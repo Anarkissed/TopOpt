@@ -1489,7 +1489,7 @@ JobDescription parse_job(const std::string& json_text) {
                          "outer_finish", "emit_welded_stl", "welded_pitch_mm", "emit_organic_spans",
                          "emit_plan_laid",
                          "regions", "multiscale",
-                         "stepped_cells",
+                         "stepped_cells", "scenarios",
                          "forecast_only", "organic_probe_cells_mm", "organic_probe_grades_mm",
                          "organic_recommend", "organic_look_cells_across",
                          "organic_recommend_margin", "organic_recommend_steps",
@@ -1574,6 +1574,25 @@ JobDescription parse_job(const std::string& json_text) {
         }
         job.lattice.stepped_cells.push_back(c);
       }
+    }
+    // ★ E2.1: the scenarios this lattice is graded and certified on (job.hpp). The
+    // names are checked against loads.scenarios after both blocks have parsed.
+    if (const JsonValue* sv = find_key(lat, "scenarios")) {
+      if (sv->type != JsonValue::Type::Array)
+        schema_fail("\"lattice.scenarios\" must be an array of scenario names");
+      if (sv->arr.empty())
+        schema_fail(
+            "\"lattice.scenarios\" is empty: a lattice graded on no scenario has no "
+            "stress to follow and nothing to be certified against. Name at least one "
+            "of the job's load scenarios, or leave the key out to use all of them.");
+      for (const JsonValue& nv : sv->arr) {
+        const std::string name = require_nonempty_string(nv, "a lattice.scenarios name");
+        for (const std::string& seen : job.lattice.scenarios)
+          if (seen == name)
+            schema_fail("\"lattice.scenarios\" names \"" + name + "\" twice");
+        job.lattice.scenarios.push_back(name);
+      }
+      job.lattice.scenarios_stated = true;
     }
     if (const JsonValue* regs = find_key(lat, "regions")) {
       if (regs->type != JsonValue::Type::Array)
@@ -2741,6 +2760,25 @@ JobDescription parse_job(const std::string& json_text) {
           "\"retain_subfloor_in_unloaded_regions\" are mutually exclusive — fit "
           "already derives a cell per region and reports the out-of-regime material "
           "it emits");
+  }
+
+  // ★ E2.1: every name in lattice.scenarios is one of the job's load scenarios.
+  // A name that matches none would grade and certify the lattice on fewer
+  // scenarios than the user switched on, silently.
+  for (const std::string& name : job.lattice.scenarios) {
+    bool found = false;
+    for (const JobScenario& sc : job.loads.scenarios)
+      if (sc.name == name) found = true;
+    if (!found)
+      schema_fail(
+          job.loads.scenarios.empty()
+              ? "\"lattice.scenarios\" names \"" + name +
+                    "\", but this job has no load scenarios (\"loads.scenarios\"): "
+                    "it has one load case, which the lattice always uses. Leave "
+                    "\"lattice.scenarios\" out."
+              : "\"lattice.scenarios\" names \"" + name +
+                    "\", which is not one of this job's load scenarios. A name must "
+                    "match a \"loads.scenarios\" entry exactly.");
   }
 
   // ★★ THE DEPTH TIE (task 2026-08-12 §0a, bar R2). A face marked protect AND

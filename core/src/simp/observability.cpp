@@ -1287,6 +1287,24 @@ std::string run_info_json(const RunInfo& info) {
       gr += ", \"solid_margin\": " + fmt(info.grading_solid_margin);
       gr += ", \"recertify_changed_verdict\": " +
             bool_json(info.grading_recertify_changed_verdict);
+      // ★ E2.1: per scenario (absent without scenarios). A margin with no stress
+      // behind it (infinite) is written null: bare inf is not JSON.
+      if (!info.grading_recertified_scenario_names.empty()) {
+        gr += ", \"recertified_scenarios\": [";
+        for (std::size_t i = 0; i < info.grading_recertified_scenario_names.size(); ++i) {
+          const double m = i < info.grading_recertified_scenario_margins.size()
+                               ? info.grading_recertified_scenario_margins[i]
+                               : 0.0;
+          gr += std::string(i ? ", " : "") + "{\"name\": \"" +
+                json_escape(info.grading_recertified_scenario_names[i]) +
+                "\", \"margin\": " + (std::isfinite(m) ? fmt(m) : std::string("null")) +
+                ", \"governs\": " +
+                bool_json(i < info.grading_recertified_scenario_governs.size() &&
+                          info.grading_recertified_scenario_governs[i]) +
+                "}";
+        }
+        gr += "]";
+      }
     }
     if (info.grading_adaptive_cells_armed) {
       gr += ", \"adaptive_cells_per_member\": true";

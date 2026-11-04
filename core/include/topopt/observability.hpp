@@ -936,6 +936,11 @@ struct RunInfo {
   bool grading_recertified_accepted = false;
   bool grading_recertified_non_convergent = false;
   double grading_recertified_max_von_mises = 0.0;
+  // ★ E2.1: each scenario the lattice was re-certified under, in the run's order
+  // (empty without scenarios); `grading_recertified_margin` is the governing one's.
+  std::vector<std::string> grading_recertified_scenario_names;
+  std::vector<double> grading_recertified_scenario_margins;
+  std::vector<char> grading_recertified_scenario_governs;
   double grading_solid_margin = 0.0;          // the same run's SOLID-part margin
   // True when latticing flipped the verdict — the case this solve exists for.
   bool grading_recertify_changed_verdict = false;

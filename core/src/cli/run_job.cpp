@@ -3071,6 +3071,12 @@ struct LatticeCertOutcome {
   double solid_reproduction_relative_delta = 0.0;
   bool solid_reproduces_within_band = false;
   double cert_tolerance = 0.0;         // the solve's own relative-residual bound
+  // ★ E2.1: per scenario the lattice uses (empty without scenarios), in the run's
+  // order: the LATTICED margin and verdict, and the solid re-certification's margin.
+  // `lattice` above is the governing one of these.
+  std::vector<ScenarioReport> scenarios;
+  std::vector<char> scenario_accepted;
+  std::vector<ScenarioReport> solid_scenarios;
 };
 
 // The exact certification inputs minimize_plastic certified the SOLID design with
@@ -3091,7 +3097,92 @@ struct LatticeCertContext {
   // one. Carried on the context so the SOLID certification, the LATTICED
   // re-certification and the clamp counterfactual cannot drift apart.
   double printed_iso = 0.5;
+  // ★ E2.1: THE SCENARIOS THIS LATTICE IS CERTIFIED UNDER, each with its own
+  // supports and loads on the solved grid. Empty on a job without scenarios: then
+  // `loads` with the caller's bcs is the one load case, exactly as before. Sized on
+  // the run's WHOLE list and only then filtered to lattice.scenarios, because
+  // sized_scenarios scales each scenario's weak springs by the heaviest load in the
+  // list it is given: sizing a subset would certify different springs than the run.
+  std::vector<SimpScenario> scenarios;
 };
+
+// ── ★ E2.1: WHICH OF THE RUN'S SCENARIOS THE LATTICE USES ─────────────────────
+// One flag per entry of `scenarios` (the run's own list, in its order): 1 when the
+// lattice is graded and certified on it. lattice.scenarios not stated = all of them.
+// Matched by name, which parse_job has already checked against loads.scenarios.
+std::vector<char> lattice_scenario_flags(const JobDescription& job,
+                                         const std::vector<SimpScenario>& scenarios) {
+  std::vector<char> on(scenarios.size(), job.lattice.scenarios_stated ? 0 : 1);
+  if (job.lattice.scenarios_stated)
+    for (std::size_t s = 0; s < scenarios.size(); ++s)
+      for (const std::string& name : job.lattice.scenarios)
+        if (scenarios[s].name == name) on[s] = 1;
+  return on;
+}
+
+// ── ★ E2.1: THE FIELD THE LATTICE IS GRADED FROM ──────────────────────────────
+// Per voxel, the WORST von Mises over the scenarios the lattice uses (raw MPa: a
+// light scenario never drives the grade). The governing scenario's field is the
+// variant's own double field, the one the grade always read; the others come from
+// `scenario_fields`, the float32 copies the views carry. So a lattice on the
+// governing scenario alone grades from exactly the field it always did, and a job
+// without scenarios gets `v.von_mises_field` itself, by reference.
+//
+// `source`, when given, receives per voxel the index (in the run's scenario order)
+// of the scenario whose stress the grade read there: -1 without scenarios.
+const std::vector<double>& lattice_grading_stress(
+    const std::vector<double>& governing_field, const std::vector<ScenarioReport>& reps,
+    const std::vector<ScenarioFields>& fields, const std::vector<char>& on,
+    std::vector<double>& storage, std::vector<int>* source) {
+  if (source) source->assign(governing_field.size(), -1);
+  if (reps.empty()) return governing_field;
+  if (on.size() != reps.size() || fields.size() != reps.size())
+    throw JobError(
+        "internal: the analysis carries " + std::to_string(reps.size()) +
+        " scenario reports and " + std::to_string(fields.size()) +
+        " scenario fields, and the lattice was given " + std::to_string(on.size()) +
+        " scenario flags. They are one list in one order; grading from a mismatched "
+        "pair would follow the wrong scenario's stress.");
+  std::size_t gov = reps.size();
+  for (std::size_t s = 0; s < reps.size(); ++s)
+    if (reps[s].governs) gov = s;
+  const std::size_t n = governing_field.size();
+  bool others = false;
+  for (std::size_t s = 0; s < reps.size(); ++s)
+    if (on[s] && s != gov) others = true;
+  if (!others && gov < reps.size() && on[gov]) {
+    if (source) source->assign(n, static_cast<int>(gov));
+    return governing_field;
+  }
+  if (gov < reps.size() && on[gov]) {
+    storage = governing_field;
+    if (source) source->assign(n, static_cast<int>(gov));
+  } else {
+    storage.assign(n, -1.0);
+  }
+  for (std::size_t s = 0; s < reps.size(); ++s) {
+    if (!on[s] || s == gov) continue;
+    const std::vector<float>& f = fields[s].von_mises;
+    if (f.size() != n)
+      throw JobError("internal: scenario \"" + reps[s].name + "\" carries a stress field "
+                     "of " + std::to_string(f.size()) + " voxels on a grid of " +
+                     std::to_string(n) + ".");
+    for (std::size_t e = 0; e < n; ++e)
+      if (static_cast<double>(f[e]) > storage[e]) {
+        storage[e] = static_cast<double>(f[e]);
+        if (source) (*source)[e] = static_cast<int>(s);
+      }
+  }
+  return storage;
+}
+
+const std::vector<double>& lattice_grading_stress(const MinimizePlasticVariant& v,
+                                                  const std::vector<char>& on,
+                                                  std::vector<double>& storage,
+                                                  std::vector<int>* source) {
+  return lattice_grading_stress(v.von_mises_field, v.report.scenarios, v.scenario_fields, on,
+                                storage, source);
+}
 
 // `domain` is THE domain the run solved on (resolve_design_domain, pipeline.hpp):
 // under a design box its grid is the EXPANDED grid and its BCs/loads are already
@@ -3102,7 +3193,8 @@ LatticeCertContext lattice_cert_context(const MinimizePlasticVariant& variant,
                                         const VoxelGrid& part_grid,
                                         const SolvedDesignDomain& domain,
                                         const MinimizePlasticOptions& options,
-                                        const Material& material) {
+                                        const Material& material,
+                                        const JobDescription& job) {
   const VoxelGrid& sg = domain.grid;
   LatticeCertContext cx;
   cx.params.youngs_modulus = material.youngs_modulus_mpa;
@@ -3158,6 +3250,15 @@ LatticeCertContext lattice_cert_context(const MinimizePlasticVariant& variant,
   // real lattice material, and re-certifying at 0.5 would certify an object with
   // that material deleted — a different object than the one the file carries.
   cx.printed_iso = run_printed_iso(options);
+  // ★ E2.1: the scenarios, the way minimize_plastic certified them (sized on the
+  // whole list, on the solved grid), then only those the lattice uses.
+  if (!domain.scenarios.empty()) {
+    const std::vector<SimpScenario> sized =
+        sized_scenarios(domain.scenarios, material.youngs_modulus_mpa, sg.spacing);
+    const std::vector<char> on = lattice_scenario_flags(job, sized);
+    for (std::size_t s = 0; s < sized.size(); ++s)
+      if (on[s]) cx.scenarios.push_back(sized[s]);
+  }
   assert((!options.draft_quality || cx.cert_tol < options.draft_loose_tol) &&
          "E4: latticed certification must run at the tight cert tolerance, never the "
          "draft loose tolerance");
@@ -3167,11 +3268,11 @@ LatticeCertContext lattice_cert_context(const MinimizePlasticVariant& variant,
 FixedDesignAnalysis analyze_variant_with_posture(
     const MinimizePlasticVariant& variant, const VoxelGrid& sg,
     const MinimizePlasticOptions& options, const Material& material,
-    const std::vector<DirichletBC>& bcs, const LatticeCertContext& cx,
-    const LatticePosture* post) {
+    const std::vector<DirichletBC>& bcs, const std::vector<NodalLoad>& loads,
+    const LatticeCertContext& cx, const LatticePosture* post) {
   return analyze_fixed_design(sg, cx.params,
                               variant.optimization.physical_density, bcs,
-                              cx.loads, material, cx.build_dir, cx.cert_tol,
+                              loads, material, cx.build_dir, cx.cert_tol,
                               options.simp.cg_max_iterations, options.simp.solver,
                               options.margin_stop, cx.knockdown, cx.load_path_ok,
                               cx.part_solid, post,
@@ -3184,6 +3285,69 @@ FixedDesignAnalysis analyze_variant_with_posture(
                               // Read the design at the SAME threshold the
                               // optimizer, the export and the grading law used.
                               cx.printed_iso);
+}
+
+// The one load case of a job without scenarios: the caller's bcs with cx.loads.
+FixedDesignAnalysis analyze_variant_with_posture(
+    const MinimizePlasticVariant& variant, const VoxelGrid& sg,
+    const MinimizePlasticOptions& options, const Material& material,
+    const std::vector<DirichletBC>& bcs, const LatticeCertContext& cx,
+    const LatticePosture* post) {
+  return analyze_variant_with_posture(variant, sg, options, material, bcs, cx.loads, cx,
+                                      post);
+}
+
+// ── ★ E2.1: ONE POSTURE CERTIFIED UNDER EVERY SCENARIO THE LATTICE USES ───────
+// Without scenarios: the one load case (`bcs` with cx.loads), exactly as before.
+// With them: each scenario's own supports and loads (cx.scenarios), the WORST
+// governs by certify_scenarios' own rule (a non-convergent solve first, then the
+// lowest effective margin), and the verdict is ACCEPTED only if every scenario's own
+// analysis is accepted and none is unheld. Before E2.1 a scenario job's lattice was
+// certified under scenario 1 alone, whichever governed.
+struct PostureCertification {
+  FixedDesignAnalysis governing;
+  std::vector<ScenarioReport> reports;  // empty without scenarios
+  std::vector<char> accepted;           // per scenario, in `reports` order
+};
+PostureCertification certify_posture(const MinimizePlasticVariant& variant,
+                                     const VoxelGrid& sg,
+                                     const MinimizePlasticOptions& options,
+                                     const Material& material,
+                                     const std::vector<DirichletBC>& bcs,
+                                     const LatticeCertContext& cx,
+                                     const LatticePosture* post) {
+  PostureCertification pc;
+  if (cx.scenarios.empty()) {
+    pc.governing = analyze_variant_with_posture(variant, sg, options, material, bcs, cx, post);
+    return pc;
+  }
+  ScenarioCertification sc = certify_scenarios(
+      sg, cx.scenarios,
+      [&](const std::vector<DirichletBC>& b, const std::vector<NodalLoad>& l) {
+        FixedDesignAnalysis a =
+            analyze_variant_with_posture(variant, sg, options, material, b, l, cx, post);
+        pc.accepted.push_back(a.accepted ? 1 : 0);
+        return a;
+      },
+      /*keep_fields=*/false);
+  pc.governing = std::move(sc.governing);
+  pc.reports = std::move(sc.reports);
+  for (const char a : pc.accepted)
+    if (!a) pc.governing.accepted = false;
+  return pc;
+}
+
+// ★ E2.1: the organic certificates' load cases: one per scenario the lattice uses,
+// each with its own supports, or the job's one load case when it has none.
+std::vector<OrganicLoadCase> organic_load_cases(const LatticeCertContext& cx,
+                                                const std::vector<DirichletBC>& bcs) {
+  std::vector<OrganicLoadCase> ocs;
+  if (cx.scenarios.empty()) {
+    ocs.push_back({"job", bcs, cx.loads});
+    return ocs;
+  }
+  for (const SimpScenario& sc : cx.scenarios) ocs.push_back({sc.name, sc.bcs, sc.loads});
+  return ocs;
 }
 
 // Re-certify one accepted variant as the LATTICED composite: once with a nullptr
@@ -3218,24 +3382,54 @@ LatticeCertOutcome certify_latticed_variant(const MinimizePlasticVariant& varian
   // residual tolerance: the margins agree to the band that tolerance justifies, and
   // no further. On the maintainer's own run `solid_reconstruction_exact` has been
   // FALSE on every rung since the recycler was armed, and nothing read it.
-  const FixedDesignAnalysis solid_recert = analyze_variant_with_posture(
-      variant, sg, options, material, bcs, cx, /*post=*/nullptr);
+  //
+  // ★ E2.1: with scenarios, each one the lattice uses is re-certified, and each must
+  // reproduce the margin the run recorded for THAT scenario (its effective margin,
+  // the number ScenarioReport carries). The governing one's worst case is the
+  // reported reproduction.
+  const PostureCertification solid =
+      certify_posture(variant, sg, options, material, bcs, cx, /*post=*/nullptr);
+  const FixedDesignAnalysis& solid_recert = solid.governing;
   oc.solid_margin_reproduced = solid_recert.margin.worst_case;
-  oc.solid_reproduced =
-      (solid_recert.margin.worst_case == variant.report.margin.worst_case);
-  oc.solid_reproduction_relative_delta = margin_reproduction_relative_delta(
-      variant.report.margin.worst_case, solid_recert.margin.worst_case);
-  oc.solid_reproduces_within_band = margin_reproduces(
-      variant.report.margin.worst_case, solid_recert.margin.worst_case,
-      cx.cert_tol);
+  oc.solid_scenarios = solid.reports;
+  if (solid.reports.empty() || variant.report.scenarios.empty()) {
+    oc.solid_reproduced =
+        (solid_recert.margin.worst_case == variant.report.margin.worst_case);
+    oc.solid_reproduction_relative_delta = margin_reproduction_relative_delta(
+        variant.report.margin.worst_case, solid_recert.margin.worst_case);
+    oc.solid_reproduces_within_band = margin_reproduces(
+        variant.report.margin.worst_case, solid_recert.margin.worst_case,
+        cx.cert_tol);
+  } else {
+    oc.solid_reproduced = true;
+    oc.solid_reproduces_within_band = true;
+    for (const ScenarioReport& got : solid.reports) {
+      const ScenarioReport* rec = nullptr;
+      for (const ScenarioReport& r : variant.report.scenarios)
+        if (r.name == got.name) rec = &r;
+      if (rec == nullptr) {
+        oc.solid_reproduced = oc.solid_reproduces_within_band = false;
+        continue;
+      }
+      if (got.margin != rec->margin) oc.solid_reproduced = false;
+      oc.solid_reproduction_relative_delta =
+          std::max(oc.solid_reproduction_relative_delta,
+                   margin_reproduction_relative_delta(rec->margin, got.margin));
+      if (!margin_reproduces(rec->margin, got.margin, cx.cert_tol))
+        oc.solid_reproduces_within_band = false;
+    }
+  }
 
   // (2) Latticed cert — the octet tensor on the shared occupancy. THIS margin
   // describes the exported file. The certifiable BAND is enforced INSIDE
   // analyze_fixed_design PER VOXEL (bars E5 / H4b): any masked voxel whose rho
   // sits outside [rho_min, rho_max] throws LatticeDensityOutOfBand rather than
   // certify against a clamped tensor.
-  oc.lattice =
-      analyze_variant_with_posture(variant, sg, options, material, bcs, cx, &post);
+  PostureCertification lat =
+      certify_posture(variant, sg, options, material, bcs, cx, &post);
+  oc.lattice = std::move(lat.governing);
+  oc.scenarios = std::move(lat.reports);
+  oc.scenario_accepted = std::move(lat.accepted);
   oc.ran = true;
   return oc;
 }
@@ -3515,7 +3709,10 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
                                      // ★ Finding 7: the volume check, when it ran.
                                      const LatticeVolumeCheck* volume = nullptr,
                                      const LatticeVolumeCheck* volume_law = nullptr,
-                                     const long long* shipped_counts = nullptr) {
+                                     const long long* shipped_counts = nullptr,
+                                     // ★ E2.1: per voxel, the scenario the grade
+                                     // read (LatticeVariantOutcome::grade_source).
+                                     const std::vector<int>* grade_source = nullptr) {
   const LatticeGenStats& gs = oc.stats;
   const FixedDesignAnalysis& a = c.lattice;
   std::string s = "{\n";
@@ -4055,6 +4252,58 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
   s += "  \"lattice_margin_worst_case\": " + json_num(a.margin.worst_case) + ",\n";
   s += "  \"lattice_margin_effective\": " + json_num(a.margin_effective) + ",\n";
   s += "  \"margin_required\": " + json_num(variant.report.margin_required) + ",\n";
+  // ★ E2.1: THE SCENARIOS, when the job has them (absent otherwise, so no other
+  // receipt changes). The lattice is graded from the worst stress over `graded_on`
+  // and certified under each; `lattice_margin_*` above is the governing one's.
+  // `stress_share` is, per scenario, the share of latticed voxels whose grade read
+  // that scenario's stress.
+  if (!c.scenarios.empty()) {
+    std::string gov;
+    for (const ScenarioReport& r : c.scenarios)
+      if (r.governs) gov = r.name;
+    s += "  \"scenarios\": {\n    \"graded_on\": [";
+    for (std::size_t i = 0; i < c.scenarios.size(); ++i)
+      s += std::string(i ? ", " : "") + json_str(c.scenarios[i].name);
+    s += "],\n    \"governing\": " + json_str(gov) + ",\n    \"per_scenario\": [";
+    for (std::size_t i = 0; i < c.scenarios.size(); ++i) {
+      const ScenarioReport& r = c.scenarios[i];
+      double solid = std::numeric_limits<double>::quiet_NaN();
+      for (const ScenarioReport& q : c.solid_scenarios)
+        if (q.name == r.name) solid = q.margin;
+      s += std::string(i ? ", " : "") + "{\"name\": " + json_str(r.name) +
+           ", \"lattice_margin\": " + json_num(r.margin) + ", \"accepted\": " +
+           ((i < c.scenario_accepted.size() && c.scenario_accepted[i]) ? "true" : "false") +
+           ", \"unheld\": " + (r.unheld ? "true" : "false") +
+           ", \"solid_margin\": " + json_num(solid) + "}";
+    }
+    s += "]";
+    if (grade_source && graded.gf && !variant.report.scenarios.empty()) {
+      const std::vector<char>& lm = graded.gf->posture.mask;
+      std::vector<long long> n(variant.report.scenarios.size(), 0);
+      long long total = 0;
+      for (std::size_t e = 0; e < lm.size() && e < grade_source->size(); ++e) {
+        if (!lm[e]) continue;
+        ++total;
+        const int src = (*grade_source)[e];
+        if (src >= 0 && static_cast<std::size_t>(src) < n.size()) ++n[static_cast<std::size_t>(src)];
+      }
+      s += ",\n    \"stress_share\": [";
+      bool first = true;
+      for (std::size_t k = 0; k < n.size(); ++k) {
+        bool used = false;
+        for (const ScenarioReport& r : c.scenarios)
+          if (r.name == variant.report.scenarios[k].name) used = true;
+        if (!used) continue;
+        s += std::string(first ? "" : ", ") + "{\"name\": " +
+             json_str(variant.report.scenarios[k].name) + ", \"share\": " +
+             json_num(total > 0 ? static_cast<double>(n[k]) / static_cast<double>(total) : 0.0) +
+             "}";
+        first = false;
+      }
+      s += "]";
+    }
+    s += "\n  },\n";
+  }
   // The receipt's verdict. The GATE's own verdict logic is untouched; a "skin"
   // finish is refused UPSTREAM of it (like the density-band fast-fail) because
   // the composite posture assumes every latticed voxel carries at least the
@@ -4632,6 +4881,9 @@ SteppedOutcome run_stepped_step(const VoxelGrid& grid,
 struct LatticeVariantOutcome {
   LatticeExportOutcome oc;
   LatticeCertOutcome cc;
+  // ★ E2.1: per voxel, the index (in the run's scenario order) of the scenario whose
+  // stress the grade read there; -1 everywhere on a job without scenarios.
+  std::vector<int> grade_source;
   // ★ the ORGANIC structural certificate (beam network), when one was run
   OrganicCertificate organic_cert;
   OrganicRecommendation organic_recommendation;   // organic_recommend != off
@@ -5831,6 +6083,13 @@ LatticeVariantOutcome lattice_one_variant(
   refuse_organic_structural(R.algorithm, job.grading);
   refuse_stepped_structural(R.algorithm, job.grading, job.lattice);
   const bool roles_present = !job.lattice.regions.empty();
+  // ★ E2.1: the scenarios this lattice uses, and the field it is GRADED from: per
+  // voxel the worst von Mises over them (lattice_grading_stress). A job without
+  // scenarios grades from v.von_mises_field itself, by reference.
+  const std::vector<char> lat_scen_on = lattice_scenario_flags(job, domain.scenarios);
+  std::vector<double> vm_grade_storage;
+  const std::vector<double>& vm_grade =
+      lattice_grading_stress(v, lat_scen_on, vm_grade_storage, &R.grade_source);
 
   // ── Stage 4: the grading law runs FIRST, on THIS variant's own final
   // certification-recovery von Mises field (H4a — the run's own field, fresh:
@@ -6182,7 +6441,7 @@ LatticeVariantOutcome lattice_one_variant(
     if (job.grading.subfloor_per_region) gp.region_ids = &region_ids;
     region_ids_for_stepped = region_ids;
     gp.subfloor_aggregate_cap_fraction = job.grading.subfloor_aggregate_cap;
-    gf = grade_lattice(solved_grid, dens, v.von_mises_field, &cand, gp,
+    gf = grade_lattice(solved_grid, dens, vm_grade, &cand, gp,
                        printed_iso);
     // ── ★ THE ORGANIC CELL-SIZE PROBE (see JobLattice::organic_probe_cells_mm) ──
     // Runs here because everything it needs is in scope and already paid for: the
@@ -6216,8 +6475,8 @@ LatticeVariantOutcome lattice_one_variant(
           q.extent_short_mm = 2.0 * std::min(jr.half_u_mm, jr.half_w_mm);
           if (jr.kind == "bolt") { q.depth_mm = 2.0 * jr.radius_mm; q.extent_short_mm = 2.0 * jr.half_length_mm; }
           std::vector<double> vm;
-          for (std::size_t e = 0; e < region_ids.size() && e < v.von_mises_field.size(); ++e)
-            if (region_ids[e] == inc && v.von_mises_field[e] > 0.0) vm.push_back(v.von_mises_field[e]);
+          for (std::size_t e = 0; e < region_ids.size() && e < vm_grade.size(); ++e)
+            if (region_ids[e] == inc && vm_grade[e] > 0.0) vm.push_back(vm_grade[e]);
           if (!vm.empty()) {
             std::sort(vm.begin(), vm.end());
             q.stress_p50 = vm[vm.size() / 2];
@@ -6307,7 +6566,7 @@ LatticeVariantOutcome lattice_one_variant(
       // through the same certificate the run will use, with the same loads, material
       // and knockdown. It is a prediction: the support pass and the fill will change
       // the network; its agreement with the run's certificate is the calibration.
-      const LatticeCertContext pcx = lattice_cert_context(v, part_grid, domain, options, material);
+      const LatticeCertContext pcx = lattice_cert_context(v, part_grid, domain, options, material, job);
       for (std::size_t ci = 0; ci < cands.size(); ++ci) {
         const Cand& cc = cands[ci];
         const double t0 = wall_seconds();
@@ -6321,7 +6580,7 @@ LatticeVariantOutcome lattice_one_variant(
         // was its RADIUS, not its legs.)
         JobGrading jg2 = job.grading;
         jg2.cell_min_mm = cc.lo; jg2.cell_max_mm = cc.hi; jg2.cell_mm = cc.hi;
-        const GradedField agf = grade_lattice(solved_grid, dens, v.von_mises_field, &cand, alt, printed_iso);
+        const GradedField agf = grade_lattice(solved_grid, dens, vm_grade, &cand, alt, printed_iso);
         // ★ THE RUN'S DOMAIN, NOT THE POSTURE (reviewer, 2026-09-30). The run builds
         // its lattice on lattice_certification_mask INTERSECT the posture; the probe
         // used the posture alone, so it forecast for a set the run does not build.
@@ -6506,8 +6765,7 @@ LatticeVariantOutcome lattice_one_variant(
             // 2026-09-06: the probe's own network on the run's grid reads 0.80 of the run;
             // the probe's own certificate read 0.63 -- this mask was the difference.
             if (v.optimization.physical_density[e] > pcx.printed_iso && !pmask[e]) hexm[e] = 1;
-          std::vector<OrganicLoadCase> pocs;
-          pocs.push_back({"job", bcs, pcx.loads});
+          const std::vector<OrganicLoadCase> pocs = organic_load_cases(pcx, bcs);
           const OrganicCertificate pc = certify_organic_structural(
               solved_grid, hexm, psegs, pocs, material.youngs_modulus_mpa, material.poisson,
               material.yield_strength_mpa, material.z_knockdown, v.applied_build_dir, cc.hi, true);
@@ -6698,7 +6956,7 @@ LatticeVariantOutcome lattice_one_variant(
       // thick a member is.
       const std::vector<double> tau = local_member_thickness_mm(
           solved_grid, dens, printed_iso, gp.thickness_cap_voxels);
-      const std::vector<double>& vm = v.von_mises_field;
+      const std::vector<double>& vm = vm_grade;
 
       // The PART's peak demand — over every printed voxel, region or not. This is
       // the denominator the retention predicate uses, and it is recomputed here
@@ -9080,7 +9338,7 @@ LatticeVariantOutcome lattice_one_variant(
   // (b) certification of the composite — the octet tensor on the SAME mask the
   // geometry used. The band is enforced PER VOXEL inside the solve (E5/H4b).
   const LatticeCertContext cx =
-      lattice_cert_context(v, part_grid, domain, options, material);
+      lattice_cert_context(v, part_grid, domain, options, material, job);
   // ★ (3): the certificate reads the density REBUILT from what shipped, when it was.
   if (graded && !shipped_rho.empty()) gf.posture.relative_density = shipped_rho;
   const LatticePosture post = build_lattice_posture(
@@ -9175,8 +9433,7 @@ LatticeVariantOutcome lattice_one_variant(
       }
     }
 
-    std::vector<OrganicLoadCase> ocs;
-    ocs.push_back({"job", bcs, cx.loads});
+    const std::vector<OrganicLoadCase> ocs = organic_load_cases(cx, bcs);
 
     // The solid the lattice ties into: every voxel the part keeps that the lattice
     // did not replace. `mask` is the latticed set, so the complement inside the part.
@@ -9287,8 +9544,8 @@ LatticeVariantOutcome lattice_one_variant(
           cpost.mask[e] = 0;
           cpost.relative_density[e] = 0.0;
         }
-      const FixedDesignAnalysis cf = analyze_variant_with_posture(
-          v, solved_grid, options, material, bcs, cx, &cpost);
+      const FixedDesignAnalysis cf =
+          certify_posture(v, solved_grid, options, material, bcs, cx, &cpost).governing;
       grad_rcpt.clamp_counterfactual_ran = true;
       grad_rcpt.counterfactual_accepted = cf.accepted;
       grad_rcpt.clamp_changed_verdict = (cf.accepted != R.cc.lattice.accepted);
@@ -9303,7 +9560,7 @@ LatticeVariantOutcome lattice_one_variant(
   R.receipt_json = lattice_cert_report_json(
       v, job.lattice, R.cc, R.oc, cell, role_rcpt, grad_rcpt, added_rcpt,
       frozen_rcpt, R.void_check_ran ? &R.void_report : nullptr, &R.volume_check,
-      &R.volume_check_law, shipped_counts);
+      &R.volume_check_law, shipped_counts, &R.grade_source);
   write_text_file(R.receipt_path, R.receipt_json);
   // `grad_rcpt.gf` points at R.gf, which the caller now owns; the receipt is
   // already rendered, so nothing may follow that pointer after the return. Null
@@ -10802,11 +11059,17 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
           ? sized_scenarios(expand_for_mesh ? domain.scenarios : options.scenarios,
                             material.youngs_modulus_mpa, cert_grid.spacing)
           : std::vector<SimpScenario>();
+  std::vector<ScenarioFields> an_scenario_fields;
   if (cert_scenarios.empty()) {
     result.analysis = certify_one(cert_bcs, loads);
   } else {
-    ScenarioCertification sc = certify_scenarios(design_grid, cert_scenarios, certify_one);
+    // ★ E2.1: a graded lattice grades from the worst of the scenarios it uses, so
+    // their fields are kept when there is one to grade.
+    ScenarioCertification sc =
+        certify_scenarios(design_grid, cert_scenarios, certify_one,
+                          /*keep_fields=*/job.lattice.present && job.grading.present);
     result.analysis = std::move(sc.governing);
+    an_scenario_fields = std::move(sc.fields);
     result.scenarios = std::move(sc.reports);
     result.unheld_scenario = std::move(sc.unheld);
   }
@@ -10941,8 +11204,13 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     // density it is not allowed to certify.
     const LatticeAlgorithm an_alg = resolve_lattice_algorithm(job.grading);
     refuse_organic_structural(an_alg, job.grading);
-    const GradedField gf =
-        grade_lattice(design_grid, density, a.von_mises_field, nullptr, gp);
+    // ★ E2.1: graded from the worst of the scenarios the lattice uses.
+    const std::vector<char> an_scen_on = lattice_scenario_flags(job, cert_scenarios);
+    std::vector<double> an_vm_storage;
+    const std::vector<double>& an_vm =
+        lattice_grading_stress(a.von_mises_field, result.scenarios, an_scenario_fields,
+                               an_scen_on, an_vm_storage, nullptr);
+    const GradedField gf = grade_lattice(design_grid, density, an_vm, nullptr, gp);
 
     // ★ ORGANIC. The grading law above chose the DENSITY (all three algorithms honour
     // the same intent, §4b); this turns that density into a spacing field and traces.
@@ -11071,11 +11339,40 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     // Costs a second solve. It runs only when a grading block asked for a structural
     // lattice, so no existing path pays for it.
     if (gf.intent_used == GradingIntent::Structural && gf.latticed_voxels > 0) {
-      const FixedDesignAnalysis relat = analyze_fixed_design(
-          design_grid, params, density, cert_bcs, loads, material, build_dir,
+      // ★ E2.1: re-certified under each scenario the lattice uses; the worst
+      // governs and every one must pass. Before E2.1, scenario 1 alone.
+      auto recert_one = [&](const std::vector<DirichletBC>& rb,
+                            const std::vector<NodalLoad>& rl) {
+        return analyze_fixed_design(
+          design_grid, params, density, rb, rl, material, build_dir,
           options.simp.cg_tolerance, options.simp.cg_max_iterations,
           options.simp.solver, options.margin_stop, knockdown, load_path_ok,
           part_solid, &gf.posture);
+      };
+      FixedDesignAnalysis relat;
+      if (cert_scenarios.empty()) {
+        relat = recert_one(cert_bcs, loads);
+      } else {
+        std::vector<SimpScenario> used;
+        for (std::size_t sx = 0; sx < cert_scenarios.size(); ++sx)
+          if (an_scen_on[sx]) used.push_back(cert_scenarios[sx]);
+        std::vector<char> used_ok;
+        ScenarioCertification rs = certify_scenarios(
+            design_grid, used,
+            [&](const std::vector<DirichletBC>& rb, const std::vector<NodalLoad>& rl) {
+              FixedDesignAnalysis r = recert_one(rb, rl);
+              used_ok.push_back(r.accepted ? 1 : 0);
+              return r;
+            });
+        relat = std::move(rs.governing);
+        for (const char ok : used_ok)
+          if (!ok) relat.accepted = false;
+        for (const ScenarioReport& r : rs.reports) {
+          gi.grading_recertified_scenario_names.push_back(r.name);
+          gi.grading_recertified_scenario_margins.push_back(r.margin);
+          gi.grading_recertified_scenario_governs.push_back(r.governs ? 1 : 0);
+        }
+      }
       gi.grading_recertified = true;
       gi.grading_recertified_margin = relat.margin_effective;
       gi.grading_recertified_accepted = relat.accepted;
@@ -11762,14 +12059,41 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
   // grid, the material, the stored field — is not the one that produced the
   // variant, and every number after this point would describe a different
   // object. So this is ENFORCED, not reported.
-  result.solid = analyze_fixed_design(
-      cert_grid, params, sd.density, domain.bcs, loads, material, build_dir,
-      options.simp.cg_tolerance, options.simp.cg_max_iterations,
-      options.simp.solver, options.margin_stop, knockdown, load_path_ok,
-      part_solid, /*lattice=*/nullptr, options.build_orientation_report,
-      resolve_build_direction_is_inferred(options),
-      /*auto_apply_build_orientation=*/false);
-  ++result.analysis_solves;
+  auto certify_stored = [&](const std::vector<DirichletBC>& b,
+                            const std::vector<NodalLoad>& l) {
+    return analyze_fixed_design(
+        cert_grid, params, sd.density, b, l, material, build_dir,
+        options.simp.cg_tolerance, options.simp.cg_max_iterations,
+        options.simp.solver, options.margin_stop, knockdown, load_path_ok,
+        part_solid, /*lattice=*/nullptr, options.build_orientation_report,
+        resolve_build_direction_is_inferred(options),
+        /*auto_apply_build_orientation=*/false);
+  };
+  // ★ E2.1: A SCENARIO RUN RECORDED ITS GOVERNING SCENARIO'S MARGIN, so the stored
+  // design is re-certified under every scenario, sized the way minimize_plastic sized
+  // them, and the worst governs, exactly as the run did it. Before E2.1 it was
+  // certified under scenario 1 alone, and every scenario job whose first scenario did
+  // not govern was refused here as "not the one that produced this variant"
+  // (measured on a two-scenario bar: recorded 4.95, reproduced 77.95). Each
+  // scenario's own field goes to the lattice, which grades from the worst of the
+  // ones it uses.
+  std::vector<ScenarioReport> stored_scenarios;
+  std::vector<ScenarioFields> stored_scenario_fields;
+  std::string stored_unheld;
+  if (domain.scenarios.empty()) {
+    result.solid = certify_stored(domain.bcs, loads);
+    ++result.analysis_solves;
+  } else {
+    ScenarioCertification sc = certify_scenarios(
+        cert_grid,
+        sized_scenarios(domain.scenarios, material.youngs_modulus_mpa, cert_grid.spacing),
+        certify_stored, /*keep_fields=*/true);
+    result.analysis_solves += static_cast<int>(sc.reports.size());
+    result.solid = std::move(sc.governing);
+    stored_unheld = std::move(sc.unheld);
+    stored_scenarios = std::move(sc.reports);
+    stored_scenario_fields = std::move(sc.fields);
+  }
   result.reproduced_margin_worst_case = result.solid.margin.worst_case;
   result.reproduction_exact =
       (result.solid.margin.worst_case == sd.margin_worst_case);
@@ -11839,6 +12163,7 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
   v.von_mises_field = result.solid.von_mises_field;
   v.stress_tensor_field = result.solid.stress_tensor_field;
   v.displacement_field = result.solid.displacement_field;
+  v.scenario_fields = std::move(stored_scenario_fields);   // ★ E2.1 (empty without)
   v.mass_grams = result.solid.mass_grams;
   v.support_volume_voxels = result.solid.support_volume_voxels;
   // The orientation and the export frame are the RUN's, carried in the store —
@@ -11877,9 +12202,11 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
   vr.accepted = result.solid.accepted;
   vr.margin_required = options.margin_stop;
   vr.margin_effective = result.solid.margin_effective;
+  vr.scenarios = stored_scenarios;   // ★ E2.1 (empty without scenarios)
   if (!result.solid.accepted)
-    vr.rejection_reason =
-        load_path_ok ? kMarginBelowRequiredReason : kLoadPathNotConnectedReason;
+    vr.rejection_reason = !load_path_ok           ? kLoadPathNotConnectedReason
+                          : !stored_unheld.empty() ? scenario_unheld_reason(stored_unheld)
+                                                   : kMarginBelowRequiredReason;
   v.report = vr;
 
   // ── the SHARED per-variant lattice pipeline. Same body the optimize path

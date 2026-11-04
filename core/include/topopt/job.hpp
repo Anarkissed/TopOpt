@@ -317,6 +317,21 @@ struct JobLattice {
   // include-region order, so the frame each cell is stated in is DERIVED from the region
   // it names rather than sent alongside it. Nothing to keep in step.
   std::vector<SteppedCell> stepped_cells;
+  // ── ★ THE SCENARIOS THIS LATTICE IS GRADED AND CERTIFIED ON (E2.1, plan.md §B6;
+  // his Q11: "make the lattice run like the Topology Optimization where it is a
+  // combination of all scenarios") ────────────────────────────────────────────
+  // Names from `loads.scenarios`, in any order. Every voxel is graded from its WORST
+  // von Mises across these scenarios (raw MPa, so a light scenario never drives the
+  // grade), and the latticed file is certified under EACH of them: the worst margin
+  // governs and the lattice is accepted only if every one passes.
+  //
+  // Not stated (the default, ruled 2026-11-04) = every scenario of the job. A job
+  // with no scenarios has one load case and is unchanged. Before E2.1 a scenario
+  // job's lattice was graded from the governing scenario and certified under
+  // scenario 1 ONLY, whichever governed (measured: a lattice margin of 138 on a
+  // design whose governing solid margin was 8.0).
+  std::vector<std::string> scenarios;
+  bool scenarios_stated = false;
   // MULTISCALE LATTICE TO (task multiscale-lattice-to). false (the DEFAULT) is the
   // TWO-STEP pipeline every existing job runs: optimize assuming solid, then try to
   // lattice what survived. true asks the OPTIMIZER to place the lattice while it
