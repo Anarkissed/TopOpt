@@ -71,12 +71,17 @@ final class NotificationLaneTests: XCTestCase {
             let toast = try h.onScreen("lane-toast", "\(size): ★ the toast")
             XCTAssertEqual(overlaps(h, toast), [], "\(size): ★ U16 — the toast covers no control")
             XCTAssertLessThanOrEqual(toast.height, Self.twoLines, "\(size): ★ two lines at most (\(toast))")
-            // centred on the screen, unless no row has room there (11″ portrait, both panels open: its row's widest gap)
-            let centreTaken = h.frames.all.contains { k, f in
-                !k.hasPrefix("lane-") && f.maxY > toast.minY && f.minY < toast.maxY && f.minX <= size.width / 2 && f.maxX >= size.width / 2
-            }
-            if !centreTaken {
-                XCTAssertEqual(toast.midX, size.width / 2, accuracy: 1, "\(size): centred on the screen")
+            // centred on the screen, unless no row has room there (11″ portrait, both panels open: its row's widest gap). No
+            // room = a control in its row nearer the centre than half the narrowest notification and its clearance — not only
+            // one ON the centre line (the 348 pt Settings panel, 897fd9ed, leaves the centre 38 pt clear: still no room)
+            let cx = size.width / 2, reach = NotificationLane.minWidth / 2 + NotificationLane.sideClearance
+            let blocking = h.frames.all.filter { k, f in
+                !k.hasPrefix("lane-") && f.maxY > toast.minY && f.minY < toast.maxY && f.maxX > cx - reach && f.minX < cx + reach
+            }.keys.sorted()
+            if blocking.isEmpty {
+                XCTAssertEqual(toast.midX, cx, accuracy: 1, "\(size): centred on the screen")
+            } else if abs(toast.midX - cx) > 1 {
+                XCTAssertEqual(size, CGSize(width: 820, height: 1180), "\(size): ★ off centre only in 11″ portrait (\(blocking))")
             }
         }
     }
