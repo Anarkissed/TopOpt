@@ -271,4 +271,16 @@ std::vector<SteppedCellGroup> stepped_group_cells(
 // resolved deterministically rather than left to chance.
 int stepped_region_owner(const Vec3& p, const std::vector<ClearanceGeometry>& includes);
 
+// ── ★ E2.5: TWO REGIONS ON ONE FACE (plan.md §B6 note 22) ─────────────────────────
+// Which of two include regions owns a point their face planes are EXACTLY equally near.
+// Two regions on ONE face plane (coplanar and facing the same way) tie everywhere they
+// overlap, so ruling 4's tie to the lower id would hand the whole overlap to whichever was
+// declared first. There the DEEPER region wins (the plan's approved rule, "each keeps its
+// own depth band; where they overlap, the deeper group's values win"); at equal depth, and
+// on every other tie, the lower id wins, exactly as ruling 4 says. True when `a` wins.
+// The owner rule above and the clip term that mirrors it (LatticeBoundary's owned
+// region) both call this, so the two cannot disagree.
+bool include_wins_plane_tie(const ClearanceGeometry& a, int id_a, const ClearanceGeometry& b,
+                            int id_b);
+
 }  // namespace topopt

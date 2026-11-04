@@ -20,6 +20,7 @@
 #include <stdexcept>
 
 #include "topopt/clearance.hpp"
+#include "topopt/stepped_plan.hpp"
 #include "topopt/mesh_distance.hpp"
 
 namespace topopt {
@@ -608,8 +609,11 @@ double LatticeBoundary::sd_excluding_relaxed(const Vec3& p, int exclude_face_a,
         const double dS = include_plane_distance(S, p);
         // A region with no face plane never wins a shared point, so it never contests.
         if (!std::isfinite(dS)) continue;
-        const double bias =
-            include_declared_id(S, i) > own_region_ ? kIdTieBiasMm : -kIdTieBiasMm;
+        // The tie-break is stepped_region_owner's own (include_wins_plane_tie): on one
+        // face plane the deeper region, otherwise the lower id.
+        const double bias = include_wins_plane_tie(*R, own_region_, S, include_declared_id(S, i))
+                                ? kIdTieBiasMm
+                                : -kIdTieBiasMm;
         // R with no plane loses to any S that has one: the halved difference is then
         // -infinity, so only "S does not contain the point" can save it.
         const double nearer = std::isfinite(dR) ? 0.5 * (dS - dR) + bias : -1e30;

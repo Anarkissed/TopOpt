@@ -597,8 +597,24 @@ std::vector<SteppedCellGroup> stepped_group_cells(
   return out;
 }
 
+bool include_wins_plane_tie(const ClearanceGeometry& a, int id_a, const ClearanceGeometry& b,
+                            int id_b) {
+  const Vec3& na = a.normal;
+  const Vec3& nb = b.normal;
+  const double la = std::sqrt(na.x * na.x + na.y * na.y + na.z * na.z);
+  const double lb = std::sqrt(nb.x * nb.x + nb.y * nb.y + nb.z * nb.z);
+  if (la > 0.0 && lb > 0.0 && a.depth != b.depth) {
+    const double cosab = (na.x * nb.x + na.y * nb.y + na.z * nb.z) / (la * lb);
+    const Vec3 d{b.origin.x - a.origin.x, b.origin.y - a.origin.y, b.origin.z - a.origin.z};
+    const double off = std::fabs((d.x * na.x + d.y * na.y + d.z * na.z) / la);
+    if (cosab > 1.0 - 1e-12 && off < 1e-9) return a.depth > b.depth;   // one face plane
+  }
+  return id_a < id_b;
+}
+
 int stepped_region_owner(const Vec3& p, const std::vector<ClearanceGeometry>& includes) {
   int owner = 0;
+  std::size_t owner_i = 0;
   double best = 0.0;
   for (std::size_t i = 0; i < includes.size(); ++i) {
     // The SAME membership test core resolves per-voxel region ids with. Not a second one.
@@ -621,8 +637,10 @@ int stepped_region_owner(const Vec3& p, const std::vector<ClearanceGeometry>& in
     // was the same thing until ids stopped being positions. It is no longer: a caller may
     // hand the list in any order, and the app computes "the lower region id" from its own
     // numbering. A test with the ids out of order caught this.
-    if (owner == 0 || d < best || (d == best && id < owner)) {
+    if (owner == 0 || d < best ||
+        (d == best && include_wins_plane_tie(includes[i], id, includes[owner_i], owner))) {
       owner = id;
+      owner_i = i;
       best = d;
     }
   }

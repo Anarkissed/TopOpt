@@ -2819,8 +2819,17 @@ JobDescription parse_job(const std::string& json_text) {
   //
   // Checked only when the region carries `face_id`; the app always emits it. A
   // hand-authored job with no id keeps the pre-task freedom, unchecked.
+  //
+  // ★ E2.5: TWO REGIONS ON ONE FACE each keep their own depth, so it is the DEEPEST
+  // region naming a protected face that must equal its protection; a shallower one lies
+  // inside that slab. With one region per face this is the same check as before.
   for (const JobLatticeRegion& r : job.lattice.regions) {
     if (r.kind != "face" || r.face_id < 0) continue;
+    bool deeper_on_face = false;
+    for (const JobLatticeRegion& q : job.lattice.regions)
+      if (&q != &r && q.kind == "face" && q.face_id == r.face_id && q.depth_mm > r.depth_mm)
+        deeper_on_face = true;
+    if (deeper_on_face) continue;
     for (std::size_t i = 0; i < job.loads.face_protection_face_ids.size(); ++i) {
       if (job.loads.face_protection_face_ids[i] != r.face_id) continue;
       double prot = job.loads.face_protection_depth_mm;   // <= 0 => core default
