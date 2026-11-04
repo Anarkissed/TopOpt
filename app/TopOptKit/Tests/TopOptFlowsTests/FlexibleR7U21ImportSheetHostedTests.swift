@@ -12,6 +12,7 @@ import SwiftUI
 import AppKit
 import Combine
 import ImageIO
+import ObjectiveC
 @testable import TopOptFlows
 @testable import TopOptKit
 import TopOptDesign
@@ -94,6 +95,20 @@ final class FlexibleR7U21ImportSheetHostedTests: XCTestCase {
 
     struct Run { var writes: [ProcessKind] = []; var flexibleMenuAfterFilament = false; var frame = CGRect.zero }
 
+    /// Today's sheet needs a process where the app finds no flexible list. `Bundle.r7m1vSwap` (a one-way, process-wide
+    /// swizzle: 14 hosted classes run it, FlexibleR7U21CHandlesHostedTests among them, before this class) makes
+    /// `FlexibleResources.materialsPath` find it, so the "today" sheet drew [Flexible] and its Resin clicks hit Flexible.
+    /// Swapped back for the block when it is on, then on again.
+    func withoutTheAppsFlexibleList<T>(_ body: () throws -> T) rethrows -> T {
+        guard FlexibleResources.materialsPath != nil,
+              let o = class_getInstanceMethod(Bundle.self, #selector(Bundle.path(forResource:ofType:))),
+              let n = class_getInstanceMethod(Bundle.self, #selector(Bundle.r7m1vPath(forResource:ofType:))) else { return try body() }
+        method_exchangeImplementations(o, n)
+        defer { method_exchangeImplementations(o, n) }
+        XCTAssertNil(FlexibleResources.materialsPath, "premise: the swap is off for today's sheet")
+        return try body()
+    }
+
     /// Clicks Resin, Filament, Resin, Filament (and, with the list, Flexible then Filament), recording every write.
     func clicks(withList: Bool, frame known: CGRect?) throws -> Run {
         FlexibleImportDraft.testMaterialsPath = withList ? FlexibleHisProject.materialsPath : nil
@@ -102,6 +117,7 @@ final class FlexibleR7U21ImportSheetHostedTests: XCTestCase {
         let sub = m.$process.dropFirst().sink { run.writes.append($0) }
         defer { sub.cancel() }
         let h = host(sheet(m))
+        if !withList { XCTAssertNil(h.frames.all["importProcessPicker"], "premise: today's sheet has no [Flexible]") }
         let f = try XCTUnwrap(withList ? h.frames.all["importProcessPicker"] : known, "the picker's frame")
         run.frame = f
         let n = withList ? 3 : 2
@@ -120,7 +136,7 @@ final class FlexibleR7U21ImportSheetHostedTests: XCTestCase {
 
     func testFilamentAndResinWriteProcessAsToday() throws {
         let three = try clicks(withList: true, frame: nil)
-        let today = try clicks(withList: false, frame: three.frame)   // today's control sits where the picker sits
+        let today = try withoutTheAppsFlexibleList { try clicks(withList: false, frame: three.frame) }   // today's control sits where the picker sits
         print("FLEX-U21A-HOSTED today writes \(today.writes) · with [Flexible] \(three.writes) · frame \(three.frame)")
         XCTAssertEqual(today.writes, [.resin, .fdm, .resin, .fdm], "premise: today's sheet clicked")
         XCTAssertEqual(Array(three.writes.prefix(4)), today.writes, "★ Filament and Resin write model.process exactly as today")
