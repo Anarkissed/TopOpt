@@ -2463,6 +2463,12 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
       TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME keep_oriented COMMAND test_keep_oriented)
 
+    # KEEP CLEAR, EXACTLY (ruling 2026-11-03 19:55): every file is cut out of its Keep
+    # clears by Manifold (bolt and tilted face slab; the part wins; circumscribed).
+    add_executable(test_keep_clear_exact tests/validation/test_keep_clear_exact.cpp)
+    target_link_libraries(test_keep_clear_exact PRIVATE topopt manifold::manifold)
+    add_test(NAME keep_clear_exact COMMAND test_keep_clear_exact)
+
     # PROTECT on a growth run (ruling 2026-10-27 03:57): nothing grows inside a
     # protected hole or in front of a protected face; the bore and face stay exact.
     add_executable(test_keep_strengthen tests/validation/test_keep_strengthen.cpp)

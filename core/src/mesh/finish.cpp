@@ -960,10 +960,9 @@ std::string finish_verdict_reason(const FinishRecheck& r) {
     return "After finishing, the margin is " + x(r.margin) + " (needs " + x(r.margin_required) + ")";
   if (!r.load_path_ok) return "After finishing, the load no longer reaches an anchor";
   if (r.anchors_slide) return "After finishing, the anchors would slide under the load";
-  // Only what the finishing ADDED: the unfinished file's own count (the export's, today's
-  // file) is not the finish's to refuse.
-  if (r.keep_clear_added > 0)
-    return "After finishing, a Keep clear has material in it";
+  // ANY material in a Keep clear (ruling 2026-11-03 19:55): every file is cut out of its
+  // Keep clears exactly (run_job keep_clear_exact), so this should never fire.
+  if (r.keep_clear_voxels > 0) return "A Keep clear has material in it";
   if (r.pieces > 1) return "After finishing, it prints in " + std::to_string(r.pieces) + " pieces";
   if (r.loose_pieces > r.loose_pieces_before) return "After finishing, a piece is loose";
   if (r.thin_joints > r.thin_joints_before)

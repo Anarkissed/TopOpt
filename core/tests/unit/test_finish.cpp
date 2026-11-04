@@ -393,14 +393,17 @@ int main() {
     r.pieces = 2;
     CHECK(finish_verdict_reason(r) == "After finishing, it prints in 2 pieces", "(e) pieces");
     r.pieces = 1;
+    // ANY material in a Keep clear refuses, whoever put it there (ruling 2026-11-03
+    // 19:55): every file is cut out of its Keep clears exactly, so this should never fire.
     r.keep_clear_voxels = 12;
     r.keep_clear_before = 12;
-    CHECK(finish_verdict_reason(r).empty(),
-          "(e) a Keep clear the unfinished file already printed into is not the finish's");
+    CHECK(finish_verdict_reason(r) == "A Keep clear has material in it",
+          "(e) a Keep clear the unfinished file already printed into refuses too");
     r.keep_clear_added = 3;
-    CHECK(finish_verdict_reason(r) == "After finishing, a Keep clear has material in it",
+    CHECK(finish_verdict_reason(r) == "A Keep clear has material in it",
           "(e) a Keep clear the finish added to");
     r.keep_clear_voxels = 0;
+    r.keep_clear_before = 0;
     r.keep_clear_added = 0;
     CHECK(finish_verdict_reason(r).empty(), "(e) a good finished shape keeps its verdict");
   }
