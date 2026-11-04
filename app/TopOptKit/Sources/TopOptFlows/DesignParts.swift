@@ -52,6 +52,8 @@ public enum DSParts {
     /// Every control's hit area (U, Touch).
     public static let target: CGFloat = 44
 
+    /// The coordinate space a panel's body names, so its rows can say where they sit (panels never nest).
+    static let bodySpace = "DSPanelBody"
     static let strokeSub = DS.Color.strokeSubtle
     static let moreFill = DS.Color.accent.opacity(0.06)
 
@@ -68,6 +70,14 @@ extension View {
 }
 
 // MARK: - §4.3 Panel
+
+/// The panel's measures (its content's height, its footer's, its scroll view's), as preferences: they follow every layout, so
+/// rows that grow or go while the panel is up re-size it (#362, 11-04: an `.onChange` inside the scroll content missed later
+/// growth — a stale body height, a false "1 more", and the hidden row took the footer's taps).
+struct DSPanelMeasureKey: PreferenceKey {
+    static var defaultValue: [String: CGFloat] = [:]
+    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) { value.merge(nextValue()) { $1 } }
+}
 
 /// A row's place inside its panel, so the panel can count what is below its fold.
 struct DSPanelRowsKey: PreferenceKey {
@@ -130,18 +140,20 @@ public struct DSPanel<Content: View, Footer: View>: View {
                             }
                             .frame(width: width)   // a row never pushes past its panel
                             .background(GeometryReader { g in
-                                Color.clear.onAppear { contentHeight = g.size.height }
-                                    .onChange(of: g.size.height) { contentHeight = $0 }
+                                Color.clear.preference(key: DSPanelMeasureKey.self, value: ["content": g.size.height])
                             })
                         }
                         .frame(height: bodyHeight)   // as tall as its rows, never past the panel's max
-                        .coordinateSpace(name: key)
+                        .coordinateSpace(name: DSParts.bodySpace)
                         .onPreferenceChange(DSPanelRowsKey.self) { rows = $0 }
                         .background(GeometryReader { g in
-                            Color.clear.onAppear { viewport = g.size.height }.onChange(of: g.size.height) { viewport = $0 }
+                            Color.clear.preference(key: DSPanelMeasureKey.self, value: ["viewport": g.size.height])
                         })
+                        .clipped()                        // what scrolls out of the body is neither drawn nor tapped
+                        .contentShape(Rectangle())
                         .overlay(alignment: .top) { Rectangle().fill(DSParts.strokeSub.color).frame(height: 1) }
-                        let below = rows.filter { $0.value.minY > viewport - 4 }.sorted { $0.value.minY < $1.value.minY }
+                        let shown = bodyHeight ?? .infinity   // the body's own height: what it laid out, never a stale measure
+                        let below = rows.filter { $0.value.minY > shown - 4 }.sorted { $0.value.minY < $1.value.minY }
                         if !below.isEmpty {
                             // a tap brings the next page into view: the first row below the fold at the top
                             Button { withAnimation(DS.Motion.sheetIn) { reader.scrollTo(below[0].key, anchor: .top) } } label: {
@@ -167,7 +179,7 @@ public struct DSPanel<Content: View, Footer: View>: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .overlay(alignment: .top) { Rectangle().fill(DSParts.strokeSub.color).frame(height: 1) }
                         .background(GeometryReader { g in
-                            Color.clear.onAppear { footerHeight = g.size.height }.onChange(of: g.size.height) { footerHeight = $0 }
+                            Color.clear.preference(key: DSPanelMeasureKey.self, value: ["footer": g.size.height])
                         })
                         .background(DSParts.publish(key + "Footer"))
                 }
@@ -175,6 +187,12 @@ public struct DSPanel<Content: View, Footer: View>: View {
         }
         .frame(width: width)
         .fixedSize(horizontal: false, vertical: true)   // the panel is as tall as what it holds (the body caps itself)
+        .onPreferenceChange(DSPanelMeasureKey.self) { m in
+            if let c = m["content"], abs(c - contentHeight) > 0.5 { contentHeight = c }
+            if let v = m["viewport"], abs(v - viewport) > 0.5 { viewport = v }
+            if let f = m["footer"], abs(f - footerHeight) > 0.5 { footerHeight = f }
+        }
+        .transformPreference(DSPanelMeasureKey.self) { $0 = [:] }   // (never an enclosing panel's)
         .background(RoundedRectangle(cornerRadius: open ? DSParts.panelRadius : DSParts.headerHeight / 2, style: .continuous)
             .fill(DS.Surface.panel.color))
         .overlay(RoundedRectangle(cornerRadius: open ? DSParts.panelRadius : DSParts.headerHeight / 2, style: .continuous)
@@ -379,12 +397,9 @@ public struct DSRow<Actions: View>: View {
         .background(GeometryReader { g in
             Color.clear
                 .preference(key: ChromeKeepOutKey.self, value: [key: g.frame(in: .global)])
-                .preference(key: DSPanelRowsKey.self, value: [key: g.frame(in: .named(Self.panelSpace(key)))])
+                .preference(key: DSPanelRowsKey.self, value: [key: g.frame(in: .named(DSParts.bodySpace))])
         })
     }
-
-    /// The panel a row sits in names its scroll space after its own key; a row's key starts with it ("<panel>-…").
-    static func panelSpace(_ rowKey: String) -> String { String(rowKey.split(separator: "-").first ?? Substring(rowKey)) }
 
     @ViewBuilder private func markView(_ m: DSRowMark) -> some View {
         switch m {
@@ -606,6 +621,8 @@ public struct DSRunButton: View {
         case blocked(words: String, fix: String)
         /// grey with the reason line.
         case disabled(String)
+        /// grey, but a tap still goes somewhere (where the fix is: the type picker, the walls to mark).
+        case grey(String)
     }
     let title: String
     let subtitle: String
@@ -620,7 +637,7 @@ public struct DSRunButton: View {
     }
 
     private var grey: Bool {
-        switch state { case .sameSettings, .blocked, .disabled: return true; default: return false }
+        switch state { case .sameSettings, .blocked, .disabled, .grey: return true; default: return false }
     }
     private var busy: Bool {
         switch state { case .finding, .running: return true; default: return false }
@@ -628,7 +645,7 @@ public struct DSRunButton: View {
     private var line2: String {
         switch state {
         case .ready: return subtitle
-        case .sameSettings(let s), .finding(let s), .running(let s), .disabled(let s): return s
+        case .sameSettings(let s), .finding(let s), .running(let s), .disabled(let s), .grey(let s): return s
         case .blocked(let w, _): return w
         }
     }
@@ -642,7 +659,7 @@ public struct DSRunButton: View {
                 HStack(spacing: 10) {
                     if busy { ProgressView().controlSize(.small).tint(.white) }
                     VStack(spacing: 1) {
-                        Text(title).font(.system(size: 16, weight: .bold)).lineLimit(1)
+                        Text(title).font(.system(size: 16, weight: .bold)).lineLimit(1).fixedSize()
                         Text(line2).font(.system(size: 11.5)).lineLimit(1)
                             .foregroundStyle(grey ? DS.Color.textTertiary.color : Color.white.opacity(0.85))
                     }
@@ -703,7 +720,7 @@ public struct DSGlassButton: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 if let systemImage { Image(systemName: systemImage).font(.system(size: 15, weight: .semibold)) }
-                Text(title).font(.system(size: 15, weight: .semibold)).lineLimit(1)
+                Text(title).font(.system(size: 15, weight: .semibold)).lineLimit(1).fixedSize()
                 if chevron {
                     Image(systemName: "chevron.down").font(.system(size: 11, weight: .bold))
                         .rotationEffect(.degrees(selected ? 180 : 0))
