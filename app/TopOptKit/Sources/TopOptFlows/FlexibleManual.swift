@@ -276,7 +276,8 @@ public enum FlexibleManualMath {
 public enum FlexibleManualCopy {
     public static let manual = "Manual"
     public static let auto = "Auto"
-    public static let modeOptions: [(id: String, label: String)] = [("manual", manual), ("auto", auto)]
+    /// ★ B9 LOOK: Auto │ Manual, the approved mockup's order (Auto is the default)
+    public static let modeOptions: [(id: String, label: String)] = [("auto", auto), ("manual", manual)]
     public static let title = "Lattice · you set it"
     public static let lattice = "Type"
     public static let typeOptions: [(id: String, label: String)] = [("gyroid", "Gyroid"), ("honeycomb", "Honeycomb")]

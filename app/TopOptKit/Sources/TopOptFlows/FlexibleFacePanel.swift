@@ -66,6 +66,12 @@ struct FlexibleModelRows: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
             filamentRow
+            if model.material != nil, model.material?.noPrediction != nil, model.catalogueError == nil {
+                Text(FlexibleRowCopy.filamentNoData)
+                    .font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textSecondary.color)
+                    .lineLimit(1)
+                    .accessibilityIdentifier("flexible-row-filament-no-data")
+            }
             if model.material?.noPrediction == nil {
                 FlexRow(FlexibleRowCopy.feel, info: FlexibleRowCopy.Info.feel, id: "flexible-row-feel") {
                     FlexChips(options: FlexibleRowCopy.feelOptions, selection: model.settings.feel,
@@ -102,8 +108,9 @@ struct FlexibleModelRows: View {
     private var filamentRow: some View {
         let m = model.material
         let missing = model.catalogueError != nil
+        // ★ B9 LOOK: "Filament (i)  [varioShore TPU ⌄]" — the menu's label is the value box (the round ⇕ button went)
         return FlexRow(missing ? FlexibleRowCopy.catalogueMissing
-                               : FlexibleRowCopy.filament(name: m?.displayName, hasData: m != nil && m?.noPrediction == nil),
+                               : FlexibleRowCopy.filamentLabel(name: m?.displayName, hasData: m?.noPrediction == nil),
                        info: FlexibleRowCopy.Info.filament, id: "flexible-row-filament", warning: missing) {
             Menu {
                 ForEach(model.catalogue) { c in
@@ -112,12 +119,9 @@ struct FlexibleModelRows: View {
                     }
                 }
             } label: {
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .frame(width: 32, height: 32)
-                    .background(Circle().fill(DS.Color.fillSubtle.color))
+                DSValueBox(FlexibleRowCopy.filamentBox(name: m?.displayName), trail: .menu)
             }
+            .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain).fixedSize()
             .accessibilityIdentifier("flexible-filament-menu")
         } extra: {
             if let np = m?.noPrediction { FlexInfoText(np.reason) }
@@ -175,17 +179,17 @@ struct FlexibleFaceRows: View {
                 .opacity(hidden ? 0 : 1)   // ★ U21: the take-out's question is on this line
             FlexRow(hidden ? "" : name(r), info: FlexibleRowCopy.Info.face, id: "flexible-row-face") { control() }
         }
+        .padding(.leading, 10).padding(.trailing, 2)
         .frame(minHeight: FlexibleFaceList.rowHeight)
+        // ★ B9 LOOK (§4.4, the mockup's #flex-squish): the selected face is the selected row — filled, outlined in the accent
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(DS.Color.fillSelected.color))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(DS.Color.accent.color, lineWidth: 1.5)
+            .allowsHitTesting(false))
     }
 
     @ViewBuilder private func markedRows(_ r: Int, _ f: FlexibleFaceSettings) -> some View {
         let asking = model.faceRemoveAsk == r
         header(r, pressed: f.isLoaded, hidden: asking) {
-            FlexChips(options: FlexibleRowCopy.roleOptions, selection: f.role, id: "flexible-role", equalWidths: false) { v in
-                if v == "loaded" { pressOrAsk(r) } else { model.rest(r) }
-            }
-            .fixedSize()
-            .opacity(asking ? 0 : 1).allowsHitTesting(!asking)   // ★ U21: the row hides [Pressed|Rests] while it asks
             // ★ ROUND 5 (S6, img 3: "All faces should be deletable"): the trash on EVERY face — a
             // split sector, a face a main-page group holds (it leaves the Flexible setup; the main
             // page's group is untouched and its re-sync no longer brings it back)
@@ -212,6 +216,25 @@ struct FlexibleFaceRows: View {
             .accessibilityIdentifier("flexible-face-remove")
         }
         .background(askAnchor(r))
+        // ★ B9 LOOK (the mockup's #flex-squish): the face's values in an inset card under its row
+        // (rows at the mockup's 44 pt pitch: no gap between them)
+        VStack(alignment: .leading, spacing: 0) { cardRows(r, f, asking: asking) }
+            .padding(.leading, 10).padding(.trailing, 2).padding(.vertical, 2)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(DS.Color.fillSubtle.color))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)
+                .allowsHitTesting(false))
+    }
+
+    /// The selected face's values, under its row: ★ B9 LOOK — [Pressed │ Rests] on its own "Role" row (the mockup's), so the
+    /// face's name is whole on its row (it was cut to "F…" beside the chips and the take-out).
+    @ViewBuilder private func cardRows(_ r: Int, _ f: FlexibleFaceSettings, asking: Bool) -> some View {
+        FlexRow(FlexibleRowCopy.roleRow, info: FlexibleRowCopy.Info.face, id: "flexible-row-role") {
+            FlexChips(options: FlexibleRowCopy.roleOptions, selection: f.role, id: "flexible-role", equalWidths: false) { v in
+                if v == "loaded" { pressOrAsk(r) } else { model.rest(r) }
+            }
+            .fixedSize()
+            .allowsHitTesting(!asking)   // ★ U21: no role change while the take-out asks
+        }
         // [Rests] chosen here on a face the main page presses: one line, never hidden
         if !f.isLoaded, let e = model.mainPageLoads.entry(r), e.role == .pressed {
             Text(FlexibleRowCopy.pressedOnMainPage(group: e.groupName))

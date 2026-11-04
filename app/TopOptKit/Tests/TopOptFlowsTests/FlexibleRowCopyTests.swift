@@ -146,7 +146,8 @@ final class FlexibleRowCopyTests: XCTestCase {
     @MainActor
     func testEveryRowFitsThePanelInPoints() {
         let content: CGFloat = FlexibleSettingsPanel.contentWidth   // ★ RE-PINNED (round 5, S8): the tab beside the rail
-        XCTAssertEqual(content, 400 - 2 * DS.Space.ml, "round 4's row width, kept beside the rail")
+        // ★ RE-PINNED (B9 look, 11-04): the 440 pt wide panel less the 62 pt folder tabs and the tab's 14 pt insets (DSPanel's)
+        XCTAssertEqual(content, 440 - 62 - 2 * 14, "the open tab's width beside the folder tabs")
         let chips: [(String, [(id: String, label: String)])] = [
             (FlexibleRowCopy.feel, FlexibleRowCopy.feelOptions),
             ("Top A", FlexibleRowCopy.roleOptions),
@@ -169,6 +170,13 @@ final class FlexibleRowCopyTests: XCTestCase {
             let line = FlexibleRowCopy.filament(name: m.displayName, hasData: m.noPrediction == nil)
             let w = Self.width(FlexRow(line, info: "") { Color.clear.frame(width: 32, height: 32) })
             XCTAssertLessThanOrEqual(w, content, "\(line) does not fit: \(w) pt")
+            // ★ B9 LOOK: the row as the page draws it now — "Filament (i)  [name ⌄]" (no squish data: its own line under it)
+            let label = FlexibleRowCopy.filamentLabel(name: m.displayName, hasData: m.noPrediction == nil)
+            let drawn = Self.width(FlexRow(label, info: "") {
+                DSValueBox(FlexibleRowCopy.filamentBox(name: m.displayName), trail: .menu)
+            })
+            report.append("filament box \(Int(drawn))")
+            XCTAssertLessThanOrEqual(drawn, content, "\(label) [\(FlexibleRowCopy.filamentBox(name: m.displayName))] does not fit: \(drawn) pt")
         }
         // ★ RED CONTROL: the round-3 filament line did not fit (it only showed scaled down)
         XCTAssertGreaterThan(Self.width(FlexRow("colorFabb varioShore TPU · has squish data", info: "") {

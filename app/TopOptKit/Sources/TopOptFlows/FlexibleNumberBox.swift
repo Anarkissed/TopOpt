@@ -178,6 +178,13 @@ struct FlexNumberBox: View {
     /// VERIFICATION: 8 pt (was 3) — a finger's tap wanders more than 3 pt.
     static let tapSlop: CGFloat = 8
     static let height: CGFloat = 32
+    /// ★ B9 LOOK (his "look per screen"; design-system §4.4's value box, DSValueBox): the Squish page's box — 34 pt, radius 12,
+    /// the panel's hairline, no up / down hint (the drag still scrubs). The main page's boxes (a `hitHeight`) keep the 32 pt
+    /// look until that page's own rebuild.
+    static let partsHeight: CGFloat = 34
+    /// This box's look: the parts' (the Squish page) or the main page's.
+    private var parts: Bool { hitHeight == nil }
+    private var boxHeight: CGFloat { parts ? Self.partsHeight : Self.height }
     /// ★ REVIEW OF R7-D2: his 44 pt target rule.
     static let target: CGFloat = 44
 
@@ -202,7 +209,7 @@ struct FlexNumberBox: View {
                     // the number (and the up / down hint): a TAP opens the keypad, a vertical DRAG scrubs
                     Button { padTarget = key } label: {
                         number(shown)
-                            .frame(height: Self.height)
+                            .frame(height: boxHeight)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -214,7 +221,7 @@ struct FlexNumberBox: View {
                         unitView
                     }
                 }
-                .modifier(BoxLook(compact: compact, lit: lit))
+                .modifier(BoxLook(compact: compact, lit: lit, parts: parts))
                 .fixedSize()
                 .background(published)
             }
@@ -249,9 +256,11 @@ struct FlexNumberBox: View {
                 .frame(minWidth: 26, alignment: .trailing)
                 .accessibilityIdentifier("flexible-number-\(key)-value")
             if units.count <= 1, unitShown { unitView }
-            Image(systemName: "chevron.up.chevron.down")
-                .font(.system(size: 8, weight: .bold))
-                .foregroundStyle(DS.Color.textTertiary.color)
+            if !parts {
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(DS.Color.textTertiary.color)
+            }
         }
     }
 
@@ -273,17 +282,20 @@ struct FlexNumberBox: View {
         }.allowsHitTesting(false)
     }
 
-    /// The field's look: padded, 32 pt, a rounded fill and its hairline (the accent while its keypad or a scrub is live).
+    /// The field's look: padded, a rounded fill and its hairline (the accent while its keypad or a scrub is live) — 32 pt,
+    /// radius 8 (the main page), or the parts' 34 pt, radius 12 (`parts`).
     private struct BoxLook: ViewModifier {
         let compact: Bool
         let lit: Bool
+        var parts = false
         func body(content: Content) -> some View {
+            let r: CGFloat = parts ? 12 : 8
             content
-                .padding(.horizontal, compact ? 7 : 9)
-                .frame(height: FlexNumberBox.height)
-                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(DS.Color.fillSubtle.color)
-                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder((lit ? DS.Color.accent : DS.Color.strokeStrong).color,
+                .padding(.horizontal, (compact ? 7 : 9) + (parts ? 1 : 0))
+                .frame(height: parts ? FlexNumberBox.partsHeight : FlexNumberBox.height)
+                .background(RoundedRectangle(cornerRadius: r, style: .continuous).fill(DS.Color.fillSubtle.color)
+                    .overlay(RoundedRectangle(cornerRadius: r, style: .continuous)
+                        .strokeBorder((lit ? DS.Color.accent : parts ? DS.Color.strokePanel : DS.Color.strokeStrong).color,
                                       lineWidth: lit ? 1.5 : 1)))
         }
     }
@@ -303,7 +315,7 @@ struct FlexNumberBox: View {
                     Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold))
                 }
                 .foregroundStyle(DS.Color.accent.color)
-                .frame(minHeight: Self.height)
+                .frame(minHeight: boxHeight)
                 .contentShape(Rectangle())
             }
             .menuIndicator(.hidden)

@@ -1335,9 +1335,10 @@ struct FlexChips: View {
 struct FlexSectionTitle: View {
     let text: String
     var body: some View {
-        Text(text).font(.system(size: 11, weight: .semibold))
+        // ★ B9 LOOK: DSPanelSection's overline (10.5 pt bold, tracked, tertiary)
+        Text(text.uppercased()).font(.system(size: 10.5, weight: .bold)).tracking(0.8)
             .foregroundStyle(DS.Color.textTertiary.color)
-            .textCase(.uppercase)
+            .padding(.top, 4)
     }
 }
 

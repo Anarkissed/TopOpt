@@ -186,14 +186,24 @@ private extension FlexibleRailTab {
 
 // MARK: - the rail
 
+/// ★ B9 LOOK (his "look per screen", design-system §4.17): the rail IS the shared folder tabs (DSFolderTabs, 62 pt) — a square
+/// in the tab's colour, the name under it (whole, wrapped), the open tab merged into the panel, "+ New" last. The tabs keep their
+/// ids ("flexible-rail-model", "flexible-rail-group-<id>", "flexible-rail-rests", "flexible-rail-new"); past the eighth group the
+/// square carries the group's number (C5). The column scrolls, so any number of groups fits.
 struct FlexibleSettingsRailView: View {
     @ObservedObject var model: FlexibleStageModel
 
-    static let width: CGFloat = 72
-    /// A tab's title type (the hosted test measures a name in it).
-    static let titleFont = Font.system(size: 11, weight: .semibold)
+    static let width: CGFloat = DSParts.tabsWidth
+    /// The tabs' frame prefix: "<key>-<tab>".
+    static let key = "flexible-rail"
+    /// A tab's title type and the width it wraps in (the hosted test measures a name in it): DSFolderTabs' own.
+    static let titleFont = Font.system(size: 10.5)
+    static let titleWidth: CGFloat = DSParts.tabsWidth - 2 * 6 - 2 * 4
     /// ★ RED CONTROL (verify of R7-S): today's title — one line, so a long name is cut ("Index finger…").
-    @MainActor static var controlOneLineTitle = false
+    @MainActor static var controlOneLineTitle: Bool {
+        get { DSFolderTabs.controlOneLineTitle }
+        set { DSFolderTabs.controlOneLineTitle = newValue }
+    }
     static func tabID(_ t: FlexibleRailTab) -> String {
         switch t {
         case .model: return "flexible-rail-model"
@@ -202,6 +212,8 @@ struct FlexibleSettingsRailView: View {
         case .newGroup: return "flexible-rail-new"
         }
     }
+    /// The tab's id inside DSFolderTabs (its frame is "<key>-<id>", the old id).
+    static func partID(_ t: FlexibleRailTab) -> String { String(tabID(t).dropFirst(key.count + 1)) }
 
     /// The rail's tabs, in order (a value: the tests read the page's own list).
     struct Tab: Identifiable, Equatable {
@@ -231,85 +243,47 @@ struct FlexibleSettingsRailView: View {
     }
 
     var body: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            VStack(spacing: 6) {
-                ForEach(Self.tabs(model: model)) { t in tab(t) }
+        let all = Self.tabs(model: model)
+        let shown = all.filter { $0.tab != .newGroup }.map { t in
+            DSFolderTabs.Tab(id: Self.partID(t.tab), title: t.title, colour: colour(t.tab), badge: badge(t.tab))
+        }
+        // the tabs fill the column (their divider runs its whole height) and scroll past it
+        GeometryReader { g in
+            ScrollView(.vertical, showsIndicators: false) {
+                DSFolderTabs(shown, selected: Self.partID(model.rail), key: Self.key, pick: { id in
+                    guard let t = all.first(where: { Self.partID($0.tab) == id }) else { return }
+                    withAnimation(.easeInOut(duration: 0.15)) { model.rail = t.tab }
+                }, add: { withAnimation(.easeInOut(duration: 0.15)) { model.rail = .newGroup } })
+                .frame(minHeight: g.size.height, alignment: .top)
             }
-            .padding(.vertical, 2)
         }
         .frame(width: Self.width)
-        .background(GeometryReader { g in
-            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["rail": g.frame(in: .global)])
-        }.allowsHitTesting(false))
-    }
-
-    private func tab(_ t: Tab) -> some View {
-        let on = model.rail == t.tab
-        return Button { withAnimation(.easeInOut(duration: 0.15)) { model.rail = t.tab } } label: {
-            VStack(spacing: 3) {
-                icon(t.tab)
-                // ★ VERIFY OF R7-S: his name WHOLE — it wraps (two lines at most for 12 characters) where one line was cut
-                // ("Index finger…"); "Group 2", "Model", "Rests", "New" stay one line
-                Text(t.title)
-                    .font(Self.titleFont)
-                    .foregroundStyle((on ? DS.Color.textPrimary : DS.Color.textSecondary).color)
-                    .lineLimit(Self.controlOneLineTitle ? 1 : nil).minimumScaleFactor(Self.controlOneLineTitle ? 0.8 : 1)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: !Self.controlOneLineTitle)
-                    // the title as drawn, by tab (the hosted test reads what it says and its frame)
-                    .background(GeometryReader { g in
-                        Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["railTitle:\(t.id):\(t.title)": g.frame(in: .global)])
-                    }.allowsHitTesting(false))
-                if let d = t.detail {
-                    Text(d).font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(DS.Color.textTertiary.color)
-                        .lineLimit(1).minimumScaleFactor(0.8)
-                }
+        // the page's frames: the rail, its tabs as DSFolderTabs drew them ("flexible-rail-…", "…-title" — the Flexible hosts read
+        // FlexibleKeepOutKey) and each title as drawn ("railTitle:<tab>:<words>": a rename that never redraws keeps the old)
+        .backgroundPreferenceValue(ChromeKeepOutKey.self) { drawn in
+            GeometryReader { g in
+                let rail = g.frame(in: .global)
+                let words = Dictionary(all.map { ("railTitle:\($0.id):\($0.title)", rail) }) { a, _ in a }
+                Color.clear.preference(key: FlexibleKeepOutKey.self, value: drawn.filter { $0.key.hasPrefix(Self.key) }
+                    .merging(words) { $1 }.merging(["rail": rail]) { $1 })
             }
-            .frame(width: Self.width - 4)
-            .padding(.vertical, 8)
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill((on ? DS.Color.fillSelected : DS.Color.fillSubtle).color))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(accent(t.tab).color.opacity(on ? 1 : 0.35), lineWidth: on ? 1.5 : 1))
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .allowsHitTesting(false)
         }
-        .buttonStyle(.plain)
-        .background(GeometryReader { g in
-            Color.clear.preference(key: FlexibleKeepOutKey.self, value: [t.id: g.frame(in: .global)])
-        }.allowsHitTesting(false))
-        .accessibilityLabel([t.title, t.detail].compactMap { $0 }.joined(separator: ", "))
-        .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
-        .accessibilityIdentifier(t.id)
     }
 
-    private func accent(_ t: FlexibleRailTab) -> RGBA {
+    /// The square's colour: the group's own, the resting faces' cyan, the part's grey.
+    private func colour(_ t: FlexibleRailTab) -> RGBA? {
         switch t {
-        case .group(let id): return model.railGroup(id).map { model.groupColour($0) } ?? DS.Color.strokeStrong
+        case .group(let id): return model.railGroup(id).map { model.groupColour($0) }
         case .rests: return DS.Color.accentCyan
-        default: return DS.Color.strokeStrong
+        default: return nil
         }
     }
 
-    @ViewBuilder private func icon(_ t: FlexibleRailTab) -> some View {
-        switch t {
-        case .model:
-            Image(systemName: "cube").font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
-        case .group(let id):
-            // ★ C5: a colour another group also wears (past the eighth group) — the tab's dot carries
-            // the number, the same disc as on the group's faces
-            if let g = model.railGroup(id), let n = FlexibleGroupNumbers.railNumber(g, in: model.settings) {
-                FlexibleGroupNumberDisc(colour: model.groupColour(g), number: n, size: FlexibleGroupNumbers.railSize)
-                    .accessibilityIdentifier("flexible-rail-number-\(n)")
-            } else {
-                Circle().fill((model.railGroup(id).map { model.groupColour($0) } ?? DS.Color.accentGreen).color)
-                    .frame(width: 14, height: 14)
-            }
-        case .rests:
-            Circle().fill(DS.Color.accentCyan.color).frame(width: 14, height: 14)
-        case .newGroup:
-            Image(systemName: "plus").font(.system(size: 14, weight: .bold)).foregroundStyle(DS.Color.accent.color)
-        }
+    /// ★ C5: a colour another group also wears (past the eighth group) — the square carries the number, as the group's faces do.
+    private func badge(_ t: FlexibleRailTab) -> Int? {
+        guard case .group(let id) = t, let g = model.railGroup(id) else { return nil }
+        return FlexibleGroupNumbers.railNumber(g, in: model.settings)
     }
 }
 
@@ -375,7 +349,7 @@ struct FlexibleGroupTab: View {
         let row = FlexibleSqueezeGroupRows.rows(model: model).first { $0.id == group.id }
         VStack(alignment: .leading, spacing: DS.Space.xs) {
             FlexibleGroupTabHeader(model: model, group: group, row: row, padTarget: $padTarget)
-            Divider().overlay(DS.Color.strokeSubtle.color).padding(.vertical, DS.Space.xxs)
+            // ★ B9 LOOK: no rule before FACES — its overline separates (the mockup's #flex-squish)
             if group.kind == .edges {
                 FlexibleEdgeGroupRows(model: model, group: group, padTarget: $padTarget)   // ★ ROUND 6 ITEM 2
             } else {

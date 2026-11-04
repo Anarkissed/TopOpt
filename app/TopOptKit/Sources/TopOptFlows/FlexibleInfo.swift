@@ -27,9 +27,12 @@ struct FlexInfoButton<Extra: View>: View {
 
     var body: some View {
         Button { shown = true } label: {
-            Image(systemName: "info.circle")
-                .font(.system(size: 15, weight: .regular))
+            // ★ B9 LOOK (design-system §4.21): the one (i) — InfoTip's 22 pt circle and serif "i"
+            Text("i")
+                .font(.system(size: 13, weight: .bold, design: .serif))
                 .foregroundStyle(DS.Color.textTertiary.color)
+                .frame(width: InfoTip.circle, height: InfoTip.circle)
+                .overlay(Circle().strokeBorder(DS.Color.textTertiary.color, lineWidth: 1.2))
                 .frame(width: FlexInfoButton.target, height: FlexInfoButton.target)
                 .contentShape(Rectangle())
         }
@@ -58,8 +61,10 @@ extension FlexInfoButton where Extra == EmptyView {
     }
 }
 
-/// One row: its ONE line (never wrapped), its control, and its (i). `warning` colours the
+/// One row: its ONE line (never wrapped), its (i), and its control. `warning` colours the
 /// line when it says something he must act on (Auto that cannot meet the curve…).
+/// ★ B9 LOOK (design-system §4.4's setting row, as Topology's Settings): the label in the body's type, its (i) right after it,
+/// the control at the right, 44 pt tall — the (i) column at the far right went.
 struct FlexRow<Control: View, Extra: View>: View {
     let line: String
     let info: String
@@ -75,17 +80,17 @@ struct FlexRow<Control: View, Extra: View>: View {
     }
 
     var body: some View {
-        HStack(spacing: DS.Space.s) {
+        HStack(spacing: 0) {
             Text(line)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 13.5))
                 .foregroundStyle(warning ? DS.Color.warning.color : DS.Color.textPrimary.color)
                 .lineLimit(1).minimumScaleFactor(0.85)
                 .layoutPriority(1)
+            FlexInfoButton(title: line, text: info, id: "\(id)-info") { extra }
             Spacer(minLength: DS.Space.xs)
             control
-            FlexInfoButton(title: line, text: info, id: "\(id)-info") { extra }
         }
-        .frame(minHeight: 36)
+        .frame(minHeight: 44)
         .accessibilityIdentifier(id)
         .flexibleProbe(id)
     }

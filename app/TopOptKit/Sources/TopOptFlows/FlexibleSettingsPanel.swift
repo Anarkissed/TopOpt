@@ -33,17 +33,23 @@ struct FlexibleSettingsPanel: View {
     /// ★ B9 (U14, design-system §6: "the wide panel (Lattice settings, Squish, Print plan) is 440 pt"): round 5's 480 pt panel
     /// is the shared wide panel now.
     static let width: CGFloat = PageChrome.widePanelWidth
+    /// The open tab's inset from the tabs and the panel's edge (DSPanel's 14).
+    static let inset: CGFloat = 14
     /// The open tab's width beside the rail.
-    static let contentWidth: CGFloat = width - 2 * DS.Space.ml - FlexibleSettingsRailView.width - DS.Space.s
+    static let contentWidth: CGFloat = width - FlexibleSettingsRailView.width - 2 * inset
 
+    /// ★ B9 LOOK (his "look per screen"; design-system §4.3, DSPanel's measures): the 48 pt header, a hairline, the folder tabs
+    /// flush on the left beside the open tab (the tabs stay put, the tab scrolls — FlexibleRevealScroll keeps the selected face's
+    /// card in view, which DSPanel's own scroll cannot), a hairline, the pinned foot. Folded, the panel is the header's pill.
     var body: some View {
-        VStack(alignment: .leading, spacing: DS.Space.m) {
+        VStack(alignment: .leading, spacing: 0) {
             header
             if !minimized {
                 // ★ ROUND 5 (S8): the folder rail on the left, the open tab beside it
                 FlexibleHugHeight {
-                    HStack(alignment: .top, spacing: DS.Space.s) {
+                    HStack(alignment: .top, spacing: 0) {
                         FlexibleSettingsRailView(model: model)
+                            .frame(maxHeight: .infinity, alignment: .top)
                         VStack(alignment: .leading, spacing: DS.Space.s) {
                             // ★ THE SELECTED FACE'S CARD SCROLLS INTO VIEW (verification of D1): on a list
                             // tap, a tap on the part, the fix pop-up's select, a switch back to Face, the
@@ -60,6 +66,7 @@ struct FlexibleSettingsPanel: View {
                                     topRow
                                     FlexibleRailContent(model: model, padTarget: $padTarget)
                                 }
+                                .padding(.horizontal, Self.inset).padding(.top, 10).padding(.bottom, 6)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             }
                             .background(GeometryReader { g in
@@ -69,17 +76,25 @@ struct FlexibleSettingsPanel: View {
                         }
                     }
                 }
+                .overlay(alignment: .top) { Rectangle().fill(DS.Color.strokeSubtle.color).frame(height: 1) }
                 // ★ B9: the foot is pinned (U10: it never scrolls away)
-                if let foot { FlexibleSquishFoot(actions: foot) }
+                if let foot {
+                    FlexibleSquishFoot(actions: foot)
+                        .padding(.horizontal, Self.inset).padding(.top, 8).padding(.bottom, 12)
+                        .overlay(alignment: .top) { Rectangle().fill(DS.Color.strokeSubtle.color).frame(height: 1) }
+                }
             }
         }
-        .padding(DS.Space.ml)
         .frame(width: Self.width, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: DS.Radius.panel)
-            .fill(DS.Surface.panel.color)
-            .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel)
-                .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+        .background(Self.shape(minimized).fill(DS.Surface.panel.color))
+        .overlay(Self.shape(minimized).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
+        .clipShape(Self.shape(minimized))
         .dsShadow(DS.Shadow.panel)
+    }
+
+    /// DSPanel's outline: radius 22 open, the header's pill folded.
+    static func shape(_ folded: Bool) -> RoundedRectangle {
+        RoundedRectangle(cornerRadius: folded ? DSParts.headerHeight / 2 : DSParts.panelRadius, style: .continuous)
     }
 
     /// What moves the selected face's card (its height and the scroll's own are watched by
@@ -118,19 +133,22 @@ struct FlexibleSettingsPanel: View {
     /// 4's minimise) and opens it again. Auto │ Manual and Reset all moved to the top of the open tab (`topRow`).
     private var header: some View {
         Button { withAnimation(.easeInOut(duration: 0.2)) { minimized.toggle() } } label: {
-            HStack(spacing: DS.Space.s) {
-                Image(systemName: minimized ? "chevron.right" : "chevron.down")
+            // ★ B9 LOOK: DSPanel's header — chevron (turned while folded), the name, the count; 48 pt
+            HStack(spacing: 8) {
+                Image(systemName: "chevron.down")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(DS.Color.textSecondary.color)
-                    .frame(width: 16)
-                Text(Self.title).font(.system(size: 15, weight: .semibold))
+                    .rotationEffect(.degrees(minimized ? -90 : 0))
+                    .frame(width: 18)
+                Text(Self.title).font(.system(size: 14.5, weight: .semibold))
                     .foregroundStyle(DS.Color.textPrimary.color)
-                Spacer(minLength: DS.Space.s)
+                Spacer(minLength: 8)
                 Text(Self.count(groups: model.squeezeGroups.count))
-                    .font(.system(size: 12.5, weight: .medium)).monospacedDigit()
+                    .font(.system(size: 13, weight: .medium)).monospacedDigit()
                     .foregroundStyle(DS.Color.textTertiary.color)
             }
-            .frame(minHeight: FlexibleTargets.least)
+            .padding(.horizontal, Self.inset)
+            .frame(height: DSParts.headerHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

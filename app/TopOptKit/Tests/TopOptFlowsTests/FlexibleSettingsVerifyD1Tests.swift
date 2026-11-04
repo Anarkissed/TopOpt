@@ -171,11 +171,14 @@ final class FlexibleSettingsVerifyD1Tests: XCTestCase {
             })
             XCTAssertLessThanOrEqual(w, content, "\(f): \(w) pt")
         }
+        // ★ RE-PINNED (B9 look, 11-04): the row's (i) sits by its label now, so the bare picture fits beside the chips (335 of
+        // 350 pt) — the picture WITH its line does not: that is why both sit under the chips
         let chipsAndSwatch = FlexibleRowCopyTests.width(FlexRow(FlexibleRowCopy.finish, info: "") {
             FlexibleFinishSwatch(finish: .covered)
+            Text(FlexibleRowCopy.finishLine(.covered)).font(.system(size: 12, weight: .semibold))
             FlexChips(options: FlexibleRowCopy.finishOptions, selection: "covered", equalWidths: false) { _ in }.fixedSize()
         })
-        XCTAssertGreaterThan(chipsAndSwatch, content - 8, "control: beside the chips the picture left the row no room")
+        XCTAssertGreaterThan(chipsAndSwatch, content, "control: beside the chips the picture and its line overflow the row")
     }
     #endif
 

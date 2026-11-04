@@ -261,8 +261,8 @@ struct FlexibleFaceStampRows: View {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
             if let f = model.settings.face(region) {
                 let p = f.activeStamp
-                FlexRow(FlexibleRowCopy.stamp(name: p.map { model.stampName($0) } ?? "pick one"),
-                        info: FlexibleRowCopy.Info.stamp, id: "flexible-row-stamp") {
+                // ★ B9 LOOK: "Stamp (i)  [Elbow ⌄]" — the menu's label is the value box (the round ⇕ button went)
+                FlexRow(FlexibleRowCopy.stampLabel, info: FlexibleRowCopy.Info.stamp, id: "flexible-row-stamp") {
                     // a stamp needs its face's stack (its size and centre): the menu waits for it
                     if model.stack(region) != nil {
                     Menu {
@@ -272,12 +272,9 @@ struct FlexibleFaceStampRows: View {
                         Divider()
                         Button { importing = true } label: { Label(FlexibleRowCopy.stampImport, systemImage: "square.and.arrow.down") }
                     } label: {
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(DS.Color.textPrimary.color)
-                            .frame(width: 32, height: 32)
-                            .background(Circle().fill(DS.Color.fillSubtle.color))
+                        DSValueBox(FlexibleRowCopy.stampBox(name: p.map { model.stampName($0) }), trail: .menu)
                     }
+                    .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain).fixedSize()
                     .accessibilityIdentifier("flexible-stamp-menu")
                     }
                 }

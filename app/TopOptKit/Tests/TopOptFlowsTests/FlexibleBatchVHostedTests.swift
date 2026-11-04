@@ -407,14 +407,27 @@ final class FlexibleBatchVHostedTests: XCTestCase {
         pump(2.5)
         m.views = []; m.selectedRegion = nil; m.rail = .rests
         pump(1.0)
-        let clipped = try measure(h, m)
+        var clipped = try measure(h, m)
         FlexibleStagePage.controlOverlaysOverChrome = true
-        let over = try measure(h, m)
+        var over = try measure(h, m)
         FlexibleStagePage.controlOverlaysOverChrome = false
         XCTAssertEqual(clipped.inside["panel"], 0, "the clip: nothing inside the panel")
         XCTAssertEqual(clipped.inside["legend"], 0, "…nor the legend")
-        XCTAssertGreaterThan(over.inside["panel"] ?? 0, 0, "★ control (no clip): the bottom's dashed outline inside the panel again")
         XCTAssertGreaterThan(over.inside["legend"] ?? 0, 0, "★ control (no clip): …and inside the legend")
+        // ★ RE-PINNED (B9 look, 11-04): the panel hangs from the top and hugs its rows, so [Rests]' short panel ends above the
+        // bottom's dashed outline — the verifier's other states (a face's card open: the tall panel) carry the panel's control
+        var panelState = "Rests"
+        for (name, set) in [("Group 2 · face 4", { m.rail = .group(2); m.select(4) }),
+                            ("Group 3 · face 3", { m.rail = .group(3); m.select(3) })] where (over.inside["panel"] ?? 0) == 0 {
+            set(); pump(1.0)
+            clipped = try measure(h, m)
+            FlexibleStagePage.controlOverlaysOverChrome = true
+            over = try measure(h, m)
+            FlexibleStagePage.controlOverlaysOverChrome = false
+            panelState = name
+            XCTAssertEqual(clipped.inside["panel"], 0, "the clip: nothing inside the panel (\(name))")
+        }
+        XCTAssertGreaterThan(over.inside["panel"] ?? 0, 0, "★ control (no clip): a dashed outline inside the panel again (\(panelState))")
         // ★ THE CLIP CHANGES NOTHING OUTSIDE THE CHROME — only the lines are cut, never the chip, the stamp's handle or the
         // tags (a first cut masked the whole layer, which put the depth chip's glass in an offscreen pass): Group 3 with face 3
         // selected (the chip, the stamp, the dashed outline), with the clip and without it, pixel for pixel outside the chrome
@@ -434,7 +447,7 @@ final class FlexibleBatchVHostedTests: XCTestCase {
         XCTAssertNotNil(h.frames.all["legend"], "premise: the legend shows")
         XCTAssertEqual(noise, 0, "premise: the page is still between two shots")
         XCTAssertEqual(outside, 0, "★ outside the chrome the clip changes no pixel (the chip's glass, the stamp, the outline)")
-        print("FLEX-BV-2a control 13p [Rests]: clipped panel \(clipped.inside["panel"] ?? -1) legend \(clipped.inside["legend"] ?? -1) · "
+        print("FLEX-BV-2a control 13p [\(panelState)]: clipped panel \(clipped.inside["panel"] ?? -1) legend \(clipped.inside["legend"] ?? -1) · "
               + "no clip panel \(over.inside["panel"] ?? -1) legend \(over.inside["legend"] ?? -1) · Group 3 · face 3 outside the chrome: "
               + "clip vs none \(outside) px (noise \(noise))")
     }

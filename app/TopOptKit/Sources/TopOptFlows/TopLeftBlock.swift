@@ -88,6 +88,9 @@ public struct TopLeftBlock: View {
                 } label: {
                     Text(material).dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textPrimary.opacity(0.5).color)
                 }
+                // ★ LOOK PER SCREEN (11-04, §4.1: "Carriage Arms · v7 draft · PA12"): drawn as plain words — still the menu (no
+                // bordered pop-up or ⌄); Settings › Material is the design's place to change it
+                .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain)
                 .fixedSize()
                 if optimized {
                     Text("Optimized \u{2713}").dsStyle(DS.TypeScale.callout).foregroundStyle(DS.Color.okGreen.color).fixedSize()

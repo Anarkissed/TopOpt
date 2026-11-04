@@ -36,6 +36,9 @@ enum FlexibleDepthChipLayout {
         return !keepOut.contains { $0.insetBy(dx: -margin, dy: -margin).contains(p) }
     }
 
+    /// A drawn frame (a chip wider than its 44 pt target) that touches no keep-out.
+    static func clears(_ frame: CGRect, keepOut: [CGRect]) -> Bool { !keepOut.contains { $0.intersects(frame) } }
+
     /// Is the chip mounted? Always while it is being dragged (only a finite point is needed);
     /// otherwise only where it can be reached (`visible`).
     static func shows(_ p: CGPoint, dragging: Bool, keepOut: [CGRect], viewport: CGSize) -> Bool {
@@ -88,7 +91,11 @@ struct FlexibleDepthChips: View {
                !FlexibleLatticeUnder.nothingToSquish(latticeMaxMM: model.latticeMaxMM(r) ?? FlexibleDepthPrism.latticeMax(st, pinched: model.pinchedColumns(r))),
                let h = Self.handle(model: model, k: k, pose: pose), let p = proj.project(h.anchor),
                FlexibleDepthChipLayout.shows(p, dragging: dragging || model.frozenExaggeration != nil,
-                                             keepOut: keepOut, viewport: proj.viewportSize) {
+                                             keepOut: keepOut, viewport: proj.viewportSize),
+               // ★ B9 (BatchV's clip, the Squish look rebuild): the chip WHOLE clears the chrome — its centre 22 pt off the panel
+               // left half a 126 pt "0.1 of 3.0 mm" chip over the panel's edge (r5, 11" landscape)
+               dragging || model.frozenExaggeration != nil
+                   || FlexibleDepthChipLayout.clears(Self.frame(at: p, model: model), keepOut: keepOut) {
               if !model.depthIsInput {
                 // ★ MANUAL (M2, his picks of 2026-10-22: the depths become the app's PREDICTION): a read-only label on the prism's
                 // floor — "≈ 3.2 mm" (or "No estimate yet"); no drag handle, no keypad
