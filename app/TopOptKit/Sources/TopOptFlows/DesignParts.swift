@@ -749,19 +749,21 @@ extension DSSplitButton where Items == EmptyView {
 }
 
 /// The secondary button: 48 pt glass, label + optional glyph ("Settings ⌄", "Compare", "Add part"), and an optional tertiary
-/// detail after the label (the mockup's "Settings  Fast · +Z · −Z ⌄"; frame "<key>-detail").
+/// detail after the label (the mockup's "Settings  Fast · +Z · −Z ⌄"; frame "<key>-detail"). `accent`: the same button filled
+/// in the accent with its glow (the Library's "Open v8 draft", "+ Add part").
 public struct DSGlassButton: View {
     let title: String
     let detail: String?
     let systemImage: String?
     let chevron: Bool
     var selected = false
+    var accent = false
     let key: String
     let action: () -> Void
     public init(_ title: String, detail: String? = nil, systemImage: String? = nil, chevron: Bool = false, selected: Bool = false,
-                key: String, action: @escaping () -> Void) {
+                accent: Bool = false, key: String, action: @escaping () -> Void) {
         self.title = title; self.detail = detail; self.systemImage = systemImage; self.chevron = chevron; self.selected = selected
-        self.key = key; self.action = action
+        self.accent = accent; self.key = key; self.action = action
     }
     public var body: some View {
         Button(action: action) {
@@ -778,10 +780,11 @@ public struct DSGlassButton: View {
                         // (the mockup keeps ⌄ while what it opens is up)
                 }
             }
-            .foregroundStyle(DS.Color.textPrimary.color)
+            .foregroundStyle(accent ? Color.white : DS.Color.textPrimary.color)
             .padding(.horizontal, 16).frame(height: DSParts.glassHeight)
-            .background(Capsule().fill((selected ? DS.Color.fillSelected : DS.Surface.bar).color))
-            .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
+            .background(Capsule().fill((accent ? DS.Color.accent : selected ? DS.Color.fillSelected : DS.Surface.bar).color))
+            .overlay(Capsule().strokeBorder(DS.Color.strokePanel.opacity(accent ? 0 : 1).color, lineWidth: 1))
+            .partsShadow(accent ? DS.Shadow.accentGlow : nil)
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
