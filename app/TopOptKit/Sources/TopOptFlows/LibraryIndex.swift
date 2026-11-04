@@ -75,6 +75,8 @@ public struct LibraryPart: Codable, Equatable, Sendable, Identifiable {
     /// The same for branches (his decision 11): the highest branch given under each version ("4" → 2
     /// once v4.2 existed). nil = the highest listed.
     public var lastChild: [String: Int]?
+    /// ★ His "chosen" answer (11-03): the ONE result chosen for this part, set by Pick this; nil until he picks one.
+    public var chosen: LibraryChosen?
 
     public init(id: UUID = UUID(), name: String, modelHash: String?, versions: [LibraryVersion] = [],
                 lastNumber: Int? = nil, lastChild: [String: Int]? = nil) {
@@ -93,6 +95,13 @@ public struct LibraryPart: Codable, Equatable, Sendable, Identifiable {
     public func version(folderID: UUID) -> LibraryVersion? { versions.first { $0.folderID == folderID } }
 }
 
+/// A part's chosen result: one version's result (0 = a).
+public struct LibraryChosen: Codable, Equatable, Hashable, Sendable {
+    public let folder: UUID
+    public let result: Int
+    public init(folder: UUID, result: Int) { self.folder = folder; self.result = result }
+}
+
 /// One Optimize: a project folder, plus what the Library knows about it.
 public struct LibraryVersion: Codable, Equatable, Sendable {
     /// The project folder this version is (`ProjectSnapshot.id`).
@@ -108,7 +117,8 @@ public struct LibraryVersion: Codable, Equatable, Sendable {
     public var changes: [VersionChange]
     /// His marks, one entry per result that has any.
     public var marks: [ResultMark]
-    /// The result he picked (an index into the run's variants: 0 = a). nil = the suggested one.
+    /// The result this version showed (an index into the run's variants: 0 = a); nil = the suggested one. Set before his
+    /// "chosen" answer and by Storage's trim; never the part's chosen result (`LibraryPart.chosen`), and never migrated to it.
     public var pickedResult: Int?
     /// A few numbers per result, so a card never decodes the 20 MB results file. nil until known.
     public var summary: [ResultSummary]?

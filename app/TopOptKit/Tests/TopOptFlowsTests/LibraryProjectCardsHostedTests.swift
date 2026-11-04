@@ -85,6 +85,21 @@ final class LibraryProjectCardsHostedTests: XCTestCase {
     func testTheCardLine() {
         XCTAssertEqual(LibraryPartCard.line(material: "PA12", optimized: false), "PA12 · not optimized yet", "★ mockup #lib-project")
         XCTAssertEqual(LibraryPartCard.line(material: "PA12", optimized: true), "PA12")
+        XCTAssertEqual(LibraryPartCard.line(material: "PA12", optimized: true, chosen: "v7b"), "PA12 · picked v7b", "★ mockup #lib-project")
+    }
+
+    /// Note 11 + his "chosen" answer: the part's chosen result rings its card, with the "v1b" tag, the line and the strip's accent.
+    func testAChosenResultRingsItsCardWithItsTag() throws {
+        let (h, app, _) = try host(AppBuildHost.landscape13)
+        XCTAssertNil(h.frames.all["libraryPart-Carriage Arms-chosen"], "nothing chosen: no ring and no tag")
+        let arms = try XCTUnwrap(app.library.index.parts.first { $0.name == "Carriage Arms" })
+        app.library.pick(folder: arms.versions[0].folderID, result: 1)
+        h.pump(2)
+        _ = try h.onScreen("libraryPart-Carriage Arms-chosen", "★ the v1b tag on the ringed card")
+        let now = try XCTUnwrap(app.library.index.parts.first { $0.name == "Carriage Arms" })
+        XCTAssertEqual(LibraryPartCard.chips(now, library: app.library).filter(\.on).map(\.title), ["v1"],
+                       "★ the strip's accent is the chosen version")
+        XCTAssertNil(h.frames.all["libraryPart-Top motor mount-chosen"], "a part with nothing chosen has no tag")
     }
 }
 #endif

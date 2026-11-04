@@ -181,8 +181,10 @@ public final class LibraryModel: ObservableObject {
     /// The Results screen's suggestion: the last result that passes.
     public func suggestedResult(_ v: LibraryVersion) -> Int? { v.summary?.lastIndex { $0.accepted } }
 
-    /// The result a card shows: the one he picked, else one marked Print this, else the suggested one.
+    /// The result a card shows: the part's chosen one if it is this version's, else the one it showed before, else one marked
+    /// Print this, else the suggested one.
     public func shownResult(_ v: LibraryVersion) -> Int {
+        if let c = chosenResult(folder: v.folderID) { return c }
         if let p = v.pickedResult { return p }
         if let printed = v.marks.first(where: \.printThis)?.result { return printed }
         return suggestedResult(v) ?? 0
@@ -240,8 +242,36 @@ public final class LibraryModel: ObservableObject {
         }
     }
 
-    /// The result a card shows.
-    public func pick(folder: UUID, result: Int) { edit(folder) { $0.pickedResult = result } }
+    // MARK: ★ the part's chosen result (his answer 11-03; the reviewer's 11-04 18:56Z bullets)
+    //
+    // ONE chosen result per PART (version + result), set by Results' Pick this or a result tile's Pick this; the latest pick
+    // replaces the last. It drives the card's ring, its "v7b" tag, "PA12 · picked v7b", the picture and the strip's accent
+    // (note 11). Print this stays its own mark. Old per-version picks are not migrated: no part has one until he picks.
+
+    /// Pick this: `result` of version `folder` becomes its part's chosen result.
+    public func pick(folder: UUID, result: Int) {
+        guard let p = index.parts.firstIndex(where: { $0.version(folderID: folder) != nil }) else { return }
+        index.parts[p].chosen = LibraryChosen(folder: folder, result: result)
+        try? store.saveLibrary(index)
+    }
+
+    /// The part's chosen result, while its version is listed (nil = none chosen).
+    public func chosen(of part: LibraryPart) -> LibraryChosen? {
+        guard let c = part.chosen, part.version(folderID: c.folder) != nil else { return nil }
+        return c
+    }
+
+    /// "v7b", the chosen result's tag on the part's card.
+    public func chosenTag(_ part: LibraryPart) -> String? {
+        guard let c = chosen(of: part), let v = part.version(folderID: c.folder) else { return nil }
+        return "v\(v.number)\(ResultMark.letter(c.result))"
+    }
+
+    /// The result of version `folder` that is its part's chosen one (Results' "Picked ✓"), else nil.
+    public func chosenResult(folder: UUID) -> Int? {
+        guard let part = index.part(containing: folder), let c = chosen(of: part), c.folder == folder else { return nil }
+        return c.result
+    }
 
     // MARK: - projects, parts, names
 
@@ -529,6 +559,11 @@ public final class LibraryModel: ObservableObject {
             v.pickedResult = 0
             v.summary = keptSummary
             v.trimmed = true
+        }
+        // ★ the part's chosen result was the one kept (shownResult reads it first): it is result 0 now
+        if let p = index.parts.firstIndex(where: { $0.chosen?.folder == folder }) {
+            index.parts[p].chosen = LibraryChosen(folder: folder, result: 0)
+            try? store.saveLibrary(index)
         }
         let old = thumbnails[CompareItem(folder: folder, result: picked)]
         for k in thumbnails.keys where k.folder == folder { thumbnails[k] = nil }
