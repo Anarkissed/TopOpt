@@ -182,6 +182,8 @@ public struct RunReportBlocks: Equatable, Sendable {
         /// Places where the printed variant holds together only by an edge or a corner (`fragile_joints.count`;
         /// core's loose-piece fix, the reviewer's ruling 2026-10-26 03:39). Reported, never fixed.
         public var fragileJoints: Int = 0
+        /// ★ B4: E1's finishing (report "finish"); nil on a result from before E1 — today's checks then stand.
+        public var finish: FinishReport? = nil
     }
     public let strengthen: StrengthenReport?
     public let rows: [Row]
@@ -201,7 +203,8 @@ public struct RunReportBlocks: Equatable, Sendable {
                     accepted: $0["accepted"] as? Bool ?? accepted,
                     rejectionReason: $0["rejection_reason"] as? String ?? "",
                     bodies: VariantBodies.decode($0["bodies"] as? [String: Any]),
-                    fragileJoints: int(($0["fragile_joints"] as? [String: Any])?["count"]))
+                    fragileJoints: int(($0["fragile_joints"] as? [String: Any])?["count"]),
+                    finish: FinishReport.decode($0["finish"] as? [String: Any]))
             }
         }
         var strengthen = StrengthenReport.decode(r["strengthen"] as? [String: Any])
@@ -430,5 +433,47 @@ public struct RunReportCardsView: View {
         .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.l)
         .background(RoundedRectangle(cornerRadius: 12).fill(DS.Surface.bar.color)
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+    }
+}
+
+/// ★ B4 (E1, the BuildGroup contract v3 of 2026-11-03): what core's finishing did to one version — thin spots it thickened,
+/// the ones it could not (and why), the surface finish, a fallback to the safe finish, and whether a check's verdict moved.
+/// (recheck.keep_clear_voxels is not read: TO-core, 11-04 00:23Z — it over-reads until their Keep clear batch.)
+public struct FinishReport: Equatable, Sendable {
+    public struct Place: Equatable, Sendable {
+        public let centreMM: SIMD3<Double>
+        public let beforeMM: Double
+        public let afterMM: Double?
+        public let reason: String?
+    }
+    public let minThicknessMM: Double
+    public let fixed: [Place]
+    public let left: [Place]
+    public let stairStepRemovedPct: Double?
+    public let fallback: Bool
+    public let fallbackReason: String
+    public let verdictChanged: Bool
+    public let verdictReason: String
+
+    public static func decode(_ d: [String: Any]?) -> FinishReport? {
+        guard let d else { return nil }
+        func num(_ v: Any?) -> Double { (v as? NSNumber)?.doubleValue ?? 0 }
+        func centre(_ v: Any?) -> SIMD3<Double> {
+            let a = (v as? [Any] ?? []).map(num)
+            return a.count == 3 ? SIMD3(a[0], a[1], a[2]) : .zero
+        }
+        let fixed = (d["thin_spots_fixed"] as? [[String: Any]] ?? []).map {
+            Place(centreMM: centre($0["centre_mm"]), beforeMM: num($0["before_mm"]), afterMM: num($0["after_mm"]), reason: nil)
+        }
+        let left = (d["thin_spots_left"] as? [[String: Any]] ?? []).map {
+            Place(centreMM: centre($0["centre_mm"]), beforeMM: num($0["thickness_mm"]), afterMM: nil, reason: $0["reason"] as? String)
+        }
+        let surface = d["surface_finish"] as? [String: Any]
+        return FinishReport(minThicknessMM: num(d["min_thickness_mm"]), fixed: fixed, left: left,
+                            stairStepRemovedPct: (surface?["applied"] as? Bool) == true ? num(surface?["stair_step_removed_pct"]) : nil,
+                            fallback: d["finish_fallback"] as? Bool ?? false,
+                            fallbackReason: d["finish_fallback_reason"] as? String ?? "",
+                            verdictChanged: d["verdict_changed"] as? Bool ?? false,
+                            verdictReason: d["verdict_reason"] as? String ?? "")
     }
 }
