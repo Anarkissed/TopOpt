@@ -52,7 +52,7 @@ final class FlexibleMainPageHookTests: XCTestCase {
         XCTAssertTrue(ws.contains("latticeLayer: latticeLayerIsDrawn"))
         XCTAssertTrue(ws.contains("latticeLayerDrawn: latticeLayerIsDrawn"))
         XCTAssertTrue(ws.contains("if visible.latticeControls {\n                viewModeButton(\"cube.transparent\""))
-        XCTAssertTrue(ws.contains("private var fullScreenPageUp: Bool { showLatticePage || showSmoothingPage || showLatticeWizard || showFlexiblePage }"))
+        XCTAssertTrue(ws.contains("private var fullScreenPageUp: Bool { showLatticePage || showLatticeWizard || showFlexiblePage }"))   // ★ RE-PINNED (UI-Notes B4, plan.md §B4: "The Smooth page is deleted"; core finishes every result, E1), #362's OK 00:47Z
         // ★ the player slot sits inside a `!fullScreenPageUp` scope (no chrome under a page)
         let slot = try XCTUnwrap(ws.range(of: "FlexibleMainPlayerSlot(main: flexibleMain"))
         let before = String(ws[..<slot.lowerBound].suffix(1400))

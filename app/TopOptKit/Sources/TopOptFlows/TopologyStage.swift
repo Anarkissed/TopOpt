@@ -19,41 +19,34 @@ import TopOptKit
 
 // MARK: - the pages (T2)
 
-/// Topology's three pages. Setup is always open to him; Results and Smooth are hidden until the project has results (B8).
+/// Topology's two pages. Setup is always open to him; Results is hidden until the project has results (B8).
+/// ★ B4 (ledger note 15, Q2 "Automatic, no page"): the Smooth page is gone — core finishes every result (E1), and what
+/// Results shows, exports and checks is that one finished shape.
 public enum TopologyPage: String, Equatable, Sendable, CaseIterable {
-    case setup, results, smooth
+    case setup, results
 
     public var title: String {
         switch self {
         case .setup: return "Setup"
         case .results: return "Results"
-        case .smooth: return "Smooth"
         }
     }
 
-    /// Which page is up: the smoothing page wins (it is mounted over everything), then Results while it is open.
-    public static func current(resultsOpen: Bool, smoothing: Bool, hasResults: Bool) -> TopologyPage {
-        if smoothing { return .smooth }
-        return resultsOpen && hasResults ? .results : .setup
+    /// Which page is up: Results while it is open.
+    public static func current(resultsOpen: Bool, hasResults: Bool) -> TopologyPage {
+        resultsOpen && hasResults ? .results : .setup
     }
 
-    /// Results and Smooth need a run's results; Setup never greys.
+    /// Results needs a run's results; Setup never greys.
     public static func enabled(_ p: TopologyPage, hasResults: Bool) -> Bool { p == .setup || hasResults }
 
-    /// ★ B8 (his answer 2026-10-24): Results and Smooth are HIDDEN while the project has no results — not greyed. They
-    /// appear when a run lands, or on reopening a project that has results.
+    /// ★ B8 (his answer 2026-10-24): Results is HIDDEN while the project has no results — not greyed. It appears when a run
+    /// lands, or on reopening a project that has results.
     public static func shown(hasResults: Bool) -> [TopologyPage] { hasResults ? [.setup, .results] : [.setup] }
 
-    /// The capsule's segments to hide (Results = secondary, Smooth = tertiary). The greyed ✂ is not a page: it stays.
-    /// ★ His note 2026-10-27: the Smooth page is gone from the app (part of its mechanism moves into core) — its segment
-    /// is always hidden.
+    /// The capsule's segments to hide (Results = secondary). The greyed ✂ is not a page: it stays.
     public static func hiddenSegments(hasResults: Bool) -> Set<StageCapsule.Page> {
         hasResults ? [.tertiary] : [.secondary, .tertiary]
-    }
-
-    /// The variant Smooth opens on: the recommendation — "the last accepted rung" (ResultsModel.isRecommended's one rule).
-    public static func smoothVariant(_ outcome: OptimizeOutcome?) -> Int? {
-        outcome?.variants.lastIndex(where: { $0.accepted })
     }
 }
 

@@ -38,6 +38,10 @@ public struct FlexiblePrintPlan: Codable, Hashable, Sendable, Identifiable {
     public var flangeBack: [String] = []
     /// Built with its joints (the engine's per-plan rebuild sets it; nothing in the app does yet).
     public var built = false
+    /// ★ B9 slice 3: the cuts he placed (+ Cut ⌄). Their pieces and seams come from the engine's cut (E5 item 62): until it
+    /// lands a cut is kept and listed, and it adds no piece. OPTIONAL (decoded when missing): a plan saved before this field
+    /// still reads — a field added later to a saved type must always be optional (a project that fails to decode is dropped).
+    public var cuts: [FlexiblePlanCut]?
 
     public init(id: UUID = UUID(), name: String) { self.id = id; self.name = name }
 }
@@ -59,6 +63,68 @@ public struct FlexiblePrintPlans: Codable, Hashable, Sendable {
     public var plan: FlexiblePrintPlan {
         get { plans.first { $0.id == current } ?? plans[0] }
         set { if let i = plans.firstIndex(where: { $0.id == current }) { plans[i] = newValue } else { plans[0] = newValue } }
+    }
+}
+
+/// ★ B9 slice 3 (round 3: SIX ways; Draw on the part folded into Draw on a plane): how a cut is made (+ Cut ⌄).
+public enum FlexibleCutWay: String, Codable, CaseIterable, Hashable, Sendable {
+    case plane, curve, shape, offset, edges, keyed
+    public var title: String {
+        switch self {
+        case .plane: return "A plane"
+        case .curve: return "Draw on a plane"
+        case .shape: return "A shape"
+        case .offset: return "Offset from a face"
+        case .edges: return "Along the part\u{2019}s edges"
+        case .keyed: return "Keyed step cut"
+        }
+    }
+    public var sub: String {
+        switch self {
+        case .plane: return "pick a plane; move, tilt, rotate"
+        case .curve: return "Pencil or spline; cuts straight through"
+        case .shape: return "box, cylinder or ball: inside is a piece"
+        case .offset: return "follows a face at a set depth"
+        case .edges: return "tap an edge loop"
+        case .keyed: return "pick a plane; the pieces line up"
+        }
+    }
+    /// P7 / P8: a cut that is placed or drawn starts from a plane.
+    public var planeFirst: Bool { self == .plane || self == .curve || self == .keyed }
+    /// Drawn ON its plane (the view turns straight at it); otherwise placed (the view turns edge-on).
+    public var drawn: Bool { self == .curve }
+}
+
+/// The plane a cut starts from (P8: Top · Front · Side · A face you tap).
+public enum FlexiblePlaneBase: String, Codable, CaseIterable, Hashable, Sendable {
+    case top, front, side, face
+    public var title: String {
+        switch self { case .top: return "Top"; case .front: return "Front"; case .side: return "Side"; case .face: return "A face" }
+    }
+    public var sub: String {
+        switch self {
+        case .top: return "flat, like the build plate"
+        case .front: return "upright, facing you"
+        case .side: return "upright, end on"
+        case .face: return "tap a flat face"
+        }
+    }
+    public var chip: String { self == .face ? "On a face" : "\(title) plane" }
+}
+
+/// One cut as he placed it: its way, its plane (base, Move along its normal, Tilt = how far it leans, Rotate = which way),
+/// and the key's size for a keyed cut.
+public struct FlexiblePlanCut: Codable, Hashable, Sendable {
+    public var way: FlexibleCutWay
+    public var base: FlexiblePlaneBase
+    public var offsetMM: Double
+    public var tiltDeg: Double
+    public var rotateDeg: Double
+    public var keyMM: Double
+    public init(way: FlexibleCutWay, base: FlexiblePlaneBase = .side, offsetMM: Double = 0, tiltDeg: Double = 0,
+                rotateDeg: Double = 0, keyMM: Double = 4) {
+        self.way = way; self.base = base; self.offsetMM = offsetMM; self.tiltDeg = tiltDeg; self.rotateDeg = rotateDeg
+        self.keyMM = keyMM
     }
 }
 

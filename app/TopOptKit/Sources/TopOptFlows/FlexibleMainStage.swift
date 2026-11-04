@@ -204,6 +204,8 @@ public final class FlexibleMainStage: ObservableObject {
     @Published public var planSeam: String?
     @Published public var planResetAsk = false
     @Published public var planNote: String?
+    /// ★ B9 slice 3: the cut being placed (+ Cut ⌄): its plane card, then its bar; nil when none.
+    @Published public var planCut: FlexiblePlanCutDraft?
     /// ★ R7-D2: the face chip's live state (its moved spots, the keypad, the (i), the confirms, the message) — its own object,
     /// observed only by the chip's layer and the list, so a drag never re-runs the workspace.
     public let faceUI = FlexibleFaceChipState()
@@ -669,6 +671,9 @@ public final class FlexibleMainStage: ObservableObject {
     /// RED CONTROL `controlSquishPrismsOnMain`: round 6's squish prisms (S1b).
     public func volumes(_ project: ProjectModel, on stage: WorkspaceStage, drilledIn: Bool) -> [ClearanceRenderItem] {
         guard !drilledIn, !frozen, !attachView, let m = current(project, stage) else { return [] }   // ★ I2: no prisms during Attach
+        // ★ B9 slice 3: while a cut's plane is placed on the Print plan, the plane alone is drawn on the part
+        let plane = planeItems(project)
+        if !plane.isEmpty { return plane }
         if controlSquishPrismsOnMain { return squishVolumes(project, m) }
         // ★ M1 VERIFY (the verify: "[Prisms] does nothing visible on the model" — before a pick it drew nothing, after one
         // exactly what the pick drew): [Prisms] = EVERY group's lattice face-prisms (his round-6 words for the view: "a view

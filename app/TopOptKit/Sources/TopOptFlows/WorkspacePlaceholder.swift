@@ -491,26 +491,7 @@ public struct WorkspacePlaceholder: View {
     @State private var latticeRegionActiveId: Float = -1
     @State private var latticeRegionOrbiting = false
 
-    // The SMOOTHING page (handoff 2026-08-02-smoothing-page) — the third page,
-    // entered from a finished variant. Like the lattice page it is CHROME over the
-    // same live stage, and while it is open the stage renders THAT variant (or its
-    // smoothed twin, per `smoothingPageModel.currentGeometry`).
-    @State private var showSmoothingPage = false
-    @State private var smoothingPageModel: SmoothingPageModel?
-    /// The brush. Owned here so a stroke on the stage and the panel's region list
-    /// are one value.
-    @State private var smoothBrush = SmoothBrushModel(indices: [], vertexCount: 0,
-                                                      freeze: .unavailable)
-    /// The brush's OWN tools — paint / erase / orbit and the disc size (bar L4).
-    /// Round 1 borrowed the TO page's paint drawer for these, which is why the
-    /// page could not hide the TO chrome without disarming its own brush.
-    @State private var smoothTools = SmoothBrushTools()
-    /// The variant's own render mesh, and the smoothed twin once one has been
-    /// certified. Built once when they change (the viewer-lag lesson).
-    @State private var smoothVariantMesh: ViewerMesh?
-    @State private var smoothedVariantMesh: ViewerMesh?
-    /// Where the variant's mesh was written for the certification engine to read.
-    @State private var smoothVariantMeshPath = ""
+    // ★ B4 (plan.md §B4, ledger note 15): the SMOOTHING page is deleted — core finishes every result (E1).
 
     // Gravity DIRECTION widget (2026-07-26 — "set gravity by pointing, not by hunting for a
     // clean face"). During setup the user drags an arrow to point which way is down instead
@@ -563,7 +544,9 @@ public struct WorkspacePlaceholder: View {
     @State private var macNotAnswering = false   // ★ B1 (note 4): it looked, and the Mac never answered
     @State private var runCouldntFinish = false  // ★ B1 (O1): the last run failed with the engine's own text
     @State private var lastRunWasLattice = false // ★ B1 (O1): which button started it (Optimize, or Lattice)
-    @State private var libraryExportVariant: Int?   // Library (B3): Export from a card opens Smooth on this result
+    @State private var libraryExportVariant: Int?   // Library (B3): Export from a card opens Results on this result
+    /// ★ B4: the accepted result Results opens on (Library card Export); nil: Results' own pick
+    @State private var resultsOpenOn: Int? = nil
     /// The live diagnostic for the in-flight box drag (nil between drags).
     @State private var boxDragDiag: BoxDragDiagnostic?
     /// The magnetic face-detent candidate the dragged box face is currently HELD on (device
@@ -672,11 +655,11 @@ public struct WorkspacePlaceholder: View {
     /// `!showLatticePage` at each site, so the third page had to remember to add
     /// itself to eight separate conditions, and it did not. ONE predicate,
     /// gating every site, is what makes a fourth page correct by default.
-    private var fullScreenPageUp: Bool { showLatticePage || showSmoothingPage || showLatticeWizard || showFlexiblePage }
+    private var fullScreenPageUp: Bool { showLatticePage || showLatticeWizard || showFlexiblePage }
 
     /// ★ B2 (U1, note 16, IMG_0564 — the Cells page dropped the back row): the Cells page (today's `showLatticeWizard`) is the
     /// one full-screen page that keeps the workspace's top-left block; with any other page up the chrome is hidden as before.
-    private var cellsPageKeepsChrome: Bool { showLatticeWizard && !showLatticePage && !showSmoothingPage && !showFlexiblePage }
+    private var cellsPageKeepsChrome: Bool { showLatticeWizard && !showLatticePage && !showFlexiblePage }
 
     /// ★ THE STAGE IS ON AND THE QUESTION IS UNANSWERED. `nil` is "not yet asked" —
     /// deliberately not a default, so a project made before the modes existed reopens
@@ -716,9 +699,7 @@ public struct WorkspacePlaceholder: View {
         model.persistCurrentProject()
     }
 
-    /// THE BRUSH GESTURE, AS ONE VALUE (task 2026-08-05, bar D1). The SMOOTHING
-    /// PAGE OWNS IT while it is up: its brush is the page's whole point, so it
-    /// cannot depend on the TO page's Paint toggle — which L1 hides.
+    /// THE BRUSH GESTURE, AS ONE VALUE (task 2026-08-05, bar D1). ★ B4: the Smooth page that also owned it is gone.
     ///
     /// WHAT WENT WRONG HERE. This site used to read `smoothTools.paints`, a
     /// property that answered "does a FINGER paint?", to decide whether the
@@ -728,10 +709,7 @@ public struct WorkspacePlaceholder: View {
     /// the stricter one won. `BrushGesture` is now the only mechanism: `armed`
     /// comes from the MODE, `requiresPencil` decides WHICH contact, and both
     /// travel to the recognizers together.
-    private var brushGesture: BrushGesture {
-        showSmoothingPage ? .smoothingPage(smoothTools)
-                          : .workspacePaint(active: paintActive)
-    }
+    private var brushGesture: BrushGesture { .workspacePaint(active: paintActive) }
 
     /// Whether the mode's limitations sheet is up. Opened by tapping the mode title.
     @State private var showLatticeModeSheet = false
@@ -887,7 +865,7 @@ public struct WorkspacePlaceholder: View {
                           // would otherwise fall through to the face picker and
                           // change the very selections the freeze mask was
                           // computed from.
-                          faceToolActive: !showSmoothingPage,
+                          faceToolActive: true,
                           onPickFace: handlePick,
                           // ★ §6 — the same tap, with its 3D point. Only the point
                           // distinguishes the two halves of a cut face.
@@ -1068,10 +1046,10 @@ public struct WorkspacePlaceholder: View {
                           // today's design-box gate, a Negative one through the keep-outs'), and the gap of any
                           // row that stops short of the part or another row, so it is plainly visible.
                           designPrimitives: DesignPrimitiveDrawing.of(project.designBox, part: viewerMesh?.bounds,
-                              positives: (showDesignGizmo && !showSmoothingPage
+                              positives: (showDesignGizmo
                                           && visible.designBox
                                           && !legendDrilledIn),
-                              negatives: (showDesignGizmo && !showSmoothingPage
+                              negatives: (showDesignGizmo
                                           && visible.keepOuts
                                           && !legendDrilledIn)),
                           // Keep-clear v2 (Part 3): the true red clearance volumes, drawn
@@ -1149,8 +1127,7 @@ public struct WorkspacePlaceholder: View {
                           paintActive: brushGesture.armed,
                           paintFaceIDs: project.effectivePaintFaceIDs(),
                           onBrush: { center, phase, input in
-                              handleBrush(center, phase,
-                                          input == .pencil ? .pencil : .finger)
+                              handleBrush(center, phase, input)
                           },
                           // Bar U2: on the smoothing page the maintainer can give
                           // the brush to the pencil, and a finger drag then orbits
@@ -1161,10 +1138,7 @@ public struct WorkspacePlaceholder: View {
                           // AT THE MOMENT the user tries it. Once per page — a
                           // note on every orbit would be noise, and orbiting with
                           // a finger is the intended behaviour, not a mistake.
-                          onBrushRefused: { _ in
-                              guard showSmoothingPage, smoothTools.pencilOnly else { return }
-                              smoothingPageModel?.notePencilOnlyRefusedFinger()
-                          },
+                          onBrushRefused: { _ in },   // ★ B4: only the deleted Smooth page refused a contact
                           // ★ §2 — the pencil-mode discipline, Surface stage only.
                           inputDiscipline: surfaceDiscipline,
                           // ★ §2(c) — the only honest "a pencil exists" signal
@@ -1359,7 +1333,7 @@ public struct WorkspacePlaceholder: View {
             // The lattice region's transform gizmo — only while the lattice panel is open
             // and a region exists, so it never coincides with the force gizmo (U5). It is
             // the LATTICE page's own tool, so it is not gated with the workspace's.
-            if !showSmoothingPage, !legendDrilledIn {
+            if !legendDrilledIn {
                 latticeRegionGizmoOverlay.ignoresSafeArea()
             }
             // ★★ THE BAND CHIPS — lattice-only view only (his 2026-09-27). BELOW the
@@ -1569,7 +1543,7 @@ public struct WorkspacePlaceholder: View {
                     .zIndex(49)
             }
             if project.lattice.flexible != nil { FlexibleChangeTypeMount(main: flexibleMain, project: project, app: model, loseAll: { showFlexiblePage = false; deleteLatticeForMode() }, keepRegions: { showFlexiblePage = false; keepLatticeRegions() }).zIndex(49) }   // Flexible (PR #362) H62: "Change lattice type…" on the Flexible stage asks with #354's own card (its mount needs a type a Flexible project never has); Continue is today's delete with its one-step Undo
-            if flexibleMain.owns(project, stage), !showFlexiblePage, !editFaces.isEditing { FlexiblePrintPlanOverlays(main: flexibleMain).zIndex(49) }   // Flexible (PR #362) B9: the Print plan's Reset confirm, top middle over the page (U13)
+            if flexibleMain.owns(project, stage), !showFlexiblePage, !editFaces.isEditing { FlexiblePrintPlanOverlays(main: flexibleMain, project: project, camera: cameraModel).zIndex(49) }   // Flexible (PR #362) B9: the Print plan's cut bar and plane card (the camera turns to the plane, U19) and its Reset confirm, top middle over the page (U13)
             })   // Flexible (PR #362) H58
             AnyView(Group {   // Flexible (PR #362) H58: the body in heap-boxed chunks; the 47 KB body value was copied on the iPad main thread's stack until it overflowed (crash 2026-10-25)
             if showLatticeWizard {
@@ -1610,22 +1584,6 @@ public struct WorkspacePlaceholder: View {
                force.phase == .edit, viewerMesh != nil {
                 selectionsPanel
             }
-            // The SMOOTHING page (handoff 2026-08-02-smoothing-page) — chrome over
-            // the same stage, mounted like the lattice page.
-            if showSmoothingPage { smoothingPageOverlay }
-            // ROUND-2 BAR L1 — NO SELECTIONS PANEL OVER THE SMOOTHING PAGE.
-            //
-            // Round 1 mounted the shared library here, reading AE6 ("one selection
-            // model, never a second UX") as licence to show the EDITOR. But the
-            // freeze mask the brush is painting against was computed from those
-            // very selections: editing an anchor or a keep-clear volume mid-stroke
-            // would leave every stroke on screen measured against a mask that no
-            // longer describes the part, and the page has no way to react.
-            //
-            // AE6 is unweakened — the page still authors no selection state, and
-            // there is still exactly one `selectionsPanel` in the app. It simply
-            // shows a READ-ONLY readout of that one model instead of its editor,
-            // which is what L1's "indicated, not editable" asks for.
             // ═══ THE POSITION GIZMO — ONE PLACEMENT, EVERY PAGE (round-2 bar L2) ═══
             //
             // This is the THIRD time the maintainer has asked for gizmo invariance:
@@ -1699,17 +1657,9 @@ public struct WorkspacePlaceholder: View {
                                   viewOriginal = true
                                   openLatticePage(variantIndex: idx)
                               },
-                              // Per-variant SMOOTHING entry (handoff
-                              // 2026-08-02-smoothing-page): brush locally,
-                              // re-certify, keep or discard.
-                              onSmooth: { idx in
-                                  viewOriginal = true
-                                  openSmoothingPage(variantIndex: idx)
-                              },
-                              // AJ2: the two entries are DECIDED HERE, before either
-                              // page can be reached, and each blocked one carries its
-                              // own reason on the disabled control.
-                              smoothEntry: { smoothEntry($0) },
+                              // AJ2: the entry is DECIDED HERE, before the page can be
+                              // reached, and a blocked one carries its own reason on the
+                              // disabled control. (★ B4: Smooth's entry went with its page.)
                               latticeEntry: { latticeEntry($0) },
                               // ★ Results redesign (2026-10-27): undo / redo at the top left
                               undo: { project.performUndo() }, redo: { project.performRedo() },
@@ -1718,6 +1668,7 @@ public struct WorkspacePlaceholder: View {
                               loadSurfacePoints: { loadFlowSurfacePoints() },
                               scenarioLoads: resultsScenarioLoads,
                               topLeftBlock: AnyView(resultsTopLeftBlock),
+                              takeOpenOn: { defer { resultsOpenOn = nil }; return resultsOpenOn },
                               // ★ B4 (app-map §3.5, Q1): "v7 results" and Pick this — the Library's chosen result
                               version: versionLabel,
                               pickedVariant: ResultsPick.accepted(model.library.version(project.id)?.pickedResult, in: outcome),
@@ -1732,7 +1683,7 @@ public struct WorkspacePlaceholder: View {
             // `seeResultsShown` already refuses a full-screen page; the guard is
             // spelled out here too because the page-chrome audit reads this line.
             if !fullScreenPageUp, seeResultsShown { seeResultsChip }
-            // ★ B3: on Topology the capsule rides over its Results page too (the way back to Setup, on to Smooth),
+            // ★ B3: on Topology the capsule rides over its Results page too (the way back to Setup),
             // and a landed run says so here — it never opens Results by itself.
             if stage == .topology, !fullScreenPageUp, viewerMesh != nil, topologyResultsPageUp, !resultsFullScreen { topologyCapsuleOverlay }
             if stage == .topology, !editFaces.isEditing, !fullScreenPageUp, let msg = topoNotice.message { topologyResultsMessage(msg) }
@@ -2617,73 +2568,7 @@ public struct WorkspacePlaceholder: View {
     /// On stroke END the sidecar is persisted so the run + live tagging reproduce the paint. The
     /// `.add`/`.erase` mode follows the erase modifier; `force.sync` keeps the load case aligned
     /// with the group the stroke may have created.
-    private func handleBrush(_ center: CGPoint, _ phase: BrushPhase,
-                             _ input: SmoothBrushTools.Input = .finger) {
-        // On the SMOOTHING page the same gesture paints SMOOTHING strength onto the
-        // variant's own surface (handoff 2026-08-02-smoothing-page). It is routed
-        // here rather than given its own gesture so the brush feels identical on
-        // both pages — and it hit-tests the VARIANT mesh, which is what the stage
-        // is showing, so a stroke can never land on the original part's geometry.
-        if showSmoothingPage {
-            // The page's OWN tools decide the mode and the disc size (bar L4) —
-            // the TO page's paint drawer is hidden here and no longer reachable.
-            //
-            // WHICH CONTACT (bar U2). A pencil always paints; a finger paints
-            // only while `pencilOnly` is off. The recognizer reports the kind, so
-            // this is not a guess — see `MetalMeshView.handlePencilPan`. Asked of
-            // the SAME gate the recognizer routes through (bar D1), so the page
-            // and the viewer cannot disagree about who may paint.
-            guard brushGesture.admits(input) else { return }
-            // THE STAGE'S OWN MESH is what the brush hit-tests. On the smoothing
-            // page that is `smoothVariantMesh` — the ORIGINAL variant surface —
-            // even while the stage is showing the smoothed twin, because the
-            // brush's triangle indices, the freeze mask and the weight vector are
-            // all defined on the original. Painting against the smoothed mesh
-            // would index a second mesh, which is the whole class of bug round 2
-            // closed.
-            guard let mesh = smoothVariantMesh, let proj = projection else { return }
-            switch phase {
-            case .began:
-                // ONE STROKE, ONE RUNG (bar U1). A drag emits many samples over
-                // the same triangles; without this boundary a single stroke would
-                // run straight to the deepest level.
-                smoothBrush.beginStroke()
-                fallthrough
-            case .moved:
-                let tris = BrushHitTest.triangles(under: center,
-                                                  radiusPoints: CGFloat(smoothTools.radiusPoints),
-                                                  mesh: mesh, projection: proj,
-                                                  modelRotation: settleQuat,
-                                                  modelCenter: meshCenter)
-                guard !tris.isEmpty else { return }
-                smoothBrush.brush(smoothTools.mode, triangles: tris.map { Int32($0) })
-            case .ended:
-                smoothBrush.endStroke()
-                // THE STROKE SETTLED — apply it to the preview mesh, so Smoothed
-                // shows the smoothed shape NOW rather than after a certification
-                // (task 2026-08-04-variant-volume-fraction-mismatch, bar C1/L4).
-                // On `.ended` only: previewing mid-drag would re-smooth the whole
-                // mesh on every frame of the stroke.
-                if let page = smoothingPageModel {
-                    let brush = smoothBrush
-                    Task {
-                        await page.refreshPreview(brush: brush)
-                        // The stage draws `smoothedVariantMesh`, so the preview has
-                        // to land THERE or the toggle flips a label over unchanged
-                        // geometry — which is the defect, not the fix. A certified
-                        // or kept result outranks a preview and is never clobbered.
-                        guard page.receipt == nil, page.kept == nil else { return }
-                        smoothedVariantMesh = page.preview.map {
-                            ViewerMesh(vertices: $0.meshVertices,
-                                       indices: $0.meshIndices,
-                                       faceIDs: [], faceGeometry: [],
-                                       pseudoFaces: false, smoothShaded: true)
-                        }
-                    }
-                }
-            }
-            return
-        }
+    private func handleBrush(_ center: CGPoint, _ phase: BrushPhase, _ input: BrushInput = .finger) {
         guard force.phase == .edit, let mesh = viewerMesh, let proj = projection else { return }
         switch phase {
         case .began, .moved:
@@ -3444,17 +3329,7 @@ public struct WorkspacePlaceholder: View {
     /// (the preview overlay, the region volumes, the picker) reads the same
     /// mesh through this one property, so the page cannot show one object and
     /// operate on another.
-    private var stageMesh: ViewerMesh? {
-        // The smoothing page's stage shows what its model says is current — the
-        // smoothed twin only when there IS one and the user is looking at it.
-        // `currentGeometry` is the single decision; nothing here second-guesses it.
-        if showSmoothingPage, let page = smoothingPageModel {
-            return page.currentGeometry.smoothed
-                ? (smoothedVariantMesh ?? smoothVariantMesh)
-                : smoothVariantMesh
-        }
-        return latticeVariantMesh ?? viewerMesh
-    }
+    private var stageMesh: ViewerMesh? { latticeVariantMesh ?? viewerMesh }
 
     /// Open the full-screen lattice page. `variantIndex` non-nil = the variants
     /// entry: the page then WORKS ON THAT VARIANT — its geometry is what the
@@ -3489,17 +3364,6 @@ public struct WorkspacePlaceholder: View {
             requestedVolumeFraction: v.requestedVolumeFraction)
     }
 
-    /// The Smooth entry control's verdict for a variant — what the results screen's
-    /// button renders, enabled or disabled-with-a-reason.
-    private func smoothEntry(_ index: Int) -> VariantEntryVerdict {
-        guard let f = variantEntryFacts(index) else {
-            return VariantEntryVerdict(label: "Smooth", enabled: false,
-                                       reason: "this run has no variant here",
-                                       allReasons: ["this run has no variant here"])
-        }
-        return VariantEntry.smoothing(f)
-    }
-
     /// The Lattice entry control's verdict for a variant.
     private func latticeEntry(_ index: Int) -> VariantEntryVerdict {
         guard let f = variantEntryFacts(index) else {
@@ -3510,8 +3374,7 @@ public struct WorkspacePlaceholder: View {
         return VariantEntry.lattice(f)
     }
 
-    private func openLatticePage(variantIndex: Int?,
-                                 smoothed: SmoothKeptResult? = nil) {
+    private func openLatticePage(variantIndex: Int?) {
         // AJ2: the page is UNREACHABLE when the entry is blocked, not merely
         // apologetic once you are inside it. The button is already disabled; this is
         // the second layer, so no other caller can open a dead end either.
@@ -3540,15 +3403,7 @@ public struct WorkspacePlaceholder: View {
         }
         if let idx = variantIndex, let o = run.outcome, o.variants.indices.contains(idx),
            !o.variants[idx].vonMisesField.isEmpty {
-            var v = o.variants[idx]
-            // AE8, forward: a KEPT smoothing hands its own geometry on, so the
-            // lattice is generated on the SMOOTHED shape and not on the original
-            // under a label that says smoothed. The field, the rung and the
-            // retained artifacts are the variant's own and travel unchanged — only
-            // the geometry differs, which is exactly what smoothing changed.
-            if let k = smoothed {
-                v = v.withGeometry(vertices: k.meshVertices, indices: k.meshIndices)
-            }
+            let v = o.variants[idx]   // ★ B4: the variant as core finished it (E1); no app-side smoothed twin any more
             let field = LatticeDemandField(
                 vonMises: v.vonMisesField,
                 // ★★★ AND THE TENSOR (maintainer, 2026-08-22: "the organic lattice
@@ -3603,268 +3458,7 @@ public struct WorkspacePlaceholder: View {
         } else {
             latticePageVariantField = nil
         }
-        // TWO FULL-SCREEN PAGES MUST NEVER BOTH BE UP (round-2 bar L5). Each page
-        // owns the whole screen, so overlapping them is the overlay defect in its
-        // purest form. Making it structural here also lets `showLatticePage` be
-        // read as "and therefore not the smoothing page" at every placement site.
-        showSmoothingPage = false
         showLatticePage = true
-    }
-
-    // MARK: the smoothing page (handoff 2026-08-02-smoothing-page)
-
-    /// The scratch directory the page's meshes live in: the variant as the run
-    /// made it, and the smoothed twin core writes.
-    private var smoothScratchDir: URL {
-        FileManager.default.temporaryDirectory
-            .appendingPathComponent("topopt-smoothing", isDirectory: true)
-    }
-
-    /// Open the SMOOTHING page on a finished variant. The load case comes from the
-    /// variant's RETAINED JOB DOCUMENT (bar AE3) — never from `project.force` /
-    /// `project.selection`, which the user may have edited since the run. Nothing
-    /// in this function reads either.
-    private func openSmoothingPage(variantIndex: Int) {
-        guard let o = run.outcome, o.variants.indices.contains(variantIndex) else { return }
-        // AJ2: never open a page that will then refuse. The button is disabled with
-        // this same reason; this is the second layer, so the dead end is unreachable
-        // even from a caller that forgot to check.
-        let gate = smoothEntry(variantIndex)
-        guard gate.enabled else {
-            model.toast = gate.reason ?? "This variant can’t be smoothed."
-            return
-        }
-        let v = o.variants[variantIndex]
-
-        // Write the variant's own mesh out once: the certification engine reads
-        // meshes from disk, and BOTH columns of the receipt are measured on this
-        // exact file (the before directly, the after after smoothing it).
-        try? FileManager.default.createDirectory(at: smoothScratchDir,
-                                                 withIntermediateDirectories: true)
-        let inPath = smoothScratchDir
-            .appendingPathComponent("variant_\(variantIndex).stl").path
-        let outPath = smoothScratchDir
-            .appendingPathComponent("variant_\(variantIndex)_smoothed.stl").path
-        smoothVariantMeshPath = inPath
-        try? TopOptKit.exportSTL(
-            mesh: ImportedMesh(
-                vertices: v.meshVertices, indices: v.meshIndices, faceIDs: [],
-                vertexCount: v.meshVertices.count / 3,
-                triangleCount: v.meshIndices.count / 3, faceCount: 0,
-                watertight: true),
-            to: inPath)
-
-        // ROUND 2, BAR S2 — THE PAGE'S ONE MESH. From here on the page does NOT
-        // use `v.meshVertices` for anything: it reads the file back through
-        // CORE's own importer, and that is the mesh the stage draws, the brush
-        // paints, `smooth_freeze_mask` masks, and the smoother moves.
-        //
-        // Why this is the fix and not a remap: those four already all read this
-        // file. The app was the only participant holding a different buffer —
-        // on a LAN run a triangle soup with 6x core's vertex count, because
-        // `MeshExport.parseBinarySTL` shares no vertices between facets while
-        // core's `import_part_file` welds by exact coordinate. Measured 6.0030
-        // on the maintainer's fixture (`smooth_mesh_identity_probe`); their
-        // screen read 105060 vs 17496. Reconciling the two would be the guess
-        // the guard refuses to make. Dropping one of them leaves nothing to
-        // reconcile.
-        var meshError: String?
-        var pageMesh = SmoothPageMesh(path: inPath, vertices: [], indices: [])
-        do {
-            pageMesh = try SmoothPageMesh.imported(from: inPath) { path in
-                let m = try TopOptKit.importMesh(path: path)
-                return (m.vertices, m.indices)
-            }
-        } catch {
-            meshError = (error as? TopOptError)?.message ?? "\(error)"
-        }
-
-        let ctx = SmoothPageEntry.context(
-            runName: project.name, variantIndex: variantIndex,
-            requestedVolumeFraction: v.requestedVolumeFraction,
-            massGrams: v.massGrams, reportedMargin: v.worstCaseMargin,
-            accepted: v.accepted, pageMesh: pageMesh,
-            // The RUN's own record of whether it generated a lattice — not the
-            // project's current lattice settings (AE8, reverse).
-            latticed: o.latticeReport != nil,
-            retainedJob: project.relatticeArtifacts?.jobJSON,
-            modelPath: project.importedFile?.path,
-            meshUnreadable: meshError)
-
-        // A `.meshUnreadable` context is the one refusal the ENTRY GATE cannot
-        // reach: it is only knowable after writing the file and asking core to
-        // read it back, which the gate must not do for every disabled button. So
-        // it takes the page's own `gateOverlay` — the full-screen "this variant
-        // can't be smoothed" card, carrying core's own words — rather than a
-        // toast that scrolls away. AJ2 is about not opening a page that will
-        // refuse SILENTLY; naming the refusal on the page is the point of that
-        // overlay existing.
-
-        // THE STAGE DRAWS THE PAGE MESH, not the run's buffer — so what is on
-        // screen is what the brush indexes and what core masks.
-        smoothVariantMesh = pageMesh.isEmpty
-            ? nil
-            : ViewerMesh(vertices: pageMesh.vertices, indices: pageMesh.indices,
-                         faceIDs: [], faceGeometry: [],
-                         pseudoFaces: false, smoothShaded: true)
-        smoothedVariantMesh = nil
-
-        guard let cfg = model.certificationConfigPaths() else { return }
-        let materials = cfg.materials, rules = cfg.rules
-        smoothingPageModel = SmoothingPageModel(
-            context: ctx, variantMeshPath: inPath, smoothedMeshPath: outPath,
-            runner: { request in
-                try await Task.detached(priority: .userInitiated) {
-                    let lc = request.loadCase
-                    switch request.subject {
-                    case .originalVariant:
-                        // THE BEFORE COLUMN IS MEASURED (bar AE2): a real
-                        // analyze_fixed_design pass over the UNSMOOTHED variant,
-                        // through the same seam the after column uses.
-                        let c = try TopOptKit.certifyMeshLoadCase(
-                            modelPath: request.modelPath,
-                            meshPath: request.inputMeshPath,
-                            material: lc.material, materialsPath: materials,
-                            rulesPath: rules, resolution: lc.resolution,
-                            anchorFaceIDs: lc.anchorFaceIDs,
-                            loadGroups: lc.loadGroups,
-                            buildDirection: lc.buildDirection,
-                            infillPercent: lc.infillPercent)
-                        return SmoothingPageModel.CertifyOutcome(
-                            certification: SmoothCertification(subject: .originalVariant, c),
-                            smoothing: nil)
-                    case .smoothedVariant:
-                        let r = try TopOptKit.smoothBrushAndRecertifyLoadCase(
-                            modelPath: request.modelPath,
-                            inputMeshPath: request.inputMeshPath,
-                            smoothedOutPath: request.outputMeshPath,
-                            material: lc.material, materialsPath: materials,
-                            rulesPath: rules, resolution: lc.resolution,
-                            strength: request.strength, weights: request.weights,
-                            enforceMinFeature: true,
-                            anchorFaceIDs: lc.anchorFaceIDs,
-                            loadGroups: lc.loadGroups,
-                            buildDirection: lc.buildDirection,
-                            infillPercent: lc.infillPercent, freeze: lc.freeze)
-                        let mesh = try TopOptKit.importMesh(
-                            path: r.smoothing.smoothedMeshPath)
-                        return SmoothingPageModel.CertifyOutcome(
-                            certification: SmoothCertification(subject: .smoothedVariant,
-                                                               r.certification),
-                            smoothing: SmoothingApplied(
-                                maxStrength: request.strength,
-                                pairsRequested: r.smoothing.pairsRequested,
-                                pairsApplied: r.smoothing.pairsApplied,
-                                totalVertices: r.smoothing.totalVertices,
-                                frozenVertices: r.smoothing.frozenVertices,
-                                brushedVertices: r.smoothing.brushedVertices,
-                                unbrushedVertices: r.smoothing.unbrushedVertices,
-                                volumeDriftFraction: r.smoothing.volumeDriftFraction,
-                                volumeDriftBound: r.smoothing.volumeDriftBound,
-                                minFeatureLimited: r.smoothing.minFeatureLimited,
-                                regionLines: []),
-                            meshVertices: mesh.vertices, meshIndices: mesh.indices)
-                    }
-                }.value
-            },
-            // THE LIVE BRUSH PREVIEW (task
-            // 2026-08-04-variant-volume-fraction-mismatch, failure C / bar L4;
-            // moved out of this closure by task 2026-08-08, S1b). Same smoother,
-            // no certification, and NO FILE: see `SmoothingPageWiring`, which
-            // exists so a test can drive the engine the page actually runs
-            // instead of a stand-in that cannot reproduce its I/O.
-            previewer: SmoothingPageWiring.livePreviewer)
-
-        // The freeze mask, from CORE's own predicate resolution. Until it arrives
-        // the brush is inert and the page says so — it must not paint into the
-        // unknown.
-        //
-        // BOTH the brush and the request are built BY the page mesh: `brush()`
-        // takes its indices and count from it, and `freezeMaskRequest` fills the
-        // mesh path in from it. Neither has a parameter through which a different
-        // mesh could enter — bar S2's "by construction".
-        smoothBrush = pageMesh.brush()
-        smoothTools = SmoothBrushTools()
-        // Mutually exclusive, both ways (bar L5) — see `openLatticePage`.
-        showLatticePage = false
-        showSmoothingPage = true
-        if let req = ctx.freezeMaskRequest {
-            Task {
-                let lc = req.loadCase
-                let mask = try? await Task.detached(priority: .userInitiated) {
-                    try TopOptKit.smoothFreezeMask(
-                        modelPath: req.modelPath, meshPath: req.meshPath,
-                        resolution: lc.resolution,
-                        anchorFaceIDs: lc.anchorFaceIDs, loadGroups: lc.loadGroups,
-                        buildDirection: lc.buildDirection,
-                        infillPercent: lc.infillPercent, freeze: lc.freeze)
-                }.value
-                guard let mask else { return }
-                smoothBrush = pageMesh.brush(
-                    freeze: SmoothFreezeMask(frozen: mask.frozen,
-                                             toleranceMM: mask.toleranceMM,
-                                             meshPath: req.meshPath))
-            }
-        }
-    }
-
-    private func closeSmoothingPage() {
-        showSmoothingPage = false
-        smoothingPageModel = nil
-        smoothVariantMesh = nil
-        smoothedVariantMesh = nil
-        smoothBrush = SmoothBrushModel(indices: [], vertexCount: 0, freeze: .unavailable)
-    }
-
-    private var smoothingPageOverlay: some View {
-        Group {
-            if let page = smoothingPageModel {
-                SmoothingPage(
-                    project: project, page: page,
-                    brush: $smoothBrush,
-                    tools: $smoothTools,
-                    showingSmoothed: Binding(
-                        get: { page.showingSmoothed },
-                        set: { page.showingSmoothed = $0 }),
-                    onRecertify: {
-                        let brush = smoothBrush
-                        Task {
-                            await page.recertify(brush: brush)
-                            // Render the smoothed twin only once it CERTIFIED —
-                            // an uncertified shape never becomes the stage's
-                            // "smoothed" view (the honesty rule, on the stage).
-                            if page.receipt != nil {
-                                let g = page.currentGeometry
-                                smoothedVariantMesh = g.smoothed
-                                    ? ViewerMesh(vertices: g.vertices, indices: g.indices,
-                                                 faceIDs: [], faceGeometry: [],
-                                                 pseudoFaces: false, smoothShaded: true)
-                                    : nil
-                            }
-                        }
-                    },
-                    onDiscard: {
-                        // AE9: the original is never mutated, so discarding is a
-                        // state reset and the stage goes straight back to the
-                        // variant the run produced.
-                        page.discard()
-                        smoothBrush.clearStrokes()
-                        smoothedVariantMesh = nil
-                    },
-                    onSendToLattice: {
-                        guard let kept = page.kept else {
-                            model.toast = "Keep the smoothing first — a lattice needs "
-                                + "certified geometry."
-                            return
-                        }
-                        let idx = page.context.variantIndex
-                        closeSmoothingPage()
-                        openLatticePage(variantIndex: idx, smoothed: kept)
-                    },
-                    onClose: { closeSmoothingPage() })
-                    .ignoresSafeArea(.keyboard)
-            }
-        }
     }
 
     /// Close the lattice page and DROP the variant context — the stage goes back
@@ -4982,7 +4576,6 @@ public struct WorkspacePlaceholder: View {
     /// a key to exactly this ramp, and removing it would take away the thing
     /// that page exists to show.
     private var stageSurfaceTints: [SIMD4<Float>]? {
-        if showSmoothingPage { return smoothBrush.viewerTints() }
         if stressViewOn { return stressSurfaceTints }
         if showLatticePage { return latticeProxyTints }
         // ★ NIL, NOT EMPTY — nil is the renderer's "no wash at all"; an empty
@@ -5878,7 +5471,7 @@ public struct WorkspacePlaceholder: View {
             editFacesHeader
         } else if stage == .topology {
             // ★ B3 (S3 amended, 2026-10-24): Topology's stage buttons are its capsule —
-            // ● Topology ⌄ | Setup | Results | Smooth | ✂. The ● menu carries `forward`.
+            // ● Topology ⌄ | Setup | Results | ✂ (★ B4: no Smooth). The ● menu carries `forward`.
             // (Over the Results page it is mounted above ResultsScreen instead — see the body.)
             if !topologyResultsPageUp { topologyCapsuleOverlay }
         } else if stage == .lattice {
@@ -5908,11 +5501,10 @@ public struct WorkspacePlaceholder: View {
             editFacesHostReturn = nil
             leaveEditFacesTools()
         }
-        // ★ B1 (note 16, approved design 2026-11-02): changing stage closes Topology's Results / Smooth FIRST. Both draw over
+        // ★ B1 (note 16, approved design 2026-11-02): changing stage closes Topology's Results FIRST. It draws over
         // every stage (Results is mounted above the stage row), so the stage changed underneath them and the ● menu line went.
         // The same way out the capsule's Setup segment takes.
         if dest != .topology {
-            if showSmoothingPage { closeSmoothingPage() }
             viewOriginal = true
         }
         stage = dest
@@ -12875,7 +12467,7 @@ public struct WorkspacePlaceholder: View {
 // MARK: - ★ B3 — THE TOPOLOGY STAGE'S CHROME (his picks, 2026-10-24)
 //
 // A re-layout of the controls above it (TopologyStage.swift says what moved where). Every view here
-// calls today's actions — requestRun, requestLatticeRun, goToStage, openSmoothingPage, the chips —
+// calls today's actions — requestRun, requestLatticeRun, goToStage, the chips —
 // and nothing here reaches the job (TopologyStageTests pins its bytes).
 extension WorkspacePlaceholder {
 
@@ -12887,10 +12479,10 @@ extension WorkspacePlaceholder {
 
     /// The page the capsule lights.
     private var topologyPage: TopologyPage {
-        TopologyPage.current(resultsOpen: !viewOriginal, smoothing: showSmoothingPage, hasResults: acceptedVariantCount > 0)
+        TopologyPage.current(resultsOpen: !viewOriginal, hasResults: acceptedVariantCount > 0)
     }
 
-    /// ● Topology ⌄ | Setup | Results | Smooth | ✂ — where the lattice and surface stages put their back button.
+    /// ● Topology ⌄ | Setup | Results | ✂ — where the lattice and surface stages put their back button.
     @ViewBuilder var topologyCapsuleOverlay: some View {
         let has = acceptedVariantCount > 0
         let gate = LatticeEntryButtonGate.compute(gravitySet: force.gravityIsSet,
@@ -12905,18 +12497,15 @@ extension WorkspacePlaceholder {
             switch topologyPage {
             case .setup: return .primary
             case .results: return .secondary
-            case .smooth: return .tertiary
             }
         }()
         StageCapsule(project: project, title: WorkspaceStage.topology.title, accent: DS.Color.accent.color,
                      primaryTitle: TopologyPage.setup.title, secondaryTitle: TopologyPage.results.title, idPrefix: "topology",
                      page: page,
                      go: { goToStage($0) },
-                     primary: { if showSmoothingPage { closeSmoothingPage() }; viewOriginal = true },
-                     secondary: { if showSmoothingPage { closeSmoothingPage() }; viewOriginal = false },
+                     primary: { viewOriginal = true },
+                     secondary: { viewOriginal = false },
                      about: {},
-                     tertiaryTitle: TopologyPage.smooth.title,
-                     tertiary: { openTopologySmooth() },
                      greyed: TopologyPage.hiddenSegments(hasResults: has),
                      noticeDot: topoNotice.dot,
                      menuRows: rows,
@@ -12934,17 +12523,16 @@ extension WorkspacePlaceholder {
     private func openEditFaces() {
         let origin: EditFacesOrigin = stage == .lattice
             ? .lattice(LatticeStagePage.current(cellsUp: showLatticeWizard))
-            : .topology(topologyPage, smoothVariant: showSmoothingPage ? smoothingPageModel?.context.variantIndex : nil)
+            : .topology(topologyPage)
         enterEditFaces(from: origin)
     }
 
     /// ★ THE ENTRY POINT — every way into Edit faces ends here: the ● menu's "Edit faces…" row and the greyed ✂ on
     /// Topology and the lattice stage, and (#362) a Flexible page, which passes `.host(<its page>)` and the closure that
-    /// puts that page back. The page that was up closes (Results, Smooth, Cells — each through its own way out) and the
+    /// puts that page back. The page that was up closes (Results, Cells — each through its own way out) and the
     /// mode opens over the stage; Done (`finishEditFaces`) reopens it.
     func enterEditFaces(from origin: EditFacesOrigin, onReturn: ((EditFacesOrigin) -> Void)? = nil) {
         guard !editFaces.isEditing else { return }
-        if showSmoothingPage { closeSmoothingPage() }
         if showLatticeWizard { cellsCloseToken += 1 }   // the Cells page's own Save (today's onExit bakes and persists)
         viewOriginal = true
         setupPanelOpen = false
@@ -12964,14 +12552,9 @@ extension WorkspacePlaceholder {
         editFacesHostReturn = nil
         guard let origin = editFaces.done() else { return }
         switch origin {
-        case .topology(let page, let variant):
+        case .topology(let page):
             if stage != .topology { goToStage(.topology) }
-            switch page {
-            case .setup: viewOriginal = true
-            case .results: viewOriginal = false
-            case .smooth:
-                if let idx = variant { openSmoothingPage(variantIndex: idx) } else { openTopologySmooth() }
-            }
+            viewOriginal = page != .results
         case .lattice(let page):
             if stage != .lattice { goToStage(.lattice) }
             if page == .cells { showLatticeWizard = true }
@@ -13050,15 +12633,6 @@ extension WorkspacePlaceholder {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(.leading, StageCapsuleLayout.capsuleLeft)
         .padding(.top, StageCapsuleLayout.capsuleTop)
-    }
-
-    /// Smooth: the smoothing page on the recommended variant, gated as Results' own Smooth entry is.
-    private func openTopologySmooth() {
-        guard let idx = TopologyPage.smoothVariant(run.outcome) else { return }
-        let verdict = smoothEntry(idx)
-        guard verdict.enabled else { model.toast = "Smooth isn’t available: \(verdict.reason ?? verdict.label)."; return }
-        viewOriginal = true
-        openSmoothingPage(variantIndex: idx)
     }
 
     /// "Optimization finished — 4 variants." [Open Results] — top centre, where See Results sat.
@@ -13784,12 +13358,14 @@ extension WorkspacePlaceholder {
         }
     }
 
-    // Library (B3): Export from a card — Smooth on the chosen result, once its results are in
+    // Library (B3): Export from a card — ★ B4: Results on the chosen result (its Export button is the finished shape core
+    // made; the Smooth page that used to open here is gone), once its results are in
     private func openLibraryExportIfReady() {
         guard let r = libraryExportVariant, acceptedVariantCount > 0 else { return }
         libraryExportVariant = nil
         if stage != .topology { goToStage(.topology) }
-        openSmoothingPage(variantIndex: r)
+        resultsOpenOn = run.outcome.flatMap { ResultsPick.accepted(r, in: $0) }
+        viewOriginal = false
     }
 }
 
