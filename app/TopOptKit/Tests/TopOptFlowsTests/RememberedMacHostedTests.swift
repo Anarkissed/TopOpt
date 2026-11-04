@@ -96,11 +96,14 @@ final class RememberedMacHostedTests: XCTestCase {
         _ = try h.onScreen("optimizeMacNotAnswering", "★ one line on Optimize: his Mac isn't answering")
         XCTAssertNotEqual(app.toast, LoadScenarioRule.onDeviceLine, "★ never 'must go to the Mac'")
         XCTAssertEqual(runs.count, 0)
+        // ★ LOOK PER SCREEN (T5, mockup #topo-corner "nomac"): Optimize greys and the corner's fix line says it, with Try again
+        _ = try h.onScreen("topologyFixLine", "★ the fix line: Your Mac isn't answering")
+        let again = try h.probe("topologyFixChip", "★ Try again", minHit: 44)
 
-        // the Mac comes back; his tap tries again
+        // the Mac comes back; his tap on Try again tries again
         ComputeLocationModel.hostedTestDiscovery = (Self.mac,
                                                     RemoteRunnerConfig(host: "10.0.0.9", port: 8757, expectedFingerprint: CoreFingerprint.value), 0.3)
-        try clickOptimize(h)
+        h.click(CGPoint(x: again.midX, y: again.midY), settle: 0.4)
         waitUntil(h, 6, "the second try finds it and runs") { p.run.phase == .succeeded }
         XCTAssertEqual(runs.count, 1, "★ Try again ran it")
         XCTAssertNotNil(h.frames.all["optimizeButton"], "the line is gone once it ran")

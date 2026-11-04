@@ -85,12 +85,37 @@ public enum LoadScenarioRule {
     /// bearings: the app never sends `anchor_model`, so core's bearing refusal cannot arise from the app.
     public static func refusal(for request: RunRequest, workerSelected: Bool) -> String? {
         guard request.scenarios.count >= 2 else { return nil }
-        if let s = request.scenarios.first(where: { $0.hasNoAnchor }) { return noAnchorLine(s.name) }
-        if let s = request.scenarios.first(where: { $0.loadGroups.isEmpty }) { return noLoadLine(s.name) }
-        // ★ too light to shape the part (his decision 2026-10-28) — the same sum and the same words as core
-        if let line = tooLight(request.scenarios.map { s in
-            (s.name, s.loadGroups.reduce(0) { $0 + simd_length($1.force) } / newtonsPerKg) }) { return line }
+        if let g = gap(request.scenarios) {
+            let name = request.scenarios[g.index].name
+            switch g.gap {
+            case .noAnchor: return noAnchorLine(name)
+            case .noLoad: return noLoadLine(name)
+            case .tooLight(let line): return line
+            }
+        }
         if !workerSelected { return onDeviceLine }
+        return nil
+    }
+
+    /// ★ LOOK PER SCREEN (T5, U6 / U12): what a scenario lacks — the ONE rule the press refuses with and Topology's block shows
+    /// before the press (mockup #topo-corner "No anchor in Held by left plate · Switch its anchors on").
+    public enum Gap: Equatable, Sendable {
+        /// `switchable`: the scenario has anchors, all switched off (the fix switches them on).
+        case noAnchor(switchable: Bool)
+        case noLoad
+        /// Under the share of the heaviest that can shape the part; core's own line.
+        case tooLight(String)
+    }
+
+    /// The first scenario that can't run, in core's order (no anchor, no load, too light); nil with fewer than two.
+    public static func gap(_ scenarios: [LoadScenarioWire]) -> (index: Int, gap: Gap)? {
+        guard scenarios.count >= 2 else { return nil }
+        if let i = scenarios.firstIndex(where: { $0.hasNoAnchor }) { return (i, .noAnchor(switchable: false)) }
+        if let i = scenarios.firstIndex(where: { $0.loadGroups.isEmpty }) { return (i, .noLoad) }
+        // ★ too light to shape the part (his decision 2026-10-28) — the same sum and the same words as core
+        if let t = tooLightScenario(scenarios.map { s in
+            (s.name, s.loadGroups.reduce(0) { $0 + simd_length($1.force) } / newtonsPerKg) }),
+           let i = scenarios.firstIndex(where: { $0.name == t.name }) { return (i, .tooLight(t.line)) }
         return nil
     }
     public static func defaultName(_ index: Int) -> String { "Scenario \(index + 1)" }
