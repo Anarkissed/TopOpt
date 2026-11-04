@@ -85,7 +85,7 @@ public struct FlexibleSelectionsList: View {
                !FlexibleConfirmInPlace.controlOldPlacement {
                 FlexibleDeleteConfirm(name: g.name, delete: { main.confirmDelete(project: project, cardsChanged: cardsChanged) },
                                       oneLine: true)
-                    .frame(height: Self.lineHeight)
+                    .frame(height: DSParts.headerHeight)   // (the header's own height: nothing moves)
             } else {
                 header
             }
@@ -112,8 +112,10 @@ public struct FlexibleSelectionsList: View {
             }
         }
         .frame(width: collapsed ? nil : PageChrome.panelWidth, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: DS.Radius.panel).fill(DS.Surface.panel.color)
-            .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+        // ★ B9 LOOK (his "look per screen", §4.3 — DSPanel's outline): radius 22 open, the header's pill folded
+        .background(FlexibleSettingsPanel.shape(collapsed).fill(DS.Surface.panel.color))
+        .overlay(FlexibleSettingsPanel.shape(collapsed).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
+        .clipShape(FlexibleSettingsPanel.shape(collapsed))
         .dsShadow(DS.Shadow.panel)
         .background(GeometryReader { g in
             Color.clear
@@ -130,19 +132,22 @@ public struct FlexibleSelectionsList: View {
 
     private var header: some View {
         Button { collapsed.toggle() } label: {
-            HStack(spacing: DS.Space.s) {
-                Image(systemName: collapsed ? "chevron.right" : "chevron.down")
-                    .font(.system(size: 12, weight: .bold)).foregroundStyle(DS.Color.textPrimary.opacity(0.7).color)
-                Text("Selections").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.bold).foregroundStyle(DS.Color.textPrimary.color)
+            // ★ B9 LOOK: DSPanel's header — the chevron (turned while folded), the name, the count; 48 pt
+            HStack(spacing: 8) {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 12, weight: .bold)).foregroundStyle(DS.Color.textSecondary.color)
+                    .rotationEffect(.degrees(collapsed ? -90 : 0))
+                    .frame(width: 18)
+                Text("Selections").font(.system(size: 14.5, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
                 if collapsed || !groups.isEmpty {
-                    if !collapsed { Spacer(minLength: DS.Space.s) }
-                    Text("\(groups.count)").font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                    if !collapsed { Spacer(minLength: 8) }
+                    Text("\(groups.count)").font(.system(size: 13, weight: .medium)).monospacedDigit()
                         .foregroundStyle(DS.Color.textTertiary.color)
                         .accessibilityIdentifier("flexible-sel-count")
                 } else if !collapsed { Spacer(minLength: 0) }
             }
-            .padding(.horizontal, DS.Space.l)
-            .frame(height: Self.lineHeight)
+            .padding(.horizontal, 14)
+            .frame(height: DSParts.headerHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -162,17 +167,19 @@ public struct FlexibleSelectionsList: View {
         }
         .background(isPicked ? DS.Color.fillSubtle.color : Color.clear)
         .overlay(alignment: .leading) {
-            if isPicked { Rectangle().fill(g.color.color).frame(width: 3).padding(.vertical, 2) }
+            if isPicked { RoundedRectangle(cornerRadius: 2).fill(g.color.color).frame(width: 3).padding(.vertical, 6) }
         }
+        .overlay(alignment: .bottom) { Rectangle().fill(DS.Color.strokeSubtle.color).frame(height: 1) }   // §4.4: each row its line
     }
 
     private func groupLine(_ g: SelectionGroup, picked isPicked: Bool) -> some View {
         let locked = FlexibleFaceCommits.isLocked(g.id, project)
         return HStack(spacing: DS.Space.s) {
             Button { main.pickGroup(g.id, project: project) } label: {
-                HStack(spacing: DS.Space.s) {
-                    RoundedRectangle(cornerRadius: 3).fill(g.color.color).frame(width: 12, height: 12)
-                    Text(g.name).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                // ★ B9 LOOK (§4.4's group row, DSRow's measures): 48 pt, the 14 pt colour square, the name in 14 medium
+                HStack(spacing: 8) {
+                    RoundedRectangle(cornerRadius: 4, style: .continuous).fill(g.color.color).frame(width: 14, height: 14)
+                    Text(g.name).font(.system(size: 14, weight: .medium)).foregroundStyle(DS.Color.textPrimary.color)
                         .lineLimit(1)
                     FlexibleRoleGlyphs(project: project, group: g.id, size: 13)
                     if let w = FlexibleFaceChip.loadWeight(project, g.id, ui: ui) {
@@ -185,7 +192,7 @@ public struct FlexibleSelectionsList: View {
                         Image(systemName: "lock.fill").font(.system(size: 11, weight: .semibold)).foregroundStyle(DS.Color.textTertiary.color)
                     }
                 }
-                .frame(height: Self.lineHeight)
+                .frame(height: DSParts.rowHeight)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -205,7 +212,7 @@ public struct FlexibleSelectionsList: View {
                 .accessibilityIdentifier("flexible-sel-trash-\(g.id.uuidString)")
             }
         }
-        .padding(.leading, DS.Space.l).padding(.trailing, DS.Space.xs)
+        .padding(.leading, 12).padding(.trailing, 6)
         .background(publish("selGroup-\(g.id.uuidString)"))
     }
 
