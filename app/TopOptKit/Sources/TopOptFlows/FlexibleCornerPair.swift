@@ -96,7 +96,7 @@ public struct FlexibleCornerPair: View {
 
     /// The Setup chip (its tray is the `.setup` panel).
     private var chip: some View {
-        FlexibleSetupChipView(project: project, open: chrome.open == .setup) {
+        FlexibleSetupChipView(project: project, open: chrome.open == .setup, detail: FlexibleChromeLayout.setupShowsDetail(viewport)) {
             tray.page = .rows
             chrome.toggle(.setup)
         }

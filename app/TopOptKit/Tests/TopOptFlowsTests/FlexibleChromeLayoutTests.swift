@@ -71,14 +71,17 @@ final class FlexibleChromeLayoutTests: XCTestCase {
             let mini = name.hasPrefix("mini")
             XCTAssertEqual(FlexibleChromeLayout.isMini(v), mini, name)
             let size = FlexibleChromeLayout.latticeButtonSize(v)
-            XCTAssertEqual(size, CGSize(width: 260, height: 64), "\(name): the Lattice split (the mini too: 240 cut its line)")
+            // ★ RE-PINNED (B9 look, 11-04): the shared run button (250 at the least) + 12 + the 64 pt ⌃ (was one 260 split)
+            XCTAssertEqual(size, CGSize(width: 326, height: 64), "\(name): the Lattice run button and its ⌃ (the mini too)")
             let p = FlexibleChromeLayout.pair(viewport: v, setupWidth: 210)
             XCTAssertEqual(p.lattice.maxX, v.width - 24, name)
             XCTAssertEqual(p.lattice.maxY, v.height - 24, name)
             XCTAssertEqual(p.setup.maxY, v.height - 24, "\(name): bottoms aligned")
             XCTAssertEqual(p.lattice.minX - p.setup.maxX, 12, "\(name): 12 apart")
             XCTAssertEqual(p.setup.height, 48, name)
-            XCTAssertEqual(FlexibleChromeLayout.pair(viewport: v, setupWidth: 400).setup.width, 240, "\(name): the Setup chip is at most 240")
+            // ★ RE-PINNED (B9 look): on the mini the Settings button drops its detail ("Settings ⌄", at most 140)
+            XCTAssertEqual(FlexibleChromeLayout.pair(viewport: v, setupWidth: 400).setup.width, mini ? 140 : 240,
+                           "\(name): the Setup chip is at most \(mini ? 140 : 240)")
         }
         // RE-PINNED (look-and-fix 3): 52 → 44, still his 44 pt target; at 52 the main zone cut core's 44-character line
         XCTAssertEqual(FlexibleChromeLayout.latticeCaretWidth, 44)

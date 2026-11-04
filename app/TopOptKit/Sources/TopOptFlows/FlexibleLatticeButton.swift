@@ -138,59 +138,32 @@ struct FlexibleLatticeButtonView: View {
     let main: () -> Void
     let caret: () -> Void
 
+    /// ★ B9 LOOK (his "look per screen"; §4.6 / §4.18, the mockup's #flex-lattice corner): the shared run button — "Lattice"
+    /// over its line, never cut (it grows past 250 pt to the line: core's 44 characters make 272) — and the shared 64 pt ⌃,
+    /// 12 pt apart; the same actions (`main`, `caret`) and frames ("latticeMain", "latticeMore"). `width` is the old split's
+    /// slot (the run button sizes itself now).
     var body: some View {
-        let tone = FlexibleLatticeButton.tone(status, state: state)
-        let ready = tone == .ready
-        HStack(spacing: 0) {
-            Button(action: main) {
-                VStack(spacing: 2) {
-                    HStack(spacing: 6) {
-                        if state == .building || state == .opening || state == .sending {
-                            ProgressView().controlSize(.mini).tint(DS.Color.textPrimary.color)
-                        }
-                        if state == .fix || state == .blocked || state == .refused {
-                            Image(systemName: "exclamationmark.circle.fill").font(.system(size: 13, weight: .bold))
-                                .foregroundStyle((ready ? DS.Color.textPrimary : DS.Color.warning).color)
-                        }
-                        Text(FlexibleLatticeButton.title).font(.system(size: 17, weight: .semibold))
-                    }
-                    Text(line)
-                        .font(.system(size: 12, weight: .regular))
-                        .foregroundStyle(DS.Color.textPrimary.opacity(ready ? 0.88 : 0.62).color)
-                        .lineLimit(1).minimumScaleFactor(0.78).truncationMode(.tail)   // (his ≤ 44-character lines read whole)
-                        .saidWhole(line, minScale: 0.78)
-                        .accessibilityIdentifier("flexible-lattice-line")
-                }
-                .foregroundStyle(DS.Color.textPrimary.color)
-                .padding(.horizontal, DS.Space.s)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(FlexibleLatticeButton.action(state) == .none)
-            .background(FlexibleCornerPairStyle.publish("latticeMain"))
-            .accessibilityLabel("Lattice: \(line)")
-            .accessibilityIdentifier("flexible-lattice-main")
-            Rectangle().fill((ready ? DS.Color.textPrimary.opacity(0.35) : DS.Color.strokeStrong).color).frame(width: 1)
-            Button(action: caret) {
-                Image(systemName: cardOpen ? "chevron.down" : "chevron.up")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .frame(width: FlexibleChromeLayout.latticeCaretWidth)
-                    .frame(maxHeight: .infinity)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .background(FlexibleCornerPairStyle.publish("latticeMore"))
-            .accessibilityLabel(cardOpen ? "Hide the lattice steps" : "Show the lattice steps")
-            .accessibilityIdentifier("flexible-lattice-more")
+        HStack(spacing: DSParts.cornerGap) {
+            DSRunButton(FlexibleLatticeButton.title, subtitle: line, state: Self.runState(status, state: state, line: line),
+                        key: "latticeMain", action: main)
+                .background(FlexibleCornerPairStyle.publish("latticeMain"))
+                .accessibilityLabel("Lattice: \(line)")
+            DSSplitButton(key: "latticeMore", action: caret)
+                .background(FlexibleCornerPairStyle.publish("latticeMore"))
+                .accessibilityLabel(cardOpen ? "Hide the lattice steps" : "Show the lattice steps")
         }
-        .frame(width: width, height: PageChrome.actionButton)
-        .background(Capsule().fill(FlexibleMainStatusPill.fill(tone).color))
-        .overlay(Capsule().strokeBorder(FlexibleMainStatusPill.stroke(tone).color, lineWidth: ready ? 0 : 1.5))
-        .clipShape(Capsule())
-        .dsShadow(ready ? DS.Shadow.accentGlow : DS.Shadow.panel)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("flexible-lattice")
+    }
+
+    /// The run button's state for the Lattice button's: a ring while it opens, builds or sends; grey (and still tappable —
+    /// the fix, the card) unless it is ready; greyed out only where a tap does nothing (blocked: no face-prism).
+    static func runState(_ s: FlexibleMainStatus, state: FlexibleLatticeButton.State, line: String) -> DSRunButton.State {
+        switch state {
+        case .opening, .building, .sending: return .running(line)
+        default: break
+        }
+        if FlexibleLatticeButton.action(state) == .none { return .disabled(line) }
+        return FlexibleLatticeButton.tone(s, state: state) == .ready ? .ready : .grey(line)
     }
 }

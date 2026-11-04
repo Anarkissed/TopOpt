@@ -67,6 +67,10 @@ public enum FlexibleChromeLayout {
 
     public static let setupHeight: CGFloat = PageChrome.compactButton
     public static let setupMaxWidth: CGFloat = 240
+    /// ★ B9 LOOK: on the mini the Settings button is "Settings ⌄" alone (its "Fast · +Z · −Z" would bring it within 12 pt of
+    /// the minimised Selections pill beside the wider run button + ⌃).
+    public static let setupMiniWidth: CGFloat = 140
+    public static func setupShowsDetail(_ v: CGSize) -> Bool { !isMini(v) }
     /// ★ LOOKED AT (measured: FlexibleRound7FitHostedTests): 44, his target size — at 52 the main zone cut core's 44-character
     /// "Core designed it · Gyroid · 230 °C · 3 faces" by 3 pt.
     public static let latticeCaretWidth: CGFloat = 44
@@ -78,8 +82,10 @@ public enum FlexibleChromeLayout {
     public static func isMini(_ v: CGSize) -> Bool { min(v.width, v.height) < 800 }
 
     /// ★ LOOKED AT: 260 on every pad, the mini too (240 cut its line).
+    /// ★ B9 LOOK (§4.6 / §4.18): the shared run button (at least 250, wider for a long line — never cut) and the shared 64 pt
+    /// ⌃, 12 apart: 326 at the least on every pad (the drawn frames, "latticeSplit", are what the live keep-outs read).
     public static func latticeButtonSize(_ v: CGSize) -> CGSize {
-        CGSize(width: 260, height: PageChrome.actionButton)
+        CGSize(width: DSParts.runMinWidth + DSParts.cornerGap + DSParts.runHeight, height: PageChrome.actionButton)
     }
 
     /// The pair on the corner, bottoms aligned (#354's bar: an HStack aligned .bottom, 24 in from the trailing and bottom
@@ -88,7 +94,7 @@ public enum FlexibleChromeLayout {
         let ls = latticeButtonSize(v)
         let lattice = CGRect(x: v.width - PageChrome.edge - ls.width, y: v.height - PageChrome.edge - ls.height,
                              width: ls.width, height: ls.height)
-        let w = min(setupWidth, setupMaxWidth)
+        let w = min(setupWidth, setupShowsDetail(v) ? setupMaxWidth : setupMiniWidth)
         let setup = CGRect(x: lattice.minX - pairGap - w, y: v.height - PageChrome.edge - setupHeight, width: w, height: setupHeight)
         return (setup, lattice)
     }
