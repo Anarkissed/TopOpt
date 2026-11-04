@@ -49,7 +49,14 @@ final class SquishParityHostedTests: XCTestCase {
     /// Walk the page through every tab and state; the controls seen in each, by state.
     func walk(_ h: SquishHost, _ m: FlexibleStageModel) -> [(state: String, controls: Set<String>)] {
         var seen: [(state: String, controls: Set<String>)] = []
-        func look(_ state: String) { SquishHost.pump(0.8); seen.append((state, Self.controls(h))) }
+        // each state read once core's design for it has landed: lines that read it (the stamp's "N lands off the face") show
+        // only then, and a fixed 0.8 s missed it on a loaded Mac (11-04, the T3..R-lift run)
+        func look(_ state: String) {
+            SquishHost.pump(0.8)
+            if !SquishHost.pumpUntil(30, { !m.designsInFlight }) { XCTFail("\(state): core's design never landed in 30 s") }
+            SquishHost.pump(0.3)
+            seen.append((state, Self.controls(h)))
+        }
         for manual in [false, true] {
             m.setManual(manual)
             let mode = manual ? "manual" : "auto"

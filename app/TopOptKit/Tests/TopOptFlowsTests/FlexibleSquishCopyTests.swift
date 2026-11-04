@@ -2,6 +2,9 @@
 // Settings page is renamed 'Squish': [Lattice | Squish] under ● Flexible." So no user-facing word in the Flexible copy names
 // that page "Settings" any more. The accessibility ids stay (flexible-settings-*), and the words "settings" for HIS settings
 // (a filament's, a print's) are not the page. RED CONTROL inside: today's [Prisms] (i) text ("…as you set it in Settings…").
+// B9 look (11-04, c16440a9): the corner's print-setup chip is "Settings" (design Q6: "the corner chip is Settings everywhere",
+// as Topology's "Settings ⌄"); it opens the print setup tray, not the Squish page, so its title and VoiceOver label pass, in
+// that one file only.
 import XCTest
 @testable import TopOptFlows
 
@@ -18,15 +21,20 @@ final class FlexibleSquishCopyTests: XCTestCase {
                         "FlexibleLatticeButton.swift", "FlexibleLatticeCard.swift", "FlexibleBlockerCallout.swift",
                         "FlexibleMainStatusPill.swift", "FlexibleR7ReviewFixes.swift"]
 
+    /// The corner's print-setup chip (Q6): its title and VoiceOver label, as written in its source, per file.
+    static let cornerChip: [String: Set<String>] = [
+        "FlexibleSetupTray.swift": ["Settings", "Settings: \\(p.quality), plate up \\(p.plate), gravity \\(p.gravity)"],
+    ]
+
     /// The string literals of a source (comments stripped) that name the page "Settings" (a whole word, capitalised): ids
-    /// and storage keys are not words he reads.
-    static func offenders(_ code: String) -> [String] {
+    /// and storage keys are not words he reads; `allowed` are the corner chip's own words in that file.
+    static func offenders(_ code: String, allowed: Set<String> = []) -> [String] {
         let lit = try! NSRegularExpression(pattern: "\"((?:[^\"\\\\]|\\\\.)*)\"")
         let word = try! NSRegularExpression(pattern: "\\bSettings\\b")
         let ns = code as NSString
         return lit.matches(in: code, range: NSRange(location: 0, length: ns.length)).compactMap { m -> String? in
             let s = ns.substring(with: m.range(at: 1))
-            if s.hasPrefix("flexible-") || s.hasPrefix("flexible.") || s.contains("Settings.swift") { return nil }
+            if s.hasPrefix("flexible-") || s.hasPrefix("flexible.") || s.contains("Settings.swift") || allowed.contains(s) { return nil }
             return word.firstMatch(in: s, range: NSRange(location: 0, length: (s as NSString).length)) == nil ? nil : s
         }
     }
@@ -35,7 +43,7 @@ final class FlexibleSquishCopyTests: XCTestCase {
         var found: [String] = []
         for f in Self.files {
             guard FileManager.default.fileExists(atPath: FlexibleSource.url(f).path) else { continue }
-            found += Self.offenders(try FlexibleSource.code(f)).map { "\(f): \($0.prefix(90))" }
+            found += Self.offenders(try FlexibleSource.code(f), allowed: Self.cornerChip[f] ?? []).map { "\(f): \($0.prefix(90))" }
         }
         XCTAssertEqual(found, [], found.joined(separator: "\n"))
         // the copy tables' live values
@@ -44,6 +52,13 @@ final class FlexibleSquishCopyTests: XCTestCase {
         // RED CONTROL: today's (i) text is caught by the same check
         let today = "let x = \"Each pressed face's squish as you set it in Settings, drawn as a faint prism\""
         XCTAssertEqual(Self.offenders(today).count, 1, "★ RED CONTROL: 'as you set it in Settings' is caught")
+        // the corner chip passes only in its own file, and only its own words
+        let chip = try FlexibleSource.code("FlexibleSetupTray.swift")
+        XCTAssertTrue(chip.contains("DSGlassButton(\"Settings\""), "the corner chip is the §4.6 glass button 'Settings'")
+        XCTAssertEqual(Self.offenders(chip).count, 2, "★ RED CONTROL: without the Q6 pass the chip's two literals are caught")
+        let elsewhere = "let x = \"Settings\"\nlet y = \"Open Settings to change it\""
+        XCTAssertEqual(Self.offenders(elsewhere, allowed: Self.cornerChip["FlexibleSetupTray.swift"]!), ["Open Settings to change it"],
+                       "★ RED CONTROL: the pass covers the chip's exact words, nothing else")
     }
 
     /// The ids stay: the hosted tests and his VoiceOver landmarks find the page by them.
