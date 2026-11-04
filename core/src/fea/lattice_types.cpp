@@ -139,7 +139,8 @@ LatticeTypeFacts lattice_type_facts(const std::string& id) {
   f.readiness_plain = lattice_type_readiness_plain(f.readiness);
   f.rho_min = f.rho_max = f.cells_per_member_min = f.percolation_cells_per_member_min =
       f.aesthetic_hard_floor_cells = f.printable_cell_per_bead =
-          f.aesthetic_density_ceiling = f.triangles_per_cell = f.sheet_triangles_coeff = kNaN;
+          f.aesthetic_density_ceiling = f.triangles_per_cell = f.sheet_triangles_coeff =
+              f.sheet_triangles_per_cell_mm = kNaN;
   const std::string not_live =
       std::string("Not offered: ") + f.readiness_plain + ".";
   f.outline = f.rim = f.diagrid = f.uniform = f.doubled = f.stepped = f.structural =
@@ -174,9 +175,12 @@ LatticeTypeFacts lattice_type_facts(const std::string& id) {
       // (L/h)^2, the larger of rho 0.20 / 0.40 at L/h 20 and 30 (a budget should not
       // undercount). Uniform wall at the band middle, h = a third of it: cell-size free.
       f.sheet_triangles_coeff = topo == LatticeTopology::Gyroid ? 19.44 : 24.00;
-      const double mid = 0.5 * (f.rho_min + f.rho_max), cell = 8.0;
-      const double h = lattice_strut_diameter_mm(topo, mid, cell) / 3.0;
-      f.triangles_per_cell = f.sheet_triangles_coeff * (cell / h) * (cell / h);
+      // sheet_simplified_cost.txt (Finding 8): the 27 interior cells of the 40 mm sample
+      // block, simplified to 0.02 mm, near the band middle at an 8 mm cell (gyroid rho
+      // 0.375: 3,802; Schwarz-D rho 0.40: 6,105), per mm of cell. Linear in the cell to
+      // 1-2 %: gyroid at 4 mm 1,933, Schwarz-D at 5 mm 3,828.
+      f.sheet_triangles_per_cell_mm = topo == LatticeTopology::Gyroid ? 3802.0 / 8.0 : 6105.0 / 8.0;
+      f.triangles_per_cell = 8.0 * f.sheet_triangles_per_cell_mm;
     }
   }
   if (f.readiness == LatticeTypeReadiness::Live) {

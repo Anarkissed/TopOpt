@@ -23,9 +23,11 @@
 // Deterministic (fixed traversal, no RNG, no threads) and streaming (memory is two layers
 // of the DC grid, whatever the region).
 
+#include <algorithm>
 #include <functional>
 
 #include "topopt/lattice_dc.hpp"
+#include "topopt/mesh_simplify.hpp"
 #include "topopt/mesh.hpp"
 #include "topopt/tpms.hpp"
 
@@ -39,6 +41,10 @@ struct TpmsRegion {
   double cell_mm = 0.0;            // the period L
   std::function<bool(int, int, int)> latticed;  // null => every cell
   const LatticeBoundary* boundary = nullptr;    // null => the cell block alone
+  // An analytic clip (positive inside, a distance or a Lipschitz-1 bound on one) used in
+  // place of `boundary` when set: the sample coupon's own shape, where the exact distance
+  // to its mesh would be evaluated at every one of the contouring's samples.
+  std::function<double(const Vec3&)> clip;
 };
 
 struct TpmsWallField {
@@ -46,6 +52,10 @@ struct TpmsWallField {
   std::function<double(const Vec3&)> field;   // null => uniform_mm everywhere
   double at(const Vec3& p) const { return field ? field(p) : uniform_mm; }
 };
+
+// ★ Finding 8 (ruling 2026-11-02): the furthest a sheet's mesh may sit from its true surface
+// in a run and in the sample block, both ways (well under a 0.2 mm layer).
+constexpr double kSheetMaxDeviationMm = 0.02;
 
 struct TpmsGenOptions {
   // The DC cell. 0 => a THIRD of the thinnest wall the field can return (`min_wall_mm`).
@@ -55,16 +65,43 @@ struct TpmsGenOptions {
   // third keeps the mass the certificate assumed to within half a percent.
   double dc_cell_mm = 0.0;
   double min_wall_mm = 0.0;        // required when dc_cell_mm is 0
+  // ★ Finding 8 (ruling 2026-11-02): the contoured mesh simplified by bounded edge collapse
+  // (mesh_simplify.hpp) to at most this distance from the true surface. 0 => the mesh as
+  // contoured, byte-identical to before. With `bead_mm` and `true_wall_mm` (the TRUE wall
+  // at a point), no wall is cut below one bead: where the wall is within twice the bound of
+  // the bead, the mesh may only bulge outward.
+  double max_deviation_mm = 0.0;
+  double bead_mm = 0.0;
+  std::function<double(const Vec3&)> true_wall_mm;
+  // The type's wall law, TRUE wall (mm) -> the field parameter (lattice_sheet_wall_param_mm).
+  // With it, a wall nearer the bead than twice the bound is CONTOURED offset outward by
+  // half the shortfall, so the mesh can sit either side of what it contours and still
+  // never cut the true wall: the band about the true surface is [-a, +bound], a = half
+  // the wall's margin over the bead (capped at the bound), and about the contoured surface
+  // it is symmetric, +-(bound + a)/2. Measured against the TRUE wall either way.
+  std::function<double(double)> wall_param_of;
 };
 
 struct TpmsGenStats {
   long long latticed_cells = 0;
   LatticeDcFieldStats dc;
   double dc_cell_mm = 0.0;
+  bool simplified = false;          // max_deviation_mm > 0
+  BoundedSimplifyStats simplify;    // triangles in/out and the MEASURED deviation
 };
 
 TpmsGenStats generate_tpms(TpmsKind kind, const TpmsRegion& region, const TpmsWallField& wall,
                            TriangleSink& sink, const TpmsGenOptions& opt);
+
+// The wall generate_tpms CONTOURS when it simplifies (max_deviation_mm > 0): the true wall,
+// thickened where it is within twice the bound of the bead so the mesh may sit either side
+// of what it contours and never cut the true wall below the bead (TpmsGenOptions). Exposed
+// so a measurement of the written mesh (the run's volume check) reads the same wall.
+inline double tpms_contoured_wall_mm(double true_wall_mm, double bead_mm, double dev_mm) {
+  if (!(bead_mm > 0.0) || !(dev_mm > 0.0)) return true_wall_mm;
+  const double a = std::clamp(0.5 * (true_wall_mm - bead_mm), 0.0, dev_mm);
+  return true_wall_mm + (dev_mm - a);  // each face out by (dev - a) / 2
+}
 
 // The field generate_tpms contours, at DC cell `h` (TpmsGenStats::dc_cell_mm): negative
 // inside the emitted solid. The same function the generator calls, so the run's volume

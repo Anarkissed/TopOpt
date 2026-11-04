@@ -983,7 +983,8 @@ struct FnField {
 LatticeDcFieldStats lattice_dual_contour_field(
     const std::function<double(const Vec3&)>& field,
     const std::function<Vec3(const Vec3&)>& gradient, const Vec3& lo, const Vec3& hi,
-    double h, TriangleSink& sink, int crossing_steps, double qef_regularisation) {
+    double h, TriangleSink& sink, int crossing_steps, double qef_regularisation,
+    bool best_diagonal) {
   LatticeDcFieldStats st;
   if (!(h > 0.0) || !(hi.x > lo.x) || !(hi.y > lo.y) || !(hi.z > lo.z))
     throw std::invalid_argument("lattice_dual_contour_field: empty box or non-positive cell");
@@ -1020,8 +1021,19 @@ LatticeDcFieldStats lattice_dual_contour_field(
     return true;
   };
   auto quad = [&](const Vec3* q[4], bool flip) {
-    if (!flip) { sink.add_triangle(*q[0], *q[1], *q[2]); sink.add_triangle(*q[0], *q[2], *q[3]); }
-    else { sink.add_triangle(*q[0], *q[2], *q[1]); sink.add_triangle(*q[0], *q[3], *q[2]); }
+    bool d13 = false;
+    if (best_diagonal) {
+      const Vec3 m02{0.5 * (q[0]->x + q[2]->x), 0.5 * (q[0]->y + q[2]->y), 0.5 * (q[0]->z + q[2]->z)};
+      const Vec3 m13{0.5 * (q[1]->x + q[3]->x), 0.5 * (q[1]->y + q[3]->y), 0.5 * (q[1]->z + q[3]->z)};
+      d13 = std::abs(F.eval(m13)) < std::abs(F.eval(m02));
+    }
+    if (!d13) {
+      if (!flip) { sink.add_triangle(*q[0], *q[1], *q[2]); sink.add_triangle(*q[0], *q[2], *q[3]); }
+      else { sink.add_triangle(*q[0], *q[2], *q[1]); sink.add_triangle(*q[0], *q[3], *q[2]); }
+    } else {
+      if (!flip) { sink.add_triangle(*q[0], *q[1], *q[3]); sink.add_triangle(*q[1], *q[2], *q[3]); }
+      else { sink.add_triangle(*q[0], *q[3], *q[1]); sink.add_triangle(*q[1], *q[3], *q[2]); }
+    }
     st.triangles += 2;
   };
   for (long long k = 0; k < nz; ++k) {

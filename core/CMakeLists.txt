@@ -120,11 +120,13 @@ add_library(topopt
   src/mesh/surface_operator.cpp
   src/mesh/lattice_gen.cpp
   src/mesh/lattice_sample.cpp
+  src/mesh/lattice_coupon.cpp
   src/mesh/tpms_gen.cpp
   src/mesh/organic_lattice.cpp
   src/mesh/lattice_lslt.cpp
   src/mesh/lattice_union_volume.cpp
   src/mesh/lattice_volume_check.cpp
+  src/mesh/mesh_simplify.cpp
   src/mesh/lattice_dc.cpp
   src/mesh/lattice_boundary.cpp
   src/mesh/stepped_plan.cpp
@@ -402,6 +404,16 @@ add_test(NAME lattice_clip_shell COMMAND test_lattice_clip_shell)
 add_executable(test_lattice_volume_check tests/unit/test_lattice_volume_check.cpp)
 target_link_libraries(test_lattice_volume_check PRIVATE topopt)
 add_test(NAME lattice_volume_check COMMAND test_lattice_volume_check)
+
+# Finding 8 (ruling 2026-11-02): bounded simplification of a contoured field.
+add_executable(test_mesh_simplify tests/unit/test_mesh_simplify.cpp)
+target_link_libraries(test_mesh_simplify PRIVATE topopt)
+add_test(NAME mesh_simplify COMMAND test_mesh_simplify)
+
+# The sample coupon (ruling 2026-11-02, the addition).
+add_executable(test_lattice_coupon tests/unit/test_lattice_coupon.cpp)
+target_link_libraries(test_lattice_coupon PRIVATE topopt)
+add_test(NAME lattice_coupon COMMAND test_lattice_coupon)
 
 # Every mesh core SYNTHESIZES is wound outward (task 2026-08-09-fix-inward-wound-
 # normals). Covers marching_cubes, the resample, the written STL and the lattice

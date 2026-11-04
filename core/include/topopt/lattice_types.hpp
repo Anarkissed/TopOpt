@@ -54,11 +54,15 @@ struct LatticeTypeFacts {
 
   // Triangles per cell of the infinite tiling as the generator emits it (8-gon prisms,
   // 20-triangle nodes). A block's outer faces add their own; this is the per-cell cost.
-  // Sheets: the cost depends on the DC cell, a third of the thinnest wall laid
-  // (tpms_gen.hpp), so it is sheet_triangles_coeff x (cell / DC cell)^2; this field is that
-  // at the band middle with a uniform wall (a cell-size-free number: the wall scales with
-  // the cell).
+  // Sheets (Finding 8): the mesh written is SIMPLIFIED to within kSheetMaxDeviationMm
+  // (0.02 mm) of the true surface (tpms_gen.hpp), and its cost per interior cell grows with
+  // the cell, not with its square: sheet_triangles_per_cell_mm x cell. This field is that
+  // at the band middle with an 8 mm cell. Where a wall is within 0.04 mm of the bead the
+  // mesh may only bulge outward, which costs up to ~1.5x more there.
   double triangles_per_cell = 0.0;
+  double sheet_triangles_per_cell_mm = 0.0;  // sheets only; NaN for struts
+  // The CONTOURED mesh before simplification: coeff x (cell / DC cell)^2, DC cell a third
+  // of the thinnest wall laid (what the contouring visits; kept for its cost).
   double sheet_triangles_coeff = 0.0;  // sheets only; NaN for struts
 
   bool strut_strength_measured = false;  // R10

@@ -68,9 +68,10 @@ int usage(const char* argv0) {
                "       %s preflight <job.json> [--materials PATH]\n"
                "       %s lattice-variant <job.json> [--out DIR] "
                "[--materials PATH] [--rules PATH]\n"
-               "       %s lattice-sample --topology ID [--cell MM] [--rho R] "
-               "[--size MM] [--plate MM]\n"
-               "              [--bead MM] --out FILE.stl\n"
+               "       %s lattice-sample --topology ID [--shape cube|coupon] [--cell MM] "
+               "[--rho R] [--size MM] [--plate MM]\n"
+               "              [--bead MM] [--rho-lo R] [--rho-hi R] [--step 0|1] "
+               "--out FILE.stl\n"
                "       %s --version\n"
                "\n"
                "preflight\n"
@@ -453,12 +454,16 @@ static int run_lattice_sample(int argc, char** argv) {
     const bool numeric = end && *end == '\0';
     if (arg == "--topology") spec.topology = val;
     else if (arg == "--out") out = val;
+    else if (arg == "--shape") spec.shape = val;
     else if (!numeric) return usage(argv[0]);
     else if (arg == "--cell") spec.cell_mm = v;
     else if (arg == "--rho") spec.rho = v;
     else if (arg == "--size") spec.size_mm = v;
     else if (arg == "--plate") spec.plate_mm = v;
     else if (arg == "--bead") spec.bead_mm = v;
+    else if (arg == "--rho-lo") spec.rho_lo = v;
+    else if (arg == "--rho-hi") spec.rho_hi = v;
+    else if (arg == "--step") spec.step = v != 0.0;
     else return usage(argv[0]);
   }
   if (spec.topology.empty() || out.empty()) return usage(argv[0]);
@@ -494,12 +499,23 @@ static int run_lattice_sample(int argc, char** argv) {
     // A sheet's "strut diameter" is its true wall thickness (lattice.hpp): say wall.
     const bool sheet =
         topopt::lattice_topology_is_sheet(topopt::lattice_topology_from_id(r.topology));
-    std::printf("lattice-sample: %s, rho %.4g%s, %g mm cells (%d per side), %s %.3f mm, "
-                "%.1f mm plate, %llu triangles -> %s (receipt %s)\n",
-                r.topology.c_str(), r.rho, r.rho_was_band_middle ? " (band middle)" : "",
-                r.cell_mm, r.cells_per_side, sheet ? "wall" : "strut", r.strut_diameter_mm,
-                r.plate_mm,
-                static_cast<unsigned long long>(r.triangles), out.c_str(), receipt.c_str());
+    if (r.shape == "coupon")
+      std::printf("lattice-sample: %s coupon %gx%gx%g mm, rho %.4g-%.4g along x, %g mm cells, "
+                  "step %s, tongue %s, %s %.3f mm at its thinnest, %.1f mm plate, %llu "
+                  "triangles (%llu loose pieces dropped) -> %s (receipt %s)\n",
+                  r.topology.c_str(), r.coupon_dims_mm[0], r.coupon_dims_mm[1],
+                  r.coupon_dims_mm[2], r.rho_lo, r.rho_hi, r.cell_mm, r.step.c_str(),
+                  r.tongue_latticed ? "latticed" : "solid", sheet ? "wall" : "strut",
+                  r.strut_diameter_mm, r.plate_mm, static_cast<unsigned long long>(r.triangles),
+                  static_cast<unsigned long long>(r.loose_pieces_dropped), out.c_str(),
+                  receipt.c_str());
+    else
+      std::printf("lattice-sample: %s, rho %.4g%s, %g mm cells (%d per side), %s %.3f mm, "
+                  "%.1f mm plate, %llu triangles -> %s (receipt %s)\n",
+                  r.topology.c_str(), r.rho, r.rho_was_band_middle ? " (band middle)" : "",
+                  r.cell_mm, r.cells_per_side, sheet ? "wall" : "strut", r.strut_diameter_mm,
+                  r.plate_mm, static_cast<unsigned long long>(r.triangles), out.c_str(),
+                  receipt.c_str());
     return 0;
   } catch (const std::invalid_argument& e) {
     std::printf("lattice-sample: REFUSED: %s\n", e.what());

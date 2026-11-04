@@ -39,6 +39,10 @@ std::string num(double v) {
 }  // namespace
 
 LatticeSampleReceipt write_lattice_sample(const LatticeSampleSpec& spec, TriangleSink& sink) {
+  if (spec.shape == "coupon") return write_lattice_coupon(spec, sink);
+  if (spec.shape != "cube")
+    throw std::invalid_argument("lattice-sample: --shape is \"cube\" or \"coupon\" (got \"" +
+                                spec.shape + "\")");
   const LatticeGenTopology gt = lattice_gen_topology_from_id(spec.topology);
   const LatticeTopology t = lattice_gen_certificate_topology(gt);
   if (!(spec.cell_mm > 0.0) || !(spec.size_mm > 0.0) || !(spec.plate_mm >= 0.0))
@@ -102,10 +106,20 @@ LatticeSampleReceipt write_lattice_sample(const LatticeSampleSpec& spec, Triangl
     TR.boundary = &cube;
     TpmsWallField W;
     W.uniform_mm = lattice_sheet_wall_param_mm(t, r.strut_diameter_mm, spec.cell_mm);
+    // ★ Finding 8: simplified to within kSheetMaxDeviationMm of the true surface; with a
+    // bead, no wall is cut below it.
+    o.max_deviation_mm = kSheetMaxDeviationMm;
+    o.bead_mm = spec.bead_mm;
+    const double wall = r.strut_diameter_mm, cell = spec.cell_mm;
+    o.true_wall_mm = [wall](const Vec3&) { return wall; };
+    o.wall_param_of = [t, cell](double w) { return lattice_sheet_wall_param_mm(t, w, cell); };
     const TpmsGenStats ts = generate_tpms(
         gt == LatticeGenTopology::Gyroid ? TpmsKind::Gyroid : TpmsKind::SchwarzD, TR, W, sink, o);
-    r.lattice_triangles = ts.dc.triangles;
-    r.triangles += ts.dc.triangles;
+    r.lattice_triangles_contoured = static_cast<unsigned long long>(ts.simplify.triangles_in);
+    r.lattice_triangles = static_cast<unsigned long long>(ts.simplify.triangles_out);
+    r.triangles += r.lattice_triangles;
+    r.max_deviation_mm = std::max(ts.simplify.max_out_measured_mm, ts.simplify.max_in_measured_mm);
+    r.cut_max_deviation_mm = std::max(ts.simplify.cut_max_out_mm, ts.simplify.cut_max_in_mm);
     return r;
   }
   LatticeRegion R;
@@ -122,9 +136,39 @@ LatticeSampleReceipt write_lattice_sample(const LatticeSampleSpec& spec, Triangl
   return r;
 }
 
+TriangleMesh lattice_sample_mesh(const LatticeSampleSpec& spec, LatticeSampleReceipt* receipt) {
+  struct Soup : TriangleSink {
+    TriangleMesh m;
+    void add_triangle(const Vec3& a, const Vec3& b, const Vec3& c) override {
+      const int i = static_cast<int>(m.vertices.size());
+      m.vertices.push_back(a);
+      m.vertices.push_back(b);
+      m.vertices.push_back(c);
+      m.triangles.push_back({i, i + 1, i + 2});
+    }
+  } soup;
+  const LatticeSampleReceipt r = write_lattice_sample(spec, soup);
+  if (receipt) *receipt = r;
+  return soup.m;
+}
+
 std::string lattice_sample_receipt_json(const LatticeSampleReceipt& r) {
   std::string s = "{\n";
   s += "  \"topology\": \"" + r.topology + "\",\n";
+  if (r.shape == "coupon") {
+    s += "  \"shape\": \"coupon\",\n";
+    s += "  \"dimensions_mm\": [" + num(r.coupon_dims_mm[0]) + ", " + num(r.coupon_dims_mm[1]) +
+         ", " + num(r.coupon_dims_mm[2]) + "],\n";
+    s += "  \"bead_mm\": " + num(r.bead_mm) + ",\n";
+    s += "  \"relative_density_graded\": [" + num(r.rho_lo) + ", " + num(r.rho_hi) + "],\n";
+    s += "  \"step\": \"" + r.step + "\",\n";
+    if (r.step != "none") s += "  \"step_at_x_mm\": " + num(r.step_at_x_mm) + ",\n";
+    else s += "  \"step_reason\": \"" + r.step_reason + "\",\n";
+    s += "  \"tongue\": \"" + std::string(r.tongue_latticed ? "latticed" : "solid") + "\",\n";
+    if (!r.tongue_latticed) s += "  \"tongue_reason\": \"" + r.tongue_reason + "\",\n";
+    s += "  \"loose_pieces_dropped\": " + std::to_string(r.loose_pieces_dropped) + ",\n";
+    s += "  \"loose_triangles_dropped\": " + std::to_string(r.loose_triangles_dropped) + ",\n";
+  }
   const std::string note = lattice_type_directional_note(r.topology);
   if (!note.empty()) s += "  \"directional_note\": \"" + note + "\",\n";
   s += "  \"relative_density\": " + num(r.rho) + ",\n";
@@ -139,6 +183,12 @@ std::string lattice_sample_receipt_json(const LatticeSampleReceipt& r) {
   s += "  \"triangles\": " + std::to_string(r.triangles) + ",\n";
   s += "  \"lattice_triangles\": " + std::to_string(r.lattice_triangles) + ",\n";
   s += "  \"struts\": " + std::to_string(r.struts) + ",\n";
+  if (r.lattice_triangles_contoured > 0) {
+    s += "  \"lattice_triangles_contoured\": " + std::to_string(r.lattice_triangles_contoured) +
+         ",\n";
+    s += "  \"max_deviation_mm\": " + num(r.max_deviation_mm) + ",\n";
+    s += "  \"cut_max_deviation_mm\": " + num(r.cut_max_deviation_mm) + ",\n";
+  }
   s += "  \"nodes\": " + std::to_string(r.nodes) + "\n";
   s += "}\n";
   return s;

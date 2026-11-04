@@ -183,9 +183,15 @@ struct LatticeDcFieldStats {
   std::size_t vertices = 0, triangles = 0, field_evaluations = 0;
   double seconds = 0.0;
 };
+// `best_diagonal` (Finding 8): split each quad along the diagonal whose midpoint lies
+// nearer the surface, rather than always 0-2. Where a wall meets a cut face the fixed
+// diagonal can join a vertex on the wall to one on the cut and slice the corner off (up
+// to half a cell); the nearer diagonal runs along the crease. false = the fixed split,
+// byte-identical to before.
 LatticeDcFieldStats lattice_dual_contour_field(
     const std::function<double(const Vec3&)>& field,
     const std::function<Vec3(const Vec3&)>& gradient, const Vec3& lo, const Vec3& hi,
-    double h, TriangleSink& sink, int crossing_steps = 12, double qef_regularisation = 0.02);
+    double h, TriangleSink& sink, int crossing_steps = 12, double qef_regularisation = 0.02,
+    bool best_diagonal = false);
 
 }  // namespace topopt
