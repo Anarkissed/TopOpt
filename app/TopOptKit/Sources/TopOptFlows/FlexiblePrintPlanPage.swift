@@ -112,7 +112,13 @@ extension FlexibleMainStage {
 struct FlexiblePrintPlanPanel: View {
     @ObservedObject var main: FlexibleMainStage
     @ObservedObject var model: FlexibleStageModel
+    /// The plans live in the project (`project.lattice.flexible`): an edit republishes the project, not always the model.
+    @ObservedObject private var project: ProjectModel
     @State private var collapsed = false
+
+    init(main: FlexibleMainStage, model: FlexibleStageModel) {
+        self.main = main; self.model = model; self._project = ObservedObject(wrappedValue: model.project)
+    }
     @State private var renaming: String?
     @State private var contentHeight: CGFloat = 0
 
@@ -477,7 +483,13 @@ struct FlexiblePrintPlanPanel: View {
 struct FlexiblePlanBuildButton: View {
     @ObservedObject var main: FlexibleMainStage
     @ObservedObject var model: FlexibleStageModel
+    /// The plans live in the project: a joint picked republishes it (the fix chip must go at once).
+    @ObservedObject private var project: ProjectModel
     let width: CGFloat
+
+    init(main: FlexibleMainStage, model: FlexibleStageModel, width: CGFloat) {
+        self.main = main; self.model = model; self._project = ObservedObject(wrappedValue: model.project); self.width = width
+    }
 
     var body: some View {
         let plans = main.shownPlans
