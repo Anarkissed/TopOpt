@@ -24,8 +24,11 @@ Parked: none.
    round strut's area and the sphere's volume, and every run measures what its file holds and
    certifies the lesser of that and the law. On the stand every type's file is within 10 % of its
    certificate on the light side (worst -3.5 %), with 0 floating pieces.
-2. (c) octet made honest (its law and tensor on the emitted full-octet cell): in progress. Until it
-   lands octet's file is 28-30 % HEAVIER than its certificate on the stand (reported, never refused).
+2. (c) octet made honest: **DONE** (`262b731f`, `3a1b9b3d`; the section below). Octet's law and
+   tensor are the full cell's, the one the generator lays. On the stand its file holds what its
+   certificate credits (+0.0 %, it was +28-30 %), and no rung flips. Auto's octet cell at a 0.45 mm
+   bead is 7.03 mm (it was 4.93), and a plan saved on the old law near the print limit is refused,
+   naming the cell.
 3. Finding 8 (sheet triangles), the coupon, the samples: queued, in that order.
 
 <!-- STATUS -->
@@ -125,6 +128,191 @@ vertices compared, 0 drifted; exclude-region occupancy 965 = 965), and every oct
 shows its high side (+45 to +81 %: step (c)). Tests: `test_lattice_volume_check` (new, 40 checks),
 `test_lattice_types` (Finding 6, 253), `test_mesh_winding` (its pin moves with (b): 755.506110 to
 858.361992 mm3).
+
+## Rulings of 2026-11-02, step (c): octet made honest — DONE (`262b731f`, `3a1b9b3d`)
+
+What changed (core only):
+
+1. **Octet's density law is the full cell's.** The strut diameter per density (`kOctetDia`) was
+   PR 198's table, measured on the LEGS-ONLY cell (each face centre joined to its four corners: that
+   is FCC's geometry), while the generator lays the full octet, legs and braces. It is now octet's own
+   law, measured the way every other type's is (`lattice_types_probe law octet`, 17 rows, density
+   0.045 to 0.95: `c_octet_law.txt`, `c_octet_law_ends.txt`). `octet_relative_density` is its
+   inverse. On one 8 mm cell the file now holds 0.1 to 0.3 % more than the certificate at the band's
+   floor, middle and top; before it held 90 % and 59 % more at the floor and middle, and 3 % less at
+   the top (`c_gapcell_before_c.txt`, `c_gapcell_after_c.txt`; the other six types are unchanged to
+   the digit).
+2. **Octet's stiffness rows are the full cell's** (PR 246's tensor rows landed, plus the two ends
+   measured now). 18 rows, density 0.0496 to 0.9003 (`c_octet_tensor_rows.txt`):
+   - low end, 6 rows, measured 2026-11-03 at 96 voxels a cell against 128;
+   - middle, 4 rows, PR 246's validated rows (48 against 64, measured 2026-07-29, never landed);
+   - high end, 8 rows, measured 2026-11-03 at 64 against 96.
+   Each row passes PR 246's rule: within 2.4 % of the finer resolution (worst +2.29 %), at least 6
+   voxels across the strut, the solve converged. The sweep ran one density per process (each inside
+   the heavy lock's hour), so each process compared its row against a one-point curve. The drift is
+   re-judged on each set's whole curve by `c_octet_tensor_assemble.py`, which reproduces the table
+   from `c_octet_tensor_sweep/`. One row, 0.18522, lies past the end of its curve and is left out
+   (the rule never extrapolates). The certifiable band is now **0.0496 to 0.9003** (it was 0.0505 to
+   0.8999). Multiscale's bars still hold (top 0.90027 >= 0.85; 18 resolved rows >= 6).
+   In plain words: at the same density the full octet is about 16 % stiffer in shear and about 4 %
+   softer along an axis than the legs-only rows said (density 0.30). FCC keeps the legs-only rows
+   byte for byte; it is that geometry.
+3. **"Prints open" is the geometry, for every type (ruling (A)).** A tile prints open when a
+   bead-wide strut is at most **0.1898 of the tile** (`kSteppedPrintsOpenMaxStrutPerCell`, 0.7592 / 4:
+   the strut-to-cell ratio at octet's old density bound of 0.20). No density is read
+   (`lattice_prints_open`, `stepped_plan.hpp`). The menus at a 12 mm base and a 0.45 mm bead
+   (`c_menus_12mm_045.txt`; "before" is the 0.20 density rule on each type's own law):
+   - **Octet: unchanged**, 12 9.6 9 8 7.2 6 4.8 4 3 2.4, the menu he approved. The density rule on the
+     full cell's law would have cut it to 12 8 6 4 (option (B), not taken).
+   - **Rhombic gains** 9.6, 7.2, 4.8 and the 2.4 mm tile: 12 9 8 6 4 3 becomes octet's menu.
+   - **SC loses the 2 mm tile and the 10 mm size** (12 10 9.6 ... 2.4 2 becomes the same menu as
+     every other strut type). A bead-wide strut in a 2 mm tile is 0.225 of it, wider than 0.1898. This
+     was not in the ruling and is named here.
+   - FCC, Kelvin, Diamond, BCC: unchanged. BCC and SC stay Structural only (Finding 6).
+4. **The aesthetic ceiling is the same geometry with a new number.** Octet's strut is a fifth of its
+   cell at density **0.3788** on the full cell's law (0.2189 on the legs-only law). The full cell has
+   twice the legs-only cell's struts, so the same strut holds about twice the density. The cap's
+   finest cell at a 0.45 mm bead stays 2.25 mm.
+5. **Auto picks a coarser octet cell**: at a 0.45 mm bead the light floor (the cell whose bead-wide
+   strut is the band's floor density) goes from **4.93 to 7.03 mm**. In plain words: the old 4.93 mm
+   cell with its thinnest printable strut, 0.45 mm, held about 0.09 of the cell in the file (0.0965),
+   not the 0.05 it claimed. A 0.45 mm strut makes a 5 % lattice only in a 7.03 mm cell. At a
+   0.42 mm bead it is 4.60 to 6.56 mm, and a member needs 32.8 mm (5 of those cells) where 23.0 mm was
+   quoted. The finest printable cell (the band's top) moves the other way: 1.173 to 1.117 mm at
+   0.45 mm, so the thinnest member that holds a certified octet is 5.58 mm (it was 5.87).
+6. **The rounding fix in "finest printable cell"** (`cell_whose_strut_prints`, `lattice.cpp`; kept,
+   with its test). bead / phi(density) is only exact to rounding: on the full cell's law
+   0.42 / phi(0.9003) builds a 0.41999999999999993 mm strut, which every strut-against-bead check
+   reads as under the bead (Fit derives exactly that cell for a thin wall, and grading's audit threw).
+   The cell is nudged up by ulps until its strut prints. Test (`test_strut_diameter_per_type`, "a
+   cell core calls printable prints"): every type with its own law, beads 0.20 to 1.00 mm by 0.005 mm,
+   the light, uncapped and mid-cap floors; the strut is at least the bead and the cell within 1e-14 of
+   the quotient. Positive control: the bare quotient builds a short strut in 162 of those cases.
+7. **The strut-strength report reads the full cell's stresses through a legs-only law** (measured,
+   not changed). PR 259's strut law (the K table behind `lattice_strut_strength`, a report that never
+   gates) was measured on the legs-only cell: its library columns are those rows, and its measured
+   shear stiffness tracks them (C44 34.10 against 33.79 legs-only and about 35.9 full, at density
+   0.095). `test_strut_report_j6` now pins the production path's numbers on the full cell's tensor:
+   strut margins 0.5875 / 0.6265 / 0.6212 where the probe printed 0.6164 / 0.6320 / 0.6266. The
+   probe's table stays in the test as the provenance.
+
+8. **A plan sent at an octet density near the old print limit is now refused** (core's existing D5
+   check, unchanged; named because his saved plans can carry one). At the same density the full
+   cell's strut is about 0.7 of the legs-only one (twice the struts share the material), so a
+   `stepped_cells` entry the app sized on the old law can build a strut under the bead. Example, the
+   test fixture `plan_doubled_receipt`: 3 mm cells at 0.18 built over 0.45 mm before; now 0.386 mm, and
+   the run stops with "stepped cell 4 in region 1 is 3 mm at a density of 0.18, which builds a
+   0.3859 mm strut -- under the 0.45 mm bead". The app sizes plans from core
+   (`lattice_min_density_for_strut`), so a plan made on this core passes. A plan saved before it
+   needs re-planning, and core says which cell and why.
+   The same is true where a plan sends no `rho` and core's own law sizes its cells: a 3 mm cell
+   at a 0.45 mm bead prints from a density of 0.235 (it was 0.131) and a 2 mm cell from 0.455 (it
+   was 0.265), so the light voxels go solid. If none is left, the plan is refused for having
+   no density, with the count.
+
+Tests that moved with the law, each re-derived from core where the test allows:
+- `test_grading`: the band numbers. The sub-floor fixture's body grows from 30 to 40 mm: five cells of
+  6.25 mm need 31.2 mm, so no voxel of a 30 mm body read thick enough to grade, and the junction band
+  the test relies on vanished. It now puts 3,980 of 70,400 voxels under the floor (5.65 %, still over
+  the 3 % cap). S1's declared minimum is 1.116 mm, just under the new frontier (1.173 before). S2c's
+  target is 7 mm, above the new floor (6 mm before).
+- `test_strut_diameter_per_type`: the E1 pins (7.026627796 and 1.116948948 mm) and the new section
+  in item 6.
+- `test_lattice_certification`: the B2 anchor is the full cell's row. FCC keeps the legs-only row,
+  and octet now differs from it (shear more than 5 %).
+- The material-model harness: the same 18 rows (`test_lattice_material_model` pins the copy).
+- `test_strut_report_j6`: item 7.
+- `test_stepped_plan`: the geometry rule (391 checks).
+- `test_lattice_hookup`: its 30 mm cylinder holds 5 cells only at a finer bead, so the fixture's
+  bead is 0.28 mm (floor 4.37 mm, the cell it was built around).
+- `test_lattice_density_field`: "prints at a 2 mm cell, 0.45 mm bead" moves from a 30 % lattice to
+  a 50 % one (0.347 to 0.480 mm strut).
+- `test_plan_is_the_design`: the doubled arm runs a copy of `plan_doubled_receipt` whose cells carry
+  core's lightest printable density at 3 mm (item 8). The fixture itself is not edited (see Blocked).
+- Found by the gate's full ctest, fixed in `3a1b9b3d` (those three test files only):
+  - `test_build_direction` U4: PR 266's table was the legs-only tensor's (the eede708a build
+    still prints 0.6968 / 1.3285, interlayer 6.3494, 9.11x). Its region is octet at 0.30, and on
+    the full cell's tensor production gives 0.6975 / 1.3242, interlayer 6.9058, 9.90x. Every
+    verdict, the 48 support voxels and the 6x height are unchanged; the pins are the new numbers.
+  - `test_slot_origin`, `test_region_ownership`: their plans send no `rho` (item 8), so at 0.45 mm
+    the law kept every voxel they lattice solid. Their runs read a copy at a 0.32 mm bead, where a
+    3 mm cell prints from 0.128, the threshold the plans were built around. Premises read core:
+    0.45 mm gives over 0.2, 0.32 mm about 0.131.
+    `test_slot_origin`'s two K1 arms keep their fixtures: they are refusals at 0.45 mm, one by the
+    prints-open rule (a 7 mm base's 2.33 mm tile, which would print at 0.32 mm).
+
+### Blocked (maintainer data, proposed, not edited)
+- `core/tests/fixtures/organic/plan_doubled_receipt.json`: its 20 cells' `"rho": 0.18` no longer
+  print at 3 mm on octet's full-cell law. Proposed: `0.24` (the lightest that prints there is 0.235).
+  Until then the test runs a copy.
+- `core/tests/fixtures/organic/{slot_origin_inplane,slot_origin_absent,slot_origin_off_plane,
+  owner_corner_fwd,owner_corner_rev,straddler_collision,straddler_seam}.json`: both
+  `"min_extrudable_width_mm": 0.45` become `0.32` (what the two tests' copies do). `plan_base_missing`
+  and `plan_base_used` stay at 0.45. Until then the tests run copies.
+
+### The flip table (M2 stand, Structural ladder; before = `c009fa30`, after = `262b731f`)
+
+Full table with cells, density range, mass, margin and every pocket gap: `c_stand_flip_table.txt`
+(by `c_gate_c3.sh` + `f7_flip.py`). **No rung flips:** every verdict is the same before and after,
+on every type. The other eight types are identical to the digit on every rung (density range, mass,
+margin, verdict, every pocket gap). Octet:
+
+| octet rung | before | after |
+|---|---|---|
+| 0.68, 0.52 | refused, sealed cavity | refused, sealed cavity |
+| 0.38 | density 0.289-0.889, 511.8 g, margin 1,686.2, accepted; file +27.9 % over certified (heaviest pocket +63.2 %) | 0.519-0.889, 512.2 g, 1,686.5, accepted; +0.0 % (heaviest +0.0 %) |
+| 0.26 | 0.320-0.836, 484.1 g, 1,649.2, accepted; +30.2 % (heaviest +57.1 %) | 0.553-0.836, 484.4 g, 1,649.9, accepted; +0.0 % (heaviest +0.0 %) |
+
+**Octet's rows, in plain words.** The stand lays octet at a 2 mm cell. On the full cell's law a 2 mm
+cell prints only from a density of 0.455 (it was 0.265 on the legs-only law). So the light voxels the
+law grades between about 0.29 and 0.52 now build struts under the bead and stay solid: 7 and 4 of
+the part's voxels are latticed at 0.38 and 0.26, where 16 and 14 were. The lattice left in the file
+is 138.7 and 78.3 mm3 (it was 438.1 and 357.4), and the certificate credits all of it (it credited
+342.6 and 274.5). The part is 0.4 g and 0.3 g heavier, solid where light struts were. The margin rises
+by 0.3 and 0.7, and both rungs stay accepted.
+
+**BAR met:**
+- The light side is within 10 % on every latticed rung of every type: every lightest judged pocket
+  is between -3.5 % (rhombic 0.52) and +0.0 %. The largest whole-rung gap is SC's +9.0 %, on the
+  high side.
+- 0 floating pieces on the 24 latticed rungs probed, 20 strut and 4 sheet (`c_stand_floating.txt`).
+- Octet's high side: its heaviest judged pocket is +0.0 % on both latticed rungs (it was +63.2 % and
+  +57.1 %). On one 8 mm cell it is +0.31 / +0.12 / +0.12 % at the band's floor, middle and top (it
+  was +90 / +59 / -3 %).
+- The full ctest is below.
+
+### The gate (`3a1b9b3d`)
+
+ctest on `262b731f`: 164 / 167 (`c_ctest_262b731f.txt`). The three that failed pinned the legs-only
+law (the tests above) and are fixed in `3a1b9b3d`, which changes those three test files only, so its
+library and CLI are `262b731f`'s byte for byte, and the stand and identity here are theirs.
+ctest on `3a1b9b3d`: **167 / 167 passed**, 5,153 s; cli_demo passed, 2,412 s
+(`c_ctest_3a1b9b3d.txt`, by `c_gate_ctest_on.sh`, which proved the build tree equal to
+`git archive 3a1b9b3d core` before building).
+
+The 21 binaries (`c_identity_21.txt`, against eede708a): 9 identical, 12 differ. Every one exits 0,
+each with its check count unchanged except `test_grading` (26,334 to 55,089: its sub-floor body
+grew from 30 to 40 mm, so more voxels are checked). Against step 1:
+- Three print exactly what they printed there (`test_lattice_boundary`, `test_lattice_clip_shell`,
+  `test_lattice_skin_freeform`).
+- Nine move with the law:
+  - `test_stepped_plan`: the ceiling goes 0.218871 to 0.378846. Its parity control's strut goes
+    0.4000 to 0.2879 mm (the same density builds a thinner strut on the full cell).
+  - `test_grading`: the cap goes 0.218871 to 0.378846, and the uncapped top 0.899880 to 0.900270.
+  - `test_lattice_certification`: "fcc == octet-legs at the shared anchor row" becomes two checks:
+    FCC keeps the legs-only row, and octet is its own tensor (its shear differs by more than 5 %).
+  - `test_lattice_density_field`: its Jacobian samples and MODE 2 loop move with the law. The worst
+    derivative error is 5.2e-10 (it was 6.0e-10).
+  - `test_lattice_hookup`, `test_lattice_variant`, `test_bake_build_orientation`: the law now
+    counts 524.7 / 524.7 / 483.5 mm3 against a file of 361.6 / 361.6 / 333.4 (it counted 317.2 /
+    317.2 / 292.4). The high side falls from +45.6 % to +12.6 % (bake: +45.7 % to +12.7 %).
+    Variant's lightest graded density at 3 mm and 0.42 mm is 0.2084 (it was 0.1124).
+  - `test_designbox_lattice_recert`: its composite goes 11,660.6 to 13,380.1 (+14.7 %), because the
+    full cell's law credits more of what the file holds. Recorded still equals reproduced, and the
+    high side goes +36.8 % to +9.9 %.
+  - `test_lattice_void_exterior`: an 8 mm cell with 1.2 mm struts reads density 0.6774 (it was
+    0.4096). Its margins go 3,383.72 to 3,386.14 and 2,954.28 to 3,102.44, the high side +81.5 % to
+    +20.1 %, and a build path changes.
 
 ## What changed in core, once, for every strut type (and, 9-10, for the sheets)
 
@@ -635,6 +823,29 @@ exported_mm3}`. The app needs nothing new: the margin it shows is the rebuilt ce
 `topopt-cli --version` now ends with `lattice_sample=1`, so a worker can tell without a
 trial run (brief item g).
 
+### Since step (c) (2026-11-03): what the app reads differently for octet
+Nothing new to call; the same calls answer from the full cell's law.
+
+| call / field | before (c) | after (c) |
+|---|---|---|
+| `lattice_type_facts("octet").rho_min` / `rho_max` (and `lattice_rho_min/max`) | 0.0505 / 0.8999 | **0.0496 / 0.9003** |
+| `printable_cell_per_bead` (finest printable cell = this x bead) | 2.6071 | **2.4821** |
+| `aesthetic_density_ceiling` (strut = a fifth of the cell) | 0.2189 | **0.3788**: the same geometry, so the same picture; only the density number moves |
+| `lattice_cell_printability_floor_mm(octet, 0.45)` (Auto's light floor) | 4.9314 mm | **7.0266 mm** |
+| `lattice_min_printable_cell_mm(octet, 0.45, cap)` | 1.1732 mm uncapped, 2.25 mm at the cap | **1.1169 mm** uncapped, 2.25 mm at the cap |
+| `lattice_prints_open(topo, cell, bead)` | octet's density at a bead-wide strut <= 0.20 | **bead <= 0.1898 x cell, every type** (no density read; `topo` kept in the signature) |
+| `stepped_size_menu(topo, ...)` | per type's density | follows `lattice_prints_open`: octet unchanged, Rhombic gains, SC loses its 2 mm tile and 10 mm size |
+| `lattice_cubic_tensor(octet, rho, ...)` | the legs-only rows (FCC's) | the full cell's 18 rows; FCC keeps the legs-only ones |
+
+Plans: a `stepped_cells` entry sized on the old law can now build a strut under the bead and is
+refused by core's existing check, naming the cell; a plan that sends no `rho` can be left with no
+printable voxel at a small cell and is refused for having no density (handoff item 8). A plan the
+app sizes on this core (`lattice_min_density_for_strut`) passes.
+
+The app's sources read all of these from core. Six app TESTS pin octet's old numbers and will move
+when this core is linked (app side, not touched here): `LatticeAestheticCeilingFromCoreTests`
+(0.218871), `LatticeE1PrintableFloorTests`, `LatticeCapOneSourceTests`, `LatticeWizardTests`,
+`LatticeStatedDensityDeliveryProbe`, `LatticeStageRepairEvidence`.
 
 ## Octet stays byte-identical (R9) — how it was proved
 
