@@ -91,7 +91,8 @@ final class ScenarioSelectHostedTests: XCTestCase {
             let picked = try h.onScreen("selLine-\(x.s[0].uuidString)-\(x.c.uuidString)", "\(what): Group C's line under Normal use")
             XCTAssertEqual(outline.minY, picked.minY + SelectionsList.outlineInset, accuracy: 1,
                            "\(what): ★ the outline is on Normal use's line, not on the copy in another folder")
-            _ = try h.onScreen("selLine-\(x.s[1].uuidString)-\(x.loads[0].uuidString)", "\(what): Held by left plate stays open")
+            XCTAssertNotNil(h.frames.all["selLine-\(x.s[1].uuidString)-\(x.loads[0].uuidString)"],
+                            "\(what): Held by left plate stays open (its line is built; it may sit below the list's fold)")
             XCTAssertNil(h.frames.all["selOutline-folder-\(x.s[0].uuidString)"], "\(what): a picked line, so no folder reads as selected")
         }
     }

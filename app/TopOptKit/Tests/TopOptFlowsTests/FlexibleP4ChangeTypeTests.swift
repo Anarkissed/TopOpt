@@ -86,7 +86,8 @@ final class FlexibleP4ChangeTypeTests: XCTestCase {
     /// grow — WorkspaceBodySizeTests), and both pages hand the row its closure. RED CONTROL: the mount line taken out.
     func testTheCardIsMountedBesideNumber354sInsideItsChunk() throws {
         let ws = try FlexibleSource.text("WorkspacePlaceholder.swift")
-        let mount = "if project.lattice.flexible != nil { FlexibleChangeTypeMount(main: flexibleMain, project: project, app: model, loseAll: { showFlexiblePage = false; deleteLatticeForMode() }).zIndex(49) }   // Flexible (PR #362) H62:"
+        // ★ RE-PINNED (UI-Notes B3, #362's OK 23:22Z): + his third choice, "Keep my regions and groups, choose a new type"
+        let mount = "if project.lattice.flexible != nil { FlexibleChangeTypeMount(main: flexibleMain, project: project, app: model, loseAll: { showFlexiblePage = false; deleteLatticeForMode() }, keepRegions: { showFlexiblePage = false; keepLatticeRegions() }).zIndex(49) }   // Flexible (PR #362) H62:"
         func mounted(_ text: String) -> Bool {
             guard let own = text.range(of: "ChangeLatticeTypeCard(type: mode.title, regions: latticeRegionTabNames.count) { chooseLatticeTypeChange($0) }") else { return false }
             return String(text[own.upperBound...].prefix(700)).contains(mount)

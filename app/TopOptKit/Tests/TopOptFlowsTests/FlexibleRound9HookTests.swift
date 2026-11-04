@@ -40,7 +40,10 @@ final class FlexibleRound9HookTests: XCTestCase {
         // TopologyRerunChoice.saveAsNew.label (= RerunCard.saveAsNewLabel, TopologyStage.swift) and its statements moved,
         // byte for byte, into saveAsNewProjectAndRun() (pinned below); Cancel's label is TopologyRerunChoice.cancel.label
         // (= RerunCard.cancelLabel). Same gate, same behaviour. H50c's statement is verbatim inside B3/B4's one .onAppear.)
-        Hook(id: "H50b", file: ws, pin: "        .alert(RerunCard.title, isPresented: replacementPromptBinding) {\n", gate: nil),
+        // ★ RE-PINNED (UI-Notes B3, design-system U7 / OneWayToSayNoTests; #362's OK 22:30Z with its two conditions,
+        // RerunConfirmHostedTests): the card asks in place, over the run button's corner — never an alert. Its choices are
+        // H50b-copy / H50b-cancel below, unchanged.
+        Hook(id: "H50b", file: ws, pin: "        .overlay(alignment: .bottomTrailing) { RerunConfirm(shown: replacementPromptBinding.wrappedValue, message: pendingReplacement?.message ?? \"\",\n", gate: nil),
         Hook(id: "H50b-copy", file: ws, pin: "            if rerunOffersCopy { Button(TopologyRerunChoice.saveAsNew.label) { pendingReplacement = nil; saveAsNewProjectAndRun() } }\n",
              gate: "if rerunOffersCopy { "),
         Hook(id: "H50b-cancel", file: ws, pin: "            Button(TopologyRerunChoice.cancel.label, role: .cancel) { pendingReplacement = nil }\n", gate: nil),
@@ -198,7 +201,7 @@ final class FlexibleRound9HookTests: XCTestCase {
     func testAFinishedProjectIsNeverReRunWithoutTheCard() throws {
         let ws = try Self.source(Self.ws)
         // ★ RE-PINNED (UI-Notes B3, #362's own note 1 from his iPad 11-03 15:03: Topology's Optimize is topology only; the lattice rides ⌃ "Optimize, then lattice" and the Lattice stage). The run carries its flavour — `lattice` — through the gate, the card, the copy and the copy's one-shot run. Same gates, same card.
-        let body = try XCTUnwrap(ws.range(of: "    private func requestRun(lattice: Bool) {").map { String(ws[$0.lowerBound...].prefix(600)) })   // (B3: + the flavour line)
+        let body = try XCTUnwrap(ws.range(of: "    private func requestRun(lattice: Bool) {").map { String(ws[$0.lowerBound...].prefix(800)) })   // (B3: + the flavour line and the card guard)
         let prompt = try XCTUnwrap(body.range(of: "ResultsReplacementPrompt.forNewRun(existing: run.outcome)"))
         let start = try XCTUnwrap(body.range(of: "startRun(lattice: lattice)"))
         XCTAssertLessThan(prompt.lowerBound, start.lowerBound, "the card is asked for before the run starts")

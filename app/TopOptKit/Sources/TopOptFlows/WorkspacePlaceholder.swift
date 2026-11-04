@@ -821,6 +821,7 @@ public struct WorkspacePlaceholder: View {
                 // B3: Save as new project runs in the copy as it opens (RerunCard; as #362's H50c)
                 .onAppear {
                     topoNotice.seed(accepted: acceptedVariantCount)
+                    topoNotice.version = versionLabel   // ★ B3: "v8 is ready"
                     if RerunCard.takeRunOnOpen(for: project.id) { let l = RerunCard.takeRunOnOpenLattice(); if canOptimize(lattice: l) { startRun(lattice: l) } else { model.toast = RerunCard.copyNotReadyToast } }
                     // B4: a copy made to choose a lattice type (or the lattice card's Save as new) opens on Lattice
                     if let toast = LatticeStageOpen.take(for: project.id) { goToStage(.lattice); if !toast.isEmpty { model.toast = toast } }
@@ -1509,6 +1510,7 @@ public struct WorkspacePlaceholder: View {
                         CornerPairStyle.small(c.undoLabel, id: "lattice-clear-undo") {
                             project.undoClearLattice(c); clearedLattice = nil; model.persistCurrentProject()
                         }
+                        .background(CornerPairStyle.publish("latticeClearUndo"))
                         .padding(.bottom, DS.Space.xl6)
                     }
                     .frame(maxWidth: .infinity)
@@ -1566,7 +1568,7 @@ public struct WorkspacePlaceholder: View {
                     .transition(.opacity)
                     .zIndex(49)
             }
-            if project.lattice.flexible != nil { FlexibleChangeTypeMount(main: flexibleMain, project: project, app: model, loseAll: { showFlexiblePage = false; deleteLatticeForMode() }).zIndex(49) }   // Flexible (PR #362) H62: "Change lattice type…" on the Flexible stage asks with #354's own card (its mount needs a type a Flexible project never has); Continue is today's delete with its one-step Undo
+            if project.lattice.flexible != nil { FlexibleChangeTypeMount(main: flexibleMain, project: project, app: model, loseAll: { showFlexiblePage = false; deleteLatticeForMode() }, keepRegions: { showFlexiblePage = false; keepLatticeRegions() }).zIndex(49) }   // Flexible (PR #362) H62: "Change lattice type…" on the Flexible stage asks with #354's own card (its mount needs a type a Flexible project never has); Continue is today's delete with its one-step Undo
             if flexibleMain.owns(project, stage), !showFlexiblePage, !editFaces.isEditing { FlexiblePrintPlanOverlays(main: flexibleMain).zIndex(49) }   // Flexible (PR #362) B9: the Print plan's Reset confirm, top middle over the page (U13)
             })   // Flexible (PR #362) H58
             AnyView(Group {   // Flexible (PR #362) H58: the body in heap-boxed chunks; the 47 KB body value was copied on the iPad main thread's stack until it overflowed (crash 2026-10-25)
@@ -1734,6 +1736,20 @@ public struct WorkspacePlaceholder: View {
         .onPreferenceChange(LatticeBandChipKeepOutKey.self) { rects in
             if rects != bandChipKeepOut { bandChipKeepOut = rects }
         }
+        // ★ WHOLE-APP B3 (U7, OneWayToSayNoTests): it asks IN PLACE, a card over the run button's corner — never an alert. Over the whole
+        // page, so the 3D view under it never takes its clicks
+        .overlay(alignment: .bottomTrailing) { RerunConfirm(shown: replacementPromptBinding.wrappedValue, message: pendingReplacement?.message ?? "",
+                                                              leaveToken: RerunLeaveToken(stage: stage, edit: EditBox(project.editSnapshot)),
+                                                              onLeave: { pendingReplacement = nil },
+                                                              bottom: bottomBarHeight + DS.Space.xl4 + DS.Space.s) {
+            Button(TopologyRerunChoice.rerunHere.label) {
+                pendingReplacement = nil
+                startRun(lattice: runWithLattice)
+            }
+            .buttonStyle(RerunChoiceStyle(danger: true))
+            if rerunOffersCopy { Button(TopologyRerunChoice.saveAsNew.label) { pendingReplacement = nil; saveAsNewProjectAndRun() } }
+            Button(TopologyRerunChoice.cancel.label, role: .cancel) { pendingReplacement = nil }
+        } }
         // ★ B2 (U15): what a number pad kept ("Kept 40 (1 to 40 mm)") is the page's toast
         .numberPadNote { model.toast = $0 }
         // ★ B2 (U16): the top lane's notifications keep clear of every control the page publishes
@@ -1836,6 +1852,17 @@ public struct WorkspacePlaceholder: View {
         .padding(.trailing, PageChrome.gizmoInset)
     }
 
+    /// ★ B3 (#362's condition 2): what leaving the re-run card means — the stage changes, or any edit / Undo lands.
+    /// ★ THE SNAPSHOT RIDES IN A BOX (WorkspaceBodySizeTests, H58): the card hangs on the page's root, so whatever it holds is
+    /// part of the body value the iPad copies on its small main-thread stack — inline, the edit snapshot took the body from
+    /// a few hundred bytes to 1,680. The box is one pointer; equality still compares the whole snapshot.
+    struct RerunLeaveToken: Equatable { let stage: WorkspaceStage; let edit: EditBox }
+    final class EditBox: Equatable {
+        let snapshot: EditSnapshot
+        init(_ s: EditSnapshot) { snapshot = s }
+        static func == (a: EditBox, b: EditBox) -> Bool { a.snapshot == b.snapshot }
+    }
+
     private var replacementPromptBinding: Binding<Bool> {
         Binding(get: { pendingReplacement != nil },
                 set: { if !$0 { pendingReplacement = nil } })
@@ -1857,6 +1884,7 @@ public struct WorkspacePlaceholder: View {
     /// always about a real loss. Nothing to lose ⇒ no prompt, and Optimize behaves
     /// exactly as it always did.
     private func requestRun(lattice: Bool) {
+        guard pendingReplacement == nil else { return }   // ★ B3 (#362's condition 1): the re-run card is up — it answers first
         guard canOptimize(lattice: lattice) else { return }
         runWithLattice = lattice
         if let prompt = ResultsReplacementPrompt.forNewRun(existing: run.outcome) {
@@ -1871,6 +1899,7 @@ public struct WorkspacePlaceholder: View {
     /// selection, run no ladder. Goes through the SAME replacement prompt the
     /// optimize path uses, because it produces a result that would replace one.
     private func requestLatticeRun() {
+        guard pendingReplacement == nil else { return }   // ★ B3 (#362's condition 1): the re-run card is up — it answers first
         guard canLatticeThis else { return }
         guard let request = model.makeLatticeRunRequest() else {
             model.toast = "Import a part and set a lattice region first."
@@ -3350,16 +3379,7 @@ public struct WorkspacePlaceholder: View {
         // variants, and it says so before it does.
         // ★ B3: THE RE-RUN CARD (RerunCard's words; TopologyRerunChoice): Re-run here / Save as new
         // project (an Optimize re-run only) / Cancel. B4: the Lattice run has its own card, below.
-        .alert(RerunCard.title, isPresented: replacementPromptBinding) {
-            Button(TopologyRerunChoice.rerunHere.label, role: .destructive) {
-                pendingReplacement = nil
-                startRun(lattice: runWithLattice)
-            }
-            if rerunOffersCopy { Button(TopologyRerunChoice.saveAsNew.label) { pendingReplacement = nil; saveAsNewProjectAndRun() } }
-            Button(TopologyRerunChoice.cancel.label, role: .cancel) { pendingReplacement = nil }
-        } message: {
-            Text(pendingReplacement?.message ?? "")
-        }
+        // ★ WHOLE-APP B3 (U7): the card itself is mounted over the whole page (body), where clicks reach it
         // Library (B3): the "Optimize as vN" card (approved Library mockup, screen 6)
         .overlay { if nextVersionAsk { LibraryNextVersionCard(model: model, project: project, close: { nextVersionAsk = false }, optimize: { name in nextVersionAsk = false; optimizeAsNextVersion(name: name) }) } }
         // ★ B4 (APP LIST 6): THE LATTICE RUN'S RE-RUN CARD — "Re-running clears this lattice's results":
@@ -10217,13 +10237,21 @@ public struct WorkspacePlaceholder: View {
                 // TO-page affordance too.
                 if active, visible.groupPrimitives,
                    project.groupView.canEdit(g.id) {
-                    Button { addingPrimitiveGroup = g.id } label: {
+                    // ★ B3 (U6 / U7, OneWayToSayNoTests): the choice is a menu at the button, never a dialog
+                    Menu {
+                        // A freshly-placed primitive becomes the gizmo target so the user can move it
+                        // straight away (DEFECT 2: PR 190 had no handles to grab it by).
+                        Button("Cylinder") { selectNewPrimitive(project.addManualPrimitive(.bolt, to: g.id), in: g.id) }
+                        Button("Plane") { selectNewPrimitive(project.addManualPrimitive(.face, to: g.id), in: g.id) }
+                        Section("A keep-out the finder missed. Place it, then move it onto the part with magnetic detents.") {}
+                    } label: {
                         Label("primitive", systemImage: "plus")
                             .labelStyle(.titleAndIcon)
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(Self.clearanceTint)
+                            .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain).fixedSize()
                     .accessibilityIdentifier("add-primitive-\(g.id.uuidString)")
                 }
             }
@@ -10266,17 +10294,6 @@ public struct WorkspacePlaceholder: View {
             // T2: tapping the group IN THE LIBRARY is one of the three explicit
             // paths that reveal its primitive chips.
             chipsRevealedGroup = g.id
-        }
-        .confirmationDialog("Add a primitive", isPresented: Binding(
-            get: { addingPrimitiveGroup == g.id },
-            set: { if !$0 { addingPrimitiveGroup = nil } })) {
-            // A freshly-placed primitive becomes the gizmo target so the user can move it
-            // straight away (DEFECT 2: PR 190 had no handles to grab it by).
-            Button("Cylinder") { selectNewPrimitive(project.addManualPrimitive(.bolt, to: g.id), in: g.id) }
-            Button("Plane") { selectNewPrimitive(project.addManualPrimitive(.face, to: g.id), in: g.id) }
-            Button("Cancel", role: .cancel) { addingPrimitiveGroup = nil }
-        } message: {
-            Text("A keep-out the finder missed. Place it, then move it onto the part with magnetic detents.")
         }
         .overlay(alignment: .bottom) { Divider().overlay(DS.Color.strokeSubtle.color) }
     }
@@ -11840,6 +11857,7 @@ public struct WorkspacePlaceholder: View {
                 selection.clearActive(); selectedPiece = nil; scenarioRefusal = nil; scenarioAnchorHint = nil
             } label: {
                 HStack(spacing: 4) { Image(systemName: "plus"); Text("Add a load scenario").dsStyle(DS.TypeScale.caption).fontWeight(.semibold) }
+                    .frame(minHeight: 44).contentShape(Rectangle())   // ★ B3 (AddScenarioVisibleHostedTests): a 44 pt target
             }
             .buttonStyle(.plain).foregroundStyle(DS.Color.accent.color)
             .background(GeometryReader { geo in
@@ -12652,6 +12670,7 @@ public struct WorkspacePlaceholder: View {
     private func optimizeSummary(lattice: Bool) -> String {
         if lattice, let why = latticeDesignBoxConflict { return why }   // ★ B3: only a run that carries the lattice
         if lattice, let why = latticeOptimizeRefusal { return why }
+        if !lattice, let b = topologyBlock { return b.words }   // ★ B3 (U6, O2): ≤ 5 words; the fix chip is the corner's fix line
         if let why = loadDirectionRefusal { return why }
         if let why = emptyRegionRefusal { return why }   // ★ B1 (note 38)
         if force.phase == .setup { return "set gravity first" }
@@ -12809,7 +12828,9 @@ public struct WorkspacePlaceholder: View {
         let mac = compute.rememberedName ?? "your Mac"
         let title = macFinding ? "Finding \(mac)\u{2026}" : "Optimize"
         let line = runCouldntFinish && !lastRunWasLattice && ok ? Self.couldntFinishLine
-            : macNotAnswering && ok ? Self.macNotAnsweringLine : summary
+            : macNotAnswering && ok ? Self.macNotAnsweringLine
+            : !ok && run.phase != .running && sameSettingsAsLast(lattice: lattice) ? TopologyRunCopy.sameSettings(versionLabel)   // ★ B3 (§4.6)
+            : summary
         return Button {
             if ok { macNotAnswering = false; runCouldntFinish = false; requestRun(lattice: lattice) } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }
         } label: {
@@ -13064,7 +13085,7 @@ extension WorkspacePlaceholder {
     // MARK: the corner pair (A1)
 
     var topologyCornerPair: some View {
-        CornerPair(geometry: chromeGeometry, open: setupPanelOpen ? "setup" : nil) {
+        CornerPair(geometry: chromeGeometry, open: setupPanelOpen ? "setup" : nil, fixLine: topologyFixLine) {   // ★ B3 (U6, U12)
             topologySetupChip
         } split: {
             topologyOptimizeSplit
@@ -13138,11 +13159,79 @@ extension WorkspacePlaceholder {
         .background(CornerPairStyle.publish("optimizeSplit"))
     }
 
+    /// ★ B3 (U6, O2): why Topology's Optimize can't start, as the fix line says it — the same order the button's gate reads.
+    var topologyBlock: TopologyBlock? {
+        for g in selection.groups {
+            if case .refused(let why)? = project.loadDirection(for: g.id) { return .noDirection(group: g.id, why: why) }
+        }
+        if emptyRegionRefusal != nil, let g = selection.groups.first(where: { g in
+            let k = force.kind(for: g.id)
+            return (k.isAnchor || k.isLoad || force.isProtected(g.id)) && g.regionIDs.contains { project.runRegionIDs([$0]).isEmpty }
+        }) { return .emptyPiece(group: g.id) }
+        if force.phase == .setup { return .gravity }
+        if force.hasPending(in: selection.groups, latticeRoleGroups: latticeRoleGroupIDs) { return .pendingGroup }
+        let a = force.anchorCount(in: selection.groups), l = force.loadCount(in: selection.groups)
+        if !(a > 0 && l > 0), !project.minimizePlastic { return .noLoadCase }
+        return nil
+    }
+
+    /// The block's one tap: navigation and the setup it names, never a run.
+    func fixTopologyBlock(_ b: TopologyBlock) {
+        switch b {
+        case .gravity:
+            force.enterGravitySetup(); selection.clearActive(); gravityDraft = nil; gravitySnapLabel = nil
+        case .pendingGroup:
+            if let g = selection.groups.first(where: { force.needsRole($0.id, latticeRoleGroups: latticeRoleGroupIDs) }) {
+                selectionsCollapsed = false; selection.setActive(g.id)
+            }
+        case .noLoadCase:
+            selectionsCollapsed = false
+            model.toast = "Tap a face, then choose Anchor or Load"
+        case .noDirection(let g, _), .emptyPiece(let g):
+            selectionsCollapsed = false; selection.setActive(g)
+        }
+    }
+
+    /// ★ B3 (U12): the corner's fix line while Topology's Optimize is blocked — ≤ 5 words · the fix chip · (i).
+    private var topologyFixLine: AnyView? {
+        guard let b = topologyBlock, run.phase != .running else { return nil }
+        return AnyView(HStack(spacing: DS.Space.s) {
+            Text(b.words).dsStyle(DS.TypeScale.caption).fontWeight(.semibold).foregroundStyle(DS.Color.textPrimary.color)
+                .lineLimit(1).fixedSize()
+            Button { fixTopologyBlock(b) } label: {
+                Text(b.fix).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                    .padding(.horizontal, DS.Space.m).frame(height: 32)
+                    .background(Capsule().fill(DS.Color.accent.color))
+                    .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .background(CornerPairStyle.publish("topologyFixChip"))
+            .accessibilityIdentifier("topology-fix-chip")
+            if let info = b.info { InfoTip(key: "topologyBlock", text: info, label: "Why Optimize can\u{2019}t start") }
+        }
+        .padding(.leading, DS.Space.l).padding(.trailing, DS.Space.xs)
+        .background(Capsule().fill(DS.Surface.bar.color)
+            .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
+        .background(CornerPairStyle.publish("topologyFixLine")))
+    }
+
+    /// ★ B3: this project's version as the Library names it ("v8"); nil off the Library.
+    var versionLabel: String? { model.library.version(project.id).map { "v\($0.number)" } }
+
+    /// ★ B3 (§4.6 "same settings"): Optimize is grey because nothing changed since this project's last run.
+    private func sameSettingsAsLast(lattice: Bool) -> Bool {
+        guard let last = lastRunRequest else { return false }
+        return RerunCard.greysOut(sameInputsAsLastRun: model.makeRunRequest(lattice: lattice) == last, existing: run.outcome)
+    }
+
     /// ★ B3: ⌃ "Optimize, then lattice" runs once a lattice is set and the lattice run may start.
     private var optimizeThenLatticeOK: Bool { project.lattice.enabled && canOptimize(lattice: true) }
     /// Its line: the lattice run's own summary, or why it can't start.
     private var optimizeThenLatticeLine: String {
-        project.lattice.enabled ? optimizeSummary(lattice: true) : TopologyRunCopy.noLatticeYet
+        guard project.lattice.enabled else { return TopologyRunCopy.noLatticeYet }
+        // ★ B3 (the reviewer's follow-up 2, 23:05Z): core still refuses a graded lattice with Allow growth here — one plain line
+        if latticeDesignBoxConflict != nil { return TopologyRunCopy.growthClash }
+        return optimizeSummary(lattice: true)
     }
 
     /// The Setup panel: today's chips and bar controls, one row each (TopologySetupRow).
@@ -13764,6 +13853,19 @@ extension WorkspacePlaceholder {
         model.persistCurrentProject()
     }
 
+    /// ★ B3 ("Keep my regions and groups, choose a new type"): ProjectModel.clearLatticeCells — ONE undo step, its Undo over the
+    /// selector it brings up (as "Continue and lose all work").
+    func keepLatticeRegions() {
+        clearedLattice = project.clearLatticeCells()
+        showLatticeModeSheet = false
+        showLatticePage = false
+        showStrutPreview = false
+        strutScene = nil
+        latticeSettingsSavedThisSession = false
+        refreshLatticeFaceCards()
+        model.persistCurrentProject()
+    }
+
     /// ★ B3 (his answer 11-03: "Exit without selection"): the selector leaves with no type and no lattice, back to Topology. No
     /// type is picked for him (LS-19); what he had set stays stored, off.
     func exitLatticeWithoutType() {
@@ -13791,6 +13893,9 @@ extension WorkspacePlaceholder {
             leaveLatticeCells()
             model.persistCurrentProject()
             if model.duplicateAndChooseLatticeType(id: project.id) == nil { model.toast = RerunCard.copyFailedToast }
+        case .keepRegions:   // ★ B3 (his third choice): where the lattice goes stays; the cells reset; the selector asks
+            showLatticeWizard = false
+            keepLatticeRegions()
         case .loseAll:
             showLatticeWizard = false   // the page's copy of the settings is not written back over the reset
             deleteLatticeForMode()

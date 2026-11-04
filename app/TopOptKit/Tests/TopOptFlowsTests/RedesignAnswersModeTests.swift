@@ -51,7 +51,7 @@ final class RedesignAnswersModeTests: XCTestCase {
         n.note(accepted: 0, streaming: true, resultsOpen: false, landedByRun: true)    // the new run retires the old ones
         n.note(accepted: 1, streaming: true, resultsOpen: false, landedByRun: true)
         XCTAssertTrue(n.dot)
-        XCTAssertEqual(n.message, "1 variant ready \u{2014} more on the way.")
+        XCTAssertEqual(n.message, "Your part: result a is in \u{00B7} more on the way")   // ★ RE-PINNED (UI-Notes B3): plain words
 
         let ws = try Self.src("WorkspacePlaceholder.swift")
         XCTAssertTrue(ws.contains("topoNotice.note(accepted: n, streaming: run.isStreaming, resultsOpen: !viewOriginal,\n"

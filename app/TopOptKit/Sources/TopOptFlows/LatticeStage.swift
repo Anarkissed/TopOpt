@@ -163,13 +163,16 @@ public enum DeleteLatticeStageCopy {
 }
 
 public enum ChangeLatticeTypeChoice: String, Equatable, Sendable, CaseIterable {
-    case duplicate, loseAll, cancel
+    /// ★ B3 (his answer 11-03, via #362 20:22Z: "I think this should be a third choice"): `keepRegions` keeps where the lattice
+    /// goes and resets only the cells (the reviewer's ruling (a), 23:05Z).
+    case duplicate, keepRegions, loseAll, cancel
 
     public static let title = "Change the lattice type?"
 
     public var label: String {
         switch self {
         case .duplicate: return "Create a duplicate and choose a type"
+        case .keepRegions: return "Keep my regions and groups, choose a new type"
         case .loseAll: return "Continue and lose all work"
         case .cancel: return "Cancel"
         }
@@ -178,6 +181,7 @@ public enum ChangeLatticeTypeChoice: String, Equatable, Sendable, CaseIterable {
     public func detail(was type: String) -> String? {
         switch self {
         case .duplicate: return "Recommended \u{00B7} the copy keeps everything; this project keeps its \(type) lattice"
+        case .keepRegions: return "Only the \(type) cell settings reset; Undo brings them back"
         case .loseAll: return "Clears the \(type) lattice here; Undo brings it back"
         case .cancel: return nil
         }
@@ -186,6 +190,7 @@ public enum ChangeLatticeTypeChoice: String, Equatable, Sendable, CaseIterable {
     public static func message(type: String, regions: Int) -> String {
         "This project\u{2019}s lattice is \(type): \(regions) region\(regions == 1 ? "" : "s"), their cells and grades. "
             + "A duplicate carries all of it over (regions, groups, settings) and opens the type selector in the copy. "
+            + "Keeping your regions and groups resets only the cell settings. "
             + "Continuing here clears the lattice; Topology\u{2019}s groups and results stay."
     }
 }
@@ -214,6 +219,22 @@ extension LatticeSettings {
         flexible = nil   // Flexible (PR #362) H54: a Structural/Aesthetic pick or a pending copy clears Flexible's claim (reviewer ruling 2026-10-24 08:45, R4)
     }
 
+    /// ★ B3: a fresh lattice that keeps only WHERE this one goes (the include / exclude roles, depths and expands of groups and
+    /// faces, the zones, the painted faces) — no type, so the selector asks.
+    public func keepingPlacement() -> LatticeSettings {
+        var k = LatticeSettings()
+        k.enabled = enabled
+        k.includePrimitives = includePrimitives
+        k.paintedIncludeFaces = paintedIncludeFaces
+        k.paintDepthMM = paintDepthMM
+        k.groupRoles = groupRoles
+        k.groupDepthMM = groupDepthMM
+        k.selectableRoles = selectableRoles
+        k.selectableDepthMM = selectableDepthMM
+        k.selectableExpandMM = selectableExpandMM
+        return k
+    }
+
     /// The selector's Structural / Aesthetic pick: any other type cleared first, then this one.
     public mutating func chooseLatticeType(_ mode: LatticeStageMode) {
         clearLatticeType()
@@ -237,6 +258,19 @@ extension ProjectModel {
         let type = lattice.stageMode?.title ?? "lattice"
         sealUndoStep()
         lattice = LatticeSettings()
+        sealUndoStep()
+        return ClearedLattice(type: type, after: editSnapshot)
+    }
+
+    /// ★ B3 ("Keep my regions and groups, choose a new type"; the reviewer's ruling (a), 23:05Z): where the lattice goes stays —
+    /// its roles, depths, expands, zones and painted faces — and everything about the cells goes, per-region densities with it
+    /// (a density kept from one type can be out of band for the next). The type goes too, so the selector asks; on a Flexible
+    /// project its Squish setup counts as cells. ONE undo step, as the full clear.
+    @discardableResult
+    public func clearLatticeCells() -> ClearedLattice {
+        let type = lattice.stageMode?.title ?? (lattice.flexible != nil ? "Flexible" : "lattice")
+        sealUndoStep()
+        lattice = lattice.keepingPlacement()
         sealUndoStep()
         return ClearedLattice(type: type, after: editSnapshot)
     }
@@ -401,6 +435,7 @@ struct ChangeLatticeTypeCard: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .background(CornerPairStyle.publish("changeType-\(c.rawValue)"))
                     .accessibilityIdentifier("lattice-change-type-\(c.rawValue)")
                 }
             }

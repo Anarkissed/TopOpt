@@ -21,10 +21,12 @@ public enum FlexibleChangeType {
     @MainActor static func shows(asking: Bool, project: ProjectModel) -> Bool { asking && project.lattice.flexible != nil }
 
     /// A choice: the card closes, then the one thing it says.
-    @MainActor static func choose(_ c: ChangeLatticeTypeChoice, main: FlexibleMainStage, duplicate: () -> Void, loseAll: () -> Void) {
+    @MainActor static func choose(_ c: ChangeLatticeTypeChoice, main: FlexibleMainStage, duplicate: () -> Void, loseAll: () -> Void,
+                                  keepRegions: () -> Void = {}) {   // ★ UI-Notes B3 (#362's OK 23:22Z): his third choice
         main.changeTypeAsking = false
         switch c {
         case .duplicate: duplicate()
+        case .keepRegions: keepRegions()
         case .loseAll: loseAll()
         case .cancel: break
         }
@@ -51,16 +53,19 @@ public struct FlexibleChangeTypeMount: View {
     @ObservedObject var project: ProjectModel
     let app: AppModel
     let loseAll: () -> Void
+    /// ★ UI-Notes B3 (#362's OK 23:22Z): "Keep my regions and groups, choose a new type" (the Squish setup counts as cells).
+    var keepRegions: () -> Void = {}
 
-    public init(main: FlexibleMainStage, project: ProjectModel, app: AppModel, loseAll: @escaping () -> Void) {
-        self.main = main; self.project = project; self.app = app; self.loseAll = loseAll
+    public init(main: FlexibleMainStage, project: ProjectModel, app: AppModel, loseAll: @escaping () -> Void,
+                keepRegions: @escaping () -> Void = {}) {
+        self.main = main; self.project = project; self.app = app; self.loseAll = loseAll; self.keepRegions = keepRegions
     }
 
     public var body: some View {
         if FlexibleChangeType.shows(asking: main.changeTypeAsking, project: project) {
             ChangeLatticeTypeCard(type: FlexibleStageStyle.title, regions: FlexibleChangeType.regions(project)) { c in
                 FlexibleChangeType.choose(c, main: main, duplicate: { FlexibleChangeType.duplicate(app: app, project: project) },
-                                          loseAll: loseAll)
+                                          loseAll: loseAll, keepRegions: keepRegions)
             }
             .transition(.opacity)
         }

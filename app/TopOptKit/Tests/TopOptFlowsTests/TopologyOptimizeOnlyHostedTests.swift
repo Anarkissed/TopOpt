@@ -78,6 +78,8 @@ final class TopologyOptimizeOnlyHostedTests: XCTestCase {
         let offered = try h.pickFromMenu("topologySplitMore", "Optimize, then lattice", what: "⌃")
         XCTAssertTrue(offered.contains { $0.hasPrefix("Optimize, then lattice") && $0.hasSuffix("[off]") },
                       "★ ⌃ holds Optimize, then lattice, greyed while the lattice run can't start: \(offered)")
+        XCTAssertEqual(TopologyRunCopy.growthClash, "A graded lattice can\u{2019}t use Allow growth here yet",
+                       "★ the reviewer's follow-up 2: core's refusal as one plain line on that row, never a card")
         XCTAssertEqual(sent.requests.count, n, "a greyed lattice run starts nothing")
     }
 
