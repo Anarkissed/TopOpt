@@ -77,6 +77,22 @@ final class SquishHost {
         Self.pump(settle)
     }
 
+    /// A real drag through `points` (top-left origin): mouse down at the first, dragged through the rest, up at the last.
+    func drag(_ points: [CGPoint], settle: Double = 0.5) {
+        guard let first = points.first, let last = points.last else { return }
+        func send(_ t: NSEvent.EventType, _ p: CGPoint) {
+            let e = NSEvent.mouseEvent(with: t, location: NSPoint(x: p.x, y: size.height - p.y), modifierFlags: [],
+                                       timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                       context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+            window.sendEvent(e)
+            Self.pump(0.03)
+        }
+        send(.leftMouseDown, first)
+        for p in points.dropFirst() { send(.leftMouseDragged, p) }
+        send(.leftMouseUp, last)
+        Self.pump(settle)
+    }
+
     /// The ScreenProbe checks for one control (plan.md): drawn, wholly inside the window, a hit area of at least 44 × 44 pt, and
     /// not under any of `covers` unless it lies inside that frame.
     @discardableResult

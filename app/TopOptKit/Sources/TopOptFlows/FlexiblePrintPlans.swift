@@ -121,6 +121,14 @@ public struct FlexiblePlanCut: Codable, Hashable, Sendable {
     public var tiltDeg: Double
     public var rotateDeg: Double
     public var keyMM: Double
+    /// ★ B9 slice 4: A face — the tapped face's plane (model space): a point on it and its outward normal. nil for Top / Front /
+    /// Side. OPTIONAL like every field added to a saved type.
+    public var facePoint: [Double]?
+    public var faceNormal: [Double]?
+    /// ★ B9 slice 4: Draw on a plane — the stroke on the plane (its own u, v in mm about the plane's centre), and how it was
+    /// drawn ("pencil" freehand, "spline" through tapped points). nil for a placed cut.
+    public var curveUV: [[Double]]?
+    public var curveTool: String?
     public init(way: FlexibleCutWay, base: FlexiblePlaneBase = .side, offsetMM: Double = 0, tiltDeg: Double = 0,
                 rotateDeg: Double = 0, keyMM: Double = 4) {
         self.way = way; self.base = base; self.offsetMM = offsetMM; self.tiltDeg = tiltDeg; self.rotateDeg = rotateDeg
