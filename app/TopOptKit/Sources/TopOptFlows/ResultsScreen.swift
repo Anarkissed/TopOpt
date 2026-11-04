@@ -2033,7 +2033,7 @@ public struct ResultsScreen: View {
             HStack(alignment: .top, spacing: DS.Space.s) {
                 Spacer()
                 ViewProjectionPair()   // ★ B2 (note 1): [Orthographic │ Perspective], left of the gizmo, as on every page
-                    .padding(.top, 6)
+                    .padding(.top, (OrientationGizmoView.standardSize - ViewProjectionPair.height) / 2)   // ★ R-a2: as the workspace
                 OrientationGizmoView(camera: cameraModel)
             }
             Spacer()
