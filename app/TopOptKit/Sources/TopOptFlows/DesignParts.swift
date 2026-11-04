@@ -779,7 +779,11 @@ public struct DSFolderTabs: View {
         public let id: String
         public let title: String
         public let colour: RGBA?
-        public init(id: String, title: String, colour: RGBA? = nil) { self.id = id; self.title = title; self.colour = colour }
+        /// A number drawn in the square (#362's Squish: past eight groups the palette repeats, so the square says which).
+        public let badge: Int?
+        public init(id: String, title: String, colour: RGBA? = nil, badge: Int? = nil) {
+            self.id = id; self.title = title; self.colour = colour; self.badge = badge
+        }
     }
     let tabs: [Tab]
     let selected: String?
@@ -796,7 +800,13 @@ public struct DSFolderTabs: View {
                     VStack(spacing: 4) {
                         RoundedRectangle(cornerRadius: 7, style: .continuous)
                             .fill((t.colour ?? DS.Color.textTertiary).color).frame(width: 22, height: 22)
+                            .overlay {
+                                if let b = t.badge {
+                                    Text("\(b)").font(.system(size: 11, weight: .bold)).monospacedDigit().foregroundStyle(.white)
+                                }
+                            }
                         Text(t.title).font(.system(size: 10.5)).lineLimit(2).multilineTextAlignment(.center)
+                            .background(DSParts.publish("\(key)-\(t.id)-title"))   // (#362: a whole name is checked by its frame)
                     }
                     .foregroundStyle((t.id == selected ? DS.Color.textPrimary : DS.Color.textSecondary).color)
                     .padding(.vertical, 8).padding(.horizontal, 4)
