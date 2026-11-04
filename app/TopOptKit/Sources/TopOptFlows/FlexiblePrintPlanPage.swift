@@ -114,77 +114,54 @@ struct FlexiblePrintPlanPanel: View {
     @ObservedObject var model: FlexibleStageModel
     /// The plans live in the project (`project.lattice.flexible`): an edit republishes the project, not always the model.
     @ObservedObject private var project: ProjectModel
-    @State private var collapsed = false
+    @State private var open = true
+    @State private var renaming: String?
 
     init(main: FlexibleMainStage, model: FlexibleStageModel) {
         self.main = main; self.model = model; self._project = ObservedObject(wrappedValue: model.project)
     }
-    @State private var renaming: String?
-    @State private var contentHeight: CGFloat = 0
 
-    static let maxListHeight: CGFloat = 520
+    /// ★ LOOK PER SCREEN (his ruling 11-03; the mockup's #flex-plan): the panel is the shared wide DSPanel — its header "Print
+    /// plan · Plan A", sections with overlines, DSRow rows, the pinned Reset foot. It ends where the free column does.
+    static let maxHeight: CGFloat = 680
 
     private var plans: FlexiblePrintPlans { main.shownPlans }
     private var tpuName: String { model.material?.displayName ?? "varioShore TPU" }
 
+    /// What changes the panel's rows (not a value inside one).
+    private var shapeKey: String {
+        let p = plans
+        return "\(p.rigidMaterial ?? "-")|\(p.plan.id)|\(p.plan.cuts?.count ?? 0)|\(p.plan.joints.keys.sorted())|"
+            + "\(FlexiblePrintPlanRules.addOns(p).count)|\(main.planSeam ?? "-")|\(renaming != nil)"
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-            if !collapsed {
-                Divider().overlay(DS.Color.strokeSubtle.color)
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        planRow
-                        piecesSection
-                        seamsSection
-                        addOnsSection
-                        if plans.rigidMaterial != nil { skinRow }
-                    }
-                    .padding(.vertical, DS.Space.xs)
-                    .background(GeometryReader { g in
-                        Color.clear.onAppear { contentHeight = g.size.height }
-                            .onChange(of: g.size.height) { contentHeight = $0 }
-                    })
-                }
-                .frame(height: min(Self.maxListHeight, max(contentHeight, SelectionsList.lineHeight)))
-                Divider().overlay(DS.Color.strokeSubtle.color)
-                foot
-            }
+        DSPanel(key: "plan", title: FlexiblePrintPlanCopy.title, count: nil, width: DSParts.widePanelWidth,
+                maxHeight: Self.maxHeight, open: $open) {
+            planRow
+            piecesSection
+            seamsSection
+            addOnsSection
+            if plans.rigidMaterial != nil { skinRow }
+        } footer: {
+            foot
         }
-        .frame(width: collapsed ? nil : PageChrome.widePanelWidth, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: DS.Radius.panel).fill(DS.Surface.panel.color)
-            .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
-        .dsShadow(DS.Shadow.panel)
+        // Workaround (reported to UI-Notes 11-04): DSPanel keeps its body's measured height when its rows change, so a grown body
+        // hung its last row under the pinned foot — a false "1 more" and a Reset that took no tap. A new shape gives the panel a
+        // fresh measure.
+        .id(shapeKey)
+        .overlay(alignment: .topTrailing) {
+            // the header's count slot: the current plan's name ("Plan A"), as the mockup's
+            Text(plans.plan.name).font(.system(size: 13, weight: .medium)).foregroundStyle(DS.Color.textTertiary.color)
+                .padding(.trailing, 14).frame(height: DSParts.headerHeight).allowsHitTesting(false)
+        }
         .background(publish("selectionsList"))   // the left panel's place: the chips and the corner keep clear of it
         .background(publish("planPanel"))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("flexible-plan-panel")
     }
 
-    // MARK: header — chevron, "Print plan", the plan's name
-
-    private var header: some View {
-        Button { collapsed.toggle() } label: {
-            HStack(spacing: DS.Space.s) {
-                Image(systemName: collapsed ? "chevron.right" : "chevron.down")
-                    .font(.system(size: 12, weight: .bold)).foregroundStyle(DS.Color.textPrimary.opacity(0.7).color)
-                Text(FlexiblePrintPlanCopy.title).dsStyle(DS.TypeScale.bodyStrong).fontWeight(.bold)
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                if !collapsed { Spacer(minLength: DS.Space.s) }
-                Text(plans.plan.name).font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(DS.Color.textTertiary.color)
-            }
-            .padding(.horizontal, DS.Space.l)
-            .frame(height: SelectionsList.lineHeight)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .background(publish("planHeader"))
-        .accessibilityLabel(collapsed ? "Print plan. Open" : "Minimise the Print plan")
-        .accessibilityIdentifier("flexible-plan-header")
-    }
-
-    // MARK: Plan ⌄ — the plans, + New plan, Rename, Duplicate
+    // MARK: Plan ⌄ — the plans, + New plan, Rename, Duplicate (a setting row)
 
     private var planRow: some View {
         Group {
@@ -227,7 +204,7 @@ struct FlexiblePrintPlanPanel: View {
                 }
             }
         }
-        .padding(.horizontal, DS.Space.l)
+        .padding(.horizontal, 14)
     }
 
     private func commitRename() {
@@ -239,12 +216,10 @@ struct FlexiblePrintPlanPanel: View {
 
     // MARK: 1 · Pieces
 
-    private var piecesSection: some View {
+    @ViewBuilder private var piecesSection: some View {
         let pieces = FlexiblePrintPlanRules.pieces(plans, tpuName: tpuName)
-        return VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 0) {
-                overline(FlexiblePrintPlanCopy.pieces, count: pieces.count)
-                Spacer(minLength: 0)
+        DSPanelSection(FlexiblePrintPlanCopy.pieces, count: pieces.count, key: "plan-pieces")
+            .overlay(alignment: .trailing) {
                 // ★ B9 slice 3 (round 3: six ways): + Cut ⌄ — with two materials, as the mockup's
                 if plans.rigidMaterial != nil {
                     Menu {
@@ -252,87 +227,77 @@ struct FlexiblePrintPlanPanel: View {
                             Button { main.startCut(w) } label: { Text(w.title); Text(w.sub) }
                         }
                     } label: {
-                        Text("+ Cut").font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.accent.color)
-                            .padding(.horizontal, DS.Space.l).frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                        HStack(spacing: 3) {
+                            Text("+ Cut")
+                            Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
+                        }
+                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.accent.color)
+                        .padding(.horizontal, 14).frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
                     }
                     .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain).fixedSize()
                     .background(publish("planCutMenu"))
                     .accessibilityIdentifier("flexible-plan-cut-menu")
                 }
             }
-            ForEach(pieces, id: \.key) { pc in
-                HStack(spacing: DS.Space.s) {
-                    RoundedRectangle(cornerRadius: 3).fill(pc.tpu ? FlexibleStageStyle.accent : DS.Color.textTertiary.color)
-                        .frame(width: 12, height: 12)
-                    Text(pc.name).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color).lineLimit(1)
-                    Spacer(minLength: DS.Space.s)
-                    if pc.tpu {
-                        Text(pc.material).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color).lineLimit(1)
-                    } else {
-                        Menu {
-                            ForEach(FlexiblePrintPlanRules.rigidMaterials, id: \.self) { mat in
-                                Button { main.editPlans { $0.rigidMaterial = mat } } label: {
-                                    if mat == pc.material { Label(mat, systemImage: "checkmark") } else { Text(mat) }
-                                }
-                            }
-                            Divider()
-                            Button("One material (TPU)") { main.editPlans { $0.rigidMaterial = nil }; main.planSeam = nil }
-                        } label: {
-                            HStack(spacing: 4) {
-                                Text(pc.material).font(.system(size: 13, weight: .semibold))
-                                Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
-                            }
-                            .foregroundStyle(DS.Color.accent.color)
-                            .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
-                        }
-                        .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain).fixedSize()
-                        .background(publish("planRigid"))
-                        .accessibilityIdentifier("flexible-plan-rigid")
-                    }
-                }
-                .frame(minHeight: 48)
-                .padding(.horizontal, DS.Space.l)
-                .accessibilityIdentifier("flexible-plan-piece-\(pc.key)")
-            }
-            // ★ B9 slice 3: the cuts he placed — kept, their pieces from the engine's cut; Join undoes one
-            ForEach(Array((plans.plan.cuts ?? []).enumerated()), id: \.offset) { i, c in
-                HStack(spacing: DS.Space.s) {
-                    Image(systemName: "scissors").font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.accentCyan.color)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(FlexiblePlanCutCopy.row(c)).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
-                            .lineLimit(1)
-                        Text(FlexiblePlanCutCopy.rowSub).font(.system(size: 12)).foregroundStyle(DS.Color.textTertiary.color).lineLimit(1)
-                    }
-                    Spacer(minLength: DS.Space.s)
-                    Button { main.joinCut(i) } label: {
-                        Text("Join").font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.accent.color)
-                            .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .background(publish("planCutJoin-\(i)"))
-                    .accessibilityLabel("Join: undo this cut")
-                    .accessibilityIdentifier("flexible-plan-cut-join-\(i)")
-                }
-                .frame(minHeight: 48)
-                .padding(.horizontal, DS.Space.l)
-                .background(publish("planCutRow-\(i)"))
-            }
-            line(plans.rigidMaterial == nil ? FlexiblePrintPlanCopy.oneMaterial : FlexiblePrintPlanCopy.appCut)
-            if plans.rigidMaterial == nil {
-                Button { main.editPlans { $0.rigidMaterial = FlexiblePrintPlanRules.rigidMaterials[0] } } label: {
-                    HStack(spacing: DS.Space.xs) {
-                        Image(systemName: "plus").font(.system(size: 13, weight: .bold))
-                        Text(FlexiblePrintPlanCopy.secondMaterial).font(.system(size: 14, weight: .semibold))
-                    }
-                    .foregroundStyle(DS.Color.accent.color)
-                    .frame(minHeight: 44).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, DS.Space.l)
-                .background(publish("planSecondMaterial"))
-                .accessibilityIdentifier("flexible-plan-second-material")
+        ForEach(pieces, id: \.key) { pc in
+            DSRow(.group, key: "plan-piece-\(pc.key)", mark: .colour(pc.tpu ? DS.Color.accentGreen : RGBA(hex: 0xC7C7CC)),
+                  name: pc.name, value: pc.tpu ? pc.material : nil) {
+                if !pc.tpu { rigidMenu(pc) }
             }
         }
+        // ★ B9 slice 3: the cuts he placed — kept, their pieces from the engine's cut; Join undoes one
+        ForEach(Array((plans.plan.cuts ?? []).enumerated()), id: \.offset) { i, c in
+            DSRow(.group, key: "plan-cut-\(i)", name: FlexiblePlanCutCopy.row(c),
+                  line: DSRowLine(FlexiblePlanCutCopy.rowSub)) {
+                Button { main.joinCut(i) } label: {
+                    Text("Join").font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.accent.color)
+                        .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .background(publish("planCutJoin-\(i)"))
+                .accessibilityLabel("Join: undo this cut")
+                .accessibilityIdentifier("flexible-plan-cut-join-\(i)")
+            }
+            .background(publish("planCutRow-\(i)"))
+        }
+        line(plans.rigidMaterial == nil ? FlexiblePrintPlanCopy.oneMaterial : FlexiblePrintPlanCopy.appCut)
+        if plans.rigidMaterial == nil {
+            Button { main.editPlans { $0.rigidMaterial = FlexiblePrintPlanRules.rigidMaterials[0] } } label: {
+                HStack(spacing: DS.Space.xs) {
+                    Image(systemName: "plus").font(.system(size: 13, weight: .bold))
+                    Text(FlexiblePrintPlanCopy.secondMaterial).font(.system(size: 14, weight: .semibold))
+                }
+                .foregroundStyle(DS.Color.accent.color)
+                .frame(minHeight: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(publish("planSecondMaterial"))
+            .accessibilityIdentifier("flexible-plan-second-material")
+        }
+    }
+
+    /// A rigid piece's plastic: "PLA · from New part ⌄" (J-2), its menu the plastics and "One material".
+    private func rigidMenu(_ pc: FlexiblePlanPiece) -> some View {
+        Menu {
+            ForEach(FlexiblePrintPlanRules.rigidMaterials, id: \.self) { mat in
+                Button { main.editPlans { $0.rigidMaterial = mat } } label: {
+                    if mat == pc.material { Label(mat, systemImage: "checkmark") } else { Text(mat) }
+                }
+            }
+            Divider()
+            Button("One material (TPU)") { main.editPlans { $0.rigidMaterial = nil }; main.planSeam = nil }
+        } label: {
+            HStack(spacing: 6) {
+                Text("\(pc.material) \u{00B7} from New part").font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
+                Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold)).foregroundStyle(DS.Color.textSecondary.color)
+            }
+            .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+        }
+        .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain).fixedSize()
+        .background(publish("planRigid"))
+        .accessibilityIdentifier("flexible-plan-rigid")
     }
 
     // MARK: 2 · Seams
@@ -340,25 +305,16 @@ struct FlexiblePrintPlanPanel: View {
     @ViewBuilder private var seamsSection: some View {
         let seams = FlexiblePrintPlanRules.seams(plans)
         if !seams.isEmpty {
-            overline(FlexiblePrintPlanCopy.seams, count: seams.count)
+            DSPanelSection(FlexiblePrintPlanCopy.seams, count: seams.count, key: "plan-seams")
             ForEach(seams, id: \.key) { s in
                 let joint = plans.plan.joints[s.key]
                 let open = main.planSeam == s.key
-                Button { main.planSeam = open ? nil : s.key } label: {
-                    HStack(spacing: DS.Space.s) {
-                        Image(systemName: "link").font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.textSecondary.color)
-                        Text(s.name).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color).lineLimit(1)
-                        Spacer(minLength: DS.Space.s)
-                        Text(joint ?? FlexiblePrintPlanCopy.pickJoint).font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle((joint == nil ? DS.Color.warning : DS.Color.textSecondary).color).lineLimit(1)
-                    }
-                    .padding(.horizontal, DS.Space.l)
-                    .frame(minHeight: 48)
-                    .background(RoundedRectangle(cornerRadius: 10).strokeBorder(open ? DS.Color.accent.color : .clear, lineWidth: 1.5)
-                        .padding(.horizontal, DS.Space.xs))
-                    .contentShape(Rectangle())
+                DSRow(.group, key: "plan-seam-\(s.key)", name: s.name, selected: open,
+                      tap: { main.planSeam = open ? nil : s.key }) {
+                    Text(joint ?? FlexiblePrintPlanCopy.pickJoint).font(.system(size: 13, weight: joint == nil ? .semibold : .regular))
+                        .foregroundStyle((joint == nil ? DS.Color.warning : DS.Color.textSecondary).color).lineLimit(1)
+                        .padding(.trailing, 4).allowsHitTesting(false)
                 }
-                .buttonStyle(.plain)
                 .background(publish("planSeam-\(s.key)"))
                 .accessibilityIdentifier("flexible-plan-seam-\(s.key)")
                 if open { seamCard(s) }
@@ -396,20 +352,22 @@ struct FlexiblePrintPlanPanel: View {
                 }
                 switch joint.family {
                 case .together:
-                    line(FlexiblePrintPlanCopy.together)
+                    cardLine(FlexiblePrintPlanCopy.together)
                     valueRow(FlexiblePrintPlanCopy.printOrder, FlexiblePrintPlanCopy.printOrderValue)
-                case .slide: line(FlexiblePrintPlanCopy.slidePlaces)
-                case .flange: line(FlexiblePrintPlanCopy.flange)
-                case .pause: line(FlexiblePrintPlanCopy.pause(joint.name))
+                case .slide: cardLine(FlexiblePrintPlanCopy.slidePlaces)
+                case .flange: cardLine(FlexiblePrintPlanCopy.flange)
+                case .pause: cardLine(FlexiblePrintPlanCopy.pause(joint.name))
                 case .fixed, .one: EmptyView()
                 }
             } else {
-                line(FlexiblePrintPlanCopy.pickJointLine)
+                cardLine(FlexiblePrintPlanCopy.pickJointLine)
             }
         }
-        .padding(.horizontal, DS.Space.l)
-        .padding(.vertical, DS.Space.xs)
-        .background(RoundedRectangle(cornerRadius: 12).fill(DS.Color.fillSubtle.color).padding(.horizontal, DS.Space.s))
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        // the mockup's .card2: an inset card under its seam row
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(DS.Color.fillSubtle.color)
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)))
+        .padding(.horizontal, 8).padding(.vertical, 6)
         .accessibilityIdentifier("flexible-plan-seam-card")
     }
 
@@ -418,33 +376,23 @@ struct FlexiblePrintPlanPanel: View {
     @ViewBuilder private var addOnsSection: some View {
         let adds = FlexiblePrintPlanRules.addOns(plans)
         if !adds.isEmpty {
-            HStack(spacing: DS.Space.xs) {
-                overline(FlexiblePrintPlanCopy.addOns, count: adds.count)
-                InfoTip(key: "planAddOns", text: FlexiblePrintPlanCopy.addOnsInfo)
-            }
+            DSPanelSection(FlexiblePrintPlanCopy.addOns, count: adds.count, key: "plan-addons")
+                .overlay(alignment: .leading) {
+                    InfoTip(key: "planAddOns", text: FlexiblePrintPlanCopy.addOnsInfo).padding(.leading, 112).padding(.top, 8)
+                }
             ForEach(adds, id: \.key) { a in
                 let on = !plans.plan.addOnsOff.contains(a.key)
-                HStack(spacing: DS.Space.s) {
-                    Image(systemName: "key.horizontal").font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(a.name).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
-                        Text(a.what).font(.system(size: 12)).foregroundStyle(DS.Color.textTertiary.color).lineLimit(1)
-                    }
-                    Spacer(minLength: DS.Space.s)
-                    Toggle("", isOn: Binding(get: { on }, set: { v in
+                DSRow(.group, key: "plan-addon-\(a.key.replacingOccurrences(of: "/", with: "_"))", name: a.name, value: a.what) {
+                    DSSwitch(isOn: on, key: "planAddOnSwitch-\(a.key)") {
                         main.editPlans { p in
                             p.plan.addOnsOff.removeAll { $0 == a.key }
-                            if !v { p.plan.addOnsOff.append(a.key) }
+                            if on { p.plan.addOnsOff.append(a.key) }
                             p.plan.built = false
                         }
-                    }))
-                    .labelsHidden().toggleStyle(.switch)
-                    .frame(minWidth: 44, minHeight: 44)
-                    .accessibilityIdentifier("flexible-plan-addon-\(a.key)")
+                    }
                 }
-                .frame(minHeight: 48)
-                .padding(.horizontal, DS.Space.l)
                 .background(publish("planAddOn-\(a.key)"))
+                .accessibilityIdentifier("flexible-plan-addon-\(a.key)")
             }
         }
     }
@@ -461,7 +409,7 @@ struct FlexiblePrintPlanPanel: View {
                 .fixedSize()
         }
         .frame(minHeight: 44)
-        .padding(.horizontal, DS.Space.l)
+        .padding(.horizontal, 14)
     }
 
     // MARK: foot — Reset at the bottom-left (its confirm opens at the top middle)
@@ -478,32 +426,28 @@ struct FlexiblePrintPlanPanel: View {
             Text(FlexiblePrintPlanCopy.resetLine).font(.system(size: 12)).foregroundStyle(DS.Color.textTertiary.color).lineLimit(1)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, DS.Space.l)
     }
 
     // MARK: parts
 
-    private func overline(_ text: String, count: Int) -> some View {
-        HStack(spacing: DS.Space.xs) {
-            Text(text.uppercased()).font(.system(size: 12, weight: .semibold)).tracking(0.6)
-                .foregroundStyle(DS.Color.textTertiary.color)
-            Text("\(count)").font(.system(size: 12, weight: .semibold)).monospacedDigit().foregroundStyle(DS.Color.textTertiary.color)
-        }
-        .padding(.horizontal, DS.Space.l)
-        .padding(.top, DS.Space.m).padding(.bottom, DS.Space.xs)
-    }
-
     private func line(_ text: String) -> some View {
         Text(text).font(.system(size: 12.5)).foregroundStyle(DS.Color.textSecondary.color)
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.xs)
+            .padding(.horizontal, 14).padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func cardLine(_ text: String) -> some View {
+        Text(text).font(.system(size: 12.5)).foregroundStyle(DS.Color.textSecondary.color)
+            .fixedSize(horizontal: false, vertical: true).padding(.vertical, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func valueRow(_ label: String, _ value: String) -> some View {
         HStack {
             Text(label).dsStyle(DS.TypeScale.caption).fontWeight(.bold).foregroundStyle(DS.Color.textPrimary.color)
             Spacer(minLength: DS.Space.s)
-            Text(value).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
+            DSValueBox(value)
         }
         .frame(minHeight: 44)
     }
@@ -516,10 +460,9 @@ struct FlexiblePrintPlanPanel: View {
 
 // MARK: - the corner's main button on the Print plan
 
-/// ★ J-A (app-map §3.7 Corner): "Build Plan A" — grey with ONE fix chip while a seam has no joint (U6: a blocked action stays
-/// visible, says why in ≤ 5 words, and the chip is the one-tap fix: it opens that seam). Every seam held: it asks the engine
-/// to rebuild the lattice with the plan's joints — engine work (E5), so for now its tap says so in one plain line and the plan
-/// is never marked built.
+/// ★ J-A (app-map §3.7 Corner), on the shared DSRunButton: "Build Plan A" — grey, "every seam needs a joint", with ONE fix chip
+/// while a seam has no joint (U6: ≤ 5 words + the chip; the chip opens that seam). Every seam held: it asks the engine to rebuild
+/// the lattice with the plan's joints — engine work (E5), so its tap says so in one plain line and the plan is never marked built.
 struct FlexiblePlanBuildButton: View {
     @ObservedObject var main: FlexibleMainStage
     @ObservedObject var model: FlexibleStageModel
@@ -534,45 +477,21 @@ struct FlexiblePlanBuildButton: View {
     var body: some View {
         let plans = main.shownPlans
         let need = FlexiblePrintPlanRules.needing(plans)
-        let blocked = !need.isEmpty
         VStack(alignment: .trailing, spacing: DS.Space.s) {
             if let first = need.first {
-                HStack(spacing: DS.Space.s) {
-                    Text(FlexiblePrintPlanCopy.noJoint(first.name)).font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(DS.Color.warning.color).lineLimit(1)
-                    Button { main.planSeam = first.key } label: {
-                        Text(FlexiblePrintPlanCopy.pickOne).font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(DS.Color.accent.color)
-                            .padding(.horizontal, DS.Space.m).frame(height: 30)
-                            .background(Capsule().fill(DS.Color.accent.opacity(0.16).color))
-                            .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .background(FlexibleCornerPairStyle.publish("planFix"))
-                    .accessibilityIdentifier("flexible-plan-fix")
-                }
+                // the corner's fix line (the mockup's): what blocks it, in words, above the button
+                Text(FlexiblePrintPlanCopy.noJoint(first.name)).font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(DS.Color.warning.color).lineLimit(1)
             } else if let note = main.planNote {
                 Text(note).font(.system(size: 12.5)).foregroundStyle(DS.Color.textSecondary.color)
                     .multilineTextAlignment(.trailing).frame(maxWidth: width + 120, alignment: .trailing)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("flexible-plan-note")
             }
-            Button { main.planNote = FlexiblePrintPlanCopy.buildNeedsEngine } label: {
-                VStack(spacing: 2) {
-                    Text("Build \(plans.plan.name)").font(.system(size: 17, weight: .semibold))
-                    Text(blocked ? "every seam needs a joint" : "rebuilds the lattice with its joints")
-                        .font(.system(size: 12)).opacity(0.8).lineLimit(1)
-                }
-                .foregroundStyle(DS.Color.textPrimary.opacity(blocked ? 0.45 : 1).color)
-                .frame(width: width, height: PageChrome.actionButton)
-                .background(Capsule().fill((blocked ? DS.Color.fillSubtle : DS.Color.accent).color))
-                .overlay(Capsule().strokeBorder(DS.Color.strokeStrong.color, lineWidth: blocked ? 1 : 0))
-                .contentShape(Capsule())
-            }
-            .buttonStyle(.plain)
-            .disabled(blocked)
-            .background(FlexibleCornerPairStyle.publish("planBuild"))
-            .accessibilityIdentifier("flexible-plan-build")
+            DSRunButton("Build \(plans.plan.name)", subtitle: "rebuilds the lattice with its joints",
+                        state: need.isEmpty ? .ready : .blocked(words: "every seam needs a joint", fix: FlexiblePrintPlanCopy.pickOne),
+                        key: "planBuild", action: { if need.isEmpty { main.planNote = FlexiblePrintPlanCopy.buildNeedsEngine } },
+                        fix: need.first.map { first in { main.planSeam = first.key } })
         }
     }
 }
