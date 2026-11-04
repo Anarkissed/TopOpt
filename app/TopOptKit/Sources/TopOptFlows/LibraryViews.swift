@@ -631,7 +631,10 @@ struct ProjectFolderView: View {
     @State private var renamingPart: (id: UUID, name: String)?
     @State private var deleting: LibraryPart?
 
-    private let columns = [GridItem(.adaptive(minimum: 360), spacing: DS.Space.xl3)]
+    @State private var portrait = false
+
+    /// mockup .grid: 3 across (2 in portrait), 18 pt apart
+    private var columns: [GridItem] { Array(repeating: GridItem(.flexible(), spacing: DS.Space.xl), count: portrait ? 2 : 3) }
 
     var body: some View {
         ScrollView {
@@ -646,34 +649,33 @@ struct ProjectFolderView: View {
                     }
                     Spacer()
                     if let project {
-                        Button { addPart(project.id) } label: {
-                            Label("Add part", systemImage: "plus").font(DS.TypeScale.bodyStrong.font).foregroundStyle(.white)
-                                .padding(.horizontal, DS.Space.l).frame(height: 44)
-                                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(DS.Color.accent.color))
-                                .dsShadow(.accentGlow)
-                        }
-                        .buttonStyle(.plain).accessibilityIdentifier("library-add-part")
-                        .background(CornerPairStyle.publish("libraryAddPart"))   // B1: hosted tests
+                        // ★ B5 (mockup #lib-project): §4's glass button in the accent
+                        DSGlassButton("Add part", systemImage: "plus", accent: true, key: "libraryAddPart") { addPart(project.id) }
                     }
                 }
-                LazyVGrid(columns: columns, spacing: DS.Space.xl3) {
+                LazyVGrid(columns: columns, spacing: DS.Space.xl) {
                     ForEach(parts) { part in
                         LibraryPartCard(model: model, library: library, part: part) { open(part.id) }
-                            .contextMenu {
-                                Button { renamingPart = (part.id, part.name) } label: { Label("Rename", systemImage: "pencil") }
-                                Menu {
-                                    ForEach(library.index.projects) { p in Button(p.name) { library.move(part: part.id, to: p.id) } }
-                                    Button("Unfiled") { library.move(part: part.id, to: nil) }
-                                } label: { Label("Move to", systemImage: "folder") }
-                                Button(role: .destructive) { deleting = part } label: { Label("Delete part…", systemImage: "trash") }
+                            // app-map: ⋯ per card — Rename · Move to · Delete part (where he sees it; the long press stays)
+                            .overlay(alignment: .bottomTrailing) {
+                                Menu { partMenu(part) } label: { LibraryDots() }
+                                    .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain).fixedSize()
+                                    .background(DSParts.publish("libraryPart-\(part.name)-menu"))
+                                    .accessibilityLabel("\(part.name) menu")
+                                    .padding(4)
                             }
+                            .contextMenu { partMenu(part) }
                     }
-                    if let project { LibraryNewTile(title: "Add part", detail: nil) { addPart(project.id) } }
+                    if let project { DSAddTile("Add part", key: "libraryAddTile") { addPart(project.id) } }
                 }
-                .padding(.top, DS.Space.xl3)
+                .padding(.top, DS.Space.xl)
             }
             .padding(.horizontal, DS.Space.page).padding(.top, 34).padding(.bottom, 60)
         }
+        .background(GeometryReader { g in
+            Color.clear.onAppear { portrait = g.size.height > g.size.width }
+                .onChange(of: g.size) { portrait = $0.height > $0.width }
+        })
         .alert("Rename project", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Name", text: Binding(get: { renaming ?? "" }, set: { renaming = $0 }))
             Button("Rename") { if let p = project, let n = renaming { library.rename(project: p.id, to: n) }; renaming = nil }
@@ -698,64 +700,55 @@ struct ProjectFolderView: View {
         }
     }
 
+    @ViewBuilder private func partMenu(_ part: LibraryPart) -> some View {
+        Button { renamingPart = (part.id, part.name) } label: { Label("Rename…", systemImage: "pencil") }
+        Menu {
+            ForEach(library.index.projects) { p in Button(p.name) { library.move(part: part.id, to: p.id) } }
+            Button("Unfiled") { library.move(part: part.id, to: nil) }
+        } label: { Label("Move to", systemImage: "folder") }
+        Button(role: .destructive) { deleting = part } label: { Label("Delete part…", systemImage: "trash") }
+    }
+
     private func addPart(_ project: UUID) {
         library.importTargetProject = project
         model.newTopOpt()
     }
 }
 
-/// A part card: its picture, name, the H46 line, and a strip of its versions.
+/// A part card, §4.7's DSPartCard (mockup #lib-project): its picture (B1, note 10: the picked result, else the original model),
+/// its name, "PA12 · not optimized yet", its version strip ("v8 draft" in cyan, a Print this mark); a running version's chip
+/// over the same picture. (The ring and "v7b" tag of note 11 wait on the reviewer's ruling on which result is chosen.)
 struct LibraryPartCard: View {
     @ObservedObject var model: AppModel
     @ObservedObject var library: LibraryModel
     let part: LibraryPart
     let open: () -> Void
+
+    /// The card's line: the material (a Flexible part names its filament, #362 H46), and "not optimized yet" until a run lands.
+    static func line(material: String, optimized: Bool) -> String { optimized ? material : material + " · not optimized yet" }
+
     var body: some View {
         let newest = part.versions.max { $0.number < $1.number }
         let recent = newest.flatMap { n in model.recentProjects.first { $0.id == n.folderID } }
         let running = part.versions.first { model.runningIDs.contains($0.folderID) }
-        Button(action: open) {
-            VStack(spacing: 0) {
-                LibraryPicture(image: library.partPicture(part), drawnKey: "libraryPartPicture-\(part.name)").frame(height: 230).frame(maxWidth: .infinity)
-                VStack(alignment: .leading, spacing: DS.Space.s) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(part.name).dsStyle(DS.TypeScale.bodyStrong).lineLimit(1)
-                            // #362 H46's behaviour, carried over: a Flexible part names its filament
-                            Text(recent.flatMap { FlexibleHomeCard.meta($0) } ?? (recent?.materialName ?? ""))
-                                .dsStyle(DS.TypeScale.caption2).foregroundStyle(DS.Color.textTertiary.color).lineLimit(1)
-                        }
-                        Spacer()
-                        if let running {
-                            HStack(spacing: DS.Space.xs) { ProgressView().controlSize(.mini); Text("v\(running.number)") }
-                                .font(DS.TypeScale.footnote.font).fontWeight(.semibold).foregroundStyle(DS.Color.accent.color)
-                                .padding(.vertical, 5).padding(.horizontal, DS.Space.sm)
-                                .background(Capsule().fill(DS.Color.accent.opacity(0.14).color))
-                        }
-                    }
-                    HStack(spacing: DS.Space.xxs) {
-                        ForEach(part.versions.suffix(8), id: \.folderID) { v in
-                            HStack(spacing: 2) {
-                                Text("v\(v.number)")
-                                if v.marks.contains(where: \.printThis) { Image(systemName: "printer").foregroundStyle(DS.Color.okGreen.color) }
-                            }
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(library.isDraft(v) ? DS.Color.accentCyan.color : DS.Color.textSecondary.color)
-                            .padding(.horizontal, 6).frame(height: 22)
-                            .background(RoundedRectangle(cornerRadius: 7).fill(DS.Color.fillSubtle.color))
-                            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(DS.Color.strokeSubtle.color,
-                                                                                    style: StrokeStyle(lineWidth: 1, dash: library.isDraft(v) ? [3, 2] : [])))
-                        }
-                    }
-                }
-                .padding(.horizontal, DS.Space.xl).padding(.vertical, DS.Space.ml)
-                .overlay(alignment: .top) { Rectangle().fill(DS.Color.strokeSubtle.color).frame(height: 1) }
+        // #362 H46's behaviour, carried over: a Flexible part names its filament
+        let material = recent.flatMap { FlexibleHomeCard.meta($0) } ?? (recent?.materialName ?? "")
+        DSPartCard(key: "libraryPart-\(part.name)", name: part.name,
+                   line: Self.line(material: material, optimized: part.versions.contains { !library.isDraft($0) }),
+                   running: running.map { "v\($0.number)" },
+                   versions: part.versions.suffix(8).map { v in
+                       DSVersionChip(id: v.folderID.uuidString, title: library.isDraft(v) ? "v\(v.number) draft" : "v\(v.number)",
+                                     draft: library.isDraft(v), printed: v.marks.contains(where: \.printThis))
+                   },
+                   open: open) {
+            if let image = library.partPicture(part) {
+                Image(decorative: image, scale: 1).resizable().aspectRatio(contentMode: .fit).padding(12)
+                    .background(CornerPairStyle.publish("libraryPartPicture-\(part.name)"))   // B1: hosted tests
+            } else {
+                Image(systemName: "cube.transparent").font(.system(size: 34, weight: .light))
+                    .foregroundStyle(DS.Color.textPrimary.opacity(0.22).color)
             }
-            .modifier(LibraryCardSurface())
         }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("library-part-\(part.name)")
-        .background(CornerPairStyle.publish("libraryPart-\(part.name)"))   // B1: hosted tests find a part card by its frame
     }
 }
 
