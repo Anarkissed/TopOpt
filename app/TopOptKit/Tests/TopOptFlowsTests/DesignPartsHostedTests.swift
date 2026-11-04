@@ -47,7 +47,8 @@ final class DesignPartsHostedTests: XCTestCase {
                 }
                 .padding(.leading, 24).padding(.top, 130)
                 DSCorner(key: "galCorner") {
-                    DSGlassButton("Settings", chevron: true, key: "galSettings") { taps.all.append("settings") }
+                    DSGlassButton("Settings", detail: "Fast \u{00B7} +Z \u{00B7} \u{2212}Z", systemImage: "slider.horizontal.3",
+                                  chevron: true, key: "galSettings") { taps.all.append("settings") }
                 } run: {
                     DSRunButton("Optimize", subtitle: "3 anchors · 3 loads", key: "galRun") { taps.all.append("run") }
                 } split: {
@@ -64,6 +65,7 @@ final class DesignPartsHostedTests: XCTestCase {
                         DSChip(.fix("Use 3.2 mm"), key: "galFix") { taps.all.append("chipfix") }
                         DSChip(.tag("Draft"), key: "galTag")
                         DSChip(.role(glyph: "lock.fill", name: "Anchor", colour: DS.Color.Role.anchor), key: "galRole")
+                        DSSplitButton(key: "galSplitPlain") { taps.all.append("splitPlain") }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .trailing).padding(.trailing, 24).padding(.top, 130)
@@ -256,6 +258,63 @@ final class DesignPartsHostedTests: XCTestCase {
         let reset = try XCTUnwrap(h.frames.all["growReset"])
         ui.click(h, CGPoint(x: reset.midX, y: reset.midY))
         XCTAssertEqual(log.taps.last, "reset", "★ the pinned footer takes its tap")
+    }
+
+    /// #362's two additions (11-04 06:40Z): the glass button's tertiary detail (the mockup's "Settings  Fast · +Z · −Z ⌄",
+    /// UI.corner's chipSub) and the ⌃ as a plain button (Flexible's opens the lattice card panel, not a menu).
+    func testTheGlassButtonsDetailAndThePlainSplit() throws {
+        let (h, taps) = host(3)
+        let settings = try XCTUnwrap(h.frames.all["galSettings"])
+        let detail = try XCTUnwrap(h.frames.all["galSettings-detail"], "★ the detail is drawn")
+        XCTAssertTrue(settings.contains(detail), "the detail inside its button")
+        XCTAssertGreaterThan(detail.minX - settings.minX, 90, "the detail after the glyph and the title (\(detail) in \(settings))")
+        XCTAssertEqual(settings.height, 48, accuracy: 0.5, "still §4's 48 pt glass button")
+        ui.click(h, CGPoint(x: detail.midX, y: detail.midY))
+        XCTAssertEqual(taps.all.last, "settings", "the detail is part of the button")
+        let plain = try XCTUnwrap(h.frames.all["galSplitPlain"], "the plain ⌃")
+        XCTAssertEqual(plain.width, 64, accuracy: 0.5); XCTAssertEqual(plain.height, 64, accuracy: 0.5)
+        ui.click(h, CGPoint(x: plain.midX, y: plain.midY))
+        XCTAssertEqual(taps.all.last, "splitPlain", "★ the plain ⌃ runs its action")
+        // which init a call site gets (a trailing closure fits both): menu items → the menu; a call → the plain button
+        XCTAssertTrue(DSSplitButton(key: "a") { Button("Optimize, then lattice") {} }.isMenu, "Buttons → the menu")
+        XCTAssertTrue(DSSplitButton(key: "a2") {   // Topology's shape: several items, modifiers
+            Button { taps.all.append("y") } label: { Text("Optimize, then lattice"); Text("one tap") }.disabled(true)
+            Button("Lattice an optimized result") {}.accessibilityIdentifier("a2-item")
+        }.isMenu, "several items → the menu")
+        XCTAssertFalse(DSSplitButton(key: "b") { taps.all.append("x") }.isMenu, "a call → the plain button")
+        XCTAssertFalse(DSSplitButton(key: "c", action: {}).isMenu)
+    }
+
+    /// §4.6 + the mockup's `.run` (min-width 250, line 2 `white-space: nowrap`): line 2 is never cut — the button grows to it, the
+    /// text keeps its 11.5 pt. #362 (11-04 06:44Z): Flexible's Lattice line can be core's 44 characters. Squeezed here by its
+    /// neighbours (a parent offering less than it needs), as a fixed 250 pt button would be.
+    func testTheRunButtonsSecondLineReadsWhole() throws {
+        let long = "Lattice this part \u{00B7} 3 groups \u{00B7} 12.5 mm cells"
+        XCTAssertEqual(long.count, 44, "premise: core's 44 characters")
+        struct Squeezed: View {
+            let line: String
+            var body: some View {
+                HStack(spacing: DSParts.cornerGap) {
+                    DSGlassButton("Settings", detail: "Fast \u{00B7} +Z \u{00B7} \u{2212}Z", systemImage: "slider.horizontal.3",
+                                  chevron: true, key: "sqSettings") {}
+                    DSRunButton("Lattice", subtitle: line, key: "sqRun") {}
+                    DSSplitButton(key: "sqSplit") {}
+                }
+                .frame(width: 560)
+                .frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.black)
+            }
+        }
+        let size = CGSize(width: 1000, height: 400)
+        let h = ui.host(Squeezed(line: long).frame(width: size.width, height: size.height), size: size)
+        ui.pump(0.5)
+        let ideal = (long as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 11.5)]).width
+        let line2 = try XCTUnwrap(h.frames.all["sqRun-line2"], "line 2's frame")
+        let run = try XCTUnwrap(h.frames.all["sqRun"])
+        XCTAssertGreaterThanOrEqual(line2.width, ideal - 1, "★ line 2 reads whole (\(line2.width) of \(ideal) pt)")
+        XCTAssertTrue(run.insetBy(dx: 21.5, dy: 0).contains(CGRect(x: line2.minX, y: run.midY, width: line2.width, height: 0)),
+                      "★ inside its button, 22 pt clear of each end (\(line2) in \(run))")
+        XCTAssertGreaterThanOrEqual(run.width, DSParts.runMinWidth - 0.5, "never under 250")
+        XCTAssertEqual(run.height, 64, accuracy: 0.5)
     }
 
     func testTheRunButtonsStates() throws {
