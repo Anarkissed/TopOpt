@@ -11351,10 +11351,13 @@ public struct WorkspacePlaceholder: View {
                     }
                 }
             } label: {
-                Image(systemName: "ellipsis.circle").foregroundStyle(DS.Color.textTertiary.color)
+                Image(systemName: "ellipsis").font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.Color.textSecondary.color)
+                    .frame(width: 36, height: SelectionsList.lineHeight).contentShape(Rectangle())
             }
+            .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain).fixedSize()   // ★ LOOK PER SCREEN: a plain ⋯
+            .accessibilityLabel("\(s.name): more")
         }
-        .padding(.leading, DS.Space.xs).padding(.trailing, DS.Space.l)
+        .padding(.leading, DS.Space.xs).padding(.trailing, DS.Space.s)
         .frame(minHeight: SelectionsList.lineHeight)   // ★ B3 (U3): a folder row is 44 pt
         .contentShape(Rectangle())
         .onTapGesture { selectScenario(s.id) }
@@ -12080,12 +12083,14 @@ public struct WorkspacePlaceholder: View {
             // there — so the sentence is noise occupying the width the second
             // action button needs.
             if Self.hintShows(showsSelectionHint: visible.showsSelectionHint, selectionsCollapsed: selectionsCollapsed) {
+                // ★ LOOK PER SCREEN (11-04, the mockup's .hint): one 36 pt line that gives way before the corner does
                 Text(hint)
-                    .dsStyle(DS.TypeScale.caption)
-                    .foregroundStyle(DS.Color.textPrimary.opacity(0.72).color)
-                    .padding(.vertical, 8).padding(.horizontal, DS.Space.l)
+                    .font(.system(size: 12.5)).lineLimit(1).truncationMode(.tail)
+                    .foregroundStyle(DS.Color.textSecondary.color)
+                    .padding(.horizontal, 14).frame(height: 36)
                     .background(Capsule().fill(DS.Surface.bar.color))
-                    .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.1).color, lineWidth: 1))
+                    .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
+                    .layoutPriority(-1)
             }
             Spacer()
             if flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleCornerPair(main: flexibleMain, project: project, app: model, openSquish: { showFlexiblePage = true }, changeGravity: { force.enterGravitySetup(); selection.clearActive(); gravityDraft = nil; gravitySnapLabel = nil }) } else {   // Flexible (PR #362) H30: A1's corner pair (Setup chip + the Lattice split button); no iPad chip and no Optimize on this stage, Print Parameters inside Setup · Flexible (PR #362) H61: off under Edit faces (B5's mode has the page)
@@ -12150,7 +12155,7 @@ public struct WorkspacePlaceholder: View {
         }
         // ★ B3 (R5): with scenarios, the hint says which one the part shows
         if scenariosApply, force.hasScenarios { return ScenarioSelectCopy.hint(force.activeScenario.name) }
-        return "Tap a face to select · tap a set arrow to edit its load · drag to orbit"
+        return "Tap a face \u{00B7} drag to turn"   // ★ LOOK PER SCREEN: design-system §5's short form
     }
 
     /// The groups carrying a LATTICE role (bar Z10). A group set to "lattice here"
@@ -12429,17 +12434,17 @@ public struct WorkspacePlaceholder: View {
             : macNotAnswering && ok ? Self.macNotAnsweringLine
             : !ok && run.phase != .running && sameSettingsAsLast(lattice: lattice) ? TopologyRunCopy.sameSettings(versionLabel)   // ★ B3 (§4.6)
             : summary
-        return Button {
+        // ★ LOOK PER SCREEN (his ruling 11-04): §4.6's run button (DSRunButton) — the same actions and lines as before
+        let state: DSRunButton.State = macFinding ? .finding(line)
+            : ok ? .ready
+            : marks || opensType ? .grey(line)
+            : .disabled(line)
+        return DSRunButton(title, subtitle: line, state: state,
+                           key: macFinding ? "optimizeFindingMac" : macNotAnswering ? "optimizeMacNotAnswering"
+                               : runCouldntFinish && !lastRunWasLattice ? "optimizeCouldntFinish" : "optimizeButton") {
             if ok { macNotAnswering = false; runCouldntFinish = false; requestRun(lattice: lattice) } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }
-        } label: {
-            StageActionCapsuleLabel(title: title, summary: line, ok: ok || macFinding, marks: marks || opensType,
-                                    horizontalPadding: DS.Space.xl5)
         }
-        .buttonStyle(.plain)
-        .disabled(!ok && !marks && !opensType)
         .accessibilityHint(marks ? WallMarkingSubline.hint : opensType ? Self.latticeTypeTapHint : line)
-        .background(CornerPairStyle.publish(macFinding ? "optimizeFindingMac" : macNotAnswering ? "optimizeMacNotAnswering"
-                                            : runCouldntFinish && !lastRunWasLattice ? "optimizeCouldntFinish" : "optimizeButton"))
     }
 
     /// ★ B1 (note 4): the one line on Optimize when the remembered Mac never answered; a tap tries again.
@@ -12671,29 +12676,16 @@ extension WorkspacePlaceholder {
             topologyOptimizeSplit
         } panel: {
             if setupPanelOpen {
-                CornerPairStyle.panel(width: showBuildOrientation ? 600 : 420, maxHeight: 620) { topologySetupRows }
+                CornerPairStyle.panel(width: showBuildOrientation ? 600 : DSParts.panelWidth, maxHeight: 620) { topologySetupRows }
             }
         }
     }
 
+    /// ★ LOOK PER SCREEN (11-04): §4.6's glass button — "Settings ⌄" (B2, Q6: the corner chip is Settings everywhere).
     private var topologySetupChip: some View {
-        Button { withAnimation(DS.Motion.emphasized) { setupPanelOpen.toggle() } } label: {
-            HStack(spacing: DS.Space.s) {
-                Image(systemName: "slider.horizontal.3").font(.system(size: 13, weight: .semibold))
-                Text("Settings").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)   // ★ B2 (Q6): the corner chip is Settings everywhere
-                Image(systemName: setupPanelOpen ? "chevron.down" : "chevron.up").font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(DS.Color.textSecondary.color)
-            }
-            .foregroundStyle(DS.Color.textPrimary.color)
-            .padding(.horizontal, DS.Space.l)
-            .frame(minHeight: 52)
-            .background(Capsule().fill(setupPanelOpen ? DS.Color.fillSelected.color : DS.Surface.bar.color)
-                .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
-            .contentShape(Capsule())
+        DSGlassButton("Settings", systemImage: "slider.horizontal.3", chevron: true, selected: setupPanelOpen, key: "setupChip") {
+            withAnimation(DS.Motion.emphasized) { setupPanelOpen.toggle() }
         }
-        .buttonStyle(.plain)
-        .background(CornerPairStyle.publish("setupChip"))
-        .accessibilityIdentifier("topology-setup-chip")
     }
 
     /// Optimize (today's button, one tap) + ⌃: the Lattice run (today's Lattice button's action and gate).
@@ -12703,9 +12695,9 @@ extension WorkspacePlaceholder {
         let marks = !ok && wallMarkingTapGoesSomewhere && LatticeJobIncludeGate.opensWallMarking(summary)
         let opensType = opensLatticeType(ok, summary)
         let thenLattice = optimizeThenLatticeOK
-        return HStack(spacing: 2) {
+        return HStack(spacing: DSParts.cornerGap) {   // ★ LOOK PER SCREEN: §4.18, 12 pt apart
             optimizeButtonView(lattice: false)   // ★ B3 (#362's note 1): Topology's Optimize is topology only
-            Menu {
+            DSSplitButton(key: "topologySplitMore") {   // ★ LOOK PER SCREEN: §4.6's 64 pt ⌃
                 // ★ B3 (app-map §3.3, #362's note 1): the one Topology run that carries the lattice
                 Button {
                     if thenLattice { macNotAnswering = false; runCouldntFinish = false; requestRun(lattice: true) }
@@ -12723,18 +12715,7 @@ extension WorkspacePlaceholder {
                 }
                 .disabled(!ok && !marks && !opensType)
                 .accessibilityIdentifier("topology-split-lattice")
-            } label: {
-                Image(systemName: "chevron.up").font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .frame(width: 44, height: 52)
-                    .background(Capsule().fill(DS.Surface.bar.color)
-                        .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
-                    .contentShape(Capsule())
             }
-            .menuIndicator(.hidden)
-            .background(CornerPairStyle.publish("topologySplitMore"))
-            .accessibilityLabel("More runs")
-            .accessibilityIdentifier("topology-split-more")
         }
         .background(CornerPairStyle.publish("optimizeSplit"))
     }
@@ -12819,17 +12800,31 @@ extension WorkspacePlaceholder {
         let rows = TopologySetupRow.visible(protectCount: force.explicitProtectCount(in: selection.groups),
                                             isStep: isStepPart, designBoxDrawn: visible.designBox)
         return VStack(alignment: .leading, spacing: DS.Space.s) {
-            HStack {
-                Text("Settings").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.bold).foregroundStyle(DS.Color.textPrimary.color)
-                Spacer()
-                CornerPairStyle.x44("chevron.down", label: "Close Settings", id: "topology-setup-close") { setupPanelOpen = false }
+            // ★ LOOK PER SCREEN (11-04, §4.3): the header is the chevron and the name; its tap folds the panel
+            Button { setupPanelOpen = false } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "chevron.down").font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(DS.Color.textSecondary.color).frame(width: 18)
+                    Text("Settings").font(.system(size: 14.5, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                    Spacer(minLength: 0)
+                }
+                .frame(height: DSParts.headerHeight).contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .background(CornerPairStyle.publish("topology-setup-close"))
+            .accessibilityLabel("Close Settings")
+            .accessibilityIdentifier("topology-setup-close")
             ForEach(rows, id: \.self) { row in
                 VStack(alignment: .trailing, spacing: DS.Space.s) {
-                    HStack(spacing: DS.Space.m) {
-                        Text(row.title).dsStyle(DS.TypeScale.footnote).foregroundStyle(DS.Color.textSecondary.color)
+                    // ★ LOOK PER SCREEN (§4.4's setting row): the label in the body's type, its (i), the value at the right
+                    HStack(spacing: 6) {
+                        Text(row.title).font(.system(size: 13.5)).foregroundStyle(DS.Color.textPrimary.color).lineLimit(1)
+                            .fixedSize()
+                        if let info = TopologySettingsInfo.line(row) {
+                            InfoTip(key: "settings-\(row.rawValue)", text: info, label: "About \(row.title)")
+                        }
                         Spacer(minLength: DS.Space.s)
-                        topologySetupControl(row)
+                        topologySettingsValue(row)
                     }
                     .frame(minHeight: 44)
                     switch row {
@@ -12843,6 +12838,67 @@ extension WorkspacePlaceholder {
             }
         }
         .animation(DS.Motion.emphasized, value: showBuildOrientation)
+    }
+
+    /// ★ LOOK PER SCREEN (his ruling 11-04, mockup #corner-settings): each Settings row's value as §4.4's value box — the
+    /// same actions as the chips other stages still draw (they move over with their own screen's rebuild).
+    @ViewBuilder private func topologySettingsValue(_ row: TopologySetupRow) -> some View {
+        switch row {
+        case .quality:
+            Menu {
+                ForEach(RunQuality.allCases, id: \.self) { q in
+                    Button { project.quality = q } label: { Text("\(q.title) \u{00B7} \(q.detail)") }
+                }
+            } label: {
+                DSValueBox("\(project.quality.title) \u{00B7} \(project.quality.resolution)\u{00B3}",
+                           systemImage: "square.grid.3x3.fill")
+            }
+            .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain).fixedSize()
+        case .plate:
+            Button { withAnimation(DS.Motion.emphasized) { showBuildOrientation.toggle() } } label: {
+                DSValueBox("Plate up \(BuildOrientation.label(project.buildOrientation.resolved(gravity: force.gravity)))"
+                           + (project.buildOrientation.isInferredFromGravity ? " \u{00B7} assumed" : ""))
+            }
+            .buttonStyle(.plain)
+        case .gravity:
+            Button {
+                setupPanelOpen = false   // re-entering gravity setup puts the gizmo up: the panel steps out of its way
+                force.enterGravitySetup()
+                selection.clearActive()
+                gravityDraft = nil
+                gravitySnapLabel = nil
+            } label: {
+                DSValueBox("\(gravityDirectionLabel) \u{00B7} Change", systemImage: "arrow.down")
+            }
+            .buttonStyle(.plain)
+        case .minimizePlastic:
+            // ★ the mockup's [Minimize │ Strengthen] (it was a check chip); the same guard: strengthen runs on the Mac
+            SegmentedGlass([.init(true, "Minimize"), .init(false, "Strengthen")],
+                           selection: Binding(get: { project.minimizePlastic }, set: { want in
+                               let macOnly = StrengthenRoute.line(workerSelected: compute.wantsRemote)
+                               if project.minimizePlastic, !want, macOnly != nil { model.toast = StrengthenRoute.onDeviceToast; return }
+                               project.minimizePlastic = want
+                           }))
+                .frame(width: 210)
+        case .printParameters:
+            Button { model.openPrintParams() } label: {
+                DSValueBox("Walls \(project.printParams.wallLoops) \u{00B7} \(project.printParams.infillPercent) %",
+                           trail: .more)
+            }
+            .buttonStyle(.plain)
+        case .material:
+            let options = project.process == .resin ? model.resinMaterials : model.fdmMaterials
+            Menu {
+                ForEach(options) { m in Button(m.name) { model.setCurrentProjectMaterial(m.name) } }
+            } label: {
+                DSValueBox(project.material)
+            }
+            .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain).fixedSize()
+            .background(CornerPairStyle.publish("settingsMaterial"))
+            .accessibilityIdentifier("topology-setup-material")
+        default:
+            topologySetupControl(row)
+        }
     }
 
     @ViewBuilder private func topologySetupControl(_ row: TopologySetupRow) -> some View {

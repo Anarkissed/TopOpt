@@ -386,3 +386,17 @@ public enum TopologyBlock: Equatable, Sendable {
         }
     }
 }
+
+/// ★ LOOK PER SCREEN (11-04, mockup #corner-settings): the (i) on a Settings row (one sentence; nil: no (i)).
+enum TopologySettingsInfo {
+    static func line(_ row: TopologySetupRow) -> String? {
+        switch row {
+        case .quality: return "More detail takes longer."
+        case .plate: return "Which way is up on the printer bed."
+        case .compute: return "The app remembers your Mac and finds it when you press Optimize."
+        case .minimizePlastic: return "Minimize plastic, or Redesign to strengthen."
+        case .designBox: return "Boxes and cylinders where the part may grow (Grow here) or must stay empty (Keep empty). Up to 6."
+        default: return nil
+        }
+    }
+}

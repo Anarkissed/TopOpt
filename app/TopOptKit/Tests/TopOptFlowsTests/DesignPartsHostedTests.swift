@@ -208,6 +208,51 @@ final class DesignPartsHostedTests: XCTestCase {
         XCTAssertNotEqual(picks.all.last, "type", "★ one ready type is a label card: no selection")
     }
 
+    /// #362's report (11-04 03:37Z): rows that GROW while the panel is up — the panel grows with them, no false cue, and its
+    /// pinned footer still takes its tap.
+    func testRowsThatGrowWhileItIsUpResizeIt() throws {
+        final class Log { var taps: [String] = [] }
+        struct Growing: View {
+            let log: Log
+            @State var n = 2
+            @State var open = true
+            var body: some View {
+                DSPanel(key: "grow", title: "Print plan", count: n, maxHeight: 680, open: $open) {
+                    ForEach(0..<n, id: \.self) { i in DSRow(.group, key: "grow-row\(i)", name: "Piece \(i + 1)") }
+                } footer: {
+                    HStack {
+                        Button("Add") { n += 2; log.taps.append("add") }.buttonStyle(.plain)
+                            .frame(minWidth: 44, minHeight: 44).background(DSParts.publish("growAdd"))
+                        Spacer()
+                        Button("Reset") { log.taps.append("reset") }.buttonStyle(.plain)
+                            .frame(minWidth: 44, minHeight: 44).background(DSParts.publish("growReset"))
+                    }
+                }
+                .padding(.leading, 24).padding(.top, 130)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Color.black)
+            }
+        }
+        let log = Log()
+        let size = AppBuildHost.landscape13
+        let h = ui.host(Growing(log: log).frame(width: size.width, height: size.height), size: size)
+        ui.pump(0.8)
+        let before = try XCTUnwrap(h.frames.all["grow"]).height
+        for _ in 0..<3 {
+            let add = try XCTUnwrap(h.frames.all["growAdd"])
+            ui.click(h, CGPoint(x: add.midX, y: add.midY))
+            ui.pump(0.6)
+        }
+        XCTAssertEqual(log.taps, ["add", "add", "add"])
+        let panel = try XCTUnwrap(h.frames.all["grow"])
+        XCTAssertEqual(panel.height, before + 6 * 48, accuracy: 1.5, "★ the panel grew with its 6 new rows: \(before) → \(panel.height)")
+        XCTAssertNil(h.frames.all.keys.first { $0.hasPrefix("growMore-") }, "★ 8 rows fit under 680: no cue")
+        let last = try XCTUnwrap(h.frames.all["grow-row7"])
+        XCTAssertTrue(panel.contains(CGPoint(x: last.midX, y: last.midY)), "★ the last row is in the panel")
+        let reset = try XCTUnwrap(h.frames.all["growReset"])
+        ui.click(h, CGPoint(x: reset.midX, y: reset.midY))
+        XCTAssertEqual(log.taps.last, "reset", "★ the pinned footer takes its tap")
+    }
+
     func testTheRunButtonsStates() throws {
         struct States: View {
             var body: some View {
