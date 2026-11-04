@@ -281,9 +281,13 @@ int main() {
     const std::string out = dir + "/lattice_scenarios_lp";
     // A solid bar latticed whole seals its lattice inside, and its default diagrid skin
     // finds nothing to dress; both refusals are other tests', so they are off here.
-    std::ofstream(dir + "/lattice_scenarios_lp.json")
-        << job_json(f, "lattice_part",
-                    ", \"skin\": \"none\", \"require_lattice_void_reaches_exterior\": false", "");
+    // Growth off: with it on, lattice_part latticed the whole auto-derived growth box
+    // (reported to TO-core, 2026-11-04).
+    std::string lp = job_json(f, "lattice_part",
+                              ", \"skin\": \"none\", \"require_lattice_void_reaches_exterior\": false", "");
+    lp.replace(lp.find("\"minimize_plastic\": false"), std::string("\"minimize_plastic\": false").size(),
+               "\"minimize_plastic\": true");
+    std::ofstream(dir + "/lattice_scenarios_lp.json") << lp;
     std::string r;
     try {
       const JobDescription job = load_job_file(dir + "/lattice_scenarios_lp.json");

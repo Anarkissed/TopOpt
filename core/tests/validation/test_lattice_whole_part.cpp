@@ -1,6 +1,7 @@
 // E2.2 + E2.3 (plan.md §B6 notes 26, 25): the "- Lattice faces" mode and No lattice on a
 // face region, on one 60 x 20 x 20 mm bar latticed as the part ("Lattice the original
-// part", mode lattice_part, so no optimizer runs).
+// part", mode lattice_part, so no optimizer runs). Growth is off: with it on, lattice_part
+// latticed the whole auto-derived growth box (reported to TO-core, 2026-11-04).
 //
 // §1 the parse: whole_part is a boolean; an include carrying a setting is refused in that
 //    mode until per-region grading (E3); fit with whole_part has no include to fit.
@@ -72,7 +73,7 @@ std::string job_json(int left, int right, int top, const std::string& lattice_ex
                      const std::string& grading_extra = "", const std::string& loads_extra = "") {
   return "{\"model\": \"lattice_regions_bar.stl\", \"material\": \"PLA\", "
          "\"mode\": \"lattice_part\", \"resolution\": 24, "
-         "\"loads\": {\"minimize_plastic\": false, \"build_dir\": [0, 0, 1], "
+         "\"loads\": {\"minimize_plastic\": true, \"build_dir\": [0, 0, 1], "
          "\"anchor_face_ids\": [" + std::to_string(left) + "], \"groups\": [{\"face_ids\": [" +
          std::to_string(right) + "], \"force\": [0, 300, 0]}], "
          "\"face_regions\": [{\"id\": 100, \"name\": \"Top\", \"add\": [" +
