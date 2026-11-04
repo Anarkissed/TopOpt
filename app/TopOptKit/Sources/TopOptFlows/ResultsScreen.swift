@@ -172,7 +172,8 @@ public struct ResultsScreen: View {
                 loadSurfacePoints: @escaping () -> [[SIMD3<Float>]] = { [] },
                 scenarioLoads: ResultsScenarioLoads = ResultsScenarioLoads(),
                 topLeftBlock: AnyView? = nil,
-                resultsModel: ResultsModel? = nil) {
+                resultsModel: ResultsModel? = nil,
+                version: String? = nil, pickedVariant: Int? = nil, onPick: ((Int) -> Void)? = nil) {
         // `resultsModel` is a TEST SEAM (the M7 /app/ house style — the run is tested
         // through an injected scheduler / runner / notifier the same way). The screen
         // owns its ResultsModel as a @StateObject, so a test hosting this view has no
@@ -202,7 +203,13 @@ public struct ResultsScreen: View {
         self.onFullScreen = onFullScreen
         self.scenarioLoads = scenarioLoads
         self.loadSurfacePoints = loadSurfacePoints
+        self.version = version; self.pickedVariant = pickedVariant; self.onPick = onPick
     }
+
+    /// ★ B4 (app-map §3.5): the version's name ("v7"), the accepted variant he picked, and Pick this (accepted-variant index).
+    let version: String?
+    let pickedVariant: Int?
+    let onPick: ((Int) -> Void)?
 
     /// The merge trigger, and the ONLY safe way to hand the fresh outcome to the
     /// `.onChange` action. SwiftUI runs the action closure CAPTURED BY THE PREVIOUS
@@ -1241,7 +1248,10 @@ public struct ResultsScreen: View {
                                  pick: { model.select($0) },
                                  compare: rows.filter { $0.tabIndex != nil }.count >= 2 ? {
                                      compare = ResultsCompareSession(candidates: rows.compactMap(\.tabIndex))
-                                 } : nil)
+                                 } : nil,
+                                 version: version,
+                                 pickedTab: pickedVariant.flatMap { v in model.tabs.first { $0.variantIndex == v && !$0.isLatticed }?.index },
+                                 choose: onPick.map { pick in { t in if let tab = model.tabs.first(where: { $0.index == t }) { pick(tab.variantIndex) } } })
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         .padding(PageChrome.edge)
