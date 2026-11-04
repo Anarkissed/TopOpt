@@ -128,13 +128,6 @@ struct FlexiblePrintPlanPanel: View {
     private var plans: FlexiblePrintPlans { main.shownPlans }
     private var tpuName: String { model.material?.displayName ?? "varioShore TPU" }
 
-    /// What changes the panel's rows (not a value inside one).
-    private var shapeKey: String {
-        let p = plans
-        return "\(p.rigidMaterial ?? "-")|\(p.plan.id)|\(p.plan.cuts?.count ?? 0)|\(p.plan.joints.keys.sorted())|"
-            + "\(FlexiblePrintPlanRules.addOns(p).count)|\(main.planSeam ?? "-")|\(renaming != nil)"
-    }
-
     var body: some View {
         DSPanel(key: "plan", title: FlexiblePrintPlanCopy.title, count: nil, width: DSParts.widePanelWidth,
                 maxHeight: Self.maxHeight, open: $open) {
@@ -146,10 +139,6 @@ struct FlexiblePrintPlanPanel: View {
         } footer: {
             foot
         }
-        // Workaround (reported to UI-Notes 11-04): DSPanel keeps its body's measured height when its rows change, so a grown body
-        // hung its last row under the pinned foot — a false "1 more" and a Reset that took no tap. A new shape gives the panel a
-        // fresh measure.
-        .id(shapeKey)
         .overlay(alignment: .topTrailing) {
             // the header's count slot: the current plan's name ("Plan A"), as the mockup's
             Text(plans.plan.name).font(.system(size: 13, weight: .medium)).foregroundStyle(DS.Color.textTertiary.color)
