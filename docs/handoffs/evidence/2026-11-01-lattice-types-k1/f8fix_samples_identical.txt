@@ -1,0 +1,24 @@
+The 16 samples in ~/dev/TopOpt/reviewer-inbox/2026-11-02-lattice-samples/ (made by 81f49eef's frozen CLI),
+made again by the fix's CLI (the worktree build of 5bd610c1's core, core d48f10a15f86-dirty-56f2200b (dirty=true), built Nov  4 2026 00:37:04),
+one 'lattice-sample --topology T --shape S' each, and compared byte for byte (cmp) with the inbox STL.
+
+gyroid cube exit 0 145 s: IDENTICAL
+gyroid coupon exit 0 175 s: IDENTICAL
+schwarz_d cube exit 0 197 s: IDENTICAL
+schwarz_d coupon exit 0 477 s: IDENTICAL
+fcc cube exit 0: IDENTICAL
+fcc coupon exit 0: IDENTICAL
+kelvin cube exit 0: IDENTICAL
+kelvin coupon exit 0: IDENTICAL
+rhombic cube exit 0: IDENTICAL
+rhombic coupon exit 0: IDENTICAL
+diamond cube exit 0: IDENTICAL
+diamond coupon exit 0: IDENTICAL
+bcc cube exit 0: IDENTICAL
+bcc coupon exit 0: IDENTICAL
+sc cube exit 0: IDENTICAL
+sc coupon exit 0: IDENTICAL
+
+All 16 identical: the samples and their receipts stand for 5bd610c1. The sample block and the coupon
+grade their wall smoothly and leave true_wall_steps off, and the bytes show that the cell-depth change
+and the boundary bound moved nothing they write.

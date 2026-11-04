@@ -1,0 +1,18 @@
+{
+  "topology": "gyroid",
+  "relative_density": 0.375395,
+  "relative_density_is_band_middle": true,
+  "band": [0.1501, 0.60069],
+  "cell_mm": 8,
+  "cells_per_side": 5,
+  "size_mm": 40,
+  "base_plate_mm": 1.5,
+  "strut_diameter_mm": 0.993363,
+  "triangles": 431990,
+  "lattice_triangles": 431978,
+  "struts": 0,
+  "lattice_triangles_contoured": 1385936,
+  "max_deviation_mm": 0.02,
+  "cut_max_deviation_mm": 0.165544,
+  "nodes": 0
+}

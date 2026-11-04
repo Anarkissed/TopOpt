@@ -13,8 +13,9 @@ offered for Structural parts only** (Finding 6, ruled 2026-11-02).
 
 **Live (K2, the sheets): Gyroid, Schwarz-D**, with one cell size for the whole part (Doubled and
 Stepped refused, R5) and a Rim or no skin (Diagrid refused, R8). A 4 mm sheet needs members
-36-40 mm across and costs 15-19 times octet's triangles a cell (Findings 8 and 9). Not
-print-tested.
+36-40 mm across (Finding 9). Since Finding 8 its mesh is simplified to 0.02 mm: on the stand's
+rung 0.52 (4 mm cells) gyroid writes 2,673 triangles a cell and Schwarz-D 4,415 (13,782 and 16,582
+at step (c); octet's was 1,030 in Finding 8's count). Not print-tested.
 
 Parked: none.
 
@@ -29,7 +30,18 @@ Parked: none.
    certificate credits (+0.0 %, it was +28-30 %), and no rung flips. Auto's octet cell at a 0.45 mm
    bead is 7.03 mm (it was 4.93), and a plan saved on the old law near the print limit is refused,
    naming the cell.
-3. Finding 8 (sheet triangles), the coupon, the samples: queued, in that order.
+3. Finding 8 (sheet triangles) and the coupon: **DONE** (`81f49eef` and its fix `5bd610c1`; the
+   section below). A sheet's mesh is simplified to within 0.02 mm of its true surface, so an 8 mm
+   interior cell costs 3,802 (gyroid) / 6,105 (Schwarz-D) triangles, linear in the cell.
+   `lattice-sample --shape coupon` writes one 45 x 40 x 35 mm shape for the preview and the print,
+   and the app reads the same triangles through `lattice_sample_mesh`. The gate caught a stall in a
+   run before the push (a run grades the wall per voxel, so it steps at each voxel's face), and it is
+   fixed: the stand's gyroid rung that never finished now takes about 3 minutes.
+4. The samples: **DONE**. The cube and the coupon of each of the 8 new types (16 STLs, 3 to 35 MB)
+   are in `~/dev/TopOpt/reviewer-inbox/2026-11-02-lattice-samples/`, made by the gate's frozen
+   binary of `81f49eef`, with a README built from their receipts; the fix makes all 16 again byte
+   for byte. The STLs stay out of the repo; the receipts and README are in
+   `evidence/.../samples_2026-11-02/`. None is print-tested.
 
 <!-- STATUS -->
 
@@ -314,6 +326,185 @@ grew from 30 to 40 mm, so more voxels are checked). Against step 1:
     0.4096). Its margins go 3,383.72 to 3,386.14 and 2,954.28 to 3,102.44, the high side +81.5 % to
     +20.1 %, and a build path changes.
 
+## Rulings of 2026-11-02, Finding 8 and the coupon — DONE (`81f49eef`, merging `c38a95b3` and `661f6947`)
+
+What changed (core only):
+
+1. **Finding 8: a sheet's mesh is simplified to within 0.02 mm of its true surface**
+   (`kSheetMaxDeviationMm`, `tpms_gen.hpp`; bounded edge collapse, `mesh_simplify.hpp`). The
+   contoured mesh is measured against the sheet's own surface on every written triangle, both ways,
+   in a run and in the sample block. Where a wall is within 0.04 mm of the bead the mesh may only
+   bulge outward, so no wall is cut below one bead. Per interior cell at an 8 mm cell near the band
+   middle (`f8_sheet_simplified_cost.txt`, by `f8_simp_probe.cpp`):
+   - gyroid (density 0.375): **3,802 triangles** (the contoured mesh held 1,382,528 for the block);
+   - Schwarz-D (density 0.40): **6,105**, inside the 6,500 budget ruled.
+   The cost grows with the cell, not with its square: gyroid at 4 mm is 1,933 and Schwarz-D at
+   5 mm is 3,828, both linear in the cell to 1-2 %. The surface-area lower bound at 0.02 mm is
+   2,301 and 3,613 a cell (`f8_bound.txt`), so the simplified mesh is within about 1.7 times the
+   least any mesh can hold. Measured deviation: 0.0200 mm out and in on the sheet's surface. The
+   block's cut faces are flat cuts through the wall, measured separately (up to 0.17 mm, at a cut
+   edge, not on the sheet).
+2. **The coupon** (`lattice-sample --shape coupon`; `write_lattice_coupon`,
+   `lattice_coupon.cpp`). One shape that is both the app's Lattice preview and the block he prints:
+   45 x 40 x 35 mm, Z up, printed as it stands with no supports.
+   - x 0-3: a solid wall, the joint between lattice and solid.
+   - x 3-33: the lattice body, 40 mm wide.
+   - x 33-45: a tongue 12 mm wide, the thin section beside the thick one.
+   - Under all of it, a 1.5 mm solid base plate. The cross-section has vertical sides to z 15 and
+     a half-cylinder top of radius 20, so the lattice is cut at every angle, as at a rounded edge.
+   - The density is graded along x from the band's bottom at the wall to its top at the tongue's
+     end, and never below the density whose strut (or wall) is one bead at the local cell.
+   - The type's normal cell (8 mm), stepping to half of it at x 19 where the type allows one:
+     Doubled, else Stepped. A type allowed neither, and the sheets, keep one cell.
+   - A section narrower than the type's aesthetic floor in cells goes solid, as in a run. The tongue
+     at 8 mm is 1.5 cells across and goes solid; at 4 mm it is 3 and is latticed.
+   - The lattice reaches 1.5 mm into every solid beside it. A piece the cut leaves touching no solid
+     is dropped and counted, never written.
+   On this core, at the defaults (8 mm cell, 0.42 mm bead, graded across the band; the samples'
+   receipts, and octet's from `test_lattice_coupon` §1, whose strut rows match the samples exactly):
+
+   | type | step | tongue | triangles | loose pieces dropped |
+   |---|---|---|---|---|
+   | Octet | Doubled | latticed | 333,460 | 0 |
+   | FCC | Doubled | latticed | 189,284 | 0 |
+   | Kelvin | Doubled | latticed | 371,496 | 0 |
+   | Rhombic dodecahedron | Stepped | latticed | 479,600 | 4 |
+   | Diamond | Doubled | latticed | 249,076 | 0 |
+   | BCC | Doubled | latticed | 116,176 | 20 |
+   | Simple cubic | Doubled | latticed | 46,860 | 0 |
+   | Gyroid | none (R5) | solid | 285,526 | 0 |
+   | Schwarz-D | none (R5) | solid | 440,058 | 0 |
+
+   The sheets keep the 8 mm cell, so their tongue is 1.5 cells across and goes solid. Octet's coupon
+   reads step (c)'s full-cell law (merged after it).
+3. **The bridge entry**: `TriangleMesh lattice_sample_mesh(const LatticeSampleSpec&,
+   LatticeSampleReceipt*)` (`lattice_sample.hpp`) returns exactly the triangles the file gets
+   (`test_lattice_coupon` §5).
+
+Test: `test_lattice_coupon` (new). §1 every live type builds it, with the step its verdicts
+allow and the tongue solid exactly under its floor, with the reason. §2 everything lies inside the
+box, a lattice is written, and no loose piece is left. §3 the same spec writes the same bytes. §4 a
+20 mm cell is refused with the reason. §5 the bridge entry matches the file.
+`test_mesh_simplify` (new): a sphere simplified to 0.02 mm stays closed and manifold, and an
+independent dense sampling stays within the bound; the same in small streamed slabs; deterministic;
+a wall at the bead never cut into; the simplified gyroid block closed, bounded on every triangle, and
+under 4,000 triangles per interior cell.
+
+### The samples (ruling 2026-11-02)
+
+`~/dev/TopOpt/reviewer-inbox/2026-11-02-lattice-samples/`: for FCC, Kelvin, Rhombic, Diamond, BCC, SC,
+Gyroid and Schwarz-D, `<type>_cube.stl` (40 mm, 8 mm cells, the band's middle density, 1.5 mm plate)
+and `<type>_coupon.stl` (the coupon above at its defaults), each with its receipt, and `README.md`
+(every number in it is read from a receipt). Made by `topopt-cli` frozen from `git archive 81f49eef
+core`, one call each, all exit 0. The receipts and README are committed under
+`samples_2026-11-02/`; the STLs are not.
+
+- The strut types' coupons step to 4 mm at x 19: Doubled, except Rhombic, which is Stepped (its
+  struts do not meet across a halving). Rhombic drops 4 loose pieces at the cut and BCC 20; each is
+  counted in the receipt and none is written.
+- The sheets keep one 8 mm cell (R5), so their 12 mm tongue is 1.5 cells and solid. Their lightest
+  wall is the 0.42 mm bead (the grade is raised to it).
+- The sheets' meshes, simplified (Finding 8): gyroid cube 431,990 triangles (1,385,936 contoured),
+  Schwarz-D cube 697,152 (2,319,672); coupons 285,526 and 440,058. Each receipt measures 0.02 mm on
+  the sheet's surface; the cut faces reach 0.09-0.17 mm.
+- Time: a strut type writes both in 0-2 s; gyroid 110 s (cube) and 167 s (coupon); Schwarz-D 152 s
+  and 452 s.
+
+### The gate found a stall in a run; fixed before the push (`5bd610c1`)
+
+Gate F on `81f49eef` stopped on the M2 stand. The gyroid's rung 0.52 export ran 1 h 27 min at full
+CPU without writing its lattice (step (c)'s whole run took 10 min), all of it inside the simplifier
+(`f8fix_stall_sample.txt`). `81f49eef` was never pushed. The narrow tests had not seen it: the sample
+block and the coupon grade their wall smoothly, and a run does not. Three causes, each measured:
+
+1. **A run's wall steps at every voxel face.** The run's wall is the owning voxel's (`run_job.cpp`,
+   the graded radius field), so the true field jumps wherever the density changes, and no mesh is
+   within 0.02 mm of both sides. The contouring leaves its own error there too: a vertex can land a
+   micron inside the thinner wall. On the stand the lightest walls sit exactly at the 0.42 mm bead
+   (density 0.3194, wall 0.4199), where nothing inward is allowed, so that micron could never be
+   mended. Refine split it down to the micron (80,913 splits in the first pass), and the collapse
+   passes then crawled through the slivers.
+   **Now a step is a place, like a cut** (`TpmsGenOptions::true_wall_steps`, set by the run;
+   `BoundedSimplifyOptions::step`). Within three DC cells of a jump:
+   - the mesh is never refined or held back;
+   - a collapse must stay inside the band from the thickest wall in reach (plus 0.02 mm) to the
+     thinnest one's own floor, so no wall goes under the bead;
+   - the step is measured on its own (below).
+   The coupon and the sample block grade smoothly and leave it off, so their bound is unchanged.
+2. **The cap's depth ignored edge and corner neighbours.** In an inactive cell that meets an
+   active one only along an edge or at a corner, the field read the whole cell (4.000 mm) a hair
+   from the active cell, so no mesh could follow it there either. After cause 1 was fixed, 82
+   written samples on the stand sat up to 3.98 mm outside any band (`f8fix_cap_trace.txt`). The
+   depth is now the exact distance to the nearest cell of the other kind, capped at one cell, so the
+   field is continuous (`depth_to_other_kind`).
+3. **The part's distance was queried at every sample.** The exact query is now skipped wherever a
+   cached lower bound proves it cannot change the field. The distance is 1-Lipschitz, so the field
+   is the same to the bit: the sample cube's STL is byte-identical with the bound. On the stand's
+   rung 0.52 a field evaluation averaged 0.60 µs without the bound and 0.10 µs with it.
+
+On the stand's rung 0.52, latticed alone from step (c)'s design (`f8fix_stand_052.txt`):
+
+| | before (`81f49eef`) | after |
+|---|---|---|
+| the export | stalled: over 1.5 h, never finished | finishes (160 s for the whole call, traced build) |
+| refine | 80,913 splits, then a collapse pass that ran over 16 min | 0 splits |
+| triangles | 1,265,100 contoured, none written | 1,265,100 contoured, 245,912 written |
+| the sheet's own surface | not reached | within 0.0200 mm; 0 samples past the bead |
+| the steps | not reached | 12,312 samples, up to 0.180 mm from their own voxel's surface (half the step); 0 outside the step's band |
+| volume check | not reached | file 567.4 / certified 547.3 mm3 (+3.67 %), inside the 10 % |
+
+The run's receipt (`<variant>_lattice.report.json`, `sheet_mesh`) gains `step_samples`,
+`step_max_deviation_mm`, `step_samples_outside_band`, `step_worst_outside_band_mm` and
+`sheet_samples`.
+
+Test: `test_mesh_simplify` §6 (new). A gyroid cell graded per voxel, its lightest wall at the bead:
+- it finishes with no split, closed and manifold;
+- the sheet's own surface is within 0.02 mm and no sample is past the bead;
+- the steps are counted on their own;
+- an independent dense sampling, clear of the cuts, finds no wall past its floor where no step is in
+  reach, and under 5 µm outside the step's band where one is (0.11 µm inward, measured).
+
+The control (`f8fix_step_probe.txt`): with steps off, as `81f49eef` ran a run, §6's block had not
+finished after 180 s; with them on it takes 1.6 s. A block of 2 x 2 x 2 cells of 4 mm with
+3.41 mm voxels (the stand's) takes 14.7 s on, 8.5 s with one uniform wall, and had not finished
+after 180 s off.
+
+The samples stand: all 16 STLs in the inbox are made again byte for byte by the fix's CLI
+(`f8fix_samples_identical.txt`). The sample block and the coupon grade smoothly, so the step rule is
+off for them, and neither the depth change nor the bound moved what they write.
+
+### The gate (`5bd610c1`)
+
+ctest on `5bd610c1`: **169 / 169 passed**, 4,535 s; cli_demo passed, 1,963 s
+(`f_ctest_5bd610c1.txt`, by `f_gate_g.sh`). The two new tests are `mesh_simplify` and
+`lattice_coupon`.
+
+The 21 binaries against eede708a: 9 identical, 12 differ, the same list as step (c)'s
+`c_identity_21.txt`, every one exit 0 with its check count unchanged. Against step (c) itself all 42
+streams are identical once the build directory and the wall-time line are masked; the one line that
+differs unmasked is `test_lattice_variant`'s wall time, 1.08 s to 1.02 s. Against `81f49eef` all 42 are
+identical (`f_identity_vs_c.txt`).
+
+The stand (`f_stand_flip_table.txt`, by `f_flip.py`; before = step (c), `262b731f`): **no rung flips
+on any type**. The seven strut types match step (c) in every cell count, triangle, density, mass,
+margin and gap. Their runs are `81f49eef`'s (gate F, linked), because the fix touches only the sheet
+path; the 21 binaries and the full ctest above ran on `5bd610c1`. The sheets keep their cells,
+density, mass, margin and verdict; their triangles and gap:
+
+| rung | triangles, (c) -> now | a cell | gap, (c) -> now | the sheet's own surface | the steps |
+|---|---|---|---|---|---|
+| Gyroid 0.52 | 1,267,980 -> 245,912 | 13,782 -> 2,673 | +1.1 % -> +3.7 % | within 0.0200 mm, 0 past the bead | 12,312 samples, up to 0.180 mm; 0 outside the band |
+| Gyroid 0.38 | 129,140 -> 15,144 | 10,762 -> 1,262 | +0.0 % -> +0.0 % | within 0.0200 mm, 0 past the bead | 10,026, up to 0.166 mm; 0 outside |
+| Schwarz-D 0.52 | 1,525,580 -> 406,204 | 16,582 -> 4,415 | +1.4 % -> +4.5 % | within 0.0200 mm, 0 past the bead | 14,257, up to 0.134 mm; 0 outside |
+| Schwarz-D 0.38 | 187,312 -> 35,228 | 15,609 -> 2,936 | +0.0 % -> +0.0 % | within 0.0200 mm, 0 past the bead | 12,374, up to 0.110 mm; 0 outside |
+
+On rung 0.52 each sheet's file is now 2.6 to 3.1 points heavier than its certificate, inside the 10 %
+line. The simplifier may move a wall out by up to 0.02 mm, but never in past the bead, and at a
+step it may move out to the thicker wall. How much of the gap each rule adds is not measured. The
+certificate credits the lesser of the file and the law, so the margins are unchanged.
+
+Floating: 0 floating pieces on every latticed rung of all 9 types (`f_stand_floating.txt`).
+
 ## What changed in core, once, for every strut type (and, 9-10, for the sheets)
 
 1. **One canonical cell per type** (`topopt/strut_cell.hpp`). Octet, SC, BCC, FCC, Diamond,
@@ -471,6 +662,8 @@ grew from 30 to 40 mm, so more voxels are checked). Against step 1:
    cell 19.44 (gyroid) / 24.00 (Schwarz-D) x (cell / DC cell)^2 triangles
    (`sheet_triangle_cost.txt`). The sample blocks are 1.39M and 2.32M triangles (69 and 116 MB
    STL; not committed, their receipts are). The app's budget reads `sheet_triangles_coeff`.
+   **Ruled 2026-11-02 and done** (`81f49eef`): the mesh is simplified to within 0.02 mm of the true
+   surface, and the budget reads `sheet_triangles_per_cell_mm` (the Finding 8 section above).
 9. **Fine sheet cells do not print.** With the 0.42 mm bead a gyroid wall reaches one bead
    only from rho 0.42 at a 3 mm cell and 0.32 at 4 mm, and no density in the band does below
    2.03 mm (4.84 beads); Schwarz-D needs 0.51 / 0.39 and 2.52 mm (6.01 beads)
@@ -779,13 +972,15 @@ are the case that needs this).
 | `lattice_strut_diameter_mm(sheet, rho, cell)` | the TRUE wall thickness (what printability reads: wall >= bead) |
 | `lattice_sheet_wall_param_mm(sheet, wall, cell)` | the field's t for that true wall (what `tpms_in_wall` takes) |
 | `lattice_density_from_strut(sheet, cell, wall / 2)` | the density of that wall (the table; off it, the sheet's own solid fraction) |
-| `sheet_triangles_coeff` | triangles per interior cell = coeff x (cell / DC cell)^2, DC cell = a third of the thinnest wall laid; `triangles_per_cell` is that at the band middle with an 8 mm cell |
+| `sheet_triangles_per_cell_mm` | (Finding 8) triangles per interior cell of the mesh WRITTEN, simplified to 0.02 mm, per mm of cell; `triangles_per_cell` is that at an 8 mm cell near the band middle |
+| `sheet_triangles_coeff` | the contoured mesh before simplification: coeff x (cell / DC cell)^2, DC cell = a third of the thinnest wall laid |
 | `doubled`, `stepped` | refused with the R5 reason; the job refuses `swept`, `fit`, `stepped` and stepped cells. Only `fixed` and `auto` lay a sheet, one cell for the part |
 | `diagrid` | refused with the R8 reason; a sheet job must state `"skin": "rim"` or `"none"` (the default Diagrid is refused) |
 | `aesthetic_density_ceiling` | the band top (a wall has no strut-per-cell "prints open" reading) |
 | the sample block | shifted an eighth of a cell from the run's phase, so no corner of the cube cuts off a cap; the run keeps phase 0 at the grid anchor |
 | R6 (wall >= one bead) | `sheet_printability.txt`: the density at which each cell size reaches one and two beads |
 | the sample receipt (`<file.stl>.json`) | `strut_diameter_mm` is the true wall; `struts` and `nodes` are 0 |
+| a run's lattice report, `sheet_mesh` (Finding 8) | `triangles_contoured`, `triangles` (written); `max_deviation_mm` on the sheet's own surface (limit `max_deviation_limit_mm`, 0.02), measured on every written triangle at the sample spacing; `cut_max_deviation_mm` where it is cut (under solid); `samples_past_bead_floor` (0 = no wall under the bead); where the wall steps between voxels, `step_samples`, `step_max_deviation_mm` (from the sample's own voxel's surface, up to about half the step), `step_samples_outside_band` and `step_worst_outside_band_mm` (what the contouring left outside the step's band, kept as contoured); `sheet_samples` |
 
 ### Every existing per-topology call accepts the new ids
 `lattice_derive_cell_for_member`, `lattice_rho_min/max`, `lattice_cells_per_member_min`,
@@ -822,6 +1017,40 @@ exported_mm3}`. The app needs nothing new: the margin it shows is the rebuilt ce
 [--plate 1.5] [--bead <mm>] --out <file.stl>` writes the STL and `<file.stl>.json`.
 `topopt-cli --version` now ends with `lattice_sample=1`, so a worker can tell without a
 trial run (brief item g).
+
+### The coupon, and the sample as a mesh (ruling 2026-11-02)
+`topopt-cli lattice-sample --topology <id> --shape coupon [--cell 8] [--bead 0.42]
+[--rho-lo R] [--rho-hi R] [--step 0|1] [--plate 1.5] --out <file.stl>`
+writes the coupon and `<file.stl>.json`. Without `--shape` (or with `cube`) it writes the block, as
+before.
+
+| call | answer |
+|---|---|
+| `write_lattice_sample(spec, sink)` | either shape into a `TriangleSink`; `spec.shape` is `"cube"` (default) or `"coupon"` |
+| `lattice_sample_mesh(spec, &receipt)` | **the bridge entry**: the same triangles as an in-memory `TriangleMesh`, so the preview draws exactly what the file holds |
+| `lattice_sample_receipt_json(r)` | the receipt the CLI writes beside the STL |
+
+`LatticeSampleSpec` for the coupon: `topology`; `cell_mm` (8); `bead_mm` (the bead the grade never
+goes below; 0 = 0.42 mm); `rho_lo` / `rho_hi` (the grade along x; 0 = the band's bottom and top);
+`step` (true = a cell-size step where the type allows one); `plate_mm` (1.5).
+The coupon's receipt (`<file.stl>.json`) adds: `shape` `"coupon"`, `dimensions_mm` [45, 40, 35],
+`bead_mm`, `relative_density_graded` [lightest, heaviest] (the grade along x), `step` (`"doubled"`,
+`"stepped"` or `"none"`), then `step_at_x_mm` (19) when there is a step or `step_reason` (why none,
+one line) when there is not, `tongue` (`"latticed"` or `"solid"`), `tongue_reason` (why solid, one
+line, only when solid), `loose_pieces_dropped`, `loose_triangles_dropped`. On a coupon the shared
+keys read its lightest end: `relative_density` is the density laid there (the grade's bottom,
+raised to one bead where the type would print thinner) and `strut_diameter_mm` the thinnest strut
+(or wall); `cell_mm` is the body's cell, `size_mm` the x extent, and
+`cells_per_side` is 0. (In C++ the same facts are `LatticeSampleReceipt.coupon_dims_mm`, `rho_lo`,
+`rho_hi`, `tongue_latticed`, ...) A sheet's receipt, cube or coupon, also carries
+`lattice_triangles_contoured`, `max_deviation_mm` (on the sheet's surface, at most 0.02) and
+`cut_max_deviation_mm` (at the cut faces). Refusals are `std::invalid_argument` with core's reason (exit 3 from the CLI),
+e.g. a cell too coarse for the body's floor.
+
+### Sheet facts after Finding 8
+`LatticeTypeFacts.sheet_triangles_per_cell_mm`: triangles per interior cell per mm of cell
+(gyroid 475.25, Schwarz-D 763.125). `triangles_per_cell` is that at an 8 mm cell (3,802; 6,105).
+`sheet_triangles_coeff` stays: the contoured mesh's cost before simplification.
 
 ### Since step (c) (2026-11-03): what the app reads differently for octet
 Nothing new to call; the same calls answer from the full cell's law.
