@@ -37,6 +37,7 @@ public struct LibraryRootView: View {
     }
     @State private var grouping = false
     @State private var quickLook: UUID?
+    @State private var quickLookResult: Int?   // B5: the result a tile opened it on (nil = the version's shown one)
     @State private var compare: LibraryCompareRequest?
 
     public init(model: AppModel) {
@@ -68,8 +69,9 @@ public struct LibraryRootView: View {
             }
             if let folder = quickLook, library.mode == .library {
                 LibraryQuickLookView(model: model, library: library, folder: folder,
-                                     close: { quickLook = nil },
-                                     compare: { req in quickLook = nil; compare = req })
+                                     close: { quickLook = nil; quickLookResult = nil },
+                                     compare: { req in quickLook = nil; quickLookResult = nil; compare = req },
+                                     shown: quickLookResult)
                     .transition(.opacity).zIndex(3)
             }
             if let req = compare, library.mode == .library {
@@ -104,7 +106,7 @@ public struct LibraryRootView: View {
             if let part = library.part(id) {
                 PartFolderView(model: model, library: library, part: part,
                                back: { route = library.projectOf(part: id).map { .project($0.id) } ?? .unfiled },
-                               quickLook: { quickLook = $0 }, compare: { compare = $0 })
+                               quickLook: { quickLook = $0; quickLookResult = $1 }, compare: { compare = $0 })
             } else { LibraryHomeView(model: model, library: library, go: { route = $0 }, quickLook: { quickLook = $0 },
                                      ungroup: { library.ungroup() }) }
         case .storage:
@@ -769,14 +771,13 @@ struct PartFolderView: View {
     @ObservedObject var library: LibraryModel
     let part: LibraryPart
     let back: () -> Void
-    let quickLook: (UUID) -> Void
+    /// Quick look of a version: on one result (a tile's tap), or nil for the result it shows.
+    let quickLook: (UUID, Int?) -> Void
     let compare: (LibraryCompareRequest) -> Void
     @State private var filter: LibraryFilter = .all
     @State private var sort: LibrarySort = .newest
     @State private var renaming: (folder: UUID, name: String)?
     @State private var deleting: LibraryVersion?
-
-    private let columns = [GridItem(.adaptive(minimum: 380), spacing: DS.Space.xl2)]
 
     private func best(_ v: LibraryVersion) -> ResultSummary? { v.summary?[safe: library.shownResult(v)] }
 
@@ -810,6 +811,7 @@ struct PartFolderView: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: DS.Space.ml) {
                     LibraryBackPill(title: library.projectOf(part: part.id)?.name ?? "Unfiled", action: back)
+                        .layoutPriority(1)   // B5: at 11P the back target stays whole; the count line gives way first
                     VStack(alignment: .leading, spacing: 2) {
                         Text(part.name).dsStyle(DS.TypeScale.titleXL)
                         let done = part.versions.filter { !library.isDraft($0) }.count, drafts = part.versions.count - done
@@ -817,70 +819,68 @@ struct PartFolderView: View {
                             .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
                     }
                     Spacer()
-                    Button { compare(LibraryCompareRequest(part: part.id, scope: .all)) } label: {
-                        Label("Compare", systemImage: "rectangle.split.2x1").font(DS.TypeScale.bodyStrong.font)
-                            .padding(.horizontal, DS.Space.l).frame(height: 44)
-                            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(DS.Color.fillSubtle.color))
-                            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(DS.Color.strokeStrong.color, lineWidth: 1))
+                    // ★ B5 (mockup #lib-part): [Compare] [Open v8 draft] [⌄], §4's glass and accent buttons
+                    DSGlassButton("Compare", systemImage: "rectangle.split.2x1", key: "library-compare") {
+                        compare(LibraryCompareRequest(part: part.id, scope: .all))
                     }
-                    .buttonStyle(.plain).accessibilityIdentifier("library-compare")
                     if let t = openTarget {
-                        HStack(spacing: 0) {
-                            Button { openFolder(t.folderID) } label: {
-                                Text(library.isDraft(t) ? "Open v\(t.number) draft" : "Open v\(t.number)").dsStyle(DS.TypeScale.bodyStrong).foregroundStyle(.white)
-                                    .padding(.horizontal, DS.Space.l).frame(height: 44)
-                            }
-                            .buttonStyle(.plain).accessibilityIdentifier("library-open")
-                            Rectangle().fill(Color.white.opacity(0.35)).frame(width: 1, height: 26)
-                            // his decision 6: the ⌄ lists the drafts (newest first), then every version
-                            Menu {
-                                let drafts = library.drafts(of: part)
-                                if !drafts.isEmpty {
-                                    Section("Drafts") {
-                                        ForEach(drafts, id: \.folderID) { d in Button(library.shortTitle(of: d, in: part)) { openFolder(d.folderID) } }
-                                    }
+                        DSGlassButton(library.isDraft(t) ? "Open v\(t.number) draft" : "Open v\(t.number)", accent: true,
+                                      key: "library-open") { openFolder(t.folderID) }
+                        // his decision 6: the ⌄ lists the drafts (newest first), then every version
+                        Menu {
+                            let drafts = library.drafts(of: part)
+                            if !drafts.isEmpty {
+                                Section("Drafts") {
+                                    ForEach(drafts, id: \.folderID) { d in Button(library.shortTitle(of: d, in: part)) { openFolder(d.folderID) } }
                                 }
-                                Section("Versions") {
-                                    ForEach(part.versions.filter { !library.isDraft($0) }.sorted { $0.number > $1.number }, id: \.folderID) { d in
-                                        Button(library.shortTitle(of: d, in: part)) { openFolder(d.folderID) }
-                                    }
-                                }
-                            } label: {
-                                Image(systemName: "chevron.down").font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
-                                    .frame(width: 40, height: 44)
                             }
-                            .accessibilityIdentifier("library-open-menu")
+                            Section("Versions") {
+                                ForEach(part.versions.filter { !library.isDraft($0) }.sorted { $0.number > $1.number }, id: \.folderID) { d in
+                                    Button(library.shortTitle(of: d, in: part)) { openFolder(d.folderID) }
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "chevron.down").font(.system(size: 15, weight: .bold)).foregroundStyle(DS.Color.textPrimary.color)
+                                .frame(width: DSParts.glassHeight, height: DSParts.glassHeight)
+                                .background(Circle().fill(DS.Surface.bar.color))
+                                .overlay(Circle().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
+                                .contentShape(Circle())
                         }
-                        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(DS.Color.accent.color))
-                        .dsShadow(.accentGlow)
+                        .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain).fixedSize()
+                        .background(DSParts.publish("library-open-menu"))
+                        .accessibilityLabel("Open another version")
+                        .accessibilityIdentifier("library-open-menu")
                     }
                 }
                 HStack(spacing: DS.Space.sm) {
                     Spacer()
                     SegmentedGlass([.init(LibraryFilter.all, "All"), .init(.top, "★ 4+"), .init(.print, "Print"), .init(.strong, "Strong enough")],
-                                   selection: $filter)
-                        .frame(maxWidth: 460)
+                                   selection: $filter, small: true)
                     Menu {
                         ForEach(LibrarySort.allCases, id: \.self) { s in
                             Button { sort = s } label: { if s == sort { Label(s.rawValue, systemImage: "checkmark") } else { Text(s.rawValue) } }
                         }
                     } label: {
-                        Label(sort.rawValue, systemImage: "arrow.up.arrow.down").font(DS.TypeScale.subhead.font).fontWeight(.semibold)
-                            .padding(.horizontal, DS.Space.ml).frame(height: 36)
+                        Label(sort.rawValue, systemImage: "arrow.up.arrow.down").font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(DS.Color.textSecondary.color)
+                            .padding(.horizontal, 10).frame(height: 28)
                             .background(Capsule().fill(DS.Color.fillSubtle.color))
-                            .overlay(Capsule().strokeBorder(DS.Color.strokeStrong.color, lineWidth: 1))
+                            .overlay(Capsule().strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1))
+                            .frame(minHeight: DSParts.target).contentShape(Rectangle())
                     }
+                    .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain).fixedSize()
                     .accessibilityIdentifier("library-sort")
                 }
-                .padding(.vertical, DS.Space.ml)
-                LazyVGrid(columns: columns, spacing: DS.Space.xl2) {
+                .padding(.top, DS.Space.s).padding(.bottom, DS.Space.xs)
+                // ★ B5 (mockup #lib-part): one §4.7 version card per version, newest first — not a grid of cards
+                VStack(alignment: .leading, spacing: 12) {
                     ForEach(cards, id: \.folderID) { v in
-                        LibraryVersionCard(model: model, library: library, part: part, version: v,
-                                           quickLook: { quickLook(v.folderID) },
-                                           compareResults: { compare(LibraryCompareRequest(part: part.id, scope: .version(v.folderID))) },
-                                           open: { openFolder(v.folderID) },
-                                           rename: { renaming = (v.folderID, v.name ?? "") },
-                                           delete: { deleting = v })
+                        LibraryVersionRow(model: model, library: library, part: part, version: v,
+                                          quickLook: { quickLook(v.folderID, $0) },
+                                          compareResults: { compare(LibraryCompareRequest(part: part.id, scope: .version(v.folderID))) },
+                                          open: { openFolder(v.folderID) },
+                                          rename: { renaming = (v.folderID, v.name ?? "") },
+                                          delete: { deleting = v })
                     }
                 }
                 if cards.isEmpty {
@@ -911,130 +911,153 @@ struct PartFolderView: View {
     }
 }
 
-/// One version: its picture, a b c, title, what changed, weight · strength, stars, ⋯.
-struct LibraryVersionCard: View {
+/// One version, as mockup #lib-part draws it: a §4.7 version card — "v7", Draft / "from v4", what changed, the date, ⋯ — and,
+/// once it has results, its a · b · c side by side. A branch sits 48 pt in. Frames: "library-version-v<n>" (and "-draft",
+/// "-from", "-running", "-menu"); each result "library-result-v<n><letter>" (and "-picked", "-stars", "-rejected", "-menu").
+struct LibraryVersionRow: View {
     @ObservedObject var model: AppModel
     @ObservedObject var library: LibraryModel
     let part: LibraryPart
     let version: LibraryVersion
-    let quickLook: () -> Void
+    /// Quick look on one result (a tile's tap), or nil for the result the version shows.
+    let quickLook: (Int?) -> Void
     let compareResults: () -> Void
     let open: () -> Void
     let rename: () -> Void
     let delete: () -> Void
 
+    private var key: String { "library-version-v\(version.number)" }
+
     var body: some View {
         let v = version
         let running = model.runningIDs.contains(v.folderID)
         let pending = library.isDraft(v) || running
-        let r = library.shownResult(v)
-        let mark = v.mark(for: r)
-        Button(action: pending ? open : quickLook) {
-            VStack(spacing: 0) {
-                picture(pending: pending, running: running, r: r, mark: mark)
-                info(pending: pending, r: r, mark: mark)
-                    .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.m)
+        DSVersionCard(key: key, branch: !v.number.isMainLine) {
+            Text("v\(v.number)").font(.system(size: 15, weight: .bold)).foregroundStyle(DS.Color.textPrimary.color)
+            if library.isDraft(v), !running { DSChip(.tag("Draft"), key: key + "-draft") }
+            if !v.number.isMainLine, let p = v.parentNumber { DSChip(.tag("from v\(p)"), key: key + "-from") }
+            Text(line).font(.system(size: 12.5)).foregroundStyle(DS.Color.textSecondary.color).lineLimit(1)
+            Spacer(minLength: 0)
+            if running {
+                // §4.7 running: a spinning chip on the version
+                HStack(spacing: 6) { ProgressView().controlSize(.mini); Text("Running") }
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.accent.color)
+                    .padding(.horizontal, 8).frame(height: 26)
+                    .background(Capsule().fill(DS.Color.accent.opacity(0.14).color))
+                    .background(DSParts.publish(key + "-running"))
             }
-            .modifier(LibraryCardSurface(dashed: pending))
+            Text(date).font(.system(size: 11.5)).foregroundStyle(DS.Color.textTertiary.color).lineLimit(1).fixedSize()
+            Menu { versionMenu(pending: pending) } label: { LibraryDots() }
+                .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain).fixedSize()
+                .background(DSParts.publish(key + "-menu"))
+                .padding(.vertical, -4)
+                .accessibilityLabel("v\(v.number) menu")
+                .accessibilityIdentifier(key + "-menu")
+        } content: {
+            if !pending {
+                if let n = v.summary?.count, n > 0 {
+                    HStack(alignment: .top, spacing: 8) {
+                        ForEach(0..<max(3, n), id: \.self) { r in
+                            if r < n { tile(r) } else { Color.clear.frame(maxWidth: .infinity, maxHeight: 1) }
+                        }
+                    }
+                } else {
+                    Text("Reading the results…").font(.system(size: 12)).foregroundStyle(DS.Color.textTertiary.color)
+                }
+            }
+        }
+    }
+
+    /// What the row says after "v7": his name, else the automatic one ("Keep Clear on 2 faces · res 128"). A draft says where it
+    /// came from first ("from v7 · …"); a branch's "from v4" is its tag.
+    private var line: String {
+        let title = library.shortTitle(of: version, in: part)
+        let prefix = "v\(version.number) · "
+        let words = title.hasPrefix(prefix) ? String(title.dropFirst(prefix.count)) : title
+        guard library.isDraft(version), version.number.isMainLine, let p = version.parentNumber else { return words }
+        return "from v\(p) · \(words)"
+    }
+
+    private var date: String {
+        library.snapshots[version.folderID].map { $0.savedAt.formatted(.dateTime.month(.abbreviated).day()) } ?? ""
+    }
+
+    /// One result: its picture, "v2b" (+ Picked), weight · strength, its stars and marks. A tap is Quick look of it; its ⋯ holds
+    /// Pick this · Print this · Reject · Export….
+    private func tile(_ r: Int) -> some View {
+        let v = version
+        let k = "library-result-v\(v.number)\(ResultMark.letter(r))"
+        let mark = v.mark(for: r)
+        let picked = v.pickedResult == r
+        let s = v.summary?[safe: r]
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        return Button { quickLook(r) } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                LibraryPicture(image: library.thumbnails[CompareItem(folder: v.folderID, result: r)])
+                    .frame(height: 96).frame(maxWidth: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(alignment: .topLeading) {
+                        if mark.printThis {
+                            Image(systemName: "printer").font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.okGreen.color)
+                                .frame(width: 24, height: 24).background(Circle().fill(Color.black.opacity(0.6))).padding(6)
+                                .accessibilityLabel("Print this")
+                        }
+                    }
+                HStack(spacing: 6) {
+                    Text("v\(v.number)\(ResultMark.letter(r))").font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(DS.Color.textPrimary.color).lineLimit(1)
+                    Spacer(minLength: 0)
+                    if picked { DSChip(.accentTag("Picked"), key: k + "-picked") }
+                    if mark.rejected { DSChip(.tag("Rejected"), key: k + "-rejected") }
+                }
+                .frame(minHeight: 20)
+                Text(s.map { "\(LibraryStyle.grams($0.massGrams)) · \(LibraryStyle.margin($0.worstCaseMargin))" } ?? " ")
+                    .font(.system(size: 12)).monospacedDigit().foregroundStyle(DS.Color.textTertiary.color).lineLimit(1)
+                LibraryStars(value: mark.stars, size: 14) { library.setStars($0, folder: v.folderID, result: r) }
+                    .background(DSParts.publish(k + "-stars"))
+            }
+            .padding(6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(shape.fill(Color.black.opacity(0.18)))
+            .overlay(shape.strokeBorder((picked ? DS.Color.accent : DS.Color.strokeSubtle).color, lineWidth: picked ? 2 : 1))
+            .contentShape(shape)
         }
         .buttonStyle(.plain)
-        .accessibilityIdentifier("library-card-v\(v.number)")
+        .overlay(alignment: .topTrailing) {
+            Menu { resultMenu(r, mark: mark, picked: picked) } label: { LibraryDots(onPicture: true) }
+                .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain).fixedSize()
+                .background(DSParts.publish(k + "-menu"))
+                .accessibilityLabel("v\(v.number)\(ResultMark.letter(r)) menu")
+                .accessibilityIdentifier(k + "-menu")
+        }
+        .background(DSParts.publish(k))
+        .accessibilityIdentifier(k)
     }
 
-    private func picture(pending: Bool, running: Bool, r: Int, mark: ResultMark) -> some View {
+    @ViewBuilder private func resultMenu(_ r: Int, mark: ResultMark, picked: Bool) -> some View {
         let v = version
-        return ZStack(alignment: .topLeading) {
-            LibraryPicture(image: pending ? parentPicture : library.thumbnails[CompareItem(folder: v.folderID, result: r)], dim: pending)
-                .frame(height: 208).frame(maxWidth: .infinity)
-            LibraryStageChip(snapshot: library.snapshots[v.folderID]).padding(DS.Space.sm)
-            if pending {
-                pendingBadge(running: running).frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                if mark.printThis {
-                    Image(systemName: "printer").font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.Color.okGreen.color)
-                        .frame(width: 28, height: 28).background(Circle().fill(Color.black.opacity(0.6)))
-                        .frame(maxWidth: .infinity, alignment: .trailing).padding(DS.Space.sm)
-                        .accessibilityLabel("Print this")
-                }
-                if let n = v.summary?.count, n > 1 {
-                    LibraryResultSwitcher(count: n, shown: r, suggested: library.suggestedResult(v),
-                                          rejected: Set(v.marks.filter(\.rejected).map(\.result))) {
-                        library.pick(folder: v.folderID, result: $0)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading).padding(DS.Space.sm)
-                }
-            }
+        if !picked { Button { library.pick(folder: v.folderID, result: r) } label: { Label("Pick this", systemImage: "checkmark.circle") } }
+        Button { library.togglePrint(folder: v.folderID, result: r) } label: {
+            Label(mark.printThis ? "Not for print" : "Print this", systemImage: "printer")
+        }
+        Button { library.toggleReject(folder: v.folderID, result: r) } label: {
+            Label(mark.rejected ? "Not rejected" : "Reject", systemImage: "xmark.circle")
+        }
+        Button { LibraryExport.start(model: model, library: library, folder: v.folderID, result: r) } label: {
+            Label("Export…", systemImage: "square.and.arrow.up")
         }
     }
 
-    private func pendingBadge(running: Bool) -> some View {
-        HStack(spacing: DS.Space.xs) {
-            if running { ProgressView().controlSize(.mini); Text("Running") }
-            else { Image(systemName: "pencil"); Text("Not optimized yet") }
-        }
-        .font(DS.TypeScale.caption.font.weight(.semibold)).foregroundStyle(DS.Color.accent.color)
-        .padding(.horizontal, DS.Space.m).frame(height: 30)
-        .background(Capsule().fill(DS.Color.accent.opacity(0.14).color))
-    }
-
-    private func info(pending: Bool, r: Int, mark: ResultMark) -> some View {
-        let v = version
-        return VStack(alignment: .leading, spacing: DS.Space.sm) {
-            HStack(spacing: DS.Space.xs) {
-                if !v.number.isMainLine {
-                    Image(systemName: "arrow.turn.down.right").font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(DS.Color.accentCyan.color)
-                        .accessibilityLabel("A branch from v\(v.number.parent?.description ?? "")")
-                }
-                Text(library.shortTitle(of: v, in: part)).dsStyle(DS.TypeScale.bodyStrong).lineLimit(1)
-            }
-            Text(changeLine(v)).dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textSecondary.color).lineLimit(1)
-            if pending {
-                ForEach(Array(v.changes.prefix(3).enumerated()), id: \.offset) { _, c in changeRow(c) }
-            } else {
-                LibraryNumbers(summary: v.summary?[safe: r], rejected: mark.rejected)
-            }
-            footer(pending: pending, r: r, mark: mark)
-        }
-    }
-
-    private func changeRow(_ c: VersionChange) -> some View {
-        Label(c.text, systemImage: c.kind == .added ? "plus.square.fill" : c.kind == .removed ? "minus.square.fill" : "arrow.right.square.fill")
-            .font(DS.TypeScale.caption.font).lineLimit(1)
-    }
-
-    private func footer(pending: Bool, r: Int, mark: ResultMark) -> some View {
-        let v = version
-        let date = library.snapshots[v.folderID].map { $0.savedAt.formatted(.dateTime.month(.abbreviated).day()) } ?? ""
-        return HStack(spacing: DS.Space.s) {
-            if !pending {
-                LibraryStars(value: mark.stars, size: 20) { library.setStars($0, folder: v.folderID, result: r) }
-            }
-            Spacer()
-            Text(date).dsStyle(DS.TypeScale.caption2).foregroundStyle(DS.Color.textTertiary.color)
-            Menu { menu(r: r, mark: mark, pending: pending) } label: {
-                Image(systemName: "ellipsis").font(.system(size: 15, weight: .semibold))
-                    .frame(width: 36, height: 36)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(DS.Color.fillSubtle.color))
-                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1))
-            }
-            .accessibilityIdentifier("library-card-menu-v\(v.number)")
-        }
-    }
-
-    @ViewBuilder private func menu(r: Int, mark: ResultMark, pending: Bool) -> some View {
+    /// app-map's version ⋯: Quick look · Compare its results · Export… · Open v4 · New draft from v4 · Rename · Delete.
+    @ViewBuilder private func versionMenu(pending: Bool) -> some View {
         let v = version
         if !pending {
-            Button(action: quickLook) { Label("Quick look", systemImage: "eye") }
+            Button { quickLook(nil) } label: { Label("Quick look", systemImage: "eye") }
             if (v.summary?.count ?? 0) > 1 { Button(action: compareResults) { Label("Compare its results", systemImage: "rectangle.split.3x1") } }
-            Button { library.togglePrint(folder: v.folderID, result: r) } label: {
-                Label(mark.printThis ? "Not for print" : "Print this", systemImage: "printer")
-            }
-            Button { library.toggleReject(folder: v.folderID, result: r) } label: {
-                Label(mark.rejected ? "Not rejected" : "Reject", systemImage: "xmark.circle")
+            Button { LibraryExport.start(model: model, library: library, folder: v.folderID, result: library.shownResult(v)) } label: {
+                Label("Export…", systemImage: "square.and.arrow.up")
             }
         }
-        if !pending { Button { export(r) } label: { Label("Export…", systemImage: "square.and.arrow.up") } }
         Button(action: open) { Label("Open v\(v.number)", systemImage: "arrow.up.forward.app") }
         // #362 H51's behaviour, carried over: Duplicate is now "New draft from vN" (H52 unchanged)
         Button {
@@ -1044,21 +1067,18 @@ struct LibraryVersionCard: View {
         Button(action: rename) { Label("Rename…", systemImage: "pencil") }
         Button(role: .destructive, action: delete) { Label("Delete v\(v.number)…", systemImage: "trash") }
     }
+}
 
-    /// Export from a card: open this version on its Export step (Smooth, with this result).
-    private func export(_ r: Int) { LibraryExport.start(model: model, library: library, folder: version.folderID, result: r) }
-
-    private var parentPicture: CGImage? {
-        guard let p = version.parentNumber.flatMap(part.version(number:)),
-              let img = library.thumbnails[CompareItem(folder: p.folderID, result: library.shownResult(p))]
-        else { return library.originalPicture(part) }   // ★ B1 (note 10): a draft (running or not) shows the original
-        return img
-    }
-
-    private func changeLine(_ v: LibraryVersion) -> String {
-        let from = v.parentNumber.map { "from v\($0)" } ?? "first run"
-        guard let first = v.changes.first else { return v.parentNumber == nil ? from : "\(from): same settings" }
-        return "\(from): \(first.text)\(v.changes.count > 1 ? " +\(v.changes.count - 1)" : "")"
+/// The ⋯ (mockup .ib): 36 pt drawn, a 44 pt hit. On a picture it sits on a dark disc.
+struct LibraryDots: View {
+    var onPicture = false
+    var body: some View {
+        Image(systemName: "ellipsis").font(.system(size: 15, weight: .semibold))
+            .foregroundStyle((onPicture ? DS.Color.textPrimary : DS.Color.textSecondary).color)
+            .frame(width: onPicture ? 28 : 36, height: onPicture ? 28 : 36)
+            .background { if onPicture { Circle().fill(Color.black.opacity(0.6)) } }
+            .frame(width: DSParts.target, height: DSParts.target)
+            .contentShape(Rectangle())
     }
 }
 

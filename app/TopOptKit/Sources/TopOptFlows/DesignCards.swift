@@ -159,8 +159,8 @@ public struct DSVersionCard<Header: View, Content: View>: View {
         .background(RoundedRectangle(cornerRadius: DSCards.versionRadius, style: .continuous).fill(DSCards.fill.color))
         .overlay(RoundedRectangle(cornerRadius: DSCards.versionRadius, style: .continuous)
             .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
+        .background(DSParts.publish(key))   // the card he sees: a branch's frame starts 48 pt in
         .padding(.leading, branch ? DSCards.branchIndent : 0)
-        .background(DSParts.publish(key))
     }
 }
 
