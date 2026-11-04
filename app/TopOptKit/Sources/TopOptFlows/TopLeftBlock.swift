@@ -50,7 +50,17 @@ public struct TopLeftBlock: View {
         return "v\(v.number)" + (library.isDraft(v) ? " draft" : "")
     }
 
+    /// ★ R-a2 (U1): the room the view corner takes at the page's right — the gizmo, the gap, the projection column — and 12 pt.
+    public static var viewCornerReserve: CGFloat {
+        PageChrome.gizmoInset + OrientationGizmoView.standardSize + DS.Space.s + ViewProjectionPair.width + 12
+    }
+
     public var body: some View {
+        // ★ R-a2: laid out in the page's width less the view corner's room; a long name gives way first (…)
+        TopLeftRowLayout(reserve: Self.viewCornerReserve) { row }
+    }
+
+    private var row: some View {
         HStack(spacing: DS.Space.m) {
             Button(action: back) {
                 HStack(spacing: DS.Space.xs) {
@@ -70,11 +80,12 @@ public struct TopLeftBlock: View {
 
             HStack(spacing: DS.Space.sm) {
                 Button { rename?() } label: {
-                    Text(name).dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold).lineLimit(1)
+                    Text(name).dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold).lineLimit(1).truncationMode(.tail)
                         .foregroundStyle(DS.Color.textPrimary.color)
                 }
                 .buttonStyle(.plain)
                 .disabled(rename == nil)
+                .layoutPriority(-1)   // ★ R-a2: the name gives way before anything else in the pill
                 Rectangle().fill(DS.Color.textPrimary.opacity(0.15).color).frame(width: 1, height: 14)
                 if let v = Self.versionLabel(library, folder: projectID) {
                     Text(v).dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textPrimary.opacity(0.5).color).fixedSize()
@@ -101,6 +112,7 @@ public struct TopLeftBlock: View {
             .background(Capsule().fill(DS.Surface.bar.color)
                 .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
             .background(CornerPairStyle.publish("topLeftName"))
+            .layoutPriority(-1)   // ★ R-a2: … and the pill before the back pill and undo / redo
 
             HStack(spacing: DS.Space.xs) {
                 icon("arrow.uturn.backward", label: "Undo", enabled: canUndo, key: "topLeftUndo", action: undo)
@@ -126,5 +138,20 @@ public struct TopLeftBlock: View {
         .disabled(!enabled)
         .accessibilityLabel(label)
         .background(CornerPairStyle.publish(key))
+    }
+}
+
+/// ★ R-a2 (U1): lays its row out in the offered width less `reserve` (the view corner's room) and is exactly as wide as the
+/// row then is — so a long name gives way before the row runs under the view corner, and the row still reports its own
+/// trailing edge (TopClusterEdgeKey).
+struct TopLeftRowLayout: Layout {
+    let reserve: CGFloat
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let row = subviews.first else { return .zero }
+        return row.sizeThatFits(ProposedViewSize(width: proposal.width.map { Swift.max(0, $0 - reserve) }, height: proposal.height))
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: bounds.origin, anchor: .topLeading,
+                              proposal: ProposedViewSize(width: bounds.width, height: bounds.height))
     }
 }

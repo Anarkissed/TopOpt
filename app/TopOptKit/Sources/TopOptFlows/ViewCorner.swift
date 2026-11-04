@@ -60,13 +60,18 @@ public enum XrayLook {
     public static let bodyAlpha: Float = 0.3
 }
 
-/// [Orthographic │ Perspective], left of the gizmo.
+/// [Orthographic] over [Perspective], left of the gizmo (★ LOOK PER SCREEN: mockup v5's column — a row ran over the top-left
+/// block's redo on Results at 11″ portrait).
 public struct ViewProjectionPair: View {
     @ObservedObject var projection: ViewProjection
     public init(projection: ViewProjection = .shared) { self.projection = projection }
 
+    /// The column's size (two 44 pt buttons, 2 apart, in a 3 pt glass edge).
+    public static let width: CGFloat = 50
+    public static let height: CGFloat = 96
+
     public var body: some View {
-        HStack(spacing: 2) {
+        VStack(spacing: 2) {
             button(icon: "square.grid.3x3", label: "Orthographic", on: projection.orthographic, key: "viewPairOrthographic") {
                 projection.orthographic = true
             }

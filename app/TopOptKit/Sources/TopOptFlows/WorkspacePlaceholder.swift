@@ -1798,7 +1798,7 @@ public struct WorkspacePlaceholder: View {
                 Spacer()
                 // ★ B2 (note 1): [Orthographic │ Perspective], directly left of the gizmo, on every page this gizmo serves
                 ViewProjectionPair()
-                    .padding(.top, (gizmoSize - 50) / 2)
+                    .padding(.top, (gizmoSize - ViewProjectionPair.height) / 2)   // ★ R-a2: the column, beside the cube's middle
                     .latticeBandChipKeepOut()
                 // ★ B4: the Cells page draws over the live part, so the gizmo follows the part's camera
                 OrientationGizmoView(camera: cameraModel,
