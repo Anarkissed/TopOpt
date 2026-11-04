@@ -77,6 +77,17 @@ final class SquishHost {
         Self.pump(settle)
     }
 
+    /// Opt-in (APP_BUILD_SHOT_DIR=<dir>): the page as a PNG, for the side-by-side with the mockup (the 3D view draws nothing
+    /// offscreen; the reviewer's rule A covers the chrome).
+    func picture(_ name: String) throws {
+        guard let dir = ProcessInfo.processInfo.environment["APP_BUILD_SHOT_DIR"] else { return }
+        view.layoutSubtreeIfNeeded()
+        let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: rep)
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        try XCTUnwrap(rep.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: dir).appendingPathComponent(name))
+    }
+
     /// A real drag through `points` (top-left origin): mouse down at the first, dragged through the rest, up at the last.
     func drag(_ points: [CGPoint], settle: Double = 0.5) {
         guard let first = points.first, let last = points.last else { return }
