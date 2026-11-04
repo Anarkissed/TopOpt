@@ -210,7 +210,8 @@ final class LatticeProtectionFollowsSlabTests: XCTestCase {
         let app = try String(contentsOf: root.appendingPathComponent("Sources/TopOptFlows/AppModel.swift"), encoding: .utf8)
         XCTAssertTrue(app.contains("let emission = project.latticeJobRegions()"))
         XCTAssertTrue(app.contains("let protections = project.faceProtectionSpecs(emission: emission)"))
-        XCTAssertTrue(app.contains("let latticeSpec = project.latticeRunSpec(emission: emission)"))
+        // B3 s1 (5b5f6bd0): Optimize topology only sends no lattice; when it does, it reads the same emission.
+        XCTAssertTrue(app.contains("let latticeSpec = withLattice ? project.latticeRunSpec(emission: emission) : nil"))
         let pm = try String(contentsOf: root.appendingPathComponent("Sources/TopOptFlows/ProjectModel.swift"), encoding: .utf8)
         XCTAssertTrue(pm.contains("let d = emission.slabDepthMM(runFaceID: run) ?? (latticed"),
                       "the protection reads the emission's own depth")
