@@ -228,6 +228,7 @@ extension LatticeSettings {
         k.paintedIncludeFaces = paintedIncludeFaces
         k.paintDepthMM = paintDepthMM
         k.groupRoles = groupRoles
+        k.latticeList = latticeList   // ★ B6: the lattice groups are where the lattice goes
         k.groupDepthMM = groupDepthMM
         k.selectableRoles = selectableRoles
         k.selectableDepthMM = selectableDepthMM

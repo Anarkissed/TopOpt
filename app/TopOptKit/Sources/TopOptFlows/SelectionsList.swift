@@ -208,6 +208,13 @@ public struct SelectionsList: View {
         return copy
     }
 
+    /// ★ B6 (notes 22, 23): the same list over the Lattice stage's own groups.
+    func latticeList() -> SelectionsList {
+        var copy = self
+        copy.usesLatticeList = true
+        return copy
+    }
+
     /// The same list with an open/close button per group and a resize grip (Topology, his iPad 2026-10-26).
     func openAndResize(isOpen: @escaping (UUID) -> Bool, toggleOpen: @escaping (UUID) -> Void,
                        height: Binding<CGFloat?>) -> SelectionsList {
@@ -237,7 +244,9 @@ public struct SelectionsList: View {
     /// ★ B2 (U10): each shown group line's middle in the list's scroll view (0 = the list's visible top).
     @State private var lineMids: [UUID: CGFloat] = [:]
 
-    private var groups: [SelectionGroup] { project.selection.groups }
+    private var groups: [SelectionGroup] { usesLatticeList ? project.latticeGroups : project.selection.groups }
+    /// ★ B6: the Lattice stage's list (`latticeList()`), else Topology's.
+    private var usesLatticeList = false
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {

@@ -370,6 +370,7 @@ public final class ProjectModel: ObservableObject {
         self.printParams = snapshot.printParams ?? .fdmDefault
         self.designBox = snapshot.designBox ?? DesignBoxModel()
         self.lattice = snapshot.lattice ?? LatticeSettings()
+        adoptLatticeListIfNeeded()   // ★ B6: an older project's lattice groups become the Lattice stage's own list
         // nil → TRUE. A project saved before this field existed reopens with CAD-face
         // projection ARMED, which is what the new core default means; decoding it to
         // false would quietly opt every existing project out of the change.
@@ -1284,7 +1285,7 @@ public final class ProjectModel: ObservableObject {
         -> [(key: String, faceID: Int, depthMM: Double, declaredDensity: Double?)] {
         var out: [(key: String, faceID: Int, depthMM: Double,
                    declaredDensity: Double?)] = []
-        for g in selection.groups where lattice.groupRoles[g.id] != nil {
+        for g in latticeGroups where lattice.groupRoles[g.id] != nil {   // ★ B6
             // ★ NO GROUP CARD (maintainer, 2026-08-17). There used to be one more
             // entry here, keyed by the group's UUID and built from
             // `g.faces.first` at the GROUP's depth — one arbitrary face standing
@@ -1660,7 +1661,7 @@ public final class ProjectModel: ObservableObject {
         if !out.isEmpty {
             for g in selection.groups { selection.removeFaces(faces, from: g.id) }
         }
-        force.sync(groups: selection.groups)
+        syncForceGroups()   // ★ B6: both lists
         objectWillChange.send()
         return out
     }
@@ -1737,7 +1738,7 @@ public final class ProjectModel: ObservableObject {
             if !stands.isEmpty { selection.addRegions(stands, to: group) }
         }
         selection.removeRegions([piece])
-        force.sync(groups: selection.groups)
+        syncForceGroups()   // ★ B6: both lists
         objectWillChange.send()
     }
 
@@ -2079,7 +2080,7 @@ public final class ProjectModel: ObservableObject {
         let swept = Set(s.groups.map(\.id)).subtracting(live)
         selection.restore(groups: s.groups, active: s.activeGroupID)
         force.restoreEntries(for: swept, from: s.force)
-        force.sync(groups: selection.groups)
+        syncForceGroups()   // ★ B6: both lists
         objectWillChange.send()
     }
 
@@ -2115,7 +2116,7 @@ public final class ProjectModel: ObservableObject {
         faceRegions.revertSplit(id)
         let dropped = before.subtracting(faceRegions.regions.map(\.id)).sorted()
         selection.removeRegions(dropped)
-        force.sync(groups: selection.groups)
+        syncForceGroups()   // ★ B6: both lists
         objectWillChange.send()
         return dropped
     }
@@ -2128,7 +2129,7 @@ public final class ProjectModel: ObservableObject {
         beginFaceEdit(); defer { endFaceEdit(.dissolve) }
         guard let mesh = viewerMesh, SurfaceDissolve.refusal(id, regions: faceRegions) == nil else { return nil }
         let r = SurfaceDissolve.apply(id, regions: &faceRegions, selection: &selection, mesh: mesh)
-        force.sync(groups: selection.groups)
+        syncForceGroups()   // ★ B6: both lists
         objectWillChange.send()
         return r
     }
@@ -2402,7 +2403,7 @@ public final class ProjectModel: ObservableObject {
         guard lattice.enabled, let mesh = viewerMesh else { return [] }
         let roles = latticeEligibleRoles()
         var out: [LatticeDepthPlane] = []
-        for g in selection.groups {
+        for g in latticeGroups {   // ★ B6
             guard let groupRole = roles[g.id] else { continue }
             // ★ A REGION GETS A DEPTH PLANE TOO (the interrupt's §2c). A region is
             // a voxel SET, not a surface, so the plane is built from the region's
@@ -2500,7 +2501,7 @@ public final class ProjectModel: ObservableObject {
     /// re-establishes that face's own number, which is what a per-face drag means.
     public func writeGroupDepthMM(_ group: UUID, mm: Double) {
         lattice.groupDepthMM[group] = LatticeSlabDepth.clamp(mm)
-        guard let g = selection.groups.first(where: { $0.id == group }) else { return }
+        guard let g = latticeGroups.first(where: { $0.id == group }) else { return }   // ★ B6
         for ref in latticeSelectableRefs(g) {
             lattice.selectableDepthMM.removeValue(forKey: ref.key)
         }
@@ -2779,15 +2780,8 @@ public final class ProjectModel: ObservableObject {
     /// rather than pruning at each of the six places a role can change means no
     /// call site can forget: this is the ONE function the emission goes through.
     public func latticeEligibleRoles() -> [UUID: LatticeGroupRole] {
-        var byID: [UUID: SelectionGroup] = [:]
-        for g in selection.groups { byID[g.id] = g }
-        return LatticeFaceRoleGate.pruned(roles: lattice.groupRoles) { id in
-            guard let g = byID[id] else { return false }
-            return LatticeFaceRoleGate.allowed(
-                kind: force.kind(for: id), protected: force.isProtected(id),
-                // EXPLICIT only — see LatticeFaceRoleGate.block.
-                keepClearOn: force.keepClearAffix(for: id) == .on)
-        }
+        // ★ B6 (notes 24, 27): a lattice-list group's own role is its declaration; Flexible keeps today's gate (LatticeList)
+        usesLatticeList ? latticeListRoles() : topologyGatedLatticeRoles()
     }
 
     public func latticeJobRegions() -> LatticeRegionEmission.Result {
@@ -2801,7 +2795,7 @@ public final class ProjectModel: ObservableObject {
             }
         }
         return LatticeRegionEmission.regions(
-            groups: selection.groups,
+            groups: latticeGroups,   // ★ B6: where the lattice goes (Flexible: Topology's groups, as today)
             roles: latticeEligibleRoles(),
             primitives: resolvedPrims,
             includePrimitives: lattice.includePrimitives.map { ($0, $0.resolvedDepthMM) },
@@ -2877,7 +2871,7 @@ public final class ProjectModel: ObservableObject {
             ?? regions.first { $0.kind == .face && $0.faceID == m.faceID }
         var ref: LatticeSelectableRef? = nil
         if let key = prism?.selectableKey {
-            for g in selection.groups {
+            for g in latticeGroups {   // ★ B6
                 if let f = g.faces.first(where: { LatticeSelectableRef.face(group: g.id, face: $0).key == key }) {
                     ref = .face(group: g.id, face: f); break
                 }
@@ -2906,7 +2900,7 @@ public final class ProjectModel: ObservableObject {
     public func latticeDroppedRegionName(group gid: UUID, _ rid: RegionID,
                                          role: LatticeGroupRole, groupRole: LatticeGroupRole) -> String? {
         guard let r = faceRegions.region(rid) else { return nil }
-        if let g = selection.groups.first(where: { $0.id == gid }) {
+        if let g = latticeGroups.first(where: { $0.id == gid }) {   // ★ B6
             var seen: Set<RegionID> = [rid]
             var up = r.parentID
             while let a = faceRegions.region(up), !seen.contains(a.id) {
@@ -2996,10 +2990,10 @@ public final class ProjectModel: ObservableObject {
         // the only way to attribute a region to its group WITHOUT a second
         // ordering assumption, and it is the same function either way.
         return LatticeSectorDensity.rows(
-            groups: selection.groups, roles: roles,
+            groups: latticeGroups, roles: roles,   // ★ B6
             densities: lattice.groupDensities,
             regionsFor: { [weak self] gid in
-                guard let self, let g = self.selection.groups.first(where: { $0.id == gid })
+                guard let self, let g = self.latticeGroups.first(where: { $0.id == gid })
                 else { return [] }
                 return LatticeRegionEmission.regions(
                     groups: [g], roles: roles,
@@ -3124,7 +3118,7 @@ public final class ProjectModel: ObservableObject {
     @discardableResult
     public func addManualPrimitive(_ kind: ManualPrimitive.Kind, to group: UUID) -> UUID? {
         guard let mesh = viewerMesh,
-              selection.groups.contains(where: { $0.id == group }) else { return nil }
+              forceKeptGroups.contains(where: { $0.id == group }) else { return nil }   // ★ B6: a lattice group's primitives too
         let c = SIMD3<Double>(mesh.bounds.center)
         let r = max(1.0, Double(mesh.bounds.radius))
         let p: ManualPrimitive = kind == .bolt

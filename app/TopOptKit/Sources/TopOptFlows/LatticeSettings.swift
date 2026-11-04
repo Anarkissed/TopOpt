@@ -2056,6 +2056,11 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// and an entry whose group is gone is inert (lookup by id finds nothing).
     /// Empty by default ⇒ absent from old snapshots ⇒ they decode unchanged.
     public var groupRoles: [UUID: LatticeGroupRole]
+    /// ★ B6 (notes 22, 23; plan.md §B6): the Lattice stage's OWN groups (Structural / Aesthetic) — a face can be in its
+    /// Topology groups (its role in the run) and in lattice groups at once. nil = not yet made: an older project is
+    /// migrated on open (`ProjectModel.adoptLatticeListIfNeeded`); a Flexible project stays on Topology's groups until
+    /// #362's B9 moves it. `groupRoles` and the other per-group maps key by THESE groups' ids.
+    public var latticeList: SelectionModel? = nil
     /// ★ PER-REGION RELATIVE DENSITY (task 2026-08-16-per-sector-density-override),
     /// keyed by the SAME `SelectionGroup.id` as `groupRoles`. This is the one thing
     /// the region layer could not yet say: dial this sector to 25% and its
@@ -2384,6 +2389,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         case region                     // legacy single-region snapshots
         case includePrimitives, boundary, densityMode, paintedIncludeFaces, paintDepthMM
         case groupRoles
+        case latticeList            // ★ B6: the Lattice stage's own groups (absent ⇒ not yet made)
         case groupDensities
         case groupDepthMM        // the ONE dragged depth per group (task 2026-08-12 §0a)
         // The per-SELECTABLE role + depth (task 2026-08-14-lattice-separation
@@ -2523,6 +2529,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         paintedIncludeFaces = try c.decodeIfPresent([Int].self, forKey: .paintedIncludeFaces) ?? []
         paintDepthMM = try c.decodeIfPresent(Double.self, forKey: .paintDepthMM) ?? 4
         groupRoles = try c.decodeIfPresent([UUID: LatticeGroupRole].self, forKey: .groupRoles) ?? [:]
+        latticeList = try c.decodeIfPresent(SelectionModel.self, forKey: .latticeList)
         // Absent in every snapshot written before this task ⇒ [:] ⇒ auto everywhere,
         // which is exactly what those projects ran. A default must not rewrite history.
         groupDensities = try c.decodeIfPresent([UUID: Double].self, forKey: .groupDensities) ?? [:]
@@ -2650,6 +2657,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(paintedIncludeFaces, forKey: .paintedIncludeFaces)
         try c.encode(paintDepthMM, forKey: .paintDepthMM)
         try c.encode(groupRoles, forKey: .groupRoles)
+        try c.encodeIfPresent(latticeList, forKey: .latticeList)   // ★ B6: written once made; older bytes unchanged
         try c.encode(groupDensities, forKey: .groupDensities)
         try c.encode(groupDepthMM, forKey: .groupDepthMM)
         try c.encode(frozenRegionDensity, forKey: .frozenRegionDensity)
