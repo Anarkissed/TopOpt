@@ -191,12 +191,16 @@ public struct ResultSummary: Codable, Equatable, Sendable {
     public var worstCaseMargin: Double
     public var accepted: Bool
     public var achievedVolumeFraction: Double
+    /// ★ His Q1: the result's word as Results says it ("Just safe", "+10 %", "−30%"); nil when its run's results don't say.
+    public var word: String?
 
-    public init(massGrams: Double, worstCaseMargin: Double, accepted: Bool, achievedVolumeFraction: Double) {
+    public init(massGrams: Double, worstCaseMargin: Double, accepted: Bool, achievedVolumeFraction: Double,
+                word: String? = nil) {
         self.massGrams = massGrams
         self.worstCaseMargin = worstCaseMargin
         self.accepted = accepted
         self.achievedVolumeFraction = achievedVolumeFraction
+        self.word = word
     }
 }
 

@@ -223,6 +223,10 @@ enum OutcomeCodec {
         // on local runs; combined with `computedRemotely` by `SolvingMachine`, which
         // is the ONLY thing allowed to interpret the pair.
         let solvedBy: String?
+        // ★ B5 (his Q1 answer "a: save the words", 11-04): the worker's report.json as it came. Without it a reopened
+        // strengthen run lost "a · Just safe, b · +10 %, c · +20 %" (Results and the Library's tiles read them from it).
+        // Optional, so a run without one (on the device) is stored byte for byte as before; an older blob decodes to nil.
+        var reportJSON: Data? = nil
     }
 
     // MARK: OptimizeOutcome → DTO (cheap: array→Data is a memcpy)
@@ -316,7 +320,8 @@ enum OutcomeCodec {
                     variantRegionsWithoutShape: r.variantRegionsWithoutShape.isEmpty ? nil : r.variantRegionsWithoutShape,
                     variantFaceWallsLeftOut: r.variantLegacyFaceWallsLeftOut > 0 ? r.variantLegacyFaceWallsLeftOut : nil,
                     planByRegionJSON: r.planLaid?.rawJSON) },
-            solvedBy: o.solvedBy)
+            solvedBy: o.solvedBy,
+            reportJSON: o.reportJSON)
     }
 
     // MARK: DTO → OptimizeOutcome
@@ -420,7 +425,8 @@ enum OutcomeCodec {
                     planLaid: r.planByRegionJSON.map { LatticeReport.PlanLaid(planByRegionJSON: $0) }) },
             solvedBy: d.solvedBy,
             // nil on a pre-growth blob → false → reduction, which is what it is.
-            growthLadder: d.growthLadder ?? false)
+            growthLadder: d.growthLadder ?? false,
+            reportJSON: d.reportJSON)   // ★ B5 (Q1): the run's report, so a reopen keeps its words
     }
 
     // MARK: Encode / decode (binary plist)
