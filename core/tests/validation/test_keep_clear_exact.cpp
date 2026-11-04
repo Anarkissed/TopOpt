@@ -201,6 +201,64 @@ int main() {
                 same.vertices[i].z == far_only.vertices[i].z;
   CHECK(identical && cut2 == 0.0, "(f) a file reaching into no Keep clear comes back unchanged");
 
+  // (h) a Keep clear closed in on every side: a lid over the bore's mouth to 3 mm above
+  // the top and a plate under it to 3 mm below, both wider than the keep-out (his
+  // ad68d4c0 at 1.55 and 1.25: material over both ends of two bolt holes). Counted on
+  // the file whoever closed it in: the design (the bore left empty under the lid), or
+  // the cut (the export had filled the bore; emptied, it is a void). An open one is not.
+  {
+    VoxelGrid g;  // 0.5 mm voxels over the block and 4 mm round it
+    g.spacing = 0.5;
+    g.origin = {-24.0, -14.0, -6.0};
+    g.nx = 96, g.ny = 56, g.nz = 40;
+    g.tags.assign(static_cast<std::size_t>(g.nx) * g.ny * g.nz, VoxelTag::Empty);
+    DesignMask clear(g.tags.size(), MaskValue::Active);  // the bolt's keep-out, r 5, z -2..12
+    for (int k = 0; k < g.nz; ++k)
+      for (int j = 0; j < g.ny; ++j)
+        for (int i = 0; i < g.nx; ++i) {
+          const Vec3 c = g.voxel_center(i, j, k);
+          if (std::hypot(c.x - kBore.x, c.y - kBore.y) < kKeepR && c.z > -2.0 && c.z < 12.0)
+            clear[g.index(i, j, k)] = MaskValue::FrozenVoid;
+        }
+    const manifold::Manifold lids =
+        box(-16.0, -6.0, 10.0, -4.0, 6.0, 13.0) + box(-16.0, -6.0, -3.0, -4.0, 6.0, 0.0);
+    const TriangleMesh lidded = to_mesh(file_part_m + lids);
+    const TriangleMesh filled = to_mesh(file_part_m + lids + column(kBoreR + 0.5, -1.0, 11.0));
+    double cut_h = 0.0;
+    const TriangleMesh h = cut_keep_clears(filled, job, model, 0.01, &cut_h);
+    const WrittenAudit wl = audit_as_written(lidded), wf = audit_as_written(filled),
+                       wh = audit_as_written(h);
+    const int by_design = file_sealed_keep_clears(lidded, g, &clear);
+    const int by_cut = file_sealed_keep_clears(h, g, &clear);
+    const int uncut = file_sealed_keep_clears(filled, g, &clear);
+    const int open = file_sealed_keep_clears(out, g, &clear);
+    std::printf("[kc] (h) lidded bore: left empty %d sealed (%d shells); filled %d (%d shells), cut "
+                "%.3f mm3 -> %d sealed (%d shells, %d body); open bore %d\n",
+                by_design, wl.shells, uncut, wf.shells, cut_h, by_cut, wh.shells, wh.bodies, open);
+    CHECK(wl.shells == 2 && wf.shells == 1 && !mesh_encloses(h, plug) && wh.shells == 2 &&
+              wh.bodies == 1,
+          "(h) precondition: closed in by the design, or by the cut emptying a filled bore");
+    CHECK(by_design == 1, "(h) a Keep clear the design closed in is counted");
+    CHECK(by_cut == 1 && uncut == 0, "(h) one the cut emptied is counted (filled, it was not)");
+    CHECK(open == 0, "(h) a Keep clear open to the air is not sealed");
+  }
+
+  // (i) a piece the cut leaves loose, 0.4 mm thin: a plate 1.6 mm over the top, held up
+  // by a post inside the keep-out. The cut takes the post and the plate's middle; the
+  // rest (71 mm3) is loose and under the printable minimum, so with that line given it
+  // goes (his efe18e33 at 1.10: 0.89 mm3, 0.72 mm thin, just over one voxel).
+  {
+    const TriangleMesh propped =
+        to_mesh(file_part_m + box(kBore.x + 3.5, -0.5, 10.0, kBore.x + 4.5, 0.5, 11.6) +
+                box(-18.0, -8.0, 11.6, -2.0, 8.0, 12.0));
+    const WrittenAudit kept = audit_as_written(cut_keep_clears(propped, job, model, 0.01));
+    const WrittenAudit gone = audit_as_written(cut_keep_clears(propped, job, model, 0.01, nullptr, 0.84));
+    std::printf("[kc] (i) propped plate: no line %d body(ies); line 0.84 mm %d body(ies)\n",
+                kept.bodies, gone.bodies);
+    CHECK(kept.bodies == 2, "(i) precondition: the cut leaves the plate loose");
+    CHECK(gone.bodies == 1 && gone.shells == 1, "(i) the loose piece under the printable minimum goes");
+  }
+
   if (g_failures == 0) {
     std::printf("keep clear exact: all %d checks passed\n", g_checks);
     return 0;

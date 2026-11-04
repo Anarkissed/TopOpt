@@ -580,10 +580,11 @@ std::string export_variant_alpha(const MinimizePlasticVariant& variant,
 // once the file is read (his squish rig: 4 such edges where a Protect cylinder's end
 // met the voxel surface). And where Protect boxes meet the voxel surface the boolean
 // leaves loose slivers of voxel bump in the air above the face (68 on that rig, 0.00
-// to 0.25 mm3, beside a 99,842 mm3 part). The result is welded as written
-// (weld_as_written) and every shell under one solve voxel (`min_piece_mm3`) goes,
-// never one of the export's own bodies; a result still not clean is tried again with
-// the voxel surface nudged another way, and said if none is.
+// to 0.25 mm3, beside a 99,842 mm3 part). Every shell under one solve voxel
+// (`min_piece_mm3`) goes, in the boolean's own indices first and then welded as
+// written (clean_cut_as_written), never one of the export's own bodies; a result
+// still not clean is tried again with the voxel surface nudged another way, and said
+// if none is.
 #ifdef TOPOPT_HAVE_MANIFOLD
 manifold::Manifold mesh_manifold(const TriangleMesh& m) {
   manifold::MeshGL g;
@@ -739,7 +740,7 @@ TriangleMesh keep_regions_exact(const TriangleMesh& exported, const TriangleMesh
                : E0.Translate({kNudge * kNudges[n][0], kNudge * kNudges[n][1],
                                kNudge * kNudges[n][2]});
     out = manifold_mesh(((En - K) + PK).GetMeshGL());
-    out = drop_fragment_shells(weld_as_written(out), min_piece_mm3, bodies, &dropped);
+    out = clean_cut_as_written(out, min_piece_mm3, bodies, &dropped);
     const WrittenAudit w = audit_as_written(out);
     if (w.non_manifold_edges == 0 && w.non_manifold_vertices == 0 && w.boundary_edges == 0) break;
     if (n == 2)
@@ -834,11 +835,14 @@ KeepClearCut make_keep_clear_cut(const TriangleMesh& part,
 // `file` cut out of its Keep clears with `cut` (try 0, made once per run); a result not
 // clean as written is cut again with tries 1 and 2. A file that reaches into none is
 // returned as it is, byte for byte; `cut_mm3` (may be null) is the volume cut.
+// A piece the cut leaves loose goes under one voxel (`min_piece_mm3`) or, given the
+// printable minimum `thin_mm`, under that across (his efe18e33 at 1.10: 0.89 mm3, 0.72
+// mm thin, a voxel being 0.87 mm3) — never one of the file's own bodies.
 TriangleMesh keep_clear_exact(const TriangleMesh& file, const KeepClearCut& cut,
                               const TriangleMesh& part,
                               const std::vector<ClearanceGeometry>& clears,
                               const std::vector<KeepRegion>& keeps, double min_piece_mm3,
-                              double* cut_mm3 = nullptr) {
+                              double* cut_mm3 = nullptr, double thin_mm = 0.0) {
   if (cut_mm3) *cut_mm3 = 0.0;
   if (!cut.part_ok)
     std::fprintf(stderr, "WARNING: KEEP CLEAR: the part mesh is not a closed manifold, so the "
@@ -863,8 +867,8 @@ TriangleMesh keep_clear_exact(const TriangleMesh& file, const KeepClearCut& cut,
     const manifold::Manifold& C = n == 0 ? cut.cutter : retry.cutter;
     if (cut_mm3) *cut_mm3 = n == 0 ? v0 : (E ^ C).Volume();
     int dropped = 0;
-    out = drop_fragment_shells(weld_as_written(manifold_mesh((E - C).GetMeshGL())), min_piece_mm3,
-                               bodies, &dropped);
+    out = clean_cut_as_written(manifold_mesh((E - C).GetMeshGL()), min_piece_mm3, bodies,
+                               &dropped, thin_mm);
     const WrittenAudit w = audit_as_written(out);
     if (w.non_manifold_edges == 0 && w.non_manifold_vertices == 0 && w.boundary_edges == 0) break;
     if (n == 2)
@@ -1009,7 +1013,7 @@ TriangleMesh variant_export_model_mesh(const MinimizePlasticVariant& variant,
     double cut = 0.0;
     if (fin->part != nullptr && fin->keep_clear_cut != nullptr)
       m = keep_clear_exact(m, *fin->keep_clear_cut, *fin->part, fin->keep_clears, keeps,
-                           sg.spacing * sg.spacing * sg.spacing, &cut);
+                           sg.spacing * sg.spacing * sg.spacing, &cut, c.min_thickness_mm);
     if (fb) {
       *fb = finish_block(r);
       fb->keep_clear_cut_mm3 = cut;
@@ -1226,6 +1230,9 @@ FinishRecheck recheck_file(const TriangleMesh& m, const TriangleMesh& raw, const
   rc.load_path_ok = an.accepted || an.non_convergent || an.contact_held_by_sliding ||
                     an.margin_effective < rc.margin_required * (1.0 - 1e-12);
   rc.keep_clear_voxels = fb.keep_clear_voxels;
+  // A Keep clear closed in on every side refuses too: nothing reaches it.
+  fb.keep_clear_sealed = file_sealed_keep_clears(m, sg, clearance);
+  rc.keep_clear_sealed = fb.keep_clear_sealed;
   rc.keep_clear_before = file_keep_clear_voxels(occ0, clearance, exclude);
   if (clearance != nullptr && clearance->size() == occ.size()) {
     const std::size_t nx = static_cast<std::size_t>(sg.nx), nxy = nx * static_cast<std::size_t>(sg.ny);
@@ -9598,10 +9605,11 @@ void apply_build_direction_options(MinimizePlasticOptions& options,
 }  // namespace
 
 TriangleMesh cut_keep_clears(const TriangleMesh& file, const JobDescription& job,
-                             const StepModel& model, double min_piece_mm3, double* cut_mm3) {
+                             const StepModel& model, double min_piece_mm3, double* cut_mm3,
+                             double thin_mm) {
   const std::vector<ClearanceGeometry> clears = lattice_keep_outs_from_job(job, model);
   return keep_clear_exact(file, make_keep_clear_cut(model.mesh, clears, job.keep_regions),
-                          model.mesh, clears, job.keep_regions, min_piece_mm3, cut_mm3);
+                          model.mesh, clears, job.keep_regions, min_piece_mm3, cut_mm3, thin_mm);
 }
 
 // Map a job.json "loads" block onto the front-end-neutral ProductionLoadCase the
@@ -16312,9 +16320,10 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                    v.requested_volume_fraction, fb.fixed.size(), fb.left.size(),
                    fb.stair_step_removed_pct, fb.margin_before, fb.margin, fb.mass_before_grams,
                    fb.mass_grams, fb.seconds);
-      if (fb.keep_clear_cut_mm3 > 0.0)
-        std::fprintf(stderr, "[keep clear] version vf %.2f: %.4g mm3 cut out of its Keep clears\n",
-                     v.requested_volume_fraction, fb.keep_clear_cut_mm3);
+      if (fb.keep_clear_cut_mm3 > 0.0 || fb.keep_clear_sealed > 0)
+        std::fprintf(stderr, "[keep clear] version vf %.2f: %.4g mm3 cut out of its Keep clears; "
+                     "%d sealed inside the part\n",
+                     v.requested_volume_fraction, fb.keep_clear_cut_mm3, fb.keep_clear_sealed);
     }
     // A version refused after finishing joins the rejected list in ladder order (a run
     // with no refusal keeps its list as it was).
@@ -16671,6 +16680,7 @@ std::vector<std::string> refinish_job(const JobDescription& job, const std::stri
                       ", \"kc_exact\": [" + std::to_string(kc_exact) + ", " + std::to_string(kc_part) + ", " +
                       std::to_string(kc_face) + "]" +
                       ", \"kc_cut_mm3\": " + std::to_string(fb.keep_clear_cut_mm3) +
+                      ", \"kc_sealed\": " + std::to_string(file_sealed_keep_clears(done, sg, clear_p)) +
                       ", \"cut_lost\": [" + std::to_string(cut_lost) + ", " + std::to_string(cut_lost_part) + ", " +
                       std::to_string(cut_lost_keep) + ", " + std::to_string(cut_lost_far) + ", " +
                       std::to_string(cut_lost_loose) + "]" + ", \"stair_step_pct\": " +
@@ -16737,7 +16747,8 @@ std::vector<std::string> refinish_job(const JobDescription& job, const std::stri
                   "\"new_under_line_measured\": %d, "
                   "\"thinnest_new_mm\": %.3f, \"pinned_moved\": %d, \"keep_clear_voxels\": %lld, "
                   "\"keep_clear_before\": %lld, \"keep_clear_added\": %lld, \"keep_clear_left\": %zu, "
-                  "\"thin_joints\": %d, \"keep_clear_cut_mm3\": %.4f, \"finish_s\": %.2f, "
+                  "\"thin_joints\": %d, \"keep_clear_cut_mm3\": %.4f, \"keep_clear_sealed\": %d, "
+                  "\"finish_s\": %.2f, "
                   "\"seconds\": %.1f}",
                   d.requested_volume_fraction,
                   material.density_g_cm3 * std::fabs(signed_volume(raw)) / 1000.0,
@@ -16751,7 +16762,8 @@ std::vector<std::string> refinish_job(const JobDescription& job, const std::stri
                   w.non_manifold_vertices, w.shells, w.bodies, new_under, new_under_measured,
                   thinnest_new,
                   pinned_moved, fb.keep_clear_voxels, fb.keep_clear_before, fb.keep_clear_added,
-                  fb.keep_clear_left, fb.thin_joints, fb.keep_clear_cut_mm3, fb.seconds, secs);
+                  fb.keep_clear_left, fb.thin_joints, fb.keep_clear_cut_mm3, fb.keep_clear_sealed,
+                  fb.seconds, secs);
     std::map<std::string, int> why;
     for (const FinishPlace& p : fb.left) ++why[p.reason];
     std::string wr;

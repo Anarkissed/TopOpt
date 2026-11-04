@@ -405,6 +405,12 @@ int main() {
     r.keep_clear_voxels = 0;
     r.keep_clear_before = 0;
     r.keep_clear_added = 0;
+    // A Keep clear the cut left closed in on every side (his ad68d4c0 at 1.55 and 1.25:
+    // material over both ends of two bolt holes) is no Keep clear: nothing reaches it.
+    r.keep_clear_sealed = 2;
+    CHECK(finish_verdict_reason(r) == "A Keep clear is sealed inside the part",
+          "(e) a Keep clear sealed inside the part refuses");
+    r.keep_clear_sealed = 0;
     CHECK(finish_verdict_reason(r).empty(), "(e) a good finished shape keeps its verdict");
   }
 
@@ -447,6 +453,117 @@ int main() {
     CHECK(identical, "(w1) a clean mesh is returned as it is");
   }
 
+  // ── (w4) a sliver on one line ──────────────────────────────────────────────
+  {
+    // A unit cube whose front face has a corner m in the middle of its bottom edge pq,
+    // the bottom face still on pq, and the triangle (p, q, m) closing the gap: manifold
+    // in its own indices, three DISTINCT floats, but on one line. A reader drops it as
+    // zero-area and its three edges open (the Keep clear cut on his ad68d4c0, dda471a2
+    // and efe18e33: 6 to 17 of them, along voxel lines; core's import refused the file).
+    TriangleMesh m;
+    m.vertices = {{0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}, {0, 0, 1},
+                  {1, 0, 1}, {1, 1, 1}, {0, 1, 1}, {0.5, 0, 0}};
+    const int p = 0, q = 1, M = 8;
+    m.triangles = {{0, 3, 2}, {0, 2, 1},                // bottom (q -> p on the second)
+                   {p, M, 4}, {M, q, 5}, {M, 5, 4},     // front, through m
+                   {p, q, M},                           // the sliver
+                   {4, 5, 6}, {4, 6, 7}, {3, 7, 6}, {3, 6, 2},
+                   {0, 4, 7}, {0, 7, 3}, {1, 2, 6}, {1, 6, 5}};
+    const WatertightReport own = check_watertight(m);
+    const WrittenAudit as_is = audit_as_written(m);
+    const TriangleMesh w = weld_as_written(m);
+    const WrittenAudit after = audit_as_written(w);
+    const std::string path = std::string(TMP_DIR) + "/finish_w4.stl";
+    write_stl_file(path, w);
+    const PartInspection read = inspect_part_file(path);
+    std::printf("[finish] (w4) sliver on a line: own indices watertight %d; as read %d zero-area, "
+                "%d open; flipped %d zero-area, %d open, %d shell(s); imported %s (%d dropped)\n",
+                own.watertight ? 1 : 0, as_is.zero_area_triangles, as_is.boundary_edges,
+                after.zero_area_triangles, after.boundary_edges, after.shells,
+                read.acceptable ? "yes" : "no", read.degenerate_triangles);
+    CHECK(own.watertight && as_is.zero_area_triangles == 1 && as_is.boundary_edges == 3,
+          "(w4) the defect: manifold in its indices, three open edges as read");
+    CHECK(after.zero_area_triangles == 0 && after.non_manifold_edges == 0 &&
+              after.boundary_edges == 0 && after.shells == 1 && after.bodies == 1 &&
+              w.triangles.size() == m.triangles.size() && w.vertices.size() == m.vertices.size(),
+          "(w4) the sliver's long edge flipped away: the cube, clean, every corner kept");
+    CHECK(std::fabs(signed_volume(w) - 1.0) < 1e-12, "(w4) the flip moves nothing");
+    CHECK(read.acceptable && read.degenerate_triangles == 0, "(w4) core's import takes the file");
+  }
+
+  // ── (w5) a sliver in a flap ────────────────────────────────────────────────
+  {
+    // The cube's bottom triangle (R, B, M) handed back as three: (R, B, A), the sliver
+    // (A, B, M) on one line and (R, A, M) folded back over the first, A past M on B's
+    // line. Manifold in its own indices, the same solid; a zero-area flap sticking out
+    // past the face (the Keep clear cut on his dda471a2, one per version). Flipping the
+    // sliver's long edge puts (A, R, M) on (R, A, M): the two go as a fin, and so does A.
+    TriangleMesh m;
+    m.vertices = {{0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}, {0, 0, 1},
+                  {1, 0, 1}, {1, 1, 1}, {0, 1, 1}, {1, -0.5, 0}};
+    const int R = 0, B = 2, M = 1, A = 8;
+    m.triangles = {{0, 3, 2}, {R, B, A}, {A, B, M}, {R, A, M},  // bottom, through the flap
+                   {0, 1, 5}, {0, 5, 4}, {4, 5, 6}, {4, 6, 7}, {3, 7, 6}, {3, 6, 2},
+                   {0, 4, 7}, {0, 7, 3}, {1, 2, 6}, {1, 6, 5}};
+    const WatertightReport own = check_watertight(m);
+    const WrittenAudit as_is = audit_as_written(m);
+    const TriangleMesh w = weld_as_written(m);
+    const WrittenAudit after = audit_as_written(w);
+    const std::string path = std::string(TMP_DIR) + "/finish_w5.stl";
+    write_stl_file(path, w);
+    const PartInspection read = inspect_part_file(path);
+    std::printf("[finish] (w5) sliver in a flap: own indices watertight %d; as read %d zero-area, "
+                "%d open; flipped %d zero-area, %d open, %d on >2, %d shell(s), %zu triangles, "
+                "%zu vertices; imported %s\n",
+                own.watertight ? 1 : 0, as_is.zero_area_triangles, as_is.boundary_edges,
+                after.zero_area_triangles, after.boundary_edges, after.non_manifold_edges,
+                after.shells, w.triangles.size(), w.vertices.size(), read.acceptable ? "yes" : "no");
+    CHECK(own.watertight && as_is.zero_area_triangles == 1 && as_is.boundary_edges == 3,
+          "(w5) the defect: manifold in its indices, three open edges as read");
+    CHECK(after.zero_area_triangles == 0 && after.non_manifold_edges == 0 &&
+              after.boundary_edges == 0 && after.non_manifold_vertices == 0 && after.shells == 1 &&
+              after.bodies == 1 && w.triangles.size() == 12 && w.vertices.size() == 8,
+          "(w5) the flap goes: the cube, clean");
+    CHECK(std::fabs(signed_volume(w) - 1.0) < 1e-12, "(w5) the flap held no volume");
+    CHECK(read.acceptable && read.degenerate_triangles == 0, "(w5) core's import takes the file");
+  }
+
+  // ── (w6) a fragment on the part's edge ─────────────────────────────────────
+  {
+    // The cube and, outside its front face, a sliver tetrahedron closed on its OWN four
+    // vertices, two of them on the face's diagonal (the Keep clear cut on his efe18e33
+    // 1.25: a 1e-8 mm3 one on an edge of the part, all three tries). Manifold in its
+    // indices; welded as the file reads, the diagonal carries four triangles and the
+    // sliver is no longer a shell of its own to drop.
+    TriangleMesh m;
+    m.vertices = {{0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}, {0, 0, 1}, {1, 0, 1}, {1, 1, 1},
+                  {0, 1, 1}, {0, 0, 0}, {1, 0, 1}, {0.5, -0.01, 0.4}, {0.5, -0.01, 0.6}};
+    const int a = 8, b = 9, c = 11, d = 10;  // positively oriented: b - a, c - a, d - a
+    m.triangles = {{0, 2, 1}, {0, 3, 2}, {0, 1, 5}, {0, 5, 4}, {4, 5, 6}, {4, 6, 7},
+                   {3, 7, 6}, {3, 6, 2}, {0, 4, 7}, {0, 7, 3}, {1, 2, 6}, {1, 6, 5},
+                   {a, c, b}, {a, b, d}, {a, d, c}, {b, c, d}};
+    const WatertightReport own = check_watertight(m);
+    const WrittenAudit old_way =
+        audit_as_written(drop_fragment_shells(weld_as_written(m), 0.87, 1, nullptr));
+    int dropped = 0;
+    const TriangleMesh w = clean_cut_as_written(m, 0.87, 1, &dropped);
+    const WrittenAudit after = audit_as_written(w);
+    std::printf("[finish] (w6) fragment on an edge: own indices watertight %d, volume %.6g; "
+                "welded then dropped %d on >2, %d point(s); cleaned %d on >2, %d point(s), %d "
+                "open, %d shell(s), %d dropped, volume %.6g\n",
+                own.watertight ? 1 : 0, signed_volume(m), old_way.non_manifold_edges,
+                old_way.non_manifold_vertices, after.non_manifold_edges,
+                after.non_manifold_vertices, after.boundary_edges, after.shells, dropped,
+                signed_volume(w));
+    CHECK(own.watertight && signed_volume(m) > 1.0 && old_way.non_manifold_edges == 1,
+          "(w6) the defect: manifold in its indices, the diagonal on four triangles welded");
+    CHECK(after.non_manifold_edges == 0 && after.non_manifold_vertices == 0 &&
+              after.boundary_edges == 0 && after.shells == 1 && after.bodies == 1 &&
+              dropped == 1 && w.triangles.size() == 12,
+          "(w6) the fragment goes in its own indices first: the cube, clean");
+    CHECK(std::fabs(signed_volume(w) - 1.0) < 1e-12, "(w6) the cube is untouched");
+  }
+
   // ── (w2) fragment shells; (w3) a point contact ─────────────────────────────
   {
     using manifold::Manifold;
@@ -476,6 +593,26 @@ int main() {
           "(w2) the 0.125 mm^3 chip goes; the body and its sealed void stay");
     CHECK(dropped2 == 0 && kept2.triangles.size() == m.triangles.size(),
           "(w2) one of the export's own bodies never goes, whatever its size");
+    // A loose plate 0.4 mm thin (6.4 mm^3, over the volume line): a printer makes no
+    // piece under the printable minimum, so with that line given it goes too; the
+    // sealed void (2 mm across) stays.
+    TriangleMesh thin = m;
+    {
+      const TriangleMesh plate = from_manifold(
+          Manifold::Cube({4.0, 4.0, 0.4}).Translate({12.0, 2.0, 0.0}));
+      const int b0 = static_cast<int>(thin.vertices.size());
+      thin.vertices.insert(thin.vertices.end(), plate.vertices.begin(), plate.vertices.end());
+      for (const auto& t : plate.triangles) thin.triangles.push_back({b0 + t[0], b0 + t[1], b0 + t[2]});
+    }
+    int dropped3 = -1, dropped4 = -1;
+    const WrittenAudit a3 = audit_as_written(drop_fragment_shells(thin, 1.0, 1, &dropped3));
+    const WrittenAudit a4 = audit_as_written(drop_fragment_shells(thin, 1.0, 1, &dropped4, 0.84));
+    std::printf("[finish] (w2) a loose 0.4 mm plate: no line %d dropped (%d bodies); line 0.84 mm "
+                "%d dropped (%d bodies, %d shells)\n", dropped3, a3.bodies, dropped4, a4.bodies,
+                a4.shells);
+    CHECK(dropped3 == 1 && a3.bodies == 2, "(w2) without a printable line the plate stays");
+    CHECK(dropped4 == 2 && a4.bodies == 1 && a4.shells == 2,
+          "(w2) a loose piece under the printable minimum goes; the sealed void stays");
     TriangleMesh touch = big;  // a second cube sharing one corner point with the first
     const TriangleMesh other = from_manifold(Manifold::Cube({10.0, 10.0, 10.0}).Translate({10.0, 10.0, 10.0}));
     const int base = static_cast<int>(touch.vertices.size());
