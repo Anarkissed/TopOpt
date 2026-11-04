@@ -625,8 +625,12 @@ struct ProjectFolderView: View {
     @State private var renaming: String?
     @State private var renamingPart: (id: UUID, name: String)?
     @State private var deleting: LibraryPart?
+    @State private var exportOpen = false   // ★ B5 (note 11): Export chosen versions
 
     @State private var portrait = false
+
+    /// The note under the grid (mockup #lib-project, word for word).
+    static let note = "A part with nothing picked shows its original model. A picked result gets the blue ring."
 
     /// mockup .grid: 3 across (2 in portrait), 18 pt apart
     private var columns: [GridItem] { Array(repeating: GridItem(.flexible(), spacing: DS.Space.xl), count: portrait ? 2 : 3) }
@@ -644,7 +648,8 @@ struct ProjectFolderView: View {
                     }
                     Spacer()
                     if let project {
-                        // ★ B5 (mockup #lib-project): §4's glass button in the accent
+                        // ★ B5 (note 11, mockup #lib-project): Export the chosen versions, then + Add part in the accent
+                        DSGlassButton("Export", systemImage: "square.and.arrow.up", key: "libraryExport") { exportOpen = true }
                         DSGlassButton("Add part", systemImage: "plus", accent: true, key: "libraryAddPart") { addPart(project.id) }
                     }
                 }
@@ -664,6 +669,9 @@ struct ProjectFolderView: View {
                     if let project { DSAddTile("Add part", key: "libraryAddTile") { addPart(project.id) } }
                 }
                 .padding(.top, DS.Space.xl)
+                Text(Self.note).dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
+                    .background(DSParts.publish("libraryProjectNote"))
+                    .padding(.top, 14)
             }
             .padding(.horizontal, DS.Space.page).padding(.top, 34).padding(.bottom, 60)
         }
@@ -671,6 +679,10 @@ struct ProjectFolderView: View {
             Color.clear.onAppear { portrait = g.size.height > g.size.width }
                 .onChange(of: g.size) { portrait = $0.height > $0.width }
         })
+        .overlay { if exportOpen, let project { exportSheet(project) } }
+        .sheet(isPresented: Binding(get: { !library.exportedFiles.isEmpty }, set: { if !$0 { library.exportedFiles = [] } })) {
+            ShareSheet(items: library.exportedFiles)
+        }
         .alert("Rename project", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Name", text: Binding(get: { renaming ?? "" }, set: { renaming = $0 }))
             Button("Rename") { if let p = project, let n = renaming { library.rename(project: p.id, to: n) }; renaming = nil }
@@ -707,6 +719,26 @@ struct ProjectFolderView: View {
     private func addPart(_ project: UUID) {
         library.importTargetProject = project
         model.newTopOpt()
+    }
+
+    /// ★ B5 (note 11, Q10, mockup #lib-project-export): the sheet over the scrim, as RootView presents New part. Export closes
+    /// it once the files are written (the share sheet takes them); what went wrong is a toast.
+    private func exportSheet(_ project: LibraryProject) -> some View {
+        ZStack {
+            Rectangle().fill(.ultraThinMaterial).overlay(DS.Color.scrim.color).ignoresSafeArea()
+                .onTapGesture { if !library.exporting { exportOpen = false } }
+            GlassSheet {
+                ChosenExportSheet(library: library, title: project.name, lines: library.exportLines(parts),
+                                  close: { exportOpen = false }) { lines, format in
+                    library.exportChosen(lines, format: format, title: project.name) { failure in
+                        if let failure { model.toast = failure } else { exportOpen = false }
+                    }
+                }
+            }
+            .background(DSParts.publish("libraryExportSheet"))
+            .background(CornerPairStyle.publish("sheet"))   // ★ B2 (U17): the lane keeps its notifications off the sheet
+            .transition(.scale(scale: 0.97).combined(with: .opacity))
+        }
     }
 }
 
