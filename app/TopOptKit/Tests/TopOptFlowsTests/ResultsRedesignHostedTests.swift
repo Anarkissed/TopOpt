@@ -39,11 +39,11 @@ final class ResultsRedesignHostedTests: XCTestCase {
                 XCTAssertFalse(fs[i].insetBy(dx: 1, dy: 1).intersects(fs[j].insetBy(dx: 1, dy: 1)),
                                "★ \(size): '\(keys[i])' \(fs[i]) overlaps '\(keys[j])' \(fs[j])")
             } }
-            // the order he drew: Scenario above the view buttons, above the checks — one column — and the corner below them
+            // the view buttons, then the checks with "Scenario" beside them (★ R-c, mockup #topo-results), and the corner below
             // (★ R-a: Details and Export side by side in it)
-            XCTAssertLessThan(fs[1].maxY, fs[2].minY + 1); XCTAssertLessThan(fs[2].maxY, fs[3].minY + 1)
+            XCTAssertLessThan(fs[2].maxY, fs[1].minY + 1); XCTAssertLessThan(fs[2].maxY, fs[3].minY + 1)
+            XCTAssertLessThan(fs[1].maxX, fs[3].minX, "Scenario sits beside the checks, on their left")
             XCTAssertLessThan(fs[3].maxY, fs[4].minY + 1); XCTAssertEqual(fs[4].maxY, fs[5].maxY, accuracy: 1)
-            XCTAssertEqual(fs[1].maxX, fs[2].maxX, accuracy: 2, "Scenario sits right-aligned over the views")
             XCTAssertNotNil(h.frames.all["resultsVersion-v3"], "the impossible version is listed (greyed)")
             XCTAssertNil(h.frames.all["resultsDetailsPanel"], "Details starts closed")
             try ui.picture(h, "results_\(Int(size.width))x\(Int(size.height)).png")

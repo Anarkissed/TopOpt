@@ -548,32 +548,29 @@ struct ResultsChecksAndDetails: View {
     /// Folded AND short of room: the Checks header and Details become pills at the right.
     var pill = false
 
+    /// ★ LOOK PER SCREEN (R-c, mockup #topo-results): §4.3's panel, 300 pt as the mockup draws it; its header says how many
+    /// to look at, in the warning colour ("All good" in green).
     var body: some View {
-        VStack(spacing: DS.Space.s) {
-                VStack(spacing: 0) {
-                    let warns = checks.filter { $0.kind == .warn }.count
-                    ResultsPanelHeader(title: "Checks", trailing: warns == 0 ? "All good" : "\(warns) to look at",
-                                       trailingTint: (warns == 0 ? DS.Color.okGreen : DS.Color.warning).color,
-                                       open: $checksOpen, id: "results-checks-header", pill: pill && !checksOpen)
-                    if checksOpen {
-                        ForEach(checks) { c in
-                            Divider().overlay(DS.Color.strokeSubtle.color)
-                            // ★ B4 (note 14): a tap opens it — its places light on the part — and a second tap closes it
-                            ResultsCheckLine(c: c, open: openCheck == c.id,
-                                             tap: { withAnimation(DS.Motion.sheetIn) { openCheck = openCheck == c.id ? nil : c.id } },
-                                             details: c.tab.map { t in { tab = t; withAnimation(DS.Motion.sheetIn) { detailsOpen = true } } })
-                        }
-                    }
-                }
-                .fixedSize(horizontal: pill && !checksOpen, vertical: false)
-                .resultsPanel()
-                .background(ResultsChrome.publish("resultsChecks"))
+        let warns = checks.filter { $0.kind == .warn }.count
+        var panel = DSPanel(key: "resultsChecks", title: "Checks", width: Self.width, foldedPill: pill, open: $checksOpen) {
+            ForEach(checks) { c in
+                // ★ B4 (note 14): a tap opens it — its places light on the part — and a second tap closes it
+                ResultsCheckLine(c: c, open: openCheck == c.id,
+                                 tap: { withAnimation(DS.Motion.sheetIn) { openCheck = openCheck == c.id ? nil : c.id } },
+                                 details: c.tab.map { t in { tab = t; withAnimation(DS.Motion.sheetIn) { detailsOpen = true } } })
+                    .overlay(alignment: .bottom) { Rectangle().fill(DS.Color.strokeSubtle.color).frame(height: 1) }
+                    .dsPanelRow("resultsCheckRow-" + c.id)
+            }
         }
-        .frame(width: pill && !checksOpen ? nil : ResultsChrome.columnWidth, alignment: .trailing)
-        // open, under the view buttons; ★ his note 2026-10-27: folded, it drops out of the middle of the screen, down by
-        // Export (R-a: just above the corner)
-        .frame(maxHeight: .infinity, alignment: checksOpen ? .top : .bottom)
+        panel.countLabel = (warns == 0 ? "All good" : "\(warns) to look at", warns == 0 ? DS.Color.okGreen : DS.Color.warning)
+        return panel
+            // open, under the view buttons; ★ his note 2026-10-27: folded, it drops out of the middle of the screen, down by
+            // Export (R-a: just above the corner)
+            .frame(maxHeight: .infinity, alignment: checksOpen ? .top : .bottom)
     }
+
+    /// The mockup's Checks panel width.
+    static let width: CGFloat = 300
 }
 
 /// ★ LOOK PER SCREEN (R-a, mockup #topo-results-details): Details as the drawer from the bottom — the page's width; "Details ·
@@ -648,28 +645,28 @@ struct ResultsScenarioPicker: View {
     @Binding var pick: String?
 
     var body: some View {
-        HStack(spacing: DS.Space.m) {
-            Text("Scenario").font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.Color.textSecondary.color)
-            Menu {
-                Button(worstLabel) { pick = nil }
-                ForEach(scenarios, id: \.name) { s in
-                    Button(s.name + (s.margin.map { "  ·  " + ResultsVersions.x($0) } ?? "")) { pick = s.name }
-                }
-            } label: {
-                HStack(spacing: DS.Space.s) {
-                    Text(pick ?? worstLabel).font(.system(size: 15, weight: .semibold)).lineLimit(1)
-                    Image(systemName: "chevron.down").font(.system(size: 11, weight: .bold))
-                }
-                .foregroundStyle(DS.Color.textPrimary.color)
-                .padding(.horizontal, DS.Space.l).frame(height: 44)
-                .background(Capsule().fill(ResultsChrome.fill.color)
-                    .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+        // ★ LOOK PER SCREEN (R-c, mockup #topo-results): one glass chip — "Scenario:" and the one shown, ⌄
+        Menu {
+            Button(worstLabel) { pick = nil }
+            ForEach(scenarios, id: \.name) { s in
+                Button(s.name + (s.margin.map { "  ·  " + ResultsVersions.x($0) } ?? "")) { pick = s.name }
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .accessibilityIdentifier("results-scenario")
+        } label: {
+            HStack(spacing: 6) {
+                Text("Scenario:").font(.system(size: 12.5)).foregroundStyle(DS.Color.textSecondary.color)
+                Text(pick ?? worstLabel).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                    .lineLimit(1)
+                Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold)).foregroundStyle(DS.Color.textTertiary.color)
+            }
+            .padding(.horizontal, 14).frame(height: 36)
+            .background(Capsule().fill(DS.Surface.bar.color)
+                .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+            .frame(minHeight: DSParts.target).contentShape(Rectangle())
         }
+        .menuStyle(.button).buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .accessibilityIdentifier("results-scenario")
         .background(ResultsChrome.publish("resultsScenario"))
     }
 
