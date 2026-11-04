@@ -9,6 +9,12 @@
 //      cuts INTO the true surface;
 //   §5 the sheet generator's simplified gyroid block: closed, manifold, the bound measured
 //      on every written triangle, and under 4,000 triangles per interior cell.
+//   §6 ★ a block graded PER VOXEL, as a run grades (the wall jumps at a voxel's face), its
+//      lightest wall at the bead: it finishes with no split, the sheet's own surface within
+//      the bound, the steps measured on their own, and an INDEPENDENT dense check, clear of
+//      the cuts: no wall past its floor where no step is in reach, and under 5 um outside
+//      the step's band where one is. With TpmsGenOptions::true_wall_steps off this block
+//      had not finished after 180 s (1.6 s on), and the M2 stand's rung 0.52 ran 1.5 h.
 
 // Self-contained CHECK harness (ARCHITECTURE §4 locks the dependency set).
 
@@ -17,6 +23,7 @@
 #include "topopt/mesh_simplify.hpp"
 #include "topopt/tpms_gen.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -214,6 +221,130 @@ int main() {
           "§5 the sheet's own surface within 0.02 mm, measured on every written triangle");
     CHECK(ts.simplify.samples_past_max_in == 0, "§5 no wall cut below the bead");
     CHECK(middle < 4000, "§5 the interior cell is under 4,000 triangles");
+  }
+
+  // ── §6 ★ a wall graded per voxel: the steps ─────────────────────────────────────────
+  {
+    const double L = 4.0, vox = 2.5, bead = 0.42, dev = kSheetMaxDeviationMm;
+    const LatticeTopology t = LatticeTopology::Gyroid;
+    // The lightest density prints exactly one bead (the law's floor): max_in is 0 there.
+    const double rlo = lattice_min_density_for_strut(t, L, bead), rhi = 0.54;
+    auto true_wall = [=](const Vec3& p) {
+      const long i = static_cast<long>(std::floor(p.x / vox)),
+                 j = static_cast<long>(std::floor(p.y / vox)),
+                 k = static_cast<long>(std::floor(p.z / vox));
+      const unsigned long hv =
+          static_cast<unsigned long>(i * 73856093L ^ j * 19349663L ^ k * 83492791L);
+      const double rho = (i + j + k) % 2 == 0 ? rlo : rlo + (rhi - rlo) * ((hv % 1000) / 999.0);
+      return lattice_strut_diameter_mm(t, rho, L);
+    };
+    auto param = [t, L](double w) { return lattice_sheet_wall_param_mm(t, w, L); };
+    TpmsRegion R;
+    R.anchor = {0, 0, 0};
+    R.nx = R.ny = R.nz = 1;
+    R.cell_mm = L;
+    TpmsWallField W;
+    W.field = [=](const Vec3& p) { return param(true_wall(p)); };
+    TpmsGenOptions o;
+    o.min_wall_mm = bead;
+    o.max_deviation_mm = dev;
+    o.bead_mm = bead;
+    o.true_wall_mm = true_wall;
+    o.wall_param_of = param;
+    o.true_wall_steps = true;
+    // The premise, in arithmetic: somewhere a face separates walls whose surfaces are more
+    // than twice the bound apart, so on that face no mesh is within the bound of both.
+    double jump = 0.0;
+    for (int a = 0; a < 2; ++a)
+      for (int b = 0; b < 2; ++b)
+        for (int c = 0; c < 2; ++c) {
+          const Vec3 m{(a + 0.5) * vox, (b + 0.5) * vox, (c + 0.5) * vox};
+          jump = std::max({jump, std::abs(true_wall(m) - true_wall({m.x + vox, m.y, m.z})),
+                           std::abs(true_wall(m) - true_wall({m.x, m.y + vox, m.z})),
+                           std::abs(true_wall(m) - true_wall({m.x, m.y, m.z + vox}))});
+        }
+    Capture cap;
+    const TpmsGenStats ts = generate_tpms(TpmsKind::Gyroid, R, W, cap, o);
+    const auto& s = ts.simplify;
+    // INDEPENDENT of the sink's step test: every dense sample of the output against the
+    // thinnest wall in a cube of half-side three DC cells (the step's reach) about it. The
+    // block's faces are cuts, with a band of their own out to that reach, and a triangle
+    // reaching into it can leave a few microns between the sink's samples just past it
+    // (measured 5 um at 0.42 mm from the x = 4 face); in a run every cut lies under solid.
+    // So the walls are judged clear of the cuts by two reaches, and that edge is printed.
+    const double h = ts.dc_cell_mm, reach = 3.0 * h;
+    double worst_floor = 0.0, worst_out = 0.0, plain_floor = 0.0, under_bead = -1e9;
+    double cut_edge_under_bead = -1e9;
+    long long sampled = 0, past_floor = 0;
+    for (const auto& T : cap.t)
+      for (int i = 0; i <= 8; ++i)
+        for (int j = 0; j <= 8 - i; ++j) {
+          const double u = i / 8.0, w = j / 8.0;
+          const Vec3 p{T[0].x + (T[1].x - T[0].x) * u + (T[2].x - T[0].x) * w,
+                       T[0].y + (T[1].y - T[0].y) * u + (T[2].y - T[0].y) * w,
+                       T[0].z + (T[1].z - T[0].z) * u + (T[2].z - T[0].z) * w};
+          const double to_cut = std::min({p.x, p.y, p.z, L - p.x, L - p.y, L - p.z});
+          if (to_cut < reach) continue;
+          const bool cut_edge = to_cut < 2.0 * reach;
+          if (!cut_edge) ++sampled;
+          double thin = true_wall(p), thick = thin;
+          for (int q = 0; q < 27; ++q) {
+            const double wq = true_wall({p.x + reach * (q % 3 - 1), p.y + reach * (q / 3 % 3 - 1),
+                                         p.z + reach * (q / 9 - 1)});
+            thin = std::min(thin, wq);
+            thick = std::max(thick, wq);
+          }
+          TpmsWallField TN, TK;
+          TN.uniform_mm = param(thin);
+          TK.uniform_mm = param(thick);
+          const double floor_in = std::clamp(0.5 * (thin - bead), 0.0, dev);
+          const double under = -tpms_clipped_field(TpmsKind::Gyroid, R, TN, h, p) - floor_in;
+          // THE BEAD itself, unclamped: inside the thinnest wall in reach by more than half
+          // its margin over the bead leaves that wall under one bead.
+          if (cut_edge) {
+            cut_edge_under_bead = std::max(cut_edge_under_bead, under + floor_in - 0.5 * (thin - bead));
+            continue;
+          }
+          under_bead = std::max(under_bead, under + floor_in - 0.5 * (thin - bead));
+          if (!(thick > thin)) {  // no step in reach: the plain floor of its own wall
+            plain_floor = std::max(plain_floor, under);
+            continue;
+          }
+          past_floor += under > 1e-9 ? 1 : 0;
+          worst_floor = std::max(worst_floor, under);
+          worst_out = std::max(worst_out, tpms_clipped_field(TpmsKind::Gyroid, R, TK, h, p) - dev);
+        }
+    std::printf("[§6] per-voxel gyroid, one 4 mm cell, voxels 2.5 mm, rho %.4f..%.2f (largest "
+                "wall jump %.3f mm): contoured %lld -> %zu triangles, splits %lld; sheet %.4f / "
+                "%.4f mm, past the floor %lld; steps %lld samples, %.4f / %.4f mm off their own "
+                "surface, %lld outside the step's band (worst %.5f mm); independent, %lld samples "
+                "clear of the cuts: with no step in reach the deepest past its own floor %.6f mm; at a "
+                "step %lld past the thinnest floor in reach (deepest %.6f mm), furthest past the "
+                "thickest wall's bound %.6f mm; deepest under the bead %.6f mm (at a cut's edge, "
+                "under solid in a run: %.6f mm)\n",
+                rlo, rhi, jump, s.triangles_in, cap.t.size(), s.splits, s.max_out_measured_mm,
+                s.max_in_measured_mm, s.samples_past_max_in, s.step_samples, s.step_max_out_mm,
+                s.step_max_in_mm, s.step_samples_outside_band, s.step_worst_outside_band_mm,
+                sampled, plain_floor, past_floor, worst_floor, worst_out, under_bead,
+                cut_edge_under_bead);
+    CHECK(jump > 4.0 * dev, "§6 premise: a voxel face separates surfaces > twice the bound apart");
+    CHECK(ts.simplified && closed_manifold(cap.t), "§6 closed and manifold");
+    CHECK(s.splits == 0, "§6 no step is refined (no split there converges)");
+    CHECK(s.max_out_measured_mm <= dev + 1e-12 && s.max_in_measured_mm <= dev + 1e-12,
+          "§6 the sheet's own surface within 0.02 mm wherever no step is in reach");
+    CHECK(s.samples_past_max_in == 0, "§6 no sheet sample under the bead");
+    CHECK(s.step_samples > 0 && s.step_max_out_mm > dev,
+          "§6 the steps are measured on their own, off their own surface by more than the bound");
+    CHECK(plain_floor <= 1e-4,
+          "§6 independent: with no step in reach no sample cuts its wall past its floor");
+    // What contouring a JUMP leaves (the crossing's gradient is taken across it) is kept as
+    // contoured, since no collapse may leave the step's band and no split mends it: on this
+    // block under a micron either side (0.54 um by the sink's own samples; 0.11 um inward and
+    // 0.8 um outward by this denser check). The floor here is the clamped one, so it also
+    // bounds the depth under the bead. Bounded at a quarter of the bound; the receipt states it.
+    CHECK(s.step_worst_outside_band_mm <= 0.25 * dev && worst_floor <= 0.25 * dev &&
+              worst_out <= 0.25 * dev,
+          "§6 at a step, what the contouring left outside the step's band is under 5 um");
   }
 
   std::printf("%s: %d checks, %d failures\n", g_failures ? "FAIL" : "PASS", g_checks, g_failures);

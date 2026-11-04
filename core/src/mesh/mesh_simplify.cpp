@@ -157,8 +157,18 @@ bool BoundedSimplifySink::triangle_ok(const Vec3& a, const Vec3& b, const Vec3& 
     const double f = field_(p);
     if (opt_.cut_tol_mm > 0.0 && opt_.at_cut && opt_.at_cut(p))
       return sheet_only || std::abs(f) <= opt_.cut_tol_mm;
-    return f <= opt_.max_out_mm && -f <= max_in(p);
+    return sheet_ok(p, f, sheet_only);
   });
+}
+
+// The sheet's own band, or, off it within reach of a step (the header's ★ STEPS), the
+// step's band; `sheet_only` (refine, and what a flush holds back) passes a step as a cut
+// is passed, since no split there converges.
+bool BoundedSimplifySink::sheet_ok(const Vec3& p, double f, bool sheet_only) const {
+  if (f <= opt_.max_out_mm && -f <= max_in(p)) return true;
+  if (!opt_.step) return false;
+  const double off = opt_.step(p);
+  return off >= 0.0 && (sheet_only || off == 0.0);
 }
 
 // Pulled onto the MIDDLE of the band at m (field = (max_out - max_in) / 2), not onto the
@@ -495,6 +505,17 @@ void BoundedSimplifySink::measure_and_emit(int t) {
       st_.cut_max_in_mm = std::max(st_.cut_max_in_mm, -f);
       return true;
     }
+    if (!(f <= opt_.max_out_mm && -f <= max_in(p)) && opt_.step) {
+      const double off = opt_.step(p);
+      if (off >= 0.0) {
+        ++st_.step_samples;
+        st_.step_max_out_mm = std::max(st_.step_max_out_mm, f);
+        st_.step_max_in_mm = std::max(st_.step_max_in_mm, -f);
+        if (off > 0.0) ++st_.step_samples_outside_band;
+        st_.step_worst_outside_band_mm = std::max(st_.step_worst_outside_band_mm, off);
+        return true;
+      }
+    }
     ++st_.samples;
     st_.max_out_measured_mm = std::max(st_.max_out_measured_mm, f);
     st_.max_in_measured_mm = std::max(st_.max_in_measured_mm, -f);
@@ -516,7 +537,7 @@ void BoundedSimplifySink::measure_and_emit(int t) {
 bool BoundedSimplifySink::in_band(const Vec3& p) const {
   const double f = field_(p);
   if (opt_.cut_tol_mm > 0.0 && opt_.at_cut && opt_.at_cut(p)) return true;  // the cut's own band
-  return f <= opt_.max_out_mm && -f <= max_in(p);
+  return sheet_ok(p, f, /*sheet_only=*/false);
 }
 
 // A contoured vertex can sit just outside the band (the QEF places it off the surface where

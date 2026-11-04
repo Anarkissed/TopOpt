@@ -80,6 +80,15 @@ struct TpmsGenOptions {
   // the wall's margin over the bead (capped at the bound), and about the contoured surface
   // it is symmetric, +-(bound + a)/2. Measured against the TRUE wall either way.
   std::function<double(double)> wall_param_of;
+  // ★ The true wall is graded PER VOXEL (piecewise constant on boxes at least six DC cells
+  // across: a run's is the owning voxel's, or its cell's mean), so it JUMPS at their faces.
+  // Within three DC cells of a jump the simplifier then treats the step like a cut
+  // (mesh_simplify.hpp ★ STEPS): never refined, collapsed only inside the band from the
+  // thickest wall in reach plus the bound to the thinnest one's own floor (the walls read
+  // at the 27 points of the cube of that half-side, which meet every box it touches), and
+  // measured on its own. Needs true_wall_mm and wall_param_of. A smooth grade (the
+  // coupon's) leaves it off, so the bound there is the bound everywhere.
+  bool true_wall_steps = false;
 };
 
 struct TpmsGenStats {

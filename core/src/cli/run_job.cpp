@@ -793,11 +793,16 @@ struct LatticeExportOutcome {
   // ★ Finding 8: a sheet's mesh, simplified (mesh_simplify.hpp). The deviations are
   // MEASURED on every written triangle: on the sheet's own surface, and at the cuts (kept
   // as contoured; under solid in a run). samples_past_floor = samples that cut a wall
-  // below its bead (0 = none).
+  // below its bead (0 = none). The steps (the wall is graded per voxel, so it jumps at a
+  // voxel's face): how many samples lie off their own band within reach of one, how far the
+  // mesh sits from its own voxel's surface there, and what the contouring left outside the
+  // step's band (kept as contoured; inward, a wall under its floor by that much).
   bool sheet_simplified = false;
   long long sheet_triangles_contoured = 0, sheet_triangles = 0;
   double sheet_max_deviation_mm = 0.0, sheet_cut_max_deviation_mm = 0.0;
   long long sheet_samples_past_floor = 0;
+  double sheet_step_max_deviation_mm = 0.0, sheet_step_worst_outside_band_mm = 0.0;
+  long long sheet_step_samples = 0, sheet_step_samples_outside_band = 0, sheet_samples = 0;
   // ★★ ORGANIC's POST-CLIP connectivity (OrganicGenStats): the connectedness of what
   // was WRITTEN, after the boundary clip trimmed and dropped spans. The tracer's own
   // number describes the lattice it traced; this one describes the file.
@@ -2629,6 +2634,8 @@ LatticeExportOutcome export_latticed_variant(
     o.max_deviation_mm = kSheetMaxDeviationMm;
     o.bead_mm = sheet_bead_mm;
     o.true_wall_mm = [&radius](const Vec3& p) { return 2.0 * radius.radius_at(p); };
+    // The wall is the owning voxel's (or its cell's mean): it steps at their faces.
+    o.true_wall_steps = true;
     {
       const double wcell = R.cell_mm;
       o.wall_param_of = [ct, wcell](double wall_mm) {
@@ -2668,6 +2675,12 @@ LatticeExportOutcome export_latticed_variant(
       oc.sheet_cut_max_deviation_mm =
           std::max(ts.simplify.cut_max_out_mm, ts.simplify.cut_max_in_mm);
       oc.sheet_samples_past_floor = ts.simplify.samples_past_max_in;
+      oc.sheet_step_max_deviation_mm =
+          std::max(ts.simplify.step_max_out_mm, ts.simplify.step_max_in_mm);
+      oc.sheet_step_samples = ts.simplify.step_samples;
+      oc.sheet_step_samples_outside_band = ts.simplify.step_samples_outside_band;
+      oc.sheet_step_worst_outside_band_mm = ts.simplify.step_worst_outside_band_mm;
+      oc.sheet_samples = ts.simplify.samples;
     }
     return st;
   };
@@ -4202,9 +4215,20 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
     s += "    \"max_deviation_mm\": " + json_num(oc.sheet_max_deviation_mm) + ",\n";
     s += "    \"cut_max_deviation_mm\": " + json_num(oc.sheet_cut_max_deviation_mm) + ",\n";
     s += "    \"samples_past_bead_floor\": " + std::to_string(oc.sheet_samples_past_floor) + ",\n";
+    s += "    \"step_max_deviation_mm\": " + json_num(oc.sheet_step_max_deviation_mm) + ",\n";
+    s += "    \"step_samples\": " + std::to_string(oc.sheet_step_samples) + ",\n";
+    s += "    \"step_samples_outside_band\": " +
+         std::to_string(oc.sheet_step_samples_outside_band) + ",\n";
+    s += "    \"step_worst_outside_band_mm\": " +
+         json_num(oc.sheet_step_worst_outside_band_mm) + ",\n";
+    s += "    \"sheet_samples\": " + std::to_string(oc.sheet_samples) + ",\n";
     s += "    \"note\": \"bounded edge collapse (Garland & Heckbert 1997) checked against the "
          "true surface; max_deviation is measured on every written triangle of the sheet's "
-         "own surface, cut_max_deviation where it is cut (kept as contoured, under solid)\"\n";
+         "own surface, cut_max_deviation where it is cut (kept as contoured, under solid); "
+         "where the wall steps between voxels no collapse leaves the band the walls in reach "
+         "span (no wall below the bead), step_max_deviation is the distance from the "
+         "sample's own voxel's surface there, and step_*_outside_band what the contouring "
+         "left outside that band, kept as contoured\"\n";
     s += "  },\n";
   }
   // ── ★ THE VOLUME CHECK (Finding 7): per latticed pocket, the lattice the file holds

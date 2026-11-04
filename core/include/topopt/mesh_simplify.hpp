@@ -36,6 +36,18 @@
 // share exactly the two neighbours of the collapsed edge), must not flip or degenerate
 // any triangle, and never moves a frozen vertex. Deterministic: a fixed collapse order
 // (cost, then vertex ids), no threads, no randomness.
+//
+// ★ WHERE THE TRUE SURFACE STEPS. A run grades a sheet PER VOXEL (the wall is the owning
+// voxel's), so its true field JUMPS at every voxel face where the density changes. No mesh
+// follows a jump to within the bound, and the contouring leaves its own error there: the
+// crossing's gradient is taken across the jump, and a vertex can land a micron inside the
+// thinner wall. Where that wall is at the bead (max_in 0) such a triangle can never be
+// mended. refine() split it to the micron, and the collapse passes then crawled through
+// the slivers: the M2 stand's gyroid rung 0.52 ran 1.5 h without finishing (10 min for the
+// whole run before Finding 8). A step is therefore treated like a cut: within reach of one
+// (`step`) the mesh is never refined or held back, a collapse there must stay inside the
+// band the walls in reach span, and what the contouring left outside it is kept as
+// contoured. The step is measured and reported on its own.
 
 #include <array>
 #include <cstdint>
@@ -64,6 +76,12 @@ struct BoundedSimplifyOptions {
   // > 0: a cut is not frozen but simplified within +-cut_tol_mm of the true surface (a
   // band of its own, about what the contouring already leaves there), and never refined.
   double cut_tol_mm = 0.0;
+  // ★ A STEP (see the header), asked only of a point outside its own band: negative when no
+  // step is in reach; otherwise how far the point lies outside the band the surfaces in
+  // reach span (no further than max_out outside the outermost, nor deeper than the
+  // innermost one's own max_in inside it, so no wall is thinned below its floor), 0 inside
+  // it. null => no steps.
+  std::function<double(const Vec3&)> step;
 };
 
 struct BoundedSimplifyStats {
@@ -85,6 +103,13 @@ struct BoundedSimplifyStats {
   // The cuts, measured on their own (kept as contoured).
   long long cut_samples = 0;
   double cut_max_out_mm = 0.0, cut_max_in_mm = 0.0;
+  // The steps, measured on their own: the samples off their own surface's band but within
+  // reach of a step, how far they sit from their OWN true surface (up to about half the
+  // step), and those outside the step's band too (as contoured: no collapse makes one) with
+  // the furthest any sits outside it. Inward, that is how far a wall is under its floor.
+  long long step_samples = 0, step_samples_outside_band = 0;
+  double step_max_out_mm = 0.0, step_max_in_mm = 0.0;
+  double step_worst_outside_band_mm = 0.0;
   double seconds = 0.0;
 };
 
@@ -110,6 +135,7 @@ class BoundedSimplifySink : public TriangleSink {
   Vec3 onto_surface(const Vec3& m, double reach) const;
   bool fan_complete(int x) const;
   bool triangle_ok(const Vec3& a, const Vec3& b, const Vec3& c, bool sheet_only = false) const;
+  bool sheet_ok(const Vec3& p, double f, bool sheet_only) const;
   void measure_and_emit(int t);
   double max_in(const Vec3& p) const;
 
