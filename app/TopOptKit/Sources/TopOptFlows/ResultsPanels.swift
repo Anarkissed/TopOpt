@@ -597,9 +597,6 @@ struct ResultsChecksAndDetails: View {
 
     var body: some View {
         VStack(spacing: DS.Space.s) {
-            if detailsOpen {
-                details.transition(.move(edge: .bottom).combined(with: .opacity))
-            } else {
                 VStack(spacing: 0) {
                     let warns = checks.filter { $0.kind == .warn }.count
                     ResultsPanelHeader(title: "Checks", trailing: warns == 0 ? "All good" : "\(warns) to look at",
@@ -618,77 +615,77 @@ struct ResultsChecksAndDetails: View {
                 .fixedSize(horizontal: pill && !checksOpen, vertical: false)
                 .resultsPanel()
                 .background(ResultsChrome.publish("resultsChecks"))
-                detailsButton.fixedSize(horizontal: pill && !checksOpen, vertical: false)
-            }
         }
-        .frame(width: pill && !checksOpen && !detailsOpen ? nil : ResultsChrome.columnWidth, alignment: .trailing)
-        // ★ his note 2026-10-27: folded, the checks drop out of the middle of the screen, down by Export
-        .frame(maxHeight: .infinity, alignment: checksOpen || detailsOpen ? .top : .bottom)
+        .frame(width: pill && !checksOpen ? nil : ResultsChrome.columnWidth, alignment: .trailing)
+        // open, under the view buttons; ★ his note 2026-10-27: folded, it drops out of the middle of the screen, down by
+        // Export (R-a: just above the corner)
+        .frame(maxHeight: .infinity, alignment: checksOpen ? .top : .bottom)
     }
+}
 
-    private var detailsButton: some View {
-        Button { withAnimation(DS.Motion.sheetIn) { detailsOpen.toggle() } } label: {
-            HStack(spacing: DS.Space.s) {
-                Image(systemName: detailsOpen ? "chevron.down" : "chevron.up").font(.system(size: 12, weight: .bold))
-                Text("Details").dsStyle(DS.TypeScale.bodyStrong)
-            }
-            .foregroundStyle(DS.Color.textPrimary.color).padding(.horizontal, DS.Space.l)
-            .frame(maxWidth: .infinity).frame(height: 48).contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .background(detailsOpen ? nil : Capsule().fill(ResultsChrome.fill.color)
-            .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
-        .background(ResultsChrome.publish("resultsDetailsButton"))
-        .accessibilityIdentifier("results-details")
-    }
+/// ★ LOOK PER SCREEN (R-a, mockup #topo-results-details): Details as the drawer from the bottom — the page's width; "Details ·
+/// v7b", its tabs and Close on one line; then its rows in columns, each its label and value. It never takes more than 40 % of
+/// the page (its rows scroll).
+struct ResultsDetailsDrawer: View {
+    @Binding var tab: ResultsDetailsTab
+    let versionTitle: String
+    let rows: (ResultsDetailsTab) -> [ResultsDetailRow]
+    let close: () -> Void
 
-    private var details: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Details · " + versionTitle).dsStyle(DS.TypeScale.bodyStrong).fontWeight(.bold)
-                    .foregroundStyle(DS.Color.textPrimary.color).lineLimit(1)
-                Spacer()
-            }
-            .padding(.horizontal, DS.Space.l).frame(height: 50)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: DS.Space.xs) {
-                    ForEach(ResultsDetailsTab.allCases, id: \.self) { t in
-                        Button { tab = t } label: {
-                            Text(t.rawValue).font(.system(size: 14, weight: t == tab ? .semibold : .regular))
-                                .foregroundStyle((t == tab ? DS.Color.textPrimary : DS.Color.textSecondary).color)
-                                .padding(.horizontal, DS.Space.m).frame(height: 36)
-                                .background(Capsule().fill(t == tab ? DS.Color.fillSubtle.color : Color.clear))
+    var body: some View {
+        GeometryReader { g in
+            let cols = max(1, min(4, Int(g.size.width / 320)))
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 14) {
+                        Text("Details \u{00B7} " + versionTitle).font(.system(size: 17, weight: .bold))
+                            .foregroundStyle(DS.Color.textPrimary.color).lineLimit(1).fixedSize()
+                        SegmentedGlass(ResultsDetailsTab.allCases.map { .init($0, $0.rawValue) }, selection: $tab, small: true)
+                        Spacer(minLength: 8)
+                        Button(action: close) {
+                            Text("Close").font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                                .padding(.horizontal, 20).frame(height: 44)
+                                .background(Capsule().fill(DS.Color.fillSubtle.color))
+                                .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
+                                .contentShape(Capsule())
                         }
                         .buttonStyle(.plain)
-                        .accessibilityIdentifier("results-details-tab-\(t.rawValue)")
+                        .background(ResultsChrome.publish("resultsDetailsClose"))
+                        .accessibilityIdentifier("results-details-close")
                     }
-                }
-                .padding(.horizontal, DS.Space.l)
-            }
-            Divider().overlay(DS.Color.strokeSubtle.color).padding(.top, DS.Space.xs)
-            ScrollView {
-                VStack(spacing: 0) {
-                    ForEach(rows(tab)) { r in
-                        HStack(alignment: .firstTextBaseline, spacing: DS.Space.m) {
-                            Text(r.label).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
-                                .frame(width: 112, alignment: .leading)
-                            Text(r.value).font(.system(size: 13.5)).foregroundStyle(DS.Color.textPrimary.color)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                    ScrollView {
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 24, alignment: .top), count: cols),
+                                  alignment: .leading, spacing: 0) {
+                            ForEach(rows(tab)) { r in
+                                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                    Text(r.label).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
+                                    Spacer(minLength: 8)
+                                    Text(r.value).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                                        .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)
+                                }
+                                .padding(.vertical, 10)
+                                .overlay(alignment: .bottom) { Rectangle().fill(DS.Color.strokeSubtle.color).frame(height: 1) }
+                            }
                         }
-                        .padding(.vertical, 10)
-                        Divider().overlay(DS.Color.strokeSubtle.color)
                     }
+                    .frame(maxHeight: Swift.max(120, g.size.height * 0.4 - 110))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .background(ResultsChrome.publish("resultsDetailsRows"))
                 }
-                .padding(.horizontal, DS.Space.l)
+                .padding(.horizontal, 24).padding(.top, 18).padding(.bottom, 24)
+                .frame(width: g.size.width, alignment: .leading)
+                // the top corners round; the bottom runs off the page
+                .background(RoundedRectangle(cornerRadius: DS.Radius.sheet, style: .continuous).fill(DS.Surface.sheet.color)
+                    .overlay(RoundedRectangle(cornerRadius: DS.Radius.sheet, style: .continuous)
+                        .strokeBorder(DS.Color.strokeSheet.color, lineWidth: 1))
+                    .padding(.bottom, -DS.Radius.sheet))
+                .background(RoundedRectangle(cornerRadius: DS.Radius.sheet, style: .continuous).fill(.ultraThinMaterial)
+                    .padding(.bottom, -DS.Radius.sheet))
+                .dsShadow(DS.Shadow.sheet)
+                .background(ResultsChrome.publish("resultsDetailsPanel"))
             }
-            .background(ResultsChrome.publish("resultsDetailsRows"))
-            Divider().overlay(DS.Color.strokeSubtle.color)
-            detailsButton
         }
-        .frame(maxHeight: .infinity)
-        .resultsPanel()
-        .background(ResultsChrome.publish("resultsDetailsPanel"))
     }
 }
 
