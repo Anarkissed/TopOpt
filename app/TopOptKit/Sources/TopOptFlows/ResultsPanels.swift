@@ -374,7 +374,9 @@ struct ResultsPanelHeader: View {
     }
 }
 
-/// Bottom-left: the versions, one line each; Compare at the foot.
+/// Bottom-left: the version's results, one line each (a · Just safe, b · +10 %, c · +20 %); Compare at the foot.
+/// ★ B4 (app-map §3.5, Q1, ledger 11): its header is the version's ("v7 results" — one Optimize is a version, its three are
+/// results), and the selected line offers **Pick this**, the chosen result (the Library's ring and "v7b" tag).
 struct ResultsVersionsPanel: View {
     let rows: [ResultsVersionRow]
     let selectedTab: Int
@@ -383,10 +385,19 @@ struct ResultsVersionsPanel: View {
     var pill = false
     let pick: (Int) -> Void
     let compare: (() -> Void)?
+    /// ★ B4: the version's name ("v7"); nil off the Library.
+    var version: String? = nil
+    /// ★ B4: the tab he picked (nil: none yet), and Pick this — nil off the Library (there is no ring to set).
+    var pickedTab: Int? = nil
+    var choose: ((Int) -> Void)? = nil
+
+    static func title(_ version: String?) -> String { version.map { "\($0) results" } ?? "Results" }
+    static let pickLabel = "Pick this"
+    static let pickedLabel = "Picked"
 
     var body: some View {
         VStack(spacing: 0) {
-            ResultsPanelHeader(title: "Versions",
+            ResultsPanelHeader(title: Self.title(version),
                                trailing: open ? "\(rows.count)" : (rows.first { $0.tabIndex == selectedTab }?.title ?? ""),
                                trailingTint: open ? DS.Color.textTertiary.color : DS.Color.accent.color,
                                open: $open, id: "results-versions-header", pill: pill && !open)
@@ -437,8 +448,31 @@ struct ResultsVersionsPanel: View {
         }
         .buttonStyle(.plain)
         .disabled(r.tabIndex == nil)
+        .overlay(alignment: .trailing) { pickControl(r, on: on) }
         .background(ResultsChrome.publish("resultsVersion-\(r.id)"))
         .accessibilityIdentifier("results-version-\(r.id)")
+    }
+
+    /// ★ B4: Pick this on the selected line; the picked line reads "Picked ✓" whether or not it is selected.
+    @ViewBuilder private func pickControl(_ r: ResultsVersionRow, on: Bool) -> some View {
+        if let choose, let t = r.tabIndex {
+            if pickedTab == t {
+                Label(Self.pickedLabel, systemImage: "checkmark").font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(DS.Color.accent.color).padding(.trailing, DS.Space.m)
+                    .background(ResultsChrome.publish("resultsPicked-\(r.id)"))
+            } else if on {
+                Button { choose(t) } label: {
+                    Text(Self.pickLabel).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                        .padding(.horizontal, DS.Space.m).frame(height: 32)
+                        .background(Capsule().fill(DS.Color.accent.color))
+                        .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, DS.Space.s)
+                .background(ResultsChrome.publish("resultsPickThis"))
+                .accessibilityIdentifier("results-pick-this")
+            }
+        }
     }
 }
 
@@ -915,5 +949,20 @@ struct ResultsStressExplore: View {
                 }
             }
         }
+    }
+}
+
+/// ★ B4: the Library numbers a version's results over ALL its variants (LibraryVersion.summary); Results' tabs count the
+/// ACCEPTED ones. Pick this crosses between the two.
+public enum ResultsPick {
+    /// The accepted-variant index of the Library's result `r`, or nil.
+    public static func accepted(_ r: Int?, in outcome: OptimizeOutcome) -> Int? {
+        guard let r, outcome.variants.indices.contains(r), outcome.variants[r].accepted else { return nil }
+        return outcome.variants[..<r].filter(\.accepted).count
+    }
+    /// The Library's result index of accepted variant `a`, or nil.
+    public static func all(_ a: Int, in outcome: OptimizeOutcome) -> Int? {
+        let idx = outcome.variants.indices.filter { outcome.variants[$0].accepted }
+        return idx.indices.contains(a) ? idx[a] : nil
     }
 }
