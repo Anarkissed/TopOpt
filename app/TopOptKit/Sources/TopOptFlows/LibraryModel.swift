@@ -40,6 +40,8 @@ public struct LibraryResult: Identifiable {
     /// The printed fraction of the part as drawn (1.03 = 103 %), the Results screen's basis.
     public let fraction: Double
     public let accepted: Bool
+    /// ★ His Q1: its word as Results says it ("Just safe", "+10 %"); nil when its run's results don't say.
+    public var word: String? = nil
     public var id: Int { index }
 }
 
@@ -347,7 +349,7 @@ public final class LibraryModel: ObservableObject {
                         self.edit(folder) { v in
                             v.summary = results.map {
                                 ResultSummary(massGrams: $0.massGrams, worstCaseMargin: $0.margin,
-                                              accepted: $0.accepted, achievedVolumeFraction: $0.fraction)
+                                              accepted: $0.accepted, achievedVolumeFraction: $0.fraction, word: $0.word)
                             }
                         }
                     }
@@ -381,12 +383,13 @@ public final class LibraryModel: ObservableObject {
             let results: [LibraryResult]? = {
                 guard let data = store.loadResultsData(id: folder),
                       let o = try? OutcomeCodec.decode(data) else { return nil }
+                let words = ResultsVersions.words(o)   // ★ Q1: each result's word, as Results says it
                 return o.variants.enumerated().map { i, v in
                     LibraryResult(index: i,
                                   mesh: ViewerMesh(vertices: v.meshVertices, indices: v.meshIndices, faceIDs: [],
                                                    smoothShaded: true),
                                   massGrams: v.massGrams, margin: v.worstCaseMargin,
-                                  fraction: v.achievedVolumeFraction, accepted: v.accepted)
+                                  fraction: v.achievedVolumeFraction, accepted: v.accepted, word: words[i])
                 }
             }()
             DispatchQueue.main.async { done(results) }
@@ -584,7 +587,8 @@ public final class LibraryModel: ObservableObject {
         }
         let keptMark = v.mark(for: picked)
         let keptSummary = [ResultSummary(massGrams: decodedPick.massGrams, worstCaseMargin: decodedPick.worstCaseMargin,
-                                         accepted: decodedPick.accepted, achievedVolumeFraction: decodedPick.achievedVolumeFraction)]
+                                         accepted: decodedPick.accepted, achievedVolumeFraction: decodedPick.achievedVolumeFraction,
+                                         word: v.summary.flatMap { $0[safe: picked] }?.word)]   // ★ Q1: it keeps its word
         edit(folder) { v in
             v.marks = []
             v.setMark(ResultMark(result: 0, stars: keptMark.stars, printThis: keptMark.printThis, rejected: keptMark.rejected))

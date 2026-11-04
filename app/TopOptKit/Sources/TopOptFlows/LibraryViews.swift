@@ -203,6 +203,10 @@ enum LibraryStyle {
     static func percent(_ f: Double) -> String { "\(Int((f * 100).rounded())) %" }
     /// "6.5×".
     static func margin(_ m: Double) -> String { String(format: "%.1f×", m) }
+    /// ★ His Q1: a result tile's name, "v2b · +10 %" (the name alone when its results don't say).
+    static func resultTitle(number: String, result: Int, word: String?) -> String {
+        "v\(number)\(ResultMark.letter(result))" + (word.map { " · " + $0 } ?? "")
+    }
 
     /// Topology / Lattice / Flexible, from the version's own settings.
     static func stage(_ s: ProjectSnapshot?) -> (String, RGBA) {
@@ -1036,8 +1040,9 @@ struct LibraryVersionRow: View {
                         }
                     }
                 HStack(spacing: 6) {
-                    Text("v\(v.number)\(ResultMark.letter(r))").font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(DS.Color.textPrimary.color).lineLimit(1)
+                    Text(LibraryStyle.resultTitle(number: "\(v.number)", result: r, word: s?.word))   // ★ Q1: "v2b · +10 %"
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(DS.Color.textPrimary.color).lineLimit(1).minimumScaleFactor(0.85)
                     Spacer(minLength: 0)
                     if picked { DSChip(.accentTag("Picked"), key: k + "-picked") }
                     if mark.rejected { DSChip(.tag("Rejected"), key: k + "-rejected") }
