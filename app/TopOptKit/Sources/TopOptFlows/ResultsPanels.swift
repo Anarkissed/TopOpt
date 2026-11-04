@@ -97,48 +97,94 @@ public struct ResultsCheck: Equatable, Sendable, Identifiable {
     public let title: String
     public let detail: String
     public var id: String { title }
+    /// ★ B4 (note 14, "every row can be tapped"): the places it lights on the model (model mm), the one line its open row
+    /// shows, and the Details tab its link opens.
+    public var places: [SIMD3<Double>] = []
+    public var more: String? = nil
+    public var tab: ResultsDetailsTab? = nil
 }
 
 public enum ResultsChecks {
     /// One line + one sub-line each, in his order: strength, scenarios, layers, how to print, thin spots.
     public static func checks(tab: ResultVariantVM?, margin: Double?, required: Double, safetyMargin: Double?,
                               scenarios: [ScenarioResult], thinJoints: Int, bridged: Bool,
-                              pieces: StrengthenText.PiecesFlag? = nil) -> [ResultsCheck] {
+                              pieces: StrengthenText.PiecesFlag? = nil, finish: FinishReport? = nil,
+                              weakest: SIMD3<Double>? = nil) -> [ResultsCheck] {
         guard let tab else { return [] }
         var out: [ResultsCheck] = []
         if let m = margin, m > 0 {
             let built = safetyMargin.map { " · built for \(Int(($0 * 100).rounded()))%" } ?? ""
             out.append(m >= required
-                ? ResultsCheck(kind: .ok, title: "Strong enough", detail: ResultsVersions.x(m) + " your load" + built)
-                : ResultsCheck(kind: .warn, title: "Not strong enough", detail: ResultsVersions.x(m) + " your load" + built))
+                ? ResultsCheck(kind: .ok, title: "Strong enough", detail: ResultsVersions.x(m) + " your load" + built,
+                               places: weakest.map { [$0] } ?? [], more: weakest == nil ? nil : "The weakest point is lit on the part",
+                               tab: .strength)
+                : ResultsCheck(kind: .warn, title: "Not strong enough", detail: ResultsVersions.x(m) + " your load" + built,
+                               places: weakest.map { [$0] } ?? [], more: weakest == nil ? nil : "The weakest point is lit on the part",
+                               tab: .strength))
         }
         if scenarios.count >= 2 {
             let unheld = scenarios.filter(\.unheld)
             if let u = unheld.first {
-                out.append(ResultsCheck(kind: .warn, title: "A scenario isn’t held", detail: "\(u.name)’s load has no path to its anchors"))
+                out.append(ResultsCheck(kind: .warn, title: "A scenario isn’t held", detail: "\(u.name)’s load has no path to its anchors",
+                                        tab: .scenarios))
             } else if let g = scenarios.first(where: \.governs) {
-                out.append(ResultsCheck(kind: .ok, title: "Every scenario holds", detail: "Worst case: " + g.name))
+                out.append(ResultsCheck(kind: .ok, title: "Every scenario holds", detail: "Worst case: " + g.name,
+                                        places: g.peakMM.map { [$0] } ?? [], more: g.peakMM == nil ? nil : "Its worst point is lit on the part",
+                                        tab: .scenarios))
             }
         }
         switch tab.layerShear {
         case .unknown: break
-        case .low: out.append(ResultsCheck(kind: .ok, title: "Layers won’t split", detail: "Layer shear " + tab.layerShear.label.lowercased()))
-        default: out.append(ResultsCheck(kind: .warn, title: "Layers may split", detail: "Layer shear " + tab.layerShear.label.lowercased()))
+        case .low: out.append(ResultsCheck(kind: .ok, title: "Layers won’t split", detail: "Layer shear " + tab.layerShear.label.lowercased(),
+                                           tab: .printing))
+        default: out.append(ResultsCheck(kind: .warn, title: "Layers may split", detail: "Layer shear " + tab.layerShear.label.lowercased(),
+                                         tab: .printing))
         }
         out.append(ResultsCheck(kind: .info, title: tab.tiltDegrees == 0 ? "Print it upright" : "Print it tilted \(tab.tiltDegrees)°",
                                 detail: tab.supportCm3 > 0 ? "About " + String(format: "%.1f", tab.supportCm3) + " cm³ of support"
-                                                           : "No support needed"))
-        if tab.minFeatureViolations > 0 {
-            out.append(ResultsCheck(kind: .warn, title: "Some thin spots", detail: "May print thinner than drawn"))
+                                                           : "No support needed", tab: .printing))
+        // ★ B4 (note 14, ledger 15 (c)): with E1's finishing the thin-spot row says what core did — "Thin spots fixed · 6", or
+        // where it could not, "2 thin spots left" and why there; a result from before E1 keeps today's row
+        if let f = finish {
+            out += finishChecks(f)
+        } else if tab.minFeatureViolations > 0 {
+            out.append(ResultsCheck(kind: .warn, title: "Some thin spots", detail: "May print thinner than drawn", tab: .printing))
         }
         if thinJoints > 0 {
-            out.append(ResultsCheck(kind: .warn, title: "Thin joints", detail: "\(thinJoints) held by an edge or corner only"))
+            out.append(ResultsCheck(kind: .warn, title: "Thin joints", detail: "\(thinJoints) held by an edge or corner only", tab: .printing))
         }
         // ★ his ruling 2026-10-28: a version in pieces is accepted WITH A FLAG — never "joined into one part"
         if let p = pieces {
             out.append(ResultsCheck(kind: .warn, title: p.title, detail: p.lines.joined(separator: " ")))
         } else if bridged {
             out.append(ResultsCheck(kind: .info, title: "Joined by a bridge", detail: "Two pieces were joined into one part"))
+        }
+        return out
+    }
+
+    /// ★ B4: E1's thin spots, its safe-finish fallback and a verdict that finishing changed — each in plain words.
+    public static func finishChecks(_ f: FinishReport) -> [ResultsCheck] {
+        var out: [ResultsCheck] = []
+        let mm = { (v: Double) in String(format: "%.1f mm", v) }
+        if !f.left.isEmpty {
+            let n = f.left.count
+            let why = f.left.compactMap(\.reason).first { !$0.isEmpty } ?? "Core could not thicken it here"
+            out.append(ResultsCheck(kind: .warn, title: "\(n) thin spot\(n == 1 ? "" : "s") left",
+                                    detail: why, places: f.left.map(\.centreMM),
+                                    more: "Thinnest " + mm(f.left.map(\.beforeMM).min() ?? 0) + " · at least " + mm(f.minThicknessMM) + " prints"
+                                        + (f.fixed.isEmpty ? "" : " · \(f.fixed.count) fixed"),
+                                    tab: .printing))
+        } else if !f.fixed.isEmpty {
+            out.append(ResultsCheck(kind: .ok, title: "Thin spots fixed \u{00B7} \(f.fixed.count)",
+                                    detail: "Thickened to at least " + mm(f.minThicknessMM), places: f.fixed.map(\.centreMM),
+                                    more: "Material was only added, never taken away", tab: .printing))
+        }
+        if f.fallback {
+            out.append(ResultsCheck(kind: .info, title: "Finished the safe way", detail: f.fallbackReason.isEmpty
+                                        ? "The slim finish would have thinned a member" : f.fallbackReason, tab: .printing))
+        }
+        if f.verdictChanged, !f.verdictReason.isEmpty {
+            out.append(ResultsCheck(kind: .warn, title: "Finishing changed a check", detail: f.verdictReason, tab: .strength))
         }
         return out
     }
@@ -478,7 +524,40 @@ struct ResultsVersionsPanel: View {
 
 struct ResultsCheckLine: View {
     let c: ResultsCheck
+    /// ★ B4 (note 14): open — its places lit, its one line and Details › under it; nil taps: today's still line.
+    var open = false
+    var tap: (() -> Void)? = nil
+    var details: (() -> Void)? = nil
     var body: some View {
+        if let tap {
+            VStack(alignment: .leading, spacing: 0) {
+                Button(action: tap) { line.contentShape(Rectangle()) }.buttonStyle(.plain)
+                if open {
+                    HStack(spacing: DS.Space.s) {
+                        if let more = c.more {
+                            Text(more).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: DS.Space.s)
+                        if let details, c.tab != nil {
+                            Button(action: details) {
+                                Text("Details \u{203A}").font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.accent.color)
+                                    .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .background(ResultsChrome.publish("resultsCheckDetails-" + c.title))
+                        }
+                    }
+                    .padding(.leading, DS.Space.l + 26 + DS.Space.m).padding(.trailing, DS.Space.m)
+                    .background(ResultsChrome.publish("resultsCheckMore-" + c.title))
+                }
+            }
+        } else {
+            line
+        }
+    }
+
+    private var line: some View {
         HStack(spacing: DS.Space.m) {
             let (sym, tint): (String, Color) = {
                 switch c.kind {
@@ -507,6 +586,8 @@ struct ResultsCheckLine: View {
 struct ResultsChecksAndDetails: View {
     let checks: [ResultsCheck]
     @Binding var checksOpen: Bool
+    /// ★ B4 (note 14): the open check (its places light on the model).
+    @Binding var openCheck: String?
     @Binding var detailsOpen: Bool
     @Binding var tab: ResultsDetailsTab
     let versionTitle: String
@@ -527,7 +608,10 @@ struct ResultsChecksAndDetails: View {
                     if checksOpen {
                         ForEach(checks) { c in
                             Divider().overlay(DS.Color.strokeSubtle.color)
-                            ResultsCheckLine(c: c)
+                            // ★ B4 (note 14): a tap opens it — its places light on the part — and a second tap closes it
+                            ResultsCheckLine(c: c, open: openCheck == c.id,
+                                             tap: { withAnimation(DS.Motion.sheetIn) { openCheck = openCheck == c.id ? nil : c.id } },
+                                             details: c.tab.map { t in { tab = t; withAnimation(DS.Motion.sheetIn) { detailsOpen = true } } })
                         }
                     }
                 }

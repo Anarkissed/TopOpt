@@ -95,6 +95,8 @@ public struct ResultsScreen: View {
     // ★ Results redesign state (his mockup, 2026-10-27)
     @State private var versionsOpen = true
     @State private var checksOpen = true
+    /// ★ B4 (note 14): the open check — its places light on the model
+    @State private var openCheck: String? = nil
     @State private var detailsOpen = false
     @State private var detailsTab: ResultsDetailsTab = .strength
     /// ★ His iPad 2026-10-28: the view buttons are LAYERS (Stress or Solid, X-ray) under one MOTION (Load paths / Bend /
@@ -276,6 +278,7 @@ public struct ResultsScreen: View {
             // M7.viz.2: worst-point callout — in the Stress view, out of the way of an explore reading. (★ his iPad
             // 2026-10-27: the scenario dots and rings "make no sense" — gone.)
             if legendShown, layers.motion == nil, stressProbe == nil { hotSpotMarker.ignoresSafeArea() }
+            checkMarkers.ignoresSafeArea()   // ★ B4 (note 14): the open check's places
             if layers.motion == .breakIt { failureMarker.ignoresSafeArea() }   // ★ Break: where it yields, and at what load
             versionsColumn
             rightColumn
@@ -963,6 +966,24 @@ public struct ResultsScreen: View {
     /// red zone. Shown only while the stress overlay is on and the point projects in
     /// front of the camera. The located point + value/margin are headlessly tested on
     /// ResultsModel; the marker's placement/look is device QA (the M7 /app/ standard).
+    /// ★ B4 (note 14): the open check's places on the part — a ring each, in the check's colour (never a tap target).
+    @ViewBuilder private var checkMarkers: some View {
+        if let id = openCheck, let c = checks.first(where: { $0.id == id }), !c.places.isEmpty, let proj = projection {
+            let tint = (c.kind == .warn ? DS.Color.warning : c.kind == .ok ? DS.Color.okGreen : DS.Color.accent).color
+            ZStack {
+                ForEach(Array(c.places.enumerated()), id: \.offset) { i, p in
+                    if let at = proj.project(SIMD3<Float>(p)) {
+                        Circle().strokeBorder(tint, lineWidth: 2.5).background(Circle().fill(tint.opacity(0.2)))
+                            .frame(width: 28, height: 28)
+                            .background(ResultsChrome.publish("resultsCheckMarker-\(i)"))
+                            .position(at)
+                    }
+                }
+            }
+            .allowsHitTesting(false)
+        }
+    }
+
     @ViewBuilder private var hotSpotMarker: some View {
         // When the failure surface is on, its marker sits at this same point (the
         // failure location IS the hot spot), so defer to it to avoid a double marker.
@@ -1223,6 +1244,12 @@ public struct ResultsScreen: View {
 
     private var selectedRow: ResultsVersionRow? { versionRows.first { $0.tabIndex == model.selectedIndex } }
 
+    /// ★ B4: E1's finishing of the selected version (report "finish"), nil on a result from before E1.
+    private var selectedFinish: FinishReport? {
+        guard let b = model.reportBlocks, let t = model.selected, let vf = model.requestedVolumeFraction(of: t) else { return nil }
+        return b.rows.first { $0.accepted && abs($0.volumeFraction - vf) < 1e-6 }?.finish
+    }
+
     /// The checks for the selected version (one line + one sub-line each).
     var checks: [ResultsCheck] {
         let blocks = model.reportBlocks
@@ -1234,7 +1261,9 @@ public struct ResultsScreen: View {
                                     required: blocks?.safetyMargin ?? blocks?.strengthen?.marginRequired ?? 1,
                                     safetyMargin: blocks?.safetyMargin, scenarios: model.scenarios(for: model.selected),
                                     thinJoints: thin, bridged: model.selected.map { model.isBridged($0) } ?? false,
-                                    pieces: model.selected.flatMap { model.piecesFlag($0) })
+                                    pieces: model.selected.flatMap { model.piecesFlag($0) },
+                                    finish: selectedFinish,   // ★ B4: E1's finishing
+                                    weakest: model.hotSpot.map { SIMD3<Double>($0.position) })
     }
 
     /// Bottom left: the streaming pill, a latticed version's mesh state, then the Versions panel.
@@ -1274,7 +1303,7 @@ public struct ResultsScreen: View {
             // ★ his note 2026-10-27: the tap-to-explore key sits above Checks, minimised until he opens it — and (10-28) it is
             // there whenever the part wears stress colours: still, bending, breaking or carrying the light
             stressKey
-            ResultsChecksAndDetails(checks: checks, checksOpen: $checksOpen, detailsOpen: $detailsOpen, tab: $detailsTab,
+            ResultsChecksAndDetails(checks: checks, checksOpen: $checksOpen, openCheck: $openCheck, detailsOpen: $detailsOpen, tab: $detailsTab,
                                     versionTitle: selectedRow?.title ?? "",
                                     rows: { model.detailRows($0, version: selectedRow) }, pill: crowded)
             exportButton
