@@ -19,8 +19,8 @@ import simd
 
 /// ★ WHERE DONE GOES — the page Edit faces was opened from.
 public enum EditFacesOrigin: Equatable, Sendable {
-    /// Topology's Setup, Results or Smooth (Smooth names the variant it was smoothing).
-    case topology(TopologyPage, smoothVariant: Int? = nil)
+    /// Topology's Setup or Results (★ B4: the Smooth page is gone).
+    case topology(TopologyPage)
     /// The lattice stage's Regions or Cells.
     case lattice(LatticeStagePage)
     /// ★ THE RETURN-TARGET API for a page another owner draws (#362's Flexible pages, e.g. "flexible.squish"). Done hands

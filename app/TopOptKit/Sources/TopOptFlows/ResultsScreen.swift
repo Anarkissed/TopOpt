@@ -57,19 +57,12 @@ public struct ResultsScreen: View {
     /// (auto density with no sim — bar B6's variants entry). Invoked with the
     /// selected variant's index. nil hides the affordance.
     var onLattice: ((Int) -> Void)?
-    /// "Smooth" on the selected variant (handoff 2026-08-02-smoothing-page): opens
-    /// the SMOOTHING page on that variant — brush locally, re-certify, keep or
-    /// discard. Invoked with the selected variant's index; nil hides the
-    /// affordance. Distinct from `smoothing` below, which is the older global
-    /// strength control on this screen.
-    var onSmooth: ((Int) -> Void)?
-    /// THE ENTRY GATES (task 2026-08-03-variant-entry-gating-and-retention, AJ2).
-    /// Given a variant index, whether "Smooth" / "Lattice" may be tapped for it and,
+    /// THE ENTRY GATE (task 2026-08-03-variant-entry-gating-and-retention, AJ2; ★ B4: Smooth's went with its page).
+    /// Given a variant index, whether "Lattice" may be tapped for it and,
     /// when it may not, the SPECIFIC reason — which the disabled control shows,
     /// exactly as the lattice page's bottom bar already does. A page that would
     /// refuse must never be reachable, so an absent closure means "enabled" only for
     /// callers that have not adopted the gate (previews, the evidence captures).
-    var smoothEntry: ((Int) -> VariantEntryVerdict)?
     var latticeEntry: ((Int) -> VariantEntryVerdict)?
     /// Constrained smoothing + re-certification (handoff 2026-07-28-constrained-
     /// smooth-ui). nil (a self-weight run, or a caller that has not wired it) hides
@@ -164,8 +157,6 @@ public struct ResultsScreen: View {
                 onClose: @escaping () -> Void = {}, onExport: @escaping () -> Void = {},
                 onSeeOriginal: @escaping () -> Void = {},
                 onLattice: ((Int) -> Void)? = nil,
-                onSmooth: ((Int) -> Void)? = nil,
-                smoothEntry: ((Int) -> VariantEntryVerdict)? = nil,
                 latticeEntry: ((Int) -> VariantEntryVerdict)? = nil,
                 smoothing: SmoothingModel? = nil,
                 undo: (() -> Void)? = nil, redo: (() -> Void)? = nil,
@@ -175,6 +166,7 @@ public struct ResultsScreen: View {
                 scenarioLoads: ResultsScenarioLoads = ResultsScenarioLoads(),
                 topLeftBlock: AnyView? = nil,
                 resultsModel: ResultsModel? = nil,
+                takeOpenOn: (() -> Int?)? = nil,
                 version: String? = nil, pickedVariant: Int? = nil, onPick: ((Int) -> Void)? = nil) {
         // `resultsModel` is a TEST SEAM (the M7 /app/ house style — the run is tested
         // through an injected scheduler / runner / notifier the same way). The screen
@@ -196,8 +188,6 @@ public struct ResultsScreen: View {
         self.onExport = onExport
         self.onSeeOriginal = onSeeOriginal
         self.onLattice = onLattice
-        self.onSmooth = onSmooth
-        self.smoothEntry = smoothEntry
         self.latticeEntry = latticeEntry
         self.smoothing = smoothing
         self.undo = undo; self.redo = redo; self.canUndo = canUndo; self.canRedo = canRedo
@@ -206,7 +196,11 @@ public struct ResultsScreen: View {
         self.scenarioLoads = scenarioLoads
         self.loadSurfacePoints = loadSurfacePoints
         self.version = version; self.pickedVariant = pickedVariant; self.onPick = onPick
+        self.takeOpenOn = takeOpenOn
     }
+
+    /// ★ B4: takes (once) the accepted result to open on — the Library card's Export; nil: the screen's own pick.
+    let takeOpenOn: (() -> Int?)?
 
     /// ★ B4 (app-map §3.5): the version's name ("v7"), the accepted variant he picked, and Pick this (accepted-variant index).
     let version: String?
@@ -376,6 +370,7 @@ public struct ResultsScreen: View {
             model.flowReducedStatic = false           // ★ the arrows MOVE (his iPad 2026-10-27) …
             model.setFlowWiggle(0)                    // … and never wiggle
             layers = ResultsLayers()   // ★ B4 (note 13): open plain, no view lit
+            if let v = takeOpenOn?(), let t = model.tabs.first(where: { $0.variantIndex == v && !$0.isLatticed }) { model.select(t.index) }
             model.stressOn = layers.stress
             applyMotion(nil)
         }
@@ -1122,13 +1117,6 @@ public struct ResultsScreen: View {
 
     // MARK: - the variant entry controls (task variant-entry-gating-and-retention)
 
-    /// The Smooth entry's verdict for the SELECTED variant. A caller that has not
-    /// wired the gate (previews, evidence captures) gets the pre-gate behaviour.
-    private var smoothVerdict: VariantEntryVerdict {
-        smoothEntry?(model.selectedVariantIndex)
-            ?? VariantEntryVerdict(label: "Smooth", enabled: true, reason: nil,
-                                   allReasons: [])
-    }
     // MARK: - Top bar: back · project / Optimized ✓ · See Original · Export
 
     /// One flex row across the top: navigation + project on the left, Export on the

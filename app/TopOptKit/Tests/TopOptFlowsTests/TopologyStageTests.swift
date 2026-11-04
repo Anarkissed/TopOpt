@@ -90,9 +90,9 @@ final class TopologyStageTests: XCTestCase {
         n.opened()
         XCTAssertFalse(n.dot)
         // the page is the caller's: only his tap opens Results
-        XCTAssertEqual(TopologyPage.current(resultsOpen: false, smoothing: false, hasResults: true), .setup)
+        XCTAssertEqual(TopologyPage.current(resultsOpen: false, hasResults: true), .setup)
         XCTAssertFalse(TopologyPage.enabled(.results, hasResults: false))
-        XCTAssertFalse(TopologyPage.enabled(.smooth, hasResults: false))
+        XCTAssertEqual(TopologyPage.allCases, [.setup, .results])   // ★ RE-PINNED (UI-Notes B4, plan.md §B4: "The Smooth page is deleted"; core finishes every result, E1)
         XCTAssertTrue(TopologyPage.enabled(.setup, hasResults: false))
         // a project reopened with results: no dot (nothing landed)
         var o = TopologyResultsNotice(); o.seed(accepted: 3); o.note(accepted: 3, streaming: false, resultsOpen: false)
