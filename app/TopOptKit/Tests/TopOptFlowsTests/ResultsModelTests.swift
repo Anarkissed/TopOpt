@@ -822,19 +822,19 @@ final class ResultsModelTests: XCTestCase {
     }
 
     @MainActor func testFailureLoadInEachUnit() {
-        // 7.5 kg in kg → "7.5 kg"; in lbs → 16.5 lb → "17 lbs" (≥10 rounds to integer).
+        // 7.5 kg in kg → "7.5 kg"; in lbs → 16.5 lb → "17 lb" (≥10 rounds to integer).
         XCTAssertEqual(failureModel(unit: .kg).failurePrediction?.valueLabel, "7.5 kg")
-        XCTAssertEqual(failureModel(unit: .lbs).failurePrediction?.valueLabel, "17 lbs")
+        XCTAssertEqual(failureModel(unit: .lbs).failurePrediction?.valueLabel, "17 lb")
         // A design-scale case: 10 kg applied, peak 4 / yield 60 → ×15 → 150 kg → 331 lb.
         let big = failureModel(appliedLoadKg: 10, unit: .lbs, peak: 4, yield: 60)
         XCTAssertEqual(big.failurePrediction?.failureLoadKg ?? 0, 150, accuracy: 1e-6)
-        XCTAssertEqual(big.failurePrediction?.valueLabel, "331 lbs")
+        XCTAssertEqual(big.failurePrediction?.valueLabel, "331 lb")
     }
 
     @MainActor func testFailureLoadLabelFormatting() {
         XCTAssertEqual(ResultsModel.loadLabel(kg: 7.5, unit: .kg), "7.5 kg")
         XCTAssertEqual(ResultsModel.loadLabel(kg: 154.2, unit: .kg), "154 kg")
-        XCTAssertEqual(ResultsModel.loadLabel(kg: 7.5, unit: .lbs), "17 lbs")   // 16.5 → 17
+        XCTAssertEqual(ResultsModel.loadLabel(kg: 7.5, unit: .lbs), "17 lb")    // 16.5 → 17 (U9: lb)
         XCTAssertEqual(ResultsModel.loadLabel(kg: 0.67, unit: .kg), "0.7 kg")
     }
 

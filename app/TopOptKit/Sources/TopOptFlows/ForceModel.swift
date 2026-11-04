@@ -30,13 +30,13 @@ import simd
 import TopOptDesign
 import TopOptKit
 
-/// The global weight display unit (design's kg / lbs segment). Storage is always
-/// kgf; this only changes presentation and the scrub step.
+/// The global weight display unit (design's kg │ lb segment). Storage is always
+/// kgf; this only changes presentation and the scrub step. The raw value stays "lbs" (saved projects).
 public enum WeightUnit: String, CaseIterable, Sendable, Codable {
     case kg
     case lbs
-    /// The segment button label ("kg" / "lbs").
-    public var label: String { rawValue }
+    /// The segment button label and the unit after a weight: "kg" / "lb" (★ U9, LOOK PER SCREEN 11-04: kg │ lb).
+    public var label: String { self == .kg ? "kg" : "lb" }
 }
 
 /// A load's direction affordance (design snap row, D4). The world-space vector is
@@ -779,7 +779,7 @@ public struct ForceModel: Equatable, Sendable, Codable {
     public func formattedWeight(kg: Double) -> String {
         let v = unit == .kg ? kg : kg * Self.kgToLb
         let num = v < 10 ? String(format: "%.1f", v) : String(Int(v.rounded()))
-        return "\(num) \(unit.rawValue)"
+        return "\(num) \(unit.label)"
     }
 
     /// The weight after scrubbing by `dx` points of horizontal drag, in the current

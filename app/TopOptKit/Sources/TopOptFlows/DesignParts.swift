@@ -153,7 +153,9 @@ public struct DSPanel<Content: View, Footer: View>: View {
                         .contentShape(Rectangle())
                         .overlay(alignment: .top) { Rectangle().fill(DSParts.strokeSub.color).frame(height: 1) }
                         let shown = bodyHeight ?? .infinity   // the body's own height: what it laid out, never a stale measure
-                        let below = rows.filter { $0.value.minY > shown - 4 }.sorted { $0.value.minY < $1.value.minY }
+                        // U10 "nothing hidden below a fold": a row cut by the fold counts too (T3: Settings' Material showed its
+                        // top 18 pt and no cue)
+                        let below = rows.filter { $0.value.maxY > shown + 4 }.sorted { $0.value.minY < $1.value.minY }
                         if !below.isEmpty {
                             // a tap brings the next page into view: the first row below the fold at the top
                             Button { withAnimation(DS.Motion.sheetIn) { reader.scrollTo(below[0].key, anchor: .top) } } label: {
@@ -195,6 +197,9 @@ public struct DSPanel<Content: View, Footer: View>: View {
         .transformPreference(DSPanelMeasureKey.self) { $0 = [:] }   // (never an enclosing panel's)
         .background(RoundedRectangle(cornerRadius: open ? DSParts.panelRadius : DSParts.headerHeight / 2, style: .continuous)
             .fill(DS.Surface.panel.color))
+        // the mockup's .panel blurs what is behind it (backdrop-filter 36 px): a chip on the model never reads through
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: open ? DSParts.panelRadius : DSParts.headerHeight / 2,
+                                                             style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: open ? DSParts.panelRadius : DSParts.headerHeight / 2, style: .continuous)
             .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
         .clipShape(RoundedRectangle(cornerRadius: open ? DSParts.panelRadius : DSParts.headerHeight / 2, style: .continuous))
@@ -229,6 +234,18 @@ public struct DSPanel<Content: View, Footer: View>: View {
         .background(DSParts.publish(key + "Header"))
         .accessibilityLabel(open ? "Fold \(title)" : "\(title), \(count ?? 0). Open")
         .accessibilityIdentifier("\(key)-header")
+    }
+}
+
+extension View {
+    /// A row that is not a DSRow (a setting row) inside a DSPanel: its frame published under `key`, its place counted by the
+    /// panel's "N more ⌄" cue, and the cue's scroll target.
+    public func dsPanelRow(_ key: String) -> some View {
+        id(key).background(GeometryReader { g in
+            Color.clear
+                .preference(key: ChromeKeepOutKey.self, value: [key: g.frame(in: .global)])
+                .preference(key: DSPanelRowsKey.self, value: [key: g.frame(in: .named(DSParts.bodySpace))])
+        })
     }
 }
 

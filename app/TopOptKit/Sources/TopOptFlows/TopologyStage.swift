@@ -395,6 +395,7 @@ enum TopologySettingsInfo {
         case .plate: return "Which way is up on the printer bed."
         case .compute: return "The app remembers your Mac and finds it when you press Optimize."
         case .minimizePlastic: return "Minimize plastic, or Redesign to strengthen."
+        case .protectSkin: return ProtectKeepRegions.info   // ★ exact Protect (ruling 2026-10-26 23:44): which faces come out exact
         case .designBox: return "Boxes and cylinders where the part may grow (Grow here) or must stay empty (Keep empty). Up to 6."
         default: return nil
         }

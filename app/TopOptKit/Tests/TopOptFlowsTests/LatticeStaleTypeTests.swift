@@ -97,8 +97,15 @@ final class LatticeStaleTypeTests: XCTestCase {
         XCTAssertTrue(ws.contains("if ok { requestLatticeRun() } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }"))
         // (B1 notes 4 and O1 clear the Mac-not-answering and could-not-finish lines first; re-pinned in B2)
         XCTAssertTrue(ws.contains("if ok { macNotAnswering = false; runCouldntFinish = false; requestRun(lattice: lattice) } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }"))
-        // B3: three controls — Optimize, Lattice, and Topology's Optimize-split row that is the Lattice button there
-        XCTAssertEqual(ws.components(separatedBy: ".disabled(!ok && !marks && !opensType)").count - 1, 3, "★ greyed, yet tappable")
+        // B3: three controls — Optimize, Lattice, and Topology's Optimize-split row that is the Lattice button there.
+        // ★ RE-PINNED (UI-Notes, Topology T1 491e7b1b; posted to #362 11-04 10:20Z): Optimize is §4.6's DSRunButton — its
+        // greyed-yet-tappable is the `.grey` state (the tap still leads to the fix), and only `.disabled` refuses the tap
+        XCTAssertEqual(ws.components(separatedBy: ".disabled(!ok && !marks && !opensType)").count - 1, 2, "★ greyed, yet tappable")
+        let opt = try member(ws, "private func optimizeButtonView(lattice: Bool) -> some View")
+        XCTAssertTrue(opt.contains(": marks || opensType ? .grey(line)") && opt.contains(": .disabled(line)"),
+                      "★ Optimize: greyed, yet tappable (DSRunButton .grey); untappable only when nothing leads to a fix")
+        XCTAssertTrue(try src("DesignParts.swift").contains(".disabled({ if case .disabled = state { return true }; return false }())"),
+                      "★ DSRunButton refuses the tap only in its .disabled state")
         let go = try member(ws, "private func goToLatticeType()")
         XCTAssertTrue(go.contains("if stage != .lattice { goToStage(.lattice) }") && go.contains("showLatticeWizard = true"))
         for write in ["topologyID", "setTopology", "lattice.enabled", "persist"] {

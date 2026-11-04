@@ -1696,7 +1696,7 @@ public struct WorkspacePlaceholder: View {
         .overlay(alignment: .bottomTrailing) { RerunConfirm(shown: replacementPromptBinding.wrappedValue, message: pendingReplacement?.message ?? "",
                                                               leaveToken: RerunLeaveToken(stage: stage, edit: EditBox(project.editSnapshot)),
                                                               onLeave: { pendingReplacement = nil },
-                                                              bottom: bottomBarHeight + DS.Space.xl4 + DS.Space.s) {
+                                                              bottom: bottomBarClearance + DS.Space.s) {   // (the one expression)
             Button(TopologyRerunChoice.rerunHere.label) {
                 pendingReplacement = nil
                 startRun(lattice: runWithLattice)
@@ -12674,7 +12674,12 @@ extension WorkspacePlaceholder {
             topologyOptimizeSplit
         } panel: {
             if setupPanelOpen {
-                CornerPairStyle.panel(width: showBuildOrientation ? 600 : DSParts.panelWidth, maxHeight: 620) { topologySetupRows }
+                // ★ LOOK PER SCREEN (T3, §4.19 "A Panel (4.3)"): the header folds it away; a row below the fold says "N more ⌄"
+                DSPanel(key: "settingsPanel", title: "Settings", width: showBuildOrientation ? 600 : DSParts.panelWidth, maxHeight: 620,
+                        open: Binding(get: { true }, set: { if !$0 { withAnimation(DS.Motion.emphasized) { setupPanelOpen = false } } })) {
+                    topologySetupRows
+                }
+                .background(CornerPairStyle.publish("cornerPanel"))   // (B2, U12/U16: the lane and the fix line read it)
             }
         }
     }
@@ -12797,21 +12802,8 @@ extension WorkspacePlaceholder {
     private var topologySetupRows: some View {
         let rows = TopologySetupRow.visible(protectCount: force.explicitProtectCount(in: selection.groups),
                                             isStep: isStepPart, designBoxDrawn: visible.designBox)
+        // ★ LOOK PER SCREEN (T3): the rows of §4.3's panel (DSPanel draws the header: the chevron and "Settings")
         return VStack(alignment: .leading, spacing: DS.Space.s) {
-            // ★ LOOK PER SCREEN (11-04, §4.3): the header is the chevron and the name; its tap folds the panel
-            Button { setupPanelOpen = false } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "chevron.down").font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(DS.Color.textSecondary.color).frame(width: 18)
-                    Text("Settings").font(.system(size: 14.5, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
-                    Spacer(minLength: 0)
-                }
-                .frame(height: DSParts.headerHeight).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .background(CornerPairStyle.publish("topology-setup-close"))
-            .accessibilityLabel("Close Settings")
-            .accessibilityIdentifier("topology-setup-close")
             ForEach(rows, id: \.self) { row in
                 VStack(alignment: .trailing, spacing: DS.Space.s) {
                     // ★ LOOK PER SCREEN (§4.4's setting row): the label in the body's type, its (i), the value at the right
@@ -12831,10 +12823,11 @@ extension WorkspacePlaceholder {
                     default: EmptyView()
                     }
                 }
-                .background(CornerPairStyle.publish("settingsRow-\(row.rawValue)"))   // ★ B3: SettingsPanelHostedTests
+                .dsPanelRow("settingsRow-\(row.rawValue)")   // ★ B3: SettingsPanelHostedTests; T3: the cue counts it
                 .accessibilityIdentifier("topology-setup-row-\(row.rawValue)")
             }
         }
+        .padding(.horizontal, 14).padding(.vertical, DS.Space.xs)
         .animation(DS.Motion.emphasized, value: showBuildOrientation)
     }
 
@@ -12876,8 +12869,24 @@ extension WorkspacePlaceholder {
                                let macOnly = StrengthenRoute.line(workerSelected: compute.wantsRemote)
                                if project.minimizePlastic, !want, macOnly != nil { model.toast = StrengthenRoute.onDeviceToast; return }
                                project.minimizePlastic = want
-                           }))
-                .frame(width: 210)
+                           }), small: true)   // ★ T3: the mockup's small segments (.seg.sm)
+        case .compute:
+            // ★ T3: the device's glyph and name in a value box; its tap opens today's picker
+            ComputeLocationControl(compute: compute, asValueBox: true)
+                .background(CornerPairStyle.publish("settingsRunsOn"))
+        case .units:
+            // ★ T3 (U9): [kg │ lb]
+            SegmentedGlass(WeightUnit.allCases.map { .init($0, $0.label) },
+                           selection: Binding(get: { force.unit }, set: { force.unit = $0 }), small: true)
+                .background(CornerPairStyle.publish("settingsUnits"))
+                .accessibilityIdentifier("topology-setup-units")
+        case .protectSkin:
+            // ★ T3 (U9, mockup "5 mm"): the ONE number box — the one depth every protected face uses
+            NumberField(key: "settings-protectSkin", title: "Protect skin",
+                        spec: FlexNumberSpec(value: force.faceProtectDepthMM, unit: "mm", step: 0.5,
+                                             range: FaceProtection.minDepthMM ... FaceProtection.maxDepthMM, decimals: 1)) {
+                force.faceProtectDepthMM = Swift.min(FaceProtection.maxDepthMM, Swift.max(FaceProtection.minDepthMM, $0))
+            }
         case .printParameters:
             Button { model.openPrintParams() } label: {
                 DSValueBox("Walls \(project.printParams.wallLoops) \u{00B7} \(project.printParams.infillPercent) %",
