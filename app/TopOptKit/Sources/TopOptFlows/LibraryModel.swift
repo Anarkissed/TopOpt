@@ -40,6 +40,8 @@ public struct LibraryResult: Identifiable {
     /// The printed fraction of the part as drawn (1.03 = 103 %), the Results screen's basis.
     public let fraction: Double
     public let accepted: Bool
+    /// ★ His Q1: its word as Results says it ("Just safe", "+10 %"); nil when its run's results don't say.
+    public var word: String? = nil
     public var id: Int { index }
 }
 
@@ -57,6 +59,10 @@ public final class LibraryModel: ObservableObject {
     /// ★ B1 (note 8, approved design 2026-11-02): where the Library is, kept HERE so it outlives the workspace. It was the
     /// Library view's own @State, rebuilt on every return, so Back from a part always landed on the Library's home.
     @Published var route: LibraryRoute = .home
+    /// ★ B5 (note 11): Export chosen versions is writing its files.
+    @Published public private(set) var exporting = false
+    /// ★ B5 (note 11): the files it wrote, for the share sheet; emptied when that sheet closes.
+    @Published public var exportedFiles: [URL] = []
     private var drawingOriginals = false   // ★ B1 (note 10)
     /// The proposal shown on the first-launch sheet, so Group saves exactly what he saw.
     private var lastProposal: LibraryIndex?
@@ -343,7 +349,7 @@ public final class LibraryModel: ObservableObject {
                         self.edit(folder) { v in
                             v.summary = results.map {
                                 ResultSummary(massGrams: $0.massGrams, worstCaseMargin: $0.margin,
-                                              accepted: $0.accepted, achievedVolumeFraction: $0.fraction)
+                                              accepted: $0.accepted, achievedVolumeFraction: $0.fraction, word: $0.word)
                             }
                         }
                     }
@@ -377,12 +383,13 @@ public final class LibraryModel: ObservableObject {
             let results: [LibraryResult]? = {
                 guard let data = store.loadResultsData(id: folder),
                       let o = try? OutcomeCodec.decode(data) else { return nil }
+                let words = ResultsVersions.words(o)   // ★ Q1: each result's word, as Results says it
                 return o.variants.enumerated().map { i, v in
                     LibraryResult(index: i,
                                   mesh: ViewerMesh(vertices: v.meshVertices, indices: v.meshIndices, faceIDs: [],
                                                    smoothShaded: true),
                                   massGrams: v.massGrams, margin: v.worstCaseMargin,
-                                  fraction: v.achievedVolumeFraction, accepted: v.accepted)
+                                  fraction: v.achievedVolumeFraction, accepted: v.accepted, word: words[i])
                 }
             }()
             DispatchQueue.main.async { done(results) }
@@ -470,6 +477,34 @@ public final class LibraryModel: ObservableObject {
         step(todo[...])
     }
 
+    // MARK: ★ B5 (note 11, Q10): Export chosen versions
+
+    /// Write `lines`' files off the main thread (the chosen results' solids, the originals through the app's own importer) into
+    /// a fresh folder, then hand them to the share sheet (`exportedFiles`). `done` gets nil, or what went wrong in one line.
+    func exportChosen(_ lines: [ChosenExportLine], format: ChosenExportFormat, title: String,
+                      done: @escaping (String?) -> Void) {
+        guard !exporting, !lines.isEmpty else { return }
+        exporting = true
+        let store = self.store, original = originalMeshLoader
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("export-" + UUID().uuidString.prefix(8),
+                                                                               isDirectory: true)
+        Self.queue.async {
+            let written = Result {
+                try ChosenExport.write(lines, format: format, title: title, into: dir) {
+                    ChosenExport.mesh($0, store: store, original: original)
+                }
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.exporting = false
+                switch written {
+                case .success(let urls): self.exportedFiles = urls; done(nil)
+                case .failure(let error): done(ChosenExport.failure(error))
+                }
+            }
+        }
+    }
+
     private func storeImage(_ image: CGImage, for item: CompareItem) {
         thumbnails[item] = image
         try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
@@ -552,7 +587,8 @@ public final class LibraryModel: ObservableObject {
         }
         let keptMark = v.mark(for: picked)
         let keptSummary = [ResultSummary(massGrams: decodedPick.massGrams, worstCaseMargin: decodedPick.worstCaseMargin,
-                                         accepted: decodedPick.accepted, achievedVolumeFraction: decodedPick.achievedVolumeFraction)]
+                                         accepted: decodedPick.accepted, achievedVolumeFraction: decodedPick.achievedVolumeFraction,
+                                         word: v.summary.flatMap { $0[safe: picked] }?.word)]   // ★ Q1: it keeps its word
         edit(folder) { v in
             v.marks = []
             v.setMark(ResultMark(result: 0, stars: keptMark.stars, printThis: keptMark.printThis, rejected: keptMark.rejected))

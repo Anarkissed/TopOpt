@@ -80,6 +80,33 @@ public enum ResultsVersions {
         return out
     }
 
+    /// ★ B5 (his Q1): each result's word as its line above says it, without the letter ("Just safe", "+10 %", "−30%"), from the
+    /// outcome alone (the Library's tiles), one per variant. A strengthen run's versions meet their results as `rows` meets
+    /// them; the rest read their headline. A strengthen run saved before its report was kept (11-04) says nothing, never a
+    /// savings figure its line never meant.
+    public static func words(_ o: OptimizeOutcome) -> [String?] {
+        var out = [String?](repeating: nil, count: o.variants.count)
+        var used = Set<Int>()
+        if let s = o.reportJSON.flatMap(RunReportBlocks.decode(reportJSON:))?.strengthen {
+            for v in s.versions where v.status != "unreachable" {
+                let own = StrengthenText.lineVersion(of: v, in: s)
+                guard let i = o.variants.indices.first(where: { !used.contains($0)
+                    && abs(o.variants[$0].requestedVolumeFraction - own.volumeFraction) < 1e-6 }) else { continue }
+                used.insert(i)
+                out[i] = word(StrengthenText.title(v, in: s))
+            }
+        } else if o.growthLadder && !o.variants.contains(where: { $0.addedMaterial != nil }) {
+            return out
+        }
+        for i in o.variants.indices where !used.contains(i) { out[i] = ResultsModel.headline(o.variants[i]) }
+        return out
+    }
+
+    /// "b · +10 %" → "+10 %".
+    private static func word(_ title: String) -> String {
+        title.range(of: " · ").map { String(title[$0.upperBound...]) } ?? title
+    }
+
     static func row(_ tab: ResultVariantVM, title: String, margin: Double, headline: String? = nil,
                     pieces: Int? = nil) -> ResultsVersionRow {
         let verdict = tab.latticeAccepted == false ? "not certified" : x(margin) + " ✓"

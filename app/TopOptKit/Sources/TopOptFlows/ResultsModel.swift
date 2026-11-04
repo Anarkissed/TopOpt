@@ -2886,6 +2886,22 @@ public final class ResultsModel: ObservableObject {
             latticeAccepted: alt.accepted)
     }
 
+    /// "−30%": the material a solid result saves against the part (its tab's `savingsLabel`).
+    nonisolated static func savingsLabel(_ v: OptimizeVariant) -> String {
+        "\u{2212}\(Int(((1 - v.achievedVolumeFraction) * 100).rounded()))%"
+    }
+
+    /// "+48%": the material a growth rung adds (its tab's `growthLabel`).
+    nonisolated static func growthLabel(_ v: OptimizeVariant) -> String {
+        "+\(Int(((v.achievedVolumeFraction - 1) * 100).rounded()))%"
+    }
+
+    /// ★ B5 (Q1): a solid result's headline as its tab shows it (`headlineLabel`): added on a growth rung, else saved. Off the
+    /// main thread too (the Library reads it while it decodes a version's results).
+    nonisolated static func headline(_ v: OptimizeVariant) -> String {
+        v.addedMaterial != nil ? growthLabel(v) : savingsLabel(v)
+    }
+
     private static func solidTab(_ v: OptimizeVariant, variantIndex i: Int,
                                  tabIndex: Int, isRecommended: Bool,
                                  voxelVolumeMM3: Double, knockdown: Double,
@@ -2914,8 +2930,8 @@ public final class ResultsModel: ObservableObject {
             let supportLabel = hasScalars ? realSupport
                                           : (remote ? ResultsModel.remoteNA : realSupport)
             let tilt = tiltFromVertical(v.orientation)
-            let growthLabel = "+\(growthPct)%"
-            let savingsLabel = "\u{2212}\(pct)%"
+            let growthLabel = Self.growthLabel(v)
+            let savingsLabel = Self.savingsLabel(v)
             return ResultVariantVM(
                 index: tabIndex, variantIndex: i, kind: .solid,
                 latticeAlternative: nil,
