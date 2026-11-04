@@ -758,6 +758,7 @@ public final class AppModel: ObservableObject {
                               paramsLocked: false)
         pm.minimizePlastic = minimizePlastic
         pm.quality = quality
+        AppSettings.shared.apply(to: &pm.force)   // ★ B5 (Q12): the new part starts from the app's default margin
         projectsById[recent.id] = pm
         project = pm
         recentProjects.insert(recent, at: 0)

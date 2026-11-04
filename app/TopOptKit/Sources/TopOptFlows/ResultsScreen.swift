@@ -167,7 +167,8 @@ public struct ResultsScreen: View {
                 topLeftBlock: AnyView? = nil,
                 resultsModel: ResultsModel? = nil,
                 takeOpenOn: (() -> Int?)? = nil,
-                version: String? = nil, pickedVariant: Int? = nil, onPick: ((Int) -> Void)? = nil) {
+                version: String? = nil, pickedVariant: Int? = nil, onPick: ((Int) -> Void)? = nil,
+                printOrientation: ResultsPrintOrientation? = nil) {
         // `resultsModel` is a TEST SEAM (the M7 /app/ house style — the run is tested
         // through an injected scheduler / runner / notifier the same way). The screen
         // owns its ResultsModel as a @StateObject, so a test hosting this view has no
@@ -197,7 +198,15 @@ public struct ResultsScreen: View {
         self.loadSurfacePoints = loadSurfacePoints
         self.version = version; self.pickedVariant = pickedVariant; self.onPick = onPick
         self.takeOpenOn = takeOpenOn
+        self.printOrientation = printOrientation
     }
+
+    /// ★ B4 (note 12, Q9): the orientation line's source; nil draws no line.
+    let printOrientation: ResultsPrintOrientation?
+    @State private var orientPhase: PrintOrientationPhase = .ours
+    /// The page's controls the line keeps clear of, and its own size (it changes with its state).
+    @StateObject private var orientControls = LaneControls()
+    @State private var orientSize: CGSize = .zero
 
     /// ★ B4: takes (once) the accepted result to open on — the Library card's Export; nil: the screen's own pick.
     let takeOpenOn: (() -> Int?)?
@@ -276,6 +285,7 @@ public struct ResultsScreen: View {
             if layers.motion == .breakIt { failureMarker.ignoresSafeArea() }   // ★ Break: where it yields, and at what load
             versionsColumn
             rightColumn
+            if let po = printOrientation { printOrientationLine(po) }   // ★ B4 (note 12): bottom-centre
             }
             // The optimization-history playbar exists ONLY when the variant carries real
             // keyframes (`hasHistory`). Without them the slider used to reveal-SLICE the
@@ -294,12 +304,18 @@ public struct ResultsScreen: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onPreferenceChange(ChromeKeepOutKey.self) { all in   // ★ B4: what the orientation line keeps clear of
+            if printOrientation != nil { orientControls.update(all.filter { !PrintOrientationLayout.ignored($0.key) }) }
+        }
         .transition(.opacity)
         .animation(DS.Motion.sheetIn, value: orientOpen)
         .animation(DS.Motion.sheetIn, value: compare != nil)
         .onChange(of: layers.motion) { applyMotion($0) }
         .onChange(of: layers.stress) { on in model.stressOn = on; if !on { stressProbe = nil } }
-        .onChange(of: model.selectedIndex) { _ in stressProbe = nil; applyMotion(layers.motion) }   // a new version's views start from rest
+        .onChange(of: model.selectedIndex) { _ in
+            stressProbe = nil; applyMotion(layers.motion)   // a new version's views start from rest
+            syncOrientPhase()                               // ★ B4: and its own way of printing
+        }
         // ★ his ask 2026-10-27: the Scenario menu changes the views — the picked scenario's own fields, from rest
         .onChange(of: scenarioPick) { p in model.viewScenario = p; stressProbe = nil; applyMotion(layers.motion) }
         .onChange(of: model.selectedIndex) { _ in stressProbe = nil }
@@ -370,6 +386,7 @@ public struct ResultsScreen: View {
             model.flowReducedStatic = false           // ★ the arrows MOVE (his iPad 2026-10-27) …
             model.setFlowWiggle(0)                    // … and never wiggle
             layers = ResultsLayers()   // ★ B4 (note 13): open plain, no view lit
+            syncOrientPhase()
             if let v = takeOpenOn?(), let t = model.tabs.first(where: { $0.variantIndex == v && !$0.isLatticed }) { model.select(t.index) }
             model.stressOn = layers.stress
             applyMotion(nil)
@@ -1895,6 +1912,34 @@ public struct ResultsScreen: View {
             .disabled(!model.hasHistory)
             .opacity(model.hasHistory ? 1 : 0.35)
         }
+    }
+
+    // MARK: - Bottom-centre: the orientation line (★ B4, note 12)
+
+    /// "Shown as we'd print it" · Show as you placed it, and the confirm it grows into. Only `yours` changes how it prints.
+    private func printOrientationLine(_ po: ResultsPrintOrientation) -> some View {
+        let v = model.selectedVariantIndex
+        return GeometryReader { g in
+            let space = g.frame(in: .global)
+            let local = orientControls.frames.map { $0.offsetBy(dx: -space.minX, dy: -space.minY) }
+            PrintOrientationLine(phase: orientPhase, changes: po.changes(v)) { t in
+                let next = orientPhase.after(t)
+                if next == .confirm { po.recheck(v) }
+                if (next == .yours) != (orientPhase == .yours) { po.choose(v, next == .yours) }
+                orientPhase = next
+            }
+            .background(GeometryReader { s in
+                Color.clear.onAppear { orientSize = s.size }.onChange(of: s.size) { orientSize = $0 }
+            })
+            .frame(width: g.size.width,
+                   height: PrintOrientationLayout.bottomY(size: orientSize, viewport: g.size, controls: local), alignment: .bottom)
+        }
+    }
+
+    /// A version opens on how it prints: his placement if he picked it, ours otherwise.
+    private func syncOrientPhase() {
+        guard let po = printOrientation else { return }
+        orientPhase = po.printsYours(model.selectedVariantIndex) ? .yours : .ours
     }
 
     // MARK: - Top-right: orientation gizmo (ViewCube), below Export
