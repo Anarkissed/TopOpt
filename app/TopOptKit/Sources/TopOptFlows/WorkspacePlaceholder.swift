@@ -1527,6 +1527,7 @@ public struct WorkspacePlaceholder: View {
                 FlexibleStagePage(project: project, model: flexibleMain.model(for: project, materialsPath: FlexibleResources.materialsPath,
                                   stampsPath: FlexibleResources.stampsPath, persist: { model.persistCurrentProject() }),
                                   onLeave: { goToStage($0) }, onAbout: { showLatticeModeSheet = true }, onEditFaces: { flexibleMain.editFacesOpens(); enterEditFaces(from: FlexibleEditFaces.origin(.squish), onReturn: { if flexibleMain.editFacesReturns($0) { showFlexiblePage = true } }) }, onChangeType: { flexibleMain.askChangeType() },   // Flexible (PR #362) H36: the Squish page's capsule leaves for Topology or Surface after Save & Exit's own check, and opens About Flexible… · Flexible (PR #362) H60: Edit faces from the Squish page (after its Save & Exit check); Done re-opens it · Flexible (PR #362) H62: "Change lattice type…" from the Squish page, after its Save & Exit check
+                                  appModel: model, onBack: { model.backHome() }, onPrintPlan: { flexibleMain.page = .plan },   // Flexible (PR #362) B9: the Squish page draws the one top-left block (U1); its ‹ goes where the workspace's Back goes, and its stage row's Print plan opens the main stage's Print plan page, each after the page's leave check
                                   onExit: { showFlexiblePage = false; latticeSettingsSavedThisSession = true; flexibleMain.didExitSettings(solver: FlexibleStressSolver(app: model, sim: latticeSim)) })
                     .transition(.opacity).zIndex(48)
             }
@@ -1566,6 +1567,7 @@ public struct WorkspacePlaceholder: View {
                     .zIndex(49)
             }
             if project.lattice.flexible != nil { FlexibleChangeTypeMount(main: flexibleMain, project: project, app: model, loseAll: { showFlexiblePage = false; deleteLatticeForMode() }).zIndex(49) }   // Flexible (PR #362) H62: "Change lattice type…" on the Flexible stage asks with #354's own card (its mount needs a type a Flexible project never has); Continue is today's delete with its one-step Undo
+            if flexibleMain.owns(project, stage), !showFlexiblePage, !editFaces.isEditing { FlexiblePrintPlanOverlays(main: flexibleMain).zIndex(49) }   // Flexible (PR #362) B9: the Print plan's Reset confirm, top middle over the page (U13)
             })   // Flexible (PR #362) H58
             AnyView(Group {   // Flexible (PR #362) H58: the body in heap-boxed chunks; the 47 KB body value was copied on the iPad main thread's stack until it overflowed (crash 2026-10-25)
             if showLatticeWizard {

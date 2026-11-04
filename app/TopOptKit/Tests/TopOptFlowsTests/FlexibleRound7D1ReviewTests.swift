@@ -176,7 +176,11 @@ final class FlexibleRound7D1ReviewTests: XCTestCase {
         var piece = inc(7, 10); piece.sectorPiece = true; piece.faceID = nil
         XCTAssertEqual(FlexibleLatticeCard.previewLine(includes: [piece]), "built \u{00B7} 1 face-prism \u{00B7} 10.0 mm", "a split piece has no face name")
         for l in [four] { XCTAssertLessThanOrEqual(l.count, 44) }
-        XCTAssertEqual(FlexibleSettingsPanel.title, "Flexible \u{00B7} Squish", "★ the Squish page's panel says the page (the mockup's words)")
+        // ★ RE-PINNED (B9, U2 — design-system §4.3 "Header: chevron + name + count, nothing else"; the one-app mockup's #flex-squish
+        // header reads "Squish · 2 groups" under a stage row that already says Flexible)
+        XCTAssertEqual(FlexibleSettingsPanel.title, "Squish", "★ the Squish page's panel says the page (the mockup's words)")
+        XCTAssertEqual(FlexibleSettingsPanel.count(groups: 2), "2 groups")
+        XCTAssertEqual(FlexibleSettingsPanel.count(groups: 1), "1 group")
         let panel = try FlexibleSource.code("FlexibleSettingsPanel.swift")
         XCTAssertTrue(panel.contains("Text(Self.title)"), "the header draws it")
     }

@@ -218,14 +218,15 @@ final class FlexibleRound5SettingsHostedTests: XCTestCase {
         m.edit { s in guard var f = s.face(5) else { return }; f.deepestMM = d0; s.setFace(f) }
         pump(0.4)
         XCTAssertEqual(title(h), "Exit", "back to the original value: Exit again")
-        try click(h, "exitButton")
+        // ★ RE-PINNED (B9, R6's foot): the Exit button is the panel foot's Save — the same leave check, whatever it would say
+        try click(h, "squishSave")
         XCTAssertEqual(exited, 1, "Exit leaves")
         XCTAssertTrue(m.exitUnchanged, "…telling the main page nothing changed")
         // ★ RED CONTROL: after a real change the same click saves (no flag)
         m.exitUnchanged = false
         m.edit { s in guard var f = s.face(5) else { return }; f.deepestMM = d0 + 1; s.setFace(f) }
         pump(0.4)
-        try click(h, "exitButton")
+        try click(h, "squishSave")
         XCTAssertEqual(exited, 2)
         XCTAssertFalse(m.exitUnchanged, "control: Save & Exit hands the main page a change")
     }

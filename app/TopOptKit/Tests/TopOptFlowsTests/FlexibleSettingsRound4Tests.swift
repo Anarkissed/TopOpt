@@ -97,7 +97,8 @@ final class FlexibleSettingsRound4Tests: XCTestCase {
         let panel = try FlexibleSource.code("FlexibleSettingsPanel.swift")
         XCTAssertTrue(panel.contains("FlexibleHugHeight {"))
         let page = try FlexibleSource.code("FlexibleStagePage.swift")
-        XCTAssertTrue(page.contains("FlexibleSettingsPanel(model: model, padTarget: $padTarget, minimized: $panelMinimized)"))
+        // ★ RE-PINNED (B9, R6's foot): the panel takes its foot's Save and Cancel
+        XCTAssertTrue(page.contains("FlexibleSettingsPanel(model: model, padTarget: $padTarget, minimized: $panelMinimized, foot: footActions)"))
         XCTAssertFalse(page.contains("ScrollView(.vertical"), "the page no longer builds a greedy scroll of its own")
     }
 

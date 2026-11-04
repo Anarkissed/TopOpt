@@ -26,39 +26,51 @@ struct FlexibleSettingsPanel: View {
     @ObservedObject var model: FlexibleStageModel
     @Binding var padTarget: String?
     @Binding var minimized: Bool
+    /// ★ B9 (R6: "Foot: Cancel │ Save … Save matches the Lattice page"): the pinned foot's two ways off the page — the page's
+    /// leave check (Save) and its revert (Cancel). nil (a panel hosted alone in a test): no foot.
+    var foot: FlexibleSquishFoot.Actions? = nil
 
-    static let width: CGFloat = 480
-    /// The open tab's width beside the rail — round 4's 372 pt, so every one-line row still fits.
+    /// ★ B9 (U14, design-system §6: "the wide panel (Lattice settings, Squish, Print plan) is 440 pt"): round 5's 480 pt panel
+    /// is the shared wide panel now.
+    static let width: CGFloat = PageChrome.widePanelWidth
+    /// The open tab's width beside the rail.
     static let contentWidth: CGFloat = width - 2 * DS.Space.ml - FlexibleSettingsRailView.width - DS.Space.s
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.m) {
-            // ★ U21 (DEL-CONFIRM, his Img13): Reset all and a group's trash ask IN PLACE (FlexibleConfirmInPlace) — the header stays
             header
             if !minimized {
                 // ★ ROUND 5 (S8): the folder rail on the left, the open tab beside it
                 FlexibleHugHeight {
                     HStack(alignment: .top, spacing: DS.Space.s) {
                         FlexibleSettingsRailView(model: model)
-                        // ★ THE SELECTED FACE'S CARD SCROLLS INTO VIEW (verification of D1): on a list
-                        // tap, a tap on the part, the fix pop-up's select, a switch back to Face, the
-                        // card growing (Stamp's rows, a warning line), the panel shrinking under the
-                        // pop-up — and as the page opens. ★ ROUND 7 · T3 RECODE: an explicit scroll
-                        // position settled against the scroll's measured height (FlexibleRevealScroll);
-                        // the ScrollViewReader ask never moved on 11" landscape "as opened".
-                        FlexibleRevealScroll(revealKey: revealKey, enabled: revealEnabled,
-                                             legacyID: model.selectedRegion.map { AnyHashable(FlexibleFaceList.cardID($0)) }) {
-                            VStack(alignment: .leading, spacing: DS.Space.m) {
-                                FlexibleRailContent(model: model, padTarget: $padTarget)
+                        VStack(alignment: .leading, spacing: DS.Space.s) {
+                            // ★ THE SELECTED FACE'S CARD SCROLLS INTO VIEW (verification of D1): on a list
+                            // tap, a tap on the part, the fix pop-up's select, a switch back to Face, the
+                            // card growing (Stamp's rows, a warning line), the panel shrinking under the
+                            // pop-up — and as the page opens. ★ ROUND 7 · T3 RECODE: an explicit scroll
+                            // position settled against the scroll's measured height (FlexibleRevealScroll);
+                            // the ScrollViewReader ask never moved on 11" landscape "as opened".
+                            FlexibleRevealScroll(revealKey: revealKey, enabled: revealEnabled,
+                                                 legacyID: model.selectedRegion.map { AnyHashable(FlexibleFaceList.cardID($0)) }) {
+                                VStack(alignment: .leading, spacing: DS.Space.m) {
+                                    // ★ B9 (the mockup's #flex-squish): Auto │ Manual and Reset all at the top of the open tab, on
+                                    // every tab — inside its scroll, as the mockup's (the pinned foot took room the selected
+                                    // face's Stamp card needs at 11" landscape)
+                                    topRow
+                                    FlexibleRailContent(model: model, padTarget: $padTarget)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(GeometryReader { g in
+                                // what the scroll SHOWS (the hosted test checks the card lies in it)
+                                Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["panelScroll": g.frame(in: .global)])
+                            }.allowsHitTesting(false))
                         }
-                        .background(GeometryReader { g in
-                            // what the scroll SHOWS (the hosted test checks the card lies in it)
-                            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["panelScroll": g.frame(in: .global)])
-                        }.allowsHitTesting(false))
                     }
                 }
+                // ★ B9: the foot is pinned (U10: it never scrolls away)
+                if let foot { FlexibleSquishFoot(actions: foot) }
             }
         }
         .padding(DS.Space.ml)
@@ -95,65 +107,123 @@ struct FlexibleSettingsPanel: View {
         return max(viewport.height * 0.62, viewport.height - edge - top - DS.Space.m)
     }
 
-    /// ★ ROUND 7, the review of R7-D1: the panel names the page — "Flexible · Squish", the mockup's words — under a capsule
-    /// that already says Flexible (it said "● Flexible" twice, one under the other).
-    static let title = "Flexible \u{00B7} Squish"
+    /// ★ B9 (U2, design-system §4.3: "Header: chevron + name + count, nothing else"): the page's name alone — the stage row
+    /// above it already says Flexible.
+    static let title = "Squish"
 
+    /// The header's count: "2 groups", "1 group".
+    static func count(groups n: Int) -> String { n == 1 ? "1 group" : "\(n) groups" }
+
+    /// ★ B9 (U2): chevron + "Squish" + its count, nothing else. A tap anywhere on it folds the panel to this one line (round
+    /// 4's minimise) and opens it again. Auto │ Manual and Reset all moved to the top of the open tab (`topRow`).
     private var header: some View {
-        HStack(spacing: DS.Space.xs) {
-            Circle().fill(FlexibleStageStyle.accent).frame(width: 8, height: 8)
-                .opacity(model.resetAsk ? 0 : 1)   // ★ U21: Reset all's question is on this line
-            Text(Self.title).font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(DS.Color.textPrimary.color)
-                .opacity(model.resetAsk ? 0 : 1)
-            // folded: which face the page is on, so the header still says it
-            if minimized, let r = model.selectedRegion {
-                Text("· \(model.faceName(r))").font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(DS.Color.textSecondary.color)
-                    .lineLimit(1)
-            }
-            Spacer()
-            // ★ MANUAL (M1, his words of 2026-10-22: "at the very top of the Squish modal, it should have a toggle that says manual or
-            // auto"): on the header line itself (it hides while Reset all asks on this line)
-            if !minimized {
-                FlexibleManualToggle(model: model)
-                    .opacity(model.resetAsk ? 0 : 1).allowsHitTesting(!model.resetAsk)
-            }
-            // ★ ROUND 5 (S5): "Reset all" — every input back to a brand-new setup (asked once; undoable)
-            if !minimized {
-                Button { model.askResetAll() } label: {
-                    Text(FlexibleSettingsExit.resetButton)
-                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textSecondary.color)
-                        .padding(.horizontal, 10).frame(height: 30)
-                        .background(Capsule().fill(DS.Color.fillSubtle.color)
-                            .overlay(Capsule().strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)))
-                        .contentShape(Capsule())
-                        .frame(minWidth: FlexibleTargets.least, minHeight: FlexibleTargets.least)   // ★ R: a 44 pt target
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .modifier(FlexibleConfirmInPlace(asking: model.resetAsk, question: FlexibleSettingsExit.resetAsk,
-                                                 destructive: FlexibleSettingsExit.resetConfirm, keep: FlexibleSettingsExit.resetCancel,
-                                                 confirmKey: "resetConfirm", keepKey: "resetCancel", questionID: "flexible-reset-ask",
-                                                 confirm: { model.confirmResetAll() }, cancel: { model.keepAll() }))
-                .background(GeometryReader { g in
-                    Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["resetAll": g.frame(in: .global)])
-                }.allowsHitTesting(false))
-                .accessibilityIdentifier("flexible-reset-all")
-            }
-            Button { withAnimation(.easeInOut(duration: 0.2)) { minimized.toggle() } } label: {
-                Image(systemName: minimized ? "chevron.up" : "chevron.down")
+        Button { withAnimation(.easeInOut(duration: 0.2)) { minimized.toggle() } } label: {
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: minimized ? "chevron.right" : "chevron.down")
                     .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(DS.Color.accent.color)
-                    .frame(width: 32, height: 32)
-                    .background(Circle().fill(DS.Color.fillSubtle.color))
-                    .frame(width: 44, height: 36)
+                    .foregroundStyle(DS.Color.textSecondary.color)
+                    .frame(width: 16)
+                Text(Self.title).font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                Spacer(minLength: DS.Space.s)
+                Text(Self.count(groups: model.squeezeGroups.count))
+                    .font(.system(size: 12.5, weight: .medium)).monospacedDigit()
+                    .foregroundStyle(DS.Color.textTertiary.color)
+            }
+            .frame(minHeight: FlexibleTargets.least)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(GeometryReader { g in
+            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["panelHeader": g.frame(in: .global)])
+        }.allowsHitTesting(false))
+        .accessibilityLabel(minimized ? "Show the settings" : "Minimise the settings")
+        .accessibilityIdentifier("flexible-panel-minimize")
+        .flexibleProbe("flexible-panel-minimize")
+    }
+
+    /// ★ B9: the open tab's top line — ★ MANUAL (M1, his words of 2026-10-22: "at the very top of the Squish modal, it should
+    /// have a toggle that says manual or auto") and ★ ROUND 5 (S5) "Reset all": every input back to a brand-new setup (asked
+    /// once, in place; undoable). Reset all sits at the trailing end, so its ask (the question and [Reset] to the left of
+    /// [Cancel]) lies over the hidden switch.
+    private var topRow: some View {
+        HStack(spacing: DS.Space.s) {
+            FlexibleManualToggle(model: model)
+                .opacity(model.resetAsk ? 0 : 1).allowsHitTesting(!model.resetAsk)
+            Spacer(minLength: 0)
+            Button { model.askResetAll() } label: {
+                Text(FlexibleSettingsExit.resetButton)
+                    .font(.system(size: 12.5, weight: .semibold)).foregroundStyle(DS.Color.accent.color)
+                    .padding(.horizontal, 6).frame(height: 30)
+                    .frame(minWidth: FlexibleTargets.least, minHeight: FlexibleTargets.least)   // ★ R: a 44 pt target
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(minimized ? "Show the settings" : "Minimise the settings")
-            .accessibilityIdentifier("flexible-panel-minimize")
+            .modifier(FlexibleConfirmInPlace(asking: model.resetAsk, question: FlexibleSettingsExit.resetAsk,
+                                             destructive: FlexibleSettingsExit.resetConfirm, keep: FlexibleSettingsExit.resetCancel,
+                                             confirmKey: "resetConfirm", keepKey: "resetCancel", questionID: "flexible-reset-ask",
+                                             confirm: { model.confirmResetAll() }, cancel: { model.keepAll() }))
+            .background(GeometryReader { g in
+                Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["resetAll": g.frame(in: .global)])
+            }.allowsHitTesting(false))
+            .accessibilityIdentifier("flexible-reset-all")
+            .flexibleProbe("flexible-reset-all")
         }
+    }
+}
+
+/// ★ B9 (R6: "Foot: Cancel │ Save. Today it is Exit │ Save & Exit; Save matches the Lattice page (R3.4), and Save rebuilds the
+/// lattice"): the Squish panel's pinned foot. Save is the page's one leave check (today's Exit / Save & Exit: it saves what
+/// changed and rebuilds, leaves as it was when nothing did, and opens the fix instead while a change is blocked — then the
+/// fix chip beside it says so, U6). Cancel puts back what changed on this page and leaves; Redo brings it back.
+struct FlexibleSquishFoot: View {
+    struct Actions {
+        let save: () -> Void
+        let cancel: () -> Void
+        /// "Fix 1 thing" while a change is blocked (Save opens the fix); nil when Save can leave.
+        let fix: String?
+    }
+    let actions: Actions
+
+    var body: some View {
+        HStack(spacing: DS.Space.s) {
+            if let fix = actions.fix {
+                Button(action: actions.save) {
+                    Text(fix).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(DS.Color.warning.color)
+                        .lineLimit(1).fixedSize()
+                        .padding(.horizontal, DS.Space.sm).frame(height: 30)
+                        .background(Capsule().fill(DS.Color.warning.opacity(0.14).color))
+                        .frame(minHeight: FlexibleTargets.least).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("flexible-squish-fix")
+                .flexibleProbe("flexible-squish-fix")
+            }
+            Spacer(minLength: 0)
+            button(FlexibleSettingsExit.cancel, primary: false, key: "squishCancel", id: "flexible-squish-cancel", action: actions.cancel)
+            button(FlexibleSettingsExit.save, primary: true, key: "squishSave", id: "flexible-exit", action: actions.save)
+        }
+        .padding(.top, DS.Space.xs)
+    }
+
+    /// One foot button (44 pt tall): Save in the accent (greyed while a change is blocked), Cancel quiet. Save keeps the old
+    /// Exit button's id ("flexible-exit"): it is the same one way off the page.
+    private func button(_ title: String, primary: Bool, key: String, id: String, action: @escaping () -> Void) -> some View {
+        let blocked = primary && actions.fix != nil
+        return Button(action: action) {
+            Text(title).font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(DS.Color.textPrimary.opacity(blocked ? 0.5 : 1).color)
+                .padding(.horizontal, DS.Space.l).frame(minWidth: 84, minHeight: FlexibleTargets.least)
+                .background(Capsule().fill(primary ? (blocked ? DS.Color.fillSubtle : DS.Color.accent).color
+                                                   : DS.Color.fillSubtle.color))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .background(GeometryReader { g in
+            Color.clear.preference(key: FlexibleKeepOutKey.self, value: [key: g.frame(in: .global)])
+        }.allowsHitTesting(false))
+        .accessibilityIdentifier(id)
+        .flexibleProbe(id)
     }
 }
 

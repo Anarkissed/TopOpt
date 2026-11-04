@@ -1,13 +1,13 @@
 // SquishParityHostedTests — B9 (#362), the Squish page's restyle guard (plan.md › B9 › Risks; his R6 words: "Keep the
 // aesthetic as it is in this design, but DO NOT REMOVE ANY of the settings/actions/capabilities from the squish page").
 //
-// The page is HOSTED in a window (offscreen, never the app) on the A1 pad lookalike with an edges group, and walked through
-// every tab and state a control lives in: Model (Auto, then Manual), each squeeze group (a face's card with Curves, then
-// Stamp; the edges group's selected edge), Rests and + New. In each state it collects every control it can see: the ids the
-// shared Flexible parts publish while a test records (`flexibleProbe`: FlexRow, FlexChips, FlexNumberBox, the (i), the view
-// buttons) and the frame keys the page's controls publish (FlexibleKeepOutKey, ChromeKeepOutKey). A test process builds no
-// accessibility tree for SwiftUI on macOS (an NSHostingView's AccessibilityNode children carry no ids without an assistive
-// client), so the ids cannot be read there.
+// The page is HOSTED in a window (SquishHost: offscreen, never the app) on the A1 pad lookalike with an edges group, and
+// walked through every tab and state a control lives in: Model (Auto, then Manual), each squeeze group (a face's card with
+// Curves, then Stamp; the edges group's selected edge), Rests and + New. In each state it collects every control it can see:
+// the ids the shared Flexible parts publish while a test records (`flexibleProbe`: FlexRow, FlexChips, FlexNumberBox, the (i),
+// the view buttons, the panel's header, Reset all and foot) and the frame keys the page's controls publish
+// (FlexibleKeepOutKey, ChromeKeepOutKey). A test process builds no accessibility tree for SwiftUI on macOS (an
+// NSHostingView's AccessibilityNode children carry no ids without an assistive client), so the ids cannot be read there.
 //
 // `baseline` is what today's page showed (B3's tip, 91a3347e), per KIND (a row's number or a press's UUID folded). The test
 // fails when one is missing after the restyle, unless `moved` names what replaced it on purpose.
@@ -21,54 +21,10 @@ import AppKit
 @testable import TopOptFlows
 @testable import TopOptKit
 
-private final class SquishParityWindow: NSWindow {
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { true }
-}
-
 @MainActor
 final class SquishParityHostedTests: XCTestCase {
-    final class Keys { var chrome = Set<String>(); var flexible = Set<String>(); var probed = Set<String>() }
-    struct Host { let window: NSWindow; let view: NSView; let size: CGSize; let keys: Keys }
-
     override nonisolated func setUp() { super.setUp(); FlexibleSaid.recording = true }
     override nonisolated func tearDown() { FlexibleSaid.recording = false; super.tearDown() }
-
-    func pump(_ seconds: Double) {
-        let end = Date().addingTimeInterval(seconds)
-        while Date() < end { _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02)) }
-    }
-
-    @discardableResult
-    func pumpUntil(_ timeout: Double, _ cond: () -> Bool) -> Bool {
-        let end = Date().addingTimeInterval(timeout)
-        while !cond() {
-            if Date() > end { return false }
-            _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02))
-        }
-        return true
-    }
-
-    func host<V: View>(_ v: V, size: CGSize) -> Host {
-        let keys = Keys()
-        let hv = NSHostingView(rootView: AnyView(v.onPreferenceChange(ChromeKeepOutKey.self) { keys.chrome = Set($0.keys) }
-            .onPreferenceChange(FlexibleKeepOutKey.self) { keys.flexible = Set($0.keys) }
-            .onPreferenceChange(FlexibleIDKey.self) { keys.probed = $0 }
-            .environment(\.colorScheme, .dark)))
-        hv.sizingOptions = []
-        hv.frame = CGRect(origin: .zero, size: size)
-        _ = NSApplication.shared
-        let w = SquishParityWindow(contentRect: CGRect(x: -20000, y: -20000, width: size.width, height: size.height),
-                                   styleMask: [.borderless], backing: .buffered, defer: false)
-        w.appearance = NSAppearance(named: .darkAqua)
-        w.contentView = hv
-        w.setFrameOrigin(NSPoint(x: -20000, y: -20000))
-        w.orderFrontRegardless()
-        w.makeKey()
-        hv.layoutSubtreeIfNeeded()
-        addTeardownBlock { @MainActor in w.orderOut(nil); w.contentView = nil }
-        return Host(window: w, view: hv, size: size, keys: keys)
-    }
 
     /// Ids that name one row of a list (a group's number, a face's region, a press's UUID) are kept per KIND of control: the
     /// numbers and UUIDs inside are folded ("groupRemove-2" → "groupRemove-#", "flexible-group-3-info" → "flexible-group-#-info").
@@ -86,40 +42,14 @@ final class SquishParityHostedTests: XCTestCase {
     }
 
     /// Every control the page shows now, per kind.
-    func controls(_ h: Host) -> Set<String> {
-        Set(h.keys.probed.union(h.keys.chrome).union(h.keys.flexible).map(Self.kind).filter(Self.isControl))
-    }
-
-    /// The pad lookalike on the main stage's shared model, opened (SYNCHRONOUS: the page's Metal view publishes its projection
-    /// only with the run loop pumped), then an edges group picked and [Done] — the R7 settings tests' fixture.
-    func padWithEdges() throws -> (FlexibleHisProject.Restored, FlexibleStageModel) {
-        let r = try FlexiblePressFixtures.a1Project(3, self)
-        let stage = FlexibleMainStage()
-        stage.reduceMotion = { true }
-        let m = stage.model(for: r.project, materialsPath: FlexibleHisProject.materialsPath,
-                            stampsPath: FlexibleHisProject.stampsPath, persist: {})
-        addTeardownBlock { @MainActor in await m.waitForIdle() }
-        m.openScene()
-        XCTAssertTrue(pumpUntil(120) { m.sceneState == .ready && m.loadedKeys.allSatisfy { m.stacks[$0] != nil && m.geometry[$0] != nil } },
-                      "the scene and stacks")
-        m.rail = .newGroup
-        m.startEdgePick()
-        XCTAssertTrue(pumpUntil(240) { m.edgePick.map { !$0.loading && !$0.checking } ?? false }, "the edges and corners listed")
-        let c = try XCTUnwrap(m.edgePick?.candidates.first { $0.kind == .edge && Set($0.members) == [1, 2] })
-        m.toggleEdgePick(c.number)
-        m.setEdgePickWeight(5)
-        var done = false
-        Task { @MainActor in _ = await m.finishEdgePick(); done = true }
-        XCTAssertTrue(pumpUntil(240) { done && m.sceneState == .ready && m.openedKey == m.currentSceneKey
-            && m.loadedKeys.allSatisfy { m.stacks[$0] != nil && m.geometry[$0] != nil } }, "the part open on the strips")
-        pump(0.5)
-        return (r, m)
+    static func controls(_ h: SquishHost) -> Set<String> {
+        Set(h.keys.probed.union(h.keys.chrome.keys).union(h.keys.flexible.keys).map(kind).filter(isControl))
     }
 
     /// Walk the page through every tab and state; the controls seen in each, by state.
-    func walk(_ h: Host, _ m: FlexibleStageModel) -> [(state: String, controls: Set<String>)] {
+    func walk(_ h: SquishHost, _ m: FlexibleStageModel) -> [(state: String, controls: Set<String>)] {
         var seen: [(state: String, controls: Set<String>)] = []
-        func look(_ state: String) { pump(0.8); seen.append((state, controls(h))) }
+        func look(_ state: String) { SquishHost.pump(0.8); seen.append((state, Self.controls(h))) }
         for manual in [false, true] {
             m.setManual(manual)
             let mode = manual ? "manual" : "auto"
@@ -150,7 +80,7 @@ final class SquishParityHostedTests: XCTestCase {
     }
 
     /// Every control seen across the walk (and, with SQUISH_PARITY_OUT, each state's list written there).
-    func seen(_ h: Host, _ m: FlexibleStageModel) -> Set<String> {
+    func seen(_ h: SquishHost, _ m: FlexibleStageModel) -> Set<String> {
         let states = walk(h, m)
         let all = Set(states.flatMap { $0.controls })
         if let out = ProcessInfo.processInfo.environment["SQUISH_PARITY_OUT"] {
@@ -206,16 +136,19 @@ final class SquishParityHostedTests: XCTestCase {
 
     /// Controls that went on purpose → what replaced each (the design's own move). A missing one listed here passes when its
     /// replacement is seen.
-    static let moved: [String: String] = [:]
+    static let moved: [String: String] = [
+        // B9 (R6's foot): round 5's Exit / Save & Exit is the panel foot's Save (the same leave check; Cancel beside it)
+        "exitButton": "squishSave",
+    ]
 
     static func missing(from seen: Set<String>) -> [String] {
         baseline.filter { k in !seen.contains(k) && !(moved[k].map(seen.contains) ?? false) }.sorted()
     }
 
     func testEveryControlOfTodaysSquishPageIsStillThere() throws {
-        let (r, m) = try padWithEdges()
-        let h = host(FlexibleStagePage(project: r.project, model: m, onExit: {}), size: CGSize(width: 1376, height: 1032))
-        pump(2.5)
+        let (r, m) = try SquishHost.pad(self, edges: true)
+        let h = SquishHost(FlexibleStagePage(project: r.project, model: m, onExit: {}), size: CGSize(width: 1376, height: 1032), test: self)
+        SquishHost.pump(2.5)
         let all = seen(h, m)
         XCTAssertFalse(Self.baseline.isEmpty, "the baseline is recorded")
         let missing = Self.missing(from: all)
@@ -224,11 +157,11 @@ final class SquishParityHostedTests: XCTestCase {
 
     /// ★ RED CONTROL: with the Auto │ Manual switch hidden, the parity names it as missing.
     func testTheParityNamesADroppedControl() throws {
-        let (r, m) = try padWithEdges()
+        let (r, m) = try SquishHost.pad(self, edges: true)
         FlexibleManualToggle.controlHidden = true
         defer { FlexibleManualToggle.controlHidden = false }
-        let h = host(FlexibleStagePage(project: r.project, model: m, onExit: {}), size: CGSize(width: 1376, height: 1032))
-        pump(2.5)
+        let h = SquishHost(FlexibleStagePage(project: r.project, model: m, onExit: {}), size: CGSize(width: 1376, height: 1032), test: self)
+        SquishHost.pump(2.5)
         let missing = Self.missing(from: seen(h, m))
         XCTAssertTrue(missing.contains("flexible-manual-mode-manual"), "control: a hidden Auto │ Manual is named: \(missing)")
     }

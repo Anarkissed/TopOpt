@@ -105,7 +105,10 @@ public struct FlexibleCornerPair: View {
 
     /// The Lattice split button (before the stage's model arrives: the steps, nothing to send yet).
     @ViewBuilder private var split: some View {
-        if let m = main.model {
+        if main.page == .plan, let m = main.model {
+            // ★ B9 (J-A): on the Print plan the main button builds the plan (grey with one fix chip while a seam has no joint)
+            FlexiblePlanBuildButton(main: main, model: m, width: FlexibleChromeLayout.latticeButtonSize(viewport).width)
+        } else if let m = main.model {
             FlexibleLatticeSplit(model: m, run: main.coreRun, main: main, chrome: chrome, project: project, viewport: viewport,
                                  openSquish: openSquish)
         } else {

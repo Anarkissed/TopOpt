@@ -172,7 +172,14 @@ final class FlexibleRound7ScreenHostedTests: XCTestCase {
             m.openScene()
             _ = pumpUntil(120) { m.sceneState == .ready }
             let size = CGSize(width: 834, height: 1194)
-            let h = host(FlexibleStagePage(project: r.project, model: m, onLeave: { _ in }, onAbout: {}, onExit: {}), size: size)
+            // ★ RE-PINNED (B9, U1): the page draws the one top-left block where the Exit row was — hosted with an app model (a
+            // scratch library), as the workspace mounts it, so the top line measures against the block he sees
+            let dir = FileManager.default.temporaryDirectory.appendingPathComponent("r7-screen-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+            let app = AppModel(materialsPath: "/no/such/materials.json", store: ProjectStore(rootDir: dir))
+            let h = host(FlexibleStagePage(project: r.project, model: m, onLeave: { _ in }, onAbout: {}, appModel: app, onBack: {},
+                                           onExit: {}), size: size)
             pump(2.5)
             let page = h.frames.all["page"] ?? .zero
             let cap = try XCTUnwrap(h.frames.all["capsule"], "the capsule").offsetBy(dx: -page.minX, dy: -page.minY)

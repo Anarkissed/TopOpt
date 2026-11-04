@@ -50,6 +50,12 @@ public struct FlexibleStagePage: View {
     /// ★ P4 (H62): "Change lattice type…" from this page (nil: the row does nothing).
     let onChangeType: (() -> Void)?
     let onAbout: () -> Void
+    /// ★ B9 (U1): the app model, for the one top-left block (nil: a page hosted alone in a test — undo and redo only).
+    let appModel: AppModel?
+    /// ★ B9: where the top-left block's ‹ goes (the workspace's Back), after the page's leave check. nil: Save's leave.
+    let onBack: (() -> Void)?
+    /// ★ B9: the stage row's Print plan — the main stage's Print plan page, after the page's leave check (nil: no way there).
+    let onPrintPlan: (() -> Void)?
 
     // the overlay mesh and its per-vertex channels, rebuilt only when their inputs change
     @State private var overlay: FlexibleOverlayMesh?
@@ -102,6 +108,9 @@ public struct FlexibleStagePage: View {
     /// (FlexibleStageModel.openedSnapshot) — never re-taken from the settings he may have edited.
     @State private var opened: FlexibleStageSettings?
     @State private var openedSettled = false
+    /// ★ B9 (R6's foot, Cancel): the project's whole edit slice as the page settled open — Cancel undoes back to it (the
+    /// Squeeze is written back to the Topology load it came from, so the Flexible settings alone would not put it back).
+    @State private var openedEdit: EditSnapshot?
     /// ★ ROUND 5 (S2): the overlay's edge (the 3D sim's grid while its field moves the part), the
     /// field's mesh displacements (cached per overlay and field), and the group that plays.
     @State private var overlayEdge: Double?
@@ -138,8 +147,10 @@ public struct FlexibleStagePage: View {
     /// ★ BATCH B: over the main page's shared model (FlexibleMainStage.model(for:)).
     /// ★ R7-D1 (H36): `onLeave` / `onAbout` — the capsule's hops (every existing construction compiles unchanged).
     /// ★ P5 (H60): `onEditFaces` — Edit faces from this page (the capsule's menu row and its ✂), after Save & Exit's own check.
+    /// ★ B9 (U1): `appModel` / `onBack` — the one top-left block in place of the Exit row.
     public init(project: ProjectModel, model: FlexibleStageModel, onLeave: @escaping (WorkspaceStage) -> Void = { _ in },
                 onAbout: @escaping () -> Void = {}, onEditFaces: (() -> Void)? = nil, onChangeType: (() -> Void)? = nil,
+                appModel: AppModel? = nil, onBack: (() -> Void)? = nil, onPrintPlan: (() -> Void)? = nil,
                 onExit: @escaping () -> Void) {
         self.project = project
         self.model = model
@@ -147,6 +158,9 @@ public struct FlexibleStagePage: View {
         self.onAbout = onAbout
         self.onEditFaces = onEditFaces
         self.onChangeType = onChangeType
+        self.appModel = appModel
+        self.onBack = onBack
+        self.onPrintPlan = onPrintPlan
         self.onExit = onExit
     }
     /// Test control only (R7-D1): the top line's band from the Exit row alone (it lands on the capsule at 11" portrait).
@@ -160,6 +174,9 @@ public struct FlexibleStagePage: View {
         self.onAbout = {}
         self.onEditFaces = nil
         self.onChangeType = nil
+        self.appModel = nil
+        self.onBack = nil
+        self.onPrintPlan = nil
         self.onExit = onExit
     }
 
@@ -274,17 +291,19 @@ public struct FlexibleStagePage: View {
             ZStack {
                 DS.Color.background.color.ignoresSafeArea()
                 stage
-                exitButton
+                topLeft   // ★ B9 (U1): the one top-left block where the Exit row was
                 capsule   // ★ R7-D1: A2's capsule, the main page's own, with Squish lit
                 notice(in: geo.size)
-                FlexibleSettingsPanel(model: model, padTarget: $padTarget, minimized: $panelMinimized)
+                // ★ B9 (U1, B2's rule for every left panel): the panel hangs from under the stage row and hugs its rows; its
+                // foot is Cancel │ Save
+                FlexibleSettingsPanel(model: model, padTarget: $padTarget, minimized: $panelMinimized, foot: footActions)
                     .background(GeometryReader { g in
                         Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["panel": g.frame(in: .global)])
                     }.allowsHitTesting(false))
-                    .frame(maxHeight: panelMaxHeight(geo.size), alignment: .bottom)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .frame(maxHeight: max(0, geo.size.height - panelTop(geo.size) - PageChrome.edge), alignment: .top)
+                    .padding(.top, panelTop(geo.size))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .padding(.leading, PageChrome.edge)
-                    .padding(.bottom, PageChrome.edge)
                 FlexibleViewColumn(camera: camera, model: model)
                 player(in: geo.size)
                 // ★ THE LEGEND SITS ON THE TRAILING EDGE, VERTICALLY CENTRED (round 3, item 7:
@@ -340,6 +359,7 @@ public struct FlexibleStagePage: View {
             // (★ S VERIFICATION: as the page appeared while it is still opening)
             openedSettled = model.sceneState == .ready
             opened = openedSettled ? model.settings : appeared
+            if openedSettled { openedEdit = project.editSnapshot }   // ★ B9: what Cancel puts back
             rebuildOverlay()
             // the main page's pill opened Settings on a fix
             if let f = model.pendingFix { model.pendingFix = nil; present(f) }
@@ -350,7 +370,10 @@ public struct FlexibleStagePage: View {
         // ★ S VERIFICATION: the page's snapshot WITH the open's read of the main page's loads (an edit
         // he made while it opened stays a change)
         .onChange(of: model.sceneState == .ready) { ready in
-            if ready, !openedSettled, let o = opened { opened = model.openedSnapshot(appeared: o); openedSettled = true }
+            if ready, !openedSettled, let o = opened {
+                opened = model.openedSnapshot(appeared: o); openedSettled = true
+                openedEdit = project.editSnapshot   // ★ B9: what Cancel puts back
+            }
         }
         .onReceive(ticker) { _ in
             // ★ THE SQUISH (the player's loop): only the scale moves — the displacements and
@@ -780,36 +803,22 @@ public struct FlexibleStagePage: View {
 
     // MARK: chrome
 
-    private var exitButton: some View {
-        VStack {
-            HStack {
-                HStack {
-                    // ★ BATCH B (item 9.3): Exit consults the readiness — blocked ONLY by what truly
-                    // stops a lattice, and then it opens the fix instead of leaving
-                    let r = model.readiness
-                    // ★ ROUND 5 (S9): "Exit" until something differs from how the page opened (a value —
-                    // undoing back reads "Exit" again); "Save & Exit" after; "Fix 1 thing" while blocked
-                    let modified = FlexibleSettingsExit.modified(model.settings, since: opened)
-                    // ★ ROUND 7 (F, his answer: "Allow an *empty* setup after reset all."): nothing set to squish leaves
-                    let empty = model.isEmptySetup
-                    Button {
-                        leave(then: nil)   // ★ R7-D1: the ONE way off the page (Save & Exit's check first)
-                    } label: {
-                        Text(FlexibleSettingsExit.title(r, modified: modified, empty: empty))
-                            .dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
-                            .foregroundStyle(DS.Color.textPrimary.color)
-                            .padding(.vertical, 12).padding(.horizontal, DS.Space.xl5)
-                            .background(Capsule().fill((r.isReady || !modified || FlexibleSettingsExit.emptyLeaves(r, empty: empty) ? DS.Color.accent : DS.Color.warning).color))
-                    }
-                    .buttonStyle(.plain)
-                    .background(GeometryReader { g in
-                        // (and what it says, for the hosted test: "exitTitle:Save & Exit")
-                        Color.clear.preference(key: FlexibleKeepOutKey.self,
-                                               value: ["exitButton": g.frame(in: .global),
-                                                       "exitTitle:" + FlexibleSettingsExit.title(r, modified: modified, empty: empty): .zero])
-                    }.allowsHitTesting(false))
-                    .accessibilityIdentifier("flexible-exit")
-                    // the project's own snapshot history: every Flexible setting is undoable (S5)
+    /// ★ B9 (U1, design-system §4.1): THE ONE TOP-LEFT BLOCK — ‹ back · the part's name · material · undo · redo, in the place
+    /// it has on every stage. It replaces round 5's Exit row: Exit / Save & Exit is the panel foot's Save now, beside Cancel.
+    /// Back runs the page's leave check first (as the capsule's hops do). Its frame keeps the Exit row's key ("exitRow"): the
+    /// top line's band, the player and the panel keep clear of it as they did of the row. Without the app model (a page
+    /// hosted alone in a test) it is undo and redo alone, in the same place.
+    private var topLeft: some View {
+        Group {
+            if let appModel {
+                TopLeftBlock(model: appModel, projectID: project.id, name: project.name, material: project.material,
+                             process: project.process, back: { leave(then: onBack) },
+                             canUndo: project.canUndoNow, canRedo: project.canRedoNow,
+                             undo: { Self.history(undo: true, project: project, model: model) },
+                             redo: { Self.history(undo: false, project: project, model: model) })
+            } else {
+                // the project's own snapshot history: every Flexible setting is undoable (S5)
+                HStack(spacing: DS.Space.xs) {
                     ForEach([(true, "arrow.uturn.backward"), (false, "arrow.uturn.forward")], id: \.1) { undo, icon in
                         Button {
                             Self.history(undo: undo, project: project, model: model)
@@ -823,15 +832,68 @@ public struct FlexibleStagePage: View {
                         .accessibilityIdentifier(undo ? "flexible-undo" : "flexible-redo")
                     }
                 }
-                // ★ the WHOLE row (Exit, undo, redo) — the top line's band starts right of it
-                .background(GeometryReader { g in
-                    Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["exitRow": g.frame(in: .global)])
-                }.allowsHitTesting(false))
-                Spacer()
+                .padding(.top, TopLeftBlock.top).padding(.leading, TopLeftBlock.leading)
             }
-            Spacer()
         }
-        .padding(PageChrome.edge)
+        .background(GeometryReader { g in
+            // (and what Save's leave check would do, for the hosted tests: "exitTitle:Save & Exit")
+            Color.clear.preference(key: FlexibleKeepOutKey.self,
+                                   value: ["exitRow": g.frame(in: .global), "exitTitle:" + leaveTitle: .zero])
+        }.allowsHitTesting(false))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// ★ ROUND 5 (S9) + ★ BATCH B (item 9.3): what the leave check does now — "Exit" until something differs from how the page
+    /// opened (undoing back reads "Exit" again), "Save & Exit" after, "Fix 1 thing" while a change is blocked (★ ROUND 7 (F):
+    /// an empty setup after Reset all leaves). The foot's Save runs it whatever it says; the fix words show as its chip.
+    private var leaveTitle: String {
+        FlexibleSettingsExit.title(model.readiness, modified: FlexibleSettingsExit.modified(model.settings, since: opened),
+                                   empty: model.isEmptySetup)
+    }
+
+    /// ★ B9: the panel foot's two ways off the page.
+    private var footActions: FlexibleSquishFoot.Actions {
+        let t = leaveTitle
+        let blocked = t != FlexibleSettingsExit.exit && t != FlexibleSettingsExit.saveAndExit
+        return .init(save: { leave(then: nil) }, cancel: { cancel() }, fix: blocked ? t : nil)
+    }
+
+    /// Test control only (B9): Cancel leaves as it is — nothing put back (the red run of the Cancel test).
+    @MainActor static var controlCancelKeeps = false
+
+    /// ★ B9 (R6's foot): CANCEL — what changed on this page is put back, and the page leaves with nothing to rebuild. The
+    /// project's own history steps back to the edit slice the page settled open on (`openedEdit`): the Squeeze lives in the
+    /// Topology load it came from, and a new edges group cut the faces, so the Flexible settings alone would not put them back.
+    /// Redo brings it all back. Nothing changed: it leaves as Exit always did.
+    private func cancel() {
+        let modified = FlexibleSettingsExit.modified(model.settings, since: opened)
+        if modified, !Self.controlCancelKeeps, let target = openedEdit {
+            project.sealUndoStep()
+            var steps = 0
+            while project.editSnapshot != target, project.canUndoNow, steps < 60 {
+                Self.history(undo: true, project: project, model: model)
+                steps += 1
+            }
+            // more steps than the history keeps (50): what is left is saved as it stands, as Save would
+            if project.editSnapshot != target { model.save() } else { model.exitUnchanged = true }
+        } else if modified {
+            model.save()
+        } else {
+            model.exitUnchanged = true
+        }
+        onExit()
+    }
+
+    /// ★ B9 (U1): the panel's top — under the stage row (PageChrome.panelTop), and below the top line or the fix pop-up while
+    /// either lies over the panel's column (11" portrait puts the top line on its own row under the capsule).
+    private func panelTop(_ size: CGSize) -> CGFloat {
+        let columnRight = PageChrome.edge + FlexibleSettingsPanel.width
+        var band = noticeBand(size)
+        if model.toast != nil { band.size.height += Self.toastRowHeight }
+        var over = [band]
+        if fixShown != nil, let p = frames["popup"], let page = frames["page"] { over.append(p.offsetBy(dx: -page.minX, dy: -page.minY)) }
+        let below = over.filter { $0.minX < columnRight && $0.maxY > PageChrome.panelTop - DS.Space.m }.map { $0.maxY + DS.Space.m }
+        return ([PageChrome.panelTop] + below).max() ?? PageChrome.panelTop
     }
 
     /// ★ ROUND 7, R7-D1 (his pick 1: A2's capsule on BOTH pages): "● Flexible ⌄ | Lattice | Squish" under the Exit row, at
@@ -841,7 +903,8 @@ public struct FlexibleStagePage: View {
                              go: { dest in leave(then: { onLeave(dest) }) }, lattice: { leave(then: nil) }, squish: {},
                              about: onAbout, modified: FlexibleSettingsExit.modified(model.settings, since: opened),
                              editFaces: Self.editFacesHop(onEditFaces: onEditFaces, leave: { leave(then: $0) }),
-                             changeType: Self.changeTypeHop(onChangeType: onChangeType, leave: { leave(then: $0) }))
+                             changeType: Self.changeTypeHop(onChangeType: onChangeType, leave: { leave(then: $0) }),
+                             printPlan: onPrintPlan.map { go in { leave(then: go) } })   // ★ B9: after the page's own check
             .padding(.leading, FlexibleChromeLayout.capsuleLeft)
             .padding(.top, FlexibleChromeLayout.capsuleTop)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -873,18 +936,6 @@ public struct FlexibleStagePage: View {
     /// The toast line's height under the top line (the pop-up goes below it).
     static let toastRowHeight: CGFloat = 30
 
-    /// ★ THE PANEL MAY GROW UP TO THE TOP CHROME (verification of D1; FlexibleSettingsPanel.maxHeight):
-    /// the Exit row, the top line and its toast, the fix pop-up while it is up.
-    private func panelMaxHeight(_ size: CGSize) -> CGFloat {
-        var band = noticeBand(size)
-        if model.toast != nil { band.size.height += Self.toastRowHeight }
-        var top = [exitRowLocal(), band] + (capsuleLocal().map { [$0] } ?? [])   // ★ R7-D1: the capsule
-        if fixShown != nil, let p = frames["popup"], let page = frames["page"] {
-            top.append(p.offsetBy(dx: -page.minX, dy: -page.minY))
-        }
-        return FlexibleSettingsPanel.maxHeight(viewport: size, topChrome: top)
-    }
-
     /// The Exit row in the page's frame (measured; a nominal row before the first layout).
     private func exitRowLocal() -> CGRect {
         guard let row = frames["exitRow"] else {
@@ -898,9 +949,21 @@ public struct FlexibleStagePage: View {
     /// or its own row under Exit when that is too narrow (11" portrait). ★ R7-D1: never onto the capsule — beside the Exit
     /// row when it misses it, else its own row below the capsule.
     private func noticeBand(_ size: CGSize) -> CGRect {
-        FlexibleLegendPlacement.noticeBand(viewport: size, exitRow: exitRowLocal(),
-                                           capsule: Self.controlExitRowOnlyKeepOut ? nil : (capsuleLocal() ?? Self.nominalCapsule))
+        let band = FlexibleLegendPlacement.noticeBand(viewport: size, exitRow: exitRowLocal(),
+                                                      capsule: Self.controlExitRowOnlyKeepOut ? nil : (capsuleLocal() ?? Self.nominalCapsule))
+        // ★ B9 (U1): on its own row under the stage row, the top line starts right of the panel's column — the panel hangs from
+        // under the stage row, and a line across its column pushed it 52 pt down (11" landscape: a face's Stamp card no longer
+        // fitted the scroll). Too narrow there (portrait): the row as before, and the panel starts under it.
+        let column = PageChrome.edge + FlexibleSettingsPanel.width + FlexibleLegendPlacement.gap
+        let right = size.width - PageChrome.gizmoClearance
+        guard !Self.controlNoticeAcrossPanel, band.minX < column, band.minY > exitRowLocal().maxY,
+              right - column >= Self.sideNoticeMinWidth else { return band }
+        return CGRect(x: column, y: band.minY, width: right - column, height: band.height)
     }
+    /// ★ B9: the narrowest top line beside the panel's column (its words are one short line: "Ready · nothing changed yet").
+    static let sideNoticeMinWidth: CGFloat = 300
+    /// Test control only (B9): the top line's own row runs across the panel's column (the panel then starts under it).
+    @MainActor static var controlNoticeAcrossPanel = false
 
     /// ★ R7-D1: the capsule in the page's frame (measured), nil before the first layout.
     private func capsuleLocal() -> CGRect? {

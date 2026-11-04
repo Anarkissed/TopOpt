@@ -67,7 +67,17 @@ public struct FlexibleSelectionsList: View {
     private var groups: [SelectionGroup] { project.selection.groups }
     private var picked: UUID? { FlexibleFacePick.validated(main.facePick, project: project).scope.groupID }
 
+    /// ★ B9 (app-map §3.7): the main stage's left panel is the page's — the Selections on Setup, the plan's panel on the Print
+    /// plan (H25's mount line is unchanged).
     public var body: some View {
+        if main.page == .plan, let m = main.model {
+            FlexiblePrintPlanPanel(main: main, model: m)
+        } else {
+            selections
+        }
+    }
+
+    private var selections: some View {
         VStack(alignment: .leading, spacing: 0) {
             // ★ U21 (DEL-CONFIRM): a trash's ask takes the header's line — the same height, so nothing moves and [Cancel] stays
             // exactly where the trash was

@@ -233,6 +233,11 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
     /// Auto and Manual: never part of the lattice's key (`designInputs`), never in a job (CORE LIST: per-layer nozzle temperature
     /// in the job/export) — Auto's job bytes are unchanged. OPTIONAL, omitted when nil (old projects encode byte-identical).
     public var nozzleGrade: FlexibleNozzleGrade?
+    /// ★ B9 (#362, the Print plan — app-map §3.7, round 2 J-1…J-8): the plans (cuts, a joint per seam, add-ons, built state),
+    /// the solid areas' rigid plastic and Skin and rim. Never part of the lattice's key (`designInputs`) and never in today's
+    /// job (the per-plan rebuild is engine work, E5). OPTIONAL, omitted when nil: an old project reads as no plan (a fresh Plan A
+    /// from the app's cut) and encodes byte-identical.
+    public var printPlans: FlexiblePrintPlans?
 
     /// ★ ROUND 7 · U21 (batch A): a brand-new Flexible setup — nothing read in from the Topology page (his Img7).
     public static func newSetup(materialID: String? = nil) -> FlexibleStageSettings {
@@ -264,6 +269,7 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
         c.readsMainPageGroups = nil   // ★ U21 (batch A): how the open reads the main page, not an input of the lattice
         c.manual = c.manual?.on == true || Self.controlManualOffInDesignInputs ? c.manual : nil   // ★ MANUAL (M1): Auto keys as before
         c.nozzleGrade = nil   // ★ NOZZLE GRADE: the display sim's per-layer temperature — never the lattice's key, never a job
+        c.printPlans = nil    // ★ B9: the Print plan — how the part prints in pieces, never the lattice's key (E5 rebuilds per plan)
         c.links = Self.controlLinksInDesignInputs ? c.links : nil   // ★ U21 (batch I): a link tells the sim what holds the lattice — never the lattice's key
         // ★ R7-E2 (AP9): an edge or corner press (a flat prism) is built into the lattice now — core builds its stack, designs it,
         // grades the lattice along its arrow — so its every edit re-keys the lattice. A press that is never sent (AP1's tilted

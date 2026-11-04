@@ -31,8 +31,9 @@ public enum FlexibleChromeLayout {
     public static let capsuleLeft: CGFloat = DS.Space.xl4
     public static let capsuleHeight: CGFloat = 44
     /// The capsule's widest ("● Flexible ⌄ | Lattice | Squish" is ~263 pt; ★ P5 (R9: "capsule ~320 pt keeping the 12 pt gizmo
-    /// check"): with its ✂ after a second divider ~312 pt).
-    public static let capsuleMaxWidth: CGFloat = 320
+    /// check"): with its ✂ after a second divider ~312 pt). ★ B9: "● Flexible ⌄ │ Setup │ Squish │ Print plan │ ✂" is ~394 pt —
+    /// at 11" portrait (834 pt) it ends at 24 + 400 = 424, far left of the gizmo's 12 pt check (the gizmo starts near 600).
+    public static let capsuleMaxWidth: CGFloat = 400
     /// The page segments inside it: 36 tall, 4 pt in.
     public static let segmentHeight: CGFloat = 36
     public static let segmentInset: CGFloat = 4
