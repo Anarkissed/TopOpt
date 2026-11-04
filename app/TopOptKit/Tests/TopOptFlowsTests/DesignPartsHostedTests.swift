@@ -56,7 +56,8 @@ final class DesignPartsHostedTests: XCTestCase {
                 VStack(alignment: .trailing, spacing: 12) {
                     DSLegend("Stress", low: "low", high: "high", ramp: DSLegend<EmptyView>.stressRamp, key: "galLegend",
                              toggleReading: { taps.all.append("read") })
-                    DSFolderTabs([.init(id: "part", title: "Part"), .init(id: "g1", title: "Group 1", colour: DS.Color.groupPalette[1], badge: 9)],
+                    DSFolderTabs([.init(id: "part", title: "Part"), .init(id: "g1", title: "Group 1", colour: DS.Color.groupPalette[1], badge: 9),
+                                  .init(id: "long", title: "WWWWWWWWWWWW", colour: DS.Color.groupPalette[2])],
                                  selected: "g1", key: "galTabs", pick: { taps.all.append("tab-\($0)") }, add: { taps.all.append("new") })
                         .frame(height: 220)
                     HStack {
@@ -135,6 +136,8 @@ final class DesignPartsHostedTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(h.frames.all["galTabs-g1"]).width, DSParts.tabsWidth - 12, accuracy: 0.5, "§4.17")
         XCTAssertTrue(try XCTUnwrap(h.frames.all["galTabs-g1"]).contains(try XCTUnwrap(h.frames.all["galTabs-g1-title"])),
                       "a tab's title frame (#362), inside its tab")
+        XCTAssertGreaterThan(try XCTUnwrap(h.frames.all["galTabs-long-title"]).height, 3 * 10.5,
+                             "★ a long name takes the lines it needs (his R7-S rule: never cut)")
         // Touch: every control 44 pt
         for k in ["galHeader", "gal-eye0", "gal-trash0", "gal-switch", "gal-row2-fix", "galFix", "galLegendRead", "galSectionAction",
                   "galTabs-part", "galTabs-new"] {
