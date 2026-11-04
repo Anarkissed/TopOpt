@@ -242,7 +242,24 @@ struct FlexiblePrintPlanPanel: View {
     private var piecesSection: some View {
         let pieces = FlexiblePrintPlanRules.pieces(plans, tpuName: tpuName)
         return VStack(alignment: .leading, spacing: 0) {
-            overline(FlexiblePrintPlanCopy.pieces, count: pieces.count)
+            HStack(spacing: 0) {
+                overline(FlexiblePrintPlanCopy.pieces, count: pieces.count)
+                Spacer(minLength: 0)
+                // ★ B9 slice 3 (round 3: six ways): + Cut ⌄ — with two materials, as the mockup's
+                if plans.rigidMaterial != nil {
+                    Menu {
+                        ForEach(FlexibleCutWay.allCases, id: \.self) { w in
+                            Button { main.startCut(w) } label: { Text(w.title); Text(w.sub) }
+                        }
+                    } label: {
+                        Text("+ Cut").font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.accent.color)
+                            .padding(.horizontal, DS.Space.l).frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                    }
+                    .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain).fixedSize()
+                    .background(publish("planCutMenu"))
+                    .accessibilityIdentifier("flexible-plan-cut-menu")
+                }
+            }
             ForEach(pieces, id: \.key) { pc in
                 HStack(spacing: DS.Space.s) {
                     RoundedRectangle(cornerRadius: 3).fill(pc.tpu ? FlexibleStageStyle.accent : DS.Color.textTertiary.color)
@@ -276,6 +293,29 @@ struct FlexiblePrintPlanPanel: View {
                 .frame(minHeight: 48)
                 .padding(.horizontal, DS.Space.l)
                 .accessibilityIdentifier("flexible-plan-piece-\(pc.key)")
+            }
+            // ★ B9 slice 3: the cuts he placed — kept, their pieces from the engine's cut; Join undoes one
+            ForEach(Array((plans.plan.cuts ?? []).enumerated()), id: \.offset) { i, c in
+                HStack(spacing: DS.Space.s) {
+                    Image(systemName: "scissors").font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.accentCyan.color)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(FlexiblePlanCutCopy.row(c)).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                            .lineLimit(1)
+                        Text(FlexiblePlanCutCopy.rowSub).font(.system(size: 12)).foregroundStyle(DS.Color.textTertiary.color).lineLimit(1)
+                    }
+                    Spacer(minLength: DS.Space.s)
+                    Button { main.joinCut(i) } label: {
+                        Text("Join").font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.accent.color)
+                            .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .background(publish("planCutJoin-\(i)"))
+                    .accessibilityLabel("Join: undo this cut")
+                    .accessibilityIdentifier("flexible-plan-cut-join-\(i)")
+                }
+                .frame(minHeight: 48)
+                .padding(.horizontal, DS.Space.l)
+                .background(publish("planCutRow-\(i)"))
             }
             line(plans.rigidMaterial == nil ? FlexiblePrintPlanCopy.oneMaterial : FlexiblePrintPlanCopy.appCut)
             if plans.rigidMaterial == nil {
@@ -539,16 +579,24 @@ struct FlexiblePlanBuildButton: View {
 
 // MARK: - the page-wide parts: Reset's confirm (top middle, over a dim)
 
-/// Reset's clear-all confirm (U13: its yes ≥ 300 pt from the Reset button), over the whole page while asked.
+/// The Print plan's page-wide parts: the cut layer (its plane card and bar; the camera turns with them) and Reset's
+/// clear-all confirm (U13: its yes ≥ 300 pt from the Reset button), over the whole page while asked.
 public struct FlexiblePrintPlanOverlays: View {
     @ObservedObject var main: FlexibleMainStage
-    public init(main: FlexibleMainStage) { self.main = main }
+    @ObservedObject var project: ProjectModel
+    let camera: OrbitCameraModel?
+    public init(main: FlexibleMainStage, project: ProjectModel, camera: OrbitCameraModel?) {
+        self.main = main; self.project = project; self.camera = camera
+    }
 
     public var body: some View {
-        if main.page == .plan, main.planResetAsk {
-            ClearAllConfirm(question: FlexiblePrintPlanCopy.resetAsk, detail: FlexiblePrintPlanCopy.resetDetail,
-                            keep: { main.planResetAsk = false }, clear: { main.clearPlans() })
-                .transition(.opacity)
+        ZStack {
+            if main.page == .plan { FlexiblePlanCutLayer(main: main, project: project, camera: camera) }
+            if main.page == .plan, main.planResetAsk {
+                ClearAllConfirm(question: FlexiblePrintPlanCopy.resetAsk, detail: FlexiblePrintPlanCopy.resetDetail,
+                                keep: { main.planResetAsk = false }, clear: { main.clearPlans() })
+                    .transition(.opacity)
+            }
         }
     }
 }

@@ -38,6 +38,7 @@ final class PrintPlanHostedTests: XCTestCase {
         @ObservedObject var main: FlexibleMainStage
         @ObservedObject var project: ProjectModel
         let app: AppModel
+        var camera: OrbitCameraModel? = nil
         @State private var collapsed = false
         var body: some View {
             ZStack {
@@ -48,16 +49,25 @@ final class PrintPlanHostedTests: XCTestCase {
                 FlexibleCornerPair(main: main, project: project, app: app, openSquish: {}, changeGravity: {})
                     .padding(PageChrome.edge)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                FlexiblePrintPlanOverlays(main: main)
+                FlexiblePrintPlanOverlays(main: main, project: project, camera: camera)
             }
         }
     }
 
-    func planPage() throws -> (SquishHost, FlexibleMainStage, FlexibleStageModel) {
+    func planPage(camera: OrbitCameraModel? = nil) throws -> (SquishHost, FlexibleMainStage, FlexibleStageModel) {
+        try planPageFor(self, camera: camera)
+    }
+
+    /// The Print plan page for `test` (PlanCutHostedTests hosts it too).
+    func planPageFor(_ test: XCTestCase, camera: OrbitCameraModel? = nil) throws -> (SquishHost, FlexibleMainStage, FlexibleStageModel) {
         let stage = FlexibleMainStage()
-        let (r, m) = try SquishHost.pad(self, edges: false, stage: stage)
+        let (r, m) = try SquishHost.pad(test, edges: false, stage: stage)
         stage.page = .plan
-        let h = SquishHost(PlanPage(main: stage, project: r.project, app: try appModel()), size: Self.size, test: self)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("print-plan-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        test.addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        let app = AppModel(materialsPath: "/no/such/materials.json", store: ProjectStore(rootDir: dir))
+        let h = SquishHost(PlanPage(main: stage, project: r.project, app: app, camera: camera), size: Self.size, test: test)
         SquishHost.pump(1.5)
         return (h, stage, m)
     }

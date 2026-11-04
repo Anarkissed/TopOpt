@@ -1569,7 +1569,7 @@ public struct WorkspacePlaceholder: View {
                     .zIndex(49)
             }
             if project.lattice.flexible != nil { FlexibleChangeTypeMount(main: flexibleMain, project: project, app: model, loseAll: { showFlexiblePage = false; deleteLatticeForMode() }, keepRegions: { showFlexiblePage = false; keepLatticeRegions() }).zIndex(49) }   // Flexible (PR #362) H62: "Change lattice type…" on the Flexible stage asks with #354's own card (its mount needs a type a Flexible project never has); Continue is today's delete with its one-step Undo
-            if flexibleMain.owns(project, stage), !showFlexiblePage, !editFaces.isEditing { FlexiblePrintPlanOverlays(main: flexibleMain).zIndex(49) }   // Flexible (PR #362) B9: the Print plan's Reset confirm, top middle over the page (U13)
+            if flexibleMain.owns(project, stage), !showFlexiblePage, !editFaces.isEditing { FlexiblePrintPlanOverlays(main: flexibleMain, project: project, camera: cameraModel).zIndex(49) }   // Flexible (PR #362) B9: the Print plan's cut bar and plane card (the camera turns to the plane, U19) and its Reset confirm, top middle over the page (U13)
             })   // Flexible (PR #362) H58
             AnyView(Group {   // Flexible (PR #362) H58: the body in heap-boxed chunks; the 47 KB body value was copied on the iPad main thread's stack until it overflowed (crash 2026-10-25)
             if showLatticeWizard {
