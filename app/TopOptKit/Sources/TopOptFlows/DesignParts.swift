@@ -785,6 +785,8 @@ public struct DSFolderTabs: View {
             self.id = id; self.title = title; self.colour = colour; self.badge = badge
         }
     }
+    /// RED CONTROL (#362's FlexibleR7SettingsHostedTests): a title on one line, cut — the test proves it catches a cut name.
+    @MainActor public static var controlOneLineTitle = false
     let tabs: [Tab]
     let selected: String?
     let key: String
@@ -805,7 +807,10 @@ public struct DSFolderTabs: View {
                                     Text("\(b)").font(.system(size: 11, weight: .bold)).monospacedDigit().foregroundStyle(.white)
                                 }
                             }
-                        Text(t.title).font(.system(size: 10.5)).lineLimit(2).multilineTextAlignment(.center)
+                        // ★ a name is drawn whole, never cut (his R7-S rule, #362 11-04 04:59Z): as many lines as it needs
+                        Text(t.title).font(.system(size: 10.5)).multilineTextAlignment(.center)
+                            .lineLimit(Self.controlOneLineTitle ? 1 : nil)
+                            .fixedSize(horizontal: false, vertical: !Self.controlOneLineTitle)
                             .background(DSParts.publish("\(key)-\(t.id)-title"))   // (#362: a whole name is checked by its frame)
                     }
                     .foregroundStyle((t.id == selected ? DS.Color.textPrimary : DS.Color.textSecondary).color)
