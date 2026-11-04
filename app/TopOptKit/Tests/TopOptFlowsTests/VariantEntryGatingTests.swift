@@ -94,11 +94,9 @@ final class VariantEntryGatingTests: XCTestCase {
     /// the green path is asserted first and explicitly.
     func testAHealthyWorkerRunEnablesBothEntries() {
         let f = healthy()
-        XCTAssertTrue(VariantEntry.smoothing(f).enabled,
-                      "blocks: \(VariantEntry.smoothingBlocks(f))")
+        // ★ RE-PINNED (UI-Notes B4, plan.md §B4: "The Smooth page is deleted"; core finishes every result, E1): the Lattice entry alone
         XCTAssertTrue(VariantEntry.lattice(f).enabled,
                       "blocks: \(VariantEntry.latticeBlocks(f))")
-        XCTAssertNil(VariantEntry.smoothing(f).reason)
         XCTAssertNil(VariantEntry.lattice(f).reason)
     }
 
@@ -117,19 +115,13 @@ final class VariantEntryGatingTests: XCTestCase {
     /// configuration. Neither has any claim on the Mac.
     func testAStreamedVariantIsFullyUsableWhileTheLadderIsStillRunning() {
         let mid = healthy(runInFlight: true)
-        XCTAssertTrue(VariantEntry.smoothing(mid).enabled,
-                      "smoothing runs on THIS device and must not wait for the "
-                      + "Mac: \(VariantEntry.smoothingBlocks(mid))")
         XCTAssertTrue(VariantEntry.lattice(mid).enabled,
                       "lattice SETUP is zero compute and must not wait for the "
                       + "Mac: \(VariantEntry.latticeBlocks(mid))")
-        XCTAssertNil(VariantEntry.smoothing(mid).reason)
         XCTAssertNil(VariantEntry.lattice(mid).reason)
 
         // …and the verdicts are IDENTICAL to the idle case, so "a run is going" is
         // not quietly changing some other reason either.
-        XCTAssertEqual(VariantEntry.smoothingBlocks(mid),
-                       VariantEntry.smoothingBlocks(healthy()))
         XCTAssertEqual(VariantEntry.latticeBlocks(mid),
                        VariantEntry.latticeBlocks(healthy()))
     }
@@ -170,36 +162,6 @@ final class VariantEntryGatingTests: XCTestCase {
         let mustSay: [String]
     }
 
-    // "a job is already running" is NOT in either table any more (task
-    // 2026-08-03-variant-postprocessing-concurrency). It used to head both, and
-    // that is what made a four-hour ladder freeze every variant it had already
-    // produced. The replacement is STRONGER, not absent: two explicit tests below
-    // assert both entries stay USABLE mid-run, and that the lattice ACTION — the
-    // only part that needs the Mac — queues with its own sentence.
-    private var smoothingCases: [Case] {
-        [
-            Case(name: "the rung produced no geometry",
-                 facts: healthy(hasGeometry: false),
-                 mustSay: ["no geometry"]),
-            Case(name: "the run generated a lattice (pipeline order)",
-                 facts: healthy(latticed: true),
-                 mustSay: ["lattice", "struts"]),
-            Case(name: "the model file is gone",
-                 facts: healthy(modelPath: nil),
-                 mustSay: ["model file is missing"]),
-            Case(name: "the run was solved ON DEVICE",
-                 facts: healthy(machine: .thisDevice, retainedJob: Data(),
-                                retainedDesign: Data()),
-                 mustSay: ["on this device", "Mac worker"]),
-            Case(name: "the run predates job/design retention",
-                 facts: healthy(machine: .worker(name: "Mac mini"),
-                                retainedJob: Data(), retainedDesign: Data()),
-                 mustSay: ["before results kept"]),
-            Case(name: "the retained job declared no load case (self-weight)",
-                 facts: healthy(retainedJob: job(selfWeight: true)),
-                 mustSay: ["self-weight"]),
-        ]
-    }
 
     private var latticeCases: [Case] {
         [
@@ -244,25 +206,7 @@ final class VariantEntryGatingTests: XCTestCase {
         ]
     }
 
-    func testEveryBlockingPreconditionDisablesSmoothingWithItsOwnReason() throws {
-        var seen = Set<String>()
-        for c in smoothingCases {
-            let v = VariantEntry.smoothing(c.facts)
-            XCTAssertFalse(v.enabled, "AJ2: \(c.name) must DISABLE the Smooth entry")
-            let reason = try XCTUnwrap(v.reason, "AJ2: \(c.name) must carry a reason")
-            XCTAssertFalse(reason.isEmpty)
-            for word in c.mustSay {
-                XCTAssertTrue(reason.localizedCaseInsensitiveContains(word),
-                              "AJ2: \(c.name)'s reason must say “\(word)” — got: \(reason)")
-            }
-            XCTAssertFalse(reason.localizedCaseInsensitiveContains("not available"),
-                           "AJ2: a generic message does not satisfy this bar")
-            XCTAssertTrue(seen.insert(reason).inserted,
-                          "AJ2: \(c.name) must have its OWN reason, not one shared "
-                          + "with another condition")
-            XCTAssertEqual(v.accessibilityLabel, "Smooth, unavailable: \(reason)")
-        }
-    }
+    // ★ RE-PINNED (UI-Notes B4, plan.md §B4: "The Smooth page is deleted"; core finishes every result, E1): the Smooth entry's reasons went with it.
 
     func testEveryBlockingPreconditionDisablesLatticeWithItsOwnReason() throws {
         var seen = Set<String>()
@@ -290,11 +234,7 @@ final class VariantEntryGatingTests: XCTestCase {
             .jobDocumentNotRecorded, .noGeometry, .designBoxRun, .noWorkerSelected,
             .modelFileMissing,
         ]
-        let smooth: [SmoothUnavailable] = [
-            .noRetainedJob, .computedOnDevice, .selfWeightRun, .alreadyLatticed,
-            .noGeometry, .modelFileMissing,
-        ]
-        let all = relattice.map(\.reason) + smooth.map(\.reason)
+        let all = relattice.map(\.reason)   // ★ RE-PINNED (UI-Notes B4, plan.md §B4: "The Smooth page is deleted"; core finishes every result, E1)
         XCTAssertEqual(Set(all).count, all.count,
                        "AJ2: no two conditions may share a sentence")
         for r in all {
@@ -325,14 +265,8 @@ final class VariantEntryGatingTests: XCTestCase {
         let ws = try String(contentsOf: sourceURL("WorkspacePlaceholder.swift"),
                             encoding: .utf8)
 
-        let smooth = try XCTUnwrap(ws.range(of: "private func openSmoothingPage"))
-        let smoothBody = String(ws[smooth.lowerBound...].prefix(700))
-        XCTAssertTrue(smoothBody.contains("smoothEntry(variantIndex)"),
-                      "AJ2: the smoothing opener must consult the gate")
-        XCTAssertTrue(smoothBody.contains("guard gate.enabled else"),
-                      "AJ2: …and RETURN rather than open a page that refuses")
-        XCTAssertTrue(smoothBody.contains("gate.reason"),
-                      "AJ2: …stating which condition blocked it")
+        // ★ RE-PINNED (UI-Notes B4, plan.md §B4: "The Smooth page is deleted"; core finishes every result, E1): no Smooth opener
+        XCTAssertFalse(ws.contains("private func openSmoothingPage"))
 
         let lattice = try XCTUnwrap(ws.range(of: "private func openLatticePage"))
         let latticeBody = String(ws[lattice.lowerBound...].prefix(900))
@@ -351,7 +285,7 @@ final class VariantEntryGatingTests: XCTestCase {
 
         let ws = try String(contentsOf: sourceURL("WorkspacePlaceholder.swift"),
                             encoding: .utf8)
-        XCTAssertTrue(ws.contains("smoothEntry: { smoothEntry($0) }"))
+        XCTAssertFalse(ws.contains("smoothEntry:"), "★ RE-PINNED (UI-Notes B4, plan.md §B4: \"The Smooth page is deleted\"; core finishes every result, E1)")
         XCTAssertTrue(ws.contains("latticeEntry: { latticeEntry($0) }"))
     }
 
@@ -647,12 +581,9 @@ final class VariantEntryGatingTests: XCTestCase {
     // MARK: - AJ7 · determinism
 
     func testTheGateIsDeterministic() {
-        for c in smoothingCases + latticeCases {
-            let a = (VariantEntry.smoothing(c.facts), VariantEntry.lattice(c.facts))
-            for _ in 0..<20 {
-                XCTAssertEqual(VariantEntry.smoothing(c.facts), a.0)
-                XCTAssertEqual(VariantEntry.lattice(c.facts), a.1)
-            }
+        for c in latticeCases {   // ★ RE-PINNED (UI-Notes B4, plan.md §B4: "The Smooth page is deleted"; core finishes every result, E1)
+            let a = VariantEntry.lattice(c.facts)
+            for _ in 0..<20 { XCTAssertEqual(VariantEntry.lattice(c.facts), a) }
         }
     }
 

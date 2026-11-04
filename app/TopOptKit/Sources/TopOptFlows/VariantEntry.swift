@@ -198,34 +198,7 @@ public enum VariantEntry {
         "the Mac is still solving this run — set the lattice up now; generating it "
         + "starts when the run finishes"
 
-    // MARK: smoothing
-
-    /// Why smoothing is blocked, or nil. The reasons are `SmoothUnavailable`'s own
-    /// — the page and the button say the same sentence because they read the same
-    /// enum, not because two strings were kept in step by hand.
-    public static func smoothingBlocks(_ f: VariantEntryFacts) -> [String] {
-        var out: [String] = []
-        // `f.runInFlight` is deliberately NOT a block here — see `runningReason`.
-        // Smoothing runs on THIS device, in-process; the ladder runs on the Mac.
-        // THE JOB DOCUMENT ALONE (task 2026-08-03-variant-postprocessing-fix).
-        // Smoothing re-certifies under the run's LOAD CASE; it never opens
-        // design.bin. Reading the both-halves `artifacts` here meant a run whose
-        // design container did not arrive — a run killed mid-ladder, a worker that
-        // served no design — reported "there's no load case to re-certify a smoothed
-        // shape under" while holding the load case. Two different artifacts, two
-        // different verdicts.
-        if let why = SmoothPageEntry.availability(
-            hasGeometry: f.hasGeometry, latticed: f.runGeneratedLattice,
-            retainedJob: f.retainedJobIfPresent, modelPath: f.modelPath,
-            solvedOnDevice: f.machine.isThisDevice) {
-            out.append(why.reason)
-        }
-        return out
-    }
-
-    public static func smoothing(_ f: VariantEntryFacts) -> VariantEntryVerdict {
-        verdict(label: "Smooth", blocks: smoothingBlocks(f))
-    }
+    // ★ B4: the Smooth entry gate went with the Smooth page (plan.md §B4).
 
     // MARK: lattice
 

@@ -122,7 +122,7 @@ final class ResultsRedesignTests: XCTestCase {
 
     /// Smooth is gone from the Topology capsule (his note 2026-10-27).
     func testTheSmoothPageIsGone() {
-        XCTAssertFalse(TopologyPage.shown(hasResults: true).contains(.smooth))
+        XCTAssertEqual(TopologyPage.allCases, [.setup, .results], "★ RE-PINNED (UI-Notes B4, plan.md §B4: \"The Smooth page is deleted\"; core finishes every result, E1)")
         XCTAssertTrue(TopologyPage.hiddenSegments(hasResults: true).contains(.tertiary))
     }
 }

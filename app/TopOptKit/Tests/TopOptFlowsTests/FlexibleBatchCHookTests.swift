@@ -64,7 +64,7 @@ final class FlexibleBatchCHookTests: XCTestCase {
         XCTAssertTrue(ws.contains("setLatticeProbe(at: model, world: world,"))
         XCTAssertTrue(ws.contains("!(showStrutPreview && strutScene != nil) {\n                    stressLegend"))
         XCTAssertTrue(ws.contains("latticeLayer: latticeLayerIsDrawn"))
-        XCTAssertTrue(ws.contains("private var fullScreenPageUp: Bool { showLatticePage || showSmoothingPage || showLatticeWizard || showFlexiblePage }"))
+        XCTAssertTrue(ws.contains("private var fullScreenPageUp: Bool { showLatticePage || showLatticeWizard || showFlexiblePage }"))   // ★ RE-PINNED (UI-Notes B4, plan.md §B4: "The Smooth page is deleted"; core finishes every result, E1), #362's OK 00:47Z
         XCTAssertTrue(ws.contains("\n                else if viewerMesh != nil, visible.wireframe, !visible.surfaceEditing {\n                    viewModeToggles"))
     }
 

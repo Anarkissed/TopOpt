@@ -14,7 +14,7 @@ final class EditFacesModeTests: XCTestCase {
 
     func testDoneReturnsToThePageItCameFrom() {
         let origins: [EditFacesOrigin] = [
-            .topology(.setup), .topology(.results), .topology(.smooth, smoothVariant: 2),
+            .topology(.setup), .topology(.results),   // ★ RE-PINNED (UI-Notes B4, plan.md §B4: "The Smooth page is deleted"; core finishes every result, E1)
             .lattice(.regions), .lattice(.cells), .host("flexible.squish"),
         ]
         for o in origins {

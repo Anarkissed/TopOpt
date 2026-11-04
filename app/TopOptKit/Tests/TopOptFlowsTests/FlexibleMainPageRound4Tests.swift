@@ -413,6 +413,7 @@ final class FlexibleMainPageRound4Tests: XCTestCase {
         // plus goToLattice ("Building…" on another stage goes to the Lattice stage only)
         XCTAssertTrue(ws.contains("FlexibleMainStatusPill(main: flexibleMain, open: { if stage != .lattice { goToStage(.lattice) }; showFlexiblePage = true }, goToLattice: { if stage != .lattice { goToStage(.lattice) } })"))
         // #354's octet Lattice run is untouched
-        XCTAssertTrue(ws.contains("private func requestLatticeRun() {\n        guard canLatticeThis else { return }"))
+        // ★ RE-PINNED (UI-Notes B3 slice 5a, 75379975 — #362's condition 1): the re-run card answers first, then the same gate
+        XCTAssertTrue(ws.contains("private func requestLatticeRun() {\n        guard pendingReplacement == nil else { return }   // ★ B3 (#362's condition 1): the re-run card is up — it answers first\n        guard canLatticeThis else { return }"))
     }
 }

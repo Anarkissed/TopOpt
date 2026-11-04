@@ -288,9 +288,7 @@ final class VariantRetentionTests: XCTestCase {
                 retainedDesign: project.relatticeArtifacts?.designBin,
                 runGeneratedLattice: false, modelPath: "/tmp/part.stl",
                 workerSelected: true, runInFlight: false)
-            XCTAssertTrue(VariantEntry.smoothing(facts).enabled,
-                          "AJ3: still smoothable after \(what) — "
-                          + "\(VariantEntry.smoothingBlocks(facts))")
+            // ★ RE-PINNED (UI-Notes B4, plan.md §B4: "The Smooth page is deleted"; core finishes every result, E1)
             XCTAssertTrue(VariantEntry.lattice(facts).enabled,
                           "AJ3: still latticeable after \(what) — "
                           + "\(VariantEntry.latticeBlocks(facts))")
