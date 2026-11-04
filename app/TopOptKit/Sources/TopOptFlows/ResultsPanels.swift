@@ -226,7 +226,9 @@ extension ResultsModel {
 // MARK: - the views (Stress / Solid / X-ray / Load paths)
 
 public enum ResultsViewMode: String, CaseIterable, Sendable {
-    case stress = "Stress", solid = "Solid", xray = "X-ray", loadPaths = "Load paths"
+    /// ★ B4 (ledger note 13, his words: "there shouldn't be a view button for the default view. Default should happen when no
+    /// views are selected"): no Solid — the plain part is what shows with no view lit.
+    case stress = "Stress", xray = "X-ray", loadPaths = "Load paths"
     /// ★ his iPad 2026-10-27: the old page's MOVING views are back — the part bending under its load, and the push
     /// toward the load that breaks it.
     case bend = "Bend", breakIt = "Break"
@@ -235,7 +237,6 @@ public enum ResultsViewMode: String, CaseIterable, Sendable {
     var symbol: String {
         switch self {
         case .stress: return ""            // the colour wheel, drawn
-        case .solid: return "cube.fill"
         case .xray: return "cube.transparent"
         case .loadPaths: return "point.topleft.down.to.point.bottomright.curvepath"
         case .bend: return "arrow.down.to.line"
@@ -249,7 +250,7 @@ public enum ResultsViewMode: String, CaseIterable, Sendable {
     /// The views this run can show, in order — one it cannot is hidden, never greyed (his note 2026-10-27).
     /// ★ B2 (round 1, design-system §4.2): the X-ray pair first, then today's views in today's order.
     static func shown(hasStress: Bool, hasDisplacement: Bool, canBreak: Bool) -> [ResultsViewMode] {
-        [.xray] + (hasStress ? [.stress] : []) + [.solid]
+        [.xray] + (hasStress ? [.stress] : [])
             + (hasStress ? [.loadPaths] : []) + (hasDisplacement ? [.bend] : []) + (canBreak ? [.breakIt] : [])   // ★ 10-28: the light flow reads the stress
     }
 }
@@ -694,23 +695,23 @@ enum ResultsScenarioViews {
 /// can be added (the light then takes the stress colours).
 public struct ResultsLayers: Equatable, Sendable {
     public var motion: ResultsViewMode? = nil
-    public var stress = true
+    /// ★ B4 (note 13): Results opens with no view lit — the plain part.
+    public var stress = false
     public var xray = false
-    public init(stress: Bool = true) { self.stress = stress }
+    public init(stress: Bool = false) { self.stress = stress }
 
     public func isOn(_ m: ResultsViewMode) -> Bool {
         switch m {
         case .stress: return stress
-        case .solid: return !stress
         case .xray: return xray
         case .loadPaths, .bend, .breakIt: return motion == m
         }
     }
-    /// A tap: Stress / Solid choose the colouring; X-ray toggles; a motion starts (or stops when tapped again).
+    /// A tap: a lit view goes off (back to the plain part, note 13); Stress colours; X-ray toggles; a motion starts (or stops
+    /// when tapped again).
     public mutating func tap(_ m: ResultsViewMode, hasStress: Bool) {
         switch m {
-        case .stress: stress = hasStress
-        case .solid: stress = false
+        case .stress: stress = hasStress && !stress
         case .xray: xray.toggle()
         case .loadPaths, .bend, .breakIt:
             motion = motion == m ? nil : m

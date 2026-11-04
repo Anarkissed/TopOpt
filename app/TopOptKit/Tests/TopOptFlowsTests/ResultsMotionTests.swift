@@ -14,8 +14,8 @@ final class ResultsMotionTests: XCTestCase {
 
     func testTheMovingViewsAreBackAndHiddenWhenTheRunCannotShowThem() {
         XCTAssertEqual(ResultsViewMode.shown(hasStress: true, hasDisplacement: true, canBreak: true),
-                       [.xray, .stress, .solid, .loadPaths, .bend, .breakIt])   // ★ B2: the X-ray pair first
-        XCTAssertEqual(ResultsViewMode.shown(hasStress: false, hasDisplacement: false, canBreak: false), [.xray, .solid],
+                       [.xray, .stress, .loadPaths, .bend, .breakIt])   // ★ B2: the X-ray pair first · ★ RE-PINNED (B4, note 13): no Solid
+        XCTAssertEqual(ResultsViewMode.shown(hasStress: false, hasDisplacement: false, canBreak: false), [.xray],   // ★ RE-PINNED (B4, note 13): no Solid
                        "a view the run cannot show is hidden, never greyed")
         XCTAssertEqual(ResultsViewMode.allCases.filter(\.moves), [.loadPaths, .bend, .breakIt])
     }
@@ -96,13 +96,14 @@ final class ResultsMotionTests: XCTestCase {
         XCTAssertTrue(l.isOn(.bend) && l.isOn(.stress), "★ Bend turns Stress on")
         l.tap(.xray, hasStress: true)
         XCTAssertTrue(l.isOn(.stress) && l.isOn(.xray) && l.isOn(.bend), "★ Stress + X-ray on top of Bend")
-        l.tap(.solid, hasStress: true)
-        XCTAssertTrue(l.isOn(.solid) && !l.isOn(.stress) && l.isOn(.xray), "Solid replaces Stress; X-ray stays")
+        // ★ RE-PINNED (UI-Notes B4, note 13): no Solid — the lit Stress tapped again goes off, back to the plain colouring
+        l.tap(.stress, hasStress: true)
+        XCTAssertTrue(!l.isOn(.stress) && l.isOn(.xray), "Stress off (plain); X-ray stays")
         l.tap(.breakIt, hasStress: true)
         XCTAssertTrue(l.isOn(.breakIt) && !l.isOn(.bend) && l.isOn(.stress), "★ one motion at a time; Break turns Stress on")
-        l.tap(.solid, hasStress: true); l.xray = false
+        l.tap(.stress, hasStress: true); l.xray = false
         l.tap(.loadPaths, hasStress: true)
-        XCTAssertTrue(l.isOn(.loadPaths) && l.isOn(.xray) && l.isOn(.solid), "★ Load paths turns X-ray on, not Stress")
+        XCTAssertTrue(l.isOn(.loadPaths) && l.isOn(.xray) && !l.isOn(.stress), "★ Load paths turns X-ray on, not Stress")
         l.tap(.stress, hasStress: true)
         XCTAssertTrue(l.isOn(.stress) && l.isOn(.loadPaths), "Stress can be added to Load paths")
         l.tap(.loadPaths, hasStress: true)
