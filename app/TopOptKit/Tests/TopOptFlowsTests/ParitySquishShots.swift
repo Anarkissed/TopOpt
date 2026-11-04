@@ -32,5 +32,19 @@ final class ParitySquishShots: XCTestCase {
             try h.picture("app_flex-squish-model_\(name).png")
         }
     }
+
+    /// The main Flexible page (the mockup's #flex-lattice): his pad, the whole app page, on the Flexible stage — Setup.
+    func testMainPageStates() throws {
+        guard ProcessInfo.processInfo.environment["APP_BUILD_SHOT_DIR"] != nil else { throw XCTSkip("APP_BUILD_SHOT_DIR not set") }
+        for (name, size) in Self.sizes {
+            let r = try FlexiblePressFixtures.a1Project(3, self)
+            let h = SquishHost(WorkspacePlaceholder(model: r.app, project: r.project), size: size, test: self)
+            SquishHost.pump(3)
+            try FlexiblePressFixtures.enterLatticeStage(r.project, click: { h.click($0) })
+            SquishHost.pump(3)
+            if let s = FlexibleMainStage.lastMade { addTeardownBlock { @MainActor in await s.model?.waitForIdle() } }
+            try h.picture("app_flex-lattice_\(name).png")
+        }
+    }
 }
 #endif
