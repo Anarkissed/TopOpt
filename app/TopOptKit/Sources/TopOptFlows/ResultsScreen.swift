@@ -365,7 +365,7 @@ public struct ResultsScreen: View {
             model.viewScenario = scenarioPick
             model.flowReducedStatic = false           // ★ the arrows MOVE (his iPad 2026-10-27) …
             model.setFlowWiggle(0)                    // … and never wiggle
-            layers = ResultsLayers(stress: model.hasStress)
+            layers = ResultsLayers()   // ★ B4 (note 13): open plain, no view lit
             model.stressOn = layers.stress
             applyMotion(nil)
         }
@@ -1335,7 +1335,7 @@ public struct ResultsScreen: View {
                               canBreak: model.hasFlex && model.hasFailurePrediction)
     }
 
-    /// One view at a time: Stress colours; Solid plain; X-ray see-through; Load paths, Bend and Break MOVE (his iPad
+    /// One view at a time: Stress colours; none lit is the plain part; X-ray see-through; Load paths, Bend and Break MOVE (his iPad
     /// 2026-10-27), each starting from rest and playing.
     private func applyMotion(_ m: ResultsViewMode?) {
         model.flexOn = m == .bend
