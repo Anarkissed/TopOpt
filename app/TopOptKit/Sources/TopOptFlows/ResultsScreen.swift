@@ -128,6 +128,10 @@ public struct ResultsScreen: View {
     /// ★ R-a: the corner's frame (the results panel lifts above it where they would meet).
     @State private var cornerFrame: CGRect = .zero
     @State private var screenHeight: CGFloat = 1032
+    /// ★ the Details drawer's height (the model rises above it while it is open).
+    @State private var drawerHeight: CGFloat = 0
+    /// Test seam: each lift the screen applies (ResultsDrawerLiftTests).
+    @MainActor static var frameLiftProbe: ((Float) -> Void)?
     /// Whether the constrained-smoothing drawer is open (only when `smoothing != nil`).
     @State private var smoothOpen = false
     /// An export failure message (rare — a temp-dir write error), surfaced as an alert
@@ -320,8 +324,11 @@ public struct ResultsScreen: View {
         .onPreferenceChange(ChromeKeepOutKey.self) { all in   // ★ B4: what the orientation line keeps clear of
             if printOrientation != nil { orientControls.update(all.filter { !PrintOrientationLayout.ignored($0.key) }) }
             if let c = all["resultsCorner"], c != cornerFrame { cornerFrame = c }   // ★ R-a
+            let d = all["resultsDetailsPanel"]?.height ?? 0
+            if abs(d - drawerHeight) > 0.5 { drawerHeight = d; liftModel() }
         }
         .animation(DS.Motion.sheetIn, value: detailsOpen)
+        .onChange(of: detailsOpen) { _ in liftModel() }
         .transition(.opacity)
         .animation(DS.Motion.sheetIn, value: orientOpen)
         .animation(DS.Motion.sheetIn, value: compare != nil)
@@ -1350,6 +1357,14 @@ public struct ResultsScreen: View {
     /// What the file is: the latticed part, or one finished shape (smoothed when E1 finished it).
     private var exportLine: String {
         model.exportIsStreamed ? "The latticed part" : selectedFinish != nil ? "One finished shape \u{00B7} smoothed" : "One finished shape"
+    }
+
+    /// ★ The model rises above the Details drawer while it is open (mockup #topo-results-details: "the drawer never covers
+    /// it"), by the drawer's share of the page; closed, it comes back down.
+    private func liftModel() {
+        let f: Float = detailsOpen && screenHeight > 0 ? Float(Swift.min(0.45, drawerHeight / screenHeight)) : 0
+        cameraModel.setFrameLift(f)
+        Self.frameLiftProbe?(f)
     }
 
     /// ★ R-a: every solid result's STL into one folder, handed to the share sheet together.

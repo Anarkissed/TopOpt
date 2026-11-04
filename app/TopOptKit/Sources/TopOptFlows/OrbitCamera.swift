@@ -89,6 +89,10 @@ public struct OrbitCamera: Equatable {
     /// The point the camera looks at (set to the model centre by `frame`; slid off it by
     /// `pan`, restored by `resetPan`).
     public var target: SIMD3<Float>
+    /// ★ LOOK PER SCREEN (Results, mockup #topo-results-details: "the model moved up so the whole part stays in view"): the
+    /// share of the view's height a drawer covers at the bottom (0 = none). The picture is drawn scaled into the page above
+    /// it — folded into `projectionMatrix`, so the renderer, picking, `CameraProjection.project` and `ray` all agree.
+    public var frameLift: Float = 0
     /// The un-panned orbit centre — the framed model centre `frame` computed. `pan` moves
     /// `target` away from it; `resetPan` (the Home button, round-4 item 2) returns to it, so
     /// Home clears any pan. Captured by `init`/`frame` so it always tracks the current framing.
@@ -320,12 +324,22 @@ public struct OrbitCamera: Equatable {
         let ys = 1 / tan(drawFovY * 0.5)   // ★ B2: the drawn field of view (the telephoto when orthographic)
         let xs = ys / a
         let zs = far / (near - far)
-        return simd_float4x4(columns: (
+        let p = simd_float4x4(columns: (
             SIMD4<Float>(xs, 0, 0, 0),
             SIMD4<Float>(0, ys, 0, 0),
             SIMD4<Float>(0, 0, zs, -1),
             SIMD4<Float>(0, 0, zs * near, 0)
         ))
+        guard frameLift > 0 else { return p }
+        // ★ the lift: NDC (x, y) → ((1 − f)·x, (1 − f)·y + f) — the whole picture in the top (1 − f) of the view
+        let f = Swift.min(0.9, frameLift)
+        let lift = simd_float4x4(columns: (
+            SIMD4<Float>(1 - f, 0, 0, 0),
+            SIMD4<Float>(0, 1 - f, 0, 0),
+            SIMD4<Float>(0, 0, 1, 0),
+            SIMD4<Float>(0, f, 0, 1)
+        ))
+        return lift * p
     }
 
     /// The normal matrix: the view rotation (upper-left 3×3 of the view matrix).
