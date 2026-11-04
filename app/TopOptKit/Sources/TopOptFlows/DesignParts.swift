@@ -660,13 +660,16 @@ public struct DSRunButton: View {
                     if busy { ProgressView().controlSize(.small).tint(.white) }
                     VStack(spacing: 1) {
                         Text(title).font(.system(size: 16, weight: .bold)).lineLimit(1).fixedSize()
-                        Text(line2).font(.system(size: 11.5)).lineLimit(1)
+                        // never cut (the mockup's `.run small`: nowrap; min-width 250): the button grows to the line
+                        Text(line2).font(.system(size: 11.5)).lineLimit(1).fixedSize()
                             .foregroundStyle(grey ? DS.Color.textTertiary.color : Color.white.opacity(0.85))
+                            .background(DSParts.publish("\(key)-line2"))
                     }
                 }
                 .foregroundStyle(grey ? DS.Color.textDisabled.color : Color.white)
                 .padding(.horizontal, 22)
                 .frame(minWidth: DSParts.runMinWidth, minHeight: DSParts.runHeight)
+                .fixedSize()   // its own size, max(250, the lines + 44), whatever the parent offers
                 .background(Capsule().fill((grey ? DS.Color.fillDisabled : busy ? DS.Color.accent.opacity(0.25) : DS.Color.accent).color))
                 .overlay(Capsule().strokeBorder(DS.Color.accent.opacity(busy ? 0.6 : 0).color, lineWidth: 1))
                 .partsShadow(grey || busy ? nil : DS.Shadow.accentGlow)
@@ -680,47 +683,72 @@ public struct DSRunButton: View {
     }
 }
 
-/// The ⌃ beside the run button: a 64 pt square opening the other run choices.
+/// The ⌃ beside the run button: a 64 pt square opening the other run choices — a menu, or a plain button (#362: Flexible's ⌃
+/// opens the lattice card panel).
 public struct DSSplitButton<Items: View>: View {
     let key: String
     let items: Items
+    var action: (() -> Void)?
     public init(key: String, @ViewBuilder items: () -> Items) { self.key = key; self.items = items() }
+    /// True when it opens a menu (its items); false for the plain button.
+    public var isMenu: Bool { action == nil }
     public var body: some View {
-        Menu { items } label: {
-            Image(systemName: "chevron.up").font(.system(size: 18, weight: .bold)).foregroundStyle(DS.Color.textPrimary.color)
-                .frame(width: DSParts.runHeight, height: DSParts.runHeight)
-                .background(RoundedRectangle(cornerRadius: DSParts.runHeight / 2, style: .continuous).fill(DS.Surface.bar.color))
-                .overlay(RoundedRectangle(cornerRadius: DSParts.runHeight / 2, style: .continuous)
-                    .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
-                .contentShape(Rectangle())
+        Group {
+            if let action {
+                Button(action: action) { face }.buttonStyle(.plain)
+            } else {
+                Menu { items } label: { face }
+                    .menuIndicator(.hidden)
+                    .menuStyle(.button).buttonStyle(.plain)
+            }
         }
-        .menuIndicator(.hidden)
-        .menuStyle(.button).buttonStyle(.plain)
         .fixedSize()
         .background(DSParts.publish(key))
         .accessibilityLabel("More ways to run")
         .accessibilityIdentifier(key)
     }
+    private var face: some View {
+        Image(systemName: "chevron.up").font(.system(size: 18, weight: .bold)).foregroundStyle(DS.Color.textPrimary.color)
+            .frame(width: DSParts.runHeight, height: DSParts.runHeight)
+            .background(RoundedRectangle(cornerRadius: DSParts.runHeight / 2, style: .continuous).fill(DS.Surface.bar.color))
+            .overlay(RoundedRectangle(cornerRadius: DSParts.runHeight / 2, style: .continuous)
+                .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
+            .contentShape(Rectangle())
+    }
 }
 
-/// The secondary button: 48 pt glass, label + optional glyph ("Settings ⌄", "Compare", "Add part").
+extension DSSplitButton where Items == EmptyView {
+    /// The ⌃ as a plain button: the same 64 pt square, `action` on a tap, no menu. Disfavoured: a trailing closure of menu
+    /// items (Buttons also type-check as a `() -> Void`) stays the menu; one that cannot build Views takes this.
+    @_disfavoredOverload
+    public init(key: String, action: @escaping () -> Void) { self.key = key; self.items = EmptyView(); self.action = action }
+}
+
+/// The secondary button: 48 pt glass, label + optional glyph ("Settings ⌄", "Compare", "Add part"), and an optional tertiary
+/// detail after the label (the mockup's "Settings  Fast · +Z · −Z ⌄"; frame "<key>-detail").
 public struct DSGlassButton: View {
     let title: String
+    let detail: String?
     let systemImage: String?
     let chevron: Bool
     var selected = false
     let key: String
     let action: () -> Void
-    public init(_ title: String, systemImage: String? = nil, chevron: Bool = false, selected: Bool = false, key: String,
-                action: @escaping () -> Void) {
-        self.title = title; self.systemImage = systemImage; self.chevron = chevron; self.selected = selected; self.key = key
-        self.action = action
+    public init(_ title: String, detail: String? = nil, systemImage: String? = nil, chevron: Bool = false, selected: Bool = false,
+                key: String, action: @escaping () -> Void) {
+        self.title = title; self.detail = detail; self.systemImage = systemImage; self.chevron = chevron; self.selected = selected
+        self.key = key; self.action = action
     }
     public var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
                 if let systemImage { Image(systemName: systemImage).font(.system(size: 15, weight: .semibold)) }
                 Text(title).font(.system(size: 15, weight: .semibold)).lineLimit(1).fixedSize()
+                if let detail {
+                    Text(detail).font(.system(size: 15, weight: .medium)).foregroundStyle(DS.Color.textTertiary.color)
+                        .lineLimit(1).fixedSize()
+                        .background(DSParts.publish("\(key)-detail"))
+                }
                 if chevron {
                     Image(systemName: "chevron.down").font(.system(size: 11, weight: .bold))
                         // (the mockup keeps ⌄ while what it opens is up)
