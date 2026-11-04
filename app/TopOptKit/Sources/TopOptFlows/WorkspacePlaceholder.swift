@@ -12674,7 +12674,7 @@ extension WorkspacePlaceholder {
             topologyOptimizeSplit
         } panel: {
             if setupPanelOpen {
-                CornerPairStyle.panel(width: showBuildOrientation ? 600 : 420, maxHeight: 620) { topologySetupRows }
+                CornerPairStyle.panel(width: showBuildOrientation ? 600 : DSParts.panelWidth, maxHeight: 620) { topologySetupRows }
             }
         }
     }

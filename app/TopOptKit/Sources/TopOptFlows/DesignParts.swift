@@ -723,7 +723,7 @@ public struct DSGlassButton: View {
                 Text(title).font(.system(size: 15, weight: .semibold)).lineLimit(1).fixedSize()
                 if chevron {
                     Image(systemName: "chevron.down").font(.system(size: 11, weight: .bold))
-                        .rotationEffect(.degrees(selected ? 180 : 0))
+                        // (the mockup keeps ⌄ while what it opens is up)
                 }
             }
             .foregroundStyle(DS.Color.textPrimary.color)
