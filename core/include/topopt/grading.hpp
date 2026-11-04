@@ -376,6 +376,18 @@ struct GradingLawParams {
   bool organic_shape_fit = false;
   double aesthetic_rho_min = 0.0;
   double aesthetic_rho_max = 0.0;
+  // ── ★ A CAP THAT APPLIES UNDER BOTH INTENTS (app, 2026-09-20) ────────────────
+  // `aesthetic_rho_max` above is aesthetic-only BY DESIGN: it says where within the
+  // certifiable band an aesthetic run chooses to grade. It is not a cap a structural
+  // run can state, and the preview needs one -- it rescales every automatic density
+  // onto the aesthetic ceiling under BOTH intents unless "Allow quilt" is on, so
+  // without this the run grades to the full band (top 0.8999) while the preview is
+  // capped near 0.219, and the two pictures are different objects.
+  //
+  // So: the top of the certifiable band, lowered. Applied before the aesthetic range
+  // is resolved, so an aesthetic job that states both gets the tighter of the two.
+  // 0 = off, which is every job written before this.
+  double max_relative_density = 0.0;
 
   // ── ★ AN ADAPTIVE CELLS-PER-MEMBER FLOOR, AESTHETIC ONLY ─────────────────────
   // The fixed floor of 5 is an ACCURACY threshold: below it the homogenised tensor

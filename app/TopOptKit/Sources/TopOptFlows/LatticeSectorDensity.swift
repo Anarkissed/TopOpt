@@ -40,11 +40,20 @@ public enum LatticeSectorDensity {
         /// Core's derivation at this region's extent. `valid == false` ⇒ the row
         /// says it has no core number rather than showing one it made up.
         public let derivation: TopOptKit.LatticeRegionDerivation
+        /// ★ THE CAP THE JOB WRITES (`grading.max_relative_density`; 0 = none), the reviewer's
+        /// 2026-10-09 ruling: "one source". Core prints a stated density above it AT the cap
+        /// (grade_lattice clamps), so the field says so before the run, never after it.
+        public let jobCap: Double
 
         public init(id: UUID, name: String, extentMM: Double?, stated: Double?,
-                    derivation: TopOptKit.LatticeRegionDerivation) {
+                    derivation: TopOptKit.LatticeRegionDerivation, jobCap: Double = 0) {
             self.id = id; self.name = name; self.extentMM = extentMM
-            self.stated = stated; self.derivation = derivation
+            self.stated = stated; self.derivation = derivation; self.jobCap = jobCap
+        }
+
+        /// The densest this region may be: the band's top, or the job's cap below it.
+        public var ceiling: Double {
+            jobCap > 0 && jobCap.isFinite ? Swift.min(derivation.rhoMax, jobCap) : derivation.rhoMax
         }
 
         /// What the field shows when the user has typed nothing: the density core
@@ -58,9 +67,9 @@ public enum LatticeSectorDensity {
         public var validRange: ClosedRange<Double>? {
             guard derivation.valid, derivation.feasible,
                   derivation.derivedRelativeDensity > 0,
-                  derivation.rhoMax >= derivation.derivedRelativeDensity
+                  ceiling >= derivation.derivedRelativeDensity
             else { return nil }
-            return derivation.derivedRelativeDensity...derivation.rhoMax
+            return derivation.derivedRelativeDensity...ceiling
         }
 
         /// A typed value core will REFUSE, and why — shown beside the field before
@@ -73,6 +82,10 @@ public enum LatticeSectorDensity {
             if s > derivation.rhoMax {
                 return String(format: "above the certifiable band's %.0f%% ceiling",
                               derivation.rhoMax * 100)
+            }
+            if s > ceiling {
+                return String(format: "above the %.1f%% ceiling this lattice prints at — "
+                              + "turn on Allow quilt to go denser", ceiling * 100)
             }
             if !derivation.prints {
                 return String(format:
@@ -120,10 +133,24 @@ public enum LatticeSectorDensity {
                             regionsFor: (UUID) -> [LatticeRegionSpec],
                             topology: String,
                             minExtrudableWidthMM: Double,
-                            derive: (String, Double, Double, Double)
-                                -> TopOptKit.LatticeRegionDerivation
-                                = TopOptKit.latticeRegionDerivation)
+                            // ★ THE JOB'S CAP (the reviewer, 2026-10-09 19:41, item 3: the
+                            // sector-density readout takes it "through E1 or the capped
+                            // derivation. One source."): `LatticeSettings.jobDensityCap`, 0 = none.
+                            maxRelativeDensity: Double = 0,
+                            // ★ The seam stays FOUR arguments: this readout is about a
+                            // stated density, not about which floor the cell was
+                            // derived against, so it keeps core's default (accuracy).
+                            // Widening it here would make every test rewrite the
+                            // injection for a parameter none of them vary. nil = core's
+                            // derivation at the job's cap.
+                            derive: ((String, Double, Double, Double)
+                                -> TopOptKit.LatticeRegionDerivation)? = nil)
         -> [Row] {
+        let derive = derive ?? { TopOptKit.latticeRegionDerivation(
+                                     topology: $0, memberWidthMM: $1,
+                                     minExtrudableWidthMM: $2,
+                                     statedRelativeDensity: $3,
+                                     maxRelativeDensity: maxRelativeDensity) }
         var out: [Row] = []
         for g in groups {
             guard roles[g.id] == .include else { continue }
@@ -136,7 +163,7 @@ public enum LatticeSectorDensity {
             let stated = densities[g.id].flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
             let d = derive(topology, extent ?? 0, minExtrudableWidthMM, stated ?? 0)
             out.append(Row(id: g.id, name: g.name, extentMM: extent,
-                           stated: stated, derivation: d))
+                           stated: stated, derivation: d, jobCap: maxRelativeDensity))
         }
         return out
     }

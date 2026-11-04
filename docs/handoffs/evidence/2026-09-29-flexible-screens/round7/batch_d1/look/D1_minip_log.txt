@@ -1,0 +1,17 @@
+[minip] the Squish page opened by itself: false (H37: never)
+settled true · status 'Preview · core runs one group at a time' tone preview · capsule (24,76 262x44) · setupChip (228,1061 220x48) · latticeSplit (460,1045 260x64) · mainViews (572,236 148x96)
+wrote D1_minip_M01_main_rest.png
+  tap the Setup chip [setupChip (228,1061 220x48)]
+tray: capsule (24,76 262x44) · setupChip (228,1061 220x48) · latticeSplit (460,1045 260x64) · mainViews (572,236 148x96) · setupTray (384,757 336x276)
+wrote D1_minip_M02_setup_tray.png
+  tap the ⌃ [latticeMore (676,1045 44x64)]
+card: capsule (24,76 262x44) · setupChip (228,1061 220x48) · latticeSplit (460,1045 260x64) · mainViews (572,236 148x96) · latticeCard (384,522 336x511) · sent 0
+wrote D1_minip_M03_card_preview.png
+  tap the ⌃ again (folds) [latticeMore (676,1045 44x64)]
+Selections minimised: pill (24,1059 139x50) · Setup chip (228,1061 220x48) · gap 65.5 pt
+wrote D1_minip_M04_selections_minimised.png
+after Face 3's weight → 0: status 'Fix: the weight on Face 3' tone fix · chrome Optional(TopOptFlows.FlexibleChromeState.Card.callout) · capsule (24,76 262x44) · setupChip (228,1061 220x48) · latticeSplit (460,1045 260x64) · mainViews (572,236 148x96) · callout (384,882 336x151)
+wrote D1_minip_M05_callout.png
+  tap the capsule's Squish [capsuleSquish (212,76 70x44)]
+Squish page up true · capsule (24,76 262x44) · notice (64,132 403x40)
+wrote D1_minip_S01_squish_page.png

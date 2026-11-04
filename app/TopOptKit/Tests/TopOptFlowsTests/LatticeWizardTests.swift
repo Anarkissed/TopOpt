@@ -61,42 +61,41 @@ final class LatticeWizardTests: XCTestCase {
 
     // MARK: §2 — the order is the teaching
 
-    func testTypeChangeMorphsAndSizeDoesNot() {
-        var m = LatticeWizardModel()
-        m.setTopology(LatticeType.bcc.id)
-        XCTAssertEqual(m.playing, .morph, "§2A: the cell MORPHS into the new type")
-        m.finishedPlaying()
-        m.cellMM = 4
-        XCTAssertNil(m.playing, "§2A: size is live, not a cinematic")
-    }
-
     func testTheCellBecomesALatticeByAnimation() {
         var m = LatticeWizardModel()
         XCTAssertEqual(m.stage, .cell, "§2A: the page opens on ONE cell")
-        XCTAssertEqual(LatticeSamplePatch.counts(lattice: m.lattice, cells: 1).struts,
-                       LatticeSamplePatch.counts(lattice: m.lattice, cells: 1).struts)
+        XCTAssertEqual(LatticeSamplePatch.counts(lattice: m.lattice!, cells: 1).struts,
+                       LatticeSamplePatch.counts(lattice: m.lattice!, cells: 1).struts)
         m.enterLattice()
         XCTAssertEqual(m.stage, .lattice)
-        XCTAssertEqual(m.playing, .tile,
-                       "§2B: it is ANIMATED into the part, never cut to")
-    }
-
-    func testAutoDensityPlaysTheStressCinematicAndUniformDoesNot() {
-        var m = LatticeWizardModel()
-        m.setDensityMode(.sim)
-        XCTAssertEqual(m.playing, .stressWipeAndDive,
-                       "§2C: Auto density wipes the field down and dives in")
-        m.finishedPlaying()
-        m.setDensityMode(.uniform)
-        XCTAssertNotEqual(m.playing, .stressWipeAndDive,
-                          "a flat field has nothing to explain")
     }
 
     func testAutoCellSizeJumpsStraightToTheSample() {
         var m = LatticeWizardModel()
         m.setCellSizeMode(.auto)
         XCTAssertEqual(m.stage, .lattice)
-        XCTAssertEqual(m.playing, .jumpToSample, "§2C")
+    }
+
+    /// ★★ SINGLE-CELL MEMBERS REQUIRE THE SKIN (his 2026-09-18): the switch sets Skin,
+    /// the finish is then locked (a refused change returns false so the wizard can say
+    /// why), and turning the switch off unlocks it.
+    func testSingleCellMembersLockTheFinishToSkin() {
+        var m = LatticeWizardModel(boundary: .rim)
+        m.setSingleCellMembers(true)
+        XCTAssertEqual(m.boundary, .fullSkin, "turning the switch on SETS Skin")
+        XCTAssertTrue(m.finishLockedBySingleCell)
+        XCTAssertFalse(m.setBoundary(.rim), "locked: refused, and says so")
+        XCTAssertFalse(m.setBoundary(.none))
+        XCTAssertFalse(m.setBoundary(.covered))
+        XCTAssertEqual(m.boundary, .fullSkin)
+        XCTAssertTrue(m.setBoundary(.fullSkin), "Skin itself is always accepted")
+        m.setSingleCellMembers(false)
+        XCTAssertTrue(m.setBoundary(.rim), "unlocked")
+        XCTAssertEqual(m.boundary, .rim)
+        // and a saved single-cell project opens with Skin whatever it stored
+        var saved = LatticeSettings()
+        saved.singleCellMembers = true; saved.boundary = .none
+        XCTAssertEqual(LatticeWizardModel(settings: saved).boundary, .fullSkin)
     }
 
     func testTheFourFinishesAreShownOnThePart() {
@@ -104,9 +103,6 @@ final class LatticeWizardTests: XCTestCase {
         for b in [LatticeBoundaryTreatment.rim, .fullSkin, .none] {
             m.setBoundary(b)
             XCTAssertEqual(m.boundary, b)
-            XCTAssertEqual(m.playing, .boundarySwap,
-                           "§2C: switching a finish SHOWS it on the part")
-            m.finishedPlaying()
         }
     }
 
@@ -114,7 +110,6 @@ final class LatticeWizardTests: XCTestCase {
         var m = LatticeWizardModel()
         m.jump(to: .lattice)
         XCTAssertEqual(m.stage, .lattice)
-        XCTAssertNil(m.playing, "§2: a jump is not a lesson")
     }
 
     func testTheSelectionsRoundTripThroughTheProjectSettings() {
@@ -132,51 +127,6 @@ final class LatticeWizardTests: XCTestCase {
         XCTAssertEqual(back.cellMM, 3.5)
         XCTAssertEqual(back.boundary, .rim)
         XCTAssertTrue(back.enabled, "saving the page turns lattice mode on")
-    }
-
-    // MARK: §3 — the sample, and its disclaimer
-
-    func testTheSampleFieldIsBakedAndPeaksAtTheRootSkin() {
-        let mesh = LatticeWizardSample.mesh(subdiv: 6)
-        let f = LatticeWizardSample.stress(for: mesh)
-        XCTAssertEqual(f.count, mesh.positions.count / 3)
-        XCTAssertEqual(f.max() ?? 0, 1.0, accuracy: 1e-6, "normalised to 1")
-        XCTAssertEqual(f.min() ?? 1, 0.0, accuracy: 1e-6, "and to 0")
-        // The densest point is at the ROOT (−x) and off the neutral axis.
-        let p = LatticeWizardSample.densestPoint(for: mesh)
-        XCTAssertLessThan(p.x, 0, "§3a: peak stress is at the root")
-        XCTAssertGreaterThan(abs(p.z), Float(LatticeWizardSample.heightMM) * 0.4,
-                             "§3a: and at the skin, not the neutral axis")
-    }
-
-    func testTheSampleIsDeterministic() {
-        // A FIXED part: same mesh, same field, every call. Not a solve.
-        let a = LatticeWizardSample.stress(for: LatticeWizardSample.mesh(subdiv: 8))
-        let b = LatticeWizardSample.stress(for: LatticeWizardSample.mesh(subdiv: 8))
-        XCTAssertEqual(a, b)
-    }
-
-    func testTheDisclaimerIsOneLineAndDismissible() {
-        var m = LatticeWizardModel()
-        XCTAssertTrue(m.showDisclaimer)
-        let words = LatticeWizardSample.provenanceNote
-            .split(separator: " ").count
-        XCTAssertLessThanOrEqual(words, 12, "§3b: one line, not a paragraph")
-        m.showDisclaimer = false
-        XCTAssertFalse(m.showDisclaimer)
-    }
-
-    func testThePreviewTessellationStaysSmall() {
-        // §3c — the preview is fast because the SAMPLE is small and tessellated
-        // at screen resolution. The ceiling is enforced, not hoped for.
-        var m = LatticeWizardModel(cellMM: 0.6)      // absurdly fine
-        m.jump(to: .lattice)
-        XCTAssertLessThanOrEqual(m.cellsAcross, LatticeWizardModel.maxCellsAcross)
-        XCTAssertLessThan(m.stageTriangleCount, 150_000,
-                          "§3c: the worst case is still a small mesh")
-        let one = LatticeWizardModel()
-        XCTAssertLessThan(one.stageTriangleCount, 2_000,
-                          "§2A: one cell is a handful of triangles")
     }
 
     // MARK: §4 — Auto
@@ -201,38 +151,83 @@ final class LatticeWizardTests: XCTestCase {
         XCTAssertEqual(m.densityMode, .uniform)
     }
 
-    func testAutoResolvesToThePerRegionModeWhenRegionsAreDeclared() {
-        // ★ Core's OWN pre-flight names this: at the whole-part Auto cell the
-        // maintainer's 7 mm regions come back SOLID, and core says "set
-        // cell_mode: fit and core derives exactly that, per region".
+    /// ★★ REPLACED, NOT DROPPED (2026-08-20). This asserted §4a — Auto resolves to
+    /// FIT when regions are declared — and the maintainer changed that requirement:
+    /// "Auto should also mean *GRADED*".
+    ///
+    /// ★ WHY HE WAS RIGHT, in one measurement. Fit gives each region ONE cell, and
+    /// core REFUSES fit alongside sub-floor retention — so Auto silently switched
+    /// retention off before the job was built. On his part that is the difference
+    /// between 417 cells of lattice on a quiet wall and 228. Nothing on screen said
+    /// so, and it defeated every other fix in this pass.
+    ///
+    /// ★ WHAT §4a WAS ACTUALLY FOR SURVIVES: core's pre-flight said his 7 mm regions
+    /// came back SOLID at the whole-part Auto cell, and the remedy was a cell each
+    /// region can hold. Auto still delivers that — it is now the CEILING of a swept
+    /// window (`W / N*`, which is Fit's own answer) rather than the single cell, so
+    /// the grading fills in below it. The property is asserted below and it is
+    /// STRONGER than the old one: not merely "a mode was chosen" but "every declared
+    /// region can hold the finest cell that mode sweeps to".
+    func testAutoIsGradedAndEveryRegionCanHoldItsFinestCell() {
         let withRegions = LatticeAutoPosture.resolve(includeRegionCount: 8,
                                                      retainSubfloor: false)
-        XCTAssertEqual(withRegions.cellMode, .fit, "§4a: per region")
+        XCTAssertEqual(withRegions.cellMode, .swept, "★ Auto means graded")
         XCTAssertEqual(withRegions.densityMode, .sim)
+        XCTAssertFalse(withRegions.droppedSubfloorRetention,
+                       "★ and it no longer has to drop retention to be legal")
 
         let none = LatticeAutoPosture.resolve(includeRegionCount: 0,
                                               retainSubfloor: false)
         XCTAssertEqual(none.cellMode, .swept,
                        "§4a: with no region declared, graded across the part")
+
+        // ★ THE 7 mm REGION §4a WAS WRITTEN FOR. Auto's window must reach fine
+        // enough for it, or we are back to the whole-part cell that returned solid.
+        // uncapped (Allow quilt on): at the aesthetic cap no 7 mm region holds 5 printable cells
+        let w = LatticeAutoPosture.autoWindowMM(regionWidthsMM: [7, 13, 20],
+                                                lineWidthMM: 0.42, topology: "octet", maxRelativeDensity: 0)
+        let n = TopOptKit.latticeLimits(topology: "octet").minCellsPerMember
+        XCTAssertNotNil(w)
+        if let w {
+            XCTAssertLessThanOrEqual(w.min, 7.0 / n,
+                                     "★ a 7 mm region must be able to hold Auto's "
+                                     + "finest cell — the whole point of §4a")
+            XCTAssertLessThanOrEqual(w.max, 20.0 / n + 1e-9,
+                                     "★ and the ceiling is what the WIDEST region can "
+                                     + "hold, never coarser")
+        }
     }
 
     func testAutoNeverEmitsACombinationCoreRefuses() {
         // §4c — "fit" with no include region, and "fit" alongside sub-floor
         // retention, are both hard core refusals. Auto cannot produce either.
+        // ★ THE BAR IS UNCHANGED; only the way Auto satisfies it has moved. It used
+        // to resolve to fit and then DROP retention; it now never resolves to fit at
+        // all, so the refusable pair cannot arise. The assertion below is written
+        // against the REFUSAL, not against the mode, so it holds either way.
         var s = LatticeSettings()
         s.cellSizeMode = .auto
         s.retainSubfloorInUnloadedRegions = true
 
-        let noRegions = LatticeAutoPosture.applied(to: s, includeRegionCount: 0)
-        XCTAssertNotEqual(noRegions.cellSizeMode, .fit,
-                          "§4c: fit needs a region; Auto does not ask for one "
-                          + "that is not there")
+        for regions in [0, 3, 8] {
+            let out = LatticeAutoPosture.applied(to: s, includeRegionCount: regions,
+                                                 regionWidthsMM: [13, 20],
+                                                 lineWidthMM: 0.42)
+            XCTAssertFalse(out.cellSizeMode == .fit
+                           && out.retainSubfloorInUnloadedRegions,
+                           "§4c: fit alongside retention is a core refusal and Auto "
+                           + "must never author it (\(regions) regions)")
+            XCTAssertFalse(out.cellSizeMode == .fit && regions == 0,
+                           "§4c: fit needs a region")
+        }
 
-        let withRegions = LatticeAutoPosture.applied(to: s, includeRegionCount: 3)
-        XCTAssertEqual(withRegions.cellSizeMode, .fit)
-        XCTAssertFalse(withRegions.retainSubfloorInUnloadedRegions,
-                       "§4c: and it drops the mutually-exclusive one rather than "
-                       + "emitting a job core will reject")
+        // ★ AND THE ONE THAT USED TO BE LOST: retention SURVIVES Auto now.
+        let withRegions = LatticeAutoPosture.applied(to: s, includeRegionCount: 3,
+                                                     regionWidthsMM: [13, 20],
+                                                     lineWidthMM: 0.42)
+        XCTAssertTrue(withRegions.retainSubfloorInUnloadedRegions,
+                      "★ Auto no longer takes the switch away — the defect that made "
+                      + "his quiet wall solid")
         XCTAssertTrue(withRegions.reportRegionCells,
                       "§5: Auto asks for the per-region breakdown")
     }
@@ -424,7 +419,6 @@ final class LatticeWizardTests: XCTestCase {
     func testNoWallOfTextAnywhereInTheNewUI() {
         var longest = ""
         func consider(_ s: String) { if s.split(separator: " ").count > longest.split(separator: " ").count { longest = s } }
-        consider(LatticeWizardSample.provenanceNote)
         consider(LatticeFaceRoleGate.Block.undeclared.reason)
         consider(LatticeFaceRoleGate.Block.keepClear.reason)
         for v in [LatticeFaceCard.Verdict.certified, .outOfRegime, .noMaterial] {

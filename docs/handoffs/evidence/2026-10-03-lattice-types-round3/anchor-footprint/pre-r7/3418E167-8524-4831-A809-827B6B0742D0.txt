@@ -1,0 +1,35 @@
+# anchor-footprint identical-bake proof (2026-10-03)
+project 3418E167-8524-4831-A809-827B6B0742D0 "M2 verticalStand THICK" algorithm stepped stage Optional(TopOptFlows.LatticeStageMode.structural) step-halves false density sim cells auto field stage
+regions 2 (includes 2); cells 4.67,12.00
+
+arm control-1: setScene 31.1s (whole rebake, renderer included)
+  stats: pitch=2.00 kept=[12.00=5 10.00=15 9.60=3 9.00=2 8.00=16 7.20=6 6.00=24 4.80=18 4.67=686 4.00=141 3.00=86 2.40=1067 2.33=522 2.00=1248] edge=3233 texels=25002 anchor=(9.0,0.0,7.5) in 2.4s drawnHi=0.0 why=[r0/kept=686 r0/occupancy=4 r0/outline=322 r0/slab=2024 r1/kept=5 r1/outline=11 r1/slab=127] noLadder=[] t=23.09s walk=anchor:523224 place:7870 shifts=64 children=5 fp= unb= raster=3.3s place=5.2s cells=6800
+  sha256/16: field.values=3ac05c03ead17a1e level=0bfa2419fd388ef0 steppedCellMM=a2979dab3059e75c steppedPhase=0e9bbedd54261ee8 steppedOrigin=41925ffb4e60661f solidDepthMM=059dd3f9f9fe908a steppedCells=109e0c00e860076e anchorBaseVolumes=ce1e4c5fcc1c0edb anchorChildVolumes=af0ad461a1a296ac
+
+arm control-2: setScene 31.1s (whole rebake, renderer included)
+  stats: pitch=2.00 kept=[12.00=5 10.00=15 9.60=3 9.00=2 8.00=16 7.20=6 6.00=24 4.80=18 4.67=686 4.00=141 3.00=86 2.40=1067 2.33=522 2.00=1248] edge=3233 texels=25002 anchor=(9.0,0.0,7.5) in 2.4s drawnHi=0.0 why=[r0/kept=686 r0/occupancy=4 r0/outline=322 r0/slab=2024 r1/kept=5 r1/outline=11 r1/slab=127] noLadder=[] t=23.12s walk=anchor:523224 place:7870 shifts=64 children=5 fp= unb= raster=3.3s place=5.2s cells=6800
+  sha256/16: field.values=3ac05c03ead17a1e level=0bfa2419fd388ef0 steppedCellMM=a2979dab3059e75c steppedPhase=0e9bbedd54261ee8 steppedOrigin=41925ffb4e60661f solidDepthMM=059dd3f9f9fe908a steppedCells=109e0c00e860076e anchorBaseVolumes=ce1e4c5fcc1c0edb anchorChildVolumes=af0ad461a1a296ac
+
+arm footprint: setScene 31.0s (whole rebake, renderer included)
+  stats: pitch=2.00 kept=[12.00=5 10.00=15 9.60=3 9.00=2 8.00=16 7.20=6 6.00=24 4.80=18 4.67=686 4.00=141 3.00=86 2.40=1067 2.33=522 2.00=1248] edge=3233 texels=25002 anchor=(9.0,0.0,7.5) in 2.4s drawnHi=0.0 why=[r0/kept=686 r0/occupancy=4 r0/outline=322 r0/slab=2024 r1/kept=5 r1/outline=11 r1/slab=127] noLadder=[] t=23.00s walk=anchor:523224 place:7870 shifts=64 children=5 fp=anchor/outline=2,place/outline=2 unb= raster=3.3s place=5.2s cells=6800
+  sha256/16: field.values=3ac05c03ead17a1e level=0bfa2419fd388ef0 steppedCellMM=a2979dab3059e75c steppedPhase=0e9bbedd54261ee8 steppedOrigin=41925ffb4e60661f solidDepthMM=059dd3f9f9fe908a steppedCells=109e0c00e860076e anchorBaseVolumes=ce1e4c5fcc1c0edb anchorChildVolumes=af0ad461a1a296ac
+
+arm red-inset (inset 52.0 mm): setScene 26.3s (whole rebake, renderer included)
+  stats: pitch=2.00 kept=[12.00=3 10.00=9 9.00=1 8.00=8 7.20=1 6.00=9 4.80=14 4.67=211 4.00=64 3.00=63 2.40=575 2.33=72 2.00=678] edge=1546 texels=9958 anchor=(9.0,0.0,6.0) in 0.9s drawnHi=0.0 why=[r0/kept=211 r0/occupancy=1 r0/outline=67 r0/slab=558 r1/kept=3 r1/outline=11 r1/slab=44] noLadder=[] t=18.32s walk=anchor:186280 place:2595 shifts=64 children=9 fp=anchor/outline=2,place/outline=2 unb= raster=3.3s place=1.9s cells=3184
+  sha256/16: field.values=4e1b730505edb5a0 level=1c3bcb0ed244802f steppedCellMM=1a21226800d4ca89 steppedPhase=b9d663beb63a9d50 steppedOrigin=e6e16b9e065c83fa solidDepthMM=059dd3f9f9fe908a steppedCells=c0c77bd7b17d4e4e anchorBaseVolumes=5b5ad32af16b0fc8 anchorChildVolumes=7d02f9a5530ef559
+
+verdict
+  A/A control-1 vs control-2: IDENTICAL
+  control-1 vs footprint: IDENTICAL (every array by bit pattern; 64 base volumes, 5 children volumes, anchor, plan of 6800 cells)
+  RED control-1 vs red-inset: DIFFER ["grid.origin", "field.values", "level", "steppedCellMM", "steppedPhase", "steppedOrigin", "steppedCells", "anchorBaseVolumes", "anchorChildVolumes", "anchorShiftMM", "slotsKept", "slotsCut", "texelsPainted", "why", "paintedByRegion", "cellsPlaced"]; 64 of 64 shift volumes moved
+  anchor search: walked 523224 -> 523224 slots (100.0%), 2.4s -> 2.4s
+  level-0 walk: 7870 -> 7870 slots (100.0%), 5.2s -> 5.2s
+  octree bake: 23.1s -> 23.0s; whole rebake (setScene) 31.1s -> 31.0s
+
+harness: exit 0, 236s wall, build debug
+Executed 1 test, with 0 failures (0 unexpected) in 234.713 (234.713) seconds
+the renderer's own DIAG octree lines, in arm order:
+  DIAG octree pitch=2.00 kept=[12.00=5 10.00=15 9.60=3 9.00=2 8.00=16 7.20=6 6.00=24 4.80=18 4.67=686 4.00=141 3.00=86 2.40=1067 2.33=522 2.00=1248] edge=3233 texels=25002 band=1.0 floor=1.8 solidBand=1.27 anchor=(9.0,0.0,7.5) in 2.4s drawnHi=0.0 why=[r0/kept=686 r0/occupancy=4 r0/outline=322 r0/slab=2024 r1/kept=5 r1/outline=11 r1/slab=127] noLadder=[] t=23.09s walk=anchor:523224 place:7870 shifts=64 fp= unb= raster=3.3s place=5.2s
+  DIAG octree pitch=2.00 kept=[12.00=5 10.00=15 9.60=3 9.00=2 8.00=16 7.20=6 6.00=24 4.80=18 4.67=686 4.00=141 3.00=86 2.40=1067 2.33=522 2.00=1248] edge=3233 texels=25002 band=1.0 floor=1.8 solidBand=1.27 anchor=(9.0,0.0,7.5) in 2.4s drawnHi=0.0 why=[r0/kept=686 r0/occupancy=4 r0/outline=322 r0/slab=2024 r1/kept=5 r1/outline=11 r1/slab=127] noLadder=[] t=23.12s walk=anchor:523224 place:7870 shifts=64 fp= unb= raster=3.3s place=5.2s
+  DIAG octree pitch=2.00 kept=[12.00=5 10.00=15 9.60=3 9.00=2 8.00=16 7.20=6 6.00=24 4.80=18 4.67=686 4.00=141 3.00=86 2.40=1067 2.33=522 2.00=1248] edge=3233 texels=25002 band=1.0 floor=1.8 solidBand=1.27 anchor=(9.0,0.0,7.5) in 2.4s drawnHi=0.0 why=[r0/kept=686 r0/occupancy=4 r0/outline=322 r0/slab=2024 r1/kept=5 r1/outline=11 r1/slab=127] noLadder=[] t=23.00s walk=anchor:523224 place:7870 shifts=64 fp=anchor/outline=2,place/outline=2 unb= raster=3.3s place=5.2s
+  DIAG octree pitch=2.00 kept=[12.00=3 10.00=9 9.00=1 8.00=8 7.20=1 6.00=9 4.80=14 4.67=211 4.00=64 3.00=63 2.40=575 2.33=72 2.00=678] edge=1546 texels=9958 band=1.0 floor=1.8 solidBand=1.27 anchor=(9.0,0.0,6.0) in 0.9s drawnHi=0.0 why=[r0/kept=211 r0/occupancy=1 r0/outline=67 r0/slab=558 r1/kept=3 r1/outline=11 r1/slab=44] noLadder=[] t=18.32s walk=anchor:186280 place:2595 shifts=64 fp=anchor/outline=2,place/outline=2 unb= raster=3.3s place=1.9s

@@ -1,0 +1,82 @@
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleChromeState.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleChromeState.swift
+index ace1a892..4e0da25e 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleChromeState.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleChromeState.swift
+@@ -40,5 +40,10 @@ public final class FlexibleChromeState: ObservableObject {
+     }
+ 
+     /// D2's face chip may show: nothing else is open (the chip itself, or the keypad it opened).
+-    public var allowsFaceChip: Bool { open == nil || open == .faceChip || open == .keypad }
++    public var allowsFaceChip: Bool {
++        if Self.controlChipOutsideTheRule { return true }
++        return open == nil || open == .faceChip || open == .keypad
++    }
++    /// ★ ROUND 7, R7-D3: test control only — the chip outside the one-card rule (the tray and the chip both up).
++    nonisolated(unsafe) static var controlChipOutsideTheRule = false
+ }
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleCornerPair.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleCornerPair.swift
+index 8495bbad..526ef51a 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleCornerPair.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleCornerPair.swift
+@@ -57,6 +57,11 @@ public struct FlexibleCornerPair: View {
+         self._geometry = ObservedObject(wrappedValue: main.chromeGeometry)
+     }
+ 
++    /// STUB (R7-D3 red run): the tray's Gravity [Change] as the pair hands it — today's closure alone.
++    @MainActor static func gravityAction(main: FlexibleMainStage, then changeGravity: @escaping () -> Void) -> () -> Void {
++        changeGravity
++    }
++
+     /// Test control only: the panels placed IN layout (the bar would measure them — the defect the overlay avoids).
+     @MainActor static var controlPanelInLayout = false
+     /// Test control only: the blocker rule fed the status its onChange closure captured (the first build: no pop on his pad).
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleFaceChipLayout.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleFaceChipLayout.swift
+index 93c9afe5..3e9262aa 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleFaceChipLayout.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleFaceChipLayout.swift
+@@ -140,6 +140,15 @@ public enum FlexibleFaceChipLayout {
+         return auto(size: s, anchor: anchor, viewport: v, keepOut: keepOut)
+     }
+ 
++    /// STUB (R7-D3 red run 2): the list's fallback — ignored (today's placement).
++    public static func auto(size s: CGSize, anchor: CGPoint?, viewport v: CGSize, keepOut: [CGRect], fallback: [CGRect]?, soft: CGRect? = nil) -> CGRect {
++        auto(size: s, anchor: anchor, viewport: v, keepOut: keepOut, soft: soft)
++    }
++    /// STUB (R7-D3 red run 2): the list's fallback — ignored (today's let-go).
++    public static func released(_ r: CGRect, viewport v: CGSize, keepOut: [CGRect], fallback: [CGRect]?) -> CGRect {
++        released(r, viewport: v, keepOut: keepOut)
++    }
++
+     /// Where a chip that started at `anchor` is while a finger has moved it by `translation` (clamped 16 pt inside).
+     public static func dragged(anchor: CGPoint, translation t: CGSize, size: CGSize, viewport v: CGSize) -> CGRect {
+         clamped(CGRect(x: anchor.x + t.width, y: anchor.y + t.height, width: size.width, height: size.height), viewport: v)
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleLatticeCard.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleLatticeCard.swift
+index 5e0faa19..a62caa10 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleLatticeCard.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleLatticeCard.swift
+@@ -50,6 +50,15 @@ public enum FlexibleLatticeCard {
+         return line.count <= 44 ? line : parts.joined(separator: " \u{00B7} ")
+     }
+ 
++    /// STUB (R7-D3 red run): the card offers [Send to core] (today's rule, as the view draws it).
++    @MainActor static func offersSend(state: FlexibleLatticeButton.State, run: FlexibleCoreRun) -> Bool {
++        (state == .ready || (state == .preview && run.hold == nil)) && !run.isSending
++    }
++    /// STUB (R7-D3 red run): the summary the card shows — today's: Ready only.
++    @MainActor static func shownSummary(state: FlexibleLatticeButton.State, run: FlexibleCoreRun, summary: () -> String?) -> String? {
++        state == .ready ? summary() : nil
++    }
++
+     /// ① Preview's line from the face-prisms the job sends: ★ the review of R7-D1 — named as Selections names them ("Face 3 +
+     /// Face 5", the mockup's), the count past two (one line), a split piece by count.
+     static func previewLine(includes inc: [LatticeRegionSpec]) -> String {
+
+# RED RUN 2 added (FlexibleFaceChipLayout.swift, before `dragged(anchor:…)`):
+    /// STUB (R7-D3 red run 2): the list's fallback — ignored (today's placement).
+    public static func auto(size s: CGSize, anchor: CGPoint?, viewport v: CGSize, keepOut: [CGRect], fallback: [CGRect]?, soft: CGRect? = nil) -> CGRect {
+        auto(size: s, anchor: anchor, viewport: v, keepOut: keepOut, soft: soft)
+    }
+    /// STUB (R7-D3 red run 2): the list's fallback — ignored (today's let-go).
+    public static func released(_ r: CGRect, viewport v: CGSize, keepOut: [CGRect], fallback: [CGRect]?) -> CGRect {
+        released(r, viewport: v, keepOut: keepOut)
+    }

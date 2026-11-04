@@ -1,0 +1,71 @@
+15:55  up 30 days, 23:20, 2 users, load averages: 9.19 7.24 6.47
+Test Case '-[TopOptFlowsTests.FlexibleBatchNProbe testTheSteppedSolveOnC1sPadsAndTheM2Stand]' started.
+Test Case '-[TopOptFlowsTests.FlexibleBatchNProbe testTheSteppedSolveOnC1sPadsAndTheM2Stand]' passed (74.738 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleBatchNProbe testTheSteppedSolveOnHisRound5Project]' started.
+Test Case '-[TopOptFlowsTests.FlexibleBatchNProbe testTheSteppedSolveOnHisRound5Project]' passed (46.686 seconds).
+	 Executed 2 tests, with 0 failures (0 unexpected) in 121.425 (121.425) seconds
+	 Executed 2 tests, with 0 failures (0 unexpected) in 121.425 (121.425) seconds
+	 Executed 2 tests, with 0 failures (0 unexpected) in 121.425 (121.428) seconds
+FLEX-N LINEAR his 0004 group-1: k 2.000 (asked 3.64, cut none) · uncut: gmax part 0.206 · max|u| 2.59 mm · inverted cells 0 (min det 0.825) · pull-back misses 0 (worst 0.00 mm) · solve 2424 ms
+FLEX-N STEPPED his 0004 group-1 past 1: REFINED λ 2.000 (asked 3.06) · gmax part 0.238 · max|u| 2.80 mm · inverted 0 (min det 0.796) · pull-back misses 0 of 53248 (worst 0.00 mm) · 11 solves · 11.9 s (the refine; 16.7 s with the extra solves) · past the data 0 of 53248 (0%) · grow > 30% 0 (max det 1.02) · 8 more undamped solves: 0.0036 0.0011 0.0004 0.0000 0.0000 0.0000 0.0000 0.0000 · the stop is 0.01 mm (0.5% of max|u|) from them
+FLEX-N   step 1 λ 0.250: 2 solves · change 0.0000 ✓ (last ω 1.00) · CG 126 · 2811 ms · strain p99 0.020 max 0.022 · beyond data 0 · by stress 0 · grow > 30% 0
+FLEX-N   step 2 λ 0.500: 1 solves · change 0.0000 ✓ (last ω 1.00) · CG 1 · 410 ms · strain p99 0.040 max 0.044 · beyond data 0 · by stress 0 · grow > 30% 0
+FLEX-N   step 3 λ 0.750: 1 solves · change 0.0000 ✓ (last ω 1.00) · CG 1 · 407 ms · strain p99 0.059 max 0.066 · beyond data 0 · by stress 0 · grow > 30% 0
+FLEX-N   step 4 λ 1.000: 1 solves · change 0.0000 ✓ (last ω 1.00) · CG 1 · 411 ms · strain p99 0.079 max 0.088 · beyond data 0 · by stress 0 · grow > 30% 0
+FLEX-N   step 5 λ 1.250: 1 solves · change 0.0000 ✓ (last ω 1.00) · CG 1 · 408 ms · strain p99 0.099 max 0.109 · beyond data 0 · by stress 0 · grow > 30% 0
+FLEX-N   step 6 λ 1.500: 1 solves · change 0.0080 ✓ (last ω 1.00) · CG 59 · 1337 ms · strain p99 0.120 max 0.138 · beyond data 0 · by stress 0 · grow > 30% 0
+FLEX-N   step 7 λ 1.750: 2 solves · change 0.0103 ✓ (last ω 1.00) · CG 127 · 2827 ms · strain p99 0.152 max 0.176 · beyond data 0 · by stress 0 · grow > 30% 0
+FLEX-N   step 8 λ 2.000: 2 solves · change 0.0118 ✓ (last ω 1.00) · CG 134 · 2923 ms · strain p99 0.185 max 0.214 · beyond data 0 · by stress 0 · grow > 30% 0
+FLEX-N LINEAR C1 pad bare group-1: k 1.367 (asked 1.37, cut none) · uncut: gmax part 0.202 · max|u| 2.98 mm · inverted cells 0 (min det 0.843) · pull-back misses 0 (worst 0.00 mm) · solve 682 ms
+FLEX-N STEPPED C1 pad bare group-1 past 1: REFINED λ 1.367 (asked 1.37) · gmax part 0.203 · max|u| 2.96 mm · inverted 0 (min det 0.846) · pull-back misses 0 of 53248 (worst 0.00 mm) · 10 solves · 5.0 s (the refine; 8.7 s with the extra solves) · past the data 0 of 53248 (0%) · grow > 30% 0 (max det 0.99) · 8 more undamped solves: 0.0055 0.0019 0.0006 0.0002 0.0000 0.0000 0.0000 0.0000 · the stop is 0.02 mm (0.8% of max|u|) from them
+FLEX-N   step 1 λ 0.171: 2 solves · change 0.0000 ✓ (last ω 1.00) · CG 19 · 1107 ms · strain p99 0.017 max 0.017 · beyond data 0 · by stress 0 · grow > 30% 0
+FLEX-N   step 2 λ 0.342: 1 solves · change 0.0000 ✓ (last ω 1.00) · CG 1 · 414 ms · strain p99 0.034 max 0.035 · beyond data 0 · by stress 0 · grow > 30% 0
+FLEX-N   step 3 λ 0.513: 1 solves · change 0.0000 ✓ (last ω 1.00) · CG 1 · 411 ms · strain p99 0.051 max 0.052 · beyond data 0 · by stress 0 · grow > 30% 0
+FLEX-N   step 4 λ 0.684: 1 solves · change 0.0000 ✓ (last ω 1.00) · CG 1 · 415 ms · strain p99 0.068 max 0.069 · beyond data 0 · by stress 0 · grow > 30% 0
+FLEX-N   step 5 λ 0.854: 1 solves · change 0.0000 ✓ (last ω 1.00) · CG 1 · 417 ms · strain p99 0.085 max 0.086 · beyond data 0 · by stress 0 · grow > 30% 0
+FLEX-N   step 6 λ 1.025: 1 solves · change 0.0000 ✓ (last ω 1.00) · CG 1 · 418 ms · strain p99 0.101 max 0.104 · beyond data 0 · by stress 0 · grow > 30% 0
+FLEX-N   step 7 λ 1.196: 1 solves · change 0.0092 ✓ (last ω 1.00) · CG 6 · 493 ms · strain p99 0.120 max 0.123 · beyond data 0 · by stress 0 · grow > 30% 0
+FLEX-N   step 8 λ 1.367: 2 solves · change 0.0166 ✓ (last ω 1.00) · CG 16 · 1052 ms · strain p99 0.147 max 0.152 · beyond data 0 · by stress 0 · grow > 30% 0
+FLEX-N LINEAR C1 pad covered group-1: k 1.616 (asked 1.62, cut none) · uncut: gmax part 0.175 · max|u| 2.92 mm · inverted cells 0 (min det 0.827) · pull-back misses 0 (worst 0.00 mm) · solve 2325 ms
+FLEX-N STEPPED C1 pad covered group-1 past 1: REFINED λ 1.534 (asked 1.52) · gmax part 0.180 · max|u| 2.97 mm · inverted 0 (min det 0.822) · pull-back misses 0 of 53248 (worst 0.00 mm) · 12 solves · 13.8 s (the refine; 19.7 s with the extra solves) · past the data 0 of 53248 (0%) · grow > 30% 0 (max det 1.01) · 8 more undamped solves: 0.0045 0.0015 0.0005 0.0002 0.0000 0.0000 0.0000 0.0000 · the stop is 0.02 mm (0.7% of max|u|) from them
+FLEX-N   step 1 λ 0.202: 2 solves · change 0.0000 ✓ (last ω 1.00) · CG 119 · 2697 ms · strain p99 0.020 max 0.020 · beyond data 0 · by stress 0 · grow > 30% 0
+FLEX-N   step 2 λ 0.404: 1 solves · change 0.0000 ✓ (last ω 1.00) · CG 1 · 416 ms · strain p99 0.039 max 0.040 · beyond data 0 · by stress 0 · grow > 30% 0
+FLEX-N   step 3 λ 0.606: 1 solves · change 0.0000 ✓ (last ω 1.00) · CG 1 · 415 ms · strain p99 0.059 max 0.060 · beyond data 0 · by stress 0 · grow > 30% 0
+FLEX-N   step 4 λ 0.808: 1 solves · change 0.0000 ✓ (last ω 1.00) · CG 1 · 415 ms · strain p99 0.079 max 0.080 · beyond data 0 · by stress 0 · grow > 30% 0
+FLEX-N   step 5 λ 1.010: 1 solves · change 0.0000 ✓ (last ω 1.00) · CG 1 · 415 ms · strain p99 0.098 max 0.101 · beyond data 0 · by stress 0 · grow > 30% 0
+FLEX-N   step 6 λ 1.212: 1 solves · change 0.0063 ✓ (last ω 1.00) · CG 61 · 1371 ms · strain p99 0.119 max 0.122 · beyond data 0 · by stress 0 · grow > 30% 0
+FLEX-N   step 7 λ 1.414: 2 solves · change 0.0171 ✓ (last ω 1.00) · CG 132 · 2912 ms · strain p99 0.150 max 0.155 · beyond data 0 · by stress 0 · grow > 30% 0
+FLEX-N   step 8 λ 1.616: 2 solves · change 0.0178 ✓ (last ω 1.00) · CG 153 · 3250 ms · strain p99 0.184 max 0.192 · beyond data 0 · by stress 0 · grow > 30% 0
+FLEX-N   step 9 λ 1.534: 1 solves · change 0.0127 ✓ (last ω 1.00) · CG 72 · 1557 ms · strain p99 0.173 max 0.180 · beyond data 0 · by stress 0 · grow > 30% 0
+FLEX-N LINEAR M2 stand group-1: k 2.000 (asked 12.87, cut 0.60) · uncut: gmax part 0.831 · max|u| 6.80 mm · inverted cells 0 (min det 0.564) · pull-back misses 0 (worst 0.00 mm) · solve 4708 ms
+FLEX-N STEPPED M2 stand group-1 past 1: REFINED λ 2.000 (asked 11.63) · gmax part 1.051 · max|u| 7.43 mm · inverted 0 (min det 0.450) · pull-back misses 0 of 13289 (worst 0.00 mm) · 10 solves · 12.7 s (the refine; 13.8 s with the extra solves) · past the data 54 of 13287 (0%) · grow > 30% 0 (max det 1.24) · 8 more undamped solves: 0.0037 0.0007 0.0002 0.0000 0.0000 0.0000 0.0000 0.0000 · the stop is 0.03 mm (0.4% of max|u|) from them
+FLEX-N   step 1 λ 0.250: 2 solves · change 0.0000 ✓ (last ω 1.00) · CG 2560 · 4090 ms · strain p99 0.022 max 0.042 · beyond data 0 · by stress 0 · grow > 30% 0 · Jacobi-CG
+FLEX-N   step 2 λ 0.500: 1 solves · change 0.0000 ✓ (last ω 1.00) · CG 0 · 5 ms · strain p99 0.045 max 0.083 · beyond data 0 · by stress 0 · grow > 30% 0 · Jacobi-CG
+FLEX-N   step 3 λ 0.750: 1 solves · change 0.0028 ✓ (last ω 1.00) · CG 240 · 246 ms · strain p99 0.067 max 0.128 · beyond data 0 · by stress 0 · grow > 30% 0 · Jacobi-CG
+FLEX-N   step 4 λ 1.000: 1 solves · change 0.0198 ✓ (last ω 1.00) · CG 955 · 960 ms · strain p99 0.089 max 0.186 · beyond data 0 · by stress 0 · grow > 30% 0 · Jacobi-CG
+FLEX-N   step 5 λ 1.250: 2 solves · change 0.0066 ✓ (last ω 1.00) · CG 2420 · 2434 ms · strain p99 0.114 max 0.258 · beyond data 0 · by stress 0 · grow > 30% 0 · Jacobi-CG
+FLEX-N   step 6 λ 1.500: 1 solves · change 0.0189 ✓ (last ω 1.00) · CG 1583 · 1588 ms · strain p99 0.143 max 0.322 · beyond data 20 · by stress 0 · grow > 30% 0 · Jacobi-CG
+FLEX-N   step 7 λ 1.750: 1 solves · change 0.0193 ✓ (last ω 1.00) · CG 1587 · 1593 ms · strain p99 0.177 max 0.379 · beyond data 39 · by stress 19 · grow > 30% 0 · Jacobi-CG
+FLEX-N   step 8 λ 2.000: 1 solves · change 0.0158 ✓ (last ω 1.00) · CG 1528 · 1517 ms · strain p99 0.212 max 0.425 · beyond data 54 · by stress 38 · grow > 30% 0 · Jacobi-CG
+FLEX-N LINEAR his r5 group-1: k 2.000 (asked 7.39, cut 0.23) · uncut: gmax part 2.204 · max|u| 26.39 mm · inverted cells 24 (min det -0.201) · pull-back misses 665 (worst 9.25 mm) · solve 690 ms
+FLEX-N STEPPED his r5 group-1 past 1: REFINED λ 2.000 (asked 6.83) · gmax part 2.141 · max|u| 24.20 mm · inverted 0 (min det 0.339) · pull-back misses 493 of 53248 (worst 3.12 mm) · 23 solves · 18.5 s (the refine; 22.9 s with the extra solves) · past the data 18169 of 53248 (34%) · grow > 30% 1321 (max det 2.11) · 8 more undamped solves: 0.0054 0.0032 0.0020 0.0013 0.0009 0.0007 0.0005 0.0004 · the stop is 0.32 mm (1.4% of max|u|) from them
+FLEX-N   step 1 λ 0.250: 2 solves · change 0.0041 ✓ (last ω 1.00) · CG 25 · 1197 ms · strain p99 0.071 max 0.154 · beyond data 0 · by stress 0 · grow > 30% 0
+FLEX-N   step 2 λ 0.500: 2 solves · change 0.0079 ✓ (last ω 1.00) · CG 21 · 1140 ms · strain p99 0.152 max 0.349 · beyond data 33 · by stress 4 · grow > 30% 0
+FLEX-N   step 3 λ 0.750: 2 solves · change 0.0076 ✓ (last ω 1.00) · CG 22 · 1154 ms · strain p99 0.254 max 0.500 · beyond data 351 · by stress 178 · grow > 30% 0
+FLEX-N   step 4 λ 1.000: 2 solves · change 0.0122 ✓ (last ω 1.00) · CG 23 · 1173 ms · strain p99 0.350 max 0.597 · beyond data 1097 · by stress 735 · grow > 30% 151
+FLEX-N   step 5 λ 1.250: 2 solves · change 0.0121 ✓ (last ω 1.00) · CG 23 · 1178 ms · strain p99 0.423 max 0.652 · beyond data 2608 · by stress 1749 · grow > 30% 485
+FLEX-N   step 6 λ 1.500: 2 solves · change 0.0081 ✓ (last ω 1.00) · CG 23 · 1193 ms · strain p99 0.475 max 0.681 · beyond data 5516 · by stress 3563 · grow > 30% 756
+FLEX-N   step 7 λ 1.750: 3 solves · change 0.0766 ✗ (last ω 1.00) · CG 96 · 3051 ms · strain p99 0.505 max 1.097 · beyond data 11750 · by stress 6049 · grow > 30% 1038
+FLEX-N   step 8 λ 2.000: 8 solves · change 0.0112 ✓ (last ω 1.00) · CG 266 · 7943 ms · strain p99 0.532 max 0.727 · beyond data 18169 · by stress 11594 · grow > 30% 1321
+FLEX-N LINEAR his r5 group-2: k 2.000 (asked 2.09, cut 0.53) · uncut: gmax part 0.941 · max|u| 27.40 mm · inverted cells 0 (min det 0.514) · pull-back misses 0 (worst 0.04 mm) · solve 1119 ms
+FLEX-N STEPPED his r5 group-2 past 1: REFINED λ 1.634 (asked 1.65) · gmax part 0.832 · max|u| 28.31 mm · inverted 0 (min det 0.579) · pull-back misses 0 of 53248 (worst 0.02 mm) · 18 solves · 15.9 s (the refine; 20.4 s with the extra solves) · past the data 20044 of 53248 (38%) · grow > 30% 0 (max det 1.10) · 8 more undamped solves: 0.0023 0.0006 0.0002 0.0000 0.0000 0.0000 0.0000 0.0000 · the stop is 0.08 mm (0.3% of max|u|) from them
+FLEX-N   step 1 λ 0.250: 2 solves · change 0.0000 ✓ (last ω 1.00) · CG 41 · 1548 ms · strain p99 0.045 max 0.052 · beyond data 0 · by stress 0 · grow > 30% 0
+FLEX-N   step 2 λ 0.500: 1 solves · change 0.0000 ✓ (last ω 1.00) · CG 1 · 454 ms · strain p99 0.091 max 0.104 · beyond data 0 · by stress 0 · grow > 30% 0
+FLEX-N   step 3 λ 0.750: 1 solves · change 0.0096 ✓ (last ω 1.00) · CG 14 · 665 ms · strain p99 0.144 max 0.174 · beyond data 0 · by stress 0 · grow > 30% 0
+FLEX-N   step 4 λ 1.000: 3 solves · change 0.0079 ✓ (last ω 1.00) · CG 92 · 2830 ms · strain p99 0.220 max 0.271 · beyond data 0 · by stress 0 · grow > 30% 0
+FLEX-N   step 5 λ 1.250: 3 solves · change 0.0071 ✓ (last ω 1.00) · CG 77 · 2584 ms · strain p99 0.300 max 0.354 · beyond data 680 · by stress 113 · grow > 30% 0
+FLEX-N   step 6 λ 1.500: 2 solves · change 0.0130 ✓ (last ω 1.00) · CG 42 · 1582 ms · strain p99 0.367 max 0.415 · beyond data 4347 · by stress 940 · grow > 30% 0
+FLEX-N   step 7 λ 1.750: 2 solves · change 0.0092 ✓ (last ω 1.00) · CG 55 · 1980 ms · strain p99 0.420 max 0.466 · beyond data 29210 · by stress 8990 · grow > 30% 0
+FLEX-N   step 8 λ 2.000: 2 solves · change 0.0040 ✓ (last ω 1.00) · CG 54 · 1947 ms · strain p99 0.461 max 0.518 · beyond data 38204 · by stress 27866 · grow > 30% 0
+FLEX-N   step 9 λ 1.634: 2 solves · change 0.0074 ✓ (last ω 1.00) · CG 56 · 1819 ms · strain p99 0.397 max 0.441 · beyond data 20044 · by stress 2196 · grow > 30% 0
+15:57  up 30 days, 23:22, 2 users, load averages: 5.46 6.38 6.23

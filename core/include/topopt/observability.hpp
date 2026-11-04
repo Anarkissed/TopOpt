@@ -271,11 +271,21 @@ struct OrganicSyntheticRegionInfo {
   long long voxels = 0;
   long long fully = 0;
   long long blended = 0;
+  // ── ★ RULING H'S VERDICT FOR THIS WALL, IN THE RECEIPT (2026-09-29) ─────────
+  // Report-only. The verdict existed only on a stderr line ("[synthetic] region N
+  // ... -> DEAD, synthesised WHOLE"), so the run's DEAD SET could not be compared
+  // with the size probe's except by reading and parsing two logs -- which is how the
+  // two came to disagree unnoticed (#354's audit). `p99_von_mises` is the REAL
+  // field's p99 over this region's voxels in the synthesis domain, measured before a
+  // single voxel was written; `whole_region` is that p99 against the run's dead
+  // threshold (already in the receipt as synthetic_stress_dead_threshold).
+  bool whole_region = false;
+  double p99_von_mises = 0.0;
 };
 
 struct RunInfo {
   std::string cli_version;   // topopt::version()
-  std::string fingerprint;   // TOPOPT_BUILD_FINGERPRINT (core git sha or "dev")
+  std::string fingerprint;   // TOPOPT_BUILD_FINGERPRINT (core tree hash or "dev")
   // ★ WHEN THIS BINARY WAS COMPILED (__DATE__ " " __TIME__ of the CLI's own
   // translation unit). The SHA says which SOURCE ERA; this says whether the binary
   // is actually current. A targeted build that reports success without relinking
@@ -1017,12 +1027,24 @@ struct RunInfo {
   // ★ which rule set that threshold: the absolute floor, or 2 % of the part's peak.
   bool organic_synthetic_dead_floor_bound = false;
   std::vector<OrganicSyntheticRegionInfo> organic_synthetic_by_region;   // keyed by face_id
-  // ★ the overhang fillet (grading.organic_overhang_fillet) and the transfer ties
-  // (grading.organic_transfer_ties), so the receipt says what each did or declined
   double organic_solid_rim_mm = 0.0;        // grade-to-solid band at the outline
   long long organic_solid_rim_voxels = 0;
-  bool organic_overhang_fillet_on = true;
-  long long organic_fillet_skipped_spans = 0;
+  // Spans over open air: PRINTED AS DRAWN and counted. Not repaired, not deleted --
+  // the overhang fillet that used to flare them was removed for depositing blobs up
+  // to nine times the strut, and this count is the measurement that replaced it. Said
+  // explicitly because the generator's own field carried the opposite claim until
+  // 2026-09-29, and silence here would leave the same inference available.
+  long long organic_unsupported_spans = 0;
+  // ── ★ §3 PARITY: THE SPAN CENSUS, to be diffed against the app's own trace banner.
+  // Measured on the spans that SHIP, after every pass -- which is the set the file is
+  // carved from and the set the certificate reads, not the set the tracer drew. The
+  // two differ, and reporting the tracer's numbers here is how a run comes to describe
+  // geometry it did not emit.
+  long long organic_span_count = 0;
+  double organic_span_length_mm = 0.0;
+  double organic_span_radius_min_mm = 0.0;
+  double organic_span_radius_p50_mm = 0.0;
+  double organic_span_radius_max_mm = 0.0;
   bool organic_transfer_ties_on = false;
   long long organic_ties_seeded = 0;
   long long organic_ties_landed = 0;
@@ -1148,9 +1170,6 @@ struct RunInfo {
   long long organic_cantilever_islands = 0;
   long long organic_arched_spans = 0;
   double organic_arch_rise = 0.0;
-  long long organic_filleted = 0;
-  long long organic_fillet_unresolved = 0;
-  double organic_fillet_radius = 0.0;
   // ── ★★ GROWTH TELEMETRY (task PR-353 amendment §1) ──────────────────────────
   // `growth_ran` distinguishes "growth measured zero" from "growth never ran": a
   // traced run reports false and every counter below is meaningless, which is the
@@ -1248,6 +1267,140 @@ struct RunInfo {
   // an adjacent-but-not-joined pair is a mechanical disconnection at that seam.
   long long stepped_adjacent_region_pairs = 0;
   long long stepped_adjacent_pairs_joined = 0;
+  // ── ★ ANY-STEP STEPPED (brief of 2026-09-17 §2.4) ──────────────────────────
+  // The plan the job stated and core laid down, and its size histogram in the same
+  // shape as the preview's DIAG so the run and the screen can be compared entry for
+  // entry rather than by eye.
+  long long stepped_anystep_cells = 0;
+  long long stepped_anystep_regions = 0;
+  long long stepped_anystep_passes = 0;
+  std::string stepped_anystep_histogram;
+  // ── ★ §3 PARITY: THE NUMBERS THE PREVIEW'S DIAG PRINTS, SO THE TWO CAN BE DIFFED ──
+  // Per emitted size: the relative density USED and the strut radius core's law gave
+  // at it, in the same descending-size order as the histogram. When the job sent
+  // stepped_cells[].rho these must equal what was sent; when it did not, they are what
+  // core derived. Either way the app can check a size at a time rather than by eye.
+  // Shape: "9.000=0.2189/0.9852, 3.000=0.1740/0.2611" (size=rho/radius_mm).
+  std::string stepped_anystep_rho_by_size;
+  // ── ★ K3 (3): WHAT THE PLAN LEFT SOLID, PER REGION ──────────────────────────
+  // Printed voxels each include region owns that NO plan cell covers, in mm3
+  // ("r1=1234.567, r2=0.000"), beside the volume the plan latticed. On a plan job this
+  // is the solid companion's own set: the partial-depth strip -- cells that stop short
+  // of the region's depth -- is exactly this number, so a run that latticed it anyway
+  // or left it as air is visible in the receipt rather than only in the mesh.
+  std::string stepped_plan_solid_remainder_mm3;
+  double stepped_plan_latticed_mm3 = 0.0;
+  // ★ ruling 1's condition (2026-10-10): latticed voxels per region whose relative
+  // density came from core's own grading because the covering cell sent none, e.g.
+  // "r1=0, r2=0". A plan that sends a rho with every cell must show 0 everywhere; a
+  // non-zero entry says core is sizing and certifying that many of the plan's struts
+  // from its own field.
+  std::string stepped_plan_rho_fallback_by_region;
+  // ★ ruling 2 (2026-10-10): per region, the volume its OWN plan cells cover that the
+  // region does not reach -- outside its `outline_uv`, or overhanging its prism. That is
+  // the set the outline clip stops struts from filling. Before the clip those voxels
+  // carried struts AND were certified SOLID by the mask, which is the disagreement bar
+  // B7 exists to stop. "r1=5097.656" in mm3; 0 on a region whose cells all sit inside it.
+  std::string stepped_clip_outside_region_mm3;
+  // ★ ruling 3b (2026-10-11): the same volume split by what put it out of the region's
+  // reach -- "r1: outline=2062.908 depth=0.000 rect=0.000 owned=0.000 other=0.000" --
+  // on the same voxel basis, so the five add back to the figure above.
+  std::string stepped_clip_outside_by_cause_mm3;
+  // ── ★ K5 (2026-10-10): WHERE EVERY STRUT AND NODE GOT ITS DENSITY ───────────
+  // The generator samples the radius at a strut's MIDPOINT and at a node's own position,
+  // and for the octet both sit ON cell planes -- a corner node is shared by eight cells,
+  // a face-diagonal strut's midpoint lies in a shared face. These three say whether the
+  // plan's own per-cell density reached them. `_floor` must be 0 on a plan that sent a
+  // rho with every cell: a boundary joint sized at the thinnest density the law allows,
+  // where the plan asked for something else, is a notch where the load leaves the
+  // lattice.
+  long long stepped_plan_rho_queries_plan = 0;
+  long long stepped_plan_rho_queries_posture = 0;
+  long long stepped_plan_rho_queries_floor = 0;
+
+  // ── ★ K4 (2026-10-10): THE PLAN AS LAID, PER REGION AND PER GROUP ───────────
+  // The summary above says how many cells over how many regions in how many passes.
+  // This says WHICH: each region's base, the grid it was packed on, and every group the
+  // run laid -- its own size, its own grid origin, the PHASE of that origin against the
+  // region's slot grid (which is what the pass bucketing keys on), and what the
+  // generator actually put there.
+  //
+  // `cell_mm` elsewhere in this receipt is the LAW's cell, which on a plan run names a
+  // grid the file does not contain. These are the file's own numbers; nothing here is
+  // derived a second time.
+  struct PlanGroup {
+    double size_mm = 0.0;
+    double origin_mm[3] = {0.0, 0.0, 0.0};
+    // origin - slot_origin reduced into [0, size): the grid phase, per axis.
+    double phase_mm[3] = {0.0, 0.0, 0.0};
+    int nx = 0, ny = 0, nz = 0;
+    long long cells = 0;
+    long long struts_laid = 0;     // what the GENERATOR emitted in these cells
+    long long nodes_laid = 0;
+    long long cells_with_no_strut = 0;
+    // ★ ruling 3 (2026-10-11): and WHY, so the count is a diagnosis. Tested in this
+    // order, each cell filed under the FIRST thing that would have stopped it; only
+    // `never_generated` is unexplained, every other row is a reason the app can see.
+    long long no_strut_outside_rect = 0;
+    long long no_strut_beyond_depth = 0;
+    long long no_strut_outside_outline = 0;
+    long long no_strut_owned_elsewhere = 0;
+    long long no_strut_no_material = 0;
+    // core's own activation proof dropped the cell whole (cell_may_overlap)
+    long long no_strut_cell_overlap_dropped = 0;
+    long long no_strut_never_generated = 0;
+  };
+  struct PlanRegion {
+    int region_id = 0;
+    double base_cell_mm = 0.0;
+    double slot_origin_mm[3] = {0.0, 0.0, 0.0};
+    bool slot_origin_stated = false;
+    double plane_origin_mm[3] = {0.0, 0.0, 0.0};
+    double normal[3] = {0.0, 0.0, 0.0};
+    double depth_mm = 0.0;
+    long long cells = 0;
+    std::string sizes;             // "6.00=4, 3.00=12", descending by size
+    std::vector<PlanGroup> groups;
+  };
+  std::vector<PlanRegion> stepped_plan_by_region;
+  // ★ Whether the LEDGER TAP ran (lattice.emit_plan_laid). Without it the per-cell
+  // counts are not measured, and reporting `struts_laid: 0` /
+  // `cells_with_no_strut: <every cell>` would say the generator laid nothing where the
+  // truth is that nobody counted. They are omitted instead, and this says why.
+  bool stepped_plan_laid_measured = false;
+  // ── ★ THE LAW GRADED NOTHING AND THE RUN CARRIED ON (ruling, 2026-10-11) ────
+  // On a PLAN job whose every cell carries its own relative density, the law's inability
+  // to grade is REPORTED rather than fatal: the plan is the design, so core needs the
+  // law's grade for neither the geometry nor the certificate. The note carries the law's
+  // own fallback counts, so "core overrode its own law here" is never silent. False on
+  // every job where the law did grade, and on every job that sent no plan.
+  bool stepped_law_ungradeable_reported = false;
+  std::string stepped_law_ungradeable_note;
+  // Elements the generator emitted that no plan cell shares. 0 is the expected value;
+  // a non-zero count means geometry was written outside every cell of the plan.
+  long long stepped_plan_laid_unattributed = 0;
+  // The outline beam as APPLIED (ruling B): the width core derived from bead and
+  // voxel, the bleed the band asked for, and how far in the solid actually reaches.
+  // 0 when the shape grade is off, which is when there is no beam.
+  double lattice_outline_beam_mm = 0.0;
+  double lattice_outline_bleed_mm = 0.0;
+  double lattice_outline_inward_mm = 0.0;
+  long long lattice_outline_voxels = 0;
+  // ── THE SEAM CENSUS, which is the whole reason any-step certifies as a network ──
+  // `t_junction_ends` is an end that landed on another member's interior and was
+  // FUSED -- the normal case for an any-step seam, reported and never gated.
+  // `floating_ends` is an end on NOTHING; after the contact weld it must be 0 for a
+  // certified job, because a packed plan has no free tips by construction.
+  // The subdivision counts sit beside them: the weld is endpoint-based, so an
+  // unsubdivided octet member crossing at mid-span is not fused at all, and the
+  // before/after is the evidence that the precondition was actually met.
+  long long stepped_seam_spans_before = 0;
+  long long stepped_seam_spans_after = 0;
+  double stepped_seam_piece_mm = 0.0;
+  double stepped_seam_longest_before_mm = 0.0;
+  long long stepped_seam_welded_nodes = 0;
+  long long stepped_seam_t_junction_ends = 0;
+  long long stepped_seam_floating_ends = 0;
   long long grading_solid_fallback_voxels = 0;  // L4: too thin -> stayed solid
   double grading_min_member_width_mm = 0.0; // thinnest latticed member (mm)
   double grading_min_cells_per_member = 0.0;    // at that member (>= floor, EXCEPT

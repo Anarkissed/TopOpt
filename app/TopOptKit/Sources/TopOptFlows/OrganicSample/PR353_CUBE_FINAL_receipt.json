@@ -1,0 +1,37 @@
+{
+ "grading": {
+  "organic": {
+   "span_count": 12434,
+   "span_length_mm": 20233.09307,
+   "length_survival": 1.48290896,
+   "emitted_components": 1,
+   "emitted_largest_length_fraction": 1,
+   "emitted_stranded_length_mm": 0,
+   "support_legs_added": 748,
+   "support_spans_cut": 317,
+   "curves_traced": 584,
+   "strut_diameter_mm": 0.42,
+   "requested_spacing_min_mm": 3,
+   "requested_spacing_max_mm": 6,
+   "achieved_spacing_min_mm": 1.501992488,
+   "achieved_spacing_median_mm": 3.101639644,
+   "achieved_spacing_max_mm": 6.034986737,
+   "tensor_out_of_regime": true,
+   "length_census_mm": {
+    "grown": 13644.19099,
+    "emitted": 15410.43574,
+    "node_merge": 15020.11122,
+    "base_cut": null,
+    "support_prune": 13597.81652,
+    "stranded_drop": 13597.81652,
+    "ground_tie": null,
+    "branch_support": null,
+    "dangling": 13597.81652,
+    "stranded_drop_2": 13597.81652,
+    "fill_mat": null,
+    "finish": 20233.09307,
+    "written": 20233.09307
+   }
+  }
+ }
+}

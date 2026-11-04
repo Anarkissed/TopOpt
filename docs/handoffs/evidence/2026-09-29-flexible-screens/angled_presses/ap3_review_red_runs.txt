@@ -1,0 +1,105 @@
+# Angled presses (task 2026-10-07), batch AP3 REVIEW: the two AP3 verifiers' findings on "the arrow's maths", confirmed
+# and fixed. (1) TESTS-FIRST red run. The review's tests-first commit carries FlexiblePressAimReviewTests (6 tests) and
+# the new API as RED STUBS (app/TopOptKit, the lines marked "AP3 REVIEW RED STUB"):
+#   FlexibleStageModel.aimPress — `Release.exact` unread: ANY release of kind straighten on a tilted press straightens
+#     it (the blocker, as AP3 shipped it);
+#   FlexiblePressAimSet.footprintNormals = memberLoads (each member's AVERAGE normal: the AP3 1° limit);
+#   FlexiblePressAimSet.whyDetail = why; Asked.line = core's sentence; FlexibleStageModel.plainLine = text(reason);
+#   FlexiblePressAim.plainLine / plainFrameLine = core's sentence as it is;
+#   FlexiblePressAimSet.on(_:) = the first offered target wherever the arrow is (the stored kind read as "snapped");
+# and every other finding red against AP3 AS IT WAS (c5b7b165's logic, unchanged in that commit): [Straighten] asked
+# only as the no-direction face press; the clamp holding at a start inside the 1° band; the box's range 0…0 from a target
+# inside it; FlexibleRegions.renamed blind to "face region N".
+# Real in that commit (data, no rule): Release.exact (true for a chip, a knob snap, the box at 0), the set's drag(...) /
+# trackball(...) conveniences (they hand the knob the offered targets and footprintNormals).
+# FlexiblePressAimTests (AP3's 13) also changed in that commit, to the review's API: testOpposingFacesHaveNoHalfway reads
+# core's words from `whyDetail` (`why` becomes the plain line); testEveryOfferedDirectionIsOneCoreAccepts asks every
+# target EXACTLY as a release stores it (the direction stated, straighten too, and straighten also as the face press it
+# turns back into) and takes the box from the set (footprintNormals). Both green against AP3's logic on their (planar)
+# fixtures, as expected: the wrapped-face case is the review class's.
+# Command (app/TopOptKit, built with swift build --build-tests, unseeded):
+#   swift test --skip-build --filter 'TopOptFlowsTests\.(FlexiblePressAimReviewTests|FlexiblePressAimTests)/'
+# Expected: FlexiblePressAimReviewTests 6 run, 6 RED, each for its finding; FlexiblePressAimTests 13/13 green.
+
+FAILED FlexiblePressAimReviewTests.testATargetInsideTheOneDegreeBandLeavesTheBoxAndTheKnobFree: 2 failures
+   - XCTAssertEqualWithAccuracy failed: (…) is not equal to (…) +/- (…) - ★ the box moves: over the normal to 0.5° short of the far edge
+   - XCTAssertLessThan failed: (…) is not less than (…) - ★ the knob follows the finger (no further out than its target)
+FAILED FlexiblePressAimReviewTests.testCoreRefusalsReadAsOnePlainLine: 51 failures
+   - XCTAssertFalse failed - ★ the (i) names the sector the app's way
+   - XCTAssertTrue failed - ★ … as the app names it: press_direction does not point into the part over face region 1000103: part of it faces along the direction or edge-on to it
+   - XCTAssertLessThanOrEqual failed: (…) is greater than (…) - ★ one line
+FAILED FlexiblePressAimReviewTests.testEveryDirectionTheAppAllowsIsOneCoreBuilds: 6 failures
+   - XCTAssertGreaterThan failed: (…) is not greater than (…) - one-fillet slab top + wrapped wall: core's normal of every footprint triangle
+   - XCTAssertEqual failed: (…) is not equal to (…) - ★ one-fillet slab top + wrapped wall: every direction the app allows is built by core — knob SIMD3<Double>(…): press_direction does not point into the part over face region 0: part 
+   - XCTAssertGreaterThan failed: (…) is not greater than (…) - M2 corner #11 [33, 34, 57]: core's normal of every footprint triangle
+FAILED FlexiblePressAimReviewTests.testStraightenIsOfferedOnlyWhereCoreBuildsItBothWays: 5 failures
+   - XCTAssertFalse failed - ★ [Straighten] is not offered where its stored direction is refused
+   - XCTAssertFalse failed
+   - XCTAssertNotEqual failed: ("Optional(TopOptFlows.FlexiblePress.Snap.straighten)") is equal to ("Optional(TopOptFlows.FlexiblePress.Snap.straighten)") - ★ nor a new press's default
+FAILED FlexiblePressAimReviewTests.testTheArrowShowsSnappedOnlyOnItsTarget: 3 failures
+   - XCTAssertNil failed: "Target(kind: TopOptFlows.FlexiblePress.Snap.halfway, direction: SIMD3<Double>(…)" - ★ 20° off: nothing is shown snapped
+   - XCTAssertNil failed: "Target(kind: TopOptFlows.FlexiblePress.Snap.halfway, direction: SIMD3<Double>(…)" - ★ one ulp off is not on it
+   - XCTAssertNil failed: "Target(kind: TopOptFlows.FlexiblePress.Snap.straighten, direction: SIMD3<Double>(…)" - a tilt is not straight
+FAILED FlexiblePressAimReviewTests.testTheDegreesBoxTiltsATiltedFacePress: 1 failures
+   - XCTUnwrap failed: expected non-nil value of type "FlexiblePress" - ★ the box's 20° keeps the tilt
+
+# The tests' own evidence lines (FLEX-AP3R), red run:
+FLEX-AP3R BAND box from a target 0.5° in: range 0.0...0.0 · limit 0.000000000°
+FLEX-AP3R BAND knob from the target toward 0.7° in, 30° along: moved 0.000000°
+FLEX-AP3R WORDS r5 edge along face 3's normal: core 'press_direction does not point into the part over face region 1000103: part of it faces along the direction or edge-on to it' (124) → (i) 'press_direction does not point into the part over face region 1000103: part of it faces along the direction or edge-on to it' → line 'press_direction does not point into the part over face region 1000103:
+FLEX-AP3R WORDS cube60 edge Straight down: 'press_direction does not point into the part over face region 5: part of it faces along the direction or edge-on to it' (118) · (i) 'press_direction does not point into the part over face region 5: part of it faces along the direction or edge-on to it'
+FLEX-AP3R WORDS cube60 edge Straight up: 'press_direction does not point into the part over face region 1: part of it faces along the direction or edge-on to it' (118) · (i) 'press_direction does not point into the part over face region 1: part of it faces along the direction or edge-on to it'
+FLEX-AP3R WORDS cube60 corner Straight down: 'press_direction does not point into the part over face region 5: part of it faces along the direction or edge-on to it' (118) · (i) 'press_direction does not point into the part over face region 5: part of it faces along the direction or edge-on to it'
+FLEX-AP3R WORDS cube60 corner Straight up: 'press_direction does not point into the part over face region 1: part of it faces along the direction or edge-on to it' (118) · (i) 'press_direction does not point into the part over face region 1: part of it faces along the direction or edge-on to it'
+FLEX-AP3R WORDS cube60 top Straight up: 'press_direction does not point into the part over face region 1: part of it faces along the direction or edge-on to it' (118) · (i) 'press_direction does not point into the part over face region 1: part of it faces along the direction or edge-on to it'
+FLEX-AP3R WORDS his r5 edge Straight down: 'press_direction does not point into the part over face region 3: part of it faces along the direction or edge-on to it' (118) · (i) 'press_direction does not point into the part over face region 3: part of it faces along the direction or edge-on to it'
+FLEX-AP3R WORDS his r5 edge Straight up: 'press_direction does not point into the part over face region 1000103: part of it faces along the direction or edge-on to it' (124) · (i) 'press_direction does not point into the part over face region 1000103: part of it faces along the direction or edge-on to it'
+FLEX-AP3R WORDS his r5 corner Straight down: 'press_direction does not point into the part over face region 3: part of it faces along the direction or edge-on to it' (118) · (i) 'press_direction does not point into the part over face region 3: part of it faces along the direction or edge-on to it'
+FLEX-AP3R WORDS his r5 corner Straight up: 'press_direction does not point into the part over face region 1000103: part of it faces along the direction or edge-on to it' (124) · (i) 'press_direction does not point into the part over face region 1000103: part of it faces along the direction or edge-on to it'
+FLEX-AP3R WORDS A1_0003 edge Straight down: 'press_direction does not point into the part over face region 2: part of it faces along the direction or edge-on to it' (118) · (i) 'press_direction does not point into the part over face region 2: part of it faces along the direction or edge-on to it'
+FLEX-AP3R WORDS A1_0003 edge Straight up: 'press_direction does not point into the part over face region 1: part of it faces along the direction or edge-on to it' (118) · (i) 'press_direction does not point into the part over face region 1: part of it faces along the direction or edge-on to it'
+FLEX-AP3R WORDS A1_0003 corner Straight down: 'press_direction does not point into the part over face region 2: part of it faces along the direction or edge-on to it' (118) · (i) 'press_direction does not point into the part over face region 2: part of it faces along the direction or edge-on to it'
+FLEX-AP3R WORDS A1_0003 corner Straight up: 'press_direction does not point into the part over face region 1: part of it faces along the direction or edge-on to it' (118) · (i) 'press_direction does not point into the part over face region 1: part of it faces along the direction or edge-on to it'
+FLEX-AP3R WORDS rounded slab top + wall 0: why 'face 0: the face's normals cancel out (no single direction to push along)' (73) · (i) 'face 0: the face's normals cancel out (no single direction to push along)'
+FLEX-AP3R WORDS rule: 'press_direction does not point into the part over face region 7: part of it faces along the direction or edge-on to it' (118) ← 'press_direction does not point into the part over face region 7: part of it faces along the direction or edge-on to it'
+FLEX-AP3R WORDS rule: 'face region 3 and face region 7 are not adjacent (no shared edge); an edge or corner press needs one connected footprint' (120) ← 'face region 3 and face region 7 are not adjacent (no shared edge); an edge or corner press needs one connected footprint'
+FLEX-AP3R WORDS rule: 'face region 3 and face region 7 are sectors of the SAME face in one press; give the press one region for that face' (114) ← 'face region 3 and face region 7 are sectors of the SAME face in one press; give the press one region for that face'
+FLEX-AP3R WORDS rule: 'face region 7 appears twice in one press' (40) ← 'face region 7 appears twice in one press'
+FLEX-AP3R WORDS rule: 'face region 7: the face's normals cancel out (no single direction to push along)' (80) ← 'face region 7: the face's normals cancel out (no single direction to push along)'
+FLEX-AP3R WORDS rule: 'face region 7: the region's cuts leave nothing of its faces' (59) ← 'face region 7: the region's cuts leave nothing of its faces'
+FLEX-AP3R WORDS rule: 'face region 7 has no column at a 1.5 mm pitch' (45) ← 'face region 7 has no column at a 1.5 mm pitch'
+FLEX-AP3R WORDS rule: 'press_direction must be a finite, non-zero vector' (49) ← 'press_direction must be a finite, non-zero vector'
+FLEX-AP3R WORDS rule: 'something core says one day' (27) ← 'something core says one day'
+FLEX-AP3R ALLOW one-fillet slab top + wrapped wall: 2 footprint normals (members 2) · 80 allowed directions asked, core refused 56 · CONTROL by members' averages: 80 asked, core refused 56 — e.g. knob: press_direction does not point into the part over face region 0: part of it faces along the direction or edge-on to it; knob: press_direction does not point into the part over face region 0: par
+FLEX-AP3R ALLOW M2 corner #11 [33, 34, 57]: 3 footprint normals (members 3) · 79 allowed directions asked, core refused 19 · CONTROL by members' averages: 79 asked, core refused 19 — e.g. knob: press_direction does not point into the part over face region 57: part of it faces along the direction or edge-on to it; knob: press_direction does not point into the part over face region 57: part of i
+FLEX-AP3R ALLOW M2 corner #12 [34, 36, 56]: 3 footprint normals (members 3) · 79 allowed directions asked, core refused 24 · CONTROL by members' averages: 79 asked, core refused 24 — e.g. knob: press_direction does not point into the part over face region 56: part of it faces along the direction or edge-on to it; knob: press_direction does not point into the part over face region 56: part of i
+FLEX-AP3R ALLOW totals: 238 allowed directions, core refused 99 · control refused 99 · STEP skips 0
+FLEX-AP3R STRAIGHTEN pie wall 1: as a face built · stated refused 'press_direction does not point into the part over face region 1: part of it faces along the direction or edge-on to it' → asked Straighten built · Straight down refused 'press_direction does not point into the part over face region 1: part of it faces along the direction or edge-on to it' · Straight up refused 'press_direction
+FLEX-AP3R STRAIGHTEN every offered target stated as stored: 7 asked
+FLEX-AP3R ON box 20 off the halfway: stored kind halfway · shown snapped Halfway
+FLEX-AP3R BOX tilt 15° → box 20: press GONE — the face is back: true
+
+# Per test:
+  FlexiblePressAimReviewTests testATargetInsideTheOneDegreeBandLeavesTheBoxAndTheKnobFree]' failed (1.791 seconds).
+  FlexiblePressAimReviewTests testCoreRefusalsReadAsOnePlainLine]' failed (2.747 seconds).
+  FlexiblePressAimReviewTests testEveryDirectionTheAppAllowsIsOneCoreBuilds]' failed (0.610 seconds).
+  FlexiblePressAimReviewTests testStraightenIsOfferedOnlyWhereCoreBuildsItBothWays]' failed (0.122 seconds).
+  FlexiblePressAimReviewTests testTheArrowShowsSnappedOnlyOnItsTarget]' failed (0.451 seconds).
+  FlexiblePressAimReviewTests testTheDegreesBoxTiltsATiltedFacePress]' failed (1.739 seconds).
+	 Executed 6 tests, with 68 failures (0 unexpected) in 7.459 (7.460) seconds
+  FlexiblePressAimTests testAMultiFacePressNeverOffersItsOwnFacesNormals]' passed (2.598 seconds).
+  FlexiblePressAimTests testAMultiFaceRegionsHalfwayRunsOverItsFaces]' passed (0.028 seconds).
+  FlexiblePressAimTests testBuildZIsCoresBuildDirectionBothWays]' passed (0.074 seconds).
+  FlexiblePressAimTests testEveryOfferedDirectionIsOneCoreAccepts]' passed (2.300 seconds).
+  FlexiblePressAimTests testLookingAlongTheArrowTheKnobIsATrackball]' passed (0.000 seconds).
+  FlexiblePressAimTests testOpposingFacesHaveNoHalfway]' passed (0.084 seconds).
+  FlexiblePressAimTests testSideVerdictIsCores]' passed (0.075 seconds).
+  FlexiblePressAimTests testSnapsLandExactly]' passed (0.466 seconds).
+  FlexiblePressAimTests testTheCameraLooksAcrossTheArrow]' passed (0.551 seconds).
+  FlexiblePressAimTests testTheDefaultArrowIs45OnAnEdgeAnd5474OnACorner]' passed (2.566 seconds).
+  FlexiblePressAimTests testTheDegreesBoxScrubsFromTheTarget]' passed (0.453 seconds).
+  FlexiblePressAimTests testTheDragNeverPointsOutOfAFace]' passed (0.035 seconds).
+  FlexiblePressAimTests testTheSnapKindIsSavedWithThePress]' passed (0.388 seconds).
+	 Executed 13 tests, with 0 failures (0 unexpected) in 9.617 (9.619) seconds
+	 Executed 19 tests, with 68 failures (0 unexpected) in 17.076 (17.079) seconds
+	 Executed 19 tests, with 68 failures (0 unexpected) in 17.076 (17.079) seconds

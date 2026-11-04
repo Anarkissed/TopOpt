@@ -1,0 +1,24 @@
+	 Executed 1 test, with 0 failures (0 unexpected) in 35.853 (35.853) seconds
+	 Executed 1 test, with 0 failures (0 unexpected) in 35.853 (35.853) seconds
+	 Executed 1 test, with 0 failures (0 unexpected) in 35.853 (35.854) seconds
+FLEX-N LINEAR his r5 group-1: k 2.000 (asked 7.39, cut 0.23) · uncut: gmax part 2.204 · max|u| 26.39 mm · inverted cells 24 (min det -0.201) · pull-back misses 665 (worst 9.25 mm) · solve 698 ms
+FLEX-N STEPPED his r5 group-1 past 1: REFINED λ 2.000 (asked 6.82) · gmax part 2.130 · max|u| 23.03 mm · inverted 0 (min det 0.250) · pull-back misses 402 of 53248 (worst 2.19 mm) · 21 solves · 16.7 s
+FLEX-N   step 1 λ 0.250: 2 solves · change 0.0041 ✓ · CG 25 · 1198 ms · strain p99 0.071 max 0.154 · beyond data 0 · by stress 0
+FLEX-N   step 2 λ 0.500: 2 solves · change 0.0079 ✓ · CG 21 · 1134 ms · strain p99 0.152 max 0.349 · beyond data 33 · by stress 4
+FLEX-N   step 3 λ 0.750: 2 solves · change 0.0076 ✓ · CG 22 · 1149 ms · strain p99 0.254 max 0.500 · beyond data 351 · by stress 178
+FLEX-N   step 4 λ 1.000: 2 solves · change 0.0122 ✓ · CG 23 · 1171 ms · strain p99 0.350 max 0.597 · beyond data 1097 · by stress 735
+FLEX-N   step 5 λ 1.250: 2 solves · change 0.0121 ✓ · CG 23 · 1186 ms · strain p99 0.423 max 0.652 · beyond data 2608 · by stress 1749
+FLEX-N   step 6 λ 1.500: 2 solves · change 0.0081 ✓ · CG 23 · 1198 ms · strain p99 0.475 max 0.681 · beyond data 5516 · by stress 3563
+FLEX-N   step 7 λ 1.750: 3 solves · change 0.0766 ✗ · CG 96 · 2803 ms · strain p99 0.505 max 1.097 · beyond data 11750 · by stress 6049
+FLEX-N   step 8 λ 2.000: 6 solves · change 0.0156 ✓ · CG 243 · 6535 ms · strain p99 0.511 max 0.701 · beyond data 18235 · by stress 11640
+FLEX-N LINEAR his r5 group-2: k 2.000 (asked 2.09, cut 0.53) · uncut: gmax part 0.941 · max|u| 27.40 mm · inverted cells 0 (min det 0.514) · pull-back misses 0 (worst 0.04 mm) · solve 1122 ms
+FLEX-N STEPPED his r5 group-2 past 1: REFINED λ 1.634 (asked 1.65) · gmax part 0.832 · max|u| 28.31 mm · inverted 0 (min det 0.579) · pull-back misses 0 of 53248 (worst 0.02 mm) · 18 solves · 15.7 s
+FLEX-N   step 1 λ 0.250: 2 solves · change 0.0000 ✓ · CG 41 · 1550 ms · strain p99 0.045 max 0.052 · beyond data 0 · by stress 0
+FLEX-N   step 2 λ 0.500: 1 solves · change 0.0000 ✓ · CG 1 · 449 ms · strain p99 0.091 max 0.104 · beyond data 0 · by stress 0
+FLEX-N   step 3 λ 0.750: 1 solves · change 0.0096 ✓ · CG 14 · 675 ms · strain p99 0.144 max 0.174 · beyond data 0 · by stress 0
+FLEX-N   step 4 λ 1.000: 3 solves · change 0.0079 ✓ · CG 92 · 2833 ms · strain p99 0.220 max 0.271 · beyond data 0 · by stress 0
+FLEX-N   step 5 λ 1.250: 3 solves · change 0.0071 ✓ · CG 77 · 2635 ms · strain p99 0.300 max 0.354 · beyond data 680 · by stress 113
+FLEX-N   step 6 λ 1.500: 2 solves · change 0.0130 ✓ · CG 42 · 1574 ms · strain p99 0.367 max 0.415 · beyond data 4347 · by stress 940
+FLEX-N   step 7 λ 1.750: 2 solves · change 0.0092 ✓ · CG 55 · 1826 ms · strain p99 0.420 max 0.466 · beyond data 29210 · by stress 8990
+FLEX-N   step 8 λ 2.000: 2 solves · change 0.0040 ✓ · CG 54 · 1940 ms · strain p99 0.461 max 0.518 · beyond data 38204 · by stress 27866
+FLEX-N   step 9 λ 1.634: 2 solves · change 0.0074 ✓ · CG 56 · 1813 ms · strain p99 0.397 max 0.441 · beyond data 20044 · by stress 2196

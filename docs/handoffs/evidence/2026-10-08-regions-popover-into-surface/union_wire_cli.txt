@@ -1,0 +1,7 @@
+# Frozen CLI (core 436819f6) parse of his 102117B9 stage job, with and without one app-shaped union entry
+## job_orig
+topopt-cli: core 436819f6e6c8, built Oct  2 2026 20:06:17
+topopt-cli: preflight: unsupported mode: lattice_part
+## job_union
+topopt-cli: core 436819f6e6c8, built Oct  2 2026 20:06:17
+topopt-cli: job.json: face region 900 declares neither a filter nor any "add" faces — it would resolve to nothing and tag nothing

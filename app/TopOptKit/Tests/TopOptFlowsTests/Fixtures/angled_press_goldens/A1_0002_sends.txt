@@ -1,0 +1,3 @@
+# A1_0002: the Export step's sends as the project stands (FlexibleCoreHold; 'direct' = nothing held)
+send 1 · Send with Face 1, Face 22, Face 25 resting · resting [1, 22, 25] · A1_0002_send1_run_job.json
+send 2 · Send with Face 2 resting · resting [2] · A1_0002_send2_run_job.json

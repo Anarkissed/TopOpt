@@ -1,0 +1,5 @@
+[Done] Edge 16 [2, 3]: stored · toast Face 3 keeps the rest · Edge 16
+before the twist: cam az 0.785 el 0.011 dist 214.7
+right after the twist: cam az 0.785 el 0.011 dist 214.7
+typed twist 5° at 10 mm → stored · now twist 1.71875 · card Twist stops at 1.7° · lattice ends
+C01_13p_twist_landed.png: cam az 0.785 el 0.011 dist 214.7 · probe (9, 9, 12, 95) · marks ["flatArrow-Edge 16 (516.0, 689.0, 2.0, 10.0)", "flatDepthChip-Edge 16 (468.0, 676.0, 96.0, 45.0)", "flatKnob-Edge 16 (494.0, 620.0, 45.0, 45.0)", "flatPrism-Edge 16 (516.0, 689.0, 2.0, 10.0)", "flatTiltBox-Edge 16 (563.0, 572.0, 90.0, 45.0)", "flatTwistBox-Edge 16 (557.0, 620.0, 102.0, 45.0)"] · toast Twist stops at 1.7° · lattice ends

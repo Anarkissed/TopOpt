@@ -1,0 +1,9 @@
+[Done] corner fast: stored · toast Face 1 keeps the rest · Corner 2
+D01_13p_corner_fast_model_tab_edges.png: cam az 0.785 el 0.524 dist 214.9 · probe (6, 6, 8, 255) · marks [] · toast Face 1 keeps the rest · Corner 2
+D02_13p_corner_fast_RED_CONTROL_sawtooth.png: cam az 0.785 el 0.524 dist 217.1 · probe (6, 6, 8, 255) · marks [] · toast Face 1 keeps the rest · Corner 2
+[Done] corner balanced: stored · toast Face 1 keeps the rest · Corner 2
+D01_13p_corner_balanced_model_tab_edges.png: cam az 0.785 el 0.615 dist 214.8 · probe (6, 6, 8, 255) · marks [] · toast Face 1 keeps the rest · Corner 2
+D02_13p_corner_balanced_RED_CONTROL_sawtooth.png: cam az 0.785 el 0.524 dist 215.9 · probe (6, 6, 8, 255) · marks [] · toast Face 1 keeps the rest · Corner 2
+[Done] Edge 9 [1, 2]: stored · toast -
+Top + Face 2 at Balanced: depth 3.0 · cap 25.55510458079519
+D03_13p_top_face2_edge_balanced_stored.png: cam az 0.785 el 0.524 dist 214.8 · probe (6, 6, 8, 255) · marks ["flatArrow-Edge 9 (-69.0, 645.0, 276.0, 136.0)", "flatDepthChip-Edge 9 (163.0, 758.0, 87.0, 45.0)", "flatKnob-Edge 9 (19.0, 665.0, 45.0, 45.0)", "flatPrism-Edge 9 (-69.0, 645.0, 276.0, 136.0)", "flatTiltBox-Edge 9 (72.0, 569.0, 90.0, 45.0)", "flatTwistBox-Edge 9 (66.0, 617.0, 102.0, 45.0)"] · toast -

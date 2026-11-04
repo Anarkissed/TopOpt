@@ -183,7 +183,14 @@ final class LatticeSimSolveTriggerTests: XCTestCase {
             .appendingPathComponent("Sources/TopOptFlows/WorkspacePlaceholder.swift"),
             encoding: .utf8)
         let r = try XCTUnwrap(src.range(of: "private func startStressSolveIfNeeded()"))
-        let body = String(src[r.lowerBound...].prefix(900))
+        // ★ APP LIST 4 (#362's handoff): the window was a fixed 900 characters, and the function grew past it
+        // (latticeSim.run(ctx) sat at 1,073 already at abe3f3ae). The window is now the function's OWN body: up to
+        // the next declaration at the same indent, so it pins this function and nothing after it.
+        let rest = src[r.upperBound...]
+        let end = ["\n    private func ", "\n    func ", "\n    private var ", "\n    var ", "\n}"]
+            .compactMap { rest.range(of: $0)?.lowerBound }.min() ?? rest.endIndex
+        let body = String(src[r.lowerBound..<end])
+        XCTAssertLessThan(body.count, 4000, "the window is one function, not the rest of the file")
 
         XCTAssertTrue(body.contains("needsStressSolve"),
                       "★ nothing asking ⇒ no solve")
@@ -206,7 +213,9 @@ final class LatticeSimSolveTriggerTests: XCTestCase {
             .appendingPathComponent("Sources/TopOptFlows/WorkspacePlaceholder.swift"),
             encoding: .utf8)
         let r = try XCTUnwrap(src.range(of: "LatticeSetupWizard(project: project)"))
-        let head = String(src[r.lowerBound...].prefix(700))
+        // the exit closure grew (the gizmo reset and save-bakes of 2026-09-21); the pin is
+        // that the solve trigger is INSIDE it, so the window covers the whole closure
+        let head = String(src[r.lowerBound...].prefix(1800))
         XCTAssertTrue(head.contains("startStressSolveIfNeeded()"),
                       "★ the wizard's exit is the call site")
     }

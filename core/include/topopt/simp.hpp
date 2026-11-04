@@ -1025,6 +1025,16 @@ struct SimpIterationObservation {
   IterationPhaseTimes phases;
 };
 
+// One load scenario (SimpOptions::scenarios): a name, its supports (an anchor that
+// is OFF in it is a weak, non-contact spring, DirichletBC::contact == false) and its
+// loads, node-indexed on the grid the optimizer solves.
+struct SimpScenario {
+  std::string name;
+  std::vector<DirichletBC> bcs;
+  std::vector<NodalLoad> loads;
+};
+inline constexpr double kScenarioPNorm = 8.0;
+
 struct SimpOptions {
   double volume_fraction = 0.5;  // target physical volume fraction, in (0, 1]
 
@@ -1611,7 +1621,36 @@ struct SimpOptions {
   // Grid points per voxel per axis. A DISCRETIZATION parameter, not a control
   // parameter — see topopt/semdot.hpp. Must be >= 1; ignored unless `semdot`.
   int semdot_grid_points = kSemdotDefaultGridPoints;
+
+  // LOAD SCENARIOS (the reviewer's overnight ruling of 2026-10-26 03:45). Empty (the
+  // DEFAULT) = one load case, the `bcs` / `loads` the optimizer is called with, byte
+  // for byte. With two or more, every iteration solves every scenario (each warm-started
+  // from its own last field) and the objective is a SMOOTH MAX of the normalised
+  // compliances, J = (sum_s (c_s / c_s0)^p)^(1/p), p = kScenarioPNorm, c_s0 = scenario
+  // s's compliance at the run's first iteration: the worst scenario governs, and the
+  // gradient is sum_s (r_s / J)^(p-1) / c_s0 x dc_s. Each scenario's supports and loads
+  // are on the optimizer's grid. See simp_scenarios_compliance.
+  std::vector<SimpScenario> scenarios;
 };
+
+// LOAD SCENARIOS — what one optimize run carries across its iterations: each
+// scenario's first compliance (the normaliser), last field (its warm start) and last
+// compliance.
+struct ScenarioSolveState {
+  std::vector<double> c0;
+  std::vector<FeaSolution> warm;
+  std::vector<double> last;
+};
+// Solves every scenario on `density` and returns the smooth max J (SimpOptions::
+// scenarios) as `compliance`, its gradient as `dcompliance`, the GOVERNING (largest
+// r_s) scenario's field as `solution`, and the summed CG work / timings. `warm_start`
+// false = every solve cold (the final, certified-tolerance solve).
+SimpCompliance simp_scenarios_compliance(const VoxelGrid& grid, const SimpParams& params,
+                                         const std::vector<double>& density,
+                                         const std::vector<SimpScenario>& scenarios,
+                                         double tolerance, int max_iterations,
+                                         SolverKind solver_kind, ScenarioSolveState& state,
+                                         bool warm_start);
 
 // One recorded step of the SIMP trajectory.
 // The draft-quality (handoff 2026-07-25-draft-quality) trajectory CG tolerance for

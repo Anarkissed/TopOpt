@@ -1,0 +1,1580 @@
+// FlexibleStagePage — the Flexible stage's page (task 2026-09-29-flexible-screens, A1).
+//
+// Layout follows the lattice Settings page (LatticeSetupWizard): the part fills the
+// screen, "Exit" top-left in the accent capsule, a one-line notice top-centre, and ONE
+// panel bottom-left (PageChrome.edge inset, DS.Surface.panel, DS.Radius.panel). ★ ROUND 3:
+// every row one line (FlexibleFacePanel); the page is always in X-ray; the legend sits on
+// the trailing edge, centred. ★ ROUND 4 (batch D1): the panel (FlexibleSettingsPanel) is as
+// tall as its rows, Face | More, and folds to its header; the legend folds to a bar; and NO
+// LATTICE is drawn here (his img 6: "the lattice should not be visible in the settings screen
+// - only in the main Flexibles page. Simply have the model in xray view in the settings") —
+// the X-ray part and the bent map only; the lattice lives on the main page.
+//
+// ★ ROUND 3 BATCH B: there is no Generate button — Save & Exit builds the lattice and the MAIN
+// Flexible page shows it (FlexibleMainStage owns the ONE model, so the lattice outlives this
+// page). The top line is a live readiness line (FlexibleReadiness); a blocker opens a pop-up
+// that selects the face and offers 1–3 one-tap fixes (FlexibleFixPopup); Exit is blocked
+// only by a blocking issue and then reads "Fix 1 thing". The squish player (play / drag)
+// sits bottom-centre, its frame computed against the panel, the legend and the top row.
+//
+// ★ NOTHING ON THIS PAGE COMPUTES A SQUISH NUMBER. It draws FlexibleStageModel's copies of
+// core's results (M9). Numbers carry their tier and ± band (R7); a column core could not
+// give a number for is drawn as "no number", never a guess.
+
+import Combine
+import SwiftUI
+import simd
+import TopOptDesign
+import TopOptKit
+
+/// The live camera projection, kept OUTSIDE the page's own state so a camera move
+/// redraws only the overlays that follow it — not the mesh view or the panel.
+@MainActor
+final class FlexibleProjectionBox: ObservableObject {
+    @Published var projection: CameraProjection?
+}
+
+public struct FlexibleStagePage: View {
+    @ObservedObject var project: ProjectModel
+    /// ★ BATCH B: the SHARED model (FlexibleMainStage.model(for:)), observed — not owned. A
+    /// page-owned @StateObject died with the page, and the lattice with it (item 7.1).
+    @ObservedObject var model: FlexibleStageModel
+    @StateObject private var camera = OrbitCameraModel()
+    @StateObject private var proj = FlexibleProjectionBox()
+    let onExit: () -> Void
+    /// ★ ROUND 7, R7-D1 (H36): the capsule's ways off the page — to Topology or Surface (after Save & Exit's own check),
+    /// and About Flexible… (the limits sheet).
+    let onLeave: (WorkspaceStage) -> Void
+    /// ★ P5 (H60): Edit faces from this page (nil: no ✂, no row action).
+    let onEditFaces: (() -> Void)?
+    /// ★ P4 (H62): "Change lattice type…" from this page (nil: the row does nothing).
+    let onChangeType: (() -> Void)?
+    let onAbout: () -> Void
+
+    // the overlay mesh and its per-vertex channels, rebuilt only when their inputs change
+    @State private var overlay: FlexibleOverlayMesh?
+    @State private var tints: [Float]?
+    @State private var dents: [Float]?
+    @State private var dentScale: Float = 0
+    /// The shown dent's exaggeration, kept so the loop only rescales (FlexibleShownValues).
+    @State private var dentExaggeration: Double = 0
+    /// The dent loops only while a lattice is drawn; while he edits it holds still (round 3).
+    @State private var dentAnimated = false
+    @State private var padTarget: String?
+    /// ★ THE SQUISH PLAYER (maintainer: "a play button and/or timeline to drag that moves the
+    /// squish in and out"): one amount 0…1 for the dent AND the walls (FlexibleSquishLoop).
+    @StateObject private var loop = FlexibleSquishLoop()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The fix pop-up (item 9): which issue, and the rule that opens it on a NEW one.
+    @State private var fixShown: FlexibleIssue?
+    /// ★ R7-E1 REVIEW: the flat press the camera last turned to ([Done], a press selected) — while it is the one he works on, a
+    /// pop-up that fires by itself is shown but does not turn the camera away from it.
+    @State private var flatTurnHold: UUID?
+    @State private var prompt = FlexibleFixPrompt()
+    /// The face the pop-up pulses on the part.
+    @State private var pulse: DetentPulse?
+    @State private var pulseToken = 0
+    /// ★ X-RAY VISION (maintainer, 2026-09-29): the body as a ghost, the dented map opaque,
+    /// the lattice seen inside. ★ ROUND 3 (item 1.4): ALWAYS on on this page — the bend reads
+    /// from any angle, even edge-on (img 1); the X-ray button under the gizmo is gone.
+    /// ★ ROUND 7, X1: his [X-ray] icon again, OFF on open (`Self.xray(views)`, `bodyAlpha(views:…)`).
+    /// ★ X1: X-ray's prism of the current group's bend into the model (FlexibleBendPrism).
+    @State private var bendPrism: [ClearanceRenderItem] = []
+    /// ★ X1 VERIFY: the prism's number (in a box, at its floor) and whether the bend is well short of the curve he drew.
+    @State private var bendTag: FlexibleBendPrism.Tag?
+    @State private var bendShort = false
+    @State private var pressHeatTop: Double?   // ★ R7-E5: an edges group's heat top (the legend's scale)
+    /// ★ BATCH C (item 1.4): the legend reads too — tap it ("TAP THE PART TO READ"), then the
+    /// part: the dent's true mm at that spot, pinned as a callout; a tap never selects a face
+    /// while it reads; a double tap anywhere (or the legend again) comes back out.
+    @State private var legendDrilled = false
+    @State private var reading: FlexibleReading?
+    /// The panel's, the legend's, the top row's and the player's frames (global), and the
+    /// stage's — for the chips' keep-out and the player's place.
+    @State private var frames: [String: CGRect] = [:]
+    /// ★ ROUND 4 (img 1): the panel and the legend fold away.
+    @State private var panelMinimized = false
+    @State private var legendMinimized = false
+    /// ★ ROUND 5 (S9): the settings as they were when the page opened (once the part is open and the
+    /// main page's loads are read in) — "Exit" until something differs, "Save & Exit" after.
+    /// ★ S VERIFICATION: taken as the page APPEARS (an edit while the part is still opening counts);
+    /// once it is open, the open's own read of the main page's loads is applied to it
+    /// (FlexibleStageModel.openedSnapshot) — never re-taken from the settings he may have edited.
+    @State private var opened: FlexibleStageSettings?
+    @State private var openedSettled = false
+    /// ★ ROUND 5 (S2): the overlay's edge (the 3D sim's grid while its field moves the part), the
+    /// field's mesh displacements (cached per overlay and field), and the group that plays.
+    @State private var overlayEdge: Double?
+    @State private var feDents: (key: String, dents: [Float])?
+    /// ★ R6 REVIEW: each pressed region's colours as composed (the glass's alpha is its colour's over them).
+    @State private var glassHeat: [Int: [SIMD3<Float>]] = [:]
+    @State private var playingNumber: Int?
+    @State private var playingFE = false
+    /// ★ R7-V: Bend with Play — the full-depth pose's faint ghost (FlexibleBendGhost).
+    @State private var bendGhost: ClearanceRenderItem?
+    /// ★ ROUND 7 (F, his answer: "If bend is on, all views move to the furthest bend. Always."): the full-bend pose of what
+    /// is drawn on the part (FlexibleBendPose), while Bend shows.
+    @State private var bendPose: FlexibleBendPose?
+    private var keepOut: [CGRect] { Self.stageKeepOut(frames) }
+    /// ★ R7 MERGE: the dent's rows (the legend's scale, TAP TO READ, the reading) — a dent AND heat drawn on the part.
+    private var dentRows: Bool { dents != nil && Self.heatDrawn(model: model, views: model.views) }
+    /// The chips', the stamp handle's and the curve editors' keep-outs, in the stage's frame.
+    /// ★ S VERIFICATION: the player as its two DRAWN parts — the capsule and its top row's picker
+    /// and note (the "Group 2 ▾" row made the whole player's width above the capsule a keep-out,
+    /// and a curve's end point hid under its empty right side at 11" landscape).
+    static func stageKeepOut(_ frames: [String: CGRect]) -> [CGRect] {
+        guard let st = frames["stage"] else { return [] }
+        let player = frames["playerCapsule"] != nil ? ["playerTopRow", "playerCapsule"] : ["player"]
+        return (["panel", "legend", "viewButtons"] + player).compactMap { frames[$0]?.offsetBy(dx: -st.minX, dy: -st.minY) }   // ★ R6: the view buttons
+    }
+    /// ★ R6 REVIEW: what the legend keeps clear of — the gizmo, the top line and the view buttons (lifted so the
+    /// tests read the page's own list: nothing had exercised the buttons in it).
+    static func legendKeepOut(viewport: CGSize, notice: CGRect) -> [CGRect] {
+        [FlexibleLegendPlacement.gizmoFrame(viewport: viewport), notice, FlexibleStageViews.frame(viewport: viewport)]
+    }
+    private let ticker = Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()
+    static let squishPeriodS = 2.4
+
+    /// ★ BATCH B: over the main page's shared model (FlexibleMainStage.model(for:)).
+    /// ★ R7-D1 (H36): `onLeave` / `onAbout` — the capsule's hops (every existing construction compiles unchanged).
+    /// ★ P5 (H60): `onEditFaces` — Edit faces from this page (the capsule's menu row and its ✂), after Save & Exit's own check.
+    public init(project: ProjectModel, model: FlexibleStageModel, onLeave: @escaping (WorkspaceStage) -> Void = { _ in },
+                onAbout: @escaping () -> Void = {}, onEditFaces: (() -> Void)? = nil, onChangeType: (() -> Void)? = nil,
+                onExit: @escaping () -> Void) {
+        self.project = project
+        self.model = model
+        self.onLeave = onLeave
+        self.onAbout = onAbout
+        self.onEditFaces = onEditFaces
+        self.onChangeType = onChangeType
+        self.onExit = onExit
+    }
+    /// Test control only (R7-D1): the top line's band from the Exit row alone (it lands on the capsule at 11" portrait).
+    @MainActor static var controlExitRowOnlyKeepOut = false
+    /// ★ R7-V: tests hand the page its squish loop, to watch it (the pause latch, Play, Bend).
+    init(project: ProjectModel, model: FlexibleStageModel, loop: FlexibleSquishLoop, onExit: @escaping () -> Void) {
+        self.project = project
+        self.model = model
+        self._loop = StateObject(wrappedValue: loop)
+        self.onLeave = { _ in }
+        self.onAbout = {}
+        self.onEditFaces = nil
+        self.onChangeType = nil
+        self.onExit = onExit
+    }
+
+    /// ★ P5 (the redesign, point 1; R9: "the Squish leave-check first"): Edit faces from the Squish page runs the page's ONE way
+    /// off — Save & Exit's own check (`leave(then:)`) — first; blocked, the fix opens and Edit faces does not. RED CONTROL:
+    /// Edit faces called directly.
+    @MainActor static var controlEditFacesSkipsLeave = false
+    @MainActor static func editFacesHop(onEditFaces: (() -> Void)?, leave: @escaping ((() -> Void)?) -> Void) -> (() -> Void)? {
+        guard let onEditFaces else { return nil }
+        if controlEditFacesSkipsLeave { return onEditFaces }
+        return { leave(onEditFaces) }
+    }
+
+    /// ★ P4 (the redesign, point 2): "Change lattice type…" from the Squish page runs the page's Save & Exit check first — it
+    /// saves the draft, so a duplicate carries it; blocked, the fix opens and the card does not. RED CONTROL: called directly.
+    @MainActor static var controlChangeTypeSkipsLeave = false
+    @MainActor static func changeTypeHop(onChangeType: (() -> Void)?, leave: @escaping ((() -> Void)?) -> Void) -> (() -> Void)? {
+        guard let onChangeType else { return nil }
+        if controlChangeTypeSkipsLeave { return onChangeType }
+        return { leave(onChangeType) }
+    }
+    /// ★ R7-V (his img4: "a 'bend' icon view … the entire group's bend at the full depth - all together", and his answer:
+    /// frozen): the page's ONE scale — k × the loop's amount, or k × 1 while Bend shows without Play (the current group's
+    /// dent at full depth, every face of it; with Play the bar animates and the full pose is a ghost — FlexibleBendGhost).
+    static func dentScale(views: FlexibleStageViews, exaggeration k: Double, amount: Double) -> Float {
+        views.contains(.bend) && !views.contains(.play) ? Float(k) : Float(k * amount)
+    }
+    /// ★ R7-V: Bend ALONE — no Heat, no Prisms or Groups, no Play — shows only the bent model: the layer drawn on the part
+    /// (the curves, the depth chip, the stamp's handle, the tags) is left out. Bend with Heat or Prisms brings it back;
+    /// pick mode keeps its overlay.
+    /// ★ ROUND 7 (F, his answer: "If bend is on, all views move to the furthest bend. Always."): REVERSED — nothing drawn on
+    /// the part hides under Bend; it is drawn at the full bend (FlexibleBendPose). R7-V's rule is the red control's.
+    static func overlaysHidden(views: FlexibleStageViews, edgePick: Bool) -> Bool {
+        controlBendRestPose && bendAlone(views: views, edgePick: edgePick)
+    }
+    /// Bend ALONE — no Heat, no Prisms or Groups, no Play (the body is drawn opaque to read the bent part).
+    static func bendAlone(views: FlexibleStageViews, edgePick: Bool) -> Bool {
+        views.contains(.bend) && views.heatScope == .off && !views.contains(.prisms) && !views.contains(.groups)
+            && !views.contains(.play) && !edgePick
+    }
+    /// ★ R7-V REVIEW (the verify, S06 / S18: Bend alone drew the bent part as a near-black smudge — this page is always in
+    /// X-ray, and with the heat hidden nothing on the part was opaque): the body's opacity for the page's views.
+    /// Bend with the heat hidden: the bent part is drawn to READ (his img4: "showing the entire 3d model at its full squish
+    /// depth") — Bend ALONE opaque (the shaded part, nothing inside it to see), with Prisms / Groups / Play at the dent's 30 %
+    /// (what sits inside still shows through). Otherwise the page's X-ray ghost, the heat opaque on it.
+    /// ★ ROUND 7, X1 (his answer on the R7-V handoff's Q9 — X-ray off by default on both pages — and his answer 12: "The curve
+    /// should be viewed as nothing but the curve without any view turned on … Turning x-ray on shows a prism view of the actual
+    /// bend INTO the model"): this page is NO LONGER always in X-ray. His [X-ray] icon: the ghost (the bend's prism inside it —
+    /// `xrayItems`). Off (the default): the part OPAQUE — except while something the page draws sits INSIDE the part ([Prisms],
+    /// or Bend's full-depth ghost under Play): the part then at the dent's 30 %, so it shows through.
+    /// RED CONTROL `controlAlwaysXray`: rounds 3–7 (always the ghost; R7-V's Bend rules inside it).
+    static func bodyAlpha(views: FlexibleStageViews, edgePick: Bool, hasDent: Bool) -> Float {
+        if controlAlwaysXray {
+            guard !controlBendGhost, hasDent, views.contains(.bend), views.heatScope == .off else { return xrayBodyAlpha }
+            return bendAlone(views: views, edgePick: edgePick) ? 1 : dentBodyAlpha
+        }
+        if views.contains(.xray) { return xrayBodyAlpha }
+        // ★ ROUND 7, R7-D2 — his answer 3 of 2026-10-17 evening: [Prisms] with X-ray off keeps the part SOLID (no 30 %);
+        // RED CONTROL `controlPrismsSeeThrough`: X1's 30 % with [Prisms]
+        let inside = (Self.controlPrismsSeeThrough && views.contains(.prisms)) || (views.contains(.bend) && views.contains(.play) && hasDent)
+        return inside ? dentBodyAlpha : 1
+    }
+    /// Test control only (R7-V review): Bend alone in the X-ray ghost (R7-V's first build) — under `controlAlwaysXray`.
+    @MainActor static var controlBendGhost = false
+    /// ★ ROUND 7, R7-D2 — test control only (his answer 3 of 2026-10-17 evening: "Squish page with [Prisms] on and X-ray off:
+    /// the part stays SOLID until X-ray (no 30 % see-through)"): X1's 30 % see-through with [Prisms].
+    @MainActor static var controlPrismsSeeThrough = false
+    /// Test control only (X1): rounds 3–7's page — always in X-ray, no prism of the bend.
+    @MainActor static var controlAlwaysXray = false
+    /// The page is in X-ray: his icon (★ X1), or the red control's always.
+    static func xray(_ views: FlexibleStageViews) -> Bool { controlAlwaysXray || views.contains(.xray) }
+    /// ★ X1: what X-ray adds on this page — the current group's bend as a PRISM into the model (FlexibleBendPrism: its faces at
+    /// rest, the same faces bent at full depth — k × the dent at full load — and the skirt between). [] out of X-ray.
+    static func xrayItems(model: FlexibleStageModel, overlay: FlexibleOverlayMesh?, dents: [Float]?, k: Double,
+                          views: FlexibleStageViews) -> [ClearanceRenderItem] {
+        guard views.contains(.xray), !controlAlwaysXray,
+              let item = FlexibleBendPrism.item(model: model, overlay: overlay, dents: dents, k: k) else { return [] }
+        return [item]
+    }
+    /// ★ R7-V REVIEW (the verify: Heat hidden while the legend read left the page stuck in its reading — every tap on the
+    /// part went to the reading, none selected a face): the legend can READ only while the dent's rows show — a dent, and
+    /// his Heat view showing heat.
+    static func reads(hasDent: Bool, views: FlexibleStageViews) -> Bool {
+        hasDent && views.heatScope != .off
+    }
+    /// Test controls only (R7-V review): the reading kept when the heat goes hidden; the TAP TO READ strip live with the heat
+    /// hidden (R7-V's first build).
+    @MainActor static var controlKeepReadingWithoutHeat = false
+    @MainActor static var controlTabIgnoresHeat = false
+    /// ★ R7 MERGE (R7-S × R7-V; his img4, 2026-10-14: "I should only be able to view numbers associated to what I'm working
+    /// on"): the dent's rows — the legend's scale and its TAP TO READ — only where heat is DRAWN on the part. R7-S made the open
+    /// tab the group that plays; R7-V's Heat shows that group's heat; an edges/corners group has none yet (no stacks until AP9),
+    /// so on its tab the part wore no heat while the card still said "What you drew · 0 mm … 28.4 mm" and took a tap to read.
+    @MainActor static func heatDrawn(model: FlexibleStageModel, views: FlexibleStageViews) -> Bool {
+        if controlLegendIgnoresDrawnHeat { return views.heatScope != .off }
+        return !FlexibleStageHeat.shown(model: model, views: views).isEmpty || !pressHeat(model: model, views: views).isEmpty   // ★ R7-E5
+    }
+    /// ★ R7-E5: the edges groups' heat the Squish page draws (the open group on tap, every group on the hold).
+    @MainActor static func pressHeat(model: FlexibleStageModel, views: FlexibleStageViews) -> [FlexiblePressHeat.Entry] {
+        FlexiblePressHeat.entries(model: model, groups: FlexiblePressHeat.squishPageGroups(model: model, views: views))
+    }
+    /// Test control only (the merge): the dent's rows whenever Heat is on, drawn or not (the merged code before this fix).
+    @MainActor static var controlLegendIgnoresDrawnHeat = false
+    /// Tests only (R7-V review): the legend's drill in / out, driven — the hosted harness's clicks land on the MTKView under
+    /// the chrome (AppKit's hit test), never on the TAP TO READ strip. Nothing sends it in the app.
+    @MainActor static let testDrill = PassthroughSubject<Bool, Never>()
+    /// Test control only (R7-V): today's composeTints — the heat always on, every pressed face's (the red control of 4c).
+    @MainActor static var controlHeatAlwaysOn = false
+
+    public var body: some View {
+        GeometryReader { geo in
+            ZStack {
+                DS.Color.background.color.ignoresSafeArea()
+                stage
+                exitButton
+                capsule   // ★ R7-D1: A2's capsule, the main page's own, with Squish lit
+                notice(in: geo.size)
+                FlexibleSettingsPanel(model: model, padTarget: $padTarget, minimized: $panelMinimized)
+                    .background(GeometryReader { g in
+                        Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["panel": g.frame(in: .global)])
+                    }.allowsHitTesting(false))
+                    .frame(maxHeight: panelMaxHeight(geo.size), alignment: .bottom)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .padding(.leading, PageChrome.edge)
+                    .padding(.bottom, PageChrome.edge)
+                FlexibleViewColumn(camera: camera, model: model)
+                player(in: geo.size)
+                // ★ THE LEGEND SITS ON THE TRAILING EDGE, VERTICALLY CENTRED (round 3, item 7:
+                // "legends never cover buttons" — it covered Generate in the bottom corner),
+                // placed by FlexibleLegendPlacement.legend against the gizmo and the top line
+                // (batch B review: the placement the tests measure is the one the page calls)
+                // ★ ROUND 6: …and while a view is on (its row), with no dent too — ONE card
+                if FlexibleLegend.shows(hasDent: dentRows, views: model.views, sections: FlexibleLegend.sectionRow(model))   // ★ R7 MERGE: heat drawn; ★ M2: the sections' row
+                    || FlexibleLegend.shows(hasDent: false, views: [], bendPrism: bendTag != nil || !bendPrism.isEmpty) {   // ★ X1 VERIFY: the prism's row
+                    legend(in: geo.size)
+                }
+                // ★ THE POP-UP SHOWS THE ISSUE AS IT IS NOW (batch B review) — placed under the
+                // top line, clear of the gizmo (it covered its left 36 pt at 11" portrait)
+                // ★ U21 BATCH E: a tap on a face with no lattice of its own shows its notice in the same place (one sentence for
+                // every face, his Img11/12/14), until dismissed or the next tap
+                if let issue = Self.popUpIssue(shown: fixShown, model: model) {
+                    let pop = FlexibleLegendPlacement.popUp(viewport: geo.size, notice: noticeBand(geo.size),
+                                                            below: model.toast == nil ? 0 : Self.toastRowHeight,
+                                                            clear: [capsuleLocal() ?? Self.nominalCapsule],   // ★ R7-D1: below the capsule,
+                                                            rightLimit: FlexibleStageViews.frame(viewport: geo.size).minX)   // left of the views
+                    FlexibleFixPopup(model: model, issue: issue, padTarget: $padTarget) { fixShown = nil; model.noLatticeTap = nil }
+                        .frame(width: pop.width)
+                        .background(GeometryReader { g in
+                            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["popup": g.frame(in: .global)])
+                        }.allowsHitTesting(false))
+                        .padding(.leading, pop.minX)
+                        .padding(.top, pop.minY)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .transition(.opacity)
+                        .zIndex(30)
+                }
+                // ★ U2 (his notes of 2026-10-20, item 5): the curve window, over everything
+                if let d = model.curveDraft, let id = d.press, let p = model.press(id), let st = p.strip, !p.settings.isStampShape {
+                    FlexiblePressCurveModalView(model: model, draft: d, strip: st).zIndex(60)
+                } else if let d = model.curveDraft, let r = d.face, model.settings.face(r)?.isStampShape == false {
+                    // ★ X20b (his answer of 2026-10-20 ~19:10: "FACE presses use the SAME 2D/3D curve window")
+                    FlexiblePressCurveModalView(model: model, draft: d, strip: nil).zIndex(60)
+                }
+            }
+            .background(GeometryReader { g in
+                Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["page": g.frame(in: .global)])
+            }.allowsHitTesting(false))
+        }
+        .onAppear {
+            if let b = project.viewerMesh?.bounds { camera.reframe(b) }
+            // his earlier actions are not new — but a blocker that already stands pops ONCE,
+            // when the scene and designs settle (batch B review: "blockers surface at once");
+            // the main page's pill opens its own fix instead
+            prompt = FlexibleFixPrompt(actionSerial: model.actionSerial, popExisting: model.pendingFix == nil)
+            let appeared = model.settings
+            model.openScene()
+            // ★ ROUND 5 (S9): what "nothing changed" means — the settings once the part is open
+            // (★ S VERIFICATION: as the page appeared while it is still opening)
+            openedSettled = model.sceneState == .ready
+            opened = openedSettled ? model.settings : appeared
+            rebuildOverlay()
+            // the main page's pill opened Settings on a fix
+            if let f = model.pendingFix { model.pendingFix = nil; present(f) }
+        }
+        .onChange(of: model.geometry.count) { _ in rebuildOverlay() }
+        .onChange(of: model.leaveForLatticeAsks) { _ in leaveForLattice() }   // ★ U21 batch E: [Go to Lattice]
+        // ★ ROUND 5 (S9): a part still opening as the page appeared — "unchanged" is what it opens with:
+        // ★ S VERIFICATION: the page's snapshot WITH the open's read of the main page's loads (an edit
+        // he made while it opened stays a change)
+        .onChange(of: model.sceneState == .ready) { ready in
+            if ready, !openedSettled, let o = opened { opened = model.openedSnapshot(appeared: o); openedSettled = true }
+        }
+        .onReceive(ticker) { _ in
+            // ★ THE SQUISH (the player's loop): only the scale moves — the displacements and
+            // colours are rebuilt when the design changes, never per frame. ★ ROUND 4: no lattice
+            // is drawn on this page, so this ticker steps his drawing (the renderer's loop is the
+            // main page's)
+            guard loop.playing, dents != nil else { return }
+            dentScale = Self.dentScale(views: model.views, exaggeration: dentExaggeration, amount: loop.amount)
+        }
+        // a drag on the timeline, a pause: the one scale follows at once
+        .onReceive(loop.$held) { a in
+            if !loop.playing, dents != nil { dentScale = Self.dentScale(views: model.views, exaggeration: dentExaggeration, amount: a) }
+        }
+        // A fresh lattice (a Save & Exit build that lands while this page is up) refreshes the
+        // channels. ★ VERIFICATION OF D1: it no longer flips the map to "What can be built" or
+        // the tab to Face — no lattice is drawn on this page (D-R4-6), the map stays HIS drawing,
+        // and nothing ever set the flag back
+        .onChange(of: FlexibleLatticePreview.freshKey(model.lattice)) { gen in
+            refreshChannels()
+            if gen != nil, dentAnimated { loop.autoPlay(reduceMotion: reduceMotion) }
+        }
+        .onChange(of: model.stacks.count) { _ in rebuildOverlay() }
+        // ★ ROUND 7 (M2, found by looking): a face no longer pressed (its stack kept) leaves the map — its part, violet where
+        // it is lattice, shows again
+        .onChange(of: model.loadedKeys.map(\.region)) { _ in rebuildOverlay() }
+        // the legend went (no dent to show): it cannot stay drilled in
+        .onChange(of: dents == nil) { gone in if gone { legendDrilled = false; reading = nil } }
+        // ★ R7-V REVIEW: …nor once the heat is hidden (its rows leave the card — a tap on the part selects again)
+        // ★ R7 MERGE: …nor on a tab whose group wears no heat (an edges group's — no stacks until AP9)
+        .onChange(of: Self.reads(hasDent: dentRows, views: model.views)) { can in
+            if !can, !Self.controlKeepReadingWithoutHeat { legendDrilled = false; reading = nil }
+        }
+        // ★ while the legend reads, the squish holds still (the reading stays on its surface)
+        .onChange(of: legendDrilled) { loop.holdWhileReading($0) }
+        .onReceive(Self.testDrill) { on in legendDrilled = on; reading = nil }   // (tests only)
+        // ★ R7-V: the views (shared with the main page) — Play opens or closes this page's loop (off: at rest; his tap on
+        // either page plays it), Heat and Bend recompose the picture
+        .onAppear { loop.playView = model.views.contains(.play) }
+        .onChange(of: model.views) { v in
+            let on = v.contains(.play)
+            if on != loop.playView {
+                loop.playView = on
+                if on, dents != nil { loop.playByHim() }
+            }
+            refreshChannels()
+        }
+        .onChange(of: model.latticeBuilding) { _ in refreshChannels() }
+        // ★ R7-E1: the camera on [Done] and on selecting a flat press — D-AP-13 as ruled (down the arrow; the reviewer is asked)
+        .onChange(of: model.flatCameraRequest) { id in if Self.autoCamera { turnToFlatPress(id) } else { clearFlatCameraRequest(id) } }
+        // ★ R7-E4: [Top] / [45°] beside a flat press's Shape row
+        .onChange(of: model.pressViewRequest) { r in turnToPressCurve(r) }
+        .onAppear { if Self.autoCamera { turnToFlatPress(model.flatCameraRequest) } else { clearFlatCameraRequest(model.flatCameraRequest) } }   // (a [Done] made before the page showed)
+        // ★ R7-E1 REVIEW: a press the camera already holds is not turned to again (a late second turn after [Done] undid his view)
+        // ★ R7-E1b: the open edges group's lit edges, read again when the group, its presses or the opened part change
+        .task(id: FlexibleFlatPrismUI.openEdgesGroup(model).map { ["\($0.id)", model.sceneState == .ready ? model.openedKey ?? "" : "opening"] + $0.presses.map(\.uuidString) }) {
+            model.syncEdgeAdd()
+        }
+        .onChange(of: model.selectedPress) { id in if Self.autoCamera, FlexibleFlatPrismUI.openEdgesGroup(model) != nil, id != flatTurnHold { turnToFlatPress(id) } }
+        .onReceive(model.objectWillChange.debounce(for: .milliseconds(16), scheduler: RunLoop.main)) { _ in
+            refreshChannels()
+        }
+        .onPreferenceChange(FlexibleKeepOutKey.self) { frames = $0 }
+        .accessibilityIdentifier("flexible-stage-page")
+    }
+
+    // MARK: the stage
+
+    /// The part's opacity while a dent is shown; the dented map itself stays opaque.
+    static let dentBodyAlpha: Float = 0.3
+    /// X-ray: the ghost's face-on opacity. The shader adds up to +0.5 toward the silhouette
+    /// (MetalMeshView, tint flags.z), so the outline reads and the inside shows.
+    static let xrayBodyAlpha: Float = 0.04
+
+    // ★ ROUND 4 (D1, img 6): NO LATTICE ON THIS PAGE. The generated lattice lives on the MAIN
+    // Flexible page; here the part is X-ray and the map is his drawing (FlexibleShownValues with
+    // no drawn lattice: "What you drew"), stepped by this page's own ticker.
+
+
+    /// The same settle the workspace draws with (gravity → down), so the part sits as it
+    /// does on every other stage.
+    private var settle: simd_quatf {
+        project.force.settleRotation
+            ?? simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0))
+    }
+
+    private var stage: some View {
+        ZStack {
+            MetalMeshView(
+                mesh: overlay?.mesh ?? project.viewerMesh, camera: camera,
+                vertexTints: tints,
+                settleRotation: settle, settleAnimated: false,
+                faceToolActive: true,
+                onPickFace: { fid in model.tapFace(Int(fid)) },
+                // a split face: the tap's point picks the sector (FlexibleRegions)
+                onPickPoint: { fid, pt in
+                    if legendDrilled { readDent(at: pt); return true }   // reading, never selecting
+                    // ★ ROUND 6 ITEM 2: pick mode — the nearest corner, then edge, on screen (never a face)
+                    if model.edgePick != nil {
+                        if let p = pt, let q = proj.projection, let sp = q.project(p),
+                           let line = model.edgePickTap(at: sp, projection: q) { model.toast = line }
+                        return true
+                    }
+                    // ★ R7-E1b: an edges group open — a lit edge or corner is ADDED to it; a spot that cannot be pressed says why
+                    if model.edgeAdd != nil, let p = pt, let q = proj.projection, let sp = q.project(p),
+                       let answer = model.edgeAddTap(at: sp, projection: q) {
+                        if let line = answer { model.toast = line }
+                        return true
+                    }
+                    model.tapFace(Int(fid), point: pt.map { SIMD3<Double>($0) })
+                    return true
+                },
+                // ★ a double tap anywhere leaves the reading (#354's exit, mounted only while drilled in)
+                onLatticeProbeExit: legendDrilled ? { legendDrilled = false; reading = nil } : nil,
+                onProjection: { p in
+                    // the renderer publishes world→clip; the part is drawn settled (rotated
+                    // about its centre), so the overlays project MODEL points through both
+                    let c = (overlay?.mesh ?? project.viewerMesh)?.bounds.center ?? .zero
+                    let m = ViewerModelFrame.matrix(centre: c, rotation: settle)
+                    let q = CameraProjection(viewProjection: p.viewProjection * m, viewportSize: p.viewportSize)
+                    if proj.projection != q { proj.projection = q }
+                },
+                flexDisplacements: dents, flexScale: dentScale,
+                // ★ ROUND 3 (item 1.1): the selected face's deepest squish as a prism × k — ★ ROUND 6: at once
+                // (faint), every pressed face's in the Prisms view, and the open group's glass (FlexibleStageVolumes)
+                // ★ R6 REVIEW: ONE k (`prismK`) for the prisms, the chip, the stamp handle, the tags and the legend; the glass
+                // over the page's own heat
+                clearanceVolumes: FlexibleStageVolumes.items(model: model, k: FlexibleStageVolumes.prismK(dentExaggeration), part: project.viewerMesh,
+                                                             heat: glassHeat, heated: FlexibleStageHeat.shown(model: model, views: model.views))
+                    .posed(by: bendPose)   // ★ ROUND 7 (F): with Bend on, the prisms' faces and the glass on the bent part (floors stay)
+                    + (bendGhost.map { [$0] } ?? [])   // ★ R7-V: Bend with Play — the full-depth pose, faint
+                    + bendPrism,   // ★ X1: his X-ray — the bend's prism into the model
+                // ★ THE DENT READS THROUGH THE PART (maintainer, 2026-09-29): while a dent is
+                // shown the body drops to 30 % and the dented map stays at 100 %.
+                // ★ R7-V REVIEW: Bend with the heat hidden draws the bent part to read (bodyAlpha(views:…))
+                // ★ X1: X-ray is his icon — off, the part opaque (bodyAlpha(views:…))
+                bodyAlpha: Self.bodyAlpha(views: model.views, edgePick: model.edgePick != nil, hasDent: dents != nil),
+                // ★ BATCH B: the face the fix pop-up names, pulsed
+                detentPulse: pulse,
+                // ★ ROUND 4 (D1, img 6): no lattice here — it lives on the main Flexible page
+                flexibleLattice: nil)
+            // ★ BATCH V (m19): the lines drawn on the part — the curves, the dashed outlines, the stamp's outline — are cut out
+            // of the whole chrome (`clip`; the 62 %-opaque panel and legend let them read as drawn OVER them); the chip, the tags,
+            // the discs and a reading keep out of it as views (a mask over the layer took the depth chip's glass with it)
+            // ★ BATCH V REVIEW: …out of the WHOLE chrome too (the fix pop-up, the top line and its toast, the Exit row, the gizmo,
+            // the player whole) — they kept out of the panel, the legend, the view buttons and the player's parts only
+            if !Self.controlNoOverlays, !Self.overlaysHidden(views: model.views, edgePick: model.edgePick != nil) {   // ★ R7-V: Bend alone
+                let clip = Self.controlOverlaysOverChrome ? nil : Self.chromeClip(frames, viewport: frames["page"]?.size ?? .zero)
+                FlexibleStageOverlays(model: model, proj: proj, exaggeration: FlexibleStageVolumes.prismK(dentExaggeration), keepOut: clip ?? keepOut,
+                                      clip: clip, pose: bendPose, bendTag: bendTag,   // ★ ROUND 7 (F): at the full bend while Bend shows; ★ X1 VERIFY: the bend prism's number
+                                      padTarget: $padTarget)   // ★ R7-E1: tap-to-type on the model
+                FlexibleReadingCallout(proj: proj, reading: legendDrilled ? reading : nil, clip: clip ?? [])
+            }
+        }
+        .coordinateSpace(name: FlexibleStageSpace.name)
+        .background(GeometryReader { g in
+            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["stage": g.frame(in: .global)])
+        }.allowsHitTesting(false))
+        .ignoresSafeArea()
+    }
+
+    private func rebuildOverlay() {
+        // ★ ROUND 5 (S2): cut to the 3D sim's grid while its field moves the part (a big flat
+        // triangle bends with it), as the main page's overlay is
+        overlayEdge = FlexibleSettingsSquish.pageEdge(model: model)   // ★ U1: cut fine for the column preview too
+        let cap = FlexibleSettingsSquish.overlayEdge(model: model) != nil ? FlexibleOverlayMesh.maxSubTriangles : FlexibleSettingsSquish.columnMaxTriangles
+        overlay = overlayEdge.map { FlexiblePageChannels.overlay(model: model, maxEdgeMM: $0, maxTriangles: cap) } ?? FlexiblePageChannels.overlay(model: model)
+        feDents = nil
+        refreshChannels()
+    }
+
+    /// The dent he tapped (the drawn map, at the squish on screen now), read at its column —
+    /// FlexibleProbe, the main page's one dent probe.
+    private func readDent(at pt: SIMD3<Float>?) {
+        guard let p = pt, let q = proj.projection, let sp = q.project(p), let ray = q.ray(throughViewPoint: sp) else { return }
+        reading = FlexibleProbe.dentReading(model: model, overlay: overlay, dents: dents, scale: dentScale,
+                                            drawnLattice: nil, point: p, dir: ray.dir)
+            ?? FlexibleReading(kind: .dent, value: "—", unit: FlexibleReadKind.dent.nothingHere, fraction: nil, anchor: p)
+    }
+
+    /// Test control only (round 6): round 5's group frames painted on the body.
+    @MainActor static var controlRound5Frames = false
+
+    /// ★ BATCH V (m19, the item-4 verifier's screens: the dashed group outlines and the curves read OVER the panel and
+    /// the legend), test controls only: the layer of everything drawn on the part left out (the measurement's baseline),
+    /// and that layer drawn over the chrome again (the red control).
+    @MainActor static var controlNoOverlays = false
+    @MainActor static var controlOverlaysOverChrome = false
+    /// ★ R7-E1 REVIEW, RED CONTROL only: a pop-up that fires by itself turns the camera even right after [Done] turned it to
+    /// the new flat prism (E1: it overrode the turn and looked at the back).
+    @MainActor static var controlPopupTurnsCamera = false
+
+    /// ★ BATCH V (m19): what nothing drawn on the part may show through, in the stage's frame — every keep-out (the panel,
+    /// the legend, the view buttons, the player), the player whole, the fix pop-up, the top line and its toast, the Exit row,
+    /// and the gizmo (laid out in the page's frame; the stage ignores the safe area, so it is moved by their difference).
+    static func chromeClip(_ frames: [String: CGRect], viewport: CGSize) -> [CGRect] {
+        guard let st = frames["stage"] else { return [] }
+        var out = stageKeepOut(frames)
+        out += ["player", "popup", "notice", "toast", "exitRow", "capsule"].compactMap { frames[$0]?.offsetBy(dx: -st.minX, dy: -st.minY) }
+        let page = frames["page"] ?? st
+        out.append(FlexibleLegendPlacement.gizmoFrame(viewport: viewport).offsetBy(dx: page.minX - st.minX, dy: page.minY - st.minY))
+        return out
+    }
+
+    /// The page's tints, composed (lifted out of `refreshChannels` so a test reads EXACTLY the page's).
+    /// ★ ROUND 6 (his img1 and answer): no group colour on the body — no frame, no digit, no tinted map-less
+    /// face; the OPEN group wears its glass instead (FlexibleGroupWalls, through `clearanceVolumes`).
+    /// ★ R7-V (his img3: "make the heatmap view actually show/hide the actual heatmap on the model", and his answer: tap =
+    /// the current group's heat, hold 3 s = every group's, tap again = none): the heat only where his Heat view shows it
+    /// (`views`, the model's by default).
+    @MainActor static func composeTints(model: FlexibleStageModel, overlay: FlexibleOverlayMesh?,
+                                        views: FlexibleStageViews? = nil) -> FlexiblePageChannels.Channels {
+        let v = views ?? model.views
+        let filter = controlHeatAlwaysOn ? nil : FlexibleStageHeat.filter(model: model, views: v)
+        var c = FlexiblePageChannels.channels(model: model, overlay: overlay, xray: xray(v), drawnLattice: nil,   // ★ X1: his icon
+                                              heat: filter.map { !$0.isEmpty } ?? true, groupColours: false, heatRegions: filter,
+                                              sectionTints: true,   // ★ ROUND 7 (M2): violet where a tap works
+                                              pressHeat: pressHeat(model: model, views: v))   // ★ R7-E5: an edges group's heat
+        if controlRound5Frames { FlexibleGroupFrames.paint(&c.tints, overlay: overlay, model: model) }   // (the red control only)
+        return c
+    }
+
+    /// Per-column colours + the dent (FlexiblePageChannels — the page's one source), then the
+    /// player's state and the fix pop-up's rule.
+    private func refreshChannels() {
+        var c = Self.composeTints(model: model, overlay: overlay)
+        // ★ ROUND 5 (S2): only the SELECTED face's group squishes — its 3D field when current, else
+        // its faces' columns (FlexibleSettingsSquish)
+        if FlexibleSettingsSquish.pageEdge(model: model) != overlayEdge { rebuildOverlay(); return }
+        let group = model.playingGroup
+        FlexibleSettingsSquish.startSims(model: model, group: group)
+        let sq = FlexibleSettingsSquish.shown(model: model, overlay: overlay, channels: c, feCache: &feDents)
+        c.dents = sq.dents
+        c.exaggeration = sq.exaggeration
+        if playingNumber != sq.groupNumber || playingFE != sq.fe {
+            let restart = playingNumber != nil
+            playingNumber = sq.groupNumber
+            playingFE = sq.fe
+            if restart, loop.playing { loop.restartFromRest(reduceMotion: reduceMotion) }
+        }
+        tints = c.tints
+        let pTop: Double? = Self.pressHeat(model: model, views: model.views).isEmpty ? nil : c.heatScaleMM   // ★ R7-E5
+        if pTop != pressHeatTop { pressHeatTop = pTop }
+        let heat = FlexibleGroupWalls.heatSamples(tints: c.tints, overlay: overlay, model: model)   // ★ R6 REVIEW
+        if heat != glassHeat { glassHeat = heat }
+        dents = c.dents
+        dentExaggeration = c.exaggeration
+        loop.exaggeration = c.exaggeration   // the renderer's scale is k × amount
+        // ★ R7-V (his img1: "When it is on the simulation plays"; his answer: Play off on open, at rest): a dent to show →
+        // the squish plays while Play is on — his drawing too (round 3's editing hold at the full squish is reversed by
+        // his 2026-10-14 words); Play off: at rest. Every start goes through the loop's gate, so his pause holds.
+        let animates = c.dents != nil
+        if loop.playView != model.views.contains(.play) { loop.playView = model.views.contains(.play) }   // (before any start)
+        if animates != dentAnimated {
+            if animates { loop.autoPlay(reduceMotion: reduceMotion) } else { loop.hold(1) }
+        }
+        dentAnimated = animates
+        dentScale = c.dents == nil ? 0 : Self.dentScale(views: model.views, exaggeration: c.exaggeration, amount: loop.amount)
+        // ★ R7-V: Bend with Play — the full-depth pose as a faint ghost while the bar animates
+        let ghost = model.views.contains(.bend) && model.views.contains(.play)
+            ? FlexibleBendGhost.item(overlay: overlay, dents: c.dents, k: c.exaggeration) : nil
+        if ghost != bendGhost { bendGhost = ghost }
+        // ★ ROUND 7 (F): Bend on — what is drawn on the part follows the full bend
+        let pose = Self.bendPose(views: model.views, overlay: overlay, dents: c.dents, k: c.exaggeration,
+                                 faces: sq.poseFaces, field: sq.field,   // ★ U21 (LBR-EDGES): on a pressed face, its own bend
+                                 edges: sq.poseEdges)   // ★ U21 FIX 1: on an edge press, the edge preview's own push
+        if pose?.key != bendPose?.key { bendPose = pose }
+        // ★ X1: his X-ray — the current group's bend as a prism into the model, at full depth
+        let prism = Self.xrayItems(model: model, overlay: overlay, dents: c.dents, k: c.exaggeration, views: model.views)
+        if prism != bendPrism { bendPrism = prism }
+        // ★ U21 batch F (his Img9: "it shows 14 next to the model"): true mm (÷ k); none for the face whose chip shows (Img8)
+        let tag = FlexibleBendPrism.tag(prism.first, k: c.exaggeration, excluding: FlexibleBendPrism.chipFace(model: model))
+        if tag != bendTag { bendTag = tag }
+        let short = FlexibleBendPrism.tag(prism.first, k: c.exaggeration, excluding: nil)   // (every face's deepest, true mm)
+            .map { FlexibleBendPrism.shortOfDrawn(model: model, depthMM: $0.depthMM) } ?? false
+        if short != bendShort { bendShort = short }
+        // ★ ITEM 9: a NEW blocking issue HIS last action caused opens the pop-up at once
+        let r = model.readiness
+        if let i = prompt.next(r, actionSerial: model.actionSerial,
+                               settled: !r.designing && model.sceneState == .ready && !model.designsInFlight),
+           fixShown == nil, Self.popsAtOnce(i, model: model) {   // ★ R7-S verify: not over [+ New]'s own ask
+            // ★ R7-E1 REVIEW (the verifier: after [Done] the pop-up turned the camera to the back, the new prism drawn through the
+            // part): while the camera holds the flat press he works on, the pop-up shows and the camera stays
+            let holds = flatTurnHold != nil && FlexibleFlatPrismUI.workingPress(model) == flatTurnHold
+            present(i, turnCamera: Self.controlPopupTurnsCamera || !holds)
+        }
+        if let f = fixShown, !r.popping.contains(where: { $0.id == f.id }) { fixShown = nil }
+    }
+
+    /// Open the pop-up on `issue`: select its face, pulse every face it names (a shared stack:
+    /// both ends, one after the other), turn the camera to see them (two: an oblique view).
+    private func present(_ issue: FlexibleIssue, turnCamera: Bool = true) {
+        fixShown = issue
+        guard issue.region != nil else { return }
+        // ★ ROUND 7 (S, 4f f): its face is selected only in the OPEN tab — a face in another group is named and pulsed,
+        // and the tab stays (it had opened Group 1 behind the edges tab: his img4); the pop-up's own fix is his pick
+        if let r = Self.presentSelection(issue, model: model) {
+            model.selectedRegion = r
+            if FlexibleStageModel.controlRailFollowsSelection { model.tab = .face }
+        }
+        let named = issue.named
+        for (i, region) in named.enumerated() {
+            guard let f = regionsFaces(region).first else { continue }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5 * Double(i)) {
+                pulseToken += 1
+                pulse = DetentPulse(faceID: FaceID(f), token: pulseToken)
+            }
+        }
+        let loads = named.compactMap { region in
+            (model.stack(region) ?? model.stacks.first(where: { $0.key.region == region })?.value)?.load
+        }
+        let g = loads.count >= 2 ? FlexibleFixPopup.cameraRegion(load: loads[0], other: loads[1], settle: settle)
+            : loads.first.flatMap { FlexibleFixPopup.cameraRegion(load: $0, settle: settle) }
+        if turnCamera, Self.autoCamera, let g { camera.snap(to: g, animated: !reduceMotion) }
+    }
+
+    /// ★ ROUND 7, U1 (his notes of 2026-10-20: "Edge selections change the angle of the 3d view for some reason … Sometimes it
+    /// happens when I input a value … Remove the re-positioning entirely."): on this page the camera moves only when HE moves
+    /// it (the gizmo, a drag, Home, the curve's own view buttons he taps) — never by itself: not on [Done] or a press added
+    /// (R7-E1's turn down the arrow), not on selecting a press (a tap on its card's box selects it: R7-E4's pan beside the
+    /// panel), not when a fix pop-up opens. RED CONTROL `controlAutoCamera`: R7-E1 / R7-E4's turns and the pop-up's.
+    @MainActor static var controlAutoCamera = false
+    @MainActor static var autoCamera: Bool { controlAutoCamera }
+
+    /// The model's one-shot request is consumed without turning (so a later page never acts on a stale one).
+    private func clearFlatCameraRequest(_ id: UUID?) {
+        guard let id else { return }
+        flatTurnHold = id
+        if model.flatCameraRequest == id { model.flatCameraRequest = nil }
+    }
+
+    private func regionsFaces(_ r: Int) -> [Int] { model.regions.faces(of: r, mesh: project.viewerMesh) }
+
+    /// ★ R7-E1: turn to a flat press (the gizmo view down its arrow, D-AP-13 as ruled), once.
+    private func turnToFlatPress(_ id: UUID?) {
+        guard let id, let p = model.press(id), p.strip != nil, let g = FlexibleFlatPrismUI.camera(press: p, settle: settle) else { return }
+        // ★ R7-E4 (found by the suite): the press in the free part of the stage, not under the panel (its orientation's own axes);
+        // a turn asked before the page has laid out (a [Done] made before it showed) pans again once it has
+        panToPress(id, g)
+        if frames["stage"] == nil || proj.projection == nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { panToPress(id, g) }
+        }
+        camera.snap(to: g, animated: !reduceMotion)
+        flatTurnHold = id
+        if model.flatCameraRequest == id { model.flatCameraRequest = nil }
+    }
+
+    /// ★ R7-E4: the camera's target moved so press `id` shows in the stage's free area, seen from gizmo region `g`.
+    private func panToPress(_ id: UUID, _ g: GizmoRegion) {
+        guard let p = model.press(id), let st = p.strip, let cut = model.flatCut(id) else { return }
+        var final = camera.camera
+        let ae = g.orientation(currentAzimuth: final.azimuth)
+        final.setOrientation(azimuth: ae.azimuth, elevation: ae.elevation)
+        final.setRoll(0)
+        var now = camera.camera
+        now.target = pressTarget(SIMD3<Float>(FlexiblePressCurveBaselines.focus(st, cut).centre), camera: final)
+        camera.adopt(now)
+    }
+
+    /// ★ R7-E4: the camera target that shows model point `m` in the middle of the stage's free area (right of the panel or above it).
+    private func pressTarget(_ m: SIMD3<Float>, camera c: OrbitCamera) -> SIMD3<Float> {
+        let centre = (overlay?.mesh ?? project.viewerMesh)?.bounds.center ?? .zero
+        let w = centre + settle.act(m - centre)
+        guard let st = frames["stage"], let size = proj.projection?.viewportSize, size.width > 0 else { return w }
+        let panel = frames["panel"].map { $0.offsetBy(dx: -st.minX, dy: -st.minY) }
+        let top = frames["exitRow"].map { $0.maxY - st.minY } ?? 0
+        let crossing = ["legend", "viewButtons", "player"].compactMap { frames[$0]?.offsetBy(dx: -st.minX, dy: -st.minY) }
+        guard let at = FlexiblePressCurveBaselines.freeCentre(stage: size, panel: panel, top: Swift.max(0, top), obstacles: crossing) else { return w }
+        return FlexiblePressCurveBaselines.target(placing: w, at: at, size: size, rot: c.viewRotation(), distance: c.distance, fovY: c.fovY)
+    }
+
+    /// ★ R7-E4: the curve's view — [Top] (the gizmo's top) or [45°] (45° up from the side the arrow comes from), exactly.
+    private func turnToPressCurve(_ r: FlexiblePressViewRequest?) {
+        guard let r, let p = model.press(r.press) else { return }
+        let arrow = settle.act(SIMD3<Float>(model.flatCut(r.press)?.direction ?? p.direction))
+        let eye = FlexiblePressCurveBaselines.eye(r.view, arrow: arrow)
+        var c = camera.camera
+        let ae = OrbitCamera.azimuthElevation(forDirection: eye, currentAzimuth: c.azimuth)
+        c.setOrientation(azimuth: ae.azimuth, elevation: ae.elevation)
+        c.setRoll(0)
+        // found by looking: framed on the press (its curves and arrow), not the whole part — Home still returns to the part
+        if let st = p.strip, let cut = model.flatCut(r.press) {
+            let f = FlexiblePressCurveBaselines.focus(st, cut)
+            c.distance = Swift.min(Swift.max(Float(f.radius) * 2.2 / sin(c.fovY * 0.5), c.minDistance), c.maxDistance)
+            c.target = pressTarget(SIMD3<Float>(f.centre), camera: c)
+        }
+        camera.adopt(c)
+        flatTurnHold = r.press
+    }
+
+    // MARK: the squish player (bottom-centre, its frame computed against the page's keep-outs)
+
+    @ViewBuilder private func player(in size: CGSize) -> some View {
+        // ★ R7-V: only with his Play view (shared with the main page) — off, no bar
+        if dents != nil, model.views.contains(.play), let r = playerFrame(size) {
+            // ★ ROUND 5 (S2): which group plays, in its colour ("● Group 2 ▾"); a pick selects that
+            // group's first face (the page plays the selected face's group)
+            let sims = FlexibleSettingsSquish.playerSims(model: model)
+            FlexibleSquishPlayer(loop: loop, fullLabel: fullLabel, width: r.width,
+                                 sims: sims, shown: sims.first { $0.id == playingNumber.map(FlexibleSim.groupID) },
+                                 onPick: { id in FlexibleSettingsSquish.pick(id, model: model) },
+                                 note: FlexibleSettingsSquish.note(model: model, fe: playingFE),
+                                 shortNotes: FlexibleSettingsSquish.note(model: model, fe: playingFE).map(FlexibleRowCopy.shortForms) ?? [],   // ★ R7-V review
+                                 colour: { model.groupColour(number: $0) })
+                .background(GeometryReader { g in
+                    Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["player": g.frame(in: .global)])
+                }.allowsHitTesting(false))
+                .position(x: r.midX, y: r.midY)
+        }
+    }
+
+    /// The page's keep-outs in its own frame: the panel, the legend, the top row (Exit, undo,
+    /// redo), the readiness line — so the player never covers a button or a legend.
+    static func playerKeepOut(_ frames: [String: CGRect]) -> [CGRect] {
+        guard let page = frames["page"] else { return [] }
+        return ["panel", "legend", "exitRow", "capsule", "notice"].compactMap { frames[$0]?.offsetBy(dx: -page.minX, dy: -page.minY) }
+    }
+
+    private func playerFrame(_ size: CGSize) -> CGRect? {
+        FlexibleLegendPlacement.player(viewport: size, bottomClearance: PageChrome.edge,
+                                       keepOut: Self.playerKeepOut(frames))
+    }
+
+    private var fullLabel: String {
+        // ★ ROUND 5 (S2 / S4): the playing group's, in the page's unit (FlexibleSettingsSquish)
+        FlexibleSettingsSquish.fullLabel(model: model)
+    }
+
+    // MARK: chrome
+
+    private var exitButton: some View {
+        VStack {
+            HStack {
+                HStack {
+                    // ★ BATCH B (item 9.3): Exit consults the readiness — blocked ONLY by what truly
+                    // stops a lattice, and then it opens the fix instead of leaving
+                    let r = model.readiness
+                    // ★ ROUND 5 (S9): "Exit" until something differs from how the page opened (a value —
+                    // undoing back reads "Exit" again); "Save & Exit" after; "Fix 1 thing" while blocked
+                    let modified = FlexibleSettingsExit.modified(model.settings, since: opened)
+                    // ★ ROUND 7 (F, his answer: "Allow an *empty* setup after reset all."): nothing set to squish leaves
+                    let empty = model.isEmptySetup
+                    Button {
+                        leave(then: nil)   // ★ R7-D1: the ONE way off the page (Save & Exit's check first)
+                    } label: {
+                        Text(FlexibleSettingsExit.title(r, modified: modified, empty: empty))
+                            .dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
+                            .foregroundStyle(DS.Color.textPrimary.color)
+                            .padding(.vertical, 12).padding(.horizontal, DS.Space.xl5)
+                            .background(Capsule().fill((r.isReady || !modified || FlexibleSettingsExit.emptyLeaves(r, empty: empty) ? DS.Color.accent : DS.Color.warning).color))
+                    }
+                    .buttonStyle(.plain)
+                    .background(GeometryReader { g in
+                        // (and what it says, for the hosted test: "exitTitle:Save & Exit")
+                        Color.clear.preference(key: FlexibleKeepOutKey.self,
+                                               value: ["exitButton": g.frame(in: .global),
+                                                       "exitTitle:" + FlexibleSettingsExit.title(r, modified: modified, empty: empty): .zero])
+                    }.allowsHitTesting(false))
+                    .accessibilityIdentifier("flexible-exit")
+                    // the project's own snapshot history: every Flexible setting is undoable (S5)
+                    ForEach([(true, "arrow.uturn.backward"), (false, "arrow.uturn.forward")], id: \.1) { undo, icon in
+                        Button {
+                            Self.history(undo: undo, project: project, model: model)
+                        } label: {
+                            Image(systemName: icon).font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(DS.Color.textPrimary.color)
+                                .frame(width: 44, height: 44)
+                                .background(Circle().fill(DS.Color.chipSolid.color))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier(undo ? "flexible-undo" : "flexible-redo")
+                    }
+                }
+                // ★ the WHOLE row (Exit, undo, redo) — the top line's band starts right of it
+                .background(GeometryReader { g in
+                    Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["exitRow": g.frame(in: .global)])
+                }.allowsHitTesting(false))
+                Spacer()
+            }
+            Spacer()
+        }
+        .padding(PageChrome.edge)
+    }
+
+    /// ★ ROUND 7, R7-D1 (his pick 1: A2's capsule on BOTH pages): "● Flexible ⌄ | Lattice | Squish" under the Exit row, at
+    /// the main page's place (24, 76), Squish lit; its white dot while this page holds unsaved changes.
+    private var capsule: some View {
+        FlexibleStageCapsule(main: nil, model: model, project: project, page: .squish,
+                             go: { dest in leave(then: { onLeave(dest) }) }, lattice: { leave(then: nil) }, squish: {},
+                             about: onAbout, modified: FlexibleSettingsExit.modified(model.settings, since: opened),
+                             editFaces: Self.editFacesHop(onEditFaces: onEditFaces, leave: { leave(then: $0) }),
+                             changeType: Self.changeTypeHop(onChangeType: onChangeType, leave: { leave(then: $0) }))
+            .padding(.leading, FlexibleChromeLayout.capsuleLeft)
+            .padding(.top, FlexibleChromeLayout.capsuleTop)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// ★ ROUND 7, R7-D1: the ONE way off the Squish page — Exit / Save & Exit, the capsule's Lattice, and its menu's Topology
+    /// or Surface (`then`): Save & Exit's own check first (FlexibleSquishLeave). Blocked, the fix opens and nothing leaves.
+    private func leave(then follow: (() -> Void)?) {
+        _ = FlexibleSquishLeave.run(model.readiness, modified: FlexibleSettingsExit.modified(model.settings, since: opened),
+                                    empty: model.isEmptySetup, save: { model.save() }, exitUnchanged: { model.exitUnchanged = true },
+                                    onExit: onExit, present: { present($0) }, then: follow)
+    }
+
+    /// ★ THE PAGE'S UNDO / REDO: the project's own snapshot history, then — ★ D2 REVIEW — the
+    /// main page's loads re-read (no edit, no undo step: the redo stack survives) before the
+    /// designs re-run. The cached loads had kept the undone weight: a group line read
+    /// "Squeeze 10–12 kg", the pencil seeded 12 and the next press asked for the pad.
+    @MainActor
+    static func history(undo: Bool, project: ProjectModel, model: FlexibleStageModel) {
+        model.historyWillRestore()   // ★ U21 (UNDO-GHOST): what this step brings back
+        if undo { project.performUndo() } else { project.performRedo() }
+        model.refreshMainPageLoads()
+        model.historyRestored()   // ★ AP1 review: a press card follows the history
+        model.recomputeAll()
+        // ★ ROUND 6 ITEM 2: an undone / redone strip cut moved the regions — the part re-opens on them
+        if model.sceneState == .ready, model.openedKey != model.currentSceneKey { model.openScene() }
+    }
+
+    /// The toast line's height under the top line (the pop-up goes below it).
+    static let toastRowHeight: CGFloat = 30
+
+    /// ★ THE PANEL MAY GROW UP TO THE TOP CHROME (verification of D1; FlexibleSettingsPanel.maxHeight):
+    /// the Exit row, the top line and its toast, the fix pop-up while it is up.
+    private func panelMaxHeight(_ size: CGSize) -> CGFloat {
+        var band = noticeBand(size)
+        if model.toast != nil { band.size.height += Self.toastRowHeight }
+        var top = [exitRowLocal(), band] + (capsuleLocal().map { [$0] } ?? [])   // ★ R7-D1: the capsule
+        if fixShown != nil, let p = frames["popup"], let page = frames["page"] {
+            top.append(p.offsetBy(dx: -page.minX, dy: -page.minY))
+        }
+        return FlexibleSettingsPanel.maxHeight(viewport: size, topChrome: top)
+    }
+
+    /// The Exit row in the page's frame (measured; a nominal row before the first layout).
+    private func exitRowLocal() -> CGRect {
+        guard let row = frames["exitRow"] else {
+            return CGRect(x: PageChrome.edge, y: PageChrome.edge, width: 226, height: 44)
+        }
+        guard let page = frames["page"] else { return row }
+        return row.offsetBy(dx: -page.minX, dy: -page.minY)
+    }
+
+    /// ★ THE TOP LINE'S BAND (batch B review): right of the Exit row, left of the gizmo —
+    /// or its own row under Exit when that is too narrow (11" portrait). ★ R7-D1: never onto the capsule — beside the Exit
+    /// row when it misses it, else its own row below the capsule.
+    private func noticeBand(_ size: CGSize) -> CGRect {
+        FlexibleLegendPlacement.noticeBand(viewport: size, exitRow: exitRowLocal(),
+                                           capsule: Self.controlExitRowOnlyKeepOut ? nil : (capsuleLocal() ?? Self.nominalCapsule))
+    }
+
+    /// ★ R7-D1: the capsule in the page's frame (measured), nil before the first layout.
+    private func capsuleLocal() -> CGRect? {
+        guard let c = frames["capsule"] else { return nil }
+        guard let page = frames["page"] else { return c }
+        return c.offsetBy(dx: -page.minX, dy: -page.minY)
+    }
+    /// The capsule before it is measured (its place and its widest).
+    static let nominalCapsule = FlexibleChromeLayout.capsuleFrame(width: FlexibleChromeLayout.capsuleMaxWidth)
+
+    /// The legend, placed by FlexibleLegendPlacement.legend against the gizmo and the top line
+    /// (its own size measured; trailing-centred until the first measurement).
+    @ViewBuilder private func legend(in size: CGSize) -> some View {
+        // ★ BATCH C VERIFICATION: the legend's BODY lets every touch through (a curve point or
+        // the curve line under it stays live — "tap the line adds a point"); only its tab row
+        // ("TAP TO READ") takes the tap that drills in and out
+        // ★ ROUND 4 (img 1): the legend folds to the lattice legend's bar (the scale alone) — a
+        // tap on the bar brings it back; its chevron (top right) folds it
+        let view = Group {
+            if legendMinimized {
+                // ★ A BUTTON (verification of D1): the tap gesture that brought it back was untested
+                Button { legendMinimized = false } label: {
+                    FlexibleLegendBar(fraction: legendDrilled ? reading?.fraction : nil)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Show the key")
+                .accessibilityIdentifier("flexible-legend-expand")
+            } else {
+                FlexibleLegend(model: model, drawnLattice: nil, drilled: legendDrilled,
+                               reading: legendDrilled ? reading : nil, hasDent: dentRows,   // ★ R7-V; ★ R7 MERGE: heat drawn
+                               k: Int(FlexibleStageVolumes.prismK(dentExaggeration).rounded()),
+                               bendPrism: bendTag != nil || !bendPrism.isEmpty, bendShort: bendShort,   // ★ X1 VERIFY
+                               bendDrawing: !playingFE, bendK: Int(dentExaggeration.rounded()),   // ★ U21 batch F: his drawing ×k
+                               pressHeatTopMM: pressHeatTop)   // ★ R7-E5
+                    .overlay(alignment: .top) {
+                        HStack(spacing: 0) {
+                            Color.clear
+                                .frame(maxWidth: .infinity).frame(height: FlexibleLegend.tabHeight)
+                                .contentShape(Rectangle())
+                                .onTapGesture { legendDrilled.toggle(); reading = nil }
+                                .accessibilityElement()
+                                .accessibilityLabel(legendDrilled ? "Stop reading" : "Tap to read")
+                                .accessibilityAddTraits(.isButton)
+                                .accessibilityIdentifier("flexible-settings-legend-tab")
+                                // ★ R6: TAP TO READ only with a dent — ★ R7-V REVIEW: and its heat shown (its rows on the card)
+                                .allowsHitTesting(Self.controlTabIgnoresHeat ? dents != nil : Self.reads(hasDent: dentRows, views: model.views))
+                                .accessibilityHidden(!Self.reads(hasDent: dentRows, views: model.views))
+                            Button { legendMinimized = true } label: {
+                                Image(systemName: "chevron.up")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundStyle(DS.Color.accent.color)
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Minimise the key")
+                            .accessibilityIdentifier("flexible-legend-minimize")
+                        }
+                    }
+            }
+        }
+            .accessibilityIdentifier("flexible-settings-legend")
+            .background(GeometryReader { g in
+                Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["legend": g.frame(in: .global)])
+            }.allowsHitTesting(false))
+        if let measured = frames["legend"]?.size, measured.width > 0, measured.height > 0,
+           let r = FlexibleLegendPlacement.legend(size: measured, viewport: size,
+                                                  keepOut: Self.legendKeepOut(viewport: size, notice: noticeBand(size))) {   // ★ R6: the view buttons
+            view.position(x: r.midX, y: r.midY)
+        } else {
+            view.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                .padding(.trailing, PageChrome.edge)
+        }
+    }
+
+    /// ★ THE TOP LINE (batch B, item 9): opening / a failure, else the live READINESS line —
+    /// "Ready: Exit builds the lattice" (green) or "1 thing to fix: … [Fix]" (the pop-up) —
+    /// and, under it for a moment, what an automatic fix did. In its band (noticeBand).
+    @ViewBuilder private func notice(in size: CGSize) -> some View {
+        let band = noticeBand(size)
+        VStack(spacing: DS.Space.xs) {
+            if let text = noticeText {
+                noticePill(text, icon: "info.circle.fill", colour: DS.Color.textSecondary.color, fix: nil)
+            } else if model.sceneState == .ready {
+                let r = model.readiness
+                // a failed build, and ★ (D2 review) separate groups that compete, in warning colour
+                let good = r.isReady && !r.buildFailed && r.advisory == nil   // ★ batch E: competing, or no lattice under a face
+                // ★ ROUND 7 (F, his answers: an empty setup after Reset all; "Do not." keep suggesting the Top): one plain line
+                let empty = FlexibleSettingsExit.emptyLeaves(r, empty: model.isEmptySetup)
+                // ★ ROUND 5 (S9): it names the button — "Save & Exit builds…" only once something changed
+                noticePill(FlexibleSettingsExit.topLine(r, modified: FlexibleSettingsExit.modified(model.settings, since: opened),
+                                                        empty: model.isEmptySetup),
+                           icon: empty ? "info.circle.fill" : (good ? "checkmark.circle.fill" : "exclamationmark.circle.fill"),
+                           colour: (empty ? DS.Color.textSecondary : (good ? FlexibleStageStyle.accentToken : DS.Color.warning)).color,
+                           fix: Self.noticeFix(r, model: model))   // ★ M1 VERIFY: no [Fix] with no face-prism
+            }
+            if let t = model.toast {
+                HStack(spacing: DS.Space.s) {
+                    Text(t).font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textSecondary.color)
+                        .lineLimit(1)
+                    // ★ ROUND 7 (M2): the toast's ONE fix — a solid tap's [Go to Lattice] (the page's Exit, never the bake)
+                    if model.toastFix == .goToLattice {
+                        Button { leaveForLattice() } label: {
+                            Text(FlexibleRowCopy.goToLattice).font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(DS.Color.textPrimary.color)
+                                .padding(.horizontal, 12).padding(.vertical, 6)
+                                .frame(minHeight: 32)
+                                .background(Capsule().fill(FlexibleStageStyle.facePrismToken.color.opacity(0.45)))
+                        }
+                        .buttonStyle(.plain)
+                        .background(GeometryReader { g in
+                            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["toastFix": g.frame(in: .global)])
+                        }.allowsHitTesting(false))
+                        .accessibilityIdentifier("flexible-toast-fix")
+                    }
+                }
+                .padding(.horizontal, DS.Space.m).padding(.vertical, 6)
+                .background(Capsule().fill(DS.Color.chipSolid.color))
+                .background(GeometryReader { g in   // ★ BATCH V: the toast is chrome too (chromeClip)
+                    Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["toast": g.frame(in: .global), "toastLine:" + t: .zero])
+                }.allowsHitTesting(false))
+                .accessibilityIdentifier("flexible-toast")
+            }
+        }
+        .frame(width: band.width)
+        .padding(.leading, band.minX)
+        .padding(.top, band.minY)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// ★ U21 BATCH E: what the fix pop-up shows — the issue it was opened on (as it is now), else a tap's no-lattice notice.
+    @MainActor static func popUpIssue(shown: FlexibleIssue?, model m: FlexibleStageModel) -> FlexibleIssue? {
+        if let shown, let live = FlexibleFixPrompt.live(shown, in: m.readiness) { return live }
+        return m.noLatticeTap
+    }
+
+    /// ★ ROUND 7 (M2): [Go to Lattice] — leave for the main Lattice page, where face-prisms are set: the page's Exit; his
+    /// edits are kept (saved), the lattice is NOT baked (never Save & Exit's bake).
+    private func leaveForLattice() {
+        if FlexibleSettingsExit.modified(model.settings, since: opened) { model.save() }
+        model.exitUnchanged = true
+        model.toast = nil
+        onExit()
+    }
+
+    private func noticePill(_ text: String, icon: String, colour: Color, fix: FlexibleIssue?) -> some View {
+        HStack(spacing: DS.Space.s) {
+            Image(systemName: icon).font(.system(size: 13)).foregroundStyle(colour)
+            Text(text)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(DS.Color.textSecondary.color)
+                .lineLimit(1).truncationMode(.tail)
+                .accessibilityIdentifier("flexible-readiness-line")
+            if let fix {
+                Button { present(fix) } label: {
+                    Text("Fix").font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(DS.Color.textPrimary.color)
+                        .padding(.horizontal, 12).padding(.vertical, 4)
+                        .background(Capsule().fill(DS.Color.warning.color.opacity(0.35)))
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("flexible-readiness-fix")
+            }
+        }
+        .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.s)
+        .background(Capsule().fill(DS.Color.chipSolid.color))
+        .overlay(Capsule().stroke(DS.Color.strokeSubtle.color, lineWidth: 1))
+        .background(GeometryReader { g in
+            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["notice": g.frame(in: .global)])
+        }.allowsHitTesting(false))
+    }
+
+    private var noticeText: String? {
+        switch model.sceneState {
+        case .opening: return "Opening the part — its faces, stacks and lattice region."
+        case .failed(let why): return "The part could not be opened: \(why)"
+        default: return nil
+        }
+    }
+
+    // (the panel: FlexibleSettingsPanel — round 4)
+}
+
+/// ★ BATCH V (m19): a Canvas's lines cut out of the chrome — everything outside `holes` is drawn (overlapping holes stay
+/// holes: each is cleared from the clip's layer, never toggled as an even-odd fill toggles a hole inside a hole).
+enum FlexibleChromeClip {
+    static func apply(_ ctx: inout GraphicsContext, size: CGSize, holes: [CGRect]) {
+        guard !holes.isEmpty else { return }
+        ctx.clipToLayer { layer in
+            layer.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.white))
+            layer.blendMode = .destinationOut
+            for h in holes where !h.isNull && !h.isEmpty { layer.fill(Path(h), with: .color(.white)) }
+        }
+    }
+}
+
+/// The frames the depth chips keep out of (the panel, the legend) and the stage's own.
+struct FlexibleKeepOutKey: PreferenceKey {
+    static var defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue()) { $1 }
+    }
+}
+
+// MARK: - overlays that follow the camera
+
+struct FlexibleStageOverlays: View {
+    @ObservedObject var model: FlexibleStageModel
+    @ObservedObject var proj: FlexibleProjectionBox
+    /// The page's exaggeration (the dent's and the prism's k).
+    var exaggeration: Double = 1
+    /// Where a chip cannot be reached (the panel, the legend), in stage points.
+    var keepOut: [CGRect] = []
+    /// ★ BATCH V (m19): what the lines drawn on the part are cut out of — the whole chrome (`FlexibleStagePage.chromeClip`);
+    /// nil: the curves and the stamp clip to `keepOut` and the dashed outlines to nothing (the red control).
+    var clip: [CGRect]? = nil
+    /// ★ ROUND 7 (F): the full-bend pose while Bend shows (nil: the part at rest).
+    var pose: FlexibleBendPose? = nil
+    /// ★ X1 VERIFY: X-ray's bend prism — its number, read-only, in a box at its floor.
+    var bendTag: FlexibleBendPrism.Tag? = nil
+    /// ★ R7-E1: the page's one keypad slot — the depth chips (a face's and the flat prism's) and the knob's boxes are tap-to-type.
+    var padTarget: Binding<String?>? = nil
+
+    var body: some View {
+        ZStack {
+            // ★ ROUND 3: BOTH curves on the selected pressed face, on its own two edges, at once
+            // ("X and Y always combined"); the frame arrows went with the frame rotation.
+            // ★ ROUND 7 (S, 4g): only the face he works on in the OPEN group (`workingFace` — his img4's chip and curves
+            // were Group 1's Face 1, drawn over Group 2's tab)
+            if let w = Self.workingFace(model: model) {
+                let r = w.region, g = w.geometry, f = w.face
+                // ★ ROUND 4: Curves or Stamp — never both; the Stamp face's handle is below
+                // ★ X20b (his answer of 2026-10-20 ~19:10: "On-part curves: REMOVE them from the part, but show the indent when
+                // selected like the stamp"): the face's indent, display only — its curves are edited in the 2D / 3D window
+                if !FlexibleIndent.controlCurvesOnPart, !f.isStampShape {
+                    FlexibleIndentLayer(lines: FlexibleIndent.face(model: model, region: r), projection: proj.projection,
+                                        clip: clip ?? keepOut, pose: pose)
+                }
+                ForEach(Self.curveEditorsOnPart(f), id: \.self) { axis in
+                    FlexibleCurveEditor(projection: proj.projection,
+                                        baseline: (axis == "x" ? g.baselineX : g.baselineY).posed(pose),   // ★ F: from the bent face
+                                        curve: axis == "x" ? f.curveX : f.curveY,
+                                        label: axis.uppercased(), tint: FlexibleStageStyle.onPart,
+                                        selected: selection(r, axis),
+                                        onChange: { c in setCurve(r, axis, c) },
+                                        onCommit: { model.save() },
+                                        // ★ VERIFICATION OF D1: never drawn or touched under the panel,
+                                        // the legend or the player (img 6's class, for the curves)
+                                        keepOut: keepOut, clip: clip)
+                }
+                // ★ ROUND 3 (item 1.1): the deepest squish, dragged out as a prism
+                FlexibleDepthChips(model: model, projection: proj.projection, k: exaggeration, keepOut: keepOut, pose: pose,   // ★ R: with the bend
+                                   padTarget: padTarget)   // ★ R7-E1: tap-to-type
+                // ★ ROUND 4 (D1): a Stamp face's ONE stamp — never under the panel or the legend,
+                // and never on the depth chip (it keeps clear of the chip's place: `k`)
+                FlexibleFaceStampHandle(model: model, projection: proj.projection, keepOut: keepOut, k: exaggeration, clip: clip, pose: pose)
+            }
+            // ★ ROUND 6 ITEM 2: pick mode — every edge and corner, coloured and numbered as the list
+            if model.edgePick != nil { FlexibleEdgePickOverlay(model: model, proj: proj, keepOut: keepOut, clip: clip) }
+            // ★ R7-E1: the open edges tab's flat prisms — traces, arrows, the chip at the head, the knob at the tail
+            if FlexibleFlatPrismUI.openEdgesGroup(model) != nil, model.edgeAdd != nil {
+                FlexibleEdgePickOverlay(model: model, proj: proj, keepOut: keepOut, clip: clip, add: true)   // ★ R7-E1b
+            }
+            if FlexibleFlatPrismUI.openEdgesGroup(model) != nil {
+                // ★ R7-E4: the working press's curves (Curves) or its stamp on the edge (Stamp) — under the flat prism's handles
+                // ★ U21 FIX 1 (his Img2: "The bend view doesn't bend the edges/corners"): with Bend on, the press's indent and its
+                // stamp outline sit on the bent edge (they stayed at rest over the edge preview's dent)
+                FlexiblePressCurveLayer(model: model, projection: proj.projection, keepOut: keepOut, clip: clip, pose: pose)
+                FlexiblePressStampHandle(model: model, projection: proj.projection, keepOut: keepOut, clip: clip, pose: pose)
+                FlexibleFlatPrismOverlay(model: model, projection: proj.projection, keepOut: keepOut, clip: clip, padTarget: padTarget ?? .constant(nil))
+            }
+            // ★ ROUND 6 (item 3): the Prisms view's mm tags and the Groups view's number discs
+            FlexibleStageViewTagsLayer(model: model, projection: proj.projection, k: FlexibleStageVolumes.prismK(exaggeration), keepOut: keepOut,
+                                       clip: clip, pose: pose)
+            // ★ X1 VERIFY (his rule: numbers are boxes): the bend prism's deepest mm, at its floor — never under the chrome
+            // ★ U21 batch F (SQUISH-CHIP-COVER, his Img8): and ≥ 12 pt off the depth chip's frame (the drag handle)
+            if let t = bendTag, let pt = proj.projection?.project(t.anchor), !keepOut.contains(where: { $0.contains(pt) }),
+               FlexibleBendPrism.controlTagOnWorkingFace
+                || FlexibleBendPrism.tagClear(pt, chips: Self.chipFrames(model: model, projection: proj.projection, k: exaggeration, pose: pose)
+                                                + Self.floorTagFrames(model: model, projection: proj.projection, k: exaggeration, keepOut: keepOut, pose: pose)) {
+                Text(t.text).font(.system(size: 12, weight: .semibold)).monospacedDigit()
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(Capsule().fill(DS.Surface.panel.color.opacity(0.85))
+                        .overlay(Capsule().strokeBorder(DS.Color.textPrimary.color.opacity(0.7), lineWidth: 1)))
+                    .allowsHitTesting(false)
+                    .background(GeometryReader { g in   // ★ U21 batch F: named for the hosted tests (never on the chip)
+                        Color.clear.preference(key: FlexibleViewMarksKey.self, value: ["bendTag": g.frame(in: .global)])
+                    }.allowsHitTesting(false))
+                    .position(pt)
+                    .accessibilityLabel("Bend \(t.text)")
+                    .accessibilityIdentifier("flexible-bend-prism-tag")
+            }
+        }
+    }
+
+    /// ★ U21 batch F: the depth chip's frame on screen (where FlexibleDepthChips sits it), [] with no chip.
+    @MainActor static func chipFrames(model: FlexibleStageModel, projection: CameraProjection?, k: Double, pose: FlexibleBendPose?) -> [CGRect] {
+        guard FlexibleBendPrism.chipFace(model: model) != nil, let h = FlexibleDepthChips.handle(model: model, k: k, pose: pose),
+              let p = projection?.project(h.anchor) else { return [] }
+        return [FlexibleDepthChips.frame(at: p, model: model)]
+    }
+    /// ★ U21 batch F: the Prisms view's floor tags as placed — a face's number already written there (one number per spot).
+    @MainActor static func floorTagFrames(model: FlexibleStageModel, projection: CameraProjection?, k: Double, keepOut: [CGRect],
+                                          pose: FlexibleBendPose?) -> [CGRect] {
+        FlexibleStageViewTags.tags(model: model, k: FlexibleStageVolumes.prismK(k), projection: projection, keepOut: keepOut, pose: pose)
+            .map(FlexibleStageViewTags.frame)
+    }
+
+    /// The curves drawn on a face: both (X and Y, combined) under Curves, none under Stamp —
+    /// the curves vanish the moment Stamp is chosen (his img 1).
+    static func curveAxes(_ f: FlexibleFaceSettings) -> [String] { f.isStampShape ? [] : ["x", "y"] }
+
+    /// The × of one curve, held by the model (a tap on the part clears it).
+    private func selection(_ r: Int, _ axis: String) -> Binding<Int?> {
+        Binding(get: { model.curvePoint.flatMap { $0.region == r && $0.axis == axis ? $0.index : nil } },
+                set: { model.curvePoint = $0.map { FlexCurvePoint(region: r, axis: axis, index: $0) } })
+    }
+
+    private func setCurve(_ r: Int, _ axis: String, _ c: FlexCurve) {
+        model.edit({ s in
+            guard var f = s.face(r) else { return }
+            if axis == "y" { f.curveY = c } else { f.curveX = c }
+            s.setFace(f)
+        }, recompute: false)
+        model.curveChanged(region: r)
+    }
+}
+
+// MARK: - small shared controls (the wizard's chip row, in this page's own file)
+
+struct FlexChips: View {
+    let options: [(id: String, label: String)]
+    let selection: String
+    var id: String = "flexible-chip"
+    var disabled: Set<String> = []
+    /// false: each chip its own width (the panel's rows — "Honeycomb" read "Honeyco…" in an
+    /// equal third of a fixed frame).
+    var equalWidths = true
+    let onPick: (String) -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(options, id: \.id) { o in
+                let on = o.id == selection
+                Button { onPick(o.id) } label: {
+                    Text(o.label)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(on ? DS.Color.textPrimary.color
+                                         : (disabled.contains(o.id) ? DS.Color.textDisabled.color
+                                            : DS.Color.textTertiary.color))
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                        .padding(.horizontal, 10).padding(.vertical, 7)
+                        .frame(maxWidth: equalWidths ? .infinity : nil)
+                        .background(Capsule().fill(on ? DS.Color.fillSelected.color : Color.clear))
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("\(id)-\(o.id)")
+            }
+        }
+        .padding(2)
+        .background(Capsule().fill(DS.Color.background.opacity(0.35).color)
+            .overlay(Capsule().strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)))
+    }
+}
+
+struct FlexSectionTitle: View {
+    let text: String
+    var body: some View {
+        Text(text).font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(DS.Color.textTertiary.color)
+            .textCase(.uppercase)
+    }
+}
+
+struct FlexCaption: View {
+    let text: String
+    var colour: Color = DS.Color.textTertiary.color
+    var body: some View {
+        Text(text).font(.system(size: 11.5)).foregroundStyle(colour)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// A number the user types: a chip that opens the shared number pad (standing rule:
+/// every numeric input opens a numeric keypad).
+struct FlexNumberChip: View {
+    let key: String
+    let title: String
+    let unit: String
+    let value: Double
+    var decimals = 1
+    @Binding var padTarget: String?
+    let onValue: (Double) -> Void
+
+    var body: some View {
+        HStack {
+            Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+            Spacer()
+            Button { padTarget = key } label: {
+                Text("\(String(format: "%.\(decimals)f", value)) \(unit)")
+                    .font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .background(Capsule().fill(DS.Surface.valuePill.color))
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("flexible-number-\(key)")
+            .numberPad(Binding(get: { padTarget == key }, set: { if !$0 { padTarget = nil } }),
+                       config: .init(title: title, unit: unit, allowsDecimal: true), seed: value) { v in
+                if let v, v > 0 { onValue(v) }
+            }
+        }
+    }
+}
+
+/// The badge every squish number wears (R7): tier + ± band, from core.
+struct FlexTierBadge: View {
+    let tier: FlexTier
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(tier.tier).font(.system(size: 11, weight: .bold))
+            Text("± \(Int((tier.band * 100).rounded())) %").font(.system(size: 11, weight: .medium))
+        }
+        .foregroundStyle(tier.tier == "estimated" ? DS.Color.warning.color : DS.Color.textSecondary.color)
+        .padding(.horizontal, 8).padding(.vertical, 3)
+        .background(Capsule().fill(DS.Color.fillSubtle.color))
+    }
+}
+
+/// The per-face numbers: range with tier and band, and the clamped columns in plain words.
+/// ★ ROUND 7 · MANUAL follow-up: every line here is core's DESIGN (its range, tier, clamps, "N of the design stamp lands off
+/// this face") — none of it in Manual; the face's one line there is the app's estimate (FlexibleManualPredict), as on its card.
+struct FlexibleFaceResult: View {
+    let design: FlexFaceDesignInfo
+    @ObservedObject var model: FlexibleStageModel
+    var region: Int? = nil
+
+    /// ★ RED CONTROL only (FlexibleManualFollowUpTests): core's design lines shown in Manual.
+    nonisolated(unsafe) static var controlDesignCaptionsInManual = false
+    /// Core's design lines are shown (Auto), or the estimate's one line (Manual).
+    static func showsDesign(model: FlexibleStageModel) -> Bool { !model.isManual || controlDesignCaptionsInManual }
+    /// The caption "N of the design stamp lands off this face." (nil: none — or Manual).
+    static func stampOffCaption(_ d: FlexFaceDesignInfo, model: FlexibleStageModel) -> String? {
+        guard showsDesign(model: model), d.designStampOffFace else { return nil }
+        return String(format: "%.1f N of the design stamp lands off this face.", d.designStampOffFaceN)
+    }
+
+    var body: some View {
+        if Self.showsDesign(model: model) { designBody } else {
+            FlexCaption(text: region.flatMap { model.estimateLine(region: $0) } ?? FlexibleManualCopy.estimateLater)
+        }
+    }
+
+    private var designBody: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                FlexSectionTitle(text: model.showBuildable ? "Can be built" : "You drew")
+                Spacer()
+                FlexTierBadge(tier: design.tier)
+            }
+            if let r = model.showBuildable ? design.buildableDepthRange : design.targetDepthRange {
+                let b = design.tier.band
+                Text(String(format: "%.1f – %.1f mm squish", r.lowerBound, r.upperBound))
+                    .font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                if model.showBuildable {
+                    FlexCaption(text: String(format: "± %.0f %%: %.1f – %.1f mm", b * 100,
+                                             r.lowerBound * (1 - b), r.upperBound * (1 + b)))
+                }
+            }
+            FlexCaption(text: design.tier.why)
+            let t = model.designTempC.map { "\(Int($0)) °C" } ?? "—"
+            FlexCaption(text: "\(model.designTopology.capitalized) at \(t)" + (model.settings.topology == "auto" ? " (Auto)" : ""))
+            let lines = clampLines
+            if !lines.isEmpty {
+                ForEach(lines, id: \.self) { FlexCaption(text: $0, colour: DS.Color.warning.color) }
+            }
+            if design.targetExtrapolated > 0 {
+                FlexCaption(text: "\(design.targetExtrapolated) columns squish past the tested 20 % — extrapolated.")
+            }
+            if design.designStampRigidAveraged {
+                FlexCaption(text: "A rigid design stamp is read as its stated weight spread over the area it covers — its real pressure depends on the lattice being designed.")
+            }
+            if let t = Self.stampOffCaption(design, model: model) { FlexCaption(text: t, colour: DS.Color.warning.color) }
+        }
+    }
+
+    private var clampLines: [String] {
+        var l: [String] = []
+        if design.tooFirm > 0 { l.append("\(design.tooFirm) columns: even the softest lattice will not squish that far here.") }
+        if design.tooSoft > 0 { l.append("\(design.tooSoft) columns: even the firmest lattice squishes further than drawn.") }
+        if design.beyondData > 0 { l.append("\(design.beyondData) columns: that squish is beyond the tested data.") }
+        if design.solidUnderMap > 0 { l.append("\(design.solidUnderMap) columns are solid under the drawing (no lattice there).") }
+        if model.showBuildable, design.buildableBeyondData > 0 {
+            l.append("\(design.buildableBeyondData) columns leave the data once smoothed — no number there.")
+        }
+        return l
+    }
+}
+
+/// The map's legend: ONE line saying what it shows and how much it is exaggerated ("What
+/// you drew · shown ×7"), the ramp, 0 … deepest, and the tier where core gave one. ★ ROUND 3:
+/// the long captions moved behind the (i) (FlexibleRowCopy); on the trailing edge, centred.
+/// ★ BATCH C: it takes a tap — "TAP TO READ" → "TAP THE PART TO READ" — and marks the reading
+/// on its ramp.
+/// ★ U21 FIX 1: the legend's line — 12 pt semibold, textPrimary, one line (scaled to 80 % before it is cut).
+struct FlexibleLegendLine: View {
+    let text: String
+    static let fontSize: CGFloat = 12
+    /// ★ RED CONTROL only: the line as U21 drew it — its .font and .foregroundStyle commented out (default type and colour).
+    nonisolated(unsafe) static var controlBareLegendLine = false
+
+    var body: some View {
+        if Self.controlBareLegendLine {
+            Text(text).lineLimit(1).minimumScaleFactor(0.8).accessibilityIdentifier("flexible-legend-line")
+        } else {
+            Text(text).font(.system(size: Self.fontSize, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                .lineLimit(1).minimumScaleFactor(0.8)
+                .accessibilityIdentifier("flexible-legend-line")
+        }
+    }
+}
+
+struct FlexibleLegend: View {
+    @ObservedObject var model: FlexibleStageModel
+    /// The generated lattice while it is drawn (X-ray): the map is then the one it was built from.
+    var drawnLattice: FlexibleGeneratedLattice? = nil
+    var drilled = false
+    var reading: FlexibleReading? = nil
+    /// ★ ROUND 6: the dent's rows (TAP TO READ, the ramp) only with a dent; the view rows with their view.
+    var hasDent = true
+    /// The page's exaggeration (the Prisms row's "×k").
+    var k = 1
+    /// ★ X1 VERIFY: X-ray's bend prism (its legend row), and whether the bend is well short of the curve he drew.
+    var bendPrism = false
+    var bendShort = false
+    /// ★ U21 batch F (DEPTH-LABEL): the prism is his drawing ×k (no 3D sim) — the row says so.
+    var bendDrawing = false
+    var bendK = 1
+    /// ★ R7-E5: an edges group's heat on the legend — its line and top end (nil: the faces' "What you drew" scale).
+    var pressHeatTopMM: Double? = nil
+    /// The tab row's height — the only part of the legend that takes a tap (the padding above
+    /// the "TAP TO READ" line, the line, and half the gap under it).
+    static let tabHeight: CGFloat = DS.Space.ml + 16
+
+    /// ★ ROUND 6 (item 3): the page shows the ONE card with a dent, or while a view is on (its row).
+    /// ★ R7-V: the dent's rows only while his Heat view shows heat; the rows only for the views that have one (Prisms,
+    /// Groups — Play and Bend have none).
+    /// ★ X1 VERIFY: …and while X-ray draws the bend's prism (its row: what the glass measures).
+    static func shows(hasDent: Bool, views: FlexibleStageViews, sections: Bool = false, bendPrism: Bool = false) -> Bool {
+        (hasDent && views.heatScope != .off) || views.contains(.prisms) || views.contains(.groups) || sections
+            || (bendPrism && !FlexibleBendPrism.controlFirstBuild)
+    }
+
+    /// ★ ROUND 7 (M2): the card's sections row while a face is cut into lattice sections ("Violet = lattice · tap to pick").
+    /// ★ ROUND 7 REVIEW (R): …only while something IS violet — a lattice part with no setting of its own nor on its face
+    /// (a pressed or resting part, or a face resting whole, wears its role's colour over the violet).
+    @MainActor static func sectionRow(_ m: FlexibleStageModel) -> Bool {
+        guard let set = m.regions.flexible, !set.partialRoots.isEmpty else { return false }
+        if controlVioletRowAlways { return true }
+        return set.pieces.contains { p in
+            set.partialRoots[p.rootRegion] != nil && p.kind != .strip && m.settings.face(p.wireID) == nil
+                && m.settings.face(p.rootRegion) == nil
+        }
+    }
+
+    var body: some View {
+        let shown = FlexibleShownValues(model: model, drawnLattice: drawnLattice)
+        let tier = model.checkStampShown.flatMap { model.checks[$0]?.tier }
+            ?? model.selectedRegion.flatMap { model.design($0)?.tier }
+        let noNumber = shown.values.values.contains { $0.contains { if case .noNumber = $0 { return true } else { return false } } }
+        VStack(alignment: .leading, spacing: 6) {
+            if hasDent {
+                Text(drilled ? "TAP THE PART TO READ" : "TAP TO READ")
+                    .font(.system(size: 10, weight: .bold)).tracking(0.7)
+                    .foregroundStyle(DS.Color.accent.color)
+                    .accessibilityIdentifier("flexible-legend-tab")
+                // ★ U21: core's design or the interim sim; ★ U21 FIX 1: its type and colour in ONE place (FlexibleLegendLine) — U21's
+                // comment, pasted mid-line, had swallowed the line's .font and .foregroundStyle (17 pt body in a 216 pt legend)
+                FlexibleLegendLine(text: pressHeatTopMM == nil ? shown.legendLine : FlexibleRowCopy.pressHeatLine(tuned: model.playingPressSimTuned))
+                // ★ BATCH M2 (V12; his round 5: "the graded dent colours should be in both views"): the main
+                // page's ONE smooth ramp (FlexibleMainLegendRow.ramp), never 24 flat blocks
+                FlexibleMainLegendRow.ramp(.dent).frame(width: 216, height: 10)
+                .overlay(alignment: .topLeading) {
+                    if let f = reading?.fraction {
+                        Image(systemName: "arrowtriangle.up.fill")
+                            .font(.system(size: 9))
+                            .foregroundStyle(DS.Color.accent.color)
+                            .offset(x: CGFloat(min(1, max(0, f))) * 216 - 4, y: 10)
+                    }
+                }
+                HStack {
+                    Text("0 mm"); Spacer(); Text(String(format: "%.1f mm", pressHeatTopMM ?? shown.maxDepth))
+                }
+                .font(.system(size: 11, weight: .medium)).monospacedDigit()
+                .foregroundStyle(DS.Color.textSecondary.color)
+                if noNumber {
+                    HStack(spacing: 6) {
+                        RoundedRectangle(cornerRadius: 2).fill(DS.Color.textQuaternary.color).frame(width: 12, height: 10)
+                        Text("grey · no number").font(.system(size: 11)).foregroundStyle(DS.Color.textTertiary.color)
+                    }
+                }
+                if let tier { FlexTierBadge(tier: tier) }
+            }
+            // ★ ROUND 6 (item 3): the views' rows — one line each
+            if model.views.contains(.prisms) { FlexibleLegendViewRows.prisms(k: k) }
+            if model.views.contains(.groups) { FlexibleLegendViewRows.groups(model: model) }
+            if Self.sectionRow(model) { FlexibleLegendViewRows.sections }   // ★ ROUND 7 (M2)
+            if bendPrism, !FlexibleBendPrism.controlFirstBuild {   // ★ X1 VERIFY
+                FlexibleLegendViewRows.bend(short: bendShort, drawing: bendDrawing, k: bendK)   // ★ U21 batch F: "your drawing ×2"
+            }
+        }
+        .frame(width: 236)
+        .padding(DS.Space.ml)
+        .background(RoundedRectangle(cornerRadius: DS.Radius.panel).fill(DS.Surface.panel.color)
+            .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel)
+                .strokeBorder((drilled ? DS.Color.accent : DS.Color.strokePanel).color, lineWidth: drilled ? 1.5 : 1)))
+        // ★ PASS-THROUGH (batch C verification): the page lays the tab's tap target over it
+        .allowsHitTesting(false)
+    }
+}
+
+/// The reading a tap pinned on the Settings page's part, re-projected on every camera move
+/// (it observes the page's projection box, so the page itself does not re-render).
+struct FlexibleReadingCallout: View {
+    @ObservedObject var proj: FlexibleProjectionBox
+    let reading: FlexibleReading?
+    /// ★ BATCH V (m19): the chrome — a reading whose point lies under it is not drawn there.
+    /// ★ BATCH V REVIEW: …nor one whose TAG would reach into it (the tag runs right of the point: tapped just left of the
+    /// legend, its 94 %-opaque squircle covered the legend). The legend card still reads the value (TAP TO READ).
+    var clip: [CGRect] = []
+    /// The tag's own size, measured for the reading it shows (by its words); unmeasured, it is not shown over any chrome.
+    @State private var fitted: FlexibleReadingFit?
+    /// Test control only (batch V review): the point alone tested against the chrome (as batch V built it).
+    @MainActor static var controlPointOnly = false
+
+    var body: some View {
+        if let r = reading, let s = proj.projection?.project(r.anchor), !clip.contains(where: { $0.contains(s) }) {
+            let shows = Self.controlPointOnly || Self.clear(anchor: s, size: fitted?.text == r.text ? fitted?.size : nil, clip: clip)
+            // ★ the value in the accent blue, in its own squircle (FlexibleReadingTag)
+            FlexibleReadingTag(reading: r)
+                .background(GeometryReader { g in
+                    Color.clear.preference(key: FlexibleReadingFitKey.self, value: FlexibleReadingFit(text: r.text, size: g.size))
+                })
+                .onPreferenceChange(FlexibleReadingFitKey.self) { fitted = $0 }
+                .opacity(shows ? 1 : 0)
+                .accessibilityHidden(!shows)
+                .offset(x: s.x + 2, y: s.y - FlexibleReadingTag.halfHeight)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("flexible-reading-callout")
+        }
+    }
+
+    /// Where the tag sits for a point `s` (stage points): right of it, centred on it.
+    static func frame(anchor s: CGPoint, size: CGSize) -> CGRect {
+        CGRect(x: s.x + 2, y: s.y - FlexibleReadingTag.halfHeight, width: size.width, height: size.height)
+    }
+    /// Whether the tag is drawn: its whole frame clear of every piece of the chrome (unmeasured: only with no chrome).
+    static func clear(anchor s: CGPoint, size: CGSize?, clip: [CGRect]) -> Bool {
+        guard let size else { return clip.isEmpty }
+        let f = frame(anchor: s, size: size)
+        return !clip.contains { !$0.isNull && $0.intersects(f) }
+    }
+}
+
+/// ★ BATCH V REVIEW: the reading tag's measured size, by the words it shows.
+struct FlexibleReadingFit: Equatable {
+    let text: String
+    let size: CGSize
+}
+
+struct FlexibleReadingFitKey: PreferenceKey {
+    static var defaultValue: FlexibleReadingFit? = nil
+    static func reduce(value: inout FlexibleReadingFit?, nextValue: () -> FlexibleReadingFit?) { value = nextValue() ?? value }
+}

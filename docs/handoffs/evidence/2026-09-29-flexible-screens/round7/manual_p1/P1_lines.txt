@@ -1,0 +1,3 @@
+(1) part: Optional(TopOptFlows.FlexibleManualLattice(topology: "gyroid", beads: 1, density: 0.2, grade: TopOptFlows.FlexibleManualGrade(on: false, by: "density", toDensity: 0.15174674843977753, along: "depth"), stepped: false, legacyCellMM: nil)) · facts ["8.8 cells across the depth · walls 0.45 mm", "Data covers 14–36 %"] · temp 240.0
+(2) Group 1 own: Optional(TopOptFlows.FlexibleManualLattice(topology: "honeycomb", beads: 2, density: 0.2, grade: TopOptFlows.FlexibleManualGrade(on: true, by: "density", toDensity: 0.35, along: "depth"), stepped: false, legacyCellMM: nil)) · facts ["7.6 cells across the depth · walls 0.90 mm", "Squishes ≈ 1.4 mm at 5 lb", "Data covers 16–45 %"] · manual grids true
+(3) X-ray · view line 'X-ray · bend estimated from your lattice'

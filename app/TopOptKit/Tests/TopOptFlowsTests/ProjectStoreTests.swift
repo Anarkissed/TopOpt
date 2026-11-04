@@ -84,6 +84,11 @@ final class ProjectStoreTests: XCTestCase {
         try store.save(snap, modelSource: URL(fileURLWithPath: Self.cubeSTL))
         XCTAssertNil(store.snapshot(id: snap.id), "a newer schema is skipped, not force-decoded")
         XCTAssertTrue(store.loadAllSnapshots().isEmpty)
+        // ★ round 3 ruling (c): skipped from the readable list — but listed, with the reason
+        let all = store.loadAll()
+        XCTAssertEqual(all.unreadable.map(\.id), [snap.id], "never dropped silently")
+        XCTAssertEqual(all.unreadable.first?.reason, "it was saved by a newer version of TopOpt")
+        XCTAssertEqual(all.unreadable.first?.name, "X")
     }
 
     // MARK: - the payoff: state survives a fresh AppModel (relaunch)

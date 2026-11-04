@@ -82,23 +82,248 @@ public struct DesignBoxBounds: Equatable, Sendable, Codable {
     }
 }
 
-/// The design-domain state persisted on a project and edited by the workspace gizmo.
-/// `box == nil` means the tool is off (no design box → default optimize behavior).
-public struct DesignBoxModel: Equatable, Sendable, Codable {
-    /// The design box (growable envelope), or nil when the tool has never been opened
-    /// / was turned off. nil is the DEFAULT-OFF state: the run passes no box.
-    public var box: DesignBoxBounds?
-    /// Keep-out boxes the optimizer must leave empty (FrozenVoid). Only meaningful
-    /// when `box != nil`; cleared when the tool is turned off.
-    public var keepOuts: [DesignBoxBounds]
+// MARK: - B6: the DESIGN PRIMITIVES list (his picks + the reviewer's rulings, 2026-10-24)
+//
+// The Setup panel's one Design box row is a LIST of up to 6 design primitives. Each row is a Box (length, width, height) or a
+// Cylinder (diameter, height, axis), Positive ("allow mass to grow here") or Negative ("no mass here"), with a view-only eye
+// and a trash (in place + one-step Undo). Every row is drawn on the model in its colour with today's handles.
+//
+// ★ WHAT A RUN SENDS (his answer, 2026-10-24: "Run with just the first design box for now"): the FIRST POSITIVE BOX row is
+// today's single design box, sent exactly as today's job carries it (`bridgeBox`); every NEGATIVE BOX row goes out as today's
+// keep-outs (`bridgeKeepOuts`, which core already takes). Cylinders and further Positive boxes are NOT sent until core takes
+// the list. Front end first: no core change, no card in the UI.
 
-    public init(box: DesignBoxBounds? = nil, keepOuts: [DesignBoxBounds] = []) {
-        self.box = box
-        self.keepOuts = keepOuts
+/// A design primitive's shape.
+public enum DesignPrimitiveShape: String, Equatable, Sendable, Codable, CaseIterable {
+    case box, cylinder
+    public var title: String { self == .box ? "Box" : "Cylinder" }
+}
+
+/// Positive lets mass grow; Negative keeps it out.
+public enum DesignPrimitiveSign: String, Equatable, Sendable, Codable, CaseIterable {
+    case positive, negative
+    public var title: String { self == .positive ? "Positive" : "Negative" }
+    public var meaning: String { self == .positive ? "Allow mass to grow here" : "No mass here" }
+}
+
+/// One row of the list, in MODEL space (mm). A cylinder is kept as its bounding box, square across its `axis` (so today's
+/// six face handles and move handle edit it unchanged: a cross face sets the diameter, an axis face the height).
+public struct DesignPrimitive: Equatable, Sendable, Codable, Identifiable {
+    public var id: Int
+    public var name: String
+    public var shape: DesignPrimitiveShape
+    public var sign: DesignPrimitiveSign
+    /// A box's own bounds; a cylinder's bounding box.
+    public var bounds: DesignBoxBounds
+    /// A cylinder's axis (0/1/2 = x/y/z); a box ignores it.
+    public var axis: Int
+    /// The row's eye — VIEW ONLY: a hidden row is not drawn and changes nothing about the run.
+    public var isShown: Bool
+
+    public init(id: Int, name: String, shape: DesignPrimitiveShape = .box, sign: DesignPrimitiveSign = .positive,
+                bounds: DesignBoxBounds, axis: Int = 2, isShown: Bool = true) {
+        self.id = id
+        self.name = name
+        self.shape = shape
+        self.sign = sign
+        self.bounds = bounds
+        self.axis = Swift.min(Swift.max(axis, 0), 2)
+        self.isShown = isShown
     }
 
-    /// Whether the design-box tool is active (a box is defined).
-    public var isActive: Bool { box != nil }
+    /// The smallest extent a typed or dragged size may reach (mm).
+    public static let minExtent: Float = 0.1
+
+    /// A box's length / width / height (model x / y / z).
+    public var length: Float { bounds.size.x }
+    public var width: Float { bounds.size.y }
+    /// A box's z extent; a cylinder's extent along its axis.
+    public var height: Float { shape == .cylinder ? bounds.size[axis] : bounds.size.z }
+    /// A cylinder's diameter (the smaller cross extent, which every edit keeps equal to the other).
+    public var diameter: Float {
+        let c = crossAxes
+        return Swift.min(bounds.size[c.0], bounds.size[c.1])
+    }
+    var crossAxes: (Int, Int) { axis == 0 ? (1, 2) : axis == 1 ? (0, 2) : (0, 1) }
+
+    private mutating func setSize(_ s: SIMD3<Float>) {
+        let c = bounds.center, h = simd_max(s, SIMD3<Float>(repeating: Self.minExtent)) * 0.5
+        bounds = DesignBoxBounds(min: c - h, max: c + h)
+    }
+
+    /// A box's number fields: the size about its centre.
+    public mutating func setBoxSize(length: Float, width: Float, height: Float) {
+        setSize(SIMD3<Float>(length, width, height))
+    }
+
+    /// A cylinder's number fields: diameter across its axis, height along it, about its centre.
+    public mutating func setCylinder(diameter: Float, height: Float) {
+        var s = SIMD3<Float>(repeating: diameter)
+        s[axis] = height
+        setSize(s)
+    }
+
+    /// A cylinder's axis: the same diameter and height, laid along the new axis.
+    public mutating func setAxis(_ a: Int) {
+        let d = diameter, h = height
+        axis = Swift.min(Swift.max(a, 0), 2)
+        setCylinder(diameter: d, height: h)
+    }
+
+    /// Box ↔ Cylinder. A box becomes an upright (z) cylinder as wide as its smaller footprint side; a cylinder becomes the
+    /// box it fills. A default name ("Box 3") follows the shape ("Cylinder 3").
+    public mutating func setShape(_ s: DesignPrimitiveShape) {
+        guard s != shape else { return }
+        let old = shape
+        if s == .cylinder {
+            axis = 2
+            let d = Swift.min(bounds.size.x, bounds.size.y), h = bounds.size.z
+            shape = s
+            setCylinder(diameter: d, height: h)
+        } else {
+            shape = s
+        }
+        let prefix = old.title + " "
+        if name.hasPrefix(prefix), Int(name.dropFirst(prefix.count)) != nil {
+            name = s.title + " " + name.dropFirst(prefix.count)
+        }
+    }
+
+    /// Bounds written by an on-model handle. A cylinder stays round: a dragged CROSS face sets both cross extents.
+    public mutating func write(_ b: DesignBoxBounds, draggedAxis: Int?) {
+        bounds = b
+        guard shape == .cylinder, let a = draggedAxis, a != axis else { return }
+        let other = crossAxes.0 == a ? crossAxes.1 : crossAxes.0
+        var lo = b.min, hi = b.max
+        let c = b.center[other], half = b.size[a] * 0.5
+        lo[other] = c - half; hi[other] = c + half
+        bounds = DesignBoxBounds(min: lo, max: hi)
+    }
+}
+
+/// The design-domain state persisted on a project and edited by the workspace gizmo and the Setup list.
+/// An empty list is the DEFAULT-OFF state: the run passes no box.
+public struct DesignBoxModel: Equatable, Sendable {
+    /// The rows, in his order.
+    public var primitives: [DesignPrimitive]
+
+    /// The list's cap: at 6, Add greys out ("Up to 6 design primitives").
+    public static let maxPrimitives = 6
+
+    public init(primitives: [DesignPrimitive]) {
+        self.primitives = primitives
+    }
+
+    /// Today's shape: one design box (row 1, Box, Positive) and its keep-outs (Box, Negative rows after it).
+    public init(box: DesignBoxBounds? = nil, keepOuts: [DesignBoxBounds] = []) {
+        self.primitives = Self.legacyRows(box: box, keepOuts: keepOuts)
+    }
+
+    /// The rows today's saved `box` + `keepOuts` open as: ids 1…n and names "Box 1"… in order.
+    static func legacyRows(box: DesignBoxBounds?, keepOuts: [DesignBoxBounds]) -> [DesignPrimitive] {
+        var rows: [DesignPrimitive] = []
+        if let box { rows.append(DesignPrimitive(id: 1, name: "Box 1", bounds: box)) }
+        for k in keepOuts {
+            let n = rows.count + 1
+            rows.append(DesignPrimitive(id: n, name: "Box \(n)", sign: .negative, bounds: k))
+        }
+        return rows
+    }
+
+    // MARK: the row the run sends, and the others
+
+    /// ★ THE ROW A RUN SENDS: the first Positive Box.
+    public var primaryIndex: Int? { primitives.firstIndex { $0.shape == .box && $0.sign == .positive } }
+    /// Every other row, in list order — the gizmo's `.keepOut(i)` handles (i indexes this list).
+    public var otherIndices: [Int] {
+        let p = primaryIndex
+        return primitives.indices.filter { $0 != p }
+    }
+
+    /// The design box (the first Positive Box's bounds), or nil when the list holds none. Setting it writes that row (nil
+    /// removes it); with no such row a non-nil value inserts one at the top.
+    public var box: DesignBoxBounds? {
+        get { primaryIndex.map { primitives[$0].bounds } }
+        set {
+            if let i = primaryIndex {
+                if let v = newValue { primitives[i].bounds = v } else { primitives.remove(at: i) }
+            } else if let v = newValue {
+                primitives.insert(DesignPrimitive(id: nextID, name: nextName(.box), bounds: v), at: 0)
+            }
+        }
+    }
+
+    /// The bounds of every row but the design box, in list order (the gizmo's other handles). Setting writes them back in
+    /// order; extra values append Negative boxes, fewer drop the trailing rows.
+    public var keepOuts: [DesignBoxBounds] {
+        get { otherIndices.map { primitives[$0].bounds } }
+        set {
+            let idx = otherIndices
+            for (k, i) in idx.enumerated() where k < newValue.count { primitives[i].write(newValue[k], draggedAxis: nil) }
+            if newValue.count > idx.count {
+                for b in newValue[idx.count...] {
+                    primitives.append(DesignPrimitive(id: nextID, name: nextName(.box), sign: .negative, bounds: b))
+                }
+            } else if newValue.count < idx.count {
+                for i in idx[newValue.count...].reversed() { primitives.remove(at: i) }
+            }
+        }
+    }
+
+    /// Whether a run sends a design box (a Positive Box row exists).
+    public var isActive: Bool { primaryIndex != nil }
+    /// Whether the list has any row (the model draws the gizmo).
+    public var hasPrimitives: Bool { !primitives.isEmpty }
+    /// The rows drawn: the eye is view-only.
+    public var shownPrimitives: [DesignPrimitive] { primitives.filter(\.isShown) }
+    public var canAdd: Bool { primitives.count < Self.maxPrimitives }
+
+    var nextID: Int { (primitives.map(\.id).max() ?? 0) + 1 }
+    func nextName(_ shape: DesignPrimitiveShape) -> String {
+        var n = 1
+        while primitives.contains(where: { $0.name == "Box \(n)" || $0.name == "Cylinder \(n)" }) { n += 1 }
+        return "\(shape.title) \(n)"
+    }
+    private func index(_ id: Int) -> Int? { primitives.firstIndex { $0.id == id } }
+
+    // MARK: the list's edits (by row id)
+
+    /// Add: appends a Positive Box underneath — the first is today's default grow-room box, a later one the part's box
+    /// grown 10 %. nil (nothing added) at 6. Returns the new row's id.
+    @discardableResult
+    public mutating func add(around part: MeshBounds) -> Int? {
+        guard canAdd else { return nil }
+        let b: DesignBoxBounds
+        if primitives.isEmpty || part.isEmpty {
+            b = Self.defaultBox(around: part)
+        } else {
+            let pad = (part.max - part.min) * 0.1
+            b = DesignBoxBounds(min: part.min - pad, max: part.max + pad)
+        }
+        let id = nextID
+        primitives.append(DesignPrimitive(id: id, name: nextName(.box), bounds: b))
+        return id
+    }
+
+    public mutating func setShape(_ id: Int, _ s: DesignPrimitiveShape) { if let i = index(id) { primitives[i].setShape(s) } }
+    public mutating func setSign(_ id: Int, _ s: DesignPrimitiveSign) { if let i = index(id) { primitives[i].sign = s } }
+    public mutating func setShown(_ id: Int, _ shown: Bool) { if let i = index(id) { primitives[i].isShown = shown } }
+    public mutating func setBoxSize(_ id: Int, length: Float, width: Float, height: Float) {
+        if let i = index(id) { primitives[i].setBoxSize(length: length, width: width, height: height) }
+    }
+    public mutating func setCylinder(_ id: Int, diameter: Float, height: Float) {
+        if let i = index(id) { primitives[i].setCylinder(diameter: diameter, height: height) }
+    }
+    public mutating func setAxis(_ id: Int, _ a: Int) { if let i = index(id) { primitives[i].setAxis(a) } }
+    public mutating func writeBounds(_ id: Int, _ b: DesignBoxBounds, draggedAxis: Int?) {
+        if let i = index(id) { primitives[i].write(b, draggedAxis: draggedAxis) }
+    }
+    /// The trash: the row and where it was (nil when no such row).
+    @discardableResult
+    public mutating func remove(_ id: Int) -> (row: DesignPrimitive, at: Int)? {
+        guard let i = index(id) else { return nil }
+        return (primitives.remove(at: i), i)
+    }
 
     /// The default box seeded when the user first opens the tool: the part's bounding
     /// box grown outward by `growth` × the part's size on every axis, so the user
@@ -131,15 +356,13 @@ public struct DesignBoxModel: Equatable, Sendable, Codable {
         if box == nil { box = Self.defaultBox(around: part) }
     }
 
-    /// Turn the tool off: drop the box AND its keep-outs (the run reverts to the
-    /// default no-box path).
+    /// Turn the tool off: drop every row (the run reverts to the default no-box path).
     public mutating func disable() {
-        box = nil
-        keepOuts = []
+        primitives = []
     }
 
     /// Reset the design box back to the default grow-room box around the part
-    /// (keep-outs are preserved).
+    /// (the other rows are preserved).
     public mutating func reset(around part: MeshBounds) {
         box = Self.defaultBox(around: part)
     }
@@ -158,54 +381,216 @@ public struct DesignBoxModel: Equatable, Sendable, Codable {
         box = b.translated(by: delta)
     }
 
-    /// Add a keep-out box: a small cube at the part centre the user then resizes/moves
-    /// (no-op if the tool is off — keep-outs only apply under a design box).
+    /// Add a keep-out (a Negative Box row): a small cube at the part centre the user then resizes/moves (no-op if there is
+    /// no design box, or at 6 rows). Returns its index among `keepOuts`.
     @discardableResult
     public mutating func addKeepOut(around part: MeshBounds) -> Int? {
-        guard box != nil else { return nil }
+        guard box != nil, canAdd else { return nil }
         let c = part.isEmpty ? SIMD3<Float>(repeating: 0) : part.center
         let h = Swift.max(part.radius * 0.15, 1e-3)
-        keepOuts.append(DesignBoxBounds(min: c - h, max: c + h))
+        primitives.append(DesignPrimitive(id: nextID, name: nextName(.box), sign: .negative,
+                                          bounds: DesignBoxBounds(min: c - h, max: c + h)))
         return keepOuts.count - 1
     }
 
-    /// Remove the keep-out at `index` (bounds-checked).
+    /// Remove the other row at `index` (bounds-checked).
     public mutating func removeKeepOut(at index: Int) {
-        guard keepOuts.indices.contains(index) else { return }
-        keepOuts.remove(at: index)
+        let idx = otherIndices
+        guard idx.indices.contains(index) else { return }
+        primitives.remove(at: idx[index])
     }
 
-    /// Resize a keep-out box's face (bounds-checked; no-op if off / bad index).
+    /// Resize another row's face (bounds-checked; no-op if off / bad index). A cylinder stays round.
     public mutating func resizeKeepOutFace(_ index: Int, axis: Int, isMax: Bool,
                                            to value: Float, part: MeshBounds) {
-        guard box != nil, keepOuts.indices.contains(index) else { return }
-        keepOuts[index] = keepOuts[index].movingFace(
-            axis: axis, isMax: isMax, to: value, minSize: Self.minSize(for: part))
+        let idx = otherIndices
+        guard box != nil, idx.indices.contains(index) else { return }
+        let i = idx[index]
+        primitives[i].write(primitives[i].bounds.movingFace(axis: axis, isMax: isMax, to: value,
+                                                            minSize: Self.minSize(for: part)), draggedAxis: axis)
     }
 
-    /// Translate a keep-out box (bounds-checked; no-op if off / bad index).
+    /// Translate another row (bounds-checked; no-op if off / bad index).
     public mutating func moveKeepOut(_ index: Int, by delta: SIMD3<Float>) {
-        guard box != nil, keepOuts.indices.contains(index) else { return }
-        keepOuts[index] = keepOuts[index].translated(by: delta)
+        let idx = otherIndices
+        guard box != nil, idx.indices.contains(index) else { return }
+        primitives[idx[index]].bounds = primitives[idx[index]].bounds.translated(by: delta)
     }
 
     // MARK: - bridge conversion (model space → the core's DesignBox, mm)
 
-    /// The design box as the bridge spec (model space, Double), or nil when the tool
-    /// is off → the run passes NO box (default behavior). This is what
-    /// `AppModel.makeRunRequest` hands `minimizePlasticLoadCase`.
+    /// ★ The design box as the bridge spec: the FIRST POSITIVE BOX row (shown or hidden — the eye is view-only), or nil when
+    /// the list holds none → the run passes NO box. What `AppModel.makeRunRequest` hands `minimizePlasticLoadCase`.
     public var bridgeBox: TopOptKit.DesignBoxSpec? {
         guard let b = box else { return nil }
         return TopOptKit.DesignBoxSpec(min: SIMD3<Double>(b.min), max: SIMD3<Double>(b.max))
     }
 
-    /// The keep-out boxes as bridge specs (empty when the tool is off, so no keep-out
-    /// is passed unless a design box is too).
+    /// ★ Every NEGATIVE BOX row, in list order, while a design box exists: exactly today's keep-outs, which core already
+    /// takes. A Negative box is drawn as "no mass here", so it must be sent as one: a run never silently sends something other
+    /// than what is drawn, and an old project's keep-outs go out byte-identical. Cylinders and Positive boxes after the first
+    /// are not sent until core takes the list (his answer 2026-10-24: "Run with just the first design box for now").
     public var bridgeKeepOuts: [TopOptKit.DesignBoxSpec] {
         guard box != nil else { return [] }
-        return keepOuts.map {
-            TopOptKit.DesignBoxSpec(min: SIMD3<Double>($0.min), max: SIMD3<Double>($0.max))
+        return primitives.filter { $0.sign == .negative && $0.shape == .box }.map {
+            TopOptKit.DesignBoxSpec(min: SIMD3<Double>($0.bounds.min), max: SIMD3<Double>($0.bounds.max))
         }
+    }
+}
+
+// MARK: saved projects
+
+extension DesignBoxModel: Codable {
+    private enum CodingKeys: String, CodingKey { case box, keepOuts, primitives }
+
+    /// Never fails: `primitives` when present and readable, else today's `box` + `keepOuts` (row 1 Box Positive, then
+    /// Negative boxes), else an empty list.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        if let rows = (try? c.decodeIfPresent([DesignPrimitive].self, forKey: .primitives)) ?? nil {
+            primitives = rows
+            return
+        }
+        let box = (try? c.decodeIfPresent(DesignBoxBounds.self, forKey: .box)) ?? nil
+        let kos = ((try? c.decodeIfPresent([DesignBoxBounds].self, forKey: .keepOuts)) ?? nil) ?? []
+        primitives = Self.legacyRows(box: box, keepOuts: kos)
+    }
+
+    /// An untouched project encodes as before (`box`, `keepOuts`). A list today's keys can't hold adds `primitives`, with
+    /// `box` = the design box and `keepOuts` = its Negative boxes beside it.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        let b = box, others = keepOuts
+        try c.encodeIfPresent(b, forKey: .box)
+        if Self.legacyRows(box: b, keepOuts: others) == primitives {
+            try c.encode(others, forKey: .keepOuts)
+        } else {
+            try c.encode(primitives.filter { $0.shape == .box && $0.sign == .negative }.map(\.bounds), forKey: .keepOuts)
+            try c.encode(primitives, forKey: .primitives)
+        }
+    }
+}
+
+// MARK: - a primitive that stops short is PLAINLY visible
+
+/// A primitive that stops just short of the part or of another row (his keep-out stopped short of his design box and he did
+/// not see it): the gap, drawn on the model as its own slab and named on the row.
+public struct DesignPrimitiveGap: Equatable, Sendable {
+    public enum Reference: Equatable, Sendable { case part, primitive(Int) }
+    /// The row that stops short.
+    public let primitiveID: Int
+    public let reference: Reference
+    public let axis: Int
+    /// The gap (mm).
+    public let mm: Float
+    /// The gap's slab (model space).
+    public let region: DesignBoxBounds
+}
+
+public enum DesignPrimitiveGaps {
+    /// A gap under this is touching.
+    public static let touchMM: Float = 0.05
+    /// A gap up to this reads as "meant to reach": a quarter of the part's half-diagonal, at most 5 mm.
+    public static func nearMM(part: MeshBounds?) -> Float {
+        guard let part, !part.isEmpty else { return 5 }
+        return Swift.min(5, part.radius * 0.25)
+    }
+
+    /// Every gap, on bounding boxes: a row SEPARATED from the part (or an earlier row) by a near gap on one axis while they
+    /// overlap on the other two, or a row INSIDE another row (or the part) whose face ends a near gap short of that one's.
+    public static func find(_ rows: [DesignPrimitive], part: MeshBounds?) -> [DesignPrimitiveGap] {
+        let near = nearMM(part: part)
+        var refs: [(DesignPrimitiveGap.Reference, DesignBoxBounds, Int)] = []   // (ref, bounds, list index; -1 the part)
+        if let part, !part.isEmpty { refs.append((.part, DesignBoxBounds(min: part.min, max: part.max), -1)) }
+        for (i, r) in rows.enumerated() { refs.append((.primitive(r.id), r.bounds, i)) }
+        func overlap(_ a: DesignBoxBounds, _ b: DesignBoxBounds, _ k: Int) -> Float {
+            Swift.min(a.max[k], b.max[k]) - Swift.max(a.min[k], b.min[k])
+        }
+        func isNear(_ g: Float) -> Bool { g > touchMM && g <= near }
+        var out: [DesignPrimitiveGap] = []
+        for (ai, a) in rows.enumerated() {
+            for (ref, r, ri) in refs where ri != ai {
+                for k in 0..<3 {
+                    let others = [0, 1, 2].filter { $0 != k }
+                    guard others.allSatisfy({ overlap(a.bounds, r, $0) > touchMM }) else { continue }
+                    var lo = a.bounds.min, hi = a.bounds.max
+                    for o in others { lo[o] = Swift.max(a.bounds.min[o], r.min[o]); hi[o] = Swift.min(a.bounds.max[o], r.max[o]) }
+                    var gaps: [(Float, Float, Float)] = []                                  // (mm, slab lo, slab hi)
+                    if overlap(a.bounds, r, k) <= touchMM {
+                        // separated (reported once per pair of rows: on the later one)
+                        guard ri < ai else { continue }
+                        if r.min[k] >= a.bounds.max[k] { gaps.append((r.min[k] - a.bounds.max[k], a.bounds.max[k], r.min[k])) }
+                        if a.bounds.min[k] >= r.max[k] { gaps.append((a.bounds.min[k] - r.max[k], r.max[k], a.bounds.min[k])) }
+                    } else {
+                        // inside: a face of `a` within `r` ends short of `r`'s face
+                        if a.bounds.max[k] < r.max[k], a.bounds.max[k] > r.min[k] {
+                            gaps.append((r.max[k] - a.bounds.max[k], a.bounds.max[k], r.max[k]))
+                        }
+                        if a.bounds.min[k] > r.min[k], a.bounds.min[k] < r.max[k] {
+                            gaps.append((a.bounds.min[k] - r.min[k], r.min[k], a.bounds.min[k]))
+                        }
+                    }
+                    for (g, s0, s1) in gaps where isNear(g) {
+                        lo[k] = s0; hi[k] = s1
+                        out.append(DesignPrimitiveGap(primitiveID: a.id, reference: ref, axis: k, mm: g,
+                                                      region: DesignBoxBounds(min: lo, max: hi)))
+                    }
+                }
+            }
+        }
+        return out
+    }
+}
+
+/// The list's words.
+public enum DesignPrimitivesCopy {
+    public static func count(_ n: Int) -> String { "\(n) of \(DesignBoxModel.maxPrimitives)" }
+    public static let add = "Add"
+    public static func addNote(count: Int) -> String {
+        count >= DesignBoxModel.maxPrimitives
+            ? "Up to \(DesignBoxModel.maxPrimitives) design primitives"
+            : "\(DesignPrimitiveSign.positive.title): \(DesignPrimitiveSign.positive.meaning.lowercased()) \u{00B7} "
+              + "\(DesignPrimitiveSign.negative.title): \(DesignPrimitiveSign.negative.meaning.lowercased())"
+    }
+    public static func deleteAsk(_ name: String) -> String { "Delete \(name)?" }
+    public static let delete = "Delete"
+    public static func deletedToast(_ name: String) -> String { "Deleted \(name)." }
+    public static let undo = "Undo"
+    public static let partName = "the part"
+    public static func gapNote(mm: Float, of ref: String) -> String {
+        "Stops \(String(format: "%.1f", mm)) mm short of \(ref)"
+    }
+    /// The eye is view-only.
+    public static func hiddenToast(_ name: String) -> String { "\(name) hidden from view only." }
+}
+
+/// What the model draws of the list: the shown rows (each by shape and sign) and the gaps of the shown rows that stop short.
+public struct DesignPrimitiveDrawing: Equatable, Sendable {
+    public var rows: [DesignPrimitive]
+    public var gaps: [DesignBoxBounds]
+    public init(rows: [DesignPrimitive] = [], gaps: [DesignBoxBounds] = []) {
+        self.rows = rows
+        self.gaps = gaps
+    }
+    public var isEmpty: Bool { rows.isEmpty && gaps.isEmpty }
+
+    /// A gap thinner than 2 % of the part's half-diagonal (at least 0.5 mm) is drawn that thick about its middle, so a
+    /// sliver still reads on screen.
+    /// `positives` / `negatives`: whether the stage draws that sign's rows (today's design box / keep-out gates).
+    public static func of(_ m: DesignBoxModel, part: MeshBounds?, positives: Bool = true,
+                          negatives: Bool = true) -> DesignPrimitiveDrawing {
+        let shown = m.shownPrimitives.filter { $0.sign == .positive ? positives : negatives }
+        let ids = Set(shown.map(\.id))
+        let minT = Swift.max(0.5, (part.map { $0.isEmpty ? 0 : $0.radius } ?? 0) * 0.02)
+        let gaps = DesignPrimitiveGaps.find(m.primitives, part: part).filter { ids.contains($0.primitiveID) }.map { g in
+            var lo = g.region.min, hi = g.region.max
+            if hi[g.axis] - lo[g.axis] < minT {
+                let c = (lo[g.axis] + hi[g.axis]) * 0.5
+                lo[g.axis] = c - minT * 0.5; hi[g.axis] = c + minT * 0.5
+            }
+            return DesignBoxBounds(min: lo, max: hi)
+        }
+        return DesignPrimitiveDrawing(rows: shown, gaps: gaps)
     }
 }
 
@@ -381,7 +766,9 @@ public enum DesignBoxHitTest {
 /// so the on-screen candidates and the tie order agree. Pure (closures carry all the
 /// view/camera state), so the overlay's hit-set is unit-tested headlessly.
 public enum DesignBoxHandles {
+    /// B6: `hiddenKeepOuts` — the other rows whose eye is off draw no handles (their indices keep their place).
     public static func candidates(box: DesignBoxBounds?, keepOuts: [DesignBoxBounds],
+                                  hiddenKeepOuts: Set<Int> = [],
                                   settledWorld: (SIMD3<Float>) -> SIMD3<Float>,
                                   project: (SIMD3<Float>) -> CGPoint?) -> [DesignBoxHitTest.Target] {
         var out: [DesignBoxHitTest.Target] = []
@@ -399,7 +786,7 @@ public enum DesignBoxHandles {
             }
         }
         if let box { addBox(box, target: .designBox) }
-        for (idx, ko) in keepOuts.enumerated() { addBox(ko, target: .keepOut(idx)) }
+        for (idx, ko) in keepOuts.enumerated() where !hiddenKeepOuts.contains(idx) { addBox(ko, target: .keepOut(idx)) }
         return out
     }
 }

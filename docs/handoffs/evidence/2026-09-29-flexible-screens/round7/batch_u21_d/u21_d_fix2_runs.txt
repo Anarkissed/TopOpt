@@ -1,0 +1,48 @@
+# U21 batch D FIX ROUND 2 runs (app/TopOptKit, --scratch-path /tmp/r7x20b-build) — 88c68264 + the working tree
+### new / changed tests first (red controls asserted inside; FLEX_U2_DIR = look/, lines files moved up)
+Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testFaceTakeOutAsksFirst]' passed (1.868 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testGroupTrashThenUndoReopensTheGroup]' passed (4.706 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testLatticeCalloutAndPressRowRemoveAskFirst]' passed (1.526 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testOneToolbarUndoRestoresTheTrashedGroup]' passed (6.358 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testPopupRemoveAsksFirst]' passed (1.800 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testPressTrashAsksFirst]' passed (3.373 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testResetAllThenUndoReopensTheGroup]' passed (6.595 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testTakeOutIsItsOwnUndoStep]' passed (3.945 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testTakeOutOnlyFaceThenUndoReopensItsGroup]' passed (2.692 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testTakeOutQuestionNamesTheFaceOnly]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testTakeOutSelectedFaceThenUndoReselectsIt]' passed (4.741 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU2Tests testU21ConfirmKeepSitsOnTheTappedControl]' passed (60.217 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU2Tests testU21DeleteLatticeSheetCancelOnTheButton]' passed (8.326 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU2Tests testU21FixRowsRemoveAskInPlace]' passed (22.289 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU2Tests testU21TakeOutAskFitsThePanelOnHisLBracket]' passed (16.824 seconds).
+### runner.log
+start 88c68264 + working tree 19:32:47
+build exit 0 19:32:59
+new exit 0 19:35:28
+golden det exit 0 19:35:45
+golden unseeded exit 0 19:36:01
+hashes exit 0 19:37:01
+hashes cmp vs x20b (non-comment lines): identical 19:37:01
+hashes cmp vs x20b (whole file): identical 19:37:01
+chunk_aa exit 0 19:55:05
+chunk_ab exit 0 20:03:17
+chunk_ac exit 0 20:13:42
+chunk_ad exit 1 20:34:11
+chunk_ae exit 0 20:37:41
+chunk_af exit 0 20:39:27
+ALLDONE 20:39:27
+### classes (67 = batch D's 60 + the 7 that pin the files batch D's fix rounds touched; FlexibleStageChrome.swift / FlexibleConfirmInPlace.swift pins included: FlexibleChromeStateTests, FlexibleU2Tests, FlexibleU21DeleteUndoTests), chunks of 12
+FlexibleU21DeleteUndoTests FlexibleU2Tests FlexibleRound7SelectionsHostedTests FlexibleR7FTests FlexibleR7RHostedTests FlexibleR7D2ReviewHostedTests FlexibleRound5SettingsHostedTests FlexibleR7SettingsHostedTests FlexibleSqueezeGroupsUITests FlexibleSqueezeGroupsReviewUITests FlexibleSquishCopyTests LatticeStaleTypeTests FlexibleBatchBReviewUXTests FlexibleBatchVHostedTests FlexibleEdgeGroupsHostedTests FlexibleEdgeGroupsTests FlexibleFaceCommitTests FlexibleFlatPrismHostedTests FlexibleLatticeSectionsTests FlexibleLatticeUnderReviewTests FlexibleLatticeUnderTests FlexibleMainPageLoadsTests FlexiblePressAimTests FlexiblePressReviewTests FlexiblePressSaveTests FlexibleR7E1ReviewHostedTests FlexibleR7E1bTests FlexibleR7E2HostedTests FlexibleR7E2ParkTests FlexibleR7E2Tests FlexibleR7E3Tests FlexibleR7E5Tests FlexibleR7EveningAnswersTests FlexibleR7MergeTests FlexibleR7RTests FlexibleR7SettingsTests FlexibleR7X1Tests FlexibleR7X1VerifyTests FlexibleReadinessTests FlexibleRound5SettingsTests FlexibleRound5SettingsVerifyTests FlexibleRound6HostedTests FlexibleRound6Tests FlexibleRound7D1ReviewTests FlexibleRound7DesignIntegrationTests FlexibleRound7ViewsHostedTests FlexibleRound7ViewsReviewHostedTests FlexibleRound7ViewsTests FlexibleRowCopyTests FlexibleSelectionsListTests FlexibleSettingsPageHostedTests FlexibleSettingsRound4Tests FlexibleSettingsVerifyD1Tests FlexibleShownValuesTests FlexibleSqueezeGroupsModelTests FlexibleSqueezeGroupsReviewTests FlexibleSqueezeGroupsReviewUXTests FlexibleU1Tests FlexibleX20bHostedTests FlexibleStageTests FlexibleChromeStateTests FlexibleCornerPairTests FlexiblePressCurveTests FlexibleRound7CalloutHostedTests FlexibleRound7D1ReviewHostedTests FlexibleRound7FitHostedTests FlexibleRound7ScreenHookTests 
+### goldens
+golden_det: identical 38 · DIFFERS 0 · PART-SKIP 0 · Executed 13 tests, with 0 failures (0 unexpected) in 14.074 (14.075) seconds
+golden_unseeded: identical 32 · DIFFERS 0 · PART-SKIP 1 · Executed 13 tests, with 0 failures (0 unexpected) in 13.984 (13.986) seconds
+### chunks
+chunk_aa.log: Executed 63 tests, with 0 failures (0 unexpected) in 1082.156 (1082.164) seconds
+chunk_ab.log: Executed 100 tests, with 1 test skipped and 0 failures (0 unexpected) in 489.805 (489.816) seconds
+chunk_ac.log: Executed 63 tests, with 0 failures (0 unexpected) in 621.880 (621.887) seconds
+chunk_ad.log: Executed 106 tests, with 1 failure (0 unexpected) in 1226.857 (1226.869) seconds
+chunk_ae.log: Executed 78 tests, with 0 failures (0 unexpected) in 207.054 (207.062) seconds
+chunk_af.log: Executed 30 tests, with 0 failures (0 unexpected) in 104.019 (104.023) seconds
+### failures (all chunks)
+Tests/TopOptFlowsTests/FlexibleRound7ViewsReviewHostedTests.swift:323: error: -[TopOptFlowsTests.FlexibleRound7ViewsHostedTests testThePlayIconsRingAndDotAreSeenWithPlayOff] : XCTAssertGreaterThan failed: ("20") is not greater than ("120") - ★ the sims running: an accent ring on the Play icon (20 px, idle 0)
+signal lines: 0

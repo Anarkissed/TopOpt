@@ -1,0 +1,417 @@
+{
+ "_comment": "K3 / ruling 2: the OUTLINE CLIP. The region's rectangle is 24 x 24 mm and the plan fills all of it with 6 mm cells, but outline_uv keeps only ONE QUADRANT (12 x 12 mm). Before the clip, clip_segment consulted the include region not at all, so every cell's struts were drawn -- across the outline and past the rectangle to the shell -- while point_in_clearance_region (which does honour the outline) certified three quarters of those voxels SOLID. One voxel described two ways. The struts must now stop at the outline.",
+ "bake_build_orientation": "off",
+ "grading": {
+  "algorithm": "stepped",
+  "cell_max_mm": 3.0,
+  "cell_min_mm": 3.0,
+  "cell_mode": "swept",
+  "intent": "aesthetic",
+  "min_extrudable_width_mm": 0.45,
+  "topology": "octet"
+ },
+ "lattice": {
+  "emit_3mf": false,
+  "emit_stl": true,
+  "min_extrudable_width_mm": 0.45,
+  "regions": [
+   {
+    "geometry": {
+     "depth_mm": 12.0,
+     "half_u_mm": 12.0,
+     "half_w_mm": 12.0,
+     "normal": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "origin": [
+      18.0,
+      0.0,
+      14.0
+     ],
+     "outline_uv": [
+      [
+       [
+        0.0,
+        0.0
+       ],
+       [
+        12.0,
+        0.0
+       ],
+       [
+        12.0,
+        12.0
+       ],
+       [
+        0.0,
+        12.0
+       ]
+      ]
+     ],
+     "plan_base_cell_mm": 6.0
+    },
+    "kind": "face",
+    "role": "include"
+   }
+  ],
+  "skin": "none",
+  "stepped_cells": [
+   {
+    "origin_mm": [
+     6.0,
+     0.0,
+     2.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     6.0,
+     0.0,
+     8.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     6.0,
+     0.0,
+     14.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     6.0,
+     0.0,
+     20.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     12.0,
+     0.0,
+     2.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     12.0,
+     0.0,
+     8.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     12.0,
+     0.0,
+     14.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     12.0,
+     0.0,
+     20.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     18.0,
+     0.0,
+     2.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     18.0,
+     0.0,
+     8.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     18.0,
+     0.0,
+     14.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     18.0,
+     0.0,
+     20.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     24.0,
+     0.0,
+     2.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     24.0,
+     0.0,
+     8.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     24.0,
+     0.0,
+     14.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     24.0,
+     0.0,
+     20.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     6.0,
+     6.0,
+     2.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     6.0,
+     6.0,
+     8.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     6.0,
+     6.0,
+     14.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     6.0,
+     6.0,
+     20.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     12.0,
+     6.0,
+     2.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     12.0,
+     6.0,
+     8.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     12.0,
+     6.0,
+     14.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     12.0,
+     6.0,
+     20.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     18.0,
+     6.0,
+     2.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     18.0,
+     6.0,
+     8.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     18.0,
+     6.0,
+     14.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     18.0,
+     6.0,
+     20.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     24.0,
+     6.0,
+     2.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     24.0,
+     6.0,
+     8.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     24.0,
+     6.0,
+     14.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     24.0,
+     6.0,
+     20.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   }
+  ],
+  "topology": "octet"
+ },
+ "loads": {
+  "anchor_face_ids": [
+   2
+  ],
+  "build_dir": [
+   0,
+   0,
+   1
+  ],
+  "groups": [
+   {
+    "face_ids": [
+     9
+    ],
+    "force": [
+     0.0,
+     0.0,
+     -400.0
+    ]
+   }
+  ],
+  "layer_height_mm": 0.2,
+  "minimize_plastic": true
+ },
+ "material": "PLA",
+ "mode": "lattice_part",
+ "model": "dead_parity_tab.stl",
+ "output": {
+  "mesh_format": "stl",
+  "mesh_prefix": "oc",
+  "report": "report.json"
+ },
+ "resolution": 48
+}

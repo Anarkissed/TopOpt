@@ -1,0 +1,55 @@
+# 570B38E2-3C6E-46E0-BCF6-26BE1595D204 dg — round 6 after-run, app cfca986d, core 3952c411 (frozen CLI sync-3952c411, sha 1538ab06)
+
+DG-PROJECT DOUBLED test (Claude copy) algorithm doubled stage Optional(TopOptFlows.LatticeStageMode.aesthetic) step-halves true density sim cells auto
+DG-PLAN doubled: 4198 cell(s) over 2 region(s) | 6.02=125 5.16=543 3.01=2479 2.58=1051
+DG-PLAN per region: r1=1594 r2=2604
+DG-PLAN-BASES 2 region(s) carry plan_base_cell_mm | job region 1: 10.3122 mm; job region 2: 6.0155 mm
+DG-OUTLINE r1 expand=0.000 seams=0 diverging=0 wireMovedOffRaw=0.0000mm | r2 expand=0.000 seams=0 diverging=0 wireMovedOffRaw=0.0000mm
+DG-OVERLAPS 0 same-region pair(s)
+DG-REGIONS voxel=1.719 mm | r1 cells=1594 [5.16=543 2.58=1051] prism=183827 mm3 uncovered=96468 mm3 (52.48%) | r2 cells=2604 [6.02=125 3.01=2479] prism=152157 mm3 uncovered=64767 mm3 (42.57%)
+DG-SLOT-ORIGINS 2 region(s) carry slot_origin_mm
+
+## job_plan: exit 0
+> [stepped] doubled (halves) plan: 4198 cell(s) over 2 region(s) in 4 pass(es) | 6.02=125 5.16=543 3.01=2479 2.58=1051
+## job_noplan: exit 0
+## job_plan_spans: exit 0
+> [stepped] doubled (halves) plan: 4198 cell(s) over 2 region(s) in 4 pass(es) | 6.02=125 5.16=543 3.01=2479 2.58=1051
+
+## cells_vs_spans.txt
+CELLS-VS-SPANS plan cells 4198 | laid 4188 | NOT laid 10 | struts 133308: in a plan cell 133308, FOREIGN 0
+per size (plan / laid): 6.02=125/125 5.16=543/543 3.01=2479/2478 2.58=1051/1042
+  not laid: region 1 2.578 mm at [-13.119631111621857, 1.1044653058052063, 15.468360543251038]
+  not laid: region 1 2.578 mm at [90.00277251005173, 1.1044653058052063, 54.13926190137863]
+  not laid: region 1 2.578 mm at [64.22217160463333, 1.1044653058052063, 69.60762244462967]
+  not laid: region 1 2.578 mm at [69.37829178571701, 1.1044653058052063, 64.45150226354599]
+  not laid: region 1 2.578 mm at [66.80023169517517, 1.1044653058052063, 67.02956235408783]
+  not laid: region 1 2.578 mm at [59.06605142354965, 1.1044653058052063, 74.76374262571335]
+  not laid: region 1 2.578 mm at [61.64411151409149, 1.1044653058052063, 72.18568253517151]
+  not laid: region 1 2.578 mm at [56.48799133300781, 1.1044653058052063, 77.34180271625519]
+  not laid: region 1 2.578 mm at [46.175750970840454, 1.1044653058052063, 97.9662834405899]
+  not laid: region 2 3.008 mm at [43.16801419854164, -39.88676282763481, 66.17020899057388]
+
+## unlaid.txt
+UNLAID 10 of 4198 | OUTSIDE=10
+  region 1: OUTSIDE=9
+  region 2: OUTSIDE=1
+  e.g. OUTSIDE: r1 2.578 mm inPlane=-1.346 depth mid=1.289 far=2.578 of 12.000
+  e.g. OUTSIDE: r1 2.578 mm inPlane=-1.316 depth mid=1.289 far=2.578 of 12.000
+  e.g. OUTSIDE: r1 2.578 mm inPlane=-1.473 depth mid=1.289 far=2.578 of 12.000
+
+## dropped.txt
+dropped run_noplan/variant_022_lattice.stl 2139884 B
+dropped run_plan/variant_022_lattice.stl 191066084 B
+dropped run_plan_spans/variant_022_lattice.stl 191066084 B
+dropped run_plan_spans/variant_022_lattice_SOLID.stl 875084 B
+dropped run_plan_spans/variant_022_lattice_WELDED.stl 92310084 B
+dropped run_noplan/fields.bin 1037376 B
+dropped run_plan/fields.bin 1037376 B
+dropped run_plan_spans/fields.bin 1037376 B
+dropped run_plan_spans/variant_022_lattice_SPANS.txt 11918492 B
+dropped model.step 229557 B
+
+## the published jobs
+job_plan.json: sha256 58a6d83c59dc05c5ea0dc708092b39512cf0892e8389324c24a137251b8b2803 (596388 B, compacted from the harness's pretty-printed write; same JSON value)
+job_noplan.json: sha256 3676e7e34abfc158c6ad27b2a313ccf8c6a24185692849546f400011e9123dc3 (6892 B, compacted from the harness's pretty-printed write; same JSON value)
+job_plan_spans.json: sha256 319f216679f8098c1c33c908aeda9cd541de3df9aa43b923bb2176666d44025e (596437 B, compacted from the harness's pretty-printed write; same JSON value)

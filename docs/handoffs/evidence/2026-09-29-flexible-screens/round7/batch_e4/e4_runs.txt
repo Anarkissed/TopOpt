@@ -1,0 +1,143 @@
+# R7-E4 runs (app/TopOptKit, --scratch-path /tmp/r7e-build) — at 8fee58e6 + the working tree
+### runner.log
+start 16:35:58 8fee58e6 + working tree
+build exit 0 16:36:34
+new exit 0 16:36:54
+probe exit 0 16:37:36
+chunk1 exit 0 16:40:33
+chunk2 exit 0 16:41:45
+chunk3 exit 1 16:52:20
+golden det exit 0 16:52:36
+golden unseeded exit 0 16:52:52
+hashes exit 0 16:53:56
+hashes cmp vs e1r: identical
+ALLDONE 16:53:56
+### rerun.log
+rerun start 16:56:00
+build exit 0 16:56:43
+probe exit 0 16:57:25
+tests exit 1 17:12:52
+ALLDONE 17:12:52
+### rerun2.log
+rerun2 start 17:13:52
+build exit 0 17:14:39
+probe exit 0 17:15:22
+chunkA exit 1 17:30:49
+chunkB exit 0 17:32:17
+ALLDONE 17:32:17
+### rerun3.log
+rerun3 start 17:33:06
+build exit 0 17:33:18
+probe exit 0 17:34:01
+tests exit 0 17:38:50
+ALLDONE 17:38:50
+### new tests (run 1)
+Test Suite 'FlexiblePressCurveTests' started at 2026-10-19 16:36:37.962.
+Test Suite 'FlexiblePressCurveTests' passed at 2026-10-19 16:36:47.614.
+Test Suite 'FlexiblePressStampTests' started at 2026-10-19 16:36:47.615.
+Test Suite 'FlexiblePressStampTests' passed at 2026-10-19 16:36:54.399.
+FLEX-E4-2 RED CONTROL (absolute stored): [0.0, 0.24, 1.0, 0.23999999999999994, 0.0] vs [1.0, 0.4, 1.0, 0.6, 1.0]
+FLEX-E4-1 Edge 16 h 3.0 twisted false: the default curves' worst distance off P = 9.325873406851315e-15 mm
+FLEX-E4-1 Edge 16 h 9.0 twisted false: the default curves' worst distance off P = 1.0658141036401503e-14 mm
+FLEX-E4-1 Edge 16 h 6.0 twisted true: the default curves' worst distance off P = 7.993605777301127e-15 mm
+FLEX-E4-1 RED CONTROL (a face's baseline on one rim): 3.0 mm off P at 0
+FLEX-E4-3 Edge 16: the curve's height on screen [Top] 1.0 · [45°] 0.7071067690849304; its baseline [Top] 1.0 · [45°] 1.0
+FLEX-E4-3 RED CONTROL (down the arrow): 8.429369557916289e-08
+FLEX-E4-S Edge 16 h 6: footprint (along: 20.0, across: 12.000000000000002) · seed Fingertip 10.800000000000002 × 14.400000000000004 turn 90.0 at 10.0
+FLEX-E4-S RED CONTROL (free drag): across offset 7.0 mm
+### chunk1
+Test Suite 'FlexibleFlatPrismEngineTests' passed at 2026-10-19 16:38:25.037.
+Test Suite 'FlexibleFlatPrismTests' passed at 2026-10-19 16:38:32.220.
+Test Suite 'FlexiblePressReframeTests' passed at 2026-10-19 16:38:32.360.
+Test Suite 'FlexiblePressReviewTests' passed at 2026-10-19 16:38:33.623.
+Test Suite 'FlexiblePressSaveTests' passed at 2026-10-19 16:38:35.167.
+Test Suite 'FlexibleR7E1bTests' passed at 2026-10-19 16:39:03.608.
+Test Suite 'FlexibleR7E2ParkTests' passed at 2026-10-19 16:39:08.708.
+Test Suite 'FlexibleR7E2Tests' passed at 2026-10-19 16:39:57.280.
+Test Suite 'FlexibleR7E3Tests' passed at 2026-10-19 16:40:21.774.
+Test Suite 'FlexibleR7EveningAnswersTests' passed at 2026-10-19 16:40:29.210.
+Test Suite 'FlexibleReadinessTests' passed at 2026-10-19 16:40:32.929.
+Test Suite 'FlexibleSquishCopyTests' passed at 2026-10-19 16:40:32.959.
+### chunk2
+Test Suite 'FlexibleBatchBReviewUXTests' passed at 2026-10-19 16:40:36.127.
+Test Suite 'FlexibleBatchCVerifyTests' passed at 2026-10-19 16:40:56.700.
+Test Suite 'FlexibleCurveEditTests' passed at 2026-10-19 16:40:56.708.
+Test Suite 'FlexibleDepthPrismTests' passed at 2026-10-19 16:40:57.477.
+Test Suite 'FlexibleH39HotfixHookTests' passed at 2026-10-19 16:40:58.526.
+Test Suite 'FlexibleLegendPlacementTests' passed at 2026-10-19 16:40:58.535.
+Test Suite 'FlexibleRound6Tests' passed at 2026-10-19 16:41:33.506.
+Test Suite 'FlexibleSettingsRound4Tests' passed at 2026-10-19 16:41:39.205.
+Test Suite 'FlexibleSettingsVerifyD1Tests' passed at 2026-10-19 16:41:41.380.
+Test Suite 'FlexibleShownValuesTests' passed at 2026-10-19 16:41:42.399.
+Test Suite 'FlexibleSquishTests' passed at 2026-10-19 16:41:45.146.
+### chunk3
+Test Suite 'FlexibleBatchCHookTests' passed at 2026-10-19 16:41:48.484.
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleFlatPrismHostedTests.swift:168: error: -[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow] : XCTAssertNotNil failed - ★ 11p: flatKnob-Edge 14 is drawn
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleFlatPrismHostedTests.swift:168: error: -[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow] : XCTAssertNotNil failed - ★ 11p: flatTiltBox-Edge 14 is drawn
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleFlatPrismHostedTests.swift:168: error: -[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow] : XCTAssertNotNil failed - ★ 11p: flatTwistBox-Edge 14 is drawn
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleFlatPrismHostedTests.swift:168: error: -[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow] : XCTAssertNotNil failed - ★ mini-p: flatDepthChip-Edge 14 is drawn
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleFlatPrismHostedTests.swift:168: error: -[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow] : XCTAssertNotNil failed - ★ mini-p: flatKnob-Edge 14 is drawn
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleFlatPrismHostedTests.swift:168: error: -[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow] : XCTAssertNotNil failed - ★ mini-p: flatTiltBox-Edge 14 is drawn
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleFlatPrismHostedTests.swift:168: error: -[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow] : XCTAssertNotNil failed - ★ mini-p: flatTwistBox-Edge 14 is drawn
+Test Suite 'FlexibleFlatPrismHostedTests' failed at 2026-10-19 16:43:01.529.
+Test Suite 'FlexibleMainPageHookTests' passed at 2026-10-19 16:43:01.764.
+Test Suite 'FlexibleOverlayClipTests' passed at 2026-10-19 16:43:02.638.
+Test Suite 'FlexibleRound6HostedTests' passed at 2026-10-19 16:47:17.859.
+Test Suite 'FlexibleRound7ViewsHostedTests' passed at 2026-10-19 16:52:19.076.
+### rerun_tests
+Test Suite 'FlexibleCurveEditTests' passed at 2026-10-19 16:57:27.569.
+Test Suite 'FlexibleEdgeGroupsHostedTests' passed at 2026-10-19 16:57:33.754.
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleFlatPrismHostedTests.swift:168: error: -[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow] : XCTAssertNotNil failed - ★ 11p: flatKnob-Edge 14 is drawn
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleFlatPrismHostedTests.swift:168: error: -[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow] : XCTAssertNotNil failed - ★ 11p: flatTiltBox-Edge 14 is drawn
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleFlatPrismHostedTests.swift:168: error: -[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow] : XCTAssertNotNil failed - ★ 11p: flatTwistBox-Edge 14 is drawn
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleFlatPrismHostedTests.swift:168: error: -[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow] : XCTAssertNotNil failed - ★ mini-p: flatDepthChip-Edge 14 is drawn
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleFlatPrismHostedTests.swift:168: error: -[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow] : XCTAssertNotNil failed - ★ mini-p: flatKnob-Edge 14 is drawn
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleFlatPrismHostedTests.swift:168: error: -[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow] : XCTAssertNotNil failed - ★ mini-p: flatTiltBox-Edge 14 is drawn
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleFlatPrismHostedTests.swift:168: error: -[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow] : XCTAssertNotNil failed - ★ mini-p: flatTwistBox-Edge 14 is drawn
+Test Suite 'FlexibleFlatPrismHostedTests' failed at 2026-10-19 16:58:39.530.
+Test Suite 'FlexibleOverlayClipTests' passed at 2026-10-19 16:58:40.355.
+Test Suite 'FlexiblePressCurveTests' passed at 2026-10-19 16:58:48.698.
+Test Suite 'FlexiblePressStampTests' passed at 2026-10-19 16:58:54.970.
+Test Suite 'FlexibleR7E1FollowUpHostedTests' passed at 2026-10-19 16:59:20.154.
+Test Suite 'FlexibleR7E1ReviewHostedTests' passed at 2026-10-19 17:03:53.288.
+Test Suite 'FlexibleR7E2HostedTests' passed at 2026-10-19 17:04:14.619.
+Test Suite 'FlexibleRound6HostedTests' passed at 2026-10-19 17:08:11.612.
+Test Suite 'FlexibleRound7ViewsHostedTests' passed at 2026-10-19 17:12:50.985.
+### r2_a
+Test Suite 'FlexibleCurveEditTests' passed at 2026-10-19 17:15:23.877.
+Test Suite 'FlexibleEdgeGroupsHostedTests' passed at 2026-10-19 17:15:30.116.
+Test Suite 'FlexibleFlatPrismHostedTests' passed at 2026-10-19 17:16:35.864.
+Test Suite 'FlexibleOverlayClipTests' passed at 2026-10-19 17:16:36.709.
+Test Suite 'FlexiblePressCurveTests' passed at 2026-10-19 17:16:45.002.
+Test Suite 'FlexiblePressStampTests' passed at 2026-10-19 17:16:51.006.
+Test Suite 'FlexibleR7E1FollowUpHostedTests' passed at 2026-10-19 17:17:15.996.
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7E1ReviewHostedTests.swift:174: error: -[TopOptFlowsTests.FlexibleR7E1ReviewHostedTests testTheKnobIsOnScreenInHisWorkingViews] : XCTAssertNil failed: "(776.4744873046875, 962.852294921875, 44.0, 44.0)" - ★ RED CONTROL: no knob in the home view (its tail is off the screen)
+Test Suite 'FlexibleR7E1ReviewHostedTests' failed at 2026-10-19 17:21:51.177.
+Test Suite 'FlexibleR7E2HostedTests' passed at 2026-10-19 17:22:12.547.
+Test Suite 'FlexibleRound6HostedTests' passed at 2026-10-19 17:26:08.628.
+Test Suite 'FlexibleRound7ViewsHostedTests' passed at 2026-10-19 17:30:48.749.
+### r2_b
+Test Suite 'FlexibleBatchBReviewUXTests' passed at 2026-10-19 17:31:08.355.
+Test Suite 'FlexibleBatchCHookTests' passed at 2026-10-19 17:31:09.310.
+Test Suite 'FlexibleBatchCVerifyTests' passed at 2026-10-19 17:31:29.908.
+Test Suite 'FlexibleDepthPrismTests' passed at 2026-10-19 17:31:30.692.
+Test Suite 'FlexibleLegendPlacementTests' passed at 2026-10-19 17:31:30.702.
+Test Suite 'FlexibleMainPageHookTests' passed at 2026-10-19 17:31:30.935.
+Test Suite 'FlexibleRound6Tests' passed at 2026-10-19 17:32:05.530.
+Test Suite 'FlexibleSettingsRound4Tests' passed at 2026-10-19 17:32:11.385.
+Test Suite 'FlexibleSettingsVerifyD1Tests' passed at 2026-10-19 17:32:13.604.
+Test Suite 'FlexibleShownValuesTests' passed at 2026-10-19 17:32:14.626.
+Test Suite 'FlexibleSquishCopyTests' passed at 2026-10-19 17:32:14.648.
+Test Suite 'FlexibleSquishTests' passed at 2026-10-19 17:32:17.414.
+### r3
+Test Suite 'FlexiblePressCurveTests' passed at 2026-10-19 17:34:11.454.
+Test Suite 'FlexiblePressStampTests' passed at 2026-10-19 17:34:17.707.
+Test Suite 'FlexibleR7E1ReviewHostedTests' passed at 2026-10-19 17:38:49.972.
+### goldens
+   2 	 Executed 13 tests, with 0 failures (0 unexpected) in 13.858 (13.860) seconds
+   1 	 Executed 13 tests, with 0 failures (0 unexpected) in 13.858 (13.861) seconds
+   2 	 Executed 13 tests, with 0 failures (0 unexpected) in 13.938 (13.939) seconds
+   1 	 Executed 13 tests, with 0 failures (0 unexpected) in 13.938 (13.940) seconds
+   1 FLEX-AP PART-SKIP FlexibleAngledGoldenTests.testLatticeSubtreesReEncodeIdentically: the RAW subtree bytes need SWIFT_DETERMINISTIC_HASHING=1 (UUID-keyed dictionaries encode in hash order); the canonical subtrees and the flexible blocks were compared
+golden_det identical 38 DIFFERS 0
+golden_unseeded identical 32 DIFFERS 0

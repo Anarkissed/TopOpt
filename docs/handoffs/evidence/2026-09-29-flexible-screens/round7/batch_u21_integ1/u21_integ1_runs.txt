@@ -1,0 +1,50 @@
+# U21 checkpoint 1 (integration) runs — app/TopOptKit, --scratch-path /tmp/r7x20b-build, HEAD ac251685
+# cherry-picked from claude/flexible-screens-u21-side (-x): 31496aeb 769f924c 755b7c5b 4321c453 -> 74a1ede1 4823fd74 61f12fdf ac251685
+# conflicts: only docs/handoffs/2026-09-29-flexible-screens.md (both lanes wrote the top); kept both: CORE LIST, G, D, then B, C, X20b...
+### runner.log
+start 01:00:35 ac251685
+build exit 0 01:01:49
+golden det exit 0 01:02:12
+golden unseeded exit 0 01:02:30
+hashes exit 0 01:03:31
+hashes cmp vs round7/batch_x20b/stage_job_hashes_x20b.txt (whole file): identical
+hashes cmp vs round7/batch_u21_d/stage_job_hashes_u21d_fix2.txt (whole file): identical
+hashes cmp vs round7/batch_u21_g/fix1/stage_job_hashes_u21g_fix1.txt (whole file): identical
+hashes cmp vs round7/batch_u21_b/stage_job_hashes_u21b.txt (whole file): identical
+chunk_aa exit 0 01:25:02
+chunk_ab exit 0 01:32:03
+chunk_ac exit 0 01:33:35
+chunk_ad exit 0 01:45:58
+chunk_ae exit 0 01:57:13
+chunk_af exit 0 02:09:26
+chunk_ag exit 0 02:32:45
+chunk_ah exit 0 02:38:51
+chunk_ai exit 0 02:52:45
+ALLDONE 02:52:45
+### classes (104 = union of batch D fix 2 (67), batch G fix 1 (57) + FlexibleU21BendTests, batch C fix 2 (19), batch B (16), + FlexibleSquishCopyTests), chunks of 12
+FlexibleBatchBReviewUXTests FlexibleBatchCVerifyTests FlexibleBatchM2Tests FlexibleBatchMDentTests FlexibleBatchMGroupTests FlexibleBatchMVerifyTests FlexibleBatchNRefineTests FlexibleBatchVHostedTests FlexibleC1Tests FlexibleChromeStateTests FlexibleCornerPairTests FlexibleEdgeGroupsHostedTests FlexibleEdgeGroupsTests FlexibleFEFieldTests FlexibleFEPassTests FlexibleFaceChipTests FlexibleFaceCommitTests FlexibleFlatPrismEngineTests FlexibleFlatPrismHostedTests FlexibleFlatPrismTests FlexibleGroupPaletteHostedTests FlexibleLatticeHandlesTests FlexibleLatticeIsProtectedHostedTests FlexibleLatticeIsProtectedTests FlexibleLatticeSectionsHostedTests FlexibleLatticeSectionsTests FlexibleLatticeUnderReviewTests FlexibleLatticeUnderTests FlexibleMainPageHookTests FlexibleMainPageLoadsTests FlexibleMainPrismEqualityTests FlexibleMergeR5SMTests FlexibleOverlayClipTests FlexibleOverlaySeamTests FlexiblePressAimTests FlexiblePressCurveTests FlexiblePressReviewTests FlexiblePressSaveTests FlexiblePressStampTests FlexibleR7D2ReviewHostedTests FlexibleR7D2ReviewTests FlexibleR7E1FollowUpHostedTests FlexibleR7E1FollowUpTests FlexibleR7E1ReviewHostedTests FlexibleR7E1ReviewTests FlexibleR7E1bTests FlexibleR7E2HostedTests FlexibleR7E2ParkTests FlexibleR7E2Tests FlexibleR7E3Tests FlexibleR7E5Tests FlexibleR7EveningAnswersTests FlexibleR7FTests FlexibleR7MergeTests FlexibleR7RHostedTests FlexibleR7RTests FlexibleR7SettingsHostedTests FlexibleR7SettingsTests FlexibleR7U21BCurveTests FlexibleR7U21CHandlesHostedTests FlexibleR7U21CHandlesTests FlexibleR7X1Tests FlexibleR7X1VerifyTests FlexibleReadinessTests FlexibleRegionsTests FlexibleRound5SettingsHostedTests FlexibleRound5SettingsTests FlexibleRound5SettingsVerifyTests FlexibleRound5SquishExitTests FlexibleRound6HostedTests FlexibleRound6Tests FlexibleRound7CalloutHostedTests FlexibleRound7D1ReviewHostedTests FlexibleRound7D1ReviewTests FlexibleRound7DesignIntegrationHostedTests FlexibleRound7DesignIntegrationTests FlexibleRound7FitHostedTests FlexibleRound7ScreenHookTests FlexibleRound7ScreenHostedTests FlexibleRound7SelectionsHookTests FlexibleRound7SelectionsHostedTests FlexibleRound7ViewsHostedTests FlexibleRound7ViewsTests FlexibleRowCopyTests FlexibleSelectionsListTests FlexibleSettingsPageHostedTests FlexibleSettingsRound4Tests FlexibleSettingsVerifyD1Tests FlexibleShownValuesTests FlexibleSqueezeGroupsModelTests FlexibleSqueezeGroupsReviewTests FlexibleSqueezeGroupsReviewUITests FlexibleSqueezeGroupsReviewUXTests FlexibleSqueezeGroupsUITests FlexibleSquishCopyTests FlexibleSquishTests FlexibleSquishVerifyGTests FlexibleStageTests FlexibleU1Tests FlexibleU21BendTests FlexibleU21DeleteUndoTests FlexibleU2Tests FlexibleX20bTests LatticeStaleTypeTests
+### goldens
+golden_det: identical 38 · DIFFERS 0 · PART-SKIP 0 · Executed 13 tests, with 0 failures (0 unexpected) in 17.629 (17.632) seconds
+golden_unseeded: identical 32 · DIFFERS 0 · PART-SKIP 1 · Executed 13 tests, with 0 failures (0 unexpected) in 14.092 (14.094) seconds
+### chunks (Test Case lines)
+chunk_aa.log: passed 71 · failed 0 · skipped 2
+chunk_ab.log: passed 71 · failed 0 · skipped 0
+chunk_ac.log: passed 62 · failed 0 · skipped 0
+chunk_ad.log: passed 64 · failed 0 · skipped 0
+chunk_ae.log: passed 66 · failed 0 · skipped 0
+chunk_af.log: passed 94 · failed 0 · skipped 0
+chunk_ag.log: passed 69 · failed 0 · skipped 0
+chunk_ah.log: passed 74 · failed 0 · skipped 0
+chunk_ai.log: passed 72 · failed 0 · skipped 1
+TOTAL: 643 passed, 0 failed, 3 skipped (all 104 classes ran at least one test)
+### skipped
+Test Case '-[TopOptFlowsTests.FlexibleBatchMVerifyTests testHisImg6RowsAtTheDevicesPixelCount]' skipped (0.005 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleEdgeGroupsHostedTests testEvidenceOnHisPad]' skipped (0.009 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU1Tests testU21BendPictures]' skipped (0.007 seconds).
+### known failures: none this run (the Play ring test passed: FlexibleRound7ViewsHostedTests.testThePlayIconsRingAndDotAreSeenWithPlayOff, 2.793 s)
+signal lines: 0
+### iOS
+xcodebuild -project app/TopOpt.xcodeproj -scheme TopOpt -configuration Debug -destination id=147E56A1-C8CA-4B9D-BE6C-CF230589A83A -derivedDataPath ~/Library/Developer/Xcode/DerivedData/flexA1 build: ** BUILD SUCCEEDED ** (02:54, at ac251685)
+app WAS running (launchctl UIKitApplication:com.nadim.topopt) -> simctl terminate (exit 0); installed 02:54:32; NOT launched (launchctl: not running after install)
+built == installed TopOpt.debug.dylib: cmp identical; sha256 8856b225d23448aa29e638e4f53f0248a19975d5330934e97eeb30f946e6e4d7 (94 094 768 bytes)
+strings in the installed dylib (grep -a): 'Edge preview · no lattice' 2, 'Last saved lattice · Save & Exit updates it' 1, 'Left → Right' 1, 'Right → Left' 1, 'Along → Across' 1, 'X → Y' 1, 'Mirror the ' 1, 'Copy the ' 1, FlexibleCurveMirror, FlexibleLegendLine, centringOffset, CappedPushLoop, HideWhileDragging, GapFromKeepOnly, RemoveConfirm

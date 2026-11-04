@@ -1,0 +1,18 @@
+# The D probe's lines at 3cfbc86f (before found-by-looking 5), sampled every 0.5 s after the twist: at t+1.0 s the card said
+# "Not sent · Core can't build this press" — core's error for a design asked on the OLD key −1013 on the re-opened scene.
+[Done] ["Edge 14"]: stored
+sent: ["Edge 14 in the job"]
+after the twist: landed true
+  t+0.5s key -1013 · design true · err - · line Side press · gyroid only · estimate · scene ready open true · inflight true
+  t+1.0s key -1013 · design false · err face region -1013 is not declared in the job · line Not sent · Core can't build this press · scene ready open true · inflight false
+  t+1.5s key -1020 · design false · err - · line Set up · core is designing it · scene ready open true · inflight true
+  t+2.0s key -1025 · design false · err - · line Set up · core is designing it · scene ready open true · inflight true
+  t+2.5s key -1025 · design false · err - · line Set up · core is designing it · scene ready open true · inflight true
+  t+3.0s key -1025 · design true · err - · line Twisted · squish shape up to 16% off · scene ready open true · inflight false
+  t+3.5s key -1025 · design true · err - · line Twisted · squish shape up to 16% off · scene ready open true · inflight false
+  t+4.0s key -1025 · design true · err - · line Twisted · squish shape up to 16% off · scene ready open true · inflight false
+  t+4.5s key -1025 · design true · err - · line Twisted · squish shape up to 16% off · scene ready open true · inflight false
+  t+5.0s key -1025 · design true · err - · line Twisted · squish shape up to 16% off · scene ready open true · inflight false
+  t+5.5s key -1025 · design true · err - · line Twisted · squish shape up to 16% off · scene ready open true · inflight false
+  t+6.0s key -1025 · design true · err - · line Twisted · squish shape up to 16% off · scene ready open true · inflight false
+twist 15° at 10.6 mm: stored · line Twisted · squish shape up to 16% off · N 16.319726708638694% · map both

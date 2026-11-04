@@ -87,6 +87,9 @@ public final class AppModel: ObservableObject {
     // MARK: Recents + toast
 
     @Published public private(set) var recentProjects: [RecentProject] = []
+    /// ★ ROUND 3 RULING (c) (2026-10-01): projects on disk the store cannot read — shown on Home as
+    /// "Can’t open" with the reason, never dropped, never opened, never deleted (see `deleteProject`).
+    @Published public private(set) var unreadableProjects: [UnreadableProject] = []
     /// Rendered Library thumbnails, keyed by project id. Generated from the imported
     /// mesh this launch (in-memory; on-disk-only recents show the frosted fallback).
     @Published public private(set) var thumbnails: [UUID: CGImage] = [:]
@@ -95,9 +98,12 @@ public final class AppModel: ObservableObject {
     @Published public private(set) var runningIDs: Set<UUID> = []
     /// Phase subscriptions per live project, keeping `runningIDs`/`optimized` current.
     private var runCancellables: [UUID: AnyCancellable] = [:]
+    /// Library (B3): each version's draft this session (an edit to a version with results goes there).
+    private var libraryDrafts: [UUID: UUID] = [:]
     /// Serial queue for the (potentially large) results encode/decode + file IO, so
     /// persisting/restoring variants never blocks the main thread (persist-c).
-    private static let resultsQueue = DispatchQueue(label: "app.topopt.results", qos: .utility)
+    /// Internal (not private) so the write-after-delete race test can hold the queue.
+    static let resultsQueue = DispatchQueue(label: "app.topopt.results", qos: .utility)
     /// Non-nil shows a transient toast (the design pill); the view clears it.
     @Published public var toast: String?
 
@@ -161,6 +167,8 @@ public final class AppModel: ObservableObject {
     /// Cross-launch persistence layer (M7.x-persist-b) and the clock used for
     /// `savedAt` (injected for deterministic tests).
     private let store: ProjectStore
+    /// The Library: Project → Part → Version over the same store (approved Library mockup, 2026-10-25).
+    public let library: LibraryModel
     /// App-wide print-preset persistence (separate from per-project `store`).
     private let presetStore: PrintParamsPresetStore
     private let now: () -> Date
@@ -197,13 +205,19 @@ public final class AppModel: ObservableObject {
         remoteJobDefaults: UserDefaults = .standard,
         reattachRunnerFactory: ((RemoteRunnerConfig, String) -> RunModel.Runner)? = nil
     ) {
+        // ★ Before any bridge run: core's receipts name the core this app links (#358).
+        CoreBuildIdentity.state()
         self.materialsPath = materialsPath
         self.rulesPath = rulesPath
+        // ★ The wizard's organic sample solves the PR 353 cube with the app's own FEA
+        // (2026-09-03); it needs the same materials/rules this model was handed.
+        if let m = materialsPath, let r = rulesPath { OrganicSampleCube.configPaths = (m, r) }
         self.materialsLoader = materialsLoader
         self.importer = importer
         self.inspector = inspector
         self.rescaler = rescaler
         self.store = store
+        self.library = LibraryModel(store: store)
         self.presetStore = presetStore
         self.now = now
         self.remoteJobDefaults = remoteJobDefaults
@@ -212,10 +226,12 @@ public final class AppModel: ObservableObject {
         savedPresets = presetStore.load()
         // Seed the recents grid from disk (lazy: projects are re-imported only when
         // opened). persist-b.
-        recentProjects = store.loadAllSnapshots().map {
+        let onDisk = store.loadAll()
+        recentProjects = onDisk.readable.map {
             RecentProject(id: $0.id, name: $0.name, materialName: $0.material,
                           process: $0.process, optimized: $0.optimized ?? false)
         }
+        unreadableProjects = onDisk.unreadable
         // Cold-launch re-attach (handoffs 119 + 121): surface EVERY remote job still
         // outstanding when the app last died. `RemoteRun` removes a job's record on its
         // terminal resolution or user cancel, so leftover records mean the app died
@@ -240,7 +256,10 @@ public final class AppModel: ObservableObject {
             materialsPath: materialsPath, rulesPath: rulesPath,
             resolution: resolution,
             anchorFaceIDs: lc.anchorFaceIDs, loadGroups: lc.loadGroups,
-            buildDirection: lc.buildDirection)
+            buildDirection: lc.buildDirection,
+            // ★ the same region layer the run request sends (2026-09-05)
+            faceRegions: project.faceRegions.regions.map(\.kitSpec),
+            anchorRegionIDs: lc.anchorRegionIDs)
     }
 
     /// The materials / rules files the certification engine needs (handoff
@@ -266,7 +285,10 @@ public final class AppModel: ObservableObject {
         guard let project, let file = project.importedFile,
               let materialsPath, let rulesPath else { return nil }
         let lc = project.loadCase()
-        let protections = project.faceProtectionSpecs()
+        // ★ ONE emission for the protections AND the lattice regions (ruling 2): a protected,
+        // latticed face is protected to the depth its prism emits, so both read the same regions
+        let emission = project.latticeJobRegions()
+        let protections = project.faceProtectionSpecs(emission: emission)
         // The lattice block, gated by the core-read certifiable limits (handoff
         // 2026-07-29-lattice-mode-ui). runSpec returns nil unless lattice mode is on and
         // the settings are runnable-as-certified, so a non-lattice project yields the
@@ -276,25 +298,15 @@ public final class AppModel: ObservableObject {
         // `wallLineWidthOuterMM` — a wall-loop bead standing in for a lone unsupported
         // extrusion, and the NARROWER of the two beads at that. Still the user's own
         // setting, never a hardcoded number; see PrintParams.strutLineWidthMM.
-        // THIS IS THE SITE THAT REACHES THE JOB AND THE BRIDGE; the other five are
-        // display, and all six must agree or the page describes a different run.
-        // ★ AUTO, RESOLVED (task 2026-08-12 §4). "Auto" is not a job field: it
-        // becomes core's per-region `fit` when regions are declared and `swept`
-        // otherwise, and it never emits a combination core refuses. Resolved from
-        // the EMITTED regions, not the role map, so a role whose face has no
-        // usable B-rep geometry cannot select a mode with nothing to fit into.
-        let emitted = project.latticeJobRegions()
-        let includeCount = emitted.regions.filter { $0.role == .include }.count
-        let resolvedLattice = LatticeAutoPosture.applied(to: project.lattice,
-                                                         includeRegionCount: includeCount)
-        let latticeSpec = resolvedLattice.runSpec(
-            topology: project.lattice.topologyID,
-            memberMM: project.lattice.regionMemberMM ?? 0,
-            lineWidthMM: project.printParams.strutLineWidthMM,
-            // Round-2 (M3): the include/exclude regions — role groups' primitives +
-            // faces and the legacy include primitives — ride `lattice.regions`.
-            regions: emitted.regions)
-        return RunRequest(modelPath: file.path, material: project.material,
+        // `ProjectModel.latticeRunSpec` is now THE SITE THAT REACHES THE JOB AND THE BRIDGE
+        // (for the stage and a variant's re-lattice alike); the others are display, and all
+        // must agree or the page describes a different run.
+        // ★ AUTO, RESOLVED (task 2026-08-12 §4) — in ONE place, `ProjectModel.latticeRunSpec`,
+        // which a variant's re-lattice job builds from too (ruling b, 2026-09-30). Resolved
+        // from the EMITTED regions, not the role map, so a role whose face has no usable
+        // B-rep geometry cannot select a mode with nothing to fit into.
+        let latticeSpec = project.latticeRunSpec(emission: emission)
+        var request = RunRequest(modelPath: file.path, material: project.material,
                           materialsPath: materialsPath, rulesPath: rulesPath,
                           resolution: project.quality.resolution,
                           projectName: project.name.isEmpty ? file.name : project.name,
@@ -332,7 +344,13 @@ public final class AppModel: ObservableObject {
                           // (task 2026-08-06-arm-projection-and-void-check).
                           // Defaults true on the project, so an untouched project
                           // asks for the armed posture explicitly.
-                          projectCADFaces: project.projectCADFaces)
+                          projectCADFaces: true)   // ★ always (ruling 2026-10-26 23:44): the chip is hidden, a stored OFF can't strand a project
+        request.scenarios = project.scenarioWires()   // ★ load scenarios (overnight release 2026-10-26): 2+ only
+        request.safetyMargin = project.force.safetyMarginValue   // ★ the safety margin (ruling 2026-10-26 13:12)
+        // ★ exact Protect: always reaching past the face — core 139a5411 (ruling 06:13, fix 2) cuts only the part's own skin
+        // in that band and keeps grown material, so growth runs no longer need flush regions
+        request.keepRegions = project.protectKeepRegions(protections, resolution: request.resolution)
+        return request
     }
 
     // MARK: - Materials
@@ -744,6 +762,18 @@ public final class AppModel: ObservableObject {
         openPrintParams()
     }
 
+    /// Flexible (PR #362) H52: copy a project's setup (no results) into a new Library entry, beside the original (ProjectDuplication).
+    @discardableResult public func duplicateProject(id: UUID) -> RecentProject? {   // Flexible (PR #362) H52
+        if screen == .workspace, project?.id == id { persistCurrentProject() }   // Flexible (PR #362) H52: Save as new carries the live edits; from Home the original is not re-saved
+        guard let src = recentProjects.first(where: { $0.id == id }),   // Flexible (PR #362) H52
+              let copy = try? store.duplicate(id: id, name: ProjectDuplication.copyName(of: src.name, existing: recentProjects.map(\.name)), now: now())   // Flexible (PR #362) H52
+        else { toast = "Couldn’t duplicate this project."; return nil }   // Flexible (PR #362) H52
+        let recent = ProjectDuplication.recent(for: copy)   // Flexible (PR #362) H52
+        recentProjects.insert(recent, at: (recentProjects.firstIndex { $0.id == id } ?? -1) + 1)   // Flexible (PR #362) H52
+        thumbnails[recent.id] = thumbnails[id]   // Flexible (PR #362) H52
+        return recent   // Flexible (PR #362) H52
+    }   // Flexible (PR #362) H52
+
     // MARK: - Deletion
 
     /// Delete a project from Home (Library card menu). Cancels any in-flight run,
@@ -754,6 +784,9 @@ public final class AppModel: ObservableObject {
     /// being deleted is the one currently open, returns to Home first. Safe for an id
     /// that was never loaded this launch (only the on-disk folder + recents entry).
     public func deleteProject(id: UUID) {
+        // ★ round 3 ruling (c): an unreadable project's file is never modified or deleted — Home
+        // offers no delete on it; this refuses one anyway.
+        guard !unreadableProjects.contains(where: { $0.id == id }) else { return }
         if let pm = projectsById[id] { pm.run.cancel() }
         runCancellables[id]?.cancel()
         runCancellables[id] = nil
@@ -768,6 +801,12 @@ public final class AppModel: ObservableObject {
         thumbnails[id] = nil
         recentProjects.removeAll { $0.id == id }
         store.delete(id: id)
+        // ★ AND AGAIN BEHIND ANY WRITE STILL QUEUED (round 3 review, 2026-10-01): the background
+        // writes check `holdsProject` first, and this serial-queue delete removes anything one of
+        // them managed between that check and its write — a deleted project never comes back.
+        let s = store
+        Self.resultsQueue.async { s.delete(id: id) }
+        library.refresh()   // Library: the version's entry goes with its folder
     }
 
     // MARK: - Recents / navigation
@@ -809,8 +848,47 @@ public final class AppModel: ObservableObject {
     public func backHome() {
         if printParamsSheetPresented { closePrintParams() }
         persistCurrentProject()
+        // Library (B3): a version whose edits went to its draft reopens as it ran
+        if let p = project, libraryDrafts[p.id] != nil { forgetLiveVersion(p.id) }
         screen = .home
+        library.refresh()   // Library: file what changed (a new version, a new part)
     }
+
+    // MARK: - Library (B3): drafts
+
+    /// The draft made this session for a version, if any.
+    func libraryDraft(of version: UUID) -> UUID? { libraryDrafts[version] }
+
+    /// Write `live` (a version's edited settings) into that version's draft — the one made this session,
+    /// else a new folder (the model and its sidecars copied from the version's folder, no results).
+    @discardableResult
+    func writeLibraryDraft(of project: ProjectModel, live: ProjectSnapshot) -> RecentProject? {
+        var d = live
+        d.id = libraryDrafts[project.id] ?? UUID()
+        d.optimized = nil
+        d.savedAt = now()
+        let model = project.modelSourceURL ?? URL(fileURLWithPath: store.modelPath(id: project.id, fileName: live.modelFileName))
+        do { try store.save(d, modelSource: model) } catch {
+            toast = "Couldn’t save the draft: \(error.localizedDescription)"
+            return nil
+        }
+        libraryDrafts[project.id] = d.id
+        library.noteParent(project.id, of: d.id)   // numbered from this version (his decision 11: v4 → v4.1)
+        let recent = ProjectDuplication.recent(for: d)
+        if let i = recentProjects.firstIndex(where: { $0.id == d.id }) { recentProjects[i] = recent }
+        else { recentProjects.insert(recent, at: (recentProjects.firstIndex { $0.id == project.id } ?? -1) + 1) }
+        if thumbnails[d.id] == nil { thumbnails[d.id] = thumbnails[project.id] }
+        return recent
+    }
+
+    /// Drop a version's live copy, so it next opens from its folder (as it ran).
+    func forgetLiveVersion(_ id: UUID) {
+        guard !runningIDs.contains(id) else { return }
+        projectsById[id] = nil
+        runCancellables[id]?.cancel()
+        runCancellables[id] = nil
+    }
+
 
     // MARK: - Cold-launch remote re-attach (handoff 119)
 
@@ -951,6 +1029,13 @@ public final class AppModel: ObservableObject {
     /// never crash the flow.
     private func persist(_ project: ProjectModel) {
         guard var snapshot = project.snapshot(savedAt: now()) else { return }
+        // ★ Library (B3): a version's settings never change after it ran. Once he has grouped, an edit
+        // to a version with results is written to its DRAFT; the version's own folder is left as it ran.
+        if library.makesNextVersion(of: project.id), !runningIDs.contains(project.id),
+           let ran = store.snapshot(id: project.id), !LibrarySettings.same(ran, snapshot) {
+            if writeLibraryDraft(of: project, live: snapshot) != nil { library.refresh() }
+            return
+        }
         // THE `optimized` FLAG DESCRIBES THE DURABLE RECORD, NOT THE LIVE SESSION
         // (task 2026-08-03-variant-entry-gating-and-retention, bar AJ1, second half).
         //
@@ -981,10 +1066,12 @@ public final class AppModel: ObservableObject {
             }
             let dto = OutcomeCodec.dto(from: outcome)
             let url = store.resultsURL(id: project.id)
-            let dir = url.deletingLastPathComponent()
+            let resultsStore = store, resultsID = project.id
             Self.resultsQueue.async {
-                guard let data = try? OutcomeCodec.encode(dto) else { return }
-                try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                // ★ only into a project that still exists: a write queued before a delete must
+                // never recreate its folder without project.json (round 3 review, 2026-10-01)
+                guard resultsStore.holdsProject(id: resultsID),
+                      let data = try? OutcomeCodec.encode(dto) else { return }
                 try? data.write(to: url, options: .atomic)
             }
             // The RE-LATTICE artifacts, beside the results they describe (task

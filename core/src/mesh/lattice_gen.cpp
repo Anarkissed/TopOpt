@@ -289,6 +289,9 @@ struct CellCut {
   std::vector<Landing> landings;
   std::uint64_t clipped = 0, dropped = 0, full = 0;
   long long uncertified = 0;
+  // ★ K6 part 2: pieces dropped for being shorter than their own strut diameter.
+  std::uint64_t stubs_dropped = 0;
+  double stub_length_mm = 0.0;
 };
 
 constexpr double kMinFragMm = 1e-3;   // shorter kept spans degenerate to slivers
@@ -403,8 +406,19 @@ void cut_cell_struts(const LatticeRegion& R, const LatticeRadiusField& G,
       continue;
     }
     ++out.clipped;
+    // ★ K6 part 2: a piece shorter than it is thick is a bump, not a strut. The guard is
+    // this region's own (LatticeRegion::min_fragment_diameters); 0 keeps the 1 um sliver
+    // guard, so an unraised run is byte-identical. Drops are counted, never silent.
+    const double stub_floor = R.min_fragment_diameters > 0.0
+                                  ? R.min_fragment_diameters * 2.0 * r
+                                  : 0.0;
     for (const auto& s : spans) {
       if (s.t1 - s.t0 < kMinFragMm) continue;
+      if (stub_floor > 0.0 && s.t1 - s.t0 < stub_floor) {
+        ++out.stubs_dropped;
+        out.stub_length_mm += s.t1 - s.t0;
+        continue;
+      }
       const Vec3 qa = add(pa, scale(dir, s.t0));
       const Vec3 qb = add(pa, scale(dir, s.t1));
       out.frags.push_back({qa, qb, r});
@@ -936,6 +950,9 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
                                   ? 0
                                   : static_cast<std::uint64_t>(cut.frags.size()) -
                                         cut.full;
+        // ★ K6 part 2: and what the stub guard took, so the receipt carries it.
+        st.stub_fragments_dropped += cut.stubs_dropped;
+        st.stub_fragment_length_mm += cut.stub_length_mm;
 
         // nodes (own each candidate node whose owner is this cell; if the owner
         // cell is not active, fall back to the lex-smallest active sharer)
@@ -1178,6 +1195,9 @@ LatticeGenStats generate_lattice_stepped(
     total.interior_volume_mm3 += st.interior_volume_mm3;
     total.skin_volume_mm3 += st.skin_volume_mm3;
     total.rim_volume_mm3 += st.rim_volume_mm3;
+    // ★ K6 part 2: the stub guard's own counts, summed like every other count here.
+    total.stub_fragments_dropped += st.stub_fragments_dropped;
+    total.stub_fragment_length_mm += st.stub_fragment_length_mm;
     if (st.struts == 0 && st.nodes == 0) continue;
     if (!any) {
       total.min_strut_diameter_mm = st.min_strut_diameter_mm;
@@ -1258,6 +1278,9 @@ LatticeGenStats generate_lattice_multilevel(
     total.interior_volume_mm3 += st.interior_volume_mm3;
     total.skin_volume_mm3 += st.skin_volume_mm3;
     total.rim_volume_mm3 += st.rim_volume_mm3;
+    // ★ K6 part 2: the stub guard's own counts, summed like every other count here.
+    total.stub_fragments_dropped += st.stub_fragments_dropped;
+    total.stub_fragment_length_mm += st.stub_fragment_length_mm;
     if (st.max_strut_diameter_mm > 0.0) {
       any = true;
       total.min_strut_diameter_mm =

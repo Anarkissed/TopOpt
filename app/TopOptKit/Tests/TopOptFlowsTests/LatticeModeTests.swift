@@ -66,7 +66,9 @@ final class LatticeModeTests: XCTestCase {
         XCTAssertFalse(b.certifiable)
         XCTAssertFalse(b.runnableAsCertified)
         XCTAssertNotNil(b.topologyReason)
-        XCTAssertTrue(b.topologyReason!.lowercased().contains("preview"))
+        // ★ 2026-10-03 (the one guard): the reason is core's own readiness words.
+        XCTAssertTrue(b.topologyReason!.contains(TopOptKit.latticeTypeReadinessPlain(.notEither)),
+                      b.topologyReason!)
     }
 
     func testCellsPerMemberCeilingComesFromCoreAndEngages() {

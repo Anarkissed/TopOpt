@@ -1,0 +1,3 @@
+'Squish along the arrow · core's design': reference 466×46 px · now 466×46 px, pixels identical · RED bare line 479×48 px, pixels differ
+'Squish along the arrow · interim sim': reference 438×46 px · now 438×46 px, pixels identical · RED bare line 449×48 px, pixels differ
+'Squish depth · what you drew': reference 365×46 px · now 365×46 px, pixels identical · RED bare line 375×48 px, pixels differ

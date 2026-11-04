@@ -1,0 +1,3 @@
+U1: Edge 12 shape 778 deepest 826 · Edge 9 shape 1098 deepest 1146
+RED CONTROL: Edge 12 shape - deepest 826 · Edge 9 shape 1290 deepest 1098
+camera before [0.7853981, 0.52359873, 214.60669, 50.0, 50.0, 10.0] after [0.7853981, 0.52359873, 214.60669, 50.0, 50.0, 10.0]

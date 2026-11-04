@@ -804,6 +804,11 @@ class Handler(BaseHTTPRequestHandler):
         step_name = os.path.basename(step_name)
         with open(os.path.join(tmpdir, step_name), "wb") as f:
             f.write(fields["step"]["data"])
+        # The face-overrides sidecar (B5): the painted faces the job's groups reference. Core's import reads
+        # `<model>.faces` beside the model, so it is saved under the model's own name whatever the client called it.
+        if "faces" in fields:
+            with open(os.path.join(tmpdir, step_name + ".faces"), "wb") as f:
+                f.write(fields["faces"]["data"])
         try:
             job_doc = json.loads(fields["job"]["data"].decode("utf-8"))
         except (ValueError, UnicodeDecodeError) as e:

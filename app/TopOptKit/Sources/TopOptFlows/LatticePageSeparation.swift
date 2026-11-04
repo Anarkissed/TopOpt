@@ -36,19 +36,16 @@ public enum WorkspaceStage: String, Equatable, Sendable, CaseIterable {
     case topology
     /// ★ THE LATTICE PAGE. The same page, the same style, lattice roles (§3).
     case lattice
-    /// ★ THE SURFACE PAGE (§6, task 2026-08-15-lattice-and-face-ui). Editing the
-    /// CAD faces themselves: select one, select the ones like it, cut one in two.
-    /// The maintainer's ruling: *"I don't see 'Surface' mode. I think it should be
-    /// a whole different 'Stage' with a button visible in both the TO and Lattice
-    /// stages, below their respective Stage buttons."*
-    case surface
+    // ★ B5 (his pick S3, 2026-10-24): THE SURFACE STAGE IS GONE. Editing the CAD faces themselves is EDIT FACES, a
+    // mode over either stage (`EditFacesSession`, EditFaces.swift), reached by "Edit faces…" in the ● menu and the greyed
+    // ✂. The stage was never saved (it is view state), so every project — one last seen on Surface too — opens on
+    // Topology.
 
     /// The title this stage's own button carries. Two words at most (R7).
     public var title: String {
         switch self {
         case .topology: return "Topology"
         case .lattice: return "Lattice"
-        case .surface: return "Surface"
         }
     }
 
@@ -65,22 +62,11 @@ public enum WorkspaceStage: String, Equatable, Sendable, CaseIterable {
     /// ★ "WHERE YOU GO" ABOVE "WHAT YOU CONFIGURE" (the maintainer's own phrase,
     /// approved 2026-08-14). This column is navigation ONLY; a stage's settings
     /// button (today: the lattice wizard) is rendered BELOW it, never among it.
-    /// That is why Surface takes the top slot on the lattice stage and Settings
-    /// moves down one.
+    /// B5: Edit faces is not a stage, so it is in no stage's list (it is a row of every ● menu).
     public var forward: [WorkspaceStage] {
         switch self {
-        case .topology: return [.lattice, .surface]
-        case .lattice:  return [.surface]
-        // ★ NO ONWARD NAV FROM SURFACE (maintainer, 2026-08-16: "Please make the
-        // Save button much larger and place it where the greyed out 'Lattice'
-        // button is (removing the greyed out lattice button)").
-        //
-        // The slot is worth more to SAVE than to a link. On this stage Lattice was
-        // greyed out anyway — it needs an anchor and a load, which are set on the
-        // Topology page — so it was a disabled button occupying the one place the
-        // eye goes. Surface still reaches everywhere through the Topology button
-        // top-left; nothing is unreachable.
-        case .surface:  return []
+        case .topology: return [.lattice]
+        case .lattice:  return []
         }
     }
 
@@ -135,7 +121,7 @@ public struct WorkspaceStageVisibility: Equatable, Sendable {
     /// says where the CONTROL appears; whether the lines are drawn is the toggle's
     /// business.
     ///
-    /// ★ TRUE ON ALL THREE STAGES. It was false on the lattice stage for a reason
+    /// ★ TRUE ON BOTH STAGES AND IN EDIT FACES. It was false on the lattice stage for a reason
     /// that turned out not to be worth a missing control — see `of(_:)`.
     public let wireframe: Bool
     /// ★ §6 — the face-editing affordances: the hover preview, the cut's rotate
@@ -228,16 +214,8 @@ public struct WorkspaceStageVisibility: Equatable, Sendable {
                                             latticeDepthPlanes: true,
                                             latticeControls: true,
                                             wireframe: true)
-        case .surface:
-            // ★ §6(a) — "NO PRIMITIVES ARE VISIBLE IN THIS MODE. None. Not dimmed
-            // — hidden." Every primitive column is false, and the wireframe is on
-            // so the faces you are editing are the only thing on screen.
-            return WorkspaceStageVisibility(designBox: false, groupPrimitives: false,
-                                            keepOuts: false,
-                                            latticeDepthPlanes: false,
-                                            latticeControls: false,
-                                            wireframe: true,
-                                            surfaceEditing: true)
         }
+        // ★ The Surface stage's column (§6(a) — "NO PRIMITIVES ARE VISIBLE IN THIS MODE") is Edit faces' now:
+        // `WorkspaceStageVisibility.editingFaces` / `.of(_:editingFaces:)` (EditFaces.swift).
     }
 }

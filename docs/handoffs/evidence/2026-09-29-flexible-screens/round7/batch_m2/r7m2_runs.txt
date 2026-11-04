@@ -1,0 +1,90 @@
+# Round 7 batch M2 — the runs (code b8142d3e, goldens a22c34f8; swift build --build-tests --scratch-path /tmp/r7lean-build: Build complete, 90.9 s)
+
+## RED run (tests first, d87e97a9): r7m2_red_run.txt — 17 tests, 16 red, 66 failures
+
+## The touched classes (13: FlexibleSectorStoreTests FlexibleLatticeSectionsTests FlexibleSectorMigrationTests FlexibleLatticeSectionsHostedTests FlexibleEdgeGroupsTests FlexibleRound5SettingsVerifyTests FlexibleRound5SettingsTests FlexibleRound5SettingsHostedTests FlexibleSqueezeGroupsReviewTests FlexibleR7SettingsTests FlexibleR7M1Tests FlexibleRound6HostedTests FlexibleBatchCVerifyTests)
+Test Suite 'FlexibleBatchCVerifyTests' passed at 2026-10-15 02:21:14.841.
+Test Suite 'FlexibleEdgeGroupsTests' passed at 2026-10-15 02:21:47.333.
+Test Suite 'FlexibleLatticeSectionsHostedTests' passed at 2026-10-15 02:21:55.449.
+Test Suite 'FlexibleLatticeSectionsTests' passed at 2026-10-15 02:22:35.038.
+Test Suite 'FlexibleR7M1Tests' passed at 2026-10-15 02:22:59.142.
+Test Suite 'FlexibleR7SettingsTests' passed at 2026-10-15 02:23:58.423.
+Test Suite 'FlexibleRound5SettingsHostedTests' passed at 2026-10-15 02:25:24.376.
+Test Suite 'FlexibleRound5SettingsTests' passed at 2026-10-15 02:25:32.519.
+Test Suite 'FlexibleRound5SettingsVerifyTests' passed at 2026-10-15 02:25:35.099.
+Test Suite 'FlexibleRound6HostedTests' passed at 2026-10-15 02:29:26.865.
+Test Suite 'FlexibleSectorMigrationTests' passed at 2026-10-15 02:29:46.069.
+Test Suite 'FlexibleSectorStoreTests' passed at 2026-10-15 02:30:02.132.
+Test Suite 'FlexibleSqueezeGroupsReviewTests' passed at 2026-10-15 02:30:09.171.
+106 test cases passed, 0 failed. RED controls printed:
+FLEX-STRESS control (M2 re-pin): the box corners read 0.0000 MPa at most; every vertex 0.0000
+FLEX-M2-WHOLE control: Face 3's pieces [2000007]
+FLEX-M2-KEEP control: 2000003 → 2000010
+FLEX-M2-TAP control: Face 1 — 4096 columns, 2048 latticed
+FLEX-M2-EDGE control: refused none · strip area over the solid middle 160.0 mm²
+FLEX-M2-CARRY control: loaded entries on the Top [1, 2000003, 2000004] · shared surface [(1, 2000003), (1, 2000004)]
+FLEX-M2-CURVES control: Face 1's baseline 100.00 mm
+FLEX-M2-SHARE control (area): [2.8571428571428568, 7.142857142857143]
+FLEX-M2-NUMBERS control: A 1, B 2 gone, then C 2
+FLEX-M2-STORE A1000001-0000-4000-8000-000000000003: 2894 bytes identical · control +33 bytes
+FLEX-M2-STORE his_project_0004_r5: 2223 bytes identical · control +33 bytes
+FLEX-M2-SURFACE control (I2's route): Surface regions 1 → 7 · Topology face_regions 1 → 7 (+6)
+
+## Goldens BEFORE the re-record (FlexibleAngledGoldenTests, 13 tests)
+SWIFT_DETERMINISTIC_HASHING=1: 36 identical, DIFFERS:
+FLEX-AP GOLDEN his_0004_scene_job.json: DIFFERS — 79 line(s); first: 
+FLEX-AP GOLDEN frames_his_0004.txt: DIFFERS — 142 line(s); first: 
+unseeded: 30 identical (+ PART-SKIP), DIFFERS:
+FLEX-AP GOLDEN his_0004_scene_job.json: DIFFERS — 79 line(s); first: 
+FLEX-AP GOLDEN frames_his_0004.txt: DIFFERS — 142 line(s); first: 
+
+## The re-record (RECORD=1 SWIFT_DETERMINISTIC_HASHING=1 FLEX_AP_BASE=b8142d3e, testRecord4Frames + testRecord8EverySendsJob, into a scratch copy)
+26 files written; diff -rq against the committed folder: only frames_his_0004.txt and his_0004_scene_job.json differ (24 identical). The scene job diff: additions only (0 lines removed): 2000001 Face 0 · lattice, 2000002 Face 2 · lattice, 2000003 Face 4 · lattice. frames: the header's region list, four exitRegions lines, three region blocks.
+
+## Goldens AFTER the re-record
+SWIFT_DETERMINISTIC_HASHING=1: 38 identical, 0 DIFFERS
+unseeded (suite chunk 1): 32 identical, 0 DIFFERS
+
+## The targeted suite, ONCE (188 classes, chunks of 12, --skip-build)
+run start 02:32:53
+run chunk 1 02:32:53: BottomBarMeasurementTests,FlexibleAngledGoldenRecorder,FlexibleAngledGoldenTests,FlexibleBatchBReviewTests,FlexibleBatchBReviewUXTests,Fle
+run chunk 1 exit 0 02:37:03
+run chunk 2 02:37:03: FlexibleBatchMLegendTests,FlexibleBatchMProbe,FlexibleBatchMStressTests,FlexibleBatchMVerifyTests,FlexibleBatchMXrayTests,FlexibleBatchNEv
+run chunk 2 exit 1 03:01:44
+run chunk 3 03:01:44: FlexibleCurveEditTests,FlexibleDepthPrismTests,FlexibleEdgeGroupsHostedTests,FlexibleEdgeGroupsTests,FlexibleFEFieldTests,FlexibleFEPassPe
+run chunk 3 exit 0 03:06:15
+run chunk 4 03:06:15: FlexibleGroupPaletteTests,FlexibleInPassCompositeTests,FlexibleLatticeEvidenceProbe,FlexibleLatticeFieldTests,FlexibleLatticeGradingTests,
+run chunk 4 exit 1 03:07:51
+run chunk 5 03:07:51: FlexibleMainPageHookTests,FlexibleMainPageLoadsTests,FlexibleMainPageRound4HostedTests,FlexibleMainPageRound4Tests,FlexibleMainPageRound4V
+run chunk 5 exit 0 03:10:23
+run chunk 6 03:10:23: FlexiblePinchTests,FlexiblePressAimReviewTests,FlexiblePressAimTests,FlexiblePressFixturesTests,FlexiblePressProbeTripwireTests,FlexiblePr
+run chunk 6 exit 0 03:11:48
+run chunk 7 03:11:48: FlexibleR7M2EvidenceProbe,FlexibleR7MergeTests,FlexibleR7SettingsEvidence,FlexibleR7SettingsHostedTests,FlexibleR7SettingsTests,FlexibleRe
+run chunk 7 exit 0 03:17:59
+run chunk 8 03:17:59: FlexibleRound6EvidenceProbe,FlexibleRound6HostedTests,FlexibleRound6Tests,FlexibleRound7ViewsEvidenceProbe,FlexibleRound7ViewsHostedTests,
+run chunk 8 exit 1 03:37:13
+run chunk 9 03:37:13: FlexibleSettingsPageHostedTests,FlexibleSettingsRound4Tests,FlexibleSettingsVerifyD1Tests,FlexibleShownValuesTests,FlexibleSqueezeGroupsMo
+run chunk 9 exit 0 03:40:49
+run chunk 10 03:40:49: FlexibleSquishEvidenceProbe,FlexibleSquishPerfProbe,FlexibleSquishPlayAllTests,FlexibleSquishPlayerTests,FlexibleSquishSolverTests,Flexib
+run chunk 10 exit 0 03:48:26
+run chunk 11 03:48:26: LatticeAutoDensityIsDerivedTests,LatticeBandChipsTests,LatticeBeamNetworkFactTests,LatticeDefaultGradePlanSwitchTests,LatticeDefaultGrade
+run chunk 11 exit 0 03:48:32
+run chunk 12 03:48:32: LatticeNamedNoOctetFallbackTests,LatticeOldRetainedRunTests,LatticePageRound2Tests,LatticePlanNotSentLineTests,LatticePreviewBodyAlphaTes
+run chunk 12 exit 1 03:49:22
+run chunk 13 03:49:22: LatticeStaleTypeTests,LatticeStressTintTests,LatticeStructuralPrismProbe,LatticeStructuralSteppedGateTests,LatticeStructuralViewStateTest
+run chunk 13 exit 0 03:49:34
+run chunk 14 03:49:34: OrganicPreviewBakeInputsTests,OrganicPreviewMatchesTheJobTests,OrganicPreviewParameterParityTests,OrganicPreviewSpeedAndRimTests,OrganicS
+run chunk 14 exit 0 03:53:54
+run chunk 15 03:53:54: SmoothingRound3Tests,SmoothingRound4Tests,SurfaceCutDetentTests,SurfaceInputDisciplineTests,SurfacePencilToggleExemptionTests,SurfaceRegi
+run chunk 15 exit 0 03:53:58
+run chunk 16 03:53:58: VariantRetentionTests,ViewerTests,FlexibleBridgeTests,FlexibleSliceProbe,FlexibleSquishFETests,FlexibleSquishModulusTests,FlexibleSquishS
+run chunk 16 exit 0 03:55:31
+run DONE 03:55:31
+TOTAL: 1226 tests, 56 skipped, 10 failures — all known:
+   8 FlexibleBatchNVerifyTests.testEveryRefineLineIsWholeBesideTheLivePlayAllPicker
+   1 FlexibleRound7ViewsHostedTests.testThePlayIconsRingAndDotAreSeenWithPlayOff
+   1 LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds
+chunk 4: the known exit signal 11 AFTER its tests (59 executed, 2 skipped, 0 failures).
+LatticeStaleTypeTests: 6/6 passed (chunk 13).
+
+## The 16 stage-job hashes: stage_job_hashes_r7m2.txt — diff against round7/merge/stage_job_hashes_r7merge.txt: IDENTICAL (the whole file: 16 rows exit 0 + controls)

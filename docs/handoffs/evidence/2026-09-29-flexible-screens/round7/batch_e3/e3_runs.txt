@@ -1,0 +1,103 @@
+# R7-E3 runs (app/TopOptKit, --scratch-path /tmp/r7e-build) — at 383f79d2 + the working tree
+start 15:35:51 383f79d2 + working tree
+build exit 0 15:35:53
+probe exit 0 15:37:47
+chunk1 exit 1 15:44:51
+chunk2 exit 0 15:55:29
+chunk3 exit 1 16:06:20
+golden det exit 0 16:06:37
+golden unseeded exit 0 16:06:53
+hashes exit 0 16:08:09
+hashes cmp vs e1r: identical
+ALLDONE 16:08:09
+### probe
+Test Suite 'FlexibleR7E3EvidenceProbe' passed at 2026-10-19 15:37:46.678.
+	 Executed 1 test, with 0 failures (0 unexpected) in 108.546 (108.547) seconds
+	 Executed 1 test, with 0 failures (0 unexpected) in 108.546 (108.547) seconds
+	 Executed 1 test, with 0 failures (0 unexpected) in 108.546 (108.548) seconds
+FLEX-E3UX his live pad: lattice gen 2 · Group 2 ["Edge 14", "Edge 16"] · sim landed scale 0.05618856211325271 maxSafe 1.0 · sent 0
+### chunk1
+Test Suite 'FlexibleEdgeGroupsTests' passed at 2026-10-19 15:38:26.339.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 37.261 (37.263) seconds
+Test Suite 'FlexibleFlatPrismEngineTests' passed at 2026-10-19 15:39:12.158.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 45.819 (45.819) seconds
+Test Suite 'FlexibleLatticeSectionsTests' passed at 2026-10-19 15:39:50.875.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 38.716 (38.717) seconds
+Test Suite 'FlexibleMeetReviewTests' passed at 2026-10-19 15:39:53.436.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 2.560 (2.561) seconds
+Test Suite 'FlexibleMeetTests' passed at 2026-10-19 15:40:00.799.
+	 Executed 10 tests, with 0 failures (0 unexpected) in 7.361 (7.362) seconds
+Test Suite 'FlexibleR7E1ReviewTests' passed at 2026-10-19 15:40:56.578.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 55.779 (55.780) seconds
+Test Suite 'FlexibleR7E1bTests' passed at 2026-10-19 15:41:28.092.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 31.513 (31.514) seconds
+Test Suite 'FlexibleR7E2ParkTests' passed at 2026-10-19 15:41:33.236.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 5.144 (5.144) seconds
+Test Suite 'FlexibleR7E3Tests' passed at 2026-10-19 15:41:57.669.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 24.432 (24.433) seconds
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7SettingsTests.swift:415: error: -[TopOptFlowsTests.FlexibleR7SettingsTests testEveryGroupHasATrashAndATapToRenameName] : XCTAssertTrue failed - the player's picker: []
+Test Suite 'FlexibleR7SettingsTests' failed at 2026-10-19 15:43:03.940.
+	 Executed 8 tests, with 1 failure (0 unexpected) in 66.270 (66.271) seconds
+Test Suite 'FlexibleSquishCopyTests' passed at 2026-10-19 15:43:03.972.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.032 (0.032) seconds
+Test Suite 'FlexibleSquishSolverTests' passed at 2026-10-19 15:44:50.666.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 106.694 (106.695) seconds
+	 Executed 74 tests, with 1 failure (0 unexpected) in 421.581 (421.590) seconds
+	 Executed 74 tests, with 1 failure (0 unexpected) in 421.581 (421.591) seconds
+FLEX-E3-iii his pad, Group 4 (Edge 16 + Edge 18): Edge 14: 52 points · mean u·d 5.3406 mm · mean |u| 5.4298 mm | Edge 16: 52 points · mean u·d 5.6280 mm · mean |u| 5.7572 mm · scale 0.1339543544497248 uncalibrated true
+FLEX-E3-i selector: ["All (one after another)", "Group 1", "Group 2", "Group 3", "Group 4"]
+FLEX-E3-a his pad after Edge 14's cut: 24 candidates (was 20) · mismatched []
+FLEX-E3-a RED CONTROL (E1b's piece numbers): 14 mismatched · ["edge|1,2: 9 → 10", "edge|1,5: 10 → 12", "edge|1,3: 11 → 13", "edge|1,4: 12 → 14"]
+FLEX-E3-b 'Max 18.1 mm · deeper splits its lattice' (39) · 'Edge 16 · would split its lattice in two'
+### chunk2
+Test Suite 'FlexibleBatchBReviewUXTests' passed at 2026-10-19 15:44:54.987.
+	 Executed 13 tests, with 0 failures (0 unexpected) in 0.747 (0.748) seconds
+Test Suite 'FlexibleBatchCVerifyTests' passed at 2026-10-19 15:45:15.575.
+	 Executed 14 tests, with 0 failures (0 unexpected) in 20.587 (20.589) seconds
+Test Suite 'FlexibleBatchMLegendTests' passed at 2026-10-19 15:45:59.985.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 44.409 (44.409) seconds
+Test Suite 'FlexibleBatchMVerifyTests' passed at 2026-10-19 15:54:15.653.
+	 Executed 8 tests, with 1 test skipped and 0 failures (0 unexpected) in 495.667 (495.668) seconds
+Test Suite 'FlexibleChromeStateTests' passed at 2026-10-19 15:54:22.668.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 7.015 (7.015) seconds
+Test Suite 'FlexibleH39HotfixHookTests' passed at 2026-10-19 15:54:23.689.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 1.020 (1.020) seconds
+Test Suite 'FlexibleR7EveningAnswersTests' passed at 2026-10-19 15:54:30.926.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 7.237 (7.237) seconds
+Test Suite 'FlexibleReadinessTests' passed at 2026-10-19 15:54:34.580.
+	 Executed 10 tests, with 0 failures (0 unexpected) in 3.653 (3.654) seconds
+Test Suite 'FlexibleRound6Tests' passed at 2026-10-19 15:55:08.702.
+	 Executed 11 tests, with 0 failures (0 unexpected) in 34.122 (34.123) seconds
+Test Suite 'FlexibleRound7ScreenHookTests' passed at 2026-10-19 15:55:20.568.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 11.866 (11.866) seconds
+Test Suite 'FlexibleS1VerifyTests' passed at 2026-10-19 15:55:22.868.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 2.300 (2.300) seconds
+Test Suite 'FlexibleSettingsRound4Tests' passed at 2026-10-19 15:55:28.651.
+	 Executed 14 tests, with 0 failures (0 unexpected) in 5.782 (5.783) seconds
+	 Executed 92 tests, with 1 test skipped and 0 failures (0 unexpected) in 634.403 (634.413) seconds
+	 Executed 92 tests, with 1 test skipped and 0 failures (0 unexpected) in 634.403 (634.414) seconds
+### chunk3
+Test Suite 'FlexibleEdgeGroupsHostedTests' passed at 2026-10-19 15:55:37.981.
+	 Executed 2 tests, with 1 test skipped and 0 failures (0 unexpected) in 6.117 (6.118) seconds
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleFlatPrismHostedTests.swift:180: error: -[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow] : XCTAssertLessThan failed: ("48.0") is not less than ("40.0") - ★ mini-p: the chip at the head
+Test Suite 'FlexibleFlatPrismHostedTests' failed at 2026-10-19 15:56:44.167.
+	 Executed 3 tests, with 1 failure (0 unexpected) in 66.185 (66.186) seconds
+Test Suite 'FlexibleFlatPrismTests' passed at 2026-10-19 15:56:51.320.
+	 Executed 10 tests, with 0 failures (0 unexpected) in 7.152 (7.153) seconds
+Test Suite 'FlexibleR7E2Tests' passed at 2026-10-19 15:57:39.820.
+	 Executed 12 tests, with 0 failures (0 unexpected) in 48.499 (48.500) seconds
+Test Suite 'FlexibleRound6HostedTests' passed at 2026-10-19 16:01:36.213.
+	 Executed 17 tests, with 0 failures (0 unexpected) in 236.390 (236.392) seconds
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleRound7ViewsReviewHostedTests.swift:349: error: -[TopOptFlowsTests.FlexibleRound7ViewsHostedTests testTheSettingsPlayerNoteIsWholeAtElevenInchPortrait] : XCTAssertLessThan failed: ("220.0") is not less than ("220.0") - premise (the RED CONTROL): 'Column preview · no lattice built yet' does not fit beside the picker at 11" portrait (219.5 of 220.0 pt)
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleRound7ViewsReviewHostedTests.swift:351: error: -[TopOptFlowsTests.FlexibleRound7ViewsHostedTests testTheSettingsPlayerNoteIsWholeAtElevenInchPortrait] : XCTAssertNotEqual failed: ("Column preview · no lattice built yet") is equal to ("Column preview · no lattice built yet") - ★ a shorter form is drawn
+Test Suite 'FlexibleRound7ViewsHostedTests' failed at 2026-10-19 16:06:14.354.
+	 Executed 12 tests, with 2 failures (0 unexpected) in 278.140 (278.141) seconds
+Test Suite 'FlexibleSettingsVerifyD1Tests' passed at 2026-10-19 16:06:16.715.
+	 Executed 10 tests, with 0 failures (0 unexpected) in 2.360 (2.361) seconds
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleSquishTests.swift:370: error: -[TopOptFlowsTests.FlexibleSquishTests testAStaleLatticeNeverOwnsTheMap] : XCTAssertTrue failed
+Test Suite 'FlexibleSquishTests' failed at 2026-10-19 16:06:19.481.
+	 Executed 11 tests, with 1 failure (0 unexpected) in 2.765 (2.766) seconds
+	 Executed 77 tests, with 1 test skipped and 4 failures (0 unexpected) in 647.609 (647.618) seconds
+	 Executed 77 tests, with 1 test skipped and 4 failures (0 unexpected) in 647.609 (647.619) seconds
+golden_det: identical 38 · DIFFERS 0 · PART-SKIP 0
+golden_unseeded: identical 32 · DIFFERS 0 · PART-SKIP 1

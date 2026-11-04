@@ -24,6 +24,15 @@ import TopOptKit
 
 @MainActor
 public final class ProjectModel: ObservableObject {
+    /// ★★ THE PREVIEW'S PLACED CELLS, in the job's wire form (2026-09-18: "Send the
+    /// cell list to core"). Written by the workspace after every octree bake, read by
+    /// both run paths into `LatticeSpec.steppedCells`. TRANSIENT — never persisted:
+    /// it is derived from the bake, and a stale list on disk would send a run a plan
+    /// the preview no longer shows. Empty ⇒ the legacy one-cell-per-region Stepped.
+    public var latticePreviewSteppedCells: [LatticeSteppedCellWire] = []
+    /// ★ Why the bake's plan could not go (2026-10-08, the slot origin), checked against the
+    /// scene's regions as the bake hands them over; the job re-checks against its own.
+    public var latticePreviewPlanWithheld: LatticeSteppedCellWire.PlanWithheld? = nil
     /// Stable identity, shared with the project's `RecentProject.id` so
     /// `AppModel.open(_:)` can restore this exact instance from the recents grid.
     public let id: UUID
@@ -47,7 +56,79 @@ public final class ProjectModel: ObservableObject {
     /// The working state that used to live in WorkspacePlaceholder. `@Published`
     /// value types: the workspace mutates them in place (via computed forwarders),
     /// which republishes and re-renders exactly as the old `@State` did.
-    @Published public var selection = SelectionModel()
+    @Published public var selection = SelectionModel() {
+        // ★ his iPad 2026-10-27 ("I tried unselecting and reselecting and it didn't work"): a deleted auto keep-clear
+        // (or one turned into a moved primitive) was remembered for the FACE forever, so taking the hole out of every
+        // group and picking it again never brought its keep-clear back. Leaving every group now forgets it.
+        didSet { forgetClearanceSuppressionsOutsideGroups() }
+    }
+
+    /// ★ His "Auto keep clear" switch for a group (2026-10-27). ON also forgets every "deleted" mark on the group's own
+    /// faces, so each of its holes clears again — the one-tap way back.
+    public func setAutoKeepClear(_ g: SelectionGroup, on: Bool) {
+        force.setAutoKeepClear(g.id, on)
+        if on {
+            for f in keepClearFaces(g) where force.isClearanceFaceSuppressed(f, in: g.id) { force.unsuppressClearanceFace(f, in: g.id) }
+            persistClearances()
+        }
+        objectWillChange.send()
+    }
+
+    /// ★ His iPad 2026-10-28 (holes with no keep-clear, third report): EVERY face a group holds — its plain faces, then the
+    /// faces its regions cover (a hole isolated or cut on the Surface stage is held as a region, and the keep-clear rules
+    /// read only `g.faces`, so such a hole never got one). The ONE list the keep-clear rules, rows, volumes and run read.
+    /// ★ ONLY WHOLE FACES: a CUT piece is part of a face, and a keep-clear sent for it would clear the whole CAD face (core's
+    /// clearance takes a face id only — EditFacesStageTests). A union or isolate of whole faces (a hole among them) counts.
+    public func keepClearFaces(_ g: SelectionGroup) -> [FaceID] {
+        guard !g.regionIDs.isEmpty, let mesh = viewerMesh else { return g.faces }
+        var whole: Set<FaceID> = []
+        for r in surfaceEffectiveRegions(of: g) {
+            for leaf in faceRegions.resolvedLeaves(r) {
+                guard let region = faceRegions.region(leaf), !region.isCut else { continue }
+                whole.formUnion(FaceRegionGeometry.members(of: region, in: mesh))
+            }
+        }
+        let own = Set(g.faces)
+        return g.faces + whole.filter { !own.contains($0) }.sorted()
+    }
+
+    /// Drop every "auto keep-clear deleted" mark whose face its group no longer holds (and save the sidecar if any went):
+    /// taking a hole out of a group and picking it again brings its keep-clear back. ★ 10-28: per GROUP — a hole deleted in
+    /// one group never loses its keep-clear in another.
+    func forgetClearanceSuppressionsOutsideGroups() {
+        migrateLegacyClearanceSuppressions()
+        var held: [UUID: Set<FaceID>] = [:]
+        for g in selection.groups { held[g.id] = Set(keepClearFaces(g)) }
+        if force.forgetSuppressions(held: held) { persistClearances() }
+    }
+
+    /// ★ His iPad 2026-10-28: an older project's per-face "deleted" marks (and an older sidecar's) are sorted into groups
+    /// once the geometry is here. A mark stays only in a group that CONVERTED that hole into a movable primitive (a manual
+    /// cylinder on the hole's own axis — keeping it there avoids two volumes for one hole); every other group's keep-clear
+    /// on that hole comes back.
+    func migrateLegacyClearanceSuppressions() {
+        // both the geometry and the groups must be here (a project opens its mesh and its selection in either order)
+        guard let mesh = viewerMesh, !selection.groups.isEmpty, !force.suppressedClearanceFaceList.isEmpty else { return }
+        let groups = selection.groups
+        force.migrateLegacySuppressions { f in
+            guard let geo = mesh.faceGeometry(f) else { return [] }
+            return groups.filter { g in
+                keepClearFaces(g).contains(f) && force.manualPrimitives(for: g.id).contains { mp in
+                    if geo.isCylinder {
+                        // on this hole's axis AND within this hole's stretch of it (lined-up holes in two plates share an axis)
+                        let e = simd_normalize(geo.axisDir), d = mp.center - geo.axisPoint, t = Float(simd_dot(d, e))
+                        guard mp.kind == .bolt, abs(mp.radiusMM - geo.cylinderRadiusMM) < 0.05,
+                              abs(abs(simd_dot(simd_normalize(mp.axis), e)) - 1) < 1e-3, simd_length(d - e * simd_dot(d, e)) < 0.05,
+                              let span = mesh.faceAxialSpan(f, axisPoint: SIMD3<Float>(geo.axisPoint), axisDir: SIMD3<Float>(e))
+                        else { return false }
+                        return t >= span.lo - 0.5 && t <= span.hi + 0.5
+                    }
+                    return mp.kind == .face && geo.isPlane && abs(simd_dot(mp.center - geo.planeOrigin, simd_normalize(geo.planeNormal))) < 0.05
+                }
+            }.map(\.id)
+        }
+        persistClearances()
+    }
     /// ★ HIDE / LOCK, PER GROUP (maintainer, 2026-08-18) — an ATTRIBUTE over the
     /// one `SelectionModel`, never a second group store. The groups themselves
     /// stay in `selection`; an entry whose group is gone is inert, and
@@ -55,7 +136,9 @@ public final class ProjectModel: ObservableObject {
     /// See `GroupViewState` for why hiding is session-scoped and locking is not.
     @Published public var groupView = GroupViewState()
     @Published public var force = ForceModel()
-    @Published public var viewerMesh: ViewerMesh?
+    @Published public var viewerMesh: ViewerMesh? {
+        didSet { migrateLegacyClearanceSuppressions() }   // ★ 10-28: older per-face marks need the geometry to sort
+    }
 
     /// ★ THE REGION LAYER (task 2026-08-14-face-regions §1) — the unions and the
     /// split cells over this part's faces. Default EMPTY: with no region edits the
@@ -140,6 +223,10 @@ public final class ProjectModel: ObservableObject {
     @Published public private(set) var undo = UndoHistory(depth: 50)
     /// The debounce that turns bursts of `objectWillChange` into one settled `commit`.
     private var undoAutoCommit: AnyCancellable?
+    /// ★ B5: the post-edit hooks (`onFaceEdit`), in registration order, and the open face edit (`beginFaceEdit`).
+    private var faceEditHooks: [(key: String, run: @MainActor (FaceEditEvent) -> Void)] = []
+    private var faceEditDepth = 0
+    private var faceEditBefore: FaceRegionModel?
     /// How long the edit slice must be quiet before it commits as an undo step. Long enough that a
     /// drag/scrub coalesces into one entry, short enough to feel immediate on a discrete tap.
     private static let undoSettleInterval: RunLoop.SchedulerTimeType.Stride = .milliseconds(400)
@@ -293,6 +380,9 @@ public final class ProjectModel: ObservableObject {
         // add/remove list precisely so it CAN be re-evaluated; the one thing that
         // must never happen is absorbing a change silently.
         refreshFaceRegionDrift()
+        // ★ 10-28: an older project's per-face "deleted" marks are sorted into groups NOW — the property observers that do it
+        // do not fire inside an initializer, so without this a reopened project kept the old marks until his first tap.
+        forgetClearanceSuppressionsOutsideGroups()
         // Re-seed AFTER restoring the slice: the persisted state is the undo floor, not the empty
         // state the designated init seeded. Runs synchronously before any debounce could fire.
         seedUndoBaseline()
@@ -380,6 +470,84 @@ public final class ProjectModel: ObservableObject {
     /// lose. Every surface commit seals first, so its predecessor is already a step.
     public func sealUndoStep() { commitUndoSnapshot() }
 
+    // MARK: ★ B5 — every face edit is ONE undo step, with a hook inside it
+
+    /// ★ THE POST-EDIT HOOK. `hook` runs after every edit made in Edit faces (a cut, an isolate, a union, a pattern, a
+    /// region verb, a paint stroke) and INSIDE that edit's undo step: whatever it changes in the undo slice undoes and
+    /// redoes with the edit, atomically. One hook per `key` (a second registration replaces the first).
+    public func onFaceEdit(_ key: String, _ hook: @escaping @MainActor (FaceEditEvent) -> Void) {
+        faceEditHooks.removeAll { $0.key == key }
+        faceEditHooks.append((key, hook))
+    }
+
+    public func removeFaceEditHook(_ key: String) { faceEditHooks.removeAll { $0.key == key } }
+
+    /// Open a face edit: the state before it becomes a step (as every surface action always sealed first). Nested
+    /// edits (a cut across several faces) are one edit.
+    func beginFaceEdit() {
+        if faceEditDepth == 0 {
+            sealUndoStep()
+            faceEditBefore = faceRegions
+        }
+        faceEditDepth += 1
+    }
+
+    /// ★ CLOSE IT — APP LIST 1's undo-merge, for faces: the hooks run, then the step is SEALED, so an edit made right
+    /// after (inside the 400 ms settle) can no longer fold into it and one Undo takes back exactly this edit. An edit
+    /// that changed nothing runs no hook and seals nothing.
+    func endFaceEdit(_ kind: FaceEditKind) {
+        faceEditDepth = max(0, faceEditDepth - 1)
+        guard faceEditDepth == 0, let before = faceEditBefore else { return }
+        faceEditBefore = nil
+        guard before != faceRegions else { return }
+        let was = Set(before.regions.map(\.id)), now = Set(faceRegions.regions.map(\.id))
+        let ev = FaceEditEvent(kind: kind, made: now.subtracting(was).sorted(), removed: was.subtracting(now).sorted(),
+                               paintedFaces: [])
+        for h in faceEditHooks { h.run(ev) }
+        sealUndoStep()
+    }
+
+    // MARK: ★ B8 — Edit faces' DISCARD (his answer 2026-10-24)
+
+    /// The edit slice as it was when Edit faces opened (nil outside the mode).
+    private var faceEditingEntry: EditSnapshot?
+
+    /// In Edit faces (the model's half of the mode: what Discard goes back to).
+    public var isEditingFaces: Bool { faceEditingEntry != nil }
+
+    /// Edit faces opened: seal what is on screen as a step and remember it (a fresh entry each time it opens — a mode left
+    /// without Done, e.g. by closing the project, never leaves a stale one behind).
+    public func openFaceEditing() {
+        sealUndoStep()
+        faceEditingEntry = editSnapshot
+    }
+
+    /// Done: every edit stays (each is already its own undo step).
+    public func closeFaceEditing() {
+        sealUndoStep()
+        faceEditingEntry = nil
+    }
+
+    /// Something to discard: the slice moved since Edit faces opened.
+    public var canDiscardFaceEdits: Bool {
+        guard let entry = faceEditingEntry else { return false }
+        return entry != editSnapshot
+    }
+
+    /// ★ DISCARD — the faces go back to how they were when Edit faces opened (regions, painted faces, every group's and
+    /// region's membership — the whole edit slice), as ONE undo step, so one Undo brings the discarded edits back. Leaves
+    /// the mode. False (and nothing changes) outside Edit faces.
+    @discardableResult
+    public func discardFaceEdits() -> Bool {
+        guard let entry = faceEditingEntry else { return false }
+        faceEditingEntry = nil
+        sealUndoStep()                       // the edits are a step of their own: Undo comes back to them
+        guard entry != editSnapshot else { return true }
+        applyEditSnapshot(entry)
+        sealUndoStep()                       // the discard is ONE step
+        return true
+    }
+
     private func commitUndoSnapshot() {
         let snap = editSnapshot
         guard undo.baseline != snap else { return }
@@ -438,9 +606,19 @@ public final class ProjectModel: ObservableObject {
         // router still records onto a `PaintHistory`, so hand it a throwaway we discard — we do not
         // fork a second undo stack.
         var ignoredHistory = PaintHistory()
+        let before = paint?.assignments
         WorkspacePaint.stroke(mode, triangles: triangles, paint: &overlay,
                               selection: &selection, history: &ignoredHistory)
         paint = overlay
+        // ★ B5: the post-edit hook, inside the stroke's step. A stroke is a DRAG — many calls folded into one undo step
+        // by the settle — so it is never sealed here; the hook's own changes ride the same settled step.
+        if before != overlay.assignments {
+            let touched = Set(triangles.compactMap { t -> FaceID? in
+                overlay.assignments[Int32(t)] ?? before?[Int32(t)]
+            }).sorted()
+            let ev = FaceEditEvent(kind: .paint, made: [], removed: [], paintedFaces: touched)
+            for h in faceEditHooks { h.run(ev) }
+        }
     }
 
     /// The per-triangle EFFECTIVE face ids (native ids with painted overrides applied) the viewer
@@ -473,7 +651,9 @@ public final class ProjectModel: ObservableObject {
             ClearanceSidecar.GroupPrimitives(group: $0.group, primitives: $0.primitives)
         }
         let sidecar = ClearanceSidecar(suppressedAutoFaces: force.suppressedClearanceFaceList,
-                                       manual: manual)
+                                       manual: manual,
+                                       suppressedByGroup: force.suppressedClearanceByGroupList.map {
+                                           ClearanceSidecar.GroupFaces(group: $0.group, faces: $0.faces) })
         sidecar.write(forModelPath: path)
     }
 
@@ -484,8 +664,10 @@ public final class ProjectModel: ObservableObject {
     public func applyClearanceSidecar() {
         guard let path = importedFile?.path,
               let sidecar = ClearanceSidecar.read(forModelPath: path) else { return }
-        force.loadSuppressedClearanceFaces(sidecar.suppressedAutoFaces)
+        force.loadSuppressedClearanceFaces(sidecar.suppressedAutoFaces)   // legacy per-face marks: sorted into groups below
         let live = Set(selection.groups.map { $0.id })
+        force.loadSuppressedClearance((sidecar.suppressedByGroup ?? []).filter { live.contains($0.group) }.map { ($0.group, $0.faces) })
+        migrateLegacyClearanceSuppressions()
         for gp in sidecar.manual where live.contains(gp.group) {
             force.loadManualPrimitives(gp.primitives, for: gp.group)
         }
@@ -515,9 +697,12 @@ public final class ProjectModel: ObservableObject {
         var anchors: [Int] = []
         var anchorRegions: [RegionID] = []
         var loads: [TopOptKit.LoadGroupSpec] = []
+        // ★ LOAD SCENARIOS (overnight release 2026-10-26): with 2+ scenarios the top level mirrors Scenario 1 for
+        // older readers (`scenarioWires` carries each one). With none, both filters pass everything.
+        let first = force.scenarioList[0].id
         for g in selection.groups {
             let kind = force.kind(for: g.id)
-            if kind.isAnchor {
+            if kind.isAnchor, force.anchorIsOn(g.id, in: first) {
                 // Painted faces carry a live overlay id; the run sees the dense re-import id.
                 anchors.append(contentsOf: g.faces.map { Int(resolvedRunFaceID($0)) })
                 // ★ A region rides ALONGSIDE the faces (task 2026-08-14-face-regions
@@ -525,9 +710,13 @@ public final class ProjectModel: ObservableObject {
                 // `resolvedRunFaceID` — a region is resolved core-side against the
                 // run's own import, which is the whole reason it survives one.
                 anchorRegions.append(contentsOf: g.regionIDs)
-            } else if kind.isLoad {
-                let n = groupNormalModel(g) ?? SIMD3<Float>(0, 0, 1)
-                if let f = force.loadForceVectorModel(g.id, groupNormal: n) {
+            } else if kind.isLoad, force.group(g.id, isIn: first) {
+                // ★★ ONE DIRECTION, OR NONE (2026-10-09, #362's find): the same verdict the
+                // pre-flight blocks on. A Push or Pull whose faces face opposite ways has no
+                // direction, and it used to be given +Z here — a push on two opposite faces went
+                // out as (0, 0, −F) while the pre-flight, guessing +Y, said OK. Refused, it carries
+                // no load at all, and Optimize is blocked with the reason (`loadGroupDiagnoses`).
+                if case .vector(let f)? = loadDirection(for: g.id) {
                     loads.append(.init(faceIDs: g.faces.map { Int(resolvedRunFaceID($0)) },
                                        force: SIMD3<Double>(f),
                                        regionIDs: g.regionIDs))
@@ -545,6 +734,26 @@ public final class ProjectModel: ObservableObject {
         // only when the user actually answered the second question.
         let plate = buildOrientation.plateUp.map { simd_normalize($0) } ?? SIMD3<Float>(0, 0, 0)
         return (anchors, loads, SIMD3<Double>(up), SIMD3<Double>(plate), anchorRegions)
+    }
+
+    /// ★ LOAD SCENARIOS — each scenario's ON anchors and its own loads, as `loadCase()` resolves them (job
+    /// `loads.scenarios`). Empty with fewer than two scenarios, so the job stays exactly today's.
+    public func scenarioWires() -> [LoadScenarioWire] {
+        guard force.hasScenarios else { return [] }
+        return force.scenarioList.map { s in
+            var anchors: [Int] = []
+            var loads: [TopOptKit.LoadGroupSpec] = []
+            for g in selection.groups {
+                let kind = force.kind(for: g.id)
+                if kind.isAnchor, force.anchorIsOn(g.id, in: s.id) {
+                    anchors.append(contentsOf: g.faces.map { Int(resolvedRunFaceID($0)) })
+                } else if kind.isLoad, force.group(g.id, isIn: s.id), case .vector(let f)? = loadDirection(for: g.id) {
+                    loads.append(.init(faceIDs: g.faces.map { Int(resolvedRunFaceID($0)) },
+                                       force: SIMD3<Double>(f), regionIDs: g.regionIDs))
+                }
+            }
+            return LoadScenarioWire(name: s.name, anchorFaceIDs: anchors, loadGroups: loads)
+        }
     }
 
     /// The run's "Keep clear" clearances (handoff 100), derived from the selection +
@@ -583,13 +792,16 @@ public final class ProjectModel: ObservableObject {
             // plane → slab); the auto default affixes ONLY the bore faces (fastener
             // holes), never a plane, exactly as handoff 100 shipped.
             let explicit = force.keepClearAffix(for: g.id) == .on
-            for f in g.faces {
+            let held = keepClearFaces(g)   // ★ 10-28: region-held holes too
+            for f in held {
                 let bore = FaceTopology.isFastenerBore(f, in: mesh)
                 if !explicit && !bore { continue }
+                // ★ note 3 (2026-10-27): a hole split in halves is ONE cylinder — sent/drawn by its lowest piece in the group
+                if bore, !FaceTopology.isBoreRepresentative(f, among: held, in: mesh) { continue }
                 // The "−" on an auto primitive's row DELETES it: a suppressed face's
                 // keep-out is dropped from the run (handoff group-editing, BAR B3). The
                 // face stays in the group (it may still anchor); only its clearance goes.
-                if force.isClearanceFaceSuppressed(f) { continue }
+                if force.isClearanceFaceSuppressed(f, in: g.id) { continue }   // ★ deleted in THIS group (10-28)
                 // Per-bore when the group is unsynced, shared when synced (round 4, item 3).
                 let ov = force.clearanceOverride(forGroup: g.id, face: f)
                 if bore {
@@ -611,21 +823,52 @@ public final class ProjectModel: ObservableObject {
     /// for an STL project (no B-rep faces) or when nothing is protected → the run is
     /// byte-identical. Face ids are deduped (a face never appears twice).
     ///
-    /// ★ THE DEPTH IS THE ONE THE USER DRAGGED (task 2026-08-12 §0a). `depthsMM`
-    /// is parallel to `faceIDs`: for a group that also carries a lattice role it
-    /// is that group's `LatticeSlabDepth` — the SAME number its lattice region
-    /// carries — so the barrier is exactly as deep as the lattice it feeds. For a
-    /// protect-only group it is the project's global depth, unchanged.
+    /// ★★ A PROTECTED, LATTICED FACE IS PROTECTED TO THE DEPTH ITS SLAB EMITS (maintainer,
+    /// 2026-09-30, ruling 2; his 2026-09-23 ruling: the expand moves the far end deeper). Core's
+    /// tie makes protect + lattice on one face ONE slab, so `depthsMM` reads the very number the
+    /// emission wrote on that face's prism (`LatticeRegionEmission.Result.slabDepthMM`: depth +
+    /// expand, floored at 0.1; a negative expand shrinks both) — never a second calculation.
+    /// The app used to send the dragged depth here and depth + expand on the prism: two depths
+    /// for one slab, which core refused. A face with no face prism (a bolt, no role) keeps the
+    /// depth it had: its group's `LatticeSlabDepth` when latticed, else the global depth.
+    /// ★★ AND SO IS A PROTECTED, LATTICED REGION (maintainer, 2026-10-01, round 3 ruling a):
+    /// `regionDepthsMM` reads the depth the region's prisms emit, through the same emission
+    /// (`slabDepthMM(selectableKey:)`). Core does not tie region protections yet, so this was
+    /// never refused — it was silently wrong: his stand's region 101 was frozen to 20 mm while its
+    /// slab reached 24.15 mm, and the optimizer emptied up to 25 voxels of that last 4.15 mm.
     public func faceProtectionSpecs()
         -> (faceIDs: [Int], depthMM: Double, depthsMM: [Double],
-            regionIDs: [RegionID], regionDepthsMM: [Double]) {
+            regionIDs: [RegionID], regionDepthsMM: [Double], viewerFaceIDs: [FaceID]) {
+        faceProtectionSpecs(emission: latticeJobRegions())
+    }
+
+    /// ★ EXACT PROTECT (ruling 2026-10-26 23:44): the protected faces' keep regions (ProtectKeepRegions), each at the
+    /// SAME depth its protection freezes. The slab (and an open hole's end) reaches 1.5 voxels over the air past its face
+    /// (the run's grid: the part's longest side over `resolution`), never less than 1 mm.
+    public func protectKeepRegions(_ protections: (faceIDs: [Int], depthMM: Double, depthsMM: [Double],
+                                                   regionIDs: [RegionID], regionDepthsMM: [Double], viewerFaceIDs: [FaceID]),
+                                   resolution: Int, growth: Bool = false) -> [KeepRegionSpec] {
+        guard let mesh = viewerMesh, !mesh.faceGeometry.isEmpty, !protections.viewerFaceIDs.isEmpty else { return [] }
+        let faces = zip(protections.viewerFaceIDs, protections.depthsMM).map { ProtectKeepRegions.Face(id: $0.0, depthMM: $0.1) }
+        let e = mesh.bounds.max - mesh.bounds.min
+        let voxel = Double(Swift.max(e.x, e.y, e.z)) / Double(Swift.max(resolution, 1))
+        // TO-core 2026-10-27: at least one voxel (plus a little) out past the surface, into the air — but FLUSH on a growth
+        // run, where that band may hold grown material the export must keep (the face keeps ≤ ½ voxel of bump there)
+        return ProtectKeepRegions.regions(faces, in: mesh, outwardMM: growth ? 0 : Swift.max(1.0, 1.5 * voxel))
+    }
+
+    /// The same, reading the given emission — the one the job's lattice regions come from.
+    public func faceProtectionSpecs(emission: LatticeRegionEmission.Result)
+        -> (faceIDs: [Int], depthMM: Double, depthsMM: [Double],
+            regionIDs: [RegionID], regionDepthsMM: [Double], viewerFaceIDs: [FaceID]) {
         guard viewerMesh != nil else {
-            return ([], force.faceProtectDepthMM, [], [], [])
+            return ([], force.faceProtectDepthMM, [], [], [], [])
         }
         var ids: [Int] = []
         var depths: [Double] = []
         var regionIDs: [RegionID] = []
         var regionDepths: [Double] = []
+        var viewerFaces: [FaceID] = []   // aligned with `ids`: the face as the viewer mesh knows it (exact Protect)
         var seen = Set<FaceID>()
         var seenRegions = Set<RegionID>()
         for g in selection.groups where force.isProtected(g.id) {
@@ -638,15 +881,18 @@ public final class ProjectModel: ObservableObject {
                 // per face now, so the protection is resolved per face through the
                 // SAME `LatticeSlabDepth` call the region emission makes — which is
                 // what keeps R4 true when two faces of one group hold two depths.
-                let d = latticed
+                let run = Int(resolvedRunFaceID(f))
+                // ★ ruling 2: the depth its slab emits, when the run lattices a prism on it
+                let d = emission.slabDepthMM(runFaceID: run) ?? (latticed
                     ? LatticeSlabDepth.depthMM(
                         ref: .face(group: g.id, face: f), group: g.id,
                         perSelectable: lattice.selectableDepthMM,
                         perGroup: lattice.groupDepthMM,
                         fallbackMM: lattice.paintDepthMM)
-                    : force.faceProtectDepthMM
-                ids.append(Int(resolvedRunFaceID(f)))
+                    : force.faceProtectDepthMM)
+                ids.append(run)
                 depths.append(d)
+                viewerFaces.append(f)
             }
             // ★ EACH REGION CARRIES ITS OWN DEPTH — which is what makes a grid
             // split a hand-authored grading mechanism (PR 331 §6): ten sectors
@@ -662,20 +908,36 @@ public final class ProjectModel: ObservableObject {
             // children both resolve to the same surface; emitting both describes it
             // twice with two roles and two depths, and the run keeps whichever was
             // written last. `surfaceEffectiveRegions` is the one definition.
+            // ★★ THE DEPTH ITS SLAB EMITS (round 3 ruling a, 2026-10-01): a protected, latticed
+            // region is ONE slab, like a face (ruling 2) — the protection reads the depth the
+            // region's prisms emit (depth + expand). With no prism under its key it keeps the
+            // depth it had. His stand's region 101: 20 -> 24.15 mm (the R2b control's bytes).
+            // ★ A SPLIT OR CUT PARENT (round 3 review, 2026-10-01): the emission lattices the
+            // group's OWN regions (a whole-face parent emits its whole surface under its key; a cut
+            // child emits nothing of its own), while the protection walks the effective regions —
+            // the children. So each child reads the slab its surface is latticed through: its own
+            // key first, else the group's region it descends from.
+            var slabVia: [RegionID: Double] = [:]
+            for raw in g.regionIDs {
+                guard let d = emission.slabDepthMM(selectableKey: LatticeSelectableRef.region(group: g.id, region: raw).key)
+                else { continue }
+                for e in surfaceEffectiveRegions(from: raw) where slabVia[e] == nil { slabVia[e] = d }
+            }
             for r in surfaceEffectiveRegions(of: g) where !seenRegions.contains(r) {
                 seenRegions.insert(r)
-                let d = latticed
+                let key = LatticeSelectableRef.region(group: g.id, region: r).key
+                let d = emission.slabDepthMM(selectableKey: key) ?? slabVia[r] ?? (latticed
                     ? LatticeSlabDepth.depthMM(
                         ref: .region(group: g.id, region: r), group: g.id,
                         perSelectable: lattice.selectableDepthMM,
                         perGroup: lattice.groupDepthMM,
                         fallbackMM: lattice.paintDepthMM)
-                    : force.faceProtectDepthMM
+                    : force.faceProtectDepthMM)
                 regionIDs.append(r)
                 regionDepths.append(d)
             }
         }
-        return (ids, force.faceProtectDepthMM, depths, regionIDs, regionDepths)
+        return (ids, force.faceProtectDepthMM, depths, regionIDs, regionDepths, viewerFaces)
     }
 
     /// The lattice region depth for `group`, in mm — the ONE number, read through
@@ -705,6 +967,76 @@ public final class ProjectModel: ObservableObject {
     /// stated number, else its group's, else the MODE's answer (Uniform states
     /// one; Auto and Per-region-with-nothing-stated state none and core derives).
     /// nil ⇒ AUTO ⇒ no `relative_density` key on the wire.
+    /// ★ ONE VOXEL OF THE SOLVE GRID (brief §0, 2026-09-06): the run's resolution
+    /// spans the part's longest extent, so a voxel is that extent over the quality's
+    /// resolution. 0 when the part is not loaded yet.
+    public var solveVoxelMM: Double {
+        guard let m = viewerMesh, !m.bounds.isEmpty else { return 0 }
+        let e = m.bounds.max - m.bounds.min
+        let longest = Double(Swift.max(e.x, Swift.max(e.y, e.z)))
+        let res = Double(quality.resolution)
+        return longest > 0 && res > 0 ? longest / res : 0
+    }
+
+    /// ★ THE ORGANIC FLOOR for this part: the probe's when it has run, else
+    /// max(1.535 × bead, one voxel) computed here.
+    public var organicFloor: OrganicSizeCheck.Floor {
+        if let rec = lattice.currentOrganicForecast?.recommendation, rec.ran {
+            return OrganicSizeCheck.floor(from: rec)
+        }
+        return OrganicSizeCheck.floor(beadMM: printParams.strutLineWidthMM, voxelMM: solveVoxelMM)
+    }
+
+    /// ★ THE SYNTHETIC FOCI ONE WALL STATES (2026-09-05, Aesthetic only): its own
+    /// count, or nil ⇒ the lattice's default (`organicSyntheticFoci`).
+    public func latticeSelectableSyntheticFoci(_ ref: LatticeSelectableRef) -> Int? {
+        lattice.selectableSyntheticFoci[ref.key]
+    }
+
+    /// Write one wall's synthetic-foci count. nil, 0, or a value outside 1…5
+    /// CLEARS it back to the default — "no number stated" must be spellable. A wall
+    /// core found to CARRY LOAD refuses the write (his rule, 2026-09-05: "it should
+    /// never be able to add foci to loaded walls"; core's verdict since 2026-09-29).
+    public func writeLatticeSyntheticFoci(_ ref: LatticeSelectableRef, foci: Int?) {
+        guard let n = foci, OrganicSyntheticStress.fociRange.contains(n) else {
+            lattice.selectableSyntheticFoci.removeValue(forKey: ref.key)
+            return
+        }
+        guard latticeWallLoaded(ref) != true else { return }
+        lattice.selectableSyntheticFoci[ref.key] = n
+    }
+
+    /// ★★ CORE'S VERDICT ON THIS WALL (maintainer, 2026-09-29, ruling 1): true = core
+    /// left it alone — it carries load, no foci; false = core synthesised it — barely
+    /// loaded, foci offered; nil = not measured yet. The Selections row's word and the
+    /// foci offer both read this one value, so they cannot disagree.
+    public func latticeWallLoaded(_ ref: LatticeSelectableRef) -> Bool? {
+        lattice.selectableWallCoreDead[ref.key].map { !$0 }
+    }
+
+    /// ★★ THE JOB'S SYNTHETIC-STRESS FLAGS (maintainer, 2026-09-29, ruling 2): only under
+    /// an organic Aesthetic lattice with the switch on (core refuses the keys otherwise),
+    /// and then EVERY include wall — core decides on the run's own tensor which are dead
+    /// and leaves a flagged wall that carries load untouched. Each wall carries its stated
+    /// count, else the lattice default (4, which is also core's own default for a flagged
+    /// wall with no count: `synthetic_foci = 4`, placed by core). No measurement is read,
+    /// so an unmeasured wall is asked about too. nil ⇒ nothing flagged.
+    /// ★ AND ONLY WITH THE SIMULATION ON (ruling 2, 2026-09-29): a saved "on" with the
+    /// simulation off flags nothing (`organicSyntheticStressesActive`).
+    public func latticeSyntheticFlags() -> OrganicSyntheticStress.SyntheticFlags? {
+        guard lattice.organicSyntheticStressesActive else { return nil }
+        return .init(defaultFoci: lattice.organicSyntheticFoci, stated: lattice.selectableSyntheticFoci)
+    }
+
+    /// Core's per-wall verdicts from the bake (true = core synthesised the wall),
+    /// stored so the row and the offer survive a relaunch. Replaces the whole map — a
+    /// wall this bake did not report reads unmeasured, never a stale verdict. Only
+    /// writes when something changed.
+    public func recordLatticeWallVerdicts(_ coreDead: [String: Bool]) {
+        guard coreDead != lattice.selectableWallCoreDead else { return }
+        lattice.selectableWallCoreDead = coreDead
+    }
+
     public func latticeSelectableDensity(_ ref: LatticeSelectableRef,
                                          in group: UUID) -> Double? {
         if let d = lattice.selectableDensity[ref.key], d.isFinite, d > 0 { return d }
@@ -714,16 +1046,160 @@ public final class ProjectModel: ObservableObject {
     /// Write one selectable's density. `nil` (or a non-positive value) CLEARS it
     /// back to the group's/mode's answer — "no number stated" must be spellable,
     /// because core's own sentinel for "derive it" is exactly the absence of a key.
-    public func writeLatticeDensity(_ ref: LatticeSelectableRef, fraction: Double?) {
+    /// - Parameter cellMM: the face's own cell, for the AESTHETIC floor. 0 ⇒ the
+    ///   certifiable band's own floor stands in.
+    public func writeLatticeDensity(_ ref: LatticeSelectableRef, fraction: Double?,
+                                    cellMM: Double = 0) {
         guard let f = fraction, f.isFinite, f > 0 else {
             lattice.selectableDensity.removeValue(forKey: ref.key)
             return
         }
         let limits = TopOptKit.latticeLimits(topology: lattice.topologyID)
-        // Clamped into core's certifiable band — there is no certificate outside
-        // it, and a value core would refuse must not be storable from a keypad.
-        lattice.selectableDensity[ref.key] =
-            Swift.min(Swift.max(f, limits.rhoMin), limits.rhoMax)
+        // ★★ TWO BANDS, BY STAGE MODE (his spec, 2026-08-24 evening: a per-face
+        // density control in Aesthetic, "the low end should be the printable
+        // limit… the upper limit is making it a solid").
+        //
+        //   STRUCTURAL: core's certifiable band, unchanged — there is no
+        //     certificate outside it, and a value core would refuse must not be
+        //     storable from a keypad.
+        //   AESTHETIC: no certificate is claimed, so the honest bounds are the
+        //     physical ones — the density at which this face's cell prints one
+        //     bead, up to 1.0 (solid).
+        if (lattice.stageMode ?? .structural) == .aesthetic {
+            let band = latticeAestheticDensityBand(cellMM: cellMM)
+            lattice.selectableDensity[ref.key] =
+                Swift.min(Swift.max(f, band.lo), band.hi)
+        } else {
+            lattice.selectableDensity[ref.key] =
+                Swift.min(Swift.max(f, limits.rhoMin), limits.rhoMax)
+        }
+    }
+
+    /// ★ THE PER-FACE CELL IN FORCE (2026-08-25, the grading options): the
+    /// user's own number, or nil ⇒ derived. No group fallback — a cell is a
+    /// property of the face's own wall.
+    public func latticeSelectableCellMM(_ ref: LatticeSelectableRef) -> Double? {
+        if let v = lattice.selectableCellMM[ref.key], v.isFinite, v > 0 { return v }
+        return nil
+    }
+
+    /// Write one selectable's cell (mm). nil / non-positive CLEARS back to
+    /// derived — absence is core's own "derive it" sentinel, same as the
+    /// density beside it. Clamped into what can exist: never past the declared
+    /// depth (the bake further caps per voxel at the local wall —
+    /// never-overshoot), never below two beads (no strut prints down there).
+    public func writeLatticeCellMM(_ ref: LatticeSelectableRef, mm: Double?,
+                                   declaredDepthMM: Double = 0) {
+        guard let v = mm, v.isFinite, v > 0 else {
+            lattice.selectableCellMM.removeValue(forKey: ref.key)
+            return
+        }
+        let lo = Swift.max(0.5, 2 * printParams.strutLineWidthMM)
+        let hi = declaredDepthMM > 0 ? Swift.max(lo, declaredDepthMM) : 1e3
+        lattice.selectableCellMM[ref.key] = Swift.min(Swift.max(v, lo), hi)
+    }
+
+    /// ★★★ THE DIAL IS LINEAR IN STRUT WIDTH, NOT IN DENSITY (his ruling,
+    /// 2026-08-25: "Make 1% be the printability floor. Make 100% be the quilt" —
+    /// after "density is set to nearly double … and there's no difference").
+    ///
+    /// ★ MEASURED, ON HIS OWN 13 mm CELL. Mapping the dial through RHO puts most of
+    /// it where nothing happens: core's strut law saturates, so
+    ///
+    ///     33% → Ø 3.37 mm    62% → Ø 4.99 mm    75/90/100% → Ø 4.99 mm
+    ///
+    /// The top 38 % of the control is mechanically dead — no setting in it can
+    /// change a pixel — which is exactly the "no difference" he photographed. And
+    /// the band it mapped through came back rho [0.000, 1.000] at that cell, so the
+    /// printable floor and the quilt he ruled were not in force at all.
+    ///
+    /// So the dial's ends are the two WIDTHS he named — one extruded bead, and the
+    /// width at which neighbouring struts fuse — and the percentage runs linearly
+    /// between them. Every step moves the picture by the same amount, and 100 % is
+    /// the fattest strut the law can actually produce rather than a number the
+    /// geometry ignores.
+    /// nil when the topology id has no strut law (item a, 2026-10-02): there is no width
+    /// dial to show — never octet's widths under another type's name.
+    public func latticeDensityBandDiametersMM(cellMM: Double) -> (lo: Double, hi: Double)? {
+        guard let lat = LatticeType.named(lattice.topologyID) else { return nil }
+        let bead = Swift.max(0.05, printParams.strutLineWidthMM)
+        // The law's own ceiling: what a fully dense cell of this size produces.
+        let solid = 2 * lat.strutRadiusMM(relativeDensity: 1, cellMM: cellMM)
+        // The quilt: neighbouring struts meet when the diameter reaches half the
+        // cell. Whichever comes first is the top of the dial.
+        let quilt = Swift.min(cellMM / 2, solid)
+        // ★ AND THE BOTTOM IS WHAT THE LAW CAN ACTUALLY DRAW. A bead is the
+        // PRINTABLE floor, but on a coarse cell core's curve cannot produce a
+        // strut that thin at any density — at 13 mm its thinnest is 1.18 mm — so
+        // anchoring the dial at 0.45 mm spent its first tenth on a width nothing
+        // can render. The floor is the thinner of the two, measured, not assumed.
+        let floorRho = lat.printabilityDensityFloor(lineWidthMM: bead, cellMM: cellMM)
+        let thinnest = 2 * lat.strutRadiusMM(relativeDensity: floorRho, cellMM: cellMM)
+        let lo = Swift.max(bead, thinnest)
+        return (Swift.min(lo, quilt * 0.5), Swift.max(quilt, lo * 2))
+    }
+
+    /// A stored density → the percent to SHOW, 1…100 across the width band.
+    /// nil when the type has no strut law (item a): the drawer shows no percent.
+    public func latticeDensityPercent(rho: Double, cellMM: Double) -> Double? {
+        guard let lat = LatticeType.named(lattice.topologyID),
+              let b = latticeDensityBandDiametersMM(cellMM: cellMM) else { return nil }
+        guard cellMM > 0 else { return 1 }
+        guard b.hi > b.lo else { return 1 }
+        let d = 2 * lat.strutRadiusMM(relativeDensity: rho, cellMM: cellMM)
+        let t = (d - b.lo) / (b.hi - b.lo)
+        return 1 + 99 * Swift.max(0, Swift.min(1, t))
+    }
+
+    /// A typed percent → the density to STORE. The inverse of the above, through
+    /// core's own curve (`relativeDensity(strutRadiusMM:)` bisects it), so the
+    /// number he types is the strut he gets.
+    /// nil when the type has no strut law (item a): nothing to store from a percent.
+    public func latticeDensityForPercent(_ pct: Double, cellMM: Double) -> Double? {
+        guard let lat = LatticeType.named(lattice.topologyID),
+              let b = latticeDensityBandDiametersMM(cellMM: cellMM) else { return nil }
+        guard cellMM > 0 else { return 0 }
+        let t = Swift.max(0, Swift.min(1, (pct - 1) / 99))
+        let d = b.lo + t * (b.hi - b.lo)
+        let rho = lat.relativeDensity(strutRadiusMM: d / 2, cellMM: cellMM)
+        return Swift.min(1, Swift.max(0, rho))
+    }
+
+    /// ★ WHERE "AUTO" SITS — his ruling: "Place Auto in the middle - whatever looks
+    /// nicest (not necessarily 50%)." 45 % of the width band draws a truss with
+    /// real material in it and windows still clearly open; the floor drew a wall you
+    /// could see straight through, which is what made a fresh face look empty.
+    public static let latticeAutoDensityPercent: Double = 45
+
+    /// ★★★ THE AESTHETIC DENSITY BAND FOR A FACE (his ruling, 2026-08-24 night):
+    /// the low end is the printable limit at that face's cell, "the max is the
+    /// QUILT" — the density where the struts fuse and the windows close — never
+    /// 1.0 solid. The per-face control clamps into this band, and its PERCENT is
+    /// displayed relative to it: 0% = the thinnest printable lattice, 100% = the
+    /// quilt. Both ends from core's own strut law, nothing invented here.
+    public func latticeAestheticDensityBand(cellMM: Double)
+        -> (lo: Double, hi: Double) {
+        let limits = TopOptKit.latticeLimits(topology: lattice.topologyID)
+        var lo = limits.rhoMin
+        var hi = 1.0
+        // ★ no strut law for the id (item a): core's band alone — no Swift printability floor,
+        // no quilt, no octet cap
+        guard let lat = LatticeType.named(lattice.topologyID) else {
+            if limits.rhoMax > lo { hi = limits.rhoMax }
+            return (lo, Swift.max(hi, Swift.min(1.0, lo + 1e-3)))
+        }
+        if cellMM > 0 {
+            if printParams.strutLineWidthMM > 0 {
+                let f0 = lat.printabilityDensityFloor(
+                    lineWidthMM: printParams.strutLineWidthMM, cellMM: cellMM)
+                if f0 > 0 { lo = f0 }
+            }
+            hi = lat.quiltDensityCeiling(cellMM: cellMM)
+            // ★ the aesthetic ceiling (octet), unless Allow quilt — his 2026-09-12 ruling
+            if !lattice.allowQuilt { hi = Swift.min(hi, lat.aestheticDensityCeiling(cellMM: cellMM)) }
+        }
+        if hi <= lo { hi = Swift.min(1.0, lo + 1e-3) }
+        return (lo, hi)
     }
 
     /// ★ THE IN-PLANE EXPAND IN FORCE FOR ONE SELECTABLE (maintainer,
@@ -752,6 +1228,15 @@ public final class ProjectModel: ObservableObject {
         let v = LatticeSlabExpand.snapped(mm)
         if v == 0 { lattice.selectableExpandMM.removeValue(forKey: ref.key) }
         else { lattice.selectableExpandMM[ref.key] = v }
+    }
+
+    /// ★ ONE BAND CHIP'S CHOICE (his 2026-09-27 lattice-only chips). `key` is a
+    /// `LatticeBandDecision.key`; nil CLEARS it, so the band's own rule decides again.
+    /// Which value to write for a tapped segment is `LatticeBandChipLayout.treatment`
+    /// — a choice equal to the rule's default is stored as no choice at all.
+    public func writeLatticeBandTreatment(_ key: String, solid: Bool?) {
+        if let solid { lattice.bandTreatments[key] = solid }
+        else { lattice.bandTreatments.removeValue(forKey: key) }
     }
 
     /// ★ WHAT THE FACE CARDS MUST BE DERIVED FROM (task
@@ -969,7 +1454,7 @@ public final class ProjectModel: ObservableObject {
     /// Returns the two children, or [] when nothing could be cut.
     @discardableResult
     public func commitSurfaceCut(_ cut: SurfaceCut) -> [RegionID] {
-        sealUndoStep()          // each surface action is its own undo step
+        beginFaceEdit(); defer { endFaceEdit(.cut) }   // each surface action is its own undo step (B5: sealed after too)
         guard let mesh = viewerMesh else { return [] }
         let target: RegionID
         if let existing = surfaceCutTarget(face: cut.faceID) {
@@ -1103,8 +1588,8 @@ public final class ProjectModel: ObservableObject {
     @discardableResult
     public func commitSurfaceIsolate(faces: [FaceID],
                                      named name: String) -> [RegionID] {
+        beginFaceEdit(); defer { endFaceEdit(.isolate) }
         guard let mesh = viewerMesh, !faces.isEmpty else { return [] }
-        sealUndoStep()
 
         // ★ CONNECTED GROUPS OF THE SELECTED FACES. Adjacency is face-level and
         // already derived for the loop walk; here it is restricted to the selection,
@@ -1168,6 +1653,7 @@ public final class ProjectModel: ObservableObject {
     @discardableResult
     public func commitSurfaceCut(faces: [FaceID], rotationDegrees: Double = 0,
                                  offsetMM: Double = 0) -> [RegionID] {
+        beginFaceEdit(); defer { endFaceEdit(.cut) }   // B5: the whole batch is one edit, one Undo
         guard let mesh = viewerMesh, !faces.isEmpty else { return [] }
         var out: [RegionID] = []
         for f in faces.sorted() {
@@ -1184,6 +1670,7 @@ public final class ProjectModel: ObservableObject {
     @discardableResult
     public func commitSurfacePattern(faces: [FaceID], columns: Int, rows: Int,
                                      rotationDegrees: Double = 0) -> [RegionID] {
+        beginFaceEdit(); defer { endFaceEdit(.pattern) }   // B5: the whole batch is one edit, one Undo
         guard viewerMesh != nil, !faces.isEmpty else { return [] }
         var out: [RegionID] = []
         for f in faces.sorted() {
@@ -1273,7 +1760,7 @@ public final class ProjectModel: ObservableObject {
     /// rather than shipping the wrong behaviour quietly.
     @discardableResult
     public func commitSurfaceUnion(_ u: SurfaceUnion) -> RegionID? {
-        sealUndoStep()          // each surface action is its own undo step
+        beginFaceEdit(); defer { endFaceEdit(.union) }   // each surface action is its own undo step (B5: sealed after too)
         guard viewerMesh != nil, u.hasEnoughToCombine else { return nil }
         guard let rid = faceRegions.unionOfParts(u.pieces,
                                                  named: "Union of \(u.count)")
@@ -1369,6 +1856,13 @@ public final class ProjectModel: ObservableObject {
         // with the drawing.
         let target = (piece ?? surfaceCutTarget(face: face))
             .flatMap { faceRegions.region($0) }
+        // ★★ A UNION IS DIVIDED WHOLE (2026-10-08): the grid is laid on the tapped face, inside the
+        // union's leaf under the finger, and its cells reach every part (`surfacePatternUnionPricing`)
+        let unionLeaf: FaceRegion? = target.flatMap { t in
+            guard t.isUnionOfParts else { return nil }
+            return faceRegions.resolvedLeaves(t.id).compactMap { faceRegions.region($0) }
+                .first { FaceRegionGeometry.members(of: $0, in: mesh).contains(face) }
+        }
         // ★ AND SAY WHY WHEN IT REFUSES, IN ITS OWN WORDS. The grid used to answer
         // `[]` for every failure and the panel guessed one message — "Too many
         // pieces for this face" — which was wrong for the case that actually bites
@@ -1377,7 +1871,7 @@ public final class ProjectModel: ObservableObject {
         let cells: [FaceRegionGeometry.GridCell]
         switch SurfacePatternAxis.grid(face: face, frame: frame,
                                        columns: columns, rows: rows, in: mesh,
-                                       within: target?.cuts ?? []) {
+                                       within: unionLeaf?.cuts ?? target?.cuts ?? []) {
         case .success(let c):
             cells = c
         case .failure(let refusal):
@@ -1397,6 +1891,12 @@ public final class ProjectModel: ObservableObject {
         // ★ PRICED AT THE RUN'S OWN SPACING, so the panel refuses with the number
         // the run would — the same path the Regions sheet prices against.
         let spacing = surfaceVoxelSpacingMM(mesh)
+        // ★★ a union: every cell priced over EVERY part it reaches, not the tapped face alone (the
+        // defect: one face priced, ✓ enabled, cells holding nothing — SurfaceUnionDefectControlTests)
+        if let t = target, t.isUnionOfParts {
+            let u = surfacePatternUnionPricing(union: t.id, cells: cells, spacingMM: spacing, mesh: mesh)
+            return (cells, FaceRegionModel.checkSliver(cellVoxels: u.perCell, memberVoxels: u.member))
+        }
         let per = FaceRegionGeometry.cellVoxelCounts(members: [face], in: mesh,
                                                      cells: cells, spacingMM: spacing)
         let member = FaceRegionGeometry.memberVoxelEstimate(members: [face], in: mesh,
@@ -1405,12 +1905,37 @@ public final class ProjectModel: ObservableObject {
         return (cells, verdict)
     }
 
+    /// ★★ A UNION'S PATTERN, PRICED (2026-10-08). Each leaf the union resolves to is cut by every
+    /// cell (the leaf's own cuts AND the cell's): `perLeaf[leaf][k]` is the surface of leaf ∩ cell k
+    /// in mm², `perCell` the cell's voxels summed over the leaves, `member` the leaves' own voxels.
+    func surfacePatternUnionPricing(union id: RegionID, cells: [FaceRegionGeometry.GridCell],
+                                    spacingMM: Double, mesh: ViewerMesh)
+        -> (perCell: [Int], member: Int, perLeaf: [RegionID: [Double]]) {
+        var areas = [Double](repeating: 0, count: cells.count)
+        var memberArea = 0.0
+        var perLeaf: [RegionID: [Double]] = [:]
+        for leaf in faceRegions.resolvedLeaves(id) {
+            guard let l = faceRegions.region(leaf) else { continue }
+            let members = FaceRegionGeometry.members(of: l, in: mesh)
+            let clipped = cells.map { FaceRegionGeometry.GridCell(i: $0.i, j: $0.j, cuts: l.cuts + $0.cuts, drawn: $0.drawn) }
+            let a = FaceRegionGeometry.cellAreas(members: members, in: mesh, cells: clipped, spacingMM: spacingMM)
+            perLeaf[leaf] = a.perCell
+            for k in areas.indices { areas[k] += a.perCell[k] }
+            let own = FaceRegionGeometry.cellAreas(members: members, in: mesh,
+                                                   cells: [FaceRegionGeometry.GridCell(i: 0, j: 0, cuts: l.cuts)],
+                                                   spacingMM: spacingMM)
+            memberArea += own.perCell.first ?? 0
+        }
+        let voxelArea = Swift.max(spacingMM * spacingMM, 1e-12)
+        return (areas.map { Int(($0 / voxelArea).rounded()) }, Int((memberArea / voxelArea).rounded()), perLeaf)
+    }
+
     /// Commit the pattern. Refuses on a failing verdict — the guard is not advisory.
     @discardableResult
     public func commitSurfacePattern(face: FaceID, columns: Int, rows: Int,
                                      rotationDegrees: Double = 0,
                                      piece: RegionID? = nil) -> [RegionID] {
-        sealUndoStep()          // each surface action is its own undo step
+        beginFaceEdit(); defer { endFaceEdit(.pattern) }   // each surface action is its own undo step (B5: sealed after too)
         guard let p = surfacePatternPreview(face: face, columns: columns, rows: rows,
                                             rotationDegrees: rotationDegrees,
                                             piece: piece),
@@ -1422,6 +1947,16 @@ public final class ProjectModel: ObservableObject {
             }
             return rid
         }()
+        // ★★ a union is split WHOLE (2026-10-08): every part cut by the same cells, one union per cell
+        if let u = faceRegions.region(splitTarget), u.isUnionOfParts, let mesh = viewerMesh {
+            let pricing = surfacePatternUnionPricing(union: u.id, cells: p.cells,
+                                                     spacingMM: surfaceVoxelSpacingMM(mesh), mesh: mesh)
+            let kids = faceRegions.splitUnion(u.id, cells: p.cells) { leaf, k in
+                (pricing.perLeaf[leaf]?[k] ?? 0) > 1e-9
+            }
+            if !kids.isEmpty { objectWillChange.send() }
+            return kids
+        }
         let kids = faceRegions.splitGrid(splitTarget, cells: p.cells)
         if !kids.isEmpty { objectWillChange.send() }
         return kids
@@ -1501,7 +2036,7 @@ public final class ProjectModel: ObservableObject {
 
     /// Snapshot what a Surface session can throw away. See `SurfaceScratch`.
     public func surfaceCaptureScratch() -> SurfaceScratch {
-        SurfaceScratch.capture(regions: faceRegions, groups: selection.groups)
+        SurfaceScratch.capture(regions: faceRegions, selection: selection, force: force)
     }
 
     /// Whether anything has been committed since that snapshot.
@@ -1509,27 +2044,71 @@ public final class ProjectModel: ObservableObject {
         s.differs(regions: faceRegions, groups: selection.groups)
     }
 
-    /// ★ PUT IT ALL BACK. Regions AND group membership together — see
-    /// `SurfaceScratch` for why restoring one without the other is worse than
-    /// restoring neither.
+    /// ★ PUT IT ALL BACK. Regions AND the group layer together — see `SurfaceScratch` for why
+    /// restoring one without the other is worse than restoring neither.
     ///
-    /// A group created ENTIRELY during the session had no entry in the snapshot;
-    /// its regions are dropped rather than left pointing at regions that no longer
-    /// exist. A group that existed keeps its faces untouched — no surface tool
-    /// changes those, so they are not the session's to revert.
+    /// ★★ THE WHOLE GROUP LAYER (2026-10-08): every group as captured — faces and regions — the
+    /// active group, and, for a group the session SWEPT, its role, load and protection back from the
+    /// captured force model. A group made during the session is gone with its entries. A live group's
+    /// force entries are never touched (no surface tool writes them).
     public func surfaceRestore(_ s: SurfaceScratch) {
         faceRegions = s.regions
-        for g in selection.groups {
-            selection.setRegions(s.groupRegions[g.id] ?? [], for: g.id)
-        }
-        // Any region the snapshot does not contain cannot be referred to any more.
-        let live = Set(s.regions.regions.map(\.id))
-        for g in selection.groups {
-            let stale = g.regionIDs.filter { !live.contains($0) }
-            if !stale.isEmpty { selection.removeRegions(stale) }
-        }
+        let live = Set(selection.groups.map(\.id))
+        let swept = Set(s.groups.map(\.id)).subtracting(live)
+        selection.restore(groups: s.groups, active: s.activeGroupID)
+        force.restoreEntries(for: swept, from: s.force)
         force.sync(groups: selection.groups)
         objectWillChange.send()
+    }
+
+    /// ★★ THE REGION TOOL'S TAP (2026-10-08): add the face to the aimed region, or drop it — the
+    /// explicit add/remove lists the Topology page's tap writes (task 2026-08-14 §2c), as one undo
+    /// step. Returns the refusal, in words, when the aim is not a whole face region.
+    @discardableResult
+    public func surfaceRegionToggleFace(_ id: RegionID, face: FaceID) -> String? {
+        beginFaceEdit(); defer { endFaceEdit(.regionFace) }
+        guard let mesh = viewerMesh else { return "No model open." }
+        switch SurfaceRegionTool.tapEdit(aim: id, face: face, regions: faceRegions, mesh: mesh) {
+        case .refused(let why):
+            return why
+        case .add(let f):
+            sealUndoStep()
+            faceRegions.addFace(f, to: id)
+        case .drop(let f):
+            sealUndoStep()
+            faceRegions.removeFace(f, from: id)
+        }
+        refreshFaceRegionDrift()
+        objectWillChange.send()
+        return nil
+    }
+
+    /// ★★ UNDO SPLIT ON THE SURFACE STAGE (2026-10-08): the aim's split pieces go — a union keeps
+    /// its parts — and every id that went leaves every group, so nothing dangles.
+    @discardableResult
+    public func surfaceUndoSplit(_ id: RegionID) -> [RegionID] {
+        beginFaceEdit(); defer { endFaceEdit(.undoSplit) }
+        guard SurfaceRegionTool.canUndoSplit(id, regions: faceRegions) else { return [] }
+        let before = Set(faceRegions.regions.map(\.id))
+        faceRegions.revertSplit(id)
+        let dropped = before.subtracting(faceRegions.regions.map(\.id)).sorted()
+        selection.removeRegions(dropped)
+        force.sync(groups: selection.groups)
+        objectWillChange.send()
+        return dropped
+    }
+
+    /// ★★ DISSOLVE ON THE SURFACE STAGE (2026-10-08) — `SurfaceDissolve`, as one undo step: the
+    /// faces back to the group they came from, a union's parts back, nothing dangling. nil when the
+    /// region cannot be dissolved (`SurfaceDissolve.refusal` says why).
+    @discardableResult
+    public func surfaceDissolve(_ id: RegionID) -> SurfaceDissolve.Result? {
+        beginFaceEdit(); defer { endFaceEdit(.dissolve) }
+        guard let mesh = viewerMesh, SurfaceDissolve.refusal(id, regions: faceRegions) == nil else { return nil }
+        let r = SurfaceDissolve.apply(id, regions: &faceRegions, selection: &selection, mesh: mesh)
+        force.sync(groups: selection.groups)
+        objectWillChange.send()
+        return r
     }
 
     // MARK: - ★ WHAT A GROUP ACTUALLY CONTAINS (the one resolver)
@@ -1583,8 +2162,13 @@ public final class ProjectModel: ObservableObject {
         let top = faceRegions.outermostUnion(containing: id)
         guard let r = faceRegions.region(top) else { return [] }
 
-        // A union speaks for its parts.
-        if r.isUnionOfParts { return [top] }
+        // A union speaks for its parts — until a pattern divides it (2026-10-08): then its CELLS
+        // speak for it, as a split face's children do. Its parts hang off it too; they are what it
+        // is, not a split of it.
+        if r.isUnionOfParts {
+            let cells = faceRegions.children(of: top).filter { !r.parts.contains($0.id) }
+            return cells.isEmpty ? [top] : cells.flatMap { surfaceEffectiveRegions(from: $0.id) }
+        }
 
         // A cut or grid split is superseded by its children — they cover the same
         // surface between them, and they are what the user then works with.
@@ -1626,8 +2210,8 @@ public final class ProjectModel: ObservableObject {
     /// curved faces are pocket corners / fillets / a boss no longer auto-clears
     /// (handoff 2026-07-29).
     public func autoClearanceApplies(_ g: SelectionGroup, in mesh: ViewerMesh) -> Bool {
-        guard force.kind(for: g.id).isAnchor else { return false }
-        return g.faces.contains { FaceTopology.isFastenerBore($0, in: mesh) }
+        guard force.autoKeepClearIsOn(g.id) else { return false }   // ★ his per-group switch; default: on for an Anchor
+        return keepClearFaces(g).contains { FaceTopology.isFastenerBore($0, in: mesh) }   // ★ 10-28: region-held holes count
     }
 
     /// Whether "Keep clear" is effectively on for a group given the current mesh —
@@ -1654,6 +2238,12 @@ public final class ProjectModel: ObservableObject {
     /// volume (rendered hollow/dashed) — the same safe no-op the core produces.
     public func clearanceVolumes() -> [(groupID: UUID, volume: ClearanceVolume)] {
         resolvedClearances().map { ($0.groupID, $0.volume) }
+    }
+
+    /// The same volumes with the piece each one is (its face id, or a manual primitive's sentinel key), so one piece can
+    /// be hidden on its own (his ask 2026-10-26).
+    public func clearancePieceVolumes() -> [(groupID: UUID, piece: Int, volume: ClearanceVolume)] {
+        resolvedClearances().map { ($0.groupID, $0.faceID, $0.volume) }
     }
 
     /// A resolved clearance for ONE cleared face: the rendered volume plus the FIXED
@@ -1714,10 +2304,13 @@ public final class ProjectModel: ObservableObject {
             let auto = autoClearanceApplies(g, in: mesh)
             guard force.keepClearIsOn(g.id, autoDefault: auto) else { continue }
             let explicit = force.keepClearAffix(for: g.id) == .on
-            for f in g.faces {
+            let held = keepClearFaces(g)   // ★ 10-28: region-held holes too
+            for f in held {
                 let bore = FaceTopology.isFastenerBore(f, in: mesh)
                 if !explicit && !bore { continue }
-                if force.isClearanceFaceSuppressed(f) { continue }  // deleted (BAR B3)
+                // ★ note 3 (2026-10-27): a hole split in halves is ONE cylinder — sent/drawn by its lowest piece in the group
+                if bore, !FaceTopology.isBoreRepresentative(f, among: held, in: mesh) { continue }
+                if force.isClearanceFaceSuppressed(f, in: g.id) { continue }  // deleted in THIS group (BAR B3, ★ 10-28)
                 guard let geo = mesh.faceGeometry(f) else { continue }  // STL / no B-rep
                 // Per-bore when the group is unsynced, shared when synced (round 4, item 3).
                 if bore {
@@ -1963,7 +2556,7 @@ public final class ProjectModel: ObservableObject {
         return latticeFacePrimitive(faces: members, ref: ref, group: group,
                                     key: rid, role: role,
                                     depthMM: latticeSlabDepthMM(ref, in: group),
-                                    in: mesh)
+                                    in: latticeSectorMesh(rid) ?? mesh)   // ★ batch E: a split piece's own surface
     }
 
     /// A stable NEGATIVE sentinel face key for a manual primitive, so it never
@@ -2027,9 +2620,12 @@ public final class ProjectModel: ObservableObject {
     public func listedClearanceFaces(_ g: SelectionGroup) -> [FaceID] {
         guard let mesh = viewerMesh, keepClearIsOn(g) else { return [] }
         let explicit = force.keepClearAffix(for: g.id) == .on
-        return g.faces.filter { f in
-            (FaceTopology.isFastenerBore(f, in: mesh) || explicit)
-                && !force.isClearanceFaceSuppressed(f)
+        let held = keepClearFaces(g)   // ★ 10-28: region-held holes too
+        return held.filter { f in
+            let bore = FaceTopology.isFastenerBore(f, in: mesh)
+            return (bore || explicit)
+                && !(bore && !FaceTopology.isBoreRepresentative(f, among: held, in: mesh))   // one row per split hole
+                && !force.isClearanceFaceSuppressed(f, in: g.id)
                 && mesh.faceGeometry(f) != nil
         }
     }
@@ -2048,30 +2644,102 @@ public final class ProjectModel: ObservableObject {
     /// emission the stale page copy said was impossible — PR 256's schema). Role
     /// groups' manual primitives + faces, plus the legacy include primitives.
     /// Slab depths resolve through the SAME metric chain the chips/volumes read.
-    /// The `lattice.regions` entries for a job that lattices a FINISHED VARIANT
-    /// (task 2026-08-02-lattice-a-variant, bar Z11).
+    /// The `lattice.regions` entries for a job that lattices a FINISHED VARIANT (task
+    /// 2026-08-02-lattice-a-variant, bar Z11; the face-prism route, 2026-09-29; ruling a,
+    /// 2026-09-30).
     ///
-    /// ONLY explicit geometry predicates. A variant is a marching-cubes
-    /// iso-surface with no segmentation, so a face selection carried over from
-    /// the setup page describes the ORIGINAL part's surface — geometry this
-    /// design no longer has. Synthesising a region from it would place a keep-out
-    /// or an include the user has never seen against the geometry it will
-    /// actually affect: PR 261's resolve-against-the-wrong-geometry failure. Such
-    /// faces are COUNTED (`skippedFaces`) so the page can say so, never emitted.
+    /// ★★ THE STAGE'S WALLS, AS THE STAGE SENDS THEM. Every face wall is a prism — origin and
+    /// inward normal on the ORIGINAL face plane, extents, outline, frame, depth — which core
+    /// resolves analytically (clearance.cpp's slab test). A variant job imports the original
+    /// part too (core requires the design on its exact grid), so the variant's regions are the
+    /// stage's, wall for wall — per-selectable roles, depths, densities and synthetic flags
+    /// included — each with its `face_id` as provenance (maintainer, 2026-09-30: real on the
+    /// original part, it changes no geometry, and it keeps core's depth tie against the run's
+    /// `loads.face_protections`, its messages and receipt echoes). Tapping faces ON the
+    /// variant stays refused: its mesh has none.
     public func variantLatticeJobRegions() -> LatticeRegionEmission.Result {
-        guard lattice.enabled else { return .init(regions: [], skippedFaces: 0) }
-        return LatticeRegionEmission.variantRegions(
-            groups: selection.groups,
-            roles: lattice.groupRoles,
-            primitives: resolvedLatticePrimitives,
-            includePrimitives: lattice.includePrimitives.map {
-                ($0, $0.resolvedDepthMM) },
-            groupDensities: lattice.groupDensities)
+        latticeJobRegions()
+    }
+
+    /// ★★ THE ONE LATTICE SPEC (maintainer, 2026-09-30, ruling b): what the stage's Optimize /
+    /// Lattice request carries (`AppModel.makeRunRequest`) and what a variant's re-lattice
+    /// carries (`relatticeJobJSON` — its run, forecast and Check sizes — and the run's receipt
+    /// echo). Moved VERBATIM from `AppModel.makeRunRequest` (aecef72c), so the stage's spec —
+    /// and its job bytes — are unchanged; the variant now gets Auto resolved as the stage does.
+    ///
+    /// ★ AUTO, RESOLVED (task 2026-08-12 §4). "Auto" is not a job field: it becomes core's
+    /// per-region `fit` when regions are declared and `swept` otherwise, and it never emits a
+    /// combination core refuses. Auto's swept window is DERIVED, so the posture needs the two
+    /// things it is derived from: what each declared region has to fit into (its DECLARED
+    /// depth — never the preview's measured width, or the stage's bytes would move), and the
+    /// bead. `emission` is the caller's own, so a count the caller states describes these
+    /// regions. No policy here: a variant's zero-include refusal (ruling c) is its caller's.
+    public func latticeRunSpec(emission: LatticeRegionEmission.Result) -> LatticeSpec? {
+        // ★★ THE STALE-TYPE GATE, BEFORE THE POSTURE (maintainer, 2026-10-03). A type core
+        // does not call live gets no run spec — and so its stale path asks core for no
+        // per-type number at all (the posture and the bounds both would). Core's own
+        // readiness, the same two facts `runSpec(topology:)` reads, so octet is untouched.
+        guard lattice.enabled,
+              TopOptKit.latticeTypeReadiness(lattice.topologyID,
+                                             generatable: TopOptKit.latticeGeneratableTopologies,
+                                             certifiable: TopOptKit.latticeCertifiableTopologies) == .live
+        else { return nil }
+        let includes = emission.regions.filter { $0.role == .include }
+        let resolvedLattice = LatticeAutoPosture.applied(
+            to: lattice,
+            includeRegionCount: includes.count,
+            regionWidthsMM: includes.map { $0.depthMM },
+            lineWidthMM: printParams.strutLineWidthMM)
+        var spec = resolvedLattice.runSpec(
+            topology: lattice.topologyID,
+            memberMM: lattice.regionMemberMM ?? 0,
+            lineWidthMM: printParams.strutLineWidthMM,
+            // Round-2 (M3): the include/exclude regions — role groups' primitives + faces and
+            // the legacy include primitives — ride `lattice.regions`.
+            regions: emission.regions,
+            // ★ THE OBJECTIVE SHAPES "AUTO" (maintainer, 2026-08-19); see
+            // `LatticeSettings.resolvedCellPlan`.
+            minimizePlastic: minimizePlastic,
+            // ★ growth's precondition (§2A): organic_growth is written only with a layer height
+            layerHeightMM: printParams.layerHeightMM)
+        // ★ The preview's placed cells ride with a Stepped run (2026-09-18).
+        spec?.steppedCells = latticePreviewSteppedCells
+        // ★★ THE RIM'S FLOOR, ONE NUMBER (item 2, measured 2026-10-06): the job's automatic rim
+        // is the printability floor max(1.535 × bead, one design voxel) — his 2026-09-08 rule,
+        // the number the preview draws (`organicRunSolidRimMM(floorMM: organicFloor.mm)`). The
+        // spec carried a field for it that nothing filled, so the job fell back to the bead
+        // term alone: 0.691 mm on 102117B9 against the preview's 1.705.
+        if spec?.algorithm == "organic" { spec?.organicRimFloorMM = organicFloor.mm }
+        return spec
+    }
+
+    /// ★★ THE ORGANIC WINDOW THE JOB CARRIES, as core reads it (item 2, measured 2026-10-06):
+    /// `have_window = cell_min_mm > 0 && cell_max_mm >= cell_min_mm` (run_job.cpp:4522). With
+    /// one, core floors its shape fit at `cell_min_mm` (4799-4801) — for one size, lo == hi, the
+    /// fit shrinks nothing; without one, at half the spacing. The preview's shape fit reads the
+    /// same window so it shrinks exactly what the run does. nil = the job states none (Auto).
+    public var organicJobWindowMM: (lo: Double, hi: Double)? {
+        guard lattice.algorithm == "organic",
+              let g = latticeRunSpec(emission: latticeJobRegions())?.gradingDictionary(),
+              let lo = g["cell_min_mm"] as? Double, let hi = g["cell_max_mm"] as? Double,
+              lo > 0, hi >= lo else { return nil }
+        return (lo, hi)
+    }
+
+    /// ★ RULING (c) (maintainer, 2026-09-30): why a variant's job may not be written, in the
+    /// stage's words — nil when it may. Read from the SAME emission the job carries; with no
+    /// include wall core would lattice the WHOLE variant.
+    public func variantLatticeJobRefusal() -> String? {
+        LatticeJobIncludeGate.refusal(latticeEnabled: lattice.enabled,
+                                      regions: variantLatticeJobRegions().regions)
+            // ★★ Structural Stepped waits on core's strength check (2026-10-08) — blocked, never
+            // run as core's own layout
+            ?? LatticeStructuralSteppedGate.refusal(lattice)
     }
 
     /// A role group's manual primitives with their slab depths resolved through
     /// the SAME metric chain the chips and the rendered volumes read — so run,
-    /// picture and chips agree. Shared by the whole-part and variant emissions.
+    /// picture and chips agree.
     private var resolvedLatticePrimitives: (UUID) -> [(prim: ManualPrimitive, depthMM: Double)] {
         { gid in
             self.force.manualPrimitives(for: gid).map { mp in
@@ -2131,7 +2799,134 @@ public final class ProjectModel: ObservableObject {
             // and `LatticeSlabExpandTests` caught this one missing.
             selectableDensity: lattice.selectableDensity,
             selectableExpandMM: lattice.selectableExpandMM,
+            synthetic: latticeSyntheticFlags(),
+            regionMembers: { [weak self] gid, rid in self?.latticeEmittedRegionMembers(gid, rid) },
+            regionCuts: { [weak self] rid, f in self?.latticeRegionCutSets(rid, face: f) ?? [[]] },   // ★ batch E
+            // ★ ruling (g): a region the run cannot consume is counted and NAMED
+            droppedRegionName: { [weak self] gid, rid, role, groupRole in
+                self?.latticeDroppedRegionName(group: gid, rid, role: role, groupRole: groupRole) },
+            facets: { [weak self] f in
+                guard let mesh = self?.viewerMesh else { return [] }
+                return LatticeFaceFacets.facets(face: f, in: mesh)
+            },
+            solidAt: latticeSeamSolidAt(),
             resolve: resolvedLatticeFace)
+    }
+
+    /// ★ A face region the lattice CAN consume: a union of WHOLE faces (no cuts, no
+    /// parts) — its member faces, each emitted as its own prism under the region's key.
+    /// ★ BATCH E (his item 4): a cut sector or a union of pieces is its CLIPPED outlines (LatticeSectorOutline).
+    public func latticeRegionMembers(_ rid: RegionID) -> [FaceID]? {
+        if let r = faceRegions.region(rid), !r.cuts.isEmpty || !r.parts.isEmpty { return latticeSectorMembers(rid) }
+        guard let mesh = viewerMesh, let r = faceRegions.region(rid),
+              r.cuts.isEmpty, r.parts.isEmpty else { return nil }
+        let members = FaceRegionGeometry.members(of: r, in: mesh)
+        return members.isEmpty ? nil : members
+    }
+
+    /// The name a face region goes by — on the Selections row AND in the left-out notice.
+    public func latticeRegionName(_ rid: RegionID) -> String {
+        faceRegions.region(rid)?.name ?? "Region \(rid)"
+    }
+
+    /// A selectable's short name — the Selections row's, and the one ruling 3's sentence uses.
+    /// Two words at most (R7).
+    public func latticeSelectableName(_ ref: LatticeSelectableRef) -> String {
+        switch ref {
+        case let .face(_, f): return "Face \(runFaceID(f))"
+        case .primitive: return "Primitive"
+        case let .region(_, rid): return latticeRegionName(rid)
+        }
+    }
+
+    /// ★ RULING 3 (maintainer, 2026-09-30): core's refusal of a variant document, in his words.
+    /// Core's depth tie → "This result was optimized with a X mm protected skin under [wall], but
+    /// the wall is Y mm deep. …", the wall named as its Selections row names it (the prism core
+    /// stopped at, in wire order); any other refusal → core's own words. Nothing is re-derived:
+    /// X and Y are core's.
+    public func variantJobCoreRefusal(coreError: String, regions: [LatticeRegionSpec]) -> String {
+        guard let m = LatticeVariantProtectionTie.parse(coreError: coreError) else {
+            return LatticeVariantProtectionTie.coreWords(coreError)
+        }
+        // ★ the prism core REJECTED: on this face, at core's wall depth (core prints %f) — a face can
+        // carry two prisms (a direct face of one group, a region member in another), and core
+        // stops at the first that differs, not the first that exists (round 3 review)
+        let prism = regions.first { $0.kind == .face && $0.faceID == m.faceID && abs($0.depthMM - m.wallMM) < 1e-5 }
+            ?? regions.first { $0.kind == .face && $0.faceID == m.faceID }
+        var ref: LatticeSelectableRef? = nil
+        if let key = prism?.selectableKey {
+            for g in selection.groups {
+                if let f = g.faces.first(where: { LatticeSelectableRef.face(group: g.id, face: $0).key == key }) {
+                    ref = .face(group: g.id, face: f); break
+                }
+                if let r = g.regionIDs.first(where: { LatticeSelectableRef.region(group: g.id, region: $0).key == key }) {
+                    ref = .region(group: g.id, region: r); break
+                }
+            }
+        }
+        let name = ref.map(latticeSelectableName) ?? "Face \(m.faceID)"
+        let expand = prism?.selectableKey.map { LatticeSlabExpand.clamp(lattice.selectableExpandMM[$0] ?? 0) } ?? 0
+        // ★ ROUND 3 (maintainer, 2026-10-01): a depth is suggested only when the wall can be set to
+        // it — at or below zero, or below the wall's minimum depth (`LatticeSlabDepth.minMM`, where
+        // every depth write clamps), no depth clears the tie, so only Optimize again is offered.
+        let setTo = m.protectionMM - expand
+        let settable = setTo >= LatticeSlabDepth.minMM - 1e-9 && setTo <= LatticeSlabDepth.maxMM + 1e-9
+        return LatticeVariantProtectionTie.sentence(m, wallName: name, setToMM: settable ? setTo : nil)
+    }
+
+    /// ★ RULING (g) (maintainer, 2026-09-30): the name a face region the run cannot consume is
+    /// reported under, or nil when it is not a wall to report:
+    /// - it is gone from the model (a stale id the user cannot find), or
+    /// - its surface is emitted, WITH THE CHILD'S OWN ROLE, through an ANCESTOR that sits in the
+    ///   same group (a whole-face parent folded over its cut children — `latticeRegionRefs`).
+    ///   An Off ancestor emits nothing, and one with another role drops the child's own choice,
+    ///   so either way the child is named.
+    public func latticeDroppedRegionName(group gid: UUID, _ rid: RegionID,
+                                         role: LatticeGroupRole, groupRole: LatticeGroupRole) -> String? {
+        guard let r = faceRegions.region(rid) else { return nil }
+        if let g = selection.groups.first(where: { $0.id == gid }) {
+            var seen: Set<RegionID> = [rid]
+            var up = r.parentID
+            while let a = faceRegions.region(up), !seen.contains(a.id) {
+                seen.insert(a.id)
+                if g.regionIDs.contains(a.id), latticeRegionMembers(a.id) != nil,
+                   LatticeSelectableRoles.role(for: .region(group: gid, region: a.id), groupRole: groupRole,
+                                               overrides: lattice.selectableRoles) == role {
+                    return nil   // the ancestor emits this surface with the child's own role
+                }
+                up = a.parentID
+            }
+        }
+        return r.name
+    }
+    /// Whether this selectable's lattice choice reaches the run: faces and primitives
+    /// always; a region when it is a union of whole faces (see `latticeRegionMembers`).
+    /// ★ THE PART'S MATERIAL FOR THE SEAM TEST (2026-09-23): a 128-across occupancy of the
+    /// viewer mesh, built once per mesh and kept, so `LatticeRegionEmission` can ask
+    /// "is there material just beyond this outline edge" without a mesh of its own.
+    private var latticeSeamOccupancy: (key: (Int, UInt64, UInt64), grid: LatticeVoxelGrid)? = nil
+    func latticeSeamSolidAt() -> ((SIMD3<Double>) -> Bool)? {
+        guard let mesh = viewerMesh, !mesh.indices.isEmpty else { return nil }
+        let key = (mesh.indices.count, mesh.signature.contentHash, mesh.signature.topologyHash)
+        let grid: LatticeVoxelGrid
+        if let c = latticeSeamOccupancy, c.key == key { grid = c.grid } else {
+            let t0 = Date()
+            grid = LatticePreviewOccupancy.occupancy(positions: mesh.positions, indices: mesh.indices,
+                                                    bounds: mesh.bounds, maxDim: 128)
+            latticeSeamOccupancy = (key, grid)
+            NSLog("DIAG seam occupancy: %dx%dx%d in %.2f s (once per mesh)", grid.nx, grid.ny, grid.nz, Date().timeIntervalSince(t0))
+        }
+        return { p in
+            let g = (SIMD3<Float>(p) - grid.origin) / grid.spacing
+            let i = Int(g.x.rounded()), j = Int(g.y.rounded()), k = Int(g.z.rounded())
+            guard i >= 0, j >= 0, k >= 0, i < grid.nx, j < grid.ny, k < grid.nz else { return false }
+            return grid.values[(k * grid.ny + j) * grid.nx + i] > 0.5
+        }
+    }
+
+    public func latticeReachesTheRun(_ ref: LatticeSelectableRef) -> Bool {
+        if case let .region(_, rid) = ref { return latticeRegionMembers(rid) != nil }
+        return true
     }
 
     /// A face's exact B-rep geometry as the emission needs it; nil when the face
@@ -2150,11 +2945,13 @@ public final class ProjectModel: ObservableObject {
                                      spanLoMM: Double(span.lo), spanHiMM: Double(span.hi))
                 }
                 if geo.isPlane {
-                    guard let o = mesh.facePlaneOutline(
-                        f, planeNormal: SIMD3<Float>(geo.planeNormal),
-                        planeOrigin: SIMD3<Float>(geo.planeOrigin)) else { return nil }
-                    return .plane(center: SIMD3<Double>(o.center), normal: geo.planeNormal,
-                                  halfUMM: Double(o.halfU), halfWMM: Double(o.halfV))
+                    // ★ THE ONE BUILDER — see `LatticeRegionEmission.planeFor`. It
+                    // owns the frame the outline is expressed in, so production and
+                    // the tests cannot construct it differently. They did: the loops
+                    // were built on the OUTWARD normal while containment is tested
+                    // on the INWARD one, and `basis` flips `u` with the normal, so
+                    // the region landed mirrored.
+                    return LatticeRegionEmission.planeFor(face: f, in: mesh)
                 }
                 return nil
         }
@@ -2192,10 +2989,14 @@ public final class ProjectModel: ObservableObject {
                     groupDensities: self.lattice.groupDensities,
                     selectableDensity: self.lattice.selectableDensity,
                     selectableExpandMM: self.lattice.selectableExpandMM,
+                    synthetic: self.latticeSyntheticFlags(),
                     resolve: { [weak self] f in self?.resolvedLatticeFace(f) }).regions
             },
             topology: lattice.topologyID,
-            minExtrudableWidthMM: printParams.strutLineWidthMM)
+            minExtrudableWidthMM: printParams.strutLineWidthMM,
+            maxRelativeDensity: LatticeSettings.jobDensityCap(topologyID: lattice.topologyID,
+                                                              allowQuilt: lattice.allowQuilt,
+                                                              algorithm: lattice.algorithm))
     }
 
     // MARK: - lattice page role helpers (handoff 2026-07-30-lattice-page)
@@ -2369,9 +3170,11 @@ public final class ProjectModel: ObservableObject {
     /// value type the copy shares NO storage — editing it never touches the original (G6).
     /// Arms undo + refreshes the sidecar. Returns the new id (nil if the source is gone).
     @discardableResult
-    public func copyManualPrimitive(id: UUID, in group: UUID) -> UUID? {
+    /// `nudge: false` (Copy mode, his iPad 2026-10-27): the copy stays exactly where the primitive is, and the primitive
+    /// itself is the one that moves on.
+    public func copyManualPrimitive(id: UUID, in group: UUID, nudge: Bool = true) -> UUID? {
         guard let src = force.manualPrimitives(for: group).first(where: { $0.id == id }) else { return nil }
-        let copy = ManualPrimitive(id: UUID(), kind: src.kind, center: src.center + copyOffset(for: src),
+        let copy = ManualPrimitive(id: UUID(), kind: src.kind, center: src.center + (nudge ? copyOffset(for: src) : .zero),
                                    axis: src.axis, radiusMM: src.radiusMM, halfLengthMM: src.halfLengthMM,
                                    halfUMM: src.halfUMM, halfWMM: src.halfWMM, override: src.override)
         let newID = force.addManualPrimitive(copy, to: group)
@@ -2422,7 +3225,7 @@ public final class ProjectModel: ObservableObject {
             return nil
         }
         let id = force.addManualPrimitive(mp, to: group)
-        force.suppressClearanceFace(f)          // the auto face no longer clears (no double-count)
+        force.suppressClearanceFace(f, in: group)   // the auto face no longer clears IN THIS GROUP (no double-count)
         persistClearances()
         return id
     }
@@ -2440,7 +3243,7 @@ public final class ProjectModel: ObservableObject {
             targets.append(.init(kind: .point, point: other.center, label: "primitive \(i) centre"))
         }
         if let mesh = viewerMesh, let g = selection.groups.first(where: { $0.id == group }) {
-            for f in g.faces where FaceTopology.isFastenerBore(f, in: mesh) {
+            for f in keepClearFaces(g) where FaceTopology.isFastenerBore(f, in: mesh) {
                 if let geo = mesh.faceGeometry(f) {   // isFastenerBore ⇒ a fitted cylinder
                     targets.append(.init(kind: .primitiveAxis, point: geo.axisPoint,
                                          direction: geo.axisDir, label: "bore axis"))
@@ -2505,14 +3308,14 @@ public final class ProjectModel: ObservableObject {
     /// suppress that face's keep-out. Works on auto-found primitives, which is the
     /// more frequently used half because the finder OVER-finds. Persisted to the
     /// sidecar so it stays deleted across re-detect / resolution / re-import (B3).
-    public func deleteAutoClearance(face: FaceID) {
-        force.suppressClearanceFace(face)
+    public func deleteAutoClearance(face: FaceID, in group: UUID) {
+        force.suppressClearanceFace(face, in: group)
         persistClearances()
     }
 
     /// Restore a deleted auto clearance (undo affordance).
-    public func restoreAutoClearance(face: FaceID) {
-        force.unsuppressClearanceFace(face)
+    public func restoreAutoClearance(face: FaceID, in group: UUID) {
+        force.unsuppressClearanceFace(face, in: group)
         persistClearances()
     }
 
@@ -2535,7 +3338,7 @@ public final class ProjectModel: ObservableObject {
     /// geometry (STL, or a non-cylindrical selection).
     public func clearanceBoreRadius(for g: SelectionGroup) -> Double? {
         guard let mesh = viewerMesh else { return nil }
-        for f in g.faces {
+        for f in keepClearFaces(g) {
             if let geo = mesh.faceGeometry(f), geo.isCylinder { return geo.cylinderRadiusMM }
         }
         return nil
@@ -2610,6 +3413,80 @@ public final class ProjectModel: ObservableObject {
     }
 
     /// A group's model-space outward normal (mean of its faces' normals), or nil.
+    /// ★★ A LOAD GROUP'S DIRECTION, OR WHY IT HAS NONE (the reviewer, 2026-10-09, #362's find:
+    /// "refuse or resolve the case in plain words"). ONE verdict for the job (`loadCase`), the
+    /// Optimize pre-flight (`loadGroupDiagnoses`) and the load-path picture.
+    public enum LoadDirectionVerdict: Equatable, Sendable {
+        /// The force vector in the model frame (N).
+        case vector(SIMD3<Float>)
+        /// Why there is none, naming the group.
+        case refused(String)
+    }
+
+    /// How far a Push or Pull group's face normals must agree: the length of their mean, 1 for
+    /// faces that all face one way, 0 for two that face opposite ways. Below this the mean is a
+    /// direction no face has — two opposite faces cancel to nothing, and a bore's faces cancel
+    /// round its axis — so the group is refused rather than pushed somewhere arbitrary. 0.5 is
+    /// the line where the faces agree more than they disagree (a half-cylinder reads 0.64).
+    public static let loadNormalAgreementFloor: Float = 0.5
+
+    /// nil when the group is not a load.
+    public func loadDirection(for id: UUID) -> LoadDirectionVerdict? {
+        guard let g = selection.groups.first(where: { $0.id == id }),
+              case let .load(direction, _) = force.kind(for: id) else { return nil }
+        var n = SIMD3<Float>(0, 0, 1)        // read only by a Push or Pull
+        if direction != .gravity {
+            guard let (mean, agreement) = groupNormalAgreement(g) else {
+                return .refused("“\(g.name)” has no face for \(direction.title) to act on.")
+            }
+            guard agreement >= Self.loadNormalAgreementFloor else {
+                return .refused("“\(g.name)”: its faces face opposite ways, so \(direction.title) has no "
+                                + "single direction. Put them in separate groups, or load it by weight.")
+            }
+            n = mean
+        }
+        guard let f = force.loadForceVectorModel(id, groupNormal: n) else {
+            return .refused("“\(g.name)” has no direction to load.")
+        }
+        return .vector(f)
+    }
+
+    /// ★ The Optimize pre-flight's diagnoses (099 D3), from the SAME verdict the job is built
+    /// from — so the two can no longer disagree. `mayNotRegister` is the view's voxel-footprint test.
+    public func loadGroupDiagnoses(mayNotRegister: (SelectionGroup) -> Bool = { _ in false })
+        -> [LoadGroupDiagnosis] {
+        selection.groups.compactMap { g in
+            guard let verdict = loadDirection(for: g.id) else { return nil }
+            let health: LoadGroupHealth
+            switch verdict {
+            case .refused(let why):
+                health = .noDirection(why)
+            case .vector(let f):
+                health = simd_length(f) < 1e-6 ? .zeroForce : (mayNotRegister(g) ? .mayNotRegister : .ok)
+            }
+            return LoadGroupDiagnosis(label: g.name, health: health)
+        }
+    }
+
+    /// The group's mean face normal and how far its faces agree (|Σ n̂| / count); nil when it
+    /// has no face with a normal.
+    private func groupNormalAgreement(_ g: SelectionGroup) -> (SIMD3<Float>, Float)? {
+        guard let mesh = viewerMesh else { return nil }
+        var acc = SIMD3<Float>.zero
+        var count = 0
+        for f in g.faces { if let nrm = mesh.faceNormal(f) { acc += nrm; count += 1 } }
+        for r in g.regionIDs {
+            guard let region = faceRegions.region(r) else { continue }
+            for f in FaceRegionGeometry.members(of: region, in: mesh) {
+                if let nrm = mesh.faceNormal(f) { acc += nrm; count += 1 }
+            }
+        }
+        guard count > 0 else { return nil }
+        let len = simd_length(acc)
+        guard len > 1e-6 else { return (SIMD3<Float>(0, 0, 0), 0) }
+        return (acc / len, len / Float(count))
+    }
+
     private func groupNormalModel(_ g: SelectionGroup) -> SIMD3<Float>? {
         guard let mesh = viewerMesh else { return nil }
         var acc = SIMD3<Float>.zero
@@ -2650,7 +3527,27 @@ public final class ProjectModel: ObservableObject {
                                minimizePlastic: minimizePlastic, quality: quality,
                                optimized: hasResults, printParams: printParams,
                                designBox: designBox,
-                               lattice: lattice.enabled ? lattice : nil,
+                               // ★★★ PERSIST WHAT HE CONFIGURED, NOT ONLY WHAT HE ARMED
+                               // (maintainer, 2026-08-21). This was
+                               // `lattice.enabled ? lattice : nil`, so a project with
+                               // the lattice page fully set up — cell mode, density
+                               // mode, per-face depths, roles, retention — but
+                               // `enabled` still false wrote NO lattice block at all
+                               // and lost every one of those on the next load.
+                               //
+                               // ★ MEASURED ON HIS OWN DEVICE. `M2 verticalStand THICK`
+                               // had two declared regions on screen and NO `lattice` key
+                               // in its project.json, while his two older projects had
+                               // full blocks. Everything he set there was being answered
+                               // from defaults, which is why changing a setting could
+                               // look like it did nothing.
+                               //
+                               // ★ AND THE INVARIANT THAT LINE EXISTED FOR IS KEPT. The
+                               // point of the nil was that a project which never touched
+                               // the lattice writes a file byte-identical to a
+                               // pre-lattice one. "Never touched" is `== the default`,
+                               // which is what is asked here — not "not armed".
+                               lattice: lattice == LatticeSettings() ? nil : lattice,
                                // Written ALWAYS, including when it is at the
                                // default — this is a setting the user can turn
                                // off, and "absent" already means ON, so an

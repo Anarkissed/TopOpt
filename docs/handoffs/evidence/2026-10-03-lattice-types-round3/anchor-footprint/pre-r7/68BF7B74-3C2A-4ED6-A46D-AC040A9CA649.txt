@@ -1,0 +1,35 @@
+# anchor-footprint identical-bake proof (2026-10-03)
+project 68BF7B74-3C2A-4ED6-A46D-AC040A9CA649 "M2 verticalStand" algorithm stepped stage Optional(TopOptFlows.LatticeStageMode.aesthetic) step-halves false density sim cells auto field stage
+regions 5 (includes 5); cells 4.01,5.16,24.15,10.31,10.31
+
+arm control-1: setScene 81.4s (whole rebake, renderer included)
+  stats: pitch=2.58 kept=[14.49=4 12.07=2 9.66=4 8.05=28 7.73=42 6.87=8 6.04=69 5.16=805 4.83=265 4.02=636 4.01=2565 3.44=402 2.58=9410] edge=3401 texels=28252 anchor=(18.1,0.0,0.0) in 53.1s drawnHi=0.0 why=[r0/kept=1916 r0/occupancy=716 r0/outline=572 r0/slab=1068 r1/band=326 r1/kept=777 r1/occupancy=30 r1/outline=347 r1/slab=740 r2/occupancy=2 r2/outline=1 r2/slab=36 r3/band=17 r3/occupancy=66 r3/outline=10 r3/slab=69 r4/band=8 r4/occupancy=17 r4/outline=13 r4/slab=94] noLadder=[] t=70.02s walk=anchor:11091281 place:19741 shifts=512 children=47 fp= unb= raster=5.9s place=6.5s cells=9760
+  sha256/16: field.values=966cc2ab14aa3275 level=9676073fe7ea81c2 steppedCellMM=d756c30f09da3769 steppedPhase=854d3bbbed3909c6 steppedOrigin=6af484432deaf4cd solidDepthMM=ce41513446230109 steppedCells=3f182143c5050b28 anchorBaseVolumes=a24304fdab5428f5 anchorChildVolumes=c0846f7fd1b8c2d5
+
+arm control-2: setScene 117.7s (whole rebake, renderer included)
+  stats: pitch=2.58 kept=[14.49=4 12.07=2 9.66=4 8.05=28 7.73=42 6.87=8 6.04=69 5.16=805 4.83=265 4.02=636 4.01=2565 3.44=402 2.58=9410] edge=3401 texels=28252 anchor=(18.1,0.0,0.0) in 77.1s drawnHi=0.0 why=[r0/kept=1916 r0/occupancy=716 r0/outline=572 r0/slab=1068 r1/band=326 r1/kept=777 r1/occupancy=30 r1/outline=347 r1/slab=740 r2/occupancy=2 r2/outline=1 r2/slab=36 r3/band=17 r3/occupancy=66 r3/outline=10 r3/slab=69 r4/band=8 r4/occupancy=17 r4/outline=13 r4/slab=94] noLadder=[] t=102.57s walk=anchor:11091281 place:19741 shifts=512 children=47 fp= unb= raster=9.0s place=9.8s cells=9760
+  sha256/16: field.values=966cc2ab14aa3275 level=9676073fe7ea81c2 steppedCellMM=d756c30f09da3769 steppedPhase=854d3bbbed3909c6 steppedOrigin=6af484432deaf4cd solidDepthMM=ce41513446230109 steppedCells=3f182143c5050b28 anchorBaseVolumes=a24304fdab5428f5 anchorChildVolumes=c0846f7fd1b8c2d5
+
+arm footprint: setScene 88.8s (whole rebake, renderer included)
+  stats: pitch=2.58 kept=[14.49=4 12.07=2 9.66=4 8.05=28 7.73=42 6.87=8 6.04=69 5.16=805 4.83=265 4.02=636 4.01=2565 3.44=402 2.58=9410] edge=3401 texels=28252 anchor=(18.1,0.0,0.0) in 59.1s drawnHi=0.0 why=[r0/kept=1916 r0/occupancy=716 r0/outline=572 r0/slab=1068 r1/band=326 r1/kept=777 r1/occupancy=30 r1/outline=347 r1/slab=740 r2/occupancy=2 r2/outline=1 r2/slab=36 r3/band=17 r3/occupancy=66 r3/outline=10 r3/slab=69 r4/band=8 r4/occupancy=17 r4/outline=13 r4/slab=94] noLadder=[] t=76.87s walk=anchor:10738443 place:19222 shifts=512 children=47 fp=anchor/outline=5,place/outline=5 unb= raster=6.9s place=6.5s cells=9760
+  sha256/16: field.values=966cc2ab14aa3275 level=9676073fe7ea81c2 steppedCellMM=d756c30f09da3769 steppedPhase=854d3bbbed3909c6 steppedOrigin=6af484432deaf4cd solidDepthMM=ce41513446230109 steppedCells=3f182143c5050b28 anchorBaseVolumes=a24304fdab5428f5 anchorChildVolumes=c0846f7fd1b8c2d5
+
+arm red-inset (inset 100.6 mm): setScene 26.4s (whole rebake, renderer included)
+  stats: pitch=2.58 kept=[2.58=60] edge=68 texels=160 anchor=(15.1,0.0,9.1) in 5.2s drawnHi=0.0 why=[r1/band=6 r1/outline=20 r1/slab=13] noLadder=[] t=15.30s walk=anchor:2047392 place:1696 shifts=512 children=512 fp=anchor/outline=5,place/outline=5 unb= raster=5.8s place=0.1s cells=128
+  sha256/16: field.values=19abbfa3c84dfac8 level=292889ece9997d11 steppedCellMM=69d6b1c83a8127cb steppedPhase=b6050dda979b24af steppedOrigin=b3e586cd3f244894 solidDepthMM=d8eaec34e86f2e32 steppedCells=cd8c7c03abafb99a anchorBaseVolumes=e6e982539a20f1d1 anchorChildVolumes=671bcdf357034f49
+
+verdict
+  A/A control-1 vs control-2: IDENTICAL
+  control-1 vs footprint: IDENTICAL (every array by bit pattern; 512 base volumes, 47 children volumes, anchor, plan of 9760 cells)
+  RED control-1 vs red-inset: DIFFER ["grid.dims", "grid.origin", "field.values", "level", "steppedCellMM", "steppedPhase", "solidDepthMM", "steppedOrigin", "steppedCells", "maxLevel", "anchorBaseVolumes", "anchorChildVolumes", "anchorShiftMM", "slotsKept", "slotsCut", "texelsPainted", "why", "paintedByRegion", "cellsPlaced"]; 512 of 512 shift volumes moved
+  anchor search: walked 11091281 -> 10738443 slots (96.8%), 53.1s -> 59.1s
+  level-0 walk: 19741 -> 19222 slots (97.4%), 6.5s -> 6.5s
+  octree bake: 70.0s -> 76.9s; whole rebake (setScene) 81.4s -> 88.8s
+
+harness: exit 0, 441s wall, build debug
+Executed 1 test, with 0 failures (0 unexpected) in 439.548 (439.548) seconds
+the renderer's own DIAG octree lines, in arm order:
+  DIAG octree pitch=2.58 kept=[14.49=4 12.07=2 9.66=4 8.05=28 7.73=42 6.87=8 6.04=69 5.16=805 4.83=265 4.02=636 4.01=2565 3.44=402 2.58=9410] edge=3401 texels=28252 band=10.0 floor=1.8 solidBand=1.21 anchor=(18.1,0.0,0.0) in 53.1s drawnHi=0.0 why=[r0/kept=1916 r0/occupancy=716 r0/outline=572 r0/slab=1068 r1/band=326 r1/kept=777 r1/occupancy=30 r1/outline=347 r1/slab=740 r2/occupancy=2 r2/outline=1 r2/slab=36 r3/band=17 r3/occupancy=66 r3/outline=10 r3/slab=69 r4/band=8 r4/occupancy=17 r4/outline=13 r4/slab=94] noLadder=[] t=70.02s walk=anchor:11091281 place:19741 shifts=512 fp= unb= raster=5.9s place=6.5s
+  DIAG octree pitch=2.58 kept=[14.49=4 12.07=2 9.66=4 8.05=28 7.73=42 6.87=8 6.04=69 5.16=805 4.83=265 4.02=636 4.01=2565 3.44=402 2.58=9410] edge=3401 texels=28252 band=10.0 floor=1.8 solidBand=1.21 anchor=(18.1,0.0,0.0) in 77.1s drawnHi=0.0 why=[r0/kept=1916 r0/occupancy=716 r0/outline=572 r0/slab=1068 r1/band=326 r1/kept=777 r1/occupancy=30 r1/outline=347 r1/slab=740 r2/occupancy=2 r2/outline=1 r2/slab=36 r3/band=17 r3/occupancy=66 r3/outline=10 r3/slab=69 r4/band=8 r4/occupancy=17 r4/outline=13 r4/slab=94] noLadder=[] t=102.57s walk=anchor:11091281 place:19741 shifts=512 fp= unb= raster=9.0s place=9.8s
+  DIAG octree pitch=2.58 kept=[14.49=4 12.07=2 9.66=4 8.05=28 7.73=42 6.87=8 6.04=69 5.16=805 4.83=265 4.02=636 4.01=2565 3.44=402 2.58=9410] edge=3401 texels=28252 band=10.0 floor=1.8 solidBand=1.21 anchor=(18.1,0.0,0.0) in 59.1s drawnHi=0.0 why=[r0/kept=1916 r0/occupancy=716 r0/outline=572 r0/slab=1068 r1/band=326 r1/kept=777 r1/occupancy=30 r1/outline=347 r1/slab=740 r2/occupancy=2 r2/outline=1 r2/slab=36 r3/band=17 r3/occupancy=66 r3/outline=10 r3/slab=69 r4/band=8 r4/occupancy=17 r4/outline=13 r4/slab=94] noLadder=[] t=76.87s walk=anchor:10738443 place:19222 shifts=512 fp=anchor/outline=5,place/outline=5 unb= raster=6.9s place=6.5s
+  DIAG octree pitch=2.58 kept=[2.58=60] edge=68 texels=160 band=10.0 floor=1.8 solidBand=1.21 anchor=(15.1,0.0,9.1) in 5.2s drawnHi=0.0 why=[r1/band=6 r1/outline=20 r1/slab=13] noLadder=[] t=15.30s walk=anchor:2047392 place:1696 shifts=512 fp=anchor/outline=5,place/outline=5 unb= raster=5.8s place=0.1s

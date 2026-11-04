@@ -10,6 +10,8 @@
 #include "topopt/plsm.hpp"
 
 #include <algorithm>
+#include <cstdint>
+#include <cstdlib>
 #include <array>
 #include <cassert>
 #include <chrono>
@@ -142,6 +144,252 @@ std::vector<NodalLoad> masked_self_weight_loads(const VoxelGrid& grid,
   return self_weight_loads(weighed, density, gravity, direction);
 }
 
+// CORE LIST item 42 B — THE BRIDGE HOLDS ITSELF (the reviewer's values of 2026-10-25
+// 07:05). Each piece a bridge joined hangs from that bridge ALONE: every other printed
+// voxel is clamped (the rest of the design taken as rigid; the piece's own anchors are
+// not used), and the piece carries three times its own weight plus a tenth of the real
+// load's resultant, across the bridge's axis. The bridge's own margin is read on its
+// voxels with the certification's knockdown. One solve per round; a bridge under
+// margin_stop is thickened one voxel layer, at most three times; one that still fails
+// is LIFTED (its voxels restored), so the belt and item 47 judge the split as before.
+// One receipt per bridge; `bridge.voxels` follows what is printed at the end.
+std::vector<BridgeHoldReport> hold_bridges(
+    const VoxelGrid& G, std::vector<double>& rho, double iso, BridgeResult& bridge,
+    const std::vector<char>& allowed, const std::vector<NodalLoad>& real_loads,
+    double weight_per_voxel, const Vec3& gravity_dir, const SimpParams& params,
+    const Material& material, const Vec3& build_dir, const SimpOptions& opt,
+    double margin_stop, const KnockdownSpec& knockdown, double part_solid) {
+  constexpr int kMaxThickenings = 3;
+  constexpr double kNoStress = 1e6;  // the margin of a bridge the hold load does not stress
+  const std::size_t nb = bridge.laid.size();
+  std::vector<BridgeHoldReport> out(nb);
+  if (nb == 0) return out;
+  Vec3 F{0.0, 0.0, 0.0};
+  for (const NodalLoad& l : real_loads)
+    (l.component == 0 ? F.x : l.component == 1 ? F.y : F.z) += l.value;
+  const double f_mag = std::sqrt(F.x * F.x + F.y * F.y + F.z * F.z);
+  const Vec3 gd = normalized(gravity_dir);
+  const Vec3 bn = normalized(build_dir);
+  std::vector<double> margin(nb, 0.0);
+  for (int round = 0;; ++round) {
+    std::vector<char> hangs(G.voxel_count(), 0);
+    for (const LaidBridge& b : bridge.laid) {
+      for (const auto& nd : b.laid) hangs[nd.first] = 1;
+      for (const std::size_t p : b.path) hangs[p] = 1;
+      for (const std::size_t t : b.target) hangs[t] = 1;
+    }
+    const int num_nodes = fea_node_count(G);
+    std::vector<char> clamped(static_cast<std::size_t>(num_nodes), 0);
+    std::vector<std::array<double, 3>> nodef(static_cast<std::size_t>(num_nodes),
+                                             std::array<double, 3>{0.0, 0.0, 0.0});
+    for (int k = 0; k < G.nz; ++k)
+      for (int j = 0; j < G.ny; ++j)
+        for (int i = 0; i < G.nx; ++i) {
+          const std::size_t idx = G.index(i, j, k);
+          if (hangs[idx] || G.tags[idx] == VoxelTag::Empty || !(rho[idx] > iso)) continue;
+          for (const int n : fea_element_nodes(G, i, j, k))
+            clamped[static_cast<std::size_t>(n)] = 1;
+        }
+    for (const LaidBridge& b : bridge.laid) {
+      auto centre = [&](std::size_t idx) {
+        const int nx = G.nx, ny = G.ny;
+        return G.voxel_center(static_cast<int>(idx % static_cast<std::size_t>(nx)),
+                              static_cast<int>((idx / static_cast<std::size_t>(nx)) %
+                                               static_cast<std::size_t>(ny)),
+                              static_cast<int>(idx / (static_cast<std::size_t>(nx) *
+                                                      static_cast<std::size_t>(ny))));
+      };
+      const Vec3 p0 = b.path.size() > 1 ? centre(b.path.back()) : centre(b.path.front());
+      const Vec3 p1 = b.path.size() > 1 ? centre(b.path.front()) : centre(b.target.front());
+      Vec3 a{p1.x - p0.x, p1.y - p0.y, p1.z - p0.z};
+      if (!(std::sqrt(a.x * a.x + a.y * a.y + a.z * a.z) > 0.0)) a = Vec3{1.0, 0.0, 0.0};
+      a = normalized(a);
+      const double fa = F.x * a.x + F.y * a.y + F.z * a.z;
+      Vec3 perp{F.x - fa * a.x, F.y - fa * a.y, F.z - fa * a.z};
+      if (!(std::sqrt(perp.x * perp.x + perp.y * perp.y + perp.z * perp.z) > 1e-9 * (1.0 + f_mag)))
+        perp = std::fabs(a.x) < 0.9 ? Vec3{0.0, -a.z, a.y} : Vec3{-a.z, 0.0, a.x};
+      perp = normalized(perp);
+      const double per = 1.0 / static_cast<double>(b.target.size());
+      const Vec3 fv{3.0 * weight_per_voxel * gd.x + 0.1 * f_mag * perp.x * per,
+                    3.0 * weight_per_voxel * gd.y + 0.1 * f_mag * perp.y * per,
+                    3.0 * weight_per_voxel * gd.z + 0.1 * f_mag * perp.z * per};
+      for (const std::size_t t : b.target) {
+        const int ti = static_cast<int>(t % static_cast<std::size_t>(G.nx));
+        const int tj = static_cast<int>((t / static_cast<std::size_t>(G.nx)) %
+                                        static_cast<std::size_t>(G.ny));
+        const int tk = static_cast<int>(t / (static_cast<std::size_t>(G.nx) *
+                                             static_cast<std::size_t>(G.ny)));
+        for (const int n : fea_element_nodes(G, ti, tj, tk)) {
+          std::array<double, 3>& f = nodef[static_cast<std::size_t>(n)];
+          f[0] += fv.x / 8.0;
+          f[1] += fv.y / 8.0;
+          f[2] += fv.z / 8.0;
+        }
+      }
+    }
+    std::vector<DirichletBC> bcs;
+    std::vector<NodalLoad> loads;
+    for (int n = 0; n < num_nodes; ++n) {
+      const std::size_t u = static_cast<std::size_t>(n);
+      for (int c = 0; c < 3; ++c) {
+        if (clamped[u]) bcs.push_back({n, c, 0.0});
+        else if (nodef[u][static_cast<std::size_t>(c)] != 0.0)
+          loads.push_back({n, c, nodef[u][static_cast<std::size_t>(c)]});
+      }
+    }
+    const FixedDesignAnalysis fa =
+        analyze_fixed_design(G, params, rho, bcs, loads, material, build_dir,
+                             opt.cg_tolerance, opt.cg_max_iterations, opt.solver,
+                             margin_stop, knockdown, true, part_solid);
+    const double kd = fa.margin.worst_case > 0.0 ? fa.margin_effective / fa.margin.worst_case
+                                                 : 1.0;
+    for (std::size_t bi = 0; bi < nb; ++bi) {
+      const LaidBridge& b = bridge.laid[bi];
+      double vm = 0.0, tn = 0.0;
+      auto read = [&](std::size_t n) {
+        vm = std::max(vm, fa.von_mises_field[n]);
+        if (fa.stress_tensor_field.size() == 6 * G.voxel_count()) {
+          const double* s = &fa.stress_tensor_field[6 * n];
+          tn = std::max(tn, bn.x * bn.x * s[0] + bn.y * bn.y * s[1] + bn.z * bn.z * s[2] +
+                                2.0 * bn.x * bn.y * s[3] + 2.0 * bn.y * bn.z * s[4] +
+                                2.0 * bn.z * bn.x * s[5]);
+        }
+      };
+      for (const auto& nd : b.laid) read(nd.first);
+      for (const std::size_t p : b.path) read(p);
+      const double in_plane = vm > 0.0 && fa.max_von_mises > 0.0
+                                  ? fa.margin.in_plane * fa.max_von_mises / vm : kNoStress;
+      const double inter = tn > 0.0 && fa.max_interlayer_tension > 0.0
+                               ? fa.margin.interlayer * fa.max_interlayer_tension / tn
+                               : kNoStress;
+      margin[bi] = fa.non_convergent ? 0.0 : std::min(kNoStress, kd * std::min(in_plane, inter));
+    }
+    bool again = false;
+    for (std::size_t bi = 0; bi < nb; ++bi) {
+      if (margin[bi] >= margin_stop || out[bi].thickenings >= kMaxThickenings) continue;
+      LaidBridge& b = bridge.laid[bi];
+      bridge.voxels += lay_bridge(G, rho, iso, allowed, b, b.radius + 1);
+      ++out[bi].thickenings;
+      again = true;
+    }
+    if (!again) break;
+  }
+  std::vector<char> kept(G.voxel_count(), 0);
+  for (std::size_t bi = 0; bi < nb; ++bi)
+    if (margin[bi] >= margin_stop)
+      for (const auto& nd : bridge.laid[bi].laid) kept[nd.first] = 1;
+  for (std::size_t bi = nb; bi-- > 0;) {
+    const LaidBridge& b = bridge.laid[bi];
+    out[bi].size_mm = (2.0 * b.radius + 1.0) * G.spacing;
+    out[bi].hold_margin = margin[bi];
+    out[bi].held = margin[bi] >= margin_stop;
+    if (out[bi].held) continue;
+    for (auto it = b.laid.rbegin(); it != b.laid.rend(); ++it) {
+      if (kept[it->first]) continue;
+      if (!(it->second > iso) && rho[it->first] > iso) --bridge.voxels;
+      rho[it->first] = it->second;
+    }
+  }
+  return out;
+}
+
+// FRAGILE JOINTS (reviewer's ruling 2026-10-26 00:08 UTC; a report line only, no
+// fix): the places where the printed part holds together only along an EDGE or
+// at a CORNER. The solve's connection rule is FACE connectivity (a hex8 edge or
+// corner contact is a hinge that carries no load), while the export's bodies
+// (items 41 / 47, unchanged) are 26-connected; a joint is a pair of
+// face-connected pieces of printed voxels that touch through edge / corner
+// neighbours only. One pass on the final printed voxels: label the face
+// components, then count the distinct component pairs met across an edge or a
+// corner. Deterministic; no ids reach any user-facing text; each joint's
+// position (mm, model frame) is the midpoint of its first contact.
+struct FragileJoints {
+  int count = 0;
+  std::vector<Vec3> positions_mm;  // at most kFragileJointPositionsMax
+};
+FragileJoints fragile_joints(const VoxelGrid& g, const std::vector<double>& rho,
+                             double iso) {
+  FragileJoints out;
+  const std::size_t nv = g.voxel_count();
+  if (rho.size() != nv) return out;
+  auto printed = [&](std::size_t e) {
+    return g.tags[e] != VoxelTag::Empty && rho[e] > iso;
+  };
+  std::vector<int> label(nv, -1);
+  std::vector<int> queue;
+  int id = 0;
+  const int nx = g.nx, ny = g.ny, nz = g.nz;
+  for (std::size_t seed = 0; seed < nv; ++seed) {
+    if (!printed(seed) || label[seed] >= 0) continue;
+    queue.clear();
+    queue.push_back(static_cast<int>(seed));
+    label[seed] = id;
+    for (std::size_t q = 0; q < queue.size(); ++q) {
+      const int e = queue[q];
+      const int i = e % nx, j = (e / nx) % ny, k = e / (nx * ny);
+      const int nb[6][3] = {{i - 1, j, k}, {i + 1, j, k}, {i, j - 1, k},
+                            {i, j + 1, k}, {i, j, k - 1}, {i, j, k + 1}};
+      for (const auto& c : nb) {
+        if (c[0] < 0 || c[0] >= nx || c[1] < 0 || c[1] >= ny || c[2] < 0 ||
+            c[2] >= nz)
+          continue;
+        const std::size_t f = g.index(c[0], c[1], c[2]);
+        if (printed(f) && label[f] < 0) {
+          label[f] = id;
+          queue.push_back(static_cast<int>(f));
+        }
+      }
+    }
+    ++id;
+  }
+  // Every edge / corner contact between two different face-pieces, keyed by
+  // the piece pair; per pair the FIRST contact in ascending voxel order gives
+  // the joint's position (the midpoint of the two voxel centres).
+  struct Contact {
+    std::uint64_t key;
+    std::size_t e, f;
+  };
+  std::vector<Contact> contacts;
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const std::size_t e = g.index(i, j, k);
+        if (label[e] < 0) continue;
+        for (int dz = -1; dz <= 1; ++dz)
+          for (int dy = -1; dy <= 1; ++dy)
+            for (int dx = -1; dx <= 1; ++dx) {
+              if (std::abs(dx) + std::abs(dy) + std::abs(dz) < 2) continue;  // self / face
+              const int a = i + dx, b = j + dy, c = k + dz;
+              if (a < 0 || a >= nx || b < 0 || b >= ny || c < 0 || c >= nz) continue;
+              const std::size_t f = g.index(a, b, c);
+              const int lf = label[f];
+              if (lf < 0 || lf == label[e]) continue;
+              const std::uint64_t lo = static_cast<std::uint64_t>(std::min(lf, label[e]));
+              const std::uint64_t hi = static_cast<std::uint64_t>(std::max(lf, label[e]));
+              contacts.push_back({(lo << 32) | hi, e, f});
+            }
+      }
+  std::stable_sort(contacts.begin(), contacts.end(),
+                   [](const Contact& x, const Contact& y) { return x.key < y.key; });
+  for (std::size_t q = 0; q < contacts.size(); ++q) {
+    if (q > 0 && contacts[q].key == contacts[q - 1].key) continue;
+    ++out.count;
+    if (out.positions_mm.size() >= kFragileJointPositionsMax) continue;
+    auto centre = [&](std::size_t v) {
+      const int i = static_cast<int>(v % static_cast<std::size_t>(nx));
+      const int j = static_cast<int>((v / static_cast<std::size_t>(nx)) %
+                                     static_cast<std::size_t>(ny));
+      const int k = static_cast<int>(v / (static_cast<std::size_t>(nx) *
+                                          static_cast<std::size_t>(ny)));
+      return g.voxel_center(i, j, k);
+    };
+    const Vec3 ce = centre(contacts[q].e), cf = centre(contacts[q].f);
+    out.positions_mm.push_back(
+        Vec3{0.5 * (ce.x + cf.x), 0.5 * (ce.y + cf.y), 0.5 * (ce.z + cf.z)});
+  }
+  return out;
+}
+
 }  // namespace
 
 // --- THE ONE design-domain resolution (pipeline.hpp) -------------------------
@@ -165,6 +413,7 @@ SolvedDesignDomain resolve_design_domain(const VoxelGrid& part_grid,
     out.grid = part_grid;
     out.bcs = bcs;
     out.external_loads = options.external_loads;
+    out.scenarios = options.scenarios;
     return out;
   }
 
@@ -227,16 +476,53 @@ SolvedDesignDomain resolve_design_domain(const VoxelGrid& part_grid,
               MaskValue::FrozenSolid;
         }
   }
+  // CORE LIST item 50 — domain_box_only: the part outside the box is not design
+  // space unless something froze it; it is emptied (no element, no variable).
+  if (options.domain_box_only) {
+    const DesignBox& box = *options.design_box;
+    for (int pk = 0; pk < part_grid.nz; ++pk)
+      for (int pj = 0; pj < part_grid.ny; ++pj)
+        for (int pi = 0; pi < part_grid.nx; ++pi) {
+          const VoxelTag t = part_grid.tag(pi, pj, pk);
+          if (t == VoxelTag::Empty || t == VoxelTag::Load || t == VoxelTag::Fixture)
+            continue;
+          const int i = pi + domain.offset_i, j = pj + domain.offset_j,
+                    k = pk + domain.offset_k;
+          const std::size_t idx = out.grid.index(i, j, k);
+          if (out.mask[idx] == MaskValue::FrozenSolid) continue;
+          const Vec3 c = out.grid.voxel_center(i, j, k);
+          if (c.x >= box.min.x && c.x <= box.max.x && c.y >= box.min.y &&
+              c.y <= box.max.y && c.z >= box.min.z && c.z <= box.max.z)
+            continue;
+          out.grid.tags[idx] = VoxelTag::Empty;
+          out.mask[idx] = MaskValue::FrozenVoid;
+        }
+  }
   out.bcs.reserve(bcs.size());
-  for (const DirichletBC& bc : bcs)
-    out.bcs.push_back({remap_node_to_domain(part_grid, domain, bc.node),
-                       bc.component, bc.value});
+  for (const DirichletBC& bc : bcs) {
+    DirichletBC remapped = bc;  // every field, bearing springs included (REAL BOLTS)
+    remapped.node = remap_node_to_domain(part_grid, domain, bc.node);
+    out.bcs.push_back(remapped);
+  }
   if (!options.external_loads.empty()) {
     out.external_loads.reserve(options.external_loads.size());
     for (const NodalLoad& nl : options.external_loads)
       out.external_loads.push_back(
           {remap_node_to_domain(part_grid, domain, nl.node), nl.component,
            nl.value});
+  }
+  for (const SimpScenario& sc : options.scenarios) {  // LOAD SCENARIOS
+    SimpScenario r;
+    r.name = sc.name;
+    for (const DirichletBC& bc : sc.bcs) {
+      DirichletBC remapped = bc;
+      remapped.node = remap_node_to_domain(part_grid, domain, bc.node);
+      r.bcs.push_back(remapped);
+    }
+    for (const NodalLoad& nl : sc.loads)
+      r.loads.push_back({remap_node_to_domain(part_grid, domain, nl.node), nl.component,
+                         nl.value});
+    out.scenarios.push_back(std::move(r));
   }
   return out;
 }
@@ -521,6 +807,16 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   // pad merge and the identical remap_node_to_domain over BCs and external loads
   // — it simply no longer owns the only copy.
   const SolvedDesignDomain domain = resolve_design_domain(grid, bcs, options);
+  // LOAD SCENARIOS: the weak springs that hold an anchor OFF in a scenario are sized
+  // HERE, where the material is known: kScenarioWeakSpringRel of the part's own
+  // element stiffness per node (E x h), which is what a clamp holds the part with. The
+  // load case's value is a placeholder.
+  std::vector<SimpScenario> run_scenarios = domain.scenarios;
+  for (SimpScenario& sc : run_scenarios)
+    for (DirichletBC& b : sc.bcs)
+      if (b.spring > 0.0 && !b.contact)
+        b.spring = b.spring_tangent =
+            kScenarioWeakSpringRel * material.youngs_modulus_mpa * domain.grid.spacing;
   const bool expanded = domain.expanded;
   // The effective grid + BCs the whole pipeline runs on (the expanded pair with a
   // design box, else the caller's inputs verbatim).
@@ -765,7 +1061,8 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       fl_validity = lattice_region_validity(
           G, options.frozen_lattice_region_id, options.frozen_lattice_regions,
           width, options.frozen_lattice_topology, options.frozen_lattice_cell_mm,
-          options.frozen_lattice_min_extrudable_width_mm);
+          options.frozen_lattice_min_extrudable_width_mm,
+          options.frozen_lattice_max_relative_density);  // D1
       // ★ REFUSE ONLY WHAT NO CELL CAN RESCUE. The cells-per-member floor is a
       // property of the region AND the cell, not of the region alone: a 6.8 mm
       // wall misses 5 cells at a 2 mm cell and clears them at a 1.3 mm one. An
@@ -801,7 +1098,8 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     if (options.frozen_lattice_cell_mm > 0.0) {
       const double lightest = lattice_min_density_for_strut(
           options.frozen_lattice_topology, options.frozen_lattice_cell_mm,
-          options.frozen_lattice_min_extrudable_width_mm);
+          options.frozen_lattice_min_extrudable_width_mm,
+          options.frozen_lattice_max_relative_density);
       for (LatticeRegionSpec& s : fl_specs) {
         // ★ A FITTED REGION IS NOT JUDGED AT THE RUN'S CELL. Its density floor
         // is the fitted cell's own, and `resolve_lattice_density_field` RAISES a
@@ -1013,7 +1311,8 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   // `active_effective` mirrors what effective_mask (simp) actually optimises: Active
   // voxels minus the Empty/Load/Fixture voxels it reclassifies out of the budget.
   // Gated on the box path only, so the no-box run is byte-identical.
-  const bool part_relative = expanded && !options.freeze_imported_part;
+  const bool part_relative = expanded && !options.freeze_imported_part &&
+                             !options.volume_basis_domain;  // item 50
   const double part_solid = static_cast<double>(grid.solid_count());
 
   // ── GROWTH NEEDS SOMEWHERE TO GO (task 2026-08-03-growth-ladder, rule (iii)) ──
@@ -1042,6 +1341,12 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
         " Refusing to redistribute and call it growth.");
   double active_effective = 0.0;   // voxels simp's volume constraint moves
   double frozen_effective = 0.0;   // voxels effective_mask pins solid (always printed)
+  // CORE LIST item 40 — the same frozen set COUNTED BY SOURCE, for the receipt of a
+  // rung whose ask falls under it: the Load/Fixture skin, and the mask's other
+  // FrozenSolid voxels (which options.frozen_mask_sources attributes). Plain counts,
+  // never read by the optimizer.
+  long long frozen_bc_voxels = 0;
+  long long frozen_mask_voxels = 0;
   if (part_relative) {
     for (int k = 0; k < G.nz; ++k)
       for (int j = 0; j < G.ny; ++j)
@@ -1067,6 +1372,8 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
             // declared a field, so this is `+= 1.0` bit-for-bit everywhere else.
             frozen_effective +=
                 (!fl_mask.empty() && fl_mask[idx]) ? fl_rho[idx] : 1.0;
+            if (t == VoxelTag::Load || t == VoxelTag::Fixture) ++frozen_bc_voxels;
+            else ++frozen_mask_voxels;
             continue;
           }
           if (mask[idx] != MaskValue::Active) continue;  // FrozenVoid
@@ -1143,6 +1450,16 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   // cannot disagree about what counts as added.
   const std::vector<char> in_part =
       growth_ladder ? original_part_voxels(grid, domain) : std::vector<char>();
+  // CORE LIST item 47 — the part AS DRAWN, as bodies, once per run: which anchors
+  // it joins to a load. A rung that leaves one of those anchors on a body holding
+  // no load has let it go (lost_anchored_pieces).
+  const PrintedBodies as_drawn_bodies = [&] {
+    const std::vector<char> drawn = original_part_voxels(grid, domain);
+    std::vector<double> drawn_density(drawn.size(), 0.0);
+    for (std::size_t idx = 0; idx < drawn.size(); ++idx)
+      if (drawn[idx]) drawn_density[idx] = 1.0;
+    return printed_bodies(G, drawn_density, kIso);
+  }();
   const double voxel_mm3 = G.voxel_volume();
   const double part_mm3 = part_solid * voxel_mm3;
   auto measure_added_material = [&](const std::vector<double>& rho_field,
@@ -1195,6 +1512,9 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   // no speedup claim can hide it. Peak memory is unchanged: the coarse transient is
   // smaller but the fine rungs still each pay the full iteration-0 build (091).
   std::vector<double> warm_seed;
+  // CORE LIST item 50 — a repair starts from the version it repairs.
+  if (!options.warm_start_coarse && options.initial_design.size() == G.voxel_count())
+    warm_seed = options.initial_design;
   if (options.warm_start_coarse) {
     // The pre-solve's own wall, charged as a separate line (AC3 of handoff
     // 2026-08-02-warm-start-coarse-experiment). The span covers EVERYTHING the
@@ -1225,6 +1545,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
                                        options.gravity_direction);
 
     SimpOptions opt_c = options.simp;
+    opt_c.scenarios.clear();  // the coarse seed solves the first load case alone
     opt_c.updater = options.updater;
     opt_c.volume_fraction = effective_vf(ladder[0]);
     if (options.min_feature_mm > 0.0)
@@ -1407,6 +1728,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // to a system it no longer describes. Inert when recycling is off.
     if (options.krylov_recycle_reset_per_rung) fea_reset_krylov_recycle_space();
     SimpOptions opt = options.simp;
+    opt.scenarios = run_scenarios;  // LOAD SCENARIOS (empty when none)
     // ★ THE FREED MASS, INTO THE BUDGET (task 2026-08-13-lattice-as-a-material).
     // Both stay 0.0 unless a lattice density field actually latticed something,
     // and `vf_target` inside simp_optimize is then `volume_fraction` bit-for-bit.
@@ -1457,12 +1779,78 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // ladder — but it must never be readable as if the request were honoured, so
     // it is recorded on the rung's report line and surfaced in the receipt.
     bool growth_target_saturated = false;
+    // CORE LIST item 40 — THE OTHER CLAMP. The `max(density_min, ...)` binds when a
+    // reduction rung asks for LESS than the frozen material alone prints (raw < the
+    // floor): the target is raised to the floor, the optimizer removes every free
+    // voxel, and the rung prints the frozen share whatever it asked for. His
+    // Carriage Arms (13185527, 29 protected faces): 0.68 / 0.52 / 0.38 / 0.26 all
+    // printed 0.758, and nothing said so.
+    bool rung_target_saturated = false;
     if (part_relative && active_effective > 0.0) {
       const double active_target = vf * part_solid - frozen_effective;
       const double raw = active_target / active_effective;
       growth_target_saturated = growth_ladder && raw > 1.0;
+      rung_target_saturated = !growth_ladder && raw < params.density_min;
       opt.volume_fraction =
           std::min(1.0, std::max(params.density_min, raw));
+    }
+    if (rung_target_saturated) {
+      FrozenShareReport& fs = result.report.frozen_share;
+      if (!fs.evaluated) {
+        fs.evaluated = true;
+        fs.part_solid_voxels = static_cast<long long>(part_solid);
+        fs.frozen_voxels = frozen_bc_voxels + frozen_mask_voxels;
+        fs.frozen_material_voxels = frozen_effective;
+        fs.active_voxels = static_cast<long long>(active_effective);
+        fs.share = frozen_effective / part_solid;
+        fs.smallest_honoured_fraction =
+            (frozen_effective + params.density_min * active_effective) / part_solid;
+        // What froze it, each voxel once: the BC skin, then the caller's own
+        // attribution of the mask, then whatever that attribution leaves over.
+        fs.sources.push_back({"anchor_and_load_faces", -1, -1, frozen_bc_voxels});
+        long long attributed = 0;
+        for (const FrozenSourceCount& s : options.frozen_mask_sources) {
+          fs.sources.push_back(s);
+          attributed += s.voxels;
+        }
+        if (frozen_mask_voxels != attributed)
+          fs.sources.push_back({"other", -1, -1, frozen_mask_voxels - attributed});
+      }
+      // THE SKIP. Every saturated rung gets the SAME target (the floor), so once the
+      // first floor rung has been run, a later one would only repeat its design.
+      // Whatever its verdict: an accepted floor rung seeds the next one with the
+      // floor design itself, and a rejected one (severed, infeasible, non-
+      // convergent) leaves the warm seed untouched, so the next floor rung would
+      // start from the very seed it started from, at the very same target.
+      // Measured, the skipped rung run alone reproduces the floor rung's density
+      // exactly (test_starved_rung), and on 13185527 the four rungs printed
+      // 0.7578-0.7580 at margins 7.93-8.17, i.e. warm-start noise. So it is not
+      // run: its line says why and names the rung it would repeat, and it writes
+      // no variant and no file. (A floor rung under the margin stops the walk
+      // before this is reached, as every rung under the margin does.)
+      const MinimizePlasticVariant* floor_rung = nullptr;
+      for (const MinimizePlasticVariant& ev : result.evaluated)
+        if (ev.report.target_saturated) {
+          floor_rung = &ev;
+          break;
+        }
+      if (floor_rung != nullptr) {
+        const std::string verdict =
+            floor_rung->accepted
+                ? std::string("accepted")
+                : "rejected: " + floor_rung->report.rejection_reason;
+        char reason[400];
+        std::snprintf(reason, sizeof(reason),
+                      "skipped: it asks for %.3g of the part, but the frozen "
+                      "material alone prints %.3g, so its target clamps to the "
+                      "density floor rung %.3g already ran with (%s); it would "
+                      "repeat that design",
+                      vf, fs.share, floor_rung->requested_volume_fraction,
+                      verdict.c_str());
+        fs.skipped_rungs.push_back(
+            {vf, floor_rung->requested_volume_fraction, reason});
+        continue;
+      }
     }
     // M7.mma.4 — the switchover: the driver, not the shared SimpOptions default,
     // owns the updater. Defaults to MMA (options.updater) so real runs use MMA;
@@ -1605,6 +1993,11 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
 
     MinimizePlasticVariant variant;
     variant.requested_volume_fraction = vf;
+    // CORE LIST item 40 — the line carries its ask and the clamp verdict; both are
+    // emitted only if some rung of this run saturates (`request_reported`, set
+    // after the walk).
+    variant.report.requested_volume_fraction = vf;
+    variant.report.target_saturated = rung_target_saturated;
 
     // Playback keyframes (M7): capture ~keyframe_count meshes of the analysis
     // density across this rung's iterations (stride spreads them over the run —
@@ -2281,6 +2674,29 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       }
     }
 
+    // CORE LIST item 42, option B — ONE PIECE: bridge what the design split before
+    // anything below measures or certifies it, so every number includes the bridge.
+    BridgeResult bridge;
+    std::vector<BridgeHoldReport> bridge_holds;
+    if (options.bridge_pieces) {
+      std::vector<char> allowed(G.voxel_count(), 0);
+      for (std::size_t i = 0; i < allowed.size(); ++i)
+        allowed[i] = mask[i] == MaskValue::Active || mask[i] == MaskValue::FrozenSolid;
+      // The bridge's floor (07:05): two walls thick where the job prints walls, else
+      // the min feature.
+      const double floor_mm = options.wall_loops > 0
+                                  ? 2.0 * options.wall_loops * options.wall_line_width_mm
+                                  : options.min_feature_mm;
+      const int radius =
+          std::max(1, static_cast<int>(std::lround(0.5 * floor_mm / G.spacing)));
+      bridge = bridge_split_bodies(G, variant.optimization.physical_density, kIso,
+                                   as_drawn_bodies, allowed, radius);
+      bridge_holds = hold_bridges(
+          G, variant.optimization.physical_density, kIso, bridge, allowed, loads,
+          options.gravity * material.density_g_cm3 * G.spacing * G.spacing * G.spacing,
+          options.gravity_direction, params, material, build_dir, opt, options.margin_stop,
+          knockdown, part_solid);
+    }
     const std::vector<double>& rho = variant.optimization.physical_density;
 
     // --- The CONNECTIVITY BELT ------------------------------------------------
@@ -2301,6 +2717,12 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // run tags no load faces), so a CONNECTED variant — every existing fixture —
     // takes exactly the pre-belt path to exactly the pre-belt verdict.
     const bool load_path_ok = load_path_connected(G, rho, kIso);
+    // CORE LIST item 47 — the second connectivity fact: did this design let go of
+    // an anchored piece the part as drawn joined to a load? Measured here for the
+    // same reason as the belt: it governs the warm seed below AND the verdict.
+    const LostAnchors lost_anchors =
+        lost_anchored_pieces(G, as_drawn_bodies, printed_bodies(G, rho, kIso));
+    const bool anchors_kept = lost_anchors.design_bodies.empty();
 
     // Handoff 110 (Part A) — carry this rung's CONVERGED density forward to seed
     // the next (lighter) rung when inheritance is on; otherwise clear the seed so
@@ -2314,7 +2736,8 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // severance and buries the evidence of where it started. `warm_seed` is left
     // UNTOUCHED, so it still holds the last CONNECTED rung's density (or is empty).
     // With inheritance off it is empty either way, so this guard is inert there.
-    if (load_path_ok)
+    // A rung that let go of an anchored piece (item 47) seeds nothing either.
+    if (load_path_ok && anchors_kept)
       warm_seed = options.warm_start_inherit ? rho : std::vector<double>();
 
     // Handoff 114 — rung-BOUNDARY density snapshot: the converged physical field
@@ -2353,8 +2776,10 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     assert(opt.cg_tolerance == kCertTol &&
            "draft quality: recovery/certification solve must use the tight "
            "tolerance");
-    FixedDesignAnalysis fda = analyze_fixed_design(
-        G, params, rho, B, loads, material, build_dir, opt.cg_tolerance,
+    auto certify = [&](const std::vector<DirichletBC>& cert_bcs,
+                       const std::vector<NodalLoad>& cert_loads) {
+      return analyze_fixed_design(
+        G, params, rho, cert_bcs, cert_loads, material, build_dir, opt.cg_tolerance,
         opt.cg_max_iterations, opt.solver, options.margin_stop, knockdown,
         load_path_ok, part_solid,
         // *** THE GAP THIS TASK EXISTS TO CLOSE. *** Until now this argument was
@@ -2393,6 +2818,65 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
         // only on the solid region's margin. Armed only when this run actually
         // latticed something, so bar L1 stands everywhere else.
         fl_latticed_voxels > 0 && options.frozen_lattice_gate_on_strut_strength);
+    };
+    // LOAD SCENARIOS (the reviewer's overnight ruling of 2026-10-26 03:45): every
+    // scenario is certified on this rung's design; the WORST governs (its analysis is
+    // the rung's, so every number below is the governing scenario's), and a scenario
+    // whose weak springs (its OFF anchors) carry more than kScenarioUnheldShare of its
+    // load is unheld: no path to its anchors, the rung is not accepted.
+    std::vector<ScenarioReport> scenario_reports;
+    std::string unheld_scenario;
+    FixedDesignAnalysis fda;
+    if (run_scenarios.empty()) {
+      fda = certify(B, loads);
+    } else {
+      std::size_t worst = 0;
+      std::vector<FixedDesignAnalysis> per;
+      per.reserve(run_scenarios.size());
+      for (std::size_t s = 0; s < run_scenarios.size(); ++s) {
+        const SimpScenario& sc = run_scenarios[s];
+        per.push_back(certify(sc.bcs, sc.loads));
+        const FixedDesignAnalysis& a = per.back();
+        ScenarioReport r;
+        r.name = sc.name;
+        r.margin = a.margin_effective;
+        r.peak_mpa = a.max_von_mises;
+        std::size_t pk = 0;
+        for (std::size_t e = 0; e < a.von_mises_field.size(); ++e)
+          if (a.von_mises_field[e] > a.von_mises_field[pk]) pk = e;
+        if (!a.von_mises_field.empty())
+          r.peak_mm = G.voxel_center(
+              static_cast<int>(pk % static_cast<std::size_t>(G.nx)),
+              static_cast<int>((pk / static_cast<std::size_t>(G.nx)) %
+                               static_cast<std::size_t>(G.ny)),
+              static_cast<int>(pk / (static_cast<std::size_t>(G.nx) *
+                                     static_cast<std::size_t>(G.ny))));
+        Vec3 W{0.0, 0.0, 0.0}, F{0.0, 0.0, 0.0};
+        if (a.displacement_field.size() == static_cast<std::size_t>(3 * fea_node_count(G)))
+          for (const DirichletBC& bc : sc.bcs) {
+            if (!(bc.spring > 0.0) || bc.contact) continue;  // the weak (OFF) springs
+            const double* u = &a.displacement_field[3 * static_cast<std::size_t>(bc.node)];
+            W.x += bc.spring * u[0];
+            W.y += bc.spring * u[1];
+            W.z += bc.spring * u[2];
+          }
+        for (const NodalLoad& l : sc.loads)
+          (l.component == 0 ? F.x : l.component == 1 ? F.y : F.z) += l.value;
+        const double fm = std::sqrt(F.x * F.x + F.y * F.y + F.z * F.z);
+        r.weak_share = fm > 0.0 ? std::sqrt(W.x * W.x + W.y * W.y + W.z * W.z) / fm : 0.0;
+        r.unheld = r.weak_share > kScenarioUnheldShare;
+        if (r.unheld && unheld_scenario.empty()) unheld_scenario = sc.name;
+        scenario_reports.push_back(r);
+        const auto worse = [](const FixedDesignAnalysis& x, const FixedDesignAnalysis& y) {
+          if (x.non_convergent != y.non_convergent) return x.non_convergent;
+          return x.margin_effective < y.margin_effective;
+        };
+        if (s > 0 && worse(a, per[worst])) worst = s;
+      }
+      scenario_reports[worst].governs = true;
+      fda = std::move(per[worst]);
+      if (!unheld_scenario.empty()) fda.accepted = false;
+    }
 
     // --- Handoff 2026-07-27-nonconvergence-rejection: CERTIFICATION NON-CONVERGENT ─
     // The trajectory converged to a connected design, but the CERTIFICATION solve —
@@ -2521,7 +3005,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // stops (below), exactly the pre-belt condition on the pre-belt numbers.
     const double margin_effective = fda.margin_effective;
     const bool margin_ok = margin_effective >= options.margin_stop;
-    variant.accepted = fda.accepted;
+    variant.accepted = fda.accepted && anchors_kept;
 
     // Assemble this rung's report line (M5.2 / M5.2b).
     VariantReport& vr = variant.report;
@@ -2530,6 +3014,14 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // basis that savings% and mass share (handoff 104).
     vr.volume_fraction = variant.optimization.volume_fraction;
     vr.printed_fraction = printed_fraction;
+    vr.contact_rounds = fda.contact_rounds;  // REAL BOLTS
+    vr.contact_tangent_share = fda.contact_tangent_share;
+    vr.contact_held_by_sliding = fda.contact_held_by_sliding;
+    vr.contact_settled = fda.contact_settled;
+    vr.contact_kept_last = fda.contact_kept_last;
+    vr.contact_engaged = fda.contact_engaged;
+    vr.contact_released = fda.contact_released;
+    vr.contact_load_share = fda.contact_load_share;
     // Task 2026-08-03-growth-ladder — the HEADLINE on a growth run: how much
     // plastic this rung prints, how much of it is outside the imported part, and
     // whether the box could hold what the rung asked for. No-op on a reduction
@@ -2575,9 +3067,59 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // fail the CONNECTIVITY reason wins, because it is the more fundamental fact
     // and it tells the reader what the margin on that line is worth: a number
     // measured on a severed structure, whichever side of the threshold it landed.
+    // A lost anchored piece (item 47) is the second connectivity fact: below the
+    // belt, above the margin.
     if (!variant.accepted)
-      vr.rejection_reason =
-          load_path_ok ? kMarginBelowRequiredReason : kLoadPathNotConnectedReason;
+      vr.rejection_reason = !load_path_ok   ? std::string(kLoadPathNotConnectedReason)
+                            : !anchors_kept ? std::string(kAnchorDetachedReason)
+                            : !unheld_scenario.empty()
+                                ? unheld_scenario + kScenarioUnheldSuffix
+                            : fda.contact_held_by_sliding ? std::string(kAnchorsSlidingReason)
+                                                          : std::string(kMarginBelowRequiredReason);
+
+    // CORE LIST items 41 + 47 — the line's bodies: how many the file carries, the
+    // specks dropped, and the anchored pieces let go of, named by the anchor faces
+    // or regions whose own Fixture voxels they hold.
+    vr.bodies_exported = variant.v3.bodies_exported;
+    vr.specks_dropped = variant.v3.specks_dropped;
+    vr.speck_voxels = variant.v3.speck_voxels;
+    vr.speck_volume_mm3 = static_cast<double>(variant.v3.speck_voxels) * G.voxel_volume();
+    vr.anchored_pieces_lost = static_cast<int>(lost_anchors.design_bodies.size());
+    vr.lost_anchor_voxels = lost_anchors.voxels;
+    if (!anchors_kept) {
+      std::vector<char> lost_fixture(G.voxel_count(), 0);
+      for (const std::size_t idx : lost_anchors.fixture_voxels) lost_fixture[idx] = 1;
+      for (const MinimizePlasticOptions::AnchorVoxels& a : options.anchor_voxels) {
+        bool hit = false;
+        for (const std::size_t p : a.part_voxels) {
+          const int pi = static_cast<int>(p % static_cast<std::size_t>(grid.nx));
+          const int pj = static_cast<int>((p / static_cast<std::size_t>(grid.nx)) %
+                                          static_cast<std::size_t>(grid.ny));
+          const int pk = static_cast<int>(p / (static_cast<std::size_t>(grid.nx) *
+                                               static_cast<std::size_t>(grid.ny)));
+          if (lost_fixture[G.index(pi + domain.offset_i, pj + domain.offset_j,
+                                   pk + domain.offset_k)]) {
+            hit = true;
+            break;
+          }
+        }
+        if (!hit) continue;
+        if (a.face_id >= 0) vr.lost_anchor_face_ids.push_back(a.face_id);
+        if (a.region_id >= 0) vr.lost_anchor_region_ids.push_back(a.region_id);
+      }
+    }
+    vr.bridges = bridge.bridges;
+    vr.bridge_voxels = bridge.voxels;
+    vr.bridge_holds = bridge_holds;
+    vr.scenarios = scenario_reports;  // LOAD SCENARIOS (empty when none)
+    vr.bodies_reported = vr.bodies_exported > 1 || vr.specks_dropped > 0 ||
+                         vr.anchored_pieces_lost > 0 || vr.bridges > 0;
+    // Edge / corner-only joints in what prints: reported as fragile, not fixed.
+    {
+      FragileJoints fj = fragile_joints(G, variant.optimization.physical_density, kIso);
+      vr.fragile_joints = fj.count;
+      vr.fragile_joint_positions_mm = std::move(fj.positions_mm);
+    }
 
     // ── WHY (handoff 2026-08-02-gate-diagnosis-recommendations) ───────────────
     // A POST-PASS, exactly like the build-orientation ranking: it runs AFTER
@@ -2726,6 +3268,16 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       }
       continue;
     }
+  }
+
+  // CORE LIST item 40 — on a run where some rung's target clamped to the floor,
+  // EVERY line says what it asked for beside what it got (Q40a: only such runs, so
+  // every other document keeps its bytes). The copies in report.variants /
+  // report.rejected were taken during the walk, so they are marked too.
+  if (result.report.frozen_share.evaluated) {
+    for (MinimizePlasticVariant& v : result.evaluated) v.report.request_reported = true;
+    for (VariantReport& r : result.report.variants) r.request_reported = true;
+    for (VariantReport& r : result.report.rejected) r.request_reported = true;
   }
 
   // Finalize the multigrid-usage report: MG "ran" for the run iff it carried the

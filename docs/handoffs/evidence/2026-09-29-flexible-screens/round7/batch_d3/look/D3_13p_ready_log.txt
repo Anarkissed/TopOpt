@@ -1,0 +1,10 @@
+status 'Ready' tone ready · groups [[1]]
+  [R20] frames: capsule (24,76 262x44) | capsuleLattice (142,76 70x44) | capsuleMenu (28,76 109x44) | capsuleSquish (212,76 70x44) | cube (808,14 210x210) | latticeMain (748,1288 215x64) | latticeMore (964,1288 44x64) | latticeSplit (748,1288 260x64) | legend (760,292 248x124) | mainViews (704,236 304x44) | selGroup-2AC5732E-4A99-4195-A0A3-5BBE73DD4D18 (24,812 348x44) | selGroup-A1000001-AAAA-4000-8000-000000000001 (24,724 348x44) | selGroup-A1000001-BBBB-4000-8000-000000000002 (24,768 348x44) | selHeader (24,672 348x44) | selTrash-2AC5732E-4A99-4195-A0A3-5BBE73DD4D18 (322,812 44x44) | selTrash-A1000001-AAAA-4000-8000-000000000001 (322,724 44x44) | selTrash-A1000001-BBBB-4000-8000-000000000002 (322,768 44x44) | selectionsList (24,672 348x189) | setupChip (516,1304 220x48) | views (704,236 304x44)
+  [R20] overlaps: none
+wrote D3_13p_ready_R20_main_ready.png
+  tap the ⌃ (look; never a send) [latticeMore (964,1288 44x64)]
+card on Ready · sent 0 · job 'Group 1 · 22 lb · 1 face · bead 0.45 mm'
+  [R21] frames: capsule (24,76 262x44) | capsuleLattice (142,76 70x44) | capsuleMenu (28,76 109x44) | capsuleSquish (212,76 70x44) | cardStep-core (602,1092 392x88) | cardStep-export (602,1180 392x84) | cardStep-preview (602,1048 392x44) | cube (808,14 210x210) | latticeCard (588,992 420x284) | latticeMain (748,1288 215x64) | latticeMore (964,1288 44x64) | latticeSplit (748,1288 260x64) | legend (760,292 248x124) | mainViews (704,236 304x44) | selGroup-2AC5732E-4A99-4195-A0A3-5BBE73DD4D18 (24,812 348x44) | selGroup-A1000001-AAAA-4000-8000-000000000001 (24,724 348x44) | selGroup-A1000001-BBBB-4000-8000-000000000002 (24,768 348x44) | selHeader (24,672 348x44) | selTrash-2AC5732E-4A99-4195-A0A3-5BBE73DD4D18 (322,812 44x44) | selTrash-A1000001-AAAA-4000-8000-000000000001 (322,724 44x44) | selTrash-A1000001-BBBB-4000-8000-000000000002 (322,768 44x44) | selectionsList (24,672 348x189) | setupChip (516,1304 220x48) | views (704,236 304x44)
+  [R21] overlaps: none
+wrote D3_13p_ready_R21_card_ready_what_goes_to_core.png
+touches: 0

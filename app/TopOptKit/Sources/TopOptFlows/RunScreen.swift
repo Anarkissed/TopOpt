@@ -107,7 +107,7 @@ public struct RunScreen: View {
                     PillButton("Cancel", style: .secondary) { model.cancel() }
                     PillButton(model.runningInBackground ? "In Background" : "Run in Background",
                                style: .secondary,
-                               isEnabled: !model.runningInBackground) { model.runInBackground() }
+                               isEnabled: model.canSendToBackground) { model.runInBackground() }
                 }
                 .padding(.top, DS.Space.s)
                 .frame(maxWidth: .infinity)
@@ -144,11 +144,15 @@ public struct RunScreen: View {
                             .foregroundStyle(DS.Color.textPrimary.color)
                             .multilineTextAlignment(.center)
 
+                        let blocks = model.outcome?.reportJSON.flatMap(RunReportBlocks.decode(reportJSON:))   // Flexible (PR #362) H56h: redesign to strengthen (overnight plan 2026-10-25)
+                        if blocks?.strengthen == nil {   // Flexible (PR #362) H56h: redesign to strengthen (overnight plan 2026-10-25) — a strengthen run's cards say what failed (the margin line would read 0.00×)
                         Text(failure.message)
                             .dsStyle(DS.TypeScale.body)
                             .foregroundStyle(DS.Color.textSecondary.color)
                             .multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
+                        }   // Flexible (PR #362) H56h: redesign to strengthen (overnight plan 2026-10-25) — (the margin line)
+                        if let blocks { RunReportCardsView(blocks: blocks) }   // Flexible (PR #362) H56h: redesign to strengthen (overnight plan 2026-10-25) — the versions' cards + item 47's line
 
                         HStack(spacing: DS.Space.m) {
                             PillButton("Close", style: .secondary) { model.dismissFailure() }

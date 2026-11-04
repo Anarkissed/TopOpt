@@ -1,0 +1,61 @@
+# Stage-job diff: the pre-merge tree (45903e89, rebuilt in a side worktree; its 16 hashes = round8_step_h47/stage_job_hashes_r8.txt byte for byte)
+# vs the merged tree (2949a032). Leaf paths of each row's job.json; + added, - removed, ~ value changed; [] = any index.
+again_r5_his_project_0004_r5_A1000001-0000-4000-8000-0000000:
+   ~ /grading/cell_max_mm x1
+   ~ /grading/cell_min_mm x1
+base_A1_A1000001-0000-4000-8000-000000000001_A1000001-0000-4:
+   + /lattice/regions[]/geometry/outline_uv[][][] x1000
+   ~ /lattice/regions[]/geometry/half_u_mm x5
+   ~ /lattice/regions[]/geometry/half_w_mm x5
+   ~ /lattice/regions[]/geometry/outline_uv[][][] x373
+base_A1_A1000001-0000-4000-8000-000000000002_A1000001-0000-4: same
+base_A1_A1000001-0000-4000-8000-000000000003_A1000001-0000-4: same
+base_A1_A1000001-0000-4000-8000-000000000004_A1000001-0000-4:
+   ~ /grading/cell_max_mm x1
+   ~ /grading/cell_min_mm x1
+base_his_102117B9-DDD2-4597-9BDE-49DD47EBF393_102117B9-DDD2-:
+   + /lattice/regions[]/geometry/outline_uv[][][] x3418
+   - /lattice/regions[]/geometry/outline_uv[][][] x958
+   ~ /lattice/regions[]/geometry/half_u_mm x169
+   ~ /lattice/regions[]/geometry/half_w_mm x165
+   ~ /lattice/regions[]/geometry/outline_uv[][][] x3508
+base_his_3418E167-8524-4831-A809-827B6B0742D0_3418E167-8524-:
+   ~ /lattice/regions[]/geometry/half_u_mm x2
+base_his_570B38E2-3C6E-46E0-BCF6-26BE1595D204_570B38E2-3C6E-:
+   ~ /lattice/regions[]/geometry/half_u_mm x2
+base_his_68BF7B74-3C2A-4ED6-A46D-AC040A9CA649_68BF7B74-3C2A-:
+   + /lattice/regions[]/geometry/outline_uv[][][] x1000
+   ~ /lattice/regions[]/geometry/half_u_mm x5
+   ~ /lattice/regions[]/geometry/half_w_mm x5
+   ~ /lattice/regions[]/geometry/outline_uv[][][] x373
+base_his_887AC498-5B5D-4475-B6CB-893DC69B5FD6_887AC498-5B5D-: same
+base_his_92A8016E-FCCD-421D-B19E-4A1EC81C98A5_92A8016E-FCCD-:
+   ~ /grading/cell_max_mm x1
+   ~ /grading/cell_min_mm x1
+   ~ /lattice/regions[]/geometry/half_w_mm x1
+base_his_AA4C7953-3152-4123-BCB5-EF5F8A08ABA3_AA4C7953-3152-: same
+base_r3_his_project_0004_A1000001-0000-4000-8000-00000000000: same
+base_r5_his_project_0004_r5_A1000001-0000-4000-8000-00000000:
+   ~ /grading/cell_max_mm x1
+   ~ /grading/cell_min_mm x1
+control+_r5_his_project_0004_r5_A1000001-0000-4000-8000-0000:
+   ~ /grading/cell_max_mm x1
+   ~ /grading/cell_min_mm x1
+control-_r5_his_project_0004_r5_A1000001-0000-4000-8000-0000:
+   ~ /grading/cell_max_mm x1
+   ~ /grading/cell_min_mm x1
+
+# values
+base_r5_his_project_0004_r5_A1000001-000 grading {'cell_max_mm': (1.173173434139347, 2.25), 'cell_min_mm': (1.173173434139347, 2.25)}
+base_his_92A8016E-FCCD-421D-B19E-4A1EC81 grading {'cell_max_mm': (1.6, 2.25), 'cell_min_mm': (1.6, 2.25)}
+base_his_3418E167-8524-4831-A809-827B6B0 region 0 {'half_u_mm': (112.08383178710938, 97)} outline loops x points [63] -> [63]
+base_his_3418E167-8524-4831-A809-827B6B0 region 1 {'half_u_mm': (112.0838394165039, 97)} outline loops x points [77] -> [77]
+base_his_68BF7B74-3C2A-4ED6-A46D-AC040A9 region 0 {'half_u_mm': (109.99942943176922, 109.999429), 'half_w_mm': (107.08384132385254, 107.083841)} outline loops x points [75] -> [79]
+base_his_68BF7B74-3C2A-4ED6-A46D-AC040A9 region 1 {'half_u_mm': (109.00052670148374, 109.000527), 'half_w_mm': (107.0838394165039, 107.083839)} outline loops x points [63] -> [65]
+base_his_68BF7B74-3C2A-4ED6-A46D-AC040A9 region 2 {'half_u_mm': (45.853560876317054, 45.853561), 'half_w_mm': (28.51053031968264, 28.51053)} outline loops x points [18] -> [211]
+base_his_68BF7B74-3C2A-4ED6-A46D-AC040A9 region 3 {'half_u_mm': (45.31937804404862, 45.319378), 'half_w_mm': (28.607103184934633, 28.607103)} outline loops x points [21] -> [138]
+base_his_68BF7B74-3C2A-4ED6-A46D-AC040A9 region 4 {'half_u_mm': (22.615928599394152, 22.615929), 'half_w_mm': (28.666409703500427, 28.666245)} outline loops x points [10] -> [194]
+
+# causes: grading.cell_min/max_mm -> ab0900f0 (Auto's window fine end = core's E1 floor at the job's cap, 2.25 mm, not 1.173);
+#         geometry outline_uv/half_u_mm/half_w_mm -> 56eadfd7 (P4 Clipper2 union to simple loops) + 162a3f95 (P1-P6 one generated outline, P5 extents).
+# control- (flexible face 1000104 weightKg 5 -> 6) = base r5 in both trees: no Flexible edit reaches the job.

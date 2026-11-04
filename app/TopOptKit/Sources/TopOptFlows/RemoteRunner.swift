@@ -671,7 +671,10 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
     /// of there being one function rather than of two mappings kept in step.
     ///
     /// It only ever read `request`; nothing about a live connection was involved.
-    static func buildJobJSON(_ request: RunRequest) throws -> Data {
+    /// `steppedPlans`: the Default Grade plan switch — production passes
+    /// `LatticeSteppedCellWire.defaultGradePlansEnabled` (off); the CLI proof forces it.
+    static func buildJobJSON(_ request: RunRequest,
+                             steppedPlans: Bool = LatticeSteppedCellWire.defaultGradePlansEnabled) throws -> Data {
         var job: [String: Any] = [
             "model": (request.modelPath as NSString).lastPathComponent,
             "material": request.material,
@@ -803,6 +806,25 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                 // LatticeRegionSpec.wireDictionary for why it is not two.
                 block["regions"] = lat.regions.map { $0.wireDictionary }
             }
+            // ★ THE SOLID COVER (maintainer, 2026-08-19). Only when the user picked
+            // **Covered**: an absent key leaves the job BYTE-IDENTICAL to one written
+            // before the option existed. Core validates it against
+            // "shell" / "skin" / "shell+skin" (core/src/cli/job.cpp:1433) and refuses
+            // the latter two unless `skin == "diagrid"`, which is why only the
+            // unambiguous "shell" is ever emitted.
+            if let of = lat.outerFinish { block["outer_finish"] = of }
+            // ★ ASK FOR THE EMITTED SPANS when the lattice is organic (2026-09-02): the
+            // preview draws the organic field from them. Gated on the linked core knowing
+            // the key — `reject_unknown_keys` kills the whole job over one it does not.
+            if lat.algorithm == "organic", TopOptKit.latticeSchemaAccepts(key: "emit_organic_spans") {
+                block["emit_organic_spans"] = true
+            }
+            // ★ THE PLAN (2026-09-18): the preview's placed cells, verbatim, with each planned
+            // region's grid (`slot_origin_mm`, 2026-10-08) and ladder base (`plan_base_cell_mm`,
+            // K1) — the ONE writer, shared with RelatticeRunner. A plan core would refuse is
+            // withheld, never sent.
+            LatticeSteppedCellWire.writePlan(into: &block, for: lat, wired: TopOptKit.steppedCellsWired,
+                                             enabled: steppedPlans)
             job["lattice"] = block
         }
         // The declared load case is emitted for EVERY model source — STEP B-rep
@@ -829,6 +851,7 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             "build_dir": [request.buildDirection.x, request.buildDirection.y,
                           request.buildDirection.z],
         ]
+        if request.redesign == StrengthenRoute.redesignValue { loads["redesign"] = request.redesign }   // Flexible (PR #362) H56b: redesign to strengthen (overnight plan 2026-10-25) — only a worker request carries it (RunRequest.forWorker)
         if !request.anchorFaceIDs.isEmpty {
             loads["anchor_face_ids"] = request.anchorFaceIDs
         }
@@ -925,17 +948,30 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         // The decoder and the announcement banner are ALREADY built and tested
         // for that day; only this line is in the way.
         job["bake_build_orientation"] = "off"
+        // One load group on the wire (the top level and each scenario use the same shape).
+        func loadGroupJSON(_ g: TopOptKit.LoadGroupSpec) -> [String: Any] {
+            var e: [String: Any] = ["force": [g.force.x, g.force.y, g.force.z]]
+            // Emit "face_ids" only when there ARE face ids: a group that is
+            // now ONE region must not ship an empty array where a 23-element
+            // one used to be — and a group with no regions must ship exactly
+            // what it always did.
+            if !g.faceIDs.isEmpty { e["face_ids"] = g.faceIDs }
+            if !g.regionIDs.isEmpty { e["region_ids"] = g.regionIDs }
+            return e
+        }
         if !request.loadGroups.isEmpty {
-            loads["groups"] = request.loadGroups.map { g -> [String: Any] in
-                var e: [String: Any] = ["force": [g.force.x, g.force.y, g.force.z]]
-                // Emit "face_ids" only when there ARE face ids: a group that is
-                // now ONE region must not ship an empty array where a 23-element
-                // one used to be — and a group with no regions must ship exactly
-                // what it always did.
-                if !g.faceIDs.isEmpty { e["face_ids"] = g.faceIDs }
-                if !g.regionIDs.isEmpty { e["region_ids"] = g.regionIDs }
-                return e
+            loads["groups"] = request.loadGroups.map(loadGroupJSON)
+        }
+        // ★ LOAD SCENARIOS (overnight release 2026-10-26, the shared key): only with 2+ scenarios; the groups and
+        // anchor_face_ids above already mirror Scenario 1. Each scenario sends its own ON anchors.
+        if request.scenarios.count >= 2 {
+            loads["scenarios"] = request.scenarios.map { s -> [String: Any] in
+                ["name": s.name, "anchor_face_ids": s.anchorFaceIDs, "groups": s.loadGroups.map(loadGroupJSON)]
             }
+        }
+        // ★ THE SAFETY MARGIN (ruling 2026-10-26 13:12): under TO-core's key once named; 150 % sends nothing (core's default).
+        if let key = SafetyMargin.jobKey, abs(request.safetyMargin - SafetyMargin.defaultValue) > 1e-9 {
+            loads[key] = request.safetyMargin
         }
         if request.infillPercent >= 0 {
             loads["infill_percent"] = request.infillPercent
@@ -1034,6 +1070,8 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             }
         }
         job["loads"] = loads
+        // ★ EXACT PROTECT (ruling 2026-10-26 23:44): core's keep_regions, at the job's top level. Empty ⇒ omitted.
+        if !request.keepRegions.isEmpty { job["keep_regions"] = request.keepRegions.map(\.json) }
         return try JSONSerialization.data(withJSONObject: job)
     }
 
@@ -1152,6 +1190,27 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         }
         diag("remote fields.bin fetched: \(data.count) bytes, \(container.variants.count) variant block(s)")
         return container
+    }
+
+    /// ★ LOAD SCENARIOS: fetch out/scenario_fields.bin (core v1, beside fields.bin) — each scenario's own fields, so the
+    /// Results Scenario menu swaps the views. Enrichment like fields.bin: a 404 (a one-scenario run, an older core) or a bad
+    /// body returns nil and the menu says which scenario the views show. Dropped when its grid is not fields.bin's.
+    private func fetchScenarioFields(matching fields: RemoteFieldsContainer?) -> RemoteScenarioFields? {
+        guard let id = jobID, let fields else { return nil }
+        let url = config.baseURL.appendingPathComponent("jobs")
+            .appendingPathComponent(id).appendingPathComponent("files")
+            .appendingPathComponent("scenario_fields.bin")
+        guard let (data, resp) = try? syncGET(url) else {
+            diag("remote scenario_fields.bin fetch failed (transport) — the views stay the worst case's"); return nil
+        }
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard code == 200 else { return nil }   // 404: no scenarios, or a core before scenario_fields
+        guard let sf = RemoteScenarioFields.parse(data),
+              sf.gridNx == fields.gridNx, sf.gridNy == fields.gridNy, sf.gridNz == fields.gridNz else {
+            diag("remote scenario_fields.bin unreadable (\(data.count) bytes) — the views stay the worst case's"); return nil
+        }
+        diag("remote scenario_fields.bin fetched: \(sf.names.count) scenarios × \(sf.blocks.count) block(s)")
+        return sf
     }
 
     /// Fetch the run's `design.bin` — the per-variant DENSITY FIELDS core writes
@@ -1275,9 +1334,25 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             var accepted = cp.accepted
             var margin = cp.margin
             var receipt: Data?
+            var spanText: String?
             if let (data, resp) = try? syncGET(files.appendingPathComponent(cp.reportName)),
                (resp as? HTTPURLResponse)?.statusCode == 200, !data.isEmpty {
                 receipt = data
+                // ★ THE SPAN FILE, WHEN THE RECEIPT NAMES ONE (2026-09-02). Fetched
+                // from the same per-job files directory the mesh and receipt come
+                // from; the receipt's `span_path` is the worker's absolute path, so
+                // only its basename is meaningful here. A missing file is nil, never
+                // an empty string — the preview must not mistake "not fetched" for
+                // "zero spans".
+                if let g = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                   let gr = g["grading"] as? [String: Any],
+                   let sp = gr["span_path"] as? String, !sp.isEmpty,
+                   let (sdata, sresp) = try? syncGET(files.appendingPathComponent(
+                        (sp as NSString).lastPathComponent)),
+                   (sresp as? HTTPURLResponse)?.statusCode == 200, !sdata.isEmpty,
+                   let text = String(data: sdata, encoding: .utf8) {
+                    spanText = text
+                }
                 let facts = LatticeVariantAlternative.receiptFacts(data)
                 mass = facts.massGrams
                 // The RECEIPT is authoritative where it speaks; the checkpoint
@@ -1295,7 +1370,7 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             out[vf] = LatticeVariantAlternative(
                 requestedVolumeFraction: vf, meshName: cp.meshName,
                 massGrams: mass, accepted: accepted, margin: margin,
-                triangleCount: cp.triangles, meshBytes: bytes, receiptJSON: receipt)
+                triangleCount: cp.triangles, meshBytes: bytes, receiptJSON: receipt, spanText: spanText)
             diag("latticed alternative vf=\(vf): \(cp.meshName) "
                  + "\(LatticeMeshBudget.byteLabel(bytes)), \(mass) g, "
                  + "accepted=\(accepted)")
@@ -1327,11 +1402,16 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         guard let lat = request.lattice else { return nil }
         var generated: LatticeReport.Generated? = nil
         var strut: LatticeReport.StrutStrength? = nil
+        // ★★ K4 (the reviewer, 2026-10-11 03:28, item 3): the job carried a plan ⇔ the bytes we POSTED carry
+        // `lattice.stepped_cells`; then the plan as laid (run_info `grading.plan_by_region`) is what the results read
+        let carriedPlan = submittedJobJSON.map(LatticeReport.PlanLaid.jobCarriesPlan) ?? false
+        var planLaid: LatticeReport.PlanLaid? = carriedPlan ? LatticeReport.PlanLaid(runInfo: nil) : nil
         if let id = jobID {
             let url = config.baseURL.appendingPathComponent("jobs")
                 .appendingPathComponent(id).appendingPathComponent("files")
                 .appendingPathComponent("run_info.json")
             let info = try? getJSON(url)
+            if carriedPlan { planLaid = LatticeReport.PlanLaid(runInfo: info) }
             if let le = info?["lattice_export"] as? [String: Any] {
                 func d(_ k: String) -> Double { (le[k] as? Double) ?? 0 }
                 func i(_ k: String) -> Int { (le[k] as? Int) ?? Int((le[k] as? Double) ?? 0) }
@@ -1378,7 +1458,7 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             maxRelativeDensity: lat.maxRelativeDensity,
             regionScoped: lat.regionScoped, emittedRegions: lat.regions.count,
             generated: generated, strut: strut,
-            regionCellsJSON: regionCellsJSON)
+            regionCellsJSON: regionCellsJSON, planLaid: planLaid)
     }
 
     /// The BUILD-ORIENTATION RECEIPT a remote run wrote (handoff
@@ -1400,6 +1480,41 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         return data
     }
 
+    /// One multipart part of the job upload: its field name, its filename (a file part) or nil (a plain field), its
+    /// content type (nil for a plain field) and its bytes.
+    struct UploadPart: Equatable {
+        let name: String
+        let filename: String?
+        let contentType: String?
+        let data: Data
+    }
+
+    /// ★ WHAT THE WORKER RECEIVES for a fresh job, in order: the model, job.json, and the project name.
+    static func uploadParts(modelPath: String, model: Data, jobJSON: Data, projectName: String) -> [UploadPart] {
+        let modelName = (modelPath as NSString).lastPathComponent
+        var parts = [
+            UploadPart(name: "step", filename: modelName, contentType: "application/octet-stream", data: model),
+            UploadPart(name: "job", filename: "job.json", contentType: "application/json", data: jobJSON),
+        ]
+        // The human-facing project name as a dedicated multipart FIELD (handoff 129).
+        // The worker prefers this over any job.json key (topopt_worker._create_job) and
+        // it never reaches the CLI's strict job schema. Omitted when empty.
+        let name = projectName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !name.isEmpty {
+            parts.append(UploadPart(name: "project", filename: nil, contentType: nil, data: Data(name.utf8)))
+        }
+        // ★ B5 (reviewer (i)): THE PAINTED FACES REACH THE WORKER. The face-overrides sidecar (`<model>.faces`, the
+        // painted pseudo-faces the groups reference) travels with the model, or the worker's re-import has no painted
+        // face ids and a painted group silently reaches no face. Saved beside the model under the model's own name
+        // (topopt_worker._create_job), where core's import looks for it. Absent ⇒ no part (today's upload, unchanged).
+        let sidecar = modelPath + ".faces"
+        if let faces = FileManager.default.contents(atPath: sidecar) {
+            parts.append(UploadPart(name: "faces", filename: modelName + ".faces",
+                                    contentType: "application/octet-stream", data: faces))
+        }
+        return parts
+    }
+
     private func postJob(model: Data, modelName: String, jobJSON: Data) throws -> String {
         let boundary = "topopt-\(UUID().uuidString)"
         var body = Data()
@@ -1410,16 +1525,12 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             body.append(payload)
             body.append("\r\n".data(using: .utf8)!)
         }
-        part("Content-Disposition: form-data; name=\"step\"; filename=\"\(modelName)\"\r\n" +
-             "Content-Type: application/octet-stream", model)
-        part("Content-Disposition: form-data; name=\"job\"; filename=\"job.json\"\r\n" +
-             "Content-Type: application/json", jobJSON)
-        // The human-facing project name as a dedicated multipart FIELD (handoff 129).
-        // The worker prefers this over any job.json key (topopt_worker._create_job) and
-        // it never reaches the CLI's strict job schema. Omitted when empty.
-        let projectName = request.projectName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !projectName.isEmpty {
-            part("Content-Disposition: form-data; name=\"project\"", Data(projectName.utf8))
+        for p in Self.uploadParts(modelPath: request.modelPath, model: model, jobJSON: jobJSON,
+                                  projectName: request.projectName) {
+            var headers = "Content-Disposition: form-data; name=\"\(p.name)\""
+            if let f = p.filename { headers += "; filename=\"\(f)\"" }
+            if let t = p.contentType { headers += "\r\nContent-Type: \(t)" }
+            part(headers, p.data)
         }
         body.append("--\(boundary)--\r\n".data(using: .utf8)!)
 
@@ -1731,6 +1842,7 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         let base = config.baseURL.appendingPathComponent("jobs")
             .appendingPathComponent(id).appendingPathComponent("files")
         let report = try getJSON(base.appendingPathComponent("report.json"))
+        let reportJSON = try? JSONSerialization.data(withJSONObject: report)   // Flexible (PR #362) H56c: redesign to strengthen (overnight plan 2026-10-25) — the report rides on the outcome (strengthen, bodies)
         let reportVariants = report["variants"] as? [[String: Any]] ?? []
         // *** THE 0.00x FAULT (handoff 2026-08-02-gate-diagnosis-recommendations). ***
         // report.json carries TWO arrays: `variants` (accepted) and
@@ -1749,6 +1861,7 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         // the next morning fetches exactly the same fields.bin, with the same presence
         // gate and the same graceful degradation (handoff 134, item 2).
         let fields = fetchFields()
+        let scenarioFields = fetchScenarioFields(matching: fields)   // ★ each load scenario's own views
         // The worker's own duration record (handoff 134, item 1) — never the client's
         // wall clock, which on a re-attach measures when someone looked, not the run.
         let timing = fetchTiming()
@@ -1811,14 +1924,16 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
 
         if !accepted.isEmpty {
             let variants = accepted.map { s in
-                makeVariant(streamed: s,
-                            report: reportVariant(forAchieved: s.achievedVF),
-                            fields: fields?.variant(forRequestedVF: s.requestedVF),
-                            lattice: latticeAlternatives[s.requestedVF])
+                var v = makeVariant(streamed: s,
+                                    report: reportVariant(forAchieved: s.achievedVF),
+                                    fields: fields?.variant(forRequestedVF: s.requestedVF),
+                                    lattice: latticeAlternatives[s.requestedVF])
+                v.scenarioFields = scenarioFields?.sets(forRequestedVF: s.requestedVF) ?? []
+                return v
             }
             return remoteOutcome(variants: variants, acceptedCount: variants.count,
                                  fields: fields, timing: timing, latticeReport: latticeReport,
-                                 buildOrientationJSON: buildOrientation)
+                                 buildOrientationJSON: buildOrientation, reportJSON: reportJSON)   // Flexible (PR #362) H56c: redesign to strengthen (overnight plan 2026-10-25) — accepted variants
         }
 
         // No accepted variant streamed: report-only rows. They carry no mesh, so they
@@ -1832,7 +1947,7 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             .map { makeVariant(streamed: nil, report: $0, fields: nil) }
         return remoteOutcome(variants: rejected, acceptedCount: 0, fields: fields,
                              timing: timing, latticeReport: latticeReport,
-                             buildOrientationJSON: buildOrientation)
+                             buildOrientationJSON: buildOrientation, reportJSON: reportJSON)   // Flexible (PR #362) H56c: redesign to strengthen (overnight plan 2026-10-25) — report-only rows
     }
 
     /// Wrap remote variants in an OptimizeOutcome, carrying the run's grid metadata
@@ -1843,7 +1958,7 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                                fields: RemoteFieldsContainer?,
                                timing: RunTiming? = nil,
                                latticeReport: LatticeReport? = nil,
-                               buildOrientationJSON: Data? = nil) -> OptimizeOutcome {
+                               buildOrientationJSON: Data? = nil, reportJSON: Data? = nil) -> OptimizeOutcome {   // Flexible (PR #362) H56d: redesign to strengthen (overnight plan 2026-10-25)
         OptimizeOutcome(variants: variants, stoppedOnMargin: false, cancelled: false,
                         acceptedCount: acceptedCount,
                         voxelVolumeMM3: fields?.voxelVolumeMM3 ?? 0,
@@ -1862,7 +1977,8 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                         // the core measures one only on a growth ladder. Derived
                         // from the variants rather than parsed from a separate
                         // field so the mode and the numbers can never disagree.
-                        growthLadder: variants.contains { $0.addedMaterial != nil })
+                        growthLadder: variants.contains { $0.addedMaterial != nil } || reportJSON.flatMap(RunReportBlocks.decode(reportJSON:))?.strengthen != nil,   // Flexible (PR #362) H56d: redesign to strengthen (overnight plan 2026-10-25) — a strengthen run is the strengthen mode (its versions carry no added_material)
+                        reportJSON: reportJSON)   // Flexible (PR #362) H56d: redesign to strengthen (overnight plan 2026-10-25)
     }
 
     private func makeVariant(streamed s: StreamedVariant?,

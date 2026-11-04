@@ -1,0 +1,158 @@
+# U1 runs (app/TopOptKit, --scratch-path /tmp/r7x20-build) — at f1362eb3 + the working tree
+### runner.log
+start 14:19:03 f1362eb3 + working tree
+build exit 0 14:19:06
+chunk1 exit 1 14:32:18
+chunk2 exit 1 14:52:05
+chunk3 exit 1 15:22:56
+golden det exit 0 15:23:13
+golden unseeded exit 0 15:23:29
+hashes exit 0 15:24:31
+hashes cmp vs e1r: identical
+ALLDONE 15:24:31
+rerun start 15:26:00
+build2 exit 0 15:27:01
+rerun exit 1 15:33:38
+RERUNDONE
+rerun3 start 15:37:38 (column cap 12k, ≥ 2 mm)
+rerun3 exit 0 15:50:20
+RERUN3DONE
+### chunk1
+Test Suite 'FlexibleEdgeGroupsTests' passed at 2026-10-20 14:19:46.105.
+Test Suite 'FlexibleFlatPrismTests' passed at 2026-10-20 14:19:53.535.
+Test Suite 'FlexibleLatticeFieldTests' passed at 2026-10-20 14:19:57.006.
+Test Suite 'FlexibleLatticeSectionsTests' passed at 2026-10-20 14:20:34.956.
+Test Suite 'FlexibleOverlayClipTests' passed at 2026-10-20 14:20:35.770.
+Test Suite 'FlexibleOverlaySeamTests' passed at 2026-10-20 14:20:36.478.
+Test Suite 'FlexiblePressCurveTests' passed at 2026-10-20 14:20:44.746.
+Test Suite 'FlexiblePressStampTests' passed at 2026-10-20 14:20:51.101.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7E1FollowUpTests.swift:220: error: -[TopOptFlowsTests.FlexibleR7E1FollowUpTests testHisLivePadIsUnchangedByTheCornerRule] : XCTAssertEq
+Test Suite 'FlexibleR7E1FollowUpTests' failed at 2026-10-20 14:21:05.229.
+Test Suite 'FlexibleR7E1ReviewTests' passed at 2026-10-20 14:22:01.133.
+Test Suite 'FlexibleR7E1bTests' passed at 2026-10-20 14:22:29.935.
+Test Suite 'FlexibleR7E3Tests' passed at 2026-10-20 14:22:54.600.
+Test Suite 'FlexibleR7E5Tests' passed at 2026-10-20 14:23:21.456.
+Test Suite 'FlexibleR7FTests' passed at 2026-10-20 14:23:45.612.
+Test Suite 'FlexibleR7MergeTests' passed at 2026-10-20 14:24:17.406.
+Test Suite 'FlexibleR7RTests' passed at 2026-10-20 14:24:55.162.
+Test Suite 'FlexibleR7SettingsTests' passed at 2026-10-20 14:25:58.989.
+Test Suite 'FlexibleR7X1Tests' passed at 2026-10-20 14:27:18.241.
+Test Suite 'FlexibleR7X1VerifyTests' passed at 2026-10-20 14:29:39.090.
+Test Suite 'FlexibleShownValuesTests' passed at 2026-10-20 14:29:40.178.
+Test Suite 'FlexibleSquishTests' passed at 2026-10-20 14:29:43.007.
+Test Suite 'FlexibleTopLayerTests' passed at 2026-10-20 14:30:48.490.
+Test Suite 'FlexibleU1Tests' passed at 2026-10-20 14:32:17.678.
+### chunk2
+Test Suite 'FlexibleBatchCVerifyTests' passed at 2026-10-20 14:32:41.276.
+Test Suite 'FlexibleBatchM2Tests' passed at 2026-10-20 14:33:07.019.
+Test Suite 'FlexibleBatchM2VerifyTests' passed at 2026-10-20 14:33:41.684.
+Test Suite 'FlexibleBatchMDentTests' passed at 2026-10-20 14:34:18.575.
+Test Suite 'FlexibleBatchNRefineTests' passed at 2026-10-20 14:37:59.981.
+Test Suite 'FlexibleFEFieldTests' passed at 2026-10-20 14:40:27.921.
+Test Suite 'FlexibleFEPassTests' passed at 2026-10-20 14:40:43.738.
+Test Suite 'FlexibleMainPageHookTests' passed at 2026-10-20 14:40:43.973.
+Test Suite 'FlexibleMainStageTests' passed at 2026-10-20 14:41:02.728.
+Test Suite 'FlexibleMainViewsTests' passed at 2026-10-20 14:41:22.025.
+Test Suite 'FlexibleR7SettingsEvidence' passed at 2026-10-20 14:41:22.040.
+Test Suite 'FlexibleRound5SettingsVerifyTests' passed at 2026-10-20 14:41:24.792.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleRound5SquishExitTests.swift:63: error: -[TopOptFlowsTests.FlexibleRound5SquishExitTests testOnlyTheSelectedFacesGroupSquishesOnTheSettin
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleRound5SquishExitTests.swift:63: error: -[TopOptFlowsTests.FlexibleRound5SquishExitTests testOnlyTheSelectedFacesGroupSquishesOnTheSettin
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleRound5SquishExitTests.swift:63: error: -[TopOptFlowsTests.FlexibleRound5SquishExitTests testOnlyTheSelectedFacesGroupSquishesOnTheSettin
+Test Suite 'FlexibleRound5SquishExitTests' failed at 2026-10-20 14:42:09.536.
+Test Suite 'FlexibleRound6Tests' passed at 2026-10-20 14:42:43.585.
+Test Suite 'FlexibleRound7ScreenHookTests' passed at 2026-10-20 14:42:55.423.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleRound7ViewsTests.swift:435: error: -[TopOptFlowsTests.FlexibleRound7ViewsTests testTheBendViewHoldsTheWholeGroupAtFullDepth] : XCTAssert
+Test Suite 'FlexibleRound7ViewsTests' failed at 2026-10-20 14:49:36.410.
+Test Suite 'FlexibleSettingsRound4Tests' passed at 2026-10-20 14:49:42.366.
+Test Suite 'FlexibleSettingsVerifyD1Tests' passed at 2026-10-20 14:49:44.674.
+Test Suite 'FlexibleSqueezeGroupsReviewUITests' passed at 2026-10-20 14:51:09.312.
+Test Suite 'FlexibleSqueezeGroupsUITests' passed at 2026-10-20 14:52:03.976.
+### chunk3
+Test Suite 'FlexibleBatchVHostedTests' passed at 2026-10-20 14:57:34.896.
+Test Suite 'FlexibleEdgeGroupsHostedTests' passed at 2026-10-20 14:57:40.942.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleFlatPrismHostedTests.swift:168: error: -[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow] : XCTAssertNotNil fa
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleFlatPrismHostedTests.swift:168: error: -[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow] : XCTAssertNotNil fa
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleFlatPrismHostedTests.swift:168: error: -[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow] : XCTAssertNotNil fa
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleFlatPrismHostedTests.swift:168: error: -[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow] : XCTAssertNotNil fa
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleFlatPrismHostedTests.swift:183: error: -[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow] : XCTAssertLessThan 
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleFlatPrismHostedTests.swift:168: error: -[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow] : XCTAssertNotNil fa
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleFlatPrismHostedTests.swift:168: error: -[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow] : XCTAssertNotNil fa
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleFlatPrismHostedTests.swift:168: error: -[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow] : XCTAssertNotNil fa
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleFlatPrismHostedTests.swift:168: error: -[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow] : XCTAssertNotNil fa
+Test Suite 'FlexibleFlatPrismHostedTests' failed at 2026-10-20 14:58:52.416.
+Test Suite 'FlexibleGroupPaletteHostedTests' passed at 2026-10-20 14:59:38.833.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleLatticeSectionsHostedTests.swift:124: error: -[TopOptFlowsTests.FlexibleLatticeSectionsHostedTests testASolidTapShowsTheLineAndOneFix] :
+Test Suite 'FlexibleLatticeSectionsHostedTests' failed at 2026-10-20 14:59:57.811.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7E1ReviewHostedTests.swift:140: error: -[TopOptFlowsTests.FlexibleR7E1ReviewHostedTests testAPopUpAfterDoneKeepsTheTurn] : XCTAssertLes
+Test Suite 'FlexibleR7E1ReviewHostedTests' failed at 2026-10-20 15:05:03.785.
+Test Suite 'FlexibleR7E2HostedTests' passed at 2026-10-20 15:05:25.642.
+Test Suite 'FlexibleR7RHostedTests' passed at 2026-10-20 15:06:39.517.
+Test Suite 'FlexibleR7SettingsHostedTests' passed at 2026-10-20 15:09:42.887.
+Test Suite 'FlexibleRound5SettingsHostedTests' passed at 2026-10-20 15:11:40.851.
+Test Suite 'FlexibleRound6HostedTests' passed at 2026-10-20 15:15:47.548.
+Test Suite 'FlexibleRound7ScreenHostedTests' passed at 2026-10-20 15:16:30.127.
+Test Suite 'FlexibleRound7ViewsHostedTests' passed at 2026-10-20 15:21:10.510.
+Test Suite 'FlexibleSettingsPageHostedTests' passed at 2026-10-20 15:22:55.418.
+### goldens (deterministic / unseeded)
+38
+	 Executed 13 tests, with 0 failures (0 unexpected) in 14.082 (14.083) seconds
+32
+FLEX-AP PART-SKIP FlexibleAngledGoldenTests.testLatticeSubtreesReEncodeIdentically: the RAW subtree bytes need SWIFT_DET
+	 Executed 13 tests, with 0 failures (0 unexpected) in 13.759 (13.760) seconds
+DIFFERS: 0
+### rerun (after: another group's map stands still again; the re-pins)
+Test Case '-[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow]' passed (66.491 seconds).
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleLatticeSectionsHostedTests.swift:124: error: -[TopOptFlowsTests.FlexibleLatticeSectionsHostedTests testASolidTapShowsTheLineAndOneFix] :
+Test Case '-[TopOptFlowsTests.FlexibleLatticeSectionsHostedTests testASolidTapShowsTheLineAndOneFix]' failed (21.862 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E1FollowUpTests testHisLivePadIsUnchangedByTheCornerRule]' passed (9.801 seconds).
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7E1ReviewHostedTests.swift:144: error: -[TopOptFlowsTests.FlexibleR7E1ReviewHostedTests testAPopUpAfterDoneKeepsTheTurn] : XCTAssertLes
+Test Case '-[TopOptFlowsTests.FlexibleR7E1ReviewHostedTests testAPopUpAfterDoneKeepsTheTurn]' failed (141.117 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SquishExitTests testExitWithNothingChangedDoesNotRetryAFailedBuild]' passed (3.472 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SquishExitTests testExitWithNothingChangedLeavesTheMainPageAlone]' passed (11.051 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SquishExitTests testExitWithNothingChangedLeavesTheViewOffAndNothingDeferred]' passed (7.333 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SquishExitTests testOnlyTheSelectedFacesGroupSquishesOnTheSettingsPage]' passed (3.106 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SquishExitTests testSaveAndExitWithTheLatticeViewOffOnlyStores]' passed (11.495 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SquishExitTests testTheSelectedGroupsOwnSimMovesTheSettingsPage]' passed (10.996 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsTests testTheBendViewHoldsTheWholeGroupAtFullDepth]' passed (15.174 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU1Tests testAnEdgeCardReadsLikeAFaceAndTheCameraStaysPut]' passed (77.098 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU1Tests testAStampNeverLeavesTheModel]' passed (2.161 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU1Tests testNoRodsInTheLattice]' passed (5.602 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU1Tests testTheTopBendsWithTheSide]' passed (3.457 seconds).
+### baseline f1362eb3 (my changes set aside): FlexibleLatticeSectionsHostedTests.testASolidTapShowsTheLineAndOneFix
+Test Case '-[TopOptFlowsTests.FlexibleLatticeSectionsHostedTests testASolidTapShowsTheLineAndOneFix]' passed (8.134 seconds).
+### rerun2 (column cap 60k -> 12k, >= 2 mm)
+Test Case '-[TopOptFlowsTests.FlexibleLatticeSectionsHostedTests testASolidTapShowsTheLineAndOneFix]' passed (11.004 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU1Tests testTheTopBendsWithTheSide]' passed (2.272 seconds).
+FLEX-M2-HOSTED line 'Solid here · only face-prisms get latticed' pill (323.0, 72.0, 367.0, 44.0) · fix (578.5, 78.0, 99.5, 32.0) · exited 1
+### rerun3 (final tree): U1, Round5SquishExit, Round7Views, R7X1, E1ReviewHosted popup, LatticeSectionsHosted
+Test Case '-[TopOptFlowsTests.FlexibleLatticeSectionsHostedTests testASolidTapShowsTheLineAndOneFix]' passed (11.710 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E1ReviewHostedTests testAPopUpAfterDoneKeepsTheTurn]' passed (128.492 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7X1Tests testTheLatticeViewAndPrismsNeverTurnXrayOn]' passed (24.208 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7X1Tests testThePrintedViewDrawsTheLatticeWithXrayOffUnlessCovered]' passed (22.992 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7X1Tests testTheSquishPagesXrayIsTheBendsPrismIntoTheModel]' passed (13.549 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7X1Tests testXrayIsOffByDefaultOnBothPagesWhateverTheFinish]' passed (17.781 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SquishExitTests testExitWithNothingChangedDoesNotRetryAFailedBuild]' passed (3.510 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SquishExitTests testExitWithNothingChangedLeavesTheMainPageAlone]' passed (11.368 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SquishExitTests testExitWithNothingChangedLeavesTheViewOffAndNothingDeferred]' passed (7.380 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SquishExitTests testOnlyTheSelectedFacesGroupSquishesOnTheSettingsPage]' passed (3.096 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SquishExitTests testSaveAndExitWithTheLatticeViewOffOnlyStores]' passed (9.464 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SquishExitTests testTheSelectedGroupsOwnSimMovesTheSettingsPage]' passed (10.292 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsTests testAGroupsPrismShowsOnlyAfterHisPickNeverOnOpenNorForAPendingGroup]' passed (3.817 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsTests testAStressRetryLandingNeverUndoesHisPause]' passed (35.208 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsTests testEverySettingsPlayerLineHasShorterForms]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsTests testHisPauseFreezesThePoseUntilHePressesPlay]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsTests testHisPauseHoldsAcrossAnEditUntilHePressesPlay]' passed (226.207 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsTests testNoSquishNumberOnTheMainPageAfterAPickOrUnderPrisms]' passed (3.954 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsTests testPlayIsOffOnOpenAndOnlyPlayShowsTheBarAndPlays]' passed (34.258 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsTests testTheBendViewHoldsTheWholeGroupAtFullDepth]' passed (15.034 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsTests testTheMainPageModelWearsNoRoleColourWhateverRolesAreHandedOver]' passed (28.405 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsTests testThePlayIconsSayWhenTheSimsWorkOrFail]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsTests testTheSettingsHeatShowsTheCurrentGroupEveryGroupOrNone]' passed (7.307 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsTests testXrayIsItsOwnIconOffByDefaultAndTheDefaultIsTheOpaqueModel]' passed (29.454 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsTests testXrayOpensOffWhateverTheFinish]' passed (19.586 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU1Tests testAnEdgeCardReadsLikeAFaceAndTheCameraStaysPut]' passed (58.219 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU1Tests testAStampNeverLeavesTheModel]' passed (2.179 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU1Tests testNoRodsInTheLattice]' passed (7.838 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU1Tests testTheTopBendsWithTheSide]' passed (22.467 seconds).
+	 Executed 29 tests, with 0 failures (0 unexpected) in 757.780 (757.785) seconds
+	 Executed 29 tests, with 0 failures (0 unexpected) in 757.780 (757.787) seconds

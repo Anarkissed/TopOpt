@@ -1,0 +1,125 @@
+# The H39 hotfix — the runs, raw counts (2026-10-17). swift test --skip-build --scratch-path /tmp/r7d-build; counts from Test Case lines.
+# Commits: 76df22e8 (tests FIRST vs stubs) · a3784168 (the code, re-pins, pictures) · a465f66f (follow-up: a hold never drops a newer scene; the suite's blast radius re-pinned)
+
+## 1. RED (76df22e8, stubs) — h39_red_run.txt
+=== exit 1 FlexibleH39HotfixHookTests 19:14:04
+=== exit 1 FlexibleRuling6NoCoreTests 19:14:17
+=== exit 1 FlexibleH40ShadowTests 19:14:35
+=== exit 1 FlexibleH39HostedTests 19:15:32
+
+## 2. GREEN (the code, before a3784168's commit)
+=== exit 0 FlexibleH39HotfixHookTests 19:18:35
+FLEX-RULING6-N2 opened 1 asked 91 (unchanged after the last face-prism went)
+FLEX-RULING6-N1 no face-prism: opened 0 asked 0 runs 0 · line 'Set a face to Lattice in Selections first' · control opened 1 asked 45 designs 5
+=== exit 0 FlexibleRuling6NoCoreTests 19:18:41
+FLEX-H40-S1 printed view: 4122 px differ from today's frame, 4122 darker · body alpha 0.0
+=== exit 0 FlexibleH40ShadowTests 19:18:59
+FLEX-H39-HOSTED-R1 Topology: card top 555.5 · toggle at (181.75, 586.25) · panel cover open 0.9993766233766234 / closed 0.0 | Flexible: card top 560.5 · toggle ink (182.5, 588.75) · tapped (181.75, 591.25) | Topology again: carried cover 0.0 · his own tap 0.9993766233766234
+=== exit 1 FlexibleH39HostedTests 19:19:57
+(the hosted class's first green run failed its toggle check on the widened Keep clear pill — the check now matches the toggle's own picture; then:)
+Test Case '-[TopOptFlowsTests.FlexibleH39HostedTests testAFlexibleSessionThenTopologyNeverShowsTheRegionsPanelUnlessHeOpensItThere]' passed (54.878 seconds).
+FLEX-H39-HOSTED-R1 Topology: card top 555.5 · toggle at (181.75, 586.25) · panel cover open 0.9993766233766234 / closed 0.0 | Flexible: card top 560.5 · the toggle's best match (146.0, 576.0) diff 15.5 (Topology's own 0.0) · tapped false | Topology again: carried cover 0.0 · his own tap 0.9993766233766234
+RED CONTROL re-run with H39's line taken out (then put back):
+Test Case '-[TopOptFlowsTests.FlexibleH39HostedTests testAFlexibleSessionThenTopologyNeverShowsTheRegionsPanelUnlessHeOpensItThere]' failed (58.133 seconds).
+FLEX-H39-HOSTED-R1 Topology: card top 555.5 · toggle at (181.75, 586.25) · panel cover open 0.9993766233766234 / closed 0.0 | Flexible: card top 555.5 · the toggle's best match (182.0, 586.0) diff 0.0 (Topology's own 0.0) · tapped true | Topology again: carried cover 0.9993766233766234 · his own tap 0.0
+
+## 3. The likely-affected classes, then the re-pins
+=== exit 1 FlexibleR7M1Tests 19:30:43
+=== exit 1 FlexibleR7M1VerifyTests 19:33:07
+=== exit 0 FlexibleR7RTests 19:33:46
+=== exit 0 FlexibleMeetTests 19:33:55
+=== exit 0 FlexiblePressAimTests 19:34:06
+=== exit 0 FlexibleEdgeGroupsTests 19:34:40
+=== exit 0 FlexibleRound6Tests 19:35:18
+=== exit 0 FlexiblePressFixturesTests 19:35:20
+=== exit 0 FlexibleMeetReviewTests 19:35:24
+=== exit 0 FlexiblePressAimReviewTests 19:35:31
+=== exit 0 FlexiblePressSaveTests 19:35:34
+=== exit 0 FlexibleLatticeSectionsHostedTests 19:35:44
+=== exit 0 FlexibleRound7ScreenHookTests 19:35:58
+FLEX-R7M1-1a+ his live lattice: Face 3 latticed 832/832 max 50.0 · Top 1024/1024 · voxels 26624 of the whole part's 53248
+FLEX-R7M1-1a his pad as saved: facePrisms false · stacks kept 0 (core's Top 4096) · issues ["No lattice under Face 1", "No lattice under Face 4", "No lattice under Face 2", "No lattice under Face 3", "No lattice under Face 5"] · pill 'Set a face to Lattice in Selections first' · control built true
+=== exit 0 FlexibleR7M1Tests 19:37:12
+FLEX-R7M1V-V1 no face-prism: designs 0 · shown max 0.0 dent false · line 'Set a face to Lattice in Selections first' · control max 28.668510718975572 line 'Ready · No lattice under Face 1'
+=== exit 0 FlexibleR7M1VerifyTests 19:37:39
+
+## 4. Goldens (FlexibleAngledGoldenTests), at a3784168 and again at a465f66f
+goldens_det: 38 identical, 0 DIFFERS, 0 PART-SKIP, Executed 13 tests, with 0 failures (0 unexpected) in 13.588 (13.591) seconds
+goldens_unseeded: 32 identical, 0 DIFFERS, 1 PART-SKIP, Executed 13 tests, with 0 failures (0 unexpected) in 13.407 (13.409) seconds
+goldens_det2: 38 identical, 0 DIFFERS, 0 PART-SKIP, Executed 13 tests, with 0 failures (0 unexpected) in 13.408 (13.411) seconds
+goldens_unseeded2: 32 identical, 0 DIFFERS, 1 PART-SKIP, Executed 13 tests, with 0 failures (0 unexpected) in 13.392 (13.395) seconds
+FLEX-AP A1_0002: no face-prism — opened as before ruling 6
+FLEX-AP A1_0003: no face-prism — opened as before ruling 6
+
+## 5. The 16 stage-job hashes: stage_job_hashes_h39.txt (a465f66f) == round7/batch_d1_review/stage_job_hashes_d1r.txt (whole file): IDENTICAL; a3784168's too: IDENTICAL
+
+## 6. THE TARGETED SUITE, once, at a3784168 — 267 classes (every Flexible class, every class that names a touched file — WorkspacePlaceholder, MetalMeshView, FlexibleStageModel, +EdgePick, FlexibleLatticeUnder, FlexibleReadiness, MeshRenderer+FlexibleLattice, FlexibleLatticePass — the R7-D1 review's list, LatticeStaleTypeTests and the listed #354 classes; SurfaceStageGesturesTests does not exist), 23 chunks of 12
+chunk_1.log: 85 passed · 3 failed · 13 skipped · exit 1
+chunk_2.log: 48 passed · 1 failed · 13 skipped · exit 1
+chunk_3.log: 71 passed · 1 failed · 2 skipped · exit 1
+chunk_4.log: 32 passed · 1 failed · 4 skipped · exit 1
+chunk_5.log: 65 passed · 0 failed · 1 skipped · exit 0
+chunk_6.log: 82 passed · 0 failed · 0 skipped · exit 0
+chunk_7.log: 49 passed · 0 failed · 8 skipped · exit 0
+chunk_8.log: 48 passed · 0 failed · 5 skipped · exit 0
+chunk_9.log: 64 passed · 2 failed · 4 skipped · exit 1
+chunk_10.log: 46 passed · 1 failed · 24 skipped · exit 1
+chunk_11.log: 60 passed · 1 failed · 2 skipped · exit 1
+chunk_12.log: 49 passed · 0 failed · 5 skipped · exit 0
+chunk_13.log: 81 passed · 0 failed · 1 skipped · exit 0
+chunk_14.log: 50 passed · 0 failed · 0 skipped · exit 0
+chunk_15.log: 79 passed · 0 failed · 1 skipped · exit 0
+chunk_16.log: 66 passed · 0 failed · 1 skipped · exit 0
+chunk_17.log: 82 passed · 0 failed · 2 skipped · exit 0
+chunk_18.log: 43 passed · 1 failed · 1 skipped · exit 1
+chunk_19.log: 75 passed · 0 failed · 1 skipped · exit 0
+chunk_20.log: 53 passed · 0 failed · 4 skipped · exit 0
+chunk_21.log: 145 passed · 0 failed · 2 skipped · exit 0
+chunk_22.log: 80 passed · 0 failed · 0 skipped · exit 0
+chunk_23.log: 69 passed · 0 failed · 0 skipped · exit 0
+TOTAL: 1627 tests · 1522 passed · 94 skipped · 11 failed · no exit signal 11
+the 11:
+  AppModelTests testReopenedThreeMFProjectReimportsTheStlWorkingCopy
+  AppModelTests testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance
+  AppModelTests testThreeMFImportOptimisesOnDeviceEndToEnd
+  FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker
+  FlexibleFEFieldTests testASlenderAllLatticePartGetsItsField
+  FlexibleGroupPaletteHostedTests testNineGroupsNumberTheSharedColourOnTheRailAndOnTheirOwnFaces
+  FlexibleRound6HostedTests testPastEightGroupsTheNumberRidesTheWallInTheGroupsView
+  FlexibleRound6HostedTests testTheTagsDiscsAndHiddenOutlinesAreOnThePage
+  FlexibleRound7ViewsHostedTests testThePlayIconsRingAndDotAreSeenWithPlayOff
+  FlexibleS1VerifyTests testTheAppsSectorMembershipIsCoresOnACurvedSector
+  LatticeSimSolveTriggerTests testTheTriggerRefusesOnAllThreeGrounds
+  known: AppModelTests 3MF x3; FlexibleBatchNVerifyTests refine line (x8 assertions); LatticeSimSolveTriggerTests; FlexibleRound7ViewsHostedTests Play ring (M1's environmental TimelineView ring)
+  ours, fixed at a465f66f: FlexibleFEFieldTests (a REAL fault: a late hold dropped a newer scene), FlexibleS1VerifyTests (stlProject fixture), FlexibleGroupPaletteHostedTests + FlexibleRound6HostedTests x2 (prismProject fixture)
+  #354 evidence files rewritten by #354's probes (plane-extents x2, smoothing x2): restored with git checkout
+
+## 7. The follow-up (a465f66f)
+N4 (hold then open at once) RED twice before the fix:
+Test Case '-[TopOptFlowsTests.FlexibleRuling6NoCoreTests testAHoldThenAnOpenAtOnceKeepsTheNewScene]' failed (0.209 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRuling6NoCoreTests testAHoldThenAnOpenAtOnceKeepsTheNewScene]' failed (1.606 seconds).
+fix1.log:=== exit 0 FlexibleRuling6NoCoreTests 21:50:20
+fix1.log:=== exit 0 FlexibleFEFieldTests 21:52:47
+fix1.log:=== exit 0 FlexibleGroupPaletteHostedTests 21:53:30
+fix1.log:=== exit 0 FlexibleRound6HostedTests 21:57:20
+fix1.log:=== exit 0 FlexibleS1VerifyTests 21:57:25
+fix1.log:=== exit 0 FlexibleH39HotfixHookTests 21:57:28
+fix1.log:=== exit 0 FlexibleH40ShadowTests 21:57:46
+fix1.log:=== exit 0 FlexibleR7M1Tests 21:58:06
+fix1.log:=== exit 0 FlexibleR7M1VerifyTests 21:58:33
+fix1.log:=== exit 0 FlexibleH39HostedTests 21:59:30
+fix1b.log:=== exit 0 FlexibleReadinessTests 22:00:02
+fix1b.log:=== exit 0 FlexibleSettingsRound4Tests 22:00:10
+fix1b.log:=== exit 0 FlexibleEdgeGroupsTests 22:00:43
+fix1b.log:=== exit 0 FlexibleRound6Tests 22:01:18
+fix1b.log:=== exit 0 FlexibleLatticeSectionsTests 22:01:55
+fix1b.log:=== exit 0 FlexibleLatticeSectionsHostedTests 22:02:05
+fix1b.log:=== exit 0 FlexibleR7RTests 22:02:43
+fix1b.log:=== exit 0 FlexibleSettingsResetTests 22:02:45
+
+## 8. Renderer, the other stages (H40): shadow/compare.txt — 12 frames before == after
+## 9. Chrome, the other stages: other_stages/compare.txt — 11 identical, 2 the structural Topology load arrow's run-to-run flicker (before vs before differs the same)
+
+## 10. iOS (a465f66f): xcodebuild Debug, flexA1 — BUILD SUCCEEDED; TopOpt.debug.dylib 84 237 488 bytes, 22:22, sha256 65e7f5c2…62b5413
+the app was running (launchctl: UIKitApplication:com.nadim.topopt, pid 9200) — he said 2026-10-17 he no longer uses it: simctl terminate, then install (exit 0); NOT launched.
+the installed dylib's sha256 == the built one's; strings: FlexibleCoreDoor x2, flexibleDrawn x1.

@@ -1,0 +1,61 @@
+# Part A (the 4 tests the #354 89af86dd sync left red), 2026-10-25, swift test --scratch-path /tmp/r7x20b-build
+## BASELINE at 0a0db768 (before any edit): filter FlexibleStageCapsuleTests|FlexibleRound9HookTests|FlexibleSurfaceNavTests|LatticeStageTests|LatticeStaleTypeTests
+	 Executed 10 tests, with 1 failure (0 unexpected) in 8.366 (8.367) seconds
+	 Executed 16 tests, with 1 failure (1 unexpected) in 2.301 (2.303) seconds
+	 Executed 3 tests, with 3 failures (0 unexpected) in 0.106 (0.106) seconds
+	 Executed 40 tests, with 7 failures (1 unexpected) in 12.995 (13.000) seconds
+	 Executed 40 tests, with 7 failures (1 unexpected) in 12.995 (13.001) seconds
+	 Executed 5 tests, with 2 failures (0 unexpected) in 0.003 (0.003) seconds
+	 Executed 6 tests, with 0 failures (0 unexpected) in 2.220 (2.220) seconds
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleRound9HookTests.swift:102: error: -[TopOptFlowsTests.FlexibleRound9HookTests testEveryHookIsPinnedOnceWithItsGate] : XCTAssertEqual failed: ("["H50d-lattice: the hook appears 0 times (must be exactly once)", "H50d: requestRun / requestLatticeRun / the flag lines not found"]") is not equal to ("[]")
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleStageCapsuleTests.swift:37: error: -[TopOptFlowsTests.FlexibleStageCapsuleTests testEachMenuRowDoesOneThingAndFoldsTheCards] : XCTAssertEqual failed: ("["topology"]") is not equal to ("["topology", "surface"]")
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleStageCapsuleTests.swift:43: error: -[TopOptFlowsTests.FlexibleStageCapsuleTests testEachMenuRowDoesOneThingAndFoldsTheCards] : XCTAssertEqual failed: ("1") is not equal to ("2")
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleSurfaceNavTests.swift:16: error: -[TopOptFlowsTests.FlexibleSurfaceNavTests testTheHookIsInPlace] : XCTAssertEqual failed: ("0") is not equal to ("1") - H9 must appear exactly once: HStack(spacing: PageChrome.gap) { stageNavButton(to: back, icon: "chevron.left"); if let x = FlexibleStageNav.extra(stage, flexible: project.lattice.flexible != nil) { stageNavButton(to: x.dest, icon: x.icon, title: x.title) } }
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleSurfaceNavTests.swift:19: error: -[TopOptFlowsTests.FlexibleSurfaceNavTests testTheHookIsInPlace] : XCTUnwrap failed: expected non-nil value of type "Range<Index>"
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleSurfaceNavTests.swift:41: error: -[TopOptFlowsTests.FlexibleSurfaceNavTests testTheSurfaceButtonSitsBesideTopologyAndSurfaceComesBackToFlexible] : XCTUnwrap failed: expected non-nil value of type "WorkspaceStage" - B5 removed the Surface stage (P5 retires H9 and this test)
+app/TopOptKit/Tests/TopOptFlowsTests/LatticeStageTests.swift:248: error: -[TopOptFlowsTests.LatticeStageTests testPickingStructuralOrAestheticClearsAnyOtherType] : failed: caught error: "DecodingError.keyNotFound: Key 'topology' not found in keyed decoding container. Path: flexible. Debug description: No value associated with key CodingKeys(stringValue: "topology", intValue: nil) ("topology")."
+
+## RED (tests changed, sources not yet): + FlexibleSync354HookTests
+	 Executed 10 tests, with 0 failures (0 unexpected) in 5.297 (5.298) seconds
+	 Executed 16 tests, with 1 failure (0 unexpected) in 2.252 (2.254) seconds
+	 Executed 2 tests, with 5 failures (0 unexpected) in 0.006 (0.006) seconds
+	 Executed 40 tests, with 11 failures (0 unexpected) in 11.687 (11.692) seconds
+	 Executed 40 tests, with 11 failures (0 unexpected) in 11.687 (11.693) seconds
+	 Executed 5 tests, with 5 failures (0 unexpected) in 1.949 (1.949) seconds
+	 Executed 6 tests, with 0 failures (0 unexpected) in 2.147 (2.148) seconds
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleStageCapsuleTests.swift:18: error: -[TopOptFlowsTests.FlexibleStageCapsuleTests testTheMenuIsTopologyFlexibleSurfaceThenAbout] : XCTAssertEqual failed: ("["flexible-menu-topology", "flexible-menu-flexible", "flexible-menu-surface", "flexible-menu-about"]") is not equal to ("["flexible-menu-topology", "flexible-menu-flexible", "flexible-menu-about"]")
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleStageCapsuleTests.swift:19: error: -[TopOptFlowsTests.FlexibleStageCapsuleTests testTheMenuIsTopologyFlexibleSurfaceThenAbout] : XCTAssertEqual failed: ("["‹ Topology", "Flexible", "Surface ›", "About Flexible…"]") is not equal to ("["‹ Topology", "Flexible", "About Flexible…"]")
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleStageCapsuleTests.swift:20: error: -[TopOptFlowsTests.FlexibleStageCapsuleTests testTheMenuIsTopologyFlexibleSurfaceThenAbout] : XCTAssertEqual failed: ("[Optional("1 anchor · 1 load"), Optional("You are here"), Optional("cuts · unions · patterns"), Optional("limits · delete")]") is not equal to ("[Optional("1 anchor · 1 load"), Optional("You are h
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleStageCapsuleTests.swift:21: error: -[TopOptFlowsTests.FlexibleStageCapsuleTests testTheMenuIsTopologyFlexibleSurfaceThenAbout] : XCTAssertEqual failed: ("[TopOptFlows.FlexibleStageCapsule.Action.topology, TopOptFlows.FlexibleStageCapsule.Action.none, TopOptFlows.FlexibleStageCapsule.Action.surface, TopOptFlows.FlexibleStageCapsule.Action.about]") is not
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleStageCapsuleTests.swift:22: error: -[TopOptFlowsTests.FlexibleStageCapsuleTests testTheMenuIsTopologyFlexibleSurfaceThenAbout] : XCTAssertFalse failed - no dead Surface row in the morning build
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleSync354HookTests.swift:28: error: -[TopOptFlowsTests.FlexibleSync354HookTests testH54IsPinnedOnceInsideClearLatticeType] : XCTAssertEqual failed: ("["H54: the hook appears 0 times (must be exactly once)", "H54: not inside clearLatticeType()"]") is not equal to ("[]")
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleSync354HookTests.swift:34: error: -[TopOptFlowsTests.FlexibleSync354HookTests testH54IsPinnedOnceInsideClearLatticeType] : XCTAssertFalse failed - control: H54 outside clearLatticeType() must go red
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleSync354HookTests.swift:42: error: -[TopOptFlowsTests.FlexibleSync354HookTests testAStructuralOrAestheticPickOrAPendingCopyClearsFlexible] : XCTAssertNil failed: "FlexibleStageSettings(materialID: nil, nozzleTempC: nil, topology: "auto", feel: "springy", beadsPerWall: 1, faces: [], checkStamps: [], curveConvention: Optional(1), finish: nil, groupColours:
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleSync354HookTests.swift:48: error: -[TopOptFlowsTests.FlexibleSync354HookTests testAStructuralOrAestheticPickOrAPendingCopyClearsFlexible] : XCTAssertNil failed: "FlexibleStageSettings(materialID: nil, nozzleTempC: nil, topology: "auto", feel: "springy", beadsPerWall: 1, faces: [], checkStamps: [], curveConvention: Optional(1), finish: nil, groupColours:
+app/TopOptKit/Tests/TopOptFlowsTests/LatticeStageTests.swift:252: error: -[TopOptFlowsTests.LatticeStageTests testPickingStructuralOrAestheticClearsAnyOtherType] : XCTAssertNil failed: "{
+
+## GREEN (sources changed): the 4 classes + FlexibleChromeLayoutTests + FlexibleSync354HookTests + the 19 P1 hook-pin classes + LatticeStaleTypeTests
+Test Suite 'FlexibleBatchCHookTests' passed at 2026-10-25 04:03:57.131.
+Test Suite 'FlexibleBatchMXrayTests' passed at 2026-10-25 04:06:25.741.
+Test Suite 'FlexibleChromeLayoutTests' passed at 2026-10-25 04:06:25.780.
+Test Suite 'FlexibleH39HotfixHookTests' passed at 2026-10-25 04:06:26.904.
+Test Suite 'FlexibleMainPageHookTests' passed at 2026-10-25 04:06:27.162.
+Test Suite 'FlexibleMainPageRound4Tests' passed at 2026-10-25 04:06:27.214.
+Test Suite 'FlexibleR7M1Tests' passed at 2026-10-25 04:06:49.775.
+Test Suite 'FlexibleR7U21HookTests' passed at 2026-10-25 04:06:51.006.
+Test Suite 'FlexibleRound6HostedTests' passed at 2026-10-25 04:11:20.264.
+Test Suite 'FlexibleRound6Tests' passed at 2026-10-25 04:11:56.057.
+Test Suite 'FlexibleRound7ScreenHookTests' passed at 2026-10-25 04:12:09.087.
+Test Suite 'FlexibleRound7SelectionsHookTests' passed at 2026-10-25 04:12:11.222.
+Test Suite 'FlexibleRound9HookTests' passed at 2026-10-25 04:12:16.466.
+Test Suite 'FlexibleS1VerifyTests' passed at 2026-10-25 04:12:18.787.
+Test Suite 'FlexibleSelectionsListTests' passed at 2026-10-25 04:12:18.819.
+Test Suite 'FlexibleSettingsRound4Tests' passed at 2026-10-25 04:12:19.336.
+Test Suite 'FlexibleSquishPlayerTests' passed at 2026-10-25 04:12:20.045.
+Test Suite 'FlexibleStageCapsuleTests' passed at 2026-10-25 04:12:20.046.
+Test Suite 'FlexibleStepRepairHookTests' passed at 2026-10-25 04:12:20.862.
+Test Suite 'FlexibleSurfaceNavTests' passed at 2026-10-25 04:12:20.899.
+Test Suite 'FlexibleSync354HookTests' passed at 2026-10-25 04:12:20.903.
+Test Suite 'LatticeStageTests' passed at 2026-10-25 04:12:23.167.
+Test Suite 'LatticeStaleTypeTests' passed at 2026-10-25 04:12:25.334.
+	 Executed 124 tests, with 0 failures (0 unexpected) in 509.161 (509.177) seconds

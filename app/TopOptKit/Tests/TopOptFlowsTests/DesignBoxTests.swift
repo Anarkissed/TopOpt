@@ -91,19 +91,24 @@ final class DesignBoxTests: XCTestCase {
         XCTAssertEqual(spec.max, SIMD3<Double>(21, 14, 46))
     }
 
-    func testBridgeKeepOutsConvertInOrder() {
+    /// ★ B6 (his answer 2026-10-24, "Run with just the first design box for now"): keep-outs are Negative rows of the
+    /// design-primitive list and are NOT sent until core takes the list. They stay in the model, in order.
+    /// ★ Negative BOX rows are today's keep-outs and still go out, in order, as before B6 (core takes them today): a drawn
+    /// "no mass here" is never silently dropped. Cylinders are not sent until core takes the list.
+    func testKeepOutsStayInOrderAndAreStillSent() {
         var m = DesignBoxModel()
         m.enable(around: part)
         m.keepOuts = [
             DesignBoxBounds(min: SIMD3<Float>(0, 0, 0), max: SIMD3<Float>(1, 2, 3)),
             DesignBoxBounds(min: SIMD3<Float>(4, 5, 6), max: SIMD3<Float>(7, 8, 9)),
         ]
-        let ks = m.bridgeKeepOuts
-        XCTAssertEqual(ks.count, 2)
-        XCTAssertEqual(ks[0].min, SIMD3<Double>(0, 0, 0))
-        XCTAssertEqual(ks[0].max, SIMD3<Double>(1, 2, 3))
-        XCTAssertEqual(ks[1].min, SIMD3<Double>(4, 5, 6))
-        XCTAssertEqual(ks[1].max, SIMD3<Double>(7, 8, 9))
+        XCTAssertEqual(m.bridgeKeepOuts.map(\.max), [SIMD3<Double>(1, 2, 3), SIMD3<Double>(7, 8, 9)], "★ sent, in order")
+        XCTAssertEqual(m.bridgeKeepOuts.map(\.min), [SIMD3<Double>(0, 0, 0), SIMD3<Double>(4, 5, 6)])
+        m.primitives[1].shape = .cylinder
+        XCTAssertEqual(m.bridgeKeepOuts.count, 1, "a Negative cylinder is not sent until core takes the list")
+        m.primitives[1].shape = .box
+        XCTAssertEqual(m.primitives.map(\.sign), [.positive, .negative, .negative])
+        XCTAssertEqual(m.keepOuts.map(\.max), [SIMD3<Float>(1, 2, 3), SIMD3<Float>(7, 8, 9)])
     }
 
     func testBoundsNormalizeMinMax() {

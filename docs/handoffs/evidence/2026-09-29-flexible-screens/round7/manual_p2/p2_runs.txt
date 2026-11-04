@@ -1,0 +1,43 @@
+MANUAL P2 run, 2026-10-23, at 55631daa + working tree, scratch-path /tmp/r7x20b-build
+Classes (18, the ones that touch or pin the changed files):
+FlexibleManualP2Tests FlexibleManualP1Tests FlexibleM1ManualTests FlexibleManualFollowUpTests FlexibleLatticePassTests FlexibleLatticeFieldTests FlexibleLatticeGradingTests FlexibleR7U21EdgeLookTests FlexibleTopLayerTests FlexibleR7E1FollowUpTests FlexibleU1Tests FlexibleSettingsRound4Tests FlexibleFEPassTests FlexibleInPassCompositeTests FlexibleBatchBReviewTests FlexibleH39HotfixHookTests FlexibleR7EveningAnswersTests FlexibleReadinessTests
+
+runner.log:
+start 01:42:25 55631daa + working tree
+build exit 0 01:42:27
+chunk_aa exit 0 01:45:35
+chunk_ab exit 0 01:46:06
+chunk_ac exit 0 01:48:32
+chunk_ad exit 0 01:51:01
+chunk_ae exit 0 01:51:15
+golden det exit 0 01:51:31
+golden unseeded exit 0 01:51:47
+hashes exit 0 01:52:50
+hashes cmp vs manual_followup (whole file): identical
+ALLDONE 01:52:50
+
+Per chunk (passed failed skipped):
+chunk_aa.log 28 0 0
+chunk_ab.log 32 0 1
+chunk_ac.log 37 0 1
+chunk_ad.log 39 0 0
+chunk_ae.log 23 0 0
+Total: 159 passed, 0 failed, 2 skipped
+
+golden_det.log: identical 38, DIFFERS 0, PART-SKIP 0
+golden_unseeded.log: identical 32, DIFFERS 0, PART-SKIP 1
+Stage-job hashes (16): cmp-identical (whole file) to round7/manual_followup/stage_job_hashes_mf.txt
+
+Before (red-first, the first run of FlexibleManualP2Tests): 3 of 4 passed; testTheGradeShrinksTheCellsAndSteppedStepsHard failed 6 assertions — the grade reached only the column's middle on his pinched Group 1 (cell by quarter 10.60 / 7.89 / none / none mm; the sim's rho 0.105..0.200, never 0.30; Stepped drew 3 of 5 bands). Fixed in FlexibleManualField.build (each owner's own depth), the test's hardness walk reworked; re-run passed.
+
+Printed by FlexibleManualP2Tests in this run:
+FLEX-P2 honeycomb: 300 interior points; card d 7.200 mm; walls across: 319 runs, p05 0.900 p50 1.690 mm (2 beads = 0.90 mm); prism max |Δ| 0.00e+00 over 293
+FLEX-P2 TYPE SEAM fragments over 549 lines: P2 band 0 of 703 runs over 1647.6 mm = 0.0000 /mm; control 24 of 307 over 1572.6 mm = 0.0153 /mm · RED CONTROL (P1) band 733 of 1208 runs over 1647.6 mm = 0.4449 /mm; control 121 of 435 over 1572.6 mm = 0.0769 /mm
+FLEX-P2 RED (one lattice per part): walls across p05 0.445 mm, prism max |Δ| 7.797
+FLEX-P2 WALL SEAM fragments over 549 lines: P2 band 17 of 556 runs over 1647.6 mm = 0.0103 /mm; control 21 of 338 over 1572.6 mm = 0.0134 /mm · RED CONTROL (P1) band 811 of 1445 runs over 1647.6 mm = 0.4922 /mm; control 148 of 504 over 1572.6 mm = 0.0941 /mm
+FLEX-P2 GPU pieces: max |gpu − swift| = 0.0009672642 mm over 700 points (300 in seam cells, worst there 0.0007171631); RED control (pieces dropped) 19.726192 mm
+FLEX-P2 grade 10→30 % (Default): cell by quarter of the depth 10.41 / 8.03 / 6.18 / 5.20 mm (10 % = 13.91, 30 % = 4.64); walls crossed per mm face 0.481 floor 0.592
+FLEX-P2 the sim's ρ in the group: 0.109…0.300, max |sim − drawn| 0.00e+00
+FLEX-P2 Stepped: 2 bands asked (own depth 33.9 mm); 2 distinct cells drawn off the seams [4.64, 13.91] (asked [4.64, 13.91]); on a band's cell: Stepped 94.6 % of 92343 samples (seam cells 6.7 %) · RED Default 1.4 % (208 distinct cells)
+FLEX-P2 STEPPED SEAMS fragments over 557 lines: P2 band 143 of 779 runs over 1671.6 mm = 0.0855 /mm; control 61 of 442 over 1632.0 mm = 0.0374 /mm · P1 band 1754 of 2483 runs over 1671.6 mm = 1.0493 /mm; control 227 of 661 over 1632.0 mm = 0.1391 /mm
+FLEX-P2 RED (grade off): cell by quarter 13.91 / 13.91 / 13.91 / 13.91 mm; walls crossed per mm face 0.235 floor 0.236 (floor/face 1.00; graded 1.23)

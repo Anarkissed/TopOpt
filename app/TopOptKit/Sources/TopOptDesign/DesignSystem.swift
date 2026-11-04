@@ -142,6 +142,20 @@ public enum DS {
             RGBA(hex: 0xBF5AF2), // E
         ]
 
+        // ★ THE FLEXIBLE SQUEEZE GROUPS' PALETTE (not in the HTML: the maintainer's OK, 2026-09-30,
+        // "Add more colour tokens" — PR #362 round 5 C5). Eight, never purple (the depth prism's), none
+        // a warning / danger / resting-cyan / selected-white, all ≥ 4.5 : 1 on `background`; computed,
+        // not eyeballed (FlexibleGroupPaletteTests: every pair ΔE ≥ 15, ≥ 8 colour-blind).
+        public static let groupPink = RGBA(hex: 0xF4A0BB)
+        public static let groupMint = RGBA(hex: 0x67FFC6)
+        public static let groupYellow = RGBA(hex: 0xF1E62F)
+        public static let groupTeal = RGBA(hex: 0x028D9B)
+        public static let groupOlive = RGBA(hex: 0x9A950C)
+        public static let groupTerracotta = RGBA(hex: 0xA7665A)
+        /// Squeeze groups 1…8, in order (then round again, numbered).
+        public static let squeezeGroupPalette: [RGBA] = [accentGreen, groupPink, groupMint, accent,
+                                                         groupYellow, groupTeal, groupOlive, groupTerracotta]
+
         // Hairline strokes — white at low alpha, as the design's `border` rules.
         /// `rgba(255,255,255,0.11)` — default glass-panel hairline.
         public static let strokePanel = RGBA(255, 255, 255, 0.11)

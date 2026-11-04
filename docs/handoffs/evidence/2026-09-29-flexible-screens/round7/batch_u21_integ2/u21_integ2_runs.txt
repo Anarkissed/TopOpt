@@ -1,0 +1,72 @@
+# U21 checkpoint 2 (integration) runs — app/TopOptKit, --scratch-path /tmp/r7x20b-build, HEAD f8c88ee0 (then 60732dc4, a test-only re-pin)
+# cherry-picked from claude/flexible-screens-u21-side2 (-x): bd50afba (H) -> 9d5cf10f, 19f821f9 (A) -> f8c88ee0
+# conflicts: only docs/handoffs/2026-09-29-flexible-screens.md (both lanes wrote the top); kept both: CORE LIST, APP LIST, R, F, E, then A, H, checkpoint 1
+### runner.log
+start 06:41:51 f8c88ee0
+build exit 0 06:43:00
+golden det exit 0 06:43:18
+golden unseeded exit 0 06:43:34
+hashes exit 0 06:44:32
+hashes cmp vs round7/batch_x20b/stage_job_hashes_x20b.txt (whole file): identical
+hashes cmp vs round7/batch_u21_integ1/stage_job_hashes_u21_integ1.txt (whole file): identical
+hashes cmp vs round7/batch_u21_r/stage_job_hashes_u21r.txt (whole file): identical
+hashes cmp vs round7/batch_u21_a/stage_job_hashes_u21a.txt (whole file): identical
+hashes cmp vs round7/batch_u21_h/stage_job_hashes_u21h.txt (whole file): identical
+chunk_aa exit 1 07:07:59
+chunk_ab exit 1 07:13:15
+chunk_ac exit 0 07:16:35
+chunk_ad exit 0 07:19:08
+chunk_ae exit 0 07:32:19
+chunk_af exit 0 07:42:37
+chunk_ag exit 0 07:53:19
+chunk_ah exit 1 08:11:05
+chunk_ai exit 0 08:17:28
+chunk_aj exit 0 08:26:10
+chunk_ak exit 0 08:32:18
+ALLDONE 08:32:18
+### classes (132 = union of the wave-2 batches' classes and pins: E, F, R, H, A + FlexibleSquishCopyTests), chunks of 12
+AppModelTests FlexibleBatchBReviewTests FlexibleBatchBReviewUXTests FlexibleBatchCHookTests FlexibleBatchCVerifyTests FlexibleBatchM2Tests FlexibleBatchM2VerifyTests FlexibleBatchMDentTests FlexibleBatchMVerifyTests FlexibleBatchMXrayTests FlexibleBatchNRefineTests FlexibleBatchVHostedTests FlexibleC1Tests FlexibleChromeLayoutTests FlexibleCornerPairTests FlexibleDepthPrismTests FlexibleEdgeGroupsHostedTests FlexibleEdgeGroupsTests FlexibleFEFieldTests FlexibleFEPassTests FlexibleFEVerifyGTests FlexibleFaceCommitTests FlexibleFlatPrismHostedTests FlexibleFlatPrismTests FlexibleGroupPaletteHostedTests FlexibleGroupPaletteTests FlexibleH39HotfixHookTests FlexibleInPassCompositeTests FlexibleLatticeFieldTests FlexibleLatticeGradingTests FlexibleLatticeIsProtectedHostedTests FlexibleLatticePassTests FlexibleLatticeSectionsHostedTests FlexibleLatticeSectionsTests FlexibleLatticeUnderReviewTests FlexibleLatticeUnderTests FlexibleLegendPlacementTests FlexibleMainPageHookTests FlexibleMainPageLoadsTests FlexibleMainPageRound4Tests FlexibleMainPageRound4VerifyTests FlexibleMainPrismEqualityTests FlexibleMainStageTests FlexibleMainViewsTests FlexibleMeetReviewTests FlexibleOverlayClipTests FlexiblePinchTests FlexiblePressReviewTests FlexiblePressSaveTests FlexibleR7D2ReviewHostedTests FlexibleR7D2ReviewTests FlexibleR7E1FollowUpHostedTests FlexibleR7E1FollowUpTests FlexibleR7E1ReviewHostedTests FlexibleR7E1ReviewTests FlexibleR7E1bTests FlexibleR7E2HostedTests FlexibleR7E2ParkTests FlexibleR7E2Tests FlexibleR7E3Tests FlexibleR7E5Tests FlexibleR7FTests FlexibleR7M1Tests FlexibleR7M1VerifyTests FlexibleR7MergeTests FlexibleR7RHostedTests FlexibleR7RTests FlexibleR7SettingsEvidence FlexibleR7SettingsHostedTests FlexibleR7SettingsTests FlexibleR7U21BCurveTests FlexibleR7U21CHandlesHostedTests FlexibleR7U21EdgeLookTests FlexibleR7U21HookTests FlexibleR7U21ImportSheetHostedTests FlexibleR7U21NewModelTests FlexibleR7X1Tests FlexibleR7X1VerifyTests FlexibleReadinessTests FlexibleRegionsTests FlexibleRound5SettingsHostedTests FlexibleRound5SettingsTests FlexibleRound5SettingsVerifyTests FlexibleRound6HostedTests FlexibleRound6Tests FlexibleRound7CardMessagesTests FlexibleRound7D1ReviewTests FlexibleRound7DesignIntegrationHostedTests FlexibleRound7DesignIntegrationTests FlexibleRound7FitHostedTests FlexibleRound7ScreenHookTests FlexibleRound7ScreenHostedTests FlexibleRound7SelectionsHookTests FlexibleRound7SelectionsHostedTests FlexibleRound7ViewsHostedTests FlexibleRowCopyTests FlexibleRuling6NoCoreTests FlexibleS1VerifyTests FlexibleS1bMainTagsTests FlexibleSectorStoreTests FlexibleSelectionsListTests FlexibleSettingsPageHostedTests FlexibleSettingsRound4Tests FlexibleSettingsVerifyD1Tests FlexibleShownValuesTests FlexibleSqueezeGroupsModelTests FlexibleSqueezeGroupsPressTests FlexibleSqueezeGroupsReviewTests FlexibleSqueezeGroupsReviewUITests FlexibleSqueezeGroupsReviewUXTests FlexibleSqueezeGroupsTests FlexibleSqueezeGroupsUITests FlexibleSquishCopyTests FlexibleSquishSolverTests FlexibleSquishTests FlexibleSurfaceNavTests FlexibleTopLayerHostedTests FlexibleTopLayerTests FlexibleU1Tests FlexibleU21BendTests FlexibleU21DeleteUndoTests FlexibleU21OneDepthNumberTests FlexibleU21OneLatticeRuleTests FlexibleU21RTests FlexibleU2Tests FlexibleX20bTests LatticeSectorReviewTests LatticeStaleTypeTests LatticeStructuralViewStateTests PrintParamsTests SmoothingPageRound2Tests UnreadableProjectTests
+### goldens
+golden_det: identical 38 · DIFFERS 0 · PART-SKIP 0 · Executed 13 tests, with 0 failures (0 unexpected) in 13.784 (13.786) seconds
+golden_unseeded: identical 32 · DIFFERS 0 · PART-SKIP 1 · Executed 13 tests, with 0 failures (0 unexpected) in 13.862 (13.864) seconds
+### chunks (Test Case lines)
+chunk_aa.log: passed 98 · failed 3 · skipped 1
+chunk_ab.log: passed 79 · failed 2 · skipped 1
+chunk_ac.log: passed 63 · failed 0 · skipped 0
+chunk_ad.log: passed 92 · failed 0 · skipped 0
+chunk_ae.log: passed 66 · failed 0 · skipped 0
+chunk_af.log: passed 61 · failed 0 · skipped 1
+chunk_ag.log: passed 78 · failed 0 · skipped 2
+chunk_ah.log: passed 66 · failed 1 · skipped 0
+chunk_ai.log: passed 69 · failed 0 · skipped 1
+chunk_aj.log: passed 66 · failed 0 · skipped 1
+chunk_ak.log: passed 132 · failed 0 · skipped 1
+TOTAL: 870 passed, 6 failed, 8 skipped (all 132 classes ran at least one test); signal lines: 0
+### failures
+Test Case '-[TopOptFlowsTests.AppModelTests testReopenedThreeMFProjectReimportsTheStlWorkingCopy]' failed (1.805 seconds).
+Test Case '-[TopOptFlowsTests.AppModelTests testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance]' failed (0.002 seconds).
+Test Case '-[TopOptFlowsTests.AppModelTests testThreeMFImportOptimisesOnDeviceEndToEnd]' failed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleEdgeGroupsTests testAPickedEdgeBecomesAPressAtCoresHalfwayInTheNewGroupAndIsSentOnceCoreTakesIt]' failed (4.871 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleEdgeGroupsTests testEdgesGroupsRoundTripAndOtherFacesKeepTheirJobEntries]' failed (4.507 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsHostedTests testThePlayIconsRingAndDotAreSeenWithPlayOff]' failed (2.824 seconds).
+- AppModelTests 3MF x3: known (no lib3mf in this build)
+- FlexibleRound7ViewsHostedTests ring: known (the Play ring, display)
+- FlexibleEdgeGroupsTests x2: stale pins of the old cap at three sends (batch R's ruling E(1)); batch R did not run this class. Re-pinned in 60732dc4 with an in-test RED control (controlSendsCapAtThree).
+### skipped
+Test Case '-[TopOptFlowsTests.FlexibleBatchMVerifyTests testHisImg6RowsAtTheDevicesPixelCount]' skipped (0.001 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleEdgeGroupsHostedTests testEvidenceOnHisPad]' skipped (0.001 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsEvidence testEvidenceOnHisPad]' skipped (0.001 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7U21EdgeLookTests testEvidenceRenders]' skipped (0.001 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7U21ImportSheetHostedTests testRenders]' skipped (0.001 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleS1bMainTagsTests testEvidenceTheMainPageAsHeSeesIt]' skipped (0.002 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU1Tests testU21BendPictures]' skipped (0.001 seconds).
+Test Case '-[TopOptFlowsTests.UnreadableProjectTests testEveryProjectInTheStoreCopyDecodes]' skipped (0.001 seconds).
+### re-run after the re-pin (FlexibleEdgeGroupsTests + FlexibleSquishCopyTests)
+Executed 11 tests, with 0 failures (0 unexpected) in 39.213 (39.214) seconds
+FLEX-I2-6 (R7-E2) sends ["Send Group 1 only", "Send Group 2 only, Face 2 resting", "Send Group 3 only, Face 5 resting", "Send Group 4 only"] · sent groups [1, 2, 3, 4]
+FLEX-I2-9 (R7-E2) sends before ["Send Group 1 only", "Send Group 2 only, Face 2 resting", "Send Group 3 only, Face 5 resting"] · after ["Send Group 1 only", "Send Group 2 only, Face 2 resting", "Send Group 3 only, Face 5 resting", "Send Group 4 only"] · sent groups 4
+### iOS
+xcodebuild -project app/TopOpt.xcodeproj -scheme TopOpt -configuration Debug -destination id=147E56A1-C8CA-4B9D-BE6C-CF230589A83A -derivedDataPath ~/Library/Developer/Xcode/DerivedData/flexA1 build: ** BUILD SUCCEEDED ** (08:34, at 60732dc4)
+app was NOT running (simctl terminate: "found nothing to terminate"); installed 08:34:59; NOT launched (launchctl: not running after install)
+built == installed TopOpt.debug.dylib: cmp identical; sha256 6f833c646fd8fab229bd3a800e5e271627d69f668ce8f1f6fd488e9877cca2cc (94 687 200 bytes)
+strings in the installed dylib (grep -a): 'No lattice under ' 1, 'set a face-prism' 1, 'Go to Lattice' 1 (E); 'columns short' 1, 'needs more weight or less depth' 1, 'Prism = your drawing' 1 (F); 'Lattice approximate where squish is steepest' 1, 'More…' 1 (R); flx_wall_seam 4, seamSheet 3 (H); 'Flexible filament' 2, FlexibleNewProject 2, FlexibleHomeCard 2, readsMainPageGroups 4 (A)

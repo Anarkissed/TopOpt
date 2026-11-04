@@ -241,8 +241,9 @@ public struct DisplacementField: Sendable {
 public enum FlexAnimation {
     /// Exaggeration band the design calls for (50–100×). The default sits at the low
     /// end so the deflection reads on a phone screen without tearing the mesh apart.
-    public static let minExaggeration: Float = 50
-    public static let maxExaggeration: Float = 100
+    /// ★ His iPad 2026-10-28: an Exaggeration slider "to make it bend more visually" — a wide band.
+    public static let minExaggeration: Float = 10
+    public static let maxExaggeration: Float = 300
     public static let defaultExaggeration: Float = 60
 
     /// Clamp a user-chosen exaggeration into the [min, max] band.
@@ -769,8 +770,9 @@ public final class ResultsModel: ObservableObject {
     @Published public var flowBodyMode: FlowBodyMode = .xray
     /// Travel-speed multiplier (prototype 0.2–2.5×).
     @Published public private(set) var flowSpeed: Float = 1
-    /// Undulation-amount multiplier (prototype 0–2×).
-    @Published public private(set) var flowWiggle: Float = 1
+    /// Undulation-amount multiplier (prototype 0–2×). ★ 0 — the arrows travel the path straight, never wiggling (his
+    /// iPad 2026-10-27: "keep the animation but remove the wiggling").
+    @Published public private(set) var flowWiggle: Float = 0
     /// User "reduced motion (static)" toggle — freezes the arrows mid-path with clean
     /// heads. OR-ed with the system reduce-motion setting by the view.
     @Published public var flowReducedStatic: Bool = false
@@ -840,6 +842,9 @@ public final class ResultsModel: ObservableObject {
     /// ladders optimize for OPPOSITE things and their tabs look alike, so a screen
     /// that does not say which one ran leaves the user to infer it from a sign.
     public var ladderModeLine: String { ladderMode.resultsLine }
+    /// ★ LOAD SCENARIOS: each scenario's result (report.json `scenarios`); empty for a one-scenario run.
+    public private(set) var scenarioResults: [ScenarioResult] = []
+    public private(set) var reportBlocks: RunReportBlocks?   // Flexible (PR #362) H56f: redesign to strengthen (overnight plan 2026-10-25) — the strengthen cards + bodies (RedesignToStrengthen.swift)
 
     /// THE HEADLINE OF A GROWTH RUN: how much plastic the SELECTED variant adds and
     /// how much of the object about to be printed was never in the model. nil on a
@@ -870,8 +875,21 @@ public final class ResultsModel: ObservableObject {
     public private(set) var latticeNotes: [String] = []
 
     /// Format a run's lattice report into honest lines.
+    /// Core's plan histogram ("6.000=32 3.000=8") as "32 × 6 mm, 8 × 3 mm".
+    static func planSizes(_ h: String) -> String {
+        h.split(separator: " ").compactMap { t -> String? in
+            let kv = t.split(separator: "=")
+            guard kv.count == 2, let mm = Double(kv[0]) else { return nil }
+            return "\(kv[1]) × \(String(format: "%g", (mm * 100).rounded() / 100)) mm"
+        }.joined(separator: ", ")
+    }
+
     public static func latticeNotes(_ report: LatticeReport?) -> [String] {
         guard let r = report else { return [] }
+        // ★ ruling V1 (2026-09-29): a variant's re-lattice left a face wall out — say so
+        let scopeLine = [LatticeVariantFaceWalls.legacyLine(leftOut: r.variantLegacyFaceWallsLeftOut),
+                         LatticeVariantFaceWalls.line(withoutShape: r.variantFacesWithoutShape,
+                                                      regions: r.variantRegionsWithoutShape)].compactMap { $0 }
         func pct(_ x: Double) -> String { "\(Int((x * 100).rounded()))%" }
         var lines: [String] = []
         // ★ WHICH REGION GOT WHAT (task 2026-08-05-lattice-retention-app-control,
@@ -884,7 +902,22 @@ public final class ResultsModel: ObservableObject {
         // below is the "no lattice was produced" path, which is exactly the case
         // where knowing which region caught nothing matters most. Appending only at
         // the bottom would have hidden it on the one run that needed it.
+        // ★★ K4 (the reviewer's ruling, 2026-10-11 03:28, item 3): ON A RUN WHOSE JOB CARRIED A PLAN the request's
+        // cell, the export's strut radii and the receipt's per-region cell figures are core's grading LAW, not the
+        // plan the file was built from. Those lines read the plan as laid (run_info `grading.plan_by_region`).
+        let plan = r.planLaid
         let regionLines: [String] = {
+            if let plan {
+                guard !plan.regions.isEmpty else {
+                    return ["Per region — the run did not report the plan as laid, so no per-region figures are shown."]
+                }
+                return ["Per region — your plan, as laid:"] + plan.regions.map { g in
+                    "Region \(g.region): \(g.cells) cell\(g.cells == 1 ? "" : "s") on a "
+                        + "\(String(format: "%g", (g.baseCellMM * 1000).rounded() / 1000)) mm base (\(Self.planSizes(g.sizes))), "
+                        + "\(g.strutsLaid) struts laid"
+                        + (g.cellsWithNoStrut > 0 ? ", \(g.cellsWithNoStrut) cell\(g.cellsWithNoStrut == 1 ? "" : "s") with no strut." : ".")
+                }
+            }
             guard let raw = r.regionCellsJSON,
                   let receipt = LatticeRegionCellReceipt.parse(raw) else { return [] }
             // Core's PERCOLATION floor, read at the run's own extrusion width, so a
@@ -900,7 +933,8 @@ public final class ResultsModel: ObservableObject {
                  + receipt.lines(percolationFloor: pf > 0 ? pf : nil)
                  + [LatticeRegionCellReceipt.scopeNote]
         }()
-        let name = LatticeType.named(r.topologyID).displayName
+        // ★ the run's own id, named — never "Octet truss" for a type the table lacks (item a)
+        let name = LatticeType.displayName(forID: r.topologyID)
         // BAR B6 — THE PREVIEW AND THE BUILD, RECONCILED (task
         // 2026-08-04-variant-volume-fraction-mismatch). This clause used to read,
         // unconditionally whenever anything scoped the preview:
@@ -939,24 +973,38 @@ public final class ResultsModel: ObservableObject {
         // the second layer, for records already on disk.
         let degenerate = (r.generated?.latticedCells ?? 0) == 0
                       || (r.generated.map { $0.strutRadiusMaxMM <= 0 } ?? false)
+        // what the run built: the plan's cells on a plan run, the law's cell otherwise
+        let cellPhrase = plan.map { p in
+            p.regions.isEmpty ? "your plan's cells"
+                : "your plan of \(p.cells) cell\(p.cells == 1 ? "" : "s") over \(p.regions.count) region\(p.regions.count == 1 ? "" : "s")"
+        } ?? "\(String(format: "%g", r.cellMM)) mm cell"
         if degenerate, r.generated != nil {
-            lines.append("Lattice: \(name), \(String(format: "%g", r.cellMM)) mm cell — "
+            lines.append("Lattice: \(name), \(cellPhrase) — "
                 + "NO LATTICE WAS PRODUCED. Every voxel in the region stayed solid "
-                + "(the material is too thin to hold \(String(format: "%g", r.cellMM)) mm "
-                + "cells), so this file is the solid part. The density and strut "
+                + "(the material is too thin to hold "
+                + (plan == nil ? "\(String(format: "%g", r.cellMM)) mm cells" : "the plan's cells")
+                + "), so this file is the solid part. The density and strut "
                 + "figures below describe nothing and are withheld.")
-            return lines + regionLines
+            return lines + scopeLine + regionLines
         }
-        lines.append("Lattice: \(name), \(String(format: "%g", r.cellMM)) mm cell, "
+        lines.append("Lattice: \(name), \(cellPhrase), "
             + "filled at \(pct(r.generateRelativeDensity)) density "
             + "(previewed \(pct(r.minRelativeDensity))–\(pct(r.maxRelativeDensity))).\(scope)")
         if let g = r.generated {
             let fmts = [g.emitSTL ? "STL" : nil, g.emit3MF ? "3MF" : nil].compactMap { $0 }
-            lines.append("Generated: \(g.latticedCells) cells, \(g.triangles) triangles"
-                + (fmts.isEmpty ? "" : " (\(fmts.joined(separator: " + ")))")
-                + (g.strutRadiusMaxMM > 0
+            let tail: String
+            if let plan {
+                // ★ K4: the plan's own counts, never the run's cross-variant strut radii
+                tail = plan.regions.isEmpty ? "."
+                    : "; the plan laid \(plan.strutsLaid) struts and \(plan.nodesLaid) nodes"
+                      + (plan.cellsWithNoStrut > 0 ? ", and \(plan.cellsWithNoStrut) of its \(plan.cells) cells got no strut." : ".")
+            } else {
+                tail = g.strutRadiusMaxMM > 0
                     ? ", strut radius \(String(format: "%.2f", g.strutRadiusMinMM))–\(String(format: "%.2f", g.strutRadiusMaxMM)) mm."
-                    : "."))
+                    : "."
+            }
+            lines.append("Generated: \(g.latticedCells) cells, \(g.triangles) triangles"
+                + (fmts.isEmpty ? "" : " (\(fmts.joined(separator: " + ")))") + tail)
         } else {
             lines.append("Generated on the worker; the export record wasn't available to summarise here.")
         }
@@ -1009,7 +1057,7 @@ public final class ResultsModel: ObservableObject {
                 }
             }
         }
-        return lines + regionLines
+        return lines + scopeLine + regionLines
     }
 
     /// Format the Face-protection diagnostics from a finished outcome into honest lines.
@@ -1161,10 +1209,15 @@ public final class ResultsModel: ObservableObject {
         // from the rung), so a live results view never reads a growth rung's
         // numbers as reduction numbers mid-run.
         ladderMode = outcome.growthLadder ? .growth : .reduction
+        if let d = outcome.reportJSON { reportBlocks = RunReportBlocks.decode(reportJSON: d) }   // Flexible (PR #362) H56f: redesign to strengthen (overnight plan 2026-10-25) — a streamed partial (no report) never erases it
         // Only a timing-bearing outcome updates the duration: `apply` also runs for
         // every STREAMED partial (which has no timing yet), and a partial landing
         // after the authoritative final must not erase the run's recorded duration.
         if let t = outcome.timing { runTiming = t }
+        // ★ LOAD SCENARIOS: report.json `scenarios` (a streamed partial carries no report and never erases it)
+        if let d = outcome.reportJSON, let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
+            scenarioResults = ScenarioResult.parse(o)
+        }
         clearanceNotes = ResultsModel.clearanceNotes(outcome.appliedClearances)
         faceProtectionNotes = ResultsModel.faceProtectionNotes(outcome.appliedFaceProtections)
         // Only a report-bearing outcome updates the lattice notes: `apply` also runs for
@@ -1215,6 +1268,39 @@ public final class ResultsModel: ObservableObject {
         return accepted[tab.variantIndex]
     }
 
+    // MARK: ★ LOAD SCENARIOS — the views show the picked scenario (his ask 2026-10-27)
+
+    /// The scenario the Results views show, by name; nil = the worst case (the variant's plain fields ARE its own).
+    @Published public var viewScenario: String? {
+        didSet { if oldValue != viewScenario { dropFieldCaches() } }
+    }
+    /// Each scenario's loads: indices into `loadLocations` (so the flow starts at THAT scenario's loads only) and its total
+    /// weight (so Break's breaking load is that scenario's, not every scenario's loads summed). Empty: every load.
+    public var scenarioLoads = ResultsScenarioLoads() {
+        didSet { if oldValue != scenarioLoads { dropFieldCaches() } }
+    }
+    /// The load the shown field was solved under: the picked scenario's, else the worst case's, else the run's.
+    private var shownLoadKg: Double {
+        let name = viewScenario ?? scenarios(for: selected).first(where: \.governs)?.name
+        return name.flatMap { scenarioLoads.kg[$0] } ?? appliedLoadKg
+    }
+    /// The picked scenario's own fields on the selected design, when the run sent them (core scenario_fields.bin).
+    private var viewScenarioSet: ScenarioFieldSet? {
+        guard let n = viewScenario else { return nil }
+        return selectedVariant?.scenarioFields.first { $0.name == n }
+    }
+    /// Whether the views can show `name`'s own fields on the selected version (the worst case always can).
+    public func showsOwnFields(of name: String?) -> Bool {
+        guard let name else { return true }
+        return selectedVariant?.scenarioFields.contains { $0.name == name } ?? false
+    }
+    /// Everything derived from the stress / displacement fields is rebuilt for the new scenario.
+    private func dropFieldCaches() {
+        flexCache = nil; loadPathCache = nil; loadPathSegmentCache = nil
+        flowCurveCache = nil; flowSeedCache = nil; failureCache = nil; peakToRedCache = nil
+        flowIsolate = nil
+    }
+
     /// The latticed alternative the user currently has selected, or nil when the
     /// selection is a solid variant. THE gate on every latticed-only behaviour
     /// below — masses, provenance, export, transfer.
@@ -1232,6 +1318,62 @@ public final class ResultsModel: ObservableObject {
     /// FIELD, not on whichever of its two meshes is on screen — so those entries
     /// mean the same thing from either tab, and neither is disabled by the other.
     public var selectedVariantIndex: Int { selected?.variantIndex ?? 0 }
+    // MARK: - ★ the Results redesign (his mockup, approved 2026-10-27)
+
+    /// The solid variant behind a tab (nil for a latticed object: its geometry is never on hand for a side-by-side).
+    func variant(for tab: ResultVariantVM) -> OptimizeVariant? {
+        tab.latticeAlternative == nil && accepted.indices.contains(tab.variantIndex) ? accepted[tab.variantIndex] : nil
+    }
+
+    /// The core volume fraction a tab's variant was asked for — what a strengthen version's `volume_fraction` names.
+    public func requestedVolumeFraction(of tab: ResultVariantVM) -> Double? { variant(for: tab)?.requestedVolumeFraction }
+
+    private var compareMeshCache: [Int: ViewerMesh] = [:]
+    /// Compare's viewer mesh for a tab (cached per tab; the same smooth-shaded surface the main viewer draws).
+    public func compareMesh(_ tab: ResultVariantVM) -> ViewerMesh? {
+        if tab.index == selectedIndex { return selectedMesh }
+        if let m = compareMeshCache[tab.index] { return m }
+        guard let v = variant(for: tab), !v.meshVertices.isEmpty else { return nil }
+        let m = ViewerMesh(vertices: v.meshVertices, indices: v.meshIndices, faceIDs: [], smoothShaded: true)
+        compareMeshCache[tab.index] = m
+        return m
+    }
+
+    /// Compare's stress colours for a tab, on the SAME scale as the main viewer (`stressScaleMaxMPa`); nil without a field.
+    public func compareStressTints(_ tab: ResultVariantVM) -> [SIMD4<Float>]? {
+        guard let v = variant(for: tab), let mesh = compareMesh(tab) else { return nil }
+        let own = viewScenario.flatMap { n in v.scenarioFields.first { $0.name == n } }   // ★ Compare follows the Scenario menu
+        let f = StressField(nx: gridDim.0, ny: gridDim.1, nz: gridDim.2, origin: gridOrigin, spacing: spacing,
+                            values: own?.vonMises ?? v.vonMisesField)
+        return f.isEmpty ? nil : stressTints(for: mesh, field: f)
+    }
+
+    /// ★ Compare's key (his iPad 2026-10-28): one version's stress at a model point — from the SAME field its colours are
+    /// painted from (the picked scenario's when the run sent it); nil where that version has no material.
+    public func compareStress(_ tab: ResultVariantVM, at p: SIMD3<Float>) -> Double? {
+        guard let v = variant(for: tab) else { return nil }
+        let own = viewScenario.flatMap { n in v.scenarioFields.first { $0.name == n } }
+        let f = StressField(nx: gridDim.0, ny: gridDim.1, nz: gridDim.2, origin: gridOrigin, spacing: spacing,
+                            values: own?.vonMises ?? v.vonMisesField)
+        guard !f.isEmpty else { return nil }
+        let x = f.value(at: p)
+        return x > 0 ? Double(x) : nil
+    }
+
+    /// A tab's own scenario results: its strengthen version's (each version is certified per scenario), else the run's.
+    public func scenarios(for tab: ResultVariantVM?) -> [ScenarioResult] {
+        if let tab, let s = reportBlocks?.strengthen, let vf = requestedVolumeFraction(of: tab),
+           let v = s.versions.first(where: { $0.status != "unreachable" && abs(StrengthenText.lineVersion(of: $0, in: s).volumeFraction - vf) < 1e-6 }),
+           !v.scenarios.isEmpty { return v.scenarios }
+        return scenarioResults
+    }
+
+    /// ★ his ruling 2026-10-28: the "Prints in N pieces" flag for a tab core exported as 2+ bodies, or nil.
+    public func piecesFlag(_ tab: ResultVariantVM) -> StrengthenText.PiecesFlag? {
+        guard tab.latticeAlternative == nil, accepted.indices.contains(tab.variantIndex), let b = reportBlocks else { return nil }
+        return StrengthenText.piecesFlag(printedFraction: accepted[tab.variantIndex].printedFraction, in: b)
+    }
+    public func isBridged(_ tab: ResultVariantVM) -> Bool { tab.latticeAlternative == nil && accepted.indices.contains(tab.variantIndex) && reportBlocks.map { StrengthenText.isBridged(printedFraction: accepted[tab.variantIndex].printedFraction, in: $0) } == true }   // Flexible (PR #362) H56f: redesign to strengthen (overnight plan 2026-10-25) — bodies.bridges > 0
 
     // MARK: - the latticed object's geometry (task 2026-08-07-lattice-variants-on-screen)
 
@@ -1705,7 +1847,7 @@ public final class ResultsModel: ObservableObject {
     public var selectedStressField: StressField? {
         guard let v = selectedVariant else { return nil }
         let f = StressField(nx: gridDim.0, ny: gridDim.1, nz: gridDim.2,
-                            origin: gridOrigin, spacing: spacing, values: v.vonMisesField)
+                            origin: gridOrigin, spacing: spacing, values: viewScenarioSet?.vonMises ?? v.vonMisesField)
         return f.isEmpty ? nil : f   // nil when there's nothing to show (no field / no grid)
     }
 
@@ -1728,7 +1870,8 @@ public final class ResultsModel: ObservableObject {
         // the wire in v1 (wire cost), so a remote variant's tensor stays empty and the
         // load→anchor flow sub-mode stays gated even when stress/flex/load-path light
         // up; a local run carries it as before.
-        guard let v = selectedVariant else { return nil }
+        // ★ the tensor is the worst case's only: another scenario's view has none (its load→anchor flow stays gated)
+        guard let v = selectedVariant, viewScenarioSet == nil else { return nil }
         let f = StressTensorField(nx: gridDim.0, ny: gridDim.1, nz: gridDim.2,
                                   origin: gridOrigin, spacing: spacing, values: v.stressTensorField)
         return f.isEmpty ? nil : f   // nil when absent (v1 never sends the tensor over the wire)
@@ -1744,7 +1887,7 @@ public final class ResultsModel: ObservableObject {
         // from it) light up; a fetch failure leaves it empty and they stay hidden.
         guard let v = selectedVariant else { return nil }
         let f = DisplacementField(nx: gridDim.0, ny: gridDim.1, nz: gridDim.2,
-                                  origin: gridOrigin, spacing: spacing, values: v.displacementField)
+                                  origin: gridOrigin, spacing: spacing, values: viewScenarioSet?.displacement ?? v.displacementField)
         return f.isEmpty ? nil : f   // nil when there's nothing to flex (no field / no grid)
     }
 
@@ -1770,6 +1913,11 @@ public final class ResultsModel: ObservableObject {
     /// Set the exaggeration factor, clamped to the design's 50–100× band.
     public func setFlexExaggeration(_ v: Float) {
         flexExaggeration = FlexAnimation.clampExaggeration(v)
+    }
+
+    /// ★ His iPad 2026-10-27: the bend scrubs by hand — its phase set straight from the slider (0 rest … 0.5 full … 1).
+    public func setFlexPhase(_ p: Double) {
+        flexPhase = min(1, max(0, p))
     }
 
     /// Advance the flex loop by `dt` (phase units); wraps into [0, 1). No-op unless
@@ -1923,7 +2071,9 @@ public final class ResultsModel: ObservableObject {
     public var flowLoadSeeds: [SIMD3<Float>] {
         if let c = flowSeedCache, c.index == selectedIndex { return c.seeds }
         let seeds: [SIMD3<Float>]
-        if !loadLocations.isEmpty {
+        if viewScenarioSet != nil, let n = viewScenario, let idx = scenarioLoads.indices[n] {
+            seeds = idx.filter { loadLocations.indices.contains($0) }.map { loadLocations[$0] }   // ★ THIS scenario's loads
+        } else if !loadLocations.isEmpty {
             seeds = loadLocations
         } else if let d = selectedDisplacementField, !d.isEmpty, let m = maxDisplacementPosition(d) {
             seeds = [m]
@@ -2101,12 +2251,70 @@ public final class ResultsModel: ObservableObject {
     /// Set the flow wiggle amount, clamped to the prototype's band.
     public func setFlowWiggle(_ v: Float) { flowWiggle = Swift.min(2, Swift.max(0, v)) }
 
+    // MARK: ★ the load path as light (his iPad 2026-10-28 — LoadLightFlow.swift)
+
+    /// The light flow for the shown version + scenario, once built (nil while building, or with no load to start from).
+    @Published public private(set) var lightFlow: LoadLightFlow?
+    /// Where the sweep is (0 … `LoadLightFlow.sweepEnd`).
+    @Published public private(set) var lightPhase: Double = 0
+    /// ★ Points on each load group's own faces, in the run's load order (`loadLocations`'s groups).
+    public var loadSurfacePoints: [[SIMD3<Float>]] = [] {
+        didSet { if oldValue != loadSurfacePoints { lightFlowKey = nil } }
+    }
+    /// Where the light starts: on the loaded faces of the scenario whose fields are shown — the picked one, else the worst
+    /// case — never a group's centre (that can be the air between two arms) and never every scenario's loads at once.
+    var lightFlowSeeds: [SIMD3<Float>] {
+        guard !loadSurfacePoints.isEmpty else { return flowLoadSeeds }
+        let shown = viewScenarioSet != nil ? viewScenario : scenarios(for: selected).first(where: \.governs)?.name
+        let groups = shown.flatMap { scenarioLoads.indices[$0] } ?? Array(loadSurfacePoints.indices)
+        let pts = groups.filter { loadSurfacePoints.indices.contains($0) }.flatMap { loadSurfacePoints[$0] }
+        return pts.isEmpty ? flowLoadSeeds : pts
+    }
+    /// True while a build is running (the motion bar says so).
+    @Published public private(set) var lightFlowBuilding = false
+    private var lightFlowKey: String?
+
+    /// Build the light flow for the shown version + scenario (once per pair, off the main thread).
+    public func prepareLightFlow() {
+        let key = "\(selectedIndex)|\(viewScenario ?? "")"
+        guard key != lightFlowKey else { return }
+        lightFlowKey = key
+        lightFlow = nil
+        guard let mesh = selectedMesh, let field = selectedStressField else { lightFlowBuilding = false; return }
+        let positions = mesh.flat.positions, seeds = lightFlowSeeds
+        lightFlowBuilding = true
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let built = LoadLightFlow.build(positions: positions, field: field, seeds: seeds)
+            DispatchQueue.main.async {
+                guard let self, self.lightFlowKey == key else { return }
+                self.lightFlow = built
+                self.lightFlowBuilding = false
+            }
+        }
+    }
+    public func advanceLightPhase(_ dt: Double, sweepSeconds: Double = 3.2) {
+        lightPhase = (lightPhase + dt * Double(LoadLightFlow.sweepEnd) / sweepSeconds)
+            .truncatingRemainder(dividingBy: Double(LoadLightFlow.sweepEnd))
+    }
+    /// The slider's 0…1 is one sweep.
+    public var lightPhasePosition: Double { lightPhase / Double(LoadLightFlow.sweepEnd) }
+    public func setLightPhasePosition(_ p: Double) { lightPhase = min(1, max(0, p)) * Double(LoadLightFlow.sweepEnd) }
+
     /// Advance the flow clock by `dt` seconds (called by the view's ticker while the
     /// overlay is on and motion is allowed). Monotonic — the comet math wraps travel
     /// internally, so the clock itself never needs to reset mid-run.
     public func advanceFlowClock(_ dt: Double) {
         guard loadPathOn else { return }
         flowClock += dt
+    }
+
+    /// ★ His iPad 2026-10-27: the flow scrubs by hand. The slider's 0…1 is one loop of the clock.
+    public var flowLoopPosition: Double {
+        let u = (flowClock / Self.flowLoopPeriod).truncatingRemainder(dividingBy: 1)
+        return u < 0 ? u + 1 : u
+    }
+    public func setFlowLoopPosition(_ p: Double) {
+        flowClock = min(1, max(0, p)) * Self.flowLoopPeriod
     }
 
     // MARK: - failure-load prediction (M7.viz.6)
@@ -2130,17 +2338,17 @@ public final class ResultsModel: ObservableObject {
         // Measure against the EFFECTIVE yield of the printed part at this project's
         // fixed infill (M7.params infill-aware): one honest failure load, not a
         // solid-vs-infill pair. Solid (knockdown 1) reduces to the plain yield/peak.
-        guard appliedLoadKg > 0,
+        guard shownLoadKg > 0,
               let field = selectedStressField, let peak = field.peak(),
               let mult = FailureLoad.multiplier(peakMPa: Double(peak.valueMPa),
                                                 yieldMPa: effectiveYieldStrengthMPa)
         else { return nil }
-        let failKg = mult * appliedLoadKg
+        let failKg = mult * shownLoadKg
         let valueLbl = ResultsModel.loadLabel(kg: failKg, unit: loadUnit)
         let descriptor = ResultsModel.infillDescriptor(percent: infillPercent, pattern: infillPattern)
         return FailurePrediction(
             multiplier: mult,
-            appliedLoadKg: appliedLoadKg,
+            appliedLoadKg: shownLoadKg,
             failureLoadKg: failKg,
             unit: loadUnit,
             position: peak.position,
@@ -2743,4 +2951,13 @@ public final class ResultsModel: ObservableObject {
         let support = cm3 <= 0.05 ? "Minimal supports needed." : "Est. \(supportLabel) support under overhangs."
         return base + " " + support
     }
+}
+
+/// ★ Each load scenario's loads, by scenario name (the workspace fills it; Results reads it).
+public struct ResultsScenarioLoads: Equatable, Sendable {
+    /// Indices into the run's load list (`loadLocations` order).
+    public var indices: [String: [Int]] = [:]
+    /// The scenario's total load, kg.
+    public var kg: [String: Double] = [:]
+    public init(indices: [String: [Int]] = [:], kg: [String: Double] = [:]) { self.indices = indices; self.kg = kg }
 }

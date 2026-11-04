@@ -15,6 +15,7 @@
 // under Xcode's explicit-modules dependency scanner.
 module TopOptBridge {
     header "TopOptBridge.hpp"
+    header "FlexibleBridge.hpp"
     requires cplusplus
     export *
 }
