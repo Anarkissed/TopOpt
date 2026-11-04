@@ -510,9 +510,64 @@ GradedField grade_lattice(const VoxelGrid& grid,
     }
   }
 
+  // ★ E3: the region that owns voxel e and its own grading, or null.
+  if (params.region_override_ids != nullptr && params.region_override_ids->size() != n)
+    throw std::invalid_argument("grade_lattice: region_override_ids->size() != voxel_count");
+  auto override_at = [&](std::size_t e) -> const GradingRegionOverride* {
+    if (params.region_override_ids == nullptr || params.region_overrides == nullptr)
+      return nullptr;
+    const int id = (*params.region_override_ids)[e];
+    if (id < 1 || static_cast<std::size_t>(id) > params.region_overrides->size())
+      return nullptr;
+    return &(*params.region_overrides)[static_cast<std::size_t>(id - 1)];
+  };
+
   // The demand -> density map (requirement 1 / L2), identical in every cell mode:
   // density depends on DEMAND alone, never on cell size. That is exactly what lets
   // the cell-size plan consume it without circularity.
+  //
+  // ★ E3: a region's own band and exponent replace the part's for the voxels it owns.
+  // Its floor raises the grade (it is the user's band, not a clamp to certify); its
+  // ceiling is where the curve tops out. Both lie inside the certifiable band (parse).
+  auto rho_graded = [&](std::size_t e) {
+    const GradingRegionOverride* ov = override_at(e);
+    const double g_e = ov && ov->demand_exponent > 0.0 ? ov->demand_exponent : gamma;
+    const bool own_band = ov && ov->rho_max > 0.0;
+    if (aesthetic) {
+      const double lo_e = own_band ? std::max(rho_lo, ov->rho_min) : aes_lo;
+      const double hi_e = own_band ? std::min(rho_hi, ov->rho_max) : aes_hi;
+      const double f = grading_demand_fraction(GradingIntent::Aesthetic, demand[e],
+                                               aes_ref, 1.0);
+      return lo_e + (hi_e - lo_e) * std::pow(f, g_e * aes_w);
+    }
+    double frac;
+    if (allowable > 0.0) {
+      frac = grading_demand_fraction(GradingIntent::Structural, demand[e],
+                                     allowable, u_target);
+    } else {
+      frac = demand_max > 0.0
+                 ? std::min(1.0, std::max(0.0, demand[e] / demand_max))
+                 : 0.0;
+    }
+    const double hi_e = own_band ? std::min(rho_hi, ov->rho_max) : rho_hi;
+    const double r = hi_e * std::pow(frac, g_e);
+    return own_band ? std::max(r, ov->rho_min) : r;
+  };
+  // ★ E3: a region graded "off" or "shape" takes ONE density: its stated one, or the
+  // peak of its own grade over the voxels it owns (so it is at least as dense as the
+  // grade everywhere, and certifies wherever the grade does). Measured here, once.
+  std::vector<double> flat_peak;
+  if (params.region_overrides != nullptr && params.region_override_ids != nullptr) {
+    flat_peak.assign(params.region_overrides->size(), 0.0);
+    for (std::size_t e = 0; e < n; ++e) {
+      const GradingRegionOverride* ov = override_at(e);
+      if (!ov || !ov->flat || ov->flat_rho > 0.0) continue;
+      const bool candidate = density[e] > iso && (!region || (*region)[e] != 0);
+      if (!candidate || !std::isfinite(demand[e])) continue;
+      const std::size_t k = static_cast<std::size_t>((*params.region_override_ids)[e] - 1);
+      flat_peak[k] = std::max(flat_peak[k], std::min(rho_hi, std::max(rho_lo, rho_graded(e))));
+    }
+  }
   auto rho_of = [&](std::size_t e) {
     // MULTISCALE (task multiscale-lattice-to): the optimizer already chose this
     // voxel's relative density and paid a compliance objective evaluated at the
@@ -528,6 +583,14 @@ GradedField grade_lattice(const VoxelGrid& grid,
     if (params.region_relative_density != nullptr &&
         (*params.region_relative_density)[e] > 0.0)
       return (*params.region_relative_density)[e];
+    // ★ E3: a region's one density, then a region's own band and exponent.
+    if (const GradingRegionOverride* ov = override_at(e)) {
+      if (ov->flat) {
+        const std::size_t k = static_cast<std::size_t>((*params.region_override_ids)[e] - 1);
+        return ov->flat_rho > 0.0 ? ov->flat_rho : flat_peak[k];
+      }
+      return rho_graded(e);
+    }
     // ★ THE LAW (task 2026-08-20-lattice-only-grading, §0). Two normalisations,
     // one arithmetic. The DENOMINATOR is the whole difference:
     //   * ABSOLUTE  — the material allowable. `frac` is UTILISATION, a real

@@ -1602,9 +1602,73 @@ JobDescription parse_job(const std::string& json_text) {
         reject_unknown_keys(rv, {"role", "kind", "geometry", "face_id",
                                  "region_id", "relative_density",
                                  "synthetic_stress", "synthetic_foci",
-                                 "synthetic_soft_mm"},
+                                 "synthetic_soft_mm", "label", "rho_min", "rho_max",
+                                 "demand_exponent", "grading", "shape_grade",
+                                 "shape_grade_band_mm"},
                             "a lattice region");
         JobLatticeRegion reg;
+        // ★ E2.6 + E3: the region's name and its own grading (job.hpp). The band is
+        // checked against the TYPE's certifiable band once the type is resolved.
+        if (const JsonValue* lv2 = find_key(rv, "label"))
+          reg.label = require_nonempty_string(*lv2, "a lattice region label");
+        const std::string named =
+            reg.label.empty() ? "lattice region " + std::to_string(job.lattice.regions.size() + 1)
+                              : "lattice region \"" + reg.label + "\"";
+        auto own_grading = [&](const char* key) -> const JsonValue* {
+          const JsonValue* v = find_key(rv, key);
+          if (v != nullptr && find_key(rv, "role") != nullptr &&
+              find_key(rv, "role")->type == JsonValue::Type::String &&
+              find_key(rv, "role")->str != "include")
+            schema_fail(named + ": \"" + key + "\" is an include region's own grading; "
+                        "an exclude region is kept SOLID and has no lattice to grade");
+          return v;
+        };
+        {
+          const JsonValue* lo = own_grading("rho_min");
+          const JsonValue* hi = own_grading("rho_max");
+          if ((lo != nullptr) != (hi != nullptr))
+            schema_fail(named + ": \"rho_min\" and \"rho_max\" are the region's density "
+                        "band and come together");
+          if (lo && hi) {
+            reg.rho_min = require_number(*lo, "lattice region rho_min");
+            reg.rho_max = require_number(*hi, "lattice region rho_max");
+            if (!(reg.rho_min > 0.0) || !(reg.rho_max > reg.rho_min) || !(reg.rho_max <= 1.0))
+              schema_fail(named + ": its band needs 0 < rho_min < rho_max <= 1 (got " +
+                          fmt_g(reg.rho_min) + ", " + fmt_g(reg.rho_max) + ")");
+            if (find_key(rv, "relative_density"))
+              schema_fail(named + ": states both a \"relative_density\" and a band "
+                          "(\"rho_min\", \"rho_max\"). One density or one band, not both.");
+          }
+        }
+        if (const JsonValue* ge = own_grading("demand_exponent")) {
+          reg.demand_exponent = require_number(*ge, "lattice region demand_exponent");
+          if (!(reg.demand_exponent > 0.0) || !std::isfinite(reg.demand_exponent))
+            schema_fail(named + ": \"demand_exponent\" must be finite and > 0");
+        }
+        if (const JsonValue* gm = own_grading("grading")) {
+          reg.grading = require_nonempty_string(*gm, "lattice region grading");
+          if (reg.grading != "off" && reg.grading != "stress" && reg.grading != "shape" &&
+              reg.grading != "stress_shape")
+            schema_fail(named + ": \"grading\" must be \"off\", \"stress\", \"shape\" "
+                        "or \"stress_shape\" (got \"" + reg.grading + "\")");
+        }
+        if (const JsonValue* sg = own_grading("shape_grade")) {
+          if (sg->type != JsonValue::Type::Bool)
+            schema_fail(named + ": \"shape_grade\" must be a boolean");
+          reg.shape_grade = sg->num != 0.0 ? 1 : 0;
+          if (!reg.grading.empty() &&
+              (reg.grading == "shape" || reg.grading == "stress_shape") != (reg.shape_grade == 1))
+            schema_fail(named + ": \"grading\": \"" + reg.grading + "\" already sets the "
+                        "shape grade " + (reg.shape_grade == 1 ? "off" : "on") +
+                        ", and \"shape_grade\" says the opposite");
+        }
+        if (const JsonValue* sb = own_grading("shape_grade_band_mm")) {
+          reg.shape_grade_band_mm = require_number(*sb, "lattice region shape_grade_band_mm");
+          if (!(reg.shape_grade_band_mm >= 0.0) || !std::isfinite(reg.shape_grade_band_mm))
+            schema_fail(named + ": \"shape_grade_band_mm\" must be finite and >= 0");
+        }
+        if (!reg.grading.empty())
+          reg.shape_grade = (reg.grading == "shape" || reg.grading == "stress_shape") ? 1 : 0;
         if (const JsonValue* sv = find_key(rv, "synthetic_stress")) {
           if (sv->type != JsonValue::Type::Bool)
             schema_fail("lattice region \"synthetic_stress\" must be a boolean");
@@ -1893,11 +1957,11 @@ JobDescription parse_job(const std::string& json_text) {
         if (r.relative_density > 0.0 || r.synthetic_stress)
           schema_fail(
               "lattice \"whole_part\" latticed the whole part, so an include region "
-              "there only carries its own settings, and a region's own settings in this "
-              "mode come with per-region grading (E3), not yet built. This include "
+              "there only carries its own grading: rho_min / rho_max, demand_exponent, "
+              "grading and the shape grade. This include "
               "states \"" + std::string(r.relative_density > 0.0 ? "relative_density"
                                                                  : "synthetic_stress") +
-              "\"; it is refused rather than dropped.");
+              "\", which is not carried in that mode yet; it is refused rather than dropped.");
         job.lattice.whole_part_includes.push_back(std::move(r));
       }
       job.lattice.regions = std::move(kept);
@@ -2890,6 +2954,25 @@ JobDescription parse_job(const std::string& json_text) {
               fmt_g(lo) + ", " + fmt_g(hi) + "]. Outside it the type's homogenized "
               "tensor has no measurement behind it, so the density cannot be certified.");
       }
+    // (1b) ★ E3: a region's own band, against THE TYPE's certifiable band, for every
+    // type (octet included: unlike relative_density nothing checked it at the parse).
+    {
+      std::vector<const JobLatticeRegion*> all;
+      for (const JobLatticeRegion& r : job.lattice.regions) all.push_back(&r);
+      for (const JobLatticeRegion& r : job.lattice.whole_part_includes) all.push_back(&r);
+      for (std::size_t i = 0; i < all.size(); ++i) {
+        const JobLatticeRegion& r = *all[i];
+        if (!(r.rho_max > 0.0)) continue;
+        const double lo = lattice_rho_min(topo), hi = lattice_rho_max(topo);
+        if (!(r.rho_min >= lo && r.rho_max <= hi))
+          schema_fail(
+              (r.label.empty() ? "lattice region " + std::to_string(i + 1)
+                               : "lattice region \"" + r.label + "\"") +
+              ": its band [" + fmt_g(r.rho_min) + ", " + fmt_g(r.rho_max) + "] leaves " +
+              job.lattice.topology + "'s certifiable band [" + fmt_g(lo) + ", " + fmt_g(hi) +
+              "]. Outside it the type's homogenized tensor has no measurement behind it.");
+      }
+    }
     // (2) ORGANIC traces its own curves -- it builds no cell of any type -- and its
     // strut law, calibration and beam certificate are octet's. A job naming another
     // type with it is asking for a lattice organic does not make.

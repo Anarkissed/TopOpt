@@ -159,8 +159,8 @@ int main() {
     std::string dens = kTopInclude;
     dens.insert(dens.find("\"geometry\""), "\"relative_density\": 0.3, ");
     CHECK(refused_with(job_json(left, right, top, dens + ", \"whole_part\": true"),
-                       "states \"relative_density\"; it is refused rather than dropped"),
-          "§1 whole_part: an include's own density is refused until E3, not dropped");
+                       "states \"relative_density\", which is not carried in that mode yet"),
+          "§1 whole_part: an include's stated density is refused, not dropped");
     std::string fit = job_json(left, right, top, kTopInclude + ", \"whole_part\": true",
                                ", \"cell_mode\": \"fit\"");
     fit.erase(fit.find("\"cell_mm\": 4.0, "), std::string("\"cell_mm\": 4.0, ").size());

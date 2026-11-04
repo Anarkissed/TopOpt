@@ -1054,6 +1054,10 @@ double mesh_enclosed_volume_mm3(const TriangleMesh& m);
 struct LatticeRoleRegions {
   std::vector<ClearanceGeometry> includes;
   std::vector<ClearanceGeometry> excludes;
+  // ★ E2.2 + E3: lattice.whole_part's include regions, resolved like includes and
+  // numbered 1.. in their own order. They limit nothing; they only say which voxels
+  // take a region's own grading.
+  std::vector<ClearanceGeometry> carriers;
 };
 
 // ★ RESOLVE ONE face REGION INTO A VOXEL MASK (task 2026-08-15-lattice-regions).
@@ -1210,6 +1214,13 @@ LatticeRoleRegions lattice_role_regions_from_job(const JobDescription& job,
           "compacted when an include fails to resolve, so a position is not a number. "
           "Refusing rather than answering with the position, which is the defect this "
           "check exists to prevent.");
+  // ★ E2.2 + E3: the whole-part regions, through this same resolver.
+  if (!job.lattice.whole_part_includes.empty()) {
+    JobDescription carried = job;
+    carried.lattice.regions = job.lattice.whole_part_includes;
+    carried.lattice.whole_part_includes.clear();
+    rr.carriers = lattice_role_regions_from_job(carried, model, grid).includes;
+  }
   return rr;
 }
 
@@ -3052,6 +3063,13 @@ LatticePosture build_lattice_posture(LatticeTopology topo, const VoxelGrid& sg,
   return post;
 }
 
+// ★ E3: one include region's latticed voxels and the density range the grading law
+// gave them (LatticeVariantOutcome::region_graded).
+struct LatticeRegionGraded {
+  long long voxels = 0;
+  double rho_lo = 0.0, rho_hi = 0.0;
+};
+
 struct LatticeCertOutcome {
   bool ran = false;
   double rho = 0.0;                    // uniform relative density certified
@@ -3712,7 +3730,12 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
                                      const long long* shipped_counts = nullptr,
                                      // ★ E2.1: per voxel, the scenario the grade
                                      // read (LatticeVariantOutcome::grade_source).
-                                     const std::vector<int>* grade_source = nullptr) {
+                                     const std::vector<int>* grade_source = nullptr,
+                                     // ★ E3: the include regions and their owner map.
+                                     const std::vector<JobLatticeRegion>* region_jobs = nullptr,
+                                     const std::vector<int>* region_owner = nullptr,
+                                     const std::vector<LatticeRegionGraded>*
+                                         region_graded = nullptr) {
   const LatticeGenStats& gs = oc.stats;
   const FixedDesignAnalysis& a = c.lattice;
   std::string s = "{\n";
@@ -4304,6 +4327,35 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
     }
     s += "\n  },\n";
   }
+  // ★ E3: EACH INCLUDE REGION, with its own grading and where each value came from
+  // ("region" = its own, "grading" = the part's). Written only when a region states a
+  // grading of its own, so no other receipt changes.
+  if (region_jobs && region_owner && !region_owner->empty() && region_graded &&
+      region_graded->size() == region_jobs->size()) {
+    s += "  \"lattice_regions\": [";
+    for (std::size_t i = 0; i < region_jobs->size(); ++i) {
+      const JobLatticeRegion& r = (*region_jobs)[i];
+      const long long nlat = (*region_graded)[i].voxels;
+      const double lo = (*region_graded)[i].rho_lo, hi = (*region_graded)[i].rho_hi;
+      auto src = [](bool own) { return std::string(own ? "\"region\"" : "\"grading\""); };
+      s += std::string(i ? ", " : "") + "{\"id\": " + std::to_string(i + 1) +
+           ", \"label\": " + json_str(r.label) + ", \"kind\": " + json_str(r.kind) +
+           ", \"latticed_voxels\": " + std::to_string(nlat) +
+           ", \"rho_min_graded\": " + json_num(nlat ? lo : 0.0) +
+           ", \"rho_max_graded\": " + json_num(nlat ? hi : 0.0) +
+           ", \"grading\": {\"mode\": " + json_str(r.grading.empty() ? "" : r.grading) +
+           ", \"rho_min\": " + json_num(r.rho_min) + ", \"rho_max\": " + json_num(r.rho_max) +
+           ", \"demand_exponent\": " + json_num(r.demand_exponent) +
+           ", \"shape_grade\": " + std::to_string(r.shape_grade) +
+           ", \"shape_grade_band_mm\": " + json_num(r.shape_grade_band_mm) + "}" +
+           ", \"source\": {\"mode\": " + src(!r.grading.empty()) +
+           ", \"band\": " + src(r.rho_max > 0.0) +
+           ", \"demand_exponent\": " + src(r.demand_exponent > 0.0) +
+           ", \"shape_grade\": " + src(r.shape_grade >= 0) +
+           ", \"shape_grade_band_mm\": " + src(r.shape_grade_band_mm >= 0.0) + "}}";
+    }
+    s += "],\n";
+  }
   // The receipt's verdict. The GATE's own verdict logic is untouched; a "skin"
   // finish is refused UPSTREAM of it (like the density-band fast-fail) because
   // the composite posture assumes every latticed voxel carries at least the
@@ -4884,6 +4936,14 @@ struct LatticeVariantOutcome {
   // ★ E2.1: per voxel, the index (in the run's scenario order) of the scenario whose
   // stress the grade read there; -1 everywhere on a job without scenarios.
   std::vector<int> grade_source;
+  // ★ E3: the include regions (declared order) and per voxel the one that owns it,
+  // for the receipt's lattice_regions. Empty when no region states its own grading.
+  std::vector<JobLatticeRegion> region_jobs;
+  std::vector<int> region_owner;
+  // Per region (declared order): its latticed voxels and the density range the GRADING
+  // LAW gave them, taken before the certificate's as-built rebuild (which reads each laid
+  // cell, and a cell straddling a region's edge carries its neighbour's density).
+  std::vector<LatticeRegionGraded> region_graded;
   // ★ the ORGANIC structural certificate (beam network), when one was run
   OrganicCertificate organic_cert;
   OrganicRecommendation organic_recommendation;   // organic_recommend != off
@@ -6043,6 +6103,40 @@ static std::string json_safe(std::string t) {
   return t;
 }
 
+// ── ★ E3: THE INCLUDE REGIONS, IN DECLARED ORDER, AND THEIR OWN GRADING ───────
+// The includes of `lattice.regions`, or lattice.whole_part's regions when the job
+// lattices the whole part: the same list, in the same order, that numbers the owner map.
+std::vector<JobLatticeRegion> lattice_include_regions(const JobDescription& job) {
+  if (!job.lattice.whole_part_includes.empty()) return job.lattice.whole_part_includes;
+  std::vector<JobLatticeRegion> out;
+  for (const JobLatticeRegion& r : job.lattice.regions)
+    if (r.role == "include") out.push_back(r);
+  return out;
+}
+// One override per region; EMPTY when no region states a grading of its own, so the
+// grading law is handed nothing and runs exactly as before. (A region that states only
+// a shape grade gets the part's band and curve, which grade exactly as the part's.)
+std::vector<GradingRegionOverride> lattice_region_overrides(
+    const std::vector<JobLatticeRegion>& regions) {
+  std::vector<GradingRegionOverride> out(regions.size());
+  bool any = false;
+  for (std::size_t i = 0; i < regions.size(); ++i) {
+    const JobLatticeRegion& r = regions[i];
+    GradingRegionOverride& o = out[i];
+    o.rho_min = r.rho_min;
+    o.rho_max = r.rho_max;
+    o.demand_exponent = r.demand_exponent;
+    o.flat = r.grading == "off" || r.grading == "shape";
+    o.flat_rho = o.flat ? r.relative_density : 0.0;
+    // A region's own shape grade needs the owner map too, so it arms the table.
+    if (r.rho_max > 0.0 || r.demand_exponent > 0.0 || o.flat || r.shape_grade >= 0 ||
+        r.shape_grade_band_mm >= 0.0)
+      any = true;
+  }
+  if (!any) out.clear();
+  return out;
+}
+
 LatticeVariantOutcome lattice_one_variant(
     const MinimizePlasticVariant& v, const JobDescription& job,
     const VoxelGrid& part_grid, const SolvedDesignDomain& domain,
@@ -6090,6 +6184,14 @@ LatticeVariantOutcome lattice_one_variant(
   std::vector<double> vm_grade_storage;
   const std::vector<double>& vm_grade =
       lattice_grading_stress(v, lat_scen_on, vm_grade_storage, &R.grade_source);
+  // ★ E3: each include region's own grading, and per voxel the region that owns it
+  // (ruling 4's owner over the includes, or over lattice.whole_part's regions). Empty
+  // when no region states any: the part's grading everywhere, byte for byte.
+  const std::vector<JobLatticeRegion> e3_jobs = lattice_include_regions(job);
+  const std::vector<ClearanceGeometry>& e3_regions =
+      lattice_roles.includes.empty() ? lattice_roles.carriers : lattice_roles.includes;
+  const std::vector<GradingRegionOverride> e3_overrides = lattice_region_overrides(e3_jobs);
+  std::vector<int> e3_owner;
 
   // ── Stage 4: the grading law runs FIRST, on THIS variant's own final
   // certification-recovery von Mises field (H4a — the run's own field, fresh:
@@ -6260,6 +6362,7 @@ LatticeVariantOutcome lattice_one_variant(
     LatticeBoundary members;
     for (const ClearanceGeometry& g : lattice_kos)
       members.add_keep_out(g, g.kind == ClearanceKind::Bolt);
+    if (!e3_overrides.empty()) e3_owner.assign(solved_grid.voxel_count(), 0);
     for (const ClearanceGeometry& g : lattice_roles.includes)
       members.add_include_region(g);
     for (const ClearanceGeometry& g : lattice_roles.excludes)
@@ -6299,8 +6402,13 @@ LatticeVariantOutcome lattice_one_variant(
           // tie to the lower id (stepped_region_owner, ruling 4, 2026-10-07). 0 means the
           // voxel is in no include prism at all: no owner, not "region 1".
           region_ids[e] = stepped_region_owner(c, lattice_roles.includes);
+          if (!e3_overrides.empty()) e3_owner[e] = stepped_region_owner(c, e3_regions);
         }
     GradingLawParams gp;
+    if (!e3_overrides.empty()) {   // ★ E3: each region's own grading
+      gp.region_override_ids = &e3_owner;
+      gp.region_overrides = &e3_overrides;
+    }
     gp.topology = lat_topo;  // the job's type
     gp.target_cell_size_mm = job.grading.cell_mm;
     gp.min_extrudable_width_mm = job.grading.min_extrudable_width_mm;
@@ -7830,7 +7938,76 @@ LatticeVariantOutcome lattice_one_variant(
     for (char m : mask)
       if (m) ++latticed_after_grade;
 
-  if (graded && R.algorithm != LatticeAlgorithm::Organic && job.grading.shape_grade) {
+  // ★ E3: THE SHAPE GRADE PER REGION. A region's own switch and band replace the
+  // part's for the voxels it owns (e3_owner); a voxel no region owns keeps the part's.
+  // When no region states one, `e3_shape` is false and the block below is the part-wide
+  // beam, byte for byte.
+  bool e3_shape = false;
+  for (const JobLatticeRegion& r : e3_jobs)
+    if (r.shape_grade >= 0 || r.shape_grade_band_mm >= 0.0) e3_shape = true;
+  auto shape_on = [&](int id) {
+    if (id >= 1 && static_cast<std::size_t>(id) <= e3_jobs.size() &&
+        e3_jobs[static_cast<std::size_t>(id - 1)].shape_grade >= 0)
+      return e3_jobs[static_cast<std::size_t>(id - 1)].shape_grade == 1;
+    return job.grading.shape_grade;
+  };
+  auto band_of = [&](int id) {
+    if (id >= 1 && static_cast<std::size_t>(id) <= e3_jobs.size() &&
+        e3_jobs[static_cast<std::size_t>(id - 1)].shape_grade_band_mm >= 0.0)
+      return e3_jobs[static_cast<std::size_t>(id - 1)].shape_grade_band_mm;
+    return job.grading.shape_grade_band_mm;
+  };
+  bool any_shape = job.grading.shape_grade;
+  if (e3_shape)
+    for (std::size_t i = 0; i < e3_jobs.size(); ++i)
+      if (shape_on(static_cast<int>(i) + 1)) any_shape = true;
+  if (graded && R.algorithm != LatticeAlgorithm::Organic && e3_shape && any_shape) {
+    const double beam =
+        lattice_outline_beam_mm(job.grading.min_extrudable_width_mm, solved_grid.spacing);
+    // The walk seeds from each region's own face plane, so it reads the E3 owner map
+    // and the E3 regions' normals (the includes, or lattice.whole_part's regions).
+    std::vector<Vec3> nrms;
+    for (const JobLatticeRegion& r : e3_jobs) nrms.push_back(r.normal);
+    // One band walk per distinct band width, each kept only where the owning region
+    // (or the part, where none owns the voxel) has the shape grade on at that width.
+    std::vector<double> widths;
+    auto want = [&](std::size_t e) {
+      const int id = e < e3_owner.size() ? e3_owner[e] : 0;
+      return shape_on(id) ? band_of(id) : -1.0;
+    };
+    for (std::size_t e = 0; e < mask.size(); ++e)
+      if (mask[e]) {
+        const double b = want(e);
+        if (b >= 0.0 && std::find(widths.begin(), widths.end(), b) == widths.end())
+          widths.push_back(b);
+      }
+    std::vector<char> beam_band(mask.size(), 0);
+    double inward_max = 0.0, bleed_max = 0.0;
+    for (const double b : widths) {
+      const double bleed = lattice_outline_bleed_mm(b);
+      const double inward = beam + bleed;
+      inward_max = std::max(inward_max, inward);
+      bleed_max = std::max(bleed_max, bleed);
+      const std::vector<char> band =
+          organic_solid_rim_band(solved_grid, mask, e3_owner, nrms, inward);
+      for (std::size_t e = 0; e < band.size(); ++e)
+        if (band[e] && want(e) == b) beam_band[e] = 1;
+    }
+    const std::size_t cleared = clear_band_from_mask(mask, beam_band);
+    clear_band_from_mask(gf.posture.mask, beam_band);
+    for (std::size_t e = 0; e < beam_band.size() &&
+                            e < gf.posture.relative_density.size(); ++e)
+      if (beam_band[e]) gf.posture.relative_density[e] = 0.0;
+    R.outline_beam_mm = beam;
+    R.outline_bleed_mm = bleed_max;
+    R.outline_beam_voxels = static_cast<long long>(cleared);
+    R.outline_inward_mm = inward_max;
+    std::fprintf(stderr,
+                 "[outline] per region: solid beam %.4f mm, up to %.4f mm inward over %zu "
+                 "band width(s) | %zu voxel(s) turned solid\n",
+                 beam, inward_max, widths.size(), cleared);
+  } else if (graded && R.algorithm != LatticeAlgorithm::Organic && !e3_shape &&
+             job.grading.shape_grade) {
     const double beam =
         lattice_outline_beam_mm(job.grading.min_extrudable_width_mm, solved_grid.spacing);
     const double bleed = lattice_outline_bleed_mm(job.grading.shape_grade_band_mm);
@@ -9340,6 +9517,21 @@ LatticeVariantOutcome lattice_one_variant(
   const LatticeCertContext cx =
       lattice_cert_context(v, part_grid, domain, options, material, job);
   // ★ (3): the certificate reads the density REBUILT from what shipped, when it was.
+  // ★ E3: each region's graded range, read before the as-built rebuild below.
+  if (!e3_owner.empty()) {
+    R.region_graded.assign(e3_jobs.size(), {});
+    std::vector<char> seen(e3_jobs.size(), 0);
+    for (std::size_t e = 0; e < gf.posture.mask.size() && e < e3_owner.size(); ++e) {
+      const int id = e3_owner[e];
+      if (!gf.posture.mask[e] || id < 1 || static_cast<std::size_t>(id) > e3_jobs.size()) continue;
+      LatticeRegionGraded& g = R.region_graded[static_cast<std::size_t>(id - 1)];
+      const double r = gf.posture.relative_density[e];
+      if (!seen[static_cast<std::size_t>(id - 1)]) { g.rho_lo = g.rho_hi = r; seen[static_cast<std::size_t>(id - 1)] = 1; }
+      g.rho_lo = std::min(g.rho_lo, r);
+      g.rho_hi = std::max(g.rho_hi, r);
+      ++g.voxels;
+    }
+  }
   if (graded && !shipped_rho.empty()) gf.posture.relative_density = shipped_rho;
   const LatticePosture post = build_lattice_posture(
       lat_topo, solved_grid, cell, mask, rho_uniform,
@@ -9552,6 +9744,10 @@ LatticeVariantOutcome lattice_one_variant(
     }
   }
 
+  if (!e3_owner.empty()) {   // ★ E3: for the receipt's lattice_regions
+    R.region_jobs = e3_jobs;
+    R.region_owner = e3_owner;
+  }
   const long long shipped_counts[2] = {R.shipped_lowered, R.shipped_at_floor};
   R.receipt_path =
       join_path(out_dir, lattice_base_name(job.output.mesh_prefix,
@@ -9560,7 +9756,8 @@ LatticeVariantOutcome lattice_one_variant(
   R.receipt_json = lattice_cert_report_json(
       v, job.lattice, R.cc, R.oc, cell, role_rcpt, grad_rcpt, added_rcpt,
       frozen_rcpt, R.void_check_ran ? &R.void_report : nullptr, &R.volume_check,
-      &R.volume_check_law, shipped_counts, &R.grade_source);
+      &R.volume_check_law, shipped_counts, &R.grade_source, &R.region_jobs, &R.region_owner,
+      &R.region_graded);
   write_text_file(R.receipt_path, R.receipt_json);
   // `grad_rcpt.gf` points at R.gf, which the caller now owns; the receipt is
   // already rendered, so nothing may follow that pointer after the return. Null

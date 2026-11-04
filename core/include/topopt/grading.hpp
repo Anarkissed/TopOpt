@@ -168,6 +168,20 @@ inline constexpr const char* kAestheticDensityMeaning =
 
 // How the law maps demand to (density, cell size). All fields must be positive where
 // noted; grade_lattice throws std::invalid_argument otherwise.
+// ── ★ E3: ONE INCLUDE REGION'S OWN GRADING (plan.md §B7) ─────────────────────
+// Each value falls back to the part's when absent (0, or `flat` false). The region
+// is the voxel's owner by ruling 4 (`GradingLawParams::region_override_ids`).
+struct GradingRegionOverride {
+  double rho_min = 0.0;           // the region's band, inside the certifiable band
+  double rho_max = 0.0;
+  double demand_exponent = 0.0;   // the curve from stress to density
+  // ONE density for the whole region (grading "off" or "shape"): `flat_rho` when > 0
+  // (the region's stated relative_density), else the region's graded PEAK -- the
+  // densest point of its own grade, so it certifies wherever the grade does.
+  bool flat = false;
+  double flat_rho = 0.0;
+};
+
 struct GradingLawParams {
   LatticeTopology topology = LatticeTopology::Octet;
 
@@ -477,6 +491,12 @@ struct GradingLawParams {
   // held under an accuracy claim the certification cannot check, which is why it
   // arrives with an aggregate cap below rather than on its own.
   const std::vector<int>* region_ids = nullptr;
+
+  // ★ E3: per voxel, the 1-based id of the include region that owns it (ruling 4's
+  // owner, 0 = none), and each region's own grading, indexed id - 1. Both null (the
+  // default): every voxel grades by the part's values, exactly as before.
+  const std::vector<int>* region_override_ids = nullptr;
+  const std::vector<GradingRegionOverride>* region_overrides = nullptr;
 
   // The AGGREGATE exposure cap (fraction of the printed set), defaulted to the core
   // constant lattice_subfloor_aggregate_cap_fraction(). If the total retained across
