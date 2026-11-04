@@ -86,19 +86,22 @@ int main() {
         "the app no longer quotes core's blanket-refusal phrase, so the mirror "
         "has nothing to compare against");
 
-  // ── MIRROR 2: the refusal core DOES still carry — grading + design_box ──────
-  // Both run_job's pre-flight and lattice_variant_job throw it; the app's live
-  // conflict is what mirrors it.
-  const std::string graded =
-      "block is not yet supported together with a";
-  const bool core_refuses_graded_box = has(run_job, graded);
-  const bool app_mirrors_graded_box = has(gate, "gradedDesignBoxRefusalPhrase");
-
-  CHECK(core_refuses_graded_box == app_mirrors_graded_box,
-        "the grading-with-a-design-box refusal and the app's live conflict "
-        "disagree. If core dropped it, drop LatticeCoreCapability's "
-        "gradedDesignBoxRefusalPhrase and liveConflict with it; if core added "
-        "one, the app must state it.");
+  // ── MIRROR 2: the refusal core DOES still carry — organic + design_box ──────
+  // Grading + a design box runs since the ruling of 2026-11-03 23:05 (option (b)):
+  // the law plans around the added material and no level lays a cell the certificate
+  // calls solid. Core keeps ONE graded refusal with a box, the organic lattice, thrown
+  // by both run_job's pre-flight and lattice_variant_job. The app's live conflict must
+  // quote core's own words, and must no longer hold the graded refusal core dropped.
+  const std::string organic_box = "The organic lattice can't be used with a design box";
+  const std::string graded_old = "block is not yet supported together with a";
+  CHECK(has(run_job, organic_box) == has(gate, organic_box),
+        "the organic-with-a-design-box refusal and the app's live conflict disagree: "
+        "LatticeCoreCapability must quote core's sentence while core throws it, and "
+        "drop it when core does.");
+  CHECK(!(has(gate, graded_old) && !has(run_job, graded_old)),
+        "the app still refuses EVERY graded lattice with a design box, which core "
+        "dropped: narrow LatticeCoreCapability.liveConflict to the organic lattice "
+        "(gradedDesignBoxRefusalPhrase goes with it).");
 
   // ── THE INVARIANT BEHIND BOTH ──────────────────────────────────────────────
   // The app may never be the last one holding a rule the solver dropped. Stated
