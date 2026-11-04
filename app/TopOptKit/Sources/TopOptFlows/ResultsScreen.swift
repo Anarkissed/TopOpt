@@ -1371,22 +1371,25 @@ public struct ResultsScreen: View {
     private var rightColumn: some View {
         VStack(alignment: .trailing, spacing: DS.Space.m) {
             let sc = model.scenarios(for: model.selected)
-            if sc.count >= 2 { ResultsScenarioPicker(scenarios: sc, pick: $scenarioPick) }
-            if let note = ResultsScenarioViews.note(pick: scenarioPick, scenarios: sc,
-                                                    ownFields: model.showsOwnFields(of: scenarioPick)) {
-                Text(note).font(.system(size: 11, weight: .semibold)).foregroundStyle(DS.Color.warning.color)
-                    .multilineTextAlignment(.trailing).frame(width: ResultsChrome.columnWidth, alignment: .trailing)
-                    .accessibilityIdentifier("results-scenario-views-note")
-            }
             ResultsViewModePicker(modes: viewModes, isOn: { layers.isOn($0) },
                                   tap: { layers.tap($0, hasStress: model.hasStress) }, fullScreen: $fullScreen)
             motionBar
             // ★ his note 2026-10-27: the tap-to-explore key sits above Checks, minimised until he opens it — and (10-28) it is
             // there whenever the part wears stress colours: still, bending, breaking or carrying the light
             stressKey
-            ResultsChecksAndDetails(checks: checks, checksOpen: $checksOpen, openCheck: $openCheck, detailsOpen: $detailsOpen, tab: $detailsTab,
-                                    versionTitle: selectedRow?.title ?? "",
-                                    rows: { model.detailRows($0, version: selectedRow) }, pill: crowded)
+            if let note = ResultsScenarioViews.note(pick: scenarioPick, scenarios: sc,
+                                                    ownFields: model.showsOwnFields(of: scenarioPick)) {
+                Text(note).font(.system(size: 11, weight: .semibold)).foregroundStyle(DS.Color.warning.color)
+                    .multilineTextAlignment(.trailing).frame(width: ResultsChrome.columnWidth, alignment: .trailing)
+                    .accessibilityIdentifier("results-scenario-views-note")
+            }
+            // ★ LOOK PER SCREEN (R-c, mockup #topo-results): "Scenario: Worst case ⌄" beside Checks, top-aligned
+            HStack(alignment: .top, spacing: DSParts.cornerGap) {
+                if sc.count >= 2 { ResultsScenarioPicker(scenarios: sc, pick: $scenarioPick).padding(.top, 6) }
+                ResultsChecksAndDetails(checks: checks, checksOpen: $checksOpen, openCheck: $openCheck, detailsOpen: $detailsOpen,
+                                        tab: $detailsTab, versionTitle: selectedRow?.title ?? "",
+                                        rows: { model.detailRows($0, version: selectedRow) }, pill: crowded)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
         .padding(.top, PageChrome.gizmoClearance)

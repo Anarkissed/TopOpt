@@ -70,6 +70,23 @@ final class ResultsCornerHostedTests: XCTestCase {
         XCTAssertTrue(offered.contains("Open in Library"), "★ Open in Library: \(offered)")
     }
 
+    /// ★ R-c (mockup #topo-results): Checks is §4.3's panel (300 pt, as the mockup draws it), its header "Checks · N to look at";
+    /// "Scenario: Worst case ⌄" is one glass chip beside it, top-aligned, both under the view buttons. RED before R-c (scratchpad
+    /// b2red/ResultsChecks.txt): Checks 330 pt in the old box; "Scenario" sits above the view buttons.
+    func testChecksIsThePanelAndTheScenarioSitsBesideIt() throws {
+        for size in [CGSize(width: 1376, height: 1032), CGSize(width: 820, height: 1180)] {
+            let (h, _) = try r.screen(size)
+            let checks = try r.frame(h, "resultsChecks")
+            XCTAssertEqual(checks.width, 300, accuracy: 0.5, "\(size): ★ the mockup's Checks")
+            XCTAssertEqual(try r.frame(h, "resultsChecksHeader").height, DSParts.headerHeight, accuracy: 0.5, "\(size): §4.3's header")
+            let scenario = try r.frame(h, "resultsScenario"), views = try r.frame(h, "resultsViewModes")
+            XCTAssertLessThanOrEqual(scenario.maxX, checks.minX - 7, "\(size): ★ beside Checks, on its left")
+            XCTAssertEqual(scenario.minY, checks.minY, accuracy: 7, "\(size): top-aligned with it")
+            XCTAssertGreaterThanOrEqual(Swift.min(scenario.minY, checks.minY), views.maxY - 0.5, "\(size): ★ under the view buttons")
+            XCTAssertLessThanOrEqual(scenario.height, 44.5, "\(size): one chip")
+        }
+    }
+
     /// The bytes and names of every result at once, without changing which one is shown.
     func testExportAllWritesEveryResultAndKeepsTheSelection() throws {
         let o = try ResultsRedesignTests.strengthenOutcome()
