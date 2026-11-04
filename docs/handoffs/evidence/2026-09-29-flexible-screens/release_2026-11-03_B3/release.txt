@@ -1,0 +1,23 @@
+# Release 5c5ba9c1 — 2026-11-03 B3 (UI-Notes' app batch up to 6a64d1b5), app only, released before review (his 11-03 pick)
+# Core and worker unchanged: fingerprint 35764048bba3; "fingerprint": "35764048bba3"
+# Merged onto 6cd78de7; the merged app tree equals 6a64d1b5's, so the builder's tests apply unchanged.
+# Commits:
+#   72e64cc3 Merge commit '537c1752' into claude/app-build-b3
+#   5b5f6bd0 B3 slice 1 (R5, O3, #362's note 1): one scenario shown at a time, "Used here", region anchors per scenario, Topology's Optimize topology only
+#   72fe3522 B3 slice 2 (his lattice-type answers, 11-03 via #362): Exit without selection, Delete lattice stage, no card with nothing latticed
+#   0f049a90 B3 slice 3 (note 5): a load's Kind · Weight · Direction in its open group, and a round handle on its arrow to aim it
+#   91a3347e B3 slice 4 (app-map §3.9): the Settings panel's Material row; every row inside the panel, never over the top-left block
+#   7cafac20 Release 2026-11-03: merge B3-s1-4 (91a3347e), UI-Notes' app batch (app only; core and worker unchanged at 35764048bba3)
+#   75379975 B3 slice 5a (U7): Optimize over results asks in place, never a system alert; + primitive's choice is a menu
+#   3b5e048e Release 2026-11-03: merge B3-s5a (75379975), UI-Notes' app batch (app only; core and worker unchanged at 35764048bba3)
+#   0173d435 B3 slice 5b (run states, O2 / U6): blocked = ≤ 5 words + a fix chip; "v8 is ready · Open"; + the reviewer's follow-ups
+#   272cabc8 Release 2026-11-03: merge B3-s5b (0173d435), UI-Notes' app batch (app only; core and worker unchanged at 35764048bba3)
+#   6a64d1b5 B3 slice 6: the body-size fix (the re-run card's snapshot in a box), and his third choice "Keep my regions and groups"
+#   5c5ba9c1 Release 2026-11-03: merge B3 slice 6 (6a64d1b5), UI-Notes' app batch (app only; core and worker unchanged at 35764048bba3)
+# Gates:
+#   18:49 checks ok: B3, local 5c5ba9c1 over origin 6cd78de7 (12 commits); app tree == 6a64d1b5's, fingerprint 35764048bba3
+#   18:49 waiting for HEAVY.lock (LatticeTypes gate C @ 262b731f (full ctest), driver pid 34707 2026-11-03 17:25)
+#   18:57 lock taken
+#   19:04 iPad device build green; lock released
+#   19:04 pushed 5c5ba9c1
+#   19:04 worker /health "fingerprint": "35764048bba3" (unchanged, no swap)
