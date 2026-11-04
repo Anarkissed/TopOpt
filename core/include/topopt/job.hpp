@@ -332,6 +332,16 @@ struct JobLattice {
   // design whose governing solid margin was 8.0).
   std::vector<std::string> scenarios;
   bool scenarios_stated = false;
+  // ── ★ THE "- LATTICE FACES" MODE (E2.2, plan.md §B6 note 26) ─────────────────
+  // false (the default): today's rule. Any include region limits the lattice to the
+  // includes; with none, the whole part is latticed.
+  // true: the WHOLE part is latticed and the exclude regions (No lattice, a face
+  // prism kept solid) are cut out of it. Include regions no longer limit anything:
+  // the parse moves them out of `regions` into `whole_part_includes`, where they only
+  // carry their own settings (per-region grading, E3). Until E3 a setting on one of
+  // them (relative_density, synthetic_stress) is refused rather than dropped.
+  bool whole_part = false;
+  std::vector<JobLatticeRegion> whole_part_includes;
   // MULTISCALE LATTICE TO (task multiscale-lattice-to). false (the DEFAULT) is the
   // TWO-STEP pipeline every existing job runs: optimize assuming solid, then try to
   // lattice what survived. true asks the OPTIMIZER to place the lattice while it

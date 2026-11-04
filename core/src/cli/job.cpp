@@ -1489,7 +1489,7 @@ JobDescription parse_job(const std::string& json_text) {
                          "outer_finish", "emit_welded_stl", "welded_pitch_mm", "emit_organic_spans",
                          "emit_plan_laid",
                          "regions", "multiscale",
-                         "stepped_cells", "scenarios",
+                         "stepped_cells", "scenarios", "whole_part",
                          "forecast_only", "organic_probe_cells_mm", "organic_probe_grades_mm",
                          "organic_recommend", "organic_look_cells_across",
                          "organic_recommend_margin", "organic_recommend_steps",
@@ -1874,6 +1874,33 @@ JobDescription parse_job(const std::string& json_text) {
         }
         job.lattice.regions.push_back(std::move(reg));
       }
+    }
+    // ★ E2.2: THE "- LATTICE FACES" MODE (job.hpp). The include regions stop limiting
+    // the lattice: they leave `regions` for `whole_part_includes`, so every reader of
+    // `regions` sees the whole part minus the excludes.
+    if (const JsonValue* wp = find_key(lat, "whole_part")) {
+      if (wp->type != JsonValue::Type::Bool)
+        schema_fail("lattice \"whole_part\" must be a boolean");
+      job.lattice.whole_part = (wp->num != 0.0);
+    }
+    if (job.lattice.whole_part) {
+      std::vector<JobLatticeRegion> kept;
+      for (JobLatticeRegion& r : job.lattice.regions) {
+        if (r.role != "include") {
+          kept.push_back(std::move(r));
+          continue;
+        }
+        if (r.relative_density > 0.0 || r.synthetic_stress)
+          schema_fail(
+              "lattice \"whole_part\" latticed the whole part, so an include region "
+              "there only carries its own settings, and a region's own settings in this "
+              "mode come with per-region grading (E3), not yet built. This include "
+              "states \"" + std::string(r.relative_density > 0.0 ? "relative_density"
+                                                                 : "synthetic_stress") +
+              "\"; it is refused rather than dropped.");
+        job.lattice.whole_part_includes.push_back(std::move(r));
+      }
+      job.lattice.regions = std::move(kept);
     }
     // MULTISCALE (task multiscale-lattice-to). Absent => false => the two-step
     // pipeline, byte-identical. It needs a "grading" block: a multiscale design is
