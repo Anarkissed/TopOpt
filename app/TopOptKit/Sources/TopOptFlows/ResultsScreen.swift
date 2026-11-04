@@ -79,6 +79,8 @@ public struct ResultsScreen: View {
     var smoothing: SmoothingModel?
     /// ★ Results redesign (2026-10-27): the app's undo / redo at the top left, as on every page.
     var undo: (() -> Void)?
+    /// ★ B2 (U1): the workspace's one top-left block (TopLeftBlock), drawn here in its own place. nil = the old row (tests).
+    var topLeftBlock: AnyView?
     var redo: (() -> Void)?
     var canUndo: () -> Bool = { false }
     var canRedo: () -> Bool = { false }
@@ -142,7 +144,7 @@ public struct ResultsScreen: View {
     /// The ONE shared orbit camera for this results stage (STEP 1). The Metal viewer AND
     /// the orientation gizmo both drive it, so dragging the model turns the cube and
     /// tapping the cube orbits the model.
-    @StateObject private var cameraModel = OrbitCameraModel()
+    @StateObject private var cameraModel = OrbitCameraModel(followsViewProjection: true)   // ★ B2 (note 1)
     /// Drives the Play animation: a ~30 fps tick that advances the morph scrub while
     /// `model.playing`, so Play actually plays (previously it required a manual drag).
     @State private var ticker = Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()
@@ -169,6 +171,7 @@ public struct ResultsScreen: View {
                 onFullScreen: ((Bool) -> Void)? = nil,
                 loadSurfacePoints: @escaping () -> [[SIMD3<Float>]] = { [] },
                 scenarioLoads: ResultsScenarioLoads = ResultsScenarioLoads(),
+                topLeftBlock: AnyView? = nil,
                 resultsModel: ResultsModel? = nil) {
         // `resultsModel` is a TEST SEAM (the M7 /app/ house style — the run is tested
         // through an injected scheduler / runner / notifier the same way). The screen
@@ -195,6 +198,7 @@ public struct ResultsScreen: View {
         self.latticeEntry = latticeEntry
         self.smoothing = smoothing
         self.undo = undo; self.redo = redo; self.canUndo = canUndo; self.canRedo = canRedo
+        self.topLeftBlock = topLeftBlock
         self.onFullScreen = onFullScreen
         self.scenarioLoads = scenarioLoads
         self.loadSurfacePoints = loadSurfacePoints
@@ -721,7 +725,7 @@ public struct ResultsScreen: View {
 
     /// The body opacity for the current flow body mode (x-ray/stress translucent,
     /// solid opaque); 1 when the overlay is off (the normal opaque draw).
-    private var bodyAlpha: Float { layers.xray ? 0.3 : 1 }   // ★ 10-28: X-ray is a layer, with any colouring and motion
+    private var bodyAlpha: Float { layers.xray ? XrayLook.bodyAlpha : 1 }   // ★ 10-28: X-ray is a layer, with any colouring and motion
 
     /// Per-flat-vertex flex displacement for the selected variant (nil when flex is
     /// off / the variant has no field). Cached in the model, so this is cheap.
@@ -1105,7 +1109,17 @@ public struct ResultsScreen: View {
     /// instead of letting "See Original" and Export overlap. The secondary viz chips
     /// were pulled OUT of here onto the right rail (`vizRail`), which is what freed the
     /// space. Pixels are device QA (the M7 /app/ standard).
-    private var topBar: some View {
+    @ViewBuilder private var topBar: some View {
+        // ★ B2 (U1, notes 17, 18): the workspace's ONE top-left block, in the same place as on every page ("Optimized ✓"
+        // and nothing else: no run time, no machine on the name row)
+        if let topLeftBlock {
+            topLeftBlock.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        } else {
+            legacyTopBar
+        }
+    }
+
+    private var legacyTopBar: some View {
         VStack {
             HStack(spacing: DS.Space.m) {
                 Button(action: onClose) {
@@ -1866,8 +1880,10 @@ public struct ResultsScreen: View {
     /// tabs bottom-left, the media player bottom-centre — none reach the top-right cube.
     private var orientationGizmo: some View {
         VStack {
-            HStack {
+            HStack(alignment: .top, spacing: DS.Space.s) {
                 Spacer()
+                ViewProjectionPair()   // ★ B2 (note 1): [Orthographic │ Perspective], left of the gizmo, as on every page
+                    .padding(.top, 6)
                 OrientationGizmoView(camera: cameraModel)
             }
             Spacer()

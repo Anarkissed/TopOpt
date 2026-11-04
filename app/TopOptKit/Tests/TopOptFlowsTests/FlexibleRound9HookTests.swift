@@ -202,7 +202,9 @@ final class FlexibleRound9HookTests: XCTestCase {
         XCTAssertLessThan(prompt.lowerBound, start.lowerBound, "the card is asked for before the run starts")
         let callers = ws.components(separatedBy: "startRun()").count - 1
         // requestRun's fall-through, [Re-run here], the copy's onAppear, and startRun's own declaration.
-        XCTAssertEqual(callers, 4, "a new startRun() caller must be reviewed against the card")
+        // ★ RE-PINNED (whole-app build B1, note 4, 2026-11-03): + startRun's own "the remembered Mac is found, go on"
+        // (`findTheMac { startRun() }`), reached only from inside startRun, after the card — reviewed, no new door.
+        XCTAssertEqual(callers, 5, "a new startRun() caller must be reviewed against the card")
     }
 
     func testCancelChangesNothing() throws {

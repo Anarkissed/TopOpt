@@ -143,8 +143,26 @@ final class FlexibleRound7DesignIntegrationHostedTests: XCTestCase {
         pump(1.2)
         let row = try XCTUnwrap(h.frames.all["mainViews"], "\(tag): the views row")
         if let note = h.frames.all["mainNote"], note.width > 0 {
-            XCTAssertLessThan(note.minY, row.maxY, "★ H1 \(tag): the note on the row's line, never under the icons (\(note) vs \(row))")
+            // ★ RE-PINNED (B2, U1 — #362's OK 2026-11-03 05:34, the reviewer's R7-D3 superseded 06:06): the open left panel starts
+            // at PageChrome.panelTop, so at 11" portrait the note goes under the row's right end, whole; on the row's line elsewhere
+            if tag == "11p" {
+                XCTAssertGreaterThanOrEqual(note.minY, row.maxY, "★ H1 \(tag): under the row (\(note) vs \(row))")
+                XCTAssertEqual(note.maxX, row.maxX, accuracy: 1, "★ H1 \(tag): at the row's right end")
+                let band = FlexibleMainViewToggles.noteFrame(viewport: size)
+                XCTAssertTrue(band.insetBy(dx: -1, dy: -1).contains(note), "★ H1 \(tag): whole, inside its band (\(note) in \(band))")
+            } else {
+                XCTAssertLessThan(note.minY, row.maxY, "★ H1 \(tag): the note on the row's line, never under the icons (\(note) vs \(row))")
+            }
             XCTAssertFalse(note.intersects(row), "★ H1 \(tag): off the icons")
+            // (opt-in, B2_SHOT_DIR=<dir>: the page as a PNG for the B2 hand-off — the 3D view draws nothing offscreen)
+            if let dir = ProcessInfo.processInfo.environment["B2_SHOT_DIR"] {
+                h.view.layoutSubtreeIfNeeded()
+                let rep = try XCTUnwrap(h.view.bitmapImageRepForCachingDisplay(in: h.view.bounds))
+                h.view.cacheDisplay(in: h.view.bounds, to: rep)
+                try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+                try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+                    .write(to: URL(fileURLWithPath: dir).appendingPathComponent("flexible_lattice_ready_\(tag).png"))
+            }
             for (k, f) in [("the capsule", h.frames.all["capsule"]), ("the legend", legend(s, size)), ("the Selections list", h.frames.all["selectionsList"])] {
                 if let f { XCTAssertFalse(note.intersects(f), "★ H1 \(tag): the note is not on \(k) (\(note) vs \(f))") }
             }

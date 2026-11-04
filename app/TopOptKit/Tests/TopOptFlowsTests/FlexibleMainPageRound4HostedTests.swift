@@ -89,13 +89,20 @@ final class FlexibleMainPageRound4HostedTests: XCTestCase {
                 // ★ RE-PINNED (round 7, R7-D1 — his pick 1, A2's views row: one line of six 44 pt icons): at 11" portrait the
                 // note sat UNDER the row's right end. ★ RE-PINNED (round 7, R7-D3 — the reviewer's ruling 3 of 2026-10-17: "'Lattice ready' dropping under the icons at 11\" portrait" fixed before D3 is done): beside the row on its line at EVERY size again — at 11"
                 // portrait over the left column's empty top (the open panel never rises above 2 × noteTop). Was (R7-D1): under it.
-                XCTAssertLessThanOrEqual(note.maxX, drawnRow.minX, "left of the buttons at \(name)")
-                XCTAssertEqual(note.midY, drawnRow.midY, accuracy: 1, "on the row's line at \(name)")
+                // ★ RE-PINNED (B2, U1 — #362's OK 2026-11-03 05:34): the open left panel now starts at PageChrome.panelTop, 12 pt under the stage row, so the column's top is no longer empty on the row's line; where the row leaves too little beside it (11" portrait, the 820 pt pad) the note goes UNDER the row's right end, whole (R7-D1's place). Was (R7-D3): beside, over the column's empty top.
+                let under = name == "11p"
+                if under {
+                    XCTAssertGreaterThanOrEqual(note.minY, drawnRow.maxY, "under the row at \(name)")
+                    XCTAssertEqual(note.maxX, drawnRow.maxX, accuracy: 1, "at the row's right end at \(name)")
+                } else {
+                    XCTAssertLessThanOrEqual(note.maxX, drawnRow.minX, "left of the buttons at \(name)")
+                    XCTAssertEqual(note.midY, drawnRow.midY, accuracy: 1, "on the row's line at \(name)")
+                }
                 XCTAssertTrue(!note.intersects(FlexibleMainLegendLayout.leftStrip(viewport: size)) || note.maxY < FlexibleMainViewToggles.leftPanelHighestTop,
                               "clear of the left panel (or above its highest reach) at \(name)")
                 // ★ RED CONTROL: C2's band under the row does not hold the note any more
                 let c2Band = CGRect(x: size.width - PageChrome.edge - 300, y: row.maxY + DS.Space.s, width: 300, height: 34)
-                XCTAssertFalse(c2Band.insetBy(dx: -1, dy: -1).contains(note), "control: not in C2's band under the row")   // (R7-D3: at 11" portrait too)
+                if !under { XCTAssertFalse(c2Band.insetBy(dx: -1, dy: -1).contains(note), "control: not in C2's band under the row") }
             }
         }
     }

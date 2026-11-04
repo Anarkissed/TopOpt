@@ -109,7 +109,7 @@ private struct ComputeLocationSheet: View {
                             }
                             .buttonStyle(.plain)
                             .numberPad($editingPort,
-                                       config: .init(title: "Port", allowsDecimal: false),
+                                       config: .init(title: "Port", allowsDecimal: false, range: NumberRange(1, 65535)),
                                        seed: Double(manualPort)) { v in
                                 manualPort = v.map { String(Int($0.rounded())) } ?? ""
                             }

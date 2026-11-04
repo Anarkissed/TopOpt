@@ -839,6 +839,10 @@ public final class LocalRunNotifier: RunNotifier {
 
     public init() {}
 
+    /// Notifications need an app bundle: a process without one (xctest hosting the real RootView) is refused by the system
+    /// with an exception, so it asks nothing (B1's hosted tests). On the iPad the app always has one.
+    static var hasAppBundle: Bool { Bundle.main.bundleURL.pathExtension == "app" }
+
     /// Ask for notification permission up front (handoff 121). A remote run can
     /// finish while the user is in the foreground OR via the cold-launch re-attach,
     /// and either fires a completion notification — so we request permission at app
@@ -846,13 +850,13 @@ public final class LocalRunNotifier: RunNotifier {
     /// means no banners.
     public static func requestAuthorization() {
         #if canImport(UserNotifications)
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        if Self.hasAppBundle { UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in } }
         #endif
     }
 
     public func willRunInBackground() {
         #if canImport(UserNotifications)
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        if Self.hasAppBundle { UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in } }
         #endif
         #if canImport(UIKit)
         endAssertion()
@@ -864,12 +868,14 @@ public final class LocalRunNotifier: RunNotifier {
 
     public func runDidComplete(summary: String) {
         #if canImport(UserNotifications)
+        if Self.hasAppBundle {
         let content = UNMutableNotificationContent()
         content.title = "TopOpt"
         content.body = summary
         content.sound = .default
         UNUserNotificationCenter.current().add(
             UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+        }
         #endif
         #if canImport(UIKit)
         endAssertion()
@@ -1070,6 +1076,18 @@ public final class RunModel: ObservableObject {
                                _ onVariant: @escaping (OptimizeOutcome) -> Void)
                                throws -> OptimizeOutcome
     var runner: Runner
+    /// Hosted tests only (the whole-app build, B1): when set, every run starts with this instead of the runner the workspace
+    /// picked (the bridge or the Mac), so a test lands a run through the REAL Optimize click. The app never sets it.
+    nonisolated(unsafe) static var hostedTestRunner: Runner?
+
+    /// ★ B1 (ledger O1, approved design 2026-11-02: "an engine failure is one plain line on the button that failed, never
+    /// the raw engine text in a card"): this failure is the ENGINE's own text (the runner threw). RunScreen draws no card
+    /// for it; the workspace dismisses it and the button that started the run says so in one line. The text is kept for
+    /// B2's (i). A stall ("Keep waiting") and "Not strong enough to print" are app words and stay sheets (question to the
+    /// reviewer, 2026-11-03).
+    @Published public private(set) var failureShowsOnButton = false
+    /// The engine's own words for the last such failure (for B2's (i); never drawn in a card).
+    @Published public private(set) var lastEngineFailureText: String?
 
     private let scheduler: RunScheduler
     private let notifier: RunNotifier
@@ -1274,6 +1292,7 @@ public final class RunModel: ObservableObject {
         phase = .running
         progress = nil
         failure = nil
+        failureShowsOnButton = false   // ★ B1 (O1)
         canKeepWaiting = false
         // AJ1: HOLD the finished run's variants rather than dropping them. `outcome`
         // still has to be cleared (streamed variants append to it), but a run that
@@ -1300,7 +1319,7 @@ public final class RunModel: ObservableObject {
         let token = CancelToken()
         self.token = token
         runningRequest = request
-        let runner = self.runner
+        let runner = Self.hostedTestRunner ?? self.runner
         let scheduler = self.scheduler
 
         // Arm the setup-stall watchdog — LOCAL runs only (handoff 129). A local run is
@@ -1636,6 +1655,8 @@ public final class RunModel: ObservableObject {
                 diag("run failed: \(message)")
                 outcome = nil
                 failure = .solver(message)
+                failureShowsOnButton = true      // ★ B1 (O1): engine text, never a card
+                lastEngineFailureText = message
                 phase = .failed
             }
         }

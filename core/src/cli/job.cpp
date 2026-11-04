@@ -554,7 +554,7 @@ JobDescription parse_job(const std::string& json_text) {
                        "keep_regions",
                        "build_direction", "build_orientation_report",
                        "bake_build_orientation", "variant", "semdot",
-                       "plsm", "flexible"},
+                       "plsm", "flexible", "orientation_recheck"},
                       "the job");
 
   JobDescription job;
@@ -599,6 +599,23 @@ JobDescription parse_job(const std::string& json_text) {
     if (b.x * b.x + b.y * b.y + b.z * b.z <= 0.0)
       schema_fail("\"build_direction\" must be non-zero");
     job.has_build_direction = true;
+  }
+  // E1 (f) — "Print it this way": an analyze job re-checks a version's exported file
+  // printed along a new build direction. {"mesh": "<the version's file, beside the
+  // job>", "build_dir": [x, y, z]}; analyze mode only.
+  if (const JsonValue* orc = find_key(root, "orientation_recheck")) {
+    require_object(*orc, "\"orientation_recheck\"");
+    reject_unknown_keys(*orc, {"mesh", "build_dir"}, "\"orientation_recheck\"");
+    job.orientation_recheck_mesh = require_nonempty_string(
+        require_key(*orc, "mesh", "\"orientation_recheck\""), "orientation_recheck mesh");
+    const Vec3 d = parse_vec3(require_key(*orc, "build_dir", "\"orientation_recheck\""),
+                              "orientation_recheck build_dir");
+    const double n = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+    if (!(n > 0.0)) schema_fail("\"orientation_recheck\" build_dir must be non-zero");
+    job.orientation_recheck_dir = Vec3{d.x / n, d.y / n, d.z / n};
+    job.has_orientation_recheck = true;
+    if (job.mode != "analyze")
+      schema_fail("\"orientation_recheck\" is for an analyze job (mode \"analyze\")");
   }
   if (const JsonValue* br = find_key(root, "build_orientation_report")) {
     if (br->type != JsonValue::Type::Bool)
@@ -797,13 +814,17 @@ JobDescription parse_job(const std::string& json_text) {
     // key): [{"name", "groups": [as loads.groups], "anchor_face_ids": [its ON
     // anchors]}], sent only with two or more (then loads.groups / anchor_face_ids
     // mirror scenario 1 for older readers). One scenario is today's job: ignored.
+    // A scenario may also name its ON REGION anchors, "anchor_region_ids": [ids into
+    // loads.face_regions] (a cut piece as an anchor; UI-Notes 2026-11-03, the
+    // reviewer's routing 04:16); with it, "anchor_face_ids" may be left out.
     if (const JsonValue* ss = find_key(lv, "scenarios")) {
       if (ss->type != JsonValue::Type::Array)
         schema_fail("\"loads.scenarios\" must be an array");
       std::vector<JobScenario> scenarios;
       for (const JsonValue& sv : ss->arr) {
         require_object(sv, "a load scenario");
-        reject_unknown_keys(sv, {"name", "groups", "anchor_face_ids"}, "a load scenario");
+        reject_unknown_keys(sv, {"name", "groups", "anchor_face_ids", "anchor_region_ids"},
+                            "a load scenario");
         JobScenario sc;
         sc.name = require_nonempty_string(require_key(sv, "name", "a load scenario"),
                                           "a load scenario's name");
@@ -813,10 +834,21 @@ JobDescription parse_job(const std::string& json_text) {
         parse_groups(require_key(sv, "groups", "a load scenario"), "a scenario's groups",
                      sc.groups);
         if (sc.groups.empty()) schema_fail(named + " has no load");
-        const JsonValue& av = require_key(sv, "anchor_face_ids", "a load scenario");
-        if (av.type == JsonValue::Type::Array && av.arr.empty())
+        // Either list may be empty (that kind of anchor is OFF in it); not both.
+        auto ids_or_none = [](const JsonValue& v, const char* what) {
+          return v.type == JsonValue::Type::Array && v.arr.empty() ? std::vector<int>{}
+                                                                    : parse_int_array(v, what);
+        };
+        const JsonValue* rv = find_key(sv, "anchor_region_ids");
+        if (rv != nullptr) {
+          sc.anchor_region_ids = ids_or_none(*rv, "a load scenario's anchor_region_ids");
+          sc.has_anchor_region_ids = true;
+        }
+        const JsonValue* av = rv != nullptr ? find_key(sv, "anchor_face_ids")
+                                            : &require_key(sv, "anchor_face_ids", "a load scenario");
+        if (av != nullptr) sc.anchor_face_ids = ids_or_none(*av, "anchor_face_ids");
+        if (sc.anchor_face_ids.empty() && sc.anchor_region_ids.empty())
           schema_fail(named + " has no anchor switched on");
-        sc.anchor_face_ids = parse_int_array(av, "anchor_face_ids");
         scenarios.push_back(std::move(sc));
       }
       if (scenarios.size() >= 2) {

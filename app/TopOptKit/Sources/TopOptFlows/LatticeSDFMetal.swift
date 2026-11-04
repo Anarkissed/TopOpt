@@ -3917,7 +3917,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         let zW = simd_normalize(camera.eye - camera.target)
         let xW = simd_normalize(simd_cross(camera.up, zW))
         let yW = simd_cross(zW, xW)
-        let tanHalf = tan(camera.fovY * 0.5)
+        let tanHalf = tan(camera.drawFovY * 0.5)   // ★ B2: rays spread as the frame is drawn (the telephoto when orthographic)
         let rayX = invR.act(xW) * tanHalf * aspect
         let rayY = invR.act(yW) * tanHalf
         let rayDir = invR.act(-zW)

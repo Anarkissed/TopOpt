@@ -143,7 +143,7 @@ final class LatticeStageTests: XCTestCase {
         StageCapsule.perform(.changeType, fold: nil, go: { _ in XCTFail("not a stage change") }, about: {},
                              changeType: { asked += 1 })
         XCTAssertEqual(asked, 1)
-        XCTAssertEqual(LatticeStagePage.allCases.map(\.title), ["Regions", "Cells"])
+        XCTAssertEqual(LatticeStagePage.allCases.map(\.title), ["Setup", "Lattice"])   // ★ RE-PINNED (whole-app build B2, U4: "Setup │ Lattice", never Regions / Cells)
         XCTAssertEqual(LatticeStagePage.current(cellsUp: true), .cells)
         XCTAssertFalse(WorkspaceStage.lattice.drawsForwardButtons, "the capsule carries the stage buttons")
         let ws = try Self.src("WorkspacePlaceholder.swift")
@@ -155,7 +155,7 @@ final class LatticeStageTests: XCTestCase {
         XCTAssertTrue(cap.contains("editFaces: { openEditFaces() }"), "✂ and the menu reach Edit faces (B5: the mode closes Cells)")
         XCTAssertFalse(ws.contains("LatticeStageModeChip(mode: mode) { showLatticeModeSheet = true }"),
                        "the identity row's type chip is gone: the capsule names it")
-        XCTAssertEqual(LatticeStageCopy.builtOn(achievedVolumeFraction: nil), "on the part")
+        XCTAssertNil(LatticeStageCopy.builtOn(achievedVolumeFraction: nil))   // ★ RE-PINNED (B2, note 20, Q3 (c)): no "on the part"
         XCTAssertEqual(LatticeStageCopy.builtOn(achievedVolumeFraction: 0.65), "on \u{2212}35 %")
         XCTAssertEqual(LatticeStageCopy.builtOn(achievedVolumeFraction: 1.2), "on +20 %")
     }

@@ -218,6 +218,12 @@ public final class AppModel: ObservableObject {
         self.rescaler = rescaler
         self.store = store
         self.library = LibraryModel(store: store)
+        // ★ B1 (note 10): the Library draws a never-opened part's original model with the app's own importer
+        self.library.originalMeshLoader = { [importer] path in
+            guard let m = try? importer(path) else { return nil }
+            return ViewerMesh(vertices: m.vertices, indices: m.indices, faceIDs: m.faceIDs, faceGeometry: m.faceGeometry,
+                              pseudoFaces: m.pseudoFaces)
+        }
         self.presetStore = presetStore
         self.now = now
         self.remoteJobDefaults = remoteJobDefaults
@@ -333,7 +339,7 @@ public final class AppModel: ObservableObject {
                           // Emitted only when the user authored one, so an
                           // untouched project ships the identical request — and
                           // hence the identical job.json — it always did (R1).
-                          faceRegions: project.faceRegions.regions,
+                          faceRegions: FaceRegionSend.kept(project.faceRegions.regions),   // ★ B1 (note 38): never an empty region
                           anchorRegionIDs: lc.anchorRegionIDs,
                           faceProtectionRegionIDs: protections.regionIDs,
                           faceProtectionRegionDepthsMM: protections.regionDepthsMM,
@@ -523,6 +529,7 @@ public final class AppModel: ObservableObject {
         guard let mesh, thumbnails[id] == nil,
               let image = MeshThumbnail.cgImage(for: mesh) else { return }
         thumbnails[id] = image
+        library.noteOriginal(folder: id, image: image)   // ★ B1 (note 10): the Library's original-model picture
     }
 
     /// Track a live project's run phase so the Library reflects background runs:
@@ -567,6 +574,7 @@ public final class AppModel: ObservableObject {
 
     /// Dismiss the import sheet without starting a project.
     public func cancelImport() {
+        library.importTargetProject = nil   // ★ B1 (note 9): a cancelled Add part files nothing later
         importSheetPresented = false
         pendingUnitPrompt = nil
         pendingUnitPath = nil
@@ -756,6 +764,7 @@ public final class AppModel: ObservableObject {
         importSheetPresented = false
         screen = .workspace
         persist(pm)   // copy the model into the store + write the initial snapshot (persist-b)
+        if library.importTargetProject != nil { library.refresh() }   // ★ B1 (note 9): filed in its project the moment it exists
         // M7.params (b): a freshly imported model prompts for its print parameters as
         // it enters the workspace. The sheet auto-presents over the new workspace
         // (project is set, so `openPrintParams` presents); Done/scrim persist it.
@@ -852,6 +861,7 @@ public final class AppModel: ObservableObject {
         if let p = project, libraryDrafts[p.id] != nil { forgetLiveVersion(p.id) }
         screen = .home
         library.refresh()   // Library: file what changed (a new version, a new part)
+        if let p = project { library.comeBack(from: p.id) }   // ★ B1 (note 8): back to the part's project folder
     }
 
     // MARK: - Library (B3): drafts

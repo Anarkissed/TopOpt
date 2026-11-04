@@ -372,9 +372,15 @@ final class FlexibleMainPageRound4VerifyTests: XCTestCase {
             // 11" portrait" fixed before D3 is done): beside the row on its line at EVERY size again — where the left panel's
             // column leaves too little, over that column's empty top (the open panel never rises above 2 × noteTop); it still
             // costs the legends nothing (below). Was (R7-D1): under the row at 11p and 11p820.
-            let under = false
-            XCTAssertEqual(note.midY, row.midY, accuracy: 0.5, "on the row's line at \(name)")
-            XCTAssertLessThanOrEqual(note.maxX, row.minX - DS.Space.s + 0.5, "left of the three buttons at \(name)")
+            // ★ RE-PINNED (B2, U1 — #362's OK 2026-11-03 05:34): the open left panel now starts at PageChrome.panelTop, 12 pt under the stage row, so the column's top is no longer empty on the row's line; where the row leaves too little beside it (11" portrait, the 820 pt pad) the note goes UNDER the row's right end, whole (R7-D1's place). Was (R7-D3): beside, over the column's empty top.
+            let under = ["11p", "11p820"].contains(name)
+            if under {
+                XCTAssertGreaterThanOrEqual(note.minY, row.maxY, "under the row at \(name)")
+                XCTAssertEqual(note.maxX, row.maxX, accuracy: 0.5, "at the row's right end at \(name)")
+            } else {
+                XCTAssertEqual(note.midY, row.midY, accuracy: 0.5, "on the row's line at \(name)")
+                XCTAssertLessThanOrEqual(note.maxX, row.minX - DS.Space.s + 0.5, "left of the three buttons at \(name)")
+            }
             XCTAssertGreaterThanOrEqual(note.width, 180, "room for 'Lattice ready · Show' at \(name)")
             XCTAssertTrue(!note.intersects(FlexibleMainLegendLayout.leftStrip(viewport: v)) || note.maxY < FlexibleMainViewToggles.leftPanelHighestTop,
                           "clear of the left panel (or above its highest reach) at \(name)")

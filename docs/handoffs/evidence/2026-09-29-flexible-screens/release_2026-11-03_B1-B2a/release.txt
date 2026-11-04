@@ -1,0 +1,29 @@
+# Release c745dce6 — 2026-11-03 B1-B2a (UI-Notes' app batch 4deb3a36), app only
+# Core and worker unchanged: fingerprint 340f1156e40f; "fingerprint": "340f1156e40f"
+# Merged onto da6cbd9f; the merged app tree equals B1-B2a's, so the builder's full suite and the reviewer's code check apply unchanged.
+# Commits:
+#   7b984ea8 B1 (note 16): changing stage closes Results / Smooth first; hosted test (red saved, now green)
+#   0e0f39a6 B1 (note 3): Optimize after a run lands works again — the run cards hang on an always-mounted host
+#   0fbb2e19 B1 (note 4): a remembered Mac counts; Optimize finds it first, never says 'must go to the Mac'
+#   70de7cf9 B1 (note 8): Back from a part in a project shows that project's folder
+#   fe24b788 B1 (note 9): a new part is filed in its project the moment it exists
+#   47f3864d B1 (note 10): a part card shows the picked result, else the original model, never a blank
+#   c72d1b28 B1 (note 38, app half): no face region is ever sent empty; a union goes as its pieces
+#   87ba553c B1 (ledger O1): an engine failure is one line on the button that started the run, never a card
+#   f2fdcf06 B2 (notes 1, 2, 7): [Orthographic │ Perspective] left of the gizmo; one X-ray look that works without Outlines
+#   69a2abf6 B2 (U1, notes 16-18) WIP: one top-left block (TopLeftBlock) on the workspace, Results, the Lattice page and Edit faces
+#   2283b0c1 B2: Flexible's lattice rays follow the drawn projection (#362's OK); 'Setup │ Lattice' and 'Settings' words
+#   ea424577 B2 (note 6): the delete ask is a card under its group's line, its corners inside the panel's (radius 22 − 8)
+#   4c644fa5 B2 (U4): a result is its letter (a · Just safe, b · +10 %, c · +20 %); Design primitives is Allow growth here
+#   23421e92 B2 (round 1, R0): every stage keeps today's views, the X-ray pair first; Wireframe is Outlines
+#   dca1eacc B2 (U1, U10): open left panels start 12 pt under the stage row; a tall list shows 'n more ⌄'
+#   31266163 B2 (U2, note 20): every left panel is 348 pt and a long name wraps, never cut off; no 'on the part'
+#   4deb3a36 B2 (U1): re-pin #362's hosted H1 — at 11" portrait 'Lattice ready' sits under the views row's right end, whole
+# Gates:
+#   03:49 checks ok: B1-B2a 4deb3a36, 17 commit(s), app-only, sits on da6cbd9f, fingerprint 340f1156e40f
+#   03:49 merged c745dce6; app tree == B1-B2a's, fingerprint 340f1156e40f
+#   03:49 waiting for HEAVY.lock (free)
+#   03:49 lock taken
+#   03:56 iPad device build green; lock released
+#   03:56 pushed c745dce6
+#   03:56 worker /health "fingerprint": "340f1156e40f" (unchanged, no swap)

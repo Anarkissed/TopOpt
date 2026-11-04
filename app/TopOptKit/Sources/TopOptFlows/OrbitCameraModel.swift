@@ -41,12 +41,23 @@ public final class OrbitCameraModel: ObservableObject {
     /// ~0.3s eased snap/home transition (the task's target; NOT an instant teleport).
     public static let transitionDuration: CFTimeInterval = 0.3
 
-    public init(camera: OrbitCamera = OrbitCamera()) {
+    public init(camera: OrbitCamera = OrbitCamera(), followsViewProjection: Bool = false) {
         self.camera = camera
         self.defaultAzimuth = camera.azimuth
         self.defaultElevation = camera.elevation
         self.defaultRoll = 0
+        self.followsViewProjection = followsViewProjection
+        // ★ B2 (note 1): a screen's camera follows the app's ONE [Orthographic │ Perspective] choice
+        if followsViewProjection {
+            self.camera.orthographic = ViewProjection.shared.orthographic
+            projectionFollow = ViewProjection.shared.$orthographic.dropFirst().sink { [weak self] o in
+                MainActor.assumeIsolated { self?.camera.orthographic = o }
+            }
+        }
     }
+
+    private let followsViewProjection: Bool
+    private var projectionFollow: AnyCancellable?
 
     // MARK: - Live drag / zoom (STEP 2: full orbit, elevation clamped)
 
@@ -91,6 +102,7 @@ public final class OrbitCameraModel: ObservableObject {
     /// fresh mesh while keeping this model the single source of truth).
     public func adopt(_ newCamera: OrbitCamera) {
         camera = newCamera
+        if followsViewProjection { camera.orthographic = ViewProjection.shared.orthographic }   // ★ B2: the app's choice holds
     }
 
     // MARK: - Snap / home (STEP 3 accelerators)

@@ -66,6 +66,13 @@ enum LibrarySettings {
 }
 
 extension LibraryModel {
+    /// ★ B1 (note 8, his words: "If the part is within a Project, the back should go to the Project folder"): Back from a
+    /// version of a part in a project shows that project's folder; any other part comes back to the Library's home.
+    func comeBack(from folder: UUID) {
+        guard mode == .library, let part = index.part(containing: folder) else { return }
+        route = projectOf(part: part.id).map { .project($0.id) } ?? .home
+    }
+
     /// Optimize here makes the next version: he has grouped, and this folder holds results.
     public func makesNextVersion(of folder: UUID) -> Bool {
         mode == .library && store.hasPersistedResults(id: folder)
