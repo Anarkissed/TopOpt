@@ -157,5 +157,30 @@ final class ViewCornerB2Tests: XCTestCase {
         XCTAssertEqual(MeshRenderer.bodyDrawAlpha(0, xray: true), 0, "lattice only stays lattice only")
         XCTAssertEqual(XrayLook.bodyAlpha, 0.3, "the Results X-ray")
     }
+
+    /// ★ LOOK PER SCREEN (R-a2; mockup v5: [Orthographic] over [Perspective], a column left of the gizmo; U1 "nothing
+    /// intersects the top-left block"): the pair is a column, and the top-left block never runs under the view corner — a long
+    /// name gives way first (it ends in "…"), 12 pt short of the pair. On Topology and on Results ("Optimized ✓" makes the
+    /// row longer), at every size. RED before (scratchpad b2red/ViewPairColumn.txt): a row; on Results at 11″ portrait it
+    /// covers redo.
+    func testThePairIsAColumnAndTheTopLeftBlockNeverRunsUnderIt() throws {
+        for size in AppBuildHost.probeSizes + [CGSize(width: 820, height: 1180)] {
+            for results in [false, true] {
+                let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
+                r.project.lattice.flexible = nil
+                if results { r.project.run.restoreOutcome(AppBuildFixtures.outcome()) }
+                let h = AppBuildHost(WorkspacePlaceholder(model: r.app, project: r.project), size: size, test: self)
+                h.pump(3)
+                if results { try h.tap("capsuleResults", "\(size): Results"); h.pump(1) }
+                let what = "\(size) \(results ? "Results" : "Topology")"
+                let pair = try h.onScreen("viewPair", "\(what): the pair")
+                XCTAssertGreaterThan(pair.height, pair.width, "\(what): ★ a column")
+                for k in ["backButton", "topLeftName", "topLeftUndo", "topLeftRedo"] {
+                    let b = try h.onScreen(k, "\(what): \(k)")
+                    XCTAssertLessThanOrEqual(b.maxX, pair.minX - 11, "\(what): ★ '\(k)' \(b) runs under the view corner \(pair)")
+                }
+            }
+        }
+    }
 }
 #endif
