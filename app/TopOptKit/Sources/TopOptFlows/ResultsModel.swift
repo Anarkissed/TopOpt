@@ -2427,7 +2427,7 @@ public final class ResultsModel: ObservableObject {
     static func loadLabel(kg: Double, unit: WeightUnit) -> String {
         let v = unit == .kg ? kg : kg * ForceModel.kgToLb
         let num = v < 10 ? String(format: "%.1f", v) : String(Int(v.rounded()))
-        return "\(num) \(unit.rawValue)"
+        return "\(num) \(unit.label)"
     }
 
     // MARK: - optimization-history playback (keyframes)

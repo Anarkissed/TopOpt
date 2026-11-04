@@ -10,10 +10,21 @@ import TopOptDesign
 
 struct ComputeLocationControl: View {
     @ObservedObject var compute: ComputeLocationModel
+    /// ★ LOOK PER SCREEN (11-04, T3): the Settings row's value box (§4.4) instead of the bar's capsule; the same picker.
+    var asValueBox = false
     @State private var showPicker = false
 
     var body: some View {
         Button { showPicker = true } label: {
+            if asValueBox {
+                HStack(spacing: DS.Space.xs) {
+                    if warnSelected {
+                        Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(DS.Color.danger.color)
+                    }
+                    DSValueBox(compute.label, systemImage: iconName)
+                }
+            } else {
             HStack(spacing: DS.Space.s) {
                 Image(systemName: iconName).font(.system(size: 13, weight: .semibold))
                 Text(compute.label).dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
@@ -27,6 +38,7 @@ struct ComputeLocationControl: View {
             .padding(.vertical, 11).padding(.horizontal, DS.Space.l)
             .background(Capsule().fill(DS.Surface.bar.color)
                 .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
+            }
         }
         .buttonStyle(.plain)
         .onAppear { compute.startBrowsing() }

@@ -24,6 +24,8 @@ final class ParityTopologyShots: XCTestCase {
         }
         let anchors = gs.filter { $0.name != "Group C" }.prefix(2).map(\.id)
         for a in anchors { p.force.makeAnchor(a) }
+        // the pad has three groups: the second anchor carries the Protect (the mockup's Group D), so Settings shows Protect skin
+        if let a = anchors.last { p.force.setProtected(a, true) }
         let s2 = p.force.addScenario(); p.force.renameScenario(s2, to: "Held by left plate")
         let s3 = p.force.addScenario(); p.force.renameScenario(s3, to: "Held by right plate")
         let s1 = p.force.scenarioList[0].id
