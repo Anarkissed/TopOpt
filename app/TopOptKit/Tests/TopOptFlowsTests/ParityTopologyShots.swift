@@ -132,5 +132,19 @@ final class ParityTopologyShots: XCTestCase {
             try shot(h, "topo-landed", name)
         }
     }
+
+    /// Topology Results (mockup #topo-results): his part with three results restored, opened the way he opens it (the
+    /// capsule's Results).
+    func testTopologyResultsStates() throws {
+        guard ProcessInfo.processInfo.environment["PARITY_SHOT_DIR"] != nil else { throw XCTSkip("PARITY_SHOT_DIR not set") }
+        for (name, size) in Self.sizes {
+            let (h, p, _) = try page(size)
+            p.run.restoreOutcome(AppBuildFixtures.outcome())
+            h.pump(1)
+            try h.tap("capsuleResults", "Results")
+            h.pump(1.5)
+            try shot(h, "topo-results", name)
+        }
+    }
 }
 #endif

@@ -1639,6 +1639,16 @@ public final class ResultsModel: ObservableObject {
     /// in the project / material names collapse to underscores. Falls back to
     /// "variant" when nothing is selected.
     public var exportFilename: String {
+        // A LATTICED EXPORT IS A DIFFERENT OBJECT AND MUST NOT SHARE A FILENAME
+        // (task 2026-08-07-lattice-variants-on-screen). The rung is the same, so
+        // without the tag the two files collide in Files/AirDrop and the 246 g
+        // object overwrites the 360 g one under the 360 g one's name.
+        if selectedLattice != nil { return exportStem(for: selected) + "-latticed.stl" }
+        return exportStem(for: selected) + ".stl"
+    }
+
+    /// `{project}-{material}-{NN}pct` for a result (★ R-a: shared by Export and Export all).
+    func exportStem(for tab: ResultVariantVM?) -> String {
         let proj = ResultsModel.fileToken(projectName, fallback: "part")
         let mat = ResultsModel.fileToken(materialName, fallback: "material")
         // Task 2026-08-03-growth-ladder — on a GROWTH variant the savings percent is
@@ -1646,23 +1656,41 @@ public final class ResultsModel: ObservableObject {
         // the number the user is CHOOSING BY, so it carries the growth percent on a
         // growth run, tagged so the two can never be confused for each other.
         let rung: String
-        if let v = selected, v.isGrowth { rung = "plus\(v.growthPercent)pct" }
-        else { rung = "\(selected?.savingsPercent ?? 0)pct" }
-        // A LATTICED EXPORT IS A DIFFERENT OBJECT AND MUST NOT SHARE A FILENAME
-        // (task 2026-08-07-lattice-variants-on-screen). The rung is the same, so
-        // without the tag the two files collide in Files/AirDrop and the 246 g
-        // object overwrites the 360 g one under the 360 g one's name.
-        if selectedLattice != nil { return "\(proj)-\(mat)-\(rung)-latticed.stl" }
-        return "\(proj)-\(mat)-\(rung).stl"
+        if let v = tab, v.isGrowth { rung = "plus\(v.growthPercent)pct" }
+        else { rung = "\(tab?.savingsPercent ?? 0)pct" }
+        return "\(proj)-\(mat)-\(rung)"
     }
 
     /// The 80-byte STL header detail naming the variant, e.g.
     /// "MyBracket · PLA · −30% · mm". Kept short so it survives the 80-byte truncation.
-    private var exportHeaderDetail: String {
+    private var exportHeaderDetail: String { exportHeaderDetail(for: selected) }
+
+    private func exportHeaderDetail(for tab: ResultVariantVM?) -> String {
         // "−30%" saved, or "+48%" added (task 2026-08-03-growth-ladder).
-        let pct = selected?.headlineLabel ?? ""
+        let pct = tab?.headlineLabel ?? ""
         let mat = materialName.isEmpty ? "" : "\(materialName) · "
         return "\(projectName) · \(mat)\(pct) · mm"
+    }
+
+    /// ★ R-a: whether a result's SOLID can be written here (a latticed one streams from the worker: `exportLatticedMesh`).
+    public func canExport(tab: ResultVariantVM) -> Bool {
+        guard let v = variant(for: tab) else { return false }
+        return !v.meshVertices.isEmpty && v.meshIndices.count >= 3
+    }
+
+    /// ★ R-a (mockup #topo-results, the corner's ⌃ "Export all 3 results"): every solid result's file at once — the bytes its
+    /// own Export writes — without changing which one is shown. Results with the same savings get their letter in the name,
+    /// so no file overwrites another. A latticed result is not among them: it streams from the worker, from its own Export.
+    public func exportAllSTL() -> [(filename: String, data: Data)] {
+        let solids = tabs.filter { !$0.isLatticed && canExport(tab: $0) }
+        let stems = solids.map { exportStem(for: $0) }
+        return solids.enumerated().compactMap { i, t in
+            guard let v = variant(for: t) else { return nil }
+            let stem = stems[i]
+            let name = stems.filter { $0 == stem }.count > 1 ? stem + "-" + ResultMark.letter(i) : stem
+            return (name + ".stl", MeshExport.binarySTL(vertices: v.meshVertices, indices: v.meshIndices,
+                                                        header: MeshExport.header(detail: exportHeaderDetail(for: t))))
+        }
     }
 
     /// The binary-STL bytes of the selected variant's mesh (units mm, as stored), or
