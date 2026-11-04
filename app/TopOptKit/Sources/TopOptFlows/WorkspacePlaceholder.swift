@@ -1717,7 +1717,13 @@ public struct WorkspacePlaceholder: View {
                               onFullScreen: { resultsFullScreen = $0 },
                               loadSurfacePoints: { loadFlowSurfacePoints() },
                               scenarioLoads: resultsScenarioLoads,
-                              topLeftBlock: AnyView(resultsTopLeftBlock))
+                              topLeftBlock: AnyView(resultsTopLeftBlock),
+                              // ★ B4 (app-map §3.5, Q1): "v7 results" and Pick this — the Library's chosen result
+                              version: versionLabel,
+                              pickedVariant: ResultsPick.accepted(model.library.version(project.id)?.pickedResult, in: outcome),
+                              onPick: model.library.version(project.id) == nil ? nil : { v in
+                                  if let r = ResultsPick.all(v, in: outcome) { model.library.pick(folder: project.id, result: r) }
+                              })
                     .ignoresSafeArea()
             }
             // Returning to the saved variants from the original view. L5: NOT while

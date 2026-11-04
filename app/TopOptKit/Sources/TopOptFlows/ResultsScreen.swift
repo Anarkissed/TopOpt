@@ -95,6 +95,8 @@ public struct ResultsScreen: View {
     // ★ Results redesign state (his mockup, 2026-10-27)
     @State private var versionsOpen = true
     @State private var checksOpen = true
+    /// ★ B4 (note 14): the open check — its places light on the model
+    @State private var openCheck: String? = nil
     @State private var detailsOpen = false
     @State private var detailsTab: ResultsDetailsTab = .strength
     /// ★ His iPad 2026-10-28: the view buttons are LAYERS (Stress or Solid, X-ray) under one MOTION (Load paths / Bend /
@@ -172,7 +174,8 @@ public struct ResultsScreen: View {
                 loadSurfacePoints: @escaping () -> [[SIMD3<Float>]] = { [] },
                 scenarioLoads: ResultsScenarioLoads = ResultsScenarioLoads(),
                 topLeftBlock: AnyView? = nil,
-                resultsModel: ResultsModel? = nil) {
+                resultsModel: ResultsModel? = nil,
+                version: String? = nil, pickedVariant: Int? = nil, onPick: ((Int) -> Void)? = nil) {
         // `resultsModel` is a TEST SEAM (the M7 /app/ house style — the run is tested
         // through an injected scheduler / runner / notifier the same way). The screen
         // owns its ResultsModel as a @StateObject, so a test hosting this view has no
@@ -202,7 +205,13 @@ public struct ResultsScreen: View {
         self.onFullScreen = onFullScreen
         self.scenarioLoads = scenarioLoads
         self.loadSurfacePoints = loadSurfacePoints
+        self.version = version; self.pickedVariant = pickedVariant; self.onPick = onPick
     }
+
+    /// ★ B4 (app-map §3.5): the version's name ("v7"), the accepted variant he picked, and Pick this (accepted-variant index).
+    let version: String?
+    let pickedVariant: Int?
+    let onPick: ((Int) -> Void)?
 
     /// The merge trigger, and the ONLY safe way to hand the fresh outcome to the
     /// `.onChange` action. SwiftUI runs the action closure CAPTURED BY THE PREVIOUS
@@ -269,6 +278,7 @@ public struct ResultsScreen: View {
             // M7.viz.2: worst-point callout — in the Stress view, out of the way of an explore reading. (★ his iPad
             // 2026-10-27: the scenario dots and rings "make no sense" — gone.)
             if legendShown, layers.motion == nil, stressProbe == nil { hotSpotMarker.ignoresSafeArea() }
+            checkMarkers.ignoresSafeArea()   // ★ B4 (note 14): the open check's places
             if layers.motion == .breakIt { failureMarker.ignoresSafeArea() }   // ★ Break: where it yields, and at what load
             versionsColumn
             rightColumn
@@ -365,7 +375,7 @@ public struct ResultsScreen: View {
             model.viewScenario = scenarioPick
             model.flowReducedStatic = false           // ★ the arrows MOVE (his iPad 2026-10-27) …
             model.setFlowWiggle(0)                    // … and never wiggle
-            layers = ResultsLayers(stress: model.hasStress)
+            layers = ResultsLayers()   // ★ B4 (note 13): open plain, no view lit
             model.stressOn = layers.stress
             applyMotion(nil)
         }
@@ -956,6 +966,24 @@ public struct ResultsScreen: View {
     /// red zone. Shown only while the stress overlay is on and the point projects in
     /// front of the camera. The located point + value/margin are headlessly tested on
     /// ResultsModel; the marker's placement/look is device QA (the M7 /app/ standard).
+    /// ★ B4 (note 14): the open check's places on the part — a ring each, in the check's colour (never a tap target).
+    @ViewBuilder private var checkMarkers: some View {
+        if let id = openCheck, let c = checks.first(where: { $0.id == id }), !c.places.isEmpty, let proj = projection {
+            let tint = (c.kind == .warn ? DS.Color.warning : c.kind == .ok ? DS.Color.okGreen : DS.Color.accent).color
+            ZStack {
+                ForEach(Array(c.places.enumerated()), id: \.offset) { i, p in
+                    if let at = proj.project(SIMD3<Float>(p)) {
+                        Circle().strokeBorder(tint, lineWidth: 2.5).background(Circle().fill(tint.opacity(0.2)))
+                            .frame(width: 28, height: 28)
+                            .background(ResultsChrome.publish("resultsCheckMarker-\(i)"))
+                            .position(at)
+                    }
+                }
+            }
+            .allowsHitTesting(false)
+        }
+    }
+
     @ViewBuilder private var hotSpotMarker: some View {
         // When the failure surface is on, its marker sits at this same point (the
         // failure location IS the hot spot), so defer to it to avoid a double marker.
@@ -1216,6 +1244,12 @@ public struct ResultsScreen: View {
 
     private var selectedRow: ResultsVersionRow? { versionRows.first { $0.tabIndex == model.selectedIndex } }
 
+    /// ★ B4: E1's finishing of the selected version (report "finish"), nil on a result from before E1.
+    private var selectedFinish: FinishReport? {
+        guard let b = model.reportBlocks, let t = model.selected, let vf = model.requestedVolumeFraction(of: t) else { return nil }
+        return b.rows.first { $0.accepted && abs($0.volumeFraction - vf) < 1e-6 }?.finish
+    }
+
     /// The checks for the selected version (one line + one sub-line each).
     var checks: [ResultsCheck] {
         let blocks = model.reportBlocks
@@ -1227,7 +1261,9 @@ public struct ResultsScreen: View {
                                     required: blocks?.safetyMargin ?? blocks?.strengthen?.marginRequired ?? 1,
                                     safetyMargin: blocks?.safetyMargin, scenarios: model.scenarios(for: model.selected),
                                     thinJoints: thin, bridged: model.selected.map { model.isBridged($0) } ?? false,
-                                    pieces: model.selected.flatMap { model.piecesFlag($0) })
+                                    pieces: model.selected.flatMap { model.piecesFlag($0) },
+                                    finish: selectedFinish,   // ★ B4: E1's finishing
+                                    weakest: model.hotSpot.map { SIMD3<Double>($0.position) })
     }
 
     /// Bottom left: the streaming pill, a latticed version's mesh state, then the Versions panel.
@@ -1241,7 +1277,10 @@ public struct ResultsScreen: View {
                                  pick: { model.select($0) },
                                  compare: rows.filter { $0.tabIndex != nil }.count >= 2 ? {
                                      compare = ResultsCompareSession(candidates: rows.compactMap(\.tabIndex))
-                                 } : nil)
+                                 } : nil,
+                                 version: version,
+                                 pickedTab: pickedVariant.flatMap { v in model.tabs.first { $0.variantIndex == v && !$0.isLatticed }?.index },
+                                 choose: onPick.map { pick in { t in if let tab = model.tabs.first(where: { $0.index == t }) { pick(tab.variantIndex) } } })
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         .padding(PageChrome.edge)
@@ -1264,7 +1303,7 @@ public struct ResultsScreen: View {
             // ★ his note 2026-10-27: the tap-to-explore key sits above Checks, minimised until he opens it — and (10-28) it is
             // there whenever the part wears stress colours: still, bending, breaking or carrying the light
             stressKey
-            ResultsChecksAndDetails(checks: checks, checksOpen: $checksOpen, detailsOpen: $detailsOpen, tab: $detailsTab,
+            ResultsChecksAndDetails(checks: checks, checksOpen: $checksOpen, openCheck: $openCheck, detailsOpen: $detailsOpen, tab: $detailsTab,
                                     versionTitle: selectedRow?.title ?? "",
                                     rows: { model.detailRows($0, version: selectedRow) }, pill: crowded)
             exportButton
@@ -1335,7 +1374,7 @@ public struct ResultsScreen: View {
                               canBreak: model.hasFlex && model.hasFailurePrediction)
     }
 
-    /// One view at a time: Stress colours; Solid plain; X-ray see-through; Load paths, Bend and Break MOVE (his iPad
+    /// One view at a time: Stress colours; none lit is the plain part; X-ray see-through; Load paths, Bend and Break MOVE (his iPad
     /// 2026-10-27), each starting from rest and playing.
     private func applyMotion(_ m: ResultsViewMode?) {
         model.flexOn = m == .bend

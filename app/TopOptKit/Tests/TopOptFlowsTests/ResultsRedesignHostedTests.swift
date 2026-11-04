@@ -11,7 +11,7 @@ import MetalKit
 
 @MainActor
 final class ResultsRedesignHostedTests: XCTestCase {
-    private let ui = LoadScenarioHostedTests()
+    let ui = LoadScenarioHostedTests()   // (B4: ResultsOpenPlainHostedTests shares it)
 
     func screen(_ size: CGSize, loaded: Bool = false) throws -> (LoadScenarioHostedTests.Host, ResultsModel) {
         let o = try ResultsRedesignTests.strengthenOutcome()
@@ -149,6 +149,10 @@ final class ResultsRedesignHostedTests: XCTestCase {
     func testTheStressKeyIsTapToExplore() throws {
         let (h, rm) = try screen(CGSize(width: 1032, height: 1376))
         XCTAssertTrue(rm.hasStress)
+        // ★ RE-PINNED (UI-Notes B4, note 13): Results opens plain — he lights Stress, and its key comes
+        XCTAssertNil(h.frames.all["resultsStressKey"], "★ opens plain: no key")
+        let st = try frame(h, "resultsView-Stress")
+        ui.click(h, CGPoint(x: st.midX, y: st.midY))
         // ★ his note 2026-10-27: above Checks, minimised to start
         let pill = try frame(h, "resultsStressKey"), checks = try frame(h, "resultsChecks"), views = try frame(h, "resultsViewModes")
         XCTAssertLessThan(pill.height, 60, "minimised to one line")
@@ -166,13 +170,14 @@ final class ResultsRedesignHostedTests: XCTestCase {
         // open Checks: the key minimises
         ui.click(h, CGPoint(x: folded.midX, y: folded.minY + 25))
         XCTAssertLessThan(try frame(h, "resultsStressKey").height, 60, "★ opening Checks minimises the key")
-        // ★ 10-28: X-ray is a layer ON TOP of Stress — the key stays; Solid (plain grey) takes it away
+        // ★ 10-28: X-ray is a layer ON TOP of Stress — the key stays; ★ RE-PINNED (B4, note 13): Stress tapped again, the plain
+        // part, takes it away (was the Solid button)
         let x = try frame(h, "resultsView-X-ray")
         ui.click(h, CGPoint(x: x.midX, y: x.midY))
         XCTAssertNotNil(h.frames.all["resultsStressKey"], "★ Stress + X-ray: the colours still mean something")
-        let solid = try frame(h, "resultsView-Solid")
-        ui.click(h, CGPoint(x: solid.midX, y: solid.midY))
-        XCTAssertNil(h.frames.all["resultsStressKey"], "Solid is the plain grey: no key")
+        let off = try frame(h, "resultsView-Stress")
+        ui.click(h, CGPoint(x: off.midX, y: off.midY))
+        XCTAssertNil(h.frames.all["resultsStressKey"], "the plain part: no key")
     }
 
     /// ★ His iPad 2026-10-27: Bend and Break are back beside the other views; each moving view plays on its own, the motion
@@ -228,6 +233,9 @@ final class ResultsRedesignHostedTests: XCTestCase {
     func testATapOnThePartReadsTheStressOnTheKey() throws {
         let (h, rm) = try screen(CGSize(width: 1376, height: 1032))
         XCTAssertTrue(rm.hasStress)
+        // ★ RE-PINNED (UI-Notes B4, note 13): Results opens plain — he lights Stress first
+        let st = try frame(h, "resultsView-Stress")
+        ui.click(h, CGPoint(x: st.midX, y: st.midY))
         let mtk = try XCTUnwrap(Self.metalView(in: h.view), "the Results viewer")
         let click = try XCTUnwrap(mtk.gestureRecognizers.first { ($0 as? NSClickGestureRecognizer)?.numberOfClicksRequired == 1 })
         let viewer = try XCTUnwrap(click.target as? MetalMeshView.Coordinator)
@@ -266,9 +274,7 @@ final class ResultsRedesignHostedTests: XCTestCase {
     /// same; Load paths turns X-ray on and keeps the colouring you had.
     func testTheKeyStaysWhileThePartMovesAndNamesTheExaggeration() throws {
         let (h, rm) = try screen(CGSize(width: 1376, height: 1032), loaded: true)
-        let solid = try frame(h, "resultsView-Solid")
-        ui.click(h, CGPoint(x: solid.midX, y: solid.midY))
-        XCTAssertNil(h.frames.all["resultsStressKey"], "premise: Solid, no key")
+        XCTAssertNil(h.frames.all["resultsStressKey"], "premise: Results opens plain (B4, note 13), no key")
         let bend = try frame(h, "resultsView-Bend")
         ui.click(h, CGPoint(x: bend.midX, y: bend.midY))
         let key = try frame(h, "resultsStressKey")

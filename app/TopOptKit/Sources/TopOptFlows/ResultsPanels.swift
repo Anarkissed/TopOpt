@@ -97,48 +97,94 @@ public struct ResultsCheck: Equatable, Sendable, Identifiable {
     public let title: String
     public let detail: String
     public var id: String { title }
+    /// ★ B4 (note 14, "every row can be tapped"): the places it lights on the model (model mm), the one line its open row
+    /// shows, and the Details tab its link opens.
+    public var places: [SIMD3<Double>] = []
+    public var more: String? = nil
+    public var tab: ResultsDetailsTab? = nil
 }
 
 public enum ResultsChecks {
     /// One line + one sub-line each, in his order: strength, scenarios, layers, how to print, thin spots.
     public static func checks(tab: ResultVariantVM?, margin: Double?, required: Double, safetyMargin: Double?,
                               scenarios: [ScenarioResult], thinJoints: Int, bridged: Bool,
-                              pieces: StrengthenText.PiecesFlag? = nil) -> [ResultsCheck] {
+                              pieces: StrengthenText.PiecesFlag? = nil, finish: FinishReport? = nil,
+                              weakest: SIMD3<Double>? = nil) -> [ResultsCheck] {
         guard let tab else { return [] }
         var out: [ResultsCheck] = []
         if let m = margin, m > 0 {
             let built = safetyMargin.map { " · built for \(Int(($0 * 100).rounded()))%" } ?? ""
             out.append(m >= required
-                ? ResultsCheck(kind: .ok, title: "Strong enough", detail: ResultsVersions.x(m) + " your load" + built)
-                : ResultsCheck(kind: .warn, title: "Not strong enough", detail: ResultsVersions.x(m) + " your load" + built))
+                ? ResultsCheck(kind: .ok, title: "Strong enough", detail: ResultsVersions.x(m) + " your load" + built,
+                               places: weakest.map { [$0] } ?? [], more: weakest == nil ? nil : "The weakest point is lit on the part",
+                               tab: .strength)
+                : ResultsCheck(kind: .warn, title: "Not strong enough", detail: ResultsVersions.x(m) + " your load" + built,
+                               places: weakest.map { [$0] } ?? [], more: weakest == nil ? nil : "The weakest point is lit on the part",
+                               tab: .strength))
         }
         if scenarios.count >= 2 {
             let unheld = scenarios.filter(\.unheld)
             if let u = unheld.first {
-                out.append(ResultsCheck(kind: .warn, title: "A scenario isn’t held", detail: "\(u.name)’s load has no path to its anchors"))
+                out.append(ResultsCheck(kind: .warn, title: "A scenario isn’t held", detail: "\(u.name)’s load has no path to its anchors",
+                                        tab: .scenarios))
             } else if let g = scenarios.first(where: \.governs) {
-                out.append(ResultsCheck(kind: .ok, title: "Every scenario holds", detail: "Worst case: " + g.name))
+                out.append(ResultsCheck(kind: .ok, title: "Every scenario holds", detail: "Worst case: " + g.name,
+                                        places: g.peakMM.map { [$0] } ?? [], more: g.peakMM == nil ? nil : "Its worst point is lit on the part",
+                                        tab: .scenarios))
             }
         }
         switch tab.layerShear {
         case .unknown: break
-        case .low: out.append(ResultsCheck(kind: .ok, title: "Layers won’t split", detail: "Layer shear " + tab.layerShear.label.lowercased()))
-        default: out.append(ResultsCheck(kind: .warn, title: "Layers may split", detail: "Layer shear " + tab.layerShear.label.lowercased()))
+        case .low: out.append(ResultsCheck(kind: .ok, title: "Layers won’t split", detail: "Layer shear " + tab.layerShear.label.lowercased(),
+                                           tab: .printing))
+        default: out.append(ResultsCheck(kind: .warn, title: "Layers may split", detail: "Layer shear " + tab.layerShear.label.lowercased(),
+                                         tab: .printing))
         }
         out.append(ResultsCheck(kind: .info, title: tab.tiltDegrees == 0 ? "Print it upright" : "Print it tilted \(tab.tiltDegrees)°",
                                 detail: tab.supportCm3 > 0 ? "About " + String(format: "%.1f", tab.supportCm3) + " cm³ of support"
-                                                           : "No support needed"))
-        if tab.minFeatureViolations > 0 {
-            out.append(ResultsCheck(kind: .warn, title: "Some thin spots", detail: "May print thinner than drawn"))
+                                                           : "No support needed", tab: .printing))
+        // ★ B4 (note 14, ledger 15 (c)): with E1's finishing the thin-spot row says what core did — "Thin spots fixed · 6", or
+        // where it could not, "2 thin spots left" and why there; a result from before E1 keeps today's row
+        if let f = finish {
+            out += finishChecks(f)
+        } else if tab.minFeatureViolations > 0 {
+            out.append(ResultsCheck(kind: .warn, title: "Some thin spots", detail: "May print thinner than drawn", tab: .printing))
         }
         if thinJoints > 0 {
-            out.append(ResultsCheck(kind: .warn, title: "Thin joints", detail: "\(thinJoints) held by an edge or corner only"))
+            out.append(ResultsCheck(kind: .warn, title: "Thin joints", detail: "\(thinJoints) held by an edge or corner only", tab: .printing))
         }
         // ★ his ruling 2026-10-28: a version in pieces is accepted WITH A FLAG — never "joined into one part"
         if let p = pieces {
             out.append(ResultsCheck(kind: .warn, title: p.title, detail: p.lines.joined(separator: " ")))
         } else if bridged {
             out.append(ResultsCheck(kind: .info, title: "Joined by a bridge", detail: "Two pieces were joined into one part"))
+        }
+        return out
+    }
+
+    /// ★ B4: E1's thin spots, its safe-finish fallback and a verdict that finishing changed — each in plain words.
+    public static func finishChecks(_ f: FinishReport) -> [ResultsCheck] {
+        var out: [ResultsCheck] = []
+        let mm = { (v: Double) in String(format: "%.1f mm", v) }
+        if !f.left.isEmpty {
+            let n = f.left.count
+            let why = f.left.compactMap(\.reason).first { !$0.isEmpty } ?? "Core could not thicken it here"
+            out.append(ResultsCheck(kind: .warn, title: "\(n) thin spot\(n == 1 ? "" : "s") left",
+                                    detail: why, places: f.left.map(\.centreMM),
+                                    more: "Thinnest " + mm(f.left.map(\.beforeMM).min() ?? 0) + " · at least " + mm(f.minThicknessMM) + " prints"
+                                        + (f.fixed.isEmpty ? "" : " · \(f.fixed.count) fixed"),
+                                    tab: .printing))
+        } else if !f.fixed.isEmpty {
+            out.append(ResultsCheck(kind: .ok, title: "Thin spots fixed \u{00B7} \(f.fixed.count)",
+                                    detail: "Thickened to at least " + mm(f.minThicknessMM), places: f.fixed.map(\.centreMM),
+                                    more: "Material was only added, never taken away", tab: .printing))
+        }
+        if f.fallback {
+            out.append(ResultsCheck(kind: .info, title: "Finished the safe way", detail: f.fallbackReason.isEmpty
+                                        ? "The slim finish would have thinned a member" : f.fallbackReason, tab: .printing))
+        }
+        if f.verdictChanged, !f.verdictReason.isEmpty {
+            out.append(ResultsCheck(kind: .warn, title: "Finishing changed a check", detail: f.verdictReason, tab: .strength))
         }
         return out
     }
@@ -226,7 +272,9 @@ extension ResultsModel {
 // MARK: - the views (Stress / Solid / X-ray / Load paths)
 
 public enum ResultsViewMode: String, CaseIterable, Sendable {
-    case stress = "Stress", solid = "Solid", xray = "X-ray", loadPaths = "Load paths"
+    /// ★ B4 (ledger note 13, his words: "there shouldn't be a view button for the default view. Default should happen when no
+    /// views are selected"): no Solid — the plain part is what shows with no view lit.
+    case stress = "Stress", xray = "X-ray", loadPaths = "Load paths"
     /// ★ his iPad 2026-10-27: the old page's MOVING views are back — the part bending under its load, and the push
     /// toward the load that breaks it.
     case bend = "Bend", breakIt = "Break"
@@ -235,7 +283,6 @@ public enum ResultsViewMode: String, CaseIterable, Sendable {
     var symbol: String {
         switch self {
         case .stress: return ""            // the colour wheel, drawn
-        case .solid: return "cube.fill"
         case .xray: return "cube.transparent"
         case .loadPaths: return "point.topleft.down.to.point.bottomright.curvepath"
         case .bend: return "arrow.down.to.line"
@@ -249,7 +296,7 @@ public enum ResultsViewMode: String, CaseIterable, Sendable {
     /// The views this run can show, in order — one it cannot is hidden, never greyed (his note 2026-10-27).
     /// ★ B2 (round 1, design-system §4.2): the X-ray pair first, then today's views in today's order.
     static func shown(hasStress: Bool, hasDisplacement: Bool, canBreak: Bool) -> [ResultsViewMode] {
-        [.xray] + (hasStress ? [.stress] : []) + [.solid]
+        [.xray] + (hasStress ? [.stress] : [])
             + (hasStress ? [.loadPaths] : []) + (hasDisplacement ? [.bend] : []) + (canBreak ? [.breakIt] : [])   // ★ 10-28: the light flow reads the stress
     }
 }
@@ -373,7 +420,9 @@ struct ResultsPanelHeader: View {
     }
 }
 
-/// Bottom-left: the versions, one line each; Compare at the foot.
+/// Bottom-left: the version's results, one line each (a · Just safe, b · +10 %, c · +20 %); Compare at the foot.
+/// ★ B4 (app-map §3.5, Q1, ledger 11): its header is the version's ("v7 results" — one Optimize is a version, its three are
+/// results), and the selected line offers **Pick this**, the chosen result (the Library's ring and "v7b" tag).
 struct ResultsVersionsPanel: View {
     let rows: [ResultsVersionRow]
     let selectedTab: Int
@@ -382,10 +431,19 @@ struct ResultsVersionsPanel: View {
     var pill = false
     let pick: (Int) -> Void
     let compare: (() -> Void)?
+    /// ★ B4: the version's name ("v7"); nil off the Library.
+    var version: String? = nil
+    /// ★ B4: the tab he picked (nil: none yet), and Pick this — nil off the Library (there is no ring to set).
+    var pickedTab: Int? = nil
+    var choose: ((Int) -> Void)? = nil
+
+    static func title(_ version: String?) -> String { version.map { "\($0) results" } ?? "Results" }
+    static let pickLabel = "Pick this"
+    static let pickedLabel = "Picked"
 
     var body: some View {
         VStack(spacing: 0) {
-            ResultsPanelHeader(title: "Versions",
+            ResultsPanelHeader(title: Self.title(version),
                                trailing: open ? "\(rows.count)" : (rows.first { $0.tabIndex == selectedTab }?.title ?? ""),
                                trailingTint: open ? DS.Color.textTertiary.color : DS.Color.accent.color,
                                open: $open, id: "results-versions-header", pill: pill && !open)
@@ -436,14 +494,70 @@ struct ResultsVersionsPanel: View {
         }
         .buttonStyle(.plain)
         .disabled(r.tabIndex == nil)
+        .overlay(alignment: .trailing) { pickControl(r, on: on) }
         .background(ResultsChrome.publish("resultsVersion-\(r.id)"))
         .accessibilityIdentifier("results-version-\(r.id)")
+    }
+
+    /// ★ B4: Pick this on the selected line; the picked line reads "Picked ✓" whether or not it is selected.
+    @ViewBuilder private func pickControl(_ r: ResultsVersionRow, on: Bool) -> some View {
+        if let choose, let t = r.tabIndex {
+            if pickedTab == t {
+                Label(Self.pickedLabel, systemImage: "checkmark").font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(DS.Color.accent.color).padding(.trailing, DS.Space.m)
+                    .background(ResultsChrome.publish("resultsPicked-\(r.id)"))
+            } else if on {
+                Button { choose(t) } label: {
+                    Text(Self.pickLabel).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                        .padding(.horizontal, DS.Space.m).frame(height: 32)
+                        .background(Capsule().fill(DS.Color.accent.color))
+                        .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, DS.Space.s)
+                .background(ResultsChrome.publish("resultsPickThis"))
+                .accessibilityIdentifier("results-pick-this")
+            }
+        }
     }
 }
 
 struct ResultsCheckLine: View {
     let c: ResultsCheck
+    /// ★ B4 (note 14): open — its places lit, its one line and Details › under it; nil taps: today's still line.
+    var open = false
+    var tap: (() -> Void)? = nil
+    var details: (() -> Void)? = nil
     var body: some View {
+        if let tap {
+            VStack(alignment: .leading, spacing: 0) {
+                Button(action: tap) { line.contentShape(Rectangle()) }.buttonStyle(.plain)
+                if open {
+                    HStack(spacing: DS.Space.s) {
+                        if let more = c.more {
+                            Text(more).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: DS.Space.s)
+                        if let details, c.tab != nil {
+                            Button(action: details) {
+                                Text("Details \u{203A}").font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.accent.color)
+                                    .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .background(ResultsChrome.publish("resultsCheckDetails-" + c.title))
+                        }
+                    }
+                    .padding(.leading, DS.Space.l + 26 + DS.Space.m).padding(.trailing, DS.Space.m)
+                    .background(ResultsChrome.publish("resultsCheckMore-" + c.title))
+                }
+            }
+        } else {
+            line
+        }
+    }
+
+    private var line: some View {
         HStack(spacing: DS.Space.m) {
             let (sym, tint): (String, Color) = {
                 switch c.kind {
@@ -472,6 +586,8 @@ struct ResultsCheckLine: View {
 struct ResultsChecksAndDetails: View {
     let checks: [ResultsCheck]
     @Binding var checksOpen: Bool
+    /// ★ B4 (note 14): the open check (its places light on the model).
+    @Binding var openCheck: String?
     @Binding var detailsOpen: Bool
     @Binding var tab: ResultsDetailsTab
     let versionTitle: String
@@ -492,7 +608,10 @@ struct ResultsChecksAndDetails: View {
                     if checksOpen {
                         ForEach(checks) { c in
                             Divider().overlay(DS.Color.strokeSubtle.color)
-                            ResultsCheckLine(c: c)
+                            // ★ B4 (note 14): a tap opens it — its places light on the part — and a second tap closes it
+                            ResultsCheckLine(c: c, open: openCheck == c.id,
+                                             tap: { withAnimation(DS.Motion.sheetIn) { openCheck = openCheck == c.id ? nil : c.id } },
+                                             details: c.tab.map { t in { tab = t; withAnimation(DS.Motion.sheetIn) { detailsOpen = true } } })
                         }
                     }
                 }
@@ -694,23 +813,23 @@ enum ResultsScenarioViews {
 /// can be added (the light then takes the stress colours).
 public struct ResultsLayers: Equatable, Sendable {
     public var motion: ResultsViewMode? = nil
-    public var stress = true
+    /// ★ B4 (note 13): Results opens with no view lit — the plain part.
+    public var stress = false
     public var xray = false
-    public init(stress: Bool = true) { self.stress = stress }
+    public init(stress: Bool = false) { self.stress = stress }
 
     public func isOn(_ m: ResultsViewMode) -> Bool {
         switch m {
         case .stress: return stress
-        case .solid: return !stress
         case .xray: return xray
         case .loadPaths, .bend, .breakIt: return motion == m
         }
     }
-    /// A tap: Stress / Solid choose the colouring; X-ray toggles; a motion starts (or stops when tapped again).
+    /// A tap: a lit view goes off (back to the plain part, note 13); Stress colours; X-ray toggles; a motion starts (or stops
+    /// when tapped again).
     public mutating func tap(_ m: ResultsViewMode, hasStress: Bool) {
         switch m {
-        case .stress: stress = hasStress
-        case .solid: stress = false
+        case .stress: stress = hasStress && !stress
         case .xray: xray.toggle()
         case .loadPaths, .bend, .breakIt:
             motion = motion == m ? nil : m
@@ -914,5 +1033,20 @@ struct ResultsStressExplore: View {
                 }
             }
         }
+    }
+}
+
+/// ★ B4: the Library numbers a version's results over ALL its variants (LibraryVersion.summary); Results' tabs count the
+/// ACCEPTED ones. Pick this crosses between the two.
+public enum ResultsPick {
+    /// The accepted-variant index of the Library's result `r`, or nil.
+    public static func accepted(_ r: Int?, in outcome: OptimizeOutcome) -> Int? {
+        guard let r, outcome.variants.indices.contains(r), outcome.variants[r].accepted else { return nil }
+        return outcome.variants[..<r].filter(\.accepted).count
+    }
+    /// The Library's result index of accepted variant `a`, or nil.
+    public static func all(_ a: Int, in outcome: OptimizeOutcome) -> Int? {
+        let idx = outcome.variants.indices.filter { outcome.variants[$0].accepted }
+        return idx.indices.contains(a) ? idx[a] : nil
     }
 }

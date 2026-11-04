@@ -60,7 +60,7 @@ final class ViewCornerParityHostedTests: XCTestCase {
     /// once its sim lands).
     static let expected: [(String, [String])] = [
         ("Topology Setup", ["Outlines", "X-ray", "Forces"]),
-        ("Results", ["X-ray", "Solid", "Full screen"]),        // Solid goes in B4 (note 13); Outlines comes in B4
+        ("Results", ["X-ray", "Full screen"]),                 // ★ B4 (note 13): Solid is gone; Outlines comes in B4 slice 2
         ("Lattice Setup", ["Outlines", "X-ray", "Lattice preview"]),
         ("Lattice page", []),                                   // no part is drawn (R3.2)
         ("Cut", ["Outlines", "X-ray"]),
