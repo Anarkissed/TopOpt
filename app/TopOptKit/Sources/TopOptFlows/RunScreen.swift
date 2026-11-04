@@ -18,16 +18,19 @@ public struct RunScreen: View {
     let resolution: Int
     /// Re-run the same job from a failure sheet.
     var onRetry: () -> Void
+    /// ★ T5: the version this run makes ("v8"), for the card's overline "OPTIMIZING V8"; nil off the Library.
+    var version: String? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulse = false
 
     public init(model: RunModel, materialName: String, resolution: Int,
-                onRetry: @escaping () -> Void = {}) {
+                onRetry: @escaping () -> Void = {}, version: String? = nil) {
         self.model = model
         self.materialName = materialName
         self.resolution = resolution
         self.onRetry = onRetry
+        self.version = version
     }
 
     public var body: some View {
@@ -85,39 +88,44 @@ public struct RunScreen: View {
 
     // MARK: - Running card (design RUNNING)
 
+    /// ★ LOOK PER SCREEN (T5, mockup .running): 480 pt, radius 24, the dialog surface; the overline names the version; the
+    /// buttons sit at its right. No dimming: the part stays as it is behind it.
     private var runningCard: some View {
         ZStack {
-            // A light dimming so the card reads over the 3D stage without hiding it.
-            Rectangle().fill(.ultraThinMaterial).opacity(0.15).ignoresSafeArea()
-
-            GlassSheet {
-             VStack(alignment: .leading, spacing: DS.Space.l) {
-                Text("Optimizing")
-                    .dsStyle(DS.TypeScale.overline)
-                    .textCase(.uppercase)
-                    .foregroundStyle(DS.Color.accent.color)
-                    .opacity(pulse ? 1 : 0.65)
-
-                // The honest, live readout: variant N of M, current SIMP iteration,
-                // elapsed clock, and a LABELLED est.-remaining (once one variant has
-                // completed). No fabricated percentage — handoff 086 made rung
-                // termination adaptive, so an in-advance progress bar would lie.
-                RunProgressReadout(model: model, resolution: resolution, materialName: materialName)
-
-                HStack(spacing: DS.Space.m) {
-                    PillButton("Cancel", style: .secondary) { model.cancel() }
-                    PillButton(model.runningInBackground ? "In background" : "Run in background",   // ★ B3 (app-map §3.4): plain words
-                               style: .secondary,
-                               isEnabled: model.canSendToBackground) { model.runInBackground() }
-                }
-                .padding(.top, DS.Space.s)
-                .frame(maxWidth: .infinity)
-             }
-             .padding(.horizontal, DS.Space.xl3)
-             .padding(.vertical, DS.Space.xl2)
-             .frame(width: 430)
-            }
+            // centred on the page; behind it the page takes no taps while the card is up (as before), but is not dimmed
+            Color.clear.contentShape(Rectangle()).ignoresSafeArea()
+            runningCardBody
         }
+    }
+
+    private var runningCardBody: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Optimizing" + (version.map { " \($0)" } ?? ""))
+                .font(.system(size: 11, weight: .bold)).tracking(0.8).textCase(.uppercase)
+                .foregroundStyle(DS.Color.accent.color)
+                .opacity(pulse ? 1 : 0.65)
+
+            // The honest, live readout: the result being made, its iteration, the elapsed clock, and a hedged time left
+            // (once one result has finished). No fabricated percentage — handoff 086 made rung termination adaptive, so an
+            // in-advance progress bar would lie.
+            RunProgressReadout(model: model, resolution: resolution, materialName: materialName)
+
+            HStack(spacing: 10) {
+                Spacer(minLength: 0)
+                PillButton("Cancel", style: .secondary) { model.cancel() }
+                PillButton(model.runningInBackground ? "In background" : "Run in background",   // ★ B3 (app-map §3.4): plain words
+                           style: .secondary,
+                           isEnabled: model.canSendToBackground) { model.runInBackground() }
+                    .background(CornerPairStyle.publish("runCardBackground"))
+            }
+            .padding(.top, 6)
+        }
+        .padding(.horizontal, 20).padding(.vertical, 18)
+        .frame(width: 480)
+        .background(RoundedRectangle(cornerRadius: 24, style: .continuous).fill(DS.Surface.dialog.color))
+        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(DS.Color.strokeStrong.color, lineWidth: 1))
+        .dsShadow(DS.Shadow.sheet)
+        .background(CornerPairStyle.publish("runCard"))
         .onAppear {
             guard !reduceMotion else { return }
             withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) { pulse = true }

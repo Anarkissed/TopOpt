@@ -103,5 +103,88 @@ final class RunStatesHostedTests: XCTestCase {
             XCTAssertNotNil(b.info, "the long reason sits behind (i)")
         }
     }
+
+    // MARK: ★ LOOK PER SCREEN, Topology slice T5 — the run states as mockup #topo-corner draws them
+
+    /// A scenario's gap is a block BEFORE the press (U6 / U12; mockup #topo-corner "blocked": "No anchor in Held by left plate ·
+    /// Switch its anchors on"), from the same rule the press reads (LoadScenarioRule) — never a toast after a ready-looking
+    /// Optimize. RED before T5 (scratchpad b2red/RunStates-T5.txt): Optimize stays ready and the press toasts "Scenario … has
+    /// no load".
+    func testAScenarioGapIsABlockWithItsFixBeforeThePress() throws {
+        let (h, p, app, runs) = try page(AppBuildHost.landscape13)
+        let gs = p.selection.groups
+        let bottom = try XCTUnwrap(gs.first { $0.name == "Bottom" }), top = try XCTUnwrap(gs.first { $0.name == "Top" })
+        let c = try XCTUnwrap(gs.first { $0.name == "Group C" })
+        p.force.makeAnchor(bottom.id)
+        p.force.makeLoad(c.id)   // Scenario 1's load
+        let s2 = p.force.addScenario()   // Scenario 2: open, and no load yet
+        p.force.sync(groups: p.selection.groups)
+        h.pump(0.8)
+        XCTAssertNotNil(TopologyBlock.scenarioGap(scenario: s2, name: "Scenario 2", gap: .noLoad).info)
+        _ = try h.onScreen("topologyFixLine", "★ the gap is said at once, in the corner's fix line")
+        var chip = try h.probe("topologyFixChip", "★ its one-tap fix", minHit: 44)
+        let f = try h.onScreen("optimizeButton", "Optimize")
+        h.click(CGPoint(x: f.midX, y: f.midY))
+        XCTAssertEqual(runs.count, 0, "nothing runs")
+        XCTAssertNotEqual(app.toast, LoadScenarioRule.noLoadLine("Scenario 2"), "★ never a toast after a ready-looking Optimize")
+        p.force.openScenario(p.force.scenarioList[0].id)
+        h.pump(0.4)
+        chip = try h.onScreen("topologyFixChip", "the fix")
+        h.click(CGPoint(x: chip.midX, y: chip.midY))
+        XCTAssertEqual(p.force.activeScenarioID, s2, "★ Show it: the scenario with no load opens")
+        // its load given (Top, in Scenario 2 — a fresh role is claimed by the open scenario): the block goes
+        p.force.clearKind(top.id)
+        p.force.makeLoad(top.id)
+        XCTAssertTrue(p.force.group(top.id, isIn: s2), "premise: Top's load is Scenario 2's")
+        p.force.sync(groups: p.selection.groups)
+        h.pump(0.6)
+        XCTAssertNil(h.frames.all["topologyFixLine"], "★ fixed: the line goes")
+        // an anchor deleted and the rest off in Scenario 2 → "No anchor in Scenario 2 · Switch its anchors on"
+        p.force.scenarios?.scenarios[1].anchorsOff = [bottom.id]
+        h.pump(0.6)
+        chip = try h.probe("topologyFixChip", "★ Switch its anchors on", minHit: 44)
+        h.click(CGPoint(x: chip.midX, y: chip.midY))
+        XCTAssertTrue(p.force.anchorIsOn(bottom.id, in: s2), "★ the fix switches them on")
+        XCTAssertNil(h.frames.all["topologyFixLine"])
+        XCTAssertEqual(runs.count, 0, "a fix never runs")
+    }
+
+    /// The gap words: the scenario named, its fix (mockup "No anchor in Held by left plate · Switch its anchors on").
+    func testTheScenarioGapsWords() {
+        let s = UUID()
+        XCTAssertEqual(TopologyBlock.scenarioGap(scenario: s, name: "Held by left plate", gap: .noAnchor(switchable: true)).words,
+                       "No anchor in Held by left plate")
+        XCTAssertEqual(TopologyBlock.scenarioGap(scenario: s, name: "Held by left plate", gap: .noAnchor(switchable: true)).fix,
+                       LoadScenarioRule.switchAnchorsOnLabel)
+        XCTAssertEqual(TopologyBlock.scenarioGap(scenario: s, name: "Normal use", gap: .noLoad).words, "No load in Normal use")
+        XCTAssertEqual(TopologyBlock.scenarioGap(scenario: s, name: "Normal use", gap: .tooLight("x")).info, "x")
+        // the press reads the same rule
+        let w = [LoadScenarioWire(name: "A", anchorFaceIDs: [1], loadGroups: []),
+                 LoadScenarioWire(name: "B", anchorFaceIDs: [], loadGroups: [])]
+        XCTAssertEqual(LoadScenarioRule.gap(w)?.index, 1)
+        XCTAssertEqual(LoadScenarioRule.gap(w)?.gap, .noAnchor(switchable: false), "B has no anchor before A's missing load")
+    }
+
+    /// Running: the corner's button says so with the time and a tap views the run (mockup "Optimizing v8 · 3:10 left · tap to
+    /// view"); the card's Run in background minimises it. RED before T5: the button greys to "Optimize".
+    func testWhileItRunsTheButtonSaysOptimizingAndATapShowsTheCard() throws {
+        let (h, p, _, _) = try page(AppBuildHost.landscape13)
+        RunModel.hostedTestRunner = { _, progress, _ in
+            for i in 0..<40 { if !progress(0, 3, i) { break }; Thread.sleep(forTimeInterval: 0.1) }
+            return AppBuildFixtures.outcome()
+        }
+        let f = try h.onScreen("optimizeButton", "Optimize")
+        h.click(CGPoint(x: f.midX, y: f.midY), settle: 0.6)
+        waitUntil(h, 3, "the run starts") { p.run.phase == .running }
+        h.pump(0.4)
+        let running = try h.onScreen("optimizeRunning", "★ the button says it is optimizing")
+        _ = try h.onScreen("runCard", "the run card")
+        try h.tap("runCardBackground", "Run in background")
+        XCTAssertTrue(p.run.isMinimized, "the card goes to the background")
+        h.click(CGPoint(x: running.midX, y: running.midY))
+        XCTAssertFalse(p.run.isMinimized, "★ a tap on the button views the run again")
+        p.run.cancel()
+        waitUntil(h, 5, "the run stops") { p.run.phase != .running }
+    }
 }
 #endif
