@@ -1295,8 +1295,7 @@ public struct ResultsScreen: View {
             if model.selectedLattice != nil { latticeDetailCaption }
             let rows = versionRows
             ResultsVersionsPanel(rows: rows, selectedTab: model.selectedIndex, open: $versionsOpen, pill: crowded,
-                                 pick: { model.select($0) },
-                                 compare: nil,   // ★ R-a: Compare is the corner's
+                                 pick: { model.select($0) },   // (★ R-a: Compare is the corner's)
                                  version: version,
                                  pickedTab: pickedVariant.flatMap { v in model.tabs.first { $0.variantIndex == v && !$0.isLatticed }?.index },
                                  choose: onPick.map { pick in { t in if let tab = model.tabs.first(where: { $0.index == t }) { pick(tab.variantIndex) } } })

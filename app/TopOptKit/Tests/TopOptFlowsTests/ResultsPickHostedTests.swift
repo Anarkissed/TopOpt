@@ -52,6 +52,35 @@ final class ResultsPickHostedTests: XCTestCase {
         XCTAssertNil(h2.frames.all["resultsPickThis"], "★ off the Library: no ring to set, no Pick this")
     }
 
+    /// ★ LOOK PER SCREEN (R-b, mockup #topo-results): the panel is §4.3's (348 pt), each result ONE 48 pt line — "a · Just safe
+    /// ·· 87 g · 1.5× [Pick this]" — with Pick this on every line not picked (the reviewer's chosen answer, 11-04 02:44Z: Pick this
+    /// sets the part's chosen result) and the selected line in the accent edge. RED before R-b (scratchpad
+    /// b2red/ResultsPanelRows.txt): 340 pt, two-line rows, Pick this on the selected line only.
+    func testTheResultsPanelIsThePanelWithOneLineRows() throws {
+        for size in [AppBuildHost.landscape13, CGSize(width: 820, height: 1180)] {
+            let picks = Picks()
+            let (h, rm) = try screen(size, version: "v7", picked: nil, picks: picks)
+            let panel = try XCTUnwrap(h.frames.all["resultsVersions"])
+            XCTAssertEqual(panel.width, DSParts.panelWidth, accuracy: 0.5, "\(size): ★ 348 pt (U2)")
+            XCTAssertEqual(try XCTUnwrap(h.frames.all["resultsVersionsHeader"], "\(size): §4.3's header").height,
+                           DSParts.headerHeight, accuracy: 0.5)
+            let solids = rm.tabs.filter { !$0.isLatticed }
+            XCTAssertGreaterThanOrEqual(solids.count, 2, "premise")
+            for t in solids {
+                let row = try XCTUnwrap(h.frames.all["resultsVersion-t\(t.index)"], "\(size): the line of result \(t.index)")
+                XCTAssertEqual(row.height, DSParts.rowHeight, accuracy: 0.5, "\(size): ★ one 48 pt line (\(row))")
+                let key = t.index == rm.selectedIndex ? "resultsPickThis" : "resultsPickThis-t\(t.index)"
+                let chip = try XCTUnwrap(h.frames.all[key], "\(size): ★ Pick this on line \(t.index)")
+                XCTAssertTrue(row.insetBy(dx: -0.5, dy: -0.5).contains(CGPoint(x: chip.midX, y: chip.midY)), "\(size): on its line")
+            }
+            // Pick this on a line that is not selected picks THAT result
+            let other = try XCTUnwrap(solids.first { $0.index != rm.selectedIndex })
+            let chip = try XCTUnwrap(h.frames.all["resultsPickThis-t\(other.index)"])
+            ui.click(h, CGPoint(x: chip.midX, y: chip.midY))
+            XCTAssertEqual(picks.all, [other.variantIndex], "\(size): ★ its own result")
+        }
+    }
+
     /// The Library numbers results over all variants; Results over the accepted ones.
     func testTheIndexCrossing() {
         func v(_ ok: Bool) -> OptimizeVariant {
