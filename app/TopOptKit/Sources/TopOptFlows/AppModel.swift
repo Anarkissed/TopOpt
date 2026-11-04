@@ -530,7 +530,7 @@ public final class AppModel: ObservableObject {
     /// No-op when there's no mesh or Metal is unavailable (frosted fallback shows).
     private func generateThumbnail(for id: UUID, mesh: ViewerMesh?) {
         guard let mesh, thumbnails[id] == nil,
-              let image = MeshThumbnail.cgImage(for: mesh, transparent: true) else { return }   // ★ B5: clear
+              let image = MeshThumbnail.cgImage(for: mesh) else { return }
         thumbnails[id] = image
         library.noteOriginal(folder: id, image: image)   // ★ B1 (note 10): the Library's original-model picture
     }

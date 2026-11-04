@@ -27,15 +27,14 @@ public enum DSCards {
                                                 center: UnitPoint(x: 0.5, y: 0.6), startRadius: 0, endRadius: 260)
 }
 
-/// One version chip in a part card's strip ("v7", the chosen one in accent; `printed`: a result marked Print this).
+/// One version chip in a part card's strip ("v7", the chosen one in accent).
 public struct DSVersionChip: Equatable, Identifiable {
     public let id: String
     public let title: String
     public let on: Bool
     public let draft: Bool
-    public let printed: Bool
-    public init(id: String, title: String, on: Bool = false, draft: Bool = false, printed: Bool = false) {
-        self.id = id; self.title = title; self.on = on; self.draft = draft; self.printed = printed
+    public init(id: String, title: String, on: Bool = false, draft: Bool = false) {
+        self.id = id; self.title = title; self.on = on; self.draft = draft
     }
 }
 
@@ -86,13 +85,8 @@ public struct DSPartCard<Picture: View>: View {
                     if !versions.isEmpty {
                         HStack(spacing: 4) {
                             ForEach(versions) { v in
-                                HStack(spacing: 2) {
-                                    Text(v.title)
-                                    if v.printed { Image(systemName: "printer").foregroundStyle(DS.Color.okGreen.color).accessibilityLabel("Print this") }
-                                }
-                                .font(.system(size: 11))
-                                    // mockup .vstrip: grey, the chosen one in accent ("v8 draft" says draft in words)
-                                    .foregroundStyle((v.on ? DS.Color.accent : DS.Color.textSecondary).color)
+                                Text(v.title).font(.system(size: 11))
+                                    .foregroundStyle((v.on ? DS.Color.accent : v.draft ? DS.Color.accentCyan : DS.Color.textSecondary).color)
                                     .padding(.horizontal, 6).padding(.vertical, 2)
                                     .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
                                         .fill((v.on ? DS.Color.accent.opacity(0.15) : DS.Color.fillSubtle).color))
@@ -130,18 +124,13 @@ public struct DSAddTile: View {
     public var body: some View {
         Button(action: action) {
             VStack(spacing: 6) {
-                // the mockup's .plus: a 48 pt accent disc with its glow, 8 pt above the words
-                Image(systemName: "plus").font(.system(size: 22, weight: .semibold)).foregroundStyle(Color.white)
-                    .frame(width: 48, height: 48)
-                    .background(Circle().fill(DS.Color.accent.color).shadow(color: DS.Color.accent.opacity(0.35).color, radius: 12))
-                    .padding(.bottom, 2)
+                Image(systemName: "plus").font(.system(size: 22, weight: .semibold))
                 Text(title).font(.system(size: 14.5, weight: .semibold))
                 if let detail { Text(detail).font(.system(size: 12)).foregroundStyle(DS.Color.textTertiary.color) }
             }
             .foregroundStyle(DS.Color.textSecondary.color)
             .frame(maxWidth: .infinity, minHeight: DSCards.addMinHeight)
-            .background(RoundedRectangle(cornerRadius: DSCards.radius, style: .continuous).fill(DSCards.fill.color))   // .card's fill
-            .overlay(RoundedRectangle(cornerRadius: DSCards.radius, style: .continuous)
+            .background(RoundedRectangle(cornerRadius: DSCards.radius, style: .continuous)
                 .strokeBorder(DS.Color.strokePanel.color, style: StrokeStyle(lineWidth: 1, dash: [6, 4])))
             .contentShape(RoundedRectangle(cornerRadius: DSCards.radius, style: .continuous))
         }
@@ -170,8 +159,8 @@ public struct DSVersionCard<Header: View, Content: View>: View {
         .background(RoundedRectangle(cornerRadius: DSCards.versionRadius, style: .continuous).fill(DSCards.fill.color))
         .overlay(RoundedRectangle(cornerRadius: DSCards.versionRadius, style: .continuous)
             .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
-        .background(DSParts.publish(key))   // the card he sees: a branch's frame starts 48 pt in
         .padding(.leading, branch ? DSCards.branchIndent : 0)
+        .background(DSParts.publish(key))
     }
 }
 

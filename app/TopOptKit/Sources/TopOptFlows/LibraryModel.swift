@@ -291,16 +291,11 @@ public final class LibraryModel: ObservableObject {
     // MARK: - results, numbers, pictures
 
     /// Read each optimized version's results once in the background: its numbers go into the index,
-    /// its pictures into LibraryCache/. One version at a time, oldest first. ★ B5: a version whose pictures
-    /// are not yet drawn clear is read again, for its pictures only.
+    /// its pictures into LibraryCache/. One version at a time, oldest first.
     public func loadSummaries(_ done: @escaping () -> Void = {}) {
         guard !loadingSummaries else { done(); return }
         let todo = index.parts.flatMap(\.versions)
-            .filter { v in
-                snapshots[v.folderID]?.optimized == true
-                    && (v.summary == nil && v.trimmed != true
-                        || (v.summary ?? []).indices.contains { !hasClearPicture(CompareItem(folder: v.folderID, result: $0)) })
-            }
+            .filter { $0.summary == nil && $0.trimmed != true && snapshots[$0.folderID]?.optimized == true }
             .map(\.folderID)
         guard !todo.isEmpty else { done(); return }
         loadingSummaries = true
@@ -309,17 +304,13 @@ public final class LibraryModel: ObservableObject {
             decode(folder) { [weak self] results in
                 guard let self else { return }
                 if let results {
-                    if self.version(folder)?.summary == nil {
-                        self.edit(folder) { v in
-                            v.summary = results.map {
-                                ResultSummary(massGrams: $0.massGrams, worstCaseMargin: $0.margin,
-                                              accepted: $0.accepted, achievedVolumeFraction: $0.fraction)
-                            }
+                    self.edit(folder) { v in
+                        v.summary = results.map {
+                            ResultSummary(massGrams: $0.massGrams, worstCaseMargin: $0.margin,
+                                          accepted: $0.accepted, achievedVolumeFraction: $0.fraction)
                         }
                     }
-                    for r in results where !self.hasClearPicture(CompareItem(folder: folder, result: r.index)) {
-                        self.storeThumbnail(for: CompareItem(folder: folder, result: r.index), mesh: r.mesh)
-                    }
+                    for r in results { self.storeThumbnail(for: CompareItem(folder: folder, result: r.index), mesh: r.mesh) }
                 }
                 step(rest.dropFirst())
             }
@@ -359,23 +350,12 @@ public final class LibraryModel: ObservableObject {
         }
     }
 
-    // ★ B5 (mockup #lib-project): a picture sits on its card's own gradient, so it is drawn on a clear background.
-    // Pictures cached before that were drawn on the dark stage (a black square on the card): they keep their old name,
-    // still show until each is redrawn clear, and the old file goes then. A STEP part's original waits until it is opened.
-
     private func thumbnailURL(_ item: CompareItem) -> URL {
-        cacheDir.appendingPathComponent("\(item.folder.uuidString)-\(item.result)-clear.png")
-    }
-
-    /// The name a picture had before B5 (drawn on the dark stage).
-    private func opaqueThumbnailURL(_ item: CompareItem) -> URL {
         cacheDir.appendingPathComponent("\(item.folder.uuidString)-\(item.result).png")
     }
 
-    func hasClearPicture(_ item: CompareItem) -> Bool { FileManager.default.fileExists(atPath: thumbnailURL(item).path) }
-
     private func storeThumbnail(for item: CompareItem, mesh: ViewerMesh) {
-        guard let image = MeshThumbnail.cgImage(for: mesh, transparent: true) else { return }
+        guard let image = MeshThumbnail.cgImage(for: mesh) else { return }
         storeImage(image, for: item)
     }
 
@@ -413,11 +393,11 @@ public final class LibraryModel: ObservableObject {
         storeImage(image, for: CompareItem(folder: folder, result: Self.originalResult))
     }
 
-    /// Draw the original of every part that has none drawn clear yet, one at a time in the background (STL, OBJ, 3MF only).
+    /// Draw the original of every part that has none yet, one at a time in the background (STL, OBJ, 3MF only).
     func drawMissingOriginals() {
         guard let load = originalMeshLoader, !drawingOriginals else { return }
         let todo: [(UUID, String)] = index.parts.compactMap { part in
-            guard !part.versions.contains(where: { hasClearPicture(CompareItem(folder: $0.folderID, result: Self.originalResult)) }),
+            guard originalPicture(part) == nil,
                   let v = part.versions.max(by: { $0.number < $1.number }),
                   let snap = store.snapshot(id: v.folderID) else { return nil }
             let path = store.modelPath(id: v.folderID, fileName: snap.modelFileName)
@@ -446,7 +426,7 @@ public final class LibraryModel: ObservableObject {
         guard let dest = CGImageDestinationCreateWithURL(thumbnailURL(item) as CFURL, "public.png" as CFString, 1, nil)
         else { return }
         CGImageDestinationAddImage(dest, image, nil)
-        if CGImageDestinationFinalize(dest) { try? FileManager.default.removeItem(at: opaqueThumbnailURL(item)) }
+        CGImageDestinationFinalize(dest)
     }
 
     /// The pictures already rendered, read back in the background.
@@ -456,18 +436,16 @@ public final class LibraryModel: ObservableObject {
                 + [CompareItem(folder: v.folderID, result: Self.originalResult)]   // ★ B1 (note 10): its original model
         }.filter { thumbnails[$0] == nil }
         guard !items.isEmpty else { return }
-        let urls = items.map { [thumbnailURL($0), opaqueThumbnailURL($0)] }   // ★ B5: the clear one, else the old one
+        let urls = items.map(thumbnailURL)
         Self.queue.async {
             var found: [(CompareItem, CGImage)] = []
-            for (item, names) in zip(items, urls) {
-                guard let url = names.first(where: { FileManager.default.fileExists(atPath: $0.path) }),
-                      let src = CGImageSourceCreateWithURL(url as CFURL, nil),
+            for (item, url) in zip(items, urls) {
+                guard let src = CGImageSourceCreateWithURL(url as CFURL, nil),
                       let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { continue }
                 found.append((item, img))
             }
             DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                for (item, img) in found where self.thumbnails[item] == nil { self.thumbnails[item] = img }   // never over a newer one
+                for (item, img) in found { self?.thumbnails[item] = img }
             }
         }
     }
@@ -534,11 +512,9 @@ public final class LibraryModel: ObservableObject {
         for k in thumbnails.keys where k.folder == folder { thumbnails[k] = nil }
         if let old { thumbnails[CompareItem(folder: folder, result: 0)] = old }
         let fm = FileManager.default
-        for url in [thumbnailURL, opaqueThumbnailURL] {   // ★ B5: a picture not yet redrawn clear moves too
-            let from = url(CompareItem(folder: folder, result: picked)), to = url(CompareItem(folder: folder, result: 0))
-            if picked != 0 { try? fm.removeItem(at: to); try? fm.moveItem(at: from, to: to) }
-            for r in variants.indices where r != 0 { try? fm.removeItem(at: url(CompareItem(folder: folder, result: r))) }
-        }
+        let from = thumbnailURL(CompareItem(folder: folder, result: picked)), to = thumbnailURL(CompareItem(folder: folder, result: 0))
+        if picked != 0 { try? fm.removeItem(at: to); try? fm.moveItem(at: from, to: to) }
+        for r in variants.indices where r != 0 { try? fm.removeItem(at: thumbnailURL(CompareItem(folder: folder, result: r))) }
         resultsCache[folder] = nil
     }
 }

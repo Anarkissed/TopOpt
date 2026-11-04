@@ -54,8 +54,7 @@ struct LibraryQuickLookView: View {
     let compare: (LibraryCompareRequest) -> Void
     @StateObject private var loader = LibraryResultsLoader()
     @StateObject private var camera = OrbitCameraModel()
-    /// B5: a result tile's tap opens Quick look on THAT result (nil = the version's shown one).
-    @State var shown: Int? = nil
+    @State private var shown: Int?
     @State private var details = false
 
     var body: some View {
@@ -146,7 +145,6 @@ struct LibraryQuickLookView: View {
                 .frame(maxWidth: 1240, maxHeight: 920)
                 .background(RoundedRectangle(cornerRadius: DS.Radius.sheet, style: .continuous).fill(DS.Surface.sheet.color))
                 .overlay(RoundedRectangle(cornerRadius: DS.Radius.sheet, style: .continuous).strokeBorder(DS.Color.strokeSheet.color, lineWidth: 1))
-                .background(DSParts.publish("libraryQuickLook-v\(v.number)\(ResultMark.letter(r))"))   // B5: hosted tests
                 .padding(DS.Space.xl4)
                 .onAppear { loader.need(folder, from: library) }
                 .onChange(of: folder) { loader.need($0, from: library) }
