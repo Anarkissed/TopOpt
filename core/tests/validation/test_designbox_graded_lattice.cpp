@@ -251,12 +251,62 @@ static void section_organic_refused() {
         "G5: organic + a design box is refused, in plain words");
 }
 
+// G6 "Lattice the original part" (mode lattice_part) under a design box lattices the
+// PART exactly as with no box (LatticeTypes' finding, 2026-11-04 20:24: on the expanded
+// grid every box voxel counts as solid, so the "part" latticed was the box). Nothing is
+// optimized, so the box has nothing to grow into: the file and its receipt are the
+// no-box run's, byte for byte. The refusal this batch lifts used to keep the graded form
+// out of reach; an auto-derived growth box never met it.
+static void section_lattice_part() {
+  const MaterialLibrary materials = load_materials_file(MATERIALS_JSON_PATH);
+  const SettingsRules rules = load_settings_rules_file(SETTINGS_RULES_PATH);
+  auto run = [&](bool box, const std::string& sub, std::string* refused) {
+    const std::string out = std::string(CLI_TMP_DIR) + "/dbx_graded_lattice_part_" + sub;
+    std::filesystem::remove_all(out);
+    JobDescription job = graded_box_job();
+    job.mode = "lattice_part";
+    job.has_design_box = box;
+    // One cell for the part: the swept planner throws on this solid block with or
+    // without a box (its post-balance drop leaves a split octree cell partly latticed),
+    // which is its own defect, reported, and not this section's.
+    job.grading.cell_mode = "auto";
+    job.grading.cell_min_mm = job.grading.cell_max_mm = 0.0;
+    LatticeVariantJobResult r;
+    try {
+      r = lattice_variant_job(job, g_dir, out, materials, rules);
+    } catch (const std::exception& e) {
+      *refused = e.what();
+    }
+    return r;
+  };
+  std::string refused_box, refused_none;
+  const LatticeVariantJobResult with_box = run(true, "box", &refused_box);
+  const LatticeVariantJobResult no_box = run(false, "nobox", &refused_none);
+  if (!refused_box.empty()) std::fprintf(stderr, "  lattice_part refused: %s\n", refused_box.c_str());
+  CHECK(refused_box.empty() && refused_none.empty(), "G6: lattice the part runs, box or not");
+  if (!refused_box.empty() || !refused_none.empty()) return;
+  const std::string rb = read_file(with_box.lattice_receipt_path);
+  const std::string rn = read_file(no_box.lattice_receipt_path);
+  const std::string mb = read_file(with_box.lattice_receipt_path.substr(
+                             0, with_box.lattice_receipt_path.rfind(".report.json")) + ".stl");
+  const std::string mn = read_file(no_box.lattice_receipt_path.substr(
+                             0, no_box.lattice_receipt_path.rfind(".report.json")) + ".stl");
+  std::printf("[G6] lattice_part: with the box %zu-byte file, %.0f latticed voxel(s); without "
+              "it %zu bytes, %.0f\n",
+              mb.size(), json_number(rb, "latticed_voxels"), mn.size(),
+              json_number(rn, "latticed_voxels"));
+  CHECK(!mn.empty() && mb == mn,
+        "G6: the latticed file is the no-box run's, byte for byte (the part, not the box)");
+  CHECK(!rn.empty() && rb == rn, "G6: and so is its certification receipt");
+}
+
 int main() {
   std::printf("=== grading + a design box ===\n");
   write_fixture();
   section_run();
   section_relattice();
   section_organic_refused();
+  section_lattice_part();
   std::printf("%d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;
 }

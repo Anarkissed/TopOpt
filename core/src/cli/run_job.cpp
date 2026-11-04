@@ -12344,6 +12344,15 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
     }
   }
   apply_build_direction_options(options, job);
+  // ★ LATTICING THE PART optimizes nothing, so a design box -- drawn, or the one a growth
+  // run derives -- has nothing to grow into: the part is solved, latticed and certified
+  // on its own grid, exactly as with no box. Expanded, every box voxel is solid on the
+  // grid, so the "part" latticed was the BOX (LatticeTypes' finding 2026-11-04 20:24: a
+  // 60 mm bar latticed as its 71 mm growth box, volume fraction 2.84).
+  if (lattice_the_part) {
+    options.design_box.reset();
+    options.keep_out_boxes.clear();
+  }
 
   // ── THE domain the ORIGINAL run solved on, rebuilt through the SAME core call
   // that run used (resolve_design_domain, pipeline.hpp): the expanded grid and
