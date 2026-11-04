@@ -25,10 +25,16 @@ final class ParitySquishShots: XCTestCase {
             m.selectedRegion = g.regions.first
             let h = SquishHost(FlexibleStagePage(project: r.project, model: m, appModel: app, onBack: {}, onExit: {}),
                                size: size, test: self)
+            // each shot once core's design has landed: the face's "Reaches … short" line, the dent tag and the top line read it
+            // (11-04: a fixed 2.5 s shot 13L mid-design on a loaded Mac, the panel a line shorter and scrolled)
             SquishHost.pump(2.5)
+            XCTAssertTrue(SquishHost.pumpUntil(30) { !m.designsInFlight }, "\(name): core's design landed")
+            SquishHost.pump(0.5)
             try h.picture("app_flex-squish_\(name).png")
             m.rail = .model
             SquishHost.pump(1)
+            XCTAssertTrue(SquishHost.pumpUntil(30) { !m.designsInFlight }, "\(name) model: core's design landed")
+            SquishHost.pump(0.5)
             try h.picture("app_flex-squish-model_\(name).png")
         }
     }
