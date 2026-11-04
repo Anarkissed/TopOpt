@@ -195,10 +195,26 @@ final class FlexibleRound7FitHostedTests: XCTestCase {
 
     // MARK: the button
 
-    func button(_ line: String, tone: FlexibleMainStatus.Tone, state: FlexibleLatticeButton.State, width: CGFloat) -> [FlexibleFit] {
-        let v = FlexibleLatticeButtonView(status: .init(line: line, tone: tone, fix: nil), state: state, line: line, width: width,
-                                          cardOpen: false, main: {}, caret: {})
-        return fits(v, size: CGSize(width: width, height: 64)).fits
+    /// ★ RE-PINNED (B9 look, 11-04): the button is the shared run button + ⌃ (DSRunButton grows to its line, never cut) — its
+    /// frames as drawn on a pad of `pad` width: the split, the main button, its line, and the line's own width.
+    func button(_ line: String, tone: FlexibleMainStatus.Tone, state: FlexibleLatticeButton.State, pad: CGFloat)
+        -> (main: CGRect?, line: CGRect?, caret: CGRect?, need: CGFloat) {
+        let v = FlexibleLatticeButtonView(status: .init(line: line, tone: tone, fix: nil), state: state, line: line,
+                                          width: FlexibleChromeLayout.latticeButtonSize(.zero).width, cardOpen: false, main: {}, caret: {})
+        final class Frames { var all: [String: CGRect] = [:] }
+        let frames = Frames()
+        let size = CGSize(width: pad, height: 120)
+        let hv = NSHostingView(rootView: v.onPreferenceChange(ChromeKeepOutKey.self) { frames.all = $0 }
+            .frame(width: size.width, height: size.height, alignment: .bottomTrailing).environment(\.colorScheme, .dark))
+        hv.frame = CGRect(origin: .zero, size: size)
+        let w = NSWindow(contentRect: hv.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        w.contentView = hv
+        hv.layoutSubtreeIfNeeded()
+        let end = Date().addingTimeInterval(0.3)
+        while Date() < end { _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02)) }
+        w.contentView = nil
+        let need = NSHostingView(rootView: Text(line).font(.system(size: 11.5)).fixedSize()).fittingSize.width
+        return (frames.all["latticeMain"], frames.all["latticeMain-line2"], frames.all["latticeMore"], need)
     }
 
     func testTheButtonsLineReadsWholeInEveryStateOnEveryPad() {
@@ -214,21 +230,41 @@ final class FlexibleRound7FitHostedTests: XCTestCase {
         ]
         var out: [String] = []
         for (name, v) in [("mini", Self.mini), ("11p", CGSize(width: 834, height: 1194)), ("13p", Self.pad13)] {
-            let w = FlexibleChromeLayout.latticeButtonSize(v).width
+            var widest: CGFloat = 0
             for (line, tone, st) in lines {
-                let got = button(line, tone: tone, state: st, width: w)
-                XCTAssertTrue(got.contains { $0.text == line }, "\(name): '\(line)' measured")
-                XCTAssertEqual(Self.cut(got), [], "★ \(name) (\(Int(w)) pt): '\(line)' reads whole")
+                let got = button(line, tone: tone, state: st, pad: v.width)
+                let l = try? XCTUnwrap(got.line, "\(name): '\(line)' drawn")
+                let main = try? XCTUnwrap(got.main, "\(name): the Lattice button drawn")
+                let caret = try? XCTUnwrap(got.caret, "\(name): its ⌃ drawn")
+                guard let l, let main, let caret else { continue }
+                XCTAssertGreaterThanOrEqual(l.width + 0.5, got.need, "★ \(name): '\(line)' reads whole (\(Int(l.width)) of \(Int(got.need)) pt)")
+                XCTAssertTrue(main.insetBy(dx: -0.5, dy: -0.5).contains(l), "★ \(name): '\(line)' inside its button")
+                XCTAssertGreaterThanOrEqual(main.width, DSParts.runMinWidth - 0.5, "\(name): the run button is at least 250")
+                XCTAssertEqual(caret.minX - main.maxX, DSParts.cornerGap, accuracy: 0.5, "\(name): the ⌃ 12 apart")
+                widest = max(widest, caret.maxX - main.minX)
             }
-            out.append("\(name) \(Int(w)) pt: \(lines.count) lines whole")
+            // the corner fits the pad: 24 · the Settings button (at most 240) · 12 · the split · 24
+            XCTAssertLessThanOrEqual(PageChrome.edge + FlexibleChromeLayout.setupMaxWidth + FlexibleChromeLayout.pairGap + widest + PageChrome.edge,
+                                     v.width, "★ \(name): the corner fits the pad (split \(Int(widest)) pt)")
+            out.append("\(name): \(lines.count) lines whole · the split at most \(Int(widest)) pt")
         }
-        // RED CONTROL: the first drawing's main zone on the mini (a 240 split less its 52 pt ⌃ = 187; the same zone is a 232
-        // split less today's 44) cuts the Preview line
-        let redWidth = 240 - 52 + FlexibleChromeLayout.latticeCaretWidth
-        let red = button("Preview \u{00B7} core runs one group at a time", tone: .preview, state: .preview, width: redWidth)
-        out.append("RED (the first drawing's main zone, a \(Int(redWidth)) split): cut \(Self.cut(red))")
+        // RED CONTROL: the line in a fixed slot (the old split's main zone, 260 less its 44 pt ⌃ and its 2 × 8 sides, at the run
+        // button's 11.5 pt): core's 44-character line does not fit — the run button must grow, not cut
+        let long = B.line(.init(line: FlexibleMainStatus.ready, tone: .ready, fix: nil), state: .sent, runLine: ran.line)
+        let slot: CGFloat = 260 - FlexibleChromeLayout.latticeCaretWidth - 16
+        let need = NSHostingView(rootView: Text(long).font(.system(size: 11.5)).fixedSize()).fittingSize.width
+        out.append("RED (a fixed \(Int(slot)) pt slot): '\(long)' needs \(Int(need))")
         print("FLEX-R7D1-FIT button\n" + out.joined(separator: "\n"))
-        XCTAssertFalse(Self.cut(red).isEmpty, "★ RED CONTROL: the first drawing's main zone cuts the Preview line")
+        XCTAssertGreaterThan(need, slot, "★ RED CONTROL: a fixed slot would cut the long line")
+        // ★ B9 LOOK: the Settings glass button within the widths the corner's layout gives it (the mini: no detail)
+        let p = ProjectModel(id: UUID(), name: "Pad", material: "ABS", process: .fdm, importedFile: nil, importedMesh: nil)
+        p.force.setGravity(direction: SIMD3<Float>(0, 0, -1))
+        for detail in [true, false] {
+            let w = NSHostingView(rootView: FlexibleSetupChipView(project: p, open: false, detail: detail) {}
+                .environment(\.colorScheme, .dark)).fittingSize.width
+            let cap = detail ? FlexibleChromeLayout.setupMaxWidth : FlexibleChromeLayout.setupMiniWidth
+            XCTAssertLessThanOrEqual(w, cap, "★ the Settings button \(detail ? "with" : "without") its detail: \(Int(w)) of \(Int(cap)) pt")
+        }
     }
 }
 #endif

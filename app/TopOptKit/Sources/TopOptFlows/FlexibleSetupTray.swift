@@ -106,41 +106,18 @@ public enum FlexibleSetupActions {
 struct FlexibleSetupChipView: View {
     @ObservedObject var project: ProjectModel
     let open: Bool
+    /// "Fast · +Z · −Z" after the title (not on the mini: FlexibleChromeLayout.setupShowsDetail).
+    var detail = true
     let tap: () -> Void
 
+    /// ★ B9 LOOK (his "look per screen"; §4.6 / §4.18, the mockup's #flex-lattice corner): the shared glass button —
+    /// "Settings  Fast · +Z · −Z ⌄" (B2, Q6: the corner chip is Settings everywhere); the tray it opens is unchanged.
     var body: some View {
         let p = FlexibleSetupChip.parts(project: project)
-        Button(action: tap) {
-            HStack(spacing: DS.Space.s) {
-                Image(systemName: FlexibleSetupRow.quality.glyph).font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(DS.Color.accent.color)
-                Text(p.quality)
-                Text("\u{00B7}").foregroundStyle(DS.Color.textTertiary.color)
-                Image(systemName: "arrow.up").font(.system(size: 12, weight: .semibold))
-                Text(p.plate)
-                Text("\u{00B7}").foregroundStyle(DS.Color.textTertiary.color)
-                Image(systemName: FlexibleSetupRow.gravity.glyph).font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(DS.Color.accent.color)
-                Text(p.gravity)
-                Image(systemName: open ? "chevron.down" : "chevron.up").font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(DS.Color.textSecondary.color)
-            }
-            .font(.system(size: 13.5, weight: .semibold))
-            .foregroundStyle(DS.Color.textPrimary.color)
-            .lineLimit(1)
-            .padding(.horizontal, DS.Space.ml)
-            .frame(height: FlexibleChromeLayout.setupHeight)
-            .frame(maxWidth: FlexibleChromeLayout.setupMaxWidth)
-            .background(Capsule().fill(DS.Surface.bar.color)
-                .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
-            // ★ the review of R7-D1 (minor d: thin vertical hairlines at the chip's frame edges, outside its capsule — drawn in a
-            // key window and in one that is not, so not a focus ring): nothing is drawn outside the capsule
-            .clipShape(Capsule())
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
+        DSGlassButton("Settings", detail: detail ? FlexibleSetupChip.label(project: project) : nil, systemImage: "slider.horizontal.3",
+                      chevron: true, selected: open, key: "flexibleSetupChip", action: tap)
         .fixedSize()
-        .accessibilityLabel("Setup: \(p.quality), plate up \(p.plate), gravity \(p.gravity)")
+        .accessibilityLabel("Settings: \(p.quality), plate up \(p.plate), gravity \(p.gravity)")
         .accessibilityValue(open ? "Open" : "Folded")
         .accessibilityIdentifier("flexible-setup-chip")
     }
