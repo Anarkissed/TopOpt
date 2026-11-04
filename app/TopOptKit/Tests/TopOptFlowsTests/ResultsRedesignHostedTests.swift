@@ -1,6 +1,7 @@
 // ResultsRedesignHostedTests — ★ the Results redesign on HIS screen (iPad 13" portrait and landscape), hosted offscreen
-// (never the app): every panel found by its own laid-out frame, none overlapping another, Details opening UPWARD under the
-// view buttons, a version picked from the list, and Compare's "Use this" returning to Results on it.
+// (never the app): every panel found by its own laid-out frame, none overlapping another, a version picked from the list, and
+// Compare's "Use this" returning to Results on it. (★ RE-PINNED, LOOK PER SCREEN R-a: Compare, Details and Export are the
+// corner's, and Details is the drawer from the bottom — ResultsCornerHostedTests.)
 #if canImport(AppKit) && canImport(MetalKit)
 import XCTest
 import SwiftUI
@@ -38,9 +39,10 @@ final class ResultsRedesignHostedTests: XCTestCase {
                 XCTAssertFalse(fs[i].insetBy(dx: 1, dy: 1).intersects(fs[j].insetBy(dx: 1, dy: 1)),
                                "★ \(size): '\(keys[i])' \(fs[i]) overlaps '\(keys[j])' \(fs[j])")
             } }
-            // the order he drew: Scenario above the view buttons, above the checks, above Details, above Export — one column
+            // the order he drew: Scenario above the view buttons, above the checks — one column — and the corner below them
+            // (★ R-a: Details and Export side by side in it)
             XCTAssertLessThan(fs[1].maxY, fs[2].minY + 1); XCTAssertLessThan(fs[2].maxY, fs[3].minY + 1)
-            XCTAssertLessThan(fs[3].maxY, fs[4].minY + 1); XCTAssertLessThan(fs[4].maxY, fs[5].minY + 1)
+            XCTAssertLessThan(fs[3].maxY, fs[4].minY + 1); XCTAssertEqual(fs[4].maxY, fs[5].maxY, accuracy: 1)
             XCTAssertEqual(fs[1].maxX, fs[2].maxX, accuracy: 2, "Scenario sits right-aligned over the views")
             XCTAssertNotNil(h.frames.all["resultsVersion-v3"], "the impossible version is listed (greyed)")
             XCTAssertNil(h.frames.all["resultsDetailsPanel"], "Details starts closed")
@@ -48,21 +50,8 @@ final class ResultsRedesignHostedTests: XCTestCase {
         }
     }
 
-    func testDetailsOpenUpwardUnderTheViewsAndScroll() throws {
-        let (h, _) = try screen(CGSize(width: 1032, height: 1376))
-        let views = try frame(h, "resultsViewModes"), button = try frame(h, "resultsDetailsButton")
-        ui.click(h, CGPoint(x: button.midX, y: button.midY))
-        let panel = try frame(h, "resultsDetailsPanel")
-        XCTAssertNil(h.frames.all["resultsChecks"], "★ the checks fold away while Details is open")
-        XCTAssertGreaterThanOrEqual(panel.minY, views.maxY - 1, "★ Details stays under the view buttons")
-        XCTAssertLessThan(panel.minY, button.minY - 100, "★ it opened UPWARD from its button")
-        XCTAssertNotNil(h.frames.all["resultsDetailsRows"], "its rows scroll inside it")
-        try ui.picture(h, "results_details_open.png")
-        let close = try frame(h, "resultsDetailsButton")
-        XCTAssertGreaterThan(close.minY, panel.midY, "the fold button sits at its foot")
-        ui.click(h, CGPoint(x: close.midX, y: close.midY))
-        XCTAssertNotNil(h.frames.all["resultsChecks"], "folding it brings the checks back")
-    }
+    // (★ R-a: "Details opens upward under the view buttons" is now the drawer from the bottom —
+    // ResultsCornerHostedTests.testDetailsIsTheDrawerFromTheBottom.)
 
     func testPickAVersionAndCompareReturnsOnTheOneHeUses() throws {
         let (h, rm) = try screen(CGSize(width: 1376, height: 1032))

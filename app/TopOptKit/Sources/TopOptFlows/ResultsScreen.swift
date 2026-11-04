@@ -124,7 +124,10 @@ public struct ResultsScreen: View {
     @StateObject private var videoExport = VideoExportModel()
     /// The written STL file awaiting the share sheet (nil when no export is in flight).
     /// Set when the user taps Export; drives the UIActivityViewController presentation.
-    @State private var stlExportURL: URL?
+    @State private var stlExportURLs: [URL] = []   // ★ R-a: one result's file, or every result's (Export all)
+    /// ★ R-a: the corner's frame (the results panel lifts above it where they would meet).
+    @State private var cornerFrame: CGRect = .zero
+    @State private var screenHeight: CGFloat = 1032
     /// Whether the constrained-smoothing drawer is open (only when `smoothing != nil`).
     @State private var smoothOpen = false
     /// An export failure message (rare — a temp-dir write error), surfaced as an alert
@@ -286,6 +289,16 @@ public struct ResultsScreen: View {
             versionsColumn
             rightColumn
             if let po = printOrientation { printOrientationLine(po) }   // ★ B4 (note 12): bottom-centre
+            resultsCorner   // ★ LOOK PER SCREEN (R-a, §4.18): Compare · Details · Export · ⌃
+            if detailsOpen {
+                // ★ R-a (mockup #topo-results-details): the drawer from the bottom, the page's width
+                ResultsDetailsDrawer(tab: $detailsTab, versionTitle: selectedRow?.title ?? "",
+                                     rows: { model.detailRows($0, version: selectedRow) },
+                                     close: { withAnimation(DS.Motion.sheetIn) { detailsOpen = false } })
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .zIndex(4)
+            }
             }
             // The optimization-history playbar exists ONLY when the variant carries real
             // keyframes (`hasHistory`). Without them the slider used to reveal-SLICE the
@@ -306,7 +319,9 @@ public struct ResultsScreen: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onPreferenceChange(ChromeKeepOutKey.self) { all in   // ★ B4: what the orientation line keeps clear of
             if printOrientation != nil { orientControls.update(all.filter { !PrintOrientationLayout.ignored($0.key) }) }
+            if let c = all["resultsCorner"], c != cornerFrame { cornerFrame = c }   // ★ R-a
         }
+        .animation(DS.Motion.sheetIn, value: detailsOpen)
         .transition(.opacity)
         .animation(DS.Motion.sheetIn, value: orientOpen)
         .animation(DS.Motion.sheetIn, value: compare != nil)
@@ -331,7 +346,8 @@ public struct ResultsScreen: View {
         .onChange(of: compare != nil) { onFullScreen?($0 || fullScreen) }
         .onDisappear { if fullScreen || compare != nil { onFullScreen?(false) } }
         .background(GeometryReader { g in
-            Color.clear.onAppear { screenWidth = g.size.width }.onChange(of: g.size.width) { screenWidth = $0 }
+            Color.clear.onAppear { screenWidth = g.size.width; screenHeight = g.size.height }
+                .onChange(of: g.size.width) { screenWidth = $0 }.onChange(of: g.size.height) { screenHeight = $0 }
         })
         .onReceive(ticker) { _ in
             // Signpost only the ticks that DO work (advance an animation). A quiet run
@@ -407,9 +423,9 @@ public struct ResultsScreen: View {
         // UIActivityViewController. Present flows are device QA (the M7 /app/ standard);
         // the file bytes + filename + mass math are headlessly tested on the model.
         .sheet(isPresented: Binding(
-            get: { stlExportURL != nil },
-            set: { if !$0 { stlExportURL = nil } })) {
-            if let url = stlExportURL { ShareSheet(items: [url]) }
+            get: { !stlExportURLs.isEmpty },
+            set: { if !$0 { stlExportURLs = [] } })) {
+            if !stlExportURLs.isEmpty { ShareSheet(items: stlExportURLs) }
         }
         .alert("Couldn’t export STL", isPresented: Binding(
             get: { stlExportError != nil },
@@ -440,7 +456,7 @@ public struct ResultsScreen: View {
             } completion: { result in
                 latticeExportProgress = nil
                 switch result {
-                case .success(let url): stlExportURL = url
+                case .success(let url): stlExportURLs = [url]
                 case .failure(let error):
                     stlExportError = error.localizedDescription
                 }
@@ -452,7 +468,7 @@ public struct ResultsScreen: View {
             .appendingPathComponent(model.exportFilename)
         do {
             try data.write(to: url, options: .atomic)
-            stlExportURL = url
+            stlExportURLs = [url]
         } catch {
             stlExportError = "Couldn’t write the STL file: \(error.localizedDescription)"
         }
@@ -1280,15 +1296,76 @@ public struct ResultsScreen: View {
             let rows = versionRows
             ResultsVersionsPanel(rows: rows, selectedTab: model.selectedIndex, open: $versionsOpen, pill: crowded,
                                  pick: { model.select($0) },
-                                 compare: rows.filter { $0.tabIndex != nil }.count >= 2 ? {
-                                     compare = ResultsCompareSession(candidates: rows.compactMap(\.tabIndex))
-                                 } : nil,
+                                 compare: nil,   // ★ R-a: Compare is the corner's
                                  version: version,
                                  pickedTab: pickedVariant.flatMap { v in model.tabs.first { $0.variantIndex == v && !$0.isLatticed }?.index },
                                  choose: onPick.map { pick in { t in if let tab = model.tabs.first(where: { $0.index == t }) { pick(tab.variantIndex) } } })
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-        .padding(PageChrome.edge)
+        .padding([.leading, .top], PageChrome.edge)
+        .padding(.bottom, versionsLift)
+    }
+
+    /// ★ R-a: the results panel's foot — the page's edge, or 12 pt above the corner where the two would meet (U: nothing
+    /// covers a control; the mockup's 11″ portrait overlaps them).
+    private var versionsLift: CGFloat {
+        guard cornerFrame.width > 0, cornerFrame.minX < PageChrome.edge + 340 + DSParts.cornerGap else { return PageChrome.edge }
+        return screenHeight - cornerFrame.minY + DSParts.cornerGap
+    }
+
+    /// ★ LOOK PER SCREEN (R-a, mockup #topo-results, §4.18): [Compare] [Details] [Export v7b (.stl)] [⌃], 12 pt apart, 24 pt
+    /// from the edges. ⌃: Export all N results · Open in Library.
+    @ViewBuilder private var resultsCorner: some View {
+        let rows = versionRows
+        let exportable = model.tabs.filter { !$0.isLatticed && model.canExport(tab: $0) }.count
+        DSCorner(key: "resultsCorner") {
+            if rows.filter({ $0.tabIndex != nil }).count >= 2 {
+                DSGlassButton("Compare", systemImage: "rectangle.split.2x1", key: "resultsCompare") {
+                    compare = ResultsCompareSession(candidates: rows.compactMap(\.tabIndex))
+                }
+                .accessibilityIdentifier("results-compare")
+            }
+            DSGlassButton("Details", selected: detailsOpen, key: "resultsDetailsButton") {
+                withAnimation(DS.Motion.sheetIn) { detailsOpen.toggle() }
+            }
+            .accessibilityIdentifier("results-details")
+        } run: {
+            DSRunButton(exportTitle, subtitle: exportLine,
+                        state: model.canExport ? .ready : .disabled(model.exportDisabledReason ?? "Nothing to export"),
+                        key: "resultsExport") { exportSTL() }
+                .accessibilityLabel(model.canExport ? "Export STL" : (model.exportDisabledReason ?? "Export unavailable"))
+        } split: {
+            DSSplitButton(key: "resultsSplitMore") {
+                if exportable >= 2 { Button("Export all \(exportable) results") { exportAll() } }
+                Button("Open in Library") { onClose() }
+            }
+        }
+    }
+
+    /// "Export v7b (.stl)": the version and the result's letter.
+    private var exportTitle: String {
+        let letter = selectedRow.map { $0.title.components(separatedBy: " · ").first ?? $0.title } ?? ""
+        return "Export " + (version ?? "") + letter + " (.stl)"
+    }
+
+    /// What the file is: the latticed part, or one finished shape (smoothed when E1 finished it).
+    private var exportLine: String {
+        model.exportIsStreamed ? "The latticed part" : selectedFinish != nil ? "One finished shape \u{00B7} smoothed" : "One finished shape"
+    }
+
+    /// ★ R-a: every solid result's STL into one folder, handed to the share sheet together.
+    private func exportAll() {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("results-" + UUID().uuidString.prefix(8), isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            stlExportURLs = try model.exportAllSTL().map { f in
+                let u = dir.appendingPathComponent(f.filename)
+                try f.data.write(to: u, options: .atomic)
+                return u
+            }
+        } catch {
+            stlExportError = "Couldn\u{2019}t write the STL files: \(error.localizedDescription)"
+        }
     }
 
     /// The right column, under the view cube: "Scenario" + its menu, the view buttons, the checks and Details, Export.
@@ -1311,11 +1388,12 @@ public struct ResultsScreen: View {
             ResultsChecksAndDetails(checks: checks, checksOpen: $checksOpen, openCheck: $openCheck, detailsOpen: $detailsOpen, tab: $detailsTab,
                                     versionTitle: selectedRow?.title ?? "",
                                     rows: { model.detailRows($0, version: selectedRow) }, pill: crowded)
-            exportButton
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
         .padding(.top, PageChrome.gizmoClearance)
-        .padding([.trailing, .bottom], PageChrome.edge)
+        .padding(.trailing, PageChrome.edge)
+        .padding(.bottom, cornerFrame.height > 0 ? screenHeight - cornerFrame.minY + DSParts.cornerGap   // ★ R-a: above the corner
+                          : PageChrome.edge + DSParts.runHeight + DSParts.cornerGap)
     }
 
     /// Both corners' full-width bars (340 + 330) and their gutters leave under 160 pt of model between them: pills.
@@ -1478,7 +1556,7 @@ public struct ResultsScreen: View {
                 vizRow(open: smoothOpen,
                        drawer: {
                            SmoothingPanel(model: sm,
-                                          onExport: { path in stlExportURL = URL(fileURLWithPath: path) },
+                                          onExport: { path in stlExportURLs = [URL(fileURLWithPath: path)] },
                                           onClose: { smoothOpen = false })
                        },
                        chip: { smoothChip })
