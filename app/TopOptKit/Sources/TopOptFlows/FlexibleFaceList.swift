@@ -150,11 +150,8 @@ struct FlexibleFaceList: View {
     /// ★ THE SELECTED FACE, OPEN IN PLACE: its rows inside its own row (filled, outlined in the
     /// accent). Its frame reaches the page ("faceCard") so a test can see it on the panel.
     private func card(_ region: Int) -> some View {
+        // ★ B9 LOOK: the selected row and its inset card are drawn by FlexibleFaceRows (the mockup's #flex-squish)
         FlexibleFaceRows(model: model, region: region, padTarget: $padTarget, joinGroup: joinGroup)
-            .padding(.leading, DS.Space.m).padding(.trailing, DS.Space.s).padding(.bottom, DS.Space.xs)
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(DS.Color.fillSelected.color))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(DS.Color.accent.color, lineWidth: 1.5))
             .background(GeometryReader { g in
                 Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["faceCard": g.frame(in: .global)])
             }.allowsHitTesting(false))
@@ -180,13 +177,11 @@ struct FlexibleFaceList: View {
                 .font(.system(size: row.selected ? 16 : 13, weight: .semibold))
                 .foregroundStyle((row.selected ? DS.Color.accent : DS.Color.textTertiary).color)
         }
-        .padding(.horizontal, DS.Space.m)
+        .padding(.leading, 10).padding(.trailing, DS.Space.s)
         .frame(minHeight: Self.rowHeight)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill((row.selected ? DS.Color.fillSelected : DS.Color.fillSubtle).color))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .strokeBorder((row.selected ? DS.Color.accent : DS.Color.strokeSubtle).color, lineWidth: row.selected ? 1.5 : 1))
-        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        // ★ B9 LOOK (§4.4's row): a plain row on the panel with its hairline under it; the selected one is its card's row
+        .overlay(alignment: .bottom) { Rectangle().fill(DS.Color.strokeSubtle.color).frame(height: 1) }
+        .contentShape(Rectangle())
     }
 
     // MARK: ★ SQUEEZE GROUPS (round 4 batch D2; D2 review: headers IN the list)

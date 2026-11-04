@@ -144,7 +144,7 @@ final class FlexibleSqueezeGroupsReviewUITests: XCTestCase {
             let card = try XCTUnwrap(local(host, "faceCard"))
             line += String(format: " · G2 header y %.0f–%.0f, × y %.0f, card y %.0f–%.0f, scroll %.0f–%.0f",
                            g2.minY, g2.maxY, x2.midY, card.minY, card.maxY, scroll.minY, scroll.maxY)
-            XCTAssertTrue(g2.minY >= scroll.minY - 0.5 && g2.maxY <= scroll.maxY + 0.5, "\(tag): group 2's header is on the panel")
+            XCTAssertTrue(g2.minY >= scroll.minY - 0.5 && g2.maxY <= scroll.maxY + 0.5, "\(tag): group 2's header is on the panel (\(line))")
             XCTAssertTrue(x2.minY >= scroll.minY - 0.5 && x2.maxY <= scroll.maxY + 0.5, "\(tag): its × is on the panel")
             XCTAssertLessThan(g2.maxY, card.minY + 1, "\(tag): the header sits above face 5's card")
             // ★ RED CONTROL: D2's one list drew BOTH groups' headers — the tab draws only its own

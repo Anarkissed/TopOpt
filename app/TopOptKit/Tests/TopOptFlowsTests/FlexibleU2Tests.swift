@@ -495,7 +495,10 @@ final class FlexibleU2Tests: XCTestCase {
         FlexibleStageModel.controlTakeOutFullName = false
         lines.append("RED whole name: question x \(Int(red.q.minX)) vs panel x \(Int(red.panel.minX))")
         XCTAssertLessThan(red.q.minX, a.q.minX - 30, "RED CONTROL: the whole name reaches \(Int(a.q.minX - red.q.minX)) pt further left")
-        XCTAssertLessThan(red.q.minX, (red.rail ?? rail).maxX + 8, "RED CONTROL: the whole name runs into the rail's tabs (his 22.png state)")
+        // ★ RE-PINNED (B9 look, 11-04): the face's row lost [Pressed │ Rests] (its own Role row now) and its trailing (i), so the
+        // ⊖ sits at the row's end and even the whole name stops clear of the tabs — his 22.png state can no longer be drawn; the
+        // short name stays (the control above). Logged, not asserted.
+        lines.append("RED whole name vs the tabs: x \(Int(red.q.minX)), the tabs end \(Int((red.rail ?? rail).maxX))")
         log = lines
         flush("u21_d_lbracket_take_out_lines.txt")
     }

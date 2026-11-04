@@ -255,16 +255,19 @@ final class FlexibleR7SettingsHostedTests: XCTestCase {
     // MARK: - the verify of R7-S (2026-10-14): the name field, the rail's tab, Reset all's page
 
     /// The rail tab's title as DRAWN (what it says, its frame) for group `id`.
+    /// ★ RE-PINNED (B9 look, 11-04): the rail is DSFolderTabs — the title's frame is "<tab id>-title", its words the rail's
+    /// "railTitle:<tab>:<words>" (what it last drew).
     func railTitle(_ h: Host, _ id: Int) -> (text: String, frame: CGRect)? {
-        let p = "railTitle:\(FlexibleSettingsRailView.tabID(.group(id))):"
-        guard let k = h.frames.all.keys.first(where: { $0.hasPrefix(p) }), let f = h.frames.all[k] else { return nil }
+        let tab = FlexibleSettingsRailView.tabID(.group(id))
+        let p = "railTitle:\(tab):"
+        guard let k = h.frames.all.keys.first(where: { $0.hasPrefix(p) }), let f = h.frames.all[tab + "-title"] else { return nil }
         return (String(k.dropFirst(p.count)), f)
     }
 
     /// How tall `name` is, whole, at the rail tab's width (the lines it needs).
     func railNeeds(_ name: String) -> CGFloat {
-        NSHostingView(rootView: Text(name).font(FlexibleSettingsRailView.titleFont)
-            .frame(width: FlexibleSettingsRailView.width - 4).fixedSize(horizontal: false, vertical: true)).fittingSize.height
+        NSHostingView(rootView: Text(name).font(FlexibleSettingsRailView.titleFont).multilineTextAlignment(.center)
+            .frame(width: FlexibleSettingsRailView.titleWidth).fixedSize(horizontal: false, vertical: true)).fittingSize.height
     }
 
     /// A tap on group `g`'s name, then `text` typed into its field (all he typed replaced). The field's text view.

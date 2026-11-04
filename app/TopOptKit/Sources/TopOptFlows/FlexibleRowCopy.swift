@@ -91,9 +91,18 @@ public enum FlexibleRowCopy {
         unit == .kg ? kgText(kg) : unit.text(kg: kg)
     }
     public static let facesTitle = "Faces"
+    /// ★ B9 LOOK: the selected face's [Pressed │ Rests] row (the mockup's #flex-squish).
+    public static let roleRow = "Role"
 
     /// ★ ROUND 4 (D1): the Stamp shape's rows (the face's ONE stamp).
     public static func stamp(name: String) -> String { fit("Stamp · \(name)", 34) }
+    /// ★ B9 LOOK (§4.4's setting row, the mockup's "Filament  [varioShore TPU ⌄]"): the label, then the value in its box; a
+    /// filament with no squish data says so on its own line under the row (beside the box it did not fit: 386–400 of 350 pt).
+    public static func filamentLabel(name: String?, hasData: Bool) -> String { "Filament" }
+    public static let filamentNoData = "No squish data for it yet"
+    public static func filamentBox(name: String?) -> String { name.map { fit(shortName($0), 22) } ?? "Pick one" }
+    public static let stampLabel = "Stamp"
+    public static func stampBox(name: String?) -> String { name.map { fit($0, 18) } ?? "Pick one" }
     public static func stampTurn(_ deg: Double) -> String { "Turned \(Int(deg.rounded()))°" }
     public static let stampPress = "Press"
     public static let stampPressOptions: [(id: String, label: String)] = [("soft", "Soft"), ("rigid", "Rigid")]
