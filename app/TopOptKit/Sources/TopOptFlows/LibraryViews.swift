@@ -601,15 +601,10 @@ struct LibraryFolderCard: View {
 }
 
 extension LibraryModel {
-    /// A part's picture: its Print-this result, else the shown result of its newest version with results.
-    /// ★ B1 (note 10): the result he PICKED (Print this); with none picked, the original model, never a blank.
+    /// A part's picture. ★ B1 (note 10) + his "chosen" answer: the part's CHOSEN result (Pick this; Print this is its own
+    /// mark); with none chosen, the original model, never a blank.
     func partPicture(_ part: LibraryPart) -> CGImage? {
-        let done = part.versions.filter { !isDraft($0) }.sorted { $0.number > $1.number }
-        if let v = done.first(where: { $0.marks.contains(where: \.printThis) }),
-           let r = v.marks.first(where: \.printThis)?.result,
-           let picked = thumbnails[CompareItem(folder: v.folderID, result: r)] {
-            return picked
-        }
+        if let c = chosen(of: part), let picked = thumbnails[CompareItem(folder: c.folder, result: c.result)] { return picked }
         return originalPicture(part)
     }
 }
@@ -715,9 +710,9 @@ struct ProjectFolderView: View {
     }
 }
 
-/// A part card, §4.7's DSPartCard (mockup #lib-project): its picture (B1, note 10: the picked result, else the original model),
-/// its name, "PA12 · not optimized yet", its version strip ("v8 draft" in cyan, a Print this mark); a running version's chip
-/// over the same picture. (The ring and "v7b" tag of note 11 wait on the reviewer's ruling on which result is chosen.)
+/// A part card, §4.7's DSPartCard (mockup #lib-project): its picture (B1, note 10: the chosen result, else the original model),
+/// its name, "PA12 · not optimized yet" or "PA12 · picked v7b", its version strip (the chosen version in the accent, a Print
+/// this mark); a running version's chip over the same picture. ★ Note 11: a chosen result rings the card with its "v7b" tag.
 struct LibraryPartCard: View {
     @ObservedObject var model: AppModel
     @ObservedObject var library: LibraryModel
@@ -725,7 +720,20 @@ struct LibraryPartCard: View {
     let open: () -> Void
 
     /// The card's line: the material (a Flexible part names its filament, #362 H46), and "not optimized yet" until a run lands.
-    static func line(material: String, optimized: Bool) -> String { optimized ? material : material + " · not optimized yet" }
+    /// ★ A chosen result names itself instead (mockup #lib-project: "PA12 · picked v7b").
+    static func line(material: String, optimized: Bool, chosen: String? = nil) -> String {
+        if let chosen { return material + " · picked " + chosen }
+        return optimized ? material : material + " · not optimized yet"
+    }
+
+    /// The version strip; ★ the chosen result's version in the accent.
+    static func chips(_ part: LibraryPart, library: LibraryModel) -> [DSVersionChip] {
+        let chosen = library.chosen(of: part)?.folder
+        return part.versions.suffix(8).map { v in
+            DSVersionChip(id: v.folderID.uuidString, title: library.isDraft(v) ? "v\(v.number) draft" : "v\(v.number)",
+                          on: v.folderID == chosen, draft: library.isDraft(v), printed: v.marks.contains(where: \.printThis))
+        }
+    }
 
     var body: some View {
         let newest = part.versions.max { $0.number < $1.number }
@@ -733,13 +741,12 @@ struct LibraryPartCard: View {
         let running = part.versions.first { model.runningIDs.contains($0.folderID) }
         // #362 H46's behaviour, carried over: a Flexible part names its filament
         let material = recent.flatMap { FlexibleHomeCard.meta($0) } ?? (recent?.materialName ?? "")
+        let tag = library.chosenTag(part)   // ★ note 11: the chosen result rings the card, with its "v7b" tag
         DSPartCard(key: "libraryPart-\(part.name)", name: part.name,
-                   line: Self.line(material: material, optimized: part.versions.contains { !library.isDraft($0) }),
+                   line: Self.line(material: material, optimized: part.versions.contains { !library.isDraft($0) }, chosen: tag),
+                   chosenTag: tag,
                    running: running.map { "v\($0.number)" },
-                   versions: part.versions.suffix(8).map { v in
-                       DSVersionChip(id: v.folderID.uuidString, title: library.isDraft(v) ? "v\(v.number) draft" : "v\(v.number)",
-                                     draft: library.isDraft(v), printed: v.marks.contains(where: \.printThis))
-                   },
+                   versions: Self.chips(part, library: library),
                    open: open) {
             if let image = library.partPicture(part) {
                 Image(decorative: image, scale: 1).resizable().aspectRatio(contentMode: .fit).padding(12)
@@ -981,7 +988,7 @@ struct LibraryVersionRow: View {
         let v = version
         let k = "library-result-v\(v.number)\(ResultMark.letter(r))"
         let mark = v.mark(for: r)
-        let picked = v.pickedResult == r
+        let picked = library.chosenResult(folder: v.folderID) == r   // ★ the part's ONE chosen result
         let s = v.summary?[safe: r]
         let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
         return Button { quickLook(r) } label: {

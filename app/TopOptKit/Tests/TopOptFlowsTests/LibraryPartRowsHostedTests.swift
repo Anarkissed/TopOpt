@@ -108,13 +108,16 @@ final class LibraryPartRowsHostedTests: XCTestCase {
         let (h, app, f) = try host(AppBuildHost.landscape13)
         let tile = try h.pickFromMenu("library-result-v1c-menu", "Pick this", what: "v1c's ⋯")
         XCTAssertEqual(tile, ["Pick this", "Print this", "Reject", "Export…"], "★ a result's own ⋯")
-        XCTAssertEqual(app.library.version(try XCTUnwrap(f["1"]))?.pickedResult, 2, "★ Pick this on v1c picks c")
+        let part = try XCTUnwrap(app.library.index.part(containing: try XCTUnwrap(f["1"])))
+        XCTAssertEqual(app.library.chosen(of: part), LibraryChosen(folder: try XCTUnwrap(f["1"]), result: 2),
+                       "★ Pick this on v1c makes v1c the part's chosen result")
         h.pump(1)
         _ = try h.onScreen("library-result-v1c-picked", "v1c now wears Picked")
-        let version = try h.pickFromMenu("library-version-v2-menu", "Quick look", what: "v2's ⋯")
-        XCTAssertEqual(version, ["Quick look", "Compare its results", "Export…", "Open v2", "New draft from v2", "Rename…", "Delete v2…"],
+        XCTAssertNil(h.frames.all["library-result-v2b-picked"], "★ one chosen per part: v2b is no longer picked")
+        let version = try h.pickFromMenu("library-version-v1-menu", "Quick look", what: "v1's ⋯")
+        XCTAssertEqual(version, ["Quick look", "Compare its results", "Export…", "Open v1", "New draft from v1", "Rename…", "Delete v1…"],
                        "★ app-map's version ⋯")
-        _ = try h.onScreen("libraryQuickLook-v2b", "Quick look from the version's ⋯ shows its picked result")
+        _ = try h.onScreen("libraryQuickLook-v1c", "Quick look from the version's ⋯ shows its chosen result")
     }
 }
 #endif
