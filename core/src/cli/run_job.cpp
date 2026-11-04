@@ -24,6 +24,7 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -579,67 +580,130 @@ std::string export_variant_alpha(const MinimizePlasticVariant& variant,
 // once the file is read (his squish rig: 4 such edges where a Protect cylinder's end
 // met the voxel surface). And where Protect boxes meet the voxel surface the boolean
 // leaves loose slivers of voxel bump in the air above the face (68 on that rig, 0.00
-// to 0.25 mm3, beside a 99,842 mm3 part). The result is welded as written
-// (weld_as_written) and every shell under one solve voxel (`min_piece_mm3`) goes,
-// never one of the export's own bodies; a result still not clean is tried again with
-// the voxel surface nudged another way, and said if none is.
+// to 0.25 mm3, beside a 99,842 mm3 part). Every shell under one solve voxel
+// (`min_piece_mm3`) goes, in the boolean's own indices first and then welded as
+// written (clean_cut_as_written), never one of the export's own bodies; a result
+// still not clean is tried again with the voxel surface nudged another way, and said
+// if none is.
+#ifdef TOPOPT_HAVE_MANIFOLD
+manifold::Manifold mesh_manifold(const TriangleMesh& m) {
+  manifold::MeshGL g;
+  g.numProp = 3;
+  g.vertProperties.reserve(3 * m.vertices.size());
+  for (const Vec3& v : m.vertices) {
+    g.vertProperties.push_back(static_cast<float>(v.x));
+    g.vertProperties.push_back(static_cast<float>(v.y));
+    g.vertProperties.push_back(static_cast<float>(v.z));
+  }
+  for (const auto& t : m.triangles)
+    for (int k = 0; k < 3; ++k) g.triVerts.push_back(static_cast<uint32_t>(t[k]));
+  return manifold::Manifold(g);
+}
+
+TriangleMesh manifold_mesh(const manifold::MeshGL& g) {
+  TriangleMesh out;
+  out.vertices.reserve(g.NumVert());
+  for (std::size_t v = 0; v < g.NumVert(); ++v)
+    out.vertices.push_back({g.vertProperties[v * g.numProp], g.vertProperties[v * g.numProp + 1],
+                            g.vertProperties[v * g.numProp + 2]});
+  for (std::size_t t = 0; t < g.NumTri(); ++t)
+    out.triangles.push_back({static_cast<int>(g.triVerts[3 * t]),
+                             static_cast<int>(g.triVerts[3 * t + 1]),
+                             static_cast<int>(g.triVerts[3 * t + 2])});
+  return out;
+}
+
+// A keep region as a solid, grown by `grow` mm. Its round side is a 128-gon; `cover`
+// CIRCUMSCRIBES it (the polygon's edges touch the circle from outside, so the solid
+// holds all of the true region), as a cutter must.
+manifold::Manifold keep_region_solid(const KeepRegion& k, double grow, bool cover = false) {
+  constexpr int kSeg = 128;
+  const double rs = cover ? 1.0 / std::cos(3.14159265358979323846 / kSeg) : 1.0;
+  if (k.oriented) {  // centred primitive, then the region's own (right-handed) frame
+    const manifold::Manifold prim =
+        k.cylinder ? manifold::Manifold::Cylinder(2.0 * (k.half.z + grow), rs * (k.half.x + grow),
+                                                  -1.0, kSeg, true)
+                   : manifold::Manifold::Cube({2.0 * (k.half.x + grow),
+                                               2.0 * (k.half.y + grow),
+                                               2.0 * (k.half.z + grow)},
+                                              true);
+    auto col = [](const Vec3& v) { return manifold::vec3{v.x, v.y, v.z}; };
+    return prim.Transform(manifold::mat3x4(col(k.axes[0]), col(k.axes[1]), col(k.axes[2]),
+                                           col(k.center)));
+  }
+  const manifold::vec3 lo{k.min.x - grow, k.min.y - grow, k.min.z - grow};
+  const manifold::vec3 ext{k.max.x - k.min.x + 2 * grow, k.max.y - k.min.y + 2 * grow,
+                           k.max.z - k.min.z + 2 * grow};
+  manifold::Manifold prim;
+  if (!k.cylinder) {
+    prim = manifold::Manifold::Cube(ext).Translate(lo);
+  } else {
+    const double len = k.axis == 0 ? ext.x : k.axis == 1 ? ext.y : ext.z;
+    const double r = rs * 0.5 * (k.axis == 0 ? ext.y : ext.x);
+    prim = manifold::Manifold::Cylinder(len, r, r, kSeg);  // along +Z from 0
+    if (k.axis == 0) prim = prim.Rotate(0.0, 90.0, 0.0);   // +Z -> +X
+    if (k.axis == 1) prim = prim.Rotate(-90.0, 0.0, 0.0);  // +Z -> +Y
+    const manifold::vec3 c{lo.x + 0.5 * ext.x, lo.y + 0.5 * ext.y, lo.z + 0.5 * ext.z};
+    prim = prim.Translate({k.axis == 0 ? lo.x : c.x, k.axis == 1 ? lo.y : c.y,
+                           k.axis == 2 ? lo.z : c.z});
+  }
+  return prim;
+}
+
+// A Keep clear primitive as a solid (clearance.hpp's region, grown by `grow` mm), in its
+// own right-handed frame: the bolt's swept cylinder about its axis (circumscribed, as
+// above), the face's slab on its plane. A voxel-set or outlined region (an include's,
+// never a Keep clear's) has no primitive: empty.
+manifold::Manifold clearance_solid(const ClearanceGeometry& g, double grow) {
+  if (!g.valid || g.mask != nullptr || !g.outline_uv.empty()) return manifold::Manifold();
+  auto col = [](const Vec3& v) { return manifold::vec3{v.x, v.y, v.z}; };
+  auto add = [](const Vec3& a, const Vec3& b) { return Vec3{a.x + b.x, a.y + b.y, a.z + b.z}; };
+  auto mul = [](const Vec3& a, double k) { return Vec3{a.x * k, a.y * k, a.z * k}; };
+  auto dot = [](const Vec3& a, const Vec3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; };
+  auto cross = [](const Vec3& a, const Vec3& b) {
+    return Vec3{a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+  };
+  auto normalize = [&](const Vec3& a) { return mul(a, 1.0 / std::sqrt(dot(a, a))); };
+  if (g.kind == ClearanceKind::Bolt) {
+    constexpr int kSeg = 128;
+    const Vec3 a = normalize(g.axis_dir);
+    const Vec3 e1 = normalize(cross(a, std::fabs(a.x) < 0.9 ? Vec3{1.0, 0.0, 0.0} : Vec3{0.0, 1.0, 0.0}));
+    const Vec3 e2 = cross(a, e1);  // e1 x e2 = a
+    const manifold::Manifold prim = manifold::Manifold::Cylinder(
+        g.t_hi - g.t_lo + 2.0 * grow,
+        (g.radius + grow) / std::cos(3.14159265358979323846 / kSeg), -1.0, kSeg);
+    return prim.Transform(manifold::mat3x4(col(e1), col(e2), col(a),
+                                           col(add(g.axis_point, mul(a, g.t_lo - grow)))));
+  }
+  Vec3 u = g.u, w = g.w;
+  double u_lo = g.u_lo, u_hi = g.u_hi, w_lo = g.w_lo, w_hi = g.w_hi;
+  if (dot(cross(u, w), g.normal) < 0.0) {  // the frame (u, w, normal) right-handed
+    std::swap(u, w);
+    std::swap(u_lo, w_lo);
+    std::swap(u_hi, w_hi);
+  }
+  const manifold::Manifold prim = manifold::Manifold::Cube(
+      {u_hi - u_lo + 2.0 * grow, w_hi - w_lo + 2.0 * grow, g.depth + 2.0 * grow});
+  const Vec3 o = add(add(add(g.origin, mul(u, u_lo - grow)), mul(w, w_lo - grow)),
+                     mul(g.normal, -grow));
+  return prim.Transform(manifold::mat3x4(col(u), col(w), col(g.normal), col(o)));
+}
+#endif
+
 TriangleMesh keep_regions_exact(const TriangleMesh& exported, const TriangleMesh& part,
                                 const std::vector<KeepRegion>& keeps,
                                 double min_piece_mm3 = 0.0) {
   if (keeps.empty()) return exported;
 #ifdef TOPOPT_HAVE_MANIFOLD
-  auto to_manifold = [](const TriangleMesh& m) {
-    manifold::MeshGL g;
-    g.numProp = 3;
-    g.vertProperties.reserve(3 * m.vertices.size());
-    for (const Vec3& v : m.vertices) {
-      g.vertProperties.push_back(static_cast<float>(v.x));
-      g.vertProperties.push_back(static_cast<float>(v.y));
-      g.vertProperties.push_back(static_cast<float>(v.z));
-    }
-    for (const auto& t : m.triangles)
-      for (int k = 0; k < 3; ++k) g.triVerts.push_back(static_cast<uint32_t>(t[k]));
-    return manifold::Manifold(g);
-  };
+  const auto to_manifold = mesh_manifold;
   // The part side is taken with each region GROWN by kFuse, so the two pieces
   // overlap by that much and fuse across a volume: cut exactly at K, they touched
   // along lines on K's boundary (his plate: 22 four-way edges at r = 7.0).
   constexpr double kFuse = 0.05;  // mm, below any print resolution
-  auto region = [](const KeepRegion& k, double grow) {
-    if (k.oriented) {  // centred primitive, then the region's own (right-handed) frame
-      const manifold::Manifold prim =
-          k.cylinder ? manifold::Manifold::Cylinder(2.0 * (k.half.z + grow), k.half.x + grow,
-                                                    -1.0, 128, true)
-                     : manifold::Manifold::Cube({2.0 * (k.half.x + grow),
-                                                 2.0 * (k.half.y + grow),
-                                                 2.0 * (k.half.z + grow)},
-                                                true);
-      auto col = [](const Vec3& v) { return manifold::vec3{v.x, v.y, v.z}; };
-      return prim.Transform(manifold::mat3x4(col(k.axes[0]), col(k.axes[1]), col(k.axes[2]),
-                                             col(k.center)));
-    }
-    const manifold::vec3 lo{k.min.x - grow, k.min.y - grow, k.min.z - grow};
-    const manifold::vec3 ext{k.max.x - k.min.x + 2 * grow, k.max.y - k.min.y + 2 * grow,
-                             k.max.z - k.min.z + 2 * grow};
-    manifold::Manifold prim;
-    if (!k.cylinder) {
-      prim = manifold::Manifold::Cube(ext).Translate(lo);
-    } else {
-      const double len = k.axis == 0 ? ext.x : k.axis == 1 ? ext.y : ext.z;
-      const double r = 0.5 * (k.axis == 0 ? ext.y : ext.x);
-      prim = manifold::Manifold::Cylinder(len, r, r, 128);  // along +Z from 0
-      if (k.axis == 0) prim = prim.Rotate(0.0, 90.0, 0.0);   // +Z -> +X
-      if (k.axis == 1) prim = prim.Rotate(-90.0, 0.0, 0.0);  // +Z -> +Y
-      const manifold::vec3 c{lo.x + 0.5 * ext.x, lo.y + 0.5 * ext.y, lo.z + 0.5 * ext.z};
-      prim = prim.Translate({k.axis == 0 ? lo.x : c.x, k.axis == 1 ? lo.y : c.y,
-                             k.axis == 2 ? lo.z : c.z});
-    }
-    return prim;
-  };
   manifold::Manifold K, K_part;
   for (const KeepRegion& k : keeps) {
-    K = K + region(k, 0.0);
-    K_part = K_part + region(k, kFuse);
+    K = K + keep_region_solid(k, 0.0);
+    K_part = K_part + keep_region_solid(k, kFuse);
   }
   // The voxel surface is NUDGED 1 um along a slanted direction first. A part face on
   // a voxel plane (his flat bottom at z = 0) is otherwise exactly where the voxel
@@ -675,17 +739,8 @@ TriangleMesh keep_regions_exact(const TriangleMesh& exported, const TriangleMesh
         n == 0 ? E
                : E0.Translate({kNudge * kNudges[n][0], kNudge * kNudges[n][1],
                                kNudge * kNudges[n][2]});
-    const manifold::MeshGL g = ((En - K) + PK).GetMeshGL();
-    out = TriangleMesh{};
-    out.vertices.reserve(g.NumVert());
-    for (std::size_t v = 0; v < g.NumVert(); ++v)
-      out.vertices.push_back({g.vertProperties[v * g.numProp], g.vertProperties[v * g.numProp + 1],
-                              g.vertProperties[v * g.numProp + 2]});
-    for (std::size_t t = 0; t < g.NumTri(); ++t)
-      out.triangles.push_back({static_cast<int>(g.triVerts[3 * t]),
-                               static_cast<int>(g.triVerts[3 * t + 1]),
-                               static_cast<int>(g.triVerts[3 * t + 2])});
-    out = drop_fragment_shells(weld_as_written(out), min_piece_mm3, bodies, &dropped);
+    out = manifold_mesh(((En - K) + PK).GetMeshGL());
+    out = clean_cut_as_written(out, min_piece_mm3, bodies, &dropped);
     const WrittenAudit w = audit_as_written(out);
     if (w.non_manifold_edges == 0 && w.non_manifold_vertices == 0 && w.boundary_edges == 0) break;
     if (n == 2)
@@ -708,6 +763,135 @@ TriangleMesh keep_regions_exact(const TriangleMesh& exported, const TriangleMesh
 #endif
 }
 
+// KEEP CLEAR, EXACTLY (reviewer's ruling 2026-11-03 19:55, FINDING 1): a file prints
+// NOTHING inside a Keep clear. The exports put material there on 7 of his jobs (a band
+// up to half a voxel deep where the design meets a Keep clear: 418 to 838 mm3 on
+// efe18e33 and e5909008), though no design voxel is in one. Every file is cut by
+// Manifold, as exact Protect is: file - (Keep clears - part). The Keep clears are every
+// declared primitive (a bolt's swept cylinder, a face's slab, in any orientation) and
+// every Protect region's reach, whose air the optimizer keeps clear too
+// (build_clearance_overlay). The part's own solid wins over a Keep clear, as in
+// rasterize_clearance, so the material around a bore is never cut.
+//
+// THE CUTTER NEVER LIES ON THE FILE. The file's surface is the part's own wherever the
+// CAD projection or exact Protect made it so, and a cutter whose boundary is that same
+// surface re-cuts it: cut against the part itself, efe18e33 lost 13,151 vertices of the
+// part's own surface and gained 6 edges on more than two triangles. So the part is
+// GROWN by `eps` before it is taken away (the union of the part and its 26 copies moved
+// eps along the 3 x 3 x 3 stencil: every face of it stands at least eps / sqrt(3) off the
+// part's, edges and corners included), and a Protect region, which exact Protect has
+// already cut the file at, is cut `eps` inside its own boundary. A declared Keep clear's
+// round side is CIRCUMSCRIBED (no sliver of the true region stays uncut). eps is 2 um, a
+// skin far below any print resolution and two orders above a float's rounding here.
+struct KeepClearCut {
+  bool any = false;  // a cutter to cut with
+  bool part_ok = true;
+  double eps_mm = 0.0;
+#ifdef TOPOPT_HAVE_MANIFOLD
+  manifold::Manifold cutter;
+#endif
+};
+
+// The cutter for try `n` (0, 1, 2): eps 2, 4, 8 um, a declared Keep clear grown n um.
+KeepClearCut make_keep_clear_cut(const TriangleMesh& part,
+                                 const std::vector<ClearanceGeometry>& clears,
+                                 const std::vector<KeepRegion>& keeps, int n = 0) {
+  KeepClearCut c;
+  if ((clears.empty() && keeps.empty()) || part.empty()) return c;
+#ifdef TOPOPT_HAVE_MANIFOLD
+  const manifold::Manifold P = mesh_manifold(part);
+  if (P.Status() != manifold::Manifold::Error::NoError) {
+    c.part_ok = false;
+    return c;
+  }
+  c.eps_mm = 2e-3 * static_cast<double>(1 << n);
+  const double grow = 1e-3 * n;
+  std::vector<manifold::Manifold> grown{P};
+  for (int i = -1; i <= 1; ++i)
+    for (int j = -1; j <= 1; ++j)
+      for (int k = -1; k <= 1; ++k) {
+        if (i == 0 && j == 0 && k == 0) continue;
+        const double s = c.eps_mm / std::sqrt(static_cast<double>(i * i + j * j + k * k));
+        grown.push_back(P.Translate({s * i, s * j, s * k}));
+      }
+  std::vector<manifold::Manifold> K;
+  for (const ClearanceGeometry& g : clears) K.push_back(clearance_solid(g, grow));
+  for (const KeepRegion& k : keeps) {
+    const double h = k.oriented ? std::min({k.half.x, k.half.y, k.half.z})
+                                : 0.5 * std::min({k.max.x - k.min.x, k.max.y - k.min.y,
+                                                  k.max.z - k.min.z});
+    if (h > 2.0 * c.eps_mm) K.push_back(keep_region_solid(k, -c.eps_mm));
+  }
+  c.cutter = manifold::Manifold::BatchBoolean(K, manifold::OpType::Add) -
+             manifold::Manifold::BatchBoolean(grown, manifold::OpType::Add);
+  c.any = !c.cutter.IsEmpty();
+#else
+  (void)n;
+  c.any = true;  // reported as not cut, below
+#endif
+  return c;
+}
+
+// `file` cut out of its Keep clears with `cut` (try 0, made once per run); a result not
+// clean as written is cut again with tries 1 and 2. A file that reaches into none is
+// returned as it is, byte for byte; `cut_mm3` (may be null) is the volume cut.
+// A piece the cut leaves loose goes under one voxel (`min_piece_mm3`) or, given the
+// printable minimum `thin_mm`, under that across (his efe18e33 at 1.10: 0.89 mm3, 0.72
+// mm thin, a voxel being 0.87 mm3) — never one of the file's own bodies.
+TriangleMesh keep_clear_exact(const TriangleMesh& file, const KeepClearCut& cut,
+                              const TriangleMesh& part,
+                              const std::vector<ClearanceGeometry>& clears,
+                              const std::vector<KeepRegion>& keeps, double min_piece_mm3,
+                              double* cut_mm3 = nullptr, double thin_mm = 0.0) {
+  if (cut_mm3) *cut_mm3 = 0.0;
+  if (!cut.part_ok)
+    std::fprintf(stderr, "WARNING: KEEP CLEAR: the part mesh is not a closed manifold, so the "
+                         "file is not cut out of its Keep clears.\n");
+  if (!cut.any) return file;
+#ifdef TOPOPT_HAVE_MANIFOLD
+  // Below this the two only touch.
+  constexpr double kTouchMm3 = 1e-6;
+  const manifold::Manifold E = mesh_manifold(file);
+  if (E.Status() != manifold::Manifold::Error::NoError) {
+    std::fprintf(stderr, "WARNING: KEEP CLEAR: the exported mesh is not a closed manifold "
+                         "(Manifold status %d), so it is not cut out of its Keep clears.\n",
+                 static_cast<int>(E.Status()));
+    return file;
+  }
+  const double v0 = (E ^ cut.cutter).Volume();
+  if (!(v0 > kTouchMm3)) return file;
+  const int bodies = audit_as_written(file).bodies;
+  TriangleMesh out = file;
+  for (int n = 0; n < 3; ++n) {
+    const KeepClearCut retry = n == 0 ? KeepClearCut{} : make_keep_clear_cut(part, clears, keeps, n);
+    const manifold::Manifold& C = n == 0 ? cut.cutter : retry.cutter;
+    if (cut_mm3) *cut_mm3 = n == 0 ? v0 : (E ^ C).Volume();
+    int dropped = 0;
+    out = clean_cut_as_written(manifold_mesh((E - C).GetMeshGL()), min_piece_mm3, bodies,
+                               &dropped, thin_mm);
+    const WrittenAudit w = audit_as_written(out);
+    if (w.non_manifold_edges == 0 && w.non_manifold_vertices == 0 && w.boundary_edges == 0) break;
+    if (n == 2)
+      std::fprintf(stderr,
+                   "WARNING: KEEP CLEAR: the cut file still has %d edge(s) on more than two "
+                   "triangles and %d point contact(s) after three tries.\n",
+                   w.non_manifold_edges, w.non_manifold_vertices);
+  }
+  return out;
+#else
+  (void)part;
+  (void)clears;
+  (void)keeps;
+  (void)min_piece_mm3;
+  std::fprintf(stderr, "WARNING: KEEP CLEAR: this build has no Manifold, so the file is not "
+                       "cut out of its Keep clears.\n");
+  return file;
+#endif
+}
+
+std::vector<ClearanceGeometry> lattice_keep_outs_from_job(const JobDescription& job,
+                                                         const StepModel& model);
+
 // ENGINE BATCH E1 — a run's finishing context (finish.hpp): the printable minimum
 // (2 x the outer wall line width), the export cell, the forbidden voxels (Keep clear
 // and Protect's reach), the box (growth) or the part (reduction), and the CAD.
@@ -715,6 +899,9 @@ struct RunFinish {
   FinishContext ctx;
   std::vector<char> part_solid;
   std::vector<char> part_voxels;  // the part as drawn, either run type (pins without CAD)
+  std::vector<ClearanceGeometry> keep_clears;  // the job's declared Keep clears, resolved
+  const TriangleMesh* part = nullptr;          // the part's own solid (wins over a Keep clear)
+  std::shared_ptr<const KeepClearCut> keep_clear_cut;  // made once (null: nothing to cut)
 };
 
 RunFinish make_run_finish(const JobDescription& job, const MinimizePlasticOptions& o,
@@ -754,6 +941,13 @@ RunFinish make_run_finish(const JobDescription& job, const MinimizePlasticOption
     f.part_voxels.assign(sg.voxel_count(), 0);
     for (std::size_t i = 0; i < sg.voxel_count() && i < pv.tags.size(); ++i)
       f.part_voxels[i] = pv.tags[i] != VoxelTag::Empty;
+  }
+  if (cad != nullptr && !cad->mesh.empty()) {  // every file is cut out of its Keep clears
+    f.keep_clears = lattice_keep_outs_from_job(job, *cad);
+    f.part = &cad->mesh;
+    if (!f.keep_clears.empty() || !job.keep_regions.empty())
+      f.keep_clear_cut = std::make_shared<const KeepClearCut>(
+          make_keep_clear_cut(cad->mesh, f.keep_clears, job.keep_regions));
   }
   f.ctx.slim_line_mm = 2.0 * f.ctx.min_thickness_mm;  // his ruling 2026-11-03: slim
   // A latticed job's versions carry a lattice companion built from the unfinished shape.
@@ -816,7 +1010,14 @@ TriangleMesh variant_export_model_mesh(const MinimizePlasticVariant& variant,
     FinishReport r;
     // Welded as written: the file is the shape (a float-coincident sliver goes).
     TriangleMesh m = weld_as_written(finish_shape(raw, c, &r));
-    if (fb) *fb = finish_block(r);
+    double cut = 0.0;
+    if (fin->part != nullptr && fin->keep_clear_cut != nullptr)
+      m = keep_clear_exact(m, *fin->keep_clear_cut, *fin->part, fin->keep_clears, keeps,
+                           sg.spacing * sg.spacing * sg.spacing, &cut, c.min_thickness_mm);
+    if (fb) {
+      *fb = finish_block(r);
+      fb->keep_clear_cut_mm3 = cut;
+    }
     if (unfinished) *unfinished = raw;
     return m;
   }
@@ -938,13 +1139,77 @@ long long file_keep_clear_voxels(const std::vector<char>& occ, const DesignMask*
   return n;
 }
 
+double point_triangle_d2(const Vec3& p, const Vec3& a, const Vec3& b, const Vec3& c);
+
+// The same count, each centre CONFIRMED on the file itself: the voxel test's +Z ray
+// parity misreads columns through the thin band an uncut export leaves on a bore wall
+// (his efe18e33: 14,988 voxels by the voxel test, 35 confirmed; 4 and 4 once cut), so
+// every centre it counts is checked by the generalized winding number (mesh_encloses).
+// A centre inside the part's own solid (`part`, may be null) is part material, which
+// wins over a Keep clear (rasterize_clearance's precedence), and one on the part's own
+// face is the part's surface: `in_part` and `on_face` (may be null) count those and
+// they are not in the result.
+long long file_keep_clear_exact(const TriangleMesh& m, const VoxelGrid& sg,
+                                const std::vector<char>& occ, const DesignMask* clearance,
+                                const DesignMask* exclude, const TriangleMesh* part,
+                                long long* in_part = nullptr, long long* on_face = nullptr) {
+  if (in_part) *in_part = 0;
+  if (on_face) *on_face = 0;
+  if (clearance == nullptr || clearance->size() != occ.size()) return 0;
+  const std::size_t nx = static_cast<std::size_t>(sg.nx), nxy = nx * static_cast<std::size_t>(sg.ny);
+  std::vector<Vec3> c;
+  for (std::size_t i = 0; i < occ.size(); ++i)
+    if (occ[i] && (*clearance)[i] == MaskValue::FrozenVoid &&
+        !(exclude != nullptr && (*exclude)[i] == MaskValue::FrozenSolid))
+      c.push_back(sg.voxel_center(static_cast<int>(i % nx), static_cast<int>((i % nxy) / nx),
+                                  static_cast<int>(i / nxy)));
+  // A centre within kOnFace of the part's surface AND of the file's is ON the part's own
+  // face, not material in a Keep clear: the cut holds the part's surface by 2-8 um (so
+  // it never re-cuts it), and the file is written in float (about 4 um at 100 mm). His
+  // efe18e33 kept 4 such centres after the cut, 0.02-0.4 um outside the part's bore
+  // walls, the file's surface 1.6-2 um further out.
+  constexpr double kOnFace = 0.01;  // mm
+  auto near = [](const TriangleMesh& s, const Vec3& p) {
+    for (const auto& t : s.triangles)
+      if (point_triangle_d2(p, s.vertices[t[0]], s.vertices[t[1]], s.vertices[t[2]]) <
+          kOnFace * kOnFace)
+        return true;
+    return false;
+  };
+  // One winding sum is O(triangles): the centres are split over the cores.
+  std::vector<char> enc(c.size(), 0), inp(c.size(), 0), onf(c.size(), 0);
+  const unsigned hc = std::max(1u, std::min(16u, std::thread::hardware_concurrency()));
+  std::vector<std::thread> pool;
+  for (unsigned t = 0; t < hc; ++t)
+    pool.emplace_back([&, t] {
+      for (std::size_t k = t; k < c.size(); k += hc) {
+        enc[k] = mesh_encloses(m, c[k]);
+        if (enc[k] && part != nullptr) inp[k] = mesh_encloses(*part, c[k]);
+        if (enc[k] && !inp[k] && part != nullptr) onf[k] = near(*part, c[k]) && near(m, c[k]);
+      }
+    });
+  for (std::thread& th : pool) th.join();
+  long long n = 0, p = 0, f = 0;
+  for (std::size_t k = 0; k < c.size(); ++k) {
+    n += enc[k] && !inp[k] && !onf[k];
+    p += enc[k] && inp[k];
+    f += onf[k];
+  }
+  if (in_part) *in_part = p;
+  if (on_face) *on_face = f;
+  return n;
+}
+
 FinishRecheck recheck_file(const TriangleMesh& m, const TriangleMesh& raw, const VoxelGrid& sg,
                            const DesignMask* clearance, const DesignMask* exclude,
-                           const AnalyzeJobResult& a, double margin_required, FinishBlock& fb) {
+                           const AnalyzeJobResult& a, double margin_required, FinishBlock& fb,
+                           const TriangleMesh* part) {
   const std::vector<char> occ = file_occupancy(m, sg), occ0 = file_occupancy(raw, sg);
   fb.recheck_ran = true;
   fb.margin = a.analysis.margin_effective;
-  fb.keep_clear_voxels = file_keep_clear_voxels(occ, clearance, exclude);
+  // ANY material in a Keep clear refuses (ruling 2026-11-03 19:55), each voxel confirmed
+  // on the file and outside the part's own solid.
+  fb.keep_clear_voxels = file_keep_clear_exact(m, sg, occ, clearance, exclude, part);
   // Pieces: the file's bodies (positive-volume shells; a sealed void is not one).
   fb.pieces = positive_volume_bodies(m);
   // Edge- and corner-only joints, exactly, on the file's own mesh: an edge on more than
@@ -965,6 +1230,9 @@ FinishRecheck recheck_file(const TriangleMesh& m, const TriangleMesh& raw, const
   rc.load_path_ok = an.accepted || an.non_convergent || an.contact_held_by_sliding ||
                     an.margin_effective < rc.margin_required * (1.0 - 1e-12);
   rc.keep_clear_voxels = fb.keep_clear_voxels;
+  // A Keep clear closed in on every side refuses too: nothing reaches it.
+  fb.keep_clear_sealed = file_sealed_keep_clears(m, sg, clearance);
+  rc.keep_clear_sealed = fb.keep_clear_sealed;
   rc.keep_clear_before = file_keep_clear_voxels(occ0, clearance, exclude);
   if (clearance != nullptr && clearance->size() == occ.size()) {
     const std::size_t nx = static_cast<std::size_t>(sg.nx), nxy = nx * static_cast<std::size_t>(sg.ny);
@@ -1040,7 +1308,8 @@ VersionFinish finish_and_recheck(const MinimizePlasticVariant& v, const JobDescr
     fb.mass_grams = density_g_cm3 * fb.volume_after_mm3 / 1000.0;
     fb.mass_before_grams = density_g_cm3 * fb.volume_before_mm3 / 1000.0;
     return finish_verdict_reason(
-        recheck_file(m, raw, sg, clearance, nullptr, out.analysis, margin_required, fb));
+        recheck_file(m, raw, sg, clearance, nullptr, out.analysis, margin_required, fb,
+                     fin.part));
   };
   const FallbackOutcome o = finish_with_fallback(finish, check);
   if (o.fallback) {
@@ -9335,6 +9604,14 @@ void apply_build_direction_options(MinimizePlasticOptions& options,
 
 }  // namespace
 
+TriangleMesh cut_keep_clears(const TriangleMesh& file, const JobDescription& job,
+                             const StepModel& model, double min_piece_mm3, double* cut_mm3,
+                             double thin_mm) {
+  const std::vector<ClearanceGeometry> clears = lattice_keep_outs_from_job(job, model);
+  return keep_clear_exact(file, make_keep_clear_cut(model.mesh, clears, job.keep_regions),
+                          model.mesh, clears, job.keep_regions, min_piece_mm3, cut_mm3, thin_mm);
+}
+
 // Map a job.json "loads" block onto the front-end-neutral ProductionLoadCase the
 // core builder (build_production_loadcase) consumes. This is the ONE mapping —
 // run_job's optimize path AND analyze_job's re-certification path both call it, so
@@ -13254,7 +13531,8 @@ MinimizePlasticResult strengthen_versions(
               ? &options.clearance_void
               : nullptr;
       auto file_reason = [&](const TriangleMesh& m, const AnalyzeJobResult& an, FinishBlock& b) {
-        FinishRecheck rc = recheck_file(m, raw_mesh, r.solved_grid, clearance_p, &mask, an, target, b);
+        FinishRecheck rc =
+            recheck_file(m, raw_mesh, r.solved_grid, clearance_p, &mask, an, target, b, fin.part);
         rc.margin = rc.margin_required;  // the margin is the target test below, not this one
         return finish_verdict_reason(rc);
       };
@@ -16042,6 +16320,10 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                    v.requested_volume_fraction, fb.fixed.size(), fb.left.size(),
                    fb.stair_step_removed_pct, fb.margin_before, fb.margin, fb.mass_before_grams,
                    fb.mass_grams, fb.seconds);
+      if (fb.keep_clear_cut_mm3 > 0.0 || fb.keep_clear_sealed > 0)
+        std::fprintf(stderr, "[keep clear] version vf %.2f: %.4g mm3 cut out of its Keep clears; "
+                     "%d sealed inside the part\n",
+                     v.requested_volume_fraction, fb.keep_clear_cut_mm3, fb.keep_clear_sealed);
     }
     // A version refused after finishing joins the rejected list in ladder order (a run
     // with no refusal keeps its list as it was).
@@ -16320,6 +16602,52 @@ std::vector<std::string> refinish_job(const JobDescription& job, const std::stri
       };
       const TriangleMesh raw_unwelded =
           variant_export_model_mesh(v, job.output, sg, iso, &model, job.keep_regions);
+      // The cut moves nothing away from the Keep clears: every vertex of the uncut
+      // finished file outside them (by 0.05 mm) is in the cut file, bit for bit, or in a
+      // piece the cut left loose (gone as every loose piece goes: on e5909008 a cap 0.5 mm
+      // thick that sat on the part's face only through a Keep clear 0.17 mm past it).
+      // Lost vertices: in a loose piece, then by place: on the part's own surface (CAD /
+      // Protect, must be 0), in a Protect region, in a declared Keep clear (the cut),
+      // elsewhere (must be 0).
+      long long cut_lost = 0, cut_lost_far = 0, cut_lost_part = 0, cut_lost_keep = 0, cut_lost_loose = 0;
+      {
+        RunFinish nocut = fin;
+        nocut.part = nullptr;
+        nocut.keep_clear_cut = nullptr;
+        FinishBlock fb0;
+        const TriangleMesh done0 =
+            variant_export_model_mesh(v, job.output, sg, iso, &model, job.keep_regions, &nocut, &fb0);
+        auto f3 = [](const Vec3& q) {
+          return std::array<float, 3>{static_cast<float>(q.x), static_cast<float>(q.y), static_cast<float>(q.z)};
+        };
+        std::set<std::array<float, 3>> have, whole;  // the cut file; the cut before its loose pieces go
+        for (const Vec3& q : done.vertices) have.insert(f3(q));
+#ifdef TOPOPT_HAVE_MANIFOLD
+        if (fin.keep_clear_cut != nullptr && fin.keep_clear_cut->any)  // try 0's cutter
+          for (const Vec3& q :
+               weld_as_written(manifold_mesh((mesh_manifold(done0) - fin.keep_clear_cut->cutter).GetMeshGL()))
+                   .vertices)
+            whole.insert(f3(q));
+#endif
+        for (const Vec3& q : done0.vertices) {
+          if (have.count(f3(q))) continue;
+          ++cut_lost;
+          if (whole.count(f3(q))) { ++cut_lost_loose; continue; }
+          double d2 = 1e30;
+          for (const auto& t : model.mesh.triangles)
+            d2 = std::min(d2, point_triangle_d2(q, model.mesh.vertices[t[0]], model.mesh.vertices[t[1]],
+                                                model.mesh.vertices[t[2]]));
+          if (d2 < 1e-8) { ++cut_lost_part; continue; }  // within 0.1 um of the part's surface
+          bool in_clear = false, in_keep = false;
+          for (const ClearanceGeometry& g : fin.keep_clears) in_clear = in_clear || point_in_clearance_region(g, q, 0.05);
+          for (const KeepRegion& k : job.keep_regions) in_keep = in_keep || k.contains(q);
+          cut_lost_keep += in_keep && !in_clear;
+          cut_lost_far += !in_keep && !in_clear;
+        }
+      }
+      long long kc_part = 0, kc_face = 0;  // confirmed on the file: inside the part / on its face
+      const long long kc_exact = file_keep_clear_exact(done, sg, file_occupancy(done, sg), clear_p,
+                                                       nullptr, &model.mesh, &kc_part, &kc_face);
       const long long kc_unwelded = kc(raw_unwelded);
       long long design_kc = 0;  // the design's own: printed voxels (rho > iso) kept clear
       if (clear_p != nullptr)
@@ -16348,7 +16676,14 @@ std::vector<std::string> refinish_job(const JobDescription& job, const std::stri
                       std::to_string(file_thin_joints(sg, file_occupancy(raw, sg))) + ", " +
                       std::to_string(file_thin_joints(sg, file_occupancy(done, sg))) + "], \"held\": " +
                       std::to_string(fb.keep_clear_held) + ", \"left\": " + std::to_string(fb.keep_clear_left) +
-                      ", \"kc_unwelded_raw\": " + std::to_string(kc_unwelded) + ", \"stair_step_pct\": " +
+                      ", \"kc_unwelded_raw\": " + std::to_string(kc_unwelded) +
+                      ", \"kc_exact\": [" + std::to_string(kc_exact) + ", " + std::to_string(kc_part) + ", " +
+                      std::to_string(kc_face) + "]" +
+                      ", \"kc_cut_mm3\": " + std::to_string(fb.keep_clear_cut_mm3) +
+                      ", \"kc_sealed\": " + std::to_string(file_sealed_keep_clears(done, sg, clear_p)) +
+                      ", \"cut_lost\": [" + std::to_string(cut_lost) + ", " + std::to_string(cut_lost_part) + ", " +
+                      std::to_string(cut_lost_keep) + ", " + std::to_string(cut_lost_far) + ", " +
+                      std::to_string(cut_lost_loose) + "]" + ", \"stair_step_pct\": " +
                       std::to_string(fb.stair_step_removed_pct) + ", \"slim\": " +
                       (fb.slim ? "true" : "false") + ", \"diag\": [" +
                       std::to_string(done.vertices.size()) + ", " + std::to_string(fb.pinned_vertices) +
@@ -16400,7 +16735,7 @@ std::vector<std::string> refinish_job(const JobDescription& job, const std::stri
     pinned_moved = static_cast<int>(fb.pinned_moved);
     const double req = f.analysis.margin_required > 0.0 ? f.analysis.margin_required : req0;
     const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
-    char buf[1400];
+    char buf[1500];
     std::snprintf(buf, sizeof buf,
                   "{\"vf\": %.4f, \"mass_before_g\": %.4f, \"mass_after_g\": %.4f, "
                   "\"margin_before\": %.4f, \"margin_after\": %.4f, \"margin_required\": %.4f, "
@@ -16412,7 +16747,9 @@ std::vector<std::string> refinish_job(const JobDescription& job, const std::stri
                   "\"new_under_line_measured\": %d, "
                   "\"thinnest_new_mm\": %.3f, \"pinned_moved\": %d, \"keep_clear_voxels\": %lld, "
                   "\"keep_clear_before\": %lld, \"keep_clear_added\": %lld, \"keep_clear_left\": %zu, "
-                  "\"thin_joints\": %d, \"finish_s\": %.2f, \"seconds\": %.1f}",
+                  "\"thin_joints\": %d, \"keep_clear_cut_mm3\": %.4f, \"keep_clear_sealed\": %d, "
+                  "\"finish_s\": %.2f, "
+                  "\"seconds\": %.1f}",
                   d.requested_volume_fraction,
                   material.density_g_cm3 * std::fabs(signed_volume(raw)) / 1000.0,
                   material.density_g_cm3 * std::fabs(signed_volume(done)) / 1000.0,
@@ -16425,7 +16762,8 @@ std::vector<std::string> refinish_job(const JobDescription& job, const std::stri
                   w.non_manifold_vertices, w.shells, w.bodies, new_under, new_under_measured,
                   thinnest_new,
                   pinned_moved, fb.keep_clear_voxels, fb.keep_clear_before, fb.keep_clear_added,
-                  fb.keep_clear_left, fb.thin_joints, fb.seconds, secs);
+                  fb.keep_clear_left, fb.thin_joints, fb.keep_clear_cut_mm3, fb.keep_clear_sealed,
+                  fb.seconds, secs);
     std::map<std::string, int> why;
     for (const FinishPlace& p : fb.left) ++why[p.reason];
     std::string wr;

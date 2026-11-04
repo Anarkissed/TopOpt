@@ -162,6 +162,8 @@ struct FinishRecheck {
   // Keep clear centres the finished file encloses and the unfinished one does not, each
   // confirmed by the winding number (the +Z parity misreads a column grazing a wall).
   long long keep_clear_added = 0;
+  // Keep clears closed in on every side: voids of the file (file_sealed_keep_clears).
+  int keep_clear_sealed = 0;
   int pieces = 1;
   int loose_pieces = 0;        // the file's pieces holding neither a load nor an anchor
   int loose_pieces_before = 0;  // the same count on the unfinished file
@@ -222,6 +224,14 @@ bool mesh_encloses(const TriangleMesh& mesh, const Vec3& p);
 // Load or Fixture voxel of `grid`: loose in the print.
 int file_loose_pieces(const VoxelGrid& grid, const std::vector<char>& occupancy);
 
+// The Keep clears sealed inside the part: the file's voids (negative shells) holding a
+// Keep clear centre of `clearance` (FrozenVoid), each confirmed by the winding number.
+// Whoever closed it in — the design growing over both ends of a bolt hole, the exact cut
+// emptying one the export had filled (his ad68d4c0 at 1.55 and 1.25) — nothing reaches
+// it. 0 without a mask.
+int file_sealed_keep_clears(const TriangleMesh& mesh, const VoxelGrid& grid,
+                            const DesignMask* clearance);
+
 // The mesh's bodies: its connected shells with positive signed volume (a sealed
 // internal void is a negative shell, not a piece).
 int positive_volume_bodies(const TriangleMesh& mesh);
@@ -236,6 +246,9 @@ struct WrittenAudit {
   int non_manifold_vertices = 0;  // a vertex where two shells touch at a point
   int shells = 0;
   int bodies = 0;  // shells with positive volume (a sealed void is a shell, not a body)
+  // Triangles whose three distinct float corners lie on one line: a reader drops them
+  // as zero-area (core's import does), so they are left out and their edges count open.
+  int zero_area_triangles = 0;
   std::vector<Vec3> bad_edge_midpoints;  // the first few, for the probes
 };
 WrittenAudit audit_as_written(const TriangleMesh& mesh);
@@ -247,15 +260,28 @@ WrittenAudit audit_as_written(const TriangleMesh& mesh);
 // exact-Protect boolean left them where a Protect cylinder's end met the voxel
 // surface). This merges such vertices, drops the triangles they collapse (and a
 // zero-volume fin, a triangle pair on the same three vertices), and drops unused
-// vertices. A mesh with no float-coincident vertices is returned as it is.
+// vertices. A triangle whose three distinct float corners lie on one line (a reader
+// drops it as zero-area and its edges open) has its long edge flipped away, no corner
+// moved. A mesh with neither is returned as it is.
 TriangleMesh weld_as_written(const TriangleMesh& mesh);
 
 // The fragments a boolean leaves: shells (edge-connected) under `min_volume_mm3` in
 // absolute volume — a piece smaller than one solve voxel is nothing the optimizer
-// made — except the `keep_bodies` largest positive shells, which stay whatever their
-// size. `dropped` (may be null) counts the shells removed.
+// made — and, when `thin_mm` > 0, pieces (positive shells) whose box is thinner than
+// `thin_mm` on some axis — no printer makes them — except the `keep_bodies` largest
+// positive shells, which stay whatever their size. `dropped` (may be null) counts the
+// shells removed.
 TriangleMesh drop_fragment_shells(const TriangleMesh& mesh, double min_volume_mm3,
-                                  int keep_bodies, int* dropped);
+                                  int keep_bodies, int* dropped, double thin_mm = 0.0);
+
+// A boolean's result as the file will hold it: its fragment shells in its OWN indices
+// go first (drop_fragment_shells, no thin rule) — a sliver closed on its own vertices
+// can sit on the part at the same floats, and welded it hangs there by an edge on four
+// triangles (the Keep clear cut on his efe18e33 1.25: a 1e-8 mm3 tetrahedron on an
+// edge of the part, all three tries) — then it is welded as written and the welded
+// fragments go (drop_fragment_shells with `thin_mm`). `dropped` counts both.
+TriangleMesh clean_cut_as_written(const TriangleMesh& raw, double min_volume_mm3,
+                                  int keep_bodies, int* dropped, double thin_mm = 0.0);
 
 // The local thickness (mm) at each vertex, capped at `cap_mm` (a vertex at least
 // that thick reports cap_mm). Exposed for the tests.
