@@ -1,0 +1,23 @@
+# Release 1c339f5d — 2026-11-04 T2a_B9SquishLook1_Sel (UI-Notes' app batch up to bdcc4dcb), app only, released before review (his 11-03 pick)
+# Core and worker unchanged: fingerprint 35764048bba3; "fingerprint": "35764048bba3"
+# Merged onto ecb94a5b; the merged app tree equals bdcc4dcb's, so the builder's tests apply unchanged.
+# Commits:
+#   25f19276 Topology rebuild slice 2a (§4.1): the name pill's material reads as plain words, "Pad … · ABS" (still its menu; Settings › Material is the design's place to change it)
+#   eb763342 Merge Topology slice 2a (25f19276) into B9
+#   c40d9634 §4.17 DSFolderTabs, #362's two additions (11-04 04:56Z): Tab.badge (a number in the square) and a title frame "<key>-<id>-title"
+#   577e37af Merge the DSFolderTabs additions (c40d9634) into B9: Squish's rail moves onto them
+#   8c25b765 §4.17 DSFolderTabs: a tab's name is drawn whole, as many lines as it needs (his R7-S rule; #362 11-04 04:59Z) + the red control DSFolderTabs.controlOneLineTitle
+#   2c56ba87 Merge DSFolderTabs' whole names + red control into B9
+#   d22a92ae B9 look (#362, his "Look per screen"): Squish slice 1 on the §4 parts
+#   1a5d923e U21A hosted test: today's sheet runs with Bundle.r7m1vSwap off (it failed after CHandlesHosted, on B9 alone too)
+#   46c1f985 Release 2026-11-04: merge T2a_B9SquishLook1 (d22a92ae), UI-Notes' app batch (app only; core and worker unchanged at 35764048bba3)
+#   350edef8 Merge UI-Notes' U21A test fix (1a5d923e): today's import sheet runs with the materials swizzle off (order-dependent red)
+#   bdcc4dcb B9 look: the main Flexible page's Selections panel in the §4.3 / §4.4 look
+#   1c339f5d Release 2026-11-04: merge B9 bdcc4dcb (the Selections panel in the §4 look; U21A test fix 1a5d923e); app only; core and worker unchanged at 35764048bba3
+# Gates:
+#   02:05 checks ok: T2a_B9SquishLook1_Sel, local 1c339f5d over origin ecb94a5b (12 commits); app tree == bdcc4dcb's, fingerprint 35764048bba3
+#   02:05 waiting for HEAVY.lock (TO-core Keep clear gates @ 3e3e669a: flip table + 17-test + full ctest 2026-11-04 00:28 EST)
+#   02:35 lock taken
+#   02:40 iPad device build green; lock released
+#   02:40 pushed 1c339f5d
+#   02:40 worker /health "fingerprint": "35764048bba3" (unchanged, no swap)
