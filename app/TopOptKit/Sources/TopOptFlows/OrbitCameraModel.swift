@@ -100,6 +100,11 @@ public final class OrbitCameraModel: ObservableObject {
 
     /// Replace the whole camera (used to adopt the framing a renderer computed for a
     /// fresh mesh while keeping this model the single source of truth).
+    /// ★ Results: lift the picture above a drawer (OrbitCamera.frameLift); 0 puts it back.
+    public func setFrameLift(_ f: Float) {
+        if camera.frameLift != f { camera.frameLift = f }
+    }
+
     public func adopt(_ newCamera: OrbitCamera) {
         camera = newCamera
         if followsViewProjection { camera.orthographic = ViewProjection.shared.orthographic }   // ★ B2: the app's choice holds
