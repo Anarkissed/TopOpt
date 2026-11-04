@@ -2460,6 +2460,10 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
     TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
   add_test(NAME lattice_region_grading COMMAND test_lattice_region_grading)
+  # The swept cell plan never leaves a balance-split block mixed (TO-core's finding).
+  add_executable(test_cell_plan_mixed_block tests/unit/test_cell_plan_mixed_block.cpp)
+  target_link_libraries(test_cell_plan_mixed_block PRIVATE topopt)
+  add_test(NAME cell_plan_mixed_block COMMAND test_cell_plan_mixed_block)
   # Item 50 acceptance (ruling 2026-10-26): specks are a note, not a refusal; a
   # refused version's note names the real reason.
   add_executable(test_strengthen_accept tests/unit/test_strengthen_accept.cpp)

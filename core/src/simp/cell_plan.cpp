@@ -286,7 +286,7 @@ CellSizePlan plan_cell_sizes(const VoxelGrid& grid,
   // of the certifiable regime. It can break printability (a smaller cell means a
   // thinner strut), and a cell that lands there is dropped to SOLID below — an honest
   // fallback, never a strut under the stated width.
-  {
+  auto balance = [&]() {
     bool changed = true;
     int guard = 0;
     while (changed && guard++ <= Lmax + 2) {
@@ -321,20 +321,58 @@ CellSizePlan plan_cell_sizes(const VoxelGrid& grid,
             changed = true;
           }
     }
-  }
+  };
+  balance();
 
   // ── post-balance feasibility: drop any cell a split made unprintable ────────────
   // (The ceiling cannot be violated by splitting, so only printability is re-checked.)
-  {
+  //
+  // ★ AND NO BLOCK IS LEFT MIXED (TO-core's finding, 2026-11-04; ruling 21:40Z). The
+  // drop is per BASE cell, so a balance-split block whose cells need different levels
+  // used to end partly at L-1 and partly at -1, and the alignment check below threw
+  // "not an aligned octree" (a swept lattice_part of a solid block with a bore). A block
+  // left mixed is now split one level more, its cells that fail there drop in turn,
+  // and the balance re-runs, until nothing changes. Every step only refines or drops,
+  // so it ends. A plan with no mixed block takes one pass that changes nothing more
+  // than the drop always did, and is the plan it always was.
+  auto feasibility = [&]() {
+    bool changed = false;
     for (int k = 0; k < P.nz; ++k)
       for (int j = 0; j < P.ny; ++j)
         for (int i = 0; i < P.nx; ++i) {
           const std::size_t c = P.index(i, j, k);
           const int L = P.level[c];
           if (L < 0) continue;
-          if (need[c] > L) P.level[c] = -1;  // struts would be under the stated width
+          if (need[c] > L) {  // struts would be under the stated width
+            P.level[c] = -1;
+            changed = true;
+          }
         }
-  }
+    for (int k = 0; k < P.nz; ++k)
+      for (int j = 0; j < P.ny; ++j)
+        for (int i = 0; i < P.nx; ++i) {
+          const int L = P.level[P.index(i, j, k)];
+          if (L < 1) continue;
+          const int step = ipow2(L);
+          const int obi = (i / step) * step, obj = (j / step) * step,
+                    obk = (k / step) * step;
+          bool mixed = false;
+          for (int kk = obk; kk < obk + step && !mixed; ++kk)
+            for (int jj = obj; jj < obj + step && !mixed; ++jj)
+              for (int ii = obi; ii < obi + step && !mixed; ++ii)
+                if (P.level[P.index(ii, jj, kk)] != L) mixed = true;
+          if (!mixed) continue;
+          for (int kk = obk; kk < obk + step; ++kk)
+            for (int jj = obj; jj < obj + step; ++jj)
+              for (int ii = obi; ii < obi + step; ++ii) {
+                signed char& lv = P.level[P.index(ii, jj, kk)];
+                if (lv == L) lv = static_cast<signed char>(L - 1);
+              }
+          changed = true;
+        }
+    return changed;
+  };
+  while (feasibility()) balance();
 
   // ── accounting + the per-level report (bar R5) ──────────────────────────────────
   P.levels.assign(static_cast<std::size_t>(Lmax) + 1, CellLevelReport{});
