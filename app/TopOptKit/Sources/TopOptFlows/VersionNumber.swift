@@ -72,6 +72,7 @@ extension LibraryPart {
     /// Drop a version whose folder is gone, remembering its number so it is never given again.
     public mutating func forget(_ v: LibraryVersion) {
         versions.removeAll { $0.folderID == v.folderID }
+        if chosen?.folder == v.folderID { chosen = nil }   // ★ its chosen result went with it
         if let parent = v.number.parent, let k = v.number.path.last {
             var marks = lastChild ?? [:]
             marks[parent.description] = max(marks[parent.description] ?? 0, k)

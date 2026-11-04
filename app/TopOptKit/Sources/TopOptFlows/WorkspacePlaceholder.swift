@@ -1673,7 +1673,7 @@ public struct WorkspacePlaceholder: View {
                               takeOpenOn: { defer { resultsOpenOn = nil }; return resultsOpenOn },
                               // ★ B4 (app-map §3.5, Q1): "v7 results" and Pick this — the Library's chosen result
                               version: versionLabel,
-                              pickedVariant: ResultsPick.accepted(model.library.version(project.id)?.pickedResult, in: outcome),
+                              pickedVariant: ResultsPick.accepted(model.library.chosenResult(folder: project.id), in: outcome),   // ★ the part's chosen
                               onPick: model.library.version(project.id) == nil ? nil : { v in
                                   if let r = ResultsPick.all(v, in: outcome) { model.library.pick(folder: project.id, result: r) }
                               })
