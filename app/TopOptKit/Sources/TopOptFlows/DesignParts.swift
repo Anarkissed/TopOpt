@@ -97,6 +97,8 @@ public struct DSPanel<Content: View, Footer: View>: View {
     let maxHeight: CGFloat?
     /// Folded, the pill is only as wide as its header (Results on a small iPad, his note 2026-10-27).
     var foldedPill = false
+    /// The count in words, in a colour, instead of a number (Results' Checks: "2 to look at" / "All good").
+    var countLabel: (text: String, tint: RGBA)? = nil
     /// The empty state's one line ("Tap a face to start"), shown when `isEmpty`.
     let empty: String?
     let isEmpty: Bool
@@ -223,7 +225,10 @@ public struct DSPanel<Content: View, Footer: View>: View {
                 if viewOnly {
                     Text("view only").font(.system(size: 12)).foregroundStyle(DS.Color.textTertiary.color)
                 }
-                if let count {
+                if let countLabel {
+                    Text(countLabel.text).font(.system(size: 13, weight: .medium)).foregroundStyle(countLabel.tint.color)
+                        .lineLimit(1).fixedSize()
+                } else if let count {
                     Text("\(count)").font(.system(size: 13, weight: .medium)).monospacedDigit()
                         .foregroundStyle(DS.Color.textTertiary.color)
                 }
