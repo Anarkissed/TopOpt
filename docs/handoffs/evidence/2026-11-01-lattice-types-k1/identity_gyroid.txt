@@ -1,0 +1,30 @@
+DIFFERS   test_lattice_gen
+IDENTICAL test_stepped_plan
+IDENTICAL test_lattice_boundary
+IDENTICAL test_lattice_clip_shell
+IDENTICAL test_lattice_void
+IDENTICAL test_lattice_skin_freeform
+IDENTICAL test_grading
+IDENTICAL test_lattice_refusal
+IDENTICAL test_lattice_density_field
+DIFFERS   test_lattice_certification
+IDENTICAL test_lattice_region_mask
+IDENTICAL test_analyze_fixed_design
+IDENTICAL test_lattice_hookup
+DIFFERS   test_lattice_variant
+IDENTICAL test_designbox_lattice_recert
+IDENTICAL test_loadcase_analyze
+IDENTICAL test_orient
+IDENTICAL test_lattice_depth_tie
+DIFFERS   test_lattice_void_exterior
+IDENTICAL test_bake_build_orientation
+IDENTICAL test_mesh_job
+
+test_lattice_certification DIFFERS above because it FAILED at ccf0e03b: its count of certifiable names was 7, and the two sheets (rows measured on the production wall) make 9.
+Fixed in 472b5632 (test only); that binary rebuilt in the same gate build and re-run, against the reference:
+  17c17,18
+  <   [PASS] certifiable-names accessor lists exactly the 7 cubic topologies
+  ---
+  >   [PASS] the two sheet topologies are certifiable
+  >   [PASS] certifiable-names accessor lists exactly the 9 cubic topologies
+  (stderr identical; ALL PASS, 0 failures)

@@ -309,7 +309,8 @@ inline constexpr int kOrganicFillMaxCells = 400000;
 // becomes a floor on rho:  l/D <= 5  <=>  rho >= 3pi/100 = 0.0942.
 //
 // ★ WHY IT IS NEEDED SEPARATELY FROM THE AESTHETIC BAND: the per-voxel density is
-// clamped to the LIBRARY band, whose floor is 0.05047 — below this. Measured on the
+// clamped to the LIBRARY band, whose floor is 0.0496 (0.05047 before ruling 2026-11-02
+// (c), when this was measured) — below this. Measured on the
 // maintainer's cube with an aesthetic band of [0.25, 0.45], 558 voxels still landed on
 // 0.05047, giving l/D = 6.8 and a 0.44 mm strut. Those are the specks his slicer
 // printed in layer 1 and the reason three cubes failed on the bed.

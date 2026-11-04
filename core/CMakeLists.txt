@@ -120,9 +120,14 @@ add_library(topopt
   src/mesh/surface_operator.cpp
   src/mesh/finish.cpp
   src/mesh/lattice_gen.cpp
+  src/mesh/lattice_sample.cpp
+  src/mesh/lattice_coupon.cpp
+  src/mesh/tpms_gen.cpp
   src/mesh/organic_lattice.cpp
   src/mesh/lattice_lslt.cpp
   src/mesh/lattice_union_volume.cpp
+  src/mesh/lattice_volume_check.cpp
+  src/mesh/mesh_simplify.cpp
   src/mesh/lattice_dc.cpp
   src/mesh/lattice_boundary.cpp
   src/mesh/stepped_plan.cpp
@@ -150,6 +155,8 @@ add_library(topopt
   src/fea/hex_element.cpp
   src/fea/beam_network.cpp
   src/fea/lattice.cpp
+  src/fea/strut_cell.cpp
+  src/fea/lattice_types.cpp
   src/fea/lattice_material.cpp
   src/fea/strut_strength.cpp
   src/orient/orient.cpp
@@ -394,6 +401,21 @@ add_executable(test_lattice_clip_shell tests/unit/test_lattice_clip_shell.cpp)
 target_link_libraries(test_lattice_clip_shell PRIVATE topopt)
 add_test(NAME lattice_clip_shell COMMAND test_lattice_clip_shell)
 
+# Finding 7 (ruling 2026-11-02): the cover rule and the lattice volume check.
+add_executable(test_lattice_volume_check tests/unit/test_lattice_volume_check.cpp)
+target_link_libraries(test_lattice_volume_check PRIVATE topopt)
+add_test(NAME lattice_volume_check COMMAND test_lattice_volume_check)
+
+# Finding 8 (ruling 2026-11-02): bounded simplification of a contoured field.
+add_executable(test_mesh_simplify tests/unit/test_mesh_simplify.cpp)
+target_link_libraries(test_mesh_simplify PRIVATE topopt)
+add_test(NAME mesh_simplify COMMAND test_mesh_simplify)
+
+# The sample coupon (ruling 2026-11-02, the addition).
+add_executable(test_lattice_coupon tests/unit/test_lattice_coupon.cpp)
+target_link_libraries(test_lattice_coupon PRIVATE topopt)
+add_test(NAME lattice_coupon COMMAND test_lattice_coupon)
+
 # Every mesh core SYNTHESIZES is wound outward (task 2026-08-09-fix-inward-wound-
 # normals). Covers marching_cubes, the resample, the written STL and the lattice
 # generator's own primitives, with the already-outward importers as the negative
@@ -445,6 +467,31 @@ add_test(NAME lattice_refusal COMMAND test_lattice_refusal)
 add_executable(test_strut_diameter_per_type tests/unit/test_strut_diameter_per_type.cpp)
 target_link_libraries(test_strut_diameter_per_type PRIVATE topopt)
 add_test(NAME strut_diameter_per_type COMMAND test_strut_diameter_per_type)
+
+# ★ The production strut cell IS the measured cell (lattice types round 1, go-live
+# item 1). Compiles core/tests/harness/tensor_library_nine_probe.cpp's own source (its
+# main renamed) and compares its table with lattice_strut_cell() element for element.
+# The probe uses Eigen, so it is gated like the other Eigen tests.
+# ★ The go-live bars every live strut type holds in core (lattice types round 1):
+# ownership on a holed region, determinism, one connected solid, the facts the app
+# reads, the print-tests loader against the COMMITTED maintainer file, the sample block.
+add_executable(test_lattice_types tests/unit/test_lattice_types.cpp)
+target_link_libraries(test_lattice_types PRIVATE topopt)
+target_compile_definitions(test_lattice_types PRIVATE
+  LATTICE_PRINT_TESTS_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/lattice_print_tests.json")
+add_test(NAME lattice_types COMMAND test_lattice_types)
+
+# ★ The sheet lattices (K2): the TPMS field, and generate_tpms's mesh closed, manifold,
+# deterministic, inside the part and at the solid fraction's volume.
+add_executable(test_tpms tests/unit/test_tpms.cpp)
+target_link_libraries(test_tpms PRIVATE topopt)
+add_test(NAME tpms COMMAND test_tpms)
+
+if(Eigen3_FOUND)
+  add_executable(test_strut_cell tests/unit/test_strut_cell.cpp)
+  target_link_libraries(test_strut_cell PRIVATE topopt Eigen3::Eigen)
+  add_test(NAME strut_cell COMMAND test_strut_cell)
+endif()
 
 # Harness-side lattice material model C(rho) (multiscale-lattice-feasibility
 # probe, 2026-07-31). The model itself lives in tests/harness/

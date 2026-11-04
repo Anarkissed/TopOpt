@@ -31,9 +31,12 @@
 // WHY THIS TEST RUNS THE BINARY: the decision lives in run_job.cpp's anonymous namespace,
 // so nothing with external linkage can reach it, and what is under test is what a RUN
 // emits and what its receipt says.
+#include "topopt/lattice.hpp"
+
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
+#include <cstring>
 #include <string>
 
 static int g_checks = 0, g_failures = 0;
@@ -73,9 +76,8 @@ static const char* cli_exe() {
   return (over != nullptr && *over != '\0') ? over : TOPOPT_CLI_EXE;
 }
 
-static Run run_job(const std::string& name) {
+static Run run_job_file(const std::string& job, const std::string& name) {
   Run r;
-  const std::string job = std::string(ORGANIC_FIXTURE_DIR) + "/" + name + ".json";
   r.dir = std::string(CLI_TMP_DIR) + "/k3_" + name;
   const std::string so = r.dir + ".stdout", se = r.dir + ".stderr";
   std::system(("rm -rf \"" + r.dir + "\" && mkdir -p \"" + r.dir + "\"").c_str());
@@ -100,6 +102,10 @@ static Run run_job(const std::string& name) {
   }
   r.run_info = read_file(r.dir + "/run_info.json");
   return r;
+}
+
+static Run run_job(const std::string& name) {
+  return run_job_file(std::string(ORGANIC_FIXTURE_DIR) + "/" + name + ".json", name);
 }
 
 static bool has(const std::string& h, const char* n) {
@@ -359,7 +365,38 @@ int main() {
   // Found by reading his run_info.json, not by reading the code. A receipt wired into one
   // of two writers is a receipt that is missing exactly where it is needed, so the arm
   // that proves it has to be the algorithm the fixtures did not cover.
-  const Run dbl = run_job("plan_doubled_receipt");
+  // ★ RULING 2026-11-02 (c): the fixture's 16 three-millimetre cells carry rho 0.18, which
+  // on octet's legs-only law built a strut over the 0.45 mm bead and on the full cell's
+  // builds 0.386 mm, so core (rightly) refuses the plan by D5. The fixture is maintainer
+  // data and is not edited here (the change is proposed in the handoff): the arm runs a
+  // copy whose cells carry the lightest density that prints a 3 mm cell, read from core.
+  // Nothing below reads the density; the arm proves the receipts reach a doubled run.
+  std::string dbl_job;
+  {
+    const double rho3 =
+        topopt::lattice_min_density_for_strut(topopt::LatticeTopology::Octet, 3.0, 0.45) +
+        1e-3;
+    CHECK(rho3 > 0.18, "premise: on octet's full-cell law 0.18 no longer prints at 3 mm");
+    const std::string src = std::string(ORGANIC_FIXTURE_DIR) + "/plan_doubled_receipt.json";
+    const std::string dir = std::string(CLI_TMP_DIR) + "/k3_plan_doubled_receipt_job";
+    std::system(("rm -rf \"" + dir + "\" && mkdir -p \"" + dir + "\" && cp \"" +
+                 ORGANIC_FIXTURE_DIR + "/dead_parity_tab.stl\" \"" + dir + "/\"")
+                    .c_str());
+    std::string text = read_file(src);
+    char rho[32];
+    std::snprintf(rho, sizeof rho, "\"rho\": %.4f", rho3);
+    std::size_t swapped = 0;
+    for (std::size_t at = text.find("\"rho\": 0.18"); at != std::string::npos;
+         at = text.find("\"rho\": 0.18", at + 1), ++swapped)
+      text.replace(at, std::strlen("\"rho\": 0.18"), rho);
+    CHECK(swapped == 20, "every one of the plan's 20 cells carried rho 0.18");
+    dbl_job = dir + "/plan_doubled_receipt.json";
+    if (FILE* f = std::fopen(dbl_job.c_str(), "w")) {
+      std::fwrite(text.data(), 1, text.size(), f);
+      std::fclose(f);
+    }
+  }
+  const Run dbl = run_job_file(dbl_job, "plan_doubled_receipt");
   CHECK(dbl.rc == 0, "the doubled plan run must be ACCEPTED");
   CHECK(has(dbl.run_info, "\"algorithm\": \"doubled\""),
         "premise: this arm really is DOUBLED, not stepped -- without that the check "

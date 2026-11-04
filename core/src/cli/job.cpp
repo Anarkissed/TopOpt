@@ -4,6 +4,7 @@
 
 #include "topopt/lattice.hpp"
 #include "topopt/lattice_gen.hpp"  // lattice_gen_topology_names: the LIVE set
+#include "topopt/lattice_types.hpp"  // R4: the per-type cell-mode verdicts
 
 #include "topopt/cell_plan.hpp"  // cell_size_mode_from_name (the ONE mode vocabulary)
 #include "topopt/lattice_algorithm.hpp"  // the ONE algorithm vocabulary (§4)
@@ -2825,6 +2826,69 @@ JobDescription parse_job(const std::string& json_text) {
           "one of them, or state both the same.");
     job.lattice.topology = tc.id;
     job.grading.topology = tc.id;
+  }
+
+  // ── ★ WHAT THE RESOLVED TYPE NOW DECIDES (lattice types round 1) ──────────
+  // Two checks read the type, so they run once it is known. Both are no-ops for octet.
+  {
+    const LatticeTopology topo = lattice_topology_from_id(job.lattice.topology);
+    // (1) A stated region density is checked against octet's band where the region is
+    // parsed (the type is not known yet there). Octet's band contains every live
+    // type's, so that check never refuses a density this one admits; this one applies
+    // THE TYPE's band, so a density only octet has a tensor for is refused by name.
+    if (topo != LatticeTopology::Octet)
+      for (std::size_t i = 0; i < job.lattice.regions.size(); ++i) {
+        const double rho = job.lattice.regions[i].relative_density;
+        if (!(rho > 0.0)) continue;
+        const double lo = lattice_rho_min(topo), hi = lattice_rho_max(topo);
+        if (!(rho >= lo && rho <= hi))
+          schema_fail(
+              "lattice region " + std::to_string(i + 1) + " states \"relative_density\" " +
+              fmt_g(rho) + ", outside " + job.lattice.topology + "'s certifiable band [" +
+              fmt_g(lo) + ", " + fmt_g(hi) + "]. Outside it the type's homogenized "
+              "tensor has no measurement behind it, so the density cannot be certified.");
+      }
+    // (2) ORGANIC traces its own curves -- it builds no cell of any type -- and its
+    // strut law, calibration and beam certificate are octet's. A job naming another
+    // type with it is asking for a lattice organic does not make.
+    if (topo != LatticeTopology::Octet && job.grading.present &&
+        job.grading.algorithm == "organic")
+      schema_fail(
+          "grading \"algorithm\": \"organic\" traces its own strut curves and builds "
+          "no cell type, so it runs only with \"topology\": \"octet\" (this job says \"" +
+          job.lattice.topology + "\"). Use \"doubled\" or \"stepped\" to build " +
+          job.lattice.topology + ".");
+    // (2b) R8: Diagrid anchors where struts meet the surface; a sheet meets it along curves,
+    // so there is nothing to anchor. Refused whether stated or the default.
+    if (lattice_topology_is_sheet(topo) && job.lattice.present && job.lattice.skin == "diagrid")
+      schema_fail(
+          "lattice \"skin\": \"diagrid\" anchors where struts meet the surface, and " +
+          job.lattice.topology + " is a sheet with no struts (R8). State \"skin\": \"rim\" "
+          "or \"none\".");
+    // (3) R4: cells of two sizes are offered for a type only where core has PROVED its
+    // struts join across the step (lattice_types.hpp). Octet and every type that
+    // passed keep today's behaviour exactly.
+    if (job.grading.present) {
+      // Swept AND Fit both lay the dyadic ladder (cell_plan.cpp: both set max_level from
+      // it, and run_job builds a level per rung whenever max_level > 0).
+      const bool doubled_steps =
+          (job.grading.algorithm.empty() || job.grading.algorithm == "doubled") &&
+          (job.grading.cell_mode == "swept" || job.grading.cell_mode == "fit" ||
+           !job.lattice.stepped_cells.empty());
+      if (doubled_steps) {
+        const LatticeOption ok = lattice_type_doubled(topo);
+        if (!ok.allowed) schema_fail(ok.reason);
+      }
+      if (job.grading.algorithm == "stepped") {
+        const LatticeOption ok = lattice_type_stepped(topo);
+        if (!ok.allowed) schema_fail(ok.reason);
+      }
+      // ★ Finding 6: BCC and SC are Structural only.
+      if (job.grading.intent == "aesthetic") {
+        const LatticeOption ok = lattice_type_aesthetic(topo);
+        if (!ok.allowed) schema_fail(ok.reason);
+      }
+    }
   }
 
   // ── THE FLEXIBLE STAGE (task 2026-09-28-flexible-squish-maths) ── its own module

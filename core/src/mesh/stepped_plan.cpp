@@ -8,7 +8,7 @@
 #include <map>
 #include <unordered_map>
 
-#include "topopt/lattice.hpp"   // lattice_density_from_strut
+#include "topopt/lattice.hpp"   // LatticeTopology, the diameter law
 
 namespace topopt {
 
@@ -16,15 +16,8 @@ bool lattice_prints_open(LatticeTopology topo, double cell_size_mm, double bead_
   if (!(cell_size_mm > 0.0) || !std::isfinite(cell_size_mm)) return false;
   if (!(bead_mm > 0.0) || !std::isfinite(bead_mm)) return false;
   if (cell_size_mm <= bead_mm) return false;   // the bead does not fit in the cell at all
-  try {
-    return lattice_density_from_strut(topo, cell_size_mm, 0.5 * bead_mm) <=
-           kSteppedPrintsOpenMaxRho;
-  } catch (const std::exception&) {
-    // Off the measured table: resolved by side, not swallowed. A bead-wide strut in a cell
-    // far wider than the bead is a density BELOW the band -- open by any reading.
-    return cell_size_mm > lattice_min_printable_cell_mm(topo, bead_mm,
-                                                        kSteppedPrintsOpenMaxRho);
-  }
+  (void)topo;  // the rule is geometry: one bound for every type (ruling 2026-11-02 (c))
+  return bead_mm <= kSteppedPrintsOpenMaxStrutPerCell * cell_size_mm;
 }
 
 std::vector<int> stepped_admitted_divisors(LatticeTopology topo,

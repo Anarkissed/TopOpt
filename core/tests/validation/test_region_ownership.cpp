@@ -29,6 +29,9 @@
 //     real collision. Both halves are asserted, because a rule that only permitted would
 //     let the stand's 1,367 real overlapping pairs through, and a rule that only refused
 //     would refuse every mitre.
+#include "topopt/lattice.hpp"
+
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <cstdint>
@@ -65,8 +68,38 @@ static const char* cli_exe() {
   return (over != nullptr && *over != '\0') ? over : TOPOPT_CLI_EXE;
 }
 
+// ★ RULING 2026-11-02 (c): these plans send no "rho", so the grading law sizes their
+// cells, and they were built when a 3 mm octet cell at the 0.45 mm bead printed from a
+// density of 0.131 up (the legs-only law). On the full cell's law it prints from 0.235, so
+// the law keeps the seam's voxels solid (strut_unprintable_at_every_cell) and core refuses
+// the plan for having no density. The fixtures are maintainer data and are not edited (the
+// change is proposed in the handoff): every run reads a copy at a 0.32 mm bead, where the
+// 3 mm cell prints from 0.128 -- the threshold the plans were built around. Nothing below
+// reads the bead, and both orders of the corner read the same copy rule.
+static constexpr const char* kFixtureBead = "\"min_extrudable_width_mm\": 0.45";
+static constexpr const char* kCopyBead = "\"min_extrudable_width_mm\": 0.32";
+
+static std::string rebeaded_copy(const std::string& name) {
+  const std::string dir = std::string(CLI_TMP_DIR) + "/c_bead_jobs";
+  std::system(("mkdir -p \"" + dir + "\" && cp \"" + ORGANIC_FIXTURE_DIR +
+               "/dead_parity_tab.stl\" \"" + dir + "/\"")
+                  .c_str());
+  std::string text = read_file(std::string(ORGANIC_FIXTURE_DIR) + "/" + name + ".json");
+  std::size_t swapped = 0;
+  for (std::size_t at = text.find(kFixtureBead); at != std::string::npos;
+       at = text.find(kFixtureBead, at + 1), ++swapped)
+    text.replace(at, std::strlen(kFixtureBead), kCopyBead);
+  CHECK(swapped == 2, "the fixture states its 0.45 mm bead twice (grading and lattice)");
+  const std::string job = dir + "/" + name + ".json";
+  if (FILE* f = std::fopen(job.c_str(), "w")) {
+    std::fwrite(text.data(), 1, text.size(), f);
+    std::fclose(f);
+  }
+  return job;
+}
+
 static int run_job(const std::string& name, std::string& text, std::string& out_dir) {
-  const std::string job = std::string(ORGANIC_FIXTURE_DIR) + "/" + name + ".json";
+  const std::string job = rebeaded_copy(name);
   out_dir = std::string(CLI_TMP_DIR) + "/" + name;
   const std::string so = out_dir + ".stdout", se = out_dir + ".stderr";
   const std::string cmd = std::string("\"") + cli_exe() + "\" lattice-variant \"" +
@@ -100,6 +133,15 @@ static std::string the_stl(const std::string& dir) {
 }
 
 int main() {
+  {
+    const auto octet = topopt::LatticeTopology::Octet;
+    const double at_045 = topopt::lattice_min_density_for_strut(octet, 3.0, 0.45);
+    const double at_032 = topopt::lattice_min_density_for_strut(octet, 3.0, 0.32);
+    CHECK(at_045 > 0.2,
+          "premise: on octet's full-cell law a 3 mm cell at 0.45 mm prints only over 0.2");
+    CHECK(std::fabs(at_032 - 0.1312) < 0.01,
+          "premise: at 0.32 mm it prints from about the 0.131 the plans were built around");
+  }
   // ── 1. the corner, both ways round ──────────────────────────────────────────
   std::string f_text, r_text, f_dir, r_dir;
   const int f_rc = run_job("owner_corner_fwd", f_text, f_dir);

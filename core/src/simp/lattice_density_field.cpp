@@ -124,10 +124,10 @@ double percentile_sorted(const std::vector<double>& v, double p) {
 
 bool lattice_density_printable(LatticeTopology topo, double rho, double cell_mm,
                                double min_extrudable_width_mm) {
-  if (topo != LatticeTopology::Octet) {
-    // Only octet carries a measured strut-diameter table. Refusing is the same
-    // answer `lattice_min_density_for_strut` gives, and for the same reason:
-    // there is no measurement to borrow.
+  if (!lattice_type_numbers_measured(topo)) {
+    // Only a type with its OWN measured strut-diameter table can answer. Refusing
+    // is the same answer `lattice_min_density_for_strut` gives, and for the same
+    // reason: there is no measurement to borrow.
     return false;
   }
   return lattice_strut_diameter_mm(topo, rho, cell_mm) >= min_extrudable_width_mm;
@@ -169,7 +169,7 @@ std::vector<LatticeRegionValidity> lattice_region_validity(
     v.floor_certifiable = floor_cert;
     v.floor_buildable = floor_build;
     v.lightest_printable_density =
-        topo == LatticeTopology::Octet
+        lattice_type_numbers_measured(topo)
             ? lattice_min_density_for_strut(topo, cell_mm,
                                             min_extrudable_width_mm,
                                             max_relative_density)

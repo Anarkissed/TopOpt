@@ -774,6 +774,12 @@ struct RunInfo {
   // they exist because a silent pass is indistinguishable from a check that did
   // not run. `bfs_visits` and `wall_seconds` are the check's OWN cost, separate
   // from `gen_seconds` (generation) — the R5 bar.
+  // ★ Finding 7: the volume check over every lattice rung (lattice_volume_check.hpp).
+  bool lattice_volume_check_ran = false;
+  int lattice_volume_refused_variants = 0;
+  double lattice_volume_worst_gap = 0.0;
+  double lattice_volume_certified_mm3 = 0.0;  // summed over the accepted rungs
+  double lattice_volume_exported_mm3 = 0.0;
   bool lattice_void_check_ran = false;
   int lattice_void_sealed_variants = 0;
   long long lattice_void_sealed_cells = 0;

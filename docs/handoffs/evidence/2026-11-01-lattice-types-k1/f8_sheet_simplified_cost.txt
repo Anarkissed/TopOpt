@@ -1,0 +1,16 @@
+gyroid cell 8 size 40 rho 0.375 wall 0.992 h 0.3308 dev 0.020: DC 1382528 -> out 432236 tris (3458 / cell), edges not used twice 0, 110.4 s
+   interior cells 27: 102666 triangles, 3802 per cell
+   splits 150, collapses 475296, rejected dev 13485374 topo 388083, flushes 1; measured max out 0.0200 in 0.0200 mm, past max_in 0 of 12539024 samples; simplify 106.4 s
+   cut samples 3093656 max out 0.1654 in 0.1738; worst sheet excess 0.0000 at (0.000, 0.000, 0.000)
+schwarz_d cell 8 size 40 rho 0.400 wall 0.855 h 0.2851 dev 0.020: DC 2308592 -> out 696592 tris (5573 / cell), edges not used twice 0, 157.5 s
+   interior cells 27: 164847 triangles, 6105 per cell
+   splits 12337, collapses 818337, rejected dev 22167510 topo 605080, flushes 1; measured max out 0.0200 in 0.0200 mm, past max_in 0 of 17002624 samples; simplify 151.0 s
+   cut samples 3079478 max out 0.1426 in 0.1426; worst sheet excess 0.0000 at (0.000, 0.000, 0.000)
+schwarz_d cell 5 size 25 rho 0.400 wall 0.535 h 0.1782 dev 0.020: DC 2323124 -> out 450334 tris (3603 / cell), edges not used twice 0, 84.4 s
+   interior cells 27: 103364 triangles, 3828 per cell
+   splits 0, collapses 936395, rejected dev 10582503 topo 375509, flushes 1; measured max out 0.0200 in 0.0200 mm, past max_in 0 of 9372137 samples; simplify 77.6 s
+   cut samples 1694730 max out 0.0891 in 0.0891; worst sheet excess 0.0000 at (0.000, 0.000, 0.000)
+gyroid cell 4 size 20 rho 0.375 wall 0.496 h 0.1654 dev 0.020: DC 1392768 -> out 228198 tris (1826 / cell), edges not used twice 0, 47.3 s
+   interior cells 27: 52179 triangles, 1933 per cell
+   splits 0, collapses 582285, rejected dev 5220719 topo 275128, flushes 1; measured max out 0.0200 in 0.0200 mm, past max_in 0 of 5336349 samples; simplify 43.3 s
+   cut samples 1226454 max out 0.0827 in 0.0827; worst sheet excess 0.0000 at (0.000, 0.000, 0.000)

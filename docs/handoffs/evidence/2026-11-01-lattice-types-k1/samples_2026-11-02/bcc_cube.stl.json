@@ -1,0 +1,16 @@
+{
+  "topology": "bcc",
+  "directional_note": "Strongly directional: best when the load runs along the cell axes.",
+  "relative_density": 0.40169,
+  "relative_density_is_band_middle": true,
+  "band": [0.2105, 0.59288],
+  "cell_mm": 8,
+  "cells_per_side": 5,
+  "size_mm": 40,
+  "base_plate_mm": 1.5,
+  "strut_diameter_mm": 2.58055,
+  "triangles": 38832,
+  "lattice_triangles": 38820,
+  "struts": 1000,
+  "nodes": 341
+}

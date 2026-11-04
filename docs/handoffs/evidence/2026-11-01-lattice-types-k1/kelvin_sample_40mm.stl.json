@@ -1,0 +1,15 @@
+{
+  "topology": "kelvin",
+  "relative_density": 0.29948,
+  "relative_density_is_band_middle": true,
+  "band": [0.09375, 0.50521],
+  "cell_mm": 8,
+  "cells_per_side": 5,
+  "size_mm": 40,
+  "base_plate_mm": 1.5,
+  "strut_diameter_mm": 2.00314,
+  "triangles": 141612,
+  "lattice_triangles": 141600,
+  "struts": 3300,
+  "nodes": 1800
+}

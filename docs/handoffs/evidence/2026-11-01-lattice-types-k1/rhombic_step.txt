@@ -1,0 +1,5 @@
+  [writing ../docs/handoffs/evidence/2026-11-01-lattice-types-k1/rhombic_step.csv]
+STEP rhombic at rho 0.3429 (band middle), S=8 mm, production generator
+  uniform_4x4x4              prims   2924  components   1  ends   4096  dangling    0  -> PASS
+  doubled_S|S/2              prims   3306  components   2  ends   4608  dangling    0  -> FAIL
+  stepped_S|2S/3             prims   1633  components   1  ends   2240  dangling    0  -> PASS

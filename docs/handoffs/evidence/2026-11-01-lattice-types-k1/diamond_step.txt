@@ -1,0 +1,5 @@
+  [writing ../docs/handoffs/evidence/2026-11-01-lattice-types-k1/diamond_step.csv]
+STEP diamond at rho 0.3746 (band middle), S=8 mm, production generator
+  uniform_4x4x4              prims   1641  components   1  ends   2048  dangling    0  -> PASS
+  doubled_S|S/2              prims   1860  components   1  ends   2304  dangling    0  -> PASS
+  stepped_S|2S/3             prims    927  components   1  ends   1120  dangling    0  -> PASS

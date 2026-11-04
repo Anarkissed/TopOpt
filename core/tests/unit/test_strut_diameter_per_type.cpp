@@ -59,8 +59,23 @@ int main() {
       LatticeTopology::Bcc,     LatticeTopology::Fcc,
       LatticeTopology::Diamond, LatticeTopology::Kelvin,
       LatticeTopology::Rhombic, LatticeTopology::Bccz,
-      LatticeTopology::Fccz,    LatticeTopology::Reentrant};
-  CHECK(all.size() == 10, "the enum still carries ten topologies");
+      LatticeTopology::Fccz,    LatticeTopology::Reentrant,
+      LatticeTopology::Gyroid,  LatticeTopology::SchwarzD};
+  CHECK(all.size() == 12, "the enum carries twelve topologies (the two sheets since K2)");
+  // ★ The types whose OWN law is landed (lattice types round 1: each joins this list
+  // as it goes live, with its own section below). Sections 2 and 7 assert that every
+  // OTHER type still refuses.
+  auto has_own_law = [](LatticeTopology t) {
+    return t == LatticeTopology::Octet || t == LatticeTopology::Fcc ||
+           t == LatticeTopology::Kelvin ||
+           t == LatticeTopology::Rhombic ||
+           t == LatticeTopology::Diamond ||
+           t == LatticeTopology::Bcc ||
+           t == LatticeTopology::SimpleCubic ||
+           // K2: a sheet's "diameter" is its true wall thickness (lattice.cpp's sheet blocks)
+           t == LatticeTopology::Gyroid ||
+           t == LatticeTopology::SchwarzD;
+  };
 
   // ── 1. OCTET, BIT FOR BIT ───────────────────────────────────────────────────
   // Across the measured table's whole range and past both ends (the table clamps
@@ -100,7 +115,7 @@ int main() {
   // ── 2. EVERY OTHER TYPE REFUSES, AND NAMES ITSELF ───────────────────────────
   // This is the section that was RED against the permissive first implementation.
   for (LatticeTopology t : all) {
-    if (t == LatticeTopology::Octet) continue;
+    if (has_own_law(t)) continue;
     const std::string name = lattice_topology_name(t);
     bool threw = false;
     bool named = false;
@@ -124,21 +139,73 @@ int main() {
     CHECK(named, msg);
   }
 
-  // ── 3. AND A CERTIFIABLE TYPE IS STILL REFUSED HERE ─────────────────────────
-  // The two refusals are about different things and must not be conflated: FCC's
-  // tensor rows are landed, so it is CERTIFIABLE, and it still has no diameter law.
-  {
-    CHECK(lattice_topology_certifiable(LatticeTopology::Fcc),
-          "Fcc is certifiable (its tensor rows are landed)");
+  // ── 3. AND EVERY CERTIFIABLE TYPE NOW HAS ITS OWN LAW ───────────────────────
+  // The two refusals are about different things and must not be conflated. This section
+  // named FCC, Kelvin, then Simple cubic as a CERTIFIABLE type that still had no
+  // diameter law, until each one's own law landed. With Simple cubic's (the last strut
+  // type of lattice types round 1) none is left, so it holds the converse: no
+  // certifiable type is refused here.
+  for (LatticeTopology t : all) {
+    if (!lattice_topology_certifiable(t)) continue;
+    const std::string name = lattice_topology_name(t);
     bool threw = false;
     try {
-      (void)lattice_strut_diameter_mm(LatticeTopology::Fcc, 0.30, 8.0);
+      (void)lattice_strut_diameter_mm(t, 0.30, 8.0);
     } catch (const LatticeDiameterLawNotMeasured&) {
       threw = true;
     }
-    CHECK(threw,
-          "Fcc: certifiable and still has no measured diameter law — the two "
-          "refusals are independent");
+    char msg[160];
+    std::snprintf(msg, sizeof msg,
+                  "%s: certifiable, so it has its own measured diameter law",
+                  name.c_str());
+    CHECK(has_own_law(t) && !threw, msg);
+  }
+
+  // ── 3b. FCC'S OWN LAW (lattice types round 1) ───────────────────────────────
+  // FCC's table was measured on FCC's own canonical cell, on its converged solid
+  // fraction (lattice_types_probe `law`). Since ruling 2026-11-02 (c) octet's is measured
+  // the same way on the FULL octet (legs and braces), which has exactly twice FCC's strut
+  // length per cell: at one density its strut carries half the area, so its diameter is
+  // FCC's over sqrt(2), less only the node overlap. Asserted as the cross-check it is (it
+  // used to assert the two were EQUAL, which is how octet's legs-only table was found).
+  {
+    const double rows[8][2] = {{0.05, 0.3639}, {0.08, 0.4670}, {0.10, 0.5265},
+                               {0.15, 0.6580}, {0.20, 0.7739}, {0.30, 0.9807},
+                               {0.40, 1.1712}, {0.60, 1.5434}};
+    for (const auto& r : rows)
+      CHECK(lattice_strut_diameter_mm(LatticeTopology::Fcc, r[0], 4.0) == r[1],
+            "fcc: the measured table, verbatim at a 4 mm cell");
+    CHECK(lattice_strut_diameter_mm(LatticeTopology::Fcc, 0.30, 8.0) == 2 * 0.9807,
+          "fcc: diameter is linear in cell size");
+    for (const auto& r : rows)
+      CHECK(std::fabs(std::sqrt(2.0) * octet_strut_diameter_mm(r[0], 7.0) /
+                          lattice_strut_diameter_mm(LatticeTopology::Fcc, r[0], 7.0) -
+                      1.0) < 0.01,
+            "fcc: the full octet's strut is FCC's over sqrt(2) to 1 % (twice the strut "
+            "length at one density)");
+    // The other direction is the same measurement read backwards, so inside the table
+    // the round trip is exact; off it (a strut thinner than the 0.05 row) the density is
+    // integrated on the converged solid fraction, and lands below the table's first row.
+    for (double want : {0.05, 0.12, 0.30, 0.47, 0.60}) {
+      const double r = 0.5 * lattice_strut_diameter_mm(LatticeTopology::Fcc, want, 8.0);
+      CHECK(std::fabs(lattice_density_from_strut(LatticeTopology::Fcc, 8.0, r) - want) < 1e-12,
+            "fcc: (cell, radius) -> rho is the table read backwards, an exact round trip");
+    }
+    {
+      const double thin = lattice_density_from_strut(LatticeTopology::Fcc, 8.0, 0.30);
+      CHECK(thin > 0.0 && thin < 0.05, "fcc: off the table, the solid fraction answers");
+    }
+    CHECK(lattice_type_numbers_measured(LatticeTopology::Fcc),
+          "fcc: its numbers are measured");
+    CHECK(lattice_type_numbers_measured(LatticeTopology::SimpleCubic),
+          "sc: its numbers are measured (the last strut type of round 1)");
+    CHECK(!lattice_type_numbers_measured(LatticeTopology::Bccz),
+          "bccz: its numbers are not measured (not in round 1)");
+    CHECK(lattice_cells_per_member_min(LatticeTopology::Fcc) == 5.0 &&
+              lattice_percolation_cells_per_member_min(LatticeTopology::Fcc) == 0.75 &&
+              aesthetic_cells_per_member_hard_floor(LatticeTopology::Fcc, true) == 2.0,
+          "fcc: its own floors (5 bending, 0.75 percolation, 2 aesthetic, no finish "
+          "relaxation)");
   }
 
   // ── 4. THE TWO CONSUMERS THAT TOOK A TOPOLOGY AND IGNORED IT ────────────────
@@ -156,23 +223,27 @@ int main() {
             lattice_min_density_for_strut(LatticeTopology::Octet, c, w);
         CHECK(std::isfinite(m), "octet: the minimum density still answers");
       }
-      // A type with no diameter law refuses, rather than being handed octet's.
-      bool threw_floor = false;
-      try {
-        (void)lattice_cell_printability_floor_mm(LatticeTopology::Kelvin, w);
-      } catch (const LatticeDiameterLawNotMeasured&) {
-        threw_floor = true;
+      // Every certifiable type with no diameter law of its own refuses, rather than being
+      // handed octet's (a loop, so a type leaves it by going live, not by an edit here).
+      for (LatticeTopology t : all) {
+        if (has_own_law(t) || !lattice_topology_certifiable(t)) continue;
+        bool threw_floor = false;
+        try {
+          (void)lattice_cell_printability_floor_mm(t, w);
+        } catch (const LatticeDiameterLawNotMeasured&) {
+          threw_floor = true;
+        }
+        CHECK(threw_floor,
+              "no law: the printability floor must refuse, not read octet's table");
+        bool threw_min = false;
+        try {
+          (void)lattice_min_density_for_strut(t, 8.0, w);
+        } catch (const LatticeDiameterLawNotMeasured&) {
+          threw_min = true;
+        }
+        CHECK(threw_min,
+              "no law: the minimum density must refuse, not read octet's table");
       }
-      CHECK(threw_floor,
-            "Kelvin: the printability floor must refuse, not read octet's table");
-      bool threw_min = false;
-      try {
-        (void)lattice_min_density_for_strut(LatticeTopology::Kelvin, 8.0, w);
-      } catch (const LatticeDiameterLawNotMeasured&) {
-        threw_min = true;
-      }
-      CHECK(threw_min,
-            "Kelvin: the minimum density must refuse, not read octet's table");
     }
   }
 
@@ -196,7 +267,7 @@ int main() {
     // An unknown id refuses and names what it was given. "Octet" with a capital O is
     // in the list on purpose: the ids are lower-case, and a near-miss must refuse
     // rather than fall back.
-    for (const char* bad : {"", "Octet", "OCTET", "oct", "octet ", "gyroid",
+    for (const char* bad : {"", "Octet", "OCTET", "oct", "octet ", "gyroids",
                             "schwarz-d", "honeycomb", "bcc-z"}) {
       bool threw = false, named = false;
       try {
@@ -231,26 +302,28 @@ int main() {
           "unprintable (as test_lattice_refusal pins)");
     CHECK(!lattice_stated_density_unprintable(LatticeTopology::Octet, 0.25, c, w),
           "stated density: octet, rho 0.25 there is printable");
-    bool quiet = true;
-    try {
-      for (double nothing : {0.0, -1.0, -1e-300})
-        if (lattice_stated_density_unprintable(LatticeTopology::Kelvin, nothing, c, w))
-          quiet = false;
-    } catch (const std::exception&) {
-      quiet = false;   // it must NOT consult the diameter law when nothing is stated
+    for (LatticeTopology t : all) {
+      if (has_own_law(t)) continue;
+      bool quiet = true;
+      try {
+        for (double nothing : {0.0, -1.0, -1e-300})
+          if (lattice_stated_density_unprintable(t, nothing, c, w)) quiet = false;
+      } catch (const std::exception&) {
+        quiet = false;   // it must NOT consult the diameter law when nothing is stated
+      }
+      CHECK(quiet,
+            "stated density: nothing stated returns false for a type with no diameter "
+            "law, without consulting it");
+      // But a STATED density on such a type does reach the law, and refuses.
+      bool threw = false;
+      try {
+        (void)lattice_stated_density_unprintable(t, 0.25, c, w);
+      } catch (const LatticeDiameterLawNotMeasured&) {
+        threw = true;
+      }
+      CHECK(threw,
+            "stated density: a STATED density on a type with no diameter law refuses");
     }
-    CHECK(quiet,
-          "stated density: nothing stated returns false for a type with no diameter "
-          "law, without consulting it");
-    // But a STATED density on such a type does reach the law, and refuses.
-    bool threw = false;
-    try {
-      (void)lattice_stated_density_unprintable(LatticeTopology::Kelvin, 0.25, c, w);
-    } catch (const LatticeDiameterLawNotMeasured&) {
-      threw = true;
-    }
-    CHECK(threw,
-          "stated density: a STATED density on a type with no diameter law refuses");
   }
 
   // ── 7. R11: THE AESTHETIC CEILING, PER TYPE ─────────────────────────────────
@@ -263,7 +336,7 @@ int main() {
               octet_aesthetic_density_ceiling(),
           "octet: the per-type ceiling IS octet_aesthetic_density_ceiling(), exactly");
     for (LatticeTopology t : all) {
-      if (t == LatticeTopology::Octet) continue;
+      if (has_own_law(t)) continue;
       const std::string name = lattice_topology_name(t);
       bool threw = false, named = false, right_type = true;
       try {
@@ -307,8 +380,23 @@ int main() {
               LatticeTypeReadiness::Live,
           "readiness: octet is live (generatable AND certifiable)");
     CHECK(lattice_type_readiness("fcc", gen_real, cert_real) ==
-              LatticeTypeReadiness::NotGeneratable,
-          "readiness: fcc is certifiable and not yet generatable");
+              LatticeTypeReadiness::Live,
+          "readiness: fcc is live (lattice types round 1)");
+    CHECK(lattice_type_readiness("kelvin", gen_real, cert_real) ==
+              LatticeTypeReadiness::Live,
+          "readiness: kelvin is live");
+    CHECK(lattice_type_readiness("rhombic", gen_real, cert_real) ==
+              LatticeTypeReadiness::Live,
+          "readiness: rhombic is live");
+    CHECK(lattice_type_readiness("diamond", gen_real, cert_real) ==
+              LatticeTypeReadiness::Live,
+          "readiness: diamond is live");
+    CHECK(lattice_type_readiness("bcc", gen_real, cert_real) ==
+              LatticeTypeReadiness::Live,
+          "readiness: bcc is live");
+    CHECK(lattice_type_readiness("sc", gen_real, cert_real) ==
+              LatticeTypeReadiness::Live,
+          "readiness: sc is live");
     for (const char* tetra : {"bccz", "fccz", "reentrant"}) {
       char msg[140];
       std::snprintf(msg, sizeof msg, "readiness: %s is in neither set", tetra);
@@ -409,7 +497,7 @@ int main() {
     std::printf("  octet density parity: %lld pairs, bit-identical\n", n);
 
     for (LatticeTopology t : all) {
-      if (t == LatticeTopology::Octet) continue;
+      if (has_own_law(t)) continue;
       const std::string name = lattice_topology_name(t);
       bool threw = false, named = false;
       try {
@@ -428,28 +516,19 @@ int main() {
     }
   }
 
-  // ── ★ PLANNED IDS ARE "NOT YET", NOT "NO SUCH THING" ───────────────────────
-  // gyroid and schwarz_d are on the go-live list and not in the enum, so the readiness
-  // answer would otherwise be UnknownId -- the answer for a TYPO. The app would then tell
-  // the user they misspelled a type core is going to ship. NotEither is the honest answer:
-  // core knows it and has not built it.
+  // ── ★ THE SHEET IDS ARE TYPES, NOT TYPOS (K2) ───────────────────────────────
+  // gyroid and schwarz_d used to be a separate "planned" list so they would not read as
+  // typos before they had enum values. At K2 they are LatticeTopology ids, so the list is
+  // gone and they read like any type: known, and live exactly when both sets hold them.
   {
     const std::vector<std::string> gen = lattice_gen_topology_names();
     const std::vector<std::string> cert = lattice_certifiable_topology_names();
-    for (const std::string& id : lattice_planned_topology_ids()) {
-      CHECK(lattice_type_readiness(id, gen, cert) ==
-                LatticeTypeReadiness::NotEither,
-            "a PLANNED id reads NotEither, not UnknownId");
-      // And it really is absent from both sets -- otherwise this says nothing.
-      bool in_either = false;
-      for (const std::vector<std::string>* s : {&gen, &cert})
-        for (const std::string& n : *s)
-          if (n == id) in_either = true;
-      CHECK(!in_either, "premise: a planned id is in neither live set");
+    for (const char* id : {"gyroid", "schwarz_d"}) {
+      CHECK(lattice_type_readiness(id, gen, cert) != LatticeTypeReadiness::UnknownId,
+            "a sheet id is a type core knows, never UnknownId");
+      CHECK(lattice_topology_name(lattice_topology_from_id(id)) == std::string(id),
+            "a sheet id round-trips through the enum");
     }
-    CHECK(lattice_planned_topology_ids().size() == 2,
-          "the planned list is gyroid and schwarz_d today; this fails when one goes live, "
-          "which is the reminder to delete it from the list at K2");
     // A genuine typo must still be UnknownId, or the distinction is lost.
     for (const char* typo : {"gyroids", "gyroid ", "schwarz-d", "schwarzd", "octett"})
       CHECK(lattice_type_readiness(typo, gen, cert) ==
@@ -469,10 +548,13 @@ int main() {
     const double light = lattice_cell_printability_floor_mm(t, w);
     const double uncapped = lattice_min_printable_cell_mm(t, w, 0.0);
     const double at_cap = lattice_min_printable_cell_mm(t, w, octet_aesthetic_density_ceiling());
-    CHECK(std::fabs(light - 4.931378498) < 5e-9,
-          "E1: the LIGHT floor w/phi(rho_min) is 4.931378498 mm");
-    CHECK(std::fabs(uncapped - 1.173173434) < 5e-9,
-          "E1: the UNCAPPED dense floor w/phi(rho_max) is 1.173173434 mm");
+    // Ruling 2026-11-02 (c): octet's law and band are the full cell's. The light floor was
+    // 4.931378498 mm on the legs-only law, a cell whose bead-wide strut held rho 0.0965 in
+    // the file, not the band floor's 0.05; the full cell's floor is about sqrt(2) coarser.
+    CHECK(std::fabs(light - 7.026627796) < 5e-9,
+          "E1: the LIGHT floor w/phi(rho_min) is 7.026627796 mm");
+    CHECK(std::fabs(uncapped - 1.116948948) < 5e-9,
+          "E1: the UNCAPPED dense floor w/phi(rho_max) is 1.116948948 mm");
     CHECK(std::fabs(at_cap - 2.25) < 5e-9,
           "E1: and at the job's cap it is 2.25 mm -- the number grade_lattice applies");
     // The three are genuinely different answers; that is the whole defect.
@@ -496,11 +578,9 @@ int main() {
     // property which makes it a floor at all, and it is what a path computing the
     // UNCAPPED number got wrong -- it reported a cell FINER than the job can print.
     //
-    // NON-STRICTLY monotone, and the reason is the measured table, not an approximation:
-    // the diameter law is CLAMPED above its last measured row (rho 0.60), so every cap
-    // from 0.60 up gives the same floor. My first draft asserted strict increase and went
-    // red at cap 0.60 against 0.80 -- the table's flat top, which is a fact worth pinning
-    // rather than an assumption worth keeping.
+    // NON-STRICTLY monotone: the diameter law is CLAMPED above its last measured row, so
+    // caps above it give the same floor. (On the legs-only table that row was rho 0.60 and
+    // a strict check went red at 0.60 against 0.80; octet's full-cell table reaches 0.90.)
     double prev = 0.0;
     for (double cap : {0.90, 0.80, 0.60, 0.55, 0.40, 0.30, 0.25, 0.20, 0.10, 0.06}) {
       const double cell = lattice_min_printable_cell_mm(t, w, cap);
@@ -514,13 +594,14 @@ int main() {
       CHECK(cell > below, "E1: and below rho 0.60 a tighter cap is strictly coarser");
       below = cell;
     }
-    // THE FLAT TOP ITSELF, pinned: a cap anywhere from the band floor's top region down to
-    // 0.60 buys nothing, because phi is clamped there. If the table ever gains a row above
-    // 0.60 this check reports it instead of the app silently getting a finer floor.
-    CHECK(lattice_min_printable_cell_mm(t, w, 0.60) ==
-              lattice_min_printable_cell_mm(t, w, 0.90),
-          "E1: caps of 0.60 and 0.90 give the SAME floor -- the diameter law is clamped "
-          "above its last measured row, so a cap up there is inert");
+    // THE FLAT TOP, GONE (ruling 2026-11-02 (c)). The legs-only table stopped at rho 0.60,
+    // so a cap from 0.60 up bought nothing (this check pinned that, "if the table ever
+    // gains a row above 0.60 this check reports it"). Octet's full-cell table has rows to
+    // 0.90: a cap up there now buys a finer printable cell, as it should.
+    CHECK(lattice_min_printable_cell_mm(t, w, 0.60) >
+              lattice_min_printable_cell_mm(t, w, 0.85),
+          "E1: a cap of 0.85 gives a FINER floor than 0.60 -- the full-cell law is measured "
+          "up there, not clamped");
 
     // A cap under the band's own floor admits no measured density: refused, named.
     bool threw = false;
@@ -536,6 +617,44 @@ int main() {
     try { (void)lattice_min_printable_cell_mm(t, 0.0, 0.2); }
     catch (const std::exception&) { threw_w = true; }
     CHECK(threw_w, "E1: a non-positive bead is refused");
+  }
+
+  // ── ★ A CELL CORE CALLS PRINTABLE PRINTS (ruling 2026-11-02 (c)) ────────────
+  // width / phi(rho) is that cell only to rounding: on octet's full-cell law 0.42 /
+  // phi(0.89988) built a 0.41999999999999993 mm strut, every strut-vs-width test read it as
+  // under the bead, and grade_lattice's audit threw on a thin wall FIT had sized. Core now
+  // nudges the cell up by ulps until the strut prints. Every type with a law, beads 0.20 to
+  // 1.00 mm, the band's two ends and a cap between: the strut prints, and the cell is still
+  // the quotient to a few ulps (a floor, not a margin). The bare quotient is the positive
+  // control: it must fall short somewhere, or this section proves nothing.
+  {
+    int bare_short = 0;
+    for (LatticeTopology t : all) {
+      if (!has_own_law(t)) continue;
+      const double lo = lattice_rho_min(t), hi = lattice_rho_max(t);
+      for (int k = 0; k <= 160; ++k) {
+        const double w = 0.20 + 0.005 * k;
+        const double light = lattice_cell_printability_floor_mm(t, w);
+        bool ok = lattice_strut_diameter_mm(t, lo, light) >= w &&
+                  light <= w / lattice_strut_diameter_mm(t, lo, 1.0) * (1.0 + 1e-14);
+        for (double cap : {0.0, 0.5 * (lo + hi)}) {
+          const double rho = cap > 0.0 ? cap : hi;
+          const double cell = lattice_min_printable_cell_mm(t, w, cap);
+          ok = ok && lattice_strut_diameter_mm(t, rho, cell) >= w &&
+               cell <= w / lattice_strut_diameter_mm(t, rho, 1.0) * (1.0 + 1e-14);
+          const double bare = w / lattice_strut_diameter_mm(t, rho, 1.0);
+          if (lattice_strut_diameter_mm(t, rho, bare) < w) ++bare_short;
+        }
+        if (!ok) {
+          std::fprintf(stderr, "  %s at a %.3f mm bead\n", lattice_topology_name(t), w);
+          CHECK(false, "the finest printable cell's strut prints, and the cell is the "
+                       "quotient to a few ulps");
+        }
+      }
+    }
+    std::printf("[rounding] the bare quotient built a strut under the bead in %d cases\n",
+                bare_short);
+    CHECK(bare_short > 0, "positive control: the bare quotient falls short somewhere");
   }
 
   if (g_failures == 0) {
