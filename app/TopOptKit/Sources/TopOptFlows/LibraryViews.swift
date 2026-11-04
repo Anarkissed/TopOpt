@@ -337,6 +337,8 @@ struct LibraryHomeView: View {
     let ungroup: () -> Void
     @State private var confirmUngroup = false
     @State private var newProjectName: String?
+    @State private var settingsOpen = false   // ★ B5 (Q12): Library ⋯ › Settings
+    @StateObject private var compute = ComputeLocationModel()
 
     private let columns = [GridItem(.adaptive(minimum: 290), spacing: DS.Space.xl3)]
 
@@ -402,6 +404,10 @@ struct LibraryHomeView: View {
             .padding(.top, 34)
             .padding(.bottom, 60)
         }
+        .sheet(isPresented: $settingsOpen) {
+            AppSettingsView(settings: AppSettings.shared, projection: ViewProjection.shared, compute: compute,
+                            storage: { settingsOpen = false; go(.storage) }, done: { settingsOpen = false })
+        }
         .confirmationDialog("Ungroup the Library?", isPresented: $confirmUngroup, titleVisibility: .visible) {
             Button("Ungroup", role: .destructive, action: ungroup)
             Button("Cancel", role: .cancel) {}
@@ -436,6 +442,9 @@ struct LibraryHomeView: View {
             }
             .buttonStyle(.plain).accessibilityIdentifier("library-storage")
             Menu {
+                // ★ B5 (app-map §3.1, Q12): ⋯ → Settings · Storage · Ungroup
+                Button { settingsOpen = true } label: { Label("Settings", systemImage: "gearshape") }
+                Button { go(.storage) } label: { Label("Storage", systemImage: "internaldrive") }
                 Button(role: .destructive) { confirmUngroup = true } label: { Label("Ungroup…", systemImage: "rectangle.stack.badge.minus") }
             } label: {
                 Image(systemName: "ellipsis").font(.system(size: 16, weight: .semibold))

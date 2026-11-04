@@ -93,7 +93,15 @@ final class PlanCutHostedTests: XCTestCase {
         XCTAssertEqual(camera.camera, mine, "★ U19: his own view comes back after ✕")
     }
 
-    func testDrawOnAPlaneFacesThePlane() throws {
+    /// The main page's view frame, as the workspace hands it each render (H6): the camera's projection and the part's settle.
+    func view(_ camera: OrbitCameraModel, _ project: ProjectModel, size: CGSize) throws -> LatticeBandChipFrame {
+        let settle = project.force.settleRotation ?? simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0))
+        let b = try XCTUnwrap(project.viewerMesh?.bounds)
+        return LatticeBandChipFrame(projection: CameraProjection(camera: camera.camera, viewportSize: size),
+                                    modelCentre: (b.min + b.max) * 0.5, modelRotation: settle)
+    }
+
+    func testDrawOnAPlaneFacesThePlaneAndKeepsThePencilStrokeOnIt() throws {
         let (h, stage, m, camera) = try page()
         try h.pickFromMenu("planCutMenu", "Draw on a plane", what: "+ Cut ⌄")
         XCTAssertEqual(stage.planCut?.step, .pick, "★ U19: drawing starts from a plane too")
@@ -101,10 +109,68 @@ final class PlanCutHostedTests: XCTestCase {
         let cut = try XCTUnwrap(stage.planCut?.cut)
         XCTAssertGreaterThan(abs(simd_dot(camera.camera.direction, worldNormal(cut, m.project))), 0.95,
                              "★ U19: to draw, the camera faces the plane")
-        XCTAssertNotNil(h.frame("planCutPencil"), "✎ Pencil")
-        XCTAssertNotNil(h.frame("planCutSpline"), "〰 Spline")
+        try h.probe("planCutPencil", "✎ Pencil")
+        try h.probe("planCutSpline", "〰 Spline")
         try h.tap("planCutOK", "✓ before a stroke")
         XCTAssertNotNil(stage.planCut, "✓ waits for a stroke")
+        // ✎ and a real drag across the drawing area
+        try h.tap("planCutPencil", "✎ Pencil")
+        XCTAssertEqual(stage.planCut?.tool, .pencil)
+        let area = try XCTUnwrap(h.frame("planCutCanvas"), "the drawing area")
+        let line = (0...20).map { i in CGPoint(x: area.minX + 40 + CGFloat(i) * (area.width - 80) / 20, y: area.midY + CGFloat(i % 3) * 6) }
+        h.drag(line)
+        XCTAssertGreaterThanOrEqual(stage.planCut?.stroke.count ?? 0, 10, "★ the drag draws the stroke")
+        stage.viewFrame = try view(camera, m.project, size: h.size)
+        try h.tap("planCutOK", "✓")
+        let kept = try XCTUnwrap(m.settings.printPlans?.plan.cuts?.first, "★ the drawing is kept")
+        XCTAssertEqual(kept.way, .curve)
+        XCTAssertEqual(kept.curveTool, "pencil")
+        let uv = try XCTUnwrap(kept.curveUV)
+        XCTAssertGreaterThanOrEqual(uv.count, 10, "the stroke on the plane")
+        let b = try XCTUnwrap(m.project.viewerMesh?.bounds)
+        let half = Double(simd_reduce_max(b.max - b.min))
+        XCTAssertTrue(uv.allSatisfy { abs($0[0]) < half && abs($0[1]) < half }, "★ every point lands on the plane, inside the part's reach")
+        XCTAssertNil(stage.planCut)
+    }
+
+    func testTheSplineTakesTappedPointsAndATapAgainRemovesOne() throws {
+        let (h, stage, _, _) = try page()
+        try h.pickFromMenu("planCutMenu", "Draw on a plane", what: "+ Cut ⌄")
+        try h.tap("planPlane-front", "Front")
+        try h.tap("planCutSpline", "〰 Spline")
+        let area = try XCTUnwrap(h.frame("planCutCanvas"))
+        let pts = [0.2, 0.5, 0.8].map { CGPoint(x: area.minX + area.width * $0, y: area.midY) }
+        for p in pts { h.click(p, settle: 0.3) }
+        XCTAssertEqual(stage.planCut?.stroke.count, 3, "★ three taps, three points")
+        h.click(pts[1], settle: 0.3)
+        XCTAssertEqual(stage.planCut?.stroke.count, 2, "★ a tap on a point removes it")
+        XCTAssertNotNil(h.frame("planCutOK"))
+    }
+
+    func testAFaceLaysThePlaneOnTheTappedFlatFace() throws {
+        let (h, stage, m, camera) = try page()
+        try h.pickFromMenu("planCutMenu", "A plane", what: "+ Cut ⌄")
+        try h.tap("planPlane-face", "A face")
+        XCTAssertEqual(stage.planCut?.step, .face, "★ the bar waits for a tap on a flat face")
+        XCTAssertNotNil(h.frame("planCutFaceLine"), "it says so")
+        let mesh = try XCTUnwrap(m.project.viewerMesh)
+        // a face with no triangles (not flat, not there): it says so and keeps waiting
+        stage.tapFace(m.project, face: 99_999, point: nil, mesh: mesh)
+        XCTAssertEqual(stage.planCut?.step, .face)
+        XCTAssertEqual(stage.planCut?.faceMiss, true, "★ not a flat face: the bar says so")
+        // the pad's top face (flat): the plane lies on it, and the view sees it edge-on
+        let top = FlexibleHisProject.topFace(mesh)
+        stage.tapFace(m.project, face: FaceID(top), point: nil, mesh: mesh)
+        SquishHost.pump(0.5)
+        let cut = try XCTUnwrap(stage.planCut?.cut)
+        XCTAssertEqual(stage.planCut?.step, .place)
+        XCTAssertEqual(cut.base, .face)
+        let fp = try XCTUnwrap(FlexiblePlaneFrame.facePlane(Int32(top), mesh: mesh))
+        let n = try XCTUnwrap(cut.faceNormal)
+        XCTAssertGreaterThan(simd_dot(SIMD3<Float>(Float(n[0]), Float(n[1]), Float(n[2])), fp.normal), 0.999, "★ the plane takes the face's normal")
+        XCTAssertLessThan(abs(simd_dot(camera.camera.direction, worldNormal(cut, m.project))), 0.15, "★ U19: edge-on to place it")
+        try h.tap("planCutOK", "✓")
+        XCTAssertEqual(m.settings.printPlans?.plan.cuts?.first?.base, .face, "kept on the face")
     }
 }
 #endif

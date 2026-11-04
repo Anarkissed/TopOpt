@@ -23,6 +23,8 @@ extension FlexibleMainStage {
 
     /// H22: a tap on the part in the edit phase with no page up. Consumed: #354's tap routers never run on this stage.
     public func tapFace(_ project: ProjectModel, face: FaceID, point: SIMD3<Float>?, mesh: ViewerMesh) {
+        // ★ B9 slice 4: the Print plan's A face waits for this tap — it lays the cut's plane on the face, nothing else runs
+        if page == .plan, planCut?.step == .face { planFaceTap(face: face, mesh: mesh); return }
         // ★ U21 batch I (I2): during Attach a tap on the part picks a wall / its solid — it never throws the steps away
         if attach.active {
             guard FlexibleAttach.controlStrayTapCancels else { attachTap(project, face: face, point: point); return }
