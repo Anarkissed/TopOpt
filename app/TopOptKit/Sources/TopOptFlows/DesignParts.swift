@@ -95,6 +95,8 @@ public struct DSPanel<Content: View, Footer: View>: View {
     let viewOnly: Bool
     let width: CGFloat
     let maxHeight: CGFloat?
+    /// Folded, the pill is only as wide as its header (Results on a small iPad, his note 2026-10-27).
+    var foldedPill = false
     /// The empty state's one line ("Tap a face to start"), shown when `isEmpty`.
     let empty: String?
     let isEmpty: Bool
@@ -116,10 +118,10 @@ public struct DSPanel<Content: View, Footer: View>: View {
     }
 
     public init(key: String, title: String, count: Int? = nil, viewOnly: Bool = false, width: CGFloat = DSParts.panelWidth,
-                maxHeight: CGFloat? = nil, empty: String? = nil, isEmpty: Bool = false, open: Binding<Bool>,
+                maxHeight: CGFloat? = nil, empty: String? = nil, isEmpty: Bool = false, foldedPill: Bool = false, open: Binding<Bool>,
                 @ViewBuilder content: () -> Content, @ViewBuilder footer: () -> Footer) {
         self.key = key; self.title = title; self.count = count; self.viewOnly = viewOnly; self.width = width
-        self.maxHeight = maxHeight; self.empty = empty; self.isEmpty = isEmpty; self._open = open
+        self.maxHeight = maxHeight; self.empty = empty; self.isEmpty = isEmpty; self.foldedPill = foldedPill; self._open = open
         self.content = content(); self.footer = footer()
     }
 
@@ -187,8 +189,8 @@ public struct DSPanel<Content: View, Footer: View>: View {
                 }
             }
         }
-        .frame(width: width)
-        .fixedSize(horizontal: false, vertical: true)   // the panel is as tall as what it holds (the body caps itself)
+        .frame(width: !open && foldedPill ? nil : width)
+        .fixedSize(horizontal: !open && foldedPill, vertical: true)   // the panel is as tall as what it holds (the body caps itself)
         .onPreferenceChange(DSPanelMeasureKey.self) { m in
             if let c = m["content"], abs(c - contentHeight) > 0.5 { contentHeight = c }
             if let v = m["viewport"], abs(v - viewport) > 0.5 { viewport = v }
@@ -251,10 +253,10 @@ extension View {
 
 extension DSPanel where Footer == EmptyView {
     public init(key: String, title: String, count: Int? = nil, viewOnly: Bool = false, width: CGFloat = DSParts.panelWidth,
-                maxHeight: CGFloat? = nil, empty: String? = nil, isEmpty: Bool = false, open: Binding<Bool>,
+                maxHeight: CGFloat? = nil, empty: String? = nil, isEmpty: Bool = false, foldedPill: Bool = false, open: Binding<Bool>,
                 @ViewBuilder content: () -> Content) {
         self.init(key: key, title: title, count: count, viewOnly: viewOnly, width: width, maxHeight: maxHeight, empty: empty,
-                  isEmpty: isEmpty, open: open, content: content, footer: { EmptyView() })
+                  isEmpty: isEmpty, foldedPill: foldedPill, open: open, content: content, footer: { EmptyView() })
     }
 }
 

@@ -30,6 +30,8 @@ public struct ResultsVersionRow: Equatable, Identifiable, Sendable {
     public let margin: Double?
     public let massLabel: String
     public let headline: String
+    /// ★ R-b: what its one line says after the name — "87 g · 1.5×" (with "· in 2 pieces" when it prints in pieces).
+    public var value: String = ""
 }
 
 public enum ResultsVersions {
@@ -81,11 +83,12 @@ public enum ResultsVersions {
     static func row(_ tab: ResultVariantVM, title: String, margin: Double, headline: String? = nil,
                     pieces: Int? = nil) -> ResultsVersionRow {
         let verdict = tab.latticeAccepted == false ? "not certified" : x(margin) + " ✓"
+        let piecesLine = pieces.map { " · in \($0) pieces" } ?? ""
         return ResultsVersionRow(id: "t\(tab.index)", title: title,
-                                 subtitle: (tab.isRecommended ? "Recommended · " : "") + tab.massLabel + " · " + verdict
-                                     + (pieces.map { " · in \($0) pieces" } ?? ""),
+                                 subtitle: (tab.isRecommended ? "Recommended · " : "") + tab.massLabel + " · " + verdict + piecesLine,
                                  recommended: tab.isRecommended, tabIndex: tab.index, margin: margin,
-                                 massLabel: tab.massLabel, headline: headline ?? tab.headlineLabel)
+                                 massLabel: tab.massLabel, headline: headline ?? tab.headlineLabel,
+                                 value: tab.massLabel + " · " + (tab.latticeAccepted == false ? "not certified" : x(margin)) + piecesLine)
     }
 }
 
@@ -430,7 +433,6 @@ struct ResultsVersionsPanel: View {
     /// Folded AND short of room (his note 2026-10-27): a small pill instead of the full-width bar.
     var pill = false
     let pick: (Int) -> Void
-    let compare: (() -> Void)?
     /// ★ B4: the version's name ("v7"); nil off the Library.
     var version: String? = nil
     /// ★ B4: the tab he picked (nil: none yet), and Pick this — nil off the Library (there is no ring to set).
@@ -441,82 +443,33 @@ struct ResultsVersionsPanel: View {
     static let pickLabel = "Pick this"
     static let pickedLabel = "Picked"
 
+    /// ★ LOOK PER SCREEN (R-b, mockup #topo-results): §4.3's panel; each result one §4.4 line — its name, "87 g · 1.5×", and
+    /// Pick this (every line not picked) or Picked; the selected line in the accent edge; one core could not make greyed with
+    /// its reason. Folded and short of room, a pill (his note 2026-10-27).
     var body: some View {
-        VStack(spacing: 0) {
-            ResultsPanelHeader(title: Self.title(version),
-                               trailing: open ? "\(rows.count)" : (rows.first { $0.tabIndex == selectedTab }?.title ?? ""),
-                               trailingTint: open ? DS.Color.textTertiary.color : DS.Color.accent.color,
-                               open: $open, id: "results-versions-header", pill: pill && !open)
-            if open {
-                ForEach(rows) { r in
-                    Divider().overlay(DS.Color.strokeSubtle.color)
-                    line(r)
-                }
-                if let compare {
-                    Divider().overlay(DS.Color.strokeSubtle.color)
-                    Button(action: compare) {
-                        HStack(spacing: DS.Space.s) {
-                            Image(systemName: "rectangle.split.2x1").font(.system(size: 13, weight: .semibold))
-                            Text("Compare").dsStyle(DS.TypeScale.bodyStrong)
-                        }
-                        .foregroundStyle(DS.Color.textPrimary.color).frame(maxWidth: .infinity).frame(height: 48).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .background(ResultsChrome.publish("resultsCompare"))
-                    .accessibilityIdentifier("results-compare")
-                }
-            }
+        DSPanel(key: "resultsVersions", title: Self.title(version), count: rows.count, foldedPill: pill, open: $open) {
+            ForEach(rows) { r in line(r) }
         }
-        .frame(width: pill && !open ? nil : 340)
-        .fixedSize(horizontal: pill && !open, vertical: false)
-        .resultsPanel()
-        .background(ResultsChrome.publish("resultsVersions"))
     }
 
     @ViewBuilder private func line(_ r: ResultsVersionRow) -> some View {
         let on = r.tabIndex == selectedTab
-        Button { if let t = r.tabIndex { pick(t) } } label: {
-            HStack(spacing: DS.Space.m) {
-                RoundedRectangle(cornerRadius: 2).fill(on ? DS.Color.accent.color : Color.clear).frame(width: 4, height: 36)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(r.title).font(.system(size: 15, weight: on ? .bold : .semibold))
-                        .foregroundStyle((r.tabIndex == nil ? DS.Color.textTertiary : DS.Color.textPrimary).color).lineLimit(1)
-                    Text(r.subtitle).font(.system(size: 13))
-                        .foregroundStyle((r.tabIndex == nil ? DS.Color.textTertiary : on ? DS.Color.accent : DS.Color.textSecondary).color)
-                        .lineLimit(2).fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.vertical, DS.Space.sm).padding(.horizontal, DS.Space.m)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(on ? DS.Color.accent.opacity(0.14).color : Color.clear)
-            .contentShape(Rectangle())
+        DSRow(.group, key: "resultsVersion-\(r.id)", name: r.title, value: r.tabIndex == nil ? nil : r.value,
+              selected: on, disabled: r.tabIndex == nil, tag: r.recommended ? "Recommended" : nil,
+              line: r.tabIndex == nil ? DSRowLine(r.subtitle) : nil,
+              tap: r.tabIndex.map { t in { pick(t) } }) {
+            pickChip(r, on: on)
         }
-        .buttonStyle(.plain)
-        .disabled(r.tabIndex == nil)
-        .overlay(alignment: .trailing) { pickControl(r, on: on) }
-        .background(ResultsChrome.publish("resultsVersion-\(r.id)"))
-        .accessibilityIdentifier("results-version-\(r.id)")
     }
 
-    /// ★ B4: Pick this on the selected line; the picked line reads "Picked ✓" whether or not it is selected.
-    @ViewBuilder private func pickControl(_ r: ResultsVersionRow, on: Bool) -> some View {
+    /// ★ B4 + the reviewer's chosen answer (11-04 02:44Z): Pick this on every line not picked (it sets the part's chosen
+    /// result); the picked line reads Picked. Off the Library (no ring to set) neither.
+    @ViewBuilder private func pickChip(_ r: ResultsVersionRow, on: Bool) -> some View {
         if let choose, let t = r.tabIndex {
             if pickedTab == t {
-                Label(Self.pickedLabel, systemImage: "checkmark").font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(DS.Color.accent.color).padding(.trailing, DS.Space.m)
-                    .background(ResultsChrome.publish("resultsPicked-\(r.id)"))
-            } else if on {
-                Button { choose(t) } label: {
-                    Text(Self.pickLabel).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
-                        .padding(.horizontal, DS.Space.m).frame(height: 32)
-                        .background(Capsule().fill(DS.Color.accent.color))
-                        .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .padding(.trailing, DS.Space.s)
-                .background(ResultsChrome.publish("resultsPickThis"))
-                .accessibilityIdentifier("results-pick-this")
+                DSChip(.accentTag(Self.pickedLabel), key: "resultsPicked-\(r.id)")
+            } else {
+                DSChip(.accentTag(Self.pickLabel), key: on ? "resultsPickThis" : "resultsPickThis-\(r.id)") { choose(t) }
             }
         }
     }
