@@ -3995,6 +3995,13 @@ struct LatticeAddedMaterialReceipt {
   long long emitted_lattice_cells = 0;
   long long voxels_strut_and_solid = 0;
   long long voxels_strut_and_solid_bond = 0;
+  // A graded design-box run laying more than one grid (a swept plan's levels, or
+  // passes): the audit is asked of every grid, and these are written only then.
+  //   emitted_cells_covering_no_certified — cells a level or pass emits while
+  //                             covering no voxel of the final mask: struts in a cell
+  //                             the certificate calls solid. Must be 0.
+  bool multi_grid = false;
+  long long emitted_cells_covering_no_certified = 0;
 };
 
 struct LatticeGradedReceipt {
@@ -4310,6 +4317,9 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
          std::to_string(added.voxels_strut_and_solid) + ",\n";
     s += "    \"voxels_strut_and_solid_bond\": " +
          std::to_string(added.voxels_strut_and_solid_bond) + ",\n";
+    if (added.multi_grid)
+      s += "    \"emitted_cells_covering_no_certified\": " +
+           std::to_string(added.emitted_cells_covering_no_certified) + ",\n";
     s += "    \"audit_note\": \"certified_lattice_cells is the cell set the "
          "certification mask implies (every cell covering a latticed voxel); "
          "emitted_lattice_cells is the generator's own count of the cells it wrote. "
@@ -6266,6 +6276,13 @@ void refuse_stepped_structural(LatticeAlgorithm alg, const JobGrading& jg,
 
 // Resolve the job's algorithm; an ABSENT key is "doubled", which is what keeps every
 // existing job byte-identical (§4d). An unknown one is refused, never defaulted.
+// The one graded lattice a design box still refuses (lattice_variant_job, run_job).
+const char* const kOrganicDesignBoxRefusal =
+    "The organic lattice can't be used with a design box yet: it lays its struts before "
+    "the material the design box added is kept solid, so it could put struts where the "
+    "certificate counts solid. Use the doubled or stepped lattice with the design box, "
+    "or the organic lattice without one.";
+
 LatticeAlgorithm resolve_lattice_algorithm(const JobGrading& jg) {
   if (jg.algorithm.empty()) return LatticeAlgorithm::Doubled;
   LatticeAlgorithm a = LatticeAlgorithm::Doubled;
@@ -6588,11 +6605,19 @@ LatticeVariantOutcome lattice_one_variant(
       members.add_exclude_region(g);
     std::vector<char> cand(solved_grid.voxel_count(), 0);
     std::vector<int> region_ids(solved_grid.voxel_count(), 0);
+    // ★ GRADING + A DESIGN BOX (reviewer's ruling 2026-11-03 23:05, option (b)): the law
+    // plans its cells from what the certificate can lattice. Material the design box
+    // added (printed, outside the imported part) is certified SOLID by the added-material
+    // policy below, so it is never a candidate: the plan is laid around it, not through
+    // it. Off the box path this is empty and the candidate set is unchanged.
+    const std::vector<char> cand_in_part =
+        domain.expanded ? original_part_voxels(part_grid, domain) : std::vector<char>{};
     for (int k = 0; k < solved_grid.nz; ++k)
       for (int j = 0; j < solved_grid.ny; ++j)
         for (int i = 0; i < solved_grid.nx; ++i) {
           const std::size_t e = solved_grid.index(i, j, k);
           if (!(dens[e] >= printed_iso)) continue;
+          if (!cand_in_part.empty() && !cand_in_part[e]) continue;
           const Vec3 c{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
                        solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
                        solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
@@ -8876,6 +8901,33 @@ LatticeVariantOutcome lattice_one_variant(
   //    the whole printability payoff. Empty (fewer than two levels) on every
   //    non-swept run, so the export takes the single-cell path unchanged.
   std::vector<LatticeLevelSpec> levels;
+  // ★ GRADING + A DESIGN BOX (ruling 2026-11-03 23:05, option (b)): which cells of each
+  // level, and of each plan pass below, cover a voxel of the FINAL certification mask --
+  // the mask the added-material policy has already cleared whole cells from. A level's
+  // or a pass's own occupancy comes from its plan, so without this a graded design-box
+  // run would write struts into cells the certificate calls solid. Built only on an
+  // expanded domain (the predicates are untouched off the box path, so the file is
+  // byte-identical); a deque, because the predicates hold pointers into it.
+  std::deque<std::vector<char>> certified_cover;
+  auto cover_of_mask = [&](const Vec3& o, double ce, int gnx, int gny, int gnz) {
+    std::vector<char> cov(static_cast<std::size_t>(gnx) * gny * gnz, 0);
+    const double s = solved_grid.spacing;
+    for (int k = 0; k < solved_grid.nz; ++k)
+      for (int j = 0; j < solved_grid.ny; ++j)
+        for (int i = 0; i < solved_grid.nx; ++i) {
+          if (!mask[solved_grid.index(i, j, k)]) continue;
+          int i0, i1, j0, j1, k0, k1;
+          cells_covering_span(solved_grid.origin.x + i * s, s, o.x, ce, gnx, &i0, &i1);
+          cells_covering_span(solved_grid.origin.y + j * s, s, o.y, ce, gny, &j0, &j1);
+          cells_covering_span(solved_grid.origin.z + k * s, s, o.z, ce, gnz, &k0, &k1);
+          for (int ck = k0; ck <= k1; ++ck)
+            for (int cj = j0; cj <= j1; ++cj)
+              for (int ci = i0; ci <= i1; ++ci)
+                cov[(static_cast<std::size_t>(ck) * gny + cj) * gnx + ci] = 1;
+        }
+    certified_cover.push_back(std::move(cov));
+    return &certified_cover.back();
+  };
   // ★ RULING A: THE DYADIC PLANNER IS NOT CONSULTED WHEN THE LIST IS PRESENT. The app
   // packed the cells and core lays THOSE down; running the ladder as well would emit a
   // second, differently-anchored set of passes over the same voxels -- two lattices in
@@ -8890,11 +8942,24 @@ LatticeVariantOutcome lattice_one_variant(
       sp.level = lr.level;
       sp.cell_mm = lr.cell_size_mm;
       const int LV = lr.level;
-      sp.latticed = [pl, LV](int ci, int cj, int ck) {
-        const int bi = ci << LV, bj = cj << LV, bk = ck << LV;
-        if (bi >= pl->nx || bj >= pl->ny || bk >= pl->nz) return false;
-        return static_cast<int>(pl->level[pl->index(bi, bj, bk)]) == LV;
-      };
+      if (domain.expanded) {
+        const int lnx = (pl->nx + (1 << LV) - 1) >> LV, lny = (pl->ny + (1 << LV) - 1) >> LV,
+                  lnz = (pl->nz + (1 << LV) - 1) >> LV;
+        const std::vector<char>* cov =
+            cover_of_mask(pl->origin, pl->base_cell_mm * (1 << LV), lnx, lny, lnz);
+        sp.latticed = [pl, LV, cov, lnx, lny](int ci, int cj, int ck) {
+          const int bi = ci << LV, bj = cj << LV, bk = ck << LV;
+          if (bi >= pl->nx || bj >= pl->ny || bk >= pl->nz) return false;
+          return static_cast<int>(pl->level[pl->index(bi, bj, bk)]) == LV &&
+                 (*cov)[(static_cast<std::size_t>(ck) * lny + cj) * lnx + ci] != 0;
+        };
+      } else {
+        sp.latticed = [pl, LV](int ci, int cj, int ck) {
+          const int bi = ci << LV, bj = cj << LV, bk = ck << LV;
+          if (bi >= pl->nx || bj >= pl->ny || bk >= pl->nz) return false;
+          return static_cast<int>(pl->level[pl->index(bi, bj, bk)]) == LV;
+        };
+      }
       // Same fallback chain as the uniform graded field (owning voxel's graded
       // rho, else the level's own band floor) — evaluated at THIS level's cell.
       const VoxelGrid& sgr = solved_grid;
@@ -8976,6 +9041,12 @@ LatticeVariantOutcome lattice_one_variant(
       act.assign(static_cast<std::size_t>(g.nx) * g.ny * g.nz, 0);
       for (const std::array<int, 3>& c : g.cells)
         act[(static_cast<std::size_t>(c[2]) * g.ny + c[1]) * g.nx + c[0]] = 1;
+      // ★ GRADING + A DESIGN BOX: a plan cell the added-material policy kept solid (it
+      // covers no voxel of the final mask) is not laid. Off the box path, untouched.
+      if (domain.expanded) {
+        const std::vector<char>* cov = cover_of_mask(g.origin, g.size_mm, g.nx, g.ny, g.nz);
+        for (std::size_t a = 0; a < act.size(); ++a) act[a] = act[a] && (*cov)[a];
+      }
       const std::vector<char>* ap = &act;
       const int anx = g.nx, any = g.ny, anz = g.nz;
       PR.latticed = [ap, anx, any, anz](int ci, int cj, int ck) {
@@ -9434,7 +9505,80 @@ LatticeVariantOutcome lattice_one_variant(
                   solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
     return !boundary.in_keep_out(vc, 0.0);
   };
-  if (added_rcpt.present) {
+  // ★ GRADING + A DESIGN BOX: on a SWEPT run (one grid per level) or a run of passes
+  // (stepped, or the app's plan), the same two questions are asked of EVERY grid the
+  // generator lays, through that grid's own activation chain (its predicate AND the
+  // boundary-overlap proof): a cell it emits must cover a voxel of the final mask
+  // (certified == emitted, summed over the grids), and no companion-solid voxel may sit
+  // in an emitted cell that covers none. The single `cell` grid below is what the
+  // uniform and one-cell graded runs lay, and is audited as before.
+  const bool multi_grid = (levels.size() > 1 && gf.cell_plan.base_cell_mm > 0.0) ||
+                          !stepped_passes.empty();
+  if (added_rcpt.present && multi_grid) {
+    added_rcpt.multi_grid = true;
+    struct AuditGrid {
+      Vec3 o;
+      double ce;
+      int nx, ny, nz;
+      std::function<bool(int, int, int)> pred;
+      const LatticeBoundary* b;
+      const std::vector<char>* cov;
+    };
+    std::vector<AuditGrid> grids;
+    if (levels.size() > 1 && gf.cell_plan.base_cell_mm > 0.0) {
+      const CellSizePlan& pl = gf.cell_plan;
+      for (const LatticeLevelSpec& sp : levels) {
+        const int LV = sp.level;
+        const int lnx = (pl.nx + (1 << LV) - 1) >> LV, lny = (pl.ny + (1 << LV) - 1) >> LV,
+                  lnz = (pl.nz + (1 << LV) - 1) >> LV;
+        const double ce = pl.base_cell_mm * (1 << LV);
+        grids.push_back({pl.origin, ce, lnx, lny, lnz, sp.latticed, &boundary,
+                         cover_of_mask(pl.origin, ce, lnx, lny, lnz)});
+      }
+    }
+    for (const LatticeSteppedPass& sp : stepped_passes) {
+      const LatticeRegion& PR = sp.region;
+      grids.push_back({PR.origin, PR.cell_mm, PR.nx, PR.ny, PR.nz, PR.latticed,
+                       PR.boundary != nullptr ? PR.boundary : &boundary,
+                       cover_of_mask(PR.origin, PR.cell_mm, PR.nx, PR.ny, PR.nz)});
+    }
+    auto at = [](const AuditGrid& g, int ci, int cj, int ck) {
+      return (static_cast<std::size_t>(ck) * g.ny + cj) * g.nx + ci;
+    };
+    auto emitted = [&](const AuditGrid& g, int ci, int cj, int ck) {
+      if (g.pred && !g.pred(ci, cj, ck)) return false;
+      return g.b->cell_may_overlap(
+          Vec3{g.o.x + ci * g.ce, g.o.y + cj * g.ce, g.o.z + ck * g.ce}, g.ce);
+    };
+    for (const AuditGrid& g : grids)
+      for (int ck = 0; ck < g.nz; ++ck)
+        for (int cj = 0; cj < g.ny; ++cj)
+          for (int ci = 0; ci < g.nx; ++ci) {
+            if (!emitted(g, ci, cj, ck)) continue;
+            if ((*g.cov)[at(g, ci, cj, ck)]) ++added_rcpt.certified_lattice_cells;
+            else ++added_rcpt.emitted_cells_covering_no_certified;
+          }
+    added_rcpt.emitted_lattice_cells = R.oc.stats.latticed_cells;
+    for (int k = 0; k < solved_grid.nz; ++k)
+      for (int j = 0; j < solved_grid.ny; ++j)
+        for (int i = 0; i < solved_grid.nx; ++i) {
+          if (!is_companion_solid(i, j, k)) continue;
+          const Vec3 c{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
+                       solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
+                       solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
+          int state = 0;  // 0 in no emitted cell, 1 the bond, 2 a cell covering none
+          for (const AuditGrid& g : grids) {
+            const int ci = clampi(static_cast<int>(std::floor((c.x - g.o.x) / g.ce)), g.nx - 1);
+            const int cj = clampi(static_cast<int>(std::floor((c.y - g.o.y) / g.ce)), g.ny - 1);
+            const int ck = clampi(static_cast<int>(std::floor((c.z - g.o.z) / g.ce)), g.nz - 1);
+            if (!emitted(g, ci, cj, ck)) continue;
+            state = std::max(state, (*g.cov)[at(g, ci, cj, ck)] ? 1 : 2);
+          }
+          if (state == 2) ++added_rcpt.voxels_strut_and_solid;
+          else if (state == 1) ++added_rcpt.voxels_strut_and_solid_bond;
+        }
+  }
+  if (added_rcpt.present && !multi_grid) {
     // ★ Finding 7: the certified cell set is every cell COVERING a masked voxel (the
     // cover rule the activation now uses), so certified == emitted still holds cell
     // for cell.
@@ -12079,13 +12223,15 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
   // design-box refusal that used to sit here is gone — the remap it named now
   // exists, ONCE, in core (resolve_design_domain), and this entry point calls it
   // below like every other site (task 2026-08-03-design-box-recertification).
-  if (job.grading.present && job.has_design_box)
-    throw JobError(
-        "lattice_variant: a \"grading\" block is not yet supported together with "
-        "a \"design_box\" — the grading law chooses its cell plan before the "
-        "added-material policy runs, so a graded design-box run could emit struts "
-        "into cells the certificate calls solid. Re-lattice with a uniform cell + "
-        "strut radius instead.");
+  // GRADING + A DESIGN BOX runs (reviewer's ruling 2026-11-03 23:05, option (b)): the
+  // law plans its cells around the added material and every level and pass lays only
+  // cells covering a voxel of the final mask (lattice_one_variant). The ORGANIC lattice
+  // is the one graded algorithm still refused with a box: its traced network is laid
+  // before the added-material policy keeps whole cells solid, and it has no cell to
+  // keep solid.
+  if (job.grading.present && job.has_design_box &&
+      resolve_lattice_algorithm(job.grading) == LatticeAlgorithm::Organic)
+    throw JobError(kOrganicDesignBoxRefusal);
   if (!job.grading.present) {
     const double lat_rho =
         lattice_density_from_strut(
@@ -14232,26 +14378,17 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
         "final stress field, so without a lattice there is nothing to grade "
         "into. Add a \"lattice\" block (without cell_mm/strut_radius_mm — the "
         "graded run derives those) or drop \"grading\".");
-  // GRADING + a DESIGN BOX is refused, and this is a NARROWER refusal than the
-  // one that stood before this task (which refused the whole design-box + lattice
-  // combination). Reason, precisely: a graded run's cell PLAN comes from
-  // grade_lattice, which runs before the added-material policy can speak, and the
-  // SWEPT multilevel emission takes its per-level cell occupancy from that plan
-  // rather than from the final certification mask. So on a graded design-box run
-  // the generator could still write struts into cells the certificate calls
-  // solid — the exact certified-object-is-not-the-exported-object failure the
-  // uniform path just closed. Rather than ship a second shape of it, refuse until
-  // the law's candidate set is made added-material-aware. Uniform lattice + a
-  // design box is supported and tested.
-  if (job.grading.present && job.has_design_box)
-    throw JobError(
-        "a \"grading\" block is not yet supported together with a \"design_box\": "
-        "the grading law chooses its cell plan before the added-material policy "
-        "runs, and the swept multilevel emission takes its cell occupancy from "
-        "that plan rather than from the final certification mask — so a graded "
-        "design-box run could emit struts into cells the certificate calls "
-        "solid. Run the design-box lattice job WITHOUT grading (uniform cell + "
-        "strut radius), or run the graded job without a design box.");
+  // GRADING + a DESIGN BOX runs (reviewer's ruling 2026-11-03 23:05, option (b)). It
+  // was refused because the graded cell PLAN came from grade_lattice before the
+  // added-material policy could speak, and the SWEPT levels (and the plan's passes)
+  // took their cells from that plan rather than from the final certification mask: a
+  // graded design-box run could write struts into cells the certificate calls solid.
+  // Now the law's candidates leave the added material out, and every level and pass
+  // lays only cells covering a voxel of the final mask (lattice_one_variant, audited
+  // per grid in the added-material receipt). Organic stays refused with a box.
+  if (job.grading.present && job.has_design_box &&
+      resolve_lattice_algorithm(job.grading) == LatticeAlgorithm::Organic)
+    throw JobError(kOrganicDesignBoxRefusal);
   if (job.lattice.present) {
     // A DESIGN BOX no longer refuses (task 2026-08-03-design-box-recertification).
     // The refusal existed because the latticed re-certification reconstructed the

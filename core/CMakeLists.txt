@@ -2516,6 +2516,17 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     target_link_libraries(test_keep_clear_exact PRIVATE topopt manifold::manifold)
     add_test(NAME keep_clear_exact COMMAND test_keep_clear_exact)
 
+    # GRADING + A DESIGN BOX (ruling 2026-11-03 23:05, option (b)): a graded design-box
+    # job runs, and no level lays a cell the certificate calls solid.
+    add_executable(test_designbox_graded_lattice
+      tests/validation/test_designbox_graded_lattice.cpp)
+    target_link_libraries(test_designbox_graded_lattice PRIVATE topopt manifold::manifold)
+    target_compile_definitions(test_designbox_graded_lattice PRIVATE
+      MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+      SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+      CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME designbox_graded_lattice COMMAND test_designbox_graded_lattice)
+
     # PROTECT on a growth run (ruling 2026-10-27 03:57): nothing grows inside a
     # protected hole or in front of a protected face; the bore and face stay exact.
     add_executable(test_keep_strengthen tests/validation/test_keep_strengthen.cpp)
