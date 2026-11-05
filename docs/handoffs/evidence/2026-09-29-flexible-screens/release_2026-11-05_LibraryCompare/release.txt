@@ -1,0 +1,14 @@
+# Release ad529734 — 2026-11-05 LibraryCompare (UI-Notes' app batch up to 995f3ca5), app only, released before review (his 11-03 pick)
+# Core and worker unchanged: fingerprint 6c5a6fbaa842; "fingerprint": "6c5a6fbaa842"
+# Merged onto 141286e6; the merged app tree equals 995f3ca5's, so the builder's tests apply unchanged.
+# Commits:
+#   96286699 Library Compare (his iPad notes 11-05, L3): Better rejects the other and the next slides in; Tie; the last one left is chosen and Compare goes back to the part page
+#   995f3ca5 Merge UI-Notes' Library Compare (96286699, his iPad notes 11-05 L3) into B9: Better rejects the other and the next slides in; Tie; the last one left is the part's chosen and Compare goes back to the part page
+#   ad529734 Release 2026-11-05: merge B9 995f3ca5 — UI-Notes' Library Compare (96286699, his iPad notes 11-05 L3): Better rejects the other and the next slides in; Tie sets both aside, a second Tie leaves the undecided In consideration; the last one left is the part's chosen and Compare goes back to the part page (app only; core and worker unchanged at 6c5a6fbaa842)
+# Gates:
+#   10:31 checks ok: LibraryCompare, local ad529734 over origin 141286e6 (3 commits); app tree == 995f3ca5's, fingerprint 6c5a6fbaa842
+#   10:31 waiting for HEAVY.lock (free)
+#   10:31 lock taken
+#   10:36 iPad device build green; lock released
+#   10:36 pushed ad529734
+#   10:36 worker /health "fingerprint": "6c5a6fbaa842" (unchanged, no swap)
