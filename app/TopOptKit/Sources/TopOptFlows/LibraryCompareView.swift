@@ -94,20 +94,25 @@ struct LibraryQuickLookView: View {
                         HStack {
                             LibraryStars(value: mark.stars, size: 30) { library.setStars($0, folder: folder, result: r) }
                             Spacer()
-                            Button { library.togglePrint(folder: folder, result: r) } label: {
+                            // ★ his iPad notes 11-05 (L2): on → a tap takes the flag off, with Undo; 44 pt targets
+                            Button { library.tapFlag(.printThis, folder: folder, result: r) } label: {
                                 Label("Print this", systemImage: "printer").font(DS.TypeScale.subhead.font).fontWeight(.semibold)
                                     .foregroundStyle(mark.printThis ? .white : DS.Color.okGreen.color)
                                     .padding(.horizontal, DS.Space.ml).frame(height: 36)
                                     .background(RoundedRectangle(cornerRadius: 12).fill(mark.printThis ? DS.Color.okGreen.color : DS.Color.fillSubtle.color))
+                                    .frame(minHeight: DSParts.target).contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            Button { library.toggleReject(folder: folder, result: r) } label: {
+                            .background(DSParts.publish("libraryQuickLook-print"))
+                            Button { library.tapFlag(.rejected, folder: folder, result: r) } label: {
                                 Label("Reject", systemImage: "xmark.circle").font(DS.TypeScale.subhead.font).fontWeight(.semibold)
                                     .foregroundStyle(mark.rejected ? .white : DS.Color.danger.color)
                                     .padding(.horizontal, DS.Space.ml).frame(height: 36)
                                     .background(RoundedRectangle(cornerRadius: 12).fill(mark.rejected ? DS.Color.danger.color : DS.Color.fillSubtle.color))
+                                    .frame(minHeight: DSParts.target).contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .background(DSParts.publish("libraryQuickLook-reject"))
                         }
                         VStack(alignment: .leading, spacing: DS.Space.s) {
                             Text(v.parentNumber.map { "Changed from v\($0)" } ?? "First run").dsStyle(DS.TypeScale.overlineSmall)
