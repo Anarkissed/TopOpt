@@ -2,7 +2,7 @@
 //
 // Library ⋯ › Settings, "For every new part": Safety margin, Runs on, Camera, Storage ›, then Done. The margin is the one a
 // new part starts with (150 % stores nothing, so the job is today's); Camera is the app's one projection choice. Units and
-// Accent wait on the reviewer's answer. RED before B5 (saved: scratchpad b2red/AppSettings.txt): the Library's ⋯ had no
+// Accent: AppSettingsUnitsAccentHostedTests. RED before B5 (saved: scratchpad b2red/AppSettings.txt): the Library's ⋯ had no
 // Settings and a new part ignored the default.
 #if canImport(AppKit) && canImport(MetalKit)
 import XCTest

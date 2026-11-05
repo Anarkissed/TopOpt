@@ -238,6 +238,7 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
     public static func newSetup(materialID: String? = nil) -> FlexibleStageSettings {
         var s = FlexibleStageSettings(materialID: materialID)
         s.readsMainPageGroups = false
+        s.weightUnit = AppSettings.flexibleStartingUnit()   // ★ B5 (Q12 Units (a)): his App Settings unit; kg stores nil, as before
         return s
     }
 

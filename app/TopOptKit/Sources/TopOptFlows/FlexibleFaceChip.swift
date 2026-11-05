@@ -412,7 +412,7 @@ struct FlexibleJoinButton: View {
     let note: String
     let action: () -> Void
     static let height: CGFloat = 48
-    static let fill = DS.Color.accent
+    static var fill: RGBA { DS.Color.accent }   // ★ B5 (Q12): the accent is live, so read it as it draws
 
     var body: some View {
         Button(action: action) {
