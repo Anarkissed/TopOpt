@@ -107,23 +107,7 @@ public struct LatticeSetupWizard: View {
                 // one on the left."* The floating wizard card is gone; its view
                 // switch is the last row inside this panel.
                 if let c = cellsPage {
-                    // ★ B7: the Squish look — the panel from under the stage row (design-system §4.1, PageChrome.panelTop).
-                    // Landscape: to the hint band, the view switch over the canvas beside it, level with the panel's header.
-                    // Portrait (mockup 11P): the panel hugs its rows (at most 62 % of the page, as Squish's) and the canvas,
-                    // its view switch on top, is under it.
-                    let portrait = geo.size.width < geo.size.height
-                    let band = max(DSParts.headerHeight, geo.size.height - PageChrome.panelTop - PageChrome.panelBottom)
-                    latticePanel(c, hug: portrait)
-                        .frame(height: portrait ? nil : band)
-                        .frame(maxHeight: portrait ? min(band, geo.size.height * 0.62) : nil, alignment: .top)
-                        .padding(.leading, PageChrome.edge).padding(.top, PageChrome.panelTop)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    latticeViewSwitch
-                        .frame(maxWidth: .infinity)
-                        .padding(.leading, portrait ? PageChrome.edge : PageChrome.edge + PageChrome.widePanelWidth + DS.Space.l)
-                        .padding(.trailing, PageChrome.edge)
-                        .padding(.top, portrait ? PageChrome.panelTop + latticePanelHeight + DS.Space.l + 14 : PageChrome.panelTop + 14)
-                        .frame(maxHeight: .infinity, alignment: .top)
+                    latticePage(c, size: geo.size)
                 } else {
                     selectionsModal
                         .modifier(WizardModalPlacement(canvasHeight: geo.size.height))
@@ -2278,6 +2262,29 @@ public struct LatticeSetupWizard: View {
         return c.regions[i]
     }
 
+    /// The panel from under the stage row (design-system §4.1, PageChrome.panelTop). Landscape: to the hint band, the view
+    /// switch over the canvas beside it, level with the panel's header. Portrait (mockup 11P): the panel hugs its rows (at most
+    /// 62 % of the page, as Squish's) and the canvas, its view switch on top, is under it.
+    /// AnyView: the iPad's Release build (whole-module) found `body`'s opaque type defined in terms of itself through this
+    /// tree (the Mac's debug build did not); erasing it here ends the chain.
+    private func latticePage(_ c: CellsPageContext, size: CGSize) -> AnyView {
+        let portrait = size.width < size.height
+        let band = max(DSParts.headerHeight, size.height - PageChrome.panelTop - PageChrome.panelBottom)
+        return AnyView(ZStack {
+            latticePanel(c, hug: portrait)
+                .frame(height: portrait ? nil : band)
+                .frame(maxHeight: portrait ? min(band, size.height * 0.62) : nil, alignment: .top)
+                .padding(.leading, PageChrome.edge).padding(.top, PageChrome.panelTop)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            latticeViewSwitch
+                .frame(maxWidth: .infinity)
+                .padding(.leading, portrait ? PageChrome.edge : PageChrome.edge + PageChrome.widePanelWidth + DS.Space.l)
+                .padding(.trailing, PageChrome.edge)
+                .padding(.top, portrait ? PageChrome.panelTop + latticePanelHeight + DS.Space.l + 14 : PageChrome.panelTop + 14)
+                .frame(maxHeight: .infinity, alignment: .top)
+        })
+    }
+
     private func latticePanel(_ c: CellsPageContext, hug: Bool) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             latticePanelHeader
@@ -2412,13 +2419,15 @@ public struct LatticeSetupWizard: View {
 
     /// The open tab's rows. Part: the type (and, with no lattice group yet, the area rows). An area: its finish and grading,
     /// and in Manual the rest. Organic keeps its own pane (a traced lattice has no cell, no finish ladder).
-    @ViewBuilder private func latticeTabBody(_ c: CellsPageContext) -> some View {
+    /// AnyView here and in each row below: the whole page in one opaque type crashed the iPad's Release compiler (SILGen, 11-05).
+    private func latticeTabBody(_ c: CellsPageContext) -> AnyView {
         let area = latticeArea(c)
         let organic = model.cellTransition == .organicGrade
         let structural = (project.lattice.stageMode ?? .structural) == .structural
+        return AnyView(Group {
         if area == nil {
-            settingControl(.type, titled: true)
-            if latticeManual, !Self.controlHideSimulateStresses { simulateStressesSwitch }
+            AnyView(settingControl(.type, titled: true))
+            if latticeManual, !Self.controlHideSimulateStresses { AnyView(simulateStressesSwitch) }
             if c.regions.isEmpty {
                 latticeAreaRows(organic: organic, structural: structural)
             } else {
@@ -2430,15 +2439,17 @@ public struct LatticeSetupWizard: View {
             if c.regions.count > 1 { shortNote(LatticeCellsRow.tabsNote).latticeID("lattice-page-tabs-note") }
             latticeAreaRows(organic: organic, structural: structural)
         }
+        })
     }
 
-    @ViewBuilder private func latticeAreaRows(organic: Bool, structural: Bool) -> some View {
+    private func latticeAreaRows(organic: Bool, structural: Bool) -> AnyView {
+        AnyView(Group {
         if organic {
-            organicRow
+            AnyView(organicRow)
         } else {
-            settingControl(.finish, titled: true)
-            gradeToggleRow
-            if model.gradingMode != LatticeGradingMode.none { gradeTypeRow }
+            AnyView(settingControl(.finish, titled: true))
+            AnyView(gradeToggleRow)
+            if model.gradingMode != LatticeGradingMode.none { AnyView(gradeTypeRow) }
         }
         if latticeManual {
             Text(Self.latticeManualSection.uppercased()).font(.system(size: 10.5, weight: .bold)).tracking(0.8)
@@ -2446,15 +2457,16 @@ public struct LatticeSetupWizard: View {
                 .padding(.top, 4)
             if !organic {
                 ForEach([LatticeWizardSetting.cellSize, .density, .thickness], id: \.rawValue) { s in
-                    settingControl(s, titled: true)
+                    AnyView(settingControl(s, titled: true))
                 }
-                gradeStyleRow
-                if model.gradingMode.fitsShape { shapeBandRow }
-                if !structural { singleCellSwitch }
+                AnyView(gradeStyleRow)
+                if model.gradingMode.fitsShape { AnyView(shapeBandRow) }
+                if !structural { AnyView(singleCellSwitch) }
             }
-            if structural { subfloorRetentionSwitch }
-            if !organic { cellsAddedRows }
+            if structural { AnyView(subfloorRetentionSwitch) }
+            if !organic { AnyView(cellsAddedRows) }
         }
+        })
     }
 
     /// Cancel │ Save, pinned (the Squish panel's foot). Save is today's (it saves what changed, then builds the preview);
