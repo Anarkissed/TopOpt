@@ -154,7 +154,7 @@ public struct LibraryVersion: Codable, Equatable, Sendable {
 }
 
 /// His marks on one result. His decision 1 (2026-10-25): stars in half steps, Print this, Rejected;
-/// no Favourite.
+/// no Favourite. ★ His iPad notes 11-05 (L3): In consideration, what a Compare ended on Tie left undecided.
 public struct ResultMark: Codable, Equatable, Sendable {
     /// The result's index in the run's variants (0 = a, 1 = b, 2 = c).
     public let result: Int
@@ -162,12 +162,21 @@ public struct ResultMark: Codable, Equatable, Sendable {
     public private(set) var stars: Double
     public var printThis: Bool
     public var rejected: Bool
+    /// ★ L3: true = In consideration. OPTIONAL, left out when nil, so library.json written before reads (and saves) as it was.
+    public var considering: Bool? = nil
 
-    public init(result: Int, stars: Double = 0, printThis: Bool = false, rejected: Bool = false) {
+    public init(result: Int, stars: Double = 0, printThis: Bool = false, rejected: Bool = false, considering: Bool = false) {
         self.result = result
         self.stars = ResultMark.clampStars(stars)
         self.printThis = printThis
         self.rejected = rejected
+        self.considering = considering ? true : nil
+    }
+
+    /// In consideration.
+    public var inConsideration: Bool {
+        get { considering == true }
+        set { considering = newValue ? true : nil }
     }
 
     public mutating func setStars(_ value: Double) { stars = ResultMark.clampStars(value) }
@@ -178,7 +187,7 @@ public struct ResultMark: Codable, Equatable, Sendable {
         return min(5, max(0, (value * 2).rounded() / 2))
     }
 
-    public var isEmpty: Bool { stars == 0 && !printThis && !rejected }
+    public var isEmpty: Bool { stars == 0 && !printThis && !rejected && !inConsideration }
     /// The result's letter on screen: a, b, c, … (past z: its number).
     public static func letter(_ index: Int) -> String {
         (0..<26).contains(index) ? String(UnicodeScalar(UInt8(97 + index))) : "\(index + 1)"

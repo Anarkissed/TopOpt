@@ -1,8 +1,11 @@
-// LibraryCompareTests.swift — Compare's winner-stays steps (approved mockup 2026-10-25, his decisions 1-2).
+// LibraryCompareTests.swift — Compare's steps (approved mockup 2026-10-25, his decision 1; ★ his iPad notes 11-05, ledger L3,
+// his "Yes, as written").
 //
-// He taps Better under one model; a › appears on the other; › brings in the next result AND clears
-// Better, so every pair is an active choice (decision 2). Rejected results are skipped while the switch
-// is on (decision 1). One optimization's results compare side by side, with one Best.
+// ★ L3 replaces the 10-25 "Better, then ›" step (his decision 2): Better under one side is the choice — the other side is
+// rejected and the next result comes in on its side; the winner stays. Tie sets both aside and the next two come in; once
+// every result has been seen, the set-aside ones come back against the winner so far, and a second Tie ends Compare with the
+// ones still undecided In consideration. The last one left is the part's chosen result. Rejected results are skipped while the
+// switch is on (decision 1). One optimization's results compare side by side, with one Best — unchanged.
 
 import XCTest
 @testable import TopOptFlows
@@ -36,56 +39,96 @@ final class LibraryCompareTests: XCTestCase {
         let s = CompareSession(part: part, skipRejected: true)
         XCTAssertEqual(s.left, item(b, 0))
         XCTAssertEqual(s.right, item(b, 1))
-        XCTAssertNil(s.kept)
-        XCTAssertFalse(s.showsNext(on: .left) || s.showsNext(on: .right), "no › until he picks")
+        XCTAssertEqual(s.remaining, 3)
+        XCTAssertTrue(s.canTie)
+        XCTAssertNil(s.end)
     }
 
-    func testNextReplacesTheOtherSideAndClearsBetter() {
+    /// ★ L3: Better rejects the other side and brings the next one in at once; the winner stays.
+    func testBetterRejectsTheOtherAndTheNextComesIn() {
         var s = CompareSession(part: part, skipRejected: true)
-        s.pick(.left)
-        XCTAssertTrue(s.showsNext(on: .right))
-        XCTAssertFalse(s.showsNext(on: .left))
-        XCTAssertTrue(s.next())
-        XCTAssertEqual(s.left, item(b, 0), "the one he picked stays")
-        XCTAssertEqual(s.right, item(b, 2), "the next one he has not seen")
-        XCTAssertNil(s.kept, "his decision 2: he chooses again before moving on")
-        XCTAssertFalse(s.next(), "no › without a pick")
-    }
-
-    func testTheChallengerCanWinAndTheOldWinnerIsReplaced() {
-        var s = CompareSession(part: part, skipRejected: true)
-        s.pick(.left); _ = s.next()          // b0 vs b2
-        s.pick(.right); _ = s.next()         // b2 stays; b0 is replaced
+        XCTAssertEqual(s.better(.left), item(b, 1), "★ the other side is the one rejected")
+        XCTAssertEqual(s.left, item(b, 0), "the winner stays")
+        XCTAssertEqual(s.right, item(b, 2), "★ the next one comes in on its side, no › to press")
+        XCTAssertEqual(s.rejected, [item(b, 1)])
+        XCTAssertEqual(s.better(.right), item(b, 0), "the challenger can win")
         XCTAssertEqual(s.right, item(b, 2))
         XCTAssertEqual(s.left, item(a, 0))
     }
 
-    func testItSaysWhenEveryResultHasBeenSeen() {
+    /// ★ L3: the last one left is the part's chosen; every other was rejected along the way.
+    func testTheLastOneLeftIsChosen() {
         var s = CompareSession(part: part, skipRejected: true)
-        var steps = 0
-        while true {
-            s.pick(.left)
-            guard s.next() else { break }
-            steps += 1
-        }
-        XCTAssertEqual(steps, 3, "5 results: the two shown, then 3 more")
-        XCTAssertEqual(s.remaining, 0)
-        XCTAssertEqual(Set(s.seen).count, 5)
+        while s.end == nil { s.better(.left) }
+        XCTAssertEqual(s.end, .chosen(item(b, 0)), "★ b0 won every pair")
+        XCTAssertEqual(s.rejected, [item(b, 1), item(b, 2), item(a, 0), item(a, 1)], "★ 4 rejected, in order")
+        XCTAssertEqual(Set(s.seen).count, 5, "every result was seen")
+        XCTAssertNil(s.better(.left), "it has ended")
     }
 
-    func testPickingTheSameSideAgainUndoesIt() {
+    /// ★ L3: Tie sets both aside and the next two come in; after the rest, they come back against the winner so far.
+    func testTieSetsBothAsideAndTheyComeBackAtTheEnd() {
         var s = CompareSession(part: part, skipRejected: true)
-        s.pick(.left); s.pick(.left)
-        XCTAssertNil(s.kept)
+        s.tie()                                                         // b0 = b1
+        XCTAssertEqual(s.setAside, [item(b, 0), item(b, 1)])
+        XCTAssertEqual(s.left, item(b, 2), "★ the next two")
+        XCTAssertEqual(s.right, item(a, 0))
+        XCTAssertFalse(s.secondLook)
+        XCTAssertEqual(s.better(.left), item(a, 0))                     // b2 beats a0; a1 comes in
+        XCTAssertEqual(s.right, item(a, 1))
+        XCTAssertEqual(s.better(.left), item(a, 1))                     // b2 beats a1; nothing new: b0 comes back
+        XCTAssertTrue(s.secondLook, "★ every result seen: the set-aside ones come back")
+        XCTAssertEqual(s.right, item(b, 0), "against the winner so far")
+        XCTAssertEqual(s.left, item(b, 2))
+        XCTAssertEqual(s.better(.right), item(b, 2))                    // b0 beats b2; b1 comes back
+        XCTAssertEqual(s.left, item(b, 1))
+        XCTAssertEqual(s.better(.right), item(b, 1))
+        XCTAssertEqual(s.end, .chosen(item(b, 0)))
+    }
+
+    /// ★ L3: a second Tie ends Compare; the ones still undecided stay In consideration, none chosen.
+    func testASecondTieEndsInConsideration() {
+        var s = CompareSession(part: part, skipRejected: true)
+        s.tie()                                                         // b0 = b1 → b2 vs a0
+        s.better(.left)                                                 // a0 rejected → b2 vs a1
+        s.better(.left)                                                 // a1 rejected → b2 vs b0 (second look)
+        XCTAssertTrue(s.secondLook)
+        s.tie()                                                         // b2 = b0, with b1 still set aside
+        XCTAssertEqual(s.end, .undecided([item(b, 2), item(b, 0), item(b, 1)]), "★ the two on screen and the one still waiting")
+        XCTAssertEqual(s.rejected, [item(a, 0), item(a, 1)])
+        XCTAssertFalse(s.canTie)
+    }
+
+    /// A Tie with nothing new to bring in shows the same two again (the second look); a Tie there ends.
+    func testATieOnTheLastPairShowsThemAgainThenEnds() {
+        var s = CompareSession(part: part, skipRejected: true)
+        s.better(.left); s.better(.left); s.better(.left)              // b0 beats b1, b2, a0 → b0 vs a1
+        XCTAssertEqual(s.right, item(a, 1))
+        s.tie()
+        XCTAssertTrue(s.secondLook, "★ nothing new: the ones he can't decide on come back")
+        XCTAssertEqual([s.left, s.right], [item(b, 0), item(a, 1)])
+        s.tie()
+        XCTAssertEqual(s.end, .undecided([item(b, 0), item(a, 1)]))
+    }
+
+    func testOneResultAloneIsChosenWithBetter() {
+        var one = LibraryVersion(folderID: a, number: 1, summary: [ResultSummary(massGrams: 90, worstCaseMargin: 13, accepted: true,
+                                                                                 achievedVolumeFraction: 0.8)])
+        one.setMark(ResultMark(result: 0))
+        var s = CompareSession(part: LibraryPart(name: "Stand", modelHash: "y", versions: [one]), skipRejected: true)
+        XCTAssertNil(s.right)
+        XCTAssertFalse(s.canTie, "no Tie without a pair")
+        s.better(.left)
+        XCTAssertEqual(s.end, .chosen(item(a, 0)))
     }
 
     func testChoosingAResultByHandOnASide() {
         var s = CompareSession(part: part, skipRejected: true)
-        s.pick(.left)
         s.set(.right, to: item(a, 1))
         XCTAssertEqual(s.right, item(a, 1))
-        XCTAssertNil(s.kept, "a new pair is a new choice")
         XCTAssertTrue(s.seen.contains(item(a, 1)))
+        XCTAssertFalse(s.waiting.contains(item(a, 1)), "it is no longer waiting")
+        XCTAssertEqual(s.waiting.first, item(b, 1), "★ the one it replaced waits its turn again")
     }
 
     func testThreeUpShowsOneOptimizationsResultsWithOneBest() {
@@ -94,5 +137,17 @@ final class LibraryCompareTests: XCTestCase {
         s.best = item(a, 1)
         s.toggleBest(item(a, 1))
         XCTAssertNil(s.best)
+    }
+
+    /// ★ L3: In consideration is a mark of its own; a library.json written before reads (and saves) as it was.
+    func testInConsiderationIsAMarkAndOldMarksReadAsBefore() throws {
+        var m = ResultMark(result: 1)
+        XCTAssertTrue(m.isEmpty)
+        m.inConsideration = true
+        XCTAssertFalse(m.isEmpty, "★ a mark worth keeping")
+        let old = try JSONDecoder().decode(ResultMark.self, from: Data(#"{"result":2,"stars":3,"printThis":false,"rejected":true}"#.utf8))
+        XCTAssertFalse(old.inConsideration, "★ an old mark reads as before")
+        let again = try JSONSerialization.jsonObject(with: try JSONEncoder().encode(old)) as? [String: Any]
+        XCTAssertNil(again?["considering"], "★ and saves as it was: no new key")
     }
 }

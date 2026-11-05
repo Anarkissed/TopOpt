@@ -45,20 +45,33 @@ public struct LibraryResult: Identifiable {
     public var id: Int { index }
 }
 
-/// ★ A result's flag that a tap takes off (his iPad notes 11-05, ledger L2).
+/// ★ A result's flag that a tap takes off (his iPad notes 11-05, ledger L2; In consideration from L3).
 public enum LibraryFlag: Sendable {
-    case printThis, rejected
+    case printThis, rejected, considering
 
     /// The flag's word on its chip.
-    public var title: String { self == .printThis ? "Print" : "Rejected" }
+    public var title: String {
+        switch self {
+        case .printThis: return "Print"
+        case .rejected: return "Rejected"
+        case .considering: return "In consideration"
+        }
+    }
     /// The toast after a tap: "Rejected removed" (· Undo).
     public var removedText: String { "\(title) removed" }
 
-    func isOn(_ m: ResultMark) -> Bool { self == .printThis ? m.printThis : m.rejected }
+    func isOn(_ m: ResultMark) -> Bool {
+        switch self {
+        case .printThis: return m.printThis
+        case .rejected: return m.rejected
+        case .considering: return m.inConsideration
+        }
+    }
     func clear(_ m: inout ResultMark) {
         switch self {
         case .printThis: m.printThis = false
         case .rejected: m.rejected = false
+        case .considering: m.inConsideration = false
         }
     }
 }
@@ -296,6 +309,7 @@ public final class LibraryModel: ObservableObject {
         switch flag {
         case .printThis: togglePrint(folder: folder, result: result)
         case .rejected: toggleReject(folder: folder, result: result)
+        case .considering: break   // only a Compare that ends on its second Tie sets it
         }
     }
 
@@ -303,6 +317,33 @@ public final class LibraryModel: ObservableObject {
         guard let u = flagUndo else { return }
         edit(u.folder) { $0.setMark(u.before) }
         flagUndo = nil
+    }
+
+    // MARK: ★ Compare's marks, made as he goes (his iPad notes 11-05, ledger L3, his "Yes, as written")
+
+    /// Better under the other side: this one is Rejected (Print this and In consideration come off, as Reject does).
+    public func rejectInCompare(_ item: CompareItem) {
+        edit(item.folder) { v in
+            var m = v.mark(for: item.result)
+            m.rejected = true; m.printThis = false; m.inConsideration = false
+            v.setMark(m)
+        }
+    }
+
+    /// Compare ended. The last one left becomes the part's chosen (as Pick this); a second Tie leaves the undecided ones In
+    /// consideration. Returns the toast: "v1a chosen · 4 rejected", or "3 in consideration · 2 rejected".
+    public func finishCompare(_ end: CompareSession.End, rejected: Int) -> String {
+        switch end {
+        case let .chosen(item):
+            pick(folder: item.folder, result: item.result)
+            let name = version(item.folder).map { "v\($0.number)" } ?? ""
+            return "\(name)\(ResultMark.letter(item.result)) chosen · \(rejected) rejected"
+        case let .undecided(items):
+            for i in items {
+                edit(i.folder) { v in var m = v.mark(for: i.result); m.inConsideration = true; v.setMark(m) }
+            }
+            return "\(items.count) in consideration · \(rejected) rejected"
+        }
     }
 
     // MARK: ★ the part's chosen result (his answer 11-03; the reviewer's 11-04 18:56Z bullets)
