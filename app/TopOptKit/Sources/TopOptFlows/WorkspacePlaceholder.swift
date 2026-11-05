@@ -110,6 +110,9 @@ public struct WorkspacePlaceholder: View {
     /// ★ B6 s1b (note 28, N2): the face row opened on Lattice Setup (its key), and the lattice groups opened by their disclosure.
     @State private var latticeFacePick: String?
     @State private var latticeOpenGroups: Set<UUID> = []
+    /// ★ B6 s2a (23a, R2.1): the Topology panel on Lattice Setup is open (closed by default), and its opened folders.
+    @State private var latticeTopologyOpen = false
+    @State private var latticeTopologyFolders: Set<UUID> = []
     @StateObject private var flexibleMain = FlexibleMainStage()   // Flexible (PR #362): the ONE Flexible model per project + the main page's lattice (FlexibleMainStage.swift)
     @State private var strutScene: LatticeSDFScene? = nil
     @State private var strutSceneToken = 0
@@ -9521,12 +9524,34 @@ public struct WorkspacePlaceholder: View {
     /// makes "attached to the bottom edge, but off it" a property of the layout
     /// instead of a number that has to keep being right.
     private var selectionsPanel: some View {
+        ZStack(alignment: .topLeading) {
+            selectionsColumn
+            // ★ B6 s2a (23a, R2.1; mockup #lat-setup-topo-open): open, the Topology panel takes the top of the left column and
+            // Selections folds to its pill at the bottom left
+            if latticeSetupUp, latticeTopologyOpen {
+                GeometryReader { geo in
+                    latticeTopologyPanel(maxHeight: Swift.max(3 * DSParts.rowHeight,
+                                                              geo.size.height - PageChrome.panelTop - PageChrome.panelBottom
+                                                              - DSParts.headerHeight - PageChrome.gap))
+                        .latticeBandChipKeepOut()
+                        .pageLeftModal(canvasHeight: geo.size.height, minimized: false, canvasWidth: geo.size.width)
+                }
+            }
+        }
+        // R2.1: opening Selections folds Topology; leaving Lattice Setup leaves both as Topology's page expects them
+        .onChange(of: selectionsCollapsed) { collapsed in if !collapsed, latticeTopologyOpen { latticeTopologyOpen = false } }
+        .onChange(of: latticeSetupUp) { up in if !up, latticeTopologyOpen { latticeTopologyOpen = false; selectionsCollapsed = false } }
+    }
+
+    private var selectionsColumn: some View {
         VStack(alignment: .leading, spacing: DS.Space.s) {
             // ★ ABOVE THE CARD WHEN MINIMIZED (maintainer, 2026-08-17: "The
             // 'lattice preview' notification should go *on top* of the minimized
             // selections modal when it is in the bottom left corner"). Below it
             // when the panel is open, where "under the modal" is what reads.
             if selectionsCollapsed { latticePreviewNotice }
+            // ★ B6 s2a (23a): closed, the Topology panel is its header, on top of Selections
+            if latticeSetupUp, !latticeTopologyOpen { latticeTopologyPanel(maxHeight: nil) }
             // ★ B5: Edit faces shows today's library card (the Surface stage's), whose header carries Regions.
             if editFaces.isEditing { selectionsLibraryCard }
             else if flexibleMain.owns(project, stage), !editFaces.isEditing, !fullScreenPageUp { FlexibleSelectionsList(project: project, main: flexibleMain, collapsed: $selectionsCollapsed, cards: latticeSelectableCards, groupCards: latticeFaceCards, cardsChanged: { refreshLatticeFaceCards() }) }   // Flexible (PR #362) H25: the B1 list (one quiet line per group; the picked group's faces with their depth/expand boxes and (i)) · Flexible (PR #362) H61: off under Edit faces (B5's mode has the page)
@@ -10835,6 +10860,70 @@ public struct WorkspacePlaceholder: View {
         project.syncForceGroups()
         refreshLatticeFaceCards()
         model.toast = LatticeSetupCopy.removed(project.latticeSelectableName(ref))
+    }
+
+    // MARK: B6 s2a — the Topology panel on Lattice Setup (notes 19, 23a, 23b, R2.1)
+
+    /// ★ B6 s2a (mockup #lat-setup / #lat-setup-topo-open): Topology's scenarios and groups on top of Selections, closed by
+    /// default; open, each with its include switch (note 23b). Topology and Selections are an accordion (R2.1).
+    private func latticeTopologyPanel(maxHeight: CGFloat?) -> some View {
+        DSPanel(key: "latticeTopologyPanel", title: LatticeSetupCopy.topology, count: selection.groups.count, maxHeight: maxHeight,
+                open: Binding(get: { latticeTopologyOpen }, set: { setLatticeTopologyOpen($0) })) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(LatticeSetupCopy.includeLine).font(.system(size: 12.5)).foregroundStyle(DS.Color.textSecondary.color)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(DSParts.publish("latticeTopologyLine"))
+                if !project.lattice.topologyExcluded.isEmpty {
+                    // ★ his 11-03 rule: the job stays as today until the engine takes the include list (E2) — one plain line
+                    Text(LatticeSetupCopy.includeWaits).font(.system(size: 12.5)).foregroundStyle(DS.Color.warning.color)
+                        .padding(.horizontal, 14).padding(.bottom, 8)
+                        .background(DSParts.publish("latticeIncludeWaits"))
+                }
+                if force.hasScenarios {
+                    ForEach(force.scenarioList, id: \.id) { s in
+                        let open = latticeTopologyFolders.contains(s.id)
+                        DSRow(.folder, key: "latticeTopoFolder-\(s.id.uuidString)", mark: .folder, name: s.name, disclosure: open,
+                              tap: { if open { latticeTopologyFolders.remove(s.id) } else { latticeTopologyFolders.insert(s.id) } }) {
+                            latticeIncludeSwitch(s.id, name: s.name)
+                        }
+                        if open {
+                            ForEach(selection.groups.filter { force.group($0.id, isIn: s.id) }) { g in
+                                latticeTopologyRow(g).padding(.leading, SelectionsList.folderIndent)
+                            }
+                        }
+                    }
+                    ForEach(scenarioLooseGroups) { g in latticeTopologyRow(g) }
+                } else {
+                    ForEach(selection.groups) { g in latticeTopologyRow(g) }
+                }
+            }
+        }
+    }
+
+    /// One Topology group on Lattice Setup (§4.4's include row): its colour, name, role glyph, value and include switch.
+    private func latticeTopologyRow(_ g: SelectionGroup) -> some View {
+        let glyph = RoleGlyphs.glyphs(project, g.id, readsLattice: false).first
+        return DSRow(.include, key: "latticeTopo-\(g.id.uuidString)", mark: .colour(g.color), name: g.name,
+                     role: glyph.map { (glyph: $0.symbol, colour: $0.tint) }, value: topologyGroupSummary(g)) {
+            latticeIncludeSwitch(g.id, name: g.name)
+        }
+    }
+
+    /// ★ Note 23b: a scenario's or group's include switch — on unless switched off for this lattice.
+    private func latticeIncludeSwitch(_ id: UUID, name: String) -> some View {
+        DSSwitch(isOn: !project.lattice.topologyExcluded.contains(id), key: "latticeInclude-\(id.uuidString)", small: true) {
+            if project.lattice.topologyExcluded.contains(id) { project.lattice.topologyExcluded.remove(id) }
+            else { project.lattice.topologyExcluded.insert(id) }
+        }
+        .accessibilityLabel("\(name): in this lattice")
+    }
+
+    /// R2.1: opening Topology folds Selections; closing it opens Selections again (the mockup's fold).
+    private func setLatticeTopologyOpen(_ open: Bool) {
+        withAnimation(DS.Motion.emphasized) {
+            latticeTopologyOpen = open
+            selectionsCollapsed = open
+        }
     }
 
     /// Drag the drawer's depth number. It writes the GROUP's depth, which every

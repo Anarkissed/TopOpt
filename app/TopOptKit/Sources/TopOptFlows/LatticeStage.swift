@@ -193,6 +193,12 @@ public enum LatticeSetupCopy {
     }
     /// Note 22's tag on a face row.
     public static func alsoIn(_ group: String) -> String { "also in \(group)" }
+    // ★ B6 s2a — the Topology panel (notes 23a, 23b)
+    public static let topology = "Topology"
+    public static let includeLine = "Switched-off groups are left out of this lattice."
+    /// While any switch is off: the job stays as today until the engine takes the include list (his 11-03 rule).
+    public static let includeWaits = "The run still uses them until the engine update"
+
     /// The toast after a face row's trash (Undo, top left, brings it back).
     public static func removed(_ name: String) -> String { "\(name) removed \u{00B7} Undo brings it back" }
 }
