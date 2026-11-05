@@ -595,6 +595,13 @@ public struct WorkspacePlaceholder: View {
         get { project.selection }
         nonmutating set { project.selection = newValue }
     }
+    /// ★ B6 (notes 22, 23): the groups THIS stage edits and draws — the Lattice stage's own list there (Structural /
+    /// Aesthetic; Flexible stays on Topology's until B9), Topology's everywhere else. `selection` stays Topology's, so
+    /// Optimize, the arrows and the scenarios never read a lattice group.
+    private var stageList: SelectionModel {
+        get { stage == .lattice ? project.latticeList : project.selection }
+        nonmutating set { if stage == .lattice { project.latticeList = newValue } else { project.selection = newValue } }
+    }
     private var force: ForceModel {
         get { project.force }
         nonmutating set { project.force = newValue }
@@ -809,7 +816,7 @@ public struct WorkspacePlaceholder: View {
                 }
             MetalMeshView(mesh: flexibleMain.mesh(project, on: stage) ?? stageMesh,   // Flexible (PR #362) H4: the part + its dented map quads
                           camera: cameraModel,
-                          selection: selection,
+                          selection: stageList,   // ★ B6: the Lattice stage draws its own groups
                           // ★ §6 — THE SURFACE STAGE DOES NOT WEAR THE TO PAGE'S
                           // COLOURS (maintainer, 2026-08-14: "all colours from the
                           // TO page cannot be the same in the Surface page … they
@@ -2396,7 +2403,7 @@ public struct WorkspacePlaceholder: View {
     /// reaching INTO the part, tinted by the role the user gave THAT primitive
     /// (§3c) — include mid-violet, exclude deep indigo.
     private var latticeDepthPlaneItems: [ClearanceRenderItem] {
-        let active = selection.activeGroupID
+        let active = stageList.activeGroupID
         // ★ A HIDDEN GROUP DRAWS NO PRIMITIVE (maintainer, 2026-08-18: "view or
         // hide all the primitives/colours of that group"). The group is
         // untouched — still anchored, still latticed, still in the job — it is
@@ -2412,7 +2419,7 @@ public struct WorkspacePlaceholder: View {
     /// The ladder page's region volumes — the pre-separation behaviour, kept for
     /// the page that is about a finished variant's regions.
     private var latticeRegionRenderItems: [ClearanceRenderItem] {
-        let active = selection.activeGroupID
+        let active = stageList.activeGroupID
         var items = project.clearanceVolumes().map {
             ClearanceRenderItem(volume: $0.volume, selected: $0.groupID == active,
                                 tint: latticeRegionTint(project.lattice.enabled
@@ -2508,11 +2515,9 @@ public struct WorkspacePlaceholder: View {
         if stage == .lattice {
             let loop = project.surfaceLoopRespectingRegions(
                 FaceTopology.loop(fromFace: faceID, in: mesh), from: faceID)
-            if let gid = LatticeLibraryTap.route(faceID: faceID, loop: loop,
-                                                 selection: &selection) {
+            if let gid = project.latticeStageTap(face: faceID, loop: loop) {   // ★ B6: the lattice list (LatticeList)
                 latticeDisclosure.toggle(gid.uuidString)
             }
-            force.sync(groups: selection.groups)
             refreshLatticeFaceCards()
             return
         }
@@ -2528,7 +2533,7 @@ public struct WorkspacePlaceholder: View {
                    groupClearanceFaces(g).contains(faceID) || !force.manualPrimitives(for: gid).isEmpty {
                     chipsRevealedGroup = gid
                 }
-                force.sync(groups: selection.groups)
+                project.syncForceGroups()
             }
             return
         }
@@ -2561,7 +2566,7 @@ public struct WorkspacePlaceholder: View {
         } else if chipsRevealedGroup != selection.activeGroupID {
             chipsRevealedGroup = nil
         }
-        force.sync(groups: selection.groups)
+        project.syncForceGroups()
     }
 
     /// Brush callback from the viewer (paint mode, handoff 2026-07-25). Each sample resolves the
@@ -2583,7 +2588,7 @@ public struct WorkspacePlaceholder: View {
                                               modelRotation: settleQuat, modelCenter: meshCenter)
             guard !tris.isEmpty else { return }
             project.paintStroke(paintErasing ? .erase : .add, triangles: tris)
-            force.sync(groups: selection.groups)
+            project.syncForceGroups()
         case .ended:
             project.persistPaint()
         }
@@ -5842,6 +5847,9 @@ public struct WorkspacePlaceholder: View {
             // there it is the column's one chip (greyed on STEP, `EditFacesPaint`), and on no stage outside it.
             if editFaces.isEditing { return id == .paint && viewerMesh != nil }
             if stage == .topology { return false }
+            // ★ B6 s1 (note 21): on the Lattice stage the chips are the Settings panel's rows; the band chips' Show / Hide stays
+            // (the lattice-only view's own, not one of the chips his note moves)
+            if stage == .lattice { return id == .bandChips && bandChipsAvailable }
             switch id {
             // The Face-protection depth chip appears only once ≥ 1 face is protected (124).
             case .faceProtectDepth: return force.explicitProtectCount(in: selection.groups) > 0
@@ -6708,7 +6716,7 @@ public struct WorkspacePlaceholder: View {
         var items: [ClearanceHandleItem] = []
         for entry in project.groupView.showing(project.clearanceHandles(), group: { $0.groupID }) {   // Flexible (PR #362) H49b: a hidden group's clearance knobs + value chips are not drawn, so they stop catching taps (GroupEyeHides)
             // ★ his iPad 10-26 (2)(3): only the selected group's, and only the selected piece's when one is picked
-            guard SelectionArrowRule.chipsShow(group: entry.groupID, piece: entry.faceID, selectedGroup: selection.activeGroupID,
+            guard SelectionArrowRule.chipsShow(group: entry.groupID, piece: entry.faceID, selectedGroup: stageList.activeGroupID,
                                                selectedPiece: gizmoPieceKey ?? selectedPieceKey),   // ★ app-wide chip rule (10-27)
                   SelectionArrowRule.pieceDrawn(group: entry.groupID, piece: entry.faceID, hidden: hiddenPieces),
                   force.scenarioDraw(entry.groupID, applies: scenariosApply) == .shown else { continue }   // ★ no knobs off the open scenario
@@ -6997,7 +7005,7 @@ public struct WorkspacePlaceholder: View {
                 selection.addRegions([piece], to: target)
             }
         }
-        force.sync(groups: selection.groups)
+        project.syncForceGroups()
         return true
     }
 
@@ -8512,7 +8520,7 @@ public struct WorkspacePlaceholder: View {
         else { return false }
         // ★ "SELECTED" MEANS EITHER WAY IN (maintainer, 2026-08-17: "I do not see
         // a handle for the expansion of a face"). The first cut required
-        // `selection.activeGroupID`, which is set by tapping the group's BODY —
+        // `stageList.activeGroupID`, which is set by tapping the group's BODY —
         // but the natural way to reach a face's controls is to EXPAND its row,
         // which writes the disclosure and never touches the active group. So a
         // user looking straight at the Expand number had no handle beside it.
@@ -8520,7 +8528,7 @@ public struct WorkspacePlaceholder: View {
         if latticeDisclosure.isExpanded(plane.ref,
                                         regions: project.faceRegions) { return true }
         if latticeDisclosure.isExpanded(plane.groupID.uuidString) { return true }
-        return plane.groupID == selection.activeGroupID
+        return plane.groupID == stageList.activeGroupID
     }
 
     /// Where the expand knob sits: OUT along an in-plane axis, at the current
@@ -8785,7 +8793,7 @@ public struct WorkspacePlaceholder: View {
     /// The Auto suggestion (mm) for a group's role — the reference the crossing haptic
     /// fires at. Nil for a bolt role with no bore geometry.
     private func clearanceAutoValue(_ gid: UUID, role: ClearanceHandle.Role) -> Float? {
-        guard let g = selection.groups.first(where: { $0.id == gid }) else { return nil }
+        guard let g = stageList.groups.first(where: { $0.id == gid }) else { return nil }
         switch role {
         case .margin:
             return project.clearanceBoreRadius(for: g).map { Float(ClearanceSuggestion.boltMarginMM(boreRadiusMM: $0)) }
@@ -8819,13 +8827,13 @@ public struct WorkspacePlaceholder: View {
     /// a control so it can't nudge a primitive. The transform math is the pure, tested
     /// `PrimitiveGizmo`; THIS gesture + body draw are the device-QA'd layers.
     @ViewBuilder private var primitiveGizmoOverlay: some View {
-        if let proj = projection, let gid = selection.activeGroupID, project.groupView.drawsPrimitiveKnobs(forActive: gid) {   // Flexible (PR #362) H49c: a hidden active group draws no move knobs / gizmo (GroupEyeHides)
+        if let proj = projection, let gid = stageList.activeGroupID, project.groupView.drawsPrimitiveKnobs(forActive: gid) {   // Flexible (PR #362) H49c: a hidden active group draws no move knobs / gizmo (GroupEyeHides)
             ZStack(alignment: .topLeading) {
                 ForEach(project.manualPrimitives(in: gid)) { mp in
                     if liveGizmo == GizmoTarget(group: gid, id: mp.id) {
                         gizmoHandles(proj, group: gid, mp: mp)
                     } else if SelectionArrowRule.chipsShow(group: gid, piece: ProjectModel.manualFaceKey(mp.id),
-                                                           selectedGroup: selection.activeGroupID, selectedPiece: selectedPieceKey),
+                                                           selectedGroup: stageList.activeGroupID, selectedPiece: selectedPieceKey),
                               let pt = proj.project(settledWorld(SIMD3<Float>(mp.center))) {   // ★ app-wide chip rule (10-27)
                         // Round-2 T6: the move knob is the ONLY way to grab a
                         // primitive — enlarged (26 → 40 pt glass, ~64 pt hit
@@ -9166,7 +9174,7 @@ public struct WorkspacePlaceholder: View {
     private func selectNewPrimitive(_ id: UUID?, in gid: UUID) {
         addingPrimitiveGroup = nil
         guard let id else { return }
-        selection.setActive(gid)
+        stageList.setActive(gid)
         setPickedPiece(SelectionArrowRule.PieceRef(group: gid, key: ProjectModel.manualFaceKey(id)))   // ★ its row is the picked one
         setGizmo(GizmoTarget(group: gid, id: id))
         chipsRevealedGroup = gid   // T2: an explicit primitive interaction reveals its chips
@@ -9758,7 +9766,7 @@ public struct WorkspacePlaceholder: View {
 
     /// `inList`: the open group's rows under SelectionsList's line (B3) — the line already carries the eye and the trash.
     private func groupRow(_ g: SelectionGroup, inList: Bool = false) -> some View {
-        let active = g.id == selection.activeGroupID
+        let active = g.id == stageList.activeGroupID   // ★ B6
         let tint = force.tint(for: g)
         return VStack(alignment: .trailing, spacing: 5) {
           HStack(alignment: .top, spacing: DS.Space.s) {
@@ -9777,7 +9785,7 @@ public struct WorkspacePlaceholder: View {
                                           set: { if !$0 { recoloringGroup = nil } })) {
                 HStack(spacing: DS.Space.sm) {
                     ForEach(Array(DS.Color.groupPalette.enumerated()), id: \.offset) { idx, c in
-                        Button { selection.setColorIndex(g.id, idx); recoloringGroup = nil } label: {
+                        Button { stageList.setColorIndex(g.id, idx); recoloringGroup = nil } label: {
                             Circle().fill(c.color).frame(width: 28, height: 28)
                                 .overlay(Circle().strokeBorder(
                                     g.colorIndex == idx ? DS.Color.textPrimary.color : .clear, lineWidth: 2))
@@ -9891,7 +9899,7 @@ public struct WorkspacePlaceholder: View {
         // different group's rename was open, tapping away commits + closes it.
         .onTapGesture {
             if renamingGroup != nil, renamingGroup != g.id { renamingGroup = nil }
-            selection.setActive(g.id)
+            stageList.setActive(g.id)   // ★ B6
             // T2: tapping the group IN THE LIBRARY is one of the three explicit
             // paths that reveal its primitive chips.
             chipsRevealedGroup = g.id
@@ -9921,7 +9929,7 @@ public struct WorkspacePlaceholder: View {
                 .foregroundStyle(DS.Color.textPrimary.color)
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    selection.setActive(g.id)
+                    stageList.setActive(g.id)   // ★ B6
                     renamingGroup = g.id
                     chipsRevealedGroup = g.id   // T2: a name tap is a group tap too
                 }
@@ -9930,8 +9938,8 @@ public struct WorkspacePlaceholder: View {
     }
 
     private func binding(for g: SelectionGroup) -> Binding<String> {
-        Binding(get: { selection.groups.first { $0.id == g.id }?.name ?? g.name },
-                set: { selection.rename(g.id, to: $0) })
+        Binding(get: { stageList.groups.first { $0.id == g.id }?.name ?? g.name },
+                set: { stageList.rename(g.id, to: $0) })
     }
 
     /// A group's OWN keep-clear faces (bores + explicit slabs) — the WITHIN-group scope the Sync
@@ -10001,7 +10009,7 @@ public struct WorkspacePlaceholder: View {
         // reveal requires a tap on the primitive, one of its faces, or the group
         // row — a face tap that merely grew a selection no longer pops the chips
         // open under the finger. Otherwise: the compact summary.
-        if everyPiece || (g.id == selection.activeGroupID && chipsRevealedGroup == g.id) {
+        if everyPiece || (g.id == stageList.activeGroupID && chipsRevealedGroup == g.id) {
             lockedClearanceEditor(g)
         } else {
             compactClearanceEditor(g)
@@ -10909,7 +10917,11 @@ public struct WorkspacePlaceholder: View {
     /// group's EFFECTIVE keep-clear, auto rule included, so an auto-cleared bore
     /// is blocked for the reason it is actually blocked.
     private func latticeRoleBlock(_ g: SelectionGroup) -> LatticeFaceRoleGate.Block? {
-        LatticeFaceRoleGate.block(
+        // ★ B6 (notes 24, 27, Q5): a lattice group's own role is its declaration; only Keep clear blocks it
+        if stage == .lattice, project.usesLatticeList {
+            return force.keepClearAffix(for: g.id) == .on ? .keepClear : nil
+        }
+        return LatticeFaceRoleGate.block(
             kind: force.kind(for: g.id),
             protected: force.isProtected(g.id),
             // EXPLICIT only — an anchored bore's AUTO bolt clearance is a derived
@@ -10952,7 +10964,7 @@ public struct WorkspacePlaceholder: View {
             return
         }
         let keysCopy = keys
-        let groupKeys = Set(selection.groups.map(\.id.uuidString))
+        let groupKeys = Set(stageList.groups.map(\.id.uuidString))
         latticeCardsToken += 1
         let token = latticeCardsToken
         let resolution = Self.latticeCardPreviewResolution
@@ -11100,7 +11112,7 @@ public struct WorkspacePlaceholder: View {
                 pieceCard(g, key: Int(p.id), title: ClearanceChipLayout.kindLabel(p.kind) + " \(i + 1)",
                           pickID: "pick-auto-\(p.id)", trashID: "delete-auto-\(p.id)",
                           // G2 / round-2 T6: the move icon converts an auto-found keep-out to a movable primitive
-                          grab: selection.activeGroupID == g.id ? (id: "grab-auto-\(p.id)", action: {
+                          grab: stageList.activeGroupID == g.id ? (id: "grab-auto-\(p.id)", action: {
                               selectNewPrimitive(project.convertAutoClearanceToManual(face: p.id, in: g.id), in: g.id)
                           }) : nil,
                           delete: { project.deleteAutoClearance(face: p.id, in: g.id) }) {
@@ -11168,7 +11180,7 @@ public struct WorkspacePlaceholder: View {
     private func emptyTapClears() {
         guard !(flexibleMain.owns(project, stage) && !fullScreenPageUp), !visible.surfaceEditing, !editFaces.isEditing else { return }
         selection.clearActive(); setPickedPiece(nil); chipsRevealedGroup = nil
-        force.sync(groups: selection.groups)
+        project.syncForceGroups()
     }
 
     // MARK: ★ LOAD SCENARIOS (his order 2026-10-26 + the 03:32 anchor addendum; the model is LoadScenarios.swift)
@@ -11787,7 +11799,7 @@ public struct WorkspacePlaceholder: View {
         renamingGroup = nil
         addingPrimitiveGroup = nil
         chipsRevealedGroup = nil
-        selection.clearActive()
+        stageList.clearActive()   // ★ B6
     }
 
     // MARK: in-scene force arrows (D6)
@@ -12085,7 +12097,8 @@ public struct WorkspacePlaceholder: View {
             // selection already exists — that is the precondition for being
             // there — so the sentence is noise occupying the width the second
             // action button needs.
-            if Self.hintShows(showsSelectionHint: visible.showsSelectionHint, selectionsCollapsed: selectionsCollapsed) {
+            // ★ B6 s1 (the approved mockup #lat-setup): Lattice Setup has the hint again — its corner is Topology's three now
+            if Self.hintShows(showsSelectionHint: visible.showsSelectionHint || latticeSetupUp, selectionsCollapsed: selectionsCollapsed) {
                 // ★ LOOK PER SCREEN (11-04, the mockup's .hint): one 36 pt line that gives way before the corner does
                 Text(hint)
                     .font(.system(size: 12.5)).lineLimit(1).truncationMode(.tail)
@@ -12093,6 +12106,7 @@ public struct WorkspacePlaceholder: View {
                     .padding(.horizontal, 14).frame(height: 36)
                     .background(Capsule().fill(DS.Surface.bar.color))
                     .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
+                    .background(DSParts.publish("stageHint"))
                     .layoutPriority(-1)
             }
             Spacer()
@@ -12104,10 +12118,8 @@ public struct WorkspacePlaceholder: View {
                 // parameters and the chip column, as rows) and the Optimize split button.
                 AnyView(topologyCornerPair)   // Flexible (PR #362) H57
             } else if !editFaces.isEditing, stage == .lattice {
-                // ★ B4: the lattice split — Lattice, and ⌃ for its steps (Preview → Core → Export)
-                ComputeLocationControl(compute: compute)
-                printParamsButton
-                latticeSplit
+                // ★ B6 s1 (note 21): Topology's corner — [Settings ⌄] [Lattice] [⌃]; iPad and Print Parameters are Settings rows
+                AnyView(latticeCornerPair)
             } else {
             ComputeLocationControl(compute: compute)
             printParamsButton
@@ -12149,8 +12161,14 @@ public struct WorkspacePlaceholder: View {
         showsSelectionHint && !selectionsCollapsed
     }
 
+    /// ★ B6 s1: the Lattice stage's Setup page is up (not the Lattice page, Edit faces or Flexible's own page).
+    private var latticeSetupUp: Bool {
+        stage == .lattice && !editFaces.isEditing && !showLatticePage && !showLatticeWizard && !flexibleMain.owns(project, stage)
+    }
+
     private var hint: String {
         if force.phase == .setup { return "Tap the face that points at the floor · drag to orbit" }
+        if latticeSetupUp { return LatticeSetupCopy.hint }   // ★ B6 s1: taps make lattice groups
         if let g = activeGroup {
             let k = force.kind(for: g.id)
             if force.needsRole(g.id, latticeRoleGroups: latticeRoleGroupIDs) { return "Tap more faces to grow the selection, then choose Anchor or Load" }
@@ -12688,15 +12706,80 @@ extension WorkspacePlaceholder {
         } split: {
             topologyOptimizeSplit
         } panel: {
-            if setupPanelOpen {
-                // ★ LOOK PER SCREEN (T3, §4.19 "A Panel (4.3)"): the header folds it away; a row below the fold says "N more ⌄"
-                DSPanel(key: "settingsPanel", title: "Settings", width: showBuildOrientation ? 600 : DSParts.panelWidth, maxHeight: 620,
-                        open: Binding(get: { true }, set: { if !$0 { withAnimation(DS.Motion.emphasized) { setupPanelOpen = false } } })) {
-                    topologySetupRows
-                }
-                .background(CornerPairStyle.publish("cornerPanel"))   // (B2, U12/U16: the lane and the fix line read it)
-            }
+            if setupPanelOpen { settingsPanel }
         }
+    }
+
+    /// ★ LOOK PER SCREEN (T3, §4.19 "A Panel (4.3)"): the corner's Settings panel — the header folds it away; a row below the
+    /// fold says "N more ⌄". ★ B6 s1: the Lattice corner opens the same one (note 21: its chips and buttons are these rows).
+    private var settingsPanel: some View {
+        DSPanel(key: "settingsPanel", title: "Settings", width: showBuildOrientation ? 600 : DSParts.panelWidth, maxHeight: 620,
+                open: Binding(get: { true }, set: { if !$0 { withAnimation(DS.Motion.emphasized) { setupPanelOpen = false } } })) {
+            topologySetupRows
+        }
+        .background(CornerPairStyle.publish("cornerPanel"))   // (B2, U12/U16: the lane and the fix line read it)
+    }
+
+    // MARK: the Lattice corner (B6 s1)
+
+    /// ★ B6 s1 (his note 21, mockup #lat-setup / #lat-corner): "Should have the same bottom right corner as Topology: Settings |
+    /// Lattice | ^" — the Settings chip, the Lattice run button and ⌃, with the fix line above while no lattice is set.
+    var latticeCornerPair: some View {
+        CornerPair(geometry: chromeGeometry, open: setupPanelOpen ? "setup" : nil, fixLine: latticeFixLine) {
+            topologySetupChip
+        } split: {
+            latticeSplit
+        } panel: {
+            if setupPanelOpen { settingsPanel }
+        }
+    }
+
+    /// ★ B6 s1 (N4, mockup #lat-setup): "No lattice settings yet · Open Lattice" just above the corner while nothing is saved on the
+    /// Lattice page (Save is what turns the lattice on).
+    private var latticeFixLine: AnyView? {
+        guard !project.lattice.enabled, run.phase != .running else { return nil }
+        return AnyView(HStack(spacing: DS.Space.s) {
+            Text(LatticeSetupCopy.noSettings).font(.system(size: 12)).foregroundStyle(DS.Color.warning.color).lineLimit(1).fixedSize()
+            DSChip(.fix(LatticeSetupCopy.openLattice), key: "latticeFixChip") { showLatticeWizard = true }
+        }
+        .background(CornerPairStyle.publish("latticeFixLine")))
+    }
+
+    /// ★ B6 s1 (§4.6): the Lattice run button — today's Lattice (its gate, its taps) on the corner's run button. Ready: "Octet · 2
+    /// groups"; nothing saved yet: grey, "Save a lattice first" (its tap opens the Lattice page, as the fix line does); a refusal:
+    /// its words, grey when its tap goes where the fix is; while the lattice run goes: "Latticing", a tap views it.
+    private var latticeRunButton: some View {
+        let ok = canLatticeThis
+        let summary = latticeThisSummary
+        let marks = !ok && wallMarkingTapGoesSomewhere && LatticeJobIncludeGate.opensWallMarking(summary)
+        let opensType = opensLatticeType(ok, summary)
+        let notSet = !project.lattice.enabled
+        let runs = run.phase == .running && lastRunWasLattice
+        let groups = latticeRegionTabNames.count
+        let line = runs ? RunProgressReadout.buttonLine(run)
+            : notSet ? LatticeSetupCopy.saveFirst
+            : ok && groups > 0 && !(runCouldntFinish && lastRunWasLattice)
+                ? LatticeSetupCopy.ready(type: LatticeType.displayName(forID: project.lattice.topologyID), groups: groups)
+            : summary
+        let state: DSRunButton.State = runs ? .running(line) : ok ? .ready : notSet || marks || opensType ? .grey(line) : .disabled(line)
+        return DSRunButton(runs ? LatticeSetupCopy.running : "Lattice", subtitle: line, state: state, key: "latticeButton") {
+            if runs { run.restore(); return }
+            if ok { requestLatticeRun() } else if notSet { showLatticeWizard = true }
+            else if marks { goToWallMarking() } else if opensType { goToLatticeType() }
+        }
+        .accessibilityHint(marks ? WallMarkingSubline.hint : opensType || notSet ? Self.latticeTypeTapHint : line)
+    }
+
+    /// ★ B6 s1 (note 21): "Lattice an optimized result ›" — this run's results, each as the Library names it ("v7a"); a tap
+    /// opens the Lattice page on that result, as Results' own Lattice does (its entry gate greys one that can't be latticed).
+    private var latticeResultChoices: [(index: Int, title: String, enabled: Bool, why: String?)] {
+        guard let o = run.outcome else { return [] }
+        var out: [(index: Int, title: String, enabled: Bool, why: String?)] = []
+        for (i, v) in o.variants.enumerated() where v.accepted {
+            let e = latticeEntry(i)
+            out.append((i, (versionLabel ?? "") + ResultMark.letter(out.count), e.enabled, e.enabled ? nil : e.reason))
+        }
+        return out
     }
 
     /// ★ LOOK PER SCREEN (11-04): §4.6's glass button — "Settings ⌄" (B2, Q6: the corner chip is Settings everywhere).
@@ -13524,11 +13607,8 @@ extension WorkspacePlaceholder {
                          editFaces: { openEditFaces() },
                          changeType: { askChangeLatticeType() })
                 .onDeleteStage { deleteLatticeStageAsk = true }
-            if let on = LatticeStageCopy.builtOn(achievedVolumeFraction: latticeVariantContext?.achievedVolumeFraction) {
-                Text(on)
-                    .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
-                    .accessibilityIdentifier("lattice-built-on")
-            }
+            // ★ B6 s1 (the reviewer's Q3 (c)): "on −35 %" left the stage row — the corner's ⌃ says it, under "Lattice an
+            // optimized result"
         }
         .latticeBandChipKeepOut()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -13607,43 +13687,64 @@ extension WorkspacePlaceholder {
         if model.saveAsNewProjectForLattice(id: project.id) == nil { model.toast = RerunCard.copyFailedToast }
     }
 
-    /// The lattice split: Lattice (today's button), and ⌃ for its steps — Preview, Core, Export.
+    /// The lattice split: the Lattice run button, and ⌃ — ★ B6 s1 (note 21) its five, in the design's order: Lattice the original
+    /// part · Optimize, then lattice · Lattice an optimized result › · Preview only · Export…
     var latticeSplit: some View {
         let hasResults = acceptedVariantCount > 0
-        return HStack(spacing: 2) {
-            latticeThisButton
-            Menu {
-                Section("Preview") {
-                    Button(showStrutPreview ? "Hide the preview" : "Show the preview") {
-                        if showStrutPreview { showStrutPreview = false } else { armLatticePreview() }
+        let thenLattice = optimizeThenLatticeOK
+        let results = latticeResultChoices
+        // ★ B2 (Q3 (c)) → B6: what the lattice builds on ("on −35 %") is ⌃'s to say now, under the result it came from
+        let builtOn = LatticeStageCopy.builtOn(achievedVolumeFraction: latticeVariantContext?.achievedVolumeFraction)
+        return HStack(spacing: DSParts.cornerGap) {   // §4.18, 12 pt apart
+            latticeRunButton
+            DSSplitButton(key: "latticeSplitMore") {   // §4.6's 64 pt ⌃
+                Button { requestLatticeRun() } label: {
+                    Text(LatticeSetupCopy.original)
+                    Text(latticeThisSummary)
+                }
+                .disabled(!canLatticeThis)
+                .accessibilityIdentifier("lattice-split-core")
+                Button {
+                    if thenLattice { macNotAnswering = false; runCouldntFinish = false; requestRun(lattice: true) }
+                } label: {
+                    Text(TopologyRunCopy.optimizeThenLattice)
+                    Text(optimizeThenLatticeLine)
+                }
+                .disabled(!thenLattice)
+                .accessibilityIdentifier("lattice-split-optimize")
+                if results.isEmpty {
+                    // no results yet: a greyed line (a submenu stays live in the menu even when it is disabled)
+                    Button {} label: {
+                        Text(LatticeSetupCopy.optimizedResult)
+                        Text(LatticeSetupCopy.noResults)
                     }
-                    .accessibilityIdentifier("lattice-split-preview")
+                    .disabled(true)
+                    .accessibilityIdentifier("lattice-split-result")
+                } else {
+                    Menu {
+                        ForEach(results, id: \.index) { r in
+                            Button { viewOriginal = true; openLatticePage(variantIndex: r.index) } label: {
+                                Text(r.title)
+                                if let why = r.why { Text(why) }
+                            }
+                            .disabled(!r.enabled)
+                        }
+                    } label: {
+                        Text(LatticeSetupCopy.optimizedResult)
+                        Text(builtOn ?? results.map(\.title).joined(separator: " \u{00B7} "))
+                    }
+                    .accessibilityIdentifier("lattice-split-result")
                 }
-                Section("Core") {
-                    Button(hasResults ? "Re-run in core\u{2026}" : "Run in core") { requestLatticeRun() }
-                        .disabled(!canLatticeThis)
-                        .accessibilityIdentifier("lattice-split-core")
-                    Button("Optimize with this lattice") { requestRun(lattice: true) }
-                        .disabled(!canOptimize(lattice: true))
-                        .accessibilityIdentifier("lattice-split-optimize")
+                Divider()
+                Button(LatticeSetupCopy.previewOnly) {
+                    if showStrutPreview { showStrutPreview = false } else { armLatticePreview() }
                 }
-                Section("Export") {
-                    // today's STL / 3MF export is on Results; this opens it (his tap — never by itself)
-                    Button("Export\u{2026}") { viewOriginal = false }
-                        .disabled(!hasResults)
-                        .accessibilityIdentifier("lattice-split-export")
-                }
-            } label: {
-                Image(systemName: "chevron.up").font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .frame(width: 44, height: 52)
-                    .background(Capsule().fill(DS.Surface.bar.color)
-                        .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
-                    .contentShape(Capsule())
+                .accessibilityIdentifier("lattice-split-preview")
+                // today's STL / 3MF export is on Results; this opens it (his tap — never by itself)
+                Button(LatticeSetupCopy.export) { viewOriginal = false }
+                    .disabled(!hasResults)
+                    .accessibilityIdentifier("lattice-split-export")
             }
-            .menuIndicator(.hidden)
-            .accessibilityLabel("Lattice steps")
-            .accessibilityIdentifier("lattice-split-more")
         }
         .background(CornerPairStyle.publish("latticeSplit"))
     }
@@ -13655,13 +13756,13 @@ extension WorkspacePlaceholder {
     /// pair — Grade lives only on the Cells page.
     var latticeSelectionsList: some View {
         VStack(alignment: .leading, spacing: DS.Space.s) {
-            SelectionsList(project: project, collapsed: $selectionsCollapsed, picked: selection.activeGroupID,
+            SelectionsList(project: project, collapsed: $selectionsCollapsed, picked: stageList.activeGroupID,
                            deleteAsk: topoDeleteAsk,
                            isLocked: { !project.groupView.canEdit($0) },
                            readsLattice: { _ in true },
                            pick: { id in
                                topoDeleteAsk = nil
-                               if selection.activeGroupID == id { leaveGroupEditing() } else { selection.setActive(id) }
+                               if stageList.activeGroupID == id { leaveGroupEditing() } else { stageList.setActive(id) }
                            },
                            askDelete: { topoDeleteAsk = $0 },
                            confirmDelete: { confirmTopologyTrash() },
@@ -13676,6 +13777,7 @@ extension WorkspacePlaceholder {
                            isHidden: { project.groupView.isHidden($0) },
                            toggleEye: { toggleTopologyEye($0) },
                            ask: TopologySelectionsCopy.deleteAsk)
+                .latticeList()   // ★ B6 (notes 22, 23): the Lattice stage's own groups
             if !selectionsCollapsed {
                 // ★ B8 (his answer 2026-10-24): Grade lives ONLY on the Cells page — no Grade pair here.
                 HStack(spacing: DS.Space.s) {

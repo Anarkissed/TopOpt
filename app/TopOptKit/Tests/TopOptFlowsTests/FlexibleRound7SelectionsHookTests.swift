@@ -134,12 +134,15 @@ final class FlexibleRound7SelectionsHookTests: XCTestCase {
             XCTAssertFalse(t.contains("latticeOnlyRoleLanded"), "★ \(f): the hold")
             XCTAssertFalse(t.contains("For lattice now"), "★ \(f): chip N's greyed route line")
         }
+        // ★ RE-PINNED (UI-Notes B6 slice 1, 7e4f0b53): the role gate H35 would have followed moved with Topology's gated roles
+        // to LatticeList.swift (`topologyGatedLatticeRoles`, the migration's filter and Flexible's emission gate)
+        let gate = try Self.text("LatticeList.swift")
         let anchor = "                keepClearOn: force.keepClearAffix(for: id) == .on)\n"
-        XCTAssertEqual(pm.components(separatedBy: anchor).count - 1, 1, "premise: the line H35 would have followed")
-        let withH35 = pm.replacingOccurrences(of: anchor, with: anchor + "                || (\(h35)?.contains(id) == true && force.keepClearAffix(for: id) != .on)   // Flexible (PR #362) H35: x\n")
-        XCTAssertNotEqual(withH35, pm, "premise: the copy carries the approved line")
+        XCTAssertEqual(gate.components(separatedBy: anchor).count - 1, 1, "premise: the line H35 would have followed")
+        let withH35 = gate.replacingOccurrences(of: anchor, with: anchor + "                || (\(h35)?.contains(id) == true && force.keepClearAffix(for: id) != .on)   // Flexible (PR #362) H35: x\n")
+        XCTAssertNotEqual(withH35, gate, "premise: the copy carries the approved line")
         XCTAssertFalse(clean(withH35), "★ RED CONTROL: the approved H35 line put back is caught")
-        XCTAssertFalse(clean(pm.replacingOccurrences(of: anchor, with: anchor + "                // Flexible (PR #362) H35: x\n")),
+        XCTAssertFalse(clean(gate.replacingOccurrences(of: anchor, with: anchor + "                // Flexible (PR #362) H35: x\n")),
                        "★ RED CONTROL: the H35 comment alone is caught too")
     }
 

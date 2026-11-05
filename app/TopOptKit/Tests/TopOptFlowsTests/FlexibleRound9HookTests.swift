@@ -30,7 +30,9 @@ final class FlexibleRound9HookTests: XCTestCase {
              gate: "project.groupView.showing("),
         Hook(id: "H49b", file: ws, pin: "        for entry in project.groupView.showing(project.clearanceHandles(), group: { $0.groupID }) {   // Flexible (PR #362) H49b",
              gate: "project.groupView.showing("),
-        Hook(id: "H49c", file: ws, pin: "        if let proj = projection, let gid = selection.activeGroupID, project.groupView.drawsPrimitiveKnobs(forActive: gid) {   // Flexible (PR #362) H49c",
+        // ★ RE-PINNED (UI-Notes B6 slice 1, 7e4f0b53 — notes 22, 23): the knobs follow the active group of the list the stage
+        // draws (`stageList`: the Lattice stage's own groups there, Topology's elsewhere and on Flexible). Same gate.
+        Hook(id: "H49c", file: ws, pin: "        if let proj = projection, let gid = stageList.activeGroupID, project.groupView.drawsPrimitiveKnobs(forActive: gid) {   // Flexible (PR #362) H49c",
              gate: ", project.groupView.drawsPrimitiveKnobs(forActive: gid)"),
         // ★ RE-PINNED (UI-Notes B3, #362's own note 1 from his iPad 11-03 15:03: Topology's Optimize is topology only; the lattice rides ⌃ "Optimize, then lattice" and the Lattice stage). The run carries its flavour — `lattice` — through the gate, the card, the copy and the copy's one-shot run. Same gates, same card.
         Hook(id: "H50a", file: ws, pin: "        if let last = lastRunRequest, RerunCard.greysOut(sameInputsAsLastRun: model.makeRunRequest(lattice: lattice) == last, existing: run.outcome) { return false }   // Flexible (PR #362) H50a",
