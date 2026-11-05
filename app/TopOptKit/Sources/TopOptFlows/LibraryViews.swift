@@ -76,7 +76,9 @@ public struct LibraryRootView: View {
                     .transition(.opacity).zIndex(3)
             }
             if let req = compare, library.mode == .library {
-                LibraryCompareView(library: library, request: req, close: { compare = nil })
+                // ★ L3: a Compare that ends goes back to the part page, saying what it decided
+                LibraryCompareView(library: library, request: req, close: { compare = nil },
+                                   finished: { compare = nil; model.toast = $0 })
                     .transition(.opacity).zIndex(4)
             }
         }
@@ -1042,8 +1044,14 @@ enum LibraryRejectedView: String, CaseIterable {
 }
 
 extension LibraryFlag {
-    /// ★ His note: Rejected is RED; Print this keeps its green.
-    var colour: RGBA { self == .rejected ? DS.Color.danger : DS.Color.okGreen }
+    /// ★ His note: Rejected is RED; Print this keeps its green; In consideration is amber (L3; U5: amber = look at this).
+    var colour: RGBA {
+        switch self {
+        case .printThis: return DS.Color.okGreen
+        case .rejected: return DS.Color.danger
+        case .considering: return DS.Color.warning
+        }
+    }
     var glyph: String? { self == .printThis ? "printer" : nil }
 }
 
@@ -1213,7 +1221,7 @@ struct LibraryVersionCard: View {
                     .accessibilityIdentifier(k + "-menu")
             }
             .frame(minHeight: DSParts.target)
-            if picked || mark.rejected || mark.printThis {
+            if picked || mark.rejected || mark.printThis || mark.inConsideration {
                 HStack(spacing: 2) {
                     if picked { DSChip(.accentTag("Picked"), key: k + "-picked") }
                     if mark.printThis {
@@ -1221,6 +1229,9 @@ struct LibraryVersionCard: View {
                     }
                     if mark.rejected {
                         LibraryFlagChip(flag: .rejected, key: k + "-rejected") { library.removeFlag(.rejected, folder: v.folderID, result: r) }
+                    }
+                    if mark.inConsideration {   // ★ L3: what a Compare ended on its second Tie left undecided
+                        LibraryFlagChip(flag: .considering, key: k + "-considering") { library.removeFlag(.considering, folder: v.folderID, result: r) }
                     }
                 }
                 .frame(minHeight: DSParts.target)
