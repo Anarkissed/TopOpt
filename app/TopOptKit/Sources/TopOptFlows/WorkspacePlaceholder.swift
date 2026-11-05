@@ -801,6 +801,7 @@ public struct WorkspacePlaceholder: View {
                 .onAppear {
                     topoNotice.seed(accepted: acceptedVariantCount)
                     topoNotice.version = versionLabel   // ★ B3: "v8 is ready"
+                    learnWhatThisVersionRanWith()   // ★ B5 (note 3): "Same settings as v6" after a reopen
                     if RerunCard.takeRunOnOpen(for: project.id) { let l = RerunCard.takeRunOnOpenLattice(); if canOptimize(lattice: l) { startRun(lattice: l) } else { model.toast = RerunCard.copyNotReadyToast } }
                     // B4: a copy made to choose a lattice type (or the lattice card's Save as new) opens on Lattice
                     if let toast = LatticeStageOpen.take(for: project.id) { goToStage(.lattice); if !toast.isEmpty { model.toast = toast } }
@@ -12198,6 +12199,7 @@ public struct WorkspacePlaceholder: View {
                                 latticeRoleGroups: latticeRoleGroupIDs)
         else { return false }
         // Grey out until the inputs change from the last optimized run.
+        if sameSettingsInALibraryVersion(lattice: lattice) { return false }   // ★ B5 (note 3): "Same settings as v6"
         if let last = lastRunRequest, RerunCard.greysOut(sameInputsAsLastRun: model.makeRunRequest(lattice: lattice) == last, existing: run.outcome) { return false }   // Flexible (PR #362) H50a: a finished project can be re-run with the same inputs; the re-run card confirms (RerunCard)
         return true
     }
@@ -12452,6 +12454,7 @@ public struct WorkspacePlaceholder: View {
             if runs { run.restore(); return }   // ★ T5: "tap to view"
             if ok { macNotAnswering = false; runCouldntFinish = false; requestRun(lattice: lattice) } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }
         }
+        .background { if !macFinding && line == TopologyRunCopy.sameSettings(versionLabel) { DSParts.publish("optimizeSameSettings") } }   // ★ B5 (note 3): hosted tests
         .accessibilityHint(marks ? WallMarkingSubline.hint : opensType ? Self.latticeTypeTapHint : line)
     }
 
@@ -12815,8 +12818,25 @@ extension WorkspacePlaceholder {
 
     /// ★ B3 (§4.6 "same settings"): Optimize is grey because nothing changed since this project's last run.
     private func sameSettingsAsLast(lattice: Bool) -> Bool {
+        if sameSettingsInALibraryVersion(lattice: lattice) { return true }   // ★ B5 (note 3)
         guard let last = lastRunRequest else { return false }
         return RerunCard.greysOut(sameInputsAsLastRun: model.makeRunRequest(lattice: lattice) == last, existing: run.outcome)
+    }
+
+    /// ★ B5 (note 3): off the Library, results to re-run over keep Optimize live (the re-run card confirms: H50a). A Library
+    /// version keeps its results and a new run makes the next version, so the same settings grey it: "Optimize as v7" would
+    /// only make this version again.
+    private func sameSettingsInALibraryVersion(lattice: Bool) -> Bool {
+        guard let last = lastRunRequest, model.library.makesNextVersion(of: project.id) else { return false }
+        return model.makeRunRequest(lattice: lattice) == last
+    }
+
+    /// ★ B5 (note 3; the reviewer's (a)): a Library version reopened later learns what it ran with, once: its saved job
+    /// against the job this setup would send. Nothing changed → Optimize reads "Same settings as v6".
+    private func learnWhatThisVersionRanWith() {
+        guard lastRunRequest == nil, model.library.makesNextVersion(of: project.id) else { return }
+        lastRunRequest = LibrarySameSettings.ranWith(savedJob: model.library.store.loadRelatticeArtifacts(id: project.id)?.jobJSON,
+                                                     request: { model.makeRunRequest(lattice: $0) })
     }
 
     /// ★ B3: ⌃ "Optimize, then lattice" runs once a lattice is set and the lattice run may start.
