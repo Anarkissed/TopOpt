@@ -2003,6 +2003,9 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                 wd.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
                 wd.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
                 wd.depthAttachmentPixelFormat = Self.depthFormat
+                // §3b: it lands in the multisampled colour pass. Built 1× it aborted his iPad (Metal validation) whenever
+                // Outlines drew (2026-11-03 / 11-04 crash logs; MSAAPipelineSampleCountTests).
+                wd.rasterSampleCount = raster
 
                 let wvd = MTLVertexDescriptor()
                 wvd.attributes[0].format = .float3            // a

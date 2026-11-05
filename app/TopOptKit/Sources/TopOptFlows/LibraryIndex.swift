@@ -75,6 +75,8 @@ public struct LibraryPart: Codable, Equatable, Sendable, Identifiable {
     /// The same for branches (his decision 11): the highest branch given under each version ("4" → 2
     /// once v4.2 existed). nil = the highest listed.
     public var lastChild: [String: Int]?
+    /// ★ His "chosen" answer (11-03): the ONE result chosen for this part, set by Pick this; nil until he picks one.
+    public var chosen: LibraryChosen?
 
     public init(id: UUID = UUID(), name: String, modelHash: String?, versions: [LibraryVersion] = [],
                 lastNumber: Int? = nil, lastChild: [String: Int]? = nil) {
@@ -93,6 +95,13 @@ public struct LibraryPart: Codable, Equatable, Sendable, Identifiable {
     public func version(folderID: UUID) -> LibraryVersion? { versions.first { $0.folderID == folderID } }
 }
 
+/// A part's chosen result: one version's result (0 = a).
+public struct LibraryChosen: Codable, Equatable, Hashable, Sendable {
+    public let folder: UUID
+    public let result: Int
+    public init(folder: UUID, result: Int) { self.folder = folder; self.result = result }
+}
+
 /// One Optimize: a project folder, plus what the Library knows about it.
 public struct LibraryVersion: Codable, Equatable, Sendable {
     /// The project folder this version is (`ProjectSnapshot.id`).
@@ -108,7 +117,8 @@ public struct LibraryVersion: Codable, Equatable, Sendable {
     public var changes: [VersionChange]
     /// His marks, one entry per result that has any.
     public var marks: [ResultMark]
-    /// The result he picked (an index into the run's variants: 0 = a). nil = the suggested one.
+    /// The result this version showed (an index into the run's variants: 0 = a); nil = the suggested one. Set before his
+    /// "chosen" answer and by Storage's trim; never the part's chosen result (`LibraryPart.chosen`), and never migrated to it.
     public var pickedResult: Int?
     /// A few numbers per result, so a card never decodes the 20 MB results file. nil until known.
     public var summary: [ResultSummary]?
@@ -144,7 +154,7 @@ public struct LibraryVersion: Codable, Equatable, Sendable {
 }
 
 /// His marks on one result. His decision 1 (2026-10-25): stars in half steps, Print this, Rejected;
-/// no Favourite.
+/// no Favourite. ★ His iPad notes 11-05 (L3): In consideration, what a Compare ended on Tie left undecided.
 public struct ResultMark: Codable, Equatable, Sendable {
     /// The result's index in the run's variants (0 = a, 1 = b, 2 = c).
     public let result: Int
@@ -152,12 +162,21 @@ public struct ResultMark: Codable, Equatable, Sendable {
     public private(set) var stars: Double
     public var printThis: Bool
     public var rejected: Bool
+    /// ★ L3: true = In consideration. OPTIONAL, left out when nil, so library.json written before reads (and saves) as it was.
+    public var considering: Bool? = nil
 
-    public init(result: Int, stars: Double = 0, printThis: Bool = false, rejected: Bool = false) {
+    public init(result: Int, stars: Double = 0, printThis: Bool = false, rejected: Bool = false, considering: Bool = false) {
         self.result = result
         self.stars = ResultMark.clampStars(stars)
         self.printThis = printThis
         self.rejected = rejected
+        self.considering = considering ? true : nil
+    }
+
+    /// In consideration.
+    public var inConsideration: Bool {
+        get { considering == true }
+        set { considering = newValue ? true : nil }
     }
 
     public mutating func setStars(_ value: Double) { stars = ResultMark.clampStars(value) }
@@ -168,7 +187,7 @@ public struct ResultMark: Codable, Equatable, Sendable {
         return min(5, max(0, (value * 2).rounded() / 2))
     }
 
-    public var isEmpty: Bool { stars == 0 && !printThis && !rejected }
+    public var isEmpty: Bool { stars == 0 && !printThis && !rejected && !inConsideration }
     /// The result's letter on screen: a, b, c, … (past z: its number).
     public static func letter(_ index: Int) -> String {
         (0..<26).contains(index) ? String(UnicodeScalar(UInt8(97 + index))) : "\(index + 1)"
@@ -181,12 +200,16 @@ public struct ResultSummary: Codable, Equatable, Sendable {
     public var worstCaseMargin: Double
     public var accepted: Bool
     public var achievedVolumeFraction: Double
+    /// ★ His Q1: the result's word as Results says it ("Just safe", "+10 %", "−30%"); nil when its run's results don't say.
+    public var word: String?
 
-    public init(massGrams: Double, worstCaseMargin: Double, accepted: Bool, achievedVolumeFraction: Double) {
+    public init(massGrams: Double, worstCaseMargin: Double, accepted: Bool, achievedVolumeFraction: Double,
+                word: String? = nil) {
         self.massGrams = massGrams
         self.worstCaseMargin = worstCaseMargin
         self.accepted = accepted
         self.achievedVolumeFraction = achievedVolumeFraction
+        self.word = word
     }
 }
 

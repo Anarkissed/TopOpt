@@ -801,6 +801,7 @@ public struct WorkspacePlaceholder: View {
                 .onAppear {
                     topoNotice.seed(accepted: acceptedVariantCount)
                     topoNotice.version = versionLabel   // ★ B3: "v8 is ready"
+                    learnWhatThisVersionRanWith()   // ★ B5 (note 3): "Same settings as v6" after a reopen
                     if RerunCard.takeRunOnOpen(for: project.id) { let l = RerunCard.takeRunOnOpenLattice(); if canOptimize(lattice: l) { startRun(lattice: l) } else { model.toast = RerunCard.copyNotReadyToast } }
                     // B4: a copy made to choose a lattice type (or the lattice card's Save as new) opens on Lattice
                     if let toast = LatticeStageOpen.take(for: project.id) { goToStage(.lattice); if !toast.isEmpty { model.toast = toast } }
@@ -1673,7 +1674,7 @@ public struct WorkspacePlaceholder: View {
                               takeOpenOn: { defer { resultsOpenOn = nil }; return resultsOpenOn },
                               // ★ B4 (app-map §3.5, Q1): "v7 results" and Pick this — the Library's chosen result
                               version: versionLabel,
-                              pickedVariant: ResultsPick.accepted(model.library.version(project.id)?.pickedResult, in: outcome),
+                              pickedVariant: ResultsPick.accepted(model.library.chosenResult(folder: project.id), in: outcome),   // ★ the part's chosen
                               onPick: model.library.version(project.id) == nil ? nil : { v in
                                   if let r = ResultsPick.all(v, in: outcome) { model.library.pick(folder: project.id, result: r) }
                               })
@@ -12038,7 +12039,7 @@ public struct WorkspacePlaceholder: View {
         // The value is shown/entered in the CURRENT unit (kg or lbs); the pad emits in
         // that unit and we convert back to kg on the way into the model, so typing a
         // number never silently changes the unit.
-        let shown = force.unit == .kg ? kg : kg * ForceModel.kgToLb
+        let shown = force.unit.fromKg(kg)
         Text(force.formattedWeight(kg: kg))
             .font(.system(size: 14, weight: .heavy)).tracking(-0.2)
             .foregroundStyle(g.color.color)
@@ -12064,7 +12065,7 @@ public struct WorkspacePlaceholder: View {
                        config: .init(title: "Weight", unit: force.unit.label, allowsDecimal: true),
                        seed: shown) { v in
                 if let v, v > 0 {
-                    force.setWeight(g.id, kg: force.unit == .kg ? v : v / ForceModel.kgToLb)
+                    force.setWeight(g.id, kg: force.unit.toKg(v))
                 }
             }
     }
@@ -12200,6 +12201,7 @@ public struct WorkspacePlaceholder: View {
                                 latticeRoleGroups: latticeRoleGroupIDs)
         else { return false }
         // Grey out until the inputs change from the last optimized run.
+        if sameSettingsInALibraryVersion(lattice: lattice) { return false }   // ★ B5 (note 3): "Same settings as v6"
         if let last = lastRunRequest, RerunCard.greysOut(sameInputsAsLastRun: model.makeRunRequest(lattice: lattice) == last, existing: run.outcome) { return false }   // Flexible (PR #362) H50a: a finished project can be re-run with the same inputs; the re-run card confirms (RerunCard)
         return true
     }
@@ -12454,6 +12456,7 @@ public struct WorkspacePlaceholder: View {
             if runs { run.restore(); return }   // ★ T5: "tap to view"
             if ok { macNotAnswering = false; runCouldntFinish = false; requestRun(lattice: lattice) } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }
         }
+        .background { if !macFinding && line == TopologyRunCopy.sameSettings(versionLabel) { DSParts.publish("optimizeSameSettings") } }   // ★ B5 (note 3): hosted tests
         .accessibilityHint(marks ? WallMarkingSubline.hint : opensType ? Self.latticeTypeTapHint : line)
     }
 
@@ -12817,8 +12820,25 @@ extension WorkspacePlaceholder {
 
     /// ★ B3 (§4.6 "same settings"): Optimize is grey because nothing changed since this project's last run.
     private func sameSettingsAsLast(lattice: Bool) -> Bool {
+        if sameSettingsInALibraryVersion(lattice: lattice) { return true }   // ★ B5 (note 3)
         guard let last = lastRunRequest else { return false }
         return RerunCard.greysOut(sameInputsAsLastRun: model.makeRunRequest(lattice: lattice) == last, existing: run.outcome)
+    }
+
+    /// ★ B5 (note 3): off the Library, results to re-run over keep Optimize live (the re-run card confirms: H50a). A Library
+    /// version keeps its results and a new run makes the next version, so the same settings grey it: "Optimize as v7" would
+    /// only make this version again.
+    private func sameSettingsInALibraryVersion(lattice: Bool) -> Bool {
+        guard let last = lastRunRequest, model.library.makesNextVersion(of: project.id) else { return false }
+        return model.makeRunRequest(lattice: lattice) == last
+    }
+
+    /// ★ B5 (note 3; the reviewer's (a)): a Library version reopened later learns what it ran with, once: its saved job
+    /// against the job this setup would send. Nothing changed → Optimize reads "Same settings as v6".
+    private func learnWhatThisVersionRanWith() {
+        guard lastRunRequest == nil, model.library.makesNextVersion(of: project.id) else { return }
+        lastRunRequest = LibrarySameSettings.ranWith(savedJob: model.library.store.loadRelatticeArtifacts(id: project.id)?.jobJSON,
+                                                     request: { model.makeRunRequest(lattice: $0) })
     }
 
     /// ★ B3: ⌃ "Optimize, then lattice" runs once a lattice is set and the lattice run may start.
@@ -12908,7 +12928,7 @@ extension WorkspacePlaceholder {
             ComputeLocationControl(compute: compute, asValueBox: true)
                 .background(CornerPairStyle.publish("settingsRunsOn"))
         case .units:
-            // ★ T3 (U9): [kg │ lb]
+            // ★ T3 (U9): [kg │ lb │ N] (★ B5, Q12 Units (a): N, display only)
             SegmentedGlass(WeightUnit.allCases.map { .init($0, $0.label) },
                            selection: Binding(get: { force.unit }, set: { force.unit = $0 }), small: true)
                 .background(CornerPairStyle.publish("settingsUnits"))
@@ -13253,10 +13273,10 @@ extension WorkspacePlaceholder {
                 Text("Weight").dsStyle(DS.TypeScale.caption).fontWeight(.bold).foregroundStyle(DS.Color.textPrimary.color)
                 Spacer(minLength: DS.Space.s)
                 NumberField(key: "loadWeight-\(g.id.uuidString)", title: "Weight",
-                            spec: FlexNumberSpec(value: force.unit == .kg ? kg : kg * ForceModel.kgToLb, unit: force.unit.label,
-                                                 step: 0.5, range: 0 ... 100_000, decimals: 1),
+                            spec: FlexNumberSpec(value: force.unit.fromKg(kg), unit: force.unit.label,
+                                                 step: force.unit.boxStep, range: 0 ... 100_000, decimals: force.unit.boxDecimals),
                             padRange: NumberRange(0, nil)) { v in
-                    if v > 0 { force.setWeight(g.id, kg: force.unit == .kg ? v : v / ForceModel.kgToLb) }
+                    if v > 0 { force.setWeight(g.id, kg: force.unit.toKg(v)) }
                 }
             }
             .frame(minHeight: 44)

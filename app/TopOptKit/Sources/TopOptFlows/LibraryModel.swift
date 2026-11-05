@@ -40,7 +40,48 @@ public struct LibraryResult: Identifiable {
     /// The printed fraction of the part as drawn (1.03 = 103 %), the Results screen's basis.
     public let fraction: Double
     public let accepted: Bool
+    /// ★ His Q1: its word as Results says it ("Just safe", "+10 %"); nil when its run's results don't say.
+    public var word: String? = nil
     public var id: Int { index }
+}
+
+/// ★ A result's flag that a tap takes off (his iPad notes 11-05, ledger L2; In consideration from L3).
+public enum LibraryFlag: Sendable {
+    case printThis, rejected, considering
+
+    /// The flag's word on its chip.
+    public var title: String {
+        switch self {
+        case .printThis: return "Print"
+        case .rejected: return "Rejected"
+        case .considering: return "In consideration"
+        }
+    }
+    /// The toast after a tap: "Rejected removed" (· Undo).
+    public var removedText: String { "\(title) removed" }
+
+    func isOn(_ m: ResultMark) -> Bool {
+        switch self {
+        case .printThis: return m.printThis
+        case .rejected: return m.rejected
+        case .considering: return m.inConsideration
+        }
+    }
+    func clear(_ m: inout ResultMark) {
+        switch self {
+        case .printThis: m.printThis = false
+        case .rejected: m.rejected = false
+        case .considering: m.inConsideration = false
+        }
+    }
+}
+
+/// The last flag a tap took off, for the toast's Undo.
+public struct LibraryFlagUndo: Equatable {
+    public let folder: UUID
+    public let before: ResultMark
+    public let text: String
+    let id = UUID()
 }
 
 @MainActor
@@ -57,6 +98,12 @@ public final class LibraryModel: ObservableObject {
     /// ★ B1 (note 8, approved design 2026-11-02): where the Library is, kept HERE so it outlives the workspace. It was the
     /// Library view's own @State, rebuilt on every return, so Back from a part always landed on the Library's home.
     @Published var route: LibraryRoute = .home
+    /// ★ B5 (note 11): Export chosen versions is writing its files.
+    @Published public private(set) var exporting = false
+    /// ★ B5 (note 11): the files it wrote, for the share sheet; emptied when that sheet closes.
+    @Published public var exportedFiles: [URL] = []
+    /// ★ His iPad notes 11-05 (L2): the flag a tap just took off; the toast offers Undo until it goes.
+    @Published public var flagUndo: LibraryFlagUndo?
     private var drawingOriginals = false   // ★ B1 (note 10)
     /// The proposal shown on the first-launch sheet, so Group saves exactly what he saw.
     private var lastProposal: LibraryIndex?
@@ -181,8 +228,10 @@ public final class LibraryModel: ObservableObject {
     /// The Results screen's suggestion: the last result that passes.
     public func suggestedResult(_ v: LibraryVersion) -> Int? { v.summary?.lastIndex { $0.accepted } }
 
-    /// The result a card shows: the one he picked, else one marked Print this, else the suggested one.
+    /// The result a card shows: the part's chosen one if it is this version's, else the one it showed before, else one marked
+    /// Print this, else the suggested one.
     public func shownResult(_ v: LibraryVersion) -> Int {
+        if let c = chosenResult(folder: v.folderID) { return c }
         if let p = v.pickedResult { return p }
         if let printed = v.marks.first(where: \.printThis)?.result { return printed }
         return suggestedResult(v) ?? 0
@@ -240,8 +289,93 @@ public final class LibraryModel: ObservableObject {
         }
     }
 
-    /// The result a card shows.
-    public func pick(folder: UUID, result: Int) { edit(folder) { $0.pickedResult = result } }
+    // MARK: ★ a flag comes off with a tap, and Undo puts it back (his iPad notes 11-05, ledger L2, his answer)
+
+    /// Take a flag off a result; the toast's Undo (`undoFlagRemoval`) puts the mark back as it was.
+    public func removeFlag(_ flag: LibraryFlag, folder: UUID, result: Int) {
+        guard let before = version(folder)?.mark(for: result), flag.isOn(before) else { return }
+        edit(folder) { v in
+            var m = v.mark(for: result)
+            flag.clear(&m)
+            v.setMark(m)
+        }
+        flagUndo = LibraryFlagUndo(folder: folder, before: before, text: flag.removedText)
+    }
+
+    /// Quick look's buttons: on → off (with Undo, as a tap on the flag); off → on.
+    public func tapFlag(_ flag: LibraryFlag, folder: UUID, result: Int) {
+        guard let m = version(folder)?.mark(for: result) else { return }
+        if flag.isOn(m) { removeFlag(flag, folder: folder, result: result); return }
+        switch flag {
+        case .printThis: togglePrint(folder: folder, result: result)
+        case .rejected: toggleReject(folder: folder, result: result)
+        case .considering: break   // only a Compare that ends on its second Tie sets it
+        }
+    }
+
+    public func undoFlagRemoval() {
+        guard let u = flagUndo else { return }
+        edit(u.folder) { $0.setMark(u.before) }
+        flagUndo = nil
+    }
+
+    // MARK: ★ Compare's marks, made as he goes (his iPad notes 11-05, ledger L3, his "Yes, as written")
+
+    /// Better under the other side: this one is Rejected (Print this and In consideration come off, as Reject does).
+    public func rejectInCompare(_ item: CompareItem) {
+        edit(item.folder) { v in
+            var m = v.mark(for: item.result)
+            m.rejected = true; m.printThis = false; m.inConsideration = false
+            v.setMark(m)
+        }
+    }
+
+    /// Compare ended. The last one left becomes the part's chosen (as Pick this); a second Tie leaves the undecided ones In
+    /// consideration. Returns the toast: "v1a chosen · 4 rejected", or "3 in consideration · 2 rejected".
+    public func finishCompare(_ end: CompareSession.End, rejected: Int) -> String {
+        switch end {
+        case let .chosen(item):
+            pick(folder: item.folder, result: item.result)
+            let name = version(item.folder).map { "v\($0.number)" } ?? ""
+            return "\(name)\(ResultMark.letter(item.result)) chosen · \(rejected) rejected"
+        case let .undecided(items):
+            for i in items {
+                edit(i.folder) { v in var m = v.mark(for: i.result); m.inConsideration = true; v.setMark(m) }
+            }
+            return "\(items.count) in consideration · \(rejected) rejected"
+        }
+    }
+
+    // MARK: ★ the part's chosen result (his answer 11-03; the reviewer's 11-04 18:56Z bullets)
+    //
+    // ONE chosen result per PART (version + result), set by Results' Pick this or a result tile's Pick this; the latest pick
+    // replaces the last. It drives the card's ring, its "v7b" tag, "PA12 · picked v7b", the picture and the strip's accent
+    // (note 11). Print this stays its own mark. Old per-version picks are not migrated: no part has one until he picks.
+
+    /// Pick this: `result` of version `folder` becomes its part's chosen result.
+    public func pick(folder: UUID, result: Int) {
+        guard let p = index.parts.firstIndex(where: { $0.version(folderID: folder) != nil }) else { return }
+        index.parts[p].chosen = LibraryChosen(folder: folder, result: result)
+        try? store.saveLibrary(index)
+    }
+
+    /// The part's chosen result, while its version is listed (nil = none chosen).
+    public func chosen(of part: LibraryPart) -> LibraryChosen? {
+        guard let c = part.chosen, part.version(folderID: c.folder) != nil else { return nil }
+        return c
+    }
+
+    /// "v7b", the chosen result's tag on the part's card.
+    public func chosenTag(_ part: LibraryPart) -> String? {
+        guard let c = chosen(of: part), let v = part.version(folderID: c.folder) else { return nil }
+        return "v\(v.number)\(ResultMark.letter(c.result))"
+    }
+
+    /// The result of version `folder` that is its part's chosen one (Results' "Picked ✓"), else nil.
+    public func chosenResult(folder: UUID) -> Int? {
+        guard let part = index.part(containing: folder), let c = chosen(of: part), c.folder == folder else { return nil }
+        return c.result
+    }
 
     // MARK: - projects, parts, names
 
@@ -291,11 +425,16 @@ public final class LibraryModel: ObservableObject {
     // MARK: - results, numbers, pictures
 
     /// Read each optimized version's results once in the background: its numbers go into the index,
-    /// its pictures into LibraryCache/. One version at a time, oldest first.
+    /// its pictures into LibraryCache/. One version at a time, oldest first. ★ B5: a version whose pictures
+    /// are not yet drawn clear is read again, for its pictures only.
     public func loadSummaries(_ done: @escaping () -> Void = {}) {
         guard !loadingSummaries else { done(); return }
         let todo = index.parts.flatMap(\.versions)
-            .filter { $0.summary == nil && $0.trimmed != true && snapshots[$0.folderID]?.optimized == true }
+            .filter { v in
+                snapshots[v.folderID]?.optimized == true
+                    && (v.summary == nil && v.trimmed != true
+                        || (v.summary ?? []).indices.contains { !hasClearPicture(CompareItem(folder: v.folderID, result: $0)) })
+            }
             .map(\.folderID)
         guard !todo.isEmpty else { done(); return }
         loadingSummaries = true
@@ -304,13 +443,17 @@ public final class LibraryModel: ObservableObject {
             decode(folder) { [weak self] results in
                 guard let self else { return }
                 if let results {
-                    self.edit(folder) { v in
-                        v.summary = results.map {
-                            ResultSummary(massGrams: $0.massGrams, worstCaseMargin: $0.margin,
-                                          accepted: $0.accepted, achievedVolumeFraction: $0.fraction)
+                    if self.version(folder)?.summary == nil {
+                        self.edit(folder) { v in
+                            v.summary = results.map {
+                                ResultSummary(massGrams: $0.massGrams, worstCaseMargin: $0.margin,
+                                              accepted: $0.accepted, achievedVolumeFraction: $0.fraction, word: $0.word)
+                            }
                         }
                     }
-                    for r in results { self.storeThumbnail(for: CompareItem(folder: folder, result: r.index), mesh: r.mesh) }
+                    for r in results where !self.hasClearPicture(CompareItem(folder: folder, result: r.index)) {
+                        self.storeThumbnail(for: CompareItem(folder: folder, result: r.index), mesh: r.mesh)
+                    }
                 }
                 step(rest.dropFirst())
             }
@@ -338,24 +481,36 @@ public final class LibraryModel: ObservableObject {
             let results: [LibraryResult]? = {
                 guard let data = store.loadResultsData(id: folder),
                       let o = try? OutcomeCodec.decode(data) else { return nil }
+                let words = ResultsVersions.words(o)   // ★ Q1: each result's word, as Results says it
                 return o.variants.enumerated().map { i, v in
                     LibraryResult(index: i,
                                   mesh: ViewerMesh(vertices: v.meshVertices, indices: v.meshIndices, faceIDs: [],
                                                    smoothShaded: true),
                                   massGrams: v.massGrams, margin: v.worstCaseMargin,
-                                  fraction: v.achievedVolumeFraction, accepted: v.accepted)
+                                  fraction: v.achievedVolumeFraction, accepted: v.accepted, word: words[i])
                 }
             }()
             DispatchQueue.main.async { done(results) }
         }
     }
 
+    // ★ B5 (mockup #lib-project): a picture sits on its card's own gradient, so it is drawn on a clear background.
+    // Pictures cached before that were drawn on the dark stage (a black square on the card): they keep their old name,
+    // still show until each is redrawn clear, and the old file goes then. A STEP part's original waits until it is opened.
+
     private func thumbnailURL(_ item: CompareItem) -> URL {
+        cacheDir.appendingPathComponent("\(item.folder.uuidString)-\(item.result)-clear.png")
+    }
+
+    /// The name a picture had before B5 (drawn on the dark stage).
+    private func opaqueThumbnailURL(_ item: CompareItem) -> URL {
         cacheDir.appendingPathComponent("\(item.folder.uuidString)-\(item.result).png")
     }
 
+    func hasClearPicture(_ item: CompareItem) -> Bool { FileManager.default.fileExists(atPath: thumbnailURL(item).path) }
+
     private func storeThumbnail(for item: CompareItem, mesh: ViewerMesh) {
-        guard let image = MeshThumbnail.cgImage(for: mesh) else { return }
+        guard let image = MeshThumbnail.cgImage(for: mesh, transparent: true) else { return }
         storeImage(image, for: item)
     }
 
@@ -393,11 +548,11 @@ public final class LibraryModel: ObservableObject {
         storeImage(image, for: CompareItem(folder: folder, result: Self.originalResult))
     }
 
-    /// Draw the original of every part that has none yet, one at a time in the background (STL, OBJ, 3MF only).
+    /// Draw the original of every part that has none drawn clear yet, one at a time in the background (STL, OBJ, 3MF only).
     func drawMissingOriginals() {
         guard let load = originalMeshLoader, !drawingOriginals else { return }
         let todo: [(UUID, String)] = index.parts.compactMap { part in
-            guard originalPicture(part) == nil,
+            guard !part.versions.contains(where: { hasClearPicture(CompareItem(folder: $0.folderID, result: Self.originalResult)) }),
                   let v = part.versions.max(by: { $0.number < $1.number }),
                   let snap = store.snapshot(id: v.folderID) else { return nil }
             let path = store.modelPath(id: v.folderID, fileName: snap.modelFileName)
@@ -420,13 +575,41 @@ public final class LibraryModel: ObservableObject {
         step(todo[...])
     }
 
+    // MARK: ★ B5 (note 11, Q10): Export chosen versions
+
+    /// Write `lines`' files off the main thread (the chosen results' solids, the originals through the app's own importer) into
+    /// a fresh folder, then hand them to the share sheet (`exportedFiles`). `done` gets nil, or what went wrong in one line.
+    func exportChosen(_ lines: [ChosenExportLine], format: ChosenExportFormat, title: String,
+                      done: @escaping (String?) -> Void) {
+        guard !exporting, !lines.isEmpty else { return }
+        exporting = true
+        let store = self.store, original = originalMeshLoader
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("export-" + UUID().uuidString.prefix(8),
+                                                                               isDirectory: true)
+        Self.queue.async {
+            let written = Result {
+                try ChosenExport.write(lines, format: format, title: title, into: dir) {
+                    ChosenExport.mesh($0, store: store, original: original)
+                }
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.exporting = false
+                switch written {
+                case .success(let urls): self.exportedFiles = urls; done(nil)
+                case .failure(let error): done(ChosenExport.failure(error))
+                }
+            }
+        }
+    }
+
     private func storeImage(_ image: CGImage, for item: CompareItem) {
         thumbnails[item] = image
         try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
         guard let dest = CGImageDestinationCreateWithURL(thumbnailURL(item) as CFURL, "public.png" as CFString, 1, nil)
         else { return }
         CGImageDestinationAddImage(dest, image, nil)
-        CGImageDestinationFinalize(dest)
+        if CGImageDestinationFinalize(dest) { try? FileManager.default.removeItem(at: opaqueThumbnailURL(item)) }
     }
 
     /// The pictures already rendered, read back in the background.
@@ -436,16 +619,18 @@ public final class LibraryModel: ObservableObject {
                 + [CompareItem(folder: v.folderID, result: Self.originalResult)]   // ★ B1 (note 10): its original model
         }.filter { thumbnails[$0] == nil }
         guard !items.isEmpty else { return }
-        let urls = items.map(thumbnailURL)
+        let urls = items.map { [thumbnailURL($0), opaqueThumbnailURL($0)] }   // ★ B5: the clear one, else the old one
         Self.queue.async {
             var found: [(CompareItem, CGImage)] = []
-            for (item, url) in zip(items, urls) {
-                guard let src = CGImageSourceCreateWithURL(url as CFURL, nil),
+            for (item, names) in zip(items, urls) {
+                guard let url = names.first(where: { FileManager.default.fileExists(atPath: $0.path) }),
+                      let src = CGImageSourceCreateWithURL(url as CFURL, nil),
                       let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { continue }
                 found.append((item, img))
             }
             DispatchQueue.main.async { [weak self] in
-                for (item, img) in found { self?.thumbnails[item] = img }
+                guard let self else { return }
+                for (item, img) in found where self.thumbnails[item] == nil { self.thumbnails[item] = img }   // never over a newer one
             }
         }
     }
@@ -500,7 +685,8 @@ public final class LibraryModel: ObservableObject {
         }
         let keptMark = v.mark(for: picked)
         let keptSummary = [ResultSummary(massGrams: decodedPick.massGrams, worstCaseMargin: decodedPick.worstCaseMargin,
-                                         accepted: decodedPick.accepted, achievedVolumeFraction: decodedPick.achievedVolumeFraction)]
+                                         accepted: decodedPick.accepted, achievedVolumeFraction: decodedPick.achievedVolumeFraction,
+                                         word: v.summary.flatMap { $0[safe: picked] }?.word)]   // ★ Q1: it keeps its word
         edit(folder) { v in
             v.marks = []
             v.setMark(ResultMark(result: 0, stars: keptMark.stars, printThis: keptMark.printThis, rejected: keptMark.rejected))
@@ -508,13 +694,20 @@ public final class LibraryModel: ObservableObject {
             v.summary = keptSummary
             v.trimmed = true
         }
+        // ★ the part's chosen result was the one kept (shownResult reads it first): it is result 0 now
+        if let p = index.parts.firstIndex(where: { $0.chosen?.folder == folder }) {
+            index.parts[p].chosen = LibraryChosen(folder: folder, result: 0)
+            try? store.saveLibrary(index)
+        }
         let old = thumbnails[CompareItem(folder: folder, result: picked)]
         for k in thumbnails.keys where k.folder == folder { thumbnails[k] = nil }
         if let old { thumbnails[CompareItem(folder: folder, result: 0)] = old }
         let fm = FileManager.default
-        let from = thumbnailURL(CompareItem(folder: folder, result: picked)), to = thumbnailURL(CompareItem(folder: folder, result: 0))
-        if picked != 0 { try? fm.removeItem(at: to); try? fm.moveItem(at: from, to: to) }
-        for r in variants.indices where r != 0 { try? fm.removeItem(at: thumbnailURL(CompareItem(folder: folder, result: r))) }
+        for url in [thumbnailURL, opaqueThumbnailURL] {   // ★ B5: a picture not yet redrawn clear moves too
+            let from = url(CompareItem(folder: folder, result: picked)), to = url(CompareItem(folder: folder, result: 0))
+            if picked != 0 { try? fm.removeItem(at: to); try? fm.moveItem(at: from, to: to) }
+            for r in variants.indices where r != 0 { try? fm.removeItem(at: url(CompareItem(folder: folder, result: r))) }
+        }
         resultsCache[folder] = nil
     }
 }

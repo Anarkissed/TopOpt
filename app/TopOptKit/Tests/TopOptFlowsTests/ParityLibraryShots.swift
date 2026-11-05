@@ -78,14 +78,19 @@ final class ParityLibraryShots: XCTestCase {
             h.pump(4)
             try shot(h, "lib-home", name)
             let squish = try XCTUnwrap(app.library.index.projects.first { $0.name == "Squish Mechanism" })
+            app.library.pick(folder: arms, result: 1)   // the mockup's Carriage Arms: a chosen result, ringed
             app.library.route = .project(squish.id)
             h.pump(3)
             try shot(h, "lib-project", name)
-            if let p = app.library.index.part(containing: arms) {
-                app.library.route = .part(p.id)
-                h.pump(3)
-                try shot(h, "lib-part", name)
-            }
+            try h.tap("libraryExport", "\(name): Export")   // ★ B5 (note 11): #lib-project-export
+            try shot(h, "lib-project-export", name)
+            // the Part folder: Carriage Arms in four versions (v3 draft, v2 picked b, v1, v1.1 a branch), like #lib-part
+            let (versions, f) = try LibraryPartRowsHostedTests.arms(root: root.appendingPathComponent("arms-\(name)", isDirectory: true))
+            let p = try XCTUnwrap(versions.library.index.part(containing: try XCTUnwrap(f["2"])))
+            versions.library.route = .part(p.id)
+            let hp = AppBuildHost(AppBuildRoot(model: versions), size: size, test: self)
+            hp.pump(4)
+            try shot(hp, "lib-part", name)
         }
     }
 }

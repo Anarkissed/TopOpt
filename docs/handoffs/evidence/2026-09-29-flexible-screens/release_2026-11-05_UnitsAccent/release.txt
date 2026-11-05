@@ -1,0 +1,14 @@
+# Release 9e298233 — 2026-11-05 UnitsAccent (UI-Notes' app batch up to 56aad3d4), app only, released before review (his 11-03 pick)
+# Core and worker unchanged: fingerprint 6c5a6fbaa842; "fingerprint": "6c5a6fbaa842"
+# Merged onto d0a60fd1; the merged app tree equals 56aad3d4's, so the builder's tests apply unchanged.
+# Commits:
+#   3ec92382 B5 (Q12, the reviewer's Units (a) + Accent (a)): App settings' Units [kg │ lb │ N] and Accent, live when Settings closes
+#   56aad3d4 Merge UI-Notes' B5 Units N + Accent (3ec92382) into B9: App settings' Units [kg │ lb │ N] (each new part's starting unit; N display only, storage kgf) and Accent (applied when Settings closes and at launch)
+#   9e298233 Release 2026-11-05: merge B9 56aad3d4 — UI-Notes' B5 Units N + Accent (3ec92382): App settings' Units [kg │ lb │ N] (each new part's starting unit; N display only, storage kgf) and Accent (applied when Settings closes and at launch) (app only; core and worker unchanged at 6c5a6fbaa842)
+# Gates:
+#   09:46 checks ok: UnitsAccent, local 9e298233 over origin d0a60fd1 (3 commits); app tree == 56aad3d4's, fingerprint 6c5a6fbaa842
+#   09:46 waiting for HEAVY.lock (free)
+#   09:46 lock taken
+#   09:51 iPad device build green; lock released
+#   09:51 pushed 9e298233
+#   09:51 worker /health "fingerprint": "6c5a6fbaa842" (unchanged, no swap)

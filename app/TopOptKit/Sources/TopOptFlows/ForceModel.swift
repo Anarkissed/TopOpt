@@ -30,13 +30,45 @@ import simd
 import TopOptDesign
 import TopOptKit
 
-/// The global weight display unit (design's kg │ lb segment). Storage is always
+/// The global weight display unit (design's kg │ lb │ N segment). Storage is always
 /// kgf; this only changes presentation and the scrub step. The raw value stays "lbs" (saved projects).
 public enum WeightUnit: String, CaseIterable, Sendable, Codable {
     case kg
     case lbs
-    /// The segment button label and the unit after a weight: "kg" / "lb" (★ U9, LOOK PER SCREEN 11-04: kg │ lb).
-    public var label: String { self == .kg ? "kg" : "lb" }
+    /// ★ B5 (Q12, the reviewer's Units (a) 11-04): newtons, DISPLAY ONLY — storage stays kgf (N = kgf × 9.80665).
+    case N
+    /// The segment button label and the unit after a weight: "kg" / "lb" / "N" (★ U9, LOOK PER SCREEN 11-04: kg │ lb).
+    public var label: String {
+        switch self {
+        case .kg: return "kg"
+        case .lbs: return "lb"
+        case .N: return "N"
+        }
+    }
+
+    /// kgf → this unit (what a weight reads).
+    public func fromKg(_ kg: Double) -> Double {
+        switch self {
+        case .kg: return kg
+        case .lbs: return kg * ForceModel.kgToLb
+        case .N: return kg * ForceModel.gravityAccel
+        }
+    }
+
+    /// This unit → kgf (what is stored).
+    public func toKg(_ v: Double) -> Double {
+        switch self {
+        case .kg: return v
+        case .lbs: return v / ForceModel.kgToLb
+        case .N: return v / ForceModel.gravityAccel
+        }
+    }
+
+    /// A drag's step per point, in this unit (proto: 0.05 kg │ lb; N: 0.5, about the kg step).
+    public var scrubStep: Double { self == .N ? 0.5 : ForceModel.scrubStepKg }
+    /// The Weight number box's step and decimals (kg │ lb: 0.5 and one; N: 5 and none, Flexible's N box).
+    public var boxStep: Double { self == .N ? 5 : 0.5 }
+    public var boxDecimals: Int { self == .N ? 0 : 1 }
 }
 
 /// A load's direction affordance (design snap row, D4). The world-space vector is
@@ -777,7 +809,7 @@ public struct ForceModel: Equatable, Sendable, Codable {
     /// Format a kgf weight in the current display unit (proto `fmtW`: < 10 → one
     /// decimal, ≥ 10 → rounded integer).
     public func formattedWeight(kg: Double) -> String {
-        let v = unit == .kg ? kg : kg * Self.kgToLb
+        let v = unit.fromKg(kg)
         let num = v < 10 ? String(format: "%.1f", v) : String(Int(v.rounded()))
         return "\(num) \(unit.label)"
     }
@@ -785,7 +817,7 @@ public struct ForceModel: Equatable, Sendable, Codable {
     /// The weight after scrubbing by `dx` points of horizontal drag, in the current
     /// display unit, clamped (proto scrub handler).
     public func scrub(kg: Double, byPoints dx: Double) -> Double {
-        let stepKg = unit == .kg ? Self.scrubStepKg : Self.scrubStepKg / Self.kgToLb
+        let stepKg = unit.toKg(unit.scrubStep)
         return clampWeight(kg + dx * stepKg)
     }
 

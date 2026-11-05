@@ -174,6 +174,8 @@ struct FinishBlock {
   std::size_t roughness_vertices = 0;
   std::size_t outward_only_vertices = 0, slim_guarded_vertices = 0, fold_walked_back = 0;
   std::size_t keep_clear_held = 0, keep_clear_left = 0;  // put back around / still in a Keep clear
+  double keep_clear_cut_mm3 = 0.0;  // cut out of the Keep clears, exactly (the [finish] log line)
+  int keep_clear_sealed = 0;        // Keep clears sealed inside the part (refuses; log line)
   long long keep_clear_before = 0, keep_clear_added = 0;  // the unfinished file's / confirmed new
   int slim_rounds = 0;
   double roughness_before_mm = 0.0, roughness_after_mm = 0.0;

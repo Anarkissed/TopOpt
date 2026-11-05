@@ -37,7 +37,9 @@ public struct LibraryRootView: View {
     }
     @State private var grouping = false
     @State private var quickLook: UUID?
+    @State private var quickLookResult: Int?   // B5: the result a tile opened it on (nil = the version's shown one)
     @State private var compare: LibraryCompareRequest?
+    @ObservedObject private var appSettings = AppSettings.shared   // ★ B5 (Q12): the accent the app wears
 
     public init(model: AppModel) {
         self.model = model
@@ -68,13 +70,43 @@ public struct LibraryRootView: View {
             }
             if let folder = quickLook, library.mode == .library {
                 LibraryQuickLookView(model: model, library: library, folder: folder,
-                                     close: { quickLook = nil },
-                                     compare: { req in quickLook = nil; compare = req })
+                                     close: { quickLook = nil; quickLookResult = nil },
+                                     compare: { req in quickLook = nil; quickLookResult = nil; compare = req },
+                                     shown: quickLookResult)
                     .transition(.opacity).zIndex(3)
             }
             if let req = compare, library.mode == .library {
-                LibraryCompareView(library: library, request: req, close: { compare = nil })
+                // ★ L3: a Compare that ends goes back to the part page, saying what it decided
+                LibraryCompareView(library: library, request: req, close: { compare = nil },
+                                   finished: { compare = nil; model.toast = $0 })
                     .transition(.opacity).zIndex(4)
+            }
+        }
+        // ★ B5 (Q12, Accent (a)): Settings closed on a new accent — the Library redraws whole in it (its route lives on the
+        // Library model, so nothing he had open is lost)
+        .id(appSettings.appliedAccent)
+        // ★ his iPad notes 11-05 (L2): a flag a tap took off — "Rejected removed · Undo", over Quick look too, for 6 s
+        .overlay(alignment: .bottom) {
+            if let u = library.flagUndo {
+                HStack(spacing: DS.Space.s) {
+                    Text(u.text).dsStyle(DS.TypeScale.bodyStrong).foregroundStyle(DS.Color.textPrimary.color).lineLimit(1)
+                    Button { library.undoFlagRemoval() } label: {
+                        Text("Undo").font(DS.TypeScale.bodyStrong.font).foregroundStyle(DS.Color.accent.color)
+                            .padding(.horizontal, DS.Space.ml).frame(minWidth: DSParts.target, minHeight: DSParts.target)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .background(DSParts.publish("libraryFlagUndo"))
+                    .accessibilityIdentifier("libraryFlagUndo")
+                }
+                .padding(.leading, DS.Space.l).padding(.trailing, DS.Space.xs)
+                .liquidGlassCapsule()
+                .padding(.bottom, DS.Space.xl3)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .task(id: u) {
+                    try? await Task.sleep(nanoseconds: 6_000_000_000)
+                    if library.flagUndo == u { library.flagUndo = nil }
+                }
             }
         }
         .background(DS.Color.background.color.ignoresSafeArea())
@@ -104,7 +136,7 @@ public struct LibraryRootView: View {
             if let part = library.part(id) {
                 PartFolderView(model: model, library: library, part: part,
                                back: { route = library.projectOf(part: id).map { .project($0.id) } ?? .unfiled },
-                               quickLook: { quickLook = $0 }, compare: { compare = $0 })
+                               quickLook: { quickLook = $0; quickLookResult = $1 }, compare: { compare = $0 })
             } else { LibraryHomeView(model: model, library: library, go: { route = $0 }, quickLook: { quickLook = $0 },
                                      ungroup: { library.ungroup() }) }
         case .storage:
@@ -201,6 +233,10 @@ enum LibraryStyle {
     static func percent(_ f: Double) -> String { "\(Int((f * 100).rounded())) %" }
     /// "6.5×".
     static func margin(_ m: Double) -> String { String(format: "%.1f×", m) }
+    /// ★ His Q1: a result tile's name, "v2b · +10 %" (the name alone when its results don't say).
+    static func resultTitle(number: String, result: Int, word: String?) -> String {
+        "v\(number)\(ResultMark.letter(result))" + (word.map { " · " + $0 } ?? "")
+    }
 
     /// Topology / Lattice / Flexible, from the version's own settings.
     static func stage(_ s: ProjectSnapshot?) -> (String, RGBA) {
@@ -310,7 +346,9 @@ struct LibraryResultSwitcher: View {
                 Button { pick(r) } label: {
                     Text(ResultMark.letter(r)).font(.system(size: 13, weight: .bold))
                         .strikethrough(rejected.contains(r))
-                        .foregroundStyle(r == shown ? DS.Color.textPrimary.color : DS.Color.textSecondary.color)
+                        // ★ his iPad notes 11-05 (L2): a rejected result's mark is red
+                        .foregroundStyle(rejected.contains(r) ? DS.Color.danger.color
+                                         : r == shown ? DS.Color.textPrimary.color : DS.Color.textSecondary.color)
                         .frame(width: 32, height: 28)
                         .background(RoundedRectangle(cornerRadius: 8).fill(r == shown ? DS.Color.fillSelected.color : .clear))
                         .overlay(alignment: .topTrailing) {
@@ -404,7 +442,7 @@ struct LibraryHomeView: View {
             .padding(.top, 34)
             .padding(.bottom, 60)
         }
-        .sheet(isPresented: $settingsOpen) {
+        .sheet(isPresented: $settingsOpen, onDismiss: { AppSettings.shared.applyAccent() }) {
             AppSettingsView(settings: AppSettings.shared, projection: ViewProjection.shared, compute: compute,
                             storage: { settingsOpen = false; go(.storage) }, done: { settingsOpen = false })
         }
@@ -599,15 +637,10 @@ struct LibraryFolderCard: View {
 }
 
 extension LibraryModel {
-    /// A part's picture: its Print-this result, else the shown result of its newest version with results.
-    /// ★ B1 (note 10): the result he PICKED (Print this); with none picked, the original model, never a blank.
+    /// A part's picture. ★ B1 (note 10) + his "chosen" answer: the part's CHOSEN result (Pick this; Print this is its own
+    /// mark); with none chosen, the original model, never a blank.
     func partPicture(_ part: LibraryPart) -> CGImage? {
-        let done = part.versions.filter { !isDraft($0) }.sorted { $0.number > $1.number }
-        if let v = done.first(where: { $0.marks.contains(where: \.printThis) }),
-           let r = v.marks.first(where: \.printThis)?.result,
-           let picked = thumbnails[CompareItem(folder: v.folderID, result: r)] {
-            return picked
-        }
+        if let c = chosen(of: part), let picked = thumbnails[CompareItem(folder: c.folder, result: c.result)] { return picked }
         return originalPicture(part)
     }
 }
@@ -628,8 +661,17 @@ struct ProjectFolderView: View {
     @State private var renaming: String?
     @State private var renamingPart: (id: UUID, name: String)?
     @State private var deleting: LibraryPart?
+    @State private var exportOpen = false   // ★ B5 (note 11): Export chosen versions
 
-    private let columns = [GridItem(.adaptive(minimum: 360), spacing: DS.Space.xl3)]
+    @State private var portrait = false
+
+    /// The note under the grid (mockup #lib-project, word for word). ★ B5 (Q12): the ring is his accent, so it names that.
+    static var note: String {
+        "A part with nothing picked shows its original model. A picked result gets the \(AppSettings.shared.appliedAccent.name) ring."
+    }
+
+    /// mockup .grid: 3 across (2 in portrait), 18 pt apart
+    private var columns: [GridItem] { Array(repeating: GridItem(.flexible(), spacing: DS.Space.xl), count: portrait ? 2 : 3) }
 
     var body: some View {
         ScrollView {
@@ -644,33 +686,40 @@ struct ProjectFolderView: View {
                     }
                     Spacer()
                     if let project {
-                        Button { addPart(project.id) } label: {
-                            Label("Add part", systemImage: "plus").font(DS.TypeScale.bodyStrong.font).foregroundStyle(.white)
-                                .padding(.horizontal, DS.Space.l).frame(height: 44)
-                                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(DS.Color.accent.color))
-                                .dsShadow(.accentGlow)
-                        }
-                        .buttonStyle(.plain).accessibilityIdentifier("library-add-part")
-                        .background(CornerPairStyle.publish("libraryAddPart"))   // B1: hosted tests
+                        // ★ B5 (note 11, mockup #lib-project): Export the chosen versions, then + Add part in the accent
+                        DSGlassButton("Export", systemImage: "square.and.arrow.up", key: "libraryExport") { exportOpen = true }
+                        DSGlassButton("Add part", systemImage: "plus", accent: true, key: "libraryAddPart") { addPart(project.id) }
                     }
                 }
-                LazyVGrid(columns: columns, spacing: DS.Space.xl3) {
+                LazyVGrid(columns: columns, spacing: DS.Space.xl) {
                     ForEach(parts) { part in
                         LibraryPartCard(model: model, library: library, part: part) { open(part.id) }
-                            .contextMenu {
-                                Button { renamingPart = (part.id, part.name) } label: { Label("Rename", systemImage: "pencil") }
-                                Menu {
-                                    ForEach(library.index.projects) { p in Button(p.name) { library.move(part: part.id, to: p.id) } }
-                                    Button("Unfiled") { library.move(part: part.id, to: nil) }
-                                } label: { Label("Move to", systemImage: "folder") }
-                                Button(role: .destructive) { deleting = part } label: { Label("Delete part…", systemImage: "trash") }
+                            // app-map: ⋯ per card — Rename · Move to · Delete part (where he sees it; the long press stays)
+                            .overlay(alignment: .bottomTrailing) {
+                                Menu { partMenu(part) } label: { LibraryDots() }
+                                    .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain).fixedSize()
+                                    .background(DSParts.publish("libraryPart-\(part.name)-menu"))
+                                    .accessibilityLabel("\(part.name) menu")
+                                    .padding(4)
                             }
+                            .contextMenu { partMenu(part) }
                     }
-                    if let project { LibraryNewTile(title: "Add part", detail: nil) { addPart(project.id) } }
+                    if let project { DSAddTile("Add part", key: "libraryAddTile") { addPart(project.id) } }
                 }
-                .padding(.top, DS.Space.xl3)
+                .padding(.top, DS.Space.xl)
+                Text(Self.note).dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
+                    .background(DSParts.publish("libraryProjectNote"))
+                    .padding(.top, 14)
             }
             .padding(.horizontal, DS.Space.page).padding(.top, 34).padding(.bottom, 60)
+        }
+        .background(GeometryReader { g in
+            Color.clear.onAppear { portrait = g.size.height > g.size.width }
+                .onChange(of: g.size) { portrait = $0.height > $0.width }
+        })
+        .overlay { if exportOpen, let project { exportSheet(project) } }
+        .sheet(isPresented: Binding(get: { !library.exportedFiles.isEmpty }, set: { if !$0 { library.exportedFiles = [] } })) {
+            ShareSheet(items: library.exportedFiles)
         }
         .alert("Rename project", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Name", text: Binding(get: { renaming ?? "" }, set: { renaming = $0 }))
@@ -696,64 +745,87 @@ struct ProjectFolderView: View {
         }
     }
 
+    @ViewBuilder private func partMenu(_ part: LibraryPart) -> some View {
+        Button { renamingPart = (part.id, part.name) } label: { Label("Rename…", systemImage: "pencil") }
+        Menu {
+            ForEach(library.index.projects) { p in Button(p.name) { library.move(part: part.id, to: p.id) } }
+            Button("Unfiled") { library.move(part: part.id, to: nil) }
+        } label: { Label("Move to", systemImage: "folder") }
+        Button(role: .destructive) { deleting = part } label: { Label("Delete part…", systemImage: "trash") }
+    }
+
     private func addPart(_ project: UUID) {
         library.importTargetProject = project
         model.newTopOpt()
     }
+
+    /// ★ B5 (note 11, Q10, mockup #lib-project-export): the sheet over the scrim, as RootView presents New part. Export closes
+    /// it once the files are written (the share sheet takes them); what went wrong is a toast.
+    private func exportSheet(_ project: LibraryProject) -> some View {
+        ZStack {
+            Rectangle().fill(.ultraThinMaterial).overlay(DS.Color.scrim.color).ignoresSafeArea()
+                .onTapGesture { if !library.exporting { exportOpen = false } }
+            GlassSheet {
+                ChosenExportSheet(library: library, title: project.name, lines: library.exportLines(parts),
+                                  close: { exportOpen = false }) { lines, format in
+                    library.exportChosen(lines, format: format, title: project.name) { failure in
+                        if let failure { model.toast = failure } else { exportOpen = false }
+                    }
+                }
+            }
+            .background(DSParts.publish("libraryExportSheet"))
+            .background(CornerPairStyle.publish("sheet"))   // ★ B2 (U17): the lane keeps its notifications off the sheet
+            .transition(.scale(scale: 0.97).combined(with: .opacity))
+        }
+    }
 }
 
-/// A part card: its picture, name, the H46 line, and a strip of its versions.
+/// A part card, §4.7's DSPartCard (mockup #lib-project): its picture (B1, note 10: the chosen result, else the original model),
+/// its name, "PA12 · not optimized yet" or "PA12 · picked v7b", its version strip (the chosen version in the accent, a Print
+/// this mark); a running version's chip over the same picture. ★ Note 11: a chosen result rings the card with its "v7b" tag.
 struct LibraryPartCard: View {
     @ObservedObject var model: AppModel
     @ObservedObject var library: LibraryModel
     let part: LibraryPart
     let open: () -> Void
+
+    /// The card's line: the material (a Flexible part names its filament, #362 H46), and "not optimized yet" until a run lands.
+    /// ★ A chosen result names itself instead (mockup #lib-project: "PA12 · picked v7b").
+    static func line(material: String, optimized: Bool, chosen: String? = nil) -> String {
+        if let chosen { return material + " · picked " + chosen }
+        return optimized ? material : material + " · not optimized yet"
+    }
+
+    /// The version strip; ★ the chosen result's version in the accent.
+    static func chips(_ part: LibraryPart, library: LibraryModel) -> [DSVersionChip] {
+        let chosen = library.chosen(of: part)?.folder
+        return part.versions.suffix(8).map { v in
+            DSVersionChip(id: v.folderID.uuidString, title: library.isDraft(v) ? "v\(v.number) draft" : "v\(v.number)",
+                          on: v.folderID == chosen, draft: library.isDraft(v), printed: v.marks.contains(where: \.printThis))
+        }
+    }
+
     var body: some View {
         let newest = part.versions.max { $0.number < $1.number }
         let recent = newest.flatMap { n in model.recentProjects.first { $0.id == n.folderID } }
         let running = part.versions.first { model.runningIDs.contains($0.folderID) }
-        Button(action: open) {
-            VStack(spacing: 0) {
-                LibraryPicture(image: library.partPicture(part), drawnKey: "libraryPartPicture-\(part.name)").frame(height: 230).frame(maxWidth: .infinity)
-                VStack(alignment: .leading, spacing: DS.Space.s) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(part.name).dsStyle(DS.TypeScale.bodyStrong).lineLimit(1)
-                            // #362 H46's behaviour, carried over: a Flexible part names its filament
-                            Text(recent.flatMap { FlexibleHomeCard.meta($0) } ?? (recent?.materialName ?? ""))
-                                .dsStyle(DS.TypeScale.caption2).foregroundStyle(DS.Color.textTertiary.color).lineLimit(1)
-                        }
-                        Spacer()
-                        if let running {
-                            HStack(spacing: DS.Space.xs) { ProgressView().controlSize(.mini); Text("v\(running.number)") }
-                                .font(DS.TypeScale.footnote.font).fontWeight(.semibold).foregroundStyle(DS.Color.accent.color)
-                                .padding(.vertical, 5).padding(.horizontal, DS.Space.sm)
-                                .background(Capsule().fill(DS.Color.accent.opacity(0.14).color))
-                        }
-                    }
-                    HStack(spacing: DS.Space.xxs) {
-                        ForEach(part.versions.suffix(8), id: \.folderID) { v in
-                            HStack(spacing: 2) {
-                                Text("v\(v.number)")
-                                if v.marks.contains(where: \.printThis) { Image(systemName: "printer").foregroundStyle(DS.Color.okGreen.color) }
-                            }
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(library.isDraft(v) ? DS.Color.accentCyan.color : DS.Color.textSecondary.color)
-                            .padding(.horizontal, 6).frame(height: 22)
-                            .background(RoundedRectangle(cornerRadius: 7).fill(DS.Color.fillSubtle.color))
-                            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(DS.Color.strokeSubtle.color,
-                                                                                    style: StrokeStyle(lineWidth: 1, dash: library.isDraft(v) ? [3, 2] : [])))
-                        }
-                    }
-                }
-                .padding(.horizontal, DS.Space.xl).padding(.vertical, DS.Space.ml)
-                .overlay(alignment: .top) { Rectangle().fill(DS.Color.strokeSubtle.color).frame(height: 1) }
+        // #362 H46's behaviour, carried over: a Flexible part names its filament
+        let material = recent.flatMap { FlexibleHomeCard.meta($0) } ?? (recent?.materialName ?? "")
+        let tag = library.chosenTag(part)   // ★ note 11: the chosen result rings the card, with its "v7b" tag
+        DSPartCard(key: "libraryPart-\(part.name)", name: part.name,
+                   line: Self.line(material: material, optimized: part.versions.contains { !library.isDraft($0) }, chosen: tag),
+                   chosenTag: tag,
+                   running: running.map { "v\($0.number)" },
+                   versions: Self.chips(part, library: library),
+                   open: open) {
+            if let image = library.partPicture(part) {
+                Image(decorative: image, scale: 1).resizable().aspectRatio(contentMode: .fit).padding(12)
+                    .background(CornerPairStyle.publish("libraryPartPicture-\(part.name)"))   // B1: hosted tests
+            } else {
+                Image(systemName: "cube.transparent").font(.system(size: 34, weight: .light))
+                    .foregroundStyle(DS.Color.textPrimary.opacity(0.22).color)
             }
-            .modifier(LibraryCardSurface())
         }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("library-part-\(part.name)")
-        .background(CornerPairStyle.publish("libraryPart-\(part.name)"))   // B1: hosted tests find a part card by its frame
     }
 }
 
@@ -769,16 +841,30 @@ struct PartFolderView: View {
     @ObservedObject var library: LibraryModel
     let part: LibraryPart
     let back: () -> Void
-    let quickLook: (UUID) -> Void
+    /// Quick look of a version: on one result (a tile's tap), or nil for the result it shows.
+    let quickLook: (UUID, Int?) -> Void
     let compare: (LibraryCompareRequest) -> Void
     @State private var filter: LibraryFilter = .all
     @State private var sort: LibrarySort = .newest
+    @State private var rejected: LibraryRejectedView = .shown   // ★ his iPad notes 11-05 (L2)
     @State private var renaming: (folder: UUID, name: String)?
     @State private var deleting: LibraryVersion?
+    @State private var portrait = false
 
-    private let columns = [GridItem(.adaptive(minimum: 380), spacing: DS.Space.xl2)]
+    /// ★ His iPad notes 11-05 (L1): "3 versions per row", as the project page (2 in portrait).
+    private var columnCount: Int { portrait ? 2 : 3 }
 
     private func best(_ v: LibraryVersion) -> ResultSummary? { v.summary?[safe: library.shownResult(v)] }
+
+    /// The results a version's card shows: the Rejected chip may hide them, or show only them.
+    private func shown(_ v: LibraryVersion) -> [Int] {
+        let all = Array((v.summary ?? []).indices)
+        switch rejected {
+        case .shown: return all
+        case .hidden: return all.filter { !v.mark(for: $0).rejected }
+        case .only: return all.filter { v.mark(for: $0).rejected }
+        }
+    }
 
     private var cards: [LibraryVersion] {
         let pending = part.versions.filter { library.isDraft($0) || model.runningIDs.contains($0.folderID) }
@@ -789,6 +875,8 @@ struct PartFolderView: View {
         case .print: done = done.filter { $0.marks.contains(where: \.printThis) }
         case .strong: done = done.filter { $0.summary?.contains(where: \.accepted) == true }
         }
+        // ★ a version whose every result is hidden goes (one still reading its results stays)
+        if rejected != .shown { done = done.filter { v in v.summary == nil ? rejected == .hidden : !shown(v).isEmpty } }
         switch sort {
         // his decision 11: a branch (v4.1) sits right under the version it came from
         case .newest: done.sort { VersionNumber.newestFirst($0.number, $1.number) }
@@ -798,7 +886,12 @@ struct PartFolderView: View {
         case .lightest: done.sort { (best($0)?.massGrams ?? .infinity) < (best($1)?.massGrams ?? .infinity) }
         case .strongest: done.sort { (best($0)?.worstCaseMargin ?? -1) > (best($1)?.worstCaseMargin ?? -1) }
         }
-        return (filter == .all ? pending.sorted { VersionNumber.newestFirst($0.number, $1.number) } : []) + done
+        return (filter == .all && rejected != .only ? pending.sorted { VersionNumber.newestFirst($0.number, $1.number) } : []) + done
+    }
+
+    /// The cards in rows of `columnCount`, for the grid (cards in a row share the tallest one's height).
+    private var rows: [[LibraryVersion]] {
+        stride(from: 0, to: cards.count, by: columnCount).map { Array(cards[$0 ..< min($0 + columnCount, cards.count)]) }
     }
 
     private var openTarget: LibraryVersion? {
@@ -810,6 +903,7 @@ struct PartFolderView: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: DS.Space.ml) {
                     LibraryBackPill(title: library.projectOf(part: part.id)?.name ?? "Unfiled", action: back)
+                        .layoutPriority(1)   // B5: at 11P the back target stays whole; the count line gives way first
                     VStack(alignment: .leading, spacing: 2) {
                         Text(part.name).dsStyle(DS.TypeScale.titleXL)
                         let done = part.versions.filter { !library.isDraft($0) }.count, drafts = part.versions.count - done
@@ -817,78 +911,109 @@ struct PartFolderView: View {
                             .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
                     }
                     Spacer()
-                    Button { compare(LibraryCompareRequest(part: part.id, scope: .all)) } label: {
-                        Label("Compare", systemImage: "rectangle.split.2x1").font(DS.TypeScale.bodyStrong.font)
-                            .padding(.horizontal, DS.Space.l).frame(height: 44)
-                            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(DS.Color.fillSubtle.color))
-                            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(DS.Color.strokeStrong.color, lineWidth: 1))
+                    // ★ B5 (mockup #lib-part): [Compare] [Open v8 draft] [⌄], §4's glass and accent buttons
+                    DSGlassButton("Compare", systemImage: "rectangle.split.2x1", key: "library-compare") {
+                        compare(LibraryCompareRequest(part: part.id, scope: .all))
                     }
-                    .buttonStyle(.plain).accessibilityIdentifier("library-compare")
                     if let t = openTarget {
-                        HStack(spacing: 0) {
-                            Button { openFolder(t.folderID) } label: {
-                                Text(library.isDraft(t) ? "Open v\(t.number) draft" : "Open v\(t.number)").dsStyle(DS.TypeScale.bodyStrong).foregroundStyle(.white)
-                                    .padding(.horizontal, DS.Space.l).frame(height: 44)
-                            }
-                            .buttonStyle(.plain).accessibilityIdentifier("library-open")
-                            Rectangle().fill(Color.white.opacity(0.35)).frame(width: 1, height: 26)
-                            // his decision 6: the ⌄ lists the drafts (newest first), then every version
-                            Menu {
-                                let drafts = library.drafts(of: part)
-                                if !drafts.isEmpty {
-                                    Section("Drafts") {
-                                        ForEach(drafts, id: \.folderID) { d in Button(library.shortTitle(of: d, in: part)) { openFolder(d.folderID) } }
-                                    }
+                        DSGlassButton(library.isDraft(t) ? "Open v\(t.number) draft" : "Open v\(t.number)", accent: true,
+                                      key: "library-open") { openFolder(t.folderID) }
+                        // his decision 6: the ⌄ lists the drafts (newest first), then every version
+                        Menu {
+                            let drafts = library.drafts(of: part)
+                            if !drafts.isEmpty {
+                                Section("Drafts") {
+                                    ForEach(drafts, id: \.folderID) { d in Button(library.shortTitle(of: d, in: part)) { openFolder(d.folderID) } }
                                 }
-                                Section("Versions") {
-                                    ForEach(part.versions.filter { !library.isDraft($0) }.sorted { $0.number > $1.number }, id: \.folderID) { d in
-                                        Button(library.shortTitle(of: d, in: part)) { openFolder(d.folderID) }
-                                    }
-                                }
-                            } label: {
-                                Image(systemName: "chevron.down").font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
-                                    .frame(width: 40, height: 44)
                             }
-                            .accessibilityIdentifier("library-open-menu")
+                            Section("Versions") {
+                                ForEach(part.versions.filter { !library.isDraft($0) }.sorted { $0.number > $1.number }, id: \.folderID) { d in
+                                    Button(library.shortTitle(of: d, in: part)) { openFolder(d.folderID) }
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "chevron.down").font(.system(size: 15, weight: .bold)).foregroundStyle(DS.Color.textPrimary.color)
+                                .frame(width: DSParts.glassHeight, height: DSParts.glassHeight)
+                                .background(Circle().fill(DS.Surface.bar.color))
+                                .overlay(Circle().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
+                                .contentShape(Circle())
                         }
-                        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(DS.Color.accent.color))
-                        .dsShadow(.accentGlow)
+                        .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain).fixedSize()
+                        .background(DSParts.publish("library-open-menu"))
+                        .accessibilityLabel("Open another version")
+                        .accessibilityIdentifier("library-open-menu")
                     }
                 }
                 HStack(spacing: DS.Space.sm) {
                     Spacer()
                     SegmentedGlass([.init(LibraryFilter.all, "All"), .init(.top, "★ 4+"), .init(.print, "Print"), .init(.strong, "Strong enough")],
-                                   selection: $filter)
-                        .frame(maxWidth: 460)
+                                   selection: $filter, small: true)
+                    // ★ his iPad notes 11-05 (L2, his answer): "Rejected: Shown ⌄" — Shown │ Hidden │ Only rejected
+                    Menu {
+                        ForEach(LibraryRejectedView.allCases, id: \.self) { s in
+                            Button { rejected = s } label: { if s == rejected { Label(s.rawValue, systemImage: "checkmark") } else { Text(s.rawValue) } }
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text("Rejected: \(rejected.short)")
+                            Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
+                        }
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(DS.Color.textSecondary.color)
+                        .padding(.horizontal, 10).frame(height: 28)
+                        .background(Capsule().fill(DS.Color.fillSubtle.color))
+                        .overlay(Capsule().strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1))
+                        .frame(minHeight: DSParts.target).contentShape(Rectangle())
+                    }
+                    .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain).fixedSize()
+                    .background(DSParts.publish("library-rejected-filter"))
+                    .accessibilityIdentifier("library-rejected-filter")
                     Menu {
                         ForEach(LibrarySort.allCases, id: \.self) { s in
                             Button { sort = s } label: { if s == sort { Label(s.rawValue, systemImage: "checkmark") } else { Text(s.rawValue) } }
                         }
                     } label: {
-                        Label(sort.rawValue, systemImage: "arrow.up.arrow.down").font(DS.TypeScale.subhead.font).fontWeight(.semibold)
-                            .padding(.horizontal, DS.Space.ml).frame(height: 36)
+                        Label(sort.rawValue, systemImage: "arrow.up.arrow.down").font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(DS.Color.textSecondary.color)
+                            .padding(.horizontal, 10).frame(height: 28)
                             .background(Capsule().fill(DS.Color.fillSubtle.color))
-                            .overlay(Capsule().strokeBorder(DS.Color.strokeStrong.color, lineWidth: 1))
+                            .overlay(Capsule().strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1))
+                            .frame(minHeight: DSParts.target).contentShape(Rectangle())
                     }
+                    .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain).fixedSize()
+                    .background(DSParts.publish("library-sort"))
                     .accessibilityIdentifier("library-sort")
                 }
-                .padding(.vertical, DS.Space.ml)
-                LazyVGrid(columns: columns, spacing: DS.Space.xl2) {
-                    ForEach(cards, id: \.folderID) { v in
-                        LibraryVersionCard(model: model, library: library, part: part, version: v,
-                                           quickLook: { quickLook(v.folderID) },
-                                           compareResults: { compare(LibraryCompareRequest(part: part.id, scope: .version(v.folderID))) },
-                                           open: { openFolder(v.folderID) },
-                                           rename: { renaming = (v.folderID, v.name ?? "") },
-                                           delete: { deleting = v })
+                .padding(.top, DS.Space.s).padding(.bottom, DS.Space.xs)
+                // ★ His iPad notes 11-05 (L1): a card per version, a third of the width (half in portrait), newest first, a
+                // branch right after the version it came from. "As tall as required": each row takes its tallest card's height.
+                Grid(alignment: .topLeading, horizontalSpacing: DS.Space.xl, verticalSpacing: DS.Space.xl) {
+                    ForEach(rows, id: \.first!.folderID) { row in
+                        GridRow {
+                            ForEach(row, id: \.folderID) { v in
+                                LibraryVersionCard(model: model, library: library, part: part, version: v, results: shown(v),
+                                                   quickLook: { quickLook(v.folderID, $0) },
+                                                   compareResults: { compare(LibraryCompareRequest(part: part.id, scope: .version(v.folderID))) },
+                                                   open: { openFolder(v.folderID) },
+                                                   rename: { renaming = (v.folderID, v.name ?? "") },
+                                                   delete: { deleting = v })
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                            }
+                            ForEach(row.count ..< columnCount, id: \.self) { _ in Color.clear.frame(maxWidth: .infinity, maxHeight: 1) }
+                        }
                     }
                 }
+                .padding(.top, DS.Space.ml)
                 if cards.isEmpty {
                     Text("Nothing here yet.").dsStyle(DS.TypeScale.body).foregroundStyle(DS.Color.textTertiary.color).padding(.top, DS.Space.xl)
                 }
             }
             .padding(.horizontal, DS.Space.page).padding(.top, 34).padding(.bottom, 60)
         }
+        .background(GeometryReader { g in
+            Color.clear.onAppear { portrait = g.size.height > g.size.width }
+                .onChange(of: g.size) { portrait = $0.height > $0.width }
+        })
         .alert("Name this version", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Automatic", text: Binding(get: { renaming?.name ?? "" }, set: { renaming?.name = $0 }))
             Button("Save") { if let r = renaming { library.rename(version: r.folder, to: r.name) }; renaming = nil }
@@ -911,130 +1036,250 @@ struct PartFolderView: View {
     }
 }
 
-/// One version: its picture, a b c, title, what changed, weight · strength, stars, ⋯.
+/// ★ His iPad notes 11-05 (ledger L1/L2): which rejected results the part page shows (his answer: a chip beside Newest).
+enum LibraryRejectedView: String, CaseIterable {
+    case shown = "Shown", hidden = "Hidden", only = "Only rejected"
+    /// The chip's word: "Rejected: Shown".
+    var short: String { self == .only ? "Only" : rawValue }
+}
+
+extension LibraryFlag {
+    /// ★ His note: Rejected is RED; Print this keeps its green; In consideration is amber (L3; U5: amber = look at this).
+    var colour: RGBA {
+        switch self {
+        case .printThis: return DS.Color.okGreen
+        case .rejected: return DS.Color.danger
+        case .considering: return DS.Color.warning
+        }
+    }
+    var glyph: String? { self == .printThis ? "printer" : nil }
+}
+
+/// A result's flag on its line: "Rejected ✕", "Print ✕". ★ His answer (L2): a tap takes it off, Undo in the toast; 44 pt.
+struct LibraryFlagChip: View {
+    let flag: LibraryFlag
+    let key: String
+    let remove: () -> Void
+    var body: some View {
+        Button(action: remove) {
+            HStack(spacing: 4) {
+                if let g = flag.glyph { Image(systemName: g).font(.system(size: 10, weight: .semibold)) }
+                Text(flag.title).font(.system(size: 11.5, weight: .semibold)).lineLimit(1).fixedSize()
+                Image(systemName: "xmark").font(.system(size: 8.5, weight: .bold))
+            }
+            .foregroundStyle(flag.colour.color)
+            .padding(.horizontal, 8).frame(height: 24)
+            .background(Capsule().fill(flag.colour.opacity(0.14).color))
+            .overlay(Capsule().strokeBorder(flag.colour.opacity(0.5).color, lineWidth: 1))
+            .frame(minWidth: DSParts.target, minHeight: DSParts.target).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Remove \(flag.title)")
+        .background(DSParts.publish(key))
+        .accessibilityIdentifier(key)
+    }
+}
+
+/// One version as a card a third of the page wide (★ his iPad notes 11-05, ledger L1): its results small, side by side, just
+/// to show how many; then "v7", Draft / "from v4", the date, ⋯, and its name; then one line per result (his answer "On the
+/// card"): "v2b · +10 %  117 g · 8.7×  ★★★  ⋯", with Picked and its flags under it. As tall as it needs (his add): nothing is
+/// squeezed. Frames: "library-version-v<n>" (and "-draft", "-from", "-running", "-menu", "-open"); each result's small picture
+/// "library-mini-v<n><letter>"; its line "library-result-v<n><letter>" (and "-picked", "-stars", "-menu", "-rejected", "-print").
 struct LibraryVersionCard: View {
     @ObservedObject var model: AppModel
     @ObservedObject var library: LibraryModel
     let part: LibraryPart
     let version: LibraryVersion
-    let quickLook: () -> Void
+    /// The results the page shows (the Rejected chip may hide some).
+    let results: [Int]
+    /// Quick look on one result (a small picture's tap), or nil for the result the version shows.
+    let quickLook: (Int?) -> Void
     let compareResults: () -> Void
     let open: () -> Void
     let rename: () -> Void
     let delete: () -> Void
 
+    /// The small pictures' height: three fit across a card at 13″ (about 125 × 160); one alone reads like a part card's.
+    static let pictureHeight: CGFloat = 160
+
+    private var key: String { "library-version-v\(version.number)" }
+
     var body: some View {
         let v = version
         let running = model.runningIDs.contains(v.folderID)
         let pending = library.isDraft(v) || running
-        let r = library.shownResult(v)
-        let mark = v.mark(for: r)
-        Button(action: pending ? open : quickLook) {
-            VStack(spacing: 0) {
-                picture(pending: pending, running: running, r: r, mark: mark)
-                info(pending: pending, r: r, mark: mark)
-                    .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.m)
-            }
-            .modifier(LibraryCardSurface(dashed: pending))
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("library-card-v\(v.number)")
-    }
-
-    private func picture(pending: Bool, running: Bool, r: Int, mark: ResultMark) -> some View {
-        let v = version
-        return ZStack(alignment: .topLeading) {
-            LibraryPicture(image: pending ? parentPicture : library.thumbnails[CompareItem(folder: v.folderID, result: r)], dim: pending)
-                .frame(height: 208).frame(maxWidth: .infinity)
-            LibraryStageChip(snapshot: library.snapshots[v.folderID]).padding(DS.Space.sm)
-            if pending {
-                pendingBadge(running: running).frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                if mark.printThis {
-                    Image(systemName: "printer").font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.Color.okGreen.color)
-                        .frame(width: 28, height: 28).background(Circle().fill(Color.black.opacity(0.6)))
-                        .frame(maxWidth: .infinity, alignment: .trailing).padding(DS.Space.sm)
-                        .accessibilityLabel("Print this")
+        let shape = RoundedRectangle(cornerRadius: DSCards.versionRadius, style: .continuous)
+        VStack(alignment: .leading, spacing: 10) {
+            picture(pending: pending)
+            HStack(spacing: 8) {
+                Text("v\(v.number)").font(.system(size: 15, weight: .bold)).foregroundStyle(DS.Color.textPrimary.color)
+                if library.isDraft(v), !running { DSChip(.tag("Draft"), key: key + "-draft") }
+                if !v.number.isMainLine, let p = v.parentNumber { DSChip(.tag("from v\(p)"), key: key + "-from") }
+                Spacer(minLength: 0)
+                if running {
+                    // §4.7 running: a spinning chip on the version
+                    HStack(spacing: 6) { ProgressView().controlSize(.mini); Text("Running") }
+                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.accent.color)
+                        .padding(.horizontal, 8).frame(height: 26)
+                        .background(Capsule().fill(DS.Color.accent.opacity(0.14).color))
+                        .background(DSParts.publish(key + "-running"))
                 }
-                if let n = v.summary?.count, n > 1 {
-                    LibraryResultSwitcher(count: n, shown: r, suggested: library.suggestedResult(v),
-                                          rejected: Set(v.marks.filter(\.rejected).map(\.result))) {
-                        library.pick(folder: v.folderID, result: $0)
+                Text(date).font(.system(size: 11.5)).foregroundStyle(DS.Color.textTertiary.color).lineLimit(1).fixedSize()
+                Menu { versionMenu(pending: pending) } label: { LibraryDots() }
+                    .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain).fixedSize()
+                    .background(DSParts.publish(key + "-menu"))
+                    .padding(.vertical, -4)
+                    .accessibilityLabel("v\(v.number) menu")
+                    .accessibilityIdentifier(key + "-menu")
+            }
+            Text(line).font(.system(size: 12.5)).foregroundStyle(DS.Color.textSecondary.color).lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            if pending {
+                if !running {
+                    // a draft's card opens it (the ⋯'s Open, as a button he can see)
+                    Button(action: open) {
+                        Text("Open v\(v.number) draft").font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.accent.color)
+                            .frame(minHeight: DSParts.target).contentShape(Rectangle())
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading).padding(DS.Space.sm)
+                    .buttonStyle(.plain)
+                    .background(DSParts.publish(key + "-open"))
+                    .accessibilityIdentifier(key + "-open")
                 }
-            }
-        }
-    }
-
-    private func pendingBadge(running: Bool) -> some View {
-        HStack(spacing: DS.Space.xs) {
-            if running { ProgressView().controlSize(.mini); Text("Running") }
-            else { Image(systemName: "pencil"); Text("Not optimized yet") }
-        }
-        .font(DS.TypeScale.caption.font.weight(.semibold)).foregroundStyle(DS.Color.accent.color)
-        .padding(.horizontal, DS.Space.m).frame(height: 30)
-        .background(Capsule().fill(DS.Color.accent.opacity(0.14).color))
-    }
-
-    private func info(pending: Bool, r: Int, mark: ResultMark) -> some View {
-        let v = version
-        return VStack(alignment: .leading, spacing: DS.Space.sm) {
-            HStack(spacing: DS.Space.xs) {
-                if !v.number.isMainLine {
-                    Image(systemName: "arrow.turn.down.right").font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(DS.Color.accentCyan.color)
-                        .accessibilityLabel("A branch from v\(v.number.parent?.description ?? "")")
-                }
-                Text(library.shortTitle(of: v, in: part)).dsStyle(DS.TypeScale.bodyStrong).lineLimit(1)
-            }
-            Text(changeLine(v)).dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textSecondary.color).lineLimit(1)
-            if pending {
-                ForEach(Array(v.changes.prefix(3).enumerated()), id: \.offset) { _, c in changeRow(c) }
+            } else if (v.summary?.count ?? 0) > 0 {
+                VStack(alignment: .leading, spacing: 0) { ForEach(results, id: \.self) { resultLine($0) } }
             } else {
-                LibraryNumbers(summary: v.summary?[safe: r], rejected: mark.rejected)
+                Text("Reading the results…").font(.system(size: 12)).foregroundStyle(DS.Color.textTertiary.color)
             }
-            footer(pending: pending, r: r, mark: mark)
         }
+        .padding(14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(shape.fill(DSCards.fill.color))
+        .overlay(shape.strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
+        .background(DSParts.publish(key))
     }
 
-    private func changeRow(_ c: VersionChange) -> some View {
-        Label(c.text, systemImage: c.kind == .added ? "plus.square.fill" : c.kind == .removed ? "minus.square.fill" : "arrow.right.square.fill")
-            .font(DS.TypeScale.caption.font).lineLimit(1)
-    }
-
-    private func footer(pending: Bool, r: Int, mark: ResultMark) -> some View {
+    /// Its results small, side by side (just how many), the picked one ringed, a rejected one dim; a tap is Quick look of that
+    /// one. A draft shows what it came from, dim.
+    @ViewBuilder private func picture(pending: Bool) -> some View {
         let v = version
-        let date = library.snapshots[v.folderID].map { $0.savedAt.formatted(.dateTime.month(.abbreviated).day()) } ?? ""
-        return HStack(spacing: DS.Space.s) {
-            if !pending {
-                LibraryStars(value: mark.stars, size: 20) { library.setStars($0, folder: v.folderID, result: r) }
+        if pending || results.isEmpty {
+            LibraryPicture(image: parentPicture, dim: true)
+                .frame(maxWidth: .infinity).frame(height: Self.pictureHeight)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        } else {
+            HStack(spacing: 6) {
+                ForEach(results, id: \.self) { r in
+                    let picked = library.chosenResult(folder: v.folderID) == r
+                    let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    Button { quickLook(r) } label: {
+                        LibraryPicture(image: library.thumbnails[CompareItem(folder: v.folderID, result: r)], dim: v.mark(for: r).rejected)
+                            .frame(maxWidth: .infinity).frame(height: Self.pictureHeight)
+                            .clipShape(shape)
+                            .overlay(shape.strokeBorder((picked ? DS.Color.accent : DS.Color.strokeSubtle).color, lineWidth: picked ? 2 : 1))
+                            .overlay(alignment: .bottomLeading) {
+                                Text(ResultMark.letter(r)).font(.system(size: 11, weight: .bold)).foregroundStyle(DS.Color.textPrimary.color)
+                                    .padding(.horizontal, 7).frame(height: 20)
+                                    .background(Capsule().fill(Color.black.opacity(0.55))).padding(6)
+                            }
+                            .contentShape(shape)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("v\(v.number)\(ResultMark.letter(r))")
+                    .background(DSParts.publish("library-mini-v\(v.number)\(ResultMark.letter(r))"))
+                }
             }
-            Spacer()
-            Text(date).dsStyle(DS.TypeScale.caption2).foregroundStyle(DS.Color.textTertiary.color)
-            Menu { menu(r: r, mark: mark, pending: pending) } label: {
-                Image(systemName: "ellipsis").font(.system(size: 15, weight: .semibold))
-                    .frame(width: 36, height: 36)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(DS.Color.fillSubtle.color))
-                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1))
-            }
-            .accessibilityIdentifier("library-card-menu-v\(v.number)")
         }
     }
 
-    @ViewBuilder private func menu(r: Int, mark: ResultMark, pending: Bool) -> some View {
+    /// A draft's picture: the result of the version it came from, else the original model.
+    private var parentPicture: CGImage? {
+        guard let parent = version.parentNumber.flatMap(part.version(number:)) else { return library.originalPicture(part) }
+        return library.thumbnails[CompareItem(folder: parent.folderID, result: library.shownResult(parent))] ?? library.originalPicture(part)
+    }
+
+    /// One result's line: "v2b · +10 %", weight · strength, its stars, its ⋯; under it Picked and its flags (when it has any).
+    private func resultLine(_ r: Int) -> some View {
+        let v = version
+        let k = "library-result-v\(v.number)\(ResultMark.letter(r))"
+        let mark = v.mark(for: r)
+        let picked = library.chosenResult(folder: v.folderID) == r   // ★ the part's ONE chosen result
+        let s = v.summary?[safe: r]
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Text(LibraryStyle.resultTitle(number: "\(v.number)", result: r, word: s?.word))   // ★ Q1: "v2b · +10 %"
+                    .font(.system(size: 12.5, weight: .bold)).foregroundStyle(DS.Color.textPrimary.color)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+                Text(s.map { "\(LibraryStyle.grams($0.massGrams)) · \(LibraryStyle.margin($0.worstCaseMargin))" } ?? "")
+                    .font(.system(size: 12)).monospacedDigit().foregroundStyle(DS.Color.textTertiary.color).lineLimit(1).fixedSize()
+                Spacer(minLength: 4)
+                LibraryStars(value: mark.stars, size: 14) { library.setStars($0, folder: v.folderID, result: r) }
+                    .background(DSParts.publish(k + "-stars"))
+                Menu { resultMenu(r, mark: mark, picked: picked) } label: { LibraryDots() }
+                    .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain).fixedSize()
+                    .background(DSParts.publish(k + "-menu"))
+                    .accessibilityLabel("v\(v.number)\(ResultMark.letter(r)) menu")
+                    .accessibilityIdentifier(k + "-menu")
+            }
+            .frame(minHeight: DSParts.target)
+            if picked || mark.rejected || mark.printThis || mark.inConsideration {
+                HStack(spacing: 2) {
+                    if picked { DSChip(.accentTag("Picked"), key: k + "-picked") }
+                    if mark.printThis {
+                        LibraryFlagChip(flag: .printThis, key: k + "-print") { library.removeFlag(.printThis, folder: v.folderID, result: r) }
+                    }
+                    if mark.rejected {
+                        LibraryFlagChip(flag: .rejected, key: k + "-rejected") { library.removeFlag(.rejected, folder: v.folderID, result: r) }
+                    }
+                    if mark.inConsideration {   // ★ L3: what a Compare ended on its second Tie left undecided
+                        LibraryFlagChip(flag: .considering, key: k + "-considering") { library.removeFlag(.considering, folder: v.folderID, result: r) }
+                    }
+                }
+                .frame(minHeight: DSParts.target)
+            }
+        }
+        .background(DSParts.publish(k))
+        .accessibilityIdentifier(k)
+    }
+
+    /// What the row says after "v7": his name, else the automatic one ("Keep Clear on 2 faces · res 128"). A draft says where it
+    /// came from first ("from v7 · …"); a branch's "from v4" is its tag.
+    private var line: String {
+        let title = library.shortTitle(of: version, in: part)
+        let prefix = "v\(version.number) · "
+        let words = title.hasPrefix(prefix) ? String(title.dropFirst(prefix.count)) : title
+        guard library.isDraft(version), version.number.isMainLine, let p = version.parentNumber else { return words }
+        return "from v\(p) · \(words)"
+    }
+
+    private var date: String {
+        library.snapshots[version.folderID].map { $0.savedAt.formatted(.dateTime.month(.abbreviated).day()) } ?? ""
+    }
+
+    @ViewBuilder private func resultMenu(_ r: Int, mark: ResultMark, picked: Bool) -> some View {
+        let v = version
+        if !picked { Button { library.pick(folder: v.folderID, result: r) } label: { Label("Pick this", systemImage: "checkmark.circle") } }
+        // ★ his iPad notes 11-05 (L2): a flag taken off here offers Undo too
+        Button { library.tapFlag(.printThis, folder: v.folderID, result: r) } label: {
+            Label(mark.printThis ? "Not for print" : "Print this", systemImage: "printer")
+        }
+        Button { library.tapFlag(.rejected, folder: v.folderID, result: r) } label: {
+            Label(mark.rejected ? "Not rejected" : "Reject", systemImage: "xmark.circle")
+        }
+        Button { LibraryExport.start(model: model, library: library, folder: v.folderID, result: r) } label: {
+            Label("Export…", systemImage: "square.and.arrow.up")
+        }
+    }
+
+    /// app-map's version ⋯: Quick look · Compare its results · Export… · Open v4 · New draft from v4 · Rename · Delete.
+    @ViewBuilder private func versionMenu(pending: Bool) -> some View {
         let v = version
         if !pending {
-            Button(action: quickLook) { Label("Quick look", systemImage: "eye") }
+            Button { quickLook(nil) } label: { Label("Quick look", systemImage: "eye") }
             if (v.summary?.count ?? 0) > 1 { Button(action: compareResults) { Label("Compare its results", systemImage: "rectangle.split.3x1") } }
-            Button { library.togglePrint(folder: v.folderID, result: r) } label: {
-                Label(mark.printThis ? "Not for print" : "Print this", systemImage: "printer")
-            }
-            Button { library.toggleReject(folder: v.folderID, result: r) } label: {
-                Label(mark.rejected ? "Not rejected" : "Reject", systemImage: "xmark.circle")
+            Button { LibraryExport.start(model: model, library: library, folder: v.folderID, result: library.shownResult(v)) } label: {
+                Label("Export…", systemImage: "square.and.arrow.up")
             }
         }
-        if !pending { Button { export(r) } label: { Label("Export…", systemImage: "square.and.arrow.up") } }
         Button(action: open) { Label("Open v\(v.number)", systemImage: "arrow.up.forward.app") }
         // #362 H51's behaviour, carried over: Duplicate is now "New draft from vN" (H52 unchanged)
         Button {
@@ -1044,21 +1289,18 @@ struct LibraryVersionCard: View {
         Button(action: rename) { Label("Rename…", systemImage: "pencil") }
         Button(role: .destructive, action: delete) { Label("Delete v\(v.number)…", systemImage: "trash") }
     }
+}
 
-    /// Export from a card: open this version on its Export step (Smooth, with this result).
-    private func export(_ r: Int) { LibraryExport.start(model: model, library: library, folder: version.folderID, result: r) }
-
-    private var parentPicture: CGImage? {
-        guard let p = version.parentNumber.flatMap(part.version(number:)),
-              let img = library.thumbnails[CompareItem(folder: p.folderID, result: library.shownResult(p))]
-        else { return library.originalPicture(part) }   // ★ B1 (note 10): a draft (running or not) shows the original
-        return img
-    }
-
-    private func changeLine(_ v: LibraryVersion) -> String {
-        let from = v.parentNumber.map { "from v\($0)" } ?? "first run"
-        guard let first = v.changes.first else { return v.parentNumber == nil ? from : "\(from): same settings" }
-        return "\(from): \(first.text)\(v.changes.count > 1 ? " +\(v.changes.count - 1)" : "")"
+/// The ⋯ (mockup .ib): 36 pt drawn, a 44 pt hit. On a picture it sits on a dark disc.
+struct LibraryDots: View {
+    var onPicture = false
+    var body: some View {
+        Image(systemName: "ellipsis").font(.system(size: 15, weight: .semibold))
+            .foregroundStyle((onPicture ? DS.Color.textPrimary : DS.Color.textSecondary).color)
+            .frame(width: onPicture ? 28 : 36, height: onPicture ? 28 : 36)
+            .background { if onPicture { Circle().fill(Color.black.opacity(0.6)) } }
+            .frame(width: DSParts.target, height: DSParts.target)
+            .contentShape(Rectangle())
     }
 }
 

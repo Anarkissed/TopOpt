@@ -1686,4 +1686,14 @@ std::vector<std::string> refinish_job(const JobDescription& job, const std::stri
                                       const MaterialLibrary& materials,
                                       const SettingsRules& rules, bool export_only = false);
 
+// KEEP CLEAR, EXACTLY (reviewer's ruling 2026-11-03 19:55): `file` cut out of every Keep
+// clear of `job` (its declared primitives and its keep regions' reach), minus the part's
+// own solid (`model.mesh`), by Manifold. Every finished export goes through it; a file
+// that reaches into none comes back unchanged. Shells under `min_piece_mm3` the cut
+// leaves are dropped, and pieces it cuts loose thinner than `thin_mm` (the printable
+// minimum; 0: none). `cut_mm3` (may be null) is the volume cut.
+TriangleMesh cut_keep_clears(const TriangleMesh& file, const JobDescription& job,
+                             const StepModel& model, double min_piece_mm3,
+                             double* cut_mm3 = nullptr, double thin_mm = 0.0);
+
 }  // namespace topopt
