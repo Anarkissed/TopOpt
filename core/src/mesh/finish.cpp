@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <map>
+#include <set>
 #include <unordered_map>
 
 #include "topopt/cad_project.hpp"
@@ -672,6 +673,24 @@ int positive_volume_bodies(const TriangleMesh& m) {
   return n;
 }
 
+namespace {
+
+// The reader's zero-area rule (core's import, weld_and_clean): the cross product, in
+// double, of the edges of the corners as read, exactly zero.
+bool zero_area_as_read(const Vec3& p0, const Vec3& p1, const Vec3& p2) {
+  const double ax = p1.x - p0.x, ay = p1.y - p0.y, az = p1.z - p0.z;
+  const double bx = p2.x - p0.x, by = p2.y - p0.y, bz = p2.z - p0.z;
+  const double cx = ay * bz - az * by, cy = az * bx - ax * bz, cz = ax * by - ay * bx;
+  return cx * cx + cy * cy + cz * cz <= 0.0;
+}
+
+Vec3 as_read(const Vec3& v) {
+  return {static_cast<double>(static_cast<float>(v.x)), static_cast<double>(static_cast<float>(v.y)),
+          static_cast<double>(static_cast<float>(v.z))};
+}
+
+}  // namespace
+
 WrittenAudit audit_as_written(const TriangleMesh& m) {
   WrittenAudit a;
   std::map<std::array<float, 3>, int> at;
@@ -684,9 +703,20 @@ WrittenAudit audit_as_written(const TriangleMesh& m) {
   }
   const std::size_t nt = m.triangles.size();
   auto corner = [&](std::size_t t, int k) { return id[static_cast<std::size_t>(m.triangles[t][k])]; };
+  // A triangle on one line (three distinct float corners) is dropped, as a reader does.
+  std::vector<char> dead(nt, 0);
+  for (std::size_t t = 0; t < nt; ++t) {
+    const int p = corner(t, 0), q = corner(t, 1), r = corner(t, 2);
+    const auto& T = m.triangles[t];
+    dead[t] = p != q && q != r && r != p &&
+              zero_area_as_read(as_read(m.vertices[static_cast<std::size_t>(T[0])]),
+                                as_read(m.vertices[static_cast<std::size_t>(T[1])]),
+                                as_read(m.vertices[static_cast<std::size_t>(T[2])]));
+    a.zero_area_triangles += dead[t];
+  }
   std::map<std::pair<int, int>, std::vector<int>> uses;
   for (std::size_t t = 0; t < nt; ++t)
-    for (int e = 0; e < 3; ++e) {
+    for (int e = 0; dead[t] == 0 && e < 3; ++e) {
       const int p = corner(t, e), q = corner(t, (e + 1) % 3);
       uses[{std::min(p, q), std::max(p, q)}].push_back(static_cast<int>(t));
     }
@@ -728,6 +758,7 @@ WrittenAudit audit_as_written(const TriangleMesh& m) {
   }
   std::map<int, double> vol;
   for (std::size_t t = 0; t < nt; ++t) {
+    if (dead[t]) continue;
     const Vec3& p = m.vertices[static_cast<std::size_t>(m.triangles[t][0])];
     const Vec3& q = m.vertices[static_cast<std::size_t>(m.triangles[t][1])];
     const Vec3& r = m.vertices[static_cast<std::size_t>(m.triangles[t][2])];
@@ -738,6 +769,7 @@ WrittenAudit audit_as_written(const TriangleMesh& m) {
   std::vector<int> fan_of(at.size(), -1);
   std::vector<char> bad(at.size(), 0);
   for (std::size_t c = 0; c < cp.size(); ++c) {
+    if (dead[c / 3]) continue;
     const std::size_t vid = static_cast<std::size_t>(corner(c / 3, static_cast<int>(c % 3)));
     const int f = find(cp, static_cast<int>(c));
     if (fan_of[vid] < 0) fan_of[vid] = f;
@@ -758,7 +790,15 @@ TriangleMesh weld_as_written(const TriangleMesh& m) {
     to[v] = ins.first->second;
     merged = merged || !ins.second;
   }
-  if (!merged) return m;
+  auto fl = [&](int v) { return as_read(m.vertices[static_cast<std::size_t>(v)]); };
+  auto on_line = [&](const std::array<int, 3>& r) {
+    return r[0] != r[1] && r[1] != r[2] && r[2] != r[0] && zero_area_as_read(fl(r[0]), fl(r[1]), fl(r[2]));
+  };
+  bool any_on_line = false;
+  for (const auto& t : m.triangles)
+    any_on_line = any_on_line || on_line({to[static_cast<std::size_t>(t[0])], to[static_cast<std::size_t>(t[1])],
+                                          to[static_cast<std::size_t>(t[2])]});
+  if (!merged && !any_on_line) return m;
   std::vector<std::array<int, 3>> tris;
   for (const auto& t : m.triangles) {
     const std::array<int, 3> r{to[static_cast<std::size_t>(t[0])], to[static_cast<std::size_t>(t[1])],
@@ -785,6 +825,86 @@ TriangleMesh weld_as_written(const TriangleMesh& m) {
           gone[g[x]] = gone[g[y]] = 1;
         }
   }
+  // A triangle on ONE line: three distinct float corners, no area. A reader drops it
+  // (core's import does) and its three edges open: the Keep clear cut left 6 to 17 of
+  // them on his ad68d4c0, dda471a2 and efe18e33, along voxel lines, and exact Protect
+  // 2 on 6d9b535f, so core refused to re-check those files. Its long edge is flipped
+  // away: with the triangle across that edge, the pair is re-cut from the sliver's
+  // middle corner to the far corner, which covers the same area with the same corners,
+  // nothing moved. Where the sliver sits in a zero-area FLAP (dda471a2, one per
+  // version: the triangle across it and a third folded back over that one, the sliver's
+  // far corner past its middle on one line), one of the re-cut pair lands on the folded
+  // one reversed: the two go as a fin, and the flap's tip with them. Any other flip that
+  // would put a third triangle on an edge is not made; that sliver stays, and the audit
+  // counts it.
+  if (any_on_line) {
+    std::map<std::pair<int, int>, std::size_t> half;  // directed edge -> its triangle
+    std::set<std::pair<int, int>> twice;  // a directed edge on two triangles: never flipped across
+    auto link = [&](std::size_t u, bool on) {
+      for (int e = 0; e < 3; ++e) {
+        const std::pair<int, int> k{tris[u][e], tris[u][(e + 1) % 3]};
+        if (on) half[k] = u;
+        else if (half.count(k) && half[k] == u) half.erase(k);
+      }
+    };
+    for (std::size_t t = 0; t < tris.size(); ++t)
+      for (int e = 0; !gone[t] && e < 3; ++e) {
+        const std::pair<int, int> k{tris[t][e], tris[t][(e + 1) % 3]};
+        if (!half.emplace(k, t).second) twice.insert(k);
+      }
+    auto on_set = [](const std::array<int, 3>& u, int a, int b, int c) {
+      std::array<int, 3> x = u, y{a, b, c};
+      std::sort(x.begin(), x.end());
+      std::sort(y.begin(), y.end());
+      return x == y;
+    };
+    for (int round = 0; round < 8; ++round) {
+      bool flipped = false;
+      for (std::size_t t = 0; t < tris.size(); ++t) {
+        if (gone[t] || !on_line(tris[t])) continue;
+        int k = 0;
+        double longest = -1.0;
+        for (int e = 0; e < 3; ++e) {
+          const Vec3 d = sub(fl(tris[t][e]), fl(tris[t][(e + 1) % 3]));
+          if (dot(d, d) > longest) longest = dot(d, d), k = e;
+        }
+        const int p = tris[t][k], q = tris[t][(k + 1) % 3], mid = tris[t][(k + 2) % 3];
+        const auto across = half.find({q, p});
+        if (across == half.end() || across->second == t || gone[across->second]) continue;
+        const std::size_t s = across->second;
+        int r = -1;
+        for (int e = 0; e < 3; ++e)
+          if (tris[s][e] == q && tris[s][(e + 1) % 3] == p) r = tris[s][(e + 2) % 3];
+        if (r < 0 || r == mid || twice.count({p, q}) || twice.count({q, p}) ||
+            twice.count({r, mid}) || twice.count({mid, r}))
+          continue;
+        // The re-cut pair is (p, r, mid), with r -> mid, and (r, q, mid), with mid -> r.
+        const auto rm = half.find({r, mid}), mr = half.find({mid, r});
+        std::size_t fin = SIZE_MAX;  // a triangle the new t (or s) lands on reversed
+        bool fin_of_t = false;
+        if (mr != half.end() && !gone[mr->second] && on_set(tris[mr->second], p, r, mid))
+          fin = mr->second, fin_of_t = true;
+        else if (rm != half.end() && !gone[rm->second] && on_set(tris[rm->second], r, q, mid))
+          fin = rm->second;
+        else if (rm != half.end() || mr != half.end())
+          continue;
+        link(t, false);
+        link(s, false);
+        tris[t] = {p, r, mid};
+        tris[s] = {r, q, mid};
+        if (fin == SIZE_MAX) {
+          link(t, true);
+          link(s, true);
+        } else {  // the new one on the fin goes with it, never linked; the other is
+          link(fin, false);
+          gone[fin_of_t ? t : s] = gone[fin] = 1;
+          link(fin_of_t ? s : t, true);
+        }
+        flipped = true;
+      }
+      if (!flipped) break;
+    }
+  }
   TriangleMesh out;
   std::vector<int> nid(m.vertices.size(), -1);
   for (std::size_t t = 0; t < tris.size(); ++t) {
@@ -804,18 +924,25 @@ TriangleMesh weld_as_written(const TriangleMesh& m) {
 }
 
 TriangleMesh drop_fragment_shells(const TriangleMesh& mesh, double min_volume_mm3,
-                                  int keep_bodies, int* dropped) {
+                                  int keep_bodies, int* dropped, double thin_mm) {
   if (dropped) *dropped = 0;
   const TriangleMesh clean = clean_degenerate_triangles(mesh);
   int n = 0;
   const std::vector<int> root = triangle_component_roots(clean, n);
   if (n <= 1) return mesh;
   std::map<int, double> vol;
+  std::map<int, std::array<double, 6>> box;  // each shell's min x y z, max x y z
   for (std::size_t t = 0; t < clean.triangles.size(); ++t) {
     const Vec3& p = clean.vertices[static_cast<std::size_t>(clean.triangles[t][0])];
     const Vec3& q = clean.vertices[static_cast<std::size_t>(clean.triangles[t][1])];
     const Vec3& r = clean.vertices[static_cast<std::size_t>(clean.triangles[t][2])];
     vol[root[t]] += dot(p, cross(q, r)) / 6.0;
+    const auto ins = box.emplace(root[t], std::array<double, 6>{p.x, p.y, p.z, p.x, p.y, p.z});
+    std::array<double, 6>& b = ins.first->second;
+    for (const Vec3* v : {&p, &q, &r}) {
+      b[0] = std::min(b[0], v->x), b[1] = std::min(b[1], v->y), b[2] = std::min(b[2], v->z);
+      b[3] = std::max(b[3], v->x), b[4] = std::max(b[4], v->y), b[5] = std::max(b[5], v->z);
+    }
   }
   std::vector<std::pair<double, int>> pos;
   for (const auto& kv : vol)
@@ -826,7 +953,10 @@ TriangleMesh drop_fragment_shells(const TriangleMesh& mesh, double min_volume_mm
   std::vector<char> keep(clean.triangles.size() + 1, 0);
   int gone = 0;
   for (const auto& kv : vol) {
-    bool k = std::fabs(kv.second) >= min_volume_mm3;
+    const std::array<double, 6>& b6 = box[kv.first];
+    const bool thin = thin_mm > 0.0 && kv.second > 0.0 &&
+                      std::min({b6[3] - b6[0], b6[4] - b6[1], b6[5] - b6[2]}) < thin_mm;
+    bool k = std::fabs(kv.second) >= min_volume_mm3 && !thin;
     for (int b = 0; b < keep_bodies && b < static_cast<int>(pos.size()); ++b)
       k = k || pos[static_cast<std::size_t>(b)].second == kv.first;
     if (static_cast<std::size_t>(kv.first) >= keep.size()) keep.resize(static_cast<std::size_t>(kv.first) + 1, 0);
@@ -836,6 +966,16 @@ TriangleMesh drop_fragment_shells(const TriangleMesh& mesh, double min_volume_mm
   if (dropped) *dropped = gone;
   if (gone == 0) return mesh;
   return rebuild_from_components(clean, root, keep);
+}
+
+TriangleMesh clean_cut_as_written(const TriangleMesh& raw, double min_volume_mm3,
+                                  int keep_bodies, int* dropped, double thin_mm) {
+  int own = 0, welded = 0;
+  const TriangleMesh out = drop_fragment_shells(
+      weld_as_written(drop_fragment_shells(raw, min_volume_mm3, keep_bodies, &own)),
+      min_volume_mm3, keep_bodies, &welded, thin_mm);
+  if (dropped) *dropped = own + welded;
+  return out;
 }
 
 bool mesh_encloses(const TriangleMesh& m, const Vec3& p) {
@@ -907,6 +1047,57 @@ int file_thin_joints(const VoxelGrid& g, const std::vector<char>& occ) {
   return static_cast<int>(std::unique(pairs.begin(), pairs.end()) - pairs.begin());
 }
 
+int file_sealed_keep_clears(const TriangleMesh& mesh, const VoxelGrid& g,
+                            const DesignMask* clearance) {
+  const std::size_t nx = static_cast<std::size_t>(g.nx), ny = static_cast<std::size_t>(g.ny);
+  if (clearance == nullptr || clearance->size() != nx * ny * static_cast<std::size_t>(g.nz)) return 0;
+  const TriangleMesh clean = clean_degenerate_triangles(mesh);
+  int n = 0;
+  const std::vector<int> root = triangle_component_roots(clean, n);
+  if (n <= 1) return 0;
+  std::map<int, double> vol;
+  for (std::size_t t = 0; t < clean.triangles.size(); ++t) {
+    const auto& T = clean.triangles[t];
+    vol[root[t]] += dot(clean.vertices[static_cast<std::size_t>(T[0])],
+                        cross(clean.vertices[static_cast<std::size_t>(T[1])],
+                              clean.vertices[static_cast<std::size_t>(T[2])])) / 6.0;
+  }
+  int sealed = 0;
+  for (const auto& kv : vol) {
+    if (!(kv.second < 0.0)) continue;
+    TriangleMesh shell;
+    shell.vertices = clean.vertices;
+    Vec3 lo{1e300, 1e300, 1e300}, hi{-1e300, -1e300, -1e300};
+    for (std::size_t t = 0; t < clean.triangles.size(); ++t) {
+      if (root[t] != kv.first) continue;
+      shell.triangles.push_back(clean.triangles[t]);
+      for (const int v : clean.triangles[t]) {
+        const Vec3& p = clean.vertices[static_cast<std::size_t>(v)];
+        lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
+        hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+      }
+    }
+    auto range = [&](double a, double b, double o, int count, int& i0, int& i1) {
+      i0 = std::max(0, static_cast<int>(std::floor((a - o) / g.spacing - 0.5)));
+      i1 = std::min(count - 1, static_cast<int>(std::ceil((b - o) / g.spacing - 0.5)));
+    };
+    int i0, i1, j0, j1, k0, k1;
+    range(lo.x, hi.x, g.origin.x, g.nx, i0, i1);
+    range(lo.y, hi.y, g.origin.y, g.ny, j0, j1);
+    range(lo.z, hi.z, g.origin.z, g.nz, k0, k1);
+    bool in_clear = false;
+    for (int k = k0; !in_clear && k <= k1; ++k)
+      for (int j = j0; !in_clear && j <= j1; ++j)
+        for (int i = i0; !in_clear && i <= i1; ++i) {
+          const std::size_t e = (static_cast<std::size_t>(k) * ny + static_cast<std::size_t>(j)) * nx +
+                                static_cast<std::size_t>(i);
+          in_clear = (*clearance)[e] == MaskValue::FrozenVoid && mesh_encloses(shell, g.voxel_center(i, j, k));
+        }
+    sealed += in_clear;
+  }
+  return sealed;
+}
+
 int file_loose_pieces(const VoxelGrid& g, const std::vector<char>& occ) {
   const std::size_t nv = static_cast<std::size_t>(g.nx) * static_cast<std::size_t>(g.ny) *
                          static_cast<std::size_t>(g.nz);
@@ -960,10 +1151,11 @@ std::string finish_verdict_reason(const FinishRecheck& r) {
     return "After finishing, the margin is " + x(r.margin) + " (needs " + x(r.margin_required) + ")";
   if (!r.load_path_ok) return "After finishing, the load no longer reaches an anchor";
   if (r.anchors_slide) return "After finishing, the anchors would slide under the load";
-  // Only what the finishing ADDED: the unfinished file's own count (the export's, today's
-  // file) is not the finish's to refuse.
-  if (r.keep_clear_added > 0)
-    return "After finishing, a Keep clear has material in it";
+  // ANY material in a Keep clear (ruling 2026-11-03 19:55): every file is cut out of its
+  // Keep clears exactly (run_job keep_clear_exact), so this should never fire.
+  if (r.keep_clear_voxels > 0) return "A Keep clear has material in it";
+  // Cut clean but closed in on every side: nothing (a bolt, a tool) can reach it.
+  if (r.keep_clear_sealed > 0) return "A Keep clear is sealed inside the part";
   if (r.pieces > 1) return "After finishing, it prints in " + std::to_string(r.pieces) + " pieces";
   if (r.loose_pieces > r.loose_pieces_before) return "After finishing, a piece is loose";
   if (r.thin_joints > r.thin_joints_before)

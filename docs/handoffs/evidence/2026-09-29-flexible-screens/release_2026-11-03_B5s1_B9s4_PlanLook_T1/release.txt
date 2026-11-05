@@ -1,0 +1,26 @@
+# Release f7778839 — 2026-11-03 B5s1_B9s4_PlanLook_T1 (UI-Notes' app batch up to c0a4bff6), app only, released before review (his 11-03 pick)
+# Core and worker unchanged: fingerprint 35764048bba3; "fingerprint": "35764048bba3"
+# Merged onto 6aa3703d; the merged app tree equals c0a4bff6's, so the builder's tests apply unchanged.
+# Commits:
+#   8befd23f B4 slice 5a (note 12, Q9): the orientation line and its Print-it-this-way confirm — UI only, not yet drawn
+#   44195c27 B5 slice 1a (note 11, Q10): the multi-object 3MF writer — one named object per part, side by side on the plate
+#   a7398d8c B5 slice 1b (Q12, app-map §3.10): App settings — Library ⋯ › Settings, "For every new part"
+#   aa6508b3 B9 slice 4 (#362): A face, and drawing on the plane (✎ Pencil, 〰 Spline)
+#   502ef8b9 Merge B5 slice 1 (a7398d8c, with B4 s5a) into B9, for one release
+#   0c8c235a Release 2026-11-03: merge B5-s1_B4-s5a_B9-s4 (502ef8b9), UI-Notes' app batch (app only; core and worker unchanged at 35764048bba3)
+#   aacae843 §4 SHARED PARTS (his ruling 11-04 "Look per screen"; reviewer 02:56Z): Panel, Row, Chip, RunButton, Card, Tabs, Corner, Legend
+#   c8a55547 Merge the §4 shared parts (aacae843) into B9: the Flexible pages rebuild on them
+#   532af098 B9 look (#362, his "Look per screen" ruling): the Print plan rebuilt on the §4 shared parts
+#   f9febf60 Release 2026-11-03: merge B9's Print plan on the shared parts + the §4 parts (532af098; app only; core and worker unchanged at 35764048bba3)
+#   491e7b1b Topology rebuild slice 1 (his "look per screen", 11-04): the corner, the hint, the folder ⋯ and the Settings panel on the §4 parts; DSPanel grows with its rows (#362)
+#   897fd9ed Topology rebuild slice 1b: the Settings panel is §4.3's 348 pt; the corner's Settings keeps its ⌄ while the panel is up (mockup #corner-settings)
+#   b165118a Merge Topology rebuild slice 1 (897fd9ed) into B9: DSPanel grows with its rows, so the Print plan drops its .id workaround
+#   c0a4bff6 B9 look: the Print plan drops its .id workaround (DSPanel now grows with its rows, UI-Notes 897fd9ed)
+#   f7778839 Release 2026-11-03: merge Topology rebuild slice 1 (897fd9ed, UI-Notes) via B9 c0a4bff6 (the Print plan drops its DSPanel workaround); app only; core and worker unchanged at 35764048bba3
+# Gates:
+#   23:50 checks ok: B5s1_B9s4_PlanLook_T1, local f7778839 over origin 6aa3703d (15 commits); app tree == c0a4bff6's, fingerprint 35764048bba3
+#   23:50 waiting for HEAVY.lock (free)
+#   23:50 lock taken
+#   23:56 iPad device build green; lock released
+#   23:56 pushed f7778839
+#   23:56 worker /health "fingerprint": "35764048bba3" (unchanged, no swap)
