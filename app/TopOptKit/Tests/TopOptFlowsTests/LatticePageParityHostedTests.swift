@@ -48,7 +48,7 @@ final class LatticePageParityHostedTests: XCTestCase {
     static func isControl(_ id: String) -> Bool {
         guard id.hasPrefix("wizard-") || id.hasPrefix("lattice-cells-") || id.hasPrefix("lattice-page-") else { return false }
         return !["-note", "-fact", "-reason", "-refused", "-gap", "-left-out", "-nothing-set", "-none-checked", "-no-room",
-                 "-no-band", "-derived", "-narrow", "-blocked"].contains { id.hasSuffix($0) }
+                 "-no-band", "-derived", "-narrow", "-blocked", "-title"].contains { id.hasSuffix($0) }
     }
 
     // A test process builds no accessibility tree for SwiftUI on macOS (FlexibleSaid), so the page's ids are read from
@@ -59,8 +59,15 @@ final class LatticePageParityHostedTests: XCTestCase {
     final class Probe { var all: [String: CGRect] = [:] }
     private var probe = Probe()
 
+    /// The probe's ids and the frames the shared parts publish (the folder tabs: ChromeKeepOutKey).
     func axIDs(_ h: AppBuildHost) -> [(id: String, frame: CGRect)] {
-        probe.all.map { ($0.key, $0.value) }
+        probe.all.merging(h.frames.all) { a, _ in a }.map { ($0.key, $0.value) }
+    }
+
+    /// The tabs to open: today's region tabs, or the rebuilt page's folder tabs (Part, then each area).
+    static func tabIDs(_ ids: [String]) -> [String] {
+        ids.filter { $0.range(of: #"^lattice-cells-tab-\d+$|^lattice-page-tab-(part|area-\d+)$"#, options: .regularExpression) != nil }
+            .sorted { ($0.contains("part") ? 0 : 1, $0) < ($1.contains("part") ? 0 : 1, $1) }
     }
 
     func page(_ s: State) throws -> (AppBuildHost, ProjectModel) {
@@ -96,8 +103,13 @@ final class LatticePageParityHostedTests: XCTestCase {
             for stage in LatticeWizardStage.allCases {
                 _ = click("wizard-stage-\(stage.rawValue)")
                 look("view \(stage.rawValue)")
-                for tab in 0..<2 where click("lattice-cells-tab-\(tab)") { look("view \(stage.rawValue) tab \(tab)") }
-                // What a choice reveals: open Fine-tune, then pick each segment once (a Manual cell size shows its field…)
+                for tab in Self.tabIDs(axIDs(h).map(\.id)) where click(tab) {
+                    look("view \(stage.rawValue) \(tab)")
+                    for mode in ["lattice-page-mode-auto", "lattice-page-mode-manual"] where click(mode) {
+                        look("view \(stage.rawValue) \(tab) \(mode)")
+                    }
+                }
+                // What a choice reveals (on the last tab, in Manual): open Fine-tune, then pick each segment once
                 if click("wizard-organic-fine-tune") { look("view \(stage.rawValue) fine-tune") }
                 for seg in Set(axIDs(h).map(\.id).filter { $0.hasPrefix("wizard-seg-") }).sorted() where click(seg) {
                     look("view \(stage.rawValue) \(seg)")
@@ -158,7 +170,9 @@ final class LatticePageParityHostedTests: XCTestCase {
     ]
 
     /// Controls that moved → what replaced each.
-    static let moved: [String: String] = [:]
+    static let moved: [String: String] = [
+        "lattice-cells-tab-#": "lattice-page-tab-area-#",   // the region tabs → the folder tabs (Part, then each area)
+    ]
 
     static func missing(from seen: Set<String>) -> [String] {
         baseline.filter { k in !seen.contains(k) && removed[k] == nil && !(moved[k].map(seen.contains) ?? false) }.sorted()
@@ -175,12 +189,20 @@ final class LatticePageParityHostedTests: XCTestCase {
 
     /// ★ RED CONTROL: with Simulate stresses hidden, the parity names it as missing.
     func testTheParityNamesADroppedControl() throws {
+        // where the switch lives on the rebuilt page: the Part tab, in Manual (plan.md §B7)
+        func partInManual() throws -> Set<String> {
+            let (h, _) = try page(State(mode: .structural, transition: .defaultGrade, grading: .full, sim: true, grown: false))
+            for id in ["lattice-page-tab-part", "lattice-page-mode-manual"] {
+                if let f = axIDs(h).first(where: { $0.id == id })?.frame { h.click(CGPoint(x: f.midX, y: f.midY), settle: 0.6) }
+            }
+            return Set(axIDs(h).map(\.id))
+        }
+        XCTAssertTrue(try partInManual().contains("wizard-simulate-stresses"), "premise: the Part tab shows it in Manual")
         LatticeSetupWizard.controlHideSimulateStresses = true
         defer { LatticeSetupWizard.controlHideSimulateStresses = false }
-        let (h, _) = try page(State(mode: .structural, transition: .defaultGrade, grading: .full, sim: true, grown: false))
-        let ids = Set(axIDs(h).map(\.id))
+        let ids = try partInManual()
         XCTAssertFalse(ids.contains("wizard-simulate-stresses"), "control: the switch is hidden")
-        XCTAssertTrue(Self.baseline.isEmpty || Self.missing(from: ids).contains("wizard-simulate-stresses"),
+        XCTAssertTrue(Self.missing(from: Set(ids.filter(Self.isControl).map(Self.kind))).contains("wizard-simulate-stresses"),
                       "control: a hidden Simulate stresses is named")
     }
 }

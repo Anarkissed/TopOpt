@@ -106,8 +106,28 @@ public struct LatticeSetupWizard: View {
                 // together. Place the one on the right at the very bottom of the
                 // one on the left."* The floating wizard card is gone; its view
                 // switch is the last row inside this panel.
-                selectionsModal
-                    .modifier(WizardModalPlacement(canvasHeight: geo.size.height))
+                if let c = cellsPage {
+                    // ★ B7: the Squish look — the panel from under the stage row (design-system §4.1, PageChrome.panelTop).
+                    // Landscape: to the hint band, the view switch over the canvas beside it, level with the panel's header.
+                    // Portrait (mockup 11P): the panel hugs its rows (at most 62 % of the page, as Squish's) and the canvas,
+                    // its view switch on top, is under it.
+                    let portrait = geo.size.width < geo.size.height
+                    let band = max(DSParts.headerHeight, geo.size.height - PageChrome.panelTop - PageChrome.panelBottom)
+                    latticePanel(c, hug: portrait)
+                        .frame(height: portrait ? nil : band)
+                        .frame(maxHeight: portrait ? min(band, geo.size.height * 0.62) : nil, alignment: .top)
+                        .padding(.leading, PageChrome.edge).padding(.top, PageChrome.panelTop)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    latticeViewSwitch
+                        .frame(maxWidth: .infinity)
+                        .padding(.leading, portrait ? PageChrome.edge : PageChrome.edge + PageChrome.widePanelWidth + DS.Space.l)
+                        .padding(.trailing, PageChrome.edge)
+                        .padding(.top, portrait ? PageChrome.panelTop + latticePanelHeight + DS.Space.l + 14 : PageChrome.panelTop + 14)
+                        .frame(maxHeight: .infinity, alignment: .top)
+                } else {
+                    selectionsModal
+                        .modifier(WizardModalPlacement(canvasHeight: geo.size.height))
+                }
             }
         }
         .onAppear { rebuild() }
@@ -307,7 +327,7 @@ public struct LatticeSetupWizard: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(DS.Color.textPrimary.color)
             }
-            .toggleStyle(SwitchToggleStyle(tint: DS.Color.accent.color))
+            .toggleStyle(SwitchToggleStyle(tint: DS.Color.okGreen.color))   // ★ B7: the panel's switch green (DSSwitch)
             .latticeID("wizard-grade-toggle")
             captionLine(model.gradingMode == LatticeGradingMode.none
                         ? "One cell, one density, everywhere."
@@ -320,31 +340,30 @@ public struct LatticeSetupWizard: View {
     @ViewBuilder private var gradeTypeRow: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text("Grade")
-                .font(.system(size: 10, weight: .bold))
+                .font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)   // ★ B7: the panel's overline (DSPanelSection)
                 .foregroundStyle(DS.Color.textTertiary.color)
-            HStack(spacing: DS.Space.xs) {
+            HStack(spacing: 4) {
                 ForEach([LatticeGradingMode.full, .fitShape, .stressOnly],
                         id: \.rawValue) { m in
                     Button {
                         model.gradingMode = m
                         rebuild()
                     } label: {
+                        // ★ B7: the Squish look's segment (FlexChips): the pick in the selected fill on a dark track
                         Text(m == .full ? "Stress + shape"
                              : m == .fitShape ? "Shape" : "Stress")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.system(size: 12, weight: .semibold))
                             .lineLimit(1).minimumScaleFactor(0.8)
-                            .padding(.vertical, 6).padding(.horizontal, DS.Space.s)
+                            .padding(.vertical, 7).padding(.horizontal, DS.Space.s)
                             .frame(maxWidth: .infinity)
-                            .background(RoundedRectangle(cornerRadius: DS.Radius.pill)
-                                .fill((model.gradingMode == m
-                                       ? DS.Color.accent.opacity(0.85)
-                                       : DS.Color.background.opacity(0.35)).color))
-                            .foregroundStyle(DS.Color.textPrimary.color)
+                            .background(Capsule().fill(model.gradingMode == m ? DS.Color.fillSelected.color : Color.clear))
+                            .foregroundStyle((model.gradingMode == m ? DS.Color.textPrimary : DS.Color.textTertiary).color)
                     }
                     .buttonStyle(.plain)
                     .latticeID("wizard-grade-type-\(m.rawValue)")
                 }
             }
+            .modifier(LatticeSegmentTrack())
             captionLine(model.gradingMode == .full ? "Density by stress, cells fit the outline."
                         : model.gradingMode == .fitShape ? "Cells fit the outline, one density."
                         : "Density by stress, one cell size.",
@@ -418,7 +437,7 @@ public struct LatticeSetupWizard: View {
                                 info: "sim")
                 }
             Spacer(minLength: DS.Space.s)
-            GlassToggle(isOn: model.simulateStresses) {
+            latticeSwitch(isOn: model.simulateStresses) {
                 model.setSimulateStresses(!model.simulateStresses)
                 rebuild()
             }
@@ -482,7 +501,7 @@ public struct LatticeSetupWizard: View {
     @ViewBuilder private var gradeStyleRow: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text("Grade style")
-                .font(.system(size: 10, weight: .bold))
+                .font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)   // ★ B7: the panel's overline (DSPanelSection)
                 .foregroundStyle(DS.Color.textTertiary.color)
             HStack(spacing: DS.Space.xs) {
                 ForEach(Self.cellTransitions, id: \.rawValue) { t in
@@ -640,7 +659,7 @@ public struct LatticeSetupWizard: View {
     /// A section title with its (i).
     private func sectionTitle(_ title: String, info id: String, _ text: String) -> some View {
         HStack(spacing: DS.Space.xs) {
-            Text(title).font(.system(size: 10, weight: .bold))
+            Text(title).font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)   // ★ B7: the panel's overline (DSPanelSection)
                 .foregroundStyle(DS.Color.textTertiary.color)
             infoButton(id, text)
         }
@@ -779,7 +798,7 @@ public struct LatticeSetupWizard: View {
                             infoButton("transfer-ties", Self.infoTransferTies)
                         }
                         Spacer(minLength: DS.Space.s)
-                        GlassToggle(isOn: model.organicTransferTies) {
+                        latticeSwitch(isOn: model.organicTransferTies) {
                             model.organicTransferTies.toggle(); rebuild()
                         }
                         .accessibilityLabel("Transfer ties")
@@ -908,7 +927,7 @@ public struct LatticeSetupWizard: View {
                     infoButton("repairs", Self.infoRepairs)
                 }
                 Spacer(minLength: DS.Space.s)
-                GlassToggle(isOn: organicShowRepairs) {
+                latticeSwitch(isOn: organicShowRepairs) {
                     project.lattice.organicShowRepairs.toggle(); rebuild()
                 }
                     .accessibilityLabel("Show print repairs")
@@ -929,7 +948,7 @@ public struct LatticeSetupWizard: View {
                     Text("Shape fit only — no stress grading").dsStyle(DS.TypeScale.caption)
                         .foregroundStyle(DS.Color.textPrimary.color)
                     Spacer(minLength: DS.Space.s)
-                    GlassToggle(isOn: locked || model.organicShapeFitOnly) {
+                    latticeSwitch(isOn: locked || model.organicShapeFitOnly) {
                         if locked {
                             model.enforceOrganicSimOffRules()
                             organicNotice = OrganicNotice(
@@ -959,7 +978,7 @@ public struct LatticeSetupWizard: View {
                     infoButton("solid-rim", Self.infoSolidRim)
                 }
                 Spacer(minLength: DS.Space.s)
-                GlassToggle(isOn: model.organicSolidRimMM != 0) {
+                latticeSwitch(isOn: model.organicSolidRimMM != 0) {
                     model.organicSolidRimMM = model.organicSolidRimMM != 0 ? 0 : -1; rebuild()
                 }
                 .accessibilityLabel("Solid rim at edges")
@@ -969,7 +988,7 @@ public struct LatticeSetupWizard: View {
             // amount in Organic"). The same millimetres the octet grades over.
             VStack(alignment: .leading, spacing: 5) {
                 Text("Grade to shape band")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)   // ★ B7: the panel's overline (DSPanelSection)
                     .foregroundStyle(DS.Color.textTertiary.color)
                     .padding(.top, DS.Space.xs)
                 gradeBandSliders(idPrefix: "wizard-organic-band")
@@ -1035,7 +1054,7 @@ public struct LatticeSetupWizard: View {
                     // range with this on, and that is not derivable from the row's words.
                     infoButton("synthetic-map", Self.infoSynthetic)
                     Spacer(minLength: DS.Space.s)
-                    GlassToggle(isOn: model.organicSyntheticStresses) {
+                    latticeSwitch(isOn: model.organicSyntheticStresses) {
                         model.organicSyntheticStresses.toggle(); rebuild()
                     }
                     .accessibilityLabel("Synthetic stresses on unloaded walls")
@@ -1525,7 +1544,7 @@ public struct LatticeSetupWizard: View {
     @ViewBuilder private var shapeBandRow: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text("Grade to shape band")
-                .font(.system(size: 10, weight: .bold))
+                .font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)   // ★ B7: the panel's overline (DSPanelSection)
                 .foregroundStyle(DS.Color.textTertiary.color)
                 .padding(.top, DS.Space.s)
             gradeBandSliders(idPrefix: "wizard-shape-band")
@@ -1584,7 +1603,7 @@ public struct LatticeSetupWizard: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(DS.Color.textPrimary.color)
             }
-            .toggleStyle(SwitchToggleStyle(tint: DS.Color.accent.color))
+            .toggleStyle(SwitchToggleStyle(tint: DS.Color.okGreen.color))   // ★ B7: the panel's switch green (DSSwitch)
             .latticeID("wizard-single-cell-members")
             .popover(isPresented: Binding(get: { finishRuleNotice == "skin-required" },
                                           set: { if !$0 { finishRuleNotice = nil } })) {
@@ -1640,7 +1659,7 @@ public struct LatticeSetupWizard: View {
                                                : DS.Color.textTertiary).color)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: DS.Space.s)
-                GlassToggle(isOn: model.retainSubfloor && c.enabled) {
+                latticeSwitch(isOn: model.retainSubfloor && c.enabled) {
                     guard c.enabled else { return }
                     model.retainSubfloor.toggle()
                     rebuild()
@@ -1690,7 +1709,7 @@ public struct LatticeSetupWizard: View {
         VStack(alignment: .leading, spacing: 5) {
             if titled {
                 Text(s.title)
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)   // ★ B7: the panel's overline (DSPanelSection)
                     .foregroundStyle(DS.Color.textTertiary.color)
             }
             switch s {
@@ -1849,7 +1868,7 @@ public struct LatticeSetupWizard: View {
                         Text("Allow quilt").dsStyle(DS.TypeScale.caption)
                             .foregroundStyle(DS.Color.textPrimary.color)
                         Spacer(minLength: DS.Space.s)
-                        GlassToggle(isOn: project.lattice.allowQuilt) {
+                        latticeSwitch(isOn: project.lattice.allowQuilt) {
                             project.lattice.allowQuilt.toggle(); rebuild()
                         }
                         .accessibilityLabel("Allow quilt")
@@ -1975,7 +1994,7 @@ public struct LatticeSetupWizard: View {
                 infoButton("organic", Self.infoOrganic)
             }
             Spacer(minLength: DS.Space.s)
-            GlassToggle(isOn: on) {
+            latticeSwitch(isOn: on) {
                 if on {
                     // back to the grade style the user last had, so the octet pane
                     // comes back exactly as it was
@@ -2228,6 +2247,270 @@ public struct LatticeSetupWizard: View {
         onExit()
     }
 
+    // MARK: ★ B7 — THE LATTICE PAGE IN THE SQUISH LOOK
+    //
+    // His picks 2026-11-04 ("I build the Lattice page", "Ship the look first"); plan.md §B7; mockup v5 #lat-page. The panel is
+    // the Squish one's: "Lattice settings" with the type in use, the folder tabs on the left (Part, then one per lattice
+    // group), the open tab's [Auto │ Manual] and Reset all, its rows, and a pinned Cancel │ Save. Every row is today's
+    // control, re-homed and never copied: the Part tab holds the type, an area's tab its finish and grading, and Manual adds
+    // the rest under "Manual · this area". Until core takes settings per area (E3) every area's tab edits the same settings,
+    // and says so. The view switch (One cell │ In the part) moved over the canvas, beside the panel; it shows, it sets nothing.
+
+    @State private var latticeTab = "part"
+    @State private var latticeManual = false
+    @State private var latticeResetAsk = false
+    @State private var latticePanelOpen = true
+    @State private var latticePanelHeight: CGFloat = 0
+
+    static let latticePanelTitle = "Lattice settings"
+    static let latticeTabsKey = "lattice-page-tab"
+    static let latticeManualSection = "Manual · this area"
+    static let latticePerAreaLine = "Look, finish and grading are set per area, on the tabs at the left."
+
+    private func latticeTabs(_ c: CellsPageContext) -> [DSFolderTabs.Tab] {
+        [DSFolderTabs.Tab(id: "part", title: "Part")]
+            + c.regions.enumerated().map { DSFolderTabs.Tab(id: "area-\($0.offset)", title: $0.element, colour: DS.Color.Role.lattice) }
+    }
+
+    /// The open area's name; nil on Part. With no lattice group yet the Part tab holds the area rows too.
+    private func latticeArea(_ c: CellsPageContext) -> String? {
+        guard latticeTab.hasPrefix("area-"), let i = Int(latticeTab.dropFirst(5)), c.regions.indices.contains(i) else { return nil }
+        return c.regions[i]
+    }
+
+    private func latticePanel(_ c: CellsPageContext, hug: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            latticePanelHeader
+            if latticePanelOpen {
+                latticePanelBody(c, hug: hug)
+                    .overlay(alignment: .top) { Rectangle().fill(DS.Color.strokeSubtle.color).frame(height: 1) }
+                latticeFoot
+                    .padding(.horizontal, 14).padding(.top, 8).padding(.bottom, 12)
+                    .overlay(alignment: .top) { Rectangle().fill(DS.Color.strokeSubtle.color).frame(height: 1) }
+            }
+        }
+        .frame(width: PageChrome.widePanelWidth, alignment: .leading)
+        .frame(maxHeight: latticePanelOpen && !hug ? .infinity : nil, alignment: .top)
+        .background(CornerPairStyle.publish("latticeSettingsPanel"))
+        .background(latticePanelShape.fill(DS.Surface.panel.color))
+        .overlay(latticePanelShape.strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
+        .clipShape(latticePanelShape)
+        .dsShadow(DS.Shadow.panel)
+        .background(GeometryReader { g in Color.clear.preference(key: LatticePanelHeightKey.self, value: g.size.height) })
+        .onPreferenceChange(LatticePanelHeightKey.self) { h in if abs(h - latticePanelHeight) > 0.5 { latticePanelHeight = h } }
+        .frame(maxHeight: .infinity, alignment: .top)   // folded, the header's pill stays under the stage row
+    }
+
+    /// The folder tabs beside the open tab's scrolling rows. Landscape: the panel's whole height. Portrait: as tall as the
+    /// rows (FlexibleHugHeight, the Squish panel's), then scrolling.
+    @ViewBuilder private func latticePanelBody(_ c: CellsPageContext, hug: Bool) -> some View {
+        if hug {
+            FlexibleHugHeight { latticeTabsAndRows(c) }
+        } else {
+            latticeTabsAndRows(c).frame(maxHeight: .infinity)
+        }
+    }
+
+    private func latticeTabsAndRows(_ c: CellsPageContext) -> some View {
+        HStack(alignment: .top, spacing: 0) {
+            DSFolderTabs(latticeTabs(c), selected: latticeArea(c) == nil ? "part" : latticeTab, key: Self.latticeTabsKey,
+                         pick: { id in withAnimation(.easeInOut(duration: 0.15)) { latticeTab = id } })
+                .frame(maxHeight: .infinity, alignment: .top)
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: DS.Space.m) {
+                    latticeTopRow
+                    latticeTabBody(c)
+                }
+                .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    /// A switch on this page: the panel's (DSSwitch, green when on), as the mockup draws every row's switch.
+    private func latticeSwitch(isOn: Bool, action: @escaping () -> Void) -> some View {
+        DSSwitch(isOn: isOn, key: "latticePageSwitch", toggle: action)
+    }
+
+    private var latticePanelShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: latticePanelOpen ? DSParts.panelRadius : DSParts.headerHeight / 2, style: .continuous)
+    }
+
+    /// Chevron + "Lattice settings" + the type in use (design-system §4.3: nothing else). A tap folds it to this line.
+    private var latticePanelHeader: some View {
+        Button { withAnimation(DS.Motion.sheetIn) { latticePanelOpen.toggle() } } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "chevron.down").font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(DS.Color.textSecondary.color)
+                    .rotationEffect(.degrees(latticePanelOpen ? 0 : -90))
+                    .frame(width: 18)
+                Text(Self.latticePanelTitle).font(.system(size: 14.5, weight: .semibold))
+                    .foregroundStyle(DS.Color.textPrimary.color).lineLimit(1)
+                Spacer(minLength: 8)
+                Text((project.lattice.stageMode ?? .structural).title).font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(DS.Color.textTertiary.color).lineLimit(1).fixedSize()
+            }
+            .padding(.horizontal, 14)
+            .frame(height: DSParts.headerHeight)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .latticeID("lattice-page-header")
+    }
+
+    /// [Auto │ Manual] and Reset all, at the top of every tab (as the Squish panel's). Reset all asks once, in place.
+    private var latticeTopRow: some View {
+        HStack(spacing: DS.Space.s) {
+            HStack(spacing: 4) {
+                ForEach([(false, "Auto"), (true, "Manual")], id: \.0) { manual, word in
+                    let on = latticeManual == manual
+                    Button { withAnimation(.easeInOut(duration: 0.15)) { latticeManual = manual } } label: {
+                        Text(word).font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle((on ? DS.Color.textPrimary : DS.Color.textTertiary).color)
+                            .lineLimit(1)
+                            .padding(.horizontal, 10).padding(.vertical, 7)
+                            .background(Capsule().fill(on ? DS.Color.fillSelected.color : Color.clear))
+                    }
+                    .buttonStyle(.plain)
+                    .latticeID("lattice-page-mode-\(manual ? "manual" : "auto")")
+                }
+            }
+            .padding(2)
+            .background(Capsule().fill(DS.Color.background.opacity(0.35).color)
+                .overlay(Capsule().strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)))
+            .fixedSize()
+            .opacity(latticeResetAsk ? 0 : 1).allowsHitTesting(!latticeResetAsk)
+            Spacer(minLength: 0)
+            Button { latticeResetAsk = true } label: {
+                Text(FlexibleSettingsExit.resetButton)
+                    .font(.system(size: 12.5, weight: .semibold)).foregroundStyle(DS.Color.accent.color)
+                    .padding(.horizontal, 6).frame(height: 30)
+                    .frame(minWidth: FlexibleTargets.least, minHeight: FlexibleTargets.least)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .modifier(FlexibleConfirmInPlace(asking: latticeResetAsk, question: FlexibleSettingsExit.resetAsk,
+                                             destructive: FlexibleSettingsExit.resetConfirm, keep: FlexibleSettingsExit.resetCancel,
+                                             confirmKey: "latticeResetConfirm", keepKey: "latticeResetCancel",
+                                             questionID: "lattice-page-reset-ask",
+                                             confirm: { latticeResetAsk = false; resetLatticeSettings() },
+                                             cancel: { latticeResetAsk = false }))
+            .latticeID("lattice-page-reset-all")
+        }
+    }
+
+    /// Reset all: every setting this page asks back to a brand-new lattice of this type (the regions, their roles and
+    /// depths are the Setup step's and stay). Nothing is saved until Save; Cancel still leaves as the page opened.
+    private func resetLatticeSettings() {
+        var fresh = LatticeSettings(enabled: true)
+        fresh.stageMode = project.lattice.stageMode
+        let stage = model.stage
+        model = LatticeWizardModel(settings: fresh)
+        model.jump(to: stage)
+        rebuild()
+    }
+
+    /// The open tab's rows. Part: the type (and, with no lattice group yet, the area rows). An area: its finish and grading,
+    /// and in Manual the rest. Organic keeps its own pane (a traced lattice has no cell, no finish ladder).
+    @ViewBuilder private func latticeTabBody(_ c: CellsPageContext) -> some View {
+        let area = latticeArea(c)
+        let organic = model.cellTransition == .organicGrade
+        let structural = (project.lattice.stageMode ?? .structural) == .structural
+        if area == nil {
+            settingControl(.type, titled: true)
+            if latticeManual, !Self.controlHideSimulateStresses { simulateStressesSwitch }
+            if c.regions.isEmpty {
+                latticeAreaRows(organic: organic, structural: structural)
+            } else {
+                shortNote(Self.latticePerAreaLine).latticeID("lattice-page-per-area-note")
+            }
+        } else if let area {
+            Text(area.uppercased()).font(.system(size: 10.5, weight: .bold)).tracking(0.8)
+                .foregroundStyle(DS.Color.textTertiary.color)
+            if c.regions.count > 1 { shortNote(LatticeCellsRow.tabsNote).latticeID("lattice-page-tabs-note") }
+            latticeAreaRows(organic: organic, structural: structural)
+        }
+    }
+
+    @ViewBuilder private func latticeAreaRows(organic: Bool, structural: Bool) -> some View {
+        if organic {
+            organicRow
+        } else {
+            settingControl(.finish, titled: true)
+            gradeToggleRow
+            if model.gradingMode != LatticeGradingMode.none { gradeTypeRow }
+        }
+        if latticeManual {
+            Text(Self.latticeManualSection.uppercased()).font(.system(size: 10.5, weight: .bold)).tracking(0.8)
+                .foregroundStyle(DS.Color.accent.color)
+                .padding(.top, 4)
+            if !organic {
+                ForEach([LatticeWizardSetting.cellSize, .density, .thickness], id: \.rawValue) { s in
+                    settingControl(s, titled: true)
+                }
+                gradeStyleRow
+                if model.gradingMode.fitsShape { shapeBandRow }
+                if !structural { singleCellSwitch }
+            }
+            if structural { subfloorRetentionSwitch }
+            if !organic { cellsAddedRows }
+        }
+    }
+
+    /// Cancel │ Save, pinned (the Squish panel's foot). Save is today's (it saves what changed, then builds the preview);
+    /// Cancel leaves as the page opened.
+    private var latticeFoot: some View {
+        HStack(spacing: DS.Space.s) {
+            Spacer(minLength: 0)
+            latticeFootButton(FlexibleSettingsExit.cancel, primary: false, id: "lattice-page-cancel") { cancelAndClose() }
+            latticeFootButton(FlexibleSettingsExit.save, primary: true, id: "lattice-cells-save") { saveAndClose() }
+        }
+    }
+
+    private func latticeFootButton(_ title: String, primary: Bool, id: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title).font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                .padding(.horizontal, DS.Space.l).frame(minWidth: 84, minHeight: FlexibleTargets.least)
+                .background(Capsule().fill((primary ? DS.Color.accent : DS.Color.fillSubtle).color))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .latticeID(id)
+    }
+
+    /// Cancel: no setting this page changed is kept — the one it writes as it changes (the organic Look) goes back, the rest
+    /// was never applied — then it leaves as Save does with nothing changed. (A Check sizes answer is a measurement, not a
+    /// setting: it stays, stamped with what it was measured for.)
+    private func cancelAndClose() {
+        if let o = openedLattice { project.lattice.organicLookPercent = o.organicLookPercent }
+        onExit()
+    }
+
+    /// One cell │ In the part, over the canvas: what the canvas shows (its settings are on the panel's tabs).
+    private var latticeViewSwitch: some View {
+        HStack(spacing: 2) {
+            ForEach(LatticeWizardStage.allCases, id: \.rawValue) { s in
+                let on = model.stage == s
+                Button { model.jump(to: s); rebuild() } label: {
+                    Text(organicSampleShown && s == .cell ? "Sample" : s.title)
+                        .font(.system(size: 13, weight: on ? .semibold : .regular))
+                        .foregroundStyle((on ? DS.Color.textPrimary : DS.Color.textSecondary).color)
+                        .padding(.horizontal, DS.Space.l).frame(minWidth: 120, minHeight: 36)
+                        .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(on ? DS.Color.fillSelected.color : Color.clear))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .latticeID("wizard-stage-\(s.rawValue)")
+            }
+        }
+        .padding(3)
+        .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(DS.Surface.panel.color)
+            .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+        .fixedSize()
+        .background(CornerPairStyle.publish("latticeViewSwitch"))
+    }
+
     // MARK: ★ B4 — the Cells page's header and added rows
 
     /// "Cells" · Save / Done, and a tab per region (the rows apply to every region today, and say so).
@@ -2276,7 +2559,7 @@ public struct LatticeSetupWizard: View {
         VStack(alignment: .leading, spacing: DS.Space.s) {
             ForEach(LatticeCellsRow.rows(mode), id: \.rawValue) { row in
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(row.title).font(.system(size: 10, weight: .bold))
+                    Text(row.title).font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)   // ★ B7: the panel's overline (DSPanelSection)
                         .foregroundStyle(DS.Color.textTertiary.color)
                     switch row {
                     case .grade:
@@ -2398,11 +2681,12 @@ public struct LatticeSetupWizard: View {
 
     private func segmentRow(_ names: [String], selected: Int,
                             tap: @escaping (Int) -> Void) -> some View {
-        HStack(spacing: DS.Space.xs) {
+        HStack(spacing: 4) {
             ForEach(Array(names.enumerated()), id: \.offset) { i, n in
                 segmentButton(n, on: selected == i) { tap(i) }
             }
         }
+        .modifier(LatticeSegmentTrack())
     }
 
     private func segmentButton(_ name: String, on: Bool,
@@ -2411,17 +2695,34 @@ public struct LatticeSetupWizard: View {
         let fill: Color = on ? DS.Color.fillSelected.color : Color.clear
         return Button(action: tap) {
             Text(name)
-                .font(.system(size: 11, weight: .bold))
+                .font(.system(size: 12, weight: .semibold))
+                .lineLimit(1).minimumScaleFactor(0.8)
                 .foregroundStyle(ink)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 7)
-                .background(RoundedRectangle(cornerRadius: DS.Radius.pill).fill(fill))
+                .background(Capsule().fill(fill))
         }
         .buttonStyle(.plain)
         .latticeID("wizard-seg-\(name.lowercased())")
     }
 }
 
+
+/// ★ B7: the Lattice settings panel's drawn height (portrait: the canvas's view switch sits under it).
+private struct LatticePanelHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+/// ★ B7: the Squish look's segment track (FlexChips): 2 pt inside a dark capsule with a hairline.
+private struct LatticeSegmentTrack: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .padding(2)
+            .background(Capsule().fill(DS.Color.background.opacity(0.35).color)
+                .overlay(Capsule().strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)))
+    }
+}
 
 /// ★ THE PROBE'S REFUSALS, VERBATIM (contract 2026-09-05: "they are written to be
 /// read"): a pointer hover shows them as help; a long-press shows them as a menu.
