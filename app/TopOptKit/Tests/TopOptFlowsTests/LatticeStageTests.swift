@@ -289,7 +289,8 @@ final class LatticeStageTests: XCTestCase {
         XCTAssertTrue(list.contains("confirmDelete: { confirmTopologyTrash() }"), "…and deletes through trashGroup")
         XCTAssertTrue(list.contains("project.undoTrash(t)"), "one Undo")
         XCTAssertTrue(list.contains("toggleEye: { toggleTopologyEye($0) }"), "the eye, view only")
-        XCTAssertTrue(list.contains("rows: { g in AnyView(groupRow(g, inList: true)) }"), "today's depth and expand boxes")
+        // ★ RE-PINNED (UI-Notes B6 s1b, note 28): the open group's rows are its face rows — each face's depth and role
+        XCTAssertTrue(list.contains("rows: { g in AnyView(latticeGroupRows(g)) }"), "the open group's face rows")
         XCTAssertTrue(ws.contains("else if stage == .lattice, !showLatticePage { latticeSelectionsList }"))
     }
 
