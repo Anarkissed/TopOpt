@@ -5,7 +5,11 @@
 // - LINKED by default: the views share ONE OrbitCameraModel, so turning one turns the other (both
 //   MetalMeshViews subscribe to its `$camera`). ⚙ → Link views off gives each its own camera, copied
 //   from the shared one so nothing jumps; on again adopts the left view's.
-// - Better under one; a › on the other brings the next result and clears Better (CompareSession).
+// - ★ His iPad notes 11-05 (ledger L3, his "Yes, as written"): Better under one side rejects the other — a red Rejected
+//   stamp, saved at once — and the next result slides in on its side; the winner stays. Tie, between the two Betters, sets
+//   both aside and the next two slide in; they come back once every result was seen, and a second Tie ends Compare with the
+//   undecided ones In consideration. The last one left is the part's chosen, and Compare goes back to the part page:
+//   "v1a chosen · 4 rejected" (CompareSession). One version's results side by side (Best) is unchanged.
 // - Details (bottom) holds the engineers' numbers. ★ HIS FIX: opening it moves the 3D views UP and
 //   makes them smaller — the panel never covers a model (a VStack, not an overlay).
 // - Nothing opens a project here: everything is read from each version's saved results.
@@ -223,6 +227,8 @@ struct LibraryCompareView: View {
     @ObservedObject var library: LibraryModel
     @State var request: LibraryCompareRequest
     let close: () -> Void
+    /// ★ L3: Compare ended — back to the part page with this toast ("v1a chosen · 4 rejected").
+    var finished: (String) -> Void = { _ in }
     @StateObject private var loader = LibraryResultsLoader()
     @StateObject private var shared = OrbitCameraModel()
     @State private var own: [Int: OrbitCameraModel] = [:]
@@ -233,6 +239,8 @@ struct LibraryCompareView: View {
     @State private var skipRejected = true
     @State private var details = false
     @State private var note: String?
+    /// ★ L3: the result Better just rejected, stamped red before it slides out; taps wait until it has gone.
+    @State private var stamped: CompareItem?
 
     var body: some View {
         let part = library.part(request.part)
@@ -255,7 +263,7 @@ struct LibraryCompareView: View {
                 }
             }
             HStack {
-                if let s = session, s.kept != nil || s.seen.count > 2 {
+                if let s = session, s.seen.count > 2 || !s.rejected.isEmpty {
                     Text("\(s.seen.count) of \(s.queue.count) seen").dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
                 }
                 Spacer()
@@ -316,37 +324,95 @@ struct LibraryCompareView: View {
             HStack(spacing: DS.Space.l) {
                 ForEach(Array(three.items.enumerated()), id: \.element) { slot, item in
                     panel(item, slot: slot, kept: three.best == item, pickTitle: "Best", pick: { self.three?.toggleBest(item) },
-                          showsNext: false, menu: nil)
+                          menu: nil)
                 }
             }
         } else if let s = session {
             HStack(spacing: DS.Space.l) {
-                if let l = s.left {
-                    panel(l, slot: 0, kept: s.kept == .left, pickTitle: "Better", pick: { session?.pick(.left) },
-                          showsNext: s.showsNext(on: .left), menu: .left)
-                }
-                if let r = s.right {
-                    panel(r, slot: 1, kept: s.kept == .right, pickTitle: "Better", pick: { session?.pick(.right) },
-                          showsNext: s.showsNext(on: .right), menu: .right)
-                }
-                if s.left == nil {
+                if s.left == nil, s.right == nil {
                     Text("No results to compare yet.").dsStyle(DS.TypeScale.body).foregroundStyle(DS.Color.textTertiary.color)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }
-            .overlay {
-                if s.left != nil, s.right != nil {
-                    Image(systemName: linked ? "link" : "link.badge.plus").font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(linked ? DS.Color.accentCyan.color : DS.Color.textTertiary.color)
-                        .frame(width: 36, height: 36).liquidGlass(in: Circle())
-                        .accessibilityLabel(linked ? "Views turn together" : "Views turn apart")
+                } else {
+                    side(s.left, slot: 0, .left)
+                    // ★ L3: Tie sits between the two Betters, the link sign above it
+                    VStack(spacing: DS.Space.m) {
+                        Spacer()
+                        Image(systemName: linked ? "link" : "link.badge.plus").font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(linked ? DS.Color.accentCyan.color : DS.Color.textTertiary.color)
+                            .frame(width: 36, height: 36).liquidGlass(in: Circle())
+                            .accessibilityLabel(linked ? "Views turn together" : "Views turn apart")
+                        Spacer()
+                        Button(action: tie) {
+                            Label("Tie", systemImage: "equal").font(DS.TypeScale.bodyStrong.font)
+                                .foregroundStyle(DS.Color.textPrimary.color)
+                                .padding(.horizontal, DS.Space.ml).frame(minWidth: DSParts.target, minHeight: DSParts.target)
+                                .liquidGlassCapsule()
+                        }
+                        .buttonStyle(.plain).disabled(!s.canTie || stamped != nil).opacity(s.canTie ? 1 : 0.4)
+                        .background(DSParts.publish("compare-tie"))
+                        .accessibilityIdentifier("compare-tie")
+                        .padding(.bottom, DS.Space.ml + 10)   // level with the Betters
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                    side(s.right, slot: 1, .right)
                 }
             }
         }
     }
 
+    /// One side of Compare. ★ L3: a result comes in sliding from its own edge and goes out fading down; keyed by the result
+    /// so each change of result animates.
+    private func side(_ item: CompareItem?, slot: Int, _ side: CompareSide) -> some View {
+        ZStack {
+            if let item {
+                panel(item, slot: slot, kept: false, pickTitle: "Better", pick: { better(side) }, menu: side)
+                    .id(item)
+                    .transition(.asymmetric(insertion: .move(edge: side == .left ? .leading : .trailing).combined(with: .opacity),
+                                            removal: .offset(y: 80).combined(with: .opacity)))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
+    }
+
+    // MARK: ★ L3 steps
+
+    /// Better under `side`: the other is Rejected now (saved as he goes), stamped red, then slides out as the next comes in.
+    private func better(_ side: CompareSide) {
+        guard stamped == nil, let s = session, s.end == nil else { return }
+        let loser = side == .left ? s.right : s.left
+        if let loser {
+            library.rejectInCompare(loser)
+            withAnimation(.easeOut(duration: 0.18)) { stamped = loser }
+        }
+        Task { @MainActor in
+            if loser != nil { try? await Task.sleep(nanoseconds: 450_000_000) }
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { session?.better(side); stamped = nil }
+            stepped()
+        }
+    }
+
+    /// Tie: both set aside, the next two slide in; on the second look it ends Compare.
+    private func tie() {
+        guard stamped == nil, session?.canTie == true else { return }
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { session?.tie() }
+        stepped()
+    }
+
+    /// After a step: load what came in; at the end, back to the part page with what was decided.
+    private func stepped() {
+        guard let s = session else { return }
+        for i in [s.left, s.right].compactMap({ $0 }) { loader.need(i.folder, from: library) }
+        guard let end = s.end else { return }
+        let text = library.finishCompare(end, rejected: s.rejected.count)
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 350_000_000)   // the last slide ends before the page comes back
+            finished(text)
+        }
+    }
+
     private func panel(_ item: CompareItem, slot: Int, kept: Bool, pickTitle: String, pick: @escaping () -> Void,
-                       showsNext: Bool, menu side: CompareSide?) -> some View {
+                       menu side: CompareSide?) -> some View {
         let v = library.version(item.folder)
         let mark = v?.mark(for: item.result) ?? ResultMark(result: item.result)
         return ZStack {
@@ -390,8 +456,11 @@ struct LibraryCompareView: View {
                             .padding(.horizontal, DS.Space.ml).frame(height: 40)
                             .background(Capsule().fill(kept ? DS.Color.okGreen.color : DS.Color.fillSubtle.color))
                             .overlay(Capsule().strokeBorder(kept ? .clear : DS.Color.strokeStrong.color, lineWidth: 1))
+                            .padding(.vertical, 2).contentShape(Rectangle())   // ★ L3: the same 40 pt capsule, a 44 pt target
                     }
                     .buttonStyle(.plain)
+                    .disabled(stamped != nil)
+                    .background(DSParts.publish("compare-\(pickTitle.lowercased())-\(slot)"))
                     .accessibilityIdentifier("compare-\(pickTitle.lowercased())-\(slot)")
                 }
                 .frame(minHeight: stacked ? 48 : 60)
@@ -400,23 +469,16 @@ struct LibraryCompareView: View {
                 .liquidGlass(cornerRadius: 20)
             }
             .padding(DS.Space.ml)
-            if showsNext {
-                VStack(spacing: DS.Space.xs) {
-                    Button {
-                        if session?.next() == true, let s = session {
-                            for i in [s.left, s.right].compactMap({ $0 }) { loader.need(i.folder, from: library) }
-                        }
-                    } label: {
-                        Image(systemName: "chevron.right").font(.system(size: 26, weight: .bold))
-                            .frame(width: 60, height: 60).liquidGlass(in: Circle())
-                    }
-                    .buttonStyle(.plain).accessibilityIdentifier("compare-next")
-                    Text("\(session?.remaining ?? 0) more").dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
-                        .padding(.horizontal, 7).padding(.vertical, 2).background(Capsule().fill(Color.black.opacity(0.6)))
-                }
-                .frame(maxWidth: .infinity, alignment: .trailing).padding(.trailing, DS.Space.ml)
+            if stamped == item {   // ★ L3: Better on the other side — stamped red before it slides out
+                Text("Rejected").font(.system(size: 30, weight: .heavy)).foregroundStyle(DS.Color.danger.color)
+                    .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.s)
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(DS.Color.danger.color, lineWidth: 3))
+                    .rotationEffect(.degrees(-8))
+                    .transition(.scale(scale: 1.4).combined(with: .opacity))
+                    .background(DSParts.publish("compare-stamp-\(slot)"))
             }
         }
+        .background(DSParts.publish("compare-showing-v\(v?.number.description ?? "")\(ResultMark.letter(item.result))"))
         .background(RoundedRectangle(cornerRadius: 26, style: .continuous).fill(Color(.sRGB, red: 0.043, green: 0.051, blue: 0.071, opacity: 1)))
         .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous)
