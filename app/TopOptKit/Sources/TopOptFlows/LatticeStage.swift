@@ -174,6 +174,27 @@ public enum LatticeSetupCopy {
     public static func ready(type: String, groups: Int) -> String {
         "\(type) \u{00B7} \(groups) group\(groups == 1 ? "" : "s")"
     }
+
+    // ★ B6 s1b — the Selections rows (§4.3 / §4.4, mockup #lat-setup)
+    public static let faces = "Faces"
+    public static let newGroup = "+ New group"
+    public static let newGroupToast = "Tap a face to start a new lattice group"
+    public static let role = "Role"
+    public static let thisFace = "This face"
+    public static let lattice = "Lattice"
+    public static let noLattice = "No lattice"
+    /// A face declared out of the lattice (its row's value).
+    public static let off = "Off"
+    /// A group line's value: how deep its faces lattice, "12–31 mm deep" ("31 mm deep" when they agree to 0.1 mm).
+    public static func deep(lo: Double, hi: Double) -> String {
+        let a = SelectionsSummary.format((lo * 10).rounded() / 10, decimals: 1)
+        let b = SelectionsSummary.format((hi * 10).rounded() / 10, decimals: 1)
+        return a == b ? "\(a) mm deep" : "\(a)\u{2013}\(b) mm deep"
+    }
+    /// Note 22's tag on a face row.
+    public static func alsoIn(_ group: String) -> String { "also in \(group)" }
+    /// The toast after a face row's trash (Undo, top left, brings it back).
+    public static func removed(_ name: String) -> String { "\(name) removed \u{00B7} Undo brings it back" }
 }
 
 // MARK: - "Change lattice type…" (three ways)

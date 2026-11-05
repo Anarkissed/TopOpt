@@ -34,8 +34,18 @@ final class ParityLatticeSetupShots: XCTestCase {
     func testLatticeSetupStates() throws {
         guard ProcessInfo.processInfo.environment["PARITY_SHOT_DIR"] != nil else { throw XCTSkip("PARITY_SHOT_DIR not set") }
         for (name, size) in ParityTopologyShots.sizes {
-            let (h, _) = try page(size)
+            let (h, p) = try page(size)
             try ParityTopologyShots.shot(h, "lat-setup", name)
+            // a face row picked (mockup #lat-setup-face-row): its depth field and its own role
+            if let g = p.latticeGroups.first, let ref = p.latticeSelectableRefs(g).first {
+                p.latticeList.setActive(g.id)
+                h.pump(0.5)
+                if h.frames.all["latticeFace-\(ref.key)"] != nil {
+                    try h.tap("latticeFace-\(ref.key)", "the first face row")
+                    try ParityTopologyShots.shot(h, "lat-setup-face-row", name)
+                    try h.tap("latticeFace-\(ref.key)", "the first face row again")
+                }
+            }
             if h.frames.all["setupChip"] != nil {
                 try h.tap("setupChip", "Settings")
                 h.pump(0.5)
