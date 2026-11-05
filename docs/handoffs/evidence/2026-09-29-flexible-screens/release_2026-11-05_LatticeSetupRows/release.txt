@@ -1,0 +1,14 @@
+# Release d0636cfc — 2026-11-05 LatticeSetupRows (UI-Notes' app batch up to 4430f021), app only, released before review (his 11-03 pick)
+# Core and worker unchanged: fingerprint 6c5a6fbaa842; "fingerprint": "6c5a6fbaa842"
+# Merged onto c9f4110c; the merged app tree equals 4430f021's, so the builder's tests apply unchanged.
+# Commits:
+#   bf33bf90 B6 s1b (his go 11-05; notes 22, 25a, 28, R2.3 / R4): Lattice Setup's Selections rows — Faces · + New group, one full-size row per face, Role
+#   4430f021 Merge UI-Notes' B6 s1b (bf33bf90; notes 22, 25a, 28) into B9: Lattice Setup's Selections rows — Faces · + New group, one full-size row per face, Role; the Lattice page's tabs read the stage's own groups
+#   d0636cfc Release 2026-11-05: merge B9 4430f021 — UI-Notes' B6 s1b (bf33bf90; notes 22, 25a, 28): Lattice Setup's Selections rows — Faces N · + New group, each group's depth line, one 48 pt row per face (also in …, depth, trash; a tap opens its depth and Lattice │ No lattice), then Role; the Lattice page's tabs read the stage's own groups (app only; core and worker unchanged at 6c5a6fbaa842)
+# Gates:
+#   17:35 checks ok: LatticeSetupRows, local d0636cfc over origin c9f4110c (3 commits); app tree == 4430f021's, fingerprint 6c5a6fbaa842
+#   17:35 waiting for HEAVY.lock (free)
+#   17:35 lock taken
+#   17:40 iPad device build green; lock released
+#   17:40 pushed d0636cfc
+#   17:40 worker /health "fingerprint": "6c5a6fbaa842" (unchanged, no swap)
