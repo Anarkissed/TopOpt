@@ -82,6 +82,9 @@ public struct LatticeSetupWizard: View {
     // (Grade from → to, Along, Strength / Ties / Overhangs: LatticeCellsRow). The commit is today's: Save (here) or the
     // capsule's Regions (`closeToken`) runs `saveAndClose`, so a setting has ONE way in and ONE way to the job.
 
+    /// RED CONTROL for LatticePageParityHostedTests (B7): hides the Simulate stresses switch, so the parity must name it.
+    nonisolated(unsafe) static var controlHideSimulateStresses = false
+
     struct CellsPageContext: Equatable {
         var regions: [String]
         var closeToken: Int
@@ -198,7 +201,7 @@ public struct LatticeSetupWizard: View {
             // 'Lattice Settings' modal (above the 'type')"). It is not one
             // stage's setting — it decides what the OTHER settings may offer —
             // so it sits outside the stage list rather than inside it.
-            simulateStressesSwitch
+            if !Self.controlHideSimulateStresses { simulateStressesSwitch }
             // ★ ORGANIC IS A DIFFERENT "IN THE PART" (his ruling, 2026-09-02, and the
             // on-device screenshot of 21:12 that showed both): the stage's Cell size /
             // Density / Finish rows are the OCTET's — a traced lattice has no cell to
@@ -305,7 +308,7 @@ public struct LatticeSetupWizard: View {
                     .foregroundStyle(DS.Color.textPrimary.color)
             }
             .toggleStyle(SwitchToggleStyle(tint: DS.Color.accent.color))
-            .accessibilityIdentifier("wizard-grade-toggle")
+            .latticeID("wizard-grade-toggle")
             captionLine(model.gradingMode == LatticeGradingMode.none
                         ? "One cell, one density, everywhere."
                         : "The lattice varies across the part.",
@@ -339,7 +342,7 @@ public struct LatticeSetupWizard: View {
                             .foregroundStyle(DS.Color.textPrimary.color)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityIdentifier("wizard-grade-type-\(m.rawValue)")
+                    .latticeID("wizard-grade-type-\(m.rawValue)")
                 }
             }
             captionLine(model.gradingMode == .full ? "Density by stress, cells fit the outline."
@@ -376,7 +379,7 @@ public struct LatticeSetupWizard: View {
                                                       : Color.clear))
                 }
                 .buttonStyle(.plain)
-                .accessibilityIdentifier("wizard-stage-\(s.rawValue)")
+                .latticeID("wizard-stage-\(s.rawValue)")
             }
         }
         .padding(2)
@@ -420,7 +423,7 @@ public struct LatticeSetupWizard: View {
                 rebuild()
             }
             .accessibilityLabel("Simulate Stresses")
-            .accessibilityIdentifier("wizard-simulate-stresses")
+            .latticeID("wizard-simulate-stresses")
         }
         .padding(.vertical, DS.Space.s)
         .padding(.horizontal, DS.Space.sm)
@@ -503,7 +506,7 @@ public struct LatticeSetupWizard: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(off)
-                    .accessibilityIdentifier("wizard-cell-transition-\(t.rawValue)")
+                    .latticeID("wizard-cell-transition-\(t.rawValue)")
                 }
             }
             if let blocked = LatticeStructuralSteppedGate.refusal(
@@ -519,7 +522,7 @@ public struct LatticeSetupWizard: View {
                         Self.tapNote(blocked + " · " + LatticeStructuralSteppedGate.fixLabel)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityIdentifier("wizard-stepped-structural-blocked")
+                    .latticeID("wizard-stepped-structural-blocked")
                     infoButton("grade-style-blocked", LatticeStructuralSteppedGate.detail)
                 }
             } else {
@@ -671,7 +674,7 @@ public struct LatticeSetupWizard: View {
                                   set: { model.shapeFitBandMM = ($0).rounded(); rebuild() }),
                    in: 0...60, step: 1)
                 .tint(DS.Color.accent.color)
-                .accessibilityIdentifier("\(idPrefix)-band-slider")
+                .latticeID("\(idPrefix)-band-slider")
             Text(String(format: "%.0f mm", model.shapeFitBandMM))
                 .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textPrimary.color)
                 .frame(width: 52, alignment: .trailing)
@@ -683,7 +686,7 @@ public struct LatticeSetupWizard: View {
                                   set: { model.shapeFitGradeStrength = ($0 * 10).rounded() / 10; rebuild() }),
                    in: -1...1, step: 0.1)
                 .tint(DS.Color.accent.color)
-                .accessibilityIdentifier("\(idPrefix)-strength-slider")
+                .latticeID("\(idPrefix)-strength-slider")
             Text(model.shapeFitGradeStrength == 0 ? "0" : String(format: "%+.1f", model.shapeFitGradeStrength))
                 .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textPrimary.color)
                 .frame(width: 52, alignment: .trailing)
@@ -717,7 +720,7 @@ public struct LatticeSetupWizard: View {
                 .padding(16)
                 .frame(width: 380)
         }
-        .accessibilityIdentifier("wizard-info-\(id)")
+        .latticeID("wizard-info-\(id)")
     }
 
     private var organicAesthetic: Bool { (project.lattice.stageMode ?? .structural) == .aesthetic }
@@ -759,7 +762,7 @@ public struct LatticeSetupWizard: View {
                         .foregroundStyle(DS.Color.accent.color)
                 }
                 .buttonStyle(.plain)
-                .accessibilityIdentifier("wizard-organic-fine-tune")
+                .latticeID("wizard-organic-fine-tune")
                 if showPrintTuning {
                     sectionTitle("Spacing scale", info: "spacing-scale", Self.infoSpacingScale)
                     scrubRow("organicScale", value: model.organicScale, unit: "×",
@@ -780,7 +783,7 @@ public struct LatticeSetupWizard: View {
                             model.organicTransferTies.toggle(); rebuild()
                         }
                         .accessibilityLabel("Transfer ties")
-                        .accessibilityIdentifier("wizard-organic-transfer-ties")
+                        .latticeID("wizard-organic-transfer-ties")
                     }
                     if model.organicTransferTies {
                         shortNote("Tie swirl")
@@ -836,7 +839,7 @@ public struct LatticeSetupWizard: View {
                 let why = LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled, hasIncludeWall: false)
                 if let why, LatticeJobIncludeGate.opensWallMarking(why) {
                     refusalNote(why, marksWalls: markWalls != nil)
-                        .accessibilityIdentifier("wizard-organic-fit-nothing-set")
+                        .latticeID("wizard-organic-fit-nothing-set")
                 } else {
                     shortNote("Needs a lattice region")
                 }
@@ -909,7 +912,7 @@ public struct LatticeSetupWizard: View {
                     project.lattice.organicShowRepairs.toggle(); rebuild()
                 }
                     .accessibilityLabel("Show print repairs")
-                    .accessibilityIdentifier("wizard-organic-show-repairs")
+                    .latticeID("wizard-organic-show-repairs")
             }
             if !organicShowRepairs { shortNote("Repairs hidden", warning: true) }
             else if !TopOptKit.coreCarriesTheSampleRepairFix {
@@ -943,7 +946,7 @@ public struct LatticeSetupWizard: View {
                     }
                     .opacity(locked ? 0.6 : 1)
                     .accessibilityLabel("Shape fit only")
-                    .accessibilityIdentifier("wizard-organic-shape-fit-only")
+                    .latticeID("wizard-organic-shape-fit-only")
                 }
                 if locked { shortNote("Locked while simulation is off") }
             }
@@ -960,7 +963,7 @@ public struct LatticeSetupWizard: View {
                     model.organicSolidRimMM = model.organicSolidRimMM != 0 ? 0 : -1; rebuild()
                 }
                 .accessibilityLabel("Solid rim at edges")
-                .accessibilityIdentifier("wizard-organic-solid-rim")
+                .latticeID("wizard-organic-solid-rim")
             }
             // ★ THE GRADE-TO-SHAPE BAND, HERE TOO (his 2026-09-18: "include the gradient
             // amount in Organic"). The same millimetres the octet grades over.
@@ -976,7 +979,7 @@ public struct LatticeSetupWizard: View {
                             + "it. 0 turns the grade off. The tint on the lattice shows the same band.",
                             tint: DS.Color.textQuaternary.color)
             }
-            .accessibilityIdentifier("wizard-organic-shape-band")
+            .latticeID("wizard-organic-shape-band")
             // ★ THE LOOK (Aesthetic): cells the eye reads across the shortest face —
             // the recommendation's target when sizes are checked.
             if organicAesthetic {
@@ -1006,7 +1009,7 @@ public struct LatticeSetupWizard: View {
                         if !editing { rebuild() }
                     }
                     .tint(DS.Color.accent.color)
-                    .accessibilityIdentifier("wizard-organic-look")
+                    .latticeID("wizard-organic-look")
                     Text("100%").dsStyle(DS.TypeScale.caption2)
                         .foregroundStyle(DS.Color.textQuaternary.color)
                     Text(String(format: "%.0f%%", project.lattice.organicLookPercent))
@@ -1036,7 +1039,7 @@ public struct LatticeSetupWizard: View {
                         model.organicSyntheticStresses.toggle(); rebuild()
                     }
                     .accessibilityLabel("Synthetic stresses on unloaded walls")
-                    .accessibilityIdentifier("wizard-organic-synthetic")
+                    .latticeID("wizard-organic-synthetic")
                 }
                 if model.organicSyntheticStresses {
                     shortNote("Per wall, in Selections")
@@ -1208,7 +1211,7 @@ public struct LatticeSetupWizard: View {
         .buttonStyle(.plain)
         .disabled(refusal != nil || running)
         .help(refusal ?? OrganicForecast.checkSizesHelp)
-        .accessibilityIdentifier("wizard-organic-check-sizes")
+        .latticeID("wizard-organic-check-sizes")
     }
 
     @ViewBuilder private func organicManualLists(fitPossible: Bool) -> some View {
@@ -1291,7 +1294,7 @@ public struct LatticeSetupWizard: View {
         if project.lattice.organicSizesNeedRecheck, organicProbeState != .running {
             refusalNote(OrganicForecast.recheckLine(checkRefusal: organicProbeRefusal),
                         marksWalls: organicRefusalMarksWalls)
-                .accessibilityIdentifier("wizard-organic-sizes-recheck")
+                .latticeID("wizard-organic-sizes-recheck")
         }
         // ★ RULING (c) (2026-09-30): Check sizes shows only when it can act, so a job with no
         // include wall is SAID — unless the re-check line above or the none-checked line below
@@ -1300,7 +1303,7 @@ public struct LatticeSetupWizard: View {
            project.lattice.currentOrganicForecast?.uncheckedSummary(
                structural: structural, grades: model.simulateStresses, checkRefusal: why) == nil {
             refusalNote(why, marksWalls: organicRefusalMarksWalls)
-                .accessibilityIdentifier("wizard-organic-check-refused")
+                .latticeID("wizard-organic-check-refused")
         }
         // ★ ruling V3 (2026-09-29): not one size's stress bar was computed — say so, and
         // what would get them checked; each size's reason behind the (i)
@@ -1310,13 +1313,13 @@ public struct LatticeSetupWizard: View {
                 refusalNote(none.line, marksWalls: organicRefusalMarksWalls)
                 infoButton("none-checked", none.info)
             }
-            .accessibilityIdentifier("wizard-organic-none-checked")
+            .latticeID("wizard-organic-none-checked")
         }
         // ★ ruling V1 (2026-09-29): a variant's Check sizes left a face wall out — say so
         if let line = LatticeVariantFaceWalls.line(withoutShape: project.lattice.currentOrganicForecast?.facesWithoutShape ?? 0,
                                                    regions: project.lattice.currentOrganicForecast?.regionsWithoutShape ?? []) {
             shortNote(line, warning: true)
-                .accessibilityIdentifier("wizard-organic-face-walls-left-out")
+                .latticeID("wizard-organic-face-walls-left-out")
         }
     }
 
@@ -1329,16 +1332,16 @@ public struct LatticeSetupWizard: View {
                 ProgressView().controlSize(.mini)
                 shortNote("Checking…")
             }
-            .accessibilityIdentifier("wizard-organic-auto-recheck")
+            .latticeID("wizard-organic-auto-recheck")
         } else if organicProbeRefusal == nil {
             Button { runCheckSizes() } label: { Self.tapNote(OrganicForecast.recheckTapLine) }
             .buttonStyle(.plain)
             .accessibilityHint(OrganicForecast.checkSizesHelp)
-            .accessibilityIdentifier("wizard-organic-auto-recheck")
+            .latticeID("wizard-organic-auto-recheck")
         } else {
             refusalNote(OrganicForecast.recheckLine(checkRefusal: organicProbeRefusal),
                         marksWalls: organicRefusalMarksWalls)
-                .accessibilityIdentifier("wizard-organic-auto-recheck")
+                .latticeID("wizard-organic-auto-recheck")
         }
         if case let .failed(why) = organicProbeState {
             HStack(spacing: DS.Space.xs) {
@@ -1422,7 +1425,7 @@ public struct LatticeSetupWizard: View {
                 guard let v else { return }
                 set(v)
             }
-            .accessibilityIdentifier("wizard-field-\(id)")
+            .latticeID("wizard-field-\(id)")
     }
 
     private var organicWalls: [OrganicSizeCheck.Wall] {
@@ -1498,7 +1501,7 @@ public struct LatticeSetupWizard: View {
         if organicAesthetic, let v = organicVerdictCurrent, !v.allowed || !v.reasons.isEmpty {
             Text("*").font(.system(size: 16, weight: .heavy))
                 .foregroundStyle(Color.red)
-                .accessibilityIdentifier("wizard-organic-size-refused")
+                .latticeID("wizard-organic-size-refused")
         }
     }
 
@@ -1548,11 +1551,11 @@ public struct LatticeSetupWizard: View {
                             "A finer cell would need struts under one extrusion. Use a coarser "
                             + "cell, or a finer nozzle, to grade.",
                             tint: DS.Color.warning.color)
-                    .accessibilityIdentifier("wizard-shape-fit-no-room")
+                    .latticeID("wizard-shape-fit-no-room")
             } else if let steps = shapeFitSteps {
                 captionLine("\(steps) cell sizes available.", info: "band-steps",
                             tint: DS.Color.textQuaternary.color)
-                    .accessibilityIdentifier("wizard-shape-fit-band-note")
+                    .latticeID("wizard-shape-fit-band-note")
             }
         }
     }
@@ -1582,7 +1585,7 @@ public struct LatticeSetupWizard: View {
                     .foregroundStyle(DS.Color.textPrimary.color)
             }
             .toggleStyle(SwitchToggleStyle(tint: DS.Color.accent.color))
-            .accessibilityIdentifier("wizard-single-cell-members")
+            .latticeID("wizard-single-cell-members")
             .popover(isPresented: Binding(get: { finishRuleNotice == "skin-required" },
                                           set: { if !$0 { finishRuleNotice = nil } })) {
                 Text("The finish is now Skin: it must be on while single-cell members is on.")
@@ -1645,7 +1648,7 @@ public struct LatticeSetupWizard: View {
                 .opacity(c.enabled ? 1 : 0.4)
                 .allowsHitTesting(c.enabled)
                 .accessibilityLabel(LatticeRetentionControl.titleText)
-                .accessibilityIdentifier("wizard-subfloor-retention")
+                .latticeID("wizard-subfloor-retention")
             }
             // ★ WHY IT CANNOT BE OPERATED, said as the fact it is. Greying a row in
             // silence is the defect this page has already paid for.
@@ -1653,7 +1656,7 @@ public struct LatticeSetupWizard: View {
                                                 : "Not available on this job.",
                         info: "subfloor", c.disabledReason ?? c.body,
                         tint: (c.disabledReason == nil ? DS.Color.textTertiary : DS.Color.warning).color)
-                .accessibilityIdentifier("wizard-subfloor-retention-note")
+                .latticeID("wizard-subfloor-retention-note")
         }
         .padding(.vertical, DS.Space.s)
         .padding(.horizontal, DS.Space.sm)
@@ -1719,12 +1722,12 @@ public struct LatticeSetupWizard: View {
                 if model.densityMode.needsSimulation, model.simulateStresses {
                     simDerivedNote("Derived from the simulated density. "
                                    + "To pin it, pin Density and Cell size.")
-                        .accessibilityIdentifier("wizard-thickness-derived")
+                        .latticeID("wizard-thickness-derived")
                 } else if let why = LatticeTypeCatalog.selectionRefusal(model.topologyID) {
                     // ★ Q2 (2026-10-05): a saved type core does not call live has no band, so
                     // no printable range to scrub — core's readiness words where it was.
                     shortNote(why, warning: true)
-                        .accessibilityIdentifier("wizard-thickness-no-band")
+                        .latticeID("wizard-thickness-no-band")
                 } else {
                     // ★★ A THICKNESS IN MILLIMETRES (maintainer, 2026-08-19: "Off
                     // makes a sliding number value visible; controlling the
@@ -1754,7 +1757,7 @@ public struct LatticeSetupWizard: View {
                          + "strut this printer can lay at a \(mmText(model.cellMM)) cell.")
                         .dsStyle(DS.TypeScale.caption2)
                         .foregroundStyle(DS.Color.textQuaternary.color)
-                        .accessibilityIdentifier("wizard-thickness-floor-note")
+                        .latticeID("wizard-thickness-floor-note")
                 }
             case .cellSize:
                 // ★ "cell size could be auto or swept or manually input"
@@ -1785,7 +1788,7 @@ public struct LatticeSetupWizard: View {
                 if model.simulateStresses, model.cellSizeMode == .auto {
                     captionLine("The solve picks the cell everywhere.", info: "auto-cell",
                                 autoCellNote, tint: DS.Color.textQuaternary.color)
-                        .accessibilityIdentifier("wizard-auto-cell-note")
+                        .latticeID("wizard-auto-cell-note")
                 }
                 // ★ THE CELL DIMENSION LIVES HERE AND NOWHERE ELSE (maintainer,
                 // 2026-08-14): *"Auto needs no cell size, fixed needs one, and
@@ -1823,7 +1826,7 @@ public struct LatticeSetupWizard: View {
                 }
                 if model.densityMode.needsSimulation {
                     simDerivedNote("Each region graded from its own stress.")
-                        .accessibilityIdentifier("wizard-density-sim-note")
+                        .latticeID("wizard-density-sim-note")
                 }
                 if model.densityMode == .perRegion {
                     // ★ §8(e) — THE GAP, SURFACED. PR 331 landed the region layer
@@ -1836,7 +1839,7 @@ public struct LatticeSetupWizard: View {
                                 "Set each region's density in its drawer. Core still derives "
                                 + "density from the cell — these are saved, not yet run.",
                                 tint: DS.Color.warning.color)
-                        .accessibilityIdentifier("wizard-per-region-gap")
+                        .latticeID("wizard-per-region-gap")
                 }
                 // ★★★ ALLOW QUILT (his ruling, 2026-09-12) — octet only. Off, every
                 // density is held under the aesthetic ceiling (strut a fifth of the
@@ -1850,7 +1853,7 @@ public struct LatticeSetupWizard: View {
                             project.lattice.allowQuilt.toggle(); rebuild()
                         }
                         .accessibilityLabel("Allow quilt")
-                        .accessibilityIdentifier("wizard-allow-quilt")
+                        .latticeID("wizard-allow-quilt")
                     }
                     captionLine(project.lattice.allowQuilt ? "Manual densities may fuse the struts."
                                                            : "Densities stay under the fusing point.",
@@ -1879,7 +1882,7 @@ public struct LatticeSetupWizard: View {
                         .padding(16)
                         .frame(maxWidth: 300)
                 }
-                .accessibilityIdentifier("wizard-finish-row")
+                .latticeID("wizard-finish-row")
                 if model.finishLockedBySingleCell {
                     captionLine("Skin is required while single-cell members is on.",
                                 info: "finish-locked",
@@ -1887,14 +1890,14 @@ public struct LatticeSetupWizard: View {
                                 + "with no node to end on; the skin re-ties them. Turn off "
                                 + "single-cell members to change the finish.",
                                 tint: DS.Color.textQuaternary.color)
-                        .accessibilityIdentifier("wizard-finish-locked-note")
+                        .latticeID("wizard-finish-locked-note")
                 }
                 if model.boundary == .covered {
                     captionLine("A solid outer wall over the lattice.", info: "covered",
                                 "At the printer's own wall thickness. The lattice is still "
                                 + "there — just not on show.",
                                 tint: DS.Color.textQuaternary.color)
-                        .accessibilityIdentifier("wizard-covered-fact")
+                        .latticeID("wizard-covered-fact")
                 }
                 // ★ §10(b) — A STATED FACT, NOT A PICKER. Core implements exactly
                 // ONE skin, and the old "Skin pattern — Diagrid" readout looked
@@ -1904,7 +1907,7 @@ public struct LatticeSetupWizard: View {
                     captionLine("Skin pattern: Diagrid.", info: "skin",
                                 "The only skin pattern core builds.",
                                 tint: DS.Color.textQuaternary.color)
-                        .accessibilityIdentifier("wizard-skin-pattern-fact")
+                        .latticeID("wizard-skin-pattern-fact")
                 }
             }
         }
@@ -1950,7 +1953,7 @@ public struct LatticeSetupWizard: View {
                 .padding(.trailing, DS.Space.xs)
             }
             if let why = typeReason ?? stale {
-                shortNote(why).accessibilityIdentifier("wizard-type-reason")
+                shortNote(why).latticeID("wizard-type-reason")
             }
         }
     }
@@ -1983,7 +1986,7 @@ public struct LatticeSetupWizard: View {
                 rebuild()
             }
             .accessibilityLabel("Organic lattice")
-            .accessibilityIdentifier("wizard-type-organic")
+            .latticeID("wizard-type-organic")
         }
         .padding(.top, DS.Space.xs)
     }
@@ -2043,7 +2046,7 @@ public struct LatticeSetupWizard: View {
         .buttonStyle(.plain)
         .disabled(inert)
         .accessibilityHint(e.reason ?? "")
-        .accessibilityIdentifier("wizard-type-\(e.id)")
+        .latticeID("wizard-type-\(e.id)")
     }
     /// One type chip's look — the app's own view, so the evidence renders exactly it.
     static func typeChipLabel(_ name: String, on: Bool, greyed: Bool) -> some View {
@@ -2082,7 +2085,7 @@ public struct LatticeSetupWizard: View {
             Text(warn)
                 .dsStyle(DS.TypeScale.caption)
                 .foregroundStyle(DS.Color.warning.color)
-                .accessibilityIdentifier("wizard-swept-narrow")
+                .latticeID("wizard-swept-narrow")
         }
     }
 
@@ -2242,7 +2245,7 @@ public struct LatticeSetupWizard: View {
                         .frame(minHeight: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityIdentifier("lattice-cells-save")
+                .latticeID("lattice-cells-save")
             }
             if !c.regions.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -2257,7 +2260,7 @@ public struct LatticeSetupWizard: View {
                                     .frame(minHeight: 44).contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            .accessibilityIdentifier("lattice-cells-tab-\(i)")
+                            .latticeID("lattice-cells-tab-\(i)")
                         }
                     }
                 }
@@ -2309,7 +2312,7 @@ public struct LatticeSetupWizard: View {
                                 }
                                 .buttonStyle(.plain)
                                 .disabled(off)
-                                .accessibilityIdentifier("lattice-cells-along-\(a.rawValue)")
+                                .latticeID("lattice-cells-along-\(a.rawValue)")
                             }
                         }
                     case .strength:
@@ -2321,7 +2324,7 @@ public struct LatticeSetupWizard: View {
                         shortNote(LatticeCellsRow.overhangsLine)
                     }
                 }
-                .accessibilityIdentifier("lattice-cells-row-\(row.rawValue)")
+                .latticeID("lattice-cells-row-\(row.rawValue)")
             }
         }
     }
@@ -2342,7 +2345,7 @@ public struct LatticeSetupWizard: View {
                 guard let v else { return }
                 write(v / 100)
             }
-            .accessibilityIdentifier(key)
+            .latticeID(key)
     }
 
     // MARK: the moves
@@ -2390,7 +2393,7 @@ public struct LatticeSetupWizard: View {
                 guard let v else { return }
                 set(Swift.min(range.upperBound, Swift.max(range.lowerBound, v)))
             }
-            .accessibilityIdentifier("wizard-field-\(id)")
+            .latticeID("wizard-field-\(id)")
     }
 
     private func segmentRow(_ names: [String], selected: Int,
@@ -2415,7 +2418,7 @@ public struct LatticeSetupWizard: View {
                 .background(RoundedRectangle(cornerRadius: DS.Radius.pill).fill(fill))
         }
         .buttonStyle(.plain)
-        .accessibilityIdentifier("wizard-seg-\(name.lowercased())")
+        .latticeID("wizard-seg-\(name.lowercased())")
     }
 }
 
