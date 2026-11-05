@@ -39,6 +39,7 @@ public struct LibraryRootView: View {
     @State private var quickLook: UUID?
     @State private var quickLookResult: Int?   // B5: the result a tile opened it on (nil = the version's shown one)
     @State private var compare: LibraryCompareRequest?
+    @ObservedObject private var appSettings = AppSettings.shared   // ★ B5 (Q12): the accent the app wears
 
     public init(model: AppModel) {
         self.model = model
@@ -79,6 +80,9 @@ public struct LibraryRootView: View {
                     .transition(.opacity).zIndex(4)
             }
         }
+        // ★ B5 (Q12, Accent (a)): Settings closed on a new accent — the Library redraws whole in it (its route lives on the
+        // Library model, so nothing he had open is lost)
+        .id(appSettings.appliedAccent)
         .background(DS.Color.background.color.ignoresSafeArea())
         .foregroundStyle(DS.Color.textPrimary.color)
         .onAppear {
@@ -410,7 +414,7 @@ struct LibraryHomeView: View {
             .padding(.top, 34)
             .padding(.bottom, 60)
         }
-        .sheet(isPresented: $settingsOpen) {
+        .sheet(isPresented: $settingsOpen, onDismiss: { AppSettings.shared.applyAccent() }) {
             AppSettingsView(settings: AppSettings.shared, projection: ViewProjection.shared, compute: compute,
                             storage: { settingsOpen = false; go(.storage) }, done: { settingsOpen = false })
         }
@@ -633,8 +637,10 @@ struct ProjectFolderView: View {
 
     @State private var portrait = false
 
-    /// The note under the grid (mockup #lib-project, word for word).
-    static let note = "A part with nothing picked shows its original model. A picked result gets the blue ring."
+    /// The note under the grid (mockup #lib-project, word for word). ★ B5 (Q12): the ring is his accent, so it names that.
+    static var note: String {
+        "A part with nothing picked shows its original model. A picked result gets the \(AppSettings.shared.appliedAccent.name) ring."
+    }
 
     /// mockup .grid: 3 across (2 in portrait), 18 pt apart
     private var columns: [GridItem] { Array(repeating: GridItem(.flexible(), spacing: DS.Space.xl), count: portrait ? 2 : 3) }

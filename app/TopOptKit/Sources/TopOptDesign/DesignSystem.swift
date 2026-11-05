@@ -89,8 +89,10 @@ public enum DS {
 
         // Accent — themeable; default `#0A84FF`, options from the design's
         // Appearance section (`accentColor.options`).
-        /// Default accent `#0A84FF`.
-        public static let accent = RGBA(hex: 0x0A84FF)
+        /// The accent: `#0A84FF` until he picks another in App Settings (★ B5, Q12, the reviewer's Accent (a): applied
+        /// when Settings closes). Set ONLY by `AppSettings.applyAccent()`, on the main thread; every view reads it as it
+        /// draws, so never copy it into a `static let`.
+        public static var accent = RGBA(hex: 0x0A84FF)
         /// ★ THE STAGE-NAVIGATION BLUE `#004080` — deliberately DARKER than
         /// `accent` (task 2026-08-15-lattice-and-face-ui §4).
         ///

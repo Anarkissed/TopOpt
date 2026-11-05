@@ -12039,7 +12039,7 @@ public struct WorkspacePlaceholder: View {
         // The value is shown/entered in the CURRENT unit (kg or lbs); the pad emits in
         // that unit and we convert back to kg on the way into the model, so typing a
         // number never silently changes the unit.
-        let shown = force.unit == .kg ? kg : kg * ForceModel.kgToLb
+        let shown = force.unit.fromKg(kg)
         Text(force.formattedWeight(kg: kg))
             .font(.system(size: 14, weight: .heavy)).tracking(-0.2)
             .foregroundStyle(g.color.color)
@@ -12065,7 +12065,7 @@ public struct WorkspacePlaceholder: View {
                        config: .init(title: "Weight", unit: force.unit.label, allowsDecimal: true),
                        seed: shown) { v in
                 if let v, v > 0 {
-                    force.setWeight(g.id, kg: force.unit == .kg ? v : v / ForceModel.kgToLb)
+                    force.setWeight(g.id, kg: force.unit.toKg(v))
                 }
             }
     }
@@ -12928,7 +12928,7 @@ extension WorkspacePlaceholder {
             ComputeLocationControl(compute: compute, asValueBox: true)
                 .background(CornerPairStyle.publish("settingsRunsOn"))
         case .units:
-            // ★ T3 (U9): [kg │ lb]
+            // ★ T3 (U9): [kg │ lb │ N] (★ B5, Q12 Units (a): N, display only)
             SegmentedGlass(WeightUnit.allCases.map { .init($0, $0.label) },
                            selection: Binding(get: { force.unit }, set: { force.unit = $0 }), small: true)
                 .background(CornerPairStyle.publish("settingsUnits"))
@@ -13273,10 +13273,10 @@ extension WorkspacePlaceholder {
                 Text("Weight").dsStyle(DS.TypeScale.caption).fontWeight(.bold).foregroundStyle(DS.Color.textPrimary.color)
                 Spacer(minLength: DS.Space.s)
                 NumberField(key: "loadWeight-\(g.id.uuidString)", title: "Weight",
-                            spec: FlexNumberSpec(value: force.unit == .kg ? kg : kg * ForceModel.kgToLb, unit: force.unit.label,
-                                                 step: 0.5, range: 0 ... 100_000, decimals: 1),
+                            spec: FlexNumberSpec(value: force.unit.fromKg(kg), unit: force.unit.label,
+                                                 step: force.unit.boxStep, range: 0 ... 100_000, decimals: force.unit.boxDecimals),
                             padRange: NumberRange(0, nil)) { v in
-                    if v > 0 { force.setWeight(g.id, kg: force.unit == .kg ? v : v / ForceModel.kgToLb) }
+                    if v > 0 { force.setWeight(g.id, kg: force.unit.toKg(v)) }
                 }
             }
             .frame(minHeight: 44)

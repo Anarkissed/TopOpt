@@ -207,6 +207,7 @@ public final class AppModel: ObservableObject {
     ) {
         // ★ Before any bridge run: core's receipts name the core this app links (#358).
         CoreBuildIdentity.state()
+        _ = AppSettings.shared   // ★ B5 (Q12): the app wears his accent from the first draw
         self.materialsPath = materialsPath
         self.rulesPath = rulesPath
         // ★ The wizard's organic sample solves the PR 353 cube with the app's own FEA
