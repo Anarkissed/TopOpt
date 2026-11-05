@@ -17,7 +17,9 @@
 //    control that the filter works).
 // §4 "Lattice an optimized result" (lattice_variant) on §2's stored run: latticed
 //    again, not refused, the heavy scenario governing.
-// §5 "Lattice the original part" (lattice_part): the heavy scenario governs.
+// §5 "Lattice the original part" (lattice_part) on a top-face layer: the heavy scenario
+//    governs, with a finite margin.
+// Every section starts from an empty output folder (a stale receipt once passed §5).
 #include "topopt/job.hpp"
 #include "topopt/loadcase.hpp"
 #include "topopt/materials.hpp"
@@ -179,6 +181,7 @@ int main() {
   // ── §2 the run path ─────────────────────────────────────────────────────────
   {
     const std::string out = dir + "/lattice_scenarios_run";
+    std::filesystem::remove_all(out);
     std::ofstream(dir + "/lattice_scenarios_run.json") << job_json(f, "minimize_plastic", "", "");
     const JobDescription job = load_job_file(dir + "/lattice_scenarios_run.json");
     (void)run_job(job, dir, out, materials, rules, false, RunObservability{});
@@ -224,6 +227,7 @@ int main() {
   for (const bool light_only : {false, true}) {
     const std::string tag = light_only ? "light_only" : "both";
     const std::string out = dir + "/lattice_scenarios_an_" + tag;
+    std::filesystem::remove_all(out);
     std::ofstream(dir + "/lattice_scenarios_an.json")
         << job_json(f, "analyze", light_only ? ", \"scenarios\": [\"light down\"]" : "",
                     ", \"intent\": \"structural\"");
@@ -246,6 +250,7 @@ int main() {
   // under scenario 1 alone and refused as "not the one that produced this variant".
   {
     const std::string out = dir + "/lattice_scenarios_lv";
+    std::filesystem::remove_all(out);
     std::string j = job_json(f, "lattice_variant", "", "");
     j.insert(j.size() - 1, ", \"variant\": {\"design\": \"lattice_scenarios_run/design.bin\", "
                            "\"index\": 0}");
@@ -279,12 +284,25 @@ int main() {
   // ── §5 the lattice-part path ("Lattice the original part") ──────────────────
   {
     const std::string out = dir + "/lattice_scenarios_lp";
-    // A solid bar latticed whole seals its lattice inside, and its default diagrid skin
-    // finds nothing to dress; both refusals are other tests', so they are off here.
+    std::filesystem::remove_all(out);
+    // The lattice is a 6 mm layer under the top face, so the rest of the bar is solid and
+    // carries the certified margin. (Latticed whole, no voxel is solid: the certificate
+    // leaves latticed voxels out of the margin, so every scenario reads infinite and the
+    // first listed "governs" on the tie; the receipt flags strut_strength_uncertified.)
+    // A latticed layer seals its void inside, and its default diagrid skin finds nothing
+    // to dress; both refusals are other tests', so they are off here.
     // Growth off: with it on, lattice_part latticed the whole auto-derived growth box
-    // (reported to TO-core, 2026-11-04).
+    // (reported to TO-core, 2026-11-04; fixed in 49048743).
+    char top_layer[400];
+    std::snprintf(top_layer, sizeof(top_layer),
+                  ", \"regions\": [{\"role\": \"include\", \"kind\": \"face\", \"face_id\": %d, "
+                  "\"geometry\": {\"origin\": [30, 10, 20], \"normal\": [0, 0, -1], "
+                  "\"half_u_mm\": 30, \"half_w_mm\": 10, \"depth_mm\": 6}}]",
+                  f.top);
     std::string lp = job_json(f, "lattice_part",
-                              ", \"skin\": \"none\", \"require_lattice_void_reaches_exterior\": false", "");
+                              ", \"skin\": \"none\", \"require_lattice_void_reaches_exterior\": false" +
+                                  std::string(top_layer),
+                              "");
     lp.replace(lp.find("\"minimize_plastic\": false"), std::string("\"minimize_plastic\": false").size(),
                "\"minimize_plastic\": true");
     std::ofstream(dir + "/lattice_scenarios_lp.json") << lp;
@@ -303,6 +321,9 @@ int main() {
     CHECK(r.find("\"graded_on\": [\"light down\", \"heavy side\"]") != std::string::npos &&
               r.find("\"governing\": \"heavy side\"") != std::string::npos,
           "§5 lattice_part: graded and certified on both, the heavy scenario governing");
+    CHECK(std::isfinite(num_after(r, "lattice_margin_effective")) &&
+              scenario_margin(r, "light down") > num_after(r, "lattice_margin_effective"),
+          "§5 its margin is the solid's, finite, and the light scenario's is above it");
     if (!r.empty())
       std::printf("[lattice-scenarios] lattice-part: lattice margin %.4f (light %.4f)\n",
                   num_after(r, "lattice_margin_effective"), scenario_margin(r, "light down"));
