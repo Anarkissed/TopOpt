@@ -46,6 +46,16 @@ final class ParityLatticeSetupShots: XCTestCase {
                     try h.tap("latticeFace-\(ref.key)", "the first face row again")
                 }
             }
+            // the Topology panel open, its first scenario open (mockup #lat-setup-topo-open)
+            if h.frames.all["latticeTopologyPanelHeader"] != nil {
+                try h.tap("latticeTopologyPanelHeader", "Topology's header")
+                if let s = p.force.scenarioList.first, h.frames.all["latticeTopoFolder-\(s.id.uuidString)"] != nil {
+                    try h.tap("latticeTopoFolder-\(s.id.uuidString)", "the first scenario")
+                }
+                h.pump(0.5)
+                try ParityTopologyShots.shot(h, "lat-setup-topo-open", name)
+                try h.tap("latticeTopologyPanelHeader", "Topology's header again")
+            }
             if h.frames.all["setupChip"] != nil {
                 try h.tap("setupChip", "Settings")
                 h.pump(0.5)
