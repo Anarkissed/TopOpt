@@ -182,6 +182,11 @@ public struct SelectionsList: View {
     /// ★ his ask: the list's height, set by dragging the grip under it (nil: as tall as its rows, up to the screen).
     /// No binding: no grip.
     var chosenHeight: Binding<CGFloat?>? = nil
+    /// ★ B6 s1b: a section heading the groups (nil: none).
+    var lead: AnyView? = nil
+    /// ★ B6 s1b (mockup #lat-setup-face-row): the selected look on the group's LINE only, and only while this says so (a
+    /// picked face row under it wears its own); nil: on the line and its rows together, as Topology's.
+    var lineLook: ((UUID) -> Bool)? = nil
     @Environment(\.selectionsListMaxHeight) private var maxHeight
     @State private var dragFrom: CGFloat? = nil
 
@@ -212,6 +217,15 @@ public struct SelectionsList: View {
     func latticeList() -> SelectionsList {
         var copy = self
         copy.usesLatticeList = true
+        return copy
+    }
+
+    /// ★ B6 s1b (design-system §4.3 "Body: sections, each with a 12 pt overline"): a section heading the groups (Lattice
+    /// Setup's "FACES N · + New group"), drawn under the header, empty list or not; and a disclosure on each group's line.
+    func latticeSections(lead: AnyView, isOpen: @escaping (UUID) -> Bool, toggleOpen: @escaping (UUID) -> Void,
+                         lineLook: @escaping (UUID) -> Bool) -> SelectionsList {
+        var copy = self
+        copy.lead = lead; copy.isOpen = isOpen; copy.toggleOpen = toggleOpen; copy.lineLook = lineLook
         return copy
     }
 
@@ -260,6 +274,7 @@ public struct SelectionsList: View {
             }
             if !collapsed {
                 Divider().overlay(DS.Color.strokeSubtle.color)
+                if let lead { lead }
                 if groups.isEmpty, folders == nil {
                     Text(SelectionsCopy.empty)
                         .font(.system(size: 13)).foregroundStyle(DS.Color.textTertiary.color)
@@ -367,12 +382,15 @@ public struct SelectionsList: View {
                     Color.clear.preference(key: SelectionsLineMidKey.self, value: [g.id: geo.frame(in: .named(Self.scrollSpace)).midY])
                 })
                 .background { if let folder { publish("selLine-\(folder.id.uuidString)-\(g.id.uuidString)") } }
+                // ★ B6 s1b: the line alone wears the look (Lattice Setup)
+                .modifier(SelectedRowLook(on: lineLook != nil && isPicked && lineLook?(g.id) == true,
+                                          outlineKey: "selOutline-\(g.id.uuidString)", oldBar: g.color))
             if deleteAsk == g.id, here, !DeleteConfirm.controlOldHeaderLine { deleteConfirm(g) }
             if isPicked || (isOpen?(g.id) == true && here) { rows(g) }
         }
         // ★ B2 (round 1, R2.3 / R4, design-system §4.4): a selected row reads as selected at a glance — the fill, the 3 pt
         // accent bar and a 1.5 pt accent outline inset 4 pt; every row is its own line, a hairline under it
-        .modifier(SelectedRowLook(on: isPicked, outlineKey: "selOutline-\(g.id.uuidString)", oldBar: g.color))
+        .modifier(SelectedRowLook(on: lineLook == nil && isPicked, outlineKey: "selOutline-\(g.id.uuidString)", oldBar: g.color))
         .overlay(alignment: .bottom) {
             Rectangle().fill(DS.Color.strokeSubtle.color).frame(height: 1).allowsHitTesting(false)
         }

@@ -107,6 +107,9 @@ public struct WorkspacePlaceholder: View {
     /// The gate for popping them open — not `lattice.enabled`, which is true for any
     /// project configured on a previous run and so never opened them again.
     @State private var latticeSettingsSavedThisSession = false
+    /// ★ B6 s1b (note 28, N2): the face row opened on Lattice Setup (its key), and the lattice groups opened by their disclosure.
+    @State private var latticeFacePick: String?
+    @State private var latticeOpenGroups: Set<UUID> = []
     @StateObject private var flexibleMain = FlexibleMainStage()   // Flexible (PR #362): the ONE Flexible model per project + the main page's lattice (FlexibleMainStage.swift)
     @State private var strutScene: LatticeSDFScene? = nil
     @State private var strutSceneToken = 0
@@ -10657,24 +10660,7 @@ public struct WorkspacePlaceholder: View {
         }
         return Button {
             guard !on else { return }   // it already says this; a re-tap is a no-op
-            // The declaring tap PINS this primitive's siblings to whatever they
-            // resolved to a moment ago, so setting one face never moves another.
-            LatticeSelectableRoles.declare(
-                role, for: ref, siblings: project.latticeSelectableRefs(g),
-                groupRole: project.latticeEligibleRoles()[g.id],
-                in: &project.lattice.selectableRoles)
-            // The group must carry a role for the eligibility gate to let ANY of
-            // its primitives through (§1a), and a primitive saying "lattice here"
-            // is the declaration that turns the mode on. Both, from the one tap.
-            if role != .off, project.lattice.groupRoles[g.id] == nil {
-                project.lattice.groupRoles[g.id] = role.regionRole
-                if project.lattice.groupDepthMM[g.id] == nil {
-                    project.lattice.groupDepthMM[g.id] =
-                        LatticeSlabDepth.clamp(project.lattice.paintDepthMM)
-                }
-            }
-            if role == .include { project.lattice.enabled = true }
-            refreshLatticeFaceCards()
+            declareLatticeRole(role, ref, in: g)
         } label: {
             Text(label)
                 .font(.system(size: 10, weight: .bold))
@@ -10688,6 +10674,167 @@ public struct WorkspacePlaceholder: View {
         .buttonStyle(.plain)
         .accessibilityLabel("\(label)\(on ? " — on, tap to clear" : "")")
         .accessibilityIdentifier("lattice-role-\(role.rawValue)-\(ref.key)")
+    }
+
+    /// One selectable's own Lattice / Solid / Off — the per-face chip's tap and (B6 s1b) the open face row's role.
+    private func declareLatticeRole(_ role: LatticeSelectableRole, _ ref: LatticeSelectableRef, in g: SelectionGroup) {
+        // The declaring tap PINS this primitive's siblings to whatever they
+        // resolved to a moment ago, so setting one face never moves another.
+        LatticeSelectableRoles.declare(
+            role, for: ref, siblings: project.latticeSelectableRefs(g),
+            groupRole: project.latticeEligibleRoles()[g.id],
+            in: &project.lattice.selectableRoles)
+        // The group must carry a role for the eligibility gate to let ANY of
+        // its primitives through (§1a), and a primitive saying "lattice here"
+        // is the declaration that turns the mode on. Both, from the one tap.
+        if role != .off, project.lattice.groupRoles[g.id] == nil {
+            project.lattice.groupRoles[g.id] = role.regionRole
+            if project.lattice.groupDepthMM[g.id] == nil {
+                project.lattice.groupDepthMM[g.id] =
+                    LatticeSlabDepth.clamp(project.lattice.paintDepthMM)
+            }
+        }
+        if role == .include { project.lattice.enabled = true }
+        refreshLatticeFaceCards()
+    }
+
+    // MARK: B6 s1b — Lattice Setup's Selections rows (§4.3 / §4.4)
+
+    /// ★ B6 s1b (design-system §4.3, mockup #lat-setup): the Faces section heading the groups — "FACES N" and "+ New group"
+    /// (the next tap starts a new lattice group).
+    private var latticeFacesSection: some View {
+        DSPanelSection(LatticeSetupCopy.faces, count: stageList.groups.count, key: "latticeFacesSection",
+                       action: (LatticeSetupCopy.newGroup, {
+                           leaveGroupEditing()
+                           model.toast = LatticeSetupCopy.newGroupToast
+                       }))
+    }
+
+    /// ★ B6 s1b (§4.4, mockup "12–31 mm deep"): a lattice group's one value — how deep its faces lattice.
+    private func latticeGroupValue(_ g: SelectionGroup) -> String {
+        let depths = project.latticeSelectableRefs(g).filter { project.latticeSelectableRole($0, in: g.id) != nil }
+            .map { project.latticeSlabDepthMM($0, in: g.id) }
+        guard let lo = depths.min(), let hi = depths.max() else { return "\u{2014}" }
+        return LatticeSetupCopy.deep(lo: lo, hi: hi)
+    }
+
+    /// ★ B6 s1b (note 28, R2.3 / R4): an open lattice group — one full-size row per face, then the group's Role, then what the
+    /// lattice says about it (its diagnosis line). Keep clear and Protect are Topology's (its panel comes in B6 s2).
+    @ViewBuilder private func latticeGroupRows(_ g: SelectionGroup) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let b = latticeRoleBlock(g) {
+                // ★ SAY WHY, IN FIVE WORDS (R7): a blocked group's one line
+                Text(b.reason).font(.system(size: 12.5)).foregroundStyle(DS.Color.warning.color).lineLimit(1)
+                    .padding(.leading, DSParts.faceIndent).padding(.vertical, 10)
+            } else {
+                ForEach(project.latticeSelectableRefs(g), id: \.key) { ref in latticeFaceRow(g, ref) }
+                latticeRoleRow(g)
+                latticeDiagnosisBadge(g).padding(.horizontal, 14).padding(.bottom, 6)
+            }
+        }
+    }
+
+    /// ★ B6 s1b (note 28, §4.4 "Face row"): one face — its name, "also in Top" (note 22), its depth, its trash. A tap opens
+    /// it a little (N2): the depth becomes the number field (tap to type, drag) and the face's own role.
+    @ViewBuilder private func latticeFaceRow(_ g: SelectionGroup, _ ref: LatticeSelectableRef) -> some View {
+        let role = project.latticeSelectableRole(ref, in: g.id)
+        let picked = latticeFacePick == ref.key
+        let depth = project.latticeSlabDepthMM(ref, in: g.id)
+        let mm = SelectionsSummary.format((depth * 10).rounded() / 10, decimals: 1) + " mm"
+        let value = role == nil ? LatticeSetupCopy.off : role == .exclude ? "\(LatticeSetupCopy.noLattice) \u{00B7} \(mm)" : mm
+        // ★ THE ONE HONEST DIFFERENCE (the interrupt's §3): a region the run freezes without latticing says so
+        let frozen = !project.latticeReachesTheRun(ref) && role != nil
+        let removable: Bool = { if case .primitive = ref { return false }; return true }()
+        VStack(alignment: .leading, spacing: 0) {
+            DSRow(.face, key: "latticeFace-\(ref.key)", name: project.latticeSelectableName(ref), value: picked ? nil : value,
+                  selected: picked, tag: latticeAlsoIn(ref, g),
+                  line: frozen ? DSRowLine(LatticeSectorOutline.notLatticedWords(protected: force.isProtected(g.id)), tone: .warning) : nil,
+                  tap: { latticeFacePick = picked ? nil : ref.key }) {
+                if picked {
+                    NumberField(key: "latticeFaceDepth-\(ref.key)", title: "Depth",
+                                spec: FlexNumberSpec(value: depth, unit: "mm", step: 0.5,
+                                                     range: LatticeSlabDepth.minMM ... LatticeSlabDepth.maxMM, decimals: 1),
+                                size: .withHandle) { v in
+                        project.writeLatticeDepthMM(ref, mm: v)
+                        refreshLatticeFaceCards()
+                    }
+                }
+                if removable {
+                    DSRowTrash(key: "latticeFaceTrash-\(ref.key)") { removeLatticeFace(g, ref) }
+                }
+            }
+            if picked {
+                HStack(spacing: DS.Space.s) {
+                    Text(LatticeSetupCopy.thisFace).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
+                    Spacer(minLength: DS.Space.s)
+                    SegmentedGlass([.init(LatticeGroupRole?.some(.include), LatticeSetupCopy.lattice),
+                                    .init(LatticeGroupRole?.some(.exclude), LatticeSetupCopy.noLattice)],
+                                   selection: Binding(get: { role },
+                                                      set: { if let r = $0 { declareLatticeRole(r == .include ? .include : .exclude, ref, in: g) } }),
+                                   small: true)
+                        .background(DSParts.publish("latticeFaceRole-\(ref.key)"))
+                }
+                .padding(.leading, DSParts.faceIndent).padding(.trailing, 12).frame(minHeight: 44)
+                if let rid = ref.regionID { latticeRegionFaceChildren(rid).padding(.leading, DSParts.faceIndent) }
+            }
+        }
+        // ★ R14 — PR 331's small-face policy: below the sliver floor a row is dimmed, never hidden
+        .opacity(latticeRowIsBelowTheSmallFaceFloor(ref) ? 0.55 : 1)
+    }
+
+    /// ★ B6 s1b (mockup "Role  [Lattice │ No lattice]"): the group's role — every face without its own follows it. The lock
+    /// stays the group's (it was on today's tall row).
+    private func latticeRoleRow(_ g: SelectionGroup) -> some View {
+        HStack(spacing: DS.Space.s) {
+            Text(LatticeSetupCopy.role).font(.system(size: 13.5)).foregroundStyle(DS.Color.textPrimary.color)
+            Spacer(minLength: DS.Space.s)
+            SegmentedGlass([.init(LatticeGroupRole?.some(.include), LatticeSetupCopy.lattice),
+                            .init(LatticeGroupRole?.some(.exclude), LatticeSetupCopy.noLattice)],
+                           selection: Binding(get: { project.lattice.groupRoles[g.id] },
+                                              set: { if let r = $0 { setLatticeGroupRole(r, g) } }),
+                           small: true)
+            groupLockToggle(g)
+        }
+        .padding(.leading, 14).padding(.trailing, 10).frame(minHeight: 44)
+        .background(DSParts.publish("latticeRoleRow-\(g.id.uuidString)"))
+    }
+
+    /// The group's role, for every face of it: a face's own Lattice / No lattice gives way to it (its Off stays).
+    private func setLatticeGroupRole(_ role: LatticeGroupRole, _ g: SelectionGroup) {
+        project.lattice.groupRoles[g.id] = role
+        for ref in project.latticeSelectableRefs(g) where project.lattice.selectableRoles[ref.key] != .off {
+            project.lattice.selectableRoles[ref.key] = nil
+        }
+        if project.lattice.groupDepthMM[g.id] == nil {
+            project.lattice.groupDepthMM[g.id] = LatticeSlabDepth.clamp(project.lattice.paintDepthMM)
+        }
+        if role == .include { project.lattice.enabled = true }
+        refreshLatticeFaceCards()
+    }
+
+    /// Note 22's tag: the other group that holds this face too — Topology's first, else another lattice group.
+    private func latticeAlsoIn(_ ref: LatticeSelectableRef, _ g: SelectionGroup) -> String? {
+        guard case let .face(_, f) = ref else { return nil }
+        let other = project.selection.groups.first { $0.id != g.id && $0.faces.contains(f) }
+            ?? stageList.groups.first { $0.id != g.id && $0.faces.contains(f) }
+        return other.map { LatticeSetupCopy.alsoIn($0.name) }
+    }
+
+    /// ★ B6 s1b (§4.4: a face row's trash): the face leaves this lattice group — never its Topology group. Undo (top left)
+    /// brings it back (the lattice list is in the undo slice).
+    private func removeLatticeFace(_ g: SelectionGroup, _ ref: LatticeSelectableRef) {
+        var l = stageList
+        switch ref {
+        case let .face(_, f): l.removeFaces([f], from: g.id)
+        case let .region(_, rid): l.setRegions(g.regionIDs.filter { $0 != rid }, for: g.id)
+        case .primitive: return
+        }
+        stageList = l
+        project.lattice.selectableRoles[ref.key] = nil
+        if latticeFacePick == ref.key { latticeFacePick = nil }
+        project.syncForceGroups()
+        refreshLatticeFaceCards()
+        model.toast = LatticeSetupCopy.removed(project.latticeSelectableName(ref))
     }
 
     /// Drag the drawer's depth number. It writes the GROUP's depth, which every
@@ -13578,7 +13725,7 @@ extension WorkspacePlaceholder {
 
     /// The groups that lattice something (an include in them): the Cells page's tabs, the change-type card's count.
     var latticeRegionTabNames: [String] {
-        selection.groups.filter { g in
+        project.latticeGroups.filter { g in   // ★ B6 s1b (#362's seam, 11-05): the Lattice stage's own groups
             project.latticeSelectableRefs(g).contains { project.latticeSelectableRole($0, in: g.id) == .include }
         }.map(\.name)
     }
@@ -13769,15 +13916,17 @@ extension WorkspacePlaceholder {
                            cancelDelete: { topoDeleteAsk = nil },
                            noteFrame: { chromeGeometry.noteSelections($0) },
                            idPrefix: "lattice",
-                           rows: { g in AnyView(groupRow(g, inList: true)) },
-                           summary: { g in
-                               let s = SelectionsSummary.summary(project: project, group: g)
-                               return s == "\u{2014}" ? topologyGroupSummary(g) : s
-                           },
+                           rows: { g in AnyView(latticeGroupRows(g)) },   // ★ B6 s1b (note 28): one full-size row per face
+                           summary: { g in latticeGroupValue(g) },        // ★ B6 s1b: "12–31 mm deep"
                            isHidden: { project.groupView.isHidden($0) },
                            toggleEye: { toggleTopologyEye($0) },
                            ask: TopologySelectionsCopy.deleteAsk)
                 .latticeList()   // ★ B6 (notes 22, 23): the Lattice stage's own groups
+                // ★ B6 s1b (§4.3, mockup #lat-setup): "FACES N · + New group" heads the groups; a disclosure on each line
+                .latticeSections(lead: AnyView(latticeFacesSection),
+                                 isOpen: { latticeOpenGroups.contains($0) },
+                                 toggleOpen: { id in if latticeOpenGroups.contains(id) { latticeOpenGroups.remove(id) } else { latticeOpenGroups.insert(id) } },
+                                 lineLook: { _ in latticeFacePick == nil })   // a picked face row wears the look itself
             if !selectionsCollapsed {
                 // ★ B8 (his answer 2026-10-24): Grade lives ONLY on the Cells page — no Grade pair here.
                 HStack(spacing: DS.Space.s) {
