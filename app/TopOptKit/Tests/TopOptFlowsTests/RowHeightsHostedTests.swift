@@ -26,7 +26,14 @@ final class RowHeightsHostedTests: XCTestCase {
                 h.pump(3)
                 if lattice { try h.pickFromMenu("capsuleMenu", "Structural", what: "\(size): the stage menu") }
                 let what = "\(size) \(lattice ? "Lattice" : "Topology")"
-                for g in p.selection.groups {
+                // ★ RE-PINNED (UI-Notes B6 slice 1, 7e4f0b53 — notes 22, 23): the Lattice stage lists its OWN groups, so a tap
+                // there makes one (Topology's groups are its Topology panel's, B6)
+                if lattice, let f = p.selection.groups.first?.faces.first {
+                    _ = p.latticeStageTap(face: f, loop: [f])
+                    h.pump(1)
+                    XCTAssertFalse(p.latticeGroups.isEmpty, "\(what): premise — a lattice group")
+                }
+                for g in lattice ? p.latticeGroups : p.selection.groups {
                     let row = try h.onScreen("selGroup-\(g.id.uuidString)", "\(what): \(g.name)'s row")
                     XCTAssertEqual(row.height, 48, accuracy: 0.5, "\(what): ★ U3 — a group row is 48 pt")
                 }

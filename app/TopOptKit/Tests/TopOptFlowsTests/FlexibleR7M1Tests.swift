@@ -116,6 +116,10 @@ final class FlexibleR7M1Tests: XCTestCase {
             + "            // there it is the column's one chip (greyed on STEP, `EditFacesPaint`), and on no stage outside it.\n"
             + "            if editFaces.isEditing { return id == .paint && viewerMesh != nil }\n"
             + "            if stage == .topology { return false }\n"
+            // ★ RE-PINNED (UI-Notes B6 s1, his note 21): the Lattice stage's chips are its Settings rows too
+            + "            // ★ B6 s1 (note 21): on the Lattice stage the chips are the Settings panel's rows; the band chips' Show / Hide stays\n"
+            + "            // (the lattice-only view's own, not one of the chips his note moves)\n"
+            + "            if stage == .lattice { return id == .bandChips && bandChipsAvailable }\n"
         XCTAssertEqual(ws.components(separatedBy: "SettingsChipID.allCases.filter { id in\n" + filter354 + "            switch id {").count - 1, 1,
                        "★ H18 is gone: the filter's first statement is #354's switch")
         XCTAssertTrue(ws.contains("if force.gravityIsSet, !flexibleMain.owns(project, stage) { bottomRightControls }   // Flexible (PR #362) H24:"),

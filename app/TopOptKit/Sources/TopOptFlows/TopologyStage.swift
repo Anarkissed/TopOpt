@@ -246,12 +246,17 @@ extension ProjectModel {
     /// The removal itself is today's `removeGroup` (selection, its kind, the force sync, its view state).
     @discardableResult
     public func trashGroup(_ id: UUID) -> TrashedGroup? {
-        guard let g = selection.groups.first(where: { $0.id == id }), groupView.canEdit(id) else { return nil }
+        // ★ B6: from every stage — Topology's list and the Lattice stage's (a migrated lattice group shares its twin's id)
+        let inLattice = usesLatticeList && lattice.latticeList?.groups.contains(where: { $0.id == id }) == true
+        guard let g = selection.groups.first(where: { $0.id == id })
+                ?? (inLattice ? lattice.latticeList?.groups.first(where: { $0.id == id }) : nil),
+              groupView.canEdit(id) else { return nil }
         let hidden = groupView.isHidden(id), locked = groupView.isLocked(id)
         sealUndoStep()
         selection.remove(id)
+        if inLattice { lattice.latticeList?.remove(id) }
         force.clearKind(id)
-        force.sync(groups: selection.groups)
+        syncForceGroups()
         groupView.forget(id)
         sealUndoStep()
         return TrashedGroup(id: id, name: g.name, wasHidden: hidden, wasLocked: locked, after: editSnapshot)
@@ -305,7 +310,7 @@ extension ProjectModel {
         selection.joinFaces(faces, to: target)   // Flexible (PR #362) H55d: several roles on one face (owner 2026-10-25) — the faces keep the other groups they are in (was addFaces, which took them out)
         selection.remove(pending)
         force.clearKind(pending)
-        force.sync(groups: selection.groups)
+        syncForceGroups()   // ★ B6: a lattice group's state stays
         groupView.forget(pending)
         selection.setActive(target)
         return nil   // Flexible (PR #362) H55d: several roles on one face (owner 2026-10-25)

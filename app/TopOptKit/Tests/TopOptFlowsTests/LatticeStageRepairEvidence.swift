@@ -496,9 +496,13 @@ final class LatticeAutoDensityIsDerivedTests: XCTestCase {
     func testTheDeclaredDensityIsCarriedOnTheShippingCardList() {
         let p = ProjectModel(id: UUID(), name: "D", material: "PLA",
                              process: .fdm, importedFile: nil, importedMesh: nil)
-        p.selection.addGroup()
-        p.selection.pickFaces([1])
-        let gid = p.selection.groups[0].id
+        // ★ RE-PINNED (UI-Notes B6 slice 1, 7e4f0b53 — notes 22, 23): the group is the Lattice stage's own (its list), as a tap
+        // there makes it; a Topology group with a lattice role and no Topology role is one today's run drops (the migration
+        // keeps it dropped), so it draws no card either
+        var list = p.latticeList
+        let gid = list.addGroup()
+        list.addFaces([1], to: gid)
+        p.latticeList = list
         p.lattice.enabled = true
         p.lattice.groupRoles[gid] = .include
         p.printParams.strutLineWidthMM = Self.w

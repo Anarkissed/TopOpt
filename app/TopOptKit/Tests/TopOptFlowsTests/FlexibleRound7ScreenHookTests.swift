@@ -121,11 +121,10 @@ final class FlexibleRound7ScreenHookTests: XCTestCase {
             + "                // ★ B3 (A1): Topology's bar is the CORNER PAIR — the Setup chip (iPad | Mac, Print\n"
             + "                // parameters and the chip column, as rows) and the Optimize split button.\n"
             + "                AnyView(topologyCornerPair)   // Flexible (PR #362) H57\n"
+            // ★ RE-PINNED (UI-Notes B6 s1, his note 21): the Lattice stage's bar is Topology's corner pair too
             + "            } else if !editFaces.isEditing, stage == .lattice {\n"
-            + "                // ★ B4: the lattice split — Lattice, and ⌃ for its steps (Preview → Core → Export)\n"
-            + "                ComputeLocationControl(compute: compute)\n"
-            + "                printParamsButton\n"
-            + "                latticeSplit\n"
+            + "                // ★ B6 s1 (note 21): Topology's corner — [Settings ⌄] [Lattice] [⌃]; iPad and Print Parameters are Settings rows\n"
+            + "                AnyView(latticeCornerPair)\n"
             + "            } else {"
         let between = chain354 + "\n            ComputeLocationControl(compute: compute)\n            printParamsButton\n"
             + "            // ★ LATTICE, TO THE LEFT OF OPTIMIZE (maintainer, 2026-08-17: \"Make\n"
@@ -227,6 +226,10 @@ final class FlexibleRound7ScreenHookTests: XCTestCase {
             + "            // there it is the column's one chip (greyed on STEP, `EditFacesPaint`), and on no stage outside it.\n"
             + "            if editFaces.isEditing { return id == .paint && viewerMesh != nil }\n"
             + "            if stage == .topology { return false }\n"
+            // ★ RE-PINNED (UI-Notes B6 s1, his note 21): the Lattice stage's chips are its Settings rows too
+            + "            // ★ B6 s1 (note 21): on the Lattice stage the chips are the Settings panel's rows; the band chips' Show / Hide stays\n"
+            + "            // (the lattice-only view's own, not one of the chips his note moves)\n"
+            + "            if stage == .lattice { return id == .bandChips && bandChipsAvailable }\n"
         // (this test reads FlexibleSource.code: comments cut at `//`, so #354's two comment lines are their indent)
         let filter354Code = filter354.split(separator: "\n", omittingEmptySubsequences: false)
             .map { l in l.range(of: "//").map { String(l[..<$0.lowerBound]) } ?? String(l) }.joined(separator: "\n")

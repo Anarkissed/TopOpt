@@ -151,6 +151,31 @@ public enum LatticeStageCopy {
     }
 }
 
+/// ★ B6 s1 (his go 11-05; ledger note 21, app-map §3.6, mockup #lat-setup / #lat-corner): the Lattice Setup corner's and hint's
+/// words — the corner is Topology's, [Settings ⌄] [Lattice] [⌃].
+public enum LatticeSetupCopy {
+    /// design-system §5's short form, while taps make lattice groups (mockup #lat-setup).
+    public static let hint = "Tap a face to lattice it \u{00B7} drag to turn"
+    /// Lattice, grey: nothing saved on the Lattice page yet (§4.6, ≤ 5 words).
+    public static let saveFirst = "Save a lattice first"
+    /// The fix line just above the corner (§4.18, N4) and its one tap.
+    public static let noSettings = "No lattice settings yet"
+    public static let openLattice = "Open Lattice"
+    /// ⌃'s five (note 21), in its order; Optimize, then lattice is `TopologyRunCopy.optimizeThenLattice`.
+    public static let original = "Lattice the original part"
+    public static let optimizedResult = "Lattice an optimized result"
+    public static let previewOnly = "Preview only"
+    public static let export = "Export\u{2026}"
+    /// Under "Lattice an optimized result" with no results yet.
+    public static let noResults = "Optimize first"
+    /// Lattice while its run goes (Topology's "Optimizing" rule).
+    public static let running = "Latticing"
+    /// The ready line: "Octet · 2 groups" (the mockup's "Octet · 1 group · 1 zone"; zones come with B6's zones slice).
+    public static func ready(type: String, groups: Int) -> String {
+        "\(type) \u{00B7} \(groups) group\(groups == 1 ? "" : "s")"
+    }
+}
+
 // MARK: - "Change lattice type…" (three ways)
 
 /// ★ B3: "Delete lattice stage" asks with the clear-all confirm (design-system §4.29: it clears the whole lattice), its yes apart
@@ -228,6 +253,7 @@ extension LatticeSettings {
         k.paintedIncludeFaces = paintedIncludeFaces
         k.paintDepthMM = paintDepthMM
         k.groupRoles = groupRoles
+        k.latticeList = latticeList   // ★ B6: the lattice groups are where the lattice goes
         k.groupDepthMM = groupDepthMM
         k.selectableRoles = selectableRoles
         k.selectableDepthMM = selectableDepthMM

@@ -433,7 +433,7 @@ extension ProjectModel {
     func latticeEmittedRegionMembers(_ gid: UUID, _ rid: RegionID) -> [FaceID]? {
         guard let members = latticeRegionMembers(rid) else { return nil }
         guard let r = faceRegions.region(rid), faceRegions.region(r.parentID) != nil,
-              let g = selection.groups.first(where: { $0.id == gid }) else { return members }
+              let g = latticeGroups.first(where: { $0.id == gid }) else { return members }   // ★ B6
         let groupRole = latticeEligibleRoles()[gid]
         func role(_ id: RegionID) -> LatticeGroupRole? {
             LatticeSelectableRoles.role(for: .region(group: gid, region: id), groupRole: groupRole,
@@ -532,7 +532,7 @@ extension ProjectModel {
         // each face resolved once per call (a grid split puts many pieces on one face); its facets
         // only when it is not a plane
         var byFace: [FaceID: (resolved: LatticeRegionEmission.ResolvedFace?, facets: [LatticeRegionEmission.ResolvedFace])] = [:]
-        for g in selection.groups where lattice.groupRoles[g.id] != nil {
+        for g in latticeGroups where lattice.groupRoles[g.id] != nil {   // ★ B6
             for ref in latticeSelectableRefs(g) {
                 guard case let .region(_, rid) = ref, let r = faceRegions.region(rid), !r.cuts.isEmpty,
                       let f = latticeCardFace(ref, in: g) else { continue }
