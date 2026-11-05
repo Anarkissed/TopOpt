@@ -17,6 +17,10 @@ final class LatticeRunSpecSharedTests: XCTestCase {
     }()
     private static func core(_ rel: String) -> String { repoRoot.appendingPathComponent("core/\(rel)").path }
 
+    override func tearDownWithError() throws {
+        XCTAssertEqual(FixtureSidecars.strays(), [], "a sidecar beside a fixture")
+    }
+
     /// THE STAGE'S RECIPE AS IT SHIPPED (aecef72c, `AppModel.makeRunRequest`), rebuilt inline:
     /// the reference the moved builder must equal, setting for setting.
     /// (`emitted` is passed in: two emissions can list an outline's loops in different hash
@@ -82,7 +86,8 @@ final class LatticeRunSpecSharedTests: XCTestCase {
                          store: ProjectStore(rootDir: tmp),
                          presetStore: PrintParamsPresetStore(rootDir: tmp))
         m.loadMaterials(); m.newTopOpt(); m.selectMaterial("PLA")
-        XCTAssertTrue(m.importFile(atPath: Self.core("tests/fixtures/stl/cube_10mm.stl"), displayName: "Cube.stl"))
+        // a COPY: a persist (an Undo, a primitive's edit) writes the bolt's sidecar beside the imported file
+        XCTAssertTrue(m.importFile(atPath: try fixtureCopy("stl/cube_10mm.stl"), displayName: "Cube.stl"))
         m.continueToWorkspace()
         let p = try XCTUnwrap(m.project)
         p.lattice.enabled = true

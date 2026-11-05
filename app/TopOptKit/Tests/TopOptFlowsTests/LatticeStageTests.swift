@@ -23,19 +23,21 @@ final class LatticeStageTests: XCTestCase {
     }
     override func tearDownWithError() throws {
         if let tempDir { try? FileManager.default.removeItem(at: tempDir) }
+        XCTAssertEqual(FixtureSidecars.strays(), [], "the cube's Undo persisted its bolt beside the fixture")
     }
 
     private func sha(_ d: Data) -> String { SHA256.hash(data: d).map { String(format: "%02x", $0) }.joined() }
 
     /// The cube, opened, latticed under Structural: an include wall through a protected group (as
-    /// LatticeRunSpecSharedTests' stage request), an anchor, a 4.2 kg load and gravity.
+    /// LatticeRunSpecSharedTests' stage request), an anchor, a 4.2 kg load and gravity. Opened from a COPY: an Undo
+    /// persists the bolt to the clearance sidecar beside the imported file.
     private func latticedCube() throws -> (AppModel, ProjectModel, include: UUID, load: UUID) {
         let m = AppModel(materialsPath: Self.core("src/materials/materials.json"),
                          rulesPath: Self.core("src/settings/rules.json"),
                          store: ProjectStore(rootDir: tempDir),
                          presetStore: PrintParamsPresetStore(rootDir: tempDir))
         m.loadMaterials(); m.newTopOpt(); m.selectMaterial("PLA")
-        XCTAssertTrue(m.importFile(atPath: Self.core("tests/fixtures/stl/cube_10mm.stl"), displayName: "Cube.stl"))
+        XCTAssertTrue(m.importFile(atPath: try fixtureCopy("stl/cube_10mm.stl"), displayName: "Cube.stl"))
         m.continueToWorkspace()
         let p = try XCTUnwrap(m.project)
         let anchor = p.selection.addGroup()
@@ -233,6 +235,8 @@ final class LatticeStageTests: XCTestCase {
         XCTAssertNil(p.lattice.stageMode)
         XCTAssertTrue(p.canUndoClearLattice(c))
         p.undoClearLattice(c)
+        XCTAssertNotNil(ClearanceSidecar.read(forModelPath: try XCTUnwrap(p.importedFile?.path))?.manual.first,
+                        "control: the Undo persisted the bolt, beside the copy (tearDown: never beside the fixture)")
         XCTAssertEqual(p.lattice, lattice, "★ one Undo restores the lattice work")
         XCTAssertEqual(p.lattice.groupRoles[include], .include)
         XCTAssertEqual(p.selection.groups.first { $0.id == load }?.name, "Top load", "one step: the rename stays")
