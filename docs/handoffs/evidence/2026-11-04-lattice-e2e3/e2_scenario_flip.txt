@@ -1,0 +1,18 @@
+The scenario flip at the gate (6c6102bc): e21_scen_red.py's four bar jobs on topopt-cli at 4e7648d8
+(before: TO-core's grading + design box tip, the base E2/E3 merged) and at 6c6102bc (after). Rung 1.55.
+A lists the light scenario first; B the heavy one first; C and D have no scenarios (the control).
+
+A_light_then_heavy   before solid margin 8.0198; lattice margin 138.9403, solid reproduced 154.1580, accepted True
+A_light_then_heavy   after  solid margin 8.0198; lattice margin 7.2516, solid reproduced 8.0198, accepted True, governing heavy side
+
+B_heavy_then_light   before solid margin 8.5322; no lattice at this rung (sealed-cavity refusal, both sides)
+B_heavy_then_light   after  solid margin 8.5322; no lattice at this rung (sealed-cavity refusal, both sides)
+
+C_heavy_alone        before solid margin 8.7622; lattice margin 6.9166, solid reproduced 8.7622, accepted True
+C_heavy_alone        after  solid margin 8.7622; lattice margin 6.9166, solid reproduced 8.7622, accepted True
+
+D_light_alone        before solid margin 169.7956; lattice margin 142.0444, solid reproduced 169.7956, accepted True
+D_light_alone        after  solid margin 169.7956; lattice margin 142.0444, solid reproduced 169.7956, accepted True
+
+C and D (no scenarios) are identical before and after; A moves from the light scenario's
+certificate to the heavy one's, which governs; B lays no lattice at 1.55 on either side.

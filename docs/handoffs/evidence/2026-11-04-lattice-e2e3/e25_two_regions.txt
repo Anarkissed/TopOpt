@@ -1,0 +1,11 @@
+E2.5 at the gate (6c6102bc): two regions on the top face (10 mm at 0.75, 16 mm at 0.88), fit cells,
+lattice_part with growth off, in both declaration orders. before = topopt-cli at 4e7648d8, after = 6c6102bc.
+
+before e_shallow_first exit 0
+before e_shallow_first {'latticed_voxels': 990, 'rho_min_used': 0.75, 'rho_max_used': 0.88}
+before f_deep_first exit 0
+before f_deep_first {'latticed_voxels': 990, 'rho_min_used': 0.88, 'rho_max_used': 0.88}
+after e_shallow_first exit 0
+after e_shallow_first {'latticed_voxels': 990, 'rho_min_used': 0.88, 'rho_max_used': 0.88}
+after f_deep_first exit 0
+after f_deep_first {'latticed_voxels': 990, 'rho_min_used': 0.88, 'rho_max_used': 0.88}
