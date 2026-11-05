@@ -161,8 +161,24 @@ public struct SelectionModel: Equatable, Sendable, Codable {
     /// Monotonic palette cursor (design `nextColor`): advanced by 1 whenever a group
     /// is created, so colours cycle through the palette as groups come and go.
     private var nextColor: Int = 0
+    /// ★ B6 (notes 22, 23): the Lattice stage's own list numbers its groups ("Group 1") where Topology's letters them.
+    /// Optional so Topology's list encodes exactly as it always did (nil is never written).
+    private var numbered: Bool?
 
     public init() {}
+
+    /// ★ B6: the Lattice stage's list, starting from `groups` (copies keep their names, colours and ids); a new group
+    /// takes the next colour after theirs and the next free number.
+    public static func latticeList(adopting groups: [SelectionGroup]) -> SelectionModel {
+        var m = SelectionModel()
+        m.numbered = true
+        m.groups = groups
+        m.nextColor = (groups.map(\.colorIndex).max() ?? -1) + 1
+        return m
+    }
+
+    /// Whether this is the Lattice stage's list.
+    public var isLatticeList: Bool { numbered == true }
 
     /// The active group, if any.
     public var activeGroup: SelectionGroup? { groups.first { $0.id == activeGroupID } }
@@ -181,6 +197,11 @@ public struct SelectionModel: Equatable, Sendable, Codable {
         let colorIndex = nextColor % palette.count
         let letter = Character(UnicodeScalar(UInt8(65 + (groups.count % 26))))
         nextColor += 1
+        if numbered == true {   // ★ B6: "Group 1", "Group 2" — the next number no group in the list has
+            var n = groups.count + 1
+            while groups.contains(where: { $0.name == "Group \(n)" }) { n += 1 }
+            return SelectionGroup(name: "Group \(n)", colorIndex: colorIndex)
+        }
         return SelectionGroup(name: "Group \(letter)", colorIndex: colorIndex)
     }
 
