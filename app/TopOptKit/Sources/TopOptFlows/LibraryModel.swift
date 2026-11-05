@@ -45,6 +45,32 @@ public struct LibraryResult: Identifiable {
     public var id: Int { index }
 }
 
+/// ★ A result's flag that a tap takes off (his iPad notes 11-05, ledger L2).
+public enum LibraryFlag: Sendable {
+    case printThis, rejected
+
+    /// The flag's word on its chip.
+    public var title: String { self == .printThis ? "Print" : "Rejected" }
+    /// The toast after a tap: "Rejected removed" (· Undo).
+    public var removedText: String { "\(title) removed" }
+
+    func isOn(_ m: ResultMark) -> Bool { self == .printThis ? m.printThis : m.rejected }
+    func clear(_ m: inout ResultMark) {
+        switch self {
+        case .printThis: m.printThis = false
+        case .rejected: m.rejected = false
+        }
+    }
+}
+
+/// The last flag a tap took off, for the toast's Undo.
+public struct LibraryFlagUndo: Equatable {
+    public let folder: UUID
+    public let before: ResultMark
+    public let text: String
+    let id = UUID()
+}
+
 @MainActor
 public final class LibraryModel: ObservableObject {
     public let store: ProjectStore
@@ -63,6 +89,8 @@ public final class LibraryModel: ObservableObject {
     @Published public private(set) var exporting = false
     /// ★ B5 (note 11): the files it wrote, for the share sheet; emptied when that sheet closes.
     @Published public var exportedFiles: [URL] = []
+    /// ★ His iPad notes 11-05 (L2): the flag a tap just took off; the toast offers Undo until it goes.
+    @Published public var flagUndo: LibraryFlagUndo?
     private var drawingOriginals = false   // ★ B1 (note 10)
     /// The proposal shown on the first-launch sheet, so Group saves exactly what he saw.
     private var lastProposal: LibraryIndex?
@@ -246,6 +274,35 @@ public final class LibraryModel: ObservableObject {
             if m.rejected { m.printThis = false }
             v.setMark(m)
         }
+    }
+
+    // MARK: ★ a flag comes off with a tap, and Undo puts it back (his iPad notes 11-05, ledger L2, his answer)
+
+    /// Take a flag off a result; the toast's Undo (`undoFlagRemoval`) puts the mark back as it was.
+    public func removeFlag(_ flag: LibraryFlag, folder: UUID, result: Int) {
+        guard let before = version(folder)?.mark(for: result), flag.isOn(before) else { return }
+        edit(folder) { v in
+            var m = v.mark(for: result)
+            flag.clear(&m)
+            v.setMark(m)
+        }
+        flagUndo = LibraryFlagUndo(folder: folder, before: before, text: flag.removedText)
+    }
+
+    /// Quick look's buttons: on → off (with Undo, as a tap on the flag); off → on.
+    public func tapFlag(_ flag: LibraryFlag, folder: UUID, result: Int) {
+        guard let m = version(folder)?.mark(for: result) else { return }
+        if flag.isOn(m) { removeFlag(flag, folder: folder, result: result); return }
+        switch flag {
+        case .printThis: togglePrint(folder: folder, result: result)
+        case .rejected: toggleReject(folder: folder, result: result)
+        }
+    }
+
+    public func undoFlagRemoval() {
+        guard let u = flagUndo else { return }
+        edit(u.folder) { $0.setMark(u.before) }
+        flagUndo = nil
     }
 
     // MARK: ★ the part's chosen result (his answer 11-03; the reviewer's 11-04 18:56Z bullets)

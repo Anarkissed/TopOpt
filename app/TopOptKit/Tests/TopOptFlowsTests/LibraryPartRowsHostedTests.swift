@@ -1,11 +1,17 @@
-// LibraryPartRowsHostedTests — B5 (his "look per screen"): the Part folder is mockup v5's #lib-part. Each version is one §4.7
-// version card (DSVersionCard), newest first: a draft on top marked "Draft", a branch 48 pt in under the version it came from
-// with "from v1". A version with results shows its a · b · c inline — picture, "v2b · +10 %", weight · strength, stars, and the
-// "Picked" ring on the one picked. A tile tap is Quick look of THAT result; the tile's ⋯ holds Pick this · Print this · Reject ·
-// Export…; the version's ⋯ is app-map's list.
+// LibraryPartRowsHostedTests — the Part folder. ★ His iPad notes 11-05 (ledger L1, his answers): "Make each version 1/3 that
+// width, making it look like the rest of the Library with 3 versions per row … Each of the version's thumbnails should show
+// smaller thumbnails of each version available - it is just meant to show you how many there are", his answer "On the card"
+// (one line per result under the picture: "v2b · +10 % · 117 g · 8.7× ★★★ ⋯"), and "Make the cards as tall as required to
+// ensure the card doesn't look too crowded". This replaces B5's one full-width row per version (mockup #lib-part).
+//
+// Each version is one card, newest first, 3 across (2 in portrait, as the project page): a draft first marked "Draft" with its
+// Open, a branch right after the version it came from with "from v1" (no indent). A version with results shows them small,
+// side by side, and one line each: name, weight · strength, stars, its ⋯, its flags. A small result's tap is Quick look of THAT
+// result; a line's ⋯ holds Pick this · Print this · Reject · Export…; the version's ⋯ is app-map's list.
 #if canImport(AppKit) && canImport(MetalKit)
 import XCTest
 import SwiftUI
+import TopOptDesign
 @testable import TopOptFlows
 @testable import TopOptKit
 
@@ -51,7 +57,7 @@ final class LibraryPartRowsHostedTests: XCTestCase {
         return (app, f)
     }
 
-    private func host(_ size: CGSize) throws -> (AppBuildHost, AppModel, [String: UUID]) {
+    func host(_ size: CGSize) throws -> (AppBuildHost, AppModel, [String: UUID]) {
         let (app, f) = try Self.arms(root: root.appendingPathComponent("\(Int(size.width))", isDirectory: true))
         let part = try XCTUnwrap(app.library.index.part(containing: try XCTUnwrap(f["2"])))
         XCTAssertEqual(part.versions.map(\.number.description).sorted(), ["1", "1.1", "2", "3"], "the fixture's four versions")
@@ -61,50 +67,87 @@ final class LibraryPartRowsHostedTests: XCTestCase {
         return (h, app, f)
     }
 
-    func testEachVersionIsOneRowNewestFirstWithItsResultsInline() throws {
+    /// Reading order in the grid: an earlier row, or the same row further left.
+    static func before(_ a: CGRect, _ b: CGRect) -> Bool {
+        a.minY < b.minY - 0.5 || (abs(a.minY - b.minY) < 0.5 && a.minX < b.minX)
+    }
+
+    func testEachVersionIsACardAThirdWideNewestFirst() throws {
         for (name, size) in ParityTopologyShots.sizes {
             let (h, _, _) = try host(size)
-            let v3 = try h.onScreen("library-version-v3", "\(name): v3, the draft, as a row")
-            let v2 = try h.onScreen("library-version-v2", "\(name): v2 as a row")
-            let v1 = try h.onScreen("library-version-v1", "\(name): v1 as a row")
-            let b = try XCTUnwrap(h.frames.all["library-version-v1.1"], "\(name): ★ v1.1, the branch, as a row")
-            XCTAssertLessThan(v3.minY, v2.minY, "\(name): ★ a draft sits on top")
-            XCTAssertLessThan(v2.minY, v1.minY, "\(name): ★ newest first")
-            XCTAssertLessThan(v1.minY, b.minY, "\(name): ★ a branch sits right under the version it came from")
-            for f in [v2, v1] {
-                XCTAssertEqual(f.minX, v3.minX, accuracy: 0.5, "\(name): the rows share one left edge")
-                XCTAssertEqual(f.maxX, v3.maxX, accuracy: 0.5, "\(name): one width — rows, not a grid of cards")
+            let portrait = size.height > size.width
+            let v3 = try h.onScreen("library-version-v3", "\(name): v3, the draft, as a card")
+            let v2 = try h.onScreen("library-version-v2", "\(name): v2 as a card")
+            let v1 = try h.onScreen("library-version-v1", "\(name): v1 as a card")
+            let b = try h.onScreen("library-version-v1.1", "\(name): ★ v1.1, the branch, as a card")
+            let page = size.width - 2 * DS.Space.page
+            for c in [v3, v2, v1, b] {
+                XCTAssertEqual(c.width, v3.width, accuracy: 0.5, "\(name): one card width")
+                XCTAssertLessThan(c.width, page / (portrait ? 1.9 : 2.9), "\(name): ★ a third of the width (half in portrait), not a full row")
             }
-            XCTAssertEqual(b.minX, v1.minX + DSCards.branchIndent, accuracy: 0.5, "\(name): ★ the branch sits 48 pt in")
-            XCTAssertEqual(b.maxX, v1.maxX, accuracy: 0.5, "\(name): the branch keeps the right edge")
+            if portrait {
+                XCTAssertEqual(v3.minY, v2.minY, accuracy: 0.5, "\(name): ★ two across in portrait, as the project page")
+                XCTAssertEqual(v1.minY, b.minY, accuracy: 0.5, "\(name): the next row")
+                XCTAssertGreaterThan(v1.minY, v3.maxY, "\(name): the next row under the first")
+                XCTAssertEqual(v1.minX, v3.minX, accuracy: 0.5, "\(name): the rows share one left edge")
+            } else {
+                for c in [v2, v1] { XCTAssertEqual(c.minY, v3.minY, accuracy: 0.5, "\(name): ★ three across, like the project page") }
+                XCTAssertGreaterThan(b.minY, v3.maxY, "\(name): the fourth on the next row")
+                XCTAssertEqual(b.minX, v3.minX, accuracy: 0.5, "\(name): ★ the branch has no indent: it follows its parent")
+            }
+            XCTAssertTrue(Self.before(v3, v2), "\(name): ★ a draft comes first")
+            XCTAssertTrue(Self.before(v2, v1), "\(name): ★ newest first")
+            XCTAssertTrue(Self.before(v1, b), "\(name): ★ a branch right after the version it came from")
             _ = try h.onScreen("library-version-v3-draft", "\(name): ★ the draft is marked Draft")
+            _ = try h.onScreen("library-version-v3-open", "\(name): ★ a draft's card opens it")
             XCTAssertNotNil(h.frames.all["library-version-v1.1-from"], "\(name): ★ the branch says where it came from")
             XCTAssertNil(h.frames.all["library-result-v3a"], "\(name): a draft has no results to show")
-            let tiles = try ["a", "b", "c"].map { try h.onScreen("library-result-v2\($0)", "\(name): ★ v2\($0) inline in v2's row") }
-            for t in tiles {
-                XCTAssertTrue(v2.insetBy(dx: -0.5, dy: -0.5).contains(t), "\(name): v2's results sit inside v2's row: \(t) in \(v2)")
-                XCTAssertEqual(t.minY, tiles[0].minY, accuracy: 0.5, "\(name): ★ a · b · c side by side")
-                XCTAssertEqual(t.width, tiles[0].width, accuracy: 1, "\(name): three equal tiles")
+        }
+    }
+
+    /// The results small (just how many), and one line each under them; as tall as it needs, nothing squeezed.
+    func testAVersionShowsItsResultsSmallAndOneLineEachNeverCrowded() throws {
+        for (name, size) in ParityTopologyShots.sizes {
+            let (h, _, _) = try host(size)
+            let v2 = try h.onScreen("library-version-v2", "\(name): v2")
+            let minis = try ["a", "b", "c"].map { try h.onScreen("library-mini-v2\($0)", "\(name): ★ v2\($0) small in v2's picture") }
+            let lines = try ["a", "b", "c"].map { try h.onScreen("library-result-v2\($0)", "\(name): ★ v2\($0)'s line") }
+            for m in minis {
+                XCTAssertTrue(v2.insetBy(dx: -0.5, dy: -0.5).contains(m), "\(name): in v2's card")
+                XCTAssertEqual(m.minY, minis[0].minY, accuracy: 0.5, "\(name): ★ side by side")
+                XCTAssertEqual(m.width, minis[0].width, accuracy: 1, "\(name): equal")
+                XCTAssertLessThan(m.width, v2.width / 2.5, "\(name): ★ small: three fit across the card")
+                XCTAssertGreaterThanOrEqual(m.height, 64, "\(name): big enough to see the shape")
             }
-            XCTAssertLessThan(tiles[0].maxX, tiles[1].minX, "\(name): a, then b")
-            XCTAssertLessThan(tiles[1].maxX, tiles[2].minX, "\(name): b, then c")
-            XCTAssertNotNil(h.frames.all["library-result-v1a"], "\(name): ★ every version with results shows them (app-map: each card has 3)")
+            XCTAssertLessThan(minis[0].maxX, minis[1].minX, "\(name): a, then b")
+            XCTAssertLessThan(minis[1].maxX, minis[2].minX, "\(name): b, then c")
+            for (i, l) in lines.enumerated() {
+                XCTAssertTrue(v2.insetBy(dx: -0.5, dy: -0.5).contains(l), "\(name): v2's lines are in v2's card: \(l) in \(v2)")
+                XCTAssertGreaterThan(l.minY, minis[0].maxY, "\(name): ★ under the picture")
+                XCTAssertGreaterThanOrEqual(l.height, DSParts.target - 0.5, "\(name): ★ not crowded: each line a 44 pt row")
+                if i > 0 { XCTAssertGreaterThanOrEqual(l.minY, lines[i - 1].maxY - 0.5, "\(name): ★ one under the other, never overlapping") }
+            }
+            XCTAssertGreaterThanOrEqual(v2.maxY - lines[2].maxY, 8, "\(name): ★ the card is as tall as it needs: room under its last line")
+            let v1 = try h.onScreen("library-version-v1", "\(name): v1")
+            if abs(v1.minY - v2.minY) < 0.5 { XCTAssertEqual(v1.height, v2.height, accuracy: 0.5, "\(name): cards in a row share one height") }
             _ = try h.onScreen("library-result-v2b-picked", "\(name): ★ the picked result wears Picked")
             XCTAssertNil(h.frames.all["library-result-v2a-picked"], "\(name): only the picked one")
             _ = try h.onScreen("library-result-v2b-stars", "\(name): each result has its stars")
             try h.probe("library-version-v2-menu", "\(name): v2's ⋯")
             try h.probe("library-result-v2b-menu", "\(name): v2b's ⋯")
+            // the picture is drawn at its own shape: a small result is never a long thin strip
+            XCTAssertLessThan(minis[0].width / minis[0].height, 1.8, "\(name): ★ not stretched into a band")
         }
     }
 
-    func testATileTapIsQuickLookOfThatResult() throws {
+    func testASmallResultsTapIsQuickLookOfThatResult() throws {
         let (h, _, _) = try host(AppBuildHost.landscape13)
-        let c = try h.onScreen("library-result-v2c", "v2c's tile")
-        h.click(CGPoint(x: c.midX, y: c.minY + 30), settle: 1.5)
+        let c = try h.onScreen("library-mini-v2c", "v2c, small")
+        h.click(CGPoint(x: c.midX, y: c.midY), settle: 1.5)
         _ = try h.onScreen("libraryQuickLook-v2c", "★ a tap on v2c is Quick look of v2c — not the version's shown result (b)")
     }
 
-    func testTheTileMenuPicksAndTheVersionMenuIsAppMapsList() throws {
+    func testTheLineMenuPicksAndTheVersionMenuIsAppMapsList() throws {
         let (h, app, f) = try host(AppBuildHost.landscape13)
         let tile = try h.pickFromMenu("library-result-v1c-menu", "Pick this", what: "v1c's ⋯")
         XCTAssertEqual(tile, ["Pick this", "Print this", "Reject", "Export…"], "★ a result's own ⋯")
@@ -118,6 +161,14 @@ final class LibraryPartRowsHostedTests: XCTestCase {
         XCTAssertEqual(version, ["Quick look", "Compare its results", "Export…", "Open v1", "New draft from v1", "Rename…", "Delete v1…"],
                        "★ app-map's version ⋯")
         _ = try h.onScreen("libraryQuickLook-v1c", "Quick look from the version's ⋯ shows its chosen result")
+    }
+
+    /// A draft's card opens it (today's ⋯ Open, as a button he can see).
+    func testADraftsCardOpensIt() throws {
+        let (h, app, f) = try host(AppBuildHost.landscape13)
+        let open = try h.probe("library-version-v3-open", "v3's Open")
+        h.click(CGPoint(x: open.midX, y: open.midY), settle: 2)
+        XCTAssertEqual(app.project?.id, f["3"], "★ the draft opens")
     }
 }
 #endif
