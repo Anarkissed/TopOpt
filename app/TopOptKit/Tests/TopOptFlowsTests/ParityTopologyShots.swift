@@ -10,7 +10,7 @@ import AppKit
 @testable import TopOptKit
 
 /// The workspace as RootView mounts it, with its notification lane (the "v8 is ready" message, the toasts).
-private struct ParityRoot: View {
+struct ParityRoot: View {
     @ObservedObject var model: AppModel
     var body: some View { AppBuildWorkspace(model: model).laneToast($model.toast) }
 }
@@ -21,7 +21,12 @@ final class ParityTopologyShots: XCTestCase {
 
     /// `scenarios`: the mockup's three folders, each with its own load.
     func page(_ size: CGSize, scenarios: Bool = true) throws -> (AppBuildHost, ProjectModel, AppModel) {
-        let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
+        try Self.pad(size, scenarios: scenarios, test: self)
+    }
+
+    /// The pad `page` lays out, for another screen's shots (ParityLatticeSetupShots).
+    static func pad(_ size: CGSize, scenarios: Bool = true, test: XCTestCase) throws -> (AppBuildHost, ProjectModel, AppModel) {
+        let r = try FlexiblePressFixtures.a1Project(3, test, facePrism: false)
         let p = r.project
         p.lattice.flexible = nil
         // the mockup's groups, on his pad's faces
@@ -50,12 +55,14 @@ final class ParityTopologyShots: XCTestCase {
             p.force.openScenario(s1)
         }
         p.force.sync(groups: p.selection.groups)
-        let h = AppBuildHost(ParityRoot(model: r.app), size: size, test: self)
+        let h = AppBuildHost(ParityRoot(model: r.app), size: size, test: test)
         h.pump(3)
         return (h, p, r.app)
     }
 
-    func shot(_ h: AppBuildHost, _ state: String, _ size: String) throws {
+    func shot(_ h: AppBuildHost, _ state: String, _ size: String) throws { try Self.shot(h, state, size) }
+
+    static func shot(_ h: AppBuildHost, _ state: String, _ size: String) throws {
         guard let dir = ProcessInfo.processInfo.environment["PARITY_SHOT_DIR"] else { return }
         h.view.layoutSubtreeIfNeeded()
         let rep = try XCTUnwrap(h.view.bitmapImageRepForCachingDisplay(in: h.view.bounds))

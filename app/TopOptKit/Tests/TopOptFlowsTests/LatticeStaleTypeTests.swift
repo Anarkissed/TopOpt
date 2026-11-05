@@ -92,7 +92,12 @@ final class LatticeStaleTypeTests: XCTestCase {
         XCTAssertTrue(try member(ws, "var canLatticeThis").contains("latticeStageRefusal == nil"))
         XCTAssertTrue(try member(ws, "private var latticeThisSummary").contains("if let why = latticeStageRefusal { return why }"))
         // the tap
-        XCTAssertEqual(ws.components(separatedBy: "let opensType = opensLatticeType(ok, summary)").count - 1, 3)   // B3: + the split row
+        // B3: + the split row · ★ RE-PINNED (UI-Notes B6 s1, note 21): + the Lattice corner's run button (Edit faces keeps the old one)
+        XCTAssertEqual(ws.components(separatedBy: "let opensType = opensLatticeType(ok, summary)").count - 1, 4)
+        let lat = try member(ws, "private var latticeRunButton: some View")
+        XCTAssertTrue(lat.contains("notSet || marks || opensType ? .grey(line) : .disabled(line)")
+                      && lat.contains("else if marks { goToWallMarking() } else if opensType { goToLatticeType() }"),
+                      "★ the Lattice corner's button: greyed yet tappable to the fix, as the others")
         XCTAssertTrue(try member(ws, "private func opensLatticeType").contains("!ok && summary == latticeSettingsRefusal"))
         XCTAssertTrue(ws.contains("if ok { requestLatticeRun() } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }"))
         // (B1 notes 4 and O1 clear the Mac-not-answering and could-not-finish lines first; re-pinned in B2)

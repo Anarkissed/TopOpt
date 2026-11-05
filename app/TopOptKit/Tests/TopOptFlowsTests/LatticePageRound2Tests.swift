@@ -101,8 +101,12 @@ final class LatticePageRound2Tests: XCTestCase {
         // Structural half: LatticeSettings stores NO group or face collection —
         // only the id-keyed role attribute (a second store is the failure mode
         // this bar exists to prevent; two models that agree today diverge later).
+        // ★ RE-PINNED (UI-Notes B6 slice 1, 7e4f0b53 — his notes 22, 23 of the approved design, 11-02: "the 'Selections'
+        // should separate the groups made from Topology with the ones going to be made here"): the Lattice stage's OWN list
+        // (`latticeList`) is the one store the lattice side has; Topology's groups are never copied into it after the one-time
+        // migration. Nothing else in LatticeSettings holds groups.
         let mirror = Mirror(reflecting: p.lattice)
-        for child in mirror.children {
+        for child in mirror.children where child.label != "latticeList" {
             let typeName = String(describing: type(of: child.value))
             XCTAssertFalse(typeName.contains("SelectionGroup"),
                            "LatticeSettings must not hold its own group list (\(child.label ?? "?"): \(typeName))")
