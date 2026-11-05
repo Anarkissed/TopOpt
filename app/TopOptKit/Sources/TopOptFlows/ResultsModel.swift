@@ -2449,11 +2449,11 @@ public final class ResultsModel: ObservableObject {
         return atFailure ? "\(load) · \(mult) · YIELDS" : "\(load) · \(mult) load"
     }
 
-    /// Format a kgf load in the given display unit (kg / lbs), matching the workspace
+    /// Format a kgf load in the given display unit (kg / lbs / N), matching the workspace
     /// weight readout (`ForceModel.formattedWeight`): < 10 → one decimal, ≥ 10 →
     /// rounded integer. Keeps the failure load in the user's current units.
     static func loadLabel(kg: Double, unit: WeightUnit) -> String {
-        let v = unit == .kg ? kg : kg * ForceModel.kgToLb
+        let v = unit.fromKg(kg)
         let num = v < 10 ? String(format: "%.1f", v) : String(Int(v.rounded()))
         return "\(num) \(unit.label)"
     }

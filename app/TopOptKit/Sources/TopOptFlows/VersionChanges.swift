@@ -215,7 +215,7 @@ public enum VersionChanges {
     }
 
     private static func weight(_ kg: Double, _ unit: WeightUnit) -> String {
-        num(unit == .kg ? kg : kg * ForceModel.kgToLb)
+        num(unit.fromKg(kg))
     }
 
     /// 51 → "51", 3.5 → "3.5", 112.43 → "112.4".

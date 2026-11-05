@@ -55,7 +55,7 @@ public enum DSParts {
     /// The coordinate space a panel's body names, so its rows can say where they sit (panels never nest).
     static let bodySpace = "DSPanelBody"
     static let strokeSub = DS.Color.strokeSubtle
-    static let moreFill = DS.Color.accent.opacity(0.06)
+    static var moreFill: RGBA { DS.Color.accent.opacity(0.06) }   // ★ B5 (Q12): the accent is live, so read it as it draws
 
     static func publish(_ key: String) -> some View {
         GeometryReader { g in Color.clear.preference(key: ChromeKeepOutKey.self, value: [key: g.frame(in: .global)]) }

@@ -90,11 +90,13 @@ final class SettingsPanelHostedTests: XCTestCase {
         }
         XCTAssertNil(h.frames.all["protectInfo"], "★ the old Protect chip and its own (i) are gone (the row's (i) says it)")
         XCTAssertNotNil(h.frames.all["info-settings-protectSkin"], "★ Protect skin's (i), on its row")
-        // Units: the right half is lb, the left kg
+        // Units: [kg │ lb │ N] (★ B5, Q12 Units (a): N added, display only)
         let units = try h.onScreen("settingsUnits", "Units")
-        h.click(CGPoint(x: units.maxX - units.width / 4, y: units.midY))
-        XCTAssertEqual(p.force.unit, .lbs, "★ lb")
-        h.click(CGPoint(x: units.minX + units.width / 4, y: units.midY))
+        h.click(CGPoint(x: units.midX, y: units.midY))
+        XCTAssertEqual(p.force.unit, .lbs, "★ lb, the middle")
+        h.click(CGPoint(x: units.maxX - units.width / 6, y: units.midY))
+        XCTAssertEqual(p.force.unit, .N, "★ N, the right")
+        h.click(CGPoint(x: units.minX + units.width / 6, y: units.midY))
         XCTAssertEqual(p.force.unit, .kg, "★ kg")
         // Protect skin: a drag up steps it (the number box's rule), one depth for every protected face
         let box = try h.onScreen("numberField-settings-protectSkin", "Protect skin's number")
