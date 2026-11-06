@@ -31,12 +31,14 @@ final class LatticeNamedNoOctetFallbackTests: XCTestCase {
         var lat = LatticeSettings(enabled: true, topologyID: "kelvin")
         lat.densityMode = .sim
         let limits = TopOptKit.latticeLimits(topology: "kelvin")
-        XCTAssertFalse(limits.certifiable, "★ core gives a non-live type no numbers")
-        XCTAssertEqual([limits.rhoMin, limits.rhoMax, limits.minCellsPerMember], [0, 0, 0],
-                       "★ and never octet's band or floor")
-        XCTAssertTrue(limits.reason?.contains("not buildable") ?? false, limits.reason ?? "nil")
-        XCTAssertNil(lat.runSpec(limits: limits, generatable: true, lineWidthMM: 0.45),
-                     "★ no Kelvin job, so no octet cap can ride one")
+        // ★ RE-PINNED (release (2), E2): core makes Kelvin live with ITS OWN band (measured law), so a Kelvin spec
+        // exists when a caller states it generatable — and still carries no octet cap and never octet's band.
+        let octet = TopOptKit.latticeLimits(topology: "octet")
+        XCTAssertTrue(limits.certifiable, "core certifies Kelvin now")
+        XCTAssertNotEqual([limits.rhoMin, limits.rhoMax], [octet.rhoMin, octet.rhoMax], "★ never octet's band")
+        let k = try XCTUnwrap(lat.runSpec(limits: limits, generatable: true, lineWidthMM: 0.45))
+        XCTAssertEqual(k.densityCapRho, 0, "★ no octet cap rides a Kelvin job")
+        XCTAssertNil(lat.runSpec(lineWidthMM: 0.45), "★ and the app runs none until Kelvin's batch ships (the type gate)")
         // control: octet still carries its cap
         var oct = lat; oct.topologyID = "octet"
         let o = try XCTUnwrap(oct.runSpec(limits: TopOptKit.latticeLimits(topology: "octet"),

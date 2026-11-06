@@ -44,6 +44,37 @@ final class LatticeCoreOwnerTests: XCTestCase {
         XCTAssertEqual(swift, [1, 2, 1, 2, 1, nil], "the Swift rule agrees on these points")
     }
 
+    /// ★ E2.5's TIE (reviewer, 2026-11-06, item 1): "the deeper region wins; at equal depth, the
+    /// lower id". Two includes on ONE face plane tie on plane distance everywhere they overlap;
+    /// core's `include_wins_plane_tie` gives the overlap to the deeper one, and the preview's Swift
+    /// rule must say the same. Equal depths, or a tie across two planes, stay the lower id.
+    func testE25OnOneFacePlaneTheDeeperRegionWins() throws {
+        let shallow = face(SIMD3(20, 0, 20), SIMD3(0, 1, 0), depth: 6)             // id 1
+        let deep = face(SIMD3(20, 0, 20), SIMD3(0, 1, 0), half: 10, depth: 12)     // id 2, inside its outline
+        let pts: [SIMD3<Double>] = [
+            SIMD3(20, 3, 20),      // both prisms, the same plane distance: the deeper (2)
+            SIMD3(35, 3, 20),      // only the shallow one's outline (|u| 15 > 10)
+            SIMD3(20, 9, 20),      // only the deep one's depth (9 > 6)
+        ]
+        let r = try XCTUnwrap(TopOptKit.steppedRegionOwners(regions: [shallow, deep].map { $0.wireDictionary },
+                                                             points: pts), TopOptKit.lastCoreRefusal ?? "")
+        XCTAssertEqual(r.owners, [2, 1, 2], "★ core: the deeper region owns the shared plane's overlap")
+        let swift = pts.map { LatticePreviewOccupancy.owner(of: $0, regions: [shallow, deep]) }
+        XCTAssertEqual(swift, [1, 0, 1], "★ the preview's Swift rule agrees (scene indices)")
+        // equal depths on one plane, and a tie across two planes: the lower id
+        let twin = face(SIMD3(20, 0, 20), SIMD3(0, 1, 0), half: 10, depth: 6)
+        XCTAssertEqual(LatticePreviewOccupancy.owner(of: SIMD3(20, 3, 20), regions: [shallow, twin]), 0)
+        let a = face(SIMD3(20, 0, 20), SIMD3(0, 1, 0), depth: 6)
+        let b = face(SIMD3(0, 20, 20), SIMD3(1, 0, 0), depth: 12)
+        XCTAssertEqual(LatticePreviewOccupancy.owner(of: SIMD3(4, 4, 20), regions: [a, b]), 0,
+                       "two planes: an exact tie is the lower id, whatever the depths")
+        // it is the depth, not the order: declared the other way round, the deep one still owns it
+        XCTAssertEqual(LatticePreviewOccupancy.owner(of: SIMD3(20, 3, 20), regions: [deep, shallow]), 0)
+        // ★ RED CONTROL: the rule before E2.5 (an exact tie always to the lower id) is caught
+        XCTAssertFalse(LatticePreviewOccupancy.outranks((0, 3, 0), (0, 3, 1), regions: [shallow, deep]),
+                       "★ the shallow region no longer outranks the deep one on their shared plane")
+    }
+
     /// Where core cannot answer, it says why: a stated frame core refuses.
     func testTheBridgeRefusesWithCoresReason() throws {
         var a = face(SIMD3(20, 0, 20), SIMD3(0, 1, 0))

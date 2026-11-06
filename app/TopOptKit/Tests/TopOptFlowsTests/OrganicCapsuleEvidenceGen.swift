@@ -20,8 +20,7 @@ final class OrganicCapsuleEvidenceGen: XCTestCase {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let variants = root.appendingPathComponent("Sources/TopOptFlows/OrganicSample/variants")
-        let evidence = root.deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("evidence/2026-09-02-organic-on-device/sample_shape_fit_2026-09-03")
+        let evidence = EvidenceOut.dir("evidence/2026-09-02-organic-on-device/sample_shape_fit_2026-09-03")   // (11-06)
         let mesh = LatticeWizardSample.cube(edgeMM: 20, at: .zero)
         // ★ WHATEVER THIS BUILD SHIPS, NOT A FILENAME FROM A PAST ONE (2026-09-07).
         // The keys are a hash of the picks, core's fingerprint and the bake layout, so

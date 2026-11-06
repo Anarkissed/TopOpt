@@ -56,10 +56,11 @@ final class TopologyOptimizeOnlyHostedTests: XCTestCase {
         if let c = p.selection.groups.first(where: { $0.name == "Group C" }) { p.force.makeAnchor(c.id) }   // no group left pending
         p.lattice.enabled = true                      // what opening the Lattice stage leaves behind
         p.lattice.densityMode = .sim                  // graded
+        p.lattice.cellTransition = .organicGrade      // the one graded lattice core still refuses with a box (4e7648d8)
         p.designBox = DesignBoxModel(primitives: [DesignPrimitive(id: 1, name: "Box 1", shape: .box, sign: .positive,
             bounds: DesignBoxBounds(min: SIMD3<Float>(-200, -200, -200), max: SIMD3<Float>(200, 200, 200)))])
         XCTAssertNotNil(LatticeCoreCapability.liveConflict(latticeEnabled: p.lattice.enabled, designBoxActive: p.designBox.isActive,
-                                                           graded: p.lattice.densityMode == .sim),
+                                                           graded: p.lattice.densityMode == .sim, organic: p.lattice.isOrganic),
                         "premise: the lattice run would be refused for the design box")
         let sent = Sent()
         let h = host(r, sent)

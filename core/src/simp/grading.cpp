@@ -423,6 +423,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
   post.mask.assign(n, 0);
   post.relative_density.assign(n, 0.0);
   out.clamp_flags.assign(n, 0);
+  out.cover_dropped_rho.assign(n, 0.0);
 
   const double kInf = std::numeric_limits<double>::infinity();
   double rho_min_used = kInf, rho_max_used = 0.0;
@@ -509,9 +510,64 @@ GradedField grade_lattice(const VoxelGrid& grid,
     }
   }
 
+  // ★ E3: the region that owns voxel e and its own grading, or null.
+  if (params.region_override_ids != nullptr && params.region_override_ids->size() != n)
+    throw std::invalid_argument("grade_lattice: region_override_ids->size() != voxel_count");
+  auto override_at = [&](std::size_t e) -> const GradingRegionOverride* {
+    if (params.region_override_ids == nullptr || params.region_overrides == nullptr)
+      return nullptr;
+    const int id = (*params.region_override_ids)[e];
+    if (id < 1 || static_cast<std::size_t>(id) > params.region_overrides->size())
+      return nullptr;
+    return &(*params.region_overrides)[static_cast<std::size_t>(id - 1)];
+  };
+
   // The demand -> density map (requirement 1 / L2), identical in every cell mode:
   // density depends on DEMAND alone, never on cell size. That is exactly what lets
   // the cell-size plan consume it without circularity.
+  //
+  // ★ E3: a region's own band and exponent replace the part's for the voxels it owns.
+  // Its floor raises the grade (it is the user's band, not a clamp to certify); its
+  // ceiling is where the curve tops out. Both lie inside the certifiable band (parse).
+  auto rho_graded = [&](std::size_t e) {
+    const GradingRegionOverride* ov = override_at(e);
+    const double g_e = ov && ov->demand_exponent > 0.0 ? ov->demand_exponent : gamma;
+    const bool own_band = ov && ov->rho_max > 0.0;
+    if (aesthetic) {
+      const double lo_e = own_band ? std::max(rho_lo, ov->rho_min) : aes_lo;
+      const double hi_e = own_band ? std::min(rho_hi, ov->rho_max) : aes_hi;
+      const double f = grading_demand_fraction(GradingIntent::Aesthetic, demand[e],
+                                               aes_ref, 1.0);
+      return lo_e + (hi_e - lo_e) * std::pow(f, g_e * aes_w);
+    }
+    double frac;
+    if (allowable > 0.0) {
+      frac = grading_demand_fraction(GradingIntent::Structural, demand[e],
+                                     allowable, u_target);
+    } else {
+      frac = demand_max > 0.0
+                 ? std::min(1.0, std::max(0.0, demand[e] / demand_max))
+                 : 0.0;
+    }
+    const double hi_e = own_band ? std::min(rho_hi, ov->rho_max) : rho_hi;
+    const double r = hi_e * std::pow(frac, g_e);
+    return own_band ? std::max(r, ov->rho_min) : r;
+  };
+  // ★ E3: a region graded "off" or "shape" takes ONE density: its stated one, or the
+  // peak of its own grade over the voxels it owns (so it is at least as dense as the
+  // grade everywhere, and certifies wherever the grade does). Measured here, once.
+  std::vector<double> flat_peak;
+  if (params.region_overrides != nullptr && params.region_override_ids != nullptr) {
+    flat_peak.assign(params.region_overrides->size(), 0.0);
+    for (std::size_t e = 0; e < n; ++e) {
+      const GradingRegionOverride* ov = override_at(e);
+      if (!ov || !ov->flat || ov->flat_rho > 0.0) continue;
+      const bool candidate = density[e] > iso && (!region || (*region)[e] != 0);
+      if (!candidate || !std::isfinite(demand[e])) continue;
+      const std::size_t k = static_cast<std::size_t>((*params.region_override_ids)[e] - 1);
+      flat_peak[k] = std::max(flat_peak[k], std::min(rho_hi, std::max(rho_lo, rho_graded(e))));
+    }
+  }
   auto rho_of = [&](std::size_t e) {
     // MULTISCALE (task multiscale-lattice-to): the optimizer already chose this
     // voxel's relative density and paid a compliance objective evaluated at the
@@ -527,6 +583,14 @@ GradedField grade_lattice(const VoxelGrid& grid,
     if (params.region_relative_density != nullptr &&
         (*params.region_relative_density)[e] > 0.0)
       return (*params.region_relative_density)[e];
+    // ★ E3: a region's one density, then a region's own band and exponent.
+    if (const GradingRegionOverride* ov = override_at(e)) {
+      if (ov->flat) {
+        const std::size_t k = static_cast<std::size_t>((*params.region_override_ids)[e] - 1);
+        return ov->flat_rho > 0.0 ? ov->flat_rho : flat_peak[k];
+      }
+      return rho_graded(e);
+    }
     // ★ THE LAW (task 2026-08-20-lattice-only-grading, §0). Two normalisations,
     // one arithmetic. The DENOMINATOR is the whole difference:
     //   * ABSOLUTE  — the material allowable. `frac` is UTILISATION, a real
@@ -948,6 +1012,49 @@ GradedField grade_lattice(const VoxelGrid& grid,
     pp.max_cell_size_mm = params.max_cell_size_mm;
     pp.min_extrudable_width_mm = params.min_extrudable_width_mm;
     pp.thickness_cap_voxels = params.thickness_cap_voxels;
+    // ★ E3: each region's own cell window, as the part's ladder levels per voxel. The
+    // ladder's BASE stays the part's (a region cannot go finer than it: the octree is
+    // one dyadic ladder); its TOP rises to the coarsest region max, and every voxel no
+    // window covers is capped at the part's own top, so its plan is unchanged.
+    std::vector<signed char> lvl_lo, lvl_hi;
+    {
+      const double S0 = params.min_cell_size_mm;
+      const int part_top = cell_plan_max_level(S0, params.max_cell_size_mm);
+      auto level_lo = [&](double mm) {   // the finest ladder cell at or above mm
+        int L = 0;
+        while (S0 * std::ldexp(1.0, L) < mm * (1.0 - 1e-9)) ++L;
+        return L;
+      };
+      auto level_hi = [&](double mm) {   // the coarsest ladder cell at or below mm
+        int L = -1;
+        while (S0 * std::ldexp(1.0, L + 1) <= mm * (1.0 + 1e-9)) ++L;
+        return L;
+      };
+      int top = part_top;
+      bool any = false;
+      if (params.region_overrides != nullptr)
+        for (const GradingRegionOverride& o : *params.region_overrides)
+          if (o.cell_max_mm > 0.0) {
+            any = true;
+            top = std::max(top, level_hi(o.cell_max_mm));
+          } else if (o.cell_min_mm > 0.0) {
+            any = true;
+          }
+      if (any) {
+        lvl_lo.assign(n, -1);
+        lvl_hi.assign(n, static_cast<signed char>(part_top));
+        for (std::size_t e = 0; e < n; ++e) {
+          const GradingRegionOverride* o = override_at(e);
+          if (o == nullptr || (o->cell_min_mm <= 0.0 && o->cell_max_mm <= 0.0)) continue;
+          lvl_lo[e] = static_cast<signed char>(o->cell_min_mm > 0.0 ? level_lo(o->cell_min_mm) : 0);
+          lvl_hi[e] = static_cast<signed char>(o->cell_max_mm > 0.0 ? level_hi(o->cell_max_mm)
+                                                                    : part_top);
+        }
+        pp.max_cell_size_mm = S0 * std::ldexp(1.0, top);
+        pp.voxel_level_lo = &lvl_lo;
+        pp.voxel_level_hi = &lvl_hi;
+      }
+    }
     out.cell_plan = plan_cell_sizes(grid, rho_raw, cand, width, pp);
     voxel_cell = cell_size_field(grid, out.cell_plan);
     apply_aggregate_cap(/*swept_mode=*/true);
@@ -990,25 +1097,33 @@ GradedField grade_lattice(const VoxelGrid& grid,
         // Both can occur in swept mode and their remedies are opposite (a finer
         // cell for a thin member, a coarser one for an unprintable strut), so the
         // receipt reports them separately or reports nothing useful.
-        // Voxel -> base cell, by the voxel CENTRE — the SAME convention
-        // plan_cell_sizes used to build the aggregates, so the attribution reads
-        // the reason of the cell that actually decided this voxel.
+        // Voxel -> the base cells COVERING it (Finding 7's cover rule, the SAME one
+        // plan_cell_sizes built the aggregates with), so the attribution reads the
+        // reason of a cell that actually refused part of this voxel.
         const int vi = static_cast<int>(e % static_cast<std::size_t>(grid.nx));
         const int vj = static_cast<int>((e / static_cast<std::size_t>(grid.nx)) %
                                         static_cast<std::size_t>(grid.ny));
         const int vk = static_cast<int>(e / (static_cast<std::size_t>(grid.nx) *
                                              static_cast<std::size_t>(grid.ny)));
-        const double S0 = out.cell_plan.base_cell_mm;
-        const int ci = std::min(out.cell_plan.nx - 1, std::max(0,
-            static_cast<int>(std::floor((vi + 0.5) * grid.spacing / S0))));
-        const int cj = std::min(out.cell_plan.ny - 1, std::max(0,
-            static_cast<int>(std::floor((vj + 0.5) * grid.spacing / S0))));
-        const int ck = std::min(out.cell_plan.nz - 1, std::max(0,
-            static_cast<int>(std::floor((vk + 0.5) * grid.spacing / S0))));
-        const std::size_t c = out.cell_plan.index(ci, cj, ck);
         const signed char why =
-            c < out.cell_plan.reject_reason.size()
-                ? out.cell_plan.reject_reason[c] : 0;
+            cell_plan_voxel_reject_reason(grid, out.cell_plan, vi, vj, vk);
+        // ★ Finding 7: the voxel's OWN (centre) cell is laid, and only another cell
+        // covering it is not. It goes solid outright: retention would certify it at a cell
+        // the swept export never lays there, and a part of it would be empty.
+        {
+          const double S0 = out.cell_plan.base_cell_mm;
+          const int ci = std::min(out.cell_plan.nx - 1, std::max(0,
+              static_cast<int>(std::floor((vi + 0.5) * grid.spacing / S0))));
+          const int cj = std::min(out.cell_plan.ny - 1, std::max(0,
+              static_cast<int>(std::floor((vj + 0.5) * grid.spacing / S0))));
+          const int ck = std::min(out.cell_plan.nz - 1, std::max(0,
+              static_cast<int>(std::floor((vk + 0.5) * grid.spacing / S0))));
+          if (out.cell_plan.cell_size_at(ci, cj, ck) > 0.0) {
+            out.cover_dropped_rho[e] = clamp_rho(e, rho_of(e));
+            ++out.solid_fallback_voxels;
+            continue;
+          }
+        }
         if (why == 2) {
           // An unprintable strut is a fact about the PRINTER, not about load. Sub-floor
           // retention has nothing to say about it and never rescues one.

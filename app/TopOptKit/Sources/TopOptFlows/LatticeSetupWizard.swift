@@ -1532,6 +1532,11 @@ public struct LatticeSetupWizard: View {
                 .foregroundStyle(DS.Color.textTertiary.color)
                 .padding(.top, DS.Space.s)
             gradeBandSliders(idPrefix: "wizard-shape-band")
+            // ★ the reviewer's ruling (2), 2026-11-06: one plain line until core builds the real band (LatticeTypes, after
+            // its queue: grading.shape_grade_strength); it goes by itself the day the linked core takes that key
+            if !TopOptKit.gradingSchemaAccepts(key: "shape_grade_strength") {
+                shortNote(Self.shapeGradeRunLine).latticeID("wizard-shape-grade-run-line")
+            }
             captionLine("How far in the cells grade down to the outline.",
                         info: "band",
                         "How far in from the face's outline the cells grade down toward the "
@@ -2224,9 +2229,15 @@ public struct LatticeSetupWizard: View {
     }
 
     private func saveAndClose() {
+        leaveLatticeArea()   // ★ B7 (E3): an open area's grade goes to its own store; the model is the Part tab's again
         // ★ B4: Along's display pick is not a bake input, so it is saved on its own test
         if settingsChangedSinceOpen || model.gradeAlong != project.lattice.gradeAlong {
             project.lattice = model.applied(to: project.lattice)
+        }
+        if let edits = latticeAreaEdits {
+            var s = project.lattice
+            s.saveAreaGrading(edits, areas: project.latticeAreaGroups.map(\.id))
+            if s != project.lattice { project.lattice = s }
         }
         onExit()
     }
@@ -2237,19 +2248,63 @@ public struct LatticeSetupWizard: View {
     // the Squish one's: "Lattice settings" with the type in use, the folder tabs on the left (Part, then one per lattice
     // group), the open tab's [Auto │ Manual] and Reset all, its rows, and a pinned Cancel │ Save. Every row is today's
     // control, re-homed and never copied: the Part tab holds the type, an area's tab its finish and grading, and Manual adds
-    // the rest under "Manual · this area". Until core takes settings per area (E3) every area's tab edits the same settings,
-    // and says so. The view switch (One cell │ In the part) moved over the canvas, beside the panel; it shows, it sets nothing.
+    // the rest under "Manual · this area". ★ E3 (reviewer 2026-11-06 09:41Z): an area's grade — on or off, what varies, and
+    // the shape band — is its own (`LatticeSettings.areaGrading`), sent on its regions; the other rows on its tab are the
+    // whole part's, and the tab says so. The view switch (One cell │ In the part) moved over the canvas; it sets nothing.
 
     @State private var latticeTab = "part"
     @State private var latticeManual = false
     @State private var latticeResetAsk = false
     @State private var latticePanelOpen = true
     @State private var latticePanelHeight: CGFloat = 0
+    /// ★ B7 (E3): each area's grade this visit (nil until the page first opens an area; saved by Save, dropped by Cancel)
+    @State private var latticeAreaEdits: [UUID: LatticeAreaGrading]? = nil
+    /// The Part tab's grade, held while an area's tab has the model (nil on Part).
+    @State private var latticePartGrade: LatticeAreaGrading? = nil
 
     static let latticePanelTitle = "Lattice settings"
     static let latticeTabsKey = "lattice-page-tab"
     static let latticeManualSection = "Manual · this area"
-    static let latticePerAreaLine = "Look, finish and grading are set per area, on the tabs at the left."
+    static let latticePerAreaLine = "Each area's tab sets its own grade; its look and finish are the whole part's."
+    /// ★ E3: on an area's tab, which rows are its own (it replaces "These settings apply to every region today.")
+    static let latticeAreaOwnLine = "The grade and its band are this area's; the other rows are the whole part's."
+    /// ★ The reviewer's words (ruling (2), 2026-11-06), under the shape grade until core's band is real.
+    static let shapeGradeRunLine = "The run's shape grade is a solid outline; the band and Strength are preview only."
+    /// Where an area's grade differs from the part's: the preview draws one grade, the run grades this area its own way.
+    static let latticeAreaPreviewLine = "The preview draws one grade for the whole part; the run grades this area as set here."
+
+    /// The open area's lattice group, nil on Part (the tabs are `ProjectModel.latticeAreaGroups`, in order).
+    private func latticeAreaGroupID(_ c: CellsPageContext) -> UUID? {
+        guard latticeArea(c) != nil, let i = Int(latticeTab.dropFirst(5)) else { return nil }
+        let groups = project.latticeAreaGroups
+        return groups.indices.contains(i) && groups[i].name == c.regions[i] ? groups[i].id : nil
+    }
+
+    /// ★ B7 (E3): open a tab. Leaving an area stores its grade (only what differs from the Part tab) and gives the model
+    /// back the Part tab's; opening one holds the Part tab's grade and shows the area's own over it.
+    private func openLatticeTab(_ id: String, _ c: CellsPageContext) {
+        leaveLatticeArea()
+        latticeTab = id
+        guard let gid = latticeAreaGroupID(c) else { return }
+        let edits = latticeAreaEdits ?? project.lattice.areaGrading
+        latticeAreaEdits = edits
+        latticePartGrade = LatticeAreaGrading(gradingMode: model.gradingMode, shapeFitBandMM: model.shapeFitBandMM)
+        if let m = edits[gid]?.gradingMode { model.gradingMode = m }
+        if let b = edits[gid]?.shapeFitBandMM { model.shapeFitBandMM = b }
+        rebuild()
+    }
+
+    private func leaveLatticeArea() {
+        guard let part = latticePartGrade, let c = cellsPage, let gid = latticeAreaGroupID(c) else { return }
+        let mode = part.gradingMode ?? model.gradingMode, band = part.shapeFitBandMM ?? model.shapeFitBandMM
+        let own = LatticeAreaGrading(gradingMode: model.gradingMode != mode ? model.gradingMode : nil,
+                                     shapeFitBandMM: model.shapeFitBandMM != band ? model.shapeFitBandMM : nil)
+        latticeAreaEdits?[gid] = own.isEmpty ? nil : own
+        model.gradingMode = mode
+        model.shapeFitBandMM = band
+        latticePartGrade = nil
+        rebuild()
+    }
 
     private func latticeTabs(_ c: CellsPageContext) -> [DSFolderTabs.Tab] {
         [DSFolderTabs.Tab(id: "part", title: "Part")]
@@ -2321,7 +2376,7 @@ public struct LatticeSetupWizard: View {
     private func latticeTabsAndRows(_ c: CellsPageContext) -> some View {
         HStack(alignment: .top, spacing: 0) {
             DSFolderTabs(latticeTabs(c), selected: latticeArea(c) == nil ? "part" : latticeTab, key: Self.latticeTabsKey,
-                         pick: { id in withAnimation(.easeInOut(duration: 0.15)) { latticeTab = id } })
+                         pick: { id in withAnimation(.easeInOut(duration: 0.15)) { openLatticeTab(id, c) } })
                 .frame(maxHeight: .infinity, alignment: .top)
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: DS.Space.m) {
@@ -2414,6 +2469,11 @@ public struct LatticeSetupWizard: View {
         let stage = model.stage
         model = LatticeWizardModel(settings: fresh)
         model.jump(to: stage)
+        // ★ B7 (E3): every area's own grade goes too; an open area's tab now shows the fresh part's
+        latticeAreaEdits = [:]
+        if latticePartGrade != nil {
+            latticePartGrade = LatticeAreaGrading(gradingMode: model.gradingMode, shapeFitBandMM: model.shapeFitBandMM)
+        }
         rebuild()
     }
 
@@ -2436,7 +2496,13 @@ public struct LatticeSetupWizard: View {
         } else if let area {
             Text(area.uppercased()).font(.system(size: 10.5, weight: .bold)).tracking(0.8)
                 .foregroundStyle(DS.Color.textTertiary.color)
-            if c.regions.count > 1 { shortNote(LatticeCellsRow.tabsNote).latticeID("lattice-page-tabs-note") }
+            // ★ E3 (reviewer 2026-11-06): the grade is this area's own now; "These settings apply to every region today" goes
+            shortNote(Self.latticeAreaOwnLine).latticeID("lattice-page-area-own-note")
+            if let part = latticePartGrade, c.regions.count > 1,
+               part.gradingMode != model.gradingMode
+                || (model.gradingMode.fitsShape && part.shapeFitBandMM != model.shapeFitBandMM) {
+                shortNote(Self.latticeAreaPreviewLine).latticeID("lattice-page-area-preview-note")
+            }
             latticeAreaRows(organic: organic, structural: structural)
         }
         })

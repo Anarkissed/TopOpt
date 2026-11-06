@@ -45,7 +45,12 @@ final class OrganicSampleCubeTests: XCTestCase {
         XCTAssertEqual(OrganicSampleCube.Picks(settings: s, layerHeightMM: 0.2).overhangDeg, 40)
     }
 
-    func testThickerIsLiveAndNeverRetraces() {
+    /// ★ RE-PINNED for release (2) (reviewer, 2026-11-06: "settle the three standing reds … one reason each"). This was
+    /// "Thicker is live and never re-traces", red since 7012584da (2026-09-10) made the strut width a TRACE input on
+    /// purpose: core's emission merges endpoints closer than a share of the strut RADIUS, so the width decides how much of
+    /// the weave survives, and a sample traced without it showed a thickness that was not his. Thicker re-traces now;
+    /// nothing else in the picks moves, and the bake voxel still follows the cell.
+    func testThickerRetracesForTheWidthAlone() {
         var s = organic()
         let bead = OrganicSampleCube.Picks(settings: s, layerHeightMM: 0.2)
         XCTAssertEqual(bead.thinnestRadiusMM, 0.21, accuracy: 1e-9)      // 0.42 / 2
@@ -58,10 +63,11 @@ final class OrganicSampleCubeTests: XCTestCase {
                        accuracy: 1e-9)
         s.organicStrutWidthMM = 1.0
         let thick = OrganicSampleCube.Picks(settings: s, layerHeightMM: 0.2)
-        // ★ 2026-09-04: the strut width is a live radius on the march, not a pick —
-        // the same picks ⇒ the same trace. The RIM does not read it either, precisely
-        // so that this stays true (2026-09-07).
-        XCTAssertEqual(thick, bead, "Thicker must not re-trace the sample")
+        // ★ 7012584da (2026-09-10): the width reaches core's emission (`strutDiameterMM`), so it is a pick
+        XCTAssertNotEqual(thick, bead, "★ Thicker re-traces: the stated width reaches core's emission")
+        XCTAssertEqual(thick.strutWidthMM, 1.0)
+        var same = bead; same.strutWidthMM = thick.strutWidthMM
+        XCTAssertEqual(thick, same, "★ and nothing else in the picks moves (the rim does not read it: 2026-09-07)")
         XCTAssertEqual(thick.bakeVoxelMM, bead.bakeVoxelMM, accuracy: 1e-9)
         // the cube stays far under the 12 M cap
         let n = Int(OrganicSampleCube.edgeMM / bead.bakeVoxelMM) + 2

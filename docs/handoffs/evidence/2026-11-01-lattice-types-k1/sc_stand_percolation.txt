@@ -1,0 +1,23 @@
+Stand percolation, Simple cubic: lattice-variant of the Structural run's rung 0.38 (out_lv_sc, the pipeline's own), part = that run's variant_038.stl, shell 2.22 mm (0.42 + 4 x 0.45).
+SPANS out_lv_sc/variant_038_lattice_SPANS.txt: 2415 primitives, 107 components, 212 of 3060 strut ends cut (no other primitive covers them)
+  components with no cut end: 60 (1558 primitives)
+  FLOATING (no cut end, not touching the solid companion or the shell): 3 components, 115 primitives
+  component sizes (primitives), largest first: 51 51 51 44 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 31 29 27 27 27 27 27 27 27 27 27 27 27 27 25 ...
+
+The 3 floating components, located (the same spans mode plus one line per floating component: stand_percolation_locate.patch):
+  float comp 32 prims (20 seg, 12 ball) r<=0.331 bbox (119.72 -44.91 18.00)-(123.72 -42.91 20.00) ext (4.00 2.00 2.00) gap-to-solid 0.132 mm
+  float comp 32 prims (20 seg, 12 ball) r<=0.297 bbox (115.72 -40.91 18.00)-(117.72 -36.91 20.00) ext (2.00 4.00 2.00) gap-to-solid 0.167 mm
+  float comp 51 prims (33 seg, 18 ball) r<=0.291 bbox (119.72 -40.91 18.00)-(123.72 -36.91 20.00) ext (4.00 4.00 2.00) gap-to-solid 0.172 mm
+
+Octet control (bcc_stand_percolation.txt; octet's own stand lattice, stand_percolation.txt, rung 0.38) -- its 2 floating components:
+  float comp 91 prims (68 seg, 23 ball) r<=0.283 bbox (119.72 -44.91 18.00)-(123.72 -42.91 20.00) ext (4.00 2.00 2.00) gap-to-solid 0.180 mm
+  float comp 166 prims (128 seg, 38 ball) r<=0.243 bbox (119.72 -40.91 18.00)-(123.72 -36.91 20.00) ext (4.00 4.00 2.00) gap-to-solid 0.220 mm
+
+What they are (measured): the same core behaviour as BCC's 12 (Finding 7). All three pieces are 2 or 4 whole 2 mm
+cells (8 in all) in the pocket ONE solve voxel thick (z 17.05-20.46 mm, voxel 3.41 mm) at x 115-124; two of them have
+exactly the bounding boxes of octet's two floating pieces, and FCC also left a lone cell at the third's x (115.72-117.72).
+The report says latticed_cells 154 == latticed_voxels 154: one cell per masked solve
+voxel, as for octet (112 == 112) and BCC (92 == 92). The corner balls stop 0.13-0.17 mm short of the wall
+(octet's 0.18-0.22 mm). SC's generator emits exactly the cells it is given (block, Doubled and Stepped are
+one solid each in test_lattice_gen); the pieces float because core gives it isolated cells. Reported under
+Findings; not changed here (it is octet's path too, R9).

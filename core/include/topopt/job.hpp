@@ -254,6 +254,36 @@ struct JobLatticeRegion {
   bool synthetic_stress = false;
   int synthetic_foci = 4;
   double synthetic_soft_mm = 0.0;   // 0 = a quarter of the region's largest extent
+  // ── ★ E2.6 + E3: THE REGION'S NAME AND ITS OWN GRADING (plan.md §B7) ─────────
+  // `label` is the name the app shows ("Zone 1", "Group 2"), echoed in the receipt so
+  // the app never shows him a region number. Any role.
+  //
+  // The rest are an INCLUDE region's own grading, each falling back to the part's
+  // `grading.*` when absent (the defaults below mean absent):
+  //   rho_min / rho_max     the region's density band, inside the type's certifiable
+  //                         band; both or neither; not with relative_density
+  //   demand_exponent       the curve from stress to density
+  //   grading               "off" one density for the region, no shape grade;
+  //                         "stress" graded from stress, no shape grade;
+  //                         "shape" one density, the shape grade on;
+  //                         "stress_shape" graded from stress, the shape grade on.
+  //                         One density = relative_density when stated, else the
+  //                         region's graded peak (densest point of its own grade), so
+  //                         it certifies wherever the graded lattice does.
+  //   shape_grade / shape_grade_band_mm   the solid outline beam for this region
+  //                         (grading.shape_grade's meaning); `grading` sets the switch
+  //                         when given, so the two may not disagree.
+  std::string label;
+  double rho_min = 0.0;
+  double rho_max = 0.0;
+  double demand_exponent = 0.0;
+  std::string grading;
+  int shape_grade = -1;               // -1 = the part's; 0 off; 1 on
+  double shape_grade_band_mm = -1.0;  // < 0 = the part's
+  // ★ E3: the region's own cell window (mm), swept only; 0 = the part's. Its voxels take
+  // only the part's ladder cells (grading cell_min_mm x 2^L) inside it.
+  double cell_min_mm = 0.0;
+  double cell_max_mm = 0.0;
 };
 
 // ── ★ AN INCLUDE-REGION ID COUNTS INCLUDES, NOT REGIONS (#354, 2026-09-30) ────
@@ -317,6 +347,31 @@ struct JobLattice {
   // include-region order, so the frame each cell is stated in is DERIVED from the region
   // it names rather than sent alongside it. Nothing to keep in step.
   std::vector<SteppedCell> stepped_cells;
+  // ── ★ THE SCENARIOS THIS LATTICE IS GRADED AND CERTIFIED ON (E2.1, plan.md §B6;
+  // his Q11: "make the lattice run like the Topology Optimization where it is a
+  // combination of all scenarios") ────────────────────────────────────────────
+  // Names from `loads.scenarios`, in any order. Every voxel is graded from its WORST
+  // von Mises across these scenarios (raw MPa, so a light scenario never drives the
+  // grade), and the latticed file is certified under EACH of them: the worst margin
+  // governs and the lattice is accepted only if every one passes.
+  //
+  // Not stated (the default, ruled 2026-11-04) = every scenario of the job. A job
+  // with no scenarios has one load case and is unchanged. Before E2.1 a scenario
+  // job's lattice was graded from the governing scenario and certified under
+  // scenario 1 ONLY, whichever governed (measured: a lattice margin of 138 on a
+  // design whose governing solid margin was 8.0).
+  std::vector<std::string> scenarios;
+  bool scenarios_stated = false;
+  // ── ★ THE "- LATTICE FACES" MODE (E2.2, plan.md §B6 note 26) ─────────────────
+  // false (the default): today's rule. Any include region limits the lattice to the
+  // includes; with none, the whole part is latticed.
+  // true: the WHOLE part is latticed and the exclude regions (No lattice, a face
+  // prism kept solid) are cut out of it. Include regions no longer limit anything:
+  // the parse moves them out of `regions` into `whole_part_includes`, where they only
+  // carry their own grading (E3: band, exponent, grading mode, shape grade). A stated
+  // relative_density or synthetic_stress on one is not carried yet and is refused.
+  bool whole_part = false;
+  std::vector<JobLatticeRegion> whole_part_includes;
   // MULTISCALE LATTICE TO (task multiscale-lattice-to). false (the DEFAULT) is the
   // TWO-STEP pipeline every existing job runs: optimize assuming solid, then try to
   // lattice what survived. true asks the OPTIMIZER to place the lattice while it
@@ -367,7 +422,14 @@ struct JobLattice {
   //                composite margins but lattice_accepted is forced false.
   //   "shell+skin" — shell retained, freeform skin laid on it (decorative,
   //                closed); certification unchanged from "shell".
-  // A non-"shell" finish requires skin == "diagrid" (the skin IS the finish).
+  //   "none"       — ★ E2.4 (ruling 11-06 (1)): the OPEN lattice. No shell and no
+  //                freeform skin; `skin` (none | rim | diagrid) dresses the clipped
+  //                ends as it does under a shell. Certified honestly: the cells the
+  //                part's free surface cuts form a weaker boundary layer (Onck,
+  //                Andrews & Gibson 2001), so they get NO credit (the safe floor:
+  //                void in the certification solve); refused by region label when
+  //                the rest does not certify. The app's None; its Covered is "shell".
+  // "skin" and "shell+skin" require skin == "diagrid" (the skin IS the finish).
   std::string outer_finish = "shell";
   // ── ★ THE WELDED, SINGLE-BODY LATTICE (task 2026-08-21-organic-lattice) ──────
   // false (the DEFAULT) writes nothing extra and every existing job is unchanged.

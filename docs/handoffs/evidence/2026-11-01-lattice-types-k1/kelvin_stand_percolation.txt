@@ -1,0 +1,4 @@
+SPANS out_lv_kelvin/variant_038_lattice_SPANS.txt: 778 primitives, 14 components, 28 of 952 strut ends cut (no other primitive covers them)
+  components with no cut end: 8 (523 primitives)
+  FLOATING (no cut end, not touching the solid companion or the shell): 0 components, 0 primitives
+  component sizes (primitives), largest first: 106 60 60 60 60 60 60 57 52 52 52 33 33 33

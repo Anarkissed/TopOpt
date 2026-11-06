@@ -42,20 +42,25 @@ final class LatticeTypeCatalogTests: XCTestCase {
         XCTAssertEqual(more.last?.id, "lattice9"); XCTAssertEqual(more.last?.offered, true)
     }
 
-    /// The linked core (#358 at 23e6154e): the octet alone is offered; the six struts are certifiable but
-    /// not built; the sheets and the tetragonal three are neither. The job parser accepts octet only.
-    /// When core lights a type this test fails by name — light it up (A2).
+    /// The linked core: the octet alone is offered. ★ RE-PINNED (release (2), K1 + E2): core builds, certifies and
+    /// runs the six struts now, so they are greyed by the TYPE GATE (their app batch, B7.n, has not shipped); core
+    /// builds and certifies the two sheets but its job parser refuses their ids (core's fact, said first); the
+    /// tetragonal three are neither. When a batch ships its id joins `appBatches` and this test fails by name.
     func testTheLinkedCoreOffersTheOctetAlone() {
         let e = LatticeTypeCatalog.entriesFromCore()
         XCTAssertEqual(e.filter(\.offered).map(\.id), ["octet"], "★ a newly offered type: light it up (A2)")
         for id in ["sc", "bcc", "fcc", "diamond", "kelvin", "rhombic"] {
-            XCTAssertEqual(e.first { $0.id == id }?.reason, "Strength-checked, but not buildable yet", id)
+            XCTAssertEqual(e.first { $0.id == id }?.reason, LatticeTypeCatalog.appBatchPending, id)
+            XCTAssertTrue(TopOptKit.jobSchemaAcceptsTopology(id), "★ core runs \(id)")
         }
-        for id in ["gyroid", "schwarz_d", "bccz", "fccz", "reentrant"] {
+        for id in ["gyroid", "schwarz_d"] {
+            XCTAssertEqual(e.first { $0.id == id }?.reason, LatticeTypeCatalog.jobRefused, id)
+        }
+        for id in ["bccz", "fccz", "reentrant"] {
             XCTAssertEqual(e.first { $0.id == id }?.reason, "Not buildable or strength-checked yet", id)
         }
         XCTAssertTrue(TopOptKit.jobSchemaAcceptsTopology("octet"), "the control")
-        XCTAssertFalse(TopOptKit.jobSchemaAcceptsTopology("fcc"), "★ core's parser refuses a non-octet id today")
+        XCTAssertEqual(LatticeTypeCatalog.appBatches, ["octet"])
         XCTAssertEqual(LatticeSetupWizard.offeredTypeIDs, ["octet"])
     }
 

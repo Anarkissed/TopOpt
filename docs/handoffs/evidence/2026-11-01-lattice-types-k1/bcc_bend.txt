@@ -1,0 +1,8 @@
+BEND bcc: cell S=5.0 mm, vpc=12, cantilever 6 cells long, target rho 0.30 -> periodic cell rho 0.2778 (r/L 0.13608, 3.3 vox/strut), C11=260.80 C12=173.73 C44=153.18 Zener=3.518
+  [writing ../docs/handoffs/evidence/2026-11-01-lattice-types-k1/bcc_bend.csv]
+    nc=1  block rho 0.2778  K_res 2.4631  K_hom 7.8832  err +220.05 %  dof 37011  364 ms  NO-GO
+    nc=2  block rho 0.2778  K_res 45.3192  K_hom 67.8327  err +49.68 %  dof 136875  1333 ms  NO-GO
+    nc=3  block rho 0.2778  K_res 216.5528  K_hom 265.5391  err +22.62 %  dof 299811  3326 ms  NO-GO
+    nc=4  block rho 0.2778  K_res 608.9551  K_hom 687.8339  err +12.95 %  dof 525819  5836 ms  NO-GO
+    nc=5  block rho 0.2778  K_res 1281.0548  K_hom 1388.0823  err +8.35 %  dof 814899  9954 ms  NO-GO
+    nc=6  block rho 0.2778  K_res 2252.5714  K_hom 2382.8377  err +5.78 %  dof 1167051  15698 ms  NO-GO

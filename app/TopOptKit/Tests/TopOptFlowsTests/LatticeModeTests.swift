@@ -166,8 +166,8 @@ final class LatticeModeTests: XCTestCase {
                        "the uniform build fills at the clamped dense end")
         let expected = LatticeType.octet.strutRadiusMM(relativeDensity: core.rhoMax, cellMM: s.cellMM)
         XCTAssertEqual(spec.strutRadiusMM, expected, accuracy: 1e-9)
-        // Enabled but a topology the GENERATOR can't emit → nil (bcc now certifies,
-        // but core's LatticeGenTopology is octet-only — the B0 generatable gate).
+        // Enabled but a topology the app can't run → nil. ★ RE-PINNED (release (2), E2): core builds BCC now; the
+        // run waits for its app batch (`LatticeTypeCatalog.appBatches`, the type gate).
         s.topologyID = "bcc"
         XCTAssertNil(s.runSpec())
         // And a topology that certifies nothing at all → nil too.

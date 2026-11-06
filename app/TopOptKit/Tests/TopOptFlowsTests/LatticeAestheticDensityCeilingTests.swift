@@ -26,15 +26,18 @@ final class LatticeAestheticDensityCeilingTests: XCTestCase {
         // because `rho` on the wire goes back through the diameter table; this pins
         // that the forward law is exposed and that the two do differ, so nobody
         // "corrects" one to the other again without reading this.
+        // ★ RE-PINNED (release (2), K1 item 1): octet's forward law IS the diameter table's inverse now
+        // (`octet_relative_density`, measured on the full cell), so the two scales are ONE: strut/cell 0.20 reads
+        // 0.3788 both ways, and sent forward the run's strut lands ON 0.20 of the cell.
         if TopOptKit.latticeRelativeDensity(topology: "octet", strutRadiusMM: 0.4, cellMM: 4) > 0 {
             let forward = TopOptKit.latticeRelativeDensity(topology: "octet", strutRadiusMM: 0.4, cellMM: 4)
-            XCTAssertEqual(forward, 0.211733, accuracy: 0.002, "core's forward law at strut/cell 0.20")
-            XCTAssertGreaterThan(rhos[1], forward + 0.003, "the preimage sits above the forward number — two scales")
+            XCTAssertEqual(forward, rhos[1], accuracy: 1e-6, "★ one scale: core's forward law at strut/cell 0.20 is the ceiling")
             let back = 2 * octet.strutRadiusMM(relativeDensity: forward, cellMM: 4) / 4
-            XCTAssertLessThan(back, LatticeType.aestheticStrutRatioCeiling, "sent forward, the run's strut lands UNDER 0.20 of the cell")
+            XCTAssertEqual(back, LatticeType.aestheticStrutRatioCeiling, accuracy: 1e-6, "sent forward, the strut is 0.20 of the cell")
         }
-        // and it is a LATTICE density, well under the 0.53 where octet struts touch
-        XCTAssertGreaterThan(rhos[1], 0.12); XCTAssertLessThan(rhos[1], 0.32)
+        // and it is a LATTICE density, under the 0.53 where octet struts touch (K1 item 4: the full cell has twice the
+        // legs-only cell's struts, so a fifth-of-the-cell strut holds 0.3788, where it held 0.2189)
+        XCTAssertGreaterThan(rhos[1], 0.12); XCTAssertLessThan(rhos[1], 0.53)
     }
 
     func testTheDemandCapLandsExactlyOnTheCeiling() {

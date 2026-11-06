@@ -293,6 +293,8 @@ public enum LatticeRegionEmission {
                                selectableRoles: [String: LatticeSelectableRole] = [:],
                                selectableDepthMM: [String: Double] = [:],
                                groupDensities: [UUID: Double] = [:],
+                               // ★ B7 (E3): each area's own grading, on its include regions. Empty ⇒ no key.
+                               groupGrading: [UUID: LatticeAreaGrading] = [:],
                                // ★ THE PER-SELECTABLE DENSITY (maintainer,
                                // 2026-08-17). The note below used to say a
                                // per-selectable density "needs its own store AND
@@ -398,6 +400,7 @@ public enum LatticeRegionEmission {
                     s.relativeDensity = density(
                         for: g.id, role: role, densities: groupDensities,
                         stated: selectableDensity[LatticeSelectableRef.primitive(p.id).key])
+                    if role == .include { s.areaGrading = groupGrading[g.id] }   // ★ B7 (E3)
                     s.selectableKey = ref.key
                     if role == .include, let sf = synthetic { s.syntheticStress = true; s.syntheticFoci = sf.foci(for: ref.key) }
                     out.append(s)
@@ -419,6 +422,7 @@ public enum LatticeRegionEmission {
                     s.relativeDensity = density(
                         for: g.id, role: role, densities: groupDensities,
                         stated: selectableDensity[ref.key])
+                    if role == .include { s.areaGrading = groupGrading[g.id] }   // ★ B7 (E3)
                     s.selectableKey = ref.key
                     s.rawFaceID = f
                     if role == .include, let sf = synthetic { s.syntheticStress = true; s.syntheticFoci = sf.foci(for: ref.key) }
@@ -452,6 +456,7 @@ public enum LatticeRegionEmission {
                         s.relativeDensity = density(
                             for: g.id, role: role, densities: groupDensities,
                             stated: selectableDensity[ref.key])
+                        if role == .include { s.areaGrading = groupGrading[g.id] }   // ★ B7 (E3)
                         s.selectableKey = ref.key
                         s.rawFaceID = f
                         if role == .include, let sf = synthetic { s.syntheticStress = true; s.syntheticFoci = sf.foci(for: ref.key) }

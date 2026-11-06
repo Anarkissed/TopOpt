@@ -26,9 +26,13 @@ final class LatticeTypeNoBandTests: XCTestCase {
     func testTheReasonIsCoresSentenceWithTheNameOnce() throws {
         let certifiable = TopOptKit.latticeCertifiableTopologies
         let generatable = Set(TopOptKit.latticeGeneratableTopologies)
-        let certOnly = try XCTUnwrap(certifiable.first { !generatable.contains($0) }, "no certify-only type on this core")
-        for (id, words) in [(certOnly, TopOptKit.latticeTypeReadinessPlain(.notGeneratable)),
-                            ("bccz", TopOptKit.latticeTypeReadinessPlain(.notEither))] {
+        // ★ RE-PINNED (release (2), K1 + E2): core builds every type it certifies now, so there is no certify-only type
+        // to word; the case comes back by itself the day core certifies one it cannot build.
+        let certOnly = certifiable.filter { !generatable.contains($0) }
+        XCTAssertEqual(certOnly, [], "core builds every type it certifies")
+        let cases = certOnly.prefix(1).map { ($0, TopOptKit.latticeTypeReadinessPlain(.notGeneratable)) }
+            + [("bccz", TopOptKit.latticeTypeReadinessPlain(.notEither))]
+        for (id, words) in cases {
             let s = LatticeSettings(enabled: true, topologyID: id)
             let limits = TopOptKit.latticeLimits(topology: id)
             XCTAssertFalse(limits.certifiable, "no band for \(id)")

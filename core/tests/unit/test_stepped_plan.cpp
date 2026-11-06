@@ -512,10 +512,11 @@ static void test_plan_cell_density_is_checked_against_bead_and_cap() {
                                  bead, min_tile, true, SteppedMenu::AnyStep, nullptr, cap); };
 
   // ── the premise: these two densities really do straddle the bead at this cell ──
+  // (octet's full-cell law since ruling 2026-11-02 (c): 0.20 no longer prints here, 0.30 does)
   CHECK(lattice_strut_diameter_mm(LatticeTopology::Octet, 0.10, 3.0) < bead,
-        "D5 premise: rho 0.10 at a 3 mm cell is UNDER the 0.45 mm bead (0.4002 mm)");
-  CHECK(lattice_strut_diameter_mm(LatticeTopology::Octet, 0.20, 3.0) > bead,
-        "D5 premise: and rho 0.20 prints (0.5694 mm)");
+        "D5 premise: rho 0.10 at a 3 mm cell is UNDER the 0.45 mm bead (0.2793 mm)");
+  CHECK(lattice_strut_diameter_mm(LatticeTopology::Octet, 0.30, 3.0) > bead,
+        "D5 premise: and rho 0.30 prints (0.5201 mm)");
 
   // ── a strut under the bead: refused, with the number ──
   const SteppedPlanCheck thin = run(3.0, 3.0, 0.10, 0.0, 0.0);
@@ -526,7 +527,7 @@ static void test_plan_cell_density_is_checked_against_bead_and_cap() {
   CHECK(thin.error.find("region 1") != std::string::npos,
         "D5: and the region, so a plan with many walls says which");
   // the control: the SAME cell at a printable density
-  CHECK(run(3.0, 3.0, 0.20, 0.0, 0.0).ok,
+  CHECK(run(3.0, 3.0, 0.30, 0.0, 0.0).ok,
         "D5 control: at a printable density the same cell validates -- so the refusal is "
         "about the density, not about the cell");
   // and a cell that sends NO rho is unaffected (every job before ruling C)
@@ -541,7 +542,7 @@ static void test_plan_cell_density_is_checked_against_bead_and_cap() {
         "D5: and the refusal quotes the cap it exceeds");
   CHECK(over.error.find("clamped") != std::string::npos,
         "D5: and says why it is not clamped -- the density sizes the strut");
-  CHECK(run(3.0, 3.0, 0.20, 0.0, 0.25).ok,
+  CHECK(run(3.0, 3.0, 0.30, 0.0, 0.35).ok,
         "D5 control: within the cap, the same cell validates");
   CHECK(run(3.0, 3.0, 0.30, 0.0, 0.0).ok,
         "D5: with no cap sent, no cap is applied");
@@ -702,15 +703,17 @@ static void test_group_keeps_each_cells_own_rho() {
     c.rho = rho;
     return c; };
   // sent in DESCENDING corner order, which is the reverse of the emission order
-  // ★ D5 (2026-10-09): these densities START AT 0.20, not 0.10. The validator now checks
+  // ★ D5 (2026-10-09): these densities START AT 0.30, not 0.10. The validator now checks
   // each cell's own rho against the bead AT ITS OWN SIZE, and 0.10 at a 3 mm cell builds a
-  // 0.4002 mm strut -- measured -- under the 0.45 mm bead. The old values were chosen to be
-  // DISTINGUISHABLE (each a function of the cell's position, so a mispairing cannot look
-  // right), not to be printable, and that property is untouched: 0.20..0.21 are still
-  // distinct per cell and now also print (0.5694 mm at 3 mm). The assertion this fixture
-  // exists for -- that each cell keeps ITS OWN rho through the emission sort -- is unchanged.
+  // strut under the 0.45 mm bead. The values were chosen to be DISTINGUISHABLE (each a
+  // function of the cell's position, so a mispairing cannot look right), not to be
+  // printable, and that property is untouched: 0.30..0.31 are distinct per cell and print
+  // (0.5201 mm at 3 mm on octet's full-cell law; they started at 0.20 on the legs-only law,
+  // which on the full cell builds 0.4105 mm, under the bead -- ruling 2026-11-02 (c)). The
+  // assertion this fixture exists for -- that each cell keeps ITS OWN rho through the
+  // emission sort -- is unchanged.
   auto rho_for = [](double dx, double dy, double dz) {
-    return 0.20 + 0.01 * (dx / 3.0) + 0.001 * (dy / 3.0) + 0.0001 * (dz / 3.0); };
+    return 0.30 + 0.01 * (dx / 3.0) + 0.001 * (dy / 3.0) + 0.0001 * (dz / 3.0); };
   std::vector<SteppedCell> cells;
   for (int i = 1; i >= 0; --i)
     for (int j = 1; j >= 0; --j)
@@ -781,7 +784,7 @@ static void test_strut_radius_matches_the_sent_rho() {
   // a mixed pack: three sizes, each with its own density, as the app would send
   struct Want { double dx, dy, dz, size, rho; };
   const std::vector<Want> want = {
-      {0, 0, 0, 6.0, 0.2189}, {6, 0, 0, 3.0, 0.1740},
+      {0, 0, 0, 6.0, 0.2189}, {6, 0, 0, 3.0, 0.2600},  // 0.1740 until (c): 0.379 mm on the full cell
       {6, 3, 0, 3.0, 0.4500}, {0, 6, 0, 6.0, 0.0950}};
   std::vector<SteppedCell> cells;
   for (const Want& w : want) {
@@ -833,9 +836,10 @@ static void test_strut_radius_matches_the_sent_rho() {
         "EXACTLY -- not within a tolerance, because nothing on this path is allowed "
         "to adjust it");
 
-  // ★ THE CONTROL. Size one cell from the WRONG density -- the forward density law's
-  // 0.2117 instead of the diameter table's 0.2189 -- and the disagreement must be
-  // visible, or this test would pass against a core that used either table.
+  // ★ THE CONTROL. Size one cell from a WRONG density -- off by the 0.007 the two legs-only
+  // octet tables once disagreed by (0.2117 against 0.2189, before ruling 2026-11-02 (c)
+  // made them one measurement) -- and the disagreement must be visible, or this test would
+  // pass against a core that drifted the sent density by that much.
   const double r_right = 0.5 * octet_strut_diameter_mm(0.218871, 4.0);
   const double r_wrong = 0.5 * octet_strut_diameter_mm(0.211733, 4.0);
   std::printf("  parity control: right %.4f vs wrong-table %.4f mm (delta %.4f)\n",
@@ -857,14 +861,15 @@ static void test_aesthetic_ceiling_is_the_diameter_preimage() {
     CHECK(std::fabs(got - kOctetAestheticStrutPerCell) < 1e-6,
           "ceiling: sent through the diameter table it builds strut/cell 0.20 exactly");
   }
-  CHECK(std::fabs(ceil - 0.218871) < 1e-5,
-        "ceiling: and that is the app's 0.219, not the forward law's 0.2117");
-  // ★ THE CONTROL: the forward law's value does NOT build it, which is the whole
-  // reason the two cannot be used interchangeably.
-  CHECK(std::fabs(octet_strut_diameter_mm(fwd, 4.0) / 4.0 - kOctetAestheticStrutPerCell)
-            > 0.003,
-        "ceiling: the forward law's value builds a measurably THINNER strut -- the two "
-        "tables are not inverses, and which one you use is not a rounding choice");
+  // ★ RULING 2026-11-02 (c): on the FULL octet's own law the ruled geometry is rho
+  // 0.378846 (it was 0.218871, the app's 0.219, on the legs-only law: the same struts,
+  // twice as many of them per cell).
+  CHECK(std::fabs(ceil - 0.378846) < 1e-5,
+        "ceiling: the full octet's strut is a fifth of its cell at rho 0.3788");
+  // and the forward law is now the SAME measurement read backwards, so the two agree --
+  // before (c) the legs-only forward law read 0.2117, a measurably thinner strut.
+  CHECK(std::fabs(fwd - ceil) < 1e-7,
+        "ceiling: the forward law and the diameter table agree (one measurement since (c))");
 }
 
 static void test_outline_beam_width() {

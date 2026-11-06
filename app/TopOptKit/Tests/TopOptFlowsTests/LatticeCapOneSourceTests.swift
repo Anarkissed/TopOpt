@@ -19,15 +19,22 @@ final class LatticeCapOneSourceTests: XCTestCase {
     /// ★ Core's lightest printable density at the floor cell is AT the cap, never over it; the
     /// app's old bisection was over it (the control: it can see the defect).
     func testCoresFloorAtTheCapNeverExceedsIt() throws {
-        XCTAssertGreaterThan(cap, 0.2); XCTAssertLessThan(cap, 0.25)
+        // ★ RE-PINNED (release (2), K1 items 4 + 6): the cap is 0.3788 on the full octet cell's law, and the floor cell
+        // is core's (2.25 mm nudged up by ulps until its strut prints a bead), so ask core at its own floor cell
+        XCTAssertGreaterThan(cap, 0.37); XCTAssertLessThan(cap, 0.39)
+        let floorCell = try XCTUnwrap(TopOptKit.latticeMinPrintableCellMM(topology: "octet", minExtrudableWidthMM: 0.45,
+                                                                           maxRelativeDensity: cap))
+        XCTAssertEqual(floorCell, 2.25, accuracy: 1e-9)
         guard case .prints(let core)? = TopOptKit.latticeMinDensityForStrut(
-            topology: "octet", cellMM: 2.25, minExtrudableWidthMM: 0.45, maxRelativeDensity: cap) else {
+            topology: "octet", cellMM: floorCell, minExtrudableWidthMM: 0.45, maxRelativeDensity: cap) else {
             return XCTFail("core answers at the floor cell")
         }
         XCTAssertLessThanOrEqual(core, cap, "★ core's floor is never over the job's cap")
-        XCTAssertGreaterThan(core, cap - 1e-6, "2.25 mm IS the floor cell: its floor is the cap")
-        let old = try XCTUnwrap(LatticeType.named("octet")).printabilityDensityFloor(lineWidthMM: 0.45, cellMM: 2.25)
-        XCTAssertGreaterThan(old, cap, "★ control: the app's old bisection lands over the cap")
+        XCTAssertGreaterThan(core, cap - 1e-6, "core's floor cell: its floor is the cap")
+        let old = try XCTUnwrap(LatticeType.named("octet")).printabilityDensityFloor(lineWidthMM: 0.45, cellMM: floorCell)
+        // ★ RE-PINNED (release (2), K1): on the full cell's law the old bisection lands 15 ppb UNDER the cap (it was 24
+        // ppb over on the legs-only table), so the control is that it is not core's number at all
+        XCTAssertNotEqual(old, core, accuracy: 1e-9, "★ control: the app's old bisection is not core's floor")
         // below the floor cell nothing the job allows prints; uncapped the band top still does
         XCTAssertEqual(TopOptKit.latticeMinDensityForStrut(topology: "octet", cellMM: 2.0, minExtrudableWidthMM: 0.45,
                                                            maxRelativeDensity: cap), .noneUnderTheCap)
@@ -121,7 +128,9 @@ final class LatticeCapOneSourceTests: XCTestCase {
         XCTAssertEqual(capped.min, 2.25, accuracy: 1e-9, "★ the run's floor")
         let open = try XCTUnwrap(LatticeAutoPosture.autoWindowMM(regionWidthsMM: [], lineWidthMM: 0.45,
                                                                  topology: "octet", maxRelativeDensity: 0))
-        XCTAssertEqual(open.min, 1.173173434, accuracy: 1e-9, "control: uncapped (Allow quilt)")
+        // ★ RE-PINNED (release (2), K1 item 5): uncapped, the band's top builds a bead-wide strut from 1.117 mm (1.173 on
+        // the legs-only law); core's own pin is 1.116948948 (test_strut_diameter_per_type)
+        XCTAssertEqual(open.min, 1.116948948, accuracy: 1e-9, "control: uncapped (Allow quilt)")
         // a 9 mm member: the capped derivation's cell is never under the floor
         let w = try XCTUnwrap(LatticeAutoPosture.autoWindowMM(regionWidthsMM: [9], lineWidthMM: 0.45,
                                                               topology: "octet", maxRelativeDensity: cap))
@@ -139,11 +148,13 @@ final class LatticeCapOneSourceTests: XCTestCase {
                                       regionsFor: { _ in [r] }, topology: "octet", minExtrudableWidthMM: 0.45,
                                       maxRelativeDensity: cap)[0]
         }
-        let over = row(0.25, cap: cap)
+        // ★ RE-PINNED (release (2), K1): the cap is 0.3788 and the lightest that prints in this region's cell is 34 %
+        // (the full cell's strut is about 0.7 of the legs-only one at a density), so the stated numbers move above both
+        let over = row(0.40, cap: cap)
         XCTAssertTrue(over.refusal?.contains("Allow quilt") ?? false, over.refusal ?? "nil")
         XCTAssertEqual(over.validRange?.upperBound ?? 0, cap, accuracy: 1e-12, "★ the range ends at the cap")
-        XCTAssertNil(row(0.25, cap: 0).refusal, "control: uncapped, 25% is in the band")
-        XCTAssertNil(row(0.20, cap: cap).refusal, "under the cap is fine")
+        XCTAssertNil(row(0.40, cap: 0).refusal, "control: uncapped, 40% is in the band")
+        XCTAssertNil(row(0.36, cap: cap).refusal, "under the cap is fine")
     }
 
     /// The production callers pass the job's cap — the one source — and the bake's floor is core's.

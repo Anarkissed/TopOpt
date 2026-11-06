@@ -67,7 +67,8 @@ final class LatticeStartFromHostedTests: XCTestCase {
         try h.tap("latticeModeSwitch", "★ Switch", settle: 1)
         XCTAssertTrue(p.lattice.wholePart, "★ All lattice")
         XCTAssertEqual(p.lattice.groupRoles[g], .exclude, "★ Group 1 now removes lattice")
-        _ = try h.onScreen("latticeWholePartWaits", "★ the plain line: the engine takes it next")
+        XCTAssertEqual(h.frames.all["latticeWholePartWaits"] != nil, !TopOptKit.latticeWholePartWired,
+                       "★ the plain line exactly until the engine takes it (release (2): LatticeE2WiringHostedTests)")
         // and back: every group as it was
         try h.pickFromMenu("latticeStartFrom", "Solid", what: "Start from, back")
         h.pump(0.5)

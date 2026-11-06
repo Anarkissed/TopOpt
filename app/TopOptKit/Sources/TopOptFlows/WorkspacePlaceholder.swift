@@ -10494,7 +10494,7 @@ public struct WorkspacePlaceholder: View {
                         // above it rather than as a row that lost its controls.
                         Circle().fill(DS.Color.textQuaternary.color)
                             .frame(width: 3, height: 3)
-                        Text("Face \(project.runFaceID(f))")
+                        Text(project.faceName(f))
                             .font(.system(size: 9, weight: .semibold)).monospacedDigit()
                             .foregroundStyle(DS.Color.textQuaternary.color)
                         Spacer(minLength: 0)
@@ -10612,7 +10612,7 @@ public struct WorkspacePlaceholder: View {
 
     /// A selectable's short name on its row. Two words at most (R7).
     private func latticePrimitiveName(_ ref: LatticeSelectableRef) -> String {
-        project.latticeSelectableName(ref)   // one definition (ruling 3 names walls with it)
+        project.latticeRowName(ref)   // one definition (ruling 3 names walls with it; a face by its plain name)
     }
 
     /// ★ One primitive's own answer: Lattice / Solid / Off (§3c). Three, not two —
@@ -10722,8 +10722,9 @@ public struct WorkspacePlaceholder: View {
                 }
             }
             .padding(.horizontal, 14)
-            if project.lattice.wholePart {
-                // ★ his 11-03 rule: the job stays as today until the engine takes `lattice.whole_part` (E2) — one plain line
+            if project.lattice.wholePart, !project.latticeWholePartLive {
+                // ★ his 11-03 rule: the job stays as today until the engine takes `lattice.whole_part` (E2) — one plain line,
+                // gone by itself once the linked core takes the key (release (2))
                 Text(LatticeSetupCopy.wholePartWaits).font(.system(size: 12.5)).foregroundStyle(DS.Color.warning.color)
                     .padding(.horizontal, 14).padding(.bottom, 8)
                     .background(DSParts.publish("latticeWholePartWaits"))
@@ -10858,7 +10859,7 @@ public struct WorkspacePlaceholder: View {
         let frozen = !project.latticeReachesTheRun(ref) && role != nil
         let removable: Bool = { if case .primitive = ref { return false }; return true }()
         VStack(alignment: .leading, spacing: 0) {
-            DSRow(.face, key: "latticeFace-\(ref.key)", name: project.latticeSelectableName(ref), value: picked ? nil : value,
+            DSRow(.face, key: "latticeFace-\(ref.key)", name: project.latticeRowName(ref), value: picked ? nil : value,
                   selected: picked, tag: latticeAlsoIn(ref, g),
                   line: frozen ? DSRowLine(LatticeSectorOutline.notLatticedWords(protected: force.isProtected(g.id)), tone: .warning) : nil,
                   tap: { latticeFacePick = picked ? nil : ref.key }) {
@@ -11054,7 +11055,7 @@ public struct WorkspacePlaceholder: View {
         if latticeFacePick == ref.key { latticeFacePick = nil }
         project.syncForceGroups()
         refreshLatticeFaceCards()
-        model.toast = LatticeSetupCopy.removed(project.latticeSelectableName(ref))
+        model.toast = LatticeSetupCopy.removed(project.latticeRowName(ref))
     }
 
     // MARK: B6 s2a — the Topology panel on Lattice Setup (notes 19, 23a, 23b, R2.1)
@@ -11068,11 +11069,26 @@ public struct WorkspacePlaceholder: View {
                 Text(LatticeSetupCopy.includeLine).font(.system(size: 12.5)).foregroundStyle(DS.Color.textSecondary.color)
                     .padding(.horizontal, 14).padding(.vertical, 8)
                     .background(DSParts.publish("latticeTopologyLine"))
-                if !project.lattice.topologyExcluded.isEmpty {
-                    // ★ his 11-03 rule: the job stays as today until the engine takes the include list (E2) — one plain line
+                if !project.latticeScenariosLive, force.scenarioList.contains(where: { project.lattice.topologyExcluded.contains($0.id) }) {
+                    // ★ his 11-03 rule: a scenario's switch waits on `lattice.scenarios` (E2) — one plain line, gone by itself
+                    // once the linked core takes the key (release (2))
                     Text(LatticeSetupCopy.includeWaits).font(.system(size: 12.5)).foregroundStyle(DS.Color.warning.color)
                         .padding(.horizontal, 14).padding(.bottom, 8)
                         .background(DSParts.publish("latticeIncludeWaits"))
+                }
+                if !project.latticeLeftOutGroups.isEmpty {
+                    // ★ release (2): a group's switch acts in the app, on every run but a result's re-lattice
+                    Text(LatticeSetupCopy.resultKeepsGroups).font(.system(size: 12.5)).foregroundStyle(DS.Color.textSecondary.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 14).padding(.bottom, 8)
+                        .background(DSParts.publish("latticeResultKeepsGroups"))
+                }
+                if project.latticeSwitchedOffStillProtects {
+                    // ★ release (2): those switches wait on the reviewer's answer — the job still applies them, said once
+                    Text(LatticeSetupCopy.protectStillApplies).font(.system(size: 12.5)).foregroundStyle(DS.Color.textSecondary.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 14).padding(.bottom, 8)
+                        .background(DSParts.publish("latticeProtectStillApplies"))
                 }
                 if force.hasScenarios {
                     ForEach(force.scenarioList, id: \.id) { s in
@@ -11087,7 +11103,9 @@ public struct WorkspacePlaceholder: View {
                             }
                         }
                     }
-                    ForEach(scenarioLooseGroups) { g in latticeTopologyRow(g) }
+                    // the groups no scenario owns (Protect, Keep clear). Not `scenarioLooseGroups`: that is Topology's own and
+                    // empty on any other stage, which left these rows out of this panel (found 11-06 with ruling (b))
+                    ForEach(selection.groups.filter { !scenarioOwned($0.id) }) { g in latticeTopologyRow(g) }
                 } else {
                     ForEach(selection.groups) { g in latticeTopologyRow(g) }
                 }
@@ -11100,7 +11118,9 @@ public struct WorkspacePlaceholder: View {
         let glyph = RoleGlyphs.glyphs(project, g.id, readsLattice: false).first
         return DSRow(.include, key: "latticeTopo-\(g.id.uuidString)", mark: .colour(g.color), name: g.name,
                      role: glyph.map { (glyph: $0.symbol, colour: $0.tint) }, value: topologyGroupSummary(g)) {
-            latticeIncludeSwitch(g.id, name: g.name)
+            // ★ the reviewer's ruling 11-06 10:45Z: a Load or Hold switches (a); Protect and Keep clear always apply — rules
+            // about the part, not loads — so a group with neither load nor hold shows no switch
+            if project.latticeGroupSwitches(g.id) { latticeIncludeSwitch(g.id, name: g.name) }
         }
     }
 
@@ -12658,15 +12678,15 @@ public struct WorkspacePlaceholder: View {
         return true
     }
 
-    /// The GRADED-lattice-plus-design-box conflict in the CURRENT setup, or nil.
+    /// The graded-ORGANIC-lattice-plus-design-box conflict in the CURRENT setup, or nil.
     /// One rule, shared by the workspace Optimize button and the lattice page's own.
-    /// A UNIFORM lattice under a design box is supported by core (PR 285) and is
-    /// not gated here — it was, until the device-failure task found the app still
-    /// refusing what core had learned to do.
+    /// A UNIFORM lattice under a design box is supported by core (PR 285), and a graded
+    /// Default Grade / Stepped one since TO-core's 4e7648d8; neither is gated here.
     private var latticeDesignBoxConflict: String? {
         LatticeCoreCapability.liveConflict(latticeEnabled: project.lattice.enabled,
                                            designBoxActive: project.designBox.isActive,
-                                           graded: project.lattice.densityMode == .sim)
+                                           graded: project.lattice.densityMode == .sim,
+                                           organic: project.lattice.isOrganic)
     }
 
     /// ★ ruling 4 (item 5): why Optimize may not start with this lattice — the ONE definition
@@ -13749,9 +13769,9 @@ extension WorkspacePlaceholder {
             // ★ his ask 2026-10-26 + his iPad 14:13: every face its own card, picked one at a time, with its own eye and trash
             VStack(spacing: PieceRowPick.spacing) {
                 ForEach(g.faces, id: \.self) { f in
-                    pieceCard(g, key: Int(f), title: "Face \(f)", pickID: "topology-face-pick-\(f)",
+                    pieceCard(g, key: Int(f), title: project.faceName(f), pickID: "topology-face-pick-\(f)",
                               trashID: "topology-face-trash-\(f)",
-                              info: "Face \(f) is in \(g.name) (\(force.panelKindLabel(for: g.id))). "
+                              info: "\(project.faceName(f)) is in \(g.name) (\(force.panelKindLabel(for: g.id))). "
                                   + "Tap it on the model to take it out of the group.",
                               canDelete: project.groupView.canEdit(g.id), delete: { removePieceFace(g, f) }) { EmptyView() }
                 }
@@ -14013,9 +14033,7 @@ extension WorkspacePlaceholder {
 
     /// The groups that lattice something (an include in them): the Cells page's tabs, the change-type card's count.
     var latticeRegionTabNames: [String] {
-        project.latticeGroups.filter { g in   // ★ B6 s1b (#362's seam, 11-05): the Lattice stage's own groups
-            project.latticeSelectableRefs(g).contains { project.latticeSelectableRole($0, in: g.id) == .include }
-        }.map(\.name)
+        project.latticeAreaGroups.map(\.name)   // ★ B6 s1b: the Lattice stage's own groups; ★ B7 (E3): one list with the tabs' grades
     }
 
     /// ● <Type> ⌄ | Regions | Cells | ✂ — and what the lattice builds on. Over the Cells page too (mounted above it).

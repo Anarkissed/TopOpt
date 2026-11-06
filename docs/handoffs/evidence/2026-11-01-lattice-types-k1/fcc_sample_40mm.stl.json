@@ -1,0 +1,15 @@
+{
+  "topology": "fcc",
+  "relative_density": 0.34299,
+  "relative_density_is_band_middle": true,
+  "band": [0.09505, 0.59093],
+  "cell_mm": 8,
+  "cells_per_side": 5,
+  "size_mm": 40,
+  "base_plate_mm": 1.5,
+  "strut_diameter_mm": 2.12519,
+  "triangles": 70932,
+  "lattice_triangles": 70920,
+  "struts": 1800,
+  "nodes": 666
+}

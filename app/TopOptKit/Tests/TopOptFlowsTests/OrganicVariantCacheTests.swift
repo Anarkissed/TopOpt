@@ -3,7 +3,7 @@ import simd
 @testable import TopOptFlows
 
 /// ★ THE TOPOLOGY CACHE (maintainer, 2026-09-04): a beam-lattice 3MF round-trips the
-/// emitted spans byte-for-value; the key excludes thickness and includes core's SHA.
+/// emitted spans byte-for-value; the key holds a stated thickness (7012584da) and core's SHA.
 final class OrganicVariantCacheTests: XCTestCase {
     private func doc() -> OrganicBeamLattice3MF.Document {
         OrganicBeamLattice3MF.Document(
@@ -33,13 +33,20 @@ final class OrganicVariantCacheTests: XCTestCase {
         XCTAssertEqual(StoredZip.crc32(Data("123456789".utf8)), 0xCBF43926)
     }
 
-    func testTheKeyIgnoresThicknessAndFollowsCoreAndTopology() {
+    /// ★ RE-PINNED for release (2) (reviewer, 2026-11-06: "settle the three standing reds … one reason each"). This was
+    /// "the key ignores thickness", red since 7012584da (2026-09-10) put the stated strut width in the key on purpose: the
+    /// width is a trace input (core's emission merges endpoints by the strut radius), so a cube traced at one width must
+    /// not answer for another. No width stated keeps the old key, so every shipped variant keeps its file.
+    func testTheKeyFollowsAStatedThicknessCoreAndTopology() {
         var s = LatticeSettings(); s.enabled = true; s.stageMode = .aesthetic; s.algorithm = "organic"
         s.densityMode = .sim; s.cellSizeMode = .auto; s.organicShapeFit = true
         let a = OrganicVariantCache.key(picks: OrganicSampleCube.Picks(settings: s, layerHeightMM: 0.2), fieldIdentity: "f")
         var thick = s; thick.organicStrutWidthMM = 1.5
-        XCTAssertEqual(OrganicVariantCache.key(picks: OrganicSampleCube.Picks(settings: thick, layerHeightMM: 0.2), fieldIdentity: "f"), a,
-                       "★ thickness is live — it must not fork the cache")
+        XCTAssertNotEqual(OrganicVariantCache.key(picks: OrganicSampleCube.Picks(settings: thick, layerHeightMM: 0.2), fieldIdentity: "f"), a,
+                          "★ a stated width is a trace input — it forks the cache")
+        var unstated = s; unstated.organicStrutWidthMM = 0
+        XCTAssertEqual(OrganicVariantCache.key(picks: OrganicSampleCube.Picks(settings: unstated, layerHeightMM: 0.2), fieldIdentity: "f"), a,
+                       "★ no width stated: the key every shipped variant was stored under")
         var grown = s; grown.organicGrowth = true
         XCTAssertNotEqual(OrganicVariantCache.key(picks: OrganicSampleCube.Picks(settings: grown, layerHeightMM: 0.2), fieldIdentity: "f"), a)
         var scaled = s; scaled.organicScale = 1.5

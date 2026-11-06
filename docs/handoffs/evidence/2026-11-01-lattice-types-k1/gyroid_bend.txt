@@ -1,0 +1,8 @@
+BEND gyroid: S=5.0 mm, vpc=24, 6 cells long, target rho 0.40 -> cell rho 0.4051 (wall 3.23 voxels), C11=823.22 C12=365.97 C44=262.81 Zener=1.150
+  [writing /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-comms-lattice-types-818eda/core/../docs/handoffs/evidence/2026-11-01-lattice-types-k1/gyroid_bend.csv]
+    nc=1  block rho 0.4051  K_res 6.4599  K_hom 21.1287  err +227.08 %  dof 271875  12026 ms  NO-GO
+    nc=2  block rho 0.4051  K_res 147.6881  K_hom 212.0218  err +43.56 %  dof 1044435  35460 ms  NO-GO
+    nc=3  block rho 0.4051  K_res 643.4300  K_hom 777.5464  err +20.84 %  dof 2318115  83261 ms  NO-GO
+    nc=4  block rho 0.4051  K_res 1616.1758  K_hom 1816.4774  err +12.39 %  dof 4092915  118075 ms  NO-GO
+    nc=5  block rho 0.4051  K_res 3085.0151  K_hom 3339.5126  err +8.25 %  dof 6368835  232460 ms  NO-GO
+    nc=6  block rho 0.4051  K_res 5033.5225  K_hom 5330.4789  err +5.90 %  dof 9145875  428357 ms  NO-GO

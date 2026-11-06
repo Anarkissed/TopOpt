@@ -691,7 +691,7 @@ public final class ProjectModel: ObservableObject {
     /// load groups → their faces + model-frame force (kgf → N). The build direction
     /// (print up) is the negated gravity, or +Z if gravity is unset. Empty for an
     /// STL project (no face selection) — the run then falls back to self-weight.
-    public func loadCase() -> (anchorFaceIDs: [Int], loadGroups: [TopOptKit.LoadGroupSpec],
+    public func loadCase(leavingOut: Set<UUID> = []) -> (anchorFaceIDs: [Int], loadGroups: [TopOptKit.LoadGroupSpec],
                                buildDirection: SIMD3<Double>,
                                plateDirection: SIMD3<Double>,
                                anchorRegionIDs: [RegionID]) {
@@ -701,7 +701,7 @@ public final class ProjectModel: ObservableObject {
         // ★ LOAD SCENARIOS (overnight release 2026-10-26): with 2+ scenarios the top level mirrors Scenario 1 for
         // older readers (`scenarioWires` carries each one). With none, both filters pass everything.
         let first = force.scenarioList[0].id
-        for g in selection.groups {
+        for g in selection.groups where !leavingOut.contains(g.id) {   // ★ B6: a lattice job's switched-off groups
             let kind = force.kind(for: g.id)
             if kind.isAnchor, force.anchorIsOn(g.id, in: first) {
                 // Painted faces carry a live overlay id; the run sees the dense re-import id.
@@ -739,13 +739,13 @@ public final class ProjectModel: ObservableObject {
 
     /// ★ LOAD SCENARIOS — each scenario's ON anchors and its own loads, as `loadCase()` resolves them (job
     /// `loads.scenarios`). Empty with fewer than two scenarios, so the job stays exactly today's.
-    public func scenarioWires() -> [LoadScenarioWire] {
+    public func scenarioWires(leavingOut: Set<UUID> = []) -> [LoadScenarioWire] {
         guard force.hasScenarios else { return [] }
         return force.scenarioList.map { s in
             var anchors: [Int] = []
             var anchorRegions: [RegionID] = []
             var loads: [TopOptKit.LoadGroupSpec] = []
-            for g in selection.groups {
+            for g in selection.groups where !leavingOut.contains(g.id) {   // ★ B6: a lattice job's switched-off groups
                 let kind = force.kind(for: g.id)
                 if kind.isAnchor, force.anchorIsOn(g.id, in: s.id) {
                     anchors.append(contentsOf: g.faces.map { Int(resolvedRunFaceID($0)) })
@@ -2702,7 +2702,10 @@ public final class ProjectModel: ObservableObject {
         // does not call live gets no run spec — and so its stale path asks core for no
         // per-type number at all (the posture and the bounds both would). Core's own
         // readiness, the same two facts `runSpec(topology:)` reads, so octet is untouched.
+        // ★ RELEASE (2), E2: core runs nine types; a type whose app batch has not shipped (B7.n) is stale here too
+        // (`LatticeTypeCatalog.appBatches`), asked first, so its path still asks core nothing.
         guard lattice.enabled,
+              LatticeTypeCatalog.appBatches.contains(lattice.topologyID),
               TopOptKit.latticeTypeReadiness(lattice.topologyID,
                                              generatable: TopOptKit.latticeGeneratableTopologies,
                                              certifiable: TopOptKit.latticeCertifiableTopologies) == .live
@@ -2733,7 +2736,50 @@ public final class ProjectModel: ObservableObject {
         // spec carried a field for it that nothing filled, so the job fell back to the bead
         // term alone: 0.691 mm on 102117B9 against the preview's 1.705.
         if spec?.algorithm == "organic" { spec?.organicRimFloorMM = organicFloor.mm }
+        // ★ B6 → E2 (release (2), the reviewer's ruling 11-06 09:41Z): Start from − and the scenario switches reach core
+        // once it takes their keys; until then the job is today's and Lattice Setup's plain lines say so
+        spec?.wholePart = latticeWholePartLive && lattice.wholePart
+        spec?.scenariosLeftOut = latticeScenariosLeftOut
         return spec
+    }
+
+    /// Start from − reaches the job (core's `lattice.whole_part`); false ⇒ Lattice Setup's plain line stays.
+    public var latticeWholePartLive: Bool { TopOptKit.latticeWholePartWired }
+
+    /// The scenario switches reach the job (core's `lattice.scenarios`); false ⇒ the Topology panel's plain line stays.
+    public var latticeScenariosLive: Bool { TopOptKit.latticeScenariosWired }
+
+    /// ★ B6 → E2.1: the scenarios switched off in Lattice Setup's Topology panel, by the names the job gives them — none
+    /// with fewer than two (the job sends no scenarios) or before core takes the key. Every one off sends [] and core
+    /// refuses it in its own words.
+    public var latticeScenariosLeftOut: [String] {
+        guard latticeScenariosLive, force.hasScenarios else { return [] }
+        return force.scenarioList.filter { lattice.topologyExcluded.contains($0.id) }.map(\.name)
+    }
+
+    /// ★ B6 (note 23b; the reviewer's ruling 11-06 09:41Z, as agreed 11-04 19:30Z): the Topology groups switched off in
+    /// Lattice Setup, which a job carrying the lattice leaves out of its loads and holds — app-side, no core key. A run that
+    /// leaves the part unheld meets core's own guard. ("Lattice an optimized result" keeps every group: its load case is the
+    /// run's own, re-checked as it was optimized.)
+    public var latticeLeftOutGroups: Set<UUID> {
+        guard lattice.enabled else { return [] }
+        return Set(selection.groups.lazy.filter { g in
+            self.latticeGroupSwitches(g.id) && self.lattice.topologyExcluded.contains(g.id)
+        }.map(\.id))
+    }
+
+    /// ★ The reviewer's ruling 11-06 10:45Z: a Load or a Hold has an include switch on Lattice Setup ((a)); Protect and Keep
+    /// clear always apply and show none ((b): "rules about the part … not loads").
+    public func latticeGroupSwitches(_ groupID: UUID) -> Bool {
+        let k = force.kind(for: groupID)
+        return k.isLoad || k.isAnchor
+    }
+
+    /// A switched-off Load or Hold that also carries Protect or Keep clear: its load or hold leaves the lattice job, its
+    /// Protect and Keep clear stay ((b)), and one plain line says so.
+    public var latticeSwitchedOffStillProtects: Bool {
+        let off = latticeLeftOutGroups
+        return selection.groups.contains { off.contains($0.id) && (force.isProtected($0.id) || keepClearIsOn($0)) }
     }
 
     /// ★★ THE ORGANIC WINDOW THE JOB CARRIES, as core reads it (item 2, measured 2026-10-06):
@@ -2809,6 +2855,7 @@ public final class ProjectModel: ObservableObject {
             selectableRoles: lattice.selectableRoles,
             selectableDepthMM: lattice.selectableDepthMM,
             groupDensities: lattice.groupDensities,
+            groupGrading: lattice.resolvedAreaGrading,   // ★ B7 (E3): each area's own grading, from its Lattice page tab
             // ★ THE PER-REGION DENSITY AND THE IN-PLANE EXPAND REACH THE JOB
             // (maintainer, 2026-08-17). A control whose value no run consumes is
             // the decorative-primitive defect — these two lines are what stop it,
@@ -2845,14 +2892,32 @@ public final class ProjectModel: ObservableObject {
         faceRegions.region(rid)?.name ?? "Region \(rid)"
     }
 
-    /// A selectable's short name — the Selections row's, and the one ruling 3's sentence uses.
-    /// Two words at most (R7).
+    /// A selectable's short name on the Flexible stage's rows, chips and cards. Two words at most (R7). A face keeps its
+    /// number there until a ruling moves Flexible to the plain names (its own copy names faces "Face n" in many more places,
+    /// so this alone would give one face two names on one screen). Lattice Setup reads `latticeRowName`.
     public func latticeSelectableName(_ ref: LatticeSelectableRef) -> String {
         switch ref {
         case let .face(_, f): return "Face \(runFaceID(f))"
         case .primitive: return "Primitive"
         case let .region(_, rid): return latticeRegionName(rid)
         }
+    }
+
+    /// A selectable's name on Lattice Setup's Selections rows, in its toasts, and in ruling 3's sentence: a face by its plain
+    /// name (`faceName`), anything else as `latticeSelectableName`.
+    public func latticeRowName(_ ref: LatticeSelectableRef) -> String {
+        switch ref {
+        case let .face(_, f): return faceName(f)
+        default: return latticeSelectableName(ref)
+        }
+    }
+
+    /// A face's plain name: "Top face", "Hole 2, ⌀ 8 mm", "Rounded edge, R 3 mm" (FaceNames, the reviewer's ruling 11-06
+    /// 09:41Z). Read from the part's own axes (up against its gravity, else +Z), never the camera, and the same words on
+    /// Lattice Setup's rows and Topology's. Its number only while there is no mesh to read, or the face isn't on it.
+    public func faceName(_ f: FaceID) -> String {
+        if let m = viewerMesh, let n = FaceNames.name(f, in: m, frame: .init(gravity: force.gravity)) { return n }
+        return "Face \(runFaceID(f))"
     }
 
     /// ★ RULING 3 (maintainer, 2026-09-30): core's refusal of a variant document, in his words.
@@ -2880,7 +2945,7 @@ public final class ProjectModel: ObservableObject {
                 }
             }
         }
-        let name = ref.map(latticeSelectableName) ?? "Face \(m.faceID)"
+        let name = ref.map(latticeRowName) ?? "Face \(m.faceID)"
         let expand = prism?.selectableKey.map { LatticeSlabExpand.clamp(lattice.selectableExpandMM[$0] ?? 0) } ?? 0
         // ★ ROUND 3 (maintainer, 2026-10-01): a depth is suggested only when the wall can be set to
         // it — at or below zero, or below the wall's minimum depth (`LatticeSlabDepth.minMM`, where

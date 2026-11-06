@@ -21,7 +21,7 @@ final class LatticeTileFloorFromCoreTests: XCTestCase {
         let densest = TopOptKit.latticeCellBounds(topology: "octet", minExtrudableWidthMM: bead)
             .printabilityFloorDensestMM
         XCTAssertEqual(open, densest, accuracy: 1e-12, "★ Allow quilt on: core's 1.173")
-        XCTAssertEqual(open, 1.173, accuracy: 5e-4)
+        XCTAssertEqual(open, 1.117, accuracy: 5e-4)   // ★ RE-PINNED (release (2), K1 item 5): 1.173 on the legs-only law
 
         let cap = try XCTUnwrap(TopOptKit.latticeAestheticDensityCeiling(topology: "octet"))
         let capped = try XCTUnwrap(LatticeSettings.tileFloorMM(topologyID: "octet", beadMM: bead, allowQuilt: false))
@@ -36,10 +36,13 @@ final class LatticeTileFloorFromCoreTests: XCTestCase {
 
     /// A type core does not call live: no number, and core says why — nothing baked on a
     /// made-up floor.
-    func testANonLiveTypeHasNoFloor() {
-        XCTAssertNil(LatticeSettings.tileFloorMM(topologyID: "kelvin", beadMM: bead, allowQuilt: true))
-        XCTAssertTrue(TopOptKit.lastCoreRefusal?.contains(TopOptKit.latticeTypeReadinessPlain(.notGeneratable)) ?? false,
-                      TopOptKit.lastCoreRefusal ?? "nil")
+    /// ★ RE-PINNED (release (2), E2): core makes Kelvin live with its own measured law, so its floor is its own; the
+    /// non-live type is an id core does not know.
+    func testANonLiveTypeHasNoFloor() throws {
+        XCTAssertEqual(try XCTUnwrap(LatticeSettings.tileFloorMM(topologyID: "kelvin", beadMM: bead, allowQuilt: true)),
+                       1.2569, accuracy: 1e-4, "Kelvin's own floor, never octet's")
+        XCTAssertNil(LatticeSettings.tileFloorMM(topologyID: "lattice9", beadMM: bead, allowQuilt: true))
+        XCTAssertNotNil(TopOptKit.lastCoreRefusal, "core says why")
         XCTAssertNil(TopOptKit.latticeMinPrintableCellMM(topology: "octet", minExtrudableWidthMM: 0, maxRelativeDensity: 0),
                      "no bead, no floor")
     }

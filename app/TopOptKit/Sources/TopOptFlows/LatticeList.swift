@@ -35,6 +35,12 @@ extension ProjectModel {
     /// Where the lattice goes, in order: the list's groups (Flexible: every Topology group, as today).
     public var latticeGroups: [SelectionGroup] { latticeList.groups }
 
+    /// ★ B7 (E3): the lattice AREAS, in order — the groups that lattice something (an include in them). One list for the
+    /// Lattice page's tabs (`WorkspacePlaceholder.latticeRegionTabNames`) and each tab's own grade (`areaGrading`).
+    public var latticeAreaGroups: [SelectionGroup] {
+        latticeGroups.filter { g in latticeSelectableRefs(g).contains { latticeSelectableRole($0, in: g.id) == .include } }
+    }
+
     /// Every group whose per-group state `force` must keep — Topology's and the lattice list's (a migrated lattice group
     /// shares its id with its Topology twin, so the union keeps one entry).
     public var forceKeptGroups: [SelectionGroup] {

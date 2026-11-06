@@ -223,6 +223,12 @@ struct FixedDesignAnalysis {
   // comparable on one receipt and the strut term's cost is never invisible.
   bool strut_gated = false;
   double margin_effective_solid_only = 0.0;
+  // ★ Ruling 11-06 2(a): with latticed voxels and NO solid voxel under stress (the
+  // solid margin unbounded), the strut law is folded in as above (`strut_gated`);
+  // where it cannot apply, the lattice is NOT CERTIFIED: `accepted` is false and the
+  // reason is one plain sentence. False / empty on every other analysis.
+  bool lattice_not_certified = false;
+  std::string lattice_not_certified_reason;
 
   // --- BUILD-ORIENTATION RANKING (handoff 2026-08-01-build-direction-separation)
   // A RECOMMENDATION, filled strictly AFTER `accepted` / `margin_effective` were

@@ -152,7 +152,9 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
         let o = LatticeType.octet
         for c in [2.58, 3.0, 4.0, 6.0, 12.0] {
             let q = o.quiltRowDensity(cellMM: c)
-            XCTAssertEqual(q, 0.60, accuracy: 0.02, "cell \(c) mm: \(q)")
+            // ★ RE-PINNED (release (2), K1 item 1): octet's full-cell law is measured to its 0.95 row
+            // (c_octet_law_ends.txt) and keeps rising past 0.60, so it saturates at 0.95 (0.60 on the legs-only table)
+            XCTAssertEqual(q, 0.95, accuracy: 0.02, "cell \(c) mm: \(q)")
             XCTAssertLessThan(q, 0.99, "the quilt row must stop short of solid at \(c) mm")
             XCTAssertEqual(o.strutRadiusMM(relativeDensity: q, cellMM: c),
                            o.strutRadiusMM(relativeDensity: 1.0, cellMM: c),
@@ -282,8 +284,13 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
                        "the fixture must have a 6 mm cell whose corner reaches into the band — vacuous otherwise")
         let deep = all.filter { $0.dOutline >= band + 6 }
         XCTAssertFalse(deep.isEmpty, "the fixture must have cells beyond the band — vacuous otherwise")
+        // ★ RE-PINNED (release (2), K1 item 1): the quilt row is 0.95 now, over this band's 0.9 top, so the field widens
+        // its drawn span (`drawnDensityHi`) and re-encodes every texel — compare the DENSITY a texel draws, not its code
+        let top = baked.drawnDensityHi > 0 ? baked.drawnDensityHi : hi
+        let ambientRho = lo + (hi - lo) * Double(ambient)
         for t in deep {
-            XCTAssertEqual(t.activation, ambient, accuracy: 0.01, "beyond the band the cell's own density stands; at \(t.dOutline) mm it is \(t.activation)")
+            let r = lo + (top - lo) * Double(t.activation)
+            XCTAssertEqual(r, ambientRho, accuracy: 0.009, "beyond the band the cell's own density stands; at \(t.dOutline) mm it is \(r)")
         }
         let against = all.filter { abs($0.cellMM - 3) < 0.02 && $0.dOutline < 3 }
         XCTAssertFalse(against.isEmpty, "vacuous")
@@ -356,8 +363,10 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
         let beyond = all.filter { $0.dOutline >= 11 }
         XCTAssertFalse(against.isEmpty); XCTAssertFalse(beyond.isEmpty)
         func rho(_ t: Texel) -> Double { stated + (quilt - stated) * Double(t.activation) }
+        // ★ RE-PINNED (release (2), K1 item 1): the quilt is 0.95 now (0.60), so the slack is a share of the span —
+        // three quarters of the way from the stated density to the quilt, as strict as 0.1 under a 0.60 quilt was
         for t in against {
-            XCTAssertGreaterThan(rho(t), quilt - 0.1,
+            XCTAssertGreaterThan(rho(t), stated + 0.75 * (quilt - stated),
                                  "the cells against the solid draw at the quilt over the widened span; at \(t.dOutline) mm it draws \(rho(t))")
         }
         for t in beyond {
@@ -369,7 +378,8 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
     /// With a real span the field does not widen, and says so.
     func testARealSpanIsLeftAlone() throws {
         let f = slabs([(6, 0, 34)])
-        let (baked, _) = try bake(f, band: 5)
+        // ★ RE-PINNED (release (2), K1 item 1): the quilt row is 0.95 now, so a span reaching it ends at 1.0 (0.9 did)
+        let (baked, _) = try bake(f, band: 5, span: (lo, 1.0))
         XCTAssertEqual(baked.drawnDensityHi, 0, "a span that already reaches the quilt is not widened")
     }
 

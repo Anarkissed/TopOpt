@@ -15,11 +15,7 @@ final class OrganicWettedJoinEvidenceGen: XCTestCase {
     @MainActor
     func testRenderTheWettedJoin() throws {
         guard let device = MTLCreateSystemDefaultDevice() else { throw XCTSkip("no Metal device") }
-        let root = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let out = root.deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("evidence/2026-09-08-wetted-join")
-        try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+        let out = EvidenceOut.dir("evidence/2026-09-08-wetted-join")   // never the tracked copy unless asked (11-06)
 
         let edge = 20.0
         let mesh = LatticeWizardSample.cube(edgeMM: edge, at: .zero)

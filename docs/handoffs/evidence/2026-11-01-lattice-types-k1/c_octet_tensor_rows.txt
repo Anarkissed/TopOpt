@@ -1,0 +1,37 @@
+LOW: vpc 96 vs 128, reference curve of 7 points
+  rho 0.04959  vox/strut  6.403  E100   23.8441  drift  -1.49 % (chunk said  -1.49)  VALIDATED
+  rho 0.06058  vox/strut  7.141  E100   30.0039  drift  +0.40 % (chunk said  -5.81)  VALIDATED
+  rho 0.07794  vox/strut  7.681  E100   40.0883  drift  +0.02 % (chunk said  -1.19)  VALIDATED
+  rho 0.10532  vox/strut  9.000  E100   58.0280  drift  +0.77 % (chunk said  +8.95)  VALIDATED
+  rho 0.11748  vox/strut  9.950  E100   66.0611  drift  +0.29 % (chunk said  -3.09)  VALIDATED
+  rho 0.15115  vox/strut 11.091  E100   91.4003  drift  +0.01 % (chunk said  -1.53)  VALIDATED
+  rho 0.18522  vox/strut 12.369  E100  120.7066  drift  +5.69 % (chunk said  +5.70)  not validated
+HIGH: vpc 64 vs 96, reference curve of 8 points
+  rho 0.54114  vox/strut 16.340  E100  750.2919  drift  -0.51 % (chunk said  -0.51)  VALIDATED
+  rho 0.58484  vox/strut 17.234  E100  892.7149  drift  +0.73 % (chunk said  -5.34)  VALIDATED
+  rho 0.64856  vox/strut 18.628  E100 1145.6942  drift  +1.88 % (chunk said  +0.92)  VALIDATED
+  rho 0.70178  vox/strut 19.672  E100 1401.5186  drift  +1.83 % (chunk said  +3.83)  VALIDATED
+  rho 0.74805  vox/strut 21.048  E100 1661.4728  drift  +2.29 % (chunk said  +1.84)  VALIDATED
+  rho 0.80078  vox/strut 22.338  E100 2006.1113  drift  +1.63 % (chunk said  +3.63)  VALIDATED
+  rho 0.85071  vox/strut 23.854  E100 2392.3196  drift  +1.67 % (chunk said  +1.57)  VALIDATED
+  rho 0.90027  vox/strut 25.632  E100 2754.9501  drift  +0.18 % (chunk said  +0.18)  VALIDATED
+
+THE FULL-OCTET TABLE (validated rows, ascending rho; Row{rho, C11, C12, C44})
+    {0.04959, 36.2534, 18.4178, 17.2190, true},  // low vpc96 vs 128, drift -1.49 %
+    {0.06058, 45.6481, 23.2077, 21.5912, true},  // low vpc96 vs 128, drift +0.40 %
+    {0.07794, 60.9315, 30.9432, 28.6375, true},  // low vpc96 vs 128, drift +0.02 %
+    {0.10532, 87.3471, 43.8564, 40.2300, true},  // low vpc96 vs 128, drift +0.77 %
+    {0.11748, 99.5680, 50.0693, 45.9761, true},  // low vpc96 vs 128, drift +0.29 %
+    {0.15115, 136.6541, 68.0589, 62.3069, true},  // low vpc96 vs 128, drift +0.01 %
+    {0.20660, 213.3453, 103.9827, 94.3391, true},  // pr246 vpc48 vs 64, drift +1.12 %
+    {0.29543, 355.6757, 169.5095, 155.3239, true},  // pr246 vpc48 vs 64, drift -0.13 %
+    {0.42245, 638.9053, 285.3390, 264.5521, true},  // pr246 vpc48 vs 64, drift +0.75 %
+    {0.48003, 811.3576, 354.8678, 330.5264, true},  // pr246 vpc48 vs 64, drift +1.15 %
+    {0.54114, 1006.9295, 429.2955, 398.0499, true},  // high vpc64 vs 96, drift -0.51 %
+    {0.58484, 1186.9047, 497.8077, 457.7308, true},  // high vpc64 vs 96, drift +0.73 %
+    {0.64856, 1516.5063, 630.9997, 561.0512, true},  // high vpc64 vs 96, drift +1.88 %
+    {0.70178, 1863.4078, 781.5637, 661.6485, true},  // high vpc64 vs 96, drift +1.83 %
+    {0.74805, 2217.3259, 936.1863, 749.7789, true},  // high vpc64 vs 96, drift +2.29 %
+    {0.80078, 2711.0987, 1169.5786, 859.8464, true},  // high vpc64 vs 96, drift +1.63 %
+    {0.85071, 3293.6552, 1464.3333, 972.4855, true},  // high vpc64 vs 96, drift +1.67 %
+    {0.90027, 3861.9111, 1764.7180, 1076.4927, true},  // high vpc64 vs 96, drift +0.18 %

@@ -15,7 +15,9 @@
 //       post-pass — not the probe's private scoring loop. The probe measured
 //       0.6968 gated (REJECTED) for build = -gravity = +y against 1.3285
 //       (ACCEPTED) for +z, a 9.11x macro interlayer ratio, and 48 support voxels
-//       against 0. A production path that cannot reproduce that is wrong.
+//       against 0. A production path that cannot reproduce that is wrong. (Those
+//       are the legs-only octet tensor's numbers; on the full cell's, read since
+//       ruling (c) of 2026-11-02, they are 0.6975 / 1.3242 and 9.90x, see U4.)
 //
 //   U5  *** A RECOMMENDATION NEVER SILENTLY CHANGES A VERDICT. *** The verdict
 //       reported by the analysis is computed from the orientation ACTUALLY USED.
@@ -316,23 +318,30 @@ int main() {
     // PR 266's table, reproduced. The tolerance is loose enough to survive a
     // different solver/tolerance path but far tighter than the effect measured
     // (1.9x on the gated number), so a real regression cannot slip through.
-    CHECK(std::fabs(row_y->margin_effective - 0.6968) < 5e-3,
-          "U4: -gravity gated worst-case margin reproduces 0.6968");
-    CHECK(std::fabs(row_z->margin_effective - 1.3285) < 5e-3,
-          "U4: +z gated worst-case margin reproduces 1.3285");
+    // ★ RULING 2026-11-02 (c): PR 266 measured on octet's LEGS-ONLY tensor (0.6968 /
+    // 1.3285, interlayer 0.6968 / 6.3494, 9.11x; the eede708a build still prints exactly
+    // those). The region is octet at 0.30, where the full cell's tensor is about 16 %
+    // stiffer in shear and 4 % softer along an axis, and production now reads it:
+    // 0.6975 / 1.3242, interlayer 0.6975 / 6.9058, 9.90x. Every verdict and the support
+    // and height facts are unchanged; the pins below are the full cell's numbers.
+    CHECK(std::fabs(row_y->margin_effective - 0.6975) < 5e-3,
+          "U4: -gravity gated worst-case margin reproduces 0.6975");
+    CHECK(std::fabs(row_z->margin_effective - 1.3242) < 5e-3,
+          "U4: +z gated worst-case margin reproduces 1.3242");
     CHECK(!row_y->would_be_accepted,
           "U4: at margin_stop 1.0 the derived orientation is REJECTED");
     CHECK(row_z->would_be_accepted,
           "U4: at margin_stop 1.0 the best orientation is ACCEPTED");
-    CHECK(std::fabs(row_y->macro_interlayer_margin - 0.6968) < 5e-3,
-          "U4: -gravity macro interlayer margin reproduces 0.6968");
-    CHECK(std::fabs(row_z->macro_interlayer_margin - 6.3494) < 5e-2,
-          "U4: +z macro interlayer margin reproduces 6.3494");
+    CHECK(std::fabs(row_y->macro_interlayer_margin - 0.6975) < 5e-3,
+          "U4: -gravity macro interlayer margin reproduces 0.6975");
+    CHECK(std::fabs(row_z->macro_interlayer_margin - 6.9058) < 5e-2,
+          "U4: +z macro interlayer margin reproduces 6.9058");
     const double ratio =
         row_z->macro_interlayer_margin / row_y->macro_interlayer_margin;
-    std::printf("    interlayer ratio %.2fx (PR 266 measured 9.11x)\n", ratio);
-    CHECK(std::fabs(ratio - 9.11) < 0.1,
-          "U4: the interlayer penalty of the conflation reproduces 9.11x");
+    std::printf("    interlayer ratio %.2fx (PR 266 measured 9.11x on the legs-only tensor)\n",
+                ratio);
+    CHECK(std::fabs(ratio - 9.90) < 0.1,
+          "U4: the interlayer penalty of the conflation reproduces 9.90x");
     CHECK(row_y->support_voxels == 48,
           "U4: the derived orientation needs 48 support voxels");
     CHECK(row_z->support_voxels == 0,

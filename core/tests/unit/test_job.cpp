@@ -15,6 +15,7 @@
 // harness the other tests use.
 
 #include "topopt/job.hpp"
+#include "topopt/lattice.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -528,7 +529,8 @@ static void test_lattice_block() {
     return mutate("\"mesh_prefix\": \"variant\" }",
                   "\"mesh_prefix\": \"variant\" },\n  \"lattice\": " + body);
   };
-  check_rejects(lat("{ \"topology\": \"gyroid\", \"cell_mm\": 5, \"strut_radius_mm\": 0.7 }"),
+  // (gyroid until the sheets went live; bccz is known and neither generated nor certified)
+  check_rejects(lat("{ \"topology\": \"bccz\", \"cell_mm\": 5, \"strut_radius_mm\": 0.7 }"),
                 "lattice: rejects unimplemented topology");
   check_rejects(lat("{ \"cell_mm\": 0, \"strut_radius_mm\": 0.7 }"),
                 "lattice: rejects cell_mm <= 0");
@@ -1043,7 +1045,7 @@ static void test_grading_block() {
                   "\"mesh_prefix\": \"variant\" },\n  \"grading\": " + body);
   };
   check_rejects(
-      gr("{ \"topology\": \"gyroid\", \"cell_mm\": 4, \"min_extrudable_width_mm\": 0.4 }"),
+      gr("{ \"topology\": \"bccz\", \"cell_mm\": 4, \"min_extrudable_width_mm\": 0.4 }"),
       "grading: rejects unimplemented topology");
   check_rejects(gr("{ \"cell_mm\": 0, \"min_extrudable_width_mm\": 0.4 }"),
                 "grading: rejects cell_mm <= 0");
@@ -1218,32 +1220,36 @@ static void test_a_topology_id_says_why_it_is_refused() {
     const JobDescription j = parse_job(with_topo("\"lattice\"", "octet"));
     CHECK(j.lattice.topology == "octet", "topology: octet still parses");
   }
-  // A KNOWN id that is not live yet: refused, and the message names the type and
-  // says it cannot be BUILT yet rather than that it is not octet.
-  for (const char* known : {"fcc", "kelvin", "diamond", "sc", "bcc", "rhombic"}) {
+  // A LIVE type parses on both gates (lattice types round 1: each joins as it lands).
+  for (const char* live : {"fcc", "kelvin", "rhombic", "diamond", "bcc", "sc"}) {
+    const JobDescription j = parse_job(with_topo("\"lattice\"", live));
+    CHECK(j.lattice.topology == live && j.grading.topology == live,
+          "topology: a live type parses, and both keys carry it");
+  }
+  // A KNOWN id that is not live yet would be refused as CERTIFIABLE with no GENERATOR
+  // (job.cpp's NotGeneratable message). Since Simple cubic went live (the last strut
+  // type of lattice types round 1) no id is in that state: every certifiable type has a
+  // generator. Hold that instead, so a type that loses its generator is caught here
+  // rather than slipping into that refusal unseen.
+  for (const std::string& cert : topopt::lattice_certifiable_topology_names()) {
+    // A sheet takes no Diagrid skin (R8), and Diagrid is the default, so a sheet's job
+    // states Rim; the refusals themselves are test_tpms's.
+    std::string text = with_topo("\"lattice\"", cert.c_str());
+    if (topopt::lattice_topology_is_sheet(topopt::lattice_topology_from_id(cert))) {
+      const std::string from = "\"strut_radius_mm\": 0.7 }";
+      text.replace(text.find(from), from.size(), "\"strut_radius_mm\": 0.7, \"skin\": \"rim\" }");
+    }
     bool threw = false;
-    std::string why;
     try {
-      (void)parse_job(with_topo("\"lattice\"", known));
-    } catch (const JobError& e) {
+      (void)parse_job(text);
+    } catch (const JobError&) {
       threw = true;
-      why = e.what();
     }
     char msg[220];
-    std::snprintf(msg, sizeof msg, "topology: \"%s\" is known but not live -> refused",
-                  known);
-    CHECK(threw, msg);
     std::snprintf(msg, sizeof msg,
-                  "topology: the refusal for \"%s\" names the type and says it is "
-                  "CERTIFIABLE but has no generator -- not merely \"not ready\"",
-                  known);
-    // All six are certifiable (their tensor rows landed 2026-07-29) and none is
-    // generatable, so the reason must be the generator, specifically. A user told
-    // "not certifiable" would go looking for the wrong thing.
-    CHECK(why.find(known) != std::string::npos &&
-              why.find("is CERTIFIABLE") != std::string::npos &&
-              why.find("no GENERATOR") != std::string::npos,
-          msg);
+                  "topology: certifiable \"%s\" has a generator, so it is live and parses",
+                  cert.c_str());
+    CHECK(!threw, msg);
   }
   // An UNKNOWN id: refused, named, and told it is not a topology at all.
   for (const char* bogus : {"octopus", "Octet", "gyroids", "honeycomb"}) {
@@ -1274,7 +1280,8 @@ static void test_a_topology_id_says_why_it_is_refused() {
   // type core is going to ship. This is not a loosened assertion: the message checked here
   // is the more specific of the two, and `gyroids` now holds the unknown-id loop's place
   // so a sheet-type-shaped near-miss still proves the distinction is kept.
-  for (const char* tetra : {"bccz", "fccz", "reentrant", "gyroid", "schwarz_d"}) {
+  // (K2: the two sheets went live and left this loop for the certifiable one above.)
+  for (const char* tetra : {"bccz", "fccz", "reentrant"}) {
     std::string why;
     try { (void)parse_job(with_topo("\"lattice\"", tetra)); }
     catch (const JobError& e) { why = e.what(); }

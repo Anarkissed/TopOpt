@@ -1,0 +1,15 @@
+{
+  "topology": "rhombic",
+  "relative_density": 0.34288,
+  "relative_density_is_band_middle": true,
+  "band": [0.17245, 0.51331],
+  "cell_mm": 8,
+  "cells_per_side": 5,
+  "size_mm": 40,
+  "base_plate_mm": 1.5,
+  "strut_diameter_mm": 1.67541,
+  "triangles": 161312,
+  "lattice_triangles": 161300,
+  "struts": 4000,
+  "nodes": 1665
+}
