@@ -162,7 +162,7 @@ final class FlexibleRound7ScreenHookTests: XCTestCase {
             }
         } else { out.append("H37: no openLatticeSettingsIfUnconfigured") }
         // nothing a #354 source guard counts
-        if let b = ws.range(of: "public var body: some View {"), let e = ws.range(of: "\n    private var seeResultsChip"), b.upperBound < e.lowerBound,
+        if let b = ws.range(of: "public var body: some View {"), let e = ws.range(of: "\n    private var gizmoSize"), b.upperBound < e.lowerBound,
            ws[b.upperBound..<e.lowerBound].contains("!showLatticePage") { out.append("body: '!showLatticePage' appeared") }
         if ws.components(separatedBy: "private var selectionsPanel").count - 1 != 1 { out.append("the selections panel's declaration string is not exactly once") }
         return out

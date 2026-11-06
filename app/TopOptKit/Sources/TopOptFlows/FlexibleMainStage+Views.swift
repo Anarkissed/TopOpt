@@ -426,6 +426,8 @@ extension FlexibleMainStage {
     /// face) and read at the tap's rest point: the drilled kind first, else the first other view
     /// that has a value there (the key follows — "switching colours if needed").
     public func read(_ project: ProjectModel, mode: LatticeLegendMode, face: FaceID, point: SIMD3<Float>?) -> Bool {
+        // ★ his 11-05 (P5's rule, R9): under Edit faces a tap is Edit faces' — the key is off, it reads nothing and keeps nothing
+        guard !faceEditing else { return false }
         // ★ ROUND 7 (F): every tap on the main Flexible page's part names the selected squeeze group (the heat follows it)
         if visible, !frozen, model?.project === project { chrome.foldAll(); noteMainTap(face: Int(face), point: point) }   // ★ R7-D1: a tap on the part folds every card
         guard let kind = FlexibleReadKind(mode: mode) else { return false }
@@ -485,7 +487,7 @@ extension FlexibleMainStage {
     /// and #354's drilled-in hides hold here, as they did before #354's gate (they read
     /// `latticeLegendMode.drilledIn`). An octet colour is the octet key's, under its own gate.
     public func keyDrilledIn(_ project: ProjectModel, _ stage: WorkspaceStage, mode: LatticeLegendMode) -> Bool {
-        owns(project, stage) && FlexibleReadKind(mode: mode) != nil
+        owns(project, stage) && !faceEditing && FlexibleReadKind(mode: mode) != nil   // ★ his 11-05: no key under Edit faces (H61)
     }
 
     /// H8: a wall the probe found while a Flexible legend is drilled in — read at its rest point
