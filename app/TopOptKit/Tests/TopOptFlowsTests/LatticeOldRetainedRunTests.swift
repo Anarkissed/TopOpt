@@ -18,7 +18,8 @@ final class LatticeOldRetainedRunTests: XCTestCase {
     }
 
     /// The bare form at the global depth: core refuses every variant document, and his sentence
-    /// names the wall as its Selections row does, with core's own numbers.
+    /// names the wall as its Selections row does, with core's own numbers. (Lattice Setup's rows name a face by its plain
+    /// name since 11-06, FaceNames: the banded cube's face 1 is its "Top face".)
     func testAnOldRetainedRunIsRefusedByCoreInHisWords() throws {
         for depth in [5.0, -1.0] {        // -1 omits the key: core's own 5 mm default
             let (p, _, _) = VariantFacePrismFixture.project(organic: true)
@@ -34,7 +35,7 @@ final class LatticeOldRetainedRunTests: XCTestCase {
                 let e = try XCTUnwrap(why, "★ \(label): core refuses it")
                 XCTAssertTrue(e.contains("the protection is 5.000000 mm and the lattice region is 20.000000 mm"), e)
                 XCTAssertEqual(sentence(p, e),
-                               "This result was optimized with a 5 mm protected skin under Face 1, but the wall is 20 mm deep. "
+                               "This result was optimized with a 5 mm protected skin under Top face, but the wall is 20 mm deep. "
                                + "Optimize again with this wall, or set the wall to 5 mm.", "★ \(label): his words")
             }
         }
@@ -48,7 +49,7 @@ final class LatticeOldRetainedRunTests: XCTestCase {
         p.writeLatticeDepthMM(.face(group: gid, face: 1), mm: 12.5)
         let e = try XCTUnwrap(try coreErrors(p, retained: retained).first?.1)
         XCTAssertEqual(sentence(p, e),
-                       "This result was optimized with a 20 mm protected skin under Face 1, but the wall is 12.5 mm deep. "
+                       "This result was optimized with a 20 mm protected skin under Top face, but the wall is 12.5 mm deep. "
                        + "Optimize again with this wall, or set the wall to 20 mm.")
         // ★ the remedy is true: the wall set to the skin's depth, core accepts every document
         p.writeLatticeDepthMM(.face(group: gid, face: 1), mm: 20)
@@ -63,7 +64,7 @@ final class LatticeOldRetainedRunTests: XCTestCase {
         let old = try VariantFacePrismFixture.original(bareProtection: [1], depthMM: 5)
         let e = try XCTUnwrap(try coreErrors(p, retained: old).first?.1)
         XCTAssertEqual(sentence(p, e),
-                       "This result was optimized with a 5 mm protected skin under Face 1, but the wall is 22 mm deep. "
+                       "This result was optimized with a 5 mm protected skin under Top face, but the wall is 22 mm deep. "
                        + "Optimize again with this wall, or set the wall to 3 mm.")
         p.writeLatticeDepthMM(.face(group: gid, face: 1), mm: 3)
         XCTAssertTrue(try coreErrors(p, retained: old).allSatisfy { $0.1 == nil }, "★ 3 mm + its 2 mm expand = the 5 mm skin")
@@ -79,7 +80,7 @@ final class LatticeOldRetainedRunTests: XCTestCase {
             let old = try VariantFacePrismFixture.original(bareProtection: [1], depthMM: 5)
             let err = try XCTUnwrap(try coreErrors(p, retained: old).first?.1, "control: core refuses it")
             XCTAssertEqual(sentence(p, err),
-                           "This result was optimized with a 5 mm protected skin under Face 1, but the wall is "
+                           "This result was optimized with a 5 mm protected skin under Top face, but the wall is "
                            + LatticeVariantProtectionTie.mm(20 + e) + " mm deep. Optimize again with this wall.",
                            "★ expand \(e): no depth suggested")
             if e == 4.5 {

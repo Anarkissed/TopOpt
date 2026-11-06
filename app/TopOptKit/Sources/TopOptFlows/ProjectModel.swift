@@ -2892,14 +2892,32 @@ public final class ProjectModel: ObservableObject {
         faceRegions.region(rid)?.name ?? "Region \(rid)"
     }
 
-    /// A selectable's short name — the Selections row's, and the one ruling 3's sentence uses.
-    /// Two words at most (R7).
+    /// A selectable's short name on the Flexible stage's rows, chips and cards. Two words at most (R7). A face keeps its
+    /// number there until a ruling moves Flexible to the plain names (its own copy names faces "Face n" in many more places,
+    /// so this alone would give one face two names on one screen). Lattice Setup reads `latticeRowName`.
     public func latticeSelectableName(_ ref: LatticeSelectableRef) -> String {
         switch ref {
         case let .face(_, f): return "Face \(runFaceID(f))"
         case .primitive: return "Primitive"
         case let .region(_, rid): return latticeRegionName(rid)
         }
+    }
+
+    /// A selectable's name on Lattice Setup's Selections rows, in its toasts, and in ruling 3's sentence: a face by its plain
+    /// name (`faceName`), anything else as `latticeSelectableName`.
+    public func latticeRowName(_ ref: LatticeSelectableRef) -> String {
+        switch ref {
+        case let .face(_, f): return faceName(f)
+        default: return latticeSelectableName(ref)
+        }
+    }
+
+    /// A face's plain name: "Top face", "Hole 2, ⌀ 8 mm", "Rounded edge, R 3 mm" (FaceNames, the reviewer's ruling 11-06
+    /// 09:41Z). Read from the part's own axes (up against its gravity, else +Z), never the camera, and the same words on
+    /// Lattice Setup's rows and Topology's. Its number only while there is no mesh to read, or the face isn't on it.
+    public func faceName(_ f: FaceID) -> String {
+        if let m = viewerMesh, let n = FaceNames.name(f, in: m, frame: .init(gravity: force.gravity)) { return n }
+        return "Face \(runFaceID(f))"
     }
 
     /// ★ RULING 3 (maintainer, 2026-09-30): core's refusal of a variant document, in his words.
@@ -2927,7 +2945,7 @@ public final class ProjectModel: ObservableObject {
                 }
             }
         }
-        let name = ref.map(latticeSelectableName) ?? "Face \(m.faceID)"
+        let name = ref.map(latticeRowName) ?? "Face \(m.faceID)"
         let expand = prism?.selectableKey.map { LatticeSlabExpand.clamp(lattice.selectableExpandMM[$0] ?? 0) } ?? 0
         // ★ ROUND 3 (maintainer, 2026-10-01): a depth is suggested only when the wall can be set to
         // it — at or below zero, or below the wall's minimum depth (`LatticeSlabDepth.minMM`, where

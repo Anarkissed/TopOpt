@@ -10494,7 +10494,7 @@ public struct WorkspacePlaceholder: View {
                         // above it rather than as a row that lost its controls.
                         Circle().fill(DS.Color.textQuaternary.color)
                             .frame(width: 3, height: 3)
-                        Text("Face \(project.runFaceID(f))")
+                        Text(project.faceName(f))
                             .font(.system(size: 9, weight: .semibold)).monospacedDigit()
                             .foregroundStyle(DS.Color.textQuaternary.color)
                         Spacer(minLength: 0)
@@ -10612,7 +10612,7 @@ public struct WorkspacePlaceholder: View {
 
     /// A selectable's short name on its row. Two words at most (R7).
     private func latticePrimitiveName(_ ref: LatticeSelectableRef) -> String {
-        project.latticeSelectableName(ref)   // one definition (ruling 3 names walls with it)
+        project.latticeRowName(ref)   // one definition (ruling 3 names walls with it; a face by its plain name)
     }
 
     /// ★ One primitive's own answer: Lattice / Solid / Off (§3c). Three, not two —
@@ -10859,7 +10859,7 @@ public struct WorkspacePlaceholder: View {
         let frozen = !project.latticeReachesTheRun(ref) && role != nil
         let removable: Bool = { if case .primitive = ref { return false }; return true }()
         VStack(alignment: .leading, spacing: 0) {
-            DSRow(.face, key: "latticeFace-\(ref.key)", name: project.latticeSelectableName(ref), value: picked ? nil : value,
+            DSRow(.face, key: "latticeFace-\(ref.key)", name: project.latticeRowName(ref), value: picked ? nil : value,
                   selected: picked, tag: latticeAlsoIn(ref, g),
                   line: frozen ? DSRowLine(LatticeSectorOutline.notLatticedWords(protected: force.isProtected(g.id)), tone: .warning) : nil,
                   tap: { latticeFacePick = picked ? nil : ref.key }) {
@@ -11055,7 +11055,7 @@ public struct WorkspacePlaceholder: View {
         if latticeFacePick == ref.key { latticeFacePick = nil }
         project.syncForceGroups()
         refreshLatticeFaceCards()
-        model.toast = LatticeSetupCopy.removed(project.latticeSelectableName(ref))
+        model.toast = LatticeSetupCopy.removed(project.latticeRowName(ref))
     }
 
     // MARK: B6 s2a — the Topology panel on Lattice Setup (notes 19, 23a, 23b, R2.1)
@@ -13769,9 +13769,9 @@ extension WorkspacePlaceholder {
             // ★ his ask 2026-10-26 + his iPad 14:13: every face its own card, picked one at a time, with its own eye and trash
             VStack(spacing: PieceRowPick.spacing) {
                 ForEach(g.faces, id: \.self) { f in
-                    pieceCard(g, key: Int(f), title: "Face \(f)", pickID: "topology-face-pick-\(f)",
+                    pieceCard(g, key: Int(f), title: project.faceName(f), pickID: "topology-face-pick-\(f)",
                               trashID: "topology-face-trash-\(f)",
-                              info: "Face \(f) is in \(g.name) (\(force.panelKindLabel(for: g.id))). "
+                              info: "\(project.faceName(f)) is in \(g.name) (\(force.panelKindLabel(for: g.id))). "
                                   + "Tap it on the model to take it out of the group.",
                               canDelete: project.groupView.canEdit(g.id), delete: { removePieceFace(g, f) }) { EmptyView() }
                 }
