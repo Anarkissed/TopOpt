@@ -315,12 +315,11 @@ public struct ResultsReplacementPrompt: Equatable, Sendable, Identifiable {
 /// maintainer "the core refuses to lattice it" about a core, in that same binary,
 /// that certifies it happily.
 ///
-/// Core's remaining rule is much narrower, and it is about GRADING, not the design
-/// box: a graded plan picks its cell set before the added-material policy runs, so
-/// a graded design-box run could emit struts into cells the certificate calls
-/// solid (`run_job.cpp`, both the run_job pre-flight and `lattice_variant_job`).
-/// UNIFORM lattice under a design box is supported and tested — that is exactly
-/// what PR 285 built.
+/// Core's remaining rule is much narrower: since TO-core's 4e7648d8 (ruling of
+/// 2026-11-03 23:05) a graded plan works around the added material, and the one
+/// refusal left is the ORGANIC lattice with a design box (`run_job.cpp`, both the
+/// run_job pre-flight and `lattice_variant_job`). UNIFORM lattice under a design box
+/// is supported and tested — that is exactly what PR 285 built.
 public enum LatticeCoreCapability {
     /// Does core still refuse ALL lattice work on a design-box run? It does not —
     /// PR 285 removed the blanket refusal (`resolve_design_domain` now does the
@@ -334,30 +333,38 @@ public enum LatticeCoreCapability {
     public static let designBoxRefusalPhrase =
         "lattice certification does not support a design box"
 
-    /// The refusal core DOES still carry, as the source-reading test looks for it.
-    /// A RAW string: the test greps `run_job.cpp`'s SOURCE TEXT, where the quotes
-    /// around the two JSON keys are C++ escapes and appear as backslash-quote.
-    public static let gradedDesignBoxRefusalPhrase =
-        #"a \"grading\" block is not yet supported together with a \"design_box\""#
+    /// The refusal core DOES still carry (`kOrganicDesignBoxRefusal`, thrown by both the
+    /// run_job pre-flight and `lattice_variant_job`), in core's own words. Since the ruling
+    /// of 2026-11-03 23:05 a GRADED lattice runs with a design box (TO-core 4e7648d8: the
+    /// law plans around the added material); only the ORGANIC lattice is refused — its
+    /// traced network is laid before the added material is kept solid. Core's mirror test
+    /// (`test_app_core_capability_mirror`, MIRROR 2) asks that this file quote the phrase
+    /// while core throws it.
+    public static let organicDesignBoxRefusalPhrase =
+        "The organic lattice can't be used with a design box"
 
-    /// The sentence the app shows when the CURRENT setup is a GRADED lattice run
-    /// with a design box — the one configuration core still refuses.
+    /// The sentence the app shows when the CURRENT setup is a graded ORGANIC lattice run
+    /// with a design box — the one configuration core still refuses. Core's sentence, with
+    /// the app's names for the other two algorithms.
     public static let liveConflictReason =
-        "a graded lattice can’t use a design box — the grading law picks its cells "
-        + "before the added-material policy runs, so the job is refused. Switch "
-        + "density to uniform, or turn off the design box"
+        organicDesignBoxRefusalPhrase + " yet: it lays its struts before the material the "
+        + "design box added is kept solid, so it could put struts where the certificate "
+        + "counts solid. Use Default Grade or Stepped with the design box, or Organic Grade "
+        + "without one."
 
     /// Whether the CURRENT project setup would be refused. Live state on purpose:
     /// this gates a job built from live state, unlike the variant entries above,
     /// which gate work on a run that already happened.
     ///
-    /// `graded` is REQUIRED rather than defaulted: it is the fact that decides the
-    /// verdict, and a default would let a caller inherit the wrong answer in
-    /// silence — which is the shape of the failure this whole type is a scar of.
+    /// `graded` and `organic` are REQUIRED rather than defaulted: they are the facts
+    /// that decide the verdict (core refuses `grading` present + a design box + the
+    /// organic algorithm), and a default would let a caller inherit the wrong answer
+    /// in silence — which is the shape of the failure this whole type is a scar of.
     public static func liveConflict(latticeEnabled: Bool,
                                     designBoxActive: Bool,
-                                    graded: Bool) -> String? {
-        guard latticeEnabled, designBoxActive, graded else { return nil }
+                                    graded: Bool,
+                                    organic: Bool) -> String? {
+        guard latticeEnabled, designBoxActive, graded, organic else { return nil }
         return liveConflictReason
     }
 

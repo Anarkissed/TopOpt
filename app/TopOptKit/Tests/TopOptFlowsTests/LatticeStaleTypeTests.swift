@@ -37,8 +37,9 @@ final class LatticeStaleTypeTests: XCTestCase {
             p.lattice.topologyID = "sc"
             XCTAssertNil(p.latticeRunSpec(emission: p.latticeJobRegions()),
                          "★ the mechanism: a type core can't build drops the lattice block (organic \(organic))")
+            // ★ RE-PINNED (release (2), E2): core now builds SC, so the sentence is the type gate's (its app batch, B7.n)
             XCTAssertEqual(LatticeTypeCatalog.selectionRefusal(p.lattice.topologyID),
-                           "Simple cubic: Strength-checked, but not buildable yet", "★ the picker's own sentence (core's words)")
+                           "Simple cubic: \(LatticeTypeCatalog.appBatchPending)", "★ the picker's own sentence")
         }
     }
 
@@ -154,8 +155,11 @@ final class LatticeStaleTypeTests: XCTestCase {
             return log.filter { $0.topology == id }.map(\.fn)
         }
         func clear() { lock.lock(); log.removeAll(); lock.unlock() }
-        let stale = Set(TopOptKit.latticeCertifiableTopologies).subtracting(TopOptKit.latticeGeneratableTopologies)
-        XCTAssertFalse(stale.isEmpty, "positive control: core certifies types it cannot build")
+        // ★ RE-PINNED (release (2), E2): core builds every type it certifies now, so the stale set is the types core
+        // runs whose app batch has not shipped (`LatticeTypeCatalog.appBatches`)
+        let stale = Set(TopOptKit.latticeCertifiableTopologies + TopOptKit.latticeGeneratableTopologies)
+            .subtracting(LatticeTypeCatalog.appBatches)
+        XCTAssertFalse(stale.isEmpty, "positive control: core runs types the app has not shipped")
         for organic in [false, true] {
             let (p, _, _) = VariantFacePrismFixture.project(organic: organic)
             clear()

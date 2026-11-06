@@ -242,7 +242,10 @@ final class LatticeCellGradingTests: XCTestCase {
         print("GRADING lit uniform=\(uniformLit) graded=\(gradedLit) "
               + "moved=\(moved) noiseFloor=\(floorPx) levels=\(Set(field.level).sorted())")
         XCTAssertEqual(floorPx, 0, "the same frame twice must be the same frame")
-        XCTAssertGreaterThan(moved, 500,
+        // ★ RE-PINNED (release (2), K1 item 1): a share of the LIT pixels, not a count. On the full octet cell's law a
+        // density draws about 0.7 of the legs-only strut, so fewer pixels are lit and the same grading moves fewer of
+        // them (305 of 3,720 lit, 8 %, against a noise floor of 0; the count bar was 500).
+        XCTAssertGreaterThan(moved, uniformLit / 20,
                              "★ grading the cell must CHANGE the picture. Identical "
                              + "frames mean the level channel is baked and ignored.")
     }

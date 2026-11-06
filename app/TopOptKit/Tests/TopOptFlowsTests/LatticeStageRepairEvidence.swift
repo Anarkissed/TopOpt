@@ -595,14 +595,17 @@ final class LatticeStageRepairEvidence: XCTestCase {
         // ── WHAT HIS SCREENSHOT SHOWED, and the arithmetic behind each ────────
         // These are the OLD values. Each is asserted to be what the old code
         // produced — by reconstructing it here — and then asserted GONE.
-        let oldCell = bounds.printabilityFloorMM          // LIGHT-end floor
+        // ★ RE-PINNED (release (2), K1): the old code read core's LIGHT-end floor and band floor, and K1 re-measured
+        // octet's law on the full cell — rebuilt on today's core they are 7.03 mm and 4.96 %, not his card's. So his
+        // card's cell and density are LITERALS now (his screenshot, 2026-08-17); the app's old closed form, which reads
+        // no core, still turns them into his 0.32 mm strut.
+        XCTAssertNotEqual(bounds.printabilityFloorMM, 4.93, accuracy: 0.5, "K1 moved the light-end floor")
+        let oldCell = 4.93                                 // his card's cell (the legs-only law's LIGHT-end floor)
         let oldCells = Self.hisDepthMM / oldCell
-        let oldDensity = limits.rhoMin                     // the band floor
+        let oldDensity = 0.05047                           // his 5 % (the legs-only band floor)
         let oldStrut = oldAppStrutDiameterMM(
             relativeDensity: oldDensity, cellMM: oldCell)  // the app's law AS IT WAS
-        XCTAssertEqual(oldCell, 4.93, accuracy: 5e-3, "his card's 4.93 mm cell")
         XCTAssertEqual(oldCells, 0.81, accuracy: 5e-3, "his 0.8 cells across")
-        XCTAssertEqual(oldDensity, 0.05047, accuracy: 1e-4, "his 5% IS band_rho_min")
         XCTAssertEqual(oldStrut, 0.32, accuracy: 5e-3, "his 0.32 mm strut")
 
         // ── AND EVERY ONE OF THEM IS GONE ────────────────────────────────────
@@ -610,9 +613,11 @@ final class LatticeStageRepairEvidence: XCTestCase {
         XCTAssertNotEqual(card.cellsPerMember, oldCells, accuracy: 0.1)
         XCTAssertNotEqual(card.relativeDensity, oldDensity, accuracy: 0.01)
         XCTAssertNotEqual(card.strutDiameterMM, oldStrut, accuracy: 0.01)
-        XCTAssertEqual(card.cellText, "1.17 mm")
-        XCTAssertEqual(card.cellsText, "3.4")
-        XCTAssertEqual(card.densityText, "60%")
+        // ★ RE-PINNED (release (2), K1 item 5): the dense-end floor is 1.117 mm (3.6 across) and the lightest density
+        // that prints there is the band's top, 0.9003 (1.17 mm, 3.4, 60 % on the legs-only law)
+        XCTAssertEqual(card.cellText, "1.12 mm")
+        XCTAssertEqual(card.cellsText, "3.6")
+        XCTAssertEqual(card.densityText, "90%")
         XCTAssertEqual(card.strutText, "0.45 mm")
         // ★ Still out of regime at 4 mm — honestly, and for ONE reason now
         // (3.4 < 5), not two. The strut prints.
@@ -621,8 +626,8 @@ final class LatticeStageRepairEvidence: XCTestCase {
 
         // ★ THE DISTANCE, PINNED. This is the claim the handoff makes and the
         // reason the brief's "needs 24.65 mm" advice was wrong by 4.2x.
-        XCTAssertEqual(oldCell / card.cellMM, 4.2, accuracy: 0.05,
-                       "the old cell was 4.2x too coarse")
+        XCTAssertEqual(oldCell / card.cellMM, 4.41, accuracy: 0.05,
+                       "the old cell was 4.4x too coarse (4.2x against the legs-only law's 1.17 mm)")
         XCTAssertEqual(w / oldStrut, 1.4, accuracy: 0.02,
                        "and the old strut law 1.4x off core's")
 
@@ -708,11 +713,12 @@ final class LatticeStageRepairEvidence: XCTestCase {
         XCTAssertTrue(at4.valid)
         XCTAssertTrue(at4.feasible, "core: a 4 mm member BUILDS (percolation)")
         XCTAssertTrue(at4.outOfRegime, "…but does not certify")
+        // ★ RE-PINNED (release (2), K1 item 5): 1.117 mm and 3.58 across on the full cell's law (1.17 / 3.41 legs-only)
         XCTAssertEqual(at4.cellMM, denseFloorFor(w), accuracy: 1e-6,
-                       "★ core picks the DENSE-end floor, 1.17 mm — the card picks "
-                       + "the LIGHT-end floor, 4.93 mm: 4.2x apart")
-        XCTAssertEqual(at4.cellsPerMember, 3.41, accuracy: 0.01,
-                       "★ core: 3.4 cells across, not the card's 0.8")
+                       "★ core picks the DENSE-end floor, 1.12 mm — the card picked "
+                       + "the LIGHT-end floor, 4.93 mm: 4.4x apart")
+        XCTAssertEqual(at4.cellsPerMember, 3.58, accuracy: 0.01,
+                       "★ core: 3.6 cells across, not the card's 0.8")
         XCTAssertGreaterThan(at4.relativeDensity, 0.55,
                              "★ core: ~60% density, not the card's 5%")
         XCTAssertTrue(at4.prints,
@@ -732,9 +738,10 @@ final class LatticeStageRepairEvidence: XCTestCase {
         XCTAssertGreaterThanOrEqual(atNeeded.cellsPerMember, 5.0 - 1e-6)
         XCTAssertTrue(atNeeded.prints)
 
-        // ★ AND THE CARD'S STRUT WAS THE APP'S OWN LAW, 1.4x OFF CORE'S.
-        let appDia = oldAppStrutDiameterMM(
-            relativeDensity: limits.rhoMin, cellMM: bounds.printabilityFloorMM)
+        // ★ AND THE CARD'S STRUT WAS THE APP'S OWN LAW, 1.4x OFF CORE'S. ★ RE-PINNED (release (2), K1): at his card's
+        // literal cell and density (4.93 mm, 5.047 %) — on today's core the light-end floor moved to 7.03 mm, where the
+        // old closed form happens to land on one bead (it tracks the full cell's law at the light end).
+        let appDia = oldAppStrutDiameterMM(relativeDensity: 0.05047, cellMM: 4.93)
         let coreDerivedAtThatCell = TopOptKit.latticeRegionDerivation(
             topology: "octet",
             memberWidthMM: bounds.cellsPerMemberFloor * bounds.printabilityFloorMM,

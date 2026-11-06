@@ -14,13 +14,17 @@ final class LatticeAestheticCeilingFromCoreTests: XCTestCase {
         get throws { try XCTUnwrap(TopOptKit.latticeAestheticDensityCeiling(topology: "octet"), "core has an octet ceiling") }
     }
 
-    /// Core's number: the preimage of strut/cell 0.20 (core's own comment: 0.218871). None for a
-    /// type core has not measured.
-    func testCoreHasTheOctetCeilingAndNoOther() throws {
-        XCTAssertEqual(try core, 0.218871, accuracy: 1e-6)
-        for id in ["sc", "bcc", "fcc", "kelvin", "rhombic", "gyroid", "nonsense"] {
-            XCTAssertNil(TopOptKit.latticeAestheticDensityCeiling(topology: id), id)
+    /// Core's number: the preimage of strut/cell 0.20. ★ RE-PINNED (release (2), K1 item 4): on the full octet cell's
+    /// law it is 0.3788 (0.218871 was the legs-only law's); and core now measures every type's law, so each has its own
+    /// ceiling. None for an id core does not know.
+    func testCoreHasACeilingPerMeasuredTypeAndNoneForAnUnknownId() throws {
+        XCTAssertEqual(try core, 0.378846, accuracy: 1e-6)
+        let each: [(String, Double)] = [("sc", 0.083054), ("bcc", 0.179078), ("fcc", 0.212621),
+                                        ("kelvin", 0.206547), ("rhombic", 0.318122), ("gyroid", 0.60069)]
+        for (id, c) in each {
+            XCTAssertEqual(try XCTUnwrap(TopOptKit.latticeAestheticDensityCeiling(topology: id), id), c, accuracy: 1e-6, id)
         }
+        XCTAssertNil(TopOptKit.latticeAestheticDensityCeiling(topology: "nonsense"))
     }
 
     /// The app reads core's number, exactly, at every cell (core's table is linear in the cell).

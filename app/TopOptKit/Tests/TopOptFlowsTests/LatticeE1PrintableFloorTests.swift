@@ -15,13 +15,15 @@ final class LatticeE1PrintableFloorTests: XCTestCase {
     /// The literals, at a 0.45 mm bead: 2.25 mm at the job's octet cap, 1.173173434 mm uncapped
     /// (Allow quilt on). Literals, so a drift in either is seen.
     func testCoresFloorAtTheCapAndUncapped() throws {
-        XCTAssertGreaterThan(octetCap, 0.2); XCTAssertLessThan(octetCap, 0.25)
+        // ★ RE-PINNED (release (2), K1 items 4 + 5): the cap is 0.3788 on the full octet cell's law; the capped floor stays
+        // 2.25 mm and the uncapped one is 1.116948948 mm (1.173173434 on the legs-only law; core pins the same literal)
+        XCTAssertGreaterThan(octetCap, 0.37); XCTAssertLessThan(octetCap, 0.39)
         let capped = try XCTUnwrap(TopOptKit.latticeMinPrintableCellMM(topology: "octet", minExtrudableWidthMM: 0.45,
                                                                         maxRelativeDensity: octetCap))
         XCTAssertEqual(capped, 2.25, accuracy: 1e-9, "★ the floor grade_lattice applies")
         let open = try XCTUnwrap(TopOptKit.latticeMinPrintableCellMM(topology: "octet", minExtrudableWidthMM: 0.45,
                                                                       maxRelativeDensity: 0))
-        XCTAssertEqual(open, 1.173173434, accuracy: 1e-9, "★ uncapped: Allow quilt on")
+        XCTAssertEqual(open, 1.116948948, accuracy: 1e-9, "★ uncapped: Allow quilt on")
         // the tile floor reads the same function at the same cap
         XCTAssertEqual(try XCTUnwrap(LatticeSettings.tileFloorMM(topologyID: "octet", beadMM: 0.45, allowQuilt: false)),
                        capped, accuracy: 0)

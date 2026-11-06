@@ -2702,7 +2702,10 @@ public final class ProjectModel: ObservableObject {
         // does not call live gets no run spec — and so its stale path asks core for no
         // per-type number at all (the posture and the bounds both would). Core's own
         // readiness, the same two facts `runSpec(topology:)` reads, so octet is untouched.
+        // ★ RELEASE (2), E2: core runs nine types; a type whose app batch has not shipped (B7.n) is stale here too
+        // (`LatticeTypeCatalog.appBatches`), asked first, so its path still asks core nothing.
         guard lattice.enabled,
+              LatticeTypeCatalog.appBatches.contains(lattice.topologyID),
               TopOptKit.latticeTypeReadiness(lattice.topologyID,
                                              generatable: TopOptKit.latticeGeneratableTopologies,
                                              certifiable: TopOptKit.latticeCertifiableTopologies) == .live
@@ -2809,6 +2812,7 @@ public final class ProjectModel: ObservableObject {
             selectableRoles: lattice.selectableRoles,
             selectableDepthMM: lattice.selectableDepthMM,
             groupDensities: lattice.groupDensities,
+            groupGrading: lattice.resolvedAreaGrading,   // ★ B7 (E3): each area's own grading, from its Lattice page tab
             // ★ THE PER-REGION DENSITY AND THE IN-PLANE EXPAND REACH THE JOB
             // (maintainer, 2026-08-17). A control whose value no run consumes is
             // the decorative-primitive defect — these two lines are what stop it,

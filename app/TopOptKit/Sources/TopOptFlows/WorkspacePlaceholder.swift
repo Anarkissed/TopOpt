@@ -12658,15 +12658,15 @@ public struct WorkspacePlaceholder: View {
         return true
     }
 
-    /// The GRADED-lattice-plus-design-box conflict in the CURRENT setup, or nil.
+    /// The graded-ORGANIC-lattice-plus-design-box conflict in the CURRENT setup, or nil.
     /// One rule, shared by the workspace Optimize button and the lattice page's own.
-    /// A UNIFORM lattice under a design box is supported by core (PR 285) and is
-    /// not gated here — it was, until the device-failure task found the app still
-    /// refusing what core had learned to do.
+    /// A UNIFORM lattice under a design box is supported by core (PR 285), and a graded
+    /// Default Grade / Stepped one since TO-core's 4e7648d8; neither is gated here.
     private var latticeDesignBoxConflict: String? {
         LatticeCoreCapability.liveConflict(latticeEnabled: project.lattice.enabled,
                                            designBoxActive: project.designBox.isActive,
-                                           graded: project.lattice.densityMode == .sim)
+                                           graded: project.lattice.densityMode == .sim,
+                                           organic: project.lattice.isOrganic)
     }
 
     /// ★ ruling 4 (item 5): why Optimize may not start with this lattice — the ONE definition
@@ -14013,9 +14013,7 @@ extension WorkspacePlaceholder {
 
     /// The groups that lattice something (an include in them): the Cells page's tabs, the change-type card's count.
     var latticeRegionTabNames: [String] {
-        project.latticeGroups.filter { g in   // ★ B6 s1b (#362's seam, 11-05): the Lattice stage's own groups
-            project.latticeSelectableRefs(g).contains { project.latticeSelectableRole($0, in: g.id) == .include }
-        }.map(\.name)
+        project.latticeAreaGroups.map(\.name)   // ★ B6 s1b: the Lattice stage's own groups; ★ B7 (E3): one list with the tabs' grades
     }
 
     /// ● <Type> ⌄ | Regions | Cells | ✂ — and what the lattice builds on. Over the Cells page too (mounted above it).

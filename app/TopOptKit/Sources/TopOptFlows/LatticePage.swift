@@ -220,6 +220,7 @@ public struct LatticePage: View {
             lineWidthMM: project.printParams.strutLineWidthMM,
             cellSummary: cellSummaryText,
             designBoxActive: project.designBox.isActive,
+            organic: project.lattice.isOrganic,
             // a type with no band has no per-region density to refuse (Q2): its own line leads
             densityRefusals: typeLine == nil
                 ? LatticeSectorDensity.refusals(project.latticeSectorDensityRows()) : [],

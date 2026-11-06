@@ -127,7 +127,11 @@ final class LatticeSelectionsRowsHostedTests: XCTestCase {
     func testTheLatticePagesTabsAreTheStagesOwnGroups() throws {
         let ws = try FlexibleSource.code("WorkspacePlaceholder.swift")
         let r = try XCTUnwrap(ws.range(of: "var latticeRegionTabNames: [String] {"))
-        XCTAssertTrue(String(ws[r.upperBound...].prefix(200)).contains("project.latticeGroups.filter"), "★ the stage's own groups")
+        // ★ B7 (E3, #362 11-06): the tabs and each tab's own grade read ONE list, ProjectModel.latticeAreaGroups
+        XCTAssertTrue(String(ws[r.upperBound...].prefix(200)).contains("project.latticeAreaGroups"), "★ the areas' one list")
+        let list = try FlexibleSource.code("LatticeList.swift")
+        let a = try XCTUnwrap(list.range(of: "public var latticeAreaGroups: [SelectionGroup] {"))
+        XCTAssertTrue(String(list[a.upperBound...].prefix(200)).contains("latticeGroups.filter"), "★ the stage's own groups")
     }
 }
 #endif

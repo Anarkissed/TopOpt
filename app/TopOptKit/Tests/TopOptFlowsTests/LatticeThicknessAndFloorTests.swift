@@ -145,11 +145,14 @@ final class LatticeThicknessAndFloorTests: XCTestCase {
         let o = LatticeType.octet
         let his = o.printabilityDensityFloor(lineWidthMM: 0.42, cellMM: 2.20)
         let fine = o.printabilityDensityFloor(lineWidthMM: 0.20, cellMM: 2.20)
-        XCTAssertEqual(his, 0.2021, accuracy: 0.001, "★ his settings, core's law")
-        XCTAssertEqual(fine, 0.0501, accuracy: 0.001, "★ a 0.2 mm nozzle")
+        // ★ RE-PINNED (release (2), K1 item 1): octet's full-cell law — the same strut holds about twice the
+        // density, so his floor is 0.3519 (was 0.2021 on the legs-only law) and the fine nozzle's 0.0959 (was 0.0501);
+        // the fitted exponent is 1.75 (was 1.88). Still not linear, still measured.
+        XCTAssertEqual(his, 0.3519, accuracy: 0.001, "★ his settings, core's law")
+        XCTAssertEqual(fine, 0.0959, accuracy: 0.001, "★ a 0.2 mm nozzle")
         let exponent = log(his / fine) / log(0.42 / 0.20)
-        XCTAssertEqual(exponent, 1.88, accuracy: 0.03,
-                       "★ core's floor goes as w^1.88 — near-quadratic, and measured "
+        XCTAssertEqual(exponent, 1.75, accuracy: 0.03,
+                       "★ core's floor goes as w^1.75 — between linear and quadratic, and measured "
                        + "rather than assumed")
         XCTAssertGreaterThan(his / fine, 3.0,
                              "★ the correction his ~0.25 guess needed: a finer nozzle "
@@ -172,8 +175,9 @@ final class LatticeThicknessAndFloorTests: XCTestCase {
         let fine = LatticeBounds.compute(settings: s, limits: limits, lineWidthMM: 0.42)
         XCTAssertGreaterThan(fine.densityLo, coarse.densityLo,
                              "★ stating a line width must RAISE the floor")
-        // Core's floor, not the app's old 0.4374 — see the note above.
-        XCTAssertEqual(fine.densityLo, 0.2021, accuracy: 0.001)
+        // Core's floor, not the app's old 0.4374 — see the note above. ★ RE-PINNED (release (2), K1): 0.3519 on the
+        // full octet cell's law (0.2021 on the legs-only law).
+        XCTAssertEqual(fine.densityLo, 0.3519, accuracy: 0.001)
         XCTAssertNotNil(fine.densityLoReason, "★ …and say why it moved")
         XCTAssertTrue(fine.densityLoReason?.contains("extrusion") == true,
                       "the reason must name the printer, not the certification: "

@@ -25,10 +25,12 @@ import TopOptKit
 
 final class LatticeStrutLawTests: XCTestCase {
 
-    /// `kOctetDia` verbatim — rho and diameter at the reference 4 mm cell.
+    /// `kOctetDia` verbatim — rho and diameter at the reference 4 mm cell. ★ RE-PINNED (release (2), K1 item 1):
+    /// octet's own law, measured on the FULL cell (legs and braces); the old rows (0.3632 at 0.05 …) were the
+    /// legs-only cell's, PR 198's B3 table.
     private let table: [(rho: Double, d4: Double)] = [
-        (0.05, 0.3632), (0.08, 0.4787), (0.10, 0.5336), (0.15, 0.6401),
-        (0.20, 0.7592), (0.30, 0.9754), (0.40, 1.1815), (0.60, 1.5343),
+        (0.05, 0.2573), (0.08, 0.3300), (0.10, 0.3724), (0.15, 0.4653),
+        (0.20, 0.5473), (0.30, 0.6934), (0.40, 0.8286), (0.60, 1.0913),
     ]
 
     func testTheBridgeReturnsCoresMeasuredDiameters() throws {
@@ -61,24 +63,29 @@ final class LatticeStrutLawTests: XCTestCase {
     /// ★★ AND THE OLD CLOSED FORM IS MEASURABLY WRONG — this is the test that would
     /// have caught the drift years earlier. It pins the DISAGREEMENT so nobody
     /// reintroduces `sqrt(rho/K)` believing it equivalent.
+    /// ★ RE-PINNED (release (2), K1 item 1: core's law changed, and the app was re-checked against core): on the full
+    /// cell's law the closed form is right at the light end (within 1 % at 0.05) and still 15 %+ thin at the dense end,
+    /// so it is still not equivalent and still not used.
     func testTheOldClosedFormDisagreesWithCoreAndIsNotUsed() throws {
         let K = 48.0, cell = 4.0
-        for rho in [0.05, 0.20, 0.60] {
+        for (rho, lo, hi) in [(0.05, 0.99, 1.01), (0.20, 0.92, 0.96), (0.60, 0.80, 0.85)] {
             let core = TopOptKit.latticeStrutDiameterMM(topology: "octet",
                                                         relativeDensity: rho, cellMM: cell)
             try XCTSkipIf(core == 0, "core carries no strut law in this build")
             let closedForm = 2 * cell * (rho / K).squareRoot()
-            XCTAssertLessThan(closedForm / core, 0.75,
-                              "★ the closed form is 25%+ thin at rho \(rho) — if this "
-                              + "ever passes, someone has changed one of the two laws "
-                              + "and the app must be re-checked against core")
+            XCTAssertTrue((lo...hi).contains(closedForm / core),
+                          "★ rho \(rho): closed form / core = \(closedForm / core) — if this moves, someone has changed "
+                          + "one of the two laws and the app must be re-checked against core")
         }
     }
 
-    /// A topology core has no law for must return 0, not a guess.
+    /// A topology core has no law for must return 0, not a guess. ★ RE-PINNED (release (2), K1): core measures the
+    /// gyroid's own law now (its sheet, 0.26 mm at 0.2 in a 4 mm cell), so the unknown id is one core does not know.
     func testAnUnknownTopologyHasNoNumber() {
-        XCTAssertEqual(TopOptKit.latticeStrutDiameterMM(topology: "gyroid",
+        XCTAssertEqual(TopOptKit.latticeStrutDiameterMM(topology: "lattice9",
                                                         relativeDensity: 0.2, cellMM: 4), 0)
+        XCTAssertGreaterThan(TopOptKit.latticeStrutDiameterMM(topology: "gyroid",
+                                                              relativeDensity: 0.2, cellMM: 4), 0, "control: a measured law")
         XCTAssertEqual(TopOptKit.latticeStrutDiameterMM(topology: "octet",
                                                         relativeDensity: 0.2, cellMM: 0), 0)
     }
