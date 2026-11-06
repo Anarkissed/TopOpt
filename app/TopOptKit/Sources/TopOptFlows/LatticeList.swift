@@ -50,6 +50,8 @@ extension ProjectModel {
     @discardableResult
     public func latticeStageTap(face: FaceID, loop: [FaceID]) -> UUID? {
         var l = latticeList
+        // ★ B6 s3a: a face never joins a zone (a zone is a shape, no faces) — with a zone picked, the tap starts its own group
+        if let a = l.activeGroupID, lattice.zoneGroups.contains(a) { l.clearActive() }
         let gid = LatticeLibraryTap.route(faceID: face, loop: loop, selection: &l)
         latticeList = l
         syncForceGroups()

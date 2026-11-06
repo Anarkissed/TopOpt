@@ -2423,6 +2423,14 @@ public struct WorkspacePlaceholder: View {
                 ClearanceRenderItem(volume: $0.volume, selected: $0.groupID == active,
                                     tint: latticeRegionTint($0.role))
             }
+            // ★ B6 s3a: a Cylinder zone (a bolt shape has no depth plane) — its volume, as the region the run takes
+            + project.latticeZones.filter { !project.groupView.isHidden($0.id) && project.latticeZoneShape($0.id) == .cylinder }
+                .compactMap { z in
+                    project.latticeZonePrimitive(z.id).map {
+                        ClearanceRenderItem(volume: latticeIncludeVolume($0), selected: z.id == active,
+                                            tint: latticeRegionTint(project.lattice.groupRoles[z.id]))
+                    }
+                }
     }
 
     /// The ladder page's region volumes — the pre-separation behaviour, kept for
@@ -10732,11 +10740,82 @@ public struct WorkspacePlaceholder: View {
     /// ★ B6 s1b (design-system §4.3, mockup #lat-setup): the Faces section heading the groups — "FACES N" and "+ New group"
     /// (the next tap starts a new lattice group).
     private var latticeFacesSection: some View {
-        DSPanelSection(LatticeSetupCopy.faces, count: stageList.groups.count, key: "latticeFacesSection",
+        DSPanelSection(LatticeSetupCopy.faces, count: project.latticeFaceGroups.count, key: "latticeFacesSection",
                        action: (LatticeSetupCopy.newGroup, {
                            leaveGroupEditing()
                            model.toast = LatticeSetupCopy.newGroupToast
                        }))
+    }
+
+    // MARK: B6 s3a — Lattice zones (notes 25, 25a, N3)
+
+    /// ★ B6 s3a (mockup #lat-setup-zone): "LATTICE ZONES N · + Add zone", its zones, or its one line while there are none.
+    private var latticeZonesSection: some View {
+        let zones = project.latticeZones
+        return VStack(alignment: .leading, spacing: 0) {
+            DSPanelSection(LatticeSetupCopy.zones, count: zones.count, key: "latticeZonesSection",
+                           action: (LatticeSetupCopy.addZone, {
+                               latticeFacePick = nil
+                               if project.addLatticeZone() == nil { model.toast = "Import a part first" }
+                               refreshLatticeFaceCards()
+                           }))
+            if zones.isEmpty {
+                Text(LatticeSetupCopy.zoneEmpty).font(.system(size: 12.5)).foregroundStyle(DS.Color.textSecondary.color)
+                    .padding(.horizontal, 14).padding(.top, 2).padding(.bottom, 12)
+                    .background(DSParts.publish("latticeZonesEmpty"))
+            }
+            ForEach(zones) { z in latticeZoneRow(z) }
+        }
+    }
+
+    /// One zone (§4.4, a row like a group's): its swatch, "Zone 1", its size, eye, trash; picked (N3), its size as number
+    /// fields, [Box │ Cylinder] and [Lattice │ No lattice] — and its shape's handles on the part (the primitive's own knob).
+    @ViewBuilder private func latticeZoneRow(_ z: SelectionGroup) -> some View {
+        let picked = stageList.activeGroupID == z.id
+        let shape = project.latticeZoneShape(z.id) ?? .box
+        VStack(alignment: .leading, spacing: 0) {
+            DSRow(.group, key: "latticeZone-\(z.id.uuidString)", mark: .colour(z.color), name: z.name,
+                  value: project.latticeZoneSizeWords(z.id), selected: picked, hidden: project.groupView.isHidden(z.id),
+                  tap: { if picked { leaveGroupEditing() } else { latticeFacePick = nil; stageList.setActive(z.id) } }) {
+                DSRowEye(hidden: project.groupView.isHidden(z.id), key: "latticeZoneEye-\(z.id.uuidString)") { toggleTopologyEye(z.id) }
+                DSRowTrash(key: "latticeZoneTrash-\(z.id.uuidString)") {
+                    if picked { leaveGroupEditing() }
+                    project.removeLatticeZone(z.id)
+                    refreshLatticeFaceCards()
+                    model.toast = LatticeSetupCopy.removed(z.name)
+                }
+            }
+            if picked, let s = project.latticeZoneSize(z.id) {
+                HStack(spacing: 6) {
+                    ForEach(shape == .cylinder ? ["W", "H"] : ["W", "D", "H"], id: \.self) { k in
+                        Text(shape == .cylinder && k == "W" ? "\u{2300}" : k).font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(DS.Color.textTertiary.color)
+                        NumberField(key: "latticeZone\(k)-\(z.id.uuidString)", title: k == "H" ? "Height" : k == "D" ? "Depth" : "Width",
+                                    spec: FlexNumberSpec(value: k == "H" ? s.height : k == "D" ? s.depth : s.width, unit: "mm",
+                                                         step: 1, range: 1 ... 2000, decimals: 1),
+                                    size: .bare, unitShown: false) { v in
+                            let w = k == "W" ? v : s.width, d = shape == .cylinder ? w : (k == "D" ? v : s.depth)
+                            project.setLatticeZoneSize(z.id, width: w, depth: d, height: k == "H" ? v : s.height)
+                            refreshLatticeFaceCards()
+                        }
+                    }
+                    Text("mm").font(.system(size: 12)).foregroundStyle(DS.Color.textTertiary.color)
+                }
+                .padding(.leading, 34).padding(.trailing, 12).frame(minHeight: 44)
+                HStack(spacing: 8) {
+                    SegmentedGlass([.init(LatticeZoneShape.box, LatticeSetupCopy.box), .init(LatticeZoneShape.cylinder, LatticeSetupCopy.cylinder)],
+                                   selection: Binding(get: { shape }, set: { project.setLatticeZoneShape(z.id, $0); refreshLatticeFaceCards() }),
+                                   small: true)
+                        .background(DSParts.publish("latticeZoneShape-\(z.id.uuidString)"))
+                    SegmentedGlass([.init(LatticeGroupRole.include, LatticeSetupCopy.lattice), .init(LatticeGroupRole.exclude, LatticeSetupCopy.noLattice)],
+                                   selection: Binding(get: { project.lattice.groupRoles[z.id] ?? .include },
+                                                      set: { project.lattice.groupRoles[z.id] = $0; refreshLatticeFaceCards() }),
+                                   small: true)
+                        .background(DSParts.publish("latticeZoneRole-\(z.id.uuidString)"))
+                }
+                .padding(.leading, 34).padding(.trailing, 12).padding(.bottom, 8)
+            }
+        }
     }
 
     /// ★ B6 s1b (§4.4, mockup "12–31 mm deep"): a lattice group's one value — how deep its faces lattice.
@@ -13109,11 +13188,12 @@ extension WorkspacePlaceholder {
         let opensType = opensLatticeType(ok, summary)
         let notSet = !project.lattice.enabled
         let runs = run.phase == .running && lastRunWasLattice
-        let groups = latticeRegionTabNames.count
+        let tabs = latticeRegionTabNames.count, zones = project.latticeZones.count   // ★ B6 s3a: the tabs count zones too
         let line = runs ? RunProgressReadout.buttonLine(run)
             : notSet ? LatticeSetupCopy.saveFirst
-            : ok && groups > 0 && !(runCouldntFinish && lastRunWasLattice)
-                ? LatticeSetupCopy.ready(type: LatticeType.displayName(forID: project.lattice.topologyID), groups: groups)
+            : ok && tabs > 0 && !(runCouldntFinish && lastRunWasLattice)
+                ? LatticeSetupCopy.ready(type: LatticeType.displayName(forID: project.lattice.topologyID),
+                                         groups: Swift.max(0, tabs - zones), zones: zones)
             : summary
         let state: DSRunButton.State = runs ? .running(line) : ok ? .ready : notSet || marks || opensType ? .grey(line) : .disabled(line)
         return DSRunButton(runs ? LatticeSetupCopy.running : "Lattice", subtitle: line, state: state, key: "latticeButton") {
@@ -14130,7 +14210,7 @@ extension WorkspacePlaceholder {
                            ask: TopologySelectionsCopy.deleteAsk)
                 .latticeList()   // ★ B6 (notes 22, 23): the Lattice stage's own groups
                 // ★ B6 s1b (§4.3, mockup #lat-setup): "FACES N · + New group" heads the groups; a disclosure on each line
-                .latticeSections(lead: AnyView(latticeFacesSection),
+                .latticeSections(lead: AnyView(latticeFacesSection), tail: AnyView(latticeZonesSection),   // ★ B6 s3a (25, 25a)
                                  isOpen: { latticeOpenGroups.contains($0) },
                                  toggleOpen: { id in if latticeOpenGroups.contains(id) { latticeOpenGroups.remove(id) } else { latticeOpenGroups.insert(id) } },
                                  lineLook: { _ in latticeFacePick == nil })   // a picked face row wears the look itself

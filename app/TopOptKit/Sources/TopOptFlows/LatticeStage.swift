@@ -170,10 +170,18 @@ public enum LatticeSetupCopy {
     public static let noResults = "Optimize first"
     /// Lattice while its run goes (Topology's "Optimizing" rule).
     public static let running = "Latticing"
-    /// The ready line: "Octet · 2 groups" (the mockup's "Octet · 1 group · 1 zone"; zones come with B6's zones slice).
-    public static func ready(type: String, groups: Int) -> String {
+    /// The ready line: "Octet · 2 groups", "Octet · 1 group · 1 zone" (the mockup's).
+    public static func ready(type: String, groups: Int, zones: Int = 0) -> String {
         "\(type) \u{00B7} \(groups) group\(groups == 1 ? "" : "s")"
+            + (zones > 0 ? " \u{00B7} \(zones) zone\(zones == 1 ? "" : "s")" : "")
     }
+
+    // ★ B6 s3a — the Lattice zones section (notes 25, 25a, N3)
+    public static let zones = "Lattice zones"
+    public static let addZone = "+ Add zone"
+    public static let zoneEmpty = "A zone lattices a space with no face, like inside a drum."
+    public static let box = "Box"
+    public static let cylinder = "Cylinder"
 
     // ★ B6 s1b — the Selections rows (§4.3 / §4.4, mockup #lat-setup)
     public static let faces = "Faces"

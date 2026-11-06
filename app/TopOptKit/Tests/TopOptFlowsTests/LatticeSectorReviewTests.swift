@@ -214,9 +214,13 @@ final class LatticeSectorReviewTests: XCTestCase {
         p90.viewerMesh = T.pad()
         let top = p90.faceRegions.union(faces: [1], named: "top")
         let kids = p90.faceRegions.splitManual(top, point: SIMD3(90, 50, 20), normal: SIMD3(1, 0, 0))
-        let g = p90.selection.addGroup()
-        p90.selection.addRegions([kids[0]], to: g)
-        p90.force.sync(groups: p90.selection.groups)
+        // ★ RE-PINNED (UI-Notes B6 slice 1, 7e4f0b53 — notes 22, 23): the piece's group is the Lattice stage's own (its list);
+        // a Topology group with a lattice role and no Topology role is one today's run drops, and so draws no card
+        var l90 = p90.latticeList
+        let g = l90.addGroup()
+        l90.addRegions([kids[0]], to: g)
+        p90.latticeList = l90
+        p90.syncForceGroups()
         p90.lattice.enabled = true
         p90.lattice.groupRoles[g] = .include
         let s90 = p90.latticeCardHeldShares()[LatticeSelectableRef.region(group: g, region: kids[0]).key]
