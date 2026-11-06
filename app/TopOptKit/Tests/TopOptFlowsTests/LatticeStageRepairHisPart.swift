@@ -37,13 +37,9 @@ final class LatticeStageRepairHisPart: XCTestCase {
     }
 
     private func writeEvidence(_ name: String, _ text: String) {
-        let dir = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("evidence/2026-08-17-lattice-stage-repair")
-        try? FileManager.default.createDirectory(at: dir,
-                                                 withIntermediateDirectories: true)
+        // The reviewer, 11-06 09:41Z: tests must not dirty tracked files. Into the repo only with TOPOPT_EVIDENCE_TO_REPO=1
+        // (EvidenceOut); this file is regenerated from live core, so on 7d6c5dbc it rewrote 2026-08-17's numbers with K1's.
+        let dir = EvidenceOut.dir("evidence/2026-08-17-lattice-stage-repair")
         try? text.write(to: dir.appendingPathComponent(name), atomically: true,
                         encoding: .utf8)
     }
