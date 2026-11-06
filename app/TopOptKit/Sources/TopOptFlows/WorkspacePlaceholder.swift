@@ -113,6 +113,8 @@ public struct WorkspacePlaceholder: View {
     /// ★ B6 s2a (23a, R2.1): the Topology panel on Lattice Setup is open (closed by default), and its opened folders.
     @State private var latticeTopologyOpen = false
     @State private var latticeTopologyFolders: Set<UUID> = []
+    /// ★ B6 s3b (R2.2, §4.13): Start from's in-place ask — the mode it would switch to (true: −), nil: none.
+    @State private var latticeModeAsk: Bool?
     @StateObject private var flexibleMain = FlexibleMainStage()   // Flexible (PR #362): the ONE Flexible model per project + the main page's lattice (FlexibleMainStage.swift)
     @State private var strutScene: LatticeSDFScene? = nil
     @State private var strutSceneToken = 0
@@ -10747,6 +10749,75 @@ public struct WorkspacePlaceholder: View {
                        }))
     }
 
+    // MARK: B6 s3b — Start from (notes 26, R2.2)
+
+    /// ★ B6 s3b (§4.21, mockup #lat-setup / #lat-latmode-ask): Selections' foot — "Start from  Solid · + Lattice faces ⌄ (i)".
+    /// Switching asks in place first (§4.13): your faces change meaning.
+    private var latticeStartFromFoot: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let toMinus = latticeModeAsk {
+                let faceGroups = project.latticeFaceGroups
+                VStack(alignment: .leading, spacing: DS.Space.s) {
+                    Text(LatticeSetupCopy.modeAsk(toMinus: toMinus, group: faceGroups.count == 1 ? faceGroups.first?.name : nil))
+                        .font(.system(size: 13)).foregroundStyle(DS.Color.textPrimary.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: DS.Space.s) {
+                        Spacer(minLength: 0)
+                        Button(ConfirmCopy.cancel) { latticeModeAsk = nil }
+                            .buttonStyle(.plain).font(.system(size: 13.5, weight: .semibold))
+                            .foregroundStyle(DS.Color.textPrimary.color)
+                            .frame(minWidth: DSParts.target, minHeight: DSParts.target)
+                            .background(DSParts.publish("latticeModeCancel"))
+                        Button(LatticeSetupCopy.switchMode) { switchLatticeMode(toMinus: toMinus) }
+                            .buttonStyle(.plain).font(.system(size: 13.5, weight: .semibold))
+                            .foregroundStyle(DS.Color.accent.color)
+                            .frame(minWidth: DSParts.target, minHeight: DSParts.target)
+                            .background(DSParts.publish("latticeModeSwitch"))
+                    }
+                }
+                .padding(DS.Space.m)
+                .background(RoundedRectangle(cornerRadius: DeleteConfirm.cardCornerRadius, style: .continuous)
+                    .fill(DS.Color.fillSubtle.color))
+                .padding(.horizontal, DeleteConfirm.cardInset).padding(.top, DeleteConfirm.cardInset)
+                .background(DSParts.publish("latticeModeAsk"))
+            }
+            SettingRow(key: "latticeStartFrom", id: "lattice-start-from", label: LatticeSetupCopy.startFrom,
+                       value: project.lattice.wholePart ? LatticeSetupCopy.startFromMinus : LatticeSetupCopy.startFromPlus,
+                       info: LatticeSetupCopy.startFromInfo, infoLabel: "About Start from") {
+                Button { if project.lattice.wholePart { latticeModeAsk = false } } label: {
+                    Text(LatticeSetupCopy.startFromPlus); Text(LatticeSetupCopy.startFromPlusLine)
+                }
+                Button { if !project.lattice.wholePart { latticeModeAsk = true } } label: {
+                    Text(LatticeSetupCopy.startFromMinus); Text(LatticeSetupCopy.startFromMinusLine)
+                }
+            }
+            .padding(.horizontal, 14)
+            if project.lattice.wholePart {
+                // ★ his 11-03 rule: the job stays as today until the engine takes `lattice.whole_part` (E2) — one plain line
+                Text(LatticeSetupCopy.wholePartWaits).font(.system(size: 12.5)).foregroundStyle(DS.Color.warning.color)
+                    .padding(.horizontal, 14).padding(.bottom, 8)
+                    .background(DSParts.publish("latticeWholePartWaits"))
+            }
+        }
+    }
+
+    /// The switch: Start from, and what the face groups do with it — each flips (a group that added lattice removes it, one
+    /// that kept a face solid carries lattice settings in the whole part), so switching back restores every group as it was.
+    /// Zones keep their own role (a zone is a space, not a face); Protect skin groups keep theirs.
+    private func switchLatticeMode(toMinus: Bool) {
+        latticeModeAsk = nil
+        guard project.lattice.wholePart != toMinus else { return }
+        project.lattice.wholePart = toMinus
+        for g in project.latticeFaceGroups where !project.lattice.skinGroups.contains(g.id) {
+            switch project.lattice.groupRoles[g.id] {
+            case .include?: project.lattice.groupRoles[g.id] = .exclude
+            case .exclude?: project.lattice.groupRoles[g.id] = .include
+            case nil: break
+            }
+        }
+        refreshLatticeFaceCards()
+    }
+
     // MARK: B6 s3a — Lattice zones (notes 25, 25a, N3)
 
     /// ★ B6 s3a (mockup #lat-setup-zone): "LATTICE ZONES N · + Add zone", its zones, or its one line while there are none.
@@ -14211,6 +14282,7 @@ extension WorkspacePlaceholder {
                 .latticeList()   // ★ B6 (notes 22, 23): the Lattice stage's own groups
                 // ★ B6 s1b (§4.3, mockup #lat-setup): "FACES N · + New group" heads the groups; a disclosure on each line
                 .latticeSections(lead: AnyView(latticeFacesSection), tail: AnyView(latticeZonesSection),   // ★ B6 s3a (25, 25a)
+                                 footer: AnyView(latticeStartFromFoot),   // ★ B6 s3b (26, R2.2)
                                  isOpen: { latticeOpenGroups.contains($0) },
                                  toggleOpen: { id in if latticeOpenGroups.contains(id) { latticeOpenGroups.remove(id) } else { latticeOpenGroups.insert(id) } },
                                  lineLook: { _ in latticeFacePick == nil })   // a picked face row wears the look itself

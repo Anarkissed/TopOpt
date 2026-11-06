@@ -224,10 +224,11 @@ public struct SelectionsList: View {
 
     /// ★ B6 s1b (design-system §4.3 "Body: sections, each with a 12 pt overline"): a section heading the groups (Lattice
     /// Setup's "FACES N · + New group"), drawn under the header, empty list or not; and a disclosure on each group's line.
-    func latticeSections(lead: AnyView, tail: AnyView? = nil, isOpen: @escaping (UUID) -> Bool, toggleOpen: @escaping (UUID) -> Void,
-                         lineLook: @escaping (UUID) -> Bool) -> SelectionsList {
+    func latticeSections(lead: AnyView, tail: AnyView? = nil, footer: AnyView? = nil, isOpen: @escaping (UUID) -> Bool,
+                         toggleOpen: @escaping (UUID) -> Void, lineLook: @escaping (UUID) -> Bool) -> SelectionsList {
         var copy = self
         copy.lead = lead; copy.tail = tail; copy.isOpen = isOpen; copy.toggleOpen = toggleOpen; copy.lineLook = lineLook
+        if let footer { copy.footer = footer }   // ★ B6 s3b: Start from, pinned
         return copy
     }
 
