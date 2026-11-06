@@ -2068,6 +2068,9 @@ std::string run_info_json(const RunInfo& info) {
             std::to_string(info.grading_cells_raised_to_floor);
       gr += ", \"cells_dropped_unprintable\": " +
             std::to_string(info.grading_cells_dropped_unprintable);
+      if (info.grading_cells_dropped_by_window > 0)  // ★ E3, written only then
+        gr += ", \"cells_dropped_by_window\": " +
+              std::to_string(info.grading_cells_dropped_by_window);
       gr += ", \"cells_split_by_balance\": " +
             std::to_string(info.grading_cells_split_by_balance);
       gr += ", \"cell_any_out_of_regime\": " +

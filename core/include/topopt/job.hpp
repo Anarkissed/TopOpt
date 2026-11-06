@@ -280,6 +280,10 @@ struct JobLatticeRegion {
   std::string grading;
   int shape_grade = -1;               // -1 = the part's; 0 off; 1 on
   double shape_grade_band_mm = -1.0;  // < 0 = the part's
+  // ★ E3: the region's own cell window (mm), swept only; 0 = the part's. Its voxels take
+  // only the part's ladder cells (grading cell_min_mm x 2^L) inside it.
+  double cell_min_mm = 0.0;
+  double cell_max_mm = 0.0;
 };
 
 // ── ★ AN INCLUDE-REGION ID COUNTS INCLUDES, NOT REGIONS (#354, 2026-09-30) ────

@@ -163,6 +163,8 @@ struct CellSizePlan {
   //   2 — STRUT UNPRINTABLE: no level in the ladder emits a strut at this cell's
   //       thinnest density that reaches the stated minimum width. A COARSER cell
   //       helps — the opposite remedy.
+  //   3 — ★ E3 REGION WINDOW: a level printed and homogenized here, but none inside
+  //       the region's own cell window (or the 2:1 balance pushed the cell out of it).
   // The two causes were already separated for the aggregate counters; carrying them
   // PER CELL is what lets the voxel-level receipt say which one bound each voxel,
   // and therefore which remedy (if any) is worth offering.
@@ -182,6 +184,7 @@ struct CellSizePlan {
   // Cells the two bounds CROSSED on: no dyadic cell is both printable and
   // homogenizable there, so they stay SOLID (the per-cell L4 fallback).
   long long cells_dropped_unprintable = 0;  // needed a coarser cell than N* allows
+  long long cells_dropped_by_window = 0;    // ★ E3: reject reason 3
   long long cells_split_by_balance = 0;     // octree cells split (into 8) to hold
                                             //   the 2:1 balance
   double min_strut_diameter_mm = 0.0;       // across the WHOLE swept part (bar R3)
@@ -239,6 +242,15 @@ struct CellPlanParams {
   // Set >0 ONLY by the aesthetic adaptive rule, which computes it from the measured
   // error curve and what the material actually carries (lattice.hpp).
   double cells_per_member_floor_override = 0.0;
+
+  // ★ E3: A REGION'S OWN CELL WINDOW, as ladder levels per voxel (grid-indexed). Null
+  // (the default) bounds nothing and the plan is the plan it always was. A voxel's
+  // `level_lo` raises the finest level its base cells may take; `level_hi` caps the
+  // coarsest (-1 = no bound on that side). A base cell takes the tightest bounds of the
+  // voxels it covers, and one they leave with no level drops to SOLID with reject
+  // reason 3, counted in cells_dropped_by_window.
+  const std::vector<signed char>* voxel_level_lo = nullptr;
+  const std::vector<signed char>* voxel_level_hi = nullptr;
 };
 
 // Build the SWEPT plan over `grid`'s candidate set (throws for any other mode — the

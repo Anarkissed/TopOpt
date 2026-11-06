@@ -1012,6 +1012,49 @@ GradedField grade_lattice(const VoxelGrid& grid,
     pp.max_cell_size_mm = params.max_cell_size_mm;
     pp.min_extrudable_width_mm = params.min_extrudable_width_mm;
     pp.thickness_cap_voxels = params.thickness_cap_voxels;
+    // ★ E3: each region's own cell window, as the part's ladder levels per voxel. The
+    // ladder's BASE stays the part's (a region cannot go finer than it: the octree is
+    // one dyadic ladder); its TOP rises to the coarsest region max, and every voxel no
+    // window covers is capped at the part's own top, so its plan is unchanged.
+    std::vector<signed char> lvl_lo, lvl_hi;
+    {
+      const double S0 = params.min_cell_size_mm;
+      const int part_top = cell_plan_max_level(S0, params.max_cell_size_mm);
+      auto level_lo = [&](double mm) {   // the finest ladder cell at or above mm
+        int L = 0;
+        while (S0 * std::ldexp(1.0, L) < mm * (1.0 - 1e-9)) ++L;
+        return L;
+      };
+      auto level_hi = [&](double mm) {   // the coarsest ladder cell at or below mm
+        int L = -1;
+        while (S0 * std::ldexp(1.0, L + 1) <= mm * (1.0 + 1e-9)) ++L;
+        return L;
+      };
+      int top = part_top;
+      bool any = false;
+      if (params.region_overrides != nullptr)
+        for (const GradingRegionOverride& o : *params.region_overrides)
+          if (o.cell_max_mm > 0.0) {
+            any = true;
+            top = std::max(top, level_hi(o.cell_max_mm));
+          } else if (o.cell_min_mm > 0.0) {
+            any = true;
+          }
+      if (any) {
+        lvl_lo.assign(n, -1);
+        lvl_hi.assign(n, static_cast<signed char>(part_top));
+        for (std::size_t e = 0; e < n; ++e) {
+          const GradingRegionOverride* o = override_at(e);
+          if (o == nullptr || (o->cell_min_mm <= 0.0 && o->cell_max_mm <= 0.0)) continue;
+          lvl_lo[e] = static_cast<signed char>(o->cell_min_mm > 0.0 ? level_lo(o->cell_min_mm) : 0);
+          lvl_hi[e] = static_cast<signed char>(o->cell_max_mm > 0.0 ? level_hi(o->cell_max_mm)
+                                                                    : part_top);
+        }
+        pp.max_cell_size_mm = S0 * std::ldexp(1.0, top);
+        pp.voxel_level_lo = &lvl_lo;
+        pp.voxel_level_hi = &lvl_hi;
+      }
+    }
     out.cell_plan = plan_cell_sizes(grid, rho_raw, cand, width, pp);
     voxel_cell = cell_size_field(grid, out.cell_plan);
     apply_aggregate_cap(/*swept_mode=*/true);

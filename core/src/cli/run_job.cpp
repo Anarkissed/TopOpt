@@ -1818,6 +1818,7 @@ void fill_grading_cell_plan(RunInfo& gi, const GradedField& gf) {
   gi.grading_cell_latticed_cells = P.latticed_cells;
   gi.grading_cells_raised_to_floor = P.cells_raised_to_floor;
   gi.grading_cells_dropped_unprintable = P.cells_dropped_unprintable;
+  gi.grading_cells_dropped_by_window = P.cells_dropped_by_window;  // ★ E3
   gi.grading_cells_split_by_balance = P.cells_split_by_balance;
   gi.grading_cell_any_out_of_regime = P.any_out_of_regime;
   gi.grading_cell_levels.clear();
@@ -3655,6 +3656,7 @@ LatticePosture build_lattice_posture(LatticeTopology topo, const VoxelGrid& sg,
 struct LatticeRegionGraded {
   long long voxels = 0;
   double rho_lo = 0.0, rho_hi = 0.0;
+  double cell_lo = 0.0, cell_hi = 0.0;  // ★ E3: the cells it got (swept; 0 otherwise)
 };
 
 struct LatticeCertOutcome {
@@ -5058,7 +5060,17 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
            ", \"rho_min\": " + json_num(r.rho_min) + ", \"rho_max\": " + json_num(r.rho_max) +
            ", \"demand_exponent\": " + json_num(r.demand_exponent) +
            ", \"shape_grade\": " + std::to_string(r.shape_grade) +
-           ", \"shape_grade_band_mm\": " + json_num(r.shape_grade_band_mm) + "}" +
+           ", \"shape_grade_band_mm\": " + json_num(r.shape_grade_band_mm) +
+           (r.cell_min_mm > 0.0 || r.cell_max_mm > 0.0
+                ? ", \"cell_min_mm\": " + json_num(r.cell_min_mm) +
+                      ", \"cell_max_mm\": " + json_num(r.cell_max_mm)
+                : std::string()) +
+           // ★ E3: the cells the region got, where the plan sized cells per voxel (swept)
+           (nlat && (*region_graded)[i].cell_hi > 0.0
+                ? ", \"cell_mm_graded\": [" + json_num((*region_graded)[i].cell_lo) + ", " +
+                      json_num((*region_graded)[i].cell_hi) + "]"
+                : std::string()) +
+           "}" +
            ", \"source\": {\"mode\": " + src(!r.grading.empty()) +
            ", \"band\": " + src(r.rho_max > 0.0) +
            ", \"demand_exponent\": " + src(r.demand_exponent > 0.0) +
@@ -6867,9 +6879,11 @@ std::vector<GradingRegionOverride> lattice_region_overrides(
     o.demand_exponent = r.demand_exponent;
     o.flat = r.grading == "off" || r.grading == "shape";
     o.flat_rho = o.flat ? r.relative_density : 0.0;
+    o.cell_min_mm = r.cell_min_mm;  // ★ E3: its own cell window
+    o.cell_max_mm = r.cell_max_mm;
     // A region's own shape grade needs the owner map too, so it arms the table.
     if (r.rho_max > 0.0 || r.demand_exponent > 0.0 || o.flat || r.shape_grade >= 0 ||
-        r.shape_grade_band_mm >= 0.0)
+        r.shape_grade_band_mm >= 0.0 || r.cell_min_mm > 0.0 || r.cell_max_mm > 0.0)
       any = true;
   }
   if (!any) out.clear();
@@ -10392,9 +10406,16 @@ LatticeVariantOutcome lattice_one_variant(
       if (!gf.posture.mask[e] || id < 1 || static_cast<std::size_t>(id) > e3_jobs.size()) continue;
       LatticeRegionGraded& g = R.region_graded[static_cast<std::size_t>(id - 1)];
       const double r = gf.posture.relative_density[e];
-      if (!seen[static_cast<std::size_t>(id - 1)]) { g.rho_lo = g.rho_hi = r; seen[static_cast<std::size_t>(id - 1)] = 1; }
+      const double cm = e < gf.posture.cell_size_field.size() ? gf.posture.cell_size_field[e] : 0.0;
+      if (!seen[static_cast<std::size_t>(id - 1)]) {
+        g.rho_lo = g.rho_hi = r;
+        g.cell_lo = g.cell_hi = cm;
+        seen[static_cast<std::size_t>(id - 1)] = 1;
+      }
       g.rho_lo = std::min(g.rho_lo, r);
       g.rho_hi = std::max(g.rho_hi, r);
+      g.cell_lo = std::min(g.cell_lo, cm);
+      g.cell_hi = std::max(g.cell_hi, cm);
       ++g.voxels;
     }
   }
@@ -16846,6 +16867,8 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
           lat_agg.g_cell_ri.grading_cells_raised_to_floor;
       run_info.grading_cells_dropped_unprintable =
           lat_agg.g_cell_ri.grading_cells_dropped_unprintable;
+      run_info.grading_cells_dropped_by_window =
+          lat_agg.g_cell_ri.grading_cells_dropped_by_window;
       run_info.grading_cells_split_by_balance =
           lat_agg.g_cell_ri.grading_cells_split_by_balance;
       run_info.grading_cell_any_out_of_regime =

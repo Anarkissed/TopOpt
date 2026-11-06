@@ -1458,6 +1458,7 @@ struct RunInfo {
   long long grading_cell_latticed_cells = 0;  // octree cells emitted
   long long grading_cells_raised_to_floor = 0;      // bar R3
   long long grading_cells_dropped_unprintable = 0;  // bounds crossed -> stayed solid
+  long long grading_cells_dropped_by_window = 0;    // ★ E3: a region's window -> solid
   long long grading_cells_split_by_balance = 0;     // split to hold the 2:1 balance
   bool grading_cell_any_out_of_regime = false;      // any level's tripwire fired
 
