@@ -106,7 +106,7 @@ final class LatticeStructuralViewStateTests: XCTestCase {
     /// The drill-in counts only while the key is on screen; every hide reads that one value.
     func testTheDrillInCountsOnlyWhileTheKeyIsOnScreen() throws {
         let ws = try src("WorkspacePlaceholder.swift")
-        XCTAssertTrue(ws.contains("private var latticeLegendMounted: Bool { showStrutPreview && strutScene != nil }"))
+        XCTAssertTrue(ws.contains("private var latticeLegendMounted: Bool { showStrutPreview && strutScene != nil && latticeViewsUp }"))   // ★ his 11-05: never on Edit faces (EditFacesNoLatticeViewsTests)
         XCTAssertTrue(try member(ws, "private var legendDrilledIn: Bool")
             .contains("latticeLegendMounted && !latticeLegendMinimized && latticeLegendMode.drilledIn"),
                       "★ on screen AND not minimized — a minimized key has no exit hint")
