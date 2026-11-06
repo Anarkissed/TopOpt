@@ -1036,9 +1036,8 @@ GradedField grade_lattice(const VoxelGrid& grid,
       // voxels that end up latticed, so the accounting means what it means on the
       // uniform paths.
       rho_raw[e] = std::min(rho_hi, std::max(rho_lo, rho_of(e)));
-      // ★ a sheet's band thickens its wall only, at the whole raise; a strut type's is
-      // raised below, with its cells
-      if (banded && lattice_topology_is_sheet(topo)) rho_raw[e] = band_raise(e, rho_raw[e], 1.0);
+      // ★ the band is raised after the plan (below), once, for every type: a sheet's band
+      // thickens its wall only, so the plan never sees it and its cells do not move
     }
 
     CellPlanParams pp;
@@ -1316,10 +1315,12 @@ GradedField grade_lattice(const VoxelGrid& grid,
   }
 
   // ── ★ THE BAND'S STRUTS, ON THE CELLS THE PLAN CHOSE (ruling 2) ──────────────────
-  // The finest cell gets the whole raise, a coarser one the preview's 0.35 share; then
-  // the strut goes up to a whole number of line widths at its own cell (never down, and
-  // never past q or the cap). Every change here only thickens a strut, so a cell the
-  // plan proved printable stays printable.
+  // The finest cell gets the whole raise, a coarser one the preview's 0.35 share (a sheet,
+  // which grades its wall only, always the whole raise); then the strut goes to a whole
+  // number of line widths at its own cell: up where the band's top (q, the cap) allows,
+  // else down to the last whole one that is still at least the law's own density. Where
+  // neither is, the raise stands, counted (band_off_line_voxels). The band never thins a
+  // strut below its law, so a cell the plan proved printable stays printable.
   if (banded) {
     const double w = params.band_line_width_mm;
     const double S0 = params.cell_mode == CellSizeMode::Swept ? params.min_cell_size_mm : 0.0;
@@ -1336,21 +1337,24 @@ GradedField grade_lattice(const VoxelGrid& grid,
       const bool finest = !(fin > 0.0) || S <= fin * (1.0 + 1e-9);
       out.band_rho0[e] = post.relative_density[e];
       out.band_finest_mm[e] = fin;
-      double r = band_raise(e, post.relative_density[e], finest ? 1.0 : kCoarseCellBandRaise);
-      if (r > post.relative_density[e] + 1e-12) ++out.band_raised_voxels;
+      const double r0 = post.relative_density[e];
+      const bool whole = finest || lattice_topology_is_sheet(topo);
+      double r = band_raise(e, r0, whole ? 1.0 : kCoarseCellBandRaise);
+      if (r > r0 + 1e-12) ++out.band_raised_voxels;
       if (w > 0.0 && S > 0.0) {
-        // up to the next whole line width where the band's top allows it; where it does
-        // not, down to the last whole one (never under one width): the run's certificate
-        // judges the strut it gets either way
         const double d = lattice_strut_diameter_mm(topo, r, S);
         const double k = std::ceil(d / w - 1e-9);
         const double top = std::max(band_q, r);
         double r2 = lattice_min_density_for_strut(topo, S, k * w, params.max_relative_density);
-        if (!(r2 > 0.0 && r2 <= top) && k > 1.0)
+        if (!(r2 > 0.0 && r2 >= r - 1e-12 && r2 <= top) && k > 1.0) {
           r2 = lattice_min_density_for_strut(topo, S, (k - 1.0) * w, params.max_relative_density);
-        if (r2 > 0.0 && r2 <= top && std::fabs(r2 - r) > 1e-12) {
+          if (!(r2 >= r0 - 1e-12)) r2 = 0.0;  // down, but never under the law
+        }
+        if (r2 > 0.0 && r2 <= top) {
+          if (std::fabs(r2 - r) > 1e-12) ++out.band_snapped_voxels;
           r = r2;
-          ++out.band_snapped_voxels;
+        } else {
+          ++out.band_off_line_voxels;  // no whole width between the law and the top
         }
       }
       post.relative_density[e] = r;

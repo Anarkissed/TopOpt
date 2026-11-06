@@ -15,12 +15,16 @@
 //           to print, and finer where the 2:1 balance or the member ceiling says so);
 //   struts  rho = max(rho0, min(q, rho0 + (q - rho0)(1 - t) share amount)), share 1 on the
 //           finest cell and 0.35 on a coarser one, amount 2^s; then a whole number of
-//           line widths (up where the band's top allows, else down).
+//           line widths: up where the band's top allows, else down to the last whole
+//           one that is still at least the law's own density; where neither is, the strut
+//           keeps its raise and is counted (the band never thins a strut below its law).
 // §1 the keys at the parse.
 // §2 strength -1 against +1: different files, both certified; +1 lattices more of the
 //    band (a stronger raise prints finer cells), so less of it stays solid.
 // §3 the cells follow the preview's curve, within one level (and mostly exactly).
-// §4 the struts: the preview's raise, then a whole number of line widths.
+// §4 the struts: the preview's raise, then a whole number of line widths; never below
+//    the law's own density (red on ac70b9b6: 260 / 264 band struts were snapped
+//    DOWN, as far as 0.276 under the law).
 // §5 the band is solid only where nothing prints, and the receipt says how much and where.
 #include "topopt/job.hpp"
 #include "topopt/lattice.hpp"
@@ -192,7 +196,7 @@ int main() {
   // ── §3 cells, §4 struts ─────────────────────────────────────────────────────
   const double q = std::min(num_after(p.receipt, "quilt_rho"), lattice_rho_max(LatticeTopology::Octet));
   for (const Run* R : {&m, &p}) {
-    long long n = 0, exact = 0, one = 0, rho_ok = 0, multiple = 0;
+    long long n = 0, exact = 0, one = 0, rho_ok = 0, multiple = 0, not_under = 0, off = 0;
     for (const Row& r : R->rows) {
       if (!(r.f > 0.0)) continue;
       ++n;
@@ -212,21 +216,31 @@ int main() {
       const double dd = lattice_strut_diameter_mm(LatticeTopology::Octet, e, r.S);
       const double k = std::ceil(dd / kLine - 1e-9);
       double e2 = lattice_min_density_for_strut(LatticeTopology::Octet, r.S, k * kLine, 0.0);
-      if (!(e2 > 0.0 && e2 <= std::max(q, e)) && k > 1.0)
+      const double top = std::max(q, e);
+      if (!(e2 > 0.0 && e2 >= e - 1e-12 && e2 <= top) && k > 1.0) {
         e2 = lattice_min_density_for_strut(LatticeTopology::Octet, r.S, (k - 1.0) * kLine, 0.0);
-      if (e2 > 0.0 && e2 <= std::max(q, e)) e = e2;
+        if (!(e2 >= r.rho0 - 1e-12)) e2 = 0.0;  // down, but never under the law
+      }
+      if (e2 > 0.0 && e2 <= top) e = e2;
+      else ++off;  // no whole width between the law and the band's top: the raise stands
       if (std::fabs(e - r.rho) < 1e-9) ++rho_ok;
+      if (r.rho >= r.rho0 - 1e-9) ++not_under;
       if (std::fabs(r.strut / kLine - std::round(r.strut / kLine)) < 0.01 && r.strut >= kLine - 1e-9)
         ++multiple;
     }
     std::printf("[band] %s: %lld band voxels; cell = preview %lld, within one level %lld; strut = "
-                "preview's raise %lld; whole line widths %lld\n",
-                R == &m ? "-1" : "+1", n, exact, one, rho_ok, multiple);
+                "preview's raise %lld; whole line widths %lld; off a whole width %lld; never under "
+                "the law %lld\n",
+                R == &m ? "-1" : "+1", n, exact, one, rho_ok, multiple, off, not_under);
     CHECK(n > 1000, "§3 the band has voxels to compare");
     CHECK(one == n, "§3 every band cell is within one ladder level of the preview's");
     CHECK(exact >= n * 7 / 10, "§3 most band cells are the preview's exactly");
+    CHECK(not_under == n, "§4 no band strut is thinner than its own law (the band only adds)");
     CHECK(rho_ok == n, "§4 every band strut is the preview's raise, to a whole line width");
-    CHECK(multiple == n, "§4 every band strut is a whole number of line widths");
+    CHECK(multiple + off >= n && multiple >= n * 9 / 10,
+          "§4 band struts are whole line widths, except where the next is past the band's top");
+    CHECK(has(R->receipt, "\"off_line_width\": " + std::to_string(off) + ","),
+          "§4 the receipt counts the struts left off a whole line width");
   }
 
   // ── §5 solid only where nothing prints ──────────────────────────────────────

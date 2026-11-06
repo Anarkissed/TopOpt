@@ -600,6 +600,9 @@ struct GradedField {
   std::vector<double> band_rho0;  // per voxel, the law's density before the band (evidence)
   std::vector<double> band_finest_mm;  // per voxel, the band's finest printable cell (evidence)
   long long band_solid_voxels = 0;
+  // band struts left off a whole line width: no whole width lies between the law's own
+  // density and the band's top, so the raise stands (never thinned under the law)
+  long long band_off_line_voxels = 0;
   double band_solid_box[6] = {0, 0, 0, 0, 0, 0};
   std::size_t solid_fallback_voxels = 0;  // L4: too thin for the floor -> stayed SOLID
 

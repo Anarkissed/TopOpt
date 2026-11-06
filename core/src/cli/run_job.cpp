@@ -4714,6 +4714,7 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
       s += "    \"shape_band\": {\"band_voxels\": " + std::to_string(gf.band_voxels) +
            ", \"struts_raised\": " + std::to_string(gf.band_raised_voxels) +
            ", \"snapped_to_line_width\": " + std::to_string(gf.band_snapped_voxels) +
+           ", \"off_line_width\": " + std::to_string(gf.band_off_line_voxels) +
            ", \"cells_capped\": " + std::to_string(gf.band_capped_voxels) +
            ", \"quilt_rho\": " + json_num(gf.band_quilt_rho) +
            ", \"solid_where_unprintable\": " + std::to_string(gf.band_solid_voxels) +
