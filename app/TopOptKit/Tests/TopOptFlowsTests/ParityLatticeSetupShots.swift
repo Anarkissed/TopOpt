@@ -56,6 +56,13 @@ final class ParityLatticeSetupShots: XCTestCase {
                 try ParityTopologyShots.shot(h, "lat-setup-topo-open", name)
                 try h.tap("latticeTopologyPanelHeader", "Topology's header again")
             }
+            // a zone added and picked (mockup #lat-zone-sel); then off again
+            if h.frames.all["latticeZonesSectionAction"] != nil {
+                try h.tap("latticeZonesSectionAction", "+ Add zone")
+                try ParityTopologyShots.shot(h, "lat-zone-sel", name)
+                if let z = p.latticeZones.first { p.removeLatticeZone(z.id) }
+                h.pump(0.5)
+            }
             // a tap that starts a new group: the role picker at the face (mockup #lat-setup-face-pick)
             p.latticeList.clearActive()
             let held = Set(p.latticeGroups.flatMap(\.faces))
