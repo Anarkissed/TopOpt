@@ -169,6 +169,12 @@ CellSizePlan plan_cell_sizes(const VoxelGrid& grid,
   // the cells-per-member ceiling (the thinnest member in the cell). Both are the
   // CONSERVATIVE end, so a guarantee proved on them holds for every voxel in the cell.
   std::vector<double> rho_min(ncells, kInf), width_min(ncells, kInf);
+  // ★ E3: the region windows' tightest bounds per base cell (-1 = none).
+  const bool windowed = params.voxel_level_lo != nullptr && params.voxel_level_hi != nullptr;
+  if (windowed && (params.voxel_level_lo->size() != grid.voxel_count() ||
+                   params.voxel_level_hi->size() != grid.voxel_count()))
+    throw std::invalid_argument("plan_cell_sizes: voxel_level_lo/hi size != voxel_count");
+  std::vector<int> win_lo(windowed ? ncells : 0, -1), win_hi(windowed ? ncells : 0, -1);
   std::vector<long long> vox(ncells, 0);
   std::vector<long long> vox_own(ncells, 0);  // by the voxel's centre: the report counts each once
   for (int k = 0; k < grid.nz; ++k)
@@ -195,6 +201,11 @@ CellSizePlan plan_cell_sizes(const VoxelGrid& grid,
               ++vox[c];
               if (rho[e] < rho_min[c]) rho_min[c] = rho[e];
               if (width[e] < width_min[c]) width_min[c] = width[e];
+              if (windowed) {
+                const int lo = (*params.voxel_level_lo)[e], hi = (*params.voxel_level_hi)[e];
+                if (lo >= 0) win_lo[c] = std::max(win_lo[c], lo);
+                if (hi >= 0) win_hi[c] = win_hi[c] < 0 ? hi : std::min(win_hi[c], hi);
+              }
             }
       }
 
@@ -217,6 +228,18 @@ CellSizePlan plan_cell_sizes(const VoxelGrid& grid,
         need[c] = L;
     }
   }
+  // ★ E3: the window tightens both, AFTER the raw bounds are known, so a cell it empties
+  // is told apart from one that never printed (reject reason 3, below).
+  std::vector<char> window_bound(windowed ? ncells : 0, 0);
+  if (windowed)
+    for (std::size_t c = 0; c < ncells; ++c) {
+      if (vox[c] == 0 || cap[c] < 0 || need[c] == kUnreachable || need[c] > cap[c]) continue;
+      const int nl = std::max(need[c], win_lo[c]);
+      const int cl = win_hi[c] >= 0 ? std::min(cap[c], win_hi[c]) : cap[c];
+      if (nl != need[c] || cl != cap[c]) window_bound[c] = 1;
+      need[c] = nl;
+      cap[c] = cl;
+    }
 
   // ── the OCTREE: top-down, take the coarsest level someone actually NEEDS ────────
   // A block takes level L iff (a) it lies wholly inside the base grid, (b) every base
@@ -401,6 +424,9 @@ CellSizePlan plan_cell_sizes(const VoxelGrid& grid,
             /* too thin to homogenize even at the base cell — the existing L4 case,
                counted by grade_lattice as a solid fallback, not here. */
             P.reject_reason[c] = 1;
+          } else if (windowed && window_bound[c]) {
+            ++P.cells_dropped_by_window;  // ★ E3: printable, but not in its window
+            P.reject_reason[c] = 3;
           } else {
             ++P.cells_dropped_unprintable;
             P.reject_reason[c] = 2;

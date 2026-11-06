@@ -1636,7 +1636,7 @@ JobDescription parse_job(const std::string& json_text) {
                                  "synthetic_stress", "synthetic_foci",
                                  "synthetic_soft_mm", "label", "rho_min", "rho_max",
                                  "demand_exponent", "grading", "shape_grade",
-                                 "shape_grade_band_mm"},
+                                 "shape_grade_band_mm", "cell_min_mm", "cell_max_mm"},
                             "a lattice region");
         JobLatticeRegion reg;
         // ★ E2.6 + E3: the region's name and its own grading (job.hpp). The band is
@@ -1699,6 +1699,18 @@ JobDescription parse_job(const std::string& json_text) {
           if (!(reg.shape_grade_band_mm >= 0.0) || !std::isfinite(reg.shape_grade_band_mm))
             schema_fail(named + ": \"shape_grade_band_mm\" must be finite and >= 0");
         }
+        // ★ E3: the region's own cell window (swept only; checked once the grading
+        // block is read, below).
+        for (const char* key : {"cell_min_mm", "cell_max_mm"})
+          if (const JsonValue* cv = own_grading(key)) {
+            const double mm = require_number(*cv, (std::string("lattice region ") + key).c_str());
+            if (!(mm > 0.0) || !std::isfinite(mm))
+              schema_fail(named + ": \"" + key + "\" must be finite and > 0");
+            (std::string(key) == "cell_min_mm" ? reg.cell_min_mm : reg.cell_max_mm) = mm;
+          }
+        if (reg.cell_min_mm > 0.0 && reg.cell_max_mm > 0.0 && reg.cell_max_mm < reg.cell_min_mm)
+          schema_fail(named + ": its cell window needs cell_min_mm <= cell_max_mm (got " +
+                      fmt_g(reg.cell_min_mm) + ", " + fmt_g(reg.cell_max_mm) + ")");
         if (!reg.grading.empty())
           reg.shape_grade = (reg.grading == "shape" || reg.grading == "stress_shape") ? 1 : 0;
         if (const JsonValue* sv = find_key(rv, "synthetic_stress")) {
@@ -2076,10 +2088,13 @@ JobDescription parse_job(const std::string& json_text) {
           require_nonempty_string(*f, "lattice.outer_finish");
       if (job.lattice.outer_finish != "shell" &&
           job.lattice.outer_finish != "skin" &&
-          job.lattice.outer_finish != "shell+skin")
-        schema_fail("lattice \"outer_finish\" must be \"shell\", \"skin\" or "
-                    "\"shell+skin\" (got \"" + job.lattice.outer_finish + "\")");
-      if (job.lattice.outer_finish != "shell" && job.lattice.skin != "diagrid")
+          job.lattice.outer_finish != "shell+skin" &&
+          job.lattice.outer_finish != "none")
+        schema_fail("lattice \"outer_finish\" must be \"shell\", \"skin\", "
+                    "\"shell+skin\" or \"none\" (got \"" + job.lattice.outer_finish + "\")");
+      // ★ E2.4: "none" is the open lattice with whatever skin the job asks for.
+      if ((job.lattice.outer_finish == "skin" || job.lattice.outer_finish == "shell+skin") &&
+          job.lattice.skin != "diagrid")
         schema_fail("lattice outer_finish \"" + job.lattice.outer_finish +
                     "\" needs skin \"diagrid\" — the diagrid IS the outer "
                     "finish that replaces or dresses the shell");
@@ -3003,6 +3018,39 @@ JobDescription parse_job(const std::string& json_text) {
               ": its band [" + fmt_g(r.rho_min) + ", " + fmt_g(r.rho_max) + "] leaves " +
               job.lattice.topology + "'s certifiable band [" + fmt_g(lo) + ", " + fmt_g(hi) +
               "]. Outside it the type's homogenized tensor has no measurement behind it.");
+      }
+    }
+    // (1c) ★ E3: a region's own cell window. It holds the region to the part's swept
+    // ladder (cell_plan.hpp), so it needs the swept plan, and it must hold at least one
+    // of the ladder's cells: base cell_min_mm x 2^L (the base is the part's; a region
+    // cannot go finer than it).
+    {
+      std::vector<const JobLatticeRegion*> all;
+      for (const JobLatticeRegion& r : job.lattice.regions) all.push_back(&r);
+      for (const JobLatticeRegion& r : job.lattice.whole_part_includes) all.push_back(&r);
+      for (std::size_t i = 0; i < all.size(); ++i) {
+        const JobLatticeRegion& r = *all[i];
+        if (!(r.cell_min_mm > 0.0) && !(r.cell_max_mm > 0.0)) continue;
+        const std::string named = r.label.empty() ? "lattice region " + std::to_string(i + 1)
+                                                  : "lattice region \"" + r.label + "\"";
+        if (!job.grading.present || job.grading.cell_mode != "swept")
+          schema_fail(named + ": its own cell window (cell_min_mm, cell_max_mm) needs the "
+                      "swept cell plan (grading \"cell_mode\": \"swept\"), where cells of "
+                      "more than one size can meet");
+        const double S0 = job.grading.cell_min_mm;
+        const double lo = r.cell_min_mm > 0.0 ? r.cell_min_mm : S0;
+        const double hi = r.cell_max_mm > 0.0 ? r.cell_max_mm : job.grading.cell_max_mm;
+        bool holds = false;
+        std::string ladder;
+        for (int L = 0; L < 12 && S0 * std::ldexp(1.0, L) <= std::max(hi, job.grading.cell_max_mm) * (1.0 + 1e-9); ++L) {
+          const double S = S0 * std::ldexp(1.0, L);
+          ladder += std::string(L ? ", " : "") + fmt_g(S);
+          if (S >= lo * (1.0 - 1e-9) && S <= hi * (1.0 + 1e-9)) holds = true;
+        }
+        if (!holds)
+          schema_fail(named + ": its cell window [" + fmt_g(lo) + ", " + fmt_g(hi) +
+                      "] mm holds none of the part's ladder cells (" + ladder +
+                      " mm: grading cell_min_mm doubled). Widen it to hold one.");
       }
     }
     // (2) ORGANIC traces its own curves -- it builds no cell of any type -- and its

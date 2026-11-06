@@ -12,6 +12,11 @@
 // §5 the shape grade on the region alone: its outline beam turns voxels solid.
 // §6 control: "stress" names the part's own grading, so the file is byte for byte the
 //    file of the same region with no grading of its own.
+// §7 ruling 11-06: "off" with no density searches for the LIGHTEST one density that
+//    certifies, its graded peak the upper bound. Here (the whole part latticed) even the
+//    peak does not certify, so §3's peak stands and the receipt says why, by label. On
+//    the region alone over the solid bar (no whole_part), the solid carries the load:
+//    the search goes below the peak, certified, and the part is lighter for it.
 #include "topopt/job.hpp"
 #include "topopt/materials.hpp"
 #include "topopt/part.hpp"
@@ -212,6 +217,92 @@ int main() {
         "§5 the shape grade on the region: its outline beam turns voxels solid");
   CHECK(!plain.stl.empty() && plain.stl == stress.stl,
         "§6 control: \"stress\" is the part's own grading, byte for byte");
+
+  // ── §7 "off" with no density: the search ───────────────────────────────────
+  {
+    const std::string offr = read_file(dir + "/lattice_grading_off/" +
+                                       [&] {
+                                         for (const auto& e : std::filesystem::directory_iterator(
+                                                  dir + "/lattice_grading_off"))
+                                           if (e.path().filename().string().find("_lattice.report.json") !=
+                                               std::string::npos)
+                                             return e.path().filename().string();
+                                         return std::string();
+                                       }());
+    CHECK(offr.find("\"law_certified\": false, \"refusal\": \"Region \\\"Top\\\" (grading off, "
+                    "one density): the lattice does not certify even with it at its graded "
+                    "peak") != std::string::npos,
+          "§7 whole part: the peak does not certify, said by label");
+    // The region alone, over a solid bar.
+    auto layer_run = [&](const std::string& tag, const std::string& extra) {
+      const std::string out = dir + "/lattice_grading_" + tag;
+      std::filesystem::remove_all(out);
+      std::ofstream(dir + "/lattice_grading_job.json")
+          << job_json(left, right, top, ", \"regions\": [" + top_region(top, extra) + "]");
+      std::string r;
+      try {
+        (void)lattice_variant_job(load_job_file(dir + "/lattice_grading_job.json"), dir, out,
+                                  materials, rules);
+        for (const auto& e : std::filesystem::directory_iterator(out))
+          if (e.path().filename().string().find("_lattice.report.json") != std::string::npos)
+            r = read_file(e.path().string());
+      } catch (const std::exception& e) {
+        std::printf("  (%s refused: %s)\n", tag.c_str(), e.what());
+      }
+      return r;
+    };
+    const std::string peak = layer_run("layer_stress", "\"grading\": \"stress\", ");
+    const std::string lite = layer_run("layer_off", "\"grading\": \"off\", ");
+    const std::size_t od = lite.find("\"one_density\": {");
+    const double rho = num_after(lite, "rho", od), up = num_after(lite, "upper_bound_graded_peak", od),
+                 fl = num_after(lite, "printable_floor", od);
+    std::printf("[lattice-grading] layer off: one density %.4f (floor %.4f, peak %.4f), mass "
+                "%.3f g vs graded %.3f g\n", rho, fl, up, num_after(lite, "lattice_mass_grams"),
+                num_after(peak, "lattice_mass_grams"));
+    CHECK(od != std::string::npos && lite.find("\"law_certified\": true", od) != std::string::npos,
+          "§7 layer: the search certified a one density");
+    CHECK(rho >= fl - 1e-12 && rho < up, "§7 layer: lighter than its graded peak, printable");
+    CHECK(num_after(lite, "rho_min_graded") == rho && num_after(lite, "rho_max_graded") == rho,
+          "§7 layer: the region is laid at that one density");
+    CHECK(lite.find("\"lattice_accepted\": true") != std::string::npos,
+          "§7 layer: the run's own certificate accepts it");
+
+    // The whole part latticed under 35 N (300 N in §2-§6). The law search bisects (its
+    // printable floor reads under the stop), its answer is refused on what the file holds,
+    // and the shipped search bisects on whole passes up to a density the run accepts.
+    {
+      const std::string out = dir + "/lattice_grading_off_light";
+      std::filesystem::remove_all(out);
+      std::string j = job_with("\"grading\": \"off\", ");
+      const std::string heavy = "\"force\": [0, 300, 0]";
+      j.replace(j.find(heavy), heavy.size(), "\"force\": [0, 35, 0]");
+      std::ofstream(dir + "/lattice_grading_job.json") << j;
+      std::string r;
+      try {
+        (void)lattice_variant_job(load_job_file(dir + "/lattice_grading_job.json"), dir, out,
+                                  materials, rules);
+        for (const auto& e : std::filesystem::directory_iterator(out))
+          if (e.path().filename().string().find("_lattice.report.json") != std::string::npos)
+            r = read_file(e.path().string());
+      } catch (const std::exception& e) {
+        std::printf("  (off_light refused: %s)\n", e.what());
+      }
+      const std::size_t o = r.find("\"one_density\": {");
+      const double rr = num_after(r, "rho", o), uu = num_after(r, "upper_bound_graded_peak", o),
+                   ff = num_after(r, "printable_floor", o), tt = num_after(r, "trials", o);
+      std::printf("[lattice-grading] whole part, 35 N, off: one density %.4f (floor %.4f, peak "
+                  "%.4f), %.0f trials\n", rr, ff, uu, tt);
+      const double law = num_after(r, "law_search_rho", o), sp = num_after(r, "shipped_passes", o);
+      std::printf("[lattice-grading]   law answer %.4f, %.0f shipped pass(es), accepted %s\n", law,
+                  sp, r.find("\"lattice_accepted\": true") != std::string::npos ? "true" : "false");
+      CHECK(o != std::string::npos && law > ff && tt >= 3,
+            "§7 bisection: the law search lands strictly above the printable floor");
+      CHECK(sp >= 1 && rr > law && rr < uu,
+            "§7 bisection: the shipped search lands between the law answer and the peak");
+      CHECK(r.find("\"lattice_accepted\": true") != std::string::npos,
+            "§7 bisection: the run's own certificate (what ships) accepts it");
+    }
+  }
 
   std::printf("%s: %d checks, %d failures\n", g_failures ? "FAIL" : "PASS", g_checks,
               g_failures);

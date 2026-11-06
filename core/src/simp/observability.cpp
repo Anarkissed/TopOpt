@@ -521,7 +521,12 @@ std::string run_info_json(const RunInfo& info) {
     s += comma ? ",\n" : "\n";
   };
   char nb[64];
+  // ★ Ruling 11-06 2(c): JSON has no inf or nan. A non-finite number is written as a
+  // marker here and turned into null at the end, where the file lists each one (its
+  // field and value) with the reason. A finite number prints exactly as before.
   auto fmt = [&](double d) {
+    if (!std::isfinite(d))
+      return std::string("\x01") + (std::isnan(d) ? "nan" : d > 0 ? "inf" : "-inf") + "\x01";
     std::snprintf(nb, sizeof(nb), "%.10g", d);
     return std::string(nb);
   };
@@ -1280,6 +1285,14 @@ std::string run_info_json(const RunInfo& info) {
       gr += ", \"recertified_margin\": " + fmt(info.grading_recertified_margin);
       gr += ", \"recertified_accepted\": " +
             bool_json(info.grading_recertified_accepted);
+      if (info.grading_recertified_open_cut_voxels >= 0)
+        gr += ", \"recertified_open_cut_voxels\": " +
+              fmt_ll(info.grading_recertified_open_cut_voxels) +
+              ", \"recertified_open_credit\": \"none: cells at the free surface "
+              "(Onck, Andrews & Gibson 2001)\"";
+      if (!info.grading_recertified_not_certified.empty())
+        gr += ", \"recertified_not_certified\": \"" +
+              json_escape(info.grading_recertified_not_certified) + "\"";
       gr += ", \"recertified_non_convergent\": " +
             bool_json(info.grading_recertified_non_convergent);
       gr += ", \"recertified_max_von_mises\": " +
@@ -1288,7 +1301,7 @@ std::string run_info_json(const RunInfo& info) {
       gr += ", \"recertify_changed_verdict\": " +
             bool_json(info.grading_recertify_changed_verdict);
       // ★ E2.1: per scenario (absent without scenarios). A margin with no stress
-      // behind it (infinite) is written null: bare inf is not JSON.
+      // behind it (infinite) is written null, and listed (11-06 2(c)).
       if (!info.grading_recertified_scenario_names.empty()) {
         gr += ", \"recertified_scenarios\": [";
         for (std::size_t i = 0; i < info.grading_recertified_scenario_names.size(); ++i) {
@@ -1297,7 +1310,7 @@ std::string run_info_json(const RunInfo& info) {
                                : 0.0;
           gr += std::string(i ? ", " : "") + "{\"name\": \"" +
                 json_escape(info.grading_recertified_scenario_names[i]) +
-                "\", \"margin\": " + (std::isfinite(m) ? fmt(m) : std::string("null")) +
+                "\", \"margin\": " + fmt(m) +
                 ", \"governs\": " +
                 bool_json(i < info.grading_recertified_scenario_governs.size() &&
                           info.grading_recertified_scenario_governs[i]) +
@@ -2055,6 +2068,9 @@ std::string run_info_json(const RunInfo& info) {
             std::to_string(info.grading_cells_raised_to_floor);
       gr += ", \"cells_dropped_unprintable\": " +
             std::to_string(info.grading_cells_dropped_unprintable);
+      if (info.grading_cells_dropped_by_window > 0)  // ★ E3, written only then
+        gr += ", \"cells_dropped_by_window\": " +
+              std::to_string(info.grading_cells_dropped_by_window);
       gr += ", \"cells_split_by_balance\": " +
             std::to_string(info.grading_cells_split_by_balance);
       gr += ", \"cell_any_out_of_regime\": " +
@@ -2246,6 +2262,37 @@ std::string run_info_json(const RunInfo& info) {
     num("export_frame", ef, /*comma=*/false);  // last when present
   }
 
+  // ★ 11-06 2(c): every non-finite number fmt marked, as null, named: "<top>.<key>"
+  // (the key it sits under, inside the top-level entry), or "<top>" at the top level.
+  std::string fields;
+  for (std::size_t p = s.find('\x01'); p != std::string::npos; p = s.find('\x01', p)) {
+    const std::size_t q = s.find('\x01', p + 1);
+    const std::string value = s.substr(p + 1, q - p - 1);
+    const std::size_t top_at = s.rfind("\n  \"", p);
+    std::string top, key;
+    if (top_at != std::string::npos) {
+      const std::size_t a = top_at + 4;
+      top = s.substr(a, s.find('"', a) - a);
+    }
+    const std::size_t key_end = s.rfind("\": ", p);
+    if (key_end != std::string::npos && key_end > top_at + 4) {
+      const std::size_t a = s.rfind('"', key_end - 1) + 1;
+      key = s.substr(a, key_end - a);
+    }
+    const std::string name = key.empty() || key == top ? top : top + "." + key;
+    fields += std::string(fields.empty() ? "" : ", ") + "{\"field\": \"" + json_escape(name) +
+              "\", \"value\": \"" + value + "\"}";
+    s.replace(p, q + 1 - p, "null");
+    p += 4;
+  }
+  if (!fields.empty()) {
+    while (!s.empty() && (s.back() == '\n' || s.back() == ' ')) s.pop_back();
+    if (!s.empty() && s.back() != ',' && s.back() != '{') s += ",";
+    s += "\n  \"null_numbers\": {\"fields\": [" + fields +
+         "], \"reason\": \"JSON has no infinity or NaN, so these numbers are written as "
+         "null. inf is unbounded: a ratio over zero, such as a margin over material that "
+         "carries no stress (yield / 0). nan is undefined.\"}\n";
+  }
   s += "}\n";
   return s;
 }

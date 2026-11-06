@@ -180,6 +180,11 @@ struct GradingRegionOverride {
   // densest point of its own grade, so it certifies wherever the grade does.
   bool flat = false;
   double flat_rho = 0.0;
+  // ★ E3: the region's own cell window (mm), SWEPT only; 0 = the part's. The planner
+  // holds the region's voxels to the part's ladder levels inside it (cell_plan.hpp
+  // voxel_level_lo/hi); the ladder's base stays the part's, its top may rise to it.
+  double cell_min_mm = 0.0;
+  double cell_max_mm = 0.0;
 };
 
 struct GradingLawParams {

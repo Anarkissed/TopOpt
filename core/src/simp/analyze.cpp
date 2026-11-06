@@ -720,6 +720,48 @@ FixedDesignAnalysis analyze_fixed_design(
       // orientation and are deliberately left alone.
     }
   }
+  // ── ★ A LATTICE IS NEVER "MARGIN INF, ACCEPTED" (ruling 11-06 2(a)) ──────────
+  // The margin above is the SOLID region's; latticed voxels are left out of it. With
+  // no solid voxel under stress it is unbounded, and a part latticed through read
+  // "margin inf, ACCEPTED" without its lattice ever being looked at (1,536 of 1,536
+  // voxels latticed, test_lattice_no_solid). There the latticed voxels carry the load,
+  // so they are certified by the measured strut law over the posture this solve read
+  // (on the run path, each voxel at min(the law's density, what the file holds)),
+  // folded in exactly as `gate_on_strut_strength` folds it. Where the law cannot apply
+  // (no measured law for the type, or below the cells-per-member floor) the answer is
+  // NOT CERTIFIED, in words. Last, after the orientation post-pass, so the scorer's
+  // as-built row still matches the verdict it priced; a job with any solid voxel under
+  // stress never enters.
+  if (has_lattice && out.lattice_voxels > 0 &&
+      !std::isfinite(out.margin_effective_solid_only)) {
+    const char* type = lattice_topology_name(lattice->topology);
+    char why[400];
+    why[0] = '\0';
+    if (!out.lattice_strut_report) {
+      std::snprintf(why, sizeof why,
+                    "Not certified: no solid part carries the load, so the lattice's own "
+                    "strength decides, and %s has no measured strut-strength law to check "
+                    "it with.",
+                    type);
+    } else if (out.lattice_strut_out_of_regime) {
+      std::snprintf(why, sizeof why,
+                    "Not certified: no solid part carries the load, so the lattice's own "
+                    "strength decides, and its thinnest latticed member is %.1f cells "
+                    "across, below the %.0f the strut-strength law is valid for.",
+                    out.lattice_min_cells_per_member,
+                    lattice_cells_per_member_min(lattice->topology));
+    } else if (!out.strut_gated) {
+      out.strut_gated = true;
+      out.lattice_strength_uncertified = false;
+      out.margin_effective = out.lattice_strut.margin_worst_case;
+      out.accepted = load_path_ok && (out.margin_effective >= margin_stop);
+    }
+    if (why[0] != '\0') {
+      out.lattice_not_certified = true;
+      out.lattice_not_certified_reason = why;
+      out.accepted = false;
+    }
+  }
   // REAL BOLTS: anchors that hold the load only through the weak sliding springs are
   // no support at all in that direction, so no margin measured on them is a pass.
   if (out.contact_held_by_sliding) out.accepted = false;

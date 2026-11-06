@@ -280,6 +280,10 @@ struct JobLatticeRegion {
   std::string grading;
   int shape_grade = -1;               // -1 = the part's; 0 off; 1 on
   double shape_grade_band_mm = -1.0;  // < 0 = the part's
+  // ★ E3: the region's own cell window (mm), swept only; 0 = the part's. Its voxels take
+  // only the part's ladder cells (grading cell_min_mm x 2^L) inside it.
+  double cell_min_mm = 0.0;
+  double cell_max_mm = 0.0;
 };
 
 // ── ★ AN INCLUDE-REGION ID COUNTS INCLUDES, NOT REGIONS (#354, 2026-09-30) ────
@@ -418,7 +422,14 @@ struct JobLattice {
   //                composite margins but lattice_accepted is forced false.
   //   "shell+skin" — shell retained, freeform skin laid on it (decorative,
   //                closed); certification unchanged from "shell".
-  // A non-"shell" finish requires skin == "diagrid" (the skin IS the finish).
+  //   "none"       — ★ E2.4 (ruling 11-06 (1)): the OPEN lattice. No shell and no
+  //                freeform skin; `skin` (none | rim | diagrid) dresses the clipped
+  //                ends as it does under a shell. Certified honestly: the cells the
+  //                part's free surface cuts form a weaker boundary layer (Onck,
+  //                Andrews & Gibson 2001), so they get NO credit (the safe floor:
+  //                void in the certification solve); refused by region label when
+  //                the rest does not certify. The app's None; its Covered is "shell".
+  // "skin" and "shell+skin" require skin == "diagrid" (the skin IS the finish).
   std::string outer_finish = "shell";
   // ── ★ THE WELDED, SINGLE-BODY LATTICE (task 2026-08-21-organic-lattice) ──────
   // false (the DEFAULT) writes nothing extra and every existing job is unchanged.
