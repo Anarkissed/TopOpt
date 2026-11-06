@@ -503,6 +503,26 @@ struct GradingLawParams {
   const std::vector<int>* region_override_ids = nullptr;
   const std::vector<GradingRegionOverride>* region_overrides = nullptr;
 
+  // ★ THE SHAPE-GRADE BAND (ruling 2, 2026-11-06): the preview's band, built by the
+  // run. Per voxel (grid-indexed): `band_distance_mm` from the lattice's outline, the
+  // `band_mm` it grades over (> 0 inside a band, 0 outside one) and the strength's
+  // `band_amount` (2^s, the app's gradeAmount). All null (the default): no band, and
+  // every job grades exactly as before. Inside the band, with t = distance / band:
+  //   cells  (swept plan, strut types): a cell of size S may sit where
+  //          distance + S/2 >= band (S - f) / (S_base - f) (the preview's centre rule),
+  //          f the voxel's finest ladder cell and S_base its coarsest; the finest always
+  //          may. Sheets grade thickness only (no published method grades a TPMS's
+  //          cell size, 04-references R5).
+  //   struts rho = max(rho, min(q, rho + (q - rho)(1 - t) share amount)), q the quilt
+  //          row (the density whose strut stops thickening) under the band top and the
+  //          cap, share 1 on the finest cell and 0.35 on a coarser one (the preview's
+  //          coarseCellBandRaise); then the strut is raised to a whole number of
+  //          `band_line_width_mm` (Kedziora, Decker & Museyibov 2023).
+  const std::vector<double>* band_distance_mm = nullptr;
+  const std::vector<double>* band_mm = nullptr;
+  const std::vector<double>* band_amount = nullptr;
+  double band_line_width_mm = 0.0;
+
   // The AGGREGATE exposure cap (fraction of the printed set), defaulted to the core
   // constant lattice_subfloor_aggregate_cap_fraction(). If the total retained across
   // EVERY region would exceed it, the law retains NOTHING and says so — never "as
@@ -569,6 +589,18 @@ struct GradedField {
   // ── what was produced (L3) ──────────────────────────────────────────────────────
   std::size_t region_voxels = 0;          // candidate voxels (printed AND in region)
   std::size_t latticed_voxels = 0;        // graded to lattice
+  // ★ the shape-grade band (GradingLawParams::band_*): what it did, per voxel counts
+  long long band_voxels = 0;          // latticed voxels inside a band
+  long long band_raised_voxels = 0;   // their struts thickened by the band
+  long long band_snapped_voxels = 0;  // raised further to a whole line width
+  long long band_capped_voxels = 0;   // candidates whose coarsest cell the band lowered
+  double band_quilt_rho = 0.0;        // q's quilt row for the type
+  // filled by the caller once the plan is final: band candidates left SOLID (no cell
+  // prints there) and their box (min xyz, max xyz in mm); the band is solid only there
+  std::vector<double> band_rho0;  // per voxel, the law's density before the band (evidence)
+  std::vector<double> band_finest_mm;  // per voxel, the band's finest printable cell (evidence)
+  long long band_solid_voxels = 0;
+  double band_solid_box[6] = {0, 0, 0, 0, 0, 0};
   std::size_t solid_fallback_voxels = 0;  // L4: too thin for the floor -> stayed SOLID
 
   // ── WHY EACH FALLBACK VOXEL FELL BACK (task

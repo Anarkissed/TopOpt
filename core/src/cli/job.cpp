@@ -1636,7 +1636,8 @@ JobDescription parse_job(const std::string& json_text) {
                                  "synthetic_stress", "synthetic_foci",
                                  "synthetic_soft_mm", "label", "rho_min", "rho_max",
                                  "demand_exponent", "grading", "shape_grade",
-                                 "shape_grade_band_mm", "cell_min_mm", "cell_max_mm"},
+                                 "shape_grade_band_mm", "cell_min_mm", "cell_max_mm",
+                                 "shape_grade_strength"},
                             "a lattice region");
         JobLatticeRegion reg;
         // ★ E2.6 + E3: the region's name and its own grading (job.hpp). The band is
@@ -1711,6 +1712,11 @@ JobDescription parse_job(const std::string& json_text) {
         if (reg.cell_min_mm > 0.0 && reg.cell_max_mm > 0.0 && reg.cell_max_mm < reg.cell_min_mm)
           schema_fail(named + ": its cell window needs cell_min_mm <= cell_max_mm (got " +
                       fmt_g(reg.cell_min_mm) + ", " + fmt_g(reg.cell_max_mm) + ")");
+        if (const JsonValue* ss = own_grading("shape_grade_strength")) {
+          reg.shape_grade_strength = require_number(*ss, "lattice region shape_grade_strength");
+          if (!(reg.shape_grade_strength >= -1.0 && reg.shape_grade_strength <= 1.0))
+            schema_fail(named + ": \"shape_grade_strength\" must be in [-1, 1]");
+        }
         if (!reg.grading.empty())
           reg.shape_grade = (reg.grading == "shape" || reg.grading == "stress_shape") ? 1 : 0;
         if (const JsonValue* sv = find_key(rv, "synthetic_stress")) {
@@ -2186,7 +2192,7 @@ JobDescription parse_job(const std::string& json_text) {
              "organic_shape_fit", "organic_shape_fit_only",
              "organic_scale", "organic_growth",
              "organic_transfer_ties", "organic_tie_swirl", "organic_solid_rim_mm",
-             "shape_grade", "shape_grade_band_mm",
+             "shape_grade", "shape_grade_band_mm", "shape_grade_strength",
              "organic_base_mat", "organic_fill_mat", "organic_trim_below_base",
              "organic_strut_embed_mm",
              "organic_dual_contour", "organic_dc_cell_mm", "organic_dc_tolerance_mm",
@@ -2533,6 +2539,15 @@ JobDescription parse_job(const std::string& json_text) {
             "reads, so it needs \"shape_grade\": true -- without the shape grade there "
             "is no outline beam to bleed");
       job.grading.shape_grade_band_mm = sb->num;
+    }
+    // ★ ruling 2: the band's strength (job.hpp)
+    if (const JsonValue* ss = find_key(gr, "shape_grade_strength")) {
+      if (ss->type != JsonValue::Type::Number || !(ss->num >= -1.0 && ss->num <= 1.0))
+        schema_fail("grading \"shape_grade_strength\" must be a number in [-1, 1]");
+      if (!job.grading.shape_grade)
+        schema_fail("grading \"shape_grade_strength\" scales the shape-grade band, so it "
+                    "needs \"shape_grade\": true");
+      job.grading.shape_grade_strength = ss->num;
     }
     if (const JsonValue* sw = find_key(gr, "organic_tie_swirl")) {
       if (sw->type != JsonValue::Type::Number || !(sw->num >= 0.0 && sw->num <= 1.0))

@@ -22,8 +22,8 @@
 // §4 every run_info.json above is JSON: no bare inf or nan; a non-finite number is
 //    null, and the file says which and why.
 // §5 ruling 11-06 (d): the shape grade on this bar latticed through (no regions). Its
-//    outline walk seeded only from region face planes, so it turned 0 voxels solid; it
-//    now seeds from the part's own surface. Control: shape grade off, no beam.
+//    outline walk seeded only from region face planes, so it did nothing; it now seeds
+//    from the part's own surface, and (ruling 2) grades a band there. Control: off, none.
 #include "topopt/job.hpp"
 #include "topopt/loadcase.hpp"
 #include "topopt/materials.hpp"
@@ -282,14 +282,14 @@ int main() {
 
   // ── §5 the shape grade with no regions ─────────────────────────────────────
   {
-    const Lp on = lattice_part(dir, f, "octet", ", \"shape_grade\": true", "_shape");
-    const double beam = num_after(on.run_info, "outline_voxels");
+    const Lp on = lattice_part(dir, f, "octet", ", \"shape_grade\": true, \"shape_grade_band_mm\": 6", "_shape");
+    const double band = num_after(on.receipt, "band_voxels");
     const double lat = num_after(on.receipt, "lattice_voxels");
-    std::printf("[no-solid] shape grade, no regions: %.0f voxel(s) turned solid, %.0f "
-                "latticed left (of 1,536)\n", beam, lat);
-    CHECK(beam > 0, "§5 the shape grade turns the part's outline solid");
-    CHECK(lat > 0 && beam + lat <= 1536, "§5 a lattice is left inside the outline");
-    CHECK(!has(oct.run_info, "\"outline_voxels\""), "§5 control: shape grade off, no beam");
+    std::printf("[no-solid] shape grade, no regions: %.0f band voxel(s), %.0f latticed (of "
+                "1,536)\n", band, lat);
+    CHECK(band > 0, "§5 the shape grade grades a band at the part's own outline");
+    CHECK(lat > 0 && band <= lat, "§5 the band is lattice, inside the part");
+    CHECK(!has(oct.receipt, "\"shape_band\""), "§5 control: shape grade off, no band");
   }
 
   std::printf("%s: %d checks, %d failures\n", g_failures ? "FAIL" : "PASS", g_checks,

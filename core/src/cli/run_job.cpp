@@ -21,6 +21,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <queue>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -4698,6 +4699,26 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
     const GradedField& gf = *graded.gf;
     const double latticed = static_cast<double>(gf.latticed_voxels);
     s += "  \"grading\": {\n";
+    // ★ RULING 2: the shape-grade band, written only when one was built.
+    if (gf.band_voxels > 0 || gf.band_solid_voxels > 0) {
+      const double* bx = gf.band_solid_box;
+      s += "    \"shape_band\": {\"band_voxels\": " + std::to_string(gf.band_voxels) +
+           ", \"struts_raised\": " + std::to_string(gf.band_raised_voxels) +
+           ", \"snapped_to_line_width\": " + std::to_string(gf.band_snapped_voxels) +
+           ", \"cells_capped\": " + std::to_string(gf.band_capped_voxels) +
+           ", \"quilt_rho\": " + json_num(gf.band_quilt_rho) +
+           ", \"solid_where_unprintable\": " + std::to_string(gf.band_solid_voxels) +
+           (gf.band_solid_voxels > 0
+                ? ", \"solid_box_mm\": [" + json_num(bx[0]) + ", " + json_num(bx[1]) + ", " +
+                      json_num(bx[2]) + ", " + json_num(bx[3]) + ", " + json_num(bx[4]) + ", " +
+                      json_num(bx[5]) + "]"
+                : std::string()) +
+           (lattice_topology_is_sheet(a.lattice_topology)
+                ? ", \"note\": \"a sheet grades its wall thickness only: no published method "
+                  "grades a TPMS's cell size (04-references R5)\""
+                : std::string()) +
+           "},\n";
+    }
     // ── STAGE E: the per-region cell derivation. Emitted ONLY when the job asked
     // for it, so every other receipt is byte-identical. Every number here is
     // measured on this run or derived at run time from core's own constants —
@@ -6894,6 +6915,56 @@ static std::size_t clear_band_from_mask(std::vector<char>& mask, const std::vect
   return turned;
 }
 
+// ★ THE SHAPE-GRADE BAND'S DISTANCE (ruling 2): per lattice voxel, mm from the lattice's
+// outline -- seeded exactly as organic_solid_rim_band seeds its walk (a region's in-plane
+// side walls; with `unowned_from_surface`, every edge of a voxel no region owns), the
+// seed voxel's centre half a voxel in -- then a 26-neighbour chamfer walk through the
+// lattice (steps h, h*sqrt2, h*sqrt3). -1 off the lattice or out of reach of any seed.
+static std::vector<double> lattice_outline_distance_mm(const VoxelGrid& grid,
+                                                       const std::vector<char>& mask,
+                                                       const std::vector<int>& region_ids,
+                                                       const std::vector<Vec3>& region_normals,
+                                                       bool unowned_from_surface) {
+  const std::size_t n = grid.voxel_count();
+  std::vector<double> dist(n, -1.0);
+  if (mask.size() != n || region_ids.size() != n) return dist;
+  // The seeds: one voxel-step walk of organic_solid_rim_band is its seed layer.
+  const std::vector<char> seeds =
+      organic_solid_rim_band(grid, mask, region_ids, region_normals, 0.5 * grid.spacing,
+                             unowned_from_surface);
+  const double h = grid.spacing;
+  using Item = std::pair<double, std::size_t>;
+  std::priority_queue<Item, std::vector<Item>, std::greater<Item>> pq;
+  for (std::size_t e = 0; e < n; ++e)
+    if (seeds[e]) {
+      dist[e] = 0.5 * h;
+      pq.push({dist[e], e});
+    }
+  while (!pq.empty()) {
+    const auto [d, e] = pq.top();
+    pq.pop();
+    if (d > dist[e]) continue;
+    const int i = static_cast<int>(e % static_cast<std::size_t>(grid.nx));
+    const int j = static_cast<int>((e / static_cast<std::size_t>(grid.nx)) % static_cast<std::size_t>(grid.ny));
+    const int k = static_cast<int>(e / (static_cast<std::size_t>(grid.nx) * static_cast<std::size_t>(grid.ny)));
+    for (int dk = -1; dk <= 1; ++dk)
+      for (int dj = -1; dj <= 1; ++dj)
+        for (int di = -1; di <= 1; ++di) {
+          if (!di && !dj && !dk) continue;
+          const int i2 = i + di, j2 = j + dj, k2 = k + dk;
+          if (i2 < 0 || j2 < 0 || k2 < 0 || i2 >= grid.nx || j2 >= grid.ny || k2 >= grid.nz) continue;
+          const std::size_t e2 = grid.index(i2, j2, k2);
+          if (!mask[e2]) continue;
+          const double nd = d + h * std::sqrt(static_cast<double>(di * di + dj * dj + dk * dk));
+          if (dist[e2] < 0.0 || nd < dist[e2] - 1e-12) {
+            dist[e2] = nd;
+            pq.push({nd, e2});
+          }
+        }
+  }
+  return dist;
+}
+
 // quotes, backslashes and newlines out of a string headed into a JSON literal
 static std::string json_safe(std::string t) {
   for (char& c : t) if (c == '"' || c == '\\' || c == '\n' || c == '\r') c = c == '"' ? '\'' : ' ';
@@ -6929,7 +7000,8 @@ std::vector<GradingRegionOverride> lattice_region_overrides(
     o.cell_max_mm = r.cell_max_mm;
     // A region's own shape grade needs the owner map too, so it arms the table.
     if (r.rho_max > 0.0 || r.demand_exponent > 0.0 || o.flat || r.shape_grade >= 0 ||
-        r.shape_grade_band_mm >= 0.0 || r.cell_min_mm > 0.0 || r.cell_max_mm > 0.0)
+        r.shape_grade_band_mm >= 0.0 || r.cell_min_mm > 0.0 || r.cell_max_mm > 0.0 ||
+        r.shape_grade_strength >= -1.0)
       any = true;
   }
   if (!any) out.clear();
@@ -6994,6 +7066,8 @@ LatticeVariantOutcome lattice_one_variant_pass(
       lattice_roles.includes.empty() ? lattice_roles.carriers : lattice_roles.includes;
   const std::vector<GradingRegionOverride> e3_overrides = lattice_region_overrides(e3_jobs);
   std::vector<int> e3_owner;
+  // ★ the shape-grade band's per-voxel inputs (grade_lattice reads them by pointer)
+  std::vector<double> band_distance, band_mm, band_amount;
 
   // ── Stage 4: the grading law runs FIRST, on THIS variant's own final
   // certification-recovery von Mises field (H4a — the run's own field, fresh:
@@ -7359,8 +7433,86 @@ LatticeVariantOutcome lattice_one_variant_pass(
     if (job.grading.subfloor_per_region) gp.region_ids = &region_ids;
     region_ids_for_stepped = region_ids;
     gp.subfloor_aggregate_cap_fraction = job.grading.subfloor_aggregate_cap;
+    // ── ★ THE SHAPE-GRADE BAND (ruling 2, 2026-11-06): the doubled lattice's shape grade
+    // is the preview's graded band, built by the law (GradingLawParams::band_*), not a
+    // solid outline. Stepped keeps its beam (its cells arrive graded from the app) and
+    // organic has its own rim. Per voxel: the owner's switch, band and strength (a
+    // region's own, else the part's), and the distance to the outline the beam walked.
+    if (R.algorithm == LatticeAlgorithm::Doubled) {
+      auto own = [&](std::size_t e) -> const JobLatticeRegion* {
+        const int id = !e3_owner.empty() ? e3_owner[e] : region_ids[e];
+        return id >= 1 && static_cast<std::size_t>(id) <= e3_jobs.size()
+                   ? &e3_jobs[static_cast<std::size_t>(id - 1)]
+                   : nullptr;
+      };
+      bool any = false;
+      band_mm.assign(cand.size(), 0.0);
+      band_amount.assign(cand.size(), 1.0);
+      for (std::size_t e = 0; e < cand.size(); ++e) {
+        if (!cand[e]) continue;
+        const JobLatticeRegion* r = own(e);
+        const bool on = r != nullptr && r->shape_grade >= 0 ? r->shape_grade == 1
+                                                             : job.grading.shape_grade;
+        if (!on) continue;
+        const double b = r != nullptr && r->shape_grade_band_mm >= 0.0 ? r->shape_grade_band_mm
+                                                                        : job.grading.shape_grade_band_mm;
+        const double st = r != nullptr && r->shape_grade_strength >= -1.0
+                              ? r->shape_grade_strength
+                              : job.grading.shape_grade_strength;
+        band_mm[e] = b;
+        band_amount[e] = std::pow(2.0, std::min(1.0, std::max(-1.0, st)));
+        if (b > 0.0) any = true;
+      }
+      if (any) {
+        std::vector<Vec3> nrms;
+        for (const JobLatticeRegion& r : e3_jobs) nrms.push_back(r.normal);
+        band_distance = lattice_outline_distance_mm(
+            solved_grid, cand, !e3_owner.empty() ? e3_owner : region_ids, nrms,
+            e3_jobs.empty() || job.lattice.whole_part);
+        gp.band_distance_mm = &band_distance;
+        gp.band_mm = &band_mm;
+        gp.band_amount = &band_amount;
+        gp.band_line_width_mm = job.grading.min_extrudable_width_mm;
+      }
+    }
     gf = grade_lattice(solved_grid, dens, vm_grade, &cand, gp,
                        printed_iso);
+    // ★ ruling 2: where the band stays SOLID, which is only where no cell prints.
+    if (gp.band_distance_mm != nullptr) {
+      double* bx = gf.band_solid_box;
+      for (int k = 0; k < solved_grid.nz; ++k)
+        for (int j = 0; j < solved_grid.ny; ++j)
+          for (int i = 0; i < solved_grid.nx; ++i) {
+            const std::size_t e = solved_grid.index(i, j, k);
+            if (!cand[e] || gf.posture.mask[e] || !(band_mm[e] > 0.0) ||
+                !(band_distance[e] >= 0.0 && band_distance[e] < band_mm[e]))
+              continue;
+            const Vec3 c = solved_grid.voxel_center(i, j, k);
+            if (gf.band_solid_voxels++ == 0) {
+              bx[0] = bx[3] = c.x; bx[1] = bx[4] = c.y; bx[2] = bx[5] = c.z;
+            }
+            bx[0] = std::min(bx[0], c.x); bx[1] = std::min(bx[1], c.y); bx[2] = std::min(bx[2], c.z);
+            bx[3] = std::max(bx[3], c.x); bx[4] = std::max(bx[4], c.y); bx[5] = std::max(bx[5], c.z);
+          }
+      // Evidence, behind an env var like the beam band's dump: every band voxel the law
+      // latticed, with what the preview's curve is checked against.
+      if (const char* bp = std::getenv("TOPOPT_SHAPE_BAND_DUMP")) {
+        std::ofstream bf(bp);
+        bf.precision(10);
+        bf << "# BAND <distance_mm> <band_mm> <amount> <cell_mm> <rho> <strut_mm> <rho_before_band> <finest_printable_cell_mm>\n";
+        for (std::size_t e = 0; e < cand.size(); ++e) {
+          if (!gf.posture.mask[e] || !(band_mm[e] > 0.0) || band_distance[e] < 0.0) continue;
+          const double S = e < gf.posture.cell_size_field.size() && gf.posture.cell_size_field[e] > 0.0
+                               ? gf.posture.cell_size_field[e]
+                               : gf.posture.cell_size_mm;
+          const double r = gf.posture.relative_density[e];
+          bf << "BAND " << band_distance[e] << ' ' << band_mm[e] << ' ' << band_amount[e] << ' '
+             << S << ' ' << r << ' ' << lattice_strut_diameter_mm(lat_topo, r, S) << ' '
+             << (e < gf.band_rho0.size() ? gf.band_rho0[e] : 0.0) << ' '
+             << (e < gf.band_finest_mm.size() ? gf.band_finest_mm[e] : 0.0) << '\n';
+        }
+      }
+    }
     // ── ★ THE ORGANIC CELL-SIZE PROBE (see JobLattice::organic_probe_cells_mm) ──
     // Runs here because everything it needs is in scope and already paid for: the
     // one base solve (v.stress_tensor_field), the law's input candidates (`cand`),
@@ -8776,7 +8928,10 @@ LatticeVariantOutcome lattice_one_variant_pass(
   if (e3_shape)
     for (std::size_t i = 0; i < e3_jobs.size(); ++i)
       if (shape_on(static_cast<int>(i) + 1)) any_shape = true;
-  if (graded && R.algorithm != LatticeAlgorithm::Organic && e3_shape && any_shape) {
+  // ★ ruling 2: the solid outline beam is STEPPED's alone now; the doubled lattice's
+  // shape grade is the band grade_lattice built (band_* above).
+  const bool beam_algorithm = R.algorithm == LatticeAlgorithm::Stepped;
+  if (graded && beam_algorithm && e3_shape && any_shape) {
     const double beam =
         lattice_outline_beam_mm(job.grading.min_extrudable_width_mm, solved_grid.spacing);
     // The walk seeds from each region's own face plane, so it reads the E3 owner map
@@ -8821,8 +8976,7 @@ LatticeVariantOutcome lattice_one_variant_pass(
                  "[outline] per region: solid beam %.4f mm, up to %.4f mm inward over %zu "
                  "band width(s) | %zu voxel(s) turned solid\n",
                  beam, inward_max, widths.size(), cleared);
-  } else if (graded && R.algorithm != LatticeAlgorithm::Organic && !e3_shape &&
-             job.grading.shape_grade) {
+  } else if (graded && beam_algorithm && !e3_shape && job.grading.shape_grade) {
     const double beam =
         lattice_outline_beam_mm(job.grading.min_extrudable_width_mm, solved_grid.spacing);
     const double bleed = lattice_outline_bleed_mm(job.grading.shape_grade_band_mm);

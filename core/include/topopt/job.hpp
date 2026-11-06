@@ -280,6 +280,7 @@ struct JobLatticeRegion {
   std::string grading;
   int shape_grade = -1;               // -1 = the part's; 0 off; 1 on
   double shape_grade_band_mm = -1.0;  // < 0 = the part's
+  double shape_grade_strength = -9.0; // ★ ruling 2: in [-1, 1]; < -1 = the part's
   // ★ E3: the region's own cell window (mm), swept only; 0 = the part's. Its voxels take
   // only the part's ladder cells (grading cell_min_mm x 2^L) inside it.
   double cell_min_mm = 0.0;
@@ -647,6 +648,12 @@ struct JobGrading {
   // nothing. 0 = no bleed. The band's own density raise is the app's arithmetic and
   // arrives per cell as stepped_cells[].rho (ruling C) -- core adds no band term.
   double shape_grade_band_mm = 0.0;
+  // ★ RULING 2 (2026-11-06): the band is now BUILT on the doubled lattice -- cells finer
+  // and struts thicker toward the outline across `shape_grade_band_mm`, the preview's
+  // law (grading.hpp GradingLawParams::band_*), solid only where no cell prints. The
+  // strength s in [-1, 1] scales the strut raise by 2^s (the app's gradeAmount); 0 =
+  // today's amount. Needs "shape_grade": true.
+  double shape_grade_strength = 0.0;
   // ★ Drive free organic strut ends this far INTO the solid they meet, then intersect
   // the welded field with the part so nothing escapes a far face (organic_weld).
   // 0 = off. Organic only.

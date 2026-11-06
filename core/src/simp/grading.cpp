@@ -522,6 +522,45 @@ GradedField grade_lattice(const VoxelGrid& grid,
     return &(*params.region_overrides)[static_cast<std::size_t>(id - 1)];
   };
 
+  // ★ THE SHAPE-GRADE BAND (GradingLawParams::band_*). `band_t` is the voxel's place in
+  // its band, 0 at the outline .. 1 at the inner edge; a voxel in no band reads 1.
+  const bool banded = params.band_distance_mm != nullptr && params.band_mm != nullptr &&
+                      params.band_amount != nullptr &&
+                      params.band_distance_mm->size() == n && params.band_mm->size() == n &&
+                      params.band_amount->size() == n;
+  auto band_t = [&](std::size_t e) {
+    if (!banded) return 1.0;
+    const double b = (*params.band_mm)[e];
+    if (!(b > 0.0)) return 1.0;
+    return std::min(1.0, std::max(0.0, (*params.band_distance_mm)[e] / b));
+  };
+  // q: the QUILT ROW, the lightest density whose strut is as thick as the type's law
+  // ever draws it (the app's quiltRowDensity), under the band's top and the job's cap.
+  double band_q = 0.0;
+  if (banded) {
+    const double dmax = lattice_strut_diameter_mm(topo, 1.0, 1.0);
+    double lo = 0.0, hi = 1.0;
+    for (int it = 0; it < 64; ++it) {
+      const double mid = 0.5 * (lo + hi);
+      if (lattice_strut_diameter_mm(topo, mid, 1.0) >= dmax * (1.0 - 1e-3)) hi = mid;
+      else lo = mid;
+    }
+    out.band_quilt_rho = hi;
+    band_q = std::min(hi, rho_hi);
+    if (params.max_relative_density > 0.0) band_q = std::min(band_q, params.max_relative_density);
+  }
+  // The preview's raise (LatticeOctreeBake shapedRho): toward q by (1 - t) x share x amount.
+  auto band_raise = [&](std::size_t e, double r, double share) {
+    const double t = band_t(e);
+    if (t >= 1.0 || !(band_q > r)) return r;
+    const double a = (*params.band_amount)[e] > 0.0 ? (*params.band_amount)[e] : 1.0;
+    return std::max(r, std::min(band_q, r + (band_q - r) * (1.0 - t) * share * a));
+  };
+  constexpr double kCoarseCellBandRaise = 0.35;  // the app's coarseCellBandRaise
+  // the swept band's per-voxel planned level and finest printable cell (mm)
+  std::vector<signed char> band_pref;
+  std::vector<double> band_finest_mm;
+
   // The demand -> density map (requirement 1 / L2), identical in every cell mode:
   // density depends on DEMAND alone, never on cell size. That is exactly what lets
   // the cell-size plan consume it without circularity.
@@ -997,6 +1036,9 @@ GradedField grade_lattice(const VoxelGrid& grid,
       // voxels that end up latticed, so the accounting means what it means on the
       // uniform paths.
       rho_raw[e] = std::min(rho_hi, std::max(rho_lo, rho_of(e)));
+      // ★ a sheet's band thickens its wall only, at the whole raise; a strut type's is
+      // raised below, with its cells
+      if (banded && lattice_topology_is_sheet(topo)) rho_raw[e] = band_raise(e, rho_raw[e], 1.0);
     }
 
     CellPlanParams pp;
@@ -1040,7 +1082,8 @@ GradedField grade_lattice(const VoxelGrid& grid,
           } else if (o.cell_min_mm > 0.0) {
             any = true;
           }
-      if (any) {
+      const bool band_cells = banded && !lattice_topology_is_sheet(topo);
+      if (any || band_cells) {
         lvl_lo.assign(n, -1);
         lvl_hi.assign(n, static_cast<signed char>(part_top));
         for (std::size_t e = 0; e < n; ++e) {
@@ -1049,6 +1092,53 @@ GradedField grade_lattice(const VoxelGrid& grid,
           lvl_lo[e] = static_cast<signed char>(o->cell_min_mm > 0.0 ? level_lo(o->cell_min_mm) : 0);
           lvl_hi[e] = static_cast<signed char>(o->cell_max_mm > 0.0 ? level_hi(o->cell_max_mm)
                                                                     : part_top);
+        }
+        // ★ THE BAND'S CELLS, the preview's way (LatticeOctreeBake): the ramp starts at
+        // the voxel's finest PRINTABLE cell f (its strut at the whole raise reaches the line
+        // width) and runs to its coarsest S_base, a cell of size S allowed once
+        // distance + S/2 >= band (S - f) / (S_base - f); the voxel is PLANNED at the
+        // coarsest such cell (the preview lays the largest cell that passes), raised by the
+        // finest's whole share there or the coarser 0.35, and preferred at it.
+        if (band_cells) {
+          band_pref.assign(n, -1);
+          band_finest_mm.assign(n, 0.0);
+          const double w = params.band_line_width_mm > 0.0 ? params.band_line_width_mm
+                                                           : params.min_extrudable_width_mm;
+          for (std::size_t e = 0; e < n; ++e) {
+            if (!cand[e] || band_t(e) >= 1.0) continue;
+            const int lo_l = std::max(0, static_cast<int>(lvl_lo[e]));
+            const int hi_l = lvl_hi[e];
+            const double r0 = rho_raw[e];
+            auto S_at = [&](int L) { return S0 * std::ldexp(1.0, L); };
+            const double full = band_raise(e, r0, 1.0);
+            int Lf = -1;
+            for (int L = lo_l; L <= hi_l && Lf < 0; ++L)
+              if (lattice_strut_diameter_mm(topo, full, S_at(L)) >= w) Lf = L;
+            if (Lf < 0) {  // no cell prints even at the whole raise: the plan drops it
+              rho_raw[e] = full;
+              continue;
+            }
+            const double f = S_at(Lf), sb = S_at(hi_l);
+            const double d = (*params.band_distance_mm)[e], b = (*params.band_mm)[e];
+            int Lr = Lf;
+            if (sb > f * (1.0 + 1e-9))
+              for (int L = Lf + 1; L <= hi_l; ++L) {
+                if (d + 0.5 * S_at(L) >= b * (S_at(L) - f) / (sb - f) - 1e-9) Lr = L;
+                else break;
+              }
+            double rp = band_raise(e, r0, Lr == Lf ? 1.0 : kCoarseCellBandRaise);
+            while (Lr < hi_l && lattice_strut_diameter_mm(topo, rp, S_at(Lr)) < w) {
+              ++Lr;  // the coarser share does not print here: one cell coarser
+              rp = band_raise(e, r0, kCoarseCellBandRaise);
+            }
+            rho_raw[e] = rp;
+            band_pref[e] = static_cast<signed char>(Lr);
+            band_finest_mm[e] = f;
+            // a PREFERENCE, not a window: the plan takes the coarsest level up to it that
+            // its cells' printability allows, and coarser only where they need it
+            if (Lr < hi_l) ++out.band_capped_voxels;
+          }
+          pp.voxel_level_prefer = &band_pref;
         }
         pp.max_cell_size_mm = S0 * std::ldexp(1.0, top);
         pp.voxel_level_lo = &lvl_lo;
@@ -1223,6 +1313,50 @@ GradedField grade_lattice(const VoxelGrid& grid,
       post.cell_size_mm = coarsest;
     }
     post.cell_size_field = voxel_cell;
+  }
+
+  // ── ★ THE BAND'S STRUTS, ON THE CELLS THE PLAN CHOSE (ruling 2) ──────────────────
+  // The finest cell gets the whole raise, a coarser one the preview's 0.35 share; then
+  // the strut goes up to a whole number of line widths at its own cell (never down, and
+  // never past q or the cap). Every change here only thickens a strut, so a cell the
+  // plan proved printable stays printable.
+  if (banded) {
+    const double w = params.band_line_width_mm;
+    const double S0 = params.cell_mode == CellSizeMode::Swept ? params.min_cell_size_mm : 0.0;
+    out.band_rho0.assign(n, 0.0);
+    out.band_finest_mm.assign(n, 0.0);
+    for (std::size_t e = 0; e < n; ++e) {
+      if (!post.mask[e] || band_t(e) >= 1.0) continue;
+      ++out.band_voxels;
+      const double S = e < post.cell_size_field.size() && post.cell_size_field[e] > 0.0
+                           ? post.cell_size_field[e]
+                           : post.cell_size_mm;
+      const double fin = e < band_finest_mm.size() && band_finest_mm[e] > 0.0 ? band_finest_mm[e]
+                                                                               : S0;
+      const bool finest = !(fin > 0.0) || S <= fin * (1.0 + 1e-9);
+      out.band_rho0[e] = post.relative_density[e];
+      out.band_finest_mm[e] = fin;
+      double r = band_raise(e, post.relative_density[e], finest ? 1.0 : kCoarseCellBandRaise);
+      if (r > post.relative_density[e] + 1e-12) ++out.band_raised_voxels;
+      if (w > 0.0 && S > 0.0) {
+        // up to the next whole line width where the band's top allows it; where it does
+        // not, down to the last whole one (never under one width): the run's certificate
+        // judges the strut it gets either way
+        const double d = lattice_strut_diameter_mm(topo, r, S);
+        const double k = std::ceil(d / w - 1e-9);
+        const double top = std::max(band_q, r);
+        double r2 = lattice_min_density_for_strut(topo, S, k * w, params.max_relative_density);
+        if (!(r2 > 0.0 && r2 <= top) && k > 1.0)
+          r2 = lattice_min_density_for_strut(topo, S, (k - 1.0) * w, params.max_relative_density);
+        if (r2 > 0.0 && r2 <= top && std::fabs(r2 - r) > 1e-12) {
+          r = r2;
+          ++out.band_snapped_voxels;
+        }
+      }
+      post.relative_density[e] = r;
+      rho_max_used = std::max(rho_max_used, r);
+      max_d = std::max(max_d, lattice_strut_diameter_mm(topo, r, S));
+    }
   }
 
   if (out.latticed_voxels > 0) {
