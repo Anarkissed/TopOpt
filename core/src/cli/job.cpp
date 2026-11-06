@@ -2076,10 +2076,13 @@ JobDescription parse_job(const std::string& json_text) {
           require_nonempty_string(*f, "lattice.outer_finish");
       if (job.lattice.outer_finish != "shell" &&
           job.lattice.outer_finish != "skin" &&
-          job.lattice.outer_finish != "shell+skin")
-        schema_fail("lattice \"outer_finish\" must be \"shell\", \"skin\" or "
-                    "\"shell+skin\" (got \"" + job.lattice.outer_finish + "\")");
-      if (job.lattice.outer_finish != "shell" && job.lattice.skin != "diagrid")
+          job.lattice.outer_finish != "shell+skin" &&
+          job.lattice.outer_finish != "none")
+        schema_fail("lattice \"outer_finish\" must be \"shell\", \"skin\", "
+                    "\"shell+skin\" or \"none\" (got \"" + job.lattice.outer_finish + "\")");
+      // ★ E2.4: "none" is the open lattice with whatever skin the job asks for.
+      if ((job.lattice.outer_finish == "skin" || job.lattice.outer_finish == "shell+skin") &&
+          job.lattice.skin != "diagrid")
         schema_fail("lattice outer_finish \"" + job.lattice.outer_finish +
                     "\" needs skin \"diagrid\" — the diagrid IS the outer "
                     "finish that replaces or dresses the shell");

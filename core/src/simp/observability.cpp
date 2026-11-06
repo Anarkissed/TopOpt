@@ -1285,6 +1285,11 @@ std::string run_info_json(const RunInfo& info) {
       gr += ", \"recertified_margin\": " + fmt(info.grading_recertified_margin);
       gr += ", \"recertified_accepted\": " +
             bool_json(info.grading_recertified_accepted);
+      if (info.grading_recertified_open_cut_voxels >= 0)
+        gr += ", \"recertified_open_cut_voxels\": " +
+              fmt_ll(info.grading_recertified_open_cut_voxels) +
+              ", \"recertified_open_credit\": \"none: cells at the free surface "
+              "(Onck, Andrews & Gibson 2001)\"";
       if (!info.grading_recertified_not_certified.empty())
         gr += ", \"recertified_not_certified\": \"" +
               json_escape(info.grading_recertified_not_certified) + "\"";

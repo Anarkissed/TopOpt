@@ -2591,8 +2591,14 @@ LatticeSkinSpec lattice_skin_for(const JobLattice& lat) {
   // lattice-skin-freeform): the diagrid extends onto the voxel-derived outer
   // surface — as the outer finish itself ("skin") or laid on the shell
   // ("shell+skin"). Default "shell" leaves it off: byte-identical.
-  S.freeform = lat.outer_finish != "shell";
+  S.freeform = lat.outer_finish == "skin" || lat.outer_finish == "shell+skin";
   return S;
+}
+
+// Whether the export writes the solid shell: "shell" and "shell+skin" do; "skin" and
+// ★ E2.4's "none" (the open lattice) do not.
+bool lattice_shell_written(const JobLattice& lat) {
+  return lat.outer_finish == "shell" || lat.outer_finish == "shell+skin";
 }
 
 // Export one accepted variant's latticed companion. `cell_mm` and `radius` are
@@ -2786,7 +2792,7 @@ LatticeExportOutcome export_latticed_variant(
   // Outer finish (task 2026-07-30-lattice-skin-freeform): "skin" REPLACES the
   // solid shell with the freeform diagrid (open, see-through); "shell" and
   // "shell+skin" keep the shell exactly as before.
-  const bool with_shell = lat.outer_finish != "skin";
+  const bool with_shell = lattice_shell_written(lat);
   // ONE emission routine for both writers, so STL and 3MF can never diverge on
   // which path they took.
   const bool swept = levels && levels->size() > 1 && base_cell_mm > 0.0;
@@ -3676,6 +3682,13 @@ struct LatticeCertOutcome {
   std::vector<ScenarioReport> scenarios;
   std::vector<char> scenario_accepted;
   std::vector<ScenarioReport> solid_scenarios;
+  // ★ E2.4: the OPEN finish (outer_finish "none"). `lattice` above was certified with
+  // the latticed voxels in cells the part's free surface cuts given NO credit.
+  bool open_finish = false;
+  long long open_cut_voxels = 0;        // latticed voxels given no credit
+  long long open_latticed_voxels = 0;   // all latticed voxels in the posture
+  bool open_load_path_ok = true;        // the load path through what keeps credit
+  std::string open_refusal;             // plain words, by region label; "" if certified
 };
 
 // The exact certification inputs minimize_plastic certified the SOLID design with
@@ -3959,6 +3972,63 @@ std::vector<OrganicLoadCase> organic_load_cases(const LatticeCertContext& cx,
   return ocs;
 }
 
+// ── ★ E2.4: THE OPEN LATTICE'S SURFACE CELLS (outer_finish "none", ruling 11-06 (1)) ─
+// Under a solid shell, a cell the part's surface cuts lands its struts on the shell. Open,
+// it does not: Onck, Andrews & Gibson 2001 ("Size effects in ductile cellular solids",
+// Int. J. Mech. Sci. 43(3), Part I modelling doi:10.1016/S0020-7403(00)00042-4, Part II
+// experiments doi:10.1016/S0020-7403(00)00043-6) show the cells cut by a free surface form
+// a weaker boundary layer, and stiffness and strength fall when the part is only a few
+// cells thick. The posture's periodic tensor overstates that layer. So it gets NO credit,
+// the safe floor: no measured knockdown for the layer exists in core, and a reduced credit
+// without one would be a guess.
+//
+// A cell is AT THE FREE SURFACE when any voxel whose centre lies in its box, or one voxel
+// beyond any face of it (the lattice's cell grid: origin at the grid's, the voxel's own
+// cell size on a swept posture), is FREE: outside the grid, outside the part, or not
+// printed (a hole, a keep-clear, a void the optimizer left). That is a cell the surface
+// cuts AND a cell flush against it: neither has the neighbour cell the periodic tensor
+// assumes on that side (measured: on a bar whose 4 mm cells meet its faces flush, a
+// cut-only test found none). A cell touching only solid or latticed material is not:
+// its struts land on material. Returns, per voxel, latticed AND in such a cell.
+std::vector<char> open_finish_cut_cells(const VoxelGrid& g, const std::vector<double>& dens,
+                                        double iso, const LatticePosture& post) {
+  const std::size_t n = g.voxel_count();
+  std::vector<char> cut(n, 0);
+  const double h = g.spacing;
+  const bool per_voxel = post.cell_size_field.size() == n;
+  std::map<std::array<long long, 4>, char> cell_cut;  // (cell um, ix, iy, iz) -> cut
+  auto free_at = [&](int i, int j, int k) {
+    if (i < 0 || j < 0 || k < 0 || i >= g.nx || j >= g.ny || k >= g.nz) return true;
+    return !g.solid(i, j, k) || !(dens[g.index(i, j, k)] > iso);
+  };
+  for (int k = 0; k < g.nz; ++k)
+    for (int j = 0; j < g.ny; ++j)
+      for (int i = 0; i < g.nx; ++i) {
+        const std::size_t e = g.index(i, j, k);
+        if (e >= post.mask.size() || !post.mask[e]) continue;
+        const double c = per_voxel ? post.cell_size_field[e] : post.cell_size_mm;
+        if (!(c > 0.0)) continue;
+        // The cell holding this voxel's centre, in voxel-index units along each axis.
+        const long long ix = static_cast<long long>(std::floor((i + 0.5) * h / c));
+        const long long iy = static_cast<long long>(std::floor((j + 0.5) * h / c));
+        const long long iz = static_cast<long long>(std::floor((k + 0.5) * h / c));
+        const std::array<long long, 4> key{std::llround(c * 1e6), ix, iy, iz};
+        auto it = cell_cut.find(key);
+        if (it == cell_cut.end()) {
+          // Voxels whose centre (v + 0.5) h lies in [ix c, (ix + 1) c), and one beyond.
+          auto lo = [&](long long q) { return static_cast<int>(std::ceil(q * c / h - 0.5)); };
+          bool any = false;
+          for (int kk = lo(iz) - 1; kk <= lo(iz + 1) && !any; ++kk)
+            for (int jj = lo(iy) - 1; jj <= lo(iy + 1) && !any; ++jj)
+              for (int ii = lo(ix) - 1; ii <= lo(ix + 1) && !any; ++ii)
+                if (free_at(ii, jj, kk)) any = true;
+          it = cell_cut.emplace(key, any ? 1 : 0).first;
+        }
+        cut[e] = it->second;
+      }
+  return cut;
+}
+
 // Re-certify one accepted variant as the LATTICED composite: once with a nullptr
 // posture (must reproduce the SOLID margin — a live proof the reconstruction is
 // correct) and once with `post` (the composite margin that describes the exported
@@ -3971,7 +4041,8 @@ LatticeCertOutcome certify_latticed_variant(const MinimizePlasticVariant& varian
                                             const std::vector<DirichletBC>& bcs,
                                             const LatticeCertContext& cx,
                                             const LatticePosture& post,
-                                            double rho_uniform) {
+                                            double rho_uniform,
+                                            const std::vector<char>* open_cut = nullptr) {
   LatticeCertOutcome oc;
   oc.rho = rho_uniform;
 
@@ -4034,8 +4105,43 @@ LatticeCertOutcome certify_latticed_variant(const MinimizePlasticVariant& varian
   // analyze_fixed_design PER VOXEL (bars E5 / H4b): any masked voxel whose rho
   // sits outside [rho_min, rho_max] throws LatticeDensityOutOfBand rather than
   // certify against a clamped tensor.
+  //
+  // ★ E2.4: an OPEN finish certifies with its cut cells given no credit: void in the
+  // design this solve reads and out of the posture, and the load path re-walked on what
+  // is left (a load on cut cells alone has no path). The solid re-cert above read the
+  // design as the run certified it.
+  const MinimizePlasticVariant* lat_variant = &variant;
+  const LatticePosture* lat_post = &post;
+  const LatticeCertContext* lat_cx = &cx;
+  MinimizePlasticVariant floored;
+  LatticePosture floored_post;
+  LatticeCertContext floored_cx;
+  if (open_cut) {
+    oc.open_finish = true;
+    for (std::size_t e = 0; e < post.mask.size(); ++e)
+      if (post.mask[e]) {
+        ++oc.open_latticed_voxels;
+        if (e < open_cut->size() && (*open_cut)[e]) ++oc.open_cut_voxels;
+      }
+    if (oc.open_cut_voxels > 0) {
+      floored = variant;
+      floored_post = post;
+      for (std::size_t e = 0; e < open_cut->size(); ++e)
+        if ((*open_cut)[e]) {
+          floored.optimization.physical_density[e] = 0.0;
+          floored_post.mask[e] = 0;
+        }
+      floored_cx = cx;
+      floored_cx.load_path_ok =
+          load_path_connected(sg, floored.optimization.physical_density, cx.printed_iso);
+      oc.open_load_path_ok = floored_cx.load_path_ok;
+      lat_variant = &floored;
+      lat_post = &floored_post;
+      lat_cx = &floored_cx;
+    }
+  }
   PostureCertification lat =
-      certify_posture(variant, sg, options, material, bcs, cx, &post);
+      certify_posture(*lat_variant, sg, options, material, bcs, *lat_cx, lat_post);
   oc.lattice = std::move(lat.governing);
   oc.scenarios = std::move(lat.reports);
   oc.scenario_accepted = std::move(lat.accepted);
@@ -4366,7 +4472,7 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
     // volume the closed shell surface encloses (divergence theorem) when the
     // shell is in the file, 0 when the "skin" finish dropped it.
     s += "  \"shell_enclosed_volume_mm3\": " +
-         json_num(lat.outer_finish == "skin"
+         json_num(!lattice_shell_written(lat)
                       ? 0.0
                       : mesh_enclosed_volume_mm3(variant.v3.mesh)) +
          ",\n";
@@ -4847,6 +4953,10 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
     s += "  \"describes\": \"the exported latticed mesh (" + tn + " interior + freeform "
          "2D boundary skin, NO solid shell) — the composite model below is "
          "shell-blind, see finish_note\",\n";
+  else if (lat.outer_finish == "none")
+    s += "  \"describes\": \"the exported latticed mesh (" + tn + " interior, OPEN: no "
+         "solid shell, no freeform skin) solved with the " + tn + " homogenized cubic "
+         "tensor, the cells the part's free surface cuts given no credit (open_finish)\",\n";
   else if (lat.outer_finish == "shell+skin")
     s += "  \"describes\": \"the exported latticed mesh (solid shell + " + tn + " "
          "interior + decorative freeform skin) solved with the " + tn + " homogenized "
@@ -4972,6 +5082,19 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
   if (a.lattice_not_certified)
     s += "  \"lattice_not_certified\": true,\n  \"lattice_not_certified_reason\": " +
          json_str(a.lattice_not_certified_reason) + ",\n";
+  // ★ E2.4: the OPEN finish's certificate (outer_finish "none"), written only then.
+  if (c.open_finish) {
+    s += "  \"open_finish\": {\"cut_cell_voxels\": " + std::to_string(c.open_cut_voxels) +
+         ", \"latticed_voxels\": " + std::to_string(c.open_latticed_voxels) +
+         ", \"cut_cell_credit\": \"none\", \"load_path_after\": " +
+         (c.open_load_path_ok ? "true" : "false") +
+         ", \"basis\": \"the cells at the part's free surface (cut by it or flush against it) form a weaker boundary "
+         "layer (Onck, Andrews & Gibson 2001, Int. J. Mech. Sci. 43(3), Parts I and II, "
+         "doi:10.1016/S0020-7403(00)00042-4 and -00043-6); no measured knockdown for it exists, so they get no strength or "
+         "stiffness: the safe floor. The margins above are that solve's.\"";
+    if (!c.open_refusal.empty()) s += ", \"refusal\": " + json_str(c.open_refusal);
+    s += "},\n";
+  }
   if (lat.outer_finish != "shell") {
     s += "  \"finish_certified\": " +
          std::string(finish_certified ? "true" : "false") + ",\n";
@@ -7103,7 +7226,7 @@ LatticeVariantOutcome lattice_one_variant(
     // on the surface either. Any other combination writes a shell, a skin, a rim or a
     // diagrid, and any of those re-ties the struts trimming severed.
     {
-      const bool shell_written = job.lattice.outer_finish != "skin";
+      const bool shell_written = lattice_shell_written(job.lattice);
       const bool surface_net =
           job.grading.algorithm == "organic"
               ? job.grading.organic_boundary_finish != "clean"
@@ -7346,7 +7469,7 @@ LatticeVariantOutcome lattice_one_variant(
           clear_band_from_mask(
               pmask, organic_solid_rim_band(solved_grid, pmask, region_ids, nrms, rim));
         }
-        OrganicOutcome po = run_organic_step(job.lattice.outer_finish != "skin", solved_grid, dens,
+        OrganicOutcome po = run_organic_step(lattice_shell_written(job.lattice), solved_grid, dens,
                                              probe_stress, pmask, agf.posture.relative_density,
                                              agf.band_rho_min, agf.band_rho_max, jg2,
                                              job.loads.present && job.loads.minimize_plastic,
@@ -8433,7 +8556,7 @@ LatticeVariantOutcome lattice_one_variant(
     // spacing window can leave them out of its statistics and hand them the middle.
     const std::vector<char> synth_whole = organic_synthesised_whole_voxels(
         R.organic_synthetic, region_ids_for_stepped, solved_grid.voxel_count());
-    organic = run_organic_step(job.lattice.outer_finish != "skin",
+    organic = run_organic_step(lattice_shell_written(job.lattice),
                                solved_grid, dens, organic_stress, mask,
                                gf.posture.relative_density, gf.band_rho_min,
                                gf.band_rho_max, job.grading,
@@ -10279,9 +10402,57 @@ LatticeVariantOutcome lattice_one_variant(
   const LatticePosture post = build_lattice_posture(
       lat_topo, solved_grid, cell, mask, rho_uniform,
       !shipped_rho.empty() ? &shipped_rho : graded ? &gf.posture.relative_density : nullptr);
+  // ★ E2.4: the open lattice's cut cells, given no credit (open_finish_cut_cells).
+  std::vector<char> open_cut;
+  if (job.lattice.outer_finish == "none")
+    open_cut = open_finish_cut_cells(solved_grid, dens, printed_iso, post);
   R.cc = certify_latticed_variant(
       v, solved_grid, options, material, bcs, cx, post,
-      graded ? std::numeric_limits<double>::quiet_NaN() : rho_uniform);
+      graded ? std::numeric_limits<double>::quiet_NaN() : rho_uniform,
+      open_cut.empty() ? nullptr : &open_cut);
+  // Refused by label: the regions that hold cut cells (the owner rule the grading used),
+  // or "the part" where a cut cell lies in no include region.
+  if (R.cc.open_finish && !R.cc.lattice.accepted) {
+    const std::vector<ClearanceGeometry>& owners =
+        lattice_roles.includes.empty() ? lattice_roles.carriers : lattice_roles.includes;
+    std::vector<char> named(e3_jobs.size() + 1, 0);
+    for (int k = 0; k < solved_grid.nz; ++k)
+      for (int j = 0; j < solved_grid.ny; ++j)
+        for (int i = 0; i < solved_grid.nx; ++i) {
+          const std::size_t e = solved_grid.index(i, j, k);
+          if (!open_cut[e]) continue;
+          const int id = owners.empty()
+                             ? 0
+                             : stepped_region_owner(solved_grid.voxel_center(i, j, k), owners);
+          named[static_cast<std::size_t>(
+              id >= 1 && static_cast<std::size_t>(id) <= e3_jobs.size() ? id : 0)] = 1;
+        }
+    std::string who;
+    for (std::size_t id = 1; id < named.size(); ++id)
+      if (named[id]) {
+        const std::string& lb = e3_jobs[id - 1].label;
+        who += std::string(who.empty() ? "" : ", ") +
+               (lb.empty() ? "region " + std::to_string(id) : "\"" + lb + "\"");
+      }
+    if (named[0] || who.empty()) who += std::string(who.empty() ? "" : " and ") + "the part";
+    char why[300];
+    if (!R.cc.open_load_path_ok)
+      std::snprintf(why, sizeof why,
+                    "no load path is left through the rest (a load or a support sits on "
+                    "those cells)");
+    else if (R.cc.lattice.lattice_not_certified)
+      std::snprintf(why, sizeof why, "%s", R.cc.lattice.lattice_not_certified_reason.c_str());
+    else
+      std::snprintf(why, sizeof why, "the margin is %.3g against %.3g needed",
+                    R.cc.lattice.margin_effective, options.margin_stop);
+    char counts[200];
+    std::snprintf(counts, sizeof counts,
+                  " does not certify open. With the %lld of %lld latticed voxels in cells "
+                  "at the part's free surface given no strength (the safe floor), ",
+                  R.cc.open_cut_voxels, R.cc.open_latticed_voxels);
+    R.cc.open_refusal = "The open lattice in " + who + counts + why +
+                        ". Covered (a solid shell) holds those cells.";
+  }
 
   // ══════════════════════════════════════════════════════════════════════════
   // ★★★ ORGANIC STRUCTURAL CERTIFICATION — the instrument, where the gate was ★★★
@@ -12226,7 +12397,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     // on the surface either. Any other combination writes a shell, a skin, a rim or a
     // diagrid, and any of those re-ties the struts trimming severed.
     {
-      const bool shell_written = job.lattice.outer_finish != "skin";
+      const bool shell_written = lattice_shell_written(job.lattice);
       const bool surface_net =
           job.grading.algorithm == "organic"
               ? job.grading.organic_boundary_finish != "clean"
@@ -12310,7 +12481,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
                                         a.stress_tensor_field, &an_synth_rep)
             : std::vector<double>();
     if (an_alg == LatticeAlgorithm::Organic)
-      an_org = run_organic_step(job.lattice.outer_finish != "skin",
+      an_org = run_organic_step(lattice_shell_written(job.lattice),
                                 design_grid, density, an_stress,
                                 gf.posture.mask, gf.posture.relative_density,
                                 gf.band_rho_min, gf.band_rho_max, job.grading,
@@ -12398,13 +12569,36 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     if (gf.intent_used == GradingIntent::Structural && gf.latticed_voxels > 0) {
       // ★ E2.1: re-certified under each scenario the lattice uses; the worst
       // governs and every one must pass. Before E2.1, scenario 1 alone.
+      // ★ E2.4: an OPEN finish re-certifies with its cut cells given no credit, as the
+      // run path does (open_finish_cut_cells).
+      const std::vector<double>* recert_density = &density;
+      const LatticePosture* recert_post = &gf.posture;
+      bool recert_load_path_ok = load_path_ok;
+      std::vector<double> floored_density;
+      LatticePosture floored_post;
+      if (job.lattice.present && job.lattice.outer_finish == "none") {
+        const std::vector<char> cut = open_finish_cut_cells(design_grid, density, 0.5, gf.posture);
+        long long ncut = 0;
+        floored_density = density;
+        floored_post = gf.posture;
+        for (std::size_t e = 0; e < cut.size(); ++e)
+          if (cut[e]) {
+            floored_density[e] = 0.0;
+            floored_post.mask[e] = 0;
+            ++ncut;
+          }
+        gi.grading_recertified_open_cut_voxels = ncut;
+        recert_density = &floored_density;
+        recert_post = &floored_post;
+        recert_load_path_ok = load_path_connected(design_grid, floored_density, 0.5);
+      }
       auto recert_one = [&](const std::vector<DirichletBC>& rb,
                             const std::vector<NodalLoad>& rl) {
         return analyze_fixed_design(
-          design_grid, params, density, rb, rl, material, build_dir,
+          design_grid, params, *recert_density, rb, rl, material, build_dir,
           options.simp.cg_tolerance, options.simp.cg_max_iterations,
-          options.simp.solver, options.margin_stop, knockdown, load_path_ok,
-          part_solid, &gf.posture);
+          options.simp.solver, options.margin_stop, knockdown, recert_load_path_ok,
+          part_solid, recert_post);
       };
       FixedDesignAnalysis relat;
       if (cert_scenarios.empty()) {
@@ -13688,7 +13882,8 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
     lvr.min_feature_warning = min_feature_warning_text(
         rules, result.lattice.v3.min_feature_violations);
     if (!lvr.accepted)
-      lvr.rejection_reason = result.lattice.lattice_not_certified
+      lvr.rejection_reason = !R.cc.open_refusal.empty() ? R.cc.open_refusal  // ★ E2.4
+                             : result.lattice.lattice_not_certified
                                  ? result.lattice.lattice_not_certified_reason
                              : load_path_ok ? kMarginBelowRequiredReason
                                             : kLoadPathNotConnectedReason;

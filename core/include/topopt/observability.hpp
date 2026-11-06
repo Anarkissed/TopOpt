@@ -937,6 +937,9 @@ struct RunInfo {
   // ★ Ruling 11-06 2(a): why the latticed object is NOT CERTIFIED (no solid voxel
   // carries the load and the strut law cannot apply); empty otherwise.
   std::string grading_recertified_not_certified;
+  // ★ E2.4: with outer_finish "none", the latticed voxels in cells the part's free
+  // surface cuts, given no credit in the re-certification; -1 when the finish is not open.
+  long long grading_recertified_open_cut_voxels = -1;
   bool grading_recertified_non_convergent = false;
   double grading_recertified_max_von_mises = 0.0;
   // ★ E2.1: each scenario the lattice was re-certified under, in the run's order
