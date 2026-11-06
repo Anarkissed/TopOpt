@@ -63,6 +63,13 @@ final class ParityLatticeSetupShots: XCTestCase {
                 if let z = p.latticeZones.first { p.removeLatticeZone(z.id) }
                 h.pump(0.5)
             }
+            // Start from's ask (mockup #lat-latmode-ask)
+            if h.frames.all["latticeStartFrom"] != nil {
+                try h.pickFromMenu("latticeStartFrom", "All lattice", what: "Start from")
+                h.pump(0.5)
+                try ParityTopologyShots.shot(h, "lat-latmode-ask", name)
+                if h.frames.all["latticeModeCancel"] != nil { try h.tap("latticeModeCancel", "Cancel") }
+            }
             // a tap that starts a new group: the role picker at the face (mockup #lat-setup-face-pick)
             p.latticeList.clearActive()
             let held = Set(p.latticeGroups.flatMap(\.faces))

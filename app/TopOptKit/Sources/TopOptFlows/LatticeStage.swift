@@ -183,6 +183,23 @@ public enum LatticeSetupCopy {
     public static let box = "Box"
     public static let cylinder = "Cylinder"
 
+    // ★ B6 s3b — Start from (notes 26, R2.2; mockup #lat-latmode-ask)
+    public static let startFrom = "Start from"
+    public static let startFromPlus = "Solid \u{00B7} + Lattice faces"
+    public static let startFromMinus = "All lattice \u{00B7} \u{2212} Lattice faces"
+    public static let startFromPlusLine = "faces add lattice"
+    public static let startFromMinusLine = "faces remove it"
+    public static let startFromInfo = "+ Lattice faces: the part stays solid, and the faces you pick add lattice (Protect keeps a solid skin). \u{2212} Lattice faces: the whole part is lattice, and the faces you pick remove it (no skin)."
+    /// §4.13's in-place ask: your faces change meaning. `group`: the one face group's name, or nil for several.
+    public static func modeAsk(toMinus: Bool, group: String?) -> String {
+        let who = group ?? "your groups"
+        return toMinus ? "Switch to \(startFromMinus)? The whole part becomes lattice, and \(who) remove\(group == nil ? "" : "s") it."
+            : "Switch to \(startFromPlus)? The part becomes solid, and \(who) add\(group == nil ? "" : "s") lattice."
+    }
+    public static let switchMode = "Switch"
+    /// While − is set: the job stays as today until the engine takes `lattice.whole_part` (his 11-03 rule).
+    public static let wholePartWaits = "\u{2212} Lattice faces waits on the engine update"
+
     // ★ B6 s1b — the Selections rows (§4.3 / §4.4, mockup #lat-setup)
     public static let faces = "Faces"
     public static let newGroup = "+ New group"
