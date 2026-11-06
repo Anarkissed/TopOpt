@@ -5,8 +5,10 @@
 # line). Each dump row is one band voxel the run latticed (TOPOPT_SHAPE_BAND_DUMP).
 # Left: cell size by distance from the outline; dots = the run, line = the preview's centre
 # rule (coarsest S with d + S/2 >= band (S - f)/(6.4 - f)) for the commonest finest cell f.
-# Right: strut diameter, dots = the run; every one equals the preview's raise taken to a whole
-# line width (checked voxel by voxel in test_lattice_shape_band §4), grey lines = k x 0.45 mm.
+# Right: strut diameter, dots = the run: the preview's raise taken to a whole line width where
+# one lies between the law's own strut and the quilt row (blue); where none does, the raise
+# stands and the receipt counts it as off_line_width (orange). No strut is under its law
+# (checked voxel by voxel in test_lattice_shape_band §4). Grey lines = k x 0.45 mm.
 import sys, collections
 import matplotlib
 matplotlib.use("Agg")
@@ -37,7 +39,12 @@ for row, (path, label) in enumerate([(sys.argv[1], "strength -1"), (sys.argv[2],
     ax[row][0].set_title(f"{label}: cell size by distance from the outline")
     ax[row][0].set_xlabel("distance from the outline (mm)"); ax[row][0].set_ylabel("cell (mm)")
     ax[row][0].legend(loc="lower right", fontsize=8)
-    ax[row][1].scatter([r[0] for r in R], [r[5] for r in R], s=4, alpha=0.25, label="run strut (mm)")
+    on = [r for r in R if abs(r[5] / 0.45 - round(r[5] / 0.45)) < 1e-3]
+    off = [r for r in R if abs(r[5] / 0.45 - round(r[5] / 0.45)) >= 1e-3]
+    ax[row][1].scatter([r[0] for r in on], [r[5] for r in on], s=4, alpha=0.25, label=f"whole line width ({len(on)})")
+    ax[row][1].scatter([r[0] for r in off], [r[5] for r in off], s=6, alpha=0.6, color="tab:orange",
+                       label=f"no whole width above the law, under the quilt row ({len(off)})")
+    ax[row][1].legend(loc="upper right", fontsize=8)
     ax[row][1].axhline(0.45, color="k", lw=0.5)
     for k in range(2, 6): ax[row][1].axhline(0.45 * k, color="0.8", lw=0.5)
     ax[row][1].set_title(f"{label}: strut diameter (grey lines: whole line widths)")
