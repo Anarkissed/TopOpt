@@ -134,11 +134,13 @@ final class LatticeTypeReadinessFromCoreTests: XCTestCase {
         let e = LatticeTypeCatalog.entriesFromCore()
         func why(_ id: String) -> String? { e.first { $0.id == id }?.reason }
         XCTAssertNil(why("octet"))
-        XCTAssertEqual(why("kelvin"), "Strength-checked, but not buildable yet")
+        // ★ RE-PINNED (release (2), E2): core builds and certifies nine types. Kelvin's job runs, so it waits for its app
+        // batch (the type gate); gyroid is built and certified but core's job parser refuses it, so it reads core's refusal.
+        XCTAssertEqual(why("kelvin"), LatticeTypeCatalog.appBatchPending)
         XCTAssertEqual(why("reentrant"), "Not buildable or strength-checked yet")
-        XCTAssertEqual(why("gyroid"), "Not buildable or strength-checked yet")
+        XCTAssertEqual(why("gyroid"), LatticeTypeCatalog.jobRefused)
         XCTAssertEqual(TopOptKit.latticeTypeReadiness("gyroid", generatable: TopOptKit.latticeGeneratableTopologies,
                                                       certifiable: TopOptKit.latticeCertifiableTopologies),
-                       .notEither, "★ #358 at 36f5fdde carries a gyroid id: core's own \"neither\" (was .unknownId at 23e6154e)")
+                       .live, "★ E2: core builds and certifies gyroid (was .notEither at 36f5fdde, .unknownId at 23e6154e)")
     }
 }

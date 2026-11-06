@@ -61,17 +61,21 @@ final class LatticeProxyTests: XCTestCase {
     func testDensityRadiusMapIsAnExactInversePair() {
         let octet = LatticeType.octet
         let r = octet.strutRadiusMM(relativeDensity: 0.48, cellMM: 8)
-        XCTAssertEqual(r / 8, 0.1653, accuracy: 5e-4,
+        // ★ RE-PINNED (release (2), K1): octet's diameter table is the full cell's law now (17 rows, 0.045…0.95); at
+        // ρ = 0.48 it reads r/L 0.1166 (0.1653 on the legs-only table). The old closed form's 0.1 is still not core's.
+        XCTAssertEqual(r / 8, 0.11662, accuracy: 5e-4,
                        "core's measured octet diameter at ρ = 0.48 — the old closed "
-                       + "form said 0.1, and that 1.65x is the divergence itself")
+                       + "form said 0.1")
         // 24 bisections ⇒ ~6e-8 in ρ; the old 1e-9 was a closed form's exactness and
         // is not available from a table, so the bound is the method's own precision.
         XCTAssertEqual(octet.relativeDensity(strutRadiusMM: r, cellMM: 8), 0.48,
                        accuracy: 1e-6, "★ forward then back must return ρ")
-        // ★ AND A TOPOLOGY CORE HAS NO LAW FOR still answers, from the closed form —
-        // the fallback, exercised. Core carries a measured table for octet only.
+        // ★ RE-PINNED (release (2), E2): core carries a measured diameter table for all nine types now, so simple cubic
+        // reads core's table (0.08305) and no longer the closed form's fallback (0.08485). Forward then back holds there too.
+        let rsc = LatticeType.sc.strutRadiusMM(relativeDensity: 0.08305391669273376, cellMM: 8)
         XCTAssertEqual(LatticeType.sc.relativeDensity(strutRadiusMM: 0.8, cellMM: 8),
-                       0.08485, accuracy: 1e-4)
+                       0.08305, accuracy: 1e-4)
+        XCTAssertEqual(rsc, 0.8, accuracy: 1e-5, "★ simple cubic: core's table, forward then back")
     }
 
     // MARK: grading — monotone, invertible, distinct colour

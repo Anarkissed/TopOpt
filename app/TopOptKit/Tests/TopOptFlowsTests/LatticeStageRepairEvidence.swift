@@ -387,11 +387,10 @@ final class LatticeAutoDensityIsDerivedTests: XCTestCase {
         }
         // The old app law, for the record: it under-reports by ~1.4x, which is
         // exactly what turned a printable strut into the badge's 2nd problem.
-        let bounds = TopOptKit.latticeCellBounds(topology: "octet",
-                                                 minExtrudableWidthMM: Self.w)
-        let appDia = oldAppStrutDiameterMM(
-            relativeDensity: TopOptKit.latticeLimits(topology: "octet").rhoMin,
-            cellMM: bounds.printabilityFloorMM)
+        // ★ RE-PINNED (release (2), K1), as LatticeStageRepairEvidence's record: at his card's literal cell and density
+        // (4.93 mm, 5.047 %). On today's core the light-end floor moved to 7.03 mm and the band floor to 4.96 %, where the
+        // old closed form happens to land on one bead (0.452 mm: it tracks the full cell's law at the light end).
+        let appDia = oldAppStrutDiameterMM(relativeDensity: 0.05047, cellMM: 4.93)
         XCTAssertEqual(appDia, 0.32, accuracy: 5e-3)
     }
 

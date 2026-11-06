@@ -1032,7 +1032,9 @@ extension LatticeCurvedOutlineBandProbe {
             "★ the 1.29 mm rung the ceiling test allowed needs \(needCeiling) density; "
             + "if this ever drops below 0.475 the merge argument for this change is "
             + "gone and the ruling should be revisited, not the test relaxed")
-        XCTAssertEqual(lat.printabilityDensityFloor(lineWidthMM: lw, cellMM: atFloor), 0,
+        // ★ RE-PINNED (release (2), K1): his region cell is 8.90 % on the full cell's law (0 on the legs-only one); the
+        // floor test still stops there, under the merge.
+        XCTAssertEqual(lat.printabilityDensityFloor(lineWidthMM: lw, cellMM: atFloor), 0.08900931477546692,
                        accuracy: 1e-6)
     }
 }
@@ -1057,11 +1059,15 @@ extension LatticeCurvedOutlineBandProbe {
         let lat = LatticeType.octet
         let lw = 0.45, lo = 0.05
         // His part: the region cell is free — nothing forced.
-        for cell in [5.156120181083679, 6.0] {
-            XCTAssertEqual(lat.printabilityDensityFloor(lineWidthMM: lw, cellMM: cell), 0,
-                           accuracy: 1e-6,
-                           "★ his region cells must cost nothing, or the fix of "
-                           + "2026-08-28 was measuring the wrong thing")
+        // ★ RE-PINNED (release (2), K1): on octet's full-cell law a 0.45 mm bead at his region cells is 8.90 % / 6.69 %
+        // (the light-end floor cell moved 4.93 → 7.03 mm), so his walls now sit at the print floor before any grading,
+        // just above the 5 % band floor. Still far under the 47.5 % at which fix #1 measured an octet merging into a
+        // sheet with holes, so the merge argument of 2026-08-28 stands; what moved is core's law, not the ladder.
+        for (cell, need) in [(5.156120181083679, 0.08900931477546692), (6.0, 0.06691858172416687)] {
+            let got = lat.printabilityDensityFloor(lineWidthMM: lw, cellMM: cell)
+            XCTAssertEqual(got, need, accuracy: 1e-6,
+                           "★ his region cell \(cell) mm on core's K1 law")
+            XCTAssertLessThan(got, 0.475, "★ well under the merged band at his region cells")
         }
         // A thinner wall's cell is forced above the band with no grading in sight.
         let thin = 3.0

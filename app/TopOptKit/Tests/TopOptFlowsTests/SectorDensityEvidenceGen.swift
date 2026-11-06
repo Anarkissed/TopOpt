@@ -116,11 +116,9 @@ final class SectorDensityEvidenceGen: XCTestCase {
 
         let text = lines.joined(separator: "\n") + "\n"
         print(text)
-        var u = URL(fileURLWithPath: #filePath)
-        // …/Tests/TopOptFlowsTests/<this file> → the worktree root is FIVE up.
-        for _ in 0..<5 { u.deleteLastPathComponent() }
-        let dir = u.appendingPathComponent(
-            "evidence/2026-08-16-per-sector-density-override")
+        // The reviewer, 11-06 09:41Z: tests must not dirty tracked files. Into the repo only with TOPOPT_EVIDENCE_TO_REPO=1
+        // (EvidenceOut); on core 7d6c5dbc this rewrote 2026-08-16's numbers with K1's.
+        let dir = EvidenceOut.dir("evidence/2026-08-16-per-sector-density-override")
         // ★ NO SILENT SKIP. The first cut of this wrote the file only `if
         // fileExists(dir)` and got the depth wrong, so it PASSED while writing
         // nothing — a generator that produces no evidence and reports success is
