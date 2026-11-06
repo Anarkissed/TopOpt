@@ -184,6 +184,8 @@ public struct SelectionsList: View {
     var chosenHeight: Binding<CGFloat?>? = nil
     /// ★ B6 s1b: a section heading the groups (nil: none).
     var lead: AnyView? = nil
+    /// ★ B6 s3a: a section after the groups (Lattice Setup's zones), the list empty or not (nil: none).
+    var tail: AnyView? = nil
     /// ★ B6 s1b (mockup #lat-setup-face-row): the selected look on the group's LINE only, and only while this says so (a
     /// picked face row under it wears its own); nil: on the line and its rows together, as Topology's.
     var lineLook: ((UUID) -> Bool)? = nil
@@ -222,10 +224,10 @@ public struct SelectionsList: View {
 
     /// ★ B6 s1b (design-system §4.3 "Body: sections, each with a 12 pt overline"): a section heading the groups (Lattice
     /// Setup's "FACES N · + New group"), drawn under the header, empty list or not; and a disclosure on each group's line.
-    func latticeSections(lead: AnyView, isOpen: @escaping (UUID) -> Bool, toggleOpen: @escaping (UUID) -> Void,
+    func latticeSections(lead: AnyView, tail: AnyView? = nil, isOpen: @escaping (UUID) -> Bool, toggleOpen: @escaping (UUID) -> Void,
                          lineLook: @escaping (UUID) -> Bool) -> SelectionsList {
         var copy = self
-        copy.lead = lead; copy.isOpen = isOpen; copy.toggleOpen = toggleOpen; copy.lineLook = lineLook
+        copy.lead = lead; copy.tail = tail; copy.isOpen = isOpen; copy.toggleOpen = toggleOpen; copy.lineLook = lineLook
         return copy
     }
 
@@ -258,7 +260,8 @@ public struct SelectionsList: View {
     /// ★ B2 (U10): each shown group line's middle in the list's scroll view (0 = the list's visible top).
     @State private var lineMids: [UUID: CGFloat] = [:]
 
-    private var groups: [SelectionGroup] { usesLatticeList ? project.latticeGroups : project.selection.groups }
+    /// ★ B6 s3a: the Lattice stage's zones are their own section (`tail`), never group lines.
+    private var groups: [SelectionGroup] { usesLatticeList ? project.latticeFaceGroups : project.selection.groups }
     /// ★ B6: the Lattice stage's list (`latticeList()`), else Topology's.
     private var usesLatticeList = false
 
@@ -322,6 +325,7 @@ public struct SelectionsList: View {
                     }
                     }
                 }
+                if let tail { tail }   // ★ B6 s3a
                 if chosenHeight != nil, !groups.isEmpty { grip }
                 if let footer {
                     Divider().overlay(DS.Color.strokeSubtle.color)
