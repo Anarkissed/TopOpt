@@ -604,9 +604,10 @@ public struct WorkspacePlaceholder: View {
     /// ★ B6 (notes 22, 23): the groups THIS stage edits and draws — the Lattice stage's own list there (Structural /
     /// Aesthetic; Flexible stays on Topology's until B9), Topology's everywhere else. `selection` stays Topology's, so
     /// Optimize, the arrows and the scenarios never read a lattice group.
+    /// ★ B6 s2b (23c): with the Topology panel open on Lattice Setup, the stage edits and draws Topology's groups.
     private var stageList: SelectionModel {
-        get { stage == .lattice ? project.latticeList : project.selection }
-        nonmutating set { if stage == .lattice { project.latticeList = newValue } else { project.selection = newValue } }
+        get { stage == .lattice && !latticeTopologyOpen ? project.latticeList : project.selection }
+        nonmutating set { if stage == .lattice && !latticeTopologyOpen { project.latticeList = newValue } else { project.selection = newValue } }
     }
     private var force: ForceModel {
         get { project.force }
@@ -1452,9 +1453,11 @@ public struct WorkspacePlaceholder: View {
             // Load indicator should not be visible on this stage."
             })   // Flexible (PR #362) H58
             AnyView(Group {   // Flexible (PR #362) H58: the body in heap-boxed chunks; the 47 KB body value was copied on the iPad main thread's stack until it overflowed (crash 2026-10-25)
-            if !fullScreenPageUp, visible.groupPrimitives {
+            // ★ B6 s2b (23c): on Lattice Setup with its Topology panel open, Topology's overlays too (its picker, its pills)
+            if !fullScreenPageUp, visible.groupPrimitives || (latticeSetupUp && latticeTopologyOpen) {
                 loadOverlays.coordinateSpace(name: Self.loadOverlaySpace).ignoresSafeArea()   // D3/D4/D5: load pills (★ B3: + the aim handle's drag space)
             }
+            if !fullScreenPageUp, latticeSetupUp, !latticeTopologyOpen { latticePickerOverlay }   // ★ B6 s2b (24, 27)
             if !fullScreenPageUp {
                 bottomBar
                     // ★ REFUSE AN IMPLAUSIBLE READING (see `BottomBarMeasurement`).
@@ -2518,7 +2521,8 @@ public struct WorkspacePlaceholder: View {
         // ★ THE LATTICE STAGE ROUTES THE SAME WAY (task 2026-08-14 §3a): it is the
         // same Selections library, and L23/M2 still holds — nothing is removed or
         // stolen from a group on a lattice surface; removal lives on the TO page.
-        if stage == .lattice {
+        // ★ B6 s2b (note 23c): with the Topology panel open, the tap goes on to Topology's groups (below), as on Topology
+        if stage == .lattice, !latticeTopologyOpen {
             let loop = project.surfaceLoopRespectingRegions(
                 FaceTopology.loop(fromFace: faceID, in: mesh), from: faceID)
             if let gid = project.latticeStageTap(face: faceID, loop: loop) {   // ★ B6: the lattice list (LatticeList)
@@ -10737,6 +10741,7 @@ public struct WorkspacePlaceholder: View {
 
     /// ★ B6 s1b (§4.4, mockup "12–31 mm deep"): a lattice group's one value — how deep its faces lattice.
     private func latticeGroupValue(_ g: SelectionGroup) -> String {
+        if project.lattice.groupRoles[g.id] == nil { return LatticeSetupCopy.pending }   // §4.4 "pending": no role yet
         let depths = project.latticeSelectableRefs(g).filter { project.latticeSelectableRole($0, in: g.id) != nil }
             .map { project.latticeSlabDepthMM($0, in: g.id) }
         guard let lo = depths.min(), let hi = depths.max() else { return "\u{2014}" }
@@ -10766,7 +10771,9 @@ public struct WorkspacePlaceholder: View {
         let picked = latticeFacePick == ref.key
         let depth = project.latticeSlabDepthMM(ref, in: g.id)
         let mm = SelectionsSummary.format((depth * 10).rounded() / 10, decimals: 1) + " mm"
-        let value = role == nil ? LatticeSetupCopy.off : role == .exclude ? "\(LatticeSetupCopy.noLattice) \u{00B7} \(mm)" : mm
+        // (a group with no role yet: its faces say nothing yet — "Off" is a face declared out)
+        let value = role == nil ? (project.lattice.groupRoles[g.id] == nil ? "\u{2014}" : LatticeSetupCopy.off)
+            : role == .exclude ? "\(LatticeSetupCopy.noLattice) \u{00B7} \(mm)" : mm
         // ★ THE ONE HONEST DIFFERENCE (the interrupt's §3): a region the run freezes without latticing says so
         let frozen = !project.latticeReachesTheRun(ref) && role != nil
         let removable: Bool = { if case .primitive = ref { return false }; return true }()
@@ -10810,18 +10817,126 @@ public struct WorkspacePlaceholder: View {
     /// ★ B6 s1b (mockup "Role  [Lattice │ No lattice]"): the group's role — every face without its own follows it. The lock
     /// stays the group's (it was on today's tall row).
     private func latticeRoleRow(_ g: SelectionGroup) -> some View {
-        HStack(spacing: DS.Space.s) {
-            Text(LatticeSetupCopy.role).font(.system(size: 13.5)).foregroundStyle(DS.Color.textPrimary.color)
-            Spacer(minLength: DS.Space.s)
-            SegmentedGlass([.init(LatticeGroupRole?.some(.include), LatticeSetupCopy.lattice),
-                            .init(LatticeGroupRole?.some(.exclude), LatticeSetupCopy.noLattice)],
-                           selection: Binding(get: { project.lattice.groupRoles[g.id] },
-                                              set: { if let r = $0 { setLatticeGroupRole(r, g) } }),
-                           small: true)
-            groupLockToggle(g)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: DS.Space.s) {
+                Text(LatticeSetupCopy.role).font(.system(size: 13.5)).foregroundStyle(DS.Color.textPrimary.color)
+                Spacer(minLength: DS.Space.s)
+                // ★ B6 s2b (notes 24, 27): Protect skin is the third role
+                SegmentedGlass([.init(LatticePickedRole?.some(.lattice), LatticeSetupCopy.lattice),
+                                .init(LatticePickedRole?.some(.noLattice), LatticeSetupCopy.noLattice),
+                                .init(LatticePickedRole?.some(.skin), LatticeSetupCopy.protectSkin)],
+                               selection: Binding(get: { latticePickedRole(g) }, set: { if let r = $0 { setLatticePickedRole(r, g) } }),
+                               small: true)
+                groupLockToggle(g)
+            }
+            .frame(minHeight: 44)
+            if project.lattice.skinGroups.contains(g.id) {
+                // ★ his 11-03 rule: until the engine has a per-region skin (E2.4) the run keeps it solid — one plain line
+                Text(LatticeSetupCopy.skinWaits).font(.system(size: 12.5)).foregroundStyle(DS.Color.warning.color)
+                    .padding(.bottom, 8)
+                    .background(DSParts.publish("latticeSkinWaits-\(g.id.uuidString)"))
+            }
         }
-        .padding(.leading, 14).padding(.trailing, 10).frame(minHeight: 44)
+        .padding(.leading, 14).padding(.trailing, 10)
         .background(DSParts.publish("latticeRoleRow-\(g.id.uuidString)"))
+    }
+
+    /// ★ B6 s2b: the three roles a lattice group takes (notes 24, 27).
+    enum LatticePickedRole: Hashable { case lattice, noLattice, skin }
+
+    private func latticePickedRole(_ g: SelectionGroup) -> LatticePickedRole? {
+        if project.lattice.skinGroups.contains(g.id) { return .skin }
+        switch project.lattice.groupRoles[g.id] {
+        case .include?: return .lattice
+        case .exclude?: return .noLattice
+        case nil: return nil
+        }
+    }
+
+    /// Protect skin is stored, and runs as No lattice until the engine has a per-region skin (E2.4).
+    private func setLatticePickedRole(_ r: LatticePickedRole, _ g: SelectionGroup) {
+        if r == .skin { project.lattice.skinGroups.insert(g.id) } else { project.lattice.skinGroups.remove(g.id) }
+        setLatticeGroupRole(r == .lattice ? .include : .exclude, g)
+    }
+
+    static let latticePickerHalfWidth: CGFloat = 190
+
+    /// ★ B6 s2b (notes 24, 27; §4.16): a lattice group a tap just started, with no role yet — its picker at the face
+    /// (Topology's pending chip, on the Lattice list), right of the left column so it never sits under it.
+    private var latticePickerOverlay: some View {
+        GeometryReader { geo in
+            let W = geo.size.width, H = geo.size.height
+            if force.phase == .edit, let g = stageList.activeGroup, project.lattice.groupRoles[g.id] == nil {
+                let pt = projection != nil ? groupScreen(g) : nil
+                let minX = PageChrome.edge + PageChrome.panelWidth + PageChrome.gap + Self.latticePickerHalfWidth
+                latticeRolePicker(g)
+                    .position(x: Swift.min(Swift.max(pt?.x ?? W / 2, minX), Swift.max(minX, W - Self.latticePickerHalfWidth - PageChrome.edge)),
+                              y: pt.map { clamp($0.y - 70, H) } ?? H / 2)
+            }
+        }
+        .ignoresSafeArea()
+    }
+
+    /// ★ B6 s2b (notes 24, 27; §4.16, mockup #lat-setup-face-pick): the role picker at a lattice group a tap just started — the
+    /// join into the last group set ("+ Add to Group 1 as lattice") when there is one, then Lattice · No lattice · Protect
+    /// skin and ✕ (the group stays, roleless, until a role is chosen on its Role row).
+    private func latticeRolePicker(_ g: SelectionGroup) -> some View {
+        VStack(spacing: DS.Space.xs) {
+            if let target = stageList.groups.last(where: { $0.id != g.id && project.lattice.groupRoles[$0.id] != nil }) {
+                JoinButton(group: target, note: LatticeSetupCopy.joinNote, idPrefix: "lattice") { joinLatticeGroup(g, into: target) }
+                    .frame(width: 2 * Self.latticePickerHalfWidth - 20)
+            }
+            HStack(spacing: 2) {
+                latticePickerButton("lattice", "square.grid.3x3.fill", LatticeSetupCopy.lattice, StateGlyph.latticeTint) {
+                    setLatticePickedRole(.lattice, g)
+                }
+                latticePickerButton("noLattice", "square.grid.3x3", LatticeSetupCopy.noLattice, DS.Color.textSecondary) {
+                    setLatticePickedRole(.noLattice, g)
+                }
+                latticePickerButton("skin", "shield.lefthalf.filled", LatticeSetupCopy.protectSkin, FaceChip.protectTint) {
+                    setLatticePickedRole(.skin, g)
+                }
+                Button { leaveGroupEditing() } label: {
+                    Image(systemName: "xmark").font(.system(size: 13, weight: .bold)).foregroundStyle(DS.Color.textSecondary.color)
+                        .frame(width: DSParts.target, height: DSParts.target).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close")
+                .accessibilityIdentifier("latticeRolePickerClose")
+            }
+            .padding(.horizontal, 6)
+            .background(Capsule().fill(DS.Surface.bar.color).overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+            .background(.ultraThinMaterial, in: Capsule())
+        }
+        .fixedSize()
+        .background(DSParts.publish("latticeRolePicker"))
+    }
+
+    private func latticePickerButton(_ key: String, _ glyph: String, _ title: String, _ tint: RGBA,
+                                     action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: glyph).font(.system(size: 12, weight: .semibold))
+                Text(title).font(.system(size: 13.5, weight: .semibold)).lineLimit(1)
+            }
+            .foregroundStyle(tint.color)
+            .padding(.horizontal, 10).frame(minHeight: DSParts.target).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(DSParts.publish("latticeRole-\(key)"))
+        .accessibilityIdentifier("latticeRole-\(key)")
+    }
+
+    /// The join: the new group's faces go to `target` (its role and depth), and the new group goes.
+    private func joinLatticeGroup(_ g: SelectionGroup, into target: SelectionGroup) {
+        var l = stageList
+        l.addFaces(g.faces, to: target.id)
+        if !g.regionIDs.isEmpty { l.addRegions(g.regionIDs, to: target.id) }
+        l.remove(g.id)
+        l.setActive(target.id)
+        stageList = l
+        project.syncForceGroups()
+        refreshLatticeFaceCards()
     }
 
     /// The group's role, for every face of it: a face's own Lattice / No lattice gives way to it (its Off stays).
@@ -12120,7 +12235,9 @@ public struct WorkspacePlaceholder: View {
                     let placed = keepOutResolved(proj)
                     if stage == .topology { ForEach(Array(severalRolesBadges(proj).enumerated()), id: \.offset) { _, b in SeveralRolesBadge(roles: b.roles).position(b.at).allowsHitTesting(false) } }   // Flexible (PR #362) H55i: several roles on one face (owner 2026-10-25) — every role a face has, drawn
                     // ★ his iPad 10-27: only a group that still NEEDS a role — a Keep clear / Protect group picked again is done
-                    if let g = activeGroup, force.needsRole(g.id, latticeRoleGroups: latticeRoleGroupIDs) {
+                    // ★ B6 s2b (23c): on the Lattice stage only while its Topology panel is open (taps go to Topology then)
+                    if let g = activeGroup, force.needsRole(g.id, latticeRoleGroups: latticeRoleGroupIDs),
+                       stage != .lattice || latticeTopologyOpen {
                         let pt = groupScreen(g)
                         // Keep-out pass owns placement (handoff 2026-07-27): the action bar is
                         // nudged clear of the weight pills. Fallback = the old centroid-above anchor.
@@ -12129,7 +12246,7 @@ public struct WorkspacePlaceholder: View {
                         // ★ B3: the chip at the face also offers the most recent group (filled) — the face
                         // joins it — above today's Anchor | Load (a new group).
                         VStack(spacing: DS.Space.xs) {
-                            if stage == .topology, let target = project.joinTarget(excluding: g.id) {
+                            if stage == .topology || latticeTopologyOpen, let target = project.joinTarget(excluding: g.id) {
                                 JoinButton(group: target, note: TopologySelectionsCopy.joinNote, idPrefix: "topology",
                                            label: TopologySelectionsCopy.joinLabel(target.name, role: topologyRoleWord(target.id))) {
                                     if let line = project.joinPending(g.id, into: target.id) { model.toast = line }   // Flexible (PR #362) H55h: several roles on one face (owner 2026-10-25) — the join's refusal line
@@ -12138,6 +12255,7 @@ public struct WorkspacePlaceholder: View {
                             }
                             anchorLoadChip(g)
                         }
+                            .background(DSParts.publish("topologyPendingChip"))
                             .position(placed["load.pendingchip"]?.center ?? fallback)
                             .withdrawn(placed["load.pendingchip"]?.hidden == true)   // ★ never over the Selections panel
                     }
@@ -12404,7 +12522,7 @@ public struct WorkspacePlaceholder: View {
 
     private var hint: String {
         if force.phase == .setup { return "Tap the face that points at the floor · drag to orbit" }
-        if latticeSetupUp { return LatticeSetupCopy.hint }   // ★ B6 s1: taps make lattice groups
+        if latticeSetupUp { return latticeTopologyOpen ? LatticeSetupCopy.topologyHint : LatticeSetupCopy.hint }   // ★ B6: where taps go
         if let g = activeGroup {
             let k = force.kind(for: g.id)
             if force.needsRole(g.id, latticeRoleGroups: latticeRoleGroupIDs) { return "Tap more faces to grow the selection, then choose Anchor or Load" }
