@@ -73,24 +73,27 @@ int main() {
           "strut diameter increases with rho");
     CHECK(octet_strut_diameter_mm(rho_lo, 4.0) < octet_strut_diameter_mm(rho_hi, 4.0),
           "band endpoints ordered in diameter");
-    // Golden: verbatim B3 vpc48 rows (evidence b3_printability.csv).
-    CHECK(std::fabs(octet_strut_diameter_mm(0.40, 4.0) - 1.1815) < 1e-4,
-          "golden d(0.40, cell4) = 1.1815 mm");
+    // Golden: verbatim, octet's full-cell law (ruling 2026-11-02 (c); octet_law.csv).
+    // It was 1.1815 on the legs-only B3 table (evidence b3_printability.csv).
+    CHECK(std::fabs(octet_strut_diameter_mm(0.40, 4.0) - 0.8286) < 1e-4,
+          "golden d(0.40, cell4) = 0.8286 mm");
     bool threw = false;
     try { octet_strut_diameter_mm(0.4, 0.0); } catch (const std::exception&) { threw = true; }
     CHECK(threw, "octet_strut_diameter_mm rejects cell <= 0");
   }
 
   // A thick block that comfortably holds the floor; a graded demand along z.
-  // 30 mm cube at h=1 -> interior members far exceed N* * printability floor.
-  VoxelGrid thick = solid_block(30, 30, 30, 1.0);
+  // 40 mm cube at h=1 -> interior members exceed N* * printability floor. (30 mm until
+  // ruling 2026-11-02 (c): on octet's full-cell law the floor is 6.22 mm at a 0.4 mm bead,
+  // so N* = 5 cells need 31.1 mm of member, more than a 30 mm cube holds.)
+  VoxelGrid thick = solid_block(40, 40, 40, 1.0);
   const std::size_t N = thick.voxel_count();
   std::vector<double> dens = density_of(thick);
   std::vector<double> demand(N, 0.0);
   for (int k = 0; k < thick.nz; ++k)
     for (int j = 0; j < thick.ny; ++j)
       for (int i = 0; i < thick.nx; ++i)
-        demand[thick.index(i, j, k)] = static_cast<double>(k);  // 0..29
+        demand[thick.index(i, j, k)] = static_cast<double>(k);  // 0..39
 
   GradingLawParams p;
   p.topology = topo;
@@ -536,24 +539,28 @@ int main() {
   // nothing about it can be latticed by any legal cell: it is exactly the maintainer's
   // back wall. Sweeping the wall's demand against the body's then walks the threshold.
   {
-    // 34 x 30 x 30 envelope: a 30 mm cube body (x 0..29) plus a 4-voxel-thick wall
-    // (x 30..33) spanning the full y,z face. The wall's inscribed thickness is ~4 mm.
+    // 44 x 40 x 40 envelope: a 40 mm cube body (x 0..39) plus a 4-voxel-thick wall
+    // (x 40..43) spanning the full y,z face. The wall's inscribed thickness is ~4 mm.
+    // (A 30 mm body until ruling 2026-11-02 (c): octet's full-cell floor is 6.25 mm at
+    // a 0.4 mm bead, N* x it = 31.2 mm, so no voxel of a 30 mm body reads thick enough
+    // to grade and the junction band below would vanish.)
     const int pad = 3;
+    const int kB = 40;  // the body's side (mm); 30 until ruling 2026-11-02 (c)
     VoxelGrid g;
-    g.nx = 34 + 2 * pad; g.ny = 30 + 2 * pad; g.nz = 30 + 2 * pad; g.spacing = 1.0;
+    g.nx = (kB + 4) + 2 * pad; g.ny = kB + 2 * pad; g.nz = kB + 2 * pad; g.spacing = 1.0;
     g.origin = Vec3{0, 0, 0};
     g.tags.assign(static_cast<std::size_t>(g.nx) * g.ny * g.nz, VoxelTag::Empty);
-    for (int k = 0; k < 30; ++k)
-      for (int j = 0; j < 30; ++j)
-        for (int i = 0; i < 34; ++i)
+    for (int k = 0; k < kB; ++k)
+      for (int j = 0; j < kB; ++j)
+        for (int i = 0; i < kB + 4; ++i)
           g.set_tag(i + pad, j + pad, k + pad, VoxelTag::Interior);
     const std::size_t Ng = g.voxel_count();
     std::vector<double> gd = density_of(g);
-    // The REGION is the wall alone (x 30..33 in block coordinates).
+    // The REGION is the wall alone (x 40..43 in block coordinates).
     std::vector<char> wall(Ng, 0);
-    for (int k = 0; k < 30; ++k)
-      for (int j = 0; j < 30; ++j)
-        for (int i = 30; i < 34; ++i)
+    for (int k = 0; k < kB; ++k)
+      for (int j = 0; j < kB; ++j)
+        for (int i = kB; i < kB + 4; ++i)
           wall[g.index(i + pad, j + pad, k + pad)] = 1;
 
     // Demand: the body at 100, the wall at `w`. The measured region stress fraction
@@ -561,11 +568,11 @@ int main() {
     // rather than somewhere convenient.
     auto demand_with_wall = [&](double w) {
       std::vector<double> d(Ng, 0.0);
-      for (int k = 0; k < 30; ++k)
-        for (int j = 0; j < 30; ++j)
-          for (int i = 0; i < 34; ++i) {
+      for (int k = 0; k < kB; ++k)
+        for (int j = 0; j < kB; ++j)
+          for (int i = 0; i < kB + 4; ++i) {
             const std::size_t e = g.index(i + pad, j + pad, k + pad);
-            d[e] = (i >= 30) ? w : 100.0;
+            d[e] = (i >= kB) ? w : 100.0;
           }
       return d;
     };
@@ -575,15 +582,15 @@ int main() {
     wp.min_extrudable_width_mm = 0.4;
     // PINNED for the same reason as `p` above (S2): 2.0 mm used to be raised to
     // exactly this cell, and every exposure number quoted in the comments below —
-    // 1,704 of 30,600 voxels, 5.57 % — was measured at it. Reading it from core keeps
+    // 3,980 of 70,400 voxels, 5.65 % — was measured at it. Reading it from core keeps
     // the cap tests measuring the CAP rather than the cell law.
     wp.target_cell_size_mm = lattice_cell_printability_floor_mm(topo, 0.4);
     wp.demand_exponent = 1.0;
     // THE AGGREGATE CAP IS LIFTED FOR THE THRESHOLD TESTS BELOW, deliberately and
-    // with the number stated. This fixture is a 30 mm block with a 4 mm wall bolted
-    // to it, and that wall is 1,704 of the block's 30,600 printed voxels — 5.57 %,
-    // well over the 3.0 % production cap. That ratio is an artefact of keeping the
-    // fixture small, not a property of any real part (the maintainer's own wall is
+    // with the number stated. This fixture is a 40 mm block with a 4 mm wall bolted
+    // to it, and that wall puts 3,980 of the block's 70,400 printed voxels under the
+    // floor — 5.65 %, well over the 3.0 % production cap. That ratio is an artefact of
+    // keeping the fixture small, not a property of any real part (the maintainer's own wall is
     // 0.930 % of his). Left at the default, the cap would refuse retention here and
     // every threshold assertion below would pass for the WRONG REASON — they would
     // be measuring the cap, not the stress predicate. So it is lifted here and
@@ -597,7 +604,7 @@ int main() {
       CHECK(!off.subfloor_retention_armed,
             "S1: sub-floor retention is DISARMED by default");
       // Not the WHOLE wall is sub-floor: the EDT thickness bleeds where the wall
-      // meets the 30 mm body, so a band along the junction reads thick enough to
+      // meets the 40 mm body, so a band along the junction reads thick enough to
       // grade. That is physical, and it makes the fixture a better test — the
       // retained set is a strict SUBSET of the region, which is the real shape.
       CHECK(off.subfloor_candidate_voxels > 0,
@@ -847,7 +854,7 @@ int main() {
       CHECK(static_cast<double>(over.subfloor_would_retain_voxels) >
                 over.subfloor_aggregate_cap_fraction *
                     static_cast<double>(over.part_printed_voxels),
-            "this fixture really is over the production cap (5.57% of the block)");
+            "this fixture really is over the production cap (5.65% of the block)");
       CHECK(over.subfloor_over_budget, "over the cap is REPORTED, not silent");
       CHECK(over.subfloor_retained_voxels == 0,
             "over the cap retains NOTHING — never 'as much as fits', because "
@@ -898,19 +905,19 @@ int main() {
       // driven to the part's peak.
       std::vector<int> ids(Ng, 0);
       std::vector<char> both(Ng, 0);
-      for (int k = 0; k < 30; ++k)
-        for (int j = 0; j < 30; ++j)
-          for (int i = 30; i < 34; ++i) {
+      for (int k = 0; k < kB; ++k)
+        for (int j = 0; j < kB; ++j)
+          for (int i = kB; i < kB + 4; ++i) {
             const std::size_t e = g.index(i + pad, j + pad, k + pad);
             both[e] = 1;
-            ids[e] = (k < 15) ? 1 : 2;      // 1 = quiet half, 2 = loud half
+            ids[e] = (k < kB / 2) ? 1 : 2;      // 1 = quiet half, 2 = loud half
           }
       std::vector<double> d(Ng, 0.0);
-      for (int k = 0; k < 30; ++k)
-        for (int j = 0; j < 30; ++j)
-          for (int i = 0; i < 34; ++i) {
+      for (int k = 0; k < kB; ++k)
+        for (int j = 0; j < kB; ++j)
+          for (int i = 0; i < kB + 4; ++i) {
             const std::size_t e = g.index(i + pad, j + pad, k + pad);
-            d[e] = (i < 30) ? 100.0 : (k < 15 ? 1.0 : 100.0);
+            d[e] = (i < kB) ? 100.0 : (k < kB / 2 ? 1.0 : 100.0);
           }
 
       GradingLawParams uni = wp;
@@ -967,11 +974,17 @@ int main() {
     // The number that was quoted, and the number that is true — both derived here
     // from core's own constants, so a change to the band or the table moves both.
     const double quoted_floor_mm = n_star * (w / phi_lo);
-    const double real_floor_mm = n_star * (w / phi_hi);
-    CHECK(std::fabs(quoted_floor_mm - 23.0131) < 1e-3,
-          "the QUOTED requirement reproduces: N* x floor(rho_min) = 23.0131 mm");
-    CHECK(std::fabs(real_floor_mm - 5.4748) < 1e-3,
-          "the REAL requirement is N* x floor(rho_max) = 5.4748 mm");
+    // core's own finest printable cell (w / phi_hi nudged up by ulps until its strut
+    // provably prints): the frontier is N* of THAT cell, which (c) below sits on exactly.
+    const double real_floor_mm = n_star * lattice_min_printable_cell_mm(topo, w, 0.0);
+    CHECK(std::fabs(real_floor_mm - n_star * (w / phi_hi)) < 1e-12,
+          "and it is N* x w / phi(rho_max) to rounding");
+    // Ruling 2026-11-02 (c): on octet's full-cell law these are 32.7909 and 5.2124 mm
+    // (23.0131 and 5.4748 on the legs-only law, which was the "23 mm" quoted).
+    CHECK(std::fabs(quoted_floor_mm - 32.7909) < 1e-3,
+          "the QUOTED requirement reproduces: N* x floor(rho_min) = 32.7909 mm");
+    CHECK(std::fabs(real_floor_mm - 5.2124) < 1e-3,
+          "the REAL requirement is N* x floor(rho_max) = 5.2124 mm");
     CHECK(real_floor_mm < quoted_floor_mm,
           "deriving per member is a WIDENING — it never demands a thicker member");
 
@@ -1004,12 +1017,13 @@ int main() {
       CHECK(d.lightest_cell_size_mm >= d.densest_cell_size_mm - 1e-12,
             "and the coarser of the two");
       // 8 mm at N* = 5 gives a 1.6 mm cell; the lightest strut that prints there
-      // needs phi >= 0.42/1.6 = 0.2625, which the measured table reaches near
-      // rho 0.32 — well inside the band, i.e. a genuinely LIGHT lattice.
+      // needs phi >= 0.42/1.6 = 0.2625, which octet's full-cell table reaches near
+      // rho 0.57 (0.32 on the legs-only table before ruling 2026-11-02 (c): the same
+      // strut, twice as many) — inside the band, and not a near-solid lattice.
       CHECK(std::fabs(d.lightest_cell_size_mm - 1.6) < 1e-12,
             "8 mm / 5 = a 1.6 mm cell");
-      CHECK(d.lightest_relative_density < 0.40,
-            "and it certifies at under rho 0.40 — not a near-solid lattice");
+      CHECK(d.lightest_relative_density < 0.60,
+            "and it certifies at under rho 0.60 — not a near-solid lattice");
     }
 
     // (b) THE MAINTAINER'S BACK WALL: 4 mm. Below the frontier, so the honest
@@ -1021,8 +1035,8 @@ int main() {
             "a 4 mm wall does NOT hold a certified lattice at a 0.42 mm nozzle");
       CHECK(d.min_member_width_mm > 4.0,
             "and the report says so by naming a floor above the measured width");
-      CHECK(std::fabs(d.min_member_width_mm - 5.4748) < 1e-3,
-            "the thinnest wall that WOULD work is 5.4748 mm — the actionable number");
+      CHECK(std::fabs(d.min_member_width_mm - 5.2124) < 1e-3,
+            "the thinnest wall that WOULD work is 5.2124 mm — the actionable number");
       CHECK(d.max_homogenizable_cell_mm < d.min_printable_cell_mm,
             "the two bounds CROSS, which is the arithmetic that rules it out");
       CHECK(d.densest_cell_size_mm == 0.0 && d.lightest_cell_size_mm == 0.0,
@@ -1118,23 +1132,26 @@ int main() {
   //
   // THE DEFECT THESE ASSERT AGAINST, stated as arithmetic so the numbers are
   // checkable by hand at a 0.42 mm bead (the maintainer's declared bead):
-  //     phi(rho_min) = 0.091252  =>  floor cell = 0.42/phi = 4.6026 mm
-  //     phi(rho_max) = 0.383575  =>  finest printable cell = 0.42/phi = 1.0950 mm
-  //     N* = 5  =>  4.6026 mm needs 23.0131 mm of member; 1.0950 mm needs 5.4748 mm
-  // A 4 mm wall holds NEITHER at N*, but it holds 3.65 cells at the finest printable
-  // cell — buildable, out of regime — and today AUTO hands it a 4.6026 mm cell and
+  //     phi(rho_min) = 0.064042  =>  floor cell = 0.42/phi = 6.5582 mm
+  //     phi(rho_max) = 0.402883  =>  finest printable cell = 0.42/phi = 1.0425 mm
+  //     N* = 5  =>  6.5582 mm needs 32.7909 mm of member; 1.0425 mm needs 5.2124 mm
+  // (octet's full-cell law, ruling 2026-11-02 (c); 4.6026 / 1.0950 mm on the legs-only one)
+  // A 4 mm wall holds NEITHER at N*, but it holds 3.84 cells at the finest printable
+  // cell — buildable, out of regime — and today AUTO hands it a 6.5582 mm cell and
   // lattices nothing.
   // ==========================================================================
   {
     const double w_bead = 0.42;
     const double floor_cell =
-        lattice_cell_printability_floor_mm(topo, w_bead);            // 4.6026
-    const double finest_cell =
-        w_bead / octet_strut_diameter_mm(rho_hi, 1.0);               // 1.0950
-    CHECK(std::fabs(floor_cell - 4.6026) < 1e-3,
-          "FIT0: the rho_min floor is 4.6026 mm at a 0.42 mm bead");
-    CHECK(std::fabs(finest_cell - 1.0950) < 1e-3,
-          "FIT0: the finest printable cell is 1.0950 mm at the same bead");
+        lattice_cell_printability_floor_mm(topo, w_bead);            // 6.5582
+    // core's own number: w / phi(rho_hi), nudged up by ulps until its strut provably
+    // prints (lattice_min_printable_cell_mm). The bare quotient builds a strut 1e-16 mm
+    // under the bead on octet's full-cell law, and FIT derives exactly this cell.
+    const double finest_cell = lattice_min_printable_cell_mm(topo, w_bead, 0.0);
+    CHECK(std::fabs(floor_cell - 6.5582) < 1e-3,
+          "FIT0: the rho_min floor is 6.5582 mm at a 0.42 mm bead");
+    CHECK(std::fabs(finest_cell - 1.0425) < 1e-3,
+          "FIT0: the finest printable cell is 1.0425 mm at the same bead");
     CHECK(finest_cell ==
               lattice_derive_cell_for_member(topo, 4.0, w_bead).min_printable_cell_mm,
           "FIT0: and it is core's own number, not a second derivation here");
@@ -1163,12 +1180,12 @@ int main() {
     au.cell_mode = CellSizeMode::Auto;
     const GradedField A = grade_lattice(wall, wd, wdem, nullptr, au);
     CHECK(std::fabs(A.cell_size_mm - floor_cell) < 1e-9,
-          "FIT1: AUTO plans the 4.6026 mm rho_min floor in a 4 mm wall");
+          "FIT1: AUTO plans the 6.5582 mm rho_min floor in a 4 mm wall");
     CHECK(A.latticed_voxels == 0,
-          "FIT1: and lattices NOTHING there — 4 mm / 4.6026 mm = 0.87 cells");
+          "FIT1: and lattices NOTHING there — 4 mm / 6.5582 mm = 0.61 cells");
     CHECK(A.region_voxels > 0, "FIT1 is not vacuous: there were candidates");
 
-    // ── FIT2 — FIT derives max(extent/N*, finest printable) = 1.0950 mm here and
+    // ── FIT2 — FIT derives max(extent/N*, finest printable) = 1.0425 mm here and
     // DOES lattice. This is the "after" half of R3 and it cannot pass on unfixed
     // code, where the mode does not exist.
     const double want = std::max(4.0 / n_star, finest_cell);
@@ -1182,7 +1199,7 @@ int main() {
     fi.fit_cell_size_mm = &wfit;
     const GradedField Fi = grade_lattice(wall, wd, wdem, nullptr, fi);
     CHECK(std::fabs(Fi.cell_size_mm - want) < 1e-9,
-          "FIT2: FIT plans the 1.0950 mm derived cell, not the 4.6026 mm floor");
+          "FIT2: FIT plans the 1.0425 mm derived cell, not the 6.5582 mm floor");
     CHECK(Fi.latticed_voxels > 0, "FIT2: and it lattices the 4 mm wall");
     CHECK(Fi.latticed_voxels > A.latticed_voxels,
           "FIT2: strictly more than AUTO, which is the point of the mode");
@@ -1203,7 +1220,7 @@ int main() {
     CHECK(all_band, "FIT2: every emitted density is inside the certifiable band");
     CHECK(all_percolate, "FIT2: every emitted cell percolates in its own member");
     CHECK(Fi.fit_out_of_regime_voxels == Fi.latticed_voxels,
-          "FIT2: a 4 mm wall is BELOW the accuracy floor at 1.0950 mm (3.65 cells), "
+          "FIT2: a 4 mm wall is BELOW the accuracy floor at 1.0425 mm (3.84 cells), "
           "and every latticed voxel is counted as out of regime rather than hidden");
     CHECK(Fi.density_raised_for_print_voxels > 0,
           "FIT2: the density was RAISED to print at the finer cell — the joint "
@@ -1237,7 +1254,7 @@ int main() {
     // most one level (2:1 balance — what makes the levels meet at shared nodes).
     {
       // A 4 mm-thick slab whose two halves are declared with DIFFERENT cells: the
-      // thin half wants 1.0950 mm, the thick half is declared as a 12 mm region and
+      // thin half wants 1.0425 mm, the thick half is declared as a 12 mm region and
       // wants 12/5 = 2.4 mm.
       std::vector<double> two = wfit;
       std::size_t coarse_n = 0;
@@ -1315,7 +1332,7 @@ int main() {
 
     // ══ S2 — THE PRINTABILITY FLOOR IS A BOUND AGAIN, NOT AN ANSWER ═══════════
     // On UNFIXED code these three fail: a Fixed target of 1.2 mm is raised to
-    // 4.6026 mm, so S2a reads 4.6026 and S2b lattices nothing.
+    // 6.5582 mm, so S2a reads 6.5582 and S2b lattices nothing.
     {
       // S2a — the hand-set cell SURVIVES.
       GradingLawParams s2 = base;
@@ -1323,14 +1340,14 @@ int main() {
       s2.target_cell_size_mm = 1.2;
       const GradedField S2 = grade_lattice(wall, wd, wdem, nullptr, s2);
       CHECK(std::fabs(S2.cell_size_mm - 1.2) < 1e-12,
-            "S2a: a hand-set 1.2 mm cell is NOT raised to the 4.6026 mm rho_min "
+            "S2a: a hand-set 1.2 mm cell is NOT raised to the 6.5582 mm rho_min "
             "floor");
       CHECK(!S2.cell_size_floored, "S2a: and it is not reported as floored");
       CHECK(std::fabs(S2.min_printable_cell_mm - finest_cell) < 1e-12,
             "S2a: the floor that binds is the one at the band's TOP");
 
       // S2b — on a member thick enough to hold it, that cell now LATTICES. An 8 mm
-      // wall spans 6.67 cells at 1.2 mm (over N*) and 1.74 at 4.6026 mm (under it),
+      // wall spans 6.67 cells at 1.2 mm (over N*) and 1.22 at 6.5582 mm (under it),
       // so this is exactly the material the override was throwing away.
       const VoxelGrid w8 = solid_block(40, 40, 16, 0.5);
       const std::vector<double> d8 = density_of(w8);
@@ -1342,8 +1359,8 @@ int main() {
       s2auto.cell_mode = CellSizeMode::Auto;
       const GradedField A8 = grade_lattice(w8, d8, dem8, nullptr, s2auto);
       CHECK(A8.latticed_voxels == 0,
-            "S2b control: the SAME wall under AUTO's 4.6026 mm cell lattices "
-            "nothing — 1.74 cells across");
+            "S2b control: the SAME wall under AUTO's 6.5582 mm cell lattices "
+            "nothing — 1.22 cells across");
       bool print8 = true;
       for (std::size_t e = 0; e < w8.voxel_count(); ++e)
         if (L8.posture.mask[e] &&
@@ -1359,9 +1376,9 @@ int main() {
       // move a run that was not being overridden (blocked-stop 4).
       GradingLawParams s2c = base;
       s2c.cell_mode = CellSizeMode::Fixed;
-      s2c.target_cell_size_mm = 6.0;   // > 4.6026
+      s2c.target_cell_size_mm = 7.0;   // > 6.5582 (6.0 > 4.6026 until ruling 2026-11-02 (c))
       const GradedField C = grade_lattice(w8, d8, dem8, nullptr, s2c);
-      CHECK(std::fabs(C.cell_size_mm - 6.0) < 1e-12,
+      CHECK(std::fabs(C.cell_size_mm - 7.0) < 1e-12,
             "S2c: a target above the rho_min floor is untouched");
       CHECK(C.density_raised_for_print_voxels == 0,
             "S2c: and no voxel's density is raised — the S2 path is inert here");
@@ -1391,13 +1408,15 @@ int main() {
 
     // A declared minimum UNDER the frontier climbs the plan's own dyadic ladder to
     // the first rung that prints — it is NOT raised to the light floor.
-    const double finest = cell_plan_finest_printable_cell_mm(topo, 1.173, 9.384, w);
+    // 1.116 mm sits just under the frontier on octet's full-cell law (1.116949 mm since
+    // ruling 2026-11-02 (c)); it was 1.173 under the legs-only law's 1.173173 mm.
+    const double finest = cell_plan_finest_printable_cell_mm(topo, 1.116, 8.928, w);
     CHECK(finest >= abs_floor - 1e-12,
           "S1: the reported cell is at or above the cell below which nothing prints");
     CHECK(finest < light_floor,
-          "S1: and it is FINER than the light floor — the old rule reported 4.9314 mm "
+          "S1: and it is FINER than the light floor — the old rule reported that floor "
           "here, which is the whole defect");
-    CHECK(std::fabs(finest - 2.0 * 1.173) < 1e-12,
+    CHECK(std::fabs(finest - 2.0 * 1.116) < 1e-12,
           "S1: it is exactly one doubling of the declared minimum (the first rung at "
           "or above the frontier), not an invented number");
 
@@ -1424,8 +1443,8 @@ int main() {
     CellPlanParams pp;
     pp.topology = topo;
     pp.mode = CellSizeMode::Swept;
-    pp.min_cell_size_mm = 1.173;
-    pp.max_cell_size_mm = 9.384;
+    pp.min_cell_size_mm = 1.116;
+    pp.max_cell_size_mm = 8.928;
     pp.min_extrudable_width_mm = w;
     const CellSizePlan P = plan_cell_sizes(pg, rho, cand, wid, pp);
     CHECK(P.base_cell_mm == pp.min_cell_size_mm,
@@ -1462,8 +1481,9 @@ int main() {
         lattice_derive_cell_for_member(t, 11.25, w, 0.0, 0.0);
     CHECK(std::fabs(capped.min_printable_cell_mm - 2.25) < 5e-9,
           "D2: Fit's smallest printable cell at the job's cap is 2.25 mm");
-    CHECK(std::fabs(uncapped.min_printable_cell_mm - 1.173173434) < 5e-9,
-          "D2 premise: uncapped it is 1.173173434 mm -- the number Fit used to use");
+    CHECK(std::fabs(uncapped.min_printable_cell_mm - 1.116948948) < 5e-9,
+          "D2 premise: uncapped it is 1.116948948 mm -- the number Fit used to use "
+          "(1.173173434 on the legs-only law before ruling 2026-11-02 (c))");
     // The extent D2 names: exactly N* cells at the capped floor, and nearly twice that
     // uncapped. The uncapped reading is what let Fit claim a cell the cap forbids.
     CHECK(std::fabs(capped.cells_per_member_at_finest - n_star) < 1e-6,
@@ -1497,9 +1517,9 @@ int main() {
     CHECK(U.fallback_member_too_thin > 0,
           "D11 premise: the 15 mm member IS too thin for a 4 mm cell, so it falls back");
     // MEASURED: the thickest member the law rejected here is 16.0 mm, and the light
-    // floor's threshold is N* x 4.931378 = 24.66 mm -- ABOVE it. So under the light floor
+    // floor's threshold is N* x 7.026628 = 35.13 mm -- ABOVE it. So under the light floor
     // every one of these voxels was called irrecoverable by any cell size. Under the dense
-    // floor (N* x 1.173173 = 5.87 mm) only the genuinely thin ones are: the block's
+    // floor (N* x 1.116949 = 5.58 mm) only the genuinely thin ones are: the block's
     // corners, where the local member is a few millimetres across. The assertion is that
     // ratio, because "0" would be wrong -- some voxels here really are beyond rescue.
     CHECK(U.fallback_max_member_width_mm > 15.5 && U.fallback_max_member_width_mm < 16.5,

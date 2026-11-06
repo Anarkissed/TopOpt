@@ -1,0 +1,25 @@
+== out_ref_struct vs out_new_struct
+  run_info.json                        differs only in timing/identity leaves
+VERDICT: 4 files, 3 byte-identical, 0 real differences
+== out_ref_aes vs out_new_aes
+  run_info.json                        differs only in timing/identity leaves
+VERDICT: 4 files, 3 byte-identical, 0 real differences
+== out_run_octet_struct_ref vs out_run_octet_struct_new
+  iterations.csv                       differs only in timing/identity leaves
+  run_info.json                        differs only in timing/identity leaves
+  variant_026_alpha.meta               differs only in timing/identity leaves
+  variant_038_alpha.meta               differs only in timing/identity leaves
+  variant_052_alpha.meta               differs only in timing/identity leaves
+  variant_068_alpha.meta               differs only in timing/identity leaves
+VERDICT: 22 files, 16 byte-identical, 0 real differences
+== out_run_octet_struct_ref vs out_run_octet_struct_new2
+  iterations.csv                       differs only in timing/identity leaves
+  run_info.json                        differs only in timing/identity leaves
+  variant_026_alpha.meta               differs only in timing/identity leaves
+  variant_038_alpha.meta               differs only in timing/identity leaves
+  variant_052_alpha.meta               differs only in timing/identity leaves
+  variant_068_alpha.meta               differs only in timing/identity leaves
+VERDICT: 22 files, 16 byte-identical, 0 real differences
+== POSITIVE CONTROL: octet vs fcc (must be RED)
+  run_info.json                        REAL DIFFERENCE: ['/grading/algorithm_latticed_voxels', '/grading/band_rho_max', '/grading/band_rho_min', '/grading/cell_latticed_cells', '/grading/cell_levels[0]/cell_size_mm']
+VERDICT: 4 files, 3 byte-identical, 33 real differences

@@ -774,6 +774,12 @@ struct RunInfo {
   // they exist because a silent pass is indistinguishable from a check that did
   // not run. `bfs_visits` and `wall_seconds` are the check's OWN cost, separate
   // from `gen_seconds` (generation) — the R5 bar.
+  // ★ Finding 7: the volume check over every lattice rung (lattice_volume_check.hpp).
+  bool lattice_volume_check_ran = false;
+  int lattice_volume_refused_variants = 0;
+  double lattice_volume_worst_gap = 0.0;
+  double lattice_volume_certified_mm3 = 0.0;  // summed over the accepted rungs
+  double lattice_volume_exported_mm3 = 0.0;
   bool lattice_void_check_ran = false;
   int lattice_void_sealed_variants = 0;
   long long lattice_void_sealed_cells = 0;
@@ -930,6 +936,11 @@ struct RunInfo {
   bool grading_recertified_accepted = false;
   bool grading_recertified_non_convergent = false;
   double grading_recertified_max_von_mises = 0.0;
+  // ★ E2.1: each scenario the lattice was re-certified under, in the run's order
+  // (empty without scenarios); `grading_recertified_margin` is the governing one's.
+  std::vector<std::string> grading_recertified_scenario_names;
+  std::vector<double> grading_recertified_scenario_margins;
+  std::vector<char> grading_recertified_scenario_governs;
   double grading_solid_margin = 0.0;          // the same run's SOLID-part margin
   // True when latticing flipped the verdict — the case this solve exists for.
   bool grading_recertify_changed_verdict = false;

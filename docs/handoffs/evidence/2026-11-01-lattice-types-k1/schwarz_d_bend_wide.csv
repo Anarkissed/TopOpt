@@ -1,0 +1,4 @@
+cells_across,cell_rho,block_rho,K_resolved,K_homog_macro,bend_err_pct,resolved_dof,resolved_ms,verdict
+7,0.4074,0.4074,7655.1718,7904.9140,3.26,12424035,92489,NO-GO
+8,0.4074,0.4074,10517.1092,10789.6188,2.59,16203315,131038,NO-GO
+9,0.4074,0.4074,13819.1551,14108.0595,2.09,20483715,176324,GO

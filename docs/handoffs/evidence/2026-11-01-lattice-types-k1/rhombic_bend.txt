@@ -1,0 +1,8 @@
+BEND rhombic: cell S=5.0 mm, vpc=12, cantilever 6 cells long, target rho 0.30 -> periodic cell rho 0.2963 (r/L 0.11785, 2.8 vox/strut), C11=376.83 C12=188.18 C44=156.37 Zener=1.658
+  [writing ../docs/handoffs/evidence/2026-11-01-lattice-types-k1/rhombic_bend.csv]
+    nc=1  block rho 0.2963  K_res 4.7604  K_hom 10.4552  err +119.63 %  dof 37011  278 ms  NO-GO
+    nc=2  block rho 0.2963  K_res 76.9472  K_hom 101.5541  err +31.98 %  dof 136875  1138 ms  NO-GO
+    nc=3  block rho 0.2963  K_res 331.9379  K_hom 386.1839  err +16.34 %  dof 299811  2978 ms  NO-GO
+    nc=4  block rho 0.2963  K_res 851.1035  K_hom 939.5907  err +10.40 %  dof 525819  5596 ms  NO-GO
+    nc=5  block rho 0.2963  K_res 1662.3938  K_hom 1784.3256  err +7.33 %  dof 814899  9762 ms  NO-GO
+    nc=6  block rho 0.2963  K_res 2764.2833  K_hom 2916.0141  err +5.49 %  dof 1167051  15179 ms  NO-GO

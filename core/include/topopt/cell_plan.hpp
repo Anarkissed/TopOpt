@@ -65,6 +65,8 @@
 // DETERMINISTIC. Pure integer/arithmetic sweeps in a fixed cell order, no RNG, no
 // threads, no atomics: the same inputs always produce a byte-identical plan.
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <vector>
 
@@ -73,6 +75,26 @@
 #include "topopt/voxel.hpp"    // VoxelGrid
 
 namespace topopt {
+
+// ── ★ THE COVER RULE (Finding 7, ruling 2026-11-02) ──────────────────────────────────
+// A latticed voxel gets EVERY cell that covers part of its volume, not only the cell
+// holding its centre. The centre rule left a cell finer than the voxel with one cell per
+// voxel: on the M2 stand (3.41 mm voxels, 2 mm cells) about 80 % of every pocket voxel
+// was empty while the certificate read it at full density, and a pocket one voxel thick
+// floated lone cells. Per axis, the voxel span [v0, v0 + s) meets cells [lo, hi] of edge
+// `cell` anchored at `o`, clamped to [0, n - 1]. A shared face (to 1e-9 of a cell) is
+// not an overlap, so a grid whose cell is a whole number of voxels on the same origin
+// gets exactly the centre's cell.
+inline void cells_covering_span(double v0, double s, double o, double cell, int n, int* lo,
+                                int* hi) {
+  const double a = (v0 - o) / cell, b = (v0 + s - o) / cell;
+  int l = static_cast<int>(std::floor(a + 1e-9));
+  int h = static_cast<int>(std::ceil(b - 1e-9)) - 1;
+  l = std::min(std::max(l, 0), n - 1);
+  h = std::min(std::max(h, 0), n - 1);
+  *lo = l;
+  *hi = std::max(l, h);
+}
 
 // How the cell size is chosen.
 //   Fixed — the caller's target cell, raised to the printability floor. ONE cell for
@@ -304,6 +326,12 @@ CellSizePlan plan_cell_sizes_fit(const VoxelGrid& grid,
 // evaluated at each voxel's OWN cell rather than one number for the part.
 std::vector<double> cell_size_field(const VoxelGrid& grid,
                                     const CellSizePlan& plan);
+// ★ Finding 7: a voxel is latticed only if EVERY base cell covering it is (the cover
+// rule above), so cell_size_field gives 0 to a voxel any covering cell left unlatticed.
+// This is WHY: the reason of the covering cells that refused it -- 2 (strut
+// unprintable) if any did, else 1 (member too thin), else 0.
+signed char cell_plan_voxel_reject_reason(const VoxelGrid& grid, const CellSizePlan& plan,
+                                          int i, int j, int k);
 
 // ── THE SWEPT LADDER, AS ONE RULE (task 2026-08-07-cell-mode-fit-and-swept-floor) ──
 //

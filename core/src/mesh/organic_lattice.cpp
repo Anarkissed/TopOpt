@@ -3352,12 +3352,12 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
       ++st.dropped_nodes;
       return;
     }
-    lattice_emit_node(sink, p, r);
+    lattice_emit_icosahedron(sink, p, r);  // organic keeps its circumradius
     if (obs && obs->on_element)
       obs->on_element(LatticeGenElement::Node, p, p, r);
     st.triangles += 20;  // an icosahedron is exactly 20 triangles
     ++st.nodes;
-    st.volume_mm3 += lattice_node_volume_mm3(r);
+    st.volume_mm3 += lattice_icosahedron_volume_mm3(r);
   };
   // ★★ RECORD, DO NOT EMIT. Nothing reaches the sink until the span list is FINAL.
   // This is the change that made a zero-free-end bar reachable at all: the previous
@@ -6655,7 +6655,7 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
     Vec3 last_b{0, 0, 0};
     bool have_last = false;
     for (const EmittedSeg& e : emitted) {
-      lattice_emit_strut(sink, e.a, e.b, e.r, nseg);
+      lattice_emit_prism(sink, e.a, e.b, e.r, nseg);  // organic keeps its circumradius
       if (obs && obs->on_element)
         obs->on_element(LatticeGenElement::InteriorStrut, e.a, e.b, e.r);
       // ★ THE POINT OF TRUTH: this is what is actually WRITTEN. If an endpoint here
@@ -6673,7 +6673,7 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
       }
       st.triangles += static_cast<std::uint64_t>(4 * nseg);
       ++st.struts;
-      st.volume_mm3 += lattice_prism_volume_mm3(e.r, e.len, nseg);
+      st.volume_mm3 += lattice_ngon_prism_volume_mm3(e.r, e.len, nseg);
       if (!have_last || !same_point(last_b, e.a)) emit_node_once(e.a, e.r);
       emit_node_once(e.b, e.r);
       have_last = true;

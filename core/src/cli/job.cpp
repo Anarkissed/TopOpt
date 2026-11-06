@@ -4,6 +4,7 @@
 
 #include "topopt/lattice.hpp"
 #include "topopt/lattice_gen.hpp"  // lattice_gen_topology_names: the LIVE set
+#include "topopt/lattice_types.hpp"  // R4: the per-type cell-mode verdicts
 
 #include "topopt/cell_plan.hpp"  // cell_size_mode_from_name (the ONE mode vocabulary)
 #include "topopt/lattice_algorithm.hpp"  // the ONE algorithm vocabulary (§4)
@@ -1520,7 +1521,7 @@ JobDescription parse_job(const std::string& json_text) {
                          "outer_finish", "emit_welded_stl", "welded_pitch_mm", "emit_organic_spans",
                          "emit_plan_laid",
                          "regions", "multiscale",
-                         "stepped_cells",
+                         "stepped_cells", "scenarios", "whole_part",
                          "forecast_only", "organic_probe_cells_mm", "organic_probe_grades_mm",
                          "organic_recommend", "organic_look_cells_across",
                          "organic_recommend_margin", "organic_recommend_steps",
@@ -1606,6 +1607,25 @@ JobDescription parse_job(const std::string& json_text) {
         job.lattice.stepped_cells.push_back(c);
       }
     }
+    // ★ E2.1: the scenarios this lattice is graded and certified on (job.hpp). The
+    // names are checked against loads.scenarios after both blocks have parsed.
+    if (const JsonValue* sv = find_key(lat, "scenarios")) {
+      if (sv->type != JsonValue::Type::Array)
+        schema_fail("\"lattice.scenarios\" must be an array of scenario names");
+      if (sv->arr.empty())
+        schema_fail(
+            "\"lattice.scenarios\" is empty: a lattice graded on no scenario has no "
+            "stress to follow and nothing to be certified against. Name at least one "
+            "of the job's load scenarios, or leave the key out to use all of them.");
+      for (const JsonValue& nv : sv->arr) {
+        const std::string name = require_nonempty_string(nv, "a lattice.scenarios name");
+        for (const std::string& seen : job.lattice.scenarios)
+          if (seen == name)
+            schema_fail("\"lattice.scenarios\" names \"" + name + "\" twice");
+        job.lattice.scenarios.push_back(name);
+      }
+      job.lattice.scenarios_stated = true;
+    }
     if (const JsonValue* regs = find_key(lat, "regions")) {
       if (regs->type != JsonValue::Type::Array)
         schema_fail("\"lattice.regions\" must be an array");
@@ -1614,9 +1634,73 @@ JobDescription parse_job(const std::string& json_text) {
         reject_unknown_keys(rv, {"role", "kind", "geometry", "face_id",
                                  "region_id", "relative_density",
                                  "synthetic_stress", "synthetic_foci",
-                                 "synthetic_soft_mm"},
+                                 "synthetic_soft_mm", "label", "rho_min", "rho_max",
+                                 "demand_exponent", "grading", "shape_grade",
+                                 "shape_grade_band_mm"},
                             "a lattice region");
         JobLatticeRegion reg;
+        // ★ E2.6 + E3: the region's name and its own grading (job.hpp). The band is
+        // checked against the TYPE's certifiable band once the type is resolved.
+        if (const JsonValue* lv2 = find_key(rv, "label"))
+          reg.label = require_nonempty_string(*lv2, "a lattice region label");
+        const std::string named =
+            reg.label.empty() ? "lattice region " + std::to_string(job.lattice.regions.size() + 1)
+                              : "lattice region \"" + reg.label + "\"";
+        auto own_grading = [&](const char* key) -> const JsonValue* {
+          const JsonValue* v = find_key(rv, key);
+          if (v != nullptr && find_key(rv, "role") != nullptr &&
+              find_key(rv, "role")->type == JsonValue::Type::String &&
+              find_key(rv, "role")->str != "include")
+            schema_fail(named + ": \"" + key + "\" is an include region's own grading; "
+                        "an exclude region is kept SOLID and has no lattice to grade");
+          return v;
+        };
+        {
+          const JsonValue* lo = own_grading("rho_min");
+          const JsonValue* hi = own_grading("rho_max");
+          if ((lo != nullptr) != (hi != nullptr))
+            schema_fail(named + ": \"rho_min\" and \"rho_max\" are the region's density "
+                        "band and come together");
+          if (lo && hi) {
+            reg.rho_min = require_number(*lo, "lattice region rho_min");
+            reg.rho_max = require_number(*hi, "lattice region rho_max");
+            if (!(reg.rho_min > 0.0) || !(reg.rho_max > reg.rho_min) || !(reg.rho_max <= 1.0))
+              schema_fail(named + ": its band needs 0 < rho_min < rho_max <= 1 (got " +
+                          fmt_g(reg.rho_min) + ", " + fmt_g(reg.rho_max) + ")");
+            if (find_key(rv, "relative_density"))
+              schema_fail(named + ": states both a \"relative_density\" and a band "
+                          "(\"rho_min\", \"rho_max\"). One density or one band, not both.");
+          }
+        }
+        if (const JsonValue* ge = own_grading("demand_exponent")) {
+          reg.demand_exponent = require_number(*ge, "lattice region demand_exponent");
+          if (!(reg.demand_exponent > 0.0) || !std::isfinite(reg.demand_exponent))
+            schema_fail(named + ": \"demand_exponent\" must be finite and > 0");
+        }
+        if (const JsonValue* gm = own_grading("grading")) {
+          reg.grading = require_nonempty_string(*gm, "lattice region grading");
+          if (reg.grading != "off" && reg.grading != "stress" && reg.grading != "shape" &&
+              reg.grading != "stress_shape")
+            schema_fail(named + ": \"grading\" must be \"off\", \"stress\", \"shape\" "
+                        "or \"stress_shape\" (got \"" + reg.grading + "\")");
+        }
+        if (const JsonValue* sg = own_grading("shape_grade")) {
+          if (sg->type != JsonValue::Type::Bool)
+            schema_fail(named + ": \"shape_grade\" must be a boolean");
+          reg.shape_grade = sg->num != 0.0 ? 1 : 0;
+          if (!reg.grading.empty() &&
+              (reg.grading == "shape" || reg.grading == "stress_shape") != (reg.shape_grade == 1))
+            schema_fail(named + ": \"grading\": \"" + reg.grading + "\" already sets the "
+                        "shape grade " + (reg.shape_grade == 1 ? "off" : "on") +
+                        ", and \"shape_grade\" says the opposite");
+        }
+        if (const JsonValue* sb = own_grading("shape_grade_band_mm")) {
+          reg.shape_grade_band_mm = require_number(*sb, "lattice region shape_grade_band_mm");
+          if (!(reg.shape_grade_band_mm >= 0.0) || !std::isfinite(reg.shape_grade_band_mm))
+            schema_fail(named + ": \"shape_grade_band_mm\" must be finite and >= 0");
+        }
+        if (!reg.grading.empty())
+          reg.shape_grade = (reg.grading == "shape" || reg.grading == "stress_shape") ? 1 : 0;
         if (const JsonValue* sv = find_key(rv, "synthetic_stress")) {
           if (sv->type != JsonValue::Type::Bool)
             schema_fail("lattice region \"synthetic_stress\" must be a boolean");
@@ -1886,6 +1970,33 @@ JobDescription parse_job(const std::string& json_text) {
         }
         job.lattice.regions.push_back(std::move(reg));
       }
+    }
+    // ★ E2.2: THE "- LATTICE FACES" MODE (job.hpp). The include regions stop limiting
+    // the lattice: they leave `regions` for `whole_part_includes`, so every reader of
+    // `regions` sees the whole part minus the excludes.
+    if (const JsonValue* wp = find_key(lat, "whole_part")) {
+      if (wp->type != JsonValue::Type::Bool)
+        schema_fail("lattice \"whole_part\" must be a boolean");
+      job.lattice.whole_part = (wp->num != 0.0);
+    }
+    if (job.lattice.whole_part) {
+      std::vector<JobLatticeRegion> kept;
+      for (JobLatticeRegion& r : job.lattice.regions) {
+        if (r.role != "include") {
+          kept.push_back(std::move(r));
+          continue;
+        }
+        if (r.relative_density > 0.0 || r.synthetic_stress)
+          schema_fail(
+              "lattice \"whole_part\" latticed the whole part, so an include region "
+              "there only carries its own grading: rho_min / rho_max, demand_exponent, "
+              "grading and the shape grade. This include "
+              "states \"" + std::string(r.relative_density > 0.0 ? "relative_density"
+                                                                 : "synthetic_stress") +
+              "\", which is not carried in that mode yet; it is refused rather than dropped.");
+        job.lattice.whole_part_includes.push_back(std::move(r));
+      }
+      job.lattice.regions = std::move(kept);
     }
     // MULTISCALE (task multiscale-lattice-to). Absent => false => the two-step
     // pipeline, byte-identical. It needs a "grading" block: a multiscale design is
@@ -2774,6 +2885,25 @@ JobDescription parse_job(const std::string& json_text) {
           "it emits");
   }
 
+  // ★ E2.1: every name in lattice.scenarios is one of the job's load scenarios.
+  // A name that matches none would grade and certify the lattice on fewer
+  // scenarios than the user switched on, silently.
+  for (const std::string& name : job.lattice.scenarios) {
+    bool found = false;
+    for (const JobScenario& sc : job.loads.scenarios)
+      if (sc.name == name) found = true;
+    if (!found)
+      schema_fail(
+          job.loads.scenarios.empty()
+              ? "\"lattice.scenarios\" names \"" + name +
+                    "\", but this job has no load scenarios (\"loads.scenarios\"): "
+                    "it has one load case, which the lattice always uses. Leave "
+                    "\"lattice.scenarios\" out."
+              : "\"lattice.scenarios\" names \"" + name +
+                    "\", which is not one of this job's load scenarios. A name must "
+                    "match a \"loads.scenarios\" entry exactly.");
+  }
+
   // ★★ THE DEPTH TIE (task 2026-08-12 §0a, bar R2). A face marked protect AND
   // "lattice here" is ONE slab: the depth the user drags is how deep TO may not
   // cut AND how deep the lattice is allowed. When a face-kind lattice region
@@ -2785,8 +2915,17 @@ JobDescription parse_job(const std::string& json_text) {
   //
   // Checked only when the region carries `face_id`; the app always emits it. A
   // hand-authored job with no id keeps the pre-task freedom, unchecked.
+  //
+  // ★ E2.5: TWO REGIONS ON ONE FACE each keep their own depth, so it is the DEEPEST
+  // region naming a protected face that must equal its protection; a shallower one lies
+  // inside that slab. With one region per face this is the same check as before.
   for (const JobLatticeRegion& r : job.lattice.regions) {
     if (r.kind != "face" || r.face_id < 0) continue;
+    bool deeper_on_face = false;
+    for (const JobLatticeRegion& q : job.lattice.regions)
+      if (&q != &r && q.kind == "face" && q.face_id == r.face_id && q.depth_mm > r.depth_mm)
+        deeper_on_face = true;
+    if (deeper_on_face) continue;
     for (std::size_t i = 0; i < job.loads.face_protection_face_ids.size(); ++i) {
       if (job.loads.face_protection_face_ids[i] != r.face_id) continue;
       double prot = job.loads.face_protection_depth_mm;   // <= 0 => core default
@@ -2825,6 +2964,88 @@ JobDescription parse_job(const std::string& json_text) {
           "one of them, or state both the same.");
     job.lattice.topology = tc.id;
     job.grading.topology = tc.id;
+  }
+
+  // ── ★ WHAT THE RESOLVED TYPE NOW DECIDES (lattice types round 1) ──────────
+  // Two checks read the type, so they run once it is known. Both are no-ops for octet.
+  {
+    const LatticeTopology topo = lattice_topology_from_id(job.lattice.topology);
+    // (1) A stated region density is checked against octet's band where the region is
+    // parsed (the type is not known yet there). Octet's band contains every live
+    // type's, so that check never refuses a density this one admits; this one applies
+    // THE TYPE's band, so a density only octet has a tensor for is refused by name.
+    if (topo != LatticeTopology::Octet)
+      for (std::size_t i = 0; i < job.lattice.regions.size(); ++i) {
+        const double rho = job.lattice.regions[i].relative_density;
+        if (!(rho > 0.0)) continue;
+        const double lo = lattice_rho_min(topo), hi = lattice_rho_max(topo);
+        if (!(rho >= lo && rho <= hi))
+          schema_fail(
+              "lattice region " + std::to_string(i + 1) + " states \"relative_density\" " +
+              fmt_g(rho) + ", outside " + job.lattice.topology + "'s certifiable band [" +
+              fmt_g(lo) + ", " + fmt_g(hi) + "]. Outside it the type's homogenized "
+              "tensor has no measurement behind it, so the density cannot be certified.");
+      }
+    // (1b) ★ E3: a region's own band, against THE TYPE's certifiable band, for every
+    // type (octet included: unlike relative_density nothing checked it at the parse).
+    {
+      std::vector<const JobLatticeRegion*> all;
+      for (const JobLatticeRegion& r : job.lattice.regions) all.push_back(&r);
+      for (const JobLatticeRegion& r : job.lattice.whole_part_includes) all.push_back(&r);
+      for (std::size_t i = 0; i < all.size(); ++i) {
+        const JobLatticeRegion& r = *all[i];
+        if (!(r.rho_max > 0.0)) continue;
+        const double lo = lattice_rho_min(topo), hi = lattice_rho_max(topo);
+        if (!(r.rho_min >= lo && r.rho_max <= hi))
+          schema_fail(
+              (r.label.empty() ? "lattice region " + std::to_string(i + 1)
+                               : "lattice region \"" + r.label + "\"") +
+              ": its band [" + fmt_g(r.rho_min) + ", " + fmt_g(r.rho_max) + "] leaves " +
+              job.lattice.topology + "'s certifiable band [" + fmt_g(lo) + ", " + fmt_g(hi) +
+              "]. Outside it the type's homogenized tensor has no measurement behind it.");
+      }
+    }
+    // (2) ORGANIC traces its own curves -- it builds no cell of any type -- and its
+    // strut law, calibration and beam certificate are octet's. A job naming another
+    // type with it is asking for a lattice organic does not make.
+    if (topo != LatticeTopology::Octet && job.grading.present &&
+        job.grading.algorithm == "organic")
+      schema_fail(
+          "grading \"algorithm\": \"organic\" traces its own strut curves and builds "
+          "no cell type, so it runs only with \"topology\": \"octet\" (this job says \"" +
+          job.lattice.topology + "\"). Use \"doubled\" or \"stepped\" to build " +
+          job.lattice.topology + ".");
+    // (2b) R8: Diagrid anchors where struts meet the surface; a sheet meets it along curves,
+    // so there is nothing to anchor. Refused whether stated or the default.
+    if (lattice_topology_is_sheet(topo) && job.lattice.present && job.lattice.skin == "diagrid")
+      schema_fail(
+          "lattice \"skin\": \"diagrid\" anchors where struts meet the surface, and " +
+          job.lattice.topology + " is a sheet with no struts (R8). State \"skin\": \"rim\" "
+          "or \"none\".");
+    // (3) R4: cells of two sizes are offered for a type only where core has PROVED its
+    // struts join across the step (lattice_types.hpp). Octet and every type that
+    // passed keep today's behaviour exactly.
+    if (job.grading.present) {
+      // Swept AND Fit both lay the dyadic ladder (cell_plan.cpp: both set max_level from
+      // it, and run_job builds a level per rung whenever max_level > 0).
+      const bool doubled_steps =
+          (job.grading.algorithm.empty() || job.grading.algorithm == "doubled") &&
+          (job.grading.cell_mode == "swept" || job.grading.cell_mode == "fit" ||
+           !job.lattice.stepped_cells.empty());
+      if (doubled_steps) {
+        const LatticeOption ok = lattice_type_doubled(topo);
+        if (!ok.allowed) schema_fail(ok.reason);
+      }
+      if (job.grading.algorithm == "stepped") {
+        const LatticeOption ok = lattice_type_stepped(topo);
+        if (!ok.allowed) schema_fail(ok.reason);
+      }
+      // ★ Finding 6: BCC and SC are Structural only.
+      if (job.grading.intent == "aesthetic") {
+        const LatticeOption ok = lattice_type_aesthetic(topo);
+        if (!ok.allowed) schema_fail(ok.reason);
+      }
+    }
   }
 
   // ── THE FLEXIBLE STAGE (task 2026-09-28-flexible-squish-maths) ── its own module

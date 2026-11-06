@@ -8,7 +8,7 @@
 #include <map>
 #include <unordered_map>
 
-#include "topopt/lattice.hpp"   // lattice_density_from_strut
+#include "topopt/lattice.hpp"   // LatticeTopology, the diameter law
 
 namespace topopt {
 
@@ -16,15 +16,8 @@ bool lattice_prints_open(LatticeTopology topo, double cell_size_mm, double bead_
   if (!(cell_size_mm > 0.0) || !std::isfinite(cell_size_mm)) return false;
   if (!(bead_mm > 0.0) || !std::isfinite(bead_mm)) return false;
   if (cell_size_mm <= bead_mm) return false;   // the bead does not fit in the cell at all
-  try {
-    return lattice_density_from_strut(topo, cell_size_mm, 0.5 * bead_mm) <=
-           kSteppedPrintsOpenMaxRho;
-  } catch (const std::exception&) {
-    // Off the measured table: resolved by side, not swallowed. A bead-wide strut in a cell
-    // far wider than the bead is a density BELOW the band -- open by any reading.
-    return cell_size_mm > lattice_min_printable_cell_mm(topo, bead_mm,
-                                                        kSteppedPrintsOpenMaxRho);
-  }
+  (void)topo;  // the rule is geometry: one bound for every type (ruling 2026-11-02 (c))
+  return bead_mm <= kSteppedPrintsOpenMaxStrutPerCell * cell_size_mm;
 }
 
 std::vector<int> stepped_admitted_divisors(LatticeTopology topo,
@@ -604,8 +597,24 @@ std::vector<SteppedCellGroup> stepped_group_cells(
   return out;
 }
 
+bool include_wins_plane_tie(const ClearanceGeometry& a, int id_a, const ClearanceGeometry& b,
+                            int id_b) {
+  const Vec3& na = a.normal;
+  const Vec3& nb = b.normal;
+  const double la = std::sqrt(na.x * na.x + na.y * na.y + na.z * na.z);
+  const double lb = std::sqrt(nb.x * nb.x + nb.y * nb.y + nb.z * nb.z);
+  if (la > 0.0 && lb > 0.0 && a.depth != b.depth) {
+    const double cosab = (na.x * nb.x + na.y * nb.y + na.z * nb.z) / (la * lb);
+    const Vec3 d{b.origin.x - a.origin.x, b.origin.y - a.origin.y, b.origin.z - a.origin.z};
+    const double off = std::fabs((d.x * na.x + d.y * na.y + d.z * na.z) / la);
+    if (cosab > 1.0 - 1e-12 && off < 1e-9) return a.depth > b.depth;   // one face plane
+  }
+  return id_a < id_b;
+}
+
 int stepped_region_owner(const Vec3& p, const std::vector<ClearanceGeometry>& includes) {
   int owner = 0;
+  std::size_t owner_i = 0;
   double best = 0.0;
   for (std::size_t i = 0; i < includes.size(); ++i) {
     // The SAME membership test core resolves per-voxel region ids with. Not a second one.
@@ -628,8 +637,10 @@ int stepped_region_owner(const Vec3& p, const std::vector<ClearanceGeometry>& in
     // was the same thing until ids stopped being positions. It is no longer: a caller may
     // hand the list in any order, and the app computes "the lower region id" from its own
     // numbering. A test with the ids out of order caught this.
-    if (owner == 0 || d < best || (d == best && id < owner)) {
+    if (owner == 0 || d < best ||
+        (d == best && include_wins_plane_tie(includes[i], id, includes[owner_i], owner))) {
       owner = id;
+      owner_i = i;
       best = d;
     }
   }

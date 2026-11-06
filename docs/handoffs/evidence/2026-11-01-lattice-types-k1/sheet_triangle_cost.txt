@@ -1,0 +1,14 @@
+TRIS gyroid: generate_tpms, blocks of 2/3/4 cells, no part, L 8 mm, uniform wall; per interior cell = a in a n^3 + b n^2 + c n
+  rho 0.20  t 0.529 mm  L/h 10  blocks 13572 47724 115476  per cell   1920  per cell / (L/h)^2 19.20
+  rho 0.20  t 0.529 mm  L/h 20  blocks 60636 206436 491436  per cell   7776  per cell / (L/h)^2 19.44
+  rho 0.20  t 0.529 mm  L/h 30  blocks 136092 459156 1088172  per cell  16992  per cell / (L/h)^2 18.88
+  rho 0.40  t 1.138 mm  L/h 10  blocks 13404 45732 108972  per cell   1728  per cell / (L/h)^2 17.29
+  rho 0.40  t 1.138 mm  L/h 20  blocks 58908 197508 466476  per cell   7200  per cell / (L/h)^2 18.00
+  rho 0.40  t 1.138 mm  L/h 30  blocks 136860 454260 1067436  per cell  16224  per cell / (L/h)^2 18.03
+TRIS schwarz_d: generate_tpms, blocks of 2/3/4 cells, no part, L 8 mm, uniform wall; per interior cell = a in a n^3 + b n^2 + c n
+  rho 0.20  t 0.426 mm  L/h 10  blocks 14148 49884 120852  per cell   2016  per cell / (L/h)^2 20.16
+  rho 0.20  t 0.426 mm  L/h 20  blocks 74244 253356 603924  per cell   9600  per cell / (L/h)^2 24.00
+  rho 0.20  t 0.426 mm  L/h 30  blocks 169116 573204 1361580  per cell  21408  per cell / (L/h)^2 23.79
+  rho 0.40  t 0.912 mm  L/h 10  blocks 16452 56796 136212  per cell   2208  per cell / (L/h)^2 22.07
+  rho 0.40  t 0.912 mm  L/h 20  blocks 71004 239268 566700  per cell   8832  per cell / (L/h)^2 22.08
+  rho 0.40  t 0.912 mm  L/h 30  blocks 164700 551316 1301292  per cell  20064  per cell / (L/h)^2 22.29

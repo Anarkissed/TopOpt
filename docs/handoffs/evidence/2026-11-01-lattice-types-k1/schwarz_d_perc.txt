@@ -1,0 +1,17 @@
+  [writing ../docs/handoffs/evidence/2026-11-01-lattice-types-k1/schwarz_d_perc.csv]
+PERC schwarz_d: vpc32, S=5 mm, 4 cells long, 6-connected, placements x=y in {0,.25,.5,.75}
+  rho 0.15  0.50 cells: PERCOLATES | off0.00:1 off0.25:1 off0.50:1 off0.75:1
+  rho 0.15  0.75 cells: PERCOLATES | off0.00:1 off0.25:1 off0.50:1 off0.75:1
+  rho 0.15  1.00 cells: PERCOLATES | off0.00:1 off0.25:1 off0.50:1 off0.75:1
+  rho 0.15  1.50 cells: PERCOLATES | off0.00:1 off0.25:1 off0.50:1 off0.75:1
+  rho 0.15  2.00 cells: PERCOLATES | off0.00:1 off0.25:1 off0.50:1 off0.75:1
+  rho 0.35  0.50 cells: PERCOLATES | off0.00:3 off0.25:3 off0.50:3 off0.75:3
+  rho 0.35  0.75 cells: PERCOLATES | off0.00:3 off0.25:3 off0.50:3 off0.75:3
+  rho 0.35  1.00 cells: PERCOLATES | off0.00:3 off0.25:3 off0.50:3 off0.75:3
+  rho 0.35  1.50 cells: PERCOLATES | off0.00:3 off0.25:3 off0.50:3 off0.75:3
+  rho 0.35  2.00 cells: PERCOLATES | off0.00:3 off0.25:3 off0.50:3 off0.75:3
+  rho 0.60  0.50 cells: PERCOLATES | off0.00:3 off0.25:3 off0.50:3 off0.75:3
+  rho 0.60  0.75 cells: PERCOLATES | off0.00:3 off0.25:3 off0.50:3 off0.75:3
+  rho 0.60  1.00 cells: PERCOLATES | off0.00:3 off0.25:3 off0.50:3 off0.75:3
+  rho 0.60  1.50 cells: PERCOLATES | off0.00:3 off0.25:3 off0.50:3 off0.75:3
+  rho 0.60  2.00 cells: PERCOLATES | off0.00:3 off0.25:3 off0.50:3 off0.75:3
