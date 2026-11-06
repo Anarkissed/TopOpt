@@ -21,6 +21,9 @@
 //    never ACCEPTED on an unbounded margin.
 // §4 every run_info.json above is JSON: no bare inf or nan; a non-finite number is
 //    null, and the file says which and why.
+// §5 ruling 11-06 (d): the shape grade on this bar latticed through (no regions). Its
+//    outline walk seeded only from region face planes, so it turned 0 voxels solid; it
+//    now seeds from the part's own surface. Control: shape grade off, no beam.
 #include "topopt/job.hpp"
 #include "topopt/loadcase.hpp"
 #include "topopt/materials.hpp"
@@ -156,18 +159,21 @@ std::string bare_words(const std::string& s) {
 // lattice_part on the bar, latticed through. Returns the receipt ("" when none) and
 // the run's run_info.json text.
 struct Lp { std::string receipt, run_info, refused; };
-Lp lattice_part(const std::string& dir, const Faces& f, const std::string& topology) {
+Lp lattice_part(const std::string& dir, const Faces& f, const std::string& topology,
+                const std::string& grading_extra = "", const std::string& tag = "") {
   Lp out;
-  const std::string folder = dir + "/lattice_no_solid_" + topology;
+  const std::string name = topology + tag;
+  const std::string folder = dir + "/lattice_no_solid_" + name;
   std::filesystem::remove_all(folder);
   const std::string j = job_json(
       f, "lattice_part", topology,
-      ", \"skin\": \"none\", \"require_lattice_void_reaches_exterior\": false", "");
-  std::ofstream(dir + "/lattice_no_solid_" + topology + ".json") << j;
+      ", \"skin\": \"none\", \"require_lattice_void_reaches_exterior\": false",
+      grading_extra);
+  std::ofstream(dir + "/lattice_no_solid_" + name + ".json") << j;
   try {
     const MaterialLibrary materials = load_materials_file(MATERIALS_JSON_PATH);
     const SettingsRules rules = load_settings_rules_file(SETTINGS_RULES_PATH);
-    const JobDescription job = load_job_file(dir + "/lattice_no_solid_" + topology + ".json");
+    const JobDescription job = load_job_file(dir + "/lattice_no_solid_" + name + ".json");
     (void)lattice_variant_job(job, dir, folder, materials, rules);
   } catch (const std::exception& e) {
     out.refused = e.what();
@@ -272,6 +278,18 @@ int main() {
                   "\"grading.recertified_margin\", \"value\": \"inf\"}]") &&
               has(ri, "\"reason\": \""),
           "§4 the writer: the file names the field, its value and the reason");
+  }
+
+  // ── §5 the shape grade with no regions ─────────────────────────────────────
+  {
+    const Lp on = lattice_part(dir, f, "octet", ", \"shape_grade\": true", "_shape");
+    const double beam = num_after(on.run_info, "outline_voxels");
+    const double lat = num_after(on.receipt, "lattice_voxels");
+    std::printf("[no-solid] shape grade, no regions: %.0f voxel(s) turned solid, %.0f "
+                "latticed left (of 1,536)\n", beam, lat);
+    CHECK(beam > 0, "§5 the shape grade turns the part's outline solid");
+    CHECK(lat > 0 && beam + lat <= 1536, "§5 a lattice is left inside the outline");
+    CHECK(!has(oct.run_info, "\"outline_voxels\""), "§5 control: shape grade off, no beam");
   }
 
   std::printf("%s: %d checks, %d failures\n", g_failures ? "FAIL" : "PASS", g_checks,

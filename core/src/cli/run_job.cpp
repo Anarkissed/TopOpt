@@ -6779,11 +6779,18 @@ LatticeAlgorithm resolve_lattice_algorithm(const JobGrading& jg) {
 // inner face. That was the one geometric divergence between the two in source. The caller
 // now traces with the band IN and turns it solid afterwards, so the struts end up embedded
 // in the solid exactly as the picture shows.
+// ★ (d), ruling 11-06: `unowned_from_surface` seeds a lattice voxel NO region owns
+// (id 0: a lattice with no regions, or lattice.whole_part outside its includes) from any
+// non-lattice 6-neighbour. It has no face, so no direction is the open one: its outline
+// is wherever the lattice ends, the part's own surface included. Off (the default, and
+// the organic rim's call) such a voxel seeds nothing, as before, and a shape grade on a
+// lattice with no regions turned 0 voxels solid.
 static std::vector<char> organic_solid_rim_band(const VoxelGrid& grid,
                                                 const std::vector<char>& mask,
                                                 const std::vector<int>& region_ids,
                                                 const std::vector<Vec3>& region_normals,
-                                                double rim_mm) {
+                                                double rim_mm,
+                                                bool unowned_from_surface = false) {
   const std::size_t n = grid.voxel_count();
   std::vector<char> band(n, 0);
   if (!(rim_mm > 0.0) || mask.size() != n || region_ids.size() != n) return band;
@@ -6796,8 +6803,11 @@ static std::vector<char> organic_solid_rim_band(const VoxelGrid& grid,
         const std::size_t e = grid.index(i, j, k);
         if (!mask[e]) continue;
         const int rid = region_ids[e];
-        if (rid <= 0 || static_cast<std::size_t>(rid) > region_normals.size()) continue;
-        const Vec3& nrm = region_normals[static_cast<std::size_t>(rid - 1)];
+        const bool unowned = rid <= 0 && unowned_from_surface;
+        if (!unowned && (rid <= 0 || static_cast<std::size_t>(rid) > region_normals.size()))
+          continue;
+        const Vec3 nrm = unowned ? Vec3{0.0, 0.0, 0.0}  // no face: every direction seeds
+                                 : region_normals[static_cast<std::size_t>(rid - 1)];
         const double nl = std::sqrt(nrm.x * nrm.x + nrm.y * nrm.y + nrm.z * nrm.z);
         for (int d = 0; d < 6; ++d) {
           const double dot = nl > 0.0 ? (di[d] * nrm.x + dj[d] * nrm.y + dk[d] * nrm.z) / nl : 0.0;
@@ -8718,6 +8728,11 @@ LatticeVariantOutcome lattice_one_variant(
       return e3_jobs[static_cast<std::size_t>(id - 1)].shape_grade_band_mm;
     return job.grading.shape_grade_band_mm;
   };
+  // ★ (d), ruling 11-06: where the lattice belongs to no region -- a lattice with no
+  // include regions, or lattice.whole_part's -- the outline is the part's own surface, so
+  // the walk seeds those voxels from it. Not otherwise: a voxel no prism owns inside a
+  // job with includes (a "region"-kind include) has a face this walk cannot see.
+  const bool part_outline = e3_jobs.empty() || job.lattice.whole_part;
   bool any_shape = job.grading.shape_grade;
   if (e3_shape)
     for (std::size_t i = 0; i < e3_jobs.size(); ++i)
@@ -8749,8 +8764,8 @@ LatticeVariantOutcome lattice_one_variant(
       const double inward = beam + bleed;
       inward_max = std::max(inward_max, inward);
       bleed_max = std::max(bleed_max, bleed);
-      const std::vector<char> band =
-          organic_solid_rim_band(solved_grid, mask, e3_owner, nrms, inward);
+      const std::vector<char> band = organic_solid_rim_band(
+          solved_grid, mask, e3_owner, nrms, inward, part_outline);
       for (std::size_t e = 0; e < band.size(); ++e)
         if (band[e] && want(e) == b) beam_band[e] = 1;
     }
@@ -8792,7 +8807,7 @@ LatticeVariantOutcome lattice_one_variant(
     for (const JobLatticeRegion& r : job.lattice.regions)
       if (r.role == "include") nrms.push_back(r.normal);
     const std::vector<char> beam_band = organic_solid_rim_band(
-        solved_grid, mask, region_ids_for_stepped, nrms, inward);
+        solved_grid, mask, region_ids_for_stepped, nrms, inward, part_outline);
     const std::size_t cleared = clear_band_from_mask(mask, beam_band);
     clear_band_from_mask(gf.posture.mask, beam_band);
     for (std::size_t e = 0; e < beam_band.size() &&
