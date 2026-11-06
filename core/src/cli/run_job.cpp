@@ -3920,12 +3920,18 @@ PostureCertification certify_posture(const MinimizePlasticVariant& variant,
     pc.governing = analyze_variant_with_posture(variant, sg, options, material, bcs, cx, post);
     return pc;
   }
+  // ★ Ruling 11-06 2(a): a scenario whose lattice is NOT CERTIFIED reads an unbounded
+  // margin, so it never governs by the worse rule; its words go on the governing one.
+  std::string not_certified;
   ScenarioCertification sc = certify_scenarios(
       sg, cx.scenarios,
       [&](const std::vector<DirichletBC>& b, const std::vector<NodalLoad>& l) {
         FixedDesignAnalysis a =
             analyze_variant_with_posture(variant, sg, options, material, b, l, cx, post);
         pc.accepted.push_back(a.accepted ? 1 : 0);
+        if (a.lattice_not_certified && not_certified.empty())
+          not_certified = "Under \"" + cx.scenarios[pc.accepted.size() - 1].name + "\": " +
+                          a.lattice_not_certified_reason;
         return a;
       },
       /*keep_fields=*/false);
@@ -3933,6 +3939,10 @@ PostureCertification certify_posture(const MinimizePlasticVariant& variant,
   pc.reports = std::move(sc.reports);
   for (const char a : pc.accepted)
     if (!a) pc.governing.accepted = false;
+  if (!not_certified.empty()) {
+    pc.governing.lattice_not_certified = true;
+    pc.governing.lattice_not_certified_reason = not_certified;
+  }
   return pc;
 }
 
@@ -4957,6 +4967,11 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
   const bool finish_certified = lat.outer_finish != "skin";
   s += "  \"lattice_accepted\": " +
        std::string((a.accepted && finish_certified) ? "true" : "false") + ",\n";
+  // ★ Ruling 11-06 2(a): no solid voxel carries the load and the strut law cannot
+  // certify the lattice (analyze.hpp lattice_not_certified). Written only then.
+  if (a.lattice_not_certified)
+    s += "  \"lattice_not_certified\": true,\n  \"lattice_not_certified_reason\": " +
+         json_str(a.lattice_not_certified_reason) + ",\n";
   if (lat.outer_finish != "shell") {
     s += "  \"finish_certified\": " +
          std::string(finish_certified ? "true" : "false") + ",\n";
@@ -4980,6 +4995,8 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
   // stress tensors. REPORT ONLY: none of these numbers feed `lattice_accepted`
   // (its verdict logic above is untouched), and `strut_strength_uncertified`
   // stays true — the maintainer asked for NUMBERS to test against, not a gate.
+  // ★ Except where no solid voxel carries the load (ruling 11-06 2(a)): there the
+  // analysis folded the worst-case margin into the gate, and "gated" says so.
   if (a.lattice_strut_report) {
     const StrutStrengthReport& ss = a.lattice_strut;
     s += "  \"strut_strength\": {\n";
@@ -4987,7 +5004,8 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
          "populations), evidence/2026-07-31-lattice-dehomogenization-probe/"
          "kfit.csv; strut_vm <= Kd(rho)*vm(Sigma) + Kv(rho)*|p(Sigma)|, "
          "interlayer analogue Kild/Kilv\",\n";
-    s += "    \"gated\": false,\n";
+    // ★ Ruling 11-06 2(a): gated where no solid voxel carries the load.
+    s += "    \"gated\": " + std::string(a.strut_gated ? "true" : "false") + ",\n";
     // MARGINS — in-plane and interlayer SEPARATELY (bar L6): which one binds is
     // the point. The interlayer margin divides by the UNSOURCED z_knockdown.
     s += "    \"margin_in_plane\": " + json_num(ss.margin_in_plane) + ",\n";
@@ -12396,16 +12414,24 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
         for (std::size_t sx = 0; sx < cert_scenarios.size(); ++sx)
           if (an_scen_on[sx]) used.push_back(cert_scenarios[sx]);
         std::vector<char> used_ok;
+        std::string not_certified;  // ★ 11-06 2(a): its words, as certify_posture
         ScenarioCertification rs = certify_scenarios(
             design_grid, used,
             [&](const std::vector<DirichletBC>& rb, const std::vector<NodalLoad>& rl) {
               FixedDesignAnalysis r = recert_one(rb, rl);
               used_ok.push_back(r.accepted ? 1 : 0);
+              if (r.lattice_not_certified && not_certified.empty())
+                not_certified = "Under \"" + used[used_ok.size() - 1].name + "\": " +
+                                r.lattice_not_certified_reason;
               return r;
             });
         relat = std::move(rs.governing);
         for (const char ok : used_ok)
           if (!ok) relat.accepted = false;
+        if (!not_certified.empty()) {
+          relat.lattice_not_certified = true;
+          relat.lattice_not_certified_reason = not_certified;
+        }
         for (const ScenarioReport& r : rs.reports) {
           gi.grading_recertified_scenario_names.push_back(r.name);
           gi.grading_recertified_scenario_margins.push_back(r.margin);
@@ -12415,6 +12441,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
       gi.grading_recertified = true;
       gi.grading_recertified_margin = relat.margin_effective;
       gi.grading_recertified_accepted = relat.accepted;
+      gi.grading_recertified_not_certified = relat.lattice_not_certified_reason;
       gi.grading_recertified_non_convergent = relat.non_convergent;
       gi.grading_recertified_max_von_mises = relat.max_von_mises;
       gi.grading_solid_margin = a.margin_effective;
@@ -13661,8 +13688,10 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
     lvr.min_feature_warning = min_feature_warning_text(
         rules, result.lattice.v3.min_feature_violations);
     if (!lvr.accepted)
-      lvr.rejection_reason = load_path_ok ? kMarginBelowRequiredReason
-                                          : kLoadPathNotConnectedReason;
+      lvr.rejection_reason = result.lattice.lattice_not_certified
+                                 ? result.lattice.lattice_not_certified_reason
+                             : load_path_ok ? kMarginBelowRequiredReason
+                                            : kLoadPathNotConnectedReason;
     JobReport report;
     report.material = job.material;
     (lvr.accepted ? report.variants : report.rejected).push_back(lvr);

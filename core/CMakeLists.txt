@@ -2444,6 +2444,15 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
     TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
   add_test(NAME lattice_scenarios COMMAND test_lattice_scenarios)
+  # Ruling 11-06 2(a) + 2(c): a lattice is never "margin inf, ACCEPTED"; run_info.json
+  # never writes a bare inf.
+  add_executable(test_lattice_no_solid tests/validation/test_lattice_no_solid.cpp)
+  target_link_libraries(test_lattice_no_solid PRIVATE topopt)
+  target_compile_definitions(test_lattice_no_solid PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME lattice_no_solid COMMAND test_lattice_no_solid)
   # E2.2 + E2.3 (plan.md §B6): the "- Lattice faces" mode; No lattice on a face region.
   add_executable(test_lattice_whole_part tests/validation/test_lattice_whole_part.cpp)
   target_link_libraries(test_lattice_whole_part PRIVATE topopt)
