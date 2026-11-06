@@ -3657,6 +3657,13 @@ struct LatticeRegionGraded {
   long long voxels = 0;
   double rho_lo = 0.0, rho_hi = 0.0;
   double cell_lo = 0.0, cell_hi = 0.0;  // ★ E3: the cells it got (swept; 0 otherwise)
+  // ★ E3 "off" with no density: the lightest one density that certified (the search).
+  bool searched = false;
+  bool search_certified = false;
+  double search_rho = 0.0, search_floor = 0.0, search_peak = 0.0, search_margin = 0.0;
+  int search_trials = 0;
+  double search_law_rho = 0.0;    // the law search's answer (before the shipped one)
+  int search_shipped_trials = 0;  // whole passes the shipped search ran (0: none needed)
 };
 
 struct LatticeCertOutcome {
@@ -5065,6 +5072,34 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
                 ? ", \"cell_min_mm\": " + json_num(r.cell_min_mm) +
                       ", \"cell_max_mm\": " + json_num(r.cell_max_mm)
                 : std::string()) +
+           // ★ E3 "off" with no density: the search for its lightest one density
+           ((*region_graded)[i].searched
+                ? ", \"one_density\": {\"rho\": " + json_num((*region_graded)[i].search_rho) +
+                      ", \"law_search_rho\": " + json_num((*region_graded)[i].search_law_rho) +
+                      ", \"shipped_passes\": " +
+                      std::to_string((*region_graded)[i].search_shipped_trials) +
+                      ", \"printable_floor\": " + json_num((*region_graded)[i].search_floor) +
+                      ", \"upper_bound_graded_peak\": " +
+                      json_num((*region_graded)[i].search_peak) +
+                      ", \"law_margin\": " + json_num((*region_graded)[i].search_margin) +
+                      ", \"trials\": " + std::to_string((*region_graded)[i].search_trials) +
+                      ", \"law_certified\": " +
+                      ((*region_graded)[i].search_certified ? "true" : "false") +
+                      ((*region_graded)[i].search_certified
+                           ? std::string()
+                           : ", \"refusal\": " +
+                                 json_str(std::string("Region ") +
+                                          (r.label.empty() ? std::to_string(i + 1)
+                                                           : "\"" + r.label + "\"") +
+                                          " (grading off, one density): the lattice does "
+                                          "not certify even with it at its graded peak " +
+                                          json_num((*region_graded)[i].search_peak) +
+                                          " (margin " +
+                                          json_num((*region_graded)[i].search_margin) +
+                                          "), so no lighter one density was searched. Give "
+                                          "it a density, or let it grade.")) +
+                      "}"
+                : std::string()) +
            // ★ E3: the cells the region got, where the plan sized cells per voxel (swept)
            (nlat && (*region_graded)[i].cell_hi > 0.0
                 ? ", \"cell_mm_graded\": [" + json_num((*region_graded)[i].cell_lo) + ", " +
@@ -5688,6 +5723,7 @@ struct LatticeVariantOutcome {
   // LAW gave them, taken before the certificate's as-built rebuild (which reads each laid
   // cell, and a cell straddling a region's edge carries its neighbour's density).
   std::vector<LatticeRegionGraded> region_graded;
+  std::string one_density_refusal;  // ★ E3: a searched region no density certified
   // ★ the ORGANIC structural certificate (beam network), when one was run
   OrganicCertificate organic_cert;
   OrganicRecommendation organic_recommendation;   // organic_recommend != off
@@ -6900,12 +6936,15 @@ std::vector<GradingRegionOverride> lattice_region_overrides(
   return out;
 }
 
-LatticeVariantOutcome lattice_one_variant(
+// One lattice pass. `fixed_search` (null on the first pass) carries each "off" region's
+// one density chosen by lattice_one_variant's shipped search, laid as is, unsearched.
+LatticeVariantOutcome lattice_one_variant_pass(
     const MinimizePlasticVariant& v, const JobDescription& job,
     const VoxelGrid& part_grid, const SolvedDesignDomain& domain,
     const MinimizePlasticOptions& options, const Material& material,
     const std::vector<ClearanceGeometry>& lattice_kos,
-    const LatticeRoleRegions& lattice_roles, const std::string& out_dir) {
+    const LatticeRoleRegions& lattice_roles, const std::string& out_dir,
+    const std::vector<LatticeRegionGraded>* fixed_search) {
   // FIRST STATEMENT IN THE BODY, so every solve below is covered and the previous
   // enable states are restored however this function returns (including by throw).
   const ScopedLadderSolverIsolation solver_isolation;
@@ -9284,6 +9323,119 @@ LatticeVariantOutcome lattice_one_variant(
     }
   }
 
+  // ── ★ E3: "OFF" WITH NO DENSITY -- THE LIGHTEST ONE DENSITY THAT CERTIFIES ───────
+  // (ruling 11-06; agreed 11-04 19:31Z.) A region with grading "off" and no stated
+  // density took its graded PEAK: it certifies wherever the grade does, but it is the
+  // heaviest one density. Here each such region bisects its one density between the
+  // lightest that still PRINTS at its cells (lattice_min_density_for_strut) and that
+  // peak, the upper bound, certifying each trial with the run's own certificate
+  // (certify_posture, every scenario the lattice uses). The upper end is always one that
+  // certified, so the answer certifies whatever the curve's shape; regions are taken in
+  // turn, each against the ones before it at their found density. A region whose peak
+  // does not certify keeps it, and is named by label if the run's certificate refuses.
+  // The shipped certificate below still decides: this only chooses the density.
+  std::vector<LatticeRegionGraded> e3_search;
+  if (fixed_search != nullptr && graded) {  // a shipped-search pass: the density is chosen
+    e3_search = *fixed_search;
+    for (std::size_t e = 0; e < mask.size() && e < e3_owner.size(); ++e) {
+      const int id = e3_owner[e];
+      if (!mask[e] || id < 1 || static_cast<std::size_t>(id) > e3_search.size()) continue;
+      const LatticeRegionGraded& f = e3_search[static_cast<std::size_t>(id - 1)];
+      if (f.searched && f.search_certified) gf.posture.relative_density[e] = f.search_rho;
+    }
+  } else if (graded && !e3_overrides.empty() && R.algorithm != LatticeAlgorithm::Organic) {
+    std::vector<std::size_t> todo;
+    for (std::size_t i = 0; i < e3_overrides.size(); ++i)
+      if (e3_overrides[i].flat && !(e3_overrides[i].flat_rho > 0.0)) todo.push_back(i);
+    if (!todo.empty()) {
+      const LatticeCertContext scx =
+          lattice_cert_context(v, part_grid, domain, options, material, job);
+      std::vector<double> trial = gf.posture.relative_density;
+      double last_margin = 0.0;
+      auto certifies = [&]() {
+        const LatticePosture tp =
+            build_lattice_posture(lat_topo, solved_grid, cell, mask, 0.0, &trial);
+        const PostureCertification pc =
+            certify_posture(v, solved_grid, options, material, bcs, scx, &tp);
+        last_margin = pc.governing.margin_effective;
+        return pc.governing.accepted;
+      };
+      e3_search.assign(e3_jobs.size(), {});
+      for (const std::size_t i : todo) {
+        LatticeRegionGraded& rs = e3_search[i];
+        std::vector<std::size_t> vox;
+        double peak = 0.0, floor = lattice_rho_min(lat_topo);
+        bool prints = true;
+        for (std::size_t e = 0; e < mask.size() && e < e3_owner.size(); ++e) {
+          if (!mask[e] || e3_owner[e] != static_cast<int>(i) + 1) continue;
+          vox.push_back(e);
+          peak = std::max(peak, trial[e]);
+          const double S = e < gf.posture.cell_size_field.size() &&
+                                   gf.posture.cell_size_field[e] > 0.0
+                               ? gf.posture.cell_size_field[e]
+                               : cell;
+          const double pf = lattice_min_density_for_strut(
+              lat_topo, S, job.grading.min_extrudable_width_mm, job.grading.max_relative_density);
+          if (pf < 0.0) prints = false;
+          floor = std::max(floor, pf);
+        }
+        if (vox.empty()) continue;
+        if (!prints || floor > peak) floor = peak;
+        auto set = [&](double r) { for (const std::size_t e : vox) trial[e] = r; };
+        rs.searched = true;
+        rs.search_peak = peak;
+        rs.search_floor = floor;
+        set(peak);
+        ++rs.search_trials;
+        if (!certifies()) {  // the peak itself does not: keep it, the run decides
+          rs.search_rho = peak;
+          rs.search_margin = last_margin;
+          const std::string& lb = e3_jobs[i].label;
+          char tail[200];
+          std::snprintf(tail, sizeof tail,
+                        " (grading off, one density): the lattice does not certify even "
+                        "with it at its graded peak %.4g (margin %.3g), so no lighter one "
+                        "density was searched. Give it a density, or let it grade.",
+                        peak, last_margin);
+          R.one_density_refusal += std::string(R.one_density_refusal.empty() ? "" : " ") +
+                                   "Region " +
+                                   (lb.empty() ? std::to_string(i + 1) : "\"" + lb + "\"") + tail;
+          continue;
+        }
+        double good = peak, good_margin = last_margin, bad = floor;
+        if (floor < peak) {
+          set(floor);
+          ++rs.search_trials;
+          if (certifies()) {
+            good = floor;
+            good_margin = last_margin;
+          } else {
+            for (int it = 0; it < 6 && good - bad > 1e-3; ++it) {
+              const double mid = 0.5 * (good + bad);
+              set(mid);
+              ++rs.search_trials;
+              if (certifies()) {
+                good = mid;
+                good_margin = last_margin;
+              } else {
+                bad = mid;
+              }
+            }
+          }
+        }
+        set(good);
+        rs.search_rho = good;
+        rs.search_margin = good_margin;
+        rs.search_certified = true;
+        std::fprintf(stderr,
+                     "[one-density] region %zu: %.4f (printable floor %.4f, graded peak "
+                     "%.4f) certifies at margin %.4g, %d trial(s)\n",
+                     i + 1, good, floor, peak, good_margin, rs.search_trials);
+      }
+      gf.posture.relative_density = trial;
+    }
+  }
+
   // ── the radius field + cell activation.
   LatticeRadiusField G;
   G.nseg = 8;
@@ -10433,6 +10585,20 @@ LatticeVariantOutcome lattice_one_variant(
       g.cell_hi = std::max(g.cell_hi, cm);
       ++g.voxels;
     }
+    for (std::size_t i = 0; i < e3_search.size() && i < R.region_graded.size(); ++i)
+      if (e3_search[i].searched) {
+        LatticeRegionGraded& g = R.region_graded[i];
+        g.searched = true;
+        g.search_certified = e3_search[i].search_certified;
+        g.search_rho = e3_search[i].search_rho;
+        g.search_floor = e3_search[i].search_floor;
+        g.search_peak = e3_search[i].search_peak;
+        g.search_margin = e3_search[i].search_margin;
+        g.search_trials = e3_search[i].search_trials;
+        g.search_shipped_trials = e3_search[i].search_shipped_trials;
+        g.search_law_rho = e3_search[i].search_law_rho > 0.0 ? e3_search[i].search_law_rho
+                                                             : e3_search[i].search_rho;
+      }
   }
   if (graded && !shipped_rho.empty()) gf.posture.relative_density = shipped_rho;
   const LatticePosture post = build_lattice_posture(
@@ -10714,6 +10880,80 @@ LatticeVariantOutcome lattice_one_variant(
   // it rather than leave a dangling-looking field on a returned value.
   grad_rcpt.gf = nullptr;
   return R;
+}
+
+// ── ★ E3 "OFF" WITH NO DENSITY: THE SEARCH CERTIFIES WHAT SHIPS (ruling 11-06) ──────
+// The pass's own search certifies trial densities on the LAW posture, which is cheap (no
+// geometry), and the law reads at or above what the file holds. The run's certificate is
+// min(law, measured) on the emitted file, so the law's answer can still be refused
+// (measured: 1.551 on the law, 1.159 shipped, on a whole-part bar). When it is, the
+// search goes on over whole passes: each searched region's density moves from its law
+// answer toward its graded peak by one shared fraction t, bisected on the shipped
+// verdict (t = 1, every region at its peak, first: if even that refuses, the region is
+// named). The last pass run is the one chosen, so its files are the ones on disk.
+LatticeVariantOutcome lattice_one_variant(
+    const MinimizePlasticVariant& v, const JobDescription& job,
+    const VoxelGrid& part_grid, const SolvedDesignDomain& domain,
+    const MinimizePlasticOptions& options, const Material& material,
+    const std::vector<ClearanceGeometry>& lattice_kos,
+    const LatticeRoleRegions& lattice_roles, const std::string& out_dir) {
+  LatticeVariantOutcome R = lattice_one_variant_pass(
+      v, job, part_grid, domain, options, material, lattice_kos, lattice_roles, out_dir, nullptr);
+  bool any = false;
+  for (const LatticeRegionGraded& g : R.region_graded)
+    if (g.searched && g.search_certified && g.search_rho < g.search_peak) any = true;
+  if (!any || !R.cc.ran || R.cc.lattice.accepted) return R;
+  const std::vector<LatticeRegionGraded> base = R.region_graded;
+  int passes = 0;
+  auto at = [&](double t) {
+    std::vector<LatticeRegionGraded> f = base;
+    for (LatticeRegionGraded& g : f)
+      if (g.searched && g.search_certified) {
+        g.search_law_rho = g.search_rho;
+        g.search_rho = g.search_rho + t * (g.search_peak - g.search_rho);
+        g.search_shipped_trials = passes + 1;
+      }
+    return f;
+  };
+  auto pass = [&](double t) {
+    const std::vector<LatticeRegionGraded> f = at(t);
+    ++passes;
+    return lattice_one_variant_pass(v, job, part_grid, domain, options, material, lattice_kos,
+                                    lattice_roles, out_dir, &f);
+  };
+  LatticeVariantOutcome top = pass(1.0);
+  if (!top.cc.ran || !top.cc.lattice.accepted) {
+    for (std::size_t i = 0; i < base.size() && i < top.region_jobs.size(); ++i)
+      if (base[i].searched && base[i].search_certified) {
+        const std::string& lb = top.region_jobs[i].label;
+        char tail[220];
+        std::snprintf(tail, sizeof tail,
+                      " (grading off, one density): on what the file holds, the lattice does "
+                      "not certify even with it at its graded peak %.4g (margin %.3g). Give it "
+                      "a density, or let it grade.",
+                      base[i].search_peak, top.cc.lattice.margin_effective);
+        top.one_density_refusal += std::string(top.one_density_refusal.empty() ? "" : " ") +
+                                   "Region " +
+                                   (lb.empty() ? std::to_string(i + 1) : "\"" + lb + "\"") + tail;
+      }
+    return top;
+  }
+  double lo = 0.0, hi = 1.0, last = 1.0;
+  for (int it = 0; it < 4; ++it) {
+    const double mid = 0.5 * (lo + hi);
+    LatticeVariantOutcome m = pass(mid);
+    last = mid;
+    if (m.cc.ran && m.cc.lattice.accepted) {
+      hi = mid;
+      top = std::move(m);
+    } else {
+      lo = mid;
+    }
+  }
+  if (last != hi) top = pass(hi);  // the chosen pass's files are the ones left on disk
+  std::fprintf(stderr, "[one-density] shipped search: t = %.4f after %d whole pass(es)\n", hi,
+               passes);
+  return top;
 }
 
 // --- analyze_job helpers (handoff 2026-07-26-constrained-smooth) -------------
@@ -13919,6 +14159,7 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         rules, result.lattice.v3.min_feature_violations);
     if (!lvr.accepted)
       lvr.rejection_reason = !R.cc.open_refusal.empty() ? R.cc.open_refusal  // ★ E2.4
+                             : !R.one_density_refusal.empty() ? R.one_density_refusal  // ★ E3
                              : result.lattice.lattice_not_certified
                                  ? result.lattice.lattice_not_certified_reason
                              : load_path_ok ? kMarginBelowRequiredReason
