@@ -78,7 +78,8 @@ final class FaceInTwoGroupsHostedTests: XCTestCase {
         let ws = try FlexibleSource.code("WorkspacePlaceholder.swift")
         let pick = try XCTUnwrap(ws.range(of: "private func handlePick(_ faceID: FaceID) {"))
         let body = String(ws[pick.lowerBound...].prefix(3_200))
-        let lattice = try XCTUnwrap(body.range(of: "if stage == .lattice {"))
+        // ★ RE-PINNED (B6 s2b, note 23c): with the Topology panel open the tap goes on to Topology's groups
+        let lattice = try XCTUnwrap(body.range(of: "if stage == .lattice, !latticeTopologyOpen {"))
         XCTAssertTrue(String(body[lattice.lowerBound...].prefix(500)).contains("project.latticeStageTap(face: faceID, loop: loop)"),
                       "★ the Lattice stage's tap grows the lattice list, never Topology's")
     }

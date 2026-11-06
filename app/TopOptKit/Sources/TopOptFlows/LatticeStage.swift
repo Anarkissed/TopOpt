@@ -199,6 +199,16 @@ public enum LatticeSetupCopy {
     /// While any switch is off: the job stays as today until the engine takes the include list (his 11-03 rule).
     public static let includeWaits = "The run still uses them until the engine update"
 
+    // ★ B6 s2b — the role picker (notes 24, 27) and the open Topology panel's hint (23c)
+    public static let protectSkin = "Protect skin"
+    /// A lattice group with no role yet (§4.4's pending state).
+    public static let pending = "Pending\u{2026}"
+    /// Protect skin, until the engine has a per-region skin (E2.4): the run keeps the face solid.
+    public static let skinWaits = "Runs as No lattice until the engine update"
+    public static let topologyHint = "Taps go to Topology groups"
+    /// The join's second line (the face takes the group it joins).
+    public static let joinNote = "with its role and depth"
+
     /// The toast after a face row's trash (Undo, top left, brings it back).
     public static func removed(_ name: String) -> String { "\(name) removed \u{00B7} Undo brings it back" }
 }

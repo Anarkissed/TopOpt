@@ -56,6 +56,14 @@ final class ParityLatticeSetupShots: XCTestCase {
                 try ParityTopologyShots.shot(h, "lat-setup-topo-open", name)
                 try h.tap("latticeTopologyPanelHeader", "Topology's header again")
             }
+            // a tap that starts a new group: the role picker at the face (mockup #lat-setup-face-pick)
+            p.latticeList.clearActive()
+            let held = Set(p.latticeGroups.flatMap(\.faces))
+            if let mesh = p.viewerMesh, let f = mesh.faceIDs.first(where: { !held.contains($0) }) {
+                _ = p.latticeStageTap(face: f, loop: [f])
+                h.pump(1)
+                try ParityTopologyShots.shot(h, "lat-setup-face-pick", name)
+            }
             if h.frames.all["setupChip"] != nil {
                 try h.tap("setupChip", "Settings")
                 h.pump(0.5)

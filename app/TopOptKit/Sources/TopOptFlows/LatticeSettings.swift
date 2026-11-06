@@ -2064,6 +2064,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// ★ B6 s2a (note 23b): the Topology scenarios and groups switched OFF for this lattice (their ids). Empty = every one in;
     /// not written while empty, so older bytes are unchanged. The job reads it once the engine takes the include list (E2).
     public var topologyExcluded: Set<UUID> = []
+    /// ★ B6 s2b (notes 24, 27): the lattice groups set to Protect skin. Until the engine has a per-region skin (E2.4) each
+    /// runs as No lattice (its `groupRoles` entry is `.exclude`); not written while empty, so older bytes are unchanged.
+    public var skinGroups: Set<UUID> = []
     /// ★ PER-REGION RELATIVE DENSITY (task 2026-08-16-per-sector-density-override),
     /// keyed by the SAME `SelectionGroup.id` as `groupRoles`. This is the one thing
     /// the region layer could not yet say: dial this sector to 25% and its
@@ -2394,6 +2397,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         case groupRoles
         case latticeList            // ★ B6: the Lattice stage's own groups (absent ⇒ not yet made)
         case topologyExcluded       // ★ B6 s2a: the switched-off Topology scenarios and groups (absent ⇒ every one in)
+        case skinGroups             // ★ B6 s2b: the Protect skin groups (absent ⇒ none)
         case groupDensities
         case groupDepthMM        // the ONE dragged depth per group (task 2026-08-12 §0a)
         // The per-SELECTABLE role + depth (task 2026-08-14-lattice-separation
@@ -2535,6 +2539,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         groupRoles = try c.decodeIfPresent([UUID: LatticeGroupRole].self, forKey: .groupRoles) ?? [:]
         latticeList = try c.decodeIfPresent(SelectionModel.self, forKey: .latticeList)
         topologyExcluded = try c.decodeIfPresent(Set<UUID>.self, forKey: .topologyExcluded) ?? []
+        skinGroups = try c.decodeIfPresent(Set<UUID>.self, forKey: .skinGroups) ?? []
         // Absent in every snapshot written before this task ⇒ [:] ⇒ auto everywhere,
         // which is exactly what those projects ran. A default must not rewrite history.
         groupDensities = try c.decodeIfPresent([UUID: Double].self, forKey: .groupDensities) ?? [:]
@@ -2664,6 +2669,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(groupRoles, forKey: .groupRoles)
         try c.encodeIfPresent(latticeList, forKey: .latticeList)   // ★ B6: written once made; older bytes unchanged
         if !topologyExcluded.isEmpty { try c.encode(topologyExcluded, forKey: .topologyExcluded) }   // ★ B6 s2a: older bytes unchanged
+        if !skinGroups.isEmpty { try c.encode(skinGroups, forKey: .skinGroups) }   // ★ B6 s2b: older bytes unchanged
         try c.encode(groupDensities, forKey: .groupDensities)
         try c.encode(groupDepthMM, forKey: .groupDepthMM)
         try c.encode(frozenRegionDensity, forKey: .frozenRegionDensity)
