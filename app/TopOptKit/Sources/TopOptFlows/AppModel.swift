@@ -294,7 +294,6 @@ public final class AppModel: ObservableObject {
     public func makeRunRequest(lattice withLattice: Bool = true) -> RunRequest? {
         guard let project, let file = project.importedFile,
               let materialsPath, let rulesPath else { return nil }
-        let lc = project.loadCase()
         // ★ ONE emission for the protections AND the lattice regions (ruling 2): a protected,
         // latticed face is protected to the depth its prism emits, so both read the same regions
         let emission = project.latticeJobRegions()
@@ -316,6 +315,9 @@ public final class AppModel: ObservableObject {
         // from the EMITTED regions, not the role map, so a role whose face has no usable
         // B-rep geometry cannot select a mode with nothing to fit into.
         let latticeSpec = withLattice ? project.latticeRunSpec(emission: emission) : nil
+        // ★ B6 (note 23b): a job carrying the lattice leaves out the Topology groups switched off in Lattice Setup
+        let leftOut = latticeSpec == nil ? [] : project.latticeLeftOutGroups
+        let lc = project.loadCase(leavingOut: leftOut)
         var request = RunRequest(modelPath: file.path, material: project.material,
                           materialsPath: materialsPath, rulesPath: rulesPath,
                           resolution: project.quality.resolution,
@@ -355,7 +357,7 @@ public final class AppModel: ObservableObject {
                           // Defaults true on the project, so an untouched project
                           // asks for the armed posture explicitly.
                           projectCADFaces: true)   // ★ always (ruling 2026-10-26 23:44): the chip is hidden, a stored OFF can't strand a project
-        request.scenarios = project.scenarioWires()   // ★ load scenarios (overnight release 2026-10-26): 2+ only
+        request.scenarios = project.scenarioWires(leavingOut: leftOut)   // ★ load scenarios (overnight release 2026-10-26): 2+ only
         request.safetyMargin = project.force.safetyMarginValue   // ★ the safety margin (ruling 2026-10-26 13:12)
         // ★ exact Protect: always reaching past the face — core 139a5411 (ruling 06:13, fix 2) cuts only the part's own skin
         // in that band and keeps grown material, so growth runs no longer need flush regions

@@ -2538,6 +2538,38 @@ public enum TopOptKit {
         return latticeSchemaAccepts(key: "emit_plan_laid")
     }()
 
+    /// ★★ B6 → E2.2 (release (2), the reviewer's ruling 11-06 09:41Z): does the linked core take `lattice.whole_part`, Start
+    /// from's "All lattice · − Lattice faces"? Whole-job probe with its control. FALSE ⇒ the job stays as today and Lattice
+    /// Setup keeps its plain line.
+    public static let latticeWholePartWired: Bool = {
+        guard latticeSchemaAccepts(key: "emit_stl") else { return false }   // the control
+        return latticeSchemaAccepts(key: "whole_part")
+    }()
+
+    /// ★★ B6 → E2.1: does the linked core take `lattice.scenarios`, the Topology panel's scenario switches? Core refuses the
+    /// key on a job without load scenarios, so the probe is a LOADCASE job with two (which core refuses alongside the base
+    /// job's self-weight keys — fixture_faces, gravity, ladder, margin_stop — so it has none); its control is the same job
+    /// without the key.
+    public static let latticeScenariosWired: Bool = { latticeScenariosProbe().wired }()
+
+    /// The probe's two verdicts, for its own test: the control (the loadcase job without the key) must pass on every core.
+    static func latticeScenariosProbe() -> (control: String?, wired: Bool) {
+        func job(_ extra: String) -> Data {
+            func scenario(_ name: String) -> String {
+                #"{"name": ""# + name + #"", "groups": [{"force": [0, 0, -10], "face_ids": [1]}], "anchor_face_ids": [2]}"#
+            }
+            let text = #"{"model": "part.step", "material": "PLA", "mode": "minimize_plastic", "resolution": 48, "#
+                + #""loads": {"anchor_face_ids": [2], "groups": [{"force": [0, 0, -10], "face_ids": [1]}], "scenarios": ["#
+                + scenario("a") + ", " + scenario("b") + #"]}, "simp": {"max_iterations": 30}, "#
+                + #""output": {"report": "report.json", "mesh_format": "3mf", "mesh_prefix": "variant"}, "#
+                + #""lattice": {"topology": "octet", "cell_mm": 3.0, "strut_radius_mm": 0.4"# + extra + "}}"
+            return Data(text.utf8)
+        }
+        let control = jobSchemaError(job(""))
+        guard control == nil else { return (control, false) }
+        return (nil, jobSchemaError(job(#", "scenarios": ["a"]"#)) == nil)
+    }
+
     public static func latticeSchemaAccepts(key: String) -> Bool {
         // ★ STRICT: accepted ⇔ core's schema raises NO error on the base job carrying
         // the key. A test that merely asked "does the error name the key" passed a

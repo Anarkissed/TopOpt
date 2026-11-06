@@ -813,6 +813,11 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             // the latter two unless `skin == "diagrid"`, which is why only the
             // unambiguous "shell" is ever emitted.
             if let of = lat.outerFinish { block["outer_finish"] = of }
+            // ★ B6 → E2 (release (2)): Start from − and the scenario switches — set on the spec only once core takes the key
+            if lat.wholePart { block["whole_part"] = true }
+            if !lat.scenariosLeftOut.isEmpty, request.scenarios.count >= 2 {
+                block["scenarios"] = request.scenarios.map(\.name).filter { !lat.scenariosLeftOut.contains($0) }
+            }
             // ★ ASK FOR THE EMITTED SPANS when the lattice is organic (2026-09-02): the
             // preview draws the organic field from them. Gated on the linked core knowing
             // the key — `reject_unknown_keys` kills the whole job over one it does not.

@@ -162,6 +162,14 @@ public enum RelatticeJobBuilder {
         // the latter two unless `skin == "diagrid"`, which is why only the
         // unambiguous "shell" is ever emitted.
         if let of = lat.outerFinish { block["outer_finish"] = of }
+        // ★ B6 → E2 (release (2)): Start from − and the scenario switches. The load case is the run's own, so the names go
+        // only where that run carried them; every one on (or none of them there) writes nothing — core's own "every scenario".
+        if lat.wholePart { block["whole_part"] = true }
+        if !lat.scenariosLeftOut.isEmpty {
+            let ran = ((job["loads"] as? [String: Any])?["scenarios"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
+            let kept = ran.filter { !lat.scenariosLeftOut.contains($0) }
+            if ran.count >= 2, kept.count < ran.count { block["scenarios"] = kept }
+        }
         // ★ ASK FOR THE EMITTED SPANS when the lattice is organic (2026-09-02): the
         // preview draws the organic field from them. Gated on the linked core knowing
         // the key — `reject_unknown_keys` kills the whole job over one it does not.
