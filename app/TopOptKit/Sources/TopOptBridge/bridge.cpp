@@ -8,6 +8,19 @@
 #include "topopt/lattice_boundary.hpp"
 #include "topopt/grading.hpp"
 
+// ★★ THE CORE HEADERS AND THE CORE LIBRARY ARE ONE BUILD, OR THE APP DOES NOT LINK (the reviewer's ruling of
+// 2026-11-06, after his iPad crash of 05:31: this file compiled against E2/E3's JobDescription and linked the 11-04
+// libtopopt.a, and job_schema_error's destructor freed what the other layout never allocated). build_core.sh vendors a
+// pinned copy of core/include beside the libraries and stamps one name into both: topopt_vendored_core.h defines
+// TOPOPT_VENDORED_CORE_SYMBOL, and every slice of libtopopt.a defines that symbol. Referencing it here turns a vendor
+// mixed from two builds into an undefined symbol at link time — on the Mac, in every build — never a crash on the iPad.
+#if !__has_include("topopt_vendored_core.h")
+#error "vendor/include has no topopt_vendored_core.h: run app/scripts/build_core.sh, which vendors core's headers and library together"
+#endif
+#include "topopt_vendored_core.h"
+extern "C" const char TOPOPT_VENDORED_CORE_SYMBOL[];
+extern "C" __attribute__((used)) const char* const topopt_bridge_vendored_core = TOPOPT_VENDORED_CORE_SYMBOL;
+
 #include <algorithm>
 #include <atomic>
 #include <cctype>
