@@ -1,6 +1,7 @@
 // LatticeE2WiringHostedTests — release (2) (the reviewer's ruling 11-06 09:41Z, part 1: UI-Notes' half of the app): B6's
 // saved keys reach the job. Start from − goes as `lattice.whole_part` and the scenario folder switches as `lattice.scenarios`,
-// each once the linked core takes its key (E2, merged for release (2) as core db96a9122f04), and each "until the engine
+// each once the linked core takes its key (E2, in release (2)'s core 1635694a21b3; the probes read the schema, so they pin no
+// fingerprint), and each "until the engine
 // update" line goes with it. A switched-off Topology group leaves the lattice job's loads and holds app-side, with no core
 // key (as agreed 11-04 19:30Z), except on "Lattice an optimized result", whose load case is its run's own: one plain line
 // says so (pick (a), asked 09:49Z). Protect skin keeps "runs as No lattice" until E2.4.
