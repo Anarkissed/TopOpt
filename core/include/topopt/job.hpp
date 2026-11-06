@@ -281,6 +281,11 @@ struct JobLatticeRegion {
   int shape_grade = -1;               // -1 = the part's; 0 off; 1 on
   double shape_grade_band_mm = -1.0;  // < 0 = the part's
   double shape_grade_strength = -9.0; // ★ ruling 2: in [-1, 1]; < -1 = the part's
+  // ★ E2.4 per region (ruling 11-06 (A)): "none" (open) | "shell" (covered); "" = the
+  // part's lattice.outer_finish. Open beside covered: the shell is re-meshed around the
+  // design minus the open pocket, and a solid wall (the slicer's wall, in whole voxel
+  // layers) closes it from the covered part, counted by the certificate.
+  std::string outer_finish;
   // ★ E3: the region's own cell window (mm), swept only; 0 = the part's. Its voxels take
   // only the part's ladder cells (grading cell_min_mm x 2^L) inside it.
   double cell_min_mm = 0.0;

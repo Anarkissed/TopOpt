@@ -15,6 +15,11 @@
 //    is left, and the refusal names the region by its label.
 // §4 an analyze job, the whole bar latticed open: the re-certification floors the cut
 //    cells too, and does not accept.
+// §5 ruling 11-06 (A), a region's own finish: the whole part latticed covered, with
+//    "Right" (its top right 10 mm) open, loaded on the bottom. The shell is re-meshed
+//    around the design minus Right's pocket, a solid wall closes Right from the covered
+//    lattice (the slicer's wall, two 0.45 mm lines by default, in whole voxel layers
+//    rounded up), the certificate counts it, and the receipt names it.
 #include "topopt/job.hpp"
 #include "topopt/loadcase.hpp"
 #include "topopt/materials.hpp"
@@ -127,7 +132,7 @@ double num_after(const std::string& s, const std::string& key, std::size_t from 
 
 bool has(const std::string& s, const std::string& w) { return s.find(w) != std::string::npos; }
 
-struct Run { std::string receipt; long long stl_bytes = -1; };
+struct Run { std::string receipt; long long stl_bytes = -1; std::string stl; };
 Run lattice_part(const std::string& dir, const std::string& tag, const std::string& json) {
   Run out;
   const std::string folder = dir + "/lattice_open_" + tag;
@@ -147,7 +152,10 @@ Run lattice_part(const std::string& dir, const std::string& tag, const std::stri
       if (n.size() > 20 && n.compare(n.size() - 20, 20, "_lattice.report.json") == 0)
         out.receipt = read_file(e.path().string());
       if (n.size() > 12 && n.compare(n.size() - 12, 12, "_lattice.stl") == 0)
+      {
         out.stl_bytes = static_cast<long long>(std::filesystem::file_size(e.path()));
+        out.stl = read_file(e.path().string());
+      }
     }
   return out;
 }
@@ -238,6 +246,50 @@ int main() {
           "§4 the re-certification floors the cut cells");
     CHECK(has(ri, "\"recertified_accepted\": false"),
           "§4 the whole bar open, loaded on cut cells, does not accept");
+  }
+
+  // ── §5 a region's own finish ───────────────────────────────────────────────
+  {
+    const int bottom = face_with_normal(model, 0, 0, -1);
+    auto mixed = [&](const char* left_finish, const char* right_finish) {
+      // The whole part latticed (lattice.whole_part) at the part's finish, `left_finish`;
+      // "Right", the top right 10 mm, with its own. Face regions side by side keep their
+      // own solid rims and never touch, so the wall is tested where the lattice is one.
+      char regs[700];
+      std::snprintf(regs, sizeof regs,
+                    ", \"outer_finish\": \"%s\", \"whole_part\": true, \"regions\": ["
+                    "{\"role\": \"include\", \"kind\": \"face\", \"face_id\": %d, \"label\": \"Right\", "
+                    "\"outer_finish\": \"%s\", \"geometry\": {\"origin\": [45, 10, 20], "
+                    "\"normal\": [0, 0, -1], \"half_u_mm\": 15, \"half_w_mm\": 10, \"depth_mm\": 10}}]",
+                    left_finish, f.top, right_finish);
+      std::string j = job_json(f, "lattice_part", ", \"skin\": \"none\"" + std::string(regs));
+      const std::string load = "\"groups\": [{\"face_ids\": [" + std::to_string(f.right) +
+                               "], \"force\": [0, 300, 0]}]";
+      j.replace(j.find(load), load.size(),
+                "\"groups\": [{\"face_ids\": [" + std::to_string(bottom) + "], \"force\": [0, 0, -30]}]");
+      return j;
+    };
+    CHECK(refused_with(job_json(f, "lattice_part", ", \"skin\": \"diagrid\", \"outer_finish\": \"skin\", "
+                                "\"regions\": [{\"role\": \"include\", \"kind\": \"face\", \"face_id\": 0, "
+                                "\"outer_finish\": \"none\", \"geometry\": {\"origin\": [15, 10, 20], "
+                                "\"normal\": [0, 0, -1], \"half_u_mm\": 15, \"half_w_mm\": 10, \"depth_mm\": 10}}]"),
+                       "the freeform skin finishes are part-wide"),
+          "§5 a region's finish rides on the part's shell or none");
+    const Run both = lattice_part(dir, "both_covered", mixed("shell", "shell"));
+    const Run mix = lattice_part(dir, "mixed", mixed("shell", "none"));
+    const std::size_t of = mix.receipt.find("\"open_finish\": {");
+    std::printf("[open] mixed: %s\n", of == std::string::npos ? "(no open_finish)"
+                                                               : mix.receipt.substr(of, 420).c_str());
+    CHECK(of != std::string::npos &&
+              has(mix.receipt, "\"regions\": [\"Right open: a wall closes it from the covered part\"]"),
+          "§5 the receipt names the open region and its wall");
+    CHECK(num_after(mix.receipt, "wall_voxels", of) > 0 && num_after(mix.receipt, "wall_mm", of) >= 0.9 - 1e-9,
+          "§5 a wall of at least the slicer's two lines closes it");
+    CHECK(!has(both.receipt, "\"open_finish\""), "§5 control: both covered, no open finish");
+    CHECK(!mix.stl.empty() && !both.stl.empty() && mix.stl != both.stl,
+          "§5 the file differs from the all-covered one (the shell leaves Right open)");
+    CHECK(has(mix.receipt, "\"lattice_accepted\": true") || has(mix.receipt, "The open lattice in \\\"Right\\\""),
+          "§5 it certifies, or is refused naming Right");
   }
 
   std::printf("%s: %d checks, %d failures\n", g_failures ? "FAIL" : "PASS", g_checks,

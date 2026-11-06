@@ -1637,7 +1637,7 @@ JobDescription parse_job(const std::string& json_text) {
                                  "synthetic_soft_mm", "label", "rho_min", "rho_max",
                                  "demand_exponent", "grading", "shape_grade",
                                  "shape_grade_band_mm", "cell_min_mm", "cell_max_mm",
-                                 "shape_grade_strength"},
+                                 "shape_grade_strength", "outer_finish"},
                             "a lattice region");
         JobLatticeRegion reg;
         // ★ E2.6 + E3: the region's name and its own grading (job.hpp). The band is
@@ -1712,6 +1712,12 @@ JobDescription parse_job(const std::string& json_text) {
         if (reg.cell_min_mm > 0.0 && reg.cell_max_mm > 0.0 && reg.cell_max_mm < reg.cell_min_mm)
           schema_fail(named + ": its cell window needs cell_min_mm <= cell_max_mm (got " +
                       fmt_g(reg.cell_min_mm) + ", " + fmt_g(reg.cell_max_mm) + ")");
+        if (const JsonValue* of = own_grading("outer_finish")) {
+          reg.outer_finish = require_nonempty_string(*of, "lattice region outer_finish");
+          if (reg.outer_finish != "none" && reg.outer_finish != "shell")
+            schema_fail(named + ": \"outer_finish\" must be \"none\" (open) or \"shell\" "
+                        "(covered) (got \"" + reg.outer_finish + "\")");
+        }
         if (const JsonValue* ss = own_grading("shape_grade_strength")) {
           reg.shape_grade_strength = require_number(*ss, "lattice region shape_grade_strength");
           if (!(reg.shape_grade_strength >= -1.0 && reg.shape_grade_strength <= 1.0))
@@ -3035,6 +3041,16 @@ JobDescription parse_job(const std::string& json_text) {
               "]. Outside it the type's homogenized tensor has no measurement behind it.");
       }
     }
+    // (1b2) ★ E2.4: a region's own finish rides on the part's open or covered finish;
+    // the freeform skin finishes are part-wide.
+    for (const auto* list : {&job.lattice.regions, &job.lattice.whole_part_includes})
+     for (const JobLatticeRegion& r : *list)
+      if (!r.outer_finish.empty() && job.lattice.outer_finish != "shell" &&
+          job.lattice.outer_finish != "none")
+        schema_fail((r.label.empty() ? std::string("a lattice region") : "lattice region \"" + r.label + "\"") +
+                    ": its own \"outer_finish\" needs the part's lattice.outer_finish \"shell\" "
+                    "or \"none\" (got \"" + job.lattice.outer_finish + "\"); the freeform "
+                    "skin finishes are part-wide");
     // (1c) ★ E3: a region's own cell window. It holds the region to the part's swept
     // ladder (cell_plan.hpp), so it needs the swept plan, and it must hold at least one
     // of the ladder's cells: base cell_min_mm x 2^L (the base is the part's; a region
