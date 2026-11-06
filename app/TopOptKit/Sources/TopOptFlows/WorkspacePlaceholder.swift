@@ -10722,8 +10722,9 @@ public struct WorkspacePlaceholder: View {
                 }
             }
             .padding(.horizontal, 14)
-            if project.lattice.wholePart {
-                // ★ his 11-03 rule: the job stays as today until the engine takes `lattice.whole_part` (E2) — one plain line
+            if project.lattice.wholePart, !project.latticeWholePartLive {
+                // ★ his 11-03 rule: the job stays as today until the engine takes `lattice.whole_part` (E2) — one plain line,
+                // gone by itself once the linked core takes the key (release (2))
                 Text(LatticeSetupCopy.wholePartWaits).font(.system(size: 12.5)).foregroundStyle(DS.Color.warning.color)
                     .padding(.horizontal, 14).padding(.bottom, 8)
                     .background(DSParts.publish("latticeWholePartWaits"))
@@ -11068,11 +11069,26 @@ public struct WorkspacePlaceholder: View {
                 Text(LatticeSetupCopy.includeLine).font(.system(size: 12.5)).foregroundStyle(DS.Color.textSecondary.color)
                     .padding(.horizontal, 14).padding(.vertical, 8)
                     .background(DSParts.publish("latticeTopologyLine"))
-                if !project.lattice.topologyExcluded.isEmpty {
-                    // ★ his 11-03 rule: the job stays as today until the engine takes the include list (E2) — one plain line
+                if !project.latticeScenariosLive, force.scenarioList.contains(where: { project.lattice.topologyExcluded.contains($0.id) }) {
+                    // ★ his 11-03 rule: a scenario's switch waits on `lattice.scenarios` (E2) — one plain line, gone by itself
+                    // once the linked core takes the key (release (2))
                     Text(LatticeSetupCopy.includeWaits).font(.system(size: 12.5)).foregroundStyle(DS.Color.warning.color)
                         .padding(.horizontal, 14).padding(.bottom, 8)
                         .background(DSParts.publish("latticeIncludeWaits"))
+                }
+                if !project.latticeLeftOutGroups.isEmpty {
+                    // ★ release (2): a group's switch acts in the app, on every run but a result's re-lattice
+                    Text(LatticeSetupCopy.resultKeepsGroups).font(.system(size: 12.5)).foregroundStyle(DS.Color.textSecondary.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 14).padding(.bottom, 8)
+                        .background(DSParts.publish("latticeResultKeepsGroups"))
+                }
+                if project.latticeSwitchedOffStillProtects {
+                    // ★ release (2): those switches wait on the reviewer's answer — the job still applies them, said once
+                    Text(LatticeSetupCopy.protectStillApplies).font(.system(size: 12.5)).foregroundStyle(DS.Color.textSecondary.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 14).padding(.bottom, 8)
+                        .background(DSParts.publish("latticeProtectStillApplies"))
                 }
                 if force.hasScenarios {
                     ForEach(force.scenarioList, id: \.id) { s in
@@ -11087,7 +11103,9 @@ public struct WorkspacePlaceholder: View {
                             }
                         }
                     }
-                    ForEach(scenarioLooseGroups) { g in latticeTopologyRow(g) }
+                    // the groups no scenario owns (Protect, Keep clear). Not `scenarioLooseGroups`: that is Topology's own and
+                    // empty on any other stage, which left these rows out of this panel (found 11-06 with ruling (b))
+                    ForEach(selection.groups.filter { !scenarioOwned($0.id) }) { g in latticeTopologyRow(g) }
                 } else {
                     ForEach(selection.groups) { g in latticeTopologyRow(g) }
                 }
@@ -11100,7 +11118,9 @@ public struct WorkspacePlaceholder: View {
         let glyph = RoleGlyphs.glyphs(project, g.id, readsLattice: false).first
         return DSRow(.include, key: "latticeTopo-\(g.id.uuidString)", mark: .colour(g.color), name: g.name,
                      role: glyph.map { (glyph: $0.symbol, colour: $0.tint) }, value: topologyGroupSummary(g)) {
-            latticeIncludeSwitch(g.id, name: g.name)
+            // ★ the reviewer's ruling 11-06 10:45Z: a Load or Hold switches (a); Protect and Keep clear always apply — rules
+            // about the part, not loads — so a group with neither load nor hold shows no switch
+            if project.latticeGroupSwitches(g.id) { latticeIncludeSwitch(g.id, name: g.name) }
         }
     }
 

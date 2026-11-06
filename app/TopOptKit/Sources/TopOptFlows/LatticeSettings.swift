@@ -1119,6 +1119,12 @@ public struct LatticeSpec: Equatable, Sendable {
     /// aesthetic ceiling whenever Allow quilt is off; 0 = off (Allow quilt on, or a
     /// topology with no ceiling).
     public var densityCapRho: Double = 0
+    /// ★ B6 → E2 (release (2), the reviewer's ruling 11-06 09:41Z). Start from's "All lattice · − Lattice faces" as core's
+    /// `lattice.whole_part`: set by `ProjectModel.latticeRunSpec` only when the linked core takes the key; false writes nothing.
+    public var wholePart: Bool = false
+    /// The scenarios switched off in the Topology panel, by name: the job's `lattice.scenarios` names every scenario IT
+    /// carries but these (a re-lattice carries its run's). Empty ⇒ every scenario and no key — also before core takes it.
+    public var scenariosLeftOut: [String] = []
 
     // ★ ORGANIC's seven keys, carried the same way `algorithm` is: plain `var`s with
     // core's own defaults, so every existing `LatticeSpec(...)` call site is unchanged

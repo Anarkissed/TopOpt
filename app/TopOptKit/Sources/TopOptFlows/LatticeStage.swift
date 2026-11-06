@@ -221,8 +221,14 @@ public enum LatticeSetupCopy {
     // ★ B6 s2a — the Topology panel (notes 23a, 23b)
     public static let topology = "Topology"
     public static let includeLine = "Switched-off groups are left out of this lattice."
-    /// While any switch is off: the job stays as today until the engine takes the include list (his 11-03 rule).
-    public static let includeWaits = "The run still uses them until the engine update"
+    /// While a scenario's switch is off and the linked core can't take `lattice.scenarios` yet (his 11-03 rule). Group
+    /// switches act in the app (release (2)), so they never show it.
+    public static let includeWaits = "The run still uses every scenario until the engine update"
+    /// ★ Release (2): while a group's switch is off — the one run that can't leave it out (pick (a), asked 11-06 09:49Z).
+    public static let resultKeepsGroups =
+        "Lattice an optimized result keeps every group: it is checked under the loads it was optimized with."
+    /// While a switched-off group carries Protect or Keep clear: the job still applies them (the reviewer asked 09:49Z).
+    public static let protectStillApplies = "Protect and Keep clear still apply to switched-off groups."
 
     // ★ B6 s2b — the role picker (notes 24, 27) and the open Topology panel's hint (23c)
     public static let protectSkin = "Protect skin"

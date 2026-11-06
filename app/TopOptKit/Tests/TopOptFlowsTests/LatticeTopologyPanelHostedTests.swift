@@ -62,8 +62,9 @@ final class LatticeTopologyPanelHostedTests: XCTestCase {
         XCTAssertEqual(LatticeSetupCopy.includeLine, "Switched-off groups are left out of this lattice.")
     }
 
-    /// ★ 23b: every scenario folder and group has an include switch, on; off is stored with the lattice, the job stays as
-    /// today, and one plain line says it waits on the engine.
+    /// ★ 23b: every scenario folder and group has an include switch, on; off is stored with the lattice. Until the linked core
+    /// takes `lattice.scenarios` the job stays as today and one plain line says it waits on the engine; from release (2) the
+    /// job names the switched-on scenarios and the line goes (LatticeE2WiringHostedTests).
     func testEachFolderAndGroupHasAnIncludeSwitchStoredWithTheLattice() throws {
         let (h, p, app) = try stage(AppBuildHost.landscape13)
         try h.tap("latticeTopologyPanelHeader", "Topology's header", settle: 1)
@@ -71,17 +72,25 @@ final class LatticeTopologyPanelHostedTests: XCTestCase {
         for s in p.force.scenarioList {
             _ = try h.probe("latticeInclude-\(s.id.uuidString)", "★ \(s.name)'s include switch")
         }
-        let loose = p.selection.groups.filter { g in !p.force.scenarioList.contains { p.force.group(g.id, isIn: $0.id) } }
-        for g in loose { _ = try h.probe("latticeInclude-\(g.id.uuidString)", "★ \(g.name)'s include switch") }
+        // a folder's Loads and Holds, each with its switch (opened: folders start closed)
+        let first = try XCTUnwrap(p.force.scenarioList.first)
+        try h.tap("latticeTopoFolder-\(first.id.uuidString)", "\(first.name)'s folder", settle: 1)
+        let owned = p.selection.groups.filter { p.force.group($0.id, isIn: first.id) && p.latticeGroupSwitches($0.id) }
+        XCTAssertFalse(owned.isEmpty)
+        for g in owned { _ = try h.probe("latticeInclude-\(g.id.uuidString)", "★ \(g.name)'s include switch") }
+        // the groups no scenario owns (Protect, Keep clear) sit below the folders with no switch (the reviewer's (b), 11-06;
+        // the first draft's filter here was always empty, and the panel had left those rows out — LatticeE2WiringHostedTests)
+        try h.tap("latticeTopoFolder-\(first.id.uuidString)", "\(first.name)'s folder, closed", settle: 1)
         XCTAssertTrue(p.lattice.topologyExcluded.isEmpty, "every switch on")
         XCTAssertNil(h.frames.all["latticeIncludeWaits"], "all on: nothing to say")
         let before = try XCTUnwrap(app.makeLatticeRunRequest())
         try h.tap("latticeInclude-\(held.id.uuidString)", "★ Held by right plate's switch", settle: 1)
         XCTAssertEqual(p.lattice.topologyExcluded, [held.id], "★ stored with the lattice")
-        _ = try h.onScreen("latticeIncludeWaits", "★ the plain line: it waits on the engine")
+        let live = TopOptKit.latticeScenariosWired
+        XCTAssertEqual(h.frames.all["latticeIncludeWaits"] != nil, !live, "★ the plain line exactly while it waits on the engine")
         let after = try XCTUnwrap(app.makeLatticeRunRequest())
-        XCTAssertEqual(after, before, "★ the job stays as today until the engine takes the include list")
-        XCTAssertEqual(LatticeSetupCopy.includeWaits, "The run still uses them until the engine update")
+        if live { XCTAssertEqual(after.lattice?.scenariosLeftOut, [held.name], "★ release (2): the job leaves it out") }
+        else { XCTAssertEqual(after, before, "★ the job stays as today until the engine takes the include list") }
     }
 
     /// The switches are saved with the lattice, and a project saved before them reads as all on (and writes the same bytes).
