@@ -353,6 +353,8 @@ extension LatticePreviewOccupancy {
     /// How far toward the quilt a cell ABOVE the finest rung thickens at the outline
     /// when it lies in the band (the finest rung goes all the way).
     public static let coarseCellBandRaise = 0.35
+    /// ★ Ruling 2's switch (a test's control only): false draws Default Grade's old solid outline and bleed.
+    nonisolated(unsafe) static var ruling2NoBeam = true
 
     /// The band from which the solid bleeds inward from the outline beam (mm).
     public static let bleedStartsAtBandMM = 25.0
@@ -698,8 +700,12 @@ extension LatticePreviewOccupancy {
         // one thin width; the bleed is drawn by the march as solid over the band's
         // texels (`solidDepthMM`) — "the growing solid inwards is SDF — the outline
         // stays the way it is, clean and thin". Cells keep clear of both.
-        let beam = Swift.max(solidBandMM, bead)
-        let bleed = shapeFit && shapeFitBandMM >= bleedStartsAtBandMM ? (shapeFitBandMM - 15) * 0.5 : 0
+        // ★ RULING 2 (2026-11-06; release (3), core e26b8038): under Default Grade (core's doubled) the shape grade is
+        // the graded band itself, built by the run — no solid outline and no bleed; solid only where no cell prints, which
+        // the run's receipt names (grading.shape_band.solid_box_mm). Stepped keeps its beam and bleed.
+        let noBeam = Self.ruling2NoBeam && dyadicSteps && shapeFit
+        let beam = noBeam ? bead : Swift.max(solidBandMM, bead)
+        let bleed = !noBeam && shapeFit && shapeFitBandMM >= bleedStartsAtBandMM ? (shapeFitBandMM - 15) * 0.5 : 0
         let band = beam + bleed
         func occupied(_ p: SIMD3<Double>) -> Bool {
             let g = (SIMD3<Float>(p) - occ.origin) / occ.spacing
@@ -1038,6 +1044,60 @@ extension LatticePreviewOccupancy {
             !yieldedKeys.isEmpty && yieldedKeys.contains(cellKey(r, lo, S))
         }
         let finestByRegion = Dictionary(ladders.map { ($0.region, $0.sizes.last ?? 0) }, uniquingKeysWith: { a, _ in a })
+        // ★ RULING 2 (release (3), core e26b8038 grading.cpp ~1100; LatticeTypes 11-07 20:05Z): under Default Grade (core's
+        // doubled) the band's finest cell f is the RUN's — the finest rung whose strut prints (core's floor for the line
+        // width) at the band's FULL raise toward the quilt row, full = min(q, r0 + (q − r0)(1 − t)·2^s), never below r0 —
+        // so Strength and the law's density move the band's CELLS as well as its struts. r0 is the law's density (the
+        // demand over densityLo…densityHi), the cell's densest sample (the run takes f per voxel and a block follows its
+        // finest-wishing voxel); t at the cell's nearest point to the outline. Never finer than the ladder's own last rung
+        // (the printsOpen bound); nothing prints ⇒ no preference (the ladder's last, as before). Stepped is unchanged (its
+        // cells are the app's plan, sent to the run).
+        let bandRunRule = Self.ruling2NoBeam && dyadicSteps && shapeFit && shapeFitBandMM > 0 && lineWidthMM > 0
+            && !latticeID.isEmpty && LatticeType.named(latticeID) != nil
+        let bandLat = latticeID.isEmpty ? nil : LatticeType.named(latticeID)
+        let bandQ: Double = {
+            guard bandRunRule, let bandLat else { return 0 }
+            var q = Swift.min(bandLat.quiltRowDensity(cellMM: pitch), densityHi > 0 ? densityHi : 1, bandQuiltCeiling)
+            if densityCap > 0 { q = Swift.min(q, densityCap) }
+            return q
+        }()
+        var bandFloorCache: [Double: Double] = [:]
+        func bandPrintFloor(_ cell: Double) -> Double {
+            if let v = bandFloorCache[cell] { return v }
+            let v: Double
+            switch TopOptKit.latticeMinDensityForStrut(topology: latticeID, cellMM: cell,
+                                                       minExtrudableWidthMM: lineWidthMM, maxRelativeDensity: densityCap) {
+            case .prints(let rho)?: v = rho
+            case .noneUnderTheCap?: v = .infinity
+            case nil: v = bandLat?.printabilityDensityFloor(lineWidthMM: lineWidthMM, cellMM: cell) ?? .infinity
+            }
+            bandFloorCache[cell] = v
+            return v
+        }
+        let bandGamma = densityGamma > 0 ? densityGamma : 1
+        func bandLawRho(_ p: SIMD3<Double>) -> Double {
+            let q = (p - gorigin) / pitch
+            let i = Swift.max(0, Swift.min(gnx - 1, Int(q.x.rounded(.down))))
+            let j = Swift.max(0, Swift.min(gny - 1, Int(q.y.rounded(.down))))
+            let k = Swift.max(0, Swift.min(gnz - 1, Int(q.z.rounded(.down))))
+            let a = Double(Swift.max(0, Swift.min(1, grid.values[i + gnx * (j + gny * k)])))
+            return densityHi > densityLo ? densityLo + (densityHi - densityLo) * pow(a, bandGamma) : densityLo
+        }
+        /// The run's f for a band cell at `lo` (size S): see `bandRunRule`.
+        func bandFinest(_ lo: SIMD3<Double>, _ S: Double, nearest: Double, sizes: [Double]) -> Double {
+            let last = sizes.last!
+            guard bandRunRule, bandQ > 0 else { return last }
+            let t = Swift.max(0, Swift.min(1, nearest / shapeFitBandMM))
+            guard t < 1 else { return last }
+            var r0 = 0.0
+            for u in [0.25, 0.5, 0.75] { for v in [0.25, 0.5, 0.75] { for w in [0.25, 0.5, 0.75] {
+                r0 = Swift.max(r0, bandLawRho(lo + SIMD3<Double>(u, v, w) * S))
+            }}}
+            let amount = bandAmount > 0 ? bandAmount : 1
+            let full = Swift.max(r0, Swift.min(bandQ, r0 + (bandQ - r0) * (1 - t) * amount))
+            for cell in sizes.reversed() where full >= bandPrintFloor(cell) - 1e-12 { return Swift.max(cell, last) }
+            return last
+        }
         var pass = Self.centreOwnershipEnabled ? 0 : 1
         while true {
         if pass == 1 || dirtySlots == nil { candidates.removeAll(keepingCapacity: true) }
@@ -1313,9 +1373,12 @@ extension LatticePreviewOccupancy {
                 // never held back, and the rungs between get a proportional share —
                 // smallest at the outline, base cell at the band's inner edge. Band 5
                 // on a 12 mm cell changes no size (half of 12 is 6), as he accepted.
-                let finestLevel = level == ladder.sizes.count - 1
-                let centreOK = finestLevel || !(shapeFit && shapeFitBandMM > 0 && sBase > f + 1e-9)
-                    || dc >= shapeFitBandMM * (S - f) / (sBase - f) - 1e-9
+                // ★ ruling 2 (Default Grade): the run's f here, so Strength moves the cells (`bandRunRule`); a cell at or
+                // finer than it is never held back and takes the band's whole raise (the run's share 1 where S ≤ f)
+                let fHere = bandRunRule ? bandFinest(lo, S, nearest: nearest, sizes: ladder.sizes) : f
+                let finestLevel = level == ladder.sizes.count - 1 || (bandRunRule && S <= fHere + 1e-9)
+                let centreOK = finestLevel || !(shapeFit && shapeFitBandMM > 0 && sBase > fHere + 1e-9)
+                    || dc >= shapeFitBandMM * (S - fHere) / (sBase - fHere) - 1e-9
                 // ★ a cell that yielded steps down: it is not painted here, its region's next rung
                 // is tried below; at the finest rung it is dropped
                 let yielded = hasYielded(ladder.region, lo, S)
@@ -1823,7 +1886,7 @@ extension LatticePreviewOccupancy {
                                 fromCorePlan: false,
                                 drawnDensityHi: drawnHi > densityHi + 1e-9 ? drawnHi : 0,
                                 solidDepthMM: solidDepth,
-                                solidBandMM: beam)
+                                solidBandMM: noBeam ? 0 : beam)   // ★ ruling 2: no outline ribbon under Default Grade
         field.steppedCells = cells
         field.steppedTexelCell = cellOf
         return field

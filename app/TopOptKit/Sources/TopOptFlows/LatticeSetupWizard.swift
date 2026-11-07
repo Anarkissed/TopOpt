@@ -35,6 +35,9 @@ public struct LatticeSetupWizard: View {
     @State private var numberPadField: String?
     /// ★ lattice types U1: a greyed type chip, tapped, says why it can't be picked (core's facts)
     @State private var typeReason: String?
+    /// ★ B7 slice 2: a type picked on this visit (two or more offered: a new lattice starts with none picked); nil = not
+    /// yet, which counts as picked for a lattice already saved.
+    @State private var typePicked: Bool? = nil
 
     /// ★ "Check sizes" (final contract 2026-09-05): submits the re-lattice job with the
     /// candidate list and returns core's `organic_probe.json` answer. nil ⇒ no worker
@@ -903,25 +906,9 @@ public struct LatticeSetupWizard: View {
 
             // (the "Flare overhangs" row is gone, 2026-09-28: core #358 removed the stage)
 
-            // ── Preview repairs (preview only) ──
-            HStack(spacing: DS.Space.s) {
-                HStack(spacing: DS.Space.xs) {
-                    Text("Preview: show print repairs").dsStyle(DS.TypeScale.caption)
-                        .foregroundStyle(DS.Color.textPrimary.color)
-                    infoButton("repairs", Self.infoRepairs)
-                }
-                Spacer(minLength: DS.Space.s)
-                latticeSwitch(isOn: organicShowRepairs) {
-                    project.lattice.organicShowRepairs.toggle(); rebuild()
-                }
-                    .accessibilityLabel("Show print repairs")
-                    .latticeID("wizard-organic-show-repairs")
-            }
-            if !organicShowRepairs { shortNote("Repairs hidden", warning: true) }
-            else if !TopOptKit.coreCarriesTheSampleRepairFix {
-                // ★ the linked core collapses the cube under repairs (PR 358 not linked): the traced cube is shown
-                shortNote("Repairs need the newer core (PR 358) — traced cube shown", warning: true)
-            }
+            // ── Preview repairs: HIDDEN (B7 slice 2; his LS-12: "Keep it hidden for now - if required in the future I will
+            // ask for it."). No row, no (i), no note; the stored `organicShowRepairs` still decides what the preview draws,
+            // so a project keeps the picture it had (his 102117B9 keeps repairs hidden).
 
             // ── Fit to shape (item 6): ALWAYS ON without a simulation ──
             sectionTitle("Fit to shape", info: "fit-to-shape", Self.infoFitToShape
@@ -1825,12 +1812,12 @@ public struct LatticeSetupWizard: View {
                 // does not exist is not a mode — `setSimulateStresses` has
                 // already moved this axis to Uniform, so the segment cannot show
                 // a selection it no longer holds.
-                // ★ B8 (his answer 2026-10-24): NO "Sim" HERE. Along's "By stress" is the one place for it — the same
-                // setting (`densityMode = .sim`, through `chooseAlong(.load)` → `setDensityMode(.sim)`). While it is
-                // on, neither segment is lit and the line says so.
-                segmentRow(LatticeCellsRow.densityChoices.map(\.title),
-                           selected: densityModeIndex) { i in
-                    model.setDensityMode(LatticeCellsRow.densityChoices[i])
+                // ★ B8 (his answer 2026-10-24) put "Sim" under Along's "By stress"; B7 slice 2 removes Along (round 2,
+                // N5c), so the same setting (`densityMode = .sim`) is this row's "By stress" again.
+                // ★ B7 slice 2: Along is gone (round 2, N5c), so "By stress" is here again, under the permission.
+                let choices = LatticeCellsRow.densityChoices(simulate: model.simulateStresses)
+                segmentRow(choices.map(LatticeCellsRow.densityTitle), selected: densityModeIndex) { i in
+                    model.setDensityMode(choices[i])
                 }
                 if model.densityMode.needsSimulation {
                     simDerivedNote("Each region graded from its own stress.")
@@ -1949,21 +1936,89 @@ public struct LatticeSetupWizard: View {
     /// (`LatticeTypeCatalog`) — offered ones selectable, the rest greyed; a greyed chip, tapped,
     /// says why in a line under the row and never selects.
     private var typeRow: some View {
+        // ★ B7 slice 2 (plan.md §B7 Type, LS-1 / LS-19, R3.1): the offered types only (core's facts behind the type gate);
+        // one is a LABEL card with its (i), two or more are big cards with nothing pre-picked on a new lattice (Save waits
+        // for a pick). Unready types are hidden. Under Organic the cards hide (the switch below is the way back) — but a
+        // saved type core can't run still shows its fix, as before.
         let entries = LatticeTypeCatalog.entriesFromCore()
-        // ★ REVIEW 2026-10-01: a SAVED type core can't run says so at once — its run would carry
-        // no lattice — not only when its chip is tapped. The offered chip beside it is the fix.
+        let offered = entries.filter(\.offered)
         let stale = LatticeTypeCatalog.selectionRefusal(model.topologyID, in: entries)
+        let organicOn = model.cellTransition == .organicGrade
         return VStack(alignment: .leading, spacing: DS.Space.xs) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: DS.Space.xs) {
-                    ForEach(entries) { e in typeChip(e, fixesStale: e.offered && stale != nil) }
+            if !organicOn || stale != nil {
+                if offered.count <= 1 {
+                    if let one = offered.first { typeLabelCard(one, fixesStale: stale != nil) }
+                } else {
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: DS.Space.xs), GridItem(.flexible())],
+                              spacing: DS.Space.xs) {
+                        ForEach(offered) { e in typeCard(e, fixesStale: stale != nil) }
+                    }
+                    if typePickNeeded { shortNote(Self.typePickLine).latticeID("wizard-type-pick-note") }
                 }
-                .padding(.trailing, DS.Space.xs)
             }
             if let why = typeReason ?? stale {
                 shortNote(why).latticeID("wizard-type-reason")
             }
         }
+    }
+
+    static let typePickLine = "Pick a lattice type to save."
+    static func typeInfo(_ name: String) -> String {
+        "The lattice's cell shape. \(name) is the type the app offers today; more types arrive one update at a time, "
+            + "each once its settings and pictures are in."
+    }
+
+    /// Two or more types offered, and none picked yet on a new lattice: Save waits.
+    var typePickNeeded: Bool {
+        LatticeTypeCatalog.entriesFromCore().filter(\.offered).count >= 2
+            && model.cellTransition != .organicGrade && !(typePicked ?? project.lattice.enabled)
+    }
+
+    /// ★ One type: a label card, its name and an (i) — nothing to pick. A tap only fixes a saved type core can't run.
+    private func typeLabelCard(_ e: LatticeTypeEntry, fixesStale: Bool) -> some View {
+        HStack(spacing: DS.Space.s) {
+            Button {
+                guard fixesStale else { return }
+                typeReason = nil
+                if model.cellTransition == .organicGrade { model.topologyID = e.id } else { model.setTopology(e.id) }
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(e.displayName).font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(DS.Color.textPrimary.color)
+                    Text(fixesStale ? "Tap to use it" : "The lattice type").font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(DS.Color.textTertiary.color)
+                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .latticeID("wizard-type-\(e.id)")
+            infoButton("type", Self.typeInfo(e.displayName))
+        }
+        .padding(.horizontal, DS.Space.m).padding(.vertical, DS.Space.xs)
+        .background(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous).fill(DS.Color.fillSelected.color))
+        .latticeID("wizard-type-label")
+    }
+
+    /// ★ Two or more types: a big card each; lit only once picked (a saved lattice's type counts as picked).
+    private func typeCard(_ e: LatticeTypeEntry, fixesStale: Bool) -> some View {
+        let on = model.topologyID == e.id && (typePicked ?? project.lattice.enabled)
+        return Button {
+            typeReason = nil
+            typePicked = true
+            if model.cellTransition == .organicGrade { model.topologyID = e.id } else { model.setTopology(e.id) }
+        } label: {
+            Text(e.displayName).font(.system(size: 14, weight: .semibold)).multilineTextAlignment(.center)
+                .foregroundStyle((on ? DS.Color.textPrimary : DS.Color.textSecondary).color)
+                .frame(maxWidth: .infinity, minHeight: 64)
+                .background(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
+                    .fill((on ? DS.Color.fillSelected : DS.Color.fillSubtle).color))
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
+                    .strokeBorder(on ? DS.Color.accent.color : Color.clear, lineWidth: 2))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .latticeID("wizard-type-\(e.id)")
     }
 
     /// ★★★ ORGANIC, ITS OWN ROW BELOW THE LATTICE TYPES (his ruling, 2026-09-02: "add an
@@ -2027,35 +2082,6 @@ public struct LatticeSetupWizard: View {
             && !TopOptKit.organicStructuralCertificationWired
     }
 
-    private func typeChip(_ e: LatticeTypeEntry, fixesStale: Bool) -> some View {
-        // ★ ONE selection in the Type group. Under Organic the topology is still
-        // octet by core's law, but that is not the user's pick — showing "Octet
-        // truss" lit beside a lit "Organic" read as two selections (on-device,
-        // 2026-09-02 21:11). Tapping any type chip still leaves organic.
-        let organicOn = model.cellTransition == .organicGrade
-        let on: Bool = (model.topologyID == e.id) && !organicOn
-        // ★★ THE OFFERED SET IS CORE'S (lattice types U1, 2026-10-01): build ∩ certify ∩ the job
-        // parser accepts it — the octet alone until core lights a type (it lifted his 2026-09-18
-        // "grey out every type but Octet Truss" type by type, M8).
-        let offered = e.offered
-        // ★ GREYED while Organic is on (item 5): the switch below is the way back — EXCEPT the
-        // offered chip that fixes a saved type core can't run (review 2026-10-01): under Organic
-        // that type still rides the job and drops the lattice, so the fix stays one tap, and the
-        // tap leaves Organic on (it only puts back the octet core's law runs organic on).
-        let inert = organicOn && !fixesStale
-        return Button {
-            guard !inert else { return }
-            guard offered else { typeReason = LatticeTypeCatalog.reasonLine(e); return }
-            typeReason = nil
-            if organicOn { model.topologyID = e.id } else { model.setTopology(e.id) }
-        } label: {
-            Self.typeChipLabel(e.displayName, on: on, greyed: inert || !offered)
-        }
-        .buttonStyle(.plain)
-        .disabled(inert)
-        .accessibilityHint(e.reason ?? "")
-        .latticeID("wizard-type-\(e.id)")
-    }
     /// One type chip's look — the app's own view, so the evidence renders exactly it.
     static func typeChipLabel(_ name: String, on: Bool, greyed: Bool) -> some View {
         Text(name)
@@ -2116,9 +2142,9 @@ public struct LatticeSetupWizard: View {
         return modes.firstIndex(of: model.cellSizeMode) ?? 0
     }
     private var densityModeIndex: Int {
-        // ★ THE INDEX FOLLOWS THE LIST THE SEGMENT ACTUALLY SHOWS (B8: Uniform, Per region — Sim is Along's "By stress").
-        // Sim lights neither (-1): an index into a list that is not on screen is how a segment lights the wrong cell.
-        LatticeCellsRow.densityChoices.firstIndex(of: model.densityMode) ?? -1
+        // ★ THE INDEX FOLLOWS THE LIST THE SEGMENT ACTUALLY SHOWS (Uniform, Per region, and By stress under the simulation).
+        // A mode not on screen lights nothing (-1): an index into a list that is not shown is how a segment lights the wrong cell.
+        LatticeCellsRow.densityChoices(simulate: model.simulateStresses).firstIndex(of: model.densityMode) ?? -1
     }
     /// The printable thickness range for the CURRENT topology and cell — see
     /// `LatticeSettings.manualThicknessRangeMM`.
@@ -2265,9 +2291,11 @@ public struct LatticeSetupWizard: View {
     static let latticePanelTitle = "Lattice settings"
     static let latticeTabsKey = "lattice-page-tab"
     static let latticeManualSection = "Manual · this area"
-    static let latticePerAreaLine = "Each area's tab sets its own grade; its look and finish are the whole part's."
+    static let latticePerAreaLine = "Each area's tab sets its own grade and finish; the look is the whole part's."
+    /// ★ B7 slice 2 (release (3)): Rim and Skin per zone wait for core (`regions[].skin`); a zone tab says whose they are.
+    static func zoneRimSkinLine(_ part: String) -> String { "Rim and Skin are the part's for now (the part: \(part))." }
     /// ★ E3: on an area's tab, which rows are its own (it replaces "These settings apply to every region today.")
-    static let latticeAreaOwnLine = "The grade and its band are this area's; the other rows are the whole part's."
+    static let latticeAreaOwnLine = "The grade, its band and the finish are this area's; the other rows are the whole part's."
     /// ★ The reviewer's words (ruling (2), 2026-11-06), under the shape grade until core's band is real.
     static let shapeGradeRunLine = "The run's shape grade is a solid outline; the band and Strength are preview only."
     /// Where an area's grade differs from the part's: the preview draws one grade, the run grades this area its own way.
@@ -2288,20 +2316,26 @@ public struct LatticeSetupWizard: View {
         guard let gid = latticeAreaGroupID(c) else { return }
         let edits = latticeAreaEdits ?? project.lattice.areaGrading
         latticeAreaEdits = edits
-        latticePartGrade = LatticeAreaGrading(gradingMode: model.gradingMode, shapeFitBandMM: model.shapeFitBandMM)
+        latticePartGrade = LatticeAreaGrading(gradingMode: model.gradingMode, shapeFitBandMM: model.shapeFitBandMM,
+                                              shapeGradeStrength: model.shapeFitGradeStrength)
         if let m = edits[gid]?.gradingMode { model.gradingMode = m }
         if let b = edits[gid]?.shapeFitBandMM { model.shapeFitBandMM = b }
+        if let st = edits[gid]?.shapeGradeStrength { model.shapeFitGradeStrength = st }
         rebuild()
     }
 
     private func leaveLatticeArea() {
         guard let part = latticePartGrade, let c = cellsPage, let gid = latticeAreaGroupID(c) else { return }
         let mode = part.gradingMode ?? model.gradingMode, band = part.shapeFitBandMM ?? model.shapeFitBandMM
+        let strength = part.shapeGradeStrength ?? model.shapeFitGradeStrength
         let own = LatticeAreaGrading(gradingMode: model.gradingMode != mode ? model.gradingMode : nil,
-                                     shapeFitBandMM: model.shapeFitBandMM != band ? model.shapeFitBandMM : nil)
+                                     shapeFitBandMM: model.shapeFitBandMM != band ? model.shapeFitBandMM : nil,
+                                     shapeGradeStrength: model.shapeFitGradeStrength != strength ? model.shapeFitGradeStrength : nil,
+                                     outerFinish: latticeAreaEdits?[gid]?.outerFinish)
         latticeAreaEdits?[gid] = own.isEmpty ? nil : own
         model.gradingMode = mode
         model.shapeFitBandMM = band
+        model.shapeFitGradeStrength = strength
         latticePartGrade = nil
         rebuild()
     }
@@ -2472,7 +2506,8 @@ public struct LatticeSetupWizard: View {
         // ★ B7 (E3): every area's own grade goes too; an open area's tab now shows the fresh part's
         latticeAreaEdits = [:]
         if latticePartGrade != nil {
-            latticePartGrade = LatticeAreaGrading(gradingMode: model.gradingMode, shapeFitBandMM: model.shapeFitBandMM)
+            latticePartGrade = LatticeAreaGrading(gradingMode: model.gradingMode, shapeFitBandMM: model.shapeFitBandMM,
+                                                  shapeGradeStrength: model.shapeFitGradeStrength)
         }
         rebuild()
     }
@@ -2492,6 +2527,8 @@ public struct LatticeSetupWizard: View {
                 latticeAreaRows(organic: organic, structural: structural)
             } else {
                 shortNote(Self.latticePerAreaLine).latticeID("lattice-page-per-area-note")
+                // ★ B7 slice 2: the part's finish is set here once an area can have its own (Rim / Skin stay the part's)
+                if !organic, TopOptKit.regionOuterFinishWired { AnyView(settingControl(.finish, titled: true)) }
             }
         } else if let area {
             Text(area.uppercased()).font(.system(size: 10.5, weight: .bold)).tracking(0.8)
@@ -2503,17 +2540,46 @@ public struct LatticeSetupWizard: View {
                 || (model.gradingMode.fitsShape && part.shapeFitBandMM != model.shapeFitBandMM) {
                 shortNote(Self.latticeAreaPreviewLine).latticeID("lattice-page-area-preview-note")
             }
-            latticeAreaRows(organic: organic, structural: structural)
+            latticeAreaRows(organic: organic, structural: structural, zone: latticeAreaGroupID(c))
         }
         })
     }
 
-    private func latticeAreaRows(organic: Bool, structural: Bool) -> AnyView {
+    /// ★ B7 slice 2 (release (3), E2.4 per region): a zone's own finish, [None │ Covered] in core's words "none" / "shell";
+    /// until set, the part's (Covered when the part is covered, else None). Rim and Skin are the part's, said in one line.
+    private func zoneFinishRow(_ gid: UUID) -> AnyView {
+        let own = (latticeAreaEdits ?? project.lattice.areaGrading)[gid]?.outerFinish
+        let shown = own ?? (model.boundary == .covered ? "shell" : "none")
+        let partName = ["None", "Rim", "Skin", "Covered"][boundaryIndex]
+        return AnyView(VStack(alignment: .leading, spacing: 5) {
+            Text("Finish").font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)
+                .foregroundStyle(DS.Color.textTertiary.color)
+            HStack(spacing: 4) {
+                ForEach([("none", "None"), ("shell", "Covered")], id: \.0) { value, title in
+                    segmentButton(title, on: shown == value) {
+                        if latticeAreaEdits == nil { latticeAreaEdits = project.lattice.areaGrading }
+                        var g = latticeAreaEdits?[gid] ?? LatticeAreaGrading()
+                        g.outerFinish = value
+                        latticeAreaEdits?[gid] = g
+                        rebuild()
+                    }
+                    .latticeID("lattice-zone-finish-\(value)")
+                }
+            }
+            .modifier(LatticeSegmentTrack())
+            if model.boundary == .rim || model.boundary == .fullSkin {
+                shortNote(Self.zoneRimSkinLine(partName)).latticeID("lattice-zone-rim-skin-note")
+            }
+        })
+    }
+
+    private func latticeAreaRows(organic: Bool, structural: Bool, zone: UUID? = nil) -> AnyView {
         AnyView(Group {
         if organic {
             AnyView(organicRow)
         } else {
-            AnyView(settingControl(.finish, titled: true))
+            if let zone, TopOptKit.regionOuterFinishWired { zoneFinishRow(zone) }
+            else { AnyView(settingControl(.finish, titled: true)) }
             AnyView(gradeToggleRow)
             if model.gradingMode != LatticeGradingMode.none { AnyView(gradeTypeRow) }
         }
@@ -2541,15 +2607,19 @@ public struct LatticeSetupWizard: View {
         HStack(spacing: DS.Space.s) {
             Spacer(minLength: 0)
             latticeFootButton(FlexibleSettingsExit.cancel, primary: false, id: "lattice-page-cancel") { cancelAndClose() }
-            latticeFootButton(FlexibleSettingsExit.save, primary: true, id: "lattice-cells-save") { saveAndClose() }
+            latticeFootButton(FlexibleSettingsExit.save, primary: true, id: "lattice-cells-save", enabled: !typePickNeeded) {
+                saveAndClose()
+            }
         }
     }
 
-    private func latticeFootButton(_ title: String, primary: Bool, id: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+    private func latticeFootButton(_ title: String, primary: Bool, id: String, enabled: Bool = true,
+                                   action: @escaping () -> Void) -> some View {
+        Button { if enabled { action() } } label: {
             Text(title).font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
                 .padding(.horizontal, DS.Space.l).frame(minWidth: 84, minHeight: FlexibleTargets.least)
                 .background(Capsule().fill((primary ? DS.Color.accent : DS.Color.fillSubtle).color))
+                .opacity(enabled ? 1 : 0.45)   // ★ B7 slice 2: grey until a type is picked (two or more offered)
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -2630,8 +2700,8 @@ public struct LatticeSetupWizard: View {
         }
     }
 
-    /// Grade from → to (today's density band: `maxRelativeDensity` → `minRelativeDensity`), Along (three; only "By stress"
-    /// is built), then Strength (Structural) or Ties and Overhangs (Aesthetic) — each line says what backs it.
+    /// Grade from → to (today's density band: `maxRelativeDensity` → `minRelativeDensity`), then Strength (Structural), its
+    /// line saying what backs it. ★ B7 slice 2: Along, Ties and Overhangs are off the page (`LatticeCellsRow.rows`).
     @ViewBuilder private var cellsAddedRows: some View {
         let mode = project.lattice.stageMode
         VStack(alignment: .leading, spacing: DS.Space.s) {
@@ -2653,36 +2723,10 @@ public struct LatticeSetupWizard: View {
                             }
                             Text("density").dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
                         }
-                    case .along:
-                        let lit = LatticeGradeAlong.lit(stored: model.gradeAlong, densityMode: model.densityMode)
-                        HStack(spacing: DS.Space.xs) {
-                            ForEach(LatticeGradeAlong.allCases, id: \.rawValue) { a in
-                                let off = a == .load && !model.simulateStresses
-                                Button {
-                                    guard model.chooseAlong(a) else { return }
-                                    rebuild()
-                                } label: {
-                                    Text(a.title(mode)).font(.system(size: 11, weight: .semibold))
-                                        .lineLimit(1).minimumScaleFactor(0.8)
-                                        .padding(.vertical, 6).padding(.horizontal, DS.Space.s)
-                                        .frame(maxWidth: .infinity)
-                                        .background(RoundedRectangle(cornerRadius: DS.Radius.pill)
-                                            .fill((lit == a ? DS.Color.accent.opacity(0.85)
-                                                   : DS.Color.background.opacity(0.35)).color))
-                                        .foregroundStyle((off ? DS.Color.textTertiary : DS.Color.textPrimary).color)
-                                }
-                                .buttonStyle(.plain)
-                                .disabled(off)
-                                .latticeID("lattice-cells-along-\(a.rawValue)")
-                            }
-                        }
                     case .strength:
                         shortNote(LatticeCellsRow.strengthLine)
-                    case .ties:
-                        shortNote(model.cellTransition == .organicGrade ? LatticeCellsRow.tiesOrganic
-                                                                        : LatticeCellsRow.tiesNotOrganic)
-                    case .overhangs:
-                        shortNote(LatticeCellsRow.overhangsLine)
+                    case .along, .ties, .overhangs:
+                        EmptyView()   // ★ B7 slice 2: off the page (`LatticeCellsRow.rows` never lists them)
                     }
                 }
                 .latticeID("lattice-cells-row-\(row.rawValue)")

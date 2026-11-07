@@ -51,6 +51,8 @@ public enum LatticeTypeCatalog {
     /// Lattice page, B7.n) has shipped. Today that is the octet. A type core runs and the app does not yet is greyed with
     /// `appBatchPending`. Add an id here in the batch that ships its page.
     public static let appBatches: Set<String> = ["octet"]
+    /// A test's stand-in for `appBatches` (B7's two-type card test); nil in the app.
+    nonisolated(unsafe) public static var appBatchesForTests: Set<String>? = nil
     /// The line for a type core runs whose app batch has not shipped.
     public static let appBatchPending = "Ready in the engine; its settings come in a later update."
 
@@ -86,7 +88,7 @@ public enum LatticeTypeCatalog {
         entries(generatable: TopOptKit.latticeGeneratableTopologies,
                 certifiable: TopOptKit.latticeCertifiableTopologies,
                 jobAccepts: TopOptKit.jobSchemaAcceptsTopology,
-                appReady: { appBatches.contains($0) })
+                appReady: { (appBatchesForTests ?? appBatches).contains($0) })
     }
 
     /// The ids that may be picked today.
