@@ -404,9 +404,12 @@ public struct DSRow<Actions: View>: View {
                         .strokeBorder(DS.Color.accent.color, lineWidth: 1.5).padding(4)
                     RoundedRectangle(cornerRadius: 2).fill(DS.Color.accent.color).frame(width: 3).padding(.vertical, 6)
                 }
+                // ★ B6 N3: the highlight is drawn over the row's tap button (the next background) — a filled shape takes a
+                // click, so without this a picked row could not be tapped again to close it
+                .allowsHitTesting(false)
             }
         }
-        .overlay(alignment: .bottom) { Rectangle().fill(DSParts.strokeSub.color).frame(height: 1) }   // R2.3: each row its line
+        .overlay(alignment: .bottom) { Rectangle().fill(DSParts.strokeSub.color).frame(height: 1).allowsHitTesting(false) }   // R2.3: each row its line
         .background {
             // the row's tap: a plain Button behind its words (a synthesised click never reaches onTapGesture on the Mac host)
             if let tap {

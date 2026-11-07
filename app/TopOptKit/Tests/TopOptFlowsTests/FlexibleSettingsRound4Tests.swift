@@ -455,7 +455,11 @@ final class FlexibleSettingsRound4Tests: XCTestCase {
         // ★ AND ONE PURPLE FOR EVERY FACE PRISM: batch C's never-violet hook on the main page is reverted
         XCTAssertFalse(ws.contains("FlexibleMainTints.depthPlane"), "the main page's depth prism keeps the lattice purple")
         XCTAssertFalse(ws.contains("FlexibleMainTints.knob("), "…and so do its knobs")
-        XCTAssertTrue(ws.contains("LatticeDensityProxy.densityColor(fraction: 0.6),"), "#354's knob line is its own again")
+        // ★ re-pinned 11-06 (B6 N2; design-system §4.24 "A face prism's end (round 2, N2): shows when the face row is
+        // selected; drag sets its depth" — the one Handle): the 22 pt purple depth knob this line pinned is gone; the prism's
+        // end wears DragHandle, and the two lines above still keep FlexibleMainTints off the page. The prism stays purple.
+        XCTAssertFalse(ws.contains("private func latticeDepthKnob("), "the old depth knob is gone")
+        XCTAssertTrue(ws.contains("DragHandle(key: key, axis: axis, value: value, onDrag: drag)"), "the prism's end is §4.24's one Handle")
         XCTAssertFalse(FileManager.default.fileExists(atPath: FlexibleSource.url("FlexibleDepthAccent.swift").path))
     }
 

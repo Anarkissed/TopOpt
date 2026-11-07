@@ -156,6 +156,15 @@ final class DesignPartsHostedTests: XCTestCase {
         let row = try XCTUnwrap(h.frames.all["gal-row1"])
         ui.click(h, CGPoint(x: row.minX + 60, y: row.midY))
         XCTAssertEqual(taps.all.last, "row1", "★ a tap on the row's name takes the row")
+        // ★ B6 N3 (found 11-06 by ZoneSelectHostedTests: a picked zone's row tapped again stayed picked): a SELECTED row takes
+        // its tap too — its highlight fill was drawn over the row's tap button and swallowed the click, so no picked row (a
+        // Topology group, a scenario folder, a lattice group, a face, a zone) could be tapped again to close it.
+        let picked = try XCTUnwrap(h.frames.all["gal-row0"])
+        for x in [picked.minX + 60, picked.midX] {
+            taps.all.removeAll()
+            ui.click(h, CGPoint(x: x, y: picked.midY))
+            XCTAssertEqual(taps.all.last, "row0", "★ a tap on a selected row's words takes the row (x \(x))")
+        }
     }
 
     /// §4.7: the part card (picture, name, versions; chosen = accent ring + tag; running = a chip over the same picture), the
