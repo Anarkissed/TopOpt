@@ -63,14 +63,16 @@ public enum SurfaceTool: Int, CaseIterable, Hashable, Sendable {
 
     /// One line: what a tap does with this tool armed. Shown under the tray, so a
     /// tray of icons is never a guessing game.
+    /// ★ B8 (mockup #cut): the rail's one line per tool, in the mockup's words (§5's short form: no full stop).
     public var hint: String {
         switch self {
-        case .select:  return "Tap a face to select it."
-        case .similar: return "Tap a face to find the ones like it."
-        case .cut:     return "Tap a face to cut it in two."
-        case .union:   return "Tap faces to combine; tap again to drop."
-        case .pattern: return "Tap a face to split it into a grid."
-        case .region:  return "Tap a region, then faces to add or drop."
+        case .select:  return "Tap a face to select it"
+        case .similar: return "Tap a face to select its look-alikes"
+        case .cut:     return "Tap any face to cut it"
+        case .union:   return "Tap faces to join them"
+        case .pattern: return "Tap a face to split it into a grid"
+        // the mockup's "Draw a region on a face" waits for the drawing Region tool (§4.31); today's tool aims and edits
+        case .region:  return "Tap a region, then faces to add or drop"
         }
     }
 

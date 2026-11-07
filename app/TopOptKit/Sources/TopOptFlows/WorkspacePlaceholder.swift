@@ -252,6 +252,13 @@ public struct WorkspacePlaceholder: View {
     /// ★ The Regions surface (task 2026-08-14-face-regions). Opened from the
     /// Selections header; it is where a union, a filter and a split are made.
     @State private var regionsOpen = false
+    /// ★ B8 (row 34): the group whose row is lit in Edit faces' view-only Selections — its faces light on the part, for the
+    /// tools; nil = none. Joins nothing and changes nothing.
+    @State private var cutLitGroup: UUID? = nil
+    /// ★ B8: Edit faces' scenario folders that are open (the active scenario's opens on entry).
+    @State private var cutOpenFolders: Set<UUID> = []
+    /// ★ B8: from Lattice, Edit faces' Topology panel (folded first, as on Lattice Setup).
+    @State private var cutTopologyOpen = false
     /// The region a viewer tap corrects, or nil. Hoisted out of the sheet so the
     /// workspace's tap router can see it — the sheet SELECTS, the viewer EDITS.
     @State private var regionTapTarget: RegionID?
@@ -1429,7 +1436,8 @@ public struct WorkspacePlaceholder: View {
                 // the position gizmo (with padding between them)"). The Surface
                 // stage keeps them in its own tray, where the rest of its tools are.
                 if flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleMainViewToggles(main: flexibleMain, solver: FlexibleStressSolver(app: model, sim: latticeSim), openSettings: { showFlexiblePage = true }) }   // Flexible (PR #362) H5 (+C, C2): Dent heat / Stress / Lattice (the Lattice view IS the X-ray); with nothing to show the Lattice button opens Settings; Stress solved directly (never through startStressSolveIfNeeded's octet gate — FlexibleStressSolve.swift) · Flexible (PR #362) H61: off under Edit faces (B5's mode has the page)
-                else if viewerMesh != nil, visible.wireframe, !visible.surfaceEditing {
+                else if viewerMesh != nil, visible.wireframe, !visible.surfaceEditing || editFaces.isEditing {
+                    // ★ B8 (R0): Edit faces' Outlines · X-ray are the view corner's, as on every stage (they were its tray's)
                     viewModeToggles
                 }
                 latticeOnlyBadge
@@ -6780,7 +6788,7 @@ public struct WorkspacePlaceholder: View {
             return SurfaceTint.buffer(mesh: mesh, groupedFaces: surfaceGroupedFaces,
                                       regions: project.faceRegions, selected: nil,
                                       picked: ul.picked, fragmentTested: ul.fragmentTested,
-                                      groupColours: surfaceGroupHues)
+                                      groupColours: surfaceGroupHues, lit: cutLitFaces)
         }
         return SurfaceTint.buffer(mesh: mesh, groupedFaces: surfaceGroupedFaces,
                                   regions: project.faceRegions,
@@ -6800,7 +6808,7 @@ public struct WorkspacePlaceholder: View {
                                   fragmentTested: surfaceTool == .union
                                       ? surfaceUnionPickedFaces
                                       : surfaceSelectedTestedFaces,
-                                  groupColours: surfaceGroupHues)
+                                  groupColours: surfaceGroupHues, lit: cutLitFaces)
     }
 
     /// ★ WHICH WAY THE PLANE'S NORMAL POINTS ON SCREEN: +1 when it runs to the
@@ -6885,6 +6893,13 @@ public struct WorkspacePlaceholder: View {
     /// ★ EACH GROUPED FACE'S OWN GROUP COLOUR, for the Surface stage's muted hue.
     /// Read from `force.tint(for:)` — the SAME source the TO page paints with, so a
     /// group cannot read red on one page and orange on the other.
+    /// ★ B8 (row 34): the faces of the group whose row is lit in Edit faces' Selections.
+    private var cutLitFaces: Set<FaceID> {
+        guard let id = cutLitGroup,
+              let g = (selection.groups + project.latticeGroups).first(where: { $0.id == id }) else { return [] }
+        return Set(g.faces)
+    }
+
     private var surfaceGroupHues: [FaceID: SIMD3<Float>] {
         var out: [FaceID: SIMD3<Float>] = [:]
         for g in selection.groups {
@@ -7642,125 +7657,63 @@ public struct WorkspacePlaceholder: View {
     // ~60 pt wide against the old panel's 260: a 44 pt target with the tray's own
     // padding either side, and nothing else.
     @ViewBuilder private var surfaceToolsPanel: some View {
-        VStack(spacing: DS.Space.xs) {
+        // ★ B8 (mockup #cut, its .rail): ONE glass capsule of round 40 pt tools, the armed one in the accent. Outlines and
+        // X-ray left it for the view corner (R0: "Cut: Outlines · X-ray" in the corner, as on every stage).
+        VStack(spacing: 6) {
             ForEach(SurfaceTool.allCases, id: \.rawValue) { tool in
-                Button {
-                    // Abandons the last tool's work in progress, then arms this one
-                    // on whatever is still selected — see `surfaceSwitch`.
+                // Abandons the last tool's work in progress, then arms this one on whatever is still selected — see
+                // `surfaceSwitch`.
+                cutRailButton(tool.icon, label: tool.title, on: surfaceTool == tool, key: "cutTool-\(tool.title)") {
                     surfaceSwitch(to: tool)
-                } label: {
-                    Image(systemName: tool.icon)
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle((surfaceTool == tool
-                                          ? DS.Color.textPrimary
-                                          : DS.Color.textTertiary).color)
-                        .frame(width: 44, height: 44)
-                        .background(
-                            RoundedRectangle(cornerRadius: DS.Radius.pill, style: .continuous)
-                                .fill(surfaceTool == tool
-                                      ? DS.Color.accentDeep.color : Color.clear)
-                        )
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(tool.title)
             }
-
-            // ★ WIDTH-BOUND. A bare `Divider()` in a VStack expands to the widest
-            // width offered — which here is the whole viewport, so the tray's
-            // background became a full-screen band and its icons centred on it.
-            Divider().overlay(DS.Color.strokePanel.color)
-                .frame(width: 28).padding(.vertical, 2)
-
-            // §6(b) — the wireframe, as one more icon rather than a labelled switch.
-            Button { surfaceWireframeOn.toggle() } label: {
-                Image(systemName: "grid")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle((surfaceWireframeOn
-                                      ? DS.Color.textPrimary
-                                      : DS.Color.textTertiary).color)
-                    .frame(width: 44, height: 44)
-                    .background(
-                        RoundedRectangle(cornerRadius: DS.Radius.pill, style: .continuous)
-                            .fill(surfaceWireframeOn
-                                  ? DS.Color.accentDeep.opacity(0.55).color : Color.clear)
-                    )
+            // ★ §2 — THE PENCIL BUTTON, a switch rather than a tool, so below a thin divider (the reviewer's answer on
+            // where it goes in B8 is pending; it stays in the rail meanwhile).
+            Rectangle().fill(DS.Color.strokeStrong.color).frame(width: 24, height: 1).padding(.vertical, 2)
+            cutRailButton("applepencil", label: "Pencil only", on: surfacePencilOnly, key: "cutTool-PencilOnly") {
+                surfacePencilOnly.toggle()
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Outlines")   // ★ B2 (U4): never "Wireframe"; Cut's pair moves to the view corner in B8
-            .background(CornerPairStyle.publish(surfaceWireframeOn ? "view-Outlines-on" : "view-Outlines"))
-
-            // ★ X-RAY, SEPARATELY. `#` decides whether there are lines; this
-            // decides whether they show THROUGH the solid. They were one control
-            // and the wireframe was washed out because of it.
-            Button { surfaceXrayOn.toggle() } label: {
-                Image(systemName: "square.stack.3d.up")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle((surfaceXrayOn
-                                      ? DS.Color.textPrimary
-                                      : DS.Color.textTertiary).color)
-                    .frame(width: 44, height: 44)
-                    .background(
-                        RoundedRectangle(cornerRadius: DS.Radius.pill, style: .continuous)
-                            .fill(surfaceXrayOn
-                                  ? DS.Color.accentDeep.opacity(0.55).color : Color.clear)
-                    )
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("X-ray")
-            .background(CornerPairStyle.publish(surfaceXrayOn ? "view-X-ray-on" : "view-X-ray"))
-
-            // ★ §2 — THE PENCIL BUTTON. ★ THE ONLY NEW CONTROL IN THIS TASK, and
-            // it is built to the tray it sits in rather than to a new idea: the
-            // same 44×44 target, the same `DS.Radius.pill` corner, the same
-            // 17 pt semibold glyph, the same `accentDeep` fill at 0.55 when on and
-            // `textTertiary` glyph when off, in the same `DS.Space.xs` column as
-            // the wireframe and x-ray switches directly above it. It is a VIEW-ish
-            // switch, not a tool, so it belongs below the divider with those two
-            // and not in the tool well above it.
-            Button { surfacePencilOnly.toggle() } label: {
-                Image(systemName: "applepencil")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle((surfacePencilOnly
-                                      ? DS.Color.textPrimary
-                                      : DS.Color.textTertiary).color)
-                    .frame(width: 44, height: 44)
-                    .background(
-                        RoundedRectangle(cornerRadius: DS.Radius.pill, style: .continuous)
-                            .fill(surfacePencilOnly
-                                  ? DS.Color.accentDeep.opacity(0.55).color : Color.clear)
-                    )
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Pencil only")
         }
-        .padding(DS.Space.xs)
-        .background(
-            RoundedRectangle(cornerRadius: DS.Radius.panelSmall, style: .continuous)
-                .fill(DS.Surface.panel.color)
-                .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall,
-                                          style: .continuous)
-                    .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
-        )
+        .padding(6)
+        .background(Capsule().fill(DS.Surface.bar.color)
+            .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
         .dsShadow(DS.Shadow.panel)
-        // ONE LINE saying what a tap does, to the LEFT of the tray — a tray of
-        // icons must not be a guessing game, and this is the only text the stage
-        // carries.
+        .background(DSParts.publish("cutRail"))
+        // ONE LINE saying what a tap does, to the LEFT of the rail (the mockup's: 12 pt, secondary, 12 pt off the rail,
+        // 10 pt under its top) — a rail of icons must not be a guessing game.
         .overlay(alignment: .topLeading) {
             Text(surfaceRefusal ?? surfaceHint)
-                .dsStyle(DS.TypeScale.caption)
+                .font(.system(size: 12))
                 .foregroundStyle((surfaceRefusal == nil
-                                  ? DS.Color.textTertiary : DS.Color.warning).color)
+                                  ? DS.Color.textSecondary : DS.Color.warning).color)
                 .multilineTextAlignment(.trailing)
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(width: 160, alignment: .trailing)
-                .offset(x: -172, y: 10)
+                .frame(width: 190, alignment: .trailing)
+                .background(DSParts.publish("cutRailHint"))
+                .offset(x: -202, y: 10)
                 .allowsHitTesting(false)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-        .padding(.top, PageChrome.belowGizmo)
-        // ★ ON `edge` — the same right-hand line as the gizmo's glass and the
-        // bottom-right chips.
+        // ★ B8: under the view corner's Outlines · X-ray row (40 pt, at `belowGizmo`), not on top of it
+        .padding(.top, PageChrome.belowGizmo + 40 + PageChrome.gap * 2)
+        // ★ ON `edge` — the same right-hand line as the gizmo's glass and the view corner.
         .padding(.trailing, PageChrome.edge)
+    }
+
+    /// One round tool in Cut's rail (mockup .rail button): 40 pt, the accent with a white glyph when on.
+    private func cutRailButton(_ icon: String, label: String, on: Bool, key: String,
+                               action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(on ? Color.white : DS.Color.textSecondary.color)
+                .frame(width: 40, height: 40)
+                .background(Circle().fill(on ? DS.Color.accent.color : Color.clear))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .background(DSParts.publish(on ? key + "-on" : key))
+        .accessibilityLabel(label)
     }
 
     // ★ §6/§7 — THE ACTION CLUSTER: every tool's confirm, FLOATING NEXT TO WHAT IT
@@ -9701,8 +9654,8 @@ public struct WorkspacePlaceholder: View {
             if selectionsCollapsed { latticePreviewNotice }
             // ★ B6 s2a (23a): closed, the Topology panel is its header, on top of Selections
             if latticeSetupUp, !latticeTopologyOpen { latticeTopologyPanel(maxHeight: nil) }
-            // ★ B5: Edit faces shows today's library card (the Surface stage's), whose header carries Regions.
-            if editFaces.isEditing { selectionsLibraryCard }
+            // ★ B8 (row 34, mockup #cut): Edit faces shows Topology's Selections, VIEW ONLY (B5 showed the Surface stage's card)
+            if editFaces.isEditing { cutSelectionsPanel }
             else if flexibleMain.owns(project, stage), !editFaces.isEditing, !fullScreenPageUp { FlexibleSelectionsList(project: project, main: flexibleMain, collapsed: $selectionsCollapsed, cards: latticeSelectableCards, groupCards: latticeFaceCards, cardsChanged: { refreshLatticeFaceCards() }) }   // Flexible (PR #362) H25: the B1 list (one quiet line per group; the picked group's faces with their depth/expand boxes and (i)) · Flexible (PR #362) H61: off under Edit faces (B5's mode has the page)
             // ★ B3 (B1): Topology's list is SelectionsList — one line per group, eye, trash in place + Undo.
             else if stage == .topology, !showLatticePage { topologySelectionsList }
@@ -9786,6 +9739,92 @@ public struct WorkspacePlaceholder: View {
     /// (And the first cut of this very comment QUOTED the searched string, which
     /// tripped the same guards a second time. A source-text guard counts
     /// comments too.)
+    /// ★ B8 (row 34, mockup #cut): Edit faces' left side — Topology's Selections, VIEW ONLY: its scenario folders (open and
+    /// close) and groups, each with its colour, role and value, no eye, no trash, no switch. A tap on a group row lights
+    /// that group's faces on the part (`cutLitGroup`) so any of them can be cut or patterned; it joins nothing.
+    private var cutSelectionsPanel: some View {
+        VStack(alignment: .leading, spacing: DS.Space.s) {
+            if cutFromLattice {
+                // ★ from Lattice: the same two panels as Lattice Setup (Topology on top, folded first; Selections = the
+                // lattice groups), both view only, an accordion (R2.1)
+                DSPanel(key: "cutTopology", title: LatticeSetupCopy.topology, count: selection.groups.count, viewOnly: true,
+                        open: Binding(get: { cutTopologyOpen },
+                                      set: { cutTopologyOpen = $0; if $0 { selectionsCollapsed = true } })) {
+                    cutTopologyRows
+                }
+                DSPanel(key: "cutSelections", title: EditFacesCopy.selections, count: project.latticeGroups.count, viewOnly: true,
+                        open: Binding(get: { !selectionsCollapsed },
+                                      set: { selectionsCollapsed = !$0; if $0 { cutTopologyOpen = false } })) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(project.latticeGroups) { g in
+                            DSRow(.group, key: "cutGroup-\(g.id.uuidString)", mark: .colour(g.color), name: g.name,
+                                  value: latticeGroupValue(g), selected: cutLitGroup == g.id,
+                                  tap: { cutLitGroup = cutLitGroup == g.id ? nil : g.id })
+                        }
+                    }
+                } footer: { cutPanelFoot }
+            } else {
+                DSPanel(key: "cutSelections", title: EditFacesCopy.selections, count: selection.groups.count, viewOnly: true,
+                        open: Binding(get: { !selectionsCollapsed }, set: { selectionsCollapsed = !$0 })) {
+                    cutTopologyRows
+                } footer: { cutPanelFoot }
+            }
+        }
+        .onAppear { if cutOpenFolders.isEmpty { cutOpenFolders = [force.activeScenarioID] } }
+    }
+
+    /// ★ B8: Edit faces was opened from the Lattice stage.
+    private var cutFromLattice: Bool { if case .lattice = editFaces.origin { return true } else { return false } }
+
+    /// Topology's groups, view only: the scenario folders (open and close) with their groups, then the groups no scenario owns.
+    @ViewBuilder private var cutTopologyRows: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if force.hasScenarios {
+                ForEach(force.scenarioList, id: \.id) { s in
+                    let open = cutOpenFolders.contains(s.id)
+                    DSRow(.folder, key: "cutFolder-\(s.id.uuidString)", mark: .folder, name: s.name, disclosure: open,
+                          tap: { if open { cutOpenFolders.remove(s.id) } else { cutOpenFolders.insert(s.id) } })
+                    if open {
+                        ForEach(selection.groups.filter { force.group($0.id, isIn: s.id) }) { g in
+                            cutGroupRow(g).padding(.leading, SelectionsList.folderIndent)
+                        }
+                    }
+                }
+                // the groups no scenario owns (Protect, Keep clear)
+                ForEach(selection.groups.filter { !scenarioOwned($0.id) }) { g in cutGroupRow(g) }
+            } else {
+                ForEach(selection.groups) { g in cutGroupRow(g) }
+            }
+        }
+    }
+
+    /// ★ the old card's header buttons, until the reviewer's answer on B8's look (asked 11-07 20:04Z, item 3)
+    private var cutPanelFoot: some View {
+        HStack(spacing: DS.Space.m) {
+            Button { regionsOpen.toggle() } label: {
+                Image(systemName: "square.on.square.dashed")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle((regionsOpen ? DS.Color.accent : DS.Color.textTertiary).color)
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Regions")
+            keepClearQuickAction
+            unitToggle
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, DS.Space.m)
+    }
+
+    /// One Topology group in Edit faces' view-only Selections: colour, name, role glyph and value; a tap lights its faces.
+    private func cutGroupRow(_ g: SelectionGroup) -> some View {
+        let glyph = RoleGlyphs.glyphs(project, g.id, readsLattice: false).first
+        return DSRow(.group, key: "cutGroup-\(g.id.uuidString)", mark: .colour(g.color), name: g.name,
+                     role: glyph.map { (glyph: $0.symbol, colour: $0.tint) }, value: topologyGroupSummary(g),
+                     selected: cutLitGroup == g.id,
+                     tap: { cutLitGroup = cutLitGroup == g.id ? nil : g.id })
+    }
+
     private var selectionsLibraryCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
@@ -12767,9 +12806,11 @@ public struct WorkspacePlaceholder: View {
             // there — so the sentence is noise occupying the width the second
             // action button needs.
             // ★ B6 s1 (the approved mockup #lat-setup): Lattice Setup has the hint again — its corner is Topology's three now
-            if Self.hintShows(showsSelectionHint: visible.showsSelectionHint || latticeSetupUp, selectionsCollapsed: selectionsCollapsed) {
+            // ★ B8 (mockup #cut): Edit faces has the hint too — where its taps go ("It joins no group.")
+            if Self.hintShows(showsSelectionHint: visible.showsSelectionHint || latticeSetupUp || editFaces.isEditing,
+                              selectionsCollapsed: selectionsCollapsed) {
                 // ★ LOOK PER SCREEN (11-04, the mockup's .hint): one 36 pt line that gives way before the corner does
-                Text(hint)
+                Text(editFaces.isEditing ? EditFacesCopy.footHint : hint)
                     .font(.system(size: 12.5)).lineLimit(1).truncationMode(.tail)
                     .foregroundStyle(DS.Color.textSecondary.color)
                     .padding(.horizontal, 14).frame(height: 36)
@@ -12781,8 +12822,11 @@ public struct WorkspacePlaceholder: View {
             Spacer()
             if flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleCornerPair(main: flexibleMain, project: project, app: model, openSquish: { showFlexiblePage = true }, changeGravity: { force.enterGravitySetup(); selection.clearActive(); gravityDraft = nil; gravitySnapLabel = nil }) } else {   // Flexible (PR #362) H30: A1's corner pair (Setup chip + the Lattice split button); no iPad chip and no Optimize on this stage, Print Parameters inside Setup · Flexible (PR #362) H61: off under Edit faces (B5's mode has the page)
             AnyView(Group {   // Flexible (PR #362) H57: the bar's chain, type-erased (its nested type overflowed the iPad main thread's stack; crash 2026-10-25)
-            // ★ B5: Edit faces keeps the bar the Surface stage had (today's four, the last branch).
-            if !editFaces.isEditing, stage == .topology {
+            // ★ B8 (row 35, mockup #cut): Edit faces' corner is EMPTY — no run, no print parameters, no iPad │ Mac; its
+            // actions are the header's Discard · Done. (B5 had kept the Surface stage's four here.)
+            if editFaces.isEditing {
+                AnyView(EmptyView())
+            } else if stage == .topology {
                 // ★ B3 (A1): Topology's bar is the CORNER PAIR — the Setup chip (iPad | Mac, Print
                 // parameters and the chip column, as rows) and the Optimize split button.
                 AnyView(topologyCornerPair)   // Flexible (PR #362) H57
@@ -12791,6 +12835,7 @@ public struct WorkspacePlaceholder: View {
                 AnyView(latticeCornerPair)
             } else {
             ComputeLocationControl(compute: compute)
+                .background(DSParts.publish("cornerFour"))   // ★ B8: the old four (CutLookHostedTests' empty-corner check)
             printParamsButton
             // ★ LATTICE, TO THE LEFT OF OPTIMIZE (maintainer, 2026-08-17: "Make
             // it exactly like Optimize button, but to the left of it").
@@ -13280,6 +13325,7 @@ extension WorkspacePlaceholder {
         surfaceResetTools()
         paintActive = false
         regionsOpen = false
+        cutLitGroup = nil   // ★ B8
     }
 
     /// "✂ Editing faces · Done" — slim, in the capsule's place.
@@ -13290,13 +13336,15 @@ extension WorkspacePlaceholder {
             Text(EditFacesCopy.header).dsStyle(DS.TypeScale.bodyStrong).foregroundStyle(DS.Color.textPrimary.color)
                 .lineLimit(1).fixedSize()
                 .opacity(editFacesDiscardAsking ? 0 : 1)   // the ask's red button sits here while it asks
+            // ★ B8 (mockup #cut, the capsule's .div): a thin divider, then Discard as a plain page segment
+            Rectangle().fill(DS.Color.strokeStrong.color).frame(width: 1, height: 20)
+                .opacity(editFacesDiscardAsking ? 0 : 1)
             // ★ B8: DISCARD beside Done — asks in place; the question is the line under the header (it is too long to
             // sit left of the button at the screen's edge).
             Button { editFacesDiscardAsking = true } label: {
-                Text(EditFacesCopy.discard).font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle((project.canDiscardFaceEdits ? DS.Color.textPrimary : DS.Color.textDisabled).color)
-                    .padding(.horizontal, DS.Space.m).frame(height: StageCapsuleLayout.segmentHeight)
-                    .background(Capsule().fill(DS.Color.fillSubtle.color))
+                Text(EditFacesCopy.discard).font(.system(size: 14, weight: .medium))
+                    .foregroundStyle((project.canDiscardFaceEdits ? DS.Color.textSecondary : DS.Color.textDisabled).color)
+                    .padding(.horizontal, 13).frame(height: StageCapsuleLayout.segmentHeight)
                     .frame(minHeight: StageCapsuleLayout.capsuleHeight).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
