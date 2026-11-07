@@ -2284,14 +2284,25 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// Default Grade / Stepped job (the `grading` block the per-region keys fall back to; organic grades in its own pane).
     /// The band travels where the area's mode grades to the shape and either differs from the part's or the part sends none.
     public var resolvedAreaGrading: [UUID: LatticeAreaGrading] {
-        guard densityMode == .sim, !isOrganic else { return [:] }
+        guard !isOrganic else { return [:] }
+        // ★ B7 slice 2 (release (3)): a zone's own FINISH is not a grade — it rides whatever the density mode, and only
+        // where it differs from the part's ("shell" when the part is Covered, else "none")
+        let partFinish = boundary == .covered ? "shell" : "none"
         var out: [UUID: LatticeAreaGrading] = [:]
         for (gid, g) in areaGrading {
-            let mode = g.gradingMode ?? gradingMode
             var r = LatticeAreaGrading()
-            if mode != gradingMode { r.gradingMode = mode }
-            let band = g.shapeFitBandMM ?? shapeFitBandMM
-            if mode.fitsShape, band != shapeFitBandMM || !gradingMode.fitsShape { r.shapeFitBandMM = band }
+            if let f = g.outerFinish, f != partFinish { r.outerFinish = f }
+            if densityMode == .sim {
+                let mode = g.gradingMode ?? gradingMode
+                if mode != gradingMode { r.gradingMode = mode }
+                let band = g.shapeFitBandMM ?? shapeFitBandMM
+                if mode.fitsShape, band != shapeFitBandMM || !gradingMode.fitsShape { r.shapeFitBandMM = band }
+                // ★ the band's Strength (ruling 2): only with a shape grade, where it differs from the part's
+                let strength = g.shapeGradeStrength ?? shapeFitGradeStrength
+                if mode.fitsShape, gradingMode.fitsShape ? strength != shapeFitGradeStrength : strength != 0 {
+                    r.shapeGradeStrength = strength
+                }
+            }
             if !r.isEmpty { out[gid] = r }
         }
         return out
