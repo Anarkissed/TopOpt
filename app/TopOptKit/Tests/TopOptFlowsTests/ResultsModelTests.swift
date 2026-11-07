@@ -666,9 +666,9 @@ final class ResultsModelTests: XCTestCase {
     }
 
     func testFlexExaggerationClampAndDefaultInBand() {
-        XCTAssertEqual(FlexAnimation.clampExaggeration(10), 50)   // below → min
-        XCTAssertEqual(FlexAnimation.clampExaggeration(75), 75)   // inside → unchanged
-        XCTAssertEqual(FlexAnimation.clampExaggeration(999), 100) // above → max
+        XCTAssertEqual(FlexAnimation.clampExaggeration(1), 10)     // below → min (★ 10-28: 10×…300×, his slider)
+        XCTAssertEqual(FlexAnimation.clampExaggeration(75), 75)    // inside → unchanged
+        XCTAssertEqual(FlexAnimation.clampExaggeration(999), 300)  // above → max
         XCTAssertGreaterThanOrEqual(FlexAnimation.defaultExaggeration, FlexAnimation.minExaggeration)
         XCTAssertLessThanOrEqual(FlexAnimation.defaultExaggeration, FlexAnimation.maxExaggeration)
     }
@@ -720,8 +720,8 @@ final class ResultsModelTests: XCTestCase {
         let m = flexModel()
         XCTAssertFalse(m.flexOn)
         m.toggleFlex(); XCTAssertTrue(m.flexOn)
-        m.setFlexExaggeration(5);   XCTAssertEqual(m.flexExaggeration, 50)   // clamped up
-        m.setFlexExaggeration(500); XCTAssertEqual(m.flexExaggeration, 100)  // clamped down
+        m.setFlexExaggeration(5);   XCTAssertEqual(m.flexExaggeration, 10)   // clamped up (★ 10-28: his slider, 10×…300×)
+        m.setFlexExaggeration(500); XCTAssertEqual(m.flexExaggeration, 300)  // clamped down
         m.setFlexExaggeration(72);  XCTAssertEqual(m.flexExaggeration, 72)
         m.advanceFlex(0.3)
         XCTAssertEqual(m.flexPhase, 0.3, accuracy: 1e-9)
@@ -822,19 +822,19 @@ final class ResultsModelTests: XCTestCase {
     }
 
     @MainActor func testFailureLoadInEachUnit() {
-        // 7.5 kg in kg → "7.5 kg"; in lbs → 16.5 lb → "17 lbs" (≥10 rounds to integer).
+        // 7.5 kg in kg → "7.5 kg"; in lbs → 16.5 lb → "17 lb" (≥10 rounds to integer).
         XCTAssertEqual(failureModel(unit: .kg).failurePrediction?.valueLabel, "7.5 kg")
-        XCTAssertEqual(failureModel(unit: .lbs).failurePrediction?.valueLabel, "17 lbs")
+        XCTAssertEqual(failureModel(unit: .lbs).failurePrediction?.valueLabel, "17 lb")
         // A design-scale case: 10 kg applied, peak 4 / yield 60 → ×15 → 150 kg → 331 lb.
         let big = failureModel(appliedLoadKg: 10, unit: .lbs, peak: 4, yield: 60)
         XCTAssertEqual(big.failurePrediction?.failureLoadKg ?? 0, 150, accuracy: 1e-6)
-        XCTAssertEqual(big.failurePrediction?.valueLabel, "331 lbs")
+        XCTAssertEqual(big.failurePrediction?.valueLabel, "331 lb")
     }
 
     @MainActor func testFailureLoadLabelFormatting() {
         XCTAssertEqual(ResultsModel.loadLabel(kg: 7.5, unit: .kg), "7.5 kg")
         XCTAssertEqual(ResultsModel.loadLabel(kg: 154.2, unit: .kg), "154 kg")
-        XCTAssertEqual(ResultsModel.loadLabel(kg: 7.5, unit: .lbs), "17 lbs")   // 16.5 → 17
+        XCTAssertEqual(ResultsModel.loadLabel(kg: 7.5, unit: .lbs), "17 lb")    // 16.5 → 17 (U9: lb)
         XCTAssertEqual(ResultsModel.loadLabel(kg: 0.67, unit: .kg), "0.7 kg")
     }
 

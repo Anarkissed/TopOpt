@@ -1,0 +1,7 @@
+BEND rhombic: cell S=5.0 mm, vpc=12, cantilever 6 cells long, target rho 0.30 -> periodic cell rho 0.2963 (r/L 0.11785, 2.8 vox/strut), C11=376.83 C12=188.18 C44=156.37 Zener=1.658
+  [writing /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/bendx/rhombic/rhombic_bend.csv]
+    nc=7  block rho 0.2963  K_res 4146.6603  K_hom 4323.7228  err +4.27 %  dof 1582275  19945 ms  NO-GO
+    nc=8  block rho 0.2963  K_res 5800.4133  K_hom 5998.7820  err +3.42 %  dof 2060571  28023 ms  NO-GO
+    nc=9  block rho 0.2963  K_res 7719.9212  K_hom 7936.3601  err +2.80 %  dof 2601939  38026 ms  NO-GO
+    nc=10  block rho 0.2963  K_res 9902.5269  K_hom 10134.4515  err +2.34 %  dof 3206379  51301 ms  GO
+    nc=12  block rho 0.2963  K_res 15054.2539  K_hom 15310.7784  err +1.70 %  dof 4604475  80841 ms  GO

@@ -1,0 +1,11 @@
+M2 stand, Kelvin (jobs from make_stand_jobs.py kelvin; binary: the pipeline's frozen archive build of d1229fff).
+
+analyze struct {"topology": "kelvin", "intent": "structural", "band_rho_min": 0.09375, "band_rho_max": 0.50521, "cells_per_member_floor": 8, "cell_size_mm": 4, "rho_min_used": 0.09375, "rho_max_used": 0.09375, "latticed_voxels": 43661, "recertified_margin": 99.66489161, "recertified_accepted": true}
+analyze aes    {"topology": "kelvin", "intent": "aesthetic", "band_rho_min": 0.09375, "band_rho_max": 0.50521, "cells_per_member_floor": 8, "cell_size_mm": 4, "rho_min_used": 0.2, "rho_max_used": 0.50521, "latticed_voxels": 68421, "recertified_margin": null, "recertified_accepted": null}
+run struct LATTICE vf=0.680000 topology=kelvin cell_mm=2 graded=1 rho_min=0.267385 rho_max=0.504147 cells=16 tris=22404 lattice_margin=1835.33 lattice_accepted=1
+run struct LATTICE vf=0.520000 topology=kelvin cell_mm=2 graded=1 rho_min=0.240198 rho_max=0.501466 cells=16 tris=22404 lattice_margin=1768.18 lattice_accepted=1
+run struct LATTICE vf=0.380000 topology=kelvin cell_mm=2 graded=1 rho_min=0.291354 rho_max=0.498976 cells=15 tris=21272 lattice_margin=1687.33 lattice_accepted=1
+run struct LATTICE vf=0.260000 topology=kelvin cell_mm=2 graded=1 rho_min=0.272906 rho_max=0.481424 cells=12 tris=16800 lattice_margin=1650.44 lattice_accepted=1
+run aes    LATTICE vf=0.680000 topology=kelvin cell_mm=2 graded=1 rho_min=0.234164 rho_max=0.50521 cells=103 tris=154612 lattice_margin=1834.82 lattice_accepted=1
+run aes    LATTICE vf=0.520000 topology=kelvin cell_mm=2 graded=1 rho_min=0.226426 rho_max=0.50521 cells=88 tris=132212 lattice_margin=1768.93 lattice_accepted=1
+run aes    LATTICE vf=0.260000 topology=kelvin cell_mm=2 graded=1 rho_min=0.309001 rho_max=0.50521 cells=18 tris=25884 lattice_margin=1650.49 lattice_accepted=1

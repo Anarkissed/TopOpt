@@ -25,7 +25,7 @@ final class LatticeProxyTests: XCTestCase {
         let expected: [String: Int] = ["sc": 3, "bcc": 8, "bccz": 9, "fcc": 12,
                                        "fccz": 13, "diamond": 16, "octet": 24]
         for (id, n) in expected {
-            XCTAssertEqual(LatticeType.named(id).struts.count, n, "\(id) canonical strut count")
+            XCTAssertEqual(LatticeType.named(id)!.struts.count, n, "\(id) canonical strut count")
         }
     }
 
@@ -38,20 +38,44 @@ final class LatticeProxyTests: XCTestCase {
             "fccz": 9.4853, "diamond": 6.9282, "octet": 16.9706,
         ]
         for (id, mult) in expected {
-            let lat = LatticeType.named(id)
+            let lat = LatticeType.named(id)!
             let got = lat.canonicalStrutLengthMM(cellMM: 8) / 8
             XCTAssertEqual(got, mult, accuracy: 1e-3, "\(id) canonical length multiple")
         }
     }
 
-    /// The density↔radius map is the exact inverse pair, at the reference point
-    /// density.txt uses (r/L = 0.1): octet ρ = 0.48, sc ρ = 0.08485.
-    func testDensityRadiusMapIsWorkerLaw() {
+    /// The density↔radius map is an exact INVERSE PAIR.
+    ///
+    /// ★★ REPLACED, NOT WEAKENED (2026-08-20). This used to pin octet's r/L at ρ =
+    /// 0.48 to **0.1** — the closed form `ρ = K·(r/L)²`, K = 48, which the app carried
+    /// as its own second octet law. Both halves of the pair now go through CORE's
+    /// measured diameter table (`lattice_strut_diameter_mm`, inverted by bisection),
+    /// so the reference point moves to r/L = 0.1653 and the old 0.1 is exactly the
+    /// 1.4x divergence `app-octet-strut-law-differs-from-core` recorded, now closed.
+    ///
+    /// ★ THE PROPERTY THE TEST WAS FOR SURVIVES INTACT, and is the important half:
+    /// forward then back must return the density you started from. That is what
+    /// `printabilityDensityFloor` depends on, and it was BROKEN in between — the
+    /// forward law moved to core and the inverse did not, so a round trip came back
+    /// 1.4x wrong for one commit.
+    func testDensityRadiusMapIsAnExactInversePair() {
         let octet = LatticeType.octet
         let r = octet.strutRadiusMM(relativeDensity: 0.48, cellMM: 8)
-        XCTAssertEqual(r / 8, 0.1, accuracy: 1e-6)                       // r/L = 0.1
-        XCTAssertEqual(octet.relativeDensity(strutRadiusMM: r, cellMM: 8), 0.48, accuracy: 1e-9)
-        XCTAssertEqual(LatticeType.sc.relativeDensity(strutRadiusMM: 0.8, cellMM: 8), 0.08485, accuracy: 1e-4)
+        // ★ RE-PINNED (release (2), K1): octet's diameter table is the full cell's law now (17 rows, 0.045…0.95); at
+        // ρ = 0.48 it reads r/L 0.1166 (0.1653 on the legs-only table). The old closed form's 0.1 is still not core's.
+        XCTAssertEqual(r / 8, 0.11662, accuracy: 5e-4,
+                       "core's measured octet diameter at ρ = 0.48 — the old closed "
+                       + "form said 0.1")
+        // 24 bisections ⇒ ~6e-8 in ρ; the old 1e-9 was a closed form's exactness and
+        // is not available from a table, so the bound is the method's own precision.
+        XCTAssertEqual(octet.relativeDensity(strutRadiusMM: r, cellMM: 8), 0.48,
+                       accuracy: 1e-6, "★ forward then back must return ρ")
+        // ★ RE-PINNED (release (2), E2): core carries a measured diameter table for all nine types now, so simple cubic
+        // reads core's table (0.08305) and no longer the closed form's fallback (0.08485). Forward then back holds there too.
+        let rsc = LatticeType.sc.strutRadiusMM(relativeDensity: 0.08305391669273376, cellMM: 8)
+        XCTAssertEqual(LatticeType.sc.relativeDensity(strutRadiusMM: 0.8, cellMM: 8),
+                       0.08305, accuracy: 1e-4)
+        XCTAssertEqual(rsc, 0.8, accuracy: 1e-5, "★ simple cubic: core's table, forward then back")
     }
 
     // MARK: grading — monotone, invertible, distinct colour

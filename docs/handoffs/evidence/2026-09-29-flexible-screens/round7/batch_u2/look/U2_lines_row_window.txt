@@ -1,0 +1,6 @@
+U2 row: shape 778-822 · 2D 356,800 · 3D 404,800 · [↓] false · [45°] false
+RED old buttons: shape 778-822 · 2D - · 3D - · [↓] true · [45°] true
+U2 2D: window (206.0, 394.0, 620.0, 588.0) · across (222.0, 455.0, 588.0, 208.0) · along (222.0, 675.0, 588.0, 208.0) · 3D table false
+RED one table: ["curveTable-both"]
+Front: across span 236.2 pt rise 106.3 pt · along span 8.4 pt
+Top: along span 235.9 pt rise 106.3 pt · across span 14.5 pt

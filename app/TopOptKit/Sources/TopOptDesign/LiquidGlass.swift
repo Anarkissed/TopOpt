@@ -49,8 +49,8 @@ public enum LiquidGlass {
         public static let neutral = Tint(color: RGBA(255, 255, 255, 1), intensity: 0)
         /// The overhaul's signature BLUE frost — the gizmo, value chips and sync control.
         /// Explicitly NOT the 107 mock's green pools (the maintainer rejects palette
-        /// replication); this is the design accent `#0A84FF`.
-        public static let blue = Tint(color: DS.Color.accent, intensity: 0.55)
+        /// replication); this is the design accent `#0A84FF` (★ B5: his App Settings accent, read as it draws).
+        public static var blue: Tint { Tint(color: DS.Color.accent, intensity: 0.55) }
         /// RED frost — the clearance / keep-out handles keep the "forbidden space" colour
         /// language (`DS.Color.clearance`).
         public static let red = Tint(color: DS.Color.clearance, intensity: 0.55)

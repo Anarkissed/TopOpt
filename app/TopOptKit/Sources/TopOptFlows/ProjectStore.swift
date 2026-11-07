@@ -112,6 +112,44 @@ public struct ProjectSnapshot: Codable, Equatable, Sendable {
     }
 }
 
+/// ★★ A PROJECT THE STORE CANNOT READ (maintainer, 2026-10-01, round 3 ruling c): "The project store
+/// never drops a project silently. An unreadable project shows on Home as 'Can't open' with the
+/// reason. Never modify or delete the file." It used to vanish: his 102117B9 was on disk, intact,
+/// and the app showed nothing. Reading it never writes: the store only ever reads these folders.
+public struct UnreadableProject: Identifiable, Equatable, Sendable, Error {
+    public let id: UUID
+    /// The name the file states, when it is JSON at all; nil otherwise.
+    public let name: String?
+    /// Why it cannot be opened, in one line (`ProjectReadFailure.reason`).
+    public let reason: String
+    /// When its folder last changed — the order Home lists them in.
+    public let modifiedAt: Date?
+}
+
+/// A decoding error, as one line a person can read: what is missing or wrong, and where.
+public enum ProjectReadFailure {
+    static func path(_ p: [CodingKey]) -> String {
+        p.map { $0.intValue.map { "[\($0)]" } ?? $0.stringValue }.joined(separator: " › ")
+    }
+    public static func reason(_ error: Error) -> String {
+        switch error as? DecodingError {
+        case let .keyNotFound(k, c)?:
+            let at = path(c.codingPath)
+            return at.isEmpty ? "“\(k.stringValue)” is missing" : "“\(k.stringValue)” is missing in \(at)"
+        case let .typeMismatch(_, c)?:
+            return "“\(path(c.codingPath))” has the wrong type"
+        case let .valueNotFound(_, c)?:
+            return "“\(path(c.codingPath))” is empty"
+        case let .dataCorrupted(c)?:
+            return c.codingPath.isEmpty ? "project.json is not valid JSON" : "“\(path(c.codingPath))”: \(c.debugDescription)"
+        default:
+            return error.localizedDescription
+        }
+    }
+    static let missingFile = "project.json is missing"
+    static let newerSchema = "it was saved by a newer version of TopOpt"
+}
+
 /// Reads/writes projects under a root directory (default: Application Support).
 public struct ProjectStore {
     public let rootDir: URL
@@ -136,6 +174,14 @@ public struct ProjectStore {
     }
     private func snapshotURL(_ id: UUID) -> URL {
         projectDir(id).appendingPathComponent("project.json")
+    }
+
+    /// ★ round 3 (review, 2026-10-01): whether the folder still holds its project. The background
+    /// writes (results, re-lattice artifacts) write only into a project that still exists — a write
+    /// queued before a delete must never recreate the folder without its project.json, which Home
+    /// would then list as a "Can’t open" card nobody can remove.
+    public func holdsProject(id: UUID) -> Bool {
+        fm.fileExists(atPath: snapshotURL(id).path)
     }
 
     /// The path (as a String, for the bridge importer) of a project's copied model.
@@ -190,7 +236,8 @@ public struct ProjectStore {
     /// design that was stored to drift apart.
     public func saveRelatticeArtifacts(jobJSON: Data, designBin: Data,
                                        id: UUID) throws {
-        try fm.createDirectory(at: projectDir(id), withIntermediateDirectories: true)
+        // only beside a project that still exists (see `holdsProject`)
+        guard holdsProject(id: id) else { return }
         try jobJSON.write(to: runJobURL(id: id), options: .atomic)
         // A DESIGN-LESS PAIR IS A REAL STATE (task
         // 2026-08-03-variant-postprocessing-fix): a run killed mid-ladder, or one
@@ -280,20 +327,54 @@ public struct ProjectStore {
 
     /// Load one snapshot (nil if absent, unreadable, or a newer schema).
     public func snapshot(id: UUID) -> ProjectSnapshot? {
-        guard let data = try? Data(contentsOf: snapshotURL(id)),
-              let snap = try? JSONDecoder().decode(ProjectSnapshot.self, from: data),
-              snap.schemaVersion <= ProjectSnapshot.currentSchema else { return nil }
-        return snap
+        try? read(id: id).get()
+    }
+
+    /// ★ ROUND 3 RULING (c): one project folder → its snapshot, or WHY it cannot be opened. Reads
+    /// only; never writes, moves or deletes. A newer schema is not force-decoded (as before) — it is
+    /// reported.
+    public func read(id: UUID) -> Result<ProjectSnapshot, UnreadableProject> {
+        let url = snapshotURL(id)
+        let modified = (try? fm.attributesOfItem(atPath: projectDir(id).path))?[.modificationDate] as? Date
+        func unreadable(_ name: String?, _ why: String) -> Result<ProjectSnapshot, UnreadableProject> {
+            .failure(UnreadableProject(id: id, name: name, reason: why, modifiedAt: modified))
+        }
+        guard fm.fileExists(atPath: url.path) else { return unreadable(nil, ProjectReadFailure.missingFile) }
+        let data: Data
+        do { data = try Data(contentsOf: url) } catch { return unreadable(nil, error.localizedDescription) }
+        let name = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["name"] as? String
+        struct Peek: Decodable { let schemaVersion: Int? }
+        if let v = (try? JSONDecoder().decode(Peek.self, from: data))?.schemaVersion,
+           v > ProjectSnapshot.currentSchema {
+            return unreadable(name, ProjectReadFailure.newerSchema)
+        }
+        do {
+            return .success(try JSONDecoder().decode(ProjectSnapshot.self, from: data))
+        } catch {
+            return unreadable(name, ProjectReadFailure.reason(error))
+        }
+    }
+
+    /// ★ ROUND 3 RULING (c): every project folder (a UUID-named folder), readable or not — never a
+    /// silent drop. Readable ones most-recently-saved first; unreadable ones by folder date.
+    public func loadAll() -> (readable: [ProjectSnapshot], unreadable: [UnreadableProject]) {
+        guard let entries = try? fm.contentsOfDirectory(at: rootDir,
+                                                        includingPropertiesForKeys: nil) else { return ([], []) }
+        var readable: [ProjectSnapshot] = []
+        var unreadable: [UnreadableProject] = []
+        for id in entries.compactMap({ UUID(uuidString: $0.lastPathComponent) }) {
+            switch read(id: id) {
+            case let .success(s): readable.append(s)
+            case let .failure(u): unreadable.append(u)
+            }
+        }
+        return (readable.sorted { $0.savedAt > $1.savedAt },
+                unreadable.sorted { ($0.modifiedAt ?? .distantPast) > ($1.modifiedAt ?? .distantPast) })
     }
 
     /// All readable snapshots, most-recently-saved first.
     public func loadAllSnapshots() -> [ProjectSnapshot] {
-        guard let entries = try? fm.contentsOfDirectory(at: rootDir,
-                                                        includingPropertiesForKeys: nil) else { return [] }
-        return entries
-            .compactMap { UUID(uuidString: $0.lastPathComponent) }
-            .compactMap { snapshot(id: $0) }
-            .sorted { $0.savedAt > $1.savedAt }
+        loadAll().readable
     }
 
     /// Remove a project's folder entirely.

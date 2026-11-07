@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 #include "topopt/mesh.hpp"
@@ -157,6 +158,53 @@ struct DesignBox {
   Vec3 max;
 };
 
+// CORE LIST item KEEP: a region of the part kept EXACTLY (the reviewer's ruling of
+// 2026-10-25 03:58; item 7's primitive form, model space, mm). A box is its min/max;
+// a cylinder is the one inscribed in that box along `axis` (0 = X, 1 = Y, 2 = Z): its
+// cross-section must be square (the app's convention).
+//
+// The ORIENTED form (ruling 2026-10-26 23:48, so tilted holes and slanted faces are
+// kept exactly too): `axes` is a right-handed orthonormal frame about `center`. A box
+// is center + s*axes[0] + t*axes[1] + q*axes[2] with |s|, |t|, |q| <= half.x, half.y,
+// half.z; a cylinder runs along axes[2], radius half.x, |q| <= half.z. `min`/`max`
+// then hold its bounding box (a fast reject only) and `axis` is unused.
+struct KeepRegion {
+  bool cylinder = false;
+  Vec3 min{0.0, 0.0, 0.0};
+  Vec3 max{0.0, 0.0, 0.0};
+  int axis = 2;
+  bool oriented = false;
+  Vec3 center{0.0, 0.0, 0.0};
+  Vec3 axes[3] = {{1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {0.0, 0.0, 1.0}};
+  Vec3 half{0.0, 0.0, 0.0};
+  bool contains(const Vec3& p) const {
+    if (p.x < min.x || p.x > max.x || p.y < min.y || p.y > max.y || p.z < min.z ||
+        p.z > max.z)
+      return false;
+    if (oriented) {
+      const double dx = p.x - center.x, dy = p.y - center.y, dz = p.z - center.z;
+      const Vec3& w = axes[2];
+      const double q = dx * w.x + dy * w.y + dz * w.z;
+      if (q < -half.z || q > half.z) return false;
+      if (cylinder) {
+        const double rx = dx - q * w.x, ry = dy - q * w.y, rz = dz - q * w.z;
+        return rx * rx + ry * ry + rz * rz <= half.x * half.x;
+      }
+      const double s = dx * axes[0].x + dy * axes[0].y + dz * axes[0].z;
+      const double t = dx * axes[1].x + dy * axes[1].y + dz * axes[1].z;
+      return s >= -half.x && s <= half.x && t >= -half.y && t <= half.y;
+    }
+    if (!cylinder) return true;
+    const double c[3] = {0.5 * (min.x + max.x), 0.5 * (min.y + max.y), 0.5 * (min.z + max.z)};
+    const double q[3] = {p.x, p.y, p.z};
+    const double half[3] = {0.5 * (max.x - min.x), 0.5 * (max.y - min.y), 0.5 * (max.z - min.z)};
+    const int u = (axis + 1) % 3, w = (axis + 2) % 3;
+    const double r = half[u];  // square cross-section: half[w] == half[u]
+    const double du = q[u] - c[u], dw = q[w] - c[w];
+    return du * du + dw * dw <= r * r;
+  }
+};
+
 // The expanded design domain built from a part grid and a design box: the larger
 // grid, its effective mask, and the integer voxel offset at which the original
 // part sits inside the expanded grid (part voxel (i,j,k) is expanded voxel
@@ -248,6 +296,95 @@ int remap_node_to_domain(const VoxelGrid& part, const DesignDomain& domain,
 TriangleMesh marching_cubes(const VoxelGrid& grid,
                             const std::vector<double>& density, double iso = 0.5);
 
+// ── THE PRINTED MATERIAL AS BODIES (CORE LIST items 41 + 47) ────────────────
+//
+// A body is a 26-connected component of PRINTED voxels (non-Empty, density > iso:
+// the load-path belt's own definition, and the FEA's — hex elements sharing a
+// corner node are joined). It CARRIES when it holds a Load or a Fixture voxel; a
+// body holding neither is a loose speck. `decidable` is false unless the grid tags
+// BOTH a Load and a Fixture voxel (the belt's own condition): on a self-weight run
+// there is no declared load to tell a carrying body from a lost one, and every
+// caller keeps today's single-largest-shell rule.
+struct PrintedBody {
+  long long voxels = 0;
+  long long load_voxels = 0;
+  long long anchor_voxels = 0;
+  bool carries() const { return load_voxels > 0 || anchor_voxels > 0; }
+};
+struct PrintedBodies {
+  bool decidable = false;
+  std::vector<int> body_of_voxel;   // grid-indexed body id, -1 where not printed
+  std::vector<PrintedBody> bodies;  // in order of each body's lowest voxel index
+};
+PrintedBodies printed_bodies(const VoxelGrid& grid,
+                             const std::vector<double>& density, double iso);
+
+// The shells of a marching-cubes mesh of `grid`'s field (the solve grid's own, or a
+// finer resample of it) that the EXPORT keeps: for every carrying body, the largest
+// shell that lies on it, and no shell of a speck. A shell is assigned to a body by
+// majority over its vertices, each vertex voting for the nearest printed voxel
+// centre in the 3x3x3 block around it (exact on the solve grid, where a vertex sits
+// on an edge from a printed centre to an empty one). One body's inner cavity and
+// any resample fragment are dropped exactly as keep_largest_component drops them.
+// `same_as_largest` is true when the kept set is the single largest shell (or the
+// field is not decidable), and `mesh` is then keep_largest_component(raw) byte for
+// byte, so every one-body part exports exactly what it exported before.
+struct BodyShells {
+  TriangleMesh mesh;
+  bool same_as_largest = true;
+  int bodies_exported = 0;       // carrying bodies with a shell in `mesh`
+  int bodies_without_shell = 0;  // carrying bodies no shell was assigned to
+  int specks_dropped = 0;        // bodies holding neither a load nor an anchor
+  long long speck_voxels = 0;
+};
+BodyShells carrying_body_shells(const TriangleMesh& raw, const VoxelGrid& grid,
+                                const PrintedBodies& bodies);
+
+// Item 47: the design's bodies that hold Fixture voxels the part AS DRAWN joined to
+// a load, but that hold no Load voxel themselves — anchored pieces the design let
+// go of. An anchor the part as drawn never joined to a load (a separate anchored
+// block) is not counted: the design did not lose it. Both fields must be over the
+// same grid. Empty when the grid tags no Load voxel (a self-weight run).
+struct LostAnchors {
+  std::vector<int> design_bodies;  // ids into `design.bodies`
+  long long voxels = 0;            // printed voxels of those bodies
+  std::vector<std::size_t> fixture_voxels;  // their Fixture voxels, grid-indexed
+};
+LostAnchors lost_anchored_pieces(const VoxelGrid& grid, const PrintedBodies& as_drawn,
+                                 const PrintedBodies& design);
+
+// CORE LIST item 42, option B (the reviewer's ruling of 2026-10-25 03:58): ONE PIECE.
+// The design's carrying bodies that the part AS DRAWN held in one body are joined
+// back into one piece: from the largest such body, the cheapest path (26-neighbour
+// steps costed 1 / sqrt 2 / sqrt 3) through `allowed` voxels to the nearest other
+// body, thickened by `radius` voxels (within `allowed`), repeated until the group is
+// one body. The bridge voxels are set to density 1 in `density`. A part drawn as
+// separate bodies stays separate; a group no path can join is left as it is (the
+// belt and item 47 then judge it). `allowed` is grid-indexed (non-zero = the bridge
+// may pass: design space, not a keep-out or Keep Clear).
+// Each laid bridge is kept (its path, thickening, the body it joined and the voxels it
+// set) so the hold-itself check can thicken it or lift it again.
+struct LaidBridge {
+  std::vector<std::size_t> path;    // the path's voxels outside the two bodies
+  int radius = 0;                   // current thickening, voxels
+  std::vector<std::size_t> target;  // the joined (smaller) body's printed voxels
+  std::vector<std::pair<std::size_t, double>> laid;  // voxels it set to 1, prior density
+};
+struct BridgeResult {
+  int bridges = 0;                  // paths laid
+  long long voxels = 0;             // voxels the bridges set to density 1
+  int groups_left_split = 0;        // as-drawn groups no path could join
+  std::vector<LaidBridge> laid;     // one per bridge, in laid order
+};
+BridgeResult bridge_split_bodies(const VoxelGrid& grid, std::vector<double>& density,
+                                 double iso, const PrintedBodies& as_drawn,
+                                 const std::vector<char>& allowed, int radius);
+// Lays `b.path` thickened by `radius` voxels within `allowed` (the path itself always),
+// sets `b.radius`, appends what it set to `b.laid`; returns how many voxels it newly
+// printed (density from <= iso to 1).
+long long lay_bridge(const VoxelGrid& grid, std::vector<double>& density, double iso,
+                     const std::vector<char>& allowed, LaidBridge& b, int radius);
+
 // Result of the Gate V3 property suite. `passes` is the conjunction of the four
 // ARCHITECTURE §7 V3 gates; the individual fields expose why.
 struct V3Report {
@@ -268,6 +405,18 @@ struct V3Report {
   // this count SURFACES the drop so a caller can warn instead of shipping a
   // silently-broken result (diagnosis 064). Not a §7 V3 gate; a diagnostic signal.
   int load_fixture_islands = 0;
+  // CORE LIST item 41 — WHAT THE FILE CARRIES. `mesh` above stays the single
+  // largest shell (the §7 gate's input, and the shell the lattice path pushes);
+  // the exported solid is every carrying body (carrying_body_shells). Stored only
+  // when it differs from `mesh`, so a one-body part holds one copy, not two: read
+  // it through exported_mesh().
+  TriangleMesh export_mesh;
+  int bodies_exported = 1;
+  int specks_dropped = 0;
+  long long speck_voxels = 0;
+  const TriangleMesh& exported_mesh() const {
+    return export_mesh.triangles.empty() ? mesh : export_mesh;
+  }
   int min_feature_violations = 0;  // gate 4: solid voxels not in any 2x2x2 block
   bool passes = false;
 

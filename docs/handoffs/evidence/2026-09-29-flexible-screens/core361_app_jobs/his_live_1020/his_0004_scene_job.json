@@ -1,0 +1,625 @@
+{
+  "flexible" : {
+    "beads_per_wall" : 1,
+    "faces" : [
+      {
+        "curve_centre_edge" : [
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "deepest_squish_mm" : 1,
+        "face_region_id" : 5,
+        "mode" : "centre_edge",
+        "role" : "loaded",
+        "skin_on" : true,
+        "weight_n" : 1
+      }
+    ],
+    "feel" : "springy",
+    "material_id" : "varioshore_tpu",
+    "min_extrudable_width_mm" : 0.45000000000000001,
+    "nozzle_temp_c" : "auto",
+    "regions" : [
+      {
+        "face_id" : 5,
+        "geometry" : {
+          "depth_mm" : 34,
+          "frame_u" : [
+            0,
+            0,
+            -1
+          ],
+          "frame_w" : [
+            -0,
+            1,
+            0
+          ],
+          "half_u_mm" : 50,
+          "half_w_mm" : 50,
+          "normal" : [
+            1,
+            0,
+            0
+          ],
+          "origin" : [
+            0,
+            50,
+            10
+          ],
+          "outline_uv" : [
+            [
+              [
+                10,
+                -50
+              ],
+              [
+                -10,
+                -50
+              ],
+              [
+                -10,
+                50
+              ],
+              [
+                10,
+                50
+              ]
+            ]
+          ]
+        },
+        "kind" : "face",
+        "role" : "include"
+      },
+      {
+        "face_id" : 3,
+        "geometry" : {
+          "depth_mm" : 34,
+          "frame_u" : [
+            0,
+            -0,
+            1
+          ],
+          "frame_w" : [
+            0,
+            1,
+            0
+          ],
+          "half_u_mm" : 50,
+          "half_w_mm" : 50,
+          "normal" : [
+            -1,
+            0,
+            0
+          ],
+          "origin" : [
+            100,
+            50,
+            10
+          ],
+          "outline_uv" : [
+            [
+              [
+                -10,
+                -50
+              ],
+              [
+                -10,
+                50
+              ],
+              [
+                10,
+                50
+              ],
+              [
+                10,
+                -50
+              ]
+            ]
+          ]
+        },
+        "kind" : "face",
+        "role" : "include"
+      }
+    ],
+    "topology" : "auto"
+  },
+  "loads" : {
+    "build_dir" : [
+      0,
+      0,
+      1
+    ],
+    "face_regions" : [
+      {
+        "add" : [
+          0
+        ],
+        "id" : 0,
+        "name" : "face 0"
+      },
+      {
+        "add" : [
+          1
+        ],
+        "id" : 1,
+        "name" : "face 1"
+      },
+      {
+        "add" : [
+          2
+        ],
+        "id" : 2,
+        "name" : "face 2"
+      },
+      {
+        "add" : [
+          3
+        ],
+        "id" : 3,
+        "name" : "face 3"
+      },
+      {
+        "add" : [
+          4
+        ],
+        "id" : 4,
+        "name" : "face 4"
+      },
+      {
+        "add" : [
+          5
+        ],
+        "id" : 5,
+        "name" : "face 5"
+      },
+      {
+        "add" : [
+          0
+        ],
+        "cuts" : [
+          {
+            "normal" : [
+              1,
+              0,
+              0
+            ],
+            "point" : [
+              34,
+              50,
+              10
+            ],
+            "strict" : true
+          },
+          {
+            "normal" : [
+              1,
+              0,
+              0
+            ],
+            "point" : [
+              66,
+              50,
+              10
+            ],
+            "strict" : false
+          }
+        ],
+        "id" : 2000020,
+        "name" : "Face 0 · lattice B"
+      },
+      {
+        "add" : [
+          0
+        ],
+        "cuts" : [
+          {
+            "normal" : [
+              -1,
+              0,
+              0
+            ],
+            "point" : [
+              34,
+              50,
+              10
+            ],
+            "strict" : false
+          }
+        ],
+        "id" : 2000021,
+        "name" : "Face 0 · lattice A"
+      },
+      {
+        "add" : [
+          1
+        ],
+        "cuts" : [
+          {
+            "normal" : [
+              1,
+              0,
+              0
+            ],
+            "point" : [
+              34,
+              50,
+              10
+            ],
+            "strict" : true
+          },
+          {
+            "normal" : [
+              1,
+              0,
+              0
+            ],
+            "point" : [
+              66,
+              50,
+              10
+            ],
+            "strict" : false
+          }
+        ],
+        "id" : 2000022,
+        "name" : "Face 1 · lattice B"
+      },
+      {
+        "add" : [
+          2
+        ],
+        "cuts" : [
+          {
+            "normal" : [
+              1,
+              0,
+              0
+            ],
+            "point" : [
+              34,
+              50,
+              10
+            ],
+            "strict" : true
+          },
+          {
+            "normal" : [
+              1,
+              0,
+              0
+            ],
+            "point" : [
+              66,
+              50,
+              10
+            ],
+            "strict" : false
+          }
+        ],
+        "id" : 2000024,
+        "name" : "Face 2 · lattice B"
+      },
+      {
+        "add" : [
+          4
+        ],
+        "cuts" : [
+          {
+            "normal" : [
+              1,
+              0,
+              0
+            ],
+            "point" : [
+              34,
+              50,
+              10
+            ],
+            "strict" : true
+          },
+          {
+            "normal" : [
+              1,
+              0,
+              0
+            ],
+            "point" : [
+              66,
+              50,
+              10
+            ],
+            "strict" : false
+          }
+        ],
+        "id" : 2000026,
+        "name" : "Face 4 · lattice B"
+      },
+      {
+        "add" : [
+          4
+        ],
+        "cuts" : [
+          {
+            "normal" : [
+              -1,
+              0,
+              0
+            ],
+            "point" : [
+              34,
+              50,
+              10
+            ],
+            "strict" : false
+          },
+          {
+            "normal" : [
+              0.15171288480907469,
+              0,
+              -0.98842460541151467
+            ],
+            "point" : [
+              1.8517542226707313,
+              100,
+              7.9356361909153854
+            ],
+            "strict" : true
+          }
+        ],
+        "id" : 2000047,
+        "name" : "Face 4 · lattice A"
+      },
+      {
+        "add" : [
+          2
+        ],
+        "cuts" : [
+          {
+            "normal" : [
+              -1,
+              0,
+              0
+            ],
+            "point" : [
+              34,
+              50,
+              10
+            ],
+            "strict" : false
+          },
+          {
+            "normal" : [
+              0,
+              0,
+              -1
+            ],
+            "point" : [
+              0,
+              0,
+              9.4422499043621642
+            ],
+            "strict" : true
+          }
+        ],
+        "id" : 2000050,
+        "name" : "Face 2 · lattice A"
+      },
+      {
+        "add" : [
+          1
+        ],
+        "cuts" : [
+          {
+            "normal" : [
+              -1,
+              0,
+              0
+            ],
+            "point" : [
+              34,
+              50,
+              10
+            ],
+            "strict" : false
+          },
+          {
+            "normal" : [
+              0.18483148251893017,
+              -0.982770229031107,
+              0
+            ],
+            "point" : [
+              2.7484655931857089,
+              85.386092652140078,
+              20
+            ],
+            "strict" : true
+          },
+          {
+            "normal" : [
+              0,
+              1,
+              0
+            ],
+            "point" : [
+              0,
+              8.2486183979717627,
+              20
+            ],
+            "strict" : true
+          }
+        ],
+        "id" : 2000060,
+        "name" : "Face 1 · lattice A"
+      },
+      {
+        "add" : [
+          1
+        ],
+        "cuts" : [
+          {
+            "normal" : [
+              -1,
+              0,
+              0
+            ],
+            "point" : [
+              34,
+              50,
+              10
+            ],
+            "strict" : false
+          },
+          {
+            "normal" : [
+              0.18483148251893017,
+              -0.982770229031107,
+              0
+            ],
+            "point" : [
+              2.7484655931857089,
+              85.386092652140078,
+              20
+            ],
+            "strict" : true
+          },
+          {
+            "normal" : [
+              0,
+              -1,
+              0
+            ],
+            "point" : [
+              0,
+              8.2486183979717627,
+              20
+            ],
+            "strict" : false
+          }
+        ],
+        "id" : 2000061,
+        "name" : "Edge 9 · Face 1 · lattice A"
+      },
+      {
+        "add" : [
+          2
+        ],
+        "cuts" : [
+          {
+            "normal" : [
+              -1,
+              0,
+              0
+            ],
+            "point" : [
+              34,
+              50,
+              10
+            ],
+            "strict" : false
+          },
+          {
+            "normal" : [
+              0,
+              0,
+              1
+            ],
+            "point" : [
+              0,
+              0,
+              9.4422499043621642
+            ],
+            "strict" : false
+          }
+        ],
+        "id" : 2000062,
+        "name" : "Edge 9 · Face 2 · lattice A"
+      },
+      {
+        "add" : [
+          1
+        ],
+        "cuts" : [
+          {
+            "normal" : [
+              -1,
+              0,
+              0
+            ],
+            "point" : [
+              34,
+              50,
+              10
+            ],
+            "strict" : false
+          },
+          {
+            "normal" : [
+              -0.18483148251893017,
+              0.982770229031107,
+              0
+            ],
+            "point" : [
+              2.7484655931857089,
+              85.386092652140078,
+              20
+            ],
+            "strict" : false
+          }
+        ],
+        "id" : 2000063,
+        "name" : "Edge 12 · Face 1 · lattice A"
+      },
+      {
+        "add" : [
+          4
+        ],
+        "cuts" : [
+          {
+            "normal" : [
+              -1,
+              0,
+              0
+            ],
+            "point" : [
+              34,
+              50,
+              10
+            ],
+            "strict" : false
+          },
+          {
+            "normal" : [
+              -0.15171288480907469,
+              0,
+              0.98842460541151467
+            ],
+            "point" : [
+              1.8517542226707313,
+              100,
+              7.9356361909153854
+            ],
+            "strict" : false
+          }
+        ],
+        "id" : 2000064,
+        "name" : "Edge 12 · Face 4 · lattice A"
+      }
+    ]
+  },
+  "material" : "varioshore_tpu",
+  "mode" : "analyze",
+  "model" : "$ROOT\/A1000001-0000-4000-8000-000000000003\/model.stl",
+  "output" : {
+    "mesh_format" : "stl",
+    "mesh_prefix" : "unused",
+    "report" : "report.json"
+  },
+  "resolution" : 96
+}

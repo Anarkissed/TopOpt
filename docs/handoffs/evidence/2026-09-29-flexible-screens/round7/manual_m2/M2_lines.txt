@@ -1,0 +1,4 @@
+(1) Face 5 (Group 1): 'Squishes ≈ 2.8 mm at 5 lb' · chip '≈ 2.8 mm' · rings 772 segments
+(2) Edge 12 (Group 2): 'Squishes ≈ 3.1 mm at 7 lb' · chip '≈ 3.1 mm'
+(3) Face 3 window: profiles ["across", "along"] · 'What your lattice does · deepest ≈ 2.8 mm'
+(4) view line: 'Bend · estimate ≈ 2.8 mm at 5 lb' · card: 'Squishes ≈ 2.8 mm at 5 lb'

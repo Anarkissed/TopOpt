@@ -1,0 +1,115 @@
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleFaceChip.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleFaceChip.swift
+index e0725c1b..2f49b35c 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleFaceChip.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleFaceChip.swift
+@@ -186,22 +186,36 @@ struct FlexibleFaceChip: View {
+         .frame(minHeight: 44)
+     }
+ 
+-    private func roleCapsule(_ g: SelectionGroup) -> some View {
+-        let k = project.force.kind(for: g.id)
++    /// What the role capsule reads for a group: its word, its glyph, its tint, and a shield beside it.
++    struct RoleReading: Equatable {
+         let word: String
+         let symbol: String
+         let tint: RGBA
++        let shield: Bool
++    }
++
++    @MainActor
++    static func roleReading(_ project: ProjectModel, _ g: UUID, ui: FlexibleFaceChipState?) -> RoleReading {
++        let k = project.force.kind(for: g)
+         if k.isLoad {
+             // ★ the review of R7-D2: an unset weight reads as the list does — "↓ weight: Squish page" (with "Load" in front it was
+             // cut to "Load weight: Squish p…")
+-            let w = Self.loadWeight(project, g.id, ui: ui)
+-            word = w == FlexibleSelectionsCopy.weightUnset ? (w ?? "Load") : "Load" + (w.map { " " + $0 } ?? ""); symbol = "arrow.down"; tint = DS.Color.accent
+-        } else if k.isAnchor { word = "Anchor"; symbol = "lock.fill"; tint = DS.Color.okGreen
+-        } else if project.force.keepClearAffix(for: g.id) == .on { word = "Keep clear"; symbol = "nosign"; tint = DS.Color.clearance
+-        } else if project.force.isProtected(g.id) { word = "Protect"; symbol = "shield.lefthalf.filled"; tint = Self.protectTint
+-        } else if project.lattice.flexible?.latticeOnlyGroups?.contains(g.id) == true {
+-            word = FlexibleSelectionsCopy.latticeOnly; symbol = "square.grid.3x3.fill"; tint = FlexibleStageStyle.facePrismToken
+-        } else { word = FlexibleSelectionsCopy.setRole; symbol = "plus"; tint = DS.Color.textSecondary }
++            let w = loadWeight(project, g, ui: ui)
++            return RoleReading(word: w == FlexibleSelectionsCopy.weightUnset ? (w ?? "Load") : "Load" + (w.map { " " + $0 } ?? ""),
++                               symbol: "arrow.down", tint: DS.Color.accent, shield: false)
++        } else if k.isAnchor { return RoleReading(word: "Anchor", symbol: "lock.fill", tint: DS.Color.okGreen, shield: false)
++        } else if project.force.keepClearAffix(for: g) == .on { return RoleReading(word: "Keep clear", symbol: "nosign", tint: DS.Color.clearance, shield: false)
++        } else if project.force.isProtected(g) { return RoleReading(word: "Protect", symbol: "shield.lefthalf.filled", tint: protectTint, shield: false)
++        } else if project.lattice.flexible?.latticeOnlyGroups?.contains(g) == true {
++            return RoleReading(word: FlexibleSelectionsCopy.latticeOnly, symbol: "square.grid.3x3.fill", tint: FlexibleStageStyle.facePrismToken, shield: false)
++        }
++        return RoleReading(word: FlexibleSelectionsCopy.setRole, symbol: "plus", tint: DS.Color.textSecondary, shield: false)
++    }
++
++    private func roleCapsule(_ g: SelectionGroup) -> some View {
++        let k = project.force.kind(for: g.id)
++        let reading = Self.roleReading(project, g.id, ui: ui)
++        let word = reading.word, symbol = reading.symbol, tint = reading.tint
+         return Button {
+             ui.info = nil
+             ui.roleOpen = ui.roleOpen == g.id ? nil : g.id
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleFaceChipLayout.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleFaceChipLayout.swift
+index fd2840d2..6d31dfca 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleFaceChipLayout.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleFaceChipLayout.swift
+@@ -25,7 +25,7 @@ public enum FlexibleFaceChipLayout {
+     public static let clearance: CGFloat = 8
+ 
+     /// The chip's kinds (the plan's N / M / G / B / L) — their drawn heights, for placement before the first measure.
+-    public enum Kind: Equatable, Sendable { case new(join: Bool, held: Bool), member, group, blocked, locked }
++    public enum Kind: Equatable, Sendable { case new(join: Bool, held: Bool = false), member, group, blocked, locked }
+ 
+     public static func size(_ k: Kind) -> CGSize {
+         switch k {
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleFaceCommits.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleFaceCommits.swift
+index 2d39732f..85e46561 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleFaceCommits.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleFaceCommits.swift
+@@ -110,6 +110,12 @@ enum FlexibleFaceCommits {
+     /// role's tests re-pinned) only on the reviewer's word.
+     static let latticeOnlyRoleLanded = false
+ 
++    /// STUB (round 7, his ruling 2026-10-18 — the tests are written first): the red control that puts the held [Lattice] back.
++    static var controlLatticeHeld = false
++
++    /// STUB (round 7, his ruling 2026-10-18 — the tests are written first): the group reads "Lattice".
++    static func readsLattice(_ id: UUID, _ p: ProjectModel) -> Bool { false }
++
+     // MARK: reads
+ 
+     static func group(_ id: UUID, _ p: ProjectModel) -> SelectionGroup? { p.selection.groups.first { $0.id == id } }
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleSelectionsList.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleSelectionsList.swift
+index 1466de1d..c48bb925 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleSelectionsList.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleSelectionsList.swift
+@@ -370,13 +370,24 @@ struct FlexibleRoleGlyphs: View {
+     @ObservedObject var project: ProjectModel
+     let group: UUID
+     let size: CGFloat
+-    var body: some View {
++
++    /// The group line's role glyphs, in order (symbol, tint).
++    @MainActor
++    static func glyphs(_ project: ProjectModel, _ group: UUID) -> [(symbol: String, tint: RGBA)] {
+         let k = project.force.kind(for: group)
++        var out: [(symbol: String, tint: RGBA)] = []
++        if k.isAnchor { out.append(("lock.fill", DS.Color.okGreen)) }
++        if k.isLoad { out.append(("arrow.down", DS.Color.accent)) }
++        if project.force.isProtected(group) { out.append(("shield.lefthalf.filled", FlexibleFaceChip.protectTint)) }
++        if project.force.keepClearAffix(for: group) == .on { out.append(("nosign", DS.Color.clearance)) }
++        return out
++    }
++
++    var body: some View {
+         HStack(spacing: 4) {
+-            if k.isAnchor { Image(systemName: "lock.fill").foregroundStyle(DS.Color.okGreen.color) }
+-            if k.isLoad { Image(systemName: "arrow.down").foregroundStyle(DS.Color.accent.color) }
+-            if project.force.isProtected(group) { Image(systemName: "shield.lefthalf.filled").foregroundStyle(FlexibleFaceChip.protectTint.color) }
+-            if project.force.keepClearAffix(for: group) == .on { Image(systemName: "nosign").foregroundStyle(DS.Color.clearance.color) }
++            ForEach(Array(Self.glyphs(project, group).enumerated()), id: \.offset) { _, g in
++                Image(systemName: g.symbol).foregroundStyle(g.tint.color)
++            }
+         }
+         .font(.system(size: size, weight: .semibold))
+     }

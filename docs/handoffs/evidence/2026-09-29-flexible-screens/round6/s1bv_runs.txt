@@ -1,0 +1,255 @@
+# Round 6 item 3, the main page — S1b VERIFICATION (2026-10-09): the verifier's findings on 73b01e7d, each confirmed here,
+# the fixes, and the raw runs. Base 73b01e7d (S1b); the fix is 7412c023. This Mac, Xcode 27, Debug, unseeded unless said. Nothing pushed.
+#
+# (1) THE FINDINGS — CONFIRMED HERE (red run below, renders, topopt-cli runs):
+#   UX MAJOR  the prism cannot be seen in his Lattice view; a side face's tag floats over the top face (img3's red line):
+#             CONFIRMED (verify_s1b renders; FIXED: every main-page tag carries its face and a LEADER to it).
+#   UX MAJOR  [Prisms] shows 3 of 5 on A1_0003, 1 of 4 on r5 at his 13" portrait: CONFIRMED (red: [1, 3, 4] and [1000103]);
+#             FIXED: the greedy pass reads the tag AS DRAWN (76 x 26, not Settings' 84 x 44 tap target) and a hidden floor
+#             slides along its prism's axis (then beside its face, only where the leader reaches the face): 5 of 5, 4 of 4.
+#   UX minor  [Prisms] + a pick changes nothing: CONFIRMED (red: no bright prism); FIXED: the active group's prisms take
+#             Settings' view-selected alphas (0.09 / 0.60), its tags placed first with a 2 pt border.
+#   UX minor  keep-outs in the MTKView's full-screen space: CONFIRMED (red: chrome (0, 0, 1032, 1376), buttons 24 pt high,
+#             the hunt put tags over the player); FIXED: the layer reads the chrome's frame (the safe area) and keeps out of
+#             the buttons, card, player, strip, chips and bottom bar where they are drawn, plus the title/stage rows.
+#   UX minor  (b) set vs simulated number: FIXED in the copy only (FlexibleRowCopy.Info.mainPrisms says the tag is what he
+#             SET and the Squish scale is what the simulation reached). (a) the [Prisms] glyph: NOT changed (his call; it
+#             is the Settings page's glyph too).
+#   UX minor  the restored active group (A1_0003's Pending Group C) shows its number before any pick: CONFIRMED, NOT
+#             changed — a ruling (spec §2 says the ACTIVE group's prisms show).
+#   UX minor  #354's role colours paint r5's unpressed 'sides' faces on the main page: CONFIRMED by reading (H4 passes
+#             roleTints; R6-1a passes roles: [:]); NOT changed — the verifier and the ruling both say ask with item 4.
+#   SYNC      A1_0002's two Export sends cannot run (region 27): CONFIRMED with topopt-cli from this tree's core (exit 1,
+#             "face region 27 has no column at a 3.410559 mm pitch"); older than S1b; out of scope (angled_presses/s1b_sync.txt (7)).
+#   SYNC      A3 is a thrown error, not a refusal: CONFIRMED (run.cpp:569-585; control exit 1 "share surface"); wording
+#             corrected in s1b_sync.txt (7).
+#   SYNC      the golden test header named 11b264e8: FIXED (907df081); #358 is at e8a01f7d now: noted for the next sync.
+#
+# (2) RED RUN (tests first, at the API stubs: the Settings tag size, no face, full-screen chrome, no bright):
+#   swift test --skip-build --filter 'TopOptFlowsTests\.FlexibleS1bMainTagsTests/'
+#     Executed 4 tests, with 414 failures (0 unexpected) in 160.259 seconds — each for its stated reason:
+#     S1bV-1  XCTUnwrap failed … "Group C: the tag knows its face"
+#     S1bV-2  ("3") is not equal to ("5") "A1_0003 heat true: every number shows at his camera ([1, 3, 4])"; ("1") is not
+#             equal to ("4") "r5 … ([1000103])"; the hunt 250 (A1) and 135 (r5) bad, e.g. "A1_0003 az 3.14 el 1.10 zoom 0.45:
+#             face 4's tag (476, 1147, 85, 45) over the player (409, 1186, 340, 80)"
+#     S1bV-3  ("[]") is not equal to ("[1]") "Top: its faces' prisms brighter"; ("[]") vs ("[3]") for Group C
+#     S1bV-4  ("0.0") is not equal to ("24.0") "the chrome starts under the status bar"; ("1376.0") vs ("1332.0"); "the
+#             buttons as drawn (824, 259, 184, 41) is kept out of" and the card's, failed
+#
+# (3) GREEN RUNS
+#   first fix (axis 0…2, leaders, bright, chrome): Executed 4 tests, with 4 failures — still 3 of 5 and 2 of 4 (A1 faces 2, 5
+#     and r5 1000104, 5: their floors AND faces under the Selections strip)
+#   + in past the floor and beside the face: r5 3 of 4, the hunt flagged beside-face tags whose leader could not reach the
+#     face (25 failures) → a tag off the axis is taken only where its leader reaches the face's dot; the axis runs to −3
+#   final: Executed 4 tests, with 0 failures (0 unexpected) in 169.188 seconds
+#     FLEX-S1bV-1 Group C face 3 24.5 mm tag (664, 779) → face (830, 876) · Top face 1 12.0 mm tag (515, 700) → face (514, 623)
+#       · hosted leader-3 (663, 779, 167, 98)
+#     FLEX-S1bV-2 A1_0003 (heat on and off): f3 24.5 (663,779), f1 12.0 (514,699), f2 19.0 (415,740) leader→(372,765),
+#       f4 22.5 (655,605) dashed, f5 19.5 (420,632) leader→(372,604) — 5 of 5; hunt 300 cameras, 1497 of 1500 numbers, 0 bad
+#       r5: f1000103 4.0 (663,734), f1000104 3.0 (436,551) beside its face → (384,551), f3 24.5 (660,778), f5 13.5
+#       (421,633) → (372,604) — 4 of 4; hunt 300 cameras, 996 of 1200 numbers, 0 bad (none over his img4 chrome, the
+#       Flexible chrome as drawn, or another tag; each on its prism's axis or joined to its face)
+#     FLEX-S1bV-3 Top bright [1] tags 1* first · Group C bright [3] tags 3* first
+#     FLEX-S1bV-4 chrome (0, 24, 1032, 1332) · the tags still at the page's projected points
+#   R6-3l re-pinned (FlexibleRound6HostedTests): overlaps measured on the drawn tag (mainFrame); "a tag under a keep-out
+#     hides" → "a tag never sits under a keep-out" (it slides along its axis now).
+#
+# (4) EVIDENCE (FLEX_R6_EVIDENCE_DIR=… FLEX_R6_CHROME=<his img4's chrome> swift test --skip-build --filter
+#   'TopOptFlowsTests\.FlexibleS1bMainTagsTests/testEvidence', 1 test, 0 failures, 744.9 s): R6_S1bV_*.png (1x of the
+#   2064 x 2752 frames; two @2x crops *_zoom.png) and R6_S1bV_evidence_log.txt. LOOKED AT: in his everyday Lattice view
+#   (heat off) Group C's "24.5 mm" now runs a line to a dot on the right-front face; [Prisms] shows all five on A1_0003
+#   and all four on r5, the faces turned away dashed with a hollow dot, the two under the Selections panel led to its edge.
+#   Leader visibility (composite vs the frame under it, along the line, max-channel Δ of 255): median 63–136, p10 21–111;
+#   the faint prisms' own Δ beside it: median 6–16. Offscreen frames + hosted SwiftUI, not device screenshots.
+#
+# (5) THE TARGETED SUITE — 76 classes (every class in a test file that names a touched source file or a touched symbol
+#   — prismTags, .volumes(, FlexibleMainPrismTagsLayer, FlexibleStageViewTags, legendCard(, cardInfo, Info.mainPrisms,
+#   FlexibleMainLegendLayout, FlexibleMainLegends(, the prism alphas, FlexibleMainPlayerSlot —, every class that enumerates
+#   Sources, the golden classes, and LatticeStaleTypeTests ProjectStoreTests UndoHistoryTests LatticeSettingsPersistTests
+#   ViewerTests SmoothingPageRound2Tests), run detached by the S1b driver (12 per run), 15:55:58 → 17:00:54, no xctest death:
+#   TopOptFlowsTests 75 classes, 484 tests, 34 skipped, 9 failures · TopOptKitTests 1 class, 2 tests, 2 skipped, 0 failures
+#   The 9, both known: FlexibleBatchNVerifyTests.testEveryRefineLineIsWholeBesideTheLivePlayAllPicker x8 (since Xcode 27) and
+#   FlexibleRound5SettingsHostedTests.testTheRailTheBoxesTheTrashAndTheExitOnHisProject x1 ("11l: a click on the box opens
+#   the keypad", the known heavy-load flake) — re-run alone: Executed 4 tests, with 0 failures in 85.5 s.
+#   The suite rewrote evidence/2026-09-02-organic-on-device/…/v16_mac_capsules_shipped_{0,1}.png: restored, not committed.
+#   Goldens: SWIFT_DETERMINISTIC_HASHING=1 FlexibleAngledGoldenTests + FlexiblePressProbeTripwireTests: Executed 14 tests, 0
+#   failures, 38 identical, 0 DIFFERS; unseeded inside the suite: 0 DIFFERS. Display-only change: no job byte moves
+#   (the stage-job hashes were not re-run).
+#
+# (6) iOS: xcodebuild … -derivedDataPath …/flexA1 build: ** BUILD SUCCEEDED ** (17:03:07 → 17:03:34), installed; two comments
+#   changed after it, so rebuilt at 7412c023: ** BUILD SUCCEEDED ** (17:05:42 → 17:05:56); xcrun simctl install 147E56A1
+#   exit 0 (booted; NEVER launched). Installed TopOpt.debug.dylib (…/Application/1A97A196-…/TopOpt.app) 75 799 344 B, mtime
+#   2026-10-09 17:05:56, cmp-identical to the build; strings: "as you set it in Settings" (this work) 1, "leader-" 1,
+#   "flexible-main-view-prisms" 1, "907df0816037" 1.
+#
+# (6b) OPEN — rulings and limits, nothing decided silently:
+#   - A restored active group shows its number before any pick (A1_0003 opens on Group C, which the Selections panel calls
+#     "Pending"): spec §2 says the ACTIVE group's prisms show. Show H15's per-group prism only after a pick this session,
+#     or as now? And what does a Pending group show?
+#   - #354's role colours on the main page (r5's 'sides', faces 4 and 2, unpressed, painted blue): rule with item 4 —
+#     roles: [:] on the Flexible stage, or keep them and widen R6-1a.
+#   - The [Prisms] glyph (arrow.down.to.line, the Settings page's too) can read as "download": his call, or a label.
+#   - A number can still be hidden at extreme cameras (the hunt: A1_0003 1497 of 1500, r5 996 of 1200 over 300 cameras —
+#     off screen, or floor and face both under the chrome); nothing names the hidden ones. At his camera none is hidden.
+#     Naming them in the card's Prisms row is the verifier's fallback, not built.
+#   - A face under the Selections panel (A1 faces 2 and 5, r5 face 5) keeps its number on its axis in past the floor;
+#     its leader stops at the panel's edge (the face itself is under the panel).
+#   - Renders are offscreen frames + hosted SwiftUI over his img4's chrome, not device screenshots; he judges on the
+#     simulator (installed, not launched).
+#
+# (7) THE CLASS LIST
+#   TopOptFlowsTests.CoreBuildIdentityTests
+#   TopOptFlowsTests.FlexibleAngledGoldenRecorder
+#   TopOptFlowsTests.FlexibleAngledGoldenTests
+#   TopOptFlowsTests.FlexibleBatchBReviewTests
+#   TopOptFlowsTests.FlexibleBatchBReviewUXTests
+#   TopOptFlowsTests.FlexibleBatchCHookTests
+#   TopOptFlowsTests.FlexibleBatchCVerifyTests
+#   TopOptFlowsTests.FlexibleBatchM2Probe
+#   TopOptFlowsTests.FlexibleBatchM2Tests
+#   TopOptFlowsTests.FlexibleBatchM2VerifyTests
+#   TopOptFlowsTests.FlexibleBatchMDentTests
+#   TopOptFlowsTests.FlexibleBatchMGroupTests
+#   TopOptFlowsTests.FlexibleBatchMLegendTests
+#   TopOptFlowsTests.FlexibleBatchMProbe
+#   TopOptFlowsTests.FlexibleBatchMStressTests
+#   TopOptFlowsTests.FlexibleBatchMVerifyTests
+#   TopOptFlowsTests.FlexibleBatchMXrayTests
+#   TopOptFlowsTests.FlexibleBatchNEvidenceProbe
+#   TopOptFlowsTests.FlexibleBatchNProbe
+#   TopOptFlowsTests.FlexibleBatchNRefineTests
+#   TopOptFlowsTests.FlexibleBatchNVerifyTests
+#   TopOptFlowsTests.FlexibleDepthPrismTests
+#   TopOptFlowsTests.FlexibleFEFieldTests
+#   TopOptFlowsTests.FlexibleFEVerifyGTests
+#   TopOptFlowsTests.FlexibleGroupPaletteHostedTests
+#   TopOptFlowsTests.FlexibleLatticeUnderReviewTests
+#   TopOptFlowsTests.FlexibleLegendPlacementTests
+#   TopOptFlowsTests.FlexibleMainPageHookTests
+#   TopOptFlowsTests.FlexibleMainPageLoadsTests
+#   TopOptFlowsTests.FlexibleMainPageRound4HostedTests
+#   TopOptFlowsTests.FlexibleMainPageRound4Tests
+#   TopOptFlowsTests.FlexibleMainPageRound4VerifyTests
+#   TopOptFlowsTests.FlexibleMainStageTests
+#   TopOptFlowsTests.FlexibleMainViewsTests
+#   TopOptFlowsTests.FlexibleMergeR5SMTests
+#   TopOptFlowsTests.FlexiblePressProbeTripwireTests
+#   TopOptFlowsTests.FlexibleRound5EvidenceProbe
+#   TopOptFlowsTests.FlexibleRound5SettingsHostedTests
+#   TopOptFlowsTests.FlexibleRound5SettingsTests
+#   TopOptFlowsTests.FlexibleRound5SettingsVerifyTests
+#   TopOptFlowsTests.FlexibleRound5SquishExitTests
+#   TopOptFlowsTests.FlexibleRound6EvidenceProbe
+#   TopOptFlowsTests.FlexibleRound6HostedTests
+#   TopOptFlowsTests.FlexibleRound6Tests
+#   TopOptFlowsTests.FlexibleRowCopyTests
+#   TopOptFlowsTests.FlexibleS1VerifyTests
+#   TopOptFlowsTests.FlexibleS1bMainTagsTests
+#   TopOptFlowsTests.FlexibleSettingsPageHostedTests
+#   TopOptFlowsTests.FlexibleSettingsRound4Tests
+#   TopOptFlowsTests.FlexibleSettingsVerifyD1Tests
+#   TopOptFlowsTests.FlexibleSqueezeGroupsModelTests
+#   TopOptFlowsTests.FlexibleSqueezeGroupsPressTests
+#   TopOptFlowsTests.FlexibleSqueezeGroupsReviewTests
+#   TopOptFlowsTests.FlexibleSqueezeGroupsReviewUITests
+#   TopOptFlowsTests.FlexibleSqueezeGroupsReviewUXTests
+#   TopOptFlowsTests.FlexibleSqueezeGroupsTests
+#   TopOptFlowsTests.FlexibleSqueezeGroupsUITests
+#   TopOptFlowsTests.FlexibleSquishEvidenceProbe
+#   TopOptFlowsTests.FlexibleSquishPlayAllTests
+#   TopOptFlowsTests.FlexibleSquishSolverTests
+#   TopOptFlowsTests.FlexibleSquishTests
+#   TopOptFlowsTests.FlexibleSquishVerifyGTests
+#   TopOptFlowsTests.LatticeIncludeGateTests
+#   TopOptFlowsTests.LatticeSettingsPersistTests
+#   TopOptFlowsTests.LatticeStaleTypeTests
+#   TopOptFlowsTests.LatticeTypeReadinessFromCoreTests
+#   TopOptFlowsTests.LatticeVariantFaceWallsTests
+#   TopOptFlowsTests.OrganicCapsuleEvidenceGen
+#   TopOptFlowsTests.OrganicForecastRouteTests
+#   TopOptFlowsTests.OrganicVariantGeneratorTests
+#   TopOptFlowsTests.ProjectStoreTests
+#   TopOptFlowsTests.SmoothingPageRound2Tests
+#   TopOptFlowsTests.UndoHistoryTests
+#   TopOptFlowsTests.UnreadableProjectTests
+#   TopOptFlowsTests.ViewerTests
+#   TopOptKitTests.FrozenLatticeNeverArmedBareTests
+#
+# (8) PER CLASS
+#   PASSED TopOptFlowsTests.CoreBuildIdentityTests Executed 3 tests, with 0 failures (0 unexpected) in 2.081 (2.082) seconds
+#   PASSED TopOptFlowsTests.FlexibleAngledGoldenRecorder Executed 10 tests, with 10 tests skipped and 0 failures (0 unexpected) in 0.002 (0.003) seconds
+#   PASSED TopOptFlowsTests.FlexibleAngledGoldenTests Executed 13 tests, with 0 failures (0 unexpected) in 14.922 (14.923) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchBReviewTests Executed 10 tests, with 0 failures (0 unexpected) in 117.949 (117.950) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchBReviewUXTests Executed 13 tests, with 0 failures (0 unexpected) in 0.622 (0.623) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchCHookTests Executed 4 tests, with 0 failures (0 unexpected) in 0.894 (0.894) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchCVerifyTests Executed 14 tests, with 0 failures (0 unexpected) in 19.291 (19.293) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchM2Probe Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchM2Tests Executed 2 tests, with 0 failures (0 unexpected) in 62.886 (62.886) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchM2VerifyTests Executed 3 tests, with 0 failures (0 unexpected) in 60.222 (60.222) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchMDentTests Executed 2 tests, with 0 failures (0 unexpected) in 52.503 (52.503) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchMGroupTests Executed 1 test, with 0 failures (0 unexpected) in 52.007 (52.007) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchMLegendTests Executed 2 tests, with 0 failures (0 unexpected) in 65.010 (65.010) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchMProbe Executed 5 tests, with 5 tests skipped and 0 failures (0 unexpected) in 0.002 (0.003) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchMStressTests Executed 4 tests, with 0 failures (0 unexpected) in 113.580 (113.581) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchMVerifyTests Executed 8 tests, with 1 test skipped and 0 failures (0 unexpected) in 601.267 (601.268) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchMXrayTests Executed 2 tests, with 0 failures (0 unexpected) in 190.004 (190.005) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchNEvidenceProbe Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.007 (0.007) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchNProbe Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.001 (0.002) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchNRefineTests Executed 4 tests, with 0 failures (0 unexpected) in 388.714 (388.715) seconds
+#   FAILED TopOptFlowsTests.FlexibleBatchNVerifyTests Executed 4 tests, with 8 failures (0 unexpected) in 225.121 (225.122) seconds
+#   PASSED TopOptFlowsTests.FlexibleDepthPrismTests Executed 11 tests, with 0 failures (0 unexpected) in 0.837 (0.839) seconds
+#   PASSED TopOptFlowsTests.FlexibleFEFieldTests Executed 12 tests, with 0 failures (0 unexpected) in 165.872 (165.874) seconds
+#   PASSED TopOptFlowsTests.FlexibleFEVerifyGTests Executed 2 tests, with 0 failures (0 unexpected) in 38.755 (38.755) seconds
+#   PASSED TopOptFlowsTests.FlexibleGroupPaletteHostedTests Executed 2 tests, with 0 failures (0 unexpected) in 47.053 (47.053) seconds
+#   PASSED TopOptFlowsTests.FlexibleLatticeUnderReviewTests Executed 7 tests, with 0 failures (0 unexpected) in 12.505 (12.505) seconds
+#   PASSED TopOptFlowsTests.FlexibleLegendPlacementTests Executed 4 tests, with 0 failures (0 unexpected) in 0.007 (0.008) seconds
+#   PASSED TopOptFlowsTests.FlexibleMainPageHookTests Executed 3 tests, with 0 failures (0 unexpected) in 0.313 (0.313) seconds
+#   PASSED TopOptFlowsTests.FlexibleMainPageLoadsTests Executed 10 tests, with 0 failures (0 unexpected) in 2.877 (2.878) seconds
+#   PASSED TopOptFlowsTests.FlexibleMainPageRound4HostedTests Executed 2 tests, with 0 failures (0 unexpected) in 3.817 (3.817) seconds
+#   PASSED TopOptFlowsTests.FlexibleMainPageRound4Tests Executed 12 tests, with 0 failures (0 unexpected) in 29.102 (29.103) seconds
+#   PASSED TopOptFlowsTests.FlexibleMainPageRound4VerifyTests Executed 9 tests, with 0 failures (0 unexpected) in 85.782 (85.783) seconds
+#   PASSED TopOptFlowsTests.FlexibleMainStageTests Executed 8 tests, with 0 failures (0 unexpected) in 20.793 (20.794) seconds
+#   PASSED TopOptFlowsTests.FlexibleMainViewsTests Executed 10 tests, with 0 failures (0 unexpected) in 57.240 (57.242) seconds
+#   PASSED TopOptFlowsTests.FlexibleMergeR5SMTests Executed 1 test, with 0 failures (0 unexpected) in 0.003 (0.007) seconds
+#   PASSED TopOptFlowsTests.FlexiblePressProbeTripwireTests Executed 1 test, with 0 failures (0 unexpected) in 0.011 (0.012) seconds
+#   PASSED TopOptFlowsTests.FlexibleRound5EvidenceProbe Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.007 (0.007) seconds
+#   FAILED TopOptFlowsTests.FlexibleRound5SettingsHostedTests Executed 4 tests, with 1 failure (0 unexpected) in 105.366 (105.366) seconds
+#   PASSED TopOptFlowsTests.FlexibleRound5SettingsTests Executed 11 tests, with 0 failures (0 unexpected) in 8.604 (8.605) seconds
+#   PASSED TopOptFlowsTests.FlexibleRound5SettingsVerifyTests Executed 9 tests, with 0 failures (0 unexpected) in 2.729 (2.730) seconds
+#   PASSED TopOptFlowsTests.FlexibleRound5SquishExitTests Executed 6 tests, with 0 failures (0 unexpected) in 50.016 (50.016) seconds
+#   PASSED TopOptFlowsTests.FlexibleRound6EvidenceProbe Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.002 (0.003) seconds
+#   PASSED TopOptFlowsTests.FlexibleRound6HostedTests Executed 17 tests, with 0 failures (0 unexpected) in 345.895 (345.898) seconds
+#   PASSED TopOptFlowsTests.FlexibleRound6Tests Executed 11 tests, with 0 failures (0 unexpected) in 68.646 (68.650) seconds
+#   PASSED TopOptFlowsTests.FlexibleRowCopyTests Executed 4 tests, with 0 failures (0 unexpected) in 0.479 (0.481) seconds
+#   PASSED TopOptFlowsTests.FlexibleS1VerifyTests Executed 3 tests, with 0 failures (0 unexpected) in 2.384 (2.385) seconds
+#   PASSED TopOptFlowsTests.FlexibleS1bMainTagsTests Executed 5 tests, with 1 test skipped and 0 failures (0 unexpected) in 170.762 (170.763) seconds
+#   PASSED TopOptFlowsTests.FlexibleSettingsPageHostedTests Executed 2 tests, with 0 failures (0 unexpected) in 89.764 (89.765) seconds
+#   PASSED TopOptFlowsTests.FlexibleSettingsRound4Tests Executed 14 tests, with 0 failures (0 unexpected) in 5.826 (5.828) seconds
+#   PASSED TopOptFlowsTests.FlexibleSettingsVerifyD1Tests Executed 10 tests, with 0 failures (0 unexpected) in 2.023 (2.024) seconds
+#   PASSED TopOptFlowsTests.FlexibleSqueezeGroupsModelTests Executed 7 tests, with 0 failures (0 unexpected) in 18.828 (18.829) seconds
+#   PASSED TopOptFlowsTests.FlexibleSqueezeGroupsPressTests Executed 4 tests, with 0 failures (0 unexpected) in 0.940 (0.940) seconds
+#   PASSED TopOptFlowsTests.FlexibleSqueezeGroupsReviewTests Executed 8 tests, with 0 failures (0 unexpected) in 6.920 (6.921) seconds
+#   PASSED TopOptFlowsTests.FlexibleSqueezeGroupsReviewUITests Executed 2 tests, with 0 failures (0 unexpected) in 60.498 (60.498) seconds
+#   PASSED TopOptFlowsTests.FlexibleSqueezeGroupsReviewUXTests Executed 5 tests, with 0 failures (0 unexpected) in 8.805 (8.806) seconds
+#   PASSED TopOptFlowsTests.FlexibleSqueezeGroupsTests Executed 8 tests, with 0 failures (0 unexpected) in 0.013 (0.014) seconds
+#   PASSED TopOptFlowsTests.FlexibleSqueezeGroupsUITests Executed 4 tests, with 0 failures (0 unexpected) in 35.746 (35.746) seconds
+#   PASSED TopOptFlowsTests.FlexibleSquishEvidenceProbe Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.002 (0.003) seconds
+#   PASSED TopOptFlowsTests.FlexibleSquishPlayAllTests Executed 5 tests, with 0 failures (0 unexpected) in 1.144 (1.144) seconds
+#   PASSED TopOptFlowsTests.FlexibleSquishSolverTests Executed 5 tests, with 0 failures (0 unexpected) in 118.681 (118.682) seconds
+#   PASSED TopOptFlowsTests.FlexibleSquishTests Executed 11 tests, with 0 failures (0 unexpected) in 2.903 (2.904) seconds
+#   PASSED TopOptFlowsTests.FlexibleSquishVerifyGTests Executed 5 tests, with 0 failures (0 unexpected) in 312.503 (312.504) seconds
+#   PASSED TopOptFlowsTests.LatticeIncludeGateTests Executed 8 tests, with 0 failures (0 unexpected) in 2.684 (2.685) seconds
+#   PASSED TopOptFlowsTests.LatticeSettingsPersistTests Executed 4 tests, with 0 failures (0 unexpected) in 0.004 (0.004) seconds
+#   PASSED TopOptFlowsTests.LatticeStaleTypeTests Executed 6 tests, with 0 failures (0 unexpected) in 2.147 (2.147) seconds
+#   PASSED TopOptFlowsTests.LatticeTypeReadinessFromCoreTests Executed 3 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   PASSED TopOptFlowsTests.LatticeVariantFaceWallsTests Executed 8 tests, with 0 failures (0 unexpected) in 1.635 (1.636) seconds
+#   PASSED TopOptFlowsTests.OrganicCapsuleEvidenceGen Executed 1 test, with 0 failures (0 unexpected) in 8.979 (8.979) seconds
+#   PASSED TopOptFlowsTests.OrganicForecastRouteTests Executed 4 tests, with 0 failures (0 unexpected) in 0.166 (0.167) seconds
+#   PASSED TopOptFlowsTests.OrganicVariantGeneratorTests Executed 1 test, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+#   PASSED TopOptFlowsTests.ProjectStoreTests Executed 5 tests, with 0 failures (0 unexpected) in 0.025 (0.026) seconds
+#   PASSED TopOptFlowsTests.SmoothingPageRound2Tests Executed 21 tests, with 0 failures (0 unexpected) in 0.321 (0.322) seconds
+#   PASSED TopOptFlowsTests.UndoHistoryTests Executed 10 tests, with 0 failures (0 unexpected) in 0.638 (0.640) seconds
+#   PASSED TopOptFlowsTests.UnreadableProjectTests Executed 6 tests, with 1 test skipped and 0 failures (0 unexpected) in 2.883 (2.884) seconds
+#   PASSED TopOptFlowsTests.ViewerTests Executed 33 tests, with 0 failures (0 unexpected) in 0.203 (0.206) seconds
+#   PASSED TopOptKitTests.FrozenLatticeNeverArmedBareTests Executed 2 tests, with 0 failures (0 unexpected) in 0.093 (0.094) seconds
+#   SUITE DONE 17:00:54

@@ -32,8 +32,8 @@ final class LatticePerFaceOnlyTests: XCTestCase {
     /// ★ THE REMOVAL, AT ITS SOURCE. `latticeDrawer` is not in any stage's
     /// section list, and the row builder only builds what is listed.
     func testNoStageBuildsTheGroupLatticeDrawer() {
-        for stage in [WorkspaceStage.topology, .lattice, .surface] {
-            let v = WorkspaceStageVisibility.of(stage)
+        for (stage, v) in [("topology", WorkspaceStageVisibility.of(.topology)), ("lattice", .of(.lattice)),
+                           ("edit faces", .editingFaces)] {
             XCTAssertFalse(v.rowSections.contains(.latticeDrawer),
                            "★ the per-GROUP lattice drawer is gone from \(stage)")
         }

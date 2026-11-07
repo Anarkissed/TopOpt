@@ -1,0 +1,14 @@
+# Release 3e87bae0 — 2026-11-06 LatticeZones (UI-Notes' app batch up to 625e31e6), app only, released before review (his 11-03 pick)
+# Core and worker unchanged: fingerprint 6c5a6fbaa842; "fingerprint": "6c5a6fbaa842"
+# Merged onto 920bfb7b; the merged app tree equals 625e31e6's, so the builder's tests apply unchanged.
+# Commits:
+#   ce9aa4f3 B6 s3a (his go 11-05; notes 25, 25a, N3): Lattice zones — + Add zone, Box │ Cylinder, Lattice │ No lattice, its size; the run takes them today
+#   625e31e6 Merge UI-Notes' B6 s3a (ce9aa4f3, his go 11-05; notes 25, 25a, N3) into B9: Lattice zones — + Add zone, Box │ Cylinder, Lattice │ No lattice, its size; zones are lattice groups holding one manual primitive (LatticeSettings.zoneGroups, optional, not written while empty); the run takes them today through core's face / bolt include and exclude
+#   3e87bae0 Release 2026-11-06: merge B9 625e31e6 — UI-Notes' B6 s3a (ce9aa4f3; notes 25, 25a, N3): Lattice zones — + Add zone, Box │ Cylinder, Lattice │ No lattice, its size; the run takes them today through core's face / bolt include and exclude (app only; core and worker unchanged at 6c5a6fbaa842)
+# Gates:
+#   01:29 checks ok: LatticeZones, local 3e87bae0 over origin 920bfb7b (3 commits); app tree == 625e31e6's, fingerprint 6c5a6fbaa842
+#   01:29 waiting for HEAVY.lock (free)
+#   01:29 lock taken
+#   01:35 iPad device build green; lock released
+#   01:35 pushed 3e87bae0
+#   01:35 worker /health "fingerprint": "6c5a6fbaa842" (unchanged, no swap)

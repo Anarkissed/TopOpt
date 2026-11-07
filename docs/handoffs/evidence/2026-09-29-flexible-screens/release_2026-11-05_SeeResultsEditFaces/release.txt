@@ -1,0 +1,15 @@
+# Release 27a087a2 — 2026-11-05 SeeResultsEditFaces (UI-Notes' app batch up to 7a06ce84), app only, released before review (his 11-03 pick)
+# Core and worker unchanged: fingerprint 6c5a6fbaa842; "fingerprint": "6c5a6fbaa842"
+# Merged onto 5718c565; the merged app tree equals 7a06ce84's, so the builder's tests apply unchanged.
+# Commits:
+#   6132789e B6 s2b (his go 11-05; notes 23c, 24, 27, §4.16): the role picker at the face — Lattice · No lattice · Protect skin — and, with Topology open, taps go to Topology
+#   4463db1b His two notes of 11-05: no See Results chip; nothing of the lattice comes through into Edit faces
+#   7a06ce84 Merge UI-Notes' B6 s2b (6132789e, his go 11-05; notes 23c, 24, 27, §4.16) into B9: the role picker at the face — Lattice · No lattice · Protect skin (skinGroups, optional) — and, with Topology open, taps go to Topology
+#   27a087a2 Release 2026-11-05: merge B9 7a06ce84 — his two notes (4463db1b): the See Results chip is gone, and nothing of the lattice (its key, probe, Stress key and wash, preview line, FEA / rebake banners; Flexible's key, tap reading and X-ray) comes through into Edit faces; UI-Notes' B6 s2b (6132789e; notes 23c, 24, 27): the role picker at the face — Lattice · No lattice · Protect skin — and with Topology open, taps go to Topology (app only; core and worker unchanged at 6c5a6fbaa842)
+# Gates:
+#   22:46 checks ok: SeeResultsEditFaces, local 27a087a2 over origin 5718c565 (4 commits); app tree == 7a06ce84's, fingerprint 6c5a6fbaa842
+#   22:46 waiting for HEAVY.lock (free)
+#   22:46 lock taken
+#   22:51 iPad device build green; lock released
+#   22:51 pushed 27a087a2
+#   22:51 worker /health "fingerprint": "6c5a6fbaa842" (unchanged, no swap)

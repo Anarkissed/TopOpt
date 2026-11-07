@@ -28,6 +28,10 @@ public enum SurfaceTool: Int, CaseIterable, Hashable, Sendable {
     case cut
     case union
     case pattern
+    /// ★★ THE REGION TOOL (the Regions task, approved 2026-10-08): the region verbs where regions
+    /// are made — aim at one, step up to what it was cut from, undo its split, dissolve it, or tap
+    /// faces to add to it or drop from it. Last in the tray: it edits what the four before it made.
+    case region
 
     /// ★ THE DEFAULT. Named here rather than at the `@State` that holds it, so the
     /// rule is one fact with one test rather than a literal repeated per call site.
@@ -41,6 +45,7 @@ public enum SurfaceTool: Int, CaseIterable, Hashable, Sendable {
         case .cut:     return "scissors"
         case .union:   return "square.on.square"
         case .pattern: return "square.grid.3x3"
+        case .region:  return "square.dashed"
         }
     }
 
@@ -52,6 +57,7 @@ public enum SurfaceTool: Int, CaseIterable, Hashable, Sendable {
         case .cut:     return "Cut"
         case .union:   return "Union"
         case .pattern: return "Pattern"
+        case .region:  return "Region"
         }
     }
 
@@ -64,6 +70,7 @@ public enum SurfaceTool: Int, CaseIterable, Hashable, Sendable {
         case .cut:     return "Tap a face to cut it in two."
         case .union:   return "Tap faces to combine; tap again to drop."
         case .pattern: return "Tap a face to split it into a grid."
+        case .region:  return "Tap a region, then faces to add or drop."
         }
     }
 

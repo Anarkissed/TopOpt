@@ -1,0 +1,46 @@
+P0 l-bracket as saved (box 33.5, expand −3): key f:B91ED058-A180-4125-8E82-420B89D45B79:6 · face 6 · wire depth 30.50 · expand -3.0
+  Side 1 [side:f1] neighbour 1 · m (0, -1, 0) · centre (87.30, -47.00, 87.50) · lattice 2927.0 mm² · touched 2927.0 mm² (100 %) · thin 0.0 · seam 0.0 · target → wall
+  Side 2 [side:f7] neighbour 7 · m (0, 0, 1) · centre (87.30, 0.00, 147.00) · lattice 2312.1 mm² · touched 2312.1 mm² (100 %) · thin 0.0 · seam 0.0 · target → wall
+  Side 3 [side:f3] neighbour 3 · m (0, 1, 0) · centre (87.30, 47.00, 87.50) · lattice 2927.0 mm² · touched 2927.0 mm² (100 %) · thin 0.0 · seam 0.0 · target → wall
+  Side 4 [side:f0] neighbour 0 · m (0, 0, -1) · centre (87.30, 0.00, 28.00) · lattice 2312.1 mm² · touched 2312.1 mm² (100 %) · thin 0.0 · seam 0.0 · target → wall
+  suggestion: 4 → ["side:f1", "side:f7", "side:f3", "side:f0"]
+  (125 ms)
+P0 l-bracket expand 0: key f:B91ED058-A180-4125-8E82-420B89D45B79:6 · face 6 · wire depth 33.50 · expand 0.0
+  Side 1 [side:f1] neighbour 1 · m (0, -1, 0) · centre (87.32, -50.00, 87.50) · lattice 3079.0 mm² · touched 0.0 mm² (0 %) · thin 0.0 · seam 0.0 · open → none
+  Side 2 [side:f7] neighbour 7 · m (0, 0, 1) · centre (87.32, 0.00, 150.00) · lattice 2463.2 mm² · touched 0.0 mm² (0 %) · thin 0.0 · seam 0.0 · open → none
+  Side 3 [side:f3] neighbour 3 · m (0, 1, 0) · centre (87.32, 50.00, 87.50) · lattice 3079.0 mm² · touched 0.0 mm² (0 %) · thin 0.0 · seam 0.0 · open → none
+  Side 4 [side:f0] neighbour 0 · m (0, 0, -1) · centre (87.32, 0.00, 25.00) · lattice 2463.2 mm² · touched 2463.2 mm² (100 %) · thin 0.0 · seam 0.0 · target → wall
+  suggestion: none
+P0 l-bracket expand +3: key f:B91ED058-A180-4125-8E82-420B89D45B79:6 · face 6 · wire depth 36.50 · expand 3.0
+  Side 1 [side:f1] neighbour 1 · m (0, -1, 0) · centre (93.25, -53.00, 87.50) · lattice 0.0 mm² · touched 0.0 mm² (0 %) · thin 0.0 · seam 0.0 · open → none
+  Side 2 [side:f7] neighbour 7 · m (0, 0, 1) · centre (93.25, 0.00, 153.00) · lattice 0.0 mm² · touched 0.0 mm² (0 %) · thin 0.0 · seam 0.0 · open → none
+  Side 3 [side:f3] neighbour 3 · m (0, 1, 0) · centre (93.25, 53.00, 87.50) · lattice 0.0 mm² · touched 0.0 mm² (0 %) · thin 0.0 · seam 0.0 · open → none
+  Side 4 [side:f0] neighbour 0 · m (0, 0, -1) · centre (87.33, 0.00, 22.00) · lattice 2466.2 mm² · touched 2466.2 mm² (100 %) · thin 0.0 · seam 0.0 · target → wall
+  suggestion: none
+P0 l-bracket expand −0.3: key f:B91ED058-A180-4125-8E82-420B89D45B79:6 · face 6 · wire depth 33.50 · expand 0.0
+  Side 1 [side:f1] neighbour 1 · m (0, -1, 0) · centre (87.32, -50.00, 87.50) · lattice 3079.0 mm² · touched 0.0 mm² (0 %) · thin 0.0 · seam 0.0 · open → none
+  Side 2 [side:f7] neighbour 7 · m (0, 0, 1) · centre (87.32, 0.00, 150.00) · lattice 2463.2 mm² · touched 0.0 mm² (0 %) · thin 0.0 · seam 0.0 · open → none
+  Side 3 [side:f3] neighbour 3 · m (0, 1, 0) · centre (87.32, 50.00, 87.50) · lattice 3079.0 mm² · touched 0.0 mm² (0 %) · thin 0.0 · seam 0.0 · open → none
+  Side 4 [side:f0] neighbour 0 · m (0, 0, -1) · centre (87.32, 0.00, 25.00) · lattice 2463.2 mm² · touched 2463.2 mm² (100 %) · thin 0.0 · seam 0.0 · target → wall
+  suggestion: none
+P0 l-bracket box depth 9: key f:B91ED058-A180-4125-8E82-420B89D45B79:6 · face 6 · wire depth 6.00 · expand -3.0
+  Side 1 [side:f1] neighbour 1 · m (0, -1, 0) · centre (78.00, -47.00, 87.50) · lattice 714.0 mm² · touched 714.0 mm² (100 %) · thin 0.0 · seam 0.0 · target → wall
+  Side 2 [side:f7] neighbour 7 · m (0, 0, 1) · centre (78.00, 0.00, 147.00) · lattice 564.0 mm² · touched 564.0 mm² (100 %) · thin 0.0 · seam 0.0 · target → wall
+  Side 3 [side:f3] neighbour 3 · m (0, 1, 0) · centre (78.00, 47.00, 87.50) · lattice 714.0 mm² · touched 714.0 mm² (100 %) · thin 0.0 · seam 0.0 · target → wall
+  Side 4 [side:f0] neighbour 0 · m (0, 0, -1) · centre (78.00, 0.00, 28.00) · lattice 564.0 mm² · touched 564.0 mm² (100 %) · thin 0.0 · seam 0.0 · target → wall
+  Floor [floor] neighbour - · m (1, 0, 0) · centre (81.00, 0.00, 87.50) · lattice 11186.0 mm² · touched 11186.0 mm² (100 %) · thin 0.0 · seam 0.0 · target → under
+  suggestion: 4 → ["side:f1", "side:f7", "side:f3", "side:f0"]
+P0 pad Group C Face 5: key f:91596E96-9198-4738-B730-F7B52E4666D7:5 · face 5 · wire depth 34.00 · expand 0.0
+  Side 1 [side:f2] neighbour 2 · m (0, -1, 0) · centre (17.00, 0.00, 10.00) · lattice 680.0 mm² · touched 0.0 mm² (0 %) · thin 0.0 · seam 0.0 · open → none
+  Side 2 [side:f1] neighbour 1 · m (0, 0, 1) · centre (17.00, 50.00, 20.00) · lattice 3400.0 mm² · touched 0.0 mm² (0 %) · thin 0.0 · seam 0.0 · open → none
+  Side 3 [side:f4] neighbour 4 · m (0, 1, 0) · centre (17.00, 100.00, 10.00) · lattice 680.0 mm² · touched 0.0 mm² (0 %) · thin 0.0 · seam 0.0 · open → none
+  Side 4 [side:f0] neighbour 0 · m (0, 0, -1) · centre (17.00, 50.00, 0.00) · lattice 3400.0 mm² · touched 0.0 mm² (0 %) · thin 0.0 · seam 0.0 · open → none
+  Floor [floor] neighbour - · m (1, 0, 0) · centre (34.00, 50.00, 10.00) · lattice 2000.0 mm² · touched 2000.0 mm² (100 %) · thin 0.0 · seam 0.0 · target → under
+  suggestion: none
+P0 pad Group C Face 3: key f:91596E96-9198-4738-B730-F7B52E4666D7:3 · face 3 · wire depth 34.00 · expand 0.0
+  Side 1 [side:f0] neighbour 0 · m (0, 0, -1) · centre (83.00, 50.00, 0.00) · lattice 3400.0 mm² · touched 0.0 mm² (0 %) · thin 0.0 · seam 0.0 · open → none
+  Side 2 [side:f4] neighbour 4 · m (0, 1, 0) · centre (83.00, 100.00, 10.00) · lattice 680.0 mm² · touched 0.0 mm² (0 %) · thin 0.0 · seam 0.0 · open → none
+  Side 3 [side:f1] neighbour 1 · m (0, 0, 1) · centre (83.00, 50.00, 20.00) · lattice 3400.0 mm² · touched 0.0 mm² (0 %) · thin 0.0 · seam 0.0 · open → none
+  Side 4 [side:f2] neighbour 2 · m (0, -1, 0) · centre (83.00, 0.00, 10.00) · lattice 680.0 mm² · touched 0.0 mm² (0 %) · thin 0.0 · seam 0.0 · open → none
+  Floor [floor] neighbour - · m (-1, 0, 0) · centre (66.00, 50.00, 10.00) · lattice 2000.0 mm² · touched 2000.0 mm² (100 %) · thin 0.0 · seam 0.0 · target → under
+  suggestion: none

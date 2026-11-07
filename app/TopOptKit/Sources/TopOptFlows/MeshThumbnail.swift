@@ -11,14 +11,16 @@ import TopOptDesign
 
 public enum MeshThumbnail {
     /// Render `mesh` to a square `size`×`size` CGImage on the dark stage, or nil
-    /// (no mesh / no Metal device).
-    public static func cgImage(for mesh: ViewerMesh, size: Int = 400) -> CGImage? {
+    /// (no mesh / no Metal device). `transparent`: on a clear background instead
+    /// (★ B5: the Library's pictures sit on their card's own gradient, mockup #lib-project).
+    public static func cgImage(for mesh: ViewerMesh, size: Int = 400, transparent: Bool = false) -> CGImage? {
         guard !mesh.isEmpty,
               let device = MTLCreateSystemDefaultDevice(),
               let renderer = MeshRenderer(device: device) else { return nil }
         renderer.setMesh(mesh)   // frames the camera to the part
         let bg = DS.Color.background
-        let clear = MTLClearColor(red: bg.r, green: bg.g, blue: bg.b, alpha: 1)
+        let clear = transparent ? MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+                                : MTLClearColor(red: bg.r, green: bg.g, blue: bg.b, alpha: 1)
         guard let bgra = renderer.renderOffscreen(size: size, clear: clear) else { return nil }
         return image(from: bgra, size: size)
     }

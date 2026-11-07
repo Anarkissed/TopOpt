@@ -1,0 +1,9 @@
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/u21-side/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7U21EdgeLookTests.swift:235: error: -[TopOptFlowsTests.FlexibleR7U21EdgeLookTests testSmoothDensityIsUntouched] : XCTAssertGreaterThan failed: ("0") is not greater than ("50") - ★ RED CONTROL: a seam spilling past its band must show
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/u21-side/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7U21EdgeLookTests.swift:173: error: -[TopOptFlowsTests.FlexibleR7U21EdgeLookTests testTheJunctionKeepsTheGradientBounded] : XCTAssertLessThanOrEqual failed: ("13.327934") is greater than ("2.5") - the junction's gradient
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/u21-side/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7U21EdgeLookTests.swift:136: error: -[TopOptFlowsTests.FlexibleR7U21EdgeLookTests testThePressCliffDrawsNoFragments] : XCTAssertLessThanOrEqual failed: ("0.21453983") is greater than ("0.0068692253") - the band along the plane shreds: band 97 of 274 runs over 452.1 mm = 0.2145 /mm; control 2 of 86 over 436.7 mm = 0.0046 /mm
+	 Executed 4 tests, with 1 test skipped and 3 failures (0 unexpected) in 26.944 (26.945) seconds
+	 Executed 4 tests, with 1 test skipped and 3 failures (0 unexpected) in 26.944 (26.945) seconds
+	 Executed 4 tests, with 1 test skipped and 3 failures (0 unexpected) in 26.944 (26.946) seconds
+EDGE-LOOK untouched: 2000 random points + 47 cliffs (> 1 rung) away from the presses, 0 differ; seam voxels 3299; RED CONTROL (40-voxel band) 0 differ
+EDGE-LOOK |grad G|/k: SEAM band p50 1.215 p99 13.328 max 65.353, control p99 1.657 · RED CONTROL band p99 13.328 max 65.353, control p99 1.657
+EDGE-LOOK fragments over 151 lines: SEAM band 97 of 274 runs over 452.1 mm = 0.2145 /mm; control 2 of 86 over 436.7 mm = 0.0046 /mm · RED CONTROL (the ladder across the cliff) band 97 of 274 runs over 452.1 mm = 0.2145 /mm; control 2 of 86 over 436.7 mm = 0.0046 /mm

@@ -1,0 +1,1 @@
+off-face part vertices checked 12058 (0 of them moving): the nearest-vertex rule, unchanged

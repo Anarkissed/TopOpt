@@ -1,0 +1,343 @@
+# Batch V review — the raw runs (HEAD 00f8d0c5 = the fixes; the working tree equal to it during every run)
+
+## The four review tests, green (FlexibleBatchVHostedTests, FLEX_BV_EVIDENCE_DIR set)
+# First run: VR2, VR3, VR4 passed; VR1's fix passed but its first draft asserted the Top's HUE with the heat on, where the
+# dent heat's own ramp shares it (48 216 px ticked) — the test now compares the frames there (0 px change), and its
+# Model-view control is relative (batch V's 2 366 'blue' px are the bottom's cyan edge). Re-run (VR1 + his r5):
+Test Case '-[TopOptFlowsTests.FlexibleBatchVHostedTests testAnUndoOrRedoIsNeverAPick]' passed (9.792 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleBatchVHostedTests testAReadingsTagNeverReachesIntoTheChrome]' passed (5.299 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleBatchVHostedTests testTheOverlayViewsKeepOutOfTheWholeChrome]' passed (0.004 seconds).
+FLEX-BVR-2 undo/redo: picked false, prisms [] · control (batch V): picked true, prisms [1] · re-tap: picked true
+FLEX-BVR-3 reading 40 pt left of the legend: inside the legend 0 px (control, point only: 12084) · no chrome 17782 px drawn · far legend 17782 px drawn, 0 inside
+Test Case '-[TopOptFlowsTests.FlexibleBatchVHostedTests testRoleColoursUntickedShowTheSelectionsColoursAtHisCamera]' passed (187.991 seconds).
+FLEX-BVR-1 (his pad and his r5, his img1 camera, the shipping renderer)
+  model_heatOff: Top blue / Anchor green px — ticked 0 / 0 · unticked 147486 / 7019 · control (batch V) 2366 / 0 · px that change on the tap: 155031 (control 2278)
+  lattice_heatOff: Top blue / Anchor green px — ticked 0 / 0 · unticked 15420 / 323 · control (batch V) 0 / 0 · px that change on the tap: 151487 (control 0)
+  lattice_heatOn: Top blue / Anchor green px — ticked 48721 / 17648 · unticked 48722 / 17648 · control (batch V) 48722 / 17648 · px that change on the tap: 0 (control 0)
+  r5 model_heatOff: px that change on the tap 182727 (control, batch V: 26062) · role colours 24262/155913/1516/24262
+# In the suite: FlexibleBatchVHostedTests 11 tests (batch V's 7 + these 4), 0 failures.
+
+## The targeted suite (unseeded; the batch V driver over the same 144 classes, 12 per run; 21:15:59 → 22:20:31; no xctest death)
+PASSED TopOptFlowsTests.ComputeLocationTests Executed 5 tests, with 0 failures (0 unexpected) in 0.009 (0.009) seconds
+PASSED TopOptFlowsTests.CoreBuildIdentityTests Executed 3 tests, with 0 failures (0 unexpected) in 1.893 (1.893) seconds
+PASSED TopOptFlowsTests.DeviceRunEntryGateTests Executed 4 tests, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+PASSED TopOptFlowsTests.FlexibleAngledGoldenRecorder Executed 10 tests, with 10 tests skipped and 0 failures (0 unexpected) in 0.003 (0.004) seconds
+PASSED TopOptFlowsTests.FlexibleAngledGoldenTests Executed 13 tests, with 0 failures (0 unexpected) in 13.668 (13.669) seconds
+PASSED TopOptFlowsTests.FlexibleBatchBReviewTests Executed 10 tests, with 0 failures (0 unexpected) in 98.996 (98.997) seconds
+PASSED TopOptFlowsTests.FlexibleBatchBReviewUXTests Executed 13 tests, with 0 failures (0 unexpected) in 0.630 (0.631) seconds
+PASSED TopOptFlowsTests.FlexibleBatchCHookTests Executed 4 tests, with 0 failures (0 unexpected) in 0.864 (0.864) seconds
+PASSED TopOptFlowsTests.FlexibleBatchCVerifyTests Executed 14 tests, with 0 failures (0 unexpected) in 16.509 (16.510) seconds
+PASSED TopOptFlowsTests.FlexibleBatchM2Probe Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+PASSED TopOptFlowsTests.FlexibleBatchM2Tests Executed 2 tests, with 0 failures (0 unexpected) in 26.951 (26.951) seconds
+PASSED TopOptFlowsTests.FlexibleBatchM2VerifyTests Executed 3 tests, with 0 failures (0 unexpected) in 38.972 (38.972) seconds
+PASSED TopOptFlowsTests.FlexibleBatchMDentTests Executed 2 tests, with 0 failures (0 unexpected) in 52.631 (52.632) seconds
+PASSED TopOptFlowsTests.FlexibleBatchMGroupTests Executed 1 test, with 0 failures (0 unexpected) in 51.804 (51.804) seconds
+PASSED TopOptFlowsTests.FlexibleBatchMLegendTests Executed 2 tests, with 0 failures (0 unexpected) in 53.182 (53.182) seconds
+PASSED TopOptFlowsTests.FlexibleBatchMProbe Executed 5 tests, with 5 tests skipped and 0 failures (0 unexpected) in 0.002 (0.003) seconds
+PASSED TopOptFlowsTests.FlexibleBatchMStressTests Executed 4 tests, with 0 failures (0 unexpected) in 96.238 (96.238) seconds
+PASSED TopOptFlowsTests.FlexibleBatchMVerifyTests Executed 8 tests, with 1 test skipped and 0 failures (0 unexpected) in 562.931 (562.932) seconds
+PASSED TopOptFlowsTests.FlexibleBatchMXrayTests Executed 2 tests, with 0 failures (0 unexpected) in 161.725 (161.725) seconds
+PASSED TopOptFlowsTests.FlexibleBatchNEvidenceProbe Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+PASSED TopOptFlowsTests.FlexibleBatchNProbe Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+PASSED TopOptFlowsTests.FlexibleBatchNRefineTests Executed 4 tests, with 0 failures (0 unexpected) in 240.524 (240.525) seconds
+FAILED TopOptFlowsTests.FlexibleBatchNVerifyTests Executed 4 tests, with 8 failures (0 unexpected) in 184.830 (184.830) seconds
+PASSED TopOptFlowsTests.FlexibleBatchVEvidenceProbe Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.000 (0.001) seconds
+PASSED TopOptFlowsTests.FlexibleBatchVHostedTests Executed 11 tests, with 0 failures (0 unexpected) in 427.167 (427.168) seconds
+PASSED TopOptFlowsTests.FlexibleCoreClaimTests Executed 4 tests, with 0 failures (0 unexpected) in 41.475 (41.476) seconds
+PASSED TopOptFlowsTests.FlexibleCurveEditTests Executed 7 tests, with 0 failures (0 unexpected) in 0.015 (0.016) seconds
+PASSED TopOptFlowsTests.FlexibleDepthPrismTests Executed 11 tests, with 0 failures (0 unexpected) in 0.755 (0.756) seconds
+PASSED TopOptFlowsTests.FlexibleFEFieldTests Executed 12 tests, with 0 failures (0 unexpected) in 145.426 (145.427) seconds
+PASSED TopOptFlowsTests.FlexibleFEPassPerfTests Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+PASSED TopOptFlowsTests.FlexibleFEPassTests Executed 5 tests, with 0 failures (0 unexpected) in 15.781 (15.782) seconds
+PASSED TopOptFlowsTests.FlexibleFEVerifyGTests Executed 2 tests, with 0 failures (0 unexpected) in 30.121 (30.122) seconds
+PASSED TopOptFlowsTests.FlexibleGeometryOnlyLatticeTests Executed 3 tests, with 0 failures (0 unexpected) in 0.202 (0.202) seconds
+PASSED TopOptFlowsTests.FlexibleGroupFieldPerfTests Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.000 (0.000) seconds
+PASSED TopOptFlowsTests.FlexibleGroupPaletteEvidenceProbe Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.000 (0.000) seconds
+PASSED TopOptFlowsTests.FlexibleGroupPaletteHostedTests Executed 2 tests, with 0 failures (0 unexpected) in 43.453 (43.453) seconds
+PASSED TopOptFlowsTests.FlexibleGroupPaletteTests Executed 7 tests, with 0 failures (0 unexpected) in 0.222 (0.223) seconds
+PASSED TopOptFlowsTests.FlexibleInPassCompositeTests Executed 10 tests, with 0 failures (0 unexpected) in 18.257 (18.258) seconds
+PASSED TopOptFlowsTests.FlexibleLatticeEvidenceProbe Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+PASSED TopOptFlowsTests.FlexibleLatticeFieldTests Executed 4 tests, with 0 failures (0 unexpected) in 2.818 (2.818) seconds
+PASSED TopOptFlowsTests.FlexibleLatticeGradingTests Executed 2 tests, with 0 failures (0 unexpected) in 1.902 (1.903) seconds
+PASSED TopOptFlowsTests.FlexibleLatticePassPerfTests Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+PASSED TopOptFlowsTests.FlexibleLatticePassTests Executed 10 tests, with 0 failures (0 unexpected) in 13.130 (13.131) seconds
+PASSED TopOptFlowsTests.FlexibleLatticeUnderReviewTests Executed 7 tests, with 0 failures (0 unexpected) in 10.293 (10.294) seconds
+PASSED TopOptFlowsTests.FlexibleLatticeUnderTests Executed 3 tests, with 0 failures (0 unexpected) in 2.578 (2.578) seconds
+PASSED TopOptFlowsTests.FlexibleLegendPlacementTests Executed 4 tests, with 0 failures (0 unexpected) in 0.008 (0.008) seconds
+PASSED TopOptFlowsTests.FlexibleMainPageHookTests Executed 3 tests, with 0 failures (0 unexpected) in 0.231 (0.231) seconds
+PASSED TopOptFlowsTests.FlexibleMainPageLoadsTests Executed 10 tests, with 0 failures (0 unexpected) in 2.934 (2.935) seconds
+PASSED TopOptFlowsTests.FlexibleMainPageRound4HostedTests Executed 2 tests, with 0 failures (0 unexpected) in 4.129 (4.130) seconds
+PASSED TopOptFlowsTests.FlexibleMainPageRound4Tests Executed 12 tests, with 0 failures (0 unexpected) in 25.892 (25.893) seconds
+PASSED TopOptFlowsTests.FlexibleMainPageRound4VerifyTests Executed 9 tests, with 0 failures (0 unexpected) in 72.817 (72.818) seconds
+PASSED TopOptFlowsTests.FlexibleMainStageTests Executed 8 tests, with 0 failures (0 unexpected) in 18.949 (18.950) seconds
+PASSED TopOptFlowsTests.FlexibleMainViewsTests Executed 10 tests, with 0 failures (0 unexpected) in 19.527 (19.528) seconds
+PASSED TopOptFlowsTests.FlexibleMeetReviewTests Executed 9 tests, with 0 failures (0 unexpected) in 2.406 (2.407) seconds
+PASSED TopOptFlowsTests.FlexibleMeetTests Executed 10 tests, with 0 failures (0 unexpected) in 7.089 (7.090) seconds
+PASSED TopOptFlowsTests.FlexibleMergeR5SMTests Executed 1 test, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+PASSED TopOptFlowsTests.FlexibleOverlayClipTests Executed 6 tests, with 0 failures (0 unexpected) in 0.711 (0.712) seconds
+PASSED TopOptFlowsTests.FlexibleOverlaySeamTests Executed 2 tests, with 0 failures (0 unexpected) in 0.683 (0.684) seconds
+PASSED TopOptFlowsTests.FlexiblePinchTests Executed 7 tests, with 0 failures (0 unexpected) in 5.694 (5.695) seconds
+PASSED TopOptFlowsTests.FlexiblePressAimReviewTests Executed 6 tests, with 0 failures (0 unexpected) in 4.307 (4.308) seconds
+PASSED TopOptFlowsTests.FlexiblePressAimTests Executed 13 tests, with 0 failures (0 unexpected) in 9.447 (9.448) seconds
+PASSED TopOptFlowsTests.FlexiblePressFixturesTests Executed 2 tests, with 0 failures (0 unexpected) in 0.265 (0.265) seconds
+PASSED TopOptFlowsTests.FlexiblePressProbeTripwireTests Executed 1 test, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+PASSED TopOptFlowsTests.FlexiblePressReframeTests Executed 2 tests, with 0 failures (0 unexpected) in 0.069 (0.069) seconds
+PASSED TopOptFlowsTests.FlexiblePressReviewTests Executed 12 tests, with 0 failures (0 unexpected) in 0.983 (0.984) seconds
+PASSED TopOptFlowsTests.FlexiblePressSaveTests Executed 8 tests, with 0 failures (0 unexpected) in 1.365 (1.366) seconds
+PASSED TopOptFlowsTests.FlexibleReadinessTests Executed 10 tests, with 0 failures (0 unexpected) in 3.559 (3.560) seconds
+PASSED TopOptFlowsTests.FlexibleRegionsTests Executed 3 tests, with 0 failures (0 unexpected) in 0.036 (0.037) seconds
+PASSED TopOptFlowsTests.FlexibleRound5EvidenceProbe Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+PASSED TopOptFlowsTests.FlexibleRound5SettingsHostedTests Executed 4 tests, with 0 failures (0 unexpected) in 84.370 (84.370) seconds
+PASSED TopOptFlowsTests.FlexibleRound5SettingsTests Executed 11 tests, with 0 failures (0 unexpected) in 8.097 (8.098) seconds
+PASSED TopOptFlowsTests.FlexibleRound5SettingsVerifyTests Executed 9 tests, with 0 failures (0 unexpected) in 2.706 (2.707) seconds
+PASSED TopOptFlowsTests.FlexibleRound5SquishExitTests Executed 6 tests, with 0 failures (0 unexpected) in 44.875 (44.876) seconds
+PASSED TopOptFlowsTests.FlexibleRound6EvidenceProbe Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.001 (0.002) seconds
+PASSED TopOptFlowsTests.FlexibleRound6HostedTests Executed 17 tests, with 0 failures (0 unexpected) in 238.249 (238.251) seconds
+PASSED TopOptFlowsTests.FlexibleRound6Tests Executed 11 tests, with 0 failures (0 unexpected) in 36.556 (36.557) seconds
+PASSED TopOptFlowsTests.FlexibleRowCopyTests Executed 4 tests, with 0 failures (0 unexpected) in 0.319 (0.319) seconds
+PASSED TopOptFlowsTests.FlexibleS1VerifyTests Executed 3 tests, with 0 failures (0 unexpected) in 2.333 (2.333) seconds
+PASSED TopOptFlowsTests.FlexibleS1bMainTagsTests Executed 5 tests, with 1 test skipped and 0 failures (0 unexpected) in 149.053 (149.053) seconds
+PASSED TopOptFlowsTests.FlexibleSettingsMigrationTests Executed 5 tests, with 0 failures (0 unexpected) in 0.010 (0.011) seconds
+PASSED TopOptFlowsTests.FlexibleSettingsPageHostedTests Executed 2 tests, with 0 failures (0 unexpected) in 83.840 (83.840) seconds
+PASSED TopOptFlowsTests.FlexibleSettingsRound4Tests Executed 14 tests, with 0 failures (0 unexpected) in 5.294 (5.295) seconds
+PASSED TopOptFlowsTests.FlexibleSettingsVerifyD1Tests Executed 10 tests, with 0 failures (0 unexpected) in 1.927 (1.928) seconds
+PASSED TopOptFlowsTests.FlexibleShownValuesTests Executed 6 tests, with 0 failures (0 unexpected) in 0.936 (0.937) seconds
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsModelTests Executed 7 tests, with 0 failures (0 unexpected) in 16.384 (16.385) seconds
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsPressTests Executed 4 tests, with 0 failures (0 unexpected) in 0.917 (0.917) seconds
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsReviewTests Executed 8 tests, with 0 failures (0 unexpected) in 6.923 (6.924) seconds
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsReviewUITests Executed 2 tests, with 0 failures (0 unexpected) in 59.258 (59.258) seconds
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsReviewUXTests Executed 5 tests, with 0 failures (0 unexpected) in 8.397 (8.398) seconds
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsTests Executed 8 tests, with 0 failures (0 unexpected) in 0.011 (0.012) seconds
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsUITests Executed 4 tests, with 0 failures (0 unexpected) in 34.644 (34.645) seconds
+PASSED TopOptFlowsTests.FlexibleSquishCoarsenTests Executed 2 tests, with 0 failures (0 unexpected) in 0.459 (0.459) seconds
+PASSED TopOptFlowsTests.FlexibleSquishEvidenceProbe Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.002 (0.003) seconds
+PASSED TopOptFlowsTests.FlexibleSquishPerfProbe Executed 2 tests, with 2 tests skipped and 0 failures (0 unexpected) in 0.000 (0.001) seconds
+PASSED TopOptFlowsTests.FlexibleSquishPlayAllTests Executed 5 tests, with 0 failures (0 unexpected) in 1.096 (1.096) seconds
+PASSED TopOptFlowsTests.FlexibleSquishPlayerTests Executed 6 tests, with 0 failures (0 unexpected) in 0.673 (0.674) seconds
+PASSED TopOptFlowsTests.FlexibleSquishSolverTests Executed 5 tests, with 0 failures (0 unexpected) in 102.737 (102.738) seconds
+PASSED TopOptFlowsTests.FlexibleSquishTests Executed 11 tests, with 0 failures (0 unexpected) in 2.821 (2.822) seconds
+PASSED TopOptFlowsTests.FlexibleSquishVerifyGTests Executed 5 tests, with 0 failures (0 unexpected) in 274.713 (274.714) seconds
+PASSED TopOptFlowsTests.FlexibleStageTests Executed 15 tests, with 0 failures (0 unexpected) in 1.553 (1.554) seconds
+PASSED TopOptFlowsTests.FlexibleSurfaceNavTests Executed 3 tests, with 0 failures (0 unexpected) in 0.090 (0.090) seconds
+PASSED TopOptFlowsTests.LatticeBeamNetworkFactTests Executed 4 tests, with 0 failures (0 unexpected) in 0.041 (0.041) seconds
+PASSED TopOptFlowsTests.LatticeCellFitModeTests Executed 13 tests, with 0 failures (0 unexpected) in 0.006 (0.007) seconds
+PASSED TopOptFlowsTests.LatticeCoreOwnerParityProof Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+PASSED TopOptFlowsTests.LatticeCoreOwnerTests Executed 6 tests, with 0 failures (0 unexpected) in 28.172 (28.172) seconds
+PASSED TopOptFlowsTests.LatticeCorePlanRulesTests Executed 3 tests, with 0 failures (0 unexpected) in 1.680 (1.680) seconds
+PASSED TopOptFlowsTests.LatticeCoreProbeReportTests Executed 2 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+PASSED TopOptFlowsTests.LatticeDefaultGradePlanProof Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+PASSED TopOptFlowsTests.LatticeOrganicSettingsTests Executed 7 tests, with 0 failures (0 unexpected) in 0.006 (0.006) seconds
+PASSED TopOptFlowsTests.LatticePageRound2Tests Executed 15 tests, with 1 test skipped and 0 failures (0 unexpected) in 0.056 (0.057) seconds
+PASSED TopOptFlowsTests.LatticePageTests Executed 25 tests, with 0 failures (0 unexpected) in 0.407 (0.410) seconds
+PASSED TopOptFlowsTests.LatticeRetentionControlTests Executed 45 tests, with 0 failures (0 unexpected) in 0.033 (0.038) seconds
+PASSED TopOptFlowsTests.LatticeSettingsPersistTests Executed 4 tests, with 0 failures (0 unexpected) in 0.006 (0.006) seconds
+FAILED TopOptFlowsTests.LatticeSimSolveTriggerTests Executed 2 tests, with 1 failure (0 unexpected) in 0.093 (0.093) seconds
+FAILED TopOptFlowsTests.LatticeSlotOriginTests Executed 5 tests, with 4 failures (0 unexpected) in 3.132 (3.133) seconds
+PASSED TopOptFlowsTests.LatticeStaleTypeTests Executed 6 tests, with 0 failures (0 unexpected) in 2.244 (2.244) seconds
+PASSED TopOptFlowsTests.LatticeStructuralSteppedGateTests Executed 3 tests, with 0 failures (0 unexpected) in 1.016 (1.016) seconds
+PASSED TopOptFlowsTests.LatticeTypeReadinessFromCoreTests Executed 3 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+PASSED TopOptFlowsTests.LatticeVariantTests Executed 21 tests, with 0 failures (0 unexpected) in 2.149 (2.150) seconds
+PASSED TopOptFlowsTests.LatticeVariantsHisRunEvidence Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.000 (0.000) seconds
+PASSED TopOptFlowsTests.LatticeVariantsOnScreenTests Executed 16 tests, with 0 failures (0 unexpected) in 0.311 (0.313) seconds
+PASSED TopOptFlowsTests.OrganicDeadWallParityTests Executed 7 tests, with 0 failures (0 unexpected) in 0.260 (0.260) seconds
+PASSED TopOptFlowsTests.OrganicForecastTests Executed 13 tests, with 0 failures (0 unexpected) in 0.141 (0.142) seconds
+PASSED TopOptFlowsTests.OrganicJobsCoreAcceptsTests Executed 2 tests, with 0 failures (0 unexpected) in 1.505 (1.506) seconds
+PASSED TopOptFlowsTests.OrganicMainWiringTests Executed 10 tests, with 0 failures (0 unexpected) in 0.067 (0.068) seconds
+PASSED TopOptFlowsTests.OrganicPreviewMatchesTheJobTests Executed 3 tests, with 0 failures (0 unexpected) in 2.401 (2.401) seconds
+PASSED TopOptFlowsTests.OrganicPreviewParameterParityTests Executed 5 tests, with 0 failures (0 unexpected) in 3.822 (3.823) seconds
+PASSED TopOptFlowsTests.OrganicShapeFitTests Executed 4 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+PASSED TopOptFlowsTests.OrganicSizeCheckTests Executed 11 tests, with 0 failures (0 unexpected) in 0.012 (0.013) seconds
+PASSED TopOptFlowsTests.OrganicSolidRimTests Executed 7 tests, with 0 failures (0 unexpected) in 0.035 (0.035) seconds
+PASSED TopOptFlowsTests.ProjectStoreTests Executed 5 tests, with 0 failures (0 unexpected) in 0.055 (0.056) seconds
+PASSED TopOptFlowsTests.RecommendThePrintedObjectTests Executed 8 tests, with 0 failures (0 unexpected) in 0.109 (0.109) seconds
+PASSED TopOptFlowsTests.RemoteRunnerE2ETests Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.002 (0.003) seconds
+PASSED TopOptFlowsTests.SmoothingPageRound2Tests Executed 21 tests, with 0 failures (0 unexpected) in 0.307 (0.308) seconds
+PASSED TopOptFlowsTests.UndoHistoryTests Executed 10 tests, with 0 failures (0 unexpected) in 0.632 (0.633) seconds
+PASSED TopOptFlowsTests.VariantEntryGatingTests Executed 21 tests, with 0 failures (0 unexpected) in 0.253 (0.255) seconds
+PASSED TopOptFlowsTests.VariantRetentionTests Executed 15 tests, with 0 failures (0 unexpected) in 0.104 (0.105) seconds
+PASSED TopOptFlowsTests.ViewerTests Executed 33 tests, with 0 failures (0 unexpected) in 0.210 (0.212) seconds
+PASSED TopOptKitTests.FlexibleBridgeTests Executed 17 tests, with 0 failures (0 unexpected) in 0.692 (0.693) seconds
+PASSED TopOptKitTests.FlexibleSliceProbe Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+PASSED TopOptKitTests.FlexibleSquishFETests Executed 12 tests, with 0 failures (0 unexpected) in 26.037 (26.039) seconds
+PASSED TopOptKitTests.FlexibleSquishModulusTests Executed 2 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+PASSED TopOptKitTests.FlexibleSquishStepsTests Executed 6 tests, with 0 failures (0 unexpected) in 61.615 (61.616) seconds
+PASSED TopOptKitTests.FlexibleTimingProbe Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.000 (0.000) seconds
+SUITE DONE 22:20:31
+
+## Every failure in the suite log, by test
+   8 TopOptFlowsTests.FlexibleBatchNVerifyTests.testEveryRefineLineIsWholeBesideTheLivePlayAllPicker
+   1 TopOptFlowsTests.LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds
+   4 TopOptFlowsTests.LatticeSlotOriginTests.testTheAppWithholdsExactlyWhatCoreRefuses
+
+## Goldens (FlexibleAngledGoldenTests + FlexiblePressProbeTripwireTests)
+### goldens_det: identical 38 · DIFFERS 0 · PART-SKIP 0
+	 Executed 14 tests, with 0 failures (0 unexpected) in 14.356 (14.358) seconds
+	 Executed 14 tests, with 0 failures (0 unexpected) in 14.356 (14.359) seconds
+FLEX-AP testCoreFieldsAndDesignsAreTheGolden: SWIFT_DETERMINISTIC_HASHING=1
+FLEX-AP fields 'c1_pad' · built against core 69b059611c26 (printed, not compared)
+FLEX-AP GOLDEN fields_c1_pad.txt: identical (9113 bytes)
+FLEX-AP control c1_pad one owner + 1: 3 line(s) differ
+FLEX-AP his_0004: 4 loaded key(s), core refused 0 stack(s) []
+FLEX-AP fields 'his_0004' · built against core 69b059611c26 (printed, not compared)
+FLEX-AP GOLDEN fields_his_0004.txt: identical (31570 bytes)
+FLEX-AP his_r5: 4 loaded key(s), core refused 0 stack(s) []
+FLEX-AP fields 'his_0004_r5' · built against core 69b059611c26 (printed, not compared)
+FLEX-AP GOLDEN fields_his_0004_r5.txt: identical (33578 bytes)
+FLEX-AP control his_0004_r5 one owner + 1: 3 line(s) differ
+FLEX-AP testEveryExistingSendKeepsItsJobBytes: SWIFT_DETERMINISTIC_HASHING=1
+FLEX-AP his_0004: 4 loaded key(s), core refused 0 stack(s) []
+FLEX-AP his_0004: 2 send(s) ["Send with Face 5 resting resting [5]", "Send with Face 3 resting resting [3]"]
+FLEX-AP GOLDEN his_0004_send1_run_job.json: identical (5528 bytes)
+FLEX-AP GOLDEN his_0004_send2_run_job.json: identical (5404 bytes)
+FLEX-AP GOLDEN his_0004_scene_job.json: identical (3184 bytes)
+FLEX-AP his_r5: 4 loaded key(s), core refused 0 stack(s) []
+FLEX-AP his_r5: 2 send(s) ["Send Group 1 only resting [3]", "Send Group 2 only resting [1000104, 1000103, 5]"]
+FLEX-AP GOLDEN his_r5_held_send_run_job.json: identical (130088 bytes)
+FLEX-AP GOLDEN his_r5_send2_run_job.json: identical (57306 bytes)
+FLEX-AP GOLDEN his_r5_scene_job.json: identical (4051 bytes)
+FLEX-AP A1_0002: 19 loaded key(s), core refused 9 stack(s) [27, 41, 42, 43, 44, 45, 46, 47, 75]
+FLEX-AP A1_0002: 2 send(s) ["Send with Face 1, Face 22, Face 25 resting resting [1, 22, 25]", "Send with Face 2 resting resting [2]"]
+FLEX-AP GOLDEN A1_0002_send1_run_job.json: identical (19800 bytes)
+FLEX-AP GOLDEN A1_0002_send2_run_job.json: identical (20927 bytes)
+FLEX-AP GOLDEN A1_0002_scene_job.json: identical (9092 bytes)
+FLEX-AP A1_0003: 5 loaded key(s), core refused 0 stack(s) []
+FLEX-AP A1_0003: 3 send(s) ["Send Group 1 only resting [4, 2, 3, 5]", "Send Group 2 only, Face 2 resting resting [1, 3, 5, 2]", "Send Group 3 only, Face 5 resting resting [1, 4, 2, 5]"]
+FLEX-AP GOLDEN A1_0003_send1_run_job.json: identical (102625 bytes)
+FLEX-AP GOLDEN A1_0003_send2_run_job.json: identical (28611 bytes)
+FLEX-AP GOLDEN A1_0003_send3_run_job.json: identical (12474 bytes)
+FLEX-AP GOLDEN A1_0003_scene_job.json: identical (1543 bytes)
+FLEX-AP A1_0004: 4 loaded key(s), core refused 0 stack(s) []
+FLEX-AP A1_0004: 2 send(s) ["Send Group 1 only resting [3, 5]", "Send Group 2 only, Face 5 resting resting [1000104, 1000103, 5]"]
+FLEX-AP GOLDEN A1_0004_send1_run_job.json: identical (103370 bytes)
+FLEX-AP GOLDEN A1_0004_send2_run_job.json: identical (57304 bytes)
+FLEX-AP GOLDEN A1_0004_scene_job.json: identical (4051 bytes)
+FLEX-AP every existing send: 11 job(s) over 5 projects; 5 cross-send control(s)
+FLEX-AP frames 'C1 pad (top pressed 30 kg, bottom resting)' · built against core 69b059611c26 (printed, not compared)
+FLEX-AP GOLDEN frames_c1_pad.txt: identical (41336 bytes)
+FLEX-AP frames 'C1 pad (top pressed 30 kg, bottom resting)' · built against core 69b059611c26 (printed, not compared)
+FLEX-AP control 1 ulp: 3 line(s) differ: ["line 18", "line 19", "line 23"]
+FLEX-AP frames 'his 0004 as saved' · built against core 69b059611c26 (printed, not compared)
+FLEX-AP GOLDEN frames_his_0004.txt: identical (54972 bytes)
+FLEX-AP frames 'his 0004_r5 as saved' · built against core 69b059611c26 (printed, not compared)
+FLEX-AP GOLDEN frames_his_0004_r5.txt: identical (56770 bytes)
+FLEX-AP frames '60 mm cube (nothing pressed)' · built against core 69b059611c26 (printed, not compared)
+FLEX-AP GOLDEN frames_cube60.txt: identical (44179 bytes)
+FLEX-AP frames 'M2 stand (top pressed 5 kg, bottom resting)' · built against core 69b059611c26 (printed, not compared)
+FLEX-AP GOLDEN frames_m2.txt: identical (281228 bytes)
+FLEX-AP GOLDEN c1_pad_pure_run_job.json: identical (1911 bytes)
+FLEX-AP GOLDEN c1_pad_pure_stamp_run_job.json: identical (17811 bytes)
+FLEX-AP GOLDEN c1_pad_model_run_job.json: identical (2007 bytes)
+FLEX-AP control +0.001 kg: 1 line(s), 14 byte(s) differ: '"weight_n" : 294.1995' → '"weight_n" : 294.20930664999997'
+FLEX-AP control deepest +1 mm: 1 byte(s) differ
+FLEX-AP frames 'STEP cube 10 mm (nothing pressed)' · built against core 69b059611c26 (printed, not compared)
+FLEX-AP GOLDEN frames_step_cube.txt: identical (47842 bytes)
+FLEX-AP frames 'his l bracket 3 (nothing pressed)' · built against core 69b059611c26 (printed, not compared)
+FLEX-AP GOLDEN frames_l_bracket.txt: identical (60446 bytes)
+FLEX-AP testHisRound5HeldSendBytesUnchanged: SWIFT_DETERMINISTIC_HASHING=1
+FLEX-AP his r5 held send: [Send Group 1 only] resting [3]
+FLEX-AP GOLDEN his_r5_held_send_run_job.json: identical (130088 bytes)
+FLEX-AP testHisRound5SceneJobBytesUnchanged: SWIFT_DETERMINISTIC_HASHING=1
+FLEX-AP GOLDEN his_r5_scene_job.json: identical (4051 bytes)
+FLEX-AP control lattice_subtree_0004.json groupColours [:] → 18 byte(s) of the flexible block differ
+FLEX-AP control lattice_subtree_0004_r5.json groupColours [:] → 18 byte(s) of the flexible block differ
+FLEX-AP control r5 Top depth + 1 mm: 1 canonical line(s) differ: ["\'\"92E96F3A-D8F7-4FB0-AF8D-56230DFB6BC0\" : 4,\' → \'\"92E96F3A-D8F7-4FB0-AF8D-56230DFB6BC0\" : 5,\'"]
+FLEX-AP testLatticeSubtreesReEncodeIdentically (raw bytes): SWIFT_DETERMINISTIC_HASHING=1
+FLEX-AP GOLDEN lattice_subtree_0004.json: identical (3745 bytes)
+FLEX-AP GOLDEN lattice_subtree_0004_r5.json: identical (3682 bytes)
+FLEX-AP GOLDEN lattice_subtree_102117B9.json: identical (1850 bytes)
+FLEX-AP GOLDEN lattice_subtree_A1_0002.json: identical (1603 bytes)
+FLEX-AP GOLDEN lattice_subtree_A1_0003.json: identical (3919 bytes)
+FLEX-AP GOLDEN lattice_subtree_A1_0004.json: identical (3728 bytes)
+FLEX-AP fingerprints ["69b059611c26"] (this build's, the goldens'): absent from 43 compared golden(s)
+FLEX-AP probe now: control accepted · tilt accepted · edge accepted
+FLEX-AP GOLDEN c1_pad_model_scene_job.json: identical (1593 bytes)
+FLEX-AP testTheStageJobSeesALatticeSettingButNeverFlexible: SWIFT_DETERMINISTIC_HASHING=1
+FLEX-AP stage control: group 92E96F3A-D8F7-4FB0-AF8D-56230DFB6BC0 depth 4.0 → 5.0 mm moves 2 line(s): '"depth_mm" : 4,' → '"depth_mm" : 5,'; '"depth_mm" : 4,' → '"depth_mm" : 5,'
+FLEX-AP S1 tripwire · core 69b059611c26: control accepted · tilt accepted · edge accepted
+FLEX-AP S1 tripwire control: press_directionX → job.json: flexible: flexible.faces[0]: unknown key "press_directionX"
+### goldens_unseeded: identical 32 · DIFFERS 0 · PART-SKIP 1
+	 Executed 14 tests, with 0 failures (0 unexpected) in 13.574 (13.576) seconds
+	 Executed 14 tests, with 0 failures (0 unexpected) in 13.574 (13.577) seconds
+FLEX-AP testCoreFieldsAndDesignsAreTheGolden: SWIFT_DETERMINISTIC_HASHING=unset
+FLEX-AP fields 'c1_pad' · built against core 69b059611c26 (printed, not compared)
+FLEX-AP GOLDEN fields_c1_pad.txt: identical (9113 bytes)
+FLEX-AP control c1_pad one owner + 1: 3 line(s) differ
+FLEX-AP his_0004: 4 loaded key(s), core refused 0 stack(s) []
+FLEX-AP fields 'his_0004' · built against core 69b059611c26 (printed, not compared)
+FLEX-AP GOLDEN fields_his_0004.txt: identical (31570 bytes)
+FLEX-AP his_r5: 4 loaded key(s), core refused 0 stack(s) []
+FLEX-AP fields 'his_0004_r5' · built against core 69b059611c26 (printed, not compared)
+FLEX-AP GOLDEN fields_his_0004_r5.txt: identical (33578 bytes)
+FLEX-AP control his_0004_r5 one owner + 1: 3 line(s) differ
+FLEX-AP testEveryExistingSendKeepsItsJobBytes: SWIFT_DETERMINISTIC_HASHING=unset
+FLEX-AP his_0004: 4 loaded key(s), core refused 0 stack(s) []
+FLEX-AP his_0004: 2 send(s) ["Send with Face 5 resting resting [5]", "Send with Face 3 resting resting [3]"]
+FLEX-AP GOLDEN his_0004_send1_run_job.json: identical (5528 bytes)
+FLEX-AP GOLDEN his_0004_send2_run_job.json: identical (5404 bytes)
+FLEX-AP GOLDEN his_0004_scene_job.json: identical (3184 bytes)
+FLEX-AP his_r5: 4 loaded key(s), core refused 0 stack(s) []
+FLEX-AP his_r5: 2 send(s) ["Send Group 1 only resting [3]", "Send Group 2 only resting [1000104, 1000103, 5]"]
+FLEX-AP GOLDEN his_r5_held_send_run_job.json: identical (130088 bytes)
+FLEX-AP GOLDEN his_r5_send2_run_job.json: identical (57306 bytes)
+FLEX-AP GOLDEN his_r5_scene_job.json: identical (4051 bytes)
+FLEX-AP A1_0002: 19 loaded key(s), core refused 9 stack(s) [27, 41, 42, 43, 44, 45, 46, 47, 75]
+FLEX-AP A1_0002: 2 send(s) ["Send with Face 1, Face 22, Face 25 resting resting [1, 22, 25]", "Send with Face 2 resting resting [2]"]
+FLEX-AP GOLDEN A1_0002_send1_run_job.json: identical (19800 bytes)
+FLEX-AP GOLDEN A1_0002_send2_run_job.json: identical (20927 bytes)
+FLEX-AP GOLDEN A1_0002_scene_job.json: identical (9092 bytes)
+FLEX-AP A1_0003: 5 loaded key(s), core refused 0 stack(s) []
+FLEX-AP A1_0003: 3 send(s) ["Send Group 1 only resting [4, 2, 3, 5]", "Send Group 2 only, Face 2 resting resting [1, 3, 5, 2]", "Send Group 3 only, Face 5 resting resting [1, 4, 2, 5]"]
+FLEX-AP GOLDEN A1_0003_send1_run_job.json: identical (102625 bytes)
+FLEX-AP GOLDEN A1_0003_send2_run_job.json: identical (28611 bytes)
+FLEX-AP GOLDEN A1_0003_send3_run_job.json: identical (12474 bytes)
+FLEX-AP GOLDEN A1_0003_scene_job.json: identical (1543 bytes)
+FLEX-AP A1_0004: 4 loaded key(s), core refused 0 stack(s) []
+FLEX-AP A1_0004: 2 send(s) ["Send Group 1 only resting [3, 5]", "Send Group 2 only, Face 5 resting resting [1000104, 1000103, 5]"]
+FLEX-AP GOLDEN A1_0004_send1_run_job.json: identical (103370 bytes)
+FLEX-AP GOLDEN A1_0004_send2_run_job.json: identical (57304 bytes)
+FLEX-AP GOLDEN A1_0004_scene_job.json: identical (4051 bytes)
+FLEX-AP every existing send: 11 job(s) over 5 projects; 5 cross-send control(s)
+FLEX-AP frames 'C1 pad (top pressed 30 kg, bottom resting)' · built against core 69b059611c26 (printed, not compared)
+FLEX-AP GOLDEN frames_c1_pad.txt: identical (41336 bytes)
+FLEX-AP frames 'C1 pad (top pressed 30 kg, bottom resting)' · built against core 69b059611c26 (printed, not compared)
+FLEX-AP control 1 ulp: 3 line(s) differ: ["line 18", "line 19", "line 23"]
+FLEX-AP frames 'his 0004 as saved' · built against core 69b059611c26 (printed, not compared)
+FLEX-AP GOLDEN frames_his_0004.txt: identical (54972 bytes)
+FLEX-AP frames 'his 0004_r5 as saved' · built against core 69b059611c26 (printed, not compared)
+FLEX-AP GOLDEN frames_his_0004_r5.txt: identical (56770 bytes)
+FLEX-AP frames '60 mm cube (nothing pressed)' · built against core 69b059611c26 (printed, not compared)
+FLEX-AP GOLDEN frames_cube60.txt: identical (44179 bytes)
+FLEX-AP frames 'M2 stand (top pressed 5 kg, bottom resting)' · built against core 69b059611c26 (printed, not compared)
+FLEX-AP GOLDEN frames_m2.txt: identical (281228 bytes)
+FLEX-AP GOLDEN c1_pad_pure_run_job.json: identical (1911 bytes)
+FLEX-AP GOLDEN c1_pad_pure_stamp_run_job.json: identical (17811 bytes)
+FLEX-AP GOLDEN c1_pad_model_run_job.json: identical (2007 bytes)
+FLEX-AP control +0.001 kg: 1 line(s), 14 byte(s) differ: '"weight_n" : 294.1995' → '"weight_n" : 294.20930664999997'
+FLEX-AP control deepest +1 mm: 1 byte(s) differ
+FLEX-AP frames 'STEP cube 10 mm (nothing pressed)' · built against core 69b059611c26 (printed, not compared)
+FLEX-AP GOLDEN frames_step_cube.txt: identical (47842 bytes)
+FLEX-AP frames 'his l bracket 3 (nothing pressed)' · built against core 69b059611c26 (printed, not compared)
+FLEX-AP GOLDEN frames_l_bracket.txt: identical (60446 bytes)
+FLEX-AP testHisRound5HeldSendBytesUnchanged: SWIFT_DETERMINISTIC_HASHING=unset
+FLEX-AP his r5 held send: [Send Group 1 only] resting [3]
+FLEX-AP GOLDEN his_r5_held_send_run_job.json: identical (130088 bytes)
+FLEX-AP testHisRound5SceneJobBytesUnchanged: SWIFT_DETERMINISTIC_HASHING=unset
+FLEX-AP GOLDEN his_r5_scene_job.json: identical (4051 bytes)
+FLEX-AP control lattice_subtree_0004.json groupColours [:] → 18 byte(s) of the flexible block differ
+FLEX-AP control lattice_subtree_0004_r5.json groupColours [:] → 18 byte(s) of the flexible block differ
+FLEX-AP control r5 Top depth + 1 mm: 1 canonical line(s) differ: ["\'\"92E96F3A-D8F7-4FB0-AF8D-56230DFB6BC0\" : 4,\' → \'\"92E96F3A-D8F7-4FB0-AF8D-56230DFB6BC0\" : 5,\'"]
+FLEX-AP testLatticeSubtreesReEncodeIdentically (raw bytes): SWIFT_DETERMINISTIC_HASHING=unset
+FLEX-AP PART-SKIP FlexibleAngledGoldenTests.testLatticeSubtreesReEncodeIdentically: the RAW subtree bytes need SWIFT_DETERMINISTIC_HASHING=1 (UUID-keyed dictionaries encode in hash order); the canonical subtrees and the flexible blocks were
+FLEX-AP fingerprints ["69b059611c26"] (this build's, the goldens'): absent from 43 compared golden(s)
+FLEX-AP probe now: control accepted · tilt accepted · edge accepted
+FLEX-AP GOLDEN c1_pad_model_scene_job.json: identical (1593 bytes)
+FLEX-AP testTheStageJobSeesALatticeSettingButNeverFlexible: SWIFT_DETERMINISTIC_HASHING=unset
+FLEX-AP stage control: group 92E96F3A-D8F7-4FB0-AF8D-56230DFB6BC0 depth 4.0 → 5.0 mm moves 2 line(s): '"depth_mm" : 4,' → '"depth_mm" : 5,'; '"depth_mm" : 4,' → '"depth_mm" : 5,'
+FLEX-AP S1 tripwire · core 69b059611c26: control accepted · tilt accepted · edge accepted
+FLEX-AP S1 tripwire control: press_directionX → job.json: flexible: flexible.faces[0]: unknown key "press_directionX"
+
+## Stage-job hashes: angled_presses/stage_job_hashes_bvr.txt — the 16 rows identical to stage_job_hashes_bv.txt
+
+## iOS
+xcodebuild -project app/TopOpt.xcodeproj -scheme TopOpt -configuration Debug -destination id=147E56A1-C8CA-4B9D-BE6C-CF230589A83A -derivedDataPath /Users/nadim/Library/Developer/Xcode/DerivedData/flexA1 build → ** BUILD SUCCEEDED ** at 00f8d0c5
+xcrun simctl install 147E56A1-C8CA-4B9D-BE6C-CF230589A83A (booted) → exit 0; installed TopOpt.debug.dylib 76 975 136 B, 22:21, cmp-identical to the build; strings: FlexibleReadingFit 2, restoreWritePending 2, 'Role colours off' 1, core 69b059611c26 1. NEVER launched.

@@ -1,0 +1,237 @@
+# Angled presses (task 2026-10-07), batch S1 — the TARGETED SUITE after the #361 sync (merges b151dfa7 #361 021b7321,
+# ba599ca6 #358 36f5fdde, 11b264e8 #354 06c92c70; origin/main already contained), core rebuilt at 11b264e8 (fingerprint
+# 11b264e8549c; marker "are not adjacent (no shared edge)" in every slice), the goldens re-based (s1_goldens.txt).
+# Debug, swift test --skip-build, unseeded (CI's mode), this Mac (Xcode 27, macOS 27). Run detached (nohup, a driver that
+# re-runs a class unfinished at an xctest death and skips a class that dies twice); it needed ONE run — no death.
+#
+# THE CLASSES (180): every Flexible* class in BOTH test bundles (93 — TopOptKitTests' 6 Flexible classes are new to this
+#   filter: AP0/AP1 ran TopOptFlowsTests only); every class that source-pins a file the merges or S1 touched (90: the 36
+#   app source files the merges changed — WorkspacePlaceholder 60 readers, MetalMeshView, LatticeSettings, ProjectModel,
+#   AppModel, RunModel, bridge.cpp, TopOptBridge.hpp, TopOptKit.swift, LatticeSetupWizard, … — found by their file-name
+#   literals); the 20 classes that read the whole Sources/TopOptFlows directory; plus ProjectStoreTests, UndoHistoryTests,
+#   LatticeSettingsPersistTests, ViewerTests, SmoothingPageRound2Tests, LatticeSimSolveTriggerTests, the AP0 golden classes
+#   and LatticeStaleTypeTests (RE-INCLUDED: 877bdb88 reached this branch through #361 021b7321).
+#   swift test --skip-build --filter '<the 180 classes>' (the exact filter is the last line of this file)
+#
+# RESULT (raw):
+#   TopOptKitTests.xctest:   Executed 45 tests, with 2 tests skipped and 0 failures (0 unexpected) in 92.643 (92.648) seconds
+#   TopOptFlowsTests.xctest: Executed 1193 tests, with 39 tests skipped and 11 failures (0 unexpected) in 4935.800 (4935.919) seconds
+#   = 1238 tests, 41 skipped, 11 failures in 4 tests; 176 classes passed, 4 failed; no xctest death.
+#   THE FAILURES:
+#   - FlexibleBatchNVerifyTests.testEveryRefineLineIsWholeBesideTheLivePlayAllPicker (8) — KNOWN (since the Xcode 27
+#     update; investigated after S1 by the reviewer's ruling).
+#   - LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds (1) — KNOWN.
+#   - LatticeTypeNoBandTests.testTheDrawerLeadsWithCoresWordsAndDrawsNoBandRows (1) — NEW, a MERGE INTERACTION, attributed:
+#     the test is #354's 67595f19 (Lattice types Q2, arrived through #361), written against #354's LatticeRegionDrawer,
+#     whose frozen headline reads "Frozen, not latticed"; on THIS branch batch E's ad00765f (ours, the "#354 side" of
+#     batch E, not on #354) made that headline LatticeSectorOutline.notLatticedWords(protected:) = "Not latticed" (his
+#     "a protected face isn't frozen"). :80 XCTAssertEqual failed: ("Optional("Not latticed")") is not equal to
+#     ("Optional("Frozen, not latticed")"). Green on #354's own head; red only where both meet. Not edited here (a #354
+#     test; #354 is taking batch E's card work into its own code).
+#   - LatticeTypeReadinessFromCoreTests.testTheLinkedCoreThroughTheCatalog (1) — NEW, a MERGE INTERACTION, attributed:
+#     #358's 36f5fdde (core, merged here directly) answers "gyroid" NotEither ("planned ids read 'not yet', not 'no such
+#     thing'"); #354's 877bdb88 pinned core 23e6154e's UnknownId. CoreBuildIdentityTests.swift:140 XCTAssertEqual failed:
+#     ("notEither") is not equal to ("unknownId") - core has no gyroid id yet (brief item b). The user-facing line for
+#     gyroid ("Not buildable or strength-checked yet") passes. Green on #354's own head (no 36f5fdde there).
+#   THE SKIPS (41), every one env-gated or a recorder, none new in kind: FlexibleAngledGoldenRecorder 10 (RECORD=1),
+#     FlexibleBatchMProbe 5, FlexibleBatchM2Probe 3, FlexibleBatchNEvidenceProbe 3, FlexibleBatchNProbe 3,
+#     FlexibleSquishEvidenceProbe 3, FlexibleSquishPerfProbe 2, FlexibleBatchMVerifyTests 1 (FLEX_MV_DEVICE),
+#     FlexibleFEPassPerfTests 1, FlexibleGroupFieldPerfTests 1, FlexibleGroupPaletteEvidenceProbe 1,
+#     FlexibleLatticeEvidenceProbe 1, FlexibleLatticePassPerfTests 1, FlexibleRound5EvidenceProbe 1,
+#     LatticePageRound2Tests 1 (core/build/topopt-cli not built), LatticeStructuralPrismProbe 1 (TOPOPT_PROJECT_ROOT),
+#     UnreadableProjectTests 1 (TOPOPT_STORE_COPY), FlexibleSliceProbe 1, FlexibleTimingProbe 1; plus one FLEX-AP
+#     PART-SKIP (the subtrees' raw bytes need deterministic hashing; s1_goldens.txt ran them under it).
+#   AppModelTests' 3MF ×3, LatticeCellGradingTests, OrganicSampleCubeTests and OrganicVariantCacheTests are not in this
+#   filter (none pins a touched file).
+#   Batch E's own sector and card classes, run apart after the share drop (ruling (ii)):
+#     swift test --skip-build --filter 'TopOptFlowsTests\.(LatticeSector[A-Za-z]*|LatticeFaceCard[A-Za-z]*)/'
+#     LatticeSectorHisProjectTests 2, LatticeSectorOutlineTests 17, LatticeSectorRenderTests 4 (1 skipped),
+#     LatticeSectorReviewTests 6 — 0 failures (they test the share function's values; its call site is gone).
+#
+# iOS BUILD (this worktree's own derived data):
+#   xcodebuild -project app/TopOpt.xcodeproj -scheme TopOpt -configuration Debug -destination id=147E56A1-C8CA-4B9D-BE6C-CF230589A83A \
+#     -derivedDataPath /Users/nadim/Library/Developer/Xcode/DerivedData/flexA1s1 build   -> exit 0, ** BUILD SUCCEEDED ** (15:51:37-15:52:29)
+#   TopOpt.app/TopOpt.debug.dylib 15:52, 74 285 568 bytes, holds the addendum's marker (strings: 1). Not launched.
+#
+# PER CLASS:
+#   BridgeGuardTests passed: Executed 6 tests, with 0 failures (0 unexpected) in 0.140 (0.141) seconds
+#   FlexibleBridgeTests passed: Executed 17 tests, with 0 failures (0 unexpected) in 0.681 (0.683) seconds
+#   FlexibleSliceProbe passed: Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.002 (0.003) seconds
+#   FlexibleSquishFETests passed: Executed 12 tests, with 0 failures (0 unexpected) in 27.683 (27.685) seconds
+#   FlexibleSquishModulusTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   FlexibleSquishStepsTests passed: Executed 6 tests, with 0 failures (0 unexpected) in 64.135 (64.136) seconds
+#   FlexibleTimingProbe passed: Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.000 (0.000) seconds
+#   BottomBarMeasurementTests passed: Executed 8 tests, with 0 failures (0 unexpected) in 0.033 (0.034) seconds
+#   CoreBuildIdentityTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 1.650 (1.651) seconds
+#   FlexibleAngledGoldenRecorder passed: Executed 10 tests, with 10 tests skipped and 0 failures (0 unexpected) in 0.003 (0.003) seconds
+#   FlexibleAngledGoldenTests passed: Executed 13 tests, with 0 failures (0 unexpected) in 13.675 (13.676) seconds
+#   FlexibleBatchBReviewTests passed: Executed 10 tests, with 0 failures (0 unexpected) in 108.208 (108.210) seconds
+#   FlexibleBatchBReviewUXTests passed: Executed 13 tests, with 0 failures (0 unexpected) in 0.625 (0.626) seconds
+#   FlexibleBatchCHookTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 0.869 (0.870) seconds
+#   FlexibleBatchCVerifyTests passed: Executed 14 tests, with 0 failures (0 unexpected) in 17.845 (17.846) seconds
+#   FlexibleBatchM2Probe passed: Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.002 (0.002) seconds
+#   FlexibleBatchM2Tests passed: Executed 2 tests, with 0 failures (0 unexpected) in 28.021 (28.021) seconds
+#   FlexibleBatchM2VerifyTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 45.210 (45.210) seconds
+#   FlexibleBatchMDentTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 48.454 (48.454) seconds
+#   FlexibleBatchMGroupTests passed: Executed 1 test, with 0 failures (0 unexpected) in 49.510 (49.510) seconds
+#   FlexibleBatchMLegendTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 61.139 (61.139) seconds
+#   FlexibleBatchMProbe passed: Executed 5 tests, with 5 tests skipped and 0 failures (0 unexpected) in 0.003 (0.003) seconds
+#   FlexibleBatchMStressTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 104.754 (104.755) seconds
+#   FlexibleBatchMVerifyTests passed: Executed 8 tests, with 1 test skipped and 0 failures (0 unexpected) in 623.997 (623.998) seconds
+#   FlexibleBatchMXrayTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 193.254 (193.255) seconds
+#   FlexibleBatchNEvidenceProbe passed: Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.002 (0.003) seconds
+#   FlexibleBatchNProbe passed: Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.002 (0.002) seconds
+#   FlexibleBatchNRefineTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 400.627 (400.628) seconds
+#   FlexibleBatchNVerifyTests failed: Executed 4 tests, with 8 failures (0 unexpected) in 259.898 (259.899) seconds
+#   FlexibleCoreClaimTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 73.222 (73.223) seconds
+#   FlexibleCurveEditTests passed: Executed 7 tests, with 0 failures (0 unexpected) in 0.009 (0.010) seconds
+#   FlexibleDepthPrismTests passed: Executed 12 tests, with 0 failures (0 unexpected) in 1.177 (1.178) seconds
+#   FlexibleFEFieldTests passed: Executed 12 tests, with 0 failures (0 unexpected) in 311.971 (311.972) seconds
+#   FlexibleFEPassPerfTests passed: Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   FlexibleFEPassTests passed: Executed 5 tests, with 0 failures (0 unexpected) in 18.570 (18.570) seconds
+#   FlexibleFEVerifyGTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 38.636 (38.636) seconds
+#   FlexibleGeometryOnlyLatticeTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 0.200 (0.200) seconds
+#   FlexibleGroupFieldPerfTests passed: Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   FlexibleGroupPaletteEvidenceProbe passed: Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.000 (0.000) seconds
+#   FlexibleGroupPaletteHostedTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 50.297 (50.298) seconds
+#   FlexibleGroupPaletteTests passed: Executed 7 tests, with 0 failures (0 unexpected) in 0.229 (0.230) seconds
+#   FlexibleInPassCompositeTests passed: Executed 10 tests, with 0 failures (0 unexpected) in 18.960 (18.961) seconds
+#   FlexibleLatticeEvidenceProbe passed: Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   FlexibleLatticeFieldTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 2.920 (2.920) seconds
+#   FlexibleLatticeGradingTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 1.961 (1.961) seconds
+#   FlexibleLatticePassPerfTests passed: Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   FlexibleLatticePassTests passed: Executed 10 tests, with 0 failures (0 unexpected) in 14.044 (14.045) seconds
+#   FlexibleLatticeUnderReviewTests passed: Executed 7 tests, with 0 failures (0 unexpected) in 11.917 (11.918) seconds
+#   FlexibleLatticeUnderTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 2.596 (2.596) seconds
+#   FlexibleLegendPlacementTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 0.007 (0.008) seconds
+#   FlexibleMainPageHookTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 0.224 (0.225) seconds
+#   FlexibleMainPageLoadsTests passed: Executed 10 tests, with 0 failures (0 unexpected) in 2.817 (2.818) seconds
+#   FlexibleMainPageRound4HostedTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 3.836 (3.836) seconds
+#   FlexibleMainPageRound4Tests passed: Executed 12 tests, with 0 failures (0 unexpected) in 37.095 (37.097) seconds
+#   FlexibleMainPageRound4VerifyTests passed: Executed 9 tests, with 0 failures (0 unexpected) in 82.441 (82.442) seconds
+#   FlexibleMainStageTests passed: Executed 8 tests, with 0 failures (0 unexpected) in 22.796 (22.797) seconds
+#   FlexibleMainViewsTests passed: Executed 10 tests, with 0 failures (0 unexpected) in 23.424 (23.425) seconds
+#   FlexibleMergeR5SMTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 47.410 (47.411) seconds
+#   FlexibleOverlayClipTests passed: Executed 6 tests, with 0 failures (0 unexpected) in 0.720 (0.720) seconds
+#   FlexibleOverlaySeamTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 0.709 (0.709) seconds
+#   FlexiblePinchTests passed: Executed 7 tests, with 0 failures (0 unexpected) in 5.730 (5.730) seconds
+#   FlexiblePressFixturesTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 0.280 (0.281) seconds
+#   FlexiblePressProbeTripwireTests passed: Executed 1 test, with 0 failures (0 unexpected) in 0.002 (0.003) seconds
+#   FlexiblePressReframeTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 0.064 (0.064) seconds
+#   FlexiblePressReviewTests passed: Executed 12 tests, with 0 failures (0 unexpected) in 1.022 (1.023) seconds
+#   FlexiblePressSaveTests passed: Executed 8 tests, with 0 failures (0 unexpected) in 1.368 (1.369) seconds
+#   FlexibleReadinessTests passed: Executed 10 tests, with 0 failures (0 unexpected) in 3.559 (3.559) seconds
+#   FlexibleRegionsTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 0.037 (0.037) seconds
+#   FlexibleRound5EvidenceProbe passed: Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   FlexibleRound5SettingsHostedTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 108.977 (108.978) seconds
+#   FlexibleRound5SettingsTests passed: Executed 12 tests, with 0 failures (0 unexpected) in 13.443 (13.444) seconds
+#   FlexibleRound5SettingsVerifyTests passed: Executed 9 tests, with 0 failures (0 unexpected) in 2.793 (2.794) seconds
+#   FlexibleRound5SquishExitTests passed: Executed 6 tests, with 0 failures (0 unexpected) in 230.788 (230.789) seconds
+#   FlexibleRowCopyTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 0.285 (0.286) seconds
+#   FlexibleSettingsMigrationTests passed: Executed 5 tests, with 0 failures (0 unexpected) in 0.005 (0.005) seconds
+#   FlexibleSettingsPageHostedTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 96.331 (96.332) seconds
+#   FlexibleSettingsRound4Tests passed: Executed 14 tests, with 0 failures (0 unexpected) in 5.792 (5.794) seconds
+#   FlexibleSettingsVerifyD1Tests passed: Executed 10 tests, with 0 failures (0 unexpected) in 1.929 (1.930) seconds
+#   FlexibleShownValuesTests passed: Executed 6 tests, with 0 failures (0 unexpected) in 0.952 (0.953) seconds
+#   FlexibleSqueezeGroupsModelTests passed: Executed 7 tests, with 0 failures (0 unexpected) in 22.974 (22.975) seconds
+#   FlexibleSqueezeGroupsPressTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 0.880 (0.880) seconds
+#   FlexibleSqueezeGroupsReviewTests passed: Executed 8 tests, with 0 failures (0 unexpected) in 6.790 (6.790) seconds
+#   FlexibleSqueezeGroupsReviewUITests passed: Executed 2 tests, with 0 failures (0 unexpected) in 60.209 (60.209) seconds
+#   FlexibleSqueezeGroupsReviewUXTests passed: Executed 5 tests, with 0 failures (0 unexpected) in 8.674 (8.675) seconds
+#   FlexibleSqueezeGroupsTests passed: Executed 8 tests, with 0 failures (0 unexpected) in 0.012 (0.013) seconds
+#   FlexibleSqueezeGroupsUITests passed: Executed 4 tests, with 0 failures (0 unexpected) in 35.707 (35.708) seconds
+#   FlexibleSquishCoarsenTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 0.422 (0.422) seconds
+#   FlexibleSquishEvidenceProbe passed: Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   FlexibleSquishPerfProbe passed: Executed 2 tests, with 2 tests skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   FlexibleSquishPlayAllTests passed: Executed 5 tests, with 0 failures (0 unexpected) in 1.139 (1.140) seconds
+#   FlexibleSquishPlayerTests passed: Executed 6 tests, with 0 failures (0 unexpected) in 0.709 (0.710) seconds
+#   FlexibleSquishSolverTests passed: Executed 5 tests, with 0 failures (0 unexpected) in 143.014 (143.015) seconds
+#   FlexibleSquishTests passed: Executed 11 tests, with 0 failures (0 unexpected) in 2.916 (2.917) seconds
+#   FlexibleSquishVerifyGTests passed: Executed 5 tests, with 0 failures (0 unexpected) in 321.573 (321.573) seconds
+#   FlexibleStageTests passed: Executed 15 tests, with 0 failures (0 unexpected) in 1.747 (1.748) seconds
+#   FlexibleSurfaceNavTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 0.095 (0.095) seconds
+#   FrozenRegionAsMaterialTests passed: Executed 15 tests, with 0 failures (0 unexpected) in 0.014 (0.015) seconds
+#   GroupViewEnforcementTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 0.048 (0.048) seconds
+#   GroupViewStateTests passed: Executed 7 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   LatticeActionBarTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 0.005 (0.005) seconds
+#   LatticeAutoDensityIsDerivedTests passed: Executed 10 tests, with 0 failures (0 unexpected) in 0.005 (0.005) seconds
+#   LatticeBandChipsTests passed: Executed 10 tests, with 0 failures (0 unexpected) in 0.181 (0.181) seconds
+#   LatticeBeamNetworkFactTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 0.038 (0.038) seconds
+#   LatticeDefaultGradePlanSwitchTests passed: Executed 1 test, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   LatticeDefaultGradePlanTests passed: Executed 1 test, with 0 failures (0 unexpected) in 0.017 (0.017) seconds
+#   LatticeDepthIsOneValueTests passed: Executed 5 tests, with 0 failures (0 unexpected) in 0.315 (0.315) seconds
+#   LatticeDrawerCellIsTheBakesTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 0.036 (0.036) seconds
+#   LatticeDrawerScrubTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   LatticeGradeToSolidBandTests passed: Executed 11 tests, with 0 failures (0 unexpected) in 9.257 (9.259) seconds
+#   LatticeGradingWiringTests passed: Executed 5 tests, with 0 failures (0 unexpected) in 0.757 (0.757) seconds
+#   LatticeIncludeGateTests passed: Executed 8 tests, with 0 failures (0 unexpected) in 2.624 (2.625) seconds
+#   LatticeLegendColourTests passed: Executed 18 tests, with 0 failures (0 unexpected) in 0.117 (0.118) seconds
+#   LatticeModeTests passed: Executed 17 tests, with 0 failures (0 unexpected) in 0.048 (0.049) seconds
+#   LatticeNamedNoOctetFallbackTests passed: Executed 6 tests, with 0 failures (0 unexpected) in 0.072 (0.072) seconds
+#   LatticeOldRetainedRunTests passed: Executed 10 tests, with 0 failures (0 unexpected) in 3.456 (3.457) seconds
+#   LatticePageRound2Tests passed: Executed 15 tests, with 1 test skipped and 0 failures (0 unexpected) in 0.051 (0.052) seconds
+#   LatticePlanNotSentLineTests passed: Executed 5 tests, with 0 failures (0 unexpected) in 0.013 (0.014) seconds
+#   LatticePreviewBodyAlphaTests passed: Executed 6 tests, with 0 failures (0 unexpected) in 0.024 (0.024) seconds
+#   LatticePreviewDensityTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 0.002 (0.003) seconds
+#   LatticePreviewNoticeCaptionTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 0.022 (0.023) seconds
+#   LatticeProbeSamplingTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 50.157 (50.157) seconds
+#   LatticeProtectionFollowsSlabTests passed: Executed 8 tests, with 0 failures (0 unexpected) in 2.871 (2.872) seconds
+#   LatticeRegionCapTests passed: Executed 6 tests, with 0 failures (0 unexpected) in 0.211 (0.212) seconds
+#   LatticeRunSpecSharedTests passed: Executed 5 tests, with 0 failures (0 unexpected) in 4.324 (4.325) seconds
+#   LatticeSampleRefreshTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 0.028 (0.028) seconds
+#   LatticeSectorOutlineTests passed: Executed 17 tests, with 0 failures (0 unexpected) in 0.518 (0.519) seconds
+#   LatticeSettingsPersistTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 0.004 (0.004) seconds
+#   LatticeShellAndMarchAgreeTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 29.131 (29.131) seconds
+#   LatticeSimSolveTriggerTests failed: Executed 2 tests, with 1 failure (0 unexpected) in 0.023 (0.023) seconds
+#   LatticeSolidFillTests passed: Executed 9 tests, with 0 failures (0 unexpected) in 0.051 (0.051) seconds
+#   LatticeStageRepairEvidence passed: Executed 3 tests, with 0 failures (0 unexpected) in 0.016 (0.016) seconds
+#   LatticeStaleTypeTests passed: Executed 6 tests, with 0 failures (0 unexpected) in 3.964 (3.965) seconds
+#   LatticeSteppedCellListTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 0.012 (0.013) seconds
+#   LatticeStressTintTests passed: Executed 12 tests, with 0 failures (0 unexpected) in 0.002 (0.003) seconds
+#   LatticeStructuralPrismProbe passed: Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   LatticeStructuralRegionFloorTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 0.005 (0.005) seconds
+#   LatticeStructuralViewStateTests passed: Executed 8 tests, with 0 failures (0 unexpected) in 0.507 (0.508) seconds
+#   LatticeTypeCatalogTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 0.020 (0.021) seconds
+#   LatticeTypeNoBandTests failed: Executed 4 tests, with 1 failure (0 unexpected) in 0.045 (0.045) seconds
+#   LatticeTypeReadinessFromCoreTests failed: Executed 3 tests, with 1 failure (0 unexpected) in 0.003 (0.003) seconds
+#   LatticeVariantFaceWallsTests passed: Executed 8 tests, with 0 failures (0 unexpected) in 4.129 (4.130) seconds
+#   LatticeVariantTests passed: Executed 21 tests, with 0 failures (0 unexpected) in 3.830 (3.832) seconds
+#   LatticeWizardOneLineCaptionTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 0.168 (0.168) seconds
+#   OrganicAutoGradeAndFreezeTests passed: Executed 9 tests, with 0 failures (0 unexpected) in 0.142 (0.143) seconds
+#   OrganicCapsuleImpostorTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 64.676 (64.677) seconds
+#   OrganicDeadWallParityTests passed: Executed 7 tests, with 0 failures (0 unexpected) in 0.306 (0.306) seconds
+#   OrganicForecastRouteTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 0.197 (0.198) seconds
+#   OrganicJobsCoreAcceptsTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 1.660 (1.660) seconds
+#   OrganicLookAndVisibilityTests passed: Executed 9 tests, with 0 failures (0 unexpected) in 3.430 (3.431) seconds
+#   OrganicMainWiringTests passed: Executed 10 tests, with 0 failures (0 unexpected) in 0.069 (0.070) seconds
+#   OrganicPreviewBakeInputsTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 0.012 (0.012) seconds
+#   OrganicPreviewMatchesTheJobTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 2.755 (2.755) seconds
+#   OrganicPreviewParameterParityTests passed: Executed 5 tests, with 0 failures (0 unexpected) in 4.080 (4.081) seconds
+#   OrganicPreviewSpeedAndRimTests passed: Executed 5 tests, with 0 failures (0 unexpected) in 211.609 (211.609) seconds
+#   OrganicRegionFillProbe passed: Executed 7 tests, with 0 failures (0 unexpected) in 717.208 (717.210) seconds
+#   OrganicSizeCheckTests passed: Executed 11 tests, with 0 failures (0 unexpected) in 0.014 (0.015) seconds
+#   OrganicSolidRimTests passed: Executed 7 tests, with 0 failures (0 unexpected) in 0.039 (0.040) seconds
+#   OrganicSyntheticStressTests passed: Executed 13 tests, with 0 failures (0 unexpected) in 0.173 (0.174) seconds
+#   OrganicWalk0907EveningTests passed: Executed 5 tests, with 0 failures (0 unexpected) in 0.067 (0.067) seconds
+#   PageLeftModalPlacementTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+#   ProjectStoreTests passed: Executed 5 tests, with 0 failures (0 unexpected) in 0.024 (0.024) seconds
+#   ProtectFreezeVsSolidityTests passed: Executed 7 tests, with 0 failures (0 unexpected) in 0.070 (0.070) seconds
+#   SectorDensityTests passed: Executed 11 tests, with 0 failures (0 unexpected) in 0.010 (0.011) seconds
+#   SmoothingPageRound2Tests passed: Executed 21 tests, with 0 failures (0 unexpected) in 0.315 (0.317) seconds
+#   SmoothingPageTests passed: Executed 32 tests, with 0 failures (0 unexpected) in 0.164 (0.166) seconds
+#   SmoothingRound3Tests passed: Executed 27 tests, with 0 failures (0 unexpected) in 0.151 (0.153) seconds
+#   SmoothingRound4Tests passed: Executed 29 tests, with 0 failures (0 unexpected) in 0.554 (0.557) seconds
+#   SmoothingViewerTests passed: Executed 12 tests, with 0 failures (0 unexpected) in 0.029 (0.030) seconds
+#   StrutLineWidthTests passed: Executed 12 tests, with 0 failures (0 unexpected) in 0.546 (0.547) seconds
+#   SurfaceCutDetentTests passed: Executed 7 tests, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+#   SurfaceInputDisciplineTests passed: Executed 6 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   SurfacePencilToggleExemptionTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 0.060 (0.060) seconds
+#   SurfaceStageNoRegressionTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   SurfaceTapMeaningTests passed: Executed 7 tests, with 0 failures (0 unexpected) in 0.003 (0.003) seconds
+#   ThreeStageVisibilityTests passed: Executed 5 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   UndoHistoryTests passed: Executed 10 tests, with 0 failures (0 unexpected) in 0.626 (0.627) seconds
+#   UnreadableProjectTests passed: Executed 6 tests, with 1 test skipped and 0 failures (0 unexpected) in 2.847 (2.848) seconds
+#   VariantEntryGatingTests passed: Executed 21 tests, with 0 failures (0 unexpected) in 0.235 (0.237) seconds
+#   VariantRetentionTests passed: Executed 15 tests, with 0 failures (0 unexpected) in 0.067 (0.068) seconds
+#   ViewerTests passed: Executed 33 tests, with 0 failures (0 unexpected) in 0.341 (0.343) seconds
+# FILTER: (TopOptFlowsTests\.(BottomBarMeasurementTests|CoreBuildIdentityTests|FlexibleAngledGoldenRecorder|FlexibleAngledGoldenTests|FlexibleBatchBReviewTests|FlexibleBatchBReviewUXTests|FlexibleBatchCHookTests|FlexibleBatchCVerifyTests|FlexibleBatchM2Probe|FlexibleBatchM2Tests|FlexibleBatchM2VerifyTests|FlexibleBatchMDentTests|FlexibleBatchMGroupTests|FlexibleBatchMLegendTests|FlexibleBatchMProbe|FlexibleBatchMStressTests|FlexibleBatchMVerifyTests|FlexibleBatchMXrayTests|FlexibleBatchNEvidenceProbe|FlexibleBatchNProbe|FlexibleBatchNRefineTests|FlexibleBatchNVerifyTests|FlexibleCoreClaimTests|FlexibleCurveEditTests|FlexibleDepthPrismTests|FlexibleFEFieldTests|FlexibleFEPassPerfTests|FlexibleFEPassTests|FlexibleFEVerifyGTests|FlexibleGeometryOnlyLatticeTests|FlexibleGroupFieldPerfTests|FlexibleGroupPaletteEvidenceProbe|FlexibleGroupPaletteHostedTests|FlexibleGroupPaletteTests|FlexibleInPassCompositeTests|FlexibleLatticeEvidenceProbe|FlexibleLatticeFieldTests|FlexibleLatticeGradingTests|FlexibleLatticePassPerfTests|FlexibleLatticePassTests|FlexibleLatticeUnderReviewTests|FlexibleLatticeUnderTests|FlexibleLegendPlacementTests|FlexibleMainPageHookTests|FlexibleMainPageLoadsTests|FlexibleMainPageRound4HostedTests|FlexibleMainPageRound4Tests|FlexibleMainPageRound4VerifyTests|FlexibleMainStageTests|FlexibleMainViewsTests|FlexibleMergeR5SMTests|FlexibleOverlayClipTests|FlexibleOverlaySeamTests|FlexiblePinchTests|FlexiblePressFixturesTests|FlexiblePressProbeTripwireTests|FlexiblePressReframeTests|FlexiblePressReviewTests|FlexiblePressSaveTests|FlexibleReadinessTests|FlexibleRegionsTests|FlexibleRound5EvidenceProbe|FlexibleRound5SettingsHostedTests|FlexibleRound5SettingsTests|FlexibleRound5SettingsVerifyTests|FlexibleRound5SquishExitTests|FlexibleRowCopyTests|FlexibleSettingsMigrationTests|FlexibleSettingsPageHostedTests|FlexibleSettingsRound4Tests|FlexibleSettingsVerifyD1Tests|FlexibleShownValuesTests|FlexibleSqueezeGroupsModelTests|FlexibleSqueezeGroupsPressTests|FlexibleSqueezeGroupsReviewTests|FlexibleSqueezeGroupsReviewUITests|FlexibleSqueezeGroupsReviewUXTests|FlexibleSqueezeGroupsTests|FlexibleSqueezeGroupsUITests|FlexibleSquishCoarsenTests|FlexibleSquishEvidenceProbe|FlexibleSquishPerfProbe|FlexibleSquishPlayAllTests|FlexibleSquishPlayerTests|FlexibleSquishSolverTests|FlexibleSquishTests|FlexibleSquishVerifyGTests|FlexibleStageTests|FlexibleSurfaceNavTests|FrozenRegionAsMaterialTests|GroupViewEnforcementTests|GroupViewStateTests|LatticeActionBarTests|LatticeAutoDensityIsDerivedTests|LatticeBandChipsTests|LatticeBeamNetworkFactTests|LatticeDefaultGradePlanSwitchTests|LatticeDefaultGradePlanTests|LatticeDepthIsOneValueTests|LatticeDrawerCellIsTheBakesTests|LatticeDrawerScrubTests|LatticeGradeToSolidBandTests|LatticeGradingWiringTests|LatticeIncludeGateTests|LatticeLegendColourTests|LatticeModeTests|LatticeNamedNoOctetFallbackTests|LatticeOldRetainedRunTests|LatticePageRound2Tests|LatticePlanNotSentLineTests|LatticePreviewBodyAlphaTests|LatticePreviewDensityTests|LatticePreviewNoticeCaptionTests|LatticeProbeSamplingTests|LatticeProtectionFollowsSlabTests|LatticeRegionCapTests|LatticeRunSpecSharedTests|LatticeSampleRefreshTests|LatticeSectorOutlineTests|LatticeSettingsPersistTests|LatticeShellAndMarchAgreeTests|LatticeSimSolveTriggerTests|LatticeSolidFillTests|LatticeStageRepairEvidence|LatticeStaleTypeTests|LatticeSteppedCellListTests|LatticeStressTintTests|LatticeStructuralPrismProbe|LatticeStructuralRegionFloorTests|LatticeStructuralViewStateTests|LatticeTypeCatalogTests|LatticeTypeNoBandTests|LatticeTypeReadinessFromCoreTests|LatticeVariantFaceWallsTests|LatticeVariantTests|LatticeWizardOneLineCaptionTests|OrganicAutoGradeAndFreezeTests|OrganicCapsuleImpostorTests|OrganicDeadWallParityTests|OrganicForecastRouteTests|OrganicJobsCoreAcceptsTests|OrganicLookAndVisibilityTests|OrganicMainWiringTests|OrganicPreviewBakeInputsTests|OrganicPreviewMatchesTheJobTests|OrganicPreviewParameterParityTests|OrganicPreviewSpeedAndRimTests|OrganicRegionFillProbe|OrganicSizeCheckTests|OrganicSolidRimTests|OrganicSyntheticStressTests|OrganicWalk0907EveningTests|PageLeftModalPlacementTests|ProjectStoreTests|ProtectFreezeVsSolidityTests|SectorDensityTests|SmoothingPageRound2Tests|SmoothingPageTests|SmoothingRound3Tests|SmoothingRound4Tests|SmoothingViewerTests|StrutLineWidthTests|SurfaceCutDetentTests|SurfaceInputDisciplineTests|SurfacePencilToggleExemptionTests|SurfaceStageNoRegressionTests|SurfaceTapMeaningTests|ThreeStageVisibilityTests|UndoHistoryTests|UnreadableProjectTests|VariantEntryGatingTests|VariantRetentionTests|ViewerTests)|TopOptKitTests\.(BridgeGuardTests|FlexibleBridgeTests|FlexibleSliceProbe|FlexibleSquishFETests|FlexibleSquishModulusTests|FlexibleSquishStepsTests|FlexibleTimingProbe))/

@@ -1,0 +1,9 @@
+# R7-D2 follow-up — RED run: testAPickNeverOutlivesTheStage against 1c9ecdad's code (the test added, the source not yet changed), 2026-10-18 02:39
+# swift test --skip-build --scratch-path /tmp/r7d-build --filter FlexibleMainPrismEqualityTests/testAPickNeverOutlivesTheStage
+Test Case '-[TopOptFlowsTests.FlexibleMainPrismEqualityTests testAPickNeverOutlivesTheStage]' started.
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleMainPrismEqualityTests.swift:67: error: -[TopOptFlowsTests.FlexibleMainPrismEqualityTests testAPickNeverOutlivesTheStage] : XCTAssertTrue failed - ★ leaving the stage drops the pick
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleMainPrismEqualityTests.swift:71: error: -[TopOptFlowsTests.FlexibleMainPrismEqualityTests testAPickNeverOutlivesTheStage] : XCTAssertTrue failed - ★ a group picked on Topology is not the stage's pick
+Test Case '-[TopOptFlowsTests.FlexibleMainPrismEqualityTests testAPickNeverOutlivesTheStage]' failed (2.657 seconds).
+	 Executed 1 test, with 2 failures (0 unexpected) in 2.657 (2.657) seconds
+	 Executed 1 test, with 2 failures (0 unexpected) in 2.657 (2.657) seconds
+	 Executed 1 test, with 2 failures (0 unexpected) in 2.657 (2.658) seconds

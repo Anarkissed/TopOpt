@@ -1,0 +1,5 @@
+tap Face 5: popup (128.0, 132.0, 460.0, 115.0) · 'No lattice under Face 5 · set a face-prism' · fixes ["fix-go-to-lattice", "fix-rest-5"] · toast -
+tap Face 1: popup (128.0, 132.0, 460.0, 115.0) · 'No lattice under Face 1 · set a face-prism' · fixes ["fix-go-to-lattice", "fix-rest-1"] · toast -
+tap Face 2: popup (128.0, 132.0, 460.0, 115.0) · 'No lattice under Face 2 · set a face-prism' · fixes ["fix-go-to-lattice"] · toast -
+[Go to Lattice] clicked at (142.0, 190.0, 124.0, 43.0): left 1, exitUnchanged true
+Face 5 pressed: own lattice false · deepest 0.0 · issue 'No lattice under Face 5 · set a face-prism'

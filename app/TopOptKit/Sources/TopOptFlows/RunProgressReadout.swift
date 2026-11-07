@@ -74,60 +74,73 @@ public struct RunProgressReadout: View {
         return (etaLabel(remaining, bound: eta.bound), sinceEvent > staleAfter)
     }
 
+    /// ★ T5 (U4: "result", never "variant"): which of the results is being made.
     private var variantLine: String {
         let p = snapshot
-        return p.rungCount > 1 ? "Variant \(p.rung + 1) of \(p.rungCount)" : "Optimizing"
+        return p.rungCount > 1 ? "Result \(p.rung + 1) of \(p.rungCount)" : "Optimizing"
+    }
+
+    /// ★ T5: the run card's Step row — the result and its iteration (the mockup's "Scenario 2 of 3 · iteration 34").
+    private var stepLine: String {
+        let p = snapshot
+        return p.rungCount > 1 ? "Result \(p.rung + 1) of \(p.rungCount) \u{00B7} iteration \(p.iteration)" : "Iteration \(p.iteration)"
+    }
+
+    /// ★ T5 (mockup #topo-corner "running": "3:10 left · tap to view"): the corner button's line while a run goes — the hedged
+    /// time left once there is one.
+    @MainActor public static func buttonLine(_ model: RunModel, now: Date = Date()) -> String {
+        guard let eta = model.eta else { return "Tap to view" }
+        let remaining = Swift.max(0, eta.secondsRemaining - Swift.max(0, now.timeIntervalSinceReferenceDate - eta.asOf))
+        return timeLeft(remaining, bound: eta.bound) + " left \u{00B7} tap to view"
+    }
+
+    /// The time left in words, always hedged (handoff 111): "up to 42 min" while it is an upper bound, "about 42 min" once
+    /// it is built on finished results.
+    static func timeLeft(_ secs: TimeInterval, bound: RunETA.Bound) -> String {
+        let mag = coarse(secs)
+        switch bound {
+        case .upper: return secs < 60 ? "under a minute" : "up to \(mag)"
+        case .approximate: return secs < 60 ? "under a minute" : "about \(mag)"
+        }
     }
 
     // MARK: full block (running card + drawer)
 
+    /// ★ LOOK PER SCREEN (T5, mockup .running): "Optimizing" with its ring, then Step · Elapsed · Time left (13 pt, the label
+    /// secondary, the value at the right), then the bar.
     @ViewBuilder private func fullBlock(now: Date) -> some View {
-        VStack(alignment: .leading, spacing: DS.Space.m) {
-            HStack(spacing: DS.Space.s) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
                 ProgressView().controlSize(.small).tint(DS.Color.accent.color)
-                Text(variantLine)
-                    .dsStyle(DS.TypeScale.title)
-                    .foregroundStyle(DS.Color.textPrimary.color)
+                Text("Optimizing").font(.system(size: 20, weight: .bold)).foregroundStyle(DS.Color.textPrimary.color)
             }
-
-            Text("SIMP iteration \(snapshot.iteration)")
-                .dsStyle(DS.TypeScale.body)
-                .foregroundStyle(DS.Color.textSecondary.color)
-                .monospacedDigit()
-
-            // DISCRETE, honest bar: completed variants / total. Flat within a rung.
-            if snapshot.rungCount > 1 {
-                ProgressBar(value: snapshot.rungFractionComplete)
-                    .frame(maxWidth: 320)
-            }
-
             let eta = etaDisplay(now)
+            statRow(label: "Step", value: stepLine)
             statRow(label: "Elapsed", value: clock(elapsed(now)))
-            statRow(label: "Est. remaining", value: eta?.text ?? "estimating…",
-                    estimate: true, dim: eta?.dim ?? false)
-
-            Text("SIMP · \(resolution)³ voxel grid · \(materialName)")
-                .dsStyle(DS.TypeScale.caption2)
-                .foregroundStyle(DS.Color.textTertiary.color)
+            statRow(label: "Time left", value: eta?.text ?? "estimating\u{2026}", dim: eta?.dim ?? false)
+            // DISCRETE, honest bar: completed results / total. Flat within a rung (handoff 086).
+            if snapshot.rungCount > 1 {
+                GeometryReader { g in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.white.opacity(0.12))
+                        Capsule().fill(DS.Color.accent.color).frame(width: g.size.width * snapshot.rungFractionComplete)
+                    }
+                }
+                .frame(height: 6)
+            }
         }
     }
 
-    private func statRow(label: String, value: String, estimate: Bool = false,
-                         dim: Bool = false) -> some View {
+    private func statRow(label: String, value: String, dim: Bool = false) -> some View {
         HStack(spacing: DS.Space.s) {
-            Text(label)
-                .dsStyle(DS.TypeScale.footnote)
-                .foregroundStyle(DS.Color.textTertiary.color)
+            Text(label).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
             Spacer(minLength: DS.Space.l)
-            Text(value)
-                .dsStyle(DS.TypeScale.bodyStrong)
-                .foregroundStyle((estimate ? DS.Color.textSecondary : DS.Color.textPrimary).color)
+            Text(value).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
                 .monospacedDigit()
-                // The ETA fades when the stream stalls past the freshness threshold —
+                // The time left fades when the stream stalls past the freshness threshold —
                 // it dims WITH the staleness rather than lying with a crisp number.
                 .opacity(dim ? 0.4 : 1)
         }
-        .frame(maxWidth: 320)
     }
 
     // MARK: compact line (the pill)
@@ -152,14 +165,7 @@ public struct RunProgressReadout: View {
     /// (no rung has finished, built on the iteration cap), "~ …" once it's a live
     /// approximation (built on observed iterations-per-rung). Never a bare precise time.
     private func etaLabel(_ secs: TimeInterval, bound: RunETA.Bound) -> String {
-        let mag = coarse(secs)                       // "42 min" / "under a minute"
-        let underMinute = secs < 60
-        switch bound {
-        case .upper:
-            return underMinute ? "≤ under a minute" : "≤ about \(mag) left"
-        case .approximate:
-            return underMinute ? "~ under a minute" : "~\(mag) left"
-        }
+        Self.timeLeft(secs, bound: bound)   // ★ T5: the row says "Time left"; the hedge is in words ("up to" / "about")
     }
 
     /// Elapsed as `M:SS` (or `H:MM:SS` past an hour) — exact, monospaced.
@@ -171,7 +177,7 @@ public struct RunProgressReadout: View {
     }
 
     /// The ETA magnitude, rounded to friendly units — never spuriously precise.
-    private func coarse(_ t: TimeInterval) -> String {
+    private static func coarse(_ t: TimeInterval) -> String {
         if t < 60 { return "under a minute" }
         let totalMin = Int((t / 60).rounded())
         if totalMin < 60 { return "\(totalMin) min" }

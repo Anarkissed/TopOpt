@@ -1,0 +1,7 @@
+BEND bcc: cell S=5.0 mm, vpc=12, cantilever 6 cells long, target rho 0.30 -> periodic cell rho 0.2778 (r/L 0.13608, 3.3 vox/strut), C11=260.80 C12=173.73 C44=153.18 Zener=3.518
+  [writing /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/bendx/bcc/bcc_bend.csv]
+    nc=7  block rho 0.2778  K_res 3517.5577  K_hom 3665.4532  err +4.20 %  dof 1582275  21273 ms  NO-GO
+    nc=8  block rho 0.2778  K_res 5062.0954  K_hom 5222.9549  err +3.18 %  dof 2060571  29488 ms  NO-GO
+    nc=9  block rho 0.2778  K_res 6874.7939  K_hom 7045.1036  err +2.48 %  dof 2601939  40542 ms  NO-GO
+    nc=10  block rho 0.2778  K_res 8949.0894  K_hom 9126.1217  err +1.98 %  dof 3206379  51559 ms  GO
+    nc=12  block rho 0.2778  K_res 13872.5697  K_hom 14056.3135  err +1.32 %  dof 4604475  80330 ms  GO

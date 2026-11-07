@@ -194,10 +194,7 @@ final class Round6EvidenceCaptureTests: XCTestCase {
             XCTFail("ImageRenderer produced no image for \(name)")
             return
         }
-        var dir = URL(fileURLWithPath: #filePath)
-        for _ in 0..<5 { dir.deleteLastPathComponent() }
-        dir.appendPathComponent("docs/handoffs/assets", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dir = EvidenceOut.dir("docs/handoffs/assets")   // never the tracked copy unless asked (11-06)
         let url = dir.appendingPathComponent(name)
         guard let dest = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil) else {
             XCTFail("could not create destination for \(name)")

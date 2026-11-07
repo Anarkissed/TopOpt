@@ -17,6 +17,8 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <map>
+#include <queue>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -725,6 +727,336 @@ bool load_path_connected(const VoxelGrid& grid,
   return walk_load_path(grid, density, iso).connected;
 }
 
+// ── CORE LIST items 41 + 47: the printed material as bodies (voxel.hpp) ──────
+PrintedBodies printed_bodies(const VoxelGrid& grid,
+                             const std::vector<double>& density, double iso) {
+  if (density.size() != grid.voxel_count())
+    throw std::invalid_argument(
+        "printed_bodies: density size != grid.voxel_count()");
+  const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
+  PrintedBodies pb;
+  pb.body_of_voxel.assign(grid.voxel_count(), -1);
+  // Decidable exactly when the load-path belt is: BOTH a Load and a Fixture voxel
+  // exist. A self-weight run (no load faces) keeps today's single largest shell.
+  bool any_load = false, any_anchor = false;
+  for (const VoxelTag t : grid.tags) {
+    if (t == VoxelTag::Load) any_load = true;
+    if (t == VoxelTag::Fixture) any_anchor = true;
+  }
+  pb.decidable = any_load && any_anchor;
+  auto printed_at = [&](std::size_t idx) {
+    return grid.tags[idx] != VoxelTag::Empty && density[idx] > iso;
+  };
+  std::vector<std::size_t> stack;
+  for (std::size_t seed = 0; seed < grid.voxel_count(); ++seed) {
+    if (pb.body_of_voxel[seed] >= 0 || !printed_at(seed)) continue;
+    const int id = static_cast<int>(pb.bodies.size());
+    pb.bodies.emplace_back();
+    PrintedBody& body = pb.bodies.back();
+    pb.body_of_voxel[seed] = id;
+    stack.assign(1, seed);
+    while (!stack.empty()) {
+      const std::size_t idx = stack.back();
+      stack.pop_back();
+      ++body.voxels;
+      if (grid.tags[idx] == VoxelTag::Load) ++body.load_voxels;
+      if (grid.tags[idx] == VoxelTag::Fixture) ++body.anchor_voxels;
+      const int i = static_cast<int>(idx % static_cast<std::size_t>(nx));
+      const int j = static_cast<int>((idx / static_cast<std::size_t>(nx)) %
+                                     static_cast<std::size_t>(ny));
+      const int k = static_cast<int>(idx / (static_cast<std::size_t>(nx) *
+                                            static_cast<std::size_t>(ny)));
+      for (int dk = -1; dk <= 1; ++dk)
+        for (int dj = -1; dj <= 1; ++dj)
+          for (int di = -1; di <= 1; ++di) {
+            const int ni = i + di, nj = j + dj, nk = k + dk;
+            if (ni < 0 || nj < 0 || nk < 0 || ni >= nx || nj >= ny || nk >= nz)
+              continue;
+            const std::size_t nidx = grid.index(ni, nj, nk);
+            if (pb.body_of_voxel[nidx] >= 0 || !printed_at(nidx)) continue;
+            pb.body_of_voxel[nidx] = id;
+            stack.push_back(nidx);
+          }
+    }
+  }
+  return pb;
+}
+
+BodyShells carrying_body_shells(const TriangleMesh& raw, const VoxelGrid& grid,
+                                const PrintedBodies& bodies) {
+  BodyShells out;
+  const TriangleMesh clean = clean_degenerate_triangles(raw);
+  if (clean.triangles.empty()) return out;
+  int comps = 0;
+  const std::vector<int> root = triangle_component_roots(clean, comps);
+  // The largest shell, with keep_largest_component's tie-break (the smallest
+  // root among those holding the most triangles).
+  std::vector<int> tri_count(clean.triangles.size(), 0);
+  for (int r : root) ++tri_count[static_cast<std::size_t>(r)];
+  int best_root = -1;
+  for (std::size_t r = 0; r < tri_count.size(); ++r)
+    if (tri_count[r] > 0 &&
+        (best_root < 0 || tri_count[r] > tri_count[static_cast<std::size_t>(best_root)]))
+      best_root = static_cast<int>(r);
+
+  std::vector<char> keep(clean.triangles.size(), 0);
+  bool same = true;
+  if (bodies.decidable) {
+    // Each vertex votes for the nearest printed voxel centre near it.
+    const double h = grid.spacing;
+    std::vector<int> vertex_body(clean.vertices.size(), -1);
+    for (std::size_t vi = 0; vi < clean.vertices.size(); ++vi) {
+      const Vec3& p = clean.vertices[vi];
+      const double u[3] = {(p.x - grid.origin.x) / h - 0.5,
+                           (p.y - grid.origin.y) / h - 0.5,
+                           (p.z - grid.origin.z) / h - 0.5};
+      const int c[3] = {static_cast<int>(std::lround(u[0])),
+                        static_cast<int>(std::lround(u[1])),
+                        static_cast<int>(std::lround(u[2]))};
+      double best_d2 = std::numeric_limits<double>::infinity();
+      for (int dk = -1; dk <= 1; ++dk)
+        for (int dj = -1; dj <= 1; ++dj)
+          for (int di = -1; di <= 1; ++di) {
+            const int i = c[0] + di, j = c[1] + dj, k = c[2] + dk;
+            if (i < 0 || j < 0 || k < 0 || i >= grid.nx || j >= grid.ny ||
+                k >= grid.nz)
+              continue;
+            const int b = bodies.body_of_voxel[grid.index(i, j, k)];
+            if (b < 0) continue;
+            const double d2 = (u[0] - i) * (u[0] - i) + (u[1] - j) * (u[1] - j) +
+                              (u[2] - k) * (u[2] - k);
+            if (d2 < best_d2) {
+              best_d2 = d2;
+              vertex_body[vi] = b;
+            }
+          }
+    }
+    // Each shell goes to the body most of its vertices voted for (the smallest
+    // body id on a tie). Tallied per shell, not per triangle.
+    std::vector<int> shell_index(clean.triangles.size(), -1);
+    std::vector<int> shell_root;
+    for (std::size_t r = 0; r < tri_count.size(); ++r)
+      if (tri_count[r] > 0) {
+        shell_index[r] = static_cast<int>(shell_root.size());
+        shell_root.push_back(static_cast<int>(r));
+      }
+    std::vector<std::map<int, int>> tally(shell_root.size());
+    for (std::size_t t = 0; t < clean.triangles.size(); ++t) {
+      std::map<int, int>& m =
+          tally[static_cast<std::size_t>(shell_index[static_cast<std::size_t>(root[t])])];
+      for (int w = 0; w < 3; ++w) {
+        const int b = vertex_body[static_cast<std::size_t>(clean.triangles[t][w])];
+        if (b >= 0) ++m[b];
+      }
+    }
+    std::vector<int> shell_body(clean.triangles.size(), -1);
+    for (std::size_t s = 0; s < shell_root.size(); ++s) {
+      int best = -1, best_n = 0;
+      for (const auto& kv : tally[s])
+        if (kv.second > best_n) {
+          best_n = kv.second;
+          best = kv.first;
+        }
+      shell_body[static_cast<std::size_t>(shell_root[s])] = best;
+    }
+    // Per carrying body, its largest shell.
+    std::vector<int> body_shell(bodies.bodies.size(), -1);
+    for (std::size_t r = 0; r < shell_body.size(); ++r) {
+      const int b = shell_body[r];
+      if (b < 0 || !bodies.bodies[static_cast<std::size_t>(b)].carries()) continue;
+      int& s = body_shell[static_cast<std::size_t>(b)];
+      if (s < 0 || tri_count[r] > tri_count[static_cast<std::size_t>(s)])
+        s = static_cast<int>(r);
+    }
+    for (std::size_t b = 0; b < bodies.bodies.size(); ++b) {
+      if (!bodies.bodies[b].carries()) {
+        ++out.specks_dropped;
+        out.speck_voxels += bodies.bodies[b].voxels;
+        continue;
+      }
+      if (body_shell[b] < 0) {
+        ++out.bodies_without_shell;
+        continue;
+      }
+      keep[static_cast<std::size_t>(body_shell[b])] = 1;
+      ++out.bodies_exported;
+    }
+    // No carrying body has a shell (a field whose tagged voxels are not printed):
+    // nothing to tell apart, so the largest shell, as before.
+    same = out.bodies_exported == 0 ||
+           (out.bodies_exported == 1 && keep[static_cast<std::size_t>(best_root)]);
+  }
+  if (same) {
+    std::fill(keep.begin(), keep.end(), 0);
+    keep[static_cast<std::size_t>(best_root)] = 1;
+  }
+  out.same_as_largest = same;
+  out.mesh = rebuild_from_components(clean, root, keep);
+  return out;
+}
+
+LostAnchors lost_anchored_pieces(const VoxelGrid& grid, const PrintedBodies& as_drawn,
+                                 const PrintedBodies& design) {
+  LostAnchors lost;
+  bool any_load = false;
+  for (const VoxelTag t : grid.tags)
+    if (t == VoxelTag::Load) {
+      any_load = true;
+      break;
+    }
+  if (!any_load) return lost;
+  std::vector<char> counted(design.bodies.size(), 0);
+  for (std::size_t idx = 0; idx < grid.voxel_count(); ++idx) {
+    if (grid.tags[idx] != VoxelTag::Fixture) continue;
+    const int a = as_drawn.body_of_voxel[idx];
+    const int d = design.body_of_voxel[idx];
+    if (a < 0 || d < 0) continue;  // not part material as drawn, or carved away
+    if (as_drawn.bodies[static_cast<std::size_t>(a)].load_voxels == 0) continue;
+    if (design.bodies[static_cast<std::size_t>(d)].load_voxels > 0) continue;
+    lost.fixture_voxels.push_back(idx);
+    if (!counted[static_cast<std::size_t>(d)]) {
+      counted[static_cast<std::size_t>(d)] = 1;
+      lost.design_bodies.push_back(d);
+      lost.voxels += design.bodies[static_cast<std::size_t>(d)].voxels;
+    }
+  }
+  return lost;
+}
+
+BridgeResult bridge_split_bodies(const VoxelGrid& grid, std::vector<double>& density,
+                                 double iso, const PrintedBodies& as_drawn,
+                                 const std::vector<char>& allowed, int radius) {
+  BridgeResult out;
+  if (density.size() != grid.voxel_count() || allowed.size() != grid.voxel_count())
+    throw std::invalid_argument("bridge_split_bodies: size != grid.voxel_count()");
+  if (!as_drawn.decidable) return out;
+  const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
+  auto decode = [&](std::size_t idx, int& i, int& j, int& k) {
+    i = static_cast<int>(idx % static_cast<std::size_t>(nx));
+    j = static_cast<int>((idx / static_cast<std::size_t>(nx)) % static_cast<std::size_t>(ny));
+    k = static_cast<int>(idx / (static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny)));
+  };
+  // Per as-drawn body, repeat until its carrying design bodies are one.
+  for (int guard = 0; guard < 64; ++guard) {
+    const PrintedBodies design = printed_bodies(grid, density, iso);
+    // The as-drawn body each carrying design body belongs to (by its BC voxels).
+    std::vector<int> group(design.bodies.size(), -1);
+    for (std::size_t idx = 0; idx < grid.voxel_count(); ++idx) {
+      const VoxelTag t = grid.tags[idx];
+      if (t != VoxelTag::Load && t != VoxelTag::Fixture) continue;
+      const int d = design.body_of_voxel[idx], a = as_drawn.body_of_voxel[idx];
+      if (d >= 0 && a >= 0 && group[static_cast<std::size_t>(d)] < 0)
+        group[static_cast<std::size_t>(d)] = a;
+    }
+    // The first as-drawn group with more than one design body: its largest body
+    // is the source, its other bodies the targets.
+    int g = -1, source = -1;
+    std::vector<char> target(design.bodies.size(), 0);
+    for (std::size_t b = 0; b < design.bodies.size() && g < 0; ++b) {
+      if (group[b] < 0) continue;
+      int members = 0;
+      for (std::size_t c = 0; c < design.bodies.size(); ++c) members += group[c] == group[b];
+      if (members > 1) g = group[b];
+    }
+    if (g < 0) break;
+    for (std::size_t b = 0; b < design.bodies.size(); ++b) {
+      if (group[b] != g) continue;
+      if (source < 0 || design.bodies[b].voxels >
+                            design.bodies[static_cast<std::size_t>(source)].voxels)
+        source = static_cast<int>(b);
+    }
+    for (std::size_t b = 0; b < design.bodies.size(); ++b)
+      target[b] = group[b] == g && static_cast<int>(b) != source;
+    // Dijkstra from the source body through allowed voxels to the nearest target.
+    std::vector<double> dist(grid.voxel_count(), std::numeric_limits<double>::infinity());
+    std::vector<long long> prev(grid.voxel_count(), -1);
+    using Item = std::pair<double, std::size_t>;
+    std::priority_queue<Item, std::vector<Item>, std::greater<Item>> pq;
+    for (std::size_t idx = 0; idx < grid.voxel_count(); ++idx)
+      if (design.body_of_voxel[idx] == source) {
+        dist[idx] = 0.0;
+        pq.push({0.0, idx});
+      }
+    long long hit = -1;
+    while (!pq.empty()) {
+      const auto [d, idx] = pq.top();
+      pq.pop();
+      if (d > dist[idx]) continue;
+      const int b = design.body_of_voxel[idx];
+      if (b >= 0 && target[static_cast<std::size_t>(b)]) {
+        hit = static_cast<long long>(idx);
+        break;
+      }
+      int i, j, k;
+      decode(idx, i, j, k);
+      for (int dk = -1; dk <= 1; ++dk)
+        for (int dj = -1; dj <= 1; ++dj)
+          for (int di = -1; di <= 1; ++di) {
+            if (!di && !dj && !dk) continue;
+            const int ni = i + di, nj = j + dj, nk = k + dk;
+            if (ni < 0 || nj < 0 || nk < 0 || ni >= nx || nj >= ny || nk >= nz) continue;
+            const std::size_t n = grid.index(ni, nj, nk);
+            const int nb = design.body_of_voxel[n];
+            const bool passable = (nb >= 0 && (nb == source || target[static_cast<std::size_t>(nb)])) ||
+                                  (allowed[n] && grid.tags[n] != VoxelTag::Empty);
+            if (!passable) continue;
+            const double step = std::sqrt(static_cast<double>(di * di + dj * dj + dk * dk));
+            const double nd = d + (nb >= 0 ? 0.0 : step);  // bodies are free to cross
+            if (nd < dist[n]) {
+              dist[n] = nd;
+              prev[n] = static_cast<long long>(idx);
+              pq.push({nd, n});
+            }
+          }
+    }
+    if (hit < 0) {
+      // No path inside the allowed space: this group stays split, and a second pass
+      // would find the same group first, so stop (the belt and item 47 judge it).
+      ++out.groups_left_split;
+      break;
+    }
+    // Lay the path, thickened by `radius` voxels within the allowed space.
+    LaidBridge b;
+    for (long long v = hit; v >= 0; v = prev[static_cast<std::size_t>(v)]) {
+      if (design.body_of_voxel[static_cast<std::size_t>(v)] < 0)
+        b.path.push_back(static_cast<std::size_t>(v));
+    }
+    const int joined = design.body_of_voxel[static_cast<std::size_t>(hit)];
+    for (std::size_t idx = 0; idx < grid.voxel_count(); ++idx)
+      if (design.body_of_voxel[idx] == joined) b.target.push_back(idx);
+    out.voxels += lay_bridge(grid, density, iso, allowed, b, radius);
+    out.laid.push_back(std::move(b));
+    ++out.bridges;
+  }
+  return out;
+}
+
+long long lay_bridge(const VoxelGrid& grid, std::vector<double>& density, double iso,
+                     const std::vector<char>& allowed, LaidBridge& b, int radius) {
+  const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
+  long long printed = 0;
+  for (const std::size_t p : b.path) {
+    const int i = static_cast<int>(p % static_cast<std::size_t>(nx));
+    const int j = static_cast<int>((p / static_cast<std::size_t>(nx)) % static_cast<std::size_t>(ny));
+    const int k = static_cast<int>(p / (static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny)));
+    for (int dk = -radius; dk <= radius; ++dk)
+      for (int dj = -radius; dj <= radius; ++dj)
+        for (int di = -radius; di <= radius; ++di) {
+          const int ni = i + di, nj = j + dj, nk = k + dk;
+          if (ni < 0 || nj < 0 || nk < 0 || ni >= nx || nj >= ny || nk >= nz) continue;
+          const std::size_t n = grid.index(ni, nj, nk);
+          if (!(n == p || (allowed[n] && grid.tags[n] != VoxelTag::Empty))) continue;
+          if (density[n] < 1.0) {
+            if (!(density[n] > iso)) ++printed;
+            b.laid.push_back({n, density[n]});
+            density[n] = 1.0;
+          }
+        }
+  }
+  b.radius = radius;
+  return printed;
+}
+
 V3Report check_v3(const VoxelGrid& grid, const std::vector<double>& density,
                   double iso) {
   if (density.size() != grid.voxel_count())
@@ -812,6 +1144,16 @@ V3Report check_v3(const VoxelGrid& grid, const std::vector<double>& density,
       keep_largest_and_marked_components(raw, vertex_frozen, extra);
   r.load_fixture_islands = extra;
   r.mesh = extra == 0 ? std::move(marked) : keep_largest_component(raw);
+  // CORE LIST item 41 — the shells the export carries: every body holding an
+  // anchor or a load, not just the largest. Kept apart from `mesh` (see voxel.hpp).
+  {
+    BodyShells shells =
+        carrying_body_shells(raw, grid, printed_bodies(grid, density, iso));
+    r.bodies_exported = shells.same_as_largest ? 1 : shells.bodies_exported;
+    r.specks_dropped = shells.specks_dropped;
+    r.speck_voxels = shells.speck_voxels;
+    if (!shells.same_as_largest) r.export_mesh = std::move(shells.mesh);
+  }
   r.watertight = check_watertight(r.mesh);
   r.mesh_components = count_components(r.mesh);
 

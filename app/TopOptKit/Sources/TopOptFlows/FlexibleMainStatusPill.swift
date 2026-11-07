@@ -1,0 +1,422 @@
+// FlexibleMainStatusPill — the main page's bottom-bar pill under Flexible (task
+// 2026-09-29-flexible-screens, round 3 batch B, item 7.1; hook H10).
+//
+// ★ NO OCTET "LATTICE" RUN UNDER FLEXIBLE. The bottom bar's `latticeThisButton` ("Lattice ·
+// nothing set to lattice") is replaced, only when the project is Flexible, by this pill in
+// the same slot and stature: "Lattice" over one line — "Ready", "Building…", the shape-only
+// label, a failed build's words, or the ONE thing to fix in its short pill form
+// (FlexibleIssue.pill — the whole sentence is on the pop-up it opens).
+// ★ ROUND 4 (C2 — his img 6 and answer 2: "the large bottom buttons are for exports and
+// starting the actual core process. So when Lattice Ready shows, tapping it should send to Core
+// and the export path"): Ready → core's Flexible runner and the Export step
+// (FlexibleMainStage.pillTapped → FlexibleCoreRun); the one thing to fix → Settings on its
+// pop-up; building → nothing opens. It used to open Settings on EVERY tap, a ready lattice
+// included — his img 6.
+// ★ C2 VERIFICATION: a PREVIEW tone — the lattice preview is built, but core can't take the job
+// as it stands (his pinch, two squeeze groups, a calibrate-first filament): never the Ready
+// green; its tap opens the Export step on why and what core CAN run. `goToLattice` (H10): on
+// another stage "Building…" (and a Ready his edits there made stale) takes him to the Lattice
+// stage, where builds start.
+//
+// Also here: the Flexible view toggles (H5 — Dent heat, Stress, Lattice; ★ S1b: [Prisms]; ★ R7-V: X-ray and Play,
+// icons only) and the main page's squish player slot (★ R7-V: only with Play).
+
+import SwiftUI
+import TopOptDesign
+
+public struct FlexibleMainStatusPill: View {
+    @ObservedObject var main: FlexibleMainStage
+    let open: () -> Void
+    let goToLattice: () -> Void
+
+    public init(main: FlexibleMainStage, open: @escaping () -> Void, goToLattice: @escaping () -> Void = {}) {
+        self.main = main
+        self.open = open
+        self.goToLattice = goToLattice
+    }
+
+    public var body: some View {
+        // the model's own changes (designs landing, the build) redraw ONLY this pill
+        if let m = main.model {
+            FlexibleMainStatusPillBody(model: m, main: main, open: open, goToLattice: goToLattice)
+        } else {
+            Self.pill(FlexibleMainStatus.of(model: nil), action: open)
+        }
+    }
+
+    /// The pill's fill: the Ready green only when core can take the job (★ C2 VERIFICATION).
+    static func fill(_ t: FlexibleMainStatus.Tone) -> RGBA {
+        t == .ready ? FlexibleStageStyle.accentToken : DS.Color.fillDisabled
+    }
+    /// Its outline: warning for a fix, the green for a preview (the preview is good; core can't
+    /// take it yet), the panel's otherwise.
+    static func stroke(_ t: FlexibleMainStatus.Tone) -> RGBA {
+        switch t {
+        case .fix, .blocked: return DS.Color.warning   // ★ M1 VERIFY: blocked (no face-prism) is said in the warning colour
+        case .preview: return FlexibleStageStyle.accentToken
+        default: return DS.Color.strokePanel
+        }
+    }
+
+    /// ★ M1 VERIFY: `disabled` — ruling 4's "Export disabled with a stated reason" (no face-prism, on the main page): no tap,
+    /// greyed by the disabled style, its line the reason (no extra fade — looking found the line too faint to read at 0.7).
+    static func pill(_ s: FlexibleMainStatus, disabled: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 1) {
+                HStack(spacing: 6) {
+                    if s.tone == .building { ProgressView().controlSize(.mini).tint(DS.Color.textPrimary.color) }
+                    if s.tone == .fix || s.tone == .blocked { Image(systemName: "exclamationmark.circle.fill").font(.system(size: 12, weight: .bold)) }
+                    Text("Lattice").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
+                }
+                Text(s.line)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .lineLimit(1).truncationMode(.tail)
+                    .frame(maxWidth: 300)
+                    .opacity(0.85)
+                    .accessibilityIdentifier("flexible-status-line")
+            }
+            .foregroundStyle(DS.Color.textPrimary.color)
+            .padding(.vertical, 11).padding(.horizontal, DS.Space.xl3)
+            .background(Capsule().fill(fill(s.tone).color)
+                .overlay(Capsule().strokeBorder(stroke(s.tone).color, lineWidth: s.tone == .ready ? 0 : 1)))
+            .dsShadow(s.tone == .ready ? DS.Shadow.accentGlow : DS.Shadow.panel)
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .accessibilityIdentifier("flexible-status-pill")
+    }
+}
+
+private struct FlexibleMainStatusPillBody: View {
+    @ObservedObject var model: FlexibleStageModel
+    @ObservedObject var main: FlexibleMainStage
+    @ObservedObject var run: FlexibleCoreRun
+    let open: () -> Void
+    let goToLattice: () -> Void
+
+    init(model: FlexibleStageModel, main: FlexibleMainStage, open: @escaping () -> Void, goToLattice: @escaping () -> Void) {
+        self.model = model; self.main = main; self._run = ObservedObject(wrappedValue: main.coreRun)
+        self.open = open; self.goToLattice = goToLattice
+    }
+
+    var body: some View {
+        // ★ C2: while core runs the job, the pill says so (a tap shows the run)
+        let s = FlexibleMainStatus.of(model: model).whileSending(run.isSending)
+        FlexibleMainStatusPill.pill(s, disabled: FlexibleMainStatusPill.disabled(s, visible: main.visible)) {   // ★ M1 VERIFY
+            main.pillTapped(s, open: open, goToLattice: goToLattice)
+        }
+    }
+}
+
+/// H5 / H5': the main Flexible page's views, where `viewModeToggles` sits (below the gizmo, on
+/// `edge`) — the same 40 pt buttons. ★ ROUND 4 (C2, his img 5): Dent heat, Stress, Lattice.
+/// The Lattice button shows / hides the lattice, or — with nothing to show — opens Settings, whose Exit turns the view on
+/// (`openSettings`, H5's closure). The "Lattice ready" note sits on the row's line, left of the buttons
+/// (FlexibleMainNoteView — ★ C2 verification: it was under the row);
+/// ★ BATCH C VERIFICATION: Stress and Dent heat are the two colourings of the pressed map — one
+/// at a time (FlexibleMainStage.toggleStress); Stress leaves X-ray and the lattice alone.
+/// ★ STRESS IS SOLVED DIRECTLY (item T): `solver` is the workspace's own FlexibleStressSolver
+/// (latticeSim + the regions the load case reaches), never `startStressSolveIfNeeded` (gated on
+/// `lattice.enabled && needsStressSolve`, which a fresh Flexible part never passes). While it
+/// solves the button spins; the Stress legend says "Simulating…" — once (the #354 banner and a
+/// caption under this row said it too: four times).
+/// ★ ROUND 7, R7-V (his img1 and img5, 2026-10-14: "All view buttons should be icons - never full words. Remove the two
+/// full worded view icons. I've decided against them. Instead, add a Play button icon" … "Please re-add the x-ray view
+/// icon."): ICONS ONLY — batch V's two worded settings are gone (their behaviours fixed: FlexibleMainPickSession); X-RAY
+/// is its own icon again (off by default: the opaque model — C2 and M6 reversed) and PLAY is a view (off on open: no bar,
+/// the model at rest). Six 40 pt icons: one line where it fits beside the note, else three over three.
+public struct FlexibleMainViewToggles: View {
+    @ObservedObject var main: FlexibleMainStage
+    let solver: FlexibleStressSolver?
+    /// ★ C2: H5 hands the workspace's "open Settings" over (the Lattice button with nothing to show).
+    let openSettings: () -> Void
+
+    public init(main: FlexibleMainStage, solver: FlexibleStressSolver? = nil, openSettings: @escaping () -> Void = {}) {
+        self.main = main
+        self.solver = solver
+        self.openSettings = openSettings
+    }
+
+    static let heatIcon = "thermometer.medium"
+    static let stressIcon = "waveform.path.ecg"
+    /// ★ R7-V: the X-ray icon (the glyph C2 removed) and the Play icon.
+    static let xrayIcon = "square.stack.3d.up"
+    static let playIcon = "play.fill"
+    /// ★ S1b (round 6 item 3): Dent heat, Stress, Lattice and [Prisms] (the Settings page's own button and glyph);
+    /// ★ R7-V: X-ray and Play.
+    static let buttons = 6
+    /// ★ ROUND 7, R7-D1 (his pick 1: "everything from A2 is great" — A2's views row): Heat, Stress, X-ray, Lattice, Prisms,
+    /// Play, 44 pt each (his rule: 44 pt targets), 8 apart. X1's rules stay: no view turns X-ray on.
+    public enum Kind: Equatable, Sendable { case heat, stress, xray, lattice, prisms, play }
+    /// Test control only: R7-V's order.
+    @MainActor static var controlR7VOrder = false
+    @MainActor static var order: [Kind] {
+        controlR7VOrder ? [.heat, .stress, .lattice, .prisms, .xray, .play] : [.heat, .stress, .xray, .lattice, .prisms, .play]
+    }
+    /// Test control only (R7-V review): the first build's Play status — a mini spinner while the sims work, nothing for a
+    /// failure.
+    @MainActor static var controlMiniSpinner = false
+
+    // ★ a thermometer reads "heat" (the stacked-layers glyph did not — batch B review)
+    private var heatButton: some View {
+        // ★ ROUND 7 (F, his answer 13): a tap = the selected group's heat or none; a 3 s HOLD = every group's (the mark of
+        // his groups' colours on it, as on the Squish page)
+        FlexibleViewButton(icon: main.heat && main.heatAll ? "thermometer.high" : FlexibleMainViewToggles.heatIcon, label: "Dent heat",
+                           on: main.heatIconLit, action: { main.toggleHeat() }, onLongPress: { main.heatHeld() })   // ★ R: lit only with something to heat
+            .overlay(alignment: .topTrailing) {
+                if main.heatAllBadgeShown, let m = main.model { FlexibleHeatAllBadge(colours: FlexibleStageViews.glyphColours(model: m)) }
+            }
+            .unavailable(!main.heatAvailable || main.attach.active)   // ★ M1 VERIFY: no face-prism — nothing to heat; ★ R: …nor with no squeeze group
+            .accessibilityIdentifier("flexible-main-view-heat")
+    }
+    private var stressButton: some View {
+        FlexibleViewButton(icon: FlexibleMainViewToggles.stressIcon, label: main.stressRunning ? "Simulating…" : "Stress",
+                           on: main.stress && main.viewsAvailable) { main.toggleStress() }
+            .overlay {
+                if main.stressRunning, main.stress {
+                    ProgressView().controlSize(.small).tint(DS.Color.textPrimary.color).allowsHitTesting(false)
+                }
+            }
+            .unavailable(!main.viewsAvailable || main.attach.active)   // ★ M1 VERIFY
+            .accessibilityIdentifier("flexible-main-view-stress")
+    }
+    // ★ C2: shows / hides the lattice — or, with nothing to show, opens Settings. ★ ROUND 7, X1: a plain show / hide, lit by
+    // his view; it never turns X-ray on (R7-V's "lit while its walls are seen … turns X-ray on", reversed by his Q9 answer)
+    private var latticeButton: some View {
+        FlexibleViewButton(icon: "cube.transparent", label: "Lattice", on: main.latticeIconLit) {
+            main.latticeButtonTapped(openSettings: openSettings)
+        }
+            .unavailable(!main.viewsAvailable || main.attach.active)   // ★ M1 VERIFY: no face-prism — no lattice can come (the Squish page cannot make one)
+            .accessibilityIdentifier("flexible-main-view-lattice")
+    }
+    // ★ S1b (round 6 item 3 — his img3: "a view that turns on/off ALL squish prisms"): every pressed face's prism,
+    // faint, with its mm; ★ ROUND 7, X1: it no longer turns X-ray on (R7-V's rule, reversed)
+    private var prismsButton: some View {
+        FlexibleViewButton(icon: FlexibleStageViews.prismsIcon, label: "Prisms", on: main.prismsOn && main.viewsAvailable,
+                           action: { main.togglePrisms() }, glyph: FlexibleStageViews.prismsGlyph(on: main.prismsOn && main.viewsAvailable))
+            .unavailable(!main.viewsAvailable || main.attach.active)   // ★ M1 VERIFY: no face-prism to draw
+            .background(GeometryReader { g in Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["mainView-prisms": g.frame(in: .global)]) }
+                .allowsHitTesting(false))   // (★ I2: the hosted tests click it)
+            .accessibilityIdentifier("flexible-main-view-prisms")
+    }
+    // ★ R7-V: X-ray — the ghost and the walls inside it. ★ X1: off (the default), the solid part with the lattice where the
+    // finish leaves it open (the printed view); Covered, the plain model
+    private var xrayButton: some View {
+        FlexibleViewButton(icon: FlexibleMainViewToggles.xrayIcon, label: "X-ray", on: main.xrayOn) { main.toggleXray() }
+            .unavailable(main.attach.step == .pickWall)   // ★ U21 batch I (I2): live in step 2 (his to see through); step 1 has no body
+            .background(GeometryReader { g in Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["mainView-xray": g.frame(in: .global)]) }
+                .allowsHitTesting(false))
+            .accessibilityIdentifier("flexible-main-view-xray")
+    }
+    // ★ R7-V: Play — the sim plays and its bar shows; off, no bar and the model at rest. A small ring while the sims run
+    // or refine (the bar's note said so)
+    private var playButton: some View {
+        FlexibleViewButton(icon: FlexibleMainViewToggles.playIcon, label: "Play", on: main.playOn && main.viewsAvailable) { main.togglePlay() }
+            .unavailable(!main.viewsAvailable || main.attach.active)   // ★ M1 VERIFY: nothing to play
+            .overlay(alignment: .topTrailing) {
+                if Self.controlMiniSpinner {
+                    if main.simsWorking {   // (the RED CONTROL only: the first build's faint grey speck)
+                        ProgressView().controlSize(.mini).tint(DS.Color.textPrimary.color).scaleEffect(0.7)
+                            .padding(3).allowsHitTesting(false)
+                    }
+                } else {
+                    // ★ R7-V REVIEW (the verify: a faint grey speck, and nothing for a failed sim): an accent arc turning on
+                    // the rim while the sims run or refine; an orange dot when one failed (the bar says why)
+                    FlexiblePlayBadge(status: main.playStatus)
+                }
+            }
+            .accessibilityValue(playValue)
+            .accessibilityIdentifier("flexible-main-view-play")
+    }
+
+    /// ★ R7-V REVIEW: the Play icon's spoken value — on / off, and the sims' status while its bar is hidden.
+    private var playValue: String {
+        let on = main.playOn ? "On" : "Off"
+        switch main.playStatus {
+        case .working: return on + " · " + FlexibleRowCopy.playWorking
+        case .failed: return on + " · " + FlexibleRowCopy.playFailed
+        case .idle: return on
+        }
+    }
+
+    public var body: some View {
+        // the workspace's solver (no publish: its sim's phase arrives on the next run-loop turn)
+        let _ = solver.map { main.attach($0) }
+        GeometryReader { g in
+            // ★ C2: "Lattice ready" — ★ C2 VERIFICATION: beside the row, in the band `frame` holds; ★ R7-D1: under the row
+            // where one line of six 44 pt icons leaves too little beside it (noteFrame)
+            let note = Self.noteFrame(viewport: g.size), under = note.minY >= Self.rowFrame(viewport: g.size).maxY
+            Group {
+                if under {
+                    VStack(alignment: .trailing, spacing: DS.Space.s) {
+                        row(g.size)
+                        FlexibleMainNoteView(note: main.note, main: main, maxWidth: note.width)
+                    }
+                } else {
+                    HStack(spacing: DS.Space.s) {
+                        FlexibleMainNoteView(note: main.note, main: main, maxWidth: note.width)
+                        row(g.size)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            .padding(.top, PageChrome.belowGizmo)
+            .padding(.trailing, PageChrome.edge)
+            .onAppear { main.chromeGeometry.note(g.size) }   // ★ R7-D1: the corner pair sizes its panels to this viewport
+            .onChange(of: g.size) { main.chromeGeometry.note($0) }
+        }
+    }
+
+    /// ★ R7-D1 (his pick 1, A2's views row): the mockup's order, one line of six 44 pt icons — three over three below
+    /// 800 pt (the mini in portrait). X1's rules stay as they are (no view turns X-ray on).
+    private func row(_ v: CGSize) -> some View {
+        let order = Self.order, c = Self.columns(viewport: v)
+        return Group {
+            if c >= Self.buttons {
+                HStack(spacing: DS.Space.s) { ForEach(0..<order.count, id: \.self) { button(order[$0]) } }
+            } else {
+                VStack(alignment: .trailing, spacing: DS.Space.s) {
+                    HStack(spacing: DS.Space.s) { ForEach(0..<c, id: \.self) { button(order[$0]) } }
+                    HStack(spacing: DS.Space.s) { ForEach(c..<order.count, id: \.self) { button(order[$0]) } }
+                }
+            }
+        }
+        .background(GeometryReader { r in
+            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["mainViews": r.frame(in: .global)])
+        }.allowsHitTesting(false))
+        .latticeBandChipKeepOut()
+    }
+
+    /// ★ R7-D1: one view button by its kind.
+    @ViewBuilder private func button(_ k: Kind) -> some View {
+        switch k {
+        case .heat: heatButton
+        case .stress: stressButton
+        case .xray: xrayButton
+        case .lattice: latticeButton
+        case .prisms: prismsButton
+        case .play: playButton
+        }
+    }
+
+    /// Where the toggles sit, for the player's and the legends' keep-outs: the row (★ R7-V: six 40 pt
+    /// buttons, `s` apart — three over three on a narrow pad) AND the note's band beside it (★ C2: reserved, so a note coming and
+    /// going never moves a legend; ★ C2 VERIFICATION: on the row's line, so it ends where the row
+    /// ends and costs the legends nothing).
+    static func frame(viewport: CGSize) -> CGRect {
+        rowFrame(viewport: viewport).union(noteFrame(viewport: viewport))
+    }
+    /// The buttons alone (★ R7-V: one line of six, or three over three — `columns`).
+    static func rowFrame(viewport: CGSize) -> CGRect {
+        FlexibleChromeLayout.viewsRow(viewport: viewport)   // ★ R7-D1: 44 pt icons (the layout's one row)
+    }
+    /// ★ S1b: the buttons per line — all of them, unless one line would leave the "Lattice ready · Show" note less than
+    /// its `minWidth` beside them, clear of the left panel; then half (★ R7-V: three over three).
+    static func columns(viewport: CGSize) -> Int {
+        // ★ R7-D1 (the mockup he picked): one line of six, three over three below 800 pt (the mini in portrait) — the note
+        // goes under the row where it does not fit beside it (noteFrame)
+        FlexibleChromeLayout.viewsColumns(viewport: viewport)
+    }
+}
+
+/// The main page's squish player: bottom-centre, above the bottom bar, clear of the view
+/// toggles and of the legends (batch C: their real frames, FlexibleMainLegendLayout). Only
+/// when there is something to squish.
+public struct FlexibleMainPlayerSlot: View {
+    @ObservedObject var main: FlexibleMainStage
+    let bottomClearance: CGFloat
+    /// ★ BATCH B REVIEW: the width of the bottom-right settings-chip column (Gravity, …) — it
+    /// sits in the player's row (0 when the column is not shown). Its widest chip is the
+    /// bottom one (BottomChipOrder), the one beside the player.
+    let chipColumnWidth: CGFloat
+    /// ★ R7-D1: the corner pair's open panel moves the player left (one card at a time; the player is not a card).
+    @ObservedObject var chrome: FlexibleChromeState
+    /// ★ ROUND 7, the review of R7-D1: the open panel's drawn height (the pair measures it).
+    @ObservedObject var geometry: FlexibleChromeGeometry
+
+    public init(main: FlexibleMainStage, bottomClearance: CGFloat, chipColumnWidth: CGFloat = 0) {
+        self.main = main
+        self.bottomClearance = bottomClearance
+        self.chipColumnWidth = chipColumnWidth
+        self._chrome = ObservedObject(wrappedValue: main.chrome)
+        self._geometry = ObservedObject(wrappedValue: main.chromeGeometry)
+    }
+
+    /// ★ ROUND 7, the review of R7-D1 (the blocker: "In portrait, the squish player slides under the orientation cube
+    /// whenever the Setup tray or the Lattice card is open with Play on … Cause: place() adds R7-D1's panelColumn() as a
+    /// keep-out. That reserves the whole maximum column … not the open panel's real frame"): the open panel's REAL frame — its
+    /// drawn height as the pair measured it, right-aligned on 24, 12 above the pair, under the legend — or nil while none is
+    /// open, and for the one pass before the pair's measure of a panel lands (the player then moves once; never onto the cube
+    /// or the name row: they are keep-outs too).
+    static func openPanel(main: FlexibleMainStage, viewport v: CGSize, bottomClearance: CGFloat, chipColumnWidth: CGFloat) -> CGRect? {
+        guard let open = main.chrome.open, [.setup, .latticeCard, .callout].contains(open) else { return nil }
+        let g = main.chromeGeometry
+        guard g.panelHeight > 0, g.panelCard == nil || g.panelCard == open else { return nil }
+        let legend = main.legendCard(viewport: v, bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth)?.frame
+        return FlexibleChromeLayout.panelFrame(viewport: v, contentHeight: g.panelHeight, legend: legend)
+    }
+
+    /// The trailing legend slot the main page's legends take (batch C) — kept clear now.
+    public static let legendSize = CGSize(width: 268, height: 168)
+    /// How tall the chip column is kept clear above the bar (four chip rows).
+    static let chipColumnHeight: CGFloat = 4 * (PageChrome.compactButton + DS.Space.s)
+
+    public static func keepOut(viewport: CGSize, bottomClearance: CGFloat = 0, chipColumnWidth: CGFloat = 0,
+                               legends: [CGRect]? = nil) -> [CGRect] {
+        var k = [FlexibleMainViewToggles.frame(viewport: viewport),
+                 // ★ BATCH C VERIFICATION: the left panel strip (Selections, the stage buttons) —
+                 // at 11" portrait the player sat inside the Selections column
+                 FlexibleMainLegendLayout.leftStrip(viewport: viewport),
+                 // ★ ROUND 7, the review of R7-D1: the cube and the name row with the capsule — a player that must climb never
+                 // lands on them (at 13" portrait it sat on the cube with the Lattice card open)
+                 FlexibleLegendPlacement.gizmoFrame(viewport: viewport), FlexibleChromeLayout.topLeftChrome(viewport)]
+        // ★ BATCH C: the legends' real frames (FlexibleMainLegendLayout); the reserved slot
+        // only when none are handed over
+        if let legends { k += legends } else if let l = FlexibleLegendPlacement.legend(size: legendSize, viewport: viewport) { k.append(l) }
+        if chipColumnWidth > 0 {
+            // bottomRightControls: trailing on `edge`, its bottom `bottomClearance + m` up
+            let bottom = viewport.height - bottomClearance - DS.Space.m
+            k.append(CGRect(x: viewport.width - PageChrome.edge - chipColumnWidth, y: bottom - chipColumnHeight,
+                            width: chipColumnWidth, height: chipColumnHeight))
+        }
+        return k
+    }
+
+    /// Where a player of `size` goes: clear of the buttons, the left panel, the chip column and the ONE legend card
+    /// (★ S1b: the card itself — it now comes for [Prisms]' row with no scale, where no kind names it).
+    static func place(main: FlexibleMainStage, viewport v: CGSize, bottomClearance: CGFloat, chipColumnWidth: CGFloat,
+                      size: CGSize) -> CGRect? {
+        FlexibleLegendPlacement.player(viewport: v, bottomClearance: bottomClearance,
+                                       keepOut: keepOut(viewport: v, bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth,
+                                                        legends: main.legendCard(viewport: v, bottomClearance: bottomClearance,
+                                                                                 chipColumnWidth: chipColumnWidth).map { [$0.frame] } ?? [])
+                                           + (openPanel(main: main, viewport: v, bottomClearance: bottomClearance,
+                                                        chipColumnWidth: chipColumnWidth).map { [$0] } ?? []),   // ★ R7-D1 (review: the real frame)
+                                       size: size)
+    }
+    /// ★ S1b: where the player is now (nil while it does not show) — the main page's mm tags keep clear of it.
+    static func frame(main: FlexibleMainStage, viewport v: CGSize, bottomClearance: CGFloat, chipColumnWidth: CGFloat) -> CGRect? {
+        guard main.playerShown else { return nil }
+        return place(main: main, viewport: v, bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth,
+                     size: FlexibleSquishPlayer.size(picker: pickerSims(main.sims).count > 1, note: main.simNote != nil))
+    }
+
+    public var body: some View {
+        GeometryReader { g in
+            // ★ ROUND 4 (D2): the group picker widens it, a group's miss line heightens it — the
+            // placement keeps the whole of it clear of every button and legend
+            let sims = Self.pickerSims(main.sims), note = main.simNote   // ★ ROUND 7 (F): no group picker in the bar
+            let size = FlexibleSquishPlayer.size(picker: sims.count > 1, note: note != nil)
+            if main.playerShown,
+               let r = Self.place(main: main, viewport: g.size, bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth,
+                                  size: size) {
+                FlexibleSquishPlayer(loop: main.loop, fullLabel: main.fullLabel, width: r.width,
+                                     playAllLive: main.playAllLive, noteFor: { main.simNote(playing: $0) },   // ★ G verification: the playing group
+                                     sims: sims, shown: main.shownSimInfo, onPick: { main.pick($0) }, note: note,
+                                     colour: { n in main.model?.groupColour(number: n) ?? FlexibleSqueezeGroups.colour(number: n) })   // ★ S1: his chosen colour
+                    .latticeBandChipKeepOut()
+                    .position(x: r.midX, y: r.midY)
+            }
+        }
+    }
+}

@@ -1,0 +1,8 @@
+[loadcase] face-protection face=15 voxels_frozen=4820 depth=4 requested=12mm effective=13.64mm status=ok
+[loadcase] face-protection face=2 voxels_frozen=4203 depth=4 requested=13mm effective=13.64mm status=ok
+[loadcase] face-protection region=101 voxels_frozen=3376 depth=6 requested=20mm effective=20.46mm status=ok
+VARIANT vf=0.680000 achieved=0.680000 printed=0.985249 margin=1559.92 accepted=1 mesh=run/variant_068.stl
+VARIANT vf=0.520000 achieved=0.520000 printed=0.977723 margin=1559.68 accepted=1 mesh=run/variant_052.stl
+VARIANT vf=0.380000 achieved=0.380000 printed=0.971401 margin=1559.33 accepted=1 mesh=run/variant_038.stl
+VARIANT vf=0.260000 achieved=0.260000 printed=0.965756 margin=1559.22 accepted=1 mesh=run/variant_026.stl
+variants: 4 evaluated, 4 accepted

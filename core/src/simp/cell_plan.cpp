@@ -53,12 +53,18 @@ int cell_plan_max_level(double min_cell_size_mm, double max_cell_size_mm) {
 double cell_plan_finest_printable_cell_mm(LatticeTopology topo,
                                           double min_cell_size_mm,
                                           double max_cell_size_mm,
-                                          double min_extrudable_width_mm) {
-  // The cell below which NO density in the band prints — w / phi(rho_max). Read from
-  // core's own law, never a literal, exactly as grading.cpp's `abs_floor_mm` is.
-  const double abs_floor_mm =
-      min_extrudable_width_mm /
-      octet_strut_diameter_mm(lattice_rho_max(topo), 1.0);
+                                          double min_extrudable_width_mm,
+                                          double max_relative_density) {
+  // ★ D1: the cell below which no density THE JOB ALLOWS prints -- one function, which
+  // takes the cap. This was w/phi(rho_max) inline, the UNCAPPED floor.
+  const double abs_floor_mm = lattice_min_printable_cell_mm(
+      topo, min_extrudable_width_mm, max_relative_density);
+  // The densest density the job permits, which is what the per-cell predicate below must
+  // ask about -- asking about the band's top admits rungs the job can never reach.
+  const double rho_densest =
+      (std::isfinite(max_relative_density) && max_relative_density > 0.0)
+          ? std::min(lattice_rho_max(topo), max_relative_density)
+          : lattice_rho_max(topo);
   if (!(min_cell_size_mm > 0.0) || !(min_extrudable_width_mm > 0.0))
     return abs_floor_mm;
   const int Lmax = cell_plan_max_level(min_cell_size_mm, max_cell_size_mm);
@@ -67,7 +73,7 @@ double cell_plan_finest_printable_cell_mm(LatticeTopology topo,
     // The SAME predicate `plan_cell_sizes` applies per base cell, at the density most
     // favourable to it. A cell clearing this is one the plan can use somewhere; a cell
     // failing it can never be used by any base cell, at any density in the band.
-    if (octet_strut_diameter_mm(lattice_rho_max(topo), S) >= min_extrudable_width_mm)
+    if (lattice_strut_diameter_mm(topo, rho_densest, S) >= min_extrudable_width_mm)
       return S;
   }
   return abs_floor_mm;
@@ -163,24 +169,44 @@ CellSizePlan plan_cell_sizes(const VoxelGrid& grid,
   // the cells-per-member ceiling (the thinnest member in the cell). Both are the
   // CONSERVATIVE end, so a guarantee proved on them holds for every voxel in the cell.
   std::vector<double> rho_min(ncells, kInf), width_min(ncells, kInf);
+  // ★ E3: the region windows' tightest bounds per base cell (-1 = none).
+  const bool windowed = params.voxel_level_lo != nullptr && params.voxel_level_hi != nullptr;
+  if (windowed && (params.voxel_level_lo->size() != grid.voxel_count() ||
+                   params.voxel_level_hi->size() != grid.voxel_count()))
+    throw std::invalid_argument("plan_cell_sizes: voxel_level_lo/hi size != voxel_count");
+  std::vector<int> win_lo(windowed ? ncells : 0, -1), win_hi(windowed ? ncells : 0, -1);
   std::vector<long long> vox(ncells, 0);
+  std::vector<long long> vox_own(ncells, 0);  // by the voxel's centre: the report counts each once
   for (int k = 0; k < grid.nz; ++k)
     for (int j = 0; j < grid.ny; ++j)
       for (int i = 0; i < grid.nx; ++i) {
         const std::size_t e = grid.index(i, j, k);
         if (!candidate[e]) continue;
-        // The voxel CENTRE decides which base cell owns it — the same convention
-        // run_job's graded-cell accumulation uses.
-        const double cx = (i + 0.5) * grid.spacing;
-        const double cy = (j + 0.5) * grid.spacing;
-        const double cz = (k + 0.5) * grid.spacing;
-        const int ci = std::min(P.nx - 1, std::max(0, static_cast<int>(std::floor(cx / S0))));
-        const int cj = std::min(P.ny - 1, std::max(0, static_cast<int>(std::floor(cy / S0))));
-        const int ck = std::min(P.nz - 1, std::max(0, static_cast<int>(std::floor(cz / S0))));
-        const std::size_t c = P.index(ci, cj, ck);
-        ++vox[c];
-        if (rho[e] < rho_min[c]) rho_min[c] = rho[e];
-        if (width[e] < width_min[c]) width_min[c] = width[e];
+        // ★ Finding 7: EVERY base cell covering the voxel's volume takes it (the cover
+        // rule, cell_plan.hpp), so each such cell is planned against this voxel's
+        // density and member width. It used to be the centre's cell alone, which left
+        // a base cell finer than the voxel with one cell per voxel.
+        ++vox_own[P.index(
+            std::min(P.nx - 1, static_cast<int>(std::floor((i + 0.5) * grid.spacing / S0))),
+            std::min(P.ny - 1, static_cast<int>(std::floor((j + 0.5) * grid.spacing / S0))),
+            std::min(P.nz - 1, static_cast<int>(std::floor((k + 0.5) * grid.spacing / S0))))];
+        int i0, i1, j0, j1, k0, k1;
+        cells_covering_span(i * grid.spacing, grid.spacing, 0.0, S0, P.nx, &i0, &i1);
+        cells_covering_span(j * grid.spacing, grid.spacing, 0.0, S0, P.ny, &j0, &j1);
+        cells_covering_span(k * grid.spacing, grid.spacing, 0.0, S0, P.nz, &k0, &k1);
+        for (int ck = k0; ck <= k1; ++ck)
+          for (int cj = j0; cj <= j1; ++cj)
+            for (int ci = i0; ci <= i1; ++ci) {
+              const std::size_t c = P.index(ci, cj, ck);
+              ++vox[c];
+              if (rho[e] < rho_min[c]) rho_min[c] = rho[e];
+              if (width[e] < width_min[c]) width_min[c] = width[e];
+              if (windowed) {
+                const int lo = (*params.voxel_level_lo)[e], hi = (*params.voxel_level_hi)[e];
+                if (lo >= 0) win_lo[c] = std::max(win_lo[c], lo);
+                if (hi >= 0) win_hi[c] = win_hi[c] < 0 ? hi : std::min(win_hi[c], hi);
+              }
+            }
       }
 
   // ── the two bounds, per base cell ───────────────────────────────────────────────
@@ -197,10 +223,23 @@ CellSizePlan plan_cell_sizes(const VoxelGrid& grid,
       // width_min is +inf where every member exceeds the EDT cap -> always clears.
       if (width_min[c] / S >= n_star) cap[c] = L;
       if (need[c] == kUnreachable &&
-          octet_strut_diameter_mm(rho_min[c], S) >= params.min_extrudable_width_mm)
+          lattice_strut_diameter_mm(params.topology, rho_min[c], S) >=
+              params.min_extrudable_width_mm)
         need[c] = L;
     }
   }
+  // ★ E3: the window tightens both, AFTER the raw bounds are known, so a cell it empties
+  // is told apart from one that never printed (reject reason 3, below).
+  std::vector<char> window_bound(windowed ? ncells : 0, 0);
+  if (windowed)
+    for (std::size_t c = 0; c < ncells; ++c) {
+      if (vox[c] == 0 || cap[c] < 0 || need[c] == kUnreachable || need[c] > cap[c]) continue;
+      const int nl = std::max(need[c], win_lo[c]);
+      const int cl = win_hi[c] >= 0 ? std::min(cap[c], win_hi[c]) : cap[c];
+      if (nl != need[c] || cl != cap[c]) window_bound[c] = 1;
+      need[c] = nl;
+      cap[c] = cl;
+    }
 
   // ── the OCTREE: top-down, take the coarsest level someone actually NEEDS ────────
   // A block takes level L iff (a) it lies wholly inside the base grid, (b) every base
@@ -270,7 +309,7 @@ CellSizePlan plan_cell_sizes(const VoxelGrid& grid,
   // of the certifiable regime. It can break printability (a smaller cell means a
   // thinner strut), and a cell that lands there is dropped to SOLID below — an honest
   // fallback, never a strut under the stated width.
-  {
+  auto balance = [&]() {
     bool changed = true;
     int guard = 0;
     while (changed && guard++ <= Lmax + 2) {
@@ -305,20 +344,58 @@ CellSizePlan plan_cell_sizes(const VoxelGrid& grid,
             changed = true;
           }
     }
-  }
+  };
+  balance();
 
   // ── post-balance feasibility: drop any cell a split made unprintable ────────────
   // (The ceiling cannot be violated by splitting, so only printability is re-checked.)
-  {
+  //
+  // ★ AND NO BLOCK IS LEFT MIXED (TO-core's finding, 2026-11-04; ruling 21:40Z). The
+  // drop is per BASE cell, so a balance-split block whose cells need different levels
+  // used to end partly at L-1 and partly at -1, and the alignment check below threw
+  // "not an aligned octree" (a swept lattice_part of a solid block with a bore). A block
+  // left mixed is now split one level more, its cells that fail there drop in turn,
+  // and the balance re-runs, until nothing changes. Every step only refines or drops,
+  // so it ends. A plan with no mixed block takes one pass that changes nothing more
+  // than the drop always did, and is the plan it always was.
+  auto feasibility = [&]() {
+    bool changed = false;
     for (int k = 0; k < P.nz; ++k)
       for (int j = 0; j < P.ny; ++j)
         for (int i = 0; i < P.nx; ++i) {
           const std::size_t c = P.index(i, j, k);
           const int L = P.level[c];
           if (L < 0) continue;
-          if (need[c] > L) P.level[c] = -1;  // struts would be under the stated width
+          if (need[c] > L) {  // struts would be under the stated width
+            P.level[c] = -1;
+            changed = true;
+          }
         }
-  }
+    for (int k = 0; k < P.nz; ++k)
+      for (int j = 0; j < P.ny; ++j)
+        for (int i = 0; i < P.nx; ++i) {
+          const int L = P.level[P.index(i, j, k)];
+          if (L < 1) continue;
+          const int step = ipow2(L);
+          const int obi = (i / step) * step, obj = (j / step) * step,
+                    obk = (k / step) * step;
+          bool mixed = false;
+          for (int kk = obk; kk < obk + step && !mixed; ++kk)
+            for (int jj = obj; jj < obj + step && !mixed; ++jj)
+              for (int ii = obi; ii < obi + step && !mixed; ++ii)
+                if (P.level[P.index(ii, jj, kk)] != L) mixed = true;
+          if (!mixed) continue;
+          for (int kk = obk; kk < obk + step; ++kk)
+            for (int jj = obj; jj < obj + step; ++jj)
+              for (int ii = obi; ii < obi + step; ++ii) {
+                signed char& lv = P.level[P.index(ii, jj, kk)];
+                if (lv == L) lv = static_cast<signed char>(L - 1);
+              }
+          changed = true;
+        }
+    return changed;
+  };
+  while (feasibility()) balance();
 
   // ── accounting + the per-level report (bar R5) ──────────────────────────────────
   P.levels.assign(static_cast<std::size_t>(Lmax) + 1, CellLevelReport{});
@@ -347,6 +424,9 @@ CellSizePlan plan_cell_sizes(const VoxelGrid& grid,
             /* too thin to homogenize even at the base cell — the existing L4 case,
                counted by grade_lattice as a solid fallback, not here. */
             P.reject_reason[c] = 1;
+          } else if (windowed && window_bound[c]) {
+            ++P.cells_dropped_by_window;  // ★ E3: printable, but not in its window
+            P.reject_reason[c] = 3;
           } else {
             ++P.cells_dropped_unprintable;
             P.reject_reason[c] = 2;
@@ -359,11 +439,11 @@ CellSizePlan plan_cell_sizes(const VoxelGrid& grid,
         const bool is_owner = (i == obi && j == obj && k == obk);
 
         const double S = P.cell_mm_at_level(L);
-        const double d = octet_strut_diameter_mm(rho_min[c], S);
+        const double d = lattice_strut_diameter_mm(params.topology, rho_min[c], S);
         const double cpm = width_min[c] / S;
         CellLevelReport& r = P.levels[static_cast<std::size_t>(L)];
         if (is_owner) { ++r.cells; ++P.latticed_cells; if (L > 0) ++P.cells_raised_to_floor; }
-        r.voxels += vox[c];
+        r.voxels += vox_own[c];
         r.min_member_width_mm = std::min(r.min_member_width_mm, width_min[c]);
         r.min_cells_per_member = std::min(r.min_cells_per_member, cpm);
         r.min_strut_diameter_mm = std::min(r.min_strut_diameter_mm, d);
@@ -407,7 +487,7 @@ CellSizePlan plan_cell_sizes(const VoxelGrid& grid,
         if (!(width_min[c] / S >= n_star))
           throw std::logic_error(
               "plan_cell_sizes: emitted a cell below the cells-per-member floor");
-        if (!(octet_strut_diameter_mm(rho_min[c], S) >=
+        if (!(lattice_strut_diameter_mm(params.topology, rho_min[c], S) >=
               params.min_extrudable_width_mm))
           throw std::logic_error(
               "plan_cell_sizes: emitted a cell whose strut is under the stated "
@@ -504,23 +584,43 @@ CellSizePlan plan_cell_sizes_fit(const VoxelGrid& grid,
   std::vector<double> rho_min(ncells, kInf), width_min(ncells, kInf),
       want_min(ncells, kInf);
   std::vector<long long> vox(ncells, 0);
+  std::vector<long long> vox_own(ncells, 0);  // by the voxel's centre: the report counts each once
   for (int k = 0; k < grid.nz; ++k)
     for (int j = 0; j < grid.ny; ++j)
       for (int i = 0; i < grid.nx; ++i) {
         const std::size_t e = grid.index(i, j, k);
         if (!candidate[e]) continue;
         if (!(desired_cell_mm[e] > 0.0)) continue;  // no derivation ⇒ not fitted
-        const double cx = (i + 0.5) * grid.spacing;
-        const double cy = (j + 0.5) * grid.spacing;
-        const double cz = (k + 0.5) * grid.spacing;
-        const int ci = std::min(P.nx - 1, std::max(0, static_cast<int>(std::floor(cx / S0))));
-        const int cj = std::min(P.ny - 1, std::max(0, static_cast<int>(std::floor(cy / S0))));
-        const int ck = std::min(P.nz - 1, std::max(0, static_cast<int>(std::floor(cz / S0))));
-        const std::size_t c = P.index(ci, cj, ck);
-        ++vox[c];
-        if (rho[e] < rho_min[c]) rho_min[c] = rho[e];
-        if (width[e] < width_min[c]) width_min[c] = width[e];
-        if (desired_cell_mm[e] < want_min[c]) want_min[c] = desired_cell_mm[e];
+        // ★ Finding 7: every covering base cell, as in plan_cell_sizes.
+        ++vox_own[P.index(
+            std::min(P.nx - 1, static_cast<int>(std::floor((i + 0.5) * grid.spacing / S0))),
+            std::min(P.ny - 1, static_cast<int>(std::floor((j + 0.5) * grid.spacing / S0))),
+            std::min(P.nz - 1, static_cast<int>(std::floor((k + 0.5) * grid.spacing / S0))))];
+        int i0, i1, j0, j1, k0, k1;
+        cells_covering_span(i * grid.spacing, grid.spacing, 0.0, S0, P.nx, &i0, &i1);
+        cells_covering_span(j * grid.spacing, grid.spacing, 0.0, S0, P.ny, &j0, &j1);
+        cells_covering_span(k * grid.spacing, grid.spacing, 0.0, S0, P.nz, &k0, &k1);
+        // The bounds (printability, the member ceiling) must hold in EVERY cell covering
+        // the voxel; the region's DERIVED cell is that region's intent, read where the
+        // region owns the voxel -- the cell holding its centre. Spread to a cell the voxel
+        // only grazes, it carried across region boundaries, and on a tie between two
+        // regions (decided by declared id) made the declaration order change the part
+        // (test_region_ownership).
+        for (int ck = k0; ck <= k1; ++ck)
+          for (int cj = j0; cj <= j1; ++cj)
+            for (int ci = i0; ci <= i1; ++ci) {
+              const std::size_t c = P.index(ci, cj, ck);
+              ++vox[c];
+              if (rho[e] < rho_min[c]) rho_min[c] = rho[e];
+              if (width[e] < width_min[c]) width_min[c] = width[e];
+            }
+        {
+          const std::size_t c = P.index(
+              std::min(P.nx - 1, static_cast<int>(std::floor((i + 0.5) * grid.spacing / S0))),
+              std::min(P.ny - 1, static_cast<int>(std::floor((j + 0.5) * grid.spacing / S0))),
+              std::min(P.nz - 1, static_cast<int>(std::floor((k + 0.5) * grid.spacing / S0))));
+          if (desired_cell_mm[e] < want_min[c]) want_min[c] = desired_cell_mm[e];
+        }
       }
 
   // The level each base cell WANTS: the coarsest ladder rung at or below its own
@@ -656,13 +756,14 @@ CellSizePlan plan_cell_sizes_fit(const VoxelGrid& grid,
         const bool is_owner = (i == obi && j == obj && k == obk);
         const double S = P.cell_mm_at_level(L);
         const double rho_floor =
-            lattice_min_density_for_strut(topo, S, params.min_extrudable_width_mm);
+            lattice_min_density_for_strut(topo, S, params.min_extrudable_width_mm,
+                                          params.max_relative_density);
         const double rho_here = std::max(rho_min[c], rho_floor);
-        const double d = octet_strut_diameter_mm(rho_here, S);
+        const double d = lattice_strut_diameter_mm(params.topology, rho_here, S);
         const double cpm = width_min[c] / S;
         CellLevelReport& r = P.levels[static_cast<std::size_t>(L)];
         if (is_owner) { ++r.cells; ++P.latticed_cells; }
-        r.voxels += vox[c];
+        r.voxels += vox_own[c];
         r.min_member_width_mm = std::min(r.min_member_width_mm, width_min[c]);
         r.min_cells_per_member = std::min(r.min_cells_per_member, cpm);
         r.min_strut_diameter_mm = std::min(r.min_strut_diameter_mm, d);
@@ -750,9 +851,40 @@ std::vector<double> cell_size_field(const VoxelGrid& grid,
         const int ci = std::min(plan.nx - 1, std::max(0, static_cast<int>(std::floor(cx / S0))));
         const int cj = std::min(plan.ny - 1, std::max(0, static_cast<int>(std::floor(cy / S0))));
         const int ck = std::min(plan.nz - 1, std::max(0, static_cast<int>(std::floor(cz / S0))));
-        out[grid.index(i, j, k)] = plan.cell_size_at(ci, cj, ck);
+        double c = plan.cell_size_at(ci, cj, ck);
+        // ★ Finding 7: and only if every OTHER covering cell is latticed too, or part of
+        // the voxel would be certified as lattice the file does not hold. The centre's
+        // cell stays the one reported; every covering cell was planned against this
+        // voxel's density and member width, so each satisfies its bounds.
+        if (c > 0.0) {
+          int i0, i1, j0, j1, k0, k1;
+          cells_covering_span(i * grid.spacing, grid.spacing, 0.0, S0, plan.nx, &i0, &i1);
+          cells_covering_span(j * grid.spacing, grid.spacing, 0.0, S0, plan.ny, &j0, &j1);
+          cells_covering_span(k * grid.spacing, grid.spacing, 0.0, S0, plan.nz, &k0, &k1);
+          for (int kk = k0; kk <= k1 && c > 0.0; ++kk)
+            for (int jj = j0; jj <= j1 && c > 0.0; ++jj)
+              for (int ii = i0; ii <= i1 && c > 0.0; ++ii)
+                if (!(plan.cell_size_at(ii, jj, kk) > 0.0)) c = 0.0;
+        }
+        out[grid.index(i, j, k)] = c;
       }
   return out;
+}
+
+signed char cell_plan_voxel_reject_reason(const VoxelGrid& grid, const CellSizePlan& plan,
+                                          int i, int j, int k) {
+  if (plan.base_cell_mm <= 0.0 || plan.reject_reason.empty()) return 0;
+  const double S0 = plan.base_cell_mm;
+  int i0, i1, j0, j1, k0, k1;
+  cells_covering_span(i * grid.spacing, grid.spacing, 0.0, S0, plan.nx, &i0, &i1);
+  cells_covering_span(j * grid.spacing, grid.spacing, 0.0, S0, plan.ny, &j0, &j1);
+  cells_covering_span(k * grid.spacing, grid.spacing, 0.0, S0, plan.nz, &k0, &k1);
+  signed char why = 0;
+  for (int kk = k0; kk <= k1; ++kk)
+    for (int jj = j0; jj <= j1; ++jj)
+      for (int ii = i0; ii <= i1; ++ii)
+        why = std::max(why, plan.reject_reason[plan.index(ii, jj, kk)]);
+  return why;
 }
 
 }  // namespace topopt

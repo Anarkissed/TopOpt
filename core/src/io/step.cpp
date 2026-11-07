@@ -1,15 +1,19 @@
 #include "topopt/step.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <fstream>
 #include <map>
+#include <set>
+#include <cstdio>
 #include <stdexcept>
 #include <utility>
 
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepGProp.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
+#include <BRepTools.hxx>
 #include <BRep_Tool.hxx>
 #include <GProp_GProps.hxx>
 #include <GeomAbs_SurfaceType.hxx>
@@ -69,6 +73,89 @@ class VertexWelder {
   std::map<std::array<long long, 3>, int> index_of_;
   TriangleMesh mesh_;
 };
+
+// One tessellation of `shape`: BRepMesh writes a Poly_Triangulation into each face,
+// the per-face triangulations are welded into one mesh, and every triangle records
+// its 0-based face id in TopExp order (ROADMAP M1.6). Faces with no triangulation
+// still consume an id (they own zero triangles).
+struct Tessellated {
+  TriangleMesh mesh;
+  std::vector<int> triangle_face;  // parallel to mesh.triangles
+};
+
+Tessellated tessellate(const TopoDS_Shape& shape, double linear, double angular) {
+  BRepMesh_IncrementalMesh mesher(shape, linear, /*isRelative=*/Standard_False, angular,
+                                  /*isInParallel=*/Standard_True);
+  mesher.Perform();
+  VertexWelder welder;
+  Tessellated out;
+  int face_id = 0;
+  for (TopExp_Explorer e(shape, TopAbs_FACE); e.More(); e.Next(), ++face_id) {
+    const TopoDS_Face face = TopoDS::Face(e.Current());
+    TopLoc_Location loc;
+    const Handle(Poly_Triangulation) tri = BRep_Tool::Triangulation(face, loc);
+    if (tri.IsNull()) continue;
+    const gp_Trsf trsf = loc.Transformation();
+    // A REVERSED face's outward direction is opposite its parametric normal, so
+    // flip the winding to keep every triangle facing outward. With consistent
+    // outward winding, signed_volume (divergence theorem) returns +volume.
+    const bool reversed = face.Orientation() == TopAbs_REVERSED;
+    for (int i = 1; i <= tri->NbTriangles(); ++i) {
+      int a = 0, b = 0, c = 0;
+      tri->Triangle(i).Get(a, b, c);
+      if (reversed) std::swap(b, c);
+      const int ia = welder.add(tri->Node(a).Transformed(trsf));
+      const int ib = welder.add(tri->Node(b).Transformed(trsf));
+      const int ic = welder.add(tri->Node(c).Transformed(trsf));
+      welder.add_triangle(ia, ib, ic);
+      out.triangle_face.push_back(face_id);
+    }
+  }
+  out.mesh = welder.take();
+  return out;
+}
+
+// T1: drop every triangle whose welded corners repeat (zero area). Vertices are kept
+// as they are; kept triangles keep their order and their face id.
+int drop_repeated_index_triangles(Tessellated& t) {
+  int dropped = 0;
+  std::size_t w = 0;
+  for (std::size_t i = 0; i < t.mesh.triangles.size(); ++i) {
+    const auto& tr = t.mesh.triangles[i];
+    if (tr[0] == tr[1] || tr[1] == tr[2] || tr[0] == tr[2]) { ++dropped; continue; }
+    t.mesh.triangles[w] = tr;
+    t.triangle_face[w] = t.triangle_face[i];
+    ++w;
+  }
+  t.mesh.triangles.resize(w);
+  t.triangle_face.resize(w);
+  return dropped;
+}
+
+// Closed and consistently wound: every directed edge appears once and its reverse
+// once. A folded or overlapping triangulation fails this even when it closes.
+bool closed_and_oriented(const TriangleMesh& m) {
+  if (m.triangles.empty()) return false;
+  std::map<std::pair<int, int>, int> directed;
+  for (const auto& t : m.triangles)
+    for (int k = 0; k < 3; ++k) ++directed[{t[k], t[(k + 1) % 3]}];
+  for (const auto& kv : directed) {
+    if (kv.second != 1) return false;
+    const auto rev = directed.find({kv.first.second, kv.first.first});
+    if (rev == directed.end() || rev->second != 1) return false;
+  }
+  return true;
+}
+
+// A repair pass is kept only if the mesh is closed, consistently oriented, encloses
+// positive volume and keeps every face in `wanted` (the app's rule, StepMeshRepair).
+bool repair_accepted(const Tessellated& t, const std::set<int>& wanted) {
+  if (t.mesh.triangles.empty() || !check_watertight(t.mesh).watertight ||
+      !closed_and_oriented(t.mesh) || !(signed_volume(t.mesh) > 0.0))
+    return false;
+  const std::set<int> present(t.triangle_face.begin(), t.triangle_face.end());
+  return std::includes(present.begin(), present.end(), wanted.begin(), wanted.end());
+}
 
 }  // namespace
 
@@ -141,45 +228,38 @@ StepModel import_step_file(const std::string& path,
   BRepGProp::VolumeProperties(shape, props);
   model.brep_volume = props.Mass();
 
-  // Tessellate: BRepMesh writes a Poly_Triangulation into each face. The
-  // constructor performs the meshing at the requested linear/angular deflection.
-  BRepMesh_IncrementalMesh mesher(shape, tess.linear_deflection,
-                                  /*isRelative=*/Standard_False,
-                                  tess.angular_deflection,
-                                  /*isInParallel=*/Standard_True);
-  mesher.Perform();
-
-  VertexWelder welder;
-  std::vector<int> triangle_face;  // parallel to the welded triangles
-  // `face_id` advances once per B-rep face in TopExp order, matching the
-  // face_count enumeration above, so every triangle records the 0-based face
-  // it came from (ROADMAP M1.6 selects voxels by that id). Faces with no
-  // triangulation still consume an id (they own zero triangles).
-  int face_id = 0;
-  for (TopExp_Explorer e(shape, TopAbs_FACE); e.More(); e.Next(), ++face_id) {
-    const TopoDS_Face face = TopoDS::Face(e.Current());
-    TopLoc_Location loc;
-    const Handle(Poly_Triangulation) tri = BRep_Tool::Triangulation(face, loc);
-    if (tri.IsNull()) continue;
-    const gp_Trsf trsf = loc.Transformation();
-    // A REVERSED face's outward direction is opposite its parametric normal, so
-    // flip the winding to keep every triangle facing outward. With consistent
-    // outward winding, signed_volume (divergence theorem) returns +volume.
-    const bool reversed = face.Orientation() == TopAbs_REVERSED;
-    for (int i = 1; i <= tri->NbTriangles(); ++i) {
-      int a = 0, b = 0, c = 0;
-      tri->Triangle(i).Get(a, b, c);
-      if (reversed) std::swap(b, c);
-      const int ia = welder.add(tri->Node(a).Transformed(trsf));
-      const int ib = welder.add(tri->Node(b).Transformed(trsf));
-      const int ic = welder.add(tri->Node(c).Transformed(trsf));
-      welder.add_triangle(ia, ib, ic);
-      triangle_face.push_back(face_id);
+  Tessellated t = tessellate(shape, tess.linear_deflection, tess.angular_deflection);
+  // STEP MESH REPAIR (his 2040 Extrusion Stand, 2026-10-29: the app closed it since
+  // 2026-10-23 with StepMeshRepair.swift, the worker refused it "not watertight").
+  // A valid B-rep can tessellate with cracks: (T1) a pole of a degenerated edge (a
+  // sphere, or three fillets meeting) welds into a repeated-index sliver; (T2) a face
+  // whose wire has edges far below the deflection meshes with a hole. Only a
+  // NOT-watertight tessellation reaches this, so every watertight import is untouched.
+  if (!t.mesh.empty() && !check_watertight(t.mesh).watertight) {
+    Tessellated t1 = t;
+    const int dropped = drop_repeated_index_triangles(t1);
+    // Every face that owns a triangle with area must keep one.
+    const std::set<int> wanted(t1.triangle_face.begin(), t1.triangle_face.end());
+    if (repair_accepted(t1, wanted)) {
+      std::fprintf(stderr, "[step] mesh repaired: %d pole sliver(s) dropped (%s)\n", dropped,
+                   path.c_str());
+      t = std::move(t1);
+    } else {
+      for (const double fraction : {0.5, 0.25}) {
+        const double d = tess.linear_deflection * fraction;
+        BRepTools::Clean(shape);  // force BRepMesh to mesh again, finer
+        Tessellated tf = tessellate(shape, d, tess.angular_deflection);
+        const int n = drop_repeated_index_triangles(tf);
+        if (!repair_accepted(tf, wanted)) continue;
+        std::fprintf(stderr, "[step] mesh repaired: re-meshed at %.3g mm, %d pole sliver(s) dropped (%s)\n",
+                     d, n, path.c_str());
+        t = std::move(tf);
+        break;
+      }
     }
   }
-
-  model.mesh = welder.take();
-  model.triangle_face = std::move(triangle_face);
+  model.mesh = std::move(t.mesh);
+  model.triangle_face = std::move(t.triangle_face);
   if (model.mesh.empty())
     throw StepError("STEP tessellation produced no triangles: " + path);
   return model;

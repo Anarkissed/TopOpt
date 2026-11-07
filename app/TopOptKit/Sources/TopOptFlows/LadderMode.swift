@@ -41,7 +41,10 @@ public enum LadderMode: String, Equatable, Sendable, CaseIterable {
     public var title: String {
         switch self {
         case .reduction: return "Minimize plastic"
-        case .growth:    return "Add to strengthen"
+        // ★ REVIEWER RULING (B3, 2026-10-24): "Add to strengthen" read as add-only, but the growth
+        // ladder REDESIGNS THE WHOLE PART — on his part it removed 7.6–14.8 % of the plastic in
+        // places while adding elsewhere. The words now say what it does; the mode is unchanged.
+        case .growth:    return "Redesign to strengthen"
         }
     }
 
@@ -52,7 +55,7 @@ public enum LadderMode: String, Equatable, Sendable, CaseIterable {
         case .reduction:
             return "Remove as much plastic as possible while still meeting your safety margin."
         case .growth:
-            return "Add as little plastic as possible to meet your safety margin."
+            return "Redesign the whole part to meet your safety margin, adding as little plastic as possible; it may also remove plastic where the part does not need it."
         }
     }
 
@@ -61,7 +64,7 @@ public enum LadderMode: String, Equatable, Sendable, CaseIterable {
     public var summaryToken: String {
         switch self {
         case .reduction: return "minimize plastic"
-        case .growth:    return "add to strengthen"
+        case .growth:    return "redesign to strengthen"
         }
     }
 
@@ -73,7 +76,7 @@ public enum LadderMode: String, Equatable, Sendable, CaseIterable {
         case .reduction:
             return "Minimize plastic — recommending the LIGHTEST variant that meets your margin."
         case .growth:
-            return "Add to strengthen — recommending the SMALLEST addition that meets your margin."
+            return "Redesign to strengthen — recommending the SMALLEST net addition that meets your margin."
         }
     }
 

@@ -1,0 +1,2 @@
+control: side 6.15 mm · Top over the pocket 0.00 mm (0 vertices)
+fixed:   side 6.15 mm · Top over the pocket 4.12 mm (1875 vertices)

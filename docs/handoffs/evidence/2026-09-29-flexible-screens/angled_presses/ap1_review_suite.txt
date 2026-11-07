@@ -1,0 +1,77 @@
+# Angled presses (task 2026-10-07), batch AP1 REVIEW — the targeted suite, the goldens under both hash modes, the stage hashes
+# and the iOS build, after the review's fix (b64699a2; 0c410d97 = its tests-first red commit, ap1_review_red_runs.txt). App
+# only: no core, no bridge, no app project file; of the #354/main files none is touched (WorkspacePlaceholder, MetalMeshView,
+# LatticeSettings, ProjectModel, DesignSystem, ProjectStore). Track files: FlexiblePress, FlexiblePressReframe,
+# FlexibleSqueezeGroups, FlexibleStageModel+Presses, FlexibleStageModel (one comment line), FlexibleStagePage (one line in
+# history()). Debug, swift test --skip-build, this Mac. This branch still lacks #361's addendum (S1 blocked): "the base" is
+# AP0's (01ec5e3c).
+#
+# (1) TARGETED SUITE, unseeded, LatticeStaleTypeTests left out, run detached (nohup; watched by PID). ★ The filter now ALSO
+#     holds the 8 non-Flexible classes that read the whole Sources/TopOptFlows directory (they read every new or changed
+#     file): LatticeGradeToSolidBandTests, LatticeIncludeGateTests, LatticeModeTests, LatticeVariantFaceWallsTests,
+#     OrganicCapsuleImpostorTests, OrganicForecastRouteTests, ProtectFreezeVsSolidityTests, StrutLineWidthTests (AP1's
+#     filter missed them — the correction is noted in ap1_suite.txt). Source pins of the touched files: FlexibleStageModel.swift
+#     (FlexibleReadinessTests, FlexibleSettingsRound4Tests) and FlexibleStagePage.swift (12 classes) — all Flexible*.
+#     swift test --skip-build --filter 'TopOptFlowsTests\.(Flexible[A-Za-z0-9]*|ProjectStoreTests|UndoHistoryTests|LatticeSettingsPersistTests|ViewerTests|SmoothingPageRound2Tests|LatticeSimSolveTriggerTests|LatticeGradeToSolidBandTests|LatticeIncludeGateTests|LatticeModeTests|LatticeVariantFaceWallsTests|OrganicCapsuleImpostorTests|OrganicForecastRouteTests|ProtectFreezeVsSolidityTests|StrutLineWidthTests)/'
+   	 Executed 631 tests, with 36 tests skipped and 9 failures (0 unexpected) in 3164.356 (3164.417) seconds
+#   631 = AP1's 548 + the review's 12 + the 8 directory readers' 71. The 36 skips are AP0's / AP1's (10 RECORD=1 recorders,
+#   26 env-gated probes); one "FLEX-AP PART-SKIP" (the raw subtree bytes need deterministic hashing — section 2 runs them;
+#   the canonical subtrees and flexible blocks were compared). The 9 failures are in 2 tests, both known and pre-existing:
+#   - FlexibleBatchNVerifyTests.testEveryRefineLineIsWholeBesideTheLivePlayAllPicker (8) — the hosted layout test that
+#     fails alone at AP0 and AP1 (truncated "Simulating the squish…" etc. on 11" portrait); re-run ALONE after the review:
+#     "Executed 1 test, with 8 failures" — the same 8. It reads no press;
+#   - LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds (1) — known.
+#   FlexibleBatchNRefineTests (AP1's wall-clock flake) passed 4 of 4 in this run.
+#     FlexiblePressReviewTests: Executed 12 tests, with 0 failures (0 unexpected) in 0.984 (0.985) seconds
+#     FlexiblePressSaveTests: Executed 8 tests, with 0 failures (0 unexpected) in 1.338 (1.339) seconds
+#     FlexibleSqueezeGroupsPressTests: Executed 4 tests, with 0 failures (0 unexpected) in 0.867 (0.868) seconds
+#     FlexiblePressReframeTests: Executed 2 tests, with 0 failures (0 unexpected) in 0.066 (0.066) seconds
+#     FlexibleAngledGoldenTests: Executed 13 tests, with 0 failures (0 unexpected) in 13.688 (13.689) seconds
+#     LatticeGradeToSolidBandTests: Executed 11 tests, with 0 failures (0 unexpected) in 8.362 (8.363) seconds
+#     LatticeIncludeGateTests: Executed 8 tests, with 0 failures (0 unexpected) in 3.308 (3.309) seconds
+#     LatticeModeTests: Executed 17 tests, with 0 failures (0 unexpected) in 0.071 (0.073) seconds
+#     LatticeVariantFaceWallsTests: Executed 8 tests, with 0 failures (0 unexpected) in 2.176 (2.177) seconds
+#     OrganicCapsuleImpostorTests: Executed 4 tests, with 0 failures (0 unexpected) in 38.102 (38.103) seconds
+#     OrganicForecastRouteTests: Executed 4 tests, with 0 failures (0 unexpected) in 0.157 (0.157) seconds
+#     ProtectFreezeVsSolidityTests: Executed 7 tests, with 0 failures (0 unexpected) in 0.068 (0.068) seconds
+#     StrutLineWidthTests: Executed 12 tests, with 0 failures (0 unexpected) in 0.496 (0.497) seconds
+#     FlexibleReadinessTests: Executed 10 tests, with 0 failures (0 unexpected) in 3.534 (3.535) seconds
+#     FlexibleSettingsRound4Tests: Executed 14 tests, with 0 failures (0 unexpected) in 5.365 (5.366) seconds
+#     ProjectStoreTests: Executed 5 tests, with 0 failures (0 unexpected) in 0.022 (0.023) seconds
+#     UndoHistoryTests: Executed 10 tests, with 0 failures (0 unexpected) in 0.630 (0.631) seconds
+#     LatticeSettingsPersistTests: Executed 4 tests, with 0 failures (0 unexpected) in 0.003 (0.003) seconds
+#     ViewerTests: Executed 33 tests, with 0 failures (0 unexpected) in 0.186 (0.188) seconds
+#     SmoothingPageRound2Tests: Executed 21 tests, with 0 failures (0 unexpected) in 0.301 (0.302) seconds
+#     LatticeSimSolveTriggerTests: Executed 2 tests, with 1 failure (0 unexpected) in 0.011 (0.011) seconds
+#     FlexibleBatchNVerifyTests: Executed 4 tests, with 8 failures (0 unexpected) in 178.162 (178.162) seconds
+#   The review's 12 in that run:
+#     FlexiblePressReviewTests testAClashFaceKeepsItsLinkThroughTheReSync passed (0.010 seconds).
+#     FlexiblePressReviewTests testADirectionChangeIsTwoFrames passed (0.011 seconds).
+#     FlexiblePressReviewTests testADirectionThatIsNotFiniteOrHasNoLengthIsNeverStored passed (0.010 seconds).
+#     FlexiblePressReviewTests testAGroupThatOnlyPullsItsMembersNeverLinksAPress passed (0.001 seconds).
+#     FlexiblePressReviewTests testALinkedPressSitsInItsHandsGroup passed (0.000 seconds).
+#     FlexiblePressReviewTests testALinkedWeightIsTheSameBitsEveryCall passed (0.001 seconds).
+#     FlexiblePressReviewTests testAMemberChangeAndAReAimKeepTheFrameTheInputsWereDrawnIn passed (0.000 seconds).
+#     FlexiblePressReviewTests testAPressActionIsItsOwnUndoStepAndTheCardFollowsTheHistory passed (0.001 seconds).
+#     FlexiblePressReviewTests testAPressWhoseGroupDropsEveryMemberKeepsItsWeightUnlinked passed (0.001 seconds).
+#     FlexiblePressReviewTests testRemovingAPressLeavesItsMembersAsHeLeftThem passed (0.008 seconds).
+#     FlexiblePressReviewTests testTheFrameOfRecordRoundTripsThroughSaveAndLoad passed (0.019 seconds).
+#     FlexiblePressReviewTests testTiltThenStraightenLeavesHisSetupAndJobAsTheyWere passed (0.921 seconds).
+#
+# (2) GOLDENS + every press class under SWIFT_DETERMINISTIC_HASHING=1 (raw subtree bytes included):
+#     SWIFT_DETERMINISTIC_HASHING=1 swift test --skip-build --filter 'FlexibleAngledGoldenTests|FlexiblePressFixturesTests|FlexibleStageTests|FlexiblePressSaveTests|FlexibleSqueezeGroupsPressTests|FlexiblePressReframeTests|FlexiblePressReviewTests'
+   	 Executed 56 tests, with 0 failures (0 unexpected) in 19.200 (19.205) seconds
+#   43 "FLEX-AP GOLDEN … identical" lines (AP1's 42 + the review's his_r5_held_send_run_job.json after tilt + straighten), 0 DIFFERS, 0 skips.
+#   Unseeded, the same press classes + the goldens: Executed 39 tests, with 0 failures (13 goldens, 12 review, 8 save, 4 groups, 2 reframe).
+#   The ruling's "every existing face press is unchanged: job bytes and stage hashes identical" holds after the review.
+#
+# (3) STAGE-JOB HASHES (stage_job_hashes.sh, unchanged; frozen inputs checked): stage_job_hashes_ap1_review.txt — 16 of 16 rows
+#     and 13 of 13 source lines identical to stage_job_hashes_base.txt; control+ still moves the hash (31646a7163500d78).
+#
+# (4) iOS BUILD.
+#     xcodebuild -project app/TopOpt.xcodeproj -scheme TopOpt -configuration Debug -destination id=147E56A1-C8CA-4B9D-BE6C-CF230589A83A \
+#       -derivedDataPath /Users/nadim/Library/Developer/Xcode/DerivedData/flexA1 build   -> exit 70, unchanged since AP0:
+#       "CoreSimulator is out of date. Current version (1051.55.0) is older than build version (1171.7.0)" — Simulator device
+#       support disabled, the id is not found (a system update for the maintainer; not made here).
+#     The same with -destination 'generic/platform=iOS Simulator':  ** BUILD SUCCEEDED ** (60 s; FlexiblePress, FlexiblePressReframe,
+#       FlexibleSqueezeGroups, FlexibleStageModel+Presses, FlexibleStageModel and FlexibleStagePage compiled). The app was not launched.

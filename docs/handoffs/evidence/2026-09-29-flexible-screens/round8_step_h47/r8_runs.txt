@@ -1,0 +1,29 @@
+start 15:04:58 9b11b6dc + working tree
+build exit 0 15:05:01
+repair exit 0 15:05:32
+hooks exit 0 15:06:26
+paint exit 0 15:06:29
+appimport exit 1 15:06:35
+kitimport exit 0 15:06:37
+golden det exit 0 15:06:59
+golden unseeded exit 0 15:07:19
+hashes exit 0 15:08:38
+hashes cmp vs t3_reveal (whole file): identical
+ALLDONE 15:08:38
+
+repair.log: Executed 11 tests, with 0 failures (0 unexpected) in 25.517 (25.520) seconds
+hooks.log: Executed 30 tests, with 0 failures (0 unexpected) in 51.895 (51.904) seconds
+paint.log: Executed 21 tests, with 0 failures (0 unexpected) in 0.712 (0.718) seconds
+appimport.log: Executed 12 tests, with 8 failures (0 unexpected) in 2.720 (2.723) seconds
+kitimport.log: Executed 8 tests, with 0 failures (0 unexpected) in 0.036 (0.038) seconds
+golden_det.log: Executed 13 tests, with 0 failures (0 unexpected) in 18.268 (18.272) seconds
+golden_unseeded.log: Executed 13 tests, with 0 failures (0 unexpected) in 16.669 (16.672) seconds
+Test Case '-[TopOptFlowsTests.AppModelTests testReopenedThreeMFProjectReimportsTheStlWorkingCopy]' failed (2.702 seconds).
+Test Case '-[TopOptFlowsTests.AppModelTests testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance]' failed (0.002 seconds).
+Test Case '-[TopOptFlowsTests.AppModelTests testThreeMFImportOptimisesOnDeviceEndToEnd]' failed (0.001 seconds).
+golden_det: identical 38 DIFFERS 0 PART-SKIP 0
+golden_unseeded: identical 32 DIFFERS 0 PART-SKIP 1
+STEP-REPAIR Carriage_Arms pass=poleSlivers stockTris=9646 repairedTris=9638 dropped=8 deflection=0.1 (stock) faces=186
+STEP-REPAIR Pressing_Plate_Mount pass=poleSlivers stockTris=9418 repairedTris=9414 dropped=4 deflection=0.1 (stock) faces=180
+STEP-REPAIR Top_Motor_Mount pass=poleSlivers stockTris=12762 repairedTris=12752 dropped=10 deflection=0.1 (stock) faces=285
+STEP-REPAIR 2040_Extrusion_Stand pass=retessellated stockTris=3868 repairedTris=4454 dropped=2 deflection=0.05 faces=162

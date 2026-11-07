@@ -57,7 +57,7 @@ int main() {
       for (double c : cells)
         for (double w : widths) {
           ++n;
-          if (lattice_stated_density_unprintable(stated, c, w)) all_false = false;
+          if (lattice_stated_density_unprintable(LatticeTopology::Octet, stated, c, w)) all_false = false;
         }
     CHECK(n == (long long)(nothing_stated.size() * cells.size() * widths.size()),
           "the sweep actually ran every combination (a positive control: an "
@@ -76,8 +76,8 @@ int main() {
     bool quiet = true;
     for (double bad : {0.0, -1.0, -0.0})
       for (double w : widths) {
-        if (lattice_stated_density_unprintable(0.0, bad, w)) quiet = false;
-        if (lattice_stated_density_unprintable(0.25, bad, w)) quiet = false;
+        if (lattice_stated_density_unprintable(LatticeTopology::Octet, 0.0, bad, w)) quiet = false;
+        if (lattice_stated_density_unprintable(LatticeTopology::Octet, 0.25, bad, w)) quiet = false;
       }
     CHECK(quiet,
           "a non-derivable cell does not refuse through THIS branch — "
@@ -86,7 +86,7 @@ int main() {
     bool width_quiet = true;
     for (double c : cells)
       for (double badw : {0.0, -1.0})
-        if (lattice_stated_density_unprintable(0.25, c, badw)) width_quiet = false;
+        if (lattice_stated_density_unprintable(LatticeTopology::Octet, 0.25, c, badw)) width_quiet = false;
     CHECK(width_quiet,
           "an unset extrusion width does not refuse here either — the schema "
           "already refuses width 0, and guessing a default is the one thing "
@@ -99,12 +99,12 @@ int main() {
   {
     // 0.06 on a 2.7284 mm cell at a 0.42 mm nozzle: the measured case from
     // r4_refusals.txt, where the CLI quotes a 0.2740042783 mm strut.
-    CHECK(lattice_stated_density_unprintable(0.06, 2.7284, 0.42),
+    CHECK(lattice_stated_density_unprintable(LatticeTopology::Octet, 0.06, 2.7284, 0.42),
           "★ THE POSITIVE CONTROL — the measured too-light case still refuses, "
           "so the unreachability is not the trivial always-false function");
-    CHECK(!lattice_stated_density_unprintable(0.25, 2.7284, 0.42),
+    CHECK(!lattice_stated_density_unprintable(LatticeTopology::Octet, 0.25, 2.7284, 0.42),
           "and the measured printable case does not");
-    CHECK(!lattice_stated_density_unprintable(0.60, 2.7284, 0.42),
+    CHECK(!lattice_stated_density_unprintable(LatticeTopology::Octet, 0.60, 2.7284, 0.42),
           "nor the heavier one");
 
     // The frontier is the strut law itself, not a constant: at any cell, a
@@ -113,7 +113,7 @@ int main() {
     for (double c : cells)
       for (double w : widths)
         for (double rho : {0.06, 0.1385609912, 0.25, 0.5, 0.6, 0.89988}) {
-          const bool refuses = lattice_stated_density_unprintable(rho, c, w);
+          const bool refuses = lattice_stated_density_unprintable(LatticeTopology::Octet, rho, c, w);
           const bool thin = octet_strut_diameter_mm(rho, c) + 1e-12 < w;
           if (refuses != thin) frontier_agrees = false;
         }

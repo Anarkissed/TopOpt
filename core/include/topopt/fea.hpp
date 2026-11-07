@@ -3,6 +3,7 @@
 #include <array>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 #include "topopt/voxel.hpp"
@@ -361,7 +362,47 @@ struct DirichletBC {
   int node = 0;
   int component = 0;
   double value = 0.0;
+  // REAL BOLTS (bearing anchors, job key loads.anchor_model "bearing"; the reviewer's
+  // brief of 2026-10-25 20:10). An entry with spring > 0 is NOT a constraint: it is a
+  // penalty spring at `node`: `spring` N/mm along the unit `normal` (out of the part,
+  // into the bolt or support; a per-area stiffness times the node's area, so it does
+  // not stiffen toward a clamp as the grid refines), and across it a weak tangential
+  // spring `spring_tangent` N/mm (near-frictionless: the reviewer's ruling of
+  // 2026-10-25 21:45). `released`: the part pulls away there (the normal spring is in
+  // tension), so the node is held by NOTHING, neither normal nor tangential.
+  // `component` and `value` are unused. Every {node, component, value} entry is
+  // unchanged.
+  double spring = 0.0;
+  double spring_tangent = 0.0;
+  Vec3 normal{0.0, 0.0, 0.0};
+  bool released = false;
+  // false: a plain support spring, never part of a contact set (never released). LOAD
+  // SCENARIOS use one for an anchor that is OFF in a scenario: isotropic (spring ==
+  // spring_tangent), ~1e-6 of an anchor's stiffness, so the solve is never singular.
+  bool contact = true;
 };
+
+// True when `bcs` carries any spring (DirichletBC::spring > 0).
+bool has_springs(const std::vector<DirichletBC>& bcs);
+// REAL BOLTS — the contact set. True when `bcs` carries a bearing (contact) spring.
+bool has_contact_springs(const std::vector<DirichletBC>& bcs);
+
+// One contact update from a solved displacement field `u` (DOF-ordered, size 3 x
+// node count): a spring whose node clearly moves away from its support (u . normal <
+// -tol) is released, a released one that clearly presses (u . normal > +tol) is
+// engaged again, and one inside that band keeps its state (tol = 1e-3 of the largest
+// |u . normal|: without the band the edge of the contact chatters). A change that would leave
+// NO spring engaged is not applied (`kept_last`): a support that holds nothing is a
+// singular system, never solved. When the set changes, the caches built on the old
+// operator are dropped (the Krylov recycling space, the GenEO basis, the safe retry's
+// consecutive-failure count; the stagnation latch keeps its shipped rule).
+struct ContactUpdate {
+  int changed = 0;
+  int engaged = 0;
+  int released = 0;
+  bool kept_last = false;
+};
+ContactUpdate contact_update(std::vector<DirichletBC>& bcs, const std::vector<double>& u);
 
 // A nodal force `value` applied to (node, component). A point load is one
 // entry; a distributed load is the same force split across several nodes.
@@ -500,6 +541,7 @@ struct CgInfo {
   //                       system; 3 = basis (RE)BUILT — first build via the
   //                       stagnation trigger, or a scheduled degradation /
   //                       DOF-set rebuild; 4 = build REFUSED by the memory cap
+  //                       or by N_t over the dense coarse cap
   //                       (solve stayed plain Jacobi-CG — exact, just slower);
   //                       5 = DECLINED by the ENGAGEMENT GATE (handoff
   //                       2026-08-02-geneo-disarm): a basis WAS held and this
@@ -646,6 +688,47 @@ struct SolverDeadlineExceeded : public SolverNonConvergence {
   SolverDeadlineExceeded(const std::string& what_arg, int iterations_,
                          double residual_)
       : SolverNonConvergence(what_arg, iterations_, residual_) {}
+};
+
+// ---------------------------------------------------------------------------
+// THE SAFETY NET (ruling 2026-10-25, item 5: "it shouldn't hang at all";
+// limits set by the independent review of 2026-10-26).
+//
+// A BACKSTOP, not a tight limit. Every matrix-free Jacobi-CG solve — the MG
+// solve's fallback and the plain matrix-free CG — carries:
+//   * a WALL CLOCK of kSolverSafetyNetMs = 45 minutes of SOLVING per solve,
+//     polled every kSafetyNetPollIters = 16 CG iterations, always armed.
+//     GenEO's setup never counts (the deadline moves forward by each setup
+//     span; a build that gives up at the deadline, or is refused, leaves plain
+//     CG going), and neither does a PAUSE (a gap between two polls longer than
+//     30 s — the worker's SIGSTOP — moves the deadline forward by the gap).
+//     Past it the solve throws SolverStopped and THE JOB STOPS: the CLI writes
+//     the report it was asked for with status "stopped" and
+//     kSolverStoppedMessage, naming the job, says the same on stderr, exits 4,
+//     and ships no result. It is deliberately NOT a SolverNonConvergence, so no
+//     rung-rejection / certification catch absorbs it.
+//   * an ITERATION CAP, when the caller set none: min(max(1000, 2 ng), 250,000)
+//     on the MG solve's fallback, min(2 ng, 250,000) on the plain CG
+//     (fea_detail::kFallbackIterCap). Reaching it is a SolverNonConvergence, as
+//     it always was: that rung is rejected and the search goes on.
+// The root fix makes it a net and not a timer: every solve takes its loose
+// pieces out first (fea_matfree_last_dropped_islands). A run that never trips
+// it is bit-identical (the poll reads a clock and changes no arithmetic).
+inline constexpr const char* kSolverStoppedMessage =
+    "stopped: the solver did not converge";
+inline constexpr double kSolverSafetyNetMs = 45.0 * 60.0 * 1000.0;  // 45 min of solving
+struct SolverStopped : public std::runtime_error {
+  SolverStopped(const std::string& detail_, int iterations_, double residual_,
+                double elapsed_ms_)
+      : std::runtime_error(std::string(kSolverStoppedMessage) + " (" + detail_ + ")"),
+        detail(detail_),
+        iterations(iterations_),
+        residual(residual_),
+        elapsed_ms(elapsed_ms_) {}
+  std::string detail;  // which solve, which limit
+  int iterations;      // CG iterations when it stopped
+  double residual;     // relative residual when it stopped
+  double elapsed_ms;   // wall time of the solve when it stopped
 };
 
 // Solve the same global linear-elastic system as fea_solve, but with a Jacobi
@@ -1269,6 +1352,123 @@ long long fea_geneo_decisions_dropped();
 // is for tests/diagnostics. Both are inert off the matrix-free multigrid path.
 void fea_matfree_reset_mg_stagnation_latch();
 bool fea_matfree_mg_stagnation_latched();
+// REAL BOLTS: only the safe retry's consecutive-failure count, for a contact-set
+// change mid-run (the operator changed; the latch keeps its shipped rule).
+void fea_matfree_reset_mg_safe_failures();
+
+// SAFE-SMOOTHER RETRY (thin-wall solver cure S3 + S5 gate + arm G). The shipped
+// V-cycle smoother (damped Jacobi, omega = 0.6) is formally unsafe on a hex8 at
+// nu >= ~0.3 (lambda_max(D^-1 A) ~ 5-9 > 2/omega); healthy parts converge
+// despite it. When the shipped matrix-free MG-CG has ALREADY stalled (cycle
+// budget exhausted or breakdown), the solve now retries MG-CG once with an
+// l1-Jacobi smoother (lambda_max(D_l1^-1 A) <= 1 by construction) before the
+// Jacobi-CG fallback; if it does not reach tolerance its iterate seeds that
+// fallback. A solve that converges on the shipped path never reaches any of
+// this, so it is bit-identical.
+//
+// THE CONNECTION RULE (ruling 2026-10-25) — on EVERY matrix-free solve of the
+// graded isotropic operator, before the shipped attempt: the LOOSE pieces —
+// FACE-connected (6-connected) components of the solid voxels (E >= 1e-3 Emax)
+// that touch no node carrying a Dirichlet BC or a non-zero load — are solved at
+// the FLOOR modulus (the void's), whatever their size, frozen or not. A piece
+// that reaches the body only through an edge or a corner contact is a hinge,
+// carries no load, and is loose. The shipped MG-CG, the safe retry and the Jacobi-CG fallback
+// solve that one system; an empty loose set leaves the solve exactly as it
+// was. It replaces the old in-retry island drop (arm G: <= 27 voxels, isolated,
+// unfrozen, <= 5 % of elements, only under a FeaIslandDropPermit).
+// In a CERTIFIED solve (under a FeaIslandDropForbid: certification, the final
+// compliance, analysis) a piece is loose only if it is not even 26-connected
+// (edge / corner contacts included) to an anchor or a load — the connectivity
+// the acceptance check (load_path_connected) assumes — so a piece hinged to
+// the anchored body is solved at its true stiffness and its stress is read
+// (review 2026-10-26, R4). Trajectory / search solves keep the FACE rule. Per-run state resets with
+// fea_matfree_reset_mg_stagnation_latch(); a latched run (3 shipped stalls)
+// goes straight to the safe path, and 3 consecutive UNPRODUCTIVE safe attempts
+// (neither converged nor cut the residual 10x) latch it off too (today's
+// Jacobi-only behaviour). ON by default; the switch is for tests and A/B
+// measurement.
+void fea_matfree_set_mg_safe_retry(bool enable);
+bool fea_matfree_mg_safe_retry_enabled();
+long long fea_matfree_mg_safe_engagements();  // retries run since the reset
+long long fea_matfree_mg_safe_carries();      // ... of which CONVERGED
+bool fea_matfree_mg_safe_latched();
+// The voxels (ascending grid indices) the LAST matrix-free solve on this thread
+// solved at the floor modulus — its LOOSE pieces (the connection rule) — and
+// that modulus. Empty / 0 when it had none. A caller that computes energies,
+// sensitivities or stresses from the solution must treat these voxels as the
+// floor material they were solved as (they carry no load).
+const std::vector<int>& fea_matfree_last_dropped_islands();
+double fea_matfree_last_dropped_floor_youngs();
+// RAII scopes (thread-local, nestable). They gated the old arm-G drop (off
+// unless a permit was held; a forbid overrode every permit). Under the
+// connection rule every solve takes its loose pieces out; a FORBID now marks a
+// CERTIFIED solve, in which "loose" means not even 26-connected to an anchor or
+// a load (see above), and the certification reads zero stress on such a piece
+// (analyze.cpp). A permit changes nothing; it is kept so callers compile and so
+// mg_island_permit_stats can still observe the scopes.
+void fea_matfree_island_drop_scope_enter(bool permit);
+void fea_matfree_island_drop_scope_exit(bool permit);
+struct FeaIslandDropPermit {
+  FeaIslandDropPermit() { fea_matfree_island_drop_scope_enter(true); }
+  ~FeaIslandDropPermit() { fea_matfree_island_drop_scope_exit(true); }
+  FeaIslandDropPermit(const FeaIslandDropPermit&) = delete;
+  FeaIslandDropPermit& operator=(const FeaIslandDropPermit&) = delete;
+};
+// The run's FROZEN voxels (grid-indexed, non-zero = frozen/protected). The
+// connection rule solves a loose frozen piece at the floor like any other; the
+// mask only lets the census COUNT them (frozen_loose). Without a registered mask
+// the census's proxy is a full-modulus voxel; Load / Fixture voxels are frozen.
+// RAII, thread-local, restores the previous mask; the pointee must outlive it.
+const std::vector<char>* fea_matfree_set_island_keep_mask(const std::vector<char>* m);
+struct FeaIslandKeepMask {
+  explicit FeaIslandKeepMask(const std::vector<char>* m)
+      : prev_(fea_matfree_set_island_keep_mask(m)) {}
+  ~FeaIslandKeepMask() { fea_matfree_set_island_keep_mask(prev_); }
+  FeaIslandKeepMask(const FeaIslandKeepMask&) = delete;
+  FeaIslandKeepMask& operator=(const FeaIslandKeepMask&) = delete;
+ private:
+  const std::vector<char>* prev_;
+};
+struct FeaIslandDropForbid {
+  FeaIslandDropForbid() { fea_matfree_island_drop_scope_enter(false); }
+  ~FeaIslandDropForbid() { fea_matfree_island_drop_scope_exit(false); }
+  FeaIslandDropForbid(const FeaIslandDropForbid&) = delete;
+  FeaIslandDropForbid& operator=(const FeaIslandDropForbid&) = delete;
+};
+
+// THE CONNECTION RULE, OFF, for a caller that is not a SIMP / level-set
+// density solve (the Flexible stage's squish FE: a graded field whose soft
+// lattice is a real material, not void) — RAII, thread-local, nestable. Inside
+// it no census runs and the solve is exactly the system its moduli describe,
+// as before the rule existed (review 2026-10-26, R5).
+#define TOPOPT_LOOSE_RULE_OFF_SCOPE 1
+void fea_matfree_loose_rule_off_enter();
+void fea_matfree_loose_rule_off_exit();
+struct FeaLoosePieceRuleOff {
+  FeaLoosePieceRuleOff() { fea_matfree_loose_rule_off_enter(); }
+  ~FeaLoosePieceRuleOff() { fea_matfree_loose_rule_off_exit(); }
+  FeaLoosePieceRuleOff(const FeaLoosePieceRuleOff&) = delete;
+  FeaLoosePieceRuleOff& operator=(const FeaLoosePieceRuleOff&) = delete;
+};
+
+// THE CONNECTION RULE, on a DESIGN (not a solve): the same classifier the
+// solves use — face-connected pieces of `solid` (non-zero = material; voxels
+// tagged Empty never count), LOOSE iff no element node of the piece carries a
+// Dirichlet BC or a non-zero load — for a caller that must clean a design before
+// handing it on (strengthen's coarse-to-fine hand-off). `loose` holds every
+// loose voxel, ascending; `ms` is the flood fill's wall time.
+struct LoosePieceCensus {
+  int pieces = 0;               // face-connected pieces of `solid`
+  int loose = 0;                // ... of which touch no support or load
+  long long loose_voxels = 0;
+  int largest_loose = 0;
+  std::vector<int> loose_voxel; // ascending grid indices
+  double ms = 0.0;
+};
+LoosePieceCensus fea_loose_pieces(const VoxelGrid& grid,
+                                  const std::vector<char>& solid,
+                                  const std::vector<DirichletBC>& bcs,
+                                  const std::vector<NodalLoad>& loads);
 
 // MEASUREMENT-ONLY latch RE-ARM (task solver-speed-arm-and-diagnose). Handoff
 // 2026-07-27-mg-stagnation-phase0 refuted the rung-boundary re-arm on synthetic

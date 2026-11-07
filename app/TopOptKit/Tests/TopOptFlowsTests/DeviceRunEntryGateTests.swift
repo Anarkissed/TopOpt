@@ -61,24 +61,12 @@ final class DeviceRunEntryGateTests: XCTestCase {
         let job = try deviceJob()
         XCTAssertTrue(RetainedJobFacts.parse(job).declaresDesignBox,
                       "this run DID use a design box — that is the premise")
-        let lc = try SmoothRecertLoadCase.fromRetainedJob(job)
-        XCTAssertEqual(lc.material, "PLA")
-        XCTAssertEqual(lc.resolution, 64)
-        XCTAssertEqual(lc.anchorFaceIDs, [8, 14, 12])
-        XCTAssertEqual(lc.loadGroups.count, 1)
-        XCTAssertEqual(lc.freeze.count, 3, "the three keep-clear bores survive")
+        // ★ RE-PINNED (UI-Notes B4, plan.md §B4: "The Smooth page is deleted"; core finishes every result, E1): the re-certification load case went with the Smooth page
     }
 
     // MARK: - the two entries, on the real document
 
-    /// SMOOTH. A worker run that kept a parseable job document has a load case to
-    /// re-certify under, so the entry is ENABLED.
-    func testSmoothIsAvailableOnTheDeviceRun() throws {
-        let v = VariantEntry.smoothing(deviceFacts(job: try deviceJob()))
-        XCTAssertTrue(v.enabled,
-                      "Smooth is blocked on a run that kept everything it needed: "
-                      + (v.allReasons.first ?? "—"))
-    }
+    // ★ RE-PINNED (UI-Notes B4, plan.md §B4: "The Smooth page is deleted"; core finishes every result, E1): no Smooth entry.
 
     /// LATTICE — THE REGRESSION PR 285 LEFT BEHIND.
     ///

@@ -1,0 +1,6 @@
+# Can an offscreen hosted test drive a SwiftUI DragGesture? (2026-10-17 23:27) — NO.
+# A 300x300 view with DragGesture(minimumDistance: 4), hosted in an offscreen NSWindow like every round-7 hosted test:
+#  route 1: window.sendEvent(leftMouseDown / 10x leftMouseDragged / leftMouseUp)  route 2: hitTest view's mouseDown/mouseDragged/mouseUp
+ZZDRAG changed 0 ended 0
+ZZDRAG2 NSHostingView<ModifiedContent<ModifiedContent<ModifiedContent<Color, _FrameLayout>, _ContentShapeModifier<Rectangle>>, AddGestureModifier<_EndedGesture<_ChangedGesture<DragGesture>>, DefaultGestureCombiner>>> changed 0 ended 0
+# So the chip's drag is checked by its math (FlexibleFaceChipLayout.dragged / released, FlexibleFaceChipTests) and the page honouring a kept spot (hosted S5), and its wiring by a source pin.

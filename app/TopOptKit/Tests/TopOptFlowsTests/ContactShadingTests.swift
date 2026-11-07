@@ -236,11 +236,9 @@ final class ContactShadingTests: XCTestCase {
 
     // MARK: PNG capture helper
 
-    /// The docs/handoffs/assets directory (worktree root ÷ app/TopOptKit/Tests/TopOptFlowsTests).
-    private func assetsDir(file: StaticString = #filePath) -> URL {
-        var url = URL(fileURLWithPath: "\(file)")
-        for _ in 0..<5 { url.deleteLastPathComponent() }   // …/ContactShadingTests.swift → worktree root
-        return url.appendingPathComponent("docs/handoffs/assets", isDirectory: true)
+    /// The docs/handoffs/assets directory — its temp twin unless TOPOPT_EVIDENCE_TO_REPO=1 (EvidenceOut, 11-06).
+    private func assetsDir() -> URL {
+        EvidenceOut.dir("docs/handoffs/assets")
     }
 
     private func writeCapture(_ bgra: [UInt8], _ name: String) {

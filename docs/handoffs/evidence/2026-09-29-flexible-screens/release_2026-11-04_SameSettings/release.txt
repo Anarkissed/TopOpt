@@ -1,0 +1,14 @@
+# Release 6935ae60 — 2026-11-04 SameSettings (UI-Notes' app batch up to a142d732), app only, released before review (his 11-03 pick)
+# Core and worker unchanged: fingerprint 6c5a6fbaa842; "fingerprint": "6c5a6fbaa842"
+# Merged onto 97a99076; the merged app tree equals a142d732's, so the builder's tests apply unchanged.
+# Commits:
+#   bf1a72d3 B5 (note 3, the reviewer's (a)): a Library version with nothing changed reads "Same settings as v6", also after a reopen
+#   a142d732 Merge UI-Notes' B5 "Same settings as vN" (bf1a72d3) into B9: a Library version whose setup matches its run greys Optimize with "Same settings as v6", also after a reopen
+#   6935ae60 Release 2026-11-04: merge B9 a142d732 — UI-Notes' B5 "Same settings as vN" (bf1a72d3): a Library version whose setup matches its run greys Optimize with "Same settings as v6", also after a reopen (app only; core and worker unchanged at 6c5a6fbaa842)
+# Gates:
+#   20:37 checks ok: SameSettings, local 6935ae60 over origin 97a99076 (3 commits); app tree == a142d732's, fingerprint 6c5a6fbaa842
+#   20:37 waiting for HEAVY.lock (free)
+#   20:37 lock taken
+#   20:42 iPad device build green; lock released
+#   20:42 pushed 6935ae60
+#   20:42 worker /health "fingerprint": "6c5a6fbaa842" (unchanged, no swap)

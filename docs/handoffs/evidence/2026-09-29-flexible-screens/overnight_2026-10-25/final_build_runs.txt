@@ -1,0 +1,104 @@
+# Overnight 2026-10-25, final build steps on #362 (claude/flexible-screens). This Mac, macOS 27, Xcode 27.0.
+# Merge only (--no-ff); nothing rebased, forced, amended or stashed; NOT pushed. The worker's CLI was NOT swapped;
+# core/build-fix, core/build-cifix2 and the TopOpt Worker app were not touched; nothing installed.
+
+## COMMITS
+#   400dc1cc  Merge core-solver-stall-fix 393c7244 (git fetch /Users/nadim/dev/TopOpt/worker-core-61cfce05 core-solver-stall-fix)
+#             dd12576e "the l1 retry never starts worse than a cold start" + 393c7244 "a cold-start retry gets a 2500-cycle
+#             first progress window", on 179589b0 (already in #362). 5 files: core/CMakeLists.txt (+2), fea_matfree.hpp,
+#             multigrid.cpp, tests/unit/test_mg_safe_retry.cpp, + fixture tests/fixtures/mg_safe/demo_lbracket_selfweight_solve1.txt.
+#   a3f870c9  Flexible (PR #362) H56k-m (app; RedesignToStrengthen.swift, WorkspacePlaceholder.swift, RedesignToStrengthenTests.swift)
+#             H56k  a "merged" version (core writes no variants[] line: run_job.cpp strengthen_versions `continue`s before
+#                   append_rung; note "the same design as version N", N = this version − 1) reads BRIDGED from the line of
+#                   the version it merged into (walked back over merged/unreachable = core's prev_vf).
+#             H56l  cap line from cap.at_anchor_face / cap.at_load_face ONLY: "The strongest possible version is limited at an
+#                   anchor" / "... limited at the load"; both true -> anchor (core's own precedence); neither -> no line.
+#                   cap.note is never parsed. Shown above item 47's line (StrengthenText.lines, RunReportCardsView).
+#             H56m  StrengthenRoute.refusal: worker + minimize_plastic job + Minimize plastic off + no design box ->
+#                   "Draw a design box first" (toast in startRun, nothing sent). Before: no redesign key, the growth job ran.
+#                   On device unchanged (the strengthen redesign is not offered there: "Runs on your Mac").
+#             RED first (H56klm_red_run.log, stubs): 5 new tests red — merged x2 (old rule read [true, false, false]),
+#             cap, refusal, hook pins. GREEN (H56klm_green_run.log): RedesignToStrengthenTests 16/16 + LatticeStaleTypeTests 6/6
+#             + SeveralRolesOnOneFaceTests 9/9 + GrowthLadderTests + JobJSONEquivalenceTests = 48/48. Pins: H56k-own, H56k-walk,
+#             H56l-line, H56l-view, H56m-rule, H56m-start, each once with its gate; the gate-removed control covers them.
+#   (this file's commit: docs only)
+
+## FINGERPRINT 180a23637fc6
+#   printf '%s\n%s\n' "$(git rev-parse HEAD:core)" "$(git rev-parse HEAD:app/scripts/build_core.sh)" | shasum | cut -c1-12
+#   at a3f870c9 -> 180a23637fc6 (core/ and build_core.sh are identical at 400dc1cc and a3f870c9).
+#   NOTE (order): build_core.sh ran 06:26:41-06:31:19 at 400dc1cc with the H56k-m app edits uncommitted (to red-first the
+#   tests against a core whose headers match core/include). The fingerprint is the tree hash of core/ + build_core.sh only;
+#   tracked core/ was clean, so the stamp is the same value a3f870c9 gives (not dirty).
+
+## APP CORE: app/scripts/build_core.sh, exit 0
+#   MANIFOLD_ROOT=/Users/nadim/dev/TopOpt/TopOpt/.vcpkg/installed-manifold VCPKG_ROOT=/Users/nadim/dev/TopOpt/TopOpt/.vcpkg
+#   LIB3MF_PREFIX=/nonexistent-keep-macos-slice-3mf-free  ("==> lib3mf: (none) — macOS slice is 3MF-free";
+#   "==> Manifold: .../installed-manifold (KEEP regions exported exactly)")
+#   slice stamps (app/.build-core/<slice>/generated/fingerprint): macos 180a23637fc6 · iossimulator 180a23637fc6 · iphoneos 180a23637fc6
+#   CoreFingerprint.generated.swift: value "180a23637fc6", buildTime "Oct 25 2026 06:31:19" (no -dirty-)
+#   vendor/TopOptCore.xcframework libtopopt.a:  nm | grep -c manifold   strings | grep -c mg-safe   sha256
+#     macos-arm64          8 674 424 B   1210   4   f0f0c61bd746469c...
+#     ios-arm64-simulator  8 769 328 B   1210   4   553f096f5506c278...
+#     ios-arm64            8 671 072 B   1210   4   5a49c0d5e9b7fcbf...
+
+## CLI: app/scripts/build_cli_macos.sh, exit 0, 06:34:47-06:36:15 (same tree)
+#   VCPKG_ROOT=/Users/nadim/dev/TopOpt/TopOpt/.vcpkg MANIFOLD_ROOT=/Users/nadim/dev/TopOpt/TopOpt/.vcpkg/installed-manifold
+#   TOPOPT_CLI_BUILD_DIR=<worktree>/core/build-cli-180a23637fc6 (new, untracked)
+#   --version: topopt-cli: core 180a23637fc6 (dirty=false), built Oct 25 2026 06:36:14
+#              topopt-cli version=0.1.0 fingerprint=180a23637fc6 dirty=false
+#   sha256 86a28b1dfccd75532e16612c50d97df3f99dcf55e2d9a5f42e6fe5aa93d0325f (5 793 720 B); mg-safe strings 4; nm manifold 749
+#   copied (cp -p): /Users/nadim/dev/TopOpt/worker-bin/180a23637fc6/topopt-cli (same sha256). NOT swapped.
+
+## CORE: ctest in core/build-cli-180a23637fc6 (cmake --build -j 6 first), 06:37:51-07:46:01
+#   100% tests passed out of 158 (Total Test time 4090.09 s)
+#   build_fingerprint_rebuild 9.70 s · fea_mg_safe_retry 74.44 s · cli_demo 1973.57 s · cli_run_info_fingerprint 4.50 s ·
+#   strengthen 93.37 s · keep 42.51 s — all Passed.
+#   NOTE: started at 1-min load 12.30 (the tail of my own -j 6 test build, which ended 34 s before; 5-min 6.06).
+
+## APP: swift build --build-tests --scratch-path /tmp/r7x20b-build (app/TopOptKit) at the H56k-m tree: Build complete! (42.61 s)
+#   TopOptKitTests (full target, 80 tests): 07:12:54-07:15:41, start load 5.95 (alongside ctest's cli_demo, which has no timing checks)
+#     Executed 80 tests, with 4 tests skipped and 0 failures
+#   TopOptFlowsTests (full target, 4089 tests): 07:16:20-12:44:59, start load 5.15 (ctest's tail ran alongside until 07:46)
+#     Executed 4089 tests, with 183 tests skipped and 91 failures (0 unexpected) in 19715.616 s — 39 tests failed:
+#   (a) KNOWN, allowed (#354's handoff 2026-10-24-redesign-build.md "Known failing tests" + the brief's list): 6
+#       AppModelTests.testReopenedThreeMFProjectReimportsTheStlWorkingCopy, .testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance,
+#       .testThreeMFImportOptimisesOnDeviceEndToEnd (no macOS lib3mf); LatticeCellGradingTests.testGradingChangesTheRenderedLattice;
+#       OrganicSampleCubeTests.testThickerIsLiveAndNeverRetraces; OrganicVariantCacheTests.testTheKeyIgnoresThicknessAndFollowsCoreAndTopology.
+#       (LatticeSlotOriginTests.testTheAppWithholdsExactlyWhatCoreRefuses and LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds PASSED.)
+#   (b) LOAD FLAKES — re-run ALONE at 1-min load < 6, passed: 2
+#       FlexibleR7U21ImportSheetHostedTests.testFilamentAndResinWriteProcessAsToday (12:49:51, load 4.43, 0 failures; same flake as rebuild 2)
+#       FlexibleU2Tests.testU21ConfirmKeepSitsOnTheTappedControl (12:52:12, load 4.50, 0 failures)
+#   (c) FAIL ALONE (12:45-12:52, each alone, load 4.2-5.5): 31 hosted tests in the 10 classes that host WorkspacePlaceholder
+#       and reach the Lattice/Flexible stage by clicking (width − PageChrome.gizmoClearance − 62, gizmoAlignedTop + compactButton/2):
+#       FlexibleH39HostedTests 1, FlexibleI2AttachHostedTests 8, FlexibleLatticeIsProtectedHostedTests 1, FlexibleR7D2ReviewHostedTests 5,
+#       FlexibleR7E1FollowUpHostedTests 1, FlexibleR7U21CHandlesHostedTests 3, FlexibleRound7D1ReviewHostedTests 1,
+#       FlexibleRound7DesignIntegrationHostedTests 5, FlexibleRound7ScreenHostedTests 1, FlexibleRound7SelectionsHostedTests 5.
+#       Messages: "premise: the Flexible stage" / "the stage's model" nil / H39's "POSITIVE CONTROL: Topology draws the Regions toggle".
+#       CAUSE: the #354 sync merge 2949a032 (B3/B5) deleted the Topology "WAY FORWARD" column (top-right, left of the gizmo) —
+#       "no stage draws them (drawsForwardButtons is false everywhere)"; Topology's stage buttons are now its ● capsule menu.
+#       The click lands on nothing. Not caused by 400dc1cc (core only) or a3f870c9 (a guard in startRun + RedesignToStrengthen.swift).
+#       The last full suite (rebuild 2, before the sync) had all of these passing; no full suite ran between 2949a032 and now.
+#       NOT FIXED, NOT BACKED OUT: from 12:43 another session has these exact 19 test files modified (uncommitted) in this
+#       worktree — FlexiblePressFixtures.enterLatticeStage, "★ SYNC #354 (89af86dd): no forward buttons since B5 — the
+#       ● Topology menu's lattice row" — and runs them in /tmp/r7x20b-build2. Left untouched and out of every commit here.
+
+## GOLDENS: FlexibleAngledGoldenTests + LatticeStaleTypeTests
+#   SWIFT_DETERMINISTIC_HASHING=1: Executed 19 tests, 0 failures — 38 "GOLDEN … identical", 0 DIFFERS, 0 PART-SKIP
+#   unseeded:                       Executed 19 tests, 0 failures — 32 identical, 0 DIFFERS, 1 PART-SKIP (as every earlier round)
+
+## STAGE-JOB HASHES: angled_presses/stage_job_hashes.sh, SWIFT_TEST_ARGS="--scratch-path /tmp/r7x20b-build", exit 0
+#   16 rows, each "exit 0 … repeats 3: identical"; control+ moves, control- does not.
+#   stage_job_hashes_final.txt (this folder) is byte-identical (cmp) to sync354_89af86dd/stage_job_hashes_sync354.txt.
+
+## iOS DEVICE BUILD: scheme TopOpt (app/TopOpt.xcodeproj; schemes: TopOpt, TopOptDesign, TopOptFlows, TopOptKit, TopOptOCCT)
+#   xcodebuild -project app/TopOpt.xcodeproj -scheme TopOpt -destination 'generic/platform=iOS' -configuration Debug
+#     -derivedDataPath /tmp/claude-501/dd_ios -jobs 4 build CODE_SIGNING_ALLOWED=NO   06:37:59-06:39:16
+#   ** BUILD SUCCEEDED ** (fresh DerivedData). TopOpt.app/TopOpt.debug.dylib: "180a23637fc6" 1, "mg-safe" 4. Not installed.
+#   git status unchanged by the build. NOTE: started at 1-min load 13.95 (ctest had just started).
+
+## LEFT AS FOUND / RESTORED
+#   The full TopOptFlowsTests run rewrote 23 tracked artifact files (docs/handoffs/assets/120_contact_*, 134_*, round6_*,
+#   tap_overselect_*; evidence/2026-07-25-numeric-input/*, 2026-07-26-plane-extents/*, 2026-08-08-smoothing…/r3_usable_path.txt +
+#   s1c_stroke_latency.txt, 2026-09-02-organic…/v16_mac_capsules_shipped_{0,1}.png, 2026-09-08-wetted-join/*), all with mtimes
+#   inside the run (07:16-12:44): restored with git checkout. #354's r4_preview_latency.txt / r6_sample_after.png were not touched.
+#   Untracked and not committed: core/build-cli-180a23637fc6/ (and the older core/build-cli-b21c5d9a8311/).

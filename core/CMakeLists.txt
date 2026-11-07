@@ -6,6 +6,22 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# ★ THE CORE BUILD FINGERPRINT IS TAKEN AT BUILD TIME (item 44). An always-run
+# target restamps <build>/generated/fingerprint/topopt_build_fingerprint.h on
+# every build (rewritten only when it changes): a TREE hash of everything that
+# changes the built core — HEAD's core/ tree and app/scripts/build_core.sh —
+# plus "-dirty-<diff8>" when tracked files under either differ from HEAD. A
+# docs-only or app-only commit leaves it unchanged. It used to be an
+# execute_process here at CONFIGURE time, so a rebuild after a new commit kept
+# the old SHA until cmake was re-run, and a binary built from uncommitted
+# changes claimed a clean commit; then it was the HEAD commit, which every
+# docs commit moved. topopt-cli (--version, run_info.json) and
+# app/scripts/build_core.sh (the app's CoreFingerprint) both read this target.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/TopoptFingerprintTarget.cmake")
+topopt_add_fingerprint_target(topopt_fingerprint "${CMAKE_CURRENT_SOURCE_DIR}"
+                              "${CMAKE_CURRENT_BINARY_DIR}/generated/fingerprint"
+                              "../app/scripts/build_core.sh")
+
 # CI configures with -DTOPOPT_REQUIRE_DEPS=ON so the pipeline proves the
 # locked dependencies (ARCHITECTURE.md §4) are installed and findable.
 option(TOPOPT_REQUIRE_DEPS "Fail configure unless OCCT, Eigen and lib3mf are found" OFF)
@@ -13,6 +29,7 @@ if(TOPOPT_REQUIRE_DEPS)
   find_package(OpenCASCADE CONFIG REQUIRED)
   find_package(Eigen3 CONFIG REQUIRED)
   find_package(lib3mf CONFIG REQUIRED)
+  find_package(manifold CONFIG REQUIRED)
 else()
   # Optional locally: if OCCT is installed the STEP importer (M1.4) builds and
   # its test runs; if not, the OCCT-free targets (materials, STL) still build so
@@ -28,6 +45,10 @@ else()
   # lib3mf (DEPS=ON), so the 3MF round-trip always runs in the pipeline; the STL
   # export/round-trip is pure C++/std and builds regardless.
   find_package(lib3mf CONFIG QUIET)
+  # Manifold (mesh booleans for KEEP regions' exact export; CORE LIST item KEEP).
+  # From vcpkg through core/vcpkg-ports/manifold (serial, no TBB); locally pass
+  # -Dmanifold_DIR=<.vcpkg/installed-keep/<triplet>/share/manifold>.
+  find_package(manifold CONFIG QUIET)
 endif()
 
 # ★ A SMALLER SUITE THAN CI'S MUST SAY SO, LOUDLY (task
@@ -97,9 +118,20 @@ add_library(topopt
   # including the dependency-free iOS slices.
   src/mesh/cad_project.cpp
   src/mesh/surface_operator.cpp
+  src/mesh/finish.cpp
   src/mesh/lattice_gen.cpp
+  src/mesh/lattice_sample.cpp
+  src/mesh/lattice_coupon.cpp
+  src/mesh/tpms_gen.cpp
   src/mesh/organic_lattice.cpp
+  src/mesh/lattice_lslt.cpp
+  src/mesh/lattice_union_volume.cpp
+  src/mesh/lattice_volume_check.cpp
+  src/mesh/mesh_simplify.cpp
+  src/mesh/lattice_dc.cpp
   src/mesh/lattice_boundary.cpp
+  src/mesh/stepped_plan.cpp
+  src/voxel/voxel_sdf.cpp
   src/mesh/lattice_void.cpp
   src/voxel/voxelize.cpp
   src/voxel/clearance.cpp
@@ -123,6 +155,8 @@ add_library(topopt
   src/fea/hex_element.cpp
   src/fea/beam_network.cpp
   src/fea/lattice.cpp
+  src/fea/strut_cell.cpp
+  src/fea/lattice_types.cpp
   src/fea/lattice_material.cpp
   src/fea/strut_strength.cpp
   src/orient/orient.cpp
@@ -223,6 +257,8 @@ if(Eigen3_FOUND)
   # assembled operator (fea_assembled_apply in assembly.cpp), so it is gated on
   # Eigen the same way. CI has Eigen (DEPS=ON), so it always builds in CI.
   target_sources(topopt PRIVATE src/fea/matfree.cpp)
+  # REAL BOLTS: the bearing-anchor contact set (calls the matrix-free cache resets).
+  target_sources(topopt PRIVATE src/fea/contact.cpp)
   # Krylov subspace recycling / deflation (handoff 133): the opt-in SPD additive
   # coarse-space correction that wraps BOTH matrix-free CG loops (matfree.cpp's
   # Jacobi-CG and multigrid.cpp's MG-CG) from outside their preconditioners. Like
@@ -295,8 +331,27 @@ if(lib3mf_FOUND)
   # lib3mf it rejects mesh_format "3mf" with a diagnostic instead.
   target_compile_definitions(topopt PRIVATE TOPOPT_HAVE_3MF)
 endif()
+# KEEP regions exported exactly (run_job keep_regions_exact); without Manifold the
+# kept material is still frozen and the export says it is not exact.
+if(manifold_FOUND)
+  target_link_libraries(topopt PRIVATE manifold::manifold)
+  target_compile_definitions(topopt PRIVATE TOPOPT_HAVE_MANIFOLD)
+endif()
 
 enable_testing()
+
+# ★ Item 44: the fingerprint is BUILD-time and a TREE hash. A throwaway git repo
+# + a toy project wired through the SAME cmake/TopoptFingerprintTarget.cmake:
+# configure once, build, commit to core/ or build_core.sh, build again (no
+# configure) -> a new fingerprint; a docs-only commit -> the same one; edit a
+# tracked file -> "-dirty-<diff8>"; restore -> clean again; configure ran once.
+add_test(NAME build_fingerprint_rebuild
+  COMMAND "${CMAKE_COMMAND}"
+          "-DCORE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+          "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/fp_rebuild_test"
+          "-DGENERATOR=${CMAKE_GENERATOR}"
+          "-DCXX=${CMAKE_CXX_COMPILER}"
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/scripts/test_build_fingerprint.cmake")
 
 add_executable(test_materials tests/unit/test_materials.cpp)
 target_link_libraries(test_materials PRIVATE topopt)
@@ -324,6 +379,10 @@ target_compile_definitions(test_lattice_gen PRIVATE
   LATTICE_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 add_test(NAME lattice_gen COMMAND test_lattice_gen)
 
+add_executable(test_stepped_plan tests/unit/test_stepped_plan.cpp)
+target_link_libraries(test_stepped_plan PRIVATE topopt)
+add_test(NAME stepped_plan COMMAND test_stepped_plan)
+
 # The lattice boundary finish (handoff 2026-07-29-lattice-boundary-finish): the
 # shared boundary predicate, solid-safe clipping (B3 is adversarial against a
 # centreline-clipped variant), overlap activation, the anchored skin/collar, and
@@ -341,6 +400,21 @@ add_test(NAME lattice_boundary COMMAND test_lattice_boundary)
 add_executable(test_lattice_clip_shell tests/unit/test_lattice_clip_shell.cpp)
 target_link_libraries(test_lattice_clip_shell PRIVATE topopt)
 add_test(NAME lattice_clip_shell COMMAND test_lattice_clip_shell)
+
+# Finding 7 (ruling 2026-11-02): the cover rule and the lattice volume check.
+add_executable(test_lattice_volume_check tests/unit/test_lattice_volume_check.cpp)
+target_link_libraries(test_lattice_volume_check PRIVATE topopt)
+add_test(NAME lattice_volume_check COMMAND test_lattice_volume_check)
+
+# Finding 8 (ruling 2026-11-02): bounded simplification of a contoured field.
+add_executable(test_mesh_simplify tests/unit/test_mesh_simplify.cpp)
+target_link_libraries(test_mesh_simplify PRIVATE topopt)
+add_test(NAME mesh_simplify COMMAND test_mesh_simplify)
+
+# The sample coupon (ruling 2026-11-02, the addition).
+add_executable(test_lattice_coupon tests/unit/test_lattice_coupon.cpp)
+target_link_libraries(test_lattice_coupon PRIVATE topopt)
+add_test(NAME lattice_coupon COMMAND test_lattice_coupon)
 
 # Every mesh core SYNTHESIZES is wound outward (task 2026-08-09-fix-inward-wound-
 # normals). Covers marching_cubes, the resample, the written STL and the lattice
@@ -386,6 +460,38 @@ add_test(NAME grading COMMAND test_grading)
 add_executable(test_lattice_refusal tests/unit/test_lattice_refusal.cpp)
 target_link_libraries(test_lattice_refusal PRIVATE topopt)
 add_test(NAME lattice_refusal COMMAND test_lattice_refusal)
+
+# ★ One definition of density -> strut diameter, per type, plus R1's refusal
+# (task 2026-09-28-lattice-types-core). Octet must come through bit-for-bit (R9);
+# every type without a measured table must refuse rather than borrow octet's.
+add_executable(test_strut_diameter_per_type tests/unit/test_strut_diameter_per_type.cpp)
+target_link_libraries(test_strut_diameter_per_type PRIVATE topopt)
+add_test(NAME strut_diameter_per_type COMMAND test_strut_diameter_per_type)
+
+# ★ The production strut cell IS the measured cell (lattice types round 1, go-live
+# item 1). Compiles core/tests/harness/tensor_library_nine_probe.cpp's own source (its
+# main renamed) and compares its table with lattice_strut_cell() element for element.
+# The probe uses Eigen, so it is gated like the other Eigen tests.
+# ★ The go-live bars every live strut type holds in core (lattice types round 1):
+# ownership on a holed region, determinism, one connected solid, the facts the app
+# reads, the print-tests loader against the COMMITTED maintainer file, the sample block.
+add_executable(test_lattice_types tests/unit/test_lattice_types.cpp)
+target_link_libraries(test_lattice_types PRIVATE topopt)
+target_compile_definitions(test_lattice_types PRIVATE
+  LATTICE_PRINT_TESTS_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/lattice_print_tests.json")
+add_test(NAME lattice_types COMMAND test_lattice_types)
+
+# ★ The sheet lattices (K2): the TPMS field, and generate_tpms's mesh closed, manifold,
+# deterministic, inside the part and at the solid fraction's volume.
+add_executable(test_tpms tests/unit/test_tpms.cpp)
+target_link_libraries(test_tpms PRIVATE topopt)
+add_test(NAME tpms COMMAND test_tpms)
+
+if(Eigen3_FOUND)
+  add_executable(test_strut_cell tests/unit/test_strut_cell.cpp)
+  target_link_libraries(test_strut_cell PRIVATE topopt Eigen3::Eigen)
+  add_test(NAME strut_cell COMMAND test_strut_cell)
+endif()
 
 # Harness-side lattice material model C(rho) (multiscale-lattice-feasibility
 # probe, 2026-07-31). The model itself lives in tests/harness/
@@ -788,6 +894,32 @@ if(Eigen3_FOUND)
   target_link_libraries(test_mg_tuning PRIVATE topopt)
   target_include_directories(test_mg_tuning PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
   add_test(NAME fea_mg_tuning COMMAND test_mg_tuning)
+
+  # SAFE-SMOOTHER RETRY tripwire (thin-wall solver cure S3 + S5 gate + arm G):
+  # lambda_max(D_l1^-1 A) <= 1 and a positive-definite l1 V-cycle (red control:
+  # the shipped omega is indefinite at nu = 0.38), bit-identity of solves the
+  # shipped path converges, and the floating-speck drop (red control: without
+  # it the gated l1 solve stalls). Uses the internal fea_matfree.hpp probes.
+  add_executable(test_mg_safe_retry tests/unit/test_mg_safe_retry.cpp)
+  target_link_libraries(test_mg_safe_retry PRIVATE topopt)
+  target_include_directories(test_mg_safe_retry PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_compile_definitions(test_mg_safe_retry PRIVATE
+    MG_SAFE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mg_safe")
+  add_test(NAME fea_mg_safe_retry COMMAND test_mg_safe_retry)
+  # THE CONNECTION RULE (ruling 2026-10-25): every solve takes its LOOSE pieces
+  # (26-connected, touching no support or load, any size, hinged or frozen) out
+  # of the system; ~290 of them cost the solver nothing.
+  add_executable(test_loose_pieces tests/unit/test_loose_pieces.cpp)
+  target_link_libraries(test_loose_pieces PRIVATE topopt)
+  target_include_directories(test_loose_pieces PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  add_test(NAME fea_loose_pieces COMMAND test_loose_pieces)
+  # The independent review of the rule (2026-10-26): R1 GenEO setup never counts
+  # against the net, R2 a pause is not work, R3 the cap is a rejection not a stop,
+  # R4 certification reads a staircase neck at true stiffness, R5 the opt-out scope.
+  add_executable(test_loose_review tests/unit/test_loose_review.cpp)
+  target_link_libraries(test_loose_review PRIVATE topopt)
+  target_include_directories(test_loose_review PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  add_test(NAME fea_loose_review COMMAND test_loose_review)
 
   # Multigrid COARSE-SPACE SEAM tripwire (task: hybrid-amg-coarsening-probe).
   # That task let a measurement harness supply the prolongators for levels 2..
@@ -1556,6 +1688,11 @@ if(OpenCASCADE_FOUND)
   add_executable(segment_evidence EXCLUDE_FROM_ALL tests/tools/segment_evidence.cpp)
   target_link_libraries(segment_evidence PRIVATE topopt)
 
+  # CORE LIST item 50 preview: "Redesign to strengthen", version 1 only.
+  #   ./core/build/strengthen_sample <job.json> <out_dir> <materials> <rules> [res]
+  add_executable(strengthen_sample EXCLUDE_FROM_ALL tests/tools/strengthen_sample.cpp)
+  target_link_libraries(strengthen_sample PRIVATE topopt)
+
   # Phase 2 mesh-repair evidence: before/after reports on real broken brackets.
   add_executable(repair_evidence EXCLUDE_FROM_ALL tests/tools/repair_evidence.cpp)
   target_link_libraries(repair_evidence PRIVATE topopt)
@@ -1718,6 +1855,12 @@ if(OpenCASCADE_FOUND)
   add_executable(sector_density_cost_probe EXCLUDE_FROM_ALL
     tests/harness/sector_density_cost_probe.cpp)
   target_link_libraries(sector_density_cost_probe PRIVATE topopt)
+
+  # ★ Sizing the beam-network certificate for any-step Stepped (reviewer,
+  # 2026-10-01). MEASURE ONLY -- nothing here is wired into the run.
+  add_executable(stepped_beam_cost_probe EXCLUDE_FROM_ALL
+                 tests/harness/stepped_beam_cost_probe.cpp)
+  target_link_libraries(stepped_beam_cost_probe PRIVATE topopt)
 
   add_executable(cad_probe EXCLUDE_FROM_ALL tests/harness/cad_probe.cpp)
   target_link_libraries(cad_probe PRIVATE topopt)
@@ -1928,6 +2071,13 @@ if(OpenCASCADE_FOUND)
   # time per stroke). Prints tables, writes evidence. A harness, not a ctest.
   #   cmake --build build --target operator_bakeoff_probe
   #   ./build/operator_bakeoff_probe [evidence_dir] [bracket.stl]
+  # E1 flip table (not a test): ./build/finish_flip_probe <out_root> <job_dir>...
+  add_executable(finish_flip_probe EXCLUDE_FROM_ALL tests/harness/finish_flip_probe.cpp)
+  target_link_libraries(finish_flip_probe PRIVATE topopt)
+  target_compile_definitions(finish_flip_probe PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+
   add_executable(operator_bakeoff_probe EXCLUDE_FROM_ALL
     tests/harness/operator_bakeoff_probe.cpp)
   target_link_libraries(operator_bakeoff_probe PRIVATE topopt)
@@ -2037,18 +2187,11 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
   set_target_properties(topopt_cli PROPERTIES OUTPUT_NAME topopt-cli)
   target_link_libraries(topopt_cli PRIVATE topopt)
   # Build fingerprint for `topopt-cli --version` (handoff 093, worker /health +
-  # the app's version-skew refusal): the core git commit SHA when available, else
-  # "dev". Two cores that differ silently produce different parts, so the app
-  # refuses a worker whose fingerprint != its own.
-  execute_process(
-    COMMAND git -C "${CMAKE_CURRENT_SOURCE_DIR}" rev-parse --short=12 HEAD
-    OUTPUT_VARIABLE TOPOPT_GIT_SHA OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET RESULT_VARIABLE TOPOPT_GIT_RC)
-  if(NOT TOPOPT_GIT_RC EQUAL 0 OR TOPOPT_GIT_SHA STREQUAL "")
-    set(TOPOPT_GIT_SHA "dev")
-  endif()
-  target_compile_definitions(topopt_cli PRIVATE
-    TOPOPT_BUILD_FINGERPRINT="${TOPOPT_GIT_SHA}")
+  # the app's version-skew refusal): the core's tree hash at BUILD time, with a
+  # dirty marker (see topopt_fingerprint at the top of this file), else "dev".
+  # Two cores that differ silently produce different parts, so the app refuses
+  # a worker whose fingerprint != its own.
+  topopt_use_fingerprint(topopt_cli topopt_fingerprint)
   # Dev/CI defaults for --materials / --rules: the committed files. The flags
   # override them; the integration test passes both explicitly.
   target_compile_definitions(topopt_cli PRIVATE
@@ -2074,6 +2217,113 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     target_compile_definitions(test_cli PRIVATE TOPOPT_HAVE_3MF)
   endif()
   add_test(NAME cli_demo COMMAND test_cli)
+
+  # ★ THE SIZE PROBE AND THE RUN MUST AGREE ABOUT WHICH WALLS ARE DEAD
+  # (#354's audit, 2026-09-29). The domain the synthesis runs over is chosen in
+  # run_job.cpp, inside one of its anonymous namespaces (:67-7774), so no unit test
+  # can name the decision -- run_job.cpp itself IS linked and reachable, via
+  # production_loadcase_from_job, but nothing inside those namespaces is. The only way
+  # to see WHICH domain the probe passes is therefore to run the binary: one `lattice-variant` on a tiny L-prism
+  # fixture (~4 s at resolution 48) writes both organic_probe.json and run_info.json,
+  # and the test compares the dead verdicts AND the numbers behind them.
+  add_executable(test_organic_dead_parity tests/validation/test_organic_dead_parity.cpp)
+  target_link_libraries(test_organic_dead_parity PRIVATE topopt)
+  target_compile_definitions(test_organic_dead_parity PRIVATE
+    ORGANIC_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/organic"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    TOPOPT_CLI_EXE="$<TARGET_FILE:topopt_cli>")
+  add_test(NAME cli_organic_dead_parity COMMAND test_organic_dead_parity)
+
+  # ★ D10/E3: an empty post-beam mask is a REFUSAL, not a finished part. The decision
+  # sits in run_job.cpp's anonymous namespace and what is under test is what a RUN
+  # concludes, so this runs the binary: one job whose lattice the outline beam clears
+  # entirely (must refuse) and its control, whose lattice survives (must still accept
+  # with a NON-EMPTY lattice, so the pair cannot both pass by refusing everything).
+  add_executable(test_empty_post_beam_mask tests/validation/test_empty_post_beam_mask.cpp)
+  target_link_libraries(test_empty_post_beam_mask PRIVATE topopt)
+  target_compile_definitions(test_empty_post_beam_mask PRIVATE
+    ORGANIC_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/organic"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    TOPOPT_CLI_EXE="$<TARGET_FILE:topopt_cli>")
+  add_test(NAME cli_empty_post_beam_mask COMMAND test_empty_post_beam_mask)
+
+  # ★ R1: the in-plane slot origin as SENT. Three fixtures: the plan validates only
+  # because the grid was stated; the identical plan without the key is refused (the
+  # control, without which a loosened alignment check would look the same); and a slot
+  # origin off the face plane is refused by name.
+  add_executable(test_slot_origin tests/validation/test_slot_origin.cpp)
+  target_link_libraries(test_slot_origin PRIVATE topopt)
+  target_compile_definitions(test_slot_origin PRIVATE
+    ORGANIC_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/organic"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    TOPOPT_CLI_EXE="$<TARGET_FILE:topopt_cli>")
+  add_test(NAME cli_slot_origin COMMAND test_slot_origin)
+
+  # ★ Ruling 4: ownership of shared space. Reversing the declaration order must emit a
+  # byte-identical lattice (it did not before: the first-declared region swallowed the
+  # shared volume), and a cross-region overlap is a straddled seam only where each cell's
+  # centre is owned by its own region.
+  add_executable(test_region_ownership tests/validation/test_region_ownership.cpp)
+  target_link_libraries(test_region_ownership PRIVATE topopt)
+  target_compile_definitions(test_region_ownership PRIVATE
+    ORGANIC_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/organic"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    TOPOPT_CLI_EXE="$<TARGET_FILE:topopt_cli>")
+  add_test(NAME cli_region_ownership COMMAND test_region_ownership)
+
+  # ★ K3: on a plan job the PLAN is the design (reviewer, 2026-10-10). The companion is
+  # printed minus the plan's cells, the certificate's posture is the plan's mask and the
+  # plan's own per-cell density, and the receipt states the solid remainder per region.
+  # Proven as DIFFERENCES between a partial-depth plan and a full-depth control, because
+  # the pre-K3 binary reported the same companion volume for both.
+  add_executable(test_plan_is_the_design tests/validation/test_plan_is_the_design.cpp)
+  target_link_libraries(test_plan_is_the_design PRIVATE topopt)
+  target_compile_definitions(test_plan_is_the_design PRIVATE
+    ORGANIC_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/organic"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    TOPOPT_CLI_EXE="$<TARGET_FILE:topopt_cli>")
+  add_test(NAME cli_plan_is_the_design COMMAND test_plan_is_the_design)
+
+  # ★ THE OUTLINE INDEX (2026-10-24): its ring walk was unbounded in the FAR field, which
+  # cost eleven hours on 102117B9 before it was caught. A visit CAP rather than a
+  # stopwatch, plus bit-exactness against the unindexed scan on near AND far samples --
+  # the far field being what the original 4.264 us/query measurement missed.
+  add_executable(test_outline_index tests/unit/test_outline_index.cpp)
+  target_link_libraries(test_outline_index PRIVATE topopt)
+  add_test(NAME outline_index COMMAND test_outline_index)
+
+  # ★ K6 PART 2 (2026-10-10): the ownership clip and stepped_region_owner must agree at
+  # every point of a shared volume. The reviewer's "10,000 random points per shared
+  # volume" bar, as a unit test: the agreement is a property of two pure functions, and
+  # measuring it through a run would sample it only where struts happen to lie.
+  add_executable(test_owner_clip tests/unit/test_owner_clip.cpp)
+  target_link_libraries(test_owner_clip PRIVATE topopt)
+  add_test(NAME owner_clip COMMAND test_owner_clip)
+
+  # ★ RULING 2 (2026-10-10): the outline is a CLIP, in every job that sends one.
+  # clip_segment consulted the include region not at all, so a cell the outline cuts had
+  # its struts drawn across the cut in voxels the mask certified SOLID. Measured as a
+  # ratio against a no-outline control arm, because pre-clip the outlined job wrote 100.2%
+  # of the control's lattice for a quarter of the area.
+  add_executable(test_outline_clip tests/validation/test_outline_clip.cpp)
+  target_link_libraries(test_outline_clip PRIVATE topopt)
+  target_compile_definitions(test_outline_clip PRIVATE
+    ORGANIC_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/organic"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    TOPOPT_CLI_EXE="$<TARGET_FILE:topopt_cli>")
+  add_test(NAME cli_outline_clip COMMAND test_outline_clip)
+
+  # ★ Every subcommand that writes a receipt stamps the binary that wrote it
+  # (reviewer, 2026-10-01). `analyze` and `lattice-variant` return before main.cpp
+  # populates the fingerprint, so their run_info.json carried "unknown". Runs the real
+  # binary and compares the receipt against the binary's own --version line.
+  add_executable(test_run_info_fingerprint tests/validation/test_run_info_fingerprint.cpp)
+  target_link_libraries(test_run_info_fingerprint PRIVATE topopt)
+  target_compile_definitions(test_run_info_fingerprint PRIVATE
+    ORGANIC_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/organic"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    TOPOPT_CLI_EXE="$<TARGET_FILE:topopt_cli>")
+  add_test(NAME cli_run_info_fingerprint COMMAND test_run_info_fingerprint)
 
   # Task 2026-08-03-variant-postprocessing-fix (defect 1): design.bin is
   # published AFTER EVERY VARIANT, not once at the end of the ladder. Runs the
@@ -2130,6 +2380,233 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME face_protection_parity COMMAND test_face_protection_parity)
+
+  # CORE LIST item 40 (his Carriage Arms run 13185527): a reduction rung that asks
+  # for less than the part's frozen material alone prints clamps to the density
+  # floor. Pins the flag, the frozen share and what froze it (through the same
+  # build_production_loadcase seam, on the demo l-bracket with protected faces), and
+  # that the rungs below the floor rung (same target, same design) are reported
+  # skipped, not run. Drives OCCT (STEP) + Eigen.
+  add_executable(test_starved_rung tests/validation/test_starved_rung.cpp)
+  target_link_libraries(test_starved_rung PRIVATE topopt)
+  target_compile_definitions(test_starved_rung PRIVATE
+    DEMO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo"
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+  add_test(NAME starved_rung COMMAND test_starved_rung)
+
+  # CORE LIST items 41 + 47: the export keeps every body that holds an anchor or a
+  # load (it kept only the largest, so his split arms saved one arm), and a rung
+  # whose design detaches an anchored piece the part as drawn joined to a load is
+  # rejected naming the faces (his cut holes). Through run_job on two meshes.
+  add_executable(test_export_bodies tests/validation/test_export_bodies.cpp)
+  target_link_libraries(test_export_bodies PRIVATE topopt)
+  target_compile_definitions(test_export_bodies PRIVATE
+    MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh"
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME export_bodies COMMAND test_export_bodies)
+
+  # CORE LIST item 50: "Redesign to strengthen" — three versions rebuilt in the box,
+  # each verified on its exported geometry; unreachable targets reported; a failing
+  # part referenced to the requirement; without the key, today's growth ladder.
+  add_executable(test_strengthen tests/validation/test_strengthen.cpp)
+  target_link_libraries(test_strengthen PRIVATE topopt)
+  target_compile_definitions(test_strengthen PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME strengthen COMMAND test_strengthen)
+  # Load scenarios with "Redesign to strengthen" (reviewer 2026-10-26 12:46): every
+  # step on the worst scenario, every version verified on its export in every
+  # scenario; two blocks a push can only join through the gap come out as one body.
+  add_executable(test_scenarios_strengthen tests/validation/test_scenarios_strengthen.cpp)
+  target_link_libraries(test_scenarios_strengthen PRIVATE topopt)
+  target_compile_definitions(test_scenarios_strengthen PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME scenarios_strengthen COMMAND test_scenarios_strengthen)
+  # LOAD SCENARIOS (his ask 2026-10-27): every scenario's own fields beside fields.bin.
+  add_executable(test_scenario_fields tests/validation/test_scenario_fields.cpp)
+  target_link_libraries(test_scenario_fields PRIVATE topopt)
+  target_compile_definitions(test_scenario_fields PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME scenario_fields COMMAND test_scenario_fields)
+  # E2.1 (plan.md §B6): a lattice graded on the worst scenario, certified under each.
+  add_executable(test_lattice_scenarios tests/validation/test_lattice_scenarios.cpp)
+  target_link_libraries(test_lattice_scenarios PRIVATE topopt)
+  target_compile_definitions(test_lattice_scenarios PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME lattice_scenarios COMMAND test_lattice_scenarios)
+  # Ruling 11-06 2(a) + 2(c): a lattice is never "margin inf, ACCEPTED"; run_info.json
+  # never writes a bare inf.
+  add_executable(test_lattice_no_solid tests/validation/test_lattice_no_solid.cpp)
+  target_link_libraries(test_lattice_no_solid PRIVATE topopt)
+  target_compile_definitions(test_lattice_no_solid PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME lattice_no_solid COMMAND test_lattice_no_solid)
+  # E2.4 (ruling 11-06 (1)): outer_finish "none", the open lattice, its cut cells uncredited.
+  add_executable(test_lattice_open_finish tests/validation/test_lattice_open_finish.cpp)
+  target_link_libraries(test_lattice_open_finish PRIVATE topopt)
+  target_compile_definitions(test_lattice_open_finish PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME lattice_open_finish COMMAND test_lattice_open_finish)
+  # E3 (plan.md §B7): an include region's own cell window on the swept plan.
+  add_executable(test_lattice_region_cell_window tests/validation/test_lattice_region_cell_window.cpp)
+  target_link_libraries(test_lattice_region_cell_window PRIVATE topopt)
+  target_compile_definitions(test_lattice_region_cell_window PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME lattice_region_cell_window COMMAND test_lattice_region_cell_window)
+  # E2.2 + E2.3 (plan.md §B6): the "- Lattice faces" mode; No lattice on a face region.
+  add_executable(test_lattice_whole_part tests/validation/test_lattice_whole_part.cpp)
+  target_link_libraries(test_lattice_whole_part PRIVATE topopt)
+  target_compile_definitions(test_lattice_whole_part PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME lattice_whole_part COMMAND test_lattice_whole_part)
+  # E3 (plan.md §B7): an include region's own grading.
+  add_executable(test_lattice_region_grading tests/validation/test_lattice_region_grading.cpp)
+  target_link_libraries(test_lattice_region_grading PRIVATE topopt)
+  target_compile_definitions(test_lattice_region_grading PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME lattice_region_grading COMMAND test_lattice_region_grading)
+  # The swept cell plan never leaves a balance-split block mixed (TO-core's finding).
+  add_executable(test_cell_plan_mixed_block tests/unit/test_cell_plan_mixed_block.cpp)
+  target_link_libraries(test_cell_plan_mixed_block PRIVATE topopt)
+  add_test(NAME cell_plan_mixed_block COMMAND test_cell_plan_mixed_block)
+  # Item 50 acceptance (ruling 2026-10-26): specks are a note, not a refusal; a
+  # refused version's note names the real reason.
+  add_executable(test_strengthen_accept tests/unit/test_strengthen_accept.cpp)
+  target_link_libraries(test_strengthen_accept PRIVATE topopt)
+  add_test(NAME strengthen_accept COMMAND test_strengthen_accept)
+
+  # CORE LIST item 42, option B: a part that was one piece as drawn stays one piece
+  # (split carrying bodies are bridged before certification, and said so); item 47's
+  # rejection is the fallback; a part drawn as two bodies is left as two.
+  add_executable(test_bridge tests/validation/test_bridge.cpp)
+  target_link_libraries(test_bridge PRIVATE topopt)
+  target_compile_definitions(test_bridge PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+  add_test(NAME bridge COMMAND test_bridge)
+
+  # REAL BOLTS (reviewer 2026-10-25 20:10): bearing anchors, compression-only normal
+  # springs released in tension until the contact set settles; three solvers agree;
+  # the plate's margin converges across resolutions.
+  add_executable(test_bearing tests/validation/test_bearing.cpp)
+  target_link_libraries(test_bearing PRIVATE topopt)
+  target_compile_definitions(test_bearing PRIVATE
+    MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh"
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME bearing COMMAND test_bearing)
+
+  # LOAD SCENARIOS, engine (reviewer 2026-10-26 03:45): every scenario solved each
+  # iteration (smooth max), certified each; an OFF anchor is a weak spring; two blocks
+  # a push can only join through the gap come out as one body.
+  add_executable(test_scenarios tests/validation/test_scenarios.cpp)
+  target_link_libraries(test_scenarios PRIVATE topopt)
+  target_compile_definitions(test_scenarios PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME scenarios COMMAND test_scenarios)
+  # LOAD SCENARIOS: a scenario's own region anchors (a cut piece as its anchor).
+  add_executable(test_scenario_anchor_regions tests/validation/test_scenario_anchor_regions.cpp)
+  target_link_libraries(test_scenario_anchor_regions PRIVATE topopt)
+  target_compile_definitions(test_scenario_anchor_regions PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME scenario_anchor_regions COMMAND test_scenario_anchor_regions)
+  # LOAD SCENARIOS count in proportion to their load (his ask 2026-10-28).
+  add_executable(test_scenario_weights tests/validation/test_scenario_weights.cpp)
+  target_link_libraries(test_scenario_weights PRIVATE topopt)
+  target_compile_definitions(test_scenario_weights PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME scenario_weights COMMAND test_scenario_weights)
+
+  # CORE LIST item KEEP: kept regions exported exactly (the part's own CAD geometry)
+  # and merged into one closed shell. Needs Manifold (core/vcpkg-ports/manifold).
+  if(manifold_FOUND)
+    add_executable(test_keep tests/validation/test_keep.cpp)
+    target_link_libraries(test_keep PRIVATE topopt)
+    target_compile_definitions(test_keep PRIVATE
+      MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh"
+      MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+      SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+      TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME keep COMMAND test_keep)
+
+    # ORIENTED keep regions (ruling 2026-10-26 23:48): a tilted bore and a slanted face
+    # exported exactly. The test builds its part with Manifold.
+    add_executable(test_keep_oriented tests/validation/test_keep_oriented.cpp)
+    target_link_libraries(test_keep_oriented PRIVATE topopt manifold::manifold)
+    target_compile_definitions(test_keep_oriented PRIVATE
+      MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+      SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+      TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME keep_oriented COMMAND test_keep_oriented)
+
+    # KEEP CLEAR, EXACTLY (ruling 2026-11-03 19:55): every file is cut out of its Keep
+    # clears by Manifold (bolt and tilted face slab; the part wins; circumscribed).
+    add_executable(test_keep_clear_exact tests/validation/test_keep_clear_exact.cpp)
+    target_link_libraries(test_keep_clear_exact PRIVATE topopt manifold::manifold)
+    add_test(NAME keep_clear_exact COMMAND test_keep_clear_exact)
+
+    # GRADING + A DESIGN BOX (ruling 2026-11-03 23:05, option (b)): a graded design-box
+    # job runs, and no level lays a cell the certificate calls solid.
+    add_executable(test_designbox_graded_lattice
+      tests/validation/test_designbox_graded_lattice.cpp)
+    target_link_libraries(test_designbox_graded_lattice PRIVATE topopt manifold::manifold)
+    target_compile_definitions(test_designbox_graded_lattice PRIVATE
+      MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+      SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+      CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME designbox_graded_lattice COMMAND test_designbox_graded_lattice)
+
+    # PROTECT on a growth run (ruling 2026-10-27 03:57): nothing grows inside a
+    # protected hole or in front of a protected face; the bore and face stay exact.
+    add_executable(test_keep_strengthen tests/validation/test_keep_strengthen.cpp)
+    target_link_libraries(test_keep_strengthen PRIVATE topopt manifold::manifold)
+    target_compile_definitions(test_keep_strengthen PRIVATE
+      MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+      SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+      TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME keep_strengthen COMMAND test_keep_strengthen)
+
+    # ENGINE BATCH E1: the finished shape (thin-spot cleanup + surface finish).
+    add_executable(test_finish tests/unit/test_finish.cpp)
+    target_link_libraries(test_finish PRIVATE topopt manifold::manifold)
+    target_include_directories(test_finish PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests/harness)
+    target_compile_definitions(test_finish PRIVATE TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME finish COMMAND test_finish)
+    add_executable(test_finish_run tests/validation/test_finish_run.cpp)
+    target_link_libraries(test_finish_run PRIVATE topopt manifold::manifold)
+    target_compile_definitions(test_finish_run PRIVATE
+      MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+      SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+      TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    if(lib3mf_FOUND)
+      target_compile_definitions(test_finish_run PRIVATE TOPOPT_HAVE_3MF)
+    endif()
+    add_test(NAME finish_run COMMAND test_finish_run)
+  endif()
 
   # ★ THE DEPTH TIE + THE PAD, COUNTED APART (task 2026-08-12-lattice-page-
   # redesign). §0a/R2: a face that is both protected and a lattice region carries
@@ -2326,3 +2803,46 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     add_test(NAME threemf_import COMMAND test_3mf_import)
   endif()
 endif()
+
+add_executable(lslt_probe EXCLUDE_FROM_ALL tests/tools/lslt_probe.cpp)
+target_link_libraries(lslt_probe PRIVATE topopt)
+
+# ══ THE FLEXIBLE STAGE — SQUISH MATHS (task 2026-09-28-flexible-squish-maths, C1) ══
+# docs/design/flexibles/02-squish-model.md. Pure data + geometry over the base
+# library's own types (StepModel, VoxelGrid, face regions, clearances): no Eigen, no
+# OCCT, no lib3mf. It is in the ALWAYS-BUILT library on purpose — the app (A1) calls
+# these functions through the bridge on every slice, including the OCCT-free iOS
+# ones, and DECISIONS 2026-09-27 item 4 says the app never re-implements them.
+target_sources(topopt PRIVATE
+  src/flexible/json.cpp
+  src/flexible/data.cpp
+  src/flexible/squish.cpp
+  src/flexible/curve.cpp
+  src/flexible/faces.cpp
+  src/flexible/field.cpp
+  src/flexible/recommend.cpp
+  src/flexible/job_block.cpp
+  src/flexible/run.cpp)
+
+set(TOPOPT_FLEXIBLE_MATERIALS_JSON
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/materials/flexible_materials.json")
+foreach(_flex_test data squish curve faces field recommend job run press)
+  add_executable(test_flexible_${_flex_test} tests/unit/test_flexible_${_flex_test}.cpp)
+  target_link_libraries(test_flexible_${_flex_test} PRIVATE topopt)
+  target_compile_definitions(test_flexible_${_flex_test} PRIVATE
+    FLEXIBLE_MATERIALS_JSON_PATH="${TOPOPT_FLEXIBLE_MATERIALS_JSON}"
+    FLEXIBLE_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME flexible_${_flex_test} COMMAND test_flexible_${_flex_test})
+endforeach()
+if(TARGET topopt_cli)
+  # run_job / analyze_job / lattice_variant_job / preflight_job exist in this
+  # configuration: test that each refuses a job carrying a flexible block.
+  target_compile_definitions(test_flexible_run PRIVATE TOPOPT_FLEXIBLE_TEST_RUNNERS)
+  # `topopt-cli flexible` reads the live catalogue by default; --flexible-materials
+  # overrides it.
+  target_compile_definitions(topopt_cli PRIVATE
+    TOPOPT_CLI_DEFAULT_FLEXIBLE_MATERIALS="${TOPOPT_FLEXIBLE_MATERIALS_JSON}")
+endif()
+# Evidence: core's lookup against Iacob 2024 Table 2, as a Markdown table.
+add_executable(flexible_spot_table EXCLUDE_FROM_ALL tests/tools/flexible_spot_table.cpp)
+target_link_libraries(flexible_spot_table PRIVATE topopt)

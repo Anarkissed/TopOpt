@@ -1,0 +1,4 @@
+row name: Face 6 · lattice
+control (386.0, 1165.0, 44.0, 44.0) · keep (376.0, 1165.0, 64.0, 44.0) · red (274.0, 1165.0, 78.0, 44.0) · on spot true · ≥24 pt clear true · ≥24 pt clear of the tapped control true · question (161.0, 1179.0, 114.0, 16.0) · panel (24.0, 912.0, 480.0, 440.0) · rail (38.0, 982.0, 72.0, 356.0)
+control (386.0, 1165.0, 44.0, 44.0) · keep (376.0, 1165.0, 64.0, 44.0) · red (274.0, 1165.0, 78.0, 44.0) · on spot true · ≥24 pt clear true · ≥24 pt clear of the tapped control true · question (110.0, 1179.0, 165.0, 16.0) · panel (24.0, 912.0, 480.0, 440.0) · rail (38.0, 982.0, 72.0, 356.0)
+RED whole name: question x 110 vs panel x 24

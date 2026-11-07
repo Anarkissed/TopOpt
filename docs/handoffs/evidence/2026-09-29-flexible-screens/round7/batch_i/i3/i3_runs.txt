@@ -1,0 +1,59 @@
+# U21 batch I · part I3 runs — app/TopOptKit, --scratch-path /tmp/r7x20b-build, on 2e37f1a1 + the I3 working tree
+### red-first (FlexibleI3LinkSimTests, run 1 13:09): 2 passed, 1 failed — the ratio pin was 0.0 on purpose; measured 0.952, pinned
+FLEX-I3 l-bracket 4 linked walls: bc wall · walls held [738, 594, 738, 594] (reach ["3.125", "3.125", "3.125", "3.125"]) · free modes 0 · far anvils 0 · exits held false · raw u_x Face 6 5.0085 · Face 2 window 4.7667 (ratio 0.952) · window edges ["0.4422", "0.4422", "0.3713", "0.3713"] (mean 0.4068, centre/mean 11.72) · plate max|u| 0.00e+00 · frame max|u| 0.00e+00 · solve 272 ms
+FLEX-I3 l-bracket CORE LIST: deepest raw compression 0.2480 mm · shown k 1.705 (kRef 1.705, asked 1.705) · gmaxPart×k 0.753 · fold share nil · shown max|u| 8.630 mm
+FLEX-I3 l-bracket RED links ignored: bc anchor · walls held [] (reach []) · free modes 0 · far anvils 0 · exits held false · raw u_x Face 6 18.6971 · Face 2 window 18.4184 (ratio 0.985) · window edges ["11.8479", "11.8475", "0.7882", "28.7089"] (mean 13.2981, centre/mean 1.39) · plate max|u| 2.35e-01 · frame max|u| 2.97e+01 · solve 440 ms
+FLEX-I3 l-bracket RED CORE LIST: deepest raw compression 0.2862 mm
+FLEX-I3 pad: groups pressing Face 5 [1] · others [2]
+FLEX-I3 pad group-1 floor link + Rests: bc rest · wall nodes [1078, 0] (reach [2.0833333333333335, 4.166666666666667]) · far anvils 0 (today 0) · free modes 0 (today 3) · exits held true · max|u| raw 4.4075 (today 4.1691)
+### run 1 (i3run, 13:11-13:42): frames probe + TopOptKitTests.FlexibleSquishFETests + 29 TopOptFlowsTests classes, chunks of 5
+start 13:11:08 2e37f1a1 + working tree
+build exit 0 13:11:20
+frames exit 0 13:12:12
+kit FlexibleSquishFETests exit 0 13:12:40
+chunk_aa exit 0 13:19:15
+chunk_ab exit 0 13:26:03
+chunk_ac exit 0 13:33:18
+chunk_ad exit 0 13:33:39
+chunk_ae exit 0 13:39:33
+chunk_af exit 0 13:40:52
+golden det exit 0 13:41:07
+golden unseeded exit 0 13:41:23
+hashes exit 0 13:42:22
+hashes cmp vs round7/batch_i/i2/stage_job_hashes_i2.txt (whole file): identical
+ALLDONE 13:42:22
+kit_fe.log: 19 passed · 0 failed
+chunk_aa.log [FlexibleI3LinkSimTests FlexibleI1HoldTests FlexibleI2AttachTests FlexibleI2AttachHostedTests FlexibleFEFieldTests]: 55 passed · 0 failed · 0 skipped
+chunk_ab.log [FlexibleFEVerifyGTests FlexibleSquishVerifyGTests FlexibleX20bTests FlexibleRowCopyTests FlexibleSquishCopyTests]: 29 passed · 0 failed · 0 skipped
+chunk_ac.log [FlexibleU21BendTests FlexibleBatchNRefineTests FlexibleSquishSolverTests FlexibleR7E3Tests FlexibleU21RTests]: 43 passed · 0 failed · 0 skipped
+chunk_ad.log [FlexibleSquishPerfProbe FlexibleR7U21NewModelTests FlexibleSettingsRound4Tests FlexibleRound5SettingsTests FlexiblePressReviewTests]: 55 passed · 0 failed · 2 skipped
+chunk_ae.log [FlexibleR7E2Tests FlexibleR7SettingsHostedTests FlexibleR7FTests FlexibleR7SettingsTests FlexibleSqueezeGroupsReviewTests]: 52 passed · 0 failed · 0 skipped
+chunk_af.log [FlexibleU21DeleteUndoTests FlexibleMainPageLoadsTests FlexibleRound5SettingsVerifyTests FlexibleRound7FitHostedTests]: 44 passed · 0 failed · 0 skipped
+TOTAL run 1: 297 + 19 (kit) passed, 0 failed, 2 skipped (FlexibleSquishPerfProbe x2: Release only)
+golden_det.log: identical 38 · DIFFERS 0 · PART-SKIP 0
+golden_unseeded.log: identical 32 · DIFFERS 0 · PART-SKIP 1
+found by LOOKING at frame 2 of run 1 (camera from above): after a link the Squish page read 'Ready: Save & Exit builds the lattice' — links counted as a Squish change. Fixed (FlexibleSettingsExit.modified leaves links out; test in FlexibleI3LinkSimTests test 2, RED controlLinksModifySettings). Run 1's two frames had a camera from above (deformation not readable): not kept.
+### run 2 after the fix (i3run2, 13:43-13:54): frames probe (new side camera) + I3 tests + the 15 classes that read FlexibleSettingsExit / the ready line
+start 13:43:05 2e37f1a1 + working tree
+build exit 0 13:43:30
+frames exit 0 13:44:19
+chunk_aa exit 0 13:46:06
+chunk_ab exit 0 13:47:25
+chunk_ac exit 0 13:52:33
+golden det exit 0 13:52:49
+golden unseeded exit 0 13:53:04
+hashes exit 0 13:54:04
+hashes cmp vs round7/batch_i/i2/stage_job_hashes_i2.txt (whole file): identical
+ALLDONE 13:54:04
+chunk_aa.log [FlexibleI3LinkSimTests FlexibleMainPageHookTests FlexibleR7EveningAnswersTests FlexibleR7M1VerifyTests FlexibleR7RTests]: 39 passed · 0 failed · 0 skipped
+chunk_ab.log [FlexibleRound5SettingsVerifyHostedTests FlexibleRound6Tests FlexibleRound7CardMessagesTests FlexibleStageCapsuleTests FlexibleR7FTests]: 37 passed · 0 failed · 0 skipped
+chunk_ac.log [FlexibleR7SettingsHostedTests FlexibleR7SettingsTests FlexibleRound5SettingsTests FlexibleRound5SettingsVerifyTests FlexibleRound7FitHostedTests]: 46 passed · 0 failed · 0 skipped
+TOTAL run 2: 122 passed, 0 failed, 0 skipped
+golden_det.log: identical 38 · DIFFERS 0 · PART-SKIP 0
+golden_unseeded.log: identical 32 · DIFFERS 0 · PART-SKIP 1
+### hashes: stage_job_hashes_i3.txt cmp-identical to round7/batch_i/i2/stage_job_hashes_i2.txt (whole file), both runs
+### frames (I3_lines.txt)
+NO LINK (as saved): bc anchor · walls [] · k 1.117 (kRef 1.705) · shown u_x Face 6 20.89 mm · Face 2 20.58 mm · max|u| 33.16 mm · line 'Held by Group A · fixed on Topology'
+I3_01_13p_lbracket_play_full_load_NO_LINK.png: playing Group 1 · ×1.0 · held 1.0 · line 'Held by Group A · fixed on Topology'
+4 LINKED WALLS: bc wall · walls [738, 594, 738, 594] · k 1.705 (kRef 1.705) · shown u_x Face 6 8.54 mm · Face 2 8.13 mm · max|u| 8.63 mm · line 'Held by 4 linked walls'
+I3_02_13p_lbracket_play_full_load_4_LINKED.png: playing Group 1 · ×1.0 · held 1.0 · line 'Held by 4 linked walls'

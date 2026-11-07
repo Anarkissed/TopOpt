@@ -1,0 +1,74 @@
+Round 8b (2026-10-24): his 7 rig STEPs git-rm'd; StepMeshRepairTests + FlexibleStepRepairHookTests on SyntheticStepParts.swift.
+Tree: 6f7b59bf + working tree (the commit's content). Package: app/TopOptKit, swift test --scratch-path /tmp/r7x20b-build --skip-build.
+Filters (same as round 8's runner): repair 'TopOptFlowsTests\.(StepMeshRepairTests|FlexibleStepRepairHookTests)/'; hooks (7 classes); paint; appimport; kitimport; FlexibleAngledGoldenTests det + unseeded; stage_job_hashes.sh.
+RED first = the same repair filter with TOPOPT_STEP_REPAIR_RED_CONTROL=1 (every repaired import replaced by the unrepaired path).
+
+start 05:56:36 6f7b59bf + working tree (rig STEPs git-rm'd, synthetic parts)
+build exit 0 05:56:39
+repair_red exit 1 05:56:48
+repair exit 0 05:56:53
+hooks exit 0 05:58:02
+paint exit 0 05:58:05
+appimport exit 1 05:58:08
+kitimport exit 0 05:58:11
+golden det exit 0 05:58:33
+golden unseeded exit 0 05:59:00
+hashes exit 0 06:00:40
+hashes cmp vs round8_step_h47 (whole file): identical
+hashes cmp vs t3_reveal (whole file): identical
+ALLDONE 06:00:40
+
+repair_red.log: Executed 11 tests, with 26 failures (0 unexpected) in 5.296 (5.299) seconds
+repair.log: Executed 11 tests, with 0 failures (0 unexpected) in 2.189 (2.192) seconds
+hooks.log: Executed 30 tests, with 0 failures (0 unexpected) in 66.354 (66.362) seconds
+paint.log: Executed 21 tests, with 0 failures (0 unexpected) in 0.732 (0.737) seconds
+appimport.log: Executed 12 tests, with 8 failures (0 unexpected) in 0.175 (0.178) seconds
+kitimport.log: Executed 8 tests, with 0 failures (0 unexpected) in 0.032 (0.034) seconds
+golden_det.log: Executed 13 tests, with 0 failures (0 unexpected) in 18.396 (18.399) seconds
+golden_unseeded.log: Executed 13 tests, with 0 failures (0 unexpected) in 24.130 (24.134) seconds
+appimport (known 3MF x3, no macOS lib3mf): Test Case '-[TopOptFlowsTests.AppModelTests testReopenedThreeMFProjectReimportsTheStlWorkingCopy]' failed (0.158 seconds).
+appimport (known 3MF x3, no macOS lib3mf): Test Case '-[TopOptFlowsTests.AppModelTests testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance]' failed (0.002 seconds).
+appimport (known 3MF x3, no macOS lib3mf): Test Case '-[TopOptFlowsTests.AppModelTests testThreeMFImportOptimisesOnDeviceEndToEnd]' failed (0.001 seconds).
+golden_det: identical 38 DIFFERS 0 PART-SKIP 0
+golden_unseeded: identical 32 DIFFERS 0 PART-SKIP 1
+
+RED (repair disabled): per test
+  failed  FlexibleStepRepairHookTests.testAppModelImportGatesPaintOnTheRepairedPartOnly
+  passed  FlexibleStepRepairHookTests.testEveryHookIsPinnedOnceAtItsAnchorWithItsGate
+  failed  FlexibleStepRepairHookTests.testRepairedPartsPaintIsOffUnrepairedPartsPaintIsOn
+  passed  StepMeshRepairTests.testAlreadyWatertightImportsComeBackByteIdentical
+  passed  StepMeshRepairTests.testDiagnosisOfTheStockTessellation
+  failed  StepMeshRepairTests.testHookedImportMeshAcceptsTheRefusedParts
+  passed  StepMeshRepairTests.testNothingAcceptedReturnsTheOriginal
+  passed  StepMeshRepairTests.testRedControlForcedRepairIsCaught
+  failed  StepMeshRepairTests.testRepairClosesTheRefusedPartsAndKeepsEveryFaceID
+  failed  StepMeshRepairTests.testRepairedVolumeAndBoundingBoxMatchTheBrep
+  passed  StepMeshRepairTests.testT1DropsOnlyTheRepeatedCornerTriangleAndKeepsFaceIDs
+RED failures (first per test):
+  FlexibleStepRepairHookTests.testAppModelImportGatesPaintOnTheRepairedPartOnly: XCTAssertTrue failed - the filleted block imports (refused before H47)
+  FlexibleStepRepairHookTests.testRepairedPartsPaintIsOffUnrepairedPartsPaintIsOn: XCTAssertTrue failed - filleted_block
+  StepMeshRepairTests.testHookedImportMeshAcceptsTheRefusedParts: XCTAssertTrue failed - filleted_block
+  StepMeshRepairTests.testRepairClosesTheRefusedPartsAndKeepsEveryFaceID: XCTAssertTrue failed - filleted_block
+  StepMeshRepairTests.testRepairedVolumeAndBoundingBoxMatchTheBrep: XCTAssertLessThan failed: ("0.010481730038931159") is not less than ("0.002") - lipped_plate_and_corner
+
+GREEN: per test
+  passed  FlexibleStepRepairHookTests.testAppModelImportGatesPaintOnTheRepairedPartOnly
+  passed  FlexibleStepRepairHookTests.testEveryHookIsPinnedOnceAtItsAnchorWithItsGate
+  passed  FlexibleStepRepairHookTests.testRepairedPartsPaintIsOffUnrepairedPartsPaintIsOn
+  passed  StepMeshRepairTests.testAlreadyWatertightImportsComeBackByteIdentical
+  passed  StepMeshRepairTests.testDiagnosisOfTheStockTessellation
+  passed  StepMeshRepairTests.testHookedImportMeshAcceptsTheRefusedParts
+  passed  StepMeshRepairTests.testNothingAcceptedReturnsTheOriginal
+  passed  StepMeshRepairTests.testRedControlForcedRepairIsCaught
+  passed  StepMeshRepairTests.testRepairClosesTheRefusedPartsAndKeepsEveryFaceID
+  passed  StepMeshRepairTests.testRepairedVolumeAndBoundingBoxMatchTheBrep
+  passed  StepMeshRepairTests.testT1DropsOnlyTheRepeatedCornerTriangleAndKeepsFaceIDs
+STEP-REPAIR-DIAG filleted_block stockTris=628 slivers=8 t1Watertight=true
+STEP-REPAIR-DIAG lipped_plate_and_corner stockTris=134 slivers=1 t1Watertight=false
+STEP-REPAIR-DIAG lipped_plate_and_corner face 1: 72.496 mm² of triangles on a 70.100 mm² face, open faces [1, 4, 5, 6, 7, 13]
+STEP-REPAIR-RED slot_plate today=132 forced=188 differs=["vertices", "indices", "faceIDs", "vertexCount", "triangleCount"]
+STEP-REPAIR-RED rounded_bracket today=96 forced=104 differs=["vertices", "indices", "faceIDs", "vertexCount", "triangleCount"]
+STEP-REPAIR filleted_block pass=poleSlivers stockTris=628 repairedTris=620 dropped=8 deflection=0.1 (stock) faces=26
+STEP-REPAIR lipped_plate_and_corner pass=retessellated stockTris=134 repairedTris=188 dropped=1 deflection=0.05 faces=14
+STEP-REPAIR-VOL filleted_block vol=23320.0908 brep=23340.8494 rel=-0.0889% stockRel=-0.0889% boxDev=0.00000%/0.00000%/0.00000%
+STEP-REPAIR-VOL lipped_plate_and_corner vol=214.3884 brep=214.4889 rel=-0.0469% stockRel=+1.0482% boxDev=0.00000%/0.00000%/0.00000%

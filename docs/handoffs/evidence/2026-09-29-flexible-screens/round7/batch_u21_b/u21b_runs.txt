@@ -1,0 +1,55 @@
+# U21 batch B runs (app/TopOptKit, --scratch-path /tmp/r7u21-side-build) — 755b7c5b + the working tree (= the batch B commit)
+### runner.log
+start 18:15:38 755b7c5b + working tree
+build exit 0 18:15:58
+golden det exit 0 18:16:15
+golden unseeded exit 0 18:16:31
+hashes exit 0 18:17:33
+hashes cmp vs round7/batch_e1r/stage_job_hashes_e1r.txt (whole file): identical
+hashes cmp vs round7/batch_x20b/stage_job_hashes_x20b.txt (whole file): identical
+hashes cmp vs round7/batch_u21_c/stage_job_hashes_u21c_fix2.txt (whole file): identical
+chunk_aa exit 0 18:20:48
+chunk_ab exit 0 18:22:52
+chunk_ac exit 0 18:31:26
+chunk_ad exit 0 18:31:52
+ALLDONE 18:31:52
+### classes (16, chunks of 5)
+FlexibleR7U21BCurveTests FlexibleU2Tests FlexibleX20bTests FlexibleRowCopyTests FlexiblePressCurveTests FlexibleSquishCopyTests LatticeStaleTypeTests FlexibleEdgeGroupsTests FlexibleFlatPrismTests FlexibleFlatPrismEngineTests FlexibleR7E1ReviewTests FlexibleR7E2Tests FlexibleEdgeGroupsHostedTests FlexibleFlatPrismHostedTests FlexibleR7E1ReviewHostedTests FlexibleR7E2HostedTests
+### goldens
+golden_det: identical 38 · DIFFERS 0 · PART-SKIP 0 · Executed 13 tests, with 0 failures (0 unexpected) in 13.990 (13.993) seconds
+golden_unseeded: identical 32 · DIFFERS 0 · PART-SKIP 1 · Executed 13 tests, with 0 failures (0 unexpected) in 13.998 (14.000) seconds
+### chunks
+chunk_aa.log: Executed 24 tests, with 0 failures (0 unexpected) in 193.241 (193.245) seconds
+chunk_ab.log: Executed 32 tests, with 0 failures (0 unexpected) in 121.037 (121.042) seconds
+chunk_ac.log: Executed 29 tests, with 1 test skipped and 0 failures (0 unexpected) in 512.165 (512.169) seconds
+chunk_ad.log: Executed 3 tests, with 0 failures (0 unexpected) in 23.576 (23.578) seconds
+skipped: FlexibleEdgeGroupsHostedTests testEvidenceOnHisPad
+### failures: 0 · signal lines: 0
+### batch B prints (from the chunk runs above = the committed code)
+FLEX-U21B gap: x [0.00000, 0.30000, 0.50000, 0.70000, 1.00000] y [0.20000, 0.60000, 1.00000, 0.60000, 0.20000] · x [0.00000, 0.30000, 0.50000, 0.70000, 1.00000] y [0.20000, 0.60000, 0.90000, 0.60000, 0.20000] · x [0.00000, 0.49000, 0.50000, 0.51000, 1.00000] y [0.50000, 0.80000, 0.79977, 0.80000, 0.50000]
+FLEX-U21B Face 6 X x [0.00000, 0.04724, 0.50000, 0.94980, 1.00000] y [0.00000, 0.78134, 1.00000, 0.78302, 0.00000] · asym today 0.03101
+    RED naive flip: asym 0.03373
+FLEX-U21B pad Face 3 X leftToRight: x [0.00000, 0.29035, 0.46241, 0.50000, 0.53759, 0.70965, 1.00000] y [0.97063, 0.11103, 0.53496, 0.59348, 0.53496, 0.11103, 0.97063] · asym 4.440892098500626e-16 · kept half moved 0.0091 · core ½ 0.59348
+  pad Face 3 X rightToLeft: x [0.00000, 0.50000, 1.00000] y [1.00000, 0.59348, 1.00000] · asym 2.220446049250313e-16 · kept half moved 0.1057 · core ½ 0.59348
+FLEX-U21B pad Face 3: before X x [0.00000, 0.29035, 0.46241, 1.00000] y [0.97063, 0.11103, 0.53496, 1.00000] · OK X=Y x [0.00000, 0.29035, 0.46241, 0.50000, 0.53759, 0.70965, 1.00000] y [0.97063, 0.11103, 0.53496, 0.59348, 0.53496, 0.11103, 0.97063] · one undo → X x [0.00000, 0.29035, 0.46241, 1.00000] y [0.97063, 0.11103, 0.53496, 1.00000]
+  RED written at once: after Cancel X x [0.00000, 0.50000, 1.00000] y [1.00000, 0.59348, 1.00000]
+FLEX-U2 U21B mini landscape 2D: window (113.0, 74.0, 907.0, 596.0) (want (113.0, 74.0, 907.0, 596.0)) = 80.0% × 80.0%
+  U21B mini landscape: X chart (129.0, 155.0, 691.0, 174.0) · Y chart (129.0, 379.0, 691.0, 174.0) · Cancel (832.0, 609.0, 86.0, 45.0) · OK (929.0, 609.0, 75.0, 45.0)
+FLEX-U2 13p 3D yaw 45°: view 610×941 · drawn x 106…504 y 262…641 · gizmo (474.0, 0.0, 136.0, 136.0) · inside yes clear yes
+  13p 3D sweep yaw 0°: view 610×941 · drawn x 99…463 y 215…682 · gizmo (474.0, 0.0, 136.0, 136.0) · inside yes clear yes
+  13p 3D sweep yaw 90°: view 610×941 · drawn x 147…511 y 215…682 · gizmo (474.0, 0.0, 136.0, 136.0) · inside yes clear yes
+  13p 3D sweep yaw 135°: view 610×941 · drawn x 229…387 y 213…747 · gizmo (474.0, 0.0, 136.0, 136.0) · inside yes clear yes
+  13p 3D sweep yaw 180°: view 610×941 · drawn x 139…495 y 255…743 · gizmo (474.0, 0.0, 136.0, 136.0) · inside yes clear yes
+  13p 3D sweep yaw 225°: view 610×941 · drawn x 93…517 y 297…672 · gizmo (474.0, 0.0, 136.0, 136.0) · inside yes clear yes
+  13p 3D sweep yaw 270°: view 610×941 · drawn x 115…471 y 255…743 · gizmo (474.0, 0.0, 136.0, 136.0) · inside yes clear yes
+  13p 3D sweep yaw 315°: view 610×941 · drawn x 223…381 y 213…747 · gizmo (474.0, 0.0, 136.0, 136.0) · inside yes clear yes
+  RED no aspect fit yaw 45°: view 610×941 · drawn x -2…612 y 149…734 · gizmo (474.0, 0.0, 136.0, 136.0) · inside NO clear yes
+FLEX-U2 U21B 13p 2D: window (103.0, 137.0, 826.0, 1102.0) (want (103.0, 137.0, 826.0, 1102.0)) = 80.0% × 80.0%
+  U21B 13p 2D: X table (119.0, 198.0, 610.0, 465.0) chart (119.0, 218.0, 610.0, 427.0) · Y table (119.0, 675.0, 610.0, 465.0) chart (119.0, 695.0, 610.0, 427.0) · legend (745.0, 198.0, 168.0, 942.0)
+  U21B buttons: mirror-along-lr 221-265 · mirror-along-rl 273-317 · copy-down 632-676 · copy-up 684-728 · mirror-across-lr 1043-1087 · mirror-across-rl 1095-1139 · gaps [8, 315, 8, 315, 8]
+  U21B click [Left → Right]: X [0.0, 0.7813411927398622, 1.0, 0.7830194535094326, 0.0] → [0.0, 0.7813411927398622, 1.0, 0.7813411927398622, 0.0]
+  U21B 13p 3D: window (103.0, 137.0, 826.0, 1102.0) (want (103.0, 137.0, 826.0, 1102.0)) = 80.0% × 80.0%
+  U21B 13p 3D: table (119.0, 198.0, 610.0, 942.0) = 59.1% × 68.4% · gizmo (593.0, 198.0, 136.0, 137.0) · legend (745.0, 198.0, 168.0, 942.0)
+  RED old window: (206.0, 394.0, 620.0, 588.0) = 60.1% × 42.7%
+  U21B 13l 2D: window (137.0, 103.0, 1102.0, 826.0) (want (137.0, 103.0, 1102.0, 826.0)) = 80.0% × 80.0%
+  U21B 13l 3D: window (137.0, 103.0, 1102.0, 826.0) (want (137.0, 103.0, 1102.0, 826.0)) = 80.0% × 80.0%

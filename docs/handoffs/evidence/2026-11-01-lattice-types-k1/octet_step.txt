@@ -1,0 +1,5 @@
+  [writing ../docs/handoffs/evidence/2026-11-01-lattice-types-k1/octet_step.csv]
+STEP octet at rho 0.4752 (band middle), S=8 mm, production generator
+  uniform_4x4x4              prims   2093  components   1  ends   3456  dangling    0  -> PASS
+  doubled_S|S/2              prims   2396  components   1  ends   3936  dangling    0  -> PASS
+  stepped_S|2S/3             prims   1231  components   1  ends   1992  dangling    0  -> PASS

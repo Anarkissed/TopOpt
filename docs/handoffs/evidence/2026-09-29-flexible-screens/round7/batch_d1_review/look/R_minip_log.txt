@@ -1,0 +1,30 @@
+[minip] the Squish page opened by itself: false (H37: never)
+settled true · status 'Preview · core runs one group at a time' tone preview · heat true · play false
+  R01: player none · legend (472,344 248x124) · panel none · nothing touches
+wrote R_minip_R01_rest.png
+  tap the Setup chip [setupChip (228,1061 220x48) at 338,1085]
+  R02: player none · legend (472,344 248x124) · panel setupTray (384,757 336x276) · nothing touches
+wrote R_minip_R02_setup.png
+  tap Plate up's [Change] [setupRow-plateUp (398,865 308x52) at 670,891]
+  plate page: 6 buttons [+X 97x48, +Y 97x48, +Z 97x48, −X 97x48, −Y 97x48, −Z 97x48]
+  R03: player none · legend (472,344 248x124) · panel setupTray (384,769 336x264) · nothing touches
+wrote R_minip_R03_plate.png
+  tap the ⌃ [latticeMore (676,1045 44x64) at 698,1077]
+  card: sent 0
+  R04: player none · legend (472,344 248x124) · panel latticeCard (384,516 336x517) · nothing touches
+wrote R_minip_R04_card.png
+  Play true · the bar shown true
+  R05: player none · legend (472,344 248x124) · panel latticeCard (384,516 336x517) · nothing touches
+wrote R_minip_R05_play_card.png
+  R06: player (384,711 336x46)+(384,680 264x24) · legend (472,344 248x124) · panel setupTray (384,769 336x264) · nothing touches
+wrote R_minip_R06_play_setup.png
+  weight of Face 3 → 0: status 'Fix: the weight on Face 3' tone fix · chrome Optional(TopOptFlows.FlexibleChromeState.Card.callout)
+  R07: player none · legend none · panel callout (384,882 336x151) · nothing touches
+wrote R_minip_R07_callout.png
+  tap the ⌃ with the blocker [latticeMore (676,1045 44x64) at 698,1077]
+  R08: player none · legend none · panel latticeCard (384,654 336x379) · nothing touches
+wrote R_minip_R08_card_blocker.png
+  tap the capsule's Squish [capsuleSquish (212,76 70x44) at 247,98]
+  Squish page up true · panel 'Flexible · Squish'
+wrote R_minip_R09_squish.png
+touches: 0

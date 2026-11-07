@@ -168,6 +168,25 @@ inline constexpr const char* kAestheticDensityMeaning =
 
 // How the law maps demand to (density, cell size). All fields must be positive where
 // noted; grade_lattice throws std::invalid_argument otherwise.
+// ── ★ E3: ONE INCLUDE REGION'S OWN GRADING (plan.md §B7) ─────────────────────
+// Each value falls back to the part's when absent (0, or `flat` false). The region
+// is the voxel's owner by ruling 4 (`GradingLawParams::region_override_ids`).
+struct GradingRegionOverride {
+  double rho_min = 0.0;           // the region's band, inside the certifiable band
+  double rho_max = 0.0;
+  double demand_exponent = 0.0;   // the curve from stress to density
+  // ONE density for the whole region (grading "off" or "shape"): `flat_rho` when > 0
+  // (the region's stated relative_density), else the region's graded PEAK -- the
+  // densest point of its own grade, so it certifies wherever the grade does.
+  bool flat = false;
+  double flat_rho = 0.0;
+  // ★ E3: the region's own cell window (mm), SWEPT only; 0 = the part's. The planner
+  // holds the region's voxels to the part's ladder levels inside it (cell_plan.hpp
+  // voxel_level_lo/hi); the ladder's base stays the part's, its top may rise to it.
+  double cell_min_mm = 0.0;
+  double cell_max_mm = 0.0;
+};
+
 struct GradingLawParams {
   LatticeTopology topology = LatticeTopology::Octet;
 
@@ -376,6 +395,19 @@ struct GradingLawParams {
   bool organic_shape_fit = false;
   double aesthetic_rho_min = 0.0;
   double aesthetic_rho_max = 0.0;
+  // ── ★ A CAP THAT APPLIES UNDER BOTH INTENTS (app, 2026-09-20) ────────────────
+  // `aesthetic_rho_max` above is aesthetic-only BY DESIGN: it says where within the
+  // certifiable band an aesthetic run chooses to grade. It is not a cap a structural
+  // run can state, and the preview needs one -- it rescales every automatic density
+  // onto the aesthetic ceiling under BOTH intents unless "Allow quilt" is on, so
+  // without this the run grades to the full band (top 0.9003) while the preview is
+  // capped near 0.379 (0.8999 and 0.219 on octet's legs-only law, before ruling
+  // 2026-11-02 (c)), and the two pictures are different objects.
+  //
+  // So: the top of the certifiable band, lowered. Applied before the aesthetic range
+  // is resolved, so an aesthetic job that states both gets the tighter of the two.
+  // 0 = off, which is every job written before this.
+  double max_relative_density = 0.0;
 
   // ── ★ AN ADAPTIVE CELLS-PER-MEMBER FLOOR, AESTHETIC ONLY ─────────────────────
   // The fixed floor of 5 is an ACCURACY threshold: below it the homogenised tensor
@@ -464,6 +496,12 @@ struct GradingLawParams {
   // held under an accuracy claim the certification cannot check, which is why it
   // arrives with an aggregate cap below rather than on its own.
   const std::vector<int>* region_ids = nullptr;
+
+  // ★ E3: per voxel, the 1-based id of the include region that owns it (ruling 4's
+  // owner, 0 = none), and each region's own grading, indexed id - 1. Both null (the
+  // default): every voxel grades by the part's values, exactly as before.
+  const std::vector<int>* region_override_ids = nullptr;
+  const std::vector<GradingRegionOverride>* region_overrides = nullptr;
 
   // The AGGREGATE exposure cap (fraction of the printed set), defaulted to the core
   // constant lattice_subfloor_aggregate_cap_fraction(). If the total retained across
@@ -675,6 +713,12 @@ struct GradedField {
   // clamp-counterfactual certification (run_job) uses to know WHICH voxels to
   // keep solid in the comparison solve.
   std::vector<char> clamp_flags;
+  // ★ Finding 7: the band-clamped LAW density of each voxel the swept plan's cover rule
+  // kept solid only because ANOTHER cell covering it was refused (its own cell was laid),
+  // 0 elsewhere (grid-indexed). The swept export never lays that other cell, so such a
+  // voxel is solid there; a run that lays its OWN cells (a stated "stepped_cells" plan)
+  // reads its density from here where the plan sent none.
+  std::vector<double> cover_dropped_rho;
 
   // ── ★ UTILISATION ACCOUNTING (task 2026-08-20-lattice-only-grading, §0) ───────
   // All zero on the peak-relative path, which is what keeps a legacy run identical.

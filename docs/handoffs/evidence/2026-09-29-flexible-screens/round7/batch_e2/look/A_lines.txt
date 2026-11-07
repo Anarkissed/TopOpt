@@ -1,0 +1,7 @@
+[Done] ["Edge 14", "Edge 16"]: stored
+sent: ["Edge 14 in the job", "Edge 16 in the job"]
+card line Side press · gyroid only · estimate · toast Angled presses are estimates until measured · side true
+A01_13p_edges_group_sent_side_label_solid_arrow.png: marks ["flatArrow-Edge 14", "flatDepthChip-Edge 14", "flatKnob-Edge 14", "flatPrism-Edge 14", "flatTiltBox-Edge 14", "flatTwistBox-Edge 14"] · solid ["Edge 14": true, "Edge 16": true] · toast toastLine:Angled presses are estimates until measured
+A02_11l_edges_group_sent.png: marks ["flatArrow-Edge 14", "flatDepthChip-Edge 14", "flatKnob-Edge 14", "flatPrism-Edge 14", "flatTiltBox-Edge 14", "flatTwistBox-Edge 14"] · solid ["Edge 14": true, "Edge 16": true] · toast -
+gated: Set up · core support pending
+A03_13p_core_side_closed_dashed_pending.png: marks ["flatArrow-Edge 14", "flatDepthChip-Edge 14", "flatKnob-Edge 14", "flatPrism-Edge 14", "flatTiltBox-Edge 14", "flatTwistBox-Edge 14"] · solid ["Edge 14": false, "Edge 16": false] · toast -

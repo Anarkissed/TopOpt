@@ -1,0 +1,140 @@
+e2_fix3.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testAPressWhoseArrowMovedWaitsForCoresNewStack]' started.
+e2_fix3.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testAPressWhoseArrowMovedWaitsForCoresNewStack]' passed (3.809 seconds).
+e2_fix3.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testAnEdgesGroupBesideAFaceGroupExportsOneGroupAndSaysSoFirst]' started.
+e2_fix3.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testAnEdgesGroupBesideAFaceGroupExportsOneGroupAndSaysSoFirst]' passed (6.830 seconds).
+e2_fix3.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testExportIsDisabledWithAStatedReasonWhenNoFacePrismIsSet]' started.
+e2_fix3.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testExportIsDisabledWithAStatedReasonWhenNoFacePrismIsSet]' passed (0.128 seconds).
+e2_fix3.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testH15PrimeAndH18AreStageSwitchesAtTheirAnchors]' started.
+e2_fix3.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testH15PrimeAndH18AreStageSwitchesAtTheirAnchors]' passed (0.092 seconds).
+e2_fix3.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testHisFacePrismsLatticeOnlyUnderThem]' started.
+e2_fix3.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testHisFacePrismsLatticeOnlyUnderThem]' passed (4.605 seconds).
+e2_fix3.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testNoFacePrismMeansNoLatticeAnywhere]' started.
+e2_fix3.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testNoFacePrismMeansNoLatticeAnywhere]' passed (3.326 seconds).
+e2_fix3.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testPickingTheTopDrawsNoPrismItsFaceIsOffInSelections]' started.
+e2_fix3.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testPickingTheTopDrawsNoPrismItsFaceIsOffInSelections]' passed (1.660 seconds).
+e2_fix3.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testPrismsIsEveryFacePrismOfThePickedGroup]' started.
+e2_fix3.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testPrismsIsEveryFacePrismOfThePickedGroup]' passed (1.689 seconds).
+e2_fix3.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testProtectAndMinimizePlasticAreOffTheFlexibleStageAndNothingElseIs]' started.
+e2_fix3.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testProtectAndMinimizePlasticAreOffTheFlexibleStageAndNothingElseIs]' passed (0.000 seconds).
+e2_fix3.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testThePrismIsThePickedGroupsLatticeFacePrismAtTheListsDepth]' started.
+e2_fix3.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testThePrismIsThePickedGroupsLatticeFacePrismAtTheListsDepth]' passed (1.703 seconds).
+e2_fix3.log:FLEX-E2-12 the moment after the twist: key nil · 'Set up · core is designing it' · designed false · RED CONTROL key Optional(-1002) in the job Optional(true) designed true
+e2_fix3.log:FLEX-E2-12 on the way: ["designing", "in the job"] · new key -1005 (old -1002)
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleBatchCVerifyTests testAFailedOrBlockedSolveIsSaidAndRetryRunsItAgain]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleBatchCVerifyTests testAFailedOrBlockedSolveIsSaidAndRetryRunsItAgain]' passed (0.083 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleBatchCVerifyTests testALegendTapNeverReordersTheLegends]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleBatchCVerifyTests testALegendTapNeverReordersTheLegends]' passed (0.002 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleBatchCVerifyTests testEveryTappedValueIsInTheBlueSquircle]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleBatchCVerifyTests testEveryTappedValueIsInTheBlueSquircle]' passed (0.117 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleBatchCVerifyTests testHisProjectsStressSolvesWithTheRegionsItsLoadsReach]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleBatchCVerifyTests testHisProjectsStressSolvesWithTheRegionsItsLoadsReach]' passed (0.766 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleBatchCVerifyTests testMPaReadsToThreeSignificantDigits]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleBatchCVerifyTests testMPaReadsToThreeSignificantDigits]' passed (0.000 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleBatchCVerifyTests testStressTakesTheMapFromHeatAndLeavesXrayAndTheLatticeAlone]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleBatchCVerifyTests testStressTakesTheMapFromHeatAndLeavesXrayAndTheLatticeAlone]' passed (0.000 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleBatchCVerifyTests testTappingStressShowsItInTheDefaultView]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleBatchCVerifyTests testTappingStressShowsItInTheDefaultView]' passed (14.403 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleBatchCVerifyTests testTheDentLegendSaysWhatYouDrewUnlessCoreDesignedTheLattice]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleBatchCVerifyTests testTheDentLegendSaysWhatYouDrewUnlessCoreDesignedTheLattice]' passed (0.000 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleBatchCVerifyTests testTheFirstSaveAndExitHasTheSolverAndSolvesOnlyWhileStressShows]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleBatchCVerifyTests testTheFirstSaveAndExitHasTheSolverAndSolvesOnlyWhileStressShows]' passed (0.061 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleBatchCVerifyTests testThePlayerKeepsOffTheSelectionsColumn]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleBatchCVerifyTests testThePlayerKeepsOffTheSelectionsColumn]' passed (0.001 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleBatchCVerifyTests testTheReachedRegionsAreTheLoadsAndAnchorsAndTheirAncestors]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleBatchCVerifyTests testTheReachedRegionsAreTheLoadsAndAnchorsAndTheirAncestors]' passed (0.000 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleBatchCVerifyTests testTheSquishHoldsStillWhileALegendReads]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleBatchCVerifyTests testTheSquishHoldsStillWhileALegendReads]' passed (0.000 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleBatchCVerifyTests testTheStressColourUnderAPointIsTheNumberATapReadsThere]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleBatchCVerifyTests testTheStressColourUnderAPointIsTheNumberATapReadsThere]' passed (4.785 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleBatchCVerifyTests testTheTintHookIsInertOffTheFlexibleStage]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleBatchCVerifyTests testTheTintHookIsInertOffTheFlexibleStage]' passed (0.078 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testACalibrateFirstFilamentIsCoresRefusalInOneLine]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testACalibrateFirstFilamentIsCoresRefusalInOneLine]' passed (1.704 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testALatticeReadyNoteShowsOnceWhenABuildLands]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testALatticeReadyNoteShowsOnceWhenABuildLands]' passed (10.895 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testNotSentLinesAreOneShortLineEach]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testNotSentLinesAreOneShortLineEach]' passed (0.000 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testReadySendsTheJobToCoresFlexibleRunner]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testReadySendsTheJobToCoresFlexibleRunner]' passed (6.334 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testTheExportStepSaysTheExportsWaitOnCoreInOneLine]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testTheExportStepSaysTheExportsWaitOnCoreInOneLine]' passed (0.002 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testTheHooksAreInPlace]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testTheHooksAreInPlace]' passed (0.047 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testTheLatticeButtonOpensSettingsWhenNothingCanShowAndExitShowsIt]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testTheLatticeButtonOpensSettingsWhenNothingCanShowAndExitShowsIt]' passed (8.408 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testTheLatticeViewIsTheXRayRendering]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testTheLatticeViewIsTheXRayRendering]' passed (0.001 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testTheNoteBandIsReservedBesideTheViewRow]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testTheNoteBandIsReservedBesideTheViewRow]' passed (0.000 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testThePillSendsWhenReadyAndOpensSettingsOnlyToFix]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testThePillSendsWhenReadyAndOpensSettingsOnlyToFix]' passed (0.003 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testTheViewRowHasNoXRayButton]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testTheViewRowHasNoXRayButton]' passed (0.003 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testWhatCoreCannotRunIsSaidNotSent]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testWhatCoreCannotRunIsSaidNotSent]' passed (1.037 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2HostedTests testTheArrowIsSolidWhenSentAndDashedOtherwise]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2HostedTests testTheArrowIsSolidWhenSentAndDashedOtherwise]' passed (10.356 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2HostedTests testTheRulingsSentencePopsOncePerSession]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2HostedTests testTheRulingsSentencePopsOncePerSession]' passed (5.366 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2HostedTests testTheSideLabelLine]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2HostedTests testTheSideLabelLine]' passed (4.609 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testALatticeDesignedAtAnotherTemperatureIsStale]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testALatticeDesignedAtAnotherTemperatureIsStale]' passed (0.007 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testAPressIsADesignTarget]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testAPressIsADesignTarget]' passed (5.569 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testAPressIsSentOnlyWhenCoreTakesIt]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testAPressIsSentOnlyWhenCoreTakesIt]' passed (3.168 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testAPressWhoseArrowMovedWaitsForCoresNewStack]' started.
+e2_fix2.log:app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7E2Tests.swift:680: error: -[TopOptFlowsTests.FlexibleR7E2Tests testAPressWhoseArrowMovedWaitsForCoresNewStack] : XCTUnwrap failed: expected non-nil value of type "FlexibleCoreFix"
+e2_fix2.log:app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7E2Tests.swift:695: error: -[TopOptFlowsTests.FlexibleR7E2Tests testAPressWhoseArrowMovedWaitsForCoresNewStack] : XCTAssertFalse failed: threw error "UnwrappingOptional(errorCode: 105, errorUserInfo: ["XCTestErrorUserInfoKeyShouldIgnore": true])" - ★ nothing written while its stack is being read
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testAPressWhoseArrowMovedWaitsForCoresNewStack]' failed (5.365 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testATwistSaysHowFarOff]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testATwistSaysHowFarOff]' passed (8.348 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testCubeCornerFrameColumnsAndExitLinksMatchCoreToTheBit]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testCubeCornerFrameColumnsAndExitLinksMatchCoreToTheBit]' passed (3.887 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testFacePressesUnchanged]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testFacePressesUnchanged]' passed (0.001 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testOneGroupPerExportSaid]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testOneGroupPerExportSaid]' passed (3.552 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testRimDefault]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testRimDefault]' passed (0.817 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testSharedFootprintInPlainWords]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testSharedFootprintInPlainWords]' passed (5.352 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testTheDefaultMapIsTheFlatPrismInCoresNumbers]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testTheDefaultMapIsTheFlatPrismInCoresNumbers]' passed (9.444 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testTheLatticeIsGradedAlongTheArrow]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testTheLatticeIsGradedAlongTheArrow]' passed (4.022 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testAnEdgesGroupBesideAFaceGroupExportsOneGroupAndSaysSoFirst]' started.
+e2_fix2.log:app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7M1Tests.swift:382: error: -[TopOptFlowsTests.FlexibleR7M1Tests testAnEdgesGroupBesideAFaceGroupExportsOneGroupAndSaysSoFirst] : XCTAssertEqual failed: ("Building…") is not equal to ("Preview · one group per export")
+e2_fix2.log:app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7M1Tests.swift:383: error: -[TopOptFlowsTests.FlexibleR7M1Tests testAnEdgesGroupBesideAFaceGroupExportsOneGroupAndSaysSoFirst] : XCTAssertEqual failed: ("building") is not equal to ("preview")
+e2_fix2.log:app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7M1Tests.swift:390: error: -[TopOptFlowsTests.FlexibleR7M1Tests testAnEdgesGroupBesideAFaceGroupExportsOneGroupAndSaysSoFirst] : XCTAssertTrue failed
+e2_fix2.log:app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7M1Tests.swift:391: error: -[TopOptFlowsTests.FlexibleR7M1Tests testAnEdgesGroupBesideAFaceGroupExportsOneGroupAndSaysSoFirst] : failed - ★ said, not sent: idle
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testAnEdgesGroupBesideAFaceGroupExportsOneGroupAndSaysSoFirst]' failed (1.689 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testExportIsDisabledWithAStatedReasonWhenNoFacePrismIsSet]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testExportIsDisabledWithAStatedReasonWhenNoFacePrismIsSet]' passed (0.133 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testH15PrimeAndH18AreStageSwitchesAtTheirAnchors]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testH15PrimeAndH18AreStageSwitchesAtTheirAnchors]' passed (0.092 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testHisFacePrismsLatticeOnlyUnderThem]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testHisFacePrismsLatticeOnlyUnderThem]' passed (4.647 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testNoFacePrismMeansNoLatticeAnywhere]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testNoFacePrismMeansNoLatticeAnywhere]' passed (3.258 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testPickingTheTopDrawsNoPrismItsFaceIsOffInSelections]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testPickingTheTopDrawsNoPrismItsFaceIsOffInSelections]' passed (1.679 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testPrismsIsEveryFacePrismOfThePickedGroup]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testPrismsIsEveryFacePrismOfThePickedGroup]' passed (1.662 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testProtectAndMinimizePlasticAreOffTheFlexibleStageAndNothingElseIs]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testProtectAndMinimizePlasticAreOffTheFlexibleStageAndNothingElseIs]' passed (0.000 seconds).
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testThePrismIsThePickedGroupsLatticeFacePrismAtTheListsDepth]' started.
+e2_fix2.log:Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testThePrismIsThePickedGroupsLatticeFacePrismAtTheListsDepth]' passed (1.687 seconds).
+e2_fix2.log:FLEX-STRESS failed: state failed("face region 9 out of range") · line 'Couldn't simulate' · (i) 'Core could not solve the solid part: face region 9 out of range'
+e2_fix2.log:FLEX-STRESS his regions: sent by the app [101, 102, 103, 104] · reached [102, 103] · anchors [0] · loads ["[]/[103]"]
+e2_fix2.log:FLEX-STRESS the app's context: THROWS 'face region 101 "add": face id 23 out of range — the model carries 6 faces (valid ids 0..5)'
+e2_fix2.log:FLEX-STRESS reached context: 0.74 s, nonConvergent no, peak 0.0462 MPa, grid 64x64x13 @ 1.56 mm
+e2_fix2.log:FLEX-STRESS view: part covers 48242 px of 262144; pixels moved > 30/255 by tapping Stress — batch C's mix 0 (control), now 38041
+e2_fix2.log:FLEX-STRESS gap distribution (8 part triangles): p50 0.0 p90 0.4329940207003857 p99 0.6555924242145883 worst 0.919175967520226 at SIMD3<Float>(99.77736, 0.0, 16.258484)
+e2_fix2.log:FLEX-STRESS gap distribution (25888 part triangles): p50 0.0 p90 0.0001223871748524877 p99 0.08084654396086854 worst 0.9306080160090178 at SIMD3<Float>(98.44118, 100.0, 2.1169252)
+e2_fix2.log:FLEX-STRESS colour vs reading on his part (2000 points): unsubdivided overlay p99 0.656 mean 0.068 worst 0.919 of the ramp (max at a vertex 0.0000 MPa) · subdivided to 2.08 mm (25888 part triangles) p99 0.081 mean 0.0041 worst 0.931 (max at a vertex 0.0462 MPa) · peak 0.0462 MPa
+e2_fix2.log:FLEX-STRESS control (M2 re-pin): the box corners read 0.0000 MPa at most; every vertex 0.0000
+e2_fix2.log:FLEX-STRESS dent on the subdivided part: 77178 of 77664 vertices move; worst off the unsubdivided dented surface 8.58e-08 mm
+e2_fix2.log:FLEX-E2-12 the moment after the twist: key nil · 'Set up · core is designing it' · designed false · RED CONTROL key Optional(-1034) in the job Optional(true) designed true
+e2_fix2.log:FLEX-E2-12 on the way: ["designing", "in the job"] · new key -1037 (old -1034)

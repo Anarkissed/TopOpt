@@ -1,0 +1,33 @@
+# Topology / Structural / Aesthetic / Surface chrome (FlexibleRound7OtherStagesProbe, 13 frames: the whole app page hosted, each stage by its own navigation), the SAME environment, back to back (2026-10-17 22:04-22:30):
+#   BEFORE = a465f66f with the two #354 lines taken out (H39 deleted, H40 back to #354's line); AFTER = a465f66f as committed.
+# (Against R7-D1's committed before/ every frame differed by a uniform 1-2 levels: the Mac's main display changed since — this run's PNGs carry the 'U28E590' profile, R7-D1's 'Display P3'. So the comparison is re-run here in one environment.)
+
+## before (run 1) vs after (run 1)
+11l_flexiblePad0003_surface.png: IDENTICAL (0 px differ)
+11l_flexiblePad0003_topology.png: IDENTICAL (0 px differ)
+11l_structural3418_lattice.png: IDENTICAL (0 px differ)
+11l_structural3418_surface.png: IDENTICAL (0 px differ)
+11l_structural3418_topology.png: DIFFERS (104 px differ, bbox (1234, 846, 1255, 963))
+13p_aesthetic68BF_lattice.png: IDENTICAL (0 px differ)
+13p_aesthetic68BF_topology.png: IDENTICAL (0 px differ)
+13p_flexiblePad0003_surface.png: IDENTICAL (0 px differ)
+13p_flexiblePad0003_topology.png: IDENTICAL (0 px differ)
+13p_plain887A_topology.png: IDENTICAL (0 px differ)
+13p_structural3418_lattice.png: IDENTICAL (0 px differ)
+13p_structural3418_surface.png: IDENTICAL (0 px differ)
+13p_structural3418_topology.png: DIFFERS (12 px differ, bbox (1101, 1503, 1131, 1609))
+13 images, 2 differ
+
+## the two structural Topology frames, the load arrow (11l: 104 px in (1234,846)-(1255,963); 13p: 3-12 px) — run-to-run flicker, not the hooks:
+11l_structural3418_topology.png
+  before run 2 vs before run 1: (104, (1234, 846, 1255, 963))
+  before run 3 vs before run 2: (103, (1234, 846, 1252, 960))
+  before run 2 vs after run 2:  (0, None)
+  before run 3 vs after run 3:  (103, (1234, 846, 1252, 960))
+13p_structural3418_topology.png
+  before run 2 vs before run 1: (3, (1101, 1608, 1131, 1609))
+  before run 3 vs before run 2: (9, (1118, 1503, 1127, 1608))
+  before run 2 vs after run 2:  (0, None)
+  before run 3 vs after run 3:  (10, (1103, 1503, 1127, 1621))
+
+R7-D1 recorded the same flicker on this arrow (8 px at 11l, next run identical).

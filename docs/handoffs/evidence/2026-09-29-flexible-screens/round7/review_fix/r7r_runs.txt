@@ -1,0 +1,133 @@
+# Round 7 · the review of M2 and F — the runs. swift build --build-tests --scratch-path /tmp/r7d-build; every run --skip-build.
+
+## The new tests on the code (before the suite): 12/12
+Test Case '-[TopOptFlowsTests.FlexibleR7RHostedTests testWithBendOnTheDepthChipIsDrawnWhereTheBentFacePutsIt]' passed (20.510 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7RTests testWithBendOnTheDepthChipAndTheDepthLabelsMoveWithTheBend]' passed (3.410 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7RHostedTests testFsNewControlsAreFingerTargets]' passed (19.707 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7RHostedTests testTheFaceCardsNamedChipsAreDrawnOnHisPad]' passed (26.517 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7RTests testAFacesOwnWeightIsAnEqualSharePerLatticePartAndOneHand]' passed (3.229 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7RTests testAfterResetAllTheMainPageSaysNothingToSquishYetAndHeatsNothing]' passed (6.145 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7RTests testATapOnAFacesSolidMiddlePicksItsLatticePartsGroup]' passed (1.697 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7RTests testTheBendPoseKeyIsTheWholeBendSoEachGroupGetsItsOwnPose]' passed (5.428 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7RTests testTheMainPageStartsOnTheFirstGroupEverySession]' passed (6.755 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7RTests testTheRailCountsFacesAndThePinchLineNamesTheFaceWhole]' passed (1.573 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7RTests testTheTrashQuestionNeverOutlivesItsGroup]' passed (4.588 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7RTests testTheVioletRowOnlyWhileSomethingIsViolet]' passed (3.189 seconds).
+(run 1 had the two Bend tests' RED controls still moving the chip — the control is now F's chip read at rest; run 2: both pass)
+FLEX-R7R-H3 now: rest (605.4913940429688, 595.2178955078125) · bent (509.5511474609375, 643.1051635742188) · 107.2 pt | control: rest (605.4913940429688, 595.2178955078125) · bent (605.4913940429688, 595.2178955078125) · 0.0 pt
+FLEX-R7R-3 Face 4's chip moves 19.361 mm · Face 2's floor tag 17.562 mm (k 1.00)
+FLEX-R7R-H2 now: Delete 65x44, Keep 56x44, Reset 60x44, Reset all 70x44, take-out 44x44 | control: Delete 65x32, Keep 56x32, Reset 60x32, Reset all 70x30, take-out 32x32
+FLEX-R7R-H1 13p: chips (130.0, 832.0, 273.5, 33.0) · menu none | 13p control: chips none · menu (326.0, 826.5, 104.0, 33.0) | 11l: chips (130.0, 475.0, 273.5, 33.0) · menu none | 11l control: chips none · menu (326.0, 432.5, 104.0, 33.0)
+FLEX-R7R-H3 now: rest (605.4913940429688, 595.2178955078125) · bent (509.5511474609375, 643.1051635742188) · 107.2 pt | control: rest (605.4913940429688, 595.2178955078125) · bent (509.5511474609375, 643.1051635742188) · 107.2 pt
+FLEX-R7R-1 Face 4: parts 2000007:2.2680 2000008:2.2680 · total 4.5359 kg (saved 4.5359)
+FLEX-R7R-1 Face 2: parts 2000005:2.2680 2000006:2.2680 · total 4.5359 kg (saved 4.5359)
+FLEX-R7R-2 dents 133650 (step 522) · Group 1 bends 11.994 mm × k 1.00 · Group 2 k 1.00
+FLEX-R7R-9 rail '2 faces' · pinch line 'Pinched with Face 2 · two halves' (32 chars)
+FLEX-R7R-3 Face 4's chip moves 19.361 mm · Face 2's floor tag 17.562 mm (k 1.00)
+
+## The review's failing sequence, in ONE process (FlexibleR7FTests, then FlexibleRound7ViewsHostedTests/testBendAlone…): H5 passes
+Test Case '-[TopOptFlowsTests.FlexibleR7FTests testAnEmptySetupMayExitAndATapOnTheTopStartsGroupOneAtItsShare]' passed (2.395 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7FTests testBendAndPlayNeverShowTogether]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7FTests testNoViewOnIsTheCurveOnly]' passed (3.986 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7FTests testOnHisPadTheFaceUnderTheBendMovesWithIt]' passed (3.478 seconds).
+FlexibleR7FTests.swift:206: error: -[TopOptFlowsTests.FlexibleR7FTests testTheBendPoseMovesWhatIsDrawnOnThePart] : XCTAssertEqual failed: ("[SIMD3<Float>(4.0, 2.0, -41.2), SIMD3<Float>(3.0, 2.0, -40.9), SIMD3<Float>(4.0, 3.0, -41.2)]") is not equal to ("[SIMD3<Float>(4.0, 2.0, -40.0), SIMD3<Float>(3.0, 2.0, -40.0), SIMD3<Float>(4.0, 3.0, -40.0)]") - its floor stays
+Test Case '-[TopOptFlowsTests.FlexibleR7FTests testTheBendPoseMovesWhatIsDrawnOnThePart]' failed (1.151 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7FTests testTheFaceCardsGroupChipsShowTheNames]' passed (1.920 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7FTests testTheGroupTrashAsksFirstAndTheFaceRowLooksDifferent]' passed (4.152 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7FTests testTheMainPagesHeatFollowsTheLastTappedFacesGroup]' passed (7.378 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsHostedTests testBendAloneKeepsWhatIsDrawnOnThePartAtTheFullBend]' passed (52.546 seconds).
+FLEX-R7V-H5 overlay px: editing 4357 · Bend alone 4380 · Bend + Heat 4380 · control (R7-V) 0 · bent vs rest pose 8700 px
+(the one failure, FlexibleR7FTests.testTheBendPoseMovesWhatIsDrawnOnThePart: 'its floor stays' — F's rule, reversed by his 2026-10-15 answer 1; re-pinned with attribution)
+
+## The targeted suite, ONCE, at the fixes (before the two C5 re-pins): 201 classes (mx1's 196 + FlexibleR7RTests, FlexibleR7RHostedTests, FlexibleR7REvidenceProbe (skips without its env), LatticeBarrierModelTests, LatticeSeparationTests; SurfaceStageGesturesTests does not exist), chunks of 12
+run start 05:04:32
+run chunk 1 exit 0 05:22:40
+run chunk 2 exit 0 05:49:10
+run chunk 3 exit 0 05:52:33
+run chunk 4 exit 1 06:07:17
+run chunk 5 exit 0 06:11:48
+run chunk 6 exit 1 06:13:10
+run chunk 7 exit 0 06:15:10
+run chunk 8 exit 0 06:15:40
+run chunk 9 exit 0 06:20:52
+run chunk 10 exit 0 06:23:06
+run chunk 11 exit 0 06:32:28
+run chunk 12 exit 0 06:32:30
+run chunk 13 exit 0 06:33:21
+run chunk 14 exit 1 06:33:31
+run chunk 15 exit 0 06:37:55
+run chunk 16 exit 0 06:37:58
+run chunk 17 exit 0 06:38:02
+run DONE 06:38:02
+Test Case lines: started 1348 · passed 1280 · failed 4 · skipped 64
+### every failing test, with its line
+LatticeStressTintTests.swift:195: error: -[TopOptFlowsTests.LatticeSimSolveTriggerTests testTheTriggerRefusesOnAllThreeGrounds] : XCTAssertTrue failed - ★ …and otherwise it actually runs
+FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Simulating the squish…' is drawn whole (118.5 of 151.0 pt)
+FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Refining Group 2… 8/8' is drawn whole (110.5 of 147.0 pt)
+FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Refining Group 1… 3/8' is drawn whole (117.5 of 145.0 pt)
+FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Refine didn't settle' is drawn whole (117.5 of 128.0 pt)
+FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Refine took too long' is drawn whole (117.0 of 134.0 pt)
+FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Group 2's sim failed' is drawn whole (118.5 of 133.0 pt)
+FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p a pick: 'Simulating the squish…' is drawn whole (145.5 of 151.0 pt)
+FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p a pick: 'Refining Group 2… 8/8' is drawn whole (144.0 of 147.0 pt)
+FlexibleGroupPaletteHostedTests.swift:143: error: -[TopOptFlowsTests.FlexibleGroupPaletteHostedTests testEightSwatchesOnOneLineAndSixGroupsWearSixColours] : XCTAssertGreaterThanOrEqual failed: ("12.0") is less than ("94.86501753330231") - 11l: "Squeeze group" keeps its room
+FlexibleGroupPaletteHostedTests.swift:144: error: -[TopOptFlowsTests.FlexibleGroupPaletteHostedTests testEightSwatchesOnOneLineAndSixGroupsWearSixColours] : XCTAssertLessThanOrEqual failed: ("556.5") is greater than ("490.0") - 11l: inside the card
+FlexibleGroupPaletteHostedTests.swift:143: error: -[TopOptFlowsTests.FlexibleGroupPaletteHostedTests testEightSwatchesOnOneLineAndSixGroupsWearSixColours] : XCTAssertGreaterThanOrEqual failed: ("12.0") is less than ("94.86501753330231") - 11p: "Squeeze group" keeps its room
+FlexibleGroupPaletteHostedTests.swift:144: error: -[TopOptFlowsTests.FlexibleGroupPaletteHostedTests testEightSwatchesOnOneLineAndSixGroupsWearSixColours] : XCTAssertLessThanOrEqual failed: ("556.5") is greater than ("490.0") - 11p: inside the card
+FlexibleGroupPaletteHostedTests.swift:143: error: -[TopOptFlowsTests.FlexibleGroupPaletteHostedTests testEightSwatchesOnOneLineAndSixGroupsWearSixColours] : XCTAssertGreaterThanOrEqual failed: ("12.0") is less than ("94.86501753330231") - 13p: "Squeeze group" keeps its room
+FlexibleGroupPaletteHostedTests.swift:144: error: -[TopOptFlowsTests.FlexibleGroupPaletteHostedTests testEightSwatchesOnOneLineAndSixGroupsWearSixColours] : XCTAssertLessThanOrEqual failed: ("556.5") is greater than ("490.0") - 13p: inside the card
+FlexibleGroupPaletteHostedTests.swift:143: error: -[TopOptFlowsTests.FlexibleGroupPaletteHostedTests testEightSwatchesOnOneLineAndSixGroupsWearSixColours] : XCTAssertGreaterThanOrEqual failed: ("12.0") is less than ("94.86501753330231") - 13l: "Squeeze group" keeps its room
+FlexibleGroupPaletteHostedTests.swift:144: error: -[TopOptFlowsTests.FlexibleGroupPaletteHostedTests testEightSwatchesOnOneLineAndSixGroupsWearSixColours] : XCTAssertLessThanOrEqual failed: ("556.5") is greater than ("490.0") - 13l: inside the card
+FlexibleGroupPaletteHostedTests.swift:251: error: -[TopOptFlowsTests.FlexibleGroupPaletteHostedTests testNineGroupsNumberTheSharedColourOnTheRailAndOnTheirOwnFaces] : XCTAssertNotNil failed - 11l: nine groups → the menu chip
+FlexibleGroupPaletteHostedTests.swift:252: error: -[TopOptFlowsTests.FlexibleGroupPaletteHostedTests testNineGroupsNumberTheSharedColourOnTheRailAndOnTheirOwnFaces] : XCTAssertNil failed: "(130.0, 452.0, 640.0, 33.0)" - 11l: …not nine chips
+FlexibleGroupPaletteHostedTests.swift:253: error: -[TopOptFlowsTests.FlexibleGroupPaletteHostedTests testNineGroupsNumberTheSharedColourOnTheRailAndOnTheirOwnFaces] : XCTAssertGreaterThanOrEqual failed: ("12.0") is less than ("94.86501753330231") - 11l: "Squeeze group" keeps its room (94.86501753330231 pt)
+FlexibleGroupPaletteHostedTests.swift:254: error: -[TopOptFlowsTests.FlexibleGroupPaletteHostedTests testNineGroupsNumberTheSharedColourOnTheRailAndOnTheirOwnFaces] : XCTAssertLessThanOrEqual failed: ("770.0") is greater than ("490.0") - 11l: inside the card
+FlexibleGroupPaletteHostedTests.swift:251: error: -[TopOptFlowsTests.FlexibleGroupPaletteHostedTests testNineGroupsNumberTheSharedColourOnTheRailAndOnTheirOwnFaces] : XCTAssertNotNil failed - 13p: nine groups → the menu chip
+FlexibleGroupPaletteHostedTests.swift:252: error: -[TopOptFlowsTests.FlexibleGroupPaletteHostedTests testNineGroupsNumberTheSharedColourOnTheRailAndOnTheirOwnFaces] : XCTAssertNil failed: "(130.0, 834.0, 640.0, 33.0)" - 13p: …not nine chips
+FlexibleGroupPaletteHostedTests.swift:253: error: -[TopOptFlowsTests.FlexibleGroupPaletteHostedTests testNineGroupsNumberTheSharedColourOnTheRailAndOnTheirOwnFaces] : XCTAssertGreaterThanOrEqual failed: ("12.0") is less than ("94.86501753330231") - 13p: "Squeeze group" keeps its room (94.86501753330231 pt)
+FlexibleGroupPaletteHostedTests.swift:254: error: -[TopOptFlowsTests.FlexibleGroupPaletteHostedTests testNineGroupsNumberTheSharedColourOnTheRailAndOnTheirOwnFaces] : XCTAssertLessThanOrEqual failed: ("770.0") is greater than ("490.0") - 13p: inside the card
+
+Known (unchanged): FlexibleBatchNVerifyTests refine-line x8 (one test), LatticeSimSolveTriggerTests x1. No exit signal 11. LatticeStaleTypeTests 6/6. The Play ring passed.
+F's H5 Bend check passed in chunk 1, where FlexibleR7FTests (05:04:35) ran BEFORE FlexibleRound7ViewsHostedTests in the same process — the order that failed at the merge:
+  FLEX-R7V-H5 overlay px: editing 4357 · Bend alone 4380 · Bend + Heat 4380 · control (R7-V) 0 · bent vs rest pose 8700 px
+  (F measured 5569 / 7221 px for the overlays: the face card is one row taller now — the named chips under 'Squeeze group' — so the panel covers a little more of the part; still > 200)
+Caused by this step: FlexibleGroupPaletteHostedTests x2 (batch C5's 'menu chip past the words' rule — the review's chips finding reverses it); re-pinned with attribution, the scrolling line's frame made the drawn control (its ScrollView), and re-run:
+
+## Re-run after the C5 re-pins (FlexibleGroupPaletteHostedTests, FlexibleR7RHostedTests, FlexibleSqueezeGroupsUITests, FlexibleSqueezeGroupsReviewUITests, FlexibleR7FTests): 19/19
+Test Suite 'TopOptKitTests.xctest' passed at 2026-10-17 06:40:56.613.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-17 06:40:56.613.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Test Suite 'FlexibleGroupPaletteHostedTests' passed at 2026-10-17 06:41:37.587.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 40.813 (40.813) seconds
+Test Suite 'FlexibleR7FTests' passed at 2026-10-17 06:42:00.543.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 22.955 (22.956) seconds
+Test Suite 'FlexibleR7RHostedTests' passed at 2026-10-17 06:43:06.824.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 66.281 (66.281) seconds
+Test Suite 'FlexibleSqueezeGroupsReviewUITests' passed at 2026-10-17 06:44:07.854.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 61.030 (61.031) seconds
+Test Suite 'FlexibleSqueezeGroupsUITests' passed at 2026-10-17 06:44:45.641.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 37.786 (37.787) seconds
+Test Suite 'TopOptFlowsTests.xctest' passed at 2026-10-17 06:44:45.641.
+	 Executed 19 tests, with 0 failures (0 unexpected) in 228.865 (228.868) seconds
+Test Suite 'Selected tests' passed at 2026-10-17 06:44:45.642.
+	 Executed 19 tests, with 0 failures (0 unexpected) in 228.865 (228.869) seconds
+FLEX-C5-HOSTED swatches: 11l row x 209–438 (w 229, h 32) · words from 138 need 42 · panel x 24–504 · rail to 110 | 11l group row: chips x 130–482 | 11p row x 209–438 (w 229, h 32) · words from 138 need 42 · panel x 24–504 · rail to 110 | 11p group row: chips x 130–482 | 13p row x 209–438 (w 229, h 32) · words from 138 need 42 · panel x 24–504 · rail to 110 | 13p group row:
+FLEX-C5-HOSTED nine groups: shared [1, 9] · rail [Optional(1), nil, nil, nil, nil, nil, nil, nil, Optional(9)]
+FLEX-C5-HOSTED 11l group row: control x 130–482 in card 118–490 · words need 95 pt
+FLEX-C5-HOSTED 13p group row: control x 130–482 in card 118–490 · words need 95 pt
+FLEX-R7R-H1 13p: chips (130.0, 832.0, 273.5, 33.0) · menu none | 13p control: chips none · menu (326.0, 826.5, 104.0, 33.0) | 11l: chips (130.0, 475.0, 273.5, 33.0) · menu none | 11l control: chips none · menu (326.0, 432.5, 104.0, 33.0)
+Test Suite 'TopOptDesignTests.xctest' passed at 2026-10-17 06:44:45.745.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-17 06:44:45.745.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+
+## Goldens (FlexibleAngledGoldenTests, 13 tests)
+SWIFT_DETERMINISTIC_HASHING=1: identical 38, DIFFERS 0
+unseeded: identical 32, DIFFERS 0, PART-SKIP 1
+
+## The 16 stage-job hashes: stage_job_hashes_r7r.txt — cmp against round7/merge_x1/stage_job_hashes_mx1.txt: byte-identical (16 rows exit 0, plus the controls)
+
+## iOS (Debug, iPad Pro 13 Flexible-A1 147E56A1, derivedData flexA1) at 95fb60f1: ** BUILD SUCCEEDED ** (06:46)
+The app was NOT running (`launchctl list | grep -i com.nadim.topopt`: nothing) — installed, NOT launched. Installed TopOpt.debug.dylib == the built one (cmp), sha256 d2a199092228ea56, 81206448 bytes.
+Strings in the installed dylib: this step's 'groupWords' (the chips' words line) 1; 'Nothing to squish yet' 1; 'Pinched with' 1.

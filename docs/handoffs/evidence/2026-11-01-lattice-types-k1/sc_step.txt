@@ -1,0 +1,5 @@
+  [writing ../docs/handoffs/evidence/2026-11-01-lattice-types-k1/sc_step.csv]
+STEP sc at rho 0.2915 (band middle), S=8 mm, production generator
+  uniform_4x4x4              prims    425  components   1  ends    600  dangling    0  -> PASS
+  doubled_S|S/2              prims    506  components   1  ends    708  dangling    0  -> PASS
+  stepped_S|2S/3             prims    289  components   1  ends    396  dangling    0  -> PASS

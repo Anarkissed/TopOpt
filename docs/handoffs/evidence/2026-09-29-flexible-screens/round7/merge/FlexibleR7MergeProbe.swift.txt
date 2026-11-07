@@ -1,0 +1,75 @@
+// FlexibleR7MergeProbe — the MERGE step's look at R7-S and R7-V TOGETHER on his pad (A1_0003 + I2's Edge 9), the Settings
+// page hosted at 13" portrait (offscreen, never the app). A PROBE: printed, not asserted (temporary, never committed as a test;
+// its source is kept beside the merge's evidence as .swift.txt). FLEX_R7S_EVIDENCE_DIR=<dir> writes the composites.
+//   * an edges group's tab under R7-V's default views (Heat = the current group's, Play off): which faces wear heat, is the
+//     legend card up, is the player up (R7-S's verify saw Group 1's heat legend and an "All" player there before R7-V);
+//   * a faces group's tab: its own heat only;
+//   * Play on, a 12-character name on the group that plays: which form of the player's line is drawn, and is it whole
+//     (R7-S's question 8 — the line was cut beside "Index finger" before R7-V's shorter forms).
+#if canImport(AppKit)
+import XCTest
+import SwiftUI
+import AppKit
+import TopOptDesign
+@testable import TopOptFlows
+@testable import TopOptKit
+
+extension FlexibleR7SettingsHostedTests {
+    func testMergeProbeR7SAndR7VTogetherOnHisPad() throws {
+        let (r, m, _) = try hisPadWithEdges()
+        let size = CGSize(width: 1032, height: 1376)
+        let h = host(FlexibleStagePage(project: r.project, model: m, onExit: {}), size: size)
+        pump(2.5)
+        var report: [String] = []
+        func drawnLine() -> String? {
+            h.frames.all.keys.first { $0.hasPrefix("playerNoteText:") }.map { String($0.dropFirst("playerNoteText:".count)) }
+        }
+        func state(_ tag: String) {
+            let heated = FlexibleStageHeat.shown(model: m, views: m.views).sorted()
+            let chips = h.frames.marks.keys.filter { $0.hasPrefix("depthChip-") }.sorted()
+            report.append("\(tag): tab \(m.rail) · views heat \(m.views.heatScope) play \(m.views.contains(.play)) bend \(m.views.contains(.bend))"
+                + " · heated \(heated) · legend \(h.frames.all["legend"] != nil) · player \(h.frames.all["player"] != nil)"
+                + " · chips \(chips) · playing \(m.playingGroup.map { m.groupName($0) } ?? "none")")
+        }
+        // ★ the edges tab, R7-V's default views
+        let e = try XCTUnwrap(m.squeezeGroups.first { $0.kind == .edges })
+        m.rail = .group(e.id)
+        pump(1.5)
+        state("edges tab, default views")
+        composite(h, "R7M_13p_edges_tab_default_views.png")
+        // ★ Group 2 (Face 4 + Face 2 — its rest after Edge 9), the default views
+        let g2 = try XCTUnwrap(m.squeezeGroups.first { $0.kind == .faces && $0.regions.contains(4) })
+        m.rail = .group(g2.id)
+        m.select(4)
+        pump(1.5)
+        state("Group 2 tab, default views")
+        composite(h, "R7M_13p_group2_default_views.png")
+        // ★ Play on, then a 12-character name on the group that plays
+        m.views.insert(.play)
+        pump(1.5)
+        for name in ["", "Index finger", "WWWWWWWWWWWW"] {
+            m.setGroupName(g2.id, name)
+            pump(1.0)
+            let full = FlexibleSettingsSquish.note(model: m, fe: false) ?? "none"
+            let shown = drawnLine() ?? full
+            let drawn = h.frames.all["playerNote"]?.width ?? 0
+            func natural(_ t: String) -> CGFloat {
+                NSHostingView(rootView: Text(t).dsStyle(DS.TypeScale.footnote).fixedSize()).fittingSize.width + 2 * DS.Space.m
+            }
+            report.append(String(format: "Play on, Group 2 named '%@': full line '%@' needs %.0f pt · drawn '%@' needs %.0f pt · frame %.0f pt · whole %@",
+                                 m.groupName(try XCTUnwrap(m.railGroup(g2.id))), full, natural(full), shown, natural(shown), drawn,
+                                 drawn + 0.5 >= natural(shown) ? "yes" : "NO"))
+            if name == "Index finger" { composite(h, "R7M_13p_play_on_index_finger.png") }
+        }
+        state("Group 2 tab, Play on")
+        // ★ Reset all with Play on: [Model] [New], no pop-up, and no player (nothing pressed)
+        m.resetAll()
+        pump(2.0)
+        state("after Reset all, Play on")
+        report.append("after Reset all: tabs \(FlexibleSettingsRailView.tabs(model: m).map(\.title)) · fix buttons \(h.frames.all.keys.filter { $0.hasPrefix("fix-") }.sorted())")
+        composite(h, "R7M_13p_reset_all_play_on.png")
+        m.views = []
+        print("FLEX-R7-MERGE-PROBE\n  " + report.joined(separator: "\n  "))
+    }
+}
+#endif

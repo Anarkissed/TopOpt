@@ -1,0 +1,35 @@
+# core-speck-fix — overnight release (reviewer's ruling 07:42 UTC 2026-10-26). Branch claude/core-speck-fix from 85cadb88 (the shipped core,
+# fingerprint f2ca3eeb57ae), worktree .claude/worktrees/core-speck-fix. NOT pushed. Merge only; nothing rebased / forced / amended / stashed.
+# Deferred to the next release (stay on claude/core-loose-pieces): coarse seeding 269ca010, cold first window 6cb055c9 and their evidence.
+
+## COMMITS
+#   b2a1fd3a  cherry-pick -x of core-loose-pieces 74fed3cf (applied cleanly): item 50 acceptance — specks are a note, not a refusal; a refused
+#             version's note names the real reason; versions[].attempts.
+#   4b1296a3  plain [mg-safe] wording, HAND-WRITTEN: core-loose-pieces e49838d2 conflicted on 85cadb88 (it rewords lines 269ca010 changed);
+#             aborted and rewritten minimally — per-solve "multigrid (l1 smoother) CONVERGED / did not converge ; a Jacobi-CG FALLBACK follows",
+#             summary "N converged on multigrid (l1 smoother), fallback: none | K (Jacobi-CG; ...)", and a "FALLBACK: [mg-safe] solve N fell back
+#             to Jacobi-CG: ..." line after a fallback the safe retry led to.
+
+## TESTS (core/build-speck, nice -n 15, -j 4; core 013205159d9b at 4b1296a3)
+#   test_strengthen_accept (new) 5/5 checks — RED on the old rule (encoded temporarily on core-loose-pieces: 5 checks failed), GREEN here;
+#   test_strengthen 18/18; test_export_bodies; test_mg_safe_retry; test_loose_pieces; test_loose_review — all pass.
+#   17-test comparison vs 322b1c78 (git archive of 4b1296a3, same flags): 16 IDENTICAL; test_recycle '[mgcg void]' differs exactly as on the
+#   shipped core (5 edge/corner-hinged pieces, plain cg 188 -> 113, recycled 285 -> 130) — compare17.txt.
+#   Full ctest + cli_demo: NOT run here (runs at integration on the merged tree, per the coordinator).
+
+## ACCEPTANCE RE-RUN — his job 0e07f31f (res 96, strengthen; the 1 h 48 min job NOT re-run). Its six attempt exports
+## (out/strengthen/v1_0..2.stl, v2_0..2.stl, copied to the session scratchpad only) analyzed with this branch's CLI (`topopt-cli analyze
+## job.json --mesh vK_i.stl`); the same numbers as the core-loose-pieces 74fed3cf binary. Targets from his report.json.
+#   attempt | verified margin (export) | target | verdict under the shipped rule
+#   v1 attempt 0: verified 3.03382 vs target 4.11352 -> refused
+#   v1 attempt 1: verified 3.3404 vs target 4.11352 -> refused
+#   v1 attempt 2: verified 5.31568 vs target 4.11352 -> ACCEPTED
+#   v1: ACCEPTED on attempt 2; note "1 loose speck dropped from the export (0 mm^3)" (speck volume not on disk)
+#   v2 attempt 0: verified 5.53111 vs target 6.17028 -> refused
+#   v2 attempt 1: verified 5.64769 vs target 6.17028 -> refused
+#   v2 attempt 2: verified 5.53374 vs target 6.17028 -> refused
+#   v2: refused; note "verified 5.65× vs target 6.17×; the verified export missed the target after 2 repairs (best shown)"
+#   v1 attempt 2 is the attempt his report showed (specks 1, keep clear 0, anchors attached): ACCEPTED now (verified 5.32 >= 4.11); its note
+#   gains "1 loose speck dropped from the export (V mm^3)" (V comes from the run; not on disk for this job).
+#   v2's real reason: "verified 5.65× vs target 6.17×; the verified export missed the target after 2 repairs (best shown)" — all three attempts
+#   short, every repair ran, so the repairs line is true.

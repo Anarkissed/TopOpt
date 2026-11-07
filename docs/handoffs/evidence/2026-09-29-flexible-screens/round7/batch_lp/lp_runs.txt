@@ -1,0 +1,64 @@
+# Round 7 · his ruling of 2026-10-18 (a lattice face is always protected from Topology) — the runs, raw counts.
+# swift build --build-tests --scratch-path /tmp/r7lp-build; swift test --skip-build --scratch-path /tmp/r7lp-build; counts from the Test Case end lines.
+
+## 1. RED (tests first, against stubs at 6af7aa78) — lp_red_run.txt: 10 cases, 25 failures, all the hold (or the withdrawn field still present); no RED CONTROL assertion failed.
+   FlexibleLatticeIsProtectedTests 5/5 red · FlexibleLatticeIsProtectedHostedTests red (the click on the greyed [Lattice] made no group) · FlexibleRound7SelectionsHookTests.testH35IsWithdrawnNoLatticeOnlyRoleAnywhere red (the hold and the field in 6 sources).
+
+## 2. GREEN — the tree of dfee100e before its one added print line (FlexibleLatticeIsProtectedTests' 'FLEX-LP job') — the ruling's classes and the re-pinned ones (36 cases, 0 failures):
+FlexibleFaceChipTests testADraggedChipKeepsItsSpotForThatFaceAndTheLeaderReAims passed (0.003 seconds).
+FlexibleFaceChipTests testAutoPlacementOrderAndTheKeepOuts passed (0.001 seconds).
+FlexibleFaceChipTests testTheDragGestureWritesTheSpotLiveAndLetsGoClear passed (0.002 seconds).
+FlexibleFaceChipTests testTheInfoShowsOnlyHisFourRowsFromTheDrawersOwnNumbers passed (0.002 seconds).
+FlexibleFaceChipTests testTheJoinIsAFilledButtonWithItsExactLabel passed (0.002 seconds).
+FlexibleFaceCommitTests testALockedGroupTakesNoWrite passed (0.082 seconds).
+FlexibleFaceCommitTests testAnchorLoadProtectKeepClearMakeAGroupWithTheFaceOff passed (0.010 seconds).
+FlexibleFaceCommitTests testDeleteIsOneUndoStepAndUndoRestoresEverything passed (0.010 seconds).
+FlexibleFaceCommitTests testEveryLineFits44 passed (0.000 seconds).
+FlexibleFaceCommitTests testJoinWritesTheGroupsCommonDepthAndExpand passed (0.009 seconds).
+FlexibleFaceCommitTests testKeepClearAsksFirstThenBlocksAndLatticeInsteadClearsIt passed (0.009 seconds).
+FlexibleFaceCommitTests testLatticeOnANewFaceSetsProtectLikeTheLatticeUnderRecipe passed (0.009 seconds).
+FlexibleFaceCommitTests testRenameCommitsAndAnEmptyNameKeepsTheOld passed (0.009 seconds).
+FlexibleFaceCommitTests testTheSegmentDeclaresSeedsAndOffKeepsTheDepth passed (0.010 seconds).
+FlexibleLatticeIsProtectedHostedTests testTheChipsLatticeButtonMakesAProtectedLatticeGroup passed (28.516 seconds).
+FlexibleLatticeIsProtectedTests testAnOldProjectOpensAndAProjectWithTheWithdrawnKeyStillOpens passed (0.010 seconds).
+FlexibleLatticeIsProtectedTests testBothRoutesReadLatticeWithTheShieldBesideIt passed (0.009 seconds).
+FlexibleLatticeIsProtectedTests testLatticeOnANewFaceIsLatticeAndProtectedAndTopologysJobIsTodays passed (0.420 seconds).
+FlexibleLatticeIsProtectedTests testTheChipsLatticeButtonCommitsThroughTheStage passed (0.010 seconds).
+FlexibleLatticeIsProtectedTests testTheWithdrawnLatticeOnlyRoleWouldBlockTopology passed (0.080 seconds).
+FlexibleR7D2ReviewTests testAPrismNumberUnderAPanelMovesToAnotherSpotOfItsPrism passed (0.010 seconds).
+FlexibleR7D2ReviewTests testTheAutoSpotKeepsOffTheFacesOwnOutline passed (0.002 seconds).
+FlexibleR7D2ReviewTests testTheChipsInfoCardSitsBelowTheChipNeverOnIt passed (0.000 seconds).
+FlexibleR7D2ReviewTests testTheDeleteQuestionAndItsMessageFitOneLineWhateverTheName passed (0.000 seconds).
+FlexibleR7D2ReviewTests testTheDeleteQuestionNeverWidensItsPanel passed (0.001 seconds).
+FlexibleR7D2ReviewTests testTheInfoReadsTheFlexibleLatticeDrawnInsideThatFace passed (0.046 seconds).
+FlexibleR7D2ReviewTests testTheJoinOffersOnlyAGroupThatHasALatticeFace passed (0.012 seconds).
+FlexibleR7D2ReviewTests testTheLatticeButtonIsNeverGreyedAndTheRouteLineIsGone passed (0.002 seconds).
+FlexibleR7D2ReviewTests testTheMainPagesNumberBoxesHaveA44PointTarget passed (0.002 seconds).
+FlexibleR7D2ReviewTests testTheMessageSitsAboveThePlayerWhenPlayIsOn passed (0.000 seconds).
+FlexibleR7D2ReviewTests testTheWeightsReadInTheFlexibleUnitAndANewLoadPointsToTheSquishPage passed (0.010 seconds).
+FlexibleR7D2ReviewTests testWhenNoSpotIsClearOfTheFaceTheChromeStillWins passed (0.089 seconds).
+FlexibleRound7SelectionsHookTests testEachHookOnceAtItsAnchorWithItsGateAndRemovingAGateGoesRed passed (1.084 seconds).
+FlexibleRound7SelectionsHookTests testH35IsWithdrawnNoLatticeOnlyRoleAnywhere passed (0.524 seconds).
+FlexibleRound7SelectionsHookTests testTheNewFlexibleFilesExist passed (0.001 seconds).
+FlexibleRound7SelectionsHookTests testTheOldLinesAreGoneAndNothingElseOfOursIsInThoseSpots passed (0.222 seconds).
+(printed in the targeted run, section 3:)
+FLEX-LP-H chipN (523.9999389648438, 651.2901611328125, 404.0, 128.0) button (535.9999389648438, 711.2901611328125, 64.0, 56.0) group Group D protected true chip Optional((523.9999389648438, 659.2901611328125, 404.0, 132.0))
+FLEX-LP job: his pad 3479 bytes; + Face 4 as Protect then Lattice = + Face 4 as [Lattice] 4453 bytes; the default depth 4.0 mm
+
+## 3. THE TARGETED RUN at dfee100e (14:57–15:19): 36 classes (lp_suite_classes.txt: every class whose source names a touched type or file — FlexibleFaceChip(Layout), FlexibleFaceCommits, FlexibleSelectionsCopy/List/Summary, FlexibleRoleGlyphs, FlexibleNewFaceKind/Button, commitNew/commitJoin, FlexibleSettings.swift, FlexibleSettingsReset, FlexibleMainStage+Selections, resetAll, freshSettings, designInputs, the withdrawn names, FlexibleOnModelLayer, FlexibleStageSettings' coders — + FlexibleRound7DesignIntegrationHostedTests (chip N is 22 pt shorter) + FlexibleRound7ScreenHookTests (condition e's pins) + LatticeStaleTypeTests), 3 chunks of 12
+=== chunk 1 rc 0 passed 78 failed 0 skipped 4 sigmentions 0 start 14:57:59 end 14:59:19 classes FlexibleEdgeGroupsTests 
+=== chunk 2 rc 0 passed 77 failed 0 skipped 4 sigmentions 0 start 14:59:19 end 15:10:27 classes FlexibleR7D2ReviewHosted
+=== chunk 3 rc 0 passed 45 failed 0 skipped 12 sigmentions 0 start 15:10:27 end 15:19:26 classes FlexibleRound7DesignEvi
+TOTAL 220 cases: 200 passed, 20 skipped (the five evidence probes, which need their env), 0 failed; no signal in any chunk. LatticeStaleTypeTests 6/6. Both hook files green (FlexibleRound7ScreenHookTests 4/4; FlexibleRound7SelectionsHookTests 4/4). No known failure is in these classes. No tracked file was rewritten.
+
+## 4. GOLDENS (FlexibleAngledGoldenTests) at dfee100e
+golden_det rc 0 identical 38 · DIFFERS 0 · PART-SKIP 0 · Executed 13 tests, with 0 failures (0 unexpected)
+golden_unseeded rc 0 identical 32 · DIFFERS 0 · PART-SKIP 1 · Executed 13 tests, with 0 failures (0 unexpected)
+(golden_det = SWIFT_DETERMINISTIC_HASHING=1; the same counts as R7-D3's: 38 / 32 + 1 PART-SKIP)
+
+## 5. THE 16 STAGE-JOB HASHES (angled_presses/stage_job_hashes.sh, SWIFT_TEST_ARGS='--scratch-path /tmp/r7lp-build') → stage_job_hashes_lp.txt: byte-identical (cmp, whole file) to round7/batch_d3/stage_job_hashes_d3.txt (and so to every round-7 hash file).
+
+## 6. iOS
+xcodebuild -project app/TopOpt.xcodeproj -scheme TopOpt -configuration Debug -destination id=147E56A1-C8CA-4B9D-BE6C-CF230589A83A -derivedDataPath ~/Library/Developer/Xcode/DerivedData/flexA1 build: BUILD SUCCEEDED (15:21)
+install rule: the simulator Booted; launchctl showed UIKitApplication:com.nadim.topopt (PID 48714) — the app WAS running, so it was terminated (simctl terminate rc 0, 15:21:58; not running after); simctl install rc 0 at 15:22:04–15:22:10; NOT launched; launchctl after: not running.
+installed TopOpt.debug.dylib: 87 542 848 bytes, built 15:20:54, sha256 001d9422077aa6a5… == the built one (cmp). It carries 'protected from Topology' and FlexibleFaceCommits.readsLattice; 'For lattice now', 'Lattice only' and latticeOnlyGroups: 0.

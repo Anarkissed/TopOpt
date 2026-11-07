@@ -1,0 +1,47 @@
+Stand percolation (go-live item 7), gyroid: the EMITTED lattice STL of lattice-variant on two Structural rungs, read by tpms_probe mesh <lattice.stl> = <part.stl> 2.22
+(core/tests/harness/tpms_probe.cpp at the docs commit; the run's lattice STL carries the solid body beside the sheet, unwelded to it: the probe takes that body, its widest piece, as the companion).
+A piece is held when a vertex lies inside the body or within 0.05 mm of its surface (lattice_types_probe spans' rule). 'signed' is the distance to that body (+ = inside it);
+'depth in the part' the distance inside the run's own closed part STL, a second reading of the same question.
+
+--- rung 0.38 (lattice-variant out_lv_gyroid), part = the Structural run's variant_038.stl, shell 2.22 mm
+EDGES out_lv_gyroid/variant_038_lattice.stl: 134600 edges, 0 open, 6208 non-manifold (in more than two triangles)
+  non-manifold edges by distance to the part's surface: <=0.25 mm 5858, <=0.5 256, <=1 1, <=shell 2.22 93, <=shell+0.5 0, beyond 0
+  6208 non-manifold edges in the piece of 38092 triangles
+  companion: the piece of 38092 triangles (the widest); held = a vertex within 0.05 mm of it or inside it
+MESH out_lv_gyroid/variant_038_lattice.stl: 93872 triangles, 44681 vertices, 5 pieces
+  FLOATING (no vertex on the solid companion or within the shell): 0 pieces, 0 triangles
+  piece 38092 triangles bbox (-18.276 -48.910 0.000)-(200.000 2.250 201.223) held
+  piece 28408 triangles bbox (177.723 -40.916 19.998)-(185.727 -36.908 24.001) gap 0.000 mm (signed -1.205..3.290, + = in the body), depth in the part 0.035..5.325 mm held
+  piece 27264 triangles bbox (189.724 -40.913 23.995)-(197.726 -36.884 28.006) gap 0.000 mm (signed -1.206..3.169, + = in the body), depth in the part -0.203..4.890 mm held
+  piece 72 triangles bbox (189.724 -40.910 23.994)-(190.270 -40.385 24.508) gap 2.296 mm (signed 2.296..2.736, + = in the body), depth in the part 2.809..3.441 mm held
+  piece 36 triangles bbox (177.725 -40.910 20.000)-(178.092 -40.538 20.384) gap 2.833 mm (signed 2.833..3.112, + = in the body), depth in the part 5.011..5.321 mm held
+  piece sizes (triangles), largest first: 38092 28408 27264 72 36
+--- rung 0.52 (lattice-variant out_lv1_gyroid), part = the Structural run's variant_052.stl, shell 2.22 mm
+EDGES out_lv1_gyroid/variant_052_lattice.stl: 840172 edges, 0 open, 6800 non-manifold (in more than two triangles)
+  non-manifold edges by distance to the part's surface: <=0.25 mm 6430, <=0.5 274, <=1 1, <=shell 2.22 95, <=shell+0.5 0, beyond 0
+  6800 non-manifold edges in the piece of 37576 triangles
+  companion: the piece of 37576 triangles (the widest); held = a vertex within 0.05 mm of it or inside it
+MESH out_lv1_gyroid/variant_052_lattice.stl: 564648 triangles, 279479 vertices, 8 pieces
+  FLOATING (no vertex on the solid companion or within the shell): 0 pieces, 0 triangles
+  piece 460328 triangles bbox (97.709 -48.782 15.960)-(129.844 -32.878 20.008) gap 0.000 mm (signed -2.099..2.973, + = in the body), depth in the part 0.128..8.230 mm held
+  piece 37576 triangles bbox (-18.276 -48.910 0.000)-(200.000 2.250 201.223) held
+  piece 33944 triangles bbox (177.724 -40.912 19.961)-(185.729 -36.903 24.024) gap 0.000 mm (signed -1.204..3.669, + = in the body), depth in the part 0.026..5.352 mm held
+  piece 32644 triangles bbox (189.721 -40.918 23.999)-(197.727 -36.870 28.008) gap 0.000 mm (signed -1.202..3.162, + = in the body), depth in the part -0.216..4.892 mm held
+  piece 72 triangles bbox (189.722 -40.910 24.000)-(190.184 -40.370 24.500) gap 2.275 mm (signed 2.275..2.733, + = in the body), depth in the part 2.797..3.415 mm held
+  piece 36 triangles bbox (177.725 -40.909 19.991)-(178.137 -40.510 20.300) gap 4.319 mm (signed 4.319..4.569, + = in the body), depth in the part 5.018..5.327 mm held
+  piece 36 triangles bbox (129.424 -33.230 19.647)-(129.724 -32.910 19.999) gap 0.232 mm (signed 0.232..0.638, + = in the body), depth in the part 1.766..2.118 mm held
+  piece 12 triangles bbox (97.728 -48.775 16.005)-(97.924 -48.769 16.211) gap 0.135 mm (signed 0.135..0.141, + = in the body), depth in the part 0.135..0.141 mm held
+  piece sizes (triangles), largest first: 460328 37576 33944 32644 72 36 36 12
+
+Verdict: 0 floating pieces on either rung. The sheet's pockets are one piece each, cut where they meet the solid (gap 0.000 mm, running up to 3.7 mm into it).
+The 12-72-triangle pieces (under 0.6 mm across) are caps cut off at cell corners, where both TPMS surfaces pass through (f = 0 at every corner):
+each lies wholly INSIDE the solid body (signed +0.135 to +4.6 mm; 0.135 to 5.3 mm deep in the part), so it prints as solid, not as a loose bit.
+The 6,208 / 6,800 non-manifold edges are all in that solid body (they lie within the shell of the part's surface); the sheet pieces have none, and no edge is open.
+
+How far the lattice reaches OUTSIDE the run's exported part STL (a one-off reader over every vertex but the solid body's; the Structural runs' rung 0.52, and octet's on the same fixed 4 mm cell; SC's from its own gate, 2 mm cells):
+  out_run_struct_gyroid/variant_052_lattice.stl: 263094 lattice vertices; most outward -0.216 mm at (191.51 -37.80 27.91); 72 more than 0.05 mm outside the part
+  out_run_struct_schwarz_d/variant_052_lattice.stl: 316416 lattice vertices; most outward -0.137 mm at (195.07 -37.87 27.99); 105 more than 0.05 mm outside the part
+  out_run_struct_octet_fixed/variant_052_lattice.stl: 35100 lattice vertices; most outward -1.348 mm at (37.98 -9.13 24.34); 194 more than 0.05 mm outside the part
+  out_run_struct_octet_fixed/variant_068_lattice.stl: 41723 lattice vertices; most outward -1.567 mm at (35.72 -7.88 27.51); 732 more than 0.05 mm outside the part
+  out_run_struct_sc/variant_052_lattice.stl: 95266 lattice vertices; most outward -1.402 mm at (29.17 -43.12 163.79); 18706 more than 0.05 mm outside the part
+The sheets stay within 0.22 mm of the exported surface, where octet's and SC's struts reach 1.35-1.57 mm past it: not a sheet effect.

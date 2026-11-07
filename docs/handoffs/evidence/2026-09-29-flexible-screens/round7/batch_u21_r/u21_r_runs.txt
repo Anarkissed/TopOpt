@@ -1,0 +1,42 @@
+# U21 batch R (the reviewer's ruling E items 1, 3, 4, 5 + ruling 3's APP LIST) runs — app/TopOptKit, --scratch-path /tmp/r7x20b-build, on cdf226ab + batch R working tree
+### run 0: the batch's own class (red-first; each red control asserted inside)
+Test Case '-[TopOptFlowsTests.FlexibleU21RTests testANewerDrawnMapSupersedesAnInFlightDesign]' passed (2.530 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21RTests testMoreListsEveryGroupOnePerRow]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21RTests testPullbackMeetsToleranceOrSaysSo]' passed (6.823 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21RTests testTheCapIsSaidInOneLine]' passed (0.000 seconds).
+FLEX-U21R-E5 Face 5 Stamp → Curves held in flight: shown = the drawn map (1824 columns, S max 0.9996977857853042) · RED showed the stamp's design · landed for the drawing on screen: true
+FLEX-U21R-E1 sends ["Send Group 1 only", "Send Group 2 only", "Send Group 3 only", "Send Group 4 only"] · slots 3 (2 + More… with 4 rows) · RED ["Send Group 1 only", "Send Group 2 only", "Send Group 3 only"]
+FLEX-U21R-E3 his Group 2: gmax 0.9559619426727295 part 0.9559619426727295 · min det 0.2987040579319 · X20b's 8 iterations: 31/26411 over tolerance, worst 0.045513514 mm · now (cap 64): 0/26411, worst 0.0006212718 mm · shortfall none · chip '-'
+### run 1: 44 classes (the batch's class, every class that touches or pins the changed files, FlexibleSquishCopyTests, LatticeStaleTypeTests), chunks of 10, then goldens + hashes
+chunk_1 exit 1 05:59:27 · passed 74 failed 2 skipped 0 signal 0
+chunk_2 exit 0 06:02:26 · passed 66 failed 0 skipped 0 signal 0
+chunk_3 exit 0 06:11:03 · passed 62 failed 0 skipped 0 signal 0
+chunk_4 exit 0 06:20:08 · passed 94 failed 0 skipped 0 signal 0
+chunk_5 exit 0 06:21:21 · passed 22 failed 0 skipped 0 signal 0
+golden det exit 0 06:21:37
+golden unseeded exit 0 06:21:53
+hashes exit 0 06:22:53
+hashes cmp vs round7/batch_u21_f/stage_job_hashes_u21f.txt (whole file): identical
+hashes cmp vs round7/batch_x20b/stage_job_hashes_x20b.txt (whole file): identical
+ALLDONE 06:22:53
+### classes
+classes 44: FlexibleU21RTests FlexibleMainPageRound4VerifyTests FlexibleMainPageRound4Tests FlexibleCornerPairTests FlexibleR7E2Tests FlexibleR7E2HostedTests FlexibleR7M1Tests FlexibleR7M1VerifyTests FlexibleC1Tests FlexibleRound7CardMessagesTests FlexibleRound7D1ReviewTests FlexibleRound7FitHostedTests FlexibleShownValuesTests FlexibleSettingsVerifyD1Tests FlexibleSquishTests FlexibleBatchMDentTests FlexibleBatchM2Tests FlexibleBatchM2VerifyTests FlexibleLatticeSectionsTests FlexibleSettingsRound4Tests FlexibleSqueezeGroupsReviewUXTests FlexibleDepthPrismTests FlexibleFEFieldTests FlexibleFEPassTests FlexibleFEVerifyGTests FlexibleBatchNRefineTests FlexibleLatticePassTests FlexibleX20bTests FlexibleR7E3Tests FlexibleR7E5Tests FlexibleU21BendTests FlexibleU2Tests FlexibleSquishCopyTests FlexibleBatchBReviewTests FlexibleGroupPaletteTests FlexibleLatticeUnderReviewTests FlexibleMainStageTests FlexibleMainViewsTests FlexibleReadinessTests FlexibleRound5SettingsTests FlexibleSqueezeGroupsPressTests FlexibleSqueezeGroupsTests FlexibleSqueezeGroupsUITests LatticeStaleTypeTests
+TOTAL: 318 passed, 2 failed, 0 skipped, signal lines 0
+Test Case '-[TopOptFlowsTests.FlexibleCornerPairTests testTheExportStringsLiveOnceInTheSharedRows]' failed (1.831 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7M1VerifyTests testTwoFaceGroupsBesideAnEdgesGroupEachExportMakesOneGroupSaidFirst]' failed (3.255 seconds).
+  - FlexibleCornerPairTests source pin (run.onFix?(f) once in FlexibleExportRows): [More…] had its own copy -> one tap path (FixRow.tap); no re-pin
+  - FlexibleR7M1VerifyTests V6 ('said, not sent: idle', status Building…, no lattice yet): caused by this batch's first test hold, which hopped to the main actor before every design landing and moved the landing's timing; at HEAD with every other file of the batch restored it passes (11.2 s), with only the hold's hop it fails (5.4 s). The hold is now a plain flag read (no hop unless a test holds it): passes (11.5 s).
+### run 2 (final tree, after the two fixes): 6 classes, goldens, hashes
+build exit 0
+start 06:30:59 cdf226ab + working tree (batch R)
+classes 6: FlexibleU21RTests FlexibleCornerPairTests FlexibleR7M1VerifyTests FlexibleMainPageRound4VerifyTests FlexibleSquishCopyTests LatticeStaleTypeTests
+final_1 exit 0 06:32:58 · passed 40 failed 0 skipped 0 signal 0
+golden det exit 0 06:33:14
+golden unseeded exit 0 06:33:30
+hashes exit 0 06:34:31
+hashes cmp vs round7/batch_u21_f/stage_job_hashes_u21f.txt (whole file): identical
+hashes cmp vs round7/batch_x20b/stage_job_hashes_x20b.txt (whole file): identical
+ALLDONE 06:34:31
+golden_det2: 38 identical, 0 DIFFERS, 0 PART-SKIP, failed 0
+golden_unseeded2: 32 identical, 0 DIFFERS, 1 PART-SKIP, failed 0
+hashes run 1 == run 2 (cmp): identical
