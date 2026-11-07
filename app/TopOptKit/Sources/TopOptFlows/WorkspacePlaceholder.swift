@@ -8573,14 +8573,23 @@ public struct WorkspacePlaceholder: View {
                         let ex = proj.project(settledWorld(plane.handle.anchor))
                             .map { LatticeSlabExpand.separated(knob: raw, from: $0) }
                             ?? raw
+                        // ★ B6 (his 11-06 shots: on the 11" portrait it sat on the Role row's lock): like the handles, never
+                        // under the page's own UI nor on the picked prism's handle and its number — slid along its own drag
+                        // line (sideways: the drag reads the finger's sideways travel only, so the number never jumps)
+                        let depthRoom = plane.ref.key == latticeFacePick
+                            ? latticePrismHandleSpot(proj, plane).map {
+                                [LatticeSetupHandles.footprint(LatticeSetupHandles.placed($0.at, axis: $0.axis, keepOut: bandChipKeepOut))]
+                            } ?? [] : []
+                        let expandAt = LatticeSetupHandles.placed(ex, axis: CGVector(dx: 1, dy: 0), keepOut: bandChipKeepOut + depthRoom)
                         latticeExpandKnob(
                             active: draggingExpandPlane == plane.id,
                             sense: LatticeSlabExpand.sense(
                                 project.latticeExpandMM(plane.ref)))
                             .frame(width: 44, height: 44)
                             .contentShape(Circle())
+                            .background(DSParts.publish("latticeExpandKnob-\(plane.ref.key)"))
                             .gesture(latticeExpandDrag(plane))
-                            .position(ex)
+                            .position(expandAt)   // ★ B6: placed
                     }
                 }
                 // ★ B6 N3: a picked zone's sides — a Box's width, depth and height, a Cylinder's across and height
@@ -8628,13 +8637,19 @@ public struct WorkspacePlaceholder: View {
             .position(LatticeSetupHandles.placed(p, axis: axis, keepOut: bandChipKeepOut))
     }
 
+    /// ★ B6 N2: where the face's prism-end handle stands on screen (its TRUE point) and the prism's direction there.
+    private func latticePrismHandleSpot(_ proj: CameraProjection, _ plane: ProjectModel.LatticeDepthPlane) -> (at: CGPoint, axis: CGVector)? {
+        let world = plane.handle.settled(center: meshCenter, rotation: settleQuat)
+        guard let at = proj.project(world.anchor) else { return nil }
+        return (at, LatticeSetupHandles.screenAxis(from: at, to: proj.project(world.anchor + world.planeNormal * 10)))
+    }
+
     /// ★ B6 N2: the picked face's prism end — dragged along the prism (the slab-depth ray math the old knob used), it
     /// writes the face's one depth (the row's number), through the same magnets.
     @ViewBuilder private func latticePrismHandle(_ proj: CameraProjection, _ plane: ProjectModel.LatticeDepthPlane) -> some View {
         let world = plane.handle.settled(center: meshCenter, rotation: settleQuat)
         let ref = plane.ref
-        if let at = proj.project(world.anchor) {
-            let axis = LatticeSetupHandles.screenAxis(from: at, to: proj.project(world.anchor + world.planeNormal * 10))
+        if let (at, axis) = latticePrismHandleSpot(proj, plane) {
             latticeSetupHandle(LatticeSetupHandles.prismKey(ref), at: at, axis: axis,
                                value: SelectionsSummary.format((plane.depthMM * 10).rounded() / 10, decimals: 1) + " mm",
                                apply: { finger in

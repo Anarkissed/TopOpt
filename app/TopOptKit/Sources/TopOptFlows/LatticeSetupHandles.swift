@@ -59,6 +59,13 @@ public enum LatticeSetupHandles {
         return p
     }
 
+    /// The widest number a handle's pill shows beside its knob ("⌀ 120.0 mm"), pt.
+    public static let pillMax: CGFloat = 96
+    /// The room a drawn handle takes: its 44 pt knob (middle on `p`), then its number beside it (DragHandle's HStack).
+    public static func footprint(_ p: CGPoint, size: CGFloat = 44, spacing: CGFloat = 8) -> CGRect {
+        CGRect(x: p.x - size / 2, y: p.y - size / 2, width: size + spacing + pillMax, height: size)
+    }
+
     /// A held handle: its key, and where it was and its axis on screen when the drag began.
     public struct DragStart: Equatable {
         public let key: String

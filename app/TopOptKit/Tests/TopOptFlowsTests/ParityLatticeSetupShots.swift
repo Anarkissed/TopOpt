@@ -160,16 +160,32 @@ final class ParityLatticeSetupShots: XCTestCase {
             q[s] = part[s + 2]; q[s + 1] = part[s + 1]; q[s + 2] = part[s]; q[s + 3] = 255
         } }
         let back = (Int(bg.r * 255), Int(bg.g * 255), Int(bg.b * 255))
+        // The page paints its own opaque backdrop where the 3D view sits (the MTKView caches as nothing), so the chrome's α
+        // alone would hide the part. Inside the 3D view, a chrome pixel that IS that backdrop (its most common colour there,
+        // within 3 per channel) shows the part; everything else (panels, handles, pills) stays as drawn.
+        var counts: [UInt32: Int] = [:]
+        for y in stride(from: max(0, yTop), to: min(H, yTop + ph), by: 7) { for x in stride(from: max(0, x0), to: min(W, x0 + pw), by: 7) {
+            let i = (y * W + x) * 4
+            counts[UInt32(c[i]) << 16 | UInt32(c[i + 1]) << 8 | UInt32(c[i + 2]), default: 0] += 1
+        } }
+        let key = counts.max { $0.value < $1.value }?.key ?? 0
+        let backdrop = (Int(key >> 16 & 255), Int(key >> 8 & 255), Int(key & 255))
         for y in 0..<H { for x in 0..<W {
             let i = (y * W + x) * 4
-            let a = Int(c[i + 3])
+            var a = Int(c[i + 3])
             let px = x - x0, py = y - yTop
             var under = back
-            if px >= 0, py >= 0, px < pw, py < ph { let s = (py * pw + px) * 4; under = (Int(q[s]), Int(q[s + 1]), Int(q[s + 2])) }
-            // premultiplied "over": out = chrome + under · (1 − α)
-            o[i] = UInt8(min(255, Int(c[i]) + under.0 * (255 - a) / 255))
-            o[i + 1] = UInt8(min(255, Int(c[i + 1]) + under.1 * (255 - a) / 255))
-            o[i + 2] = UInt8(min(255, Int(c[i + 2]) + under.2 * (255 - a) / 255))
+            if px >= 0, py >= 0, px < pw, py < ph {
+                let s = (py * pw + px) * 4; under = (Int(q[s]), Int(q[s + 1]), Int(q[s + 2]))
+                if abs(Int(c[i]) - backdrop.0) <= 3, abs(Int(c[i + 1]) - backdrop.1) <= 3, abs(Int(c[i + 2]) - backdrop.2) <= 3 {
+                    a = 0
+                }
+            }
+            // premultiplied "over": out = chrome + under · (1 − α)   (a backdrop pixel: the part alone)
+            let cr = a == 0 ? 0 : Int(c[i]), cg = a == 0 ? 0 : Int(c[i + 1]), cb = a == 0 ? 0 : Int(c[i + 2])
+            o[i] = UInt8(min(255, cr + under.0 * (255 - a) / 255))
+            o[i + 1] = UInt8(min(255, cg + under.1 * (255 - a) / 255))
+            o[i + 2] = UInt8(min(255, cb + under.2 * (255 - a) / 255))
             o[i + 3] = 255
         } }
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)

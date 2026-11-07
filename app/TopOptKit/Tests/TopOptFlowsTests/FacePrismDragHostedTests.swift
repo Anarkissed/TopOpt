@@ -103,6 +103,13 @@ final class FacePrismDragHostedTests: XCTestCase {
             _ = try h.onScreen("latticeFace-\(ref.key)-line", "\(size): ★ the row's line: \(LatticeSetupCopy.dragItsHandle)")
             XCTAssertEqual(h.frames.all.keys.filter { $0.hasPrefix("handle-prism-") && !$0.hasPrefix("handle-prism-\(ref.key)") }.count, 0,
                            "\(size): ★ one handle: the picked face's")
+            // ★ the picked face's expand knob (his 11-06 shots: at 11" portrait it sat on the Role row's lock, over the panel):
+            // clear of the page's panel and of the prism's handle and its number
+            let knob = try h.onScreen("latticeExpandKnob-\(ref.key)", "\(size): the picked face's expand knob")
+            let list = try XCTUnwrap(h.frames.all["selectionsList"], "the Selections panel")
+            XCTAssertFalse(list.intersects(knob.insetBy(dx: 0.5, dy: 0.5)), "\(size): ★ the expand knob is not on the panel: \(knob) vs \(list)")
+            XCTAssertFalse(handle.union(pill).intersects(knob.insetBy(dx: 0.5, dy: 0.5)),
+                           "\(size): ★ the expand knob is clear of the prism's handle and its number: \(knob)")
 
             let axis = try XCTUnwrap(LatticeSetupHandles.live[key]).axis
             let d0 = p.latticeSlabDepthMM(ref, in: g.id)
