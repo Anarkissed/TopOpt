@@ -142,7 +142,49 @@ final class LatticeAreaGradingHostedTests: XCTestCase {
         XCTAssertTrue(src.contains("if !TopOptKit.gradingSchemaAccepts(key: \"shape_grade_strength\") {\n"
                                    + "                shortNote(Self.shapeGradeRunLine)"),
                       "★ under the shape grade, until the linked core takes the band's strength")
-        XCTAssertFalse(TopOptKit.gradingSchemaAccepts(key: "shape_grade_strength"), "premise: today's core: the line shows")
+        // ★ RE-PINNED (release (3), core e26b8038, ruling 2): the linked core builds the band and takes its strength, so
+        // the line goes by itself (it showed on release (2)'s 565cc17c).
+        XCTAssertTrue(TopOptKit.gradingSchemaAccepts(key: "shape_grade_strength"), "★ release (3)'s core: the line is gone")
+    }
+
+    /// ★ B7 slice 2 (release (3), the reviewer 11-07 19:55Z): the band's Strength and a zone's own Finish reach the job —
+    /// the part's strength in `grading`, the zone's in its regions, its finish as `regions[].outer_finish` — and the linked
+    /// core parses them; a finish core doesn't know is refused (the control).
+    func testStrengthAndAZonesFinishReachTheJob() throws {
+        XCTAssertTrue(TopOptKit.gradingSchemaAccepts(key: "shape_grade_strength"), "premise: release (3)'s core")
+        XCTAssertTrue(TopOptKit.regionOuterFinishWired, "premise: release (3)'s core takes a region's own finish")
+        let (p, _, z) = try twoAreas()
+        XCTAssertNil(try zoneRegion(p)["outer_finish"], "nothing where the zone's finish is the part's")
+        XCTAssertNil(try zoneRegion(p)["shape_grade_strength"])
+        p.lattice.areaGrading[z] = LatticeAreaGrading(shapeGradeStrength: 0.5, outerFinish: "none")
+        XCTAssertEqual(try zoneRegion(p)["outer_finish"] as? String, "none", "★ the zone is open")
+        XCTAssertEqual(try zoneRegion(p)["shape_grade_strength"] as? Double, 0.5, "★ its own strength")
+        XCTAssertTrue(faceRegions(p).allSatisfy { $0["outer_finish"] == nil && $0["shape_grade_strength"] == nil },
+                      "★ the other area's regions carry nothing")
+        func job(_ regions: [[String: Any]]) throws -> Data {
+            let text = String(decoding: try JSONSerialization.data(withJSONObject: regions, options: [.sortedKeys]), as: UTF8.self)
+            return Data(TopOptKit.latticeProbeBaseJob.replacingOccurrences(
+                of: #""output":"#,
+                with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "cell_mm": 4.0, "shape_grade": true, "shape_grade_strength": 0.5}, "lattice": {"topology": "octet", "regions": "#
+                    + text + #"}, "output":"#).utf8)
+        }
+        let regions = p.latticeJobRegions().regions.map(\.wireDictionary)
+        XCTAssertNil(TopOptKit.jobSchemaError(try job(regions)), "★ core parses the app's strength and finish")
+        var bad = regions
+        let i = try XCTUnwrap(bad.firstIndex { $0["outer_finish"] != nil })
+        bad[i]["outer_finish"] = "open"
+        XCTAssertNotNil(TopOptKit.jobSchemaError(try job(bad)), "★ CONTROL: core refuses a finish it doesn't know")
+        // the part's strength in `grading`, with the shape grade (0, today's amount, is not restated)
+        var s = LatticeSettings(enabled: true)
+        s.densityMode = .sim
+        s.algorithm = "doubled"
+        s.gradingMode = .full
+        s.shapeFitGradeStrength = -0.5
+        let g = try XCTUnwrap(XCTUnwrap(s.runSpec(lineWidthMM: 0.45)).gradingDictionary())
+        XCTAssertEqual(g["shape_grade_strength"] as? Double, -0.5, "★ the part's strength rides the shape grade")
+        s.shapeFitGradeStrength = 0
+        XCTAssertNil(try XCTUnwrap(XCTUnwrap(s.runSpec(lineWidthMM: 0.45)).gradingDictionary())["shape_grade_strength"],
+                     "0 is core's default and is not restated")
     }
 }
 #endif
