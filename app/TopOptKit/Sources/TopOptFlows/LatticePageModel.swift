@@ -237,11 +237,12 @@ public struct LatticeOptimizeSurface: Equatable, Sendable {
     /// ★ ruling 4 (item 6): refused for want of an include wall — the tap goes to the walls
     public var marksWalls: Bool = false
 
-    /// `designBoxActive` is the project's CURRENT design box. A lattice job with one
-    /// is refused by core before any solve (`run_job.cpp`), so the button that would
-    /// submit it is disabled with that reason instead of letting the user configure
-    /// a whole page and discover it at the end (task
-    /// 2026-08-03-variant-entry-gating-and-retention, failure B).
+    /// `designBoxActive` is the project's CURRENT design box and `organic` whether the
+    /// lattice runs core's organic algorithm. A graded ORGANIC lattice job with a box is
+    /// refused by core before any solve (`run_job.cpp`), so the button that would submit
+    /// it is disabled with that reason instead of letting the user configure a whole page
+    /// and discover it at the end (task 2026-08-03-variant-entry-gating-and-retention,
+    /// failure B). A graded Default Grade / Stepped lattice runs with a box (4e7648d8).
     public static func compute(baseCanOptimize: Bool, baseSummary: String,
                                latticeEnabled: Bool, densityMode: LatticeDensityMode,
                                topologyDisplayName: String, cellMM: Double,
@@ -249,6 +250,7 @@ public struct LatticeOptimizeSurface: Equatable, Sendable {
                                lineWidthMM: Double = 0,
                                cellSummary: String? = nil,
                                designBoxActive: Bool = false,
+                               organic: Bool = false,
                                // ★ Regions whose dialled density core will refuse
                                // (task 2026-08-16-per-sector-density-override).
                                // Empty by default, so every existing call site and
@@ -280,9 +282,9 @@ public struct LatticeOptimizeSurface: Equatable, Sendable {
         // The core refusal, surfaced BEFORE the configuration rather than after it.
         if let why = LatticeCoreCapability.liveConflict(
             latticeEnabled: true, designBoxActive: designBoxActive,
-            // Core refuses GRADING with a design box, not the box itself; auto
-            // density is what ships a `grading` block (LatticeSettings.runSpec).
-            graded: densityMode == .sim) {
+            // Core refuses the graded ORGANIC lattice with a design box, not the box
+            // itself; auto density is what ships a `grading` block (LatticeSettings.runSpec).
+            graded: densityMode == .sim, organic: organic) {
             return LatticeOptimizeSurface(enabled: false, label: "Optimize", sub: why)
         }
         // AUTO density rides the optimize job now (task lattice-page-core-hookup

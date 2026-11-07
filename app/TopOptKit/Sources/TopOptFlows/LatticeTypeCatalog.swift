@@ -46,6 +46,14 @@ public enum LatticeTypeCatalog {
     /// parser refuses the id, so a run would be refused.
     public static let jobRefused = "Core’s run doesn’t accept this type yet."
 
+    /// ★★ THE TYPE GATE (reviewer, 2026-11-04 21:40Z, release (2): "only types with their B7.n app batch show"). K1 makes
+    /// eight types live in core; the app offers a type only once its own batch (its card, finish and pictures on the
+    /// Lattice page, B7.n) has shipped. Today that is the octet. A type core runs and the app does not yet is greyed with
+    /// `appBatchPending`. Add an id here in the batch that ships its page.
+    public static let appBatches: Set<String> = ["octet"]
+    /// The line for a type core runs whose app batch has not shipped.
+    public static let appBatchPending = "Ready in the engine; its settings come in a later update."
+
     /// Core's words for a type it does not offer. A type on the round's list that core has no id
     /// for yet (the sheets, brief item b) is told core's "neither" line: core's own "Not a lattice
     /// type" would tell the user a planned type is not a lattice.
@@ -59,23 +67,26 @@ public enum LatticeTypeCatalog {
 
     /// The entries from core's three facts, given explicitly (the pure form the tests drive).
     public static func entries(generatable: [String], certifiable: [String],
-                               jobAccepts: (String) -> Bool) -> [LatticeTypeEntry] {
+                               jobAccepts: (String) -> Bool,
+                               appReady: (String) -> Bool = { _ in true }) -> [LatticeTypeEntry] {
         // a type core adds that this list does not know yet still shows (after the round's)
         let extra = (generatable + certifiable).filter { !order.contains($0) }
         var seen = Set<String>()
         return (order + extra).filter { seen.insert($0).inserted }.map { id in
             let reason = coreReason(id, generatable: generatable, certifiable: certifiable)
                 ?? (jobAccepts(id) ? nil : jobRefused)
+                ?? (appReady(id) ? nil : appBatchPending)   // ★ the type gate, after every core fact
             return LatticeTypeEntry(id: id, displayName: LatticeType.displayName(forID: id),
                                     offered: reason == nil, reason: reason)
         }
     }
 
-    /// The entries read live from the linked core (the production path).
+    /// The entries read live from the linked core (the production path), behind the type gate.
     public static func entriesFromCore() -> [LatticeTypeEntry] {
         entries(generatable: TopOptKit.latticeGeneratableTopologies,
                 certifiable: TopOptKit.latticeCertifiableTopologies,
-                jobAccepts: TopOptKit.jobSchemaAcceptsTopology)
+                jobAccepts: TopOptKit.jobSchemaAcceptsTopology,
+                appReady: { appBatches.contains($0) })
     }
 
     /// The ids that may be picked today.

@@ -44,7 +44,8 @@ final class LatticeShapeGradeKeysTests: XCTestCase {
         let capped = try XCTUnwrap(s.runSpec(lineWidthMM: 0.45))
         let ceiling = LatticeType.octet.aestheticDensityCeiling(cellMM: 6)
         XCTAssertEqual(capped.densityCapRho, ceiling, accuracy: 1e-12)
-        XCTAssertGreaterThan(ceiling, 0.2); XCTAssertLessThan(ceiling, 0.23, "the diameter table's preimage of 0.20")
+        // ★ RE-PINNED (release (2), K1 item 4): 0.3788 on the full octet cell's law (0.2189 legs-only)
+        XCTAssertGreaterThan(ceiling, 0.37); XCTAssertLessThan(ceiling, 0.39, "the diameter table's preimage of 0.20")
         let g = try XCTUnwrap(capped.gradingDictionary())
         XCTAssertEqual(g["max_relative_density"] as? Double, accepts ? ceiling : nil,
                        "written iff core accepts the key (\(accepts) on this core)")

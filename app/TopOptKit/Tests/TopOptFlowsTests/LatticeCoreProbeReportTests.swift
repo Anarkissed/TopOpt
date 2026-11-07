@@ -52,9 +52,14 @@ final class LatticeCoreProbeReportTests: XCTestCase {
         XCTAssertEqual(Set(value.keys), Set(flippedOn + unchangedOn + off + fixedOn), "every probe is pinned")
         for k in flippedOn + unchangedOn + fixedOn { XCTAssertEqual(value[k], true, "★ \(k) on core \(CoreFingerprint.value)") }
         for k in off { XCTAssertEqual(value[k], false, "★ \(k) on core \(CoreFingerprint.value)") }
-        // the offered set: generatable ∩ certifiable — octet alone until core lights a type
-        XCTAssertEqual(TopOptKit.latticeGeneratableTopologies, ["octet"], "★ a new GENERATABLE type: light it up (A2)")
-        XCTAssertEqual(TopOptKit.latticeCertifiableTopologies, ["octet", "sc", "bcc", "fcc", "diamond", "kelvin", "rhombic"])
+        // ★ RE-PINNED (release (2), K1 + E2): core builds and certifies nine types now — the six struts and the two
+        // sheets beside the octet. The app offers them through the type gate (`LatticeTypeCatalog.appBatches`, octet
+        // today), so a type core lights fails here by name and its batch decides when it shows (A2).
+        XCTAssertEqual(TopOptKit.latticeGeneratableTopologies,
+                       ["octet", "fcc", "kelvin", "rhombic", "diamond", "bcc", "sc", "gyroid", "schwarz_d"],
+                       "★ a new GENERATABLE type: light it up (A2)")
+        XCTAssertEqual(TopOptKit.latticeCertifiableTopologies,
+                       ["octet", "sc", "bcc", "fcc", "diamond", "kelvin", "rhombic", "gyroid", "schwarz_d"])
     }
 
     /// ★ steppedCellsWired WAS a broken probe (ruling 4, 2026-10-02, fixed): its old document put

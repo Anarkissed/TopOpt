@@ -27,8 +27,12 @@
 // fixture sent only the 1.5 mm cell, which therefore BECAME the base, was exempt, and was
 // accepted with or without the key -- a test that measured nothing. The 3 mm cell is in
 // the plan to take the base away from it.
+#include "topopt/lattice.hpp"
+
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 
 static int g_checks = 0, g_failures = 0;
@@ -52,8 +56,42 @@ static std::string read_file(const std::string& p) {
   return out;
 }
 
-static int run_job(const std::string& name, std::string& text) {
-  const std::string job = std::string(ORGANIC_FIXTURE_DIR) + "/" + name + ".json";
+// ★ RULING 2026-11-02 (c): these plans send no "rho", so the grading law sizes their
+// cells, and they were built when a 3 mm octet cell at the 0.45 mm bead printed from a
+// density of 0.131 up (the legs-only law). On the full cell's law it prints from 0.235,
+// so the law keeps every voxel these plans lattice solid (strut_unprintable_at_every_cell)
+// and core refuses the plan for having no density. The fixtures are maintainer data and
+// are not edited (the change is proposed in the handoff): the three slot-origin arms read
+// a copy at a 0.32 mm bead, where the 3 mm cell prints from 0.128 -- the threshold the
+// plans were built around. Nothing in those three arms reads the bead. The K1 arms below
+// run their fixtures as they are: their verdicts are refusals at the 0.45 mm bead they
+// state (one is the prints-open rule itself), and at 0.32 mm the 7 mm base's 2.33 mm tile
+// would print.
+static constexpr const char* kFixtureBead = "\"min_extrudable_width_mm\": 0.45";
+static constexpr const char* kCopyBead = "\"min_extrudable_width_mm\": 0.32";
+
+static std::string rebeaded_copy(const std::string& name) {
+  const std::string dir = std::string(CLI_TMP_DIR) + "/c_bead_jobs";
+  std::system(("mkdir -p \"" + dir + "\" && cp \"" + ORGANIC_FIXTURE_DIR +
+               "/dead_parity_tab.stl\" \"" + dir + "/\"")
+                  .c_str());
+  std::string text = read_file(std::string(ORGANIC_FIXTURE_DIR) + "/" + name + ".json");
+  std::size_t swapped = 0;
+  for (std::size_t at = text.find(kFixtureBead); at != std::string::npos;
+       at = text.find(kFixtureBead, at + 1), ++swapped)
+    text.replace(at, std::strlen(kFixtureBead), kCopyBead);
+  CHECK(swapped == 2, "the fixture states its 0.45 mm bead twice (grading and lattice)");
+  const std::string job = dir + "/" + name + ".json";
+  if (FILE* f = std::fopen(job.c_str(), "w")) {
+    std::fwrite(text.data(), 1, text.size(), f);
+    std::fclose(f);
+  }
+  return job;
+}
+
+static int run_job(const std::string& name, std::string& text, bool rebeaded = false) {
+  const std::string job = rebeaded ? rebeaded_copy(name)
+                                   : std::string(ORGANIC_FIXTURE_DIR) + "/" + name + ".json";
   const std::string dir = std::string(CLI_TMP_DIR) + "/" + name;
   const std::string so = dir + ".stdout", se = dir + ".stderr";
   const std::string cmd = std::string("\"") + TOPOPT_CLI_EXE + "\" lattice-variant \"" +
@@ -69,15 +107,24 @@ static bool has(const std::string& h, const char* n) {
 }
 
 int main() {
+  {
+    const auto octet = topopt::LatticeTopology::Octet;
+    const double at_045 = topopt::lattice_min_density_for_strut(octet, 3.0, 0.45);
+    const double at_032 = topopt::lattice_min_density_for_strut(octet, 3.0, 0.32);
+    CHECK(at_045 > 0.2,
+          "premise: on octet's full-cell law a 3 mm cell at 0.45 mm prints only over 0.2");
+    CHECK(std::fabs(at_032 - 0.1312) < 0.01,
+          "premise: at 0.32 mm it prints from about the 0.131 the plans were built around");
+  }
   // ── stated, and in the face plane: the plan validates ───────────────────────
   std::string in_text;
-  const int in_rc = run_job("slot_origin_inplane", in_text);
+  const int in_rc = run_job("slot_origin_inplane", in_text, true);
   CHECK(in_rc == 0,
         "a plan whose cells sit on the STATED slot grid validates and runs");
 
   // ── the control: the same plan, no key ──────────────────────────────────────
   std::string ab_text;
-  const int ab_rc = run_job("slot_origin_absent", ab_text);
+  const int ab_rc = run_job("slot_origin_absent", ab_text, true);
   CHECK(ab_rc != 0,
         "the identical plan WITHOUT slot_origin_mm is refused -- the derived origin "
         "stands, so nothing moves for jobs that do not send the key");
@@ -107,7 +154,7 @@ int main() {
   // core did before K2, their centres project to -1.5 and -2.25 and the plan was refused.
   // So this one case distinguishes the two readings on its own.
   std::string off_text;
-  const int off_rc = run_job("slot_origin_off_plane", off_text);
+  const int off_rc = run_job("slot_origin_off_plane", off_text, true);
   CHECK(off_rc == 0,
         "K2: a slot origin off the face plane is a grid PHASE and is accepted");
   CHECK(off_text.find("face plane") == std::string::npos,

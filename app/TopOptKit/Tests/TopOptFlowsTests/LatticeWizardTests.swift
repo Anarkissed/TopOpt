@@ -357,14 +357,14 @@ final class LatticeWizardTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(thick.cellsPerMember, 5.0 - 1e-9)
 
         // ★ HIS OWN CASE, at the depth his card actually showed: 4 mm. Core's
-        // floor forces the cell UP to 1.173 mm, which fits only 3.41 cells across
-        // — under N*, so out of regime.
+        // floor forces the cell UP to 1.117 mm, which fits only 3.58 cells across
+        // — under N*, so out of regime. (★ RE-PINNED, release (2), K1 item 5: 1.173 / 3.41 on the legs-only law.)
         let thin = LatticeFaceCardDerivation.card(
             faceID: 16, depthMM: 4, heldVoxels: 10_554, spacingMM: 1.705,
             densityGCM3: 1.24, topology: .octet,
             minExtrudableWidthMM: profileWidthMM)
         XCTAssertEqual(thin.verdict, .outOfRegime)
-        XCTAssertEqual(thin.cellMM, 1.173173434139347, accuracy: 1e-9,
+        XCTAssertEqual(thin.cellMM, 1.116948948, accuracy: 1e-9,
                        "§4c: Auto still picks the BUILDABLE cell — it does not "
                        + "refuse")
         XCTAssertLessThan(thin.cellsPerMember, 5.0, "…and says why: under N*")

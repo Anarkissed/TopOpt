@@ -650,7 +650,8 @@ public final class FlexibleMainStage: ObservableObject {
         return Float(k * loop.held)
     }
     public func bodyAlpha(_ project: ProjectModel, on stage: WorkspaceStage) -> Float? {
-        guard owns(project, stage) else { return nil }
+        // ★ his 11-05 (P5's rule, R9): under Edit faces the X-ray and the printed view stay off until Done — the part as #354 draws it
+        guard owns(project, stage), !faceEditing else { return nil }
         // ★ U21 batch I (I2): step 1 shows the lattice ON ITS OWN (no body); step 2 the model (his X-ray stays his)
         if attachView, attach.step == .pickWall { return 0 }
         if attachView { return xray ? FlexibleStagePage.xrayBodyAlpha : 1 }

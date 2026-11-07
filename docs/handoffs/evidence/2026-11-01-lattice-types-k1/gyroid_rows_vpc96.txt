@@ -1,0 +1,14 @@
+ROWS gyroid on the production wall: rows @ vpc96, reference curve @ vpc128, L=5 mm; VALID := |drift| < 2.4% AND wall >= 4.0 voxels AND converged
+  ref vpc128 target 0.100: rho 0.09999 E100 108.109 (wall 4.15 vox, 97750 ms)
+  ref vpc128 target 0.150: rho 0.14999 E100 170.688 (wall 6.32 vox, 101681 ms)
+  ref vpc128 target 0.200: rho 0.19998 E100 238.518 (wall 8.48 vox, 103499 ms)
+  ref vpc128 target 0.250: rho 0.25003 E100 312.791 (wall 10.75 vox, 117968 ms)
+  ref vpc128 target 0.300: rho 0.29999 E100 395.859 (wall 13.07 vox, 126832 ms)
+  ref vpc128 target 0.350: rho 0.35002 E100 488.677 (wall 15.54 vox, 138396 ms)
+  [writing /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-comms-lattice-types-818eda/core/../docs/handoffs/evidence/2026-11-01-lattice-types-k1/gyroid_rows_vpc96.csv]
+  row vpc96 target 0.100: rho 0.10008 C11 164.882 C12 84.891 C44 44.258 E100 107.177 drift -0.96% zener 1.107 wall 3.09 vox -
+  row vpc96 target 0.150: rho 0.15010 C11 256.729 C12 130.018 C44 71.620 E100 169.310 drift -0.89% zener 1.130 wall 4.70 vox VALID
+  row vpc96 target 0.200: rho 0.20005 C11 353.864 C12 175.204 C44 102.008 E100 237.825 drift -0.33% zener 1.142 wall 6.38 vox VALID
+  row vpc96 target 0.250: rho 0.24996 C11 456.889 C12 222.124 C44 136.148 E100 311.563 drift -0.36% zener 1.160 wall 8.02 vox VALID
+  row vpc96 target 0.300: rho 0.30002 C11 570.477 C12 270.476 C44 175.001 E100 396.491 drift +0.14% zener 1.167 wall 9.81 vox VALID
+  row vpc96 target 0.350: rho 0.34993 C11 692.610 C12 321.078 C44 218.176 E100 489.212 drift +0.14% zener 1.174 wall 11.63 vox VALID

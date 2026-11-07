@@ -1,0 +1,14 @@
+# Release 438d30d2 — 2026-11-05 LatticeTopologyPanel (UI-Notes' app batch up to 189dae8b), app only, released before review (his 11-03 pick)
+# Core and worker unchanged: fingerprint 6c5a6fbaa842; "fingerprint": "6c5a6fbaa842"
+# Merged onto 99dcbe31; the merged app tree equals 189dae8b's, so the builder's tests apply unchanged.
+# Commits:
+#   d0359a1a B6 s2a (his go 11-05; notes 19, 23, 23a, 23b, R2.1): the Topology panel on Lattice Setup — on top, closed by default, an include switch per scenario and group
+#   189dae8b Merge UI-Notes' B6 s2a (d0359a1a, his go 11-05; notes 19, 23, 23a, 23b, R2.1) into B9: the Topology panel on Lattice Setup — on top, closed by default; open, it takes the top of the left column and Selections folds to its pill; an include switch per scenario and group (topologyExcluded, optional, not written while empty); the job unchanged until E2
+#   438d30d2 Release 2026-11-05: merge B9 189dae8b — UI-Notes' B6 s2a (d0359a1a; notes 19, 23, 23a, 23b, R2.1): the Topology panel on Lattice Setup — on top, closed by default; open, it takes the top of the left column and Selections folds to its pill; an include switch per scenario and group (saved as topologyExcluded, not written while empty); the job unchanged until E2 (app only; core and worker unchanged at 6c5a6fbaa842)
+# Gates:
+#   19:21 checks ok: LatticeTopologyPanel, local 438d30d2 over origin 99dcbe31 (3 commits); app tree == 189dae8b's, fingerprint 6c5a6fbaa842
+#   19:21 waiting for HEAVY.lock (free)
+#   19:21 lock taken
+#   19:26 iPad device build green; lock released
+#   19:26 pushed 438d30d2
+#   19:26 worker /health "fingerprint": "6c5a6fbaa842" (unchanged, no swap)

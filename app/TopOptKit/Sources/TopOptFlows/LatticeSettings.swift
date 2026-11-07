@@ -151,6 +151,28 @@ public enum LatticeGradingMode: String, Equatable, Sendable, Codable {
     public var fitsShape: Bool { self == .full || self == .fitShape }
     /// Does the SOLVE decide the density here?
     public var followsStress: Bool { self == .full || self == .stressOnly }
+    /// ★ E3: core's per-region `grading` value for this mode (job.cpp: off | stress | shape | stress_shape).
+    public var coreRegionGrading: String {
+        switch self {
+        case .full: return "stress_shape"
+        case .fitShape: return "shape"
+        case .stressOnly: return "stress"
+        case .none: return "off"
+        }
+    }
+}
+
+/// ★ B7 (E3, reviewer 2026-11-06 09:41Z): an area's own grading, set on its tab of the Lattice page — nil fields are the
+/// Part tab's. Sent on each include region of the area as core's per-region `grading` and `shape_grade_band_mm`, each
+/// falling back to the job's `grading.*` (LatticeTypes 4ace41f5). Grade style and Strength stay the part's: core has no
+/// per-region key for either.
+public struct LatticeAreaGrading: Codable, Equatable, Sendable {
+    public var gradingMode: LatticeGradingMode?
+    public var shapeFitBandMM: Double?
+    public init(gradingMode: LatticeGradingMode? = nil, shapeFitBandMM: Double? = nil) {
+        self.gradingMode = gradingMode; self.shapeFitBandMM = shapeFitBandMM
+    }
+    public var isEmpty: Bool { gradingMode == nil && shapeFitBandMM == nil }
 }
 
 /// ★ HOW THE FIT-SHAPE GRADE STEPS DOWN — his "either stepped or default
@@ -215,6 +237,9 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     /// job's `relative_density`; absent when nil, so a job with no override is
     /// byte-identical to a pre-task one. Never set on an exclude region.
     public var relativeDensity: Double? = nil
+    /// ★ B7 (E3): the area's own grading (`LatticeSettings.resolvedAreaGrading`), set by the emission on an include region
+    /// only; nil ⇒ no key, the job's `grading.*` decides. Written only on a core that takes the keys (`regionGradingWired`).
+    public var areaGrading: LatticeAreaGrading? = nil
     /// ★ SYNTHETIC STRESS FOR AN UNLOADED WALL (maintainer, 2026-09-05; Aesthetic
     /// only). `syntheticStress` is set by the emission on EVERY include wall when the
     /// switch is on (ruling 2, 2026-09-29) — core decides on the run's own tensor which
@@ -384,6 +409,12 @@ public struct LatticeRegionSpec: Equatable, Sendable {
         // The DIALLED density. Absent means AUTO means core derives, so a project
         // that never touched it produces the identical job (bar R1).
         if let rho = relativeDensity { entry["relative_density"] = rho }
+        // ★ B7 (E3): the area's own grading, on an include region (core refuses it on an exclude), each key falling back
+        // to the job's `grading.*` — so nothing is written where the area grades as the part.
+        if role == .include, let g = areaGrading, TopOptKit.regionGradingWired {
+            if let m = g.gradingMode { entry["grading"] = m.coreRegionGrading }
+            if let b = g.shapeFitBandMM { entry["shape_grade_band_mm"] = b }
+        }
         // ★ Core's per-region keys travel only when the linked core's schema accepts
         // them (`organicSyntheticStressWired`, a whole-job probe with a control) —
         // a core that has never heard of them must see the job it always has.
@@ -2080,6 +2111,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// lattice · − Lattice faces (the whole part is lattice, the faces remove it). Not written while false. The job reads it
     /// once the engine takes `lattice.whole_part` (E2, not released).
     public var wholePart = false
+    /// ★ B7 (E3, reviewer 2026-11-06 09:41Z: "B7 sends E3's per-region keys from its tabs"): what an area's tab on the
+    /// Lattice page set apart from the Part tab, keyed by the lattice group's id. Each include region the group emits
+    /// carries it as core's per-region grading (`resolvedAreaGrading`). Not written while empty, so older bytes are unchanged.
+    public var areaGrading: [UUID: LatticeAreaGrading] = [:]
     /// ★ PER-REGION RELATIVE DENSITY (task 2026-08-16-per-sector-density-override),
     /// keyed by the SAME `SelectionGroup.id` as `groupRoles`. This is the one thing
     /// the region layer could not yet say: dial this sector to 25% and its
@@ -2220,6 +2255,44 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// ★ THE GRADING OPTIONS (2026-08-25). `.full` is every existing project's
     /// behaviour; absent from every older snapshot ⇒ decodes to `.full`.
     public var gradingMode: LatticeGradingMode = .full
+    /// ★ B7 (E3): each area's grading as its include regions send it — only what differs from the part, only on a graded
+    /// Default Grade / Stepped job (the `grading` block the per-region keys fall back to; organic grades in its own pane).
+    /// The band travels where the area's mode grades to the shape and either differs from the part's or the part sends none.
+    public var resolvedAreaGrading: [UUID: LatticeAreaGrading] {
+        guard densityMode == .sim, !isOrganic else { return [:] }
+        var out: [UUID: LatticeAreaGrading] = [:]
+        for (gid, g) in areaGrading {
+            let mode = g.gradingMode ?? gradingMode
+            var r = LatticeAreaGrading()
+            if mode != gradingMode { r.gradingMode = mode }
+            let band = g.shapeFitBandMM ?? shapeFitBandMM
+            if mode.fitsShape, band != shapeFitBandMM || !gradingMode.fitsShape { r.shapeFitBandMM = band }
+            if !r.isEmpty { out[gid] = r }
+        }
+        return out
+    }
+    /// ★ B7 (E3): the Lattice page's area grades saved (`areas` = `ProjectModel.latticeAreaGroups`, in tab order). The
+    /// preview draws ONE grade for the part, so where every area agrees that grade is the part's and no area sends its own
+    /// — the picture is the run. Where they differ, the first area's is the part's and each other area keeps what differs
+    /// (its tab says the preview shows one grade). Under Start from − the part's grade is the rest of the part's: not moved.
+    public mutating func saveAreaGrading(_ edits: [UUID: LatticeAreaGrading], areas: [UUID]) {
+        var out = edits.filter { areas.contains($0.key) && !$0.value.isEmpty }
+        if !wholePart, let first = areas.first {
+            let partMode = gradingMode, partBand = shapeFitBandMM
+            let leadMode = out[first]?.gradingMode ?? partMode, leadBand = out[first]?.shapeFitBandMM ?? partBand
+            var lead: [UUID: LatticeAreaGrading] = [:]
+            for g in areas {
+                let mode = out[g]?.gradingMode ?? partMode, band = out[g]?.shapeFitBandMM ?? partBand
+                let own = LatticeAreaGrading(gradingMode: mode != leadMode ? mode : nil,
+                                             shapeFitBandMM: band != leadBand ? band : nil)
+                if !own.isEmpty { lead[g] = own }
+            }
+            gradingMode = leadMode
+            shapeFitBandMM = leadBand
+            out = lead
+        }
+        areaGrading = out
+    }
     /// How the fit-shape grade steps — stepped divisors or dyadic halving.
     /// ★ The PREVIEW does not read this for a stepped/doubled job: it reads
     /// `gradeStepsAreHalves`, which follows the algorithm. This remains the organic toggle's
@@ -2413,6 +2486,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         case skinGroups             // ★ B6 s2b: the Protect skin groups (absent ⇒ none)
         case zoneGroups             // ★ B6 s3a: the lattice zones (absent ⇒ none)
         case wholePart              // ★ B6 s3b: Start from − (absent ⇒ +)
+        case areaGrading            // ★ B7 (E3): each area's own grading (absent ⇒ every area grades as the part)
         case groupDensities
         case groupDepthMM        // the ONE dragged depth per group (task 2026-08-12 §0a)
         // The per-SELECTABLE role + depth (task 2026-08-14-lattice-separation
@@ -2557,6 +2631,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         skinGroups = try c.decodeIfPresent(Set<UUID>.self, forKey: .skinGroups) ?? []
         zoneGroups = try c.decodeIfPresent(Set<UUID>.self, forKey: .zoneGroups) ?? []
         wholePart = try c.decodeIfPresent(Bool.self, forKey: .wholePart) ?? false
+        areaGrading = try c.decodeIfPresent([UUID: LatticeAreaGrading].self, forKey: .areaGrading) ?? [:]
         // Absent in every snapshot written before this task ⇒ [:] ⇒ auto everywhere,
         // which is exactly what those projects ran. A default must not rewrite history.
         groupDensities = try c.decodeIfPresent([UUID: Double].self, forKey: .groupDensities) ?? [:]
@@ -2689,6 +2764,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         if !skinGroups.isEmpty { try c.encode(skinGroups, forKey: .skinGroups) }   // ★ B6 s2b: older bytes unchanged
         if !zoneGroups.isEmpty { try c.encode(zoneGroups, forKey: .zoneGroups) }   // ★ B6 s3a: older bytes unchanged
         if wholePart { try c.encode(wholePart, forKey: .wholePart) }   // ★ B6 s3b: older bytes unchanged
+        if !areaGrading.isEmpty { try c.encode(areaGrading, forKey: .areaGrading) }   // ★ B7 (E3): older bytes unchanged
         try c.encode(groupDensities, forKey: .groupDensities)
         try c.encode(groupDepthMM, forKey: .groupDepthMM)
         try c.encode(frozenRegionDensity, forKey: .frozenRegionDensity)
@@ -3133,7 +3209,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         -> LatticeSpec? {
         let id = topology ?? topologyID
         let limits = TopOptKit.latticeLimits(topology: id)
-        let generatable = TopOptKit.latticeGeneratableTopologies.contains(id)
+        // ★ RELEASE (2), E2: a type core builds runs only once its app batch has shipped (the type gate)
+        let generatable = LatticeTypeCatalog.appBatches.contains(id)
+            && TopOptKit.latticeGeneratableTopologies.contains(id)
         return runSpec(limits: limits, generatable: generatable, memberMM: memberMM,
                        lineWidthMM: lineWidthMM, emitSTL: emitSTL, emit3MF: emit3MF,
                        regions: regions, capability: capability,

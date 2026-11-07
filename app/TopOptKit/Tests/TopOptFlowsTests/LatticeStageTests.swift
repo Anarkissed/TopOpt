@@ -77,9 +77,13 @@ final class LatticeStageTests: XCTestCase {
     // MARK: - the job bytes (a pure re-layout)
 
     /// Taken at 7e37c45f (B3, before B4) with SWIFT_DETERMINISTIC_HASHING=1.
-    static let stageLatticeJobAtB3 = "b39c15601235cfee723b7713b665e2e03b6aeacec0d8714352d63bc0e7604cce"
-    static let variantRunJobAtB3 = "dda8f4c1ce16e8dc94c8ff4d37ee964aea910bf79c23baaa6b093af2535770a5"
-    static let variantForecastJobAtB3 = "222dad739d1223cdb82e4ab20a28df513df3514c72ea911a32ad3a11655c093a"
+    /// ★ RE-PINNED (release (2), K1 items 4 + 6): the same keys, two of core's numbers moved — the octet cap the job
+    /// writes (`grading.max_relative_density` 0.3788, was 0.2189) and, on the stage job, the capped floor cell in its
+    /// swept window (`cell_min_mm` / `cell_max_mm` 2.2500000000000004: core's floor cell nudged up by ulps until its
+    /// strut prints). Was b39c1560… / dda8f4c1… / 222dad73….
+    static let stageLatticeJobAtB3 = "e48b61f3b4a6ee09f4fb08064e127f4f8d05c57b1e5e501e62216c651f71aed3"
+    static let variantRunJobAtB3 = "da110b3ed222d16f791242ae6c511a4ad405d463d79c59f16837ffec3eb399a1"
+    static let variantForecastJobAtB3 = "7886b5dfbade28c3ddbcd69dcbb28902589294400815429b05c6f1b85198eda2"
 
     func testTheStageLatticeJobIsByteIdenticalToB3() throws {
         let (m, _, _, _) = try latticedCube()

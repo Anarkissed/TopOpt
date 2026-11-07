@@ -72,7 +72,16 @@ public enum LatticeDepthDetent {
                                             minExtrudableWidthMM: minExtrudableWidthMM)
         guard b.valid, b.cellsPerMemberFloor > 0,
               b.printabilityFloorDensestMM > 0 else { return nil }
-        return b.cellsPerMemberFloor * b.printabilityFloorDensestMM
+        // ★ RELEASE (2), K1 item 6: the product can land a few ULPs under the depth core certifies (core's floor cell
+        // is nudged up by ulps until its strut prints; the derivation then reads member / max(member / N*, floor)
+        // against N*), so the magnet clicked onto a depth core called out of regime. Step up by ulps until CORE's
+        // derivation certifies it — core's own answer, the same remedy core applies to its floor cell.
+        var d = b.cellsPerMemberFloor * b.printabilityFloorDensestMM
+        for _ in 0..<64 where TopOptKit.latticeRegionDerivation(topology: topology, memberWidthMM: d,
+                                                                minExtrudableWidthMM: minExtrudableWidthMM).outOfRegime {
+            d = d.nextUp
+        }
+        return d
     }
 
     /// Every depth worth snapping to, sorted and de-duplicated.

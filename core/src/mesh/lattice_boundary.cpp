@@ -20,6 +20,7 @@
 #include <stdexcept>
 
 #include "topopt/clearance.hpp"
+#include "topopt/stepped_plan.hpp"
 #include "topopt/mesh_distance.hpp"
 
 namespace topopt {
@@ -608,8 +609,11 @@ double LatticeBoundary::sd_excluding_relaxed(const Vec3& p, int exclude_face_a,
         const double dS = include_plane_distance(S, p);
         // A region with no face plane never wins a shared point, so it never contests.
         if (!std::isfinite(dS)) continue;
-        const double bias =
-            include_declared_id(S, i) > own_region_ ? kIdTieBiasMm : -kIdTieBiasMm;
+        // The tie-break is stepped_region_owner's own (include_wins_plane_tie): on one
+        // face plane the deeper region, otherwise the lower id.
+        const double bias = include_wins_plane_tie(*R, own_region_, S, include_declared_id(S, i))
+                                ? kIdTieBiasMm
+                                : -kIdTieBiasMm;
         // R with no plane loses to any S that has one: the halved difference is then
         // -infinity, so only "S does not contain the point" can save it.
         const double nearer = std::isfinite(dR) ? 0.5 * (dS - dR) + bias : -1e30;
@@ -802,7 +806,7 @@ std::vector<char> lattice_certification_mask(const LatticeBoundary& boundary,
   // ONE cell, one origin: the graded run's own grid, expressed as the per-cell
   // predicate's degenerate case so the two paths cannot disagree about anything but
   // the cell.
-  return lattice_certification_mask_per_cell(
+  std::vector<char> mask = lattice_certification_mask_per_cell(
       boundary, grid, density, iso,
       [&region_origin, cell_mm](const Vec3& c, Vec3* cell_min, double* ce) {
         const int ci = static_cast<int>(std::floor((c.x - region_origin.x) / cell_mm));
@@ -814,6 +818,36 @@ std::vector<char> lattice_certification_mask(const LatticeBoundary& boundary,
         *ce = cell_mm;
         return true;
       });
+  // ★ Finding 7: a voxel lays EVERY cell covering it (the cover rule), and the generator
+  // lays a cell only where the boundary may overlap it. A voxel with a covering cell the
+  // boundary proves empty would be certified over a part the file leaves empty, so it is
+  // not certified (it stays solid).
+  const double s = grid.spacing;
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i) {
+        const std::size_t e = grid.index(i, j, k);
+        if (!mask[e]) continue;
+        auto range = [&](double v0, double o, int* lo, int* hi) {
+          *lo = static_cast<int>(std::floor((v0 - o) / cell_mm + 1e-9));
+          *hi = static_cast<int>(std::ceil((v0 + s - o) / cell_mm - 1e-9)) - 1;
+          if (*hi < *lo) *hi = *lo;
+        };
+        int i0, i1, j0, j1, k0, k1;
+        range(grid.origin.x + i * s, region_origin.x, &i0, &i1);
+        range(grid.origin.y + j * s, region_origin.y, &j0, &j1);
+        range(grid.origin.z + k * s, region_origin.z, &k0, &k1);
+        bool ok = true;
+        for (int ck = k0; ck <= k1 && ok; ++ck)
+          for (int cj = j0; cj <= j1 && ok; ++cj)
+            for (int ci = i0; ci <= i1 && ok; ++ci)
+              ok = boundary.cell_may_overlap(
+                  Vec3{region_origin.x + ci * cell_mm, region_origin.y + cj * cell_mm,
+                       region_origin.z + ck * cell_mm},
+                  cell_mm);
+        if (!ok) mask[e] = 0;
+      }
+  return mask;
 }
 
 std::vector<char> lattice_synthesis_domain(const LatticeBoundary& boundary,

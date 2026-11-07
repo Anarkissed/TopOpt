@@ -5,9 +5,10 @@
 // ★ WHAT IS CACHED IS THE FILE'S CONTENT: the spans core EMITS for one set of
 // topology picks (cell size, window, traced/grown, shape fit, grade, layer height,
 // the field identity) — baked to the render field in a second or two through the
-// bridge. What is NOT in the key is thickness: the Thicker slider is a live radius on
-// the march. The key also carries core's SHA and the bridge layout version, so a new
-// core re-traces rather than serving a stale file.
+// bridge. A STATED strut width is in the key since 7012584da (2026-09-10): core's
+// emission merges endpoints by the strut radius, so the width is a trace input (no
+// width stated keeps the old key). The key also carries core's SHA and the bridge
+// layout version, so a new core re-traces rather than serving a stale file.
 //
 // Lookup order: the app bundle (`OrganicSample/variants/<key>.3mf`, the cube's shipped
 // defaults) → Application Support (`OrganicVariants/<key>.3mf`, what this device has

@@ -25,6 +25,8 @@
 
 #include "topopt/fea.hpp"  // SolverStopped (the solver's safety net)
 #include "topopt/job.hpp"
+#include "topopt/lattice_sample.hpp"  // `lattice-sample` subcommand
+#include "topopt/stl.hpp"
 #include "topopt/flexible/run.hpp"  // `flexible` subcommand
 #include "topopt/materials.hpp"
 #include "topopt/part.hpp"
@@ -66,6 +68,10 @@ int usage(const char* argv0) {
                "       %s preflight <job.json> [--materials PATH]\n"
                "       %s lattice-variant <job.json> [--out DIR] "
                "[--materials PATH] [--rules PATH]\n"
+               "       %s lattice-sample --topology ID [--shape cube|coupon] [--cell MM] "
+               "[--rho R] [--size MM] [--plate MM]\n"
+               "              [--bead MM] [--rho-lo R] [--rho-hi R] [--step 0|1] "
+               "--out FILE.stl\n"
                "       %s --version\n"
                "\n"
                "preflight\n"
@@ -106,7 +112,7 @@ int usage(const char* argv0) {
                "--no-iteration-csv disables)\n"
                "  snapshots/*.f16    float16 density snapshots (opt-in "
                "--snapshots; ~10.8 MB each at 5.4M voxels)\n",
-               argv0, argv0, argv0, argv0, argv0);
+               argv0, argv0, argv0, argv0, argv0, argv0);
   std::fprintf(stderr,
                "       %s flexible <job.json> [--out DIR] [--flexible-materials PATH]\n"
                "         the FLEXIBLE stage's squish maths (a job with a \"flexible\"\n"
@@ -432,6 +438,94 @@ std::string dirname_of(const std::string& path) {
 #define TOPOPT_CLI_DEFAULT_FLEXIBLE_MATERIALS "flexible_materials.json"
 #endif
 
+// `lattice-sample` (lattice types round 1, R13): a printable sample block of one type,
+// built by the production generator, on a solid base plate, with a small receipt
+// beside it (<out>.json). Exit 0 = written, 3 = refused (the reason is printed),
+// 2 = usage.
+static int run_lattice_sample(int argc, char** argv) {
+  topopt::LatticeSampleSpec spec;
+  std::string out;
+  for (int i = 2; i < argc; ++i) {
+    const std::string arg = argv[i];
+    if (i + 1 >= argc) return usage(argv[0]);
+    const std::string val = argv[++i];
+    char* end = nullptr;
+    const double v = std::strtod(val.c_str(), &end);
+    const bool numeric = end && *end == '\0';
+    if (arg == "--topology") spec.topology = val;
+    else if (arg == "--out") out = val;
+    else if (arg == "--shape") spec.shape = val;
+    else if (!numeric) return usage(argv[0]);
+    else if (arg == "--cell") spec.cell_mm = v;
+    else if (arg == "--rho") spec.rho = v;
+    else if (arg == "--size") spec.size_mm = v;
+    else if (arg == "--plate") spec.plate_mm = v;
+    else if (arg == "--bead") spec.bead_mm = v;
+    else if (arg == "--rho-lo") spec.rho_lo = v;
+    else if (arg == "--rho-hi") spec.rho_hi = v;
+    else if (arg == "--step") spec.step = v != 0.0;
+    else return usage(argv[0]);
+  }
+  if (spec.topology.empty() || out.empty()) return usage(argv[0]);
+  // Written beside the target and renamed in only on success, so a refused sample
+  // never replaces an earlier one with an empty STL.
+  const std::string part = out + ".part";
+  try {
+    topopt::LatticeSampleReceipt r;
+    {
+      topopt::StreamingStlWriter w(part);
+      try {
+        r = topopt::write_lattice_sample(spec, w);
+      } catch (...) {
+        w.finish();
+        std::remove(part.c_str());
+        throw;
+      }
+      w.finish();
+    }
+    const std::string receipt = out + ".json";
+    {
+      std::ofstream rf(receipt);
+      rf << topopt::lattice_sample_receipt_json(r);
+      if (!rf) {
+        std::remove(part.c_str());
+        throw std::runtime_error("lattice-sample: cannot write the receipt " + receipt);
+      }
+    }
+    if (std::rename(part.c_str(), out.c_str()) != 0) {
+      std::remove(part.c_str());
+      throw std::runtime_error("lattice-sample: cannot move the block into " + out);
+    }
+    // A sheet's "strut diameter" is its true wall thickness (lattice.hpp): say wall.
+    const bool sheet =
+        topopt::lattice_topology_is_sheet(topopt::lattice_topology_from_id(r.topology));
+    if (r.shape == "coupon")
+      std::printf("lattice-sample: %s coupon %gx%gx%g mm, rho %.4g-%.4g along x, %g mm cells, "
+                  "step %s, tongue %s, %s %.3f mm at its thinnest, %.1f mm plate, %llu "
+                  "triangles (%llu loose pieces dropped) -> %s (receipt %s)\n",
+                  r.topology.c_str(), r.coupon_dims_mm[0], r.coupon_dims_mm[1],
+                  r.coupon_dims_mm[2], r.rho_lo, r.rho_hi, r.cell_mm, r.step.c_str(),
+                  r.tongue_latticed ? "latticed" : "solid", sheet ? "wall" : "strut",
+                  r.strut_diameter_mm, r.plate_mm, static_cast<unsigned long long>(r.triangles),
+                  static_cast<unsigned long long>(r.loose_pieces_dropped), out.c_str(),
+                  receipt.c_str());
+    else
+      std::printf("lattice-sample: %s, rho %.4g%s, %g mm cells (%d per side), %s %.3f mm, "
+                  "%.1f mm plate, %llu triangles -> %s (receipt %s)\n",
+                  r.topology.c_str(), r.rho, r.rho_was_band_middle ? " (band middle)" : "",
+                  r.cell_mm, r.cells_per_side, sheet ? "wall" : "strut", r.strut_diameter_mm,
+                  r.plate_mm, static_cast<unsigned long long>(r.triangles), out.c_str(),
+                  receipt.c_str());
+    return 0;
+  } catch (const std::invalid_argument& e) {
+    std::printf("lattice-sample: REFUSED: %s\n", e.what());
+    return 3;
+  } catch (const std::exception& e) {
+    std::fprintf(stderr, "topopt-cli: %s\n", e.what());
+    return 1;
+  }
+}
+
 // `flexible` subcommand (task 2026-09-28-flexible-squish-maths): run a job's
 // flexible block. Exit 0 = ran, 3 = the stage refused, 1 = error, 2 = usage.
 static int run_flexible(int argc, char** argv) {
@@ -497,8 +591,11 @@ int main(int argc, char** argv) {
   // fingerprint then carries "-dirty-<diff8>"), unknown without git.
   if (argc >= 2 &&
       (std::string(argv[1]) == "--version" || std::string(argv[1]) == "version")) {
-    std::printf("topopt-cli version=%s fingerprint=%s dirty=%s\n", topopt::version(),
-                TOPOPT_BUILD_FINGERPRINT, TOPOPT_BUILD_DIRTY_WORD);
+    // `lattice_sample=1`: this binary has the lattice-sample subcommand, so a worker
+    // can say so without a trial run (the app's brief, item g). An added key: the
+    // worker's _kv parser reads key=value tokens and ignores the ones it does not use.
+    std::printf("topopt-cli version=%s fingerprint=%s dirty=%s lattice_sample=1\n",
+                topopt::version(), TOPOPT_BUILD_FINGERPRINT, TOPOPT_BUILD_DIRTY_WORD);
     return 0;
   }
   // `analyze` — ONE analysis solve on a fixed design, no optimization.
@@ -515,6 +612,8 @@ int main(int argc, char** argv) {
                                TOPOPT_CLI_DEFAULT_RULES);
   // `flexible` — the Flexible stage's squish maths (flexible/run.hpp).
   if (argc >= 2 && std::string(argv[1]) == "flexible") return run_flexible(argc, argv);
+  if (argc >= 2 && std::string(argv[1]) == "lattice-sample")
+    return run_lattice_sample(argc, argv);
   if (argc < 3 || std::string(argv[1]) != "run") return usage(argv[0]);
   const std::string job_path = argv[2];
   std::string out_dir = ".";

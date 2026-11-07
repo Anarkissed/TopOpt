@@ -1444,7 +1444,7 @@ public struct WorkspacePlaceholder: View {
                 // legend as well"). With the strut preview up the LATTICE key carries
                 // the stress scale itself, so the standalone plot legend stands down
                 // rather than putting a second colour bar on the same edge.
-                if stressViewOn, latticeStressField != nil,
+                if stressViewOn, latticeStressField != nil, latticeViewsUp,
                    !(showStrutPreview && strutScene != nil) {
                     stressLegend
                 }
@@ -1453,14 +1453,17 @@ public struct WorkspacePlaceholder: View {
                     latticeProbeCallout
                 }
                 if flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleMainLegends(main: flexibleMain, mode: $latticeLegendMode, projection: projection, settle: settleQuat, bottomClearance: bottomBarClearance, chipColumnWidth: 0) }   // Flexible (PR #362) H6: one legend per view (Squish / Stress / Lattice), tap to read (FlexibleMainLegends.swift) (H33: no chip column on this stage; the corner pair rides the bar's clearance) · Flexible (PR #362) H61: off under Edit faces (B5's mode has the page)
-                // ★ "Simulation running", top-centre (maintainer, 2026-08-18).
-                if latticeSimIsRunning, !simBannerDismissed, !flexibleMain.owns(project, stage) { simRunningBanner }   // Flexible (PR #362): not under Flexible — it grades no lattice there; the Stress legend says "Simulating…"
-                // ★ AND THE GEOMETRY REBAKE. Only when the FEA banner is NOT up:
-                // both sit top-centre, and two capsules in one place is worse
-                // than the more specific one winning. The solve is the longer
-                // wait and the more surprising, so it takes precedence.
-                if strutBakeInFlight || strutRefining, showStrutPreview,
-                   !(latticeSimIsRunning && !simBannerDismissed) { strutBakingBanner }
+                // ★ the lattice's banners show where its views do (his 11-05: not through into Edit faces)
+                if latticeViewsUp {
+                    // ★ "Simulation running", top-centre (maintainer, 2026-08-18).
+                    if latticeSimIsRunning, !simBannerDismissed, !flexibleMain.owns(project, stage) { simRunningBanner }   // Flexible (PR #362): not under Flexible — it grades no lattice there; the Stress legend says "Simulating…"
+                    // ★ AND THE GEOMETRY REBAKE. Only when the FEA banner is NOT up:
+                    // both sit top-centre, and two capsules in one place is worse
+                    // than the more specific one winning. The solve is the longer
+                    // wait and the more surprising, so it takes precedence.
+                    if strutBakeInFlight || strutRefining, showStrutPreview,
+                       !(latticeSimIsRunning && !simBannerDismissed) { strutBakingBanner }
+                }
             }
             // ★ AND NEITHER ARE THE LOAD PILLS — the weight readout and its
             // Gravity/Push/Pull switch. The maintainer found the whole load editor
@@ -1711,12 +1714,8 @@ public struct WorkspacePlaceholder: View {
                               })
                     .ignoresSafeArea()
             }
-            // Returning to the saved variants from the original view. L5: NOT while
-            // a page is up — this chip is pinned top-centre, which is exactly where
-            // both pages put their own status banner, and the two overlapped.
-            // `seeResultsShown` already refuses a full-screen page; the guard is
-            // spelled out here too because the page-chrome audit reads this line.
-            if !fullScreenPageUp, seeResultsShown { seeResultsChip }
+            // ★ NO "See Results" CHIP (his 11-05: "I don't think that's necessary anymore … Please have that removed"): Results
+            // is Topology's page, reached from its capsule and its "Open Results" line.
             // ★ B3: on Topology the capsule rides over its Results page too (the way back to Setup),
             // and a landed run says so here — it never opens Results by itself.
             if stage == .topology, !fullScreenPageUp, viewerMesh != nil, topologyResultsPageUp, !resultsFullScreen { topologyCapsuleOverlay }
@@ -1745,77 +1744,6 @@ public struct WorkspacePlaceholder: View {
         .numberPadNote { model.toast = $0 }
         // ★ B2 (U16): the top lane's notifications keep clear of every control the page publishes
         .laneControls(laneControls)
-    }
-
-    /// Start the M7.7 optimize run for the current load case. Gated on the same
-    /// `canOptimize` the button uses; nil request only if a file/material is
-    /// somehow missing (Optimize is disabled in that case).
-    /// The "See Results" chip — pinned to the TOP EDGE at the EXACT horizontal centre, in
-    /// every workspace state it appears in (design-overhaul round 2, item 8). Vertically
-    /// aligned with the top-left chrome row so it reads as part of the top bar; the chrome is
-    /// top-left and the gizmo top-right, so the centre is always clear.
-    /// ★★★ THE SECOND ROW'S SPLIT (his ruling, 2026-08-25: "make it so Aesthetic is
-    /// the top, See results is below that and to the left and whatever else is there
-    /// is below and to the right").
-    ///
-    /// Three things wanted the top-centre slot — the MODE name, See Results, and
-    /// whichever status banner is up — and all three were pinned to the same y with
-    /// the same centring, so they drew on top of each other. The mode keeps the top
-    /// row; the other two drop below it and separate by this much, one either side
-    /// of the centre line.
-    private static let secondRowSplit: CGFloat = 300
-
-    /// ★★ WHO SHARES THE SECOND ROW (his 2026-09-17: "'rebuilding the lattice' should
-    /// be in the centre, below 'aesthetic' or 'structural'. The only time it should be
-    /// to the right … should be when there is another chip meant to be in the middle
-    /// … When the rebuilding lattice chip comes up, [See Results] should move to the
-    /// left and the rebuilding should be on the right. Otherwise, it should be in the
-    /// centre - and same with [See Results]").
-    ///
-    /// Before this the banners were ALWAYS pushed right whenever the mode chip was up,
-    /// See Results or not — so a bake on a project with no accepted variants showed
-    /// its capsule hanging off to the right of nothing. Now each of the two steps
-    /// aside only when the other is actually on screen: See Results goes left by the
-    /// split when a banner is up, a banner goes right by it when See Results is up.
-    /// One condition each, read from the same two facts.
-    private var seeResultsShown: Bool {
-        guard viewOriginal, !fullScreenPageUp, stage != .topology, let outcome = run.outcome else { return false }
-        return outcome.variants.contains(where: { $0.accepted })
-    }
-    /// Either top-centre banner is up (the FEA's, or the rebake's when the FEA's is
-    /// not) — the same tests that mount them.
-    private var topBannerShown: Bool {
-        if latticeSimIsRunning, !simBannerDismissed { return true }
-        return (strutBakeInFlight || strutRefining) && showStrutPreview
-    }
-
-    private var seeResultsChip: some View {
-        VStack {
-            Button { viewOriginal = false } label: {
-                HStack(spacing: DS.Space.s) {
-                    Image(systemName: "square.stack.3d.up.fill").font(.system(size: 13, weight: .semibold))
-                    Text("See Results").dsStyle(DS.TypeScale.bodyStrong)
-                }
-                .foregroundStyle(DS.Color.textPrimary.color)
-                .padding(.vertical, DS.Space.sm).padding(.horizontal, DS.Space.l)
-                .background(Capsule().fill(DS.Color.accent.opacity(0.22).color)
-                    .overlay(Capsule().strokeBorder(DS.Color.accent.opacity(0.6).color, lineWidth: 1)))
-            }
-            .buttonStyle(.plain)
-            // ★ BELOW THE MODE NAME, never on its row — see `secondRowSplit`.
-            .padding(.top, DS.Space.xl3 + (latticeStageModeShown
-                                           ? LatticeStageModeChip.rowHeight + PageChrome.gap
-                                           : 0))
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, alignment: .top)   // exact horizontal centre …
-        // ★ … UNLESS A BANNER SHARES THE ROW: then left by the split, the banner right
-        // by it (his 2026-09-17 rule, see `seeResultsShown`).
-        .padding(.trailing, topBannerShown ? Self.secondRowSplit : 0)
-        .animation(DS.Motion.emphasized, value: topBannerShown)
-        // ★ DIRECTLY BENEATH IT, DEAD CENTRE (his 2026-08-25: "Can you put 'See
-        // Results' directly beneath 'Aesthetic' right in the center of the
-        // screen?"). Only the transient banners step aside now.
     }
 
     /// The orientation gizmo lives in the ABSOLUTE top-right corner, ALWAYS (design-overhaul
@@ -4018,14 +3946,10 @@ public struct WorkspacePlaceholder: View {
         .padding(.top, PageChrome.edge + (latticeStageModeShown
                                           ? LatticeStageModeChip.rowHeight + PageChrome.gap
                                           : 0))
-        // ★ RIGHT OF CENTRE ONLY WHEN SEE RESULTS SHARES THE ROW (his 2026-09-17:
-        // "'rebuilding the lattice' should be in the centre, below 'aesthetic' … The
-        // only time it should be to the right … should be when there is another chip
-        // meant to be in the middle"). See `seeResultsShown`.
-        .padding(.leading, seeResultsShown ? Self.secondRowSplit : 0)
+        // ★ IN THE CENTRE (his 2026-09-17: "'rebuilding the lattice' should be in the centre, below 'aesthetic'"); the
+        // See Results chip it stepped aside for is gone (his 11-05).
         .transition(.move(edge: .top).combined(with: .opacity))
         .animation(DS.Motion.emphasized, value: strutBakeInFlight)
-        .animation(DS.Motion.emphasized, value: seeResultsShown)
         .accessibilityIdentifier("strut-baking-banner")
     }
 
@@ -4233,12 +4157,9 @@ public struct WorkspacePlaceholder: View {
         .padding(.top, PageChrome.edge + (latticeStageModeShown
                                           ? LatticeStageModeChip.rowHeight + PageChrome.gap
                                           : 0))
-        // ★ RIGHT OF CENTRE ONLY WHEN SEE RESULTS SHARES THE ROW (his 2026-09-17) —
-        // the same rule as the strut-baking banner, see `seeResultsShown`.
-        .padding(.leading, seeResultsShown ? Self.secondRowSplit : 0)
+        // ★ IN THE CENTRE, as the strut-baking banner (the See Results chip is gone, his 11-05)
         .transition(.move(edge: .top).combined(with: .opacity))
         .animation(DS.Motion.emphasized, value: latticeSimIsRunning)
-        .animation(DS.Motion.emphasized, value: seeResultsShown)
         .accessibilityIdentifier("sim-running-banner")
     }
 
@@ -4632,7 +4553,7 @@ public struct WorkspacePlaceholder: View {
     /// a key to exactly this ramp, and removing it would take away the thing
     /// that page exists to show.
     private var stageSurfaceTints: [SIMD4<Float>]? {
-        if stressViewOn { return stressSurfaceTints }
+        if stressViewOn, latticeViewsUp { return stressSurfaceTints }   // ★ his 11-05: never through into Edit faces
         if showLatticePage { return latticeProxyTints }
         // ★ NIL, NOT EMPTY — nil is the renderer's "no wash at all"; an empty
         // array is a mis-sized buffer it would drop with a warning-free shrug.
@@ -4809,8 +4730,16 @@ public struct WorkspacePlaceholder: View {
         // Hiding the layer shows the plain body for the ~1.4 s of the bake, which is
         // honest: there IS no current lattice to show.
         showStrutPreview && !strutBakeInFlight
-            && (visible.latticeControls || showLatticePage)
+            && latticeViewsUp
     }
+
+    /// ★ WHERE THE LATTICE'S VIEWS MAY SHOW AT ALL (his 11-05: "When in the face cutting screen, sometimes the legend stays
+    /// on the screen and covers up the actions available … ensure the lattice doesn't come through from whatever other
+    /// screen the user came from"). The layer had this stage gate; its key, the probe's callout, the Stress key and wash and
+    /// the FEA / rebake banners read only the preview's flag, so on Edit faces (latticeControls off,
+    /// `WorkspaceStageVisibility.of(_:editingFaces:)`) the key stayed over the tools and its drill-in swallowed the taps.
+    /// Every one of them reads this now; Done brings them back as they were.
+    private var latticeViewsUp: Bool { visible.latticeControls || showLatticePage }
 
     /// ★★ EVERY INPUT THE BAKE READS — AND IT USED TO BE ONLY THE SELECTION
     /// (maintainer, 2026-08-19: "I just tested and I don't see any difference in
@@ -7571,7 +7500,7 @@ public struct WorkspacePlaceholder: View {
     /// through this; the mode is also reset when the preview goes off. A MINIMIZED key is not
     /// drilled in either: its column carries no "Double-tap anywhere to go back", so the hides
     /// would again have no visible way out.
-    private var latticeLegendMounted: Bool { showStrutPreview && strutScene != nil }
+    private var latticeLegendMounted: Bool { showStrutPreview && strutScene != nil && latticeViewsUp }
     private var legendDrilledIn: Bool {
         latticeLegendMounted && !latticeLegendMinimized && latticeLegendMode.drilledIn
             || flexibleMain.keyDrilledIn(project, stage, mode: latticeLegendMode)   // Flexible (PR #362) H14: the Flexible key is the key on screen there (FlexibleMainStage+Views.swift)
@@ -9774,7 +9703,8 @@ public struct WorkspacePlaceholder: View {
 
     /// The banner the notice draws: production's switch and probe, the plan's own verdict.
     private var latticePreviewBanner: LatticePreviewBanner? {
-        LatticePreviewBanner.make(previewOn: showStrutPreview,
+        guard latticeViewsUp else { return nil }   // ★ his 11-05: the preview's line never comes through into Edit faces
+        return LatticePreviewBanner.make(previewOn: showStrutPreview,
                                   hasModel: viewerMesh != nil,
                                   scene: strutScene,
                                   planWithheld: project.latticePreviewPlanWithheld)
@@ -12948,15 +12878,15 @@ public struct WorkspacePlaceholder: View {
         return true
     }
 
-    /// The GRADED-lattice-plus-design-box conflict in the CURRENT setup, or nil.
+    /// The graded-ORGANIC-lattice-plus-design-box conflict in the CURRENT setup, or nil.
     /// One rule, shared by the workspace Optimize button and the lattice page's own.
-    /// A UNIFORM lattice under a design box is supported by core (PR 285) and is
-    /// not gated here — it was, until the device-failure task found the app still
-    /// refusing what core had learned to do.
+    /// A UNIFORM lattice under a design box is supported by core (PR 285), and a graded
+    /// Default Grade / Stepped one since TO-core's 4e7648d8; neither is gated here.
     private var latticeDesignBoxConflict: String? {
         LatticeCoreCapability.liveConflict(latticeEnabled: project.lattice.enabled,
                                            designBoxActive: project.designBox.isActive,
-                                           graded: project.lattice.densityMode == .sim)
+                                           graded: project.lattice.densityMode == .sim,
+                                           organic: project.lattice.isOrganic)
     }
 
     /// ★ ruling 4 (item 5): why Optimize may not start with this lattice — the ONE definition
@@ -14303,9 +14233,7 @@ extension WorkspacePlaceholder {
 
     /// The groups that lattice something (an include in them): the Cells page's tabs, the change-type card's count.
     var latticeRegionTabNames: [String] {
-        project.latticeGroups.filter { g in   // ★ B6 s1b (#362's seam, 11-05): the Lattice stage's own groups
-            project.latticeSelectableRefs(g).contains { project.latticeSelectableRole($0, in: g.id) == .include }
-        }.map(\.name)
+        project.latticeAreaGroups.map(\.name)   // ★ B6 s1b: the Lattice stage's own groups; ★ B7 (E3): one list with the tabs' grades
     }
 
     /// ● <Type> ⌄ | Regions | Cells | ✂ — and what the lattice builds on. Over the Cells page too (mounted above it).

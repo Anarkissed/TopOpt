@@ -147,12 +147,14 @@ final class LatticeOldRetainedRunTests: XCTestCase {
         p.force.sync(groups: p.selection.groups)
         p.force.setProtected(gB, true)          // a declared kind, so it may carry a lattice role
         p.lattice.groupRoles[gB] = .include
-        p.writeLatticeDepthMM(.region(group: gB, region: top), mm: 12)
+        // ★ RE-PINNED (release (2), E2.5): core checks the depth tie on the DEEPEST region per protected face only, so
+        // the region it rejects is the deeper prism — top at 25 mm over the face's own 20 mm (at 12 mm core accepted it)
+        p.writeLatticeDepthMM(.region(group: gB, region: top), mm: 25)
         let onFace1 = p.latticeJobRegions().regions.filter { $0.kind == .face && $0.rawFaceID == 1 }
-        XCTAssertEqual(onFace1.map(\.depthMM).sorted(), [12, 20], "control: face 1 carries two prisms")
+        XCTAssertEqual(onFace1.map(\.depthMM).sorted(), [20, 25], "control: face 1 carries two prisms")
         let old = try VariantFacePrismFixture.original(bareProtection: [Int(p.runFaceID(1))], depthMM: 20)
         let err = try XCTUnwrap(try coreErrors(p, retained: old).first?.1)
-        XCTAssertTrue(err.contains("the protection is 20.000000 mm and the lattice region is 12.000000 mm"), err)
+        XCTAssertTrue(err.contains("the protection is 20.000000 mm and the lattice region is 25.000000 mm"), err)
         XCTAssertTrue(sentence(p, err).contains("under top,"), "★ the region core stopped at, not Face 1: \(sentence(p, err))")
     }
 

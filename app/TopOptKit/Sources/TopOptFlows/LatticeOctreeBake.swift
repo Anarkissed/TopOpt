@@ -151,10 +151,21 @@ extension LatticePreviewOccupancy {
         let inside = LatticeRegionMask.contains(p, region: reg) ? 0 : 1
         return (inside, abs(simd_dot(p - reg.origin, LatticeRegionMask.unit(reg.normal))), r)
     }
-    public static func outranks(_ a: OwnerRank, _ b: OwnerRank) -> Bool {
+    /// ★ E2.5's TIE (reviewer, 2026-11-06, item 1: "the deeper region wins; at equal depth, the
+    /// lower id" — core's `include_wins_plane_tie`, stepped_plan.cpp): on an exact plane-distance
+    /// tie between two face regions on ONE face plane (same facing, coplanar), the deeper wins;
+    /// any other tie, or equal depths, goes to the lower id.
+    public static func outranks(_ a: OwnerRank, _ b: OwnerRank, regions: [LatticeRegionSpec]) -> Bool {
         if a.outside != b.outside { return a.outside < b.outside }
         if abs(a.planeDistanceMM - b.planeDistanceMM) > 1e-9 { return a.planeDistanceMM < b.planeDistanceMM }
-        return a.region < b.region                             // an exact tie: the lower id
+        let ra = regions[a.region], rb = regions[b.region]
+        let la = simd_length(ra.normal), lb = simd_length(rb.normal)
+        if la > 0, lb > 0, ra.depthMM != rb.depthMM,
+           simd_dot(ra.normal, rb.normal) / (la * lb) > 1 - 1e-12,
+           abs(simd_dot(rb.origin - ra.origin, ra.normal) / la) < 1e-9 {
+            return ra.depthMM > rb.depthMM                     // one face plane: the deeper region
+        }
+        return a.region < b.region                             // any other exact tie: the lower id
     }
     /// The region that owns point `p` among `candidates` (all regions when nil): the best rank
     /// among those whose prism CONTAINS it; nil when no candidate's prism does.
@@ -163,7 +174,7 @@ extension LatticePreviewOccupancy {
         for r in candidates ?? Array(regions.indices) {
             let rr = ownerRank(p, region: r, regions: regions)
             guard rr.outside == 0 else { continue }
-            if let b = best { if outranks(rr, b) { best = rr } } else { best = rr }
+            if let b = best { if outranks(rr, b, regions: regions) { best = rr } } else { best = rr }
         }
         return best?.region
     }
@@ -964,7 +975,7 @@ extension LatticePreviewOccupancy {
         var accepted: [Bool] = []
         var currentSlot = SlotTag(ladder: -1, idx: SIMD3<Int>(repeating: 0))
         func rank(_ r: Int, _ p: SIMD3<Double>) -> OwnerRank { Self.ownerRank(p, region: r, regions: regions) }
-        func outranks(_ a: OwnerRank, _ b: OwnerRank) -> Bool { Self.outranks(a, b) }
+        func outranks(_ a: OwnerRank, _ b: OwnerRank) -> Bool { Self.outranks(a, b, regions: regions) }
         // ★★ CORE'S OWNER, over the regions as the job sends them (wire dictionaries, seam-grown
         // outlines and all). Core numbers the INCLUDE regions 1-based in job order; a reply that
         // resolved a different number of includes is refused here, since every id after a skipped
@@ -1694,17 +1705,6 @@ extension LatticePreviewOccupancy {
         let lat = latticeID.isEmpty ? nil : LatticeType.named(latticeID)
         let quiltTop = (shapeFit && lat != nil && densityHi > 0)
             ? Swift.min(1, lat!.quiltRowDensity(cellMM: pitch)) : 0
-        let drawnHi = Swift.max(densityHi, quiltTop)
-        let g = densityGamma > 0 ? densityGamma : 1
-        func rho(_ a: Float) -> Double {
-            let av = Double(Swift.max(0, Swift.min(1, a)))
-            return densityHi > densityLo ? densityLo + (densityHi - densityLo) * pow(av, g) : densityLo
-        }
-        func act(_ r: Double) -> Float {
-            guard drawnHi > densityLo else { return 0 }
-            let u = Swift.max(0, Swift.min(1, (r - densityLo) / (drawnHi - densityLo)))
-            return Float(pow(u, 1 / g))
-        }
         // ★★ THE PRINTABILITY FLOOR IS CORE'S, AT THE JOB'S CAP (the reviewer, 2026-10-09 20:51: "Call
         // core's ceiling through the guarded bridge instead, and pin that a sent rho never exceeds the
         // cap the job carries"). The app's own 24-step bisection of the diameter table
@@ -1724,6 +1724,25 @@ extension LatticePreviewOccupancy {
             }
             coreFloor[s] = f
             return f
+        }
+        // ★ RELEASE (2), K1: the drawn span reaches the bead's floor too. Core raises a voxel to its cell's print floor
+        // AFTER the band clamp (grading.cpp: max(rho_clamped, print_rho_floor(cell)), up to the job's cap), so a cell
+        // whose floor is over the band's top is built at its floor; clamping it to the band's top drew it — and planned
+        // it — lighter than the run builds. K1's full-cell law put the cap's floor at 0.3788, over many a band's top.
+        let floorTop: Double = {
+            guard let lat, lineWidthMM > 0, densityHi > 0 else { return 0 }
+            return Set(size.filter { $0 > 0 }).map { printFloor($0, lat) }.max() ?? 0
+        }()
+        let drawnHi = Swift.max(densityHi, quiltTop, floorTop)
+        let g = densityGamma > 0 ? densityGamma : 1
+        func rho(_ a: Float) -> Double {
+            let av = Double(Swift.max(0, Swift.min(1, a)))
+            return densityHi > densityLo ? densityLo + (densityHi - densityLo) * pow(av, g) : densityLo
+        }
+        func act(_ r: Double) -> Float {
+            guard drawnHi > densityLo else { return 0 }
+            let u = Swift.max(0, Swift.min(1, (r - densityLo) / (drawnHi - densityLo)))
+            return Float(pow(u, 1 / g))
         }
         // ★ ALONG: each painted texel's place in its owner's grade, 0 at the face plane (or the outline) … 1 at the
         // far end (or the face's middle); nil ⇒ none (By stress, unpicked, or not a face region's texel).

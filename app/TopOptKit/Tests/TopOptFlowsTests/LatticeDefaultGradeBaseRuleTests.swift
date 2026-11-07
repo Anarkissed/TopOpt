@@ -102,7 +102,9 @@ final class LatticeDefaultGradeBaseRuleTests: XCTestCase {
         guard let crossing = TopOptKit.printsOpenCrossingMM(topology: "octet", beadMM: bead) else {
             return XCTFail("core calls the octet live")
         }
-        XCTAssertEqual(crossing, 2.370908, accuracy: 1e-6, "core's own 0.20 crossing at a 0.45 mm bead")
+        // ★ RE-PINNED (release (2), K1 item 3): "prints open" is the geometry now — a bead-wide strut at most 0.1898 of
+        // the tile — so the crossing is 0.45 / 0.1898 = 2.3709167 mm (2.370908 was octet's 0.20-density crossing)
+        XCTAssertEqual(crossing, 2.3709167, accuracy: 1e-6, "core's own crossing at a 0.45 mm bead")
         let fast: (Double) -> Bool = { $0 >= crossing }
         func ruleFast(_ w: Double, _ c: Double) -> Double {
             LatticeRegionCells.cellWhoseHalvesEndAtTheFloor(depthMM: w, cellMM: c, tileFloorMM: floor, bakeFloorMM: floor,
@@ -157,7 +159,9 @@ final class LatticeDefaultGradeBaseRuleTests: XCTestCase {
         print("PRINTS-OPEN: crossing \(c) mm; an ask: direct \(String(format: "%.3f", tDirect * 1000)) ms, "
               + "cached \(String(format: "%.4f", tCached * 1000)) ms; open \(direct) / \(cached) / Swift law \(swift) of 200")
         XCTAssertEqual(direct, cached)
-        XCTAssertEqual(direct, swift, "the Swift law it replaces agrees on 2.00–5.98 mm")
+        // ★ RE-PINNED (release (2), K1 item 3): core's rule is the strut-to-tile geometry now, read from no density, so
+        // the Swift density law it replaced no longer agrees (it opens fewer) — which is why nothing asks it
+        XCTAssertGreaterThan(direct, swift, "core's geometry rule is not the Swift density law it replaced")
     }
 }
 

@@ -31,9 +31,13 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <set>
+#include <tuple>
 #include <vector>
 
+#include "topopt/lattice.hpp"
 #include "topopt/lattice_boundary.hpp"
+#include "topopt/strut_cell.hpp"
 
 namespace topopt {
 namespace {
@@ -87,12 +91,22 @@ std::vector<INode> ref_nodes() {
 //   LEG  : a tetrahedron leg (face-centre to cube corner); lies in ONE cube face
 //          plane and is shared with the neighbour across that face. Owned by the
 //          cell on the min side of that face (see owns_leg).
-enum class Cls { OCTA, LEG };
+//   GEN  : (every type but octet) a strut of the canonical cell table, in the
+//          closed box. Owned by the cell whose half-open box holds its midpoint,
+//          else by the lex-smallest ACTIVE cell sharing it (owns_generic) — the
+//          rule octet's nodes already use, applied to struts.
+enum class Cls { OCTA, LEG, GEN };
 struct RStrut {
   INode a, b;
   Cls cls;
   int face_axis;  // for LEG: 0=x,1=y,2=z
   int face_side;  // for LEG: 0 (min plane) or 2 (max plane)
+  // for GEN, per axis: the cells sharing it are this one + [lo, hi] (lo in {-1,0},
+  // hi in {0,+1}: -1 when the strut lies in the min face plane, +1 in the max), and
+  // the canonical owner is +canon (1 only for the max plane: the midpoint is there).
+  int lo[3] = {0, 0, 0};
+  int hi[3] = {0, 0, 0};
+  int canon[3] = {0, 0, 0};
 };
 
 std::vector<RStrut> ref_struts() {
@@ -121,6 +135,184 @@ std::vector<RStrut> ref_struts() {
   return s;
 }
 
+// --------------------------------------------------------------------------- tables
+// One cell's candidate geometry: every strut and node inside its CLOSED box, on the
+// integer grid of units L/S. Octet's is its hand-written table (S = 2, LEG/OCTA
+// classes, the PR 201 order), so its bytes cannot move; every other type's comes from
+// the canonical cell (topopt/strut_cell.hpp), which is the cell its tensor rows were
+// measured on.
+struct CellTable {
+  int S = 2;
+  double inv_s = 0.5;  // 1.0 / S, exact for S = 2 and 4
+  std::vector<RStrut> struts;
+  std::vector<INode> nodes;
+  // GEN tables only: a node is a candidate in a cell only when a strut OF THAT CELL
+  // ends on it (diamond's cell corners are reached by no strut of the cell they cap),
+  // and `node_listers[i]` says which of the 27 neighbouring cells (bit
+  // (dk+1)*9 + (dj+1)*3 + (di+1)) also list node i — so ownership is decided among
+  // the cells that hold one of its struts, and a ball is never emitted with none.
+  bool generic = false;
+  std::vector<unsigned> node_listers;
+  // The diagrid link radius is kLinkFactor * link_scale cell edges. kLinkFactor (0.72)
+  // is octet's: near a plane of nodes, a face's landings bunch around the nodes that
+  // send a strut ACROSS that plane, and octet's are 0.7071 cell apart. A type whose
+  // crossing nodes sit farther apart scales by the ratio (crossing_node_gap below), so
+  // its clusters link the way octet's do; 1.0 (and byte-identical) for every type whose
+  // gap is octet's.
+  double link_scale = 1.0;
+};
+
+// On every node plane normal to a cell axis: the nodes that send a strut across it,
+// and the radius at which they connect in the plane (the bottleneck edge of their
+// minimum spanning tree, periodic min-image). The largest over planes and axes, in cell
+// edges: what a diagrid on a face just off a node plane must bridge. Octet, Kelvin,
+// Rhombic and Diamond: 0.7071; FCC, BCC and SC: 1 (only nodes a full cell apart cross).
+double crossing_node_gap(const StrutCell& cell) {
+  const int S = cell.S;
+  auto wrap = [S](int v) { return ((v % S) + S) % S; };
+  const std::vector<StrutCellStrut> struts = strut_cell_closed_struts(cell);
+  double worst = 0.0;
+  for (int ax = 0; ax < 3; ++ax) {
+    const int u = (ax + 1) % 3, w = (ax + 2) % 3;
+    std::set<int> planes;
+    for (const StrutCellPoint& n : cell.nodes) planes.insert(ax == 0 ? n.x : ax == 1 ? n.y : n.z);
+    for (int v : planes) {
+      std::set<std::pair<int, int>> pts;
+      for (const StrutCellStrut& st : struts) {
+        const int A[3] = {st.a.x, st.a.y, st.a.z}, B[3] = {st.b.x, st.b.y, st.b.z};
+        if (wrap(A[ax]) == v && B[ax] != A[ax]) pts.insert({wrap(A[u]), wrap(A[w])});
+        if (wrap(B[ax]) == v && A[ax] != B[ax]) pts.insert({wrap(B[u]), wrap(B[w])});
+      }
+      if (pts.empty()) continue;
+      const std::vector<std::pair<int, int>> p(pts.begin(), pts.end());
+      const int n = static_cast<int>(p.size());
+      // One crossing node per cell links only to its own image, a cell away.
+      double gap = n == 1 ? S : 0.0;
+      std::vector<std::tuple<int, int, int>> edges;  // (squared distance, i, j)
+      for (int i = 0; i < n; ++i)
+        for (int j = i + 1; j < n; ++j) {
+          int du = std::abs(p[i].first - p[j].first), dw = std::abs(p[i].second - p[j].second);
+          du = std::min(du, S - du);
+          dw = std::min(dw, S - dw);
+          edges.emplace_back(du * du + dw * dw, i, j);
+        }
+      std::sort(edges.begin(), edges.end());
+      std::vector<int> parent(n);
+      for (int i = 0; i < n; ++i) parent[i] = i;
+      auto root = [&parent](int x) {
+        while (parent[x] != x) x = parent[x] = parent[parent[x]];
+        return x;
+      };
+      int pieces = n;
+      for (const auto& [d2, i, j] : edges) {
+        if (pieces == 1) break;
+        const int a = root(i), b = root(j);
+        if (a == b) continue;
+        parent[a] = b;
+        --pieces;
+        gap = std::sqrt(static_cast<double>(d2));
+      }
+      worst = std::max(worst, gap / S);
+    }
+  }
+  return worst;
+}
+
+const CellTable& octet_table() {
+  static const CellTable t = [] {
+    CellTable c;
+    c.S = 2;
+    c.inv_s = 0.5;
+    c.struts = ref_struts();
+    c.nodes = ref_nodes();
+    return c;
+  }();
+  return t;
+}
+
+CellTable generic_table(LatticeTopology topo) {
+  const StrutCell& cell = lattice_strut_cell(topo);
+  CellTable c;
+  c.S = cell.S;
+  c.inv_s = 1.0 / cell.S;
+  for (const StrutCellStrut& s : strut_cell_closed_struts(cell)) {
+    RStrut r;
+    r.a = {s.a.x, s.a.y, s.a.z};
+    r.b = {s.b.x, s.b.y, s.b.z};
+    r.cls = Cls::GEN;
+    r.face_axis = r.face_side = -1;
+    const int A[3] = {s.a.x, s.a.y, s.a.z}, B[3] = {s.b.x, s.b.y, s.b.z};
+    for (int ax = 0; ax < 3; ++ax) {
+      if (A[ax] == 0 && B[ax] == 0) r.lo[ax] = -1;            // in the min plane
+      if (A[ax] == cell.S && B[ax] == cell.S) r.hi[ax] = r.canon[ax] = 1;  // max plane
+    }
+    c.struts.push_back(r);
+  }
+  // Nodes: the closed-box nodes some strut of this cell ends on, in the closed-node
+  // order (deterministic).
+  std::set<std::tuple<int, int, int>> ends;
+  for (const RStrut& r : c.struts) {
+    ends.insert({r.a.x, r.a.y, r.a.z});
+    ends.insert({r.b.x, r.b.y, r.b.z});
+  }
+  for (const StrutCellPoint& n : strut_cell_closed_nodes(cell)) {
+    if (!ends.count({n.x, n.y, n.z})) continue;
+    unsigned mask = 0;
+    for (int dk = -1; dk <= 1; ++dk)
+      for (int dj = -1; dj <= 1; ++dj)
+        for (int di = -1; di <= 1; ++di)
+          if (ends.count({n.x - di * cell.S, n.y - dj * cell.S, n.z - dk * cell.S}))
+            mask |= 1u << ((dk + 1) * 9 + (dj + 1) * 3 + (di + 1));
+    c.nodes.push_back({n.x, n.y, n.z});
+    c.node_listers.push_back(mask);
+  }
+  c.generic = true;
+  // Octet's gap is half a face diagonal; a type whose crossing nodes are farther apart
+  // gets octet's radius scaled to its own gap (SC, BCC, FCC: sqrt 2).
+  const double octet_gap = 0.5 * std::sqrt(2.0);
+  const double gap = crossing_node_gap(cell);
+  if (gap > octet_gap + 1e-9) c.link_scale = gap / octet_gap;
+  return c;
+}
+
+const CellTable& cell_table(LatticeGenTopology topo) {
+  switch (topo) {
+    case LatticeGenTopology::Octet:
+      return octet_table();
+    case LatticeGenTopology::Fcc: {
+      static const CellTable t = generic_table(LatticeTopology::Fcc);
+      return t;
+    }
+    case LatticeGenTopology::Kelvin: {
+      static const CellTable t = generic_table(LatticeTopology::Kelvin);
+      return t;
+    }
+    case LatticeGenTopology::Rhombic: {
+      static const CellTable t = generic_table(LatticeTopology::Rhombic);
+      return t;
+    }
+    case LatticeGenTopology::Diamond: {
+      static const CellTable t = generic_table(LatticeTopology::Diamond);
+      return t;
+    }
+    case LatticeGenTopology::Bcc: {
+      static const CellTable t = generic_table(LatticeTopology::Bcc);
+      return t;
+    }
+    case LatticeGenTopology::SimpleCubic: {
+      static const CellTable t = generic_table(LatticeTopology::SimpleCubic);
+      return t;
+    }
+    case LatticeGenTopology::Gyroid:
+    case LatticeGenTopology::SchwarzD:
+      throw std::invalid_argument(
+          std::string("generate_lattice: \"") + lattice_gen_topology_name(topo) +
+          "\" is a SHEET lattice with no struts; it is built by generate_tpms "
+          "(tpms_gen.hpp), not by the strut generator");
+  }
+  throw std::invalid_argument("generate_lattice: unknown LatticeGenTopology");
+}
+
 // --------------------------------------------------------------------------- region
 // Composite cell activity: the caller's predicate AND (boundary finish) the
 // overlap activation. BOTH the strut/node ownership rules and the emission
@@ -140,10 +332,11 @@ bool cell_active(const LatticeRegion& R, int ci, int cj, int ck) {
 
 // Node-owner cell under the even/odd mapping, clamped to the grid. Even component
 // (corner on that axis) -> coord/2; odd (face centre) -> (coord-1)/2 == coord/2.
-void node_owner(const LatticeRegion& R, int gx, int gy, int gz, int& oi, int& oj,
-                int& ok) {
-  auto own = [](int g, int n) {
-    int o = g / 2;
+// (S = 2 for octet; the same rule in units of L/S for every other type.)
+void node_owner(const LatticeRegion& R, int S, int gx, int gy, int gz, int& oi,
+                int& oj, int& ok) {
+  auto own = [S](int g, int n) {
+    int o = g / S;
     if (o < 0) o = 0;
     if (o >= n) o = n - 1;
     return o;
@@ -163,9 +356,59 @@ bool owns_leg(const LatticeRegion& R, int ci, int cj, int ck, int axis, int side
   return !cell_active(R, ni, nj, nk);                       // fraction boundary
 }
 
-Vec3 node_pos(const LatticeRegion& R, int gx, int gy, int gz) {
-  return {R.origin.x + gx * 0.5 * R.cell_mm, R.origin.y + gy * 0.5 * R.cell_mm,
-          R.origin.z + gz * 0.5 * R.cell_mm};
+// Does cell (ci,cj,ck) own this GEN strut? The canonical owner (clamped to the grid,
+// as node_owner clamps) emits it when active; otherwise the lex-smallest active cell
+// that shares it does, so a strut on the face, edge or corner of an inactive region
+// is emitted exactly once and never dropped (octet's node fallback, verbatim in
+// structure).
+bool owns_generic(const LatticeRegion& R, int ci, int cj, int ck, const RStrut& s) {
+  auto clampi = [](int v, int n) { return v < 0 ? 0 : (v >= n ? n - 1 : v); };
+  const int oi = clampi(ci + s.canon[0], R.nx), oj = clampi(cj + s.canon[1], R.ny),
+            ok = clampi(ck + s.canon[2], R.nz);
+  if (cell_active(R, oi, oj, ok)) return oi == ci && oj == cj && ok == ck;
+  for (int di = s.lo[0]; di <= s.hi[0]; ++di)
+    for (int dj = s.lo[1]; dj <= s.hi[1]; ++dj)
+      for (int dk = s.lo[2]; dk <= s.hi[2]; ++dk) {
+        const int ni = ci + di, nj = cj + dj, nk = ck + dk;
+        if (!cell_active(R, ni, nj, nk)) continue;
+        if (ni < ci || (ni == ci && nj < cj) || (ni == ci && nj == cj && nk < ck))
+          return false;  // a smaller active sharer emits it
+      }
+  return true;
+}
+
+// Does cell (ci,cj,ck) own GEN node i (local coords n)? The canonical owner (the cell
+// whose half-open box holds it, clamped to the grid) emits it when it is active AND
+// holds one of its struts; otherwise the lex-smallest active cell that holds one does.
+bool owns_generic_node(const LatticeRegion& R, const CellTable& T, std::size_t i,
+                       int ci, int cj, int ck) {
+  const INode& n = T.nodes[i];
+  const unsigned mask = T.node_listers[i];
+  auto lists = [mask](int di, int dj, int dk) {
+    return (mask >> ((dk + 1) * 9 + (dj + 1) * 3 + (di + 1))) & 1u;
+  };
+  auto clampi = [](int v, int nn) { return v < 0 ? 0 : (v >= nn ? nn - 1 : v); };
+  const int oi = clampi(ci + (n.x == T.S ? 1 : 0), R.nx),
+            oj = clampi(cj + (n.y == T.S ? 1 : 0), R.ny),
+            ok = clampi(ck + (n.z == T.S ? 1 : 0), R.nz);
+  if (cell_active(R, oi, oj, ok) && lists(oi - ci, oj - cj, ok - ck))
+    return oi == ci && oj == cj && ok == ck;
+  for (int dk = -1; dk <= 1; ++dk)
+    for (int dj = -1; dj <= 1; ++dj)
+      for (int di = -1; di <= 1; ++di) {
+        if (!lists(di, dj, dk)) continue;
+        const int ni = ci + di, nj = cj + dj, nk = ck + dk;
+        if (!cell_active(R, ni, nj, nk)) continue;
+        if (ni < ci || (ni == ci && nj < cj) || (ni == ci && nj == cj && nk < ck))
+          return false;  // a smaller active cell that holds one of its struts emits it
+      }
+  return true;
+}
+
+// inv_s = 1/S: exactly 0.5 for octet, so the expression is octet's own, bit for bit.
+Vec3 node_pos(const LatticeRegion& R, double inv_s, int gx, int gy, int gz) {
+  return {R.origin.x + gx * inv_s * R.cell_mm, R.origin.y + gy * inv_s * R.cell_mm,
+          R.origin.z + gz * inv_s * R.cell_mm};
 }
 
 // --------------------------------------------------------------------------- emit
@@ -187,7 +430,32 @@ void emit_node(TriangleSink& sink, const Vec3& c, double r) {
 // ★ THE TWO SWEPT SOLIDS, PUBLIC (lattice_gen.hpp states why). Bodies unchanged
 // from the anonymous-namespace originals; only the linkage moved, so the octet
 // output stays byte-identical (bar R2).
+// ★ FINDING 2 (ruling 2026-11-02 (b)): the emitted solids match the law they were
+// certified on. Every type's density law was measured on ROUND capsules (a cylinder of
+// radius r, a sphere of radius r at each node); an n-gon prism of circumradius r holds
+// (n/2) sin(2 pi / n) of the circle's area, 0.900 at n = 8, and an icosahedron of
+// circumradius r holds 0.605 of the sphere's volume, so the file printed 6-10 % lighter
+// than its certificate. The strut and node are now emitted at EQUAL AREA and EQUAL VOLUME:
+// circumradius r x sqrt(2 pi / (n sin(2 pi / n))) (1.0539 at n = 8) and r x
+// cbrt(sphere / icosahedron) (1.1824). Everything that keeps a strut inside the part (the
+// clip, the node drop, the anchor ball) uses the emitted circumradius.
+double lattice_strut_emit_scale(int nseg) {
+  return std::sqrt(2.0 * M_PI / (nseg * std::sin(2.0 * M_PI / nseg)));
+}
+double lattice_node_emit_scale() {
+  return std::cbrt((4.0 / 3.0) * M_PI / lattice_icosahedron_volume_mm3(1.0));
+}
+
 void lattice_emit_strut(TriangleSink& sink, const Vec3& p0, const Vec3& p1,
+                        double r, int nseg) {
+  lattice_emit_prism(sink, p0, p1, r * lattice_strut_emit_scale(nseg), nseg);
+}
+
+void lattice_emit_node(TriangleSink& sink, const Vec3& c, double r) {
+  lattice_emit_icosahedron(sink, c, r * lattice_node_emit_scale());
+}
+
+void lattice_emit_prism(TriangleSink& sink, const Vec3& p0, const Vec3& p1,
                         double r, int nseg) {
   const Vec3 axis = unit(sub(p1, p0));
   const Vec3 ref = std::fabs(axis.z) < 0.9 ? Vec3{0, 0, 1} : Vec3{1, 0, 0};
@@ -217,7 +485,7 @@ void lattice_emit_strut(TriangleSink& sink, const Vec3& p0, const Vec3& p1,
 
 // An icosahedron of radius r at centre c (20 tris) — the node joint that makes
 // the strut union a solid body at each vertex.
-void lattice_emit_node(TriangleSink& sink, const Vec3& c, double r) {
+void lattice_emit_icosahedron(TriangleSink& sink, const Vec3& c, double r) {
   const double t = (1.0 + std::sqrt(5.0)) / 2.0;
   const double s = r / std::sqrt(1.0 + t * t);
   std::array<Vec3, 12> p = {{{-1, t, 0}, {1, t, 0}, {-1, -t, 0}, {1, -t, 0},
@@ -242,13 +510,23 @@ void lattice_emit_node(TriangleSink& sink, const Vec3& c, double r) {
   for (const auto& tr : f) sink.add_triangle(p[tr[0]], p[tr[1]], p[tr[2]]);
 }
 
-double lattice_prism_volume_mm3(double r, double length_mm, int nseg) {
+double lattice_ngon_prism_volume_mm3(double r, double length_mm, int nseg) {
   return 0.5 * nseg * r * r * std::sin(2.0 * M_PI / nseg) * length_mm;
 }
 
-double lattice_node_volume_mm3(double r) {
+double lattice_icosahedron_volume_mm3(double r) {
   const double a = 4.0 * r / std::sqrt(10.0 + 2.0 * std::sqrt(5.0));
   return (5.0 / 12.0) * (3.0 + std::sqrt(5.0)) * a * a * a;
+}
+
+// The volumes of what lattice_emit_strut / lattice_emit_node write: by construction the
+// round strut's and the sphere's.
+double lattice_prism_volume_mm3(double r, double length_mm, int nseg) {
+  return lattice_ngon_prism_volume_mm3(r * lattice_strut_emit_scale(nseg), length_mm, nseg);
+}
+
+double lattice_node_volume_mm3(double r) {
+  return lattice_icosahedron_volume_mm3(r * lattice_node_emit_scale());
 }
 
 namespace {
@@ -363,28 +641,30 @@ bool project_to_offset(const LatticeBoundary& B, double target, Vec3& q) {
 // this for neighbour cells instead of keeping any global landing set, which is
 // what preserves cell-local streaming). Returns nothing for inactive cells.
 void cut_cell_struts(const LatticeRegion& R, const LatticeRadiusField& G,
-                     const std::vector<RStrut>& RS, int ci, int cj, int ck,
-                     CellCut& out) {
+                     const CellTable& T, int ci, int cj, int ck, CellCut& out) {
   out.frags.clear();
   out.landings.clear();
   out.clipped = out.dropped = out.full = 0;
   out.uncertified = 0;
   if (!cell_active(R, ci, cj, ck)) return;
   const LatticeBoundary* B = R.boundary;
-  const int bx = 2 * ci, by = 2 * cj, bz = 2 * ck;
+  const int bx = T.S * ci, by = T.S * cj, bz = T.S * ck;
   const Vec3 centre{R.origin.x + (ci + 0.5) * R.cell_mm,
                     R.origin.y + (cj + 0.5) * R.cell_mm,
                     R.origin.z + (ck + 0.5) * R.cell_mm};
   const double half_diag = 0.5 * R.cell_mm * std::sqrt(3.0);
   const double sd_centre = B ? B->signed_distance(centre) : 0.0;
 
-  for (const auto& rs : RS) {
+  for (const auto& rs : T.struts) {
     if (rs.cls == Cls::LEG && !owns_leg(R, ci, cj, ck, rs.face_axis, rs.face_side))
       continue;
-    const Vec3 pa = node_pos(R, rs.a.x + bx, rs.a.y + by, rs.a.z + bz);
-    const Vec3 pb = node_pos(R, rs.b.x + bx, rs.b.y + by, rs.b.z + bz);
+    if (rs.cls == Cls::GEN && !owns_generic(R, ci, cj, ck, rs)) continue;
+    const Vec3 pa = node_pos(R, T.inv_s, rs.a.x + bx, rs.a.y + by, rs.a.z + bz);
+    const Vec3 pb = node_pos(R, T.inv_s, rs.b.x + bx, rs.b.y + by, rs.b.z + bz);
     const double r = checked_radius(G, scale(add(pa, pb), 0.5));
-    if (!B || sd_centre >= half_diag + r) {
+    // ★ (b): the solid reaches the emitted circumradius, not r.
+    const double r_solid = r * lattice_strut_emit_scale(G.nseg);
+    if (!B || sd_centre >= half_diag + r_solid) {
       // Fast path: the Lipschitz bound proves the whole strut (and its solid)
       // is inside — deep-interior cells never pay for a clip.
       out.frags.push_back({pa, pb, r});
@@ -393,7 +673,7 @@ void cut_cell_struts(const LatticeRegion& R, const LatticeRadiusField& G,
     }
     const double len = norm(sub(pb, pa));
     const Vec3 dir = scale(sub(pb, pa), 1.0 / len);
-    const auto spans = B->clip_segment(pa, pb, r, -1, -1, &out.uncertified);
+    const auto spans = B->clip_segment(pa, pb, r_solid, -1, -1, &out.uncertified);
     if (spans.empty()) {
       ++out.dropped;
       continue;
@@ -430,9 +710,13 @@ void cut_cell_struts(const LatticeRegion& R, const LatticeRadiusField& G,
   }
 }
 
+// ★ (b): the skin's CIRCUMRADIUS, the interior's law radius scaled as an interior strut's
+// prism is (lattice_strut_emit_scale), so a skin edge rides the offset surface exactly
+// where the clipped struts land (their emitted circumradius in from the part) and meets
+// the anchors there; the skin is written as a raw prism of this radius.
 double skin_radius_at(const LatticeRadiusField& G, const LatticeSkinSpec& skin,
                       const Vec3& p) {
-  return std::max(checked_radius(G, p), skin.min_radius_mm);
+  return lattice_strut_emit_scale(G.nseg) * std::max(checked_radius(G, p), skin.min_radius_mm);
 }
 
 // Track an emitted solid in the stats' diameter range.
@@ -523,13 +807,13 @@ void emit_skin_edge(TriangleSink& sink, const LatticeRegion& R,
       if (s.t1 - s.t0 < kMinFragMm) continue;
       const Vec3 qa = add(stations[i], scale(dir, s.t0));
       const Vec3 qb = add(stations[i], scale(dir, s.t1));
-      emit_strut(sink, qa, qb, r_e, G.nseg);
+      lattice_emit_prism(sink, qa, qb, r_e, G.nseg);  // a finish: raw (b)
       if (obs && obs->on_element)
         obs->on_element(LatticeGenElement::SkinStrut, qa, qb, r_e);
       ++st.skin_struts;
       st.skin_triangles += 4ull * G.nseg;
       st.triangles += 4ull * G.nseg;
-      st.skin_volume_mm3 += ngon_prism_volume(r_e, s.t1 - s.t0, G.nseg);
+      st.skin_volume_mm3 += lattice_ngon_prism_volume_mm3(r_e, s.t1 - s.t0, G.nseg);
       note_diameter(st, r_e);
     }
   }
@@ -622,14 +906,14 @@ void emit_freeform_skin_edge(TriangleSink& sink, const LatticeRegion& R,
       if (s.t1 - s.t0 < kMinFragMm) continue;
       const Vec3 qa = add(sa, scale(sdir, s.t0));
       const Vec3 qb = add(sa, scale(sdir, s.t1));
-      emit_strut(sink, qa, qb, r_e, G.nseg);
+      lattice_emit_prism(sink, qa, qb, r_e, G.nseg);  // a finish: raw (b)
       if (obs && obs->on_element)
         obs->on_element(LatticeGenElement::SkinStrut, qa, qb, r_e);
       any = true;
       ++st.skin_struts;
       st.skin_triangles += 4ull * G.nseg;
       st.triangles += 4ull * G.nseg;
-      st.skin_volume_mm3 += ngon_prism_volume(r_e, s.t1 - s.t0, G.nseg);
+      st.skin_volume_mm3 += lattice_ngon_prism_volume_mm3(r_e, s.t1 - s.t0, G.nseg);
       note_diameter(st, r_e);
     }
   }
@@ -708,13 +992,13 @@ void emit_rim_line(TriangleSink& sink, const LatticeRegion& R,
       if (s.t1 - s.t0 < kMinFragMm) continue;
       const Vec3 qa = add(stations[i], scale(sdir, s.t0));
       const Vec3 qb = add(stations[i], scale(sdir, s.t1));
-      emit_strut(sink, qa, qb, r_e, G.nseg);
+      lattice_emit_prism(sink, qa, qb, r_e, G.nseg);  // a finish: raw (b)
       if (obs && obs->on_element)
         obs->on_element(LatticeGenElement::RimStrut, qa, qb, r_e);
       any = true;
       st.rim_triangles += 4ull * G.nseg;
       st.triangles += 4ull * G.nseg;
-      st.rim_volume_mm3 += ngon_prism_volume(r_e, s.t1 - s.t0, G.nseg);
+      st.rim_volume_mm3 += lattice_ngon_prism_volume_mm3(r_e, s.t1 - s.t0, G.nseg);
       note_diameter(st, r_e);
     }
     if (any) ++st.rim_elements;
@@ -863,10 +1147,62 @@ void emit_rim_torus(TriangleSink& sink, const LatticeRegion& R,
 
 }  // namespace
 
+namespace {
+// The rim loops where analytic faces meet -- the Rim finish, and the first part of
+// Diagrid. Its own function so a SHEET lattice (which has no struts and so no landings,
+// tpms_gen.hpp) gets the same rim (R8) through generate_lattice_rims below.
+void emit_rims(TriangleSink& sink, const LatticeRegion& R, const LatticeRadiusField& G,
+               const LatticeSkinSpec& skin, LatticeGenStats& st, const LatticeGenObserver* obs) {
+  const auto& faces = R.boundary->faces();
+  for (std::size_t i = 0; i < faces.size(); ++i)
+    for (std::size_t j = i + 1; j < faces.size(); ++j) {
+      const bool pi = faces[i].kind == LatticeBoundaryFace::Kind::Plane;
+      const bool pj = faces[j].kind == LatticeBoundaryFace::Kind::Plane;
+      if (pi && pj) {
+        emit_rim_line(sink, R, G, skin, static_cast<int>(i), static_cast<int>(j), st, obs);
+      } else if (pi != pj) {
+        const int fp = pi ? static_cast<int>(i) : static_cast<int>(j);
+        const int fb = pi ? static_cast<int>(j) : static_cast<int>(i);
+        if (faces[static_cast<std::size_t>(fb)].collar)
+          emit_rim_torus(sink, R, G, skin, fp, fb, st, obs);
+      }
+      // bore-bore pairs meet nowhere a rim can ride; nothing to emit
+    }
+}
+}  // namespace
+
+LatticeGenStats generate_lattice_rims(const LatticeRegion& R, const LatticeRadiusField& G,
+                                      TriangleSink& sink, const LatticeSkinSpec& skin,
+                                      const LatticeGenObserver* obs) {
+  if (!R.boundary)
+    throw std::invalid_argument("generate_lattice_rims: a rim needs region.boundary");
+  LatticeGenStats st;
+  st.min_strut_diameter_mm = 1e30;
+  st.max_strut_diameter_mm = 0.0;
+  if (skin.mode != LatticeSkinMode::None) emit_rims(sink, R, G, skin, st, obs);
+  return st;
+}
+
 const char* lattice_gen_topology_name(LatticeGenTopology topo) {
   switch (topo) {
     case LatticeGenTopology::Octet:
       return "octet";
+    case LatticeGenTopology::SimpleCubic:
+      return "sc";
+    case LatticeGenTopology::Bcc:
+      return "bcc";
+    case LatticeGenTopology::Diamond:
+      return "diamond";
+    case LatticeGenTopology::Gyroid:
+      return "gyroid";
+    case LatticeGenTopology::SchwarzD:
+      return "schwarz_d";
+    case LatticeGenTopology::Rhombic:
+      return "rhombic";
+    case LatticeGenTopology::Kelvin:
+      return "kelvin";
+    case LatticeGenTopology::Fcc:
+      return "fcc";
   }
   // No silent fallback: an enum case without a name must be named above before
   // anything can serialize it (and -Wswitch flags the missing case at compile
@@ -880,9 +1216,47 @@ std::vector<std::string> lattice_gen_topology_names() {
   // name must appear here, so a topology added to the enum + name switch but not
   // to this list fails the suite rather than silently vanishing from pickers.
   std::vector<std::string> out;
-  for (LatticeGenTopology t : {LatticeGenTopology::Octet})
+  for (LatticeGenTopology t : {LatticeGenTopology::Octet, LatticeGenTopology::Fcc, LatticeGenTopology::Kelvin, LatticeGenTopology::Rhombic, LatticeGenTopology::Diamond, LatticeGenTopology::Bcc, LatticeGenTopology::SimpleCubic, LatticeGenTopology::Gyroid, LatticeGenTopology::SchwarzD})
     out.emplace_back(lattice_gen_topology_name(t));
   return out;
+}
+
+LatticeTopology lattice_gen_certificate_topology(LatticeGenTopology topo) {
+  switch (topo) {
+    case LatticeGenTopology::Octet:
+      return LatticeTopology::Octet;
+    case LatticeGenTopology::Fcc:
+      return LatticeTopology::Fcc;
+    case LatticeGenTopology::SimpleCubic:
+      return LatticeTopology::SimpleCubic;
+    case LatticeGenTopology::Bcc:
+      return LatticeTopology::Bcc;
+    case LatticeGenTopology::Diamond:
+      return LatticeTopology::Diamond;
+    case LatticeGenTopology::Gyroid:
+      return LatticeTopology::Gyroid;
+    case LatticeGenTopology::SchwarzD:
+      return LatticeTopology::SchwarzD;
+    case LatticeGenTopology::Rhombic:
+      return LatticeTopology::Rhombic;
+    case LatticeGenTopology::Kelvin:
+      return LatticeTopology::Kelvin;
+  }
+  throw std::logic_error("lattice_gen_certificate_topology: unmapped LatticeGenTopology");
+}
+
+bool lattice_gen_is_sheet(LatticeGenTopology topo) {
+  return topo == LatticeGenTopology::Gyroid || topo == LatticeGenTopology::SchwarzD;
+}
+
+LatticeGenTopology lattice_gen_topology_from_id(const std::string& id) {
+  for (LatticeGenTopology t : {LatticeGenTopology::Octet, LatticeGenTopology::Fcc, LatticeGenTopology::Kelvin, LatticeGenTopology::Rhombic, LatticeGenTopology::Diamond, LatticeGenTopology::Bcc, LatticeGenTopology::SimpleCubic, LatticeGenTopology::Gyroid, LatticeGenTopology::SchwarzD})
+    if (id == lattice_gen_topology_name(t)) return t;
+  throw std::invalid_argument(
+      "lattice_gen_topology_from_id: core cannot generate lattice topology \"" + id +
+      "\" (generatable: the ids lattice_gen_topology_names() lists). There is no "
+      "fallback: building octet in its place would ship a different lattice than "
+      "the one certified.");
 }
 
 long long latticed_cell_count(const LatticeRegion& R) {
@@ -898,8 +1272,6 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
                                  const LatticeRadiusField& G, TriangleSink& sink,
                                  const LatticeSkinSpec& skin,
                                  const LatticeGenObserver* obs) {
-  if (topo != LatticeGenTopology::Octet)
-    throw std::invalid_argument("generate_lattice: only Octet is implemented");
   if (R.nx < 1 || R.ny < 1 || R.nz < 1 || !(R.cell_mm > 0.0))
     throw std::invalid_argument("generate_lattice: degenerate region");
   if (G.nseg < 3)
@@ -908,8 +1280,7 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
     throw std::invalid_argument(
         "generate_lattice: a skin needs region.boundary (the shared predicate)");
 
-  static const std::vector<RStrut> RS = ref_struts();
-  static const std::vector<INode> RN = ref_nodes();
+  const CellTable& T = cell_table(topo);
   const LatticeBoundary* B = R.boundary;
 
   LatticeGenStats st;
@@ -923,11 +1294,11 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
       for (int ci = 0; ci < R.nx; ++ci) {
         if (!cell_active(R, ci, cj, ck)) continue;
         ++st.latticed_cells;
-        const int bx = 2 * ci, by = 2 * cj, bz = 2 * ck;
+        const int bx = T.S * ci, by = T.S * cj, bz = T.S * ck;
 
         // struts (clipped through the shared predicate when a boundary is set;
         // cut_cell_struts is the SAME walk the skin pass recomputes later)
-        cut_cell_struts(R, G, RS, ci, cj, ck, cut);
+        cut_cell_struts(R, G, T, ci, cj, ck, cut);
         st.clipped_struts += cut.clipped;
         st.dropped_struts += cut.dropped;
         st.uncertified_spans_dropped += cut.uncertified;
@@ -956,21 +1327,24 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
 
         // nodes (own each candidate node whose owner is this cell; if the owner
         // cell is not active, fall back to the lex-smallest active sharer)
-        for (const auto& rn : RN) {
+        for (std::size_t ni = 0; ni < T.nodes.size(); ++ni) {
+          const INode& rn = T.nodes[ni];
           const int gx = rn.x + bx, gy = rn.y + by, gz = rn.z + bz;
           int oi, oj, ok;
-          node_owner(R, gx, gy, gz, oi, oj, ok);
+          node_owner(R, T.S, gx, gy, gz, oi, oj, ok);
           bool own;
-          if (cell_active(R, oi, oj, ok)) {
+          if (T.generic) {
+            own = owns_generic_node(R, T, ni, ci, cj, ck);
+          } else if (cell_active(R, oi, oj, ok)) {
             own = (oi == ci && oj == cj && ok == ck);
           } else {
             own = true;
             for (int dk = -1; dk <= 0 && own; ++dk)
               for (int dj = -1; dj <= 0 && own; ++dj)
                 for (int di = -1; di <= 0 && own; ++di) {
-                  const int nci = (gx % 2 == 0 ? gx / 2 + di : gx / 2),
-                            ncj = (gy % 2 == 0 ? gy / 2 + dj : gy / 2),
-                            nck = (gz % 2 == 0 ? gz / 2 + dk : gz / 2);
+                  const int nci = (gx % T.S == 0 ? gx / T.S + di : gx / T.S),
+                            ncj = (gy % T.S == 0 ? gy / T.S + dj : gy / T.S),
+                            nck = (gz % T.S == 0 ? gz / T.S + dk : gz / T.S);
                   if (nci < 0 || ncj < 0 || nck < 0) continue;
                   if (nci >= R.nx || ncj >= R.ny || nck >= R.nz) continue;
                   if (!cell_active(R, nci, ncj, nck)) continue;
@@ -980,12 +1354,12 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
                 }
           }
           if (!own) continue;
-          const Vec3 np = node_pos(R, gx, gy, gz);
+          const Vec3 np = node_pos(R, T.inv_s, gx, gy, gz);
           const double r = checked_radius(G, np);
           // Boundary finish: a node ball whose solid would breach the eroded
           // region is dropped — its incident struts were already clipped short
           // of it and their cut ends get anchor balls instead.
-          if (B && B->signed_distance(np) < r) continue;
+          if (B && B->signed_distance(np) < r * lattice_node_emit_scale()) continue;
           emit_node(sink, np, r);
           if (obs && obs->on_element)
             obs->on_element(LatticeGenElement::Node, np, np, r);
@@ -1000,22 +1374,7 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
   // ── the boundary skin (a SEPARATE pass; bar B8's streaming discipline) ─────
   if (B && skin.mode != LatticeSkinMode::None) {
     // Rim loops where analytic faces meet (both Rim and Diagrid modes).
-    const auto& faces = B->faces();
-    for (std::size_t i = 0; i < faces.size(); ++i)
-      for (std::size_t j = i + 1; j < faces.size(); ++j) {
-        const bool pi = faces[i].kind == LatticeBoundaryFace::Kind::Plane;
-        const bool pj = faces[j].kind == LatticeBoundaryFace::Kind::Plane;
-        if (pi && pj) {
-          emit_rim_line(sink, R, G, skin, static_cast<int>(i),
-                        static_cast<int>(j), st, obs);
-        } else if (pi != pj) {
-          const int fp = pi ? static_cast<int>(i) : static_cast<int>(j);
-          const int fb = pi ? static_cast<int>(j) : static_cast<int>(i);
-          if (faces[static_cast<std::size_t>(fb)].collar)
-            emit_rim_torus(sink, R, G, skin, fp, fb, st, obs);
-        }
-        // bore-bore pairs meet nowhere a rim can ride; nothing to emit
-      }
+    emit_rims(sink, R, G, skin, st, obs);
 
     // The anchored diagrid (Diagrid mode): anchor balls at every landing, skin
     // edges linking neighbouring landings on the same face. Each cell gathers
@@ -1034,20 +1393,24 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
                 for (int di = -1; di <= 1; ++di) {
                   const int ni = ci + di, nj = cj + dj, nk = ck + dk;
                   if (!cell_active(R, ni, nj, nk)) continue;
-                  cut_cell_struts(R, G, RS, ni, nj, nk, ncut);
+                  cut_cell_struts(R, G, T, ni, nj, nk, ncut);
                   if (di == 0 && dj == 0 && dk == 0) {
                     // Anchor balls: one at each of THIS cell's landings, at the
                     // interior strut's own radius (contained by the clip
                     // certificate), welding the cut end to the skin (bar B6).
                     for (const auto& L : ncut.landings) {
-                      emit_node(sink, L.pos, L.r);
+                      // ★ (b): the landing sits the strut's EMITTED circumradius inside
+                      // the part, so the ball takes that circumradius (still contained)
+                      // and is reported at the law radius that lays it.
+                      const double r_ball = L.r * lattice_strut_emit_scale(G.nseg);
+                      lattice_emit_icosahedron(sink, L.pos, r_ball);
                       if (obs && obs->on_element)
-                        obs->on_element(LatticeGenElement::AnchorNode, L.pos,
-                                        L.pos, L.r);
+                        obs->on_element(LatticeGenElement::AnchorNode, L.pos, L.pos,
+                                        r_ball / lattice_node_emit_scale());
                       ++st.anchor_nodes;
                       st.skin_triangles += 20ull;
                       st.triangles += 20ull;
-                      st.skin_volume_mm3 += icosahedron_volume(L.r);
+                      st.skin_volume_mm3 += lattice_icosahedron_volume_mm3(r_ball);
                     }
                     own_landings = ncut.landings.size();
                   }
@@ -1055,7 +1418,7 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
                               ncut.landings.end());
                 }
             if (hood.empty() || (own_landings == 0 && hood.size() < 2)) continue;
-            const double link = kLinkFactor * R.cell_mm;
+            const double link = kLinkFactor * T.link_scale * R.cell_mm;
             const Vec3 cmin{R.origin.x + ci * R.cell_mm,
                             R.origin.y + cj * R.cell_mm,
                             R.origin.z + ck * R.cell_mm};

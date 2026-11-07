@@ -1,5 +1,6 @@
 #include "topopt/observability.hpp"
 #include "topopt/organic_lattice.hpp"  // OrganicGenStats, for copy_growth_stats
+#include "topopt/lattice_types.hpp"    // lattice_type_directional_note (R3)
 
 #include <chrono>
 #include <cmath>
@@ -472,6 +473,14 @@ std::string json_escape(const std::string& s) {
 
 std::string bool_json(bool b) { return b ? "true" : "false"; }
 
+// R3: `, "directional_note": "..."` after a receipt's topology for SC and BCC; empty
+// for every other type, so their receipts are byte-identical to before.
+std::string directional_note_json(const std::string& topology) {
+  const std::string note = lattice_type_directional_note(topology);
+  return note.empty() ? std::string()
+                      : ", \"directional_note\": \"" + json_escape(note) + "\"";
+}
+
 }  // namespace
 
 // ★★ ONE COPY OF THE GROWTH COUNTERS, so the analyze receipt and the geometry
@@ -512,7 +521,12 @@ std::string run_info_json(const RunInfo& info) {
     s += comma ? ",\n" : "\n";
   };
   char nb[64];
+  // ★ Ruling 11-06 2(c): JSON has no inf or nan. A non-finite number is written as a
+  // marker here and turned into null at the end, where the file lists each one (its
+  // field and value) with the reason. A finite number prints exactly as before.
   auto fmt = [&](double d) {
+    if (!std::isfinite(d))
+      return std::string("\x01") + (std::isnan(d) ? "nan" : d > 0 ? "inf" : "-inf") + "\x01";
     std::snprintf(nb, sizeof(nb), "%.10g", d);
     return std::string(nb);
   };
@@ -1009,6 +1023,7 @@ std::string run_info_json(const RunInfo& info) {
       /*comma=*/has_cert || has_exp || has_grad || has_frame);
   if (has_cert) {
     std::string lat = "{\"topology\": \"" + info.lattice_topology + "\"";
+    lat += directional_note_json(info.lattice_topology);
     lat += ", \"cell_size_mm\": " + fmt(info.lattice_cell_size_mm);
     lat += ", \"rho_min\": " + fmt(info.lattice_rho_min);
     lat += ", \"rho_max\": " + fmt(info.lattice_rho_max);
@@ -1048,6 +1063,7 @@ std::string run_info_json(const RunInfo& info) {
   }
   if (has_exp) {
     std::string le = "{\"topology\": \"" + info.lattice_export_topology + "\"";
+    le += directional_note_json(info.lattice_export_topology);
     le += ", \"cell_size_mm\": " + fmt(info.lattice_export_cell_mm);
     le += ", \"strut_radius_min_mm\": " + fmt(info.lattice_export_strut_radius_min_mm);
     le += ", \"strut_radius_max_mm\": " + fmt(info.lattice_export_strut_radius_max_mm);
@@ -1090,6 +1106,13 @@ std::string run_info_json(const RunInfo& info) {
       ve += ", \"wall_seconds\": " + fmt(info.lattice_void_wall_seconds);
       ve += "}";
       le += ", \"void_escape\": " + ve;
+    }
+    if (info.lattice_volume_check_ran) {
+      le += ", \"volume_check\": {\"limit\": 0.1";
+      le += ", \"refused_variants\": " + fmt_i(info.lattice_volume_refused_variants);
+      le += ", \"worst_gap\": " + fmt(info.lattice_volume_worst_gap);
+      le += ", \"certified_mm3\": " + fmt(info.lattice_volume_certified_mm3);
+      le += ", \"exported_mm3\": " + fmt(info.lattice_volume_exported_mm3) + "}";
     }
     le += ", \"emit_stl\": " + bool_json(info.lattice_export_emit_stl);
     le += ", \"emit_3mf\": " + bool_json(info.lattice_export_emit_3mf);
@@ -1194,6 +1217,7 @@ std::string run_info_json(const RunInfo& info) {
     // grade stayed solid); `min_strut_diameter_mm` / `any_strut_below_min` are the
     // requirement-3 printability check. ALWAYS last when present (no trailing comma).
     std::string gr = "{\"topology\": \"" + info.grading_topology + "\"";
+    gr += directional_note_json(info.grading_topology);
     gr += ", \"band_rho_min\": " + fmt(info.grading_band_rho_min);
     gr += ", \"band_rho_max\": " + fmt(info.grading_band_rho_max);
     gr += ", \"cells_per_member_floor\": " +
@@ -1261,6 +1285,14 @@ std::string run_info_json(const RunInfo& info) {
       gr += ", \"recertified_margin\": " + fmt(info.grading_recertified_margin);
       gr += ", \"recertified_accepted\": " +
             bool_json(info.grading_recertified_accepted);
+      if (info.grading_recertified_open_cut_voxels >= 0)
+        gr += ", \"recertified_open_cut_voxels\": " +
+              fmt_ll(info.grading_recertified_open_cut_voxels) +
+              ", \"recertified_open_credit\": \"none: cells at the free surface "
+              "(Onck, Andrews & Gibson 2001)\"";
+      if (!info.grading_recertified_not_certified.empty())
+        gr += ", \"recertified_not_certified\": \"" +
+              json_escape(info.grading_recertified_not_certified) + "\"";
       gr += ", \"recertified_non_convergent\": " +
             bool_json(info.grading_recertified_non_convergent);
       gr += ", \"recertified_max_von_mises\": " +
@@ -1268,6 +1300,24 @@ std::string run_info_json(const RunInfo& info) {
       gr += ", \"solid_margin\": " + fmt(info.grading_solid_margin);
       gr += ", \"recertify_changed_verdict\": " +
             bool_json(info.grading_recertify_changed_verdict);
+      // ★ E2.1: per scenario (absent without scenarios). A margin with no stress
+      // behind it (infinite) is written null, and listed (11-06 2(c)).
+      if (!info.grading_recertified_scenario_names.empty()) {
+        gr += ", \"recertified_scenarios\": [";
+        for (std::size_t i = 0; i < info.grading_recertified_scenario_names.size(); ++i) {
+          const double m = i < info.grading_recertified_scenario_margins.size()
+                               ? info.grading_recertified_scenario_margins[i]
+                               : 0.0;
+          gr += std::string(i ? ", " : "") + "{\"name\": \"" +
+                json_escape(info.grading_recertified_scenario_names[i]) +
+                "\", \"margin\": " + fmt(m) +
+                ", \"governs\": " +
+                bool_json(i < info.grading_recertified_scenario_governs.size() &&
+                          info.grading_recertified_scenario_governs[i]) +
+                "}";
+        }
+        gr += "]";
+      }
     }
     if (info.grading_adaptive_cells_armed) {
       gr += ", \"adaptive_cells_per_member\": true";
@@ -2018,6 +2068,9 @@ std::string run_info_json(const RunInfo& info) {
             std::to_string(info.grading_cells_raised_to_floor);
       gr += ", \"cells_dropped_unprintable\": " +
             std::to_string(info.grading_cells_dropped_unprintable);
+      if (info.grading_cells_dropped_by_window > 0)  // ★ E3, written only then
+        gr += ", \"cells_dropped_by_window\": " +
+              std::to_string(info.grading_cells_dropped_by_window);
       gr += ", \"cells_split_by_balance\": " +
             std::to_string(info.grading_cells_split_by_balance);
       gr += ", \"cell_any_out_of_regime\": " +
@@ -2105,6 +2158,7 @@ std::string run_info_json(const RunInfo& info) {
   if (info.multiscale_armed) {
     std::string ms = "{\"armed\": true";
     ms += ", \"topology\": \"" + info.multiscale_topology + "\"";
+    ms += directional_note_json(info.multiscale_topology);
     ms += ", \"region_voxels\": " + fmt_ll(info.multiscale_region_voxels);
     ms += ", \"fit_rows\": " + fmt_ll(info.multiscale_fit_rows);
     ms += ", \"band\": [" + fmt(info.multiscale_rho_lo) + ", " +
@@ -2208,6 +2262,37 @@ std::string run_info_json(const RunInfo& info) {
     num("export_frame", ef, /*comma=*/false);  // last when present
   }
 
+  // ★ 11-06 2(c): every non-finite number fmt marked, as null, named: "<top>.<key>"
+  // (the key it sits under, inside the top-level entry), or "<top>" at the top level.
+  std::string fields;
+  for (std::size_t p = s.find('\x01'); p != std::string::npos; p = s.find('\x01', p)) {
+    const std::size_t q = s.find('\x01', p + 1);
+    const std::string value = s.substr(p + 1, q - p - 1);
+    const std::size_t top_at = s.rfind("\n  \"", p);
+    std::string top, key;
+    if (top_at != std::string::npos) {
+      const std::size_t a = top_at + 4;
+      top = s.substr(a, s.find('"', a) - a);
+    }
+    const std::size_t key_end = s.rfind("\": ", p);
+    if (key_end != std::string::npos && key_end > top_at + 4) {
+      const std::size_t a = s.rfind('"', key_end - 1) + 1;
+      key = s.substr(a, key_end - a);
+    }
+    const std::string name = key.empty() || key == top ? top : top + "." + key;
+    fields += std::string(fields.empty() ? "" : ", ") + "{\"field\": \"" + json_escape(name) +
+              "\", \"value\": \"" + value + "\"}";
+    s.replace(p, q + 1 - p, "null");
+    p += 4;
+  }
+  if (!fields.empty()) {
+    while (!s.empty() && (s.back() == '\n' || s.back() == ' ')) s.pop_back();
+    if (!s.empty() && s.back() != ',' && s.back() != '{') s += ",";
+    s += "\n  \"null_numbers\": {\"fields\": [" + fields +
+         "], \"reason\": \"JSON has no infinity or NaN, so these numbers are written as "
+         "null. inf is unbounded: a ratio over zero, such as a margin over material that "
+         "carries no stress (yield / 0). nan is undefined.\"}\n";
+  }
   s += "}\n";
   return s;
 }

@@ -37,8 +37,10 @@ final class LatticePageTests: XCTestCase {
             XCTAssertEqual(row.generatable, generatable.contains(row.id), row.id)
         }
 
-        // The prototype's fabricated entries can never appear: they are in neither set.
-        for fake in ["Gyroid", "gyroid", "Schwarz-P", "schwarz-p", "Honeycomb", "honeycomb", "Voronoi", "voronoi"] {
+        // The prototype's fabricated entries can never appear: they are in neither set. ★ RE-PINNED (release (2), K1):
+        // core builds and certifies the gyroid now (its own id, "gyroid"), so it left this list; the capitalised
+        // prototype spelling still must not appear.
+        for fake in ["Gyroid", "Schwarz-P", "schwarz-p", "Honeycomb", "honeycomb", "Voronoi", "voronoi"] {
             XCTAssertFalse(ids.contains(fake), "\(fake) is not a core topology")
         }
         // The tetragonal three are in neither set today (not certifiable, not

@@ -1,0 +1,44 @@
+The M2 stand's gyroid, Structural rung 0.52, latticed alone: 'topopt-cli lattice-variant' on step (c)'s
+solved design (gate_C's design.bin, the same solve: the solver is unchanged), the stand job of
+make_stand_jobs.py with mode lattice_variant and variant {design, volume_fraction 0.52}
+(f8fix_lattice_variant_job.py). Each build carried a TOPOPT_SIMPLIFY_TRACE print per flush
+(diagnosis only, never committed); the field-evaluation clock in it adds its own cost.
+
+== BEFORE: 81f49eef's simplifier (traced build) ==
+[simp] flush 1 final 1 front 28.01 alive 1265100 P 631334 evals 0 (0.0 s)
+[simp] refine round 0 work 1265100 splits 0 T 1265100 evals 634802 (0.4 s)
+[simp] refine round 5 work 372 splits 414 T 1265928 evals 13956057 (8.8 s)
+[simp] refine round 10 work 1261 splits 1741 T 1268582 evals 14091621 (8.9 s)
+[simp] refine round 15 work 18696 splits 11609 T 1288318 evals 14664800 (9.2 s)
+[simp] refine round 19 work 68576 splits 55659 T 1376418 evals 17020421 (10.3 s)
+[simp]  refine1 21.5 s splits 80913 evals 18285803 (11.0 s)
+  ... the first collapse pass had run 16 min when the run was stopped (00:06). In gate F the
+  same export ran 1 h 27 min without finishing (f8fix_stall_sample.txt).
+
+== AFTER, step 1: a step is a place (true_wall_steps) and the part's distance is bounded ==
+[simp]  refine1 3.5 s splits 0 evals 13916366 (1.4 s)
+[simp]  pass 0 52.9 s collapses 500135 alive 264830 rej_dev 2129290 rej_top 170366 evals 199267802 (21.6 s)
+[simp]  pass 1 27.1 s collapses 7010 alive 250810 rej_dev 3979644 rej_top 235720 evals 300882671 (32.4 s)
+[simp]  pass 2 25.2 s collapses 2440 alive 245930 rej_dev 5785156 rej_top 286867 evals 395706036 (42.4 s)
+[simp]  improve 3.0 s
+[simp]  refine2 1.6 s splits 0 evals 414357044 (44.4 s)
+[simp]  emit 1.9 s emitted 245930 held 0
+[lattice] vf=0.52 volume check: 3 pocket(s), exported 567.4 / certified 547.3 mm3 (+3.67 %); lightest judged pocket 2 voxels +0.00 % (heaviest +3.97 %); 1 pocket(s) under one cell not judged (15.3 / 1
+EXIT 0 after 160 s
+  sheet_mesh: {"max_deviation_limit_mm": 0.02, "triangles_contoured": 1265100, "triangles": 245930, "max_deviation_mm": 0.01999995806, "cut_max_deviation_mm": 0.204807526, "samples_past_bead_floor": 0, "step_max_deviation_mm": 4, "step_samples": 12587, "step_samples_outside_band": 82, "step_worst_outside_band_mm": 3.98, "sheet_samples": 4744214}
+  82 step samples up to 3.98 mm outside the band: f = 4.000 exactly, the cell size, in inactive
+  cells with no active FACE neighbour (f8fix_cap_trace.txt): the cap's depth (below).
+
+== AFTER, step 2: the cap's depth is the distance to the nearest cell of the other kind ==
+[simp]  refine1 5.6 s splits 0 evals 13916161 (2.5 s)
+[simp]  pass 0 77.4 s collapses 500152 alive 264796 rej_dev 2128452 rej_top 170007 evals 199297161 (35.2 s)
+[simp]  pass 1 40.1 s collapses 7026 alive 250744 rej_dev 3978756 rej_top 235170 evals 300938893 (52.7 s)
+[simp]  pass 2 37.3 s collapses 2416 alive 245912 rej_dev 5784015 rej_top 286268 evals 395797690 (69.0 s)
+[simp]  improve 4.5 s
+[simp]  refine2 2.5 s splits 0 evals 414462836 (72.1 s)
+[simp]  emit 2.8 s emitted 245912 held 0
+[lattice] vf=0.52 volume check: 3 pocket(s), exported 567.4 / certified 547.3 mm3 (+3.67 %); lightest judged pocket 2 voxels +0.00 % (heaviest +3.97 %); 1 pocket(s) under one cell not judged (15.3 / 1
+EXIT 0 after 266 s
+  sheet_mesh: {"max_deviation_limit_mm": 0.02, "triangles_contoured": 1265100, "triangles": 245912, "max_deviation_mm": 0.01999995806, "cut_max_deviation_mm": 0.204807526, "samples_past_bead_floor": 0, "step_max_deviation_mm": 0.1804948814, "step_samples": 12312, "step_samples_outside_band": 0, "step_worst_outside_band_mm": 0, "sheet_samples": 4743773}
+  (266 s with the trace's per-evaluation clock and a [step] print; the gate's stand times the
+  committed build.)

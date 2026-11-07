@@ -2472,6 +2472,18 @@ public enum TopOptKit {
         guard jobSchemaError(regionSlotOriginProbeJob("")) == nil else { return false }   // the control
         return jobSchemaError(regionSlotOriginProbeJob(#", "plan_base_cell_mm": 6.0"#)) == nil
     }()
+    /// ★ E3 (LatticeTypes 4ace41f5): an include region may carry its own `grading` and `shape_grade_band_mm`, each falling
+    /// back to the job's `grading.*`. Whole-job probe on a graded job with its control (the same job without the keys).
+    public static let regionGradingWired: Bool = {
+        func job(_ extra: String) -> Data {
+            Data(latticeProbeBaseJob.replacingOccurrences(
+                of: #""output":"#,
+                with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "cell_mm": 3.0}, "lattice": {"topology": "octet", "regions": [{"role": "include", "kind": "face", "geometry": {"origin": [0, 0, 0], "normal": [0, 0, 1], "half_u_mm": 10, "half_w_mm": 10, "depth_mm": 5}"#
+                    + extra + #"}]}, "output":"#).utf8)
+        }
+        guard jobSchemaError(job("")) == nil else { return false }   // the control
+        return jobSchemaError(job(#", "grading": "stress_shape", "shape_grade_band_mm": 12"#)) == nil
+    }()
     /// The probe's document: one include face on z = 0, normal +z, with `extra` in its geometry.
     public static func regionSlotOriginProbeJob(_ extra: String) -> Data {
         var text = latticeProbeBaseJob

@@ -1,0 +1,8 @@
+SPANS out_lv_fcc/variant_038_lattice_SPANS.txt: 1861 primitives, 48 components, 210 of 2490 strut ends cut (no other primitive covers them)
+  components with no cut end: 17 (762 primitives)
+  FLOATING (no cut end, not touching the solid companion or the shell): 0 components, 0 primitives
+  component sizes (primitives), largest first: 96 67 67 65 64 52 52 52 52 52 52 52 38 38 38 38 38 38 38 38 38 38 37 36 36 33 30 30 30 30 30 30 30 30 30 29 29 29 29 26 ...
+SPANS out_lv_octet/variant_038_lattice_SPANS.txt: 4834 primitives, 82 components, 491 of 7286 strut ends cut (no other primitive covers them)
+  components with no cut end: 39 (2613 primitives)
+  FLOATING (no cut end, not touching the solid companion or the shell): 2 components, 257 primitives
+  component sizes (primitives), largest first: 166 132 91 91 91 91 91 91 91 91 91 91 91 91 89 88 87 84 74 74 74 74 74 74 74 74 74 50 50 50 50 50 50 50 50 50 50 50 50 50 ...
