@@ -2835,7 +2835,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             func col(_ a: Float) -> SIMD4<Float> { straight ? SIMD4<Float>(rgb, a) : premul(rgb, a) }
             let fcol = col(faceAlpha)
             let ecol = col(edgeAlpha)
-            xcol = col(edgeAlpha * 0.35)
+            xcol = col(edgeAlpha * (item.seeThrough ? 1 : 0.35))   // ★ B6: a picked zone's edges, lit through the part
             switch item.volume.shape {
             case let .cylinder(axisPoint, axisDir, radius, tLo, tHi):
                 let dir = simd_length(axisDir) > 1e-6 ? simd_normalize(axisDir) : SIMD3<Float>(0, 0, 1)
@@ -5008,6 +5008,49 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         var pixels = [UInt8](repeating: 0, count: size * size * 4)
         color.getBytes(&pixels, bytesPerRow: size * 4,
                        from: MTLRegionMake2D(0, 0, size, size), mipmapLevel: 0)
+        return pixels
+    }
+
+    /// ★ B6 (the reviewer's shot rule, 11-06 09:41Z: "shoot with the fixture part loaded, showing the lit faces, the zone box
+    /// and the handles"): the frame the page shows — its stage backdrop, the part, its tints and volumes, through the page's
+    /// own camera — offscreen at the page's own width and height, so the page's handles (projected at that aspect) sit on
+    /// it. The 3D view draws nothing in an offscreen test window; the evidence shots put the page's chrome over this. BGRA,
+    /// row-major. Instrumentation only; nothing in the app calls it.
+    func renderOffscreen(width: Int, height: Int, clear: MTLClearColor, stage: Bool = true) -> [UInt8]? {
+        guard vertexDrawCount > 0, width > 0, height > 0 else { return nil }
+        let cdesc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: Self.colorFormat, width: width, height: height, mipmapped: false)
+        cdesc.usage = [.renderTarget, .shaderRead]
+        cdesc.storageMode = .shared
+        let ddesc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: Self.depthFormat, width: width, height: height, mipmapped: false)
+        ddesc.usage = [.renderTarget]
+        ddesc.storageMode = .private
+        if sampleCount > 1 { ddesc.textureType = .type2DMultisample; ddesc.sampleCount = sampleCount }
+        guard let color = device.makeTexture(descriptor: cdesc),
+              let depth = device.makeTexture(descriptor: ddesc),
+              let cmd = queue.makeCommandBuffer() else { return nil }
+        let rpd = MTLRenderPassDescriptor()
+        if let msaa = msaaTexture(width: width, height: height) {
+            rpd.colorAttachments[0].texture = msaa
+            rpd.colorAttachments[0].resolveTexture = color
+            rpd.colorAttachments[0].storeAction = .multisampleResolve
+        } else {
+            rpd.colorAttachments[0].texture = color
+            rpd.colorAttachments[0].storeAction = .store
+        }
+        rpd.colorAttachments[0].loadAction = .clear
+        rpd.colorAttachments[0].clearColor = clear
+        rpd.depthAttachment.texture = depth
+        rpd.depthAttachment.loadAction = .clear
+        rpd.depthAttachment.clearDepth = 1.0
+        rpd.depthAttachment.storeAction = .dontCare
+        encode(into: rpd, aspect: Float(width) / Float(height), into: cmd, drawStage: stage)
+        cmd.commit()
+        cmd.waitUntilCompleted()
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        color.getBytes(&pixels, bytesPerRow: width * 4,
+                       from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
         return pixels
     }
 

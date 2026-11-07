@@ -237,6 +237,10 @@ public enum LatticeSetupCopy {
     /// Protect skin, until the engine has a per-region skin (E2.4): the run keeps the face solid.
     public static let skinWaits = "Runs as No lattice until the engine update"
     public static let topologyHint = "Taps go to Topology groups"
+    /// ★ B6 N2: a picked face row's line, under its depth (mockup #lat-face-prism, "or drag its handle").
+    public static let dragItsHandle = "Or drag its handle on the part"
+    /// ★ B6 N3: a picked zone's line, under its size (mockup #lat-zone-sel).
+    public static let zoneHandlesLine = "Drag its handles on the part to size it."
     /// The join's second line (the face takes the group it joins).
     public static let joinNote = "with its role and depth"
 

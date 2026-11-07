@@ -284,12 +284,16 @@ public struct ClearanceRenderItem: Equatable, Sendable {
     public let faceAlpha: Float?
     public let edgeAlpha: Float?
     public let surfaceOnly: Bool
+    /// ★ B6 (his iPad, 11-06: a zone inside the part could not be seen): its edges drawn through the part at full
+    /// strength — the depth-always edge pass every volume has (L21), at its edge alpha instead of a third of it.
+    public let seeThrough: Bool
     public init(volume: ClearanceVolume, selected: Bool, tint: SIMD3<Float>? = nil,
-                faceAlpha: Float? = nil, edgeAlpha: Float? = nil, surfaceOnly: Bool = false) {
+                faceAlpha: Float? = nil, edgeAlpha: Float? = nil, surfaceOnly: Bool = false, seeThrough: Bool = false) {
         self.volume = volume
         self.selected = selected
         self.tint = tint
         self.faceAlpha = faceAlpha; self.edgeAlpha = edgeAlpha; self.surfaceOnly = surfaceOnly
+        self.seeThrough = seeThrough
     }
 }
 

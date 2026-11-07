@@ -2400,7 +2400,10 @@ public final class ProjectModel: ObservableObject {
     /// Empty when lattice mode is off or nothing is declared — the TO page hides
     /// these, and a page that has none draws none.
     public func latticeDepthPlanes() -> [LatticeDepthPlane] {
-        guard lattice.enabled, let mesh = viewerMesh else { return [] }
+        // ★ B6 (his iPad, 11-06, via #362: "+ Add zone … could neither see the zone nor drag, move or resize it"): on the
+        // Lattice stage's own list the prisms and a Box zone draw BEFORE a lattice is saved — N2: "there should always be a
+        // way to drag out the face-prisms". The run still needs a saved lattice (`latticeJobRegions`); Flexible keeps its gate.
+        guard lattice.enabled || usesLatticeList, let mesh = viewerMesh else { return [] }
         let roles = latticeEligibleRoles()
         var out: [LatticeDepthPlane] = []
         for g in latticeGroups {   // ★ B6
