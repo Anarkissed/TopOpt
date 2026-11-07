@@ -212,6 +212,17 @@ std::vector<int> match_region_filter(const StepModel& model,
 std::vector<ResolvedFaceRegion> resolve_face_regions(
     const StepModel& model, const std::vector<FaceRegionSpec>& specs);
 
+// ★ E4 (j), ruling 2026-11-07 19:55: KEEP CLEAR ON A CUT PIECE. The piece's cuts as
+// clearance clips (the same half-spaces, the same senses).
+std::vector<ClearanceClip> region_clearance_clips(const ResolvedFaceRegion& region);
+
+// The piece's Keep clear: each member face's own (resolve_clearance_from_face), clipped
+// by the piece's cuts. Throws std::invalid_argument, in his words and naming the piece
+// (never its number), when the piece gives no Keep clear of `params.kind`: a bolt on a
+// piece with no round face, a face Keep clear on a piece with no flat face.
+std::vector<ClearanceGeometry> resolve_clearance_from_region(
+    const StepModel& model, const ResolvedFaceRegion& region, const ClearanceParams& params);
+
 // ---------------------------------------------------------------------------
 // THE REGION'S OWN COORDINATES (§4b)
 // ---------------------------------------------------------------------------

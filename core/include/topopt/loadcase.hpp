@@ -191,6 +191,13 @@ struct ProductionLoadCase {
   // Empty (the default) → no clearance → byte-identical to the pre-100 path.
   struct Clearance {
     int face_id = -1;
+    // ★ E4 (j): a Keep clear on a CUT PIECE (a face region). `region_faces` /
+    // `region_clips` are its member faces and its cuts; build_production_loadcase fills
+    // them from `face_regions` when the caller left them empty (run_job fills them
+    // itself, so the pre-flight probe's copy carries them too). -1 = not a region.
+    int region_id = -1;
+    std::vector<int> region_faces;
+    std::vector<ClearanceClip> region_clips;
     ClearanceParams params;  // kind (Bolt/Face) + the editable mm distances
     // Manual (user-placed) primitives carry their own geometry because they have
     // no B-rep face (handoff group-editing). When `manual` is true the rasterizer
@@ -336,6 +343,7 @@ struct ProductionRunSetup {
   // declared.
   struct ClearanceReport {
     int face_id = -1;
+    int region_id = -1;  // ★ E4 (j): >= 0 for a cut piece; face_id is then -1
     ClearanceKind kind = ClearanceKind::Bolt;
     std::size_t voxels_frozen = 0;  // voxels this clearance set FrozenVoid
     bool in_grid = false;           // the region intersected the solved grid
@@ -509,6 +517,13 @@ std::string preflight_refusal_report(
     const SolvedDesignDomain& domain, const MinimizePlasticOptions& options,
     const ProductionLoadCase& lc, const PreflightLoadPath& pf,
     const std::vector<int>& anchor_face_ids);
+
+// ★ E4 (j): fill a cut-piece Keep clear's member faces and clips from its resolved
+// region, and refuse -- std::invalid_argument, in his words, naming the piece -- a piece
+// that gives no Keep clear of the clearance's kind (a bolt on a piece with no round face,
+// a face Keep clear on a piece with no flat face).
+void resolve_clearance_region(ProductionLoadCase::Clearance& c,
+                              const ResolvedFaceRegion& region, const StepModel& model);
 
 DesignMask build_clearance_overlay(
     const StepModel& model, const VoxelGrid& part_grid,
