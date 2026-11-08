@@ -2484,6 +2484,18 @@ public enum TopOptKit {
         guard jobSchemaError(job("")) == nil else { return false }   // the control
         return jobSchemaError(job(#", "grading": "stress_shape", "shape_grade_band_mm": 12"#)) == nil
     }()
+    /// ★ B7 slice 2 (release (3), E2.4 per region): does the linked core take a region's own `outer_finish`? The same
+    /// one-region probe job, with and without the key (565cc17c refuses it as an unknown key).
+    public static let regionOuterFinishWired: Bool = {
+        func job(_ extra: String) -> Data {
+            Data(latticeProbeBaseJob.replacingOccurrences(
+                of: #""output":"#,
+                with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "cell_mm": 3.0}, "lattice": {"topology": "octet", "regions": [{"role": "include", "kind": "face", "geometry": {"origin": [0, 0, 0], "normal": [0, 0, 1], "half_u_mm": 10, "half_w_mm": 10, "depth_mm": 5}"#
+                    + extra + #"}]}, "output":"#).utf8)
+        }
+        guard jobSchemaError(job("")) == nil else { return false }   // the control
+        return jobSchemaError(job(#", "outer_finish": "none""#)) == nil
+    }()
     /// The probe's document: one include face on z = 0, normal +z, with `extra` in its geometry.
     public static func regionSlotOriginProbeJob(_ extra: String) -> Data {
         var text = latticeProbeBaseJob

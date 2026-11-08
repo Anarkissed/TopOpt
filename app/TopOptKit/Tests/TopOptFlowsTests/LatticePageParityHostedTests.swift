@@ -167,7 +167,9 @@ final class LatticePageParityHostedTests: XCTestCase {
         "lattice-cells-along-load": "round 2 (N5c): Along removed",
         "wizard-organic-show-repairs": "plan §B7 Removed: Show print repairs (hidden)",
         "wizard-info-repairs": "plan §B7 Removed: Show print repairs' (i), with it",
-    ]
+    ].merging(["bcc", "bccz", "diamond", "fcc", "fccz", "gyroid", "kelvin", "reentrant", "rhombic", "sc", "schwarz_d"]
+        .map { ("wizard-type-\($0)", "plan §B7 Type: unready types are hidden (each shows with its B7.n batch)") },
+        uniquingKeysWith: { a, _ in a })
 
     /// Controls that moved → what replaced each.
     static let moved: [String: String] = [
@@ -204,6 +206,94 @@ final class LatticePageParityHostedTests: XCTestCase {
         XCTAssertFalse(ids.contains("wizard-simulate-stresses"), "control: the switch is hidden")
         XCTAssertTrue(Self.missing(from: Set(ids.filter(Self.isControl).map(Self.kind))).contains("wizard-simulate-stresses"),
                       "control: a hidden Simulate stresses is named")
+    }
+
+    /// ★ B7 slice 2 (plan.md §B7 "Removed", round 2 N5c, his LS-12): what the design removes is gone in EVERY state the walk
+    /// visits — Along, the Ties and Overhangs notes, Show print repairs and its (i). Red on slice 1, which kept them.
+    func testTheDesignsRemovedRowsAreGone() throws {
+        let still = try seen().filter { Self.removed[$0] != nil }
+        XCTAssertTrue(still.isEmpty, "★ the page still shows what the design removes: \(still.sorted())")
+    }
+
+    /// ★ B7 slice 2: with Along gone, "By stress" (`densityMode = .sim`) is Density's, offered only under the simulation; a
+    /// tap sets it (the stress line shows).
+    func testByStressIsDensitysChoiceUnderTheSimulation() throws {
+        func open(_ s: State) throws -> AppBuildHost {
+            let (h, _) = try page(s)
+            func click(_ id: String) {
+                if let f = axIDs(h).first(where: { $0.id == id })?.frame, f.width > 1 { h.click(CGPoint(x: f.midX, y: f.midY), settle: 0.6) }
+            }
+            click("wizard-stage-\(LatticeWizardStage.allCases.last!.rawValue)")
+            // Density is an area's row (Manual) once the page has a lattice group; the Part tab holds the type
+            for id in ["lattice-page-tab-area-0", "lattice-page-mode-manual"] { click(id) }
+            return h
+        }
+        let on = try open(State(mode: .structural, transition: .defaultGrade, grading: .full, sim: true, grown: false))
+        let ids = Set(axIDs(on).map(\.id))
+        XCTAssertTrue(ids.contains("wizard-seg-uniform"), "premise: the Density row is open: \(ids.filter { $0.hasPrefix("wizard-seg") }.sorted())")
+        XCTAssertTrue(ids.contains("wizard-seg-by stress"), "★ By stress is Density's under the simulation")
+        XCTAssertFalse(ids.contains { $0.hasPrefix("lattice-cells-along") }, "★ Along is gone")
+        if let f = axIDs(on).first(where: { $0.id == "wizard-seg-by stress" })?.frame {
+            on.click(CGPoint(x: f.midX, y: f.midY), settle: 0.6)
+        }
+        XCTAssertTrue(axIDs(on).contains { $0.id == "wizard-density-sim-note" }, "★ a tap sets the simulated density")
+        let off = try open(State(mode: .structural, transition: .defaultGrade, grading: .full, sim: false, grown: false))
+        XCTAssertFalse(axIDs(off).contains { $0.id == "wizard-seg-by stress" }, "★ no By stress without the simulation")
+    }
+
+    /// The Part tab of a page whose Save reports to `saved`, on a NEW lattice (nothing saved yet).
+    private func newLatticePart(_ saved: @escaping () -> Void) throws -> AppBuildHost {
+        let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
+        let p = r.project
+        p.lattice.flexible = nil
+        p.lattice.chooseLatticeType(.structural)
+        p.lattice.enabled = false
+        let pr = Probe(); probe = pr
+        let v = LatticeSetupWizard(project: p, onExit: saved).cellsPage(regions: ["Group 1"], closeToken: 0)
+            .onPreferenceChange(LatticeProbeKey.self) { pr.all = $0 }
+        let h = AppBuildHost(v, size: AppBuildHost.landscape13, test: self)
+        h.pump(1.2)
+        click(h, "lattice-page-tab-part")
+        return h
+    }
+    private func click(_ h: AppBuildHost, _ id: String) {
+        if let f = axIDs(h).first(where: { $0.id == id })?.frame, f.width > 1 { h.click(CGPoint(x: f.midX, y: f.midY), settle: 0.6) }
+    }
+
+    /// ★ B7 slice 2 (plan.md §B7 OneTypeIsALabel; LS-1): core offering one type (the octet today) draws a LABEL card — no
+    /// picker, no greyed types — and Save is live on a new lattice.
+    func testOneTypeIsALabelAndSaveIsLive() throws {
+        var saved = false
+        let h = try newLatticePart { saved = true }
+        let ids = Set(axIDs(h).map(\.id))
+        XCTAssertTrue(ids.contains("wizard-type-label"), "★ one type: the label card")
+        XCTAssertEqual(ids.filter { $0.hasPrefix("wizard-type-") && !["wizard-type-label", "wizard-type-organic"].contains($0) },
+                       ["wizard-type-octet"], "★ only the offered type is drawn")
+        XCTAssertFalse(ids.contains("wizard-type-pick-note"))
+        click(h, "lattice-cells-save")
+        XCTAssertTrue(saved, "★ Save is live with one type")
+    }
+
+    /// ★ B7 slice 2 (LS-19): two offered types (a stubbed type gate) draw big cards with NOTHING pre-picked on a new
+    /// lattice, and Save waits for a pick; a pick lets it through.
+    func testTwoTypesAreCardsAndSaveWaitsForAPick() throws {
+        LatticeTypeCatalog.appBatchesForTests = ["octet", "kelvin"]
+        defer { LatticeTypeCatalog.appBatchesForTests = nil }
+        guard LatticeTypeCatalog.entriesFromCore().filter(\.offered).count == 2 else {
+            throw XCTSkip("the linked core doesn't run kelvin: \(LatticeTypeCatalog.entriesFromCore().filter(\.offered).map(\.id))")
+        }
+        var saved = false
+        let h = try newLatticePart { saved = true }
+        let ids = Set(axIDs(h).map(\.id))
+        XCTAssertTrue(ids.contains("wizard-type-octet") && ids.contains("wizard-type-kelvin"), "★ a card each: \(ids.sorted())")
+        XCTAssertFalse(ids.contains("wizard-type-label"), "two types: no label card")
+        XCTAssertTrue(ids.contains("wizard-type-pick-note"), "★ nothing pre-picked: the page asks")
+        click(h, "lattice-cells-save")
+        XCTAssertFalse(saved, "★ Save waits for a pick")
+        click(h, "wizard-type-kelvin")
+        XCTAssertFalse(axIDs(h).contains { $0.id == "wizard-type-pick-note" }, "a pick answers it")
+        click(h, "lattice-cells-save")
+        XCTAssertTrue(saved, "★ after a pick, Save goes")
     }
 }
 #endif

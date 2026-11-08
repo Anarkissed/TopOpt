@@ -127,13 +127,16 @@ final class LatticeStaleTypeTests: XCTestCase {
         let row = try member(wiz, "private var typeRow: some View")
         XCTAssertTrue(row.contains("let stale = LatticeTypeCatalog.selectionRefusal(model.topologyID, in: entries)"))
         XCTAssertTrue(row.contains("if let why = typeReason ?? stale {"), "★ at once, not only on a tap")
-        XCTAssertTrue(row.contains("typeChip(e, fixesStale: e.offered && stale != nil)"))
-        let chip = try member(wiz, "private func typeChip(_ e: LatticeTypeEntry, fixesStale: Bool)")
-        XCTAssertTrue(chip.contains("let inert = organicOn && !fixesStale"))
-        XCTAssertTrue(chip.contains(".disabled(inert)"))
-        XCTAssertTrue(chip.contains("guard offered else { typeReason = LatticeTypeCatalog.reasonLine(e); return }"),
-                      "a greyed chip still never picks; one sentence home")
-        XCTAssertTrue(chip.contains("if organicOn { model.topologyID = e.id } else { model.setTopology(e.id) }"))
+        // ★ RE-PINNED (B7 slice 2, plan.md §B7 Type): the chips became a label card (one type) or big cards (two or
+        // more), OFFERED types only — a greyed type is not drawn, so it can't be picked; the offered card is still the
+        // stale type's fix, under Organic too (the row shows while a saved type is stale).
+        XCTAssertTrue(row.contains("let offered = entries.filter(\\.offered)"), "only offered types are drawn")
+        XCTAssertTrue(row.contains("if !organicOn || stale != nil {"), "★ under Organic only the fix shows")
+        XCTAssertTrue(row.contains("typeLabelCard(one, fixesStale: stale != nil)"))
+        XCTAssertTrue(row.contains("typeCard(e, fixesStale: stale != nil)"))
+        let label = try member(wiz, "private func typeLabelCard(_ e: LatticeTypeEntry, fixesStale: Bool)")
+        XCTAssertTrue(label.contains("guard fixesStale else { return }"), "the label picks nothing but the fix")
+        XCTAssertTrue(label.contains("if model.cellTransition == .organicGrade { model.topologyID = e.id } else { model.setTopology(e.id) }"))
         // the model's topology is the project's after Save & Exit — never migrated on open
         XCTAssertFalse(try src("LatticeWizardModel.swift").contains("selectionRefusal"), "★ never migrated")
         XCTAssertFalse(try src("LatticeSettings.swift").contains("selectionRefusal"), "★ never migrated on decode")

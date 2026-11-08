@@ -52,8 +52,11 @@ final class OrganicAutoGradeAndFreezeTests: XCTestCase {
         let wz = try source("LatticeSetupWizard.swift")
         XCTAssertFalse(wz.contains("@State private var organicShowRepairs"),
                        "★ view state is reborn every time the page is built")
-        XCTAssertTrue(wz.contains("private var organicShowRepairs: Bool { project.lattice.organicShowRepairs }"))
-        XCTAssertTrue(wz.contains("project.lattice.organicShowRepairs.toggle()"))
+        // ★ RE-PINNED (B7 slice 2, his LS-12 "Keep it hidden for now"): the row is gone, so nothing on the page can flip
+        // it; the SAVED setting alone decides what the preview draws (a project keeps the picture it had).
+        XCTAssertFalse(wz.contains("project.lattice.organicShowRepairs.toggle()"), "the Show print repairs row is hidden")
+        XCTAssertTrue(try source("WorkspacePlaceholder.swift").contains("showRepairs: lat.organicShowRepairs"),
+                      "★ the preview reads the saved setting")
     }
 
     // MARK: Auto grades by stress

@@ -480,9 +480,11 @@ public enum LatticeCellsRow: String, Equatable, Sendable, CaseIterable {
         }
     }
 
-    /// Structural adds Strength; Aesthetic adds Ties and Overhangs.
+    /// Structural adds Strength. ★ B7 slice 2: Along (round 2, N5c: "remove the 'Along' options … put it on the list for an
+    /// update later") and the Ties and Overhangs notes (plan.md §B7 "Removed") are off the page; the cases stay so an old
+    /// snapshot's `gradeAlong` still decodes. Along's one live choice, "By stress", is Density's now (`densityChoices`).
     public static func rows(_ mode: LatticeStageMode?) -> [LatticeCellsRow] {
-        (mode ?? .structural) == .structural ? [.grade, .along, .strength] : [.grade, .along, .ties, .overhangs]
+        (mode ?? .structural) == .structural ? [.grade, .strength] : [.grade]
     }
 
     /// The line a row with no live control of its own shows.
@@ -492,8 +494,14 @@ public enum LatticeCellsRow: String, Equatable, Sendable, CaseIterable {
     public static let overhangsLine = "Printed as traced: core removed the flare stage (#358)."
     /// The tabs share one set of settings today.
     public static let tabsNote = "These settings apply to every region today."
-    /// ★ B8: the Density row's choices. No "Sim": Along's "By stress" sets it (the same `densityMode = .sim`).
-    public static let densityChoices: [LatticeDensityMode] = [.uniform, .perRegion]
+    /// The Density row's choices. ★ B7 slice 2: with Along gone, "By stress" (`densityMode = .sim`, which Along's "By stress"
+    /// set since B8) is Density's third choice again — offered only while the stress simulation is on (the permission rule:
+    /// `setSimulateStresses` moves the axis off it when the switch goes off).
+    public static func densityChoices(simulate: Bool) -> [LatticeDensityMode] {
+        simulate ? [.uniform, .perRegion, .sim] : [.uniform, .perRegion]
+    }
+    /// The Density row's words: Along's "By stress" for the simulated density.
+    public static func densityTitle(_ m: LatticeDensityMode) -> String { m == .sim ? "By stress" : m.title }
 }
 
 extension NumberPad.Config {
