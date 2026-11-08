@@ -34,9 +34,27 @@ double vdot(const Vec3& a, const Vec3& b) {
 }
 double vnorm(const Vec3& a) { return std::sqrt(vdot(a, a)); }
 
-// EXACT signed distance of p to keep-out region K (positive INSIDE K). The
-// allowed-region term is its negation: positive outside K.
+double keep_out_signed_distance_unclipped(const ClearanceGeometry& g, const Vec3& p);
+
+// Signed distance of p to keep-out region K (positive INSIDE K). The allowed-region term
+// is its negation: positive outside K.
+// ★ E4 (j): a cut piece's keep-out is the region INTERSECTED with its clips' half-spaces,
+// so its inside distance is the least of the region's and each plane's. That is exact
+// inside (the nearest way out of an intersection of convex sets is through the nearest of
+// their boundaries) and a lower bound on the magnitude outside -- still 1-Lipschitz, so
+// cell_may_overlap's proof holds. No clips: the region's own distance, as before E4.
 double keep_out_signed_distance(const ClearanceGeometry& g, const Vec3& p) {
+  double d = keep_out_signed_distance_unclipped(g, p);
+  for (const ClearanceClip& c : g.clips) {
+    const double nl = vnorm(c.normal);
+    if (!(nl > 0.0)) return -1e30;
+    d = std::min(d, vdot(vsub(p, c.point), c.normal) / nl);
+  }
+  return d;
+}
+
+// EXACT signed distance of p to the unclipped primitive (positive inside).
+double keep_out_signed_distance_unclipped(const ClearanceGeometry& g, const Vec3& p) {
   if (!g.valid) return -1e30;  // an invalid region contains nothing
   if (g.kind == ClearanceKind::Bolt) {
     const Vec3 d = vsub(p, g.axis_point);

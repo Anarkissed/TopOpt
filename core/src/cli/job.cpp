@@ -877,7 +877,7 @@ JobDescription parse_job(const std::string& json_text) {
       for (const JsonValue& cv : cs->arr) {
         require_object(cv, "a clearance");
         reject_unknown_keys(cv,
-                            {"face_id", "geometry", "kind",
+                            {"face_id", "geometry", "region_id", "kind",
                              "concentric_margin_mm", "axial_clearance_mm",
                              "slab_depth_mm"},
                             "a clearance");
@@ -892,12 +892,29 @@ JobDescription parse_job(const std::string& json_text) {
         // primitive supplies the axis/radius/normal/extent the auto path would
         // otherwise derive from the B-rep, so a hand-placed keep-out survives the
         // bridge and job schema intact.
+        // ★ E4 (j): OR a cut piece -- a "region_id" naming one of loads.face_regions,
+        // whose Keep clear is each member face's own, clipped by the piece's cuts.
         const JsonValue* fid_v = find_key(cv, "face_id");
         const JsonValue* geom_v = find_key(cv, "geometry");
-        if ((fid_v == nullptr) == (geom_v == nullptr))
+        const JsonValue* rid_v = find_key(cv, "region_id");
+        if ((fid_v != nullptr) + (geom_v != nullptr) + (rid_v != nullptr) != 1)
           schema_fail(
-              "a clearance must have exactly one of \"face_id\" or \"geometry\"");
-        if (fid_v != nullptr) {
+              "a clearance must have exactly one of \"face_id\", \"geometry\" or "
+              "\"region_id\"");
+        if (rid_v != nullptr) {
+          const double rid = require_number(*rid_v, "clearance region_id");
+          if (rid < 0.0 || rid != std::floor(rid))
+            schema_fail("a clearance \"region_id\" must be a non-negative integer");
+          cl.region_id = static_cast<int>(rid);
+          bool declared = false;
+          for (const FaceRegionSpec& fr : job.loads.face_regions)
+            if (fr.id == cl.region_id) declared = true;
+          if (!declared)
+            schema_fail(
+                "a Keep clear names a cut piece that is not one of this job's face "
+                "regions (\"loads.face_regions\"). A piece must be declared once and "
+                "referred to by its id.");
+        } else if (fid_v != nullptr) {
           const double fid = require_number(*fid_v, "clearance face_id");
           if (fid < 0.0 || fid != std::floor(fid))
             schema_fail("a clearance \"face_id\" must be a non-negative integer");
@@ -2979,6 +2996,40 @@ JobDescription parse_job(const std::string& json_text) {
             "the lattice is allowed. A protection shallower than its region "
             "leaves the rest of that region as void the optimizer removed, and a "
             "lattice cannot conjure material there.");
+    }
+  }
+  // ★ E4 (k): THE SAME TIE, KEYED BY REGION (ruling 2026-11-07 19:55). A cut piece is a
+  // face region, protected by {"region_id"} and latticed by a "region" lattice region:
+  // the same one slab as a face's, with the same deepest-region rule. Ids tie within
+  // their kind only -- a face protection and a region lattice region are two selections.
+  // The refusal names the piece in his words (its name), never its number.
+  for (const JobLatticeRegion& r : job.lattice.regions) {
+    if (r.kind != "region" || r.region_id < 0) continue;
+    bool deeper_on_region = false;
+    for (const JobLatticeRegion& q : job.lattice.regions)
+      if (&q != &r && q.kind == "region" && q.region_id == r.region_id &&
+          q.depth_mm > r.depth_mm)
+        deeper_on_region = true;
+    if (deeper_on_region) continue;
+    for (std::size_t i = 0; i < job.loads.face_protection_region_ids.size(); ++i) {
+      if (job.loads.face_protection_region_ids[i] != r.region_id) continue;
+      double prot = job.loads.face_protection_depth_mm;   // <= 0 => core default
+      if (i < job.loads.face_protection_region_depths_mm.size() &&
+          job.loads.face_protection_region_depths_mm[i] > 0.0)
+        prot = job.loads.face_protection_region_depths_mm[i];
+      if (!(prot > 0.0)) prot = kFaceProtectionDepthDefaultMm;
+      if (std::abs(prot - r.depth_mm) <= 1e-9) continue;
+      std::string piece = "A cut piece";
+      for (const FaceRegionSpec& s : job.loads.face_regions)
+        if (s.id == r.region_id && !s.name.empty()) piece = "“" + s.name + "”";
+      schema_fail(
+          piece + " is BOTH protected and latticed, at two different depths: the "
+          "protection is " + std::to_string(prot) + " mm and the lattice region is " +
+          std::to_string(r.depth_mm) +
+          " mm. They are one slab — the depth the piece is held to IS the depth the "
+          "lattice is allowed. A protection shallower than its region leaves the rest "
+          "of that region as void the optimizer removed, and a lattice cannot conjure "
+          "material there.");
     }
   }
 

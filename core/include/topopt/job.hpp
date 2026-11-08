@@ -909,6 +909,9 @@ struct JobScenario {
 // identically to the app (production_parity: one builder, both front-ends).
 struct JobClearance {
   int face_id = -1;
+  // ★ E4 (j): a Keep clear on a CUT PIECE names its face region (loads.face_regions)
+  // instead of a face; -1 = not a region. Exactly one of face_id / geometry / region_id.
+  int region_id = -1;
   std::string kind;  // "bolt" | "face"
   double concentric_margin_mm = 0.0;  // bolt: keep-out radius = bore_r + this
   double axial_clearance_mm = 0.0;    // bolt: sweep this far past each face
