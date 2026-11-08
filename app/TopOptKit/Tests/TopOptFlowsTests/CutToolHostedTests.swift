@@ -1,6 +1,6 @@
 // CutToolHostedTests — B8 (rows 36, R1; round 3 P6; plan §B8 CutLiesOnFace / HoleAlongAcross / PlaneAsk / TiltHasRotate;
-// mockup #cut-line, #cut-hole, #cut-hole-across, #cut-ring, #cut-plane-ask): the Cut tool on the page, on the fixture pad in
-// Edit faces (Topology's ✂).
+// mockup #cut-line, #cut-hole, #cut-hole-across, #cut-ring, #cut-plane-ask): the Cut tool on the page, in Edit faces
+// (Topology's ✂) — on the fixture pad for a flat face, on his l bracket (bolt holes) for a face that is not flat.
 //   • A flat face: no question; the bar reads ✕ │ Rotate ↺ n° ↻ │ n mm drag ↕ │ ✓ (no Tilt); the cut stands square to the
 //     face at every Rotate; the ↕ handle on the line slides it across the face and never turns it; ✓ cuts it in two.
 //   • Any other face: the question first (a hole: Along │ Across; anything else: Which plane?), no line and no bar until the
@@ -34,6 +34,33 @@ final class CutToolHostedTests: XCTestCase {
         try h.tap("cutTool-Cut", "\(size): the rail's Cut")
         h.pump(0.5)
         return (h, p, try XCTUnwrap(p.viewerMesh, "the pad's mesh"))
+    }
+
+    /// His 'l bracket 3' (S0's 92A8016E, frozen: a STEP part with bolt holes, so it has faces that are not flat — the pad is
+    /// all flat), through the app's own import, on the page at Topology, in Edit faces with Cut armed.
+    private func bracketCut(_ size: CGSize) throws -> (AppBuildHost, ProjectModel, ViewerMesh) {
+        let dir = FlexiblePressFixtures.frozenDir.appendingPathComponent("his7/92A8016E-FCCD-421D-B19E-4A1EC81C98A5", isDirectory: true)
+        try FlexiblePressFixtures.assertFrozen(dir)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("cut-bracket-\(UUID().uuidString)", isDirectory: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let core = FlexibleHisProject.repoRoot.appendingPathComponent("core")
+        let app = AppModel(materialsPath: core.appendingPathComponent("src/materials/materials.json").path,
+                           rulesPath: core.appendingPathComponent("src/settings/rules.json").path, store: ProjectStore(rootDir: root))
+        app.loadMaterials()
+        app.newTopOpt()
+        guard app.importFile(atPath: dir.appendingPathComponent("model.step").path, displayName: "l bracket 3.step") else {
+            throw XCTSkip("the STEP importer refused the l bracket: \(app.toast ?? "")")
+        }
+        app.continueToWorkspace()
+        let p = try XCTUnwrap(app.project, "the bracket opens")
+        p.force.setGravity(direction: SIMD3(0, 0, -1))
+        let h = AppBuildHost(ParityRoot(model: app), size: size, test: self)
+        h.pump(3)
+        try h.tap("capsuleScissors", "\(size): Topology's ✂")
+        h.pump(1)
+        try h.tap("cutTool-Cut", "\(size): the rail's Cut")
+        h.pump(0.5)
+        return (h, p, try XCTUnwrap(p.viewerMesh, "the bracket's mesh"))
     }
 
     private func aimFor(_ f: FaceID, _ p: ProjectModel, _ m: ViewerMesh) -> CutAim? {
@@ -86,9 +113,10 @@ final class CutToolHostedTests: XCTestCase {
     /// ★ HoleAlongAcross / PlaneAsk + P6 + R1: any face that is not flat asks first; the answer brings the line and a bar with
     /// Tilt and Rotate both; Tilt leans it and never moves it.
     func testAnyOtherFaceAsksFirstAndItsTiltHasRotate() throws {
-        let (h, p, m) = try cut(AppBuildHost.landscape13)
-        let curved = try XCTUnwrap(FaceTopology.faceIDs(in: m).first { aimFor($0, p, m)?.asks != nil },
-                                   "premise: the pad has a face that is not flat")
+        let (h, p, m) = try bracketCut(AppBuildHost.landscape13)
+        let ids = FaceTopology.faceIDs(in: m)
+        let curved = try XCTUnwrap(ids.first { aimFor($0, p, m)?.asks == .hole } ?? ids.first { aimFor($0, p, m)?.asks != nil },
+                                   "premise: the bracket has a face that is not flat (a bolt hole)")
         let asks = try XCTUnwrap(aimFor(curved, p, m)?.asks)
         try pick(h, curved)
         _ = try h.onScreen("cutAsk", "★ the question first")
