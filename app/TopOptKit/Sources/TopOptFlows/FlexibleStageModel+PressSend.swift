@@ -318,7 +318,9 @@ extension FlexibleStageModel {
         let sent = sentPresses
         return (settings.presses ?? []).compactMap { p in
             guard sent.contains(p.id), !p.regions.contains(where: excluding.contains), let map = pressMap(p.id) else { return nil }
-            return FlexibleJob.PressEntry(id: p.id, regions: p.regions, direction: p.direction, weightN: p.settings.weightN, map: map)
+            // ★ C2 WIRING W1: the apex of the SAME cut whose h the map was made with (pressMap: FlexibleFlatPrism.depth(of:))
+            return FlexibleJob.PressEntry(id: p.id, regions: p.regions, direction: p.direction, weightN: p.settings.weightN, map: map,
+                                          apex: FlexibleFlatPrism.cut(of: p)?.apex)
         }
     }
 

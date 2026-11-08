@@ -20,7 +20,9 @@ final class FlexibleFlatPrismSeamTests: XCTestCase {
     /// core's press API is 2; the bridge's stack_of hands ids ≤ −1000 to fx::build_press_stack. RED: today's stack_of throws
     /// "face region −1000 is not declared".
     func testCoreStacksThePressThroughASyntheticKey() async throws {
-        XCTAssertEqual(FlexibleScene.pressApiVersion, 2, "★ core's kPressApiVersion")
+        // ★ RE-PINNED (C2 wiring W1, B9 11-08): #361's C2 B2c is v8 (it was 2 at 099dcaed); the app's gate follows it
+        XCTAssertEqual(FlexibleScene.pressApiVersion, 8, "★ core's kPressApiVersion")
+        XCTAssertEqual(FlexiblePressSupport.expectedAPI, FlexibleScene.pressApiVersion, "★ the app's gate is core's version")
         for which in ["cube", "his pad"] {
             let m: FlexibleStageModel
             let c: FlexibleEdgeCandidates.Candidate

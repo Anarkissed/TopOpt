@@ -72,10 +72,21 @@ public enum FlexibleJob {
         public let weightN: Double
         /// The map core is sent (FlexiblePressShape.map — the same the design used): mode, curves, deepest squish.
         public let map: FlexMap
-        public init(id: UUID, regions: [Int], direction: SIMD3<Double>, weightN: Double, map: FlexMap) {
+        /// ★ C2 WIRING W1: the flat prism's apex A (FlexibleFlatPrism.cut(of:)), sent as `flat_prism.apex_mm`; core's plane is
+        /// normal to press_direction at h = deepest_squish_mm past A (core C2 B1b: the column is bounded by it and designed as a
+        /// series). nil: none sent (a press with no strip).
+        public let apex: SIMD3<Double>?
+        public init(id: UUID, regions: [Int], direction: SIMD3<Double>, weightN: Double, map: FlexMap, apex: SIMD3<Double>? = nil) {
             self.id = id; self.regions = regions; self.direction = direction; self.weightN = weightN; self.map = map
+            self.apex = apex
         }
     }
+
+    /// ★ C2 WIRING W1 (B9, 11-08; #361's C2 B1a/B1b): the run job states `no_include_region: "no_lattice"` (core refuses a job
+    /// with no include region instead of latticing the whole part — the app's own `.noFacePrism` rule, now core's too) and each
+    /// edge or corner press its `flat_prism`. OFF = the bytes before the wiring: the golden comparisons turn it off to prove
+    /// every OTHER byte unchanged, and `FlexibleC2WiringTests` proves ON = OFF + exactly these keys.
+    nonisolated(unsafe) static var sendsC2W1 = true
 
     /// ★ RED CONTROL only (FlexibleR7E2Tests): the press's pieces written as plain face entries (no face_region_ids, no
     /// press_direction) — core would design each piece along its own normal.
@@ -126,6 +137,7 @@ public enum FlexibleJob {
         for p in i.presses { faces += pressEntries(p, finish: finish) }
         var block = header(i, material: material)
         block["faces"] = faces
+        if sendsC2W1 { block["no_include_region"] = "no_lattice" }   // ★ C2 WIRING W1 (the run job only; the scene reads no faces)
         let checks = try i.settings.checkStamps.map { c -> [String: Any] in
             guard let g = i.stampGrids[c.stamp.id] else { throw EncodeError.missingStampGrid(c.stamp.id) }
             var e = stampEntry(g)
@@ -210,6 +222,8 @@ public enum FlexibleJob {
         }
         var e: [String: Any] = p.regions.count >= 2 ? ["face_region_ids": p.regions] : ["face_region_id": p.regions.first ?? -1]
         e["press_direction"] = [p.direction.x, p.direction.y, p.direction.z]
+        // ★ C2 WIRING W1: the flat prism (core needs press_direction beside it, written just above)
+        if sendsC2W1, let a = p.apex { e["flat_prism"] = ["apex_mm": [a.x, a.y, a.z]] }
         body(&e)
         return [e]
     }

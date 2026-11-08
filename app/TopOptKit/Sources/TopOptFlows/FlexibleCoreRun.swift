@@ -82,6 +82,11 @@ public struct FlexibleCoreRunReport: Equatable, Sendable {
             "topology_no_data": "no data for that lattice type",
             "honeycomb_side_stack": "honeycomb can\u{2019}t run sideways",
             "no_data": "nothing here has squish data",
+            // ★ C2 WIRING W1 (#361's C2: B1a, B1b, B2b)
+            "no_lattice_region": "no face is set to Lattice",
+            "press_stack_failed": "an edge or corner press can\u{2019}t be stacked",
+            "no_lattice_under_press": "a press has no lattice under its cut",
+            "combination_not_reachable": "its solver found no lattice for every group (not proven impossible)",
         ]
         if let s = short[r.code] { return "Core refused it: " + s }
         let first = r.reason.components(separatedBy: ". ").first ?? r.reason

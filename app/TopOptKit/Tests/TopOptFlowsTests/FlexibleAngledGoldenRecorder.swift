@@ -128,6 +128,16 @@ enum FlexibleAngledGoldens {
 
     static var repo: (path: String, token: String) { (FlexibleHisProject.repoRoot.path, "$REPO") }
 
+    /// ★ C2 WIRING W1 (B9, 11-08): the goldens are the run jobs BEFORE the wiring — every comparison writes with
+    /// `FlexibleJob.sendsC2W1` off, so every OTHER byte is still proven unchanged; `FlexibleC2WiringTests` proves the job as
+    /// sent = this job + exactly `no_include_region` and each press's `flat_prism`.
+    static func preC2<T>(_ body: () throws -> T) rethrows -> T {
+        let was = FlexibleJob.sendsC2W1
+        FlexibleJob.sendsC2W1 = false
+        defer { FlexibleJob.sendsC2W1 = was }
+        return try body()
+    }
+
     // MARK: - (1) C1's pad
 
     /// The pure encoder on FlexibleStageTests' settings (face 1 pressed 30 kg with drawn curves, face 0
@@ -139,7 +149,7 @@ enum FlexibleAngledGoldens {
             f.deepestMM += deepestDeltaMM
             s.setFace(f)
         }
-        return normalised(try FlexibleJob.runJobJSON(FlexibleStageTests.inputs(s)), [repo])
+        return normalised(try preC2 { try FlexibleJob.runJobJSON(FlexibleStageTests.inputs(s)) }, [repo])
     }
 
     /// The same with face 1 shaped as a Stamp (the library's thumb, centred) on a 2 mm pitch.
@@ -153,7 +163,7 @@ enum FlexibleAngledGoldens {
         s.setFace(f)
         let g = try XCTUnwrap(FlexibleStamps.grid(thumb, library: lib, uExtentMM: 100, vExtentMM: 100, pitchMM: 2,
                                                   onFace: { _, _ in true }))
-        return normalised(try FlexibleJob.runJobJSON(FlexibleStageTests.inputs(s, stamps: [thumb.id: g])), [repo])
+        return normalised(try preC2 { try FlexibleJob.runJobJSON(FlexibleStageTests.inputs(s, stamps: [thumb.id: g])) }, [repo])
     }
 
     /// The app's model over C1's pad: its top pressed at 30 kg, its bottom resting, designs settled.
@@ -173,7 +183,7 @@ enum FlexibleAngledGoldens {
     }
 
     static func runJob(_ m: FlexibleStageModel, resting: Set<Int> = [], roots: [(path: String, token: String)]) throws -> String {
-        normalised(try m.runJobJSON(resting: resting), roots)
+        normalised(try preC2 { try m.runJobJSON(resting: resting) }, roots)
     }
     static func sceneJob(_ m: FlexibleStageModel, roots: [(path: String, token: String)]) throws -> String {
         normalised(try XCTUnwrap(try m.sceneJob(), "a scene job").json, roots)

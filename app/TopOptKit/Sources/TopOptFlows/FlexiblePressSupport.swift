@@ -6,7 +6,7 @@
 //   1. core's schema takes a loaded entry with face_region_ids + press_direction (a WHOLE-JOB probe through core's own parse_job,
 //      with its control: the same entry with a single face_region_id must parse — memoised, injectable);
 //   2. the bridge builds a press's stack (stack_of hands a synthetic id to build_press_stack — source-pinned by the tests);
-//   3. core's press API is the one this app was written against (kPressApiVersion == 2);
+//   3. core's press API is the one this app was written against (kPressApiVersion == expectedAPI, 8 since C2's wiring);
 //   4. core stacked THIS press on the open scene (FlexiblePressRegistration — a refusal is its own line);
 //   5. no region would be in two entries (core's job_block: "a region is in one press");
 //   6. no two LOADED entries share surface (core's A3 "shared_footprint" — said in plain words, with 1–3 fixes);
@@ -63,8 +63,10 @@ public enum FlexiblePressFix: Hashable, Sendable {
 
 public enum FlexiblePressSupport {
 
-    /// The press API this app was written against (core's kPressApiVersion at #361 099dcaed).
-    public static let expectedAPI = 2
+    /// The press API this app was written against (core's kPressApiVersion). ★ C2 WIRING W1 (B9, 11-08): 8, #361's C2 B2c
+    /// (5de78975; the log is in core/include/topopt/flexible/faces.hpp). Was 2 (#361 099dcaed); on v8 every press read
+    /// "core support pending" until this moved.
+    public static let expectedAPI = 8
 
     /// Why a press is not in the job (nil: it is).
     public enum Reason: Equatable, Sendable {
