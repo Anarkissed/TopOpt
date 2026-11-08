@@ -185,6 +185,32 @@ extension ProjectModel {
         persistClearances()
     }
 
+    /// ★ His iPad 11-07 (2): Copy on the zone's glass — "highlighted = moving the zone makes a copy" (Topology's Copy). A new
+    /// zone, "Zone N", the same shape, size, turn and role where this one is now; the zone being moved stays picked and moves
+    /// on, so the copy is left behind.
+    @discardableResult
+    public func copyLatticeZone(_ zone: UUID) -> UUID? {
+        guard usesLatticeList, let p = latticeZonePrimitive(zone) else { return nil }
+        var l = latticeList
+        let keep = l.activeGroupID
+        let id = l.addGroup()
+        var n = 1
+        while l.groups.contains(where: { $0.name == "Zone \(n)" }) { n += 1 }
+        l.rename(id, to: "Zone \(n)")
+        if let keep { l.setActive(keep) }
+        latticeList = l
+        lattice.zoneGroups.insert(id)
+        lattice.groupRoles[id] = lattice.groupRoles[zone] ?? .include
+        syncForceGroups()
+        let c = ManualPrimitive(id: UUID(), kind: p.kind, center: p.center, axis: p.axis, radiusMM: p.radiusMM,
+                                halfLengthMM: p.halfLengthMM, halfUMM: p.halfUMM, halfWMM: p.halfWMM, override: p.override)
+        _ = force.addManualPrimitive(c, to: id)
+        let oldKey = LatticeSelectableRef.primitive(p.id).key
+        lattice.selectableDepthMM[LatticeSelectableRef.primitive(c.id).key] = lattice.selectableDepthMM[oldKey]
+        persistClearances()
+        return id
+    }
+
     /// The zone's trash: the group, its shape, its role go (Undo, top left, brings them back).
     public func removeLatticeZone(_ zone: UUID) {
         if let p = latticeZonePrimitive(zone) {

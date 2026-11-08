@@ -459,7 +459,9 @@ final class FlexibleSettingsRound4Tests: XCTestCase {
         // selected; drag sets its depth" — the one Handle): the 22 pt purple depth knob this line pinned is gone; the prism's
         // end wears DragHandle, and the two lines above still keep FlexibleMainTints off the page. The prism stays purple.
         XCTAssertFalse(ws.contains("private func latticeDepthKnob("), "the old depth knob is gone")
-        XCTAssertTrue(ws.contains("DragHandle(key: key, axis: axis, value: value, onDrag: drag)"), "the prism's end is §4.24's one Handle")
+        // (11-07, his iPad 1a: every shown prism of the open group wears it; only the picked one's number rides beside it)
+        XCTAssertTrue(ws.contains("DragHandle(key: key, axis: axis, value: value, showsValue: showsValue, onDrag: drag)"),
+                      "the prism's end is §4.24's one Handle")
         XCTAssertFalse(FileManager.default.fileExists(atPath: FlexibleSource.url("FlexibleDepthAccent.swift").path))
     }
 

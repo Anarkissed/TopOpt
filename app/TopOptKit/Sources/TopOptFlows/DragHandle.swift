@@ -18,6 +18,9 @@ struct DragHandle: View {
     var glyph: Glyph = .along
     /// The number it changes, shown beside it ("31.0 mm").
     let value: String
+    /// The number beside it (his iPad 11-07, 1a: a group's every prism wears its end handle; only the picked one's number
+    /// rides beside it, the rest say theirs in their rows).
+    var showsValue = true
     /// Points moved along `axis` since the drag began (+ = along it); `ended` once, on release.
     let onDrag: (_ along: CGFloat, _ ended: Bool) -> Void
 
@@ -51,13 +54,15 @@ struct DragHandle: View {
                 .accessibilityLabel("Drag to change")
                 .accessibilityValue(value)
                 .accessibilityIdentifier("handle-\(key)")
-            Text(value)
-                .font(.system(size: 14, weight: .heavy)).monospacedDigit()
-                .foregroundStyle(DS.Color.textPrimary.color)
-                .padding(.vertical, 6).padding(.horizontal, DS.Space.m)
-                .background(Capsule().fill(DS.Surface.valuePill.color)
-                    .overlay(Capsule().strokeBorder(DS.Color.strokeStrong.color, lineWidth: 1)))
-                .background(CornerPairStyle.publish("handleValue-\(key)"))
+            if showsValue {
+                Text(value)
+                    .font(.system(size: 14, weight: .heavy)).monospacedDigit()
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                    .padding(.vertical, 6).padding(.horizontal, DS.Space.m)
+                    .background(Capsule().fill(DS.Surface.valuePill.color)
+                        .overlay(Capsule().strokeBorder(DS.Color.strokeStrong.color, lineWidth: 1)))
+                    .background(CornerPairStyle.publish("handleValue-\(key)"))
+            }
         }
     }
 }

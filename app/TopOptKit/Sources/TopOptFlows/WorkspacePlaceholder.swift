@@ -116,6 +116,12 @@ public struct WorkspacePlaceholder: View {
     @State private var latticeHandleDrag: LatticeSetupHandles.DragStart?
     /// ★ B6 (his "Yes, add the move", 11-06): the zone whose move glass is up, and its drag (the region gizmo's twins).
     @State private var latticeZoneGizmo: UUID?
+    /// ★ his iPad 11-07 (1b): the open group's face a tap put the × on (its row key, the face tapped).
+    @State private var latticeFaceRemoveAsk: (ref: String, face: FaceID)?
+    /// ★ his iPad 11-07 (2): the zone whose move glass has Copy lit (each move then leaves a copy behind), and a grab's armed
+    /// copy (made on the first real movement, as Topology's).
+    @State private var latticeZoneCopy: UUID?
+    @State private var latticeZoneCopyArmed = false
     @State private var latticeZoneDrag: PrimitiveGizmo.Drag?
     @State private var latticeZoneOrbiting = false
     @State private var latticeZoneActiveId: Float = -1
@@ -1967,6 +1973,22 @@ public struct WorkspacePlaceholder: View {
                 tints[f] = SIMD4<Float>(p.x, p.y, p.z, roleAlpha)
             }
         }
+        // ★ his iPad 11-07: "even in Pending, I should still SEE what was selected" — and his rule: "Lattice = Prism. No
+        // Lattice = Prism. Protect Skin = Colour. That's it". On Lattice Setup a Pending group (no role yet) and a Protect
+        // skin group wear the group's colour on their faces, over Topology's colours; Lattice and No lattice show their
+        // prisms instead (`latticeDrawsPrism`). The face row's eye hides the colour as it hides a prism.
+        var lit: Set<FaceID> = []
+        if latticeSetupUp, !latticeTopologyOpen {
+            for g in project.latticeGroups where !project.lattice.zoneGroups.contains(g.id) && !project.groupView.isHidden(g.id)
+                && !latticeDrawsPrism(g.id) {
+                let c = g.color
+                for f in groupTintedFaces(g) where latticePrismEye[LatticeSelectableRef.face(group: g.id, face: f).key] != false {
+                    tints[f] = SIMD4<Float>(Float(c.r), Float(c.g), Float(c.b), roleAlpha)
+                    lit.insert(f)
+                }
+            }
+        }
+        if LatticeSetupHandles.recordLive { LatticeSetupHandles.latticeTinted = lit }
         return tints
     }
 
@@ -2366,6 +2388,7 @@ public struct WorkspacePlaceholder: View {
         let planes = project.latticeDepthPlanes()
             .filter { !project.groupView.isHidden($0.groupID) }
             .filter { zones.contains($0.groupID) || latticePrismShown($0.ref) }
+            .filter { latticeDrawsPrism($0.groupID) }   // ★ his iPad 11-07: Protect skin = colour, no prism
         // ★ his iPad (11-06): a zone sits INSIDE the part, and a prism reaches into it — the picked one's edges are lit
         // through the part (`seeThrough`), not the faint ghost every buried volume gets
         func lit(_ p: ProjectModel.LatticeDepthPlane) -> Bool {
@@ -2489,6 +2512,7 @@ public struct WorkspacePlaceholder: View {
         // stolen from a group on a lattice surface; removal lives on the TO page.
         // ★ B6 s2b (note 23c): with the Topology panel open, the tap goes on to Topology's groups (below), as on Topology
         if stage == .lattice, !latticeTopologyOpen {
+            if latticeTapOffersFaceRemove(faceID) { return }   // ★ his iPad 11-07 (1b): the × on a face the open group holds
             let loop = project.surfaceLoopRespectingRegions(
                 FaceTopology.loop(fromFace: faceID, in: mesh), from: faceID)
             if let gid = project.latticeStageTap(face: faceID, loop: loop) {   // ★ B6: the lattice list (LatticeList)
@@ -8440,6 +8464,21 @@ public struct WorkspacePlaceholder: View {
                             .onEnded { _ in latticeZoneGizmoEnded() })
                         .background(DSParts.publish("latticeZoneGizmo-\(key)"))
                         .position(center)
+                    // ★ his iPad 11-07 (2): Copy beside ✕, as on Topology's glass — lit, each move leaves a copy behind
+                    let copying = latticeZoneCopy == z
+                    Button {
+                        latticeZoneCopy = copying ? nil : z
+                        model.toast = copying ? "Copy off" : "Copy on \u{2014} each move leaves a copy behind"
+                    } label: {
+                        gizmoCircleKnob(active: copying, size: 26) {
+                            Image(systemName: "plus.square.on.square").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                        }
+                        .frame(width: DSParts.target, height: DSParts.target).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).accessibilityLabel(copying ? "Copy on: each move leaves a copy" : "Copy zone")
+                    .accessibilityAddTraits(copying ? .isSelected : [])
+                    .background(DSParts.publish(copying ? "latticeZoneCopy-\(key)-on" : "latticeZoneCopy-\(key)"))
+                    .position(x: center.x - DSParts.target / 2 - 2, y: center.y - box / 2 - 4)
                     Button { latticeZoneGizmo = nil } label: {
                         gizmoCircleKnob(active: false, size: 26) {
                             Image(systemName: "xmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
@@ -8448,7 +8487,7 @@ public struct WorkspacePlaceholder: View {
                     }
                     .buttonStyle(.plain).accessibilityLabel("Done moving")
                     .background(DSParts.publish("latticeZoneMoveDone-\(key)"))
-                    .position(x: center.x, y: center.y - box / 2 - 4)
+                    .position(x: center.x + DSParts.target / 2 + 2, y: center.y - box / 2 - 4)
                 } else {
                     Button { latticeZoneGizmo = z } label: {
                         gizmoCircleKnob(active: false, size: 40) {
@@ -8480,7 +8519,11 @@ public struct WorkspacePlaceholder: View {
                                              rotation: gizmoRotation * orient),
                let ray = modelRay(proj, at: loc) {
                 latticeZoneActiveId = gizmoActiveIdValue(hit)
-                latticeZoneDrag = PrimitiveGizmo.Drag(handle: gizmoHandle(for: hit, orientation: orient),
+                let handle = gizmoHandle(for: hit, orientation: orient)
+                // ★ his iPad 11-07 (2): Copy lit → this move leaves a copy where the zone started — armed here, made on the
+                // first real movement (a bare touch never stacks an unseen copy: Topology's note 4)
+                latticeZoneCopyArmed = latticeZoneCopy == z && !handle.isRotate
+                latticeZoneDrag = PrimitiveGizmo.Drag(handle: handle,
                                                       startCenter: m, startAxis: axis, grab: ray, viewDir: ray.dir)
                 draggingDepthPlane = "zoneMove-\(z.uuidString)"   // the preview's bake waits for the release
                 ClearanceHaptics.grab()
@@ -8496,6 +8539,10 @@ public struct WorkspacePlaceholder: View {
             return
         }
         guard let drag = latticeZoneDrag, let ray = modelRay(proj, at: loc) else { return }
+        if latticeZoneCopyArmed, hypot(loc.x - start.x, loc.y - start.y) > 4 {
+            latticeZoneCopyArmed = false
+            project.copyLatticeZone(z)
+        }
         let out = drag.resolve(currentRay: ray)
         if case .rotate = drag.handle {
             project.turnLatticeZone(z, to: out.axis)
@@ -8507,6 +8554,7 @@ public struct WorkspacePlaceholder: View {
     private func latticeZoneGizmoEnded() {
         let was = latticeZoneDrag != nil
         latticeZoneDrag = nil
+        latticeZoneCopyArmed = false
         latticeZoneOrbiting = false
         gizmoBoxDragLast = nil
         latticeZoneActiveId = -1
@@ -8544,9 +8592,11 @@ public struct WorkspacePlaceholder: View {
         ZStack(alignment: .topLeading) {
             if let proj = projection {
                 let zones = project.lattice.zoneGroups
-                ForEach(project.latticeDepthPlanes()) { plane in
+                ForEach(project.latticeDepthPlanes().filter { latticeDrawsPrism($0.groupID) }) { plane in   // ★ his iPad 11-07
                     // ★ HIDDEN ⇒ NOT DRAWN; LOCKED ⇒ NOT GRABBABLE.
-                    if plane.ref.key == latticeFacePick, !zones.contains(plane.groupID), latticePrismShown(plane.ref),
+                    // ★ his iPad 11-07 (1a): "only the ± EXPAND knobs show … NO depth handle at a prism's end" — every shown
+                    // prism of the open group wears its end handle beside its expand knob; the picked one's number rides it
+                    if latticeDepthHandleShows(plane), !zones.contains(plane.groupID), latticePrismShown(plane.ref),
                        !project.groupView.isHidden(plane.groupID),
                        project.groupView.canEdit(plane.groupID) {
                         latticePrismHandle(proj, plane)
@@ -8576,9 +8626,10 @@ public struct WorkspacePlaceholder: View {
                         // ★ B6 (his 11-06 shots: on the 11" portrait it sat on the Role row's lock): like the handles, never
                         // under the page's own UI nor on the picked prism's handle and its number — slid along its own drag
                         // line (sideways: the drag reads the finger's sideways travel only, so the number never jumps)
-                        let depthRoom = plane.ref.key == latticeFacePick
+                        let depthRoom = latticeDepthHandleShows(plane)
                             ? latticePrismHandleSpot(proj, plane).map {
-                                [LatticeSetupHandles.footprint(LatticeSetupHandles.placed($0.at, axis: $0.axis, keepOut: bandChipKeepOut))]
+                                [LatticeSetupHandles.footprint(LatticeSetupHandles.placed($0.at, axis: $0.axis, keepOut: bandChipKeepOut),
+                                                               pill: plane.ref.key == latticeFacePick)]
                             } ?? [] : []
                         let expandAt = LatticeSetupHandles.placed(ex, axis: CGVector(dx: 1, dy: 0), keepOut: bandChipKeepOut + depthRoom)
                         latticeExpandKnob(
@@ -8596,13 +8647,29 @@ public struct WorkspacePlaceholder: View {
                 if let z = stageList.activeGroupID, zones.contains(z), !project.groupView.isHidden(z), project.groupView.canEdit(z) {
                     ForEach(project.latticeZoneHandles(z), id: \.side) { hd in latticeZoneSideHandle(proj, z, hd) }
                 }
+                // ★ his iPad 11-07 (1b): the × on the tapped face of the open group
+                latticeFaceRemoveButton(proj)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .coordinateSpace(name: Self.clearanceStageSpace)
     }
 
-    /// ★ B6 N2: a face's prism shows while its row is picked, or while its row's eye says so.
+    /// ★ his iPad 11-07: "Lattice = Prism. No Lattice = Prism. Protect Skin = Colour." A lattice group draws its faces'
+    /// prisms (with their handles and expand knobs) once it is Lattice or No lattice; Pending and Protect skin show their
+    /// colour instead (`roleTints`). Zones always draw their box.
+    private func latticeDrawsPrism(_ groupID: UUID) -> Bool {
+        project.lattice.zoneGroups.contains(groupID)
+            || (project.lattice.groupRoles[groupID] != nil && !project.lattice.skinGroups.contains(groupID))
+    }
+
+    /// ★ his iPad 11-07 (1a): a prism's end handle shows on the picked face, and on every face of the open group (where
+    /// the expand knobs show).
+    private func latticeDepthHandleShows(_ plane: ProjectModel.LatticeDepthPlane) -> Bool {
+        plane.ref.key == latticeFacePick || latticeExpandHandleIsVisible(plane)
+    }
+
+    /// ★ B6 N2: a face's prism shows unless its row's eye hid it (his iPad 11-07, 3a: visible by default).
     private func latticePrismShown(_ ref: LatticeSelectableRef) -> Bool {
         LatticeSetupHandles.prismShown(ref.key, eye: latticePrismEye, picked: latticeFacePick)
     }
@@ -8611,7 +8678,7 @@ public struct WorkspacePlaceholder: View {
     /// beside it. `apply` gets the finger's place, on the handle's axis only, from where the drag BEGAN (held across frames:
     /// the handle moves under the finger while the page redraws); `end` runs once, on release. While it is held the
     /// preview's bake waits (`draggingDepthPlane`, as the old knob's drag did).
-    private func latticeSetupHandle(_ key: String, at p: CGPoint, axis: CGVector, value: String,
+    private func latticeSetupHandle(_ key: String, at p: CGPoint, axis: CGVector, value: String, showsValue: Bool = true,
                                     apply: @escaping (CGPoint) -> Void, end: @escaping () -> Void) -> some View {
         let drag: (CGFloat, Bool) -> Void = { along, ended in
             let s: LatticeSetupHandles.DragStart
@@ -8633,8 +8700,70 @@ public struct WorkspacePlaceholder: View {
         // ★ never under the page's own UI: slid along its line, clear of the Selections panel and the rest (the band chips'
         // keep-out list); the drag above still reads the true point `p`
         return Color.clear.frame(width: DragHandle.size, height: DragHandle.size)
-            .overlay(alignment: .leading) { DragHandle(key: key, axis: axis, value: value, onDrag: drag).fixedSize() }
+            .overlay(alignment: .leading) { DragHandle(key: key, axis: axis, value: value, showsValue: showsValue, onDrag: drag).fixedSize() }
             .position(LatticeSetupHandles.placed(p, axis: axis, keepOut: bandChipKeepOut))
+    }
+
+    /// ★ his iPad 11-07 (1b): the × on a face of the open group — on the face where it was tapped, clear of the page's UI
+    /// and of that face's handles; a tap takes the face out of the group (the row's trash, one undo step).
+    @ViewBuilder private func latticeFaceRemoveButton(_ proj: CameraProjection) -> some View {
+        let _ = recordLivePick()
+        if let ask = latticeFaceRemoveAsk, let a = stageList.activeGroupID,
+           let g = project.latticeGroups.first(where: { $0.id == a }),
+           let ref = project.latticeSelectableRefs(g).first(where: { $0.key == ask.ref }),
+           let mesh = viewerMesh, let c = mesh.faceCentroid(ask.face), let at = proj.project(settledWorld(c)) {
+            let near = project.latticeDepthPlanes().filter { $0.ref.key == ask.ref }.compactMap { plane in
+                latticePrismHandleSpot(proj, plane).map {
+                    LatticeSetupHandles.footprint(LatticeSetupHandles.placed($0.at, axis: $0.axis, keepOut: bandChipKeepOut),
+                                                  pill: ref.key == latticeFacePick)
+                }
+            }
+            Button {
+                latticeFaceRemoveAsk = nil
+                removeLatticeFace(g, ref)
+            } label: {
+                Image(systemName: "xmark").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+                    .frame(width: 32, height: 32)
+                    .background(Circle().fill(DS.Color.danger.color)
+                        .overlay(Circle().strokeBorder(Color.white.opacity(0.85), lineWidth: 2)))
+                    .dsShadow(DS.Shadow.panel)
+                    .frame(width: DSParts.target, height: DSParts.target).contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Take \(project.latticeRowName(ref)) out of \(g.name)")
+            .background(DSParts.publish("latticeFaceRemove-\(ref.key)"))
+            .position(LatticeSetupHandles.placed(at, axis: CGVector(dx: 1, dy: 0), keepOut: bandChipKeepOut + near))
+        }
+    }
+
+    /// Test hook: the page's face tap, as the viewer's pick calls it (a click offscreen never reaches the 3D view).
+    private func recordLivePick() {
+        if LatticeSetupHandles.recordLive { LatticeSetupHandles.livePick = { handlePick($0) } }
+    }
+
+    /// ★ his iPad 11-07 (1b): "tap a prism → an × pops up on it → tapping the × removes that face from the group" — a tap on
+    /// a face the OPEN group holds puts the × on it (a second tap takes it away) and the tap goes no further; any other tap
+    /// clears the × and goes on to the lattice list.
+    private func latticeTapOffersFaceRemove(_ faceID: FaceID) -> Bool {
+        if latticeSetupUp, let a = stageList.activeGroupID, !project.lattice.zoneGroups.contains(a),
+           let g = project.latticeGroups.first(where: { $0.id == a }),
+           let ref = project.latticeSelectableRefs(g).first(where: { latticeRef($0, holds: faceID) }) {
+            latticeFaceRemoveAsk = latticeFaceRemoveAsk?.ref == ref.key ? nil : (ref.key, faceID)
+            return true
+        }
+        latticeFaceRemoveAsk = nil
+        return false
+    }
+
+    /// Whether a lattice row's face or piece holds the tapped face.
+    private func latticeRef(_ ref: LatticeSelectableRef, holds face: FaceID) -> Bool {
+        switch ref {
+        case .face(_, let f): return f == face
+        case .region(_, let rid):
+            guard let mesh = viewerMesh, let r = project.faceRegions.region(rid) else { return false }
+            return FaceRegionGeometry.members(of: r, in: mesh).contains(face)
+        default: return false
+        }
     }
 
     /// ★ B6 N2: where the face's prism-end handle stands on screen (its TRUE point) and the prism's direction there.
@@ -8652,6 +8781,7 @@ public struct WorkspacePlaceholder: View {
         if let (at, axis) = latticePrismHandleSpot(proj, plane) {
             latticeSetupHandle(LatticeSetupHandles.prismKey(ref), at: at, axis: axis,
                                value: SelectionsSummary.format((plane.depthMM * 10).rounded() / 10, decimals: 1) + " mm",
+                               showsValue: ref.key == latticeFacePick || latticeHandleDrag?.key == LatticeSetupHandles.prismKey(ref),
                                apply: { finger in
                                    guard let proj = projection, let ray = proj.ray(throughViewPoint: finger),
                                          let v = world.value(rayOrigin: ray.origin, rayDir: ray.dir) else { return }
