@@ -116,8 +116,14 @@ final class FlexibleRound7ScreenHookTests: XCTestCase {
         let h30 = hooks.first { $0.id == "H30" }!.pin
         // ★ H57 (2026-10-25): the chain sits inside AnyView(Group { … }) and topologyCornerPair is AnyView-wrapped (iPad stack overflow).
         let chain354 = "\n            AnyView(Group {   // Flexible (PR #362) H57: the bar's chain, type-erased (its nested type overflowed the iPad main thread's stack; crash 2026-10-25)"
-            + "\n            // ★ B5: Edit faces keeps the bar the Surface stage had (today's four, the last branch).\n"
-            + "            if !editFaces.isEditing, stage == .topology {\n"
+            // ★ RE-PINNED (UI-Notes B8, ledger row 35, mockup #cut): Edit faces' corner is EMPTY (its actions are the header's
+            // Discard · Done); the chain's first branch says so. Was: B5's note and `if !editFaces.isEditing, stage == .topology {`
+            // (Edit faces fell through to today's four).
+            + "\n            // ★ B8 (row 35, mockup #cut): Edit faces' corner is EMPTY — no run, no print parameters, no iPad │ Mac; its\n"
+            + "            // actions are the header's Discard · Done. (B5 had kept the Surface stage's four here.)\n"
+            + "            if editFaces.isEditing {\n"
+            + "                AnyView(EmptyView())\n"
+            + "            } else if stage == .topology {\n"
             + "                // ★ B3 (A1): Topology's bar is the CORNER PAIR — the Setup chip (iPad | Mac, Print\n"
             + "                // parameters and the chip column, as rows) and the Optimize split button.\n"
             + "                AnyView(topologyCornerPair)   // Flexible (PR #362) H57\n"

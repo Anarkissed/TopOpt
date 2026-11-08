@@ -210,6 +210,12 @@ public enum SurfaceTint {
     /// subject is the surface, and group membership is context: enough hue to say
     /// "this one is in the red group", not enough to compete with the selection.
     /// Desaturated toward the stage's own wash and held at its alpha.
+    /// ★ B8 (row 34): a group whose Selections row is lit in Edit faces wears its OWN colour, not the hint — "tapping a
+    /// group row lights that group's faces".
+    public static func litHue(_ groupColour: SIMD3<Float>) -> SIMD4<Float> {
+        SIMD4<Float>(groupColour.x, groupColour.y, groupColour.z, 0.7)
+    }
+
     public static func groupedHue(_ groupColour: SIMD3<Float>) -> SIMD4<Float> {
         let base = SIMD3<Float>(grouped.x, grouped.y, grouped.z)
         let mixed = base * 0.45 + groupColour * 0.55
@@ -225,7 +231,8 @@ public enum SurfaceTint {
                               selected: RegionID?,
                               picked: Set<FaceID> = [],
                               fragmentTested: Set<FaceID> = [],
-                              groupColours: [FaceID: SIMD3<Float>] = [:]) -> [Float] {
+                              groupColours: [FaceID: SIMD3<Float>] = [:],
+                              lit: Set<FaceID> = []) -> [Float] {
         let s = states(mesh: mesh, groupedFaces: groupedFaces,
                        regions: regions, selected: selected, picked: picked,
                        fragmentTested: fragmentTested)
@@ -270,7 +277,7 @@ public enum SurfaceTint {
             // is what says WHICH PIECE rather than which group.
             if !tested, st == .grouped, owner[i] >= 0,
                let gc = groupColours[owner[i]] {
-                c = groupedHue(gc)
+                c = lit.contains(owner[i]) ? litHue(gc) : groupedHue(gc)
             }
             out[i * 8] = c.x; out[i * 8 + 1] = c.y
             out[i * 8 + 2] = c.z; out[i * 8 + 3] = c.w
