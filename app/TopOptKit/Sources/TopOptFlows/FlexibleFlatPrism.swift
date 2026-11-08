@@ -301,12 +301,33 @@ public enum FlexibleFlatPrism {
 
     /// ★ THE LATTICE CAP from core's registered press stack: h ≤ min over its columns of (lattice_k + entry_t_k − t_A), t_A the
     /// apex's t in core's press frame (core's to_uvt): the squish target per column δ_k = (t_A + h) − entry_t_k then stays within
-    /// the lattice that column starts in. lattice_k is the run CONTIGUOUS from the entry (FlexStackInfo.latticeRunMM — core's own
-    /// samples read until the first off the lattice); core's lattice_mm (every latticed sample, another face-prism's lattice far
-    /// down the column too) only where the run is not given. nil: no column.
+    /// the lattice that column starts in. lattice_k is the run CONTIGUOUS from the entry: ★ C2 WIRING W1b — core's lattice_mm
+    /// (C2 B1a 8(a): another face-prism's lattice further down the column is no longer counted), on the run's lattice, the
+    /// columns that enter it only (restrict_to_lattice); it was the bridge's own run (latticeRunMM, gone). nil: no column.
+    /// ★ C2 WIRING W1b — ONLY THE COLUMNS ON THEIR CELL'S CENTRE stop the plane: C2's grid runs edge to edge (B1a item 25), a
+    /// cell the footprint covers in part is a column too, its ray from the covered piece's centroid when its centre is off the
+    /// face — there for the exact area, not as a stop: on his pad's Edge 16 a 0.0004 mm² sliver at the footprint's edge entered
+    /// and left the part within 0.04 mm and held the whole flat prism at 0.7 mm (the 15° twist landed at 1.7°, was 7°). A column
+    /// whose ray starts on its cell's centre is the rule the grid had before C2. RED CONTROL: `controlEveryColumnCaps`.
+    /// A footprint with NO cell on its centre (a sliver C2 now builds — before C2 core refused it, "no column at a … pitch") is
+    /// capped by every column: it is all partial cells, and an uncapped plane would press past its lattice.
     public static func latticeCap(_ st: FlexStackInfo, apexT: Double) -> Double? {
-        guard !st.columns.isEmpty else { return nil }
-        let run = st.latticeRunMM.count == st.columns.count ? st.latticeRunMM : st.columns.map(\.latticeMM)
-        return st.columns.indices.map { run[$0] + st.columns[$0].entryT - apexT }.min()
+        let centred = st.columns.indices.filter { controlEveryColumnCaps || st.onCellCentre($0) }
+        let caps = centred.isEmpty ? Array(st.columns.indices) : centred
+        guard !caps.isEmpty else { return nil }
+        return caps.map { st.columns[$0].latticeMM + st.columns[$0].entryT - apexT }.min()
+    }
+
+    /// ★ C2 WIRING W1b — TESTS ONLY (a red control): every column stops the plane, the partial cells' too.
+    nonisolated(unsafe) public static var controlEveryColumnCaps = false
+}
+
+extension FlexStackInfo {
+    /// ★ C2 WIRING W1b: column `i`'s ray starts on its CELL'S CENTRE (core's u, v = (iu + ½, iv + ½)·pitch, faces.cpp trace) —
+    /// the columns the grid had before C2. C2's grid runs edge to edge (B1a item 25): a cell whose centre is off the face is a
+    /// column too, for its exact area, its ray from its covered piece's centroid — not a cell to stop a plane on or draw whole.
+    public func onCellCentre(_ i: Int) -> Bool {
+        let c = columns[i], tol = 1e-6 * Swift.max(1, pitchMM)
+        return abs(c.uMM - (Double(c.iu) + 0.5) * pitchMM) <= tol && abs(c.vMM - (Double(c.iv) + 0.5) * pitchMM) <= tol
     }
 }

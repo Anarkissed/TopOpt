@@ -292,9 +292,10 @@ final class FlexibleR7M1Tests: XCTestCase {
         XCTAssertTrue(m.facePrismsSet, "his live lattice sets two face-prisms")
         let three = try XCTUnwrap(m.stack(3))
         XCTAssertGreaterThan(three.latticedColumns, 0, "Face 3 has lattice under it")
-        // Face 3's columns cross the pad to Face 5 (100 mm): 25 mm of lattice under each of the two prisms, none between
-        // (the red run's first expectation, 25, forgot Face 5's prism at the far end of the same columns)
-        XCTAssertEqual(three.latticeMMMax, 50, accuracy: 3.5, "…25 mm under each face-prism of the pair (one voxel)")
+        // Face 3's columns cross the pad to Face 5 (100 mm): 25 mm of lattice under each of the two prisms, none between.
+        // ★ RE-PINNED (C2 WIRING W1b — C2 B1a item 8(a): a face's lattice_mm is the run unbroken from its entry, through its OWN
+        // include regions): 25 mm, Face 3's own prism (was 50: core counted Face 5's prism at the far end of the same columns too)
+        XCTAssertEqual(three.latticeMMMax, 25, accuracy: 3.5, "…25 mm under Face 3's own face-prism (one voxel)")
         XCTAssertLessThan(three.latticeMMMax, three.stackMMMax - 20, "★ not the whole 100 mm column")
         // ★ RE-PINNED (round 7, M2 — his img3 words: "only the places with face-prisms get latticed … one of the lattice's
         // top faces"; the reviewer's ruling 3): the Top is pressed by its two lattice SECTIONS now (was: the whole Top, half its

@@ -149,9 +149,10 @@ extension FlexibleScene {
     /// ★ R7-E1: core's press API version (fx::kPressApiVersion).
     public static var pressApiVersion: Int { Int(topoptbridge.flexible_press_api_version()) }
 
-    /// ★ R7-E1 REVIEW — TESTS ONLY (a red control): the press columns' latticed run counted from the first sample (E1's rule —
-    /// a surface voxel core leaves Empty makes it 0). Off (the app): the leading off-lattice stretch within two voxels is travel.
-    nonisolated(unsafe) public static var controlRunFromFirstSample = false {
-        didSet { topoptbridge.flexible_control_run_from_first_sample(controlRunFromFirstSample) }
+    /// ★ C2 WIRING W1b — TESTS ONLY (a red control): a scene OPENED while this is on builds its stacks as before the wiring
+    /// (the Legacy grid, the region mask with no surface fill, a face's on the job's lattice, no press restrict_to_lattice). Off (the
+    /// app): the run's own stacks (FlexibleBridge.hpp).
+    nonisolated(unsafe) public static var controlStacksBeforeC2 = false {
+        didSet { topoptbridge.flexible_control_stacks_before_c2(controlStacksBeforeC2) }
     }
 }

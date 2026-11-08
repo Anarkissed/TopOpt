@@ -1,5 +1,5 @@
-# Angled presses (task 2026-10-07): the BASE goldens of 69b05961 (claude/flexible-screens, PR #362),
-# recorded by FlexibleAngledGoldenRecorder (RECORD=1, SWIFT_DETERMINISTIC_HASHING=1), built against core 69b059611c26.
+# Angled presses (task 2026-10-07): the BASE goldens of B9 C2 wiring W1b (C2 merge 02571c07 + W1 2724357f + W1b) (claude/flexible-screens, PR #362),
+# recorded by FlexibleAngledGoldenRecorder (RECORD=1, SWIFT_DETERMINISTIC_HASHING=1), built against core 551af4317149.
 # The core fingerprint is the repo HEAD when build_core.sh ran, so it lives HERE only: no compared golden
 # line carries it (testNoComparedGoldenCarriesTheCoreFingerprint). Read by FlexibleAngledGoldenTests.
 # AP0 recorded the first base at 01ec5e3c, BEFORE any angled-press code. S1 (the #361 sync) re-ran them,
@@ -48,3 +48,29 @@ rounded_slab.txt                  the two slabs' pseudo-faces and which wrap (co
 #   lattice_subtree_102117B9.json   the `wallThickness` block is gone, nothing else: 2353efb4 ("Remove the Lattice depth
 #                                   section and the slab") removed LatticeSettings.wallThickness and its CodingKey (an old
 #                                   save's key is read and ignored). No Flexible key changed.
+# C2 WIRING W1b on B9 (2026-11-08; #361's C2 core B0-B2c merged at 02571c07, core fingerprint 551af4317149): TWELVE files
+# re-recorded ONCE (RECORD=1, SWIFT_DETERMINISTIC_HASHING=1, FLEX_AP_BASE="B9 C2 wiring W1b (C2 merge 02571c07 + W1 2724357f +
+# W1b)") after the 46 classes that read core's stacks were green but these five tests (W1's gate failed on the same files, so
+# every move is C2's core, not the wiring). The other recorded files are byte-identical; the goldens then 19/19. Each move:
+#   frames_c1_pad.txt, frames_his_0004.txt, frames_his_0004_r5.txt   no column added or lost, no frame moved: (1) the side
+#                             faces' last row (the 20 mm pad over a 1.5625 mm pitch) carries its EXACT covered area, 1.953 for
+#                             2.441 mm² (B1a item 25: the grid runs edge to edge, a partial cell's area is cell ∩ footprint);
+#                             (2) lattice_mm 20 → 19.999999999999996 (one ulp: B1a item 8(a)'s run sums quarter-voxel steps).
+#   frames_l_bracket.txt      no frame moved (the STEP re-mesh, B0 item 15, moves none here); five faces gain their edge cells
+#                             (2320→2384, 1053→1233, 1014→1195, 2707→2728, 2365→2408 columns: item 25), the rest re-areaed.
+#   frames_m2.txt             78 regions: 55 gain edge cells (none loses one) and 16 core refused before ("face region N has no
+#                             column at a 3.410559 mm pitch": 9, 11-14, 27, 28, 41-47, 53, 75) are built now from their partial
+#                             cells (item 25); 7 re-areaed.
+#   fields_c1_pad.txt         the designs' last bits only (the 1-ulp lattice_mm above); the fields unchanged.
+#   fields_his_0004.txt       Face 5's design: noLattice 832 (was ok 786): his 0004's lattice is Top A's prism (x 50-100) and
+#                             Face 5's columns cross 50 mm of solid before it — B1a item 8(a): a face's lattice_mm is the run
+#                             unbroken from its entry (a leading stretch off the lattice within two voxels is travel), so it
+#                             reads 0 and C2's run would refuse a send that presses it (item 24, no_lattice_under_press; the
+#                             page already says "No lattice under Face 5"). Face 3 and the group field move with item 25's
+#                             areas (pressureEven 0.04828 → 0.04903).
+#   fields_his_0004_r5.txt    the same: the side faces' exact areas (item 25) move pressureEven and the designs over them.
+#   A1_0002_sends.txt, A1_0002_send2_run_job.json   send 2 rests Faces 1 and 22 too ("Send with Face 2, Face 1, Face 22
+#                             resting", was "Face 2 resting"): the A1 store's M2 project, as saved, had 9 of its 19 loaded
+#                             stacks refused (27, 41-47, 75 — no column at the pitch); item 25 builds all 19 (core refuses
+#                             0), and the hold's sends, computed over the stacks core builds, rest Faces 1 and 22 in send 2 too.
+#   MANIFEST.txt, probe_answers.json   their base and core labels (the probe's answers: all accepted, as since S1).

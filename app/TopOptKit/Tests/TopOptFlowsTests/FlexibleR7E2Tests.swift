@@ -37,6 +37,7 @@ final class FlexibleR7E2Tests: XCTestCase {
     }
 
     override func tearDown() {
+        FlexibleFlatPrism.controlEveryColumnCaps = false
         FlexiblePressShape.controlAcrossIsY = false
         FlexiblePressShape.controlSilent = false
         FlexibleJob.controlPressAsFaces = false
@@ -260,6 +261,19 @@ final class FlexibleR7E2Tests: XCTestCase {
         let phi = FlexibleFlatPrismAngles.decompose(f, p.direction).phi
         print("FLEX-E2-3 typed 15° → stored twist \(phi)° (\(m.lastFlatStop?.line ?? "no stop"))")
         XCTAssertGreaterThanOrEqual(phi, 5, "premise: twisted (15° typed; the lattice may land it short, said)")
+        // ★ C2 WIRING W1b — RED CONTROL: every column stops the plane, the partial cells' too (C2 B1a item 25: the grid runs edge to
+        // edge) — on the twist's own stack a sliver at the footprint's edge leaves the part within a fraction of a millimetre and
+        // holds the plane far short of h (the twist landed at 1.7° so, measured 11-08; was 7° before C2)
+        if let st0 = m.pressStack(press.id), let a0 = m.pressRegistrations[press.id]?.apexT, let h0 = p.settings.deepestMM as Double? {
+            let cap = try XCTUnwrap(FlexibleFlatPrism.latticeCap(st0, apexT: a0))
+            FlexibleFlatPrism.controlEveryColumnCaps = true
+            let redCap = FlexibleFlatPrism.latticeCap(st0, apexT: a0)
+            FlexibleFlatPrism.controlEveryColumnCaps = false
+            let red = try XCTUnwrap(redCap)
+            print("FLEX-E2-3 twisted \(phi)°: cap \(cap) on the cells' centres · RED CONTROL every column \(red) · h \(h0)")
+            XCTAssertGreaterThanOrEqual(cap + 1e-6, h0, "★ the cells on their centres hold the plane at h")
+            XCTAssertLessThan(red, h0, "★ RED CONTROL: a partial cell's sliver stops the plane short of h")
+        }
         let shape = try XCTUnwrap(m.pressShape(press.id))
         XCTAssertTrue(S.twisted(shape), "★ core's t of the two ends differ")
         let d = try XCTUnwrap(m.pressDesign(press.id))
@@ -292,7 +306,8 @@ final class FlexibleR7E2Tests: XCTestCase {
     func testAPressIsSentOnlyWhenCoreTakesIt() async throws {
         // the pure gate
         let pid = UUID()
-        let all = FlexiblePressSupport.Facts(schema: true, bridge: true, api: 2, stacked: nil, twoEntries: nil, shared: nil,
+        // ★ RE-PINNED (C2 WIRING W1: the gate's API is core's version, 8 since C2 — was the literal 2)
+        let all = FlexiblePressSupport.Facts(schema: true, bridge: true, api: FlexiblePressSupport.expectedAPI, stacked: nil, twoEntries: nil, shared: nil,
                                              designed: true, designRefusal: nil, conflict: nil)
         XCTAssertTrue(FlexiblePressSupport.verdict(all).inJob, "★ everything holds: in the job")
         let shared = FlexibleSharedFootprint(press: pid, pressName: "Edge 16", otherRegion: 3, otherPress: nil, otherName: "Face 3", mm2: 84.85)

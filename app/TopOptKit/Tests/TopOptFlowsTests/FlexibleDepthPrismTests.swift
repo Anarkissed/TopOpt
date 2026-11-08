@@ -167,31 +167,52 @@ final class FlexibleDepthPrismTests: XCTestCase {
         let geo = try FlexFaceGeometry.compute(scene: scene, key: FlexFaceKey(region: sector, rotation: 0), stack: stack,
                                                partFlat: part.flat.positions)
         let s = try XCTUnwrap(FlexibleDepthPrism.shell(stack: stack, centres: geo.centres, depthMM: 3, k: 2))
-        let cells = Set(stack.columns.map { SIMD2($0.iu, $0.iv) })
+        // ★ RE-PINNED (C2 WIRING W1b): the cells on their centre (FlexStackInfo.onCellCentre) — C2's grid runs edge to edge (B1a
+        // item 25): the diagonal's partial cells are columns too, rays from their covered pieces' centroids; the shell stands on
+        // the cells the grid had before (was: every column, all of them on their centres then)
+        let centred = stack.columns.indices.filter { stack.onCellCentre($0) }
+        XCTAssertGreaterThan(stack.columns.count, centred.count, "premise (C2 item 25): the diagonal's partial cells are columns too")
+        let cells = Set(centred.map { SIMD2(stack.columns[$0].iu, stack.columns[$0].iv) })
         // the columns' perimeter: every column side with no column across it
         var perimeter = 0
         for c in cells { for d in [SIMD2(1, 0), SIMD2(-1, 0), SIMD2(0, 1), SIMD2(0, -1)] where !cells.contains(c &+ d) { perimeter += 1 } }
         // the shell's boundary (edges used once), measured
-        var use: [UInt64: Int] = [:]
-        for t in stride(from: 0, to: s.indices.count, by: 3) {
-            for e in 0..<3 {
-                let a = s.indices[t + e], b = s.indices[t + (e + 1) % 3]
-                use[a < b ? UInt64(a) << 32 | UInt64(b) : UInt64(b) << 32 | UInt64(a), default: 0] += 1
+        func edgeUse(_ s: FaceOffsetShell) -> [UInt64: Int] {
+            var use: [UInt64: Int] = [:]
+            for t in stride(from: 0, to: s.indices.count, by: 3) {
+                for e in 0..<3 {
+                    let a = s.indices[t + e], b = s.indices[t + (e + 1) % 3]
+                    use[a < b ? UInt64(a) << 32 | UInt64(b) : UInt64(b) << 32 | UInt64(a), default: 0] += 1
+                }
             }
+            return use
         }
-        XCTAssertTrue(use.values.allSatisfy { $0 <= 2 }, "no edge is shared by three triangles")
-        var boundary = 0.0
-        for (key, n) in use where n == 1 {
-            boundary += Double(simd_length(s.base[Int(key >> 32)] - s.base[Int(key & 0xFFFF_FFFF)]))
+        func boundaryOf(_ s: FaceOffsetShell) -> Double {
+            var b = 0.0
+            for (key, n) in edgeUse(s) where n == 1 { b += Double(simd_length(s.base[Int(key >> 32)] - s.base[Int(key & 0xFFFF_FFFF)])) }
+            return b
         }
+        XCTAssertTrue(edgeUse(s).values.allSatisfy { $0 <= 2 }, "no edge is shared by three triangles")
+        let boundary = boundaryOf(s)
         let rects = FlexibleDepthPrism.rectangles(cells.map { ($0.x, $0.y) })
-        let want = Double(stack.columns.count) * stack.pitchMM * stack.pitchMM
-        print(String(format: "FLEX-PRISM diagonal sector: %d columns in %d rectangles, boundary %.1f mm (perimeter %.1f mm), skirt %d vertical edges",
-                     cells.count, rects.count, boundary, Double(perimeter) * stack.pitchMM, FlexibleDepthPrism.skirtVertices(s)))
+        let want = Double(cells.count) * stack.pitchMM * stack.pitchMM
+        print(String(format: "FLEX-PRISM diagonal sector: %d columns (%d on their centres) in %d rectangles, boundary %.1f mm (perimeter %.1f mm), skirt %d vertical edges",
+                     stack.columns.count, cells.count, rects.count, boundary, Double(perimeter) * stack.pitchMM, FlexibleDepthPrism.skirtVertices(s)))
         XCTAssertGreaterThan(rects.count, 5, "premise: a staircase, not one rectangle")
         XCTAssertEqual(rects.reduce(0) { $0 + ($1.u1 - $1.u0) * ($1.v1 - $1.v0) }, cells.count, "the rectangles cover every column once")
         XCTAssertEqual(Self.area(s), want, accuracy: want * 1e-6)
         XCTAssertEqual(boundary, Double(perimeter) * stack.pitchMM, accuracy: 1e-3, "the skirt rides the outline only")
+        // ★ RED CONTROL (C2 WIRING W1b): the shell over EVERY column — the partial cells' squares at their centroids skew the
+        // corners they share: the outline is no longer the cells'
+        FlexibleDepthPrism.controlEveryColumn = true
+        let skewed = FlexibleDepthPrism.shell(stack: stack, centres: geo.centres, depthMM: 3, k: 2)
+        FlexibleDepthPrism.controlEveryColumn = false
+        let skew = try XCTUnwrap(skewed)
+        var allPerimeter = 0
+        let all = Set(stack.columns.map { SIMD2($0.iu, $0.iv) })
+        for c in all { for d in [SIMD2(1, 0), SIMD2(-1, 0), SIMD2(0, 1), SIMD2(0, -1)] where !all.contains(c &+ d) { allPerimeter += 1 } }
+        print(String(format: "FLEX-PRISM diagonal sector RED CONTROL (every column): boundary %.1f mm (perimeter %.1f mm)", boundaryOf(skew), Double(allPerimeter) * stack.pitchMM))
+        XCTAssertGreaterThan(abs(boundaryOf(skew) - Double(allPerimeter) * stack.pitchMM), stack.pitchMM, "★ RED CONTROL: every column skews the outline")
         // ★ RED CONTROL: each rectangle fanned through its own FOUR corners only — its sides meet
         // its neighbours' at T-junctions, and every such side reads as a boundary (a wall inside)
         struct Seg: Hashable { let a: SIMD2<Int>; let b: SIMD2<Int> }

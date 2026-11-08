@@ -1890,6 +1890,8 @@ public final class FlexibleStageModel: ObservableObject {
         (inputs.buildDir, inputs.plateDir) = buildDirections
         inputs.pinches = pinches.map { [$0.a, $0.b] }
         inputs.presses = pressEntries
+        // ★ C2 WIRING W1b: a stage that asks core with no face-prism (the tests' ruling-6 controls only) runs the whole part, as its scene
+        inputs.wholePartWithoutPrism = !facePrismsNow && mayAskCore(facePrism: false)
         return try FlexibleJob.runJobJSON(inputs)
     }
 }

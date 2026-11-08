@@ -28,7 +28,7 @@ final class FlexibleR7E1ReviewTests: XCTestCase {
     typealias A = FlexibleFlatPrismAngles
 
     override func tearDown() {
-        FlexibleScene.controlRunFromFirstSample = false
+        FlexibleScene.controlStacksBeforeC2 = false
         FlexibleStageModel.controlNoStartHold = false
         FlexibleStageModel.controlPerPressRest = false
         FlexibleStageModel.controlNoLatticeLanding = false
@@ -65,37 +65,30 @@ final class FlexibleR7E1ReviewTests: XCTestCase {
         corner ? F.corner(m, p, faces: faces) : F.M2.edge(m, p, faces: faces)
     }
 
-    /// Core's press stack's columns that core says are latticed but whose run from the entry the bridge reads as 0.
+    /// Core's press stack's columns whose lattice run from the entry is 0. ★ RE-PINNED (C2 WIRING W1b): core's lattice_mm IS the run
+    /// from the entry (C2 B1a 8(a)) and the scene keeps only the columns that enter the lattice (restrict_to_lattice), as the run
+    /// does — it was the bridge's own run (latticeRunMM, gone) against core's every-sample lattice_mm.
     func zeroRuns(_ st: FlexStackInfo) -> Int {
-        st.columns.indices.filter { st.latticeRunMM.count == st.columns.count && st.latticeRunMM[$0] == 0 && st.columns[$0].latticeMM > 0 }.count
+        st.columns.filter { $0.latticeMM <= 0 }.count
     }
 
     // MARK: - R1 + R2
 
     /// R1. His pad at BALANCED (his own quality): 19.2 of core's 1.04 mm voxels tall, so core leaves the Top's surface layer Empty
     /// (centres at z 20.31). [Done] on the Top + Face 2 edge and on the Top corner stores the flat prism 3 mm deep, with a cap from
-    /// core's columns well past it, and no latticed column reads 0 mm of lattice. His live Edge (Face 3 + Face 2) still stores. RED
-    /// CONTROL (E1's rule, the run counted from the first sample): "Stops at 0.4 mm · the lattice ends there", nothing stored.
+    /// core's columns well past it, and no latticed column reads 0 mm of lattice. His live Edge (Face 3 + Face 2) still stores.
+    /// ★ RE-PINNED (C2 WIRING W1b): the RED CONTROL is CORE'S now — the fix moved into core's lattice_mm (C2 B1a 8(a), the
+    /// bridge's rule: a leading off-lattice stretch within two voxels of the entry is travel), red there (test_flexible_b1a,
+    /// 8(a)(i): "three is not"). The app keeps no rule of its own to switch off: a scene opened before the wiring (the Legacy
+    /// grid, no surface fill) stores here too (measured 11-08). Was: E1's rule, the bridge's run counted from the first sample —
+    /// "Stops at 0.x mm · the lattice ends there", nothing stored.
     func testTheTopEdgeAndTheCornerStoreAtBalanced() async throws {
         for (faces, corner) in [(Set([1, 2]), false), (Set([1, 2, 3]), true)] {
-            let (r, m) = try await pad(.balanced)
-            // ★ RED CONTROL first: E1's run from the first sample
-            FlexibleScene.controlRunFromFirstSample = true
-            var pick = try await F.M2.pickMode(m)
-            var c = try XCTUnwrap(candidate(m, pick, faces, corner: corner), "\(faces.sorted()) at Balanced")
+            let (_, m) = try await pad(.balanced)
+            // (the red control is core's — the doc above)
+            let pick = try await F.M2.pickMode(m)
+            let c = try XCTUnwrap(candidate(m, pick, faces, corner: corner), "\(faces.sorted()) at Balanced")
             XCTAssertNil(pick.greyed[c.number], "\(FlexibleRowCopy.candidateLabel(c)) is offered")
-            let before = r.project.lattice.flexible, past = r.project.undo.past.count
-            m.toggleEdgePick(c.number)
-            let red = try await F.M2.done(m)
-            print("FLEX-E1R-R1 RED CONTROL \(faces.sorted()) Balanced: [Done] → \(red ?? "stored")")
-            XCTAssertTrue(red?.hasPrefix("Stops at 0.") ?? false, "★ RED CONTROL: E1's run stops the Top's columns at core's Empty surface voxel: \(red ?? "stored")")
-            XCTAssertEqual(r.project.lattice.flexible, before, "RED CONTROL: nothing stored")
-            XCTAssertEqual(r.project.undo.past.count, past)
-            m.cancelEdgePick()
-            FlexibleScene.controlRunFromFirstSample = false
-            // the fix
-            pick = try await F.M2.pickMode(m)
-            c = try XCTUnwrap(candidate(m, pick, faces, corner: corner))
             m.toggleEdgePick(c.number)
             let why = try await F.M2.done(m)
             XCTAssertNil(why, "★ \(FlexibleRowCopy.candidateLabel(c)) at Balanced: [Done] stores the flat prism")
@@ -336,7 +329,9 @@ final class FlexibleR7E1ReviewTests: XCTestCase {
     /// principal axis — turned to the Top's edges. Its column quads now stop at the Top's outer edge and behind its own cut line
     /// (none past either by more than a micron), and the band along every outer edge and along the cut is covered (a point 0.2 mm
     /// inside each, every 0.5 mm, lies on a drawn triangle of the Top). RED CONTROL (the quads as they come): quads past the edge
-    /// and notches along it — the sawtooth. (The cut line's checks were added after the red run, found by looking at the corner.)
+    /// — the sawtooth. (The cut line's checks were added after the red run, found by looking at the corner.) ★ RE-PINNED (C2
+    /// WIRING W1b): the control's NOTCHES are gone at the source — C2's grid runs edge to edge (B1a item 25), the edge's partial
+    /// cells are columns too, so the quads as they come reach the edge (they step past it by up to a cell instead).
     func testACornersTurnedRestHasNoSawtooth() async throws {
         let (r, m) = try await F.hisPad(self)
         let mesh = try XCTUnwrap(r.project.viewerMesh)
@@ -405,7 +400,7 @@ final class FlexibleR7E1ReviewTests: XCTestCase {
         let got = try measure()
         print("FLEX-E1R-R7 RED CONTROL: quads past the edge by \(red.past) mm · notches \(red.notches)/\(red.samples) · the fix: \(got.past) mm · \(got.notches)/\(got.samples)")
         XCTAssertGreaterThan(red.past, 0.05, "★ RED CONTROL: quads step past the Top's edge")
-        XCTAssertGreaterThan(red.notches, 0, "★ RED CONTROL: notches along the edge")
+        XCTAssertEqual(red.notches, 0, "★ RE-PINNED (C2 B1a item 25): the quads as they come reach the edge — no notch to fill")
         XCTAssertLessThan(got.past, 1e-3, "★ no quad past the Top's outer edge")
         XCTAssertEqual(got.notches, 0, "★ the band along every outer edge is covered")
     }

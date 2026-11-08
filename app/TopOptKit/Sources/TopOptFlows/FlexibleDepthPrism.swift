@@ -46,6 +46,9 @@ enum FlexibleDepthPrism {
 
     /// The base sits this far inside the face, so the heat map (lifted 0.05 mm out) stays readable.
     static let insetMM = 0.05
+    /// ★ C2 WIRING W1b — TESTS ONLY (a red control): the shell over EVERY column, the partial cells' too (their squares at their
+    /// centroids).
+    nonisolated(unsafe) static var controlEveryColumn = false
     /// The shallowest squish a drag can set (core refuses ≤ 0).
     static let minMM = 0.5
     /// The drag's round detents.
@@ -61,7 +64,10 @@ enum FlexibleDepthPrism {
     static func shell(stack st: FlexStackInfo, centres: [SIMD3<Double>], depthMM: Double, k: Double,
                       flatOutline: Bool = true, columns only: Set<Int>? = nil) -> FaceOffsetShell? {
         guard !st.columns.isEmpty, centres.count == st.columns.count, st.pitchMM > 0 else { return nil }
-        let kept = st.columns.indices.filter { only?.contains($0) ?? true }
+        // ★ C2 WIRING W1b: the cells on their centre only (FlexStackInfo.onCellCentre) — a partial cell's ray starts at its covered
+        // piece's centroid (C2 B1a item 25), so its square drawn there would skew every corner it shares (the diagonal sector's
+        // shell lost 250 mm² and its outline)
+        let kept = st.columns.indices.filter { (only?.contains($0) ?? true) && (Self.controlEveryColumn || st.onCellCentre($0)) }
         guard !kept.isEmpty else { return nil }
         struct Key: Hashable { let u: Int; let v: Int }
         var sum: [Key: SIMD3<Double>] = [:], count: [Key: Int] = [:]

@@ -266,15 +266,6 @@ struct FlexStack {
   std::vector<int32_t> sector_refused;
   // ★ R7-E1: the regions whose union is the footprint (core's Stack.footprint_region_ids — one for a face, 2+ for a press).
   std::vector<int32_t> footprint_region_ids;
-  // ★ R7-E1 (a registered PRESS's stack only; empty for a face's): per column, the latticed run CONTIGUOUS FROM ITS ENTRY —
-  // core's own lattice_mm samples (faces.cpp: n = ⌈len / ¼ voxel⌉ points at entry + (k + ½)·step along the load, against the
-  // scene's mask), counted until the first sample off the lattice. core's lattice_mm counts every latticed sample of the column
-  // (another face-prism's lattice far down it too); the flat prism's wedge must stay in the lattice it starts in.
-  // ★ R7-E1 REVIEW: a leading off-lattice stretch within two voxels of the entry is travel (a surface voxel core leaves Empty —
-  // its centre outside the part, the Top at Balanced — never makes the run 0), and a hole of at most one voxel's diagonal inside
-  // the run is crossed (core's Empty sheet under the Top's triangle diagonal at Balanced): run = t of the end of the last latticed
-  // sample before the first longer gap − entry_t.
-  std::vector<double> col_lattice_run_mm;
 };
 FlexStack flexible_scene_stack(int64_t scene, int32_t face_region_id, int32_t rotation_deg,
                                BridgeError& err);
@@ -819,10 +810,10 @@ int32_t flexible_scene_register_press(int64_t scene, const std::vector<int32_t>&
 // ★ R7-E1: core's press API version (fx::kPressApiVersion; 2 at #361 099dcaed).
 int32_t flexible_press_api_version();
 
-// ★ R7-E1 REVIEW — TESTS ONLY (a red control): the press columns' latticed run counted from the FIRST sample (it stops at
-// the first sample off the lattice, so a surface voxel core leaves Empty makes the run 0) — E1's rule. Off: the leading
-// off-lattice stretch within one voxel of the entry is travel (col_lattice_run_mm).
-void flexible_control_run_from_first_sample(bool on);
+// ★ C2 WIRING W1b — TESTS ONLY (a red control): a scene opened while this is on builds its stacks as before the wiring — the
+// Legacy grid, flexible_region_mask (no surface fill), a face's on the job's lattice, no restrict_to_lattice. Off (the app):
+// the run's (run.cpp) — Watertight, flexible_lattice_mask, a face's own lattice, a press's restrict_to_lattice.
+void flexible_control_stacks_before_c2(bool on);
 
 // ★ AP3: core's side-stack threshold (fx::kSideStackDeg, 15°) — for the side label's (i) text ONLY.
 // The side VERDICT is never computed from it in the app: it is core's FaceFrame.side for the stated

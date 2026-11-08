@@ -655,7 +655,7 @@ extension FlexibleStageModel {
         for g in mine {
             for r in g.regions { if let st = stack(r) { d += st.columns.map(\.latticeMM).filter { $0 > 0 } } }
             for p in g.presses {
-                if let st = pressStack(p) { d += (st.latticeRunMM.isEmpty ? st.columns.map(\.latticeMM) : st.latticeRunMM).filter { $0 > 0 } }
+                if let st = pressStack(p) { d += st.columns.map(\.latticeMM).filter { $0 > 0 } }   // ★ C2 WIRING W1b: core's run
             }
         }
         return d.isEmpty ? nil : d.reduce(0, +) / Double(d.count)

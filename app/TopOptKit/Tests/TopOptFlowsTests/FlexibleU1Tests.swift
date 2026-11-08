@@ -57,16 +57,11 @@ final class FlexibleU1Tests: XCTestCase {
     /// His img_1020_10: thin violet rods standing in the lattice. Cause: core's field leaves whole voxel columns EMPTY inside
     /// the part where a voxel centre lies exactly on the pad's top/bottom diagonal (each is two triangles split along x = y);
     /// each column cut a hole straight through the lattice and the walls ended at it with their violet cut faces.
+    /// ★ RE-PINNED (C2 WIRING W1b): the cause is fixed AT THE SOURCE — the run voxelizes WATERTIGHT (C2 B0 item 1) and the scene
+    /// with it, so core's field has no hole and the app's seam fill puts back nothing (W2 drops it). RED CONTROL (was: the wired
+    /// field itself): the field of a scene opened before the wiring (FlexibleScene.controlStacksBeforeC2 — the Legacy grid) has
+    /// the holes, on the diagonal, whole columns, and the seam fill closes them.
     func testNoRodsInTheLattice() async throws {
-        let (r, _, m) = try await hisPad(lattice: true)
-        let f = try XCTUnwrap(m.lastCombinedField, "the kept field")
-        let part = try XCTUnwrap(r.project.viewerMesh)
-        let b = m.build
-        func inputs(_ seam: Bool) throws -> FlexibleLatticeInputs {
-            try FlexibleLatticeBuilder.inputs(field: f, part: part, topology: b.topology, beadsPerWall: b.beadsPerWall,
-                                              beadWidthMM: b.beadWidthMM, buildDir: m.sceneInfo?.buildDir ?? SIMD3(0, 0, 1),
-                                              skinOffFaces: [], finish: m.settings.finishMode, seamFill: seam)
-        }
         /// Columns holding a non-lattice voxel with lattice on both sides (x or y) — a hole through the lattice.
         func holes(_ mk: FlexGrid) -> [SIMD2<Int>: Int] {
             var out: [SIMD2<Int>: Int] = [:]
@@ -77,31 +72,40 @@ final class FlexibleU1Tests: XCTestCase {
             } } }
             return out
         }
-        // RED CONTROL: the mask as core gives it — the holes, on the diagonal, every layer
-        let control = try inputs(false)
+        func inputs(_ m: FlexibleStageModel, _ f: FlexDensityField, _ part: ViewerMesh, _ seam: Bool) throws -> FlexibleLatticeInputs {
+            let b = m.build
+            return try FlexibleLatticeBuilder.inputs(field: f, part: part, topology: b.topology, beadsPerWall: b.beadsPerWall,
+                                                     beadWidthMM: b.beadWidthMM, buildDir: m.sceneInfo?.buildDir ?? SIMD3(0, 0, 1),
+                                                     skinOffFaces: [], finish: m.settings.finishMode, seamFill: seam)
+        }
+        // ★ RED CONTROL first: a scene opened before the wiring — the mask as core gave it then: the holes, on the diagonal, every layer
+        FlexibleScene.controlStacksBeforeC2 = true
+        let (rc, _, mc) = try await hisPad(lattice: true)
+        FlexibleScene.controlStacksBeforeC2 = false
+        let fc = try XCTUnwrap(mc.lastCombinedField, "the control's kept field")
+        let partC = try XCTUnwrap(rc.project.viewerMesh)
+        let control = try inputs(mc, fc, partC, false)
         let before = holes(control.mask)
-        log.append("control: \(before.count) hole columns \(before.sorted { $0.key.x < $1.key.x }.map { "(\($0.key.x),\($0.key.y))×\($0.value)" })")
-        XCTAssertGreaterThanOrEqual(before.count, 1, "RED CONTROL: core's field has the holes")
+        log.append("control (before the wiring): \(before.count) hole columns \(before.sorted { $0.key.x < $1.key.x }.map { "(\($0.key.x),\($0.key.y))×\($0.value)" })")
+        XCTAssertGreaterThanOrEqual(before.count, 1, "★ RED CONTROL: core's field before the wiring has the holes")
         XCTAssertTrue(before.keys.allSatisfy { $0.x == $0.y }, "premise: on the x = y diagonal (the top's and bottom's shared edge)")
-        XCTAssertTrue(before.values.allSatisfy { $0 >= f.nz - 1 }, "premise: whole columns")
-        // the fix: the page's own lattice (built through the builder) and the builder itself
-        let fixed = try inputs(true)
-        XCTAssertEqual(holes(fixed.mask).count, 0, "no hole left through the lattice")
-        XCTAssertGreaterThan(fixed.seamFilled, 0)
+        XCTAssertTrue(before.values.allSatisfy { $0 >= fc.nz - 1 }, "premise: whole columns")
+        let filled = try inputs(mc, fc, partC, true)
+        XCTAssertEqual(holes(filled.mask).count, 0, "control: the seam fill closed them")
+        XCTAssertGreaterThan(filled.seamFilled, 0, "control: the seam fill put voxels back")
+        // the fix: the wired scene — core's own field, no seam fill
+        let (r, _, m) = try await hisPad(lattice: true)
+        let f = try XCTUnwrap(m.lastCombinedField, "the kept field")
+        let part = try XCTUnwrap(r.project.viewerMesh)
+        let core = try inputs(m, f, part, false)
+        XCTAssertEqual(holes(core.mask).count, 0, "★ core's field has no hole through the lattice (C2 B0 item 1, the Watertight grid)")
+        let fixed = try inputs(m, f, part, true)
+        XCTAssertEqual(fixed.seamFilled, 0, "★ nothing left for the seam fill to put back")
+        XCTAssertEqual(fixed.mask.values, core.mask.values, "★ the seam fill changes nothing")
         let shown = try XCTUnwrap(m.lattice).inputs
         XCTAssertEqual(holes(shown.mask).count, 0, "the lattice the page draws has no hole")
         XCTAssertEqual(shown.mask.values, fixed.mask.values, "the page's mask is the builder's")
-        // nothing else moved: only voxels core had left out, each between lattice of ONE region
-        var changed = 0
-        for v in 0..<fixed.mask.values.count where fixed.mask.values[v] != control.mask.values[v] {
-            changed += 1
-            XCTAssertEqual(control.mask.values[v], 0)
-            XCTAssertEqual(f.owner[v], -1, "only a voxel core left out")
-        }
-        // (the put-back columns' top voxels, outside the part by core's rule, then join through the R7 mask-to-surface fill)
-        XCTAssertGreaterThanOrEqual(changed, fixed.seamFilled)
-        XCTAssertLessThanOrEqual(changed - fixed.seamFilled, before.count, "at most one surface voxel per column on top")
-        log.append("fixed: \(fixed.seamFilled) voxels put back, 0 hole columns")
+        log.append("fixed: core's field 0 hole columns, \(fixed.seamFilled) voxels put back")
         if Self.dir != nil { try latticePair(part: part, lattice: try XCTUnwrap(m.lattice), control: control) }
         flush("U1_lines_rods.txt")
     }

@@ -52,6 +52,10 @@ public enum FlexibleJob {
         /// loaded entry: face_region_ids (its pieces, member order) + press_direction (its stored bits). Empty ⇒ the job is
         /// byte-identical to before (every face entry is).
         public var presses: [PressEntry] = []
+        /// ★ C2 WIRING W1b: the stage as before ruling 6 — a TEST control only (the synthetic parts and the goldens' C1 pad ask core
+        /// with no face-prism, FlexibleCoreDoor): its scene lattices the whole part, so its run job keeps core's default
+        /// (`whole_part`) and states no `no_include_region`. The app never sends a job with no face-prism (FlexibleCoreRun).
+        public var wholePartWithoutPrism = false
 
         public init(modelPath: String, resolution: Int, beadWidthMM: Double, faceCount: Int,
                     settings: FlexibleStageSettings, regions: [[String: Any]] = [],
@@ -137,7 +141,8 @@ public enum FlexibleJob {
         for p in i.presses { faces += pressEntries(p, finish: finish) }
         var block = header(i, material: material)
         block["faces"] = faces
-        if sendsC2W1 { block["no_include_region"] = "no_lattice" }   // ★ C2 WIRING W1 (the run job only; the scene reads no faces)
+        // ★ C2 WIRING W1 (the run job only; the scene reads no faces) — ★ W1b: not for the stage as before ruling 6 (a test control)
+        if sendsC2W1 && !i.wholePartWithoutPrism { block["no_include_region"] = "no_lattice" }
         let checks = try i.settings.checkStamps.map { c -> [String: Any] in
             guard let g = i.stampGrids[c.stamp.id] else { throw EncodeError.missingStampGrid(c.stamp.id) }
             var e = stampEntry(g)

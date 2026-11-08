@@ -129,6 +129,15 @@ struct Scene {
   topopt::StepModel model;
   topopt::VoxelGrid grid;
   std::vector<char> mask;
+  // ★ C2 WIRING W1b (B9, 11-08): the RUN's lattice — flexible_lattice_mask, the region mask plus core's surface fill (C2 B1a
+  // 9(b)). Every stack is built on it as the run builds its own (run.cpp): a press's on it, a face's on its OWN include regions
+  // (C2 B1a 8(a), flexible_face_lattice_mask); a PRESS's then kept to the columns that enter it (item 24, restrict_to_lattice
+  // — a face's stays whole for the page, stack_of). `mask`
+  // stays flexible_region_mask — the field and the drawing: the app fills its own surface (FlexibleLatticeField.inputs), the
+  // rule core's fill copies, so the two agree voxel for voxel.
+  std::vector<char> lattice;
+  std::map<int, std::vector<char>> face_lattice;   // a face region's own lattice, by region id (built on first ask)
+  bool before_c2 = false;                          // TESTS ONLY: opened under flexible_control_stacks_before_c2
   std::vector<topopt::ResolvedFaceRegion> regions;
   topopt::Vec3 build{0, 0, 1};
   long long lattice_voxels = 0;
@@ -152,8 +161,9 @@ struct Scene {
 // ★ R7-E1: synthetic press ids start here and go down — new for every registration, never reused in the process.
 constexpr int kSyntheticPressMax = -1000;
 std::atomic<int32_t> g_next_press{kSyntheticPressMax};
-// ★ R7-E1 REVIEW: TESTS ONLY — the press columns' run from the first sample (flexible_control_run_from_first_sample).
-std::atomic<bool> g_control_run_first_sample{false};
+// ★ C2 WIRING W1b: TESTS ONLY — a scene opened while this is on builds its stacks as before the wiring
+// (flexible_control_stacks_before_c2).
+std::atomic<bool> g_control_before_c2{false};
 
 std::mutex& g_scene_mu = *new std::mutex;                                                   // ★ T1: never destroyed
 std::map<int64_t, std::shared_ptr<Scene>>& g_scenes = *new std::map<int64_t, std::shared_ptr<Scene>>;
@@ -172,8 +182,28 @@ const topopt::ResolvedFaceRegion& region_of(const Scene& s, int id) {
   throw std::invalid_argument("face region " + std::to_string(id) + " is not declared in the job");
 }
 
+// Caller holds s.mu. ★ C2 WIRING W1b: a face region's OWN lattice (C2 B1a 8(a) — the run's flexible_face_lattice_mask).
+const std::vector<char>& face_lattice_of(Scene& s, const topopt::ResolvedFaceRegion& r) {
+  if (s.before_c2) return s.mask;
+  auto it = s.face_lattice.find(r.id);
+  if (it != s.face_lattice.end()) return it->second;
+  return s.face_lattice[r.id] = topopt::flexible_face_lattice_mask(s.job, s.model, s.grid, {&r});
+}
+
+// ★ C2 WIRING W1b: the run's restrict_to_lattice (C2 B1a item 24) — only the columns that enter the lattice, the weight and
+// the map over them. Where NO column enters, the run refuses (no_lattice_under_press, FlexibleCoreRun's plain words); the scene
+// keeps core's whole stack (every column's lattice_mm 0), so the app still says "No lattice under …".
+void restrict_as_run(const Scene& s, fx::Stack& st) {
+  if (s.before_c2) return;
+  try {
+    fx::restrict_to_lattice(st, s.regions);
+  } catch (const fx::FlexibleError&) {
+  }
+}
+
 // Caller holds s.mu. ★ R7-E1: an id ≤ kSyntheticPressMax is a registered PRESS — core's press stack over its footprint
-// along its stated direction (fx::build_press_stack), cached per (id, rotation) like a face's.
+// along its stated direction (fx::build_press_stack), cached per (id, rotation) like a face's. ★ C2 WIRING W1b: built and
+// restricted as the run builds its stacks.
 const fx::Stack& stack_of(Scene& s, int face, int rot) {
   auto key = std::make_pair(face, rot);
   auto it = s.stacks.find(key);
@@ -185,11 +215,16 @@ const fx::Stack& stack_of(Scene& s, int face, int rot) {
       throw std::invalid_argument("face region " + std::to_string(face) + " is not declared in the job");
     std::vector<const topopt::ResolvedFaceRegion*> fp;
     for (int id : p->second.footprint) fp.push_back(&region_of(s, id));
-    st = std::make_unique<fx::Stack>(fx::build_press_stack(s.model, fp, s.regions, s.grid, s.mask, rot, s.build,
+    st = std::make_unique<fx::Stack>(fx::build_press_stack(s.model, fp, s.regions, s.grid, s.lattice, rot, s.build,
                                                            s.grid.spacing, &p->second.direction));
+    restrict_as_run(s, *st);
   } else {
-    st = std::make_unique<fx::Stack>(fx::build_stack(s.model, region_of(s, face), s.regions, s.grid,
-                                                     s.mask, rot, s.build, s.grid.spacing));
+    // A FACE's stack stays WHOLE: the page reads what lies under every part of the face (the lattice under it, its sections,
+    // its depth prism, the one-tap fixes) — the run presses only its columns that enter the lattice (restrict_to_lattice);
+    // its receipt's over_solid_columns is W2's.
+    const topopt::ResolvedFaceRegion& r = region_of(s, face);
+    st = std::make_unique<fx::Stack>(fx::build_stack(s.model, r, s.regions, s.grid,
+                                                     face_lattice_of(s, r), rot, s.build, s.grid.spacing));
   }
   const fx::Stack& ref = *st;
   s.stacks[key] = std::move(st);
@@ -213,7 +248,8 @@ squishfe::Press press_of(Scene& s, const FlexSquishPress& p) {
     fp.push_back(&region_of(s, id));   // (the scene's own regions, as stack_of passes them)
   }
   out.region = out.footprint.front();
-  out.stack = fx::build_press_stack(s.model, fp, s.regions, s.grid, s.mask, 0, s.build, s.grid.spacing, &d);
+  out.stack = fx::build_press_stack(s.model, fp, s.regions, s.grid, s.lattice, 0, s.build, s.grid.spacing, &d);
+  restrict_as_run(s, out.stack);   // ★ C2 WIRING W1b
   out.has_direction = true;
   out.direction = topopt::Vec3{d.x / n, d.y / n, d.z / n};
   out.weight_n = p.weight_n;
@@ -627,8 +663,13 @@ int64_t flexible_scene_open(const std::string& job_json, const std::string& job_
     if (!s->job.flexible) throw std::invalid_argument("the job has no \"flexible\" block");
     const std::string model_path = (std::filesystem::path(job_dir) / s->job.model).string();
     s->model = topopt::import_part_file_resolved(model_path);
-    s->grid = topopt::voxelize(s->model.mesh, s->job.resolution);
+    // ★ C2 WIRING W1b: the Flexible run voxelizes WATERTIGHT (C2 B0 item 1, run.cpp) — the scene too, so its stacks are the
+    // run's; and the run's lattice beside the region mask (Scene::lattice)
+    s->before_c2 = g_control_before_c2.load();
+    s->grid = topopt::voxelize(s->model.mesh, s->job.resolution,
+                               s->before_c2 ? topopt::VoxelTies::Legacy : topopt::VoxelTies::Watertight);
     s->mask = topopt::flexible_region_mask(s->job, s->model, s->grid);
+    s->lattice = s->before_c2 ? s->mask : topopt::flexible_lattice_mask(s->job, s->model, s->grid);
     s->regions = topopt::resolve_face_regions(s->model, s->job.loads.face_regions);
     s->build = s->job.has_build_direction
                    ? s->job.build_direction
@@ -683,57 +724,8 @@ FlexStack flexible_scene_stack(int64_t scene, int32_t face_region_id, int32_t ro
     const fx::Stack& st = stack_of(*s, face_region_id, rotation_deg);
     const fx::FaceFrame& f = st.frame;
     fill_stack(st, o);   // ★ R7-E2: the one copy (the run's A5 stacks take it too)
-    // ★ R7-E1: a press's columns — the latticed run contiguous from each entry (core's own samples; FlexibleBridge.hpp).
-    // ★ R7-E1 REVIEW (the verifier: at Balanced his 20 mm pad is 19.2 voxels tall and core leaves the Top's surface layer Empty —
-    // its centres at z 20.31, above the part — so every column entering through the Top read 0 mm and [Done] was refused at
-    // 0.4 mm): a leading stretch OFF the lattice within TWO voxels of the entry is travel, not the end — the run is the t of the
-    // last sample of the first latticed stretch past the entry. Two, not one: along the Top's triangle diagonal core also leaves
-    // the voxel below the surface layer Empty at Balanced (six columns of 7,776 over his Top + Face 2 entering there). A column with no latticed sample within two voxels of its entry still reads 0. And inside the run a
-    // hole of at most one voxel's diagonal is crossed, not its end: at Balanced core leaves voxels along the Top's triangle
-    // diagonal (x = y on his pad) Empty inside the lattice, and the columns crossing them stopped there — his Top + Face 2 edge was
-    // capped at 2.98 mm by one (a column entering at (3.6, 2.0, 20): 1.56 mm of lattice, then the hole). A gap longer than a voxel's diagonal (the 50 mm between Face 3's and Face 5's slabs on
-    // his live pad) still ends it. Where the run has no hole (Fast, Fine, the sides) it is E1's, sample for sample.
-    if (face_region_id <= kSyntheticPressMax && s->mask.size() == s->grid.voxel_count() && s->grid.spacing > 0.0) {
-      const topopt::VoxelGrid& g = s->grid;
-      const bool first_sample = g_control_run_first_sample.load();   // (the red control: E1's rule)
-      for (const fx::StackColumn& c : st.columns) {
-        const double len = c.exit_t - c.entry_t;
-        double run = 0.0;
-        if (len > 0.0) {
-          const topopt::Vec3 org = f.from_uv(c.u_mm, c.v_mm);
-          const int n = std::max(1, static_cast<int>(std::ceil(len / (0.25 * g.spacing))));
-          const double step = len / n;
-          bool in_lattice = false;
-          int gap = 0;   // off-lattice samples since the last latticed one (inside the run)
-          const int gap_max = static_cast<int>(std::floor(std::sqrt(3.0) * g.spacing / step));   // one voxel's diagonal
-          for (int k = 0; k < n; ++k) {
-            const double t = c.entry_t + (k + 0.5) * step;
-            const topopt::Vec3 p{org.x + f.load.x * t, org.y + f.load.y * t, org.z + f.load.z * t};
-            const int i = static_cast<int>(std::floor((p.x - g.origin.x) / g.spacing));
-            const int j = static_cast<int>(std::floor((p.y - g.origin.y) / g.spacing));
-            const int kk = static_cast<int>(std::floor((p.z - g.origin.z) / g.spacing));
-            const bool on = !(i < 0 || j < 0 || kk < 0 || i >= g.nx || j >= g.ny || kk >= g.nz) && s->mask[g.index(i, j, kk)];
-            if (first_sample) {
-              if (!on) break;
-              run += step;
-              continue;
-            }
-            if (on) {
-              // the first latticed sample: the leading Empty stretch (k samples) counts as travel; a hole of at most one voxel
-              // inside the run is crossed (its samples count); then sample by sample, as E1
-              run = in_lattice ? run + gap * step + step : k * step + step;
-              in_lattice = true;
-              gap = 0;
-            } else if (!in_lattice) {
-              if ((k + 0.5) * step > 2.0 * g.spacing) break;   // no lattice within two voxels of the entry
-            } else if (++gap > gap_max) {
-              break;   // the lattice ended: more than a voxel's diagonal of no lattice
-            }
-          }
-        }
-        o.col_lattice_run_mm.push_back(run);
-      }
-    }
+    // ★ C2 WIRING W1b: a column's lattice_mm IS its run from the entry now (C2 B1a 8(a), on the run's lattice: the surface
+    // fill and the Watertight grid leave no Empty surface layer and no seam hole) — the bridge's own run (R7-E1) is gone.
     // ★ S1 (#361's 254cb137): a sector's voxels core does not own — its in_stack's column and t
     // test at each voxel centre, then core's public stack_owns_projection (field.cpp's in_stack).
     if (!st.cuts.empty() || !st.part_cuts.empty()) {
@@ -944,7 +936,7 @@ std::vector<FlexConflict> flexible_scene_conflicts(int64_t scene,
     std::vector<const fx::Stack*> sp;
     for (std::size_t i = 0; i < face_region_ids.size(); ++i)
       sp.push_back(&stack_of(*s, face_region_ids[i], i < rotations.size() ? rotations[i] : 0));
-    for (const fx::StackConflict& c : fx::find_stack_conflicts(s->grid, s->mask, sp))
+    for (const fx::StackConflict& c : fx::find_stack_conflicts(s->grid, s->lattice, sp))   // ★ C2 WIRING W1b: the run's
       out.push_back(FlexConflict{c.face_a, c.face_b, c.overlap_mm3, c.axis_angle_deg});
   } catch (const std::exception& e) {
     fail(err, e);
@@ -1425,7 +1417,7 @@ FlexPressVerdict flexible_scene_press_verdict(int64_t scene, const std::vector<i
       dp = &dir;
     }
     try {
-      const fx::Stack st = fx::build_press_stack(s->model, fp, s->regions, s->grid, s->mask, 0, s->build,
+      const fx::Stack st = fx::build_press_stack(s->model, fp, s->regions, s->grid, s->lattice, 0, s->build,
                                                  s->grid.spacing, dp);
       o.accepted = true;
       put3(o.load, st.frame.load);
@@ -1462,8 +1454,9 @@ int32_t flexible_scene_register_press(int64_t scene, const std::vector<int32_t>&
     std::vector<const topopt::ResolvedFaceRegion*> fp;
     for (int id : def.footprint) fp.push_back(&region_of(*s, id));
     // core builds it now: its refusal is the answer, and nothing is registered
-    auto st = std::make_unique<fx::Stack>(fx::build_press_stack(s->model, fp, s->regions, s->grid, s->mask, 0, s->build,
+    auto st = std::make_unique<fx::Stack>(fx::build_press_stack(s->model, fp, s->regions, s->grid, s->lattice, 0, s->build,
                                                                 s->grid.spacing, &def.direction));
+    restrict_as_run(*s, *st);   // ★ C2 WIRING W1b
     const int32_t id = g_next_press.fetch_sub(1);
     s->presses[id] = def;
     s->stacks[std::make_pair(static_cast<int>(id), 0)] = std::move(st);
@@ -1479,8 +1472,8 @@ int32_t flexible_scene_register_press(int64_t scene, const std::vector<int32_t>&
 
 int32_t flexible_press_api_version() { return fx::kPressApiVersion; }
 
-// ★ R7-E1 REVIEW: the red control of the press columns' latticed run (FlexibleBridge.hpp) — tests only.
-void flexible_control_run_from_first_sample(bool on) { g_control_run_first_sample.store(on); }
+// ★ C2 WIRING W1b: the red control of the scene's stacks (FlexibleBridge.hpp) — tests only.
+void flexible_control_stacks_before_c2(bool on) { g_control_before_c2.store(on); }
 
 // ★ AP3: core's side-stack threshold, for the (i) text only (FlexibleBridge.hpp).
 double flexible_side_stack_deg() { return fx::kSideStackDeg; }

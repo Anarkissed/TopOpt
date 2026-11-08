@@ -60,6 +60,13 @@ final class FlexibleC2WiringTests: XCTestCase {
         XCTAssertNoThrow(try FlexibleCore.parseJobBlock(on), "★ core's own parser takes it")
         let scene = try FlexibleJob.sceneJobJSON(i, fallbackMaterial: "varioshore_tpu")
         XCTAssertNil(try Self.block(scene)["no_include_region"], "the scene job reads no faces: unchanged")
+        // ★ W1b: the stage as before ruling 6 (a TEST control only — the synthetic parts ask core with no face-prism, their scene
+        // the whole part) keeps core's default, whole_part: the pre-wiring job exactly
+        var w = i
+        w.wholePartWithoutPrism = true
+        let whole = try FlexibleJob.runJobJSON(w)
+        XCTAssertNil(try Self.block(whole)["no_include_region"], "★ the ruling-6 control's job states no no_include_region")
+        XCTAssertTrue(NSDictionary(dictionary: try Self.object(whole)).isEqual(to: try Self.object(off)), "★ = the pre-wiring job")
         // ★ RED CONTROL
         let bad = on.replacingOccurrences(of: "\"no_lattice\"", with: "\"nope\"")
         XCTAssertNotEqual(bad, on)
