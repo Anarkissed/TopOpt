@@ -10,7 +10,8 @@
 // so a new zone sat a whole height above the part's middle and Box │ Cylinder moved it by its height.
 //
 // And (his "Yes, add the move", 11-06) a picked zone moves: Topology's move knob at its middle raises Topology's move and turn
-// glass, with no Copy; it moves the zone and turns it about its middle.
+// glass; it moves the zone and turns it about its middle. ★ His iPad 11-07 (2) reverses "without Copy": "He wants the COPY
+// icon back, working the same as before: highlighted = moving the zone makes a copy."
 //
 // RED before (saved: scratchpad b2red/LatticeHandles_build.txt): no handles on a zone and no way to move it; a new zone's run
 // region centred one height above the part's middle.
@@ -175,8 +176,8 @@ final class ZoneSelectHostedTests: XCTestCase {
     }
 
     /// ★ His "Yes, add the move" (11-06): a picked zone shows Topology's move knob at its middle; a tap raises the move and
-    /// turn glass with no Copy (a zone is one shape) and ✕ puts it away; dragging the glass's hub moves the zone, its size
-    /// unchanged.
+    /// turn glass with its Copy (his iPad 11-07, 2) and ✕ to put it away; dragging the glass's hub moves the zone, its size
+    /// unchanged — and with Copy off, no copy is made.
     func testAPickedZoneMovesWithTopologysGlass() throws {
         let (h, p) = try stage()
         try h.tap("latticeZonesSectionAction", "+ Add zone", settle: 1)
@@ -186,6 +187,7 @@ final class ZoneSelectHostedTests: XCTestCase {
         try h.tap("latticeZoneMove-\(key)", "the move knob")
         let glass = try h.onScreen("latticeZoneGizmo-\(key)", "★ the move and turn glass")
         _ = try h.probe("latticeZoneMoveDone-\(key)", "★ its ✕, a 44 pt target")
+        _ = try h.probe("latticeZoneCopy-\(key)", "★ 2: its Copy, a 44 pt target, off")
         for s in LatticeZoneHandle.Side.allCases {
             _ = try h.onScreen("handle-\(LatticeSetupHandles.zoneKey(z, s))", "★ the size handles stay with the glass")
         }
@@ -202,15 +204,50 @@ final class ZoneSelectHostedTests: XCTestCase {
         XCTAssertGreaterThan(simd_length(m1 - m0), 1, "★ dragged by its hub, the zone moves (\(m0) → \(m1))")
         XCTAssertEqual(s1.width, s0.width, accuracy: 1e-9); XCTAssertEqual(s1.depth, s0.depth, accuracy: 1e-9)
         XCTAssertEqual(s1.height, s0.height, accuracy: 1e-9, "★ its size unchanged")
+        XCTAssertEqual(p.latticeZones.count, 1, "★ Copy off: no copy")
         try h.tap("latticeZoneMoveDone-\(key)", "✕")
         XCTAssertNil(h.frames.all["latticeZoneGizmo-\(key)"], "★ ✕ puts the glass away")
         _ = try h.onScreen("latticeZoneMove-\(key)", "the knob is back")
-        // no Copy: the zone's glass is not Topology's cluster
-        let ws = try FlexibleSource.code("WorkspacePlaceholder.swift")
-        let overlay = try XCTUnwrap(ws.range(of: "private var latticeZoneMoveOverlay"), "the zone's move overlay")
-        let body = String(ws[overlay.lowerBound...].prefix(4000))
-        XCTAssertFalse(body.contains("gizmoActionCluster") || body.contains("copyManualPrimitive") || body.contains("gizmoCopyFor"),
-                       "★ no Copy on a zone: it is one shape")
+    }
+
+    /// ★ His iPad 11-07 (2): "the COPY icon back, working the same as before: highlighted = moving the zone makes a copy." Lit,
+    /// a move leaves a copy where the zone was (a new zone, its size, turn and role) and the picked zone moves on; a bare touch
+    /// makes none; tapped again, Copy is off.
+    func testCopyLitLeavesACopyWhereTheZoneWas() throws {
+        let (h, p) = try stage()
+        try h.tap("latticeZonesSectionAction", "+ Add zone", settle: 1)
+        let z = try XCTUnwrap(p.latticeZones.first).id, key = z.uuidString
+        p.setLatticeZoneSize(z, width: 30, depth: 20, height: 12)
+        h.pump(0.5)
+        try h.tap("latticeZoneMove-\(key)", "the move knob")
+        let glass = try h.onScreen("latticeZoneGizmo-\(key)", "the glass")
+        try h.tap("latticeZoneCopy-\(key)", "★ Copy")
+        _ = try h.onScreen("latticeZoneCopy-\(key)-on", "★ Copy lit")
+        let m0 = try XCTUnwrap(p.latticeZoneMiddle(z))
+        let c = CGPoint(x: glass.midX, y: glass.midY)
+        // a bare touch: no copy
+        try XCTUnwrap(LatticeSetupHandles.liveZoneGizmo).changed(c, c)
+        try XCTUnwrap(LatticeSetupHandles.liveZoneGizmo).ended()
+        h.pump(0.3)
+        XCTAssertEqual(p.latticeZones.count, 1, "★ a bare touch stacks no copy")
+        for i in 1...10 {
+            try XCTUnwrap(LatticeSetupHandles.liveZoneGizmo).changed(c, CGPoint(x: c.x + 6 * CGFloat(i), y: c.y))
+            h.pump(0.05)
+        }
+        try XCTUnwrap(LatticeSetupHandles.liveZoneGizmo).ended()
+        h.pump(0.6)
+        XCTAssertEqual(p.latticeZones.count, 2, "★ the move left a copy")
+        let copy = try XCTUnwrap(p.latticeZones.first { $0.id != z }, "the copy")
+        let mc = try XCTUnwrap(p.latticeZoneMiddle(copy.id)), m1 = try XCTUnwrap(p.latticeZoneMiddle(z))
+        XCTAssertLessThan(simd_length(mc - m0), 1e-6, "★ the copy stays where the zone was")
+        XCTAssertGreaterThan(simd_length(m1 - m0), 1, "★ the picked zone moved on")
+        let sc = try XCTUnwrap(p.latticeZoneSize(copy.id))
+        XCTAssertEqual(sc.width, 30, accuracy: 1e-9); XCTAssertEqual(sc.depth, 20, accuracy: 1e-9); XCTAssertEqual(sc.height, 12, accuracy: 1e-9)
+        XCTAssertEqual(p.latticeZoneShape(copy.id), p.latticeZoneShape(z), "its shape")
+        XCTAssertEqual(p.lattice.groupRoles[copy.id], p.lattice.groupRoles[z], "its role")
+        XCTAssertEqual(p.latticeList.activeGroupID, z, "★ the moved zone stays picked")
+        try h.tap("latticeZoneCopy-\(key)-on", "Copy again")
+        _ = try h.onScreen("latticeZoneCopy-\(key)", "★ Copy off")
     }
 
     /// ★ Moving and turning keep the zone whole: moved, its middle is where it was put and the run's region with it, its size
