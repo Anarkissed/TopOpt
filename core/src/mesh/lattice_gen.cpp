@@ -1376,6 +1376,18 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
     // Rim loops where analytic faces meet (both Rim and Diagrid modes).
     emit_rims(sink, R, G, skin, st, obs);
 
+    // ★ PER ZONE (LatticeSkinSpec.zones): the zone a point lies in, and what it lays.
+    const LatticeSkinZones* const Z = skin.zones;
+    if (Z != nullptr) {
+      st.zone_anchor_nodes.assign(Z->here.size(), 0);
+      st.zone_skin_chords.assign(Z->here.size(), 0);
+      st.zone_skin_struts.assign(Z->here.size(), 0);
+    }
+    auto zone_of = [Z](const Vec3& p) -> std::size_t {
+      const int z = Z->zone_at ? Z->zone_at(p) : 0;
+      return z > 0 && static_cast<std::size_t>(z) < Z->here.size() ? static_cast<std::size_t>(z) : 0;
+    };
+
     // The anchored diagrid (Diagrid mode): anchor balls at every landing, skin
     // edges linking neighbouring landings on the same face. Each cell gathers
     // its 27-neighbourhood's landings by DETERMINISTIC RECOMPUTE — no global
@@ -1399,6 +1411,11 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
                     // interior strut's own radius (contained by the clip
                     // certificate), welding the cut end to the skin (bar B6).
                     for (const auto& L : ncut.landings) {
+                      std::size_t z = 0;   // ★ per zone: the landing's zone lays it, or not
+                      if (Z != nullptr) {
+                        z = zone_of(L.pos);
+                        if (Z->here[z] == LatticeSkinHere::Off) continue;
+                      }
                       // ★ (b): the landing sits the strut's EMITTED circumradius inside
                       // the part, so the ball takes that circumradius (still contained)
                       // and is reported at the law radius that lays it.
@@ -1411,6 +1428,7 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
                       st.skin_triangles += 20ull;
                       st.triangles += 20ull;
                       st.skin_volume_mm3 += lattice_icosahedron_volume_mm3(r_ball);
+                      if (Z != nullptr) ++st.zone_anchor_nodes[z];
                     }
                     own_landings = ncut.landings.size();
                   }
@@ -1494,10 +1512,24 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
                 // clique wherever landings cluster.
                 if (rank(a, b) >= kSkinDegree || rank(b, a) >= kSkinDegree)
                   continue;
+                // ★ per zone: the chord's MIDPOINT zone lays it, or not; a freeform chord
+                // (the voxel / shell surface, face -1) only where that zone is Woven.
+                std::size_t z = 0;
+                if (Z != nullptr) {
+                  z = zone_of(mid);
+                  const LatticeSkinHere h = Z->here[z];
+                  if (h == LatticeSkinHere::Off || (A.face < 0 && h != LatticeSkinHere::Woven))
+                    continue;
+                }
+                const std::uint64_t chords0 = st.skin_chords, struts0 = st.skin_struts;
                 if (A.face < 0)
                   emit_freeform_skin_edge(sink, R, G, skin, A, Bl, st, obs);
                 else
                   emit_skin_edge(sink, R, G, skin, A.face, A, Bl, st, obs);
+                if (Z != nullptr) {
+                  st.zone_skin_chords[z] += st.skin_chords - chords0;
+                  st.zone_skin_struts[z] += st.skin_struts - struts0;
+                }
               }
           }
     }
@@ -1514,6 +1546,17 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
     st.min_strut_diameter_mm = 0.0;
   }
   return st;
+}
+
+// ★ PER ZONE: one pass's zone counts added into a total (both empty without zones).
+static void add_zone_counts(LatticeGenStats& total, const LatticeGenStats& st) {
+  auto add = [](std::vector<std::uint64_t>& t, const std::vector<std::uint64_t>& v) {
+    if (t.size() < v.size()) t.resize(v.size(), 0);
+    for (std::size_t i = 0; i < v.size(); ++i) t[i] += v[i];
+  };
+  add(total.zone_anchor_nodes, st.zone_anchor_nodes);
+  add(total.zone_skin_chords, st.zone_skin_chords);
+  add(total.zone_skin_struts, st.zone_skin_struts);
 }
 
 // ── swept cell size: one ordinary pass per dyadic level ─────────────────────
@@ -1561,6 +1604,7 @@ LatticeGenStats generate_lattice_stepped(
     // ★ K6 part 2: the stub guard's own counts, summed like every other count here.
     total.stub_fragments_dropped += st.stub_fragments_dropped;
     total.stub_fragment_length_mm += st.stub_fragment_length_mm;
+    add_zone_counts(total, st);   // ★ per zone, summed the same way
     if (st.struts == 0 && st.nodes == 0) continue;
     if (!any) {
       total.min_strut_diameter_mm = st.min_strut_diameter_mm;
@@ -1644,6 +1688,7 @@ LatticeGenStats generate_lattice_multilevel(
     // ★ K6 part 2: the stub guard's own counts, summed like every other count here.
     total.stub_fragments_dropped += st.stub_fragments_dropped;
     total.stub_fragment_length_mm += st.stub_fragment_length_mm;
+    add_zone_counts(total, st);   // ★ per zone, summed the same way
     if (st.max_strut_diameter_mm > 0.0) {
       any = true;
       total.min_strut_diameter_mm =

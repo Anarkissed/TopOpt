@@ -130,6 +130,24 @@ struct LatticeRegion {
 // diagonal families — so no clipped end is left floating (bar B6).
 enum class LatticeSkinMode { None, Rim, Diagrid };
 
+// ★ SKIN PER ZONE (lattice.regions[].skin, the reviewer's ruling 11-08 (1)). What the
+// diagrid pass lays at one point:
+//   Off    nothing (a zone with skin "none", or a part whose skin is "none" or "rim");
+//   Plain  the boundary-finish diagrid: an anchor ball at every landing and chords on
+//          analytic faces only (a part's "diagrid" under a shell or open finish);
+//   Woven  Plain plus the freeform diagrid's chords over the voxel / shell surface (a
+//          zone with skin "diagrid", or a part's "diagrid" with outer_finish "skin" or
+//          "shell+skin").
+enum class LatticeSkinHere { Off, Plain, Woven };
+struct LatticeSkinZones {
+  // The zone a point lies in: 0 = none (the part's own), else 1-based. An anchor ball is
+  // laid by the zone of its landing, a chord by the zone of its MIDPOINT (each chord is
+  // already owned by exactly one cell the same way), so a chord is never split between
+  // two zones. Must outlive the generate call.
+  std::function<int(const Vec3&)> zone_at;
+  std::vector<LatticeSkinHere> here;   // by zone id; here[0] is the part's
+};
+
 struct LatticeSkinSpec {
   LatticeSkinMode mode = LatticeSkinMode::None;
   // The skin's OWN printability clamp (radius, mm): the AUTO skin radius is
@@ -148,6 +166,11 @@ struct LatticeSkinSpec {
   // (bulge across a concavity / tunnel under a convex ridge) are REJECTED and
   // counted, never bent silently. Requires mode == Diagrid to emit anything.
   bool freeform = false;
+  // ★ PER ZONE. Null (default): `mode` and `freeform` hold everywhere, byte for byte.
+  // Set: each anchor ball and chord asks the zone it lies in (LatticeSkinZones above);
+  // `mode` and `freeform` then only open the passes, and the caller arms them for the
+  // most any zone asks (lattice_skin_for in run_job.cpp).
+  const LatticeSkinZones* zones = nullptr;
 };
 
 // ★ THE SAG BUDGET THE FREEFORM SKIN BUYS AGAINST THE BASE SURFACE, in mm —
@@ -269,6 +292,9 @@ struct LatticeGenStats {
   double interior_volume_mm3 = 0.0;
   double skin_volume_mm3 = 0.0;   // diagrid edges + anchor balls
   double rim_volume_mm3 = 0.0;    // rim tori + rim lines (the collar's rings)
+  // ★ PER ZONE (LatticeSkinSpec.zones; empty without): by zone id, what the diagrid pass
+  // laid there ([0] = outside every zone). Each sums to its total above.
+  std::vector<std::uint64_t> zone_anchor_nodes, zone_skin_chords, zone_skin_struts;
 };
 
 // Count the cells the region's predicate accepts (the achieved latticed-cell

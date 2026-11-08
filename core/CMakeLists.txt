@@ -2461,6 +2461,14 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
     TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
   add_test(NAME lattice_open_finish COMMAND test_lattice_open_finish)
+  # Skin per zone (reviewer's ruling 11-08 (1) + (2b)): lattice.regions[].skin.
+  add_executable(test_lattice_zone_skin tests/validation/test_lattice_zone_skin.cpp)
+  target_link_libraries(test_lattice_zone_skin PRIVATE topopt)
+  target_compile_definitions(test_lattice_zone_skin PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME lattice_zone_skin COMMAND test_lattice_zone_skin)
   # E3 (plan.md §B7): an include region's own cell window on the swept plan.
   add_executable(test_lattice_region_cell_window tests/validation/test_lattice_region_cell_window.cpp)
   target_link_libraries(test_lattice_region_cell_window PRIVATE topopt)

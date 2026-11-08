@@ -2597,6 +2597,16 @@ LatticeSkinSpec lattice_skin_for(const JobLattice& lat) {
   return S;
 }
 
+// ★ SKIN PER ZONE (ruling 11-08 (1)): what a skin + finish lays at a point
+// (LatticeSkinHere, lattice_gen.hpp). The part's: "none" and "rim" lay no diagrid,
+// "diagrid" lays the boundary-finish diagrid, woven over the surface only under the
+// freeform finishes. A zone's own "diagrid" is always woven: that is what Skin is.
+LatticeSkinHere lattice_skin_here(const std::string& skin, const std::string& finish) {
+  if (skin != "diagrid") return LatticeSkinHere::Off;
+  return finish == "skin" || finish == "shell+skin" ? LatticeSkinHere::Woven
+                                                    : LatticeSkinHere::Plain;
+}
+
 // Whether the export writes the solid shell: "shell" and "shell+skin" do; "skin" and
 // ★ E2.4's "none" (the open lattice) do not.
 bool lattice_shell_written(const JobLattice& lat) {
@@ -2671,7 +2681,10 @@ LatticeExportOutcome export_latticed_variant(
     double sheet_bead_mm = 0.0,
     // ★ E2.4 per region: the shell re-meshed around the design minus an open pocket
     // (null: the design's own, variant.v3.mesh).
-    const TriangleMesh* shell_override = nullptr) {
+    const TriangleMesh* shell_override = nullptr,
+    // ★ Skin per zone (ruling 11-08 (1)): each anchor ball and chord asks its zone. Null:
+    // the lattice's own skin everywhere, byte for byte.
+    const LatticeSkinZones* skin_zones = nullptr) {
   // ── M4: A SKIN MODE THAT PRODUCES NO GEOMETRY MUST SAY SO, NOT RETURN ZERO.
   //
   // ★ THE PREDICATE IS THE MEASURED COUNT, NOT A PREDICTION — and the first version
@@ -2743,7 +2756,23 @@ LatticeExportOutcome export_latticed_variant(
   const std::vector<double>& dens = variant.optimization.physical_density;
   LatticeRegion R = lattice_region_for(sg, cell_mm, &boundary);
   R.latticed = cell_latticed;  // null => every cell (the legacy uniform path)
-  const LatticeSkinSpec skin = lattice_skin_for(lat);
+  // ★ Per zone, the passes open for the most any zone asks: a Woven zone arms the diagrid
+  // and its freeform chords, and each element then asks its own zone (lattice_gen.cpp).
+  const LatticeSkinSpec skin = [&] {
+    LatticeSkinSpec sk = lattice_skin_for(lat);
+    if (skin_zones != nullptr) {
+      sk.zones = skin_zones;
+      for (const LatticeSkinHere h : skin_zones->here) {
+        if (h != LatticeSkinHere::Off && sk.mode == LatticeSkinMode::None)
+          sk.mode = LatticeSkinMode::Diagrid;
+        if (h == LatticeSkinHere::Woven) {
+          sk.mode = LatticeSkinMode::Diagrid;
+          sk.freeform = true;
+        }
+      }
+    }
+    return sk;
+  }();
 
   const TriangleMesh& shell = shell_override != nullptr ? *shell_override : variant.v3.mesh;
   auto push_shell = [&shell](TriangleSink& sink) {
@@ -4429,6 +4458,25 @@ struct LatticeGradedReceipt {
 // composite margin + posture + the honest "strut strength not certified" flag.
 // `cell_mm` is the exported cell (the job's on a uniform run, the grading law's on
 // a graded run); `roles`/`graded` append their sections only when present.
+// ★ SKIN PER ZONE (ruling 11-08 (1)): a lattice_regions row's skin -- the zone's own or
+// the part's, and what the diagrid pass laid in it. A zone that asks for Skin and gets no
+// skin strut says so in a plain line: no silent no-op.
+std::string zone_skin_json(const JobLatticeRegion& r, const JobLattice& lat, std::size_t i,
+                           const LatticeGenStats& gs) {
+  const std::size_t z = i + 1;
+  std::string s = ", \"skin\": " + json_str(r.skin.empty() ? lat.skin : r.skin) +
+                  ", \"skin_source\": " + json_str(r.skin.empty() ? "lattice" : "region") +
+                  ", \"skin_laid\": {\"anchor_nodes\": " + std::to_string(gs.zone_anchor_nodes[z]) +
+                  ", \"skin_chords\": " + std::to_string(gs.zone_skin_chords[z]) +
+                  ", \"skin_struts\": " + std::to_string(gs.zone_skin_struts[z]) + "}";
+  if (r.skin == "diagrid" && gs.zone_skin_struts[z] == 0)
+    s += ", \"skin_note\": " +
+         json_str("Skin laid nothing in " +
+                  (r.label.empty() ? "region " + std::to_string(z) : "\"" + r.label + "\"") +
+                  ": no chord of the outer surface has its midpoint in this zone.");
+  return s;
+}
+
 std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
                                      const JobLattice& lat,
                                      const LatticeCertOutcome& c,
@@ -4533,6 +4581,13 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
   s += "  \"landings\": " + std::to_string(gs.landings) + ",\n";
   s += "  \"anchor_nodes\": " + std::to_string(gs.anchor_nodes) + ",\n";
   s += "  \"skin_struts\": " + std::to_string(gs.skin_struts) + ",\n";
+  // ★ Skin per zone: what the diagrid pass laid outside every zone (each zone's own is in
+  // its lattice_regions row). Written only when a zone states its own skin.
+  if (!gs.zone_skin_struts.empty())
+    s += "  \"skin_outside_zones\": {\"anchor_nodes\": " +
+         std::to_string(gs.zone_anchor_nodes[0]) +
+         ", \"skin_chords\": " + std::to_string(gs.zone_skin_chords[0]) +
+         ", \"skin_struts\": " + std::to_string(gs.zone_skin_struts[0]) + "},\n";
   s += "  \"rim_elements\": " + std::to_string(gs.rim_elements) + ",\n";
   s += "  \"interior_volume_mm3\": " + json_num(gs.interior_volume_mm3) + ",\n";
   s += "  \"skin_volume_mm3\": " + json_num(gs.skin_volume_mm3) + ",\n";
@@ -5137,6 +5192,10 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
                       json_num((*region_graded)[i].cell_hi) + "]"
                 : std::string()) +
            "}" +
+           // ★ Skin per zone: the zone's skin (its own, or the part's) and what it laid
+           (!gs.zone_skin_struts.empty() && i + 1 < gs.zone_skin_struts.size()
+                ? zone_skin_json(r, lat, i, gs)
+                : std::string()) +
            ", \"source\": {\"mode\": " + src(!r.grading.empty()) +
            ", \"band\": " + src(r.rho_max > 0.0) +
            ", \"demand_exponent\": " + src(r.demand_exponent > 0.0) +
@@ -7026,7 +7085,7 @@ std::vector<GradingRegionOverride> lattice_region_overrides(
     // A region's own shape grade needs the owner map too, so it arms the table.
     if (r.rho_max > 0.0 || r.demand_exponent > 0.0 || o.flat || r.shape_grade >= 0 ||
         r.shape_grade_band_mm >= 0.0 || r.cell_min_mm > 0.0 || r.cell_max_mm > 0.0 ||
-        r.shape_grade_strength >= -1.0 || !r.outer_finish.empty())
+        r.shape_grade_strength >= -1.0 || !r.outer_finish.empty() || !r.skin.empty())
       any = true;
   }
   if (!any) out.clear();
@@ -10225,6 +10284,25 @@ LatticeVariantOutcome lattice_one_variant_pass(
   // ★ Finding 7: the emitted solid, for the volume check below (not on organic, which
   // rebuilds its certified density from its own shipped spans).
   LatticeSolidProbe solid_probe;
+  // ★ SKIN PER ZONE (ruling 11-08 (1)). Built only when a zone states its own skin; each
+  // anchor ball and chord then asks the zone it lies in, by the SAME membership test the
+  // owner map is built with (stepped_region_owner over e3_regions), so a chord's zone is
+  // the zone of its midpoint. Null otherwise: the part's skin everywhere, byte for byte.
+  LatticeSkinZones skin_zones;
+  bool any_zone_skin = false;
+  for (const JobLatticeRegion& r : e3_jobs)
+    if (!r.skin.empty()) any_zone_skin = true;
+  if (any_zone_skin) {
+    skin_zones.here.assign(e3_jobs.size() + 1,
+                           lattice_skin_here(job.lattice.skin, job.lattice.outer_finish));
+    for (std::size_t i = 0; i < e3_jobs.size(); ++i)
+      if (!e3_jobs[i].skin.empty())
+        skin_zones.here[i + 1] =
+            e3_jobs[i].skin == "diagrid" ? LatticeSkinHere::Woven : LatticeSkinHere::Off;
+    skin_zones.zone_at = [&e3_regions](const Vec3& p) {
+      return stepped_region_owner(p, e3_regions);
+    };
+  }
   R.oc = export_latticed_variant(
       v, out_dir, job.output, job.lattice, solved_grid, boundary, cell, G,
       mask, cell_latticed,
@@ -10242,7 +10320,8 @@ LatticeVariantOutcome lattice_one_variant_pass(
       job.grading.organic_calibrate_on_shipped, laid_fn ? &laid_fn : nullptr,
       organic.ran ? nullptr : &solid_probe,
       graded ? job.grading.min_extrudable_width_mm : job.lattice.min_extrudable_width_mm,
-      region_shell.triangles.empty() ? nullptr : &region_shell);
+      region_shell.triangles.empty() ? nullptr : &region_shell,
+      any_zone_skin ? &skin_zones : nullptr);
   // ★ THE EXPORT'S RETURN REPLACES THE WHOLE OUTCOME, and the growth stats copied
   // onto it above went with it -- the receipt read growth_ran: false and zero ties on
   // every grown run until 2026-09-05. Copy them again, after the replacement.
@@ -10486,8 +10565,12 @@ LatticeVariantOutcome lattice_one_variant_pass(
   // (lattice_gen.cpp:944-961) needs a PLANE and lattice_boundary_for never makes
   // one. Testing what the generator actually wrote makes the blast radius exact by
   // construction: it cannot fire on a run that emitted geometry.
+  // ★ Per zone: the part's "rim" is judged on its own rim, so a zone's woven skin cannot
+  // stand in for it. (Rim mode lays no diagrid, so without zones this is the same test.)
   if (job.lattice.skin != "none" &&
-      R.oc.stats.rim_triangles + R.oc.stats.skin_triangles == 0)
+      R.oc.stats.rim_triangles +
+              (job.lattice.skin == "rim" ? 0 : R.oc.stats.skin_triangles) ==
+          0)
     throw JobError(
         "lattice \"skin\": \"" + job.lattice.skin +
         "\" produced NO geometry on this part (rim_triangles 0, skin_triangles "
