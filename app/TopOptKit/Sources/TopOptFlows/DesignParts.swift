@@ -478,6 +478,7 @@ public struct DSRowEye: View {
         .background(DSParts.publish(key))
         .accessibilityLabel(hidden ? "Show" : "Hide from view")
         .accessibilityIdentifier(key)
+        .eyeSweep(key, hidden: hidden, toggle: toggle)   // ★ his iPad 11-07 (3b): press an eye and drag (EyeSweep)
     }
 }
 
