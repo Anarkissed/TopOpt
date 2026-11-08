@@ -9,7 +9,7 @@
 // §2 the band: the region's densities lie in [0.5, 0.7]; the part's elsewhere.
 // §3 "off": one density, the region's graded peak (its "stress" grade's maximum).
 // §4 the demand exponent: 3 grades the region lighter than the part's curve.
-// §5 the shape grade on the region alone: its outline beam turns voxels solid.
+// §5 the shape grade on the region alone: a graded band (ruling 2; it was a solid beam).
 // §6 control: "stress" names the part's own grading, so the file is byte for byte the
 //    file of the same region with no grading of its own.
 // §7 ruling 11-06: "off" with no density searches for the LIGHTEST one density that
@@ -123,7 +123,7 @@ double num_after(const std::string& s, const std::string& key, std::size_t from 
 }
 
 
-struct Region { long long voxels = -1; double lo = 0, hi = 0; double mass = 0; std::string stl; };
+struct Region { long long voxels = -1; double lo = 0, hi = 0; double mass = 0; std::string stl, receipt; };
 
 }  // namespace
 
@@ -183,6 +183,7 @@ int main() {
       const std::string n = e.path().filename().string();
       if (n.size() > 20 && n.compare(n.size() - 20, 20, "_lattice.report.json") == 0) {
         const std::string r = read_file(e.path().string());
+        g.receipt = r;
         g.mass = num_after(r, "lattice_mass_grams");
         const std::size_t lr = r.find("\"lattice_regions\"");
         if (lr != std::string::npos) {
@@ -203,7 +204,7 @@ int main() {
   const Region band = run("band", "\"rho_min\": 0.5, \"rho_max\": 0.7, ");
   const Region off = run("off", "\"grading\": \"off\", ");
   const Region exp3 = run("exp3", "\"demand_exponent\": 3, ");
-  const Region shape = run("shape", "\"shape_grade\": true, ");
+  const Region shape = run("shape", "\"shape_grade\": true, \"shape_grade_band_mm\": 6, ");
   CHECK(stress.voxels > 0, "precondition: the region is latticed");
 
   CHECK(band.lo >= 0.5 - 1e-12 && band.hi <= 0.7 + 1e-12,
@@ -213,8 +214,8 @@ int main() {
         "§3 off: one density, the region's own graded peak");
   CHECK(exp3.hi < stress.hi && exp3.mass < plain.mass,
         "§4 exponent 3: the region grades lighter than the part's curve");
-  CHECK(shape.voxels >= 0 && shape.voxels < stress.voxels,
-        "§5 the shape grade on the region: its outline beam turns voxels solid");
+  CHECK(shape.voxels > 0 && shape.receipt.find("\"shape_band\": {") != std::string::npos,
+        "§5 the shape grade on the region: its band grades the region (ruling 2)");
   CHECK(!plain.stl.empty() && plain.stl == stress.stl,
         "§6 control: \"stress\" is the part's own grading, byte for byte");
 

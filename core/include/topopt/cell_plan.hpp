@@ -251,6 +251,11 @@ struct CellPlanParams {
   // reason 3, counted in cells_dropped_by_window.
   const std::vector<signed char>* voxel_level_lo = nullptr;
   const std::vector<signed char>* voxel_level_hi = nullptr;
+  // ★ RULING 2: the shape-grade band's PREFERRED level per voxel (-1 = none). It raises
+  // the level a cell is CHOSEN at (the preview's ramp lays the coarsest cell its centre
+  // rule allows, where the planner alone takes the finest printable), but it is not a
+  // window: a cell the 2:1 balance splits below it stays latticed if it still prints.
+  const std::vector<signed char>* voxel_level_prefer = nullptr;
 };
 
 // Build the SWEPT plan over `grid`'s candidate set (throws for any other mode — the

@@ -21,6 +21,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <queue>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -2667,7 +2668,10 @@ LatticeExportOutcome export_latticed_variant(
     LatticeSolidProbe* solid_probe = nullptr,
     // ★ Finding 8: the bead a sheet's wall must keep after its mesh is simplified (the
     // grading's stated minimum extrudable width). 0 = no floor to protect.
-    double sheet_bead_mm = 0.0) {
+    double sheet_bead_mm = 0.0,
+    // ★ E2.4 per region: the shell re-meshed around the design minus an open pocket
+    // (null: the design's own, variant.v3.mesh).
+    const TriangleMesh* shell_override = nullptr) {
   // ── M4: A SKIN MODE THAT PRODUCES NO GEOMETRY MUST SAY SO, NOT RETURN ZERO.
   //
   // ★ THE PREDICATE IS THE MEASURED COUNT, NOT A PREDICTION — and the first version
@@ -2741,7 +2745,7 @@ LatticeExportOutcome export_latticed_variant(
   R.latticed = cell_latticed;  // null => every cell (the legacy uniform path)
   const LatticeSkinSpec skin = lattice_skin_for(lat);
 
-  const TriangleMesh& shell = variant.v3.mesh;
+  const TriangleMesh& shell = shell_override != nullptr ? *shell_override : variant.v3.mesh;
   auto push_shell = [&shell](TriangleSink& sink) {
     for (const auto& t : shell.triangles)
       sink.add_triangle(shell.vertices[static_cast<std::size_t>(t[0])],
@@ -2793,7 +2797,7 @@ LatticeExportOutcome export_latticed_variant(
   // Outer finish (task 2026-07-30-lattice-skin-freeform): "skin" REPLACES the
   // solid shell with the freeform diagrid (open, see-through); "shell" and
   // "shell+skin" keep the shell exactly as before.
-  const bool with_shell = lattice_shell_written(lat);
+  const bool with_shell = shell_override != nullptr || lattice_shell_written(lat);
   // ONE emission routine for both writers, so STL and 3MF can never diverge on
   // which path they took.
   const bool swept = levels && levels->size() > 1 && base_cell_mm > 0.0;
@@ -2827,7 +2831,9 @@ LatticeExportOutcome export_latticed_variant(
   // then no shell for a strut to protrude through: the measurement is SKIPPED
   // and `protrusion_measured` stays false, rather than reporting a vacuous zero
   // against a surface the file does not carry.
-  const MeshDistance shell_dist(shell);
+  // ★ E2.4 per region: measured against the DESIGN's surface, never a re-meshed shell that
+  // leaves an open pocket outside it on purpose (the same mesh on every other run).
+  const MeshDistance shell_dist(variant.v3.mesh);
   const bool measure_protrusion = with_shell && !shell_dist.empty();
   std::vector<float> sd_floor;  // per voxel: a lower bound on shell distance
   const double voxel_reach = 0.5 * std::sqrt(3.0) * sg.spacing;
@@ -3698,6 +3704,10 @@ struct LatticeCertOutcome {
   long long open_latticed_voxels = 0;   // all latticed voxels in the posture
   bool open_load_path_ok = true;        // the load path through what keeps credit
   std::string open_refusal;             // plain words, by region label; "" if certified
+  // ★ E2.4 per region: each open region beside covered ones, and the wall closing it
+  std::vector<std::string> open_region_notes;
+  double region_wall_mm = 0.0;
+  long long region_wall_voxels = 0;
 };
 
 // The exact certification inputs minimize_plastic certified the SOLID design with
@@ -4698,6 +4708,27 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
     const GradedField& gf = *graded.gf;
     const double latticed = static_cast<double>(gf.latticed_voxels);
     s += "  \"grading\": {\n";
+    // ★ RULING 2: the shape-grade band, written only when one was built.
+    if (gf.band_voxels > 0 || gf.band_solid_voxels > 0) {
+      const double* bx = gf.band_solid_box;
+      s += "    \"shape_band\": {\"band_voxels\": " + std::to_string(gf.band_voxels) +
+           ", \"struts_raised\": " + std::to_string(gf.band_raised_voxels) +
+           ", \"snapped_to_line_width\": " + std::to_string(gf.band_snapped_voxels) +
+           ", \"off_line_width\": " + std::to_string(gf.band_off_line_voxels) +
+           ", \"cells_capped\": " + std::to_string(gf.band_capped_voxels) +
+           ", \"quilt_rho\": " + json_num(gf.band_quilt_rho) +
+           ", \"solid_where_unprintable\": " + std::to_string(gf.band_solid_voxels) +
+           (gf.band_solid_voxels > 0
+                ? ", \"solid_box_mm\": [" + json_num(bx[0]) + ", " + json_num(bx[1]) + ", " +
+                      json_num(bx[2]) + ", " + json_num(bx[3]) + ", " + json_num(bx[4]) + ", " +
+                      json_num(bx[5]) + "]"
+                : std::string()) +
+           (lattice_topology_is_sheet(a.lattice_topology)
+                ? ", \"note\": \"a sheet grades its wall thickness only: no published method "
+                  "grades a TPMS's cell size (04-references R5)\""
+                : std::string()) +
+           "},\n";
+    }
     // ── STAGE E: the per-region cell derivation. Emitted ONLY when the job asked
     // for it, so every other receipt is byte-identical. Every number here is
     // measured on this run or derived at run time from core's own constants —
@@ -5140,6 +5171,16 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
          "doi:10.1016/S0020-7403(00)00042-4 and -00043-6); no measured knockdown for it exists, so they get no strength or "
          "stiffness: the safe floor. The margins above are that solve's.\"";
     if (!c.open_refusal.empty()) s += ", \"refusal\": " + json_str(c.open_refusal);
+    if (!c.open_region_notes.empty()) {
+      s += ", \"regions\": [";
+      for (std::size_t i = 0; i < c.open_region_notes.size(); ++i)
+        s += std::string(i ? ", " : "") + json_str(c.open_region_notes[i]);
+      s += "], \"wall_mm\": " + json_num(c.region_wall_mm) +
+           ", \"wall_voxels\": " + std::to_string(c.region_wall_voxels) +
+           ", \"wall_basis\": \"the slicer's wall (loops x line widths, else two line "
+           "widths) in whole voxel layers rounded up: solid in the file and counted by the "
+           "certificate\"";
+    }
     s += "},\n";
   }
   if (lat.outer_finish != "shell") {
@@ -5724,6 +5765,11 @@ struct LatticeVariantOutcome {
   // cell, and a cell straddling a region's edge carries its neighbour's density).
   std::vector<LatticeRegionGraded> region_graded;
   std::string one_density_refusal;  // ★ E3: a searched region no density certified
+  // ★ E2.4 per region: the open regions (name, latticed voxels) and the wall closing them
+  struct OpenRegion { std::string name; long long voxels = 0; };
+  std::vector<OpenRegion> open_regions;
+  double region_wall_mm = 0.0;
+  long long region_wall_voxels = 0;
   // ★ the ORGANIC structural certificate (beam network), when one was run
   OrganicCertificate organic_cert;
   OrganicRecommendation organic_recommendation;   // organic_recommend != off
@@ -6894,6 +6940,56 @@ static std::size_t clear_band_from_mask(std::vector<char>& mask, const std::vect
   return turned;
 }
 
+// ★ THE SHAPE-GRADE BAND'S DISTANCE (ruling 2): per lattice voxel, mm from the lattice's
+// outline -- seeded exactly as organic_solid_rim_band seeds its walk (a region's in-plane
+// side walls; with `unowned_from_surface`, every edge of a voxel no region owns), the
+// seed voxel's centre half a voxel in -- then a 26-neighbour chamfer walk through the
+// lattice (steps h, h*sqrt2, h*sqrt3). -1 off the lattice or out of reach of any seed.
+static std::vector<double> lattice_outline_distance_mm(const VoxelGrid& grid,
+                                                       const std::vector<char>& mask,
+                                                       const std::vector<int>& region_ids,
+                                                       const std::vector<Vec3>& region_normals,
+                                                       bool unowned_from_surface) {
+  const std::size_t n = grid.voxel_count();
+  std::vector<double> dist(n, -1.0);
+  if (mask.size() != n || region_ids.size() != n) return dist;
+  // The seeds: one voxel-step walk of organic_solid_rim_band is its seed layer.
+  const std::vector<char> seeds =
+      organic_solid_rim_band(grid, mask, region_ids, region_normals, 0.5 * grid.spacing,
+                             unowned_from_surface);
+  const double h = grid.spacing;
+  using Item = std::pair<double, std::size_t>;
+  std::priority_queue<Item, std::vector<Item>, std::greater<Item>> pq;
+  for (std::size_t e = 0; e < n; ++e)
+    if (seeds[e]) {
+      dist[e] = 0.5 * h;
+      pq.push({dist[e], e});
+    }
+  while (!pq.empty()) {
+    const auto [d, e] = pq.top();
+    pq.pop();
+    if (d > dist[e]) continue;
+    const int i = static_cast<int>(e % static_cast<std::size_t>(grid.nx));
+    const int j = static_cast<int>((e / static_cast<std::size_t>(grid.nx)) % static_cast<std::size_t>(grid.ny));
+    const int k = static_cast<int>(e / (static_cast<std::size_t>(grid.nx) * static_cast<std::size_t>(grid.ny)));
+    for (int dk = -1; dk <= 1; ++dk)
+      for (int dj = -1; dj <= 1; ++dj)
+        for (int di = -1; di <= 1; ++di) {
+          if (!di && !dj && !dk) continue;
+          const int i2 = i + di, j2 = j + dj, k2 = k + dk;
+          if (i2 < 0 || j2 < 0 || k2 < 0 || i2 >= grid.nx || j2 >= grid.ny || k2 >= grid.nz) continue;
+          const std::size_t e2 = grid.index(i2, j2, k2);
+          if (!mask[e2]) continue;
+          const double nd = d + h * std::sqrt(static_cast<double>(di * di + dj * dj + dk * dk));
+          if (dist[e2] < 0.0 || nd < dist[e2] - 1e-12) {
+            dist[e2] = nd;
+            pq.push({nd, e2});
+          }
+        }
+  }
+  return dist;
+}
+
 // quotes, backslashes and newlines out of a string headed into a JSON literal
 static std::string json_safe(std::string t) {
   for (char& c : t) if (c == '"' || c == '\\' || c == '\n' || c == '\r') c = c == '"' ? '\'' : ' ';
@@ -6929,7 +7025,8 @@ std::vector<GradingRegionOverride> lattice_region_overrides(
     o.cell_max_mm = r.cell_max_mm;
     // A region's own shape grade needs the owner map too, so it arms the table.
     if (r.rho_max > 0.0 || r.demand_exponent > 0.0 || o.flat || r.shape_grade >= 0 ||
-        r.shape_grade_band_mm >= 0.0 || r.cell_min_mm > 0.0 || r.cell_max_mm > 0.0)
+        r.shape_grade_band_mm >= 0.0 || r.cell_min_mm > 0.0 || r.cell_max_mm > 0.0 ||
+        r.shape_grade_strength >= -1.0 || !r.outer_finish.empty())
       any = true;
   }
   if (!any) out.clear();
@@ -6994,6 +7091,8 @@ LatticeVariantOutcome lattice_one_variant_pass(
       lattice_roles.includes.empty() ? lattice_roles.carriers : lattice_roles.includes;
   const std::vector<GradingRegionOverride> e3_overrides = lattice_region_overrides(e3_jobs);
   std::vector<int> e3_owner;
+  // ★ the shape-grade band's per-voxel inputs (grade_lattice reads them by pointer)
+  std::vector<double> band_distance, band_mm, band_amount;
 
   // ── Stage 4: the grading law runs FIRST, on THIS variant's own final
   // certification-recovery von Mises field (H4a — the run's own field, fresh:
@@ -7359,8 +7458,86 @@ LatticeVariantOutcome lattice_one_variant_pass(
     if (job.grading.subfloor_per_region) gp.region_ids = &region_ids;
     region_ids_for_stepped = region_ids;
     gp.subfloor_aggregate_cap_fraction = job.grading.subfloor_aggregate_cap;
+    // ── ★ THE SHAPE-GRADE BAND (ruling 2, 2026-11-06): the doubled lattice's shape grade
+    // is the preview's graded band, built by the law (GradingLawParams::band_*), not a
+    // solid outline. Stepped keeps its beam (its cells arrive graded from the app) and
+    // organic has its own rim. Per voxel: the owner's switch, band and strength (a
+    // region's own, else the part's), and the distance to the outline the beam walked.
+    if (R.algorithm == LatticeAlgorithm::Doubled) {
+      auto own = [&](std::size_t e) -> const JobLatticeRegion* {
+        const int id = !e3_owner.empty() ? e3_owner[e] : region_ids[e];
+        return id >= 1 && static_cast<std::size_t>(id) <= e3_jobs.size()
+                   ? &e3_jobs[static_cast<std::size_t>(id - 1)]
+                   : nullptr;
+      };
+      bool any = false;
+      band_mm.assign(cand.size(), 0.0);
+      band_amount.assign(cand.size(), 1.0);
+      for (std::size_t e = 0; e < cand.size(); ++e) {
+        if (!cand[e]) continue;
+        const JobLatticeRegion* r = own(e);
+        const bool on = r != nullptr && r->shape_grade >= 0 ? r->shape_grade == 1
+                                                             : job.grading.shape_grade;
+        if (!on) continue;
+        const double b = r != nullptr && r->shape_grade_band_mm >= 0.0 ? r->shape_grade_band_mm
+                                                                        : job.grading.shape_grade_band_mm;
+        const double st = r != nullptr && r->shape_grade_strength >= -1.0
+                              ? r->shape_grade_strength
+                              : job.grading.shape_grade_strength;
+        band_mm[e] = b;
+        band_amount[e] = std::pow(2.0, std::min(1.0, std::max(-1.0, st)));
+        if (b > 0.0) any = true;
+      }
+      if (any) {
+        std::vector<Vec3> nrms;
+        for (const JobLatticeRegion& r : e3_jobs) nrms.push_back(r.normal);
+        band_distance = lattice_outline_distance_mm(
+            solved_grid, cand, !e3_owner.empty() ? e3_owner : region_ids, nrms,
+            e3_jobs.empty() || job.lattice.whole_part);
+        gp.band_distance_mm = &band_distance;
+        gp.band_mm = &band_mm;
+        gp.band_amount = &band_amount;
+        gp.band_line_width_mm = job.grading.min_extrudable_width_mm;
+      }
+    }
     gf = grade_lattice(solved_grid, dens, vm_grade, &cand, gp,
                        printed_iso);
+    // ★ ruling 2: where the band stays SOLID, which is only where no cell prints.
+    if (gp.band_distance_mm != nullptr) {
+      double* bx = gf.band_solid_box;
+      for (int k = 0; k < solved_grid.nz; ++k)
+        for (int j = 0; j < solved_grid.ny; ++j)
+          for (int i = 0; i < solved_grid.nx; ++i) {
+            const std::size_t e = solved_grid.index(i, j, k);
+            if (!cand[e] || gf.posture.mask[e] || !(band_mm[e] > 0.0) ||
+                !(band_distance[e] >= 0.0 && band_distance[e] < band_mm[e]))
+              continue;
+            const Vec3 c = solved_grid.voxel_center(i, j, k);
+            if (gf.band_solid_voxels++ == 0) {
+              bx[0] = bx[3] = c.x; bx[1] = bx[4] = c.y; bx[2] = bx[5] = c.z;
+            }
+            bx[0] = std::min(bx[0], c.x); bx[1] = std::min(bx[1], c.y); bx[2] = std::min(bx[2], c.z);
+            bx[3] = std::max(bx[3], c.x); bx[4] = std::max(bx[4], c.y); bx[5] = std::max(bx[5], c.z);
+          }
+      // Evidence, behind an env var like the beam band's dump: every band voxel the law
+      // latticed, with what the preview's curve is checked against.
+      if (const char* bp = std::getenv("TOPOPT_SHAPE_BAND_DUMP")) {
+        std::ofstream bf(bp);
+        bf.precision(10);
+        bf << "# BAND <distance_mm> <band_mm> <amount> <cell_mm> <rho> <strut_mm> <rho_before_band> <finest_printable_cell_mm>\n";
+        for (std::size_t e = 0; e < cand.size(); ++e) {
+          if (!gf.posture.mask[e] || !(band_mm[e] > 0.0) || band_distance[e] < 0.0) continue;
+          const double S = e < gf.posture.cell_size_field.size() && gf.posture.cell_size_field[e] > 0.0
+                               ? gf.posture.cell_size_field[e]
+                               : gf.posture.cell_size_mm;
+          const double r = gf.posture.relative_density[e];
+          bf << "BAND " << band_distance[e] << ' ' << band_mm[e] << ' ' << band_amount[e] << ' '
+             << S << ' ' << r << ' ' << lattice_strut_diameter_mm(lat_topo, r, S) << ' '
+             << (e < gf.band_rho0.size() ? gf.band_rho0[e] : 0.0) << ' '
+             << (e < gf.band_finest_mm.size() ? gf.band_finest_mm[e] : 0.0) << '\n';
+        }
+      }
+    }
     // ── ★ THE ORGANIC CELL-SIZE PROBE (see JobLattice::organic_probe_cells_mm) ──
     // Runs here because everything it needs is in scope and already paid for: the
     // one base solve (v.stress_tensor_field), the law's input candidates (`cand`),
@@ -8776,7 +8953,10 @@ LatticeVariantOutcome lattice_one_variant_pass(
   if (e3_shape)
     for (std::size_t i = 0; i < e3_jobs.size(); ++i)
       if (shape_on(static_cast<int>(i) + 1)) any_shape = true;
-  if (graded && R.algorithm != LatticeAlgorithm::Organic && e3_shape && any_shape) {
+  // ★ ruling 2: the solid outline beam is STEPPED's alone now; the doubled lattice's
+  // shape grade is the band grade_lattice built (band_* above).
+  const bool beam_algorithm = R.algorithm == LatticeAlgorithm::Stepped;
+  if (graded && beam_algorithm && e3_shape && any_shape) {
     const double beam =
         lattice_outline_beam_mm(job.grading.min_extrudable_width_mm, solved_grid.spacing);
     // The walk seeds from each region's own face plane, so it reads the E3 owner map
@@ -8821,8 +9001,7 @@ LatticeVariantOutcome lattice_one_variant_pass(
                  "[outline] per region: solid beam %.4f mm, up to %.4f mm inward over %zu "
                  "band width(s) | %zu voxel(s) turned solid\n",
                  beam, inward_max, widths.size(), cleared);
-  } else if (graded && R.algorithm != LatticeAlgorithm::Organic && !e3_shape &&
-             job.grading.shape_grade) {
+  } else if (graded && beam_algorithm && !e3_shape && job.grading.shape_grade) {
     const double beam =
         lattice_outline_beam_mm(job.grading.min_extrudable_width_mm, solved_grid.spacing);
     const double bleed = lattice_outline_bleed_mm(job.grading.shape_grade_band_mm);
@@ -9436,6 +9615,101 @@ LatticeVariantOutcome lattice_one_variant_pass(
     }
   }
 
+  // ── ★ E2.4 PER REGION (ruling 11-06 (A)): AN OPEN REGION BESIDE COVERED ONES ─────
+  // A region's own outer_finish ("none" open | "shell" covered; "" = the part's). The
+  // open set O is the latticed voxels whose owner is open. When the lattice is mixed:
+  //   * the WALL: the covered latticed voxels within the slicer's wall of O (its loops x
+  //     line widths, else two line widths), in whole voxel layers rounded UP, leave the
+  //     lattice: the solid companion prints them and the certificate counts exactly them;
+  //   * the SHELL is re-meshed around the design minus O, so it closes over the covered
+  //     part and the wall, and leaves O open;
+  //   * O's cells at a free surface get the open floor (open_finish_cut_cells), below.
+  // A lattice all open or all covered keeps the part-wide path.
+  std::vector<char> region_open;  // O
+  TriangleMesh region_shell;
+  bool any_region_finish = false;
+  for (const JobLatticeRegion& r : e3_jobs)
+    if (!r.outer_finish.empty()) any_region_finish = true;
+  if (any_region_finish && !e3_owner.empty()) {
+    auto finish_of = [&](std::size_t e) {
+      const int id = e3_owner[e];
+      if (id >= 1 && static_cast<std::size_t>(id) <= e3_jobs.size() &&
+          !e3_jobs[static_cast<std::size_t>(id - 1)].outer_finish.empty())
+        return e3_jobs[static_cast<std::size_t>(id - 1)].outer_finish;
+      return job.lattice.outer_finish;
+    };
+    region_open.assign(mask.size(), 0);
+    long long n_open = 0, n_cov = 0;
+    for (std::size_t e = 0; e < mask.size() && e < e3_owner.size(); ++e) {
+      if (!mask[e]) continue;
+      if (finish_of(e) == "none") { region_open[e] = 1; ++n_open; }
+      else ++n_cov;
+    }
+    if (n_open > 0 && n_cov > 0) {
+      const double w = job.grading.min_extrudable_width_mm > 0.0 ? job.grading.min_extrudable_width_mm : 0.45;
+      const double inner = job.loads.wall_line_width_mm > 0.0 ? job.loads.wall_line_width_mm : w;
+      const double outer = job.loads.wall_line_width_outer_mm > 0.0 ? job.loads.wall_line_width_outer_mm : inner;
+      const double wall_mm = job.loads.wall_loops > 0 ? outer + (job.loads.wall_loops - 1) * inner : 2.0 * w;
+      const int layers = std::max(1, static_cast<int>(std::ceil(wall_mm / solved_grid.spacing - 1e-9)));
+      // walk `layers` face-steps from O into the covered lattice
+      std::vector<int> step(mask.size(), -1);
+      std::vector<std::size_t> q;
+      for (std::size_t e = 0; e < mask.size(); ++e)
+        if (region_open[e]) { step[e] = 0; q.push_back(e); }
+      const int di[6] = {1, -1, 0, 0, 0, 0}, dj[6] = {0, 0, 1, -1, 0, 0}, dk[6] = {0, 0, 0, 0, 1, -1};
+      std::vector<long long> wall_by_region(e3_jobs.size() + 1, 0), open_by_region(e3_jobs.size() + 1, 0);
+      for (std::size_t h = 0; h < q.size(); ++h) {
+        const std::size_t e = q[h];
+        if (step[e] >= layers) continue;
+        const int i = static_cast<int>(e % static_cast<std::size_t>(solved_grid.nx));
+        const int j = static_cast<int>((e / static_cast<std::size_t>(solved_grid.nx)) % static_cast<std::size_t>(solved_grid.ny));
+        const int k = static_cast<int>(e / (static_cast<std::size_t>(solved_grid.nx) * static_cast<std::size_t>(solved_grid.ny)));
+        for (int d = 0; d < 6; ++d) {
+          const int i2 = i + di[d], j2 = j + dj[d], k2 = k + dk[d];
+          if (i2 < 0 || j2 < 0 || k2 < 0 || i2 >= solved_grid.nx || j2 >= solved_grid.ny || k2 >= solved_grid.nz) continue;
+          const std::size_t e2 = solved_grid.index(i2, j2, k2);
+          if (!mask[e2] || region_open[e2] || step[e2] >= 0) continue;
+          step[e2] = step[e] + 1;
+          q.push_back(e2);
+        }
+      }
+      long long wall = 0;
+      for (std::size_t e = 0; e < mask.size(); ++e) {
+        if (region_open[e]) {
+          const int id = e3_owner[e];
+          ++open_by_region[static_cast<std::size_t>(id >= 1 && static_cast<std::size_t>(id) <= e3_jobs.size() ? id : 0)];
+        }
+        if (step[e] < 1 || region_open[e]) continue;
+        mask[e] = 0;                       // solid: the companion prints it
+        gf.posture.mask[e] = 0;
+        gf.posture.relative_density[e] = 0.0;
+        const int id = e3_owner[e];
+        ++wall_by_region[static_cast<std::size_t>(id >= 1 && static_cast<std::size_t>(id) <= e3_jobs.size() ? id : 0)];
+        ++wall;
+      }
+      // the shell around the design minus O
+      std::vector<double> minus_open = dens;
+      for (std::size_t e = 0; e < minus_open.size(); ++e)
+        if (region_open[e]) minus_open[e] = 0.0;
+      region_shell = marching_cubes(solved_grid, minus_open, printed_iso);
+      R.region_wall_mm = layers * solved_grid.spacing;
+      R.region_wall_voxels = wall;
+      for (std::size_t i = 0; i < e3_jobs.size(); ++i)
+        if (open_by_region[i + 1] > 0) {
+          const std::string& lb = e3_jobs[i].label;
+          R.open_regions.push_back({lb.empty() ? "Region " + std::to_string(i + 1) : lb,
+                                    open_by_region[i + 1]});
+        }
+      std::fprintf(stderr,
+                   "[finish] %lld latticed voxel(s) open beside %lld covered: a %d-layer "
+                   "(%.3f mm) wall of %lld voxel(s) closes the open part from the covered "
+                   "one; the shell re-meshed around the rest\n",
+                   n_open, n_cov, layers, layers * solved_grid.spacing, wall);
+    } else if (n_open == 0) {
+      region_open.clear();
+    }
+  }
+
   // ── the radius field + cell activation.
   LatticeRadiusField G;
   G.nseg = 8;
@@ -9967,7 +10241,8 @@ LatticeVariantOutcome lattice_one_variant_pass(
       job.grading.organic_dc_cell_mm, job.grading.organic_dc_tolerance_mm,
       job.grading.organic_calibrate_on_shipped, laid_fn ? &laid_fn : nullptr,
       organic.ran ? nullptr : &solid_probe,
-      graded ? job.grading.min_extrudable_width_mm : job.lattice.min_extrudable_width_mm);
+      graded ? job.grading.min_extrudable_width_mm : job.lattice.min_extrudable_width_mm,
+      region_shell.triangles.empty() ? nullptr : &region_shell);
   // ★ THE EXPORT'S RETURN REPLACES THE WHOLE OUTCOME, and the growth stats copied
   // onto it above went with it -- the receipt read growth_ran: false and zero ties on
   // every grown run until 2026-09-05. Copy them again, after the replacement.
@@ -10606,12 +10881,24 @@ LatticeVariantOutcome lattice_one_variant_pass(
       !shipped_rho.empty() ? &shipped_rho : graded ? &gf.posture.relative_density : nullptr);
   // ★ E2.4: the open lattice's cut cells, given no credit (open_finish_cut_cells).
   std::vector<char> open_cut;
-  if (job.lattice.outer_finish == "none")
+  if (!region_open.empty()) {  // per region: the open part only, beside its wall
     open_cut = open_finish_cut_cells(solved_grid, dens, printed_iso, post);
+    for (std::size_t e = 0; e < open_cut.size(); ++e)
+      if (!region_open[e]) open_cut[e] = 0;
+  } else if (job.lattice.outer_finish == "none") {
+    open_cut = open_finish_cut_cells(solved_grid, dens, printed_iso, post);
+  }
   R.cc = certify_latticed_variant(
       v, solved_grid, options, material, bcs, cx, post,
       graded ? std::numeric_limits<double>::quiet_NaN() : rho_uniform,
       open_cut.empty() ? nullptr : &open_cut);
+  for (const LatticeVariantOutcome::OpenRegion& o : R.open_regions)
+    R.cc.open_region_notes.push_back(
+        o.name + (R.region_wall_voxels > 0
+                      ? " open: a wall closes it from the covered part"
+                      : " open: the part's own solid already closes it from the covered part"));
+  R.cc.region_wall_mm = R.region_wall_mm;
+  R.cc.region_wall_voxels = R.region_wall_voxels;
   // Refused by label: the regions that hold cut cells (the owner rule the grading used),
   // or "the part" where a cut cell lies in no include region.
   if (R.cc.open_finish && !R.cc.lattice.accepted) {

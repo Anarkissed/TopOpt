@@ -19,12 +19,18 @@ final class RedesignAnswersPinsTests: XCTestCase {
         try String(contentsOf: repoRoot.appendingPathComponent("app/TopOptKit/Sources/TopOptFlows/\(file)"), encoding: .utf8)
     }
 
-    // MARK: 3 — no "Sim" on the Cells page's Density row; Along "By stress" is the one place for it
+    // MARK: 3 — no "Sim" on the Cells page's Density row; "By stress" is the one place for it
+    // ★ RE-PINNED (B7 slice 2, plan.md §B7 "Removed"): Along is off the page, and its one live choice, "By stress", is
+    // Density's third segment under the simulation. Still one setting (densityMode = .sim) in one place.
 
     func testTheDensityRowOffersNoSimAndByStressSetsWhatSimSet() throws {
         let wiz = try Self.src("LatticeSetupWizard.swift")
         XCTAssertFalse(wiz.contains("LatticeDensityMode.sim.title"), "the Density row lists no Sim segment")
-        XCTAssertTrue(wiz.contains("lattice-cells-along-"), "Along stays on the Cells page")
+        XCTAssertFalse(wiz.contains("lattice-cells-along-"), "Along is off the Cells page")
+        XCTAssertFalse(LatticeCellsRow.rows(.structural).contains(.along))
+        XCTAssertEqual(LatticeCellsRow.densityChoices(simulate: true), [.uniform, .perRegion, .sim])
+        XCTAssertEqual(LatticeCellsRow.densityTitle(.sim), "By stress", "the Density row names it By stress")
+        XCTAssertFalse(LatticeCellsRow.densityChoices(simulate: false).contains(.sim), "…only under the simulation")
 
         // the SAME setting: Sim on the Density row was `setDensityMode(.sim)`; By stress is `chooseAlong(.load)`
         var s = LatticeSettings(enabled: true); s.simulateStresses = true

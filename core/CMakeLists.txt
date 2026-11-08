@@ -2469,6 +2469,14 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
     TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
   add_test(NAME lattice_region_cell_window COMMAND test_lattice_region_cell_window)
+  # Ruling 2 (2026-11-06): the shape grade is a graded band, the preview's law, built by the run.
+  add_executable(test_lattice_shape_band tests/validation/test_lattice_shape_band.cpp)
+  target_link_libraries(test_lattice_shape_band PRIVATE topopt)
+  target_compile_definitions(test_lattice_shape_band PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME lattice_shape_band COMMAND test_lattice_shape_band)
   # E2.2 + E2.3 (plan.md §B6): the "- Lattice faces" mode; No lattice on a face region.
   add_executable(test_lattice_whole_part tests/validation/test_lattice_whole_part.cpp)
   target_link_libraries(test_lattice_whole_part PRIVATE topopt)

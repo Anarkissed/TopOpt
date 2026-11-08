@@ -3,7 +3,7 @@ import XCTest
 
 /// ★★ ONE LINE PER CAPTION, THE REST BEHIND THE (i) (his 2026-09-18), and ONLY THE
 /// OCTET TRUSS OFFERED. Source pins: the wizard's lattice-stage captions go through
-/// `captionLine`, which never wraps, and the type chips grey everything but octet.
+/// `captionLine`, which never wraps, and only the offered types (octet today) are on the page.
 final class LatticeWizardOneLineCaptionTests: XCTestCase {
     private var src: String {
         let url = URL(fileURLWithPath: #filePath)
@@ -41,15 +41,17 @@ final class LatticeWizardOneLineCaptionTests: XCTestCase {
     func testOnlyTheOctetTrussIsOffered() {
         XCTAssertEqual(LatticeSetupWizard.offeredTypeIDs, ["octet"])
         let s = src
-        XCTAssertTrue(s.contains("guard offered else { typeReason = LatticeTypeCatalog.reasonLine(e); return }"),
-                      "★ a tap on a type not offered never selects — it says why")
+        // ★ RE-PINNED (B7 slice 2, plan.md §B7 Type, LS-1 / LS-19): a type not offered is not on the page at all, so it
+        // can't be selected; a SAVED type core can't run still says why under the row.
+        XCTAssertTrue(s.contains("let offered = entries.filter(\\.offered)") && s.contains("ForEach(offered)"),
+                      "★ only offered types are drawn")
+        XCTAssertTrue(s.contains("if let why = typeReason ?? stale {"), "★ a saved type core can't run says why")
         let bcc = LatticeTypeCatalog.entriesFromCore().first { $0.id == "bcc" }!
         // ★ RE-PINNED (release (2), E2): core builds, certifies and runs BCC now; it waits for its app batch (the type gate)
         XCTAssertEqual(LatticeTypeCatalog.reasonLine(bcc), "BCC: \(LatticeTypeCatalog.appBatchPending)", "…in one sentence")
-        // only Organic disables the chips outright — except the offered chip that fixes a saved
-        // type core can't run (review 2026-10-01, `LatticeStaleTypeTests`)
-        XCTAssertTrue(s.contains("let inert = organicOn && !fixesStale") && s.contains(".disabled(inert)"),
-                      "only Organic disables the chips outright")
-        XCTAssertTrue(LatticeTypeCatalog.order.count > 1, "the others stay VISIBLE (greyed), not removed")
+        // Organic hides the cards — except the offered card that fixes a saved type core can't run
+        // (review 2026-10-01, `LatticeStaleTypeTests`)
+        XCTAssertTrue(s.contains("if !organicOn || stale != nil {"), "only Organic hides the cards, never the stale fix")
+        XCTAssertTrue(LatticeTypeCatalog.order.count > 1, "the catalog keeps every type; the page shows the offered ones")
     }
 }
