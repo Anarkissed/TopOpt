@@ -72,8 +72,18 @@ final class FlexibleH39HotfixHookTests: XCTestCase {
         var out: [String] = []
         if ws.contains("$regionsOpen") { out.append("a binding hands regionsOpen to another view") }
         if ws.contains("regionsOpen = true") { out.append("something sets regionsOpen = true") }
+        // ★ RE-PINNED (UI-Notes B8, 11-07): Edit faces' view-only Selections keeps the old card's Regions button in its foot until
+        // the reviewer's answer on B8's look (asked 20:04Z, item 3), gated as H39 is (Edit faces opens from Flexible too). Was:
+        // exactly one toggle. Now: two, and every toggle is drawn only off the Flexible stage.
         let toggles = ws.components(separatedBy: "regionsOpen.toggle()").count - 1
-        if toggles != 1 { out.append("regionsOpen.toggle() appears \(toggles) times") }
+        if toggles != 2 { out.append("regionsOpen.toggle() appears \(toggles) times") }
+        var from = ws.startIndex
+        while let r = ws.range(of: "Button { regionsOpen.toggle() } label: {", range: from..<ws.endIndex) {
+            if !ws[r.upperBound...].prefix(700).contains(".flexibleDrawn(when: !flexibleMain.owns(project, stage))") {
+                out.append("a Regions toggle is drawn on the Flexible stage (no H39 gate after it)")
+            }
+            from = r.upperBound
+        }
         // the one toggle is #354's Regions button, and that button is H39-gated
         if !ws.contains(h39Block + h39Pin) { out.append("the Regions toggle is drawn on the Flexible stage (not H39-gated)") }
         // (the red run's first count expected one: the declaration's own `= false` is the other — corrected before the code)

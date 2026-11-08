@@ -1442,10 +1442,11 @@ public struct WorkspacePlaceholder: View {
                 // the position gizmo (with padding between them)"). The Surface
                 // stage keeps them in its own tray, where the rest of its tools are.
                 if flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleMainViewToggles(main: flexibleMain, solver: FlexibleStressSolver(app: model, sim: latticeSim), openSettings: { showFlexiblePage = true }) }   // Flexible (PR #362) H5 (+C, C2): Dent heat / Stress / Lattice (the Lattice view IS the X-ray); with nothing to show the Lattice button opens Settings; Stress solved directly (never through startStressSolveIfNeeded's octet gate — FlexibleStressSolve.swift) · Flexible (PR #362) H61: off under Edit faces (B5's mode has the page)
-                else if viewerMesh != nil, visible.wireframe, !visible.surfaceEditing || editFaces.isEditing {
-                    // ★ B8 (R0): Edit faces' Outlines · X-ray are the view corner's, as on every stage (they were its tray's)
+                else if viewerMesh != nil, visible.wireframe, !visible.surfaceEditing {
                     viewModeToggles
                 }
+                // ★ B8 (R0): Edit faces' Outlines · X-ray are the view corner's, as on every stage (they were its tray's)
+                else if viewerMesh != nil, visible.wireframe, editFaces.isEditing { viewModeToggles }
                 latticeOnlyBadge
                 latticeEdgeLight
                 if flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleOnModelLayer(main: flexibleMain, project: project, projection: projection, settle: settleQuat, bottomClearance: bottomBarClearance, cards: latticeSelectableCards, groupCards: latticeFaceCards, cardsChanged: { refreshLatticeFaceCards() }) }   // Flexible (PR #362) H32: the face chip (new-face choices / Lattice·Solid·Off; draggable, with its leader) and the picked prism's depth and expand handles with their numbers · Flexible (PR #362) H61: off under Edit faces (B5's mode has the page)
@@ -7694,9 +7695,11 @@ public struct WorkspacePlaceholder: View {
             // ★ §2 — THE PENCIL BUTTON, a switch rather than a tool, so below a thin divider (the reviewer's answer on
             // where it goes in B8 is pending; it stays in the rail meanwhile).
             Rectangle().fill(DS.Color.strokeStrong.color).frame(width: 24, height: 1).padding(.vertical, 2)
-            cutRailButton("applepencil", label: "Pencil only", on: surfacePencilOnly, key: "cutTool-PencilOnly") {
-                surfacePencilOnly.toggle()
-            }
+            // (its action stays the bare toggle, written out: SurfacePencilToggleExemptionTests)
+            Button { surfacePencilOnly.toggle() } label: { cutRailGlyph("applepencil", on: surfacePencilOnly) }
+                .buttonStyle(.plain)
+                .background(DSParts.publish(surfacePencilOnly ? "cutTool-PencilOnly-on" : "cutTool-PencilOnly"))
+                .accessibilityLabel("Pencil only")
         }
         .padding(6)
         .background(Capsule().fill(DS.Surface.bar.color)
@@ -7727,17 +7730,20 @@ public struct WorkspacePlaceholder: View {
     /// One round tool in Cut's rail (mockup .rail button): 40 pt, the accent with a white glyph when on.
     private func cutRailButton(_ icon: String, label: String, on: Bool, key: String,
                                action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(on ? Color.white : DS.Color.textSecondary.color)
-                .frame(width: 40, height: 40)
-                .background(Circle().fill(on ? DS.Color.accent.color : Color.clear))
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .background(DSParts.publish(on ? key + "-on" : key))
-        .accessibilityLabel(label)
+        Button(action: action) { cutRailGlyph(icon, on: on) }
+            .buttonStyle(.plain)
+            .background(DSParts.publish(on ? key + "-on" : key))
+            .accessibilityLabel(label)
+    }
+
+    /// A rail tool's face: 40 pt round, the accent with a white glyph when on.
+    private func cutRailGlyph(_ icon: String, on: Bool) -> some View {
+        Image(systemName: icon)
+            .font(.system(size: 16, weight: .semibold))
+            .foregroundStyle(on ? Color.white : DS.Color.textSecondary.color)
+            .frame(width: 40, height: 40)
+            .background(Circle().fill(on ? DS.Color.accent.color : Color.clear))
+            .contentShape(Circle())
     }
 
     // ★ §6/§7 — THE ACTION CLUSTER: every tool's confirm, FLOATING NEXT TO WHAT IT
@@ -9939,6 +9945,7 @@ public struct WorkspacePlaceholder: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Regions")
+            .flexibleDrawn(when: !flexibleMain.owns(project, stage))   // ★ B8: as H39 — Edit faces opened from Flexible draws no Regions toggle
             keepClearQuickAction
             unitToggle
             Spacer(minLength: 0)
@@ -12965,7 +12972,6 @@ public struct WorkspacePlaceholder: View {
                 AnyView(latticeCornerPair)
             } else {
             ComputeLocationControl(compute: compute)
-                .background(DSParts.publish("cornerFour"))   // ★ B8: the old four (CutLookHostedTests' empty-corner check)
             printParamsButton
             // ★ LATTICE, TO THE LEFT OF OPTIMIZE (maintainer, 2026-08-17: "Make
             // it exactly like Optimize button, but to the left of it").
@@ -13177,6 +13183,7 @@ public struct WorkspacePlaceholder: View {
                 .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
         }
         .buttonStyle(.plain)
+        .background(DSParts.publish("printParamsButton"))   // ★ B8: one of the old four (CutLookHostedTests' empty corner)
     }
 
     /// ★ "LATTICE" — LATTICE THE SELECTION, DO NOT OPTIMIZE (maintainer,
@@ -13453,9 +13460,9 @@ extension WorkspacePlaceholder {
     /// The tools at rest, and Paint and the Regions panel shut — they live in Edit faces only.
     private func leaveEditFacesTools() {
         surfaceResetTools()
+        cutLitGroup = nil   // ★ B8
         paintActive = false
         regionsOpen = false
-        cutLitGroup = nil   // ★ B8
     }
 
     /// "✂ Editing faces · Done" — slim, in the capsule's place.

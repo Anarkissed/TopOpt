@@ -57,8 +57,11 @@ final class FlexibleRound7SelectionsHookTests: XCTestCase {
         // first, then B3 7e37c45f's Topology list, B4 564db991's lattice list, the card last). Our owns-swap goes right after
         // B5's mode branch, as #354's hook table places it; its gate and its FlexibleSelectionsList call are unchanged, and
         // its else is #354's chain. Was: `if <gate> { FlexibleSelectionsList(…) } else { selectionsLibraryCard }`.
+        // ★ RE-PINNED (UI-Notes B8, ledger row 34, mockup #cut): Edit faces' branch mounts Topology's Selections view only
+        // (cutSelectionsPanel) where B5 mounted the Surface stage's card; H25's line, gate and #354's next line are unchanged.
+        // Was: `if editFaces.isEditing { selectionsLibraryCard }`.
         Hook(id: "H25",
-             before: "            if editFaces.isEditing { selectionsLibraryCard }\n",
+             before: "            if editFaces.isEditing { cutSelectionsPanel }\n",
              line: "            else if flexibleMain.owns(project, stage), !editFaces.isEditing, !fullScreenPageUp { FlexibleSelectionsList(project: project, main: flexibleMain, collapsed: $selectionsCollapsed, cards: latticeSelectableCards, groupCards: latticeFaceCards, cardsChanged: { refreshLatticeFaceCards() }) }   // Flexible (PR #362) H25: ",
              gate: "flexibleMain.owns(project, stage), !editFaces.isEditing, !fullScreenPageUp",
              after: "            // ★ B3 (B1): Topology's list is SelectionsList — one line per group, eye, trash in place + Undo.\n"),

@@ -28,7 +28,7 @@ final class CutLookHostedTests: XCTestCase {
             h.pump(1)
 
             // ★ row 35: the corner is empty
-            for k in ["cornerFour", "optimizeSplit", "setupChip"] {
+            for k in ["printParamsButton", "optimizeSplit", "setupChip"] {
                 XCTAssertNil(h.frames.all[k], "\(name): ★ Edit faces' corner is empty (row 35), but '\(k)' is drawn")
             }
 
