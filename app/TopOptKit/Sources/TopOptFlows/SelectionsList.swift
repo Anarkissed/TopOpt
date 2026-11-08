@@ -191,6 +191,8 @@ public struct SelectionsList: View {
     var lineLook: ((UUID) -> Bool)? = nil
     @Environment(\.selectionsListMaxHeight) private var maxHeight
     @State private var dragFrom: CGFloat? = nil
+    /// ★ his iPad 11-07 (3b): the list's eye sweep (Lattice Setup's list only).
+    @StateObject private var sweep = EyeSweep()
 
     public init(project: ProjectModel, collapsed: Binding<Bool>, picked: UUID?, deleteAsk: UUID?,
                 isLocked: @escaping (UUID) -> Bool = { _ in false }, readsLattice: @escaping (UUID) -> Bool = { _ in false },
@@ -313,10 +315,23 @@ public struct SelectionsList: View {
                                     Color.clear.onAppear { contentHeight = g.size.height }
                                         .onChange(of: g.size.height) { contentHeight = $0 }
                                 })
+                                .environment(\.eyeSweepInScroll, true)   // ★ 3b: these eyes are the scroll's targets
                         }
                         .coordinateSpace(name: Self.scrollSpace)
                         .onPreferenceChange(SelectionsLineMidKey.self) { lineMids = $0 }
                         .frame(height: listHeight)
+                        // ★ his iPad 11-07 (3b): the sweep's scroll view — its frame, and a row brought in at its edge
+                        .background(GeometryReader { g in
+                            Color.clear.onAppear { sweep.visible = g.frame(in: .global) }
+                                .onChange(of: g.frame(in: .global)) { sweep.visible = $0 }
+                        }.allowsHitTesting(false))
+                        .onAppear {
+                            sweep.scrollTo = { key, dir in
+                                withAnimation(.linear(duration: EyeSweep.tickSeconds)) {
+                                    reader.scrollTo(EyeSweep.scrollID(key), anchor: dir > 0 ? .bottom : .top)
+                                }
+                            }
+                        }
                         // ★ B2 (U10): nothing hidden below the fold — "n more ⌄" on the list's foot; a tap scrolls them in
                         .overlay(alignment: .bottom) { moreCue(reader) }
                     // a card under the panel's lowest lines never opens out of sight
@@ -345,6 +360,9 @@ public struct SelectionsList: View {
                 .onChange(of: g.frame(in: .global)) { noteFrame($0) }
         }.allowsHitTesting(false))
         .onDisappear { noteFrame(nil) }
+        // ★ his iPad 11-07 (3b): press an eye and drag — Lattice Setup's list sweeps its eye column (EyeSweep)
+        .environment(\.eyeSweep, usesLatticeList ? sweep : nil)
+        .onAppear { if usesLatticeList, EyeSweep.recordLive { EyeSweep.live = sweep } }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("\(idPrefix)-selections-list")
     }
@@ -510,6 +528,7 @@ public struct SelectionsList: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(hidden ? "Show \(g.name)" : "Hide \(g.name) (it still counts in the run)")
                 .accessibilityIdentifier("\(idPrefix)-sel-eye-\(g.id.uuidString)")
+                .eyeSweep("\(idPrefix)-sel-eye-\(g.id.uuidString)", hidden: hidden, toggle: { toggleEye(g.id) })   // ★ 3b
             }
             if !locked {
                 // ★ B2 (note 6): the trash stays a trash while it asks — a second tap only cancels ([Delete] is in the card, a
