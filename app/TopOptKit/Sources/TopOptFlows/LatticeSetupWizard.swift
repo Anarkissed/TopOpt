@@ -176,8 +176,6 @@ public struct LatticeSetupWizard: View {
     /// ★ "Show without repairs" (maintainer, 2026-09-05): the sample shows the traced
     /// curves instead of the file's repaired spans. A preview option, not a setting —
     /// the file always has the repairs, and the banner says which is shown.
-    /// ★ THE SETTING, NOT VIEW STATE (2026-09-07) — see `LatticeSettings.organicShowRepairs`.
-    private var organicShowRepairs: Bool { project.lattice.organicShowRepairs }
     private var organicSampleShown: Bool { model.cellTransition == .organicGrade }
 
     // MARK: the persistent left modal (§5b/§5c) — every selection, always live
@@ -1932,9 +1930,8 @@ public struct LatticeSetupWizard: View {
     /// per-appearance shuffling, nothing that moves a chip out from under a finger.
     /// The row still SCROLLS — there are more types than fit 348 pt — it just
     /// starts from the selected one instead of from whatever happens to be first.
-    /// ★★ LATTICE TYPES U1/U2 (2026-10-01): every type, in the round's order, from core's facts
-    /// (`LatticeTypeCatalog`) — offered ones selectable, the rest greyed; a greyed chip, tapped,
-    /// says why in a line under the row and never selects.
+    /// ★★ LATTICE TYPES (U1/U2 2026-10-01, B7 slice 2): the offered types from core's facts (`LatticeTypeCatalog`),
+    /// as a label card or big cards; a saved type core can't run says why in a line under the row.
     private var typeRow: some View {
         // ★ B7 slice 2 (plan.md §B7 Type, LS-1 / LS-19, R3.1): the offered types only (core's facts behind the type gate);
         // one is a LABEL card with its (i), two or more are big cards with nothing pre-picked on a new lattice (Save waits
