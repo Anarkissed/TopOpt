@@ -15,9 +15,11 @@ import Foundation
 import simd
 
 public enum LatticeSetupHandles {
-    /// A face's prism shows while its row is picked, or while its eye says so (the eye wins either way).
+    /// A face's prism shows unless its eye hid it. ★ His iPad 11-07 (3a): "They must all be VISIBLE by default" — the
+    /// mockup's rule (shown only while picked or eyed) left every prism hidden on a group's first tap. `picked` is kept for
+    /// the callers; a picked row's prism shows like any other until its eye hides it.
     public static func prismShown(_ key: String, eye: [String: Bool], picked: String?) -> Bool {
-        eye[key] ?? (picked == key)
+        eye[key] ?? true
     }
 
     /// The drag direction on screen: from a handle's point `a` to the point 10 mm along its direction `b`, unit length.
@@ -62,8 +64,8 @@ public enum LatticeSetupHandles {
     /// The widest number a handle's pill shows beside its knob ("⌀ 120.0 mm"), pt.
     public static let pillMax: CGFloat = 96
     /// The room a drawn handle takes: its 44 pt knob (middle on `p`), then its number beside it (DragHandle's HStack).
-    public static func footprint(_ p: CGPoint, size: CGFloat = 44, spacing: CGFloat = 8) -> CGRect {
-        CGRect(x: p.x - size / 2, y: p.y - size / 2, width: size + spacing + pillMax, height: size)
+    public static func footprint(_ p: CGPoint, size: CGFloat = 44, spacing: CGFloat = 8, pill: Bool = true) -> CGRect {
+        CGRect(x: p.x - size / 2, y: p.y - size / 2, width: size + (pill ? spacing + pillMax : 0), height: size)
     }
 
     /// A held handle: its key, and where it was and its axis on screen when the drag began.
@@ -91,4 +93,8 @@ public enum LatticeSetupHandles {
     @MainActor public static var litThrough: Set<String> = []
     /// The picked zone's move glass's gesture (where the finger went down, where it is now; then its release).
     @MainActor public static var liveZoneGizmo: (changed: (CGPoint, CGPoint) -> Void, ended: () -> Void)?
+    /// ★ his iPad 11-07 (1b): the page's tap on a face of the part, as the viewer's pick calls it.
+    @MainActor public static var livePick: ((FaceID) -> Void)?
+    /// ★ his iPad 11-07: the faces the page last coloured for the Lattice stage's own groups (Pending ones included).
+    @MainActor public static var latticeTinted: Set<FaceID> = []
 }
