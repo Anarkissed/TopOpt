@@ -14165,6 +14165,13 @@ extension WorkspacePlaceholder {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
             autoKeepClearRow(g)   // ★ first, right under the group's line, where he looks (not under its primitives)
             groupRow(g, inList: true)
+            if let line = project.keepClearIdlePiecesLine(g) {   // ★ E4 (j), ruling 11-08 21:32: no silent no-ops
+                Text(line).dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textSecondary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, DS.Space.l)
+                    .accessibilityIdentifier("keepClearIdlePieces-\(g.id.uuidString)")
+                    .background(CornerPairStyle.publish("keepClearIdlePieces-\(g.id.uuidString)"))
+            }
             if force.kind(for: g.id).isLoad { loadRows(g) }   // ★ B3 (note 5): Kind, Weight, Direction
             // ★ his ask 2026-10-26 + his iPad 14:13: every face its own card, picked one at a time, with its own eye and trash
             VStack(spacing: PieceRowPick.spacing) {

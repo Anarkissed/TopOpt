@@ -104,7 +104,7 @@ final class PieceKeepClearTests: XCTestCase {
     /// ★ A piece of a face that is neither a hole nor flat is not sent: core refuses a piece that gives nothing to clear.
     /// His l bracket has none (every round face is a bolt hole), so a rounded OUTER edge: a convex arc of a fitted
     /// cylinder (r 5 mm, 135° of wrap, 10 mm tall) — curved, not flat, and not a hole (ClearanceDerivationTests' gate).
-    private func roundedEdgeProject() -> ProjectModel {
+    static func roundedEdgeProject() -> ProjectModel {
         let n = 16, segments = 6, r: Float = 5
         var verts: [Float] = []
         for k in 0...segments { let a = Float(k) * (2 * .pi / Float(n)); verts += [r * cos(a), r * sin(a), 0] }
@@ -128,7 +128,7 @@ final class PieceKeepClearTests: XCTestCase {
     }
 
     func testAPieceThatIsNeitherAHoleNorFlatIsNotSent() throws {
-        let p = roundedEdgeProject()
+        let p = Self.roundedEdgeProject()
         let mesh = try XCTUnwrap(p.viewerMesh)
         XCTAssertFalse(FaceTopology.isFastenerBore(0, in: mesh), "premise: not a hole")
         XCTAssertFalse(mesh.faceGeometry(0)?.isPlane ?? true, "premise: not flat")
