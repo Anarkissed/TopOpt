@@ -335,6 +335,11 @@ public struct WorkspacePlaceholder: View {
     /// The cut the user has TAPPED and is now aiming — the one the checkmark
     /// commits. Nil while merely hovering.
     @State private var heldCut: SurfaceCut?
+    /// ★ B8 (row 36, R1, P6): WHERE THE CUT LIES, by the face it is on (CutAim) — a flat face's line, a hole's Along │
+    /// Across, anything else's Which plane?. While it asks, no line (`heldCut` nil); once answered `heldCut` is its plane.
+    @State private var cutAim: CutAim?
+    /// The aim when the cut handle's drag began.
+    @State private var cutAimDragStart: CutAim?
     /// Where the current rotate drag started, so successive drags accumulate.
     @State private var cutRotationBase: Double = 0
     /// §6 — how far the cut has been nudged off the piece's centre, in mm, along
@@ -1012,6 +1017,7 @@ public struct WorkspacePlaceholder: View {
                               surfaceRefusal = nil
                               heldCut = nil
                               hoveredCut = nil
+                              cutAim = nil   // ★ B8
                               if surfaceTool != .union { surfacePatternFace = nil }
                           },
                           onProjection: { projection = $0 },
@@ -1435,6 +1441,7 @@ public struct WorkspacePlaceholder: View {
                     surfaceToolsPanel
                     // ★ the confirm floats NEXT TO the action, not in the tray.
                     surfaceActionCluster.ignoresSafeArea()
+                    cutHandleOverlay.ignoresSafeArea()   // ★ B8 (R1): the cut's ↕ handle on its line
                 }
                 // ★ THE WIREFRAME AND X-RAY, ON THE TOPOLOGY PAGE TOO (maintainer,
                 // 2026-08-16: "We should keep wireframe and xray view throughout
@@ -5553,6 +5560,7 @@ public struct WorkspacePlaceholder: View {
         surfaceSelectedFace = nil
         heldCut = nil
         hoveredCut = nil
+        cutAim = nil   // ★ B8
         surfaceUnion.clear()
         surfacePatternFace = nil
         surfacePatternPiece = nil
@@ -7092,6 +7100,7 @@ public struct WorkspacePlaceholder: View {
         switch tool {
         case .select:
             heldCut = nil
+            cutAim = nil   // ★ B8
 
         case .cut:
             // ★ THE MIDDLE OF THE PIECE YOU TAPPED, not of the face it came from
@@ -7107,6 +7116,10 @@ public struct WorkspacePlaceholder: View {
                 SurfaceCut.centred(onRegion: $0, of: faceID,
                                    regions: project.faceRegions, in: mesh)
             } ?? SurfaceCut.centred(onFace: faceID, in: mesh)
+            // ★ B8 (row 36): the aim by the face's kind — flat: its line at once; a hole or anything else: the question first
+            cutAim = CutAim.make(face: faceID, piece: surfaceSelected ?? project.surfaceCutTarget(face: faceID),
+                                 regions: project.faceRegions, mesh: mesh)
+            if let a = cutAim { heldCut = a.surfaceCut() }
             cutRotation = 0
             cutRotationBase = 0
             cutRotationDetent = 0
@@ -7232,6 +7245,7 @@ public struct WorkspacePlaceholder: View {
         surfaceTool = tool
         heldCut = nil
         hoveredCut = nil
+        cutAim = nil   // ★ B8
         surfaceRefusal = nil
         surfaceUnion.clear()
         surfacePatternFace = nil
@@ -7761,7 +7775,15 @@ public struct WorkspacePlaceholder: View {
                     EmptyView()
 
                 case .cut:
-                    if let held = heldCut {
+                    // ★ B8 (row 36, R1, P6; mockup #cut-line, #cut-hole, #cut-plane-ask): the question first where the face
+                    // is not flat, then the bar — ✕ │ [Tilt] │ Rotate │ mm drag ↕ (or drag ⟲) │ ✓
+                    if let aim = cutAim {
+                        if let ask = aim.asks {
+                            CutAsk(ask: ask) { way, angle in var a = aim; a.answer(way, atAnAngle: angle); setCutAim(a) }
+                        } else {
+                            CutBar(aim: aim, set: { setCutAim($0) }, cancel: { releaseCut() }, confirm: { commitCutAim(aim) })
+                        }
+                    } else if let held = heldCut {
                         surfaceClusterButton("xmark", tint: DS.Color.textSecondary) {
                             releaseCut()
                         }
@@ -8062,8 +8084,8 @@ public struct WorkspacePlaceholder: View {
             // meant to be").
             .position(x: surfaceDocksCluster
                       ? (projection?.viewportSize.width ?? 1032) / 2
-                      : min(max(at.x, 200),
-                            max((projection?.viewportSize.width ?? 1032) - 200, 200)),
+                      : min(max(at.x, surfaceClusterHalfWidth),
+                            max((projection?.viewportSize.width ?? 1032) - surfaceClusterHalfWidth, surfaceClusterHalfWidth)),
                       y: surfaceDocksCluster
                       ? (projection?.viewportSize.height ?? 1376) - bottomBarClearance - 40
                       : min(max(at.y - 84, 96),
@@ -8121,13 +8143,16 @@ public struct WorkspacePlaceholder: View {
     /// of the part.
     private var surfaceDocksCluster: Bool { false }
 
+    /// How far the cluster's middle keeps from the screen's sides: the Cut bar (✕ │ Tilt │ Rotate │ mm │ ✓) is the widest.
+    private var surfaceClusterHalfWidth: CGFloat { surfaceTool == .cut && cutAim != nil ? 330 : 200 }
+
     /// Where the cluster floats: the point the armed tool is aimed at.
     private func surfaceActionAnchor(_ proj: CameraProjection) -> CGPoint? {
         guard let mesh = viewerMesh else { return nil }
         let model: SIMD3<Double>?
         switch surfaceTool {
         case .select:  model = nil
-        case .cut:     model = heldCut?.point
+        case .cut:     model = heldCut?.point ?? cutAim?.centre   // ★ B8: the question floats where the cut will be
         // The cluster floats over the CENTRE OF EVERYTHING PICKED, so it stays
         // with the selection as it grows rather than anchoring to the first tap.
         // ★ OVER WHAT IS PICKED — the centre of the whole set, so it stays with the
@@ -8319,13 +8344,31 @@ public struct WorkspacePlaceholder: View {
     /// hovering above the glass on an M-series iPad; on hardware without hover it
     /// simply never fires and the mode still works by tap.
     @ViewBuilder private var surfaceCutOverlay: some View {
+        let _ = recordCutLive()
         if visible.surfaceEditing {
             GeometryReader { _ in
                 ZStack(alignment: .topLeading) {
                     if let proj = projection {
+                        // ★ B8 (row 36): an aimed cut draws where its plane crosses the piece — on the face, a ring round a
+                        // hole — never a straight stroke off it
+                        if let a = cutAim, let m = viewerMesh {
+                            let t = cutAimTrace(a, mesh: m)
+                            Path { path in
+                                var i = 0
+                                while i + 5 < t.count {
+                                    if let p = proj.project(settledWorld(SIMD3<Float>(t[i], t[i + 1], t[i + 2]))),
+                                       let q = proj.project(settledWorld(SIMD3<Float>(t[i + 3], t[i + 4], t[i + 5]))) {
+                                        path.move(to: p); path.addLine(to: q)
+                                    }
+                                    i += 6
+                                }
+                            }
+                            .stroke(DS.Color.accent.color, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                            .allowsHitTesting(false)
+                        }
                         // The line being aimed: the held one if a face is chosen,
                         // otherwise whatever the pencil is over.
-                        if let base = heldCut ?? hoveredCut {
+                        else if let base = heldCut ?? hoveredCut {
                             let cut = base.rotated(by: cutRotation)
                                 .moved(byMM: heldCut == nil ? 0 : cutOffsetMM)
                             let seg = cut.previewSegment(halfLengthMM: cutPreviewHalfLengthMM)
@@ -8360,6 +8403,72 @@ public struct WorkspacePlaceholder: View {
         cutRotation = 0
         cutRotationBase = 0
         cutRotationDetent = 0
+        cutAim = nil
+        cutAimDragStart = nil
+    }
+
+    /// Tests: the page's face tap and its aim, as it last drew them (CutLive).
+    private func recordCutLive() {
+        guard CutLive.recordLive else { return }
+        CutLive.aim = cutAim
+        if let m = viewerMesh { CutLive.pick = { handleSurfacePick($0, at: nil, mesh: m) } }
+    }
+
+    /// ★ B8: the aim changed (the bar, the question, the handle) — the held cut is its plane, nothing added on top.
+    private func setCutAim(_ a: CutAim) {
+        cutAim = a
+        heldCut = a.surfaceCut()
+        cutRotation = 0
+        cutOffsetMM = 0
+    }
+
+    /// ★ B8 (row 36, R1): Cut's ✓ — the aim's plane through its face (or, carried from Select similar, each face through its
+    /// own centre at the same Rotate and place).
+    private func commitCutAim(_ a: CutAim) {
+        guard let cut = a.surfaceCut() else { return }
+        let kids = surfaceCarried.count > 1
+            ? project.commitSurfaceCut(faces: surfaceCarried, rotationDegrees: a.rotateDeg, offsetMM: a.offsetMM)
+            : project.commitSurfaceCut(cut)
+        if surfaceCarried.count > 1 { model.toast = "Cut \(surfaceCarried.count) faces." }
+        surfaceCarried = []
+        releaseCut()
+        surfaceSelected = kids.first
+    }
+
+    /// ★ B8 (R1, design-system §4.24): the cut's one handle, on its line — ↕ slides it (across a flat face, up and down a
+    /// bore), ⟲ carries a line round a bore. Its number rides beside it; the bar reads the same place.
+    @ViewBuilder private var cutHandleOverlay: some View {
+        if visible.surfaceEditing, surfaceTool == .cut, let a = cutAim, let hd = a.handle, let proj = projection, let m = viewerMesh,
+           let p0 = proj.project(settledWorld(SIMD3<Float>(hd.point))) {
+            let mmLen = max(Double(m.bounds.radius) * 0.05, 1)
+            let p1 = proj.project(settledWorld(SIMD3<Float>(hd.point + hd.direction * mmLen))) ?? CGPoint(x: p0.x, y: p0.y - 1)
+            let ax = CGVector(dx: p1.x - p0.x, dy: p1.y - p0.y)
+            let ptsPerMM = max(Double((ax.dx * ax.dx + ax.dy * ax.dy).squareRoot()) / mmLen, 1e-6)
+            let value = hd.around ? "\(Int(a.rotateDeg.rounded()))\u{00B0}"
+                : (a.offsetMM >= 0 ? "+" : "\u{2212}") + SelectionsSummary.format(abs((a.offsetMM * 10).rounded() / 10), decimals: 1) + " mm"
+            let drag: (CGFloat, Bool) -> Void = { along, ended in
+                guard let start = cutAimDragStart ?? cutAim else { return }
+                if cutAimDragStart == nil { cutAimDragStart = start }
+                var next = start
+                next.drag(byMM: Double(along) / ptsPerMM, from: start)
+                setCutAim(next)
+                if ended { cutAimDragStart = nil }
+            }
+            let _ = { if CutLive.recordLive { CutLive.handleDrag = drag } }()
+            // the round handle's middle ON the line (its number rides to its right)
+            DragHandle(key: "cut", axis: ax, glyph: hd.around ? .around : .along, value: value, onDrag: drag)
+                .fixedSize()
+                .frame(width: 400, height: DragHandle.size, alignment: .leading)
+                .position(x: p0.x + 200 - DragHandle.size / 2, y: p0.y)
+        }
+    }
+
+    /// ★ B8 (row 36: "the line never leaves the face"): the aimed cut's line, traced where its plane crosses the piece.
+    private func cutAimTrace(_ a: CutAim, mesh: ViewerMesh) -> [Float] {
+        guard let pl = a.plane else { return [] }
+        let segs = SurfaceCutLines.trace(plane: RegionCut(point: pl.point, normal: pl.normal), faces: [a.face], in: mesh)
+        let cuts = surfaceSelected.flatMap { project.faceRegions.region($0)?.cuts } ?? []
+        return cuts.isEmpty ? segs : SurfaceCutLines.clip(segs, to: cuts)
     }
 
 
