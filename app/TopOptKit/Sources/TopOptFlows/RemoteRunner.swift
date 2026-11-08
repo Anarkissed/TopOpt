@@ -1020,6 +1020,9 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                             "radius_mm": m.radiusMM,
                             "half_length_mm": m.halfLengthMM,
                         ]
+                } else if c.regionID >= 0 {
+                    // ★ E4 (j): a cut piece, by its region (declared once in loads.face_regions)
+                    entry["region_id"] = c.regionID
                 } else {
                     entry["face_id"] = c.faceID
                 }

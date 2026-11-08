@@ -1057,11 +1057,14 @@ public struct AppliedClearance: Equatable, Sendable {
     public let kind: TopOptKit.ClearanceKind
     public let voxelsFrozen: Int
     public let inGrid: Bool
-    public init(faceID: Int, kind: TopOptKit.ClearanceKind, voxelsFrozen: Int, inGrid: Bool) {
+    /// ★ E4 (j): the cut piece's region when the Keep clear was on a piece (`faceID` is then -1); -1 otherwise.
+    public let regionID: Int
+    public init(faceID: Int, kind: TopOptKit.ClearanceKind, voxelsFrozen: Int, inGrid: Bool, regionID: Int = -1) {
         self.faceID = faceID
         self.kind = kind
         self.voxelsFrozen = voxelsFrozen
         self.inGrid = inGrid
+        self.regionID = regionID
     }
 }
 
@@ -3065,15 +3068,27 @@ public enum TopOptKit {
         /// axis/radius/normal/extent must travel to the core. When set, `faceID`
         /// is a sentinel (`-1`) and the same distance fields above still apply.
         public let manual: ManualGeometry?
+        /// ★ E4 (j), ruling 2026-11-07 19:55: a Keep clear on a CUT PIECE names its face region (declared in the run's
+        /// region layer) instead of a face; core clears in front of the piece only (its member faces' own Keep clear,
+        /// clipped by its cuts). `faceID` is then `-1`. -1 = not a piece.
+        public let regionID: Int
         public init(faceID: Int, kind: ClearanceKind, concentricMarginMM: Double = 0,
                     axialClearanceMM: Double = 0, slabDepthMM: Double = 0,
-                    manual: ManualGeometry? = nil) {
+                    manual: ManualGeometry? = nil, regionID: Int = -1) {
             self.faceID = faceID
             self.kind = kind
             self.concentricMarginMM = concentricMarginMM
             self.axialClearanceMM = axialClearanceMM
             self.slabDepthMM = slabDepthMM
             self.manual = manual
+            self.regionID = regionID
+        }
+
+        /// ★ E4 (j): a cut piece's Keep clear, by its region.
+        public static func piece(regionID: Int, kind: ClearanceKind, concentricMarginMM: Double = 0,
+                                 axialClearanceMM: Double = 0, slabDepthMM: Double = 0) -> ClearanceSpec {
+            ClearanceSpec(faceID: -1, kind: kind, concentricMarginMM: concentricMarginMM,
+                          axialClearanceMM: axialClearanceMM, slabDepthMM: slabDepthMM, regionID: regionID)
         }
 
         /// A hand-placed swept-cylinder (bolt) keep-out, geometry supplied inline.
@@ -3271,6 +3286,11 @@ public enum TopOptKit {
             lc.clearance_half_u_mm.push_back(g.halfUMM)
             lc.clearance_half_w_mm.push_back(g.halfWMM)
         }
+        // ★ E4 (j): a Keep clear on a cut piece names its region. Emitted only when one does, so a load case with no
+        // piece Keep clear ships the POD it always did.
+        if clearances.contains(where: { $0.regionID >= 0 }) {
+            for c in clearances { lc.clearance_region_ids.push_back(Int32(c.regionID)) }
+        }
         // Handoff 124 — flatten the Face protections (preserve-skin) into the POD
         // load case: the raw face ids + the ONE global depth (mm). A depth <= 0
         // means "use the core default". Empty list → byte-identical.
@@ -3430,13 +3450,15 @@ public enum TopOptKit {
         let cKinds = Array(raw.clearance_kinds)
         let cFrozen = Array(raw.clearance_voxels_frozen)
         let cInGrid = Array(raw.clearance_in_grid)
+        let cRegions = Array(raw.clearance_region_ids)   // ★ E4 (j): a cut piece's row names its region
         var applied: [AppliedClearance] = []
         for i in 0..<cFaces.count {
             applied.append(AppliedClearance(
                 faceID: Int(cFaces[i]),
                 kind: (i < cKinds.count && cKinds[i] == 1) ? .face : .bolt,
                 voxelsFrozen: i < cFrozen.count ? Int(cFrozen[i]) : 0,
-                inGrid: i < cInGrid.count ? cInGrid[i] != 0 : false))
+                inGrid: i < cInGrid.count ? cInGrid[i] != 0 : false,
+                regionID: i < cRegions.count ? Int(cRegions[i]) : -1))
         }
         // Handoff 124 — the Face-protection diagnostics (parallel arrays), for honest results.
         let pFaces = Array(raw.protection_face_ids)

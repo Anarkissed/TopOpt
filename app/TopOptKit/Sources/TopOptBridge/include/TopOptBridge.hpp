@@ -432,6 +432,9 @@ struct OptimizeResult {
   std::vector<int32_t> clearance_kinds;
   std::vector<int32_t> clearance_voxels_frozen;
   std::vector<uint8_t> clearance_in_grid;
+  // ★ E4 (j): clearance_region_ids[c] >= 0 when row c is a Keep clear on a CUT PIECE
+  // (its face region; clearance_face_ids[c] is then -1), -1 for a face or a manual one.
+  std::vector<int32_t> clearance_region_ids;
 
   // Handoff 124 — what each declared Face protection actually froze, so the results
   // screen states HONESTLY that preservation was applied and to which faces (the
@@ -797,6 +800,12 @@ struct BridgeLoadCase {
   std::vector<double> clearance_margin_mm;
   std::vector<double> clearance_axial_mm;
   std::vector<double> clearance_slab_mm;
+  // ★ E4 (j), ruling 2026-11-07 19:55: a Keep clear on a CUT PIECE names its face region
+  // (one of this load case's region_ids) in clearance_region_ids[c], with
+  // clearance_face_ids[c] = -1; core clears in front of the piece only (its member
+  // faces' own Keep clear, clipped by its cuts). -1 = not a piece. EMPTY when no
+  // clearance is on a piece => byte-identical to before E4.
+  std::vector<int32_t> clearance_region_ids;
 
   // Handoff group-editing — MANUAL (user-placed) primitive geometry. The finder
   // OVER-finds and MISSES; the user hand-places a keep-out primitive that has NO

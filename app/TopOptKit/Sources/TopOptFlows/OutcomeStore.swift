@@ -98,6 +98,8 @@ enum OutcomeCodec {
         let kind: Int
         let voxelsFrozen: Int
         let inGrid: Bool
+        /// ★ E4 (j): the cut piece's region; absent for a face (and in every older blob).
+        var regionID: Int? = nil
     }
 
     // Handoff 124's per-face Face-protection outcome, mirrored for persistence so a
@@ -283,7 +285,8 @@ enum OutcomeCodec {
             computedRemotely: o.computedRemotely,
             appliedClearances: o.appliedClearances.map {
                 AppliedClearanceDTO(faceID: $0.faceID, kind: $0.kind.rawValue,
-                                    voxelsFrozen: $0.voxelsFrozen, inGrid: $0.inGrid) },
+                                    voxelsFrozen: $0.voxelsFrozen, inGrid: $0.inGrid,
+                                    regionID: $0.regionID >= 0 ? $0.regionID : nil) },
             appliedFaceProtections: o.appliedFaceProtections.map {
                 AppliedFaceProtectionDTO(faceID: $0.faceID, voxelsFrozen: $0.voxelsFrozen,
                                          depthVoxels: $0.depthVoxels,
@@ -378,7 +381,8 @@ enum OutcomeCodec {
             appliedClearances: (d.appliedClearances ?? []).map {
                 AppliedClearance(faceID: $0.faceID,
                                  kind: TopOptKit.ClearanceKind(rawValue: $0.kind) ?? .face,
-                                 voxelsFrozen: $0.voxelsFrozen, inGrid: $0.inGrid) },
+                                 voxelsFrozen: $0.voxelsFrozen, inGrid: $0.inGrid,
+                                 regionID: $0.regionID ?? -1) },
             appliedFaceProtections: (d.appliedFaceProtections ?? []).map {
                 AppliedFaceProtection(faceID: $0.faceID, voxelsFrozen: $0.voxelsFrozen,
                                       depthVoxels: $0.depthVoxels,
