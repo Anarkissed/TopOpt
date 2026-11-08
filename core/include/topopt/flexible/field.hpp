@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "topopt/flexible/error.hpp"
@@ -91,13 +92,28 @@ std::vector<double> edge_fraction(const Stack& stack);
 //
 // ★ "Buildable" is a LABELLED HEURISTIC (R14): C2's realised lattice replaces it.
 // ════════════════════════════════════════════════════════════════════════════════
+// C2 B1b, item 18: A SERIES COLUMN. The column's run, split into its OWN segment (the
+// density design_face solves for) and FIXED segments at densities already designed (other
+// owners'). One stress runs through them all, so the depth is
+//     d = own_mm · ε(p; ρ_own) + Σ length · ε(p; ρ_fixed).
+// The fixed part is independent of ρ_own, so solving for ρ_own is one inversion on the own
+// segment's share of the target.
+struct FixedSegment {
+  double length_mm = 0.0;
+  double density = 0.0;
+};
+struct SeriesColumn {
+  double own_mm = 0.0;
+  std::vector<FixedSegment> fixed;
+};
+
 struct ColumnDesign {
   double s = 0.0;
   double pressure_mpa = 0.0;
   double height_mm = 0.0;         // latticed length
   double target_depth_mm = 0.0;
   double target_strain = 0.0;
-  // "ok" | "too_firm" | "too_soft" | "beyond_data" | "no_lattice"
+  // "ok" | "too_firm" | "too_soft" | "beyond_data" | "no_lattice" | "rim" (flat_cut: target under one bead)
   std::string status;
   bool target_extrapolated = false;
   double target_density = 0.0;    // meaningful when status == "ok"
@@ -111,6 +127,11 @@ struct ColumnDesign {
   bool buildable_extrapolated = false;
   double cell_mm = 0.0;           // at the buildable density
   double sigma_mm = 0.0;          // the smoothing σ used at this column
+  // C2 B1b (series): the own segment's length (= height_mm for a single-ρ column) and the
+  // fixed segments' depth at this column's pressure (0 for a single-ρ column; NaN when a fixed
+  // segment is past the data).
+  double own_length_mm = 0.0;
+  double fixed_depth_mm = 0.0;
 };
 
 struct Range1 {
@@ -129,6 +150,7 @@ struct FaceDesign {
   double design_stamp_off_face_n = 0.0;
   bool design_stamp_off_face = false;  // some of the design stamp's force misses the face
   int ok = 0, too_firm = 0, too_soft = 0, beyond_data = 0, no_lattice = 0;
+  int rim = 0;  // C2 B2c: flat_cut columns whose target is under one bead (the densest tested lattice)
   int solid_under_map = 0;  // no_lattice columns with squish drawn over them (B2)
   int target_extrapolated = 0, buildable_extrapolated = 0, buildable_beyond_data = 0;
   int near_edge = 0;  // buildable density within 10 % of the table's span of an end
@@ -138,9 +160,12 @@ struct FaceDesign {
   Range1 sigma;  // the smoothing σ used (mm), R14 / F7
 };
 
+// `series` (optional, parallel to stack.columns): each column as a series column (item 18).
+// Null = every column is single-ρ over its whole run, exactly as before.
 FaceDesign design_face(const CurveSet& set, const Stack& stack, const SquishMap& map,
                        double weight_n, const StampGrid* design_stamp,
-                       const BuildParams& build, const TierBand& tier);
+                       const BuildParams& build, const TierBand& tier,
+                       const std::vector<SeriesColumn>* series = nullptr);
 
 // ════════════════════════════════════════════════════════════════════════════════
 // F8 — CHECK MODE: press a stamp on the designed lattice and read the dent.
@@ -182,7 +207,15 @@ struct StackConflict {
   int face_a = -1, face_b = -1;
   double overlap_mm3 = 0.0;
   double axis_angle_deg = 0.0;
+  // C2 B2, item 9(a): the loads point OPPOSITE ways (a PINCH), not the same way (a step).
+  bool pinch = false;
 };
+
+// C2 B2, item 9(a), the app's rule (FlexiblePinch.pinchedColumns): a column of `st` is PINCHED
+// when its midpoint (halfway between its entry and exit) lies in a partner's stack.
+std::vector<char> pinched_columns(const Stack& st, const std::vector<const Stack*>& partners);
+// The share of a pinched column each face designs for: the half nearer it (FlexiblePinch.segmentShare).
+inline constexpr double kPinchSegmentShare = 0.5;
 // Stacks on DIFFERENT axes that overlap: nearest loaded face, blended over one cell.
 struct Handover {
   int face_a = -1, face_b = -1;
@@ -213,11 +246,14 @@ struct DensityField {
   std::vector<Handover> handovers;
 };
 
-// Assemble the field over the lattice voxels. Throws FlexibleError when a conflict
-// exists (call find_stack_conflicts first to report it properly).
+// Assemble the field over the lattice voxels. Throws FlexibleError when a conflict exists
+// (call find_stack_conflicts first to report it properly), except a PINCH the caller names in
+// `allowed_pinches` (face_region_id pairs, either order): those meet at the middle by the
+// nearest-face handover (C2 B2, item 9(a)).
 DensityField assemble_density_field(const VoxelGrid& grid, const std::vector<char>& lattice_mask,
                                     const std::vector<LoadedStack>& stacks,
-                                    const BuildParams& build);
+                                    const BuildParams& build,
+                                    const std::vector<std::pair<int, int>>* allowed_pinches = nullptr);
 
 }  // namespace flexible
 }  // namespace topopt

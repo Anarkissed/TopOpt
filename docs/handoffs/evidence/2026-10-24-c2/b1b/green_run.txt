@@ -1,0 +1,9 @@
+  series consistency: worst |rho_own - rho_single| = 1.11e-16
+  series formula: 400 columns, worst error 0 mm
+  too_soft: strains 0.0213..0.2759, target 1.6997 mm, fixed depth 4.1392 mm; single ok 400, series too_soft 400 of 400
+  flat prism: the press owns 300 voxels, 0 past its plane
+  CONTROL (none): the press owns 1080 voxels, 780 past its plane
+  grams: face 211 47.384, press 201 0.708, total 48.092
+  region grams: region 0 16.768 of 16.768 total
+test_flexible_b1b: 16 checks, 0 failures
+exit 0

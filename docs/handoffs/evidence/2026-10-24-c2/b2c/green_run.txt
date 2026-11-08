@@ -1,0 +1,15 @@
+  crossing, group 1: 900 of 900 columns within band, worst miss 0.0046 mm
+  crossing, group 2: 900 of 900 columns within band, worst miss 0.0083 mm
+  half-top + side: before 1350 columns missed (worst 2.0921 mm); after 5 sweeps: group 1 450/450, group 2 900/900 within band
+  unreachable: PROVEN: no lattice lets every squeeze group reach its own depths when pressed alone: on 216 shared run(s) and 0 shared region(s) the targets lie outside everything the tested lattices can reach, by up to 4.919 mm per column (exact in the 1-D model). (group 1 and group 2: 432 columns squish past the tested data; worst 1.602 mm, 20.0 % of its target, 1-D estimate). Change a group's depth or force, or its band.
+  mixture (top 3 + side 5.6 mm): refused 0, mixed components 30, still missing 810, worst 0.1946 mm, steep 0
+test_flexible_b2b: 12 checks, 0 failures
+  flat_cut: 180 columns, worst |target - (h - height)| = 2.22e-16 mm
+  group split: face 101 150.000000 N, face 103 150.000000 N
+  17 control (top alone): max |achieved - design| 8.88e-15 mm
+  17 two groups: group 1 max |achieved - design| 1.8422 mm, 13050 voxels on its runs owned by another group
+  26 group grams: 22.538 + 31.426 of 53.965
+  pinch: face 103 216 of 216 columns pinched, face 105 216
+  pinch: run 0.000 mm off 100 at worst, design height 50.000 mm
+  flat_cut rim: rim 96, too_soft 96
+test_flexible_b2: 22 checks, 0 failures

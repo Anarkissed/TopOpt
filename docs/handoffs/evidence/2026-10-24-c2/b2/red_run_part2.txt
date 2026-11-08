@@ -1,0 +1,16 @@
+  flat_cut: 180 columns, worst |target - (h - height)| = 2.22e-16 mm
+  group split: face 101 150.000000 N, face 103 150.000000 N
+  17 control (top alone): max |achieved - design| 8.88e-15 mm
+  17 two groups: group 1 max |achieved - design| 1.8422 mm, 13050 voxels on its runs owned by another group
+  26 group grams: 22.538 + 31.426 of 53.965
+FAIL (line 221): 9(a): two faces of ONE hand with opposite arrows: a pinch, accepted
+  (one_profile_per_stack: faces 103 and 105 are both loaded and push the same material along the same axis (240000 mm3 shared). One squish profile per stack (M13): mark one of them as where it rests.)
+FAIL (line 224): 9(a): the receipt lists the pinch
+  pinch: face 103 nan of 216 columns pinched, face 105 nan
+FAIL (line 229): 9(a): every column of each face is pinched, counted per face (per half)
+  pinch: run 0.000 mm off 100 at worst, design height nan mm
+FAIL (line 238): 9(a): a pinched face designs over half its run (segmentShare 0.5)
+FAIL (line 244): 9(a): opposite arrows in different hands: refused, saying they are different hands
+FAIL (line 270): 19: Auto scores each face over its own span, and the receipt says so
+test_flexible_b2: 20 checks, 6 failures
+exit 1

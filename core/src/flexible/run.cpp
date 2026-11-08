@@ -1,6 +1,7 @@
 #include "topopt/flexible/run.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -13,6 +14,7 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -489,6 +491,7 @@ std::string recommendation_json(const Recommendation& r, const std::string& req_
   for (const FaceFailure& f : r.failures) fl.push_back(failure_json(f));
   return Obj()
       .add("requested", Obj().add("topology", jstr(req_topo)).add("nozzle_temp_c", req_temp).str())
+      .add("scored_over", jstr("each face's own span (pinched halves, prism segments)"))
       .add("chosen", jbool(r.chosen))
       .add("reachable", jbool(r.reachable))
       .add("topology", r.chosen ? jstr(r.topology) : "null")
@@ -499,6 +502,219 @@ std::string recommendation_json(const Recommendation& r, const std::string& req_
       .add("failures", jlist(fl))
       .add("candidates", jlist(cands))
       .str();
+}
+
+
+// ── C2 B1b: the series press, the field export, grams ─────────────────────────────
+
+// Items 5 + 18: a flat-prism press's columns as SERIES columns. Along each column's run (entry
+// to entry + lattice_mm): the part before the plane is the press's own; past the plane, a
+// sample the phase-1 field gives a density to is FIXED at that density, a sample it gives none
+// (unowned lattice, or a crossed hole) is the press's own too. Fixed lengths are grouped by
+// density, in ascending order (deterministic).
+std::vector<SeriesColumn> press_series(const Stack& st, const VoxelGrid& g, const DensityField& f1) {
+  std::vector<SeriesColumn> out(st.columns.size());
+  const Vec3& d = st.frame.load;
+  const bool have = f1.density.size() == g.voxel_count() && g.spacing > 0.0;
+  for (std::size_t k = 0; k < st.columns.size(); ++k) {
+    const StackColumn& c = st.columns[k];
+    const Vec3 o = st.frame.from_uv(c.u_mm, c.v_mm);
+    const Vec3 oa{o.x - st.flat_apex.x, o.y - st.flat_apex.y, o.z - st.flat_apex.z};
+    const double t_plane = st.flat_depth_mm - (oa.x * d.x + oa.y * d.y + oa.z * d.z);
+    const double run_end = c.entry_t + c.lattice_mm;
+    double own = std::max(0.0, std::min(run_end, t_plane) - c.entry_t);
+    const double b0 = std::max(c.entry_t, t_plane);
+    std::map<double, double> fixed;
+    if (run_end > b0) {
+      const double len = run_end - b0;
+      const int n = std::max(1, static_cast<int>(std::ceil(len / (0.25 * g.spacing))));
+      const double step = len / n;
+      for (int s = 0; s < n; ++s) {
+        const double t = b0 + (s + 0.5) * step;
+        const Vec3 p{o.x + d.x * t, o.y + d.y * t, o.z + d.z * t};
+        double rho = 0.0;
+        if (have) {
+          const int i = static_cast<int>(std::floor((p.x - g.origin.x) / g.spacing));
+          const int j = static_cast<int>(std::floor((p.y - g.origin.y) / g.spacing));
+          const int kk = static_cast<int>(std::floor((p.z - g.origin.z) / g.spacing));
+          if (!(i < 0 || j < 0 || kk < 0 || i >= g.nx || j >= g.ny || kk >= g.nz))
+            rho = f1.density[g.index(i, j, kk)];
+        }
+        if (rho > 0.0)
+          fixed[rho] += step;
+        else
+          own += step;
+      }
+    }
+    out[k].own_mm = own;
+    for (const auto& kv : fixed) out[k].fixed.push_back({kv.second, kv.first});
+  }
+  return out;
+}
+
+// Item 4a: THE FILL, the app's rule (FlexibleLatticeField.inputs): every voxel with no density
+// takes the density (and owner) of the nearest assigned voxel, breadth-first over the 6-
+// neighbourhood, the seeds in index order, the neighbours +x, -x, +y, -y, +z, -z.
+void fill_field(const DensityField& f, std::vector<float>& rho, std::vector<int>& own) {
+  const std::size_t n = f.density.size();
+  rho.assign(n, 0.0f);
+  own = f.owner.size() == n ? f.owner : std::vector<int>(n, -1);
+  std::vector<std::size_t> queue;
+  queue.reserve(n);
+  for (std::size_t i = 0; i < n; ++i)
+    if (f.density[i] > 0.0) {
+      rho[i] = static_cast<float>(f.density[i]);
+      queue.push_back(i);
+    }
+  const int nx = f.nx, ny = f.ny, nz = f.nz;
+  const int dd[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+  for (std::size_t head = 0; head < queue.size(); ++head) {
+    const std::size_t v = queue[head];
+    const int i = static_cast<int>(v % static_cast<std::size_t>(nx));
+    const int j = static_cast<int>((v / static_cast<std::size_t>(nx)) % static_cast<std::size_t>(ny));
+    const int k = static_cast<int>(v / (static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny)));
+    for (const auto& o : dd) {
+      const int a = i + o[0], b = j + o[1], c = k + o[2];
+      if (a < 0 || b < 0 || c < 0 || a >= nx || b >= ny || c >= nz) continue;
+      const std::size_t w = (static_cast<std::size_t>(c) * static_cast<std::size_t>(ny) + static_cast<std::size_t>(b)) *
+                                 static_cast<std::size_t>(nx) +
+                             static_cast<std::size_t>(a);
+      if (rho[w] <= 0.0f) {
+        rho[w] = rho[v];
+        own[w] = own[v];
+        queue.push_back(w);
+      }
+    }
+  }
+}
+
+// Item 4a: THE SEAM SHARE at each flat-prism press's plane, the app's rule
+// (FlexibleGroupField.pressSeam; band 2.5 voxels, ramp 1 voxel), on the FILLED field:
+//   side   — the press side's share by the plane's true position: 1 well inside, 0 well past,
+//            0.5 − 0.5·d/ramp around the plane (d = signed distance past it), clamped;
+//   across — within the band, the OTHER side's density carried across the plane; else ρ.
+struct PlaneCut {
+  int key = -1;
+  Vec3 apex{0, 0, 0}, dir{0, 0, 1};
+  double depth = 0.0;
+};
+void seam_share(const DensityField& f, const std::vector<float>& rho, const std::vector<int>& owner,
+                std::vector<PlaneCut> planes, std::vector<float>& across, std::vector<float>& side) {
+  const std::size_t n = rho.size();
+  across = rho;
+  side.assign(n, 0.0f);
+  const double h = f.spacing;
+  if (planes.empty() || !(h > 0.0)) return;
+  std::sort(planes.begin(), planes.end(), [](const PlaneCut& a, const PlaneCut& b) { return a.key < b.key; });
+  std::map<int, const PlaneCut*> by_key;
+  for (const PlaneCut& c : planes) by_key[c.key] = &c;
+  const double band = 2.5 * h, ramp = 1.0 * h;
+  const int nx = f.nx, ny = f.ny, nz = f.nz;
+  auto centre = [&](std::size_t v) {
+    return Vec3{f.origin.x + (static_cast<double>(v % static_cast<std::size_t>(nx)) + 0.5) * h,
+                f.origin.y + (static_cast<double>((v / static_cast<std::size_t>(nx)) % static_cast<std::size_t>(ny)) + 0.5) * h,
+                f.origin.z + (static_cast<double>(v / (static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny))) + 0.5) * h};
+  };
+  auto past = [](const PlaneCut& c, const Vec3& p) {
+    return (p.x - c.apex.x) * c.dir.x + (p.y - c.apex.y) * c.dir.y + (p.z - c.apex.z) * c.dir.z - c.depth;
+  };
+  auto voxel = [&](const Vec3& p, std::size_t& w) {
+    const double qx = (p.x - f.origin.x) / h, qy = (p.y - f.origin.y) / h, qz = (p.z - f.origin.z) / h;
+    const int i = static_cast<int>(std::floor(qx)), j = static_cast<int>(std::floor(qy)), k = static_cast<int>(std::floor(qz));
+    if (i < 0 || j < 0 || k < 0 || i >= nx || j >= ny || k >= nz) return false;
+    w = (static_cast<std::size_t>(k) * static_cast<std::size_t>(ny) + static_cast<std::size_t>(j)) * static_cast<std::size_t>(nx) +
+        static_cast<std::size_t>(i);
+    return true;
+  };
+  auto share = [&](double d) { return static_cast<float>(std::min(1.0, std::max(0.0, 0.5 - 0.5 * d / ramp))); };
+  for (std::size_t v = 0; v < n; ++v) {
+    const Vec3 p = centre(v);
+    const auto it = by_key.find(owner[v]);
+    if (it != by_key.end() && past(*it->second, p) <= 0.0) {
+      const PlaneCut& c = *it->second;
+      const double d = past(c, p);
+      side[v] = share(d);
+      if (d < -band) continue;
+      for (double s = -d + 0.25 * h; s <= -d + 1.5 * h; s += 0.25 * h) {
+        std::size_t w = 0;
+        if (voxel({p.x + c.dir.x * s, p.y + c.dir.y * s, p.z + c.dir.z * s}, w) && past(c, centre(w)) > 0.0) {
+          if (rho[w] != rho[v]) across[v] = rho[w];
+          break;
+        }
+      }
+      continue;
+    }
+    for (const PlaneCut& c : planes) {
+      const double d = past(c, p);
+      if (!(d > 0.0 && d <= band)) continue;
+      bool have = false;
+      std::size_t found = 0;
+      for (double s = d + 0.25 * h; s <= d + 1.5 * h; s += 0.25 * h) {
+        std::size_t w = 0;
+        if (voxel({p.x - c.dir.x * s, p.y - c.dir.y * s, p.z - c.dir.z * s}, w) && past(c, centre(w)) <= 0.0) {
+          if (owner[w] == c.key) {
+            found = w;
+            have = true;
+          }
+          break;
+        }
+      }
+      if (!have) continue;
+      side[v] = share(d);
+      if (rho[found] != rho[v]) across[v] = rho[found];
+      break;
+    }
+  }
+}
+
+// Item 4a: a press's FOOTPRINT BOUNDARY: its pieces (each region's triangles clipped by its
+// cuts), welded on a 1e-7 × scale grid; the edges used once.
+std::vector<std::pair<Vec3, Vec3>> footprint_boundary(const StepModel& model,
+                                                      const std::vector<const ResolvedFaceRegion*>& fp) {
+  TriangleMesh m;
+  std::vector<int> ids;
+  for (const ResolvedFaceRegion* r : fp) clip_into(model.mesh, r->member_triangles, r->cuts, m, ids);
+  double scale = 1.0;
+  for (const Vec3& p : m.vertices) scale = std::max({scale, std::fabs(p.x), std::fabs(p.y), std::fabs(p.z)});
+  const double q = 1e-7 * scale;
+  std::map<std::tuple<long long, long long, long long>, int> key;
+  std::vector<Vec3> pts;
+  std::vector<int> remap(m.vertices.size());
+  for (std::size_t i = 0; i < m.vertices.size(); ++i) {
+    const Vec3& p = m.vertices[i];
+    const auto k = std::make_tuple(std::llround(p.x / q), std::llround(p.y / q), std::llround(p.z / q));
+    const auto it = key.find(k);
+    if (it != key.end()) {
+      remap[i] = it->second;
+    } else {
+      remap[i] = static_cast<int>(pts.size());
+      key.emplace(k, remap[i]);
+      pts.push_back(p);
+    }
+  }
+  std::map<std::pair<int, int>, int> use;
+  for (int id : ids) {
+    const auto& t = m.triangles[static_cast<std::size_t>(id)];
+    for (int e = 0; e < 3; ++e) {
+      int a = remap[static_cast<std::size_t>(t[static_cast<std::size_t>(e)])];
+      int b = remap[static_cast<std::size_t>(t[static_cast<std::size_t>((e + 1) % 3)])];
+      if (a == b) continue;
+      if (a > b) std::swap(a, b);
+      ++use[{a, b}];
+    }
+  }
+  std::vector<std::pair<Vec3, Vec3>> out;
+  for (const auto& kv : use)
+    if (kv.second == 1)
+      out.push_back({pts[static_cast<std::size_t>(kv.first.first)], pts[static_cast<std::size_t>(kv.first.second)]});
+  return out;
+}
+
+void write_bytes(const std::string& path, const std::string& bytes) {
+  std::ofstream out(path, std::ios::binary | std::ios::trunc);
+  if (!out) throw JobError("cannot write " + path);
+  out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+  if (!out) throw JobError("failed writing " + path);
 }
 
 }  // namespace
@@ -537,11 +753,15 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
   }
   if (!check_watertight(model.mesh).watertight)
     throw JobError("model tessellation is not watertight: " + job.model);
-  const VoxelGrid grid = voxelize(model.mesh, job.resolution);
+  // C2 B0 item 1: the Flexible stage voxelizes WATERTIGHT (voxel.hpp, VoxelTies), so a
+  // column centre on a diagonal two triangles share is not left Empty (his pad's rods).
+  const VoxelGrid grid = voxelize(model.mesh, job.resolution, VoxelTies::Watertight);
   std::vector<char> mask;
   std::vector<ResolvedFaceRegion> regions;
+  SurfaceFill surface_fill;
   try {
-    mask = flexible_region_mask(job, model, grid);
+    // C2 B1a, 9(b): the run's lattice reaches the part's surface (the app's rule).
+    mask = flexible_lattice_mask(job, model, grid, &surface_fill);
     regions = resolve_face_regions(model, job.loads.face_regions);
   } catch (const FlexibleError& e) {
     throw JobError(e.what());
@@ -581,28 +801,121 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
     }
     shared = find_shared_footprints(model.mesh, presses);  // refused below, with a code
   }
+  // C2 B1a, item 7: "no include region = no lattice", when the job says so.
+  bool any_include = false;
+  for (const JobLatticeRegion& r : fx.regions) any_include = any_include || r.role == "include";
+  const bool no_lattice_region = fx.no_include_means_no_lattice && !any_include;
+  // Each loaded entry's stack. A FACE's lattice is its OWN include regions' (item 8(a)); a
+  // PRESS's is the job's lattice (Q2: the app's run). The run then presses only the columns
+  // that enter that lattice (item 24). A stack that cannot be built is a coded refusal (27).
+  std::string stack_refusal_code, stack_refusal_reason;
+  std::vector<const JobFlexibleFace*> built;
+  std::vector<std::vector<const ResolvedFaceRegion*>> stack_fp;  // each stack's footprint regions
   for (const JobFlexibleFace* f : loaded) {
+    const bool press = !f->footprint_region_ids.empty() || f->has_press_direction;
+    std::vector<const ResolvedFaceRegion*> fp;
+    if (f->footprint_region_ids.empty())
+      fp.push_back(&find_region(f->face_region_id));
+    else
+      for (int id : f->footprint_region_ids) fp.push_back(&find_region(id));
+    std::string ids;
+    for (const ResolvedFaceRegion* r : fp) ids += (ids.empty() ? "" : ", ") + std::to_string(r->id);
     try {
-      if (f->footprint_region_ids.empty() && !f->has_press_direction) {
-        stacks.push_back(build_stack(model, find_region(f->face_region_id), regions, grid, mask,
-                                     f->frame_rotation_deg, build, pitch));
-      } else {
-        // C1 addendum: an angled and/or edge/corner press — one footprint, one stack.
-        std::vector<const ResolvedFaceRegion*> fp;
-        if (f->footprint_region_ids.empty())
-          fp.push_back(&find_region(f->face_region_id));
-        else
-          for (int id : f->footprint_region_ids) fp.push_back(&find_region(id));
-        stacks.push_back(build_press_stack(model, fp, regions, grid, mask, f->frame_rotation_deg, build,
-                                           pitch, f->has_press_direction ? &f->press_direction : nullptr));
+      const std::vector<char> own =
+          press || no_lattice_region ? mask : flexible_face_lattice_mask(job, model, grid, fp);
+      Stack st = press ? build_press_stack(model, fp, regions, grid, own, f->frame_rotation_deg, build, pitch,
+                                           f->has_press_direction ? &f->press_direction : nullptr)
+                       : build_stack(model, *fp[0], regions, grid, own, f->frame_rotation_deg, build, pitch);
+      if (!no_lattice_region) {
+        try {
+          restrict_to_lattice(st, regions);
+          // C2 B1b, item 5: the press's flat prism (its plane is normal to the press).
+          if (f->has_flat_prism)
+            restrict_to_flat_prism(st, f->flat_apex, f->deepest_squish_mm, regions);
+        } catch (const FlexibleError& e) {
+          if (stack_refusal_code.empty()) {
+            stack_refusal_code = "no_lattice_under_press";
+            stack_refusal_reason = e.what();
+          }
+          continue;
+        }
       }
+      stacks.push_back(std::move(st));
+      built.push_back(f);
+      stack_fp.push_back(fp);
     } catch (const FlexibleError& e) {
-      throw JobError(e.what());
+      if (stack_refusal_code.empty()) {
+        stack_refusal_code = "press_stack_failed";
+        stack_refusal_reason = std::string(press ? "press " : "face ") + std::to_string(f->face_region_id) +
+                               " (face regions " + ids + ") cannot be stacked: " + e.what();
+      }
     }
+  }
+  loaded = built;  // parallel to `stacks` again
+
+  // C2 B2, item 16: each entry's force. An entry in a squeeze group takes the group's force
+  // split by footprint area over the group's BUILT entries (the same pressure on every entry of
+  // one hand); an entry in no group keeps its own weight_n.
+  std::vector<double> weight_of(stacks.size(), 0.0);
+  std::vector<double> group_area(fx.squeeze_groups.size(), 0.0);
+  for (std::size_t i = 0; i < stacks.size(); ++i)
+    if (loaded[i]->squeeze_group >= 0)
+      group_area[static_cast<std::size_t>(loaded[i]->squeeze_group)] += stacks[i].footprint_area_mm2;
+  for (std::size_t i = 0; i < stacks.size(); ++i) {
+    const int g = loaded[i]->squeeze_group;
+    weight_of[i] = g < 0 ? loaded[i]->weight_n
+                         : fx.squeeze_groups[static_cast<std::size_t>(g)].force_n * stacks[i].footprint_area_mm2 /
+                               group_area[static_cast<std::size_t>(g)];
   }
   std::vector<const Stack*> sp;
   for (const Stack& s : stacks) sp.push_back(&s);
-  const std::vector<StackConflict> conflicts = find_stack_conflicts(grid, mask, sp);
+  const std::vector<StackConflict> all_conflicts = find_stack_conflicts(grid, mask, sp);
+  // C2 B2, item 9(a): a PINCH (opposite arrows) of two entries in ONE hand is accepted; a pinch
+  // across hands (separate squeezes: the combination, B2b) and a step (the same arrow) are not.
+  std::vector<StackConflict> conflicts, pinches;
+  auto hand_of = [&](int face_id) {
+    for (std::size_t i = 0; i < stacks.size(); ++i)
+      if (stacks[i].face_region_id == face_id) return loaded[i]->squeeze_group;
+    return -1;
+  };
+  // C2 B2b (his ruling on item 17, Q-C1): entries in DIFFERENT hands are separate load cases; a
+  // same-axis pair across hands is the COMBINATION's to design (cross_hand), not a refusal.
+  std::vector<StackConflict> cross_hand;
+  auto hand_key = [&](int face_id) {  // a hand: its squeeze group, or the entry itself
+    const int g = hand_of(face_id);
+    return g >= 0 ? g : -1000 - face_id;
+  };
+  for (const StackConflict& c : all_conflicts) {
+    const int ha = hand_key(c.face_a), hb = hand_key(c.face_b);
+    if (ha != hb)
+      cross_hand.push_back(c);
+    else if (c.pinch)
+      pinches.push_back(c);
+    else
+      conflicts.push_back(c);
+  }
+  std::vector<std::pair<int, int>> pinch_pairs;  // the pairs the assembly may hand over (pinches + cross-hand)
+  for (const StackConflict& c : pinches) pinch_pairs.push_back({c.face_a, c.face_b});
+  for (const StackConflict& c : cross_hand) pinch_pairs.push_back({c.face_a, c.face_b});
+  // each face's pinched columns, and its own span as series columns (pinched: half the run)
+  std::vector<std::vector<char>> pinched(stacks.size());
+  std::vector<std::vector<SeriesColumn>> span_of(stacks.size());
+  for (std::size_t i = 0; i < stacks.size(); ++i) {
+    std::vector<const Stack*> partners;
+    for (const StackConflict& c : pinches) {
+      const int other = c.face_a == stacks[i].face_region_id ? c.face_b
+                        : c.face_b == stacks[i].face_region_id ? c.face_a
+                                                               : -1;
+      if (other < 0) continue;
+      for (const Stack& q : stacks)
+        if (q.face_region_id == other) partners.push_back(&q);
+    }
+    if (partners.empty()) continue;
+    pinched[i] = pinched_columns(stacks[i], partners);
+    span_of[i].resize(stacks[i].columns.size());
+    for (std::size_t k = 0; k < stacks[i].columns.size(); ++k)
+      span_of[i][k].own_mm = stacks[i].columns[k].lattice_mm * (pinched[i][k] ? kPinchSegmentShare : 1.0);
+  }
 
   // ── the drawn maps (these need no data, so they are written even on a refusal) ──
   std::vector<std::vector<double>> target(stacks.size());
@@ -615,7 +928,7 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
     write_text(out_path("face" + id + "_target_depth.svg"),
                heatmap_svg(stacks[i], target[i], "Face " + id + " - target squish depth (what you drew)",
                            {"mode " + m.mode + ", deepest squish " + fmtd(m.deepest_squish_mm, 2) +
-                                " mm, weight " + fmtd(loaded[i]->weight_n, 1) + " N",
+                                " mm, weight " + fmtd(weight_of[i], 1) + " N",
                             "the drawn map: S x deepest squish. Not a prediction."},
                            "mm", 2));
   }
@@ -629,23 +942,52 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
                             : std::vector<std::string>{fx.topology};
   std::vector<FaceRequest> requests;
   for (std::size_t i = 0; i < stacks.size(); ++i)
-    requests.push_back({&stacks[i], squish_map_of(*loaded[i]), loaded[i]->weight_n,
-                        loaded[i]->has_design_stamp ? &loaded[i]->design_stamp : nullptr});
+    requests.push_back({&stacks[i], squish_map_of(*loaded[i]), weight_of[i],
+                        loaded[i]->has_design_stamp ? &loaded[i]->design_stamp : nullptr, nullptr});
+  // C2 B2, item 19: Auto scores each face over its OWN span: a pinched face over its halves; a
+  // flat-prism press over its prism segment (the run inside its plane).
+  std::vector<std::vector<SeriesColumn>> auto_span(stacks.size());
+  for (std::size_t i = 0; i < stacks.size(); ++i) {
+    if (!span_of[i].empty()) {
+      requests[i].series = &span_of[i];
+    } else if (stacks[i].has_flat_prism) {
+      const Stack& st = stacks[i];
+      auto_span[i].resize(st.columns.size());
+      for (std::size_t k = 0; k < st.columns.size(); ++k) {
+        const StackColumn& c = st.columns[k];
+        const Vec3 o = st.frame.from_uv(c.u_mm, c.v_mm);
+        const double t_plane = st.flat_depth_mm - ((o.x - st.flat_apex.x) * st.frame.load.x +
+                                                   (o.y - st.flat_apex.y) * st.frame.load.y +
+                                                   (o.z - st.flat_apex.z) * st.frame.load.z);
+        auto_span[i][k].own_mm = std::max(0.0, std::min(c.entry_t + c.lattice_mm, t_plane) - c.entry_t);
+      }
+      requests[i].series = &auto_span[i];
+    }
+  }
 
   Recommendation rec;
   std::string refusal_code, refusal_reason;
-  if (!shared.empty()) {
-    // First: two presses sharing surface usually ALSO conflict; the sharing is the cause.
+  if (no_lattice_region) {
+    refusal_code = "no_lattice_region";
+    refusal_reason = "no include region is set, and this job says no include region means no lattice "
+                     "(\"no_include_region\": \"no_lattice\"): set a face to Lattice first";
+  } else if (!shared.empty()) {
+    // Two presses sharing surface usually ALSO conflict; the sharing is the cause.
     refusal_code = "shared_footprint";
     refusal_reason = shared_footprint_sentence(shared.front());
+  } else if (!stack_refusal_code.empty()) {
+    refusal_code = stack_refusal_code;
+    refusal_reason = stack_refusal_reason;
   } else if (!conflicts.empty()) {
     refusal_code = "one_profile_per_stack";
-    refusal_reason = "faces " + std::to_string(conflicts[0].face_a) + " and " +
-                     std::to_string(conflicts[0].face_b) +
-                     " are both loaded and push the same material along the same axis (" +
-                     fmtd(conflicts[0].overlap_mm3, 0) +
-                     " mm3 shared). One squish profile per stack (M13): mark one of them as "
-                     "where it rests.";
+    const StackConflict& c0 = conflicts[0];
+    refusal_reason = "faces " + std::to_string(c0.face_a) + " and " + std::to_string(c0.face_b) +
+                     " are both loaded and push the same material along the same axis (" + fmtd(c0.overlap_mm3, 0) +
+                     " mm3 shared). " +
+                     (c0.pinch ? std::string("They press from opposite sides but in different hands (separate "
+                                             "squeezes): put them in one squeeze group to pinch, or mark one as where "
+                                             "it rests.")
+                               : std::string("One squish profile per stack (M13): mark one of them as where it rests."));
   } else if (temps.empty()) {
     const auto it = data.catalogue.materials.find(fx.material_id);
     if (it != data.catalogue.materials.end() && it->second.tier == "literature") {
@@ -671,6 +1013,11 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
 
   // ── the design, the field, the checks ──
   std::vector<FaceDesign> designs;
+  std::vector<std::vector<SeriesColumn>> series_of;  // per stack; empty unless a flat-prism press
+  std::string grams_json = "null";
+  std::string groups_json = "null";
+  std::string combination_json = Obj().add("components", jnum(0)).str();
+  bool combination_active = false;
   std::vector<std::string> face_json, check_json;
   DensityField field;
   CurveSet set;
@@ -678,15 +1025,786 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
   if (refusal_code.empty()) {
     set = curve_set(data, fx.material_id, rec.temp_c, rec.topology).set;
     bp = BuildParams{rec.topology, fx.beads_per_wall, fx.min_extrudable_width_mm};
+    designs.resize(stacks.size());
+    series_of.resize(stacks.size());
+    auto tier_of = [&](std::size_t i) {
+      return tier_band(data.catalogue.error_bands, set.tier, stacks[i].frame.side, fx.beads_per_wall);
+    };
+    // Phase 1: every stack without a flat prism, single-ρ over its run, as before.
+    bool any_prism = false;
     for (std::size_t i = 0; i < stacks.size(); ++i) {
-      const TierBand tier = tier_band(data.catalogue.error_bands, set.tier, stacks[i].frame.side,
-                                      fx.beads_per_wall);
-      designs.push_back(design_face(set, stacks[i], requests[i].map, requests[i].weight_n,
-                                    requests[i].design_stamp, bp, tier));
+      if (stacks[i].has_flat_prism) {
+        any_prism = true;
+        continue;
+      }
+      designs[i] = design_face(set, stacks[i], requests[i].map, requests[i].weight_n, requests[i].design_stamp,
+                               bp, tier_of(i), span_of[i].empty() ? nullptr : &span_of[i]);
+    }
+    // Phase 2 (C2 B1b, items 5 + 18, Q1): each flat-prism press as a SERIES column. Its own
+    // segment is the run inside its prism plus run nobody else owns; the rest of the run is
+    // fixed at the phase-1 field's density there (the other owners' designs). One pass: the
+    // faces were designed first, against their own runs.
+    if (any_prism) {
+      std::vector<LoadedStack> ls1;
+      for (std::size_t i = 0; i < stacks.size(); ++i)
+        if (!stacks[i].has_flat_prism) ls1.push_back({&stacks[i], &designs[i]});
+      const DensityField f1 = ls1.empty() ? DensityField{} : assemble_density_field(grid, mask, ls1, bp, &pinch_pairs);
+      for (std::size_t i = 0; i < stacks.size(); ++i) {
+        if (!stacks[i].has_flat_prism) continue;
+        series_of[i] = press_series(stacks[i], grid, f1);
+        designs[i] = design_face(set, stacks[i], requests[i].map, requests[i].weight_n, requests[i].design_stamp,
+                                 bp, tier_of(i), &series_of[i]);
+      }
     }
     std::vector<LoadedStack> ls;
     for (std::size_t i = 0; i < stacks.size(); ++i) ls.push_back({&stacks[i], &designs[i]});
-    field = assemble_density_field(grid, mask, ls, bp);
+    field = assemble_density_field(grid, mask, ls, bp, &pinch_pairs);
+
+    // ── C2 B2b: THE COMBINATION (his ruling on item 17). Each hand is its own load case (Q-C1).
+    // A column's depth under its own pressure through the field is the series sum
+    //     d = Σ_v L_v · ε(p; ρ_v)            (the 1-D estimate, Q-C3)
+    // so columns and voxels form a graph. A connected component with ONE hand is left exactly as
+    // designed (byte-identical); in a component with two or more hands, every column of every hand
+    // must hit its band (Q-C2). Solved by row projections (Kaczmarz / ART): each missing column's
+    // linearised equation is projected onto, clamped to the tested densities. From the independent
+    // designs as the start, this is the least change that meets every column, for a consistent
+    // linear system. A column the hands cannot all meet is refused before the run, named.
+    {
+      struct Col {
+        int hand = 0;
+        std::size_t stack = 0, k = 0;
+        double p = 0, t = 0, band = 0;
+        std::vector<std::pair<std::size_t, double>> runs;  // voxel, length along the run (mm)
+        std::vector<std::size_t> order;                     // the run's voxels in order from the entry
+      };
+      auto band_of = [&](const JobFlexibleFace& e, double t) {
+        const JobHitBand& b = e.squeeze_group >= 0 ? fx.squeeze_groups[static_cast<std::size_t>(e.squeeze_group)].band : e.band;
+        return std::max(b.min_mm, 0.01 * b.pct * t);
+      };
+      std::vector<Col> cols;
+      for (std::size_t i = 0; i < stacks.size(); ++i) {
+        const Stack& st = stacks[i];
+        for (std::size_t k = 0; k < st.columns.size(); ++k) {
+          const StackColumn& c = st.columns[k];
+          const ColumnDesign& cd = designs[i].columns[k];
+          if (cd.status != "ok" || !(c.lattice_mm > 0.0)) continue;
+          Col col;
+          col.hand = hand_key(loaded[i]->face_region_id);
+          col.stack = i;
+          col.k = k;
+          col.p = cd.pressure_mpa;
+          col.t = cd.target_depth_mm;
+          col.band = band_of(*loaded[i], col.t);
+          const Vec3 o = st.frame.from_uv(c.u_mm, c.v_mm);
+          const int n = std::max(1, static_cast<int>(std::ceil(c.lattice_mm / (0.25 * grid.spacing))));
+          const double step = c.lattice_mm / n;
+          std::map<std::size_t, double> acc;
+          for (int sidx = 0; sidx < n; ++sidx) {
+            const double tt = c.entry_t + (sidx + 0.5) * step;
+            const int gi = static_cast<int>(std::floor((o.x + st.frame.load.x * tt - grid.origin.x) / grid.spacing));
+            const int gj = static_cast<int>(std::floor((o.y + st.frame.load.y * tt - grid.origin.y) / grid.spacing));
+            const int gk = static_cast<int>(std::floor((o.z + st.frame.load.z * tt - grid.origin.z) / grid.spacing));
+            if (gi < 0 || gj < 0 || gk < 0 || gi >= grid.nx || gj >= grid.ny || gk >= grid.nz) continue;
+            const std::size_t v = grid.index(gi, gj, gk);
+            if (field.density[v] > 0.0) {
+              if (acc.find(v) == acc.end()) col.order.push_back(v);
+              acc[v] += step;
+            }
+          }
+          col.runs.assign(acc.begin(), acc.end());
+          cols.push_back(std::move(col));
+        }
+      }
+      // components (union-find over voxels, joined by columns)
+      std::map<std::size_t, std::size_t> parent;
+      std::function<std::size_t(std::size_t)> root = [&](std::size_t x) {
+        while (parent[x] != x) x = parent[x] = parent[parent[x]];
+        return x;
+      };
+      for (const Col& c : cols)
+        for (const auto& rv : c.runs) parent.emplace(rv.first, rv.first);
+      for (const Col& c : cols)
+        for (std::size_t q = 1; q < c.runs.size(); ++q) {
+          const std::size_t a = root(c.runs[0].first), b = root(c.runs[q].first);
+          if (a != b) parent[a] = b;
+        }
+      std::map<std::size_t, std::set<int>> hands_in;
+      for (const Col& c : cols)
+        if (!c.runs.empty()) hands_in[root(c.runs[0].first)].insert(c.hand);
+      std::vector<std::size_t> active;  // indices into cols
+      std::set<std::size_t> active_roots;
+      for (std::size_t q = 0; q < cols.size(); ++q)
+        if (!cols[q].runs.empty() && hands_in[root(cols[q].runs[0].first)].size() >= 2) {
+          active.push_back(q);
+          active_roots.insert(root(cols[q].runs[0].first));
+        }
+      const double rmin = set.density_min(), rmax = set.density_max(), span = rmax - rmin;
+      auto eps = [&](double p, double rho, bool& ok) {
+        const StrainResult e = strain_under(set, p, rho);
+        ok = e.ok;
+        return e.strain;
+      };
+      // the miss BEFORE the solve (the independent designs, assembled): what the combination fixes
+      double before_mm = 0.0;
+      long long before_missing = 0;
+      for (std::size_t q : active) {
+        const Col& c = cols[q];
+        double d = 0.0;
+        bool known = true;
+        for (const auto& rv : c.runs) {
+          bool ok = true;
+          const double e = eps(c.p, field.density[rv.first], ok);
+          if (!ok) known = false;
+          d += rv.second * e;
+        }
+        if (!known || std::fabs(d - c.t) > c.band) ++before_missing;
+        if (known) before_mm = std::max(before_mm, std::fabs(d - c.t));
+      }
+      // ── C2 B2c: THE HULL CERTIFICATE (same-axis runs) and THE MIXING START.
+      // On a run that two hands' columns traverse identically, column g's depth is
+      // Σ L_v·ε(p_g; ρ_v), so the pair of target strains (t_A/L_A, t_B/L_B) is reachable IFF it
+      // lies in the convex hull of the curve γ(ρ) = (ε(p_A; ρ), ε(p_B; ρ)) over the tested
+      // densities; a planar connected curve needs at most TWO of its points (Fenchel–Bunt), so a
+      // reachable pair is met by two densities, a fraction λ of the run at one. Outside the hull
+      // by more than the bands: PROVEN impossible (exact in core's 1-D model). For crossing
+      // components (no same-axis pair), the hands' mean target strains give the mixture, laid in
+      // blocks of two cells (Schumacher et al. 2015, Fig. 18), and the projections refine it.
+      const int kHullSamples = 400;
+      auto gamma = [&](double pa, double pb, std::vector<std::array<double, 3>>& pts) {
+        pts.clear();
+        for (int i = 0; i <= kHullSamples; ++i) {
+          const double rho = rmin + span * i / kHullSamples;
+          bool oa = true, ob = true;
+          const double ea = eps(pa, rho, oa), eb = eps(pb, rho, ob);
+          if (oa && ob) pts.push_back({ea, eb, rho});
+        }
+      };
+      // convex hull (monotone chain) of the curve's points, counter-clockwise
+      auto hull_of = [](std::vector<std::array<double, 3>> p) {
+        std::sort(p.begin(), p.end(), [](const auto& a, const auto& b) { return a[0] != b[0] ? a[0] < b[0] : a[1] < b[1]; });
+        std::vector<std::array<double, 3>> h(2 * p.size());
+        std::size_t k = 0;
+        auto cr = [](const std::array<double, 3>& o, const std::array<double, 3>& a, const std::array<double, 3>& b) {
+          return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+        };
+        for (std::size_t i = 0; i < p.size(); ++i) {
+          while (k >= 2 && cr(h[k - 2], h[k - 1], p[i]) <= 0) --k;
+          h[k++] = p[i];
+        }
+        for (std::size_t i = p.size() - 1, t = k + 1; i > 0; --i) {
+          while (k >= t && cr(h[k - 2], h[k - 1], p[i - 1]) <= 0) --k;
+          h[k++] = p[i - 1];
+        }
+        h.resize(k > 0 ? k - 1 : 0);
+        return h;
+      };
+      // distance (in mm: strain × run length per axis) from (sa, sb) to the hull; 0 inside
+      auto hull_gap_mm = [](const std::vector<std::array<double, 3>>& h, double sa, double sb, double la, double lb) {
+        if (h.size() < 3) return std::numeric_limits<double>::infinity();
+        bool inside = true;
+        for (std::size_t i = 0; i < h.size(); ++i) {
+          const auto& a = h[i];
+          const auto& b = h[(i + 1) % h.size()];
+          if ((b[0] - a[0]) * (sb - a[1]) - (b[1] - a[1]) * (sa - a[0]) < 0) inside = false;
+        }
+        if (inside) return 0.0;
+        double best = std::numeric_limits<double>::infinity();
+        for (std::size_t i = 0; i < h.size(); ++i) {
+          const auto& a = h[i];
+          const auto& b = h[(i + 1) % h.size()];
+          const double ax = a[0] * la, ay = a[1] * lb, bx = b[0] * la, by = b[1] * lb, px = sa * la, py = sb * lb;
+          const double dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+          double t = l2 > 0 ? ((px - ax) * dx + (py - ay) * dy) / l2 : 0.0;
+          t = std::min(1.0, std::max(0.0, t));
+          best = std::min(best, std::hypot(px - (ax + t * dx), py - (ay + t * dy)));
+        }
+        return best;
+      };
+      // the two-density mixture through (sa, sb): the pair of curve points whose chord passes
+      // through it with the smallest density gap; returns false when none is found
+      auto mixture = [](const std::vector<std::array<double, 3>>& g, double sa, double sb, double& r1, double& r2,
+                        double& frac1) {
+        double best_gap = std::numeric_limits<double>::infinity();
+        for (std::size_t i = 0; i < g.size(); ++i) {
+          const double dx = sa - g[i][0], dy = sb - g[i][1];
+          const double d2 = dx * dx + dy * dy;
+          if (!(d2 > 0)) continue;
+          for (std::size_t j = 0; j + 1 < g.size(); ++j) {
+            if (j == i || j + 1 == i) continue;
+            const double c0 = (g[j][0] - g[i][0]) * dy - (g[j][1] - g[i][1]) * dx;
+            const double c1 = (g[j + 1][0] - g[i][0]) * dy - (g[j + 1][1] - g[i][1]) * dx;
+            if ((c0 > 0) == (c1 > 0) && c0 != 0 && c1 != 0) continue;
+            const double u = (c0 == c1) ? 0.0 : c0 / (c0 - c1);
+            const double qx = g[j][0] + u * (g[j + 1][0] - g[j][0]), qy = g[j][1] + u * (g[j + 1][1] - g[j][1]);
+            const double along = (qx - g[i][0]) * dx + (qy - g[i][1]) * dy;
+            if (!(along >= d2)) continue;  // the chord must pass THROUGH (sa, sb)
+            const double rq = g[j][2] + u * (g[j + 1][2] - g[j][2]);
+            if (std::fabs(rq - g[i][2]) < best_gap) {
+              best_gap = std::fabs(rq - g[i][2]);
+              r1 = g[i][2];
+              r2 = rq;
+              frac1 = 1.0 - std::sqrt(d2 / ((qx - g[i][0]) * (qx - g[i][0]) + (qy - g[i][1]) * (qy - g[i][1])));
+            }
+          }
+        }
+        return std::isfinite(best_gap);
+      };
+      long long same_axis_pairs = 0, proven_pairs = 0, mixed_runs = 0, mixed_components = 0, proven_components = 0;
+      double worst_proof_gap = 0.0;
+      std::set<std::size_t> proven_cols;
+      {
+        std::map<std::vector<std::size_t>, std::vector<std::size_t>> by_run;
+        for (std::size_t q : active) {
+          std::vector<std::size_t> key;
+          for (const auto& rv : cols[q].runs) key.push_back(rv.first);
+          by_run[key].push_back(q);
+        }
+        std::vector<std::array<double, 3>> g;
+        for (const auto& kv : by_run) {
+          std::map<int, std::size_t> one_per_hand;
+          for (std::size_t q : kv.second) one_per_hand.emplace(cols[q].hand, q);
+          if (one_per_hand.size() != 2) continue;  // two hands: the 2-D certificate
+          const Col& A = cols[one_per_hand.begin()->second];
+          const Col& B = cols[std::next(one_per_hand.begin())->second];
+          double la = 0, lb = 0;
+          for (const auto& rv : A.runs) la += rv.second;
+          for (const auto& rv : B.runs) lb += rv.second;
+          if (!(la > 0 && lb > 0)) continue;
+          ++same_axis_pairs;
+          gamma(A.p, B.p, g);
+          const std::vector<std::array<double, 3>> h = hull_of(g);
+          const double sa = A.t / la, sb = B.t / lb;
+          const double gap = hull_gap_mm(h, sa, sb, la, lb);
+          if (gap > std::hypot(A.band, B.band)) {  // no lattice comes within the bands: proven
+            ++proven_pairs;
+            worst_proof_gap = std::max(worst_proof_gap, gap);
+            for (std::size_t q : kv.second) proven_cols.insert(q);
+            continue;
+          }
+          double r1 = 0, r2 = 0, f1 = 0;
+          if (gap == 0.0 && mixture(g, sa, sb, r1, r2, f1) && f1 > 1e-6 && f1 < 1 - 1e-6) {
+            // the run's first f1 of its length (from A's entry) at r1, the rest at r2
+            double acc = 0.0;
+            std::map<std::size_t, double> len(A.runs.begin(), A.runs.end());
+            for (std::size_t v : A.order) {
+              field.density[v] = acc < f1 * la ? r1 : r2;
+              acc += len[v];
+            }
+            ++mixed_runs;
+          }
+        }
+      }
+      // crossing components with two hands and no same-axis pair: the mixture start
+      {
+        std::map<std::size_t, std::map<int, std::pair<double, double>>> per;  // root -> hand -> (Σt, ΣL)
+        std::map<std::size_t, std::map<int, double>> pres;                    // root -> hand -> mean p
+        std::map<std::size_t, std::map<int, int>> np;
+        for (std::size_t q : active) {
+          if (proven_cols.count(q)) continue;
+          const std::size_t rt = root(cols[q].runs[0].first);
+          double L = 0;
+          for (const auto& rv : cols[q].runs) L += rv.second;
+          auto& e = per[rt][cols[q].hand];
+          e.first += cols[q].t;
+          e.second += L;
+          pres[rt][cols[q].hand] += cols[q].p;
+          ++np[rt][cols[q].hand];
+        }
+        // A crossing component is EXACTLY covered when every voxel in it lies on one column of each
+        // hand with the same length (within 1 %) and each hand presses one pressure: then summing
+        // each hand's column equations gives (Σt_A, Σt_B) = Σ_v ℓ_v·γ(ρ_v), so the hands' mean
+        // target strains must lie in the hull: outside by more than the summed bands is PROVEN.
+        std::map<std::size_t, std::map<std::size_t, std::array<double, 4>>> cover;  // root -> voxel -> (nA, nB, lA, lB)
+        std::map<std::size_t, std::map<int, std::pair<double, double>>> prange;     // root -> hand -> (pmin, pmax)
+        std::map<std::size_t, std::map<int, double>> bsum;                          // root -> hand -> Σ band
+        for (std::size_t q : active) {
+          if (proven_cols.count(q)) continue;
+          const std::size_t rt = root(cols[q].runs[0].first);
+          const int slot = cols[q].hand == per[rt].begin()->first ? 0 : 1;
+          for (const auto& rv : cols[q].runs) {
+            auto& c = cover[rt][rv.first];
+            c[slot] += 1;
+            c[2 + slot] += rv.second;
+          }
+          auto pr = prange[rt].emplace(cols[q].hand, std::make_pair(cols[q].p, cols[q].p)).first;
+          pr->second.first = std::min(pr->second.first, cols[q].p);
+          pr->second.second = std::max(pr->second.second, cols[q].p);
+          bsum[rt][cols[q].hand] += cols[q].band;
+        }
+        std::vector<std::array<double, 3>> g;
+        for (const auto& kv : per) {
+          if (kv.second.size() != 2 || mixed_runs > 0) continue;
+          const int ha = kv.second.begin()->first, hb = std::next(kv.second.begin())->first;
+          const double pa = pres[kv.first][ha] / np[kv.first][ha], pb = pres[kv.first][hb] / np[kv.first][hb];
+          const double sa = kv.second.at(ha).first / kv.second.at(ha).second;
+          const double sb = kv.second.at(hb).first / kv.second.at(hb).second;
+          gamma(pa, pb, g);
+          const std::vector<std::array<double, 3>> h = hull_of(g);
+          bool exact = true;
+          double ell = 0.0;
+          for (const auto& cv : cover[kv.first]) {
+            const auto& c = cv.second;
+            if (c[0] != 1 || c[1] != 1 || std::fabs(c[2] - c[3]) > 0.01 * std::max(c[2], c[3])) {
+              exact = false;
+              break;
+            }
+            ell += 0.5 * (c[2] + c[3]);
+          }
+          for (const auto& pr : prange[kv.first])
+            if (pr.second.second - pr.second.first > 1e-9 * std::max(1.0, pr.second.second)) exact = false;
+          if (exact && ell > 0.0) {
+            const double ta = kv.second.at(ha).first, tb = kv.second.at(hb).first;
+            const double gap = hull_gap_mm(h, ta / ell, tb / ell, ell, ell);
+            if (gap > std::hypot(bsum[kv.first][ha], bsum[kv.first][hb])) {
+              ++proven_components;
+              // the summed gap, as a mean per column of the region (mm)
+              const double ncol = static_cast<double>(np[kv.first][ha] + np[kv.first][hb]);
+              worst_proof_gap = std::max(worst_proof_gap, gap / std::max(1.0, ncol));
+              continue;
+            }
+          }
+          double r1 = 0, r2 = 0, f1 = 0;
+          if (hull_gap_mm(h, sa, sb, 1.0, 1.0) > 0.0 || !mixture(g, sa, sb, r1, r2, f1) || !(f1 > 1e-6 && f1 < 1 - 1e-6))
+            continue;
+          // Diagonal bands along i + j + k with a period of four cells: every axis-aligned column
+          // steps one band position per voxel, so over each period it sees exactly f1 at r1, and each
+          // band is about two cells at f1 = ½ (Schumacher et al. 2015, Fig. 18: steeper steps are
+          // counted in steep_columns, not hidden).
+          const double cell = cell_size_mm(bp.topology, 0.5 * (r1 + r2), bp.beads_per_wall, bp.bead_width_mm);
+          const long long period = std::max<long long>(2, std::llround(4.0 * cell / grid.spacing));
+          for (std::size_t q : active) {
+            if (root(cols[q].runs[0].first) != kv.first) continue;
+            for (const auto& rv : cols[q].runs) {
+              const std::size_t v = rv.first;
+              const long long i = static_cast<long long>(v % static_cast<std::size_t>(grid.nx));
+              const long long j = static_cast<long long>((v / static_cast<std::size_t>(grid.nx)) % static_cast<std::size_t>(grid.ny));
+              const long long k = static_cast<long long>(v / (static_cast<std::size_t>(grid.nx) * static_cast<std::size_t>(grid.ny)));
+              const double u = static_cast<double>((i + j + k) % period) / static_cast<double>(period);
+              field.density[v] = u < f1 ? r1 : r2;
+            }
+          }
+          ++mixed_components;
+        }
+      }
+
+      int sweeps = 0;
+      double worst = 0.0;
+      if (!active.empty()) {
+        double best = 1e300;
+        int stall = 0;
+        for (sweeps = 1; sweeps <= 400; ++sweeps) {
+          worst = 0.0;
+          for (std::size_t q : active) {
+            const Col& c = cols[q];
+            double d = 0.0;
+            bool known = true;
+            std::vector<double> grad(c.runs.size(), 0.0);
+            for (std::size_t m = 0; m < c.runs.size(); ++m) {
+              const std::size_t v = c.runs[m].first;
+              const double rho = field.density[v];
+              bool ok = true;
+              const double e0 = eps(c.p, rho, ok);
+              if (!ok) {  // past the data at this density: firm it up
+                field.density[v] = std::min(rmax, rho + 0.05 * span);
+                known = false;
+                continue;
+              }
+              d += c.runs[m].second * e0;
+              const double dr = 1e-4 * span;
+              const double r1 = rho + dr <= rmax ? rho + dr : rho - dr;
+              bool ok1 = true;
+              const double e1 = eps(c.p, r1, ok1);
+              if (ok1) grad[m] = c.runs[m].second * (e1 - e0) / (r1 - rho);
+            }
+            if (!known) {
+              worst = std::max(worst, 1e9);
+              continue;
+            }
+            const double r = d - c.t;
+            worst = std::max(worst, std::fabs(r) / c.band);
+            if (std::fabs(r) <= 0.5 * c.band) continue;
+            double g2 = 0.0;
+            for (double g : grad) g2 += g * g;
+            if (!(g2 > 0.0)) continue;
+            for (std::size_t m = 0; m < c.runs.size(); ++m) {
+              double& rho = field.density[c.runs[m].first];
+              rho = std::min(rmax, std::max(rmin, rho - r * grad[m] / g2));
+            }
+          }
+          if (worst <= 1.0) break;
+          if (worst < best * (1.0 - 1e-4)) {
+            best = worst;
+            stall = 0;
+          } else if (++stall >= 25) {
+            break;
+          }
+        }
+      }
+      // the result, judged on the field as it now is: who misses, by how much
+      std::map<std::set<int>, std::pair<long long, double>> miss_by_comp;  // the hands sharing -> (count, worst mm; inf = past the data)
+      double worst_mm = 0.0, worst_pct = 0.0;
+      long long missing = 0;
+      for (std::size_t q : active) {
+        const Col& c = cols[q];
+        double d = 0.0;
+        bool known = true;
+        for (const auto& rv : c.runs) {
+          bool ok = true;
+          const double e = eps(c.p, field.density[rv.first], ok);
+          if (!ok) known = false;
+          d += rv.second * e;
+        }
+        const double miss = known ? std::fabs(d - c.t) : 1e300;
+        if (miss <= c.band) continue;
+        ++missing;
+        auto& mc = miss_by_comp[hands_in[root(c.runs[0].first)]];
+        ++mc.first;
+        mc.second = std::max(mc.second, known ? miss : std::numeric_limits<double>::infinity());
+        if (known) {
+          worst_mm = std::max(worst_mm, miss);
+          if (c.t > 0.0) worst_pct = std::max(worst_pct, 100.0 * miss / c.t);
+        }
+      }
+      // the Schumacher et al. 2015 (Fig. 18) check: a swing of more than 0.35 of the tested
+      // density span within less than two cells along a column, counted (reported, not hidden)
+      long long steep = 0;
+      for (std::size_t q : active) {
+        const Col& c = cols[q];
+        if (c.runs.size() < 2) continue;
+        double lo = 1e300, hi = -1e300, mean = 0.0;
+        for (const auto& rv : c.runs) {
+          lo = std::min(lo, field.density[rv.first]);
+          hi = std::max(hi, field.density[rv.first]);
+          mean += field.density[rv.first];
+        }
+        mean /= static_cast<double>(c.runs.size());
+        double run_mm = 0.0;
+        for (const auto& rv : c.runs) run_mm += rv.second;
+        const double two_cells = 2.0 * cell_size_mm(bp.topology, mean, bp.beads_per_wall, bp.bead_width_mm);
+        if (hi - lo > 0.35 * span && run_mm < two_cells) ++steep;
+      }
+      auto hand_name = [&](int hand) {
+        if (hand >= 0) return "group " + std::to_string(hand + 1);
+        return "face " + std::to_string(-1000 - hand);
+      };
+      Obj comb;
+      comb.add("components", jnum(static_cast<double>(active_roots.size())))
+          .add("columns", jnum(static_cast<double>(active.size())))
+          .add("method", jstr("row projections (Kaczmarz / ART) on the 1-D series columns, from the independent "
+                              "designs, clamped to the tested densities; components with one hand untouched"))
+          .add("before", Obj().add("columns_missing_band", jnum(static_cast<double>(before_missing)))
+                                 .add("worst_miss_mm", jnum(before_mm)).str())
+          .add("sweeps", jnum(sweeps))
+          .add("columns_missing_band", jnum(static_cast<double>(missing)))
+          .add("worst_miss_mm", jnum(worst_mm))
+          .add("worst_miss_pct", jnum(worst_pct))
+          .add("hull_check", Obj().add("same_axis_pairs", jnum(static_cast<double>(same_axis_pairs)))
+                                    .add("proven_impossible_pairs", jnum(static_cast<double>(proven_pairs)))
+                                    .add("worst_proof_gap_mm", jnum(worst_proof_gap))
+                                    .add("mixed_runs", jnum(static_cast<double>(mixed_runs)))
+                                    .add("mixed_components", jnum(static_cast<double>(mixed_components)))
+                                    .add("proven_impossible_components", jnum(static_cast<double>(proven_components)))
+                                    .add("rule", jstr("a same-axis pair is reachable iff its target strains lie in the convex "
+                                                      "hull of (eps_A(rho), eps_B(rho)) over the tested densities; two "
+                                                      "densities suffice (Fenchel-Bunt); outside by more than the bands: "
+                                                      "proven impossible in the 1-D model"))
+                                    .str())
+          .add("steep_columns", jnum(static_cast<double>(steep)))
+          .add("steep_rule", jstr("a density swing over 0.35 of the tested span within under two cells along a column "
+                                  "(Schumacher et al. 2015, Fig. 18): counted, not yet spread"))
+          .add("not_built", jstr("the min-max closest-combination report (design note §3); the certificate for "
+                                 "three or more hands on one run; a proof for crossing (not same-axis) components"));
+      combination_json = comb.str();
+      combination_active = !active.empty();
+      if (missing > 0) {
+        refusal_code = "combination_not_reachable";
+        std::string who;
+        for (const auto& kv : miss_by_comp) {
+          std::string hs;
+          for (int h : kv.first) hs += (hs.empty() ? "" : " and ") + hand_name(h);
+          char b[200];
+          if (std::isfinite(kv.second.second))
+            std::snprintf(b, sizeof(b), "%s: %lld column%s miss by up to %.3g mm", hs.c_str(), kv.second.first,
+                          kv.second.first == 1 ? "" : "s", kv.second.second);
+          else
+            std::snprintf(b, sizeof(b), "%s: %lld column%s squish past the tested data", hs.c_str(), kv.second.first,
+                          kv.second.first == 1 ? "" : "s");
+          who += (who.empty() ? "" : "; ") + std::string(b);
+        }
+        refusal_reason = (proven_pairs + proven_components > 0
+                              ? "PROVEN: no lattice lets every squeeze group reach its own depths when pressed alone: on " +
+                                    std::to_string(proven_pairs) + " shared run(s) and " + std::to_string(proven_components) +
+                                    " shared region(s) the targets lie outside everything the tested lattices can reach, by up "
+                                    "to " + fmtd(worst_proof_gap, 3) + " mm per column (exact in the 1-D model). "
+                              : std::string("core found no one lattice that lets every squeeze group reach its own depths "
+                                            "when pressed alone; this is what the solver found, not a proof. ")) +
+                         "(" + who + "; worst " + fmtd(worst_mm, 3) + " mm, " + fmtd(worst_pct, 1) +
+                         " % of its target, 1-D estimate). Change a group's depth or force, or its band.";
+      }
+    }
+
+    if (refusal_code.empty()) {
+    // ── C2 B1b, item 4a: THE FIELD EXPORT ──
+    std::vector<float> filled;
+    std::vector<int> filled_owner;
+    fill_field(field, filled, filled_owner);
+    std::vector<PlaneCut> planes;
+    for (std::size_t i = 0; i < stacks.size(); ++i)
+      if (stacks[i].has_flat_prism)
+        planes.push_back({stacks[i].face_region_id, stacks[i].flat_apex, stacks[i].frame.load, stacks[i].flat_depth_mm});
+    std::vector<float> across, side;
+    if (!planes.empty()) seam_share(field, filled, filled_owner, planes, across, side);
+    {
+      const std::size_t n = field.density.size();
+      std::string bin;
+      std::vector<std::string> arrays;
+      auto put_f = [&](const char* name, const std::vector<float>& v, const char* meaning) {
+        arrays.push_back(Obj().add("name", jstr(name)).add("type", jstr("f32")).add("offset", jnum(static_cast<double>(bin.size())))
+                             .add("count", jnum(static_cast<double>(v.size()))).add("meaning", jstr(meaning)).str());
+        bin.append(reinterpret_cast<const char*>(v.data()), v.size() * sizeof(float));
+      };
+      auto put_i = [&](const char* name, const std::vector<int>& v, const char* meaning) {
+        std::vector<std::int32_t> w(v.begin(), v.end());
+        arrays.push_back(Obj().add("name", jstr(name)).add("type", jstr("i32")).add("offset", jnum(static_cast<double>(bin.size())))
+                             .add("count", jnum(static_cast<double>(w.size()))).add("meaning", jstr(meaning)).str());
+        bin.append(reinterpret_cast<const char*>(w.data()), w.size() * sizeof(std::int32_t));
+      };
+      std::vector<float> dens(n), wt(n);
+      for (std::size_t v = 0; v < n; ++v) {
+        dens[v] = static_cast<float>(field.density[v]);
+        wt[v] = static_cast<float>(field.owner_weight[v]);
+      }
+      put_f("density", dens, "-1 off the lattice; 0 lattice no loaded stack designs; else the core density");
+      put_i("owner", field.owner, "face_region_id of the owning stack (a press: its first region); -1 none");
+      put_f("owner_weight", wt, "the owner's blend weight (A6)");
+      put_i("runner_up", field.runner_up, "the other stack under the voxel; -1 none (A6)");
+      put_f("filled_density", filled, "every voxel's density after the fill rule (what is drawn)");
+      put_i("filled_owner", filled_owner, "the owner carried through the fill");
+      if (!planes.empty()) {
+        put_f("seam_side", side, "the press side's share at each flat-prism plane (seam rule)");
+        put_f("seam_across", across, "within the band, the other side's density across the plane; else filled_density");
+      }
+      std::vector<std::string> presses;
+      for (std::size_t i = 0; i < stacks.size(); ++i) {
+        if (!stacks[i].has_flat_prism) continue;
+        std::vector<std::string> segs;
+        for (const auto& e : footprint_boundary(model, stack_fp[i])) segs.push_back("[" + jvec(e.first) + ", " + jvec(e.second) + "]");
+        presses.push_back(Obj().add("press_id", jnum(stacks[i].face_region_id))
+                              .add("apex_mm", jvec(stacks[i].flat_apex))
+                              .add("direction", jvec(stacks[i].frame.load))
+                              .add("depth_mm", jnum(stacks[i].flat_depth_mm))
+                              .add("footprint_boundary", jlist(segs)).str());
+      }
+      const std::string header =
+          Obj().add("grid", Obj().add("nx", jnum(field.nx)).add("ny", jnum(field.ny)).add("nz", jnum(field.nz))
+                                .add("spacing_mm", jnum(field.spacing)).add("origin_mm", jvec(field.origin)).str())
+              .add("format", jstr("flexible_field v1: little-endian arrays in flexible_field.bin, x fastest "
+                                  "(index = (k * ny + j) * nx + i), voxel centre = origin + (i + 0.5, j + 0.5, k + 0.5) * spacing"))
+              .add("press_api_version", jnum(kPressApiVersion))
+              .add("arrays", jlist(arrays))
+              .add("filled_rule", jstr("every voxel with no density takes the density and owner of the nearest assigned "
+                                       "voxel, breadth-first over the 6-neighbourhood, seeds in index order, neighbours "
+                                       "+x -x +y -y +z -z (the app's FlexibleLatticeField.inputs)"))
+              .add("seam_rule", jstr("FlexibleGroupField.pressSeam: band 2.5 voxels, ramp 1 voxel, on the filled field"))
+              .add("presses", jlist(presses))
+              .str();
+      write_text(out_path("flexible_field.json"), header + "\n");
+      write_bytes(out_path("flexible_field.bin"), bin);
+    }
+
+    // ── C2 B1b, item 26: GRAMS, on the clipped field. A voxel weighs the measured specimen
+    // mass density at its density × its volume; the owner takes its blend weight's share, the
+    // runner-up the rest. Unknown (null) where the table has no mass density.
+    {
+      const double vv = grid.voxel_volume();
+      std::map<int, double> by_face;
+      std::map<int, long long> unknown_face;
+      double total = 0.0;
+      long long unknown = 0;
+      std::vector<double> mass(field.density.size(), 0.0);
+      for (std::size_t v = 0; v < field.density.size(); ++v) {
+        if (!(field.density[v] > 0.0)) continue;
+        const MaybeNumber md = specimen_density_g_cm3(set, field.density[v]);
+        if (!md.known) {
+          ++unknown;
+          ++unknown_face[field.owner[v]];
+          if (field.runner_up[v] >= 0) ++unknown_face[field.runner_up[v]];
+          mass[v] = kNaN;
+          continue;
+        }
+        const double m = md.value * vv / 1000.0;
+        mass[v] = m;
+        total += m;
+        by_face[field.owner[v]] += field.owner_weight[v] * m;
+        if (field.runner_up[v] >= 0) by_face[field.runner_up[v]] += (1.0 - field.owner_weight[v]) * m;
+      }
+      Obj bf;
+      for (const auto& kv : by_face)
+        bf.add("face_" + std::to_string(kv.first) + "_g", unknown_face.count(kv.first) ? "null" : jnum(kv.second));
+      Obj br;
+      const std::vector<std::vector<char>> rm = flexible_include_region_masks(job, model, grid);
+      for (std::size_t r = 0; r < rm.size(); ++r) {
+        if (rm[r].size() != mass.size()) continue;
+        double g = 0.0;
+        bool known = true;
+        for (std::size_t v = 0; v < mass.size(); ++v) {
+          if (!rm[r][v] || !(field.density[v] > 0.0)) continue;
+          if (!std::isfinite(mass[v])) known = false;
+          else g += mass[v];
+        }
+        br.add("region_" + std::to_string(r) + "_g", known ? jnum(g) : "null");
+      }
+      // C2 B2, item 26: grams per squeeze group (its entries' face grams summed).
+      Obj bg;
+      for (std::size_t gi = 0; gi < fx.squeeze_groups.size(); ++gi) {
+        double g = 0.0;
+        bool known = true;
+        for (int id : fx.squeeze_groups[gi].faces) {
+          if (unknown_face.count(id)) known = false;
+          const auto it = by_face.find(id);
+          if (it != by_face.end()) g += it->second;
+        }
+        bg.add("group_" + std::to_string(gi + 1) + "_g", known ? jnum(g) : "null");
+      }
+      grams_json = Obj().add("basis", jstr("the measured specimen mass density at each voxel's density x the voxel's "
+                                           "volume, on the clipped field; a blended voxel is shared by its weights"))
+                       .add("by_face", bf.str())
+                       .add("by_region", br.str())
+                       .add("by_group", bg.str())
+                       .add("total_g", unknown ? "null" : jnum(total))
+                       .add("unknown_voxels", jnum(static_cast<double>(unknown)))
+                       .str();
+    }
+
+    }  // refusal_code.empty(): the export and the grams
+
+    // ── C2 B2, item 17: THE RECEIPT PER GROUP. Each column's ACHIEVED depth under its own
+    // pressure through the ASSEMBLED field: the series sum of ε(p; ρ_voxel) along its run
+    // (every quarter voxel). It works under any assembly rule; today's is "nearest_face".
+    // A group is a squeeze group, or a loaded entry in none (its own hand).
+    {
+      struct Acc {
+        std::string name;
+        std::vector<int> faces;
+        JobHitBand band;
+        std::string tier;
+        double tier_band = 0.0;
+        long long columns = 0, within = 0, unknown = 0, shared = 0;
+        double t_sum = 0, d_sum = 0, a_sum = 0, max_vs_target = 0, max_vs_design = 0, max_vs_target_pct = 0;
+      };
+      std::vector<Acc> groups;
+      std::vector<int> group_of(stacks.size(), -1);
+      for (std::size_t gi = 0; gi < fx.squeeze_groups.size(); ++gi) {
+        Acc a;
+        a.name = "group " + std::to_string(gi + 1);
+        a.faces = fx.squeeze_groups[gi].faces;
+        a.band = fx.squeeze_groups[gi].band;
+        groups.push_back(a);
+      }
+      for (std::size_t i = 0; i < stacks.size(); ++i) {
+        if (loaded[i]->squeeze_group >= 0) {
+          group_of[i] = loaded[i]->squeeze_group;
+        } else {
+          Acc a;
+          a.name = "face " + std::to_string(loaded[i]->face_region_id);
+          a.faces = {loaded[i]->face_region_id};
+          a.band = loaded[i]->band;
+          group_of[i] = static_cast<int>(groups.size());
+          groups.push_back(a);
+        }
+      }
+      // which group owns each voxel (for "shared")
+      std::map<int, int> owner_group;  // face_region_id -> group index
+      for (std::size_t i = 0; i < stacks.size(); ++i) owner_group[stacks[i].face_region_id] = group_of[i];
+      for (std::size_t i = 0; i < stacks.size(); ++i) {
+        Acc& a = groups[static_cast<std::size_t>(group_of[i])];
+        const Stack& st = stacks[i];
+        const FaceDesign& fd = designs[i];
+        // the uncertainty (tier band) beside the hit band: the widest of the group's entries
+        if (fd.tier.band >= a.tier_band) {
+          a.tier_band = fd.tier.band;
+          a.tier = fd.tier.tier;
+        }
+        std::set<std::size_t> shared_vox;
+        for (std::size_t k = 0; k < st.columns.size(); ++k) {
+          const StackColumn& c = st.columns[k];
+          const ColumnDesign& cd = fd.columns[k];
+          if (cd.status == "no_lattice" || !(c.lattice_mm > 0.0)) continue;
+          const Vec3 o = st.frame.from_uv(c.u_mm, c.v_mm);
+          const int n = std::max(1, static_cast<int>(std::ceil(c.lattice_mm / (0.25 * grid.spacing))));
+          const double step = c.lattice_mm / n;
+          double achieved = 0.0;
+          bool known = true;
+          for (int sidx = 0; sidx < n; ++sidx) {
+            const double t = c.entry_t + (sidx + 0.5) * step;
+            const Vec3 p{o.x + st.frame.load.x * t, o.y + st.frame.load.y * t, o.z + st.frame.load.z * t};
+            const int gi = static_cast<int>(std::floor((p.x - grid.origin.x) / grid.spacing));
+            const int gj = static_cast<int>(std::floor((p.y - grid.origin.y) / grid.spacing));
+            const int gk = static_cast<int>(std::floor((p.z - grid.origin.z) / grid.spacing));
+            if (gi < 0 || gj < 0 || gk < 0 || gi >= grid.nx || gj >= grid.ny || gk >= grid.nz) continue;
+            const std::size_t v = grid.index(gi, gj, gk);
+            const double rho = field.density[v];
+            if (!(rho > 0.0)) continue;  // not lattice, or no density assigned: no squish counted
+            const auto og = owner_group.find(field.owner[v]);
+            if (og != owner_group.end() && og->second != group_of[i]) shared_vox.insert(v);
+            const StrainResult e = strain_under(set, cd.pressure_mpa, rho);
+            if (!e.ok) {
+              known = false;
+              break;
+            }
+            achieved += step * e.strain;
+          }
+          ++a.columns;
+          if (!known) {
+            ++a.unknown;
+            continue;
+          }
+          const double tgt = cd.target_depth_mm;
+          const double des = cd.buildable_ok ? cd.buildable_depth_mm : kNaN;
+          a.t_sum += tgt;
+          a.a_sum += achieved;
+          if (std::isfinite(des)) {
+            a.d_sum += des;
+            a.max_vs_design = std::max(a.max_vs_design, std::fabs(achieved - des));
+          }
+          const double miss = std::fabs(achieved - tgt);
+          a.max_vs_target = std::max(a.max_vs_target, miss);
+          if (tgt > 0.0) a.max_vs_target_pct = std::max(a.max_vs_target_pct, 100.0 * miss / tgt);
+          if (cd.status == "ok" && miss <= std::max(a.band.min_mm, 0.01 * a.band.pct * tgt)) ++a.within;
+        }
+        a.shared += static_cast<long long>(shared_vox.size());
+      }
+      std::vector<std::string> gj;
+      for (const Acc& a : groups) {
+        std::vector<double> ids(a.faces.begin(), a.faces.end());
+        const double nk = static_cast<double>(std::max<long long>(1, a.columns - a.unknown));
+        gj.push_back(Obj().add("group", jstr(a.name))
+                         .add("faces", jarr(ids))
+                         .add("columns", jnum(static_cast<double>(a.columns)))
+                         .add("target_mean_mm", jnum(a.t_sum / nk))
+                         .add("design_mean_mm", jnum(a.d_sum / nk))
+                         .add("achieved_mean_mm", jnum(a.a_sum / nk))
+                         .add("max_achieved_vs_target_mm", jnum(a.max_vs_target))
+                         .add("max_achieved_vs_target_pct", jnum(a.max_vs_target_pct))
+                         .add("max_achieved_vs_design_mm", jnum(a.max_vs_design))
+                         .add("band", Obj().add("min_mm", jnum(a.band.min_mm)).add("pct", jnum(a.band.pct))
+                                          .add("source", jstr(a.band.given ? "job" : "default")).str())
+                         .add("uncertainty", Obj().add("tier", jstr(a.tier)).add("band", jnum(a.tier_band))
+                                                .add("meaning", jstr("the real part may differ by this fraction of the depth")).str())
+                         .add("columns_within_band", jnum(static_cast<double>(a.within)))
+                         .add("columns_unknown", jnum(static_cast<double>(a.unknown)))
+                         .add("shared_voxels", jnum(static_cast<double>(a.shared)))
+                         .str());
+      }
+      groups_json = Obj().add("assembly", jstr(combination_active ? "combination" : "nearest_face"))
+                        .add("estimate", jstr("1-D estimate"))
+                        .add("achieved_rule", jstr("each column's depth under its own pressure through the assembled "
+                                                   "field: the series sum of strain(p; rho_voxel) along its run"))
+                        .add("tolerance_mm", jstr("per group: max(band.min_mm, band.pct % of the target), per column; "
+                                                  "only columns whose own design reached its target can hit"))
+                        .add("groups", jlist(gj))
+                        .str();
+    }
   }
 
   const std::string temp_label = rec.chosen ? fmtd(rec.temp_c, 0) + " \xC2\xB0""C" : std::string("-");
@@ -723,6 +1841,29 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
                           .add("side", jbool(fr.side))
                           .str());
       fo.add("press_api_version", jnum(kPressApiVersion));
+      if (st.has_flat_prism) {
+        int series_cols = 0;
+        double fmin = 1e300, fmax = -1e300;
+        if (i < series_of.size())
+          for (const SeriesColumn& sc : series_of[i]) {
+            double fl = 0.0;
+            for (const FixedSegment& f : sc.fixed) fl += f.length_mm;
+            if (fl > 0.0) {
+              ++series_cols;
+              fmin = std::min(fmin, fl);
+              fmax = std::max(fmax, fl);
+            }
+          }
+        fo.add("flat_prism", Obj().add("apex_mm", jvec(st.flat_apex))
+                                  .add("depth_mm", jnum(st.flat_depth_mm))
+                                  .add("columns_outside_prism_not_pressed", jnum(st.outside_flat_prism_columns))
+                                  .str());
+        fo.add("series_columns", Obj().add("count", jnum(series_cols))
+                                      .add("fixed_length_mm", series_cols ? Obj().add("min", jnum(fmin)).add("max", jnum(fmax)).str() : "null")
+                                      .add("rule", jstr("own segment (inside the prism, plus run nobody else owns) designed; "
+                                                        "the rest fixed at the other owners' designed density; one stress"))
+                                      .str());
+      }
     }
     std::vector<std::string> links, rlinks;
     for (const StackLink& l : st.exit_faces)
@@ -731,6 +1872,7 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
       rlinks.push_back(Obj().add("face_region_id", jnum(l.id)).add("area_fraction", jnum(l.area_fraction)).str());
     fo.add("stack", Obj()
                         .add("columns", jnum(static_cast<double>(st.columns.size())))
+                        .add("columns_over_solid_not_pressed", jnum(st.over_solid_columns))
                         .add("column_pitch_mm", jnum(st.pitch_mm))
                         .add("footprint_mm2", jnum(st.footprint_area_mm2))
                         .add("latticed_columns", jnum(st.latticed_columns))
@@ -742,7 +1884,21 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
                         .add("linked_regions", jlist(rlinks))
                         .add("exit_unresolved_fraction", jnum(st.exit_unresolved_fraction))
                         .str());
-    fo.add("weight_n", jnum(jf.weight_n))
+    if (!pinched.empty() && !pinched[i].empty()) {
+      int np = 0;
+      for (char x : pinched[i]) np += x ? 1 : 0;
+      fo.add("pinched_columns", jnum(np));
+      double hsum = 0.0;
+      int hn = 0;
+      if (i < designs.size())
+        for (const ColumnDesign& cd : designs[i].columns)
+          if (cd.status != "no_lattice") {
+            hsum += cd.height_mm;
+            ++hn;
+          }
+      fo.add("design_height_mm", hn ? jnum(hsum / hn) : "null");
+    }
+    fo.add("weight_n", jnum(weight_of[i]))
         .add("deepest_squish_mm", jnum(jf.deepest_squish_mm))
         .add("mode", jstr(jf.mode));
     if (jf.mode == "centre_edge")
@@ -759,7 +1915,7 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
           .add("solid_under_map_columns", jnum(d.solid_under_map))
           .add("columns_by_status", Obj().add("ok", jnum(d.ok)).add("too_firm", jnum(d.too_firm))
                                         .add("too_soft", jnum(d.too_soft)).add("beyond_data", jnum(d.beyond_data))
-                                        .add("no_lattice", jnum(d.no_lattice)).str())
+                                        .add("no_lattice", jnum(d.no_lattice)).add("rim", jnum(d.rim)).str())
           .add("clamped_columns", jnum(d.too_firm + d.too_soft + d.beyond_data))
           .add("target_extrapolated_columns", jnum(d.target_extrapolated))
           .add("buildable_extrapolated_columns", jnum(d.buildable_extrapolated))
@@ -1007,6 +2163,7 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
                                     return v;
                                   }()))
                                   .add("voxels", jnum(static_cast<double>(lattice_voxels)))
+                                  .add("surface_fill_voxels", jnum(static_cast<double>(surface_fill.added)))
                                   .add("volume_mm3", jnum(lattice_voxels * grid.voxel_volume())).str())
       .add("faces", jlist(face_json))
       .add("resting_faces", jlist(resting))
@@ -1020,6 +2177,41 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
                        .add("face_region_a", jnum(x.face_region_a)).add("face_region_b", jnum(x.face_region_b))
                        .add("shared_mm2", jnum(x.shared_mm2)).str());
     r.add("shared_footprints", jlist(sf));
+  }
+  {
+    std::vector<std::string> pj;
+    for (const StackConflict& c : pinches)
+      pj.push_back(Obj().add("face_a", jnum(c.face_a)).add("face_b", jnum(c.face_b))
+                       .add("overlap_mm3", jnum(c.overlap_mm3))
+                       .add("rule", jstr("each face designs its pinched columns over half its run (the half nearer "
+                                         "it); one hand, one pressure on both ends; the field meets at the middle"))
+                       .str());
+    r.add("pinches", jlist(pj));
+  }
+  r.add("grams", grams_json);
+  r.add("groups", groups_json);
+  r.add("combination", combination_json);
+  // C2 B2, item 16: each hand's force and its split.
+  if (!fx.squeeze_groups.empty()) {
+    std::vector<std::string> sg;
+    for (std::size_t gi = 0; gi < fx.squeeze_groups.size(); ++gi) {
+      Obj split;
+      double area = 0.0;
+      for (std::size_t i = 0; i < stacks.size(); ++i)
+        if (loaded[i]->squeeze_group == static_cast<int>(gi)) {
+          split.add("face_" + std::to_string(loaded[i]->face_region_id) + "_n", jnum(weight_of[i]));
+          area += stacks[i].footprint_area_mm2;
+        }
+      std::vector<double> ids(fx.squeeze_groups[gi].faces.begin(), fx.squeeze_groups[gi].faces.end());
+      sg.push_back(Obj().add("group", jnum(static_cast<double>(gi + 1)))
+                       .add("faces", jarr(ids))
+                       .add("force_n", jnum(fx.squeeze_groups[gi].force_n))
+                       .add("footprint_mm2", jnum(area))
+                       .add("pressure_mpa", area > 0 ? jnum(fx.squeeze_groups[gi].force_n / area) : "null")
+                       .add("split", split.str())
+                       .str());
+    }
+    r.add("squeeze_groups", jlist(sg));
   }
   r.add("handover", jlist(hv))
       .add("field", refusal_code.empty()

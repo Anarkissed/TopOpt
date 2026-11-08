@@ -600,6 +600,11 @@ target_compile_definitions(test_voxel PRIVATE
   STL_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/stl")
 add_test(NAME voxelize COMMAND test_voxel)
 
+# C2 B0 item 1 (2026-10-24): VoxelTies::Watertight, seam holes along a shared diagonal.
+add_executable(test_voxelize_ties tests/unit/test_voxelize_ties.cpp)
+target_link_libraries(test_voxelize_ties PRIVATE topopt)
+add_test(NAME voxelize_ties COMMAND test_voxelize_ties)
+
 # Hex element stiffness test (M2.1). Pure C++/std (no OCCT, no Eigen), so it
 # builds and runs in every configuration. Asserts against the human-authored
 # reference fixture, whose directory is injected here.
@@ -1668,6 +1673,17 @@ if(OpenCASCADE_FOUND)
     STEP_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/step"
     DEMO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo")
   add_test(NAME step_import COMMAND test_step)
+
+  # C2 B0 item 15 (2026-10-24): the STEP import drops repeated-corner triangles and
+  # re-meshes a face that comes out open. The test builds a filleted box with OCCT itself.
+  add_executable(test_step_clean tests/unit/test_step_clean.cpp)
+  target_include_directories(test_step_clean SYSTEM PRIVATE ${OpenCASCADE_INCLUDE_DIR})
+  target_link_libraries(test_step_clean PRIVATE topopt
+    TKFillet TKPrim TKDESTEP TKXSBase TKDE TKTopAlgo TKBRep TKMath TKernel)
+  target_compile_definitions(test_step_clean PRIVATE
+    STEP_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/step"
+    STEP_CLEAN_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME step_clean COMMAND test_step_clean)
 
   # Pseudo-faces vs B-rep ground truth (handoff 134): export the demo L-bracket
   # STEP to STL, re-import through the MESH path, and require the manufactured
@@ -2834,12 +2850,13 @@ target_sources(topopt PRIVATE
 
 set(TOPOPT_FLEXIBLE_MATERIALS_JSON
   "${CMAKE_CURRENT_SOURCE_DIR}/src/materials/flexible_materials.json")
-foreach(_flex_test data squish curve faces field recommend job run press)
+foreach(_flex_test data squish curve faces field recommend job run press b1a b1b b2 b2b)
   add_executable(test_flexible_${_flex_test} tests/unit/test_flexible_${_flex_test}.cpp)
   target_link_libraries(test_flexible_${_flex_test} PRIVATE topopt)
   target_compile_definitions(test_flexible_${_flex_test} PRIVATE
     FLEXIBLE_MATERIALS_JSON_PATH="${TOPOPT_FLEXIBLE_MATERIALS_JSON}"
-    FLEXIBLE_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    FLEXIBLE_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    FLEXIBLE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/flexible")
   add_test(NAME flexible_${_flex_test} COMMAND test_flexible_${_flex_test})
 endforeach()
 if(TARGET topopt_cli)

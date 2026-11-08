@@ -1,0 +1,6 @@
+  crossing, group 1: 900 of 900 columns within band, worst miss 0.0000 mm
+  crossing, group 2: 900 of 900 columns within band, worst miss 0.0000 mm
+  half-top + side: before 1350 columns missed (worst 2.0921 mm); after 5 sweeps: group 1 450/450, group 2 900/900 within band
+  unreachable: core found no one lattice that lets every squeeze group reach its own depths when pressed alone (group 1 and group 2: 432 columns squish past the tested data; worst 1.602 mm, 20.0 % of its target, 1-D estimate). This is what the solver found, not proven impossible (the exact hull check is not built yet). Change a group's depth or force, or its band.
+test_flexible_b2b: 11 checks, 0 failures
+exit 0

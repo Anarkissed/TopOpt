@@ -1,0 +1,9 @@
+  crossing, group 1: nan of 900 columns within band, worst miss 1.8422 mm
+FAIL (line 106): 17: every column of the group hits its band
+  crossing, group 2: nan of 900 columns within band, worst miss 13.2417 mm
+FAIL (line 106): 17: every column of the group hits its band
+FAIL (line 110): 17: the receipt names the combination and labels the judgement a 1-D estimate (Q-C3)
+FAIL (line 113): Q-C2: the default band, and tier_band beside it as the uncertainty
+FAIL (line 120): a single group: no component to combine (byte-identical to the independent design)
+libc++abi: terminating due to uncaught exception of type topopt::JobError: job.json: flexible: flexible.squeeze_groups[0]: unknown key "hit_band"
+exit 134

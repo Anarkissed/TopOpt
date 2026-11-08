@@ -1,0 +1,22 @@
+FAIL (line 111): 8(a): a column's lattice is the run from its entry: the top prism's 8 mm, not 8 + 10
+FAIL (line 116): 8(a)(i): a 1.5 mm leading gap is travel: the run is the whole column
+FAIL (line 118): 8(a)(i): a 3 mm leading gap (more than two voxels): no run
+FAIL (line 123): 8(a)(ii): a one-voxel hole inside the lattice is crossed
+FAIL (line 125): 8(a)(ii): a 3 mm hole ends the run (9 mm, from the top to z = 21)
+FAIL (line 142): 9(b): his pad's empty top layer joins the lattice (9,216)
+FAIL (line 166): 9(b): no fill voxel touches, face to face, a solid voxel that is not lattice (the inside-corner exception)
+FAIL (line 193): 25: the columns' areas sum to the face (2000 mm2)
+FAIL (line 194): 25: footprint_mm2 is the face's area
+  (face region 201 and face region 202 are sectors of the SAME face in one press; give the press one region for that face)
+FAIL (line 226): P1: two halves of one face in one press: the whole top (3,600 columns)
+  (message lacks "overlap": face region 203 and face region 202 are sectors of the SAME face in one press; give the press one region for that face)
+FAIL (line 229): P1: two pieces of one face that overlap inside one press are refused, naming both
+  (accepted)
+FAIL (line 234): P2: a piece whose clipped footprint does not touch the other's is not adjacent (their faces are)
+libc++abi: terminating due to uncaught exception of type topopt::JobError: job.json: flexible: flexible: unknown key "no_include_region"
+  run, two prisms with solid between: 18.000..18.000 mm (the whole-column count would be 18)
+  surface fill on his pad at res 96: 0 added (the top layer: 9216 Empty), 0 refused
+  inside corner: 0 added, 0 refused
+  edge to edge: face 5, 1824 columns on a 96 x 20 grid, area 1979.166667 mm2 (the face: 2000), 19 in the far rows
+  7: no include region, default: 4096 latticed columns
+exit 134

@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepGProp.hxx>
@@ -243,6 +244,7 @@ StepModel import_step_file(const std::string& path,
     if (repair_accepted(t1, wanted)) {
       std::fprintf(stderr, "[step] mesh repaired: %d pole sliver(s) dropped (%s)\n", dropped,
                    path.c_str());
+      model.dropped_repeated_corner_triangles = dropped;
       t = std::move(t1);
     } else {
       for (const double fraction : {0.5, 0.25}) {
@@ -253,6 +255,8 @@ StepModel import_step_file(const std::string& path,
         if (!repair_accepted(tf, wanted)) continue;
         std::fprintf(stderr, "[step] mesh repaired: re-meshed at %.3g mm, %d pole sliver(s) dropped (%s)\n",
                      d, n, path.c_str());
+        model.dropped_repeated_corner_triangles = n;
+        model.remeshed_at_linear_deflection = d;
         t = std::move(tf);
         break;
       }
@@ -260,10 +264,40 @@ StepModel import_step_file(const std::string& path,
   }
   model.mesh = std::move(t.mesh);
   model.triangle_face = std::move(t.triangle_face);
+  // C2 B0 item 15's report, kept on the released repair (merge 2026-11-07): what
+  // the repair did, and every face still open afterwards, said and never silent.
+  model.open_faces = step_open_faces(model.mesh, model.triangle_face);
   if (model.mesh.empty())
     throw StepError("STEP tessellation produced no triangles: " + path);
   return model;
 }
 
+
+
+std::vector<int> step_open_faces(const TriangleMesh& mesh, const std::vector<int>& triangle_face) {
+  // Count every undirected edge's uses; a closed 2-manifold uses each exactly twice.
+  std::map<std::pair<int, int>, int> use;
+  for (const auto& t : mesh.triangles)
+    for (int k = 0; k < 3; ++k) {
+      int a = t[static_cast<std::size_t>(k)], b = t[static_cast<std::size_t>((k + 1) % 3)];
+      if (a > b) std::swap(a, b);
+      ++use[{a, b}];
+    }
+  std::vector<int> open;
+  for (std::size_t i = 0; i < mesh.triangles.size(); ++i) {
+    const auto& t = mesh.triangles[i];
+    for (int k = 0; k < 3; ++k) {
+      int a = t[static_cast<std::size_t>(k)], b = t[static_cast<std::size_t>((k + 1) % 3)];
+      if (a > b) std::swap(a, b);
+      if (use[{a, b}] != 2) {
+        open.push_back(i < triangle_face.size() ? triangle_face[i] : -1);
+        break;
+      }
+    }
+  }
+  std::sort(open.begin(), open.end());
+  open.erase(std::unique(open.begin(), open.end()), open.end());
+  return open;
+}
 
 }  // namespace topopt

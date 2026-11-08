@@ -11,9 +11,7 @@ wrote face103_buildable_depth.svg
 wrote face103_density.svg
 wrote face103_cell_size.svg
 wrote face103_tier_flags.svg
-wrote field_xz_density.svg
-wrote field_xz_owner.svg
 wrote run_info.json
-flexible: ran; receipt in /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-squish-maths-7a3bc8/docs/handoffs/evidence/2026-09-28-flexible-squish-maths/c_block_top_and_side_handover/out/run_info.json
-topopt-cli: core ea325c448bc3, built Oct 10 2026 15:17:01
-exit code 0
+flexible: REFUSED (combination_not_reachable): PROVEN: no lattice lets every squeeze group reach its own depths when pressed alone: on 0 shared run(s) and 100 shared region(s) the targets lie outside everything the tested lattices can reach, by up to 4.082 mm per column (exact in the 1-D model). (face 103 and face 101: 6926 columns miss by up to 22.4 mm; worst 22.354 mm, 545.0 % of its target, 1-D estimate). Change a group's depth or force, or its band.
+topopt-cli: core 6e4d4d46d064, built Oct 24 2026 18:55:28
+exit code 3
