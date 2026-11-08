@@ -342,8 +342,13 @@ final class LatticeStageTests: XCTestCase {
     }
 
     func testTheCellsPageRowsAndItsOneWayIn() throws {
-        XCTAssertEqual(LatticeCellsRow.rows(.structural), [.grade, .along, .strength])
-        XCTAssertEqual(LatticeCellsRow.rows(.aesthetic), [.grade, .along, .ties, .overhangs])
+        // ★ RE-PINNED (B7 slice 2): Along (round 2, N5c) and the Ties / Overhangs notes (plan.md §B7 "Removed") are off the
+        // page; Along's live choice, By stress, is Density's (`densityChoices(simulate:)`).
+        XCTAssertEqual(LatticeCellsRow.rows(.structural), [.grade, .strength])
+        XCTAssertEqual(LatticeCellsRow.rows(.aesthetic), [.grade])
+        XCTAssertEqual(LatticeCellsRow.densityChoices(simulate: true), [.uniform, .perRegion, .sim])
+        XCTAssertEqual(LatticeCellsRow.densityChoices(simulate: false), [.uniform, .perRegion], "By stress needs the simulation")
+        XCTAssertEqual(LatticeCellsRow.densityTitle(.sim), "By stress")
         // the Grade pair is today's density band; reading and writing it back is the identity
         var s = LatticeSettings(); s.minRelativeDensity = 0.12; s.maxRelativeDensity = 0.30
         let back = LatticeWizardModel(settings: s).applied(to: s)

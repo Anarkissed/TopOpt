@@ -20,6 +20,10 @@
 //      min(the law's density, what the file holds), and the run says so.
 //   G5 The organic lattice is still refused with a box, in plain words, before any
 //      solve.
+//   G7 (LatticeTypes, ruling 2; TO-core's ask 11-06): G1's job with the shape grade on, an
+//      8 mm band at strength +1. The band raises densities and keeps latticed what the
+//      old beam cleared, so the G2 audit must still hold on that larger mask: no emitted
+//      cell covers no certified voxel, certified == emitted, no companion solid in one.
 
 #include "topopt/job.hpp"
 #include "topopt/lattice.hpp"
@@ -300,6 +304,37 @@ static void section_lattice_part() {
   CHECK(!rn.empty() && rb == rn, "G6: and so is its certification receipt");
 }
 
+static void section_band() {
+  const MaterialLibrary materials = load_materials_file(MATERIALS_JSON_PATH);
+  const SettingsRules rules = load_settings_rules_file(SETTINGS_RULES_PATH);
+  const std::string out = std::string(CLI_TMP_DIR) + "/dbx_graded_band";
+  std::filesystem::remove_all(out);
+  JobDescription job = graded_box_job();
+  job.grading.shape_grade = true;
+  job.grading.shape_grade_band_mm = 8.0;
+  job.grading.shape_grade_strength = 1.0;
+  std::string refused;
+  try {
+    (void)run_job(job, g_dir, out, materials, rules, /*emit_progress=*/false,
+                  RunObservability{});
+  } catch (const std::exception& e) {
+    refused = e.what();
+  }
+  if (!refused.empty()) std::fprintf(stderr, "  G7 refused: %s\n", refused.c_str());
+  CHECK(refused.empty(), "G7: the design-box job with the band runs");
+  const std::string rcpt = read_file(out + "/variant_090_lattice.report.json");
+  const double certified = json_number(rcpt, "certified_lattice_cells");
+  const double emitted = json_number(rcpt, "emitted_lattice_cells");
+  const double none = json_number(rcpt, "emitted_cells_covering_no_certified");
+  const double both = json_number(rcpt, "voxels_strut_and_solid");
+  const double band = json_number(rcpt, "band_voxels");
+  std::printf("[G7] band voxels %.0f; cells certified %.0f, emitted %.0f, covering no certified "
+              "%.0f; companion-solid voxels in one %.0f\n", band, certified, emitted, none, both);
+  CHECK(band > 0.0, "G7: the band was built");
+  CHECK(none == 0.0 && certified == emitted && both == 0.0,
+        "G7: the G2 audit holds on the band's mask");
+}
+
 int main() {
   std::printf("=== grading + a design box ===\n");
   write_fixture();
@@ -307,6 +342,7 @@ int main() {
   section_relattice();
   section_organic_refused();
   section_lattice_part();
+  section_band();
   std::printf("%d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;
 }

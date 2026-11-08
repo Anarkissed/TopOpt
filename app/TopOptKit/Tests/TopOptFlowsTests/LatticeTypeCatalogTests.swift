@@ -67,13 +67,15 @@ final class LatticeTypeCatalogTests: XCTestCase {
     /// ★ Both pickers read the one catalog, and neither can write a type it does not offer.
     func testBothPickersReadTheCatalogAndNeverPickAGreyedType() throws {
         let wiz = try src("LatticeSetupWizard.swift"), page = try src("LatticePage.swift")
+        // ★ RE-PINNED (B7 slice 2): the Lattice page draws the OFFERED types only (a label card, or big cards)
         XCTAssertTrue(wiz.contains("let entries = LatticeTypeCatalog.entriesFromCore()")
-                      && wiz.contains("ForEach(entries) { e in typeChip(e, fixesStale: e.offered && stale != nil) }"),
-                      "the Lattice stage's chips")
+                      && wiz.contains("let offered = entries.filter(\\.offered)")
+                      && wiz.contains("ForEach(offered) { e in typeCard(e, fixesStale: stale != nil) }"),
+                      "the Lattice page's cards")
         XCTAssertTrue(page.contains("private var topologyEntries: [LatticeTypeEntry] { LatticeTypeCatalog.entriesFromCore() }"), "the page's pane")
         XCTAssertTrue(page.contains("guard e.offered else { return }\n            project.lattice.topologyID = e.id"),
                       "★ the page never writes a greyed type")
-        XCTAssertTrue(wiz.contains("guard offered else { typeReason"), "★ the chip never picks a greyed type")
+        XCTAssertFalse(wiz.contains("ForEach(entries) {"), "★ a greyed type is never drawn, so never picked")
         XCTAssertFalse(try src("LatticeTypeCatalog.swift").contains("topologyID ="), "the catalog writes nothing")
     }
 }

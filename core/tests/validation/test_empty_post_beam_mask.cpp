@@ -17,6 +17,13 @@
 // region ids", which names region ids and recommends `"algorithm": "doubled"` -- the one
 // that accepts nothing silently.
 //
+// ★ RULING 2 (2026-11-06): the doubled lattice's shape grade is no longer a solid beam but
+// the preview's graded BAND (grading.hpp GradingLawParams::band_*), solid only where no
+// cell prints. So the defect job below no longer empties: the same 31 mm band now grades
+// its 810 voxels and the part is accepted with them. The refusal this test was written
+// for stays in run_job for the beam that remains (algorithm "stepped"); here the test
+// holds the new rule -- this shape grade leaves a lattice, and never an ACCEPTED over none.
+//
 // WHY THIS TEST RUNS THE BINARY. The decision lives in run_job.cpp's anonymous namespace
 // (:67-7818), so nothing with external linkage can reach it; and what is under test is
 // what a RUN concludes and what its receipt says. A header test cannot see either.
@@ -79,18 +86,15 @@ int main() {
   const int drc = run_job("empty_after_beam", dout, derr);
   const std::string dall = dout + derr;
 
-  CHECK(drc != 0,
-        "an empty post-beam mask must be REFUSED, not reported as a finished part");
-  CHECK(!has(dout, "verdict: ACCEPTED"),
-        "and it must not print a verdict of ACCEPTED over no lattice at all");
-
-  // The refusal has to name the cause a reader can act on. The grade is not the
-  // culprit here -- it produced a lattice -- so naming only the grade's own counters
-  // would send the reader to the wrong place.
-  CHECK(has(dall, "outline") || has(dall, "beam"),
-        "the refusal names the outline beam, which is what emptied the mask");
-  CHECK(has(dall, "750"),
-        "it names how many voxels were cleared, so the reader can see it was all of them");
+  // ★ ruling 2: the band grades instead of clearing, so the lattice survives it.
+  CHECK(!has(dout, "over 0 voxels"),
+        "the shape grade's band leaves a lattice (it no longer clears the mask)");
+  CHECK(drc != 0 || has(dout, "verdict: ACCEPTED"),
+        "and the run either certifies that lattice or refuses in words");
+  CHECK(!(drc == 0 && has(dout, "over 0 voxels")),
+        "never a verdict of ACCEPTED over no lattice at all");
+  CHECK(!has(dall, "turned solid"),
+        "no solid outline beam ran on the doubled lattice");
 
   // ★ AND IT MUST NOT POINT AT AN ALGORITHM. The Stepped refusal recommended
   // `"algorithm": "doubled"`, which is the path that accepted 0 voxels silently.

@@ -175,6 +175,9 @@ CellSizePlan plan_cell_sizes(const VoxelGrid& grid,
                    params.voxel_level_hi->size() != grid.voxel_count()))
     throw std::invalid_argument("plan_cell_sizes: voxel_level_lo/hi size != voxel_count");
   std::vector<int> win_lo(windowed ? ncells : 0, -1), win_hi(windowed ? ncells : 0, -1);
+  const bool preferred = params.voxel_level_prefer != nullptr &&
+                         params.voxel_level_prefer->size() == grid.voxel_count();
+  std::vector<int> pref(preferred ? ncells : 0, -1);
   std::vector<long long> vox(ncells, 0);
   std::vector<long long> vox_own(ncells, 0);  // by the voxel's centre: the report counts each once
   for (int k = 0; k < grid.nz; ++k)
@@ -201,6 +204,7 @@ CellSizePlan plan_cell_sizes(const VoxelGrid& grid,
               ++vox[c];
               if (rho[e] < rho_min[c]) rho_min[c] = rho[e];
               if (width[e] < width_min[c]) width_min[c] = width[e];
+              if (preferred) pref[c] = std::max(pref[c], static_cast<int>((*params.voxel_level_prefer)[e]));
               if (windowed) {
                 const int lo = (*params.voxel_level_lo)[e], hi = (*params.voxel_level_hi)[e];
                 if (lo >= 0) win_lo[c] = std::max(win_lo[c], lo);
@@ -241,6 +245,7 @@ CellSizePlan plan_cell_sizes(const VoxelGrid& grid,
       cap[c] = cl;
     }
 
+
   // ── the OCTREE: top-down, take the coarsest level someone actually NEEDS ────────
   // A block takes level L iff (a) it lies wholly inside the base grid, (b) every base
   // cell in it is a candidate, (c) L is exactly what the block's neediest member
@@ -269,6 +274,7 @@ CellSizePlan plan_cell_sizes(const VoxelGrid& grid,
         (bi + step <= P.nx) && (bj + step <= P.ny) && (bk + step <= P.nz);
     bool all_candidates = whole_block_in_grid;
     int need_max = 0, cap_min = kUnreachable;
+    int pref_min = kUnreachable;  // ★ ruling 2: the band's coarsest wish in the block
     if (whole_block_in_grid) {
       for (int k = bk; k < bk + step && all_candidates; ++k)
         for (int j = bj; j < bj + step && all_candidates; ++j)
@@ -277,11 +283,16 @@ CellSizePlan plan_cell_sizes(const VoxelGrid& grid,
             if (vox[c] == 0) { all_candidates = false; break; }
             need_max = std::max(need_max, need[c]);
             cap_min = std::min(cap_min, cap[c]);
+            if (preferred && pref[c] >= 0) pref_min = std::min(pref_min, pref[c]);
           }
     }
     // Take this level only when it is exactly what the block needs and the ceiling
     // allows it. L == 0 additionally accepts need_max == 0 trivially.
-    if (all_candidates && need_max == L && cap_min >= L) {
+    // ★ With a band preference the block takes the COARSEST level from what it needs up
+    // to the cap and its cells' preferred levels (the descent meets it first); a block
+    // with none takes exactly what it needs, as before.
+    const int top_ok = pref_min == kUnreachable ? need_max : std::max(need_max, pref_min);
+    if (all_candidates && need_max <= L && L <= top_ok && cap_min >= L) {
       for (int k = bk; k < bk + step; ++k)
         for (int j = bj; j < bj + step; ++j)
           for (int i = bi; i < bi + step; ++i)

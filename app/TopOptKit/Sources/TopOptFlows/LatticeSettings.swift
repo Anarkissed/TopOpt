@@ -169,10 +169,18 @@ public enum LatticeGradingMode: String, Equatable, Sendable, Codable {
 public struct LatticeAreaGrading: Codable, Equatable, Sendable {
     public var gradingMode: LatticeGradingMode?
     public var shapeFitBandMM: Double?
-    public init(gradingMode: LatticeGradingMode? = nil, shapeFitBandMM: Double? = nil) {
-        self.gradingMode = gradingMode; self.shapeFitBandMM = shapeFitBandMM
+    /// ★ B7 slice 2 (release (3), ruling 2): the band's Strength for this area (−1 … +1), sent as
+    /// `regions[].shape_grade_strength`; nil = the part's.
+    public var shapeGradeStrength: Double?
+    /// ★ B7 slice 2 (release (3), E2.4 per region, ruling 11-06 (A)): this area's finish, core's words — "none" (open) or
+    /// "shell" (covered) — sent as `regions[].outer_finish`; nil = the part's.
+    public var outerFinish: String?
+    public init(gradingMode: LatticeGradingMode? = nil, shapeFitBandMM: Double? = nil, shapeGradeStrength: Double? = nil,
+                outerFinish: String? = nil) {
+        self.gradingMode = gradingMode; self.shapeFitBandMM = shapeFitBandMM; self.shapeGradeStrength = shapeGradeStrength
+        self.outerFinish = outerFinish
     }
-    public var isEmpty: Bool { gradingMode == nil && shapeFitBandMM == nil }
+    public var isEmpty: Bool { gradingMode == nil && shapeFitBandMM == nil && shapeGradeStrength == nil && outerFinish == nil }
 }
 
 /// ★ HOW THE FIT-SHAPE GRADE STEPS DOWN — his "either stepped or default
@@ -414,6 +422,16 @@ public struct LatticeRegionSpec: Equatable, Sendable {
         if role == .include, let g = areaGrading, TopOptKit.regionGradingWired {
             if let m = g.gradingMode { entry["grading"] = m.coreRegionGrading }
             if let b = g.shapeFitBandMM { entry["shape_grade_band_mm"] = b }
+            // ★ B7 slice 2 (release (3)): the area's Strength, where the linked core takes it (e26b8038; 565cc17c refuses
+            // the whole job on an unknown key)
+            if let st = g.shapeGradeStrength, TopOptKit.gradingSchemaAccepts(key: "shape_grade_strength") {
+                entry["shape_grade_strength"] = Swift.min(1, Swift.max(-1, st))
+            }
+        }
+        // ★ B7 slice 2 (release (3), E2.4 per region): the zone's own finish, on an include region, where the linked core
+        // takes the key (an unknown key refuses the whole job)
+        if role == .include, let f = areaGrading?.outerFinish, f == "none" || f == "shell", TopOptKit.regionOuterFinishWired {
+            entry["outer_finish"] = f
         }
         // ★ Core's per-region keys travel only when the linked core's schema accepts
         // them (`organicSyntheticStressWired`, a whole-job probe with a control) —
@@ -1113,6 +1131,8 @@ public struct LatticeSpec: Equatable, Sendable {
     /// the keys.
     public var shapeGrade: Bool = false
     public var shapeGradeBandMM: Double = 0
+    /// ★ B7 slice 2 (release (3), ruling 2): the band's Strength, −1 … +1 (0 = today's amount, not written).
+    public var shapeGradeStrength: Double = 0
     /// ★ THE DENSITY CAP ON THE WIRE (core reply 6, 2026-09-20: `grading.max_relative_density`,
     /// (0, 1], not intent-gated — it lowers the top of the certifiable band, and ruling
     /// D's refusal names "turn on Allow quilt" when certification needs more). The
@@ -1358,6 +1378,11 @@ public struct LatticeSpec: Equatable, Sendable {
             grading["shape_grade"] = true
             if shapeGradeBandMM > 0, TopOptKit.gradingSchemaAccepts(key: "shape_grade_band_mm") {
                 grading["shape_grade_band_mm"] = shapeGradeBandMM
+            }
+            // ★ B7 slice 2 (release (3), ruling 2): the band's Strength, 2^s on the strut raise; 0 is core's default and
+            // is not restated. Only where the linked core takes the key (565cc17c refuses the whole job on it).
+            if shapeGradeStrength != 0, TopOptKit.gradingSchemaAccepts(key: "shape_grade_strength") {
+                grading["shape_grade_strength"] = Swift.min(1, Swift.max(-1, shapeGradeStrength))
             }
         }
         // ══════════════════════════════════════════════════════════════════════
@@ -2259,14 +2284,25 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// Default Grade / Stepped job (the `grading` block the per-region keys fall back to; organic grades in its own pane).
     /// The band travels where the area's mode grades to the shape and either differs from the part's or the part sends none.
     public var resolvedAreaGrading: [UUID: LatticeAreaGrading] {
-        guard densityMode == .sim, !isOrganic else { return [:] }
+        guard !isOrganic else { return [:] }
+        // ★ B7 slice 2 (release (3)): a zone's own FINISH is not a grade — it rides whatever the density mode, and only
+        // where it differs from the part's ("shell" when the part is Covered, else "none")
+        let partFinish = boundary == .covered ? "shell" : "none"
         var out: [UUID: LatticeAreaGrading] = [:]
         for (gid, g) in areaGrading {
-            let mode = g.gradingMode ?? gradingMode
             var r = LatticeAreaGrading()
-            if mode != gradingMode { r.gradingMode = mode }
-            let band = g.shapeFitBandMM ?? shapeFitBandMM
-            if mode.fitsShape, band != shapeFitBandMM || !gradingMode.fitsShape { r.shapeFitBandMM = band }
+            if let f = g.outerFinish, f != partFinish { r.outerFinish = f }
+            if densityMode == .sim {
+                let mode = g.gradingMode ?? gradingMode
+                if mode != gradingMode { r.gradingMode = mode }
+                let band = g.shapeFitBandMM ?? shapeFitBandMM
+                if mode.fitsShape, band != shapeFitBandMM || !gradingMode.fitsShape { r.shapeFitBandMM = band }
+                // ★ the band's Strength (ruling 2): only with a shape grade, where it differs from the part's
+                let strength = g.shapeGradeStrength ?? shapeFitGradeStrength
+                if mode.fitsShape, gradingMode.fitsShape ? strength != shapeFitGradeStrength : strength != 0 {
+                    r.shapeGradeStrength = strength
+                }
+            }
             if !r.isEmpty { out[gid] = r }
         }
         return out
@@ -2278,17 +2314,22 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     public mutating func saveAreaGrading(_ edits: [UUID: LatticeAreaGrading], areas: [UUID]) {
         var out = edits.filter { areas.contains($0.key) && !$0.value.isEmpty }
         if !wholePart, let first = areas.first {
-            let partMode = gradingMode, partBand = shapeFitBandMM
+            let partMode = gradingMode, partBand = shapeFitBandMM, partStrength = shapeFitGradeStrength
             let leadMode = out[first]?.gradingMode ?? partMode, leadBand = out[first]?.shapeFitBandMM ?? partBand
+            let leadStrength = out[first]?.shapeGradeStrength ?? partStrength
             var lead: [UUID: LatticeAreaGrading] = [:]
             for g in areas {
                 let mode = out[g]?.gradingMode ?? partMode, band = out[g]?.shapeFitBandMM ?? partBand
+                let strength = out[g]?.shapeGradeStrength ?? partStrength
                 let own = LatticeAreaGrading(gradingMode: mode != leadMode ? mode : nil,
-                                             shapeFitBandMM: band != leadBand ? band : nil)
+                                             shapeFitBandMM: band != leadBand ? band : nil,
+                                             shapeGradeStrength: strength != leadStrength ? strength : nil,
+                                             outerFinish: out[g]?.outerFinish)   // ★ a finish is the area's, never the lead's
                 if !own.isEmpty { lead[g] = own }
             }
             gradingMode = leadMode
             shapeFitBandMM = leadBand
+            shapeFitGradeStrength = leadStrength
             out = lead
         }
         areaGrading = out
@@ -3100,6 +3141,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             spec.algorithm = algorithm
             spec.shapeGrade = gradingMode.fitsShape
             spec.shapeGradeBandMM = shapeFitBandMM
+            spec.shapeGradeStrength = shapeFitGradeStrength
             // no law for the id (item a): 0 = no cap key, as for every uncapped type
             spec.densityCapRho = allowQuilt ? 0 : (lattice?.aestheticDensityCeiling(cellMM: cellMM) ?? 0)
 
@@ -3170,6 +3212,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         spec2.algorithm = algorithm
         spec2.shapeGrade = gradingMode.fitsShape
         spec2.shapeGradeBandMM = shapeFitBandMM
+        spec2.shapeGradeStrength = shapeFitGradeStrength
         spec2.densityCapRho = allowQuilt ? 0 : lattice.aestheticDensityCeiling(cellMM: cellMM)
 
         // ★ ORGANIC — copied verbatim; `gradingDictionary()` owns every emission gate.

@@ -434,6 +434,52 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
         XCTAssertEqual(stepped.pitchMM, 3, accuracy: 1e-9)
     }
 
+    /// ★ RULING 2 (release (3), core e26b8038): under Default Grade (core's doubled) the shape grade is the graded band
+    /// the run builds — no solid outline and no bleed (solid only where no cell prints, which the run's receipt names).
+    /// Stepped keeps its beam and its 25 mm bleed. Red before slice 2: Default Grade drew the bead and bled 5 mm.
+    func testDefaultGradeDrawsNoSolidOutlineUnderRuling2() throws {
+        let f = slabs([(6, 0, 60)], outlineInset: 3.55)
+        let (halves, _) = try bake(f, band: 25, dyadic: true)
+        XCTAssertEqual(halves.solidBandMM, 0, "★ Default Grade: no outline ribbon")
+        XCTAssertFalse(halves.solidDepthMM.contains { $0 > 0 }, "★ Default Grade: no bleed, even at 25 mm")
+        let (stepped, _) = try bake(f, band: 25)
+        XCTAssertEqual(stepped.solidBandMM, bead, accuracy: 1e-9, "Stepped keeps its beam")
+        XCTAssertTrue(stepped.solidDepthMM.contains { $0 > 0 }, "Stepped keeps its 25 mm bleed")
+        // control: the switch off draws Default Grade's old outline
+        LatticePreviewOccupancy.ruling2NoBeam = false
+        defer { LatticePreviewOccupancy.ruling2NoBeam = true }
+        let (old, _) = try bake(f, band: 25, dyadic: true)
+        XCTAssertEqual(old.solidBandMM, bead, accuracy: 1e-9, "control: the old Default Grade drew the bead")
+    }
+
+    /// ★ RULING 2 (release (3); the reviewer 11-07 19:55Z item 1; LatticeTypes 20:05Z): under Default Grade the band's
+    /// finest cell is the RUN's — the finest rung whose strut prints at the band's full raise × 2^s — so Strength moves
+    /// the band's CELLS, not only its struts. Red before slice 2: the preview's f was the ladder's last rung whatever the
+    /// Strength (the control below), so +1 and −1 laid the same cells.
+    func testStrengthMovesTheBandsCellsUnderDefaultGrade() throws {
+        let f = slabs([(12, 0, 72)], outlineInset: 3.55)
+        func cells(_ s: Double) throws -> [Float] {
+            var st = LatticePreviewOccupancy.OctreeBakeStats()
+            let baked = try XCTUnwrap(LatticePreviewOccupancy.octreeCellField(
+                occupancy: f.occ, demand: f.demand, regions: f.regions.map { $0.spec },
+                cellMM: f.regions.map { $0.cell }, lineWidthMM: bead, realFloorMM: 1.4,
+                shapeFitBandMM: 12, shapeFit: true, solidBandMM: bead,
+                densityLo: lo, densityHi: 0.3, densityGamma: 1, latticeID: "octet", dyadicSteps: true,
+                bandAmount: LatticeSettings.gradeAmount(strength: s), stats: &st), "no bake")
+            return baked.steppedCellMM
+        }
+        func finest(_ c: [Float]) -> Int { let m = c.filter { $0 > 0 }.min() ?? 0; return c.filter { $0 == m }.count }
+        let up = try cells(1), down = try cells(-1)
+        print("STRENGTH-CELLS +1: \(Dictionary(up.filter { $0 > 0 }.map { ($0, 1) }, uniquingKeysWith: +)) "
+              + "−1: \(Dictionary(down.filter { $0 > 0 }.map { ($0, 1) }, uniquingKeysWith: +))")
+        XCTAssertNotEqual(up, down, "★ Strength moves the band's cells under Default Grade")
+        XCTAssertGreaterThanOrEqual(finest(up), finest(down), "★ more Strength, more of the finest cells")
+        // control: without ruling 2's rule the cells are Strength's-blind (today's preview)
+        LatticePreviewOccupancy.ruling2NoBeam = false
+        defer { LatticePreviewOccupancy.ruling2NoBeam = true }
+        XCTAssertEqual(try cells(1), try cells(-1), "control: the old preview laid the same cells at +1 and −1")
+    }
+
     /// ★ THE PLAN IS THE PICTURE (2026-09-18): every placed cell is recorded, no two
     /// overlap, and every texel drawn at a size lies inside a recorded cell of that size.
     func testTheRecordedCellsAreThePictureAndNeverOverlap() throws {
