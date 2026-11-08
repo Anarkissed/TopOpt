@@ -1,0 +1,62 @@
+# Release db2cc34ef3fe — 2026-11-07: release (3) — core e26b8038 + B7 slice 2 (B9 547cd8b3), one worker swap
+# Reviewer's routing 11-07 19:55Z: LatticeTypes' e26b8038 (ruling-2 band + per-zone open finish + e3780097's snap fix) ships
+# TOGETHER with B7 slice 2. Core ctest: LatticeTypes' run on e3780097 stands (184/185). Gates in the gate tree B9 (its own
+# vendor): build_core, iPad build, CLI + the mirror, preflight on his latest job, the 17-test vs 4bab1629 (17/17 identical),
+# then 322 app classes in 8 lock-sharing chunks (reds: the 3 known 3MF ones, no lib3mf in B9; 3 source pins re-pinned
+# for B7 slice 2's removals). The key run found one real bug, fixed in a6499fb9 (a zone's Finish and Strength never
+# reached the job).
+#   A: 15:50 B9 8c6ed0d5; core == e26b8038's; fingerprint db2cc34ef3fe
+#   A: 16:30 build_core green: topopt_vendored_core_db2cc34ef3fe in the pinned include and all three slices
+#   A: 16:36 iPad build: exit 0 ** BUILD SUCCEEDED **
+#   A: 16:36 CLI: topopt-cli: core db2cc34ef3fe (dirty=false), built Nov  7 2026 16:36:37
+#   A: 16:36 app_core_capability_mirror passed
+#   A: 16:37 preflight on his latest job: preflight: load path CONNECTED
+#   A: 16:44 17-test: 17/17 identical, 4bab1629 vs 8c6ed0d5
+#   A: FP=db2cc34ef3fe B9SHA=8c6ed0d5
+#   B: 16:50 322 classes in 8 chunks
+#   B: 17:00 chunk_aa: 17:00 swift test exit 1; 	 Executed 345 tests, with 17 tests skipped and 8 failures (0 unexpected) in 603.066 (603.101) seconds 17:00 reds: 3 AppModelTests.testReopenedThreeMFProjectReimportsTheStlWorkingCopy AppModelTests.testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance AppModelTests.testThreeMFImportOptimisesOnDeviceEndToEnd  
+#   B: 17:10 chunk_ab: 17:10 swift test exit 0; 	 Executed 294 tests, with 6 tests skipped and 0 failures (0 unexpected) in 594.840 (594.871) seconds 17:10 reds: 0  
+#   B: 17:37 chunk_ac: 17:37 swift test exit 0; 	 Executed 238 tests, with 9 tests skipped and 0 failures (0 unexpected) in 1641.208 (1641.233) seconds 17:37 reds: 0  
+#   B: 18:35 chunk_ad: 18:35 swift test exit 0; 	 Executed 287 tests, with 4 tests skipped and 0 failures (0 unexpected) in 3449.098 (3449.134) seconds 18:35 reds: 0  
+#   B: 19:17 chunk_ae: 19:17 swift test exit 0; 	 Executed 256 tests, with 5 tests skipped and 0 failures (0 unexpected) in 591.722 (591.755) seconds 19:17 reds: 0  
+#   B: 19:57 chunk_af: 19:57 swift test exit 1; 	 Executed 367 tests, with 2 tests skipped and 3 failures (0 unexpected) in 901.825 (901.858) seconds 19:57 reds: 2 LatticeWizardOneLineCaptionTests.testOnlyTheOctetTrussIsOffered OrganicAutoGradeAndFreezeTests.testShowPrintRepairsIsASavedSettingNotViewState  
+#   B: 20:02 chunk_ag: 20:02 swift test exit 1; 	 Executed 374 tests, with 8 tests skipped and 1 failure (0 unexpected) in 349.802 (349.842) seconds 20:02 reds: 1 RedesignAnswersPinsTests.testTheDensityRowOffersNoSimAndByStressSetsWhatSimSet  
+#   B: 20:03 chunk_ah: 20:03 swift test exit 0; 	 Executed 46 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.464 (0.469) seconds 20:03 reds: 0  
+#   B: 20:03 ALL reds: 6 AppModelTests.testReopenedThreeMFProjectReimportsTheStlWorkingCopy AppModelTests.testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance AppModelTests.testThreeMFImportOptimisesOnDeviceEndToEnd LatticeWizardOneLineCaptionTests.testOnlyTheOctetTrussIsOffered OrganicAutoGradeAndFreezeTests.testShowPrintRepairsIsASavedSettingNotViewState RedesignAnswersPinsTests.testThe
+#   re-pins: 20:39 swift test exit 0; 	 Executed 30 tests, with 0 failures (0 unexpected) in 2025.100 (2025.105) seconds
+#   re-pins: 20:39 reds: 0 
+#   re-pins:  M app/TopOptKit/Sources/TopOptFlows/LatticeSetupWizard.swift
+#   re-pins:  M app/TopOptKit/Tests/TopOptFlowsTests/LatticeWizardOneLineCaptionTests.swift
+#   re-pins:  M app/TopOptKit/Tests/TopOptFlowsTests/OrganicAutoGradeAndFreezeTests.swift
+#   re-pins:  M app/TopOptKit/Tests/TopOptFlowsTests/RedesignAnswersPinsTests.swift
+# B9 then merged the release tip 4e136424 (UI-Notes' e0fb99ce, disjoint files); its classes + B7's key classes on the merge:
+#   merged: 20:46 swift test exit 0; 	 Executed 61 tests, with 0 failures (0 unexpected) in 259.300 (259.310) seconds
+#   merged: 20:46 reds: 0 
+# …and the tip 2b588eaa (UI-Notes' 3b, 397a67f5): the eye-sweep classes + readers on the merge:
+#   merged3b: 21:26 swift test exit 0; 	 Executed 22 tests, with 0 failures (0 unexpected) in 60.377 (60.381) seconds
+#   merged3b: 21:26 reds: 0 
+# Commits:
+#   b4a70eca Ruling 2: the shape grade is a graded band, the preview's law, built by the run
+#   ac70b9b6 E2.4 per region (ruling 11-06 (A)): an open region beside covered ones
+#   e3780097 Band: never thin a strut below its law; one raise for a sheet, at the whole share
+#   e26b8038 Band picture from the fixed run: struts off a whole width shown and counted
+#   b4180349 Merge LatticeTypes' e26b8038 into B9 for release (3) (the reviewer's routing 11-07 19:55Z, part 1): the band (ruling 2: solid only where a strut can't print, grading.shape_grade_strength / regions[].shape_grade_strength) and th
+#   f3ac258f B7 slice 2 (release (3), the reviewer's routing 11-07 19:55Z): the Lattice page's removals, the type card, Strength and each zone's Finish on the wire, and ruling 2's band in the preview
+#   8c6ed0d5 B7 slice 2: the job test for Strength and a zone's Finish on release (3)'s core (the part's strength in grading, the zone's strength and outer_finish in its regions, core parses them, an unknown finish refused); LatticeAreaGrad
+#   a6499fb9 B7 slice 2 fix (found by the release (3) key run): a zone's own Finish and Strength reached the job only through resolvedAreaGrading, which kept the grade and band alone (and only under By stress) — so regions[].outer_finish 
+#   546bcc7e B7 slice 2 re-pins (release (3) gates part B): three source pins still held the page slice 2 replaced, each re-pinned to what it guarded
+#   9f607417 Merge the release tip 4e136424 into B9 for release (3): UI-Notes' B6 iPad notes (e0fb99ce, released at f8c20f20), app only, so the release tree's app equals B9's after phase B
+#   547cd8b3 Merge the release tip 2b588eaa into B9 for release (3): UI-Notes' 3b, the drag across the eyes (397a67f5, released at d597d254), app only
+#   5effe079 Release (3) 2026-11-07: merge B9 547cd8b3 — core e26b8038 (LatticeTypes' ruling-2 band: solid only where a strut can't print, grading.shape_grade_strength / regions[].shape_grade_strength; the per-zone open finish regions[].o
+# Gates (this tree):
+#   21:26 his uncommitted files (left alone): app/TopOpt-Info.plist app/TopOpt.xcodeproj/project.pbxproj app/TopOpt.xcodeproj/xcshareddata/xcschemes/TopOpt.xcscheme 
+#   21:26 his latest job for the preflight: /Users/nadim/.topopt-worker/f9c8124fd2df48b3 (read only)
+#   21:26 merged B9 as 5effe079 (local); app + core == B9's; fingerprint db2cc34ef3fe
+#   21:27 build_core green: the pinned include and the stamped library are one build (topopt_vendored_core_db2cc34ef3fe in all three slices)
+#   21:28 worker CLI built: topopt-cli: core db2cc34ef3fe (dirty=false), built Nov  7 2026 21:28:02; 3 data paths, all under the release worktree
+#   21:28 app_core_capability_mirror passed
+#   21:33 iPad device build green (this tree's own pair)
+#   21:34 preflight on his latest job: preflight: load path CONNECTED
+#   21:34 pushed 5effe079
+#   21:35 worker swapped: /health "fingerprint": "db2cc34ef3fe"; data paths under the release worktree; preflight again OK; old kept as build-fix/topopt-cli.8902d87b88ba-replaced-20261107
+#   21:35 app_release.sh / app_release_tail.sh now expect db2cc34ef3fe
