@@ -64,6 +64,7 @@ extern "C" __attribute__((used)) const char* const topopt_bridge_vendored_core =
 #include "topopt/smooth.hpp"
 #include "topopt/step.hpp"
 #include "topopt/stepped_plan.hpp"
+#include "topopt/lattice_sample.hpp"
 #include "topopt/stl.hpp"
 #include "topopt/version.hpp"
 #include "topopt/voxel.hpp"
@@ -765,6 +766,22 @@ ImportedMesh import_stl(const std::string& path, BridgeError& err) {
   return guarded_err("import_stl", err, [&]() -> ImportedMesh {
     topopt::StlMesh sm = topopt::read_stl_file(path);
     return to_imported(sm.mesh, nullptr, 0);
+  });
+}
+
+LatticeSampleResult lattice_sample(const std::string& topology, double cell_mm, double bead_mm, BridgeError& err) {
+  return guarded_err("lattice_sample", err, [&]() -> LatticeSampleResult {
+    topopt::LatticeSampleSpec spec;
+    spec.topology = topology;
+    spec.shape = "coupon";
+    if (cell_mm > 0.0) spec.cell_mm = cell_mm;
+    if (bead_mm > 0.0) spec.bead_mm = bead_mm;
+    topopt::LatticeSampleReceipt receipt;
+    const topopt::TriangleMesh m = topopt::lattice_sample_mesh(spec, &receipt);
+    LatticeSampleResult out;
+    out.mesh = to_imported(m, nullptr, 0);
+    out.receipt_json = topopt::lattice_sample_receipt_json(receipt);
+    return out;
   });
 }
 

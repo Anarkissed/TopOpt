@@ -2720,6 +2720,19 @@ public enum TopOptKit {
         return StepMeshRepair.repaired(mesh, path: path, linearDeflectionMM: linearDeflectionMM)
     }
 
+    /// ★ B7 (his iPad notes 11-08): the Lattice page's Sample — core's coupon for `topology` (`lattice_sample`), as triangles
+    /// with core's receipt. `cellMM` / `beadMM` <= 0 take core's defaults (8 mm, 0.42 mm). Throws core's reason.
+    public struct LatticeSampleBlock: @unchecked Sendable {
+        public let mesh: ImportedMesh
+        public let receiptJSON: String
+    }
+    public static func latticeSampleBlock(topology: String, cellMM: Double = 0, beadMM: Double = 0) throws -> LatticeSampleBlock {
+        var err = topoptbridge.BridgeError()
+        let r = topoptbridge.lattice_sample(std.string(topology), cellMM, beadMM, &err)
+        try throwIfFailed(err)
+        return LatticeSampleBlock(mesh: convert(r.mesh), receiptJSON: String(r.receipt_json))
+    }
+
     /// Inspect a part file without throwing on a mesh-quality refusal: the
     /// structured verdict behind the refusal sheet (handoff 134). Still throws
     /// if the file cannot be read or parsed at all — there is nothing to
