@@ -103,6 +103,6 @@ final class LatticePlanRunResultsTests: XCTestCase {
         }
         XCTAssertTrue(try src("RemoteRunner.swift").contains("let carriedPlan = submittedJobJSON.map(LatticeReport.PlanLaid.jobCarriesPlan) ?? false"))
         XCTAssertTrue(try src("RelatticeRunner.swift").contains("if LatticeReport.PlanLaid.jobCarriesPlan(jobToSubmit) {"))
-        XCTAssertTrue(try src("WorkspacePlaceholder.swift").contains("planLaid: result.planLaid))"))
+        XCTAssertTrue(try src("WorkspacePlaceholder.swift").contains("planLaid: result.planLaid,"))   // + finishLines (2b)
     }
 }

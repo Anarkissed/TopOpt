@@ -67,6 +67,10 @@ public enum EditFacesCopy {
     /// ★ B8: Discard, beside Done — asks in place first (ConfirmInPlace).
     public static let discard = "Discard"
     public static let discardAsk = "Discard every face edit since you opened Edit faces?"
+    /// ★ B8 (row 34, mockup #cut): the stage's one hint — a tap picks a face for the tool and joins no group.
+    public static let footHint = "A tap selects a face for the tool. It joins no group."
+    /// ★ B8 (row 34): the left panel — Topology's Selections, view only.
+    public static let selections = "Selections"
     public static let paint = "Paint"
     /// ★ B8: any non-STEP mesh paints (STL, 3MF, OBJ) — the line names no one format.
     public static let paintSTL = "Drag across the mesh to paint a face."

@@ -182,6 +182,16 @@ void rescale_part(const std::string& in_path, const std::string& out_path,
 ImportedMesh import_step(const std::string& path, double linear_deflection,
                          BridgeError& err);
 
+// ★ B7 (his iPad notes 11-08; design note 30 / R3.2): the Lattice page's SAMPLE — core's COUPON
+// (topopt::lattice_sample_mesh, shape "coupon"): the block the engine builds for `topology` and he prints, as a triangle
+// soup with core's receipt. `cell_mm` <= 0 = core's 8 mm; `bead_mm` <= 0 = core's 0.42 mm. A type core cannot generate,
+// or a cell/density it refuses, sets `err` with core's reason.
+struct LatticeSampleResult {
+  ImportedMesh mesh;
+  std::string receipt_json;
+};
+LatticeSampleResult lattice_sample(const std::string& topology, double cell_mm, double bead_mm, BridgeError& err);
+
 // Write an ImportedMesh to an STL file (core write_stl_file; binary encoding).
 // This is the M6.1 STL export path exposed to the app; 3MF export (lib3mf) is
 // wired in ROADMAP M7.9. On failure sets `err`.

@@ -107,9 +107,9 @@ public struct WorkspacePlaceholder: View {
     /// The gate for popping them open — not `lattice.enabled`, which is true for any
     /// project configured on a previous run and so never opened them again.
     @State private var latticeSettingsSavedThisSession = false
-    /// ★ B6 s1b (note 28, N2): the face row opened on Lattice Setup (its key), and the lattice groups opened by their disclosure.
+    /// ★ B6 s1b (note 28, N2): the face row opened on Lattice Setup (its key). ★ his iPad 11-08 (2): the open group is the
+    /// picked one (`latticeOpenOrClose`) — the second open set the disclosure flipped is gone.
     @State private var latticeFacePick: String?
-    @State private var latticeOpenGroups: Set<UUID> = []
     /// ★ B6 N2: each face row's eye — its prism shown (true) or hidden (false); no entry: shown while its row is picked.
     @State private var latticePrismEye: [String: Bool] = [:]
     /// ★ B6 N2 / N3: the Lattice Setup handle held now — its key, and where it was and its axis when the drag began.
@@ -258,6 +258,13 @@ public struct WorkspacePlaceholder: View {
     /// ★ The Regions surface (task 2026-08-14-face-regions). Opened from the
     /// Selections header; it is where a union, a filter and a split are made.
     @State private var regionsOpen = false
+    /// ★ B8 (row 34): the group whose row is lit in Edit faces' view-only Selections — its faces light on the part, for the
+    /// tools; nil = none. Joins nothing and changes nothing.
+    @State private var cutLitGroup: UUID? = nil
+    /// ★ B8: Edit faces' scenario folders that are open (the active scenario's opens on entry).
+    @State private var cutOpenFolders: Set<UUID> = []
+    /// ★ B8: from Lattice, Edit faces' Topology panel (folded first, as on Lattice Setup).
+    @State private var cutTopologyOpen = false
     /// The region a viewer tap corrects, or nil. Hoisted out of the sheet so the
     /// workspace's tap router can see it — the sheet SELECTS, the viewer EDITS.
     @State private var regionTapTarget: RegionID?
@@ -1438,6 +1445,8 @@ public struct WorkspacePlaceholder: View {
                 else if viewerMesh != nil, visible.wireframe, !visible.surfaceEditing {
                     viewModeToggles
                 }
+                // ★ B8 (R0): Edit faces' Outlines · X-ray are the view corner's, as on every stage (they were its tray's)
+                else if viewerMesh != nil, visible.wireframe, editFaces.isEditing { viewModeToggles }
                 latticeOnlyBadge
                 latticeEdgeLight
                 if flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleOnModelLayer(main: flexibleMain, project: project, projection: projection, settle: settleQuat, bottomClearance: bottomBarClearance, cards: latticeSelectableCards, groupCards: latticeFaceCards, cardsChanged: { refreshLatticeFaceCards() }) }   // Flexible (PR #362) H32: the face chip (new-face choices / Lattice·Solid·Off; draggable, with its leader) and the picked prism's depth and expand handles with their numbers · Flexible (PR #362) H61: off under Edit faces (B5's mode has the page)
@@ -2515,8 +2524,10 @@ public struct WorkspacePlaceholder: View {
             if latticeTapOffersFaceRemove(faceID) { return }   // ★ his iPad 11-07 (1b): the × on a face the open group holds
             let loop = project.surfaceLoopRespectingRegions(
                 FaceTopology.loop(fromFace: faceID, in: mesh), from: faceID)
+            let before = stageList.activeGroupID
             if let gid = project.latticeStageTap(face: faceID, loop: loop) {   // ★ B6: the lattice list (LatticeList)
                 latticeDisclosure.toggle(gid.uuidString)
+                if gid != before { latticeFacePick = nil }   // ★ his iPad 11-08 (4): another group's picked face does not follow
             }
             refreshLatticeFaceCards()
             return
@@ -3511,7 +3522,7 @@ public struct WorkspacePlaceholder: View {
         // WHOLE variant. The backstop for all three callers (the forecast, Check sizes, the
         // run); each says why in the stage's words (`project.variantLatticeJobRefusal()`).
         guard LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled,
-                                            regions: emission.regions) == nil else { return nil }
+                                            regions: emission.regions, wholePart: project.latticeStartsWhole) == nil else { return nil }
         // ★★ Structural Stepped (2026-10-08): no document either — the run is blocked, not substituted
         guard LatticeStructuralSteppedGate.refusal(project.lattice) == nil else { return nil }
         // ★★ THE STAGE'S OWN SPEC (ruling b, 2026-09-30): the SAME builder the optimize request
@@ -3722,7 +3733,8 @@ public struct WorkspacePlaceholder: View {
                 regionCellsJSON: spec.reportRegionCells ? result.receiptJSON : nil,
                 variantFacesWithoutShape: withoutShape,
                 variantRegionsWithoutShape: regionsWithoutShape,
-                planLaid: result.planLaid))   // ★ K4: the plan as laid, when the job carried one
+                planLaid: result.planLaid,   // ★ K4: the plan as laid, when the job carried one
+                finishLines: LatticeReport.finishLines(receipt: result.receiptJSON)))   // ★ B7 slice 2 (ruling 3)
         }
         guard let request = model.makeRunRequest() else { return }
         closeLatticePage()
@@ -4719,9 +4731,15 @@ public struct WorkspacePlaceholder: View {
         //
         // The rule itself lives in `LatticePreviewBodyAlpha` so it can be tested; this
         // property is now only the two inputs it is asked for.
+        // ★★ his iPad notes 11-08 (Start from −): the whole part fills with lattice, but what stays solid must READ solid —
+        // the No-lattice zones, and every wall too thin for the cell (the cell floor leaves it solid, as in core; on his
+        // stand at 4 mm only 5,915 cells draw while 96 % of the part is set to lattice). So the body stays drawn and the
+        // shell opens only over the cells that draw (`shellClipAndDecls`' cell mode); hidden, the thin walls vanished.
+        let declared = project.latticeStartsWhole
+            || LatticeJobIncludeGate.hasIncludeWall(project.latticeJobRegions().regions)
         return LatticePreviewBodyAlpha.value(
             latticeLayerDrawn: latticeLayerIsDrawn,
-            hasIncludeRegion: LatticeJobIncludeGate.hasIncludeWall(project.latticeJobRegions().regions),
+            hasIncludeRegion: declared,
             nothingToLattice: latticePreviewHasNothingToDraw)
     }
 
@@ -4817,6 +4835,21 @@ public struct WorkspacePlaceholder: View {
         }
         for r in project.faceRegions.regions { h.combine(r.id) }
         let l = project.lattice
+        // ★★★ THE LATTICE STAGE'S OWN LIST (his iPad notes 11-08: a zone switched to No lattice still drew its lattice, and
+        // the Lattice page showed that zone). Since B6 the stage edits `latticeList`, not Topology's `selection` hashed
+        // above — so a face added to a lattice group, a group's or zone's Lattice / No lattice / Protect skin, a zone's box,
+        // and Start from − never moved this key, and the picture kept whatever it was baked with.
+        for g in project.latticeGroups {
+            h.combine(g.id)
+            for f in g.faces { h.combine(f) }
+            for r in g.regionIDs { h.combine(r) }
+            h.combine(l.groupRoles[g.id])
+            h.combine(l.zoneGroups.contains(g.id))
+            for p in project.force.manualPrimitives(for: g.id) { h.combine(String(describing: p)) }
+        }
+        for p in l.includePrimitives { h.combine(String(describing: p)) }
+        h.combine(project.latticeStartsWhole)
+        h.combine(String(describing: l.areaGrading.sorted { $0.key.uuidString < $1.key.uuidString }))
         h.combine(l.enabled)
         // ★ the per-wall cells are inputs the bake reads (review #37)
         for (k, v) in l.selectableCellMM.sorted(by: { $0.key < $1.key }) { h.combine(k); h.combine(v) }
@@ -4986,7 +5019,9 @@ public struct WorkspacePlaceholder: View {
         // sample block, which is exactly when clipping must NOT happen.
         let emission = project.latticeJobRegions()
         // ★ the job's regions, whole: the lattice fills every prism 0 to depthMM (his 2026-10-11)
-        let regions = emission.regions
+        // ★★ his iPad notes 11-08: under Start from − the preview masks by what is cut out (the whole part, minus No lattice)
+        let startsWhole = project.latticeStartsWhole
+        let regions = project.latticePreviewRegions(emission.regions)
         // ★ AND HOW MANY MARKED FACES PRODUCED NO REGION. Carried into the bake so
         // the banner can say the preview is drawing LESS than was marked, rather
         // than under-drawing in silence.
@@ -5310,7 +5345,8 @@ public struct WorkspacePlaceholder: View {
                                         // stage an empty list means "nothing is
                                         // declared", and the honest picture of
                                         // that is a solid part.
-                                        whenEmpty: .latticeNothing,
+                                        // ★ his iPad notes 11-08: Start from − is the whole part, minus No lattice
+                                        whenEmpty: startsWhole ? .latticeEverything : .latticeNothing,
                                         skinMM: skinMM,
                                         skippedFaces: skippedFaces,
                                         skippedRegionNames: skippedRegionNames,
@@ -6804,7 +6840,7 @@ public struct WorkspacePlaceholder: View {
             return SurfaceTint.buffer(mesh: mesh, groupedFaces: surfaceGroupedFaces,
                                       regions: project.faceRegions, selected: nil,
                                       picked: ul.picked, fragmentTested: ul.fragmentTested,
-                                      groupColours: surfaceGroupHues)
+                                      groupColours: surfaceGroupHues, lit: cutLitFaces)
         }
         return SurfaceTint.buffer(mesh: mesh, groupedFaces: surfaceGroupedFaces,
                                   regions: project.faceRegions,
@@ -6824,7 +6860,7 @@ public struct WorkspacePlaceholder: View {
                                   fragmentTested: surfaceTool == .union
                                       ? surfaceUnionPickedFaces
                                       : surfaceSelectedTestedFaces,
-                                  groupColours: surfaceGroupHues)
+                                  groupColours: surfaceGroupHues, lit: cutLitFaces)
     }
 
     /// ★ WHICH WAY THE PLANE'S NORMAL POINTS ON SCREEN: +1 when it runs to the
@@ -6909,6 +6945,13 @@ public struct WorkspacePlaceholder: View {
     /// ★ EACH GROUPED FACE'S OWN GROUP COLOUR, for the Surface stage's muted hue.
     /// Read from `force.tint(for:)` — the SAME source the TO page paints with, so a
     /// group cannot read red on one page and orange on the other.
+    /// ★ B8 (row 34): the faces of the group whose row is lit in Edit faces' Selections.
+    private var cutLitFaces: Set<FaceID> {
+        guard let id = cutLitGroup,
+              let g = (selection.groups + project.latticeGroups).first(where: { $0.id == id }) else { return [] }
+        return Set(g.faces)
+    }
+
     private var surfaceGroupHues: [FaceID: SIMD3<Float>] {
         var out: [FaceID: SIMD3<Float>] = [:]
         for g in selection.groups {
@@ -7666,125 +7709,68 @@ public struct WorkspacePlaceholder: View {
     // ~60 pt wide against the old panel's 260: a 44 pt target with the tray's own
     // padding either side, and nothing else.
     @ViewBuilder private var surfaceToolsPanel: some View {
-        VStack(spacing: DS.Space.xs) {
+        // ★ B8 (mockup #cut, its .rail): ONE glass capsule of round 40 pt tools, the armed one in the accent. Outlines and
+        // X-ray left it for the view corner (R0: "Cut: Outlines · X-ray" in the corner, as on every stage).
+        VStack(spacing: 6) {
             ForEach(SurfaceTool.allCases, id: \.rawValue) { tool in
-                Button {
-                    // Abandons the last tool's work in progress, then arms this one
-                    // on whatever is still selected — see `surfaceSwitch`.
+                // Abandons the last tool's work in progress, then arms this one on whatever is still selected — see
+                // `surfaceSwitch`.
+                cutRailButton(tool.icon, label: tool.title, on: surfaceTool == tool, key: "cutTool-\(tool.title)") {
                     surfaceSwitch(to: tool)
-                } label: {
-                    Image(systemName: tool.icon)
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle((surfaceTool == tool
-                                          ? DS.Color.textPrimary
-                                          : DS.Color.textTertiary).color)
-                        .frame(width: 44, height: 44)
-                        .background(
-                            RoundedRectangle(cornerRadius: DS.Radius.pill, style: .continuous)
-                                .fill(surfaceTool == tool
-                                      ? DS.Color.accentDeep.color : Color.clear)
-                        )
                 }
+            }
+            // ★ §2 — THE PENCIL BUTTON, a switch rather than a tool, so below a thin divider (the reviewer's answer on
+            // where it goes in B8 is pending; it stays in the rail meanwhile).
+            Rectangle().fill(DS.Color.strokeStrong.color).frame(width: 24, height: 1).padding(.vertical, 2)
+            // (its action stays the bare toggle, written out: SurfacePencilToggleExemptionTests)
+            Button { surfacePencilOnly.toggle() } label: { cutRailGlyph("applepencil", on: surfacePencilOnly) }
                 .buttonStyle(.plain)
-                .accessibilityLabel(tool.title)
-            }
-
-            // ★ WIDTH-BOUND. A bare `Divider()` in a VStack expands to the widest
-            // width offered — which here is the whole viewport, so the tray's
-            // background became a full-screen band and its icons centred on it.
-            Divider().overlay(DS.Color.strokePanel.color)
-                .frame(width: 28).padding(.vertical, 2)
-
-            // §6(b) — the wireframe, as one more icon rather than a labelled switch.
-            Button { surfaceWireframeOn.toggle() } label: {
-                Image(systemName: "grid")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle((surfaceWireframeOn
-                                      ? DS.Color.textPrimary
-                                      : DS.Color.textTertiary).color)
-                    .frame(width: 44, height: 44)
-                    .background(
-                        RoundedRectangle(cornerRadius: DS.Radius.pill, style: .continuous)
-                            .fill(surfaceWireframeOn
-                                  ? DS.Color.accentDeep.opacity(0.55).color : Color.clear)
-                    )
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Outlines")   // ★ B2 (U4): never "Wireframe"; Cut's pair moves to the view corner in B8
-            .background(CornerPairStyle.publish(surfaceWireframeOn ? "view-Outlines-on" : "view-Outlines"))
-
-            // ★ X-RAY, SEPARATELY. `#` decides whether there are lines; this
-            // decides whether they show THROUGH the solid. They were one control
-            // and the wireframe was washed out because of it.
-            Button { surfaceXrayOn.toggle() } label: {
-                Image(systemName: "square.stack.3d.up")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle((surfaceXrayOn
-                                      ? DS.Color.textPrimary
-                                      : DS.Color.textTertiary).color)
-                    .frame(width: 44, height: 44)
-                    .background(
-                        RoundedRectangle(cornerRadius: DS.Radius.pill, style: .continuous)
-                            .fill(surfaceXrayOn
-                                  ? DS.Color.accentDeep.opacity(0.55).color : Color.clear)
-                    )
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("X-ray")
-            .background(CornerPairStyle.publish(surfaceXrayOn ? "view-X-ray-on" : "view-X-ray"))
-
-            // ★ §2 — THE PENCIL BUTTON. ★ THE ONLY NEW CONTROL IN THIS TASK, and
-            // it is built to the tray it sits in rather than to a new idea: the
-            // same 44×44 target, the same `DS.Radius.pill` corner, the same
-            // 17 pt semibold glyph, the same `accentDeep` fill at 0.55 when on and
-            // `textTertiary` glyph when off, in the same `DS.Space.xs` column as
-            // the wireframe and x-ray switches directly above it. It is a VIEW-ish
-            // switch, not a tool, so it belongs below the divider with those two
-            // and not in the tool well above it.
-            Button { surfacePencilOnly.toggle() } label: {
-                Image(systemName: "applepencil")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle((surfacePencilOnly
-                                      ? DS.Color.textPrimary
-                                      : DS.Color.textTertiary).color)
-                    .frame(width: 44, height: 44)
-                    .background(
-                        RoundedRectangle(cornerRadius: DS.Radius.pill, style: .continuous)
-                            .fill(surfacePencilOnly
-                                  ? DS.Color.accentDeep.opacity(0.55).color : Color.clear)
-                    )
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Pencil only")
+                .background(DSParts.publish(surfacePencilOnly ? "cutTool-PencilOnly-on" : "cutTool-PencilOnly"))
+                .accessibilityLabel("Pencil only")
         }
-        .padding(DS.Space.xs)
-        .background(
-            RoundedRectangle(cornerRadius: DS.Radius.panelSmall, style: .continuous)
-                .fill(DS.Surface.panel.color)
-                .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall,
-                                          style: .continuous)
-                    .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
-        )
+        .padding(6)
+        .background(Capsule().fill(DS.Surface.bar.color)
+            .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
         .dsShadow(DS.Shadow.panel)
-        // ONE LINE saying what a tap does, to the LEFT of the tray — a tray of
-        // icons must not be a guessing game, and this is the only text the stage
-        // carries.
+        .background(DSParts.publish("cutRail"))
+        // ONE LINE saying what a tap does, to the LEFT of the rail (the mockup's: 12 pt, secondary, 12 pt off the rail,
+        // 10 pt under its top) — a rail of icons must not be a guessing game.
         .overlay(alignment: .topLeading) {
             Text(surfaceRefusal ?? surfaceHint)
-                .dsStyle(DS.TypeScale.caption)
+                .font(.system(size: 12))
                 .foregroundStyle((surfaceRefusal == nil
-                                  ? DS.Color.textTertiary : DS.Color.warning).color)
+                                  ? DS.Color.textSecondary : DS.Color.warning).color)
                 .multilineTextAlignment(.trailing)
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(width: 160, alignment: .trailing)
-                .offset(x: -172, y: 10)
+                .frame(width: 190, alignment: .trailing)
+                .background(DSParts.publish("cutRailHint"))
+                .offset(x: -202, y: 10)
                 .allowsHitTesting(false)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-        .padding(.top, PageChrome.belowGizmo)
-        // ★ ON `edge` — the same right-hand line as the gizmo's glass and the
-        // bottom-right chips.
+        // ★ B8: under the view corner's Outlines · X-ray row (40 pt, at `belowGizmo`), not on top of it
+        .padding(.top, PageChrome.belowGizmo + 40 + PageChrome.gap * 2)
+        // ★ ON `edge` — the same right-hand line as the gizmo's glass and the view corner.
         .padding(.trailing, PageChrome.edge)
+    }
+
+    /// One round tool in Cut's rail (mockup .rail button): 40 pt, the accent with a white glyph when on.
+    private func cutRailButton(_ icon: String, label: String, on: Bool, key: String,
+                               action: @escaping () -> Void) -> some View {
+        Button(action: action) { cutRailGlyph(icon, on: on) }
+            .buttonStyle(.plain)
+            .background(DSParts.publish(on ? key + "-on" : key))
+            .accessibilityLabel(label)
+    }
+
+    /// A rail tool's face: 40 pt round, the accent with a white glyph when on.
+    private func cutRailGlyph(_ icon: String, on: Bool) -> some View {
+        Image(systemName: icon)
+            .font(.system(size: 16, weight: .semibold))
+            .foregroundStyle(on ? Color.white : DS.Color.textSecondary.color)
+            .frame(width: 40, height: 40)
+            .background(Circle().fill(on ? DS.Color.accent.color : Color.clear))
+            .contentShape(Circle())
     }
 
     // ★ §6/§7 — THE ACTION CLUSTER: every tool's confirm, FLOATING NEXT TO WHAT IT
@@ -8592,6 +8578,8 @@ public struct WorkspacePlaceholder: View {
         ZStack(alignment: .topLeading) {
             if let proj = projection {
                 let zones = project.lattice.zoneGroups
+                let spots = latticeChipSpots(proj)   // ★ his iPad 11-08 (3): clear space between every chip (Lattice Setup)
+                let _ = recordLatticeChips(spots)
                 ForEach(project.latticeDepthPlanes().filter { latticeDrawsPrism($0.groupID) }) { plane in   // ★ his iPad 11-07
                     // ★ HIDDEN ⇒ NOT DRAWN; LOCKED ⇒ NOT GRABBABLE.
                     // ★ his iPad 11-07 (1a): "only the ± EXPAND knobs show … NO depth handle at a prism's end" — every shown
@@ -8599,7 +8587,7 @@ public struct WorkspacePlaceholder: View {
                     if latticeDepthHandleShows(plane), !zones.contains(plane.groupID), latticePrismShown(plane.ref),
                        !project.groupView.isHidden(plane.groupID),
                        project.groupView.canEdit(plane.groupID) {
-                        latticePrismHandle(proj, plane)
+                        latticePrismHandle(proj, plane, shownAt: spots[LatticeSetupHandles.prismKey(plane.ref)])
                     }
                     // ★ THE EXPAND HANDLE (maintainer, 2026-08-17: "I specifically
                     // requested a handle to drag the expansion to be able to both
@@ -8631,7 +8619,8 @@ public struct WorkspacePlaceholder: View {
                                 [LatticeSetupHandles.footprint(LatticeSetupHandles.placed($0.at, axis: $0.axis, keepOut: bandChipKeepOut),
                                                                pill: plane.ref.key == latticeFacePick)]
                             } ?? [] : []
-                        let expandAt = LatticeSetupHandles.placed(ex, axis: CGVector(dx: 1, dy: 0), keepOut: bandChipKeepOut + depthRoom)
+                        let expandAt = spots["expand-\(plane.ref.key)"]
+                            ?? LatticeSetupHandles.placed(ex, axis: CGVector(dx: 1, dy: 0), keepOut: bandChipKeepOut + depthRoom)
                         latticeExpandKnob(
                             active: draggingExpandPlane == plane.id,
                             sense: LatticeSlabExpand.sense(
@@ -8645,10 +8634,12 @@ public struct WorkspacePlaceholder: View {
                 }
                 // ★ B6 N3: a picked zone's sides — a Box's width, depth and height, a Cylinder's across and height
                 if let z = stageList.activeGroupID, zones.contains(z), !project.groupView.isHidden(z), project.groupView.canEdit(z) {
-                    ForEach(project.latticeZoneHandles(z), id: \.side) { hd in latticeZoneSideHandle(proj, z, hd) }
+                    ForEach(project.latticeZoneHandles(z), id: \.side) { hd in
+                        latticeZoneSideHandle(proj, z, hd, shownAt: spots[LatticeSetupHandles.zoneKey(z, hd.side)])
+                    }
                 }
                 // ★ his iPad 11-07 (1b): the × on the tapped face of the open group
-                latticeFaceRemoveButton(proj)
+                latticeFaceRemoveButton(proj, spots: spots)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -8664,9 +8655,90 @@ public struct WorkspacePlaceholder: View {
     }
 
     /// ★ his iPad 11-07 (1a): a prism's end handle shows on the picked face, and on every face of the open group (where
-    /// the expand knobs show).
+    /// the expand knobs show). ★ his iPad 11-08 (4): on Lattice Setup, only the picked thing's (`latticeChipScope`).
     private func latticeDepthHandleShows(_ plane: ProjectModel.LatticeDepthPlane) -> Bool {
-        plane.ref.key == latticeFacePick || latticeExpandHandleIsVisible(plane)
+        if latticeSetupUp { return latticeExpandHandleIsVisible(plane) }
+        return plane.ref.key == latticeFacePick || latticeExpandHandleIsVisible(plane)
+    }
+
+    /// ★ his iPad 11-08 (4): "Show only the chips of what's picked" — what is picked on Lattice Setup. The Lattice stage's
+    /// own list (Topology's while its panel is open: then no lattice group is picked, and no chip shows).
+    private var latticeChipScope: LatticeSetupHandles.ChipScope {
+        guard !latticeTopologyOpen else { return .none }
+        return .of(active: stageList.activeGroupID, zones: project.lattice.zoneGroups, facePick: latticeFacePick,
+                   groupRefs: { id in project.latticeGroups.first { $0.id == id }.map { project.latticeSelectableRefs($0).map(\.key) } ?? [] })
+    }
+
+    /// ★ his iPad 11-08 (1, 2): close what is open on Lattice Setup — the picked group (or zone) and the face picked in it,
+    /// the × on a face, the zone's glass, and every drawer a model tap opened. Nothing is open after it, so the next tap on
+    /// a free face starts a new group (LatticeLibraryTap) with no "+ New group".
+    private func leaveLatticeGroup() {
+        leaveGroupEditing()
+        latticeFacePick = nil
+        latticeFaceRemoveAsk = nil
+        latticeZoneGizmo = nil
+        latticeDisclosure.closeAll()
+    }
+
+    /// ★ his iPad 11-08 (3): where each shown chip on Lattice Setup is DRAWN — the picked face's handle and ± knob first,
+    /// then the rest of the picked group's, a picked zone's sides, then the ×: each clear of the page's UI and `chipGap`
+    /// clear of the ones before it (`LatticeSetupHandles.layout`). Empty off Lattice Setup (each chip keeps `placed`).
+    private func latticeChipSpots(_ proj: CameraProjection) -> [String: CGPoint] {
+        guard latticeSetupUp else { return [:] }
+        var chips: [LatticeSetupHandles.Chip] = []
+        let zones = project.lattice.zoneGroups
+        var planes = project.latticeDepthPlanes().filter {
+            latticeDrawsPrism($0.groupID) && !zones.contains($0.groupID) && latticePrismShown($0.ref) && latticeDepthHandleShows($0)
+        }
+        if let k = latticeFacePick, let i = planes.firstIndex(where: { $0.ref.key == k }) { planes.insert(planes.remove(at: i), at: 0) }
+        for plane in planes {
+            if let s = latticePrismHandleSpot(proj, plane) {
+                let key = LatticeSetupHandles.prismKey(plane.ref)
+                let pill = plane.ref.key == latticeFacePick || latticeHandleDrag?.key == key
+                chips.append(.init(key: key, at: s.at, axis: s.axis, shape: .init(size: DragHandle.size, pill: pill)))
+            }
+            if let ex = latticeExpandSpot(proj, plane) {
+                chips.append(.init(key: "expand-\(plane.ref.key)", at: ex, axis: CGVector(dx: 1, dy: 0), shape: .init(size: 44)))
+            }
+        }
+        if case .zone(let z) = latticeChipScope, !project.groupView.isHidden(z), project.groupView.canEdit(z) {
+            for hd in project.latticeZoneHandles(z) {
+                let anchor = settledWorld(hd.anchor), dir = settleQuat.act(hd.dir)
+                guard let at = proj.project(anchor) else { continue }
+                chips.append(.init(key: LatticeSetupHandles.zoneKey(z, hd.side), at: at,
+                                   axis: LatticeSetupHandles.screenAxis(from: at, to: proj.project(anchor + dir * 10)),
+                                   shape: .init(size: DragHandle.size, pill: true)))
+            }
+        }
+        if let ask = latticeFaceRemoveAsk, let mesh = viewerMesh, let c = mesh.faceCentroid(ask.face),
+           let at = proj.project(settledWorld(c)) {
+            chips.append(.init(key: "remove-\(ask.ref)", at: at, axis: CGVector(dx: 1, dy: 0), shape: .init(size: DSParts.target)))
+        }
+        return LatticeSetupHandles.layout(chips, keepOut: bandChipKeepOut)
+    }
+
+    /// ★ his iPad 11-08 (2): a Lattice Setup group's line (or chevron): the open one closes — nothing is open after it, and
+    /// the next free face starts a new group; any other opens, alone (no face of another group stays picked).
+    private func latticeOpenOrClose(_ id: UUID) {
+        if stageList.activeGroupID == id {
+            leaveLatticeGroup()
+        } else {
+            latticeFacePick = nil
+            latticeFaceRemoveAsk = nil
+            latticeZoneGizmo = nil
+            stageList.setActive(id)
+        }
+    }
+
+    /// Test hook: the chips the page laid out last (LatticeSetupHandles.chipSpots).
+    private func recordLatticeChips(_ spots: [String: CGPoint]) {
+        if LatticeSetupHandles.recordLive { LatticeSetupHandles.chipSpots = spots }
+    }
+
+    /// The ± knob's true point on screen: out along the face at its expanded edge, pushed clear of the prism's end.
+    private func latticeExpandSpot(_ proj: CameraProjection, _ plane: ProjectModel.LatticeDepthPlane) -> CGPoint? {
+        guard let world = latticeExpandAnchor(plane), let raw = proj.project(settledWorld(world)) else { return nil }
+        return proj.project(settledWorld(plane.handle.anchor)).map { LatticeSlabExpand.separated(knob: raw, from: $0) } ?? raw
     }
 
     /// ★ B6 N2: a face's prism shows unless its row's eye hid it (his iPad 11-07, 3a: visible by default).
@@ -8679,6 +8751,7 @@ public struct WorkspacePlaceholder: View {
     /// the handle moves under the finger while the page redraws); `end` runs once, on release. While it is held the
     /// preview's bake waits (`draggingDepthPlane`, as the old knob's drag did).
     private func latticeSetupHandle(_ key: String, at p: CGPoint, axis: CGVector, value: String, showsValue: Bool = true,
+                                    shownAt: CGPoint? = nil,
                                     apply: @escaping (CGPoint) -> Void, end: @escaping () -> Void) -> some View {
         let drag: (CGFloat, Bool) -> Void = { along, ended in
             let s: LatticeSetupHandles.DragStart
@@ -8698,15 +8771,16 @@ public struct WorkspacePlaceholder: View {
         }
         if LatticeSetupHandles.recordLive { LatticeSetupHandles.live[key] = (axis, drag) }
         // ★ never under the page's own UI: slid along its line, clear of the Selections panel and the rest (the band chips'
-        // keep-out list); the drag above still reads the true point `p`
+        // keep-out list) — ★ his iPad 11-08 (3): and of every other chip (`shownAt`, latticeChipSpots); the drag above
+        // still reads the true point `p`
         return Color.clear.frame(width: DragHandle.size, height: DragHandle.size)
             .overlay(alignment: .leading) { DragHandle(key: key, axis: axis, value: value, showsValue: showsValue, onDrag: drag).fixedSize() }
-            .position(LatticeSetupHandles.placed(p, axis: axis, keepOut: bandChipKeepOut))
+            .position(shownAt ?? LatticeSetupHandles.placed(p, axis: axis, keepOut: bandChipKeepOut))
     }
 
     /// ★ his iPad 11-07 (1b): the × on a face of the open group — on the face where it was tapped, clear of the page's UI
     /// and of that face's handles; a tap takes the face out of the group (the row's trash, one undo step).
-    @ViewBuilder private func latticeFaceRemoveButton(_ proj: CameraProjection) -> some View {
+    @ViewBuilder private func latticeFaceRemoveButton(_ proj: CameraProjection, spots: [String: CGPoint] = [:]) -> some View {
         let _ = recordLivePick()
         if let ask = latticeFaceRemoveAsk, let a = stageList.activeGroupID,
            let g = project.latticeGroups.first(where: { $0.id == a }),
@@ -8732,13 +8806,16 @@ public struct WorkspacePlaceholder: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Take \(project.latticeRowName(ref)) out of \(g.name)")
             .background(DSParts.publish("latticeFaceRemove-\(ref.key)"))
-            .position(LatticeSetupHandles.placed(at, axis: CGVector(dx: 1, dy: 0), keepOut: bandChipKeepOut + near))
+            .position(spots["remove-\(ask.ref)"] ?? LatticeSetupHandles.placed(at, axis: CGVector(dx: 1, dy: 0), keepOut: bandChipKeepOut + near))
         }
     }
 
     /// Test hook: the page's face tap, as the viewer's pick calls it (a click offscreen never reaches the 3D view).
     private func recordLivePick() {
-        if LatticeSetupHandles.recordLive { LatticeSetupHandles.livePick = { handlePick($0) } }
+        if LatticeSetupHandles.recordLive {
+            LatticeSetupHandles.livePick = { handlePick($0) }
+            LatticeSetupHandles.liveEmptyTap = { emptyTapClears() }   // ★ his iPad 11-08 (1)
+        }
     }
 
     /// ★ his iPad 11-07 (1b): "tap a prism → an × pops up on it → tapping the × removes that face from the group" — a tap on
@@ -8775,13 +8852,15 @@ public struct WorkspacePlaceholder: View {
 
     /// ★ B6 N2: the picked face's prism end — dragged along the prism (the slab-depth ray math the old knob used), it
     /// writes the face's one depth (the row's number), through the same magnets.
-    @ViewBuilder private func latticePrismHandle(_ proj: CameraProjection, _ plane: ProjectModel.LatticeDepthPlane) -> some View {
+    @ViewBuilder private func latticePrismHandle(_ proj: CameraProjection, _ plane: ProjectModel.LatticeDepthPlane,
+                                                 shownAt: CGPoint? = nil) -> some View {
         let world = plane.handle.settled(center: meshCenter, rotation: settleQuat)
         let ref = plane.ref
         if let (at, axis) = latticePrismHandleSpot(proj, plane) {
             latticeSetupHandle(LatticeSetupHandles.prismKey(ref), at: at, axis: axis,
                                value: SelectionsSummary.format((plane.depthMM * 10).rounded() / 10, decimals: 1) + " mm",
                                showsValue: ref.key == latticeFacePick || latticeHandleDrag?.key == LatticeSetupHandles.prismKey(ref),
+                               shownAt: shownAt,
                                apply: { finger in
                                    guard let proj = projection, let ray = proj.ray(throughViewPoint: finger),
                                          let v = world.value(rayOrigin: ray.origin, rayDir: ray.dir) else { return }
@@ -8797,7 +8876,8 @@ public struct WorkspacePlaceholder: View {
 
     /// ★ B6 N3: one side of a picked zone — dragged out along it from the zone's middle, that size becomes twice the
     /// distance, about the middle (`setLatticeZoneSide`); its number beside it (a Cylinder's across with ⌀).
-    @ViewBuilder private func latticeZoneSideHandle(_ proj: CameraProjection, _ z: UUID, _ hd: LatticeZoneHandle) -> some View {
+    @ViewBuilder private func latticeZoneSideHandle(_ proj: CameraProjection, _ z: UUID, _ hd: LatticeZoneHandle,
+                                                    shownAt: CGPoint? = nil) -> some View {
         let mid = settledWorld(hd.middle), dir = settleQuat.act(hd.dir), anchor = settledWorld(hd.anchor)
         if let at = proj.project(anchor), let s = project.latticeZoneSize(z) {
             let v = hd.side == .width ? s.width : hd.side == .depth ? s.depth : s.height
@@ -8805,6 +8885,7 @@ public struct WorkspacePlaceholder: View {
             latticeSetupHandle(LatticeSetupHandles.zoneKey(z, hd.side), at: at,
                                axis: LatticeSetupHandles.screenAxis(from: at, to: proj.project(anchor + dir * 10)),
                                value: (across ? "\u{2300} " : "") + SelectionsSummary.format((v * 10).rounded() / 10, decimals: 1) + " mm",
+                               shownAt: shownAt,
                                apply: { finger in
                                    guard let proj = projection, let ray = proj.ray(throughViewPoint: finger),
                                          let t = ClearanceDragMath.slabDepth(rayOrigin: ray.origin, rayDir: ray.dir,
@@ -8830,6 +8911,9 @@ public struct WorkspacePlaceholder: View {
               project.groupView.canEdit(plane.groupID),
               !project.groupView.isHidden(plane.groupID)
         else { return false }
+        // ★ his iPad 11-08 (4): on Lattice Setup, only the picked thing's chips — a face → that face's; a group → its
+        // faces'; nothing → none. The drawers below (a model tap opened one per group and never closed it) no longer count.
+        if latticeSetupUp { return latticeChipScope.shows(group: plane.groupID, key: plane.ref.key) }
         // ★ "SELECTED" MEANS EITHER WAY IN (maintainer, 2026-08-17: "I do not see
         // a handle for the expansion of a face"). The first cut required
         // `stageList.activeGroupID`, which is set by tapping the group's BODY —
@@ -9831,8 +9915,8 @@ public struct WorkspacePlaceholder: View {
             if selectionsCollapsed { latticePreviewNotice }
             // ★ B6 s2a (23a): closed, the Topology panel is its header, on top of Selections
             if latticeSetupUp, !latticeTopologyOpen { latticeTopologyPanel(maxHeight: nil) }
-            // ★ B5: Edit faces shows today's library card (the Surface stage's), whose header carries Regions.
-            if editFaces.isEditing { selectionsLibraryCard }
+            // ★ B8 (row 34, mockup #cut): Edit faces shows Topology's Selections, VIEW ONLY (B5 showed the Surface stage's card)
+            if editFaces.isEditing { cutSelectionsPanel }
             else if flexibleMain.owns(project, stage), !editFaces.isEditing, !fullScreenPageUp { FlexibleSelectionsList(project: project, main: flexibleMain, collapsed: $selectionsCollapsed, cards: latticeSelectableCards, groupCards: latticeFaceCards, cardsChanged: { refreshLatticeFaceCards() }) }   // Flexible (PR #362) H25: the B1 list (one quiet line per group; the picked group's faces with their depth/expand boxes and (i)) · Flexible (PR #362) H61: off under Edit faces (B5's mode has the page)
             // ★ B3 (B1): Topology's list is SelectionsList — one line per group, eye, trash in place + Undo.
             else if stage == .topology, !showLatticePage { topologySelectionsList }
@@ -9916,6 +10000,93 @@ public struct WorkspacePlaceholder: View {
     /// (And the first cut of this very comment QUOTED the searched string, which
     /// tripped the same guards a second time. A source-text guard counts
     /// comments too.)
+    /// ★ B8 (row 34, mockup #cut): Edit faces' left side — Topology's Selections, VIEW ONLY: its scenario folders (open and
+    /// close) and groups, each with its colour, role and value, no eye, no trash, no switch. A tap on a group row lights
+    /// that group's faces on the part (`cutLitGroup`) so any of them can be cut or patterned; it joins nothing.
+    private var cutSelectionsPanel: some View {
+        VStack(alignment: .leading, spacing: DS.Space.s) {
+            if cutFromLattice {
+                // ★ from Lattice: the same two panels as Lattice Setup (Topology on top, folded first; Selections = the
+                // lattice groups), both view only, an accordion (R2.1)
+                DSPanel(key: "cutTopology", title: LatticeSetupCopy.topology, count: selection.groups.count, viewOnly: true,
+                        open: Binding(get: { cutTopologyOpen },
+                                      set: { cutTopologyOpen = $0; if $0 { selectionsCollapsed = true } })) {
+                    cutTopologyRows
+                }
+                DSPanel(key: "cutSelections", title: EditFacesCopy.selections, count: project.latticeGroups.count, viewOnly: true,
+                        open: Binding(get: { !selectionsCollapsed },
+                                      set: { selectionsCollapsed = !$0; if $0 { cutTopologyOpen = false } })) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(project.latticeGroups) { g in
+                            DSRow(.group, key: "cutGroup-\(g.id.uuidString)", mark: .colour(g.color), name: g.name,
+                                  value: latticeGroupValue(g), selected: cutLitGroup == g.id,
+                                  tap: { cutLitGroup = cutLitGroup == g.id ? nil : g.id })
+                        }
+                    }
+                } footer: { cutPanelFoot }
+            } else {
+                DSPanel(key: "cutSelections", title: EditFacesCopy.selections, count: selection.groups.count, viewOnly: true,
+                        open: Binding(get: { !selectionsCollapsed }, set: { selectionsCollapsed = !$0 })) {
+                    cutTopologyRows
+                } footer: { cutPanelFoot }
+            }
+        }
+        .onAppear { if cutOpenFolders.isEmpty { cutOpenFolders = [force.activeScenarioID] } }
+    }
+
+    /// ★ B8: Edit faces was opened from the Lattice stage.
+    private var cutFromLattice: Bool { if case .lattice = editFaces.origin { return true } else { return false } }
+
+    /// Topology's groups, view only: the scenario folders (open and close) with their groups, then the groups no scenario owns.
+    @ViewBuilder private var cutTopologyRows: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if force.hasScenarios {
+                ForEach(force.scenarioList, id: \.id) { s in
+                    let open = cutOpenFolders.contains(s.id)
+                    DSRow(.folder, key: "cutFolder-\(s.id.uuidString)", mark: .folder, name: s.name, disclosure: open,
+                          tap: { if open { cutOpenFolders.remove(s.id) } else { cutOpenFolders.insert(s.id) } })
+                    if open {
+                        ForEach(selection.groups.filter { force.group($0.id, isIn: s.id) }) { g in
+                            cutGroupRow(g).padding(.leading, SelectionsList.folderIndent)
+                        }
+                    }
+                }
+                // the groups no scenario owns (Protect, Keep clear)
+                ForEach(selection.groups.filter { !scenarioOwned($0.id) }) { g in cutGroupRow(g) }
+            } else {
+                ForEach(selection.groups) { g in cutGroupRow(g) }
+            }
+        }
+    }
+
+    /// ★ the old card's header buttons, until the reviewer's answer on B8's look (asked 11-07 20:04Z, item 3)
+    private var cutPanelFoot: some View {
+        HStack(spacing: DS.Space.m) {
+            Button { regionsOpen.toggle() } label: {
+                Image(systemName: "square.on.square.dashed")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle((regionsOpen ? DS.Color.accent : DS.Color.textTertiary).color)
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Regions")
+            .flexibleDrawn(when: !flexibleMain.owns(project, stage))   // ★ B8: as H39 — Edit faces opened from Flexible draws no Regions toggle
+            keepClearQuickAction
+            unitToggle
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, DS.Space.m)
+    }
+
+    /// One Topology group in Edit faces' view-only Selections: colour, name, role glyph and value; a tap lights its faces.
+    private func cutGroupRow(_ g: SelectionGroup) -> some View {
+        let glyph = RoleGlyphs.glyphs(project, g.id, readsLattice: false).first
+        return DSRow(.group, key: "cutGroup-\(g.id.uuidString)", mark: .colour(g.color), name: g.name,
+                     role: glyph.map { (glyph: $0.symbol, colour: $0.tint) }, value: topologyGroupSummary(g),
+                     selected: cutLitGroup == g.id,
+                     tap: { cutLitGroup = cutLitGroup == g.id ? nil : g.id })
+    }
+
     private var selectionsLibraryCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
@@ -11975,6 +12146,9 @@ public struct WorkspacePlaceholder: View {
     /// the Surface editor and Edit faces keep their own empty-tap rules.
     private func emptyTapClears() {
         guard !(flexibleMain.owns(project, stage) && !fullScreenPageUp), !visible.surfaceEditing, !editFaces.isEditing else { return }
+        // ★ his iPad 11-08 (1): on Lattice Setup the tap into nothing closes the LATTICE list's picked group, face or zone —
+        // their chips go with it (it cleared only Topology's selection, so the prisms' chips stayed)
+        if latticeSetupUp, !latticeTopologyOpen { leaveLatticeGroup() }
         selection.clearActive(); setPickedPiece(nil); chipsRevealedGroup = nil
         project.syncForceGroups()
     }
@@ -12897,9 +13071,11 @@ public struct WorkspacePlaceholder: View {
             // there — so the sentence is noise occupying the width the second
             // action button needs.
             // ★ B6 s1 (the approved mockup #lat-setup): Lattice Setup has the hint again — its corner is Topology's three now
-            if Self.hintShows(showsSelectionHint: visible.showsSelectionHint || latticeSetupUp, selectionsCollapsed: selectionsCollapsed) {
+            // ★ B8 (mockup #cut): Edit faces has the hint too — where its taps go ("It joins no group.")
+            if Self.hintShows(showsSelectionHint: visible.showsSelectionHint || latticeSetupUp || editFaces.isEditing,
+                              selectionsCollapsed: selectionsCollapsed) {
                 // ★ LOOK PER SCREEN (11-04, the mockup's .hint): one 36 pt line that gives way before the corner does
-                Text(hint)
+                Text(editFaces.isEditing ? EditFacesCopy.footHint : hint)
                     .font(.system(size: 12.5)).lineLimit(1).truncationMode(.tail)
                     .foregroundStyle(DS.Color.textSecondary.color)
                     .padding(.horizontal, 14).frame(height: 36)
@@ -12911,8 +13087,11 @@ public struct WorkspacePlaceholder: View {
             Spacer()
             if flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleCornerPair(main: flexibleMain, project: project, app: model, openSquish: { showFlexiblePage = true }, changeGravity: { force.enterGravitySetup(); selection.clearActive(); gravityDraft = nil; gravitySnapLabel = nil }) } else {   // Flexible (PR #362) H30: A1's corner pair (Setup chip + the Lattice split button); no iPad chip and no Optimize on this stage, Print Parameters inside Setup · Flexible (PR #362) H61: off under Edit faces (B5's mode has the page)
             AnyView(Group {   // Flexible (PR #362) H57: the bar's chain, type-erased (its nested type overflowed the iPad main thread's stack; crash 2026-10-25)
-            // ★ B5: Edit faces keeps the bar the Surface stage had (today's four, the last branch).
-            if !editFaces.isEditing, stage == .topology {
+            // ★ B8 (row 35, mockup #cut): Edit faces' corner is EMPTY — no run, no print parameters, no iPad │ Mac; its
+            // actions are the header's Discard · Done. (B5 had kept the Surface stage's four here.)
+            if editFaces.isEditing {
+                AnyView(EmptyView())
+            } else if stage == .topology {
                 // ★ B3 (A1): Topology's bar is the CORNER PAIR — the Setup chip (iPad | Mac, Print
                 // parameters and the chip column, as rows) and the Optimize split button.
                 AnyView(topologyCornerPair)   // Flexible (PR #362) H57
@@ -13038,7 +13217,7 @@ public struct WorkspacePlaceholder: View {
     /// of "has an include wall" (`LatticeJobIncludeGate`), on the emission the run would send.
     private var latticeOptimizeRefusal: String? {
         LatticeJobIncludeGate.optimizeRefusal(latticeEnabled: project.lattice.enabled,
-                                              regions: project.latticeJobRegions().regions)
+                                              regions: project.latticeJobRegions().regions, wholePart: project.latticeStartsWhole)
             ?? latticeSettingsRefusal
     }
 
@@ -13132,6 +13311,7 @@ public struct WorkspacePlaceholder: View {
                 .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
         }
         .buttonStyle(.plain)
+        .background(DSParts.publish("printParamsButton"))   // ★ B8: one of the old four (CutLookHostedTests' empty corner)
     }
 
     /// ★ "LATTICE" — LATTICE THE SELECTION, DO NOT OPTIMIZE (maintainer,
@@ -13218,9 +13398,11 @@ public struct WorkspacePlaceholder: View {
     /// was emitted, and an exclude-only list would have latticed the whole part but those walls.
     /// (An organic Fit with no include wall — "OFFER, NEVER SUBSTITUTE", ruling Aug 5 — is the
     /// same refusal and was already said in these words first; its own branch was unreachable.)
+    static let wholePartSummary = "Whole part · no optimization"
+
     private var latticeStageRefusal: String? {
         LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled,
-                                      regions: project.latticeJobRegions().regions)
+                                      regions: project.latticeJobRegions().regions, wholePart: project.latticeStartsWhole)
             ?? latticeSettingsRefusal
             ?? emptyRegionRefusal   // ★ B1 (note 38): the lattice run sends the same regions
     }
@@ -13235,6 +13417,8 @@ public struct WorkspacePlaceholder: View {
         if let why = latticeStageRefusal { return why }
         if runCouldntFinish, lastRunWasLattice { return Self.couldntFinishLine }   // ★ B1 (O1)
         if !organicStructuralGateOpen { return TopOptKit.organicStructuralGateMessage }
+        // ★ his iPad notes 11-08: Start from − lattices the whole part (minus No lattice), whatever the face count
+        if project.latticeStartsWhole { return Self.wholePartSummary }
         let n = project.latticeJobRegions().regions.filter { $0.role == .include }.count
         return "\(n) region\(n > 1 ? "s" : "") · no optimization"
     }
@@ -13408,6 +13592,7 @@ extension WorkspacePlaceholder {
     /// The tools at rest, and Paint and the Regions panel shut — they live in Edit faces only.
     private func leaveEditFacesTools() {
         surfaceResetTools()
+        cutLitGroup = nil   // ★ B8
         paintActive = false
         regionsOpen = false
     }
@@ -13420,13 +13605,15 @@ extension WorkspacePlaceholder {
             Text(EditFacesCopy.header).dsStyle(DS.TypeScale.bodyStrong).foregroundStyle(DS.Color.textPrimary.color)
                 .lineLimit(1).fixedSize()
                 .opacity(editFacesDiscardAsking ? 0 : 1)   // the ask's red button sits here while it asks
+            // ★ B8 (mockup #cut, the capsule's .div): a thin divider, then Discard as a plain page segment
+            Rectangle().fill(DS.Color.strokeStrong.color).frame(width: 1, height: 20)
+                .opacity(editFacesDiscardAsking ? 0 : 1)
             // ★ B8: DISCARD beside Done — asks in place; the question is the line under the header (it is too long to
             // sit left of the button at the screen's edge).
             Button { editFacesDiscardAsking = true } label: {
-                Text(EditFacesCopy.discard).font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle((project.canDiscardFaceEdits ? DS.Color.textPrimary : DS.Color.textDisabled).color)
-                    .padding(.horizontal, DS.Space.m).frame(height: StageCapsuleLayout.segmentHeight)
-                    .background(Capsule().fill(DS.Color.fillSubtle.color))
+                Text(EditFacesCopy.discard).font(.system(size: 14, weight: .medium))
+                    .foregroundStyle((project.canDiscardFaceEdits ? DS.Color.textSecondary : DS.Color.textDisabled).color)
+                    .padding(.horizontal, 13).frame(height: StageCapsuleLayout.segmentHeight)
                     .frame(minHeight: StageCapsuleLayout.capsuleHeight).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -14560,7 +14747,7 @@ extension WorkspacePlaceholder {
                            readsLattice: { _ in true },
                            pick: { id in
                                topoDeleteAsk = nil
-                               if stageList.activeGroupID == id { leaveGroupEditing() } else { stageList.setActive(id) }
+                               latticeOpenOrClose(id)   // ★ his iPad 11-08 (2): the open row's tap closes it
                            },
                            askDelete: { topoDeleteAsk = $0 },
                            confirmDelete: { confirmTopologyTrash() },
@@ -14576,8 +14763,10 @@ extension WorkspacePlaceholder {
                 // ★ B6 s1b (§4.3, mockup #lat-setup): "FACES N · + New group" heads the groups; a disclosure on each line
                 .latticeSections(lead: AnyView(latticeFacesSection), tail: AnyView(latticeZonesSection),   // ★ B6 s3a (25, 25a)
                                  footer: AnyView(latticeStartFromFoot),   // ★ B6 s3b (26, R2.2)
-                                 isOpen: { latticeOpenGroups.contains($0) },
-                                 toggleOpen: { id in if latticeOpenGroups.contains(id) { latticeOpenGroups.remove(id) } else { latticeOpenGroups.insert(id) } },
+                                 // ★ his iPad 11-08 (2): "A group must collapse" — the open group IS the picked one, so its
+                                 // chevron closes it like its line (it used to flip a second set the pick kept open)
+                                 isOpen: { stageList.activeGroupID == $0 },
+                                 toggleOpen: { latticeOpenOrClose($0) },
                                  lineLook: { _ in latticeFacePick == nil })   // a picked face row wears the look itself
             if !selectionsCollapsed {
                 // ★ B8 (his answer 2026-10-24): Grade lives ONLY on the Cells page — no Grade pair here.
