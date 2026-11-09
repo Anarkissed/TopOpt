@@ -171,6 +171,8 @@ enum OutcomeCodec {
         // the job carried a plan; its presence IS "this job carried a plan", so a reopened plan run keeps reading
         // the plan's figures instead of the law's. Optional, so every other blob is stored byte-for-byte as before.
         var planByRegionJSON: Data? = nil
+        // ★ B7 slice 2 (ruling 3): the receipt's finish facts in words; written only when there are any.
+        var finishLines: [String]? = nil
     }
 
     struct OutcomeDTO: Codable, Sendable {
@@ -319,7 +321,8 @@ enum OutcomeCodec {
                     variantFacesWithoutShape: r.variantFacesWithoutShape > 0 ? r.variantFacesWithoutShape : nil,
                     variantRegionsWithoutShape: r.variantRegionsWithoutShape.isEmpty ? nil : r.variantRegionsWithoutShape,
                     variantFaceWallsLeftOut: r.variantLegacyFaceWallsLeftOut > 0 ? r.variantLegacyFaceWallsLeftOut : nil,
-                    planByRegionJSON: r.planLaid?.rawJSON) },
+                    planByRegionJSON: r.planLaid?.rawJSON,
+                    finishLines: r.finishLines.isEmpty ? nil : r.finishLines) },
             solvedBy: o.solvedBy,
             reportJSON: o.reportJSON)
     }
@@ -422,7 +425,8 @@ enum OutcomeCodec {
                     variantFacesWithoutShape: r.variantFacesWithoutShape ?? 0,
                     variantRegionsWithoutShape: r.variantRegionsWithoutShape ?? [],
                     variantLegacyFaceWallsLeftOut: r.variantFaceWallsLeftOut ?? 0,
-                    planLaid: r.planByRegionJSON.map { LatticeReport.PlanLaid(planByRegionJSON: $0) }) },
+                    planLaid: r.planByRegionJSON.map { LatticeReport.PlanLaid(planByRegionJSON: $0) },
+                    finishLines: r.finishLines ?? []) },
             solvedBy: d.solvedBy,
             // nil on a pre-growth blob → false → reduction, which is what it is.
             growthLadder: d.growthLadder ?? false,

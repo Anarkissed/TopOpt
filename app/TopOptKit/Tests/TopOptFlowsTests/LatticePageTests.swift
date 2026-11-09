@@ -441,14 +441,15 @@ final class LatticePageTests: XCTestCase {
     /// that maps somewhere else.
     func testBoundaryIsAFourWayAndSkinWithoutRimIsUnrepresentable() {
         XCTAssertEqual(LatticeBoundaryTreatment.allCases.count, 4)
-        // ★ The cover is the ONLY one that sets an outer finish, and it leaves the
-        // skin field alone — the lattice underneath still runs to the edge.
+        // ★ The cover leaves the skin field alone — the lattice underneath still runs to the edge.
         XCTAssertEqual(LatticeBoundaryTreatment.covered.jobOuterFinish, "shell")
         XCTAssertEqual(LatticeBoundaryTreatment.covered.jobSkinValue, "none")
-        for t in LatticeBoundaryTreatment.allCases where t != .covered {
-            XCTAssertNil(t.jobOuterFinish,
-                         "\(t) must not carry an outer finish — only Covered does")
-        }
+        // ★ RE-PINNED (B7 slice 2b, the reviewer 11-08 ruling 4; ruling 11-06 (1)): "only Covered carries an outer
+        // finish" left None and Skin under core's default SHELL. Each finish now states core's word; Rim alone stays
+        // absent (greyed). LatticeFinishWireTests holds the red control.
+        XCTAssertEqual(LatticeBoundaryTreatment.none.jobOuterFinish, "none")
+        XCTAssertEqual(LatticeBoundaryTreatment.fullSkin.jobOuterFinish, "skin")
+        XCTAssertNil(LatticeBoundaryTreatment.rim.jobOuterFinish)
         XCTAssertEqual(LatticeBoundaryTreatment.none.jobSkinValue, "none")
         XCTAssertEqual(LatticeBoundaryTreatment.rim.jobSkinValue, "rim")
         XCTAssertEqual(LatticeBoundaryTreatment.fullSkin.jobSkinValue, "diagrid",

@@ -226,7 +226,7 @@ public struct LatticePage: View {
                 ? LatticeSectorDensity.refusals(project.latticeSectorDensityRows()) : [],
             // ★ ruling 4 (item 5): the ONE definition, on the emission the run would send
             includeRefusal: LatticeJobIncludeGate.optimizeRefusal(
-                latticeEnabled: project.lattice.enabled, regions: project.latticeJobRegions().regions)
+                latticeEnabled: project.lattice.enabled, regions: project.latticeJobRegions().regions, wholePart: project.latticeStartsWhole)
                 // ★★ and Structural Stepped (2026-10-08): blocked, in the gate's words
                 ?? LatticeStructuralSteppedGate.refusal(project.lattice))
     }
@@ -254,7 +254,7 @@ public struct LatticePage: View {
             protectedGroups: force.protectedGroups(in: groups),
             roles: project.lattice.groupRoles,
             anyIncludeDeclared:
-                LatticeJobIncludeGate.hasIncludeWall(project.latticeJobRegions().regions))
+                !project.latticeStartsWhole && LatticeJobIncludeGate.hasIncludeWall(project.latticeJobRegions().regions))
     }
 
     // MARK: body

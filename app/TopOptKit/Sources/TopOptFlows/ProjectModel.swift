@@ -2749,6 +2749,17 @@ public final class ProjectModel: ObservableObject {
     /// Start from − reaches the job (core's `lattice.whole_part`); false ⇒ Lattice Setup's plain line stays.
     public var latticeWholePartLive: Bool { TopOptKit.latticeWholePartWired }
 
+    /// ★★ START FROM − AS THE RUN WILL BUILD IT (his iPad notes 11-08): the whole part latticed, the No-lattice faces and
+    /// zones cut out of it — the same condition the job's `whole_part` key is written under (`latticeRunSpec`). The stage's
+    /// preview, its Lattice / Optimize gates and the variant's job all read this one value.
+    public var latticeStartsWhole: Bool { usesLatticeList && latticeWholePartLive && lattice.wholePart }
+
+    /// The regions the PREVIEW masks by: the job's, or under Start from − only what is cut out (core moves the includes to
+    /// `whole_part_includes`, where they carry grading and limit nothing).
+    public func latticePreviewRegions(_ regions: [LatticeRegionSpec]) -> [LatticeRegionSpec] {
+        latticeStartsWhole ? regions.filter { $0.role != .include } : regions
+    }
+
     /// The scenario switches reach the job (core's `lattice.scenarios`); false ⇒ the Topology panel's plain line stays.
     public var latticeScenariosLive: Bool { TopOptKit.latticeScenariosWired }
 
@@ -2803,7 +2814,7 @@ public final class ProjectModel: ObservableObject {
     /// include wall core would lattice the WHOLE variant.
     public func variantLatticeJobRefusal() -> String? {
         LatticeJobIncludeGate.refusal(latticeEnabled: lattice.enabled,
-                                      regions: variantLatticeJobRegions().regions)
+                                      regions: variantLatticeJobRegions().regions, wholePart: latticeStartsWhole)
             // ★★ Structural Stepped waits on core's strength check (2026-10-08) — blocked, never
             // run as core's own layout
             ?? LatticeStructuralSteppedGate.refusal(lattice)

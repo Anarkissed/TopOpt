@@ -81,9 +81,15 @@ final class LatticeStageTests: XCTestCase {
     /// writes (`grading.max_relative_density` 0.3788, was 0.2189) and, on the stage job, the capped floor cell in its
     /// swept window (`cell_min_mm` / `cell_max_mm` 2.2500000000000004: core's floor cell nudged up by ulps until its
     /// strut prints). Was b39c1560… / dda8f4c1… / 222dad73….
-    static let stageLatticeJobAtB3 = "e48b61f3b4a6ee09f4fb08064e127f4f8d05c57b1e5e501e62216c651f71aed3"
-    static let variantRunJobAtB3 = "da110b3ed222d16f791242ae6c511a4ad405d463d79c59f16837ffec3eb399a1"
-    static let variantForecastJobAtB3 = "7886b5dfbade28c3ddbcd69dcbb28902589294400815429b05c6f1b85198eda2"
+    /// ★ RE-PINNED (B7 slice 2b, ruling 11-06 (1)): the fixtures' finish is None, which now sends core's open finish
+    /// (`outer_finish: "none"`). That key is the only move: under `controlShellDefault` (the old finish map) the jobs
+    /// give back the B3 bytes below, so B4 is still a re-layout.
+    static let stageLatticeJobAtB3 = "3bd4e18b4b94055e4da40e3a3b4367d9a01e8fff0bfaead7201af4a9b3059d76"
+    static let variantRunJobAtB3 = "c204659986d1e61f28823cbf1b3f81b282dbd5a41dda3364e4df3f7f20f88673"
+    static let variantForecastJobAtB3 = "fb2121ea3c3d1ec79ef9dcb534c6cd238110b8066a5a2049b8883d245e199def"
+    static let stageLatticeJobOldFinish = "e48b61f3b4a6ee09f4fb08064e127f4f8d05c57b1e5e501e62216c651f71aed3"
+    static let variantRunJobOldFinish = "da110b3ed222d16f791242ae6c511a4ad405d463d79c59f16837ffec3eb399a1"
+    static let variantForecastJobOldFinish = "7886b5dfbade28c3ddbcd69dcbb28902589294400815429b05c6f1b85198eda2"
 
     func testTheStageLatticeJobIsByteIdenticalToB3() throws {
         let (m, _, _, _) = try latticedCube()
@@ -92,6 +98,12 @@ final class LatticeStageTests: XCTestCase {
         XCTAssertEqual(sha(try stageLatticeJob(m2)), a, "control: two builds give one byte string")
         print("PIN stage \(a)")
         XCTAssertEqual(a, Self.stageLatticeJobAtB3, "the stage's lattice job moved: B4 is a re-layout")
+        let job = try XCTUnwrap(JSONSerialization.jsonObject(with: try stageLatticeJob(m)) as? [String: Any])
+        XCTAssertEqual((job["lattice"] as? [String: Any])?["outer_finish"] as? String, "none", "None sends core's open finish")
+        // CONTROL: the old finish map gives back the B3 bytes — the finish is the only key that moved
+        LatticeBoundaryTreatment.controlShellDefault = true
+        defer { LatticeBoundaryTreatment.controlShellDefault = false }
+        XCTAssertEqual(sha(try stageLatticeJob(m)), Self.stageLatticeJobOldFinish, "CONTROL: the B3 bytes")
     }
 
     func testTheVariantRelatticeJobIsByteIdenticalToB3() throws {
@@ -100,6 +112,11 @@ final class LatticeStageTests: XCTestCase {
         print("PIN variant run \(v["run"] ?? "-") forecast \(v["forecast"] ?? "-")")
         XCTAssertEqual(v["run"], Self.variantRunJobAtB3, "the re-lattice job moved")
         XCTAssertEqual(v["forecast"], Self.variantForecastJobAtB3, "the forecast job moved")
+        LatticeBoundaryTreatment.controlShellDefault = true
+        defer { LatticeBoundaryTreatment.controlShellDefault = false }
+        let old = try variantJobs()
+        XCTAssertEqual(old["run"], Self.variantRunJobOldFinish, "CONTROL: the B3 bytes")
+        XCTAssertEqual(old["forecast"], Self.variantForecastJobOldFinish, "CONTROL: the B3 bytes")
     }
 
     // MARK: - sources

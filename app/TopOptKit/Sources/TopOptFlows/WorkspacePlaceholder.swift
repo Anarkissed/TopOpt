@@ -3520,7 +3520,7 @@ public struct WorkspacePlaceholder: View {
         // WHOLE variant. The backstop for all three callers (the forecast, Check sizes, the
         // run); each says why in the stage's words (`project.variantLatticeJobRefusal()`).
         guard LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled,
-                                            regions: emission.regions) == nil else { return nil }
+                                            regions: emission.regions, wholePart: project.latticeStartsWhole) == nil else { return nil }
         // ★★ Structural Stepped (2026-10-08): no document either — the run is blocked, not substituted
         guard LatticeStructuralSteppedGate.refusal(project.lattice) == nil else { return nil }
         // ★★ THE STAGE'S OWN SPEC (ruling b, 2026-09-30): the SAME builder the optimize request
@@ -3731,7 +3731,8 @@ public struct WorkspacePlaceholder: View {
                 regionCellsJSON: spec.reportRegionCells ? result.receiptJSON : nil,
                 variantFacesWithoutShape: withoutShape,
                 variantRegionsWithoutShape: regionsWithoutShape,
-                planLaid: result.planLaid))   // ★ K4: the plan as laid, when the job carried one
+                planLaid: result.planLaid,   // ★ K4: the plan as laid, when the job carried one
+                finishLines: LatticeReport.finishLines(receipt: result.receiptJSON)))   // ★ B7 slice 2 (ruling 3)
         }
         guard let request = model.makeRunRequest() else { return }
         closeLatticePage()
@@ -4728,9 +4729,15 @@ public struct WorkspacePlaceholder: View {
         //
         // The rule itself lives in `LatticePreviewBodyAlpha` so it can be tested; this
         // property is now only the two inputs it is asked for.
+        // ★★ his iPad notes 11-08 (Start from −): the whole part fills with lattice, but what stays solid must READ solid —
+        // the No-lattice zones, and every wall too thin for the cell (the cell floor leaves it solid, as in core; on his
+        // stand at 4 mm only 5,915 cells draw while 96 % of the part is set to lattice). So the body stays drawn and the
+        // shell opens only over the cells that draw (`shellClipAndDecls`' cell mode); hidden, the thin walls vanished.
+        let declared = project.latticeStartsWhole
+            || LatticeJobIncludeGate.hasIncludeWall(project.latticeJobRegions().regions)
         return LatticePreviewBodyAlpha.value(
             latticeLayerDrawn: latticeLayerIsDrawn,
-            hasIncludeRegion: LatticeJobIncludeGate.hasIncludeWall(project.latticeJobRegions().regions),
+            hasIncludeRegion: declared,
             nothingToLattice: latticePreviewHasNothingToDraw)
     }
 
@@ -4826,6 +4833,21 @@ public struct WorkspacePlaceholder: View {
         }
         for r in project.faceRegions.regions { h.combine(r.id) }
         let l = project.lattice
+        // ★★★ THE LATTICE STAGE'S OWN LIST (his iPad notes 11-08: a zone switched to No lattice still drew its lattice, and
+        // the Lattice page showed that zone). Since B6 the stage edits `latticeList`, not Topology's `selection` hashed
+        // above — so a face added to a lattice group, a group's or zone's Lattice / No lattice / Protect skin, a zone's box,
+        // and Start from − never moved this key, and the picture kept whatever it was baked with.
+        for g in project.latticeGroups {
+            h.combine(g.id)
+            for f in g.faces { h.combine(f) }
+            for r in g.regionIDs { h.combine(r) }
+            h.combine(l.groupRoles[g.id])
+            h.combine(l.zoneGroups.contains(g.id))
+            for p in project.force.manualPrimitives(for: g.id) { h.combine(String(describing: p)) }
+        }
+        for p in l.includePrimitives { h.combine(String(describing: p)) }
+        h.combine(project.latticeStartsWhole)
+        h.combine(String(describing: l.areaGrading.sorted { $0.key.uuidString < $1.key.uuidString }))
         h.combine(l.enabled)
         // ★ the per-wall cells are inputs the bake reads (review #37)
         for (k, v) in l.selectableCellMM.sorted(by: { $0.key < $1.key }) { h.combine(k); h.combine(v) }
@@ -4995,7 +5017,9 @@ public struct WorkspacePlaceholder: View {
         // sample block, which is exactly when clipping must NOT happen.
         let emission = project.latticeJobRegions()
         // ★ the job's regions, whole: the lattice fills every prism 0 to depthMM (his 2026-10-11)
-        let regions = emission.regions
+        // ★★ his iPad notes 11-08: under Start from − the preview masks by what is cut out (the whole part, minus No lattice)
+        let startsWhole = project.latticeStartsWhole
+        let regions = project.latticePreviewRegions(emission.regions)
         // ★ AND HOW MANY MARKED FACES PRODUCED NO REGION. Carried into the bake so
         // the banner can say the preview is drawing LESS than was marked, rather
         // than under-drawing in silence.
@@ -5319,7 +5343,8 @@ public struct WorkspacePlaceholder: View {
                                         // stage an empty list means "nothing is
                                         // declared", and the honest picture of
                                         // that is a solid part.
-                                        whenEmpty: .latticeNothing,
+                                        // ★ his iPad notes 11-08: Start from − is the whole part, minus No lattice
+                                        whenEmpty: startsWhole ? .latticeEverything : .latticeNothing,
                                         skinMM: skinMM,
                                         skippedFaces: skippedFaces,
                                         skippedRegionNames: skippedRegionNames,
@@ -13089,7 +13114,7 @@ public struct WorkspacePlaceholder: View {
     /// of "has an include wall" (`LatticeJobIncludeGate`), on the emission the run would send.
     private var latticeOptimizeRefusal: String? {
         LatticeJobIncludeGate.optimizeRefusal(latticeEnabled: project.lattice.enabled,
-                                              regions: project.latticeJobRegions().regions)
+                                              regions: project.latticeJobRegions().regions, wholePart: project.latticeStartsWhole)
             ?? latticeSettingsRefusal
     }
 
@@ -13270,9 +13295,11 @@ public struct WorkspacePlaceholder: View {
     /// was emitted, and an exclude-only list would have latticed the whole part but those walls.
     /// (An organic Fit with no include wall — "OFFER, NEVER SUBSTITUTE", ruling Aug 5 — is the
     /// same refusal and was already said in these words first; its own branch was unreachable.)
+    static let wholePartSummary = "Whole part · no optimization"
+
     private var latticeStageRefusal: String? {
         LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled,
-                                      regions: project.latticeJobRegions().regions)
+                                      regions: project.latticeJobRegions().regions, wholePart: project.latticeStartsWhole)
             ?? latticeSettingsRefusal
             ?? emptyRegionRefusal   // ★ B1 (note 38): the lattice run sends the same regions
     }
@@ -13287,6 +13314,8 @@ public struct WorkspacePlaceholder: View {
         if let why = latticeStageRefusal { return why }
         if runCouldntFinish, lastRunWasLattice { return Self.couldntFinishLine }   // ★ B1 (O1)
         if !organicStructuralGateOpen { return TopOptKit.organicStructuralGateMessage }
+        // ★ his iPad notes 11-08: Start from − lattices the whole part (minus No lattice), whatever the face count
+        if project.latticeStartsWhole { return Self.wholePartSummary }
         let n = project.latticeJobRegions().regions.filter { $0.role == .include }.count
         return "\(n) region\(n > 1 ? "s" : "") · no optimization"
     }
