@@ -78,6 +78,8 @@
 #include "topopt/lattice.hpp"
 #include "topopt/materials.hpp"
 #include "topopt/simp.hpp"
+#include "topopt/strut_cell.hpp"
+#include "topopt/tpms.hpp"
 #include "topopt/voxel.hpp"
 
 using namespace topopt;
@@ -140,6 +142,70 @@ double octet_dist2_unit(double u, double v, double w,
   return best;
 }
 
+// ★ THE TYPE UNDER MEASUREMENT (ruling 11-08 (B): a strength law for each of the other
+// eight types, measured exactly this way). TOPOPT_DEHOMOG_TYPE picks it; unset is octet,
+// and octet keeps PR 259's legs-only cell and its own rho map, so its numbers cannot move.
+// Every other type is its PRODUCTION geometry: its canonical strut cell (strut_cell.hpp,
+// the cell the generator emits and its tensor rows were measured on) or, for a sheet, the
+// R7 gradient-normalised wall (tpms.hpp). The radius (for a sheet, half the true wall) is
+// calibrated through lattice_density_from_strut, the law that type's jobs key on.
+LatticeTopology g_topo = LatticeTopology::Octet;
+std::vector<std::array<std::array<double, 3>, 2>> g_type_segs;  // unit-cell strut images
+
+bool g_is_sheet() { return lattice_topology_is_sheet(g_topo); }
+
+void init_type_geometry() {
+  g_type_segs.clear();
+  if (g_topo == LatticeTopology::Octet || g_is_sheet()) return;
+  const StrutCell& c = lattice_strut_cell(g_topo);
+  const double S = c.S;
+  for (const StrutCellStrut& st : c.struts)
+    for (int dz = -1; dz <= 1; ++dz)
+      for (int dy = -1; dy <= 1; ++dy)
+        for (int dx = -1; dx <= 1; ++dx) {
+          const std::array<double, 3> a{(st.a.x + dx * S) / S, (st.a.y + dy * S) / S,
+                                        (st.a.z + dz * S) / S};
+          const std::array<double, 3> b{(st.b.x + dx * S) / S, (st.b.y + dy * S) / S,
+                                        (st.b.z + dz * S) / S};
+          bool near = true;  // within 0.5 of the unit cube (every radius here is < 0.5)
+          for (int k = 0; k < 3; ++k)
+            if (std::min(a[k], b[k]) > 1.5 || std::max(a[k], b[k]) < -0.5) near = false;
+          if (near) g_type_segs.push_back({a, b});
+        }
+}
+
+// The production rho map of the type at unit-cell radius r.
+double type_density(double r_unit) {
+  if (g_topo == LatticeTopology::Octet) return octet_relative_density(1.0, r_unit);
+  return lattice_density_from_strut(g_topo, 1.0, r_unit);
+}
+
+// For a sheet: the field parameter t that builds the true wall 2 r (the generator's own).
+double sheet_param(double r_unit) {
+  return g_is_sheet() ? lattice_sheet_wall_param_mm(g_topo, 2.0 * r_unit, 1.0) : 0.0;
+}
+
+// Is the point (unit-cell coordinates, any cell) solid?
+bool type_inside(double u, double v, double w, double r_unit, double sheet_t,
+                 const std::vector<std::array<std::array<double, 3>, 2>>& octet_segs) {
+  if (g_topo == LatticeTopology::Octet)
+    return octet_dist2_unit(u, v, w, octet_segs) < r_unit * r_unit;
+  // A radius past the whole cell is S4's SOLID cell, for every type: a sheet's wall test
+  // reads a field critical point as "far from the sheet", which would leave holes in it.
+  if (r_unit >= 1.0) return true;
+  if (g_is_sheet())
+    return tpms_wall_distance(g_topo == LatticeTopology::Gyroid ? TpmsKind::Gyroid
+                                                                : TpmsKind::SchwarzD,
+                              u, v, w, 1.0, sheet_t) < 0.0;
+  u -= std::floor(u);
+  v -= std::floor(v);
+  w -= std::floor(w);
+  const double r2 = r_unit * r_unit;
+  for (const auto& sg : g_type_segs)
+    if (point_seg_dist2(u, v, w, sg[0].data(), sg[1].data()) < r2) return true;
+  return false;
+}
+
 // The block grid: ncx x ncy x ncz cells, vpc voxels per cell edge; nz_vox may
 // CUT the top cell layer (cut fixture). Cell edge = 1 mm (K is scale-free; the
 // tensor is scale-invariant, PR 235).
@@ -152,12 +218,12 @@ VoxelGrid build_block(double r_unit, int ncx, int ncy, int vpc, int nz_vox,
   g.spacing = 1.0 / vpc;
   g.origin = Vec3{0, 0, 0};
   g.tags.assign((std::size_t)g.nx * g.ny * g.nz, VoxelTag::Empty);
-  const double r2 = r_unit * r_unit;
+  const double t = sheet_param(r_unit);
   for (int k = 0; k < g.nz; ++k)
     for (int j = 0; j < g.ny; ++j)
       for (int i = 0; i < g.nx; ++i) {
         const double x = (i + 0.5) / vpc, y = (j + 0.5) / vpc, z = (k + 0.5) / vpc;
-        if (octet_dist2_unit(x, y, z, segs) < r2)
+        if (type_inside(x, y, z, r_unit, t, segs))
           g.set_tag(i, j, k, VoxelTag::Interior);
       }
   return g;
@@ -188,7 +254,13 @@ double calibrate_r_unit(double target_rho) {
   double lo = 1e-4, hi = 0.35;
   for (int it = 0; it < 48; ++it) {
     const double mid = 0.5 * (lo + hi);
-    (octet_relative_density(1.0, mid) < target_rho ? lo : hi) = mid;
+    double rho = 0.0;
+    try {
+      rho = type_density(mid);
+    } catch (const std::exception&) {
+      rho = mid > 0.1 ? 1.0 : 0.0;  // degenerate cell: too fat, or too thin to read
+    }
+    (rho < target_rho ? lo : hi) = mid;
   }
   return 0.5 * (lo + hi);
 }
@@ -806,9 +878,20 @@ FILE* open_csv(const std::string& dir, const char* name, const char* header) {
 // The rho sweep: band endpoints READ FROM CORE (never hardcoded) + interior
 // targets spanning the certifiable band.
 std::vector<double> rho_sweep() {
-  const double lo = lattice_rho_min(LatticeTopology::Octet);
-  const double hi = lattice_rho_max(LatticeTopology::Octet);
-  return {lo, 0.10, 0.157, 0.20, 0.313, 0.45, 0.60, 0.75, hi};
+  const double lo = lattice_rho_min(g_topo);
+  const double hi = lattice_rho_max(g_topo);
+  if (g_topo == LatticeTopology::Octet) return {lo, 0.10, 0.157, 0.20, 0.313, 0.45, 0.60, 0.75, hi};
+  // the same interior targets, inside this type's own band, and its two ends
+  std::vector<double> r{lo};
+  for (double t : {0.10, 0.157, 0.20, 0.313, 0.45, 0.60, 0.75})
+    if (t > lo + 0.01 && t < hi - 0.01) r.push_back(t);
+  r.push_back(hi);
+  return r;
+}
+
+// A target clamped into the type's band (the cross-check fixtures' fixed rhos).
+double in_band(double rho) {
+  return std::clamp(rho, lattice_rho_min(g_topo), lattice_rho_max(g_topo));
 }
 
 struct RhoCal {
@@ -818,12 +901,12 @@ RhoCal calibrate(double target) {
   RhoCal c;
   c.target = target;
   c.r_unit = calibrate_r_unit(target);
-  c.rho_lib = octet_relative_density(1.0, c.r_unit);
+  c.rho_lib = type_density(c.r_unit);
   return c;
 }
 
 M6 lib_D(double rho_lib) {
-  return cubic_D(lattice_cubic_tensor(LatticeTopology::Octet, rho_lib, kEs));
+  return cubic_D(lattice_cubic_tensor(g_topo, rho_lib, kEs));
 }
 
 // ---------------------------------------------------------------------------
@@ -971,8 +1054,8 @@ int phase_selfcheck(const std::string& ev) {
 
   // S5: the band endpoints come from core (printed for the record).
   {
-    const double lo = lattice_rho_min(LatticeTopology::Octet);
-    const double hi = lattice_rho_max(LatticeTopology::Octet);
+    const double lo = lattice_rho_min(g_topo);
+    const double hi = lattice_rho_max(g_topo);
     std::printf("  band read from core: [%.5f, %.5f]\n", lo, hi);
     std::fprintf(csv, "S5_band_lo,%.6f,,1\nS5_band_hi,%.6f,,1\n", lo, hi);
     report("S5 band sane (0<lo<hi<1)", (lo > 0 && lo < hi && hi < 1) ? 0 : 1, 0.5,
@@ -1076,16 +1159,22 @@ void phase_bulk(const std::string& ev, bool fast) {
   for (double rt : rhos) {
     const RhoCal c = calibrate(rt);
     std::vector<int> vpcs = {vpc_main};
-    if (!fast) {
+    if (!fast && g_topo == LatticeTopology::Octet) {
       if (rt == rhos[3] || rt == rhos[5]) vpcs = {16, 24, 32, 40};  // vpc study
       if (rt <= 0.11 || rt == rhos[3] || rt == rhos[8]) vpcs.push_back(48);
+    } else if (!fast) {
+      // Every other type: vpc48 at EVERY row (the law reads the finest), and the vpc
+      // study (16..48) at its band floor and its middle row.
+      const std::size_t n = rhos.size();
+      vpcs = (rt == rhos[0] || rt == rhos[n / 2]) ? std::vector<int>{16, 24, 32, 40, 48}
+                                                  : std::vector<int>{32, 48};
     }
     for (int vpc : vpcs) {
       const auto t0 = std::chrono::steady_clock::now();
       Periodic P = solve_periodic(c.r_unit, vpc, 1e-9);
       const auto t1 = std::chrono::steady_clock::now();
       const M6 Dlib = lib_D(c.rho_lib);
-      const CubicTensor tl = lattice_cubic_tensor(LatticeTopology::Octet, c.rho_lib, kEs);
+      const CubicTensor tl = lattice_cubic_tensor(g_topo, c.rho_lib, kEs);
       const double c11m = (P.CH(0, 0) + P.CH(1, 1) + P.CH(2, 2)) / 3.0;
       const double c12m = (P.CH(0, 1) + P.CH(0, 2) + P.CH(1, 2) + P.CH(1, 0) +
                            P.CH(2, 0) + P.CH(2, 1)) / 6.0;
@@ -1123,9 +1212,10 @@ void phase_blocks(const std::string& ev, bool fast) {
   if (fast) {
     cases = {{0.313, 2, 8}, {0.313, 3, 8}};
   } else {
-    cases = {{0.20, 2, 16}, {0.20, 3, 16}, {0.20, 4, 16},
-             {0.45, 2, 16}, {0.45, 3, 16}, {0.45, 4, 16},
-             {0.20, 3, 24}};
+    const double a = in_band(0.20), b = in_band(0.45);
+    cases = {{a, 2, 16}, {a, 3, 16}, {a, 4, 16},
+             {b, 2, 16}, {b, 3, 16}, {b, 4, 16},
+             {a, 3, 24}};
   }
   for (const Case& cs : cases) {
     const RhoCal c = calibrate(cs.rho);
@@ -1165,6 +1255,15 @@ void phase_boundary(const std::string& ev, bool fast) {
   std::vector<Case> cases;
   if (fast) {
     cases = {{0.313, 3, 8, 0.0}, {0.313, 3, 8, 0.6}};
+  } else if (g_topo != LatticeTopology::Octet) {
+    // Every other type: BOTH boundary populations at EVERY rho of its band (PR 259 cut
+    // three; cut cells run 43-79 % hotter, so each row's envelope sees its own). Thin rows
+    // (under 0.19) at N=3 vpc24, as PR 259 re-measured its low band.
+    for (double r : rho_sweep()) {
+      const bool thin = r < 0.19;
+      cases.push_back({r, thin ? 3 : 4, thin ? 24 : 16, 0.0});
+      cases.push_back({r, thin ? 3 : 4, thin ? 24 : 16, 0.6});
+    }
   } else {
     for (double r : rho_sweep()) cases.push_back({r, 4, 16, 0.0});
     cases.push_back({0.20, 4, 24, 0.0});   // resolution cross-check
@@ -1181,7 +1280,27 @@ void phase_boundary(const std::string& ev, bool fast) {
     cases.push_back({0.313, 4, 16, 0.6});
     cases.push_back({0.60, 4, 16, 0.6});
   }
-  for (const Case& cs : cases) {
+  // ★ RE-MEASURE AN ALIASED ROW FINER (every type but octet, whose list above is PR 259's
+  // own). The fit drops a row whose measured density is off its library rho by >15 % (the
+  // aliasing guard), and a sheet two voxels thick can fall apart entirely. Dropping it
+  // leaves that rho with NO boundary population, so its law reads the bulk alone — below
+  // the cut cells it never saw (measured 11-09: diamond 0.20 at vpc16, rhombic 0.172 at
+  // vpc24, Schwarz-D 0.20 at vpc16, sc's 0.087 cut block at vpc24). PR 259 re-measured its
+  // aliased low band at a finer pitch; this does the same, case by case: N4 vpc16 -> N3
+  // vpc24 -> N3 vpc32 -> N3 vpc40, stopping at the first fixture the guard keeps. Every
+  // attempt is written, so the evidence shows the aliased row and its re-measure.
+  const bool escalate = !fast && g_topo != LatticeTopology::Octet;
+  auto finer = [](const Case& cs, Case& out) {
+    static const int ladder[][2] = {{4, 16}, {3, 24}, {3, 32}, {3, 40}};
+    for (int i = 0; i + 1 < 4; ++i)
+      if (cs.N == ladder[i][0] && cs.vpc == ladder[i][1]) {
+        out = {cs.rho, ladder[i + 1][0], ladder[i + 1][1], cs.cut};
+        return true;
+      }
+    return false;
+  };
+  for (std::size_t ci = 0; ci < cases.size(); ++ci) {
+    const Case cs = cases[ci];  // by value: the list may grow below
     const RhoCal c = calibrate(cs.rho);
     const char* fixname = cs.cut > 0 ? "cut" : "sandwich";
     const auto t0 = std::chrono::steady_clock::now();
@@ -1221,6 +1340,24 @@ void phase_boundary(const std::string& ev, bool fast) {
                 f.dropped_floaters,
                 std::chrono::duration<double>(t1 - t0).count(),
                 *std::max_element(f.iters, f.iters + 6));
+    // The fit's own tests (phase_fit's `aliased`, and its skip of an empty population), on
+    // this fixture's measured density (taken after the floater drop, so a sheet that fell
+    // apart reads as off too).
+    const bool off = c.rho_lib <= 0 || std::fabs(f.rho_meas - c.rho_lib) / c.rho_lib > 0.15 ||
+                     edF.K_dev <= 0.0;
+    Case next;
+    if (escalate && off) {
+      if (finer(cs, next)) {
+        std::printf("    rho_meas %.4f is %+.1f%% off rho_lib %.4f (aliased): re-measuring "
+                    "at N%d vpc%d\n", f.rho_meas, 100.0 * (f.rho_meas - c.rho_lib) / c.rho_lib,
+                    c.rho_lib, next.N, next.vpc);
+        cases.push_back(next);
+      } else {
+        std::printf("    rho_meas %.4f is %+.1f%% off rho_lib %.4f (aliased) at the finest "
+                    "pitch tried: this rho has no %s population\n", f.rho_meas,
+                    100.0 * (f.rho_meas - c.rho_lib) / c.rho_lib, c.rho_lib, fixname);
+      }
+    }
   }
   std::fclose(states); std::fclose(exact); std::fclose(cells);
 }
@@ -1592,11 +1729,13 @@ int main(int argc, char** argv) {
       argc > 3 ? argv[3] : "evidence/2026-07-31-multiscale-lattice-feasibility";
   const bool fast = std::getenv("TOPOPT_DEHOMOG_FAST") != nullptr;
   fea_set_matfree_threads(1);  // determinism (bar J8)
+  if (const char* t = std::getenv("TOPOPT_DEHOMOG_TYPE")) g_topo = lattice_topology_from_id(t);
+  init_type_geometry();
 
-  std::printf("LATTICE DE-HOMOGENIZATION PROBE — octet band [%.5f, %.5f] "
+  std::printf("LATTICE DE-HOMOGENIZATION PROBE — %s band [%.5f, %.5f] "
               "(read from core)\n",
-              lattice_rho_min(LatticeTopology::Octet),
-              lattice_rho_max(LatticeTopology::Octet));
+              lattice_topology_name(g_topo), lattice_rho_min(g_topo),
+              lattice_rho_max(g_topo));
   if (fast) std::printf("  [FAST mode — reduced sets, development only]\n");
 
   int rc = 0;
@@ -1606,7 +1745,7 @@ int main(int argc, char** argv) {
   if (want("blocks")) phase_blocks(ev, fast);
   if (want("boundary")) phase_boundary(ev, fast);
   if (want("fit")) phase_fit(ev);
-  if (want("j6")) phase_j6(ev, pr255_dir);
+  if (want("j6") && g_topo == LatticeTopology::Octet) phase_j6(ev, pr255_dir);  // PR 255: octet
   std::printf("\nDONE (rc=%d).\n", rc);
   return rc;
 }

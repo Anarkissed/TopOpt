@@ -5448,10 +5448,8 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
   if (a.lattice_strut_report) {
     const StrutStrengthReport& ss = a.lattice_strut;
     s += "  \"strut_strength\": {\n";
-    s += "    \"law\": \"PR 259 kfit *_cert envelope (bulk/free-surface/cut "
-         "populations), evidence/2026-07-31-lattice-dehomogenization-probe/"
-         "kfit.csv; strut_vm <= Kd(rho)*vm(Sigma) + Kv(rho)*|p(Sigma)|, "
-         "interlayer analogue Kild/Kilv\",\n";
+    // ★ The type's OWN law (ruling 11-08 (B)): octet's text is PR 259's, unchanged.
+    s += "    \"law\": \"" + strut_law_source(a.lattice_topology) + "\",\n";
     // ★ Ruling 11-06 2(a): gated where no solid voxel carries the load.
     s += "    \"gated\": " + std::string(a.strut_gated ? "true" : "false") + ",\n";
     // MARGINS — in-plane and interlayer SEPARATELY (bar L6): which one binds is
@@ -5494,8 +5492,8 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
          json_num(ss.il_cross_factor) + ",\n";
     // Out-of-band rho accounting (bar L5): law span vs certified band, clamped
     // voxels COUNTED — never silently extrapolated.
-    s += "    \"law_rho_span\": [" + json_num(strut_law_rho_min()) + ", " +
-         json_num(strut_law_rho_max()) + "],\n";
+    s += "    \"law_rho_span\": [" + json_num(strut_law_rho_min(a.lattice_topology)) +
+         ", " + json_num(strut_law_rho_max(a.lattice_topology)) + "],\n";
     s += "    \"rho_clamped_voxels\": " +
          std::to_string(ss.rho_clamped_voxels) + ",\n";
     // Cells-per-member regime guard (bar L4): below the floor the homogenized
@@ -5529,9 +5527,8 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
            "at a 44-276x cost ceiling. This is an accepted unknown, not a clean "
            "bill of health.\",\n";
     }
-    s += "    \"resolution_note\": \"joint-peak law rows are mesh-divergent "
-         "(~log in micro resolution, +10-18% per 32->48 step where measured); "
-         "the band-floor row is a still-rising lower bound\"\n";
+    s += "    \"resolution_note\": \"" + strut_law_resolution_note(a.lattice_topology) +
+         "\"\n";
     s += "  },\n";
   }
   // WHICH FRAME THIS RECEIPT'S DIRECTION-BEARING NUMBERS ARE IN (handoff

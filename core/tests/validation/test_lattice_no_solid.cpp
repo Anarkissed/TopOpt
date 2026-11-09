@@ -16,7 +16,10 @@
 //
 // §1 octet, latticed through, two scenarios: the strut law gates it; every margin is
 //    finite; it is never ACCEPTED on an unbounded margin.
-// §2 the same job as FCC (no measured strut law): not certified, said in words.
+// §2 the same job as Kelvin: every type has its own measured law now (ruling 11-08
+//    (B)), so Kelvin's law gates it and the receipt names that law and its band. (The
+//    under-the-floor words for a type other than octet are test_strut_strength 7c's:
+//    this bar fills its own grid, so the member-width guard reads it as thick.)
 // §3 an analyze job with a grading block on the same bar: the re-certification is
 //    never ACCEPTED on an unbounded margin.
 // §4 every run_info.json above is JSON: no bare inf or nan; a non-finite number is
@@ -224,17 +227,26 @@ int main() {
     CHECK(has(r, "\"governing\": \"heavy side\""), "§1 the heavy scenario governs");
   }
 
-  // ── §2 FCC: no measured strut law ──────────────────────────────────────────
-  const Lp fcc = lattice_part(dir, f, "fcc");
+  // ── §2 Kelvin: its own law decides, and the receipt names that law ─────────
+  const Lp kel = lattice_part(dir, f, "kelvin");
   {
-    const std::string& r = fcc.receipt;
-    std::printf("[no-solid] fcc: accepted %s, %s\n",
+    const std::string& r = kel.receipt;
+    const double m = num_after(r, "lattice_margin_effective");
+    std::printf("[no-solid] kelvin: margin %.4f (light %.4f, heavy %.4f), accepted %s, %s\n",
+                m, scenario_margin(r, "light down"), scenario_margin(r, "heavy side"),
                 has(r, "\"lattice_accepted\": true") ? "true" : "false",
-                fcc.refused.empty() ? "(written)" : fcc.refused.c_str());
-    CHECK(!has(r, "\"lattice_accepted\": true"), "§2 FCC latticed through is not accepted");
-    CHECK(has(r, "\"lattice_not_certified\": true") &&
-              has(r, "no measured strut-strength law"),
-          "§2 the receipt says not certified, and why, in words");
+                kel.refused.empty() ? "(written)" : kel.refused.c_str());
+    CHECK(!r.empty(), "§2 the receipt is written");
+    CHECK(std::isfinite(m), "§2 the lattice margin is finite");
+    CHECK(has(r, "\"gated\": true") && has(r, "\"strut_strength_uncertified\": false"),
+          "§2 Kelvin's own measured strut law is in the gate");
+    CHECK(has(r, "evidence/2026-11-09-lattice-type-strut-laws/kelvin/kfit.csv") &&
+              !has(r, "2026-07-31-lattice-dehomogenization-probe"),
+          "§2 the receipt names Kelvin's own law, not octet's");
+    CHECK(has(r, "\"law_rho_span\": [0.09375, 0.50521]"),
+          "§2 the law span on the receipt is Kelvin's band");
+    CHECK(!has(r, "\"lattice_accepted\": true") || std::isfinite(m),
+          "§2 never ACCEPTED on an unbounded margin");
   }
 
   // ── §3 an analyze job with a grading block ─────────────────────────────────
@@ -259,7 +271,7 @@ int main() {
 
   // ── §4 run_info.json is JSON ───────────────────────────────────────────────
   for (const auto& [name, ri] : std::vector<std::pair<std::string, std::string>>{
-           {"octet", oct.run_info}, {"fcc", fcc.run_info}, {"analyze", an_ri}}) {
+           {"octet", oct.run_info}, {"kelvin", kel.run_info}, {"analyze", an_ri}}) {
     const std::string bad = bare_words(ri);
     if (!bad.empty()) std::printf("  (%s run_info bare words: %s)\n", name.c_str(), bad.c_str());
     CHECK(!ri.empty() && bad.empty(), ("§4 " + name + ": no bare inf or nan").c_str());
