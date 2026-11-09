@@ -112,9 +112,10 @@ final class FlexibleR7M1Tests: XCTestCase {
         // #354's own again (its first statement is #354's switch) and the column is not drawn on the Flexible stage (H24).
         // Was: H18 as the filter's first statement.
         // ★ RE-PINNED (sync of #354 at 89af86dd): #354's own first statements now precede its switch (B3 7e37c45f, B5 3f293974)
-        let filter354 = "            // ★ B3: on Topology the chip column's settings are the Setup chip's rows. ★ B5: Paint lives in Edit faces —\n"
-            + "            // there it is the column's one chip (greyed on STEP, `EditFacesPaint`), and on no stage outside it.\n"
-            + "            if editFaces.isEditing { return id == .paint && viewerMesh != nil }\n"
+        // ★ RE-PINNED (UI-Notes B8, ruling 11-08 21:32Z item 1): Paint left the column for Edit faces' rail
+        let filter354 = "            // ★ B3: on Topology the chip column's settings are the Setup chip's rows. ★ B8 (ruling 11-08 21:32Z): Paint left\n"
+            + "            // the column for Edit faces' rail (`cutPaintTap`), so in Edit faces the column is empty.\n"
+            + "            if editFaces.isEditing { return false }\n"
             + "            if stage == .topology { return false }\n"
             // ★ RE-PINNED (UI-Notes B6 s1, his note 21): the Lattice stage's chips are its Settings rows too
             + "            // ★ B6 s1 (note 21): on the Lattice stage the chips are the Settings panel's rows; the band chips' Show / Hide stays\n"

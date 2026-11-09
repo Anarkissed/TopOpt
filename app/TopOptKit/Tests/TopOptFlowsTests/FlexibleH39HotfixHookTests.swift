@@ -72,9 +72,10 @@ final class FlexibleH39HotfixHookTests: XCTestCase {
         var out: [String] = []
         if ws.contains("$regionsOpen") { out.append("a binding hands regionsOpen to another view") }
         if ws.contains("regionsOpen = true") { out.append("something sets regionsOpen = true") }
-        // ★ RE-PINNED (UI-Notes B8, 11-07): Edit faces' view-only Selections keeps the old card's Regions button in its foot until
-        // the reviewer's answer on B8's look (asked 20:04Z, item 3), gated as H39 is (Edit faces opens from Flexible too). Was:
-        // exactly one toggle. Now: two, and every toggle is drawn only off the Flexible stage.
+        // ★ RE-PINNED (UI-Notes B8, 11-07): Edit faces' view-only Selections keeps the old card's Regions button in its foot —
+        // the reviewer's ruling 11-08 21:32Z: kept while the sheet's filter has no rail twin (CutRegionsTwinTests) — gated as H39
+        // is (Edit faces opens from Flexible too). Was: exactly one toggle. Now: two, and every toggle is drawn only off the
+        // Flexible stage.
         let toggles = ws.components(separatedBy: "regionsOpen.toggle()").count - 1
         if toggles != 2 { out.append("regionsOpen.toggle() appears \(toggles) times") }
         var from = ws.startIndex
