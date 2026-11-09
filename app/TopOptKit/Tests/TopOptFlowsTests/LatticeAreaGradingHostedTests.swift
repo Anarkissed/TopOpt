@@ -189,5 +189,68 @@ final class LatticeAreaGradingHostedTests: XCTestCase {
         XCTAssertNil(try XCTUnwrap(XCTUnwrap(s.runSpec(lineWidthMM: 0.45)).gradingDictionary())["shape_grade_strength"],
                      "0 is core's default and is not restated")
     }
+
+    /// ★ B7 slice 2b (the reviewer 11-08 21:32Z, rulings 3 and 4): a zone's own finish rides only beside the part's None
+    /// ("none") or Covered ("shell") — core's (1b2) refuses it beside the freeform skin — and the whole lattice block the
+    /// app sends for each part finish parses in the linked core. Under None the zone's "shell" is sent: before 2b the part
+    /// was core's default shell, so the zone's Covered was a silent no-op and its None was never sent at all.
+    func testAZoneFinishRidesOnlyBesideNoneOrCovered() throws {
+        XCTAssertTrue(TopOptKit.latticeOpenFinishWired, "premise: the linked core has E2.4's open finish")
+        let (p, _, z) = try twoAreas()
+        func block(_ finish: LatticeBoundaryTreatment) throws -> Data {
+            p.lattice.boundary = finish
+            let regions = p.latticeJobRegions().regions.map(\.wireDictionary)
+            var lat: [String: Any] = ["topology": "octet", "skin": finish.jobSkinValue, "regions": regions]
+            if let of = finish.jobOuterFinish { lat["outer_finish"] = of }
+            let text = String(decoding: try JSONSerialization.data(withJSONObject: lat, options: [.sortedKeys]), as: UTF8.self)
+            return Data(TopOptKit.latticeProbeBaseJob.replacingOccurrences(
+                of: #""output":"#,
+                with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "cell_mm": 4.0}, "lattice": "#
+                    + text + #", "output":"#).utf8)
+        }
+        p.lattice.areaGrading[z] = LatticeAreaGrading(outerFinish: "shell")
+        p.lattice.boundary = .none
+        XCTAssertEqual(try zoneRegion(p)["outer_finish"] as? String, "shell", "★ a covered zone on an open part is sent")
+        XCTAssertNil(TopOptKit.jobSchemaError(try block(.none)), "★ core parses the open part with its covered zone")
+        p.lattice.boundary = .covered
+        XCTAssertNil(try zoneRegion(p)["outer_finish"], "the part's own finish is not restated")
+        XCTAssertNil(TopOptKit.jobSchemaError(try block(.covered)))
+        p.lattice.boundary = .fullSkin
+        XCTAssertNil(try zoneRegion(p)["outer_finish"], "★ no zone finish beside the freeform skin")
+        XCTAssertNil(TopOptKit.jobSchemaError(try block(.fullSkin)), "★ the Skin part (skin + diagrid) parses")
+        // CONTROL: the gate is what keeps the Skin job alive — a zone's finish beside "skin" is refused by core
+        let specs = p.latticeJobRegions().regions
+        let i = try XCTUnwrap(specs.firstIndex { $0.kind == .face && abs($0.halfUMM - 15) < 1e-6 })
+        var regions = specs.map(\.wireDictionary)
+        regions[i]["outer_finish"] = "shell"
+        let lat: [String: Any] = ["topology": "octet", "skin": "diagrid", "outer_finish": "skin", "regions": regions]
+        let text = String(decoding: try JSONSerialization.data(withJSONObject: lat, options: [.sortedKeys]), as: UTF8.self)
+        let bad = Data(TopOptKit.latticeProbeBaseJob.replacingOccurrences(
+            of: #""output":"#,
+            with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "cell_mm": 4.0}, "lattice": "#
+                + text + #", "output":"#).utf8)
+        XCTAssertNotNil(TopOptKit.jobSchemaError(bad), "★ CONTROL: core refuses a zone finish beside Skin")
+        // ruling 3's line, in the reviewer's words
+        XCTAssertEqual(LatticeSetupWizard.zoneFinishPreviewLine(["Zone 1 runs open"]),
+                       "The preview shows the part's finish; Zone 1 runs open (see Results).")
+    }
+
+    /// ★★ His iPad notes 11-08: every group and zone set to No lattice under Start from "All lattice · − Lattice faces" —
+    /// the stage said "Nothing to lattice" and greyed Lattice. The project now lattices the whole part minus them.
+    func testStartFromMinusWithEverythingNoLatticeRuns() throws {
+        XCTAssertTrue(TopOptKit.latticeWholePartWired, "premise: the linked core takes whole_part")
+        let (p, g, z) = try twoAreas()
+        p.lattice.groupRoles[g] = .exclude
+        p.lattice.groupRoles[z] = .exclude
+        XCTAssertEqual(p.variantLatticeJobRefusal(), LatticeJobIncludeGate.nothingSetToLattice,
+                       "Start from + with nothing set to Lattice keeps its refusal")
+        p.lattice.wholePart = true
+        XCTAssertTrue(p.latticeStartsWhole)
+        XCTAssertNil(p.variantLatticeJobRefusal(), "★ his run is no longer refused")
+        let preview = p.latticePreviewRegions(p.latticeJobRegions().regions)
+        XCTAssertFalse(preview.isEmpty, "premise: his No-lattice faces and zone are emitted")
+        XCTAssertTrue(preview.allSatisfy { $0.role == .exclude }, "★ the preview cuts them out of the whole part")
+        XCTAssertEqual(p.latticeRunSpec(emission: p.latticeJobRegions())?.wholePart, true, "and the job says whole_part")
+    }
 }
 #endif

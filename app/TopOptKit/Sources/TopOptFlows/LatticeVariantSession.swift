@@ -595,13 +595,19 @@ public enum LatticeJobIncludeGate {
         guard latticeEnabled else { return latticeModeOff }
         return hasIncludeWall ? nil : nothingSetToLattice
     }
-    public static func refusal(latticeEnabled: Bool, regions: [LatticeRegionSpec]) -> String? {
-        refusal(latticeEnabled: latticeEnabled, hasIncludeWall: hasIncludeWall(regions))
+    /// ★★ `wholePart` (his iPad notes 11-08: "I have selected 'All Lattice' … but there's a notification saying 'Nothing to
+    /// lattice'"): under Start from − (core's `lattice.whole_part`) the WHOLE part is latticed and the faces only take it
+    /// away, so no Lattice face is needed — the stage refused every run of the mode it offers.
+    public static func latticesSomething(_ regions: [LatticeRegionSpec], wholePart: Bool) -> Bool {
+        wholePart || hasIncludeWall(regions)
+    }
+    public static func refusal(latticeEnabled: Bool, regions: [LatticeRegionSpec], wholePart: Bool = false) -> String? {
+        refusal(latticeEnabled: latticeEnabled, hasIncludeWall: latticesSomething(regions, wholePart: wholePart))
     }
     /// ★ ruling 4 (item 5): why Optimize may not start. Lattice OFF is no refusal — the run is
-    /// topology only; lattice ON with no include wall is, in the same words.
-    public static func optimizeRefusal(latticeEnabled: Bool, regions: [LatticeRegionSpec]) -> String? {
-        latticeEnabled && !hasIncludeWall(regions) ? nothingSetToLattice : nil
+    /// topology only; lattice ON with no include wall is, in the same words (none needed under Start from −).
+    public static func optimizeRefusal(latticeEnabled: Bool, regions: [LatticeRegionSpec], wholePart: Bool = false) -> String? {
+        latticeEnabled && !latticesSomething(regions, wholePart: wholePart) ? nothingSetToLattice : nil
     }
     /// ★ ruling 4 (item 6): the refusal a wall fixes — wherever it shows, one tap takes him to
     /// where walls are marked. Every other refusal is said without a tap.

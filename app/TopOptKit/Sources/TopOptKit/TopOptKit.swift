@@ -1032,8 +1032,10 @@ public struct LatticeReport: Equatable, Sendable {
                 variantFacesWithoutShape: Int = 0,
                 variantRegionsWithoutShape: [String] = [],
                 variantLegacyFaceWallsLeftOut: Int = 0,
-                planLaid: PlanLaid? = nil) {
+                planLaid: PlanLaid? = nil,
+                finishLines: [String] = []) {
         self.planLaid = planLaid
+        self.finishLines = finishLines
         self.regionCellsJSON = regionCellsJSON
         self.variantFacesWithoutShape = variantFacesWithoutShape
         self.variantRegionsWithoutShape = variantRegionsWithoutShape
@@ -1047,6 +1049,45 @@ public struct LatticeReport: Equatable, Sendable {
         self.emittedRegions = emittedRegions
         self.generated = generated
         self.strut = strut
+    }
+
+    /// ★ B7 slice 2 (the reviewer 11-08 21:32Z, ruling 3 (a)): the lattice receipt's FINISH facts, in plain words, for
+    /// Results — until slice 3 draws them in 3D. Empty when the receipt says none of them.
+    public let finishLines: [String]
+
+    /// Read them out of a lattice receipt (`variant_XXX_lattice.report.json`):
+    /// - `grading.shape_band.solid_where_unprintable` + `solid_box_mm` [min x, y, z, max x, y, z] (ruling 2);
+    /// - `open_finish` (E2.4): each open zone beside the covered part with the wall that closes it (`regions`,
+    ///   `wall_mm`), or, for a whole part open, its uncredited surface cells;
+    /// - `finish_certified: false` (Skin's "skin", no shell): why the lattice isn't accepted.
+    public static func finishLines(receipt: Data?) -> [String] {
+        guard let receipt, let obj = (try? JSONSerialization.jsonObject(with: receipt)) as? [String: Any] else { return [] }
+        func mm(_ x: Double) -> String { String(format: "%g", (x * 10).rounded() / 10) }
+        var out: [String] = []
+        if let band = (obj["grading"] as? [String: Any])?["shape_band"] as? [String: Any],
+           let n = band["solid_where_unprintable"] as? Int, n > 0 {
+            var line = "Solid where no cell prints: \(n) voxel\(n == 1 ? "" : "s")"
+            if let b = band["solid_box_mm"] as? [Double], b.count == 6 {
+                line += ", between x \(mm(b[0]))–\(mm(b[3])), y \(mm(b[1]))–\(mm(b[4])), z \(mm(b[2]))–\(mm(b[5])) mm"
+            }
+            out.append(line + ".")
+        }
+        if let open = obj["open_finish"] as? [String: Any] {
+            let wall = open["wall_mm"] as? Double ?? 0
+            let zones = open["regions"] as? [String] ?? []
+            // core words each: "<zone> open: a wall closes it from the covered part" (run_job.cpp, E2.4 per region)
+            for note in zones {
+                let walled = wall > 0 ? note.replacingOccurrences(of: "a wall", with: "a \(mm(wall)) mm wall") : note
+                out.append(walled.replacingOccurrences(of: " open: ", with: " is open: ") + ".")
+            }
+            if zones.isEmpty, let cut = open["cut_cell_voxels"] as? Int, cut > 0 {
+                out.append("Open finish: \(cut) voxels of cells at the surface get no strength credit (the safe floor).")
+            }
+        }
+        if obj["finish_certified"] as? Bool == false {
+            out.append("Skin: with no solid shell the engine doesn't certify this lattice yet, so it isn't accepted.")
+        }
+        return out
     }
 }
 
@@ -2492,6 +2533,19 @@ public enum TopOptKit {
                 of: #""output":"#,
                 with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "cell_mm": 3.0}, "lattice": {"topology": "octet", "regions": [{"role": "include", "kind": "face", "geometry": {"origin": [0, 0, 0], "normal": [0, 0, 1], "half_u_mm": 10, "half_w_mm": 10, "depth_mm": 5}"#
                     + extra + #"}]}, "output":"#).utf8)
+        }
+        guard jobSchemaError(job("")) == nil else { return false }   // the control
+        return jobSchemaError(job(#", "outer_finish": "none""#)) == nil
+    }()
+    /// ★ B7 slice 2b (ruling 11-06 (1), core E2.4 5fe8e992): does the linked core take the PART's open finish,
+    /// `lattice.outer_finish: "none"`? Before E2.4 core knew only shell / skin / shell+skin and refused it. The same
+    /// one-region probe job, with the key on the lattice block.
+    public static let latticeOpenFinishWired: Bool = {
+        func job(_ extra: String) -> Data {
+            Data(latticeProbeBaseJob.replacingOccurrences(
+                of: #""output":"#,
+                with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "cell_mm": 3.0}, "lattice": {"topology": "octet", "regions": [{"role": "include", "kind": "face", "geometry": {"origin": [0, 0, 0], "normal": [0, 0, 1], "half_u_mm": 10, "half_w_mm": 10, "depth_mm": 5}}]"#
+                    + extra + #"}, "output":"#).utf8)
         }
         guard jobSchemaError(job("")) == nil else { return false }   // the control
         return jobSchemaError(job(#", "outer_finish": "none""#)) == nil

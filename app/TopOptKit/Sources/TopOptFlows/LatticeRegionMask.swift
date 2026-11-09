@@ -282,7 +282,19 @@ public enum LatticeRegionMask {
     /// ★ ONLY `include` REGIONS COUNT. An `exclude` region is frozen SOLID — it
     /// carries no lattice at all — so showing struts there would be the same lie
     /// in the other direction.
-    public static func contains(_ p: SIMD3<Double>, regions: [LatticeRegionSpec]) -> Bool {
+    /// TEST CONTROL: the rule before 11-08 — an exclude region never cut the preview's lattice.
+    nonisolated(unsafe) public static var controlIncludesOnly = false
+
+    /// ★★ AND AN `exclude` REGION WINS OVER AN INCLUDE (his iPad notes 11-08: the preview drew lattice inside a No-lattice
+    /// zone). Core's own precedence (run_job.cpp `multiscale_region_mask`, `lattice_certification_mask`): keep-out beats both
+    /// roles, exclude beats include. The preview never subtracted an exclude, so a No-lattice face or zone inside a Lattice
+    /// slab showed struts the run leaves solid. `wholePart` (Start from − , core's `lattice.whole_part`): the whole part is
+    /// the include, and only the excludes are cut out of it.
+    public static func contains(_ p: SIMD3<Double>, regions: [LatticeRegionSpec], wholePart: Bool = false) -> Bool {
+        for r in regions where r.role == .exclude && !controlIncludesOnly {
+            if contains(p, region: r) { return false }
+        }
+        if wholePart { return true }
         for r in regions where r.role == .include {
             if contains(p, region: r) { return true }
         }
@@ -321,7 +333,26 @@ public enum LatticeRegionMask {
         -> LatticeVoxelGrid {
         guard LatticeJobIncludeGate.hasIncludeWall(regions) else {
             switch whenEmpty {
-            case .latticeEverything: return grid
+            case .latticeEverything:
+                // ★ his iPad notes 11-08 (Start from −): everything, minus what is set to No lattice
+                guard regions.contains(where: { $0.role == .exclude }) else { return grid }
+                var out = grid
+                var i = 0
+                for k in 0..<grid.nz {
+                    for j in 0..<grid.ny {
+                        for x in 0..<grid.nx {
+                            if out.values[i] != 0 {
+                                let p = SIMD3<Double>(
+                                    Double(grid.origin.x) + Double(x) * Double(grid.spacing.x),
+                                    Double(grid.origin.y) + Double(j) * Double(grid.spacing.y),
+                                    Double(grid.origin.z) + Double(k) * Double(grid.spacing.z))
+                                if !contains(p, regions: regions, wholePart: true) { out.values[i] = 0 }
+                            }
+                            i += 1
+                        }
+                    }
+                }
+                return out
             case .latticeNothing:
                 var out = grid
                 for i in 0..<out.values.count { out.values[i] = 0 }

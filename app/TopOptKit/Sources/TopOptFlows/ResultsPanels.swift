@@ -293,6 +293,8 @@ extension ResultsModel {
             if isSelected {
                 add("Latticed mass", latticeMassProvenanceLine)
                 add("Latticed mesh", latticeGeometrySummary)
+                // ★ B7 slice 2 (ruling 3): an optimize rung's own receipt, its finish facts in words
+                for n in LatticeReport.finishLines(receipt: selectedLattice?.receiptJSON) { add("Lattice", n) }
             }
         }
         return r
