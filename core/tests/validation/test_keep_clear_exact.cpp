@@ -259,6 +259,72 @@ int main() {
     CHECK(gone.bodies == 1 && gone.shells == 1, "(i) the loose piece under the printable minimum goes");
   }
 
+  // (j) E4, ruling 2026-11-07 19:55: a Keep clear on a CUT PIECE cuts the file in front of
+  // that piece only. The top face (z = 10) is face 0 here, cut at x = 0; a face Keep clear
+  // (3 mm) on its right half takes the bump under the tilted slab (x 8..12) and the far
+  // bump (x 14..18) and leaves the pad around the bore (x -16..-4). The same Keep clear on
+  // the whole top face takes the pad too (the control).
+  {
+    StepModel faced = model;
+    faced.face_count = 2;
+    faced.faces.assign(2, StepFaceInfo{});
+    faced.faces[0].kind = StepSurfaceKind::Plane;
+    faced.faces[0].plane_origin = Vec3{0.0, 0.0, 10.0};
+    faced.faces[0].plane_normal = Vec3{0.0, 0.0, 1.0};
+    faced.triangle_face.assign(faced.mesh.triangles.size(), 1);
+    for (std::size_t t = 0; t < faced.mesh.triangles.size(); ++t) {
+      bool top = true;
+      for (int v : faced.mesh.triangles[t])
+        top = top && std::fabs(faced.mesh.vertices[static_cast<std::size_t>(v)].z - 10.0) < 1e-9;
+      if (top) faced.triangle_face[t] = 0;
+    }
+    auto top_job = [&](bool piece) {
+      JobDescription j;
+      j.loads.present = true;
+      FaceRegionSpec spec;
+      spec.id = 7;
+      spec.name = "Top, right half";
+      spec.add = {0};
+      RegionCut cut;
+      cut.point = Vec3{0.0, 0.0, 0.0};
+      cut.normal = Vec3{1.0, 0.0, 0.0};
+      spec.cuts = {cut};
+      j.loads.face_regions.push_back(spec);
+      JobClearance c;
+      c.kind = "face";
+      c.slab_depth_mm = 3.0;
+      if (piece)
+        c.region_id = 7;
+      else
+        c.face_id = 0;
+      j.loads.clearances.push_back(c);
+      return j;
+    };
+    const Vec3 pad{kBore.x + 4.0, kBore.y, 10.5};
+    const Vec3 far_bump{16.0, 7.5, 10.5};
+    double cut_piece = 0.0, cut_whole = 0.0;
+    const TriangleMesh piece_out = cut_keep_clears(file, top_job(true), faced, 0.01, &cut_piece);
+    const TriangleMesh whole_out = cut_keep_clears(file, top_job(false), faced, 0.01, &cut_whole);
+    std::printf("[kc] (j) cut piece: %.4f mm3 cut; whole top face: %.4f mm3\n", cut_piece,
+                cut_whole);
+    CHECK(!mesh_encloses(whole_out, pad), "(j) control: the whole top face's Keep clear takes the pad");
+    CHECK(mesh_encloses(piece_out, pad), "(j) the right half's Keep clear leaves the pad on the left");
+    CHECK(!mesh_encloses(piece_out, under_slab) && !mesh_encloses(piece_out, far_bump),
+          "(j) and takes what is in front of the right half");
+    CHECK(cut_piece > 0.0 && cut_piece < cut_whole, "(j) the piece cuts less than its face");
+    // The plug in the bore is in no Keep clear here, so it stays a body of its own in
+    // both files: the piece's file is clean and has the bodies the whole face's has.
+    const WrittenAudit wa = audit_as_written(piece_out), ww = audit_as_written(whole_out);
+    std::printf("[kc] (j) piece: %d edge(s) on >2 triangles, %d open, %d point contact(s), "
+                "%d body(ies); whole face: %d body(ies)\n",
+                wa.non_manifold_edges, wa.boundary_edges, wa.non_manifold_vertices, wa.bodies,
+                ww.bodies);
+    CHECK(wa.non_manifold_edges == 0 && wa.boundary_edges == 0 && wa.non_manifold_vertices == 0,
+          "(j) the piece's cut file is clean as written");
+    CHECK(wa.bodies == 2 && ww.bodies == 2 && wa.shells == wa.bodies,
+          "(j) the part and the plug, each one closed shell, in both files");
+  }
+
   if (g_failures == 0) {
     std::printf("keep clear exact: all %d checks passed\n", g_checks);
     return 0;

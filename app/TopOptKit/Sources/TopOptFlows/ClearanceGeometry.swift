@@ -192,19 +192,32 @@ public struct ClearanceVolume: Equatable, Sendable {
     /// Which keep-out this is (bolt swept cylinder / face bounded slab).
     public let kind: TopOptKit.ClearanceKind
     public let shape: Shape
+    /// ★ E4 (j), the reviewer's ruling 2026-11-08 21:32 item 2 ("the wire and the drawing ship in one slice, so a release
+    /// never clears something the screen doesn't show"): a CUT PIECE's Keep clear is its face's own volume CLIPPED by the
+    /// piece's cuts — core's ClearanceClip, RegionCut's sense: a point is kept iff dot(p − point, normal) ≥ 0. Empty for
+    /// every whole face, manual primitive and lattice volume, which therefore draw exactly as before.
+    public let clips: [RegionCut]
 
-    public init(faceID: Int, kind: TopOptKit.ClearanceKind, shape: Shape) {
+    public init(faceID: Int, kind: TopOptKit.ClearanceKind, shape: Shape, clips: [RegionCut] = []) {
         self.faceID = faceID
         self.kind = kind
         self.shape = shape
+        self.clips = clips
+    }
+
+    /// This volume clipped by `cuts` as well (a cut piece's, E4 (j)).
+    public func clipped(by cuts: [RegionCut]) -> ClearanceVolume {
+        ClearanceVolume(faceID: faceID, kind: kind, shape: shape, clips: clips + cuts)
     }
 
     public var isDegenerate: Bool { if case .degenerate = shape { return true }; return false }
 
     /// ★ His iPad 2026-10-28 ("I can't seem to tap on a primitive to select it"): where a tap's ray (model space, `dir` unit)
     /// first enters this volume — 0 when it starts inside — or nil on a miss. A cylinder is the finite swept tube, a slab its
-    /// outward box; a shell / degenerate volume is not tappable.
+    /// outward box; a shell / degenerate volume is not tappable. ★ E4 (j): nor is a cut piece's (clipped) volume — it has
+    /// no row of its own to pick, so a tap on it reaches the surface as before.
     public func rayEntry(origin o: SIMD3<Float>, dir d: SIMD3<Float>) -> Float? {
+        guard clips.isEmpty else { return nil }
         switch shape {
         case let .cylinder(p, a, r, lo, hi):
             // Slab along the axis, then the infinite cylinder; the entry is the later of the two entries.
@@ -281,6 +294,134 @@ public struct ClearanceVolume: Equatable, Sendable {
     /// constructor rather than a hope about its callers.
     public static func shell(faceID: Int, shell: FaceOffsetShell) -> ClearanceVolume {
         ClearanceVolume(faceID: faceID, kind: .face, shape: .shell(shell))
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MARK: - ★ E4 (j): a clipped volume, drawn as a convex solid
+
+/// One flat face of a clearance volume drawn as a solid: its corners in order, and which of its edges are drawn as lines
+/// (edge i runs from `points[i]` to `points[(i + 1) % points.count]`).
+public struct ClearancePolygon: Equatable, Sendable {
+    public var points: [SIMD3<Float>]
+    public var edgeDrawn: [Bool]
+    public init(points: [SIMD3<Float>], edgeDrawn: [Bool]) { self.points = points; self.edgeDrawn = edgeDrawn }
+}
+
+extension ClearanceVolume {
+    /// The circle tessellation a cylinder is drawn with (`MeshRenderer.setClearanceVolumes`' `ring`).
+    public static let ringSegments = 28
+
+    /// ★ E4 (j): THE VOLUME AS A CONVEX SOLID, CLIPPED BY ITS CUTS. A swept cylinder and a bounded slab are both convex,
+    /// and a convex solid cut by a half-space is convex again: each flat face is clipped (Sutherland–Hodgman) and each cut
+    /// is closed by one cap, the convex polygon of the points where the faces cross it. So the solid drawn is exactly the
+    /// unclipped one's tessellation ∩ every cut — the region core keeps clear (`inside_clips` ∧ the face's own volume).
+    /// Lines: the unclipped draw's rims, every 7th axial edge and the box's edges, plus every cap's outline. Empty for a
+    /// shell or a degenerate volume (neither is a Keep clear a piece sends), and when the cuts leave nothing.
+    public func solidPolygons() -> [ClearancePolygon] {
+        var polys = Self.convexFaces(shape)
+        for c in clips {
+            polys = Self.clip(polys, by: c)
+            if polys.isEmpty { break }
+        }
+        return polys
+    }
+
+    /// The solid's drawn edges, each once (two faces sharing an edge would draw it twice, doubling its alpha).
+    public func solidEdges() -> [(SIMD3<Float>, SIMD3<Float>)] {
+        var seen: Set<[Int32]> = []
+        var out: [(SIMD3<Float>, SIMD3<Float>)] = []
+        func q(_ p: SIMD3<Float>) -> [Int32] { [Int32((p.x * 1e3).rounded()), Int32((p.y * 1e3).rounded()), Int32((p.z * 1e3).rounded())] }
+        for poly in solidPolygons() {
+            let n = poly.points.count
+            for i in 0..<n where poly.edgeDrawn[i] {
+                let a = poly.points[i], b = poly.points[(i + 1) % n]
+                let ka = q(a), kb = q(b)
+                if ka == kb { continue }
+                let key = ka.lexicographicallyPrecedes(kb) ? ka + kb : kb + ka
+                if seen.insert(key).inserted { out.append((a, b)) }
+            }
+        }
+        return out
+    }
+
+    /// The unclipped volume's flat faces, with the unclipped draw's edges marked.
+    static func convexFaces(_ shape: Shape) -> [ClearancePolygon] {
+        switch shape {
+        case let .cylinder(axisPoint, axisDir, radius, tLo, tHi):
+            let ring = ringSegments
+            let dir = simd_length(axisDir) > 1e-6 ? simd_normalize(axisDir) : SIMD3<Float>(0, 0, 1)
+            let (u, v) = planeBasis(normal: dir)
+            let c0 = axisPoint + dir * tLo, c1 = axisPoint + dir * tHi
+            func rim(_ centre: SIMD3<Float>, _ k: Int) -> SIMD3<Float> {
+                let a = Float(k % ring) * (2 * .pi / Float(ring))
+                return centre + (u * cos(a) + v * sin(a)) * radius
+            }
+            var out: [ClearancePolygon] = []
+            for k in 0..<ring {
+                // the side quad a_k → a_k+1 → b_k+1 → b_k: its two rim edges, and the axial edge b_k → a_k every 7th
+                out.append(ClearancePolygon(points: [rim(c0, k), rim(c0, k + 1), rim(c1, k + 1), rim(c1, k)],
+                                            edgeDrawn: [true, false, true, k % 7 == 0]))
+            }
+            out.append(ClearancePolygon(points: (0..<ring).reversed().map { rim(c0, $0) },
+                                        edgeDrawn: Array(repeating: false, count: ring)))   // the rims draw its outline
+            out.append(ClearancePolygon(points: (0..<ring).map { rim(c1, $0) },
+                                        edgeDrawn: Array(repeating: false, count: ring)))
+            return out
+        case let .slab(centre, normal, uAxis, vAxis, halfU, halfV, depthMM):
+            let n = simd_length(normal) > 1e-6 ? simd_normalize(normal) : SIMD3<Float>(0, 0, 1)
+            let du = uAxis * halfU, dv = vAxis * halfV, dn = n * depthMM
+            let inner = [centre - du - dv, centre + du - dv, centre + du + dv, centre - du + dv]
+            let all = inner + inner.map { $0 + dn }
+            let quads = [[0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4], [2, 3, 7, 6], [1, 2, 6, 5], [0, 4, 7, 3]]
+            return quads.map { ClearancePolygon(points: $0.map { all[$0] }, edgeDrawn: [true, true, true, true]) }
+        case .shell, .degenerate:
+            return []
+        }
+    }
+
+    /// Clip a convex solid's faces by one half-space (dot(p − point, normal) ≥ 0) and close the cut with its cap. A strict
+    /// cut (> 0) draws the same: the plane itself has no volume.
+    static func clip(_ polys: [ClearancePolygon], by cut: RegionCut) -> [ClearancePolygon] {
+        let raw = SIMD3<Float>(cut.normal)
+        guard simd_length(raw) > 1e-12 else { return [] }   // core: a zero normal keeps nothing
+        let n = simd_normalize(raw), o = SIMD3<Float>(cut.point)
+        let eps: Float = 1e-4
+        func side(_ p: SIMD3<Float>) -> Float { simd_dot(p - o, n) }
+        var out: [ClearancePolygon] = []
+        var onCut: [SIMD3<Float>] = []
+        for poly in polys {
+            let m = poly.points.count
+            var pts: [SIMD3<Float>] = [], drawn: [Bool] = []
+            for i in 0..<m {
+                let s = poly.points[i], e = poly.points[(i + 1) % m]
+                let ds = side(s), de = side(e)
+                let sIn = ds >= -eps, eIn = de >= -eps
+                if sIn {
+                    pts.append(s); drawn.append(poly.edgeDrawn[i])   // the edge leaving s is part of edge i
+                    if abs(ds) <= eps { onCut.append(s) }
+                }
+                if sIn != eIn {
+                    let t = Swift.min(Swift.max(ds / (ds - de), 0), 1)
+                    let x = s + (e - s) * t
+                    pts.append(x)
+                    // leaving the kept side, the next edge runs along the cut (the cap draws it); entering, it is edge i's
+                    drawn.append(sIn ? false : poly.edgeDrawn[i])
+                    onCut.append(x)
+                }
+            }
+            if pts.count >= 3 { out.append(ClearancePolygon(points: pts, edgeDrawn: drawn)) }
+        }
+        // ★ THE CAP: the cut's points are a convex polygon in the cut's plane — ordered round their centre.
+        var cap: [SIMD3<Float>] = []
+        for p in onCut where !cap.contains(where: { simd_distance($0, p) <= 1e-3 }) { cap.append(p) }
+        if cap.count >= 3 {
+            let c = cap.reduce(SIMD3<Float>(repeating: 0), +) / Float(cap.count)
+            let (u, v) = planeBasis(normal: n)
+            cap.sort { atan2(simd_dot($0 - c, v), simd_dot($0 - c, u)) < atan2(simd_dot($1 - c, v), simd_dot($1 - c, u)) }
+            out.append(ClearancePolygon(points: cap, edgeDrawn: Array(repeating: true, count: cap.count)))
+        }
+        return out
     }
 }
 

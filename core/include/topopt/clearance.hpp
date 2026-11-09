@@ -287,6 +287,18 @@ struct ClearanceVoxelMask {
   }
 };
 
+// ── ★ E4 (j): A KEEP CLEAR ON A CUT PIECE (ruling 2026-11-07 19:55) ──────────
+// A cut piece is a face region: its parent faces plus half-space cuts (face_region.hpp's
+// RegionCut). Its Keep clear is each member face's own one, CLIPPED by those cuts, so a
+// piece clears in front of itself and nowhere else. One clip, with RegionCut's meaning:
+// a point p is kept iff dot(p - point, normal) >= 0 (> 0 when `strict`); `normal` need
+// not be unit and must be non-zero.
+struct ClearanceClip {
+  Vec3 point{0.0, 0.0, 0.0};
+  Vec3 normal{0.0, 0.0, 0.0};
+  bool strict = false;
+};
+
 struct ClearanceGeometry {
   ClearanceKind kind = ClearanceKind::Bolt;
   // ★ Set when the job STATED frame axes that disagree with plane_basis(). The
@@ -337,6 +349,9 @@ struct ClearanceGeometry {
   // second -- measured, not assumed (TOPOPT_OUTLINE_UV_FRAME during calibration).
   std::vector<std::vector<std::array<double, 2>>> outline_uv;
   int outline_frame = 0;
+  // ★ E4 (j): the cut piece's clips (see ClearanceClip). Empty -- every face, manual
+  // and include region -- is the unclipped region, byte-identical to before E4.
+  std::vector<ClearanceClip> clips;
 };
 
 // Resolve the predicate from B-rep face `face_id` of `model` (the AUTO path): the
@@ -348,6 +363,18 @@ struct ClearanceGeometry {
 // is not parallel to the mesh.
 ClearanceGeometry resolve_clearance_from_face(const StepModel& model, int face_id,
                                               const ClearanceParams& params);
+
+// ★ E4 (j): the Keep clear of a CUT PIECE -- each of `faces`' own Keep clear
+// (resolve_clearance_from_face), clipped by `clips`. A face whose surface is not of the
+// clearance's kind gives nothing, as it does on the face path; the caller refuses a
+// piece that gives nothing at all. Out-of-range faces throw as on the face path.
+std::vector<ClearanceGeometry> resolve_clearance_from_faces(
+    const StepModel& model, const std::vector<int>& faces,
+    const std::vector<ClearanceClip>& clips, const ClearanceParams& params);
+
+// The bore radius a bolt Keep clear's defaults are read from on a cut piece: the
+// largest round face among `faces` (0 when none is round).
+double largest_bore_radius_mm(const StepModel& model, const std::vector<int>& faces);
 
 // Resolve the predicate from user-supplied MANUAL geometry (no B-rep): `geom`
 // carries the base axis/radius/half-length or origin/normal/half-extents, and

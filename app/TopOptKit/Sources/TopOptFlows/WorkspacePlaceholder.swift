@@ -267,8 +267,10 @@ public struct WorkspacePlaceholder: View {
     /// ★ B8 (row 34): the group whose row is lit in Edit faces' view-only Selections — its faces light on the part, for the
     /// tools; nil = none. Joins nothing and changes nothing.
     @State private var cutLitGroup: UUID? = nil
-    /// ★ B8: Edit faces' scenario folders that are open (the active scenario's opens on entry).
-    @State private var cutOpenFolders: Set<UUID> = []
+    /// ★ B8: Edit faces' scenario folders that are open; nil = untouched, the active scenario's open (`cutOpenFolderSet`). Derived,
+    /// never written on appear: a write there grew the panel's rows in the frame it first measured them, its body kept the
+    /// closed folders' height, and the hidden rows took the foot's taps (11-09, CutFootHostedTests).
+    @State private var cutOpenFolders: Set<UUID>? = nil
     /// ★ B8: from Lattice, Edit faces' Topology panel (folded first, as on Lattice Setup).
     @State private var cutTopologyOpen = false
     /// The region a viewer tap corrects, or nil. Hoisted out of the sheet so the
@@ -341,6 +343,11 @@ public struct WorkspacePlaceholder: View {
     /// The cut the user has TAPPED and is now aiming — the one the checkmark
     /// commits. Nil while merely hovering.
     @State private var heldCut: SurfaceCut?
+    /// ★ B8 (row 36, R1, P6): WHERE THE CUT LIES, by the face it is on (CutAim) — a flat face's line, a hole's Along │
+    /// Across, anything else's Which plane?. While it asks, no line (`heldCut` nil); once answered `heldCut` is its plane.
+    @State private var cutAim: CutAim?
+    /// The aim when the cut handle's drag began.
+    @State private var cutAimDragStart: CutAim?
     /// Where the current rotate drag started, so successive drags accumulate.
     @State private var cutRotationBase: Double = 0
     /// §6 — how far the cut has been nudged off the piece's centre, in mm, along
@@ -614,6 +621,8 @@ public struct WorkspacePlaceholder: View {
     /// group (the escape when tap-selection over-selects); OFF → tap-select is unchanged. The
     /// painted region becomes a pseudo-face routed through the SAME face-id contract as a tap.
     @State private var paintActive = false
+    /// ★ B8: the rail's Paint is the tool (on a STEP too, where it brushes nothing and says why — `cutPaintWhy`).
+    @State private var cutPaintPicked = false
     /// Paint mode: the erase MODIFIER — when on, the brush reverts triangles to their native face.
     @State private var paintErasing = false
     /// Paint mode: brush radius in view points; a small stepper in the paint drawer changes it.
@@ -1018,6 +1027,7 @@ public struct WorkspacePlaceholder: View {
                               surfaceRefusal = nil
                               heldCut = nil
                               hoveredCut = nil
+                              cutAim = nil   // ★ B8
                               if surfaceTool != .union { surfacePatternFace = nil }
                           },
                           onProjection: { projection = $0 },
@@ -1439,8 +1449,10 @@ public struct WorkspacePlaceholder: View {
                 // required for the Surface stage").
                 if viewerMesh != nil, visible.surfaceEditing {
                     surfaceToolsPanel
+                    if paintActive { cutPaintBarLayer }   // ★ B8 (ruling 11-08 21:32Z): Paint's controls, docked at the top
                     // ★ the confirm floats NEXT TO the action, not in the tray.
                     surfaceActionCluster.ignoresSafeArea()
+                    cutHandleOverlay.ignoresSafeArea()   // ★ B8 (R1): the cut's ↕ handle on its line
                 }
                 // ★ THE WIREFRAME AND X-RAY, ON THE TOPOLOGY PAGE TOO (maintainer,
                 // 2026-08-16: "We should keep wireframe and xray view throughout
@@ -5619,6 +5631,7 @@ public struct WorkspacePlaceholder: View {
         surfaceSelectedFace = nil
         heldCut = nil
         hoveredCut = nil
+        cutAim = nil   // ★ B8
         surfaceUnion.clear()
         surfacePatternFace = nil
         surfacePatternPiece = nil
@@ -5904,13 +5917,9 @@ public struct WorkspacePlaceholder: View {
                 }
             }
         case .paint:
-            VStack(alignment: .trailing, spacing: DS.Space.s) {
-                paintChip.flexibleRepairedStepPaintGate(path: project.importedFile?.path).background(chipWidthReader(id))   // Flexible (PR #362) H48 — paint off on a repaired STEP (ruling 2026-10-23 18:56)
-                if paintActive {
-                    paintDrawer
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
-            }
+            // ★ B8 (ruling 11-08 21:32Z item 1): Paint is Edit faces' rail tool (`cutPaintTap`), its controls in the docked
+            // bar; it is never a chip (`visibleSettingsChips` shows no .paint), and H48's gate moved with it (`cutPaintWhy`).
+            EmptyView()
         }
     }
 
@@ -5919,9 +5928,9 @@ public struct WorkspacePlaceholder: View {
     /// chip appears when ≥ 1 Face protection exists"); the rest are always present.
     private var visibleSettingsChips: [SettingsChipID] {
         SettingsChipID.allCases.filter { id in
-            // ★ B3: on Topology the chip column's settings are the Setup chip's rows. ★ B5: Paint lives in Edit faces —
-            // there it is the column's one chip (greyed on STEP, `EditFacesPaint`), and on no stage outside it.
-            if editFaces.isEditing { return id == .paint && viewerMesh != nil }
+            // ★ B3: on Topology the chip column's settings are the Setup chip's rows. ★ B8 (ruling 11-08 21:32Z): Paint left
+            // the column for Edit faces' rail (`cutPaintTap`), so in Edit faces the column is empty.
+            if editFaces.isEditing { return false }
             if stage == .topology { return false }
             // ★ B6 s1 (note 21): on the Lattice stage the chips are the Settings panel's rows; the band chips' Show / Hide stays
             // (the lattice-only view's own, not one of the chips his note moves)
@@ -6023,97 +6032,7 @@ public struct WorkspacePlaceholder: View {
         .help("The one preserve-depth every Face protection uses. Tap to change.")
     }
 
-    // MARK: paint mode (handoff 2026-07-25)
-
-    /// Paint-mode tint — a distinct violet so the brush toggle + drawer read as their own tool,
-    /// apart from anchor-green / clearance-red / protect-teal.
-    static let paintTint = Color(red: 0.64, green: 0.44, blue: 0.98)
-
-    /// The Paint-mode toggle chip. OFF → tap to enter paint mode (a one-finger drag then brushes
-    /// faces into the active group — the escape when tap-selection over-selects); ON → tap to leave.
-    /// Styled like the other settings chips; brightens when active.
-    private var paintChip: some View {
-        // ★ B5: Paint is an Edit faces tool for a mesh (STL) part; on STEP it is greyed with one line why.
-        let row = EditFacesPaint.row(modelPath: project.importedFile?.path, editingFaces: editFaces.isEditing)
-        let greyedLine: String? = { if case .greyed(let why) = row { return why } else { return nil } }()
-        return VStack(alignment: .trailing, spacing: 2) {
-            paintChipButton.disabled(greyedLine != nil).opacity(greyedLine != nil ? 0.45 : 1)
-            if let greyedLine {
-                Text(greyedLine).dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
-                    .lineLimit(1).fixedSize().accessibilityIdentifier("edit-faces-paint-why")
-            }
-        }
-    }
-
-    private var paintChipButton: some View {
-        Button {
-            paintActive.toggle()
-            if paintActive {
-                paintErasing = false
-                model.toast = "Paint mode — drag one finger to brush faces into the selection; two fingers orbit"
-            }
-        } label: {
-            HStack(spacing: DS.Space.s) {
-                Image(systemName: paintActive ? "paintbrush.pointed.fill" : "paintbrush.pointed")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(paintActive ? DS.Color.textPrimary.color : Self.paintTint)
-                Text("Paint").dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
-                    .foregroundStyle(DS.Color.textPrimary.color)
-            }
-            .padding(.vertical, 9).padding(.horizontal, DS.Space.l)
-            .background(Capsule().fill(paintActive ? Self.paintTint : DS.Surface.bar.color)
-                .overlay(Capsule().strokeBorder(paintActive ? Color.clear : DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
-        }
-        .buttonStyle(.plain)
-        .dsShadow(DS.Shadow.panel)
-        .help("Brush faces into the active group when a tap over-selects. One finger paints; two fingers orbit.")
-    }
-
-    /// The paint controls that unfurl beneath the chip when paint mode is on: the ERASE modifier
-    /// (revert triangles to their native face) and a brush-size stepper, plus a one-line reminder
-    /// of the gesture. Kept small and right-aligned like the design-box drawer.
-    private var paintDrawer: some View {
-        VStack(alignment: .leading, spacing: DS.Space.s) {
-            Button { paintErasing.toggle() } label: {
-                HStack(spacing: DS.Space.s) {
-                    Image(systemName: paintErasing ? "eraser.fill" : "eraser")
-                        .font(.system(size: 12, weight: .bold))
-                    Text(paintErasing ? "Erasing" : "Erase")
-                        .dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
-                    Spacer(minLength: 0)
-                }
-                .foregroundStyle(paintErasing ? DS.Color.textPrimary.color : DS.Color.textSecondary.color)
-                .padding(.vertical, 8).padding(.horizontal, DS.Space.m)
-                .background(Capsule().fill(paintErasing ? Self.paintTint.opacity(0.9)
-                                                        : DS.Color.fillSubtle.color))
-            }
-            .buttonStyle(.plain)
-
-            HStack(spacing: DS.Space.s) {
-                Text("Brush").dsStyle(DS.TypeScale.footnote).foregroundStyle(DS.Color.textSecondary.color)
-                Button { brushRadiusPoints = Swift.max(12, brushRadiusPoints - 6) } label: {
-                    Image(systemName: "minus.circle.fill").font(.system(size: 16))
-                }.buttonStyle(.plain)
-                Text("\(Int(brushRadiusPoints))").dsStyle(DS.TypeScale.footnote).fontWeight(.bold)
-                    .foregroundStyle(DS.Color.textPrimary.color).frame(minWidth: 22)
-                Button { brushRadiusPoints = Swift.min(64, brushRadiusPoints + 6) } label: {
-                    Image(systemName: "plus.circle.fill").font(.system(size: 16))
-                }.buttonStyle(.plain)
-            }
-            .foregroundStyle(Self.paintTint)
-
-            Text("Drag one finger to paint into the selection; two fingers orbit. Then pick Anchor or Load.")
-                .dsStyle(DS.TypeScale.caption)
-                .foregroundStyle(DS.Color.textTertiary.color)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(DS.Space.m)
-        .frame(width: 210, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: DS.Radius.panel).fill(DS.Surface.panel.color)
-            .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel)
-                .strokeBorder(Self.paintTint.opacity(0.5), lineWidth: 1)))
-        .dsShadow(DS.Shadow.panel)
-    }
+    // MARK: paint mode (handoff 2026-07-25) — ★ B8: its chip and drawer left for Edit faces' rail and docked bar (`cutPaintTap`)
 
     /// Reads a chip's rendered width into `SettingsChipWidthKey` (item 12: MEASURED width).
     private func chipWidthReader(_ id: SettingsChipID) -> some View {
@@ -7158,6 +7077,7 @@ public struct WorkspacePlaceholder: View {
         switch tool {
         case .select:
             heldCut = nil
+            cutAim = nil   // ★ B8
 
         case .cut:
             // ★ THE MIDDLE OF THE PIECE YOU TAPPED, not of the face it came from
@@ -7173,6 +7093,10 @@ public struct WorkspacePlaceholder: View {
                 SurfaceCut.centred(onRegion: $0, of: faceID,
                                    regions: project.faceRegions, in: mesh)
             } ?? SurfaceCut.centred(onFace: faceID, in: mesh)
+            // ★ B8 (row 36): the aim by the face's kind — flat: its line at once; a hole or anything else: the question first
+            cutAim = CutAim.make(face: faceID, piece: surfaceSelected ?? project.surfaceCutTarget(face: faceID),
+                                 regions: project.faceRegions, mesh: mesh)
+            if let a = cutAim { heldCut = a.surfaceCut() }
             cutRotation = 0
             cutRotationBase = 0
             cutRotationDetent = 0
@@ -7296,8 +7220,10 @@ public struct WorkspacePlaceholder: View {
             ? Array(similarMatches).sorted() : []
 
         surfaceTool = tool
+        cutPaintPutDown()   // ★ B8: Paint is the rail's 7th tool, so any other tool puts it down
         heldCut = nil
         hoveredCut = nil
+        cutAim = nil   // ★ B8
         surfaceRefusal = nil
         surfaceUnion.clear()
         surfacePatternFace = nil
@@ -7764,13 +7690,18 @@ public struct WorkspacePlaceholder: View {
         VStack(spacing: 6) {
             ForEach(SurfaceTool.allCases, id: \.rawValue) { tool in
                 // Abandons the last tool's work in progress, then arms this one on whatever is still selected — see
-                // `surfaceSwitch`.
-                cutRailButton(tool.icon, label: tool.title, on: surfaceTool == tool, key: "cutTool-\(tool.title)") {
+                // `surfaceSwitch` (which also puts Paint down: one tool at a time).
+                cutRailButton(tool.icon, label: tool.title, on: surfaceTool == tool && !cutPaintPicked,
+                              key: "cutTool-\(tool.title)") {
                     surfaceSwitch(to: tool)
                 }
             }
-            // ★ §2 — THE PENCIL BUTTON, a switch rather than a tool, so below a thin divider (the reviewer's answer on
-            // where it goes in B8 is pending; it stays in the rail meanwhile).
+            // ★ B8 (the reviewer's ruling 11-08 21:32Z item 1; mockup #cut .rail, "Paint (STL only)"): Paint, the rail's 7th
+            // tool. On a mesh it brushes, its controls in the bar docked at the top of the free model area (`cutPaintBarLayer`);
+            // on a STEP it brushes nothing and the rail's line says why (`cutPaintWhy`).
+            cutRailButton("paintbrush.pointed", label: "Paint", on: cutPaintPicked, key: "cutTool-Paint") { cutPaintTap() }
+            // ★ §2 — THE PENCIL BUTTON, a switch rather than a tool, so below a thin divider (the reviewer's ruling 11-08
+            // 21:32Z item 1: (a), in the rail under a divider).
             Rectangle().fill(DS.Color.strokeStrong.color).frame(width: 24, height: 1).padding(.vertical, 2)
             // (its action stays the bare toggle, written out: SurfacePencilToggleExemptionTests)
             Button { surfacePencilOnly.toggle() } label: { cutRailGlyph("applepencil", on: surfacePencilOnly) }
@@ -7786,7 +7717,9 @@ public struct WorkspacePlaceholder: View {
         // ONE LINE saying what a tap does, to the LEFT of the rail (the mockup's: 12 pt, secondary, 12 pt off the rail,
         // 10 pt under its top) — a rail of icons must not be a guessing game.
         .overlay(alignment: .topLeading) {
-            Text(surfaceRefusal ?? surfaceHint)
+            // ★ B8: with Paint picked the line is Paint's — what a drag does, or (a STEP) why it brushes nothing
+            let paintWhy = cutPaintPicked ? cutPaintWhy : nil
+            Text(surfaceRefusal ?? paintWhy ?? (cutPaintPicked ? EditFacesCopy.paintSTL : surfaceHint))
                 .font(.system(size: 12))
                 .foregroundStyle((surfaceRefusal == nil
                                   ? DS.Color.textSecondary : DS.Color.warning).color)
@@ -7794,6 +7727,7 @@ public struct WorkspacePlaceholder: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(width: 190, alignment: .trailing)
                 .background(DSParts.publish("cutRailHint"))
+                .background(Group { if paintWhy != nil { DSParts.publish("cutPaintWhy") } })
                 .offset(x: -202, y: 10)
                 .allowsHitTesting(false)
         }
@@ -7823,6 +7757,124 @@ public struct WorkspacePlaceholder: View {
             .contentShape(Circle())
     }
 
+    // MARK: ★ B8 — Paint, the rail's 7th tool (the reviewer's ruling 11-08 21:32Z item 1)
+
+    /// The rail's Paint: picks it (the other tools' work in progress is let go, as any tool switch does) or puts it down. It
+    /// brushes only where `cutPaintWhy` is nil.
+    private func cutPaintTap() {
+        if cutPaintPicked { cutPaintPutDown(); return }
+        surfaceSwitch(to: .select)
+        cutPaintPicked = true
+        paintErasing = false
+        paintActive = cutPaintWhy == nil
+    }
+
+    /// Paint down: no brush, no bar.
+    private func cutPaintPutDown() {
+        cutPaintPicked = false
+        paintErasing = false
+        paintActive = false
+    }
+
+    /// ★ Why the rail's Paint brushes nothing on this part (nil: it brushes): a STEP's CAD faces are already exact (B5's rule,
+    /// `EditFacesPaint`); a STEP the import repaired has triangles core's run does not share (H48).
+    private var cutPaintWhy: String? {
+        let path = project.importedFile?.path
+        if !FlexibleRepairedStepPaint.paintAllowed(path: path) { return FlexibleRepairedStepPaint.line }   // Flexible (PR #362) H48 — paint off on a repaired STEP (ruling 2026-10-23 18:56)
+        if case .greyed(let why) = EditFacesPaint.row(modelPath: path, editingFaces: true) { return why }
+        return nil
+    }
+
+    /// ★ Paint's bar, docked at the top of the free model area — the one place every print-plan bar docks (design-system "One
+    /// place for the bar"): from the panel's right edge to the view corner's column, at the panel's top line, centred.
+    private var cutPaintBarLayer: some View {
+        GeometryReader { geo in
+            let left = PageChrome.edge + PageChrome.panelWidth + PageChrome.gap
+            let right = geo.size.width - PageChrome.gizmoClearance
+            VStack(spacing: 0) {
+                cutPaintBar.frame(width: max(0, right - left))
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, left)
+            .padding(.top, PageChrome.panelTop)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+    }
+
+    /// Erase │ Brush − n + — one row where it fits; on a narrow screen (an 11" upright: 199.5 pt between the panel and the view
+    /// corner) the brush's size goes under Erase, its word over its − n + (the bar wraps between its groups, never inside one).
+    private var cutPaintBar: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) {
+                cutPaintEraseButton
+                Rectangle().fill(DS.Color.strokeStrong.color).frame(width: 1, height: 24)
+                cutPaintBrushSize(stacked: false)
+            }
+            .padding(5)
+            .background(Capsule().fill(DS.Surface.bar.color).overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+            .background(DSParts.publish("cutPaintBar"))
+            VStack(alignment: .leading, spacing: 0) {
+                cutPaintEraseButton
+                cutPaintBrushSize(stacked: true)
+            }
+            .padding(5)
+            .background(RoundedRectangle(cornerRadius: 22).fill(DS.Surface.bar.color)
+                .overlay(RoundedRectangle(cornerRadius: 22).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+            .background(DSParts.publish("cutPaintBar"))
+        }
+        .dsShadow(DS.Shadow.panel)
+    }
+
+    /// Erase: a stroke takes paint off instead of laying it on.
+    private var cutPaintEraseButton: some View {
+        Button { paintErasing.toggle() } label: {
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: paintErasing ? "eraser.fill" : "eraser").font(.system(size: 14, weight: .semibold))
+                Text("Erase").font(.system(size: 13, weight: .semibold))
+            }
+            .foregroundStyle(paintErasing ? Color.white : DS.Color.textPrimary.color)
+            .padding(.horizontal, DS.Space.l)
+            .frame(minHeight: 44)
+            .background(Capsule().fill((paintErasing ? DS.Color.accent : DS.Color.fillSubtle).color))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .background(DSParts.publish(paintErasing ? "cutPaintErase-on" : "cutPaintErase"))
+        .accessibilityLabel("Erase")
+    }
+
+    /// The brush's size: its word, − · the number (the app's NumberField) · +. `stacked`: the word over its − n +.
+    @ViewBuilder private func cutPaintBrushSize(stacked: Bool) -> some View {
+        let set: (Double) -> Void = { brushRadiusPoints = CGFloat(Swift.min(64, Swift.max(12, $0.rounded()))) }
+        let word = Text("Brush").font(.system(size: 12)).foregroundStyle(DS.Color.textSecondary.color).padding(.horizontal, 6).fixedSize()
+        let stepper = HStack(spacing: 4) {
+            cutPaintRound("minus", "Smaller brush", key: "cutPaintBrushMinus") { set(Double(brushRadiusPoints) - 6) }
+            NumberField(key: "cutPaintBrush", title: "Brush",
+                        spec: FlexNumberSpec(value: Double(brushRadiusPoints), unit: "", step: 6, range: 12...64, decimals: 0),
+                        size: .bare, onCommit: set)
+            cutPaintRound("plus", "Bigger brush", key: "cutPaintBrushPlus") { set(Double(brushRadiusPoints) + 6) }
+        }
+        if stacked {
+            VStack(alignment: .leading, spacing: 2) { word.padding(.top, 6); stepper }
+        } else {
+            HStack(spacing: 4) { word; stepper }
+        }
+    }
+
+    /// A 44 pt round button (the cut bar's).
+    private func cutPaintRound(_ icon: String, _ label: String, key: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon).font(.system(size: 14, weight: .bold))
+                .foregroundStyle(DS.Color.textPrimary.color)
+                .frame(width: 42, height: 42)
+                .background(Circle().fill(DS.Color.fillSubtle.color))
+                .frame(width: 44, height: 44).contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .background(DSParts.publish(key))
+        .accessibilityLabel(label)
+    }
+
     // ★ §6/§7 — THE ACTION CLUSTER: every tool's confirm, FLOATING NEXT TO WHAT IT
     // ACTS ON (maintainer: "Add a floating checkbox, rotation icon, or 'x' *next*
     // to the cut/action, not in the modal as a confirmation").
@@ -7838,7 +7890,15 @@ public struct WorkspacePlaceholder: View {
                     EmptyView()
 
                 case .cut:
-                    if let held = heldCut {
+                    // ★ B8 (row 36, R1, P6; mockup #cut-line, #cut-hole, #cut-plane-ask): the question first where the face
+                    // is not flat, then the bar — ✕ │ [Tilt] │ Rotate │ mm drag ↕ (or drag ⟲) │ ✓
+                    if let aim = cutAim {
+                        if let ask = aim.asks {
+                            CutAsk(ask: ask) { way, angle in var a = aim; a.answer(way, atAnAngle: angle); setCutAim(a) }
+                        } else {
+                            CutBar(aim: aim, set: { setCutAim($0) }, cancel: { releaseCut() }, confirm: { commitCutAim(aim) })
+                        }
+                    } else if let held = heldCut {
                         surfaceClusterButton("xmark", tint: DS.Color.textSecondary) {
                             releaseCut()
                         }
@@ -8139,8 +8199,8 @@ public struct WorkspacePlaceholder: View {
             // meant to be").
             .position(x: surfaceDocksCluster
                       ? (projection?.viewportSize.width ?? 1032) / 2
-                      : min(max(at.x, 200),
-                            max((projection?.viewportSize.width ?? 1032) - 200, 200)),
+                      : min(max(at.x, surfaceClusterHalfWidth),
+                            max((projection?.viewportSize.width ?? 1032) - surfaceClusterHalfWidth, surfaceClusterHalfWidth)),
                       y: surfaceDocksCluster
                       ? (projection?.viewportSize.height ?? 1376) - bottomBarClearance - 40
                       : min(max(at.y - 84, 96),
@@ -8198,13 +8258,16 @@ public struct WorkspacePlaceholder: View {
     /// of the part.
     private var surfaceDocksCluster: Bool { false }
 
+    /// How far the cluster's middle keeps from the screen's sides: the Cut bar (✕ │ Tilt │ Rotate │ mm │ ✓) is the widest.
+    private var surfaceClusterHalfWidth: CGFloat { surfaceTool == .cut && cutAim != nil ? 330 : 200 }
+
     /// Where the cluster floats: the point the armed tool is aimed at.
     private func surfaceActionAnchor(_ proj: CameraProjection) -> CGPoint? {
         guard let mesh = viewerMesh else { return nil }
         let model: SIMD3<Double>?
         switch surfaceTool {
         case .select:  model = nil
-        case .cut:     model = heldCut?.point
+        case .cut:     model = heldCut?.point ?? cutAim?.centre   // ★ B8: the question floats where the cut will be
         // The cluster floats over the CENTRE OF EVERYTHING PICKED, so it stays
         // with the selection as it grows rather than anchoring to the first tap.
         // ★ OVER WHAT IS PICKED — the centre of the whole set, so it stays with the
@@ -8396,13 +8459,31 @@ public struct WorkspacePlaceholder: View {
     /// hovering above the glass on an M-series iPad; on hardware without hover it
     /// simply never fires and the mode still works by tap.
     @ViewBuilder private var surfaceCutOverlay: some View {
+        let _ = recordCutLive()
         if visible.surfaceEditing {
             GeometryReader { _ in
                 ZStack(alignment: .topLeading) {
                     if let proj = projection {
+                        // ★ B8 (row 36): an aimed cut draws where its plane crosses the piece — on the face, a ring round a
+                        // hole — never a straight stroke off it
+                        if let a = cutAim, let m = viewerMesh {
+                            let t = cutAimTrace(a, mesh: m)
+                            Path { path in
+                                var i = 0
+                                while i + 5 < t.count {
+                                    if let p = proj.project(settledWorld(SIMD3<Float>(t[i], t[i + 1], t[i + 2]))),
+                                       let q = proj.project(settledWorld(SIMD3<Float>(t[i + 3], t[i + 4], t[i + 5]))) {
+                                        path.move(to: p); path.addLine(to: q)
+                                    }
+                                    i += 6
+                                }
+                            }
+                            .stroke(DS.Color.accent.color, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                            .allowsHitTesting(false)
+                        }
                         // The line being aimed: the held one if a face is chosen,
                         // otherwise whatever the pencil is over.
-                        if let base = heldCut ?? hoveredCut {
+                        else if let base = heldCut ?? hoveredCut {
                             let cut = base.rotated(by: cutRotation)
                                 .moved(byMM: heldCut == nil ? 0 : cutOffsetMM)
                             let seg = cut.previewSegment(halfLengthMM: cutPreviewHalfLengthMM)
@@ -8437,6 +8518,72 @@ public struct WorkspacePlaceholder: View {
         cutRotation = 0
         cutRotationBase = 0
         cutRotationDetent = 0
+        cutAim = nil
+        cutAimDragStart = nil
+    }
+
+    /// Tests: the page's face tap and its aim, as it last drew them (CutLive).
+    private func recordCutLive() {
+        guard CutLive.recordLive else { return }
+        CutLive.aim = cutAim
+        if let m = viewerMesh { CutLive.pick = { handleSurfacePick($0, at: nil, mesh: m) } }
+    }
+
+    /// ★ B8: the aim changed (the bar, the question, the handle) — the held cut is its plane, nothing added on top.
+    private func setCutAim(_ a: CutAim) {
+        cutAim = a
+        heldCut = a.surfaceCut()
+        cutRotation = 0
+        cutOffsetMM = 0
+    }
+
+    /// ★ B8 (row 36, R1): Cut's ✓ — the aim's plane through its face (or, carried from Select similar, each face through its
+    /// own centre at the same Rotate and place).
+    private func commitCutAim(_ a: CutAim) {
+        guard let cut = a.surfaceCut() else { return }
+        let kids = surfaceCarried.count > 1
+            ? project.commitSurfaceCut(faces: surfaceCarried, rotationDegrees: a.rotateDeg, offsetMM: a.offsetMM)
+            : project.commitSurfaceCut(cut)
+        if surfaceCarried.count > 1 { model.toast = "Cut \(surfaceCarried.count) faces." }
+        surfaceCarried = []
+        releaseCut()
+        surfaceSelected = kids.first
+    }
+
+    /// ★ B8 (R1, design-system §4.24): the cut's one handle, on its line — ↕ slides it (across a flat face, up and down a
+    /// bore), ⟲ carries a line round a bore. Its number rides beside it; the bar reads the same place.
+    @ViewBuilder private var cutHandleOverlay: some View {
+        if visible.surfaceEditing, surfaceTool == .cut, let a = cutAim, let hd = a.handle, let proj = projection, let m = viewerMesh,
+           let p0 = proj.project(settledWorld(SIMD3<Float>(hd.point))) {
+            let mmLen = max(Double(m.bounds.radius) * 0.05, 1)
+            let p1 = proj.project(settledWorld(SIMD3<Float>(hd.point + hd.direction * mmLen))) ?? CGPoint(x: p0.x, y: p0.y - 1)
+            let ax = CGVector(dx: p1.x - p0.x, dy: p1.y - p0.y)
+            let ptsPerMM = max(Double((ax.dx * ax.dx + ax.dy * ax.dy).squareRoot()) / mmLen, 1e-6)
+            let value = hd.around ? "\(Int(a.rotateDeg.rounded()))\u{00B0}"
+                : (a.offsetMM >= 0 ? "+" : "\u{2212}") + SelectionsSummary.format(abs((a.offsetMM * 10).rounded() / 10), decimals: 1) + " mm"
+            let drag: (CGFloat, Bool) -> Void = { along, ended in
+                guard let start = cutAimDragStart ?? cutAim else { return }
+                if cutAimDragStart == nil { cutAimDragStart = start }
+                var next = start
+                next.drag(byMM: Double(along) / ptsPerMM, from: start)
+                setCutAim(next)
+                if ended { cutAimDragStart = nil }
+            }
+            let _ = { if CutLive.recordLive { CutLive.handleDrag = drag } }()
+            // the round handle's middle ON the line (its number rides to its right)
+            DragHandle(key: "cut", axis: ax, glyph: hd.around ? .around : .along, value: value, onDrag: drag)
+                .fixedSize()
+                .frame(width: 400, height: DragHandle.size, alignment: .leading)
+                .position(x: p0.x + 200 - DragHandle.size / 2, y: p0.y)
+        }
+    }
+
+    /// ★ B8 (row 36: "the line never leaves the face"): the aimed cut's line, traced where its plane crosses the piece.
+    private func cutAimTrace(_ a: CutAim, mesh: ViewerMesh) -> [Float] {
+        guard let pl = a.plane else { return [] }
+        let segs = SurfaceCutLines.trace(plane: RegionCut(point: pl.point, normal: pl.normal), faces: [a.face], in: mesh)
+        let cuts = surfaceSelected.flatMap { project.faceRegions.region($0)?.cuts } ?? []
+        return cuts.isEmpty ? segs : SurfaceCutLines.clip(segs, to: cuts)
     }
 
 
@@ -9985,6 +10132,7 @@ public struct WorkspacePlaceholder: View {
                         resolution: project.quality.resolution,
                         onChange: { project.refreshFaceRegionDrift() },
                         onClose: { regionsOpen = false })
+            .background(DSParts.publish("regionsSheet"))
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
             .padding(.leading, 320)
             .padding(.bottom, 96)
@@ -10188,8 +10336,10 @@ public struct WorkspacePlaceholder: View {
                 } footer: { cutPanelFoot }
             }
         }
-        .onAppear { if cutOpenFolders.isEmpty { cutOpenFolders = [force.activeScenarioID] } }
     }
+
+    /// ★ B8: Edit faces' open folders — the active scenario's until he opens or closes one.
+    private var cutOpenFolderSet: Set<UUID> { cutOpenFolders ?? [force.activeScenarioID] }
 
     /// ★ B8: Edit faces was opened from the Lattice stage.
     private var cutFromLattice: Bool { if case .lattice = editFaces.origin { return true } else { return false } }
@@ -10199,9 +10349,9 @@ public struct WorkspacePlaceholder: View {
         VStack(alignment: .leading, spacing: 0) {
             if force.hasScenarios {
                 ForEach(force.scenarioList, id: \.id) { s in
-                    let open = cutOpenFolders.contains(s.id)
+                    let open = cutOpenFolderSet.contains(s.id)
                     DSRow(.folder, key: "cutFolder-\(s.id.uuidString)", mark: .folder, name: s.name, disclosure: open,
-                          tap: { if open { cutOpenFolders.remove(s.id) } else { cutOpenFolders.insert(s.id) } })
+                          tap: { var o = cutOpenFolderSet; if open { o.remove(s.id) } else { o.insert(s.id) }; cutOpenFolders = o })
                     if open {
                         ForEach(selection.groups.filter { force.group($0.id, isIn: s.id) }) { g in
                             cutGroupRow(g).padding(.leading, SelectionsList.folderIndent)
@@ -10216,7 +10366,9 @@ public struct WorkspacePlaceholder: View {
         }
     }
 
-    /// ★ the old card's header buttons, until the reviewer's answer on B8's look (asked 11-07 20:04Z, item 3)
+    /// ★ The old card's header buttons — the reviewer's ruling 11-08 21:32Z item 1: none in Cut (Keep clear stays on Topology,
+    /// kg│lb is in Settings), but the Regions sheet stays reachable while one of its functions has no rail twin: its filter's
+    /// "Small faces" (CutRegionsTwinTests).
     private var cutPanelFoot: some View {
         HStack(spacing: DS.Space.m) {
             Button { regionsOpen.toggle() } label: {
@@ -10227,9 +10379,8 @@ public struct WorkspacePlaceholder: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Regions")
+            .background(DSParts.publish(regionsOpen ? "cutRegions-on" : "cutRegions"))
             .flexibleDrawn(when: !flexibleMain.owns(project, stage))   // ★ B8: as H39 — Edit faces opened from Flexible draws no Regions toggle
-            keepClearQuickAction
-            unitToggle
             Spacer(minLength: 0)
         }
         .padding(.horizontal, DS.Space.m)
@@ -10379,6 +10530,7 @@ public struct WorkspacePlaceholder: View {
             }
             .buttonStyle(.plain)
             .help("Toggle Keep clear on the active selection")
+            .background(DSParts.publish("keepClearQuick"))   // ★ B8: so a page's test can see where it is drawn
         }
     }
 
@@ -10398,6 +10550,7 @@ public struct WorkspacePlaceholder: View {
         .padding(2)
         .background(Capsule().fill(DS.Color.background.opacity(0.35).color)
             .overlay(Capsule().strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)))
+        .background(DSParts.publish("unitToggle"))   // ★ B8: so a page's test can see where kg│lb is drawn
     }
 
     /// `inList`: the open group's rows under SelectionsList's line (B3) — the line already carries the eye and the trash.
@@ -13750,6 +13903,7 @@ extension WorkspacePlaceholder {
     private func leaveEditFacesTools() {
         surfaceResetTools()
         cutLitGroup = nil   // ★ B8
+        cutPaintPicked = false   // ★ B8: the rail's Paint
         paintActive = false
         regionsOpen = false
     }
@@ -14454,6 +14608,13 @@ extension WorkspacePlaceholder {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
             autoKeepClearRow(g)   // ★ first, right under the group's line, where he looks (not under its primitives)
             groupRow(g, inList: true)
+            if let line = project.keepClearIdlePiecesLine(g) {   // ★ E4 (j), ruling 11-08 21:32: no silent no-ops
+                Text(line).dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textSecondary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, DS.Space.l)
+                    .accessibilityIdentifier("keepClearIdlePieces-\(g.id.uuidString)")
+                    .background(CornerPairStyle.publish("keepClearIdlePieces-\(g.id.uuidString)"))
+            }
             if force.kind(for: g.id).isLoad { loadRows(g) }   // ★ B3 (note 5): Kind, Weight, Direction
             // ★ his ask 2026-10-26 + his iPad 14:13: every face its own card, picked one at a time, with its own eye and trash
             VStack(spacing: PieceRowPick.spacing) {

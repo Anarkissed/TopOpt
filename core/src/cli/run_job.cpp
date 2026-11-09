@@ -670,6 +670,15 @@ manifold::Manifold clearance_solid(const ClearanceGeometry& g, double grow) {
     return Vec3{a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
   };
   auto normalize = [&](const Vec3& a) { return mul(a, 1.0 / std::sqrt(dot(a, a))); };
+  // ★ E4 (j): a cut piece's Keep clear is trimmed to its clips' half-spaces, each
+  // pushed out by `grow` as the primitive is. No clips: the primitive, as before E4.
+  auto clip = [&](manifold::Manifold m) {
+    for (const ClearanceClip& c : g.clips) {
+      const Vec3 n = normalize(c.normal);
+      m = m.TrimByPlane(col(n), dot(c.point, n) - grow);
+    }
+    return m;
+  };
   if (g.kind == ClearanceKind::Bolt) {
     constexpr int kSeg = 128;
     const Vec3 a = normalize(g.axis_dir);
@@ -678,8 +687,8 @@ manifold::Manifold clearance_solid(const ClearanceGeometry& g, double grow) {
     const manifold::Manifold prim = manifold::Manifold::Cylinder(
         g.t_hi - g.t_lo + 2.0 * grow,
         (g.radius + grow) / std::cos(3.14159265358979323846 / kSeg), -1.0, kSeg);
-    return prim.Transform(manifold::mat3x4(col(e1), col(e2), col(a),
-                                           col(add(g.axis_point, mul(a, g.t_lo - grow)))));
+    return clip(prim.Transform(manifold::mat3x4(col(e1), col(e2), col(a),
+                                                col(add(g.axis_point, mul(a, g.t_lo - grow))))));
   }
   Vec3 u = g.u, w = g.w;
   double u_lo = g.u_lo, u_hi = g.u_hi, w_lo = g.w_lo, w_hi = g.w_hi;
@@ -692,7 +701,7 @@ manifold::Manifold clearance_solid(const ClearanceGeometry& g, double grow) {
       {u_hi - u_lo + 2.0 * grow, w_hi - w_lo + 2.0 * grow, g.depth + 2.0 * grow});
   const Vec3 o = add(add(add(g.origin, mul(u, u_lo - grow)), mul(w, w_lo - grow)),
                      mul(g.normal, -grow));
-  return prim.Transform(manifold::mat3x4(col(u), col(w), col(g.normal), col(o)));
+  return clip(prim.Transform(manifold::mat3x4(col(u), col(w), col(g.normal), col(o))));
 }
 #endif
 
@@ -2536,12 +2545,24 @@ std::vector<ClearanceGeometry> lattice_keep_outs_from_job(
     const JobDescription& job, const StepModel& model) {
   std::vector<ClearanceGeometry> out;
   if (!job.loads.present) return out;
+  // ★ E4 (j): a cut piece's Keep clear -- its member faces' own, clipped by its cuts.
+  std::vector<ResolvedFaceRegion> clear_regions;
+  for (const JobClearance& jc : job.loads.clearances)
+    if (jc.region_id >= 0) {
+      clear_regions = resolve_face_regions(model, job.loads.face_regions);
+      break;
+    }
   for (const JobClearance& jc : job.loads.clearances) {
     const bool bolt = jc.kind == "bolt";
+    const ResolvedFaceRegion* piece = nullptr;
+    for (const ResolvedFaceRegion& r : clear_regions)
+      if (jc.region_id >= 0 && r.id == jc.region_id) piece = &r;
     double bore_r = 0.0;
     if (bolt) {
       if (jc.manual)
         bore_r = jc.radius_mm;
+      else if (piece != nullptr)
+        bore_r = largest_bore_radius_mm(model, piece->member_faces);
       else if (jc.face_id >= 0 && jc.face_id < model.face_count)
         bore_r =
             model.faces[static_cast<std::size_t>(jc.face_id)].cylinder_radius_mm;
@@ -2553,6 +2574,15 @@ std::vector<ClearanceGeometry> lattice_keep_outs_from_job(
     if (jc.axial_clearance_mm > 0.0)
       params.axial_clearance_mm = jc.axial_clearance_mm;
     if (jc.slab_depth_mm > 0.0) params.slab_depth_mm = jc.slab_depth_mm;
+    if (piece != nullptr) {
+      try {
+        for (const ClearanceGeometry& g : resolve_clearance_from_region(model, *piece, params))
+          out.push_back(g);
+      } catch (const std::invalid_argument& e) {
+        throw JobError(e.what());
+      }
+      continue;
+    }
     ClearanceGeometry g;
     if (jc.manual) {
       ManualClearanceGeometry mg;
@@ -11864,19 +11894,32 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
   // suggestion the app prefills — for a bolt those depend on the bore radius,
   // read from the imported face geometry, so a hand-authored job need only give
   // face_id + kind.
+  // ★ E4 (j): a Keep clear on a cut piece reads its region -- resolved once, here, from
+  // the same specs the load case carries, so the pre-flight's copy of `lc` has them too.
+  std::vector<ResolvedFaceRegion> clear_regions;
+  for (const JobClearance& jc : j_clearances)
+    if (jc.region_id >= 0) {
+      clear_regions = resolve_face_regions(model, j_face_regions);
+      break;
+    }
   for (const JobClearance& jc : j_clearances) {
     ProductionLoadCase::Clearance c;
     c.face_id = jc.face_id;
     c.manual = jc.manual;
     const bool bolt = jc.kind == "bolt";
+    const ResolvedFaceRegion* piece = nullptr;
+    for (const ResolvedFaceRegion& r : clear_regions)
+      if (jc.region_id >= 0 && r.id == jc.region_id) piece = &r;
     // Default suggestions depend on the bore radius: an auto bolt reads it from
     // the imported face geometry; a manual bolt carries its own radius_mm. A
     // hand-authored job need only give face_id/geometry + kind and the same
-    // spec-suggestion defaults fill the rest.
+    // spec-suggestion defaults fill the rest. A cut piece reads its largest bore.
     double bore_r = 0.0;
     if (bolt) {
       if (jc.manual)
         bore_r = jc.radius_mm;
+      else if (piece != nullptr)
+        bore_r = largest_bore_radius_mm(model, piece->member_faces);
       else if (jc.face_id >= 0 && jc.face_id < model.face_count)
         bore_r = model.faces[static_cast<std::size_t>(jc.face_id)]
                      .cylinder_radius_mm;
@@ -11899,6 +11942,14 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
       c.manual_geom.normal = jc.normal;
       c.manual_geom.half_u_mm = jc.half_u_mm;
       c.manual_geom.half_w_mm = jc.half_w_mm;
+    }
+    if (piece != nullptr) {
+      c.region_id = jc.region_id;
+      try {
+        resolve_clearance_region(c, *piece, model);
+      } catch (const std::invalid_argument& e) {
+        throw JobError(e.what());
+      }
     }
     lc.clearances.push_back(c);
   }
@@ -12025,7 +12076,11 @@ std::string loadcase_receipt_json(const JobDescription& job,
     s += "  \"clearances\": [\n";
     for (std::size_t i = 0; i < setup->clearance_reports.size(); ++i) {
       const ProductionRunSetup::ClearanceReport& c = setup->clearance_reports[i];
+      // ★ E4 (j): a cut piece's row names its region (face_id -1), as a region
+      // protection's row does; a face's row is unchanged.
       s += "    {\"face_id\": " + std::to_string(c.face_id) +
+           (c.region_id >= 0 ? ", \"region_id\": " + std::to_string(c.region_id)
+                             : std::string()) +
            ", \"kind\": \"" +
            (c.kind == ClearanceKind::Bolt ? "bolt" : "face") +
            "\", \"voxels_frozen\": " + std::to_string(c.voxels_frozen) +

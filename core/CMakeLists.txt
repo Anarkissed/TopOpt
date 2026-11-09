@@ -2656,6 +2656,15 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     DEMO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo")
   add_test(NAME lattice_depth_tie COMMAND test_lattice_depth_tie)
 
+  # E4 (j), ruling 2026-11-07 19:55: Keep clear on a CUT PIECE ("region_id") clears that
+  # piece only -- the optimizer's overlay, the lattice's keep-out and the predicate, on a
+  # flat piece and a round one, each against the whole face as its control.
+  add_executable(test_keep_clear_region tests/validation/test_keep_clear_region.cpp)
+  target_link_libraries(test_keep_clear_region PRIVATE topopt)
+  target_compile_definitions(test_keep_clear_region PRIVATE
+    DEMO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo")
+  add_test(NAME keep_clear_region COMMAND test_keep_clear_region)
+
   # Small-face load loss (handoff 099): a load face smaller than a voxel footprint
   # at a coarse resolution tags ZERO voxels, so build_production_loadcase skips the
   # group and external_loads arrives empty. This locks the new per-group

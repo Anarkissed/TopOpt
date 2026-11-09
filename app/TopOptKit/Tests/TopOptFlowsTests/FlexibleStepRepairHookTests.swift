@@ -35,10 +35,13 @@ final class FlexibleStepRepairHookTests: XCTestCase {
                     try throwIfFailed(err)
 
             """),
+        // ★ RE-PINNED (UI-Notes B8, the reviewer's ruling 11-08 21:32Z item 1: Paint left the chip column for Edit faces' rail):
+        // the gate is the rail's Paint's first question — on a repaired STEP it brushes nothing and its line says why. Was: the
+        // chip's row, `paintChip.flexibleRepairedStepPaintGate(path: project.importedFile?.path)` under `case .paint:`.
         Hook(id: "H48", file: "app/TopOptKit/Sources/TopOptFlows/WorkspacePlaceholder.swift",
-             pin: "                paintChip.flexibleRepairedStepPaintGate(path: project.importedFile?.path).background(chipWidthReader(id))   // Flexible (PR #362) H48 — paint off on a repaired STEP (ruling 2026-10-23 18:56)\n",
-             gate: ".flexibleRepairedStepPaintGate(path: project.importedFile?.path)",
-             anchor: "        case .paint:\n            VStack(alignment: .trailing, spacing: DS.Space.s) {\n"),
+             pin: "        if !FlexibleRepairedStepPaint.paintAllowed(path: path) { return FlexibleRepairedStepPaint.line }   // Flexible (PR #362) H48 — paint off on a repaired STEP (ruling 2026-10-23 18:56)\n",
+             gate: "!FlexibleRepairedStepPaint.paintAllowed(path: path)",
+             anchor: "    private var cutPaintWhy: String? {\n        let path = project.importedFile?.path\n"),
     ]
 
     static func source(_ file: String) throws -> String {

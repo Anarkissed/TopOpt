@@ -1851,8 +1851,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     // draws edges only (hollow) — the picture must not promise what the run won't do.
     private var clearanceXrayBuffer: MTLBuffer?
     private var clearanceXrayCount = 0
-    private var clearanceFaceBuffer: MTLBuffer?
-    private var clearanceFaceCount = 0
+    private(set) var clearanceFaceBuffer: MTLBuffer?   // ★ E4 (j): read by PieceKeepClearDrawTests (the drawn corners)
+    private(set) var clearanceFaceCount = 0
     private var clearanceLineBuffer: MTLBuffer?
     private var clearanceLineCount = 0
     // Flexible (#362) R6 (A2): an item with its own alphas (FAINT) and a surface-only glass (GLASS, front faces only)
@@ -2859,6 +2859,16 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             let fcol = col(faceAlpha)
             let ecol = col(edgeAlpha)
             xcol = col(edgeAlpha * (item.seeThrough ? 1 : 0.35))   // ★ B6: a picked zone's edges, lit through the part
+            // ★ E4 (j), ruling 2026-11-08 21:32 item 2: a CUT PIECE's Keep clear — its face's volume clipped by the piece's
+            // cuts — draws as that clipped solid (ClearanceVolume.solidPolygons), so the screen shows what the run keeps
+            // clear. Every unclipped volume takes the switch below, unchanged.
+            if !item.volume.clips.isEmpty {
+                for poly in item.volume.solidPolygons() where poly.points.count >= 3 {
+                    for i in 1..<(poly.points.count - 1) { tri(poly.points[0], poly.points[i], poly.points[i + 1], fcol) }
+                }
+                for (a, b) in item.volume.solidEdges() { seg(a, b, ecol) }
+                continue
+            }
             switch item.volume.shape {
             case let .cylinder(axisPoint, axisDir, radius, tLo, tHi):
                 let dir = simd_length(axisDir) > 1e-6 ? simd_normalize(axisDir) : SIMD3<Float>(0, 0, 1)
