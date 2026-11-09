@@ -2537,6 +2537,23 @@ public enum TopOptKit {
         guard jobSchemaError(job("")) == nil else { return false }   // the control
         return jobSchemaError(job(#", "outer_finish": "none""#)) == nil
     }()
+    /// ★ RELEASE (4) (LatticeTypes b8a2d3fb + 4d928a75, ruling 11-08 (1), (A)): does the linked core take a ZONE's own skin,
+    /// `regions[].skin` "diagrid" (Skin) / "rim" (Rim) / "none"? Older cores refuse the whole job on the unknown key. The same
+    /// one-region probe job, the key on the region, with "rim" (the newest of the three) as the question.
+    public static let regionSkinWired: Bool = {
+        func job(_ extra: String) -> Data {
+            Data(latticeProbeBaseJob.replacingOccurrences(
+                of: #""output":"#,
+                with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "cell_mm": 3.0}, "lattice": {"topology": "octet", "regions": [{"role": "include", "kind": "face", "geometry": {"origin": [0, 0, 0], "normal": [0, 0, 1], "half_u_mm": 10, "half_w_mm": 10, "depth_mm": 5}"#
+                    + extra + #"}]}, "output":"#).utf8)
+        }
+        guard jobSchemaError(job("")) == nil else { return false }   // the control
+        return jobSchemaError(job(#", "skin": "rim""#)) == nil && jobSchemaError(job(#", "skin": "diagrid""#)) == nil
+    }()
+    /// ★ RELEASE (4) (LatticeTypes 4d928a75 + a38af0c6, ruling 11-08 (A)): does the linked core build a rim on a real part?
+    /// The schema took "rim" long before the engine laid one, so the question is the region-level key 4d928a75 added with it
+    /// (`regionSkinWired`): a core that takes a zone's "rim" lays the part's.
+    public static var latticeRimOnPartWired: Bool { regionSkinWired }
     /// ★ B7 slice 2b (ruling 11-06 (1), core E2.4 5fe8e992): does the linked core take the PART's open finish,
     /// `lattice.outer_finish: "none"`? Before E2.4 core knew only shell / skin / shell+skin and refused it. The same
     /// one-region probe job, with the key on the lattice block.

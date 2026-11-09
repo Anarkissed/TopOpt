@@ -98,25 +98,38 @@ public enum LatticeBoundaryTreatment: String, Codable, CaseIterable, Equatable, 
     /// - Skin → "skin": the freeform woven diagrid IS the finish (core requires skin "diagrid"; `jobSkinValue` sends it).
     ///   Core does not certify a shell-less skin yet (run_job.cpp finish_certified), and the page says so.
     /// - Covered → "shell".
-    /// - Rim → absent, its job unchanged: core builds no rim on a real part yet (rim_triangles 0 refuses), so the page
-    ///   greys it with one line until LatticeTypes' rim lands.
+    /// - Rim → ★ RELEASE (4) (LatticeTypes 4d928a75 + a38af0c6, ruling 11-08 (A)): "none", the open lattice with the rim
+    ///   laid along the part's sharp edges and the cut strut ends tied to it — LatticeTypes 11-09: absent is "shell", which
+    ///   would bury the rim under the shell. On a core that builds no rim on a real part (`latticeRimOnPartWired` false)
+    ///   Rim stays greyed with its job unchanged (absent).
     /// An older core (no E2.4) keeps the old bytes for None: "none" only where the linked core parses it.
     public var jobOuterFinish: String? {
         if Self.controlShellDefault { return self == .covered ? "shell" : nil }
         switch self {
         case .none: return TopOptKit.latticeOpenFinishWired ? "none" : nil
-        case .rim: return nil
+        case .rim: return Self.rimBuilt && TopOptKit.latticeOpenFinishWired ? "none" : nil
         case .fullSkin: return "skin"
         case .covered: return "shell"
         }
     }
     /// TEST CONTROL: the pre-2b mapping (Covered only; every other finish under core's default shell).
     nonisolated(unsafe) public static var controlShellDefault = false
+    /// ★ RELEASE (4): the linked core lays a rim on a real part (`TopOptKit.latticeRimOnPartWired`), so Rim is a finish.
+    public static var rimBuilt: Bool { TopOptKit.latticeRimOnPartWired && !controlRimGreyed }
+    /// TEST CONTROL (release (4)): Rim as before — greyed, its job absent.
+    nonisolated(unsafe) public static var controlRimGreyed = false
     /// ★ B7 slice 2b: a zone may have its own finish only beside these — core's (1b2): a region's own outer_finish needs
-    /// the part's "shell" or "none"; the freeform skin is part-wide, and Rim is greyed.
+    /// the part's "shell" or "none"; the freeform skin is part-wide. ★ Release (4): Rim is the open lattice ("none").
     public var takesZoneFinish: Bool { zoneFinishWord != nil }
     /// The part's finish in a zone's words ("shell" / "none"), nil where a zone can't have its own.
-    public var zoneFinishWord: String? { self == .covered ? "shell" : self == .none ? "none" : nil }
+    public var zoneFinishWord: String? {
+        switch self {
+        case .covered: return "shell"
+        case .none: return "none"
+        case .rim: return Self.rimBuilt ? "none" : nil
+        case .fullSkin: return nil
+        }
+    }
 
     /// The exact core job-schema value (`job.lattice.skin`).
     public var jobSkinValue: String {
@@ -197,12 +210,46 @@ public struct LatticeAreaGrading: Codable, Equatable, Sendable {
     /// ★ B7 slice 2 (release (3), E2.4 per region, ruling 11-06 (A)): this area's finish, core's words — "none" (open) or
     /// "shell" (covered) — sent as `regions[].outer_finish`; nil = the part's.
     public var outerFinish: String?
+    /// ★ RELEASE (4) (ruling 11-08 (1), (A); LatticeTypes b8a2d3fb, 4d928a75): this area's skin, core's words — "diagrid"
+    /// (Skin), "rim" (Rim) or "none" — sent as `regions[].skin`; nil = the part's. A zone's Finish is the pair:
+    /// None = none + none, Rim = none + rim, Skin = none + diagrid, Covered = shell + none.
+    public var skin: String?
     public init(gradingMode: LatticeGradingMode? = nil, shapeFitBandMM: Double? = nil, shapeGradeStrength: Double? = nil,
-                outerFinish: String? = nil) {
+                outerFinish: String? = nil, skin: String? = nil) {
         self.gradingMode = gradingMode; self.shapeFitBandMM = shapeFitBandMM; self.shapeGradeStrength = shapeGradeStrength
-        self.outerFinish = outerFinish
+        self.outerFinish = outerFinish; self.skin = skin
     }
-    public var isEmpty: Bool { gradingMode == nil && shapeFitBandMM == nil && shapeGradeStrength == nil && outerFinish == nil }
+    public var isEmpty: Bool {
+        gradingMode == nil && shapeFitBandMM == nil && shapeGradeStrength == nil && outerFinish == nil && skin == nil
+    }
+
+    /// ★ RELEASE (4): a zone's Finish as the four the page offers, from its own pair or the part's.
+    public enum ZoneFinish: String, CaseIterable, Sendable {
+        case none, rim, skin, covered
+        public var title: String { ["None", "Rim", "Skin", "Covered"][Self.allCases.firstIndex(of: self)!] }
+        /// (outer_finish, skin) in core's words.
+        public var words: (outer: String, skin: String) {
+            switch self {
+            case .none: return ("none", "none")
+            case .rim: return ("none", "rim")
+            case .skin: return ("none", "diagrid")
+            case .covered: return ("shell", "none")
+            }
+        }
+    }
+
+    /// The zone's Finish shown and sent: its own words where set, else the part's (`partOuter` nil: the part is on Skin,
+    /// whose woven finish no zone can change — only its skin).
+    public func zoneFinish(partOuter: String?, partSkin: String) -> ZoneFinish {
+        // a finish stored before release (4) carried no skin: Covered was shell with none — beside None or Covered only;
+        // under the part's Skin no zone finish was ever sent, so its skin is the part's
+        let k = skin ?? (partOuter != nil && outerFinish == "shell" ? "none" : partSkin)
+        guard let partOuter else {
+            return k == "rim" ? .rim : k == "none" ? .none : .skin
+        }
+        if (outerFinish ?? partOuter) == "shell" { return .covered }
+        return k == "rim" ? .rim : k == "diagrid" ? .skin : .none
+    }
 }
 
 /// ★ HOW THE FIT-SHAPE GRADE STEPS DOWN — his "either stepped or default
@@ -454,6 +501,11 @@ public struct LatticeRegionSpec: Equatable, Sendable {
         // takes the key (an unknown key refuses the whole job)
         if role == .include, let f = areaGrading?.outerFinish, f == "none" || f == "shell", TopOptKit.regionOuterFinishWired {
             entry["outer_finish"] = f
+        }
+        // ★ RELEASE (4) (ruling 11-08 (1), (A)): the zone's own skin — Rim or Skin, or none — on an include region, where the
+        // linked core takes the key
+        if role == .include, let k = areaGrading?.skin, ["diagrid", "rim", "none"].contains(k), TopOptKit.regionSkinWired {
+            entry["skin"] = k
         }
         // ★ Core's per-region keys travel only when the linked core's schema accepts
         // them (`organicSyntheticStressWired`, a whole-job probe with a control) —
@@ -1978,6 +2030,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// *organic, w, &boundary, …)` takes no `skin`), so the key unlocks the bare
     /// surface and draws nothing — the organic surface is `organic_boundary_finish`
     /// alone, and the wizard sets that to "clean". Non-organic jobs: byte-identical.
+    /// ★ RELEASE (4): the sheet types (no struts): core's R8 refuses a Skin (diagrid) on them, the part's or a zone's.
+    public static let sheetTopologies: Set<String> = ["gyroid", "schwarz_d"]
     public var jobOuterFinishResolved: String? {
         isOrganic ? (boundary == .covered ? "shell" : "skin") : boundary.jobOuterFinish
     }
@@ -2311,10 +2365,18 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // where it differs from the part's ("shell" when the part is Covered, "none" when None).
         // ★ B7 slice 2b: never under Skin or Rim — core's (1b2) refuses a region's own finish beside the freeform skin.
         let partFinish = boundary.zoneFinishWord
+        // ★ RELEASE (4): and a zone's own skin (Rim, Skin, or none) where it differs from the part's, on a core that takes
+        // it; never Skin on a sheet type (core's R8 refuses the diagrid on a strutless sheet)
+        let partSkin = jobSkinResolved
+        let sheet = Self.sheetTopologies.contains(topologyID)
         var out: [UUID: LatticeAreaGrading] = [:]
         for (gid, g) in areaGrading {
             var r = LatticeAreaGrading()
-            if let partFinish, let f = g.outerFinish, f != partFinish { r.outerFinish = f }
+            if g.outerFinish != nil || g.skin != nil {
+                let w = g.zoneFinish(partOuter: partFinish, partSkin: partSkin).words
+                if let partFinish, w.outer != partFinish { r.outerFinish = w.outer }
+                if TopOptKit.regionSkinWired, w.skin != partSkin, !(sheet && w.skin == "diagrid") { r.skin = w.skin }
+            }
             if densityMode == .sim {
                 let mode = g.gradingMode ?? gradingMode
                 if mode != gradingMode { r.gradingMode = mode }
@@ -2347,7 +2409,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                 let own = LatticeAreaGrading(gradingMode: mode != leadMode ? mode : nil,
                                              shapeFitBandMM: band != leadBand ? band : nil,
                                              shapeGradeStrength: strength != leadStrength ? strength : nil,
-                                             outerFinish: out[g]?.outerFinish)   // ★ a finish is the area's, never the lead's
+                                             outerFinish: out[g]?.outerFinish,   // ★ a finish is the area's, never the lead's
+                                             skin: out[g]?.skin)
                 if !own.isEmpty { lead[g] = own }
             }
             gradingMode = leadMode
