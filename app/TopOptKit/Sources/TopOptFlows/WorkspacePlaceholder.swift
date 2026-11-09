@@ -166,6 +166,9 @@ public struct WorkspacePlaceholder: View {
     /// ★ his iPad notes 11-09: the last bake's Structural thin-wall finding, and its (i).
     @State private var latticeThinWalls: LatticeStructuralThinWalls.Finding?
     @State private var latticeThinWallsInfoShown = false
+    /// ★ his 11-09: the glow + pop-up up, and the glow's per-vertex tints from the last bake ([] = no walls).
+    @State private var latticeThinWallsPromptUp = false
+    @State private var latticeThinWallTints: [Float] = []
     /// ★ The lattice settings the strut preview was last baked FROM, with the
     /// fields a bake writes stripped (`LatticeSettings.previewBakeInputs`).
     @State private var latticeInputsLastBaked: LatticeSettings? = nil
@@ -869,7 +872,7 @@ public struct WorkspacePlaceholder: View {
                           // It cannot coexist with the Surface stage's tints —
                           // they are different stages — so this is a choice, not
                           // a blend, and the Surface stage keeps priority.
-                          vertexTints: visible.surfaceEditing ? surfaceVertexTints : flexibleMain.tints(project, on: stage, roles: roleTints, stress: latticeStressField),   // Flexible H4 (+C): X-ray ghost + dent heat + Stress + group colours, ONE array
+                          vertexTints: visible.surfaceEditing ? surfaceVertexTints : latticeThinWallGlowUp ? latticeThinWallTints : flexibleMain.tints(project, on: stage, roles: roleTints, stress: latticeStressField),   // Flexible H4 (+C): X-ray ghost + dent heat + Stress + group colours, ONE array
                           extraLines: surfaceCutLineBuffer,
                           previewLines: surfacePreviewLineBuffer,
                           // ★ A UNION'S INTERNAL EDGES ARE NOT EDGES ANY MORE.
@@ -1513,6 +1516,7 @@ public struct WorkspacePlaceholder: View {
             // over the SAME live stage — the workspace chrome above is hidden while
             // it is open, so exactly one set of controls exists at a time.
             if showLatticePage { latticePageOverlay }
+            if latticeThinWallGlowUp { latticeThinWallsPromptCard }   // ★ his 11-09: the glow's pop-up
             // ★★★ THE MODE IS ASKED BEFORE THE STAGE IS USABLE (2026-08-21). It covers
             // everything and blurs it, it has no cancel, and answering it is the only
             // way out — because the two modes make DIFFERENT CLAIMS about the same
@@ -4776,6 +4780,12 @@ public struct WorkspacePlaceholder: View {
         // honest: there IS no current lattice to show.
         showStrutPreview && !strutBakeInFlight
             && latticeViewsUp
+            && !latticeThinWallGlowUp   // ★ his 11-09: everything else dimmed while the walls glow
+    }
+
+    /// ★ his 11-09: the glow is up — the pop-up is open on Lattice Setup and the last bake found walls.
+    private var latticeThinWallGlowUp: Bool {
+        latticeThinWallsPromptUp && latticeSetupUp && !latticeThinWallTints.isEmpty
     }
 
     /// ★ WHERE THE LATTICE'S VIEWS MAY SHOW AT ALL (his 11-05: "When in the face cutting screen, sometimes the legend stays
@@ -5368,6 +5378,17 @@ public struct WorkspacePlaceholder: View {
                 memberThicknessMM: scene.memberThicknessMM, cellsPerMember: scene.minCellsPerMember,
                 smallestCellMM: lat.cellSizeMode == .fixed ? lat.cellMM
                     : Swift.min(lat.cellMM, lat.cellMinMM > 0 ? lat.cellMinMM : lat.cellMM))
+            // ★ his 11-09: the glow — the same walls, as a soft per-vertex glow on the part (built only when there are some)
+            let thinGlow: [Float] = thinWalls == nil ? [] : {
+                let mask = LatticeStructuralThinWalls.mask(
+                    structural: true, occupancy: scene.occupancy.values, memberThicknessMM: scene.memberThicknessMM,
+                    cellsPerMember: scene.minCellsPerMember,
+                    smallestCellMM: lat.cellSizeMode == .fixed ? lat.cellMM
+                        : Swift.min(lat.cellMM, lat.cellMinMM > 0 ? lat.cellMinMM : lat.cellMM))
+                let field = LatticeThinWallGlow.field(thin: mask, inside: scene.solidOccupancy.values.map { $0 > 0.5 },
+                                                      grid: scene.occupancy)
+                return LatticeThinWallGlow.vertexTints(mesh: mesh, grid: scene.occupancy, field: field)
+            }()
             DispatchQueue.main.async {
                 // ★ a newer bake has started: this picture is stale, drop it
                 guard bakeGeneration == strutBakeGeneration else {
@@ -5376,6 +5397,14 @@ public struct WorkspacePlaceholder: View {
                 }
                 strutScene = scene
                 latticeThinWalls = thinWalls
+                latticeThinWallTints = thinGlow
+                // ★ his 11-09: once per project, by itself — after Continue the note stays and a tap re-opens it
+                if isLastStage, LatticeThinWallPrompt.opensByItself(
+                    finding: thinWalls, structural: project.lattice.stageMode == .structural,
+                    setupUp: latticeSetupUp, seen: project.lattice.thinWallsNoticeSeen) {
+                    latticeThinWallsPromptUp = true
+                }
+                if thinWalls == nil { latticeThinWallsPromptUp = false }
                 strutSceneToken += 1
                 // ★ item 5 (2026-10-05): the drawer's cell is the bake's, at the wall the bake
                 // measured — re-derive the cards once the final picture has landed
@@ -8763,6 +8792,64 @@ public struct WorkspacePlaceholder: View {
     }
 
     /// ★ B6 N2: a face's prism shows unless its row's eye hid it (his iPad 11-07, 3a: visible by default).
+    /// ★ his 11-09: the pop-up beside the glow — why, and the two choices (no OK: it would be Continue).
+    @ViewBuilder private var latticeThinWallsPromptCard: some View {
+        if let thin = latticeThinWalls {
+            VStack(alignment: .leading, spacing: DS.Space.m) {
+                Text(LatticeThinWallPrompt.title)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(LatticeThinWallPrompt.body(thin, cellsPerMember: strutScene?.minCellsPerMember ?? 5,
+                                                manualCell: project.lattice.cellSizeMode != .auto))
+                    .dsStyle(DS.TypeScale.footnote)
+                    .foregroundStyle(DS.Color.textSecondary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: DS.Space.s) {
+                    Button {
+                        project.switchLatticeStageMode(to: .aesthetic)
+                        latticeThinWallsPromptUp = false
+                        model.persistCurrentProject()
+                    } label: {
+                        Text(LatticeThinWallPrompt.switchTitle).font(.system(size: 15, weight: .semibold))
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background(RoundedRectangle(cornerRadius: DS.Radius.pill, style: .continuous)
+                                .fill(DS.Color.accent.color))
+                            .foregroundStyle(Color.white)
+                    }
+                    .buttonStyle(.plain)
+                    .background(CornerPairStyle.publish("lattice-thin-walls-switch"))
+                    .accessibilityIdentifier("lattice-thin-walls-switch")
+                    Button {
+                        project.lattice.thinWallsNoticeSeen = true
+                        latticeThinWallsPromptUp = false
+                        model.persistCurrentProject()
+                    } label: {
+                        Text(LatticeThinWallPrompt.continueTitle).font(.system(size: 15, weight: .semibold))
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background(RoundedRectangle(cornerRadius: DS.Radius.pill, style: .continuous)
+                                .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
+                            .foregroundStyle(DS.Color.textPrimary.color)
+                    }
+                    .buttonStyle(.plain)
+                    .background(CornerPairStyle.publish("lattice-thin-walls-continue"))
+                    .accessibilityIdentifier("lattice-thin-walls-continue")
+                }
+            }
+            .padding(DS.Space.l)
+            .frame(maxWidth: 440)
+            .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(DS.Surface.panel.color))
+            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
+            .shadow(color: .black.opacity(0.35), radius: 24, y: 8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .padding(.bottom, bottomBarClearance + DS.Space.l)
+            .background(CornerPairStyle.publish("lattice-thin-walls-card"))
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("lattice-thin-walls-card")
+            .zIndex(48)
+        }
+    }
+
     /// ★ his iPad notes 11-09: the face prisms Lattice Setup can draw — every Lattice and No-lattice face's (`latticeDrawsPrism`),
     /// a hidden group's and the zones' boxes aside. The keys the Face prisms view sets.
     private var latticeFacePrismKeys: [String] {
@@ -10021,10 +10108,16 @@ public struct WorkspacePlaceholder: View {
             if latticePreviewBanner != nil, showStrutPreview, project.lattice.stageMode == .structural,
                let thin = latticeThinWalls {
                 HStack(alignment: .firstTextBaseline, spacing: DS.Space.xs) {
-                    Text(thin.caption)
-                        .dsStyle(DS.TypeScale.caption2)
-                        .foregroundStyle(DS.Color.textSecondary.color)
-                        .fixedSize(horizontal: false, vertical: true)
+                    // ★ his 11-09: a tap on the note re-opens the glow and the pop-up
+                    Button { latticeThinWallsPromptUp = true } label: {
+                        Text(thin.caption)
+                            .dsStyle(DS.TypeScale.caption2)
+                            .foregroundStyle(DS.Color.textSecondary.color)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .buttonStyle(.plain)
+                    .background(CornerPairStyle.publish("lattice-thin-walls-note"))
+                    .accessibilityIdentifier("lattice-thin-walls-note")
                     Button { latticeThinWallsInfoShown = true } label: {
                         Image(systemName: "info.circle")
                             .font(.system(size: 11, weight: .semibold))

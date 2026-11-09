@@ -425,6 +425,7 @@ struct VOut { float4 position [[position]]; float3 vnormal; float4 tint; float m
               float3 mpos; float member;
               float solid;   // Flexible: 1 = stays opaque under a translucent body (tint flags.y)
               float ghost;   // Flexible X-ray: 1 = drawn as a ghost (tint flags.z)
+              float glow;    // ★ his 11-09: the electric-blue glow's strength 0…1 (tint flags.w)
               // ★ THE SURFACE'S OWN NORMAL, IN MODEL SPACE — the shell's declared-face
               // test. It must be MODEL space because `mpos` and the declared normals
               // are, and it must be the REST normal (not flexed) for the same reason
@@ -487,6 +488,7 @@ vertex VOut viewer_vertex(VIn in [[stage_in]], constant Uniforms& u [[buffer(1)]
     o.member = in.flags.x;       // §6: 1 on faces of the selected region
     o.solid = in.flags.y;        // Flexible: the dented face stays opaque (FlexibleOverlay)
     o.ghost = in.flags.z;        // Flexible X-ray: the body as a ghost (FlexibleStagePage)
+    o.glow = in.flags.w;         // ★ his 11-09: where Structural can't lattice, glowing (LatticeThinWallGlow)
     // §2 / §3d: the WORLD normal + WORLD position (so the light can stay put while the
     // camera orbits) and the EYE depth (so the far side of a dense lattice can recede).
     o.wnormal = (u.worldNormalMatrix * float4(in.normal, 0.0)).xyz;
@@ -662,6 +664,20 @@ fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[
     // same curve toward the same backdrop colour and its creases are drawn at the same
     // strength. Two surfaces that fade differently read as two objects at any distance.
     color = to_edge_fade(color, aoEdge.g, sp.ao.y, in.eyeZ, sp.fade);
+    // ★★ his 11-09: "more of a GLOW of electric blue, rather than a solid colour" — the walls Structural can't lattice.
+    // Light ADDED, not paint: the surface keeps its shading and an electric-blue emission rides on top, strongest
+    // where the wall turns away from the eye (a Fresnel rim, which is what reads as a glow), fading out with the
+    // per-vertex strength (`LatticeThinWallGlow`: soft over a few mm into the dimmed part), and breathing slowly
+    // (`sp.tint.z`, set while `sp.tint.w` is on; 1 when not breathing).
+    if (in.glow > 0.001) {
+        float breathe = sp.tint.w > 0.5 ? sp.tint.z : 1.0;
+        float3 Ng = normalize(in.wnormal);
+        float3 Vg = normalize(in.eyeWS - in.wpos);
+        float fr = pow(1.0 - clamp(abs(dot(Ng, Vg)), 0.0, 1.0), 2.2);
+        float g = clamp(in.glow, 0.0, 1.0) * breathe;
+        const float3 ELECTRIC = float3(0.16, 0.60, 1.0);
+        color = mix(color, color * 0.6, g) + ELECTRIC * g * (0.55 + 1.3 * fr);
+    }
     // Handoff 124 — Face protection crosshatch. A protected face carries the UNIQUE
     // mint-teal PROTECT_RGB (WorkspacePlaceholder.protectFaceRGB); recognise it by
     // colour and lay a screen-space DIAGONAL CROSSHATCH over it — a "preserved" mark,
@@ -1804,6 +1820,13 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     private var lastActiveFaces: Set<FaceID> = []
     /// True while a detent pulse is animating (drives continuous redraw, like `isSettling`).
     private(set) var isPulsing = false
+    /// ★ his 11-09: some vertex carries the thin-wall glow (tint flags.w > 0) — the view draws continuously so it can
+    /// breathe, and returns to on-demand drawing when the glow is gone.
+    var glowBreathe = false
+    /// The breathe at time `t` (s): 0.7 … 1.0, one slow cycle every 2.6 s.
+    static func glowBreathe(at t: Double) -> Float {
+        Float(0.7 + 0.3 * (0.5 + 0.5 * sin(2 * Double.pi * t / 2.6)))
+    }
 
     /// Whether to draw the ground grid + contact shadow (set once gravity is set).
     var showGround = false
@@ -3364,7 +3387,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     }
 
     func draw(in view: MTKView) {
-        let wasAnimating = isSettling || isPulsing
+        let wasAnimating = isSettling || isPulsing || glowBreathe
         let flexLooping = stepFlexibleLoop(in: view)   // Flexible (PR #362): the main page's squish loop sets THIS frame's flexScale (MeshRenderer+FlexibleLattice.swift); false ⇒ #354's frame
         if isSettling { stepSettle() }
         if isPulsing { stepPulse() }   // advance the detent flash (item 2), re-uploading its tint
@@ -3383,7 +3406,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         if let drawable = view.currentDrawable { cmd.present(drawable) }
         cmd.commit()
         // The settle/pulse finished this frame → return to on-demand drawing (battery).
-        if wasAnimating && !isSettling && !isPulsing && !flexLooping {
+        if wasAnimating && !isSettling && !isPulsing && !flexLooping && !glowBreathe {
             view.isPaused = true
             view.enableSetNeedsDisplay = true
         }
@@ -4598,6 +4621,11 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // the shading that replaces it is actually on.
         if quality.contains(.worldLighting), tintsAreState {
             sp.tint = SIMD4<Float>(Self.stateTintDesaturation, Self.stateTintBrightnessLift, 0, 0)
+        }
+        // ★ his 11-09: the glow's slow breathe — 0.7 … 1.0 over 2.6 s, while any vertex glows
+        if glowBreathe {
+            sp.tint.z = Self.glowBreathe(at: CACurrentMediaTime())
+            sp.tint.w = 1
         }
         return sp
     }
@@ -6547,6 +6575,19 @@ extension MetalMeshView {
                 if vkey != appliedVertexTint {
                     appliedVertexTint = vkey
                     renderer.setVertexTints(inputs.vertexTints ?? [])
+                    // ★ his 11-09: a glowing vertex (flags.w) keeps the view drawing so the glow breathes
+                    let glows = LatticeThinWallGlow.anyGlow(inputs.vertexTints ?? [])
+                    if glows != renderer.glowBreathe {
+                        renderer.glowBreathe = glows
+                        if glows {
+                            view.isPaused = false
+                            view.enableSetNeedsDisplay = false
+                        } else if !renderer.isSettling, !renderer.isPulsing {
+                            // back to on-demand drawing (battery): the draw loop's own check ran before the glow went
+                            view.isPaused = true
+                            view.enableSetNeedsDisplay = true
+                        }
+                    }
                     dirty = true
                 }
                 // ★ §6 — the plane itself is four floats; comparing it is free, so

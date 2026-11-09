@@ -337,6 +337,20 @@ extension LatticeSettings {
     public mutating func chooseLatticeType(_ mode: LatticeStageMode) {
         clearLatticeType()
         stageMode = mode
+        // ★ his 11-09: choosing Structural (again) is deliberate — the thin-wall glow and pop-up show once more
+        if mode == .structural { thinWallsNoticeSeen = false }
+    }
+}
+
+extension ProjectModel {
+    /// ★ his 11-09, the thin-wall pop-up's "Switch to Aesthetic": the mode changes and nothing else does — every group, zone,
+    /// depth and setting stays (unlike Change lattice type, which keeps only where the lattice goes). One Undo step.
+    public func switchLatticeStageMode(to mode: LatticeStageMode) {
+        guard lattice.stageMode != mode else { return }
+        sealUndoStep()
+        lattice.stageMode = mode
+        if mode == .structural { lattice.thinWallsNoticeSeen = false }
+        sealUndoStep()
     }
 }
 

@@ -1712,6 +1712,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         s.selectableWallCoreDead = [:]
         s.organicForecast = nil
         s.flexible = nil   // Flexible (PR #362) H12: a Flexible edit never re-keys the octet bake
+        s.thinWallsNoticeSeen = false   // ★ his 11-09: answering the pop-up never re-bakes the picture
         return s
     }
     /// LATTICE MODE. Off (the default) ⇒ no lattice block reaches the job and the
@@ -2212,6 +2213,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// lattice · − Lattice faces (the whole part is lattice, the faces remove it). Not written while false. The job reads it
     /// once the engine takes `lattice.whole_part` (E2, not released).
     public var wholePart = false
+    /// ★ his 11-09: Structural's "can't lattice these walls" glow and pop-up has been answered with Continue for this
+    /// project — it stays quiet after (the one-line note stays and re-opens it). Cleared when he switches Aesthetic →
+    /// Structural, so a deliberate return shows it once more. Not written while false, so older bytes are unchanged.
+    public var thinWallsNoticeSeen = false
     /// ★ B7 (E3, reviewer 2026-11-06 09:41Z: "B7 sends E3's per-region keys from its tabs"): what an area's tab on the
     /// Lattice page set apart from the Part tab, keyed by the lattice group's id. Each include region the group emits
     /// carries it as core's per-region grading (`resolvedAreaGrading`). Not written while empty, so older bytes are unchanged.
@@ -2613,6 +2618,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         case skinGroups             // ★ B6 s2b: the Protect skin groups (absent ⇒ none)
         case zoneGroups             // ★ B6 s3a: the lattice zones (absent ⇒ none)
         case wholePart              // ★ B6 s3b: Start from − (absent ⇒ +)
+        case thinWallsNoticeSeen    // ★ his 11-09: the Structural thin-wall pop-up answered (absent ⇒ not yet)
         case areaGrading            // ★ B7 (E3): each area's own grading (absent ⇒ every area grades as the part)
         case groupDensities
         case groupDepthMM        // the ONE dragged depth per group (task 2026-08-12 §0a)
@@ -2758,6 +2764,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         skinGroups = try c.decodeIfPresent(Set<UUID>.self, forKey: .skinGroups) ?? []
         zoneGroups = try c.decodeIfPresent(Set<UUID>.self, forKey: .zoneGroups) ?? []
         wholePart = try c.decodeIfPresent(Bool.self, forKey: .wholePart) ?? false
+        thinWallsNoticeSeen = try c.decodeIfPresent(Bool.self, forKey: .thinWallsNoticeSeen) ?? false
         areaGrading = try c.decodeIfPresent([UUID: LatticeAreaGrading].self, forKey: .areaGrading) ?? [:]
         // Absent in every snapshot written before this task ⇒ [:] ⇒ auto everywhere,
         // which is exactly what those projects ran. A default must not rewrite history.
@@ -2891,6 +2898,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         if !skinGroups.isEmpty { try c.encode(skinGroups, forKey: .skinGroups) }   // ★ B6 s2b: older bytes unchanged
         if !zoneGroups.isEmpty { try c.encode(zoneGroups, forKey: .zoneGroups) }   // ★ B6 s3a: older bytes unchanged
         if wholePart { try c.encode(wholePart, forKey: .wholePart) }   // ★ B6 s3b: older bytes unchanged
+        if thinWallsNoticeSeen { try c.encode(true, forKey: .thinWallsNoticeSeen) }   // ★ his 11-09: older bytes unchanged
         if !areaGrading.isEmpty { try c.encode(areaGrading, forKey: .areaGrading) }   // ★ B7 (E3): older bytes unchanged
         try c.encode(groupDensities, forKey: .groupDensities)
         try c.encode(groupDepthMM, forKey: .groupDepthMM)
