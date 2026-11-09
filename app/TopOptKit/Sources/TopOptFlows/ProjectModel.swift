@@ -2002,6 +2002,67 @@ public final class ProjectModel: ObservableObject {
                                             rotationDegrees: rotationDegrees,
                                             piece: piece),
               p.verdict.ok else { return [] }
+        return surfacePatternSplit(face: face, piece: piece, cells: p.cells)
+    }
+
+    // MARK: ★ B8 (row 37) — THE PATTERN ON A HOLE (`PatternHole`): lines round the bore's own axis, rings down it
+
+    /// ★ The bore a Pattern tap aims at: the tapped face (or piece) when it is a hole — CutAim's test — else nil, and the face
+    /// keeps the grid above. A union of parts keeps that grid too.
+    public func surfacePatternBore(face: FaceID, piece: RegionID? = nil) -> PatternHole.Bore? {
+        guard let mesh = viewerMesh else { return nil }
+        let target = piece ?? surfaceCutTarget(face: face)
+        if let t = target.flatMap({ faceRegions.region($0) }), t.isUnionOfParts { return nil }
+        guard let aim = CutAim.make(face: face, piece: target, regions: faceRegions, mesh: mesh) else { return nil }
+        return PatternHole.bore(aim, points: CutAim.points(face: face, piece: target, regions: faceRegions, mesh: mesh))
+    }
+
+    /// ★ n around × m down on a hole, priced as the grid above is (the run's own spacing, inside the tapped piece). Nil when
+    /// the face is not a hole. Both counts cutting nothing is refused with the bar's own words (`PatternHole.nothingToCut`).
+    public func surfacePatternPreview(face: FaceID, around: Int, down: Int, piece: RegionID? = nil)
+        -> (cells: [FaceRegionGeometry.GridCell], verdict: SliverVerdict)? {
+        guard let mesh = viewerMesh, let bore = surfacePatternBore(face: face, piece: piece) else { return nil }
+        let within = (piece ?? surfaceCutTarget(face: face)).flatMap { faceRegions.region($0)?.cuts } ?? []
+        switch PatternHole.cells(bore, around: around, down: down) {
+        case .failure(let r):
+            return ([], SliverVerdict(ok: false, minCellVoxels: 0, emptyCells: 0, memberVoxels: 0, maxCellsBudget: 0,
+                                      floorVoxels: kRegionSliverFloorVoxels, reason: r.reason))
+        case .success(let cells):
+            let spacing = surfaceVoxelSpacingMM(mesh)
+            let priced = cells.map { FaceRegionGeometry.GridCell(i: $0.i, j: $0.j, cuts: within + $0.cuts, drawn: $0.drawn) }
+            let per = FaceRegionGeometry.cellVoxelCounts(members: [face], in: mesh, cells: priced, spacingMM: spacing)
+            let member = within.isEmpty
+                ? FaceRegionGeometry.memberVoxelEstimate(members: [face], in: mesh, spacingMM: spacing)
+                : FaceRegionGeometry.cellVoxelCounts(members: [face], in: mesh,
+                                                     cells: [FaceRegionGeometry.GridCell(i: 0, j: 0, cuts: within)],
+                                                     spacingMM: spacing).first ?? 0
+            return (cells, FaceRegionModel.checkSliver(cellVoxels: per, memberVoxels: member))
+        }
+    }
+
+    /// Commit the hole's pattern. Refuses on a failing verdict, as the grid above does.
+    @discardableResult
+    public func commitSurfacePattern(face: FaceID, around: Int, down: Int, piece: RegionID? = nil) -> [RegionID] {
+        beginFaceEdit(); defer { endFaceEdit(.pattern) }   // one edit, one Undo
+        guard let p = surfacePatternPreview(face: face, around: around, down: down, piece: piece),
+              p.verdict.ok else { return [] }
+        return surfacePatternSplit(face: face, piece: piece, cells: p.cells)
+    }
+
+    /// And to every bore carried from Select similar (each on its own axis); a face that is not a hole, or that the counts do
+    /// not fit, is skipped.
+    @discardableResult
+    public func commitSurfacePattern(faces: [FaceID], around: Int, down: Int) -> [RegionID] {
+        beginFaceEdit(); defer { endFaceEdit(.pattern) }   // the whole batch is one edit, one Undo
+        guard viewerMesh != nil, !faces.isEmpty else { return [] }
+        var out: [RegionID] = []
+        for f in faces.sorted() { out += commitSurfacePattern(face: f, around: around, down: down) }
+        return out
+    }
+
+    /// The split both patterns end in: the tapped piece (or the face's own region, made and grouped as its face is) cut by
+    /// the cells; a union of parts split whole.
+    private func surfacePatternSplit(face: FaceID, piece: RegionID?, cells: [FaceRegionGeometry.GridCell]) -> [RegionID] {
         let splitTarget = piece ?? surfaceCutTarget(face: face) ?? {
             let rid = faceRegions.union(faces: [face], named: "Face \(face)")
             if let g = selection.groups.first(where: { $0.faces.contains(face) }) {
@@ -2011,15 +2072,15 @@ public final class ProjectModel: ObservableObject {
         }()
         // ★★ a union is split WHOLE (2026-10-08): every part cut by the same cells, one union per cell
         if let u = faceRegions.region(splitTarget), u.isUnionOfParts, let mesh = viewerMesh {
-            let pricing = surfacePatternUnionPricing(union: u.id, cells: p.cells,
+            let pricing = surfacePatternUnionPricing(union: u.id, cells: cells,
                                                      spacingMM: surfaceVoxelSpacingMM(mesh), mesh: mesh)
-            let kids = faceRegions.splitUnion(u.id, cells: p.cells) { leaf, k in
+            let kids = faceRegions.splitUnion(u.id, cells: cells) { leaf, k in
                 (pricing.perLeaf[leaf]?[k] ?? 0) > 1e-9
             }
             if !kids.isEmpty { objectWillChange.send() }
             return kids
         }
-        let kids = faceRegions.splitGrid(splitTarget, cells: p.cells)
+        let kids = faceRegions.splitGrid(splitTarget, cells: cells)
         if !kids.isEmpty { objectWillChange.send() }
         return kids
     }

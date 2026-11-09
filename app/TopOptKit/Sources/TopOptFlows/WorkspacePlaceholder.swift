@@ -374,6 +374,9 @@ public struct WorkspacePlaceholder: View {
     /// The pattern tool's grid, before it is committed.
     @State private var patternColumns = 3
     @State private var patternRows = 1
+    /// ★ B8 (row 37): on a hole, the lines round it and the rings down it (PatternHole; mockup S.pa, S.pd).
+    @State private var patternAround = PatternHole.defaultAround
+    @State private var patternDown = PatternHole.defaultDown
     /// §7 — the user's own rotation of the grid, ON TOP of the automatic alignment
     /// to the face's longest edge. Drag the knob; releases on 15°.
     @State private var patternRotation: Double = 0
@@ -7234,10 +7237,28 @@ public struct WorkspacePlaceholder: View {
     private var surfacePatternPreview: (cells: [FaceRegionGeometry.GridCell],
                                         verdict: SliverVerdict)? {
         guard let f = surfacePatternFace else { return nil }
+        // ★ B8 (row 37): a hole's grid hangs on its own axis — n around, m down the hole
+        if surfacePatternBore != nil {
+            return project.surfacePatternPreview(face: f, around: patternAround, down: patternDown, piece: surfacePatternPiece)
+        }
         return project.surfacePatternPreview(face: f, columns: patternColumns,
                                              rows: patternRows,
                                              rotationDegrees: patternRotation,
                                              piece: surfacePatternPiece)
+    }
+
+    /// ★ B8 (row 37): the bore the Pattern tool is aimed at, when the tapped face is a hole (nil: today's grid).
+    private var surfacePatternBore: PatternHole.Bore? {
+        guard let f = surfacePatternFace else { return nil }
+        return project.surfacePatternBore(face: f, piece: surfacePatternPiece)
+    }
+
+    /// ★ B8 (row 37): the hole bar's line — nil when ✓ splits it; "nothing to cut"; or how many pieces the hole can hold.
+    private func patternHoleRefusal(_ p: (cells: [FaceRegionGeometry.GridCell], verdict: SliverVerdict)?) -> String? {
+        guard let p else { return PatternHole.nothingToCut }
+        if p.verdict.ok { return nil }
+        if p.verdict.reason == PatternHole.nothingToCut || p.verdict.memberVoxels == 0 { return p.verdict.reason }
+        return PatternBarCopy.fits(p.verdict.maxCellsBudget)
     }
 
     // MARK: ★ VIEW MODE — the wireframe and its x-ray, on every stage that has them
@@ -8050,7 +8071,26 @@ public struct WorkspacePlaceholder: View {
                     }
 
                 case .pattern:
-                    if surfacePatternFace != nil {
+                    if let face = surfacePatternFace, surfacePatternBore != nil {
+                        // ★ B8 (row 37, N1, P5; mockup #cut-pattern): on a hole — ✕ │ − n around + │ − n down the hole + │ ✓
+                        let preview = surfacePatternPreview
+                        PatternHoleBar(around: patternAround, down: patternDown, refusal: patternHoleRefusal(preview),
+                                       set: { patternAround = $0; patternDown = $1 },
+                                       cancel: { surfacePatternFace = nil; surfacePatternPiece = nil },
+                                       confirm: {
+                                           // ★ across every bore carried from Select similar, each on its own axis
+                                           let kids = surfaceCarried.count > 1
+                                               ? project.commitSurfacePattern(faces: surfaceCarried, around: patternAround,
+                                                                              down: patternDown)
+                                               : project.commitSurfacePattern(face: face, around: patternAround,
+                                                                              down: patternDown, piece: surfacePatternPiece)
+                                           if surfaceCarried.count > 1 { model.toast = "Patterned \(surfaceCarried.count) faces." }
+                                           surfaceCarried = []
+                                           surfaceSelected = kids.first
+                                           surfacePatternFace = nil
+                                           surfacePatternPiece = nil
+                                       })
+                    } else if surfacePatternFace != nil {
                         surfaceClusterButton("xmark", tint: DS.Color.textSecondary) {
                             surfacePatternFace = nil
                             surfacePatternPiece = nil
@@ -8209,7 +8249,11 @@ public struct WorkspacePlaceholder: View {
     private var surfaceDocksCluster: Bool { false }
 
     /// How far the cluster's middle keeps from the screen's sides: the Cut bar (✕ │ Tilt │ Rotate │ mm │ ✓) is the widest.
-    private var surfaceClusterHalfWidth: CGFloat { surfaceTool == .cut && cutAim != nil ? 330 : 200 }
+    private var surfaceClusterHalfWidth: CGFloat {
+        if surfaceTool == .cut && cutAim != nil { return 330 }
+        if surfaceTool == .pattern && surfacePatternBore != nil { return 300 }   // ★ B8: ✕ │ around │ down the hole │ ✓
+        return 200
+    }
 
     /// Where the cluster floats: the point the armed tool is aimed at.
     private func surfaceActionAnchor(_ proj: CameraProjection) -> CGPoint? {
