@@ -288,7 +288,7 @@ final class LatticeVariantTests: XCTestCase {
         XCTAssertFalse(ws.contains("return \"nothing set to lattice\""), "one home for the words")
         // every variant document is gated: the one builder refuses, the run and Check sizes say why
         XCTAssertTrue(ws.contains("guard LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled,")
-                      && ws.contains("regions: emission.regions) == nil else { return nil }"),
+                      && ws.contains("regions: emission.regions, wholePart: project.latticeStartsWhole) == nil else { return nil }"),
                       "relatticeJobJSON — the forecast, Check sizes and the run all come from it")
         XCTAssertTrue(ws.contains("model.toast = \"Can’t lattice this variant: \\(why).\""))
         XCTAssertTrue(ws.contains("throw RelatticeError(\"Can’t check sizes: \\(why).\")"))

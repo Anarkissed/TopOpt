@@ -1132,7 +1132,7 @@ public struct LatticeSetupWizard: View {
         guard probeDriver != nil else { return nil }
         let has = hasIncludeWallCache
             ?? LatticeJobIncludeGate.hasIncludeWall(project.variantLatticeJobRegions().regions)
-        return LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled, hasIncludeWall: has)
+        return LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled, hasIncludeWall: has || project.latticeStartsWhole)
     }
     /// ★ ruling 4 (item 6): Check sizes is refused for want of an include wall — every line that
     /// says so is one tap from the walls.
@@ -1858,7 +1858,7 @@ public struct LatticeSetupWizard: View {
             case .finish:
                 // ★ FOUR NOW — "Covered" is the solid outer shell.
                 segmentRow(["None", "Rim", "Skin", "Covered"],
-                           selected: boundaryIndex) { i in
+                           selected: boundaryIndex, greyed: Self.rimNeedsEngineWork ? [1] : []) { i in
                     // ★ LOCKED TO SKIN while single-cell members is on: the tap is
                     // refused and the pop-up says how to unlock it (his 2026-09-18).
                     if !model.setBoundary([.none, .rim, .fullSkin, .covered][i]) {
@@ -1885,6 +1885,15 @@ public struct LatticeSetupWizard: View {
                                 tint: DS.Color.textQuaternary.color)
                         .latticeID("wizard-finish-locked-note")
                 }
+                // ★ B7 slice 2b (the reviewer 11-08 21:32Z, ruling 4): Rim greyed, said in one line, until the engine builds it
+                if Self.rimNeedsEngineWork {
+                    captionLine(model.boundary == .rim ? Self.rimStoredLine : Self.rimGreyedLine, info: "rim",
+                                "Rim thickens the struts along the part's edges. Today's engine finds those edges only "
+                                + "where two flat CAD faces meet, so it refuses Rim on a real part. Rim comes back "
+                                + "when that engine work lands.",
+                                tint: DS.Color.textQuaternary.color)
+                        .latticeID("wizard-rim-greyed-note")
+                }
                 if model.boundary == .covered {
                     captionLine("A solid outer wall over the lattice.", info: "covered",
                                 "At the printer's own wall thickness. The lattice is still "
@@ -1901,6 +1910,14 @@ public struct LatticeSetupWizard: View {
                                 "The only skin pattern core builds.",
                                 tint: DS.Color.textQuaternary.color)
                         .latticeID("wizard-skin-pattern-fact")
+                    // ★ B7 slice 2b: Skin runs as core's "skin" — the woven skin with no solid shell — which core does not
+                    // certify yet (run_job.cpp finish_certified); said here, before the run, not found in Results
+                    captionLine(Self.skinNotCertifiedLine, info: "skin-cert",
+                                "The woven skin replaces the solid shell. The engine's strength check doesn't credit a "
+                                + "part without its shell yet, so Results shows this lattice as not accepted and "
+                                + "recommends the solid. Covered keeps the shell and is certified.",
+                                tint: DS.Color.textQuaternary.color)
+                        .latticeID("wizard-skin-not-certified-note")
                 }
             }
         }
@@ -2290,7 +2307,21 @@ public struct LatticeSetupWizard: View {
     static let latticeManualSection = "Manual · this area"
     static let latticePerAreaLine = "Each area's tab sets its own grade and finish; the look is the whole part's."
     /// ★ B7 slice 2 (release (3)): Rim and Skin per zone wait for core (`regions[].skin`); a zone tab says whose they are.
-    static func zoneRimSkinLine(_ part: String) -> String { "Rim and Skin are the part's for now (the part: \(part))." }
+    /// ★ B7 slice 2b: under the part's Skin (or Rim) a zone can't have its own finish (core's (1b2)): its row is greyed.
+    static func zoneRimSkinLine(_ part: String) -> String {
+        "A zone's own finish needs the part on None or Covered; the part is on \(part), so every zone is too."
+    }
+    /// ★ B7 slice 2b (the reviewer 11-08 21:32Z, ruling 4): Rim greyed until LatticeTypes' rim on a real part lands
+    /// (then flip this, and the line goes with it).
+    static let rimNeedsEngineWork = true
+    static let rimGreyedLine = "Rim needs engine work: the engine builds no rim on a real part yet."
+    static let rimStoredLine = "This part is on Rim, which the engine refuses today. Pick another finish."
+    static let skinNotCertifiedLine = "Not certified yet: with no solid shell, Results shows this lattice as not accepted."
+    /// ★ B7 slice 2 (the reviewer 11-08 21:32Z, ruling 3): while a zone's finish differs from the part's, the preview
+    /// (one finish for the whole part) and the run differ — said in one line. `zones`: "Zone 1 runs open", …
+    static func zoneFinishPreviewLine(_ zones: [String]) -> String {
+        "The preview shows the part's finish; \(zones.joined(separator: ", ")) (see Results)."
+    }
     /// ★ E3: on an area's tab, which rows are its own (it replaces "These settings apply to every region today.")
     static let latticeAreaOwnLine = "The grade, its band and the finish are this area's; the other rows are the whole part's."
     /// ★ The reviewer's words (ruling (2), 2026-11-06), under the shape grade until core's band is real.
@@ -2357,6 +2388,14 @@ public struct LatticeSetupWizard: View {
         let portrait = size.width < size.height
         let band = max(DSParts.headerHeight, size.height - PageChrome.panelTop - PageChrome.panelBottom)
         return AnyView(ZStack {
+            // ★ B7 (his iPad notes 11-08, design note 30): Sample is core's sample block beside the panel; In the part is the
+            // stage's live preview behind the page, as before
+            if model.stage == .cell {
+                AnyView(LatticeSampleView(inputs: latticeSampleInputs)
+                    .padding(.leading, portrait ? 0 : PageChrome.edge + PageChrome.widePanelWidth)
+                    .padding(.top, portrait ? PageChrome.panelTop + latticePanelHeight : PageChrome.panelTop)
+                    .latticeID("lattice-sample-view"))
+            }
             latticePanel(c, hug: portrait)
                 .frame(height: portrait ? nil : band)
                 .frame(maxHeight: portrait ? min(band, size.height * 0.62) : nil, alignment: .top)
@@ -2369,6 +2408,14 @@ public struct LatticeSetupWizard: View {
                 .padding(.top, portrait ? PageChrome.panelTop + latticePanelHeight + DS.Space.l + 14 : PageChrome.panelTop + 14)
                 .frame(maxHeight: .infinity, alignment: .top)
         })
+    }
+
+    /// The Sample's inputs: the page's type, its cell when Cell size is Manual (else core's own), the printer's bead.
+    private var latticeSampleInputs: LatticeSampleView.Inputs {
+        LatticeSampleView.Inputs(topology: model.topologyID,
+                                 typeName: LatticeType.displayName(forID: model.topologyID),
+                                 cellMM: model.cellSizeMode == .fixed ? model.cellMM : 0,
+                                 beadMM: project.printParams.strutLineWidthMM)
     }
 
     private func latticePanel(_ c: CellsPageContext, hug: Bool) -> some View {
@@ -2526,6 +2573,7 @@ public struct LatticeSetupWizard: View {
                 shortNote(Self.latticePerAreaLine).latticeID("lattice-page-per-area-note")
                 // ★ B7 slice 2: the part's finish is set here once an area can have its own (Rim / Skin stay the part's)
                 if !organic, TopOptKit.regionOuterFinishWired { AnyView(settingControl(.finish, titled: true)) }
+                zoneFinishPreviewNote
             }
         } else if let area {
             Text(area.uppercased()).font(.system(size: 10.5, weight: .bold)).tracking(0.8)
@@ -2537,6 +2585,7 @@ public struct LatticeSetupWizard: View {
                 || (model.gradingMode.fitsShape && part.shapeFitBandMM != model.shapeFitBandMM) {
                 shortNote(Self.latticeAreaPreviewLine).latticeID("lattice-page-area-preview-note")
             }
+            zoneFinishPreviewNote
             latticeAreaRows(organic: organic, structural: structural, zone: latticeAreaGroupID(c))
         }
         })
@@ -2546,14 +2595,17 @@ public struct LatticeSetupWizard: View {
     /// until set, the part's (Covered when the part is covered, else None). Rim and Skin are the part's, said in one line.
     private func zoneFinishRow(_ gid: UUID) -> AnyView {
         let own = (latticeAreaEdits ?? project.lattice.areaGrading)[gid]?.outerFinish
-        let shown = own ?? (model.boundary == .covered ? "shell" : "none")
+        // ★ B7 slice 2b: under the part's Skin or Rim no zone has its own finish (core's (1b2)) — the row is greyed, nothing
+        // picked, and the line says why; the stored choice comes back when the part is on None or Covered again
+        let partWord = model.boundary.zoneFinishWord
+        let shown = partWord.map { own ?? $0 }
         let partName = ["None", "Rim", "Skin", "Covered"][boundaryIndex]
         return AnyView(VStack(alignment: .leading, spacing: 5) {
             Text("Finish").font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)
                 .foregroundStyle(DS.Color.textTertiary.color)
             HStack(spacing: 4) {
                 ForEach([("none", "None"), ("shell", "Covered")], id: \.0) { value, title in
-                    segmentButton(title, on: shown == value) {
+                    segmentButton(title, on: shown == value, greyed: partWord == nil) {
                         if latticeAreaEdits == nil { latticeAreaEdits = project.lattice.areaGrading }
                         var g = latticeAreaEdits?[gid] ?? LatticeAreaGrading()
                         g.outerFinish = value
@@ -2564,10 +2616,28 @@ public struct LatticeSetupWizard: View {
                 }
             }
             .modifier(LatticeSegmentTrack())
-            if model.boundary == .rim || model.boundary == .fullSkin {
+            if partWord == nil {
                 shortNote(Self.zoneRimSkinLine(partName)).latticeID("lattice-zone-rim-skin-note")
             }
         })
+    }
+
+    /// ★ B7 slice 2 (the reviewer 11-08 21:32Z, ruling 3): the zones whose finish the run gives differently from the part's
+    /// — "Zone 1 runs open" — in tab order; empty under Skin / Rim (no zone sends its own) and when core takes none.
+    var zonesRunningAnotherFinish: [String] {
+        guard TopOptKit.regionOuterFinishWired, model.cellTransition != .organicGrade,
+              let part = model.boundary.zoneFinishWord else { return [] }
+        let edits = latticeAreaEdits ?? project.lattice.areaGrading
+        return project.latticeAreaGroups.compactMap { g in
+            guard let f = edits[g.id]?.outerFinish, f != part else { return nil }
+            return "\(g.name) runs \(f == "none" ? "open" : "covered")"
+        }
+    }
+    @ViewBuilder private var zoneFinishPreviewNote: some View {
+        let zones = zonesRunningAnotherFinish
+        if !zones.isEmpty {
+            shortNote(Self.zoneFinishPreviewLine(zones)).latticeID("lattice-page-zone-finish-preview-note")
+        }
     }
 
     private func latticeAreaRows(organic: Bool, structural: Bool, zone: UUID? = nil) -> AnyView {
@@ -2637,7 +2707,7 @@ public struct LatticeSetupWizard: View {
             ForEach(LatticeWizardStage.allCases, id: \.rawValue) { s in
                 let on = model.stage == s
                 Button { model.jump(to: s); rebuild() } label: {
-                    Text(organicSampleShown && s == .cell ? "Sample" : s.title)
+                    Text(s == .cell ? LatticeSampleView.switchTitle : s.title)
                         .font(.system(size: 13, weight: on ? .semibold : .regular))
                         .foregroundStyle((on ? DS.Color.textPrimary : DS.Color.textSecondary).color)
                         .padding(.horizontal, DS.Space.l).frame(minWidth: 120, minHeight: 36)
@@ -2798,17 +2868,18 @@ public struct LatticeSetupWizard: View {
             .latticeID("wizard-field-\(id)")
     }
 
-    private func segmentRow(_ names: [String], selected: Int,
+    /// `greyed`: choices drawn faded that a tap does not pick (B7 slice 2b: Rim until the engine builds it).
+    private func segmentRow(_ names: [String], selected: Int, greyed: Set<Int> = [],
                             tap: @escaping (Int) -> Void) -> some View {
         HStack(spacing: 4) {
             ForEach(Array(names.enumerated()), id: \.offset) { i, n in
-                segmentButton(n, on: selected == i) { tap(i) }
+                segmentButton(n, on: selected == i, greyed: greyed.contains(i)) { tap(i) }
             }
         }
         .modifier(LatticeSegmentTrack())
     }
 
-    private func segmentButton(_ name: String, on: Bool,
+    private func segmentButton(_ name: String, on: Bool, greyed: Bool = false,
                                tap: @escaping () -> Void) -> some View {
         let ink: Color = (on ? DS.Color.textPrimary : DS.Color.textTertiary).color
         let fill: Color = on ? DS.Color.fillSelected.color : Color.clear
@@ -2822,6 +2893,8 @@ public struct LatticeSetupWizard: View {
                 .background(Capsule().fill(fill))
         }
         .buttonStyle(.plain)
+        .disabled(greyed)
+        .opacity(greyed ? 0.35 : 1)
         .latticeID("wizard-seg-\(name.lowercased())")
     }
 }

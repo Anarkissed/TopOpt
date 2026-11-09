@@ -155,12 +155,8 @@ public enum RelatticeJobBuilder {
         // Absent unless asked for, so a real re-lattice job is byte-identical to
         // the one this builder has always produced.
         if forecastOnly { block["forecast_only"] = true }
-        // ★ THE SOLID COVER (maintainer, 2026-08-19). Only when the user picked
-        // **Covered**: an absent key leaves the job BYTE-IDENTICAL to one written
-        // before the option existed. Core validates it against
-        // "shell" / "skin" / "shell+skin" (core/src/cli/job.cpp:1433) and refuses
-        // the latter two unless `skin == "diagrid"`, which is why only the
-        // unambiguous "shell" is ever emitted.
+        // ★ THE OUTER FINISH (B7 slice 2b): None "none", Skin "skin" (with skin "diagrid"), Covered "shell"; absent
+        // (core's "shell") only for Rim — `LatticeBoundaryTreatment.jobOuterFinish` says why.
         if let of = lat.outerFinish { block["outer_finish"] = of }
         // ★ B6 → E2 (release (2)): Start from − and the scenario switches. The load case is the run's own, so the names go
         // only where that run carried them; every one on (or none of them there) writes nothing — core's own "every scenario".

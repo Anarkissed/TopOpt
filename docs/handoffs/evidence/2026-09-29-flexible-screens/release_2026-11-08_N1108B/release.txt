@@ -1,0 +1,15 @@
+# Release 8e1b257f — 2026-11-08 N1108B (app batch 603bb98e), app only
+# Core and worker unchanged: fingerprint db2cc34ef3fe; "fingerprint": "db2cc34ef3fe"
+# Merged onto 1628c295; the merged app tree equals N1108B's, so the builder's tests and the reviewer's code check apply unchanged.
+# Commits:
+#   322d309a His iPad notes 11-08: Lattice Setup chips, picks and groups (app only)
+#   cd66a84b His iPad notes 11-08 (4.1): the Lattice page's Sample draws core's sample block for the type
+#   603bb98e Merge UI-Notes' 322d309a (his iPad notes 11-08: Lattice Setup chips, picks and groups; app only) with B7 slice 2b + Sample
+# Gates:
+#   23:41 checks ok: N1108B 603bb98e, 3 commit(s), app-only, base a81f5a96, onto 1628c295, fingerprint db2cc34ef3fe
+#   23:41 merged 8e1b257f; app tree == N1108B's, fingerprint db2cc34ef3fe
+#   23:41 waiting for HEAVY.lock (LatticeTypes rim diagnostic (res 64 coupon, ~80 s), driver pid 18973 2026-11-08 22:20)
+#   23:42 lock taken
+#   23:48 iPad device build green; lock released
+#   23:48 pushed 8e1b257f
+#   23:48 worker /health "fingerprint": "db2cc34ef3fe" (unchanged, no swap)

@@ -985,7 +985,7 @@ public final class ResultsModel: ObservableObject {
                 + (plan == nil ? "\(String(format: "%g", r.cellMM)) mm cells" : "the plan's cells")
                 + "), so this file is the solid part. The density and strut "
                 + "figures below describe nothing and are withheld.")
-            return lines + scopeLine + regionLines
+            return lines + scopeLine + regionLines + r.finishLines   // ★ B7 slice 2 (ruling 3): the receipt's finish facts
         }
         lines.append("Lattice: \(name), \(cellPhrase), "
             + "filled at \(pct(r.generateRelativeDensity)) density "
@@ -1057,7 +1057,7 @@ public final class ResultsModel: ObservableObject {
                 }
             }
         }
-        return lines + scopeLine + regionLines
+        return lines + scopeLine + regionLines + r.finishLines
     }
 
     /// Format the Face-protection diagnostics from a finished outcome into honest lines.
