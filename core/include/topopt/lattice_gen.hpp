@@ -383,6 +383,14 @@ struct LatticeMeshRimSpec {
   // bisector until it does, at most this far; one that cannot is left where it was (the
   // clip then drops what lies outside) and counted.
   double max_seat_mm = 0.0;
+  // > 0 (with max_seat_mm): a run longer than this gets stations along it, this far
+  // apart at most, so a straight edge between two corners is seated along its length,
+  // not only at its ends. A corner of three faces never seats (moving along one edge's
+  // bisector does not clear the third face), so a two-point chain left unseated at both
+  // ends lost its whole length to the clip wherever the voxel shell sat in from the
+  // edge (the coupon's tongue end at resolution 64: two edges clipped away, two laid
+  // under 0.3 of 12 mm). The voxel spacing is the natural choice.
+  double station_spacing_mm = 0.0;
 };
 // ★ (A), the OPEN finish: a cut strut end near a sharp edge (its position and the strut's
 // radius), recorded as the lattice is laid; the rim then ties it to its own centre line.
@@ -392,6 +400,11 @@ struct LatticeRimTieEnd {
 };
 struct LatticeMeshRimReport {
   long long chains = 0, chains_laid = 0, chains_clipped_away = 0;
+  // The rim dresses the LATTICE: a piece whose cell region.latticed leaves solid is not
+  // laid (that edge is a solid edge already) and is counted here; a chain lying wholly on
+  // solid material is chains_on_solid, never chains_clipped_away.
+  long long chains_on_solid = 0;
+  double length_on_solid_mm = 0.0;
   long long spans = 0, joints = 0;
   // the open finish's ties: cut ends within one cell of a laid rim
   long long tie_ends = 0, ties_laid = 0, ties_touching = 0, ties_out_of_reach = 0,

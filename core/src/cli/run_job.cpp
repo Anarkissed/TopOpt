@@ -4740,7 +4740,9 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
          ", \"chains_other_skin\": " + std::to_string(oc.rim_chains_other_skin) +
          ", \"chains_laid\": " + std::to_string(rr.chains_laid) +
          ", \"chains_clipped_away\": " + std::to_string(rr.chains_clipped_away) +
+         ", \"chains_on_solid\": " + std::to_string(rr.chains_on_solid) +
          ", \"length_laid_mm\": " + json_num(rr.length_laid_mm) +
+         ", \"length_on_solid_mm\": " + json_num(rr.length_on_solid_mm) +
          ", \"spans\": " + std::to_string(rr.spans) +
          ", \"joints\": " + std::to_string(rr.joints) +
          ", \"stations\": " + std::to_string(rr.stations) +
@@ -10533,6 +10535,7 @@ LatticeVariantOutcome lattice_one_variant_pass(
     // Seated in the shell the struts are clipped to: it sits up to about a voxel off the
     // clean surface (half a voxel on a face, more where it chamfers a convex edge).
     mesh_rim.max_seat_mm = 1.5 * solved_grid.spacing;
+    mesh_rim.station_spacing_mm = solved_grid.spacing;
   }
   R.oc = export_latticed_variant(
       v, out_dir, job.output, job.lattice, solved_grid, boundary, cell, G,
@@ -10834,7 +10837,9 @@ LatticeVariantOutcome lattice_one_variant_pass(
         std::to_string(fe.pieces_dropped_short) + " piece(s) of them shorter than one cell (" +
         json_num(fe.min_piece_mm) + " mm, dropped), " +
         std::to_string(R.oc.rim_chains_other_skin) +
-        " chain(s) in zones that ask for another skin, and " +
+        " chain(s) in zones that ask for another skin, " +
+        std::to_string(R.oc.rim.chains_on_solid) +
+        " chain(s) along material the lattice leaves solid (a solid edge needs no rim), and " +
         std::to_string(R.oc.rim.chains_clipped_away) +
         " chain(s) with no room inside the part for a rim of " +
         json_num(R.oc.rim.diameter_max_mm) +

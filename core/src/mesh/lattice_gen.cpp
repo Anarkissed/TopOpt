@@ -1203,25 +1203,49 @@ LatticeGenStats generate_mesh_rims(const LatticeRegion& R, const LatticeRadiusFi
   rp.diameter_min_mm = 1e30;
   rp.line_widths_min = std::numeric_limits<int>::max();
   const double w = spec.line_width_mm;
-  for (const LatticeMeshRimChain& C : spec.chains) {
-    const std::size_t np = C.points.size();
-    if (np < 2) continue;
-    const std::size_t nseg = C.closed ? np : np - 1;
-    if (C.left_normal.size() < nseg || C.right_normal.size() < nseg || C.convex.size() < nseg)
+  for (const LatticeMeshRimChain& C0 : spec.chains) {
+    const std::size_t np0 = C0.points.size();
+    if (np0 < 2) continue;
+    const std::size_t nseg0 = C0.closed ? np0 : np0 - 1;
+    if (C0.left_normal.size() < nseg0 || C0.right_normal.size() < nseg0 ||
+        C0.convex.size() < nseg0)
       continue;
     ++rp.chains;
     // ONE tube per chain, so its pieces meet exactly: the largest skin radius at the
     // chain's segment midpoints, rounded UP to a whole number of line widths.
     double r = 0.0;
-    for (std::size_t i = 0; i < nseg; ++i)
+    for (std::size_t i = 0; i < nseg0; ++i)
       r = std::max(r, skin_radius_at(G, skin,
-                                     scale(add(C.points[i], C.points[(i + 1) % np]), 0.5)));
+                                     scale(add(C0.points[i], C0.points[(i + 1) % np0]), 0.5)));
     int nw = 0;
     if (w > 0.0) {
       nw = std::max(1, static_cast<int>(std::ceil(2.0 * r / w - 1e-9)));
       r = 0.5 * w * nw;
     }
     if (!(r > 0.0)) continue;
+    // Stations along each run (LatticeMeshRimSpec::station_spacing_mm): a segment longer
+    // than the spacing is split evenly, each piece keeping its segment's two normals.
+    LatticeMeshRimChain dense;
+    const bool densify = spec.max_seat_mm > 0.0 && spec.station_spacing_mm > 0.0;
+    if (densify) {
+      dense.closed = C0.closed;
+      for (std::size_t k = 0; k < nseg0; ++k) {
+        const Vec3& a = C0.points[k];
+        const Vec3& b = C0.points[(k + 1) % np0];
+        const int n = std::max(
+            1, static_cast<int>(std::ceil(norm(sub(b, a)) / spec.station_spacing_mm - 1e-9)));
+        for (int j = 0; j < n; ++j) {
+          dense.points.push_back(add(a, scale(sub(b, a), static_cast<double>(j) / n)));
+          dense.left_normal.push_back(C0.left_normal[k]);
+          dense.right_normal.push_back(C0.right_normal[k]);
+          dense.convex.push_back(C0.convex[k]);
+        }
+      }
+      if (!C0.closed) dense.points.push_back(C0.points.back());
+    }
+    const LatticeMeshRimChain& C = densify ? dense : C0;
+    const std::size_t np = C.points.size();
+    const std::size_t nseg = C.closed ? np : np - 1;
     const double a_in = r + spec.inset_mm;
     // The tube's centre at point i, from the normals of the segments that meet there.
     auto station = [&](std::size_t i) {
@@ -1298,11 +1322,27 @@ LatticeGenStats generate_mesh_rims(const LatticeRegion& R, const LatticeRadiusFi
       last_ball = p;
       have_ball = true;
     };
+    bool any_on_lattice = false;
     for (std::size_t i = 0; i < nseg; ++i) {
       const Vec3& a = S[i];
       const Vec3& b = S[(i + 1) % np];
       const double len = norm(sub(b, a));
       if (!(len > 0.0)) continue;
+      // The rim dresses the lattice: a piece whose cell the lattice leaves solid is not
+      // laid, and counted (the same per-cell predicate the struts are emitted by).
+      if (R.latticed && R.cell_mm > 0.0) {
+        const Vec3 m = scale(add(a, b), 0.5);
+        auto at = [&](double x, double o, int n) {
+          return std::clamp(static_cast<int>(std::floor((x - o) / R.cell_mm)), 0,
+                            std::max(0, n - 1));
+        };
+        if (!R.latticed(at(m.x, R.origin.x, R.nx), at(m.y, R.origin.y, R.ny),
+                        at(m.z, R.origin.z, R.nz))) {
+          rp.length_on_solid_mm += len;
+          continue;
+        }
+      }
+      any_on_lattice = true;
       const Vec3 dir = scale(sub(b, a), 1.0 / len);
       const auto spans = B->clip_segment(a, b, r, -1, -1, &st.uncertified_spans_dropped, 0.0);
       for (const auto& sp : spans) {
@@ -1323,7 +1363,8 @@ LatticeGenStats generate_mesh_rims(const LatticeRegion& R, const LatticeRadiusFi
       }
     }
     if (!laid) {
-      ++rp.chains_clipped_away;
+      if (any_on_lattice) ++rp.chains_clipped_away;
+      else ++rp.chains_on_solid;
       continue;
     }
     if (C.closed) S.push_back(S.front());

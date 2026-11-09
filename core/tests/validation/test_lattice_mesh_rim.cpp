@@ -287,6 +287,31 @@ int main() {
     CHECK(std::isfinite(m0) && m0 == m1, "§2 the certificate's margin is the same with or without the rim");
     CHECK(!rim.chains.empty() && across_top == 0, "§2 no chain the rim rides crosses the smooth top");
     CHECK(!has(none.receipt, "\"rim\": {"), "§2 control: no rim asked, no rim block");
+    // Seated ALONG each run, not only at its points (station_spacing_mm): with stations
+    // only at a chain's points, a straight edge between two corners never seated (a
+    // corner of three faces cannot) and lost its length to the clip; this coupon laid
+    // 288 of its 516 mm, and at resolution 64 two whole edges clipped away. Only the
+    // corners are left out now.
+    {
+      double chain_len = 0.0;  // the coupon's chains are all open
+      for (const auto& c : rim.chains)
+        for (std::size_t i = 0; i + 1 < c.size(); ++i)
+          chain_len += std::sqrt((c[i + 1].x - c[i].x) * (c[i + 1].x - c[i].x) +
+                                 (c[i + 1].y - c[i].y) * (c[i + 1].y - c[i].y) +
+                                 (c[i + 1].z - c[i].z) * (c[i + 1].z - c[i].z));
+      const double laid_mm = num_after(rim.receipt, "length_laid_mm", rb);
+      const double solid_mm = num_after(rim.receipt, "length_on_solid_mm", rb);
+      std::printf("[rim] coupon covered: laid %.1f of %.1f mm of edge (%.1f %%), %.1f mm along "
+                  "material left solid, %.0f chain(s) clipped away, %.0f on solid\n",
+                  laid_mm, chain_len, 100.0 * laid_mm / chain_len, solid_mm,
+                  num_after(rim.receipt, "chains_clipped_away", rb),
+                  num_after(rim.receipt, "chains_on_solid", rb));
+      CHECK(num_after(rim.receipt, "chains_clipped_away", rb) == 0,
+            "§2 no edge chain is clipped away");
+      CHECK(chain_len > 0.0 && std::isfinite(solid_mm) && laid_mm + solid_mm >= 0.9 * chain_len,
+            "§2 the rim lays at least 90 % of the edges the lattice reaches (only corners are "
+            "left out; edges along material left solid are counted, not laid)");
+    }
   }
 
   // ── §3 open: the cut ends near the edges are tied ──────────────────────────
@@ -318,6 +343,16 @@ int main() {
                                                                   : r.receipt.substr(rb, 500).c_str());
     CHECK(r.refused.empty() && num_after(r.receipt, "chains_laid", rb) > 0,
           "§4 the rim is laid on his l-bracket");
+    // At 3.5 mm cells most of the bracket is too thin to lattice and stays solid; the rim
+    // dresses the lattice only: its edges along solid material are counted, not laid.
+    std::printf("[rim] l-bracket: laid %.1f mm on %.0f chain(s); %.1f mm along material left "
+                "solid (%.0f chain(s) wholly), %.0f clipped away\n",
+                num_after(r.receipt, "length_laid_mm", rb), num_after(r.receipt, "chains_laid", rb),
+                num_after(r.receipt, "length_on_solid_mm", rb),
+                num_after(r.receipt, "chains_on_solid", rb),
+                num_after(r.receipt, "chains_clipped_away", rb));
+    CHECK(num_after(r.receipt, "length_on_solid_mm", rb) > 0.0,
+          "§4 the bracket's edges along material left solid are counted, not laid");
   }
 
   // ── §5 Rim per zone ────────────────────────────────────────────────────────
