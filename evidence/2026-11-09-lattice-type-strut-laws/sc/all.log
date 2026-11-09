@@ -1,0 +1,74 @@
+LATTICE DE-HOMOGENIZATION PROBE — sc band [0.08659, 0.49638] (read from core)
+
+===== SELFCHECK — instrument honesty =====
+  S1 solid KUBC peak==macro (K=1)            5.929e-08  (bar 1.0e-05)  PASS
+  S2 superposition == direct combined solve  2.724e-09  (bar 5.0e-04)  PASS
+  S3 |rho_lib - target| via production mapping 2.776e-16  (bar 5.0e-03)  PASS
+  S4 periodic solid tensor (4 digits)        5.437e-15  (bar 1.0e-04)  PASS
+  S6 bound holds on 64 mixed states          -1.479e-01  (bar 1.0e-09)  PASS
+  band read from core: [0.08659, 0.49638]
+  S5 band sane (0<lo<hi<1)                   0.000e+00  (bar 5.0e-01)  PASS
+  selfcheck: ALL PASS
+
+===== BULK LAW — periodic cell, band sweep (J2/J3/J5) =====
+EXPECTATION STATED BEFORE MEASURING (J2): PR 247 measured the uniaxial
+strut/macro concentration at ~25x (rho 0.31) and ~44x (rho 0.20) on
+voxelized joint peaks at vpc32. If K ~ A/rho that implies A ~ 8:
+  expected K(uni) ~ 160 at rho 0.05, ~ 8-13 at rho 0.60-0.90.
+Shear states are expected WORSE per unit macro vm for a stretch-
+dominated lattice; hydrostatic macro vm is 0, so K_vm(hydro) = inf —
+the vol term must be reported per unit pressure instead.
+  rho 0.087 vpc 16 (wall 1 vox, 0.0s): K_dev=228.5 K_vol=33.1  
+  rho 0.087 vpc 24 (wall 2 vox, 0.1s): K_dev=198.0 K_vol=30.6  
+  rho 0.087 vpc 32 (wall 3 vox, 0.3s): K_dev=210.5 K_vol=31.2  
+  rho 0.087 vpc 40 (wall 3 vox, 0.8s): K_dev=266.2 K_vol=34.5  
+  rho 0.087 vpc 48 (wall 4 vox, 1.9s): K_dev=316.7 K_vol=39.3  
+  rho 0.100 vpc 32 (wall 3 vox, 0.5s): K_dev=248.9 K_vol=32.2  
+  rho 0.100 vpc 48 (wall 5 vox, 2.1s): K_dev=221.8 K_vol=31.6  
+  rho 0.157 vpc 32 (wall 4 vox, 0.6s): K_dev=129.9 K_vol=22.1  
+  rho 0.157 vpc 48 (wall 6 vox, 2.9s): K_dev=137.2 K_vol=24.0  
+  rho 0.200 vpc 16 (wall 2 vox, 0.0s): K_dev=64.4 K_vol=13.8  
+  rho 0.200 vpc 24 (wall 3 vox, 0.2s): K_dev=64.7 K_vol=14.1  
+  rho 0.200 vpc 32 (wall 5 vox, 0.8s): K_dev=68.1 K_vol=14.9  
+  rho 0.200 vpc 40 (wall 5 vox, 1.7s): K_dev=71.2 K_vol=15.9  
+  rho 0.200 vpc 48 (wall 6 vox, 3.5s): K_dev=95.6 K_vol=19.6  
+  rho 0.313 vpc 32 (wall 6 vox, 1.3s): K_dev=35.9 K_vol=10.9  
+  rho 0.313 vpc 48 (wall 8 vox, 5.3s): K_dev=41.2 K_vol=12.5  
+  rho 0.450 vpc 32 (wall 7 vox, 1.8s): K_dev=16.6 K_vol=7.1  
+  rho 0.450 vpc 48 (wall 11 vox, 8.0s): K_dev=22.9 K_vol=9.3  
+  rho 0.496 vpc 32 (wall 8 vox, 2.2s): K_dev=14.8 K_vol=6.8  
+  rho 0.496 vpc 48 (wall 11 vox, 8.5s): K_dev=20.9 K_vol=9.2  
+
+===== FINITE KUBC BLOCKS — N-convergence of the interior (J1) =====
+  rho 0.200 N2 vpc16: interior K_dev=0.0  (1s, cg<=109)
+  rho 0.200 N3 vpc16: interior K_dev=67.8  (8s, cg<=257)
+  rho 0.200 N4 vpc16: interior K_dev=69.2  (32s, cg<=389)
+  rho 0.450 N2 vpc16: interior K_dev=0.0  (2s, cg<=112)
+  rho 0.450 N3 vpc16: interior K_dev=12.0  (17s, cg<=221)
+  rho 0.450 N4 vpc16: interior K_dev=12.1  (85s, cg<=316)
+  rho 0.200 N3 vpc24: interior K_dev=68.1  (64s, cg<=379)
+
+===== BOUNDARY POPULATIONS — free surfaces and cut cells (J4) =====
+  sandwich rho 0.087 N3 vpc24: K_dev free=218.4 interior=217.2 dropped=0 (47s, cg<=1576)
+  cut rho 0.087 N3 vpc24: K_dev free=240.8 interior=240.3 dropped=0 (74s, cg<=2456)
+  sandwich rho 0.100 N3 vpc24: K_dev free=243.3 interior=244.4 dropped=0 (58s, cg<=1418)
+  cut rho 0.100 N3 vpc24: K_dev free=269.2 interior=267.8 dropped=0 (98s, cg<=2098)
+  sandwich rho 0.157 N3 vpc24: K_dev free=86.3 interior=79.1 dropped=0 (66s, cg<=1212)
+  cut rho 0.157 N3 vpc24: K_dev free=93.8 interior=88.6 dropped=0 (112s, cg<=1822)
+  sandwich rho 0.200 N4 vpc16: K_dev free=72.6 interior=71.3 dropped=0 (60s, cg<=896)
+  cut rho 0.200 N4 vpc16: K_dev free=74.3 interior=73.9 dropped=0 (88s, cg<=1270)
+  sandwich rho 0.313 N4 vpc16: K_dev free=22.2 interior=20.8 dropped=0 (73s, cg<=789)
+  cut rho 0.313 N4 vpc16: K_dev free=22.9 interior=21.4 dropped=0 (114s, cg<=1107)
+  sandwich rho 0.450 N4 vpc16: K_dev free=13.2 interior=11.8 dropped=0 (108s, cg<=620)
+  cut rho 0.450 N4 vpc16: K_dev free=13.6 interior=12.3 dropped=0 (160s, cg<=961)
+  sandwich rho 0.496 N4 vpc16: K_dev free=9.8 interior=8.8 dropped=0 (132s, cg<=591)
+  cut rho 0.496 N4 vpc16: K_dev free=10.1 interior=9.1 dropped=0 (144s, cg<=910)
+
+===== FIT — is K a function or scatter? (J3) =====
+  K_dev envelope ~ 5.95 * rho^-1.735 ; worst row deviation 30.9%
+  (the LAW HANDED TO J6 is the per-rho TABLE, interpolated —
+   the power fit is descriptive only.)
+  kfit.csv written (7 rho rows)
+
+DONE (rc=0).
+exit 0

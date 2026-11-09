@@ -75,6 +75,11 @@ LatticeSampleReceipt write_lattice_sample(const LatticeSampleSpec& spec, Triangl
 // The coupon alone (write_lattice_sample dispatches here for shape "coupon").
 LatticeSampleReceipt write_lattice_coupon(const LatticeSampleSpec& spec, TriangleSink& sink);
 
+// ★ The coupon's outline as one closed, welded solid (45 x 40 x 35 mm, the plate inside it):
+// the part a run lattices when the coupon is the part (ruling 11-08 (A), the rim's test
+// block). Its half-cylinder top is faceted in 1-degree steps, so it carries no sharp edge.
+TriangleMesh lattice_coupon_solid();
+
 // ★ THE BRIDGE ENTRY (preview parity): the same sample as an in-memory triangle soup, so the
 // app's Lattice preview draws exactly what core writes to the file. Throws as
 // write_lattice_sample does; `receipt` (optional) gets the receipt.

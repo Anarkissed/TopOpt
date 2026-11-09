@@ -31,6 +31,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <set>
 #include <tuple>
 #include <vector>
@@ -1183,6 +1184,254 @@ LatticeGenStats generate_lattice_rims(const LatticeRegion& R, const LatticeRadiu
   return st;
 }
 
+// ★ THE RIM ON A REAL PART (ruling 11-08 (A)); lattice_gen.hpp states the contract.
+LatticeGenStats generate_mesh_rims(const LatticeRegion& R, const LatticeRadiusField& G,
+                                   TriangleSink& sink, const LatticeSkinSpec& skin,
+                                   const LatticeMeshRimSpec& spec,
+                                   LatticeMeshRimReport* report,
+                                   const LatticeGenObserver* obs,
+                                   const std::vector<LatticeRimTieEnd>* tie_ends) {
+  if (!R.boundary)
+    throw std::invalid_argument("generate_mesh_rims: a rim needs region.boundary");
+  // the laid rims' centre lines and radii, for the ties after them
+  std::vector<std::pair<std::vector<Vec3>, double>> laid_lines;
+  const LatticeBoundary* B = R.boundary;
+  LatticeGenStats st;
+  st.min_strut_diameter_mm = 1e30;
+  st.max_strut_diameter_mm = 0.0;
+  LatticeMeshRimReport rp;
+  rp.diameter_min_mm = 1e30;
+  rp.line_widths_min = std::numeric_limits<int>::max();
+  const double w = spec.line_width_mm;
+  for (const LatticeMeshRimChain& C0 : spec.chains) {
+    const std::size_t np0 = C0.points.size();
+    if (np0 < 2) continue;
+    const std::size_t nseg0 = C0.closed ? np0 : np0 - 1;
+    if (C0.left_normal.size() < nseg0 || C0.right_normal.size() < nseg0 ||
+        C0.convex.size() < nseg0)
+      continue;
+    ++rp.chains;
+    // ONE tube per chain, so its pieces meet exactly: the largest skin radius at the
+    // chain's segment midpoints, rounded UP to a whole number of line widths.
+    double r = 0.0;
+    for (std::size_t i = 0; i < nseg0; ++i)
+      r = std::max(r, skin_radius_at(G, skin,
+                                     scale(add(C0.points[i], C0.points[(i + 1) % np0]), 0.5)));
+    int nw = 0;
+    if (w > 0.0) {
+      nw = std::max(1, static_cast<int>(std::ceil(2.0 * r / w - 1e-9)));
+      r = 0.5 * w * nw;
+    }
+    if (!(r > 0.0)) continue;
+    // Stations along each run (LatticeMeshRimSpec::station_spacing_mm): a segment longer
+    // than the spacing is split evenly, each piece keeping its segment's two normals.
+    LatticeMeshRimChain dense;
+    const bool densify = spec.max_seat_mm > 0.0 && spec.station_spacing_mm > 0.0;
+    if (densify) {
+      dense.closed = C0.closed;
+      for (std::size_t k = 0; k < nseg0; ++k) {
+        const Vec3& a = C0.points[k];
+        const Vec3& b = C0.points[(k + 1) % np0];
+        const int n = std::max(
+            1, static_cast<int>(std::ceil(norm(sub(b, a)) / spec.station_spacing_mm - 1e-9)));
+        for (int j = 0; j < n; ++j) {
+          dense.points.push_back(add(a, scale(sub(b, a), static_cast<double>(j) / n)));
+          dense.left_normal.push_back(C0.left_normal[k]);
+          dense.right_normal.push_back(C0.right_normal[k]);
+          dense.convex.push_back(C0.convex[k]);
+        }
+      }
+      if (!C0.closed) dense.points.push_back(C0.points.back());
+    }
+    const LatticeMeshRimChain& C = densify ? dense : C0;
+    const std::size_t np = C.points.size();
+    const std::size_t nseg = C.closed ? np : np - 1;
+    const double a_in = r + spec.inset_mm;
+    // The tube's centre at point i, from the normals of the segments that meet there.
+    auto station = [&](std::size_t i) {
+      Vec3 nl{0, 0, 0}, nr{0, 0, 0};
+      int vex = 0;
+      auto take = [&](std::size_t k) {
+        nl = add(nl, C.left_normal[k]);
+        nr = add(nr, C.right_normal[k]);
+        vex += C.convex[k] ? 1 : -1;
+      };
+      if (C.closed || i > 0) take((i + nseg - 1) % nseg);
+      if (C.closed || i < nseg) take(i % nseg);
+      nl = unit(nl);
+      nr = unit(nr);
+      const Vec3& p = C.points[i];
+      if (vex >= 0) {
+        // convex: tangent to both faces from inside, a_in from each
+        const double g = dot(nl, nr);
+        if (1.0 + g < 1e-9) return add(p, scale(nl, -a_in));   // a knife edge: guard
+        return add(p, scale(add(nl, nr), -a_in / (1.0 + g)));
+      }
+      // concave: along the corner line, a_in into the material on the bisector
+      return add(p, scale(unit(add(nl, nr)), -a_in));
+    };
+    // Inward along the edge's bisector at point i (the same normals the station used).
+    auto inward_at = [&](std::size_t i) {
+      Vec3 n{0, 0, 0};
+      if (C.closed || i > 0) {
+        const std::size_t k = (i + nseg - 1) % nseg;
+        n = add(n, add(C.left_normal[k], C.right_normal[k]));
+      }
+      if (C.closed || i < nseg) {
+        const std::size_t k = i % nseg;
+        n = add(n, add(C.left_normal[k], C.right_normal[k]));
+      }
+      return scale(unit(n), -1.0);
+    };
+    std::vector<Vec3> S(np);
+    for (std::size_t i = 0; i < np; ++i) {
+      S[i] = station(i);
+      if (!(spec.max_seat_mm > 0.0)) continue;
+      // SEATED IN THE CLIP BASE (LatticeMeshRimSpec::max_seat_mm). signed_distance is
+      // 1-Lipschitz, so a step of (target - sd) never passes the first point that holds.
+      ++rp.stations;
+      const double target = r + spec.inset_mm;
+      double sd = B->signed_distance(S[i]);
+      if (sd >= target) continue;
+      const Vec3 in = inward_at(i);
+      double t = 0.0;
+      Vec3 q = S[i];
+      while (sd < target && t <= spec.max_seat_mm) {
+        t += std::max(target - sd, 1e-3);
+        q = add(S[i], scale(in, t));
+        sd = B->signed_distance(q);
+      }
+      if (sd >= target && t <= spec.max_seat_mm) {
+        S[i] = q;
+        ++rp.stations_seated;
+        rp.seat_max_mm = std::max(rp.seat_max_mm, t);
+      } else {
+        ++rp.stations_unseated;
+      }
+    }
+    bool laid = false, have_ball = false;
+    Vec3 last_ball{0, 0, 0};
+    auto ball = [&](const Vec3& p) {
+      if (have_ball && norm(sub(p, last_ball)) < 1e-6) return;
+      lattice_emit_icosahedron(sink, p, r);
+      if (obs && obs->on_element) obs->on_element(LatticeGenElement::RimStrut, p, p, r);
+      st.rim_triangles += 20ull;
+      st.triangles += 20ull;
+      st.rim_volume_mm3 += lattice_icosahedron_volume_mm3(r);
+      ++rp.joints;
+      last_ball = p;
+      have_ball = true;
+    };
+    bool any_on_lattice = false;
+    for (std::size_t i = 0; i < nseg; ++i) {
+      const Vec3& a = S[i];
+      const Vec3& b = S[(i + 1) % np];
+      const double len = norm(sub(b, a));
+      if (!(len > 0.0)) continue;
+      // The rim dresses the lattice: a piece whose cell the lattice leaves solid is not
+      // laid, and counted (the same per-cell predicate the struts are emitted by).
+      if (R.latticed && R.cell_mm > 0.0) {
+        const Vec3 m = scale(add(a, b), 0.5);
+        auto at = [&](double x, double o, int n) {
+          return std::clamp(static_cast<int>(std::floor((x - o) / R.cell_mm)), 0,
+                            std::max(0, n - 1));
+        };
+        if (!R.latticed(at(m.x, R.origin.x, R.nx), at(m.y, R.origin.y, R.ny),
+                        at(m.z, R.origin.z, R.nz))) {
+          rp.length_on_solid_mm += len;
+          continue;
+        }
+      }
+      any_on_lattice = true;
+      const Vec3 dir = scale(sub(b, a), 1.0 / len);
+      const auto spans = B->clip_segment(a, b, r, -1, -1, &st.uncertified_spans_dropped, 0.0);
+      for (const auto& sp : spans) {
+        if (sp.t1 - sp.t0 < kMinFragMm) continue;
+        const Vec3 qa = add(a, scale(dir, sp.t0));
+        const Vec3 qb = add(a, scale(dir, sp.t1));
+        ball(qa);
+        lattice_emit_prism(sink, qa, qb, r, G.nseg);  // a finish: raw (b), like the rim line
+        if (obs && obs->on_element) obs->on_element(LatticeGenElement::RimStrut, qa, qb, r);
+        st.rim_triangles += 4ull * G.nseg;
+        st.triangles += 4ull * G.nseg;
+        st.rim_volume_mm3 += lattice_ngon_prism_volume_mm3(r, sp.t1 - sp.t0, G.nseg);
+        ball(qb);
+        note_diameter(st, r);
+        ++rp.spans;
+        rp.length_laid_mm += sp.t1 - sp.t0;
+        laid = true;
+      }
+    }
+    if (!laid) {
+      if (any_on_lattice) ++rp.chains_clipped_away;
+      else ++rp.chains_on_solid;
+      continue;
+    }
+    if (C.closed) S.push_back(S.front());
+    laid_lines.emplace_back(std::move(S), r);
+    ++rp.chains_laid;
+    ++st.rim_elements;
+    rp.diameter_min_mm = std::min(rp.diameter_min_mm, 2.0 * r);
+    rp.diameter_max_mm = std::max(rp.diameter_max_mm, 2.0 * r);
+    rp.line_widths_min = std::min(rp.line_widths_min, nw);
+    rp.line_widths_max = std::max(rp.line_widths_max, nw);
+  }
+  // ── the open finish's ties ───────────────────────────────────────────────
+  if (tie_ends != nullptr && !laid_lines.empty()) {
+    const double reach = R.cell_mm;
+    std::set<std::tuple<long long, long long, long long>> seen;   // one tie per cut end
+    for (const LatticeRimTieEnd& e : *tie_ends) {
+      if (!seen.insert(std::make_tuple(std::llround(e.pos.x * 1e6), std::llround(e.pos.y * 1e6),
+                                       std::llround(e.pos.z * 1e6)))
+               .second)
+        continue;
+      ++rp.tie_ends;
+      // the nearest point of any laid centre line
+      double best = std::numeric_limits<double>::infinity(), best_r = 0.0;
+      Vec3 at{0, 0, 0};
+      for (const auto& [line, rl] : laid_lines)
+        for (std::size_t i = 0; i + 1 < line.size(); ++i) {
+          const Vec3 d = sub(line[i + 1], line[i]);
+          const double dd = dot(d, d);
+          const double t = dd > 0.0 ? std::clamp(dot(sub(e.pos, line[i]), d) / dd, 0.0, 1.0) : 0.0;
+          const Vec3 q = add(line[i], scale(d, t));
+          const double dist = norm(sub(e.pos, q));
+          if (dist < best) { best = dist; at = q; best_r = rl; }
+        }
+      if (best > reach) { ++rp.ties_out_of_reach; continue; }
+      if (best <= best_r + e.r) { ++rp.ties_touching; continue; }   // the rim holds it
+      const double len = best;
+      const Vec3 dir = scale(sub(at, e.pos), 1.0 / len);
+      const auto spans =
+          B->clip_segment(e.pos, at, e.r, -1, -1, &st.uncertified_spans_dropped, 0.0);
+      bool any = false;
+      for (const auto& sp : spans) {
+        if (sp.t1 - sp.t0 < kMinFragMm) continue;
+        const Vec3 qa = add(e.pos, scale(dir, sp.t0));
+        const Vec3 qb = add(e.pos, scale(dir, sp.t1));
+        lattice_emit_prism(sink, qa, qb, e.r, G.nseg);
+        if (obs && obs->on_element) obs->on_element(LatticeGenElement::RimStrut, qa, qb, e.r);
+        st.rim_triangles += 4ull * G.nseg;
+        st.triangles += 4ull * G.nseg;
+        st.rim_volume_mm3 += lattice_ngon_prism_volume_mm3(e.r, sp.t1 - sp.t0, G.nseg);
+        note_diameter(st, e.r);
+        rp.tie_length_mm += sp.t1 - sp.t0;
+        any = true;
+      }
+      if (any) ++rp.ties_laid;
+      else ++rp.ties_clipped_away;
+    }
+  }
+  if (rp.chains_laid == 0) {
+    rp.diameter_min_mm = 0.0;
+    rp.line_widths_min = 0;
+    st.min_strut_diameter_mm = 0.0;
+    st.max_strut_diameter_mm = 0.0;
+  }
+  if (report) *report = rp;
+  return st;
+}
+
 const char* lattice_gen_topology_name(LatticeGenTopology topo) {
   switch (topo) {
     case LatticeGenTopology::Octet:
@@ -1376,6 +1625,18 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
     // Rim loops where analytic faces meet (both Rim and Diagrid modes).
     emit_rims(sink, R, G, skin, st, obs);
 
+    // ★ PER ZONE (LatticeSkinSpec.zones): the zone a point lies in, and what it lays.
+    const LatticeSkinZones* const Z = skin.zones;
+    if (Z != nullptr) {
+      st.zone_anchor_nodes.assign(Z->here.size(), 0);
+      st.zone_skin_chords.assign(Z->here.size(), 0);
+      st.zone_skin_struts.assign(Z->here.size(), 0);
+    }
+    auto zone_of = [Z](const Vec3& p) -> std::size_t {
+      const int z = Z->zone_at ? Z->zone_at(p) : 0;
+      return z > 0 && static_cast<std::size_t>(z) < Z->here.size() ? static_cast<std::size_t>(z) : 0;
+    };
+
     // The anchored diagrid (Diagrid mode): anchor balls at every landing, skin
     // edges linking neighbouring landings on the same face. Each cell gathers
     // its 27-neighbourhood's landings by DETERMINISTIC RECOMPUTE — no global
@@ -1399,6 +1660,11 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
                     // interior strut's own radius (contained by the clip
                     // certificate), welding the cut end to the skin (bar B6).
                     for (const auto& L : ncut.landings) {
+                      std::size_t z = 0;   // ★ per zone: the landing's zone lays it, or not
+                      if (Z != nullptr) {
+                        z = zone_of(L.pos);
+                        if (Z->here[z] == LatticeSkinHere::Off) continue;
+                      }
                       // ★ (b): the landing sits the strut's EMITTED circumradius inside
                       // the part, so the ball takes that circumradius (still contained)
                       // and is reported at the law radius that lays it.
@@ -1411,6 +1677,7 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
                       st.skin_triangles += 20ull;
                       st.triangles += 20ull;
                       st.skin_volume_mm3 += lattice_icosahedron_volume_mm3(r_ball);
+                      if (Z != nullptr) ++st.zone_anchor_nodes[z];
                     }
                     own_landings = ncut.landings.size();
                   }
@@ -1494,10 +1761,24 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
                 // clique wherever landings cluster.
                 if (rank(a, b) >= kSkinDegree || rank(b, a) >= kSkinDegree)
                   continue;
+                // ★ per zone: the chord's MIDPOINT zone lays it, or not; a freeform chord
+                // (the voxel / shell surface, face -1) only where that zone is Woven.
+                std::size_t z = 0;
+                if (Z != nullptr) {
+                  z = zone_of(mid);
+                  const LatticeSkinHere h = Z->here[z];
+                  if (h == LatticeSkinHere::Off || (A.face < 0 && h != LatticeSkinHere::Woven))
+                    continue;
+                }
+                const std::uint64_t chords0 = st.skin_chords, struts0 = st.skin_struts;
                 if (A.face < 0)
                   emit_freeform_skin_edge(sink, R, G, skin, A, Bl, st, obs);
                 else
                   emit_skin_edge(sink, R, G, skin, A.face, A, Bl, st, obs);
+                if (Z != nullptr) {
+                  st.zone_skin_chords[z] += st.skin_chords - chords0;
+                  st.zone_skin_struts[z] += st.skin_struts - struts0;
+                }
               }
           }
     }
@@ -1514,6 +1795,17 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
     st.min_strut_diameter_mm = 0.0;
   }
   return st;
+}
+
+// ★ PER ZONE: one pass's zone counts added into a total (both empty without zones).
+static void add_zone_counts(LatticeGenStats& total, const LatticeGenStats& st) {
+  auto add = [](std::vector<std::uint64_t>& t, const std::vector<std::uint64_t>& v) {
+    if (t.size() < v.size()) t.resize(v.size(), 0);
+    for (std::size_t i = 0; i < v.size(); ++i) t[i] += v[i];
+  };
+  add(total.zone_anchor_nodes, st.zone_anchor_nodes);
+  add(total.zone_skin_chords, st.zone_skin_chords);
+  add(total.zone_skin_struts, st.zone_skin_struts);
 }
 
 // ── swept cell size: one ordinary pass per dyadic level ─────────────────────
@@ -1561,6 +1853,7 @@ LatticeGenStats generate_lattice_stepped(
     // ★ K6 part 2: the stub guard's own counts, summed like every other count here.
     total.stub_fragments_dropped += st.stub_fragments_dropped;
     total.stub_fragment_length_mm += st.stub_fragment_length_mm;
+    add_zone_counts(total, st);   // ★ per zone, summed the same way
     if (st.struts == 0 && st.nodes == 0) continue;
     if (!any) {
       total.min_strut_diameter_mm = st.min_strut_diameter_mm;
@@ -1644,6 +1937,7 @@ LatticeGenStats generate_lattice_multilevel(
     // ★ K6 part 2: the stub guard's own counts, summed like every other count here.
     total.stub_fragments_dropped += st.stub_fragments_dropped;
     total.stub_fragment_length_mm += st.stub_fragment_length_mm;
+    add_zone_counts(total, st);   // ★ per zone, summed the same way
     if (st.max_strut_diameter_mm > 0.0) {
       any = true;
       total.min_strut_diameter_mm =

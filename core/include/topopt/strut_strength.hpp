@@ -41,8 +41,10 @@
 //     that split is deliberate; preserve it when reporting.
 
 #include <cstddef>
+#include <string>
 #include <vector>
 
+#include "topopt/lattice.hpp"  // LatticeTopology
 #include "topopt/mesh.hpp"  // Vec3
 
 namespace topopt {
@@ -150,6 +152,28 @@ StrutStrengthReport evaluate_strut_strength(
     const std::vector<char>& lattice_mask,
     const std::vector<double>& relative_density, const Vec3& build_dir,
     double yield_strength_mpa, double z_knockdown);
+
+// ★ PER TYPE (reviewer's ruling 11-08 (B)). Each type certifies from its OWN law,
+// measured exactly the PR 259 way (the probe above with TOPOPT_DEHOMOG_TYPE; sheets on
+// the production R7 wall), never from octet's. The functions above are octet's and stay
+// byte for byte; these take the type. A type with no table throws (naming it) --
+// callers ask strut_law_measured first.
+bool strut_law_measured(LatticeTopology topo);
+double strut_law_rho_min(LatticeTopology topo);
+double strut_law_rho_max(LatticeTopology topo);
+StrutLawK strut_law_at(LatticeTopology topo, double rho, bool* clamped = nullptr);
+StrutStrengthReport evaluate_strut_strength(
+    LatticeTopology topo, const std::vector<double>& stress_tensor_field,
+    const std::vector<char>& lattice_mask,
+    const std::vector<double>& relative_density, const Vec3& build_dir,
+    double yield_strength_mpa, double z_knockdown);
+
+// The law's source and its resolution caveat in words, for the receipt
+// (lattice_cert_report_json's "law" and "resolution_note"). Octet's are PR 259's text,
+// byte for byte; every other type names its own evidence folder and its own measured
+// bulk K_dev drift from vpc 32 to 48. Throws for a type with no table, like the above.
+std::string strut_law_source(LatticeTopology topo);
+std::string strut_law_resolution_note(LatticeTopology topo);
 
 }  // namespace topopt
 

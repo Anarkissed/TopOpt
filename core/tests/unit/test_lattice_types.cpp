@@ -393,8 +393,8 @@ int main() {
           "facts fcc: every cell mode (R4 measured PASS)");
     CHECK(!fcc.directional, "facts fcc: not directional (R3 is SC and BCC)");
     CHECK(fcc.triangles_per_cell == 12 * 32 + 4 * 20, "facts fcc: triangles per cell");
-    CHECK(!fcc.strut_strength_measured && !fcc.strut_strength_note.empty(),
-          "facts fcc: strut strength not measured, said so (R10)");
+    CHECK(fcc.strut_strength_measured && fcc.strut_strength_note.empty(),
+          "facts fcc: its own measured strut law (R10, ruling 11-08 (B))");
     CHECK(std::isfinite(fcc.aesthetic_density_ceiling) && fcc.aesthetic_density_ceiling > 0.2 &&
               fcc.aesthetic_density_ceiling < 0.23,
           "facts fcc: the R11 ceiling through its own table");

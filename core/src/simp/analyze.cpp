@@ -543,13 +543,14 @@ FixedDesignAnalysis analyze_fixed_design(
     // --- Strut-strength REPORT (task 2026-07-31-lattice-strut-strength-report).
     // REPORT ONLY, evaluated strictly AFTER `accepted`/`margin_effective` were
     // sealed above: the measured PR 259 law (strut_strength.hpp) applied to the
-    // latticed voxels' macro stress TENSORS from this same solve. Octet is the
-    // only topology with a measured law; others report nothing. The build
+    // latticed voxels' macro stress TENSORS from this same solve. Each type with
+    // its OWN measured law (strut_law_measured; ruling 11-08 (B)) is evaluated
+    // from it; a type without one reports nothing (and 2(a) below says so). The build
     // direction is passed through EXPLICITLY (bar L8) — the evaluator never reads
     // it from options, so an orientation scorer can re-call it per direction.
-    if (lattice_voxels > 0 && lattice->topology == LatticeTopology::Octet) {
+    if (lattice_voxels > 0 && strut_law_measured(lattice->topology)) {
       out.lattice_strut = evaluate_strut_strength(
-          out.stress_tensor_field, lat_mask, lattice->relative_density,
+          lattice->topology, out.stress_tensor_field, lat_mask, lattice->relative_density,
           build_dir, material.yield_strength_mpa, material.z_knockdown);
       out.lattice_strut_report = out.lattice_strut.evaluated;
       // Cells-per-member regime guard (bar L4): thinnest LATTICED member's span
@@ -694,7 +695,7 @@ FixedDesignAnalysis analyze_fixed_design(
       // in-plane term is invariant and comes back identical — U7's own check.
       if (out.lattice_strut_report) {
         out.lattice_strut = evaluate_strut_strength(
-            out.stress_tensor_field, lat_mask, lattice->relative_density,
+            lattice->topology, out.stress_tensor_field, lat_mask, lattice->relative_density,
             out.applied_build_dir, material.yield_strength_mpa,
             material.z_knockdown);
         out.lattice_strut_report = out.lattice_strut.evaluated;
