@@ -2388,6 +2388,14 @@ public struct LatticeSetupWizard: View {
         let portrait = size.width < size.height
         let band = max(DSParts.headerHeight, size.height - PageChrome.panelTop - PageChrome.panelBottom)
         return AnyView(ZStack {
+            // ★ B7 (his iPad notes 11-08, design note 30): Sample is core's sample block beside the panel; In the part is the
+            // stage's live preview behind the page, as before
+            if model.stage == .cell {
+                AnyView(LatticeSampleView(inputs: latticeSampleInputs)
+                    .padding(.leading, portrait ? 0 : PageChrome.edge + PageChrome.widePanelWidth)
+                    .padding(.top, portrait ? PageChrome.panelTop + latticePanelHeight : PageChrome.panelTop)
+                    .latticeID("lattice-sample-view"))
+            }
             latticePanel(c, hug: portrait)
                 .frame(height: portrait ? nil : band)
                 .frame(maxHeight: portrait ? min(band, size.height * 0.62) : nil, alignment: .top)
@@ -2400,6 +2408,14 @@ public struct LatticeSetupWizard: View {
                 .padding(.top, portrait ? PageChrome.panelTop + latticePanelHeight + DS.Space.l + 14 : PageChrome.panelTop + 14)
                 .frame(maxHeight: .infinity, alignment: .top)
         })
+    }
+
+    /// The Sample's inputs: the page's type, its cell when Cell size is Manual (else core's own), the printer's bead.
+    private var latticeSampleInputs: LatticeSampleView.Inputs {
+        LatticeSampleView.Inputs(topology: model.topologyID,
+                                 typeName: LatticeType.displayName(forID: model.topologyID),
+                                 cellMM: model.cellSizeMode == .fixed ? model.cellMM : 0,
+                                 beadMM: project.printParams.strutLineWidthMM)
     }
 
     private func latticePanel(_ c: CellsPageContext, hug: Bool) -> some View {
@@ -2691,7 +2707,7 @@ public struct LatticeSetupWizard: View {
             ForEach(LatticeWizardStage.allCases, id: \.rawValue) { s in
                 let on = model.stage == s
                 Button { model.jump(to: s); rebuild() } label: {
-                    Text(organicSampleShown && s == .cell ? "Sample" : s.title)
+                    Text(s == .cell ? LatticeSampleView.switchTitle : s.title)
                         .font(.system(size: 13, weight: on ? .semibold : .regular))
                         .foregroundStyle((on ? DS.Color.textPrimary : DS.Color.textSecondary).color)
                         .padding(.horizontal, DS.Space.l).frame(minWidth: 120, minHeight: 36)

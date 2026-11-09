@@ -107,9 +107,9 @@ public struct WorkspacePlaceholder: View {
     /// The gate for popping them open — not `lattice.enabled`, which is true for any
     /// project configured on a previous run and so never opened them again.
     @State private var latticeSettingsSavedThisSession = false
-    /// ★ B6 s1b (note 28, N2): the face row opened on Lattice Setup (its key), and the lattice groups opened by their disclosure.
+    /// ★ B6 s1b (note 28, N2): the face row opened on Lattice Setup (its key). ★ his iPad 11-08 (2): the open group is the
+    /// picked one (`latticeOpenOrClose`) — the second open set the disclosure flipped is gone.
     @State private var latticeFacePick: String?
-    @State private var latticeOpenGroups: Set<UUID> = []
     /// ★ B6 N2: each face row's eye — its prism shown (true) or hidden (false); no entry: shown while its row is picked.
     @State private var latticePrismEye: [String: Bool] = [:]
     /// ★ B6 N2 / N3: the Lattice Setup handle held now — its key, and where it was and its axis when the drag began.
@@ -2524,8 +2524,10 @@ public struct WorkspacePlaceholder: View {
             if latticeTapOffersFaceRemove(faceID) { return }   // ★ his iPad 11-07 (1b): the × on a face the open group holds
             let loop = project.surfaceLoopRespectingRegions(
                 FaceTopology.loop(fromFace: faceID, in: mesh), from: faceID)
+            let before = stageList.activeGroupID
             if let gid = project.latticeStageTap(face: faceID, loop: loop) {   // ★ B6: the lattice list (LatticeList)
                 latticeDisclosure.toggle(gid.uuidString)
+                if gid != before { latticeFacePick = nil }   // ★ his iPad 11-08 (4): another group's picked face does not follow
             }
             refreshLatticeFaceCards()
             return
@@ -8576,6 +8578,8 @@ public struct WorkspacePlaceholder: View {
         ZStack(alignment: .topLeading) {
             if let proj = projection {
                 let zones = project.lattice.zoneGroups
+                let spots = latticeChipSpots(proj)   // ★ his iPad 11-08 (3): clear space between every chip (Lattice Setup)
+                let _ = recordLatticeChips(spots)
                 ForEach(project.latticeDepthPlanes().filter { latticeDrawsPrism($0.groupID) }) { plane in   // ★ his iPad 11-07
                     // ★ HIDDEN ⇒ NOT DRAWN; LOCKED ⇒ NOT GRABBABLE.
                     // ★ his iPad 11-07 (1a): "only the ± EXPAND knobs show … NO depth handle at a prism's end" — every shown
@@ -8583,7 +8587,7 @@ public struct WorkspacePlaceholder: View {
                     if latticeDepthHandleShows(plane), !zones.contains(plane.groupID), latticePrismShown(plane.ref),
                        !project.groupView.isHidden(plane.groupID),
                        project.groupView.canEdit(plane.groupID) {
-                        latticePrismHandle(proj, plane)
+                        latticePrismHandle(proj, plane, shownAt: spots[LatticeSetupHandles.prismKey(plane.ref)])
                     }
                     // ★ THE EXPAND HANDLE (maintainer, 2026-08-17: "I specifically
                     // requested a handle to drag the expansion to be able to both
@@ -8615,7 +8619,8 @@ public struct WorkspacePlaceholder: View {
                                 [LatticeSetupHandles.footprint(LatticeSetupHandles.placed($0.at, axis: $0.axis, keepOut: bandChipKeepOut),
                                                                pill: plane.ref.key == latticeFacePick)]
                             } ?? [] : []
-                        let expandAt = LatticeSetupHandles.placed(ex, axis: CGVector(dx: 1, dy: 0), keepOut: bandChipKeepOut + depthRoom)
+                        let expandAt = spots["expand-\(plane.ref.key)"]
+                            ?? LatticeSetupHandles.placed(ex, axis: CGVector(dx: 1, dy: 0), keepOut: bandChipKeepOut + depthRoom)
                         latticeExpandKnob(
                             active: draggingExpandPlane == plane.id,
                             sense: LatticeSlabExpand.sense(
@@ -8629,10 +8634,12 @@ public struct WorkspacePlaceholder: View {
                 }
                 // ★ B6 N3: a picked zone's sides — a Box's width, depth and height, a Cylinder's across and height
                 if let z = stageList.activeGroupID, zones.contains(z), !project.groupView.isHidden(z), project.groupView.canEdit(z) {
-                    ForEach(project.latticeZoneHandles(z), id: \.side) { hd in latticeZoneSideHandle(proj, z, hd) }
+                    ForEach(project.latticeZoneHandles(z), id: \.side) { hd in
+                        latticeZoneSideHandle(proj, z, hd, shownAt: spots[LatticeSetupHandles.zoneKey(z, hd.side)])
+                    }
                 }
                 // ★ his iPad 11-07 (1b): the × on the tapped face of the open group
-                latticeFaceRemoveButton(proj)
+                latticeFaceRemoveButton(proj, spots: spots)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -8648,9 +8655,90 @@ public struct WorkspacePlaceholder: View {
     }
 
     /// ★ his iPad 11-07 (1a): a prism's end handle shows on the picked face, and on every face of the open group (where
-    /// the expand knobs show).
+    /// the expand knobs show). ★ his iPad 11-08 (4): on Lattice Setup, only the picked thing's (`latticeChipScope`).
     private func latticeDepthHandleShows(_ plane: ProjectModel.LatticeDepthPlane) -> Bool {
-        plane.ref.key == latticeFacePick || latticeExpandHandleIsVisible(plane)
+        if latticeSetupUp { return latticeExpandHandleIsVisible(plane) }
+        return plane.ref.key == latticeFacePick || latticeExpandHandleIsVisible(plane)
+    }
+
+    /// ★ his iPad 11-08 (4): "Show only the chips of what's picked" — what is picked on Lattice Setup. The Lattice stage's
+    /// own list (Topology's while its panel is open: then no lattice group is picked, and no chip shows).
+    private var latticeChipScope: LatticeSetupHandles.ChipScope {
+        guard !latticeTopologyOpen else { return .none }
+        return .of(active: stageList.activeGroupID, zones: project.lattice.zoneGroups, facePick: latticeFacePick,
+                   groupRefs: { id in project.latticeGroups.first { $0.id == id }.map { project.latticeSelectableRefs($0).map(\.key) } ?? [] })
+    }
+
+    /// ★ his iPad 11-08 (1, 2): close what is open on Lattice Setup — the picked group (or zone) and the face picked in it,
+    /// the × on a face, the zone's glass, and every drawer a model tap opened. Nothing is open after it, so the next tap on
+    /// a free face starts a new group (LatticeLibraryTap) with no "+ New group".
+    private func leaveLatticeGroup() {
+        leaveGroupEditing()
+        latticeFacePick = nil
+        latticeFaceRemoveAsk = nil
+        latticeZoneGizmo = nil
+        latticeDisclosure.closeAll()
+    }
+
+    /// ★ his iPad 11-08 (3): where each shown chip on Lattice Setup is DRAWN — the picked face's handle and ± knob first,
+    /// then the rest of the picked group's, a picked zone's sides, then the ×: each clear of the page's UI and `chipGap`
+    /// clear of the ones before it (`LatticeSetupHandles.layout`). Empty off Lattice Setup (each chip keeps `placed`).
+    private func latticeChipSpots(_ proj: CameraProjection) -> [String: CGPoint] {
+        guard latticeSetupUp else { return [:] }
+        var chips: [LatticeSetupHandles.Chip] = []
+        let zones = project.lattice.zoneGroups
+        var planes = project.latticeDepthPlanes().filter {
+            latticeDrawsPrism($0.groupID) && !zones.contains($0.groupID) && latticePrismShown($0.ref) && latticeDepthHandleShows($0)
+        }
+        if let k = latticeFacePick, let i = planes.firstIndex(where: { $0.ref.key == k }) { planes.insert(planes.remove(at: i), at: 0) }
+        for plane in planes {
+            if let s = latticePrismHandleSpot(proj, plane) {
+                let key = LatticeSetupHandles.prismKey(plane.ref)
+                let pill = plane.ref.key == latticeFacePick || latticeHandleDrag?.key == key
+                chips.append(.init(key: key, at: s.at, axis: s.axis, shape: .init(size: DragHandle.size, pill: pill)))
+            }
+            if let ex = latticeExpandSpot(proj, plane) {
+                chips.append(.init(key: "expand-\(plane.ref.key)", at: ex, axis: CGVector(dx: 1, dy: 0), shape: .init(size: 44)))
+            }
+        }
+        if case .zone(let z) = latticeChipScope, !project.groupView.isHidden(z), project.groupView.canEdit(z) {
+            for hd in project.latticeZoneHandles(z) {
+                let anchor = settledWorld(hd.anchor), dir = settleQuat.act(hd.dir)
+                guard let at = proj.project(anchor) else { continue }
+                chips.append(.init(key: LatticeSetupHandles.zoneKey(z, hd.side), at: at,
+                                   axis: LatticeSetupHandles.screenAxis(from: at, to: proj.project(anchor + dir * 10)),
+                                   shape: .init(size: DragHandle.size, pill: true)))
+            }
+        }
+        if let ask = latticeFaceRemoveAsk, let mesh = viewerMesh, let c = mesh.faceCentroid(ask.face),
+           let at = proj.project(settledWorld(c)) {
+            chips.append(.init(key: "remove-\(ask.ref)", at: at, axis: CGVector(dx: 1, dy: 0), shape: .init(size: DSParts.target)))
+        }
+        return LatticeSetupHandles.layout(chips, keepOut: bandChipKeepOut)
+    }
+
+    /// ★ his iPad 11-08 (2): a Lattice Setup group's line (or chevron): the open one closes — nothing is open after it, and
+    /// the next free face starts a new group; any other opens, alone (no face of another group stays picked).
+    private func latticeOpenOrClose(_ id: UUID) {
+        if stageList.activeGroupID == id {
+            leaveLatticeGroup()
+        } else {
+            latticeFacePick = nil
+            latticeFaceRemoveAsk = nil
+            latticeZoneGizmo = nil
+            stageList.setActive(id)
+        }
+    }
+
+    /// Test hook: the chips the page laid out last (LatticeSetupHandles.chipSpots).
+    private func recordLatticeChips(_ spots: [String: CGPoint]) {
+        if LatticeSetupHandles.recordLive { LatticeSetupHandles.chipSpots = spots }
+    }
+
+    /// The ± knob's true point on screen: out along the face at its expanded edge, pushed clear of the prism's end.
+    private func latticeExpandSpot(_ proj: CameraProjection, _ plane: ProjectModel.LatticeDepthPlane) -> CGPoint? {
+        guard let world = latticeExpandAnchor(plane), let raw = proj.project(settledWorld(world)) else { return nil }
+        return proj.project(settledWorld(plane.handle.anchor)).map { LatticeSlabExpand.separated(knob: raw, from: $0) } ?? raw
     }
 
     /// ★ B6 N2: a face's prism shows unless its row's eye hid it (his iPad 11-07, 3a: visible by default).
@@ -8663,6 +8751,7 @@ public struct WorkspacePlaceholder: View {
     /// the handle moves under the finger while the page redraws); `end` runs once, on release. While it is held the
     /// preview's bake waits (`draggingDepthPlane`, as the old knob's drag did).
     private func latticeSetupHandle(_ key: String, at p: CGPoint, axis: CGVector, value: String, showsValue: Bool = true,
+                                    shownAt: CGPoint? = nil,
                                     apply: @escaping (CGPoint) -> Void, end: @escaping () -> Void) -> some View {
         let drag: (CGFloat, Bool) -> Void = { along, ended in
             let s: LatticeSetupHandles.DragStart
@@ -8682,15 +8771,16 @@ public struct WorkspacePlaceholder: View {
         }
         if LatticeSetupHandles.recordLive { LatticeSetupHandles.live[key] = (axis, drag) }
         // ★ never under the page's own UI: slid along its line, clear of the Selections panel and the rest (the band chips'
-        // keep-out list); the drag above still reads the true point `p`
+        // keep-out list) — ★ his iPad 11-08 (3): and of every other chip (`shownAt`, latticeChipSpots); the drag above
+        // still reads the true point `p`
         return Color.clear.frame(width: DragHandle.size, height: DragHandle.size)
             .overlay(alignment: .leading) { DragHandle(key: key, axis: axis, value: value, showsValue: showsValue, onDrag: drag).fixedSize() }
-            .position(LatticeSetupHandles.placed(p, axis: axis, keepOut: bandChipKeepOut))
+            .position(shownAt ?? LatticeSetupHandles.placed(p, axis: axis, keepOut: bandChipKeepOut))
     }
 
     /// ★ his iPad 11-07 (1b): the × on a face of the open group — on the face where it was tapped, clear of the page's UI
     /// and of that face's handles; a tap takes the face out of the group (the row's trash, one undo step).
-    @ViewBuilder private func latticeFaceRemoveButton(_ proj: CameraProjection) -> some View {
+    @ViewBuilder private func latticeFaceRemoveButton(_ proj: CameraProjection, spots: [String: CGPoint] = [:]) -> some View {
         let _ = recordLivePick()
         if let ask = latticeFaceRemoveAsk, let a = stageList.activeGroupID,
            let g = project.latticeGroups.first(where: { $0.id == a }),
@@ -8716,13 +8806,16 @@ public struct WorkspacePlaceholder: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Take \(project.latticeRowName(ref)) out of \(g.name)")
             .background(DSParts.publish("latticeFaceRemove-\(ref.key)"))
-            .position(LatticeSetupHandles.placed(at, axis: CGVector(dx: 1, dy: 0), keepOut: bandChipKeepOut + near))
+            .position(spots["remove-\(ask.ref)"] ?? LatticeSetupHandles.placed(at, axis: CGVector(dx: 1, dy: 0), keepOut: bandChipKeepOut + near))
         }
     }
 
     /// Test hook: the page's face tap, as the viewer's pick calls it (a click offscreen never reaches the 3D view).
     private func recordLivePick() {
-        if LatticeSetupHandles.recordLive { LatticeSetupHandles.livePick = { handlePick($0) } }
+        if LatticeSetupHandles.recordLive {
+            LatticeSetupHandles.livePick = { handlePick($0) }
+            LatticeSetupHandles.liveEmptyTap = { emptyTapClears() }   // ★ his iPad 11-08 (1)
+        }
     }
 
     /// ★ his iPad 11-07 (1b): "tap a prism → an × pops up on it → tapping the × removes that face from the group" — a tap on
@@ -8759,13 +8852,15 @@ public struct WorkspacePlaceholder: View {
 
     /// ★ B6 N2: the picked face's prism end — dragged along the prism (the slab-depth ray math the old knob used), it
     /// writes the face's one depth (the row's number), through the same magnets.
-    @ViewBuilder private func latticePrismHandle(_ proj: CameraProjection, _ plane: ProjectModel.LatticeDepthPlane) -> some View {
+    @ViewBuilder private func latticePrismHandle(_ proj: CameraProjection, _ plane: ProjectModel.LatticeDepthPlane,
+                                                 shownAt: CGPoint? = nil) -> some View {
         let world = plane.handle.settled(center: meshCenter, rotation: settleQuat)
         let ref = plane.ref
         if let (at, axis) = latticePrismHandleSpot(proj, plane) {
             latticeSetupHandle(LatticeSetupHandles.prismKey(ref), at: at, axis: axis,
                                value: SelectionsSummary.format((plane.depthMM * 10).rounded() / 10, decimals: 1) + " mm",
                                showsValue: ref.key == latticeFacePick || latticeHandleDrag?.key == LatticeSetupHandles.prismKey(ref),
+                               shownAt: shownAt,
                                apply: { finger in
                                    guard let proj = projection, let ray = proj.ray(throughViewPoint: finger),
                                          let v = world.value(rayOrigin: ray.origin, rayDir: ray.dir) else { return }
@@ -8781,7 +8876,8 @@ public struct WorkspacePlaceholder: View {
 
     /// ★ B6 N3: one side of a picked zone — dragged out along it from the zone's middle, that size becomes twice the
     /// distance, about the middle (`setLatticeZoneSide`); its number beside it (a Cylinder's across with ⌀).
-    @ViewBuilder private func latticeZoneSideHandle(_ proj: CameraProjection, _ z: UUID, _ hd: LatticeZoneHandle) -> some View {
+    @ViewBuilder private func latticeZoneSideHandle(_ proj: CameraProjection, _ z: UUID, _ hd: LatticeZoneHandle,
+                                                    shownAt: CGPoint? = nil) -> some View {
         let mid = settledWorld(hd.middle), dir = settleQuat.act(hd.dir), anchor = settledWorld(hd.anchor)
         if let at = proj.project(anchor), let s = project.latticeZoneSize(z) {
             let v = hd.side == .width ? s.width : hd.side == .depth ? s.depth : s.height
@@ -8789,6 +8885,7 @@ public struct WorkspacePlaceholder: View {
             latticeSetupHandle(LatticeSetupHandles.zoneKey(z, hd.side), at: at,
                                axis: LatticeSetupHandles.screenAxis(from: at, to: proj.project(anchor + dir * 10)),
                                value: (across ? "\u{2300} " : "") + SelectionsSummary.format((v * 10).rounded() / 10, decimals: 1) + " mm",
+                               shownAt: shownAt,
                                apply: { finger in
                                    guard let proj = projection, let ray = proj.ray(throughViewPoint: finger),
                                          let t = ClearanceDragMath.slabDepth(rayOrigin: ray.origin, rayDir: ray.dir,
@@ -8814,6 +8911,9 @@ public struct WorkspacePlaceholder: View {
               project.groupView.canEdit(plane.groupID),
               !project.groupView.isHidden(plane.groupID)
         else { return false }
+        // ★ his iPad 11-08 (4): on Lattice Setup, only the picked thing's chips — a face → that face's; a group → its
+        // faces'; nothing → none. The drawers below (a model tap opened one per group and never closed it) no longer count.
+        if latticeSetupUp { return latticeChipScope.shows(group: plane.groupID, key: plane.ref.key) }
         // ★ "SELECTED" MEANS EITHER WAY IN (maintainer, 2026-08-17: "I do not see
         // a handle for the expansion of a face"). The first cut required
         // `stageList.activeGroupID`, which is set by tapping the group's BODY —
@@ -12046,6 +12146,9 @@ public struct WorkspacePlaceholder: View {
     /// the Surface editor and Edit faces keep their own empty-tap rules.
     private func emptyTapClears() {
         guard !(flexibleMain.owns(project, stage) && !fullScreenPageUp), !visible.surfaceEditing, !editFaces.isEditing else { return }
+        // ★ his iPad 11-08 (1): on Lattice Setup the tap into nothing closes the LATTICE list's picked group, face or zone —
+        // their chips go with it (it cleared only Topology's selection, so the prisms' chips stayed)
+        if latticeSetupUp, !latticeTopologyOpen { leaveLatticeGroup() }
         selection.clearActive(); setPickedPiece(nil); chipsRevealedGroup = nil
         project.syncForceGroups()
     }
@@ -14644,7 +14747,7 @@ extension WorkspacePlaceholder {
                            readsLattice: { _ in true },
                            pick: { id in
                                topoDeleteAsk = nil
-                               if stageList.activeGroupID == id { leaveGroupEditing() } else { stageList.setActive(id) }
+                               latticeOpenOrClose(id)   // ★ his iPad 11-08 (2): the open row's tap closes it
                            },
                            askDelete: { topoDeleteAsk = $0 },
                            confirmDelete: { confirmTopologyTrash() },
@@ -14660,8 +14763,10 @@ extension WorkspacePlaceholder {
                 // ★ B6 s1b (§4.3, mockup #lat-setup): "FACES N · + New group" heads the groups; a disclosure on each line
                 .latticeSections(lead: AnyView(latticeFacesSection), tail: AnyView(latticeZonesSection),   // ★ B6 s3a (25, 25a)
                                  footer: AnyView(latticeStartFromFoot),   // ★ B6 s3b (26, R2.2)
-                                 isOpen: { latticeOpenGroups.contains($0) },
-                                 toggleOpen: { id in if latticeOpenGroups.contains(id) { latticeOpenGroups.remove(id) } else { latticeOpenGroups.insert(id) } },
+                                 // ★ his iPad 11-08 (2): "A group must collapse" — the open group IS the picked one, so its
+                                 // chevron closes it like its line (it used to flip a second set the pick kept open)
+                                 isOpen: { stageList.activeGroupID == $0 },
+                                 toggleOpen: { latticeOpenOrClose($0) },
                                  lineLook: { _ in latticeFacePick == nil })   // a picked face row wears the look itself
             if !selectionsCollapsed {
                 // ★ B8 (his answer 2026-10-24): Grade lives ONLY on the Cells page — no Grade pair here.
