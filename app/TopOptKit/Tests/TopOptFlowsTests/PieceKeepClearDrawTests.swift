@@ -221,6 +221,8 @@ final class PieceKeepClearLineHostedTests: XCTestCase {
     /// ★ The line is on his screen, in the open group, while Keep clear is on and the piece gives nothing to keep clear.
     func testTheLineIsOnHisScreen() throws {
         let p = PieceKeepClearTests.roundedEdgeProject()
+        // past the gravity step, as he is when he sets Keep clear (in that step the page shows no Selections panel)
+        p.force.setGravity(direction: SIMD3<Float>(0, 0, -1))
         let mesh = try XCTUnwrap(p.viewerMesh)
         let half = try XCTUnwrap(p.commitSurfaceCut(try XCTUnwrap(SurfaceCut.centred(onFace: 0, in: mesh))).first)
         // the Topology piece tap's move (EditFacesStageTests): the piece out of every group, into a new one
