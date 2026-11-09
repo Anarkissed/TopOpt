@@ -351,6 +351,66 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo,
                                  const LatticeSkinSpec& skin = LatticeSkinSpec{},
                                  const LatticeGenObserver* observer = nullptr);
 
+// ★ THE RIM ON A REAL PART (the reviewer's ruling 11-08 (A)). The analytic rim above
+// needs two flat CAD faces in the lattice boundary, and a run's boundary has none (M4), so
+// a run's rim rides the SHARP EDGES of the surface it ships instead (feature_edges.hpp):
+//   * one tube per chain, at the skin radius (the local strut's, never under the skin's
+//     printable clamp), its diameter rounded UP to a whole number of line widths
+//     (Kedziora 2023: whole line widths print as stated);
+//   * at a convex edge the tube lies tangent to both faces from inside, `inset_mm` past
+//     tangency; at a concave edge it lies along the corner line, the same distance in;
+//   * every piece is clipped against the boundary like any strut (the clip proves it
+//     inside), with a ball at each kept span's ends so the pieces of a chain join;
+//   * with `tie_ends` (the open finish: no shell holds the cut ends), each cut end within
+//     one cell of a laid rim is tied to the nearest point of its centre line by a strut
+//     at the cut strut's own radius, clipped the same way; an end the rim already
+//     touches needs none.
+// It is DRESSING: the caller counts it in mass only, never in strength.
+struct LatticeMeshRimChain {
+  std::vector<Vec3> points;              // in order; a closed loop does not repeat its start
+  std::vector<Vec3> left_normal, right_normal;  // per segment, unit, outward
+  std::vector<char> convex;              // per segment
+  bool closed = false;
+};
+struct LatticeMeshRimSpec {
+  std::vector<LatticeMeshRimChain> chains;
+  double line_width_mm = 0.0;   // > 0: the tube's diameter is a whole number of these
+  double inset_mm = 0.02;       // past tangency, so the clip has a margin to certify
+  // > 0: SEAT each station in the clip base. The edge comes from a clean surface (the
+  // part's own mesh, or the CAD-projected design), but the clip base is the shell the file
+  // carries, which sits up to about a voxel off it and chamfers a convex edge. A station
+  // the base does not hold with r + inset_mm to spare moves inward along the edge's
+  // bisector until it does, at most this far; one that cannot is left where it was (the
+  // clip then drops what lies outside) and counted.
+  double max_seat_mm = 0.0;
+};
+// ★ (A), the OPEN finish: a cut strut end near a sharp edge (its position and the strut's
+// radius), recorded as the lattice is laid; the rim then ties it to its own centre line.
+struct LatticeRimTieEnd {
+  Vec3 pos;
+  double r = 0.0;
+};
+struct LatticeMeshRimReport {
+  long long chains = 0, chains_laid = 0, chains_clipped_away = 0;
+  long long spans = 0, joints = 0;
+  // the open finish's ties: cut ends within one cell of a laid rim
+  long long tie_ends = 0, ties_laid = 0, ties_touching = 0, ties_out_of_reach = 0,
+            ties_clipped_away = 0;
+  double tie_length_mm = 0.0;
+  double length_laid_mm = 0.0;
+  // seating (max_seat_mm > 0): stations checked, moved in, and left (no room within reach)
+  long long stations = 0, stations_seated = 0, stations_unseated = 0;
+  double seat_max_mm = 0.0;
+  double diameter_min_mm = 0.0, diameter_max_mm = 0.0;
+  int line_widths_min = 0, line_widths_max = 0;
+};
+LatticeGenStats generate_mesh_rims(const LatticeRegion& region, const LatticeRadiusField& radius,
+                                   TriangleSink& sink, const LatticeSkinSpec& skin,
+                                   const LatticeMeshRimSpec& spec,
+                                   LatticeMeshRimReport* report = nullptr,
+                                   const LatticeGenObserver* observer = nullptr,
+                                   const std::vector<LatticeRimTieEnd>* tie_ends = nullptr);
+
 // The RIM loops alone (the skin's first pass), for a lattice with no struts: the sheet
 // lattices (tpms_gen.hpp) take the Rim finish this way (R8). Any skin mode but None emits
 // the rims; Diagrid's anchored net needs strut landings and is not emitted here.

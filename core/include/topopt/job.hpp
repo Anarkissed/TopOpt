@@ -288,9 +288,9 @@ struct JobLatticeRegion {
   std::string outer_finish;
   // ★ Skin per zone (reviewer's ruling 11-08 (1)): "diagrid" (Skin, the freeform diagrid
   // woven over this zone's surface: an anchor ball where its landing lies in the zone, a
-  // chord where its midpoint does) | "none"; "" = the part's lattice.skin. "rim" is
-  // refused by the zone's name (2b): today's rim needs two flat CAD faces, and a run's
-  // lattice surface has none.
+  // chord where its midpoint does) | "rim" (Rim, ruling 11-08 (A): a rim along each sharp
+  // edge of the shipped surface whose midpoint lies in the zone) | "none"; "" = the part's
+  // lattice.skin.
   std::string skin;
   // ★ E3: the region's own cell window (mm), swept only; 0 = the part's. Its voxels take
   // only the part's ladder cells (grading cell_min_mm x 2^L) inside it.

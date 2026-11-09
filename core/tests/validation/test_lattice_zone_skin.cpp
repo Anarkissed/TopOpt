@@ -2,12 +2,11 @@
 //
 // "diagrid" is Skin: the freeform diagrid woven over the zone's own surface, a chord laid
 // where its midpoint lies in the zone and an anchor ball where its landing does. "none"
-// lays no skin in the zone. Absent, the zone takes the part's lattice.skin. "rim" is
-// refused by the zone's name: today's rim is laid only where two flat CAD faces meet, and a
-// run's lattice surface has none (M4), so it would come out empty.
+// lays no skin in the zone. Absent, the zone takes the part's lattice.skin. "rim" was
+// refused by the zone's name (2b) until ruling 11-08 (A) built it (test_lattice_mesh_rim).
 //
-// §1 the key at the parse: "diagrid" and "none" parse; "rim" is refused in plain words
-//    with the zone's name; an unknown value lists the two; a sheet's zone cannot ask for
+// §1 the key at the parse: "diagrid", "rim" and "none" parse; an unknown value lists the
+//    three; a sheet's zone cannot ask for
 //    the diagrid (R8, by name); organic lays no cell skin, so its zones cannot ask for one;
 //    an exclude region has no lattice to dress.
 // §2 the whole bar latticed covered with no skin, "Top" (the top right 10 mm) with Skin:
@@ -191,12 +190,13 @@ int main() {
         CHECK(false, (std::string("§1 a zone's skin \"") + skin + "\" parses").c_str());
       }
     }
-    CHECK(refused_with(job_json(f, "octet", zoned(f, none_part, ", \"skin\": \"rim\"")),
-                       {"\"Top\"", "Rim", "two flat", "Skin"}),
-          "§1 Rim on a zone is refused in plain words, with the zone's name");
+    // (2b)'s refusal of Rim on a zone is gone: ruling 11-08 (A) builds it
+    // (test_lattice_mesh_rim).
+    CHECK(refusal(job_json(f, "octet", zoned(f, none_part, ", \"skin\": \"rim\""))).empty(),
+          "§1 Rim on a zone parses (ruling 11-08 (A))");
     CHECK(refused_with(job_json(f, "octet", zoned(f, none_part, ", \"skin\": \"woven\"")),
-                       {"\"Top\"", "\"diagrid\"", "\"none\""}),
-          "§1 an unknown value is refused, listing the two");
+                       {"\"Top\"", "\"diagrid\"", "\"rim\"", "\"none\""}),
+          "§1 an unknown value is refused, listing the three");
     CHECK(refused_with(job_json(f, "gyroid", zoned(f, none_part, ", \"skin\": \"diagrid\"")),
                        {"\"Top\"", "sheet", "R8"}),
           "§1 a sheet's zone cannot ask for the diagrid (R8, by name)");

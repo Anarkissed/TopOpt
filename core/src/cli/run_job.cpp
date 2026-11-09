@@ -46,6 +46,8 @@
 #include "topopt/lattice_boundary.hpp"
 #include "topopt/lattice_types.hpp"
 #include "topopt/lattice_gen.hpp"
+#include "topopt/feature_edges.hpp"
+#include <unordered_set>
 #include "topopt/tpms_gen.hpp"
 #include "topopt/lattice_void.hpp"
 #include "topopt/beam_network.hpp"
@@ -1569,6 +1571,15 @@ struct LatticeExportOutcome {
   // the next reader back to the whole file; naming the pass is the difference
   // between a diagnosis and a puzzle.
   std::string worst_protrusion_pass;
+  // ★ THE RIM ON A REAL PART (ruling 11-08 (A)): the sharp edges found on the shipped
+  // surface, which chains took the rim, and what was laid. `mesh_rim_ran` is false on every
+  // run that asks for no rim, and then no receipt changes.
+  bool mesh_rim_ran = false;
+  FeatureEdgeStats rim_edges;
+  long long rim_chains_other_skin = 0;   // chains whose midpoint zone asks for another skin
+  double rim_line_width_mm = 0.0;
+  std::string rim_rides;                 // which clean surface the chains came from
+  LatticeMeshRimReport rim;
 };
 
 // ── ★★ THE RECEIPT A REFUSED RUN LEAVES BEHIND ────────────────────────────────
@@ -2607,6 +2618,29 @@ LatticeSkinHere lattice_skin_here(const std::string& skin, const std::string& fi
                                                     : LatticeSkinHere::Plain;
 }
 
+// ★ THE RIM ON A REAL PART (ruling 11-08 (A)). The edge angle a rim starts at (the
+// reviewer's start; the receipt states it), and a chain's midpoint: the point half its
+// length along it, by which a zone takes the chain (as a skin chord is taken by its own).
+constexpr double kRimFeatureAngleDeg = 30.0;
+Vec3 feature_chain_midpoint(const FeatureChain& c) {
+  const std::size_t np = c.points.size();
+  if (np == 0) return {0, 0, 0};
+  const std::size_t nseg = c.closed ? np : np - 1;
+  double half = 0.5 * c.length_mm;
+  for (std::size_t i = 0; i < nseg; ++i) {
+    const Vec3& a = c.points[i];
+    const Vec3& b = c.points[(i + 1) % np];
+    const double l = std::sqrt((b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y) +
+                               (b.z - a.z) * (b.z - a.z));
+    if (half <= l && l > 0.0) {
+      const double t = half / l;
+      return {a.x + t * (b.x - a.x), a.y + t * (b.y - a.y), a.z + t * (b.z - a.z)};
+    }
+    half -= l;
+  }
+  return c.points.back();
+}
+
 // Whether the export writes the solid shell: "shell" and "shell+skin" do; "skin" and
 // ★ E2.4's "none" (the open lattice) do not.
 bool lattice_shell_written(const JobLattice& lat) {
@@ -2684,7 +2718,11 @@ LatticeExportOutcome export_latticed_variant(
     const TriangleMesh* shell_override = nullptr,
     // ★ Skin per zone (ruling 11-08 (1)): each anchor ball and chord asks its zone. Null:
     // the lattice's own skin everywhere, byte for byte.
-    const LatticeSkinZones* skin_zones = nullptr) {
+    const LatticeSkinZones* skin_zones = nullptr,
+    // ★ The rim on a real part (ruling 11-08 (A)): the chains it rides, already chosen
+    // (the caller found them on the shipped surface and kept those its skin asks for).
+    // Null: no rim, byte for byte.
+    const LatticeMeshRimSpec* mesh_rim = nullptr) {
   // ── M4: A SKIN MODE THAT PRODUCES NO GEOMETRY MUST SAY SO, NOT RETURN ZERO.
   //
   // ★ THE PREDICATE IS THE MEASURED COUNT, NOT A PREDICTION — and the first version
@@ -3337,17 +3375,100 @@ LatticeExportOutcome export_latticed_variant(
   // on its own key, so the body cannot change because the ledger was asked for.
   const LatticeGenObserver* weld_tap =
       (lat.emit_welded_stl || (laid_tap && *laid_tap) || solid_probe) ? &weld_obs : nullptr;
+  // ★ THE RIM ON A REAL PART (ruling 11-08 (A)): laid after the lattice, once per
+  // emission, into the same sink. It is DRESSING: its elements reach the welded body and
+  // the protrusion measurement, never the solid probe (the shipped-volume certificate, so
+  // no strength credit) and never the plan's ledger.
+  // ★ (A), the OPEN finish (no shell holds the cut ends): the cut strut ends within one
+  // cell of a sharp edge are recorded as the lattice is laid, and the rim ties each to its
+  // centre line after it. The cells within reach of an edge are marked first, so the
+  // recorder asks the boundary only about ends that could need a tie.
+  const bool rim_ties = mesh_rim != nullptr && !with_shell;
+  std::vector<LatticeRimTieEnd> tie_ends;
+  std::unordered_set<long long> near_edge_cells;
+  const double tie_reach = R.cell_mm;
+  auto cell_key = [tie_reach](const Vec3& p, int di, int dj, int dk) {
+    const long long i = static_cast<long long>(std::floor(p.x / tie_reach)) + di + (1LL << 20);
+    const long long j = static_cast<long long>(std::floor(p.y / tie_reach)) + dj + (1LL << 20);
+    const long long k = static_cast<long long>(std::floor(p.z / tie_reach)) + dk + (1LL << 20);
+    return (i << 42) | (j << 21) | k;
+  };
+  if (rim_ties)
+    for (const LatticeMeshRimChain& c : mesh_rim->chains)
+      for (std::size_t i = 0; i < c.points.size(); ++i) {
+        const Vec3& a = c.points[i];
+        const Vec3& b = c.points[(i + 1) % c.points.size()];
+        const double l = std::sqrt((b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y) +
+                                   (b.z - a.z) * (b.z - a.z));
+        const int n = std::max(1, static_cast<int>(std::ceil(2.0 * l / tie_reach)));
+        for (int t = 0; t <= n; ++t) {
+          const double u = static_cast<double>(t) / n;
+          const Vec3 q{a.x + u * (b.x - a.x), a.y + u * (b.y - a.y), a.z + u * (b.z - a.z)};
+          for (int dk = -1; dk <= 1; ++dk)
+            for (int dj = -1; dj <= 1; ++dj)
+              for (int di = -1; di <= 1; ++di) near_edge_cells.insert(cell_key(q, di, dj, dk));
+        }
+      }
+  auto record_tie_end = [&](LatticeGenElement k, const Vec3& a, const Vec3& b, double r) {
+    if (!rim_ties || k != LatticeGenElement::InteriorStrut) return;
+    for (const Vec3* p : {&a, &b}) {
+      if (!near_edge_cells.count(cell_key(*p, 0, 0, 0))) continue;
+      // a CUT end lies on the clip's offset surface, sd = r (to its tolerance)
+      if (boundary.signed_distance(*p) > r + 0.05) continue;
+      tie_ends.push_back({*p, r});
+    }
+  };
+  auto lay_mesh_rim = [&](TriangleSink& w, const LatticeGenObserver* o, LatticeGenStats& st) {
+    if (mesh_rim == nullptr) return;
+    oc.mesh_rim_ran = true;
+    const LatticeGenStats rs = generate_mesh_rims(R, radius, w, skin, *mesh_rim, &oc.rim, o,
+                                                  rim_ties ? &tie_ends : nullptr);
+    tie_ends.clear();
+    st.rim_elements += rs.rim_elements;
+    st.rim_triangles += rs.rim_triangles;
+    st.triangles += rs.triangles;
+    st.rim_volume_mm3 += rs.rim_volume_mm3;
+    st.uncertified_spans_dropped += rs.uncertified_spans_dropped;
+    if (rs.max_strut_diameter_mm > 0.0) {
+      st.min_strut_diameter_mm = st.max_strut_diameter_mm > 0.0
+                                     ? std::min(st.min_strut_diameter_mm, rs.min_strut_diameter_mm)
+                                     : rs.min_strut_diameter_mm;
+      st.max_strut_diameter_mm = std::max(st.max_strut_diameter_mm, rs.max_strut_diameter_mm);
+    }
+  };
+  LatticeGenObserver rim_obs_plain;
+  rim_obs_plain.on_element = [&organic_spans, &lat](LatticeGenElement, const Vec3& a,
+                                                    const Vec3& b, double r) {
+    if (lat.emit_welded_stl) organic_spans.push_back({a, b, r});
+  };
+  LatticeGenObserver tie_obs;   // the recorder in front of whatever tap the run uses
+  tie_obs.on_element = [&weld_tap, &record_tie_end](LatticeGenElement k, const Vec3& a,
+                                                    const Vec3& b, double r) {
+    record_tie_end(k, a, b, r);
+    if (weld_tap && weld_tap->on_element) weld_tap->on_element(k, a, b, r);
+  };
+  const LatticeGenObserver* lattice_tap = rim_ties ? &tie_obs : weld_tap;
+  LatticeGenObserver tie_only_obs;   // organic keeps its own span ledger: the recorder alone
+  tie_only_obs.on_element = [&record_tie_end](LatticeGenElement k, const Vec3& a,
+                                              const Vec3& b, double r) {
+    record_tie_end(k, a, b, r);
+  };
   auto emit_lattice = [&](TriangleSink& w) {
-    if (sheet && !measure_protrusion) return sheet_pass(w);
     if (!measure_protrusion) {
-      if (organic)
-        return organic_stats(generate_organic_lattice(*organic, w, &boundary, 8,
-                                                      nullptr, &organic_spans));
-      if (stepped)
-        return generate_lattice_stepped(gen_topo, *stepped, w, skin, weld_tap);
-      return swept ? generate_lattice_multilevel(gen_topo, Rbase, *levels, w, skin,
-                                                 weld_tap)
-                   : generate_lattice(gen_topo, R, radius, w, skin, weld_tap);
+      LatticeGenStats st;
+      if (sheet)
+        st = sheet_pass(w);
+      else if (organic)
+        st = organic_stats(generate_organic_lattice(*organic, w, &boundary, 8,
+                                                    rim_ties ? &tie_only_obs : nullptr,
+                                                    &organic_spans));
+      else if (stepped)
+        st = generate_lattice_stepped(gen_topo, *stepped, w, skin, lattice_tap);
+      else
+        st = swept ? generate_lattice_multilevel(gen_topo, Rbase, *levels, w, skin, lattice_tap)
+                   : generate_lattice(gen_topo, R, radius, w, skin, lattice_tap);
+      lay_mesh_rim(w, &rim_obs_plain, st);
+      return st;
     }
     MeasuringSink m;
     m.inner = &w;
@@ -3366,9 +3487,10 @@ LatticeExportOutcome export_latticed_variant(
     long long prev_n_out = 0;
     LatticeGenObserver obs;
     obs.on_element = [&m, &pass_marks, &organic_spans, &lat, &prev_n_out, laid_tap,
-                      &feed_probe](LatticeGenElement k, const Vec3& ea, const Vec3& eb,
-                                   double er) {
+                      &feed_probe, &record_tie_end](LatticeGenElement k, const Vec3& ea,
+                                                    const Vec3& eb, double er) {
       feed_probe(k, ea, eb, er);
+      record_tie_end(k, ea, eb, er);   // ★ (A) the open finish's cut ends near an edge
       if (m.this_element_out) { ++m.elements_out; m.this_element_out = false; }
       if (m.n_out > prev_n_out && std::getenv("TOPOPT_PROTRUSION_TRACE")) {
         std::fprintf(stderr,
@@ -3398,7 +3520,7 @@ LatticeExportOutcome export_latticed_variant(
     // "interior strut" or "node ball" exactly as it is on the octet path. It was
     // "unattributed" once, and that cost a round of guessing about which primitive was
     // escaping the shell.
-    const LatticeGenStats st =
+    LatticeGenStats st =
         organic
             // ★ THE GUARD'S OWN MeshDistance GOES TO THE CLIP. `shell` is
             // `variant.v3.mesh` by const reference and nothing mutates it between
@@ -3416,6 +3538,17 @@ LatticeExportOutcome export_latticed_variant(
                                                               *levels, m, skin, &obs)
                                 : generate_lattice(gen_topo, R, radius, m, skin,
                                                    &obs)));
+    {
+      // ★ the rim, measured and attributed like every other pass
+      LatticeGenObserver rim_obs;
+      rim_obs.on_element = [&m, &pass_marks, &organic_spans, &lat](
+                               LatticeGenElement, const Vec3& ea, const Vec3& eb, double er) {
+        if (m.this_element_out) { ++m.elements_out; m.this_element_out = false; }
+        if (lat.emit_welded_stl) organic_spans.push_back({ea, eb, er});
+        pass_marks.emplace_back(m.n_seen, "rim along a sharp edge");
+      };
+      lay_mesh_rim(m, &rim_obs, st);
+    }
     const char* worst_pass = "unattributed";
     if (m.worst_vertex >= 0)
       for (const auto& pm : pass_marks)
@@ -4589,6 +4722,49 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
          ", \"skin_chords\": " + std::to_string(gs.zone_skin_chords[0]) +
          ", \"skin_struts\": " + std::to_string(gs.zone_skin_struts[0]) + "},\n";
   s += "  \"rim_elements\": " + std::to_string(gs.rim_elements) + ",\n";
+  // ★ THE RIM ON A REAL PART (ruling 11-08 (A)). Written only when a rim was asked for.
+  if (oc.mesh_rim_ran) {
+    const FeatureEdgeStats& fe = oc.rim_edges;
+    const LatticeMeshRimReport& rr = oc.rim;
+    s += "  \"rim\": {\"rides\": \"the sharp edges of " + oc.rim_rides +
+         ", seated in the shell the struts are clipped to\", "
+         "\"angle_threshold_deg\": " + json_num(fe.angle_threshold_deg) +
+         ", \"min_piece_mm\": " + json_num(fe.min_piece_mm) +
+         ", \"feature_edges\": " + std::to_string(fe.feature_edges) +
+         ", \"open_edges_skipped\": " + std::to_string(fe.open_edges) +
+         ", \"nonmanifold_edges_skipped\": " + std::to_string(fe.nonmanifold_edges) +
+         ", \"pieces\": " + std::to_string(fe.pieces) +
+         ", \"pieces_dropped_short\": " + std::to_string(fe.pieces_dropped_short) +
+         ", \"length_dropped_mm\": " + json_num(fe.length_dropped_mm) +
+         ", \"chains\": " + std::to_string(fe.chains) +
+         ", \"chains_other_skin\": " + std::to_string(oc.rim_chains_other_skin) +
+         ", \"chains_laid\": " + std::to_string(rr.chains_laid) +
+         ", \"chains_clipped_away\": " + std::to_string(rr.chains_clipped_away) +
+         ", \"length_laid_mm\": " + json_num(rr.length_laid_mm) +
+         ", \"spans\": " + std::to_string(rr.spans) +
+         ", \"joints\": " + std::to_string(rr.joints) +
+         ", \"stations\": " + std::to_string(rr.stations) +
+         ", \"stations_seated\": " + std::to_string(rr.stations_seated) +
+         ", \"stations_unseated\": " + std::to_string(rr.stations_unseated) +
+         ", \"seat_max_mm\": " + json_num(rr.seat_max_mm) +
+         ", \"tie_ends\": " + std::to_string(rr.tie_ends) +
+         ", \"ties_laid\": " + std::to_string(rr.ties_laid) +
+         ", \"ties_touching\": " + std::to_string(rr.ties_touching) +
+         ", \"ties_out_of_reach\": " + std::to_string(rr.ties_out_of_reach) +
+         ", \"ties_clipped_away\": " + std::to_string(rr.ties_clipped_away) +
+         ", \"tie_length_mm\": " + json_num(rr.tie_length_mm) +
+         ", \"line_width_mm\": " + json_num(oc.rim_line_width_mm) +
+         ", \"diameter_mm\": [" + json_num(rr.diameter_min_mm) + ", " +
+         json_num(rr.diameter_max_mm) + "], \"line_widths\": [" +
+         std::to_string(rr.line_widths_min) + ", " + std::to_string(rr.line_widths_max) +
+         "], \"strength\": \"rim: not counted in strength\"" +
+         (rr.chains_laid == 0
+              ? std::string(", \"note\": \"Rim laid nothing: no sharp edge of the shipped surface "
+                            "longer than one cell lies where the rim was asked for, or none had "
+                            "room inside the part.\"")
+              : std::string()) +
+         "},\n";
+  }
   s += "  \"interior_volume_mm3\": " + json_num(gs.interior_volume_mm3) + ",\n";
   s += "  \"skin_volume_mm3\": " + json_num(gs.skin_volume_mm3) + ",\n";
   s += "  \"rim_volume_mm3\": " + json_num(gs.rim_volume_mm3) + ",\n";
@@ -7100,7 +7276,11 @@ LatticeVariantOutcome lattice_one_variant_pass(
     const MinimizePlasticOptions& options, const Material& material,
     const std::vector<ClearanceGeometry>& lattice_kos,
     const LatticeRoleRegions& lattice_roles, const std::string& out_dir,
-    const std::vector<LatticeRegionGraded>* fixed_search) {
+    const std::vector<LatticeRegionGraded>* fixed_search,
+    // ★ (A) the surface a rim rides when the part ITSELF is latticed: its own mesh. Null:
+    // the design's exported surface, made from `cad` (CAD-projected); with neither, the
+    // design's shell (v3.mesh).
+    const TriangleMesh* part_surface = nullptr, const StepModel* cad = nullptr) {
   // FIRST STATEMENT IN THE BODY, so every solve below is covered and the previous
   // enable states are restored however this function returns (including by throw).
   const ScopedLadderSolverIsolation solver_isolation;
@@ -10303,6 +10483,57 @@ LatticeVariantOutcome lattice_one_variant_pass(
       return stepped_region_owner(p, e3_regions);
     };
   }
+  // ★ THE RIM ON A REAL PART (ruling 11-08 (A)). Built only when the part or a zone asks
+  // for "rim": the sharp edges of the surface this file ships (the design's own shell,
+  // v3.mesh), chains under one cell dropped, and each chain kept where its midpoint's skin
+  // is "rim" (a zone's own, else the part's).
+  LatticeMeshRimSpec mesh_rim;
+  FeatureEdgeStats rim_edges;
+  long long rim_other_skin = 0;
+  bool rim_asked = job.lattice.skin == "rim";
+  for (const JobLatticeRegion& r : e3_jobs)
+    if (r.skin == "rim") rim_asked = true;
+  std::string rim_rides;
+  if (rim_asked) {
+    // ★ WHICH SURFACE THE EDGES COME FROM: never the voxel grid, where every step would
+    // read as an edge. The part's own mesh when the part itself is latticed; else the
+    // design's finished surface (CAD-projected, as the plain export writes it) when the
+    // part is in hand; the design's shell (v3.mesh) only when neither is.
+    TriangleMesh finished_surface;
+    const TriangleMesh* src = part_surface;
+    rim_rides = "the part's own mesh";
+    if (src == nullptr && cad != nullptr) {
+      finished_surface =
+          variant_export_model_mesh(v, job.output, solved_grid, printed_iso, cad);
+      src = &finished_surface;
+      rim_rides = "the design's exported surface";
+    }
+    if (src == nullptr) {
+      src = &v.v3.mesh;
+      rim_rides = "the design's shell";
+    }
+    const std::vector<FeatureChain> chains =
+        mesh_feature_chains(*src, kRimFeatureAngleDeg, cell, &rim_edges);
+    for (const FeatureChain& c : chains) {
+      std::string sk = job.lattice.skin;
+      if (!e3_jobs.empty()) {
+        const int z = stepped_region_owner(feature_chain_midpoint(c), e3_regions);
+        if (z >= 1 && static_cast<std::size_t>(z) <= e3_jobs.size() &&
+            !e3_jobs[static_cast<std::size_t>(z - 1)].skin.empty())
+          sk = e3_jobs[static_cast<std::size_t>(z - 1)].skin;
+      }
+      if (sk != "rim") {
+        ++rim_other_skin;
+        continue;
+      }
+      mesh_rim.chains.push_back({c.points, c.left_normal, c.right_normal, c.convex, c.closed});
+    }
+    mesh_rim.line_width_mm =
+        graded ? job.grading.min_extrudable_width_mm : job.lattice.min_extrudable_width_mm;
+    // Seated in the shell the struts are clipped to: it sits up to about a voxel off the
+    // clean surface (half a voxel on a face, more where it chamfers a convex edge).
+    mesh_rim.max_seat_mm = 1.5 * solved_grid.spacing;
+  }
   R.oc = export_latticed_variant(
       v, out_dir, job.output, job.lattice, solved_grid, boundary, cell, G,
       mask, cell_latticed,
@@ -10321,7 +10552,32 @@ LatticeVariantOutcome lattice_one_variant_pass(
       organic.ran ? nullptr : &solid_probe,
       graded ? job.grading.min_extrudable_width_mm : job.lattice.min_extrudable_width_mm,
       region_shell.triangles.empty() ? nullptr : &region_shell,
-      any_zone_skin ? &skin_zones : nullptr);
+      any_zone_skin ? &skin_zones : nullptr, rim_asked ? &mesh_rim : nullptr);
+  if (rim_asked) {
+    // ★ TOPOPT_RIM_DUMP=<file>: the chains the rim was asked to ride, one "CHAIN" line each
+    // (closed, points, length mm) and then its points -- evidence and tests read where the
+    // rim went without a mesh parser. Never written unless asked.
+    if (const char* dump = std::getenv("TOPOPT_RIM_DUMP")) {
+      if (FILE* f = std::fopen(dump, "w")) {
+        for (const LatticeMeshRimChain& c : mesh_rim.chains) {
+          double len = 0.0;
+          for (std::size_t i = 0; i + 1 < c.points.size(); ++i) {
+            const Vec3& a = c.points[i];
+            const Vec3& b = c.points[i + 1];
+            len += std::sqrt((b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y) +
+                             (b.z - a.z) * (b.z - a.z));
+          }
+          std::fprintf(f, "CHAIN %d %zu %.6f\n", c.closed ? 1 : 0, c.points.size(), len);
+          for (const Vec3& p : c.points) std::fprintf(f, "%.6f %.6f %.6f\n", p.x, p.y, p.z);
+        }
+        std::fclose(f);
+      }
+    }
+    R.oc.rim_edges = rim_edges;
+    R.oc.rim_chains_other_skin = rim_other_skin;
+    R.oc.rim_line_width_mm = mesh_rim.line_width_mm;
+    R.oc.rim_rides = rim_rides;
+  }
   // ★ THE EXPORT'S RETURN REPLACES THE WHOLE OUTCOME, and the growth stats copied
   // onto it above went with it -- the receipt read growth_ran: false and zero ties on
   // every grown run until 2026-09-05. Copy them again, after the replacement.
@@ -10567,6 +10823,24 @@ LatticeVariantOutcome lattice_one_variant_pass(
   // construction: it cannot fire on a run that emitted geometry.
   // ★ Per zone: the part's "rim" is judged on its own rim, so a zone's woven skin cannot
   // stand in for it. (Rim mode lays no diagrid, so without zones this is the same test.)
+  // ★ The rim on a real part (ruling 11-08 (A)): a rim that found no sharp edge to ride
+  // says so in its own words, with the counts that decided it.
+  if (job.lattice.skin == "rim" && R.oc.mesh_rim_ran && R.oc.stats.rim_triangles == 0) {
+    const FeatureEdgeStats& fe = R.oc.rim_edges;
+    throw JobError(
+        "lattice \"skin\": \"rim\" laid no rim on this part: the surface it ships has " +
+        std::to_string(fe.feature_edges) + " edge(s) sharper than " +
+        json_num(fe.angle_threshold_deg) + " degrees, " +
+        std::to_string(fe.pieces_dropped_short) + " piece(s) of them shorter than one cell (" +
+        json_num(fe.min_piece_mm) + " mm, dropped), " +
+        std::to_string(R.oc.rim_chains_other_skin) +
+        " chain(s) in zones that ask for another skin, and " +
+        std::to_string(R.oc.rim.chains_clipped_away) +
+        " chain(s) with no room inside the part for a rim of " +
+        json_num(R.oc.rim.diameter_max_mm) +
+        " mm.\n  Refusing rather than exporting an undressed lattice under a finish the job "
+        "asked for. Set \"skin\": \"none\" to export it undressed.");
+  }
   if (job.lattice.skin != "none" &&
       R.oc.stats.rim_triangles +
               (job.lattice.skin == "rim" ? 0 : R.oc.stats.skin_triangles) ==
@@ -11266,9 +11540,11 @@ LatticeVariantOutcome lattice_one_variant(
     const VoxelGrid& part_grid, const SolvedDesignDomain& domain,
     const MinimizePlasticOptions& options, const Material& material,
     const std::vector<ClearanceGeometry>& lattice_kos,
-    const LatticeRoleRegions& lattice_roles, const std::string& out_dir) {
+    const LatticeRoleRegions& lattice_roles, const std::string& out_dir,
+    const TriangleMesh* part_surface = nullptr, const StepModel* cad = nullptr) {
   LatticeVariantOutcome R = lattice_one_variant_pass(
-      v, job, part_grid, domain, options, material, lattice_kos, lattice_roles, out_dir, nullptr);
+      v, job, part_grid, domain, options, material, lattice_kos, lattice_roles, out_dir, nullptr,
+      part_surface, cad);
   bool any = false;
   for (const LatticeRegionGraded& g : R.region_graded)
     if (g.searched && g.search_certified && g.search_rho < g.search_peak) any = true;
@@ -11289,7 +11565,7 @@ LatticeVariantOutcome lattice_one_variant(
     const std::vector<LatticeRegionGraded> f = at(t);
     ++passes;
     return lattice_one_variant_pass(v, job, part_grid, domain, options, material, lattice_kos,
-                                    lattice_roles, out_dir, &f);
+                                    lattice_roles, out_dir, &f, part_surface, cad);
   };
   LatticeVariantOutcome top = pass(1.0);
   if (!top.cc.ran || !top.cc.lattice.accepted) {
@@ -14135,7 +14411,8 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
       lattice_role_regions_from_job(job, &result.model, &model_grid);
   const LatticeVariantOutcome R =
       lattice_one_variant(v, job, model_grid, domain, options, material,
-                          lattice_kos, lattice_roles, out_dir);
+                          lattice_kos, lattice_roles, out_dir,
+                          lattice_the_part ? &result.model.mesh : nullptr, &result.model);
   // BAR B3 / L3 (task 2026-08-04-variant-volume-fraction-mismatch). This entry
   // point exists to produce ONE latticed object. If the grading law could
   // lattice nothing, there is no object — and the alternative the optimize path
@@ -16995,7 +17272,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     // the run-level AGGREGATION and the streaming checkpoint line.
     const LatticeVariantOutcome R =
         lattice_one_variant(v, job, grid, domain, options, material,
-                            lattice_kos, lattice_roles, out_dir);
+                            lattice_kos, lattice_roles, out_dir, nullptr, &result.model);
     // ── THIS RUNG PRODUCED NO LATTICE (task
     // 2026-08-04-variant-volume-fraction-mismatch, bar B3 / L3).
     //

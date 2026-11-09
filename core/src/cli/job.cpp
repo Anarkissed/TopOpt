@@ -1718,17 +1718,13 @@ JobDescription parse_job(const std::string& json_text) {
             schema_fail(named + ": \"outer_finish\" must be \"none\" (open) or \"shell\" "
                         "(covered) (got \"" + reg.outer_finish + "\")");
         }
-        // ★ Skin per zone (ruling 11-08 (1) + (2b)).
+        // ★ Skin per zone (ruling 11-08 (1)), and Rim per zone (ruling 11-08 (A): the rim
+        // rides the shipped surface's sharp edges, a chain taken by its midpoint's zone).
         if (const JsonValue* sk = own_grading("skin")) {
           reg.skin = require_nonempty_string(*sk, "lattice region skin");
-          if (reg.skin == "rim")
-            schema_fail(named + " asks for Rim, which can't be built on a zone yet: today's "
-                        "rim is laid only where two flat CAD faces meet, and a run's lattice "
-                        "surface has no such faces, so it would come out empty. Give this zone "
-                        "Skin (\"diagrid\") or no skin (\"none\").");
-          if (reg.skin != "diagrid" && reg.skin != "none")
-            schema_fail(named + ": \"skin\" must be \"diagrid\" (Skin) or \"none\" (got \"" +
-                        reg.skin + "\")");
+          if (reg.skin != "diagrid" && reg.skin != "rim" && reg.skin != "none")
+            schema_fail(named + ": \"skin\" must be \"diagrid\" (Skin), \"rim\" (Rim) or "
+                        "\"none\" (got \"" + reg.skin + "\")");
         }
         if (const JsonValue* ss = own_grading("shape_grade_strength")) {
           reg.shape_grade_strength = require_number(*ss, "lattice region shape_grade_strength");
