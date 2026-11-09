@@ -90,11 +90,33 @@ public enum LatticeBoundaryTreatment: String, Codable, CaseIterable, Equatable, 
         }
     }
 
-    /// ★ `job.lattice.outer_finish` — "shell" for a cover, nil otherwise so every
-    /// pre-existing job stays byte-identical. Core refuses "skin"/"shell+skin"
-    /// unless `skin == "diagrid"` (job.cpp:1438), so only the unambiguous value
-    /// is ever emitted here.
-    public var jobOuterFinish: String? { self == .covered ? "shell" : nil }
+    /// ★ `job.lattice.outer_finish`, core's word for what the OUTER SURFACE is.
+    /// ★★ B7 slice 2b (the reviewer 11-08 21:32Z, ruling 4; ruling 11-06 (1), core E2.4 5fe8e992): absent is core's
+    /// "shell", so before this every finish but Covered ran UNDER A SOLID SHELL — None was a covered part (the preview
+    /// draws it open) and Skin was the shell with the anchored diagrid's balls under it, not the woven skin.
+    /// - None → "none": the open lattice (E2.4), its surface cells certified with no credit.
+    /// - Skin → "skin": the freeform woven diagrid IS the finish (core requires skin "diagrid"; `jobSkinValue` sends it).
+    ///   Core does not certify a shell-less skin yet (run_job.cpp finish_certified), and the page says so.
+    /// - Covered → "shell".
+    /// - Rim → absent, its job unchanged: core builds no rim on a real part yet (rim_triangles 0 refuses), so the page
+    ///   greys it with one line until LatticeTypes' rim lands.
+    /// An older core (no E2.4) keeps the old bytes for None: "none" only where the linked core parses it.
+    public var jobOuterFinish: String? {
+        if Self.controlShellDefault { return self == .covered ? "shell" : nil }
+        switch self {
+        case .none: return TopOptKit.latticeOpenFinishWired ? "none" : nil
+        case .rim: return nil
+        case .fullSkin: return "skin"
+        case .covered: return "shell"
+        }
+    }
+    /// TEST CONTROL: the pre-2b mapping (Covered only; every other finish under core's default shell).
+    nonisolated(unsafe) public static var controlShellDefault = false
+    /// ★ B7 slice 2b: a zone may have its own finish only beside these — core's (1b2): a region's own outer_finish needs
+    /// the part's "shell" or "none"; the freeform skin is part-wide, and Rim is greyed.
+    public var takesZoneFinish: Bool { zoneFinishWord != nil }
+    /// The part's finish in a zone's words ("shell" / "none"), nil where a zone can't have its own.
+    public var zoneFinishWord: String? { self == .covered ? "shell" : self == .none ? "none" : nil }
 
     /// The exact core job-schema value (`job.lattice.skin`).
     public var jobSkinValue: String {
@@ -2286,12 +2308,13 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     public var resolvedAreaGrading: [UUID: LatticeAreaGrading] {
         guard !isOrganic else { return [:] }
         // ★ B7 slice 2 (release (3)): a zone's own FINISH is not a grade — it rides whatever the density mode, and only
-        // where it differs from the part's ("shell" when the part is Covered, else "none")
-        let partFinish = boundary == .covered ? "shell" : "none"
+        // where it differs from the part's ("shell" when the part is Covered, "none" when None).
+        // ★ B7 slice 2b: never under Skin or Rim — core's (1b2) refuses a region's own finish beside the freeform skin.
+        let partFinish = boundary.zoneFinishWord
         var out: [UUID: LatticeAreaGrading] = [:]
         for (gid, g) in areaGrading {
             var r = LatticeAreaGrading()
-            if let f = g.outerFinish, f != partFinish { r.outerFinish = f }
+            if let partFinish, let f = g.outerFinish, f != partFinish { r.outerFinish = f }
             if densityMode == .sim {
                 let mode = g.gradingMode ?? gradingMode
                 if mode != gradingMode { r.gradingMode = mode }

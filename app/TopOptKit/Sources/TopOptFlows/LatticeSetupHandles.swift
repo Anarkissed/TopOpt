@@ -68,6 +68,106 @@ public enum LatticeSetupHandles {
         CGRect(x: p.x - size / 2, y: p.y - size / 2, width: size + (pill ? spacing + pillMax : 0), height: size)
     }
 
+    // MARK: ★ his iPad 11-08 (3, 4) — whose chips show, and clear space between them
+
+    /// ★ His iPad 11-08 (4): "Show only the chips of what's picked" — one face-prism → that one's; a group row → that
+    /// group's; a zone → that zone's handles; nothing picked → none. (On 2a7c7bd8 every face of every group a model tap had
+    /// ever opened wore its handle and ± knob: "a clusterfuck … completely unusable".)
+    public enum ChipScope: Equatable {
+        case none
+        case group(UUID)
+        case face(group: UUID, key: String)
+        case zone(UUID)
+
+        /// What is picked on Lattice Setup: the picked group (a zone, or a face group), and inside a face group the picked
+        /// face row — a face pick left over from another group does not count.
+        public static func of(active: UUID?, zones: Set<UUID>, facePick: String?, groupRefs: (UUID) -> [String]) -> ChipScope {
+            guard let a = active else { return .none }
+            if zones.contains(a) { return .zone(a) }
+            if let k = facePick, groupRefs(a).contains(k) { return .face(group: a, key: k) }
+            return .group(a)
+        }
+
+        /// Whether a face's prism in `group` (row key `key`) wears its chips (its end handle and its ± knob).
+        public func shows(group: UUID, key: String) -> Bool {
+            switch self {
+            case .none, .zone: return false
+            case .group(let g): return g == group
+            case .face(let g, let k): return g == group && k == key
+            }
+        }
+    }
+
+    /// ★ His iPad 11-08 (3): "Every chip needs clear space between it and the next, so a tap can't be confused." The clear
+    /// space between two chips' footprints, pt — the viewport's own (KeepOutSolver.separation).
+    public static let chipGap: CGFloat = KeepOutSolver.separation
+
+    /// One chip to lay out: its true point, the line it may slide along, and the room it takes around a point.
+    public struct Chip: Equatable {
+        public let key: String
+        public let at: CGPoint
+        public let axis: CGVector
+        /// The chip's footprint when its knob's middle is on a point, as an offset rect (FootprintShape).
+        public let shape: FootprintShape
+        public init(key: String, at: CGPoint, axis: CGVector, shape: FootprintShape) {
+            self.key = key; self.at = at; self.axis = axis; self.shape = shape
+        }
+    }
+
+    /// A footprint: a knob of `size` with its middle on the point, and (a handle showing its number) the pill beside it.
+    public struct FootprintShape: Equatable {
+        public let size: CGFloat
+        public let pill: Bool
+        public init(size: CGFloat = 44, pill: Bool = false) { self.size = size; self.pill = pill }
+        public func rect(_ p: CGPoint) -> CGRect {
+            LatticeSetupHandles.footprint(p, size: size, pill: pill)
+        }
+    }
+
+    /// How far a crowded chip looks for room (pt): his 2040 stand's Group 2 lays 38 chips over one slanted side, where the
+    /// last ones found nothing within `slideMax` on their four lines and stayed on another chip.
+    public static let crowdMax: CGFloat = 400
+    /// The other ways a crowded chip looks at each distance, after along and across its drag line (degrees from its axis).
+    static let ringMore: [CGFloat] = [45, 135, 225, 315, 22.5, 67.5, 112.5, 157.5, 202.5, 247.5, 292.5, 337.5]
+    /// The ways a crowded chip looks for room at each distance, in order: along its drag line (both ways), across it (both
+    /// ways), then the diagonals (`ringMore`).
+    static func ringDirections(_ axis: CGVector) -> [CGVector] {
+        let a = atan2(axis.dy, axis.dx)
+        return ([0, 180, 90, 270] + ringMore).map { CGVector(dx: cos(a + $0 * .pi / 180), dy: sin(a + $0 * .pi / 180)) }
+    }
+
+    /// ★ ONE LAYOUT FOR EVERY CHIP ON THE PART (his iPad 11-08, 3). In order (the picked thing's first), each chip is drawn
+    /// on its true point — or at the NEAREST place, in any direction (along its own drag line first, then across it, then
+    /// the diagonals, at each distance up to `crowdMax`), clear of the page's own UI (`keepOut`) and `chipGap` clear of every
+    /// chip already placed. Each drag still reads its chip's TRUE point (`placed`'s rule) and only the finger's travel along
+    /// its line, so a slid chip moves the value exactly as one on its point. With no clear place within reach it stays put.
+    public static func layout(_ chips: [Chip], keepOut: [CGRect]) -> [String: CGPoint] {
+        var out: [String: CGPoint] = [:]
+        var taken: [CGRect] = []
+        for c in chips {
+            func clear(_ q: CGPoint) -> Bool {
+                let r = c.shape.rect(q)
+                return !keepOut.contains { $0.intersects(r) }
+                    && !taken.contains { $0.insetBy(dx: -chipGap, dy: -chipGap).intersects(r) }
+            }
+            var spot = c.at
+            if !clear(spot) {
+                let dirs = ringDirections(c.axis)
+                var t = slideStep
+                search: while t <= crowdMax {
+                    for d in dirs {
+                        let q = CGPoint(x: c.at.x + d.dx * t, y: c.at.y + d.dy * t)
+                        if clear(q) { spot = q; break search }
+                    }
+                    t += slideStep
+                }
+            }
+            out[c.key] = spot
+            taken.append(c.shape.rect(spot))
+        }
+        return out
+    }
+
     /// A held handle: its key, and where it was and its axis on screen when the drag began.
     public struct DragStart: Equatable {
         public let key: String
@@ -97,4 +197,8 @@ public enum LatticeSetupHandles {
     @MainActor public static var livePick: ((FaceID) -> Void)?
     /// ★ his iPad 11-07: the faces the page last coloured for the Lattice stage's own groups (Pending ones included).
     @MainActor public static var latticeTinted: Set<FaceID> = []
+    /// ★ his iPad 11-08 (1): the page's tap into nothing, as the viewer calls it (a click offscreen never reaches the 3D view).
+    @MainActor public static var liveEmptyTap: (() -> Void)?
+    /// ★ his iPad 11-08 (3, 4): the chips the page last laid out on Lattice Setup, by key, where each is drawn.
+    @MainActor public static var chipSpots: [String: CGPoint] = [:]
 }

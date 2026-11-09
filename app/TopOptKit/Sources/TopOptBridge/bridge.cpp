@@ -46,6 +46,7 @@ extern "C" __attribute__((used)) const char* const topopt_bridge_vendored_core =
 #include "topopt/cell_plan.hpp"
 #include "topopt/clearance.hpp"
 #include "topopt/face_overrides.hpp"
+#include "topopt/face_region.hpp"
 #include "topopt/fea.hpp"
 #include "topopt/lattice_algorithm.hpp"
 #include "topopt/lattice.hpp"
@@ -64,6 +65,7 @@ extern "C" __attribute__((used)) const char* const topopt_bridge_vendored_core =
 #include "topopt/smooth.hpp"
 #include "topopt/step.hpp"
 #include "topopt/stepped_plan.hpp"
+#include "topopt/lattice_sample.hpp"
 #include "topopt/stl.hpp"
 #include "topopt/version.hpp"
 #include "topopt/voxel.hpp"
@@ -678,6 +680,18 @@ topopt::ProductionLoadCase production_loadcase_from_bridge(
   }
   {
     const std::size_t cn = load_case.clearance_face_ids.size();
+    // ★ E4 (j), ruling 2026-11-07 19:55: A KEEP CLEAR ON A CUT PIECE names its face region
+    // (clearance_region_ids[c] >= 0). Its member faces and cuts are resolved HERE, once, from
+    // this load case's own region layer (filled above), as run_job's
+    // production_loadcase_from_job does -- so every copy of `lc` (the pre-flight's
+    // counterfactual too) carries them. A piece that gives no Keep clear of its kind is
+    // refused in his words (std::invalid_argument -> the run's refusal line).
+    std::vector<topopt::ResolvedFaceRegion> clear_regions;
+    for (const int32_t r : load_case.clearance_region_ids)
+      if (r >= 0) {
+        clear_regions = topopt::resolve_face_regions(model, lc.face_regions);
+        break;
+      }
     for (std::size_t c = 0; c < cn; ++c) {
       topopt::ProductionLoadCase::Clearance cl;
       cl.face_id = load_case.clearance_face_ids[c];
@@ -686,10 +700,24 @@ topopt::ProductionLoadCase production_loadcase_from_bridge(
       const bool manual =
           c < load_case.clearance_manual.size() && load_case.clearance_manual[c];
       cl.manual = manual;
+      const int region_id = c < load_case.clearance_region_ids.size()
+                                ? load_case.clearance_region_ids[c]
+                                : -1;
+      const topopt::ResolvedFaceRegion* piece = nullptr;
+      if (region_id >= 0) {
+        for (const topopt::ResolvedFaceRegion& r : clear_regions)
+          if (r.id == region_id) piece = &r;
+        if (piece == nullptr)
+          throw std::invalid_argument(
+              "A Keep clear names a cut piece that is not one of this run's pieces. "
+              "Redo the cut in Edit faces.");
+      }
       double bore_r = 0.0;
       if (bolt) {
         if (manual && c < load_case.clearance_radius_mm.size())
           bore_r = load_case.clearance_radius_mm[c];
+        else if (piece != nullptr)
+          bore_r = topopt::largest_bore_radius_mm(model, piece->member_faces);
         else if (!manual && cl.face_id >= 0 && cl.face_id < model.face_count)
           bore_r = model.faces[static_cast<std::size_t>(cl.face_id)]
                        .cylinder_radius_mm;
@@ -724,6 +752,10 @@ topopt::ProductionLoadCase production_loadcase_from_bridge(
         cl.manual_geom.normal = xyz(load_case.clearance_normal_xyz);
         cl.manual_geom.half_u_mm = scalar(load_case.clearance_half_u_mm);
         cl.manual_geom.half_w_mm = scalar(load_case.clearance_half_w_mm);
+      }
+      if (piece != nullptr) {
+        cl.region_id = region_id;
+        topopt::resolve_clearance_region(cl, *piece, model);  // ★ E4 (j): faces + clips; refuses an empty piece
       }
       lc.clearances.push_back(cl);
     }
@@ -765,6 +797,22 @@ ImportedMesh import_stl(const std::string& path, BridgeError& err) {
   return guarded_err("import_stl", err, [&]() -> ImportedMesh {
     topopt::StlMesh sm = topopt::read_stl_file(path);
     return to_imported(sm.mesh, nullptr, 0);
+  });
+}
+
+LatticeSampleResult lattice_sample(const std::string& topology, double cell_mm, double bead_mm, BridgeError& err) {
+  return guarded_err("lattice_sample", err, [&]() -> LatticeSampleResult {
+    topopt::LatticeSampleSpec spec;
+    spec.topology = topology;
+    spec.shape = "coupon";
+    if (cell_mm > 0.0) spec.cell_mm = cell_mm;
+    if (bead_mm > 0.0) spec.bead_mm = bead_mm;
+    topopt::LatticeSampleReceipt receipt;
+    const topopt::TriangleMesh m = topopt::lattice_sample_mesh(spec, &receipt);
+    LatticeSampleResult out;
+    out.mesh = to_imported(m, nullptr, 0);
+    out.receipt_json = topopt::lattice_sample_receipt_json(receipt);
+    return out;
   });
 }
 
@@ -2022,7 +2070,9 @@ OptimizeResult run_minimize_plastic_loadcase(
                  " depth=" + std::to_string(pr.depth_voxels) +
                  (pr.thinner_than_depth ? " thinner-than-depth" : ""));
     for (const auto& cr : setup.clearance_reports)
-      bridge_log("loadcase: clearance face=" + std::to_string(cr.face_id) +
+      bridge_log("loadcase: clearance " +
+                 (cr.region_id >= 0 ? "region=" + std::to_string(cr.region_id)    // ★ E4 (j): a cut piece
+                                    : "face=" + std::to_string(cr.face_id)) +
                  " kind=" + (cr.kind == topopt::ClearanceKind::Bolt ? "bolt" : "face") +
                  " voxels_frozen=" + std::to_string(cr.voxels_frozen) +
                  (cr.in_grid ? "" : " OUTSIDE-GRID"));
@@ -2110,6 +2160,7 @@ OptimizeResult run_minimize_plastic_loadcase(
       result.clearance_voxels_frozen.push_back(
           static_cast<int32_t>(cr.voxels_frozen));
       result.clearance_in_grid.push_back(cr.in_grid ? 1 : 0);
+      result.clearance_region_ids.push_back(cr.region_id);  // ★ E4 (j): >= 0 for a cut piece
     }
     // Handoff 124 — surface what each Face protection preserved so the results
     // screen can state it honestly (which faces, how many voxels, and whether the

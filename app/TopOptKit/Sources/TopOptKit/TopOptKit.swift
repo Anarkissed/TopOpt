@@ -1032,8 +1032,10 @@ public struct LatticeReport: Equatable, Sendable {
                 variantFacesWithoutShape: Int = 0,
                 variantRegionsWithoutShape: [String] = [],
                 variantLegacyFaceWallsLeftOut: Int = 0,
-                planLaid: PlanLaid? = nil) {
+                planLaid: PlanLaid? = nil,
+                finishLines: [String] = []) {
         self.planLaid = planLaid
+        self.finishLines = finishLines
         self.regionCellsJSON = regionCellsJSON
         self.variantFacesWithoutShape = variantFacesWithoutShape
         self.variantRegionsWithoutShape = variantRegionsWithoutShape
@@ -1048,6 +1050,45 @@ public struct LatticeReport: Equatable, Sendable {
         self.generated = generated
         self.strut = strut
     }
+
+    /// ★ B7 slice 2 (the reviewer 11-08 21:32Z, ruling 3 (a)): the lattice receipt's FINISH facts, in plain words, for
+    /// Results — until slice 3 draws them in 3D. Empty when the receipt says none of them.
+    public let finishLines: [String]
+
+    /// Read them out of a lattice receipt (`variant_XXX_lattice.report.json`):
+    /// - `grading.shape_band.solid_where_unprintable` + `solid_box_mm` [min x, y, z, max x, y, z] (ruling 2);
+    /// - `open_finish` (E2.4): each open zone beside the covered part with the wall that closes it (`regions`,
+    ///   `wall_mm`), or, for a whole part open, its uncredited surface cells;
+    /// - `finish_certified: false` (Skin's "skin", no shell): why the lattice isn't accepted.
+    public static func finishLines(receipt: Data?) -> [String] {
+        guard let receipt, let obj = (try? JSONSerialization.jsonObject(with: receipt)) as? [String: Any] else { return [] }
+        func mm(_ x: Double) -> String { String(format: "%g", (x * 10).rounded() / 10) }
+        var out: [String] = []
+        if let band = (obj["grading"] as? [String: Any])?["shape_band"] as? [String: Any],
+           let n = band["solid_where_unprintable"] as? Int, n > 0 {
+            var line = "Solid where no cell prints: \(n) voxel\(n == 1 ? "" : "s")"
+            if let b = band["solid_box_mm"] as? [Double], b.count == 6 {
+                line += ", between x \(mm(b[0]))–\(mm(b[3])), y \(mm(b[1]))–\(mm(b[4])), z \(mm(b[2]))–\(mm(b[5])) mm"
+            }
+            out.append(line + ".")
+        }
+        if let open = obj["open_finish"] as? [String: Any] {
+            let wall = open["wall_mm"] as? Double ?? 0
+            let zones = open["regions"] as? [String] ?? []
+            // core words each: "<zone> open: a wall closes it from the covered part" (run_job.cpp, E2.4 per region)
+            for note in zones {
+                let walled = wall > 0 ? note.replacingOccurrences(of: "a wall", with: "a \(mm(wall)) mm wall") : note
+                out.append(walled.replacingOccurrences(of: " open: ", with: " is open: ") + ".")
+            }
+            if zones.isEmpty, let cut = open["cut_cell_voxels"] as? Int, cut > 0 {
+                out.append("Open finish: \(cut) voxels of cells at the surface get no strength credit (the safe floor).")
+            }
+        }
+        if obj["finish_certified"] as? Bool == false {
+            out.append("Skin: with no solid shell the engine doesn't certify this lattice yet, so it isn't accepted.")
+        }
+        return out
+    }
 }
 
 /// One clearance region's outcome (handoff 100): the face it came from, its kind,
@@ -1057,11 +1098,14 @@ public struct AppliedClearance: Equatable, Sendable {
     public let kind: TopOptKit.ClearanceKind
     public let voxelsFrozen: Int
     public let inGrid: Bool
-    public init(faceID: Int, kind: TopOptKit.ClearanceKind, voxelsFrozen: Int, inGrid: Bool) {
+    /// ★ E4 (j): the cut piece's region when the Keep clear was on a piece (`faceID` is then -1); -1 otherwise.
+    public let regionID: Int
+    public init(faceID: Int, kind: TopOptKit.ClearanceKind, voxelsFrozen: Int, inGrid: Bool, regionID: Int = -1) {
         self.faceID = faceID
         self.kind = kind
         self.voxelsFrozen = voxelsFrozen
         self.inGrid = inGrid
+        self.regionID = regionID
     }
 }
 
@@ -2496,6 +2540,19 @@ public enum TopOptKit {
         guard jobSchemaError(job("")) == nil else { return false }   // the control
         return jobSchemaError(job(#", "outer_finish": "none""#)) == nil
     }()
+    /// ★ B7 slice 2b (ruling 11-06 (1), core E2.4 5fe8e992): does the linked core take the PART's open finish,
+    /// `lattice.outer_finish: "none"`? Before E2.4 core knew only shell / skin / shell+skin and refused it. The same
+    /// one-region probe job, with the key on the lattice block.
+    public static let latticeOpenFinishWired: Bool = {
+        func job(_ extra: String) -> Data {
+            Data(latticeProbeBaseJob.replacingOccurrences(
+                of: #""output":"#,
+                with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "cell_mm": 3.0}, "lattice": {"topology": "octet", "regions": [{"role": "include", "kind": "face", "geometry": {"origin": [0, 0, 0], "normal": [0, 0, 1], "half_u_mm": 10, "half_w_mm": 10, "depth_mm": 5}}]"#
+                    + extra + #"}, "output":"#).utf8)
+        }
+        guard jobSchemaError(job("")) == nil else { return false }   // the control
+        return jobSchemaError(job(#", "outer_finish": "none""#)) == nil
+    }()
     /// The probe's document: one include face on z = 0, normal +z, with `extra` in its geometry.
     public static func regionSlotOriginProbeJob(_ extra: String) -> Data {
         var text = latticeProbeBaseJob
@@ -2664,6 +2721,19 @@ public enum TopOptKit {
         // Flexible (PR #362) H47 — gate: only a .step/.stp import that is NOT watertight (StepMeshRepair.swift).
         guard StepMeshRepair.needsRepair(path: path, mesh: mesh) else { return mesh }
         return StepMeshRepair.repaired(mesh, path: path, linearDeflectionMM: linearDeflectionMM)
+    }
+
+    /// ★ B7 (his iPad notes 11-08): the Lattice page's Sample — core's coupon for `topology` (`lattice_sample`), as triangles
+    /// with core's receipt. `cellMM` / `beadMM` <= 0 take core's defaults (8 mm, 0.42 mm). Throws core's reason.
+    public struct LatticeSampleBlock: @unchecked Sendable {
+        public let mesh: ImportedMesh
+        public let receiptJSON: String
+    }
+    public static func latticeSampleBlock(topology: String, cellMM: Double = 0, beadMM: Double = 0) throws -> LatticeSampleBlock {
+        var err = topoptbridge.BridgeError()
+        let r = topoptbridge.lattice_sample(std.string(topology), cellMM, beadMM, &err)
+        try throwIfFailed(err)
+        return LatticeSampleBlock(mesh: convert(r.mesh), receiptJSON: String(r.receipt_json))
     }
 
     /// Inspect a part file without throwing on a mesh-quality refusal: the
@@ -3065,15 +3135,27 @@ public enum TopOptKit {
         /// axis/radius/normal/extent must travel to the core. When set, `faceID`
         /// is a sentinel (`-1`) and the same distance fields above still apply.
         public let manual: ManualGeometry?
+        /// ★ E4 (j), ruling 2026-11-07 19:55: a Keep clear on a CUT PIECE names its face region (declared in the run's
+        /// region layer) instead of a face; core clears in front of the piece only (its member faces' own Keep clear,
+        /// clipped by its cuts). `faceID` is then `-1`. -1 = not a piece.
+        public let regionID: Int
         public init(faceID: Int, kind: ClearanceKind, concentricMarginMM: Double = 0,
                     axialClearanceMM: Double = 0, slabDepthMM: Double = 0,
-                    manual: ManualGeometry? = nil) {
+                    manual: ManualGeometry? = nil, regionID: Int = -1) {
             self.faceID = faceID
             self.kind = kind
             self.concentricMarginMM = concentricMarginMM
             self.axialClearanceMM = axialClearanceMM
             self.slabDepthMM = slabDepthMM
             self.manual = manual
+            self.regionID = regionID
+        }
+
+        /// ★ E4 (j): a cut piece's Keep clear, by its region.
+        public static func piece(regionID: Int, kind: ClearanceKind, concentricMarginMM: Double = 0,
+                                 axialClearanceMM: Double = 0, slabDepthMM: Double = 0) -> ClearanceSpec {
+            ClearanceSpec(faceID: -1, kind: kind, concentricMarginMM: concentricMarginMM,
+                          axialClearanceMM: axialClearanceMM, slabDepthMM: slabDepthMM, regionID: regionID)
         }
 
         /// A hand-placed swept-cylinder (bolt) keep-out, geometry supplied inline.
@@ -3271,6 +3353,11 @@ public enum TopOptKit {
             lc.clearance_half_u_mm.push_back(g.halfUMM)
             lc.clearance_half_w_mm.push_back(g.halfWMM)
         }
+        // ★ E4 (j): a Keep clear on a cut piece names its region. Emitted only when one does, so a load case with no
+        // piece Keep clear ships the POD it always did.
+        if clearances.contains(where: { $0.regionID >= 0 }) {
+            for c in clearances { lc.clearance_region_ids.push_back(Int32(c.regionID)) }
+        }
         // Handoff 124 — flatten the Face protections (preserve-skin) into the POD
         // load case: the raw face ids + the ONE global depth (mm). A depth <= 0
         // means "use the core default". Empty list → byte-identical.
@@ -3430,13 +3517,15 @@ public enum TopOptKit {
         let cKinds = Array(raw.clearance_kinds)
         let cFrozen = Array(raw.clearance_voxels_frozen)
         let cInGrid = Array(raw.clearance_in_grid)
+        let cRegions = Array(raw.clearance_region_ids)   // ★ E4 (j): a cut piece's row names its region
         var applied: [AppliedClearance] = []
         for i in 0..<cFaces.count {
             applied.append(AppliedClearance(
                 faceID: Int(cFaces[i]),
                 kind: (i < cKinds.count && cKinds[i] == 1) ? .face : .bolt,
                 voxelsFrozen: i < cFrozen.count ? Int(cFrozen[i]) : 0,
-                inGrid: i < cInGrid.count ? cInGrid[i] != 0 : false))
+                inGrid: i < cInGrid.count ? cInGrid[i] != 0 : false,
+                regionID: i < cRegions.count ? Int(cRegions[i]) : -1))
         }
         // Handoff 124 — the Face-protection diagnostics (parallel arrays), for honest results.
         let pFaces = Array(raw.protection_face_ids)

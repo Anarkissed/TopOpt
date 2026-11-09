@@ -383,9 +383,10 @@ final class LatticeFaceOutlineTests: XCTestCase {
                        "★ a diagrid skin is an open LATTICE, not a slab")
         XCTAssertEqual(LatticeBoundaryTreatment.covered.faceSkinMM(wallRingMM: 1.26), 1.26,
                        accuracy: 1e-12)
-        // And the cover is the only one that carries an outer finish to core.
+        // And the cover is the only SOLID finish sent to core. ★ RE-PINNED (B7 slice 2b, ruling 3): Skin rides on the
+        // wire as core's diagrid skin ("skin"); Rim still sends nothing (core builds no rim on a real part yet).
         XCTAssertEqual(LatticeBoundaryTreatment.covered.jobOuterFinish, "shell")
-        XCTAssertNil(LatticeBoundaryTreatment.fullSkin.jobOuterFinish)
+        XCTAssertEqual(LatticeBoundaryTreatment.fullSkin.jobOuterFinish, "skin")
         XCTAssertNil(LatticeBoundaryTreatment.rim.jobOuterFinish)
         // And the ring is the slicer's own: outer + (loops-1)·inner.
         var pp = PrintParams.fdmDefault

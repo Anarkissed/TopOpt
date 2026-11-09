@@ -98,6 +98,8 @@ enum OutcomeCodec {
         let kind: Int
         let voxelsFrozen: Int
         let inGrid: Bool
+        /// ★ E4 (j): the cut piece's region; absent for a face (and in every older blob).
+        var regionID: Int? = nil
     }
 
     // Handoff 124's per-face Face-protection outcome, mirrored for persistence so a
@@ -171,6 +173,8 @@ enum OutcomeCodec {
         // the job carried a plan; its presence IS "this job carried a plan", so a reopened plan run keeps reading
         // the plan's figures instead of the law's. Optional, so every other blob is stored byte-for-byte as before.
         var planByRegionJSON: Data? = nil
+        // ★ B7 slice 2 (ruling 3): the receipt's finish facts in words; written only when there are any.
+        var finishLines: [String]? = nil
     }
 
     struct OutcomeDTO: Codable, Sendable {
@@ -283,7 +287,8 @@ enum OutcomeCodec {
             computedRemotely: o.computedRemotely,
             appliedClearances: o.appliedClearances.map {
                 AppliedClearanceDTO(faceID: $0.faceID, kind: $0.kind.rawValue,
-                                    voxelsFrozen: $0.voxelsFrozen, inGrid: $0.inGrid) },
+                                    voxelsFrozen: $0.voxelsFrozen, inGrid: $0.inGrid,
+                                    regionID: $0.regionID >= 0 ? $0.regionID : nil) },
             appliedFaceProtections: o.appliedFaceProtections.map {
                 AppliedFaceProtectionDTO(faceID: $0.faceID, voxelsFrozen: $0.voxelsFrozen,
                                          depthVoxels: $0.depthVoxels,
@@ -319,7 +324,8 @@ enum OutcomeCodec {
                     variantFacesWithoutShape: r.variantFacesWithoutShape > 0 ? r.variantFacesWithoutShape : nil,
                     variantRegionsWithoutShape: r.variantRegionsWithoutShape.isEmpty ? nil : r.variantRegionsWithoutShape,
                     variantFaceWallsLeftOut: r.variantLegacyFaceWallsLeftOut > 0 ? r.variantLegacyFaceWallsLeftOut : nil,
-                    planByRegionJSON: r.planLaid?.rawJSON) },
+                    planByRegionJSON: r.planLaid?.rawJSON,
+                    finishLines: r.finishLines.isEmpty ? nil : r.finishLines) },
             solvedBy: o.solvedBy,
             reportJSON: o.reportJSON)
     }
@@ -378,7 +384,8 @@ enum OutcomeCodec {
             appliedClearances: (d.appliedClearances ?? []).map {
                 AppliedClearance(faceID: $0.faceID,
                                  kind: TopOptKit.ClearanceKind(rawValue: $0.kind) ?? .face,
-                                 voxelsFrozen: $0.voxelsFrozen, inGrid: $0.inGrid) },
+                                 voxelsFrozen: $0.voxelsFrozen, inGrid: $0.inGrid,
+                                 regionID: $0.regionID ?? -1) },
             appliedFaceProtections: (d.appliedFaceProtections ?? []).map {
                 AppliedFaceProtection(faceID: $0.faceID, voxelsFrozen: $0.voxelsFrozen,
                                       depthVoxels: $0.depthVoxels,
@@ -422,7 +429,8 @@ enum OutcomeCodec {
                     variantFacesWithoutShape: r.variantFacesWithoutShape ?? 0,
                     variantRegionsWithoutShape: r.variantRegionsWithoutShape ?? [],
                     variantLegacyFaceWallsLeftOut: r.variantFaceWallsLeftOut ?? 0,
-                    planLaid: r.planByRegionJSON.map { LatticeReport.PlanLaid(planByRegionJSON: $0) }) },
+                    planLaid: r.planByRegionJSON.map { LatticeReport.PlanLaid(planByRegionJSON: $0) },
+                    finishLines: r.finishLines ?? []) },
             solvedBy: d.solvedBy,
             // nil on a pre-growth blob → false → reduction, which is what it is.
             growthLadder: d.growthLadder ?? false,

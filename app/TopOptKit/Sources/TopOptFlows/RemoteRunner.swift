@@ -806,12 +806,8 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                 // LatticeRegionSpec.wireDictionary for why it is not two.
                 block["regions"] = lat.regions.map { $0.wireDictionary }
             }
-            // ★ THE SOLID COVER (maintainer, 2026-08-19). Only when the user picked
-            // **Covered**: an absent key leaves the job BYTE-IDENTICAL to one written
-            // before the option existed. Core validates it against
-            // "shell" / "skin" / "shell+skin" (core/src/cli/job.cpp:1433) and refuses
-            // the latter two unless `skin == "diagrid"`, which is why only the
-            // unambiguous "shell" is ever emitted.
+            // ★ THE OUTER FINISH (B7 slice 2b): None "none", Skin "skin" (with skin "diagrid"), Covered "shell"; absent
+            // (core's "shell") only for Rim — `LatticeBoundaryTreatment.jobOuterFinish` says why.
             if let of = lat.outerFinish { block["outer_finish"] = of }
             // ★ B6 → E2 (release (2)): Start from − and the scenario switches — set on the spec only once core takes the key
             if lat.wholePart { block["whole_part"] = true }
@@ -1020,6 +1016,9 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                             "radius_mm": m.radiusMM,
                             "half_length_mm": m.halfLengthMM,
                         ]
+                } else if c.regionID >= 0 {
+                    // ★ E4 (j): a cut piece, by its region (declared once in loads.face_regions)
+                    entry["region_id"] = c.regionID
                 } else {
                     entry["face_id"] = c.faceID
                 }

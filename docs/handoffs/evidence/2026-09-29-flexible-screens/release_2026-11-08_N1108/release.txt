@@ -1,0 +1,13 @@
+# Release 0b4794e1 — 2026-11-08 N1108 (app batch a81f5a96), app only
+# Core and worker unchanged: fingerprint db2cc34ef3fe; "fingerprint": "db2cc34ef3fe"
+# Merged onto 8b5783c9; the merged app tree equals N1108's, so the builder's tests and the reviewer's code check apply unchanged.
+# Commits:
+#   a81f5a96 His iPad notes 11-08 + B7 slice 2b: All lattice lattices the part, No lattice is cut out, the stage rebakes on its own list; each finish on the wire
+# Gates:
+#   20:18 checks ok: N1108 a81f5a96, 1 commit(s), app-only, base 8b5783c9, onto 8b5783c9, fingerprint db2cc34ef3fe
+#   20:18 merged 0b4794e1; app tree == N1108's, fingerprint db2cc34ef3fe
+#   20:18 waiting for HEAVY.lock (LatticeTypes gate rim @ 4d928a75 (build, identity, red/green), driver pid 97791 2026-11-08 20:10)
+#   21:58 lock taken
+#   22:04 iPad device build green; lock released
+#   22:04 pushed 0b4794e1
+#   22:04 worker /health "fingerprint": "db2cc34ef3fe" (unchanged, no swap)

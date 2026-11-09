@@ -138,8 +138,21 @@ bool outline_inside(const ClearanceGeometry& geom, double du, double dw) {
   return inside;
 }
 
+// ★ E4 (j): inside every clip of a cut piece (RegionCut's senses), grown by `tol` as the
+// region itself is. No clips -- every face, manual and include region -- is true.
+bool inside_clips(const ClearanceGeometry& geom, const Vec3& p, double tol) {
+  for (const ClearanceClip& c : geom.clips) {
+    const double nl = norm(c.normal);
+    if (!(nl > 0.0)) return false;
+    const double s = dot(sub(p, c.point), c.normal) / nl;
+    if (c.strict ? !(s > -tol) : !(s >= -tol)) return false;
+  }
+  return true;
+}
+
 bool region_contains(const ClearanceGeometry& geom, const Vec3& p, double tol) {
   if (!geom.valid) return false;
+  if (!inside_clips(geom, p, tol)) return false;
   // ★ THE ONE BRANCH THAT MAKES A REGION A REGION (task 2026-08-15-lattice-
   // regions §1b). A mask-backed geometry IS a voxel set: membership is the
   // lookup, and every analytic field below is unread.
@@ -275,6 +288,29 @@ ClearanceGeometry resolve_clearance_from_face(const StepModel& model, int face_i
       g.valid = true;
   }
   return g;
+}
+
+std::vector<ClearanceGeometry> resolve_clearance_from_faces(
+    const StepModel& model, const std::vector<int>& faces,
+    const std::vector<ClearanceClip>& clips, const ClearanceParams& params) {
+  std::vector<ClearanceGeometry> out;
+  for (const int f : faces) {
+    ClearanceGeometry g = resolve_clearance_from_face(model, f, params);
+    if (!g.valid) continue;
+    g.clips = clips;
+    out.push_back(std::move(g));
+  }
+  return out;
+}
+
+double largest_bore_radius_mm(const StepModel& model, const std::vector<int>& faces) {
+  double r = 0.0;
+  for (const int f : faces) {
+    if (f < 0 || f >= model.face_count) continue;
+    const StepFaceInfo& face = model.faces[static_cast<std::size_t>(f)];
+    if (face.kind == StepSurfaceKind::Cylinder) r = std::max(r, face.cylinder_radius_mm);
+  }
+  return r;
 }
 
 // ── MANUAL path: resolve the predicate from user-supplied geometry. ─────────

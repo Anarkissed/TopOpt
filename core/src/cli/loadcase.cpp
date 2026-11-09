@@ -50,14 +50,16 @@ void log_load_group(std::size_t index, std::size_t face_count, double force_mag,
 // region reached the solved grid at all. An out-of-grid region is flagged SKIP so
 // a front-end (and the device/CLI log) surfaces the silent no-op instead of
 // pretending the clearance took effect.
-void log_clearance(int face_id, ClearanceKind kind, std::size_t voxels_frozen,
-                   bool in_grid) {
+void log_clearance(int face_id, int region_id, ClearanceKind kind,
+                   std::size_t voxels_frozen, bool in_grid) {
   const LoadcaseLogFn& sink = loadcase_sink();
   if (!sink) return;
   char buf[256];
   std::snprintf(buf, sizeof(buf),
-                "[loadcase] clearance face=%d kind=%s voxels_frozen=%zu %s",
-                face_id, kind == ClearanceKind::Bolt ? "bolt" : "face",
+                "[loadcase] clearance %s=%d kind=%s voxels_frozen=%zu %s",
+                region_id >= 0 ? "region" : "face",
+                region_id >= 0 ? region_id : face_id,
+                kind == ClearanceKind::Bolt ? "bolt" : "face",
                 voxels_frozen,
                 in_grid ? "status=ok" : "SKIP=region-outside-grid");
   sink(std::string(buf));
@@ -979,12 +981,18 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // design box: every reduction run) leaves the overlay empty, as before.
   if (!lc.clearances.empty() || !lc.keep_regions.empty()) {
     long long keep_air = 0;
+    // ★ E4 (j): a cut piece's faces and cuts, from THIS load case's region layer
+    // when the caller did not fill them (run_job does, for the pre-flight's copy).
+    std::vector<ProductionLoadCase::Clearance> clearances = lc.clearances;
+    for (ProductionLoadCase::Clearance& c : clearances)
+      if (c.region_id >= 0 && c.region_faces.empty())
+        resolve_clearance_region(c, region_or_throw(c.region_id, "A Keep clear"), model);
     DesignMask overlay =
-        build_clearance_overlay(model, grid, setup.solved_grid, lc.clearances,
+        build_clearance_overlay(model, grid, setup.solved_grid, clearances,
                                 -1, &setup.clearance_reports, lc.keep_regions, &keep_air);
     if (!lc.clearances.empty() || keep_air > 0) opts.clearance_void = std::move(overlay);
     for (const ProductionRunSetup::ClearanceReport& r : setup.clearance_reports)
-      log_clearance(r.face_id, r.kind, r.voxels_frozen, r.in_grid);
+      log_clearance(r.face_id, r.region_id, r.kind, r.voxels_frozen, r.in_grid);
     if (keep_air > 0 && loadcase_sink())
       loadcase_sink()("[loadcase] protect: " + std::to_string(keep_air) +
                       " voxels kept clear (inside protected holes and in front of "
@@ -1101,6 +1109,13 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   return setup;
 }
 
+void resolve_clearance_region(ProductionLoadCase::Clearance& c,
+                              const ResolvedFaceRegion& region, const StepModel& model) {
+  c.region_faces = region.member_faces;
+  c.region_clips = region_clearance_clips(region);
+  (void)resolve_clearance_from_region(model, region, c.params);  // refuses an empty piece
+}
+
 DesignMask build_clearance_overlay(
     const StepModel& model, const VoxelGrid& part_grid,
     const VoxelGrid& solved_grid,
@@ -1125,6 +1140,22 @@ DesignMask build_clearance_overlay(
   for (std::size_t ci = 0; ci < clearances.size(); ++ci) {
     if (static_cast<int>(ci) == skip_index) continue;  // the counterfactual
     const ProductionLoadCase::Clearance& c = clearances[ci];
+    // ★ E4 (j): a cut piece is its member faces' Keep clears, clipped by its cuts --
+    // one predicate each, the same rasterizer, one report row summed over them.
+    if (c.region_id >= 0) {
+      ClearanceRasterResult sum;
+      for (const ClearanceGeometry& g :
+           resolve_clearance_from_faces(model, c.region_faces, c.region_clips, c.params)) {
+        const ClearanceRasterResult rr =
+            rasterize_clearance(solved_grid, part_grid, oi, oj, ok, g, clearance);
+        sum.voxels_frozen += rr.voxels_frozen;
+        sum.region_in_grid = sum.region_in_grid || rr.region_in_grid;
+      }
+      if (reports)
+        reports->push_back(
+            {-1, c.region_id, c.params.kind, sum.voxels_frozen, sum.region_in_grid});
+      continue;
+    }
     // An AUTO primitive is derived from model.faces[face_id] (skipped, exactly
     // as before, when the id is out of range). A MANUAL primitive carries its
     // own geometry (no B-rep face). Both resolve to the SAME predicate and take
@@ -1141,7 +1172,7 @@ DesignMask build_clearance_overlay(
         rasterize_clearance(solved_grid, part_grid, oi, oj, ok, geom, clearance);
     if (reports)
       reports->push_back(
-          {c.face_id, c.params.kind, rr.voxels_frozen, rr.region_in_grid});
+          {c.face_id, -1, c.params.kind, rr.voxels_frozen, rr.region_in_grid});
   }
   // PROTECT = the exact CAD AND nothing grows within its reach (ruling 2026-10-27
   // 03:57). Every voxel the optimizer could fill (an element of the solved grid) whose
@@ -1353,12 +1384,14 @@ std::string preflight_refusal_report(
     char buf[640];
     std::snprintf(
         buf, sizeof(buf),
-        "  VERIFIED CAUSE: clearance #%d (%s, face %d, concentric_margin %.4g "
+        "  VERIFIED CAUSE: clearance #%d (%s, %s %d, concentric_margin %.4g "
         "mm, axial_clearance %.4g mm) — with THAT ONE clearance removed the "
         "load path RECONNECTS (re-checked on the real rasterizer, not "
         "inferred).\n",
         cf.index, c.params.kind == ClearanceKind::Bolt ? "bolt" : "face",
-        c.face_id, c.params.concentric_margin_mm, c.params.axial_clearance_mm);
+        c.region_id >= 0 ? "cut piece" : "face",  // ★ E4 (j)
+        c.region_id >= 0 ? c.region_id : c.face_id, c.params.concentric_margin_mm,
+        c.params.axial_clearance_mm);
     m += buf;
     if (c.params.kind == ClearanceKind::Bolt) {
       if (cf.max_axial_clearance_mm >= 0.0) {

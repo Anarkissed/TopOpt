@@ -182,6 +182,16 @@ void rescale_part(const std::string& in_path, const std::string& out_path,
 ImportedMesh import_step(const std::string& path, double linear_deflection,
                          BridgeError& err);
 
+// ★ B7 (his iPad notes 11-08; design note 30 / R3.2): the Lattice page's SAMPLE — core's COUPON
+// (topopt::lattice_sample_mesh, shape "coupon"): the block the engine builds for `topology` and he prints, as a triangle
+// soup with core's receipt. `cell_mm` <= 0 = core's 8 mm; `bead_mm` <= 0 = core's 0.42 mm. A type core cannot generate,
+// or a cell/density it refuses, sets `err` with core's reason.
+struct LatticeSampleResult {
+  ImportedMesh mesh;
+  std::string receipt_json;
+};
+LatticeSampleResult lattice_sample(const std::string& topology, double cell_mm, double bead_mm, BridgeError& err);
+
 // Write an ImportedMesh to an STL file (core write_stl_file; binary encoding).
 // This is the M6.1 STL export path exposed to the app; 3MF export (lib3mf) is
 // wired in ROADMAP M7.9. On failure sets `err`.
@@ -432,6 +442,9 @@ struct OptimizeResult {
   std::vector<int32_t> clearance_kinds;
   std::vector<int32_t> clearance_voxels_frozen;
   std::vector<uint8_t> clearance_in_grid;
+  // ★ E4 (j): clearance_region_ids[c] >= 0 when row c is a Keep clear on a CUT PIECE
+  // (its face region; clearance_face_ids[c] is then -1), -1 for a face or a manual one.
+  std::vector<int32_t> clearance_region_ids;
 
   // Handoff 124 — what each declared Face protection actually froze, so the results
   // screen states HONESTLY that preservation was applied and to which faces (the
@@ -797,6 +810,12 @@ struct BridgeLoadCase {
   std::vector<double> clearance_margin_mm;
   std::vector<double> clearance_axial_mm;
   std::vector<double> clearance_slab_mm;
+  // ★ E4 (j), ruling 2026-11-07 19:55: a Keep clear on a CUT PIECE names its face region
+  // (one of this load case's region_ids) in clearance_region_ids[c], with
+  // clearance_face_ids[c] = -1; core clears in front of the piece only (its member
+  // faces' own Keep clear, clipped by its cuts). -1 = not a piece. EMPTY when no
+  // clearance is on a piece => byte-identical to before E4.
+  std::vector<int32_t> clearance_region_ids;
 
   // Handoff group-editing — MANUAL (user-placed) primitive geometry. The finder
   // OVER-finds and MISSES; the user hand-places a keep-out primitive that has NO
