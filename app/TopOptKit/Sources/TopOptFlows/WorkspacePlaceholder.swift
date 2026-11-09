@@ -163,6 +163,9 @@ public struct WorkspacePlaceholder: View {
     @State private var strutBakeCancel = LatticeBakeFlag()
     /// The (i) beside the preview caption: the whole banner sentence, on demand.
     @State private var latticeNoticeInfoShown = false
+    /// ★ his iPad notes 11-09: the last bake's Structural thin-wall finding, and its (i).
+    @State private var latticeThinWalls: LatticeStructuralThinWalls.Finding?
+    @State private var latticeThinWallsInfoShown = false
     /// ★ The lattice settings the strut preview was last baked FROM, with the
     /// fields a bake writes stripped (`LatticeSettings.previewBakeInputs`).
     @State private var latticeInputsLastBaked: LatticeSettings? = nil
@@ -2464,7 +2467,7 @@ public struct WorkspacePlaceholder: View {
                          marginMM: 0, axialMM: 0)
         }
         let n = SIMD3<Float>(p.axis)
-        let (u, v) = planeBasis(normal: n)
+        let (u, v) = corePlaneBasis(normal: n)   // ★ his iPad notes 11-09: core's basis, as the region
         let outline = PlaneOutline(center: SIMD3<Float>(p.center), uAxis: u, vAxis: v,
                                    halfU: Float(p.halfUMM), halfV: Float(p.halfWMM))
         return .slab(faceID: key, geometry: p.syntheticGeometry, outline: outline,
@@ -5359,6 +5362,12 @@ public struct WorkspacePlaceholder: View {
                                         // (gated like organic's: the band only when grade-to-shape is on)
                                         bandGradeMM: lat.gradingMode.fitsShape ? lat.shapeFitBandMM : 0,
                                         beadMM: beadForBake)
+            // ★ his iPad notes 11-09: the walls Structural's cell floor leaves solid, said — measured here, off main
+            let thinWalls = LatticeStructuralThinWalls.finding(
+                structural: scene.stageMode == .structural, occupancy: scene.occupancy.values,
+                memberThicknessMM: scene.memberThicknessMM, cellsPerMember: scene.minCellsPerMember,
+                smallestCellMM: lat.cellSizeMode == .fixed ? lat.cellMM
+                    : Swift.min(lat.cellMM, lat.cellMinMM > 0 ? lat.cellMinMM : lat.cellMM))
             DispatchQueue.main.async {
                 // ★ a newer bake has started: this picture is stale, drop it
                 guard bakeGeneration == strutBakeGeneration else {
@@ -5366,6 +5375,7 @@ public struct WorkspacePlaceholder: View {
                     return
                 }
                 strutScene = scene
+                latticeThinWalls = thinWalls
                 strutSceneToken += 1
                 // ★ item 5 (2026-10-05): the drawer's cell is the bake's, at the wall the bake
                 // measured — re-derive the cards once the final picture has landed
@@ -7400,6 +7410,17 @@ public struct WorkspacePlaceholder: View {
                         armLatticePreview()
                     }
                 }
+                // ★ his iPad notes 11-09: one view hides and shows EVERY face prism, on by default — Lattice Setup only, and
+                // only while there is a face prism to hide. It sets each row's eye, so a row never disagrees with it.
+                if latticeSetupUp {
+                    let prismKeys = latticeFacePrismKeys
+                    if !prismKeys.isEmpty {
+                        viewModeButton(LatticePrismsView.icon, label: LatticePrismsView.label,
+                                       on: LatticePrismsView.allShown(prismKeys, eye: latticePrismEye)) {
+                            latticePrismEye = LatticePrismsView.toggled(prismKeys, eye: latticePrismEye)
+                        }
+                    }
+                }
                 // ★★ THE STRESS VIEW, BELOW THE PREVIEW BUTTON (maintainer,
                 // 2026-08-17), and shown ONLY once there is a field to draw.
                 //
@@ -8742,6 +8763,15 @@ public struct WorkspacePlaceholder: View {
     }
 
     /// ★ B6 N2: a face's prism shows unless its row's eye hid it (his iPad 11-07, 3a: visible by default).
+    /// ★ his iPad notes 11-09: the face prisms Lattice Setup can draw — every Lattice and No-lattice face's (`latticeDrawsPrism`),
+    /// a hidden group's and the zones' boxes aside. The keys the Face prisms view sets.
+    private var latticeFacePrismKeys: [String] {
+        let zones = project.lattice.zoneGroups
+        return project.latticeDepthPlanes()
+            .filter { latticeDrawsPrism($0.groupID) && !zones.contains($0.groupID) && !project.groupView.isHidden($0.groupID) }
+            .map(\.ref.key)
+    }
+
     private func latticePrismShown(_ ref: LatticeSelectableRef) -> Bool {
         LatticeSetupHandles.prismShown(ref.key, eye: latticePrismEye, picked: latticeFacePick)
     }
@@ -9986,6 +10016,40 @@ public struct WorkspacePlaceholder: View {
                         DS.Color.strokePanel.color, lineWidth: 1)))
                 .frame(maxWidth: CGFloat(LatticePreviewBanner.noticeMaxWidthPT), alignment: .leading)
                 .accessibilityIdentifier("lattice-preview-notice")
+            }
+            // ★ his iPad notes 11-09: "there should be some kind of notice" — the walls Structural leaves solid
+            if latticePreviewBanner != nil, showStrutPreview, project.lattice.stageMode == .structural,
+               let thin = latticeThinWalls {
+                HStack(alignment: .firstTextBaseline, spacing: DS.Space.xs) {
+                    Text(thin.caption)
+                        .dsStyle(DS.TypeScale.caption2)
+                        .foregroundStyle(DS.Color.textSecondary.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button { latticeThinWallsInfoShown = true } label: {
+                        Image(systemName: "info.circle")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(DS.Color.textTertiary.color)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("About thin walls under Structural")
+                    .accessibilityIdentifier("lattice-thin-walls-info")
+                    .popover(isPresented: $latticeThinWallsInfoShown) {
+                        Text(thin.sentence)
+                            .dsStyle(DS.TypeScale.footnote)
+                            .foregroundStyle(DS.Color.textPrimary.color)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(16)
+                            .frame(maxWidth: 360)
+                    }
+                }
+                .padding(.vertical, DS.Space.xs)
+                .padding(.horizontal, DS.Space.s)
+                .background(Capsule().fill(DS.Surface.panel.color.opacity(0.9))
+                    .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+                .frame(maxWidth: CGFloat(LatticePreviewBanner.noticeMaxWidthPT), alignment: .leading)
+                .padding(.top, DS.Space.xs)
+                .background(CornerPairStyle.publish("lattice-thin-walls"))
+                .accessibilityIdentifier("lattice-thin-walls")
             }
         }
     }
