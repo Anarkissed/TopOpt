@@ -9,7 +9,8 @@ import SwiftUI
 import TopOptDesign
 
 struct DragHandle: View {
-    enum Glyph { case along, around }
+    /// ↕ along its axis, ⟲ around, or ± (★ his iPad 11-09, 3.2: a face's Expand — it grows or shrinks the prism sideways).
+    enum Glyph { case along, around, expand }
 
     /// The published frame ("handle-<key>") and accessibility id.
     let key: String
@@ -23,6 +24,8 @@ struct DragHandle: View {
     var showsValue = true
     /// Points moved along `axis` since the drag began (+ = along it); `ended` once, on release.
     let onDrag: (_ along: CGFloat, _ ended: Bool) -> Void
+    /// A second name its knob's frame is published under (the Expand handle keeps the ± knob's `latticeExpandKnob-…`).
+    var alsoPublished: String? = nil
 
     static let size: CGFloat = 44
 
@@ -38,7 +41,7 @@ struct DragHandle: View {
 
     var body: some View {
         HStack(spacing: DS.Space.s) {
-            Image(systemName: glyph == .along ? "arrow.up.and.down" : "arrow.triangle.2.circlepath")
+            Image(systemName: glyph == .along ? "arrow.up.and.down" : glyph == .expand ? "plus.forwardslash.minus" : "arrow.triangle.2.circlepath")
                 .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(DS.Color.textPrimary.color)
                 .rotationEffect(glyph == .along ? angle : .zero)
@@ -51,6 +54,7 @@ struct DragHandle: View {
                     .onChanged { onDrag(Self.along($0.translation, axis: axis), false) }
                     .onEnded { onDrag(Self.along($0.translation, axis: axis), true) })
                 .background(CornerPairStyle.publish("handle-\(key)"))
+                .background(alsoPublished.map { AnyView(CornerPairStyle.publish($0)) } ?? AnyView(EmptyView()))
                 .accessibilityLabel("Drag to change")
                 .accessibilityValue(value)
                 .accessibilityIdentifier("handle-\(key)")

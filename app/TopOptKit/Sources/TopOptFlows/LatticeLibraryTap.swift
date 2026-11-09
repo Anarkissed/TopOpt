@@ -39,4 +39,24 @@ public enum LatticeLibraryTap {
         selection.addFaces(keys, to: id)
         return id
     }
+
+    /// ★ his iPad 11-09 (1): a tapped PIECE — a face a region covers (his rounded edge strip), the edited face every stage
+    /// selects (`EditedFaces.leaf`) — by the same rules. A group that already holds it selects: the piece itself, a region it
+    /// was cut from (`lineage`, the piece's ancestors, nearest first), or the whole face under it (`faces`). A free piece
+    /// grows the open group, or starts a fresh one. Nothing moves and nothing is stolen.
+    @discardableResult
+    public static func route(piece: RegionID, lineage: [RegionID], faces: [FaceID],
+                             selection: inout SelectionModel) -> UUID? {
+        var owner: SelectionGroup?
+        for r in [piece] + lineage where owner == nil { owner = selection.group(forRegion: r) }
+        for f in faces where owner == nil { owner = selection.group(forFace: f) }
+        if let owner {
+            selection.setActive(owner.id)
+            return owner.id
+        }
+        if selection.activeGroup == nil { selection.addGroup() }
+        guard let id = selection.activeGroupID else { return nil }
+        selection.addRegions([piece], to: id)
+        return id
+    }
 }

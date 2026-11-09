@@ -25,7 +25,9 @@ extension ProjectModel {
     public var latticeList: SelectionModel {
         get {
             guard usesLatticeList else { return selection }
-            if let l = lattice.latticeList { return l }
+            // ★ his iPad 11-09 (2.2): every edit gets the project's zones as groups no sweep drops while empty (a zone is a
+            // shape: no faces, no regions) — a de-pick (`clearActive`) swept both his zones away
+            if var l = lattice.latticeList { l.keepWhenEmpty(lattice.zoneGroups); return l }
             let used = topologyGatedLatticeRoles()
             return .latticeList(adopting: selection.groups.filter { used[$0.id] != nil })
         }
@@ -59,6 +61,26 @@ extension ProjectModel {
         // ★ B6 s3a: a face never joins a zone (a zone is a shape, no faces) — with a zone picked, the tap starts its own group
         if let a = l.activeGroupID, lattice.zoneGroups.contains(a) { l.clearActive() }
         let gid = LatticeLibraryTap.route(faceID: face, loop: loop, selection: &l)
+        latticeList = l
+        syncForceGroups()
+        return gid
+    }
+
+    /// ★ his iPad 11-09 (1): a tap on Lattice Setup on a PIECE (a face a region covers — the edited face every stage selects)
+    /// grows or starts a LATTICE group with that piece, by the router's rules (`LatticeLibraryTap.route(piece:)`). Topology's
+    /// groups are never touched: his rounded edge strip "coloured, but no group was made", because the tap went to
+    /// Topology's piece picker instead, and his next taps moved it in and out of a Topology group.
+    @discardableResult
+    public func latticeStageTap(piece: RegionID) -> UUID? {
+        var l = latticeList
+        if let a = l.activeGroupID, lattice.zoneGroups.contains(a) { l.clearActive() }
+        var lineage: [RegionID] = []
+        var r = faceRegions.region(piece)?.parentID ?? -1
+        while r >= 0, !lineage.contains(r), let reg = faceRegions.region(r) {
+            lineage.append(r)
+            r = reg.parentID
+        }
+        let gid = LatticeLibraryTap.route(piece: piece, lineage: lineage, faces: surfaceResolvedFaces(piece), selection: &l)
         latticeList = l
         syncForceGroups()
         return gid

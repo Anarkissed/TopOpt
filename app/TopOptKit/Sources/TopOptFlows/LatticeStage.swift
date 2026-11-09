@@ -239,6 +239,27 @@ public enum LatticeSetupCopy {
     public static let topologyHint = "Taps go to Topology groups"
     /// ★ B6 N2: a picked face row's line, under its depth (mockup #lat-face-prism, "or drag its handle").
     public static let dragItsHandle = "Or drag its handle on the part"
+    /// ★ his iPad 11-09 (2.1, the reviewer's ruling (a) 19:21Z): what a face row says. A face of a Protect skin group says
+    /// so ("Protect skin · 4 mm") — it runs as No lattice until the engine has a per-region skin, and said "No lattice ·
+    /// 4 mm" beside a depth with no handle (his rule: Protect skin = colour, no prism). A face with no role says "—"
+    /// (its group has none yet) or "Off" (declared out); a latticed face its depth.
+    public static func faceValue(role: LatticeGroupRole?, groupHasRole: Bool, skin: Bool, mm: String) -> String {
+        guard let role else { return groupHasRole ? off : "\u{2014}" }
+        return role == .exclude ? "\(notLatticed(skin: skin)) \u{00B7} \(mm)" : mm
+    }
+
+    /// A face kept out of the lattice: "Protect skin" in a Protect skin group, else "No lattice" (its row's word and its
+    /// "This face" choice).
+    public static func notLatticed(skin: Bool) -> String { skin ? protectSkin : noLattice }
+
+    /// ★ his iPad 11-09 (3.1): a picked face row's Expand line (the number its ± handle on the part drags).
+    public static let expand = "Expand"
+    /// The ± handle's number on the part: "+2.0 mm", "−1.5 mm", "0 mm".
+    public static func expandValue(_ mm: Double) -> String {
+        let r = (mm * 10).rounded() / 10
+        if r == 0 { return "0 mm" }
+        return (r > 0 ? "+" : "\u{2212}") + SelectionsSummary.format(abs(r), decimals: 1) + " mm"
+    }
     /// ★ B6 N3: a picked zone's line, under its size (mockup #lat-zone-sel).
     public static let zoneHandlesLine = "Drag its handles on the part to size it."
     /// The join's second line (the face takes the group it joins).
