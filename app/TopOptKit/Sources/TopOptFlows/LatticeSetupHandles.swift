@@ -61,6 +61,55 @@ public enum LatticeSetupHandles {
         return p
     }
 
+    // MARK: ★ his iPad 11-09 (3.2) — where the ± handle stands, so it moves with the finger
+
+    /// How far out from the prism's end the ± handle stands at 0 on screen (LatticeSlabExpand's separation, ~1 cm).
+    public static let expandBasePT: Double = LatticeSlabExpand.knobSeparationPT
+    /// The fewest points a millimetre along the face may take for the handle to ride it (seen nearly end-on, it can't).
+    public static let expandMinPTPerMM: Double = 0.3
+
+    /// The base (mm out along the face at 0): 72 pt on screen at this zoom, never under the old 8 mm.
+    public static func expandBaseMM(ptPerMM: Double) -> Double {
+        Swift.max(8, expandBasePT / Swift.max(ptPerMM, expandMinPTPerMM))
+    }
+
+    /// The handle's offset from the prism's end along the face (mm) for an Expand of `e`: the base, then the Expand's own
+    /// millimetres beyond it; below 0 the base is shared out over the shrink, so it moves back toward the prism's end and
+    /// never through it. (It used to stand at base + |e| and be pushed to 72 pt on screen when nearer: it sat still while
+    /// the value moved, then jumped, and below 0 it ran the other way.)
+    public static func expandOffsetMM(_ e: Double, baseMM b: Double) -> Double {
+        e >= 0 ? b + e : b * Swift.max(0, 1 + e / -LatticeSlabExpand.minMM)
+    }
+
+    /// How far along the face the handle moves per mm of Expand at `e`: 1 above 0; below 0, the base shared out over the
+    /// shrink.
+    public static func expandOffsetSlope(_ e: Double, baseMM b: Double) -> Double {
+        e >= 0 ? 1 : b / -LatticeSlabExpand.minMM
+    }
+
+    /// ★ The Expand whose handle is nearest a finger's ray. The prism's far end goes deeper by the Expand too (his
+    /// 2026-09-23 rule, FaceOffsetShell), so the handle at `e` stands at `end + deep·(e − now) + along·offset(e)`, where
+    /// `end` is the prism's end with the Expand at `now`: one straight line above 0 (along + deep per mm), another below.
+    /// `ray` → its closest Expand on that path (nil when the ray runs along it).
+    public static func expandNearest(rayOrigin: SIMD3<Float>, rayDir: SIMD3<Float>, end: SIMD3<Float>, along: SIMD3<Float>,
+                                     deep: SIMD3<Float>, now: Double, baseMM b: Double) -> Double? {
+        let q = end - deep * Float(now) + along * Float(b)
+        func on(_ slope: Double) -> Double? {
+            let w = deep + along * Float(slope)
+            let l = simd_length(w)
+            guard l > 1e-6, let t = ClearanceDragMath.closestAxisParam(rayOrigin: rayOrigin, rayDir: rayDir, point: q, dir: w / l)
+            else { return nil }
+            return Double(t / l)
+        }
+        if let up = on(1), up >= 0 { return up }
+        return on(expandOffsetSlope(-1, baseMM: b)).map { Swift.max(LatticeSlabExpand.minMM, Swift.min(0, $0)) }
+    }
+
+    /// The Expand for a handle at `s` mm out along the face — `expandOffsetMM`'s inverse.
+    public static func expandMM(offsetMM s: Double, baseMM b: Double) -> Double {
+        s >= b ? s - b : -LatticeSlabExpand.minMM * (Swift.max(0, s) / b - 1)
+    }
+
     /// The widest number a handle's pill shows beside its knob ("⌀ 120.0 mm"), pt.
     public static let pillMax: CGFloat = 96
     /// The room a drawn handle takes: its 44 pt knob (middle on `p`), then its number beside it (DragHandle's HStack).
@@ -201,4 +250,9 @@ public enum LatticeSetupHandles {
     @MainActor public static var liveEmptyTap: (() -> Void)?
     /// ★ his iPad 11-08 (3, 4): the chips the page last laid out on Lattice Setup, by key, where each is drawn.
     @MainActor public static var chipSpots: [String: CGPoint] = [:]
+    /// ★ his iPad 11-09 (1): the page's tap on the part EXACTLY as the viewer makes it — its point pick first (where a piece
+    /// is told from its sibling), then the face pick if that declines. (`livePick` is the face pick alone.)
+    @MainActor public static var liveViewerTap: ((FaceID, SIMD3<Float>?) -> Void)?
+    /// ★ his iPad 11-09 (3.2): each Expand handle's TRUE point on screen ("expand-<row key>"), where its drag reads from.
+    @MainActor public static var chipTrue: [String: CGPoint] = [:]
 }

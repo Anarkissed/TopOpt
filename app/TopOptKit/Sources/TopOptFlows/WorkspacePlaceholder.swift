@@ -110,6 +110,9 @@ public struct WorkspacePlaceholder: View {
     /// ★ B6 s1b (note 28, N2): the face row opened on Lattice Setup (its key). ★ his iPad 11-08 (2): the open group is the
     /// picked one (`latticeOpenOrClose`) — the second open set the disclosure flipped is gone.
     @State private var latticeFacePick: String?
+    /// ★ his iPad 11-09 (2.5): the Selections column's foot and its panel's foot, in the window (what sits under the panel).
+    @State private var selectionsColumnMaxY: CGFloat?
+    @State private var selectionsListMaxY: CGFloat?
     /// ★ B6 N2: each face row's eye — its prism shown (true) or hidden (false); no entry: shown while its row is picked.
     @State private var latticePrismEye: [String: Bool] = [:]
     /// ★ B6 N2 / N3: the Lattice Setup handle held now — its key, and where it was and its axis when the drag began.
@@ -327,9 +330,6 @@ public struct WorkspacePlaceholder: View {
     @State private var cadFacesDrawerOpen = false
     // The expand handle currently being dragged (nil = none).
     @State private var draggingExpandPlane: String?
-    /// ★ The expand a 3D-knob drag STARTED from — held across frames because the
-    /// gesture itself is rebuilt every render. See `latticeExpandDrag`.
-    @State private var draggingExpandSeed: Double?
     /// ★ §3(b) — which group's (i) pop-up is open. One at a time, PER UNION.
     @State private var diagnosisPopoverGroup: UUID?
     /// ★ §5 — which DEPTH field has the numeric keypad open. Keyed by the row's
@@ -380,10 +380,13 @@ public struct WorkspacePlaceholder: View {
     /// The pattern tool's grid, before it is committed.
     @State private var patternColumns = 3
     @State private var patternRows = 1
+    /// ★ B8 (row 37): on a hole, the lines round it and the rings down it (PatternHole; mockup S.pa, S.pd).
+    @State private var patternAround = PatternHole.defaultAround
+    @State private var patternDown = PatternHole.defaultDown
     /// §7 — the user's own rotation of the grid, ON TOP of the automatic alignment
-    /// to the face's longest edge. Drag the knob; releases on 15°.
+    /// to the face's longest edge. ★ B8 (row 37, the reviewer's 11-09 ruling (b)): the bar's Rotate — ↺ / ↻ 15°, or
+    /// typed, 0..<360 — and 0 (square to the longest edge) on each newly tapped face.
     @State private var patternRotation: Double = 0
-    @State private var patternRotationBase: Double = 0
     /// The face the pattern tool is aimed at.
     @State private var surfacePatternFace: FaceID?
     /// The PIECE the pattern divides — the region under the tap, captured at the
@@ -924,7 +927,7 @@ public struct WorkspacePlaceholder: View {
                           onPickFace: handlePick,
                           // ★ §6 — the same tap, with its 3D point. Only the point
                           // distinguishes the two halves of a cut face.
-                          onPickPoint: { fid, pt in
+                          onPickPoint: livePickPoint({ fid, pt in
                               // ★★ WHILE THE KEY IS DRILLED INTO A COLOUR, A TAP
                               // READS THE LATTICE INSTEAD OF SELECTING (maintainer,
                               // 2026-08-19: "touching any part of the lattice
@@ -950,13 +953,20 @@ public struct WorkspacePlaceholder: View {
                                   handleSurfacePick(fid, at: pt, mesh: m)
                                   return true
                               }
+                              // ★ his iPad 11-09 (1): on the Lattice stage (its Topology panel closed) the tap is the lattice list's — the
+                              // piece under the finger when a region covers the face. It went on to Topology's piece picker below: his rounded
+                              // edge strip coloured (a Topology group), made no lattice group, and his next taps moved it in and out of that group.
+                              if stage == .lattice, !latticeTopologyOpen, latticeVariantContext == nil, force.phase == .edit {
+                                  latticeSetupTap(fid, at: pt, mesh: m)
+                                  return true
+                              }
                               // ★ ON THE TOPOLOGY PAGE, A DIVIDED FACE IS TAPPED BY
                               // THE PIECE. Its pieces are independent selections —
                               // one can join a group while its sibling stays out —
                               // and only the hit POINT can tell them apart.
                               if takeAimPick(at: pt) { return true }   // ★ B3 (note 5): "Pick on the part" aims the load
                               return handleTopologyPiecePick(fid, at: pt, mesh: m)
-                          },
+                          }),
                           // ★ Only while drilled in — the PRESENCE of this closure is
                           // what makes a tap read a strut instead of selecting a face.
                           onLatticeProbe: legendDrilledIn && flexibleMain.wantsWallProbe(latticeLegendMode)   // Flexible (PR #362) H8: the wall probe only for the lattice legend (a dent / stress tap must reach the surface)
@@ -2540,15 +2550,7 @@ public struct WorkspacePlaceholder: View {
         // stolen from a group on a lattice surface; removal lives on the TO page.
         // ★ B6 s2b (note 23c): with the Topology panel open, the tap goes on to Topology's groups (below), as on Topology
         if stage == .lattice, !latticeTopologyOpen {
-            if latticeTapOffersFaceRemove(faceID) { return }   // ★ his iPad 11-07 (1b): the × on a face the open group holds
-            let loop = project.surfaceLoopRespectingRegions(
-                FaceTopology.loop(fromFace: faceID, in: mesh), from: faceID)
-            let before = stageList.activeGroupID
-            if let gid = project.latticeStageTap(face: faceID, loop: loop) {   // ★ B6: the lattice list (LatticeList)
-                latticeDisclosure.toggle(gid.uuidString)
-                if gid != before { latticeFacePick = nil }   // ★ his iPad 11-08 (4): another group's picked face does not follow
-            }
-            refreshLatticeFaceCards()
+            latticeSetupTap(faceID, at: nil, mesh: mesh)   // ★ his iPad 11-09 (1): the piece under it, when a region covers it
             return
         }
         if showLatticePage {
@@ -6928,6 +6930,28 @@ public struct WorkspacePlaceholder: View {
         return similar.matches(in: mesh)
     }
 
+    /// ★ his iPad 11-09 (1): a tap on the Lattice stage with its Topology panel closed — into the LATTICE list, never
+    /// Topology's: the edited face under it (`EditedFaces.leaf`, the one resolver every stage selects with) — a piece when
+    /// a region covers the face, else the face with its loop. The × on a face the open group holds comes first, as before.
+    private func latticeSetupTap(_ faceID: FaceID, at point: SIMD3<Float>?, mesh: ViewerMesh) {
+        let leaf = EditedFaces.leaf(face: faceID, point: point.map { SIMD3<Double>($0) }, mesh: mesh,
+                                    regions: project.faceRegions, fallback: project.surfaceCutTarget(face: faceID))
+        if latticeTapOffersFaceRemove(faceID, leaf: leaf) { return }   // ★ his iPad 11-07 (1b): the × on a face the open group holds
+        let before = stageList.activeGroupID
+        let gid: UUID?
+        if case .region(let piece) = leaf {
+            gid = project.latticeStageTap(piece: piece)
+        } else {
+            let loop = project.surfaceLoopRespectingRegions(FaceTopology.loop(fromFace: faceID, in: mesh), from: faceID)
+            gid = project.latticeStageTap(face: faceID, loop: loop)   // ★ B6: the lattice list (LatticeList)
+        }
+        if let gid {
+            latticeDisclosure.toggle(gid.uuidString)
+            if gid != before { latticeFacePick = nil }   // ★ his iPad 11-08 (4): another group's picked face does not follow
+        }
+        refreshLatticeFaceCards()
+    }
+
     /// ★ THE TOPOLOGY PAGE'S TAP ON A DIVIDED FACE (maintainer, 2026-08-15: "I want
     /// to be able to go *back* to the TO page and deselect any face that I have cut
     /// up as its own piece, removing it from the Group. I would also like to be able
@@ -7140,6 +7164,7 @@ public struct WorkspacePlaceholder: View {
             surfaceSelectedFace = nil
 
         case .pattern:
+            if surfacePatternFace != faceID { patternRotation = 0 }   // ★ B8 (11-09 ruling (b)): starts square to its longest edge
             surfacePatternFace = faceID
             surfacePatternPiece = surfaceSelected
 
@@ -7273,10 +7298,29 @@ public struct WorkspacePlaceholder: View {
     private var surfacePatternPreview: (cells: [FaceRegionGeometry.GridCell],
                                         verdict: SliverVerdict)? {
         guard let f = surfacePatternFace else { return nil }
+        // ★ B8 (row 37): a hole's grid hangs on its own axis — n around, m down the hole
+        if surfacePatternBore != nil {
+            return project.surfacePatternPreview(face: f, around: patternAround, down: patternDown, piece: surfacePatternPiece)
+        }
         return project.surfacePatternPreview(face: f, columns: patternColumns,
                                              rows: patternRows,
                                              rotationDegrees: patternRotation,
                                              piece: surfacePatternPiece)
+    }
+
+    /// ★ B8 (row 37): the bore the Pattern tool is aimed at, when the tapped face is a hole (nil: today's grid).
+    private var surfacePatternBore: PatternHole.Bore? {
+        guard let f = surfacePatternFace else { return nil }
+        return project.surfacePatternBore(face: f, piece: surfacePatternPiece)
+    }
+
+    /// ★ B8 (row 37): the Pattern bar's line — nil when ✓ splits it; "nothing to cut"; how many pieces the face can hold;
+    /// or the grid's own reason (a curve's arc too wide for a plane cut).
+    private func patternRefusal(_ p: (cells: [FaceRegionGeometry.GridCell], verdict: SliverVerdict)?) -> String? {
+        guard let p else { return PatternHole.nothingToCut }
+        if p.verdict.ok { return nil }
+        if p.verdict.reason == PatternHole.nothingToCut || p.verdict.memberVoxels == 0 { return p.verdict.reason }
+        return PatternBarCopy.fits(p.verdict.maxCellsBudget)
     }
 
     // MARK: ★ VIEW MODE — the wireframe and its x-ray, on every stage that has them
@@ -8100,77 +8144,57 @@ public struct WorkspacePlaceholder: View {
                     }
 
                 case .pattern:
-                    if surfacePatternFace != nil {
-                        surfaceClusterButton("xmark", tint: DS.Color.textSecondary) {
-                            surfacePatternFace = nil
-                            surfacePatternPiece = nil
-                        }
-                        // ★ §7 — COLUMNS x ROWS, with the SLIVER VERDICT on the
-                        // confirm. The guard is priced at the run's own voxel
-                        // spacing, so the panel refuses with the number the run
-                        // would, and the confirm is simply not tappable when it does.
-                        surfaceClusterStepper("col", value: $patternColumns)
-                        surfaceClusterStepper("row", value: $patternRows)
-                        // ★ §7 — TURN THE GRID. The automatic alignment is the
-                        // face's longest straight edge; this is the override for
-                        // when that is not the axis you meant.
-                        ZStack {
-                            Circle().fill(DS.Color.chipSolid.color)
-                                .overlay(Circle().strokeBorder(
-                                    DS.Color.textPrimary.opacity(0.22).color, lineWidth: 1))
-                            VStack(spacing: 0) {
-                                Image(systemName: "rotate.3d")
-                                    .font(.system(size: 13, weight: .bold))
-                                    .foregroundStyle(DS.Color.textPrimary.color)
-                                Text("\(Int(patternRotation))°")
-                                    .dsStyle(DS.TypeScale.caption)
-                                    .foregroundStyle(DS.Color.textTertiary.color)
-                                    .monospacedDigit()
-                            }
-                        }
-                        .frame(width: 52, height: 52)
-                        .gesture(
-                            DragGesture(minimumDistance: 2)
-                                .onChanged { g in
-                                    // ★ FOLDED AS IT TURNS. A grid is symmetric
-                                    // every 90°, so an accumulating raw drag shows
-                                    // meaningless numbers (−405° on his screen) for
-                                    // grids already named inside one quarter-turn.
-                                    patternRotation = SurfacePatternAxis.foldAngle(
-                                        patternRotationBase
-                                            + Double(g.translation.width) * 0.5)
-                                }
-                                .onEnded { _ in
-                                    patternRotation = SurfacePatternAxis.foldAngle(
-                                        SurfaceCut.snap(patternRotation))
-                                    patternRotationBase = patternRotation
-                                }
-                        )
+                    if let face = surfacePatternFace {
+                        // ★ B8 (row 37, N1, P5; mockup #cut-pattern; the reviewer's 11-09 18:31Z ruling (b)): ONE bar. On a
+                        // hole ✕ │ − n around + │ − n down the hole + │ ✓ (its lines hang on its own axis); on any other face
+                        // ✕ │ − n along + │ − n across + │ Rotate ↺ n° ↻ │ ✓ — the grid square to the face's longest straight
+                        // edge at 0° (his 08-16 arc grid on a curve, no plane question). Every count is cut lines, from 0;
+                        // the confirm waits, with the bar's line, while the run could not hold the pieces (§7's sliver
+                        // verdict, priced at the run's own voxel spacing).
+                        let hole = surfacePatternBore != nil
+                        // Rotate turns a FLAT face's straight grid; a curve's arc grid follows its bend (no Rotate)
+                        let turns = !hole && project.surfacePatternIsFlat(face: face)
                         let preview = surfacePatternPreview
-                        surfaceClusterLabel(preview.map {
-                            $0.verdict.ok ? "\($0.cells.count) pieces" : $0.verdict.reason
-                        } ?? "—", warn: preview.map { !$0.verdict.ok } ?? false)
-                        surfaceClusterConfirm(enabled: preview?.verdict.ok ?? false) {
-                            guard let face = surfacePatternFace else { return }
-                            // ★ ACROSS EVERY CARRIED FACE — same grid, each in its
-                            // own frame. A face the grid does not fit is skipped
-                            // rather than failing the batch.
-                            let kids = surfaceCarried.count > 1
-                                ? project.commitSurfacePattern(
-                                    faces: surfaceCarried, columns: patternColumns,
-                                    rows: patternRows, rotationDegrees: patternRotation)
-                                : project.commitSurfacePattern(
-                                    face: face, columns: patternColumns, rows: patternRows,
-                                    rotationDegrees: patternRotation,
-                                    piece: surfacePatternPiece)
-                            if surfaceCarried.count > 1 {
-                                model.toast = "Patterned \(surfaceCarried.count) faces."
-                            }
-                            surfaceCarried = []
-                            surfaceSelected = kids.first
-                            surfacePatternFace = nil
-                            surfacePatternPiece = nil
-                        }
+                        PatternBar(
+                            counts: hole
+                                ? [.init(word: PatternBarCopy.around, key: "patternAround", value: patternAround,
+                                         range: PatternHole.aroundRange) { patternAround = $0 },
+                                   .init(word: PatternBarCopy.downTheHole, key: "patternDown", value: patternDown,
+                                         range: PatternHole.downRange) { patternDown = $0 }]
+                                : [.init(word: PatternBarCopy.along, key: "patternAlong",
+                                         value: PatternGrid.lines(pieces: patternColumns),
+                                         range: PatternGrid.linesRange) { patternColumns = PatternGrid.pieces(lines: $0) },
+                                   .init(word: PatternBarCopy.across, key: "patternAcross",
+                                         value: PatternGrid.lines(pieces: patternRows),
+                                         range: PatternGrid.linesRange) { patternRows = PatternGrid.pieces(lines: $0) }],
+                            rotate: turns ? (patternRotation, { patternRotation = PatternGrid.rotation($0) }) : nil,
+                            refusal: patternRefusal(preview),
+                            cancel: { surfacePatternFace = nil; surfacePatternPiece = nil },
+                            confirm: {
+                                // ★ ACROSS EVERY CARRIED FACE (Select similar) — each in its own frame, a hole on its own
+                                // axis; a face the pattern does not fit is skipped rather than failing the batch.
+                                let many = surfaceCarried.count > 1
+                                let kids: [RegionID]
+                                if hole {
+                                    kids = many
+                                        ? project.commitSurfacePattern(faces: surfaceCarried, around: patternAround,
+                                                                       down: patternDown)
+                                        : project.commitSurfacePattern(face: face, around: patternAround,
+                                                                       down: patternDown, piece: surfacePatternPiece)
+                                } else {
+                                    kids = many
+                                        ? project.commitSurfacePattern(faces: surfaceCarried, columns: patternColumns,
+                                                                       rows: patternRows, rotationDegrees: patternRotation)
+                                        : project.commitSurfacePattern(face: face, columns: patternColumns, rows: patternRows,
+                                                                       rotationDegrees: patternRotation,
+                                                                       piece: surfacePatternPiece)
+                                }
+                                if many { model.toast = "Patterned \(surfaceCarried.count) faces." }
+                                surfaceCarried = []
+                                surfaceSelected = kids.first
+                                surfacePatternFace = nil
+                                surfacePatternPiece = nil
+                            })
                     }
 
                 case .region:
@@ -8259,7 +8283,13 @@ public struct WorkspacePlaceholder: View {
     private var surfaceDocksCluster: Bool { false }
 
     /// How far the cluster's middle keeps from the screen's sides: the Cut bar (✕ │ Tilt │ Rotate │ mm │ ✓) is the widest.
-    private var surfaceClusterHalfWidth: CGFloat { surfaceTool == .cut && cutAim != nil ? 330 : 200 }
+    private var surfaceClusterHalfWidth: CGFloat {
+        if surfaceTool == .cut && cutAim != nil { return 330 }
+        // ★ B8: the Pattern bar — a hole's (✕ │ n around │ n down the hole │ ✓, 675 pt measured) and a flat face's (+ Rotate,
+        // ≤ 720 pt): whole on an 11" iPad upright (820 pt) either way. (300 put the hole's 31 pt off its left edge.)
+        if surfaceTool == .pattern && surfacePatternFace != nil { return 360 }
+        return 200
+    }
 
     /// Where the cluster floats: the point the armed tool is aimed at.
     private func surfaceActionAnchor(_ proj: CameraProjection) -> CGPoint? {
@@ -8399,46 +8429,6 @@ public struct WorkspacePlaceholder: View {
             .background(Capsule().fill(DS.Color.chipSolid.color)
                 .overlay(Capsule().strokeBorder(
                     DS.Color.textPrimary.opacity(0.22).color, lineWidth: 1)))
-    }
-
-    /// A −/+ pair with its number, for the pattern grid. Typed entry is the
-    /// Regions sheet's job; here the values are 1..12 and a stepper is the faster
-    /// control at that range.
-    private func surfaceClusterStepper(_ label: String,
-                                       value: Binding<Int>) -> some View {
-        HStack(spacing: 2) {
-            Button { value.wrappedValue = max(1, value.wrappedValue - 1) } label: {
-                // ★ THE WHOLE 44 pt IS THE TARGET, NOT THE GLYPH. A bare `Image`
-                // in a button is hit-tested on its DRAWN pixels — an 11 pt minus
-                // sign is a ~10 pt target however large the frame around it, which
-                // is why these could not be pressed. `contentShape` makes the frame
-                // the target, and 44 is Apple's minimum.
-                Image(systemName: "minus").font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .frame(width: 44, height: 52)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            VStack(spacing: -2) {
-                Text("\(value.wrappedValue)")
-                    .dsStyle(DS.TypeScale.footnote)
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .monospacedDigit()
-                Text(label)
-                    .dsStyle(DS.TypeScale.caption)
-                    .foregroundStyle(DS.Color.textQuaternary.color)
-            }
-            Button { value.wrappedValue = min(12, value.wrappedValue + 1) } label: {
-                Image(systemName: "plus").font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .frame(width: 44, height: 52)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        }
-        .background(Capsule().fill(DS.Color.chipSolid.color)
-            .overlay(Capsule().strokeBorder(
-                DS.Color.textPrimary.opacity(0.22).color, lineWidth: 1)))
     }
 
     /// The held cut's angle, snapped, wrapped into 0..<360.
@@ -8776,7 +8766,7 @@ public struct WorkspacePlaceholder: View {
             if let proj = projection {
                 let zones = project.lattice.zoneGroups
                 let spots = latticeChipSpots(proj)   // ★ his iPad 11-08 (3): clear space between every chip (Lattice Setup)
-                let _ = recordLatticeChips(spots)
+                let _ = recordLatticeChips(spots, proj)
                 ForEach(project.latticeDepthPlanes().filter { latticeDrawsPrism($0.groupID) }) { plane in   // ★ his iPad 11-07
                     // ★ HIDDEN ⇒ NOT DRAWN; LOCKED ⇒ NOT GRABBABLE.
                     // ★ his iPad 11-07 (1a): "only the ± EXPAND knobs show … NO depth handle at a prism's end" — every shown
@@ -8799,34 +8789,19 @@ public struct WorkspacePlaceholder: View {
                     // ★ B6: only on a prism that is drawn, and never on a zone (a zone's region takes no expand).
                     if !zones.contains(plane.groupID), latticePrismShown(plane.ref),
                        latticeExpandHandleIsVisible(plane),
-                       let world = latticeExpandAnchor(plane),
-                       let raw = proj.project(settledWorld(world)) {
-                        // ★ AND THEN PUSHED CLEAR OF THE DEPTH KNOB IN SCREEN
-                        // SPACE. The millimetre offset makes the knob ride out
-                        // with the value; this makes the two never touch at any
-                        // zoom, which a millimetre offset cannot promise.
-                        let ex = proj.project(settledWorld(plane.handle.anchor))
-                            .map { LatticeSlabExpand.separated(knob: raw, from: $0) }
-                            ?? raw
+                       let ex = latticeExpandSpot(proj, plane) {
                         // ★ B6 (his 11-06 shots: on the 11" portrait it sat on the Role row's lock): like the handles, never
                         // under the page's own UI nor on the picked prism's handle and its number — slid along its own drag
-                        // line (sideways: the drag reads the finger's sideways travel only, so the number never jumps)
+                        // line
                         let depthRoom = latticeDepthHandleShows(plane)
                             ? latticePrismHandleSpot(proj, plane).map {
                                 [LatticeSetupHandles.footprint(LatticeSetupHandles.placed($0.at, axis: $0.axis, keepOut: bandChipKeepOut),
                                                                pill: plane.ref.key == latticeFacePick)]
                             } ?? [] : []
+                        let axis = latticeExpandAxis(proj, plane)
                         let expandAt = spots["expand-\(plane.ref.key)"]
-                            ?? LatticeSetupHandles.placed(ex, axis: CGVector(dx: 1, dy: 0), keepOut: bandChipKeepOut + depthRoom)
-                        latticeExpandKnob(
-                            active: draggingExpandPlane == plane.id,
-                            sense: LatticeSlabExpand.sense(
-                                project.latticeExpandMM(plane.ref)))
-                            .frame(width: 44, height: 44)
-                            .contentShape(Circle())
-                            .background(DSParts.publish("latticeExpandKnob-\(plane.ref.key)"))
-                            .gesture(latticeExpandDrag(plane))
-                            .position(expandAt)   // ★ B6: placed
+                            ?? LatticeSetupHandles.placed(ex, axis: axis, keepOut: bandChipKeepOut + depthRoom)
+                        latticeExpandHandle(proj, plane, at: ex, axis: axis, shownAt: expandAt)
                     }
                 }
                 // ★ B6 N3: a picked zone's sides — a Box's width, depth and height, a Cylinder's across and height
@@ -8895,7 +8870,11 @@ public struct WorkspacePlaceholder: View {
                 chips.append(.init(key: key, at: s.at, axis: s.axis, shape: .init(size: DragHandle.size, pill: pill)))
             }
             if let ex = latticeExpandSpot(proj, plane) {
-                chips.append(.init(key: "expand-\(plane.ref.key)", at: ex, axis: CGVector(dx: 1, dy: 0), shape: .init(size: 44)))
+                // ★ his iPad 11-09 (3.2): the one DragHandle — slid along its own line, its number beside it when picked
+                let key = "expand-\(plane.ref.key)"
+                chips.append(.init(key: key, at: ex, axis: latticeExpandAxis(proj, plane),
+                                   shape: .init(size: DragHandle.size,
+                                                pill: plane.ref.key == latticeFacePick || latticeHandleDrag?.key == key)))
             }
         }
         if case .zone(let z) = latticeChipScope, !project.groupView.isHidden(z), project.groupView.canEdit(z) {
@@ -8927,15 +8906,101 @@ public struct WorkspacePlaceholder: View {
         }
     }
 
-    /// Test hook: the chips the page laid out last (LatticeSetupHandles.chipSpots).
-    private func recordLatticeChips(_ spots: [String: CGPoint]) {
-        if LatticeSetupHandles.recordLive { LatticeSetupHandles.chipSpots = spots }
+    /// Test hook: the chips the page laid out last (LatticeSetupHandles.chipSpots), and the Expand handles' true points.
+    private func recordLatticeChips(_ spots: [String: CGPoint], _ proj: CameraProjection) {
+        guard LatticeSetupHandles.recordLive else { return }
+        LatticeSetupHandles.chipSpots = spots
+        var truth: [String: CGPoint] = [:]
+        for plane in project.latticeDepthPlanes() {
+            if let ex = latticeExpandSpot(proj, plane) { truth["expand-\(plane.ref.key)"] = ex }
+        }
+        LatticeSetupHandles.chipTrue = truth
     }
 
-    /// The ± knob's true point on screen: out along the face at its expanded edge, pushed clear of the prism's end.
+    /// The ± knob's true point on screen. ★ his iPad 11-09 (3.2): out along the face from the prism's end by
+    /// `LatticeSetupHandles.expandOffsetMM` (72 pt at 0, then the Expand's own millimetres), so it moves exactly with the
+    /// value; seen nearly end-on (no room along the face on screen), today's point pushed clear of the prism's end.
     private func latticeExpandSpot(_ proj: CameraProjection, _ plane: ProjectModel.LatticeDepthPlane) -> CGPoint? {
+        if let line = latticeExpandLine(plane), let b = latticeExpandBaseMM(proj, line) {
+            let s = LatticeSetupHandles.expandOffsetMM(project.latticeExpandMM(plane.ref), baseMM: b)
+            return proj.project(line.from + line.dir * Float(s))
+        }
         guard let world = latticeExpandAnchor(plane), let raw = proj.project(settledWorld(world)) else { return nil }
         return proj.project(settledWorld(plane.handle.anchor)).map { LatticeSlabExpand.separated(knob: raw, from: $0) } ?? raw
+    }
+
+    /// ★ 11-09 (3.2): the handle's base along the face at this zoom (mm), or nil when a millimetre along it is too short
+    /// on screen to ride.
+    private func latticeExpandBaseMM(_ proj: CameraProjection, _ line: (from: SIMD3<Float>, dir: SIMD3<Float>)) -> Double? {
+        guard let a = proj.project(line.from), let b = proj.project(line.from + line.dir * 10) else { return nil }
+        let ptPerMM = Double(hypot(b.x - a.x, b.y - a.y)) / 10
+        return ptPerMM >= LatticeSetupHandles.expandMinPTPerMM ? LatticeSetupHandles.expandBaseMM(ptPerMM: ptPerMM) : nil
+    }
+
+    /// ★ his iPad 11-09 (3.2): the face's own direction the ± knob moves along as the Expand grows (window space, unit), and
+    /// where on the part it starts from (the prism's end).
+    private func latticeExpandLine(_ plane: ProjectModel.LatticeDepthPlane) -> (from: SIMD3<Float>, dir: SIMD3<Float>)? {
+        guard let world = latticeExpandAnchor(plane) else { return nil }
+        let from = settledWorld(plane.handle.anchor), d = settledWorld(world) - from
+        let l = simd_length(d)
+        guard l > 1e-6, l.isFinite else { return nil }
+        return (from, d / l)
+    }
+
+    /// That direction on screen — the line the handle is dragged along.
+    /// The way the handle moves on screen as its Expand grows: along the face, and deeper by as much (the prism's far end
+    /// goes deeper by the Expand, his 09-23 rule) — the line the finger drags it along.
+    private func latticeExpandAxis(_ proj: CameraProjection, _ plane: ProjectModel.LatticeDepthPlane) -> CGVector {
+        guard let line = latticeExpandLine(plane) else { return CGVector(dx: 1, dy: 0) }
+        let e = project.latticeExpandMM(plane.ref)
+        guard let b = latticeExpandBaseMM(proj, line) else {
+            return LatticeSetupHandles.screenAxis(from: proj.project(line.from), to: proj.project(line.from + line.dir * 10))
+        }
+        let knob = line.from + line.dir * Float(LatticeSetupHandles.expandOffsetMM(e, baseMM: b))
+        let way = latticeExpandDeep(plane) + line.dir * Float(LatticeSetupHandles.expandOffsetSlope(e, baseMM: b))
+        let l = simd_length(way)
+        return LatticeSetupHandles.screenAxis(from: proj.project(knob), to: proj.project(knob + (l > 1e-6 ? way / l : line.dir) * 10))
+    }
+
+    /// The prism's depth direction on the part (into it, settled, unit).
+    private func latticeExpandDeep(_ plane: ProjectModel.LatticeDepthPlane) -> SIMD3<Float> {
+        let n = settleQuat.act(plane.handle.planeNormal)
+        let l = simd_length(n)
+        return l > 1e-6 ? n / l : .zero
+    }
+
+    /// ★ his iPad 11-09 (3.2): "the Expand chip is barely visible and VERY hard to drag". It was a 22 pt frost dot, dragged by
+    /// the finger's sideways travel only (0.05 mm a point), while the dot itself ran out along the face — away from the finger
+    /// whenever the face did not run sideways on screen. It is the one DragHandle now (design-system §4.24, as the prism's
+    /// end) with ± on it and its number beside it when its face is picked, dragged along the line it moves on, at the part's
+    /// own scale: the Expand changes by the millimetres the finger travels along the face.
+    @ViewBuilder private func latticeExpandHandle(_ proj: CameraProjection, _ plane: ProjectModel.LatticeDepthPlane,
+                                                  at: CGPoint, axis: CGVector, shownAt: CGPoint) -> some View {
+        let ref = plane.ref
+        let key = "expand-\(ref.key)"
+        let mm = project.latticeExpandMM(ref)
+        if let line = latticeExpandLine(plane) {
+            latticeSetupHandle(key, at: at, axis: axis, value: LatticeSetupCopy.expandValue(mm),
+                               showsValue: ref.key == latticeFacePick || latticeHandleDrag?.key == key,
+                               shownAt: shownAt, glyph: .expand, alsoPublished: "latticeExpandKnob-\(ref.key)",
+                               apply: { finger in
+                                   guard let proj = projection, let r = proj.ray(throughViewPoint: finger) else { return }
+                                   draggingExpandPlane = plane.id
+                                   // the Expand whose handle is under the finger, on the path the handle takes (along the
+                                   // face and deeper by as much), from where it stands now
+                                   let b = latticeExpandBaseMM(proj, line) ?? 8
+                                   guard let e = LatticeSetupHandles.expandNearest(rayOrigin: r.origin, rayDir: r.dir, end: line.from,
+                                                                                    along: line.dir, deep: latticeExpandDeep(plane),
+                                                                                    now: mm, baseMM: b) else { return }
+                                   project.writeLatticeExpandMM(ref, mm: e)
+                               },
+                               end: {
+                                   draggingExpandPlane = nil
+                                   refreshLatticeFaceCards()
+                                   // The expand moves the region the preview is clipped to: rebaked once, as it settles.
+                                   if showStrutPreview { buildStrutScene() }
+                               })
+        }
     }
 
     /// ★ B6 N2: a face's prism shows unless its row's eye hid it (his iPad 11-07, 3a: visible by default).
@@ -9015,7 +9080,7 @@ public struct WorkspacePlaceholder: View {
     /// the handle moves under the finger while the page redraws); `end` runs once, on release. While it is held the
     /// preview's bake waits (`draggingDepthPlane`, as the old knob's drag did).
     private func latticeSetupHandle(_ key: String, at p: CGPoint, axis: CGVector, value: String, showsValue: Bool = true,
-                                    shownAt: CGPoint? = nil,
+                                    shownAt: CGPoint? = nil, glyph: DragHandle.Glyph = .along, alsoPublished: String? = nil,
                                     apply: @escaping (CGPoint) -> Void, end: @escaping () -> Void) -> some View {
         let drag: (CGFloat, Bool) -> Void = { along, ended in
             let s: LatticeSetupHandles.DragStart
@@ -9038,7 +9103,10 @@ public struct WorkspacePlaceholder: View {
         // keep-out list) — ★ his iPad 11-08 (3): and of every other chip (`shownAt`, latticeChipSpots); the drag above
         // still reads the true point `p`
         return Color.clear.frame(width: DragHandle.size, height: DragHandle.size)
-            .overlay(alignment: .leading) { DragHandle(key: key, axis: axis, value: value, showsValue: showsValue, onDrag: drag).fixedSize() }
+            .overlay(alignment: .leading) {
+                DragHandle(key: key, axis: axis, glyph: glyph, value: value, showsValue: showsValue, onDrag: drag,
+                           alsoPublished: alsoPublished).fixedSize()
+            }
             .position(shownAt ?? LatticeSetupHandles.placed(p, axis: axis, keepOut: bandChipKeepOut))
     }
 
@@ -9074,6 +9142,13 @@ public struct WorkspacePlaceholder: View {
         }
     }
 
+    /// Test hook (★ his iPad 11-09 (1)): the 3D view's tap exactly as the viewer makes it — this point pick first, the face
+    /// pick if it declines (MetalMeshView) — so a hosted test taps through the very closure the viewer was handed.
+    private func livePickPoint(_ pick: @escaping (FaceID, SIMD3<Float>?) -> Bool) -> (FaceID, SIMD3<Float>?) -> Bool {
+        if LatticeSetupHandles.recordLive { LatticeSetupHandles.liveViewerTap = { f, pt in if !pick(f, pt) { handlePick(f) } } }
+        return pick
+    }
+
     /// Test hook: the page's face tap, as the viewer's pick calls it (a click offscreen never reaches the 3D view).
     private func recordLivePick() {
         if LatticeSetupHandles.recordLive {
@@ -9085,10 +9160,10 @@ public struct WorkspacePlaceholder: View {
     /// ★ his iPad 11-07 (1b): "tap a prism → an × pops up on it → tapping the × removes that face from the group" — a tap on
     /// a face the OPEN group holds puts the × on it (a second tap takes it away) and the tap goes no further; any other tap
     /// clears the × and goes on to the lattice list.
-    private func latticeTapOffersFaceRemove(_ faceID: FaceID) -> Bool {
+    private func latticeTapOffersFaceRemove(_ faceID: FaceID, leaf: EditedFace.ID) -> Bool {
         if latticeSetupUp, let a = stageList.activeGroupID, !project.lattice.zoneGroups.contains(a),
            let g = project.latticeGroups.first(where: { $0.id == a }),
-           let ref = project.latticeSelectableRefs(g).first(where: { latticeRef($0, holds: faceID) }) {
+           let ref = project.latticeSelectableRefs(g).first(where: { latticeRef($0, holds: faceID, leaf: leaf) }) {
             latticeFaceRemoveAsk = latticeFaceRemoveAsk?.ref == ref.key ? nil : (ref.key, faceID)
             return true
         }
@@ -9096,11 +9171,13 @@ public struct WorkspacePlaceholder: View {
         return false
     }
 
-    /// Whether a lattice row's face or piece holds the tapped face.
-    private func latticeRef(_ ref: LatticeSelectableRef, holds face: FaceID) -> Bool {
+    /// Whether a lattice row's face or piece holds the tapped face — ★ his iPad 11-09 (1): on a piece, that piece (or the
+    /// whole face under it); a sibling piece of the same face is another row.
+    private func latticeRef(_ ref: LatticeSelectableRef, holds face: FaceID, leaf: EditedFace.ID) -> Bool {
         switch ref {
         case .face(_, let f): return f == face
         case .region(_, let rid):
+            if case .region(let piece) = leaf { return rid == piece }
             guard let mesh = viewerMesh, let r = project.faceRegions.region(rid) else { return false }
             return FaceRegionGeometry.members(of: r, in: mesh).contains(face)
         default: return false
@@ -9211,71 +9288,6 @@ public struct WorkspacePlaceholder: View {
     /// How far out the knob sits when the expand is 0, so it is never buried in
     /// the depth knob.
     static let latticeExpandKnobBaseMM: Float = 8
-
-    /// ★ THE KNOB SAYS WHICH WAY IT IS POINTING (maintainer, 2026-08-17: "change
-    /// the expansion handle icon to '+/-' when it is pushed up … '+' … '-'"). It
-    /// wore one double arrow, which said "this drags" and nothing else; it now
-    /// reads the value's own `Sense`, so the sign is legible without opening the
-    /// drawer — and the moment it flips is the moment the detent catches.
-    private func latticeExpandKnob(active: Bool,
-                                   sense: LatticeSlabExpand.Sense) -> some View {
-        let tint = LiquidGlass.Tint.frost(
-            LatticeDensityProxy.densityColor(fraction: 0.25),
-            intensity: active ? 0.85 : 0.55)
-        let size: CGFloat = active ? 26 : 22
-        return Image(systemName: sense.symbolName)
-            .font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
-            .frame(width: size, height: size)
-            .liquidGlass(tint, in: Circle(), specular: active ? 1.3 : 1)
-            .contentShape(Circle().inset(by: -12))
-    }
-
-    /// ★ DRAG THE EXPANSION. Horizontal drag in screen space, at the same
-    /// 0.05 mm-per-point scrub the depth chip uses, so the two controls feel the
-    /// same in the hand. The number in the drawer and the handle are ONE value —
-    /// both write `writeLatticeExpandMM`.
-    /// ★★ THE SEED IS HELD ACROSS FRAMES, AND THAT IS THE BUG HE HIT (maintainer,
-    /// 2026-08-17: "I am unable to use the handle to get a positive expansion").
-    ///
-    /// ★ SwiftUI REBUILDS THIS GESTURE ON EVERY BODY EVALUATION, so a `seed`
-    /// captured at construction time is re-read from the model every frame —
-    /// while `translation.width` keeps measuring from where the finger STARTED.
-    /// The two compound: each frame adds the whole accumulated translation to an
-    /// already-moved value, so the number runs away exponentially and slams into
-    /// whichever bound the first pixel of travel pointed at. That is why his
-    /// drags only ever produced −50 mm and −25.6 mm, and why "positive" was
-    /// unreachable — one pixel of leftward jitter decided the sign.
-    ///
-    /// ★ I HAD ALREADY FIXED THIS CLASS ONCE IN THIS TASK, for the drawer scrub
-    /// (`latticeRowScrubSeed`), and left the 3D knob on the broken pattern. Both
-    /// hold the seed in `@State` now, which is the only place that survives a
-    /// re-render.
-    private func latticeExpandDrag(_ plane: ProjectModel.LatticeDepthPlane)
-        -> some Gesture {
-        let ref = plane.ref
-        let current = project.latticeExpandMM(ref)
-        return DragGesture(minimumDistance: 1,
-                           coordinateSpace: CoordinateSpace.named(Self.clearanceStageSpace))
-            .onChanged { v in
-                if draggingExpandPlane != plane.id {
-                    draggingExpandPlane = plane.id
-                    ClearanceHaptics.grab()
-                }
-                let seed = draggingExpandSeed ?? current
-                if draggingExpandSeed == nil { draggingExpandSeed = current }
-                project.writeLatticeExpandMM(
-                    ref, mm: seed + Double(v.translation.width) * 0.05)
-            }
-            .onEnded { _ in
-                draggingExpandPlane = nil
-                draggingExpandSeed = nil
-                ClearanceHaptics.release()
-                refreshLatticeFaceCards()
-                // The expand moves the region the preview is clipped to, so the
-                // picture is rebaked ONCE, when the value settles.
-                if showStrutPreview { buildStrutScene() }
-            }
-    }
 
 
     /// The on-model glass value chips — round-4 items 3+4: ONE chip PER HANDLE, anchored right
@@ -10192,7 +10204,20 @@ public struct WorkspacePlaceholder: View {
             if !selectionsCollapsed { latticePreviewNotice }
         }
         .latticeBandChipKeepOut()          // ★ the Selections panel, for the band chips
-        .modifier(WorkspacePanelPlacement(minimized: selectionsCollapsed))
+        // ★ his iPad 11-09 (2.5): what the column stacks under the panel (an Undo line, the preview's notice) — the panel's
+        // floor rises by it, so the whole column ends above the hint line
+        .onPreferenceChange(SelectionsPanelFrameKey.self) { selectionsListMaxY = $0?.maxY }
+        .background(GeometryReader { g in
+            Color.clear.onAppear { selectionsColumnMaxY = g.frame(in: .global).maxY }
+                .onChange(of: g.frame(in: .global).maxY) { selectionsColumnMaxY = $0 }
+        }.allowsHitTesting(false))
+        .modifier(WorkspacePanelPlacement(minimized: selectionsCollapsed, under: selectionsUnderPanel))
+    }
+
+    /// ★ his iPad 11-09 (2.5): the height the Selections column stacks under its panel.
+    private var selectionsUnderPanel: CGFloat {
+        guard let c = selectionsColumnMaxY, let p = selectionsListMaxY else { return 0 }
+        return Swift.max(0, c - p)
     }
 
     /// The banner the notice draws: production's switch and probe, the plan's own verdict.
@@ -10497,6 +10522,8 @@ public struct WorkspacePlaceholder: View {
         /// the ONE Selections panel, so both of its mount sites — the workspace
         /// and the lattice page's library — move together by construction.
         let minimized: Bool
+        /// ★ his iPad 11-09 (2.5): what the column stacks under its panel (measured).
+        var under: CGFloat = 0
         func body(content: Content) -> some View {
             GeometryReader { geo in
                 content.pageLeftModal(canvasHeight: geo.size.height,
@@ -10506,7 +10533,16 @@ public struct WorkspacePlaceholder: View {
                     // header, the pinned footer and the edges
                     .environment(\.selectionsListMaxHeight,
                                  SelectionsList.screenMax(canvasHeight: geo.size.height, footerReserve: Self.footerReserve))
+                    // ★ his iPad 11-09 (2.5): "the modal stops ABOVE the hint bubbles, with a buffer" — the panel's foot
+                    // never passes the band's (`PageChrome.panelBottom`: the hint line's 60 pt and 24 pt clear of it), less
+                    // what the column stacks under the panel
+                    .environment(\.selectionsPanelFloor, Self.floor(canvasBottom: geo.frame(in: .global).maxY, under: under))
             }
+        }
+
+        /// The lowest the panel's foot may reach, in the window.
+        static func floor(canvasBottom: CGFloat, under: CGFloat) -> CGFloat {
+            canvasBottom - PageChrome.panelBottom - under
         }
     }
 
@@ -11674,8 +11710,10 @@ public struct WorkspacePlaceholder: View {
         let depth = project.latticeSlabDepthMM(ref, in: g.id)
         let mm = SelectionsSummary.format((depth * 10).rounded() / 10, decimals: 1) + " mm"
         // (a group with no role yet: its faces say nothing yet — "Off" is a face declared out)
-        let value = role == nil ? (project.lattice.groupRoles[g.id] == nil ? "\u{2014}" : LatticeSetupCopy.off)
-            : role == .exclude ? "\(LatticeSetupCopy.noLattice) \u{00B7} \(mm)" : mm
+        // ★ his iPad 11-09 (2.1): a Protect skin group's faces say "Protect skin", not "No lattice"
+        let skin = project.lattice.skinGroups.contains(g.id)
+        let value = LatticeSetupCopy.faceValue(role: role, groupHasRole: project.lattice.groupRoles[g.id] != nil, skin: skin, mm: mm)
+        let saysSkin = value.hasPrefix(LatticeSetupCopy.protectSkin)
         // ★ THE ONE HONEST DIFFERENCE (the interrupt's §3): a region the run freezes without latticing says so
         let frozen = !project.latticeReachesTheRun(ref) && role != nil
         let removable: Bool = { if case .primitive = ref { return false }; return true }()
@@ -11683,7 +11721,8 @@ public struct WorkspacePlaceholder: View {
             DSRow(.face, key: "latticeFace-\(ref.key)", name: project.latticeRowName(ref), value: picked ? nil : value,
                   selected: picked, tag: latticeAlsoIn(ref, g),
                   line: frozen ? DSRowLine(LatticeSectorOutline.notLatticedWords(protected: force.isProtected(g.id)), tone: .warning)
-                      : picked && latticePrismShown(ref) ? DSRowLine(LatticeSetupCopy.dragItsHandle) : nil,   // ★ B6 N2
+                      // ★ B6 N2 — ★ 11-09 (2.1): only where its prism (and so its handle) is drawn
+                      : picked && latticePrismShown(ref) && latticeDrawsPrism(g.id) ? DSRowLine(LatticeSetupCopy.dragItsHandle) : nil,
                   tap: { latticeFacePick = picked ? nil : ref.key }) {
                 if picked {
                     NumberField(key: "latticeFaceDepth-\(ref.key)", title: "Depth",
@@ -11702,12 +11741,31 @@ public struct WorkspacePlaceholder: View {
                     DSRowTrash(key: "latticeFaceTrash-\(ref.key)") { removeLatticeFace(g, ref) }
                 }
             }
+            if picked, role != nil {
+                // ★ his iPad 11-09 (3.1): "the Selections row shows only the depth value — no Expand value": its own line, the
+                // number its ± handle on the part drags (tap to type, drag to change; it shrinks below 0)
+                HStack(spacing: DS.Space.s) {
+                    Text(LatticeSetupCopy.expand).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
+                    Spacer(minLength: DS.Space.s)
+                    NumberField(key: "latticeFaceExpand-\(ref.key)", title: LatticeSetupCopy.expand,
+                                spec: FlexNumberSpec(value: project.latticeExpandMM(ref), unit: "mm", step: 0.5,
+                                                     range: LatticeSlabExpand.minMM ... LatticeSlabExpand.maxMM, decimals: 1),
+                                allowsNegative: true) { v in
+                        project.writeLatticeExpandMM(ref, mm: v)
+                        refreshLatticeFaceCards()
+                        if showStrutPreview { buildStrutScene() }
+                    }
+                }
+                .padding(.leading, DSParts.faceIndent).padding(.trailing, 12).frame(minHeight: 44)
+                .background(DSParts.publish("latticeFaceExpandLine-\(ref.key)"))
+            }
             if picked {
                 HStack(spacing: DS.Space.s) {
                     Text(LatticeSetupCopy.thisFace).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
                     Spacer(minLength: DS.Space.s)
+                    // ★ 11-09 (2.1): in a Protect skin group the face's other choice is its group's own ("Protect skin")
                     SegmentedGlass([.init(LatticeGroupRole?.some(.include), LatticeSetupCopy.lattice),
-                                    .init(LatticeGroupRole?.some(.exclude), LatticeSetupCopy.noLattice)],
+                                    .init(LatticeGroupRole?.some(.exclude), LatticeSetupCopy.notLatticed(skin: skin))],
                                    selection: Binding(get: { role },
                                                       set: { if let r = $0 { declareLatticeRole(r == .include ? .include : .exclude, ref, in: g) } }),
                                    small: true)
@@ -11719,6 +11777,7 @@ public struct WorkspacePlaceholder: View {
         }
         // ★ R14 — PR 331's small-face policy: below the sliver floor a row is dimmed, never hidden
         .opacity(latticeRowIsBelowTheSmallFaceFloor(ref) ? 0.55 : 1)
+        .background(saysSkin ? DSParts.publish("latticeFaceSkin-\(ref.key)") : nil)   // ★ 11-09 (2.1): it says Protect skin
     }
 
     /// ★ B6 s1b (mockup "Role  [Lattice │ No lattice]"): the group's role — every face without its own follows it. The lock
