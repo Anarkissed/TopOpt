@@ -143,7 +143,7 @@ extension ProjectModel {
     public func latticeZoneHandles(_ zone: UUID) -> [LatticeZoneHandle] {
         guard let p = latticeZonePrimitive(zone), let s = latticeZoneSize(zone) else { return [] }
         let up = SIMD3<Float>(ManualPrimitive.unit(p.axis)), mid = SIMD3<Float>(latticeZoneMiddle(p))
-        let (u, v) = planeBasis(normal: up)
+        let (u, v) = corePlaneBasis(normal: up)   // ★ his iPad notes 11-09: the region's own axes
         func h(_ side: LatticeZoneHandle.Side, _ dir: SIMD3<Float>, _ half: Double) -> LatticeZoneHandle {
             LatticeZoneHandle(side: side, middle: mid, dir: dir, anchor: mid + dir * Float(half))
         }

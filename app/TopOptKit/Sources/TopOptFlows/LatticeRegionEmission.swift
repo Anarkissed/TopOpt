@@ -25,13 +25,19 @@ import simd
 
 public enum LatticeRegionEmission {
 
+    /// TEST CONTROL (his iPad notes 11-09, 2.4): the rule before — a concave cylinder's region at its own radius.
+    nonisolated(unsafe) public static var controlBoreAtItsRadius = false
+
     /// A face's resolved geometry, as the synthesis needs it. Supplied by the
     /// caller (ProjectModel reads the viewer mesh); nil when the face has no
     /// usable B-rep surface (STL pseudo-face, cone, spline…).
     public enum ResolvedFace {
         /// A cylindrical face: its axis, radius, and through-part axial span.
+        /// ★ his iPad notes 11-09 (2.4): `concave` — true: the part lies OUTSIDE the surface (a hole, an inside round),
+        /// false: inside it (a boss, an outside round); either way the region reaches the face's depth. nil: unknown —
+        /// the cylinder at its radius, as before (Flexible's regions).
         case cylinder(axisPoint: SIMD3<Double>, axisDir: SIMD3<Double>,
-                      radiusMM: Double, spanLoMM: Double, spanHiMM: Double)
+                      radiusMM: Double, spanLoMM: Double, spanHiMM: Double, concave: Bool? = nil)
         /// A planar face: its fitted outline centre, outward normal, half-extents.
         /// ★ `outlineLoops` IS THE FACE ITSELF, in the plane's (u, v) mm relative
         /// to `center` — see `LatticeFaceOutline`. The half-extents are its
@@ -154,14 +160,26 @@ public enum LatticeRegionEmission {
                             seamWith: (FaceID) -> Bool = { _ in false })
         -> LatticeRegionSpec? {
         switch face {
-        case .cylinder(let axisPoint, let axisDir, let radius, let lo, let hi):
+        case .cylinder(let axisPoint, let axisDir, let radius, let lo, let hi, let concave):
             var s = LatticeRegionSpec(role: role, kind: .bolt)
             s.faceID = faceID
             let dir = ManualPrimitive.unit(axisDir)
             let mid = 0.5 * (lo + hi)
             s.axisPoint = axisPoint + dir * mid
             s.axisDir = dir
-            s.radiusMM = radius
+            // ★★ his iPad notes 11-09 (2.4): "Lattice is being made on the rounded edges" he set to No lattice, 4 mm. A
+            // bolt is the cylinder at its radius with no margin, in core too (run_job.cpp lattice_role_regions_from_job:
+            // "all margins zero: the primitive is the region") — so the face's DEPTH never reached it: a hole or an inside
+            // round (the part lies outside the surface) held only its own air, solid or latticed. Concave, the region
+            // reaches the depth out from the surface — radius + depth, as exact Protect sizes a protected bore
+            // (ProtectKeepRegions.boreCylinders). Convex (a boss, an outside round), the part is inside the radius: a
+            // round smaller than the depth reaches it through its axis (radius = the depth; what that adds past the
+            // surface is air), a boss wider than it keeps its radius.
+            if let concave, !Self.controlBoreAtItsRadius, depthMM.isFinite, depthMM > 0 {
+                s.radiusMM = concave ? radius + depthMM : Swift.max(radius, depthMM)
+            } else {
+                s.radiusMM = radius
+            }
             s.halfLengthMM = 0.5 * (hi - lo)
             return s.isValid ? s : nil
         case .plane(let center, let normal, let halfU, let halfW, let loops, let neighbours):

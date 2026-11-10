@@ -2313,7 +2313,12 @@ public final class ProjectModel: ObservableObject {
                         boreRadiusMM: Float(mp.radiusMM), axialSpan: span))
                 } else {
                     let n = SIMD3<Float>(mp.axis)
-                    let (u, v) = planeBasis(normal: n)
+                    // ★★ reviewer 11-09 19:55Z item 4 (his zone's quarter turn, measured here too): a hand-placed Keep clear's
+                    // half_u / half_w go to core with no frame (RemoteRunner: origin, normal, half_u_mm, half_w_mm — the
+                    // clearance schema takes no frame keys), and core reads them on its own `plane_basis`. Drawn on
+                    // `planeBasis`, a W ≠ D box was turned a quarter turn from the solid core keeps clear — for every
+                    // axis-aligned normal. Drawn, sized and handled on core's basis now: the box he sees is the one cut.
+                    let (u, v) = corePlaneBasis(normal: n)
                     let outline = PlaneOutline(center: SIMD3<Float>(mp.center), uAxis: u, vAxis: v,
                                                halfU: Float(mp.halfUMM), halfV: Float(mp.halfWMM))
                     let depth = clearanceMetric(groupID: g.id, faceID: key, role: .slabDepth)?.resolved ?? mp.resolvedDepthMM
@@ -2457,7 +2462,8 @@ public final class ProjectModel: ObservableObject {
                     for: ref, groupRole: groupRole,
                     overrides: lattice.selectableRoles) else { continue }
                 let n = SIMD3<Float>(mp.axis)
-                let (u, v) = planeBasis(normal: n)
+                // ★ his iPad notes 11-09: on core's basis — the box he sees is the box the run lattices
+                let (u, v) = corePlaneBasis(normal: n)
                 let outline = PlaneOutline(center: SIMD3<Float>(mp.center),
                                            uAxis: u, vAxis: v,
                                            halfU: Float(mp.halfUMM),
@@ -2854,7 +2860,7 @@ public final class ProjectModel: ObservableObject {
                 return (mp, d)
             }
         }
-        return LatticeRegionEmission.regions(
+        let main = LatticeRegionEmission.regions(
             groups: latticeGroups,   // ★ B6: where the lattice goes (Flexible: Topology's groups, as today)
             roles: latticeEligibleRoles(),
             primitives: resolvedPrims,
@@ -2888,7 +2894,65 @@ public final class ProjectModel: ObservableObject {
             },
             solidAt: latticeSeamSolidAt(),
             resolve: resolvedLatticeFace)
+        // ★★ his iPad notes 11-09 (2.3): what Topology protects stays solid under the lattice
+        let keep = latticeProtectKeeps()
+        guard !keep.isEmpty else { return main }
+        return .init(regions: main.regions + keep, skippedFaces: main.skippedFaces,
+                     skippedRegionNames: main.skippedRegionNames)
     }
+
+    /// TEST CONTROL (his iPad notes 11-09, 2.3): the rule before — Topology's Protect never reached a lattice job.
+    nonisolated(unsafe) public static var controlProtectNotKept = false
+    /// The Protect keep's group, in the emission only (its keys never reach a row): a fixed id, so the job is stable.
+    static let protectKeepGroupID = UUID(uuidString: "50E7EC70-0000-4000-8000-000000000001")!
+
+    /// ★★ his iPad notes 11-09 (2.3): "Lattice is visible on the green 'Protect faces' inside the hole of the 2040
+    /// extrusion area. That should not be happening." Topology's Protect — the Protect skin depth his Settings set (5 mm)
+    /// — never reached a lattice job: core lattices a frozen collar like any other material (frozen ≠ solid, task
+    /// 2026-08-04), and exact Protect re-cuts the optimized shape only, never the lattice. So his Group 2's 13 mm prism ran
+    /// through the wall and opened the slot's protected faces — in the run as in the preview, which agree. Now each
+    /// protected face that no lattice group with a role names is a No-lattice region at the Protect skin depth (the
+    /// exclude a Protect-skin group already runs as; core: exclude beats include), so the lattice stops that far under
+    /// it, and under Start from − too. A face a lattice group names keeps that group's say (Lattice on a protected face
+    /// is the barrier model, LatticeSlabDepth). The protection's depth reads this emission (`faceProtectionSpecs`), so
+    /// core's depth tie holds. Lattice Setup's list only: Flexible's jobs keep their bytes.
+    private func latticeProtectKeeps() -> [LatticeRegionSpec] {
+        guard usesLatticeList, !Self.controlProtectNotKept, let mesh = viewerMesh else { return [] }
+        func whole(_ g: SelectionGroup) -> [FaceID] {
+            g.faces + g.regionIDs.flatMap { rid -> [FaceID] in
+                guard let r = faceRegions.region(rid), r.cuts.isEmpty, r.parts.isEmpty else { return [] }
+                return latticeRegionMembers(rid) ?? []
+            }
+        }
+        var named = Set<FaceID>()
+        for lg in latticeGroups where lattice.groupRoles[lg.id] != nil { named.formUnion(whole(lg)) }
+        var faces: [FaceID] = []
+        var seen = named
+        for g in selection.groups where force.isProtected(g.id) {
+            for f in whole(g) where !seen.contains(f) { seen.insert(f); faces.append(f) }
+        }
+        guard !faces.isEmpty else { return [] }
+        let id = Self.protectKeepGroupID, depth = force.faceProtectDepthMM
+        // ★ the emission runs on every view pass that asks for the job's regions: the keeps are built once per input
+        var h = Hasher()
+        h.combine(faces); h.combine(depth); h.combine(mesh.triangleCount); h.combine(mesh.faceIDs.count)
+        let key = h.finalize()
+        if let m = protectKeepMemo, m.key == key { return m.regions }
+        let built = LatticeRegionEmission.regions(
+            groups: [SelectionGroup(id: id, name: "Protect", colorIndex: 0, faces: faces)],
+            roles: [id: .exclude],
+            primitives: { _ in [] },
+            includePrimitives: [],
+            faceDepthMM: depth,
+            groupDepthMM: { _ in depth },
+            runFaceID: { [weak self] f in Int(self?.resolvedRunFaceID(f) ?? f) },
+            facets: { f in LatticeFaceFacets.facets(face: f, in: mesh) },
+            resolve: resolvedLatticeFace).regions
+        protectKeepMemo = (key, built)
+        return built
+    }
+    /// The last Protect keeps built, by their inputs' hash (`latticeProtectKeeps`).
+    private var protectKeepMemo: (key: Int, regions: [LatticeRegionSpec])?
 
     /// ★ A face region the lattice CAN consume: a union of WHOLE faces (no cuts, no
     /// parts) — its member faces, each emitted as its own prism under the region's key.
@@ -3035,9 +3099,16 @@ public final class ProjectModel: ObservableObject {
                     guard let span = mesh.faceAxialSpan(
                         f, axisPoint: SIMD3<Float>(geo.axisPoint),
                         axisDir: SIMD3<Float>(geo.axisDir)) else { return nil }
+                    // ★ his iPad notes 11-09 (2.4): a curved face's region reaches its depth (a hole's OUT from its radius).
+                    // Lattice Setup's list only: Flexible's regions keep today's bytes (its rounds are reported, not moved).
+                    let dir = simd_length(geo.axisDir) > 1e-9 ? simd_normalize(geo.axisDir) : geo.axisDir
+                    let concave: Bool? = (self?.usesLatticeList ?? false)
+                        ? FaceTopology.boreAxisMetrics(f, in: mesh, axisPoint: SIMD3<Float>(geo.axisPoint),
+                                                       axisDir: SIMD3<Float>(dir)).concave
+                        : nil
                     return .cylinder(axisPoint: geo.axisPoint, axisDir: geo.axisDir,
                                      radiusMM: geo.cylinderRadiusMM,
-                                     spanLoMM: Double(span.lo), spanHiMM: Double(span.hi))
+                                     spanLoMM: Double(span.lo), spanHiMM: Double(span.hi), concave: concave)
                 }
                 if geo.isPlane {
                     // ★ THE ONE BUILDER — see `LatticeRegionEmission.planeFor`. It

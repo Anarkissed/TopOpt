@@ -53,8 +53,10 @@ final class NumberPadHostedTests: XCTestCase {
             let pad = try XCTUnwrap(h.padFrame("numberPad"), "\(size): ★ U15 — the app's number pad opens")
             XCTAssertEqual(pad.width, 276, accuracy: 0.5, "\(size): §4.33 — 276 pt wide")
             XCTAssertFalse(pad.intersects(field.insetBy(dx: 1, dy: 1)), "\(size): ★ the pad never covers its number: \(pad) vs \(field)")
-            XCTAssertTrue(pad.minY >= field.maxY - 0.5 || pad.maxY <= field.minY + 0.5,
-                          "\(size): ★ beside it — below, or above when there is no room: \(pad) vs \(field)")
+            // ★ his iPad 11-09 (3.3): "it moves to the side and ALWAYS shows whole, never cut at the bottom or top" — beside
+            // its number, on the side with room (it opened below, or above: below cut it off at the window's foot)
+            XCTAssertTrue(pad.minX >= field.maxX - 0.5 || pad.maxX <= field.minX + 0.5,
+                          "\(size): ★ beside it — to its side: \(pad) vs \(field)")
             for k in ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "delete", "done"] {
                 let key = k == "done" ? "numberPad-done" : "numberPad-key-\(k)"
                 let f = try XCTUnwrap(h.padFrame(key), "\(size): the pad's \(k) key")
