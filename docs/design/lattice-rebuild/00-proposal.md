@@ -41,7 +41,7 @@ This is the contract, written from the screens as they are today (release N1110)
 | Start from: All lattice − Lattice faces | The whole part is latticed, as **one** layout (your ruling). Faces set to No lattice keep solid to their depth. A face set to Lattice here changes its own settings only (depth of its band, density, finish). |
 | Group role: Lattice | A prism under the face, to the group's depth, is latticed. |
 | Group role: No lattice | A prism under the face, to the group's depth, stays solid. |
-| Group role: Protect skin | The face keeps a solid skin of the stated depth. **0 mm means lattice right up to the skin** (your ruling). |
+| Group role: Protect skin | The face stays a solid surface of exactly the stated depth, with the lattice right behind it (your ruling). At 0 mm it is the thinnest face that prints, two line widths. Not the same thing as Finish: Skin, which is open bars. |
 | Depth | How far the prism goes in, measured along the face's normal on the real part. |
 | Expand | Grows or shrinks the prism's outline in the face's plane. |
 | Lattice zones | A box or cylinder that lattices space no face reaches. Same rules as a Lattice prism. |

@@ -1,6 +1,6 @@
 # Lattice rebuild — the rules (stage A)
 
-Working draft 1, 2026-11-10, LatticeReview. Companion to `00-proposal.md`.
+Working draft 2, 2026-11-10, LatticeReview. Companion to `00-proposal.md`.
 
 Each rule below is something the layout must do. Where the rule is the maintainer's, his words and the date are given, with the place in today's code where they are recorded. A ledger of every dated ruling comment in the lattice code (526 entries, verbatim) is being worked through; this draft holds the rules that decide geometry. Rules about the look of panels and legends are not in scope here.
 
@@ -18,7 +18,7 @@ Section 8 lists the places where two rulings pull against each other. Those need
 | D2 | A prism under a face turns existing solid into lattice. It never adds material. | his: "the face-prism only makes what's solid into lattice, it cannot make walls thicker" (`LatticeRegionMask.swift:70`) |
 | D3 | The lattice is laid out past the prism and then cut by it, so cells at the edge are whole cells cut, not cells left out. | his, 2026-08-27: "extend the lattices out beyond the face-prism, then use the prism to cut off the excess" (`LatticePreviewOccupancy.swift:808`) |
 | D4 | Start from All lattice: one layout for the whole part. | his, 2026-11-10 (ruling 2) |
-| D5 | Protect skin keeps solid to exactly the depth stated. 0 mm means lattice right up to the skin. | his, 2026-10-26 ("exact Protect") and 2026-11-10 (ruling 3) |
+| D5 | **Protect skin** is a solid face, at exactly the depth stated, with the lattice right behind it. At 0 mm it is the thinnest face that prints (two line widths). It is for faces that must stay a real surface: mounting, contact. It is a different thing from the Finish called Skin (S3). | his, 2026-10-26 ("exact Protect"), 2026-11-10 (ruling 3), and 2026-11-10 16:41: "Protect skin is a solid sheet. The skin I mentioned is the Lattice Finish. Two different things." |
 | D6 | Where two prisms overlap, the nearer face owns the space; on the same face plane the deeper one; then the earlier one. No lattice beats Lattice. | reviewer's ruling 4, 2026-10-07, and plan note 22 (`stepped_plan.hpp`) |
 | D7 | Nothing is ever built inside a pocket to close it: no wall, plate, cap or beam. The far end of a prism inside material is the part's own solid. | his, 2026-09-23, rule R7 (`LatticeSDFMetal.swift:2712`) |
 | D8 | Where a wall cannot hold lattice it goes solid. It is never left as a hole. | his, 2026-08-20: "Go solid" (`LatticeMeasuredRegionWidth.swift:113`) |
@@ -67,7 +67,7 @@ Section 8 lists the places where two rulings pull against each other. Those need
 |---|---|---|
 | S1 | A rim is one smooth bar bent around the whole outline of the latticed face. Not a stack of blocks. | his, 2026-09-16: "a singular beam bent around the entirety of the face-prism outline; something *inherently* smooth" (`LatticeOutlineRibbon.swift:4`); 2026-11-10: "a rim is one bar" |
 | S2 | The rim runs only where the part's solid backs it, never facing air, and not along a seam between two latticed regions. | his, 2026-09-23 (`LatticeRegionMask.swift:168`) |
-| S3 | A skin is many bars across the face joining the cut strut ends: a flat lattice over the lattice. It is not a solid sheet. | his, 2026-11-10 |
+| S3 | **Finish: Skin** is many bars across the face joining the cut strut ends: a flat lattice over the lattice. It is open and does not seal. It is a different thing from Protect skin (D5), which is solid. | his, 2026-11-10: "a skin is multiple bars connecting the lattice struts, creating a 2D lattice across the outer wall" |
 | S4 | Finish None: a cut strut is kept only if its end lands on another strut or on solid; a stub shorter than one strut width is dropped. Where a stepped edge is left, the app points at it and says "Rim or Skin will fix this". | agreed, 2026-11-10 |
 | S5 | Where two cell sizes meet, transition struts join them so every fine node has a partner. | proposed |
 | S6 | The file is one watertight solid: struts, joints, rim, skin bars and the part's solid merged. | proposed |
