@@ -36,6 +36,7 @@
 // a change that emptied every lattice would pass both halves of this test.
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 
 static int g_checks = 0, g_failures = 0;
@@ -59,10 +60,45 @@ static std::string read_file(const std::string& p) {
   return out;
 }
 
+static int g_cells_swapped = 0;
+
+// ★ RULING 11-10 (a): THE CONTROL RUNS A COPY AT A 2.4 MM CELL. The tab is a 12 mm plate and
+// an octet member needs 5 cells across: 15 mm at the fixture's 3 mm cell. The law used to
+// grade it only because the grid's outside read as material (finding 4); read honestly it
+// grades none of it and the control refuses, which would leave this test with no positive
+// control at all. 5 x 2.4 mm = 12 mm, so the plate holds the cell and the control again
+// shows a lattice that survives a 10 mm band. The maintainer's fixture is not edited: the
+// copy swaps only the two cell bounds and runs beside a copy of the tab.
+static constexpr const char* kFixtureCellMin = "\"cell_min_mm\": 3.0";
+static constexpr const char* kFixtureCellMax = "\"cell_max_mm\": 3.0";
+
+static std::string cell_copy(const std::string& name) {
+  const std::string dir = std::string(CLI_TMP_DIR) + "/c_cell_jobs";
+  std::system(("mkdir -p \"" + dir + "\" && cp \"" + ORGANIC_FIXTURE_DIR +
+               "/dead_parity_tab.stl\" \"" + dir + "/\"")
+                  .c_str());
+  std::string text = read_file(std::string(ORGANIC_FIXTURE_DIR) + "/" + name + ".json");
+  for (const char* key : {kFixtureCellMin, kFixtureCellMax}) {
+    const std::size_t at = text.find(key);
+    if (at == std::string::npos) continue;
+    text.replace(at, std::strlen(key), std::string(key, std::strlen(key) - 3) + "2.4");
+    ++g_cells_swapped;
+  }
+  const std::string job = dir + "/" + name + ".json";
+  if (FILE* f = std::fopen(job.c_str(), "w")) {
+    std::fwrite(text.data(), 1, text.size(), f);
+    std::fclose(f);
+  }
+  return job;
+}
+
 // Runs one fixture job and returns the CLI's exit status; stdout and stderr are captured
 // into the caller's strings, because the refusal is the thing under test.
-static int run_job(const std::string& name, std::string& out_text, std::string& err_text) {
-  const std::string job = std::string(ORGANIC_FIXTURE_DIR) + "/" + name + ".json";
+static int run_job(const std::string& name, std::string& out_text, std::string& err_text,
+                   bool at_2_4_mm = false) {
+  const std::string job = at_2_4_mm
+                              ? cell_copy(name)
+                              : std::string(ORGANIC_FIXTURE_DIR) + "/" + name + ".json";
   const std::string dir = std::string(CLI_TMP_DIR) + "/" + name;
   const std::string so = dir + ".stdout", se = dir + ".stderr";
   // The fixture's `model` is relative and the CLI resolves it against the job's own
@@ -93,6 +129,16 @@ int main() {
         "and the run either certifies that lattice or refuses in words");
   CHECK(!(drc == 0 && has(dout, "over 0 voxels")),
         "never a verdict of ACCEPTED over no lattice at all");
+  // ★ RULING 11-10: on the honest width the 12 mm tab holds no 3 mm octet cell, so this
+  // swept job refuses -- and the refusal quotes the floor at the run's OWN finest cell
+  // (3 mm, 15 mm needed) beside the width, never at the 1.12 mm legal minimum it used to.
+  if (drc != 0) {
+    CHECK(has(derr, "Every member is too thin: the widest is 12.5 mm across, under the 15 mm "
+                    "that 5 cells of this run's finest cell (3 mm) need"),
+          "a swept refusal quotes 5 x the run's own finest cell, beside the member width");
+    CHECK(!has(derr, "must be at least"),
+          "and nothing in it reads as a pass");
+  }
   CHECK(!has(dall, "turned solid"),
         "no solid outline beam ran on the doubled lattice");
 
@@ -104,7 +150,8 @@ int main() {
 
   // ── the control: the same job, a band under the bleed threshold ─────────────
   std::string cout_, cerr_;
-  const int crc = run_job("empty_after_beam_control", cout_, cerr_);
+  const int crc = run_job("empty_after_beam_control", cout_, cerr_, /*at_2_4_mm=*/true);
+  CHECK(g_cells_swapped == 2, "the control's copy states the 2.4 mm cell at both bounds");
   CHECK(crc == 0, "the control job, whose lattice survives the beam, is still ACCEPTED");
   CHECK(has(cout_, "verdict: ACCEPTED"), "and still reports a verdict of ACCEPTED");
   // The positive control proper: a non-empty lattice. `over 0 voxels` is what the defect

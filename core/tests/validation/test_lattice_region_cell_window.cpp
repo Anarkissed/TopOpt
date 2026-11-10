@@ -41,10 +41,13 @@ static int g_checks = 0;
 
 namespace {
 
-// A 60 x 20 x 20 mm bar.
+// A 60 x 40 x 40 mm bar. (60 x 20 x 20 until ruling 11-09 (2), the grid's outside read as
+// void: a 20 mm bar then holds no 6.4 mm cell -- octet needs 32 mm across for 5 of them --
+// and the control's "Right" latticed nothing. It did before only because the member width
+// read the bar's own faces, which are the grid's edge, as more material.)
 TriangleMesh bar() {
   TriangleMesh m;
-  const double L = 60.0, W = 20.0, H = 20.0;
+  const double L = 60.0, W = 40.0, H = 40.0;
   for (const Vec3& v : std::vector<Vec3>{{0, 0, 0}, {L, 0, 0}, {L, W, 0}, {0, W, 0},
                                          {0, 0, H}, {L, 0, H}, {L, W, H}, {0, W, H}})
     m.vertices.push_back(v);
@@ -75,11 +78,11 @@ std::string job_json(const Faces& f, const std::string& left_extra,
   std::snprintf(regions, sizeof regions,
                 ", \"regions\": ["
                 "{\"role\": \"include\", \"kind\": \"face\", \"face_id\": %d, \"label\": \"Left\", "
-                "\"geometry\": {\"origin\": [15, 10, 20], \"normal\": [0, 0, -1], "
-                "\"half_u_mm\": 15, \"half_w_mm\": 10, \"depth_mm\": 20}%s}, "
+                "\"geometry\": {\"origin\": [15, 20, 40], \"normal\": [0, 0, -1], "
+                "\"half_u_mm\": 15, \"half_w_mm\": 20, \"depth_mm\": 40}%s}, "
                 "{\"role\": \"include\", \"kind\": \"face\", \"face_id\": %d, \"label\": \"Right\", "
-                "\"geometry\": {\"origin\": [45, 10, 20], \"normal\": [0, 0, -1], "
-                "\"half_u_mm\": 15, \"half_w_mm\": 10, \"depth_mm\": 20}%s}]",
+                "\"geometry\": {\"origin\": [45, 20, 40], \"normal\": [0, 0, -1], "
+                "\"half_u_mm\": 15, \"half_w_mm\": 20, \"depth_mm\": 40}%s}]",
                 f.top, left_extra.c_str(), f.top, right_extra.c_str());
   const std::string cells = cell_mode == "swept"
                                 ? "\"cell_mode\": \"swept\", \"cell_min_mm\": 1.6, \"cell_max_mm\": 6.4"

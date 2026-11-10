@@ -2488,6 +2488,14 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     DEMO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo"
     TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
   add_test(NAME lattice_mesh_rim COMMAND test_lattice_mesh_rim)
+  # Ruling 11-09: the SOLID beside a latticed part -- no sliver, faces on the part's surface.
+  add_executable(test_lattice_solid_companion tests/validation/test_lattice_solid_companion.cpp)
+  target_link_libraries(test_lattice_solid_companion PRIVATE topopt)
+  target_compile_definitions(test_lattice_solid_companion PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME lattice_solid_companion COMMAND test_lattice_solid_companion)
   # E3 (plan.md §B7): an include region's own cell window on the swept plan.
   add_executable(test_lattice_region_cell_window tests/validation/test_lattice_region_cell_window.cpp)
   target_link_libraries(test_lattice_region_cell_window PRIVATE topopt)

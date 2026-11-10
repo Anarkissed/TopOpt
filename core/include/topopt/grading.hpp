@@ -54,6 +54,7 @@
 // same (grid, density, demand, params) always produce a byte-identical field (bar L5).
 
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 
 #include "topopt/analyze.hpp"    // LatticePosture
@@ -237,6 +238,14 @@ struct GradingLawParams {
   // kWidthAwareThicknessCapVoxels. A member thicker than 2*cap*spacing reads the +inf
   // "thicker than measured" sentinel and always clears the ceiling. Must be >= 1.
   int thickness_cap_voxels = 32;
+
+  // ★ THE PART'S OWN SURFACE, when the part itself is latticed (reviewer's ruling
+  // 11-09, the rim coupon's SOLID): the member width is measured on it
+  // (local_member_thickness_mm's surface overload), not on the voxel staircase, which
+  // reads the steps of a curved face as thin members. The width field then rides the
+  // posture (LatticePosture::member_width_mm) so the certificate's own floor guard reads
+  // the same widths. Null => the staircase, byte for byte. Must be in the grid's frame.
+  const MeshDistance* member_surface = nullptr;
 
   // ── MULTISCALE (task multiscale-lattice-to) ────────────────────────────────
   // When non-null, THIS per-voxel field (size grid.voxel_count()) is the relative
@@ -562,6 +571,11 @@ struct GradedField {
   // is legal as long as the density is raised with it — which this law now does. That
   // is why a hand-set Fixed target between the two is no longer raised.
   double min_printable_cell_mm = 0.0;
+  // ★ THE FINEST CELL THIS RUN ALLOWS (reviewer's ruling 11-10): Fixed / Auto the one cell;
+  // Swept the ladder's base (cell_min_mm); Fit the finest cell any region asked for. A
+  // refusal quotes the member floor at THIS cell, the most lenient the run could have used,
+  // so its numbers are the run's own and never read as a pass.
+  double finest_cell_mm = 0.0;
   // Latticed voxels whose relative density was RAISED above what demand asked for, so
   // the strut at their cell clears the stated width. Zero on every path whose cell is
   // at or above `printability_floor_mm`, because there the raise is inert by
@@ -640,6 +654,30 @@ struct GradedField {
   // cell — width < n* × printability_floor. A remedy that changes the cell cannot
   // touch these, and offering one would be a guess. (<= fallback_member_too_thin.)
   std::size_t fallback_irrecoverable_by_cell = 0;
+  // ★ Per voxel, why the law left it solid (absorb_solid_slivers reads it): 0 not a
+  // fallback, 1 member too thin, 2 member too thin and irrecoverable by any cell, 3 strut
+  // unprintable at every cell, 4 another reason (no cell derivation, a dropped cover).
+  std::vector<char> fallback_reason;
+  // The law's member width field (mm, per voxel): lattice_member_width_mm's (the part's
+  // own surface when `member_surface` was given, else the staircase with the grid's outside
+  // void; convex-corner residues joined to their member).
+  std::vector<double> member_width_mm;
+  // ★ The convex corners joined to their member (ruling 11-09 20:10Z): voxels under the
+  // floor within reach of it, those joined, the reach, and which (per voxel).
+  long long corner_residue_voxels = 0;
+  long long corner_joined_voxels = 0;
+  double corner_reach_mm = 0.0;
+  std::vector<char> corner_joined;
+  // ★ SLIVERS (reviewer's ruling 11-09): solid-fallback voxels in no solid block 2 line
+  // widths across. A sliver beside lattice is latticed with its neighbours (their
+  // density and cell); one with no lattice beside it, or left solid for a reason no cell
+  // answers (4), stays solid. Counted, never silent; zero unless the pass ran
+  // (`sliver_pass_block_voxels` >= 2: 2 line widths span more than one voxel).
+  int sliver_pass_block_voxels = 0;
+  std::size_t sliver_voxels_latticed = 0;
+  std::vector<char> sliver_latticed;  // per voxel (empty when none was)
+  std::size_t sliver_voxels_kept_solid = 0;
+  double sliver_min_cells_per_member = 0.0;  // over the latticed slivers (+inf: none)
   double rho_min_used = 0.0;              // achieved rho band over latticed voxels
   double rho_max_used = 0.0;
   double min_member_width_mm = 0.0;       // thinnest LATTICED member (mm); +inf if all
@@ -851,6 +889,45 @@ GradedField grade_lattice(const VoxelGrid& grid,
                           const std::vector<double>& demand,
                           const std::vector<char>* region,
                           const GradingLawParams& params, double iso = 0.5);
+
+// ★ NO SOLID SLIVER (reviewer's ruling 11-09, the rim coupon's SOLID). No solid-fallback
+// piece may be thinner than 2 line widths in any direction: every solid voxel the law
+// left must lie in a k x k x k block of printed, non-latticed voxels, k = ceil(2 *
+// line_width_mm / spacing). One that does not is a sliver. A sliver with a latticed
+// face-neighbour (or one reached through other slivers) is latticed with its
+// neighbours: the highest neighbouring density and that neighbour's cell. A sliver with
+// none beside it, or left solid for a reason no cell answers (fallback_reason 4), stays
+// solid. Updates the posture and the counts (latticed, fallback, reasons, the thinnest
+// latticed member); the law's own distribution and `fallback_max_member_width_mm` are
+// the law's, before this pass. k <= 1 => no change at all.
+void absorb_solid_slivers(GradedField& gf, const VoxelGrid& grid,
+                          const std::vector<double>& density,
+                          const std::vector<char>* region, double line_width_mm,
+                          double iso = 0.5);
+
+// ★ WHAT THE LAW DOES WITH EACH VOXEL, FOR THE PREVIEW (rulings 11-09: preview = core).
+// Runs grade_lattice itself (every printed voxel a candidate, a FLAT demand) and then
+// absorb_solid_slivers, exactly as a run does, and returns one code per voxel:
+//   0   latticed
+//   1   member_too_thin_for_cell (a smaller cell may lattice it)
+//   2   member too thin at ANY legal cell (irrecoverable by cell)
+//   3   strut_unprintable_at_every_cell (a bigger cell may lattice it)
+//   4   left solid for another reason (no cell derivation in fit mode, a dropped cover)
+//   5   a solid sliver under 2 line widths, latticed with its neighbours
+//   6   a convex-corner residue, latticed with the member it is a corner of
+//   255 not part of the part (void, or density <= iso)
+// The demand only sets densities. On the fixed and auto cells (one cell for the part) and
+// in fit mode the solid/lattice split depends on member width, cell and line width alone,
+// so this matches a run's. On the SWEPT plan the cells follow the run's stress, so the
+// split can differ: matching a run there needs that run's demand (its von Mises field,
+// the job's grading), which a part grid does not have. `params.member_surface` is the
+// part's own mesh (in the grid's frame) when the part itself is latticed; a run that
+// lattices an optimized result measures on the voxel staircase, so leave it null there.
+// Throws what grade_lattice throws.
+std::vector<std::uint8_t> lattice_solid_fallback_reasons(const VoxelGrid& grid,
+                                                         const std::vector<double>& density,
+                                                         const GradingLawParams& params,
+                                                         double iso = 0.5);
 
 }  // namespace topopt
 

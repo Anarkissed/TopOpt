@@ -557,9 +557,22 @@ FixedDesignAnalysis analyze_fixed_design(
       // in cells vs the floor homogenization needs. Reuses the width-aware
       // thickness field when that posture already measured it.
       if (lattice->cell_size_mm > 0.0) {
-        if (member_width_mm.empty())
-          member_width_mm = local_member_thickness_mm(
-              grid, density, kIso, kWidthAwareThicknessCapVoxels);
+        // ★ The width the grading law measured on the part's own surface, when it did
+        // (ruling 11-09): the staircase reads the steps of a curved face as thin
+        // members. Else the staircase, as before.
+        // ★ Rulings 11-09: the grading law's own width when the posture carries it; else
+        // the same measure (lattice_member_width_mm: the grid's outside void, convex
+        // corners joined to their member). Never the knockdown's field, which keeps its
+        // old, conservative reading.
+        const bool own_widths = lattice->member_width_mm.size() == lat_mask.size();
+        std::vector<double> guard_own;
+        if (!own_widths)
+          guard_own = lattice_member_width_mm(
+              grid, density, kIso, kWidthAwareThicknessCapVoxels,
+              lattice_cells_per_member_min(lattice->topology) * lattice->cell_size_mm,
+              lattice->cell_size_mm);
+        const std::vector<double>& guard_width =
+            own_widths ? lattice->member_width_mm : guard_own;
         // SWEPT postures (handoff 2026-08-01-lattice-cell-size-sweep) carry a
         // per-voxel cell size, and then the honest question is each voxel's span at
         // ITS OWN cell rather than one number for the part. An EMPTY field is the
@@ -572,7 +585,7 @@ FixedDesignAnalysis analyze_fixed_design(
           const double ce = per_voxel_cell ? lattice->cell_size_field[e]
                                            : lattice->cell_size_mm;
           if (!(ce > 0.0)) continue;
-          const double cpm = member_width_mm[e] / ce;
+          const double cpm = guard_width[e] / ce;
           if (cpm < min_cpm) min_cpm = cpm;
         }
         out.lattice_min_cells_per_member = min_cpm;
