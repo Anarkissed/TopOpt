@@ -16,10 +16,12 @@
 //
 // §1 octet, latticed through, two scenarios: the strut law gates it; every margin is
 //    finite; it is never ACCEPTED on an unbounded margin.
-// §2 the same job as Kelvin: every type has its own measured law now (ruling 11-08
-//    (B)), so Kelvin's law gates it and the receipt names that law and its band. (The
-//    under-the-floor words for a type other than octet are test_strut_strength 7c's:
-//    this bar fills its own grid, so the member-width guard reads it as thick.)
+// §2 the same job as Kelvin: the bar is 20 mm, five cells, under Kelvin's floor of eight;
+//    the grid's outside is its free surface (rulings 11-09), so the law lattices none of
+//    it and the run refuses in words. (Kelvin certifying from its own law is
+//    test_lattice_type_strut_law's; under its floor in words, test_strut_strength 7c's.)
+// §1 also holds the 11-09 corner rule: the bar's four edges are corners of a member that
+//    holds octet's floor, so they stay latticed and no solid voxel carries the load.
 // §3 an analyze job with a grading block on the same bar: the re-certification is
 //    never ACCEPTED on an unbounded margin.
 // §4 every run_info.json above is JSON: no bare inf or nan; a non-finite number is
@@ -227,26 +229,19 @@ int main() {
     CHECK(has(r, "\"governing\": \"heavy side\""), "§1 the heavy scenario governs");
   }
 
-  // ── §2 Kelvin: its own law decides, and the receipt names that law ─────────
+  // ── §2 Kelvin, under its floor: the law lattices none of it, said in words ──
+  // (Rulings 11-09: the grid's outside is the bar's free surface, so its members are
+  // measured: 20 mm, five 4 mm cells, under Kelvin's floor of eight, 32 mm. The bar used
+  // to read infinitely thick and was certified from Kelvin's law.)
   const Lp kel = lattice_part(dir, f, "kelvin");
   {
-    const std::string& r = kel.receipt;
-    const double m = num_after(r, "lattice_margin_effective");
-    std::printf("[no-solid] kelvin: margin %.4f (light %.4f, heavy %.4f), accepted %s, %s\n",
-                m, scenario_margin(r, "light down"), scenario_margin(r, "heavy side"),
-                has(r, "\"lattice_accepted\": true") ? "true" : "false",
+    std::printf("[no-solid] kelvin: %s\n",
                 kel.refused.empty() ? "(written)" : kel.refused.c_str());
-    CHECK(!r.empty(), "§2 the receipt is written");
-    CHECK(std::isfinite(m), "§2 the lattice margin is finite");
-    CHECK(has(r, "\"gated\": true") && has(r, "\"strut_strength_uncertified\": false"),
-          "§2 Kelvin's own measured strut law is in the gate");
-    CHECK(has(r, "evidence/2026-11-09-lattice-type-strut-laws/kelvin/kfit.csv") &&
-              !has(r, "2026-07-31-lattice-dehomogenization-probe"),
-          "§2 the receipt names Kelvin's own law, not octet's");
-    CHECK(has(r, "\"law_rho_span\": [0.09375, 0.50521]"),
-          "§2 the law span on the receipt is Kelvin's band");
-    CHECK(!has(r, "\"lattice_accepted\": true") || std::isfinite(m),
-          "§2 never ACCEPTED on an unbounded margin");
+    CHECK(kel.receipt.empty() || !has(kel.receipt, "\"lattice_accepted\": true"),
+          "§2 Kelvin on a bar under its floor is never accepted");
+    CHECK(has(kel.refused, "could lattice NONE") &&
+              has(kel.refused, "member_too_thin_for_cell=1536"),
+          "§2 the run refuses in words: every member is too thin for Kelvin's floor");
   }
 
   // ── §3 an analyze job with a grading block ─────────────────────────────────
@@ -271,7 +266,7 @@ int main() {
 
   // ── §4 run_info.json is JSON ───────────────────────────────────────────────
   for (const auto& [name, ri] : std::vector<std::pair<std::string, std::string>>{
-           {"octet", oct.run_info}, {"kelvin", kel.run_info}, {"analyze", an_ri}}) {
+           {"octet", oct.run_info}, {"analyze", an_ri}}) {
     const std::string bad = bare_words(ri);
     if (!bad.empty()) std::printf("  (%s run_info bare words: %s)\n", name.c_str(), bad.c_str());
     CHECK(!ri.empty() && bad.empty(), ("§4 " + name + ": no bare inf or nan").c_str());

@@ -5,9 +5,11 @@
 #include <limits>
 #include <map>
 #include <stdexcept>
+#include <utility>
 
 #include "topopt/lattice.hpp"  // lattice_rho_min/max, lattice_cells_per_member_min,
                                // octet_strut_diameter_mm
+#include "topopt/mesh_distance.hpp"
 #include "topopt/voxel.hpp"    // local_member_thickness_mm
 
 namespace topopt {
@@ -43,14 +45,19 @@ namespace {
 // below 24.66 mm on one path and below 11.25 mm on another, for the same part: a member
 // of 15 mm was called beyond rescue on uniform while Fit could in fact reach it. The
 // refusal sentence and the forecast's remedies both read this count.
-void note_member_too_thin(GradedField& out, double width_mm, double n_star,
+// Returns the voxel's fallback_reason: 1, or 2 when no legal cell could ever hold it.
+char note_member_too_thin(GradedField& out, double width_mm, double n_star,
                           double floor_mm) {
   ++out.fallback_member_too_thin;
   if (std::isfinite(width_mm)) {
     if (width_mm > out.fallback_max_member_width_mm)
       out.fallback_max_member_width_mm = width_mm;
-    if (width_mm < n_star * floor_mm) ++out.fallback_irrecoverable_by_cell;
+    if (width_mm < n_star * floor_mm) {
+      ++out.fallback_irrecoverable_by_cell;
+      return 2;
+    }
   }
+  return 1;
 }
 
 }  // namespace
@@ -295,11 +302,25 @@ GradedField grade_lattice(const VoxelGrid& grid,
     return r >= 0.0 ? r : rho_hi;
   };
   out.cell_size_mm = cell;
+  out.finest_cell_mm = cell;  // Fixed / Auto; Swept and Fit set their own below
   out.cell_mode = params.cell_mode;
 
   // ── the local member width field (PR 206) ───────────────────────────────────────
-  const std::vector<double> width =
-      local_member_thickness_mm(grid, density, iso, params.thickness_cap_voxels);
+  // ★ THE LATTICE'S MEMBER WIDTH (reviewer's rulings 11-09): on the part's own surface when
+  // the caller has it, else the voxel staircase with the grid's outside void (a part that
+  // fills its own grid is measured, not read as infinitely thick), and each convex corner's
+  // residue joined to the member it is a corner of (lattice_member_width_mm), so a thick
+  // member's edges are not read as thin members.
+  CornerJoinStats corner;
+  std::vector<char> corner_joined;
+  const std::vector<double> width = lattice_member_width_mm(
+      grid, density, iso, params.thickness_cap_voxels, n_star * cell, cell,
+      params.member_surface, &corner, &corner_joined);
+  out.member_width_mm = width;
+  out.corner_residue_voxels = corner.residue_voxels;
+  out.corner_joined_voxels = corner.joined_voxels;
+  out.corner_reach_mm = corner.reach_mm;
+  out.corner_joined = std::move(corner_joined);
 
   // ── normalise demand over the candidate set ─────────────────────────────────────
   double demand_max = 0.0;
@@ -422,6 +443,10 @@ GradedField grade_lattice(const VoxelGrid& grid,
   post.cell_size_mm = cell;
   post.mask.assign(n, 0);
   post.relative_density.assign(n, 0.0);
+  // The width the certificate's own floor guard reads: the law's, so the two never
+  // disagree about how thick a member is.
+  post.member_width_mm = width;
+  out.fallback_reason.assign(n, 0);
   out.clamp_flags.assign(n, 0);
   out.cover_dropped_rho.assign(n, 0.0);
 
@@ -835,7 +860,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
         // `unprintable: 0` on this path means "impossible here", not "none today".
         // ★ D11: the capped dense floor, the same one Fit passes -- it is the finest
         // cell any mode can reach, so it is what "irrecoverable by ANY cell" means.
-        note_member_too_thin(out, width[e], n_star, abs_floor_mm);
+        out.fallback_reason[e] = note_member_too_thin(out, width[e], n_star, abs_floor_mm);
         continue;
       }
 
@@ -906,6 +931,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
         // guessing is the defect this mode exists to remove.
         ++out.solid_fallback_voxels;
         ++out.fit_no_derivation_voxels;
+        out.fallback_reason[e] = 4;
         continue;
       }
       cand[e] = 1;
@@ -913,6 +939,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
       if (want[e] < s_min) s_min = want[e];
       if (want[e] > s_max) s_max = want[e];
     }
+    if (s_max > 0.0) out.finest_cell_mm = s_min;  // the finest cell any region asked for
 
     if (s_max > 0.0) {
       CellPlanParams pp;
@@ -976,7 +1003,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
         // band-top one, so measuring irrecoverability against the rho_min floor would
         // call a member irrecoverable that fit can in fact reach.
         ++out.solid_fallback_voxels;
-        note_member_too_thin(out, width[e], n_star, abs_floor_mm);
+        out.fallback_reason[e] = note_member_too_thin(out, width[e], n_star, abs_floor_mm);
         continue;
       }
       // ★ THE PERCOLATION FLOOR, measured against the DESIGN's own member width
@@ -986,7 +1013,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
       const double cpm = width[e] / ce;
       if (cpm < perc_floor) {
         ++out.solid_fallback_voxels;
-        note_member_too_thin(out, width[e], n_star, abs_floor_mm);
+        out.fallback_reason[e] = note_member_too_thin(out, width[e], n_star, abs_floor_mm);
         continue;
       }
       // Clamp FIRST, raise second — see the ordering note on the uniform path: the
@@ -1050,6 +1077,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
     pp.topology = topo;
     pp.mode = CellSizeMode::Swept;
     pp.min_cell_size_mm = params.min_cell_size_mm;
+    if (params.min_cell_size_mm > 0.0) out.finest_cell_mm = params.min_cell_size_mm;  // the ladder's base
     pp.max_cell_size_mm = params.max_cell_size_mm;
     pp.min_extrudable_width_mm = params.min_extrudable_width_mm;
     pp.thickness_cap_voxels = params.thickness_cap_voxels;
@@ -1210,6 +1238,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
           if (out.cell_plan.cell_size_at(ci, cj, ck) > 0.0) {
             out.cover_dropped_rho[e] = clamp_rho(e, rho_of(e));
             ++out.solid_fallback_voxels;
+            out.fallback_reason[e] = 4;
             continue;
           }
         }
@@ -1218,6 +1247,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
           // retention has nothing to say about it and never rescues one.
           ++out.solid_fallback_voxels;
           ++out.fallback_strut_unprintable;
+          out.fallback_reason[e] = 3;
           continue;
         }
         ++out.subfloor_candidate_voxels;
@@ -1279,12 +1309,13 @@ GradedField grade_lattice(const VoxelGrid& grid,
           // sub-floor-retainable, and it is recorded as what it actually is.
           ++out.solid_fallback_voxels;
           ++out.fallback_strut_unprintable;
+          out.fallback_reason[e] = 3;
           continue;
         }
         ++out.solid_fallback_voxels;
         // ★ D11: the capped dense floor, the same one Fit passes -- it is the finest
         // cell any mode can reach, so it is what "irrecoverable by ANY cell" means.
-        note_member_too_thin(out, width[e], n_star, abs_floor_mm);
+        out.fallback_reason[e] = note_member_too_thin(out, width[e], n_star, abs_floor_mm);
         continue;
       }
       const double rho = clamp_rho(e, rho_of(e));
@@ -1578,6 +1609,154 @@ GradedField grade_lattice(const VoxelGrid& grid,
         out.min_strut_diameter_mm, 45.0, params.min_extrudable_width_mm);
   }
 
+  return out;
+}
+
+void absorb_solid_slivers(GradedField& gf, const VoxelGrid& grid,
+                          const std::vector<double>& density,
+                          const std::vector<char>* region, double line_width_mm,
+                          double iso) {
+  const double h = grid.spacing;
+  if (!(line_width_mm > 0.0) || !(h > 0.0)) return;
+  const int kb = static_cast<int>(std::ceil(2.0 * line_width_mm / h - 1e-9));
+  if (kb <= 1) return;  // every voxel is already 2 line widths across
+  const std::size_t n = grid.voxel_count();
+  LatticePosture& post = gf.posture;
+  if (density.size() != n || post.mask.size() != n || post.relative_density.size() != n ||
+      gf.fallback_reason.size() != n)
+    return;
+  (void)region;  // the law's own reasons say which voxels it left solid
+  const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
+  gf.sliver_pass_block_voxels = kb;
+  gf.sliver_min_cells_per_member = std::numeric_limits<double>::infinity();
+
+  // The solid the law left beside the lattice: printed and not latticed (a frozen pad
+  // or a voxel outside every region counts as solid here, and never changes).
+  std::vector<char> solid(n, 0);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const std::size_t e = grid.index(i, j, k);
+        solid[e] = grid.solid(i, j, k) && density[e] > iso && !post.mask[e] ? 1 : 0;
+      }
+  // block[c]: the kb-cube whose low corner is c lies wholly in `solid`. Separable: a run
+  // of kb along x, then of those along y, then along z.
+  auto run_forward = [&](std::vector<char>& f, int len, int stride, std::size_t base) {
+    int count = 0;  // set voxels from here to the end of the line, capped
+    for (int q = len - 1; q >= 0; --q) {
+      const std::size_t e = base + static_cast<std::size_t>(q) * stride;
+      count = f[e] ? count + 1 : 0;
+      f[e] = count >= kb ? 1 : 0;
+    }
+  };
+  std::vector<char> block = solid;
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j) run_forward(block, nx, 1, grid.index(0, j, k));
+  for (int k = 0; k < nz; ++k)
+    for (int i = 0; i < nx; ++i) run_forward(block, ny, nx, grid.index(i, 0, k));
+  for (int j = 0; j < ny; ++j)
+    for (int i = 0; i < nx; ++i)
+      run_forward(block, nz, nx * ny, grid.index(i, j, 0));
+  // covered[v]: some block's low corner lies within kb-1 behind v on every axis.
+  auto spread_back = [&](std::vector<char>& f, int len, int stride, std::size_t base) {
+    int since = kb;  // voxels since the last set one, looking backward
+    for (int q = 0; q < len; ++q) {
+      const std::size_t e = base + static_cast<std::size_t>(q) * stride;
+      since = f[e] ? 0 : since + 1;
+      f[e] = since < kb ? 1 : 0;
+    }
+  };
+  std::vector<char> covered = block;
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j) spread_back(covered, nx, 1, grid.index(0, j, k));
+  for (int k = 0; k < nz; ++k)
+    for (int i = 0; i < nx; ++i) spread_back(covered, ny, nx, grid.index(i, 0, k));
+  for (int j = 0; j < ny; ++j)
+    for (int i = 0; i < nx; ++i)
+      spread_back(covered, nz, nx * ny, grid.index(i, j, 0));
+
+  std::vector<char> sliver(n, 0);
+  for (std::size_t e = 0; e < n; ++e)
+    if (solid[e] && !covered[e] && gf.fallback_reason[e] != 0) sliver[e] = 1;
+
+  // Lattice them from their latticed neighbours, a layer at a time (a layer's choices are
+  // taken from the state before it, so the result does not depend on the sweep order).
+  const bool per_voxel_cell = post.cell_size_field.size() == n;
+  const int off[6][3] = {{-1, 0, 0}, {1, 0, 0}, {0, -1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}};
+  for (;;) {
+    std::vector<std::pair<std::size_t, std::size_t>> take;  // sliver, the neighbour it copies
+    for (int k = 0; k < nz; ++k)
+      for (int j = 0; j < ny; ++j)
+        for (int i = 0; i < nx; ++i) {
+          const std::size_t e = grid.index(i, j, k);
+          if (!sliver[e] || gf.fallback_reason[e] == 4) continue;
+          std::size_t best = n;
+          for (const auto& o : off) {
+            const int a = i + o[0], b = j + o[1], c = k + o[2];
+            if (a < 0 || b < 0 || c < 0 || a >= nx || b >= ny || c >= nz) continue;
+            const std::size_t f = grid.index(a, b, c);
+            if (!post.mask[f]) continue;
+            if (best == n || post.relative_density[f] > post.relative_density[best]) best = f;
+          }
+          if (best != n) take.emplace_back(e, best);
+        }
+    if (take.empty()) break;
+    for (const auto& [e, f] : take) {
+      post.mask[e] = 1;
+      post.relative_density[e] = post.relative_density[f];
+      if (per_voxel_cell) post.cell_size_field[e] = post.cell_size_field[f];
+      switch (gf.fallback_reason[e]) {
+        case 1: --gf.fallback_member_too_thin; break;
+        case 2: --gf.fallback_member_too_thin; --gf.fallback_irrecoverable_by_cell; break;
+        case 3: --gf.fallback_strut_unprintable; break;
+        default: break;
+      }
+      gf.fallback_reason[e] = 0;
+      if (gf.sliver_latticed.size() != n) gf.sliver_latticed.assign(n, 0);
+      gf.sliver_latticed[e] = 1;
+      sliver[e] = 0;
+      --gf.solid_fallback_voxels;
+      ++gf.latticed_voxels;
+      ++gf.sliver_voxels_latticed;
+      const double ce = per_voxel_cell ? post.cell_size_field[e] : post.cell_size_mm;
+      if (e < gf.member_width_mm.size() && ce > 0.0)
+        gf.sliver_min_cells_per_member =
+            std::min(gf.sliver_min_cells_per_member, gf.member_width_mm[e] / ce);
+    }
+  }
+  for (std::size_t e = 0; e < n; ++e)
+    if (sliver[e]) ++gf.sliver_voxels_kept_solid;
+}
+
+}  // namespace topopt
+
+namespace topopt {
+
+std::vector<std::uint8_t> lattice_solid_fallback_reasons(const VoxelGrid& grid,
+                                                         const std::vector<double>& density,
+                                                         const GradingLawParams& params,
+                                                         double iso) {
+  const std::size_t n = grid.voxel_count();
+  if (density.size() != n)
+    throw std::invalid_argument("lattice_solid_fallback_reasons: density.size() != voxel_count");
+  const std::vector<double> flat(n, 1.0);
+  GradedField gf = grade_lattice(grid, density, flat, nullptr, params, iso);
+  absorb_solid_slivers(gf, grid, density, nullptr, params.min_extrudable_width_mm, iso);
+  std::vector<std::uint8_t> out(n, 255);
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i) {
+        const std::size_t e = grid.index(i, j, k);
+        if (!(grid.solid(i, j, k) && density[e] > iso)) continue;
+        if (gf.posture.mask[e]) {
+          out[e] = e < gf.sliver_latticed.size() && gf.sliver_latticed[e]   ? 5
+                   : e < gf.corner_joined.size() && gf.corner_joined[e]     ? 6
+                                                                             : 0;
+        } else {
+          const char r = e < gf.fallback_reason.size() ? gf.fallback_reason[e] : 0;
+          out[e] = r >= 1 && r <= 4 ? static_cast<std::uint8_t>(r) : 4;
+        }
+      }
   return out;
 }
 

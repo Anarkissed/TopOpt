@@ -69,6 +69,11 @@ struct LatticePosture {
   // each voxel's OWN cell instead of one number for the whole part — the honest
   // question for a part whose cell size varies.
   std::vector<double> cell_size_field;
+  // ★ The member width (mm, per voxel) the grading law measured on the PART'S OWN
+  // SURFACE (reviewer's ruling 11-09). When sized to the grid, the cells-per-member
+  // guard reads it instead of measuring the voxel staircase, which reads the steps of a
+  // curved face as thin members. Empty (every other caller) => the staircase, as before.
+  std::vector<double> member_width_mm;
 };
 
 // How the acceptance gate knocks the worst-case stress margin down for a sparse

@@ -1532,6 +1532,13 @@ struct LatticeExportOutcome {
   long long solid_region_voxels = 0;      // printed, non-keep-out, not latticed
   double solid_region_volume_mm3 = 0.0;   // voxel basis: count × spacing³
   std::uint64_t solid_region_triangles = 0;
+  // ★ THE SOLID ON THE PART'S OWN SURFACE (reviewer's ruling 11-09, the rim coupon's
+  // SOLID). Asked when the part itself is latticed: the companion is the part's own mesh
+  // intersected with the solid zone, so its outer faces ARE the part's faces. Refused
+  // (the voxel body kept, and said why) only when the boolean cannot be made.
+  bool solid_on_part_surface_asked = false;
+  bool solid_on_part_surface = false;
+  std::string solid_on_part_surface_refused;
 
   // ★ THE NO-PROTRUSION INVARIANT, MEASURED ON WHAT WAS WRITTEN (task
   // 2026-08-08-strut-clip-matches-shell, bar R3). Every vertex of every LATTICE
@@ -2677,6 +2684,117 @@ bool lattice_shell_written(const JobLattice& lat) {
   return lat.outer_finish == "shell" || lat.outer_finish == "shell+skin";
 }
 
+// ★ THE SOLID ON THE PART'S OWN SURFACE (reviewer's ruling 11-09, the rim coupon's SOLID).
+// The companion was the marching cubes of the solid voxels, so its outer faces were raw
+// voxel steps. Here it is the part's own mesh INTERSECTED with the solid ZONE:
+//   * inside the part, the zone is the solid voxels (the lattice's voxels, a clearance's
+//     and a design cut's are not in it), so the solid/lattice interface is where it was;
+//   * outside the part, each voxel within two of the printed set takes the label of the
+//     printed voxels beside it (solid wins a tie), so the zone runs past the part's
+//     surface wherever the solid meets air, and the part's faces cut it there.
+// The faces that meet air are therefore the part's own, exactly; the interface stays the
+// voxel boundary the certificate counts. A boolean that cannot be made keeps the voxel
+// body and says why (never a half-written solid).
+struct SolidOnSurface {
+  TriangleMesh mesh;
+  bool ok = false;
+  std::string why;
+};
+double mesh_signed_volume(const TriangleMesh& m) {
+  double v = 0.0;
+  for (const auto& t : m.triangles) {
+    const Vec3& a = m.vertices[static_cast<std::size_t>(t[0])];
+    const Vec3& b = m.vertices[static_cast<std::size_t>(t[1])];
+    const Vec3& c = m.vertices[static_cast<std::size_t>(t[2])];
+    v += a.x * (b.y * c.z - b.z * c.y) - a.y * (b.x * c.z - b.z * c.x) +
+         a.z * (b.x * c.y - b.y * c.x);
+  }
+  return v / 6.0;
+}
+TriangleMesh outward_wound(TriangleMesh m) {
+  if (mesh_signed_volume(m) < 0.0)
+    for (auto& t : m.triangles) std::swap(t[1], t[2]);
+  return m;
+}
+SolidOnSurface solid_on_part_surface(const VoxelGrid& sg, const std::vector<double>& comp,
+                                     const std::vector<double>& dens, double printed_iso,
+                                     const TriangleMesh& surface) {
+  SolidOnSurface out;
+#ifdef TOPOPT_HAVE_MANIFOLD
+  const int pad = 3, nx = sg.nx, ny = sg.ny, nz = sg.nz;
+  const int px = nx + 2 * pad, py = ny + 2 * pad, pz = nz + 2 * pad;
+  const std::size_t np = static_cast<std::size_t>(px) * py * pz;
+  auto at = [&](int i, int j, int k) {
+    return (static_cast<std::size_t>(k) * py + j) * px + i;
+  };
+  std::vector<double> zone(np, 0.0);
+  std::vector<int> layer(np, -1);  // 0: printed; 1, 2: outside, that far; -2: a cut
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const std::size_t e = sg.index(i, j, k);
+        const std::size_t q = at(i + pad, j + pad, k + pad);
+        if (dens[e] >= printed_iso) {
+          layer[q] = 0;
+          zone[q] = comp[e] > 0.5 ? 1.0 : 0.0;
+        } else if (sg.solid(i, j, k)) {
+          layer[q] = -2;  // inside the part, removed by the design: never filled
+        }
+      }
+  const int off[6][3] = {{-1, 0, 0}, {1, 0, 0}, {0, -1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}};
+  for (int d = 1; d <= 2; ++d) {
+    std::vector<std::pair<std::size_t, double>> next;
+    for (int k = 1; k + 1 < pz; ++k)
+      for (int j = 1; j + 1 < py; ++j)
+        for (int i = 1; i + 1 < px; ++i) {
+          const std::size_t q = at(i, j, k);
+          if (layer[q] != -1) continue;
+          bool reached = false, solid = false;
+          for (const auto& o : off) {
+            const std::size_t r = at(i + o[0], j + o[1], k + o[2]);
+            if (layer[r] != d - 1) continue;
+            reached = true;
+            if (zone[r] > 0.5) solid = true;
+          }
+          if (reached) next.emplace_back(q, solid ? 1.0 : 0.0);
+        }
+    for (const auto& [q, z] : next) {
+      layer[q] = d;
+      zone[q] = z;
+    }
+  }
+  const Vec3 o{sg.origin.x - pad * sg.spacing, sg.origin.y - pad * sg.spacing,
+               sg.origin.z - pad * sg.spacing};
+  const TriangleMesh zmesh = outward_wound(marching_cubes(px, py, pz, sg.spacing, o, zone, 0.5));
+  if (zmesh.triangles.empty()) {
+    out.why = "the solid zone is empty";
+    return out;
+  }
+  const manifold::Manifold Z = mesh_manifold(zmesh);
+  if (Z.Status() != manifold::Manifold::Error::NoError) {
+    out.why = "the solid zone's marching-cubes surface is not a closed manifold";
+    return out;
+  }
+  const manifold::Manifold P = mesh_manifold(outward_wound(surface));
+  if (P.Status() != manifold::Manifold::Error::NoError) {
+    out.why = "the part's own mesh is not a closed manifold";
+    return out;
+  }
+  const manifold::Manifold S = P ^ Z;
+  if (S.Status() != manifold::Manifold::Error::NoError || S.IsEmpty()) {
+    out.why = "the part and the solid zone did not intersect cleanly";
+    return out;
+  }
+  out.mesh = manifold_mesh(S.GetMeshGL());
+  out.ok = !out.mesh.triangles.empty();
+  if (!out.ok) out.why = "the intersection came out empty";
+#else
+  (void)sg; (void)comp; (void)dens; (void)printed_iso; (void)surface;
+  out.why = "this build has no boolean (manifold) library";
+#endif
+  return out;
+}
+
 // Export one accepted variant's latticed companion. `cell_mm` and `radius` are
 // caller-supplied (uniform: the job's cell/strut radius; graded: the law's cell
 // + a per-position radius field over the graded densities). `cert_mask` is THE
@@ -2752,7 +2870,11 @@ LatticeExportOutcome export_latticed_variant(
     // ★ The rim on a real part (ruling 11-08 (A)): the chains it rides, already chosen
     // (the caller found them on the shipped surface and kept those its skin asks for).
     // Null: no rim, byte for byte.
-    const LatticeMeshRimSpec* mesh_rim = nullptr) {
+    const LatticeMeshRimSpec* mesh_rim = nullptr,
+    // ★ The part's own surface, when the part itself is latticed (ruling 11-09): the
+    // solid companion is built on it (solid_on_part_surface). Null: the voxel body, byte
+    // for byte.
+    const TriangleMesh* solid_surface = nullptr) {
   // ── M4: A SKIN MODE THAT PRODUCES NO GEOMETRY MUST SAY SO, NOT RETURN ZERO.
   //
   // ★ THE PREDICATE IS THE MEASURED COUNT, NOT A PREDICTION — and the first version
@@ -2878,6 +3000,17 @@ LatticeExportOutcome export_latticed_variant(
         static_cast<double>(oc.solid_region_voxels) * sg.spacing * sg.spacing *
         sg.spacing;
     if (oc.solid_region_voxels > 0) comp_mesh = marching_cubes(sg, comp, 0.5);
+    if (oc.solid_region_voxels > 0 && solid_surface != nullptr &&
+        !solid_surface->triangles.empty()) {
+      oc.solid_on_part_surface_asked = true;
+      SolidOnSurface ss = solid_on_part_surface(sg, comp, dens, printed_iso, *solid_surface);
+      if (ss.ok) {
+        comp_mesh = std::move(ss.mesh);
+        oc.solid_on_part_surface = true;
+      } else {
+        oc.solid_on_part_surface_refused = ss.why;
+      }
+    }
     oc.solid_region_triangles =
         static_cast<std::uint64_t>(comp_mesh.triangles.size());
   }
@@ -4812,6 +4945,15 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
          ",\n";
     s += "  \"solid_region_triangles\": " +
          std::to_string(oc.solid_region_triangles) + ",\n";
+    // ★ Ruling 11-09: where the SOLID's outer faces come from, said only when the part
+    // itself was latticed (a legacy receipt keeps its bytes).
+    if (oc.solid_on_part_surface_asked) {
+      s += "  \"solid_faces\": " +
+           json_str(oc.solid_on_part_surface ? "the part's own surface" : "voxel steps") +
+           ",\n";
+      if (!oc.solid_on_part_surface)
+        s += "  \"solid_faces_why\": " + json_str(oc.solid_on_part_surface_refused) + ",\n";
+    }
   }
   // Lattice role regions (stage 1, H1a) — what the roles did, and the tested
   // precedence spelled out so the receipt cannot be misread.
@@ -5112,6 +5254,15 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
          json_num(gf.fallback_max_member_width_mm) + ",\n";
     s += "      \"member_width_needed_mm\": " +
          json_num(gf.cells_per_member_floor * gf.cell_size_mm) + ",\n";
+    // ★ Rulings 11-09: the convex corners joined to the member they are a corner of.
+    if (gf.corner_residue_voxels > 0)
+      s += "      \"convex_corners\": {\"residue_voxels\": " +
+           std::to_string(gf.corner_residue_voxels) + ", \"joined_to_their_member\": " +
+           std::to_string(gf.corner_joined_voxels) + ", \"reach_mm\": " +
+           json_num(gf.corner_reach_mm) +
+           ", \"note\": \"a voxel under the floor whose residue ends within reach_mm of "
+           "material that holds the floor is a convex corner of that member and is latticed "
+           "with it; where the thin material runs on (a member joining another) it stays solid\"},\n";
     s += "      \"note\": \"member_too_thin_for_cell: the member cannot hold "
          "cells_per_member_floor cells across at this cell size — a SMALLER cell "
          "helps. strut_unprintable_at_every_cell: the strut this density emits is "
@@ -5120,6 +5271,20 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
          "than the floor times the smallest printable cell, so no cell choice can "
          "lattice it; the design itself is too thin here.\"\n";
     s += "    },\n";
+    // ★ SLIVERS (reviewer's ruling 11-09): solid the law left that is in no block 2 line
+    // widths across. Emitted only when the pass ran (2 line widths span more than one
+    // voxel), so a coarse run's receipt keeps its bytes.
+    if (gf.sliver_pass_block_voxels >= 2) {
+      s += "    \"slivers\": {\"block_voxels\": " + std::to_string(gf.sliver_pass_block_voxels) +
+           ", \"latticed_with_neighbours\": " + std::to_string(gf.sliver_voxels_latticed) +
+           ", \"kept_solid\": " + std::to_string(gf.sliver_voxels_kept_solid) +
+           ", \"latticed_min_cells_per_member\": " +
+           json_num(gf.sliver_voxels_latticed > 0 ? gf.sliver_min_cells_per_member : 0.0) +
+           ", \"note\": \"a solid piece under 2 line widths in any direction is latticed with "
+           "its neighbours (their density and cell); one with no lattice beside it, or kept "
+           "solid for a reason no cell answers, stays solid. The reason counts above are "
+           "after this pass; widest_rejected_member_mm is the law's, before it.\"},\n";
+    }
     // ── SUB-FLOOR RETENTION — THE ACCEPTED INACCURACY, NAMED (handoff
     //    2026-08-04-subfloor-lattice-unloaded-regions, bar S2) ───────────────────
     // Retaining below-the-floor material is a decision to accept an error nothing
@@ -7586,6 +7751,14 @@ LatticeVariantOutcome lattice_one_variant_pass(
       gp.region_override_ids = &e3_owner;
       gp.region_overrides = &e3_overrides;
     }
+    // ★ THE PART'S OWN SURFACE (reviewer's ruling 11-09, the rim coupon's SOLID): when the
+    // part itself is latticed, its members are measured on its mesh, not on the voxel
+    // staircase, which read the steps of the coupon's arch as a rod and a comb of fins.
+    std::unique_ptr<MeshDistance> part_md;
+    if (part_surface != nullptr && !part_surface->triangles.empty()) {
+      part_md = std::make_unique<MeshDistance>(*part_surface);
+      gp.member_surface = part_md.get();
+    }
     gp.topology = lat_topo;  // the job's type
     gp.target_cell_size_mm = job.grading.cell_mm;
     gp.min_extrudable_width_mm = job.grading.min_extrudable_width_mm;
@@ -7770,6 +7943,10 @@ LatticeVariantOutcome lattice_one_variant_pass(
     }
     gf = grade_lattice(solved_grid, dens, vm_grade, &cand, gp,
                        printed_iso);
+    // ★ No solid sliver (ruling 11-09): a solid piece under 2 line widths is latticed with
+    // its neighbours, before anything reads the posture.
+    absorb_solid_slivers(gf, solved_grid, dens, &cand, gp.min_extrudable_width_mm,
+                         printed_iso);
     // ★ ruling 2: where the band stays SOLID, which is only where no cell prints.
     if (gp.band_distance_mm != nullptr) {
       double* bx = gf.band_solid_box;
@@ -7943,7 +8120,9 @@ LatticeVariantOutcome lattice_one_variant_pass(
         // was its RADIUS, not its legs.)
         JobGrading jg2 = job.grading;
         jg2.cell_min_mm = cc.lo; jg2.cell_max_mm = cc.hi; jg2.cell_mm = cc.hi;
-        const GradedField agf = grade_lattice(solved_grid, dens, vm_grade, &cand, alt, printed_iso);
+        GradedField agf = grade_lattice(solved_grid, dens, vm_grade, &cand, alt, printed_iso);
+        absorb_solid_slivers(agf, solved_grid, dens, &cand, alt.min_extrudable_width_mm,
+                             printed_iso);
         // ★ THE RUN'S DOMAIN, NOT THE POSTURE (reviewer, 2026-09-30). The run builds
         // its lattice on lattice_certification_mask INTERSECT the posture; the probe
         // used the posture alone, so it forecast for a set the run does not build.
@@ -8317,8 +8496,11 @@ LatticeVariantOutcome lattice_one_variant_pass(
       // The SAME thickness measure the law reads, at the law's own cap, so a number
       // in this report and a decision inside the law can never disagree about how
       // thick a member is.
-      const std::vector<double> tau = local_member_thickness_mm(
-          solved_grid, dens, printed_iso, gp.thickness_cap_voxels);
+      const std::vector<double> tau =
+          gf.member_width_mm.size() == solved_grid.voxel_count()
+              ? gf.member_width_mm  // the law's own (rulings 11-09)
+              : local_member_thickness_mm(solved_grid, dens, printed_iso,
+                                          gp.thickness_cap_voxels);
       const std::vector<double>& vm = vm_grade;
 
       // The PART's peak demand — over every printed voxel, region or not. This is
@@ -8486,6 +8668,31 @@ LatticeVariantOutcome lattice_one_variant_pass(
           gf.cell_size_mm = plan_coarsest;
       } else {
       R.ungradeable = true;
+      // ★ THE FLOOR IS QUOTED AT THE RUN'S OWN FINEST CELL (reviewer's ruling 11-10). It
+      // used to be quoted at `cell_size_mm`, which a swept or fit run that latticed nothing
+      // leaves at the smallest LEGAL cell (width / phi(rho_max): 0.79 mm at a 0.32 mm
+      // bead), a cell the run never allowed -- so a 12.5 mm member beside "must be at
+      // least 3.97 mm" read as a pass. The finest cell the run allows is the most lenient
+      // floor it could have applied; a member under it is too thin at every cell it had.
+      const double finest_cell =
+          gf.finest_cell_mm > 0.0 ? gf.finest_cell_mm : gf.cell_size_mm;
+      const double floor_at_finest = gf.cells_per_member_floor * finest_cell;
+      const std::string widths =
+          gf.fallback_max_member_width_mm < floor_at_finest
+              ? ". Every member is too thin: the widest is " +
+                    json_num(gf.fallback_max_member_width_mm) +
+                    " mm across, under the " + json_num(floor_at_finest) + " mm that " +
+                    json_num(gf.cells_per_member_floor) +
+                    " cells of this run's finest cell (" + json_num(finest_cell) +
+                    " mm) need"
+              : ". The widest member the law rejected is " +
+                    json_num(gf.fallback_max_member_width_mm) +
+                    " mm across, which would hold " +
+                    json_num(gf.cells_per_member_floor) +
+                    " cells of this run's finest cell (" + json_num(finest_cell) +
+                    " mm, " + json_num(floor_at_finest) +
+                    " mm needed); it was rejected because its own cell is coarser or its "
+                    "strut does not print (the reasons above)";
       R.ungradeable_reason =
           "the grading law could lattice NONE of this variant's " +
           std::to_string(gf.region_voxels) +
@@ -8496,13 +8703,8 @@ LatticeVariantOutcome lattice_one_variant_pass(
           ", strut_unprintable_at_every_cell=" +
           std::to_string(gf.fallback_strut_unprintable) +
           ", irrecoverable_by_any_cell_size=" +
-          std::to_string(gf.fallback_irrecoverable_by_cell) +
-          ". The widest member the law rejected is " +
-          json_num(gf.fallback_max_member_width_mm) +
-          " mm; at this cell size a member must be at least " +
-          json_num(gf.cells_per_member_floor * gf.cell_size_mm) +
-          " mm across to hold " + json_num(gf.cells_per_member_floor) +
-          " cells. A smaller cell needs a finer declared extrusion width "
+          std::to_string(gf.fallback_irrecoverable_by_cell) + widths +
+          ". A smaller cell needs a finer declared extrusion width "
           "(min_extrudable_width_mm " +
           json_num(gp.min_extrudable_width_mm) +
           " mm sets the printability floor at " +
@@ -10582,7 +10784,8 @@ LatticeVariantOutcome lattice_one_variant_pass(
       organic.ran ? nullptr : &solid_probe,
       graded ? job.grading.min_extrudable_width_mm : job.lattice.min_extrudable_width_mm,
       region_shell.triangles.empty() ? nullptr : &region_shell,
-      any_zone_skin ? &skin_zones : nullptr, rim_asked ? &mesh_rim : nullptr);
+      any_zone_skin ? &skin_zones : nullptr, rim_asked ? &mesh_rim : nullptr,
+      part_surface);
   if (rim_asked) {
     // ★ TOPOPT_RIM_DUMP=<file>: the chains the rim was asked to ride, one "CHAIN" line each
     // (closed, points, length mm) and then its points -- evidence and tests read where the
@@ -11265,9 +11468,16 @@ LatticeVariantOutcome lattice_one_variant_pass(
       }
   }
   if (graded && !shipped_rho.empty()) gf.posture.relative_density = shipped_rho;
-  const LatticePosture post = build_lattice_posture(
-      lat_topo, solved_grid, cell, mask, rho_uniform,
-      !shipped_rho.empty() ? &shipped_rho : graded ? &gf.posture.relative_density : nullptr);
+  const LatticePosture post = [&] {
+    LatticePosture p = build_lattice_posture(
+        lat_topo, solved_grid, cell, mask, rho_uniform,
+        !shipped_rho.empty() ? &shipped_rho : graded ? &gf.posture.relative_density : nullptr);
+    // ★ The widths measured on the part's own surface ride to the certificate's floor
+    // guard (ruling 11-09); empty => it measures the staircase, as before.
+    if (gf.posture.member_width_mm.size() == p.mask.size())
+      p.member_width_mm = gf.posture.member_width_mm;
+    return p;
+  }();
   // ★ E2.4: the open lattice's cut cells, given no credit (open_finish_cut_cells).
   std::vector<char> open_cut;
   if (!region_open.empty()) {  // per region: the open part only, beside its wall

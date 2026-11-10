@@ -17,7 +17,12 @@
 //    strength, and the certificate's margin is the same number either way; no chain the
 //    rim rides crosses the smooth top.
 // §3 the coupon open (outer_finish "none"): the cut strut ends near the edges are tied.
-// §4 his l-bracket (3.5 mm cells: its widest member is 18.75 mm): the rim is laid.
+// §4 his l-bracket: its plates are 8 mm thick, under the 17.5 mm an octet member needs at
+//    3.5 mm cells, so the run REFUSES and no rim is laid. Until ruling 11-09 (2) the run's
+//    grid ended at the bracket's own faces and the member width read past them as
+//    material: the plates read 18.75 mm and were latticed, and the rim rode that lattice.
+//    That lattice was the grid's edge, not the part. (Latticing an 8 mm plate takes a
+//    cell under 1.6 mm, a run too heavy for this test.)
 // §5 Rim per zone: the coupon with the rim only in "Wall end" (the 6 mm under its x = 0
 //    face): every chain it rides has its midpoint there, and the rest are counted.
 // §6 the welded body (emit_welded_stl) with the rim is one closed mesh.
@@ -337,22 +342,20 @@ int main() {
     const int bottom = face_with_normal(m, 0, 0, -1), side = face_with_normal(m, 1, 0, 0);
     CHECK(bottom >= 0 && side >= 0, "precondition: the l-bracket's bottom and its x+ face");
     const Run r = lattice_part(dir, "lbracket", job_json(lb, bottom, side, 32, ", \"skin\": \"rim\"", 3.5));
-    // 3.5 mm: its widest member is 18.75 mm, and 4 mm cells need 20 mm for 5 cells.
-    const std::size_t rb = r.receipt.find("\"rim\": {");
-    std::printf("[rim] l-bracket: %s\n", rb == std::string::npos ? r.refused.c_str()
-                                                                  : r.receipt.substr(rb, 500).c_str());
-    CHECK(r.refused.empty() && num_after(r.receipt, "chains_laid", rb) > 0,
-          "§4 the rim is laid on his l-bracket");
-    // At 3.5 mm cells most of the bracket is too thin to lattice and stays solid; the rim
-    // dresses the lattice only: its edges along solid material are counted, not laid.
-    std::printf("[rim] l-bracket: laid %.1f mm on %.0f chain(s); %.1f mm along material left "
-                "solid (%.0f chain(s) wholly), %.0f clipped away\n",
-                num_after(r.receipt, "length_laid_mm", rb), num_after(r.receipt, "chains_laid", rb),
-                num_after(r.receipt, "length_on_solid_mm", rb),
-                num_after(r.receipt, "chains_on_solid", rb),
-                num_after(r.receipt, "chains_clipped_away", rb));
-    CHECK(num_after(r.receipt, "length_on_solid_mm", rb) > 0.0,
-          "§4 the bracket's edges along material left solid are counted, not laid");
+    std::printf("[rim] l-bracket: %s\n", r.refused.c_str());
+    static const char kWidest[] = "Every member is too thin: the widest is ";
+    const std::size_t at = r.refused.find(kWidest);
+    const double widest = at == std::string::npos
+                              ? -1.0
+                              : std::strtod(r.refused.c_str() + at + sizeof kWidest - 1, nullptr);
+    CHECK(r.refused.find("could lattice NONE") != std::string::npos,
+          "§4 his l-bracket's 8 mm plates are too thin for 3.5 mm cells: the run refuses");
+    CHECK(widest > 0.0 && widest <= 8.0 + 1e-9,
+          "§4 and the widest member it rejects is no wider than the bracket's 8 mm plates");
+    // ★ ruling 11-10: the floor is quoted at the run's own cell, beside the width
+    CHECK(r.refused.find("under the 17.5 mm that 5 cells of this run's finest cell (3.5 mm) need") !=
+              std::string::npos,
+          "§4 and the refusal quotes the floor at the run's own 3.5 mm cell, beside the width");
   }
 
   // ── §5 Rim per zone ────────────────────────────────────────────────────────
