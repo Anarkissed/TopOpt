@@ -830,9 +830,10 @@ int main() {
                               ? r.posture.cell_size_field[e]
                               : r.cell_size_mm;
         if (ce > 0.0 && r.posture.mask[e]) {
-          // Re-derive from the posture rather than trusting the report.
-          const double w = local_member_thickness_mm(
-              g, gd, 0.5, sw.thickness_cap_voxels)[e];
+          // Re-derive from the posture rather than trusting the report: the posture's own
+          // cell against the law's width field (since ruling 11-10 (3) measured below a
+          // voxel, which the staircase levels cannot reproduce).
+          const double w = r.member_width_mm[e];
           if (w / ce < floor_n) ++flagged_really_subfloor;
         }
       }
@@ -1539,20 +1540,25 @@ int main() {
     const GradedField U = grade_lattice(blk, d, dm, nullptr, up);
     CHECK(U.fallback_member_too_thin > 0,
           "D11 premise: the 15 mm member IS too thin for a 4 mm cell, so it falls back");
-    // MEASURED: the thickest member the law rejected here is 16.0 mm, and the light
+    // MEASURED: the thickest member the law rejected here is 15.0 mm (16.0 before ruling
+    // 11-10 (3): the two-voxel levels rounded the 15-voxel block up), and the light
     // floor's threshold is N* x 7.026628 = 35.13 mm -- ABOVE it. So under the light floor
     // every one of these voxels was called irrecoverable by any cell size. Under the dense
     // floor (N* x 1.116949 = 5.58 mm) only the genuinely thin ones are: the block's
     // corners, where the local member is a few millimetres across. The assertion is that
     // ratio, because "0" would be wrong -- some voxels here really are beyond rescue.
-    CHECK(U.fallback_max_member_width_mm > 15.5 && U.fallback_max_member_width_mm < 16.5,
-          "D11 premise: the thickest rejected member is the block's 16 mm one");
+    std::printf("[D11] the thickest rejected member reads %.6f mm\n", U.fallback_max_member_width_mm);
+    CHECK(U.fallback_max_member_width_mm > 14.5 && U.fallback_max_member_width_mm < 15.5,
+          "D11 premise: the thickest rejected member is the block's 15 mm one");
     CHECK(U.fallback_max_member_width_mm <
               lattice_cells_per_member_min(LatticeTopology::Octet) *
                   lattice_cell_printability_floor_mm(LatticeTopology::Octet, 0.45),
           "D11 premise: and it is UNDER the light floor's threshold, so with that floor "
           "every rejected voxel would read irrecoverable -- which is what makes this a "
           "discriminating fixture");
+    std::printf("[D11] irrecoverable %lld of %lld rejected\n",
+                static_cast<long long>(U.fallback_irrecoverable_by_cell),
+                static_cast<long long>(U.fallback_member_too_thin));
     CHECK(U.fallback_irrecoverable_by_cell * 100 < U.fallback_member_too_thin,
           "D11: under the dense floor almost none are irrecoverable (measured 8 of 13,500) "
           "-- only the corners, where the member really is a few mm across");

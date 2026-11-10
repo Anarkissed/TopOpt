@@ -348,6 +348,23 @@ struct JobLattice {
   // Lattice role regions (see JobLatticeRegion). Empty => whole-part lattice,
   // byte-identical to the pre-regions schema.
   std::vector<JobLatticeRegion> regions;
+  // ★ FACE SKINS (reviewer's ruling 11-10 (3), the app's Protect "Skin only"): a region
+  // {"kind": "face", "role": "skin", "face_id", "thickness_mm"?, "label"?}. Neither lattice
+  // nor a hole: a SOLID skin of exactly `thickness_mm` on that B-rep face's own surface,
+  // with the lattice running on, unbroken, behind it -- no voxel slab and no inner wall.
+  // The parse moves them out of `regions`, so no role test anywhere reads one as an
+  // exclude. `thickness_mm` is his Protect depth (ruling 11-10 (ii)): 0 or absent = the skin
+  // alone, 2 line widths; between 0 and 2 line widths it is ROUNDED UP to 2 and the receipt
+  // says so (no solid piece prints thinner); above that, exactly what he asked. Empty =>
+  // byte-identical.
+  struct FaceSkin {
+    std::string label;
+    int face_id = -1;
+    double thickness_mm = 0.0;  // as built, after the rounding
+    double asked_mm = 0.0;      // as he stated it (0 = not stated)
+    bool rounded_up = false;
+  };
+  std::vector<FaceSkin> face_skins;
   // ★ ANY-STEP STEPPED: the cells the app placed, which core VALIDATES and does not
   // repack. Sending the plan rather than the packer's inputs is what makes the preview a
   // contract: the run lays down the arrangement the maintainer approved on screen, and a
@@ -766,7 +783,14 @@ struct JobGrading {
   double max_relative_density = 0.0;
   // AESTHETIC only: let the cells-per-member floor be COMPUTED from what the material
   // actually carries, instead of the fixed accuracy floor of 5. Off by default.
+  // ★ SUPERSEDED by the flat aesthetic floor (ruling 11-10 (i)): that floor is the lowest
+  // this rule could ever reach, so the key is still read and no longer changes the run.
   bool aesthetic_adaptive_cells_per_member = false;
+  // ★ "ALLOW SINGLE-CELL MEMBERS" (ruling 11-10 (i)): the aesthetic floor goes from 2 cells
+  // across to 1. AESTHETIC only, and only with a finish that re-ties the cut struts (a
+  // skin, rim or diagrid, or the shell): both are refused in words otherwise. A type whose
+  // skinned 1-cell member is not measured (every type but octet) stays at 2.
+  bool single_cell_members = false;
   double aesthetic_error_budget = 0.0;   // 0 => the core constant (1 %)
 
   double demand_exponent = 1.0;         // rho = rho_max*(demand/max)^exp; 1.0 = fully-

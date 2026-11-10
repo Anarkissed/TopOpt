@@ -529,7 +529,25 @@ std::vector<double> lattice_member_width_mm(const VoxelGrid& grid,
                                             double cell_mm,
                                             const MeshDistance* surface = nullptr,
                                             CornerJoinStats* stats = nullptr,
-                                            std::vector<char>* joined = nullptr);
+                                            std::vector<char>* joined = nullptr,
+                                            double fine_mm = 0.0);
+// ★ `fine_mm` > 0 (reviewer's ruling 11-10 (3), on ruling (i)): every printed voxel the
+// levels above read under `fine_mm` is measured BELOW A VOXEL instead -- the diameter of the
+// widest inscribed ball painted onto it, each ball's depth and place fitted where the depth
+// tops out along an axis (on `surface`, the exact depth; on the voxel model, the depth to
+// the void voxels' faces), so a wall reads its own thickness whichever way it lies on the
+// grid and whether it is an odd or an even number of voxels. The levels move in two-voxel
+// steps and round up, so they cannot tell a 2-cell floor from a 5-cell one on a coarse grid.
+// 0 (the default): the levels alone, byte for byte. The corner join reads the refined widths.
+//
+// The corner join alone, on a width field already measured (`floor_mm` <= 0 or `cell_mm` <= 0:
+// returned as given). lattice_member_width_mm is the measure followed by this; a caller that
+// needs the same widths joined at two floors measures once and joins twice.
+std::vector<double> lattice_member_corner_join(const VoxelGrid& grid,
+                                               const std::vector<double>& density, double iso,
+                                               std::vector<double> width, double floor_mm,
+                                               double cell_mm, CornerJoinStats* stats = nullptr,
+                                               std::vector<char>* joined = nullptr);
 
 // ---------------------------------------------------------------------------
 // The CONNECTIVITY BELT (handoff 2026-07-23-gate-honesty-connectivity-rejection).

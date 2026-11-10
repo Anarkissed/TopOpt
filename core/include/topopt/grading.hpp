@@ -447,6 +447,10 @@ struct GradingLawParams {
   // False by default: a caller that has not thought about the boundary gets the safe
   // floor rather than the relaxed one.
   bool boundary_finish_written = false;
+  // ★ "ALLOW SINGLE-CELL MEMBERS" (ruling 11-10 (i)): with a finish written, the aesthetic
+  // floor is 1 cell across instead of 2 (lattice_member_floor_cells). Ignored under
+  // Structural, which keeps its accuracy floor.
+  bool single_cell_members = false;
 
   // HOW THESE TWO COMPOSE (multiscale x sub-floor retention). A multiscale run
   // prescribes rho and stops using `demand` FOR THE DENSITY — but it still hands
@@ -571,6 +575,11 @@ struct GradedField {
   // is legal as long as the density is raised with it — which this law now does. That
   // is why a hand-set Fixed target between the two is no longer raised.
   double min_printable_cell_mm = 0.0;
+  // ★ THE ACCURACY FLOOR (cells across) beside `cells_per_member_floor`, the floor this run
+  // held members to (ruling 11-10 (i)): equal under Structural; under Aesthetic the floor
+  // is 2 (or 1) and latticed material under this one is counted as not strength-checked
+  // (`aesthetic_below_accuracy_floor_voxels`).
+  double accuracy_cells_per_member = 0.0;
   // ★ THE FINEST CELL THIS RUN ALLOWS (reviewer's ruling 11-10): Fixed / Auto the one cell;
   // Swept the ladder's base (cell_min_mm); Fit the finest cell any region asked for. A
   // refusal quotes the member floor at THIS cell, the most lenient the run could have used,

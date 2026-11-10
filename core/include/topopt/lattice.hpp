@@ -231,6 +231,22 @@ double aesthetic_cells_per_member_hard_floor(LatticeTopology topo);
 double aesthetic_cells_per_member_hard_floor(LatticeTopology topo,
                                              bool boundary_finish_written);
 
+// ★ THE FLOOR A RUN HOLDS A MEMBER TO (the maintainer's ruling 11-10 (i), the thin-wall
+// floor). STRUCTURAL: the type's accuracy floor, `lattice_cells_per_member_min` (5 for
+// octet), because the certificate has to hold. AESTHETIC: the type's hard floor, FLAT --
+// 2 cells across, or 1 where "Allow single-cell members" is on AND a finish re-ties the
+// struts the cut severs (only octet's skinned 1-cell member is measured, so every other
+// type stays at 2 until its own is). An aesthetic wall under the accuracy floor is latticed
+// and NOT strength-checked, and the receipt says so in one plain line. ONE function, so the
+// app's preview, the law and every pre-flight read the same number.
+double lattice_member_floor_cells(LatticeTopology topo, bool aesthetic,
+                                  bool single_cell_members, bool boundary_finish_written);
+
+// The plain line an aesthetic receipt carries (ruling 11-10 (i)).
+inline constexpr const char* kAestheticThinWallsLine =
+    "Aesthetic: thin walls are latticed down to 2 cells across (1 with Allow single-cell "
+    "members) and are not strength-checked.";
+
 // The default error budget: the fraction of the allowable by which the homogenisation
 // error is permitted to perturb this material's contribution. 1 % — the same scale as
 // `kUnloadedUtilisationMax`, and stated as a POLICY so it can be argued with.

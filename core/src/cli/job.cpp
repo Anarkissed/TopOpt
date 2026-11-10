@@ -1631,6 +1631,48 @@ JobDescription parse_job(const std::string& json_text) {
         schema_fail("\"lattice.regions\" must be an array");
       for (const JsonValue& rv : regs->arr) {
         require_object(rv, "a lattice region");
+        // ★ A FACE SKIN (ruling 11-10 (3)). Its own keys only: the face it lies on and its
+        // thickness. No geometry -- the skin follows the B-rep face itself, so a prism
+        // beside it would be a second source of truth for the same surface -- and no
+        // finish or grading, because a skin is solid and has no lattice of its own.
+        if (const JsonValue* rk = find_key(rv, "role");
+            rk != nullptr && rk->type == JsonValue::Type::String && rk->str == "skin") {
+          const std::string named =
+              "lattice region " + std::to_string(job.lattice.regions.size() +
+                                                 job.lattice.face_skins.size() + 1) +
+              " (a skin)";
+          reject_unknown_keys(rv, {"role", "kind", "face_id", "label", "thickness_mm"},
+                              named + ": a skin states only \"kind\": \"face\", its "
+                              "\"face_id\", and optionally \"thickness_mm\" and \"label\"; "
+                              "it is solid, so it takes no finish, grading or geometry, "
+                              "and");
+          JobLattice::FaceSkin sk;
+          if (require_nonempty_string(require_key(rv, "kind", named), named + " kind") !=
+              "face")
+            schema_fail(named + ": a skin lies on a face, so its \"kind\" must be \"face\"");
+          const JsonValue* fv = find_key(rv, "face_id");
+          if (fv == nullptr)
+            schema_fail(named + ": a skin needs the \"face_id\" of the face it lies on");
+          const double d = require_number(*fv, named + " face_id");
+          if (d < 0.0 || d != std::floor(d))
+            schema_fail(named + ": \"face_id\" must be a non-negative integer");
+          sk.face_id = static_cast<int>(d);
+          if (const JsonValue* lv2 = find_key(rv, "label"))
+            sk.label = require_nonempty_string(*lv2, named + " label");
+          if (const JsonValue* tv = find_key(rv, "thickness_mm")) {
+            sk.thickness_mm = require_number(*tv, named + " thickness_mm");
+            if (!(sk.thickness_mm >= 0.0) || !std::isfinite(sk.thickness_mm))
+              schema_fail(named + ": \"thickness_mm\" must be 0 (the skin alone, 2 line "
+                          "widths) or more");
+            sk.asked_mm = sk.thickness_mm;
+          }
+          for (const JobLattice::FaceSkin& o : job.lattice.face_skins)
+            if (o.face_id == sk.face_id)
+              schema_fail(named + ": face " + std::to_string(sk.face_id) +
+                          " already has a skin; one face takes one skin");
+          job.lattice.face_skins.push_back(std::move(sk));
+          continue;
+        }
         reject_unknown_keys(rv, {"role", "kind", "geometry", "face_id",
                                  "region_id", "relative_density",
                                  "synthetic_stress", "synthetic_foci",
@@ -2071,6 +2113,18 @@ JobDescription parse_job(const std::string& json_text) {
           require_number(*w, "lattice.min_extrudable_width_mm");
       if (!(job.lattice.min_extrudable_width_mm > 0.0))
         schema_fail("lattice \"min_extrudable_width_mm\" must be > 0");
+      // ★ THE UNGRADED JOB'S PRINTABILITY FLOOR (reviewer's ruling 11-10 (3), on ruling (i);
+      // LatticeReview's U1). A job with no grading block states its strut, and no law raises
+      // it, so a strut thinner than the line the printer lays cannot print at all. Refused in
+      // words, never thickened behind his back.
+      if (!has_grading_block && job.lattice.strut_radius_mm > 0.0 &&
+          2.0 * job.lattice.strut_radius_mm < job.lattice.min_extrudable_width_mm)
+        schema_fail("the lattice's struts are " + fmt_g(2.0 * job.lattice.strut_radius_mm) +
+                    " mm across, under the " + fmt_g(job.lattice.min_extrudable_width_mm) +
+                    " mm line your printer lays (\"min_extrudable_width_mm\"), so they would "
+                    "not print. State a strut at least that wide (\"strut_radius_mm\" " +
+                    fmt_g(0.5 * job.lattice.min_extrudable_width_mm) +
+                    " or more), or a grading block, whose law sizes each strut to print.");
     }
     // Outer finish (task 2026-07-30-lattice-skin-freeform). Absent => "shell",
     // byte-identical to the boundary-finish behaviour.
@@ -2196,7 +2250,7 @@ JobDescription parse_job(const std::string& json_text) {
              "intent", "aesthetic_percentile", "aesthetic_rho_min",
              "max_relative_density",
              "aesthetic_rho_max", "aesthetic_adaptive_cells_per_member",
-             "aesthetic_error_budget",
+             "aesthetic_error_budget", "single_cell_members",
              "cell_mode", "cell_min_mm", "cell_max_mm",
              "retain_subfloor_in_unloaded_regions", "subfloor_stress_fraction",
              "subfloor_aggregate_cap", "report_region_cells",
@@ -2694,6 +2748,11 @@ JobDescription parse_job(const std::string& json_text) {
         schema_fail("grading \"aesthetic_adaptive_cells_per_member\" must be a boolean");
       job.grading.aesthetic_adaptive_cells_per_member = (v->num != 0.0);
     }
+    if (const JsonValue* v = find_key(gr, "single_cell_members")) {
+      if (v->type != JsonValue::Type::Bool)
+        schema_fail("grading \"single_cell_members\" must be a boolean");
+      job.grading.single_cell_members = (v->num != 0.0);
+    }
     if (const JsonValue* v = find_key(gr, "aesthetic_error_budget")) {
       job.grading.aesthetic_error_budget =
           require_number(*v, "grading.aesthetic_error_budget");
@@ -2905,6 +2964,48 @@ JobDescription parse_job(const std::string& json_text) {
   // ── FIT's two cross-field requirements (task 2026-08-05-lattice-cell-fit-mode).
   // Checked here rather than in the grading block because both are about the LATTICE
   // block, which parses after it.
+  // ★ "ALLOW SINGLE-CELL MEMBERS" (ruling 11-10 (i)): an aesthetic floor, and a 1-cell member
+  // is admissible only where a finish re-ties the struts the cut severs (lattice.hpp states
+  // the measurement). The same finish test the run applies (run_job, boundary_finish_written).
+  if (job.grading.single_cell_members) {
+    if (job.grading.intent != "aesthetic")
+      schema_fail("grading \"single_cell_members\" is an Aesthetic setting: a Structural "
+                  "lattice holds every member to its accuracy floor, so the certificate "
+                  "describes it. Set \"intent\": \"aesthetic\" or leave it out.");
+    const bool shell = job.lattice.outer_finish == "shell" ||
+                       job.lattice.outer_finish == "shell+skin";
+    const bool net = job.grading.algorithm == "organic"
+                         ? job.grading.organic_boundary_finish != "clean"
+                         : job.lattice.skin != "none";
+    if (!shell && !net)
+      schema_fail("grading \"single_cell_members\" needs a finish on the lattice's cut "
+                  "faces (a skin, rim or diagrid, or the shell): a bare one-cell member has "
+                  "its struts severed where the part's surface cuts it, and nothing ties "
+                  "them. This job has none (lattice \"skin\": \"none\" and no shell).");
+  }
+  // ★ A FACE SKIN'S THICKNESS (ruling 11-10 (3)): 2 line widths unless stated, and never
+  // under that -- the SOLID slice's rule, that no solid piece is thinner than 2 line widths.
+  // The line width is the one the job states (grading's, else the lattice's), else 0.45 mm,
+  // the width every other core default prints at.
+  if (!job.lattice.face_skins.empty()) {
+    const double w = job.grading.present && job.grading.min_extrudable_width_mm > 0.0
+                         ? job.grading.min_extrudable_width_mm
+                     : job.lattice.min_extrudable_width_mm > 0.0
+                         ? job.lattice.min_extrudable_width_mm
+                         : 0.45;
+    // ★ Ruling 11-10 (ii): his Protect depth. 0 = the skin alone; under 2 line widths it
+    // is rounded UP to 2 and the receipt says so; above that it is exactly his depth.
+    for (JobLattice::FaceSkin& sk : job.lattice.face_skins) {
+      if (!(sk.thickness_mm > 0.0)) {
+        sk.thickness_mm = 2.0 * w;
+        continue;
+      }
+      if (sk.thickness_mm < 2.0 * w - 1e-9) {
+        sk.thickness_mm = 2.0 * w;
+        sk.rounded_up = true;
+      }
+    }
+  }
   if (job.grading.present && job.grading.cell_mode == "fit") {
     // (1) FIT DERIVES THE CELL FROM A DECLARED REGION, so there must be one. Without
     // an include region there is no stated requirement to fit — and the design's own

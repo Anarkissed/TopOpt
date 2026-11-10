@@ -15,6 +15,7 @@
 #include "topopt/voxel.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <map>
@@ -722,16 +723,266 @@ std::vector<double> local_member_thickness_mm(const VoxelGrid& grid,
   return thickness;
 }
 
+// ★ THE WIDTH BELOW A VOXEL (reviewer's ruling 11-10 (3), on ruling (i)). The granulometry
+// above measures in whole levels, so a width moves in steps of TWO voxels and rounds up:
+// a wall N voxels thick reads N (even) or N + 1 (odd) voxels, and at Fast on a 200 mm part
+// (3.1 mm voxels) the 2-cell and 5-cell floors of a 2 mm cell cannot be told apart. Here,
+// for every printed voxel the levels read under `fine_mm`, the width is the diameter of
+// the widest INSCRIBED BALL painted onto it, measured below a voxel:
+//   * D, each voxel's depth in the part: on the part's own surface when given (its exact
+//     signed distance at the voxel's centre, bounded by the part's inner voids at the void
+//     voxel's face); on the voxel model, the distance to the nearest void voxel's face, the
+//     grid's outside void;
+//   * a voxel at least as deep as its two neighbours along an axis is on the ridge of the
+//     line through it. The depth runs up to the ridge and down from it at one slope (a wall
+//     seen along an axis: the cosine of its tilt), so the three depths (four, for an even
+//     count across, whose ridge lies between two centres) place the ridge within half a
+//     voxel of the centre -- on a wall, exactly, whichever way it lies on the grid;
+//   * the ball there is a REAL one: its radius is the part's own clearance at its centre
+//     (the exact depth on the part's surface, or the grid's outside on the voxel model, and
+//     every void voxel's box), its centre this voxel's moved to the ridge along one axis or
+//     several at once (a bar's ridge line, a node), whichever clears most. So no width
+//     reads a member wider than a ball it holds;
+//   * each such ball, moved to the ridge, is painted onto every voxel whose centre lies
+//     within half a voxel of it; a voxel takes the widest ball painted on it. One no ball
+//     reaches takes the widest of its neighbours', else keeps the levels' width.
+// No search: one depth per voxel, and a few more at each ridge's candidate centres. Deterministic.
+// `fine_mm` <= 0: nothing changes.
+static void refine_member_width(const VoxelGrid& grid, const std::vector<double>& density,
+                                double iso, const MeshDistance* surface, double fine_mm,
+                                std::vector<double>& width) {
+  if (!(fine_mm > 0.0)) return;
+  const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
+  const std::size_t n = grid.voxel_count();
+  const double h = grid.spacing;
+  if (!(h > 0.0)) return;
+  std::vector<char> printed(n, 0), in_f(n, 0), in_s(n, 0);
+  bool any_f = false;
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const std::size_t e = grid.index(i, j, k);
+        if (!(grid.solid(i, j, k) && density[e] > iso)) continue;
+        printed[e] = 1;
+        // F: refined. S: whose balls can reach F (the levels round up by at most two
+        // voxels, so a member reading two voxels wider than F's widest can still paint it).
+        if (width[e] < fine_mm) in_f[e] = 1, any_f = true;
+        if (width[e] < fine_mm + 4.0 * h) in_s[e] = 1;
+      }
+  if (!any_f) return;
+
+  // The voids D is measured to (besides the part's surface, when given): on the surface,
+  // the part's inner voids; on the voxel model, every void, the grid's outside too.
+  const int pad = surface != nullptr ? 0 : 1;
+  const int px = nx + 2 * pad, py = ny + 2 * pad, pz = nz + 2 * pad;
+  auto at_p = [&](int i, int j, int k) {
+    return (static_cast<std::size_t>(k + pad) * py + (j + pad)) * px + (i + pad);
+  };
+  std::vector<char> seed(static_cast<std::size_t>(px) * py * pz, surface != nullptr ? 0 : 1);
+  bool any_void = surface == nullptr;
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const std::size_t e = grid.index(i, j, k);
+        const bool v = surface != nullptr ? (grid.solid(i, j, k) && !printed[e]) : !printed[e];
+        seed[at_p(i, j, k)] = v ? 1 : 0;
+        any_void = any_void || v;
+      }
+  const double kInf = std::numeric_limits<double>::infinity();
+  const std::vector<double> d2v =
+      any_void ? squared_edt(seed, px, py, pz) : std::vector<double>(seed.size(), kInf);
+
+  // D, in voxels, for S. A printed voxel outside S is deeper than any ball that matters
+  // (+inf: never a ridge's lower side); a voxel that is not printed lies half a voxel
+  // beyond the surface (-0.5).
+  std::vector<double> D(n, kInf);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const std::size_t e = grid.index(i, j, k);
+        if (!printed[e]) { D[e] = -0.5; continue; }
+        if (!in_s[e]) continue;
+        const double d2 = d2v[at_p(i, j, k)];
+        const double dv = std::isfinite(d2) ? std::max(0.0, std::sqrt(d2) - 0.5) : kInf;
+        D[e] = surface != nullptr
+                   ? std::min(std::max(0.0, surface->signed_distance(grid.voxel_center(i, j, k))) / h,
+                              dv)
+                   : dv;
+      }
+  // Outside the part, on its own surface, the depth goes on below zero: the exact signed
+  // distance at that centre (read once, when a ridge asks), so a member two voxels thin is
+  // fitted as truly as a thick one. On the voxel model the staircase is a voxel face away.
+  std::vector<double> Dout(surface != nullptr ? n : 0, std::numeric_limits<double>::quiet_NaN());
+  auto Dat = [&](int a, int b, int c) -> double {
+    const bool in_grid = a >= 0 && b >= 0 && c >= 0 && a < nx && b < ny && c < nz;
+    if (in_grid && printed[grid.index(a, b, c)]) return D[grid.index(a, b, c)];
+    if (surface == nullptr || (in_grid && grid.solid(a, b, c))) return -0.5;  // an inner void
+    const Vec3 p{grid.origin.x + (a + 0.5) * h, grid.origin.y + (b + 0.5) * h,
+                 grid.origin.z + (c + 0.5) * h};
+    if (!in_grid) return std::min(0.0, surface->signed_distance(p)) / h;
+    double& v = Dout[grid.index(a, b, c)];
+    if (std::isnan(v)) v = std::min(0.0, surface->signed_distance(p)) / h;
+    return v;
+  };
+
+  std::vector<double> painted(n, 0.0);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const std::size_t e = grid.index(i, j, k);
+        if (!in_s[e]) continue;
+        const double b = D[e];
+        if (!(b > 0.0) || !std::isfinite(b)) continue;
+        // Where the ridge lies along each axis this voxel tops (an offset of up to half a
+        // voxel toward the deeper side, from the depths of the line's neighbours).
+        double offs[3] = {0.0, 0.0, 0.0};
+        bool any_off = false;
+        for (int ai = 0; ai < 3; ++ai) {
+          const int d[3] = {ai == 0, ai == 1, ai == 2};
+          const double a = Dat(i - d[0], j - d[1], k - d[2]);
+          const double c = Dat(i + d[0], j + d[1], k + d[2]);
+          if (!(b >= a && b >= c)) continue;  // not this line's ridge (or a deep neighbour)
+          constexpr double kTie = 1e-9;
+          double off = 0.0, dir = 1.0;
+          if (b - a > kTie && b - c > kTie) {
+            // A strict peak: the line's ridge lies within half a voxel of this centre, toward
+            // the deeper neighbour, on the steeper side's slope (the depth is 1-Lipschitz).
+            const double lo = std::min(a, c), hi = std::max(a, c);
+            const double s = std::min(1.0, b - lo);
+            off = std::min(0.5, std::max(0.0, 0.5 * (1.0 - (b - hi) / s)));
+            dir = c >= a ? 1.0 : -1.0;
+          } else if ((b - a > kTie) != (b - c > kTie)) {
+            // A flat pair (an even count across): the ridge lies between the two equal
+            // centres only if the depth falls again beyond the pair. If it stays (a plateau,
+            // bounded by another face), this line has no ridge here.
+            dir = b - c > kTie ? -1.0 : 1.0;  // toward the equal neighbour
+            const double lo = dir > 0 ? a : c;
+            const double far = Dat(i + 2 * static_cast<int>(dir) * d[0],
+                                   j + 2 * static_cast<int>(dir) * d[1],
+                                   k + 2 * static_cast<int>(dir) * d[2]);
+            const double s = std::min(1.0, b - lo), s2 = std::min(1.0, b - far);
+            if (s2 > kTie) off = std::min(0.5, s2 / (s + s2));
+          }
+          offs[ai] = dir * off;
+          any_off = any_off || off > 1e-12;
+        }
+        // ★ THE BALL IS A REAL ONE: its radius is the part's own clearance at its centre --
+        // the exact depth on the part's surface (or the grid's outside, on the voxel model)
+        // and every void voxel's box -- never a fitted number, so no width reads a member
+        // wider than a ball it holds. Its centre: this voxel's, moved to the ridge along one
+        // axis (a wall), or along several at once (a bar's ridge line, a node), whichever
+        // clears most.
+        std::vector<std::array<double, 3>> voids;  // void boxes' centres within reach
+        double P = b, cx = i, cy = j, cz = k;
+        // (On the part's surface with no shift, b already is the exact clearance.)
+        if (any_off || surface == nullptr) {
+          const int r = static_cast<int>(std::ceil(b)) + 2;
+          for (int c = std::max(0, k - r); c <= std::min(nz - 1, k + r); ++c)
+            for (int bb = std::max(0, j - r); bb <= std::min(ny - 1, j + r); ++bb)
+              for (int a = std::max(0, i - r); a <= std::min(nx - 1, i + r); ++a) {
+                if (printed[grid.index(a, bb, c)]) continue;
+                if (surface != nullptr && !grid.solid(a, bb, c)) continue;  // the surface's
+                voids.push_back({static_cast<double>(a), static_cast<double>(bb),
+                                 static_cast<double>(c)});
+              }
+          auto clearance = [&](double qx, double qy, double qz) {
+            double cl;
+            if (surface != nullptr) {
+              const Vec3 q{grid.origin.x + (qx + 0.5) * h, grid.origin.y + (qy + 0.5) * h,
+                           grid.origin.z + (qz + 0.5) * h};
+              cl = std::max(0.0, surface->signed_distance(q)) / h;
+            } else {
+              cl = std::min({qx + 0.5, nx - 0.5 - qx, qy + 0.5, ny - 0.5 - qy, qz + 0.5,
+                             nz - 0.5 - qz});
+            }
+            for (const auto& v : voids) {
+              const double dx = std::max(0.0, std::fabs(v[0] - qx) - 0.5);
+              const double dy = std::max(0.0, std::fabs(v[1] - qy) - 0.5);
+              const double dz = std::max(0.0, std::fabs(v[2] - qz) - 0.5);
+              cl = std::min(cl, std::sqrt(dx * dx + dy * dy + dz * dz));
+            }
+            return cl;
+          };
+          P = clearance(i, j, k);
+          for (int mask = 1; mask < 8; ++mask) {
+            bool used = true;
+            for (int ai = 0; ai < 3; ++ai)
+              if ((mask >> ai & 1) && !(std::fabs(offs[ai]) > 1e-12)) used = false;
+            if (!used) continue;
+            const double qx = i + ((mask & 1) ? offs[0] : 0.0);
+            const double qy = j + ((mask & 2) ? offs[1] : 0.0);
+            const double qz = k + ((mask & 4) ? offs[2] : 0.0);
+            const double cl = clearance(qx, qy, qz);
+            if (cl > P) P = cl, cx = qx, cy = qy, cz = qz;
+          }
+        }
+        if (!(P > 0.0)) continue;
+        // Paint: every F voxel whose centre lies within half a voxel of this ball.
+        const double rv = P + 0.5;
+        const int i0 = std::max(0, static_cast<int>(std::floor(cx - rv))),
+                  i1 = std::min(nx - 1, static_cast<int>(std::ceil(cx + rv)));
+        const int j0 = std::max(0, static_cast<int>(std::floor(cy - rv))),
+                  j1 = std::min(ny - 1, static_cast<int>(std::ceil(cy + rv)));
+        const int k0 = std::max(0, static_cast<int>(std::floor(cz - rv))),
+                  k1 = std::min(nz - 1, static_cast<int>(std::ceil(cz + rv)));
+        const double w = 2.0 * P * h;
+        for (int c = k0; c <= k1; ++c)
+          for (int bb = j0; bb <= j1; ++bb)
+            for (int a = i0; a <= i1; ++a) {
+              const std::size_t x = grid.index(a, bb, c);
+              if (!in_f[x] || painted[x] >= w) continue;
+              const double dx = a - cx, dy = bb - cy, dz = c - cz;
+              if (dx * dx + dy * dy + dz * dz <= rv * rv + 1e-9) painted[x] = w;
+            }
+      }
+  // A voxel no ball reached: the widest of its neighbours' (one pass, from the painted
+  // field only), else the levels' width.
+  std::vector<double> fill(n, 0.0);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const std::size_t e = grid.index(i, j, k);
+        if (!in_f[e] || painted[e] > 0.0) continue;
+        double best = 0.0;
+        for (int dk = -1; dk <= 1; ++dk)
+          for (int dj = -1; dj <= 1; ++dj)
+            for (int di = -1; di <= 1; ++di) {
+              const int a = i + di, b = j + dj, c = k + dk;
+              if (a < 0 || b < 0 || c < 0 || a >= nx || b >= ny || c >= nz) continue;
+              best = std::max(best, painted[grid.index(a, b, c)]);
+            }
+        fill[e] = best;
+      }
+  // Measured to a nanometre: a member exactly at a floor (a 12 mm tab at 5 x 2.4 mm) reads
+  // the floor, not a hair under it from the last digit of the arithmetic.
+  for (std::size_t e = 0; e < n; ++e) {
+    if (!in_f[e]) continue;
+    const double w = painted[e] > 0.0 ? painted[e] : fill[e];
+    if (w > 0.0) width[e] = std::round(w * 1e6) / 1e6;
+  }
+}
+
 std::vector<double> lattice_member_width_mm(const VoxelGrid& grid,
                                             const std::vector<double>& density, double iso,
                                             int cap_radius_voxels, double floor_mm,
                                             double cell_mm, const MeshDistance* surface,
-                                            CornerJoinStats* stats, std::vector<char>* joined) {
+                                            CornerJoinStats* stats, std::vector<char>* joined,
+                                            double fine_mm) {
   std::vector<double> width =
       surface != nullptr
           ? local_member_thickness_mm(grid, density, iso, cap_radius_voxels, *surface)
           : local_member_thickness_mm(grid, density, iso, cap_radius_voxels,
                                       /*grid_outside_is_void=*/true);
+  refine_member_width(grid, density, iso, surface, fine_mm, width);
+  return lattice_member_corner_join(grid, density, iso, std::move(width), floor_mm, cell_mm,
+                                    stats, joined);
+}
+
+std::vector<double> lattice_member_corner_join(const VoxelGrid& grid,
+                                               const std::vector<double>& density, double iso,
+                                               std::vector<double> width, double floor_mm,
+                                               double cell_mm, CornerJoinStats* stats,
+                                               std::vector<char>* joined) {
   const std::size_t n = grid.voxel_count();
   if (joined != nullptr) joined->assign(n, 0);
   const double h = grid.spacing;

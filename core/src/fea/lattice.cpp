@@ -1373,6 +1373,13 @@ double aesthetic_cells_per_member_hard_floor(LatticeTopology topo,
   return boundary_finish_written ? 1.0 : 2.0;
 }
 
+double lattice_member_floor_cells(LatticeTopology topo, bool aesthetic,
+                                  bool single_cell_members, bool boundary_finish_written) {
+  if (!aesthetic) return lattice_cells_per_member_min(topo);
+  return aesthetic_cells_per_member_hard_floor(topo,
+                                               single_cell_members && boundary_finish_written);
+}
+
 double aesthetic_cells_per_member_floor(LatticeTopology topo, double utilisation,
                                         double error_budget) {
   return aesthetic_cells_per_member_floor(topo, utilisation, error_budget, false);

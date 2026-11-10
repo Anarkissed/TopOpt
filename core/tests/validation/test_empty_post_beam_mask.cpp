@@ -133,7 +133,9 @@ int main() {
   // swept job refuses -- and the refusal quotes the floor at the run's OWN finest cell
   // (3 mm, 15 mm needed) beside the width, never at the 1.12 mm legal minimum it used to.
   if (drc != 0) {
-    CHECK(has(derr, "Every member is too thin: the widest is 12.5 mm across, under the 15 mm "
+    // (ruling 11-10 (3): the tab is measured below a voxel, its own 12 mm, where the two-voxel
+    // levels read 12.5)
+    CHECK(has(derr, "Every member is too thin: the widest is 12 mm across, under the 15 mm "
                     "that 5 cells of this run's finest cell (3 mm) need"),
           "a swept refusal quotes 5 x the run's own finest cell, beside the member width");
     CHECK(!has(derr, "must be at least"),

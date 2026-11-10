@@ -95,7 +95,10 @@ std::string job_json(const Faces& f, const std::string& mode, const std::string&
          std::to_string(f.top) + "], \"force\": [0, 0, -30]}], \"scenarios\": [" + light +
          ", " + heavy + "]}, "
          "\"lattice\": {\"topology\": \"octet\"" + lattice_extra + "}, "
-         "\"grading\": {\"topology\": \"octet\", \"cell_mm\": 4.0, "
+         // 3.4 mm cells (ruling 11-10 (3)): the optimised rungs' widest member is 7 voxels,
+         // 17.5 mm, which the two-voxel levels read as 20 -- exactly 5 cells of 4 mm. Measured
+         // honestly it is under that floor, so the cell leaves room: 5 x 3.4 = 17 mm.
+         "\"grading\": {\"topology\": \"octet\", \"cell_mm\": 3.4, "
          "\"min_extrudable_width_mm\": 0.45" + grading_extra + "}, "
          "\"output\": {\"report\": \"report.json\", \"mesh_format\": \"stl\", "
          "\"mesh_prefix\": \"variant\"}}";

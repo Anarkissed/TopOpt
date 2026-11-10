@@ -350,8 +350,13 @@ int main() {
                               : std::strtod(r.refused.c_str() + at + sizeof kWidest - 1, nullptr);
     CHECK(r.refused.find("could lattice NONE") != std::string::npos,
           "§4 his l-bracket's 8 mm plates are too thin for 3.5 mm cells: the run refuses");
-    CHECK(widest > 0.0 && widest <= 8.0 + 1e-9,
-          "§4 and the widest member it rejects is no wider than the bracket's 8 mm plates");
+    // ★ ruling 11-10 (3): measured below a voxel, the widest member is the ball inscribed in
+    // the L's corner, touching both outer faces and the inner corner's edge: diameter
+    // 2 x 8 sqrt 2 / (1 + sqrt 2) = 9.373 mm. (The two-voxel levels read no more than 8.)
+    const double corner_ball = 2.0 * 8.0 * std::sqrt(2.0) / (1.0 + std::sqrt(2.0));
+    CHECK(widest > 0.0 && widest <= corner_ball + 1e-3,
+          "§4 and the widest member it rejects is no wider than the ball in the bracket's "
+          "corner, where its two 8 mm plates meet");
     // ★ ruling 11-10: the floor is quoted at the run's own cell, beside the width
     CHECK(r.refused.find("under the 17.5 mm that 5 cells of this run's finest cell (3.5 mm) need") !=
               std::string::npos,

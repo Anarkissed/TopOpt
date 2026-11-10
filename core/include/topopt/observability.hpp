@@ -928,6 +928,11 @@ struct RunInfo {
   // Material the relaxation let through below the ACCURACY floor: buildable, and NOT
   // describable by the homogenised tensor. A certificate over it is out of regime.
   long long grading_below_accuracy_floor_voxels = 0;
+  // ★ RULING 11-10 (i): the floor this run held members to (cells across), and the one
+  // plain line an aesthetic receipt carries -- thin walls are not strength-checked. Empty
+  // line (and 0) under Structural, whose receipt is unchanged.
+  double grading_member_floor_cells = 0.0;
+  std::string grading_thin_walls_line;
   // ── ★ RE-CERTIFICATION OF THE LATTICED OBJECT (structural intent only) ───────
   // Before this, the lattice-only path certified the SOLID part and never the
   // hollowed-out one. These describe the second solve, run with the graded posture.

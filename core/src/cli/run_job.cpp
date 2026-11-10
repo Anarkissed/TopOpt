@@ -1530,6 +1530,25 @@ struct LatticeExportOutcome {
   bool solid_on_part_surface_asked = false;
   bool solid_on_part_surface = false;
   std::string solid_on_part_surface_refused;
+  // ★ FACE SKINS (ruling 11-10 (3)): one row per skin, as built and measured on the skin.
+  struct FaceSkinRow {
+    int face_id = -1;
+    std::string label;
+    double thickness_mm = 0.0, area_mm2 = 0.0, volume_mm3 = 0.0;
+    double asked_mm = 0.0;     // his Protect depth as stated (0 = the skin alone)
+    bool rounded_up = false;   // under 2 line widths, rounded up (ruling 11-10 (ii))
+    double measured_min_mm = 0.0, measured_max_mm = 0.0;
+    std::size_t measured_samples = 0;
+    // solid voxels (the law's fallbacks) within one voxel behind the skin: what would sit
+    // between the skin and the lattice. 0 where the part behind the face is latticed.
+    std::size_t solid_voxels_behind = 0;
+  };
+  std::vector<FaceSkinRow> face_skins;
+  // ★ ruling 11-10 (3): a job with no grading block, held to the thin-wall floor
+  // (ungraded_member_floor). `ungraded_floor` false: no such job, nothing written.
+  bool ungraded_floor = false;
+  double ungraded_floor_cells = 0.0, ungraded_floor_mm = 0.0;
+  long long ungraded_kept_solid_voxels = 0;
 
   // ★ THE NO-PROTRUSION INVARIANT, MEASURED ON WHAT WAS WRITTEN (task
   // 2026-08-08-strut-clip-matches-shell, bar R3). Every vertex of every LATTICE
@@ -1697,6 +1716,16 @@ std::shared_ptr<const ClearanceVoxelMask> region_lattice_mask(
 // A region-backed one with nothing to resolve against REFUSES rather than
 // resolving to an empty mask — an empty include region silently latticing
 // NOTHING is the failure this whole track exists to stop seeing.
+// ★ A FACE SKIN NAMES A FACE OF THIS PART (ruling 11-10 (3)).
+void check_face_skins_on_part(const JobDescription& job, const StepModel& model) {
+  for (const JobLattice::FaceSkin& sk : job.lattice.face_skins)
+    if (sk.face_id >= model.face_count)
+      throw JobError("the skin " + (sk.label.empty() ? std::string() : "\"" + sk.label + "\" ") +
+                     "names face " + std::to_string(sk.face_id) + ", and this part has " +
+                     std::to_string(model.face_count) + " faces (0 to " +
+                     std::to_string(model.face_count - 1) + ")");
+}
+
 LatticeRoleRegions lattice_role_regions_from_job(const JobDescription& job,
                                                  const StepModel* model,
                                                  const VoxelGrid* grid) {
@@ -1821,6 +1850,9 @@ LatticeRoleRegions lattice_role_regions_from_job(const JobDescription& job,
     carried.lattice.whole_part_includes.clear();
     rr.carriers = lattice_role_regions_from_job(carried, model, grid).includes;
   }
+  // ★ A face skin names a face of this part (ruling 11-10 (3)), on every path that builds
+  // the roles; the lattice-variant entry checks it before any solve as well.
+  if (model != nullptr) check_face_skins_on_part(job, *model);
   return rr;
 }
 
@@ -2065,13 +2097,125 @@ void fill_fit_region_cell(FitRegionCell& f, LatticeTopology topo,
 // which would silently break the index mirror `includes` relies on — so the
 // call sites that can see a region kind pass them, and the mirror assertion at
 // each call site is what catches it if one does not.
+bool lattice_shell_written(const JobLattice& lat);
+
+// ★ THE FLOOR THIS JOB'S RUN HOLDS A MEMBER TO (ruling 11-10 (i)), read from the job the
+// way the run reads it: Aesthetic takes the type's hard floor (2 cells, or 1 with
+// "single_cell_members" and a finish), Structural its accuracy floor. The pre-flight and
+// fit's per-region cell use this, so they answer with the number the law applies.
+double job_member_floor_cells(const JobDescription& job, LatticeTopology topo) {
+  const bool aesthetic = job.grading.present && job.grading.intent == "aesthetic";
+  const bool finish =
+      lattice_shell_written(job.lattice) ||
+      (job.grading.algorithm == "organic" ? job.grading.organic_boundary_finish != "clean"
+                                          : job.lattice.skin != "none");
+  return lattice_member_floor_cells(topo, aesthetic, job.grading.single_cell_members, finish);
+}
+
+// ★ THE UNGRADED JOB'S THIN-WALL FLOOR (reviewer's ruling 11-10 (3), on ruling (i);
+// LatticeReview's U1). A job with no grading block never runs the law, so every cell
+// overlapping the boundary got a strut and a wall of any thickness was latticed, while the
+// preview draws its 2-cell floor. The floor here is the preview's, the type's Aesthetic hard
+// floor (2 cells; no single-cell switch without a grading block): an ungraded lattice is not
+// graded by stress, so it is held to what the picture shows, and its receipt says thin walls
+// are not strength-checked. Measured with the law's own width (lattice_member_width_mm: the
+// part's surface when the part itself is latticed, below a voxel, convex corners joined).
+// `ok[e]` = 1 where a printed voxel's member clears the floor. Pure: no state.
+//
+// ★ BUILT AND DISARMED. Armed, it holds five tests' ungraded jobs -- a 4 mm plate latticed at
+// 3 mm cells (plate_bore), whose whole body is under 2 cells and prints solid -- to a lattice
+// they no longer have (their diagrid then refuses: nothing to dress): lattice_hookup,
+// lattice_variant, bake_build_orientation, designbox_lattice_recert, lattice_void_exterior V2.
+// Arming it and re-fixturing those is left to the lattice rebuild (maintainer's re-plan,
+// 11-10). The ungraded PRINTABILITY floor (job.cpp: a strut under the stated line is
+// refused) is armed.
+inline constexpr bool kUngradedThinWallFloorArmed = false;
+struct UngradedFloor {
+  std::vector<char> ok;
+  double floor_cells = 0.0, floor_mm = 0.0;
+};
+UngradedFloor ungraded_member_floor(const JobDescription& job, LatticeTopology topo,
+                                    const VoxelGrid& g, const std::vector<double>& dens,
+                                    double iso, const TriangleMesh* part_surface) {
+  UngradedFloor f;
+  const double cell = job.lattice.cell_mm;
+  if (!kUngradedThinWallFloorArmed || !(cell > 0.0)) return f;
+  const bool finish = lattice_shell_written(job.lattice) || job.lattice.skin != "none";
+  f.floor_cells = lattice_member_floor_cells(topo, /*aesthetic=*/true,
+                                             /*single_cell_members=*/false, finish);
+  f.floor_mm = f.floor_cells * cell;
+  std::unique_ptr<MeshDistance> md;
+  if (part_surface != nullptr && !part_surface->triangles.empty())
+    md = std::make_unique<MeshDistance>(*part_surface);
+  const double fine_mm = std::max(f.floor_cells, lattice_cells_per_member_min(topo)) * cell +
+                         3.0 * g.spacing;
+  const std::vector<double> w = lattice_member_width_mm(g, dens, iso, 32, f.floor_mm, cell,
+                                                        md.get(), nullptr, nullptr, fine_mm);
+  f.ok.assign(g.voxel_count(), 0);
+  for (std::size_t e = 0; e < f.ok.size(); ++e)
+    f.ok[e] = dens[e] > iso && !(w[e] < f.floor_mm) ? 1 : 0;
+  return f;
+}
+inline constexpr const char* kUngradedThinWallsLine =
+    "No grading block: walls are latticed down to 2 cells across, as the preview draws "
+    "them; thinner ones print solid. Thin walls are not strength-checked.";
+
+// ★ ONE BUILDER FOR THE LAW'S TERMS (reviewer's ruling 11-10 (3), on ruling (i); LatticeReview's
+// F1). The run, `analyze` and the pre-flight forecast each built their own GradingLawParams,
+// and the forecast set none of the job's intent, aesthetic range, density cap or finish: it
+// always graded Structural, uncapped, at 5 cells, so its counts and remedies described a
+// different job from an Aesthetic run. Every term the JOB states is set here, once; each
+// caller adds only what is its own (the run: its surface, regions and retention; analyze:
+// its allowable; the forecast: its fallbacks). `absent_intent` is what a job stating no
+// intent means on that path (Structural for the run and its forecast, Aesthetic for
+// analyze's lattice-only receipt), as before. `who` prefixes a refusal.
+LatticeAlgorithm resolve_lattice_algorithm(const JobGrading& jg);  // defined below
+GradingLawParams grading_law_params_from_job(const JobDescription& job,
+                                             GradingIntent absent_intent,
+                                             const std::string& who) {
+  GradingLawParams gp;
+  gp.topology = lattice_topology_from_id(job.grading.topology);  // the job's type
+  gp.target_cell_size_mm = job.grading.cell_mm;
+  gp.min_extrudable_width_mm = job.grading.min_extrudable_width_mm;
+  gp.demand_exponent = job.grading.demand_exponent;
+  gp.organic_geometry = resolve_lattice_algorithm(job.grading) == LatticeAlgorithm::Organic;
+  // Cell-size mode; an absent "cell_mode" parses as "fixed" — the pre-sweep path.
+  if (!resolve_cell_mode(job.grading.cell_mode, gp.cell_mode))
+    throw JobError(who + ": unknown grading cell_mode \"" + job.grading.cell_mode + "\"");
+  gp.min_cell_size_mm = job.grading.cell_min_mm;
+  gp.max_cell_size_mm = job.grading.cell_max_mm;
+  gp.intent = absent_intent;
+  if (!job.grading.intent.empty() &&
+      !grading_intent_from_name(job.grading.intent.c_str(), gp.intent))
+    throw JobError(who + ": unknown grading intent \"" + job.grading.intent + "\"");
+  gp.aesthetic_percentile = job.grading.aesthetic_percentile;
+  gp.aesthetic_rho_min = job.grading.aesthetic_rho_min;
+  gp.aesthetic_rho_max = job.grading.aesthetic_rho_max;
+  gp.max_relative_density = job.grading.max_relative_density;
+  // Read by nothing since ruling 11-10 (i) (the flat floor); passed so a receipt that
+  // reports it reports what the job sent.
+  gp.aesthetic_adaptive_cells_per_member = job.grading.aesthetic_adaptive_cells_per_member;
+  gp.aesthetic_error_budget = job.grading.aesthetic_error_budget;
+  // ★★ IS A BOUNDARY FINISH WRITTEN? A finish exists unless the export is the BARE
+  // lattice — `outer_finish: "skin"` drops the solid shell, and for organic
+  // `grading.organic_boundary_finish: "clean"` then emits nothing at all on the surface
+  // either. Any other combination writes a shell, a skin, a rim or a diagrid, and any of
+  // those re-ties the struts trimming severed.
+  gp.boundary_finish_written =
+      lattice_shell_written(job.lattice) ||
+      (job.grading.algorithm == "organic" ? job.grading.organic_boundary_finish != "clean"
+                                          : job.lattice.skin != "none");
+  gp.single_cell_members = job.grading.single_cell_members;  // ruling 11-10 (i)
+  return gp;
+}
+
 std::vector<FitRegionCell> fit_region_cells(const JobDescription& job,
                                             LatticeTopology topo,
                                             double min_extrudable_width_mm,
                                             const LatticeRoleRegions* roles = nullptr) {
   std::vector<FitRegionCell> out;
   if (!(min_extrudable_width_mm > 0.0)) return out;
-  const double n_star = lattice_cells_per_member_min(topo);
+  const double n_star = job_member_floor_cells(job, topo);  // ruling 11-10 (i)
   std::size_t include_index = 0;  // mirrors LatticeRoleRegions::includes order
   for (std::size_t ri = 0; ri < job.lattice.regions.size(); ++ri) {
     const JobLatticeRegion& r = job.lattice.regions[ri];
@@ -2765,6 +2909,174 @@ SolidOnSurface solid_on_part_surface(const VoxelGrid& sg, const std::vector<doub
   return out;
 }
 
+// ★ A FACE SKIN (reviewer's ruling 11-10 (3), the app's Protect "Skin only"). A solid of
+// exactly `t` on one B-rep face's own surface: the part INTERSECTED with the face's
+// triangles thickened -- `t` inward and `margin` outward along their vertex normals, the
+// boundary closed by walls along those normals. So its outer face is the part's own, its
+// inner face is the face offset by t, and its sides stop at the face's edges. Nothing in it
+// is voxels: the lattice behind it is untouched, and the struts clipped to the part run on
+// into it. A boolean that cannot be made says why (the caller refuses; never a half skin).
+struct FaceSkinBuilt {
+  TriangleMesh mesh;
+  bool ok = false;
+  std::string why;
+  double area_mm2 = 0.0, volume_mm3 = 0.0;
+  double thickness_min_mm = 0.0, thickness_max_mm = 0.0;  // measured on `mesh`
+  std::size_t thickness_samples = 0;
+};
+FaceSkinBuilt build_face_skin(const TriangleMesh& part, const StepModel& cad, int face_id,
+                              double t, double margin) {
+  FaceSkinBuilt out;
+#ifdef TOPOPT_HAVE_MANIFOLD
+  const double sign = mesh_signed_volume(cad.mesh) >= 0.0 ? 1.0 : -1.0;
+  // The face's triangles, welded by position (a STEP tessellation may repeat a vertex).
+  std::map<std::array<long long, 3>, int> weld;
+  std::vector<Vec3> pts;
+  std::vector<std::array<int, 3>> tris;
+  auto vid = [&](const Vec3& p) {
+    const std::array<long long, 3> key{std::llround(p.x * 1e6), std::llround(p.y * 1e6),
+                                       std::llround(p.z * 1e6)};
+    const auto it = weld.find(key);
+    if (it != weld.end()) return it->second;
+    const int id = static_cast<int>(pts.size());
+    weld.emplace(key, id);
+    pts.push_back(p);
+    return id;
+  };
+  for (std::size_t i = 0; i < cad.mesh.triangles.size() && i < cad.triangle_face.size(); ++i) {
+    if (cad.triangle_face[i] != face_id) continue;
+    const auto& tr = cad.mesh.triangles[i];
+    std::array<int, 3> l{vid(cad.mesh.vertices[static_cast<std::size_t>(tr[0])]),
+                         vid(cad.mesh.vertices[static_cast<std::size_t>(tr[1])]),
+                         vid(cad.mesh.vertices[static_cast<std::size_t>(tr[2])])};
+    if (l[0] == l[1] || l[1] == l[2] || l[0] == l[2]) continue;  // degenerate
+    if (sign < 0.0) std::swap(l[1], l[2]);                        // outward winding
+    tris.push_back(l);
+  }
+  if (tris.empty()) {
+    out.why = "face " + std::to_string(face_id) + " has no triangles in the part's mesh";
+    return out;
+  }
+  auto sub3 = [](const Vec3& a, const Vec3& b) { return Vec3{a.x - b.x, a.y - b.y, a.z - b.z}; };
+  auto crs = [](const Vec3& a, const Vec3& b) {
+    return Vec3{a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+  };
+  auto len = [](const Vec3& a) { return std::sqrt(a.x * a.x + a.y * a.y + a.z * a.z); };
+  // Vertex normals: the area-weighted mean of the face's own triangle normals (a B-rep face
+  // is smooth, so these are its surface normals at the vertices).
+  std::vector<Vec3> nrm(pts.size(), Vec3{0, 0, 0});
+  std::vector<Vec3> tn(tris.size());
+  for (std::size_t i = 0; i < tris.size(); ++i) {
+    const Vec3 c = crs(sub3(pts[tris[i][1]], pts[tris[i][0]]), sub3(pts[tris[i][2]], pts[tris[i][0]]));
+    const double l = len(c);
+    out.area_mm2 += 0.5 * l;
+    tn[i] = l > 0.0 ? Vec3{c.x / l, c.y / l, c.z / l} : Vec3{0, 0, 0};
+    for (int k = 0; k < 3; ++k) {
+      Vec3& n = nrm[static_cast<std::size_t>(tris[i][k])];
+      n = {n.x + c.x, n.y + c.y, n.z + c.z};
+    }
+  }
+  for (Vec3& n : nrm) {
+    const double l = len(n);
+    if (l > 0.0) n = {n.x / l, n.y / l, n.z / l};
+  }
+  // Edges: an interior edge is used once each way; a boundary edge once.
+  std::map<std::pair<int, int>, int> directed;
+  for (const auto& tr : tris)
+    for (int k = 0; k < 3; ++k) ++directed[{tr[k], tr[(k + 1) % 3]}];
+  std::vector<std::pair<int, int>> boundary;
+  for (const auto& [e, c] : directed) {
+    if (c > 1) {
+      out.why = "face " + std::to_string(face_id) + "'s mesh uses one edge twice the same way";
+      return out;
+    }
+    if (directed.count({e.second, e.first}) == 0) boundary.push_back(e);
+  }
+  // The thickened face: outer copy, inner copy (reversed), and a wall on each boundary edge.
+  const int nv = static_cast<int>(pts.size());
+  TriangleMesh K;
+  for (int v = 0; v < nv; ++v) {
+    const Vec3& p = pts[static_cast<std::size_t>(v)];
+    const Vec3& n = nrm[static_cast<std::size_t>(v)];
+    K.vertices.push_back({p.x + margin * n.x, p.y + margin * n.y, p.z + margin * n.z});
+  }
+  for (int v = 0; v < nv; ++v) {
+    const Vec3& p = pts[static_cast<std::size_t>(v)];
+    const Vec3& n = nrm[static_cast<std::size_t>(v)];
+    K.vertices.push_back({p.x - t * n.x, p.y - t * n.y, p.z - t * n.z});
+  }
+  for (const auto& tr : tris) {
+    K.triangles.push_back({tr[0], tr[1], tr[2]});
+    K.triangles.push_back({nv + tr[0], nv + tr[2], nv + tr[1]});
+  }
+  for (const auto& [a, b] : boundary) {
+    K.triangles.push_back({a, nv + a, nv + b});
+    K.triangles.push_back({a, nv + b, b});
+  }
+  const manifold::Manifold Km = mesh_manifold(K);
+  if (Km.Status() != manifold::Manifold::Error::NoError) {
+    out.why = "face " + std::to_string(face_id) + " thickened by " + json_num(t) +
+              " mm is not a closed solid (it may curve tighter than the skin is thick)";
+    return out;
+  }
+  const manifold::Manifold P = mesh_manifold(outward_wound(part));
+  if (P.Status() != manifold::Manifold::Error::NoError) {
+    out.why = "the part's own mesh is not a closed manifold";
+    return out;
+  }
+  const manifold::Manifold S = P ^ Km;
+  if (S.Status() != manifold::Manifold::Error::NoError || S.IsEmpty()) {
+    out.why = "the part and face " + std::to_string(face_id) + "'s skin did not intersect cleanly";
+    return out;
+  }
+  out.mesh = manifold_mesh(S.GetMeshGL());
+  out.volume_mm3 = std::fabs(mesh_signed_volume(out.mesh));
+  // ★ MEASURED ON THE SKIN AS BUILT: from each face triangle's centre at least 2 t from the
+  // face's edges, how deep the skin runs along the inward normal (bisection on the exact
+  // signed distance, > 0 inside).
+  const MeshDistance in_skin(out.mesh);
+  auto seg_dist = [&](const Vec3& p, const Vec3& a, const Vec3& b) {
+    const Vec3 ab = sub3(b, a), ap = sub3(p, a);
+    const double L2 = ab.x * ab.x + ab.y * ab.y + ab.z * ab.z;
+    double u = L2 > 0.0 ? (ap.x * ab.x + ap.y * ab.y + ap.z * ab.z) / L2 : 0.0;
+    u = std::min(1.0, std::max(0.0, u));
+    return len(Vec3{ap.x - u * ab.x, ap.y - u * ab.y, ap.z - u * ab.z});
+  };
+  out.thickness_min_mm = std::numeric_limits<double>::infinity();
+  for (std::size_t i = 0; i < tris.size(); ++i) {
+    const Vec3& a = pts[tris[i][0]];
+    const Vec3& b = pts[tris[i][1]];
+    const Vec3& c = pts[tris[i][2]];
+    const Vec3 m{(a.x + b.x + c.x) / 3.0, (a.y + b.y + c.y) / 3.0, (a.z + b.z + c.z) / 3.0};
+    double edge = std::numeric_limits<double>::infinity();
+    for (const auto& [ea, eb] : boundary)
+      edge = std::min(edge, seg_dist(m, pts[static_cast<std::size_t>(ea)], pts[static_cast<std::size_t>(eb)]));
+    if (edge < 2.0 * t) continue;
+    const Vec3& n = tn[i];
+    auto inside = [&](double s) {
+      return in_skin.signed_distance({m.x - s * n.x, m.y - s * n.y, m.z - s * n.z}) > 0.0;
+    };
+    double lo = 0.02 * t, hi = t + 1.0;
+    if (!inside(lo) || inside(hi)) continue;
+    for (int it = 0; it < 40; ++it) {
+      const double mid = 0.5 * (lo + hi);
+      (inside(mid) ? lo : hi) = mid;
+    }
+    const double d = 0.5 * (lo + hi);
+    out.thickness_min_mm = std::min(out.thickness_min_mm, d);
+    out.thickness_max_mm = std::max(out.thickness_max_mm, d);
+    ++out.thickness_samples;
+  }
+  if (out.thickness_samples == 0) out.thickness_min_mm = 0.0;
+  out.ok = !out.mesh.triangles.empty();
+  if (!out.ok) out.why = "face " + std::to_string(face_id) + "'s skin came out empty";
+#else
+  (void)part; (void)cad; (void)face_id; (void)t; (void)margin;
+  out.why = "this build has no boolean (manifold) library";
+#endif
+  return out;
+}
+
 // Export one accepted variant's latticed companion. `cell_mm` and `radius` are
 // caller-supplied (uniform: the job's cell/strut radius; graded: the law's cell
 // + a per-position radius field over the graded densities). `cert_mask` is THE
@@ -2844,7 +3156,10 @@ LatticeExportOutcome export_latticed_variant(
     // ★ The part's own surface, when the part itself is latticed (ruling 11-09): the
     // solid companion is built on it (solid_on_part_surface). Null: the voxel body, byte
     // for byte.
-    const TriangleMesh* solid_surface = nullptr) {
+    const TriangleMesh* solid_surface = nullptr,
+    // ★ Face skins (ruling 11-10 (3)): each already the part intersected with its thickened
+    // face. Joined into the solid companion. Null: none, byte for byte.
+    const std::vector<TriangleMesh>* face_skin_meshes = nullptr) {
   // ── M4: A SKIN MODE THAT PRODUCES NO GEOMETRY MUST SAY SO, NOT RETURN ZERO.
   //
   // ★ THE PREDICATE IS THE MEASURED COUNT, NOT A PREDICTION — and the first version
@@ -2980,6 +3295,27 @@ LatticeExportOutcome export_latticed_variant(
       } else {
         oc.solid_on_part_surface_refused = ss.why;
       }
+    }
+    // ★ THE FACE SKINS JOIN THE SOLID (ruling 11-10 (3)): one closed body, by a boolean
+    // union, so the skin and any solid beside it print as one piece. A union that cannot be
+    // made refuses the run, naming the face: the user asked for that skin.
+    if (face_skin_meshes != nullptr && !face_skin_meshes->empty()) {
+#ifdef TOPOPT_HAVE_MANIFOLD
+      manifold::Manifold U;
+      if (!comp_mesh.triangles.empty()) U = mesh_manifold(outward_wound(comp_mesh));
+      if (U.Status() != manifold::Manifold::Error::NoError)
+        throw JobError("the face skins could not be joined to the solid: the solid "
+                       "companion is not a closed manifold");
+      for (const TriangleMesh& sk : *face_skin_meshes) {
+        const manifold::Manifold Sm = mesh_manifold(sk);
+        if (Sm.Status() != manifold::Manifold::Error::NoError)
+          throw JobError("a face skin is not a closed manifold once written");
+        U = U + Sm;
+      }
+      if (U.Status() != manifold::Manifold::Error::NoError)
+        throw JobError("the face skins could not be joined to the solid companion");
+      comp_mesh = manifold_mesh(U.GetMeshGL());
+#endif
     }
     oc.solid_region_triangles =
         static_cast<std::uint64_t>(comp_mesh.triangles.size());
@@ -4925,6 +5261,38 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
         s += "  \"solid_faces_why\": " + json_str(oc.solid_on_part_surface_refused) + ",\n";
     }
   }
+  // ★ Ruling 11-10 (3): the face skins, said only when a job asked for one.
+  if (!oc.face_skins.empty()) {
+    s += "  \"face_skins\": [";
+    for (std::size_t i = 0; i < oc.face_skins.size(); ++i) {
+      const auto& f = oc.face_skins[i];
+      s += std::string(i ? ", " : "") + "{\"face_id\": " + std::to_string(f.face_id) +
+           (f.label.empty() ? std::string() : ", \"label\": " + json_str(f.label)) +
+           ", \"thickness_mm\": " + json_num(f.thickness_mm) +
+           ", \"asked_mm\": " + json_num(f.asked_mm) +
+           (f.rounded_up
+                ? ", \"note\": " +
+                      json_str("Rounded up from " + json_num(f.asked_mm) + " mm to " +
+                               json_num(f.thickness_mm) +
+                               " mm, 2 line widths: no solid piece prints thinner.")
+                : std::string()) +
+           ", \"area_mm2\": " + json_num(f.area_mm2) +
+           ", \"volume_mm3\": " + json_num(f.volume_mm3) +
+           ", \"measured_thickness_mm\": [" + json_num(f.measured_min_mm) + ", " +
+           json_num(f.measured_max_mm) + "], \"measured_at\": " +
+           std::to_string(f.measured_samples) +
+           ", \"solid_voxels_behind\": " + std::to_string(f.solid_voxels_behind) +
+           ", \"strength\": \"skin: not counted in strength\"}";
+    }
+    s += "],\n";
+  }
+  // ★ Ruling 11-10 (3): the floor a job with no grading block was held to.
+  if (oc.ungraded_floor) {
+    s += "  \"thin_walls\": {\"member_floor_cells\": " + json_num(oc.ungraded_floor_cells) +
+         ", \"member_floor_mm\": " + json_num(oc.ungraded_floor_mm) +
+         ", \"kept_solid_voxels\": " + std::to_string(oc.ungraded_kept_solid_voxels) +
+         ", \"note\": " + json_str(kUngradedThinWallsLine) + "},\n";
+  }
   // Lattice role regions (stage 1, H1a) — what the roles did, and the tested
   // precedence spelled out so the receipt cannot be misread.
   if (roles.present) {
@@ -5083,6 +5451,14 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
     const GradedField& gf = *graded.gf;
     const double latticed = static_cast<double>(gf.latticed_voxels);
     s += "  \"grading\": {\n";
+    // ★ RULING 11-10 (i): an aesthetic lattice's floor and its one plain line. Written only
+    // under Aesthetic, so a structural receipt keeps its bytes.
+    if (gf.intent_used == GradingIntent::Aesthetic)
+      s += "    \"thin_walls\": {\"member_floor_cells\": " + json_num(gf.cells_per_member_floor) +
+           ", \"accuracy_floor_cells\": " + json_num(gf.accuracy_cells_per_member) +
+           ", \"below_accuracy_floor_voxels\": " +
+           std::to_string(gf.aesthetic_below_accuracy_floor_voxels) +
+           ", \"note\": " + json_str(kAestheticThinWallsLine) + "},\n";
     // ★ RULING 2: the shape-grade band, written only when one was built.
     if (gf.band_voxels > 0 || gf.band_solid_voxels > 0) {
       const double* bx = gf.band_solid_box;
@@ -7472,6 +7848,9 @@ LatticeVariantOutcome lattice_one_variant_pass(
   R.design_fingerprint = design_fingerprint(dens);
   const bool graded = job.grading.present;
   R.graded = graded;
+  // ★ ruling 11-10 (3): the ungraded job's thin-wall floor, set where its mask is built
+  double ungraded_floor_cells = 0.0, ungraded_floor_mm = 0.0;
+  long long ungraded_kept_solid = 0;
   // ★ THE ALGORITHM (task 2026-08-21-organic-lattice, §4). Resolved FIRST, so an
   // organic + structural job is refused before it spends a solve on a density it is
   // not allowed to certify. An absent key is "doubled" — §4(d)'s byte-identity.
@@ -7716,7 +8095,8 @@ LatticeVariantOutcome lattice_one_variant_pass(
           region_ids[e] = stepped_region_owner(c, lattice_roles.includes);
           if (!e3_overrides.empty()) e3_owner[e] = stepped_region_owner(c, e3_regions);
         }
-    GradingLawParams gp;
+    // ★ ruling 11-10 (3): the job's own terms from the one builder; the run adds its own.
+    GradingLawParams gp = grading_law_params_from_job(job, GradingIntent::Structural, "run_job");
     if (!e3_overrides.empty()) {   // ★ E3: each region's own grading
       gp.region_override_ids = &e3_owner;
       gp.region_overrides = &e3_overrides;
@@ -7729,18 +8109,7 @@ LatticeVariantOutcome lattice_one_variant_pass(
       part_md = std::make_unique<MeshDistance>(*part_surface);
       gp.member_surface = part_md.get();
     }
-    gp.topology = lat_topo;  // the job's type
-    gp.target_cell_size_mm = job.grading.cell_mm;
-    gp.min_extrudable_width_mm = job.grading.min_extrudable_width_mm;
-    gp.demand_exponent = job.grading.demand_exponent;
-    gp.organic_geometry =
-        resolve_lattice_algorithm(job.grading) == LatticeAlgorithm::Organic;
-    // Cell-size mode (handoff 2026-08-01-lattice-cell-size-sweep). An absent
-    // "cell_mode" parses as "fixed", which is the pre-sweep path exactly. Resolved
-    // through the ONE place `auto` can mean `fit` (bar S4).
-    if (!resolve_cell_mode(job.grading.cell_mode, gp.cell_mode))
-      throw JobError("run_job: unknown grading cell_mode \"" +
-                     job.grading.cell_mode + "\"");
+    gp.topology = lat_topo;  // the job's type (resolved; job.cpp wrote it into both blocks)
     // FIT — the per-region derivation, resolved into the per-voxel field the law
     // consumes (task 2026-08-05-lattice-cell-fit-mode, S1). Built ONLY in fit mode,
     // so every other mode's call is byte-identical.
@@ -7766,46 +8135,13 @@ LatticeVariantOutcome lattice_one_variant_pass(
       rho_field = region_density_field(solved_grid, lattice_roles.includes, fit_cells);
       gp.region_relative_density = &rho_field;
     }
-    gp.min_cell_size_mm = job.grading.cell_min_mm;
-    gp.max_cell_size_mm = job.grading.cell_max_mm;
     // ── ★ THE INTENT AND THE AESTHETIC RANGE, ON THE GEOMETRY PATH ─────────────
-    // ★ THEY WERE NEVER PASSED HERE, AND THAT IS WHY A STATED BAND DID NOTHING.
-    // PR 344/345 wired the intent into `analyze_job` only. `lattice_one_variant` is
-    // the path that WRITES GEOMETRY, and it left `GradingLawParams::intent` at its
-    // Structural default with no aesthetic range at all — so a job stating
-    // `aesthetic_rho_min/max` had them silently ignored and rho ran over the whole
-    // certifiable band. Measured on a 40 mm cube asking for [0.0505, 0.12]: the
-    // emitted lattice came out 49.2 % solid against the 6 % the band implies,
-    // because the BEAD follows rho (t = 2 d sqrt(rho/3pi)) and rho was reaching 0.9.
-    //
-    // ★ GATED ON THE JOB SAYING SO, which is what keeps the TO+lattice and multiscale
-    // paths byte-identical: an absent "intent" leaves the Structural default exactly
-    // as before, and an absent range leaves both zeros, which grading.hpp documents
-    // as "the certifiable band". Only a job that ASKS gets anything different.
-    if (!job.grading.intent.empty() &&
-        !grading_intent_from_name(job.grading.intent.c_str(), gp.intent))
-      throw JobError("run_job: unknown grading intent \"" + job.grading.intent + "\"");
-    gp.aesthetic_percentile = job.grading.aesthetic_percentile;
-    gp.aesthetic_rho_min = job.grading.aesthetic_rho_min;
-    gp.aesthetic_rho_max = job.grading.aesthetic_rho_max;
-    gp.max_relative_density = job.grading.max_relative_density;
-    gp.aesthetic_adaptive_cells_per_member =
-        job.grading.aesthetic_adaptive_cells_per_member;
-    gp.aesthetic_error_budget = job.grading.aesthetic_error_budget;
-    // ★★ IS A BOUNDARY FINISH WRITTEN? This is what lets the adaptive floor reach ONE
-    // cell per member (lattice.hpp states the measurement). A finish exists unless the
-    // export is the BARE lattice — `outer_finish: "skin"` drops the solid shell, and
-    // for organic `grading.organic_boundary_finish: "clean"` then emits nothing at all
-    // on the surface either. Any other combination writes a shell, a skin, a rim or a
-    // diagrid, and any of those re-ties the struts trimming severed.
-    {
-      const bool shell_written = lattice_shell_written(job.lattice);
-      const bool surface_net =
-          job.grading.algorithm == "organic"
-              ? job.grading.organic_boundary_finish != "clean"
-              : job.lattice.skin != "none";
-      gp.boundary_finish_written = shell_written || surface_net;
-    }
+    // They were once never passed here (PR 344/345 wired them into `analyze` only), so a
+    // stated band did nothing on the path that writes geometry. Since ruling 11-10 (3) they
+    // come from grading_law_params_from_job above, with the cell window, the density cap,
+    // the finish and the single-cell switch: the same terms analyze and the forecast read.
+    // An absent "intent" leaves the Structural default and an absent range both zeros
+    // ("the certifiable band"), as before.
     // MULTISCALE (task multiscale-lattice-to): the optimizer already chose this
     // variant's relative density per voxel, and PAID a compliance objective
     // evaluated at the measured tensor of that density (it is also the density the
@@ -9185,6 +9521,19 @@ LatticeVariantOutcome lattice_one_variant_pass(
     mask = lattice_synthesis_domain(
         boundary, solved_grid, dens, printed_iso, solved_grid.origin, cell,
         graded ? gf.posture.mask : kNoPosture, &dropped_by_overlap);
+    // ★ ruling 11-10 (3): an UNGRADED job's members under the thin-wall floor print solid
+    // (ungraded_member_floor). Cleared from the mask exactly as the law's posture clears
+    // its own; a job with no member under the floor keeps every byte.
+    if (!graded) {
+      const UngradedFloor uf = ungraded_member_floor(job, lat_topo, solved_grid, dens,
+                                                     printed_iso, part_surface);
+      if (!uf.ok.empty()) {
+        ungraded_floor_cells = uf.floor_cells;
+        ungraded_floor_mm = uf.floor_mm;
+        for (std::size_t e = 0; e < mask.size(); ++e)
+          if (mask[e] && !uf.ok[e]) mask[e] = 0, ++ungraded_kept_solid;
+      }
+    }
   }
   // ── ★ GRADE TO SOLID AT THE OUTLINE, for organic (see organic_solid_rim_band) ──
   // ★★ THE BAND IS COMPUTED HERE AND APPLIED AFTER THE TRACER (ruling G). It used to be
@@ -10281,7 +10630,9 @@ LatticeVariantOutcome lattice_one_variant_pass(
     // (strictly fewer cells — it stops writing struts the certificate never
     // credited). So this cannot move a verdict, which is what makes it landable
     // under this task's bar 5.
-    if (domain.expanded || roles_present) {
+    // ★ ruling 11-10 (3): and when the thin-wall floor kept a member solid, for the same
+    // reason -- the cells it leaves must not write struts the certificate calls solid.
+    if (domain.expanded || roles_present || ungraded_kept_solid > 0) {
       uniform_cells.assign(ncells, 0);
       // ★ Finding 7: every cell COVERING a masked voxel (the cover rule).
       for (int k = 0; k < solved_grid.nz; ++k)
@@ -10736,14 +11087,82 @@ LatticeVariantOutcome lattice_one_variant_pass(
     mesh_rim.max_seat_mm = 1.5 * solved_grid.spacing;
     mesh_rim.station_spacing_mm = solved_grid.spacing;
   }
+  // ── ★ FACE SKINS (reviewer's ruling 11-10 (3)) ──────────────────────────────────
+  // Each built on the part's own surface (the part's mesh when the part itself is
+  // latticed, else the design's exported surface), from the B-rep face's own triangles.
+  // The mask is not touched: the lattice runs on behind the skin and its struts, clipped
+  // to the part, run into it. Certification is unchanged: the skin is not counted in
+  // strength (the safe floor), and the receipt says so.
+  std::vector<TriangleMesh> face_skin_meshes;
+  std::vector<LatticeExportOutcome::FaceSkinRow> face_skin_rows;
+  if (!job.lattice.face_skins.empty()) {
+    if (cad == nullptr)
+      throw JobError("a face skin needs the part's faces, and this run has no imported model");
+    TriangleMesh skin_surface;
+    const TriangleMesh* P = part_surface;
+    if (P == nullptr) {
+      skin_surface = variant_export_model_mesh(v, job.output, solved_grid, printed_iso, cad);
+      P = &skin_surface;
+    }
+    const double h = solved_grid.spacing;
+    for (const JobLattice::FaceSkin& sk : job.lattice.face_skins) {
+      const FaceSkinBuilt b =
+          build_face_skin(*P, *cad, sk.face_id, sk.thickness_mm, std::max(1.0, 2.0 * h));
+      if (!b.ok)
+        throw JobError("the skin on face " + std::to_string(sk.face_id) +
+                       (sk.label.empty() ? std::string() : " (\"" + sk.label + "\")") +
+                       " could not be built: " + b.why);
+      if (sk.rounded_up)
+        std::fprintf(stderr,
+                     "[skin] face %d: %g mm asked, rounded up to %g mm (2 line widths): no "
+                     "solid piece prints thinner\n",
+                     sk.face_id, sk.asked_mm, sk.thickness_mm);
+      LatticeExportOutcome::FaceSkinRow row;
+      row.face_id = sk.face_id;
+      row.label = sk.label;
+      row.thickness_mm = sk.thickness_mm;
+      row.asked_mm = sk.asked_mm;
+      row.rounded_up = sk.rounded_up;
+      row.area_mm2 = b.area_mm2;
+      row.volume_mm3 = b.volume_mm3;
+      row.measured_min_mm = b.thickness_min_mm;
+      row.measured_max_mm = b.thickness_max_mm;
+      row.measured_samples = b.thickness_samples;
+      // What would sit between the skin and the lattice: printed, un-latticed voxels whose
+      // centre lies within the skin's depth plus one voxel of the face.
+      TriangleMesh F;
+      for (std::size_t i = 0; i < cad->mesh.triangles.size() && i < cad->triangle_face.size(); ++i)
+        if (cad->triangle_face[i] == sk.face_id) {
+          const auto& tr = cad->mesh.triangles[i];
+          const int o = static_cast<int>(F.vertices.size());
+          for (int k = 0; k < 3; ++k)
+            F.vertices.push_back(cad->mesh.vertices[static_cast<std::size_t>(tr[k])]);
+          F.triangles.push_back({o, o + 1, o + 2});
+        }
+      const MeshDistance on_face(F);
+      for (std::size_t e = 0; e < mask.size() && e < dens.size(); ++e) {
+        if (mask[e] || !(dens[e] >= printed_iso)) continue;
+        const int i = static_cast<int>(e % static_cast<std::size_t>(solved_grid.nx));
+        const int j = static_cast<int>((e / static_cast<std::size_t>(solved_grid.nx)) %
+                                       static_cast<std::size_t>(solved_grid.ny));
+        const int k = static_cast<int>(e / (static_cast<std::size_t>(solved_grid.nx) *
+                                            static_cast<std::size_t>(solved_grid.ny)));
+        if (!solved_grid.solid(i, j, k)) continue;
+        if (on_face.unsigned_distance(solved_grid.voxel_center(i, j, k)) <= sk.thickness_mm + h)
+          ++row.solid_voxels_behind;
+      }
+      face_skin_rows.push_back(std::move(row));
+      face_skin_meshes.push_back(b.mesh);
+    }
+  }
   R.oc = export_latticed_variant(
       v, out_dir, job.output, job.lattice, solved_grid, boundary, cell, G,
       mask, cell_latticed,
       // The companion body must also be armed when the added-material policy
       // kept voxels solid — otherwise that material would be certified solid but
       // never written, and the file would not be the certified object.
-      /*emit_solid_companion=*/graded || roles_present ||
-          added_rcpt.kept_solid_voxels > 0,
+      /*emit_solid_companion=*/graded || roles_present || ungraded_kept_solid > 0 ||
+          added_rcpt.kept_solid_voxels > 0 || !face_skin_meshes.empty(),
       levels.empty() ? nullptr : &levels,
       levels.empty() ? 0.0 : gf.cell_plan.base_cell_mm, printed_iso,
       organic.ran ? &organic.lat : nullptr,
@@ -10755,7 +11174,14 @@ LatticeVariantOutcome lattice_one_variant_pass(
       graded ? job.grading.min_extrudable_width_mm : job.lattice.min_extrudable_width_mm,
       region_shell.triangles.empty() ? nullptr : &region_shell,
       any_zone_skin ? &skin_zones : nullptr, rim_asked ? &mesh_rim : nullptr,
-      part_surface);
+      part_surface, face_skin_meshes.empty() ? nullptr : &face_skin_meshes);
+  R.oc.face_skins = std::move(face_skin_rows);
+  if (!graded && ungraded_floor_mm > 0.0) {
+    R.oc.ungraded_floor = true;
+    R.oc.ungraded_floor_cells = ungraded_floor_cells;
+    R.oc.ungraded_floor_mm = ungraded_floor_mm;
+    R.oc.ungraded_kept_solid_voxels = ungraded_kept_solid;
+  }
   if (rim_asked) {
     // ★ TOPOPT_RIM_DUMP=<file>: the chains the rim was asked to ride, one "CHAIN" line each
     // (closed, points, length mm) and then its points -- evidence and tests read where the
@@ -12441,24 +12867,18 @@ std::vector<char> forecast_candidates(const VoxelGrid& grid,
 }
 
 GradingLawParams forecast_grading_params(const JobDescription& job) {
-  GradingLawParams gp;
-  gp.topology = lattice_topology_from_id(job.grading.topology);  // the job's type
-  gp.target_cell_size_mm = job.grading.present ? job.grading.cell_mm
-                                               : job.lattice.cell_mm;
-  gp.min_extrudable_width_mm = job.grading.present
-                                   ? job.grading.min_extrudable_width_mm
-                                   : job.lattice.min_extrudable_width_mm;
-  gp.demand_exponent = job.grading.present ? job.grading.demand_exponent : 1.0;
-  gp.organic_geometry =
-      job.grading.present &&
-      resolve_lattice_algorithm(job.grading) == LatticeAlgorithm::Organic;
-  gp.cell_mode = CellSizeMode::Fixed;
-  if (job.grading.present &&
-      !resolve_cell_mode(job.grading.cell_mode, gp.cell_mode))
-    throw JobError("lattice_forecast: unknown grading cell_mode \"" +
-                   job.grading.cell_mode + "\"");
-  gp.min_cell_size_mm = job.grading.cell_min_mm;
-  gp.max_cell_size_mm = job.grading.cell_max_mm;
+  // ★ ruling 11-10 (3) (LatticeReview's F1): the run's own builder, so the forecast grades
+  // the job's real intent, aesthetic range, density cap, finish and floor -- not always
+  // Structural, uncapped, at 5 cells. An absent "intent" is Structural, as in the run.
+  GradingLawParams gp =
+      grading_law_params_from_job(job, GradingIntent::Structural, "lattice_forecast");
+  if (!job.grading.present) {   // the uniform job's own cell and bead
+    gp.target_cell_size_mm = job.lattice.cell_mm;
+    gp.min_extrudable_width_mm = job.lattice.min_extrudable_width_mm;
+    gp.demand_exponent = 1.0;
+    gp.organic_geometry = false;
+    gp.cell_mode = CellSizeMode::Fixed;
+  }
   if (!(gp.target_cell_size_mm > 0.0) && gp.cell_mode == CellSizeMode::Fixed)
     gp.cell_mode = CellSizeMode::Auto;   // no cell stated ⇒ the law picks the floor
   if (!(gp.min_extrudable_width_mm > 0.0))
@@ -12491,6 +12911,8 @@ GradingLawParams forecast_grading_params(const JobDescription& job) {
 struct UniformForecast {
   std::size_t region_voxels = 0;
   std::size_t latticed_voxels = 0;
+  std::size_t kept_solid_voxels = 0;   // ★ ruling 11-10 (3): under the thin-wall floor
+  double floor_cells = 0.0, floor_mm = 0.0;
   double strut_diameter_mm = 0.0;
   bool strut_below_min_extrudable = false;
 };
@@ -12500,7 +12922,8 @@ UniformForecast forecast_uniform(const JobDescription& job,
                                  const StoredDesign& sd,
                                  const std::vector<ClearanceGeometry>& kos,
                                  const LatticeRoleRegions& roles,
-                                 const std::vector<char>& cand) {
+                                 const std::vector<char>& cand,
+                                 const TriangleMesh* part_surface = nullptr) {
   UniformForecast u;
   for (const char c : cand) u.region_voxels += (c != 0);
   const double cell = job.lattice.cell_mm;
@@ -12530,8 +12953,17 @@ UniformForecast forecast_uniform(const JobDescription& job,
       grid, sd.density, cell, kos, roles, forecast_iso, &shell);
   const std::vector<char> mask = lattice_certification_mask(
       boundary, grid, sd.density, forecast_iso, grid.origin, cell);
-  for (std::size_t e = 0; e < mask.size(); ++e)
-    if (mask[e] && e < cand.size() && cand[e]) ++u.latticed_voxels;
+  // ★ ruling 11-10 (3): the run's own thin-wall floor, on the run's own widths.
+  const UngradedFloor uf =
+      ungraded_member_floor(job, lattice_topology_from_id(job.lattice.topology), grid,
+                            sd.density, forecast_iso, part_surface);
+  u.floor_cells = uf.floor_cells;
+  u.floor_mm = uf.floor_mm;
+  for (std::size_t e = 0; e < mask.size(); ++e) {
+    if (!(mask[e] && e < cand.size() && cand[e])) continue;
+    if (!uf.ok.empty() && !uf.ok[e]) { ++u.kept_solid_voxels; continue; }
+    ++u.latticed_voxels;
+  }
   u.strut_diameter_mm = 2.0 * job.lattice.strut_radius_mm;
   u.strut_below_min_extrudable =
       job.lattice.min_extrudable_width_mm > 0.0 &&
@@ -12544,7 +12976,8 @@ std::string lattice_forecast_json(const JobDescription& job,
                                   const VoxelGrid& grid,
                                   const StoredDesign& sd,
                                   const std::vector<ClearanceGeometry>& kos,
-                                  const LatticeRoleRegions& roles) {
+                                  const LatticeRoleRegions& roles,
+                                  const TriangleMesh* part_surface = nullptr) {
   LatticeBoundary members;
   const std::vector<char> cand =
       forecast_candidates(grid, sd.density, kos, roles, members);
@@ -12552,7 +12985,7 @@ std::string lattice_forecast_json(const JobDescription& job,
   // an entirely different forecast here. See `forecast_uniform`.
   if (!job.grading.present) {
     const UniformForecast u =
-        forecast_uniform(job, grid, sd, kos, roles, cand);
+        forecast_uniform(job, grid, sd, kos, roles, cand, part_surface);
     const double frac = u.region_voxels > 0
                             ? static_cast<double>(u.latticed_voxels) /
                                   static_cast<double>(u.region_voxels)
@@ -12571,10 +13004,10 @@ std::string lattice_forecast_json(const JobDescription& job,
     s += "  \"cell_mode\": \"uniform\",\n";
     s += "  \"cell_size_mm\": " + json_num(job.lattice.cell_mm) + ",\n";
     s += "  \"uniform_note\": \"this job carries NO \\\"grading\\\" block, so "
-         "the run applies no grading law: no cells-per-member floor, no "
-         "printability floor, one declared strut radius everywhere. The counts "
-         "below come from the run's OWN boundary and certification-mask "
-         "predicates, not from the grading law.\",\n";
+         "the run applies no grading law: one declared strut radius everywhere, no "
+         "cells-per-member floor. A strut thinner than the declared line width is "
+         "refused. The counts below come from the run's OWN boundary and "
+         "certification-mask predicates, not from the grading law.\",\n";
     s += "  \"strut_radius_mm\": " + json_num(job.lattice.strut_radius_mm) +
          ",\n";
     s += "  \"strut_diameter_mm\": " + json_num(u.strut_diameter_mm) + ",\n";
@@ -12586,10 +13019,19 @@ std::string lattice_forecast_json(const JobDescription& job,
     s += "  \"latticed_fraction_of_region\": " + json_num(frac) + ",\n";
     s += "  \"would_stay_solid_by_reason\": {\n";
     s += "    \"cell_does_not_overlap_the_region\": " +
-         std::to_string(u.region_voxels - u.latticed_voxels) + ",\n";
-    s += "    \"note\": \"on the uniform path the ONLY predicate is whether a "
-         "voxel's owning lattice cell overlaps the allowed region; there is no "
-         "member-width test\"\n";
+         std::to_string(u.region_voxels - u.latticed_voxels - u.kept_solid_voxels) + ",\n";
+    if (u.floor_mm > 0.0) {
+      // ★ ruling 11-10 (3): the run's thin-wall floor, which the uniform path applies
+      s += "    \"member_under_the_thin_wall_floor\": " + std::to_string(u.kept_solid_voxels) +
+           ",\n";
+      s += "    \"member_floor_cells\": " + json_num(u.floor_cells) + ",\n";
+      s += "    \"member_floor_mm\": " + json_num(u.floor_mm) + ",\n";
+      s += "    \"note\": " + json_str(kUngradedThinWallsLine) + "\n";
+    } else {
+      s += "    \"note\": \"on the uniform path the ONLY predicate is whether a "
+           "voxel's owning lattice cell overlaps the allowed region; there is no "
+           "member-width test\"\n";
+    }
     s += "  },\n";
     s += "  \"include_regions\": " + std::to_string(roles.includes.size()) +
          ",\n";
@@ -12597,11 +13039,10 @@ std::string lattice_forecast_json(const JobDescription& job,
          ",\n";
     s += "  \"strut_below_min_extrudable\": " +
          std::string(u.strut_below_min_extrudable ? "true" : "false") + ",\n";
-    if (u.strut_below_min_extrudable)
+    if (u.strut_below_min_extrudable)   // ★ ruling 11-10 (3): job.cpp refuses this job
       s += "  \"strut_printability_note\": \"the declared strut radius implies a "
-           "strut thinner than the declared extrusion width — the run will emit "
-           "it anyway (the uniform path applies no printability floor), but the "
-           "slicer will not be able to print it\",\n";
+           "strut thinner than the declared extrusion width, so it would not print; "
+           "the run refuses this job\",\n";
     const bool rim_only = job.lattice.skin == "rim";
     s += "  \"boundary\": \"" + job.lattice.skin + "\",\n";
     s += "  \"boundary_can_emit\": " +
@@ -12625,6 +13066,13 @@ std::string lattice_forecast_json(const JobDescription& job,
   // candidate clamps to the band's low end.
   const std::vector<double> flat_demand(grid.voxel_count(), 0.0);
   GradingLawParams gp = forecast_grading_params(job);
+  // ★ ruling 11-10 (3): members measured where the run measures them -- on the part's own
+  // surface when the part itself is latticed -- so the forecast's floor reads the run's widths.
+  std::unique_ptr<MeshDistance> fc_md;
+  if (part_surface != nullptr && !part_surface->triangles.empty()) {
+    fc_md = std::make_unique<MeshDistance>(*part_surface);
+    gp.member_surface = fc_md.get();
+  }
   // FIT: the same per-region derivation the run itself will use, so the forecast
   // describes the job that would actually run (the whole point of a forecast). The
   // counterfactuals below deliberately switch to Fixed, and they clear the pointer
@@ -12731,7 +13179,7 @@ std::string lattice_forecast_json(const JobDescription& job,
     // The widest cell the widest REJECTED member can hold, and the declared width
     // whose floor sits exactly there. phi is linear in cell size, so
     // floor(w) = w / phi(rho_lo, 1) and the threshold inverts it directly.
-    const double n_star = lattice_cells_per_member_min(gp.topology);
+    const double n_star = gf.cells_per_member_floor;  // the run's floor (ruling 11-10 (i))
     const double cell_needed = gf.fallback_max_member_width_mm / n_star;
     const double phi_unit = lattice_strut_diameter_mm(gp.topology, lattice_rho_min(gp.topology), 1.0);
     const double w_threshold = cell_needed * phi_unit;
@@ -13468,19 +13916,10 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   // "grading" object. Absent -> this block is skipped, no run_info is written, and the
   // analyze path is byte-identical (bar L1).
   if (job.grading.present) {
-    GradingLawParams gp;
-    gp.topology = lattice_topology_from_id(job.grading.topology);  // the job's type
-    gp.target_cell_size_mm = job.grading.cell_mm;
-    gp.min_extrudable_width_mm = job.grading.min_extrudable_width_mm;
-    gp.demand_exponent = job.grading.demand_exponent;
-    gp.organic_geometry =
-        resolve_lattice_algorithm(job.grading) == LatticeAlgorithm::Organic;
-    // Cell-size mode; an absent "cell_mode" parses as "fixed" — the pre-sweep path.
-    if (!resolve_cell_mode(job.grading.cell_mode, gp.cell_mode))
-      throw JobError("analyze: unknown grading cell_mode \"" +
-                     job.grading.cell_mode + "\"");
-    gp.min_cell_size_mm = job.grading.cell_min_mm;
-    gp.max_cell_size_mm = job.grading.cell_max_mm;
+    // ★ ruling 11-10 (3): the job's own terms from the one builder the run and the forecast
+    // use. AESTHETIC is what an absent "intent" means HERE (see below); analyze adds its
+    // allowable.
+    GradingLawParams gp = grading_law_params_from_job(job, GradingIntent::Aesthetic, "analyze");
     // ── ★ ABSOLUTE UTILISATION, ARMED ON THE LATTICE-ONLY PATH (task
     //    2026-08-20-lattice-only-grading, §0 / §2 / §3) ──────────────────────────
     // ★ THIS BLOCK IS WHY §5(a) HOLDS STRUCTURALLY. `analyze` is the LATTICE-ONLY
@@ -13511,33 +13950,8 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     // GradingLawParams, where every caller would inherit it and the TO+lattice and
     // multiscale paths would silently change. An absent "intent" key means the
     // common case: a lattice the user wants to SEE, on a part that usually does not
-    // need one structurally.
-    if (job.grading.intent.empty()) {
-      gp.intent = GradingIntent::Aesthetic;
-    } else if (!grading_intent_from_name(job.grading.intent.c_str(), gp.intent)) {
-      throw JobError("analyze: unknown grading intent \"" + job.grading.intent + "\"");
-    }
-    gp.aesthetic_percentile = job.grading.aesthetic_percentile;
-    gp.aesthetic_rho_min = job.grading.aesthetic_rho_min;
-    gp.aesthetic_rho_max = job.grading.aesthetic_rho_max;
-    gp.max_relative_density = job.grading.max_relative_density;
-    gp.aesthetic_adaptive_cells_per_member =
-        job.grading.aesthetic_adaptive_cells_per_member;
-    gp.aesthetic_error_budget = job.grading.aesthetic_error_budget;
-    // ★★ IS A BOUNDARY FINISH WRITTEN? This is what lets the adaptive floor reach ONE
-    // cell per member (lattice.hpp states the measurement). A finish exists unless the
-    // export is the BARE lattice — `outer_finish: "skin"` drops the solid shell, and
-    // for organic `grading.organic_boundary_finish: "clean"` then emits nothing at all
-    // on the surface either. Any other combination writes a shell, a skin, a rim or a
-    // diagrid, and any of those re-ties the struts trimming severed.
-    {
-      const bool shell_written = lattice_shell_written(job.lattice);
-      const bool surface_net =
-          job.grading.algorithm == "organic"
-              ? job.grading.organic_boundary_finish != "clean"
-              : job.lattice.skin != "none";
-      gp.boundary_finish_written = shell_written || surface_net;
-    }
+    // need one structurally. (Passed to grading_law_params_from_job above, with the
+    // aesthetic range, the cap, the finish and the single-cell switch.)
     // FIT needs the per-region derivation here too, or the analyze receipt would
     // describe a cell law the run never used. `nullptr` region below means the
     // candidate set is the whole printed design, so voxels outside every declared
@@ -13796,8 +14210,11 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
         gf.aesthetic_min_cells_per_member_allowed;
     gi.grading_below_accuracy_floor_voxels =
         static_cast<long long>(gf.aesthetic_below_accuracy_floor_voxels);
-    if (gf.intent_used == GradingIntent::Aesthetic)
+    if (gf.intent_used == GradingIntent::Aesthetic) {
       gi.grading_density_meaning = kAestheticDensityMeaning;
+      gi.grading_member_floor_cells = gf.cells_per_member_floor;  // ruling 11-10 (i)
+      gi.grading_thin_walls_line = kAestheticThinWallsLine;
+    }
     gi.grading_density_histogram.assign(
         gf.density_histogram, gf.density_histogram + GradedField::kDensityBins);
     gi.grading_solid_fallback_voxels =
@@ -14123,6 +14540,8 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
   if (!check_watertight(result.model.mesh).watertight)
     throw JobError("lattice_variant: model tessellation is not watertight: " +
                    job.model);
+  // ★ A face skin names a face of this part (ruling 11-10 (3)): refused before any solve.
+  check_face_skins_on_part(job, result.model);
 
   // ── the load case, rebuilt from THIS JOB — which is the original run's job
   // (the schema requires the variant block to live in it). Same mapping, same
@@ -14448,7 +14867,8 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
   if (job.lattice.forecast_only) {
     result.forecast_json = lattice_forecast_json(
         job, cert_grid, sd, lattice_keep_outs_from_job(job, result.model),
-        lattice_role_regions_from_job(job, &result.model, &model_grid));
+        lattice_role_regions_from_job(job, &result.model, &model_grid),
+        lattice_the_part ? &result.model.mesh : nullptr);   // the run's own width surface
     result.forecast_path = join_path(out_dir, "lattice_forecast.json");
     write_text_file(result.forecast_path, result.forecast_json);
     return result;
@@ -14684,6 +15104,12 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
       gi.grading_band_rho_min = R.gf.band_rho_min;
       gi.grading_band_rho_max = R.gf.band_rho_max;
       gi.grading_cells_per_member_floor = R.gf.cells_per_member_floor;
+      if (R.gf.intent_used == GradingIntent::Aesthetic) {   // ruling 11-10 (i)
+        gi.grading_member_floor_cells = R.gf.cells_per_member_floor;
+        gi.grading_thin_walls_line = kAestheticThinWallsLine;
+        gi.grading_below_accuracy_floor_voxels =
+            static_cast<long long>(R.gf.aesthetic_below_accuracy_floor_voxels);
+      }
       gi.lattice_outline_beam_mm = R.outline_beam_mm;
       gi.lattice_outline_bleed_mm = R.outline_bleed_mm;
       gi.lattice_outline_inward_mm = R.outline_inward_mm;
@@ -16345,7 +16771,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     if (!job.lattice.regions.empty()) {
       const LatticeTopology topo =
           lattice_topology_from_id(job.grading.topology);
-      const double n_star = lattice_cells_per_member_min(topo);
+      const double n_star = job_member_floor_cells(job, topo);  // ruling 11-10 (i)
       // The cell this run will actually use, by the SAME rules the law applies:
       // AUTO takes the printability floor, FIXED the target raised to the floor that
       // actually binds (S2), SWEPT the finest rung its OWN dyadic ladder can print
@@ -16978,7 +17404,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
               std::to_string(thin_regions) + " of " +
               std::to_string(include_regions) +
               " declared lattice include regions are thinner than the " +
-              json_num(required_mm) + " mm the accuracy floor requires at the "
+              json_num(required_mm) + " mm the cells-per-member floor requires at the "
               "planned " + json_num(cell_mm) + " mm cell (thinnest " +
               json_num(thinnest_mm) + " mm).";
           action = "This job states no strut line width, so core cannot derive a "
@@ -17936,6 +18362,10 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       run_info.grading_band_rho_min = lat_agg.g_band_lo;
       run_info.grading_band_rho_max = lat_agg.g_band_hi;
       run_info.grading_cells_per_member_floor = lat_agg.g_cpm_floor;
+      if (job.grading.intent == "aesthetic") {   // ruling 11-10 (i)
+        run_info.grading_member_floor_cells = lat_agg.g_cpm_floor;
+        run_info.grading_thin_walls_line = kAestheticThinWallsLine;
+      }
       run_info.grading_cell_size_mm = lat_agg.g_cell;
       run_info.grading_printability_floor_mm = lat_agg.g_floor;
       run_info.grading_cell_size_floored = lat_agg.g_floored;

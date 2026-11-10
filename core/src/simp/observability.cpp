@@ -1330,6 +1330,12 @@ std::string run_info_json(const RunInfo& info) {
     }
     if (!info.grading_density_meaning.empty())
       gr += ", \"density_meaning\": \"" + info.grading_density_meaning + "\"";
+    if (!info.grading_thin_walls_line.empty()) {
+      gr += ", \"member_floor_cells\": " + fmt(info.grading_member_floor_cells);
+      gr += ", \"below_accuracy_floor_voxels\": " +
+            fmt_ll(info.grading_below_accuracy_floor_voxels);
+      gr += ", \"thin_walls\": \"" + info.grading_thin_walls_line + "\"";
+    }
     // R4 — the clamp counts. Present on EVERY graded receipt: the analyze path did
     // not carry them before this task, so a clamp could decide the posture with
     // nothing in the record saying so.

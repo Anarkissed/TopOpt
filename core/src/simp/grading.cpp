@@ -46,13 +46,17 @@ namespace {
 // of 15 mm was called beyond rescue on uniform while Fit could in fact reach it. The
 // refusal sentence and the forecast's remedies both read this count.
 // Returns the voxel's fallback_reason: 1, or 2 when no legal cell could ever hold it.
+// `any_cell_width_mm`: the member's width joined at the finest legal cell's floor (D11 below
+// a voxel; NaN = `width_mm`).
 char note_member_too_thin(GradedField& out, double width_mm, double n_star,
-                          double floor_mm) {
+                          double floor_mm,
+                          double any_cell_width_mm = std::numeric_limits<double>::quiet_NaN()) {
   ++out.fallback_member_too_thin;
   if (std::isfinite(width_mm)) {
     if (width_mm > out.fallback_max_member_width_mm)
       out.fallback_max_member_width_mm = width_mm;
-    if (width_mm < n_star * floor_mm) {
+    const double w_any = std::isnan(any_cell_width_mm) ? width_mm : any_cell_width_mm;
+    if (w_any < n_star * floor_mm) {
       ++out.fallback_irrecoverable_by_cell;
       return 2;
     }
@@ -204,44 +208,31 @@ GradedField grade_lattice(const VoxelGrid& grid,
     throw std::invalid_argument(
         "grade_lattice: max_relative_density is at or below the certifiable band's "
         "floor, so no density is admissible");
+  // `n_star` is the ACCURACY floor: under it the homogenised tensor stops describing the
+  // member. `n_floor` is the floor THIS RUN holds a member to (ruling 11-10 (i)): the
+  // accuracy floor under Structural, the type's hard floor under Aesthetic (2 cells, or 1
+  // with "Allow single-cell members" and a finish) -- lattice_member_floor_cells, the one
+  // function the app's preview reads too.
   const double n_star = lattice_cells_per_member_min(topo);
+  const double n_floor = lattice_member_floor_cells(topo, aesthetic, params.single_cell_members,
+                                                    params.boundary_finish_written);
   out.band_rho_min = rho_lo;
   out.band_rho_max = rho_hi;
-  out.cells_per_member_floor = n_star;
-  // ── ★ THE ADAPTIVE FLOOR (aesthetic only) ────────────────────────────────────
-  // Disarms itself without an allowable: utilisation is what it is a function of.
-  const bool adaptive_cpm = aesthetic &&
-                            params.aesthetic_adaptive_cells_per_member &&
-                            params.demand_allowable_mpa > 0.0;
-  const double err_budget = params.aesthetic_error_budget > 0.0
-                                ? params.aesthetic_error_budget
-                                : kAestheticHomogenisationErrorBudget;
-  out.aesthetic_adaptive_cells_armed = adaptive_cpm;
-  out.aesthetic_error_budget_used = adaptive_cpm ? err_budget : 0.0;
-  out.aesthetic_min_cells_per_member_allowed = adaptive_cpm ? n_star : 0.0;
-  // The floor THIS voxel must clear. Constant everywhere unless the adaptive rule is
-  // armed, so every other path is bit-identical.
-  // The loosest floor the adaptive rule permits over the candidate set — what the
-  // per-CELL planner is allowed to consider. Computed in a fixed voxel order.
-  double adaptive_plan_floor = n_star;
-  if (adaptive_cpm) {
-    for (std::size_t e = 0; e < n; ++e) {
-      if (!(density[e] > iso && (!region || (*region)[e] != 0))) continue;
-      const double f = aesthetic_cells_per_member_floor(
-          topo, demand[e] / params.demand_allowable_mpa, err_budget,
-          params.boundary_finish_written);
-      if (f < adaptive_plan_floor) adaptive_plan_floor = f;
-    }
-  }
-  auto n_req = [&](std::size_t e) -> double {
-    if (!adaptive_cpm) return n_star;
-    const double u = demand[e] / params.demand_allowable_mpa;
-    const double f = aesthetic_cells_per_member_floor(topo, u, err_budget,
-                                                     params.boundary_finish_written);
-    if (f < out.aesthetic_min_cells_per_member_allowed)
-      out.aesthetic_min_cells_per_member_allowed = f;
-    return f;
-  };
+  out.cells_per_member_floor = n_floor;
+  out.accuracy_cells_per_member = n_star;
+  // ── ★ THE AESTHETIC FLOOR SITS UNDER THE ACCURACY FLOOR ─────────────────────
+  // `adaptive_cpm` keeps its old name and its old machinery -- the per-voxel requirement,
+  // the planner's floor, the out-of-regime count and the assertions at the end -- and now
+  // means: this run's floor is below the accuracy floor. The utilisation-adaptive rule it
+  // used to arm (aesthetic_adaptive_cells_per_member) is superseded: the flat floor is the
+  // lowest that rule could ever reach. The error budget is no longer used.
+  const bool adaptive_cpm = n_floor < n_star;
+  out.aesthetic_adaptive_cells_armed = false;
+  out.aesthetic_error_budget_used = 0.0;
+  out.aesthetic_min_cells_per_member_allowed = adaptive_cpm ? n_floor : 0.0;
+  // The loosest floor over the candidate set: what the per-CELL planner may consider.
+  const double adaptive_plan_floor = n_floor;
+  auto n_req = [&](std::size_t) -> double { return n_floor; };
 
   // ── the printability floor (requirement 3) ──────────────────────────────────────
   // The thinnest strut at any cell occurs at rho_lo (diameter is monotone in rho), so
@@ -313,9 +304,27 @@ GradedField grade_lattice(const VoxelGrid& grid,
   // member's edges are not read as thin members.
   CornerJoinStats corner;
   std::vector<char> corner_joined;
-  const std::vector<double> width = lattice_member_width_mm(
-      grid, density, iso, params.thickness_cap_voxels, n_star * cell, cell,
-      params.member_surface, &corner, &corner_joined);
+  // ★ BELOW A VOXEL (reviewer's ruling 11-10 (3), on ruling (i)): every member up to the
+  // wider of the two floors (this run's and the accuracy floor its receipt counts against) at
+  // the coarsest cell the run can lay, plus the levels' rounding, is measured to a fraction
+  // of a voxel, so the 2-cell and the 5-cell floors are told apart on a coarse grid.
+  double coarsest_cell = std::max(cell, params.max_cell_size_mm);
+  if (params.cell_mode == CellSizeMode::Fit && params.fit_cell_size_mm != nullptr)
+    for (const double c : *params.fit_cell_size_mm)
+      if (std::isfinite(c)) coarsest_cell = std::max(coarsest_cell, c);
+  const double fine_mm = std::max(n_floor, n_star) * coarsest_cell + 3.0 * grid.spacing;
+  const std::vector<double> measured = lattice_member_width_mm(
+      grid, density, iso, params.thickness_cap_voxels, 0.0, cell, params.member_surface,
+      nullptr, nullptr, fine_mm);
+  const std::vector<double> width = lattice_member_corner_join(
+      grid, density, iso, measured, n_floor * cell, cell, &corner, &corner_joined);
+  // ★ D11 below a voxel: "irrecoverable by ANY cell" asks whether the finest legal cell could
+  // hold the voxel's member, and at that cell a thick member's convex edges join it (the
+  // corner join, at that floor and that cell) -- measured honestly, a 90-degree edge's own
+  // ball is a few mm across, and the levels used to read it wide. The same widths, joined
+  // at the dense floor, decide it.
+  const std::vector<double> width_any_cell = lattice_member_corner_join(
+      grid, density, iso, measured, n_floor * abs_floor_mm, abs_floor_mm);
   out.member_width_mm = width;
   out.corner_residue_voxels = corner.residue_voxels;
   out.corner_joined_voxels = corner.joined_voxels;
@@ -765,9 +774,9 @@ GradedField grade_lattice(const VoxelGrid& grid,
         if (voxel_cell[e] > 0.0) continue;          // the plan already latticed it
         const double ce_r = finest_printable_cell(e);
         if (!(ce_r > 0.0)) continue;                // unprintable: never retained
-        if (width[e] / ce_r < n_star) ++would;      // genuinely sub-floor
+        if (width[e] / ce_r < n_floor) ++would;     // genuinely sub-floor
       } else {
-        if (width[e] / cell < n_star) ++would;
+        if (width[e] / cell < n_floor) ++would;
       }
     }
     out.subfloor_would_retain_voxels = would;
@@ -860,7 +869,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
         // `unprintable: 0` on this path means "impossible here", not "none today".
         // ★ D11: the capped dense floor, the same one Fit passes -- it is the finest
         // cell any mode can reach, so it is what "irrecoverable by ANY cell" means.
-        out.fallback_reason[e] = note_member_too_thin(out, width[e], n_star, abs_floor_mm);
+        out.fallback_reason[e] = note_member_too_thin(out, width[e], n_floor, abs_floor_mm, width_any_cell[e]);
         continue;
       }
 
@@ -900,7 +909,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
     out.cell_plan.origin = grid.origin;
     out.cell_plan.base_cell_mm = cell;
     out.cell_plan.max_level = 0;
-    out.cell_plan.cells_per_member_floor = n_star;
+    out.cell_plan.cells_per_member_floor = n_floor;
     out.cell_plan.printability_floor_mm = floor_mm;
   } else if (fit) {
     // ── FIT: the cell is DERIVED PER DECLARED REGION and handed in ───────────────
@@ -1003,7 +1012,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
         // band-top one, so measuring irrecoverability against the rho_min floor would
         // call a member irrecoverable that fit can in fact reach.
         ++out.solid_fallback_voxels;
-        out.fallback_reason[e] = note_member_too_thin(out, width[e], n_star, abs_floor_mm);
+        out.fallback_reason[e] = note_member_too_thin(out, width[e], n_star, abs_floor_mm, width_any_cell[e]);
         continue;
       }
       // ★ THE PERCOLATION FLOOR, measured against the DESIGN's own member width
@@ -1013,7 +1022,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
       const double cpm = width[e] / ce;
       if (cpm < perc_floor) {
         ++out.solid_fallback_voxels;
-        out.fallback_reason[e] = note_member_too_thin(out, width[e], n_star, abs_floor_mm);
+        out.fallback_reason[e] = note_member_too_thin(out, width[e], n_star, abs_floor_mm, width_any_cell[e]);
         continue;
       }
       // Clamp FIRST, raise second — see the ordering note on the uniform path: the
@@ -1281,7 +1290,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
             // claim, and only that material is what the receipt names.
             // (The law's own invariant caught this: flagging them made the
             // retained count disagree with the posture, and it threw.)
-            if (cpm_r < n_star) {
+            if (cpm_r < n_floor) {
               out.subfloor_flags[e] = 1;
               ++out.subfloor_retained_voxels;
               if (GradedField::SubfloorRegion* rr = region_record(e))
@@ -1296,7 +1305,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
             if (d_r < min_d) min_d = d_r;
             if (d_r > max_d) max_d = d_r;
             if (d_r < params.min_extrudable_width_mm) out.any_strut_below_min = true;
-            if (cpm_r < n_star) {
+            if (cpm_r < n_floor) {
               if (cpm_r < sub_min_cpm) sub_min_cpm = cpm_r;
               if (cpm_r > sub_max_cpm) sub_max_cpm = cpm_r;
               if (d_r < sub_min_d) sub_min_d = d_r;
@@ -1315,7 +1324,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
         ++out.solid_fallback_voxels;
         // ★ D11: the capped dense floor, the same one Fit passes -- it is the finest
         // cell any mode can reach, so it is what "irrecoverable by ANY cell" means.
-        out.fallback_reason[e] = note_member_too_thin(out, width[e], n_star, abs_floor_mm);
+        out.fallback_reason[e] = note_member_too_thin(out, width[e], n_floor, abs_floor_mm, width_any_cell[e]);
         continue;
       }
       const double rho = clamp_rho(e, rho_of(e));

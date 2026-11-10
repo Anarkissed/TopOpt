@@ -2496,6 +2496,23 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
     TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
   add_test(NAME lattice_solid_companion COMMAND test_lattice_solid_companion)
+  # Ruling 11-10 (3): a face skin -- 2 line widths on the face's own surface, the lattice
+  # running on behind it, no slab and no inner wall.
+  add_executable(test_lattice_face_skin tests/validation/test_lattice_face_skin.cpp)
+  target_link_libraries(test_lattice_face_skin PRIVATE topopt)
+  target_compile_definitions(test_lattice_face_skin PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME lattice_face_skin COMMAND test_lattice_face_skin)
+  # Ruling 11-10 (i): the aesthetic thin-wall floor -- 2 cells, or 1 with single-cell members.
+  add_executable(test_lattice_thin_wall_floor tests/validation/test_lattice_thin_wall_floor.cpp)
+  target_link_libraries(test_lattice_thin_wall_floor PRIVATE topopt)
+  target_compile_definitions(test_lattice_thin_wall_floor PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME lattice_thin_wall_floor COMMAND test_lattice_thin_wall_floor)
   # E3 (plan.md §B7): an include region's own cell window on the swept plan.
   add_executable(test_lattice_region_cell_window tests/validation/test_lattice_region_cell_window.cpp)
   target_link_libraries(test_lattice_region_cell_window PRIVATE topopt)
