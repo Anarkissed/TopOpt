@@ -193,6 +193,15 @@ public final class FlexibleMainStage: ObservableObject {
     /// face of a group, or a whole group — and what the session remembers beside it (FlexibleFacePick). Coarse: one publish
     /// per tap (the prisms follow it).
     @Published public internal(set) var facePick = FlexibleFacePickSession()
+    /// ★ B9 Setup (R2-Q2, N2: "the eye shows or hides the prism"): a face row's eye — false hides that face's prism and so its
+    /// handle; no entry = shown (Lattice Setup's rule, LatticeSetupHandles.prismShown). A view pick: never saved.
+    @Published var prismEye: [String: Bool] = [:]
+    /// ★ RED CONTROL (B9 Setup): the eye is drawn but hides nothing (the prisms as before).
+    static var controlEyeHidesNothing = false
+    func prismShown(_ key: String) -> Bool {
+        Self.controlEyeHidesNothing || LatticeSetupHandles.prismShown(key, eye: prismEye, picked: nil)
+    }
+    func togglePrismEye(_ key: String) { prismEye[key] = !(prismEye[key] ?? true) }
     /// ★ P5 (FlexibleEditFaces): Edit faces is up, opened from a Flexible page — Flexible's own layers are off until Done.
     @Published public internal(set) var faceEditing = false
     /// ★ P4 (FlexibleChangeType): #354's "Change lattice type?" card is up over the Flexible pages.
@@ -708,11 +717,11 @@ public final class FlexibleMainStage: ObservableObject {
         let inputs = FacePrismInputs(group: nil, all: all, lattice: project.lattice, selection: project.selection,
                                      force: project.force, regions: project.faceRegions, groupView: project.groupView,
                                      mesh: project.viewerMesh?.triangleCount ?? 0, picked: picked, faint: faintUnpicked,
-                                     over: overLattice && !Self.controlPrismGlassOverLattice)
+                                     over: overLattice && !Self.controlPrismGlassOverLattice, eye: prismEye)
         if let c = facePrismCache, c.inputs == inputs { return c.items }
         let items: [ClearanceRenderItem] = project.latticeDepthPlanes()
             .filter { p in
-                guard !project.groupView.isHidden(p.groupID) else { return false }
+                guard !project.groupView.isHidden(p.groupID), prismShown(p.ref.key) else { return false }   // ★ B9 Setup: its eye
                 let mine = picked?.contains(p.ref.key) == true
                 return p.role == .include ? (all || mine) : mine
             }
@@ -762,6 +771,8 @@ public final class FlexibleMainStage: ObservableObject {
         var picked: Set<String>? = nil
         var faint = false
         var over = false
+        /// ★ B9 Setup: the face rows' eyes (`prismEye`)
+        var eye: [String: Bool] = [:]
     }
 
     /// The RED CONTROL's prisms: round 6 (item 3, hook H15) — the main page's SQUISH prisms, faint (FlexibleDepthPrism's,

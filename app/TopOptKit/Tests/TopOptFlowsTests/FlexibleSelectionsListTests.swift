@@ -51,7 +51,8 @@ final class FlexibleSelectionsListTests: XCTestCase {
     func testLinesAre44AndBoxesAreNumberBoxes() throws {
         XCTAssertEqual(FlexibleSelectionsList.lineHeight, 44)
         let src = try String(contentsOf: FlexibleRound7SelectionsHookTests.sources.appendingPathComponent("FlexibleSelectionsList.swift"), encoding: .utf8)
-        XCTAssertTrue(src.contains("FlexNumberBox(key: key"), "the boxes are FlexNumberBox")
+        // ★ B9 Setup re-pin (the B6 face rows): the numbers are the app's one NumberField (tap = keypad, drag = steps)
+        XCTAssertTrue(src.contains("NumberField(key: key"), "the numbers are the NumberField")
         XCTAssertTrue(src.contains("main.pickFace(r, group: g.id, project: project)"), "★ a box edits AND picks its face")
         XCTAssertTrue(src.contains("main.askDelete(g.id)"), "★ the trash asks first (his answer)")
     }

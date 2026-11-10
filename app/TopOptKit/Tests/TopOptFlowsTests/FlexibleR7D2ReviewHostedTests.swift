@@ -252,10 +252,11 @@ final class FlexibleR7D2ReviewHostedTests: XCTestCase {
     func testANumberBoxTakesATapAcross44Points() throws {
         let (p, h, s, _, c) = try flexibleStage(CGSize(width: 1032, height: 1376), lattice: false)
         let r3 = LatticeSelectableRef.face(group: c, face: 3)
-        s.pickGroup(c, project: p)
+        // ★ B9 Setup re-pin: the B6 face row opens when its face is picked; its depth is the NumberField (32 pt to look at)
+        s.pickFace(r3, group: c, project: p)
         pump(1.2)
-        let box = try XCTUnwrap(h.frames.all["numberBox-list-depth-\(r3.key)"], "Face 3's depth box in the list")
-        XCTAssertEqual(box.height, FlexNumberBox.height, accuracy: 0.5, "the box still looks 32 pt tall")
+        let box = try XCTUnwrap(h.frames.all["numberFieldBox-list-depth-\(r3.key)"], "Face 3's depth number in the list")
+        XCTAssertEqual(box.height, NumberField.height, accuracy: 0.5, "the box still looks 32 pt tall")
         click(h, CGPoint(x: box.midX, y: box.minY - 5))
         XCTAssertEqual(s.faceUI.padTarget, "list-depth-\(r3.key)", "★ R8: a click 5 pt above the box opens its keypad (a 44 pt target)")
         s.faceUI.padTarget = nil

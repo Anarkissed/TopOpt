@@ -91,10 +91,15 @@ extension FlexibleMainStage {
 
     /// ★ R8.1 (round 2: it comes last): the Print plan shows for two materials, or for solid areas outside the flexible lattice.
     /// Every Flexible lattice today is face prisms in a solid part, so any face set up has solid areas round it.
+    /// ★ B9 Setup (UI-Notes, PrintPlanVisibilityTests): a face latticed in Selections counts too — before any squish face is
+    /// set, the part is already a lattice in a solid part. (Until E5's whole-part lattice there is no all-lattice part.)
     static func showsPrintPlan(_ m: FlexibleStageModel?) -> Bool {
         guard let m else { return false }
         return m.settings.printPlans?.rigidMaterial != nil || !m.settings.faces.isEmpty
+            || (!controlSquishFacesOnly && !m.project.latticeAreaGroups.isEmpty)
     }
+    /// ★ RED CONTROL (B9 Setup): the rule before — a lattice face in Selections alone left the Print plan hidden.
+    static var controlSquishFacesOnly = false
 
     /// Reset (J-5): every plan, add-on and place goes; a fresh Plan A from the app's cut (the rigid plastic stays: it is the
     /// part's, not a plan's).
