@@ -77,7 +77,7 @@ public enum LatticeThinWallGlow {
         let n = grid.nx * grid.ny * grid.nz
         guard field.count == n, mesh.indices.count >= 3 else { return [] }
         let h = Swift.min(grid.spacing.x, Swift.min(grid.spacing.y, grid.spacing.z))
-        func pos(_ k: Int32) -> SIMD3<Float> {
+        func pos(_ k: UInt32) -> SIMD3<Float> {   // ViewerMesh.indices is [UInt32]
             let i = Int(k) * 3
             return SIMD3(mesh.positions[i], mesh.positions[i + 1], mesh.positions[i + 2])
         }
