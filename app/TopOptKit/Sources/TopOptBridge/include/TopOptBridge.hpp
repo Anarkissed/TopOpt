@@ -186,11 +186,15 @@ ImportedMesh import_step(const std::string& path, double linear_deflection,
 // (topopt::lattice_sample_mesh, shape "coupon"): the block the engine builds for `topology` and he prints, as a triangle
 // soup with core's receipt. `cell_mm` <= 0 = core's 8 mm; `bead_mm` <= 0 = core's 0.42 mm. A type core cannot generate,
 // or a cell/density it refuses, sets `err` with core's reason.
+// ★ his iPad notes 11-10 (img 6: "nothing changes the sample"): `rho_lo`/`rho_hi` (> 0) grade the coupon between the
+// page's Grade ends, held inside the type's printable band (`rho_held` says when they were moved); <= 0 = core's band.
 struct LatticeSampleResult {
   ImportedMesh mesh;
   std::string receipt_json;
+  bool rho_held = false;
 };
-LatticeSampleResult lattice_sample(const std::string& topology, double cell_mm, double bead_mm, BridgeError& err);
+LatticeSampleResult lattice_sample(const std::string& topology, double cell_mm, double bead_mm, double rho_lo,
+                                   double rho_hi, BridgeError& err);
 
 // Write an ImportedMesh to an STL file (core write_stl_file; binary encoding).
 // This is the M6.1 STL export path exposed to the app; 3MF export (lib3mf) is

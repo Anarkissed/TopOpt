@@ -471,12 +471,18 @@ extension ProjectModel {
 
     /// ★ BATCH E: the surface a split piece covers — its member faces' triangles CLIPPED to the
     /// piece's half-spaces, welded — so the Selections row's 3D depth primitive (`FaceOffsetShell`)
-    /// sits over the piece and not over the whole face it was cut from. nil for a region with no cut
-    /// (or a union of pieces, which draws no primitive today): that path is unchanged.
+    /// sits over the piece and not over the whole face it was cut from. nil for a region with no cut: that path is unchanged.
+    /// ★ his iPad notes 11-10 (img 1/2): a UNION of pieces is the surface of all its leaves — each cut leaf clipped to its own
+    /// half-spaces, a whole-face leaf whole (once, if two leaves share a face) — the leaves the run takes (`latticeSectorMembers`).
     func latticeSectorMesh(_ rid: RegionID) -> ViewerMesh? {
-        guard let r = faceRegions.region(rid), !r.cuts.isEmpty, !r.isUnionOfParts, let mesh = viewerMesh
+        guard let r = faceRegions.region(rid), !r.cuts.isEmpty || r.isUnionOfParts, let mesh = viewerMesh
         else { return nil }
-        let members = Set(FaceRegionGeometry.members(of: r, in: mesh).map { Int32($0) })
+        // one leaf for a cut piece (itself: the bytes before 11-10); a union's leaves otherwise
+        let leaves: [(members: Set<Int32>, cuts: [RegionCut])] = faceRegions.resolvedLeaves(rid).compactMap { leaf in
+            guard let p = faceRegions.region(leaf) else { return nil }
+            return (Set(FaceRegionGeometry.members(of: p, in: mesh).map { Int32($0) }), p.cuts)
+        }
+        let members = leaves.reduce(into: Set<Int32>()) { $0.formUnion($1.members) }
         var v: [Float] = [], idx: [Int32] = [], fid: [Int32] = []
         struct Key: Hashable { let x: Int64, y: Int64, z: Int64 }
         var weld: [Key: Int32] = [:]
@@ -497,13 +503,18 @@ extension ProjectModel {
             let tri = t / 3
             defer { t += 3 }
             guard tri < mesh.faceIDs.count, members.contains(mesh.faceIDs[tri]) else { continue }
-            let poly = SurfacePatternAxis.clipPolygon([at(mesh.indices[t]), at(mesh.indices[t + 1]), at(mesh.indices[t + 2])],
-                                                      to: r.cuts)
-            guard poly.count >= 3 else { continue }
-            let ids = poly.map(vid)
-            for k in 1..<(ids.count - 1) where ids[0] != ids[k] && ids[k] != ids[k + 1] && ids[0] != ids[k + 1] {
-                idx += [ids[0], ids[k], ids[k + 1]]
-                fid.append(mesh.faceIDs[tri])
+            let f = mesh.faceIDs[tri]
+            let corners = [at(mesh.indices[t]), at(mesh.indices[t + 1]), at(mesh.indices[t + 2])]
+            let holding = leaves.filter { $0.members.contains(f) }
+            // a whole-face leaf covers the triangle whole; else each piece's clip (a cut's pieces never overlap)
+            let polys = holding.contains { $0.cuts.isEmpty } ? [corners]
+                : holding.map { SurfacePatternAxis.clipPolygon(corners, to: $0.cuts) }
+            for poly in polys where poly.count >= 3 {
+                let ids = poly.map(vid)
+                for k in 1..<(ids.count - 1) where ids[0] != ids[k] && ids[k] != ids[k + 1] && ids[0] != ids[k + 1] {
+                    idx += [ids[0], ids[k], ids[k + 1]]
+                    fid.append(f)
+                }
             }
         }
         guard !idx.isEmpty else { return nil }

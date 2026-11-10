@@ -2579,7 +2579,9 @@ public final class ProjectModel: ObservableObject {
                                  group: UUID, role: LatticeGroupRole,
                                  in mesh: ViewerMesh) -> LatticeDepthPlane? {
         guard let region = faceRegions.region(rid) else { return nil }
-        let members = FaceRegionGeometry.members(of: region, in: mesh)
+        // ★ his iPad notes 11-10 (img 1/2): a UNION of pieces lists its faces only through its parts — read them as the
+        // run does (`latticeSectorMembers`); its own face list is empty, so Lattice and No lattice drew no prism
+        let members = region.isUnionOfParts ? (latticeSectorMembers(rid) ?? []) : FaceRegionGeometry.members(of: region, in: mesh)
         guard !members.isEmpty else { return nil }
         // The render/handle key is the REGION id, kept distinct from a face key by
         // construction: face keys are non-negative run face ids and manual

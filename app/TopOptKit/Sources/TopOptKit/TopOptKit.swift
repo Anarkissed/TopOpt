@@ -2725,12 +2725,16 @@ public enum TopOptKit {
     public struct LatticeSampleBlock: @unchecked Sendable {
         public let mesh: ImportedMesh
         public let receiptJSON: String
+        /// ★ his iPad notes 11-10 (img 6): the asked Grade ends were moved into the type's printable band.
+        public var densityHeld = false
     }
-    public static func latticeSampleBlock(topology: String, cellMM: Double = 0, beadMM: Double = 0) throws -> LatticeSampleBlock {
+    /// `rhoLo`/`rhoHi` (> 0): the coupon graded between the page's Grade ends, held inside the type's band.
+    public static func latticeSampleBlock(topology: String, cellMM: Double = 0, beadMM: Double = 0,
+                                          rhoLo: Double = 0, rhoHi: Double = 0) throws -> LatticeSampleBlock {
         var err = topoptbridge.BridgeError()
-        let r = topoptbridge.lattice_sample(std.string(topology), cellMM, beadMM, &err)
+        let r = topoptbridge.lattice_sample(std.string(topology), cellMM, beadMM, rhoLo, rhoHi, &err)
         try throwIfFailed(err)
-        return LatticeSampleBlock(mesh: convert(r.mesh), receiptJSON: String(r.receipt_json))
+        return LatticeSampleBlock(mesh: convert(r.mesh), receiptJSON: String(r.receipt_json), densityHeld: r.rho_held)
     }
 
     /// Inspect a part file without throwing on a mesh-quality refusal: the

@@ -2391,7 +2391,7 @@ public struct LatticeSetupWizard: View {
             // ★ B7 (his iPad notes 11-08, design note 30): Sample is core's sample block beside the panel; In the part is the
             // stage's live preview behind the page, as before
             if model.stage == .cell {
-                AnyView(LatticeSampleView(inputs: latticeSampleInputs)
+                AnyView(LatticeSampleView(inputs: latticeSampleInputs, notInSample: latticeNotInSample)
                     .padding(.leading, portrait ? 0 : PageChrome.edge + PageChrome.widePanelWidth)
                     .padding(.top, portrait ? PageChrome.panelTop + latticePanelHeight : PageChrome.panelTop)
                     .latticeID("lattice-sample-view"))
@@ -2407,15 +2407,32 @@ public struct LatticeSetupWizard: View {
                 .padding(.trailing, PageChrome.edge)
                 .padding(.top, portrait ? PageChrome.panelTop + latticePanelHeight + DS.Space.l + 14 : PageChrome.panelTop + 14)
                 .frame(maxHeight: .infinity, alignment: .top)
-        })
+        }
+        // ★ his iPad notes 11-10 (img 3): Sample is up — the workspace covers its part (LatticeSampleShowingKey)
+        .preference(key: LatticeSampleShowingKey.self, value: model.stage == .cell))
     }
 
-    /// The Sample's inputs: the page's type, its cell when Cell size is Manual (else core's own), the printer's bead.
+    /// The Sample's inputs: the page's type, its cell when Cell size is Manual (else core's own), the printer's bead, and
+    /// (★ his iPad notes 11-10, img 6) the Grade's ends — graded from "to" up to "from", or one density when not graded.
     private var latticeSampleInputs: LatticeSampleView.Inputs {
-        LatticeSampleView.Inputs(topology: model.topologyID,
-                                 typeName: LatticeType.displayName(forID: model.topologyID),
-                                 cellMM: model.cellSizeMode == .fixed ? model.cellMM : 0,
-                                 beadMM: project.printParams.strutLineWidthMM)
+        Self.sampleInputs(model, beadMM: project.printParams.strutLineWidthMM)
+    }
+
+    static func sampleInputs(_ model: LatticeWizardModel, beadMM: Double) -> LatticeSampleView.Inputs {
+        let graded = model.gradingMode != LatticeGradingMode.none
+        return LatticeSampleView.Inputs(topology: model.topologyID,
+                                        typeName: LatticeType.displayName(forID: model.topologyID),
+                                        cellMM: model.cellSizeMode == .fixed ? model.cellMM : 0,
+                                        beadMM: beadMM,
+                                        rhoLo: graded ? model.minRelativeDensity : model.relativeDensity,
+                                        rhoHi: model.relativeDensity)
+    }
+
+    /// ★ his iPad notes 11-10 (img 6): what he has on that the engine's sample block can't show yet.
+    private var latticeNotInSample: [String] {
+        LatticeSampleView.notInSample(organic: model.cellTransition == .organicGrade, finish: model.boundary,
+                                      shapeBand: model.gradingMode.fitsShape,
+                                      singleCell: model.singleCellMembers && (project.lattice.stageMode ?? .structural) == .aesthetic)
     }
 
     private func latticePanel(_ c: CellsPageContext, hug: Bool) -> some View {
