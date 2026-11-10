@@ -555,6 +555,23 @@ public final class ProjectModel: ObservableObject {
         return true
     }
 
+    // MARK: ★ B9 — the Flexible page's CANCEL (LatticeReview's DIGEST-3, C1 / C2)
+
+    /// Can Undo alone walk back to `s` — it is the state on screen, the history's baseline, or a step in its past?
+    /// False once Undo has gone past it and a new edit cleared that branch, or the 50 steps the history keeps ran out.
+    public func undoReaches(_ s: EditSnapshot) -> Bool {
+        editSnapshot == s || undo.baseline == s || undo.past.contains(s)
+    }
+
+    /// Put `s` back as ONE undo step (one Undo brings back what it replaced), as Edit faces' Discard does — never by
+    /// undoing past it, so nothing made before `s` is touched.
+    public func restoreEditSnapshotAsOneStep(_ s: EditSnapshot) {
+        sealUndoStep()
+        guard s != editSnapshot else { return }
+        applyEditSnapshot(s)
+        sealUndoStep()
+    }
+
     private func commitUndoSnapshot() {
         let snap = editSnapshot
         guard undo.baseline != snap else { return }

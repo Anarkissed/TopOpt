@@ -860,21 +860,30 @@ public struct FlexibleStagePage: View {
 
     /// Test control only (B9): Cancel leaves as it is — nothing put back (the red run of the Cancel test).
     @MainActor static var controlCancelKeeps = false
+    /// Test control only (B9, DIGEST-3 C1/C2): Cancel walks the history blind, as it did (the red run of the reach test).
+    @MainActor static var controlCancelWalksBlind = false
 
     /// ★ B9 (R6's foot): CANCEL — what changed on this page is put back, and the page leaves with nothing to rebuild. The
     /// project's own history steps back to the edit slice the page settled open on (`openedEdit`): the Squeeze lives in the
     /// Topology load it came from, and a new edges group cut the faces, so the Flexible settings alone would not put them back.
     /// Redo brings it all back. Nothing changed: it leaves as Exit always did.
+    /// ★ B9 (LatticeReview DIGEST-3 C1/C2): when Undo can no longer reach that slice (he undid past the open point and
+    /// edited again, or made more steps than the history keeps), the walk used to undo everything it could — edits made
+    /// before the page opened, on other stages — and then SAVE that half-undone state. Now the slice is put back as one
+    /// step instead (one Undo brings the cancelled edits back), and nothing made before the page opened is touched.
     private func cancel() {
         let modified = FlexibleSettingsExit.modified(model.settings, since: opened)
         if modified, !Self.controlCancelKeeps, let target = openedEdit {
             project.sealUndoStep()
-            var steps = 0
-            while project.editSnapshot != target, project.canUndoNow, steps < 60 {
-                Self.history(undo: true, project: project, model: model)
-                steps += 1
+            if project.undoReaches(target) || Self.controlCancelWalksBlind {
+                var steps = 0
+                while project.editSnapshot != target, project.canUndoNow, steps < 60 {
+                    Self.history(undo: true, project: project, model: model)
+                    steps += 1
+                }
+            } else {
+                Self.restore(target, project: project, model: model)
             }
-            // more steps than the history keeps (50): what is left is saved as it stands, as Save would
             if project.editSnapshot != target { model.save() } else { model.exitUnchanged = true }
         } else if modified {
             model.save()
@@ -926,6 +935,17 @@ public struct FlexibleStagePage: View {
     static func history(undo: Bool, project: ProjectModel, model: FlexibleStageModel) {
         model.historyWillRestore()   // ★ U21 (UNDO-GHOST): what this step brings back
         if undo { project.performUndo() } else { project.performRedo() }
+        afterHistory(project: project, model: model)
+    }
+
+    /// ★ B9 (Cancel, DIGEST-3 C1/C2): the page's own slice put back as one step, followed as an Undo is.
+    static func restore(_ s: EditSnapshot, project: ProjectModel, model: FlexibleStageModel) {
+        model.historyWillRestore()
+        project.restoreEditSnapshotAsOneStep(s)
+        afterHistory(project: project, model: model)
+    }
+
+    private static func afterHistory(project: ProjectModel, model: FlexibleStageModel) {
         model.refreshMainPageLoads()
         model.historyRestored()   // ★ AP1 review: a press card follows the history
         model.recomputeAll()

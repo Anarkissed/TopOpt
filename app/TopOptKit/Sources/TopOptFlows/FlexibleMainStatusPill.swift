@@ -211,8 +211,14 @@ public struct FlexibleMainViewToggles: View {
     // ★ R7-V: Play — the sim plays and its bar shows; off, no bar and the model at rest. A small ring while the sims run
     // or refine (the bar's note said so)
     private var playButton: some View {
-        FlexibleViewButton(icon: FlexibleMainViewToggles.playIcon, label: "Play", on: main.playOn && main.viewsAvailable) { main.togglePlay() }
-            .unavailable(!main.viewsAvailable || main.attach.active)   // ★ M1 VERIFY: nothing to play
+        // ★ B9 (P3): on the Print plan page ▶ is the Play view — the pieces apart, as they print, and the timeline
+        FlexibleViewButton(icon: FlexibleMainViewToggles.playIcon, label: "Play",
+                           on: main.page == .plan ? main.planPlay : main.playOn && main.viewsAvailable) {
+            if main.page == .plan { main.planPlay.toggle(); main.planPlayPosition = 0 } else { main.togglePlay() }
+        }
+            .unavailable(main.page != .plan && (!main.viewsAvailable || main.attach.active))   // ★ M1 VERIFY: nothing to play
+            .background(GeometryReader { g in Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["mainView-play": g.frame(in: .global)]) }
+                .allowsHitTesting(false))   // (★ B9 P3: the Play view's hosted test clicks it)
             .overlay(alignment: .topTrailing) {
                 if Self.controlMiniSpinner {
                     if main.simsWorking {   // (the RED CONTROL only: the first build's faint grey speck)

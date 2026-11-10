@@ -168,6 +168,9 @@ enum FlexibleExportRows {
     struct Exports: View {
         @ObservedObject var run: FlexibleCoreRun
         var compact = false
+        /// ★ B9 (P4, J-8): the part prints in pieces — Export part's plan selector, its need and its button (nil: one piece).
+        var plans: FlexiblePrintPlans? = nil
+        var openPrintPlan: () -> Void = {}
 
         /// Both exports wait on core (its Flexible runner writes receipts, heat maps and CSVs — no mesh yet).
         static var disabled: Bool { true }
@@ -175,6 +178,7 @@ enum FlexibleExportRows {
         var body: some View {
             let wait = FlexibleCoreRun.exportsWait
             VStack(alignment: .leading, spacing: DS.Space.s) {
+                if let plans { FlexibleExportPlanSelector(plans: plans, openPrintPlan: openPrintPlan) }
                 Text(wait)
                     .font(.system(size: compact ? 13 : 14)).foregroundStyle(DS.Color.textSecondary.color)
                     .lineLimit(1).minimumScaleFactor(0.85)

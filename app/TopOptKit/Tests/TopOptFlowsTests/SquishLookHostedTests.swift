@@ -154,6 +154,53 @@ final class SquishLookHostedTests: XCTestCase {
         XCTAssertNotEqual(m.settings.face(face)?.weightKg, before, "control: the change stays")
     }
 
+    /// ★ B9, LatticeReview's DIGEST-3 C1/C2: he made an edit BEFORE the page opened, then on the page pressed Undo past the
+    /// open point and edited again — Undo can no longer reach how the page opened. Cancel used to undo everything it could
+    /// (his earlier edit too) and SAVE that half-undone state. Now: the page's opened state comes back as one step, his
+    /// earlier edit stays, nothing to rebuild, and one Undo brings the cancelled edit back.
+    func cancelPastTheOpenPoint(blind: Bool) throws -> (earlier: Double, original: Double, now: Double, m: FlexibleStageModel,
+                                                         r: FlexibleHisProject.Restored, exits: Exits, cancelled: Double) {
+        let (r, m) = try SquishHost.pad(self, edges: false)
+        FlexibleStagePage.controlCancelWalksBlind = blind
+        defer { FlexibleStagePage.controlCancelWalksBlind = false }
+        let face = try XCTUnwrap(m.squeezeGroups.first?.regions.first, "a pressed face")
+        let original = try XCTUnwrap(m.settings.face(face)?.weightKg, "its weight")
+        r.project.sealUndoStep()
+        m.setWeight(face, kg: original + 5)          // his edit before the page opens
+        SquishHost.pump(1.2)
+        let exits = Exits()
+        let h = page(r, m, app: try appModel(), exits: exits, size: Self.sizes[0])
+        let earlier = try XCTUnwrap(m.settings.face(face)?.weightKg)
+        XCTAssertEqual(earlier, original + 5, accuracy: 1e-9, "the page opened on his earlier edit")
+        let opened = r.project.editSnapshot
+        try h.tap("topLeftUndo", "the block's Undo")  // past the open point
+        SquishHost.pump(0.8)
+        XCTAssertEqual(try XCTUnwrap(m.settings.face(face)?.weightKg), original, accuracy: 1e-9, "Undo went past the open point")
+        m.setWeight(face, kg: original + 9)          // and a new edit: the open point leaves the history
+        SquishHost.pump(1.2)
+        r.project.sealUndoStep()
+        XCTAssertFalse(r.project.undoReaches(opened), "Undo can no longer reach how the page opened")
+        try h.tap("squishCancel", "Cancel")
+        return (earlier, original, try XCTUnwrap(m.settings.face(face)?.weightKg), m, r, exits, original + 9)
+    }
+
+    func testCancelPastTheOpenPointPutsTheOpenedStateBackAndKeepsTheEarlierEdit() throws {
+        let t = try cancelPastTheOpenPoint(blind: false)
+        XCTAssertEqual(t.exits.count, 1, "Cancel leaves the page")
+        XCTAssertEqual(t.now, t.earlier, accuracy: 1e-9, "★ back to how the page opened — his earlier edit kept")
+        XCTAssertTrue(t.m.takeExitUnchanged(), "★ nothing saved, nothing to rebuild")
+        let face = try XCTUnwrap(t.m.squeezeGroups.first?.regions.first)
+        FlexibleStagePage.history(undo: true, project: t.r.project, model: t.m)
+        XCTAssertEqual(try XCTUnwrap(t.m.settings.face(face)?.weightKg), t.cancelled, accuracy: 1e-9,
+                       "★ one Undo brings the cancelled edit back")
+    }
+
+    /// ★ RED CONTROL: the blind walk (`controlCancelWalksBlind`, as it was) undoes his edit made before the page opened.
+    func testCancelRedControlTheBlindWalkUndoesTheEarlierEdit() throws {
+        let t = try cancelPastTheOpenPoint(blind: true)
+        XCTAssertEqual(t.now, t.original, accuracy: 1e-9, "control: his earlier edit is undone")
+    }
+
     func testResetAllStillAsksInPlace() throws {
         let (r, m) = try SquishHost.pad(self, edges: false)
         let h = page(r, m, app: try appModel(), exits: Exits(), size: Self.sizes[2])

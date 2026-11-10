@@ -204,6 +204,9 @@ public final class FlexibleMainStage: ObservableObject {
     @Published public var planSeam: String?
     @Published public var planResetAsk = false
     @Published public var planNote: String?
+    /// ★ B9 (P3): the Print plan's Play view (the view row's ▶ on that page) and where its timeline is (0 apart … 1 together).
+    @Published public var planPlay = false
+    @Published public var planPlayPosition = 0.0
     /// ★ B9 slice 3: the cut being placed (+ Cut ⌄): its plane card, then its bar; nil when none.
     @Published public var planCut: FlexiblePlanCutDraft?
     /// ★ R7-D2: the face chip's live state (its moved spots, the keypad, the (i), the confirms, the message) — its own object,

@@ -218,7 +218,12 @@ public enum FlexiblePrintPlanRules {
     /// The seams still waiting for a joint (Build stays grey with one fix chip for the first).
     public static func needing(_ p: FlexiblePrintPlans?) -> [FlexiblePlanSeam] {
         guard let p else { return seams(nil) }
-        return seams(p).filter { p.plan.joints[$0.key] == nil }
+        return needing(p, in: p.plan)
+    }
+
+    /// ★ B9 (P4): the seams with no joint yet in one plan (Export part's selector asks it of every plan, not only the open one).
+    public static func needing(_ p: FlexiblePrintPlans, in plan: FlexiblePrintPlan) -> [FlexiblePlanSeam] {
+        seams(p).filter { plan.joints[$0.key] == nil }
     }
 
     /// The add-ons the plan's joints call for (on unless switched off).

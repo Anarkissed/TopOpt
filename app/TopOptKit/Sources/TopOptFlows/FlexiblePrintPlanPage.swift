@@ -489,6 +489,25 @@ struct FlexiblePlanBuildButton: View {
 
 /// The Print plan's page-wide parts: the cut layer (its plane card and bar; the camera turns with them) and Reset's
 /// clear-all confirm (U13: its yes ≥ 300 pt from the Reset button), over the whole page while asked.
+/// ★ B9 (P3, the mockup's #flex-plan-play): the Play view's words. The pieces come apart along the engine's split of the
+/// body (E5 item 53), which waits (the reviewer's 20:54Z re-plan): until then the timeline says so and its ▶ is dim, as it
+/// is when the part prints as one piece.
+public enum FlexiblePlanPlay {
+    public static let apart = "Apart"
+    public static let together = "Together"
+    public static let onePiece = "Prints as one piece \u{00B7} nothing comes apart"
+    /// Above the corner (the corner's ~96 pt and a gap).
+    static let bottom: CGFloat = 132
+
+    public static func caption(_ p: FlexiblePrintPlans?) -> (caption: String, enabled: Bool) {
+        let pieces = FlexiblePrintPlanRules.pieces(p, tpuName: "TPU").count
+        guard pieces > 1 else { return (onePiece, false) }
+        let addOns = FlexiblePrintPlanRules.addOns(p).filter { !(p?.plan.addOnsOff.contains($0.key) ?? false) }.count
+        let what = "\(pieces) pieces" + (addOns > 0 ? " + \(addOns) add-on\(addOns == 1 ? "" : "s")" : "")
+        return (what + " \u{00B7} apart once the engine splits them", false)
+    }
+}
+
 public struct FlexiblePrintPlanOverlays: View {
     @ObservedObject var main: FlexibleMainStage
     @ObservedObject var project: ProjectModel
@@ -500,6 +519,14 @@ public struct FlexiblePrintPlanOverlays: View {
     public var body: some View {
         ZStack {
             if main.page == .plan { FlexiblePlanCutLayer(main: main, project: project, camera: camera) }
+            if main.page == .plan, main.planPlay {
+                let say = FlexiblePlanPlay.caption(main.printPlans)
+                PlayTimeline(caption: say.caption, leftEnd: FlexiblePlanPlay.apart, rightEnd: FlexiblePlanPlay.together,
+                             position: $main.planPlayPosition, enabled: say.enabled)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, FlexiblePlanPlay.bottom)
+                    .transition(.opacity)
+            }
             if main.page == .plan, main.planResetAsk {
                 ClearAllConfirm(question: FlexiblePrintPlanCopy.resetAsk, detail: FlexiblePrintPlanCopy.resetDetail,
                                 keep: { main.planResetAsk = false }, clear: { main.clearPlans() })

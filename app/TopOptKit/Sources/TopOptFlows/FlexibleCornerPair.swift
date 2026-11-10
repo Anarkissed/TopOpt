@@ -180,7 +180,8 @@ private struct FlexibleLatticeSplit: View {
     var body: some View {
         let s = main.cornerStatus(model)
         let st = FlexibleLatticeButton.state(s, phase: run.phase, answerIsCurrent: main.answerIsCurrent(model))
-        let line = FlexibleLatticeButton.line(s, state: st, runLine: run.line)
+        let line = FlexibleLatticeButton.shownLine(FlexibleLatticeButton.line(s, state: st, runLine: run.line), state: st,
+                                                   printPlanNext: FlexibleMainStage.showsPrintPlan(model))   // ★ B9 (J-1)
         FlexibleLatticeButtonView(status: s, state: st, line: line, width: FlexibleChromeLayout.latticeButtonSize(viewport).width,
                                   cardOpen: chrome.open == .latticeCard,
                                   main: { FlexibleLatticeButton.perform(FlexibleLatticeButton.action(st), chrome: chrome, hooks: main.cornerHooks(openSquish: openSquish)) },
@@ -223,7 +224,10 @@ private struct FlexibleLatticeCardMount: View {
                                 showFix: { chrome.show(.callout) },
                                 summary: FlexibleLatticeCard.shownSummary(state: st, run: run, summary: { FlexibleLatticeCard.jobSummary(model: model) }),   // ★ R7-D3: above every send
                                 sendAgain: { main.resendFromCard() },
-                                fixButtons: fixes)
+                                fixButtons: fixes,
+                                // ★ B9 (P4, J-8, J-1): where a Print plan applies, Export part picks the plan (and links to it)
+                                exportPlans: FlexibleMainStage.showsPrintPlan(model) ? main.shownPlans : nil,
+                                openPrintPlan: { chrome.close(.latticeCard); main.page = .plan })
     }
 }
 
