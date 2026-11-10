@@ -86,7 +86,12 @@ std::string job_json(const Faces& f, const std::string& mode, const std::string&
   const std::string heavy = "{\"name\": \"heavy side\", \"groups\": [{\"face_ids\": [" +
                             std::to_string(f.right) + "], \"force\": [0, 300, 0]}], "
                             "\"anchor_face_ids\": " + anchor + "}";
-  return "{\"model\": \"lattice_no_solid_bar.stl\", \"material\": \"PLA\", \"mode\": \"" +
+  // ★ ITS OWN BAR (found by the SOLID slice's gate, 11-10): this named
+  // "lattice_no_solid_bar.stl", test_lattice_no_solid's 20 mm bar left in the shared build
+  // folder, so it latticed that bar and not the 44 mm one below. The 20 mm bar held every
+  // type's floor only because the grid's outside read as material (finding 4); read
+  // honestly it is 20 mm, under most types' floors at a 4 mm cell, and the run refuses.
+  return "{\"model\": \"type_strut_law_bar.stl\", \"material\": \"PLA\", \"mode\": \"" +
          mode + "\", \"resolution\": 24, "
          "\"loads\": {\"minimize_plastic\": true, \"build_dir\": [0, 0, 1], "
          "\"anchor_face_ids\": " + anchor + ", \"groups\": [{\"face_ids\": [" +
