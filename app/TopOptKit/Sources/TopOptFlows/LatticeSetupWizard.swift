@@ -2402,14 +2402,13 @@ public struct LatticeSetupWizard: View {
         let portrait = size.width < size.height
         let band = max(DSParts.headerHeight, size.height - PageChrome.panelTop - PageChrome.panelBottom)
         return AnyView(ZStack {
-            // ★ B7 (his iPad notes 11-08, design note 30): Sample is core's sample block beside the panel; In the part is the
-            // stage's live preview behind the page, as before
-            if model.stage == .cell {
-                AnyView(LatticeSampleView(inputs: latticeSampleInputs, notInSample: latticeNotInSample)
-                    .padding(.leading, portrait ? 0 : PageChrome.edge + PageChrome.widePanelWidth)
-                    .padding(.top, portrait ? PageChrome.panelTop + latticePanelHeight : PageChrome.panelTop)
-                    .latticeID("lattice-sample-view"))
-            }
+            // ★ B7 (his iPad notes 11-08, design note 30), ★ his 11-10 (later): Cells is core's chunk of cells; In a part is
+            // core's sample part with the settings on it — never his own part (the workspace covers it on this page)
+            AnyView(LatticeSampleView(inputs: latticeSampleInputs, notInSample: latticeNotInSample)
+                .id(model.stage)   // each view its own camera: the chunk and the part frame differently
+                .padding(.leading, portrait ? 0 : PageChrome.edge + PageChrome.widePanelWidth)
+                .padding(.top, portrait ? PageChrome.panelTop + latticePanelHeight : PageChrome.panelTop)
+                .latticeID(model.stage == .cell ? "lattice-sample-cells" : "lattice-sample-part"))
             latticePanel(c, hug: portrait)
                 .frame(height: portrait ? nil : band)
                 .frame(maxHeight: portrait ? min(band, size.height * 0.62) : nil, alignment: .top)
@@ -2422,19 +2421,21 @@ public struct LatticeSetupWizard: View {
                 .padding(.top, portrait ? PageChrome.panelTop + latticePanelHeight + DS.Space.l + 14 : PageChrome.panelTop + 14)
                 .frame(maxHeight: .infinity, alignment: .top)
         }
-        // ★ his iPad notes 11-10 (img 3): Sample is up — the workspace covers its part (LatticeSampleShowingKey)
-        .preference(key: LatticeSampleShowingKey.self, value: model.stage == .cell))
+        // ★ his iPad notes 11-10 (img 3) + (later): a sample is always up — the workspace covers his part (LatticeSampleShowingKey)
+        .preference(key: LatticeSampleShowingKey.self, value: true))
     }
 
-    /// The Sample's inputs: the page's type, its cell when Cell size is Manual (else core's own), the printer's bead, and
-    /// (★ his iPad notes 11-10, img 6) the Grade's ends — graded from "to" up to "from", or one density when not graded.
+    /// The sample's inputs: which view, the page's type, its cell when Cell size is Manual (else core's own), the printer's
+    /// bead, and (★ his iPad notes 11-10, img 6) the Grade's ends — graded from "to" up to "from", or one density when not
+    /// graded (the chunk of cells shows "from").
     private var latticeSampleInputs: LatticeSampleView.Inputs {
         Self.sampleInputs(model, beadMM: project.printParams.strutLineWidthMM)
     }
 
     static func sampleInputs(_ model: LatticeWizardModel, beadMM: Double) -> LatticeSampleView.Inputs {
         let graded = model.gradingMode != LatticeGradingMode.none
-        return LatticeSampleView.Inputs(topology: model.topologyID,
+        return LatticeSampleView.Inputs(shape: model.stage == .cell ? .cells : .part,
+                                        topology: model.topologyID,
                                         typeName: LatticeType.displayName(forID: model.topologyID),
                                         cellMM: model.cellSizeMode == .fixed ? model.cellMM : 0,
                                         beadMM: beadMM,
@@ -2739,7 +2740,7 @@ public struct LatticeSetupWizard: View {
             ForEach(LatticeWizardStage.allCases, id: \.rawValue) { s in
                 let on = model.stage == s
                 Button { model.jump(to: s); rebuild() } label: {
-                    Text(s == .cell ? LatticeSampleView.switchTitle : s.title)
+                    Text(s.title)   // ★ his 11-10: Cells │ In a part
                         .font(.system(size: 13, weight: on ? .semibold : .regular))
                         .foregroundStyle((on ? DS.Color.textPrimary : DS.Color.textSecondary).color)
                         .padding(.horizontal, DS.Space.l).frame(minWidth: 120, minHeight: 36)

@@ -193,8 +193,11 @@ struct LatticeSampleResult {
   std::string receipt_json;
   bool rho_held = false;
 };
+// ★ his iPad notes 11-10 (later): `cube` = the page's first view, "a chunk of a bunch of lattice cells together" — core's
+// cube sample (shape "cube", the production struts) at the page's cell (0 ⇒ 8 mm), 3–6 whole cells a side (~40 mm), at
+// ONE density (`rho_hi`, held into the band; <= 0 = the band's middle). false = the coupon (the sample part).
 LatticeSampleResult lattice_sample(const std::string& topology, double cell_mm, double bead_mm, double rho_lo,
-                                   double rho_hi, BridgeError& err);
+                                   double rho_hi, bool cube, BridgeError& err);
 
 // Write an ImportedMesh to an STL file (core write_stl_file; binary encoding).
 // This is the M6.1 STL export path exposed to the app; 3MF export (lib3mf) is

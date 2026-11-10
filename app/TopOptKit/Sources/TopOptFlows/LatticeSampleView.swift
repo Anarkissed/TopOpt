@@ -14,17 +14,24 @@ import TopOptDesign
 import TopOptKit
 
 /// ★ his iPad notes 11-10 (img 3): "The background of the model is completely visible and cut off. It looks horrendous. This
-/// should not be visible at all." The Lattice page says when Sample is up; the workspace then covers its part (under the
-/// top-left block and the stage capsule, which stay), so only the sample block shows.
+/// should not be visible at all." The Lattice page says when its sample is up; the workspace then covers its part (under the
+/// top-left block and the stage capsule, which stay), so only the sample shows. ★ his 11-10 (later): "In a part … shouldn't
+/// be the actual part the user has" — both views are samples now, so the page covers his part in either.
 struct LatticeSampleShowingKey: PreferenceKey {
     static var defaultValue = false
     static func reduce(value: inout Bool, nextValue: () -> Bool) { value = value || nextValue() }
 }
 
 struct LatticeSampleView: View {
-    /// What the block is built from: the page's type, its cell (0 ⇒ core's 8 mm), the printer's bead, and (★ his iPad notes
-    /// 11-10, img 6: "nothing changes the sample") the Grade's two ends (0 ⇒ core's band).
+    /// ★ his 11-10 (later): "For the 'cell/in the part' I think it should go back to how it was, showing a chunk of a bunch of
+    /// lattice cells together, and the 'in the part' should be named 'In A part' and should be a sample part that is shown
+    /// with the settings implemented on there. It shouldn't be the actual part the user has."
+    enum Shape: Equatable { case cells, part }
+    /// What the sample is built from: which one, the page's type, its cell (0 ⇒ core's 8 mm), the printer's bead, and
+    /// (★ his iPad notes 11-10, img 6: "nothing changes the sample") the Grade's two ends (0 ⇒ core's band; the chunk of
+    /// cells takes `rhoHi`, one density).
     struct Inputs: Equatable {
+        var shape: Shape = .part
         let topology: String; let typeName: String; let cellMM: Double; let beadMM: Double
         var rhoLo: Double = 0; var rhoHi: Double = 0
     }
@@ -37,9 +44,7 @@ struct LatticeSampleView: View {
     @State private var caption = LatticeSampleView.building
     @State private var failed = false
 
-    static let building = "Building the sample block\u{2026}"
-    /// The switch's first view, in the design's word (note 30: [Sample │ In the part]).
-    static let switchTitle = "Sample"
+    static let building = "Building the sample\u{2026}"
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -76,7 +81,7 @@ struct LatticeSampleView: View {
         let i = inputs
         let r = await Task.detached(priority: .userInitiated) { () -> Result<TopOptKit.LatticeSampleBlock, Error> in
             Result { try TopOptKit.latticeSampleBlock(topology: i.topology, cellMM: i.cellMM, beadMM: i.beadMM,
-                                                      rhoLo: i.rhoLo, rhoHi: i.rhoHi) }
+                                                      rhoLo: i.rhoLo, rhoHi: i.rhoHi, cube: i.shape == .cells) }
         }.value
         guard !Task.isCancelled else { return }
         switch r {
@@ -85,7 +90,9 @@ struct LatticeSampleView: View {
                                faceIDs: [Int32](repeating: 1, count: block.mesh.indices.count / 3))
             mesh = m
             camera.reframe(m.bounds)
-            caption = Self.caption(receiptJSON: block.receiptJSON, typeName: i.typeName, densityHeld: block.densityHeld)
+            caption = i.shape == .cells
+                ? Self.cellsCaption(receiptJSON: block.receiptJSON, typeName: i.typeName, densityHeld: block.densityHeld)
+                : Self.caption(receiptJSON: block.receiptJSON, typeName: i.typeName, densityHeld: block.densityHeld)
         case .failure(let e):
             mesh = nil; failed = true
             caption = "The engine can't build this type's sample: \(e.localizedDescription)"
@@ -107,7 +114,21 @@ struct LatticeSampleView: View {
             grade = (lo == hi ? "density \(lo) %" : "density \(lo) → \(hi) %")
                 + (densityHeld ? " (held to \(typeName)'s band)" : "") + " · "
         }
-        return "Sample block · \(size)\(typeName) · \(grade)built by the engine, as in your part"
+        return "Sample part · \(size)\(typeName) · \(grade)built by the engine"
+    }
+
+    /// The chunk of cells: "5 × 5 × 5 cells of 8 mm · Octet truss · density 30 % · built by the engine".
+    static func cellsCaption(receiptJSON: String, typeName: String, densityHeld: Bool = false) -> String {
+        let obj = (try? JSONSerialization.jsonObject(with: Data(receiptJSON.utf8))) as? [String: Any]
+        var head = ""
+        if let n = (obj?["cells_per_side"] as? NSNumber)?.intValue, let c = obj?["cell_mm"] as? Double, n > 0 {
+            head = "\(n) × \(n) × \(n) cells of \(String(format: "%g", (c * 100).rounded() / 100)) mm · "
+        }
+        var dens = ""
+        if let r = obj?["relative_density"] as? Double, r > 0 {
+            dens = "density \(Int((r * 100).rounded())) %" + (densityHeld ? " (held to \(typeName)'s band)" : "") + " · "
+        }
+        return "\(head)\(typeName) · \(dens)built by the engine"
     }
 
     /// One plain line for the settings he has on that the engine's sample block doesn't build yet; nil when none.

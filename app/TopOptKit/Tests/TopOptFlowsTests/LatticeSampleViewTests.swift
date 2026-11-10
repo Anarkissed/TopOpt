@@ -15,20 +15,48 @@ final class LatticeSampleViewTests: XCTestCase {
         XCTAssertEqual(obj["shape"] as? String, "coupon")
         XCTAssertEqual(obj["topology"] as? String, "octet")
         XCTAssertEqual((obj["dimensions_mm"] as? [Double])?.count, 3)
-        XCTAssertEqual(LatticeSampleView.caption(receiptJSON: block.receiptJSON, typeName: "Octet truss").hasPrefix("Sample block · "), true)
+        XCTAssertEqual(LatticeSampleView.caption(receiptJSON: block.receiptJSON, typeName: "Octet truss").hasPrefix("Sample part · "), true)
         // CONTROL: a type core cannot generate is refused in core's words, never drawn as octet
         XCTAssertThrowsError(try TopOptKit.latticeSampleBlock(topology: "no-such-type"))
     }
 
-    /// ★ The page mounts it under Sample (the switch's first view), beside the panel; In the part keeps the stage's preview.
+    /// ★ his 11-10: "go back to how it was, showing a chunk of a bunch of lattice cells together" — core's cube of whole
+    /// cells at the page's cell and density (held to the band), production struts; a different cell, a different chunk.
+    func testCellsIsCoresChunkOfCells() throws {
+        let a = try TopOptKit.latticeSampleBlock(topology: "octet", cellMM: 8, rhoHi: 0.3, cube: true)
+        let obj = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(a.receiptJSON.utf8)) as? [String: Any])
+        XCTAssertNotEqual(obj["shape"] as? String, "coupon", "★ the chunk, not the sample part")
+        XCTAssertEqual((obj["cells_per_side"] as? NSNumber)?.intValue, 5, "★ 40 mm of 8 mm cells")
+        XCTAssertGreaterThan(a.mesh.triangleCount, 1000)
+        // a cell that does not divide 40 mm still gives whole cells (core refuses a part cell)
+        let b = try TopOptKit.latticeSampleBlock(topology: "octet", cellMM: 6.5, rhoHi: 0.3, cube: true)
+        let ob = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(b.receiptJSON.utf8)) as? [String: Any])
+        XCTAssertEqual((ob["cells_per_side"] as? NSNumber)?.intValue, 6)
+        XCTAssertNotEqual(a.mesh.vertices, b.mesh.vertices, "★ the cell size changes the chunk")
+        // a density outside the band is held, and said
+        let held = try TopOptKit.latticeSampleBlock(topology: "octet", cellMM: 8, rhoHi: 1.0, cube: true)
+        XCTAssertTrue(held.densityHeld)
+        let cap = LatticeSampleView.cellsCaption(receiptJSON: held.receiptJSON, typeName: "Octet truss", densityHeld: true)
+        XCTAssertTrue(cap.hasPrefix("5 × 5 × 5 cells of 8 mm · Octet truss · density "), cap)
+        XCTAssertTrue(cap.contains("(held to Octet truss's band)"), cap)
+    }
+
+    /// ★ The page draws a sample in BOTH views — Cells the chunk, In a part the sample part — and the switch says so.
+    @MainActor
     func testThePageDrawsTheSampleUnderTheSwitch() throws {
         let src = try FlexibleSource.code("LatticeSetupWizard.swift")
         let r = try XCTUnwrap(src.range(of: "private func latticePage(_ c: CellsPageContext, size: CGSize) -> AnyView {"))
         let page = String(src[r.upperBound...].prefix(1400))
-        XCTAssertTrue(page.contains("if model.stage == .cell {"))
+        XCTAssertFalse(page.contains("if model.stage == .cell {"), "★ no longer only under the first view")
         XCTAssertTrue(page.contains("LatticeSampleView(inputs: latticeSampleInputs, notInSample: latticeNotInSample)"))
-        XCTAssertTrue(src.contains("Text(s == .cell ? LatticeSampleView.switchTitle : s.title)"), "the switch says Sample")
-        XCTAssertEqual(LatticeSampleView.switchTitle, "Sample")
+        XCTAssertTrue(src.contains("Text(s.title)"), "the switch says the views' own titles")
+        XCTAssertEqual(LatticeWizardStage.cell.title, "Cells")
+        XCTAssertEqual(LatticeWizardStage.lattice.title, "In a part")
+        var m = LatticeWizardModel(settings: LatticeSettings(enabled: true))
+        m.stage = .cell
+        XCTAssertEqual(LatticeSetupWizard.sampleInputs(m, beadMM: 0.45).shape, .cells)
+        m.stage = .lattice
+        XCTAssertEqual(LatticeSetupWizard.sampleInputs(m, beadMM: 0.45).shape, .part, "★ a sample part, not his")
     }
 
     // MARK: his iPad notes 11-10 (img 6): "I am not seeing the details adjusting the sample on the right side at all"
@@ -85,12 +113,13 @@ final class LatticeSampleViewTests: XCTestCase {
 }
 
 /// ★ his iPad notes 11-10 (img 3): "The background of the model is completely visible and cut off. It looks horrendous.
-/// This should not be visible at all." The page says when Sample is up and the workspace covers its part.
+/// This should not be visible at all." + (later) "It shouldn't be the actual part the user has": a sample is always up on the
+/// Lattice page, so the workspace covers his part in both views.
 final class LatticeSampleCoverTests: XCTestCase {
-    func testSampleCoversThePartAndInThePartDoesNot() throws {
+    func testThePageAlwaysCoversHisPart() throws {
         let wiz = try FlexibleSource.code("LatticeSetupWizard.swift")
-        XCTAssertTrue(wiz.contains(".preference(key: LatticeSampleShowingKey.self, value: model.stage == .cell)"),
-                      "★ the page says when Sample is up")
+        XCTAssertTrue(wiz.contains(".preference(key: LatticeSampleShowingKey.self, value: true)"),
+                      "★ the page says a sample is up, in either view")
         let ws = try FlexibleSource.code("WorkspacePlaceholder.swift")
         XCTAssertTrue(ws.contains(".onPreferenceChange(LatticeSampleShowingKey.self) { latticeSampleUp = $0 }"))
         let cover = try XCTUnwrap(ws.range(of: "if showLatticeWizard, latticeSampleUp {"), "★ the cover")
@@ -102,8 +131,9 @@ final class LatticeSampleCoverTests: XCTestCase {
 }
 
 #if canImport(AppKit) && canImport(MetalKit)
-/// ★ his iPad notes 11-10 (img 3), IN THE REAL PAGE: on the Lattice page's Sample the part is covered edge to edge (the
-/// top-left block stays); on In the part the cover is gone and the live part is back.
+/// ★ his iPad notes 11-10 (img 3) + (later), IN THE REAL PAGE: on the Lattice page his part is covered edge to edge in both
+/// views (the top-left block stays); Cells draws the chunk of cells, In a part the sample part; leaving the page shows his
+/// part again.
 @MainActor
 final class LatticeSampleCoverHostedTests: XCTestCase {
     // `latticeID`'s probe (LatticeProbeKey), published while a test records
@@ -130,16 +160,18 @@ final class LatticeSampleCoverHostedTests: XCTestCase {
         }
         try h.pickFromMenu("capsuleMenu", "Aesthetic", what: "Topology's ● menu")
         try h.tap("capsuleLattice", "the Lattice page", settle: 1.5)
-        try click("wizard-stage-\(LatticeWizardStage.cell.rawValue)", "Sample")
-        XCTAssertNotNil(seen("lattice-sample-view"), "premise: Sample is up")
-        let cover = try XCTUnwrap(seen("lattice-sample-cover"), "★ the part is covered")
+        try click("wizard-stage-\(LatticeWizardStage.cell.rawValue)", "Cells")
+        XCTAssertNotNil(seen("lattice-sample-cells"), "★ Cells: the chunk of cells")
+        let cover = try XCTUnwrap(seen("lattice-sample-cover"), "★ his part is covered")
         XCTAssertGreaterThanOrEqual(cover.width, AppBuildHost.landscape13.width - 1, "★ edge to edge")
         XCTAssertNotNil(h.frames.all["topLeftName"], "the top-left block stays")
-        try click("wizard-stage-\(LatticeWizardStage.lattice.rawValue)", "In the part")
-        XCTAssertNil(seen("lattice-sample-cover"), "★ In the part shows the part again")
-        XCTAssertNil(seen("lattice-sample-view"))
-        try click("wizard-stage-\(LatticeWizardStage.cell.rawValue)", "Sample again")
-        XCTAssertNotNil(seen("lattice-sample-cover"), "★ covered again")
+        try click("wizard-stage-\(LatticeWizardStage.lattice.rawValue)", "In a part")
+        XCTAssertNotNil(seen("lattice-sample-part"), "★ In a part: the sample part")
+        XCTAssertNil(seen("lattice-sample-cells"))
+        XCTAssertNotNil(seen("lattice-sample-cover"), "★ never his own part")
+        // CONTROL: off the page, his part is back
+        try h.tap("capsuleSetup", "Setup", settle: 1.5)
+        XCTAssertNil(seen("lattice-sample-cover"), "control: Setup shows his part")
     }
 }
 #endif

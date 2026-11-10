@@ -2729,10 +2729,11 @@ public enum TopOptKit {
         public var densityHeld = false
     }
     /// `rhoLo`/`rhoHi` (> 0): the coupon graded between the page's Grade ends, held inside the type's band.
+    /// `cube`: core's chunk of cells instead (whole cells, ~40 mm, one density `rhoHi`).
     public static func latticeSampleBlock(topology: String, cellMM: Double = 0, beadMM: Double = 0,
-                                          rhoLo: Double = 0, rhoHi: Double = 0) throws -> LatticeSampleBlock {
+                                          rhoLo: Double = 0, rhoHi: Double = 0, cube: Bool = false) throws -> LatticeSampleBlock {
         var err = topoptbridge.BridgeError()
-        let r = topoptbridge.lattice_sample(std.string(topology), cellMM, beadMM, rhoLo, rhoHi, &err)
+        let r = topoptbridge.lattice_sample(std.string(topology), cellMM, beadMM, rhoLo, rhoHi, cube, &err)
         try throwIfFailed(err)
         return LatticeSampleBlock(mesh: convert(r.mesh), receiptJSON: String(r.receipt_json), densityHeld: r.rho_held)
     }
