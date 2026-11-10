@@ -1,6 +1,6 @@
 # Lattice rebuild — proposal
 
-Draft 1, 2026-11-10, LatticeReview. For the maintainer to edit. Nothing here is built.
+Draft 2, 2026-11-10, LatticeReview. For the maintainer to edit. Nothing here is built.
 Scope: cell lattices (every strut and sheet type, laid Stepped, Default Grade or uniform). Organic follows as its own proposal.
 Background: the code review at `4bdcc9d2` (synthesis and digests in `agent-scratch/lattice-review/`).
 
@@ -10,9 +10,11 @@ Lines marked **DECIDE** are the places I expect you to change.
 
 ## 1. The one rule
 
-**The engine makes one answer, called the layout. The preview draws it. The run builds the file from it. Nothing else decides geometry.**
+**One piece of code makes one answer, called the layout. It runs on the device for the preview and on the worker for the file. Nothing else decides geometry.**
 
-Today the app and the engine each compute the lattice with their own code. After the rebuild the app computes nothing about the lattice: no cell sizes, no densities, no rim, no skin, no band. It sends your settings to the engine, gets the layout back, and draws it.
+Today the app and the engine each compute the lattice with their own code. After the rebuild there is one implementation, in the engine's code, which is already compiled into the app. The preview calls it directly on the iPad; it never waits for a job, a worker or a file. The run calls the same code and builds the file from the same answer.
+
+The layout is planning, not building. It needs no stress solve of its own, no certificate and no strut mesh, which are the three things that make a run slow.
 
 Three consequences:
 
@@ -96,6 +98,19 @@ The layout is one object the engine returns. It holds:
 - **Totals:** latticed volume, solid volume by reason, mass.
 - **Refusals:** anything the settings asked for that cannot be done, as a code and one plain sentence.
 
+**Speed requirement. DECIDE** the numbers:
+
+- Dragging a slider stays smooth: the picture follows the finger.
+- On release the full picture settles almost at once (proposed: within about a third of a second on your iPad, on the stand).
+- Opening a part or changing a region may take longer once (proposed: a few seconds at most), with the old picture kept up meanwhile.
+
+How it is kept:
+
+- **Measure once.** Walls and surfaces are measured when the part or a region changes, then kept. A slider never triggers it.
+- **Redo only what changed.** Density and Strength move no cells. Band touches only cells near the outline. Cell size is the only setting that re-lays everything.
+- **Draw as today.** The graphics chip draws the lattice from a small table of cells. Only who fills the table changes.
+- **Fallback while dragging:** a coarse layout, replaced by the full one on release.
+
 How it is made:
 
 1. **Measure the part on its real surface.** Wall thickness by casting across the wall on the mesh. Depths and bands in mm on the mesh. The voxel grid is used only for the stress result.
@@ -139,11 +154,12 @@ Each stage ends with something you can look at on the stand.
 
 | Stage | What is built | You can check |
 |---|---|---|
+| 0. Speed proof | A rough layout for the stand only, run on the iPad and timed against the speed requirement in section 3 | The numbers. If it misses, we switch to the alternative in section 8 before any real work is spent |
 | A. Spec and reference parts | Sections 2 to 4 turned into exact rules; your stand plus three or four other parts, each with the settings and a picture you approve | The pictures and the rules read right |
 | B. Domain and measure | Section 3 steps 1 and 2, in the engine | Lattice / solid borders drawn on the stand follow the real surface |
 | C. Cells and density | Steps 3 and 4 | Stepped, Default Grade and uniform on the stand, under both Start from choices |
 | D. Surface | Step 5 and section 4 | Rim, skin, None and cut ends |
-| E. Preview draws the layout | The app's own lattice code switched off behind a setting | Speed on the iPad while dragging a slider |
+| E. Preview draws the layout | The app's own lattice code switched off behind a setting | Speed again, now on every reference part |
 | F. The run builds from the layout | File, receipt, forecast, Results | A printed part against the preview |
 | G. Switch over and delete | Old code removed | Nothing |
 
@@ -153,7 +169,8 @@ Until stage G nothing that ships changes: the new path sits beside the old one.
 
 ## 8. Risks
 
-- **Speed.** The layout has to follow a slider on the iPad. Not measured yet. Stage E is where this is proved or the design changes (for example a coarse layout while dragging, the full one on release).
+- **Speed.** The layout has to follow a slider on the iPad. Not measured yet; the argument is only that the app does a similar amount of work on the device today. Stage 0 proves it or not before anything else is built.
+- **The alternative if stage 0 fails.** The app's fast preview stays the author of the layout, and the run builds exactly the cells the preview placed, refusing if it cannot (the engine already has a path for this). It still gives "what you see is what you get". The cost: the layout rules stay in the app, so the engine cannot lay out a part by itself and the sample needs the app's code too.
 - **Shared engine files.** Stages B to F touch files other agents own. This needs the reviewer to sequence it.
 - **Rules that live only in old code.** Stage A exists to pull them into the spec before anything is deleted.
 
