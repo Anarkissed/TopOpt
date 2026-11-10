@@ -22,6 +22,40 @@ struct LatticeSampleShowingKey: PreferenceKey {
     static func reduce(value: inout Bool, nextValue: () -> Bool) { value = value || nextValue() }
 }
 
+/// ★ 362's 11-10 regression set found it: every change of the page's settings started a whole engine build of the sample
+/// (~1.7 s), and a build already started runs to its end even after the page moved on — a Strength drag stacked dozens side
+/// by side (the page-parity walk took 26 min a test; on his iPad, lag and heat). The builder runs ONE build at a time, and
+/// only the newest sample asked for: one asked for before a newer one, or for a view that left, is skipped before it starts.
+final class LatticeSampleBuilder: @unchecked Sendable {
+    static let shared = LatticeSampleBuilder()
+    private let queue = DispatchQueue(label: "lattice-sample", qos: .userInitiated)
+    private let lock = NSLock()
+    private var newest = 0
+    private var started = 0
+
+    /// A number for the sample just asked for; every earlier one is stale from now on.
+    func ticket() -> Int { lock.lock(); defer { lock.unlock() }; newest += 1; return newest }
+    /// The view that asked for `t` left or moved on: if its build hasn't started, it never will.
+    func retire(_ t: Int) { lock.lock(); defer { lock.unlock() }; if newest == t { newest += 1 } }
+    /// How many builds actually ran.
+    var builds: Int { lock.lock(); defer { lock.unlock() }; return started }
+    private func claim(_ t: Int) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard t == newest else { return false }
+        started += 1; return true
+    }
+
+    /// Runs `work` on the builder's one queue if `t` is still the newest when its turn comes; nil when it was skipped.
+    func run<T>(_ t: Int, _ work: @escaping () throws -> T) async -> Result<T, Error>? {
+        await withCheckedContinuation { (c: CheckedContinuation<Result<T, Error>?, Never>) in
+            queue.async {
+                guard self.claim(t) else { c.resume(returning: nil); return }
+                c.resume(returning: Result { try work() })
+            }
+        }
+    }
+}
+
 struct LatticeSampleView: View {
     /// ★ his 11-10 (later): "For the 'cell/in the part' I think it should go back to how it was, showing a chunk of a bunch of
     /// lattice cells together, and the 'in the part' should be named 'In A part' and should be a sample part that is shown
@@ -71,24 +105,56 @@ struct LatticeSampleView: View {
             .padding(.bottom, DS.Space.l)
         }
         .task(id: inputs) { await build() }
+        .onAppear { if FlexibleSaid.recording { Self.recordedAppears += 1 }; Self.say(tag, "appear") }
+        .onDisappear { Self.say(tag, "disappear") }
     }
+
+    /// Diagnostics: SAMPLE_TRACE=1 prints each view's asks, skips, builds and appearances.
+    static let tracing = ProcessInfo.processInfo.environment["SAMPLE_TRACE"] != nil
+    static func say(_ tag: String, _ what: @autoclosure () -> String) {
+        guard tracing else { return }
+        let line = "[sample \(tag)] \(String(format: "%.3f", Date().timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1000))) \(what())\n"
+        FileHandle.standardError.write(Data(line.utf8))   // unbuffered: a stall's last lines are in the log
+    }
+    @State private var tag = String(UUID().uuidString.prefix(4))
+
+    /// Test hooks, kept only while a test records (FlexibleSaid.recording): each sample asked for, each time a view came up.
+    nonisolated(unsafe) static var recordedAsks: [Inputs] = []
+    nonisolated(unsafe) static var recordedAppears = 0
 
     /// Core's sample is Z-up (printed as it stands); the viewer is Y-up — the map the workspace applies to a part.
     static let settleZUp = simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0))
 
+    /// ★ A beat for a drag to move on before the engine builds (a slider's steps come ~16 ms apart): a change the next step
+    /// replaces is cancelled here, before it costs a build.
+    static let settleNanos: UInt64 = 120_000_000
+
     private func build() async {
         caption = Self.building; failed = false
         let i = inputs
-        let r = await Task.detached(priority: .userInitiated) { () -> Result<TopOptKit.LatticeSampleBlock, Error> in
-            Result { try TopOptKit.latticeSampleBlock(topology: i.topology, cellMM: i.cellMM, beadMM: i.beadMM,
-                                                      rhoLo: i.rhoLo, rhoHi: i.rhoHi, cube: i.shape == .cells) }
-        }.value
-        guard !Task.isCancelled else { return }
+        if FlexibleSaid.recording { Self.recordedAsks.append(i) }
+        Self.say(tag, "ask \(i.shape) \(i.topology) cell \(i.cellMM) rho \(i.rhoLo)-\(i.rhoHi) bead \(i.beadMM)")
+        try? await Task.sleep(nanoseconds: Self.settleNanos)
+        guard !Task.isCancelled else { Self.say(tag, "cancelled in the beat"); return }
+        let builder = LatticeSampleBuilder.shared
+        let t = builder.ticket()
+        // ★ the viewer's mesh is made on the builder's queue too: for the sample part's ~330 k triangles it held the main
+        // thread for seconds (traced 11-10, debug build), a freeze on his iPad each time the sample changed
+        let built = await withTaskCancellationHandler {
+            await builder.run(t) { () -> (block: TopOptKit.LatticeSampleBlock, mesh: ViewerMesh) in
+                let b = try TopOptKit.latticeSampleBlock(topology: i.topology, cellMM: i.cellMM, beadMM: i.beadMM,
+                                                         rhoLo: i.rhoLo, rhoHi: i.rhoHi, cube: i.shape == .cells)
+                return (b, ViewerMesh(vertices: b.mesh.vertices, indices: b.mesh.indices,
+                                      faceIDs: [Int32](repeating: 1, count: b.mesh.indices.count / 3)))
+            }
+        } onCancel: { builder.retire(t) }
+        Self.say(tag, "ticket \(t): \(built == nil ? "skipped" : "built")\(Task.isCancelled ? ", cancelled" : "")")
+        guard let r = built, !Task.isCancelled else { return }
         switch r {
-        case .success(let block):
-            let m = ViewerMesh(vertices: block.mesh.vertices, indices: block.mesh.indices,
-                               faceIDs: [Int32](repeating: 1, count: block.mesh.indices.count / 3))
+        case .success(let made):
+            let block = made.block, m = made.mesh
             mesh = m
+            Self.say(tag, "mesh up (\(block.mesh.indices.count / 3) triangles)")
             camera.reframe(m.bounds)
             caption = i.shape == .cells
                 ? Self.cellsCaption(receiptJSON: block.receiptJSON, typeName: i.typeName, densityHeld: block.densityHeld)

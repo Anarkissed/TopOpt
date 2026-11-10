@@ -112,6 +112,82 @@ final class LatticeSampleViewTests: XCTestCase {
     }
 }
 
+/// ★ 362's 11-10 regression set: every settings change built a whole sample and a started build ran to its end, so a drag
+/// stacked dozens side by side (the page-parity walk: 26 min a test). The builder builds only the newest ask, one at a time.
+final class LatticeSampleBuilderTests: XCTestCase {
+    final class Count: @unchecked Sendable {
+        private let lock = NSLock(); private var n = 0, live = 0, top = 0
+        func enter() { lock.lock(); n += 1; live += 1; top = max(top, live); lock.unlock() }
+        func leave() { lock.lock(); live -= 1; lock.unlock() }
+        var built: Int { lock.lock(); defer { lock.unlock() }; return n }
+        var peak: Int { lock.lock(); defer { lock.unlock() }; return top }
+    }
+
+    /// ★ A burst of asks (a Strength drag) builds ONE sample — the newest. CONTROL: the old way (a detached build per
+    /// change) built all ten, side by side.
+    func testABurstBuildsOnlyTheNewest() async {
+        let b = LatticeSampleBuilder(), c = Count()
+        let tickets = (0..<10).map { _ in b.ticket() }
+        let got = await withTaskGroup(of: (Int, Int?).self, returning: [Int: Int].self) { g in
+            for (k, t) in tickets.enumerated() {
+                g.addTask {
+                    let r = await b.run(t) { () -> Int in c.enter(); Thread.sleep(forTimeInterval: 0.05); c.leave(); return k }
+                    return (k, try? r?.get())
+                }
+            }
+            var out: [Int: Int] = [:]
+            for await (k, v) in g { if let v { out[k] = v } }
+            return out
+        }
+        XCTAssertEqual(c.built, 1, "★ only the newest is built")
+        XCTAssertEqual(got, [9: 9], "★ the newest is the one built; every earlier ask is skipped")
+        XCTAssertEqual(b.builds, 1)
+        let old = Count()
+        await withTaskGroup(of: Void.self) { g in
+            for _ in 0..<10 {
+                g.addTask { await Task.detached { old.enter(); Thread.sleep(forTimeInterval: 0.05); old.leave() }.value }
+            }
+        }
+        XCTAssertEqual(old.built, 10, "control: the old way built every one")
+        XCTAssertGreaterThan(old.peak, 1, "control: the old way built them side by side")
+    }
+
+    /// ★ Asks he lets settle are each built, never two at once; a view that left before its turn is skipped.
+    func testOneAtATimeAndALeftViewIsSkipped() async {
+        let b = LatticeSampleBuilder(), c = Count()
+        for k in 0..<3 {
+            let t = b.ticket()
+            let r = await b.run(t) { () -> Int in c.enter(); Thread.sleep(forTimeInterval: 0.02); c.leave(); return k }
+            XCTAssertEqual(try r?.get(), k)
+        }
+        XCTAssertEqual(c.built, 3, "★ each settled ask is built")
+        // a newer ask while one builds: it waits its turn (never side by side)
+        let t1 = b.ticket()
+        async let first = b.run(t1) { () -> Int in c.enter(); Thread.sleep(forTimeInterval: 0.2); c.leave(); return 1 }
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        let t2 = b.ticket()
+        let second = await b.run(t2) { () -> Int in c.enter(); c.leave(); return 2 }
+        _ = await first
+        XCTAssertEqual(try second?.get(), 2)
+        XCTAssertEqual(c.peak, 1, "★ one build at a time")
+        // the page moved on before its turn
+        let gone = b.ticket(); b.retire(gone)
+        let before = c.built
+        let r = await b.run(gone) { () -> Int in c.enter(); c.leave(); return 99 }
+        XCTAssertNil(r, "★ a view that left is not built"); XCTAssertEqual(c.built, before)
+    }
+
+    /// ★ The page builds through the builder after a beat, and keeps no build it can't call off.
+    func testThePageBuildsThroughTheBuilder() throws {
+        let src = try FlexibleSource.code("LatticeSampleView.swift")
+        XCTAssertTrue(src.contains("try? await Task.sleep(nanoseconds: Self.settleNanos)"))
+        XCTAssertTrue(src.contains("let builder = LatticeSampleBuilder.shared"))
+        XCTAssertTrue(src.contains("} onCancel: { builder.retire(t) }"))
+        XCTAssertFalse(src.contains("Task.detached"), "★ no detached build that runs on after the page moved on")
+        XCTAssertLessThanOrEqual(LatticeSampleView.settleNanos, 200_000_000, "a beat, not a wait he notices")
+    }
+}
+
 /// ★ his iPad notes 11-10 (img 3): "The background of the model is completely visible and cut off. It looks horrendous.
 /// This should not be visible at all." + (later) "It shouldn't be the actual part the user has": a sample is always up on the
 /// Lattice page, so the workspace covers his part in both views.
@@ -172,6 +248,65 @@ final class LatticeSampleCoverHostedTests: XCTestCase {
         // CONTROL: off the page, his part is back
         try h.tap("capsuleSetup", "Setup", settle: 1.5)
         XCTAssertNil(seen("lattice-sample-cover"), "control: Setup shows his part")
+    }
+
+    /// ★ 362's 11-10 set: with nothing changing, the page asks for its sample at most once — never a loop (the stalled fix1
+    /// run: a Lattice page left up kept rebuilding its sample, and the main thread made each mesh).
+    func testNothingChangingAsksOnce() throws {
+        let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: true)
+        let p = r.project
+        p.lattice.flexible = nil
+        p.lattice.clearLatticeType()
+        p.lattice.chooseLatticeType(.aesthetic)
+        if let c = p.selection.groups.first(where: { $0.name == "Group C" }) { p.force.makeAnchor(c.id) }
+        let pr = Probe()
+        let h = AppBuildHost(WorkspacePlaceholder(model: r.app, project: p).onPreferenceChange(LatticeProbeKey.self) { pr.all = $0 },
+                             size: AppBuildHost.landscape13, test: self)
+        h.pump(3)
+        try h.pickFromMenu("capsuleMenu", "Aesthetic", what: "Topology's ● menu")
+        try h.tap("capsuleLattice", "the Lattice page", settle: 1.5)
+        h.pump(6)
+        LatticeSampleView.recordedAsks = []; LatticeSampleView.recordedAppears = 0
+        let built = LatticeSampleBuilder.shared.builds
+        h.pump(12)
+        let asks = LatticeSampleView.recordedAsks
+        let distinct = Set(asks.map { "\($0)" })
+        XCTAssertLessThanOrEqual(asks.count, 1, "★ no loop: \(asks.count) asks, \(LatticeSampleView.recordedAppears) appears, "
+                                 + "\(distinct.count) distinct inputs: \(distinct.prefix(3))")
+        XCTAssertLessThanOrEqual(LatticeSampleBuilder.shared.builds - built, 1, "★ no build while nothing changes")
+    }
+
+    /// The stalled run's own steps (LatticeCornerHostedTests): no lattice saved yet, Structural, the page opened by the
+    /// fix line's Open Lattice; that host stays up while the next test stages a new one.
+    func testAPageLeftUpAsksOnce() throws {
+        func stage(prism: Bool) throws -> AppBuildHost {
+            let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: prism)
+            let p = r.project
+            p.lattice.flexible = nil
+            p.lattice.chooseLatticeType(.structural)
+            if let c = p.selection.groups.first(where: { $0.name == "Group C" }) { p.force.makeAnchor(c.id) }
+            let h = AppBuildHost(WorkspacePlaceholder(model: r.app, project: p), size: AppBuildHost.landscape13, test: self)
+            h.pump(3)
+            try h.pickFromMenu("capsuleMenu", "Structural", what: "the stage menu")
+            h.pump(1)
+            return h
+        }
+        let first = try stage(prism: false)
+        try first.tap("latticeFixChip", "Open Lattice", settle: 1.5)
+        first.pump(6)
+        LatticeSampleView.recordedAsks = []; LatticeSampleView.recordedAppears = 0
+        let built = LatticeSampleBuilder.shared.builds
+        first.pump(8)
+        var asks = LatticeSampleView.recordedAsks
+        XCTAssertLessThanOrEqual(asks.count, 1, "★ the page alone: \(asks.count) asks, \(LatticeSampleView.recordedAppears) appears, "
+                                 + "distinct \(Set(asks.map { "\($0)" }).prefix(3))")
+        LatticeSampleView.recordedAsks = []; LatticeSampleView.recordedAppears = 0
+        let second = try stage(prism: true)
+        second.pump(8)
+        asks = LatticeSampleView.recordedAsks
+        XCTAssertLessThanOrEqual(asks.count, 1, "★ with a second host: \(asks.count) asks, \(LatticeSampleView.recordedAppears) "
+                                 + "appears, distinct \(Set(asks.map { "\($0)" }).prefix(3))")
+        XCTAssertLessThanOrEqual(LatticeSampleBuilder.shared.builds - built, 2, "★ no build loop")
     }
 }
 #endif
