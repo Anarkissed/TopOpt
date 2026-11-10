@@ -15,6 +15,12 @@
 //    first and last row. A silent table edit (or a re-run not carried into the table)
 //    breaks here.
 // §3 octet is unchanged: gated by PR 259's table, as before.
+//
+// ★ §1 AND §3's LATTICE RUNS ARE LONG (about 2.4 h on the honest 44 mm bar) and run only when
+// TOPOPT_LONG_TESTS=1: in full on every change to a type's law, and on the daily full suite;
+// the push that changes a law names that full pass (its SHA, 9/9 types). §2 runs every time.
+// TOPOPT_STRUT_LAW_TYPES (a comma list) runs only those types: one process per type, side by
+// side, takes the full pass from about 2.4 h to its slowest type.
 #include "topopt/job.hpp"
 #include "topopt/loadcase.hpp"
 #include "topopt/materials.hpp"
@@ -27,6 +33,8 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <unistd.h>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -220,7 +228,12 @@ Lp lattice_part(const std::string& dir, const Faces& f, const std::string& topol
 
 int main() {
   const std::string dir = TMP_DIR;
-  write_stl_file(dir + "/type_strut_law_bar.stl", bar(), StlFormat::Binary);
+  {  // written under a private name and renamed into place, so runs side by side (one type
+     // each, TOPOPT_STRUT_LAW_TYPES below) never read a half-written bar
+    const std::string mine = dir + "/type_strut_law_bar." + std::to_string(::getpid()) + ".stl";
+    write_stl_file(mine, bar(), StlFormat::Binary);
+    std::filesystem::rename(mine, dir + "/type_strut_law_bar.stl");
+  }
   const StepModel model = import_part(dir + "/type_strut_law_bar.stl").model;
   Faces f;
   f.left = face_with_normal(model, -1, 0, 0);
@@ -228,10 +241,25 @@ int main() {
   f.right = face_with_normal(model, 1, 0, 0);
   CHECK(f.left >= 0 && f.top >= 0 && f.right >= 0, "precondition: the bar's three faces");
 
+  // ★ §1's NINE LATTICE RUNS ARE THE LONG HALF (option (b), the reviewer's call 11-10): on
+  // the honest 44 mm bar -- the largest type floor is 10 cells, so every side must hold 10
+  // -- they take about 2.4 h (measured: the first 3 types in 48 min). They run when
+  // TOPOPT_LONG_TESTS=1: in full on every change to a type's law and on the daily full
+  // suite. §2 (each law transcribed from its own evidence) runs every time, in seconds.
+  const char* long_env = std::getenv("TOPOPT_LONG_TESTS");
+  const bool long_runs = long_env != nullptr && std::string(long_env) == "1";
+  if (!long_runs)
+    std::printf("[type law] §1/§3's lattice runs skipped: set TOPOPT_LONG_TESTS=1 (about 2.4 h)\n");
   const char* types[] = {"sc", "bcc", "fcc", "diamond", "kelvin", "rhombic", "gyroid",
                          "schwarz_d", "octet"};
+  // TOPOPT_STRUT_LAW_TYPES=bcc,kelvin runs only those types, so the long half can run one
+  // type per process side by side (each type's job and output folder are its own).
+  const char* only_env = std::getenv("TOPOPT_STRUT_LAW_TYPES");
+  const std::string only = only_env != nullptr ? "," + std::string(only_env) + "," : "";
   for (const char* t : types) {
     const std::string id = t;
+    if (!only.empty() && only.find("," + id + ",") == std::string::npos) continue;
+    if (long_runs) {
     const Lp r = lattice_part(dir, f, id);
     const std::string& rc = r.receipt;
     const double m = num_after(rc, "lattice_margin_effective");
@@ -249,8 +277,10 @@ int main() {
     CHECK(has(rc, "\"gated\": true") && has(rc, "\"strut_strength_uncertified\": false"),
           (sec + id + ": its strut law is in the gate").c_str());
     CHECK(std::isfinite(m), (sec + id + ": its lattice margin is finite").c_str());
+    }
 
     const LatticeTopology topo = lattice_topology_from_id(id);
+    const std::string sec = id == "octet" ? "§3 " : "§1 ";
     CHECK(strut_law_measured(topo), (sec + id + ": the type has a measured strut law").c_str());
     if (id != "octet" && strut_law_measured(topo)) {
       const double mid = 0.5 * (strut_law_rho_min(topo) + strut_law_rho_max(topo));
