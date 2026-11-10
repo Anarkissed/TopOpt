@@ -468,7 +468,7 @@ final class LatticeSeparationTests: XCTestCase {
         XCTAssertEqual(LatticeWizardStage.allCases.count, 2,
                        "\"These are now 'views'. One cell or a lattice.\"")
         XCTAssertEqual(LatticeWizardStage.allCases.map(\.title),
-                       ["One cell", "In the part"])
+                       ["Cells", "In a part"])   // ★ his 11-10: a chunk of cells │ a sample part, never his own
         // Finish is a SETTING of the in-the-part view, never a view of its own.
         XCTAssertEqual(LatticeWizardSetting.finish.stage, .lattice,
                        "\"Do not include the 'Finish' section\" — as a view")

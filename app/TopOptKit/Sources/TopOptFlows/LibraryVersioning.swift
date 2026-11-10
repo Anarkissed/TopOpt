@@ -61,6 +61,7 @@ enum LibrarySettings {
         x.lattice = s.lattice ?? LatticeSettings()
         x.projectCADFaces = s.projectCADFaces ?? true
         x.faceRegions = s.faceRegions ?? FaceRegionModel()
+        x.latticePageManual = nil   // ★ 11-10 (img08): the Lattice page's Auto │ Manual is a view pick, never a setting
         return x
     }
 }

@@ -194,6 +194,11 @@ public final class ProjectModel: ObservableObject {
     /// controls are bounded at USE by the core-read `TopOptKit.LatticeLimits`, never here.
     @Published public var lattice = LatticeSettings()
 
+    /// ★ His iPad note 11-10 (img08: "Auto/Manual on the Lattice page falls back to Auto every visit"): the page's
+    /// [Auto │ Manual], kept with the part until Reset all. A view pick (Manual shows more rows; Auto still holds what they
+    /// set), so it lives outside `lattice`: never an undo step, never a rebake, never a draft (`LibrarySettings.same`).
+    @Published public var latticePageManual = false
+
     /// THE ARTIFACTS A RE-LATTICE NEEDS (task 2026-08-02-lattice-a-variant): the
     /// EXACT job document that produced this project's current results, and that
     /// run's `design.bin` (each variant's own density field).
@@ -396,6 +401,7 @@ public final class ProjectModel: ObservableObject {
         // false would quietly opt every existing project out of the change.
         self.projectCADFaces = snapshot.projectCADFaces ?? true
         self.faceRegions = snapshot.faceRegions ?? FaceRegionModel()
+        self.latticePageManual = snapshot.latticePageManual ?? false   // ★ 11-10 (img08)
         // ★ RE-EVALUATE THE PERSISTED REGIONS AGAINST THIS IMPORT, and report what
         // moved (§3c / bar R6). A union is stored as a filter plus a hand
         // add/remove list precisely so it CAN be re-evaluated; the one thing that
@@ -2761,7 +2767,9 @@ public final class ProjectModel: ObservableObject {
                                  group: UUID, role: LatticeGroupRole,
                                  in mesh: ViewerMesh) -> LatticeDepthPlane? {
         guard let region = faceRegions.region(rid) else { return nil }
-        let members = FaceRegionGeometry.members(of: region, in: mesh)
+        // ★ his iPad notes 11-10 (img 1/2): a UNION of pieces lists its faces only through its parts — read them as the
+        // run does (`latticeSectorMembers`); its own face list is empty, so Lattice and No lattice drew no prism
+        let members = region.isUnionOfParts ? (latticeSectorMembers(rid) ?? []) : FaceRegionGeometry.members(of: region, in: mesh)
         guard !members.isEmpty else { return nil }
         // The render/handle key is the REGION id, kept distinct from a face key by
         // construction: face keys are non-negative run face ids and manual
@@ -3903,7 +3911,9 @@ public final class ProjectModel: ObservableObject {
                                // state the only one that survives a reopen only
                                // by accident of which value it happened to be.
                                projectCADFaces: projectCADFaces,
-                               faceRegions: faceRegions.isEmpty ? nil : faceRegions)
+                               faceRegions: faceRegions.isEmpty ? nil : faceRegions,
+                               // ★ 11-10 (img08): only Manual is written, so a part that never picked it saves as before
+                               latticePageManual: latticePageManual ? true : nil)
     }
 
     /// The URL of the imported model file to copy into the store on first save.

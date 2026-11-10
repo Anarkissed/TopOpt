@@ -497,6 +497,8 @@ public struct WorkspacePlaceholder: View {
     /// and carries the ladder, the sim and the receipt, which the wizard
     /// deliberately does not.
     @State private var showLatticeWizard = false
+    /// ★ his iPad notes 11-10 (img 3): the Lattice page's Sample is up — the part is covered (`LatticeSampleShowingKey`).
+    @State private var latticeSampleUp = false
 
     /// ★ WHICH STAGE THE WORKSPACE IS SHOWING (task 2026-08-14-lattice-separation
     /// §1/§2/§3). The TO page and the lattice page are the SAME page — same
@@ -1415,6 +1417,11 @@ public struct WorkspacePlaceholder: View {
                 latticeBandChipsOverlay.ignoresSafeArea()
             }
 
+            // ★ his iPad notes 11-10 (img 3): while the Lattice page shows its Sample, the part is covered — never seen behind
+            // the panel or cut off above it; the top-left block and the stage capsule stay over it
+            if showLatticeWizard, latticeSampleUp {
+                DS.Color.background.color.ignoresSafeArea().latticeID("lattice-sample-cover")
+            }
             if !fullScreenPageUp || cellsPageKeepsChrome { chrome }   // ★ B2 (note 16, IMG_0564): the Cells page keeps the top-left block
             })   // Flexible (PR #362) H58
             AnyView(Group {   // Flexible (PR #362) H58: the body in heap-boxed chunks; the 47 KB body value was copied on the iPad main thread's stack until it overflowed (crash 2026-10-25)
@@ -1653,6 +1660,7 @@ public struct WorkspacePlaceholder: View {
                 .wallMarking { goToWallMarking() }
                 // ★ B4: the Cells page — this page's rows, over the live part, under the capsule
                 .cellsPage(regions: latticeRegionTabNames, closeToken: cellsCloseToken)
+                .onPreferenceChange(LatticeSampleShowingKey.self) { latticeSampleUp = $0 }   // ★ his iPad notes 11-10 (img 3)
                 .transition(.opacity)
             }
             if showLatticeWizard, stage == .lattice, viewerMesh != nil { latticeCapsuleOverlay }
