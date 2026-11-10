@@ -1,6 +1,6 @@
 # Lattice rebuild — proposal
 
-Draft 3, 2026-11-10, LatticeReview. For the maintainer to edit. Nothing here is built.
+Draft 4, 2026-11-10, LatticeReview. For the maintainer to edit. Nothing here is built.
 Scope: cell lattices (every strut and sheet type, laid Stepped, Default Grade or uniform). Organic follows as its own proposal.
 Background: the code review at `4bdcc9d2` (synthesis and digests in `agent-scratch/lattice-review/`).
 
@@ -86,24 +86,27 @@ This is the contract, written from the screens as they are today (release N1110)
 - **Removed:** "Through the depth / Across the face".
 - **Kept: the Auto | Manual pill.** His words: "Auto is for makers. Manual is for engineers. One app for two groups of people." Auto shows the few choices a maker needs and the engine decides the rest. Manual shows every value the layout uses, each editable.
 
-### Manual controls for engineers — proposed, DECIDE each
+### Manual controls for engineers — DECIDED: these ten
 
-Every one of these is a number the layout already has to choose. Manual would show it and let it be set; Auto keeps choosing it. Each can be set for the part or per zone or region.
+Each is a number the layout already has to choose. Manual shows it and lets it be set; Auto keeps choosing it. Each can be set for the part or per zone or region. They are listed in the order they get built, which follows the stage that makes each one possible.
 
-| Control | What it sets | Why an engineer wants it |
-|---|---|---|
-| Strut width, from → to (mm) | The thinnest and thickest strut, stated directly instead of as a density | Struts are specified and inspected in mm, not in percent |
-| Cells across a wall (minimum) | Overrides the 2 / 1 / certified rule, with a plain warning when it goes below what is certified | To accept or forbid lattice in a given wall thickness |
-| Size change rate | The largest step in cell size between neighbours | Controls how abruptly stiffness changes |
-| Grade response | How steeply density follows stress, and the target stress the lattice is sized to (a share of the allowable) | Sets the safety factor of the lattice itself |
-| Which loads drive the grade | One load case, or the worst of all | A part used in more than one way |
-| Layout anchor and angle | Where the cell grid starts (a face, an edge, the part's centre) and its rotation | To line cells up with a feature, or turn struts off the print's weak direction |
-| Joint fillet | The blend radius where struts meet | Joints are where lattices crack; a fillet lowers the peak stress |
-| Skin bars | Bar width, spacing and pattern of the skin's flat lattice | The skin carries the surface load |
-| Rim width | Width of the rim bar | Edge strength and print adhesion |
-| Overhang limit | The steepest unsupported strut allowed, with any breach highlighted | Printability on the chosen build direction |
-| Target mass | "Make this part N grams": the layout solves the density to hit it | Weight budgets |
-| Symmetry | Mirror the layout across a chosen plane | Symmetric parts should get symmetric lattices |
+| # | Control | What it sets | Why an engineer wants it | Built in |
+|---|---|---|---|---|
+| 1 | Strut width, from → to (mm) | The thinnest and thickest strut, stated directly instead of as a density | Struts are specified and inspected in mm, not in percent | C |
+| 2 | Cells across a wall (minimum) | Overrides the 2 / 1 / certified rule, with a plain warning when it goes below what is certified | To accept or forbid lattice in a given wall thickness | C |
+| 3 | Layout anchor and angle | Where the cell grid starts (a face, an edge, the part's centre) and its rotation | To line cells up with a feature, or turn struts off the print's weak direction | C |
+| 4 | Size change rate | The largest step in cell size between neighbours | Controls how abruptly stiffness changes | C |
+| 5 | Grade response | How steeply density follows stress, and the target stress the lattice is sized to (a share of the allowable) | Sets the safety factor of the lattice itself | C |
+| 6 | Which loads drive the grade | One load case, or the worst of all | A part used in more than one way | C |
+| 7 | Skin bars | Bar width, spacing and pattern of the skin's flat lattice | The skin carries the surface load | D |
+| 8 | Rim width | Width of the rim bar | Edge strength and print adhesion | D |
+| 9 | Joint fillet | The blend radius where struts meet | Joints are where lattices crack; a fillet lowers the peak stress | D |
+| 10 | Overhang limit | The steepest unsupported strut allowed, with any breach highlighted on the part | Printability on the chosen build direction | D |
+
+**Left out for now, and why:**
+
+- **Symmetry.** The layout is centred on the part by default, so a symmetric part already gets a symmetric lattice. A control is only needed for a part that is nearly symmetric, which can wait.
+- **Target mass.** It needs the layout to be solved several times to hit a number. Until then the mass is shown live, so the same result is reached by moving the strut width.
 
 ## 3. The layout
 
@@ -205,5 +208,4 @@ The stand plus three parts of the same machine, each with the anchors, loads and
 ## 10. Still to decide
 
 1. Section 2: any control whose meaning is wrong or missing.
-2. The Manual controls table: which to build, and in what order.
-3. The speed numbers, once stage 0 has measured them.
+2. The speed numbers, once stage 0 has measured them.
