@@ -1,0 +1,69 @@
+# tools/sparse-evidence.txt -- sparse checkout for AGENT WORKING worktrees only
+# (reviewer ruling 2026-11-10 08:43Z, item 2). Nothing is deleted from git: the
+# evidence/ folders below are kept, the rest of evidence/ is simply not checked out.
+# The RELEASE tree and #362's GATE tree stay FULL checkouts, so a path this list
+# missed shows up as a missing file in an agent's run, never as a release red.
+#
+#   apply : git sparse-checkout set --no-cone --stdin < tools/sparse-evidence.txt
+#   undo  : git sparse-checkout disable
+#   new evidence outside the list: git add --sparse <path>
+#
+# A test that fails on a missing evidence file: ADD ITS PATH HERE. Never edit the test.
+# docs/handoffs/evidence is outside evidence/ and stays checked out in full.
+#
+# Built 2026-11-10 from a scan of every path under evidence/ named in code (not in
+# comments) in core/, app/ and tools/ -- core/CMakeLists.txt, the core and app tests
+# and harnesses -- on origin/main f932266f, claude/flexible-screens 50c83c39,
+# claude/lattice-e2e3 7239e253, claude/app-ipad-notes-1110 134dcc89,
+# claude/app-build-b8-cut 73fd1ec9, claude/app-build-b9 937fc6ee, claude/release-4
+# 4bdcc9d2, claude/app-ipad-notes-1110-362 5d881430 and claude/e4-region-keep-clear
+# 1446e656, plus LatticeTypes' 3 folders and UI-Notes' 6 files. Folders tests write
+# into (the *EvidenceGen tests) are kept whole. Kept: about 0.28 GB of 5.58 GB.
+
+# everything outside evidence/
+/*
+# none of evidence/ ...
+!/evidence/*
+# ... except what the build and the tests read
+/evidence/2026-07-25-numeric-input/
+/evidence/2026-07-26-plane-extents/
+/evidence/2026-07-28-graded-cell-size-phase0/
+!/evidence/2026-07-28-graded-cell-size-phase0/*
+/evidence/2026-07-28-graded-cell-size-phase0/b3_printability.csv
+/evidence/2026-07-30-lattice-skin-freeform/
+!/evidence/2026-07-30-lattice-skin-freeform/*
+/evidence/2026-07-30-lattice-skin-freeform/cylinder_r9_h28.stl
+/evidence/2026-07-31-lattice-dehomogenization-probe/
+/evidence/2026-07-31-lattice-page-round2/
+/evidence/2026-07-31-multiscale-lattice-feasibility/
+/evidence/2026-08-02-gate-diagnosis-recommendations/
+/evidence/2026-08-03-hybrid-amg-coarsening-probe/
+/evidence/2026-08-03-retention-designbox-device-failure/
+!/evidence/2026-08-03-retention-designbox-device-failure/*
+/evidence/2026-08-03-retention-designbox-device-failure/device_run_job.json
+/evidence/2026-08-03-variant-postprocessing-fix/
+/evidence/2026-08-04-smoothing-viewer-and-ui/
+/evidence/2026-08-05-smoothing-page-brush-and-panel/
+/evidence/2026-08-06-cad-face-projection/
+!/evidence/2026-08-06-cad-face-projection/*
+/evidence/2026-08-06-cad-face-projection/variant_068.stl
+/evidence/2026-08-07-lattice-variants-on-screen/
+!/evidence/2026-08-07-lattice-variants-on-screen/*
+/evidence/2026-08-07-lattice-variants-on-screen/run_his/
+/evidence/2026-08-08-smoothing-that-works-and-is-usable/
+/evidence/2026-08-12-lattice-page-redesign/
+/evidence/2026-08-14-lattice-separation/
+/evidence/2026-08-15-render-quality/
+/evidence/2026-08-16-per-sector-density-override/
+/evidence/2026-08-17-lattice-stage-repair/
+/evidence/2026-08-17-surface-stage-gestures/
+/evidence/2026-08-18-lattice-preview-confetti/
+/evidence/2026-08-18-unified-shading/
+/evidence/2026-09-02-organic-on-device/
+!/evidence/2026-09-02-organic-on-device/*
+/evidence/2026-09-02-organic-on-device/run2_replay_gate_off_SPANS.txt
+/evidence/2026-09-02-organic-on-device/sample_shape_fit_2026-09-03/
+/evidence/2026-09-08-wetted-join/
+/evidence/2026-09-30-ruling4-gates/
+/evidence/2026-10-01-cant-open/
+/evidence/2026-11-09-lattice-type-strut-laws/
