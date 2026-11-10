@@ -1,10 +1,10 @@
 # Lattice rebuild — proposal
 
-Draft 2, 2026-11-10, LatticeReview. For the maintainer to edit. Nothing here is built.
+Draft 3, 2026-11-10, LatticeReview. For the maintainer to edit. Nothing here is built.
 Scope: cell lattices (every strut and sheet type, laid Stepped, Default Grade or uniform). Organic follows as its own proposal.
 Background: the code review at `4bdcc9d2` (synthesis and digests in `agent-scratch/lattice-review/`).
 
-Lines marked **DECIDE** are the places I expect you to change.
+Lines marked **DECIDE** are the places I expect you to change. Lines marked **DECIDED** carry the maintainer's answers of 2026-11-10.
 
 ---
 
@@ -52,7 +52,7 @@ This is the contract, written from the screens as they are today (release N1110)
 | Control | Meaning |
 |---|---|
 | Cell size: Auto | The engine picks: the largest cells that fit, the fewest cells (your 2026-09-14 rule), never a cell wider than the wall it sits in (your 2026-08-24 ruling). |
-| Cell size: Manual | Your base cell. The layout still shrinks it where the wall is too thin. |
+| Cell size: Manual | Your base cell. The layout still shrinks it where the wall is too thin. Can be set per zone or region. |
 | Grade style: Stepped | Cells of several sizes packed largest first; smaller cells fill toward the outline. |
 | Grade style: Default Grade | Cells halve toward the outline (S, S/2, S/4…). |
 | Grade style: none (uniform) | One cell size everywhere it fits. |
@@ -65,10 +65,10 @@ This is the contract, written from the screens as they are today (release N1110)
 | Allow single-cell members | Aesthetic only. Lets a wall hold one cell across. |
 | Allow quilt | Lets the finest cells get dense enough to read as a quilt at the outline. |
 | Finish: None | Struts are cut at the surface. No skin. See section 4 for what happens to cut ends. |
-| Finish: Rim | A solid bar along every edge of a latticed face; cut struts land on it. |
-| Finish: Skin | A thin solid sheet over the latticed face; cut struts land in it. |
+| Finish: Rim | One bar along every edge of a latticed face; cut struts land on it. |
+| Finish: Skin | **DECIDED:** not a solid sheet. A flat lattice of bars across the face that joins the cut strut ends to each other: a rim is one bar, a skin is many. It stays open. |
 | Finish: Covered | The face is closed by the part's own solid surface. |
-| Cells / In a part (sample) | A sample built by the engine from the same settings. **DECIDE:** the sample should take every setting on the page, or the page should show your own part again once the layout is fast enough to follow a slider. |
+| Cells / In a part (sample) | **DECIDED:** if the layout follows every setting and slider instantly, the page shows the user's own part. If it cannot, the page keeps the engine's sample, and the sample takes every setting on the page. Stage 0 decides which. |
 
 ### On the part
 
@@ -79,14 +79,31 @@ This is the contract, written from the screens as they are today (release N1110)
 | The pill under Selections | One line naming anything the layout could not do as asked. Empty when it did everything. |
 | Lattice button | Runs the job. Its second line says what will be built, from the layout. |
 
-### Controls I propose to remove
+### Removed and kept — DECIDED
 
-They change the picture only, or nothing at all, today. **DECIDE** each:
+- **Removed:** band chips ("Grade to solid" / "Lattice through"), replaced by the one overlap rule.
+- **Removed:** per-face cell size. Cell size per zone or region stays.
+- **Removed:** "Through the depth / Across the face".
+- **Kept: the Auto | Manual pill.** His words: "Auto is for makers. Manual is for engineers. One app for two groups of people." Auto shows the few choices a maker needs and the engine decides the rest. Manual shows every value the layout uses, each editable.
 
-- Band chips ("Grade to solid" / "Lattice through") — replaced by the one overlap rule.
-- Per-face cell size.
-- "Through the depth / Across the face".
-- The Auto | Manual pill as a fold. Auto and Manual stay as real choices on Cell size and Density.
+### Manual controls for engineers — proposed, DECIDE each
+
+Every one of these is a number the layout already has to choose. Manual would show it and let it be set; Auto keeps choosing it. Each can be set for the part or per zone or region.
+
+| Control | What it sets | Why an engineer wants it |
+|---|---|---|
+| Strut width, from → to (mm) | The thinnest and thickest strut, stated directly instead of as a density | Struts are specified and inspected in mm, not in percent |
+| Cells across a wall (minimum) | Overrides the 2 / 1 / certified rule, with a plain warning when it goes below what is certified | To accept or forbid lattice in a given wall thickness |
+| Size change rate | The largest step in cell size between neighbours | Controls how abruptly stiffness changes |
+| Grade response | How steeply density follows stress, and the target stress the lattice is sized to (a share of the allowable) | Sets the safety factor of the lattice itself |
+| Which loads drive the grade | One load case, or the worst of all | A part used in more than one way |
+| Layout anchor and angle | Where the cell grid starts (a face, an edge, the part's centre) and its rotation | To line cells up with a feature, or turn struts off the print's weak direction |
+| Joint fillet | The blend radius where struts meet | Joints are where lattices crack; a fillet lowers the peak stress |
+| Skin bars | Bar width, spacing and pattern of the skin's flat lattice | The skin carries the surface load |
+| Rim width | Width of the rim bar | Edge strength and print adhesion |
+| Overhang limit | The steepest unsupported strut allowed, with any breach highlighted | Printability on the chosen build direction |
+| Target mass | "Make this part N grams": the layout solves the density to hit it | Weight budgets |
+| Symmetry | Mirror the layout across a chosen plane | Symmetric parts should get symmetric lattices |
 
 ## 3. The layout
 
@@ -98,11 +115,11 @@ The layout is one object the engine returns. It holds:
 - **Totals:** latticed volume, solid volume by reason, mass.
 - **Refusals:** anything the settings asked for that cannot be done, as a code and one plain sentence.
 
-**Speed requirement. DECIDE** the numbers:
+**Speed requirement — DECIDED:**
 
-- Dragging a slider stays smooth: the picture follows the finger.
-- On release the full picture settles almost at once (proposed: within about a third of a second on your iPad, on the stand).
-- Opening a part or changing a region may take longer once (proposed: a few seconds at most), with the old picture kept up meanwhile.
+- **The aim:** dragging a slider stays smooth; the picture follows the finger, on the user's own part.
+- **What he will settle for if that is all we can manage:** a one-time wait when a part is opened or a region changes, with sliders still quick afterwards.
+- Working numbers until measured: full picture within about a third of a second of release; the one-time wait a few seconds at most, with the old picture kept up meanwhile.
 
 How it is kept:
 
@@ -125,11 +142,11 @@ The preview asks for the layout whenever a setting changes and draws it. The run
 
 - **Cells run to the true surface.** Struts are trimmed against the part's own surface, set back by the skin. A slope is a straight line, a fillet is a curve.
 - **Where a whole cell does not fit:** smaller cells first (Stepped packs, Default Grade halves), then cut what remains.
-- **Cut ends land on something.** In Skin or Rim they land in the skin or on the rim.
-- **Finish None. DECIDE:** I propose a cut strut is kept only if its end lands on another strut or on solid, and a stub shorter than one strut width is dropped.
-- **Slivers.** A leftover piece of a cell too small to print becomes solid and joins the skin.
+- **Cut ends land on something.** With Rim they land on the rim bar. With Skin they are joined to each other by the skin's bars.
+- **Finish None — DECIDED:** a cut strut is kept only if its end lands on another strut or on solid, and a stub shorter than one strut width is dropped. Where that leaves a stepped edge, the app points at it on the part and says "Rim or Skin will fix this".
+- **Slivers.** A leftover piece of a cell too small to print becomes solid and joins the nearest solid.
 - **Size changes.** Where two cell sizes meet, transition struts join them so every fine node has a partner. No join relies on the shell.
-- **One solid.** The file is one clean, watertight body: struts, nodes, rim, skin and the part's own surface merged. No overlapping pieces.
+- **One solid.** The file is one clean, watertight body: struts, nodes, rim bars, skin bars and the part's solid merged. No overlapping pieces.
 - **The outside of the file is your part's surface**, not a grid approximation of it.
 - **Printability.** The strut actually written is at least one bead wide, measured across its flats.
 
@@ -138,7 +155,7 @@ The preview asks for the layout whenever a setting changes and draws it. The run
 - **Before:** the forecast is the layout's totals. It cannot describe a different job, because it is the same object.
 - **After:** Results shows the lattice's own margin and verdict, the mass, how much went solid and why, and the verdicts of the enclosed-space and volume checks. A refused lattice says so on its own tab.
 - **Certificate.** Structural runs the certificate the job names, with your safety margin, and refuses if any member it dropped is still in the file.
-- **Enclosed space.** The check counts the skin and shell as solid. **DECIDE:** add drain holes as a setting, or leave the check as refuse-only.
+- **Enclosed space — DECIDED:** the check counts every solid surface that really closes the lattice in (Covered faces and the part's own walls; a Skin is open bars and does not). Where it finds trapped lattice the app shows a notice and highlights the place on the part. Drain holes as a setting are set aside for now: slicers can add them.
 
 ## 6. What is kept, what is replaced
 
@@ -146,7 +163,7 @@ The preview asks for the layout whenever a setting changes and draws it. The run
 
 **Replaced by the layout:** in the app, the cell bake, the band, rim and skin fields, the region mask and the measured-width code; in the engine, the three cell planners and the one long run function that ties them together.
 
-**Old projects.** They open with the same settings. Their preview will change, because today's picture comes from the app's own rules. **DECIDE:** accept that, or keep the old picture read-only on versions that already ran.
+**Old projects — DECIDED:** they open with the same settings and their preview may change.
 
 ## 7. Order of work
 
@@ -154,7 +171,7 @@ Each stage ends with something you can look at on the stand.
 
 | Stage | What is built | You can check |
 |---|---|---|
-| 0. Speed proof | A rough layout for the stand only, run on the iPad and timed against the speed requirement in section 3 | The numbers. If it misses, we switch to the alternative in section 8 before any real work is spent |
+| 0. Speed proof | A rough layout for the stand only, timed on the Mac as a first indication (**DECIDED**), then on the iPad when he installs a build | The numbers. If it misses, we switch to the alternative in section 8 before any real work is spent |
 | A. Spec and reference parts | Sections 2 to 4 turned into exact rules; your stand plus three or four other parts, each with the settings and a picture you approve | The pictures and the rules read right |
 | B. Domain and measure | Section 3 steps 1 and 2, in the engine | Lattice / solid borders drawn on the stand follow the real surface |
 | C. Cells and density | Steps 3 and 4 | Stepped, Default Grade and uniform on the stand, under both Start from choices |
@@ -174,12 +191,19 @@ Until stage G nothing that ships changes: the new path sits beside the old one.
 - **Shared engine files.** Stages B to F touch files other agents own. This needs the reviewer to sequence it.
 - **Rules that live only in old code.** Stage A exists to pull them into the spec before anything is deleted.
 
-## 9. Questions for you
+## 9. Reference parts — DECIDED
 
-1. Section 2: is any control's meaning wrong, or missing?
-2. The four controls proposed for removal: agree?
-3. Sample or your own part on the Lattice page?
-4. Finish None: the cut-end rule in section 4?
-5. Drain holes?
-6. Old projects: may their preview change?
-7. Which three or four parts, besides the stand, should be the references?
+The stand plus three parts of the same machine, each with the anchors, loads and protected faces the maintainer supplied. The model files stay on his disk and are never copied into the repo; the tests read them from a folder he names and skip where it is absent.
+
+| Part | What it covers |
+|---|---|
+| 2040 Extrusion Stand | A sloped face, pockets, both Start-from choices; the screenshots this work began from |
+| Base | A flat plate with a raised edge all round, loaded mid-span, held at two bolt holes: thin, wide walls and holes through them |
+| Top Motor Mount | Bosses, fillets and many holes; curved walls; lightly loaded |
+| Pressing Plate Mount | A channel with 3 mm walls and a flange: the thin-wall rule at its limit |
+
+## 10. Still to decide
+
+1. Section 2: any control whose meaning is wrong or missing.
+2. The Manual controls table: which to build, and in what order.
+3. The speed numbers, once stage 0 has measured them.
