@@ -60,11 +60,12 @@ public enum LatticeWizardStage: Int, Equatable, Sendable, CaseIterable {
     /// there: its size, its density, its boundary finish.
     case lattice = 1
 
-    /// ★ Three words at most (R7).
+    /// ★ Three words at most (R7). ★ his 11-10: the first view is "a chunk of a bunch of lattice cells together" (Cells); the
+    /// second "should be named 'In A part' and should be a sample part … It shouldn't be the actual part the user has."
     public var title: String {
         switch self {
-        case .cell: return "One cell"
-        case .lattice: return "In the part"
+        case .cell: return "Cells"
+        case .lattice: return "In a part"
         }
     }
 

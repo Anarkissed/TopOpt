@@ -769,16 +769,54 @@ ImportedMesh import_stl(const std::string& path, BridgeError& err) {
   });
 }
 
-LatticeSampleResult lattice_sample(const std::string& topology, double cell_mm, double bead_mm, BridgeError& err) {
+LatticeSampleResult lattice_sample(const std::string& topology, double cell_mm, double bead_mm, double rho_lo,
+                                   double rho_hi, bool cube, BridgeError& err) {
   return guarded_err("lattice_sample", err, [&]() -> LatticeSampleResult {
     topopt::LatticeSampleSpec spec;
     spec.topology = topology;
+    if (cube) {
+      // the chunk of cells: whole cells only (core refuses a part cell), ~40 mm, 3–6 a side; one density, held to the band
+      spec.shape = "cube";
+      if (cell_mm > 0.0) spec.cell_mm = cell_mm;
+      const int n = std::clamp(static_cast<int>(std::lround(40.0 / spec.cell_mm)), 3, 6);
+      spec.size_mm = spec.cell_mm * n;
+      bool held = false;
+      if (rho_hi > 0.0) {
+        const topopt::LatticeTopology t =
+            topopt::lattice_gen_certificate_topology(topopt::lattice_gen_topology_from_id(topology));
+        const double c = std::clamp(rho_hi, topopt::lattice_rho_min(t), topopt::lattice_rho_max(t));
+        held = std::abs(c - rho_hi) > 1e-9;
+        spec.rho = c;
+      }
+      topopt::LatticeSampleReceipt receipt;
+      const topopt::TriangleMesh m = topopt::lattice_sample_mesh(spec, &receipt);
+      LatticeSampleResult out;
+      out.rho_held = held;
+      out.mesh = to_imported(m, nullptr, 0);
+      out.receipt_json = topopt::lattice_sample_receipt_json(receipt);
+      return out;
+    }
     spec.shape = "coupon";
     if (cell_mm > 0.0) spec.cell_mm = cell_mm;
     if (bead_mm > 0.0) spec.bead_mm = bead_mm;
+    // ★ his iPad notes 11-10 (img 6): the page's Grade ends, held inside the type's printable band (the coupon refuses a
+    // range outside it); the band is core's own, read the way the coupon reads it
+    bool held = false;
+    if (rho_lo > 0.0 || rho_hi > 0.0) {
+      const topopt::LatticeTopology t =
+          topopt::lattice_gen_certificate_topology(topopt::lattice_gen_topology_from_id(topology));
+      const double bmin = topopt::lattice_rho_min(t), bmax = topopt::lattice_rho_max(t);
+      double lo = rho_lo > 0.0 ? rho_lo : bmin, hi = rho_hi > 0.0 ? rho_hi : bmax;
+      if (lo > hi) std::swap(lo, hi);
+      const double clo = std::clamp(lo, bmin, bmax), chi = std::clamp(hi, bmin, bmax);
+      held = std::abs(clo - lo) > 1e-9 || std::abs(chi - hi) > 1e-9;
+      spec.rho_lo = clo;
+      spec.rho_hi = chi;
+    }
     topopt::LatticeSampleReceipt receipt;
     const topopt::TriangleMesh m = topopt::lattice_sample_mesh(spec, &receipt);
     LatticeSampleResult out;
+    out.rho_held = held;
     out.mesh = to_imported(m, nullptr, 0);
     out.receipt_json = topopt::lattice_sample_receipt_json(receipt);
     return out;

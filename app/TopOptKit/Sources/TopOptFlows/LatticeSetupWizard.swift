@@ -655,22 +655,45 @@ public struct LatticeSetupWizard: View {
     /// of the text in the settings. Have a single line of text with an (i) in it for
     /// more details if absolutely necessary"). `brief` is the line — never wrapped —
     /// and `detail`, when given, is the popover the (i) opens. No detail ⇒ no (i).
+    /// `probe`: an id the brief's frame is published under while a test records (11-10: the band's lines are measured).
     private func captionLine(_ brief: String, info id: String, _ detail: String? = nil,
-                             tint: Color? = nil) -> some View {
+                             tint: Color? = nil, probe: String? = nil) -> some View {
         HStack(spacing: DS.Space.xs) {
             Text(brief)
                 .dsStyle(DS.TypeScale.caption2)
                 .foregroundStyle(tint ?? DS.Color.textTertiary.color)
+                .latticeID(ifGiven: probe)
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
             if let detail { infoButton(id, detail) }
         }
     }
 
+    /// ★ His iPad note 11-10 (img04/05): each slider's caption sits right under it, Band's under Band and Strength's under
+    /// Strength, as ONE SHORT LINE drawn at full size, with the rest behind its (i). Both used to sit under Strength, Band's
+    /// last, so his (i) on Band opened two rows below its slider, and Strength's line was shrunk to fit.
+    struct BandCaption { let brief: String; let info: String; let detail: String }
+    static let strengthBrief = "0 is today's grade; + more, − less."
+    static let strengthDetail = "+ thickens the struts and shrinks the cells further; − does less. "
+        + "A multiplier on how much the grade does at every point of the band: at +1 "
+        + "the struts thicken and the cells shrink twice as far, at −1 half as far. "
+        + "The band's length is set above and is not changed by this."
+    static let shapeBand = BandCaption(
+        brief: "How far in the cells grade down.", info: "band",
+        detail: "How far in from the face's outline the cells grade down toward the "
+            + "solid outline, in millimetres. A cell stands where its centre is far "
+            + "enough in for its size; the smallest cells always reach the outline. "
+            + "From 25 mm the solid outline also thickens inward.")
+    static let organicBand = BandCaption(
+        brief: "How far in the cells shrink.", info: "organic-band",
+        detail: "Within this many millimetres of a face outline the strut spacing runs "
+            + "down to the printable floor at the outline, and the struts thicken with "
+            + "it. 0 turns the grade off. The tint on the lattice shows the same band.")
+
     /// ★ THE BAND AND ITS STRENGTH AS SLIDERS (his 2026-09-18: "add the grade band
     /// slider in the settings … the default is really not visible … a multiplier for the
     /// gradient too … a slider with 0 at the middle"). One view for both panes.
-    @ViewBuilder private func gradeBandSliders(idPrefix: String) -> some View {
+    @ViewBuilder private func gradeBandSliders(idPrefix: String, band: BandCaption) -> some View {
         HStack(spacing: DS.Space.s) {
             Text("Band").dsStyle(DS.TypeScale.caption2).foregroundStyle(DS.Color.textTertiary.color)
                 .frame(width: 52, alignment: .leading)
@@ -683,6 +706,8 @@ public struct LatticeSetupWizard: View {
                 .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textPrimary.color)
                 .frame(width: 52, alignment: .trailing)
         }
+        captionLine(band.brief, info: band.info, band.detail, tint: DS.Color.textQuaternary.color,
+                    probe: "\(idPrefix)-band-note")
         HStack(spacing: DS.Space.s) {
             Text("Strength").dsStyle(DS.TypeScale.caption2).foregroundStyle(DS.Color.textTertiary.color)
                 .frame(width: 52, alignment: .leading)
@@ -695,12 +720,8 @@ public struct LatticeSetupWizard: View {
                 .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textPrimary.color)
                 .frame(width: 52, alignment: .trailing)
         }
-        captionLine("0 is today's amount; + thicker struts and smaller cells, − less.",
-                    info: "\(idPrefix)-strength",
-                    "A multiplier on how much the grade does at every point of the band: at +1 "
-                    + "the struts thicken and the cells shrink twice as far, at −1 half as far. "
-                    + "The band's length is set above and is not changed by this.",
-                    tint: DS.Color.textQuaternary.color)
+        captionLine(Self.strengthBrief, info: "\(idPrefix)-strength", Self.strengthDetail,
+                    tint: DS.Color.textQuaternary.color, probe: "\(idPrefix)-strength-note")
     }
 
     /// The (i): a popover with the explanation, one open at a time.
@@ -960,12 +981,7 @@ public struct LatticeSetupWizard: View {
                     .font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)   // ★ B7: the panel's overline (DSPanelSection)
                     .foregroundStyle(DS.Color.textTertiary.color)
                     .padding(.top, DS.Space.xs)
-                gradeBandSliders(idPrefix: "wizard-organic-band")
-                captionLine("How far in the cells shrink toward the outline.", info: "organic-band",
-                            "Within this many millimetres of a face outline the strut spacing runs "
-                            + "down to the printable floor at the outline, and the struts thicken with "
-                            + "it. 0 turns the grade off. The tint on the lattice shows the same band.",
-                            tint: DS.Color.textQuaternary.color)
+                gradeBandSliders(idPrefix: "wizard-organic-band", band: Self.organicBand)
             }
             .latticeID("wizard-organic-shape-band")
             // ★ THE LOOK (Aesthetic): cells the eye reads across the shortest face —
@@ -1516,19 +1532,12 @@ public struct LatticeSetupWizard: View {
                 .font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)   // ★ B7: the panel's overline (DSPanelSection)
                 .foregroundStyle(DS.Color.textTertiary.color)
                 .padding(.top, DS.Space.s)
-            gradeBandSliders(idPrefix: "wizard-shape-band")
+            gradeBandSliders(idPrefix: "wizard-shape-band", band: Self.shapeBand)
             // ★ the reviewer's ruling (2), 2026-11-06: one plain line until core builds the real band (LatticeTypes, after
             // its queue: grading.shape_grade_strength); it goes by itself the day the linked core takes that key
             if !TopOptKit.gradingSchemaAccepts(key: "shape_grade_strength") {
                 shortNote(Self.shapeGradeRunLine).latticeID("wizard-shape-grade-run-line")
             }
-            captionLine("How far in the cells grade down to the outline.",
-                        info: "band",
-                        "How far in from the face's outline the cells grade down toward the "
-                        + "solid outline, in millimetres. A cell stands where its centre is far "
-                        + "enough in for its size; the smallest cells always reach the outline. "
-                        + "From 25 mm the solid outline also thickens inward.",
-                        tint: DS.Color.textQuaternary.color)
             // ★★★ HOW MANY STEPS THIS PART CAN ACTUALLY GRADE (maintainer, 2026-08-23:
             // the band offered 0–60 mm while his settings allowed exactly ONE step, and
             // nothing said so).
@@ -2293,7 +2302,12 @@ public struct LatticeSetupWizard: View {
     // whole part's, and the tab says so. The view switch (One cell │ In the part) moved over the canvas; it sets nothing.
 
     @State private var latticeTab = "part"
-    @State private var latticeManual = false
+    /// ★ His iPad note 11-10 (img08): his [Auto │ Manual] pick is the part's, kept every visit until Reset all. It was this
+    /// page's own `@State` (false on every open), and Reset all never touched it.
+    private var latticeManual: Bool {
+        get { project.latticePageManual }
+        nonmutating set { project.latticePageManual = newValue }
+    }
     @State private var latticeResetAsk = false
     @State private var latticePanelOpen = true
     @State private var latticePanelHeight: CGFloat = 0
@@ -2388,14 +2402,13 @@ public struct LatticeSetupWizard: View {
         let portrait = size.width < size.height
         let band = max(DSParts.headerHeight, size.height - PageChrome.panelTop - PageChrome.panelBottom)
         return AnyView(ZStack {
-            // ★ B7 (his iPad notes 11-08, design note 30): Sample is core's sample block beside the panel; In the part is the
-            // stage's live preview behind the page, as before
-            if model.stage == .cell {
-                AnyView(LatticeSampleView(inputs: latticeSampleInputs)
-                    .padding(.leading, portrait ? 0 : PageChrome.edge + PageChrome.widePanelWidth)
-                    .padding(.top, portrait ? PageChrome.panelTop + latticePanelHeight : PageChrome.panelTop)
-                    .latticeID("lattice-sample-view"))
-            }
+            // ★ B7 (his iPad notes 11-08, design note 30), ★ his 11-10 (later): Cells is core's chunk of cells; In a part is
+            // core's sample part with the settings on it — never his own part (the workspace covers it on this page)
+            AnyView(LatticeSampleView(inputs: latticeSampleInputs, notInSample: latticeNotInSample)
+                .id(model.stage)   // each view its own camera: the chunk and the part frame differently
+                .padding(.leading, portrait ? 0 : PageChrome.edge + PageChrome.widePanelWidth)
+                .padding(.top, portrait ? PageChrome.panelTop + latticePanelHeight : PageChrome.panelTop)
+                .latticeID(model.stage == .cell ? "lattice-sample-cells" : "lattice-sample-part"))
             latticePanel(c, hug: portrait)
                 .frame(height: portrait ? nil : band)
                 .frame(maxHeight: portrait ? min(band, size.height * 0.62) : nil, alignment: .top)
@@ -2407,15 +2420,34 @@ public struct LatticeSetupWizard: View {
                 .padding(.trailing, PageChrome.edge)
                 .padding(.top, portrait ? PageChrome.panelTop + latticePanelHeight + DS.Space.l + 14 : PageChrome.panelTop + 14)
                 .frame(maxHeight: .infinity, alignment: .top)
-        })
+        }
+        // ★ his iPad notes 11-10 (img 3) + (later): a sample is always up — the workspace covers his part (LatticeSampleShowingKey)
+        .preference(key: LatticeSampleShowingKey.self, value: true))
     }
 
-    /// The Sample's inputs: the page's type, its cell when Cell size is Manual (else core's own), the printer's bead.
+    /// The sample's inputs: which view, the page's type, its cell when Cell size is Manual (else core's own), the printer's
+    /// bead, and (★ his iPad notes 11-10, img 6) the Grade's ends — graded from "to" up to "from", or one density when not
+    /// graded (the chunk of cells shows "from").
     private var latticeSampleInputs: LatticeSampleView.Inputs {
-        LatticeSampleView.Inputs(topology: model.topologyID,
-                                 typeName: LatticeType.displayName(forID: model.topologyID),
-                                 cellMM: model.cellSizeMode == .fixed ? model.cellMM : 0,
-                                 beadMM: project.printParams.strutLineWidthMM)
+        Self.sampleInputs(model, beadMM: project.printParams.strutLineWidthMM)
+    }
+
+    static func sampleInputs(_ model: LatticeWizardModel, beadMM: Double) -> LatticeSampleView.Inputs {
+        let graded = model.gradingMode != LatticeGradingMode.none
+        return LatticeSampleView.Inputs(shape: model.stage == .cell ? .cells : .part,
+                                        topology: model.topologyID,
+                                        typeName: LatticeType.displayName(forID: model.topologyID),
+                                        cellMM: model.cellSizeMode == .fixed ? model.cellMM : 0,
+                                        beadMM: beadMM,
+                                        rhoLo: graded ? model.minRelativeDensity : model.relativeDensity,
+                                        rhoHi: model.relativeDensity)
+    }
+
+    /// ★ his iPad notes 11-10 (img 6): what he has on that the engine's sample block can't show yet.
+    private var latticeNotInSample: [String] {
+        LatticeSampleView.notInSample(organic: model.cellTransition == .organicGrade, finish: model.boundary,
+                                      shapeBand: model.gradingMode.fitsShape,
+                                      singleCell: model.singleCellMembers && (project.lattice.stageMode ?? .structural) == .aesthetic)
     }
 
     private func latticePanel(_ c: CellsPageContext, hug: Bool) -> some View {
@@ -2542,6 +2574,7 @@ public struct LatticeSetupWizard: View {
     /// Reset all: every setting this page asks back to a brand-new lattice of this type (the regions, their roles and
     /// depths are the Setup step's and stay). Nothing is saved until Save; Cancel still leaves as the page opened.
     private func resetLatticeSettings() {
+        latticeManual = false   // ★ 11-10 (img08): Reset all is the one thing that puts Auto back
         var fresh = LatticeSettings(enabled: true)
         fresh.stageMode = project.lattice.stageMode
         let stage = model.stage
@@ -2707,7 +2740,7 @@ public struct LatticeSetupWizard: View {
             ForEach(LatticeWizardStage.allCases, id: \.rawValue) { s in
                 let on = model.stage == s
                 Button { model.jump(to: s); rebuild() } label: {
-                    Text(s == .cell ? LatticeSampleView.switchTitle : s.title)
+                    Text(s.title)   // ★ his 11-10: Cells │ In a part
                         .font(.system(size: 13, weight: on ? .semibold : .regular))
                         .foregroundStyle((on ? DS.Color.textPrimary : DS.Color.textSecondary).color)
                         .padding(.horizontal, DS.Space.l).frame(minWidth: 120, minHeight: 36)
