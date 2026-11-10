@@ -5395,22 +5395,26 @@ public struct WorkspacePlaceholder: View {
                                         bandGradeMM: lat.gradingMode.fitsShape ? lat.shapeFitBandMM : 0,
                                         beadMM: beadForBake)
             // ★ his iPad notes 11-09: the walls Structural's cell floor leaves solid, said — measured here, off main
-            let thinWalls = LatticeStructuralThinWalls.finding(
+            let smallestCellMM = lat.cellSizeMode == .fixed ? lat.cellMM
+                : Swift.min(lat.cellMM, lat.cellMinMM > 0 ? lat.cellMinMM : lat.cellMM)
+            var thinWalls = LatticeStructuralThinWalls.finding(
                 structural: scene.stageMode == .structural, occupancy: scene.occupancy.values,
                 memberThicknessMM: scene.memberThicknessMM, cellsPerMember: scene.minCellsPerMember,
-                smallestCellMM: lat.cellSizeMode == .fixed ? lat.cellMM
-                    : Swift.min(lat.cellMM, lat.cellMinMM > 0 ? lat.cellMinMM : lat.cellMM))
+                smallestCellMM: smallestCellMM)
+            // ★ release (4), the reviewer's 11-09 20:10Z item 2: the glow is CORE's mask — the voxels
+            // `lattice_solid_fallback_reasons` leaves solid as too thin (codes 1–3), inside what he
+            // latticed. nil = core gave no answer (no glow, the line stays); core answering with no
+            // such wall clears the line too, so the line and the glow never disagree.
+            let coreThin: [Bool]? = thinWalls == nil ? nil : LatticeThinWallGlow.coreThin(
+                solid: scene.solidOccupancy, latticed: scene.occupancy, topology: lat.topologyID,
+                cellMM: smallestCellMM, lineWidthMM: beadForBake, organic: algorithmForBake == "organic")
+            if let c = coreThin, !c.contains(true) { thinWalls = nil }
             // ★ his 11-09: the glow — the same walls, as a soft per-vertex glow on the part (built only when there are some)
-            let thinGlow: [Float] = thinWalls == nil ? [] : {
-                let mask = LatticeStructuralThinWalls.mask(
-                    structural: true, occupancy: scene.occupancy.values, memberThicknessMM: scene.memberThicknessMM,
-                    cellsPerMember: scene.minCellsPerMember,
-                    smallestCellMM: lat.cellSizeMode == .fixed ? lat.cellMM
-                        : Swift.min(lat.cellMM, lat.cellMinMM > 0 ? lat.cellMinMM : lat.cellMM))
+            let thinGlow: [Float] = thinWalls == nil ? [] : coreThin.map { mask in
                 let field = LatticeThinWallGlow.field(thin: mask, inside: scene.solidOccupancy.values.map { $0 > 0.5 },
                                                       grid: scene.occupancy)
                 return LatticeThinWallGlow.vertexTints(mesh: mesh, grid: scene.occupancy, field: field)
-            }()
+            } ?? []
             DispatchQueue.main.async {
                 // ★ a newer bake has started: this picture is stale, drop it
                 guard bakeGeneration == strutBakeGeneration else {

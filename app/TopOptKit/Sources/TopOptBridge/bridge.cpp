@@ -2331,6 +2331,44 @@ std::vector<double> lattice_member_thickness_mm(int nx, int ny, int nz, double s
   });
 }
 
+std::vector<std::uint8_t> lattice_solid_fallback_reasons(int nx, int ny, int nz, double spacing,
+                                                         const std::uint8_t* solid,
+                                                         std::size_t solid_count,
+                                                         const std::string& topology,
+                                                         double cell_mm, double line_width_mm,
+                                                         bool organic) {
+  return guarded_empty("lattice_solid_fallback_reasons", [&]() -> std::vector<std::uint8_t> {
+  const std::size_t want =
+      static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny) *
+      static_cast<std::size_t>(nz);
+  if (nx <= 0 || ny <= 0 || nz <= 0) return {};
+  if (!(spacing > 0.0) || !(cell_mm > 0.0) || !(line_width_mm > 0.0)) return {};
+  if (solid == nullptr || solid_count != want) return {};
+
+  topopt::VoxelGrid grid;
+  grid.nx = nx; grid.ny = ny; grid.nz = nz;
+  grid.spacing = spacing;
+  grid.origin = topopt::Vec3{0.0, 0.0, 0.0};   // no surface is passed, so no frame is needed
+  grid.tags.resize(want, topopt::VoxelTag::Empty);
+  std::vector<double> density(want, 0.0);
+  for (std::size_t i = 0; i < want; ++i) {
+    const bool s = solid[i] != 0;
+    grid.tags[i] = s ? topopt::VoxelTag::Interior : topopt::VoxelTag::Empty;
+    density[i] = s ? 1.0 : 0.0;
+  }
+
+  topopt::GradingLawParams p;
+  p.topology = live_topology(topology);       // core's own resolver; unknown or not live → refused
+  p.cell_mode = topopt::CellSizeMode::Fixed;  // the part's one cell, as the caller resolved it
+  p.target_cell_size_mm = cell_mm;
+  p.min_extrudable_width_mm = line_width_mm;
+  p.organic_geometry = organic;
+  // member_surface stays null: the preview's mesh is not welded for a signed distance, so
+  // members are measured on the voxel staircase (core's rule for an optimized result).
+  return topopt::lattice_solid_fallback_reasons(grid, density, p, 0.5);
+  });
+}
+
 
 
 // ★★★ ORGANIC'S OWN (SPACING, DENSITY, STRUT) LAW — FORWARDED, NEVER RE-DERIVED.

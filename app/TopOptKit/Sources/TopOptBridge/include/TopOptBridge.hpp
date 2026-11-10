@@ -1267,6 +1267,21 @@ std::vector<double> lattice_member_thickness_mm(int nx, int ny, int nz, double s
                                                 std::size_t solid_count,
                                                 int cap_radius_voxels);
 
+// ★ WHY CORE LEAVES EACH VOXEL SOLID (release (4), the reviewer's 11-09 20:10Z item 2:
+// the Structural thin-wall glow is core's own mask, not an app guess). Forwards
+// `topopt::lattice_solid_fallback_reasons` (LatticeTypes' SOLID 7def1f22) over the
+// caller's occupancy at ONE cell for the part (Fixed): 0 latticed, 1 too thin for this
+// cell, 2 too thin for any cell, 3 strut unprintable at every cell, 4 other, 5 sliver
+// latticed, 6 corner joined, 255 not part. Measured on the voxel staircase (no surface).
+// EMPTY on a size mismatch, a non-positive spacing / cell / line width, a type core does
+// not call live, or a core throw — the caller then draws no glow rather than a guess.
+std::vector<std::uint8_t> lattice_solid_fallback_reasons(int nx, int ny, int nz, double spacing,
+                                                         const std::uint8_t* solid,
+                                                         std::size_t solid_count,
+                                                         const std::string& topology,
+                                                         double cell_mm, double line_width_mm,
+                                                         bool organic);
+
 // The topology names the core certification library covers (can be RUN and
 // certified), in the core's own order — the seven cubic topologies today. The UI
 // reads this to know which picker entries are certifiable rather than assuming a

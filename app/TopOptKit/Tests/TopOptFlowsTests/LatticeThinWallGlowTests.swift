@@ -89,6 +89,70 @@ final class LatticeThinWallGlowTests: XCTestCase {
         p.performUndo()
         XCTAssertEqual(p.lattice.stageMode, .structural, "★ one Undo step")
     }
+
+    // ★ release (4), the reviewer's 11-09 20:10Z item 2: the walls that glow are CORE's
+    // (`lattice_solid_fallback_reasons`, LatticeTypes' SOLID 7def1f22), not the app's own measure.
+
+    /// A 60 mm block with a 2 mm fin, 2 mm voxels, octet at an 8 mm cell, a 0.45 mm line: core keeps the fin
+    /// solid as too thin (codes 1–3) and lattices the block's middle. The block's middle is the CONTROL: a code
+    /// there would mean the glow lights everything.
+    private func blockWithFin(fin: Bool) -> LatticeVoxelGrid {
+        let nx = 40, ny = 30, nz = 30
+        var v = [Float](repeating: 0, count: nx * ny * nz)
+        for k in 0..<nz { for j in 0..<ny { for i in 0..<nx {
+            let inBlock = i < 30
+            let inFin = fin && i >= 30 && j == 15
+            if inBlock || inFin { v[i + nx * (j + ny * k)] = 1 }
+        } } }
+        return LatticeVoxelGrid(nx: nx, ny: ny, nz: nz, origin: .zero, spacing: SIMD3(2, 2, 2), values: v)
+    }
+
+    func testTheGlowIsCoresMaskTheFinNotTheBlock() throws {
+        let g = blockWithFin(fin: true)
+        let r = TopOptKit.latticeSolidFallbackReasons(nx: g.nx, ny: g.ny, nz: g.nz, spacing: g.spacing,
+                                                      solid: g.values.map { $0 > 0.5 }, topology: "octet",
+                                                      cellMM: 8, lineWidthMM: 0.45)
+        XCTAssertEqual(r.count, g.values.count, "★ core answered, one code per voxel")
+        let at = { (i: Int, j: Int, k: Int) in r[i + g.nx * (j + g.ny * k)] }
+        XCTAssertEqual(at(39, 0, 15), 255, "air is not part")
+        var finThin = 0, fin = 0
+        for k in 4..<26 { for i in 34..<40 { fin += 1; if TopOptKit.solidFallbackGlowCodes.contains(at(i, 15, k)) { finThin += 1 } } }
+        XCTAssertEqual(finThin, fin, "★ every fin voxel away from the block is left solid as too thin")
+        XCTAssertFalse(TopOptKit.solidFallbackGlowCodes.contains(at(15, 15, 15)), "CONTROL: the block's middle is latticed")
+
+        let thin = try XCTUnwrap(LatticeThinWallGlow.coreThin(solid: g, latticed: g, topology: "octet",
+                                                              cellMM: 8, lineWidthMM: 0.45, organic: false))
+        XCTAssertTrue(thin[36 + g.nx * (15 + g.ny * 15)], "★ the glow lights the fin")
+        XCTAssertFalse(thin[15 + g.nx * (15 + g.ny * 15)], "… and not the block")
+        let nothingLatticed = LatticeVoxelGrid(nx: g.nx, ny: g.ny, nz: g.nz, origin: .zero, spacing: g.spacing,
+                                               values: [Float](repeating: 0, count: g.values.count))
+        XCTAssertEqual(LatticeThinWallGlow.coreThin(solid: g, latticed: nothingLatticed, topology: "octet",
+                                                    cellMM: 8, lineWidthMM: 0.45, organic: false)?.contains(true), false,
+                       "★ only where he latticed")
+    }
+
+    /// No core answer → no glow, never a guess: a stretched grid, an unknown type, no line width.
+    func testNoCoreAnswerMeansNoGlow() {
+        let g = blockWithFin(fin: true)
+        let solid = g.values.map { $0 > 0.5 }
+        XCTAssertTrue(TopOptKit.latticeSolidFallbackReasons(nx: g.nx, ny: g.ny, nz: g.nz, spacing: SIMD3(2, 2, 3), solid: solid,
+                                                            topology: "octet", cellMM: 8, lineWidthMM: 0.45).isEmpty)
+        XCTAssertTrue(TopOptKit.latticeSolidFallbackReasons(nx: g.nx, ny: g.ny, nz: g.nz, spacing: g.spacing, solid: solid,
+                                                            topology: "no-such-type", cellMM: 8, lineWidthMM: 0.45).isEmpty)
+        XCTAssertTrue(TopOptKit.latticeSolidFallbackReasons(nx: g.nx, ny: g.ny, nz: g.nz, spacing: g.spacing, solid: solid,
+                                                            topology: "octet", cellMM: 8, lineWidthMM: 0).isEmpty)
+        XCTAssertNil(LatticeThinWallGlow.coreThin(solid: g, latticed: g, topology: "no-such-type",
+                                                  cellMM: 8, lineWidthMM: 0.45, organic: false))
+    }
+
+    /// The page's bake asks core for the walls and lets core clear the line too (one source for line and glow).
+    func testThePageGlowsCoresWalls() throws {
+        let src = try FlexibleSource.code("WorkspacePlaceholder.swift")
+        XCTAssertTrue(src.contains("LatticeThinWallGlow.coreThin("), "★ the glow's walls are core's")
+        XCTAssertFalse(src.contains("LatticeStructuralThinWalls.mask("), "★ not the app's own measure")
+        XCTAssertTrue(src.contains("if let c = coreThin, !c.contains(true) { thinWalls = nil }"),
+                      "★ core saying no wall stays solid clears the line as well")
+    }
 }
 
 #if canImport(AppKit) && canImport(MetalKit)

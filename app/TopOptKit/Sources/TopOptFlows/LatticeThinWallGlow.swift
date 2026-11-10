@@ -2,14 +2,15 @@
 // it can't lattice … by dimming everywhere else", then "Dim and electric blue", then "more of a GLOW of electric blue
 // rather than a solid colour".
 //
-// The walls Structural leaves solid (a voxel mask on the preview's grid — today `LatticeStructuralThinWalls.mask`, core's
-// own solid-fallback reasons once LatticeTypes' SOLID slice lands, reviewer 20:10Z) become a per-vertex tint buffer for the
+// The walls Structural leaves solid (a voxel mask on the preview's grid: core's own solid-fallback reasons, LatticeTypes'
+// SOLID 7def1f22, `coreThin` below; the reviewer's 11-09 20:10Z item 2) become a per-vertex tint buffer for the
 // part: those walls glow (strength in `flags.w`, which the mesh shader turns into an additive electric-blue emission with a
 // Fresnel rim and a slow breathe), the glow fades out over a few millimetres into the part around them, and everything
 // else is dimmed. Pure, so it is headless-testable (`LatticeThinWallGlowTests`).
 
 import Foundation
 import simd
+import TopOptKit
 
 public enum LatticeThinWallGlow {
     /// How far the glow fades into the part around a wall (mm).
@@ -18,6 +19,20 @@ public enum LatticeThinWallGlow {
     public static let dimRGBA = SIMD4<Float>(0.10, 0.11, 0.14, 0.62)
     /// The glowing walls' albedo tint (the emission is the shader's).
     public static let blueRGBA = SIMD3<Float>(0.16, 0.60, 1.0)
+
+    /// ★ release (4): the walls the glow lights are CORE's — `lattice_solid_fallback_reasons` over the part (`solid`) at
+    /// the part's one cell, codes 1–3 (too thin for this cell / any cell / struts unprintable), kept only where he
+    /// latticed (`latticed`). nil when core gives no answer (then no glow is drawn rather than an app guess).
+    public static func coreThin(solid: LatticeVoxelGrid, latticed: LatticeVoxelGrid, topology: String,
+                                cellMM: Double, lineWidthMM: Double, organic: Bool) -> [Bool]? {
+        guard solid.values.count == latticed.values.count else { return nil }
+        let reasons = TopOptKit.latticeSolidFallbackReasons(
+            nx: solid.nx, ny: solid.ny, nz: solid.nz, spacing: solid.spacing,
+            solid: solid.values.map { $0 > 0.5 }, topology: topology,
+            cellMM: cellMM, lineWidthMM: lineWidthMM, organic: organic)
+        guard reasons.count == latticed.values.count else { return nil }
+        return zip(reasons, latticed.values).map { TopOptKit.solidFallbackGlowCodes.contains($0) && $1 > 0.5 }
+    }
 
     /// Any vertex glowing (flags.w of the 8-float layout)?
     public static func anyGlow(_ rgba: [Float]) -> Bool {

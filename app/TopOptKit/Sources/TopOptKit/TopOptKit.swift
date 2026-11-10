@@ -1904,6 +1904,37 @@ public enum TopOptKit {
         return out.map { Double($0) }
     }
 
+    /// ★ WHY CORE LEAVES EACH VOXEL SOLID — core's `lattice_solid_fallback_reasons` (LatticeTypes'
+    /// SOLID 7def1f22) over the caller's occupancy at ONE cell for the part. Codes: 0 latticed,
+    /// 1 too thin for this cell, 2 too thin for any cell, 3 strut unprintable at every cell, 4 other,
+    /// 5 sliver latticed, 6 corner joined, 255 not part. The Structural thin-wall glow lights 1–3
+    /// (the reviewer's 11-09 20:10Z item 2: core's own mask). Empty when core has no answer (a
+    /// non-cubic grid, a refused parameter, a type core does not call live): draw no glow then.
+    public static let solidFallbackGlowCodes: ClosedRange<UInt8> = 1...3
+    public static func latticeSolidFallbackReasons(nx: Int, ny: Int, nz: Int,
+                                                   spacing: SIMD3<Float>,
+                                                   solid: [Bool],
+                                                   topology: String,
+                                                   cellMM: Double, lineWidthMM: Double,
+                                                   organic: Bool = false) -> [UInt8] {
+        notePerTypeCall(#function, topology)
+        guard nx > 0, ny > 0, nz > 0, solid.count == nx * ny * nz else { return [] }
+        let sx = Double(spacing.x), sy = Double(spacing.y), sz = Double(spacing.z)
+        guard sx > 0, sy > 0, sz > 0, cellMM > 0, lineWidthMM > 0 else { return [] }
+        // ★ CORE TAKES ONE CUBIC SPACING — the same 2 % check as latticeMemberThicknessMM.
+        let mean = (sx + sy + sz) / 3
+        let worst = max(abs(sx - mean), max(abs(sy - mean), abs(sz - mean))) / mean
+        guard worst <= 0.02 else { return [] }
+        var flags = [UInt8](repeating: 0, count: solid.count)
+        for i in 0..<solid.count where solid[i] { flags[i] = 1 }
+        let out = flags.withUnsafeBufferPointer { buf in
+            topoptbridge.lattice_solid_fallback_reasons(
+                Int32(nx), Int32(ny), Int32(nz), mean, buf.baseAddress, buf.count,
+                std.string(topology), cellMM, lineWidthMM, organic)
+        }
+        return out.map { UInt8($0) }
+    }
+
     /// ★★ CORE'S DYADIC CELL-SIZE PLAN — the levels, on core's own base grid.
     ///
     /// The preview drew one cell size for the whole part; a swept run gives every
