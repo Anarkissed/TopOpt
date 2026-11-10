@@ -1,8 +1,8 @@
 # Lattice rebuild — the rules (stage A)
 
-Working draft 2, 2026-11-10, LatticeReview. Companion to `00-proposal.md`.
+Working draft 3, 2026-11-10, LatticeReview. Companion to `00-proposal.md`.
 
-Each rule below is something the layout must do. Where the rule is the maintainer's, his words and the date are given, with the place in today's code where they are recorded. A ledger of every dated ruling comment in the lattice code (526 entries, verbatim) is being worked through; this draft holds the rules that decide geometry. Rules about the look of panels and legends are not in scope here.
+Each rule below is something the layout must do. Where the rule is the maintainer's, his words and the date are given, with the place in today's code where they are recorded. A ledger of every dated ruling comment in the lattice code (526 entries, verbatim) has been read in full; this draft holds every rule in it that decides geometry for cell lattices. Rulings about organic lattices are listed in section 10 and wait for the organic proposal. Rules about the look of panels and legends are not in scope here.
 
 Status of each rule: **his** (a ruling of his), **agreed** (settled on 2026-11-10 for the rebuild), **proposed** (mine, for him to accept or change).
 
@@ -23,6 +23,15 @@ Section 8 lists the places where two rulings pull against each other. Those need
 | D7 | Nothing is ever built inside a pocket to close it: no wall, plate, cap or beam. The far end of a prism inside material is the part's own solid. | his, 2026-09-23, rule R7 (`LatticeSDFMetal.swift:2712`) |
 | D8 | Where a wall cannot hold lattice it goes solid. It is never left as a hole. | his, 2026-08-20: "Go solid" (`LatticeMeasuredRegionWidth.swift:113`) |
 | D9 | The edge of the lattice is the part's true surface, measured on the mesh. | agreed, 2026-11-10 |
+| D10 | A latticed region has the shape of the face it came from, never the rectangle around it. Laying less than was marked, and saying so, beats laying more in silence. | his, 2026-08-18 and 2026-08-21 (`LatticeFaceOutline.swift:2`, `LatticeRegionEmission.swift:189`) |
+| D11 | Expand grows or shrinks a region in the face's plane only, either sign; 0 is exactly the face. It never changes the depth. | his, 2026-08-17: "an expand handle for all the other axis *except* the depth"; "also take a negative value" (`LatticeSlabExpand.swift:2`, `:37`) |
+| D12 | Only what is set to Lattice is latticed. Everything else stays solid. | his, 2026-08-18 (`LatticeRegionMask.swift:310`) |
+| D13 | Each cell has one owner, decided by where its centre is, never by the order the regions were made. Reordering walls never changes the lattice. A cell that loses a contest steps down one size on its own region's grid. | his, 2026-10-03 ("order-dependent ownership would change the lattice when he reorders walls"); reviewer's ruling 6, 2026-10-07 (`LatticeOctreeBake.swift:962`, `:1028`) |
+| D14 | Space inside a region that no cell covers is solid, and is drawn solid, so a slit never looks like a hole the print does not have. | reviewer, 2026-10-11, item 2 (`LatticeSettings.swift:1026`) |
+| D15 | Protect skin and Lattice on the same face are one slab with one depth. | his, 2026-09-30, ruling 2 (`ProjectModel.swift:836`) |
+| D16 | Nothing is printed inside a Keep clear. The part's own solid wins over a Keep clear. | reviewer, 2026-11-03 19:55 (`run_job.cpp:770`) |
+| D17 | Material a design box added is solid. The lattice is laid around it, not through it. | reviewer, 2026-11-03 23:05 (`run_job.cpp:7273`) |
+| D18 | The same part and settings give the same layout, byte for byte, on every launch. | his, 2026-09-30, ruling 1 (`LatticeFaceOutline.swift:46`) |
 
 ## 2. Cell size
 
@@ -38,6 +47,14 @@ Section 8 lists the places where two rulings pull against each other. Those need
 | C8 | Once a cell would be smaller than the printable floor, that space is solid. | his, 2026-08-28: "Once you hit the printability floor go solid." (`LatticeSDFMetal.swift:2781`) |
 | C9 | The layout is centred on the part, so a symmetric part gets a symmetric layout. | proposed |
 | C10 | Manual: minimum cells across a wall, cell size per zone or region, layout anchor and angle, and the largest size step between neighbours can each be set. | agreed, 2026-11-10 (Manual controls 2 to 4) |
+| C11 | A wall's width is the thickness of the material at that spot, measured along the region's own direction. It is never the region's depth, and a corner where two walls meet is not a thick wall. | his, 2026-08-20 ("the walls here are *exactly* 20mm wide. That's 4mm cells 5x wide"), 2026-08-23, 2026-08-24: "it should read the actual depth of that area. so preferably per voxel" (`LatticeMeasuredRegionWidth.swift:4`, `:345`, `:414`) |
+| C12 | Stepped: the cell at each spot fits the smaller of the region's depth and the material there, in both directions. A thinner spot gets a smaller cell; a thicker spot gets a larger one. | his, 2026-08-25 (`LatticePreviewOccupancy.swift:1439`) |
+| C13 | Stepped: a space the outline cuts is packed, not halved. Several sizes, largest first; the finest fills what is left. The sizes offered always fill the depth exactly, so no solid strip is laid to make up a depth. | his, 2026-09-17 (`stepped_plan.hpp:5`) |
+| C14 | The printable floor follows the print settings. The thinnest strut is one line width. The smallest cell that still prints open is 5.27 line widths (2.37 mm at 0.45 mm). | his, 2026-08-19: "It should be based on the printing parameters"; reviewer, 2026-10-10 and 2026-11-02 (c) (`LatticeType.swift:162`, `stepped_plan.hpp:61`) |
+| C15 | A face cuts the cells on a cell boundary, which leaves open cells, never through the middle of a cell, which leaves a quilt of strut ends. | his, 2026-08-23 (`LatticeSDFMetal.swift:3256`). See section 8, item 6. |
+| C16 | Cell size Auto means any size the stress asks for, place by place. Only Manual forces one size through the whole lattice. | his, 2026-08-19 and 2026-08-20: "Auto should also mean GRADED" (`LatticeSettings.swift:2876`, `LatticeAutoPosture.swift:63`) |
+| C17 | Default Grade: the starting cell is the largest whole-number fit whose halves end at the printable floor, and it is taken only if it covers at least as much of the wall as the plain fit. | reviewer with his approval, 2026-10-11 (`LatticeRegionCells.swift:153`, `LatticeOctreeBake.swift:408`) |
+| C18 | Structural: a wall too thin for the certified count keeps its lattice if it is barely loaded (Unloaded walls). This switch is not shown in Aesthetic. | his, 2026-08-20: "Why does that rule exist for a wall that does not need to certify?"; 2026-08-24 (`LatticePreviewOccupancy.swift:2254`, `LatticeSetupWizard.swift:268`) |
 
 ## 3. Density and strut width
 
@@ -51,6 +68,11 @@ Section 8 lists the places where two rulings pull against each other. Those need
 | R6 | Uniform density is one density for the whole part. Per-region density is sent only in Per region mode. | proposed (fixes two review findings) |
 | R7 | By stress: density runs between "Grade from" and "Grade to". Both ends reach the layout. | proposed (today neither end is sent) |
 | R8 | Manual: strut width from → to in mm, grade response and target stress, and which loads drive the grade can each be set. | agreed, 2026-11-10 (Manual controls 1, 5, 6) |
+| R9 | What a lattice looks like is set by one number, strut width over cell size. At 0.20 the windows are half open (the ceiling of R2). At 0.354 neighbouring struts touch: the quilt. The top of the density range is the quilt, never solid. | his, 2026-08-24: "saying the max is solid is wrong. The max is the quilt"; 2026-09-12 (`LatticeType.swift:182`, `:247`) |
+| R10 | The density dial is even steps of strut width, not of density. 1% is the thinnest strut that prints, 100% is the quilt. | his, 2026-08-25: "Make 1% be the printability floor. Make 100% be the quilt" (`ProjectModel.swift:1131`) |
+| R11 | A strut width that was typed in is the width everywhere. | his, 2026-08-19 and 2026-09-10 (`LatticeSettings.swift:2022`, `run_job.cpp:6216`) |
+| R12 | Under By stress the stress decides every strut. Hand-set densities are greyed, and a number the app derived never overrides the stress. | his, 2026-08-20 ("That 17% and 25% was automatically input, I never typed it") and 2026-08-25 (`LatticeSDFMetal.swift:572`, `WorkspacePlaceholder.swift:11897`) |
+| R13 | The strut written to the file holds the same material as the round strut the strength numbers were measured on. | reviewer, 2026-11-02 (b) (`lattice_gen.cpp:433`) |
 
 ## 4. Grade to shape
 
@@ -60,6 +82,11 @@ Section 8 lists the places where two rulings pull against each other. Those need
 | G2 | The Band is how far in from the outline the cells take to climb from the finest cell back to the region's own cell. At 0 the outline stays and whatever cells fit are laid. | his, 2026-09-14 (`LatticePreviewOccupancy.swift:1647`) |
 | G3 | At its edge the lattice always goes down to the smallest printable cell. | his, 2026-09-14 (same place) |
 | G4 | Strength scales how much the grade does. 0 is the default. | reviewer's ruling 2, 2026-11-06 |
+| G5 | The distance is measured in the plane of the face, to the face's outline. The thickness direction is left out. | his, 2026-08-23: "in-plane distance to the face outline. I mean the shape of the face not the thickness as that is already covered by the floor" (`LatticeBoundaryDistance.swift:35`) |
+| G6 | With Grade to shape on, the cells break down to the smallest printable cell before anything goes solid. No other limit on the number of steps. | his, 2026-08-27: "It needs to break into smaller cells before it can become solid." (`LatticePreviewOccupancy.swift:851`) |
+| G7 | With Grade to shape off, a cell at the edge is simply cut where the region ends. | his, 2026-08-27: "if it's not applied, the cell should just be cut off where it ends" (`LatticeRegionMask.swift:54`) |
+| G8 | As the cells shrink toward the outline the strut keeps its thickness, so the lattice gets denser until it meets solid. The strut never gets thinner toward the edge. | his, 2026-09-05: "why aren't they the same thing?" (grade to shape and grade to solid; `run_job.cpp:6396`); reviewer's ruling 2, 2026-11-06 (`grading.hpp:506`) |
+| G9 | The fit reads the whole outline, open edges included. Only the rim is limited to edges backed by solid (S2). | his, 2026-08-24 (`LatticePreviewOccupancy.swift:960`) |
 
 ## 5. Rim, skin and cut ends
 
@@ -72,6 +99,10 @@ Section 8 lists the places where two rulings pull against each other. Those need
 | S5 | Where two cell sizes meet, transition struts join them so every fine node has a partner. | proposed |
 | S6 | The file is one watertight solid: struts, joints, rim, skin bars and the part's solid merged. | proposed |
 | S7 | Manual: skin bar width, spacing and pattern, rim width, joint fillet and overhang limit can each be set. | agreed, 2026-11-10 (Manual controls 7 to 10) |
+| S8 | Finish defaults to None. A rim or a skin is something the user adds. | his, 2026-08-14: "it should default to 'none'" (`LatticeSettings.swift:2472`) |
+| S9 | Finish: Covered is a solid outer shell over the lattice, for anyone who does not care to see it. | his, 2026-08-19 (`LatticeSettings.swift:30`) |
+| S10 | By default the rim is only as thick as the printable floor. Everything before it is graded. | his, 2026-09-08: "the rim should only ever be as thick as the printability floor" (`LatticeSettings.swift:1613`); for cell lattices the bar is two line widths (reviewer's ruling B, 2026-09-18, `job.hpp:639`) |
+| S11 | Struts run on into the solid they meet and are trimmed by the part, so nothing stops short of the wall and nothing sticks out of it. | his, 2026-09-08: "boolean them together and then just remove anything that goes beyond the solid" (`organic_lattice.hpp:1899`); reviewer, 2026-10-10: the outline cuts the struts (`lattice_boundary.hpp:323`) |
 
 ## 6. What the app says
 
@@ -82,6 +113,21 @@ Section 8 lists the places where two rulings pull against each other. Those need
 | U3 | A setting either changes the layout or is not on the page. | agreed, 2026-11-10 |
 | U4 | Trapped lattice: a notice that highlights where. No drain-hole setting for now. | his, 2026-11-10 |
 | U5 | Auto shows what a maker needs; Manual shows every value the layout uses. | his, 2026-11-10: "Auto is for makers. Manual is for engineers." |
+| U6 | A lattice type the engine cannot build is refused by name. It is never drawn or built as another type. | his, 2026-10-02 (`LatticeType.swift:368`) |
+| U7 | A wall the job leaves out is named. Never a silent drop. | reviewer's ruling V1, 2026-09-29 (`LatticeRegionEmission.swift:732`) |
+| U8 | A setting that is hidden does not act. | his, 2026-09-29, ruling 2 (`LatticeSettings.swift:2122`) |
+| U9 | Aesthetic never shows a strength warning. | his, 2026-08-25: "'Won't certify — tap for the fix' must not show in aesthetic" (`WorkspacePlaceholder.swift:10715`) |
+| U10 | Nothing on screen covers the lattice being looked at. | his, 2026-09-07: "NEVER OBSTRUCT THE VIEW OF THE LATTICE" (`LatticeSDFMetal.swift:1466`) |
+| U11 | Structural or Aesthetic is chosen once, when the Lattice stage opens. | his, 2026-08-21 (`LatticeStageMode.swift:2`) |
+| U12 | Every number can be typed on a keypad as well as dragged. | his, standing (`WorkspacePlaceholder.swift:10966`) |
+
+## 6b. What a run may claim
+
+| # | Rule | Status and source |
+|---|---|---|
+| V1 | The strength check judges the lattice that is in the file, after every cut and repair. It never counts material the file does not have. | his, 2026-09-11 ("fix the timing first"; `run_job.cpp:10697`); reviewer, 2026-11-02 (`lattice_volume_check.hpp:2`, `:121`) |
+| V2 | A check that did not run is not named in the job or the result. | his, 2026-10-02, ruling 3 (`LatticeSettings.swift:1363`) |
+| V3 | A run that ends with no lattice refuses. It does not report success over nothing. | reviewer, 2026-10-07 (`run_job.cpp:9223`) |
 
 ## 7. Speed
 
@@ -90,17 +136,33 @@ Section 8 lists the places where two rulings pull against each other. Those need
 | P1 | The preview never waits for a run. The layout runs on the device. | agreed, 2026-11-10 |
 | P2 | Dragging a slider stays smooth. A one-time wait when a part opens or a region changes is acceptable if that is all that can be managed. | his, 2026-11-10 |
 | P3 | The user's own part is shown on the Lattice page only if the layout follows every setting instantly; otherwise the sample. | his, 2026-11-10 |
+| P4 | The picture is never half updated: new geometry is not drawn with the old cells. | his, 2026-08-23: "can you make it so the quilt *never* comes up?" (`LatticeSDFMetal.swift:2672`) |
+| P5 | If a change cannot be shown at once, something on screen shows that it is working. | his, 2026-08-19 (`WorkspacePlaceholder.swift:139`) |
+| P6 | Older rule, kept as plan B under P2: the layout is rebuilt when the finger lifts or a typed number is confirmed, not on every frame of a drag. | his, 2026-08-21 and 2026-08-25 (`WorkspacePlaceholder.swift:3200`, `:789`) |
 
 ## 8. Where rulings pull against each other — his to settle
 
-1. **What sits at the outline under Grade to shape.** On 2026-09-14 grade to shape was "a solid outline wrapping the lattice", with the finest cells against it. On 2026-11-10 a rim is one bar, a skin is bars, and with Finish None struts are simply cut. So: is the solid outline of 2026-09-14 now the Rim, present only when Finish is Rim? Or does Grade to shape always bring its own outline bar whatever the Finish?
-2. **G3 against C1.** "Always down to the smallest printable cell at the edge" puts a band of the finest cells along every outline. "Fewest cells, smallest only where nothing larger fits" argues against it now that struts are cut cleanly at the true surface. Proposed: fine cells at the edge only when Grade to shape is on; with it off, large cells are cut at the surface.
+1. **What sits at the outline under Grade to shape.** On 2026-09-14 grade to shape was "a solid outline wrapping the lattice", with the finest cells against it. On 2026-11-10 a rim is one bar, a skin is bars, and with Finish None struts are simply cut. So: is the solid outline of 2026-09-14 now the Rim, present only when Finish is Rim? Or does Grade to shape always bring its own outline bar whatever the Finish? The reviewer's ruling of 2026-11-06 already removed the solid outline under Default Grade (the graded band itself is the shape grade; solid only where no cell prints) and kept it under Stepped. Proposed: the same for both. Grade to shape grades the cells; the bar is the Rim and appears only when Finish is Rim.
+2. **G3 against C1.** "Always down to the smallest printable cell at the edge" puts a band of the finest cells along every outline. "Fewest cells, smallest only where nothing larger fits" argues against it now that struts are cut cleanly at the true surface. Proposed: fine cells at the edge only when Grade to shape is on; with it off, large cells are cut at the surface. His own words of 2026-08-27 already say this (G7: "if it's not applied, the cell should just be cut off where it ends"), so this needs only his confirmation.
 3. **"A finish is a look, not a repair."** That was the rule while a shell did the holding (`LatticeSettings.swift:640`). In the rebuild the rim and skin are what hold the cut ends, so the finish becomes part of the structure. Proposed: retire the old sentence; the certificate counts rim and skin bars as members.
 4. **C8 against D3 and D9.** "At the printability floor go solid" was written when the alternative was a cell too small to print. With clean cuts, a leftover smaller than the floor can be a cut piece of a larger cell instead of solid. Proposed: solid only where the cut piece itself is too small to print (the sliver rule); otherwise cut.
 5. **C4.** Single-cell members "automatically requires finish = skin" (2026-08-22). With Finish None now having its own cut-end rule, does a single-cell wall still force Skin?
+6. **C15 against D4 and C9.** A face should cut cells on a cell boundary (C15). One layout for the whole part, centred (D4, C9), cannot put every face of every wall on a boundary; the old code says so itself ("one grid origin cannot serve two faces"). Proposed: within a wall the cells divide the wall exactly (C2, C6), so both faces of that wall land on boundaries; where two walls with different divisions meet, transition struts join them (S5). The layout is centred per wall, and the part as a whole stays symmetric because each wall is.
+7. **C12 against C1 at thick spots.** "A thicker spot gets a larger cell" (2026-08-25) and "a corner is not a thick wall" (2026-08-23) pull against each other where two walls meet. Proposed: the corner takes the cell of the walls that meet there, not a larger one; a larger cell is laid only where the material is thick over at least one full cell in every direction.
 
 ## 9. Still to do in stage A
 
-- Work through the rest of the ledger (about 500 entries) and add any geometry rule not yet here.
 - Turn each rule into a test statement with numbers (tolerances, which points are measured).
 - The reference cases: settings and expected layout for the stand, Base, Top Motor Mount and Pressing Plate Mount, with a picture for each.
+
+## 10. Set aside for the organic proposal
+
+The ledger holds about 60 rulings on organic lattices (2026-09-02 to 2026-10-08). They are not rules for cell lattices and are not written out here. The ones that will carry over as they stand:
+
+- Without a simulation an organic lattice can only fit the shape (2026-09-05).
+- "Fit to shape means grade to solid at the edges. Always. And always on the sides" (2026-09-06).
+- Struts continue through into the solid and blend into it "as though they are being wetted by a liquid layer" (2026-09-08).
+- A stated strut width is the width everywhere (2026-09-10).
+- A wall is dead or it is not, as a whole; the engine decides which, never the app (2026-09-18, 2026-09-29).
+- Synthetic stresses only on unloaded walls, Aesthetic only, simulation on (2026-09-05, 2026-09-29).
+- Repairs that add or remove material to help printing are off unless asked for (2026-09-08).
