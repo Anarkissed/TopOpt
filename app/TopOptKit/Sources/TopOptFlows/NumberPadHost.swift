@@ -59,6 +59,9 @@ enum NumberPadProbe {
     static var frames: [String: CGRect] = [:]
     /// RED CONTROL (NumberPadHostedTests): the old pad — no range, no keyboard path, the old keys.
     static var controlOldPad = false
+    /// ★ 11-09 (3.3): the edge the last pad opened from, its number in its window, and that window's width. (An offscreen
+    /// test window can't show where a popover lands — it is kept on the screen — so the tests read what the page asked for.)
+    static var lastOpen: (edge: Edge?, anchor: CGRect, windowWidth: CGFloat)?
 }
 
 private struct NumberPadNoteKey: EnvironmentKey {
@@ -79,6 +82,30 @@ extension View {
     }
 }
 
+/// ★ his iPad 11-09 (3.3): "a number keypad near the bottom is cut off and unusable … it moves to the side and ALWAYS shows
+/// whole, never cut at the bottom or top — everywhere it opens, the Selections modal included". The pad opened BELOW its
+/// number (`arrowEdge: .top`, which iPadOS keeps to), so a number near the window's foot (Settings › Protect skin) had its
+/// pad cut off. It opens to the number's SIDE now — the side with more room — and a side popover slides up or down to stay
+/// whole in the window.
+enum NumberPadPlacement {
+    /// Which side of its number the pad opens on: the one with more room in the window.
+    static func opensRight(anchor: CGRect, windowWidth: CGFloat) -> Bool {
+        windowWidth - anchor.maxX >= anchor.minX
+    }
+
+    /// The popover's arrow edge for that side. On the iPad the edge is the PAD's arrow (`.top` put it below its number, his
+    /// shot): `.leading` opens it on the number's right. A Mac popover is attached at the NUMBER's edge: `.trailing` is its
+    /// right.
+    static func arrowEdge(anchor: CGRect, windowWidth: CGFloat) -> Edge {
+        let right = opensRight(anchor: anchor, windowWidth: windowWidth)
+        #if os(macOS)
+        return right ? .trailing : .leading
+        #else
+        return right ? .leading : .trailing
+        #endif
+    }
+}
+
 /// What `.numberPad(...)` attaches to a number.
 struct NumberPadField: ViewModifier {
     @Binding var presented: Bool
@@ -90,6 +117,17 @@ struct NumberPadField: ViewModifier {
     @ObservedObject private var keyboard = HardwareKeyboard.shared
     /// What has been typed since it opened (nil = nothing yet).
     @State private var typed: Double?? = nil
+    /// ★ 11-09 (3.3): the number in its window, and that window's width (which side has room).
+    @State private var anchor: CGRect = .zero
+    @State private var windowWidth: CGFloat = 0
+
+    /// The side with room — or, before the number is measured (a pad opened as its number appears: Custom…), nil: the system
+    /// places it, whole.
+    private var padEdge: Edge? {
+        if NumberPadProbe.controlOldPad { return .top }
+        guard windowWidth > 0, anchor.width > 0 else { return nil }
+        return NumberPadPlacement.arrowEdge(anchor: anchor, windowWidth: windowWidth)
+    }
 
     func body(content: Content) -> some View {
         if keyboard.connected, !NumberPadProbe.controlOldPad {
@@ -103,7 +141,12 @@ struct NumberPadField: ViewModifier {
             .onChange(of: presented) { open in if !open { closed() } }
         } else {
             content
-                .popover(isPresented: $presented, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
+                .background(GeometryReader { g in
+                    Color.clear.onAppear { anchor = g.frame(in: .global) }
+                        .onChange(of: g.frame(in: .global)) { anchor = $0 }
+                }.allowsHitTesting(false))
+                .background(NumberPadWindowWidth { w in if abs(w - windowWidth) > 0.5 { windowWidth = w } })
+                .popover(isPresented: $presented, attachmentAnchor: .rect(.bounds), arrowEdge: padEdge) {
                     NumberPad(config: NumberPadProbe.controlOldPad ? NumberPad.Config(title: config.title, unit: config.unit,
                                                                                        allowsDecimal: config.allowsDecimal)
                                                                    : config,
@@ -112,7 +155,9 @@ struct NumberPadField: ViewModifier {
                               onDone: { presented = false })
                         .presentationCompactAdaptationPopover()
                 }
-                .onChange(of: presented) { open in if open { typed = nil } else { closed() } }
+                .onChange(of: presented) { open in
+                    if open { typed = nil; NumberPadProbe.lastOpen = (padEdge, anchor, windowWidth) } else { closed() }
+                }
         }
     }
 
@@ -125,6 +170,49 @@ struct NumberPadField: ViewModifier {
         note?(r.keptNote(r.clamp(v), unit: config.unit))
     }
 }
+
+/// ★ 11-09 (3.3): the width of the window a number sits in (its own window: a sheet's or a test's, not the screen's).
+#if os(iOS)
+private struct NumberPadWindowWidth: UIViewRepresentable {
+    let report: (CGFloat) -> Void
+    func makeUIView(context: Context) -> Probe {
+        let v = Probe()
+        v.isUserInteractionEnabled = false
+        v.report = report
+        return v
+    }
+    func updateUIView(_ v: Probe, context: Context) { v.report = report; v.publish() }
+    final class Probe: UIView {
+        var report: ((CGFloat) -> Void)?
+        override func didMoveToWindow() { super.didMoveToWindow(); publish() }
+        override func layoutSubviews() { super.layoutSubviews(); publish() }
+        func publish() {
+            guard let w = window?.bounds.width, let r = report else { return }
+            DispatchQueue.main.async { r(w) }
+        }
+    }
+}
+#elseif os(macOS)
+private struct NumberPadWindowWidth: NSViewRepresentable {
+    let report: (CGFloat) -> Void
+    func makeNSView(context: Context) -> Probe {
+        let v = Probe()
+        v.report = report
+        return v
+    }
+    func updateNSView(_ v: Probe, context: Context) { v.report = report; v.publish() }
+    final class Probe: NSView {
+        var report: ((CGFloat) -> Void)?
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); publish() }
+        override func layout() { super.layout(); publish() }
+        func publish() {
+            guard let w = window?.contentView?.bounds.width, let r = report else { return }
+            DispatchQueue.main.async { r(w) }
+        }
+    }
+}
+#endif
 
 private extension View {
     @ViewBuilder func presentationCompactAdaptationPopover() -> some View {

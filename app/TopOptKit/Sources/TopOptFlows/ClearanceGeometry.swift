@@ -87,6 +87,21 @@ public struct ClearanceMetric: Equatable, Sendable {
 /// A right-handed orthonormal (u, v) basis spanning the plane whose normal is `n`.
 /// Deterministic: picks the world axis least aligned with `n` as the seed so the
 /// basis is stable for axis-aligned mounting faces. `n` is assumed ~unit.
+/// ★★ his iPad notes 11-09 ("the zone is only half working"): CORE'S in-plane basis, exactly — `plane_basis`
+/// (core/src/voxel/clearance.cpp): u = normalize(cross(ref, n)), w = cross(n, u), ref = +x unless |n.x| ≥ 0.9, then +y.
+/// A manual slab's half_u / half_w are read on THIS basis by core and by the preview's mask (`LatticeRegionMask.basis`),
+/// so a lattice zone (or primitive) must be DRAWN and sized on it too. `planeBasis` below picks a different pair — for an
+/// up axis its u is +x where core's is −y — so a zone W ≠ D was drawn turned 90° from the box the run lattices.
+public func corePlaneBasis(normal n: SIMD3<Float>) -> (u: SIMD3<Float>, v: SIMD3<Float>) {
+    if ManualPrimitive.controlZoneDrawnOnViewerBasis { return planeBasis(normal: n) }
+    let ref: SIMD3<Float> = abs(n.x) < 0.9 ? SIMD3(1, 0, 0) : SIMD3(0, 1, 0)
+    let c = simd_cross(ref, n)
+    let l = simd_length(c)
+    guard l > 1e-6 else { return planeBasis(normal: n) }
+    let u = c / l
+    return (u, simd_normalize(simd_cross(n, u)))
+}
+
 public func planeBasis(normal n: SIMD3<Float>) -> (u: SIMD3<Float>, v: SIMD3<Float>) {
     let a = abs(n)
     // Seed with the world axis MOST orthogonal to n (smallest |component|).

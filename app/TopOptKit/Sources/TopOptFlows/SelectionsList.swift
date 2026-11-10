@@ -139,11 +139,26 @@ private struct SelectionsLineMidKey: PreferenceKey {
 }
 
 private struct SelectionsListMaxHeightKey: EnvironmentKey { static let defaultValue: CGFloat = SelectionsList.maxListHeight }
+/// ★ his iPad 11-09 (2.5): the lowest the panel's foot may reach, in the window (global y) — nil: no floor.
+private struct SelectionsPanelFloorKey: EnvironmentKey { static let defaultValue: CGFloat? = nil }
 extension EnvironmentValues {
     var selectionsListMaxHeight: CGFloat {
         get { self[SelectionsListMaxHeightKey.self] }
         set { self[SelectionsListMaxHeightKey.self] = newValue }
     }
+    /// ★ his iPad 11-09 (2.5): "the modal stops ABOVE the hint bubbles, with a buffer so it doesn't feel crowded". The page
+    /// sets it (WorkspacePanelPlacement: its band's foot, less what its column stacks under the panel); the list then gives
+    /// its rows only what is left between its own top, its header and footer (measured), and this floor.
+    var selectionsPanelFloor: CGFloat? {
+        get { self[SelectionsPanelFloorKey.self] }
+        set { self[SelectionsPanelFloorKey.self] = newValue }
+    }
+}
+
+/// ★ his iPad 11-09 (2.5): the Selections panel's frame in the window, for the column that holds it (what sits under it).
+struct SelectionsPanelFrameKey: PreferenceKey {
+    static let defaultValue: CGRect? = nil
+    static func reduce(value: inout CGRect?, nextValue: () -> CGRect?) { if let n = nextValue() { value = n } }
 }
 
 public struct SelectionsList: View {
@@ -190,6 +205,10 @@ public struct SelectionsList: View {
     /// picked face row under it wears its own); nil: on the line and its rows together, as Topology's.
     var lineLook: ((UUID) -> Bool)? = nil
     @Environment(\.selectionsListMaxHeight) private var maxHeight
+    @Environment(\.selectionsPanelFloor) private var panelFloor
+    /// ★ his iPad 11-09 (2.5): the panel's top in the window, and its height less the list's (header, sections, footer).
+    @State private var panelTopY: CGFloat? = nil
+    @State private var chromeHeight: CGFloat = 0
     @State private var dragFrom: CGFloat? = nil
     /// ★ his iPad 11-07 (3b): the list's eye sweep (Lattice Setup's list only).
     @StateObject private var sweep = EyeSweep()
@@ -356,8 +375,9 @@ public struct SelectionsList: View {
         .background(GeometryReader { g in
             Color.clear
                 .preference(key: ChromeKeepOutKey.self, value: ["selectionsList": g.frame(in: .global)])
-                .onAppear { noteFrame(g.frame(in: .global)) }
-                .onChange(of: g.frame(in: .global)) { noteFrame($0) }
+                .preference(key: SelectionsPanelFrameKey.self, value: g.frame(in: .global))   // ★ 11-09 (2.5)
+                .onAppear { noteFrame(g.frame(in: .global)); measured(g.frame(in: .global)) }
+                .onChange(of: g.frame(in: .global)) { noteFrame($0); measured($0) }
         }.allowsHitTesting(false))
         .onDisappear { noteFrame(nil) }
         // ★ his iPad 11-07 (3b): press an eye and drag — Lattice Setup's list sweeps its eye column (EyeSweep)
@@ -578,9 +598,30 @@ public struct SelectionsList: View {
 
     /// As tall as its rows, up to the screen — or exactly the height he dragged it to (★ his iPad 2026-10-27, note 2: the
     /// grip "does not work": a drag past the rows did nothing, the list never grew taller than what it held).
+    /// ★ his iPad 11-09 (2.5): and never past the page's floor — the panel's foot stays above the hint line.
     private var listHeight: CGFloat {
-        if let chosen = chosenHeight?.wrappedValue { return max(Self.lineHeight * 2, min(chosen, maxHeight)) }
-        return min(maxHeight, max(contentHeight, Self.lineHeight))
+        let cap = min(maxHeight, floorCap)
+        if let chosen = chosenHeight?.wrappedValue { return max(Self.lineHeight * 2, min(chosen, cap)) }
+        return min(cap, max(contentHeight, Self.lineHeight))
+    }
+
+    /// ★ his iPad 11-09 (2.5): the most the rows may take so the whole panel ends on the floor: the floor less the panel's
+    /// top and its header, sections and footer (measured, `chromeHeight`). Lattice Setup's column is taller than Topology's
+    /// guess (`footerReserve`): the Topology header over it, FACES, LATTICE ZONES with their rows, Start from — on his
+    /// stand its foot ran under the hint and off the window. Never under two lines.
+    var floorCap: CGFloat {
+        guard let panelFloor, let top = panelTopY else { return .infinity }
+        return Swift.max(Self.lineHeight * 2, panelFloor - top - chromeHeight)
+    }
+
+    /// Whether the rows' scroll view is drawn (the list open, with groups or folders).
+    private var drawsRows: Bool { !collapsed && !(groups.isEmpty && folders == nil) }
+
+    /// ★ his iPad 11-09 (2.5): the panel measured — its top, and its height less the rows' (which `listHeight` sets).
+    private func measured(_ f: CGRect) {
+        if panelTopY.map({ abs($0 - f.minY) > 0.5 }) ?? true { panelTopY = f.minY }
+        let chrome = Swift.max(0, f.height - (drawsRows ? listHeight : 0))
+        if abs(chrome - chromeHeight) > 0.5 { chromeHeight = chrome }
     }
 
     /// ★ B2 (U2, approved design 2026-11-02 §4.3; his answer to Q5 2026-11-03: "We'll try 1 for now, then change it up if
@@ -603,7 +644,7 @@ public struct SelectionsList: View {
                 .onChanged { v in
                     let from = dragFrom ?? listHeight
                     if dragFrom == nil { dragFrom = from }
-                    chosenHeight?.wrappedValue = Self.resized(from: from, drag: v.translation.height, max: maxHeight)
+                    chosenHeight?.wrappedValue = Self.resized(from: from, drag: v.translation.height, max: min(maxHeight, floorCap))
                 }
                 .onEnded { _ in dragFrom = nil })
             .background(publish("selectionsGrip"))

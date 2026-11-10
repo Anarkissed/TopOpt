@@ -80,7 +80,13 @@ final class FaceInTwoGroupsHostedTests: XCTestCase {
         let body = String(ws[pick.lowerBound...].prefix(3_200))
         // ★ RE-PINNED (B6 s2b, note 23c): with the Topology panel open the tap goes on to Topology's groups
         let lattice = try XCTUnwrap(body.range(of: "if stage == .lattice, !latticeTopologyOpen {"))
-        XCTAssertTrue(String(body[lattice.lowerBound...].prefix(500)).contains("project.latticeStageTap(face: faceID, loop: loop)"),
+        // ★ RE-PINNED (his iPad 11-09 (1)): the branch hands the tap to latticeSetupTap, the one Lattice Setup tap (the 3D
+        // view's point pick calls it too), which grows the lattice list by the face — or by the piece under it
+        XCTAssertTrue(String(body[lattice.lowerBound...].prefix(500)).contains("latticeSetupTap(faceID, at: nil, mesh: mesh)"),
+                      "★ the Lattice stage's tap goes to the Lattice Setup tap")
+        let setup = try XCTUnwrap(ws.range(of: "private func latticeSetupTap("))
+        let tap = String(ws[setup.lowerBound...].prefix(1_400))
+        XCTAssertTrue(tap.contains("project.latticeStageTap(face: faceID, loop: loop)") && tap.contains("project.latticeStageTap(piece: piece)"),
                       "★ the Lattice stage's tap grows the lattice list, never Topology's")
     }
 }

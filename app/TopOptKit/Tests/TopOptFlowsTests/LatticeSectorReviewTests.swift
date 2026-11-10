@@ -73,8 +73,15 @@ final class LatticeSectorReviewTests: XCTestCase {
         XCTAssertEqual(piece.faceID, 1, "the preview keeps the face it was cut from")
         let job = try stageJob(p)
         XCTAssertNil(job.error, "★ core accepts — \(job.error ?? "")")
-        XCTAssertEqual(job.regions.count, 1)
+        // his iPad notes 11-09 (2.3): the protected face, named by no Lattice group as a WHOLE face, is kept solid
+        // at its OWN depth (an exclude after the piece) — the piece's 25 mm is still not the face's
+        XCTAssertEqual(job.regions.count, 2, "the piece + face 1's Protect keep")
         XCTAssertNil(job.regions.first?["face_id"], "★ a piece is not its face: no face_id on the wire")
+        let keeps = p.latticeJobRegions().regions.filter {
+            $0.selectableKey?.contains(ProjectModel.protectKeepGroupID.uuidString) == true }
+        XCTAssertEqual(keeps.count, 1, "★ one Protect keep")
+        XCTAssertEqual(keeps.first?.role, .exclude, "★ Protect stays solid under the lattice")
+        XCTAssertEqual(keeps.first?.depthMM ?? .nan, own, accuracy: 1e-9, "★ at the face's own depth, not the piece's 25 mm")
 
         // CONTROL: the whole top latticed 25 mm in the same place — ruling 2 (one slab)
         let whole = T.splitPad()
@@ -86,6 +93,9 @@ final class LatticeSectorReviewTests: XCTestCase {
         let wj = try stageJob(whole.p)
         XCTAssertNil(wj.error)
         XCTAssertEqual((wj.regions.first?["face_id"] as? NSNumber)?.intValue, 1, "control: a whole face names its face")
+        XCTAssertFalse(whole.p.latticeJobRegions().regions.contains {
+            $0.selectableKey?.contains(ProjectModel.protectKeepGroupID.uuidString) == true },
+            "control: a protected face latticed WHOLE is named by its Lattice group — no keep")
         XCTAssertFalse(try XCTUnwrap(T.prisms(whole.p, whole.gid, whole.top).first).sectorPiece)
     }
 

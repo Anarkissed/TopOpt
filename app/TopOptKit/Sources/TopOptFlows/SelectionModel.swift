@@ -164,8 +164,25 @@ public struct SelectionModel: Equatable, Sendable, Codable {
     /// ★ B6 (notes 22, 23): the Lattice stage's own list numbers its groups ("Group 1") where Topology's letters them.
     /// Optional so Topology's list encodes exactly as it always did (nil is never written).
     private var numbered: Bool?
+    /// ★ his iPad 11-09 (2.2): groups no sweep drops while empty — the Lattice stage's zones (a zone is a shape: no faces, no
+    /// regions; it added a zone, picked a group, de-picked, and both zones were gone). Never saved: `ProjectModel.latticeList`
+    /// hands every edit the project's zones (`LatticeSettings.zoneGroups`).
+    private var keptEmpty: Set<UUID> = []
+
+    /// The saved fields — `keptEmpty` is not one, so a project's file is byte-for-byte what it was.
+    private enum CodingKeys: String, CodingKey { case groups, activeGroupID, nextColor, numbered }
+
+    public static func == (a: SelectionModel, b: SelectionModel) -> Bool {
+        a.groups == b.groups && a.activeGroupID == b.activeGroupID && a.nextColor == b.nextColor && a.numbered == b.numbered
+    }
 
     public init() {}
+
+    /// ★ his iPad 11-09 (2.2): `ids` stay when empty (the zones); every other empty group is swept as before.
+    public mutating func keepWhenEmpty(_ ids: Set<UUID>) { keptEmpty = ids }
+
+    /// Whether a sweep drops `g`: empty, and not kept (`keepWhenEmpty`).
+    private static func sweeps(_ g: SelectionGroup, kept: Set<UUID>) -> Bool { g.isEmptySelection && !kept.contains(g.id) }
 
     /// ★ B6: the Lattice stage's list, starting from `groups` (copies keep their names, colours and ids); a new group
     /// takes the next colour after theirs and the next free number.
@@ -253,7 +270,8 @@ public struct SelectionModel: Equatable, Sendable, Codable {
 
         // Drop groups the steal/deselect emptied — but keep the active one so the
         // user can keep tapping into it (design's filter keeps `id === active.id`).
-        groups.removeAll { $0.isEmptySelection && $0.id != activeID }
+        let kept = keptEmpty
+        groups.removeAll { Self.sweeps($0, kept: kept) && $0.id != activeID }
     }
 
     /// Group-TARGETED face add for programmatic flows (the lattice page's paint
@@ -266,7 +284,8 @@ public struct SelectionModel: Equatable, Sendable, Codable {
             groups[i].removeFaces(keys)
         }
         groups[idx].addFaces(keys)
-        groups.removeAll { $0.isEmptySelection && $0.id != id && $0.id != activeGroupID }
+        let kept = keptEmpty, active = activeGroupID
+        groups.removeAll { Self.sweeps($0, kept: kept) && $0.id != id && $0.id != active }
     }
 
     /// Group-targeted face removal (the paint pane's tap-again-to-remove). The
@@ -304,7 +323,8 @@ public struct SelectionModel: Equatable, Sendable, Codable {
     /// invariant kept by `pickFaces`.
     public mutating func clearActive() {
         activeGroupID = nil
-        groups.removeAll { $0.isEmptySelection }
+        let kept = keptEmpty
+        groups.removeAll { Self.sweeps($0, kept: kept) }
     }
 
     /// Put regions into a group (the union commit path). A region belongs to
@@ -317,9 +337,10 @@ public struct SelectionModel: Equatable, Sendable, Codable {
             groups[i].removeRegions(ids)
         }
         groups[idx].addRegions(ids)
+        let kept = keptEmpty, active = activeGroupID
         groups.removeAll {
-            $0.isEmptySelection && $0.id != group
-                && $0.id != activeGroupID
+            Self.sweeps($0, kept: kept) && $0.id != group
+                && $0.id != active
         }
     }
 
@@ -348,8 +369,9 @@ public struct SelectionModel: Equatable, Sendable, Codable {
     /// Drop regions from every group (a dissolve, or a re-import that lost them).
     public mutating func removeRegions(_ ids: [RegionID]) {
         for i in groups.indices { groups[i].removeRegions(ids) }
+        let kept = keptEmpty, active = activeGroupID
         groups.removeAll {
-            $0.isEmptySelection && $0.id != activeGroupID
+            Self.sweeps($0, kept: kept) && $0.id != active
         }
     }
 
@@ -363,6 +385,7 @@ public struct SelectionModel: Equatable, Sendable, Codable {
     public mutating func remove(_ id: UUID) {
         guard groups.contains(where: { $0.id == id }) else { return }
         groups.removeAll { $0.id == id }
+        keptEmpty.remove(id)
         if activeGroupID == id { activeGroupID = nil }
     }
 
