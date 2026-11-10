@@ -174,6 +174,13 @@ public struct CutAim: Equatable, Sendable {
 
     // MARK: - building one from a tap
 
+    /// ★ B8 (row 37): `make`'s own flat test — a CAD plane, or (no CAD) a face whose normals do not bend — for the Pattern,
+    /// which lays a straight grid there (`PatternFlat`).
+    public static func isFlat(_ face: FaceID, in mesh: ViewerMesh) -> Bool {
+        if let g = mesh.faceGeometry(face) { return g.kind == .plane }
+        return !bent(face, mesh)
+    }
+
     /// ★ THE AIM FOR A TAPPED FACE (or one piece of it): flat, a hole, or anything else.
     public static func make(face: FaceID, piece: RegionID?, regions: FaceRegionModel, mesh: ViewerMesh) -> CutAim? {
         let pts = points(face: face, piece: piece, regions: regions, mesh: mesh)

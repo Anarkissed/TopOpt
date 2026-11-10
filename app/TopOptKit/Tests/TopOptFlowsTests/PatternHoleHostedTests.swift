@@ -3,7 +3,7 @@
 // l bracket (a STEP with bolt holes).
 //   • PatternDownHole: on a hole the bar reads ✕ │ − n around + │ − n down the hole + │ ✓ (each count the app's number, with
 //     its − and +); ✓ splits the bore so its rows run down its axis: every ring stands square to the bore, every line holds
-//     its axis. A flat face keeps its grid's own bar until the reviewer's answer on it.
+//     its axis. (A flat face's bar — along │ across │ Rotate, the reviewer's 11-09 ruling (b): PatternFlatHostedTests.)
 //   • PatternZero: 0 around is rings only; both 0 says "nothing to cut" and ✓ waits.
 // A synthesised click never picks a face in the offscreen Metal view, so the test drives the page's own face tap (CutLive).
 #if canImport(AppKit) && canImport(MetalKit)
@@ -132,15 +132,6 @@ final class PatternDownHoleHostedTests: XCTestCase {
             XCTAssertGreaterThan(lines, 0, "\(name): the columns run round it")
             XCTAssertNil(h.frames.all["patternBar"], "\(name): the bar goes with the split made")
         }
-    }
-
-    /// A flat face keeps its own grid's bar (until the reviewer's answer on a flat face's bar).
-    func testAFlatFaceKeepsItsGridsBar() throws {
-        let (h, p, m) = try PatternHoleHost.bracket(AppBuildHost.landscape13, test: self)
-        let flat = try XCTUnwrap(FaceTopology.faceIDs(in: m).first { m.faceGeometry($0)?.kind == .plane }, "a flat face")
-        XCTAssertNil(p.surfacePatternBore(face: flat), "★ a flat face is not a bore")
-        try PatternHoleHost.pick(h, flat)
-        XCTAssertNil(h.frames.all["patternBar"], "★ no hole bar on a flat face")
     }
 }
 

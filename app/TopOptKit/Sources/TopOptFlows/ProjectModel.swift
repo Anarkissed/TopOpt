@@ -1900,6 +1900,11 @@ public final class ProjectModel: ObservableObject {
                                       piece: RegionID? = nil)
         -> (cells: [FaceRegionGeometry.GridCell], verdict: SliverVerdict)? {
         guard let mesh = viewerMesh else { return nil }
+        // ★ B8 (row 37, P5): the bar counts cut lines from 0 — one column by one row cuts nothing
+        if columns <= 1 && rows <= 1 {
+            return ([], SliverVerdict(ok: false, minCellVoxels: 0, emptyCells: 0, memberVoxels: 0, maxCellsBudget: 0,
+                                      floorVoxels: kRegionSliverFloorVoxels, reason: PatternHole.nothingToCut))
+        }
         // ★ §7 — THE GRID RUNS ALONG THE SHAPE. The frame's own axes come from the
         // member vertices' principal direction, which is pulled off by wherever the
         // tessellation is dense; the face's longest STRAIGHT EDGE is what a person
@@ -1931,9 +1936,14 @@ public final class ProjectModel: ObservableObject {
         // on a curve ("170° per piece is too wide to cut with a plane"). The
         // geometry knows why; it now says so.
         let cells: [FaceRegionGeometry.GridCell]
-        switch SurfacePatternAxis.grid(face: face, frame: frame,
+        let within = unionLeaf?.cuts ?? target?.cuts ?? []
+        // ★ B8 (row 37, the reviewer's 11-09 ruling (b)): a FLAT face's grid is straight — square to its longest edge,
+        // turned by Rotate (`PatternFlat`); the walk below never read the frame, and on a plate it ran corner to corner
+        switch surfacePatternIsFlat(face: face)
+            ? PatternFlat.cells(face: face, frame: frame, columns: columns, rows: rows, in: mesh, within: within)
+            : SurfacePatternAxis.grid(face: face, frame: frame,
                                        columns: columns, rows: rows, in: mesh,
-                                       within: unionLeaf?.cuts ?? target?.cuts ?? []) {
+                                       within: within) {
         case .success(let c):
             cells = c
         case .failure(let refusal):
@@ -2003,6 +2013,13 @@ public final class ProjectModel: ObservableObject {
                                             piece: piece),
               p.verdict.ok else { return [] }
         return surfacePatternSplit(face: face, piece: piece, cells: p.cells)
+    }
+
+    /// ★ B8 (row 37): whether the Pattern lays a straight grid on this face (a flat one: `CutAim.isFlat`, the Cut tool's
+    /// own test), which Rotate turns. A curve keeps the arc grid, which follows its bend.
+    public func surfacePatternIsFlat(face: FaceID) -> Bool {
+        guard let mesh = viewerMesh else { return false }
+        return CutAim.isFlat(face, in: mesh)
     }
 
     // MARK: ★ B8 (row 37) — THE PATTERN ON A HOLE (`PatternHole`): lines round the bore's own axis, rings down it

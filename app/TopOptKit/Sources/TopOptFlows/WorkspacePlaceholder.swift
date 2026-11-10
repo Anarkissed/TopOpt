@@ -381,9 +381,9 @@ public struct WorkspacePlaceholder: View {
     @State private var patternAround = PatternHole.defaultAround
     @State private var patternDown = PatternHole.defaultDown
     /// §7 — the user's own rotation of the grid, ON TOP of the automatic alignment
-    /// to the face's longest edge. Drag the knob; releases on 15°.
+    /// to the face's longest edge. ★ B8 (row 37, the reviewer's 11-09 ruling (b)): the bar's Rotate — ↺ / ↻ 15°, or
+    /// typed, 0..<360 — and 0 (square to the longest edge) on each newly tapped face.
     @State private var patternRotation: Double = 0
-    @State private var patternRotationBase: Double = 0
     /// The face the pattern tool is aimed at.
     @State private var surfacePatternFace: FaceID?
     /// The PIECE the pattern divides — the region under the tap, captured at the
@@ -7135,6 +7135,7 @@ public struct WorkspacePlaceholder: View {
             surfaceSelectedFace = nil
 
         case .pattern:
+            if surfacePatternFace != faceID { patternRotation = 0 }   // ★ B8 (11-09 ruling (b)): starts square to its longest edge
             surfacePatternFace = faceID
             surfacePatternPiece = surfaceSelected
 
@@ -7284,8 +7285,9 @@ public struct WorkspacePlaceholder: View {
         return project.surfacePatternBore(face: f, piece: surfacePatternPiece)
     }
 
-    /// ★ B8 (row 37): the hole bar's line — nil when ✓ splits it; "nothing to cut"; or how many pieces the hole can hold.
-    private func patternHoleRefusal(_ p: (cells: [FaceRegionGeometry.GridCell], verdict: SliverVerdict)?) -> String? {
+    /// ★ B8 (row 37): the Pattern bar's line — nil when ✓ splits it; "nothing to cut"; how many pieces the face can hold;
+    /// or the grid's own reason (a curve's arc too wide for a plane cut).
+    private func patternRefusal(_ p: (cells: [FaceRegionGeometry.GridCell], verdict: SliverVerdict)?) -> String? {
         guard let p else { return PatternHole.nothingToCut }
         if p.verdict.ok { return nil }
         if p.verdict.reason == PatternHole.nothingToCut || p.verdict.memberVoxels == 0 { return p.verdict.reason }
@@ -8113,96 +8115,57 @@ public struct WorkspacePlaceholder: View {
                     }
 
                 case .pattern:
-                    if let face = surfacePatternFace, surfacePatternBore != nil {
-                        // ★ B8 (row 37, N1, P5; mockup #cut-pattern): on a hole — ✕ │ − n around + │ − n down the hole + │ ✓
+                    if let face = surfacePatternFace {
+                        // ★ B8 (row 37, N1, P5; mockup #cut-pattern; the reviewer's 11-09 18:31Z ruling (b)): ONE bar. On a
+                        // hole ✕ │ − n around + │ − n down the hole + │ ✓ (its lines hang on its own axis); on any other face
+                        // ✕ │ − n along + │ − n across + │ Rotate ↺ n° ↻ │ ✓ — the grid square to the face's longest straight
+                        // edge at 0° (his 08-16 arc grid on a curve, no plane question). Every count is cut lines, from 0;
+                        // the confirm waits, with the bar's line, while the run could not hold the pieces (§7's sliver
+                        // verdict, priced at the run's own voxel spacing).
+                        let hole = surfacePatternBore != nil
+                        // Rotate turns a FLAT face's straight grid; a curve's arc grid follows its bend (no Rotate)
+                        let turns = !hole && project.surfacePatternIsFlat(face: face)
                         let preview = surfacePatternPreview
-                        PatternHoleBar(around: patternAround, down: patternDown, refusal: patternHoleRefusal(preview),
-                                       set: { patternAround = $0; patternDown = $1 },
-                                       cancel: { surfacePatternFace = nil; surfacePatternPiece = nil },
-                                       confirm: {
-                                           // ★ across every bore carried from Select similar, each on its own axis
-                                           let kids = surfaceCarried.count > 1
-                                               ? project.commitSurfacePattern(faces: surfaceCarried, around: patternAround,
-                                                                              down: patternDown)
-                                               : project.commitSurfacePattern(face: face, around: patternAround,
-                                                                              down: patternDown, piece: surfacePatternPiece)
-                                           if surfaceCarried.count > 1 { model.toast = "Patterned \(surfaceCarried.count) faces." }
-                                           surfaceCarried = []
-                                           surfaceSelected = kids.first
-                                           surfacePatternFace = nil
-                                           surfacePatternPiece = nil
-                                       })
-                    } else if surfacePatternFace != nil {
-                        surfaceClusterButton("xmark", tint: DS.Color.textSecondary) {
-                            surfacePatternFace = nil
-                            surfacePatternPiece = nil
-                        }
-                        // ★ §7 — COLUMNS x ROWS, with the SLIVER VERDICT on the
-                        // confirm. The guard is priced at the run's own voxel
-                        // spacing, so the panel refuses with the number the run
-                        // would, and the confirm is simply not tappable when it does.
-                        surfaceClusterStepper("col", value: $patternColumns)
-                        surfaceClusterStepper("row", value: $patternRows)
-                        // ★ §7 — TURN THE GRID. The automatic alignment is the
-                        // face's longest straight edge; this is the override for
-                        // when that is not the axis you meant.
-                        ZStack {
-                            Circle().fill(DS.Color.chipSolid.color)
-                                .overlay(Circle().strokeBorder(
-                                    DS.Color.textPrimary.opacity(0.22).color, lineWidth: 1))
-                            VStack(spacing: 0) {
-                                Image(systemName: "rotate.3d")
-                                    .font(.system(size: 13, weight: .bold))
-                                    .foregroundStyle(DS.Color.textPrimary.color)
-                                Text("\(Int(patternRotation))°")
-                                    .dsStyle(DS.TypeScale.caption)
-                                    .foregroundStyle(DS.Color.textTertiary.color)
-                                    .monospacedDigit()
-                            }
-                        }
-                        .frame(width: 52, height: 52)
-                        .gesture(
-                            DragGesture(minimumDistance: 2)
-                                .onChanged { g in
-                                    // ★ FOLDED AS IT TURNS. A grid is symmetric
-                                    // every 90°, so an accumulating raw drag shows
-                                    // meaningless numbers (−405° on his screen) for
-                                    // grids already named inside one quarter-turn.
-                                    patternRotation = SurfacePatternAxis.foldAngle(
-                                        patternRotationBase
-                                            + Double(g.translation.width) * 0.5)
+                        PatternBar(
+                            counts: hole
+                                ? [.init(word: PatternBarCopy.around, key: "patternAround", value: patternAround,
+                                         range: PatternHole.aroundRange) { patternAround = $0 },
+                                   .init(word: PatternBarCopy.downTheHole, key: "patternDown", value: patternDown,
+                                         range: PatternHole.downRange) { patternDown = $0 }]
+                                : [.init(word: PatternBarCopy.along, key: "patternAlong",
+                                         value: PatternGrid.lines(pieces: patternColumns),
+                                         range: PatternGrid.linesRange) { patternColumns = PatternGrid.pieces(lines: $0) },
+                                   .init(word: PatternBarCopy.across, key: "patternAcross",
+                                         value: PatternGrid.lines(pieces: patternRows),
+                                         range: PatternGrid.linesRange) { patternRows = PatternGrid.pieces(lines: $0) }],
+                            rotate: turns ? (patternRotation, { patternRotation = PatternGrid.rotation($0) }) : nil,
+                            refusal: patternRefusal(preview),
+                            cancel: { surfacePatternFace = nil; surfacePatternPiece = nil },
+                            confirm: {
+                                // ★ ACROSS EVERY CARRIED FACE (Select similar) — each in its own frame, a hole on its own
+                                // axis; a face the pattern does not fit is skipped rather than failing the batch.
+                                let many = surfaceCarried.count > 1
+                                let kids: [RegionID]
+                                if hole {
+                                    kids = many
+                                        ? project.commitSurfacePattern(faces: surfaceCarried, around: patternAround,
+                                                                       down: patternDown)
+                                        : project.commitSurfacePattern(face: face, around: patternAround,
+                                                                       down: patternDown, piece: surfacePatternPiece)
+                                } else {
+                                    kids = many
+                                        ? project.commitSurfacePattern(faces: surfaceCarried, columns: patternColumns,
+                                                                       rows: patternRows, rotationDegrees: patternRotation)
+                                        : project.commitSurfacePattern(face: face, columns: patternColumns, rows: patternRows,
+                                                                       rotationDegrees: patternRotation,
+                                                                       piece: surfacePatternPiece)
                                 }
-                                .onEnded { _ in
-                                    patternRotation = SurfacePatternAxis.foldAngle(
-                                        SurfaceCut.snap(patternRotation))
-                                    patternRotationBase = patternRotation
-                                }
-                        )
-                        let preview = surfacePatternPreview
-                        surfaceClusterLabel(preview.map {
-                            $0.verdict.ok ? "\($0.cells.count) pieces" : $0.verdict.reason
-                        } ?? "—", warn: preview.map { !$0.verdict.ok } ?? false)
-                        surfaceClusterConfirm(enabled: preview?.verdict.ok ?? false) {
-                            guard let face = surfacePatternFace else { return }
-                            // ★ ACROSS EVERY CARRIED FACE — same grid, each in its
-                            // own frame. A face the grid does not fit is skipped
-                            // rather than failing the batch.
-                            let kids = surfaceCarried.count > 1
-                                ? project.commitSurfacePattern(
-                                    faces: surfaceCarried, columns: patternColumns,
-                                    rows: patternRows, rotationDegrees: patternRotation)
-                                : project.commitSurfacePattern(
-                                    face: face, columns: patternColumns, rows: patternRows,
-                                    rotationDegrees: patternRotation,
-                                    piece: surfacePatternPiece)
-                            if surfaceCarried.count > 1 {
-                                model.toast = "Patterned \(surfaceCarried.count) faces."
-                            }
-                            surfaceCarried = []
-                            surfaceSelected = kids.first
-                            surfacePatternFace = nil
-                            surfacePatternPiece = nil
-                        }
+                                if many { model.toast = "Patterned \(surfaceCarried.count) faces." }
+                                surfaceCarried = []
+                                surfaceSelected = kids.first
+                                surfacePatternFace = nil
+                                surfacePatternPiece = nil
+                            })
                     }
 
                 case .region:
@@ -8293,7 +8256,9 @@ public struct WorkspacePlaceholder: View {
     /// How far the cluster's middle keeps from the screen's sides: the Cut bar (✕ │ Tilt │ Rotate │ mm │ ✓) is the widest.
     private var surfaceClusterHalfWidth: CGFloat {
         if surfaceTool == .cut && cutAim != nil { return 330 }
-        if surfaceTool == .pattern && surfacePatternBore != nil { return 300 }   // ★ B8: ✕ │ around │ down the hole │ ✓
+        // ★ B8: the Pattern bar — a hole's (✕ │ n around │ n down the hole │ ✓, 675 pt measured) and a flat face's (+ Rotate,
+        // ≤ 720 pt): whole on an 11" iPad upright (820 pt) either way. (300 put the hole's 31 pt off its left edge.)
+        if surfaceTool == .pattern && surfacePatternFace != nil { return 360 }
         return 200
     }
 
@@ -8435,46 +8400,6 @@ public struct WorkspacePlaceholder: View {
             .background(Capsule().fill(DS.Color.chipSolid.color)
                 .overlay(Capsule().strokeBorder(
                     DS.Color.textPrimary.opacity(0.22).color, lineWidth: 1)))
-    }
-
-    /// A −/+ pair with its number, for the pattern grid. Typed entry is the
-    /// Regions sheet's job; here the values are 1..12 and a stepper is the faster
-    /// control at that range.
-    private func surfaceClusterStepper(_ label: String,
-                                       value: Binding<Int>) -> some View {
-        HStack(spacing: 2) {
-            Button { value.wrappedValue = max(1, value.wrappedValue - 1) } label: {
-                // ★ THE WHOLE 44 pt IS THE TARGET, NOT THE GLYPH. A bare `Image`
-                // in a button is hit-tested on its DRAWN pixels — an 11 pt minus
-                // sign is a ~10 pt target however large the frame around it, which
-                // is why these could not be pressed. `contentShape` makes the frame
-                // the target, and 44 is Apple's minimum.
-                Image(systemName: "minus").font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .frame(width: 44, height: 52)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            VStack(spacing: -2) {
-                Text("\(value.wrappedValue)")
-                    .dsStyle(DS.TypeScale.footnote)
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .monospacedDigit()
-                Text(label)
-                    .dsStyle(DS.TypeScale.caption)
-                    .foregroundStyle(DS.Color.textQuaternary.color)
-            }
-            Button { value.wrappedValue = min(12, value.wrappedValue + 1) } label: {
-                Image(systemName: "plus").font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .frame(width: 44, height: 52)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        }
-        .background(Capsule().fill(DS.Color.chipSolid.color)
-            .overlay(Capsule().strokeBorder(
-                DS.Color.textPrimary.opacity(0.22).color, lineWidth: 1)))
     }
 
     /// The held cut's angle, snapped, wrapped into 0..<360.
