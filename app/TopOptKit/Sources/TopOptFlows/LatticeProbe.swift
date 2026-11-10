@@ -24,4 +24,9 @@ extension View {
             accessibilityIdentifier(id)
         }
     }
+
+    /// `latticeID` when an id is given, and the view untouched when not (a caption line measured only where it asks to be).
+    @ViewBuilder func latticeID(ifGiven id: String?) -> some View {
+        if let id { latticeID(id) } else { self }
+    }
 }

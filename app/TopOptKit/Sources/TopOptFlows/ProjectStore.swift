@@ -82,6 +82,11 @@ public struct ProjectSnapshot: Codable, Equatable, Sendable {
     /// written before this existed must decode, and nil is the empty model — no
     /// regions, so the project emits exactly the job it always did (bar R1).
     public var faceRegions: FaceRegionModel?
+    /// ★ His iPad note 11-10 (img08): the Lattice page's [Auto │ Manual] keeps his pick on every visit until Reset all.
+    /// A view choice (Manual only shows more rows; what they set holds in Auto too): true when he picked Manual, nil for
+    /// Auto, so a project that never picked it writes the bytes it always did. Never a setting: `LibrarySettings.same`
+    /// leaves it out, so it never opens a draft of a version that ran.
+    public var latticePageManual: Bool?
 
     public init(schemaVersion: Int = ProjectSnapshot.currentSchema, id: UUID, name: String,
                 material: String, process: ProcessKind, modelFileName: String,
@@ -90,7 +95,8 @@ public struct ProjectSnapshot: Codable, Equatable, Sendable {
                 minimizePlastic: Bool? = nil, quality: RunQuality? = nil,
                 optimized: Bool? = nil, printParams: PrintParams? = nil,
                 designBox: DesignBoxModel? = nil, lattice: LatticeSettings? = nil,
-                projectCADFaces: Bool? = nil, faceRegions: FaceRegionModel? = nil) {
+                projectCADFaces: Bool? = nil, faceRegions: FaceRegionModel? = nil,
+                latticePageManual: Bool? = nil) {
         self.schemaVersion = schemaVersion
         self.id = id
         self.name = name
@@ -109,6 +115,7 @@ public struct ProjectSnapshot: Codable, Equatable, Sendable {
         self.lattice = lattice
         self.projectCADFaces = projectCADFaces
         self.faceRegions = faceRegions
+        self.latticePageManual = latticePageManual
     }
 }
 

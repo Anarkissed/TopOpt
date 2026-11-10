@@ -28,8 +28,9 @@ final class LatticeWizardOneLineCaptionTests: XCTestCase {
             XCTAssertFalse(s.contains("Text(\"" + gone) || s.contains("? \"" + gone) || s.contains(": \"" + gone),
                            "★ still a paragraph on the page: \(gone)")
         }
+        // ★ re-pinned 11-10 (his iPad note img04/05): the band's line is shorter, under Band (IPadNotes1110Tests)
         for brief in ["An FEA decides the Sim settings.", "The lattice varies across the part.",
-                      "How far in the cells grade down to the outline.", "cell sizes available.",
+                      "How far in the cells grade down.", "cell sizes available.",
                       "The solve picks the cell everywhere.", "Each region graded from its own stress."] {
             XCTAssertTrue(s.contains(brief), "★ the one-line brief is missing: \(brief)")
         }
