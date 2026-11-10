@@ -37,6 +37,10 @@ struct NumberField: View {
     var unitShown = true
     /// The pad's open state when the page drives it (Custom… opens it at once). nil = its own.
     var open: Binding<Bool>? = nil
+    /// ★ B9 Setup: it wears the accent while its twin's pad is open (Flexible's handle box on the part ⇄ the list's number).
+    var alsoLit = false
+    /// ★ B9 Setup: the word it shows in place of the number until a drag or a typed value ("mixed": the faces differ).
+    var word: String? = nil
     /// Commit, in the unit it shows: once per pad close, once per drag release, once per − / +.
     let onCommit: (Double) -> Void
 
@@ -77,6 +81,9 @@ struct NumberField: View {
                        config: .init(title: title, unit: spec.unit, allowsDecimal: spec.decimals > 0,
                                      allowsNegative: allowsNegative, range: range, clampsOnClose: false),
                        seed: spec.value) { pending = .some($0) }
+            // ★ B9 Setup: a page that closes it from outside (another box took the page's one keypad slot) still commits
+            // what was typed — once (the pad's own close already cleared `pending`)
+            .onChange(of: isOpen) { o in if !o { commitTyped() } }
             .background(NumberPad.published("numberField-\(key)"))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(title)
@@ -94,12 +101,12 @@ struct NumberField: View {
     private var range: NumberRange { padRange ?? NumberRange(spec.range) }
 
     private var shown: String {
-        scrub.map { FlexNumberSpec.format($0.shown, decimals: spec.decimals) } ?? spec.text
+        scrub.map { FlexNumberSpec.format($0.shown, decimals: spec.decimals) } ?? word ?? spec.text
     }
 
     /// The box: the number, its unit, the ↕ hint; the accent edge while its pad is open or a drag is live.
     private var face: some View {
-        let lit = isOpen || scrub != nil
+        let lit = isOpen || scrub != nil || alsoLit
         return HStack(spacing: 4) {
             Text(shown)
                 .font(.system(size: 14, weight: .semibold)).monospacedDigit()

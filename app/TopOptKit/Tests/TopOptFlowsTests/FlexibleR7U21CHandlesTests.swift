@@ -41,10 +41,11 @@ final class FlexibleR7U21CHandlesTests: XCTestCase {
 
     func testTheCaptionsCarryTheHandleIcons() throws {
         let list = try String(contentsOf: FlexibleRound7SelectionsHookTests.sources.appendingPathComponent("FlexibleSelectionsList.swift"), encoding: .utf8)
-        XCTAssertEqual(list.components(separatedBy: "FlexibleHandleCaption(kind: .depth).frame(width: FlexibleSelectionsList.boxWidth").count - 1, 1,
-                       "★ the depth caption = icon + \"Depth mm\", over its 80 pt box")
-        XCTAssertEqual(list.components(separatedBy: "FlexibleHandleCaption(kind: .expand).frame(width: FlexibleSelectionsList.boxWidth").count - 1, 1,
-                       "★ the expand caption = + \"Expand mm\", over its 80 pt box")
+        // ★ B9 Setup (re-pinned: the B6 face rows replaced the caption row over two boxes): the picked face's Expand line is
+        // labelled by its handle's caption (+ "Expand mm"); its depth is the NumberField that wears the handle's ↕
+        XCTAssertEqual(list.components(separatedBy: "FlexibleHandleCaption(kind: .expand).font(").count - 1, 1,
+                       "★ the Expand line's label = + \"Expand mm\", beside its number")
+        XCTAssertTrue(list.contains("spec: Self.depthSpec,\n                           size: .withHandle)"), "★ the face's depth wears the handle's ↕")
         let handles = try String(contentsOf: FlexibleRound7SelectionsHookTests.sources.appendingPathComponent("FlexibleLatticeHandles.swift"), encoding: .utf8)
         XCTAssertTrue(handles.contains("kind == .depth ? FlexibleLatticeHandles.depthSymbol : FlexibleLatticeHandles.expandSymbol"),
                       "★ the captions read the discs' source")

@@ -213,7 +213,7 @@ final class FlexibleRound7SelectionsHostedTests: XCTestCase {
         s.tapFace(p, face: 3, point: nil, mesh: try XCTUnwrap(p.viewerMesh))
         pump(1.5)
         let handleBox = try XCTUnwrap(h.frames.all["numberBox-handle-depth-\(r3.key)"], "★ the depth handle's number box")
-        let listBox = try XCTUnwrap(h.frames.all["numberBox-list-depth-\(r3.key)"], "★ the list's box for Face 3")
+        let listBox = try XCTUnwrap(h.frames.all["numberField-list-depth-\(r3.key)"], "★ the list's number for Face 3")   // ★ B9 Setup re-pin: the B6 row's NumberField
         XCTAssertGreaterThan(handleBox.height, 0); XCTAssertGreaterThan(listBox.height, 0)
         click(h, CGPoint(x: handleBox.midX, y: handleBox.midY))
         XCTAssertEqual(s.faceUI.padTarget, "handle-depth-\(r3.key)", "★ a click on the handle's number opens the keypad")

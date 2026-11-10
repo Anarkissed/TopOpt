@@ -16,6 +16,12 @@
 //     more faces (its boxes show the common value or "mixed"), and one line per face — its state glyph, "Face 3", its (i)
 //     (his change b), its depth box and its expand box (Off: "—"). A box edits AND picks its face.
 //   * empty: "Tap a face on the model to start."
+// ★ B9 SETUP (ledger 39, R2-Q2, N2; the reviewer's ruling 11-10 21:38Z, (C): "Flexible keeps its one list"): the picked
+//   group's faces are Lattice Setup's face rows — one 48 pt row per face (its name, its depth or "No lattice · 25 mm" / "Off",
+//   its eye, its (i)); a tap opens it a little: the depth becomes the NumberField (tap to type, drag; its prism's handle on
+//   the part drags the same number), its own Expand line ("+ Expand mm", his Img6 icon) and "This face [Lattice │ No lattice
+//   │ Off]". The eye shows or hides that face's prism and so its handle (`FlexibleMainStage.prismEye`, never saved). The
+//   group's "All N" line keeps its two numbers. The list stays Topology's (his 10-14 and 10-18 rules); no Protect skin row.
 // The squeeze groups of the Squish page never appear here (the two lists stay separate — his 2026-10-10 reversal; squish
 // names are squish only — his answer of 2026-10-14).
 
@@ -228,19 +234,9 @@ public struct FlexibleSelectionsList: View {
         let refs = project.latticeSelectableRefs(g)
         let scope = FlexibleFacePick.validated(main.facePick, project: project).scope
         let locked = FlexibleFaceCommits.isLocked(g.id, project)
-        HStack(spacing: Self.rowSpacing) {
-            Spacer(minLength: 0)
-            // ★ U21 HANDLE-ICONS (his Img6): the handle's own icon beside each caption, directly over its box
-            FlexibleHandleCaption(kind: .depth).frame(width: FlexibleSelectionsList.boxWidth, alignment: .center)
-            FlexibleHandleCaption(kind: .expand).frame(width: FlexibleSelectionsList.boxWidth, alignment: .center)
-            Color.clear.frame(width: 44, height: 1)
-        }
-        .font(.system(size: 11, weight: .semibold)).foregroundStyle(DS.Color.textTertiary.color)
-        .padding(.leading, Self.rowLeading).padding(.trailing, Self.rowTrailing)
-        .frame(height: Self.captionsHeight)
-        if refs.count >= 2 { allLine(g, refs: refs, selected: scope == .group(g.id), locked: locked) }
+        if refs.count >= 2 { allRow(g, refs: refs, selected: scope == .group(g.id), locked: locked) }
         ForEach(refs, id: \.key) { r in
-            faceLine(g, r, selected: scope == .face(group: g.id, ref: r), locked: locked)
+            faceRow(g, r, picked: scope == .face(group: g.id, ref: r), locked: locked)
             // ★ U21 batch I (I2): its links, live or stale (never dormant), each with a trash that asks in place
             ForEach(main.listedLinks(project, key: r.key), id: \.link.id) { e in
                 FlexibleLinkRow(main: main, project: project, ui: ui, link: e.link, state: e.state, group: g.id, ref: r,
@@ -256,88 +252,102 @@ public struct FlexibleSelectionsList: View {
     static let rowLeading: CGFloat = 24
     static let rowTrailing: CGFloat = 12
 
-    private func allLine(_ g: SelectionGroup, refs: [LatticeSelectableRef], selected: Bool, locked: Bool) -> some View {
+    /// ★ B9 Setup: the group's "All N" row — every face's depth and expand at once (their common value, or "mixed"). A tap
+    /// picks the whole group; its numbers are NumberFields, the depth's twin the group handle's box on the part.
+    private func allRow(_ g: SelectionGroup, refs: [LatticeSelectableRef], selected: Bool, locked: Bool) -> some View {
         let live = refs.filter { project.latticeSelectableRole($0, in: g.id) != nil }
         let depth = FlexibleSelectionsSummary.common(live.map { project.latticeSlabDepthMM($0, in: g.id) })
         let expand = FlexibleSelectionsSummary.common(live.map { project.latticeExpandMM($0) })
-        return HStack(spacing: Self.rowSpacing) {
-            Image(systemName: "square.stack.3d.up").font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
-                .frame(width: 18)
-            Text(FlexibleSelectionsCopy.allFaces(refs.count)).font(.system(size: 13.5, weight: .medium))
-                .foregroundStyle(DS.Color.textPrimary.color).lineLimit(1).fixedSize()
-            Spacer(minLength: 0)
-            if live.isEmpty || locked {
-                dash; dash
-            } else {
-                box(key: "list-gdepth-\(g.id.uuidString)", twin: "handle-gdepth-\(g.id.uuidString)", title: "Depth",
-                    value: depth ?? project.latticeSlabDepthMM(g.id), mixed: depth == nil, spec: FlexibleSelectionsList.depthSpec) { v in
+        let dKey = "list-gdepth-\(g.id.uuidString)", eKey = "list-gexpand-\(g.id.uuidString)"
+        return DSRow(.face, key: "flexSetupAll-\(g.id.uuidString)", name: FlexibleSelectionsCopy.allFaces(refs.count),
+                     value: live.isEmpty ? "\u{2014}" : nil, selected: selected, locked: locked && !live.isEmpty,
+                     tap: { main.pickGroup(g.id, project: project) }) {
+            if !live.isEmpty, !locked {
+                number(dKey, twin: "handle-gdepth-\(g.id.uuidString)", title: "Depth", value: depth ?? project.latticeSlabDepthMM(g.id),
+                       mixed: depth == nil, spec: Self.depthSpec, size: .withHandle) { v in
                     main.pickGroup(g.id, project: project)
                     var s = main.facePick
                     FlexibleFaceCommits.setDepth(v, ref: nil, group: g.id, project: project, session: &s)
                     main.facePick = s
                     cardsChanged()
                 }
-                box(key: "list-gexpand-\(g.id.uuidString)", twin: nil, title: "Expand", value: expand ?? 0, mixed: expand == nil,
-                    spec: FlexibleSelectionsList.expandSpec, negative: true) { v in
+                number(eKey, twin: nil, title: LatticeSetupCopy.expand, value: expand ?? 0, mixed: expand == nil,
+                       spec: Self.expandSpec, negative: true) { v in
                     main.pickGroup(g.id, project: project)
                     FlexibleFaceCommits.setExpand(v, ref: nil, group: g.id, project: project)
                     cardsChanged()
                 }
             }
-            Color.clear.frame(width: 44, height: 1)
         }
-        .padding(.leading, Self.rowLeading).padding(.trailing, Self.rowTrailing)
-        .frame(height: Self.lineHeight)
-        .background(selected ? DS.Color.fillSelected.color : Color.clear)
-        .contentShape(Rectangle())
-        .onTapGesture { main.pickGroup(g.id, project: project) }
+        .modifier(FlexibleKeepOutBridge())
         .background(publish("selAll-\(g.id.uuidString)"))
-        .accessibilityIdentifier("flexible-sel-all-\(g.id.uuidString)")
     }
 
-    private func faceLine(_ g: SelectionGroup, _ r: LatticeSelectableRef, selected: Bool, locked: Bool) -> some View {
+    /// ★ B9 Setup (R2-Q2, N2; Lattice Setup's face row): one face — its name, its depth or what it is ("No lattice · 25 mm",
+    /// "Off"), its eye (its prism and handle on the part), its (i). A tap opens it a little: the depth becomes the NumberField
+    /// (its prism's handle drags the same number), then its Expand line and "This face [Lattice │ No lattice │ Off]"; a tap on
+    /// the open row closes it to the group. Locked on Topology: it reads, nothing edits.
+    private func faceRow(_ g: SelectionGroup, _ r: LatticeSelectableRef, picked: Bool, locked: Bool) -> some View {
         let role = project.latticeSelectableRole(r, in: g.id)
-        return HStack(spacing: Self.rowSpacing) {
-            FlexibleStateGlyph(role: role).frame(width: 18)
-            Text(project.latticeSelectableName(r)).font(.system(size: 13.5, weight: .medium))
-                .foregroundStyle(DS.Color.textPrimary.color).lineLimit(1).fixedSize()
-            Spacer(minLength: 0)
-            if role == nil || locked {
-                dash; dash
-            } else {
-                box(key: "list-depth-\(r.key)", twin: "handle-depth-\(r.key)", title: "Depth",
-                    value: project.latticeSlabDepthMM(r, in: g.id), mixed: false, spec: FlexibleSelectionsList.depthSpec) { v in
-                    main.pickFace(r, group: g.id, project: project)
-                    var s = main.facePick
-                    FlexibleFaceCommits.setDepth(v, ref: r, group: g.id, project: project, session: &s)
-                    main.facePick = s
-                    cardsChanged()
+        let depth = project.latticeSlabDepthMM(r, in: g.id)
+        let mm = SelectionsSummary.format((depth * 10).rounded() / 10, decimals: 1) + " mm"
+        let value = LatticeSetupCopy.faceValue(role: role, groupHasRole: project.lattice.groupRoles[g.id] != nil, skin: false, mm: mm)
+        let shown = main.prismShown(r.key)
+        let opens = picked && !locked
+        let dKey = "list-depth-\(r.key)", eKey = "list-expand-\(r.key)"
+        return VStack(alignment: .leading, spacing: 0) {
+            DSRow(.face, key: "flexSetupFace-\(r.key)", name: project.latticeSelectableName(r),
+                  value: opens && role != nil ? nil : value, selected: picked, locked: locked,
+                  line: opens && role != nil && shown ? DSRowLine(LatticeSetupCopy.dragItsHandle) : nil,
+                  tap: { picked ? main.pickGroup(g.id, project: project) : main.pickFace(r, group: g.id, project: project) }) {
+                if opens, role != nil {
+                    number(dKey, twin: "handle-depth-\(r.key)", title: "Depth", value: depth, mixed: false, spec: Self.depthSpec,
+                           size: .withHandle) { v in
+                        main.pickFace(r, group: g.id, project: project)
+                        var s = main.facePick
+                        FlexibleFaceCommits.setDepth(v, ref: r, group: g.id, project: project, session: &s)
+                        main.facePick = s
+                        cardsChanged()
+                    }
                 }
-                box(key: "list-expand-\(r.key)", twin: "handle-expand-\(r.key)", title: "Expand",
-                    value: project.latticeExpandMM(r), mixed: false, spec: FlexibleSelectionsList.expandSpec, negative: true) { v in
-                    main.pickFace(r, group: g.id, project: project)
-                    FlexibleFaceCommits.setExpand(v, ref: r, group: g.id, project: project)
-                    cardsChanged()
+                // ★ N2: the eye shows or hides THIS face's prism (and so its handle); an Off face has no prism, so no eye
+                if role != nil {
+                    DSRowEye(hidden: !shown, key: "flexSetupFaceEye-\(r.key)") { main.togglePrismEye(r.key) }
+                    FlexibleInfoButton(main: main, key: "l-" + r.key, group: g.id, ref: r)
                 }
             }
-            if role != nil {
-                FlexibleInfoButton(main: main, key: "l-" + r.key, group: g.id, ref: r)
-            } else {
-                Color.clear.frame(width: 44, height: 1)
+            if opens, role != nil {
+                // the Expand number its + handle on the part drags (his Img6: the handle's own icon beside it)
+                HStack(spacing: DS.Space.s) {
+                    FlexibleHandleCaption(kind: .expand).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
+                    Spacer(minLength: DS.Space.s)
+                    number(eKey, twin: "handle-expand-\(r.key)", title: LatticeSetupCopy.expand, value: project.latticeExpandMM(r),
+                           mixed: false, spec: Self.expandSpec, negative: true) { v in
+                        main.pickFace(r, group: g.id, project: project)
+                        FlexibleFaceCommits.setExpand(v, ref: r, group: g.id, project: project)
+                        cardsChanged()
+                    }
+                }
+                .padding(.leading, DSParts.faceIndent).padding(.trailing, 12).frame(minHeight: 44)
+                .background(publish("flexSetupFaceExpand-\(r.key)"))
+            }
+            if opens {
+                HStack(spacing: DS.Space.s) {
+                    Text(LatticeSetupCopy.thisFace).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
+                    Spacer(minLength: DS.Space.s)
+                    SegmentedGlass([.init(LatticeSelectableRole.include, LatticeSetupCopy.lattice),
+                                    .init(LatticeSelectableRole.exclude, LatticeSetupCopy.noLattice),
+                                    .init(LatticeSelectableRole.off, LatticeSetupCopy.off)],
+                                   selection: Binding(get: { role.map(LatticeSelectableRole.init) ?? .off },
+                                                      set: { FlexibleFaceCommits.setState($0, ref: r, group: g.id, project: project); cardsChanged() }),
+                                   small: true)
+                        .background(publish("flexSetupFaceRole-\(r.key)"))
+                }
+                .padding(.leading, DSParts.faceIndent).padding(.trailing, 12).frame(minHeight: 44)
             }
         }
-        .padding(.leading, Self.rowLeading).padding(.trailing, Self.rowTrailing)
-        .frame(height: Self.lineHeight)
-        .background(selected ? DS.Color.fillSelected.color : Color.clear)
-        .contentShape(Rectangle())
-        .onTapGesture { main.pickFace(r, group: g.id, project: project) }
+        .modifier(FlexibleKeepOutBridge())
         .background(publish("selFace-\(r.key)"))
-        .accessibilityIdentifier("flexible-sel-face-\(r.key)")
-    }
-
-    private var dash: some View {
-        Text("—").font(.system(size: 13)).foregroundStyle(DS.Color.textQuaternary.color)
-            .frame(width: Self.boxWidth)
     }
 
     static func spec(_ base: FlexNumberSpec, _ value: Double) -> FlexNumberSpec {
@@ -349,12 +359,18 @@ public struct FlexibleSelectionsList: View {
     static let depthSpec = FlexNumberSpec(value: 0, unit: "mm", step: 0.5, range: LatticeSlabDepth.minMM...LatticeSlabDepth.maxMM, decimals: 1)
     static let expandSpec = FlexNumberSpec(value: 0, unit: "mm", step: 0.5, range: -50...50, decimals: 1)
 
-    @ViewBuilder private func box(key: String, twin: String?, title: String, value: Double, mixed: Bool, spec: FlexNumberSpec,
-                                  negative: Bool = false, commit: @escaping (Double) -> Void) -> some View {
-        FlexNumberBox(key: key, title: title, spec: Self.spec(spec, value), padTarget: $ui.padTarget, allowsNegative: negative, twin: twin,
-                      shownOverride: mixed ? FlexibleSelectionsCopy.mixed : FlexibleLatticeHandles.boxNumber(value, signed: negative),
-                      compact: true, unitShown: !mixed, hitHeight: FlexNumberBox.target, onCommit: commit)
-            .frame(width: Self.boxWidth)
+    /// ★ B9 Setup: the list's numbers are the app's one NumberField (B2, U11). Its pad is the page's one keypad slot
+    /// (`padTarget`, so one pad at a time), and it wears the accent while its twin's pad is open — the handle's box on the
+    /// part names this key as its twin, as before. "mixed" when the faces differ (the pad then starts from the group's).
+    @ViewBuilder private func number(_ key: String, twin: String?, title: String, value: Double, mixed: Bool, spec: FlexNumberSpec,
+                                     size: NumberField.Size = .setting, negative: Bool = false,
+                                     commit: @escaping (Double) -> Void) -> some View {
+        let open = Binding(get: { ui.padTarget == key }, set: { v in
+            if v { ui.padTarget = key } else if ui.padTarget == key { ui.padTarget = nil }
+        })
+        NumberField(key: key, title: title, spec: Self.spec(spec, value), size: size, allowsNegative: negative, unitShown: !mixed,
+                    open: open, alsoLit: twin.map { ui.padTarget == $0 } ?? false, word: mixed ? FlexibleSelectionsCopy.mixed : nil,
+                    onCommit: commit)
     }
 
     private func publish(_ key: String) -> some View {

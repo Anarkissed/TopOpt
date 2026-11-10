@@ -234,7 +234,9 @@ final class FlexibleR7D2ReviewTests: XCTestCase {
         XCTAssertEqual(FlexNumberBox.height, 32, "the box itself is still 32 pt (the look is unchanged)")
         let list = try String(contentsOf: FlexibleRound7SelectionsHookTests.sources.appendingPathComponent("FlexibleSelectionsList.swift"), encoding: .utf8)
         let layer = try String(contentsOf: FlexibleRound7SelectionsHookTests.sources.appendingPathComponent("FlexibleOnModelLayer.swift"), encoding: .utf8)
-        XCTAssertEqual(list.components(separatedBy: "hitHeight: FlexNumberBox.target").count - 1, 1, "★ the list's boxes: a 44 pt target")
+        // ★ B9 Setup re-pin (the B6 face rows): the list's numbers are NumberFields, each a 44 pt target
+        XCTAssertTrue(list.contains("NumberField(key: key"), "★ the list's numbers are the NumberField")
+        XCTAssertEqual(NumberField.target, 44, "★ …a 44 pt target")
         XCTAssertEqual(layer.components(separatedBy: "hitHeight: FlexNumberBox.target").count - 1, 2, "★ the handles' two boxes: a 44 pt target")
         XCTAssertEqual(FlexNumberBox.target, 44)
         // scope: the Squish page's boxes keep their 32 pt (nothing else changes; the RED run is the hosted click,
