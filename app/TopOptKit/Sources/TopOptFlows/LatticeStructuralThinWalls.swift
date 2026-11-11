@@ -32,6 +32,20 @@ public enum LatticeStructuralThinWalls {
         }
     }
 
+    /// ★ his 11-09 (the glow): the voxels counted — set to lattice and in a wall thinner than N* × the smallest cell — as
+    /// a mask on the occupancy grid. Empty off Structural or with no measured walls. (To be core's own solid-fallback
+    /// reasons 1–3 once LatticeTypes' SOLID slice lands — reviewer 11-09 20:10Z.)
+    public static func mask(structural: Bool, occupancy: [Float], memberThicknessMM: [Double],
+                            cellsPerMember nStar: Double, smallestCellMM: Double) -> [Bool] {
+        guard structural, nStar > 0, smallestCellMM > 0, !memberThicknessMM.isEmpty,
+              memberThicknessMM.count == occupancy.count else { return [] }
+        let minWall = nStar * smallestCellMM
+        return (0..<occupancy.count).map { i in
+            let t = memberThicknessMM[i]
+            return occupancy[i] > 0.5 && t.isFinite && t > 0 && t < minWall
+        }
+    }
+
     /// The finding for one bake: `occupancy` (> 0.5 = set to lattice and inside the part) and `memberThicknessMM` share the
     /// occupancy grid's layout. nil off Structural, with no measured walls, or below `quietBelow`.
     public static func finding(structural: Bool, occupancy: [Float], memberThicknessMM: [Double],

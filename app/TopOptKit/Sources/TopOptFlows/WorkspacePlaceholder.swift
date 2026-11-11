@@ -169,6 +169,9 @@ public struct WorkspacePlaceholder: View {
     /// ★ his iPad notes 11-09: the last bake's Structural thin-wall finding, and its (i).
     @State private var latticeThinWalls: LatticeStructuralThinWalls.Finding?
     @State private var latticeThinWallsInfoShown = false
+    /// ★ his 11-09: the glow + pop-up up, and the glow's per-vertex tints from the last bake ([] = no walls).
+    @State private var latticeThinWallsPromptUp = false
+    @State private var latticeThinWallTints: [Float] = []
     /// ★ The lattice settings the strut preview was last baked FROM, with the
     /// fields a bake writes stripped (`LatticeSettings.previewBakeInputs`).
     @State private var latticeInputsLastBaked: LatticeSettings? = nil
@@ -267,8 +270,10 @@ public struct WorkspacePlaceholder: View {
     /// ★ B8 (row 34): the group whose row is lit in Edit faces' view-only Selections — its faces light on the part, for the
     /// tools; nil = none. Joins nothing and changes nothing.
     @State private var cutLitGroup: UUID? = nil
-    /// ★ B8: Edit faces' scenario folders that are open (the active scenario's opens on entry).
-    @State private var cutOpenFolders: Set<UUID> = []
+    /// ★ B8: Edit faces' scenario folders that are open; nil = untouched, the active scenario's open (`cutOpenFolderSet`). Derived,
+    /// never written on appear: a write there grew the panel's rows in the frame it first measured them, its body kept the
+    /// closed folders' height, and the hidden rows took the foot's taps (11-09, CutFootHostedTests).
+    @State private var cutOpenFolders: Set<UUID>? = nil
     /// ★ B8: from Lattice, Edit faces' Topology panel (folded first, as on Lattice Setup).
     @State private var cutTopologyOpen = false
     /// The region a viewer tap corrects, or nil. Hoisted out of the sheet so the
@@ -338,6 +343,11 @@ public struct WorkspacePlaceholder: View {
     /// The cut the user has TAPPED and is now aiming — the one the checkmark
     /// commits. Nil while merely hovering.
     @State private var heldCut: SurfaceCut?
+    /// ★ B8 (row 36, R1, P6): WHERE THE CUT LIES, by the face it is on (CutAim) — a flat face's line, a hole's Along │
+    /// Across, anything else's Which plane?. While it asks, no line (`heldCut` nil); once answered `heldCut` is its plane.
+    @State private var cutAim: CutAim?
+    /// The aim when the cut handle's drag began.
+    @State private var cutAimDragStart: CutAim?
     /// Where the current rotate drag started, so successive drags accumulate.
     @State private var cutRotationBase: Double = 0
     /// §6 — how far the cut has been nudged off the piece's centre, in mm, along
@@ -370,10 +380,13 @@ public struct WorkspacePlaceholder: View {
     /// The pattern tool's grid, before it is committed.
     @State private var patternColumns = 3
     @State private var patternRows = 1
+    /// ★ B8 (row 37): on a hole, the lines round it and the rings down it (PatternHole; mockup S.pa, S.pd).
+    @State private var patternAround = PatternHole.defaultAround
+    @State private var patternDown = PatternHole.defaultDown
     /// §7 — the user's own rotation of the grid, ON TOP of the automatic alignment
-    /// to the face's longest edge. Drag the knob; releases on 15°.
+    /// to the face's longest edge. ★ B8 (row 37, the reviewer's 11-09 ruling (b)): the bar's Rotate — ↺ / ↻ 15°, or
+    /// typed, 0..<360 — and 0 (square to the longest edge) on each newly tapped face.
     @State private var patternRotation: Double = 0
-    @State private var patternRotationBase: Double = 0
     /// The face the pattern tool is aimed at.
     @State private var surfacePatternFace: FaceID?
     /// The PIECE the pattern divides — the region under the tap, captured at the
@@ -613,6 +626,8 @@ public struct WorkspacePlaceholder: View {
     /// group (the escape when tap-selection over-selects); OFF → tap-select is unchanged. The
     /// painted region becomes a pseudo-face routed through the SAME face-id contract as a tap.
     @State private var paintActive = false
+    /// ★ B8: the rail's Paint is the tool (on a STEP too, where it brushes nothing and says why — `cutPaintWhy`).
+    @State private var cutPaintPicked = false
     /// Paint mode: the erase MODIFIER — when on, the brush reverts triangles to their native face.
     @State private var paintErasing = false
     /// Paint mode: brush radius in view points; a small stepper in the paint drawer changes it.
@@ -871,7 +886,7 @@ public struct WorkspacePlaceholder: View {
                           // It cannot coexist with the Surface stage's tints —
                           // they are different stages — so this is a choice, not
                           // a blend, and the Surface stage keeps priority.
-                          vertexTints: visible.surfaceEditing ? surfaceVertexTints : flexibleMain.tints(project, on: stage, roles: roleTints, stress: latticeStressField),   // Flexible H4 (+C): X-ray ghost + dent heat + Stress + group colours, ONE array
+                          vertexTints: visible.surfaceEditing ? surfaceVertexTints : latticeThinWallGlowUp ? latticeThinWallTints : flexibleMain.tints(project, on: stage, roles: roleTints, stress: latticeStressField),   // Flexible H4 (+C): X-ray ghost + dent heat + Stress + group colours, ONE array
                           extraLines: surfaceCutLineBuffer,
                           previewLines: surfacePreviewLineBuffer,
                           // ★ A UNION'S INTERNAL EDGES ARE NOT EDGES ANY MORE.
@@ -1024,6 +1039,7 @@ public struct WorkspacePlaceholder: View {
                               surfaceRefusal = nil
                               heldCut = nil
                               hoveredCut = nil
+                              cutAim = nil   // ★ B8
                               if surfaceTool != .union { surfacePatternFace = nil }
                           },
                           onProjection: { projection = $0 },
@@ -1450,8 +1466,10 @@ public struct WorkspacePlaceholder: View {
                 // required for the Surface stage").
                 if viewerMesh != nil, visible.surfaceEditing {
                     surfaceToolsPanel
+                    if paintActive { cutPaintBarLayer }   // ★ B8 (ruling 11-08 21:32Z): Paint's controls, docked at the top
                     // ★ the confirm floats NEXT TO the action, not in the tray.
                     surfaceActionCluster.ignoresSafeArea()
+                    cutHandleOverlay.ignoresSafeArea()   // ★ B8 (R1): the cut's ↕ handle on its line
                 }
                 // ★ THE WIREFRAME AND X-RAY, ON THE TOPOLOGY PAGE TOO (maintainer,
                 // 2026-08-16: "We should keep wireframe and xray view throughout
@@ -1527,6 +1545,7 @@ public struct WorkspacePlaceholder: View {
             // over the SAME live stage — the workspace chrome above is hidden while
             // it is open, so exactly one set of controls exists at a time.
             if showLatticePage { latticePageOverlay }
+            if latticeThinWallGlowUp { latticeThinWallsPromptCard }   // ★ his 11-09: the glow's pop-up
             // ★★★ THE MODE IS ASKED BEFORE THE STAGE IS USABLE (2026-08-21). It covers
             // everything and blurs it, it has no cancel, and answering it is the only
             // way out — because the two modes make DIFFERENT CLAIMS about the same
@@ -4783,6 +4802,12 @@ public struct WorkspacePlaceholder: View {
         // honest: there IS no current lattice to show.
         showStrutPreview && !strutBakeInFlight
             && latticeViewsUp
+            && !latticeThinWallGlowUp   // ★ his 11-09: everything else dimmed while the walls glow
+    }
+
+    /// ★ his 11-09: the glow is up — the pop-up is open on Lattice Setup and the last bake found walls.
+    private var latticeThinWallGlowUp: Bool {
+        latticeThinWallsPromptUp && latticeSetupUp && !latticeThinWallTints.isEmpty
     }
 
     /// ★ WHERE THE LATTICE'S VIEWS MAY SHOW AT ALL (his 11-05: "When in the face cutting screen, sometimes the legend stays
@@ -5370,11 +5395,26 @@ public struct WorkspacePlaceholder: View {
                                         bandGradeMM: lat.gradingMode.fitsShape ? lat.shapeFitBandMM : 0,
                                         beadMM: beadForBake)
             // ★ his iPad notes 11-09: the walls Structural's cell floor leaves solid, said — measured here, off main
-            let thinWalls = LatticeStructuralThinWalls.finding(
+            let smallestCellMM = lat.cellSizeMode == .fixed ? lat.cellMM
+                : Swift.min(lat.cellMM, lat.cellMinMM > 0 ? lat.cellMinMM : lat.cellMM)
+            var thinWalls = LatticeStructuralThinWalls.finding(
                 structural: scene.stageMode == .structural, occupancy: scene.occupancy.values,
                 memberThicknessMM: scene.memberThicknessMM, cellsPerMember: scene.minCellsPerMember,
-                smallestCellMM: lat.cellSizeMode == .fixed ? lat.cellMM
-                    : Swift.min(lat.cellMM, lat.cellMinMM > 0 ? lat.cellMinMM : lat.cellMM))
+                smallestCellMM: smallestCellMM)
+            // ★ release (4), the reviewer's 11-09 20:10Z item 2: the glow is CORE's mask — the voxels
+            // `lattice_solid_fallback_reasons` leaves solid as too thin (codes 1–3), inside what he
+            // latticed. nil = core gave no answer (no glow, the line stays); core answering with no
+            // such wall clears the line too, so the line and the glow never disagree.
+            let coreThin: [Bool]? = thinWalls == nil ? nil : LatticeThinWallGlow.coreThin(
+                solid: scene.solidOccupancy, latticed: scene.occupancy, topology: lat.topologyID,
+                cellMM: smallestCellMM, lineWidthMM: beadForBake, organic: algorithmForBake == "organic")
+            if let c = coreThin, !c.contains(true) { thinWalls = nil }
+            // ★ his 11-09: the glow — the same walls, as a soft per-vertex glow on the part (built only when there are some)
+            let thinGlow: [Float] = thinWalls == nil ? [] : coreThin.map { mask in
+                let field = LatticeThinWallGlow.field(thin: mask, inside: scene.solidOccupancy.values.map { $0 > 0.5 },
+                                                      grid: scene.occupancy)
+                return LatticeThinWallGlow.vertexTints(mesh: mesh, grid: scene.occupancy, field: field)
+            } ?? []
             DispatchQueue.main.async {
                 // ★ a newer bake has started: this picture is stale, drop it
                 guard bakeGeneration == strutBakeGeneration else {
@@ -5383,6 +5423,14 @@ public struct WorkspacePlaceholder: View {
                 }
                 strutScene = scene
                 latticeThinWalls = thinWalls
+                latticeThinWallTints = thinGlow
+                // ★ his 11-09: once per project, by itself — after Continue the note stays and a tap re-opens it
+                if isLastStage, LatticeThinWallPrompt.opensByItself(
+                    finding: thinWalls, structural: project.lattice.stageMode == .structural,
+                    setupUp: latticeSetupUp, seen: project.lattice.thinWallsNoticeSeen) {
+                    latticeThinWallsPromptUp = true
+                }
+                if thinWalls == nil { latticeThinWallsPromptUp = false }
                 strutSceneToken += 1
                 // ★ item 5 (2026-10-05): the drawer's cell is the bake's, at the wall the bake
                 // measured — re-derive the cards once the final picture has landed
@@ -5597,6 +5645,7 @@ public struct WorkspacePlaceholder: View {
         surfaceSelectedFace = nil
         heldCut = nil
         hoveredCut = nil
+        cutAim = nil   // ★ B8
         surfaceUnion.clear()
         surfacePatternFace = nil
         surfacePatternPiece = nil
@@ -5882,13 +5931,9 @@ public struct WorkspacePlaceholder: View {
                 }
             }
         case .paint:
-            VStack(alignment: .trailing, spacing: DS.Space.s) {
-                paintChip.flexibleRepairedStepPaintGate(path: project.importedFile?.path).background(chipWidthReader(id))   // Flexible (PR #362) H48 — paint off on a repaired STEP (ruling 2026-10-23 18:56)
-                if paintActive {
-                    paintDrawer
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
-            }
+            // ★ B8 (ruling 11-08 21:32Z item 1): Paint is Edit faces' rail tool (`cutPaintTap`), its controls in the docked
+            // bar; it is never a chip (`visibleSettingsChips` shows no .paint), and H48's gate moved with it (`cutPaintWhy`).
+            EmptyView()
         }
     }
 
@@ -5897,9 +5942,9 @@ public struct WorkspacePlaceholder: View {
     /// chip appears when ≥ 1 Face protection exists"); the rest are always present.
     private var visibleSettingsChips: [SettingsChipID] {
         SettingsChipID.allCases.filter { id in
-            // ★ B3: on Topology the chip column's settings are the Setup chip's rows. ★ B5: Paint lives in Edit faces —
-            // there it is the column's one chip (greyed on STEP, `EditFacesPaint`), and on no stage outside it.
-            if editFaces.isEditing { return id == .paint && viewerMesh != nil }
+            // ★ B3: on Topology the chip column's settings are the Setup chip's rows. ★ B8 (ruling 11-08 21:32Z): Paint left
+            // the column for Edit faces' rail (`cutPaintTap`), so in Edit faces the column is empty.
+            if editFaces.isEditing { return false }
             if stage == .topology { return false }
             // ★ B6 s1 (note 21): on the Lattice stage the chips are the Settings panel's rows; the band chips' Show / Hide stays
             // (the lattice-only view's own, not one of the chips his note moves)
@@ -6001,97 +6046,7 @@ public struct WorkspacePlaceholder: View {
         .help("The one preserve-depth every Face protection uses. Tap to change.")
     }
 
-    // MARK: paint mode (handoff 2026-07-25)
-
-    /// Paint-mode tint — a distinct violet so the brush toggle + drawer read as their own tool,
-    /// apart from anchor-green / clearance-red / protect-teal.
-    static let paintTint = Color(red: 0.64, green: 0.44, blue: 0.98)
-
-    /// The Paint-mode toggle chip. OFF → tap to enter paint mode (a one-finger drag then brushes
-    /// faces into the active group — the escape when tap-selection over-selects); ON → tap to leave.
-    /// Styled like the other settings chips; brightens when active.
-    private var paintChip: some View {
-        // ★ B5: Paint is an Edit faces tool for a mesh (STL) part; on STEP it is greyed with one line why.
-        let row = EditFacesPaint.row(modelPath: project.importedFile?.path, editingFaces: editFaces.isEditing)
-        let greyedLine: String? = { if case .greyed(let why) = row { return why } else { return nil } }()
-        return VStack(alignment: .trailing, spacing: 2) {
-            paintChipButton.disabled(greyedLine != nil).opacity(greyedLine != nil ? 0.45 : 1)
-            if let greyedLine {
-                Text(greyedLine).dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
-                    .lineLimit(1).fixedSize().accessibilityIdentifier("edit-faces-paint-why")
-            }
-        }
-    }
-
-    private var paintChipButton: some View {
-        Button {
-            paintActive.toggle()
-            if paintActive {
-                paintErasing = false
-                model.toast = "Paint mode — drag one finger to brush faces into the selection; two fingers orbit"
-            }
-        } label: {
-            HStack(spacing: DS.Space.s) {
-                Image(systemName: paintActive ? "paintbrush.pointed.fill" : "paintbrush.pointed")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(paintActive ? DS.Color.textPrimary.color : Self.paintTint)
-                Text("Paint").dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
-                    .foregroundStyle(DS.Color.textPrimary.color)
-            }
-            .padding(.vertical, 9).padding(.horizontal, DS.Space.l)
-            .background(Capsule().fill(paintActive ? Self.paintTint : DS.Surface.bar.color)
-                .overlay(Capsule().strokeBorder(paintActive ? Color.clear : DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
-        }
-        .buttonStyle(.plain)
-        .dsShadow(DS.Shadow.panel)
-        .help("Brush faces into the active group when a tap over-selects. One finger paints; two fingers orbit.")
-    }
-
-    /// The paint controls that unfurl beneath the chip when paint mode is on: the ERASE modifier
-    /// (revert triangles to their native face) and a brush-size stepper, plus a one-line reminder
-    /// of the gesture. Kept small and right-aligned like the design-box drawer.
-    private var paintDrawer: some View {
-        VStack(alignment: .leading, spacing: DS.Space.s) {
-            Button { paintErasing.toggle() } label: {
-                HStack(spacing: DS.Space.s) {
-                    Image(systemName: paintErasing ? "eraser.fill" : "eraser")
-                        .font(.system(size: 12, weight: .bold))
-                    Text(paintErasing ? "Erasing" : "Erase")
-                        .dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
-                    Spacer(minLength: 0)
-                }
-                .foregroundStyle(paintErasing ? DS.Color.textPrimary.color : DS.Color.textSecondary.color)
-                .padding(.vertical, 8).padding(.horizontal, DS.Space.m)
-                .background(Capsule().fill(paintErasing ? Self.paintTint.opacity(0.9)
-                                                        : DS.Color.fillSubtle.color))
-            }
-            .buttonStyle(.plain)
-
-            HStack(spacing: DS.Space.s) {
-                Text("Brush").dsStyle(DS.TypeScale.footnote).foregroundStyle(DS.Color.textSecondary.color)
-                Button { brushRadiusPoints = Swift.max(12, brushRadiusPoints - 6) } label: {
-                    Image(systemName: "minus.circle.fill").font(.system(size: 16))
-                }.buttonStyle(.plain)
-                Text("\(Int(brushRadiusPoints))").dsStyle(DS.TypeScale.footnote).fontWeight(.bold)
-                    .foregroundStyle(DS.Color.textPrimary.color).frame(minWidth: 22)
-                Button { brushRadiusPoints = Swift.min(64, brushRadiusPoints + 6) } label: {
-                    Image(systemName: "plus.circle.fill").font(.system(size: 16))
-                }.buttonStyle(.plain)
-            }
-            .foregroundStyle(Self.paintTint)
-
-            Text("Drag one finger to paint into the selection; two fingers orbit. Then pick Anchor or Load.")
-                .dsStyle(DS.TypeScale.caption)
-                .foregroundStyle(DS.Color.textTertiary.color)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(DS.Space.m)
-        .frame(width: 210, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: DS.Radius.panel).fill(DS.Surface.panel.color)
-            .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel)
-                .strokeBorder(Self.paintTint.opacity(0.5), lineWidth: 1)))
-        .dsShadow(DS.Shadow.panel)
-    }
+    // MARK: paint mode (handoff 2026-07-25) — ★ B8: its chip and drawer left for Edit faces' rail and docked bar (`cutPaintTap`)
 
     /// Reads a chip's rendered width into `SettingsChipWidthKey` (item 12: MEASURED width).
     private func chipWidthReader(_ id: SettingsChipID) -> some View {
@@ -7158,6 +7113,7 @@ public struct WorkspacePlaceholder: View {
         switch tool {
         case .select:
             heldCut = nil
+            cutAim = nil   // ★ B8
 
         case .cut:
             // ★ THE MIDDLE OF THE PIECE YOU TAPPED, not of the face it came from
@@ -7173,6 +7129,10 @@ public struct WorkspacePlaceholder: View {
                 SurfaceCut.centred(onRegion: $0, of: faceID,
                                    regions: project.faceRegions, in: mesh)
             } ?? SurfaceCut.centred(onFace: faceID, in: mesh)
+            // ★ B8 (row 36): the aim by the face's kind — flat: its line at once; a hole or anything else: the question first
+            cutAim = CutAim.make(face: faceID, piece: surfaceSelected ?? project.surfaceCutTarget(face: faceID),
+                                 regions: project.faceRegions, mesh: mesh)
+            if let a = cutAim { heldCut = a.surfaceCut() }
             cutRotation = 0
             cutRotationBase = 0
             cutRotationDetent = 0
@@ -7216,6 +7176,7 @@ public struct WorkspacePlaceholder: View {
             surfaceSelectedFace = nil
 
         case .pattern:
+            if surfacePatternFace != faceID { patternRotation = 0 }   // ★ B8 (11-09 ruling (b)): starts square to its longest edge
             surfacePatternFace = faceID
             surfacePatternPiece = surfaceSelected
 
@@ -7296,8 +7257,10 @@ public struct WorkspacePlaceholder: View {
             ? Array(similarMatches).sorted() : []
 
         surfaceTool = tool
+        cutPaintPutDown()   // ★ B8: Paint is the rail's 7th tool, so any other tool puts it down
         heldCut = nil
         hoveredCut = nil
+        cutAim = nil   // ★ B8
         surfaceRefusal = nil
         surfaceUnion.clear()
         surfacePatternFace = nil
@@ -7347,10 +7310,29 @@ public struct WorkspacePlaceholder: View {
     private var surfacePatternPreview: (cells: [FaceRegionGeometry.GridCell],
                                         verdict: SliverVerdict)? {
         guard let f = surfacePatternFace else { return nil }
+        // ★ B8 (row 37): a hole's grid hangs on its own axis — n around, m down the hole
+        if surfacePatternBore != nil {
+            return project.surfacePatternPreview(face: f, around: patternAround, down: patternDown, piece: surfacePatternPiece)
+        }
         return project.surfacePatternPreview(face: f, columns: patternColumns,
                                              rows: patternRows,
                                              rotationDegrees: patternRotation,
                                              piece: surfacePatternPiece)
+    }
+
+    /// ★ B8 (row 37): the bore the Pattern tool is aimed at, when the tapped face is a hole (nil: today's grid).
+    private var surfacePatternBore: PatternHole.Bore? {
+        guard let f = surfacePatternFace else { return nil }
+        return project.surfacePatternBore(face: f, piece: surfacePatternPiece)
+    }
+
+    /// ★ B8 (row 37): the Pattern bar's line — nil when ✓ splits it; "nothing to cut"; how many pieces the face can hold;
+    /// or the grid's own reason (a curve's arc too wide for a plane cut).
+    private func patternRefusal(_ p: (cells: [FaceRegionGeometry.GridCell], verdict: SliverVerdict)?) -> String? {
+        guard let p else { return PatternHole.nothingToCut }
+        if p.verdict.ok { return nil }
+        if p.verdict.reason == PatternHole.nothingToCut || p.verdict.memberVoxels == 0 { return p.verdict.reason }
+        return PatternBarCopy.fits(p.verdict.maxCellsBudget)
     }
 
     // MARK: ★ VIEW MODE — the wireframe and its x-ray, on every stage that has them
@@ -7764,13 +7746,18 @@ public struct WorkspacePlaceholder: View {
         VStack(spacing: 6) {
             ForEach(SurfaceTool.allCases, id: \.rawValue) { tool in
                 // Abandons the last tool's work in progress, then arms this one on whatever is still selected — see
-                // `surfaceSwitch`.
-                cutRailButton(tool.icon, label: tool.title, on: surfaceTool == tool, key: "cutTool-\(tool.title)") {
+                // `surfaceSwitch` (which also puts Paint down: one tool at a time).
+                cutRailButton(tool.icon, label: tool.title, on: surfaceTool == tool && !cutPaintPicked,
+                              key: "cutTool-\(tool.title)") {
                     surfaceSwitch(to: tool)
                 }
             }
-            // ★ §2 — THE PENCIL BUTTON, a switch rather than a tool, so below a thin divider (the reviewer's answer on
-            // where it goes in B8 is pending; it stays in the rail meanwhile).
+            // ★ B8 (the reviewer's ruling 11-08 21:32Z item 1; mockup #cut .rail, "Paint (STL only)"): Paint, the rail's 7th
+            // tool. On a mesh it brushes, its controls in the bar docked at the top of the free model area (`cutPaintBarLayer`);
+            // on a STEP it brushes nothing and the rail's line says why (`cutPaintWhy`).
+            cutRailButton("paintbrush.pointed", label: "Paint", on: cutPaintPicked, key: "cutTool-Paint") { cutPaintTap() }
+            // ★ §2 — THE PENCIL BUTTON, a switch rather than a tool, so below a thin divider (the reviewer's ruling 11-08
+            // 21:32Z item 1: (a), in the rail under a divider).
             Rectangle().fill(DS.Color.strokeStrong.color).frame(width: 24, height: 1).padding(.vertical, 2)
             // (its action stays the bare toggle, written out: SurfacePencilToggleExemptionTests)
             Button { surfacePencilOnly.toggle() } label: { cutRailGlyph("applepencil", on: surfacePencilOnly) }
@@ -7786,7 +7773,9 @@ public struct WorkspacePlaceholder: View {
         // ONE LINE saying what a tap does, to the LEFT of the rail (the mockup's: 12 pt, secondary, 12 pt off the rail,
         // 10 pt under its top) — a rail of icons must not be a guessing game.
         .overlay(alignment: .topLeading) {
-            Text(surfaceRefusal ?? surfaceHint)
+            // ★ B8: with Paint picked the line is Paint's — what a drag does, or (a STEP) why it brushes nothing
+            let paintWhy = cutPaintPicked ? cutPaintWhy : nil
+            Text(surfaceRefusal ?? paintWhy ?? (cutPaintPicked ? EditFacesCopy.paintSTL : surfaceHint))
                 .font(.system(size: 12))
                 .foregroundStyle((surfaceRefusal == nil
                                   ? DS.Color.textSecondary : DS.Color.warning).color)
@@ -7794,6 +7783,7 @@ public struct WorkspacePlaceholder: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(width: 190, alignment: .trailing)
                 .background(DSParts.publish("cutRailHint"))
+                .background(Group { if paintWhy != nil { DSParts.publish("cutPaintWhy") } })
                 .offset(x: -202, y: 10)
                 .allowsHitTesting(false)
         }
@@ -7823,6 +7813,124 @@ public struct WorkspacePlaceholder: View {
             .contentShape(Circle())
     }
 
+    // MARK: ★ B8 — Paint, the rail's 7th tool (the reviewer's ruling 11-08 21:32Z item 1)
+
+    /// The rail's Paint: picks it (the other tools' work in progress is let go, as any tool switch does) or puts it down. It
+    /// brushes only where `cutPaintWhy` is nil.
+    private func cutPaintTap() {
+        if cutPaintPicked { cutPaintPutDown(); return }
+        surfaceSwitch(to: .select)
+        cutPaintPicked = true
+        paintErasing = false
+        paintActive = cutPaintWhy == nil
+    }
+
+    /// Paint down: no brush, no bar.
+    private func cutPaintPutDown() {
+        cutPaintPicked = false
+        paintErasing = false
+        paintActive = false
+    }
+
+    /// ★ Why the rail's Paint brushes nothing on this part (nil: it brushes): a STEP's CAD faces are already exact (B5's rule,
+    /// `EditFacesPaint`); a STEP the import repaired has triangles core's run does not share (H48).
+    private var cutPaintWhy: String? {
+        let path = project.importedFile?.path
+        if !FlexibleRepairedStepPaint.paintAllowed(path: path) { return FlexibleRepairedStepPaint.line }   // Flexible (PR #362) H48 — paint off on a repaired STEP (ruling 2026-10-23 18:56)
+        if case .greyed(let why) = EditFacesPaint.row(modelPath: path, editingFaces: true) { return why }
+        return nil
+    }
+
+    /// ★ Paint's bar, docked at the top of the free model area — the one place every print-plan bar docks (design-system "One
+    /// place for the bar"): from the panel's right edge to the view corner's column, at the panel's top line, centred.
+    private var cutPaintBarLayer: some View {
+        GeometryReader { geo in
+            let left = PageChrome.edge + PageChrome.panelWidth + PageChrome.gap
+            let right = geo.size.width - PageChrome.gizmoClearance
+            VStack(spacing: 0) {
+                cutPaintBar.frame(width: max(0, right - left))
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, left)
+            .padding(.top, PageChrome.panelTop)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+    }
+
+    /// Erase │ Brush − n + — one row where it fits; on a narrow screen (an 11" upright: 199.5 pt between the panel and the view
+    /// corner) the brush's size goes under Erase, its word over its − n + (the bar wraps between its groups, never inside one).
+    private var cutPaintBar: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) {
+                cutPaintEraseButton
+                Rectangle().fill(DS.Color.strokeStrong.color).frame(width: 1, height: 24)
+                cutPaintBrushSize(stacked: false)
+            }
+            .padding(5)
+            .background(Capsule().fill(DS.Surface.bar.color).overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+            .background(DSParts.publish("cutPaintBar"))
+            VStack(alignment: .leading, spacing: 0) {
+                cutPaintEraseButton
+                cutPaintBrushSize(stacked: true)
+            }
+            .padding(5)
+            .background(RoundedRectangle(cornerRadius: 22).fill(DS.Surface.bar.color)
+                .overlay(RoundedRectangle(cornerRadius: 22).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+            .background(DSParts.publish("cutPaintBar"))
+        }
+        .dsShadow(DS.Shadow.panel)
+    }
+
+    /// Erase: a stroke takes paint off instead of laying it on.
+    private var cutPaintEraseButton: some View {
+        Button { paintErasing.toggle() } label: {
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: paintErasing ? "eraser.fill" : "eraser").font(.system(size: 14, weight: .semibold))
+                Text("Erase").font(.system(size: 13, weight: .semibold))
+            }
+            .foregroundStyle(paintErasing ? Color.white : DS.Color.textPrimary.color)
+            .padding(.horizontal, DS.Space.l)
+            .frame(minHeight: 44)
+            .background(Capsule().fill((paintErasing ? DS.Color.accent : DS.Color.fillSubtle).color))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .background(DSParts.publish(paintErasing ? "cutPaintErase-on" : "cutPaintErase"))
+        .accessibilityLabel("Erase")
+    }
+
+    /// The brush's size: its word, − · the number (the app's NumberField) · +. `stacked`: the word over its − n +.
+    @ViewBuilder private func cutPaintBrushSize(stacked: Bool) -> some View {
+        let set: (Double) -> Void = { brushRadiusPoints = CGFloat(Swift.min(64, Swift.max(12, $0.rounded()))) }
+        let word = Text("Brush").font(.system(size: 12)).foregroundStyle(DS.Color.textSecondary.color).padding(.horizontal, 6).fixedSize()
+        let stepper = HStack(spacing: 4) {
+            cutPaintRound("minus", "Smaller brush", key: "cutPaintBrushMinus") { set(Double(brushRadiusPoints) - 6) }
+            NumberField(key: "cutPaintBrush", title: "Brush",
+                        spec: FlexNumberSpec(value: Double(brushRadiusPoints), unit: "", step: 6, range: 12...64, decimals: 0),
+                        size: .bare, onCommit: set)
+            cutPaintRound("plus", "Bigger brush", key: "cutPaintBrushPlus") { set(Double(brushRadiusPoints) + 6) }
+        }
+        if stacked {
+            VStack(alignment: .leading, spacing: 2) { word.padding(.top, 6); stepper }
+        } else {
+            HStack(spacing: 4) { word; stepper }
+        }
+    }
+
+    /// A 44 pt round button (the cut bar's).
+    private func cutPaintRound(_ icon: String, _ label: String, key: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon).font(.system(size: 14, weight: .bold))
+                .foregroundStyle(DS.Color.textPrimary.color)
+                .frame(width: 42, height: 42)
+                .background(Circle().fill(DS.Color.fillSubtle.color))
+                .frame(width: 44, height: 44).contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .background(DSParts.publish(key))
+        .accessibilityLabel(label)
+    }
+
     // ★ §6/§7 — THE ACTION CLUSTER: every tool's confirm, FLOATING NEXT TO WHAT IT
     // ACTS ON (maintainer: "Add a floating checkbox, rotation icon, or 'x' *next*
     // to the cut/action, not in the modal as a confirmation").
@@ -7838,7 +7946,15 @@ public struct WorkspacePlaceholder: View {
                     EmptyView()
 
                 case .cut:
-                    if let held = heldCut {
+                    // ★ B8 (row 36, R1, P6; mockup #cut-line, #cut-hole, #cut-plane-ask): the question first where the face
+                    // is not flat, then the bar — ✕ │ [Tilt] │ Rotate │ mm drag ↕ (or drag ⟲) │ ✓
+                    if let aim = cutAim {
+                        if let ask = aim.asks {
+                            CutAsk(ask: ask) { way, angle in var a = aim; a.answer(way, atAnAngle: angle); setCutAim(a) }
+                        } else {
+                            CutBar(aim: aim, set: { setCutAim($0) }, cancel: { releaseCut() }, confirm: { commitCutAim(aim) })
+                        }
+                    } else if let held = heldCut {
                         surfaceClusterButton("xmark", tint: DS.Color.textSecondary) {
                             releaseCut()
                         }
@@ -8040,77 +8156,57 @@ public struct WorkspacePlaceholder: View {
                     }
 
                 case .pattern:
-                    if surfacePatternFace != nil {
-                        surfaceClusterButton("xmark", tint: DS.Color.textSecondary) {
-                            surfacePatternFace = nil
-                            surfacePatternPiece = nil
-                        }
-                        // ★ §7 — COLUMNS x ROWS, with the SLIVER VERDICT on the
-                        // confirm. The guard is priced at the run's own voxel
-                        // spacing, so the panel refuses with the number the run
-                        // would, and the confirm is simply not tappable when it does.
-                        surfaceClusterStepper("col", value: $patternColumns)
-                        surfaceClusterStepper("row", value: $patternRows)
-                        // ★ §7 — TURN THE GRID. The automatic alignment is the
-                        // face's longest straight edge; this is the override for
-                        // when that is not the axis you meant.
-                        ZStack {
-                            Circle().fill(DS.Color.chipSolid.color)
-                                .overlay(Circle().strokeBorder(
-                                    DS.Color.textPrimary.opacity(0.22).color, lineWidth: 1))
-                            VStack(spacing: 0) {
-                                Image(systemName: "rotate.3d")
-                                    .font(.system(size: 13, weight: .bold))
-                                    .foregroundStyle(DS.Color.textPrimary.color)
-                                Text("\(Int(patternRotation))°")
-                                    .dsStyle(DS.TypeScale.caption)
-                                    .foregroundStyle(DS.Color.textTertiary.color)
-                                    .monospacedDigit()
-                            }
-                        }
-                        .frame(width: 52, height: 52)
-                        .gesture(
-                            DragGesture(minimumDistance: 2)
-                                .onChanged { g in
-                                    // ★ FOLDED AS IT TURNS. A grid is symmetric
-                                    // every 90°, so an accumulating raw drag shows
-                                    // meaningless numbers (−405° on his screen) for
-                                    // grids already named inside one quarter-turn.
-                                    patternRotation = SurfacePatternAxis.foldAngle(
-                                        patternRotationBase
-                                            + Double(g.translation.width) * 0.5)
-                                }
-                                .onEnded { _ in
-                                    patternRotation = SurfacePatternAxis.foldAngle(
-                                        SurfaceCut.snap(patternRotation))
-                                    patternRotationBase = patternRotation
-                                }
-                        )
+                    if let face = surfacePatternFace {
+                        // ★ B8 (row 37, N1, P5; mockup #cut-pattern; the reviewer's 11-09 18:31Z ruling (b)): ONE bar. On a
+                        // hole ✕ │ − n around + │ − n down the hole + │ ✓ (its lines hang on its own axis); on any other face
+                        // ✕ │ − n along + │ − n across + │ Rotate ↺ n° ↻ │ ✓ — the grid square to the face's longest straight
+                        // edge at 0° (his 08-16 arc grid on a curve, no plane question). Every count is cut lines, from 0;
+                        // the confirm waits, with the bar's line, while the run could not hold the pieces (§7's sliver
+                        // verdict, priced at the run's own voxel spacing).
+                        let hole = surfacePatternBore != nil
+                        // Rotate turns a FLAT face's straight grid; a curve's arc grid follows its bend (no Rotate)
+                        let turns = !hole && project.surfacePatternIsFlat(face: face)
                         let preview = surfacePatternPreview
-                        surfaceClusterLabel(preview.map {
-                            $0.verdict.ok ? "\($0.cells.count) pieces" : $0.verdict.reason
-                        } ?? "—", warn: preview.map { !$0.verdict.ok } ?? false)
-                        surfaceClusterConfirm(enabled: preview?.verdict.ok ?? false) {
-                            guard let face = surfacePatternFace else { return }
-                            // ★ ACROSS EVERY CARRIED FACE — same grid, each in its
-                            // own frame. A face the grid does not fit is skipped
-                            // rather than failing the batch.
-                            let kids = surfaceCarried.count > 1
-                                ? project.commitSurfacePattern(
-                                    faces: surfaceCarried, columns: patternColumns,
-                                    rows: patternRows, rotationDegrees: patternRotation)
-                                : project.commitSurfacePattern(
-                                    face: face, columns: patternColumns, rows: patternRows,
-                                    rotationDegrees: patternRotation,
-                                    piece: surfacePatternPiece)
-                            if surfaceCarried.count > 1 {
-                                model.toast = "Patterned \(surfaceCarried.count) faces."
-                            }
-                            surfaceCarried = []
-                            surfaceSelected = kids.first
-                            surfacePatternFace = nil
-                            surfacePatternPiece = nil
-                        }
+                        PatternBar(
+                            counts: hole
+                                ? [.init(word: PatternBarCopy.around, key: "patternAround", value: patternAround,
+                                         range: PatternHole.aroundRange) { patternAround = $0 },
+                                   .init(word: PatternBarCopy.downTheHole, key: "patternDown", value: patternDown,
+                                         range: PatternHole.downRange) { patternDown = $0 }]
+                                : [.init(word: PatternBarCopy.along, key: "patternAlong",
+                                         value: PatternGrid.lines(pieces: patternColumns),
+                                         range: PatternGrid.linesRange) { patternColumns = PatternGrid.pieces(lines: $0) },
+                                   .init(word: PatternBarCopy.across, key: "patternAcross",
+                                         value: PatternGrid.lines(pieces: patternRows),
+                                         range: PatternGrid.linesRange) { patternRows = PatternGrid.pieces(lines: $0) }],
+                            rotate: turns ? (patternRotation, { patternRotation = PatternGrid.rotation($0) }) : nil,
+                            refusal: patternRefusal(preview),
+                            cancel: { surfacePatternFace = nil; surfacePatternPiece = nil },
+                            confirm: {
+                                // ★ ACROSS EVERY CARRIED FACE (Select similar) — each in its own frame, a hole on its own
+                                // axis; a face the pattern does not fit is skipped rather than failing the batch.
+                                let many = surfaceCarried.count > 1
+                                let kids: [RegionID]
+                                if hole {
+                                    kids = many
+                                        ? project.commitSurfacePattern(faces: surfaceCarried, around: patternAround,
+                                                                       down: patternDown)
+                                        : project.commitSurfacePattern(face: face, around: patternAround,
+                                                                       down: patternDown, piece: surfacePatternPiece)
+                                } else {
+                                    kids = many
+                                        ? project.commitSurfacePattern(faces: surfaceCarried, columns: patternColumns,
+                                                                       rows: patternRows, rotationDegrees: patternRotation)
+                                        : project.commitSurfacePattern(face: face, columns: patternColumns, rows: patternRows,
+                                                                       rotationDegrees: patternRotation,
+                                                                       piece: surfacePatternPiece)
+                                }
+                                if many { model.toast = "Patterned \(surfaceCarried.count) faces." }
+                                surfaceCarried = []
+                                surfaceSelected = kids.first
+                                surfacePatternFace = nil
+                                surfacePatternPiece = nil
+                            })
                     }
 
                 case .region:
@@ -8139,8 +8235,8 @@ public struct WorkspacePlaceholder: View {
             // meant to be").
             .position(x: surfaceDocksCluster
                       ? (projection?.viewportSize.width ?? 1032) / 2
-                      : min(max(at.x, 200),
-                            max((projection?.viewportSize.width ?? 1032) - 200, 200)),
+                      : min(max(at.x, surfaceClusterHalfWidth),
+                            max((projection?.viewportSize.width ?? 1032) - surfaceClusterHalfWidth, surfaceClusterHalfWidth)),
                       y: surfaceDocksCluster
                       ? (projection?.viewportSize.height ?? 1376) - bottomBarClearance - 40
                       : min(max(at.y - 84, 96),
@@ -8198,13 +8294,22 @@ public struct WorkspacePlaceholder: View {
     /// of the part.
     private var surfaceDocksCluster: Bool { false }
 
+    /// How far the cluster's middle keeps from the screen's sides: the Cut bar (✕ │ Tilt │ Rotate │ mm │ ✓) is the widest.
+    private var surfaceClusterHalfWidth: CGFloat {
+        if surfaceTool == .cut && cutAim != nil { return 330 }
+        // ★ B8: the Pattern bar — a hole's (✕ │ n around │ n down the hole │ ✓, 675 pt measured) and a flat face's (+ Rotate,
+        // ≤ 720 pt): whole on an 11" iPad upright (820 pt) either way. (300 put the hole's 31 pt off its left edge.)
+        if surfaceTool == .pattern && surfacePatternFace != nil { return 360 }
+        return 200
+    }
+
     /// Where the cluster floats: the point the armed tool is aimed at.
     private func surfaceActionAnchor(_ proj: CameraProjection) -> CGPoint? {
         guard let mesh = viewerMesh else { return nil }
         let model: SIMD3<Double>?
         switch surfaceTool {
         case .select:  model = nil
-        case .cut:     model = heldCut?.point
+        case .cut:     model = heldCut?.point ?? cutAim?.centre   // ★ B8: the question floats where the cut will be
         // The cluster floats over the CENTRE OF EVERYTHING PICKED, so it stays
         // with the selection as it grows rather than anchoring to the first tap.
         // ★ OVER WHAT IS PICKED — the centre of the whole set, so it stays with the
@@ -8338,46 +8443,6 @@ public struct WorkspacePlaceholder: View {
                     DS.Color.textPrimary.opacity(0.22).color, lineWidth: 1)))
     }
 
-    /// A −/+ pair with its number, for the pattern grid. Typed entry is the
-    /// Regions sheet's job; here the values are 1..12 and a stepper is the faster
-    /// control at that range.
-    private func surfaceClusterStepper(_ label: String,
-                                       value: Binding<Int>) -> some View {
-        HStack(spacing: 2) {
-            Button { value.wrappedValue = max(1, value.wrappedValue - 1) } label: {
-                // ★ THE WHOLE 44 pt IS THE TARGET, NOT THE GLYPH. A bare `Image`
-                // in a button is hit-tested on its DRAWN pixels — an 11 pt minus
-                // sign is a ~10 pt target however large the frame around it, which
-                // is why these could not be pressed. `contentShape` makes the frame
-                // the target, and 44 is Apple's minimum.
-                Image(systemName: "minus").font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .frame(width: 44, height: 52)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            VStack(spacing: -2) {
-                Text("\(value.wrappedValue)")
-                    .dsStyle(DS.TypeScale.footnote)
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .monospacedDigit()
-                Text(label)
-                    .dsStyle(DS.TypeScale.caption)
-                    .foregroundStyle(DS.Color.textQuaternary.color)
-            }
-            Button { value.wrappedValue = min(12, value.wrappedValue + 1) } label: {
-                Image(systemName: "plus").font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .frame(width: 44, height: 52)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        }
-        .background(Capsule().fill(DS.Color.chipSolid.color)
-            .overlay(Capsule().strokeBorder(
-                DS.Color.textPrimary.opacity(0.22).color, lineWidth: 1)))
-    }
-
     /// The held cut's angle, snapped, wrapped into 0..<360.
     private var cutAngleDegrees: Double {
         var d = SurfaceCut.settle(cutRotation).truncatingRemainder(dividingBy: 360)
@@ -8396,13 +8461,31 @@ public struct WorkspacePlaceholder: View {
     /// hovering above the glass on an M-series iPad; on hardware without hover it
     /// simply never fires and the mode still works by tap.
     @ViewBuilder private var surfaceCutOverlay: some View {
+        let _ = recordCutLive()
         if visible.surfaceEditing {
             GeometryReader { _ in
                 ZStack(alignment: .topLeading) {
                     if let proj = projection {
+                        // ★ B8 (row 36): an aimed cut draws where its plane crosses the piece — on the face, a ring round a
+                        // hole — never a straight stroke off it
+                        if let a = cutAim, let m = viewerMesh {
+                            let t = cutAimTrace(a, mesh: m)
+                            Path { path in
+                                var i = 0
+                                while i + 5 < t.count {
+                                    if let p = proj.project(settledWorld(SIMD3<Float>(t[i], t[i + 1], t[i + 2]))),
+                                       let q = proj.project(settledWorld(SIMD3<Float>(t[i + 3], t[i + 4], t[i + 5]))) {
+                                        path.move(to: p); path.addLine(to: q)
+                                    }
+                                    i += 6
+                                }
+                            }
+                            .stroke(DS.Color.accent.color, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                            .allowsHitTesting(false)
+                        }
                         // The line being aimed: the held one if a face is chosen,
                         // otherwise whatever the pencil is over.
-                        if let base = heldCut ?? hoveredCut {
+                        else if let base = heldCut ?? hoveredCut {
                             let cut = base.rotated(by: cutRotation)
                                 .moved(byMM: heldCut == nil ? 0 : cutOffsetMM)
                             let seg = cut.previewSegment(halfLengthMM: cutPreviewHalfLengthMM)
@@ -8437,6 +8520,72 @@ public struct WorkspacePlaceholder: View {
         cutRotation = 0
         cutRotationBase = 0
         cutRotationDetent = 0
+        cutAim = nil
+        cutAimDragStart = nil
+    }
+
+    /// Tests: the page's face tap and its aim, as it last drew them (CutLive).
+    private func recordCutLive() {
+        guard CutLive.recordLive else { return }
+        CutLive.aim = cutAim
+        if let m = viewerMesh { CutLive.pick = { handleSurfacePick($0, at: nil, mesh: m) } }
+    }
+
+    /// ★ B8: the aim changed (the bar, the question, the handle) — the held cut is its plane, nothing added on top.
+    private func setCutAim(_ a: CutAim) {
+        cutAim = a
+        heldCut = a.surfaceCut()
+        cutRotation = 0
+        cutOffsetMM = 0
+    }
+
+    /// ★ B8 (row 36, R1): Cut's ✓ — the aim's plane through its face (or, carried from Select similar, each face through its
+    /// own centre at the same Rotate and place).
+    private func commitCutAim(_ a: CutAim) {
+        guard let cut = a.surfaceCut() else { return }
+        let kids = surfaceCarried.count > 1
+            ? project.commitSurfaceCut(faces: surfaceCarried, rotationDegrees: a.rotateDeg, offsetMM: a.offsetMM)
+            : project.commitSurfaceCut(cut)
+        if surfaceCarried.count > 1 { model.toast = "Cut \(surfaceCarried.count) faces." }
+        surfaceCarried = []
+        releaseCut()
+        surfaceSelected = kids.first
+    }
+
+    /// ★ B8 (R1, design-system §4.24): the cut's one handle, on its line — ↕ slides it (across a flat face, up and down a
+    /// bore), ⟲ carries a line round a bore. Its number rides beside it; the bar reads the same place.
+    @ViewBuilder private var cutHandleOverlay: some View {
+        if visible.surfaceEditing, surfaceTool == .cut, let a = cutAim, let hd = a.handle, let proj = projection, let m = viewerMesh,
+           let p0 = proj.project(settledWorld(SIMD3<Float>(hd.point))) {
+            let mmLen = max(Double(m.bounds.radius) * 0.05, 1)
+            let p1 = proj.project(settledWorld(SIMD3<Float>(hd.point + hd.direction * mmLen))) ?? CGPoint(x: p0.x, y: p0.y - 1)
+            let ax = CGVector(dx: p1.x - p0.x, dy: p1.y - p0.y)
+            let ptsPerMM = max(Double((ax.dx * ax.dx + ax.dy * ax.dy).squareRoot()) / mmLen, 1e-6)
+            let value = hd.around ? "\(Int(a.rotateDeg.rounded()))\u{00B0}"
+                : (a.offsetMM >= 0 ? "+" : "\u{2212}") + SelectionsSummary.format(abs((a.offsetMM * 10).rounded() / 10), decimals: 1) + " mm"
+            let drag: (CGFloat, Bool) -> Void = { along, ended in
+                guard let start = cutAimDragStart ?? cutAim else { return }
+                if cutAimDragStart == nil { cutAimDragStart = start }
+                var next = start
+                next.drag(byMM: Double(along) / ptsPerMM, from: start)
+                setCutAim(next)
+                if ended { cutAimDragStart = nil }
+            }
+            let _ = { if CutLive.recordLive { CutLive.handleDrag = drag } }()
+            // the round handle's middle ON the line (its number rides to its right)
+            DragHandle(key: "cut", axis: ax, glyph: hd.around ? .around : .along, value: value, onDrag: drag)
+                .fixedSize()
+                .frame(width: 400, height: DragHandle.size, alignment: .leading)
+                .position(x: p0.x + 200 - DragHandle.size / 2, y: p0.y)
+        }
+    }
+
+    /// ★ B8 (row 36: "the line never leaves the face"): the aimed cut's line, traced where its plane crosses the piece.
+    private func cutAimTrace(_ a: CutAim, mesh: ViewerMesh) -> [Float] {
+        guard let pl = a.plane else { return [] }
+        let segs = SurfaceCutLines.trace(plane: RegionCut(point: pl.point, normal: pl.normal), faces: [a.face], in: mesh)
+        let cuts = surfaceSelected.flatMap { project.faceRegions.region($0)?.cuts } ?? []
+        return cuts.isEmpty ? segs : SurfaceCutLines.clip(segs, to: cuts)
     }
 
 
@@ -8867,6 +9016,64 @@ public struct WorkspacePlaceholder: View {
     }
 
     /// ★ B6 N2: a face's prism shows unless its row's eye hid it (his iPad 11-07, 3a: visible by default).
+    /// ★ his 11-09: the pop-up beside the glow — why, and the two choices (no OK: it would be Continue).
+    @ViewBuilder private var latticeThinWallsPromptCard: some View {
+        if let thin = latticeThinWalls {
+            VStack(alignment: .leading, spacing: DS.Space.m) {
+                Text(LatticeThinWallPrompt.title)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(LatticeThinWallPrompt.body(thin, cellsPerMember: strutScene?.minCellsPerMember ?? 5,
+                                                manualCell: project.lattice.cellSizeMode != .auto))
+                    .dsStyle(DS.TypeScale.footnote)
+                    .foregroundStyle(DS.Color.textSecondary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: DS.Space.s) {
+                    Button {
+                        project.switchLatticeStageMode(to: .aesthetic)
+                        latticeThinWallsPromptUp = false
+                        model.persistCurrentProject()
+                    } label: {
+                        Text(LatticeThinWallPrompt.switchTitle).font(.system(size: 15, weight: .semibold))
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background(RoundedRectangle(cornerRadius: DS.Radius.pill, style: .continuous)
+                                .fill(DS.Color.accent.color))
+                            .foregroundStyle(Color.white)
+                    }
+                    .buttonStyle(.plain)
+                    .background(CornerPairStyle.publish("lattice-thin-walls-switch"))
+                    .accessibilityIdentifier("lattice-thin-walls-switch")
+                    Button {
+                        project.lattice.thinWallsNoticeSeen = true
+                        latticeThinWallsPromptUp = false
+                        model.persistCurrentProject()
+                    } label: {
+                        Text(LatticeThinWallPrompt.continueTitle).font(.system(size: 15, weight: .semibold))
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background(RoundedRectangle(cornerRadius: DS.Radius.pill, style: .continuous)
+                                .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
+                            .foregroundStyle(DS.Color.textPrimary.color)
+                    }
+                    .buttonStyle(.plain)
+                    .background(CornerPairStyle.publish("lattice-thin-walls-continue"))
+                    .accessibilityIdentifier("lattice-thin-walls-continue")
+                }
+            }
+            .padding(DS.Space.l)
+            .frame(maxWidth: 440)
+            .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(DS.Surface.panel.color))
+            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
+            .shadow(color: .black.opacity(0.35), radius: 24, y: 8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .padding(.bottom, bottomBarClearance + DS.Space.l)
+            .background(CornerPairStyle.publish("lattice-thin-walls-card"))
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("lattice-thin-walls-card")
+            .zIndex(48)
+        }
+    }
+
     /// ★ his iPad notes 11-09: the face prisms Lattice Setup can draw — every Lattice and No-lattice face's (`latticeDrawsPrism`),
     /// a hidden group's and the zones' boxes aside. The keys the Face prisms view sets.
     private var latticeFacePrismKeys: [String] {
@@ -9949,6 +10156,7 @@ public struct WorkspacePlaceholder: View {
                         resolution: project.quality.resolution,
                         onChange: { project.refreshFaceRegionDrift() },
                         onClose: { regionsOpen = false })
+            .background(DSParts.publish("regionsSheet"))
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
             .padding(.leading, 320)
             .padding(.bottom, 96)
@@ -10085,10 +10293,16 @@ public struct WorkspacePlaceholder: View {
             if latticePreviewBanner != nil, showStrutPreview, project.lattice.stageMode == .structural,
                let thin = latticeThinWalls {
                 HStack(alignment: .firstTextBaseline, spacing: DS.Space.xs) {
-                    Text(thin.caption)
-                        .dsStyle(DS.TypeScale.caption2)
-                        .foregroundStyle(DS.Color.textSecondary.color)
-                        .fixedSize(horizontal: false, vertical: true)
+                    // ★ his 11-09: a tap on the note re-opens the glow and the pop-up
+                    Button { latticeThinWallsPromptUp = true } label: {
+                        Text(thin.caption)
+                            .dsStyle(DS.TypeScale.caption2)
+                            .foregroundStyle(DS.Color.textSecondary.color)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .buttonStyle(.plain)
+                    .background(CornerPairStyle.publish("lattice-thin-walls-note"))
+                    .accessibilityIdentifier("lattice-thin-walls-note")
                     Button { latticeThinWallsInfoShown = true } label: {
                         Image(systemName: "info.circle")
                             .font(.system(size: 11, weight: .semibold))
@@ -10159,8 +10373,10 @@ public struct WorkspacePlaceholder: View {
                 } footer: { cutPanelFoot }
             }
         }
-        .onAppear { if cutOpenFolders.isEmpty { cutOpenFolders = [force.activeScenarioID] } }
     }
+
+    /// ★ B8: Edit faces' open folders — the active scenario's until he opens or closes one.
+    private var cutOpenFolderSet: Set<UUID> { cutOpenFolders ?? [force.activeScenarioID] }
 
     /// ★ B8: Edit faces was opened from the Lattice stage.
     private var cutFromLattice: Bool { if case .lattice = editFaces.origin { return true } else { return false } }
@@ -10170,9 +10386,9 @@ public struct WorkspacePlaceholder: View {
         VStack(alignment: .leading, spacing: 0) {
             if force.hasScenarios {
                 ForEach(force.scenarioList, id: \.id) { s in
-                    let open = cutOpenFolders.contains(s.id)
+                    let open = cutOpenFolderSet.contains(s.id)
                     DSRow(.folder, key: "cutFolder-\(s.id.uuidString)", mark: .folder, name: s.name, disclosure: open,
-                          tap: { if open { cutOpenFolders.remove(s.id) } else { cutOpenFolders.insert(s.id) } })
+                          tap: { var o = cutOpenFolderSet; if open { o.remove(s.id) } else { o.insert(s.id) }; cutOpenFolders = o })
                     if open {
                         ForEach(selection.groups.filter { force.group($0.id, isIn: s.id) }) { g in
                             cutGroupRow(g).padding(.leading, SelectionsList.folderIndent)
@@ -10187,7 +10403,9 @@ public struct WorkspacePlaceholder: View {
         }
     }
 
-    /// ★ the old card's header buttons, until the reviewer's answer on B8's look (asked 11-07 20:04Z, item 3)
+    /// ★ The old card's header buttons — the reviewer's ruling 11-08 21:32Z item 1: none in Cut (Keep clear stays on Topology,
+    /// kg│lb is in Settings), but the Regions sheet stays reachable while one of its functions has no rail twin: its filter's
+    /// "Small faces" (CutRegionsTwinTests).
     private var cutPanelFoot: some View {
         HStack(spacing: DS.Space.m) {
             Button { regionsOpen.toggle() } label: {
@@ -10198,9 +10416,8 @@ public struct WorkspacePlaceholder: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Regions")
+            .background(DSParts.publish(regionsOpen ? "cutRegions-on" : "cutRegions"))
             .flexibleDrawn(when: !flexibleMain.owns(project, stage))   // ★ B8: as H39 — Edit faces opened from Flexible draws no Regions toggle
-            keepClearQuickAction
-            unitToggle
             Spacer(minLength: 0)
         }
         .padding(.horizontal, DS.Space.m)
@@ -10361,6 +10578,7 @@ public struct WorkspacePlaceholder: View {
             }
             .buttonStyle(.plain)
             .help("Toggle Keep clear on the active selection")
+            .background(DSParts.publish("keepClearQuick"))   // ★ B8: so a page's test can see where it is drawn
         }
     }
 
@@ -10380,6 +10598,7 @@ public struct WorkspacePlaceholder: View {
         .padding(2)
         .background(Capsule().fill(DS.Color.background.opacity(0.35).color)
             .overlay(Capsule().strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)))
+        .background(DSParts.publish("unitToggle"))   // ★ B8: so a page's test can see where kg│lb is drawn
     }
 
     /// `inList`: the open group's rows under SelectionsList's line (B3) — the line already carries the eye and the trash.
@@ -13755,6 +13974,7 @@ extension WorkspacePlaceholder {
     private func leaveEditFacesTools() {
         surfaceResetTools()
         cutLitGroup = nil   // ★ B8
+        cutPaintPicked = false   // ★ B8: the rail's Paint
         paintActive = false
         regionsOpen = false
     }
@@ -14459,6 +14679,13 @@ extension WorkspacePlaceholder {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
             autoKeepClearRow(g)   // ★ first, right under the group's line, where he looks (not under its primitives)
             groupRow(g, inList: true)
+            if let line = project.keepClearIdlePiecesLine(g) {   // ★ E4 (j), ruling 11-08 21:32: no silent no-ops
+                Text(line).dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textSecondary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, DS.Space.l)
+                    .accessibilityIdentifier("keepClearIdlePieces-\(g.id.uuidString)")
+                    .background(CornerPairStyle.publish("keepClearIdlePieces-\(g.id.uuidString)"))
+            }
             if force.kind(for: g.id).isLoad { loadRows(g) }   // ★ B3 (note 5): Kind, Weight, Direction
             // ★ his ask 2026-10-26 + his iPad 14:13: every face its own card, picked one at a time, with its own eye and trash
             VStack(spacing: PieceRowPick.spacing) {

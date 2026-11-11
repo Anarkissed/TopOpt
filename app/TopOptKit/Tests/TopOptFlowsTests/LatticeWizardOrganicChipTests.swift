@@ -39,7 +39,9 @@ final class LatticeWizardOrganicChipTests: XCTestCase {
         // — and the octet path is byte-identical: its own boundary, no outer finish —
         var octetLike = out; octetLike.algorithm = ""; octetLike.boundary = .rim
         let os = octetLike.runSpec(limits: lim, generatable: true, memberMM: 8, lineWidthMM: 0.42)
-        XCTAssertNil(os?.outerFinish); XCTAssertEqual(os?.skin, "rim")
+        // ★ RE-PINNED (release (4), 868b11bf): Rim is a finish on a real part now, so the octet path states core's open
+        // outer finish beside its rim skin (organic above is unchanged)
+        XCTAssertEqual(os?.outerFinish, "none"); XCTAssertEqual(os?.skin, "rim")
         XCTAssertEqual(g["intent"] as? String, "aesthetic",
                        "★ core refuses organic without an explicit aesthetic intent (measured on-device 2026-09-02)")
         // — Structural is the stage's own word, so core's refusal stays faithful —

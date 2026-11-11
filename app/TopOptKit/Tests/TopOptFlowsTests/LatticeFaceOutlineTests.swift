@@ -387,7 +387,12 @@ final class LatticeFaceOutlineTests: XCTestCase {
         // wire as core's diagrid skin ("skin"); Rim still sends nothing (core builds no rim on a real part yet).
         XCTAssertEqual(LatticeBoundaryTreatment.covered.jobOuterFinish, "shell")
         XCTAssertEqual(LatticeBoundaryTreatment.fullSkin.jobOuterFinish, "skin")
-        XCTAssertNil(LatticeBoundaryTreatment.rim.jobOuterFinish)
+        // ★ RE-PINNED (release (4), 868b11bf: the linked core lays a rim on a real part): Rim is a finish and sends
+        // core's open outer finish; the control puts Rim back to greyed, sending nothing.
+        XCTAssertEqual(LatticeBoundaryTreatment.rim.jobOuterFinish, "none")
+        LatticeBoundaryTreatment.controlRimGreyed = true
+        XCTAssertNil(LatticeBoundaryTreatment.rim.jobOuterFinish, "CONTROL: Rim greyed sends nothing")
+        LatticeBoundaryTreatment.controlRimGreyed = false
         // And the ring is the slicer's own: outer + (loops-1)·inner.
         var pp = PrintParams.fdmDefault
         pp.wallLineWidthOuterMM = 0.46

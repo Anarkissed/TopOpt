@@ -286,6 +286,12 @@ struct JobLatticeRegion {
   // design minus the open pocket, and a solid wall (the slicer's wall, in whole voxel
   // layers) closes it from the covered part, counted by the certificate.
   std::string outer_finish;
+  // ★ Skin per zone (reviewer's ruling 11-08 (1)): "diagrid" (Skin, the freeform diagrid
+  // woven over this zone's surface: an anchor ball where its landing lies in the zone, a
+  // chord where its midpoint does) | "rim" (Rim, ruling 11-08 (A): a rim along each sharp
+  // edge of the shipped surface whose midpoint lies in the zone) | "none"; "" = the part's
+  // lattice.skin.
+  std::string skin;
   // ★ E3: the region's own cell window (mm), swept only; 0 = the part's. Its voxels take
   // only the part's ladder cells (grading cell_min_mm x 2^L) inside it.
   double cell_min_mm = 0.0;
@@ -909,6 +915,9 @@ struct JobScenario {
 // identically to the app (production_parity: one builder, both front-ends).
 struct JobClearance {
   int face_id = -1;
+  // ★ E4 (j): a Keep clear on a CUT PIECE names its face region (loads.face_regions)
+  // instead of a face; -1 = not a region. Exactly one of face_id / geometry / region_id.
+  int region_id = -1;
   std::string kind;  // "bolt" | "face"
   double concentric_margin_mm = 0.0;  // bolt: keep-out radius = bore_r + this
   double axial_clearance_mm = 0.0;    // bolt: sweep this far past each face

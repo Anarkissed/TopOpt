@@ -398,8 +398,17 @@ static void section_graded() {
                                          v.von_mises_field, &cand, gp);
     CHECK(gf.latticed_voxels > 0,
           "graded fixture: the thick cylinder really grades (not ungradeable)");
-    CHECK(gf.solid_fallback_voxels > 0,
-          "graded fixture: near-surface members fall back solid (L4 live)");
+    // ★ RULING 11-09 20:10Z (the corner criterion): "a corner residue thinner than a
+    // cell, beside a member that holds the floor, joins that member." This cylinder's
+    // near-surface fallbacks were its voxel staircase -- convex corner residues beside
+    // the thick core -- so they now JOIN the core rather than fall back solid. L4 stays
+    // live as the join: residues found and joined, counted on the field.
+    std::printf("[hookup] graded fixture: latticed %zu, solid fallback %zu, corner residues "
+                "%lld, joined %lld (reach %.3f mm)\n",
+                gf.latticed_voxels, gf.solid_fallback_voxels, gf.corner_residue_voxels,
+                gf.corner_joined_voxels, gf.corner_reach_mm);
+    CHECK(gf.corner_joined_voxels > 0,
+          "graded fixture: near-surface staircase residues join their member (L4 live)");
     CHECK(json_number(rcpt, "latticed_voxels") ==
               static_cast<double>(gf.latticed_voxels),
           "H4a: receipt latticed count == law on THIS variant's own field");

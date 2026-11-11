@@ -1,0 +1,105 @@
+# Release 54d2ce825a74 — 2026-11-11: release (4) — claude/release-4 67ea83ba, one worker swap (db2cc34ef3fe -> 54d2ce825a74)
+# The reviewer's 20:54Z re-plan item 2: SOLID 7def1f22, Rim, Skin per zone, the lattice types, Cut + Pattern, and the glow.
+# His words for it: "Structural now reads your stand's walls honestly. Walls under 5 cells across stay solid, and the blue highlight shows where."
+# Until the rebuild's stage F, Structural lattice strength results aren't to be trusted for load-bearing parts.
+# LatticeTypes' 181deb12 (grading.single_cell_members, regions[] role "skin") is NOT in this release (his 11-10 21:32 EST).
+# Gates in the gate tree release-4 (its own vendor, iOS slices with OCCT):
+#   18:36 release-4 7b07cd87 (SOLID + N1110 merged); core fingerprint 54d2ce825a74
+#   18:42 build_core green: topopt_vendored_core_54d2ce825a74 in the pinned include and all three slices
+#   18:43 iPad build: exit 65 ** BUILD FAILED **
+#       |                                                                                             `- error: cannot convert value of type 'UInt32' to expected argument type 'Int32'
+#       |                                                               `- error: cannot convert value of type 'UInt32' to expected argument type 'Int32'
+#       |                                     `- error: cannot convert value of type 'UInt32' to expected argument type 'Int32'
+#   /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/release-4/app/TopOptKit/Sources/TopOptFlows/LatticeThinWallGlow.swift:93:37: error: cannot convert value of type 'UInt32' to expected argument type 'Int32'
+#   /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/release-4/app/TopOptKit/Sources/TopOptFlows/LatticeThinWallGlow.swift:93:63: error: cannot convert value of type 'UInt32' to expected argument type 'Int32'
+#   /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/release-4/app/TopOptKit/Sources/TopOptFlows/LatticeThinWallGlow.swift:93:93: error: cannot convert value of type 'UInt32' to expected argument type 'Int32'
+#   18:44 CLI: topopt-cli: core 54d2ce825a74 (dirty=false), built Nov 10 2026 18:44:16
+#   18:44 app_core_capability_mirror passed
+#   18:45 preflight on his latest job: preflight: load path CONNECTED
+#   18:51 17-test: 17/17 identical, 4a99c057 vs 7b07cd87
+#   18:51 STOPPED: the iPad build failed
+#   18:53 release-4 3d509723 (SOLID + N1110 merged); core fingerprint 54d2ce825a74
+#   19:00 iPad build: exit 65 ** BUILD FAILED **
+#   /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/release-4/app/TopOpt.xcodeproj: TopOpt: clang: error: linker command failed with exit code 1 (use -v to see invocation)
+#   Undefined symbols for architecture arm64:
+#   19:00 STOPPED: the iPad build failed
+#   19:01 release-4 3d509723 (SOLID + N1110 merged); core fingerprint 54d2ce825a74
+#   ==> building iOS simulator slice (Eigen + OCCT + lib3mf, arm64)
+#   ==> building iOS device slice (Eigen + OCCT + lib3mf, arm64)
+#   19:03 build_core green: topopt_vendored_core_54d2ce825a74 + build_identity + lattice_variant_job in all three slices
+#   19:10 iPad build: exit 0 ** BUILD SUCCEEDED **
+#   19:17 chunk_first.txt: exit 0; so far 52 passed, 0 failed
+#   19:55 chunk_aa: exit 1; so far 520 passed, 6 failed
+#   20:19 chunk_ab: exit 1; so far 853 passed, 7 failed
+#   20:58 chunk_ac: exit 0; so far 1138 passed, 7 failed
+#   21:58 chunk_ad: exit 1; so far 1509 passed, 8 failed
+#   22:33 chunk_ae: exit 0; so far 1858 passed, 8 failed
+#   23:30 chunk_af: exit 1; so far 2132 passed, 9 failed
+#   01:12 chunk_ag: exit 1; so far 2484 passed, 10 failed
+#   01:44 chunk_ah: exit 0; so far 2807 passed, 10 failed
+#   02:33 chunk_ai: exit 1; so far 3243 passed, 11 failed
+#   03:04 chunk_aj: exit 0; so far 3593 passed, 11 failed
+#   03:22 chunk_ak: exit 0; so far 4058 passed, 11 failed
+#   06:18 chunk_al: exit 0; so far 4405 passed, 11 failed
+#   06:45 stand classes: exit 1
+#   06:45 B + stand: 4415 passed, 186 skipped, 12 failed, build failures 0
+#   FP=54d2ce825a74 HEAD=3d509723
+# The 12 reds, each read: 3 = the known 3MF AppModelTests (no lib3mf on the macOS slice); 9 = pins this release moved, re-pinned
+# in 67ea83ba's last commit with controls (the glow in the H4 tint line and the renderer's pause line; Rim's open finish x3;
+# the six newly live types in BridgeGuardTests; the stand glow test now closes the once-per-session Lattice page first):
+#   re-pins: 06:56 8 classes: exit 0; 67 passed, 0 failed
+#   re-pins: 07:03 stand glow class: exit 0; failed (436.634 seconds).
+#   re-pins: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/release-4/app/TopOptKit/Tests/TopOptFlowsTests/LatticeThinWallGlowTests.swift:184: error: -[TopOptFlowsTests.LatticeThinWallGlowHostedTests testHisStandShowsThePopUpOnceAndTheNoteReopensIt] : XCTUnwrap failed: expected non-nil value of ty
+#   re-pins: 
+#   re-pins: [exited with code 0]
+#   stand: 07:45 stand glow class (HIS_PROJECT_DIR): passed (65.6 s) — the first preview opens the Lattice page, its Save bakes, the pop-up shows by itself on Lattice Setup; Continue saves; the note re-opens it; Switch to Aesthetic changes the mode
+# A probe on his stand (bake's inputs; octet, auto 8 mm / min 4 mm, 1 mm grid): core leaves every latticed voxel solid at 4 mm
+# (code 1: 34160, code 2: 1001), so under Structural the whole latticed part glows.
+# Commits:
+#   1446e656 E4 (B8's engine pair): Keep clear on a cut piece clears that piece only; the Protect-vs-lattice tie keyed by region
+#   c33fc0ee B8 slice 2 (WIP, not for release): the Cut tool — CutAim (flat line, hole Along│Across, Which plane?), CutBar (✕ │ Tilt │ Rotate │ mm │ ✓), the ↕ handle, the traced line
+#   2e3442f6 Merge branch 'claude/app-build-b8' into claude/app-build-b8-cut
+#   48b612eb B8 slice 2 (WIP, local): the not-flat Cut test opens his l bracket (bolt holes) — the pad is all flat
+#   e48e2546 Merge commit '1446e656' into claude/app-build-b8
+#   acee6965 B8 wiring (E4 j, ledger row 38): a Keep clear on a cut piece goes to core by the piece's region
+#   b8a2d3fb Skin per zone (ruling 11-08 (1) + (2b)): lattice.regions[].skin
+#   a52039d7 B8 E4 drawing (WIP, LOCAL, UNTESTED — parked 11-08 22:20Z for his iPad notes): a cut piece's Keep clear drawn as its face's volume clipped by the piece's cuts, and the plain line for a piece that is neither a hole nor flat (r
+#   4d928a75 Rim on a real part (ruling 11-08 (A)): lattice.skin and regions[].skin "rim"
+#   d55beec1 Merge commit '927fa1e0' into claude/app-build-b8
+#   a38af0c6 Rim: seated along each run, and laid only where the part is latticed
+#   270e43d8 B8 E4 drawing: the line's hosted test sets gravity first (test setup only)
+#   1e9ac102 Merge branch 'claude/app-build-b8' into claude/app-build-b8-cut
+#   7239e253 Each lattice type's own strut-strength law (ruling 11-08 (B), R10)
+#   d618d9c4 B8 Cut look: the reviewer's 11-08 21:32Z rulings, item 1 (app only)
+#   c0a07c41 PARKED (local, untested): B8 row 37 Pattern on a hole — around / down the hole bar
+#   040d11f3 Release (4) base: merge LatticeTypes' 7239e253 (Skin per zone b8a2d3fb, Rim on a real part 4d928a75 + a38af0c6, each type's own strut law) onto release tip 927fa1e0
+#   868b11bf Release (4) app half (WIP, LOCAL, UNTESTED): Rim un-greyed, a zone's Finish is the four, regions[].skin
+#   f5d2a98a Release (4) branch: merge 362's iPad-note fixes (2c3357a5, local) so the thin-wall glow builds on them
+#   992965b4 Release (4) Structural thin-wall glow (WIP, LOCAL, UNBUILT): the walls glow electric blue, the rest dims; two-button pop-up once per project (Switch to Aesthetic / Continue with Structural); the cell hint only in a Manual cell 
+#   f1079337 Release (4): merge B8 Cut d618d9c4 (Cut look + Cut tool, with E4 1446e656: Keep clear on a cut piece, the region-keyed tie); reviewer's approval 11-09
+#   6dbc3a21 Merge branch 'claude/flexible-screens' of https://github.com/Anarkissed/TopOpt into claude/app-build-b8-cut
+#   73fd1ec9 B8 row 37 Pattern: one bar; a hole's grid on its own axis; a flat face's straight grid square to its longest edge, Rotate in 15° steps
+#   4bdcc9d2 Release (4): merge B8 Pattern 73fd1ec9 (row 37, the reviewer's 11-09 18:31Z ruling: one Pattern bar; a hole's grid on its own axis, a flat face square to its longest edge with Rotate in 15° steps, other faces the arc grid; bri
+#   824d59a2 SOLID on the part's surface; members measured honestly (rulings 11-09 + 11-10)
+#   534df5e9 test_lattice_type_strut_law: lattice its own 44 mm bar
+#   7def1f22 test_lattice_type_strut_law: the nine lattice runs behind TOPOPT_LONG_TESTS=1
+#   4906f96d Release (4): merge LatticeTypes' SOLID 7def1f22 (SOLID on the part's surface, members measured honestly, lattice_solid_fallback_reasons; §1 log lt-work/strutlaw_log/7def1f22_s1_7of9.txt, 7/9)
+#   f64ca800 Release (4): merge the N1110 release tip 4a99c057 (d3c50520: his iPad notes 11-10, Cells / In a part, the Sample builder)
+#   7b07cd87 Release (4): the Structural glow lights CORE's walls (the reviewer's 11-09 20:10Z item 2)
+#   3d509723 Release (4): the glow's vertexTints reads ViewerMesh's UInt32 indices (the iPad build's only error; the glow batch 992965b4 was never compiled)
+#   67ea83ba Release (4) gate: re-pin the 9 pins this release moved (each with its control); the stand glow test follows the page's settings-first order
+#   95e66119 Release (4) 2026-11-11: merge claude/release-4 67ea83ba — core SOLID 7def1f22 (LatticeTypes: why each voxel stays solid; the six new live types sc, bcc, fcc, diamond, kelvin, rhombic; Rim on a real part; Skin per zone), B8 Cu
+# Gates (this tree):
+#   07:45 his uncommitted files (left alone): app/TopOpt-Info.plist app/TopOpt.xcodeproj/project.pbxproj app/TopOpt.xcodeproj/xcshareddata/xcschemes/TopOpt.xcscheme 
+#   07:45 his latest job for the preflight: /Users/nadim/.topopt-worker/f9c8124fd2df48b3 (read only)
+#   07:45 merged release-4 as 95e66119 (local); app + core == release-4's; fingerprint 54d2ce825a74
+#   ==> building iOS simulator slice (Eigen + OCCT + lib3mf, arm64)
+#   ==> building iOS device slice (Eigen + OCCT + lib3mf, arm64)
+#   07:47 build_core green: topopt_vendored_core_54d2ce825a74 + build_identity + lattice_variant_job + lattice_solid_fallback_reasons in every slice and arch
+#   07:48 worker CLI built: topopt-cli: core 54d2ce825a74 (dirty=false), built Nov 11 2026 07:48:32; 3 data paths, all under the release worktree
+#   07:48 app_core_capability_mirror passed
+#   07:55 iPad device build green (this tree's own pair)
+#   07:55 preflight on his latest job: preflight: load path CONNECTED
+#   07:56 pushed 95e66119
+#   07:56 worker swapped: /health "fingerprint": "54d2ce825a74"; data paths under the release worktree; preflight again OK; old kept as build-fix/topopt-cli.db2cc34ef3fe-replaced-20261111
+#   07:56 app_release.sh now expects 54d2ce825a74

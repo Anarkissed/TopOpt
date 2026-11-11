@@ -74,7 +74,8 @@ FloorOccupancy measure_floor_occupancy(const VoxelGrid& grid,
   // member here", never a second one.
   constexpr int kThicknessCapVoxels = 32;
   const std::vector<double> width_mm =
-      local_member_thickness_mm(grid, density, iso, kThicknessCapVoxels);
+      lattice_member_width_mm(grid, density, iso, kThicknessCapVoxels,
+                              floor_cells * cell_mm, cell_mm);  // the law's (rulings 11-09)
   if (want_histogram) out.histogram.assign(11, 0);
   double min_cells = std::numeric_limits<double>::infinity();
   for (std::size_t e = 0; e < density.size(); ++e) {
@@ -1181,8 +1182,11 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       // reports are the same measurement and cannot disagree about a member being
       // "thicker than we measured".
       constexpr int kFrozenLatticeThicknessCapVoxels = 32;
-      const std::vector<double> width = local_member_thickness_mm(
-          G, solid_field, kIso, kFrozenLatticeThicknessCapVoxels);
+      const std::vector<double> width = lattice_member_width_mm(
+          G, solid_field, kIso, kFrozenLatticeThicknessCapVoxels,
+          lattice_cells_per_member_min(options.frozen_lattice_topology) *
+              options.frozen_lattice_cell_mm,
+          options.frozen_lattice_cell_mm);  // the certificate's (rulings 11-09)
       fl_validity = lattice_region_validity(
           G, options.frozen_lattice_region_id, options.frozen_lattice_regions,
           width, options.frozen_lattice_topology, options.frozen_lattice_cell_mm,

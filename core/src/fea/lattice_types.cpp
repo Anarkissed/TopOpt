@@ -1,6 +1,7 @@
 // The per-type facts the app reads (topopt/lattice_types.hpp states the contract).
 
 #include "topopt/lattice_types.hpp"
+#include "topopt/strut_strength.hpp"
 
 #include <cstdio>
 
@@ -196,8 +197,10 @@ LatticeTypeFacts lattice_type_facts(const std::string& id) {
     f.structural = yes();
     f.aesthetic = lattice_type_aesthetic(topo);
   }
-  if (topo == LatticeTopology::Octet) {
-    f.strut_strength_measured = true;  // PR 259's law (strut_strength.hpp)
+  // R10: a type's OWN measured strut-strength law (strut_strength.hpp; octet's is PR 259's,
+  // the rest ruling 11-08 (B)'s, each measured the same way).
+  if (strut_law_measured(topo)) {
+    f.strut_strength_measured = true;
     f.strut_strength_note = "";
   }
   return f;

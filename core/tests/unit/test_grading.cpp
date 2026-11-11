@@ -539,26 +539,37 @@ int main() {
   // nothing about it can be latticed by any legal cell: it is exactly the maintainer's
   // back wall. Sweeping the wall's demand against the body's then walks the threshold.
   {
-    // 44 x 40 x 40 envelope: a 40 mm cube body (x 0..39) plus a 4-voxel-thick wall
-    // (x 40..43) spanning the full y,z face. The wall's inscribed thickness is ~4 mm.
+    // 44 x 40 x 60 envelope: a 40 mm cube body (x 0..39, z 0..39) plus a 4-voxel-thick
+    // wall (x 40..43) spanning the body's whole y,z face AND standing kH = 20 mm above
+    // it (z 0..59). The wall's inscribed thickness is ~4 mm where it stands free.
     // (A 30 mm body until ruling 2026-11-02 (c): octet's full-cell floor is 6.25 mm at
     // a 0.4 mm bead, N* x it = 31.2 mm, so no voxel of a 30 mm body reads thick enough
     // to grade and the junction band below would vanish.)
+    // ★ WHY THE WALL STANDS ABOVE THE BODY (ruling 11-09 20:10Z, the convex-corner rule).
+    // Until then the wall was flush with the body's face: x 40..43 of one 44 x 40 x 40
+    // block. Its below-floor voxels were the wedges along that block's end edges and
+    // corners, which the member width now joins to the block they sit on ("a corner
+    // residue thinner than a cell, beside a member that holds the floor, joins that
+    // member"), so the flush wall had NO voxel below the floor and §13 measured nothing.
+    // A wall that stands free above the body is thin in its own right; the part beside
+    // the body is still the block's end and reads thick, which keeps the strict subset.
     const int pad = 3;
     const int kB = 40;  // the body's side (mm); 30 until ruling 2026-11-02 (c)
+    const int kH = 20;  // how far the wall stands above the body (ruling 11-09 20:10Z)
+    const int kW = kB + kH;  // the wall's height
     VoxelGrid g;
-    g.nx = (kB + 4) + 2 * pad; g.ny = kB + 2 * pad; g.nz = kB + 2 * pad; g.spacing = 1.0;
+    g.nx = (kB + 4) + 2 * pad; g.ny = kB + 2 * pad; g.nz = kW + 2 * pad; g.spacing = 1.0;
     g.origin = Vec3{0, 0, 0};
     g.tags.assign(static_cast<std::size_t>(g.nx) * g.ny * g.nz, VoxelTag::Empty);
-    for (int k = 0; k < kB; ++k)
+    for (int k = 0; k < kW; ++k)
       for (int j = 0; j < kB; ++j)
         for (int i = 0; i < kB + 4; ++i)
-          g.set_tag(i + pad, j + pad, k + pad, VoxelTag::Interior);
+          if (i >= kB || k < kB) g.set_tag(i + pad, j + pad, k + pad, VoxelTag::Interior);
     const std::size_t Ng = g.voxel_count();
     std::vector<double> gd = density_of(g);
     // The REGION is the wall alone (x 40..43 in block coordinates).
     std::vector<char> wall(Ng, 0);
-    for (int k = 0; k < kB; ++k)
+    for (int k = 0; k < kW; ++k)
       for (int j = 0; j < kB; ++j)
         for (int i = kB; i < kB + 4; ++i)
           wall[g.index(i + pad, j + pad, k + pad)] = 1;
@@ -568,9 +579,10 @@ int main() {
     // rather than somewhere convenient.
     auto demand_with_wall = [&](double w) {
       std::vector<double> d(Ng, 0.0);
-      for (int k = 0; k < kB; ++k)
+      for (int k = 0; k < kW; ++k)
         for (int j = 0; j < kB; ++j)
           for (int i = 0; i < kB + 4; ++i) {
+            if (i < kB && k >= kB) continue;  // above the body: air
             const std::size_t e = g.index(i + pad, j + pad, k + pad);
             d[e] = (i >= kB) ? w : 100.0;
           }
@@ -582,14 +594,16 @@ int main() {
     wp.min_extrudable_width_mm = 0.4;
     // PINNED for the same reason as `p` above (S2): 2.0 mm used to be raised to
     // exactly this cell, and every exposure number quoted in the comments below —
-    // 3,980 of 70,400 voxels, 5.65 % — was measured at it. Reading it from core keeps
+    // 5,018 of 73,600 voxels, 6.82 % (ruling 11-09 20:10Z's free-standing wall; 3,980 of
+    // 70,400, 5.65 %, when it was flush) — was measured at it. Reading it from core keeps
     // the cap tests measuring the CAP rather than the cell law.
     wp.target_cell_size_mm = lattice_cell_printability_floor_mm(topo, 0.4);
     wp.demand_exponent = 1.0;
     // THE AGGREGATE CAP IS LIFTED FOR THE THRESHOLD TESTS BELOW, deliberately and
     // with the number stated. This fixture is a 40 mm block with a 4 mm wall bolted
-    // to it, and that wall puts 3,980 of the block's 70,400 printed voxels under the
-    // floor — 5.65 %, well over the 3.0 % production cap. That ratio is an artefact of
+    // to it and standing 20 mm above it, and that wall puts 5,018 of the part's 73,600
+    // printed voxels under the floor — 6.82 %, well over the 3.0 % production cap (the
+    // 13a line prints it). That ratio is an artefact of
     // keeping the fixture small, not a property of any real part (the maintainer's own wall is
     // 0.930 % of his). Left at the default, the cap would refuse retention here and
     // every threshold assertion below would pass for the WRONG REASON — they would
@@ -601,6 +615,13 @@ int main() {
     {
       const std::vector<double> d = demand_with_wall(1.0);  // 1% of peak: very quiet
       GradedField off = grade_lattice(g, gd, d, &wall, wp);
+      double printed = 0.0;
+      for (const double x : gd) printed += x >= 0.5 ? 1.0 : 0.0;
+      std::printf("[grading] §13 fixture: wall %.0f voxels, %.0f below the floor, %.0f "
+                  "printed (%.2f %% of the part)\n",
+                  static_cast<double>(off.region_voxels),
+                  static_cast<double>(off.subfloor_candidate_voxels), printed,
+                  100.0 * static_cast<double>(off.subfloor_candidate_voxels) / printed);
       CHECK(!off.subfloor_retention_armed,
             "S1: sub-floor retention is DISARMED by default");
       // Not the WHOLE wall is sub-floor: the EDT thickness bleeds where the wall
@@ -854,7 +875,7 @@ int main() {
       CHECK(static_cast<double>(over.subfloor_would_retain_voxels) >
                 over.subfloor_aggregate_cap_fraction *
                     static_cast<double>(over.part_printed_voxels),
-            "this fixture really is over the production cap (5.65% of the block)");
+            "this fixture really is over the production cap (6.82% of the part)");
       CHECK(over.subfloor_over_budget, "over the cap is REPORTED, not silent");
       CHECK(over.subfloor_retained_voxels == 0,
             "over the cap retains NOTHING — never 'as much as fits', because "
@@ -901,23 +922,25 @@ int main() {
     // is not — which is the whole point, and also strictly more material under the
     // accuracy claim, which is why 13j exists.
     {
-      // Split the wall in two along z: the LOW half stays quiet, the HIGH half is
-      // driven to the part's peak.
+      // Split the wall in two along y: the y < 20 half stays quiet, the other half is
+      // driven to the part's peak. (Along z until ruling 11-09 20:10Z: the free-standing
+      // top is where the wall is below the floor, so each half must hold some of it.)
       std::vector<int> ids(Ng, 0);
       std::vector<char> both(Ng, 0);
-      for (int k = 0; k < kB; ++k)
+      for (int k = 0; k < kW; ++k)
         for (int j = 0; j < kB; ++j)
           for (int i = kB; i < kB + 4; ++i) {
             const std::size_t e = g.index(i + pad, j + pad, k + pad);
             both[e] = 1;
-            ids[e] = (k < kB / 2) ? 1 : 2;      // 1 = quiet half, 2 = loud half
+            ids[e] = (j < kB / 2) ? 1 : 2;      // 1 = quiet half, 2 = loud half
           }
       std::vector<double> d(Ng, 0.0);
-      for (int k = 0; k < kB; ++k)
+      for (int k = 0; k < kW; ++k)
         for (int j = 0; j < kB; ++j)
           for (int i = 0; i < kB + 4; ++i) {
+            if (i < kB && k >= kB) continue;  // above the body: air
             const std::size_t e = g.index(i + pad, j + pad, k + pad);
-            d[e] = (i < kB) ? 100.0 : (k < kB / 2 ? 1.0 : 100.0);
+            d[e] = (i < kB) ? 100.0 : (j < kB / 2 ? 1.0 : 100.0);
           }
 
       GradingLawParams uni = wp;

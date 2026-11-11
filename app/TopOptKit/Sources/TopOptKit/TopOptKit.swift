@@ -1098,11 +1098,14 @@ public struct AppliedClearance: Equatable, Sendable {
     public let kind: TopOptKit.ClearanceKind
     public let voxelsFrozen: Int
     public let inGrid: Bool
-    public init(faceID: Int, kind: TopOptKit.ClearanceKind, voxelsFrozen: Int, inGrid: Bool) {
+    /// ★ E4 (j): the cut piece's region when the Keep clear was on a piece (`faceID` is then -1); -1 otherwise.
+    public let regionID: Int
+    public init(faceID: Int, kind: TopOptKit.ClearanceKind, voxelsFrozen: Int, inGrid: Bool, regionID: Int = -1) {
         self.faceID = faceID
         self.kind = kind
         self.voxelsFrozen = voxelsFrozen
         self.inGrid = inGrid
+        self.regionID = regionID
     }
 }
 
@@ -1901,6 +1904,37 @@ public enum TopOptKit {
         return out.map { Double($0) }
     }
 
+    /// ★ WHY CORE LEAVES EACH VOXEL SOLID — core's `lattice_solid_fallback_reasons` (LatticeTypes'
+    /// SOLID 7def1f22) over the caller's occupancy at ONE cell for the part. Codes: 0 latticed,
+    /// 1 too thin for this cell, 2 too thin for any cell, 3 strut unprintable at every cell, 4 other,
+    /// 5 sliver latticed, 6 corner joined, 255 not part. The Structural thin-wall glow lights 1–3
+    /// (the reviewer's 11-09 20:10Z item 2: core's own mask). Empty when core has no answer (a
+    /// non-cubic grid, a refused parameter, a type core does not call live): draw no glow then.
+    public static let solidFallbackGlowCodes: ClosedRange<UInt8> = 1...3
+    public static func latticeSolidFallbackReasons(nx: Int, ny: Int, nz: Int,
+                                                   spacing: SIMD3<Float>,
+                                                   solid: [Bool],
+                                                   topology: String,
+                                                   cellMM: Double, lineWidthMM: Double,
+                                                   organic: Bool = false) -> [UInt8] {
+        notePerTypeCall(#function, topology)
+        guard nx > 0, ny > 0, nz > 0, solid.count == nx * ny * nz else { return [] }
+        let sx = Double(spacing.x), sy = Double(spacing.y), sz = Double(spacing.z)
+        guard sx > 0, sy > 0, sz > 0, cellMM > 0, lineWidthMM > 0 else { return [] }
+        // ★ CORE TAKES ONE CUBIC SPACING — the same 2 % check as latticeMemberThicknessMM.
+        let mean = (sx + sy + sz) / 3
+        let worst = max(abs(sx - mean), max(abs(sy - mean), abs(sz - mean))) / mean
+        guard worst <= 0.02 else { return [] }
+        var flags = [UInt8](repeating: 0, count: solid.count)
+        for i in 0..<solid.count where solid[i] { flags[i] = 1 }
+        let out = flags.withUnsafeBufferPointer { buf in
+            topoptbridge.lattice_solid_fallback_reasons(
+                Int32(nx), Int32(ny), Int32(nz), mean, buf.baseAddress, buf.count,
+                std.string(topology), cellMM, lineWidthMM, organic)
+        }
+        return out.map { UInt8($0) }
+    }
+
     /// ★★ CORE'S DYADIC CELL-SIZE PLAN — the levels, on core's own base grid.
     ///
     /// The preview drew one cell size for the whole part; a swept run gives every
@@ -2537,6 +2571,23 @@ public enum TopOptKit {
         guard jobSchemaError(job("")) == nil else { return false }   // the control
         return jobSchemaError(job(#", "outer_finish": "none""#)) == nil
     }()
+    /// ★ RELEASE (4) (LatticeTypes b8a2d3fb + 4d928a75, ruling 11-08 (1), (A)): does the linked core take a ZONE's own skin,
+    /// `regions[].skin` "diagrid" (Skin) / "rim" (Rim) / "none"? Older cores refuse the whole job on the unknown key. The same
+    /// one-region probe job, the key on the region, with "rim" (the newest of the three) as the question.
+    public static let regionSkinWired: Bool = {
+        func job(_ extra: String) -> Data {
+            Data(latticeProbeBaseJob.replacingOccurrences(
+                of: #""output":"#,
+                with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "cell_mm": 3.0}, "lattice": {"topology": "octet", "regions": [{"role": "include", "kind": "face", "geometry": {"origin": [0, 0, 0], "normal": [0, 0, 1], "half_u_mm": 10, "half_w_mm": 10, "depth_mm": 5}"#
+                    + extra + #"}]}, "output":"#).utf8)
+        }
+        guard jobSchemaError(job("")) == nil else { return false }   // the control
+        return jobSchemaError(job(#", "skin": "rim""#)) == nil && jobSchemaError(job(#", "skin": "diagrid""#)) == nil
+    }()
+    /// ★ RELEASE (4) (LatticeTypes 4d928a75 + a38af0c6, ruling 11-08 (A)): does the linked core build a rim on a real part?
+    /// The schema took "rim" long before the engine laid one, so the question is the region-level key 4d928a75 added with it
+    /// (`regionSkinWired`): a core that takes a zone's "rim" lays the part's.
+    public static var latticeRimOnPartWired: Bool { regionSkinWired }
     /// ★ B7 slice 2b (ruling 11-06 (1), core E2.4 5fe8e992): does the linked core take the PART's open finish,
     /// `lattice.outer_finish: "none"`? Before E2.4 core knew only shell / skin / shell+skin and refused it. The same
     /// one-region probe job, with the key on the lattice block.
@@ -3137,15 +3188,27 @@ public enum TopOptKit {
         /// axis/radius/normal/extent must travel to the core. When set, `faceID`
         /// is a sentinel (`-1`) and the same distance fields above still apply.
         public let manual: ManualGeometry?
+        /// ★ E4 (j), ruling 2026-11-07 19:55: a Keep clear on a CUT PIECE names its face region (declared in the run's
+        /// region layer) instead of a face; core clears in front of the piece only (its member faces' own Keep clear,
+        /// clipped by its cuts). `faceID` is then `-1`. -1 = not a piece.
+        public let regionID: Int
         public init(faceID: Int, kind: ClearanceKind, concentricMarginMM: Double = 0,
                     axialClearanceMM: Double = 0, slabDepthMM: Double = 0,
-                    manual: ManualGeometry? = nil) {
+                    manual: ManualGeometry? = nil, regionID: Int = -1) {
             self.faceID = faceID
             self.kind = kind
             self.concentricMarginMM = concentricMarginMM
             self.axialClearanceMM = axialClearanceMM
             self.slabDepthMM = slabDepthMM
             self.manual = manual
+            self.regionID = regionID
+        }
+
+        /// ★ E4 (j): a cut piece's Keep clear, by its region.
+        public static func piece(regionID: Int, kind: ClearanceKind, concentricMarginMM: Double = 0,
+                                 axialClearanceMM: Double = 0, slabDepthMM: Double = 0) -> ClearanceSpec {
+            ClearanceSpec(faceID: -1, kind: kind, concentricMarginMM: concentricMarginMM,
+                          axialClearanceMM: axialClearanceMM, slabDepthMM: slabDepthMM, regionID: regionID)
         }
 
         /// A hand-placed swept-cylinder (bolt) keep-out, geometry supplied inline.
@@ -3343,6 +3406,11 @@ public enum TopOptKit {
             lc.clearance_half_u_mm.push_back(g.halfUMM)
             lc.clearance_half_w_mm.push_back(g.halfWMM)
         }
+        // ★ E4 (j): a Keep clear on a cut piece names its region. Emitted only when one does, so a load case with no
+        // piece Keep clear ships the POD it always did.
+        if clearances.contains(where: { $0.regionID >= 0 }) {
+            for c in clearances { lc.clearance_region_ids.push_back(Int32(c.regionID)) }
+        }
         // Handoff 124 — flatten the Face protections (preserve-skin) into the POD
         // load case: the raw face ids + the ONE global depth (mm). A depth <= 0
         // means "use the core default". Empty list → byte-identical.
@@ -3502,13 +3570,15 @@ public enum TopOptKit {
         let cKinds = Array(raw.clearance_kinds)
         let cFrozen = Array(raw.clearance_voxels_frozen)
         let cInGrid = Array(raw.clearance_in_grid)
+        let cRegions = Array(raw.clearance_region_ids)   // ★ E4 (j): a cut piece's row names its region
         var applied: [AppliedClearance] = []
         for i in 0..<cFaces.count {
             applied.append(AppliedClearance(
                 faceID: Int(cFaces[i]),
                 kind: (i < cKinds.count && cKinds[i] == 1) ? .face : .bolt,
                 voxelsFrozen: i < cFrozen.count ? Int(cFrozen[i]) : 0,
-                inGrid: i < cInGrid.count ? cInGrid[i] != 0 : false))
+                inGrid: i < cInGrid.count ? cInGrid[i] != 0 : false,
+                regionID: i < cRegions.count ? Int(cRegions[i]) : -1))
         }
         // Handoff 124 — the Face-protection diagnostics (parallel arrays), for honest results.
         let pFaces = Array(raw.protection_face_ids)

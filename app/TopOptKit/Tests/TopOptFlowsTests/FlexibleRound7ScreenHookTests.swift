@@ -228,9 +228,10 @@ final class FlexibleRound7ScreenHookTests: XCTestCase {
         let filter = try XCTUnwrap(ws.range(of: "SettingsChipID.allCases.filter { id in\n"))
         // ★ RE-PINNED (sync of #354 at 89af86dd): #354's own first statements now come before its switch (B3 7e37c45f's Topology
         // rule, B5 3f293974's Edit faces rule); nothing of ours is in the filter. Was: the switch first.
-        let filter354 = "            // ★ B3: on Topology the chip column's settings are the Setup chip's rows. ★ B5: Paint lives in Edit faces —\n"
-            + "            // there it is the column's one chip (greyed on STEP, `EditFacesPaint`), and on no stage outside it.\n"
-            + "            if editFaces.isEditing { return id == .paint && viewerMesh != nil }\n"
+        // ★ RE-PINNED (UI-Notes B8, ruling 11-08 21:32Z item 1): Paint left the column for Edit faces' rail
+        let filter354 = "            // ★ B3: on Topology the chip column's settings are the Setup chip's rows. ★ B8 (ruling 11-08 21:32Z): Paint left\n"
+            + "            // the column for Edit faces' rail (`cutPaintTap`), so in Edit faces the column is empty.\n"
+            + "            if editFaces.isEditing { return false }\n"
             + "            if stage == .topology { return false }\n"
             // ★ RE-PINNED (UI-Notes B6 s1, his note 21): the Lattice stage's chips are its Settings rows too
             + "            // ★ B6 s1 (note 21): on the Lattice stage the chips are the Settings panel's rows; the band chips' Show / Hide stays\n"

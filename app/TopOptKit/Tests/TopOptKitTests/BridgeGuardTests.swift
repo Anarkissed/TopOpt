@@ -15,7 +15,10 @@ import simd
 final class BridgeGuardTests: XCTestCase {
 
     /// The round's non-live ids, and one core has never heard of.
-    static let nonLive = ["sc", "bcc", "fcc", "diamond", "kelvin", "rhombic", "bccz", "fccz", "reentrant"]
+    /// ★ RE-PINNED (release (4), LatticeTypes' types in the linked core 54d2ce825a74): sc, bcc, fcc, diamond, kelvin and
+    /// rhombic are live now (`nowLive`, pinned below); these three are still not.
+    static let nonLive = ["bccz", "fccz", "reentrant"]
+    static let nowLive = ["sc", "bcc", "fcc", "diamond", "kelvin", "rhombic"]
     static let unknown = "lattice9"
 
     /// Core's own words for a type it knows but does not call live, from its own sets.
@@ -84,6 +87,13 @@ final class BridgeGuardTests: XCTestCase {
         }
     }
 
+    /// ★ RELEASE (4): the six types LatticeTypes made live are live in the linked core, in core's own words.
+    func testTheSixNewTypesAreLiveInCoresWords() {
+        for id in Self.nowLive {
+            XCTAssertEqual(coreWords(id), TopOptKit.latticeTypeReadinessPlain(.live), "★ \(id) is live in the linked core")
+        }
+    }
+
     /// ★★ THE RULING'S TEST: every non-live id, every per-type function — invalid, with
     /// core's reason, and no crash (a crash ends this process before the class finishes).
     func testEveryNonLiveTypeIsInvalidWithCoresReason() {
@@ -122,7 +132,7 @@ final class BridgeGuardTests: XCTestCase {
         XCTAssertTrue(TopOptKit.lastCoreRefusal?.contains("not a std::exception") ?? false,
                       TopOptKit.lastCoreRefusal ?? "nil")
         // a refusal is not left behind for the next caller to misread
-        _ = TopOptKit.latticeLimits(topology: "kelvin")
+        _ = TopOptKit.latticeLimits(topology: "reentrant")   // ★ re-pinned (release (4)): kelvin is live now
         XCTAssertNotNil(TopOptKit.lastCoreRefusal)
         _ = TopOptKit.latticeLimits(topology: "octet")
         XCTAssertNil(TopOptKit.lastCoreRefusal, "★ cleared by the next call that answers")

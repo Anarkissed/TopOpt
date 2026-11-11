@@ -12,6 +12,7 @@ final class LatticeFinishWireTests: XCTestCase {
 
     override func tearDown() {
         LatticeBoundaryTreatment.controlShellDefault = false
+        LatticeBoundaryTreatment.controlRimGreyed = false
         super.tearDown()
     }
 
@@ -19,7 +20,7 @@ final class LatticeFinishWireTests: XCTestCase {
     /// nothing (core's default shell).
     func testEachFinishStatesCoresWord() {
         XCTAssertTrue(TopOptKit.latticeOpenFinishWired, "premise: the linked core has E2.4's open finish")
-        let want: [(LatticeBoundaryTreatment, String?)] = [(.none, "none"), (.rim, nil), (.fullSkin, "skin"), (.covered, "shell")]
+        let want: [(LatticeBoundaryTreatment, String?)] = [(.none, "none"), (.rim, "none"), (.fullSkin, "skin"), (.covered, "shell")]   // ★ release (4): Rim is the open lattice + its rim
         for (t, w) in want { XCTAssertEqual(t.jobOuterFinish, w, "\(t)") }
         LatticeBoundaryTreatment.controlShellDefault = true
         XCTAssertNil(LatticeBoundaryTreatment.none.jobOuterFinish, "★ CONTROL: before 2b None ran under core's shell")
@@ -37,7 +38,7 @@ final class LatticeFinishWireTests: XCTestCase {
                 with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "cell_mm": 3.0}, "lattice": {"topology": "octet", "skin": "\#(skin)""#
                     + of + #", "regions": [{"role": "include", "kind": "face", "geometry": {"origin": [0, 0, 0], "normal": [0, 0, 1], "half_u_mm": 10, "half_w_mm": 10, "depth_mm": 5}}]}, "output":"#).utf8)
         }
-        let want: [(LatticeBoundaryTreatment, String, String?)] = [(.none, "none", "none"), (.rim, "rim", nil),
+        let want: [(LatticeBoundaryTreatment, String, String?)] = [(.none, "none", "none"), (.rim, "rim", "none"),
                                                                    (.fullSkin, "diagrid", "skin"), (.covered, "none", "shell")]
         for (t, skin, finish) in want {
             var s = LatticeSettings(enabled: true)
@@ -78,8 +79,13 @@ final class LatticeFinishWireTests: XCTestCase {
     }
 
     /// ★ Ruling 4: Rim greyed with one line until the engine builds it; Skin says, before the run, that it isn't certified.
+    /// ★ RE-PINNED (release (4), reviewer 11-09 18:31Z "un-grey Rim"): the linked core lays a rim on a real part
+    /// (LatticeTypes 4d928a75 + a38af0c6), so Rim is offered; the control greys it as before.
     func testRimIsGreyedAndSkinSaysItIsNotCertified() throws {
-        XCTAssertTrue(LatticeSetupWizard.rimNeedsEngineWork, "un-grey Rim when LatticeTypes' rim on a real part lands")
+        XCTAssertFalse(LatticeSetupWizard.rimNeedsEngineWork, "★ release (4): Rim is offered")
+        LatticeBoundaryTreatment.controlRimGreyed = true
+        XCTAssertTrue(LatticeSetupWizard.rimNeedsEngineWork, "control: greyed on a core without the rim")
+        LatticeBoundaryTreatment.controlRimGreyed = false
         let src = try FlexibleSource.code("LatticeSetupWizard.swift")
         XCTAssertTrue(src.contains("selected: boundaryIndex, greyed: Self.rimNeedsEngineWork ? [1] : []"),
                       "★ the finish row greys Rim (index 1)")
@@ -87,7 +93,7 @@ final class LatticeFinishWireTests: XCTestCase {
         XCTAssertTrue(src.contains("model.boundary == .rim ? Self.rimStoredLine : Self.rimGreyedLine"))
         XCTAssertEqual(LatticeSetupWizard.rimGreyedLine, "Rim needs engine work: the engine builds no rim on a real part yet.")
         XCTAssertTrue(src.contains("captionLine(Self.skinNotCertifiedLine"))
-        XCTAssertTrue(src.contains("segmentButton(title, on: shown == value, greyed: partWord == nil)"),
-                      "★ a zone's finish is greyed under the part's Skin or Rim")
+        XCTAssertTrue(src.contains("segmentButton(f.title, on: shown == f, greyed: greyed(f))"),
+                      "★ release (4): a zone's four finishes, each greyed where core refuses it")
     }
 }

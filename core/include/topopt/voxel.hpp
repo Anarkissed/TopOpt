@@ -458,6 +458,12 @@ V3Report check_v3(const VoxelGrid& grid, const std::vector<double>& density,
 // transform: for r = 1,2,… the opening by a radius-r ball keeps v iff some point
 // with EDT-to-void >= r lies within r of v; τ(v) = 2·(largest surviving r)·spacing.
 //
+// ★ `grid_outside_is_void` (reviewer's ruling 11-09 (2)): the grid is the part's bounding
+// box with no padding, so for the LATTICE's member width (the cells-per-member floor, where
+// "thick" is the unsafe side) a member reaching a grid face is measured to it; a part that
+// filled its own grid used to read infinitely thick. False (the default): the outside is
+// not void, as the width-aware knockdown and the smoothing policy have always read it.
+//
 // Void voxels (and non-solid tags) return 0. The radius sweep is capped at
 // `cap_radius_voxels` for a BOUNDED cost (bar K6): any voxel still covered at the
 // cap is at least that thick and returns +infinity — a "thicker than we measured"
@@ -468,7 +474,62 @@ V3Report check_v3(const VoxelGrid& grid, const std::vector<double>& density,
 // non-positive cap.
 std::vector<double> local_member_thickness_mm(const VoxelGrid& grid,
                                               const std::vector<double>& density,
-                                              double iso, int cap_radius_voxels);
+                                              double iso, int cap_radius_voxels,
+                                              bool grid_outside_is_void = false);
+
+// ★ THE SAME THICKNESS, MEASURED ON THE PART'S REAL SURFACE (reviewer's ruling 11-09,
+// the rim coupon's SOLID). On a curved face the voxel staircase above reads its own
+// steps as members: a ridge voxel at an arch's apex is one voxel wide by the staircase,
+// so it fell back to solid as a ROD, and the steps of the curved top as a COMB of fins.
+// Here a printed voxel's ball radius is read from `surface` (the part's own mesh,
+// exact signed distance): radius = depth below the surface + half a voxel, which on a
+// face lying on voxel boundaries is EXACTLY the staircase's radius (the distance to
+// the nearest void centre), so a grid-aligned box reads as before. Void voxels INSIDE
+// the surface (a design cut, a clearance) still bound the radius by the staircase, as
+// above. The outside of the grid is the surface's outside, so a part that fills its
+// own grid is measured too. The granulometry, the cap and the +inf sentinel are the
+// ones above. `surface` must be in the grid's frame.
+class MeshDistance;
+std::vector<double> local_member_thickness_mm(const VoxelGrid& grid,
+                                              const std::vector<double>& density,
+                                              double iso, int cap_radius_voxels,
+                                              const MeshDistance& surface);
+
+// ★ THE LATTICE'S MEMBER WIDTH, WITH CONVEX CORNERS JOINED TO THEIR MEMBER (reviewer's
+// ruling 11-09 20:10Z, the rim coupon's SOLID). The inscribed-ball width reads the corner
+// of a THICK member as thin: along a 90-degree convex edge the balls of the floor's radius
+// r leave a wedge reaching (sqrt 2 - 1) r from them, so every convex edge of every part fell
+// back to solid, about 10 mm wide at octet's floor on a 4 mm cell. That residue is not a
+// thin member; the cut-cell population in each type's law covers boundary cells.
+//
+// THE RULE: a voxel under the floor whose residue, measured from the floor-holding
+// material outward to the free surface, ends within the REACH is a convex corner of that
+// member and JOINS it (its width becomes the floor's). The reach is the further of a
+// right-angle edge's residue plus one cell, (sqrt 2 - 1) r + cell, and a three-face
+// corner's plus one voxel, (sqrt 3 - 1) r + h. A junction between
+// two members does not: there the thin member CONTINUES past that reach (the coupon's
+// tongue, 12 mm on), so its root stays thin and solid. "Ends": the largest distance from
+// the floor-holding material reachable from the voxel through under-floor material along
+// strictly rising distance. A right-angle edge's residue ends at (sqrt 2 - 1) r and a
+// three-face corner's at (sqrt 3 - 1) r, both inside the reach. A tip sharper than about
+// 75 degrees keeps its point solid, because there the faces really do converge. A stub
+// shorter than the reach joins too.
+//
+// The width is local_member_thickness_mm's: on `surface` when given, else on the voxel
+// staircase with the grid's outside void. `floor_mm` <= 0 or `cell_mm` <= 0 disables the
+// join (the width alone). Deterministic.
+struct CornerJoinStats {
+  long long residue_voxels = 0;  // printed, under the floor, within reach of the floor-holding set
+  long long joined_voxels = 0;   // of those, joined to their member
+  double floor_mm = 0.0, reach_mm = 0.0;
+};
+std::vector<double> lattice_member_width_mm(const VoxelGrid& grid,
+                                            const std::vector<double>& density, double iso,
+                                            int cap_radius_voxels, double floor_mm,
+                                            double cell_mm,
+                                            const MeshDistance* surface = nullptr,
+                                            CornerJoinStats* stats = nullptr,
+                                            std::vector<char>* joined = nullptr);
 
 // ---------------------------------------------------------------------------
 // The CONNECTIVITY BELT (handoff 2026-07-23-gate-honesty-connectivity-rejection).

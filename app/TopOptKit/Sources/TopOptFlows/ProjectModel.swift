@@ -77,8 +77,9 @@ public final class ProjectModel: ObservableObject {
     /// ★ His iPad 2026-10-28 (holes with no keep-clear, third report): EVERY face a group holds — its plain faces, then the
     /// faces its regions cover (a hole isolated or cut on the Surface stage is held as a region, and the keep-clear rules
     /// read only `g.faces`, so such a hole never got one). The ONE list the keep-clear rules, rows, volumes and run read.
-    /// ★ ONLY WHOLE FACES: a CUT piece is part of a face, and a keep-clear sent for it would clear the whole CAD face (core's
-    /// clearance takes a face id only — EditFacesStageTests). A union or isolate of whole faces (a hole among them) counts.
+    /// ★ ONLY WHOLE FACES: a CUT piece is part of a face, and a keep-clear sent for its face would clear the whole CAD face
+    /// (EditFacesStageTests). A piece goes by its region instead (`keepClearPieces`, E4 (j)). A union or isolate of whole
+    /// faces (a hole among them) counts here.
     public func keepClearFaces(_ g: SelectionGroup) -> [FaceID] {
         guard !g.regionIDs.isEmpty, let mesh = viewerMesh else { return g.faces }
         var whole: Set<FaceID> = []
@@ -90,6 +91,25 @@ public final class ProjectModel: ObservableObject {
         }
         let own = Set(g.faces)
         return g.faces + whole.filter { !own.contains($0) }.sorted()
+    }
+
+    /// ★ E4 (j), ruling 2026-11-07 19:55: the CUT pieces a group holds — what `keepClearFaces` leaves out. Core takes a
+    /// Keep clear on a piece by its region now (`ClearanceSpec.piece`): its member faces' own Keep clear, clipped by its
+    /// cuts, so a piece clears in front of itself and nowhere else. Each piece once, with its member faces (the viewer's);
+    /// a piece the run would not send (no faces left — `runRegionIDs`) is left out.
+    public func keepClearPieces(_ g: SelectionGroup) -> [(region: RegionID, faces: [FaceID])] {
+        guard !g.regionIDs.isEmpty, let mesh = viewerMesh else { return [] }
+        var out: [(region: RegionID, faces: [FaceID])] = []
+        var seen: Set<RegionID> = []
+        for r in surfaceEffectiveRegions(of: g) {
+            for leaf in faceRegions.resolvedLeaves(r) where !seen.contains(leaf) {
+                seen.insert(leaf)
+                guard let region = faceRegions.region(leaf), region.isCut, !runRegionIDs([leaf]).isEmpty else { continue }
+                let faces = FaceRegionGeometry.members(of: region, in: mesh).sorted()
+                if !faces.isEmpty { out.append((region: leaf, faces: faces)) }
+            }
+        }
+        return out
     }
 
     /// Drop every "auto keep-clear deleted" mark whose face its group no longer holds (and save the sidecar if any went):
@@ -837,6 +857,25 @@ public final class ProjectModel: ObservableObject {
                 } else {
                     specs.append(.init(faceID: Int(resolvedRunFaceID(f)), kind: .face,
                                        slabDepthMM: ov.slabDepthMM ?? 0))
+                }
+            }
+            // ★ E4 (j), ruling 2026-11-07 19:55: A CUT PIECE KEEPS CLEAR AS A FACE DOES (ledger row 38: a piece "works
+            // everywhere a CAD face works … Keep clear"), by its region, and core clips it to the piece: a piece of a hole
+            // goes as a bolt (the auto rule's too), a flat piece as a face (an explicit Keep clear only). A piece with
+            // neither gives core nothing to clear and core refuses it, so it is not sent — as a whole face of that kind
+            // clears nothing. Its distances and its "deleted" mark are its hole's / its flat face's, in this group.
+            for piece in keepClearPieces(g) {
+                if let f = piece.faces.first(where: { FaceTopology.isFastenerBore($0, in: mesh) }),
+                   !force.isClearanceFaceSuppressed(f, in: g.id) {
+                    let ov = force.clearanceOverride(forGroup: g.id, face: f)
+                    specs.append(.piece(regionID: piece.region, kind: .bolt,
+                                        concentricMarginMM: ov.concentricMarginMM ?? 0,
+                                        axialClearanceMM: ov.axialClearanceMM ?? 0))
+                }
+                if explicit, let f = piece.faces.first(where: { mesh.faceGeometry($0)?.isPlane ?? false }),
+                   !force.isClearanceFaceSuppressed(f, in: g.id) {
+                    let ov = force.clearanceOverride(forGroup: g.id, face: f)
+                    specs.append(.piece(regionID: piece.region, kind: .face, slabDepthMM: ov.slabDepthMM ?? 0))
                 }
             }
         }
@@ -1884,6 +1923,11 @@ public final class ProjectModel: ObservableObject {
                                       piece: RegionID? = nil)
         -> (cells: [FaceRegionGeometry.GridCell], verdict: SliverVerdict)? {
         guard let mesh = viewerMesh else { return nil }
+        // ★ B8 (row 37, P5): the bar counts cut lines from 0 — one column by one row cuts nothing
+        if columns <= 1 && rows <= 1 {
+            return ([], SliverVerdict(ok: false, minCellVoxels: 0, emptyCells: 0, memberVoxels: 0, maxCellsBudget: 0,
+                                      floorVoxels: kRegionSliverFloorVoxels, reason: PatternHole.nothingToCut))
+        }
         // ★ §7 — THE GRID RUNS ALONG THE SHAPE. The frame's own axes come from the
         // member vertices' principal direction, which is pulled off by wherever the
         // tessellation is dense; the face's longest STRAIGHT EDGE is what a person
@@ -1915,9 +1959,14 @@ public final class ProjectModel: ObservableObject {
         // on a curve ("170° per piece is too wide to cut with a plane"). The
         // geometry knows why; it now says so.
         let cells: [FaceRegionGeometry.GridCell]
-        switch SurfacePatternAxis.grid(face: face, frame: frame,
+        let within = unionLeaf?.cuts ?? target?.cuts ?? []
+        // ★ B8 (row 37, the reviewer's 11-09 ruling (b)): a FLAT face's grid is straight — square to its longest edge,
+        // turned by Rotate (`PatternFlat`); the walk below never read the frame, and on a plate it ran corner to corner
+        switch surfacePatternIsFlat(face: face)
+            ? PatternFlat.cells(face: face, frame: frame, columns: columns, rows: rows, in: mesh, within: within)
+            : SurfacePatternAxis.grid(face: face, frame: frame,
                                        columns: columns, rows: rows, in: mesh,
-                                       within: unionLeaf?.cuts ?? target?.cuts ?? []) {
+                                       within: within) {
         case .success(let c):
             cells = c
         case .failure(let refusal):
@@ -1986,6 +2035,74 @@ public final class ProjectModel: ObservableObject {
                                             rotationDegrees: rotationDegrees,
                                             piece: piece),
               p.verdict.ok else { return [] }
+        return surfacePatternSplit(face: face, piece: piece, cells: p.cells)
+    }
+
+    /// ★ B8 (row 37): whether the Pattern lays a straight grid on this face (a flat one: `CutAim.isFlat`, the Cut tool's
+    /// own test), which Rotate turns. A curve keeps the arc grid, which follows its bend.
+    public func surfacePatternIsFlat(face: FaceID) -> Bool {
+        guard let mesh = viewerMesh else { return false }
+        return CutAim.isFlat(face, in: mesh)
+    }
+
+    // MARK: ★ B8 (row 37) — THE PATTERN ON A HOLE (`PatternHole`): lines round the bore's own axis, rings down it
+
+    /// ★ The bore a Pattern tap aims at: the tapped face (or piece) when it is a hole — CutAim's test — else nil, and the face
+    /// keeps the grid above. A union of parts keeps that grid too.
+    public func surfacePatternBore(face: FaceID, piece: RegionID? = nil) -> PatternHole.Bore? {
+        guard let mesh = viewerMesh else { return nil }
+        let target = piece ?? surfaceCutTarget(face: face)
+        if let t = target.flatMap({ faceRegions.region($0) }), t.isUnionOfParts { return nil }
+        guard let aim = CutAim.make(face: face, piece: target, regions: faceRegions, mesh: mesh) else { return nil }
+        return PatternHole.bore(aim, points: CutAim.points(face: face, piece: target, regions: faceRegions, mesh: mesh))
+    }
+
+    /// ★ n around × m down on a hole, priced as the grid above is (the run's own spacing, inside the tapped piece). Nil when
+    /// the face is not a hole. Both counts cutting nothing is refused with the bar's own words (`PatternHole.nothingToCut`).
+    public func surfacePatternPreview(face: FaceID, around: Int, down: Int, piece: RegionID? = nil)
+        -> (cells: [FaceRegionGeometry.GridCell], verdict: SliverVerdict)? {
+        guard let mesh = viewerMesh, let bore = surfacePatternBore(face: face, piece: piece) else { return nil }
+        let within = (piece ?? surfaceCutTarget(face: face)).flatMap { faceRegions.region($0)?.cuts } ?? []
+        switch PatternHole.cells(bore, around: around, down: down) {
+        case .failure(let r):
+            return ([], SliverVerdict(ok: false, minCellVoxels: 0, emptyCells: 0, memberVoxels: 0, maxCellsBudget: 0,
+                                      floorVoxels: kRegionSliverFloorVoxels, reason: r.reason))
+        case .success(let cells):
+            let spacing = surfaceVoxelSpacingMM(mesh)
+            let priced = cells.map { FaceRegionGeometry.GridCell(i: $0.i, j: $0.j, cuts: within + $0.cuts, drawn: $0.drawn) }
+            let per = FaceRegionGeometry.cellVoxelCounts(members: [face], in: mesh, cells: priced, spacingMM: spacing)
+            let member = within.isEmpty
+                ? FaceRegionGeometry.memberVoxelEstimate(members: [face], in: mesh, spacingMM: spacing)
+                : FaceRegionGeometry.cellVoxelCounts(members: [face], in: mesh,
+                                                     cells: [FaceRegionGeometry.GridCell(i: 0, j: 0, cuts: within)],
+                                                     spacingMM: spacing).first ?? 0
+            return (cells, FaceRegionModel.checkSliver(cellVoxels: per, memberVoxels: member))
+        }
+    }
+
+    /// Commit the hole's pattern. Refuses on a failing verdict, as the grid above does.
+    @discardableResult
+    public func commitSurfacePattern(face: FaceID, around: Int, down: Int, piece: RegionID? = nil) -> [RegionID] {
+        beginFaceEdit(); defer { endFaceEdit(.pattern) }   // one edit, one Undo
+        guard let p = surfacePatternPreview(face: face, around: around, down: down, piece: piece),
+              p.verdict.ok else { return [] }
+        return surfacePatternSplit(face: face, piece: piece, cells: p.cells)
+    }
+
+    /// And to every bore carried from Select similar (each on its own axis); a face that is not a hole, or that the counts do
+    /// not fit, is skipped.
+    @discardableResult
+    public func commitSurfacePattern(faces: [FaceID], around: Int, down: Int) -> [RegionID] {
+        beginFaceEdit(); defer { endFaceEdit(.pattern) }   // the whole batch is one edit, one Undo
+        guard viewerMesh != nil, !faces.isEmpty else { return [] }
+        var out: [RegionID] = []
+        for f in faces.sorted() { out += commitSurfacePattern(face: f, around: around, down: down) }
+        return out
+    }
+
+    /// The split both patterns end in: the tapped piece (or the face's own region, made and grouped as its face is) cut by
+    /// the cells; a union of parts split whole.
+    private func surfacePatternSplit(face: FaceID, piece: RegionID?, cells: [FaceRegionGeometry.GridCell]) -> [RegionID] {
         let splitTarget = piece ?? surfaceCutTarget(face: face) ?? {
             let rid = faceRegions.union(faces: [face], named: "Face \(face)")
             if let g = selection.groups.first(where: { $0.faces.contains(face) }) {
@@ -1995,15 +2112,15 @@ public final class ProjectModel: ObservableObject {
         }()
         // ★★ a union is split WHOLE (2026-10-08): every part cut by the same cells, one union per cell
         if let u = faceRegions.region(splitTarget), u.isUnionOfParts, let mesh = viewerMesh {
-            let pricing = surfacePatternUnionPricing(union: u.id, cells: p.cells,
+            let pricing = surfacePatternUnionPricing(union: u.id, cells: cells,
                                                      spacingMM: surfaceVoxelSpacingMM(mesh), mesh: mesh)
-            let kids = faceRegions.splitUnion(u.id, cells: p.cells) { leaf, k in
+            let kids = faceRegions.splitUnion(u.id, cells: cells) { leaf, k in
                 (pricing.perLeaf[leaf]?[k] ?? 0) > 1e-9
             }
             if !kids.isEmpty { objectWillChange.send() }
             return kids
         }
-        let kids = faceRegions.splitGrid(splitTarget, cells: p.cells)
+        let kids = faceRegions.splitGrid(splitTarget, cells: cells)
         if !kids.isEmpty { objectWillChange.send() }
         return kids
     }
@@ -2258,6 +2375,7 @@ public final class ProjectModel: ObservableObject {
     public func autoClearanceApplies(_ g: SelectionGroup, in mesh: ViewerMesh) -> Bool {
         guard force.autoKeepClearIsOn(g.id) else { return false }   // ★ his per-group switch; default: on for an Anchor
         return keepClearFaces(g).contains { FaceTopology.isFastenerBore($0, in: mesh) }   // ★ 10-28: region-held holes count
+            || keepClearPieces(g).contains { $0.faces.contains { FaceTopology.isFastenerBore($0, in: mesh) } }   // ★ E4 (j): a hole's cut piece
     }
 
     /// Whether "Keep clear" is effectively on for a group given the current mesh —
@@ -2283,13 +2401,77 @@ public final class ProjectModel: ObservableObject {
     /// A bore whose B-rep face is not actually a cylinder yields a `.degenerate`
     /// volume (rendered hollow/dashed) — the same safe no-op the core produces.
     public func clearanceVolumes() -> [(groupID: UUID, volume: ClearanceVolume)] {
-        resolvedClearances().map { ($0.groupID, $0.volume) }
+        resolvedClearances().map { (groupID: $0.groupID, volume: $0.volume) }
+            + resolvedPieceClearances().map { (groupID: $0.groupID, volume: $0.volume) }
     }
 
     /// The same volumes with the piece each one is (its face id, or a manual primitive's sentinel key), so one piece can
-    /// be hidden on its own (his ask 2026-10-26).
+    /// be hidden on its own (his ask 2026-10-26). A cut piece's is keyed by its representative hole / flat face.
     public func clearancePieceVolumes() -> [(groupID: UUID, piece: Int, volume: ClearanceVolume)] {
-        resolvedClearances().map { ($0.groupID, $0.faceID, $0.volume) }
+        resolvedClearances().map { (groupID: $0.groupID, piece: $0.faceID, volume: $0.volume) }
+            + resolvedPieceClearances().map { (groupID: $0.groupID, piece: $0.key, volume: $0.volume) }
+    }
+
+    /// ★ E4 (j), the reviewer's ruling 2026-11-08 21:32 item 2 ("the wire and the drawing ship in one slice, so a release
+    /// never clears something the screen doesn't show"): A CUT PIECE'S KEEP CLEAR, DRAWN — exactly what `clearanceSpecs`
+    /// sends for the piece, built the way core builds it (`resolve_clearance_from_region`): each member face of the kind
+    /// gives its own volume — a round member its swept cylinder at its own radius plus the piece's margin, a flat member
+    /// its slab — clipped by the piece's cuts. The distances are the spec's: the hole's / flat face's override in this
+    /// group, else core's Auto, read as core reads it from the piece's widest round face. Keyed by that representative
+    /// face (the override's key). No drag handles: a piece has no row of its own yet.
+    private func resolvedPieceClearances() -> [(groupID: UUID, key: Int, volume: ClearanceVolume)] {
+        guard let mesh = viewerMesh else { return [] }
+        var out: [(groupID: UUID, key: Int, volume: ClearanceVolume)] = []
+        for g in selection.groups {
+            guard force.keepClearIsOn(g.id, autoDefault: autoClearanceApplies(g, in: mesh)) else { continue }
+            let explicit = force.keepClearAffix(for: g.id) == .on
+            for piece in keepClearPieces(g) {
+                guard let region = faceRegions.region(piece.region) else { continue }
+                if let f = piece.faces.first(where: { FaceTopology.isFastenerBore($0, in: mesh) }),
+                   !force.isClearanceFaceSuppressed(f, in: g.id) {
+                    let ov = force.clearanceOverride(forGroup: g.id, face: f)
+                    let r = piece.faces.compactMap { mesh.faceGeometry($0) }.filter { $0.isCylinder }
+                        .map { $0.cylinderRadiusMM }.max() ?? 0
+                    let margin = ov.concentricMarginMM ?? ClearanceSuggestion.boltMarginMM(boreRadiusMM: r)
+                    let axial = ov.axialClearanceMM ?? ClearanceSuggestion.boltAxialMM(boreRadiusMM: r)
+                    for m in piece.faces {
+                        guard let geo = mesh.faceGeometry(m), geo.isCylinder else { continue }
+                        let span = mesh.faceAxialSpan(m, axisPoint: SIMD3<Float>(geo.axisPoint),
+                                                      axisDir: SIMD3<Float>(geo.axisDir))
+                        let v = ClearanceVolume.bolt(faceID: Int(m), geometry: geo, axialSpan: span,
+                                                     marginMM: margin, axialMM: axial)
+                        if !v.isDegenerate { out.append((g.id, Int(f), v.clipped(by: region.cuts))) }
+                    }
+                }
+                if explicit, let f = piece.faces.first(where: { mesh.faceGeometry($0)?.isPlane ?? false }),
+                   !force.isClearanceFaceSuppressed(f, in: g.id) {
+                    let depth = force.clearanceOverride(forGroup: g.id, face: f).slabDepthMM ?? ClearanceSuggestion.faceSlabDepthMM
+                    for m in piece.faces {
+                        guard let geo = mesh.faceGeometry(m), geo.isPlane else { continue }
+                        let outline = mesh.facePlaneOutline(m, planeNormal: SIMD3<Float>(geo.planeNormal),
+                                                            planeOrigin: SIMD3<Float>(geo.planeOrigin))
+                        let v = ClearanceVolume.slab(faceID: Int(m), geometry: geo, outline: outline, depthMM: depth)
+                        if !v.isDegenerate { out.append((g.id, Int(f), v.clipped(by: region.cuts))) }
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    /// ★ E4 (j), ruling 2026-11-08 21:32 item 2 ("No silent no-ops"): the one plain line a group shows while its Keep clear
+    /// is switched on and it holds a cut piece that is neither a hole nor flat. Such a piece gives core nothing to keep
+    /// clear, so nothing is sent or drawn for it; this says so. nil otherwise.
+    public func keepClearIdlePiecesLine(_ g: SelectionGroup) -> String? {
+        guard let mesh = viewerMesh, force.keepClearAffix(for: g.id) == .on else { return nil }
+        let idle = keepClearPieces(g).filter { piece in
+            !piece.faces.contains { FaceTopology.isFastenerBore($0, in: mesh) || (mesh.faceGeometry($0)?.isPlane ?? false) }
+        }
+        switch idle.count {
+        case 0: return nil
+        case 1: return "Keep clear does nothing on one piece here: it is neither a hole nor flat."
+        default: return "Keep clear does nothing on \(idle.count) pieces here: they are neither holes nor flat."
+        }
     }
 
     /// A resolved clearance for ONE cleared face: the rendered volume plus the FIXED

@@ -30,6 +30,7 @@
 #include "topopt/lattice.hpp"
 
 #include <cmath>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -70,6 +71,31 @@ static std::string read_file(const std::string& p) {
 static constexpr const char* kFixtureBead = "\"min_extrudable_width_mm\": 0.45";
 static constexpr const char* kCopyBead = "\"min_extrudable_width_mm\": 0.32";
 
+// ★ RULING 11-10 (a): EACH PLANNED CELL STATES ITS OWN DENSITY, as the app's real plans do
+// (102117B9's Default Grade plan: every cell carries a rho). The tab these plans sit on is a
+// 12 mm plate, and an octet member needs 5 cells across: 15 mm at the 3 mm cell, 30 at the
+// 6 mm one. The law used to grade it only because the grid's outside read as material
+// (finding 4); read honestly it grades none of it and refuses. A plan whose every cell
+// carries a density is the design itself (ruling 2026-10-11), so the run carries on without
+// the law's grade, and these arms go on testing what they were written for. 0.30 prints at
+// both of the plans' cells at the copy's 0.32 mm bead (the 3 mm cell from 0.131). The
+// maintainer's fixtures are not edited.
+static constexpr const char* kCellSize = "\"size_mm\": ";
+static constexpr const char* kCellRho = ", \"rho\": 0.30";
+
+static std::size_t state_cell_densities(std::string& text) {
+  std::size_t stated = 0;
+  for (std::size_t at = text.find(kCellSize); at != std::string::npos;
+       at = text.find(kCellSize, at + 1), ++stated) {
+    std::size_t end = at + std::strlen(kCellSize);
+    while (end < text.size() && (std::isdigit(static_cast<unsigned char>(text[end])) ||
+                                 text[end] == '.'))
+      ++end;
+    text.insert(end, kCellRho);
+  }
+  return stated;
+}
+
 static std::string rebeaded_copy(const std::string& name) {
   const std::string dir = std::string(CLI_TMP_DIR) + "/c_bead_jobs";
   std::system(("mkdir -p \"" + dir + "\" && cp \"" + ORGANIC_FIXTURE_DIR +
@@ -81,6 +107,9 @@ static std::string rebeaded_copy(const std::string& name) {
        at = text.find(kFixtureBead, at + 1), ++swapped)
     text.replace(at, std::strlen(kFixtureBead), kCopyBead);
   CHECK(swapped == 2, "the fixture states its 0.45 mm bead twice (grading and lattice)");
+  if (text.find("\"stepped_cells\"") != std::string::npos)
+    CHECK(state_cell_densities(text) >= 2,
+          "the copy states a density on every planned cell (ruling 11-10 (a))");
   const std::string job = dir + "/" + name + ".json";
   if (FILE* f = std::fopen(job.c_str(), "w")) {
     std::fwrite(text.data(), 1, text.size(), f);

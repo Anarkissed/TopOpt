@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "topopt/coarsen.hpp"
+#include "topopt/mesh_distance.hpp"
 #include "topopt/mesh.hpp"
 
 namespace topopt {
@@ -547,7 +548,8 @@ std::vector<double> squared_edt(const std::vector<char>& seed, int nx, int ny,
 
 std::vector<double> local_member_thickness_mm(const VoxelGrid& grid,
                                               const std::vector<double>& density,
-                                              double iso, int cap_radius_voxels) {
+                                              double iso, int cap_radius_voxels,
+                                              bool grid_outside_is_void) {
   if (density.size() != grid.voxel_count())
     throw std::invalid_argument(
         "local_member_thickness_mm: density size != grid.voxel_count()");
@@ -568,13 +570,30 @@ std::vector<double> local_member_thickness_mm(const VoxelGrid& grid,
       }
 
   // d²(v): squared distance from each printed voxel to the nearest VOID voxel
-  // (seeds = void). Out-of-grid is NOT seeded, so a member filling to a grid face
-  // reads no thinner there — the design grid pads the part with void, which is the
-  // free surface. A fully-solid grid has no void seed → d² stays large → every
-  // voxel resolves as "thick" (no wall rescue), the conservative degenerate.
-  std::vector<char> seed_void(n);
-  for (std::size_t idx = 0; idx < n; ++idx) seed_void[idx] = printed[idx] ? 0 : 1;
-  const std::vector<double> d2 = squared_edt(seed_void, nx, ny, nz);
+  // (seeds = void). Out-of-grid is NOT seeded by default, so a member filling to a grid
+  // face reads no thinner there: a fully-solid grid resolves as "thick" (no wall rescue),
+  // the conservative degenerate for the width-aware knockdown.
+  // ★ `grid_outside_is_void` (reviewer's ruling 11-09 (2)), for the LATTICE's member
+  // width: the grid is the part's bounding box with no padding, so a member reaching a
+  // grid face is at the part's free surface there. Unseeded, a part that fills its own
+  // grid (a plain bar) read infinitely thick and was never under any cells-per-member
+  // floor, where "thick" is the UNSAFE side. One ring of void around the grid is that
+  // free surface.
+  const int pad = grid_outside_is_void ? 1 : 0;
+  const int px = nx + 2 * pad, py = ny + 2 * pad, pz = nz + 2 * pad;
+  auto at_padded = [&](int i, int j, int k) {
+    return (static_cast<std::size_t>(k + pad) * py + (j + pad)) * px + (i + pad);
+  };
+  std::vector<char> seed_void(static_cast<std::size_t>(px) * py * pz, 1);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i)
+        seed_void[at_padded(i, j, k)] = printed[grid.index(i, j, k)] ? 0 : 1;
+  const std::vector<double> d2_padded = squared_edt(seed_void, px, py, pz);
+  std::vector<double> d2(n);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) d2[grid.index(i, j, k)] = d2_padded[at_padded(i, j, k)];
 
   // Granulometric opening: for r = 1..cap, S_r = { printed voxel with d ≥ r } is the
   // erosion by a radius-r ball; a voxel SURVIVES the opening by that ball iff it lies
@@ -606,6 +625,218 @@ std::vector<double> local_member_thickness_mm(const VoxelGrid& grid,
                          : 2.0 * static_cast<double>(level[idx]) * grid.spacing;
   }
   return thickness;
+}
+
+std::vector<double> local_member_thickness_mm(const VoxelGrid& grid,
+                                              const std::vector<double>& density,
+                                              double iso, int cap_radius_voxels,
+                                              const MeshDistance& surface) {
+  if (density.size() != grid.voxel_count())
+    throw std::invalid_argument(
+        "local_member_thickness_mm: density size != grid.voxel_count()");
+  if (cap_radius_voxels <= 0)
+    throw std::invalid_argument(
+        "local_member_thickness_mm: cap_radius_voxels must be > 0");
+  const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
+  const std::size_t n = grid.voxel_count();
+  const double h = grid.spacing;
+
+  std::vector<char> printed(n, 0);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const std::size_t idx = grid.index(i, j, k);
+        printed[idx] = (grid.solid(i, j, k) && density[idx] > iso) ? 1 : 0;
+      }
+
+  // The staircase radius from the voids INSIDE the part (solid tag, not printed): a cut
+  // the design made has no other surface to read. None => no bound from it.
+  std::vector<char> seed_in(n, 0);
+  bool any_in = false;
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const std::size_t idx = grid.index(i, j, k);
+        if (grid.solid(i, j, k) && !printed[idx]) seed_in[idx] = 1, any_in = true;
+      }
+  const std::vector<double> d2_in =
+      any_in ? squared_edt(seed_in, nx, ny, nz) : std::vector<double>(n, 1e300);
+
+  // A cheap bound first, so a voxel deeper than the cap is never queried: the staircase
+  // distance to the part's outside, the grid's own outside included (a one-voxel ring of
+  // void around it). The surface lies within a voxel diagonal of that staircase.
+  const int px = nx + 2, py = ny + 2, pz = nz + 2;
+  std::vector<char> seed_out(static_cast<std::size_t>(px) * py * pz, 1);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i)
+        if (grid.solid(i, j, k))
+          seed_out[(static_cast<std::size_t>(k + 1) * py + (j + 1)) * px + (i + 1)] = 0;
+  const std::vector<double> d2_out = squared_edt(seed_out, px, py, pz);
+
+  // The ball radius at each printed voxel, in voxels.
+  const double deep = static_cast<double>(cap_radius_voxels) + 1.0;
+  std::vector<double> radius(n, 0.0);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const std::size_t idx = grid.index(i, j, k);
+        if (!printed[idx]) continue;
+        const double vox_out =
+            std::sqrt(d2_out[(static_cast<std::size_t>(k + 1) * py + (j + 1)) * px + (i + 1)]);
+        double r_out = deep;
+        if (vox_out - 2.0 <= deep) {
+          const double depth = std::max(0.0, surface.signed_distance(grid.voxel_center(i, j, k)));
+          r_out = std::min(deep, (depth + 0.5 * h) / h);
+        }
+        radius[idx] = std::min(r_out, std::sqrt(d2_in[idx]));
+      }
+
+  // The granulometry above, on these radii. A radius a rounding under a whole level
+  // (a face on a voxel boundary: depth + h/2 = d * h in floating point) counts as that
+  // level, so a grid-aligned box reads exactly as the staircase does.
+  std::vector<int> level(n, 0);
+  std::vector<char> seed_s(n);
+  for (int r = 1; r <= cap_radius_voxels; ++r) {
+    const double r2 = static_cast<double>(r) * r;
+    bool any = false;
+    for (std::size_t idx = 0; idx < n; ++idx) {
+      const bool in = printed[idx] && radius[idx] >= static_cast<double>(r) - 1e-6;
+      seed_s[idx] = in ? 1 : 0;
+      any = any || in;
+    }
+    if (!any) break;
+    const std::vector<double> dr2 = squared_edt(seed_s, nx, ny, nz);
+    for (std::size_t idx = 0; idx < n; ++idx)
+      if (printed[idx] && dr2[idx] <= r2) level[idx] = r;
+  }
+
+  std::vector<double> thickness(n, 0.0);
+  const double inf = std::numeric_limits<double>::infinity();
+  for (std::size_t idx = 0; idx < n; ++idx) {
+    if (!printed[idx]) continue;
+    thickness[idx] = (level[idx] >= cap_radius_voxels)
+                         ? inf
+                         : 2.0 * static_cast<double>(level[idx]) * h;
+  }
+  return thickness;
+}
+
+std::vector<double> lattice_member_width_mm(const VoxelGrid& grid,
+                                            const std::vector<double>& density, double iso,
+                                            int cap_radius_voxels, double floor_mm,
+                                            double cell_mm, const MeshDistance* surface,
+                                            CornerJoinStats* stats, std::vector<char>* joined) {
+  std::vector<double> width =
+      surface != nullptr
+          ? local_member_thickness_mm(grid, density, iso, cap_radius_voxels, *surface)
+          : local_member_thickness_mm(grid, density, iso, cap_radius_voxels,
+                                      /*grid_outside_is_void=*/true);
+  const std::size_t n = grid.voxel_count();
+  if (joined != nullptr) joined->assign(n, 0);
+  const double h = grid.spacing;
+  if (!(floor_mm > 0.0) || !(cell_mm > 0.0) || !(h > 0.0)) return width;
+  const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
+  auto printed = [&](int i, int j, int k) {
+    return i >= 0 && j >= 0 && k >= 0 && i < nx && j < ny && k < nz && grid.solid(i, j, k) &&
+           density[grid.index(i, j, k)] > iso;
+  };
+  // The floor in whole levels of the granulometry, and the width that clears it.
+  const int need = std::max(1, static_cast<int>(std::ceil(floor_mm / (2.0 * h) - 1e-9)));
+  const double member_mm = 2.0 * static_cast<double>(need) * h;
+  // The reach, in voxels: a right-angle edge's residue plus one cell, or a three-face
+  // corner's residue plus one voxel (its quantization), whichever is further.
+  const double reach = std::max((std::sqrt(2.0) - 1.0) * static_cast<double>(need) + cell_mm / h,
+                                (std::sqrt(3.0) - 1.0) * static_cast<double>(need) + 1.0);
+  if (stats != nullptr) {
+    stats->floor_mm = floor_mm;
+    stats->reach_mm = reach * h;
+  }
+  std::vector<char> holds(n, 0);
+  bool any = false;
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const std::size_t e = grid.index(i, j, k);
+        if (printed(i, j, k) && !(width[e] < floor_mm)) holds[e] = 1, any = true;
+      }
+  if (!any) return width;
+  const std::vector<double> d2 = squared_edt(holds, nx, ny, nz);
+  // How far each under-floor voxel's residue runs from the floor-holding material: the
+  // largest distance reachable from it through under-floor material along STRICTLY rising
+  // distance (26 neighbours). In a convex corner the distance rises to the corner's apex and
+  // stops there; in a thin member it keeps rising to the member's far end. Strict, so a
+  // corner's apex line (one distance along the whole edge) is not a road into a member at
+  // the edge's end. Computed in falling distance order, so each voxel reads finished values.
+  std::vector<std::size_t> under;
+  for (std::size_t e = 0; e < n; ++e) {
+    const int i = static_cast<int>(e % static_cast<std::size_t>(nx));
+    const int j = static_cast<int>((e / static_cast<std::size_t>(nx)) % static_cast<std::size_t>(ny));
+    const int k = static_cast<int>(e / (static_cast<std::size_t>(nx) * ny));
+    if (printed(i, j, k) && !holds[e]) under.push_back(e);
+  }
+  std::sort(under.begin(), under.end(), [&](std::size_t a, std::size_t b) {
+    return d2[a] != d2[b] ? d2[a] > d2[b] : a < b;
+  });
+  std::vector<double> runs(n, 0.0);
+  for (const std::size_t e : under) {
+    const int i = static_cast<int>(e % static_cast<std::size_t>(nx));
+    const int j = static_cast<int>((e / static_cast<std::size_t>(nx)) % static_cast<std::size_t>(ny));
+    const int k = static_cast<int>(e / (static_cast<std::size_t>(nx) * ny));
+    double r = std::sqrt(d2[e]);
+    for (int dk = -1; dk <= 1; ++dk)
+      for (int dj = -1; dj <= 1; ++dj)
+        for (int di = -1; di <= 1; ++di) {
+          if (di == 0 && dj == 0 && dk == 0) continue;
+          const int a = i + di, b = j + dj, c = k + dk;
+          if (!printed(a, b, c)) continue;
+          const std::size_t w = grid.index(a, b, c);
+          if (holds[w] || !(d2[w] > d2[e])) continue;
+          r = std::max(r, runs[w]);
+        }
+    runs[e] = r;
+  }
+  std::vector<char> cand(n, 0);
+  for (const std::size_t e : under) {
+    if (!(std::sqrt(d2[e]) <= reach)) continue;
+    if (stats != nullptr) ++stats->residue_voxels;
+    if (runs[e] <= reach) cand[e] = 1;
+  }
+  // ★ A CORNER IS PART OF ITS MEMBER, SO IT TOUCHES IT THROUGH MATERIAL. The distance above
+  // is straight-line, through air too: a thin fin a voxel off a thick wall reads within
+  // reach of it, and a voxel meeting the member only at an edge or a vertex is not joined
+  // to it by a face. Either one, latticed, is a lattice island of its own (measured on
+  // test_lattice_variant's Z4 part: 1 pocket became 21). So a candidate joins only when a
+  // FACE path through joined voxels leads to the floor-holding member.
+  std::vector<char> join(n, 0);
+  {
+    std::vector<std::size_t> q;
+    for (std::size_t e = 0; e < n; ++e)
+      if (holds[e]) q.push_back(e);
+    static const int d6[6][3] = {{-1, 0, 0}, {1, 0, 0}, {0, -1, 0},
+                                 {0, 1, 0},  {0, 0, -1}, {0, 0, 1}};
+    for (std::size_t at = 0; at < q.size(); ++at) {
+      const std::size_t e = q[at];
+      const int i = static_cast<int>(e % static_cast<std::size_t>(nx));
+      const int j = static_cast<int>((e / static_cast<std::size_t>(nx)) % static_cast<std::size_t>(ny));
+      const int k = static_cast<int>(e / (static_cast<std::size_t>(nx) * ny));
+      for (const auto& d : d6) {
+        const int a = i + d[0], b = j + d[1], c = k + d[2];
+        if (a < 0 || b < 0 || c < 0 || a >= nx || b >= ny || c >= nz) continue;
+        const std::size_t w = grid.index(a, b, c);
+        if (!cand[w] || join[w]) continue;
+        join[w] = 1;
+        q.push_back(w);
+      }
+    }
+  }
+  for (std::size_t e = 0; e < n; ++e)
+    if (join[e]) {
+      width[e] = member_mm;
+      if (stats != nullptr) ++stats->joined_voxels;
+    }
+  if (joined != nullptr) *joined = std::move(join);
+  return width;
 }
 
 LoadPathWalk walk_load_path(const VoxelGrid& grid,

@@ -230,7 +230,8 @@ final class FlexibleSquishPlayerTests: XCTestCase {
         let step = try XCTUnwrap(tail.range(of: "let flexLooping = stepFlexibleLoop(in: view)"), "the loop is stepped in draw(in:)")
         let enc = try XCTUnwrap(tail.range(of: "encode(into: rpd"))
         XCTAssertLessThan(step.lowerBound, enc.lowerBound, "…BEFORE the frame is encoded (this frame's flexScale)")
-        XCTAssertTrue(tail.contains("if wasAnimating && !isSettling && !isPulsing && !flexLooping {"),
+        // ★ RE-PINNED (release (4), his 11-09 glow): a breathing glow keeps the view drawing too
+        XCTAssertTrue(tail.contains("if wasAnimating && !isSettling && !isPulsing && !flexLooping && !glowBreathe {"),
                       "a settle ending must not pause the view under a playing loop")
         XCTAssertTrue(mv.contains("if dirty || !appliedFlex || flex != appliedFlexArray {"), "a new dent on the same mesh re-uploads")
         XCTAssertTrue(mv.contains("appliedFlexArray = flex"))
