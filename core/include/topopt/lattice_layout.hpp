@@ -396,9 +396,16 @@ struct CellSpec {
   // struts only (C16). Off, or band 0: cells are cut where the region ends (G7).
   bool grade_to_shape = false;
   double band_mm = 0.0;
-  // G11 (awaiting his pick): inside the band, cells may go below the open look's floor,
-  // down to the smallest cell one line draws without closing it (line / kQuiltStrutPerCell).
-  bool band_fine_cells = false;
+  // G11 (his answer, 2026-11-12: not a taste to be picked for the user; something any
+  // user reaches with the controls, Auto or Manual). How fine a band's cells may go:
+  //   band_finer   0 = no finer than the smallest cell that prints open (C14);
+  //                1 = down to the smallest cell one line draws without closing it (the
+  //                quilt's cell, line / kQuiltStrutPerCell); between, even steps of ratio.
+  //   band_cell_mm Manual: a typed smallest cell for the band, mm. Above 0 it is used
+  //                instead of band_finer. Never under the quilt's cell.
+  // Inside a Grade to shape band only (R3): outside it no cell is under the open look.
+  double band_finer = 0.0;
+  double band_cell_mm = 0.0;
 };
 
 // Cells are cubes on a frame: world position = origin + ax[0]*a + ax[1]*b + ax[2]*c.

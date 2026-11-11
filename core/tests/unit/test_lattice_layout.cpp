@@ -1337,7 +1337,7 @@ static void test_grade_to_shape() {
       on.grade_to_shape = true;
       on.band_mm = band;
       const Layout open_look = lay_cells(d45, on);
-      on.band_fine_cells = true;
+      on.band_finer = 1.0;
       const Layout fine = lay_cells(d45, on);
       const double floor = open_look.floor_cell_mm, closes = 0.45 / kQuiltStrutPerCell;
       double f0 = 8.0, f1 = 8.0;
@@ -1361,7 +1361,7 @@ static void test_grade_to_shape() {
       // Away from a band nothing changes: the switch alone moves no cell.
       CellSpec plain_fine = off;
       plain_fine.algorithm = algo;
-      plain_fine.band_fine_cells = true;
+      plain_fine.band_finer = 1.0;
       CellSpec plain_off = off;
       plain_off.algorithm = algo;
       CHECK(lay_cells(d45, plain_fine).cells == lay_cells(d45, plain_off).cells);
@@ -1564,6 +1564,47 @@ static void test_kept_readings() {
     CHECK(of2[i].wall == one.cells[i].wall && of2[i].wall >= 0);   // laid as its own wall
     for (int a = 0; a < 3; ++a) NEAR(of2[i].lo[a], one.cells[i].lo[a], 1e-9);
   }
+}
+
+// G11 (his answer, 2026-11-12): how fine the band goes is a control, Auto or typed, not a
+// switch and not a taste. A 7 mm wall on a 0.45 mm line, band 6, Stepped.
+static void test_band_fineness_is_a_control() {
+  PartMeasure pm(weld_mesh(box(60, 7, 40)));
+  DomainSpec s;
+  s.regions = {face_region(1, Role::Lattice, {30, 0, 20}, {0, 1, 0}, 30, 30, 7)};
+  Domain d(pm, s);
+  auto smallest = [&](double finer, double typed) {
+    CellSpec cs;
+    cs.algorithm = Algorithm::Stepped;
+    cs.grade_to_shape = true;
+    cs.band_mm = 6.0;
+    cs.band_finer = finer;
+    cs.band_cell_mm = typed;
+    const Layout l = lay_cells(d, cs);
+    double least = 1e9;
+    for (const Cell& c : l.cells) least = std::min(least, c.size);
+    return least;
+  };
+  // The smallest cell that prints open is 2.371 mm; the quilt's cell is 1.273 mm. A 7 mm
+  // cell divides into 3.5, 2.333, 1.75, 1.4 (and 1.167, under even the quilt's).
+  NEAR(smallest(0.0, 0.0), 3.5, 1e-6);        // open look only: 7 and 3.5
+  NEAR(smallest(0.1, 0.0), 2.0 + 1.0 / 3.0, 1e-6);   // a touch finer admits 2.333
+  NEAR(smallest(0.5, 0.0), 1.75, 1e-6);       // half way: 1.737 admits 1.75
+  NEAR(smallest(1.0, 0.0), 1.4, 1e-6);        // the quilt's cell: 1.4
+  NEAR(smallest(7.0, 0.0), 1.4, 1e-6);        // past the end is the end
+  NEAR(smallest(-1.0, 0.0), 3.5, 1e-6);
+  NEAR(smallest(0.0, 1.75), 1.75, 1e-6);      // typed: nothing under 1.75
+  NEAR(smallest(1.0, 2.0), 2.0 + 1.0 / 3.0, 1e-6);   // typed wins over the slider
+  NEAR(smallest(0.0, 0.5), 1.4, 1e-6);        // typed under the quilt's cell is held at it
+  NEAR(smallest(0.0, 5.0), 7.0, 1e-6);        // typed above the open floor: a coarser band
+  // Without a band none of it applies.
+  CellSpec plain;
+  plain.algorithm = Algorithm::Stepped;
+  plain.band_finer = 1.0;
+  plain.band_cell_mm = 1.5;
+  CellSpec base;
+  base.algorithm = Algorithm::Stepped;
+  CHECK(lay_cells(d, plain).cells == lay_cells(d, base).cells);
 }
 
 // C11a: the member's narrowest width is read once per column, at the column's middle.
@@ -2563,7 +2604,7 @@ static void test_finer_cells_stay_in_the_band() {
       cs.algorithm = algo;
       cs.grade_to_shape = true;
       cs.band_mm = band;
-      cs.band_fine_cells = true;
+      cs.band_finer = 1.0;
       const Layout l = lay_cells(d, cs);
       int in_band = 0, outside = 0;
       for (const Cell& c : l.cells) {
@@ -2593,7 +2634,7 @@ static void test_finer_cells_stay_in_the_band() {
     CellSpec off;
     off.algorithm = Algorithm::Stepped;
     CellSpec on = off;
-    on.band_fine_cells = true;
+    on.band_finer = 1.0;
     const Layout a = lay_cells(d, off), b = lay_cells(d, on);
     CHECK(!a.cells.empty());
     CHECK(a.cells == b.cells && a.solid == b.solid);
@@ -2628,6 +2669,7 @@ int main() {
   test_cells_behind_a_protect_skin();
   test_finer_cells_stay_in_the_band();
   test_cells_across_the_narrowest_width();
+  test_band_fineness_is_a_control();
   test_cells_behind_a_pocket();
   test_grooves_do_not_narrow_a_wall();
   test_kept_readings();

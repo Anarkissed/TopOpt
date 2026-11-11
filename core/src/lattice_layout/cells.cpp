@@ -664,11 +664,20 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
   // Lay one pass over the box [lo, hi] of its frame, in slots of `base`.
   auto lay = [&](Pass& pass, double base, const double lo[3], const double hi[3],
                  bool depth_from_zero) {
-    // G11: with "finer cells in the band" on, a band's cells go below the open look's
-    // floor, down to the smallest cell one line can draw without closing it (the quilt).
-    const bool fine = pass.band_region != nullptr && spec.band_fine_cells;
+    // G11: how fine a band's cells may go is the user's to set. From the smallest cell
+    // that prints open (band_finer 0) down to the smallest one line draws without closing
+    // it, the quilt's cell (band_finer 1), in even steps of ratio; or a typed size.
+    const double open_floor = out.floor_cell_mm, quilt_floor = ds.bead_mm / kQuiltStrutPerCell;
+    double band_floor = open_floor;
+    if (pass.band_region != nullptr) {
+      if (spec.band_cell_mm > 0.0)
+        band_floor = std::max(spec.band_cell_mm, quilt_floor);
+      else
+        band_floor = open_floor * std::pow(quilt_floor / open_floor, std::clamp(spec.band_finer, 0.0, 1.0));
+    }
+    const bool fine = band_floor < open_floor * (1.0 - 1e-12);
     const double tile_min =
-        fine ? std::max(spec.cell_min_mm, ds.bead_mm / kQuiltStrutPerCell) : spec.cell_min_mm;
+        band_floor != open_floor ? std::max(spec.cell_min_mm, band_floor) : spec.cell_min_mm;
     if (spec.algorithm == Algorithm::DefaultGrade)
       // The halving ladder and its printable floor are core's own (ruling A, C7, C14).
       pass.sizes = stepped_size_menu(spec.topology, base, ds.bead_mm, tile_min, !fine,
