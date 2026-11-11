@@ -211,6 +211,16 @@ static void test_measure_by_line() {
         }
   CHECK(in > 1000 && out > 1000);
   CHECK(!pr.inside({1000, 0, 0}));   // far outside the part's own box
+  // The depth read only as far as asked: the depth where it is under the limit, the limit
+  // where it is not.
+  for (double x = 0.3; x < 60; x += 1.7)
+    for (double y = 0.2; y < 60; y += 1.9)
+      for (double z : {0.4, 3.0, 5.0, 9.8}) {
+        const Vec3 p{x, y, z};
+        const double depth = pr.depth(p);
+        if (depth <= 0.0) continue;
+        for (double limit : {0.5, 0.9, 2.5, 30.0}) NEAR(pr.depth_up_to(p, limit), std::min(depth, limit), 1e-9);
+      }
   // "No narrower than": the answer a caller acts on is the same, read more cheaply.
   PartMeasure bx(weld_mesh(box(20, 40, 10)));
   auto pb = bx.probe();
@@ -2294,6 +2304,61 @@ static void test_region_squares() {
   }
 }
 
+// S9: Finish Covered. A solid shell over the lattice; the cells start behind it.
+static void test_cover() {
+  const Vec3 down{0, 0, -1};
+  PartMeasure pm(weld_mesh(box(30, 30, 12)));
+  for (double cover : {1.0, -1.0}) {   // asked for, and the default: two 0.45 mm lines
+    const double t = cover > 0 ? cover : 0.9;
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, {15, 15, 12}, down, 15, 15, 12)};   // all of it
+    s.cover_mm = cover;
+    Domain d(pm, s);
+    auto pr = d.probe();
+    CHECK((pr.where({15, 15, 6}) == Where{Why::Lattice, 1}));
+    CHECK((pr.where({15, 15, 12 - 0.5 * t}) == Where{Why::Cover, 1}));    // under the top
+    CHECK((pr.where({15, 15, 0.5 * t}) == Where{Why::Cover, 1}));         // over the bottom
+    CHECK((pr.where({0.5 * t, 15, 6}) == Where{Why::Cover, 1}));          // inside a side
+    CHECK((pr.where({15, 15, 12 - 1.1 * t}) == Where{Why::Lattice, 1}));  // just behind it
+    CHECK((pr.where({15, 15, 12.5}) == Where{Why::Outside, 0}));
+    CellSpec cs;
+    cs.cell_max_mm = 6;
+    Layout l = lay_cells(d, cs);
+    CHECK(!l.cells.empty() && l.solid.empty());
+    // The cells divide what is left between the two shells exactly (C15), in two layers.
+    double first = 1e9, last = -1e9;
+    int other = 0;
+    for (const Cell& c : l.cells) {
+      first = std::min(first, c.lo[2]);
+      last = std::max(last, c.lo[2] + c.size);
+      if (std::fabs(c.size - (12 - 2 * t) / 2) > 1e-5) ++other;
+    }
+    NEAR(first, t, 1e-5);
+    NEAR(last, 12 - t, 1e-5);
+    CHECK(other == 0);
+    set_struts(l, StrutSpec{});
+    Bars bars = lay_bars(l, d);
+    int in_air = 0, into_cover = 0;
+    for (const Bar& b : bars.bars)
+      for (int e = 0; e < 2; ++e) {
+        const Bar::End kind = e ? b.end_b : b.end_a;
+        if (kind == Bar::End::Surface) ++in_air;
+        if (kind == Bar::End::Solid && pr.where(e ? b.b : b.a).why == Why::Cover) ++into_cover;
+      }
+    CHECK(in_air == 0);          // no strut reaches the outside
+    CHECK(into_cover > 50);      // the cut ones run on into the shell (S11)
+    drop_loose_bars(bars);
+    CHECK(bars.dropped == 0 && stepped_edges(bars).empty());
+    CHECK(count_pieces(bars, d).adrift == 0);
+  }
+  {  // No cover asked: the same points are lattice.
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, {15, 15, 12}, down, 15, 15, 12)};
+    Domain d(pm, s);
+    CHECK((d.probe().where({15, 15, 11.5}) == Where{Why::Lattice, 1}));
+  }
+}
+
 // P2, stage E: the session the app holds for a part. A cell or strut setting re-lays
 // without reading the part again; a "where" setting reads it again; either way the
 // layout is the one a fresh session gives.
@@ -2573,6 +2638,7 @@ int main() {
   test_stepped_edges();
   test_rim();
   test_session();
+  test_cover();
   test_region_squares();
   test_struts();
   test_grade_to_shape();

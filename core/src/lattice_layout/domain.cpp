@@ -159,6 +159,9 @@ double Domain::Probe::skin_gap(const Vec3& p) const {
   double g = std::numeric_limits<double>::infinity();
   for (std::size_t i = 0; i < skins_.size(); ++i)
     g = std::min(g, skins_[i].unsigned_distance(p) - d_->protect_depth_mm(d_->spec_.protect[i]));
+  // Finish Covered is a skin on every face of the part.
+  const double cover = d_->cover_depth_mm();
+  if (cover > 0.0) g = std::min(g, part_.depth_up_to(p, cover + 2.0) - cover);
   return g;
 }
 
@@ -167,7 +170,7 @@ double Domain::Probe::skin_gap(const Vec3& p) const {
 // would crawl, so a step is never under 0.05 mm; a start it then oversteps is found
 // again by halving (as PartMeasure::reach does at the part's surface).
 double Domain::Probe::skin_ahead(const Vec3& p, const Vec3& dir, double limit) const {
-  if (skins_.empty() || !(limit > 0.0)) return -1.0;
+  if ((skins_.empty() && !(d_->cover_depth_mm() > 0.0)) || !(limit > 0.0)) return -1.0;
   const double kMinStep = 0.05, kOn = 1e-7;   // mm
   auto gap_at = [&](double t) {
     return skin_gap(Vec3{p.x + dir.x * t, p.y + dir.y * t, p.z + dir.z * t});
@@ -302,6 +305,11 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
   }
 
   // D8: lattice was asked for here; can the wall hold it?
+  // S9: Finish Covered. Lattice within the cover's thickness of the part's surface is
+  // the solid shell instead.
+  const double cover = d_->cover_depth_mm();
+  if (cover > 0.0 && part_.depth_up_to(p, cover * (1.0 + 1e-9) + 1e-9) <= cover) return {Why::Cover, id};
+
   if (wall_wanted) {
     double wall = 0.0;
     if (flat) {   // the wall's width along the region's direction (PartMeasure::wall_width)
@@ -313,7 +321,7 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
     }
     if (wall_mm) *wall_mm = wall;
     double holds_mm = wall;   // the width lattice can use: the wall less its Protect skins
-    if (flat && !skins_.empty()) {
+    if (flat && (!skins_.empty() || cover > 0.0)) {
       // Only within the region's own slab: `best` is how far `p` is below its face.
       const Vec3& n = owner->prism.normal;
       const Vec3 toward{-n.x, -n.y, -n.z};

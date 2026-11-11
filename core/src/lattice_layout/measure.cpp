@@ -240,6 +240,47 @@ double point_triangle_distance2(const Vec3& p, const Vec3& a, const Vec3& b, con
 }
 }  // namespace
 
+double PartMeasure::Probe::depth_up_to(const Vec3& p, double limit) const {
+  const RayGrid& g = *grid_;
+  const double o[3] = {p.x - g.lo.x, p.y - g.lo.y, p.z - g.lo.z};
+  int lo[3], hi[3], mid[3];
+  for (int a = 0; a < 3; ++a) {
+    lo[a] = std::max(0, static_cast<int>(std::floor((o[a] - limit) / g.cell)));
+    hi[a] = std::min(g.n[a] - 1, static_cast<int>(std::floor((o[a] + limit) / g.cell)));
+    mid[a] = std::clamp(static_cast<int>(std::floor(o[a] / g.cell)), lo[a], hi[a]);
+  }
+  // Every triangle within `limit` of the point is listed in a cell its box reaches, and
+  // so in one of the cells the point's own box of that size reaches. The point's own
+  // cell first: what it finds lets most of the others be passed over unread (a cell
+  // farther from the point than the nearest triangle found holds nothing nearer).
+  double best2 = limit * limit;
+  auto read = [&](int x, int y, int z) {
+    const std::size_t c = (static_cast<std::size_t>(z) * g.n[1] + y) * g.n[0] + x;
+    for (std::uint32_t k = g.start[c]; k < g.start[c + 1]; ++k) {
+      const auto& t = mesh_->triangles[g.tris[k]];
+      best2 = std::min(best2, point_triangle_distance2(p, mesh_->vertices[static_cast<std::size_t>(t[0])],
+                                                       mesh_->vertices[static_cast<std::size_t>(t[1])],
+                                                       mesh_->vertices[static_cast<std::size_t>(t[2])]));
+    }
+  };
+  if (lo[0] <= hi[0] && lo[1] <= hi[1] && lo[2] <= hi[2]) read(mid[0], mid[1], mid[2]);
+  for (int z = lo[2]; z <= hi[2]; ++z)
+    for (int y = lo[1]; y <= hi[1]; ++y)
+      for (int x = lo[0]; x <= hi[0]; ++x) {
+        if (x == mid[0] && y == mid[1] && z == mid[2]) continue;
+        const int at[3] = {x, y, z};
+        double away2 = 0.0;   // from the point to this cell's box
+        for (int a = 0; a < 3; ++a) {
+          const double low = at[a] * g.cell, high = low + g.cell;
+          const double d = o[a] < low ? low - o[a] : (o[a] > high ? o[a] - high : 0.0);
+          away2 += d * d;
+        }
+        if (away2 >= best2) continue;
+        read(x, y, z);
+      }
+  return std::sqrt(best2);
+}
+
 bool PartMeasure::Probe::inside_along(const Vec3& p, const Vec3& unit_dir, double* reach) const {
   const double kSkin = 1e-6;   // mm: the same micron Domain::where has always used
   const RayGrid& g = *grid_;

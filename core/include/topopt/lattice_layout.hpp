@@ -70,6 +70,10 @@ class PartMeasure {
    public:
     // Depth below the surface, mm. Positive inside the part, negative outside.
     double depth(const Vec3& p) const { return md_.signed_distance(p); }
+    // The depth of a point inside the part where it is under `limit`, and `limit` where it
+    // is not: only the triangles within `limit` of the point are looked at, so a small
+    // limit is cheap however deep the point is.
+    double depth_up_to(const Vec3& p, double limit) const;
     // From a point inside the part, the distance to the surface along `unit_dir`.
     // 0 when `p` is not inside.
     // Read as a straight line against the part's own triangles (exact, and the same cost
@@ -217,6 +221,11 @@ struct DomainSpec {
   // not where the edge faces air, and not along a seam with another Lattice region.
   // 0 = no rim (S8). < 0 = the default width, two line widths (S10).
   double rim_mm = 0.0;
+  // Finish Covered (S9): a solid outer shell over the lattice, for anyone who does not
+  // care to see it. Lattice within this distance of the part's own surface is solid
+  // instead, on every face; the cells start behind it as they do behind a Protect skin.
+  // 0 = no cover. < 0 = the default thickness, two line widths.
+  double cover_mm = 0.0;
 };
 
 enum class Why : std::uint8_t {
@@ -229,6 +238,7 @@ enum class Why : std::uint8_t {
                 // `id` is the region that asked, 0 = the whole part
   Rim,          // solid: the rim round a flat Lattice region's outline (S1, S2, S10);
                 // `id` is that region
+  Cover,        // solid: Finish Covered's shell over the lattice (S9); `id` as Lattice
 };
 
 struct Where {
@@ -262,7 +272,8 @@ class Domain {
     };
     Where where(const Vec3& p, double* wall_mm, Room* room) const;
     // How far `p` is from the nearest Protect skin's solid: negative inside one, and
-    // +infinity when the part has none.
+    // +infinity when the part has none. (From Finish Covered's shell it is read no
+    // farther than 2 mm: a caller walking by this value takes steps of 2 mm at most.)
     double skin_gap(const Vec3& p) const;
     const PartMeasure::Probe& part() const { return part_; }
 
@@ -306,6 +317,8 @@ class Domain {
   }
   // The rim's width: the one asked for, or two line widths; 0 with no rim.
   double rim_width_mm() const { return spec_.rim_mm < 0.0 ? 2.0 * spec_.bead_mm : spec_.rim_mm; }
+  // The cover's thickness: the one asked for, or two line widths; 0 with no cover.
+  double cover_depth_mm() const { return spec_.cover_mm < 0.0 ? 2.0 * spec_.bead_mm : spec_.cover_mm; }
 
  private:
   const PartMeasure* measure_;
@@ -675,6 +688,7 @@ struct Settings {
   double bead_mm = 0.45;
   double min_wall_mm = 0.0;
   double rim_mm = 0.0;           // Finish Rim: 0 none, < 0 two line widths
+  double cover_mm = 0.0;         // Finish Covered: 0 none, < 0 two line widths
   std::vector<RegionAsk> regions;
   std::vector<ProtectAsk> protect;
   // The cells, the struts, and what happens to cut ends.

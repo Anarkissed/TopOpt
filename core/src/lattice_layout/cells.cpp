@@ -464,7 +464,7 @@ int face_columns(const Domain::Probe& pr, const Region& r, const Frame& f, doubl
       column_of(room, z, depth, &start[n], &width[n]);
       z = start[n] + width[n] + under;
       ++n;
-    } else if (h.why == Why::ProtectSkin) {
+    } else if (h.why == Why::ProtectSkin || h.why == Why::Cover) {
       // Straight in through the skin, by its own gap: such a step cannot pass its inner side.
       for (int it = 0; it < 200 && z < depth; ++it) {
         const double gap = pr.skin_gap(f.at(u, w, z));
@@ -587,7 +587,8 @@ std::shared_ptr<const FaceReadings> read_face(const Domain& domain, const Region
 // The map's nodes stop short of a stretch's true edge by up to one step. Find the edge
 // itself, outward from the outermost nodes, so the cells are centred on the real stretch
 // (and a symmetric one gets a symmetric layout, exactly). Once per stretch, then kept.
-void find_edges(const FaceReadings& kept, std::size_t which, const Domain::Probe& probe,
+void find_edges(const FaceReadings& kept, std::size_t which, const Domain& domain,
+                const Domain::Probe& probe, std::vector<std::unique_ptr<Domain::Probe>>& spare,
                 const Region& r, const Frame& f) {
   std::lock_guard<std::mutex> lock(kept.edging);
   FaceReadings::Stretch& st = kept.stretches[which];
@@ -595,7 +596,10 @@ void find_edges(const FaceReadings& kept, std::size_t which, const Domain::Probe
   const WallMap& map = kept.map;
   const int deep = WallMap::kDeep;
   const long want = map.bin[st.entries.front()], want_start = map.sbin[st.entries.front()];
-  double edge[2][2] = {{st.lo[0], st.hi[0]}, {st.lo[1], st.hi[1]}};
+  // Each outermost node, each way it is outermost: one search, on its own. Shared between
+  // threads; the edge is the farthest any of them found, the same for any number.
+  struct Search { double at[2]; int axis, side; double found = 0.0; };
+  std::vector<Search> searches;
   for (std::size_t n : st.entries) {
     const double at[2] = {map.u0 + ((n / deep) % map.nu) * WallMap::kPitch,
                           map.w0 + ((n / deep) / map.nu) * WallMap::kPitch};
@@ -603,17 +607,36 @@ void find_edges(const FaceReadings& kept, std::size_t which, const Domain::Probe
       for (int side = 0; side < 2; ++side) {
         const double extreme = side ? st.hi[axis] : st.lo[axis];
         if (std::fabs(at[axis] - extreme) > 1e-9) continue;
-        double in = at[axis], outside = at[axis] + (side ? WallMap::kPitch : -WallMap::kPitch);
-        for (int it = 0; it < 50; ++it) {
-          const double m = 0.5 * (in + outside);
-          const bool yes = axis == 0 ? face_column_of(probe, r, f, want, want_start, m, at[1], nullptr, nullptr)
-                                     : face_column_of(probe, r, f, want, want_start, at[0], m, nullptr, nullptr);
-          if (yes) in = m; else outside = m;
-        }
-        const double found = std::round(0.5 * (in + outside) * 1e7) / 1e7;
-        edge[axis][side] = side ? std::max(edge[axis][side], found) : std::min(edge[axis][side], found);
+        searches.push_back({{at[0], at[1]}, axis, side});
       }
   }
+  std::atomic<std::size_t> next{0};
+  auto work = [&](int who) {
+    if (who > 0 && !spare[static_cast<std::size_t>(who)])
+      spare[static_cast<std::size_t>(who)] = std::make_unique<Domain::Probe>(domain.probe());
+    const Domain::Probe& mine = who > 0 ? *spare[static_cast<std::size_t>(who)] : probe;
+    for (std::size_t i = next.fetch_add(1); i < searches.size(); i = next.fetch_add(1)) {
+      Search& q = searches[i];
+      double in = q.at[q.axis], outside = q.at[q.axis] + (q.side ? WallMap::kPitch : -WallMap::kPitch);
+      for (int it = 0; it < 50; ++it) {
+        const double m = 0.5 * (in + outside);
+        const bool yes = q.axis == 0 ? face_column_of(mine, r, f, want, want_start, m, q.at[1], nullptr, nullptr)
+                                     : face_column_of(mine, r, f, want, want_start, q.at[0], m, nullptr, nullptr);
+        if (yes) in = m; else outside = m;
+      }
+      q.found = std::round(0.5 * (in + outside) * 1e7) / 1e7;
+    }
+  };
+  {
+    const int nt = static_cast<int>(std::min<std::size_t>(spare.size(), std::max<std::size_t>(1, searches.size() / 4)));
+    std::vector<std::thread> pool;
+    for (int t = 1; t < nt; ++t) pool.emplace_back(work, t);
+    work(0);
+    for (std::thread& t : pool) t.join();
+  }
+  double edge[2][2] = {{st.lo[0], st.hi[0]}, {st.lo[1], st.hi[1]}};
+  for (const Search& q : searches)
+    edge[q.axis][q.side] = q.side ? std::max(edge[q.axis][q.side], q.found) : std::min(edge[q.axis][q.side], q.found);
   st.lo[0] = edge[0][0]; st.hi[0] = edge[0][1];
   st.lo[1] = edge[1][0]; st.hi[1] = edge[1][1];
   st.edged = true;
@@ -812,7 +835,7 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
       // A wall is a stretch wide enough for its own cells (two by two of them) whose
       // cell prints. Anything else is left to the pass below, cell by cell.
       if (wall.cell < smallest || area < 4.0 * wall.cell * wall.cell) continue;
-      find_edges(*kept, which, probe, r, f);
+      find_edges(*kept, which, domain, probe, spare, r, f);
       const FaceReadings::Stretch& st = kept->stretches[which];   // edged: no longer written
       wall.lo[0] = st.lo[0]; wall.lo[1] = st.lo[1];
       wall.hi[0] = st.hi[0]; wall.hi[1] = st.hi[1];

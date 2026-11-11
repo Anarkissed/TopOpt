@@ -17,7 +17,7 @@ std::string where_text(const Settings& s) {
   auto num = [&](double v) { std::snprintf(buf, sizeof buf, "%.17g,", v); out += buf; };
   auto whole = [&](long v) { std::snprintf(buf, sizeof buf, "%ld,", v); out += buf; };
   whole(static_cast<long>(s.start));
-  num(s.bead_mm); num(s.min_wall_mm); num(s.rim_mm);
+  num(s.bead_mm); num(s.min_wall_mm); num(s.rim_mm); num(s.cover_mm);
   out += "R";
   for (const Settings::RegionAsk& r : s.regions) {
     whole(r.id); whole(static_cast<long>(r.role)); num(r.depth_mm); num(r.expand_mm);
@@ -48,6 +48,7 @@ Outcome Session::lay(const Settings& settings, int threads) {
     spec.bead_mm = settings.bead_mm;
     spec.min_wall_mm = settings.min_wall_mm;
     spec.rim_mm = settings.rim_mm;
+    spec.cover_mm = settings.cover_mm;
     empty_regions_.clear();
     for (const Settings::RegionAsk& r : settings.regions) {
       bool ok = false;
