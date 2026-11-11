@@ -15,6 +15,7 @@ Vec3 sub(const Vec3& a, const Vec3& b) { return {a.x - b.x, a.y - b.y, a.z - b.z
 }  // namespace
 
 bool region_contains(const Region& r, const Vec3& p) {
+  if (r.is_shell()) return false;  // a shell is answered by the probe (it needs a distance)
   const ClearanceGeometry& g = r.prism;
   // Expand 0 is exactly the face: the predicate core already uses, not a second one.
   if (r.expand_mm == 0.0 || !g.valid || g.mask || g.kind != ClearanceKind::Face)
@@ -44,6 +45,8 @@ Domain::Domain(const PartMeasure& measure, DomainSpec spec)
 Domain::Probe::Probe(const Domain& d) : d_(&d), part_(d.measure_->probe()) {
   skins_.reserve(d.spec_.protect.size());
   for (const ProtectSkin& s : d.spec_.protect) skins_.emplace_back(s.face);
+  shells_.reserve(d.spec_.regions.size());
+  for (const Region& r : d.spec_.regions) shells_.emplace_back(r.shell);
 }
 
 Where Domain::Probe::where(const Vec3& p) const {
@@ -57,30 +60,57 @@ Where Domain::Probe::where(const Vec3& p) const {
     if (skins_[i].unsigned_distance(p) <= d_->protect_depth_mm(spec.protect[i]))
       return {Why::ProtectSkin, spec.protect[i].id};
 
-  // D6: No lattice beats Lattice.
-  for (const Region& r : spec.regions)
-    if (r.role == Role::NoLattice && region_contains(r, p)) return {Why::NoLattice, r.id};
+  // In the region? For a prism also how far the point is from the face plane; for a
+  // shell, from the face itself.
+  auto holds = [&](std::size_t i, double* dist) {
+    const Region& r = spec.regions[i];
+    if (r.is_shell()) {
+      const double d = shells_[i].unsigned_distance(p);
+      if (dist) *dist = d;
+      return d <= r.shell_depth_mm;
+    }
+    if (!region_contains(r, p)) return false;
+    if (dist) {
+      const Vec3& n = r.prism.normal;
+      const double ln = std::sqrt(dot(n, n));
+      *dist = ln > 0.0 ? std::fabs(dot(sub(p, r.prism.origin), n) / ln)
+                       : std::numeric_limits<double>::infinity();
+    }
+    return true;
+  };
 
-  // D6: among the Lattice prisms that hold the point, the nearer face owns it; on one
+  // D6: No lattice beats Lattice.
+  for (std::size_t i = 0; i < spec.regions.size(); ++i)
+    if (spec.regions[i].role == Role::NoLattice && holds(i, nullptr))
+      return {Why::NoLattice, spec.regions[i].id};
+
+  // D6: among the Lattice regions that hold the point, the nearer face owns it; on one
   // face plane the deeper; then the lower id (include_wins_plane_tie, as core rules today).
   const Region* owner = nullptr;
   double best = 0.0;
-  for (const Region& r : spec.regions) {
-    if (r.role != Role::Lattice || !region_contains(r, p)) continue;
-    const Vec3& n = r.prism.normal;
-    const double ln = std::sqrt(dot(n, n));
-    const double d = ln > 0.0 ? std::fabs(dot(sub(p, r.prism.origin), n) / ln)
-                              : std::numeric_limits<double>::infinity();
-    if (!owner || d < best ||
-        (d == best && include_wins_plane_tie(r.prism, r.id, owner->prism, owner->id))) {
+  for (std::size_t i = 0; i < spec.regions.size(); ++i) {
+    const Region& r = spec.regions[i];
+    double d = 0.0;
+    if (r.role != Role::Lattice || !holds(i, &d)) continue;
+    bool wins = !owner || d < best;
+    if (!wins && d == best)   // regions are in id order, so a shell tie keeps the lower id
+      wins = !r.is_shell() && !owner->is_shell() &&
+             include_wins_plane_tie(r.prism, r.id, owner->prism, owner->id);
+    if (wins) {
       owner = &r;
       best = d;
     }
   }
-  if (owner) return {Why::Lattice, owner->id};
+  if (!owner && spec.start != Start::AllLattice) return {Why::NotAsked, 0};   // D12
+  const int id = owner ? owner->id : 0;                                       // D4
 
-  // D4 / D12.
-  return spec.start == Start::AllLattice ? Where{Why::Lattice, 0} : Where{Why::NotAsked, 0};
+  // D8: lattice was asked for here; can the wall hold it?
+  if (spec.min_wall_mm > 0.0) {
+    const double wall = owner && !owner->is_shell() ? part_.wall_width(p, owner->prism.normal)
+                                                     : part_.thickness(p);
+    if (wall < spec.min_wall_mm) return {Why::WallTooThin, id};
+  }
+  return {Why::Lattice, id};
 }
 
 }  // namespace topopt::lattice_layout

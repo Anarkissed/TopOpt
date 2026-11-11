@@ -76,4 +76,64 @@ double PartMeasure::Probe::reach(const Vec3& p, const Vec3& d) const {
   return t;
 }
 
+Vec3 PartMeasure::Probe::through(const Vec3& p) const {
+  // The exact distance falls fastest toward the nearest surface. Central differences
+  // over a 0.05 mm stencil; on the middle of a wall both sides are equally near and
+  // either answer runs straight through it.
+  const double h = 0.05;
+  Vec3 g{md_.signed_distance({p.x + h, p.y, p.z}) - md_.signed_distance({p.x - h, p.y, p.z}),
+         md_.signed_distance({p.x, p.y + h, p.z}) - md_.signed_distance({p.x, p.y - h, p.z}),
+         md_.signed_distance({p.x, p.y, p.z + h}) - md_.signed_distance({p.x, p.y, p.z - h})};
+  double n = std::sqrt(g.x * g.x + g.y * g.y + g.z * g.z);
+  if (n < 1e-9) {
+    // Dead centre: step a hair off it and ask again.
+    const Vec3 q{p.x + 0.013, p.y + 0.007, p.z + 0.003};
+    g = Vec3{md_.signed_distance({q.x + h, q.y, q.z}) - md_.signed_distance({q.x - h, q.y, q.z}),
+             md_.signed_distance({q.x, q.y + h, q.z}) - md_.signed_distance({q.x, q.y - h, q.z}),
+             md_.signed_distance({q.x, q.y, q.z + h}) - md_.signed_distance({q.x, q.y, q.z - h})};
+    n = std::sqrt(g.x * g.x + g.y * g.y + g.z * g.z);
+    if (n < 1e-9) return Vec3{0, 0, 1};
+  }
+  return Vec3{g.x / n, g.y / n, g.z / n};
+}
+
+double PartMeasure::Probe::thickness(const Vec3& p) const {
+  if (depth(p) <= 0.0) return 0.0;
+  // Candidate widths: straight toward the nearest surface, and 13 fixed directions.
+  const double a = std::sqrt(0.5), b = std::sqrt(1.0 / 3.0);
+  Vec3 dirs[14] = {through(p), {1, 0, 0}, {0, 1, 0}, {0, 0, 1}, {a, a, 0}, {a, -a, 0},
+                   {a, 0, a}, {a, 0, -a}, {0, a, a}, {0, a, -a}, {b, b, b}, {b, b, -b},
+                   {b, -b, b}, {b, -b, -b}};
+  struct Chord { double fwd, back; int dir; };
+  Chord chords[14];
+  for (int i = 0; i < 14; ++i) {
+    const Vec3 n{-dirs[i].x, -dirs[i].y, -dirs[i].z};
+    chords[i] = {reach(p, dirs[i]), reach(p, n), i};
+  }
+  std::sort(chords, chords + 14, [](const Chord& x, const Chord& y) {
+    return x.fwd + x.back != y.fwd + y.back ? x.fwd + x.back < y.fwd + y.back : x.dir < y.dir;
+  });
+  // A width is a WALL's width only if it is measured square to one of the two surfaces
+  // it joins, and does not merely graze the other. A line that clips across a corner
+  // meets both at a slant and is not the wall; a line square to the back of a plate that
+  // ends on a countersink is the wall there. The narrowest that qualifies is the answer.
+  const double kSquare = 0.85;   // cos of about 32 degrees
+  const double kGraze = 0.5;     // cos of 60 degrees
+  auto squareness = [&](const Vec3& d, double t) {
+    const double in = t > 0.4 ? t - 0.2 : 0.5 * t;   // a point just inside the hit
+    const Vec3 n = through(Vec3{p.x + d.x * in, p.y + d.y * in, p.z + d.z * in});
+    return std::fabs(n.x * d.x + n.y * d.y + n.z * d.z);
+  };
+  for (const Chord& c : chords) {
+    const Vec3& d = dirs[c.dir];
+    const double s1 = squareness(d, c.fwd), s2 = squareness(Vec3{-d.x, -d.y, -d.z}, c.back);
+    if (std::max(s1, s2) >= kSquare && std::min(s1, s2) >= kGraze) return c.fwd + c.back;
+  }
+  // Nothing qualified (a sharp wedge, a point in a fillet): the width
+  // toward the nearest surface is the honest reading.
+  for (const Chord& c : chords)
+    if (c.dir == 0) return c.fwd + c.back;
+  return 0.0;
+}
+
 }  // namespace topopt::lattice_layout

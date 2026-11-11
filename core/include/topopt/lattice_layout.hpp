@@ -25,6 +25,7 @@
 #include "topopt/clearance.hpp"
 #include "topopt/mesh.hpp"
 #include "topopt/mesh_distance.hpp"
+#include "topopt/step.hpp"
 
 namespace topopt::lattice_layout {
 
@@ -63,6 +64,16 @@ class PartMeasure {
       if (a <= 0.0 && depth(p) <= 0.0) return 0.0;
       return a + reach(p, Vec3{-unit_dir.x, -unit_dir.y, -unit_dir.z});
     }
+    // The direction toward the nearest surface at `p`.
+    Vec3 through(const Vec3& p) const;
+    // The material's thickness at `p` where no region names a direction (All lattice, a
+    // curved face): the narrowest width through `p` that is square to one of the two
+    // surfaces it joins and does not graze the other, over the direction of the nearest surface and 13 fixed directions. The
+    // nearest surface alone is not enough: at the END of a thin wall the nearest surface
+    // is the end, and the width that way is the wall's length. The narrowest of all is
+    // not it either: a line clipping across a corner is shorter than any wall. A wall
+    // tilted off all 13 directions can read up to 15% wide.
+    double thickness(const Vec3& p) const;
 
    private:
     friend class PartMeasure;
@@ -96,7 +107,22 @@ struct Region {
   // Rule D11: grow (+) or shrink (-) the outline in the face's plane only. 0 is exactly
   // the face, and is answered by the old predicate itself. Never changes the depth.
   double expand_mm = 0.0;
+  // A CURVED face has no prism. When `shell` holds the face's own triangles the region
+  // is everything within `shell_depth_mm` of that face instead, and `prism` is unread.
+  TriangleMesh shell;
+  double shell_depth_mm = 0.0;
+  bool is_shell() const { return !shell.triangles.empty(); }
 };
+
+// The region under one face of the model, from the face itself (rule D10: the face's
+// true outline, read off its own triangles, never the rectangle around it). A flat face
+// gives a prism of `depth_mm` into the material; a curved face gives a shell of that
+// depth. `ok` is false, and the region empty, when the face has no triangles.
+Region region_from_face(const StepModel& model, int face_id, int id, Role role,
+                        double depth_mm, double expand_mm = 0.0, bool* ok = nullptr);
+
+// The triangles of the given faces, as one open mesh (for ProtectSkin::face).
+TriangleMesh faces_mesh(const StepModel& model, const std::vector<int>& face_ids);
 
 // Rule D5: a solid face at exactly the stated depth, the lattice right behind it.
 // `face` is the face's own triangles (need not be closed). 0 mm means the thinnest face
@@ -110,6 +136,10 @@ struct ProtectSkin {
 struct DomainSpec {
   Start start = Start::AllSolid;
   double bead_mm = 0.45;
+  // Rule D8: a wall narrower than this cannot hold lattice and is solid. The cell rules
+  // (C3-C5) set it; 0 switches the check off. Measured through the wall along the owning
+  // prism's direction, or as the narrowest width at the spot where there is no prism (C11).
+  double min_wall_mm = 0.0;
   std::vector<Region> regions;
   std::vector<ProtectSkin> protect;
 };
@@ -120,6 +150,8 @@ enum class Why : std::uint8_t {
   NotAsked,     // solid: Start from All solid and no Lattice region covers it (D12)
   NoLattice,    // solid: a No lattice region; `id` is that region (D6)
   ProtectSkin,  // solid: within a Protect skin's depth; `id` is that skin (D5)
+  WallTooThin,  // solid: lattice was asked for but the wall cannot hold it (D8);
+                // `id` is the region that asked, 0 = the whole part
 };
 
 struct Where {
@@ -147,6 +179,7 @@ class Domain {
     const Domain* d_;
     PartMeasure::Probe part_;
     std::vector<MeshDistance> skins_;
+    std::vector<MeshDistance> shells_;   // one per region, empty mesh for a prism
   };
   Probe probe() const { return Probe(*this); }
 
