@@ -1866,6 +1866,20 @@ static void test_bars_join() {
   CHECK(outside == 0);                 // nothing was run out of the part
   CHECK(moved_other == 0);             // only loose ends move
   CHECK(thick_into_thin > 0 && thin_into_thick > 0);   // each wall's struts reach the other's
+  // The struts lying IN the latticed face (y = 0) are cut at the line too, and run on along
+  // the face: on the surface itself nothing is "inside", so they are read a hair in.
+  int in_face_loose = 0, in_face_joined = 0;
+  for (std::size_t i = 0; i < bars.bars.size(); ++i) {
+    const Bar &b = bars.bars[i], &was = laid.bars[i];
+    if (std::fabs(was.a.y) > 1e-9 || std::fabs(was.b.y) > 1e-9) continue;
+    for (int e = 0; e < 2; ++e) {
+      if ((e ? was.end_b : was.end_a) != Bar::End::Loose) continue;
+      ++in_face_loose;
+      if ((e ? b.end_b : b.end_a) == Bar::End::Joined) ++in_face_joined;
+      CHECK(std::fabs((e ? b.b : b.a).y) < 1e-9);   // still in the face
+    }
+  }
+  CHECK(in_face_loose > 4 && in_face_joined * 2 > in_face_loose);
   // The same bars whichever way it is asked again.
   Bars again = laid;
   join_loose_bars(again, d);
@@ -1875,6 +1889,122 @@ static void test_bars_join() {
   for (const Bar& b : bars.bars)
     loose_after += (b.end_a == Bar::End::Loose) + (b.end_b == Bar::End::Loose);
   CHECK(loose_after == 0);
+}
+
+// S3: Finish Skin. Bars across the part's surface joining the cut strut ends.
+static void test_skin() {
+  const Vec3 down{0, 0, -1};
+  CellSpec cs;
+  cs.cell_max_mm = 6;
+  {  // The 20 mm block: its side cells are cut by its four sides.
+    PartMeasure pm(weld_mesh(box(20, 20, 12)));
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, {10, 10, 12}, down, 10, 10, 6)};
+    Domain d(pm, s);
+    auto pr = d.probe();
+    Layout l = lay_cells(d, cs);
+    set_struts(l, StrutSpec{});
+    const Bars laid = lay_bars(l, d);
+    Bars bars = laid;
+    const std::size_t made = lay_skin(bars, d);
+    CHECK(made > 20 && bars.bars.size() == laid.bars.size() + made);
+    int side[4] = {0, 0, 0, 0}, off = 0, too_long = 0, not_skin = 0;
+    std::vector<const Bar*> on_x0;
+    for (std::size_t i = laid.bars.size(); i < bars.bars.size(); ++i) {
+      const Bar& b = bars.bars[i];
+      const Vec3 mid{0.5 * (b.a.x + b.b.x), 0.5 * (b.a.y + b.b.y), 0.5 * (b.a.z + b.b.z)};
+      if (!b.skin) ++not_skin;
+      if (std::fabs(pr.part().depth(b.a)) > 1e-6 || std::fabs(pr.part().depth(b.b)) > 1e-6 ||
+          std::fabs(pr.part().depth(mid)) > 1e-6)
+        ++off;                                   // it lies ON the surface, end to end
+      if (bar_length(b) > 1.2 * 6.0 + 1e-9) ++too_long;
+      if (std::fabs(mid.x) < 1e-6) { ++side[0]; on_x0.push_back(&b); }
+      if (std::fabs(mid.x - 20) < 1e-6) ++side[1];
+      if (std::fabs(mid.y) < 1e-6) ++side[2];
+      if (std::fabs(mid.y - 20) < 1e-6) ++side[3];
+    }
+    CHECK(not_skin == 0 && off == 0 && too_long == 0);
+    // The block and its cells are the same on all four sides, and so is the skin (C9).
+    CHECK(side[0] > 5 && side[0] == side[1] && side[1] == side[2] && side[2] == side[3]);
+    // No two skin bars cross (seen on the side x = 0, in y and z).
+    int crossings = 0;
+    auto turn = [](double ax, double ay, double bx, double by, double cx, double cy) {
+      return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+    };
+    for (std::size_t i = 0; i < on_x0.size(); ++i)
+      for (std::size_t j = i + 1; j < on_x0.size(); ++j) {
+        const Bar &p = *on_x0[i], &q = *on_x0[j];
+        const double d1 = turn(p.a.y, p.a.z, p.b.y, p.b.z, q.a.y, q.a.z), d2 = turn(p.a.y, p.a.z, p.b.y, p.b.z, q.b.y, q.b.z);
+        const double d3 = turn(q.a.y, q.a.z, q.b.y, q.b.z, p.a.y, p.a.z), d4 = turn(q.a.y, q.a.z, q.b.y, q.b.z, p.b.y, p.b.z);
+        if (d1 * d2 < -1e-9 && d3 * d4 < -1e-9) ++crossings;
+      }
+    CHECK(crossings == 0);
+    // A cut end that got a skin bar has landed, and nothing else changed.
+    int still_cut = 0, landed = 0;
+    for (std::size_t i = 0; i < laid.bars.size(); ++i)
+      for (int e = 0; e < 2; ++e) {
+        const Bar::End was = e ? laid.bars[i].end_b : laid.bars[i].end_a, now = e ? bars.bars[i].end_b : bars.bars[i].end_a;
+        if (was != Bar::End::Surface) { CHECK(now == was); continue; }
+        ++(now == Bar::End::Joined ? landed : still_cut);
+      }
+    CHECK(landed > 100 && still_cut * 10 < landed);
+    // With the skin, Finish None's rule has far less to remove.
+    Bars bare = laid;
+    drop_loose_bars(bare);
+    drop_loose_bars(bars);
+    CHECK(bars.dropped * 3 < bare.dropped);
+    CHECK(count_pieces(bars, d).adrift == 0);
+  }
+  {  // By hand, on the top of a block: two cut ends 5 mm apart are joined; two 9 mm apart,
+     // with nothing between them, are not (no farther than 1.2 of their 6 mm cell).
+    PartMeasure pm(weld_mesh(box(30, 30, 12)));
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, {15, 15, 12}, down, 15, 15, 6)};
+    Domain d(pm, s);
+    auto stub = [](double x, double y) {
+      Bar b;
+      b.a = {x, y, 10}; b.b = {x, y, 12}; b.end_b = Bar::End::Surface; b.width = 0.5; b.cell = 6.0;
+      return b;
+    };
+    Bars bars;
+    bars.bars = {stub(5, 5), stub(14, 5), stub(5, 20), stub(10, 20)};
+    CHECK(lay_skin(bars, d) == 1);
+    CHECK(bars.bars.size() == 5 && bars.bars[4].skin);
+    NEAR(bar_length(bars.bars[4]), 5.0, 1e-12);
+    NEAR(bars.bars[4].width, 0.5, 0.0);          // as wide as the struts it joins
+    CHECK(bars.bars[0].end_b == Bar::End::Surface && bars.bars[1].end_b == Bar::End::Surface);
+    CHECK(bars.bars[2].end_b == Bar::End::Joined && bars.bars[3].end_b == Bar::End::Joined);
+    SkinSpec wide;
+    wide.width_mm = 0.9;                         // or the width asked for (S7)
+    Bars again;
+    again.bars = {stub(5, 20), stub(10, 20)};
+    CHECK(lay_skin(again, d, wide) == 1);
+    NEAR(again.bars[2].width, 0.9, 0.0);
+  }
+  {  // An L: cut ends on the two walls of its notch. No skin bar runs across the notch.
+    PartMeasure pm(weld_mesh(prism({{0, 0}, {60, 0}, {60, 20}, {20, 20}, {20, 60}, {0, 60}}, 0, 12)));
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, {30, 30, 12}, down, 30, 30, 6)};
+    Domain d(pm, s);
+    auto pr = d.probe();
+    Layout l = lay_cells(d, cs);
+    set_struts(l, StrutSpec{});
+    Bars bars = lay_bars(l, d);
+    const std::size_t before = bars.bars.size();
+    CHECK(lay_skin(bars, d) > 50);
+    int in_air = 0, on_notch_walls = 0;
+    for (std::size_t i = before; i < bars.bars.size(); ++i) {
+      const Bar& b = bars.bars[i];
+      for (int k = 0; k <= 10; ++k) {
+        const double t = k / 10.0;
+        if (pr.part().depth({b.a.x + (b.b.x - b.a.x) * t, b.a.y + (b.b.y - b.a.y) * t, b.a.z + (b.b.z - b.a.z) * t}) < -1e-6)
+          ++in_air;
+      }
+      if ((std::fabs(b.a.x - 20) < 1e-6 && b.a.y > 20) || (std::fabs(b.a.y - 20) < 1e-6 && b.a.x > 20)) ++on_notch_walls;
+    }
+    CHECK(in_air == 0);
+    CHECK(on_notch_walls > 10);   // the notch's own walls do get their skin
+  }
 }
 
 // S4, S5, S6: the lattice is one piece and joined to the part; a piece adrift is removed.
@@ -2340,6 +2470,7 @@ int main() {
   test_bars();
   test_bars_join();
   test_pieces();
+  test_skin();
   test_rim();
   test_session();
   test_region_squares();

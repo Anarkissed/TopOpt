@@ -572,6 +572,7 @@ struct Bar {
   };
   End end_a = End::Node, end_b = End::Node;
   bool piece = false;    // part of a strut of a cut cell, not a whole strut
+  bool skin = false;     // a skin bar (S3): it lies on the part's surface, between cut ends
 };
 
 struct Bars {
@@ -591,6 +592,20 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads = 0);
 // direction of strut is made, and no join relies on the part's shell. Returns the number
 // of ends that landed.
 std::size_t join_loose_bars(Bars& bars, const Domain& domain, int threads = 0);
+
+// S3, Finish Skin: bars across the part's surface joining the cut strut ends, "a flat
+// lattice over the lattice". It is open and does not seal (that is Protect skin, D5).
+// Two cut ends are joined when no other cut end lies in the ball between them (so the
+// bars never cross and every end is joined to its natural neighbours: on a flat face cut
+// through a regular lattice the skin is itself a regular flat lattice), when they are no
+// farther apart than `reach_cells` of the larger of their two cells, and when the bar
+// between them lies on the surface (not across a notch, nor through the part).
+// A cut end that gets a skin bar has landed (End::Joined). Returns the number of skin bars.
+struct SkinSpec {
+  double width_mm = 0.0;      // 0 = as wide as the thinner of the two struts it joins
+  double reach_cells = 1.2;
+};
+std::size_t lay_skin(Bars& bars, const Domain& domain, const SkinSpec& spec = SkinSpec{});
 
 // S4, Finish None: a bar is kept only if each of its ends lands on another bar or on
 // solid. Removes the rest (a cut end in the air or loose in the lattice, and then any
@@ -649,6 +664,8 @@ struct Settings {
   StrutSpec struts;
   bool bars = true;              // false: cells and strut widths only
   bool join_loose = true;        // S5
+  bool skin = false;             // Finish Skin (S3)
+  SkinSpec skin_spec;
   bool drop_loose = true;        // S4, Finish None's rule; then pieces adrift go too
 };
 

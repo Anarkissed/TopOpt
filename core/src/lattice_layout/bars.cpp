@@ -327,17 +327,32 @@ std::size_t join_loose_bars(Bars& bars, const Domain& domain, int threads) {
         if (land < 0.0 || at < land) land = at;
       }
       // What the line passes through before that: solid ends it sooner (S11); air ends it.
+      // A strut lying IN the part's surface (the outermost struts of a latticed face) is
+      // read a hair inside the part, as its cell read it: on the surface itself every
+      // point is "not inside", and it would be stopped where it stands.
+      Vec3 lift{0, 0, 0};
+      if (probe.part().depth(p) < 0.01) {
+        double best = 0.01;
+        for (int k = 0; k < 6; ++k) {
+          const Vec3 step{((k == 0) - (k == 1)) * kInward, ((k == 2) - (k == 3)) * kInward, ((k == 4) - (k == 5)) * kInward};
+          const double depth = probe.part().depth(Vec3{p.x + step.x, p.y + step.y, p.z + step.z});
+          if (depth > best) { best = depth; lift = step; }
+        }
+      }
+      auto read = [&](double at) {
+        return probe.where(Vec3{p.x + d.x * at + lift.x, p.y + d.y * at + lift.y, p.z + d.z * at + lift.z});
+      };
       const double reach = land >= 0.0 ? land : limit;
       Bar::End kind = land >= 0.0 ? Bar::End::Joined : Bar::End::Loose;
       double stop = reach;
       for (double t = 0.25; t < reach + 0.25; t += 0.25) {
         const double at = std::min(t, reach);
-        const Where w = probe.where(Vec3{p.x + d.x * at, p.y + d.y * at, p.z + d.z * at});
+        const Where w = read(at);
         if (w.lattice()) continue;
         double in = at - 0.25 < 0.0 ? 0.0 : at - 0.25, out = at;   // lattice at `in`, not at `out`
         for (int k = 0; k < 12; ++k) {
           const double m = 0.5 * (in + out);
-          if (probe.where(Vec3{p.x + d.x * m, p.y + d.y * m, p.z + d.z * m}).lattice()) in = m; else out = m;
+          if (read(m).lattice()) in = m; else out = m;
         }
         if (w.why == Why::Outside) {
           kind = Bar::End::Surface;
@@ -372,6 +387,86 @@ std::size_t join_loose_bars(Bars& bars, const Domain& domain, int threads) {
   }
   bars.joined += joined;
   return joined;
+}
+
+std::size_t lay_skin(Bars& bars, const Domain& domain, const SkinSpec& spec) {
+  // The cut ends, each once (two bars can be cut at the same point).
+  struct Tip { Vec3 p; double cell, width; std::vector<std::pair<std::size_t, int>> of; };
+  std::vector<Tip> tips;
+  {
+    std::map<PointKey, std::size_t> at;
+    for (std::size_t i = 0; i < bars.bars.size(); ++i)
+      for (int end = 0; end < 2; ++end) {
+        const Bar& b = bars.bars[i];
+        if ((end ? b.end_b : b.end_a) != Bar::End::Surface || b.skin) continue;
+        const Vec3& p = end ? b.b : b.a;
+        auto [it, fresh] = at.emplace(key_of(p), tips.size());
+        if (fresh) tips.push_back({p, b.cell, b.width, {}});
+        Tip& t = tips[it->second];
+        t.cell = std::max(t.cell, b.cell);
+        t.width = std::min(t.width, b.width);
+        t.of.push_back({i, end});
+      }
+  }
+  if (tips.size() < 2) return 0;
+  double reach_most = 0.0;
+  for (const Tip& t : tips) reach_most = std::max(reach_most, spec.reach_cells * t.cell);
+  const double pitch = std::max(0.5, reach_most);
+  auto slot = [&](double x) { return static_cast<long long>(std::floor(x / pitch)); };
+  std::map<std::array<long long, 3>, std::vector<std::size_t>> grid;
+  for (std::size_t i = 0; i < tips.size(); ++i)
+    grid[{slot(tips[i].p.x), slot(tips[i].p.y), slot(tips[i].p.z)}].push_back(i);
+  const Domain::Probe probe = domain.probe();
+  std::vector<char> landed(tips.size(), 0);
+  std::size_t made = 0;
+  std::vector<std::size_t> near;
+  for (std::size_t i = 0; i < tips.size(); ++i) {
+    const Vec3& p = tips[i].p;
+    near.clear();
+    for (long long x = slot(p.x) - 1; x <= slot(p.x) + 1; ++x)
+      for (long long y = slot(p.y) - 1; y <= slot(p.y) + 1; ++y)
+        for (long long z = slot(p.z) - 1; z <= slot(p.z) + 1; ++z) {
+          const auto it = grid.find({x, y, z});
+          if (it != grid.end()) near.insert(near.end(), it->second.begin(), it->second.end());
+        }
+    std::sort(near.begin(), near.end());
+    for (std::size_t j : near) {
+      if (j <= i) continue;   // each pair once
+      const Vec3& q = tips[j].p;
+      const Vec3 d{q.x - p.x, q.y - p.y, q.z - p.z};
+      const double len2 = d.x * d.x + d.y * d.y + d.z * d.z, len = std::sqrt(len2);
+      if (len < 10 * kSame || len > spec.reach_cells * std::max(tips[i].cell, tips[j].cell)) continue;
+      // No other cut end in the ball between them, or on it: four ends at the corners of
+      // a square are joined round the square, and neither diagonal crosses it.
+      const Vec3 mid{0.5 * (p.x + q.x), 0.5 * (p.y + q.y), 0.5 * (p.z + q.z)};
+      bool empty = true;
+      for (std::size_t k : near) {
+        if (k == i || k == j) continue;
+        const Vec3& r = tips[k].p;
+        const double e2 = (r.x - mid.x) * (r.x - mid.x) + (r.y - mid.y) * (r.y - mid.y) + (r.z - mid.z) * (r.z - mid.z);
+        if (e2 <= 0.25 * len2 * (1.0 + 1e-6)) { empty = false; break; }
+      }
+      if (!empty) continue;
+      // On the surface: its middle neither in the air (across a notch) nor deep in the part.
+      const double depth = probe.part().depth(mid);
+      if (depth < -1e-6 || depth > 0.05 * len + 0.02) continue;
+      Bar skin;
+      skin.a = p;
+      skin.b = q;
+      skin.skin = true;
+      skin.width = spec.width_mm > 0.0 ? spec.width_mm : std::min(tips[i].width, tips[j].width);
+      skin.cell = std::max(tips[i].cell, tips[j].cell);
+      skin.region = bars.bars[tips[i].of.front().first].region;
+      bars.bars.push_back(skin);
+      landed[i] = landed[j] = 1;
+      ++made;
+    }
+  }
+  for (std::size_t i = 0; i < tips.size(); ++i) {
+    if (!landed[i]) continue;
+    for (const auto& [bar, end] : tips[i].of) (end ? bars.bars[bar].end_b : bars.bars[bar].end_a) = Bar::End::Joined;
+  }
+  return made;
 }
 
 namespace {
