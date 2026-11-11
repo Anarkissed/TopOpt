@@ -30,21 +30,35 @@ int WallMap::find(double u, double w, double start, double width) const {
   return -1;
 }
 
+namespace {
+// How closely a wall's width is read, with margin: 10 nanometres on a half-width.
+constexpr double kReadingSlack = 1e-5;   // mm
+
+// The lattice's column through a point `c` below a flat region's face, from what the
+// Domain read there. It starts at the face; or at a Protect skin's inner side (D5, D15);
+// or, with a pocket under the face, where the material the point is in begins. It ends at
+// the far surface, a skin on it, or the region's depth (C12). The wall the cells divide
+// is that column and nothing else (C2): not material beyond a pocket, nor beyond the depth.
+void column_of(const Domain::Probe::Room& room, double c, double depth, double* start,
+               double* width) {
+  const double lo = c - (room.skin_back ? room.back : room.part_back);
+  const double hi = std::min(c + (room.skin_on ? room.on : room.part_on), depth);
+  *start = room.skin_back || lo > kReadingSlack ? lo : 0.0;
+  *width = hi - *start;
+}
+}  // namespace
+
 Reading read_at(const Domain::Probe& probe, const Frame& frame, const WallMap& walls,
                 double a, double b, double c) {
   Reading r;
   Domain::Probe::Room room;
   r.where = probe.where(frame.at(a, b, c), &r.width, walls.flat ? &room : nullptr);
   if (!r.where.lattice()) return r;
-  // D5, D15: behind a Protect skin the lattice starts at the skin's own depth, and a
-  // skin on the far face ends it: the wall the cells divide is what lies between.
-  if (room.skin_back) r.start = c - room.back;
-  // C12: never more than the region's depth.
-  r.width = std::min(room.skin_on ? c + room.on : r.width, walls.depth) - r.start;
   if (walls.flat) {
+    column_of(room, c, walls.depth, &r.start, &r.width);
     r.wall = walls.find(a, b, r.start, r.width);
-    r.lo = c - (room.skin_back ? room.back : room.part_back);
-    r.hi = std::min(c + (room.skin_on ? room.on : room.part_on), std::max(walls.depth, r.lo));
+  } else {
+    r.width = std::min(r.width, walls.depth);   // C12: never more than the region's depth
   }
   return r;
 }
@@ -63,9 +77,6 @@ bool cell_holds(const Layout& layout, const Domain::Probe& probe, const Cell& ce
 }
 
 namespace {
-
-// How closely a wall's width is read, with margin: 10 nanometres on a half-width.
-constexpr double kReadingSlack = 1e-5;   // mm
 
 // One region's pass.
 struct Pass {
@@ -138,17 +149,34 @@ struct Pass {
     // region's own direction, and never more than the region's depth.
     // C3-C5 (reviewer's ruling 2026-11-11): the cells a wall must hold are counted across
     // the member's NARROWEST width, whichever way that lies. A rib one cell wide across
-    // the face and two deep is one across, not two. (Twice the depth below the surface is
-    // a ball that fits, so nothing through the point is narrower than that.)
-    double narrow = width;
-    if (walls->flat) {
-      const Vec3 p = frame.at(a, b, c);
-      // Only whether it is narrower than `width` is asked, so the measure may stop early.
-      if (2.0 * probe->part().depth(p) < width)
-        narrow = std::min(width, probe->part().thickness_in(p, width));
-    }
+    // the face and two deep is one across, not two.
+    const double narrow = walls->flat ? narrowest(a, b, r) : width;
     *fit = std::min(width, narrow / spec->min_cells_across);
     return true;
+  }
+
+  // The member's narrowest width, for the lattice's column through (a, b): read ONCE per
+  // column, at the column's middle (the point of it farthest from both faces, where a
+  // groove or a chamfer on either face cannot pass for a narrow member), and kept for
+  // every other point of the column in this base cell. Twice the depth below the surface
+  // is a ball that fits, so when the middle is half the column deep nothing through it is
+  // narrower and no width is measured at all: the case on any plain wall.
+  struct Column { double a, b, start, width, narrow; };
+  mutable std::vector<Column> columns;   // of the base cell being laid; emptied per cell
+  double narrowest(double a, double b, const Reading& r) const {
+    for (std::size_t i = columns.size(); i-- > 0;) {
+      const Column& c = columns[i];
+      if (c.a == a && c.b == b && std::fabs(c.start - r.start) < 1e-6 &&
+          std::fabs(c.width - r.width) < 1e-6)
+        return c.narrow;
+    }
+    const Vec3 mid = frame.at(a, b, r.start + 0.5 * r.width);
+    double narrow = r.width;
+    // Only whether it is narrower than the column is asked, so the measure may stop early.
+    if (2.0 * probe->part().depth(mid) < r.width - kReadingSlack)
+      narrow = std::min(r.width, probe->part().thickness(mid, r.width));
+    columns.push_back({a, b, r.start, r.width, narrow});
+    return narrow;
   }
 
   // D14: a strip of this pass's lattice thinner than the spacing of a cube's own sample
@@ -450,6 +478,7 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
       for (std::size_t i = 0; i < total; ++i) {
         double q[3];
         slot(i, q);
+        pass.columns.clear();
         pass.place(q, base);
       }
       return;
@@ -471,6 +500,7 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
       for (std::size_t i = next.fetch_add(1); i < total; i = next.fetch_add(1)) {
         double q[3];
         slot(i, q);
+        p.columns.clear();
         p.place(q, base);
         pieces[i].cells.swap(local.cells);
         pieces[i].solid.swap(local.solid);
@@ -579,8 +609,7 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
         Domain::Probe::Room room;
         const Where h = probe.where(f.at(u, w, z), &wall, &room);
         if (h.lattice() && h.id == r.id) {
-          *start = room.skin_back ? z - room.back : 0.0;
-          *width = std::min(room.skin_on ? z + room.on : wall, g.depth) - *start;
+          column_of(room, z, g.depth, start, width);
           return true;
         }
         if (h.why != Why::ProtectSkin) return false;

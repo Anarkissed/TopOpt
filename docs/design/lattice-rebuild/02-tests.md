@@ -47,7 +47,7 @@ Kind of test: **L** reads the layout, **F** reads the file, **A** is an app test
 | Rule | Kind | Test |
 |---|---|---|
 | C1 | L | On a plain block the layout uses one cell size. On each reference part, no cell can be merged with its neighbours into an allowed larger cell that fits. |
-| C2 | L | Every cell's size ≤ the wall's width at its centre + 1e-6. A 12.000 mm wall gets 12.000 mm cells, a 12.999 mm wall does not get a 13 mm cell. |
+| C2 | L | Every cell's size ≤ the wall's width at its centre + 1e-6. A 12.000 mm wall gets 12.000 mm cells, a 12.999 mm wall does not get a 13 mm cell. Behind a pocket (a 4 mm wall, a 5 mm pocket, solid from 9 mm, region 13 deep): the wall behind reads start 9, width 4, and no cell in it is wider than 4 mm (built 2026-11-11; it read 11 and took 6.5 mm cells). A 2 mm wall, a 2 mm pocket and solid behind, all in one base cell: the 2 mm wall is listed solid and the wall behind keeps its cells. Known gap: a wall behind a pocket is laid from the region's own grid, not from its own start (C15), and the half millimetre of it that reaches into the next base cell at the pocket's end is in no list. |
 | C3 | L | Aesthetic, single-cell walls off: every wall at least 2 floor cells wide (4.742 mm at 0.45) holds lattice, with stress on or off; a narrower wall is solid. |
 | C4 | L, A | With nothing set, single-cell walls are on: a 4.2 mm wall at 0.45 holds one cell across and no solid. A wall between 1 and 2 floor cells wide holds one cell across, sized to the wall. Finish is unchanged by the switch. A new project shows the switch on; a saved project keeps what it saved. |
 | C5 | L | Structural: a wall holds lattice only if it takes 5 cells across at or above the floor cell; otherwise solid. |
@@ -60,7 +60,7 @@ Kind of test: **L** reads the layout, **F** reads the file, **A** is an app test
 | C9 | L | Mirror a symmetric part across its plane of symmetry: the layout maps onto itself, cell for cell, to 1e-6. |
 | C10 | L | Each Manual value changes the layout to match: minimum cells across ≥ the value; cell size per zone = the value; anchor moves every cell by the offset; angle turns them by the angle ± 0.01°; neighbours differ by no more than the stated step. |
 | C11 | L | On an L-shaped part with two 20 mm walls, both walls get the cell a 20 mm wall gets; the corner gets no cell larger than that. On a 10 mm wall in a 40 mm deep region the wall width read is 10 ± 0.05 mm. |
-| C11a | L | A rib 40 long, 3 wide across the face and 6 deep, lattice from its top. Two across at a 0.45 mm line: no cell, solid. Two across at a 0.2 mm line: cells of at most 1.5 mm. Single-cell walls: 3 mm cells, nothing solid. Five across: no cell, solid. The same rib 6 mm wide, two across: 3 mm cells, nothing solid. A wall with a step behind it (12 mm beside 6 mm) keeps its own cells right up to the step. Any number of threads gives the same layout. |
+| C11a | L | A rib 40 long, 3 wide across the face and 6 deep, lattice from its top. Two across at a 0.45 mm line: no cell, solid. Two across at a 0.2 mm line: cells of at most 1.5 mm. Single-cell walls: 3 mm cells, nothing solid. Five across: no cell, solid. The same rib 6 mm wide, two across: 3 mm cells, nothing solid. A wall with a step behind it (12 mm beside 6 mm) keeps its own cells right up to the step. Any number of threads gives the same layout. A 12 mm plate with grooves in its face (teeth 1.9 mm wide, 1.5 tall): all cells are 6 mm, none solid; the width read inside a tooth is 1.9, at the column's middle 12. |
 | C12 | L | On a wall stepping from 12 to 6 mm, the 6 mm part gets cells ≤ 6 mm and the 12 mm part cells ≤ 12 mm. A larger cell appears only where the material is at least that cell's size in all three directions. |
 | C13 | L | Stepped: a base slot cut by the outline holds at least two sizes when a larger allowed cell fits beside the cut. No solid strip in the depth. |
 | C14 | L, F | Changing the bead from 0.45 to 0.60 moves the floor cell from 2.371 to 3.161 mm and the thinnest strut from 0.45 to 0.60 mm. |
@@ -170,6 +170,8 @@ Timed on the Mac first (stage 0), then on the iPad (stage E).
 | Far from a surface | A point the coarse map rules out is farther from the surface than the distance asked. |
 
 Each has a deliberate break that fails it (seven in all). On his stand (two faces, Stepped, 0.45 mm line, band 6): 2,201 cells and 136 solid pieces before and after, every cell the same to half a micron; laid in 0.22 s on all cores of the Mac (was 9.4 s) and 0.74 s on one core. With a 1.2 mm Protect skin: 0.24 s (was 4.3 s), identical. With finer cells in the band: 1.6 s (was 47.6 s). Not yet timed on the iPad.
+
+After the two changes that followed (the wall is the lattice's own column; the narrowest width read once per column): 0.12 s on all cores and 0.27 s on one; finer cells 0.38 s and 1.6 s. On the stand's back face this changed the cells behind its pockets only (118 cells of 3.25 mm that stood in under 3.25 mm of material are now solid; 56 pieces wrongly solid are now cells); the front face and the Protect skin case are unchanged, cell for cell.
 
 The 33 ms, 1 s and 5 s are my starting numbers. Stage 0 measures what the stand actually takes; the go or no-go at stage E is his.
 

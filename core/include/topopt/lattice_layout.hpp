@@ -433,14 +433,14 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads = 0);
 // a flat region, the lattice's column there (where it starts below the face, how wide it
 // is) and the wall the point stands in (-1: in none). The one reading both the laying and
 // anyone drawing or building from the layout use.
+// Under a flat region `start` and `width` are the lattice's own column through the point,
+// along the frame's depth: from the face (0), or a Protect skin's inner side, or where
+// the material itself begins when there is a pocket under the face; to the far surface,
+// a far skin, or the region's depth, whichever comes first (C2, C12, D5).
 struct Reading {
   Where where;
   double start = 0.0, width = 0.0;
   int wall = -1;
-  // Under a flat region: where the lattice's column through the point lies along the
-  // frame's depth (from the face, or a Protect skin's inner side, to the far surface, a
-  // far skin, or the region's depth).
-  double lo = 0.0, hi = 0.0;
 };
 Reading read_at(const Domain::Probe& probe, const Frame& frame, const WallMap& walls,
                 double a, double b, double c);

@@ -42,6 +42,46 @@ static TriangleMesh prism(const std::vector<std::array<double, 2>>& xy, double z
   }
   return s.mesh;
 }
+// The same for any simple polygon (counter-clockwise), its ends cut into triangles ear by ear.
+static TriangleMesh prism_any(const std::vector<std::array<double, 2>>& xy, double z0, double z1) {
+  const int n = static_cast<int>(xy.size());
+  auto turn = [&](int a, int b, int c) {
+    return (xy[b][0] - xy[a][0]) * (xy[c][1] - xy[a][1]) - (xy[b][1] - xy[a][1]) * (xy[c][0] - xy[a][0]);
+  };
+  std::vector<int> left(n);
+  for (int i = 0; i < n; ++i) left[i] = i;
+  std::vector<std::array<int, 3>> tris;
+  while (left.size() > 3) {
+    bool cut = false;
+    const int m = static_cast<int>(left.size());
+    for (int i = 0; i < m && !cut; ++i) {
+      const int a = left[(i + m - 1) % m], b = left[i], c = left[(i + 1) % m];
+      if (turn(a, b, c) <= 1e-12) continue;   // not a corner that sticks out
+      bool empty = true;
+      for (int k : left)
+        if (k != a && k != b && k != c && turn(a, b, k) >= -1e-12 && turn(b, c, k) >= -1e-12 &&
+            turn(c, a, k) >= -1e-12)
+          empty = false;
+      if (!empty) continue;
+      tris.push_back({a, b, c});
+      left.erase(left.begin() + i);
+      cut = true;
+    }
+    if (!cut) throw std::runtime_error("prism_any: not a simple polygon");
+  }
+  tris.push_back({left[0], left[1], left[2]});
+  MeshSink s;
+  auto P = [&](int i, double z) { return Vec3{xy[i % n][0], xy[i % n][1], z}; };
+  for (const auto& t : tris) {
+    s.add_triangle(P(t[0], z1), P(t[1], z1), P(t[2], z1));
+    s.add_triangle(P(t[0], z0), P(t[2], z0), P(t[1], z0));
+  }
+  for (int i = 0; i < n; ++i) {
+    s.add_triangle(P(i, z0), P(i + 1, z0), P(i + 1, z1));
+    s.add_triangle(P(i, z0), P(i + 1, z1), P(i, z1));
+  }
+  return s.mesh;
+}
 static TriangleMesh box(double x, double y, double z) {
   return prism({{0, 0}, {x, 0}, {x, y}, {0, y}}, 0, z);
 }
@@ -1368,6 +1408,126 @@ static void test_cells_across_the_narrowest_width() {
   }
 }
 
+// The reading at a part's own point, in a layout's frame.
+static Reading reading_at(const Domain::Probe& pr, const Layout& l, int frame, const Vec3& p) {
+  const Frame& f = l.frames[static_cast<std::size_t>(frame)];
+  const Vec3 r{p.x - f.origin.x, p.y - f.origin.y, p.z - f.origin.z};
+  return read_at(pr, f, l.walls[static_cast<std::size_t>(frame)],
+                 r.x * f.ax[0].x + r.y * f.ax[0].y + r.z * f.ax[0].z,
+                 r.x * f.ax[1].x + r.y * f.ax[1].y + r.z * f.ax[1].z,
+                 r.x * f.ax[2].x + r.y * f.ax[2].y + r.z * f.ax[2].z);
+}
+
+// C2, C12: the wall a cell divides is the lattice's own column and nothing else. With a
+// pocket under the face, the material behind the pocket is a wall of its own: it starts
+// where that material starts and ends at the region's depth. (Found on the stand's back
+// face, 2026-11-11: the whole length of material through the point was read as the
+// wall, 10.8 mm for a 4.4 mm column, and 6.5 mm cells stood in it.)
+static void test_cells_behind_a_pocket() {
+  // In section (x across, y into the part from the face y = 0): a 4 mm wall, a 5 mm
+  // pocket open to the left, then solid from 9 mm on. For x > 50 solid all the way.
+  std::size_t open = 99;
+  PartMeasure pm(weld_mesh(prism_any({{0, 0}, {60, 0}, {60, 20}, {0, 20}, {0, 9}, {50, 9}, {50, 4}, {0, 4}}, 0, 40),
+                           1e-5, &open));
+  CHECK(open == 0);
+  DomainSpec s;
+  s.regions = {face_region(1, Role::Lattice, {30, 0, 20}, {0, 1, 0}, 30, 30, 13)};
+  Domain d(pm, s);
+  auto pr = d.probe();
+  for (Algorithm algo : {Algorithm::Stepped, Algorithm::DefaultGrade}) {
+    CellSpec cs;
+    cs.algorithm = algo;
+    const Layout l = lay_cells(d, cs);
+    Reading r = reading_at(pr, l, 0, {25, 11, 20});     // behind the pocket
+    CHECK(r.where.lattice());
+    NEAR(r.start, 9.0, 1e-6);
+    NEAR(r.width, 4.0, 1e-6);                           // 9 to the region's 13, not 9 to 20
+    r = reading_at(pr, l, 0, {25, 2, 20});              // the wall in front of it
+    NEAR(r.start, 0.0, 0.0);
+    NEAR(r.width, 4.0, 1e-6);
+    r = reading_at(pr, l, 0, {55, 11, 20});             // beside the pocket
+    NEAR(r.start, 0.0, 0.0);
+    NEAR(r.width, 13.0, 1e-6);
+    CHECK(!reading_at(pr, l, 0, {25, 6, 20}).where.lattice());   // the pocket itself
+    // No cell behind the pocket is wider than the 4 mm it stands in (C2).
+    double widest = 0.0;
+    int held = 0;
+    for (double x = 2; x < 48; x += 3.1)
+      for (double y = 9.2; y < 12.9; y += 0.45)
+        for (double z = 3; z < 37; z += 4.3)
+          for (const Cell& c : l.cells)
+            if (cell_holds(l, pr, c, {x, y, z})) {
+              ++held;
+              widest = std::max(widest, c.size);
+            }
+    CHECK(held > 500);
+    CHECK(widest <= 4.0 + 1e-5);
+    // Covered either side of the pocket's end. (The half millimetre of the behind-the-
+    // pocket wall that reaches into the next base cell at x = 49.5 to 50 is in no list:
+    // D14's known limit, a strip thinner than the layout looks. Solid by the rule.)
+    CHECK(badly_covered(d, l, {1, 0, 1}, {49, 13, 39}, 0.97) == 0);
+    CHECK(badly_covered(d, l, {51, 0, 1}, {59, 13, 39}, 0.97) == 0);
+  }
+  // Two walls in one column, one base cell deep: a 2 mm wall too thin for any cell, a
+  // 2 mm pocket, then solid. The thin wall goes solid; the wall behind it is read on its
+  // own (its own start, width and narrowest width) and keeps its cells.
+  PartMeasure thin(weld_mesh(prism_any({{0, 0}, {60, 0}, {60, 20}, {0, 20}, {0, 4}, {50, 4}, {50, 2}, {0, 2}}, 0, 40)));
+  Domain d2(thin, s);
+  auto pr2 = d2.probe();
+  for (Algorithm algo : {Algorithm::Stepped, Algorithm::DefaultGrade}) {
+    CellSpec cs;
+    cs.algorithm = algo;
+    const Layout l = lay_cells(d2, cs);
+    const Reading r = reading_at(pr2, l, 0, {25, 5, 20});
+    NEAR(r.start, 4.0, 1e-6);
+    NEAR(r.width, 9.0, 1e-6);
+    CHECK(cells_holding(l, {25, 5, 20}, 1) == 1);     // behind the pocket: a cell
+    CHECK(cells_holding(l, {25, 12, 20}, 1) == 1);
+    CHECK(cells_holding(l, {25, 1, 20}, 1) == 0);     // the 2 mm wall: no cell,
+    Layout as_solid;
+    as_solid.frames = l.frames;
+    as_solid.cells = l.solid;
+    CHECK(cells_holding(as_solid, {25, 1, 20}, 1) == 1);   // listed solid
+  }
+}
+
+// C11a: the member's narrowest width is read once per column, at the column's middle.
+// Grooves in the face of a thick plate leave teeth 1.9 mm wide and 1.5 tall; the plate is
+// not a 1.9 mm member, and its cells stand whole, cut by the grooves (D3).
+static void test_grooves_do_not_narrow_a_wall() {
+  std::vector<std::array<double, 2>> xy;
+  for (int k = 0; k < 6; ++k) {
+    xy.push_back({3.7 * k, 0.0});
+    xy.push_back({3.7 * k + 1.9, 0.0});
+    if (k < 5) {
+      xy.push_back({3.7 * k + 1.9, 1.5});
+      xy.push_back({3.7 * k + 3.7, 1.5});
+    }
+  }
+  xy.push_back({20.4, 12.0});
+  xy.push_back({0.0, 12.0});
+  std::size_t open = 99;
+  PartMeasure pm(weld_mesh(prism_any(xy, 0, 40), 1e-5, &open));
+  CHECK(open == 0);
+  DomainSpec s;
+  s.regions = {face_region(1, Role::Lattice, {10.2, 0, 20}, {0, 1, 0}, 30, 30, 12)};
+  Domain d(pm, s);
+  auto pr = d.probe();
+  NEAR(pr.part().thickness({1.2, 1.0, 20}), 1.9, 0.01);   // inside a tooth: the tooth
+  NEAR(pr.part().thickness({1.2, 6.0, 20}), 12.0, 0.01);  // the column's middle: the plate
+  for (Algorithm algo : {Algorithm::Stepped, Algorithm::DefaultGrade}) {
+    CellSpec cs;
+    cs.algorithm = algo;
+    const Layout l = lay_cells(d, cs);
+    int other = 0;
+    for (const Cell& c : l.cells)
+      if (std::fabs(c.size - 6.0) > 1e-5) ++other;
+    CHECK(!l.cells.empty() && other == 0 && l.solid.empty());
+    CHECK(badly_covered(d, l, {0, 0, 1}, {20.4, 12, 39}, 0.83) == 0);
+    CHECK((lay_cells(d, cs, 1).cells == l.cells));        // any number of threads (D18)
+  }
+}
+
 // D5, D15, C15: with a Protect skin on a face, the lattice starts at the skin's own depth
 // and its cells divide what is left of the wall. The skin never cuts through a cell.
 static void test_cells_behind_a_protect_skin() {
@@ -1570,6 +1730,8 @@ int main() {
   test_cells_behind_a_protect_skin();
   test_finer_cells_stay_in_the_band();
   test_cells_across_the_narrowest_width();
+  test_cells_behind_a_pocket();
+  test_grooves_do_not_narrow_a_wall();
   test_struts();
   test_grade_to_shape();
   test_cells_prism();
