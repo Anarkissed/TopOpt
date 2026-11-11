@@ -66,8 +66,14 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
         len = std::sqrt(len);
         if (len > 0.0)
           for (int a = 0; a < 3; ++a) q[a] += off[a] * std::min(1.0, kInward / len);
-        const Reading r = read_at(probe, f, walls, q[0], q[1], q[2]);
-        const bool yes = r.where.lattice() && r.where.id == c.region && (!walls.flat || r.wall == c.wall);
+        bool yes = false;
+        if (!walls.flat) {
+          const Where w = probe.where(f.at(q[0], q[1], q[2]));
+          yes = w.lattice() && w.id == c.region;
+        } else {
+          const Reading r = read_at(probe, f, walls, q[0], q[1], q[2]);
+          yes = r.where.lattice() && r.where.id == c.region && r.wall == c.wall;
+        }
         node_read.emplace(k, yes);
         return yes;
       };
@@ -94,8 +100,12 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
         auto mine = [&](double t) {
           double q[3];
           inward(t, q);
+          if (!walls.flat) {   // no wall to name: only "lattice of this region" is asked
+            const Where w = probe.where(f.at(q[0], q[1], q[2]));
+            return w.lattice() && w.id == c.region;
+          }
           const Reading r = read_at(probe, f, walls, q[0], q[1], q[2]);
-          return r.where.lattice() && r.where.id == c.region && (!walls.flat || r.wall == c.wall);
+          return r.where.lattice() && r.where.id == c.region && r.wall == c.wall;
         };
         Bar bar;
         bar.width = c.strut;
@@ -550,6 +560,10 @@ Pieces count_pieces(const Bars& bars, const Domain& domain, std::vector<char>* a
   }
   for (const auto& cell : grid) {
     const std::vector<std::size_t>& in = cell.second;
+    // Nearly every square of the grid holds bars of one piece already: nothing to test.
+    bool one = true;
+    for (std::size_t a = 1; a < in.size() && one; ++a) one = find(in[a]) == find(in[0]);
+    if (one) continue;
     for (std::size_t a = 0; a < in.size(); ++a)
       for (std::size_t b = a + 1; b < in.size(); ++b) {
         const std::size_t i = in[a], j = in[b];

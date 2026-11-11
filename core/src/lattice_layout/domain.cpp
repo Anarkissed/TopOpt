@@ -307,7 +307,9 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
     if (flat) {   // the wall's width along the region's direction (PartMeasure::wall_width)
       wall = on_m + back_m;
     } else {
-      wall = part_.thickness(p);
+      // A caller that wants the width gets it; one that only needs "can this wall hold
+      // lattice?" (D8) lets the measure stop as soon as no line through here is shorter.
+      wall = wall_mm ? part_.thickness_in(p) : part_.thickness_in(p, spec.min_wall_mm);
     }
     if (wall_mm) *wall_mm = wall;
     double holds_mm = wall;   // the width lattice can use: the wall less its Protect skins
