@@ -526,6 +526,7 @@ StrutReport set_struts(Layout& layout, const StrutSpec& spec);
 struct Bar {
   Vec3 a{}, b{};         // its two ends, in the part's own coordinates
   double width = 0.0;    // mm
+  double cell = 0.0;     // the size of the cell it is a strut of, mm
   int region = 0;
   // How an end finishes.
   enum class End : std::uint8_t {
@@ -534,7 +535,8 @@ struct Bar {
                // solid by one width, so it is joined to it, not butted against it (S11)
     Surface,   // cut flat by the part's own surface: air beyond (S11)
     Loose,     // the cell's shape stops inside the lattice: another wall's or region's
-               // cells begin, or space no cell holds. Transition struts join these (S5).
+               // cells begin, or space no cell holds. join_loose_bars joins these (S5).
+    Joined,    // was Loose: the bar was run on until it met another bar, and ends in it
   };
   End end_a = End::Node, end_b = End::Node;
   bool piece = false;    // part of a strut of a cut cell, not a whole strut
@@ -544,9 +546,19 @@ struct Bars {
   std::vector<Bar> bars;
   std::size_t stubs = 0;      // pieces shorter than their own width: not kept (S4)
   std::size_t dropped = 0;    // by drop_loose_bars
+  std::size_t joined = 0;     // ends, by join_loose_bars
 };
 
 Bars lay_bars(const Layout& layout, const Domain& domain, int threads = 0);
+
+// S5: where two walls with different cells meet (or two regions, or two cell sizes whose
+// cells are cut against each other), each side's struts stop Loose at the line between
+// them. Each such bar is run straight on, in its own direction, until it meets a bar of
+// the other side and ends inside it (Joined), or meets solid (Solid, as S11), or has gone
+// one cell of its own without meeting anything, in which case it is left as it was. No new
+// direction of strut is made, and no join relies on the part's shell. Returns the number
+// of ends that landed.
+std::size_t join_loose_bars(Bars& bars, const Domain& domain);
 
 // S4, Finish None: a bar is kept only if each of its ends lands on another bar or on
 // solid. Removes the rest (a cut end in the air or loose in the lattice, and then any

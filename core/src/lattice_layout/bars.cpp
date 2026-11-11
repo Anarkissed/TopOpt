@@ -99,6 +99,7 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
         };
         Bar bar;
         bar.width = c.strut;
+        bar.cell = c.size;
         bar.region = c.region;
         // A strut whose two ends and middle are the cell's, in a cell the layout found
         // whole, is whole. (The layout's own "whole" is not enough: it looks a sixth of
@@ -202,15 +203,123 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
       } else {
         Bar& kept = result.bars[it->second];
         kept.width = std::max(kept.width, bar.width);
+        kept.cell = std::max(kept.cell, bar.cell);
       }
     }
   }
   return result;
 }
 
+namespace {
+// The nearest approach of the segment p + s d (0 <= s <= len, d a unit vector) to the
+// segment a..b: the distance, and where along the first it happens.
+double approach(const Vec3& p, const Vec3& d, double len, const Vec3& a, const Vec3& b, double* at) {
+  const Vec3 e{b.x - a.x, b.y - a.y, b.z - a.z}, r{p.x - a.x, p.y - a.y, p.z - a.z};
+  const double ee = e.x * e.x + e.y * e.y + e.z * e.z;
+  const double de = d.x * e.x + d.y * e.y + d.z * e.z;
+  const double dr = d.x * r.x + d.y * r.y + d.z * r.z, er = e.x * r.x + e.y * r.y + e.z * r.z;
+  const double den = ee - de * de;   // (d.d = 1)
+  double s = den > 1e-12 * ee ? std::clamp((de * er - dr * ee) / den, 0.0, len) : 0.0;
+  double u = ee > 0.0 ? std::clamp((er + de * s) / ee, 0.0, 1.0) : 0.0;
+  s = std::clamp(de * u - dr, 0.0, len);
+  u = ee > 0.0 ? std::clamp((er + de * s) / ee, 0.0, 1.0) : 0.0;
+  const Vec3 gap{r.x + d.x * s - e.x * u, r.y + d.y * s - e.y * u, r.z + d.z * s - e.z * u};
+  *at = s;
+  return std::sqrt(gap.x * gap.x + gap.y * gap.y + gap.z * gap.z);
+}
+}  // namespace
+
+std::size_t join_loose_bars(Bars& bars, const Domain& domain) {
+  const std::vector<Bar> before = bars.bars;   // every bar is run on against the bars as laid
+  if (before.empty()) return 0;
+  // The bars sorted into a grid, to find those near a line.
+  double longest = 0.0, widest = 0.0;
+  for (const Bar& b : before) {
+    longest = std::max(longest, std::max(b.cell, std::fabs(b.b.x - b.a.x) + std::fabs(b.b.y - b.a.y) + std::fabs(b.b.z - b.a.z)));
+    widest = std::max(widest, b.width);
+  }
+  const double pitch = std::max(1.0, longest);
+  auto slot = [&](double x) { return static_cast<long long>(std::floor(x / pitch)); };
+  std::map<std::array<long long, 3>, std::vector<std::size_t>> grid;
+  for (std::size_t i = 0; i < before.size(); ++i) {
+    const Bar& b = before[i];
+    for (long long x = slot(std::min(b.a.x, b.b.x) - widest); x <= slot(std::max(b.a.x, b.b.x) + widest); ++x)
+      for (long long y = slot(std::min(b.a.y, b.b.y) - widest); y <= slot(std::max(b.a.y, b.b.y) + widest); ++y)
+        for (long long z = slot(std::min(b.a.z, b.b.z) - widest); z <= slot(std::max(b.a.z, b.b.z) + widest); ++z)
+          grid[{x, y, z}].push_back(i);
+  }
+  const Domain::Probe probe = domain.probe();
+  std::size_t joined = 0;
+  std::vector<std::size_t> near;
+  for (std::size_t i = 0; i < before.size(); ++i)
+    for (int end = 0; end < 2; ++end) {
+      const Bar& me = before[i];
+      if ((end ? me.end_b : me.end_a) != Bar::End::Loose) continue;
+      const Vec3 p = end ? me.b : me.a, q = end ? me.a : me.b;
+      Vec3 d{p.x - q.x, p.y - q.y, p.z - q.z};
+      const double own = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+      if (!(own > 0.0)) continue;
+      d = Vec3{d.x / own, d.y / own, d.z / own};
+      const double limit = me.cell > 0.0 ? me.cell : own;   // one cell of its own, no farther
+      const Vec3 far{p.x + d.x * limit, p.y + d.y * limit, p.z + d.z * limit};
+      // The nearest place along the line where it is inside another bar.
+      near.clear();
+      for (long long x = slot(std::min(p.x, far.x) - widest); x <= slot(std::max(p.x, far.x) + widest); ++x)
+        for (long long y = slot(std::min(p.y, far.y) - widest); y <= slot(std::max(p.y, far.y) + widest); ++y)
+          for (long long z = slot(std::min(p.z, far.z) - widest); z <= slot(std::max(p.z, far.z) + widest); ++z) {
+            const auto it = grid.find({x, y, z});
+            if (it != grid.end()) near.insert(near.end(), it->second.begin(), it->second.end());
+          }
+      std::sort(near.begin(), near.end());
+      near.erase(std::unique(near.begin(), near.end()), near.end());
+      double land = -1.0;
+      for (std::size_t k : near) {
+        if (k == i) continue;
+        const Bar& other = before[k];
+        double at = 0.0;
+        const double gap = approach(p, d, limit, other.a, other.b, &at);
+        if (gap > 0.5 * other.width) continue;        // its middle line stays outside that bar
+        // Not the bar it is a continuation of (the next piece of the same strut touches
+        // it end to end only when nothing lies between them, and that is a join too).
+        if (land < 0.0 || at < land) land = at;
+      }
+      // What the line passes through before that: solid ends it sooner (S11); air ends it.
+      const double reach = land >= 0.0 ? land : limit;
+      Bar::End kind = land >= 0.0 ? Bar::End::Joined : Bar::End::Loose;
+      double stop = reach;
+      for (double t = 0.25; t < reach + 0.25; t += 0.25) {
+        const double at = std::min(t, reach);
+        const Where w = probe.where(Vec3{p.x + d.x * at, p.y + d.y * at, p.z + d.z * at});
+        if (w.lattice()) continue;
+        double in = at - 0.25 < 0.0 ? 0.0 : at - 0.25, out = at;   // lattice at `in`, not at `out`
+        for (int k = 0; k < 12; ++k) {
+          const double m = 0.5 * (in + out);
+          if (probe.where(Vec3{p.x + d.x * m, p.y + d.y * m, p.z + d.z * m}).lattice()) in = m; else out = m;
+        }
+        if (w.why == Why::Outside) {
+          kind = Bar::End::Surface;
+          stop = in;
+        } else {
+          kind = Bar::End::Solid;
+          stop = in + me.width;   // S11: on into the solid by its own width
+        }
+        break;
+      }
+      if (kind == Bar::End::Loose) continue;   // met nothing within a cell: left as it was
+      Bar& mine = bars.bars[i];
+      const Vec3 to{p.x + d.x * stop, p.y + d.y * stop, p.z + d.z * stop};
+      if (end) { mine.b = to; mine.end_b = kind; } else { mine.a = to; mine.end_a = kind; }
+      if (kind != Bar::End::Surface) ++joined;
+    }
+  bars.joined += joined;
+  return joined;
+}
+
 void drop_loose_bars(Bars& bars) {
   // A cut end that lands on nothing: in the air, or loose in the lattice.
-  auto lands = [](Bar::End e) { return e == Bar::End::Node || e == Bar::End::Solid; };
+  auto lands = [](Bar::End e) {
+    return e == Bar::End::Node || e == Bar::End::Solid || e == Bar::End::Joined;
+  };
   std::vector<char> keep(bars.bars.size(), 1);
   for (std::size_t i = 0; i < bars.bars.size(); ++i)
     if (!lands(bars.bars[i].end_a) || !lands(bars.bars[i].end_b)) keep[i] = 0;

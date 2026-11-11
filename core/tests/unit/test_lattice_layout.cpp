@@ -1,6 +1,7 @@
 // Lattice layout, stage B: measure and domain. Rule numbers are those of
 // docs/design/lattice-rebuild/01-rules.md; the numbers are those of 02-tests.md.
 #include <cmath>
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <map>
@@ -1753,6 +1754,80 @@ static void test_bars() {
   }
 }
 
+// The distance from a point to a bar's middle line.
+static double off_bar(const Vec3& p, const Bar& b) {
+  const Vec3 e{b.b.x - b.a.x, b.b.y - b.a.y, b.b.z - b.a.z}, r{p.x - b.a.x, p.y - b.a.y, p.z - b.a.z};
+  const double ee = e.x * e.x + e.y * e.y + e.z * e.z;
+  const double u = ee > 0 ? std::clamp((e.x * r.x + e.y * r.y + e.z * r.z) / ee, 0.0, 1.0) : 0.0;
+  const Vec3 g{r.x - e.x * u, r.y - e.y * u, r.z - e.z * u};
+  return std::sqrt(g.x * g.x + g.y * g.y + g.z * g.z);
+}
+
+// S5: where two walls with different cells meet, each side's cut struts run on until
+// they end inside a bar of the other side. No join relies on the part's shell.
+static void test_bars_join() {
+  // A 12 mm wall beside a 5 mm wall, lattice from their common flat face: 6 mm cells
+  // beside 5 mm cells, meeting along x = 32 where neither grid has a cell boundary (the
+  // 6 mm cells run 2 mm past it, the 5 mm cells start 1 mm before it).
+  PartMeasure pm(weld_mesh(prism({{0, 0}, {60, 0}, {60, 5}, {32, 5}, {32, 12}, {0, 12}}, 0, 41)));
+  DomainSpec s;
+  s.regions = {face_region(1, Role::Lattice, {30, 0, 20.5}, {0, 1, 0}, 30, 30, 12)};
+  Domain d(pm, s);
+  auto pr = d.probe();
+  CellSpec cs;
+  cs.cell_max_mm = 6;
+  Layout l = lay_cells(d, cs);
+  set_struts(l, StrutSpec{});
+  const Bars laid = lay_bars(l, d);
+  int loose_before = 0;
+  for (const Bar& b : laid.bars)
+    loose_before += (b.end_a == Bar::End::Loose) + (b.end_b == Bar::End::Loose);
+  CHECK(loose_before > 50);            // both sides stop loose along the line
+  Bars bars = laid;
+  const std::size_t landed = join_loose_bars(bars, d);
+  CHECK(landed == bars.joined && bars.bars.size() == laid.bars.size());
+  CHECK(landed * 2 > static_cast<std::size_t>(loose_before));   // most of them land
+  int not_inside = 0, too_far = 0, outside = 0, thick_into_thin = 0, thin_into_thick = 0, moved_other = 0;
+  for (std::size_t i = 0; i < bars.bars.size(); ++i) {
+    const Bar &b = bars.bars[i], &was = laid.bars[i];
+    if (pr.part().depth(b.a) < -1e-6 || pr.part().depth(b.b) < -1e-6) ++outside;
+    for (int e = 0; e < 2; ++e) {
+      const Bar::End kind = e ? b.end_b : b.end_a, kind_was = e ? was.end_b : was.end_a;
+      const Vec3 &p = e ? b.b : b.a, &p_was = e ? was.b : was.a;
+      const double run = std::sqrt((p.x - p_was.x) * (p.x - p_was.x) + (p.y - p_was.y) * (p.y - p_was.y) +
+                                   (p.z - p_was.z) * (p.z - p_was.z));
+      if (kind_was != Bar::End::Loose) { if (run > 0.0 || kind != kind_was) ++moved_other; continue; }
+      if (run > b.cell + b.width + 1e-9) ++too_far;        // one cell of its own, no farther
+      if (kind != Bar::End::Joined) continue;
+      // It ends inside another bar: its end is within that bar's half width of its middle.
+      bool inside = false, into_5 = false, into_6 = false;
+      for (std::size_t k = 0; k < laid.bars.size(); ++k)
+        if (k != i && off_bar(p, laid.bars[k]) <= 0.5 * laid.bars[k].width + 1e-9) {
+          inside = true;
+          if (b.cell > laid.bars[k].cell + 0.5) into_5 = true;   // a 6 mm cell's strut in a 5 mm cell's
+          if (b.cell < laid.bars[k].cell - 0.5) into_6 = true;
+        }
+      if (!inside) ++not_inside;
+      thick_into_thin += into_5;
+      thin_into_thick += into_6;
+    }
+  }
+  CHECK(not_inside == 0);
+  CHECK(too_far == 0);
+  CHECK(outside == 0);                 // nothing was run out of the part
+  CHECK(moved_other == 0);             // only loose ends move
+  CHECK(thick_into_thin > 0 && thin_into_thick > 0);   // each wall's struts reach the other's
+  // The same bars whichever way it is asked again.
+  Bars again = laid;
+  join_loose_bars(again, d);
+  CHECK(same_bars(again, bars));
+  drop_loose_bars(bars);
+  int loose_after = 0;
+  for (const Bar& b : bars.bars)
+    loose_after += (b.end_a == Bar::End::Loose) + (b.end_b == Bar::End::Loose);
+  CHECK(loose_after == 0);
+}
+
 // D5, D15, C15: with a Protect skin on a face, the lattice starts at the skin's own depth
 // and its cells divide what is left of the wall. The skin never cuts through a cell.
 static void test_cells_behind_a_protect_skin() {
@@ -1959,6 +2034,7 @@ int main() {
   test_grooves_do_not_narrow_a_wall();
   test_kept_readings();
   test_bars();
+  test_bars_join();
   test_struts();
   test_grade_to_shape();
   test_cells_prism();
