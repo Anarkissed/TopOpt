@@ -583,7 +583,22 @@ struct Bars {
   std::size_t stubs = 0;      // pieces shorter than their own width: not kept (S4)
   std::size_t dropped = 0;    // by drop_loose_bars
   std::size_t joined = 0;     // ends, by join_loose_bars
+  // Where drop_loose_bars removed a strut that the part's surface had cut and nothing
+  // held: the places a stepped edge is left (S4).
+  struct CutEnd { Vec3 at{}; int region = 0; double cell = 0.0; };
+  std::vector<CutEnd> cut_in_air;
 };
+
+// S4: "where a stepped edge is left, the app points at it and says Rim or Skin will fix
+// this". The cut ends drop_loose_bars removed, gathered into edges: ends within one and a
+// half cells of each other are one edge. A lone end or two is not an edge. Largest first.
+struct SteppedEdge {
+  int region = 0;
+  Vec3 at{};                  // the middle of its ends: where to point
+  Vec3 lo{}, hi{};            // the box round them
+  std::size_t ends = 0;
+};
+std::vector<SteppedEdge> stepped_edges(const Bars& bars);
 
 Bars lay_bars(const Layout& layout, const Domain& domain, int threads = 0);
 
@@ -677,6 +692,7 @@ struct Outcome {
   StrutReport struts;
   Bars bars;
   Pieces pieces;                 // as found before any piece adrift was removed
+  std::vector<SteppedEdge> stepped_edges;   // what Finish None left ragged (S4)
   bool read_again = false;       // the part was read for this layout (a "where" setting changed)
   std::vector<int> empty_regions;   // asked-for regions none of whose faces has triangles
   double ms_read = 0.0, ms_cells = 0.0, ms_bars = 0.0;

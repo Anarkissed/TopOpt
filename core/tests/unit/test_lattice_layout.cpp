@@ -1920,6 +1920,65 @@ static void test_bars_join() {
   CHECK(joined_left > 20 && into_nothing == 0);
 }
 
+// S4: where Finish None leaves a stepped edge, the layout says where.
+static void test_stepped_edges() {
+  const Vec3 down{0, 0, -1};
+  CellSpec cs;
+  cs.cell_max_mm = 6;
+  PartMeasure pm(weld_mesh(box(20, 20, 12)));
+  auto laid = [&](double expand, bool skin) {
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, {10, 10, 12}, down, 10, 10, 6, expand)};
+    Domain d(pm, s);
+    Layout l = lay_cells(d, cs);
+    set_struts(l, StrutSpec{});
+    Bars bars = lay_bars(l, d);
+    if (skin) lay_skin(bars, d);
+    drop_loose_bars(bars);
+    return bars;
+  };
+  {  // The block's four sides cut its lattice: one edge all the way round.
+    const Bars bars = laid(0.0, false);
+    const std::vector<SteppedEdge> edges = stepped_edges(bars);
+    CHECK(edges.size() == 1);
+    if (!edges.empty()) {
+      const SteppedEdge& e = edges[0];
+      CHECK(e.region == 1 && e.ends == bars.cut_in_air.size() && e.ends > 100);
+      NEAR(e.at.x, 10.0, 0.01);   // round a square block its middle is the block's
+      NEAR(e.at.y, 10.0, 0.01);
+      NEAR(e.lo.x, 0.0, 1e-6);    // and its ends are on the block's sides
+      NEAR(e.hi.x, 20.0, 1e-6);
+      NEAR(e.lo.y, 0.0, 1e-6);
+      NEAR(e.hi.y, 20.0, 1e-6);
+      CHECK(e.lo.z >= 6.0 - 1e-6 && e.hi.z <= 12.0 + 1e-6);
+    }
+  }
+  {  // With the skin holding the cut ends there is far less of it, or none.
+    const Bars bare = laid(0.0, false), skinned = laid(0.0, true);
+    CHECK(skinned.cut_in_air.size() * 5 < bare.cut_in_air.size());
+  }
+  {  // The region pulled in from the sides: nothing is cut by air, nothing is stepped.
+    const Bars bars = laid(-2.0, false);
+    CHECK(bars.cut_in_air.empty() && stepped_edges(bars).empty());
+  }
+  {  // By hand: ends within a cell and a half are one edge; a lone pair is not an edge;
+     // another region's ends are another edge; the larger edge comes first.
+    Bars bars;
+    auto end = [](double x, double y, int region) { return Bars::CutEnd{{x, y, 0}, region, 4.0}; };
+    bars.cut_in_air = {end(0, 0, 1), end(5, 0, 1), end(10, 0, 1), end(15, 0, 1),     // 4, each 5 from the next
+                       end(40, 0, 1), end(45, 0, 1),                                   // 2: not an edge
+                       end(0, 3, 2), end(5, 3, 2), end(10, 3, 2),                      // region 2, right beside
+                       end(22, 0, 1)};                                                 // 7 from the last of the first: not joined
+    const std::vector<SteppedEdge> edges = stepped_edges(bars);
+    CHECK(edges.size() == 2);
+    if (edges.size() == 2) {
+      CHECK(edges[0].region == 1 && edges[0].ends == 4 && edges[1].region == 2 && edges[1].ends == 3);
+      NEAR(edges[0].at.x, 7.5, 1e-12);
+      NEAR(edges[1].at.y, 3.0, 1e-12);
+    }
+  }
+}
+
 // S3: Finish Skin. Bars across the part's surface joining the cut strut ends.
 static void test_skin() {
   const Vec3 down{0, 0, -1};
@@ -2511,6 +2570,7 @@ int main() {
   test_bars_join();
   test_pieces();
   test_skin();
+  test_stepped_edges();
   test_rim();
   test_session();
   test_region_squares();

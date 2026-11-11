@@ -647,14 +647,74 @@ Pieces drop_adrift_bars(Bars& bars, const Domain& domain) {
   return found;
 }
 
+std::vector<SteppedEdge> stepped_edges(const Bars& bars) {
+  const std::vector<Bars::CutEnd>& ends = bars.cut_in_air;
+  std::vector<SteppedEdge> out;
+  if (ends.empty()) return out;
+  double largest = 0.0;
+  for (const Bars::CutEnd& e : ends) largest = std::max(largest, e.cell);
+  const double reach = 1.5 * std::max(largest, 1.0);
+  auto slot = [&](double x) { return static_cast<long long>(std::floor(x / reach)); };
+  std::map<std::array<long long, 3>, std::vector<std::size_t>> grid;
+  for (std::size_t i = 0; i < ends.size(); ++i)
+    grid[{slot(ends[i].at.x), slot(ends[i].at.y), slot(ends[i].at.z)}].push_back(i);
+  std::vector<std::size_t> parent(ends.size());
+  for (std::size_t i = 0; i < ends.size(); ++i) parent[i] = i;
+  auto find = [&](std::size_t i) {
+    while (parent[i] != i) { parent[i] = parent[parent[i]]; i = parent[i]; }
+    return i;
+  };
+  for (std::size_t i = 0; i < ends.size(); ++i) {
+    const Vec3& p = ends[i].at;
+    for (long long x = slot(p.x) - 1; x <= slot(p.x) + 1; ++x)
+      for (long long y = slot(p.y) - 1; y <= slot(p.y) + 1; ++y)
+        for (long long z = slot(p.z) - 1; z <= slot(p.z) + 1; ++z) {
+          const auto it = grid.find({x, y, z});
+          if (it == grid.end()) continue;
+          for (std::size_t j : it->second) {
+            if (j <= i || ends[j].region != ends[i].region) continue;
+            const Vec3& q = ends[j].at;
+            const double d2 = (q.x - p.x) * (q.x - p.x) + (q.y - p.y) * (q.y - p.y) + (q.z - p.z) * (q.z - p.z);
+            const double near = 1.5 * std::max(ends[i].cell, ends[j].cell);
+            if (d2 > near * near) continue;
+            const std::size_t a = find(i), b = find(j);
+            if (a != b) parent[std::max(a, b)] = std::min(a, b);
+          }
+        }
+  }
+  std::map<std::size_t, SteppedEdge> groups;
+  for (std::size_t i = 0; i < ends.size(); ++i) {
+    const Vec3& p = ends[i].at;
+    auto [it, fresh] = groups.emplace(find(i), SteppedEdge{});
+    SteppedEdge& g = it->second;
+    if (fresh) { g.region = ends[i].region; g.lo = g.hi = p; }
+    g.lo = Vec3{std::min(g.lo.x, p.x), std::min(g.lo.y, p.y), std::min(g.lo.z, p.z)};
+    g.hi = Vec3{std::max(g.hi.x, p.x), std::max(g.hi.y, p.y), std::max(g.hi.z, p.z)};
+    g.at = Vec3{g.at.x + p.x, g.at.y + p.y, g.at.z + p.z};
+    ++g.ends;
+  }
+  for (auto& [root, g] : groups) {
+    if (g.ends < 3) continue;
+    g.at = Vec3{g.at.x / g.ends, g.at.y / g.ends, g.at.z / g.ends};
+    out.push_back(g);
+  }
+  std::stable_sort(out.begin(), out.end(),
+                   [](const SteppedEdge& x, const SteppedEdge& y) { return x.ends > y.ends; });
+  return out;
+}
+
 void drop_loose_bars(Bars& bars) {
   // A cut end that lands on nothing: in the air, or loose in the lattice.
   auto lands = [](Bar::End e) {
     return e == Bar::End::Node || e == Bar::End::Solid || e == Bar::End::Joined;
   };
   std::vector<char> keep(bars.bars.size(), 1);
-  for (std::size_t i = 0; i < bars.bars.size(); ++i)
-    if (!lands(bars.bars[i].end_a) || !lands(bars.bars[i].end_b)) keep[i] = 0;
+  for (std::size_t i = 0; i < bars.bars.size(); ++i) {
+    const Bar& b = bars.bars[i];
+    if (!lands(b.end_a) || !lands(b.end_b)) keep[i] = 0;
+    if (b.end_a == Bar::End::Surface) bars.cut_in_air.push_back({b.a, b.region, b.cell});
+    if (b.end_b == Bar::End::Surface) bars.cut_in_air.push_back({b.b, b.region, b.cell});
+  }
   // A node end lands on another bar only while another bar is still there: take away
   // bars that hold a node alone, until none does. (A Solid end has landed already.)
   for (bool again = true; again;) {

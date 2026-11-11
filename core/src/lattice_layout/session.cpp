@@ -74,6 +74,7 @@ Outcome Session::lay(const Settings& settings, int threads) {
     if (settings.skin) lay_skin(out.bars, *domain_, settings.skin_spec);
     if (settings.drop_loose) {
       drop_loose_bars(out.bars);
+      out.stepped_edges = stepped_edges(out.bars);
       out.pieces = drop_adrift_bars(out.bars, *domain_);
     } else {
       out.pieces = count_pieces(out.bars, *domain_);
