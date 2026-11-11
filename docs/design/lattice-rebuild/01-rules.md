@@ -32,6 +32,8 @@ Section 8 held seven places where two rulings pulled against each other. He sett
 | D16 | Nothing is printed inside a Keep clear. The part's own solid wins over a Keep clear. | reviewer, 2026-11-03 19:55 (`run_job.cpp:770`) |
 | D17 | Material a design box added is solid. The lattice is laid around it, not through it. | reviewer, 2026-11-03 23:05 (`run_job.cpp:7273`) |
 | D18 | The same part and settings give the same layout, byte for byte, on every launch. | his, 2026-09-30, ruling 1 (`LatticeFaceOutline.swift:46`) |
+| D19 | Start from is the rule for everything a zone, a face-prism or a protection does not cover. Under All lattice a face-prism only changes solid to lattice settings; shrinking it with a negative Expand leaves lattice behind, not solid. Only a No lattice region makes solid inside a lattice. | his, 2026-11-10: "The base setting is always the rule for anything NOT covered by a zone or face-prism or protection." |
+| D20 | A face-prism works on a curved face, and on several faces joined into one. Curved: the region follows the face inward by the depth and stops at the face's own outline. Joined: one region, one depth, one outline, no seam between the faces. | his, 2026-11-10: "We definitely need to implement curved face-prisms - as well as unioned ones." |
 
 ## 2. Cell size
 

@@ -38,6 +38,8 @@ Kind of test: **L** reads the layout, **F** reads the file, **A** is an app test
 | D16 | F | Zero volume of lattice inside a Keep clear. Where the part's own solid enters a Keep clear, the solid is present. |
 | D17 | L | No cell centre lies in material a design box added; that material is solid in the file. |
 | D18 | L | Two launches, same part and settings: the layout's bytes are identical. |
+| D19 | L | All lattice with one Lattice prism at Expand −3: every point of the 3 mm strip is lattice owned by the whole part. The same strip under All solid is solid. |
+| D20 | L | A region from a curved face holds a point only if the nearest point of the face is inside the face's outline and within the depth ± 0.01 mm. A region from two faces that share an edge holds the points under that edge, and has one outline. |
 
 ## 2. Cell size
 

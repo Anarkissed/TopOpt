@@ -253,7 +253,7 @@ struct ModelBuilder {
 
 // A 60 x 60 x 10 plate whose top is TWO faces: an L (the two 20 mm arms) and the 40 mm
 // square the L wraps. The rectangle around the L covers the square too.
-static StepModel plate_with_L_face(int* L, int* square, int* side) {
+static StepModel plate_with_L_face(int* L, int* square, int* sideA, int* sideB) {
   ModelBuilder b;
   const double z = 10;
   *L = b.face(StepSurfaceKind::Plane, {0, 0, 1}, {0, 0, z});
@@ -263,7 +263,9 @@ static StepModel plate_with_L_face(int* L, int* square, int* side) {
   *square = b.face(StepSurfaceKind::Plane, {0, 0, 1}, {20, 20, z});
   b.quad(*square, {20, 20, z}, {60, 20, z}, {60, 60, z}, {20, 60, z});
   const int bottom = b.face(StepSurfaceKind::Plane, {0, 0, -1}, {0, 0, 0});
-  b.quad(bottom, {0, 0, 0}, {0, 60, 0}, {60, 60, 0}, {60, 0, 0});
+  b.tri(bottom, {60, 0, 0}, {0, 0, 0}, {0, 20, 0});
+  b.tri(bottom, {60, 0, 0}, {0, 20, 0}, {0, 60, 0});
+  b.tri(bottom, {60, 0, 0}, {0, 60, 0}, {60, 60, 0});
   // A side whose top edge has a vertex where two top faces meet: three triangles from
   // one bottom corner, so every edge is shared by exactly two triangles.
   auto side_of = [&](int f, Vec3 bl, Vec3 br, Vec3 tr, Vec3 tm, Vec3 tl) {
@@ -271,10 +273,13 @@ static StepModel plate_with_L_face(int* L, int* square, int* side) {
     b.tri(f, bl, tr, tm);
     b.tri(f, bl, tm, tl);
   };
-  // The x = 0 side is tagged as a CURVED face on purpose (it is flat; the tag is what
-  // the code reads), to exercise the shell path with a distance that is easy to state.
-  *side = b.face(StepSurfaceKind::Other, {0, 0, 0}, {0, 0, 0});
-  side_of(*side, {0, 60, 0}, {0, 0, 0}, {0, 0, z}, {0, 20, z}, {0, 60, z});
+  // The x = 0 side is TWO faces (y 0..20 and y 20..60), tagged as CURVED on purpose
+  // (they are flat; the tag is what the code reads), to exercise the curved path with
+  // distances that are easy to state.
+  *sideA = b.face(StepSurfaceKind::Other, {0, 0, 0}, {0, 0, 0});
+  b.quad(*sideA, {0, 20, 0}, {0, 0, 0}, {0, 0, z}, {0, 20, z});
+  *sideB = b.face(StepSurfaceKind::Other, {0, 0, 0}, {0, 0, 0});
+  b.quad(*sideB, {0, 60, 0}, {0, 20, 0}, {0, 20, z}, {0, 60, z});
   const int rest = b.face(StepSurfaceKind::Other, {0, 0, 0}, {0, 0, 0});
   side_of(rest, {0, 0, 0}, {60, 0, 0}, {60, 0, z}, {20, 0, z}, {0, 0, z});
   side_of(rest, {60, 0, 0}, {60, 60, 0}, {60, 60, z}, {60, 20, z}, {60, 0, z});
@@ -283,8 +288,8 @@ static StepModel plate_with_L_face(int* L, int* square, int* side) {
 }
 
 static void test_face_regions() {
-  int L = -1, square = -1, side = -1;
-  const StepModel model = plate_with_L_face(&L, &square, &side);
+  int L = -1, square = -1, sideA = -1, sideB = -1;
+  const StepModel model = plate_with_L_face(&L, &square, &sideA, &sideB);
   std::size_t open = 99;
   PartMeasure pm(weld_mesh(model.mesh, 1e-5, &open));
   CHECK(open == 0);
@@ -322,22 +327,97 @@ static void test_face_regions() {
     CHECK((p2.where({2.9, 40, 8}) == Where{Why::NotAsked, 0}));   // the part's own edge moves in too
     CHECK((p2.where({3.1, 40, 8}) == Where{Why::Lattice, 1}));
   }
-  {  // A curved face has no prism: the region is everything within the depth of the face.
+  {  // D20: a curved face. The region follows the face in by the depth and stops at
+     // the face's own outline.
     bool ok = false;
     DomainSpec s;
-    s.regions = {region_from_face(model, side, 2, Role::Lattice, 5, 0.0, &ok)};
+    s.regions = {region_from_face(model, sideA, 2, Role::Lattice, 5, 0.0, &ok)};   // y 0..20
     CHECK(ok);
+    CHECK(s.regions[0].is_shell());
+    CHECK(s.regions[0].shell_edge.size() == 4);
+    Domain d(pm, s);
+    auto pr = d.probe();
+    CHECK((pr.where({4.99, 10, 5}) == Where{Why::Lattice, 2}));
+    CHECK((pr.where({5.01, 10, 5}) == Where{Why::NotAsked, 0}));
+    CHECK((pr.where({3, 19.9, 5}) == Where{Why::Lattice, 2}));
+    // 3.6 mm from the face, but past its edge: not under it.
+    CHECK((pr.where({3, 22, 5}) == Where{Why::NotAsked, 0}));
+    CHECK((pr.where({3, 20.1, 5}) == Where{Why::NotAsked, 0}));
+  }
+  {  // D11 on a curved face: a negative Expand pulls the region in from the outline.
+    DomainSpec s;
+    s.regions = {region_from_face(model, sideA, 2, Role::Lattice, 5, -2.0)};
+    Domain d(pm, s);
+    auto pr = d.probe();
+    CHECK((pr.where({3, 17.9, 5}) == Where{Why::Lattice, 2}));
+    CHECK((pr.where({3, 18.1, 5}) == Where{Why::NotAsked, 0}));
+    CHECK((pr.where({3, 10, 7.9}) == Where{Why::Lattice, 2}));    // 2 mm in from the top edge
+    CHECK((pr.where({3, 10, 8.1}) == Where{Why::NotAsked, 0}));
+    CHECK((pr.where({4.9, 10, 5}) == Where{Why::Lattice, 2}));    // the depth is unchanged
+    // A positive Expand cannot be done on a curved face yet: ignored, and it says so.
+    const Region up = region_from_face(model, sideA, 2, Role::Lattice, 5, 2.0);
+    CHECK(up.expand_ignored && up.expand_mm == 0.0);
+  }
+  {  // D20: two curved faces joined are ONE region: one outline, nothing lost at the seam.
+    bool ok = false;
+    DomainSpec s;
+    s.regions = {region_from_faces(model, {sideB, sideA}, 2, Role::Lattice, 5, 0.0, &ok)};
+    CHECK(ok);
+    CHECK(s.regions[0].is_shell());
+    CHECK(s.regions[0].shell_edge.size() == 6);                   // the seam is not a border
+    Domain d(pm, s);
+    auto pr = d.probe();
+    CHECK((pr.where({3, 20, 5}) == Where{Why::Lattice, 2}));      // right under the seam
+    CHECK((pr.where({3, 22, 5}) == Where{Why::Lattice, 2}));
+    CHECK((pr.where({4.99, 30, 5}) == Where{Why::Lattice, 2}));
+    CHECK((pr.where({5.01, 30, 5}) == Where{Why::NotAsked, 0}));
+    // Joined and pulled in 2 mm: the seam still is not an edge.
+    s.regions = {region_from_faces(model, {sideA, sideB}, 2, Role::Lattice, 5, -2.0)};
+    Domain d2(pm, s);
+    CHECK((d2.probe().where({3, 20, 5}) == Where{Why::Lattice, 2}));
+    CHECK((d2.probe().where({3, 1.9, 5}) == Where{Why::NotAsked, 0}));
+    // ... and as No lattice it beats a Lattice prism (D6).
+    s.regions = {region_from_face(model, L, 1, Role::Lattice, 6),
+                 region_from_faces(model, {sideA, sideB}, 2, Role::NoLattice, 5)};
+    Domain d3(pm, s);
+    CHECK((d3.probe().where({3, 30, 8}) == Where{Why::NoLattice, 2}));
+    CHECK((d3.probe().where({7, 30, 8}) == Where{Why::Lattice, 1}));
+  }
+  {  // D20: two FLAT faces in one plane joined are one prism with one outline.
+    bool ok = false;
+    DomainSpec s;
+    s.regions = {region_from_faces(model, {L, square}, 1, Role::Lattice, 6, -3.0, &ok)};
+    CHECK(ok);
+    CHECK(!s.regions[0].is_shell());
+    CHECK(s.regions[0].prism.outline_uv.size() == 1);
+    Domain d(pm, s);
+    auto pr = d.probe();
+    CHECK((pr.where({20, 40, 8}) == Where{Why::Lattice, 1}));     // on the seam, pulled in 3: still in
+    CHECK((pr.where({40, 40, 8}) == Where{Why::Lattice, 1}));
+    CHECK((pr.where({2.9, 40, 8}) == Where{Why::NotAsked, 0}));   // the true edge moved in
+    CHECK((pr.where({3.1, 40, 8}) == Where{Why::Lattice, 1}));
+  }
+  {  // D20: faces at an angle joined (the top and a side): one region around the corner.
+    DomainSpec s;
+    s.regions = {region_from_faces(model, {L, square, sideA, sideB}, 1, Role::Lattice, 4)};
     CHECK(s.regions[0].is_shell());
     Domain d(pm, s);
     auto pr = d.probe();
-    CHECK((pr.where({4.99, 30, 5}) == Where{Why::Lattice, 2}));
-    CHECK((pr.where({5.01, 30, 5}) == Where{Why::NotAsked, 0}));
-    // ... and as No lattice it beats a Lattice prism (D6).
-    s.regions = {region_from_face(model, L, 1, Role::Lattice, 6),
-                 region_from_face(model, side, 2, Role::NoLattice, 5)};
+    CHECK((pr.where({30, 30, 7}) == Where{Why::Lattice, 1}));     // under the top
+    CHECK((pr.where({2, 30, 3}) == Where{Why::Lattice, 1}));      // behind the side
+    CHECK((pr.where({2, 30, 8.5}) == Where{Why::Lattice, 1}));    // in the corner between them
+    CHECK((pr.where({30, 30, 5.9}) == Where{Why::NotAsked, 0}));
+  }
+  {  // D19: under All lattice a shrunk prism leaves lattice behind, not solid.
+    DomainSpec s;
+    s.start = Start::AllLattice;
+    s.regions = {region_from_faces(model, {L, square}, 1, Role::Lattice, 6, -3.0)};
+    Domain d(pm, s);
+    CHECK((d.probe().where({1.5, 40, 8}) == Where{Why::Lattice, 0}));
+    CHECK((d.probe().where({10, 40, 8}) == Where{Why::Lattice, 1}));
+    s.start = Start::AllSolid;
     Domain d2(pm, s);
-    CHECK((d2.probe().where({3, 30, 8}) == Where{Why::NoLattice, 2}));
-    CHECK((d2.probe().where({7, 30, 8}) == Where{Why::Lattice, 1}));
+    CHECK((d2.probe().where({1.5, 40, 8}) == Where{Why::NotAsked, 0}));
   }
   {  // Protect skin from the model's own faces (D5).
     DomainSpec s;

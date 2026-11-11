@@ -12,6 +12,14 @@ namespace topopt::lattice_layout {
 namespace {
 double dot(const Vec3& a, const Vec3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
 Vec3 sub(const Vec3& a, const Vec3& b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
+double segment_distance2(const Vec3& p, const Vec3& a, const Vec3& b) {
+  const Vec3 ab = sub(b, a), ap = sub(p, a);
+  const double l2 = dot(ab, ab);
+  double t = l2 > 0.0 ? dot(ap, ab) / l2 : 0.0;
+  t = t < 0.0 ? 0.0 : (t > 1.0 ? 1.0 : t);
+  const Vec3 d{ap.x - ab.x * t, ap.y - ab.y * t, ap.z - ab.z * t};
+  return dot(d, d);
+}
 }  // namespace
 
 bool region_contains(const Region& r, const Vec3& p) {
@@ -65,9 +73,18 @@ Where Domain::Probe::where(const Vec3& p) const {
   auto holds = [&](std::size_t i, double* dist) {
     const Region& r = spec.regions[i];
     if (r.is_shell()) {
+      // D20: the surface carried inward along its own normals, to its own outline.
       const double d = shells_[i].unsigned_distance(p);
       if (dist) *dist = d;
-      return d <= r.shell_depth_mm;
+      if (d > r.shell_depth_mm) return false;
+      if (r.shell_edge.empty()) return true;          // a closed surface has no outline
+      double e2 = std::numeric_limits<double>::infinity();
+      for (const auto& seg : r.shell_edge) e2 = std::min(e2, segment_distance2(p, seg[0], seg[1]));
+      // The nearest point of the surface is inside its outline exactly when the surface
+      // is nearer than its border. How far inside, along the surface: the other leg.
+      const double along2 = e2 - d * d;
+      if (!(along2 > 1e-12)) return false;
+      return r.expand_mm >= 0.0 || along2 >= r.expand_mm * r.expand_mm;
     }
     if (!region_contains(r, p)) return false;
     if (dist) {

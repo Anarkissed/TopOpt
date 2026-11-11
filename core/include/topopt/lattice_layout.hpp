@@ -18,6 +18,7 @@
 //
 // Nothing here is called by the shipped path. The old path is untouched.
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -107,19 +108,33 @@ struct Region {
   // Rule D11: grow (+) or shrink (-) the outline in the face's plane only. 0 is exactly
   // the face, and is answered by the old predicate itself. Never changes the depth.
   double expand_mm = 0.0;
-  // A CURVED face has no prism. When `shell` holds the face's own triangles the region
-  // is everything within `shell_depth_mm` of that face instead, and `prism` is unread.
+  // Rule D20: a CURVED face, or several faces that are not one flat face, has no flat
+  // prism. When `shell` holds the faces' own triangles the region is instead every point
+  // whose NEAREST point of that surface is within `shell_depth_mm` and lies inside the
+  // surface's own outline (`shell_edge`, the edges on its border): the surface carried
+  // inward along its own normals, stopping at its outline. `prism` is then unread.
+  // Expand below 0 pulls the region in from the outline; above 0 is not possible on a
+  // curved surface yet and is ignored, with `expand_ignored` set so the caller can say so.
   TriangleMesh shell;
+  std::vector<std::array<Vec3, 2>> shell_edge;
   double shell_depth_mm = 0.0;
+  bool expand_ignored = false;
   bool is_shell() const { return !shell.triangles.empty(); }
 };
 
-// The region under one face of the model, from the face itself (rule D10: the face's
-// true outline, read off its own triangles, never the rectangle around it). A flat face
-// gives a prism of `depth_mm` into the material; a curved face gives a shell of that
-// depth. `ok` is false, and the region empty, when the face has no triangles.
-Region region_from_face(const StepModel& model, int face_id, int id, Role role,
-                        double depth_mm, double expand_mm = 0.0, bool* ok = nullptr);
+// The region under one or more faces of the model, from the faces themselves (rule D10:
+// the true outline, read off their own triangles, never the rectangle around it; rule
+// D20: several faces are ONE region with one depth and one outline, no seam between
+// them). Faces that together are one flat face give a prism of `depth_mm` into the
+// material; anything else (a curved face, faces at an angle) gives a shell of that depth.
+// `ok` is false, and the region empty, when no listed face has triangles.
+Region region_from_faces(const StepModel& model, const std::vector<int>& face_ids, int id,
+                         Role role, double depth_mm, double expand_mm = 0.0,
+                         bool* ok = nullptr);
+inline Region region_from_face(const StepModel& model, int face_id, int id, Role role,
+                               double depth_mm, double expand_mm = 0.0, bool* ok = nullptr) {
+  return region_from_faces(model, {face_id}, id, role, depth_mm, expand_mm, ok);
+}
 
 // The triangles of the given faces, as one open mesh (for ProtectSkin::face).
 TriangleMesh faces_mesh(const StepModel& model, const std::vector<int>& face_ids);

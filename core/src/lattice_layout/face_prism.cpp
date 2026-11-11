@@ -25,23 +25,60 @@ TriangleMesh faces_mesh(const StepModel& model, const std::vector<int>& face_ids
   return sink.mesh;
 }
 
-Region region_from_face(const StepModel& model, int face_id, int id, Role role,
-                        double depth_mm, double expand_mm, bool* ok) {
+Region region_from_faces(const StepModel& model, const std::vector<int>& face_ids, int id,
+                         Role role, double depth_mm, double expand_mm, bool* ok) {
   Region r;
   r.id = id;
   r.role = role;
   r.expand_mm = expand_mm;
   if (ok) *ok = false;
-  if (face_id < 0 || face_id >= model.face_count || !(depth_mm > 0.0)) return r;
-  TriangleMesh face = faces_mesh(model, {face_id});
+  if (!(depth_mm > 0.0)) return r;
+  std::vector<int> ids;
+  for (int f : face_ids)
+    if (f >= 0 && f < model.face_count) ids.push_back(f);
+  std::sort(ids.begin(), ids.end());
+  ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+  if (ids.empty()) return r;
+  TriangleMesh face = faces_mesh(model, ids);
   if (face.triangles.empty()) return r;
 
-  const StepFaceInfo& info = model.faces[static_cast<std::size_t>(face_id)];
+  // One flat face? Every listed face a plane, facing the same way, in the same plane.
+  const StepFaceInfo& info = model.faces[static_cast<std::size_t>(ids[0])];
   const Vec3 out = info.plane_normal;
-  if (info.kind != StepSurfaceKind::Plane || dot(out, out) < 0.25) {
-    // A curved face: everything within the depth of the face itself.
+  bool flat = info.kind == StepSurfaceKind::Plane && dot(out, out) > 0.25;
+  for (std::size_t i = 1; flat && i < ids.size(); ++i) {
+    const StepFaceInfo& o = model.faces[static_cast<std::size_t>(ids[i])];
+    flat = o.kind == StepSurfaceKind::Plane &&
+           dot(o.plane_normal, out) >= (1.0 - 1e-9) * std::sqrt(dot(out, out) * dot(o.plane_normal, o.plane_normal)) &&
+           std::fabs(dot(sub(o.plane_origin, info.plane_origin), out)) <= 1e-4 * std::sqrt(dot(out, out));
+  }
+  if (!flat) {
+    // Rule D20. The outline of the surface: its edges used by one triangle only, so an
+    // edge two listed faces share is inside the region, not on its border.
+    struct K3 {
+      long long x, y, z;
+      bool operator<(const K3& o) const { return x != o.x ? x < o.x : y != o.y ? y < o.y : z < o.z; }
+    };
+    auto k3 = [](const Vec3& v) { return K3{std::llround(v.x * 1e5), std::llround(v.y * 1e5), std::llround(v.z * 1e5)}; };
+    std::map<std::pair<K3, K3>, std::pair<int, std::array<Vec3, 2>>> edges;
+    for (const auto& t : face.triangles)
+      for (int c = 0; c < 3; ++c) {
+        const Vec3& va = face.vertices[t[c]];
+        const Vec3& vb = face.vertices[t[(c + 1) % 3]];
+        const K3 ka = k3(va), kb = k3(vb);
+        if (!(ka < kb) && !(kb < ka)) continue;
+        auto& e = edges[ka < kb ? std::make_pair(ka, kb) : std::make_pair(kb, ka)];
+        ++e.first;
+        e.second = {va, vb};
+      }
+    for (const auto& kv : edges)
+      if (kv.second.first == 1) r.shell_edge.push_back(kv.second.second);
     r.shell = std::move(face);
     r.shell_depth_mm = depth_mm;
+    if (expand_mm > 0.0) {
+      r.expand_mm = 0.0;
+      r.expand_ignored = true;
+    }
     if (ok) *ok = true;
     return r;
   }
