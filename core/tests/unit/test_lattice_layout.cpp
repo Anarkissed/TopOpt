@@ -1769,6 +1769,22 @@ static void test_bars() {
     drop_loose_bars(chain);
     CHECK(chain.dropped == 4);
     CHECK(chain.bars.size() == 2 && chain.bars[0].a.y == 5 && chain.bars[1].a.y == 5);
+    // A bar that ends IN another has landed only while that other is there. Bar 1 ends
+    // in bar 0, which is cut in the air and goes: bar 1 goes with it, and bar 2, which
+    // ends in bar 1. Bar 4 ends in bar 3, which stands on solid at both ends: both stay,
+    // and bar 4 still points at bar 3 after the others are gone.
+    Bars into;
+    into.bars = {bar({0, 0, 0}, {4, 0, 0}, Bar::End::Solid, Bar::End::Surface),
+                 bar({2, 3, 0}, {2, 0, 0}, Bar::End::Solid, Bar::End::Joined),
+                 bar({5, 1.5, 0}, {2, 1.5, 0}, Bar::End::Solid, Bar::End::Joined),
+                 bar({0, 9, 0}, {4, 9, 0}, Bar::End::Solid, Bar::End::Solid),
+                 bar({2, 12, 0}, {2, 9, 0}, Bar::End::Solid, Bar::End::Joined)};
+    into.bars[1].into_b = 0;
+    into.bars[2].into_b = 1;
+    into.bars[4].into_b = 3;
+    drop_loose_bars(into);
+    CHECK(into.dropped == 3 && into.bars.size() == 2);
+    CHECK(into.bars[0].a.y == 9 && into.bars[1].a.y == 12 && into.bars[1].into_b == 0);
   }
   {  // The same block, the region pulled 2 mm in from the outline: solid all round it.
      // A bar cut at the region's edge runs on into the solid by its own width (S11).
@@ -1885,10 +1901,23 @@ static void test_bars_join() {
   join_loose_bars(again, d);
   CHECK(same_bars(again, bars));
   drop_loose_bars(bars);
-  int loose_after = 0;
-  for (const Bar& b : bars.bars)
+  int loose_after = 0, into_nothing = 0, joined_left = 0;
+  for (std::size_t i = 0; i < bars.bars.size(); ++i) {
+    const Bar& b = bars.bars[i];
     loose_after += (b.end_a == Bar::End::Loose) + (b.end_b == Bar::End::Loose);
+    for (int e = 0; e < 2; ++e) {
+      if ((e ? b.end_b : b.end_a) != Bar::End::Joined) continue;
+      ++joined_left;
+      const int into = e ? b.into_b : b.into_a;
+      // It points at a bar that is still there, and its end is inside that bar.
+      if (into < 0 || into >= static_cast<int>(bars.bars.size()) || into == static_cast<int>(i) ||
+          off_bar(e ? b.b : b.a, bars.bars[static_cast<std::size_t>(into)]) >
+              0.5 * bars.bars[static_cast<std::size_t>(into)].width + 1e-9)
+        ++into_nothing;
+    }
+  }
   CHECK(loose_after == 0);
+  CHECK(joined_left > 20 && into_nothing == 0);
 }
 
 // S3: Finish Skin. Bars across the part's surface joining the cut strut ends.
@@ -1940,13 +1969,24 @@ static void test_skin() {
       }
     CHECK(crossings == 0);
     // A cut end that got a skin bar has landed, and nothing else changed.
-    int still_cut = 0, landed = 0;
+    int still_cut = 0, landed = 0, unpointed = 0;
     for (std::size_t i = 0; i < laid.bars.size(); ++i)
       for (int e = 0; e < 2; ++e) {
         const Bar::End was = e ? laid.bars[i].end_b : laid.bars[i].end_a, now = e ? bars.bars[i].end_b : bars.bars[i].end_a;
         if (was != Bar::End::Surface) { CHECK(now == was); continue; }
         ++(now == Bar::End::Joined ? landed : still_cut);
+        if (now != Bar::End::Joined) continue;
+        // It says which skin bar it ended in, and that bar starts or ends at this very point.
+        const int into = e ? bars.bars[i].into_b : bars.bars[i].into_a;
+        const Vec3& p = e ? bars.bars[i].b : bars.bars[i].a;
+        bool right = into >= static_cast<int>(laid.bars.size()) && into < static_cast<int>(bars.bars.size());
+        if (right) {
+          const Bar& sk = bars.bars[static_cast<std::size_t>(into)];
+          right = sk.skin && ((sk.a.x == p.x && sk.a.y == p.y && sk.a.z == p.z) || (sk.b.x == p.x && sk.b.y == p.y && sk.b.z == p.z));
+        }
+        if (!right) ++unpointed;
       }
+    CHECK(unpointed == 0);
     CHECK(landed > 100 && still_cut * 10 < landed);
     // With the skin, Finish None's rule has far less to remove.
     Bars bare = laid;

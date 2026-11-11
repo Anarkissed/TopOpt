@@ -284,7 +284,7 @@ std::size_t join_loose_bars(Bars& bars, const Domain& domain, int threads) {
   }
   // Each loose end on its own, against the bars as laid: shared between threads, and the
   // same result for any number of them.
-  struct Result { Bar::End kind = Bar::End::Loose; Vec3 to{}; };
+  struct Result { Bar::End kind = Bar::End::Loose; Vec3 to{}; int into = -1; };
   std::vector<std::pair<std::size_t, int>> ends;
   for (std::size_t i = 0; i < before.size(); ++i)
     for (int end = 0; end < 2; ++end)
@@ -316,6 +316,7 @@ std::size_t join_loose_bars(Bars& bars, const Domain& domain, int threads) {
       std::sort(near.begin(), near.end());
       near.erase(std::unique(near.begin(), near.end()), near.end());
       double land = -1.0;
+      int into = -1;
       for (std::size_t k : near) {
         if (k == i) continue;
         const Bar& other = before[k];
@@ -324,7 +325,10 @@ std::size_t join_loose_bars(Bars& bars, const Domain& domain, int threads) {
         if (gap > 0.5 * other.width) continue;        // its middle line stays outside that bar
         // Not the bar it is a continuation of (the next piece of the same strut touches
         // it end to end only when nothing lies between them, and that is a join too).
-        if (land < 0.0 || at < land) land = at;
+        if (land < 0.0 || at < land) {
+          land = at;
+          into = static_cast<int>(k);
+        }
       }
       // What the line passes through before that: solid ends it sooner (S11); air ends it.
       // A strut lying IN the part's surface (the outermost struts of a latticed face) is
@@ -366,6 +370,7 @@ std::size_t join_loose_bars(Bars& bars, const Domain& domain, int threads) {
       if (kind == Bar::End::Loose) continue;   // met nothing within a cell: left as it was
       results[job].kind = kind;
       results[job].to = Vec3{p.x + d.x * stop, p.y + d.y * stop, p.z + d.z * stop};
+      if (kind == Bar::End::Joined) results[job].into = into;
     }
   };
   {
@@ -381,8 +386,8 @@ std::size_t join_loose_bars(Bars& bars, const Domain& domain, int threads) {
   for (std::size_t job = 0; job < ends.size(); ++job) {
     if (results[job].kind == Bar::End::Loose) continue;
     Bar& mine = bars.bars[ends[job].first];
-    if (ends[job].second) { mine.b = results[job].to; mine.end_b = results[job].kind; }
-    else { mine.a = results[job].to; mine.end_a = results[job].kind; }
+    if (ends[job].second) { mine.b = results[job].to; mine.end_b = results[job].kind; mine.into_b = results[job].into; }
+    else { mine.a = results[job].to; mine.end_a = results[job].kind; mine.into_a = results[job].into; }
     if (results[job].kind != Bar::End::Surface) ++joined;
   }
   bars.joined += joined;
@@ -417,7 +422,7 @@ std::size_t lay_skin(Bars& bars, const Domain& domain, const SkinSpec& spec) {
   for (std::size_t i = 0; i < tips.size(); ++i)
     grid[{slot(tips[i].p.x), slot(tips[i].p.y), slot(tips[i].p.z)}].push_back(i);
   const Domain::Probe probe = domain.probe();
-  std::vector<char> landed(tips.size(), 0);
+  std::vector<int> landed(tips.size(), 0);
   std::size_t made = 0;
   std::vector<std::size_t> near;
   for (std::size_t i = 0; i < tips.size(); ++i) {
@@ -457,19 +462,38 @@ std::size_t lay_skin(Bars& bars, const Domain& domain, const SkinSpec& spec) {
       skin.width = spec.width_mm > 0.0 ? spec.width_mm : std::min(tips[i].width, tips[j].width);
       skin.cell = std::max(tips[i].cell, tips[j].cell);
       skin.region = bars.bars[tips[i].of.front().first].region;
+      if (!landed[i]) landed[i] = static_cast<int>(bars.bars.size()) + 1;   // the bar it ends in, + 1
+      if (!landed[j]) landed[j] = static_cast<int>(bars.bars.size()) + 1;
       bars.bars.push_back(skin);
-      landed[i] = landed[j] = 1;
       ++made;
     }
   }
   for (std::size_t i = 0; i < tips.size(); ++i) {
     if (!landed[i]) continue;
-    for (const auto& [bar, end] : tips[i].of) (end ? bars.bars[bar].end_b : bars.bars[bar].end_a) = Bar::End::Joined;
+    for (const auto& [bar, end] : tips[i].of) {
+      (end ? bars.bars[bar].end_b : bars.bars[bar].end_a) = Bar::End::Joined;
+      (end ? bars.bars[bar].into_b : bars.bars[bar].into_a) = landed[i] - 1;
+    }
   }
   return made;
 }
 
 namespace {
+// Keep the flagged bars, in order, and renumber what the Joined ends point at.
+void keep_only(Bars& bars, const std::vector<char>& keep) {
+  std::vector<int> now(bars.bars.size(), -1);
+  std::vector<Bar> left;
+  for (std::size_t i = 0; i < bars.bars.size(); ++i) {
+    if (!keep[i]) { ++bars.dropped; continue; }
+    now[i] = static_cast<int>(left.size());
+    left.push_back(bars.bars[i]);
+  }
+  for (Bar& b : left) {
+    if (b.into_a >= 0) b.into_a = b.into_a < static_cast<int>(now.size()) ? now[static_cast<std::size_t>(b.into_a)] : -1;
+    if (b.into_b >= 0) b.into_b = b.into_b < static_cast<int>(now.size()) ? now[static_cast<std::size_t>(b.into_b)] : -1;
+  }
+  bars.bars.swap(left);
+}
 double length_of(const Bar& b) {
   return std::sqrt((b.b.x - b.a.x) * (b.b.x - b.a.x) + (b.b.y - b.a.y) * (b.b.y - b.a.y) +
                    (b.b.z - b.a.z) * (b.b.z - b.a.z));
@@ -603,12 +627,9 @@ Pieces drop_adrift_bars(Bars& bars, const Domain& domain) {
   std::vector<char> adrift;
   const Pieces found = count_pieces(bars, domain, &adrift);
   if (found.adrift == 0) return found;
-  std::vector<Bar> left;
-  for (std::size_t i = 0; i < bars.bars.size(); ++i) {
-    if (adrift[i]) ++bars.dropped;
-    else left.push_back(bars.bars[i]);
-  }
-  bars.bars.swap(left);
+  std::vector<char> keep(adrift.size());
+  for (std::size_t i = 0; i < adrift.size(); ++i) keep[i] = !adrift[i];
+  keep_only(bars, keep);
   return found;
 }
 
@@ -635,18 +656,18 @@ void drop_loose_bars(Bars& bars) {
       const Bar& b = bars.bars[i];
       const bool alone_a = b.end_a == Bar::End::Node && at[key_of(b.a)] < 2;
       const bool alone_b = b.end_b == Bar::End::Node && at[key_of(b.b)] < 2;
-      if (alone_a || alone_b) {
+      // A joined end lands on the bar it ends in only while that bar is still there.
+      auto gone = [&](Bar::End e, int into) {
+        return e == Bar::End::Joined && into >= 0 && into < static_cast<int>(keep.size()) &&
+               !keep[static_cast<std::size_t>(into)];
+      };
+      if (alone_a || alone_b || gone(b.end_a, b.into_a) || gone(b.end_b, b.into_b)) {
         keep[i] = 0;
         again = true;
       }
     }
   }
-  std::vector<Bar> left;
-  for (std::size_t i = 0; i < bars.bars.size(); ++i) {
-    if (keep[i]) left.push_back(bars.bars[i]);
-    else ++bars.dropped;
-  }
-  bars.bars.swap(left);
+  keep_only(bars, keep);
 }
 
 }  // namespace topopt::lattice_layout

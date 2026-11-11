@@ -573,6 +573,9 @@ struct Bar {
   End end_a = End::Node, end_b = End::Node;
   bool piece = false;    // part of a strut of a cut cell, not a whole strut
   bool skin = false;     // a skin bar (S3): it lies on the part's surface, between cut ends
+  // For a Joined end: the bar it ends in (its place in Bars::bars), -1 otherwise. If that
+  // bar is removed, this end lands on nothing again (drop_loose_bars follows it).
+  int into_a = -1, into_b = -1;
 };
 
 struct Bars {
