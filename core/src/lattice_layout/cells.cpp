@@ -3,7 +3,9 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
+#include <thread>
 
 #include "topopt/stepped_plan.hpp"  // stepped_size_menu, kSteppedPrintsOpenMaxStrutPerCell
 
@@ -122,9 +124,18 @@ struct Pass {
     if (!w.lattice() || w.id != region) return false;
     width = std::min(width, depth_cap);
     if (walls && walls->find(a, b, width) != wall) return false;
-    // C2, C3-C5, C12: never wider than the wall over the cells it must hold; the wall is
-    // the material at this spot, and never more than the region's depth.
-    *fit = width / spec->min_cells_across;
+    // C2, C12: never wider than the wall; the wall is the material at this spot along the
+    // region's own direction, and never more than the region's depth.
+    // C3-C5 (reviewer's ruling 2026-11-11): the cells a wall must hold are counted across
+    // the member's NARROWEST width, whichever way that lies. A rib one cell wide across
+    // the face and two deep is one across, not two. (Twice the depth below the surface is
+    // a ball that fits, so nothing through the point is narrower than that.)
+    double narrow = width;
+    if (walls) {
+      const Vec3 p = frame.at(a, b, c);
+      if (2.0 * probe->part().depth(p) < width) narrow = std::min(width, probe->part().thickness(p));
+    }
+    *fit = std::min(width, narrow / spec->min_cells_across);
     return true;
   }
 
@@ -338,8 +349,10 @@ void centred(double lo, double hi, double s, double* start, int* count) {
 
 }  // namespace
 
-Layout lay_cells(const Domain& domain, const CellSpec& spec) {
+Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
   Layout out;
+  const int thread_count =
+      threads > 0 ? threads : std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
   const DomainSpec& ds = domain.spec();
   out.floor_cell_mm = ds.bead_mm / kSteppedPrintsOpenMaxStrutPerCell;   // C14
   out.bead_mm = ds.bead_mm;
@@ -382,12 +395,55 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec) {
       start[2] = lo[2];
       count[2] = std::max(1, static_cast<int>(std::llround((hi[2] - lo[2]) / base)));
     }
-    for (int c = 0; c < count[2]; ++c)
-      for (int b = 0; b < count[1]; ++b)
-        for (int a = 0; a < count[0]; ++a) {
-          const double q[3] = {start[0] + a * base, start[1] + b * base, start[2] + c * base};
-          pass.place(q, base);
-        }
+    // Each base cell is laid on its own, so they are shared between threads and put
+    // back in the order one thread would have laid them: the layout is the same for any
+    // number of threads (D18). A probe serves one thread, so each takes its own.
+    const std::size_t total = static_cast<std::size_t>(count[0]) * count[1] * count[2];
+    auto slot = [&](std::size_t i, double q[3]) {
+      const std::size_t a = i % count[0], b = (i / count[0]) % count[1], c = i / (static_cast<std::size_t>(count[0]) * count[1]);
+      q[0] = start[0] + a * base; q[1] = start[1] + b * base; q[2] = start[2] + c * base;
+    };
+    const int nt = static_cast<int>(std::min<std::size_t>(static_cast<std::size_t>(thread_count), total));
+    if (nt <= 1) {
+      for (std::size_t i = 0; i < total; ++i) {
+        double q[3];
+        slot(i, q);
+        pass.place(q, base);
+      }
+      return;
+    }
+    struct Piece { std::vector<Cell> cells, solid; };
+    std::vector<Piece> pieces(total);
+    std::atomic<std::size_t> next{0};
+    auto work = [&]() {
+      const Domain::Probe mine = domain.probe();
+      Layout local;
+      local.floor_cell_mm = out.floor_cell_mm;
+      RegionCells count_here;
+      Pass p = pass;
+      p.probe = &mine;
+      p.out = &local;
+      p.tally = &count_here;
+      for (std::size_t i = next.fetch_add(1); i < total; i = next.fetch_add(1)) {
+        double q[3];
+        slot(i, q);
+        p.place(q, base);
+        pieces[i].cells.swap(local.cells);
+        pieces[i].solid.swap(local.solid);
+        local.cells.clear();
+        local.solid.clear();
+      }
+    };
+    std::vector<std::thread> pool;
+    for (int t = 1; t < nt; ++t) pool.emplace_back(work);
+    work();
+    for (std::thread& t : pool) t.join();
+    for (const Piece& piece : pieces) {
+      out.cells.insert(out.cells.end(), piece.cells.begin(), piece.cells.end());
+      out.solid.insert(out.solid.end(), piece.solid.begin(), piece.solid.end());
+      pass.tally->cells += piece.cells.size();
+      pass.tally->solid += piece.solid.size();
+    }
   };
   // A region's frame and its tally; returns the pass to lay with.
   auto open = [&](int region, const Frame& frame, double depth_cap, double base) {

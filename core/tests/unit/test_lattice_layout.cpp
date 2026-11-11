@@ -687,6 +687,10 @@ static void test_cells_walls_under_a_face() {
     CHECK(badly_covered(d, l, {0, 0, 0}, {60, 12, 40}, 1.3) == 0);
     const Layout again = lay_cells(d, cs);
     CHECK(l.cells == again.cells);          // D18
+    const Layout one = lay_cells(d, cs, 1), three = lay_cells(d, cs, 3);   // any number of threads
+    CHECK(l.cells == one.cells && l.cells == three.cells && l.solid == one.solid && l.solid == three.solid);
+    CHECK(l.regions.size() == one.regions.size() && l.regions[0].cells == one.regions[0].cells &&
+          l.regions[0].solid == one.regions[0].solid);
   }
 }
 
@@ -1205,6 +1209,47 @@ static void test_grade_to_shape() {
 }
 
 
+// The reviewer's rib (ruling 2026-11-11): one cell wide across the face, two deep. The
+// cells a wall must hold are counted across its narrowest width, not along the prism.
+static void test_cells_across_the_narrowest_width() {
+  auto lay_rib = [](double wide, double bead, int across) {
+    PartMeasure pm(weld_mesh(box(40, wide, 6)));
+    DomainSpec s;
+    s.bead_mm = bead;
+    s.regions = {face_region(1, Role::Lattice, {20, 0.5 * wide, 6}, {0, 0, -1}, 20, 0.5 * wide, 6)};
+    Domain d(pm, s);
+    CellSpec cs;
+    cs.min_cells_across = across;
+    return lay_cells(d, cs);
+  };
+  {  // Two across asked. 6 deep would hold two 3 mm cells; 3 wide holds one. Not a lattice.
+    const Layout l = lay_rib(3, 0.45, 2);
+    CHECK(l.cells.empty() && !l.solid.empty());
+  }
+  {  // On a finer line the rib takes cells that are two across its 3 mm: 1.5 mm at most.
+    const Layout l = lay_rib(3, 0.2, 2);
+    double largest = 0.0;
+    for (const Cell& c : l.cells) largest = std::max(largest, c.size);
+    CHECK(!l.cells.empty() && largest <= 1.5 + 1e-5);
+  }
+  {  // Single-cell walls: one 3 mm cell across the 3 mm, two deep.
+    const Layout l = lay_rib(3, 0.45, 1);
+    int other = 0;
+    for (const Cell& c : l.cells) if (std::fabs(c.size - 3.0) > 1e-5) ++other;
+    CHECK(!l.cells.empty() && other == 0 && l.solid.empty());
+  }
+  {  // Structural, five across: 0.6 mm cells do not print. Solid.
+    const Layout l = lay_rib(3, 0.2, 5);
+    CHECK(l.cells.empty() && !l.solid.empty());
+  }
+  {  // The same rib 6 mm wide is two across both ways: lattice, 3 mm cells.
+    const Layout l = lay_rib(6, 0.45, 2);
+    int other = 0;
+    for (const Cell& c : l.cells) if (std::fabs(c.size - 3.0) > 1e-5) ++other;
+    CHECK(!l.cells.empty() && other == 0 && l.solid.empty());
+  }
+}
+
 static void test_cells_curved_region() {
   int L = -1, square = -1, sideA = -1, sideB = -1;
   const StepModel model = plate_with_L_face(&L, &square, &sideA, &sideB);
@@ -1224,6 +1269,7 @@ static void test_cells_curved_region() {
 }
 
 int main() {
+  test_cells_across_the_narrowest_width();
   test_struts();
   test_grade_to_shape();
   test_cells_prism();

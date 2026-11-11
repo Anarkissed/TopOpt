@@ -137,10 +137,35 @@ double PartMeasure::Probe::thickness(const Vec3& p) const {
     const Vec3 n = through(Vec3{p.x + d.x * in, p.y + d.y * in, p.z + d.z * in});
     return std::fabs(n.x * d.x + n.y * d.y + n.z * d.z);
   };
+  // Nor is it a wall's width if it ends on an inside corner (the edge where a step or a
+  // rib meets the wall): the line toward such an edge is always "square" to it, and is
+  // shorter than the wall the point sits in. An inside corner is where the depth below
+  // the surface curves upward to either side; next to a flat or rounded-out face it
+  // does not.
+  auto ends_on_inside_corner = [&](const Vec3& d, double t) {
+    const double in = t > 0.4 ? 0.2 : 0.5 * t;
+    if (in <= 0.0) return false;
+    const Vec3 q{p.x + d.x * (t - in), p.y + d.y * (t - in), p.z + d.z * (t - in)};
+    const Vec3 ref = std::fabs(d.x) < 0.9 ? Vec3{1, 0, 0} : Vec3{0, 1, 0};
+    Vec3 e1{d.y * ref.z - d.z * ref.y, d.z * ref.x - d.x * ref.z, d.x * ref.y - d.y * ref.x};
+    const double l = std::sqrt(e1.x * e1.x + e1.y * e1.y + e1.z * e1.z);
+    e1 = {e1.x / l, e1.y / l, e1.z / l};
+    const Vec3 e2{d.y * e1.z - d.z * e1.y, d.z * e1.x - d.x * e1.z, d.x * e1.y - d.y * e1.x};
+    const double s = 0.5 * in, here = depth(q);
+    for (const Vec3& e : {e1, e2}) {
+      const double bend = depth(Vec3{q.x + e.x * s, q.y + e.y * s, q.z + e.z * s}) +
+                          depth(Vec3{q.x - e.x * s, q.y - e.y * s, q.z - e.z * s}) - 2.0 * here;
+      if (bend > 0.1 * s) return true;
+    }
+    return false;
+  };
   for (const Chord& c : chords) {
     const Vec3& d = dirs[c.dir];
-    const double s1 = squareness(d, c.fwd), s2 = squareness(Vec3{-d.x, -d.y, -d.z}, c.back);
-    if (std::max(s1, s2) >= kSquare && std::min(s1, s2) >= kGraze) return c.fwd + c.back;
+    const Vec3 back{-d.x, -d.y, -d.z};
+    const double s1 = squareness(d, c.fwd), s2 = squareness(back, c.back);
+    if (std::max(s1, s2) >= kSquare && std::min(s1, s2) >= kGraze &&
+        !ends_on_inside_corner(d, c.fwd) && !ends_on_inside_corner(back, c.back))
+      return c.fwd + c.back;
   }
   // Nothing qualified (a sharp wedge, a point in a fillet): the width
   // toward the nearest surface is the honest reading.

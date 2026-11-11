@@ -302,7 +302,8 @@ struct Layout {
   std::vector<RegionCells> regions;
 };
 
-Layout lay_cells(const Domain& domain, const CellSpec& spec);
+// `threads`: 0 = all of this machine's; the layout is the same for any number (D18).
+Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads = 0);
 
 // ── STRUT WIDTH ───────────────────────────────────────────────────────────────
 // What a lattice looks like is one number, strut width over cell size (R9). Octet's
