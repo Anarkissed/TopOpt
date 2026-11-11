@@ -346,13 +346,14 @@ final class VariantRetentionTests: XCTestCase {
 
         let p = try XCTUnwrap(ResultsReplacementPrompt.forNewRun(existing: finished(3)))
         XCTAssertEqual(p.variantCount, 3)
-        XCTAssertTrue(p.message.contains("3 variants"), p.message)
+        // ★ RE-PINNED (UI-Notes B10, design-system.md §3: a run's outcomes are "results" on the kept pages, never "variants")
+        XCTAssertTrue(p.message.contains("3 results"), p.message)
         XCTAssertTrue(p.message.contains("41.2 g"), "it names what is at stake: \(p.message)")
         XCTAssertTrue(p.message.contains("can’t be brought back"), p.message)
 
         let one = try XCTUnwrap(ResultsReplacementPrompt.forNewRun(existing: finished(1)))
-        XCTAssertTrue(one.message.contains("1 variant this project"), one.message)
-        XCTAssertFalse(one.message.contains("1 variants"), "singular reads properly")
+        XCTAssertTrue(one.message.contains("1 result this project"), one.message)
+        XCTAssertFalse(one.message.contains("1 results"), "singular reads properly")
     }
 
     /// And the workspace really routes Optimize through it rather than starting

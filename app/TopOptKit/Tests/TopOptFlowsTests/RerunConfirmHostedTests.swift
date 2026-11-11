@@ -54,7 +54,7 @@ final class RerunConfirmHostedTests: XCTestCase {
     func card(_ h: AppBuildHost) -> CGRect? { h.frames.all["rerunConfirm"] }
 
     func testOptimizeOverResultsAsksInPlaceAndReRunHereRuns() throws {
-        for size in [AppBuildHost.landscape13, AppBuildHost.portrait13, AppBuildHost.landscape11] {
+        for size in AppBuildHost.sweep {   // ★ B10: the six windows
             let (h, _, runs) = try landed(size)
             let what = "\(size)"
             try clickOptimize(h)

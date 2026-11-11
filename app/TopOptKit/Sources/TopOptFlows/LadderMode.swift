@@ -74,7 +74,7 @@ public enum LadderMode: String, Equatable, Sendable, CaseIterable {
     public var resultsLine: String {
         switch self {
         case .reduction:
-            return "Minimize plastic — recommending the LIGHTEST variant that meets your margin."
+            return "Minimize plastic — recommending the LIGHTEST result that meets your margin."
         case .growth:
             return "Redesign to strengthen — recommending the SMALLEST net addition that meets your margin."
         }

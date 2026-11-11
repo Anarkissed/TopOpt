@@ -312,7 +312,7 @@ public struct RunProgress: Equatable, Sendable {
     /// names the rung and iteration rather than inventing voxelize/assemble phases.
     public var stageLabel: String {
         rungCount > 1
-            ? "Variant \(rung + 1) of \(rungCount) · SIMP iteration \(iteration)"
+            ? "Result \(rung + 1) of \(rungCount) · SIMP iteration \(iteration)"
             : "SIMP iteration \(iteration)"
     }
 
@@ -528,8 +528,8 @@ public enum RunFailure: Equatable, Sendable {
     public static func stalledDuringSetup(graceSeconds: Double) -> String {
         "The optimizer stalled before it could take its first step, so the run was "
       + "stopped after \(gracePhrase(graceSeconds)) with no progress. This can happen "
-      + "on a dense load case or a fine resolution — try the Fast resolution or a "
-      + "simpler load case, then run again. If you think it just needs longer, tap "
+      + "on a dense load scenario or a fine resolution — try the Fast resolution or a "
+      + "simpler load scenario, then run again. If you think it just needs longer, tap "
       + "Keep waiting."
     }
 
@@ -540,7 +540,7 @@ public enum RunFailure: Equatable, Sendable {
     public static func stalledWithDesignBox(graceSeconds: Double) -> String {
         "The optimizer stalled before it could take its first step, so the run was "
       + "stopped after \(gracePhrase(graceSeconds)) with no progress. The growth space "
-      + "(design box) makes this much more likely — try turning it off or making it "
+      + "(Allow growth here) makes this much more likely — try turning it off or making it "
       + "smaller, or use the Fast resolution, then run again. If you think it just "
       + "needs longer, tap Keep waiting."
     }
@@ -688,7 +688,7 @@ public enum RunFailure: Equatable, Sendable {
                  + "\(r.proposedLabel) → \(at) at the gate."
         case "volume_fraction":
             return "Keep more material (volume fraction \(r.proposedLabel)) → "
-                 + "\(at) at the gate — that rung was solved in this run."
+                 + "\(at) at the gate — that result was solved in this run."
         case "material":
             return "Print it in \(r.proposedLabel) → \(at) at the gate."
         case "resolution":
@@ -1689,7 +1689,7 @@ public final class RunModel: ObservableObject {
         switch phase {
         case .succeeded:
             let n = outcome?.acceptedCount ?? 0
-            return "\(request.projectName): \(n) variant\(n == 1 ? "" : "s") ready"
+            return "\(request.projectName): \(n) result\(n == 1 ? "" : "s") ready"
         case .cancelled:
             return "\(request.projectName): optimization cancelled"
         case .failed:

@@ -29,10 +29,14 @@ final class SettingsPanelHostedTests: XCTestCase {
                                                 isStep: false, designBoxDrawn: true)
             XCTAssertEqual(rows.last, .material, "\(what): ★ Material is the last row (app-map §3.9)")
             var seen = 0
+            // ★ B10: at 11″ landscape the panel stays under the view controls and scrolls; a row the fold cuts is U10's own
+            // case — reachable, with the panel's "N more ⌄" cue showing
+            let cue = h.frames.all.first(where: { $0.key.hasPrefix("settingsPanelMore-") })?.value
             for row in rows {
                 guard let f = h.frames.all["settingsRow-\(row.rawValue)"] else { continue }
                 seen += 1
-                XCTAssertTrue(panel.insetBy(dx: -0.5, dy: -0.5).contains(f) || f.minY >= panel.maxY - 1,
+                XCTAssertTrue(panel.insetBy(dx: -0.5, dy: -0.5).contains(f) || f.minY >= panel.maxY - 1
+                              || (cue != nil && f.minY < panel.maxY && f.minY >= panel.minY),
                               "\(what): ★ \(row.title) sits inside the panel (or below its fold, scrolled to): \(f) in \(panel)")
                 XCTAssertGreaterThanOrEqual(f.minX, panel.minX - 0.5, "\(what): \(row.title) is not cut at the side")
                 XCTAssertLessThanOrEqual(f.maxX, panel.maxX + 0.5, "\(what): \(row.title) is not cut at the side")

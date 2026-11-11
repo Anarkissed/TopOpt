@@ -460,7 +460,7 @@ public struct ResultVariantVM: Equatable, Sendable {
         var line = "+\(mass) of plastic added · \(outside)% of what prints is "
             + "new material, outside your model"
         if a.targetSaturated {
-            line += " · the design box could not hold this step's full ask"
+            line += " · Allow growth here could not hold this step's full ask"
         }
         return line
     }
@@ -1075,7 +1075,7 @@ public final class ResultsModel: ObservableObject {
             // latticed is the Lattice page's include/exclude decision, and the run
             // reports which it was (run_info lattice_export.frozen_latticed /
             // frozen_kept_solid). Say "frozen", not "frozen solid".
-            let base = "Protection on \(face): preserved (\(vox) of the face's skin frozen — "
+            let base = "Protection on \(face): preserved (\(vox) of the face's skin kept as it was — "
                      + "the optimizer could not reshape it)."
             if p.thinnerThanDepth {
                 return base + " The face's own material was thinner than the depth, "
@@ -1088,12 +1088,12 @@ public final class ResultsModel: ObservableObject {
     /// Format the clearance diagnostics from a finished outcome into honest lines.
     public static func clearanceNotes(_ applied: [AppliedClearance]) -> [String] {
         applied.map { c in
-            let kind = c.kind == .face ? "Face clearance" : "Bolt clearance"
+            let kind = c.kind == .face ? "Keep clear (face)" : "Keep clear (bolt)"
             let face = "face \(c.faceID)"
             if !c.inGrid {
                 return "\(kind) on \(face): its region fell outside the solved area — "
-                     + "no effect. (With no design box, a clearance in unreachable void "
-                     + "does nothing; check the selection or add a design box.)"
+                     + "no effect. (Without Allow growth here, a Keep clear in unreachable space "
+                     + "does nothing; check the selection or add Allow growth here.)"
             }
             if c.voxelsFrozen == 0 {
                 return "\(kind) on \(face): applied, but forbade no new material here."
@@ -1141,7 +1141,7 @@ public final class ResultsModel: ObservableObject {
         let head = joined.prefix(1).uppercased() + joined.dropFirst()
         let verb = missing.count == 1 ? "is" : "are"
         let neg = missing.count == 1 ? "isn’t" : "aren’t"
-        return "This variant was optimized on your Mac. \(head) \(verb) computed there "
+        return "This result was optimized on your Mac. \(head) \(verb) computed there "
              + "and \(neg) available for a LAN run in this build — the geometry, savings, "
              + "orientation and safety margins are."
     }
@@ -1576,7 +1576,7 @@ public final class ResultsModel: ObservableObject {
                 : "This latticed variant's mesh was not named by the worker, so "
                 + "there is no file to ask for."
         }
-        return canExport ? nil : "This variant has no mesh to export."
+        return canExport ? nil : "This result has no mesh to export."
     }
 
     /// Whether the Export button must go through the STREAMING path (a latticed
@@ -2827,7 +2827,7 @@ public final class ResultsModel: ObservableObject {
         guard let choice = ResultsModel.recommendation(accepted),
               let tab = tabs.first(where: { $0.isRecommended }) else { return nil }
         let noun = choice.isLatticed ? "latticed" : "solid"
-        var line = "Recommended: the \(noun) object of the \(tab.rungLabel) rung, "
+        var line = "Recommended: the \(noun) object of result \(tab.rungLabel), "
             + "\(ResultsModel.massLabel(choice.massGrams))"
         // The rung's OTHER object, when there is one, so the number on the screen
         // is never mistaken for the one it is not.
@@ -2837,7 +2837,7 @@ public final class ResultsModel: ObservableObject {
                 .flatMap { $0.accepted && $0.massGrams > 0 ? $0.massGrams : nil }
         if let other = alt, abs(other - choice.massGrams) > 0.05 {
             let otherNoun = choice.isLatticed ? "solid" : "latticed"
-            line += " · the same rung's \(otherNoun) is \(ResultsModel.massLabel(other))"
+            line += " · the same result's \(otherNoun) is \(ResultsModel.massLabel(other))"
         }
         return line
     }

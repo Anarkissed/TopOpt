@@ -3413,8 +3413,8 @@ public final class ProjectModel: ObservableObject {
         for other in force.manualPrimitives(for: group) where other.id != id {
             i += 1
             targets.append(.init(kind: .primitiveAxis, point: other.center, direction: other.axis,
-                                 label: "primitive \(i)"))
-            targets.append(.init(kind: .point, point: other.center, label: "primitive \(i) centre"))
+                                 label: "\(other.kind.word) \(i)"))   // ★ B10: "box 2", never "primitive 2"
+            targets.append(.init(kind: .point, point: other.center, label: "\(other.kind.word) \(i) centre"))
         }
         if let mesh = viewerMesh, let g = selection.groups.first(where: { $0.id == group }) {
             for f in keepClearFaces(g) where FaceTopology.isFastenerBore(f, in: mesh) {

@@ -46,7 +46,7 @@ public enum StrengthenRoute {
     /// the part inside it and refuses the key without one); "" otherwise, so the job is
     /// byte-identical to one written before this key existed.
     /// THE ONE LINE the app shows when "Redesign to strengthen" would go to the worker with no design box.
-    public static let noBoxLine = "Draw a design box first"
+    public static let noBoxLine = "Add Allow growth here first"
 
     /// Why the Mac worker may not start this request, or nil. Core rebuilds the part INSIDE the design box and
     /// refuses `redesign` without one, so a strengthen run with no box used to ship no key and silently run the

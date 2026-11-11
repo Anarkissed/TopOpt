@@ -29,6 +29,11 @@ final class AppBuildHost {
     static let portrait13 = CGSize(width: 1032, height: 1376)
     static let landscape11 = CGSize(width: 1180, height: 820)
     static let moreSpace = CGSize(width: 1590, height: 1192)
+    /// ★ B10 (plan.md B10: "every U-test on every page in 3 sizes and both orientations"): 11″ and More Space in portrait.
+    static let portrait11 = CGSize(width: 820, height: 1180)
+    static let moreSpacePortrait = CGSize(width: 1192, height: 1590)
+    /// ★ B10: the sweep's six windows — 13″, 11″ and More Space, each in landscape and portrait.
+    static let sweep: [CGSize] = [landscape13, portrait13, landscape11, portrait11, moreSpace, moreSpacePortrait]
 
     init<V: View>(_ v: V, size: CGSize, test: XCTestCase) {
         let frames = Frames()
@@ -82,8 +87,8 @@ final class AppBuildHost {
 
     // MARK: ScreenProbe (B2, plan.md "How every batch is proven")
 
-    /// The four window sizes every new control is proven at.
-    static let probeSizes: [CGSize] = [landscape13, portrait13, landscape11, moreSpace]
+    /// The window sizes every new control is proven at (B10: the six of the sweep).
+    static let probeSizes: [CGSize] = sweep   // ★ B10: was the four landscape-first sizes; now every window, both orientations
 
     /// The ScreenProbe checks for one control: drawn, wholly inside the window, a hit area of at least 44 × 44 pt, and not
     /// under any of `covers` (frames drawn above it: a sheet, a panel, a menu, a chip), unless it lies inside that frame
@@ -100,6 +105,20 @@ final class AppBuildHost {
             XCTAssertTrue(inside || !cf.intersects(f.insetBy(dx: 0.5, dy: 0.5)), "★ \(what) is under '\(c)' \(cf): \(f)", file: file, line: line)
         }
         return f
+    }
+
+    /// ★ B10: a row below a DSPanel's fold (U10), brought into view the way he would — the panel's "N more ⌄" cue, tapped
+    /// until `key` lies inside the panel's shown body (at most `tries` taps). A panel with room shows no cue: nothing happens.
+    /// (The corner's Settings panel scrolls at 11″ landscape since B10 kept it under the view controls.)
+    func scrollIntoPanel(_ key: String, panel: String, tries: Int = 6) {
+        for _ in 0..<tries {
+            guard let pf = frames.all[panel], let f = frames.all[key] else { return }
+            let cue = frames.all.first(where: { $0.key.hasPrefix(panel + "More-") })?.value
+            let foot = cue.map { Swift.min(pf.maxY, $0.minY) } ?? pf.maxY
+            if f.minY >= pf.minY - 0.5, f.maxY <= foot + 0.5 { return }
+            guard let c = cue else { return }
+            click(CGPoint(x: c.midX, y: c.midY), settle: 0.6)
+        }
     }
 
     /// ★ B3: scroll the Selections list (the way he would) until `key` sits inside it — a row below the list's fold is laid out

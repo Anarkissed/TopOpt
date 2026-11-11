@@ -342,7 +342,7 @@ final class RedesignToStrengthenTests: XCTestCase {
 
     func testStrengthenWithNoDesignBoxIsRefusedOnTheWorker() {
         XCTAssertEqual(StrengthenRoute.refusal(for: Self.request(minimizePlastic: false, box: nil), workerSelected: true),
-                       "Draw a design box first", "no box: refused, never the growth job in its place")
+                       "Add Allow growth here first", "no box: refused, never the growth job in its place")
         XCTAssertNil(StrengthenRoute.refusal(for: Self.request(minimizePlastic: false, box: Self.box), workerSelected: true))
         XCTAssertNil(StrengthenRoute.refusal(for: Self.request(minimizePlastic: true, box: nil), workerSelected: true),
                      "minimize plastic needs no box")

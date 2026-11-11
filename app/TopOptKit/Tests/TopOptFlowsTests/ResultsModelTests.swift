@@ -76,7 +76,7 @@ final class ResultsModelTests: XCTestCase {
             AppliedClearance(faceID: 9, kind: .bolt, voxelsFrozen: 0, inGrid: false),
         ])
         XCTAssertEqual(notes.count, 3)
-        XCTAssertTrue(notes[0].contains("Bolt clearance") && notes[0].contains("54 voxels"),
+        XCTAssertTrue(notes[0].contains("Keep clear (bolt)") && notes[0].contains("54 voxels"),
                       "an applied bolt clearance states what it reserved")
         XCTAssertTrue(notes[1].contains("forbade no new material"),
                       "a clearance that froze nothing says so")
