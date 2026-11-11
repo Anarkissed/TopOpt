@@ -218,7 +218,7 @@ final class FlexibleRound7DesignIntegrationHostedTests: XCTestCase {
         XCTAssertNil(h.frames.all["faceChip"], "★ H2 \(tag): the card folds the chip")
         if let l = legend(s, size) { XCTAssertFalse(card.intersects(l), "★ H4 \(tag): the card is not on the legend (\(card) vs \(l))") }
         let r5 = LatticeSelectableRef.face(group: c, face: 5)
-        try press(h, "numberBox-list-depth-\(r5.key)", "Face 5's depth box in the list")
+        try press(h, "numberField-list-depth-\(r5.key)", "Face 5's depth number in the list")   // ★ B9 Setup re-pin: the B6 row's NumberField
         XCTAssertEqual(s.faceUI.padTarget, "list-depth-\(r5.key)", "premise \(tag): the box's keypad")
         pump(0.6)
         XCTAssertEqual(s.chrome.open, .keypad, "★ H2 \(tag): the keypad is the one card")

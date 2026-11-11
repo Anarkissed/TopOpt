@@ -35,7 +35,7 @@ public struct ResultsScreen: View {
     /// The live run, so the streaming pill can surface the honest progress readout
     /// (variant N of M, elapsed, ETA) and offer Cancel. Optional — nil in previews /
     /// tests that render a static results screen; when nil the pill stays a plain
-    /// "Optimizing more variants…" label. Only READ here (progress/startedAt) plus
+    /// "Optimizing more results…" label. Only READ here (progress/startedAt) plus
     /// the existing `cancel()`; this task surfaces run state, it doesn't change it.
     var run: RunModel?
     /// Voxel resolution + material name for the readout's "SIMP · NN³" footer.
@@ -136,7 +136,11 @@ public struct ResultsScreen: View {
     @State private var smoothOpen = false
     /// An export failure message (rare — a temp-dir write error), surfaced as an alert
     /// rather than failing silently.
-    @State private var stlExportError: String?
+    /// ★ B10 (U6, the reviewer's ruling 11-11 08:04Z (2)(a)): what failed to export — the corner's danger line, never an alert.
+    @State private var exportFailure: ResultsExportFailure?
+    /// Hosted tests only: the STL write fails (the line and its Try again are shown), and each export attempt is reported.
+    nonisolated(unsafe) static var exportWriteFailsForTests = false
+    nonisolated(unsafe) static var exportAttemptProbe: ((String) -> Void)?
     /// Fraction of a LATTICED export transferred so far, or nil when none is in
     /// flight (task 2026-08-07-lattice-variants-on-screen). A solid export writes
     /// bytes the app already holds and is instant; a latticed one streams 740 MB to
@@ -419,13 +423,7 @@ public struct ResultsScreen: View {
             set: { if !$0 { videoExport.reset() } })) {
             if case let .ready(url) = videoExport.state { ShareSheet(items: [url]) }
         }
-        .alert("Couldn’t save video", isPresented: Binding(
-            get: { if case .failed = videoExport.state { return true } else { return false } },
-            set: { if !$0 { videoExport.reset() } })) {
-            Button("OK") { videoExport.reset() }
-        } message: {
-            if case let .failed(msg) = videoExport.state { Text(msg) }
-        }
+        // (★ B10: a video that couldn't be saved says so in the corner's danger line — `exportFailureLine`)
         // The real STL export share sheet (EXPORT task): AirDrop / Files / Mail via
         // UIActivityViewController. Present flows are device QA (the M7 /app/ standard);
         // the file bytes + filename + mass math are headlessly tested on the model.
@@ -434,13 +432,7 @@ public struct ResultsScreen: View {
             set: { if !$0 { stlExportURLs = [] } })) {
             if !stlExportURLs.isEmpty { ShareSheet(items: stlExportURLs) }
         }
-        .alert("Couldn’t export STL", isPresented: Binding(
-            get: { stlExportError != nil },
-            set: { if !$0 { stlExportError = nil } })) {
-            Button("OK") { stlExportError = nil }
-        } message: {
-            if let msg = stlExportError { Text(msg) }
-        }
+        // (★ B10: an STL that couldn't be exported says so in the corner's danger line — `exportFailureLine`)
     }
 
     /// Write the selected variant's STL to a temp file and hand it to the share sheet.
@@ -448,6 +440,8 @@ public struct ResultsScreen: View {
     /// + presentation live here. No-op when the variant has no exportable mesh (the
     /// button is disabled in that case anyway).
     private func exportSTL() {
+        exportFailure = nil
+        Self.exportAttemptProbe?("stl")
         // A LATTICED SELECTION EXPORTS THE LATTICED FILE (task 2026-08-07-lattice-
         // variants-on-screen, S2d). It streams from the worker straight to disk and
         // is never decoded, so it exports on a device that cannot display it —
@@ -465,11 +459,12 @@ public struct ResultsScreen: View {
                 switch result {
                 case .success(let url): stlExportURLs = [url]
                 case .failure(let error):
-                    stlExportError = error.localizedDescription
+                    exportFailure = .stl(error.localizedDescription)
                 }
             }
             return
         }
+        if Self.exportWriteFailsForTests { exportFailure = .stl(CocoaError(.fileWriteNoPermission).localizedDescription); return }
         guard let data = model.exportSTLData() else { return }
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(model.exportFilename)
@@ -477,7 +472,7 @@ public struct ResultsScreen: View {
             try data.write(to: url, options: .atomic)
             stlExportURLs = [url]
         } catch {
-            stlExportError = "Couldn’t write the STL file: \(error.localizedDescription)"
+            exportFailure = .stl(error.localizedDescription)
         }
     }
 
@@ -579,7 +574,7 @@ public struct ResultsScreen: View {
     }
 
     /// The in-flight-progress pill above the savings tabs (bottom-left). Previously
-    /// an inert "Optimizing more variants…" label with no progress, count, or time —
+    /// an inert "Optimizing more results…" label with no progress, count, or time —
     /// on an ~80-minute run it was indistinguishable from a dead run. Now it is LIVE
     /// (variant N of M · elapsed) and TAPPABLE: tapping opens a compact drawer with
     /// the honest readout + a Cancel affordance. Falls back to the old static label
@@ -605,7 +600,7 @@ public struct ResultsScreen: View {
                 } else {
                     HStack(spacing: DS.Space.s) {
                         ProgressView().controlSize(.small).tint(DS.Color.accent.color)
-                        Text("Optimizing more variants…").dsStyle(DS.TypeScale.footnote)
+                        Text("Optimizing more results…").dsStyle(DS.TypeScale.footnote)
                             .fontWeight(.semibold).foregroundStyle(DS.Color.textSecondary.color)
                     }
                     .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.l)
@@ -1345,6 +1340,39 @@ public struct ResultsScreen: View {
                 if exportable >= 2 { Button("Export all \(exportable) results") { exportAll() } }
                 Button("Open in Library") { onClose() }
             }
+        } above: {
+            exportFailureLine
+        }
+    }
+
+    /// The failure the corner says: an STL export's, else the video's.
+    private var currentExportFailure: ResultsExportFailure? {
+        if let exportFailure { return exportFailure }
+        if case let .failed(msg) = videoExport.state { return .video(msg) }
+        return nil
+    }
+
+    /// ★ B10 (U6, the reviewer's ruling 11-11 08:04Z (2)(a); §4.12 Line): ONE danger line over the corner — the design's
+    /// fix-line place (§4.18; the corner sits at the page's foot, so its line is the one just above it) — at most 12 words,
+    /// with ONE "Try again" chip. The system's own words are its (i).
+    @ViewBuilder private var exportFailureLine: some View {
+        if let f = currentExportFailure {
+            HStack(spacing: DS.Space.s) {
+                Text(f.words).font(.system(size: 12)).foregroundStyle(DS.Color.danger.color).lineLimit(1).fixedSize()
+                DSChip(.fix(ResultsExportFailure.retry), key: "resultsExportRetry") { retryExport(f) }
+                if !f.detail.isEmpty { InfoTip(key: "resultsExportFailure", text: f.detail, label: "What went wrong") }
+            }
+            .background(ResultsChrome.publish("resultsExportFailure"))
+        }
+    }
+
+    private func retryExport(_ f: ResultsExportFailure) {
+        switch f {
+        case .stl: exportSTL()
+        case .stlAll: exportAll()
+        case .video:
+            videoExport.reset()
+            videoExport.export(keyframes: model.keyframes(), name: model.projectName)
         }
     }
 
@@ -1369,6 +1397,8 @@ public struct ResultsScreen: View {
 
     /// ★ R-a: every solid result's STL into one folder, handed to the share sheet together.
     private func exportAll() {
+        exportFailure = nil
+        Self.exportAttemptProbe?("all")
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("results-" + UUID().uuidString.prefix(8), isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -1378,7 +1408,7 @@ public struct ResultsScreen: View {
                 return u
             }
         } catch {
-            stlExportError = "Couldn\u{2019}t write the STL files: \(error.localizedDescription)"
+            exportFailure = .stlAll(error.localizedDescription)
         }
     }
 
@@ -2205,3 +2235,20 @@ struct ShareSheet: View {
     }
 }
 #endif
+
+/// ★ B10 (U6, the reviewer's ruling 11-11 08:04Z (2)(a)): what failed to export on Results, said in ONE danger line (§4.12:
+/// at most 12 words) with one "Try again" chip; the system's own words go in its (i).
+public enum ResultsExportFailure: Equatable, Sendable {
+    case stl(String), stlAll(String), video(String)
+    public static let retry = "Try again"
+    public var words: String {
+        switch self {
+        case .stl: return "Couldn\u{2019}t export the STL"
+        case .stlAll: return "Couldn\u{2019}t export the STL files"
+        case .video: return "Couldn\u{2019}t save the video"
+        }
+    }
+    public var detail: String {
+        switch self { case let .stl(d), let .stlAll(d), let .video(d): return d }
+    }
+}

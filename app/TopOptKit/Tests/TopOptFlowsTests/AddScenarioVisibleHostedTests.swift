@@ -14,7 +14,7 @@ import AppKit
 @MainActor
 final class AddScenarioVisibleHostedTests: XCTestCase {
     func testAddALoadScenarioIsOnScreenAndHittableWithThreeFoldersOpen() throws {
-        for size in [AppBuildHost.landscape13, AppBuildHost.portrait13, AppBuildHost.landscape11] {
+        for size in AppBuildHost.sweep {   // ★ B10: the six windows
             let x = try ScenarioSelectHostedTests.threeScenarios(self)
             let p = x.r.project
             let h = AppBuildHost(WorkspacePlaceholder(model: x.r.app, project: p), size: size, test: self)

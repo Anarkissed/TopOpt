@@ -164,7 +164,7 @@ final class ViewCornerB2Tests: XCTestCase {
     /// row longer), at every size. RED before (scratchpad b2red/ViewPairColumn.txt): a row; on Results at 11″ portrait it
     /// covers redo.
     func testThePairIsAColumnAndTheTopLeftBlockNeverRunsUnderIt() throws {
-        for size in AppBuildHost.probeSizes + [CGSize(width: 820, height: 1180)] {
+        for size in AppBuildHost.sweep {   // ★ B10: the six windows
             for results in [false, true] {
                 let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
                 r.project.lattice.flexible = nil

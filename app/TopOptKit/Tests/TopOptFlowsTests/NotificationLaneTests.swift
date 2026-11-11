@@ -22,8 +22,7 @@ private struct LaneRoot: View {
 
 @MainActor
 final class NotificationLaneTests: XCTestCase {
-    static let sizes = [AppBuildHost.landscape13, AppBuildHost.portrait13, AppBuildHost.landscape11, CGSize(width: 820, height: 1180),
-                        AppBuildHost.moreSpace, CGSize(width: 1192, height: 1590)]
+    static let sizes = AppBuildHost.sweep   // ★ B10: the same six windows, from one list
     static let longToast = "Hidden from view — it still counts in the run, in every load scenario it belongs to, until you show it again"
     /// Two lines of the lane's type and padding, with a little slack.
     static let twoLines: CGFloat = 62

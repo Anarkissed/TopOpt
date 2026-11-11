@@ -54,9 +54,10 @@ final class NumberFieldHostedTests: XCTestCase {
     }
 
     func testASizeTapsToThePadAndDragsToStep() throws {
-        for size in [AppBuildHost.landscape13, AppBuildHost.portrait13, AppBuildHost.landscape11] {
+        for size in AppBuildHost.sweep {   // ★ B10: the six windows
             let (h, p, id) = try host(size)
             let key = "numberField-topology-primitive-field-\(id)-l"
+            h.scrollIntoPanel(key, panel: "settingsPanel")   // ★ B10: at 11″ landscape the panel scrolls (U10); he scrolls to it
             let field = try h.probe(key, "\(size): ★ U11 — the box's Length is a number field", minHit: 44)
             try h.tap(key, "\(size): Length")
             let pad = try XCTUnwrap(h.padFrame("numberPad"), "\(size): ★ a tap opens the app's pad")

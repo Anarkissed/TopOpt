@@ -81,7 +81,7 @@ final class RunModelTests: XCTestCase {
         XCTAssertEqual(RunProgress(rung: 0, rungCount: 1, iteration: 7).stageLabel,
                        "SIMP iteration 7")
         XCTAssertEqual(RunProgress(rung: 1, rungCount: 3, iteration: 12).stageLabel,
-                       "Variant 2 of 3 · SIMP iteration 12")
+                       "Result 2 of 3 · SIMP iteration 12")
     }
 
     // MARK: - honest progress readout math (run-progress-visibility)
@@ -511,7 +511,7 @@ final class RunModelTests: XCTestCase {
         model.start(request())
         XCTAssertTrue(minimizedDuringRun, "card is dismissed while the run continues")
         XCTAssertEqual(spy.willCount, 1)              // background assertion armed
-        XCTAssertEqual(spy.completions, ["Cube: 3 variants ready"])  // notified on completion
+        XCTAssertEqual(spy.completions, ["Cube: 3 results ready"])  // notified on completion
         XCTAssertFalse(model.isMinimized, "restored on completion so the result can surface")
     }
 
@@ -601,7 +601,7 @@ final class RunModelTests: XCTestCase {
         }
         model.start(request())
         XCTAssertEqual(spy.willCount, 0, "no background assertion for a foreground run")
-        XCTAssertEqual(spy.completions, ["Cube: 2 variants ready"],
+        XCTAssertEqual(spy.completions, ["Cube: 2 results ready"],
                        "an observed remote completion notifies")
     }
 

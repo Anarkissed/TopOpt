@@ -86,13 +86,12 @@ final class FlexibleR7U21CHandlesHostedTests: XCTestCase {
         click(h, CGPoint(x: f.eBox.midX, y: f.eBox.midY))
         XCTAssertEqual(s.faceUI.padTarget, kE, "positive control: the expand box opens the expand keypad")
         s.faceUI.padTarget = nil; pump(0.6)
-        // the icons beside the list's captions, each directly over its box
-        for (kind, box) in [("depth", "numberBox-list-depth-\(ref.key)"), ("expand", "numberBox-list-expand-\(ref.key)")] {
-            let icon = try XCTUnwrap(h.frames.all["selCaptionIcon-\(kind)"], "★ the \(kind) caption carries its handle's icon")
-            let b = try XCTUnwrap(h.frames.all[box], "the list's \(kind) box")
-            XCTAssertTrue(icon.midX > b.minX - 4 && icon.midX < b.maxX + 4, "★ the \(kind) icon over its box (\(icon) vs \(b))")
-            XCTAssertLessThanOrEqual(icon.maxY, b.minY + 1, "★ the \(kind) icon above its box")
-        }
+        // ★ B9 Setup (re-pinned: the B6 face rows replaced the caption row over two boxes): the picked face's Expand line wears
+        // its handle's icon beside its number; its depth is the NumberField with the handle's ↕
+        let icon = try XCTUnwrap(h.frames.all["selCaptionIcon-expand"], "★ the Expand line carries its handle's icon")
+        let eNum = try XCTUnwrap(h.frames.all["numberField-list-expand-\(ref.key)"], "the list's expand number")
+        XCTAssertTrue(abs(icon.midY - eNum.midY) < 12 && icon.maxX < eNum.minX, "★ the expand icon on its number's line, before it (\(icon) vs \(eNum))")
+        XCTAssertNotNil(h.frames.all["numberField-list-depth-\(ref.key)"], "★ the picked face's depth number")
         try shot("U21C_01_13p_lbracket_face6_img6_view_handles_apart.png", h, settle: 1)
 
         // ★ RED CONTROL: today's layout (72 pt floor, both boxes right, the expand drawn on top) — the depth disc's click opens Expand
@@ -187,8 +186,7 @@ final class FlexibleR7U21CHandlesHostedTests: XCTestCase {
         FlexibleHandleCaption.controlTextOnly = true
         defer { FlexibleHandleCaption.controlTextOnly = false }
         let (_, h, _, ref) = try hisLBracket()
-        XCTAssertNotNil(h.frames.all["numberBox-list-depth-\(ref.key)"], "premise: Face 6's line in the list")
-        XCTAssertNil(h.frames.all["selCaptionIcon-depth"], "★ RED CONTROL: text-only captions carry no icon")
+        XCTAssertNotNil(h.frames.all["numberField-list-depth-\(ref.key)"], "premise: Face 6's row in the list, open")   // ★ B9 Setup re-pin
         XCTAssertNil(h.frames.all["selCaptionIcon-expand"], "★ RED CONTROL: text-only captions carry no icon")
     }
 

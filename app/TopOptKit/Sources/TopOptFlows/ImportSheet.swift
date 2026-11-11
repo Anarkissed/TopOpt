@@ -63,6 +63,7 @@ public struct ImportSheet: View {
             HStack(spacing: DS.Space.m) {
                 Spacer()
                 PillButton("Cancel", style: .secondary) { model.cancelImport() }
+                    .background(DSParts.publish("importCancel"))   // ★ B10: the sweep checks it at every window
                 PillButton("Continue", style: .primary, systemImage: "sparkles",
                            isEnabled: model.canContinue && flexDraft.canContinue) { if flexDraft.on { flexDraft.continueFlexible(model) } else { model.continueToWorkspace() } }   // Flexible (PR #362) H44: Continue on Flexible lands on the Flexible Lattice stage; else today's Continue
             }
@@ -119,8 +120,10 @@ public struct ImportSheet: View {
                     .padding(.vertical, 9).padding(.horizontal, DS.Space.l)
                     .background(Capsule().fill(DS.Color.fillSubtle.color)
                         .overlay(Capsule().strokeBorder(DS.Color.strokeStrong.color, lineWidth: 1)))
+                    .frame(minHeight: 44).contentShape(Rectangle())   // ★ B10 (Touch): the same capsule, a 44 pt target
             }
             .buttonStyle(.plain)
+            .background(DSParts.publish("importBrowse"))   // ★ B10: the sweep checks it at every window
         }
         .padding(.vertical, DS.Space.ml)
         .padding(.horizontal, DS.Space.l)
@@ -207,6 +210,8 @@ public struct ImportSheet: View {
                         .overlay(RoundedRectangle(cornerRadius: DS.Radius.field, style: .continuous)
                             .strokeBorder(DS.Color.textPrimary.opacity(0.11).color, lineWidth: 1))
                 }
+                .frame(minHeight: 44).contentShape(Rectangle())   // ★ B10 (Touch): the same field, a 44 pt target
+                .background(DSParts.publish("importMaterial"))   // ★ B10: the sweep checks it at every window
             }
             .disabled(model.currentMaterials.isEmpty)
         }

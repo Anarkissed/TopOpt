@@ -16,7 +16,7 @@ final class RowHeightsHostedTests: XCTestCase {
     func testGroupRowsAre48AndTheHeaderAndSettingRows44() throws {
         XCTAssertEqual(SelectionsList.groupLineHeight, 48)
         XCTAssertEqual(SelectionsList.lineHeight, 44)
-        for size in [AppBuildHost.landscape13, AppBuildHost.portrait13, AppBuildHost.landscape11] {
+        for size in AppBuildHost.sweep {   // ★ B10: the six windows
             for lattice in [false, true] {
                 let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
                 let p = r.project

@@ -139,7 +139,7 @@ final class GrowthLadderTests: XCTestCase {
                       "the share printed OUTSIDE the model is stated: \(text)")
         XCTAssertTrue(text.lowercased().contains("outside your model"))
         // Nothing about saturation when the box held the ask.
-        XCTAssertFalse(text.lowercased().contains("design box could not hold"))
+        XCTAssertFalse(text.lowercased().contains("allow growth here could not hold"))
     }
 
     func testSaturatedRungSaysSo() {
@@ -147,7 +147,7 @@ final class GrowthLadderTests: XCTestCase {
             variant(vf: 1.2, mass: 1.0, added: added(saturated: true)),
         ], growth: true))
         let text = m.addedMaterialLine ?? ""
-        XCTAssertTrue(text.lowercased().contains("design box could not hold"),
+        XCTAssertTrue(text.lowercased().contains("allow growth here could not hold"),
                       "a rung that could not reach its ask must SAY so: \(text)")
     }
 

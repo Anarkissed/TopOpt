@@ -36,6 +36,15 @@ public enum FlexibleLatticeButton {
 
     /// The title, never changing.
     public static let title = "Lattice"
+    /// ★ B9 (J-1, round 2: "joints should come last"; the mockup's #flex-built): once core has made the lattice (Sent) the
+    /// main button is Export part — its tap opens the card on its Export step, as Sent's always did — and where the part
+    /// prints in pieces its line says the Print plan comes next. Every other state keeps "Lattice".
+    public static let exportTitle = "Export part"
+    public static let nextPrintPlan = "Next: the Print plan"
+    public static func shownTitle(_ st: State) -> String { st == .sent ? exportTitle : title }
+    public static func shownLine(_ line: String, state st: State, printPlanNext: Bool) -> String {
+        st == .sent && printPlanNext ? nextPrintPlan : line
+    }
     /// Ready's line (the status's plain "Ready" says what a tap does here).
     public static let readyLine = "Ready \u{00B7} tap to send"
     /// Exports' line (core returns no mesh yet — FlexibleCoreRun.exportsWait).
@@ -143,11 +152,13 @@ struct FlexibleLatticeButtonView: View {
     /// 12 pt apart; the same actions (`main`, `caret`) and frames ("latticeMain", "latticeMore"). `width` is the old split's
     /// slot (the run button sizes itself now).
     var body: some View {
+        let title = FlexibleLatticeButton.shownTitle(state)   // ★ B9 (J-1): Export part once the lattice is made
         HStack(spacing: DSParts.cornerGap) {
-            DSRunButton(FlexibleLatticeButton.title, subtitle: line, state: Self.runState(status, state: state, line: line),
+            DSRunButton(title, subtitle: line, state: Self.runState(status, state: state, line: line),
                         key: "latticeMain", action: main)
                 .background(FlexibleCornerPairStyle.publish("latticeMain"))
-                .accessibilityLabel("Lattice: \(line)")
+                .background(FlexibleCornerPairStyle.publish("latticeTitle:" + title))
+                .accessibilityLabel("\(title): \(line)")
             DSSplitButton(key: "latticeMore", action: caret)
                 .background(FlexibleCornerPairStyle.publish("latticeMore"))
                 .accessibilityLabel(cardOpen ? "Hide the lattice steps" : "Show the lattice steps")

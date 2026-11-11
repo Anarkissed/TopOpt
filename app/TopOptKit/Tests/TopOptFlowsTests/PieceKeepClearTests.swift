@@ -149,9 +149,10 @@ final class PieceKeepClearTests: XCTestCase {
             AppliedClearance(faceID: -1, kind: .bolt, voxelsFrozen: 54, inGrid: true, regionID: 7),
             AppliedClearance(faceID: 3, kind: .face, voxelsFrozen: 0, inGrid: true),
         ])
-        XCTAssertEqual(notes[0], "Bolt clearance on a cut piece: kept clear (54 voxels reserved as empty).")
+        // ★ RE-PINNED (B10 §3 words, UI-Notes 8560bcb6): "Keep clear (bolt)" / "Keep clear (face)"; the piece is still plain words
+        XCTAssertEqual(notes[0], "Keep clear (bolt) on a cut piece: kept clear (54 voxels reserved as empty).")
         XCTAssertFalse(notes[0].contains("-1") || notes[0].contains(" 7"), "never the piece's number")
-        XCTAssertEqual(notes[1], "Face clearance on face 3: applied, but forbade no new material here.")
+        XCTAssertEqual(notes[1], "Keep clear (face) on face 3: applied, but forbade no new material here.")
     }
 
     /// ★ A reopened run keeps the piece's row (and an older saved run, with no region, reads as a face).

@@ -168,6 +168,9 @@ struct FlexibleLatticeCardView: View {
     /// ★ R7-D1 look-and-fix 3: the mini's 336 pt card puts each step's body UNDER its title (nil: from `width`). Beside a
     /// 64 pt title column the body had 194 pt and the mini cut "Send Group 2 only, Face 2 re…" and broke "Export G-code".
     var narrow: Bool? = nil
+    /// ★ B9 (P4, J-8): the part prints in pieces — the Export step carries the plan selector (nil: one piece).
+    var exportPlans: FlexiblePrintPlans? = nil
+    var openPrintPlan: () -> Void = {}
     private var stacked: Bool { narrow ?? FlexibleChromeLayout.panelIsNarrow(width) }
 
     var body: some View {
@@ -257,7 +260,7 @@ struct FlexibleLatticeCardView: View {
             switch s.id {
             case "preview": previewBody(s)
             case "core": coreBody(s)
-            default: FlexibleExportRows.Exports(run: run, compact: true)
+            default: FlexibleExportRows.Exports(run: run, compact: true, plans: exportPlans, openPrintPlan: openPrintPlan)
             }
         }
         .padding(.vertical, DS.Space.s)

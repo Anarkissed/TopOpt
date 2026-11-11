@@ -52,6 +52,38 @@ public final class ChromeGeometry: ObservableObject {
         guard r != selectionsFrame else { return }
         DispatchQueue.main.async { [weak self] in if self?.selectionsFrame != r { self?.selectionsFrame = r } }
     }
+
+    /// ★ B10 (B10SweepHostedTests): the role picker's DRAWN size — its keep-out is the chip it draws. It was told 300 × 44
+    /// for a 434 × 100 chip, so it ran off 11″ portrait.
+    @Published public internal(set) var pendingChipSize: CGSize?
+    /// ★ B10: the open corner panel's frame (global) — the role picker keeps clear of it, as of the Selections panel.
+    @Published public internal(set) var cornerPanelFrame: CGRect?
+    /// ★ B10: the foot of the view toggles under the gizmo (global y) and the corner panel's foot: the panel is never taller
+    /// than the room between them (at 11″ landscape its top sat on the gizmo, Orthographic │ Perspective and the toggles).
+    @Published public internal(set) var viewsBottom: CGFloat?
+    @Published public internal(set) var panelFoot: CGFloat?
+    /// The room the corner's panel has, from its foot up to the view toggles less the gap (nil: not measured yet).
+    public var cornerPanelRoom: CGFloat? {
+        guard let foot = panelFoot, let top = viewsBottom else { return nil }
+        return foot - top - PageChrome.gap
+    }
+    func notePendingChip(_ s: CGSize) {
+        guard s.width > 0, s.height > 0, pendingChipSize.map({ abs($0.width - s.width) > 0.5 || abs($0.height - s.height) > 0.5 }) ?? true
+        else { return }
+        DispatchQueue.main.async { [weak self] in self?.pendingChipSize = s }
+    }
+    func noteCornerPanel(_ r: CGRect?) {
+        guard let r, r.width > 0, r.height > 0, r != cornerPanelFrame else { return }   // (a shut corner measures 0 × 0)
+        DispatchQueue.main.async { [weak self] in if self?.cornerPanelFrame != r { self?.cornerPanelFrame = r } }
+    }
+    func noteViews(_ y: CGFloat) {
+        guard y > 0, viewsBottom.map({ abs($0 - y) > 0.5 }) ?? true else { return }
+        DispatchQueue.main.async { [weak self] in self?.viewsBottom = y }
+    }
+    func noteFoot(_ y: CGFloat) {
+        guard y > 0, panelFoot.map({ abs($0 - y) > 0.5 }) ?? true else { return }
+        DispatchQueue.main.async { [weak self] in self?.panelFoot = y }
+    }
 }
 
 public struct CornerPair<Chip: View, Split: View, Panel: View>: View {
@@ -105,6 +137,11 @@ public struct CornerPair<Chip: View, Split: View, Panel: View>: View {
             .overlay(alignment: .bottomTrailing) {
                 measuredPanel.offset(y: -(PageChrome.actionButton + lift))
             }
+            // ★ B10: where the panel's foot sits (global y), measured with the panel shut too — its room is known before it opens
+            .background(GeometryReader { g in
+                let foot = g.frame(in: .global).maxY - PageChrome.actionButton - lift
+                Color.clear.onAppear { geometry.noteFoot(foot) }.onChange(of: foot) { geometry.noteFoot($0) }
+            }.allowsHitTesting(false))
         }
     }
 
@@ -114,8 +151,12 @@ public struct CornerPair<Chip: View, Split: View, Panel: View>: View {
         let geometry = self.geometry, open = self.open
         panel.background(GeometryReader { g in
             Color.clear
-                .onAppear { geometry.notePanel(g.size.height, for: open) }
+                .onAppear { geometry.notePanel(g.size.height, for: open); geometry.noteCornerPanel(g.frame(in: .global)) }
                 .onChange(of: g.size.height) { geometry.notePanel($0, for: open) }
+                // ★ B10: the role picker keeps clear of it. Never cleared on disappear: a new panel's reader appears BEFORE
+                // the old one disappears, so a clear landed last and lost the open panel (the B10 trace); the reader of the
+                // page counts it only while its panel is open.
+                .onChange(of: g.frame(in: .global)) { geometry.noteCornerPanel($0) }
         }.id(open).allowsHitTesting(false))
     }
 }

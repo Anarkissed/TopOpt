@@ -60,8 +60,8 @@ final class PanelOverflowHostedTests: XCTestCase {
 
     /// ★ The reviewer (2026-11-03 06:06): "Add a hosted test that the Safety margin row is reachable at every viewport" — the
     /// three ScreenProbe sizes, his iPad's More Space, and 11" portrait.
-    static let everyViewport = [AppBuildHost.landscape13, AppBuildHost.portrait13, AppBuildHost.landscape11,
-                                AppBuildHost.moreSpace, CGSize(width: 820, height: 1180)]
+    /// ★ B10: the sweep's six windows (it was these five, without More Space portrait).
+    static let everyViewport = AppBuildHost.sweep
 
     func testThePinnedFooterIsNeverOutOfSight() throws {
         for size in Self.everyViewport {

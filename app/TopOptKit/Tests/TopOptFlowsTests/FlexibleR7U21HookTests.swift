@@ -131,6 +131,9 @@ final class FlexibleR7U21HookTests: XCTestCase {
         // re-pinned by Library (2026-10-25, reviewer ruling 22:36 (1)); was: no Library line to take back out.
         // The Library's one addition, its Project row (with the blank line before it), comes out like the hooks do.
         s = s.replacingOccurrences(of: "\n\n            LibraryImportProjectRow(model: model)   // Library: which project the new part joins (its own top padding, only when shown)", with: "")
+        // re-pinned by UI-Notes B10 (2026-11-11, the reviewer's B10 scope + ruling 08:04Z (1)(a)): its 5 reach-and-fit lines
+        // (44 pt targets on Browse and the material menu, and the frames the sweep reads) each carry "★ B10" and come out too.
+        dropLine(containing: "★ B10")
         XCTAssertFalse(s.contains("flexDraft"), "★ no other line reads the draft")
         XCTAssertEqual(s.components(separatedBy: "\n").count, 251, "★ today's 250 lines (and the last newline)")
         XCTAssertTrue(s.contains("\n            fileRow.padding(.top, DS.Space.xl3)\n\n            Text(\"PRINT PROCESS\")\n"))

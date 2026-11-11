@@ -15,7 +15,7 @@ import AppKit
 final class SettingRowHostedTests: XCTestCase {
 
     func testSafetyMarginIsASettingRowWithItsInfo() throws {
-        for size in [AppBuildHost.landscape13, AppBuildHost.portrait13, AppBuildHost.landscape11] {
+        for size in AppBuildHost.sweep {   // ★ B10: the six windows
             let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
             let p = r.project
             p.lattice.flexible = nil

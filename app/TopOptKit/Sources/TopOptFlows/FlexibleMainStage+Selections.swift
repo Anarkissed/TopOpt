@@ -255,10 +255,10 @@ extension FlexibleMainStage {
         guard sessionPicked else { return nil }   // a pick of this session (R7-V's rule — a test may reset it)
         switch FlexibleFacePick.validated(facePick, project: project).scope {
         case .none, .pending: return nil
-        case let .face(_, ref): return [ref.key]
+        case let .face(_, ref): return Set([ref.key].filter(prismShown))   // ★ B9 Setup: a shut eye hides it and its handle
         case let .group(g):
             guard let grp = project.selection.groups.first(where: { $0.id == g }) else { return nil }
-            return Set(project.latticeSelectableRefs(grp).map(\.key))
+            return Set(project.latticeSelectableRefs(grp).map(\.key).filter(prismShown))
         }
     }
 

@@ -458,20 +458,30 @@ public struct KeepOutStabilizer: Equatable, Sendable {
 public enum SelectionsPanelKeepOut {
     public static func clear(_ placed: [String: KeepOutPlacement], sizes: [String: CGSize], panel: CGRect,
                              viewport: CGSize) -> [String: KeepOutPlacement] {
-        let guardRect = panel.insetBy(dx: -KeepOutSolver.separation, dy: -KeepOutSolver.separation)
+        clear(placed, sizes: sizes, panels: [panel], viewport: viewport)
+    }
+
+    /// ★ B10: every panel drawn over the part (the Selections panel, and the corner's open Settings panel on the other
+    /// side): a chip on one moves just outside it — right, LEFT (a right-hand panel's way out), above or below — to a place
+    /// on the screen clear of EVERY panel, or, with no room, it is withdrawn.
+    public static func clear(_ placed: [String: KeepOutPlacement], sizes: [String: CGSize], panels: [CGRect],
+                             viewport: CGSize) -> [String: KeepOutPlacement] {
+        let guards = panels.map { $0.insetBy(dx: -KeepOutSolver.separation, dy: -KeepOutSolver.separation) }
         let screen = CGRect(origin: .zero, size: viewport)
         var out = placed
         func rect(_ c: CGPoint, _ s: CGSize) -> CGRect { CGRect(x: c.x - s.width / 2, y: c.y - s.height / 2, width: s.width, height: s.height) }
         for id in placed.keys.sorted() {
-            guard let p = out[id], !p.hidden, let size = sizes[id], rect(p.center, size).intersects(guardRect) else { continue }
+            guard let p = out[id], !p.hidden, let size = sizes[id],
+                  let guardRect = guards.first(where: { rect(p.center, size).intersects($0) }) else { continue }
             let others = out.values.filter { $0.id != id && !$0.hidden }.compactMap { o in sizes[o.id].map { rect(o.center, $0) } }
             let gap = KeepOutSolver.separation
             let candidates = [CGPoint(x: guardRect.maxX + size.width / 2, y: p.center.y),
+                              CGPoint(x: guardRect.minX - size.width / 2, y: p.center.y),
                               CGPoint(x: p.center.x, y: guardRect.minY - size.height / 2),
                               CGPoint(x: p.center.x, y: guardRect.maxY + size.height / 2)]
                 .filter { c in
                     let r = rect(c, size)
-                    return screen.contains(r) && !r.intersects(guardRect)
+                    return screen.contains(r) && !guards.contains { r.intersects($0) }
                         && !others.contains { $0.insetBy(dx: -gap / 2, dy: -gap / 2).intersects(r) }
                 }
                 .sorted { hypot($0.x - p.center.x, $0.y - p.center.y) < hypot($1.x - p.center.x, $1.y - p.center.y) }

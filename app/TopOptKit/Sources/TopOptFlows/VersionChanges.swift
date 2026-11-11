@@ -64,7 +64,7 @@ public enum VersionChanges {
 
         // design box and face edits
         if (a.designBox ?? DesignBoxModel()) != (b.designBox ?? DesignBoxModel()) {
-            out.append(.init(.changed, .designBox, "Design box"))
+            out.append(.init(.changed, .designBox, "Allow growth here"))
         }
         if (a.faceRegions ?? FaceRegionModel()) != (b.faceRegions ?? FaceRegionModel()) {
             out.append(.init(.changed, .designBox, "Faces edited"))

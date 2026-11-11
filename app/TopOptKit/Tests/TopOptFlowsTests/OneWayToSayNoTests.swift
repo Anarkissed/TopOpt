@@ -10,19 +10,22 @@ import XCTest
 
 final class OneWayToSayNoTests: XCTestCase {
     /// The batches already built (their listed alerts must be gone).
-    static let doneBatches: Set<String> = ["B1", "B2"]
+    /// ★ B10 (the reviewer's scope ruling 2026-11-11 03:50Z): the kept pages' are B10's; the lattice pages' wait for the
+    /// rebuild (listed, never fixed); the Library's nine are KEPT by his 11-04 ruling (its look stays — the reviewer's answer
+    /// 11-11 08:04Z (1)(a); the name sheet and ask-in-place are offered to him, his call).
+    static let doneBatches: Set<String> = ["B1", "B2", "B10"]
 
     /// file → each alert / dialog title still there, and the batch that replaces it.
     static let later: [String: [(String, String)]] = [
         "LatticeSetupWizard.swift": [("Grading needs a stress simulation", "B7"),   // U6: a refusal → a line + fix chip
                                      ("organicNotice?.title", "B7")],                // U6: the organic notices → lines
-        "ResultsScreen.swift": [("Couldn’t save video", "B4"), ("Couldn’t export STL", "B4")],   // U6: error paths → a line
-        "WorkspacePlaceholder.swift": [("Rename project", "B5"),                     // the name sheet (§4.11)
+        "ResultsScreen.swift": [("Couldn’t save video", "B10"), ("Couldn’t export STL", "B10")],   // U6: B10 made them the corner's danger line (ruling 11-11 08:04Z (2)(a))
+        "WorkspacePlaceholder.swift": [("Rename project", "B10"),                    // the name sheet (§4.11)
                                        ("LatticeRerunChoice.title", "B6"),           // U7: the Lattice run's re-run ask
                                        ("Certification found", "B7")],               // the spacing choice → a row in the page
-        "LibraryViews.swift": [("Ungroup the Library?", "B5"), ("New project", "B5"), ("Rename project", "B5"),
-                               ("Rename part", "B5"), ("deleting.map", "B5"), ("Name this version", "B5"), ("deleting.map", "B5")],
-        "HomeView.swift": [("Rename project", "B5"), ("confirmationDialog(", "B5")],
+        "LibraryViews.swift": [("Ungroup the Library?", "kept: his 11-04 ruling"), ("New project", "kept: his 11-04 ruling"), ("Rename project", "kept: his 11-04 ruling"),
+                               ("Rename part", "kept: his 11-04 ruling"), ("deleting.map", "kept: his 11-04 ruling"), ("Name this version", "kept: his 11-04 ruling"), ("deleting.map", "kept: his 11-04 ruling")],
+        "HomeView.swift": [("Rename project", "kept: his 11-04 ruling"), ("confirmationDialog(", "kept: his 11-04 ruling")],
     ]
 
     func testNoNewAlertOrDialog() throws {
