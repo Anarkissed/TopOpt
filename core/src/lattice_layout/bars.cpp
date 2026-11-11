@@ -374,6 +374,149 @@ std::size_t join_loose_bars(Bars& bars, const Domain& domain, int threads) {
   return joined;
 }
 
+namespace {
+double length_of(const Bar& b) {
+  return std::sqrt((b.b.x - b.a.x) * (b.b.x - b.a.x) + (b.b.y - b.a.y) * (b.b.y - b.a.y) +
+                   (b.b.z - b.a.z) * (b.b.z - b.a.z));
+}
+// The nearest approach of the two bars' middle lines.
+double apart(const Bar& x, const Bar& y) {
+  const Vec3 d{x.b.x - x.a.x, x.b.y - x.a.y, x.b.z - x.a.z};
+  const double len = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+  if (!(len > 0.0)) return 1e300;
+  double at = 0.0;
+  return approach(x.a, Vec3{d.x / len, d.y / len, d.z / len}, len, y.a, y.b, &at);
+}
+}  // namespace
+
+Pieces count_pieces(const Bars& bars, const Domain& domain, std::vector<char>* adrift_bar,
+                    std::vector<int>* piece_of) {
+  const std::vector<Bar>& all = bars.bars;
+  const std::size_t n = all.size();
+  Pieces out;
+  if (adrift_bar) adrift_bar->assign(n, 0);
+  if (piece_of) piece_of->assign(n, -1);
+  if (n == 0) return out;
+  std::vector<std::size_t> parent(n);
+  for (std::size_t i = 0; i < n; ++i) parent[i] = i;
+  auto find = [&](std::size_t i) {
+    while (parent[i] != i) { parent[i] = parent[parent[i]]; i = parent[i]; }
+    return i;
+  };
+  auto join = [&](std::size_t i, std::size_t j) {
+    i = find(i); j = find(j);
+    if (i != j) parent[std::max(i, j)] = std::min(i, j);
+  };
+  // Shared ends first: nearly every join is one of these.
+  {
+    std::map<PointKey, std::size_t> first;
+    for (std::size_t i = 0; i < n; ++i)
+      for (const Vec3& p : {all[i].a, all[i].b}) {
+        auto [it, fresh] = first.emplace(key_of(p), i);
+        if (!fresh) join(i, it->second);
+      }
+  }
+  // Then bars that touch along their length: sorted into a grid, each against its neighbours.
+  double widest = 0.0;
+  for (const Bar& b : all) widest = std::max(widest, b.width);
+  const double pitch = 2.0;
+  auto slot = [&](double x) { return static_cast<long long>(std::floor(x / pitch)); };
+  std::map<std::array<long long, 3>, std::vector<std::size_t>> grid;
+  for (std::size_t i = 0; i < n; ++i) {
+    const Bar& b = all[i];
+    for (long long x = slot(std::min(b.a.x, b.b.x) - widest); x <= slot(std::max(b.a.x, b.b.x) + widest); ++x)
+      for (long long y = slot(std::min(b.a.y, b.b.y) - widest); y <= slot(std::max(b.a.y, b.b.y) + widest); ++y)
+        for (long long z = slot(std::min(b.a.z, b.b.z) - widest); z <= slot(std::max(b.a.z, b.b.z) + widest); ++z)
+          grid[{x, y, z}].push_back(i);
+  }
+  for (const auto& cell : grid) {
+    const std::vector<std::size_t>& in = cell.second;
+    for (std::size_t a = 0; a < in.size(); ++a)
+      for (std::size_t b = a + 1; b < in.size(); ++b) {
+        const std::size_t i = in[a], j = in[b];
+        if (find(i) == find(j)) continue;
+        const Bar &x = all[i], &y = all[j];
+        const double gap = apart(x, y);
+        bool touch = gap <= 0.25 * std::max(x.width, y.width);
+        // An end of one inside the other (a joined end; a T).
+        if (!touch && gap <= 0.5 * std::max(x.width, y.width)) {
+          double at = 0.0;
+          const Vec3 zero{1, 0, 0};
+          for (const Vec3& p : {x.a, x.b})
+            touch = touch || approach(p, zero, 0.0, y.a, y.b, &at) <= 0.5 * y.width;
+          for (const Vec3& p : {y.a, y.b})
+            touch = touch || approach(p, zero, 0.0, x.a, x.b, &at) <= 0.5 * x.width;
+        }
+        if (touch) join(i, j);
+      }
+  }
+  // Each piece: its length, and whether it is joined to the part.
+  struct Group { double mm = 0.0; std::size_t bars = 0; bool held = false; std::vector<std::size_t> members; };
+  std::map<std::size_t, Group> groups;
+  for (std::size_t i = 0; i < n; ++i) {
+    Group& g = groups[find(i)];
+    g.mm += length_of(all[i]);
+    ++g.bars;
+    g.held = g.held || all[i].end_a == Bar::End::Solid || all[i].end_b == Bar::End::Solid;
+    g.members.push_back(i);
+  }
+  // A piece with no bar ending in solid may still stand on it: a node on the plane where
+  // the lattice stops. Look just past each of its ends, each way along the axes.
+  const Domain::Probe probe = domain.probe();
+  for (auto& [root, g] : groups) {
+    if (g.held) continue;
+    for (std::size_t i : g.members) {
+      const double off = 0.5 * all[i].width + 0.02;
+      for (const Vec3& p : {all[i].a, all[i].b})
+        for (int k = 0; k < 6 && !g.held; ++k) {
+          const Vec3 q{p.x + (k == 0) * off - (k == 1) * off, p.y + (k == 2) * off - (k == 3) * off,
+                       p.z + (k == 4) * off - (k == 5) * off};
+          const Where w = probe.where(q);
+          g.held = !w.lattice() && w.why != Why::Outside;
+        }
+      if (g.held) break;
+    }
+  }
+  out.pieces = groups.size();
+  if (piece_of) {
+    int number = 0;
+    for (const auto& [root, g] : groups) {   // roots are each piece's first bar, in order
+      for (std::size_t i : g.members) (*piece_of)[i] = number;
+      ++number;
+    }
+  }
+  bool any_held = false;
+  std::size_t largest = 0;
+  double largest_mm = -1.0;
+  for (const auto& [root, g] : groups) {
+    any_held = any_held || g.held;
+    if (g.mm > largest_mm) { largest_mm = g.mm; largest = root; }
+  }
+  for (const auto& [root, g] : groups) {
+    if (g.held || (!any_held && root == largest)) continue;
+    ++out.adrift;
+    out.adrift_bars += g.bars;
+    out.adrift_mm += g.mm;
+    out.largest_adrift_mm = std::max(out.largest_adrift_mm, g.mm);
+    if (adrift_bar)
+      for (std::size_t i : g.members) (*adrift_bar)[i] = 1;
+  }
+  return out;
+}
+
+Pieces drop_adrift_bars(Bars& bars, const Domain& domain) {
+  std::vector<char> adrift;
+  const Pieces found = count_pieces(bars, domain, &adrift);
+  if (found.adrift == 0) return found;
+  std::vector<Bar> left;
+  for (std::size_t i = 0; i < bars.bars.size(); ++i) {
+    if (adrift[i]) ++bars.dropped;
+    else left.push_back(bars.bars[i]);
+  }
+  bars.bars.swap(left);
+  return found;
+}
+
 void drop_loose_bars(Bars& bars) {
   // A cut end that lands on nothing: in the air, or loose in the lattice.
   auto lands = [](Bar::End e) {

@@ -597,6 +597,28 @@ std::size_t join_loose_bars(Bars& bars, const Domain& domain, int threads = 0);
 // bar left holding a node alone), and counts them in `dropped`.
 void drop_loose_bars(Bars& bars);
 
+// S4, S5, S6: is the lattice one piece, and is it joined to the part? Bars are one piece
+// when they share an end, when an end of one lies inside the other, or when their middle
+// lines pass within a quarter of the wider one's width (two struts crossing in the face
+// two cells share). A piece is joined to the part when one of its bars ends in solid, or
+// has an end touching solid (a node on the plane where the lattice stops).
+struct Pieces {
+  std::size_t pieces = 0;
+  // Pieces not joined to the part's solid. When the whole part is lattice and nothing is
+  // joined to solid, the largest piece is the part itself and is not counted here.
+  std::size_t adrift = 0;
+  std::size_t adrift_bars = 0;
+  double adrift_mm = 0.0;        // their struts' total length
+  double largest_adrift_mm = 0.0;
+};
+// `adrift_bar`, when given, receives one flag per bar; `piece_of`, the piece each bar is
+// in (pieces numbered from 0 in the order of their first bar).
+Pieces count_pieces(const Bars& bars, const Domain& domain, std::vector<char>* adrift_bar = nullptr,
+                    std::vector<int>* piece_of = nullptr);
+// Finish None, completed: a piece that is not joined to the part cannot be printed and is
+// removed. Counted in `dropped`. Returns what count_pieces found before removing.
+Pieces drop_adrift_bars(Bars& bars, const Domain& domain);
+
 // ── SESSION (stage E) ─────────────────────────────────────────────────────────
 // What the app holds for one part while its Lattice page is open. It measures the part
 // once, and between two layouts keeps everything the changed settings do not touch (P2):
@@ -627,13 +649,14 @@ struct Settings {
   StrutSpec struts;
   bool bars = true;              // false: cells and strut widths only
   bool join_loose = true;        // S5
-  bool drop_loose = true;        // S4, Finish None's rule
+  bool drop_loose = true;        // S4, Finish None's rule; then pieces adrift go too
 };
 
 struct Outcome {
   Layout layout;
   StrutReport struts;
   Bars bars;
+  Pieces pieces;                 // as found before any piece adrift was removed
   bool read_again = false;       // the part was read for this layout (a "where" setting changed)
   std::vector<int> empty_regions;   // asked-for regions none of whose faces has triangles
   double ms_read = 0.0, ms_cells = 0.0, ms_bars = 0.0;

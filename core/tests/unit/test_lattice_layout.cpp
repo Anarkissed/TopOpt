@@ -1877,6 +1877,87 @@ static void test_bars_join() {
   CHECK(loose_after == 0);
 }
 
+// S4, S5, S6: the lattice is one piece and joined to the part; a piece adrift is removed.
+static void test_pieces() {
+  const Vec3 down{0, 0, -1};
+  PartMeasure pm(weld_mesh(box(30, 30, 12)));
+  DomainSpec s;
+  s.regions = {face_region(1, Role::Lattice, {15, 15, 12}, down, 15, 15, 12, -3.0)};   // solid all round
+  Domain d(pm, s);
+  auto bar = [](Vec3 a, Vec3 b, Bar::End ea = Bar::End::Node, Bar::End eb = Bar::End::Node) {
+    Bar x;
+    x.a = a; x.b = b; x.end_a = ea; x.end_b = eb; x.width = 0.5;
+    return x;
+  };
+  Bars bars;
+  bars.bars = {
+      // 0-2: a triangle, one corner ending in solid: joined to the part.
+      bar({6, 6, 6}, {8, 6, 6}, Bar::End::Solid), bar({8, 6, 6}, {7, 8, 6}), bar({7, 8, 6}, {6, 6, 6}),
+      // 3-5: a triangle touching nothing: adrift.
+      bar({12, 6, 6}, {14, 6, 6}), bar({14, 6, 6}, {13, 8, 6}), bar({13, 8, 6}, {12, 6, 6}),
+      // 6-7: two bars crossing in one plane with no end in common, one ending in solid: one piece.
+      bar({18, 6, 6}, {20, 8, 6}, Bar::End::Solid), bar({18, 8, 6}, {20, 6, 6}),
+      // 8-9: a T (the end of one inside the side of the other), in the air: one piece, adrift.
+      bar({6, 14, 6}, {10, 14, 6}), bar({8, 14.2, 6}, {8, 17, 6}),
+      // 10-11: side by side a millimetre apart: two pieces, both adrift.
+      bar({14, 14, 6}, {18, 14, 6}), bar({14, 15, 6}, {18, 15, 6}),
+      // 12: one bar whose end is a node a fifth of a millimetre from the solid ring: it stands on it.
+      bar({3.2, 22, 6}, {6, 22, 6}),
+  };
+  std::vector<char> adrift;
+  std::vector<int> piece;
+  const Pieces found = count_pieces(bars, d, &adrift, &piece);
+  CHECK(found.pieces == 7);
+  CHECK(found.adrift == 4 && found.adrift_bars == 7);
+  NEAR(found.adrift_mm, (2 + 2 * std::sqrt(5.0)) + (4 + 2.8) + 4 + 4, 1e-9);
+  NEAR(found.largest_adrift_mm, 4 + 2.8, 1e-9);   // the T
+  CHECK(piece[0] == piece[1] && piece[1] == piece[2] && piece[6] == piece[7] && piece[8] == piece[9]);
+  CHECK(piece[10] != piece[11] && piece[3] != piece[0]);
+  const std::vector<char> want = {0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0};
+  CHECK(adrift == want);
+  const Pieces before = drop_adrift_bars(bars, d);
+  CHECK(before.adrift == 4 && bars.bars.size() == 6 && bars.dropped == 7);
+  CHECK(count_pieces(bars, d).adrift == 0);
+
+  // A part that is lattice all through has no solid to be joined to: its lattice IS the
+  // part, and is not adrift. A stray bar beside it is.
+  PartMeasure cube(weld_mesh(box(12, 12, 12)));
+  DomainSpec all;
+  all.regions = {face_region(1, Role::Lattice, {6, 6, 12}, down, 6, 6, 12)};
+  Domain dc(cube, all);
+  CellSpec cs;
+  cs.cell_max_mm = 6;
+  Layout l = lay_cells(dc, cs);
+  set_struts(l, StrutSpec{});
+  Bars whole = lay_bars(l, dc);
+  const Pieces one = count_pieces(whole, dc);
+  CHECK(one.pieces == 1 && one.adrift == 0);
+  whole.bars.push_back(bar({1.3, 1.1, 5.2}, {1.9, 1.4, 5.5}));
+  const Pieces two = count_pieces(whole, dc);
+  CHECK(two.pieces == 2 && two.adrift == 1 && two.adrift_bars == 1);
+
+  // S5, said as it matters: two walls with different cells are ONE piece once joined.
+  PartMeasure step(weld_mesh(prism({{0, 0}, {60, 0}, {60, 5}, {32, 5}, {32, 12}, {0, 12}}, 0, 41)));
+  DomainSpec two_walls;
+  two_walls.regions = {face_region(1, Role::Lattice, {30, 0, 20.5}, {0, 1, 0}, 30, 30, 12)};
+  Domain ds(step, two_walls);
+  Layout ls = lay_cells(ds, cs);
+  set_struts(ls, StrutSpec{});
+  Bars joined = lay_bars(ls, ds);
+  join_loose_bars(joined, ds);
+  drop_loose_bars(joined);
+  std::vector<int> of;
+  const Pieces after = count_pieces(joined, ds, nullptr, &of);
+  int left = -1, right = -1;
+  for (std::size_t i = 0; i < joined.bars.size(); ++i) {
+    const Bar& b = joined.bars[i];
+    if (std::max(b.a.x, b.b.x) < 20 && left < 0) left = of[i];
+    if (std::min(b.a.x, b.b.x) > 44 && right < 0) right = of[i];
+  }
+  CHECK(left >= 0 && left == right);
+  CHECK(after.adrift == 0);
+}
+
 // S1, S2, S10: Finish Rim. One solid bar round a flat Lattice region's outline, as wide as
 // asked (two line widths by default), only where the part's solid backs it.
 static void test_rim() {
@@ -2258,6 +2339,7 @@ int main() {
   test_kept_readings();
   test_bars();
   test_bars_join();
+  test_pieces();
   test_rim();
   test_session();
   test_region_squares();
