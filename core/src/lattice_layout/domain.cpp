@@ -60,6 +60,43 @@ Domain::Domain(const PartMeasure& measure, DomainSpec spec)
                    [](const Region& a, const Region& b) { return a.id < b.id; });
   std::stable_sort(spec_.protect.begin(), spec_.protect.end(),
                    [](const ProtectSkin& a, const ProtectSkin& b) { return a.id < b.id; });
+  for (const ProtectSkin& s : spec_.protect) near_skin_.emplace_back(s.face, protect_depth_mm(s));
+  for (const Region& r : spec_.regions) near_shell_.emplace_back(r.shell, r.shell_depth_mm);
+}
+
+Domain::Near::Near(const TriangleMesh& surface, double within_mm) {
+  if (surface.triangles.empty()) return;
+  const double r = std::max(0.0, within_mm) * (1.0 + 1e-9) + 1e-9;
+  double mn[3] = {1e300, 1e300, 1e300}, mx[3] = {-1e300, -1e300, -1e300};
+  auto co = [](const Vec3& v, int a) { return a == 0 ? v.x : a == 1 ? v.y : v.z; };
+  for (const auto& t : surface.triangles)
+    for (int k = 0; k < 3; ++k)
+      for (int a = 0; a < 3; ++a) {
+        const double x = co(surface.vertices[static_cast<std::size_t>(t[k])], a);
+        mn[a] = std::min(mn[a], x); mx[a] = std::max(mx[a], x);
+      }
+  lo = Vec3{mn[0] - r, mn[1] - r, mn[2] - r};
+  const double ext[3] = {mx[0] - mn[0] + 2 * r, mx[1] - mn[1] + 2 * r, mx[2] - mn[2] + 2 * r};
+  cell = std::max(std::max(ext[0], std::max(ext[1], ext[2])) / 64.0, 1e-3);
+  for (int a = 0; a < 3; ++a) n[a] = std::max(1, static_cast<int>(std::ceil(ext[a] / cell)));
+  on.assign(static_cast<std::size_t>(n[0]) * n[1] * n[2], 0);
+  const double l[3] = {lo.x, lo.y, lo.z};
+  for (const auto& t : surface.triangles) {
+    int a0[3], a1[3];
+    for (int a = 0; a < 3; ++a) {
+      double tmn = 1e300, tmx = -1e300;
+      for (int k = 0; k < 3; ++k) {
+        const double x = co(surface.vertices[static_cast<std::size_t>(t[k])], a);
+        tmn = std::min(tmn, x); tmx = std::max(tmx, x);
+      }
+      a0[a] = std::clamp(static_cast<int>(std::floor((tmn - r - l[a]) / cell)), 0, n[a] - 1);
+      a1[a] = std::clamp(static_cast<int>(std::floor((tmx + r - l[a]) / cell)), 0, n[a] - 1);
+    }
+    for (int z = a0[2]; z <= a1[2]; ++z)
+      for (int y = a0[1]; y <= a1[1]; ++y)
+        for (int x = a0[0]; x <= a1[0]; ++x)
+          on[(static_cast<std::size_t>(z) * n[1] + y) * n[0] + x] = 1;
+  }
 }
 
 Domain::Probe::Probe(const Domain& d) : d_(&d), part_(d.measure_->probe()) {
@@ -108,12 +145,13 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
   // D2: a prism only turns existing solid into lattice.
   // A point ON the surface (within a nanometre) is not inside: a width measured from it
   // has nowhere to start, and the distance there is rounding, not geometry.
-  if (part_.depth(p) <= 1e-6) return {Why::Outside, 0};
+  if (!part_.inside(p)) return {Why::Outside, 0};
 
   // D5, D15: a Protect skin is solid to its exact depth, measured from the face itself,
   // whatever else covers the point. The lattice starts right behind it.
   for (std::size_t i = 0; i < spec.protect.size(); ++i)
-    if (skins_[i].unsigned_distance(p) <= d_->protect_depth_mm(spec.protect[i]))
+    if (d_->near_skin_[i].maybe(p) &&
+        skins_[i].unsigned_distance(p) <= d_->protect_depth_mm(spec.protect[i]))
       return {Why::ProtectSkin, spec.protect[i].id};
 
   // In the region? For a prism also how far the point is from the face plane; for a
@@ -122,6 +160,7 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
     const Region& r = spec.regions[i];
     if (r.is_shell()) {
       // D20: the surface carried inward along its own normals, to its own outline.
+      if (!d_->near_shell_[i].maybe(p)) return false;   // farther than its depth
       const double d = shells_[i].unsigned_distance(p);
       if (dist) *dist = d;
       if (d > r.shell_depth_mm) return false;
@@ -175,8 +214,8 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
     double wall = 0.0, on_m = 0.0, back_m = 0.0;
     if (flat) {   // the wall's width along the region's direction (PartMeasure::wall_width)
       const Vec3& n = owner->prism.normal;
-      on_m = part_.reach(p, n);
-      back_m = part_.reach(p, Vec3{-n.x, -n.y, -n.z});
+      on_m = part_.reach_in(p, n);
+      back_m = part_.reach_in(p, Vec3{-n.x, -n.y, -n.z});
       wall = on_m + back_m;
     } else {
       wall = part_.thickness(p);
@@ -194,6 +233,10 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
       r.skin_on = r.on >= 0.0;
       holds_mm = (r.skin_back ? r.back : back_m) + (r.skin_on ? r.on : on_m);
       if (room) *room = r;
+    }
+    if (room && flat) {
+      room->part_back = back_m;
+      room->part_on = on_m;
     }
     if (spec.min_wall_mm > 0.0 && holds_mm < spec.min_wall_mm) return {Why::WallTooThin, id};
   }

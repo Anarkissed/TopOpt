@@ -5,6 +5,7 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <memory>
 #include <thread>
 
 #include "topopt/stepped_plan.hpp"  // stepped_size_menu, kSteppedPrintsOpenMaxStrutPerCell
@@ -40,7 +41,11 @@ Reading read_at(const Domain::Probe& probe, const Frame& frame, const WallMap& w
   if (room.skin_back) r.start = c - room.back;
   // C12: never more than the region's depth.
   r.width = std::min(room.skin_on ? c + room.on : r.width, walls.depth) - r.start;
-  if (walls.flat) r.wall = walls.find(a, b, r.start, r.width);
+  if (walls.flat) {
+    r.wall = walls.find(a, b, r.start, r.width);
+    r.lo = c - (room.skin_back ? room.back : room.part_back);
+    r.hi = std::min(c + (room.skin_on ? room.on : room.part_on), std::max(walls.depth, r.lo));
+  }
   return r;
 }
 
@@ -138,7 +143,9 @@ struct Pass {
     double narrow = width;
     if (walls->flat) {
       const Vec3 p = frame.at(a, b, c);
-      if (2.0 * probe->part().depth(p) < width) narrow = std::min(width, probe->part().thickness(p));
+      // Only whether it is narrower than `width` is asked, so the measure may stop early.
+      if (2.0 * probe->part().depth(p) < width)
+        narrow = std::min(width, probe->part().thickness_in(p, width));
     }
     *fit = std::min(width, narrow / spec->min_cells_across);
     return true;
@@ -394,6 +401,8 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
   const double smallest = std::max(out.floor_cell_mm * (1.0 + 1e-9), spec.cell_min_mm);
   const double target = spec.cell_mm > 0.0 ? spec.cell_mm : spec.cell_max_mm;
   const Domain::Probe probe = domain.probe();
+  // A probe serves one thread; each worker makes its own once and keeps it for every lay.
+  std::vector<std::unique_ptr<Domain::Probe>> spare(static_cast<std::size_t>(thread_count));
   const PartMeasure& part = domain.measure();
   const int k_min = std::max(1, spec.min_cells_across);
 
@@ -448,8 +457,10 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
     struct Piece { std::vector<Cell> cells, solid; };
     std::vector<Piece> pieces(total);
     std::atomic<std::size_t> next{0};
-    auto work = [&]() {
-      const Domain::Probe mine = domain.probe();
+    auto work = [&](int who) {
+      if (who > 0 && !spare[static_cast<std::size_t>(who)])
+        spare[static_cast<std::size_t>(who)] = std::make_unique<Domain::Probe>(domain.probe());
+      const Domain::Probe& mine = who > 0 ? *spare[static_cast<std::size_t>(who)] : probe;
       Layout local;
       local.floor_cell_mm = out.floor_cell_mm;
       RegionCells count_here;
@@ -468,8 +479,8 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
       }
     };
     std::vector<std::thread> pool;
-    for (int t = 1; t < nt; ++t) pool.emplace_back(work);
-    work();
+    for (int t = 1; t < nt; ++t) pool.emplace_back(work, t);
+    work(0);
     for (std::thread& t : pool) t.join();
     for (const Piece& piece : pieces) {
       out.cells.insert(out.cells.end(), piece.cells.begin(), piece.cells.end());

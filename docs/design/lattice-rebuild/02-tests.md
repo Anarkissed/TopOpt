@@ -158,6 +158,19 @@ Timed on the Mac first (stage 0), then on the iPad (stage E).
 | P5 | A | Any wait over 0.3 s shows a working indicator. |
 | P6 | T | Plan B only: one layout per finger lift or confirmed number. |
 
+**How the layout reads the part, 2026-11-11 (speed).** The layout used to find a wall's far side by walking through the part by the distance to its surface; deep inside a thick wall that is slow, and it steps over air thinner than 0.01 mm. It now reads a straight line against the part's own triangles, and reads "inside or outside" the same way. The answers a layout is built from did not change. Checks (`test_measure_by_line`):
+
+| What | Test |
+|---|---|
+| A line never slips between two triangles | Round-number lines through triangle edges and corners of the L: each reads its exact length. |
+| A line that only touches the surface has reached it | Through the L's inside corner with material either side: stops at the corner; a thousandth to either side it runs on, or ends in the notch. |
+| Line and walk agree | 4,000 lines from points inside the L: equal to 0.00001 mm, or the line is shorter and the point just past it is air. |
+| Inside by more than a micron | Every point of a grid over the L, on faces, edges and corners and a hair either side: the same answer as the distance gives. A point in a notch whose line only brushes the part's edge is not inside. |
+| "No narrower than" | On a box, for five points and six widths, the width a caller acts on is the same as the full measure gives; beside an upright edge the 2.83 mm line across the corner is still not the wall. |
+| Far from a surface | A point the coarse map rules out is farther from the surface than the distance asked. |
+
+Each has a deliberate break that fails it (seven in all). On his stand (two faces, Stepped, 0.45 mm line, band 6): 2,201 cells and 136 solid pieces before and after, every cell the same to half a micron; laid in 0.22 s on all cores of the Mac (was 9.4 s) and 0.74 s on one core. With a 1.2 mm Protect skin: 0.24 s (was 4.3 s), identical. With finer cells in the band: 1.6 s (was 47.6 s). Not yet timed on the iPad.
+
 The 33 ms, 1 s and 5 s are my starting numbers. Stage 0 measures what the stand actually takes; the go or no-go at stage E is his.
 
 ## Reference cases

@@ -101,6 +101,119 @@ static void test_measure_L() {
   NEAR(pr.depth({25, 25, 5}), -5.0, 1e-9);                   // the notch is outside
 }
 
+// The straight-line readings (speed, 2026-11-11) say what the distance says.
+static void test_measure_by_line() {
+  // The L of C11. Its top and bottom are fans of triangles from the corner (0,0), so
+  // round-number lines run exactly through triangle edges and corners.
+  PartMeasure pm(weld_mesh(prism({{0, 0}, {60, 0}, {60, 20}, {20, 20}, {20, 60}, {0, 60}}, 0, 10)));
+  auto pr = pm.probe();
+  const double r = std::sqrt(0.5), b = std::sqrt(1.0 / 3.0);
+  struct Ray { Vec3 p, d; double want; };
+  const Ray rays[] = {
+      {{10, 10, 5}, {1, 0, 0}, 50.0},                    // the middle of the end face (on its diagonal)
+      {{10, 10, 5}, {0, 0, 1}, 5.0},                     // up through the edge of two top triangles
+      {{10, 10, 5}, {0, 0, -1}, 5.0},
+      {{10, 10, 5}, {r, r, 0}, std::sqrt(200.0)},        // into the inside corner's edge itself
+      {{40, 10, 5}, {0, 1, 0}, 10.0},
+      {{10, 40, 5}, {-1, 0, 0}, 10.0},
+      {{5, 5, 5}, {-r, -r, 0}, std::sqrt(50.0)},         // out through the upright edge at (0,0)
+      {{5, 5, 5}, {-b, -b, -b}, 5.0 * std::sqrt(3.0)},   // out through the corner (0,0,0)
+  };
+  for (const Ray& q : rays) {
+    NEAR(pr.reach_by_line(q.p, q.d), q.want, 1e-9);      // never slips between two triangles
+    NEAR(pr.reach(q.p, q.d), q.want, 1e-9);
+    NEAR(pr.reach_by_walk(q.p, q.d, pr.depth(q.p)), q.want, 2e-6);
+  }
+  // A line that only touches the surface has reached it (a point on the surface is not
+  // inside): through the inside corner's edge with material either side of it. A
+  // thousandth to one side it runs on to the far face; to the other, into the notch.
+  NEAR(pr.reach_by_line({10, 30, 5}, {r, -r, 0}), std::sqrt(200.0), 1e-9);
+  NEAR(pr.reach_by_line({10, 29.999, 5}, {r, -r, 0}), 29.999 / r, 1e-9);
+  NEAR(pr.reach_by_line({10, 30.001, 5}, {r, -r, 0}), 10.0 / r, 1e-9);
+  // Any line, from any point: the line and the walk agree; where they do not, the walk
+  // has stepped over air the line met (it never steps under 0.01 mm).
+  unsigned long long seed = 12345;
+  auto rnd = [&]() {
+    seed = seed * 6364136223846793005ULL + 1442695040888963407ULL;
+    return static_cast<double>(seed >> 11) / 9007199254740992.0;
+  };
+  int tried = 0;
+  while (tried < 4000) {
+    Vec3 p{60 * rnd(), 60 * rnd(), 10 * rnd()};
+    if (tried % 2) p = Vec3{std::round(p.x), std::round(p.y), std::round(p.z)};
+    const double dp = pr.depth(p);
+    if (dp <= 1e-6) continue;
+    ++tried;
+    const double z = 2 * rnd() - 1, t = 6.283185307179586 * rnd(), s = std::sqrt(1 - z * z);
+    const Vec3 d{s * std::cos(t), s * std::sin(t), z};
+    const double line = pr.reach_by_line(p, d), walk = pr.reach_by_walk(p, d, dp);
+    CHECK(line >= dp - 1e-9);          // nothing nearer than the depth is surface
+    CHECK(line <= walk + 1e-5);
+    if (walk - line > 1e-5) {
+      const double e = line + 1e-6;
+      CHECK(pr.depth({p.x + d.x * e, p.y + d.y * e, p.z + d.z * e}) <= 1e-9);
+    }
+  }
+  // Inside by more than a micron, read without a distance: the same answer as the
+  // distance gives, on faces, edges and corners and a hair either side of them.
+  int in = 0, out = 0;
+  for (double x = -2.5; x <= 62.5; x += 2.5)
+    for (double y = -2.5; y <= 62.5; y += 2.5)
+      for (double z : {-1.0, 0.0, 1e-7, 1e-5, 5.0, 10.0 - 1e-5, 10.0 - 1e-7, 10.0, 11.0})
+        for (double e : {0.0, 1e-7, -1e-7, 1e-5, -1e-5}) {
+          const Vec3 p{x + e, y - e, z};
+          const bool by_depth = pr.depth(p) > 1e-6;
+          CHECK(pr.inside(p) == by_depth);
+          ++(by_depth ? in : out);
+        }
+  CHECK(in > 1000 && out > 1000);
+  CHECK(!pr.inside({1000, 0, 0}));   // far outside the part's own box
+  // "No narrower than": the answer a caller acts on is the same, read more cheaply.
+  PartMeasure bx(weld_mesh(box(20, 40, 10)));
+  auto pb = bx.probe();
+  {
+    // A point in the notch of an L (outside the part, inside its box) whose line only
+    // brushes the part, exactly through the edge between the notch's wall x = 0 (seen from
+    // outside) and the top (seen from inside): not inside.
+    PartMeasure notch(weld_mesh(prism({{20, 60}, {-40, 60}, {-40, 40}, {0, 40}, {0, 0}, {20, 0}}, 0, 10)));
+    auto pn = notch.probe();
+    const Vec3 d = PartMeasure::Probe::inside_line();
+    const Vec3 p{-(d.x / d.z) * 4.0, 20.0 - (d.y / d.z) * 4.0, 6.0};
+    CHECK(pn.depth(p) < -1.0);
+    NEAR(pn.reach_by_line(p, d), 4.0 / d.z, 1e-9);   // it does meet the edge
+    CHECK(!pn.inside(p));
+    CHECK(pn.inside({10, 20, 5}) && !pn.inside({-20, 20, 5}) && pn.inside({-20, 50, 5}));
+  }
+  for (const Vec3& p : {Vec3{1, 1, 5}, Vec3{10, 20, 5}, Vec3{3, 31, 2}, Vec3{19, 39, 9}, Vec3{10, 1, 1}})
+    for (double w : {0.5, 2.0, 5.0, 10.0, 15.0, 100.0})
+      NEAR(std::min(w, pb.thickness(p, w)), std::min(w, pb.thickness(p)), 1e-9);
+  // Beside an upright edge the shortest line clips the corner (2.83 mm) and is not the
+  // wall; the wall is the 10 mm plate, whether or not a caller asked "no narrower than 5".
+  NEAR(pb.thickness({1, 1, 5}), 10.0, 1e-6);
+  NEAR(pb.thickness({1, 1, 5}, 5.0), 10.0, 1e-6);
+  CHECK(pb.thickness({1, 1, 5}, 2.0) >= 2.0);
+
+  // Domain::Near: a point it rules out is farther from the surface than the distance
+  // asked; and it does rule points out.
+  MeshSink one;
+  one.add_triangle({0, 0, 0}, {30, 0, 0}, {0, 30, 10});
+  one.add_triangle({30, 0, 0}, {30, 30, 10}, {0, 30, 10});
+  const Domain::Near near(one.mesh, 2.0);
+  const MeshDistance md(one.mesh);
+  int ruled_out = 0, kept = 0;
+  for (double x = -6; x <= 36; x += 0.75)
+    for (double y = -6; y <= 36; y += 0.75)
+      for (double z = -6; z <= 16; z += 0.75) {
+        const Vec3 p{x, y, z};
+        if (near.maybe(p)) { ++kept; continue; }
+        ++ruled_out;
+        CHECK(md.unsigned_distance(p) > 2.0);
+      }
+  CHECK(ruled_out > 1000 && kept > 1000);
+  CHECK(near.maybe({10, 10, 10.0 / 3.0}));   // on the surface itself
+  CHECK(!Domain::Near().maybe({0, 0, 0}));   // no surface: nothing is near
+}
+
 static void test_domain() {
   PartMeasure pm(weld_mesh(box(40, 40, 20)));
   const Vec3 top{20, 20, 20}, down{0, 0, -1};
@@ -1469,6 +1582,7 @@ int main() {
   test_pocket_and_thin_wall();
   test_measure_box();
   test_measure_L();
+  test_measure_by_line();
   test_domain();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;

@@ -50,6 +50,17 @@ class PartMeasure {
   Vec3 hi() const { return hi_; }
   double diagonal_mm() const { return diag_; }
 
+ private:
+  // The triangles sorted into a uniform grid, for straight lines through the part.
+  struct RayGrid {
+    Vec3 lo{};
+    double cell = 1.0;
+    int n[3] = {1, 1, 1};
+    std::vector<std::uint32_t> start;   // per cell, into `tris` (one more than cells)
+    std::vector<std::uint32_t> tris;
+    bool outward = true;                // the triangles' own normals point out of the part
+  };
+ public:
   // A probe answers questions for ONE thread (MeshDistance keeps per-instance scratch).
   // Making one costs about a millisecond.
   class Probe {
@@ -58,7 +69,27 @@ class PartMeasure {
     double depth(const Vec3& p) const { return md_.signed_distance(p); }
     // From a point inside the part, the distance to the surface along `unit_dir`.
     // 0 when `p` is not inside.
-    double reach(const Vec3& p, const Vec3& unit_dir) const;
+    // Read as a straight line against the part's own triangles (exact, and the same cost
+    // however deep the point is); should that line ever disagree with the distance (it
+    // leaves the mesh between two triangles), walked by the distance instead.
+    double reach(const Vec3& p, const Vec3& unit_dir) const { return reach(p, unit_dir, depth(p)); }
+    // The same, for a caller that has already read depth(p).
+    double reach(const Vec3& p, const Vec3& unit_dir, double depth_at_p) const;
+    // The same from a point known to be inside (no distance is read at all).
+    double reach_in(const Vec3& p, const Vec3& unit_dir) const {
+      const double t = reach_by_line(p, unit_dir);
+      return t >= 0.0 ? t : reach(p, unit_dir, depth(p));
+    }
+    // The two ways `reach` reads, for the test that holds them together. The line gives
+    // < 0 when it meets no triangle at all.
+    double reach_by_line(const Vec3& p, const Vec3& unit_dir) const { return cast(p, unit_dir, nullptr); }
+    double reach_by_walk(const Vec3& p, const Vec3& unit_dir, double depth_at_p) const;
+    // Is `p` inside the part by more than a micron? The same answer as depth(p) > 1e-6
+    // (a point ON the surface is not inside), read without a distance: the triangles a
+    // micron around the point, then which way the first surface along one line faces.
+    bool inside(const Vec3& p) const;
+    // The one line `inside` looks along: a direction no face of a designed part lies in.
+    static Vec3 inside_line() { return Vec3{0.36514837167011, 0.54772255750517, 0.75277265270908}; }
     // The wall's width at `p` along `unit_dir`: the material through `p` in that
     // direction, surface to surface (rule C11). 0 when `p` is not inside.
     double wall_width(const Vec3& p, const Vec3& unit_dir) const {
@@ -75,17 +106,32 @@ class PartMeasure {
     // is the end, and the width that way is the wall's length. The narrowest of all is
     // not it either: a line clipping across a corner is shorter than any wall. A wall
     // tilted off all 13 directions can read up to 15% wide.
-    double thickness(const Vec3& p) const;
+    // A caller that only needs to know whether the material is narrower than some width
+    // passes it as `at_least`: when no line through `p` is shorter, the shortest is
+    // returned as it is (it is not narrower, and which line "is the wall" no longer matters).
+    double thickness(const Vec3& p, double at_least = 0.0) const {
+      return depth(p) <= 0.0 ? 0.0 : thickness_in(p, at_least);
+    }
+    // The same from a point known to be inside.
+    double thickness_in(const Vec3& p, double at_least = 0.0) const;
 
    private:
     friend class PartMeasure;
-    Probe(const TriangleMesh& m, double max_mm) : md_(m), max_mm_(max_mm) {}
+    Probe(const TriangleMesh& m, double max_mm, const RayGrid* grid)
+        : md_(m), max_mm_(max_mm), mesh_(&m), grid_(grid) {}
+    // The nearest triangle along the line, < 0 for none. `facing`, when given, receives
+    // 1 when that surface is seen from inside the material, -1 from outside, 0 when the
+    // line meets an edge between one of each.
+    double cast(const Vec3& p, const Vec3& unit_dir, int* facing) const;
     MeshDistance md_;
     double max_mm_;
+    const TriangleMesh* mesh_;
+    const RayGrid* grid_;
   };
-  Probe probe() const { return Probe(*mesh_, diag_); }
+  Probe probe() const { return Probe(*mesh_, diag_, grid_.get()); }
 
  private:
+  std::shared_ptr<const RayGrid> grid_;
   std::shared_ptr<const TriangleMesh> mesh_;
   Vec3 lo_{}, hi_{};
   double diag_ = 0.0;
@@ -193,9 +239,11 @@ class Domain {
     // direction: a Protect skin met before the part's surface ends it (D5: the lattice is
     // right behind the skin). `back` is toward the region's face, `on` away from it; each
     // is read only when its flag is set, and is then the distance from `p` to the skin.
+    // `part_back` and `part_on` are the same two distances to the part's own surface.
     struct Room {
       bool skin_back = false, skin_on = false;
       double back = 0.0, on = 0.0;
+      double part_back = 0.0, part_on = 0.0;
     };
     Where where(const Vec3& p, double* wall_mm, Room* room) const;
     // How far `p` is from the nearest Protect skin's solid: negative inside one, and
@@ -216,6 +264,25 @@ class Domain {
   };
   Probe probe() const { return Probe(*this); }
 
+  // Which cells of a coarse grid come within a set distance of a surface. A point in no
+  // such cell is certainly farther than that, and its exact distance need not be read
+  // (the exact distance to a surface far away is the costly kind).
+  struct Near {
+    Vec3 lo{};
+    double cell = 1.0;
+    int n[3] = {0, 0, 0};
+    std::vector<unsigned char> on;
+    Near() = default;
+    Near(const TriangleMesh& surface, double within_mm);
+    bool maybe(const Vec3& p) const {
+      const double q[3] = {(p.x - lo.x) / cell, (p.y - lo.y) / cell, (p.z - lo.z) / cell};
+      for (int a = 0; a < 3; ++a)
+        if (!(q[a] >= 0.0) || q[a] >= n[a]) return false;
+      return on[(static_cast<std::size_t>(q[2]) * n[1] + static_cast<std::size_t>(q[1])) * n[0] +
+                static_cast<std::size_t>(q[0])] != 0;
+    }
+  };
+
   const DomainSpec& spec() const { return spec_; }
   const PartMeasure& measure() const { return *measure_; }
   // The depth a Protect skin is solid to: its own, or two line widths at 0 (rule D5).
@@ -226,6 +293,8 @@ class Domain {
  private:
   const PartMeasure* measure_;
   DomainSpec spec_;
+  std::vector<Near> near_skin_;    // one per Protect skin, within its depth
+  std::vector<Near> near_shell_;   // one per region (empty for a prism), within its depth
 };
 
 // ── CELLS (stage C) ───────────────────────────────────────────────────────────
@@ -368,6 +437,10 @@ struct Reading {
   Where where;
   double start = 0.0, width = 0.0;
   int wall = -1;
+  // Under a flat region: where the lattice's column through the point lies along the
+  // frame's depth (from the face, or a Protect skin's inner side, to the far surface, a
+  // far skin, or the region's depth).
+  double lo = 0.0, hi = 0.0;
 };
 Reading read_at(const Domain::Probe& probe, const Frame& frame, const WallMap& walls,
                 double a, double b, double c);
