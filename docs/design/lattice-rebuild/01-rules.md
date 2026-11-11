@@ -158,7 +158,7 @@ Stepped against Default Grade (the C6 check): settled the same day. Default Grad
 
 ## 9. Still to do in stage A
 
-- Turn each rule into a test statement with numbers (tolerances, which points are measured).
+- Done in `02-tests.md`: a test statement with numbers for each rule.
 - The reference cases: settings and expected layout for the stand, Base, Top Motor Mount and Pressing Plate Mount, with a picture for each.
 
 ## 10. Set aside for the organic proposal
