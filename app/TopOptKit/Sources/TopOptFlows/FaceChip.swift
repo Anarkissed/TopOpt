@@ -1,5 +1,5 @@
-// FaceChip — the pieces of the chip AT THE FACE: its [▦ Lattice | ■ Solid | ⬚ Off] segment, the filled join button and the
-// new-face buttons.
+// FaceChip — the pieces of the chip AT THE FACE: its [▦ Lattice | ■ No lattice | ⬚ Off] segment (B9 Setup: the face rows'
+// words, where it said Solid), the filled join button and the new-face buttons.
 //
 // Lifted from #362 (claude/flexible-screens) at b472880b, app/TopOptKit/Sources/TopOptFlows/FlexibleFaceChip.swift, as a
 // neutral shared component (reviewer ruling 2026-10-24 07:30). #362 swaps its Flexible* copy for this one on its next sync of
@@ -31,36 +31,54 @@ public enum FaceChip {
 /// The new-face buttons' kinds (copied from FlexibleNewFaceKind).
 public enum NewFaceKind: String, CaseIterable, Sendable { case lattice, anchor, load, protect, keepClear }
 
-/// [▦ Lattice | ■ Solid | ⬚ Off]: 3 × 80, 36 tall, in a 44 pt target.
+/// [▦ Lattice | ■ No lattice | ⬚ Off]: 3 × 80, 36 tall, in a 44 pt target.
+/// ★ B9 Setup (the reviewer's ruling 11-11 02:28Z, (1)(a)): the words are the face rows' (LatticeSetupCopy), so the chip
+/// at the face and the list beside it say one word for one thing (No lattice, where the chip said Solid). Each word,
+/// with its glyph, fits its 80 pt segment (FaceChipWordTests measures it), so the chip keeps its width.
 struct FaceStateSegment: View {
     let current: LatticeSelectableRole?
     let mixed: Bool
     var idPrefix: String = "stage"
     let set: (LatticeSelectableRole) -> Void
 
+    static func word(_ r: LatticeSelectableRole) -> String {
+        r == .include ? LatticeSetupCopy.lattice : r == .exclude ? LatticeSetupCopy.noLattice : LatticeSetupCopy.off
+    }
+
     var body: some View {
         HStack(spacing: 2) {
             ForEach([LatticeSelectableRole.include, .exclude, .off], id: \.self) { r in
                 let on = !mixed && current == r
                 Button { set(r) } label: {
-                    HStack(spacing: 4) {
-                        StateGlyph(role: r.regionRole)
-                        Text(r == .include ? "Lattice" : r == .exclude ? "Solid" : "Off")
-                            .font(.system(size: 12.5, weight: .semibold))
-                            .foregroundStyle((on ? DS.Color.textPrimary : DS.Color.textSecondary).color)
-                    }
-                    .frame(width: FaceChip.segmentWidth, height: 36)
-                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(on ? DS.Color.fillSelected.color : Color.clear))
-                    .frame(height: 44).contentShape(Rectangle())
+                    FaceStateLabel(role: r, on: on)
+                        .frame(width: FaceChip.segmentWidth, height: 36)
+                        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(on ? DS.Color.fillSelected.color : Color.clear))
+                        .frame(height: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel((r == .include ? "Lattice" : r == .exclude ? "Solid" : "Off") + (on ? ", selected" : ""))
+                .accessibilityLabel(Self.word(r) + (on ? ", selected" : ""))
                 .accessibilityIdentifier("\(idPrefix)-chip-seg-\(r.rawValue)")
                 .background(CornerPairStyle.publish("chipSeg-\(r.rawValue)"))
             }
         }
         .padding(2)
         .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(DS.Color.fillSubtle.color))
+    }
+}
+
+/// One segment's glyph and word (12.5 pt semibold, one line). The word publishes itself and its two widths while a test
+/// records (FlexibleSaid: a test process has no SwiftUI accessibility tree to read), so a test sees it drawn whole.
+struct FaceStateLabel: View {
+    let role: LatticeSelectableRole
+    let on: Bool
+    var body: some View {
+        HStack(spacing: 4) {
+            StateGlyph(role: role.regionRole)
+            Text(FaceStateSegment.word(role))
+                .font(.system(size: 12.5, weight: .semibold)).lineLimit(1)
+                .saidWhole(FaceStateSegment.word(role))
+                .foregroundStyle((on ? DS.Color.textPrimary : DS.Color.textSecondary).color)
+        }
     }
 }
 
