@@ -219,6 +219,9 @@ class Domain {
 enum class Algorithm : std::uint8_t {
   Uniform,       // one cell size per region; a wall it does not fit is solid (C16)
   DefaultGrade,  // halves: S, S/2, S/4 ... down to the printable floor (C7)
+  // Any whole fraction of the base cell, from ONE shared unit per base cell: k x (S/n),
+  // n = 2..6 (C6-C6c, C13; his ruling 2026-11-10 22:54: shared-unit splits only).
+  Stepped,
 };
 
 struct CellSpec {

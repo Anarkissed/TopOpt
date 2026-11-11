@@ -2,6 +2,7 @@
 #include "topopt/lattice_layout.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 #include "topopt/stepped_plan.hpp"  // stepped_size_menu, kSteppedPrintsOpenMaxStrutPerCell
@@ -61,6 +62,7 @@ struct Pass {
   Frame frame;
   double depth_cap;            // a prism's or shell's own depth; the wall is never read deeper (C12)
   std::vector<double> sizes;   // the sizes this region may use, largest first
+  std::vector<int> divisors;   // Stepped: the fractions of the base whose unit prints open
   Layout* out;
   RegionCells* tally;
   const WallMap* walls = nullptr;   // a flat region's walls, if it has any
@@ -72,42 +74,60 @@ struct Pass {
     return false;
   }
 
-  // A cube of the frame: emit it as a cell, split it, or record it as solid.
-  void place(const double lo[3], double s) {
-    // 27 points: the centre and a 3 x 3 x 3 grid a third of the cell apart. A point
-    // counts when the layout's one Domain says lattice goes there AND this region owns
-    // it (D13: ownership is the Domain's answer at the point, never the order of work).
-    int inside = 0;
-    double fits = 1e300;   // the largest cell every counted point's wall allows
-    for (int c = 0; c < 3; ++c)
-      for (int b = 0; b < 3; ++b)
-        for (int a = 0; a < 3; ++a) {
-          const Vec3 p = frame.at(lo[0] + s * (1 + 2 * a) / 6.0, lo[1] + s * (1 + 2 * b) / 6.0,
-                                  lo[2] + s * (1 + 2 * c) / 6.0);
-          double width = 0.0;
-          const Where w = probe->where(p, &width);
-          if (!w.lattice() || w.id != region) continue;
-          if (walls) {   // this pass lays one wall (or the rest), and nothing else
-            const double a2 = lo[0] + s * (1 + 2 * a) / 6.0, b2 = lo[1] + s * (1 + 2 * b) / 6.0;
-            if (walls->find(a2, b2, std::min(width, depth_cap)) != wall) continue;
-          }
-          ++inside;
-          // C2, C3-C5, C12: never wider than the wall over the cells it must hold; the
-          // wall is the material at this spot, and never more than the region's depth.
-          fits = std::min(fits, std::min(width, depth_cap) / spec->min_cells_across);
-        }
-    if (inside == 0) return;   // nothing of this region here
+  // One point: does lattice of this pass go here, and how big a cell does the wall at
+  // this spot allow? A point counts when the layout's one Domain says lattice goes there
+  // AND this region owns it (D13: ownership is the Domain's answer at the point, never
+  // the order of work) AND, under a flat face, it is in the wall this pass lays.
+  bool sample(double a, double b, double c, double* fit) const {
+    double width = 0.0;
+    const Where w = probe->where(frame.at(a, b, c), &width);
+    if (!w.lattice() || w.id != region) return false;
+    width = std::min(width, depth_cap);
+    if (walls && walls->find(a, b, width) != wall) return false;
+    // C2, C3-C5, C12: never wider than the wall over the cells it must hold; the wall is
+    // the material at this spot, and never more than the region's depth.
+    *fit = width / spec->min_cells_across;
+    return true;
+  }
+
+  void emit(const double lo[3], double s, bool cut, bool as_cell) {
     Cell cell;
     cell.region = region;
     cell.frame = frame_index;
     cell.lo[0] = lo[0]; cell.lo[1] = lo[1]; cell.lo[2] = lo[2];
     cell.size = s;
-    cell.cut = inside < 27;    // D3: a whole cell, cut by the edge
+    cell.cut = cut;
+    if (as_cell) {
+      out->cells.push_back(cell);
+      ++tally->cells;
+    } else {
+      // D8, D14: lattice was asked for, and no allowed cell fits the wall here. Solid.
+      out->solid.push_back(cell);
+      ++tally->solid;
+    }
+  }
+
+  // A cube of the frame: emit it as a cell, split it, or record it as solid.
+  void place(const double lo[3], double s, bool top = true) {
+    // 27 points: the centre and a 3 x 3 x 3 grid a third of the cell apart.
+    int inside = 0;
+    double fits = 1e300;   // the largest cell every counted point's wall allows
+    for (int c = 0; c < 3; ++c)
+      for (int b = 0; b < 3; ++b)
+        for (int a = 0; a < 3; ++a) {
+          double fit = 0.0;
+          if (!sample(lo[0] + s * (1 + 2 * a) / 6.0, lo[1] + s * (1 + 2 * b) / 6.0,
+                      lo[2] + s * (1 + 2 * c) / 6.0, &fit))
+            continue;
+          ++inside;
+          fits = std::min(fits, fit);
+        }
+    if (inside == 0) return;   // nothing of this pass here
+    const bool cut = inside < 27;   // D3: a whole cell, cut by the edge
     // A width is read to about a micron (PartMeasure::reach), so a cell that fits its
     // wall exactly must not be refused over the last digits of the reading.
     if (s <= fits + kReadingSlack) {
-      out->cells.push_back(cell);
-      ++tally->cells;
+      emit(lo, s, cut, true);
       return;
     }
     const double h = 0.5 * s;
@@ -116,13 +136,114 @@ struct Pass {
         for (int b = 0; b < 2; ++b)
           for (int a = 0; a < 2; ++a) {
             const double q[3] = {lo[0] + a * h, lo[1] + b * h, lo[2] + c * h};
-            place(q, h);
+            place(q, h, false);
           }
       return;
     }
-    // D8, D14: lattice was asked for, and no allowed cell fits the wall here. Solid.
-    out->solid.push_back(cell);
-    ++tally->solid;
+    if (spec->algorithm == Algorithm::Stepped && top && pack(lo, s)) return;
+    emit(lo, s, cut, false);
+  }
+
+  // ── STEPPED: pack one base cell from one shared unit (C6-C6c, C13) ────────────
+  // The base cell S did not fit. For each fraction n whose unit t = S/n prints open,
+  // the base cell is n x n x n units; cells of m units (m = n-1 .. 1), each starting on
+  // a whole unit, are placed largest first wherever the wall allows them (C1). Of the
+  // fractions, the one that covers the most of the lattice here wins, then the one with
+  // the fewest cells (C6c). Returns false when no fraction places anything.
+  struct Packed {
+    int n = 0;
+    long covered = 0, asked = 0;   // sample points with lattice asked: in a cell / in all
+    std::vector<std::array<int, 4>> cubes;   // i, j, k, m (in units)
+    std::vector<std::array<int, 3>> bare;    // units with lattice asked and no cell
+    std::vector<unsigned char> cut;          // per cube
+  };
+  bool pack(const double lo[3], double S) {
+    Packed best;
+    for (int n : divisors) {
+      if (n < 2) continue;
+      const double t = S / n;
+      // Each unit read at 8 points (a 2 x 2 x 2 grid half a unit apart).
+      const std::size_t N = static_cast<std::size_t>(n) * n * n;
+      std::vector<unsigned char> in(N, 0);
+      std::vector<double> fit(N, 1e300);
+      for (int k = 0; k < n; ++k)
+        for (int j = 0; j < n; ++j)
+          for (int i = 0; i < n; ++i) {
+            const std::size_t u = (static_cast<std::size_t>(k) * n + j) * n + i;
+            for (int c = 0; c < 2; ++c)
+              for (int b = 0; b < 2; ++b)
+                for (int a = 0; a < 2; ++a) {
+                  double f = 0.0;
+                  if (!sample(lo[0] + t * (i + 0.25 + 0.5 * a), lo[1] + t * (j + 0.25 + 0.5 * b),
+                              lo[2] + t * (k + 0.25 + 0.5 * c), &f))
+                    continue;
+                  ++in[u];
+                  fit[u] = std::min(fit[u], f);
+                }
+          }
+      Packed p;
+      p.n = n;
+      std::vector<unsigned char> taken(N, 0);
+      for (int m = n - 1; m >= 1; --m) {
+        const double size = m * t;
+        for (int k = 0; k + m <= n; ++k)
+          for (int j = 0; j + m <= n; ++j)
+            for (int i = 0; i + m <= n; ++i) {
+              bool free = true;
+              int some = 0, all = 0;
+              double f = 1e300;
+              for (int c = k; c < k + m && free; ++c)
+                for (int b = j; b < j + m && free; ++b)
+                  for (int a = i; a < i + m; ++a) {
+                    const std::size_t u = (static_cast<std::size_t>(c) * n + b) * n + a;
+                    if (taken[u]) { free = false; break; }
+                    some += in[u];
+                    all += 8;
+                    f = std::min(f, fit[u]);
+                  }
+              if (!free || some == 0 || size > f + kReadingSlack) continue;
+              for (int c = k; c < k + m; ++c)
+                for (int b = j; b < j + m; ++b)
+                  for (int a = i; a < i + m; ++a)
+                    taken[(static_cast<std::size_t>(c) * n + b) * n + a] = 1;
+              p.covered += some;
+              p.cubes.push_back({i, j, k, m});
+              p.cut.push_back(some < all);
+            }
+      }
+      for (int k = 0; k < n; ++k)
+        for (int j = 0; j < n; ++j)
+          for (int i = 0; i < n; ++i) {
+            const std::size_t u = (static_cast<std::size_t>(k) * n + j) * n + i;
+            p.asked += in[u];
+            if (in[u] && !taken[u]) p.bare.push_back({i, j, k});
+          }
+      if (p.cubes.empty()) continue;
+      // Most covered, then fewest cells, then the coarser unit (the smaller n).
+      // C1 before C6c: "largest cells, fewest cells ... the smallest only where no
+      // larger cell fits". A finer unit always hugs an edge a little closer, and would
+      // win every time on coverage alone; so coverage within a tenth counts as the same,
+      // and the fewer, larger cells are kept. What the larger cells leave at the edge is
+      // a sliver, which is solid (C8).
+      // Coverage is the share of the lattice asked for here that ends up in a cell.
+      const long mine = p.covered * best.asked, theirs = best.covered * p.asked;
+      const bool more = mine * 100 > theirs * 110;
+      const bool same = !more && mine * 110 >= theirs * 100;
+      if (best.n == 0 || more || (same && p.cubes.size() < best.cubes.size()))
+        best = std::move(p);
+    }
+    if (best.n == 0) return false;
+    const double t = S / best.n;
+    for (std::size_t q = 0; q < best.cubes.size(); ++q) {
+      const auto& c = best.cubes[q];
+      const double at[3] = {lo[0] + c[0] * t, lo[1] + c[1] * t, lo[2] + c[2] * t};
+      emit(at, c[3] * t, best.cut[q] != 0, true);
+    }
+    for (const auto& u : best.bare) {
+      const double at[3] = {lo[0] + u[0] * t, lo[1] + u[1] * t, lo[2] + u[2] * t};
+      emit(at, t, true, false);
+    }
+    return true;
   }
 };
 
@@ -156,6 +277,11 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec) {
                                      SteppedMenu::Halves);
     else
       pass.sizes = {base};
+    pass.divisors.clear();
+    if (spec.algorithm == Algorithm::Stepped)
+      // Which fractions' units print open is core's own rule (C6a).
+      pass.divisors = stepped_admitted_divisors(spec.topology, base, ds.bead_mm,
+                                                spec.cell_min_mm, true, SteppedMenu::AnyStep);
     double start[3];
     int count[3];
     for (int a = 0; a < 3; ++a) centred(lo[a], hi[a], base, &start[a], &count[a]);

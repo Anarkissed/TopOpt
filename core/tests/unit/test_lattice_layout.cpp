@@ -774,6 +774,70 @@ static void test_cells_whole_part() {
   }
 }
 
+static void test_cells_stepped() {
+  // A 20 mm wall and an 8.5 mm wall, 40 tall. Base cell 12 mm, two across.
+  PartMeasure pm(weld_mesh(prism({{0, 0}, {60, 0}, {60, 8.5}, {20, 8.5}, {20, 60}, {0, 60}}, 0, 40)));
+  DomainSpec s;
+  s.start = Start::AllLattice;
+  Domain d(pm, s);
+  CellSpec cs;
+  cs.algorithm = Algorithm::Stepped;
+  cs.cell_mm = 12.0;
+  const Layout l = lay_cells(d, cs);
+  CHECK(!l.cells.empty());
+  // C6, C6a: every size is k x (12/n), n = 2..5 at a 0.45 mm line: never 10 or 2 mm.
+  const double menu[] = {12, 9.6, 9, 8, 7.2, 6, 4.8, 4, 3, 2.4};
+  int off_menu = 0, too_wide = 0, thin_not_4 = 0, thick_not_6 = 0, thin = 0, thick = 0;
+  auto pr = d.probe();
+  for (const Cell& c : l.cells) {
+    bool on = false;
+    for (double m : menu) on = on || std::fabs(c.size - m) < 1e-9;
+    if (!on) ++off_menu;
+    const Vec3 m = cell_centre(l, c);
+    if (pr.part().depth(m) > 0 && c.size > pr.part().thickness(m) / 2 + 1e-5) ++too_wide;   // C3
+    // The 8.5 mm wall allows 4.25: thirds of 12 (4 mm), not the halves' 3 mm (C6, C1).
+    if (m.x > 26 && m.x < 58 && m.y > 0 && m.y < 8.5 && m.z > 0 && m.z < 40) { ++thin; if (std::fabs(c.size - 4.0) > 1e-9) ++thin_not_4; }
+    // The 20 mm wall allows 10: halves of 12 (6 mm), the fewest cells that fill it (C6c).
+    if (m.x > 6 && m.x < 14 && m.y > 16 && m.y < 54 && m.z > 6 && m.z < 34) { ++thick; if (std::fabs(c.size - 6.0) > 1e-9) ++thick_not_6; }
+  }
+  CHECK(off_menu == 0);
+  CHECK(too_wide == 0);
+  CHECK(thin > 20 && thin_not_4 == 0);
+  CHECK(thick > 10 && thick_not_6 == 0);
+  CHECK(badly_covered(d, l, {0, 0, 0}, {60, 60, 40}, 2.3) == 0);   // no gap, no overlap
+  CHECK(l.cells == lay_cells(d, cs).cells);                        // D18
+
+  // "I did not want stepped to look EXACTLY like default" (2026-11-10): the same part
+  // under Default Grade takes halves, 3 mm in the thin wall.
+  CellSpec dg = cs;
+  dg.algorithm = Algorithm::DefaultGrade;
+  const Layout h = lay_cells(d, dg);
+  int thin_h = 0, thin_h_not_3 = 0;
+  for (const Cell& c : h.cells) {
+    const Vec3 m = cell_centre(h, c);
+    if (m.x > 26 && m.x < 58 && m.y > 0 && m.y < 8.5 && m.z > 0 && m.z < 40) { ++thin_h; if (std::fabs(c.size - 3.0) > 1e-9) ++thin_h_not_3; }
+  }
+  CHECK(thin_h > 20 && thin_h_not_3 == 0);
+
+  // C6a: a finer line lets sixths back in. A 4.2 mm wall allows 2.1: at 0.45 nothing
+  // that small prints open, so it is solid; at 0.35 the sixths (2 mm) fill it.
+  PartMeasure slim(weld_mesh(prism({{0, 0}, {60, 0}, {60, 4.2}, {20, 4.2}, {20, 60}, {0, 60}}, 0, 40)));
+  for (double bead : {0.45, 0.35}) {
+    DomainSpec s2;
+    s2.start = Start::AllLattice;
+    s2.bead_mm = bead;
+    Domain d2(slim, s2);
+    const Layout l2 = lay_cells(d2, cs);
+    int in_thin = 0, twos = 0;
+    for (const Cell& c : l2.cells) {
+      const Vec3 m = cell_centre(l2, c);
+      if (m.x > 26 && m.x < 58 && m.y > 0 && m.y < 4.2 && m.z > 0 && m.z < 40) { ++in_thin; if (std::fabs(c.size - 2.0) < 1e-9) ++twos; }
+    }
+    if (bead == 0.45) CHECK(in_thin == 0);
+    else CHECK(in_thin > 50 && twos == in_thin);
+  }
+}
+
 static void test_cells_curved_region() {
   int L = -1, square = -1, sideA = -1, sideB = -1;
   const StepModel model = plate_with_L_face(&L, &square, &sideA, &sideB);
@@ -797,6 +861,7 @@ int main() {
   test_cells_walls_under_a_face();
   test_cells_ledge_is_not_a_wall();
   test_cells_whole_part();
+  test_cells_stepped();
   test_cells_curved_region();
   test_face_regions();
   test_pocket_and_thin_wall();
