@@ -23,6 +23,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include "topopt/clearance.hpp"
@@ -575,6 +576,65 @@ std::size_t join_loose_bars(Bars& bars, const Domain& domain);
 // solid. Removes the rest (a cut end in the air or loose in the lattice, and then any
 // bar left holding a node alone), and counts them in `dropped`.
 void drop_loose_bars(Bars& bars);
+
+// ── SESSION (stage E) ─────────────────────────────────────────────────────────
+// What the app holds for one part while its Lattice page is open. It measures the part
+// once, and between two layouts keeps everything the changed settings do not touch (P2):
+// a cell-size, band or strut slider re-lays the cells without reading the part again; a
+// region, depth, Expand, Protect skin, rim or line-width change reads it again, once.
+struct Settings {
+  struct RegionAsk {
+    int id = 0;
+    Role role = Role::Lattice;
+    std::vector<int> faces;      // the model's own face numbers
+    double depth_mm = 0.0;
+    double expand_mm = 0.0;
+  };
+  struct ProtectAsk {
+    int id = 0;
+    std::vector<int> faces;
+    double depth_mm = 0.0;       // 0 = two line widths (D5)
+  };
+  // Where lattice goes.
+  Start start = Start::AllSolid;
+  double bead_mm = 0.45;
+  double min_wall_mm = 0.0;
+  double rim_mm = 0.0;           // Finish Rim: 0 none, < 0 two line widths
+  std::vector<RegionAsk> regions;
+  std::vector<ProtectAsk> protect;
+  // The cells, the struts, and what happens to cut ends.
+  CellSpec cells;
+  StrutSpec struts;
+  bool bars = true;              // false: cells and strut widths only
+  bool join_loose = true;        // S5
+  bool drop_loose = true;        // S4, Finish None's rule
+};
+
+struct Outcome {
+  Layout layout;
+  StrutReport struts;
+  Bars bars;
+  bool read_again = false;       // the part was read for this layout (a "where" setting changed)
+  std::vector<int> empty_regions;   // asked-for regions none of whose faces has triangles
+  double ms_read = 0.0, ms_cells = 0.0, ms_bars = 0.0;
+};
+
+class Session {
+ public:
+  // Welds and measures the model once. `open_edges()` is 0 for a part that can be measured.
+  explicit Session(StepModel model);
+  Outcome lay(const Settings& settings, int threads = 0);
+  std::size_t open_edges() const { return open_edges_; }
+  const PartMeasure& measure() const { return *measure_; }
+
+ private:
+  StepModel model_;
+  std::size_t open_edges_ = 0;
+  std::unique_ptr<PartMeasure> measure_;
+  std::string where_;                  // the "where" settings the kept domain was made for
+  std::unique_ptr<Domain> domain_;
+  std::vector<int> empty_regions_;
+};
 
 // In the plane of a flat region's face: how far `p` is inside the region's edge (its
 // outline moved by Expand), mm. Negative outside. The depth is left out (G5). A curved

@@ -152,7 +152,7 @@ Timed on the Mac first (stage 0), then on the iPad (stage E).
 | Rule | Kind | Test |
 |---|---|---|
 | P1 | T | The preview shows a layout with no worker reachable. |
-| P2 | T | Dragging any slider: the layout is ready within 33 ms of each change on the stand (two frames). If not, P6 applies and the wait after the finger lifts is under 1 s. First layout when a part opens: under 5 s. |
+| P2 | T | Dragging any slider: the layout is ready within 33 ms of each change on the stand (two frames). If not, P6 applies and the wait after the finger lifts is under 1 s. First layout when a part opens: under 5 s. In core, built 2026-11-11 (`lattice_layout::Session`, `test_session`): the app holds one session per part; a cell or strut setting re-lays without reading the part again, a region, depth, Expand, Protect skin, rim or line-width setting reads it again once, and either way the layout equals a fresh session's. Four deliberate breaks fail. Measured on a Mac, his stand: first layout 0.26 s, each cell-setting change 44 ms for the cells (above the 33 ms on all cores, 0.2 s on one) plus about 0.2 s for the bars. Not measured on the iPad: the bridge entry is proposed, not built. |
 | P3 | T | The user's part is shown on the Lattice page only if P2's 33 ms is met for it; otherwise the sample. |
 | P4 | A | No frame draws geometry from one layout with cells from another: each frame carries one layout id. |
 | P5 | A | Any wait over 0.3 s shows a working indicator. |

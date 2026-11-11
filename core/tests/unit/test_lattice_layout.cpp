@@ -1910,6 +1910,73 @@ static void test_rim() {
   }
 }
 
+// P2, stage E: the session the app holds for a part. A cell or strut setting re-lays
+// without reading the part again; a "where" setting reads it again; either way the
+// layout is the one a fresh session gives.
+static void test_session() {
+  int L = 0, square = 0, sideA = 0, sideB = 0;
+  const StepModel model = plate_with_L_face(&L, &square, &sideA, &sideB);
+  Session session(model);
+  CHECK(session.open_edges() == 0);
+  Settings st;
+  st.regions = {{1, Role::Lattice, {square}, 6.0, 0.0}};
+  st.cells.cell_max_mm = 6;
+  auto same = [](const Outcome& x, const Outcome& y) {
+    return x.layout.cells == y.layout.cells && x.layout.solid == y.layout.solid && same_bars(x.bars, y.bars);
+  };
+  auto fresh = [&](const Settings& s) { return Session(model).lay(s); };
+  const Outcome first = session.lay(st);
+  CHECK(first.read_again);
+  CHECK(!first.layout.cells.empty() && !first.bars.bars.empty() && first.empty_regions.empty());
+  CHECK(first.layout.cells.front().strut > 0.0);   // strut widths are set
+  st.cells.cell_max_mm = 4;                         // a cell setting
+  const Outcome smaller = session.lay(st);
+  CHECK(!smaller.read_again);
+  CHECK(same(smaller, fresh(st)));
+  CHECK(smaller.layout.cells.size() > first.layout.cells.size());
+  st.struts.dial = 0.9;                             // a strut setting
+  const Outcome thicker = session.lay(st);
+  CHECK(!thicker.read_again);
+  CHECK(same(thicker, fresh(st)));
+  CHECK(thicker.layout.cells.front().strut > smaller.layout.cells.front().strut);
+  st.regions[0].depth_mm = 8.0;                     // a "where" setting
+  const Outcome deeper = session.lay(st);
+  CHECK(deeper.read_again);
+  CHECK(same(deeper, fresh(st)));
+  CHECK(!(deeper.layout.cells == thicker.layout.cells));
+  CHECK(!session.lay(st).read_again);               // and asked again: kept
+  st.rim_mm = -1.0;                                 // Finish Rim is a "where" setting too
+  const Outcome rimmed = session.lay(st);
+  CHECK(rimmed.read_again && same(rimmed, fresh(st)));
+  // A region whose faces do not exist is named, and the rest is laid.
+  st.regions.push_back({7, Role::Lattice, {9999}, 5.0, 0.0});
+  const Outcome named = session.lay(st);
+  CHECK(named.empty_regions == std::vector<int>{7});
+  CHECK(named.layout.cells == rimmed.layout.cells);
+  st.bars = false;                                  // cells only
+  CHECK(session.lay(st).bars.bars.empty());
+  // Two regions side by side with different cells: the session joins what is loose along
+  // the seam (S5) and drops what still lands on nothing (S4), unless told not to.
+  Settings two;
+  two.regions = {{1, Role::Lattice, {square}, 6.0, 0.0}, {2, Role::Lattice, {L}, 10.0, 0.0}};
+  two.cells.cell_max_mm = 6;
+  two.join_loose = false;
+  two.drop_loose = false;
+  const Outcome as_laid = session.lay(two);
+  int loose = 0;
+  for (const Bar& b : as_laid.bars.bars)
+    loose += (b.end_a == Bar::End::Loose) + (b.end_b == Bar::End::Loose);
+  CHECK(loose > 0 && as_laid.bars.joined == 0 && as_laid.bars.dropped == 0);
+  two.join_loose = true;
+  const Outcome joined = session.lay(two);
+  CHECK(joined.bars.joined > 0 && joined.bars.dropped == 0);
+  CHECK(joined.bars.bars.size() == as_laid.bars.bars.size());
+  two.drop_loose = true;
+  const Outcome kept = session.lay(two);
+  CHECK(kept.bars.dropped > 0 && kept.bars.bars.size() < joined.bars.bars.size());
+  CHECK(!kept.read_again);
+}
+
 // D5, D15, C15: with a Protect skin on a face, the lattice starts at the skin's own depth
 // and its cells divide what is left of the wall. The skin never cuts through a cell.
 static void test_cells_behind_a_protect_skin() {
@@ -2118,6 +2185,7 @@ int main() {
   test_bars();
   test_bars_join();
   test_rim();
+  test_session();
   test_struts();
   test_grade_to_shape();
   test_cells_prism();
