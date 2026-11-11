@@ -90,7 +90,10 @@ class PartMeasure {
     // Is `p` inside the part by more than a micron? The same answer as depth(p) > 1e-6
     // (a point ON the surface is not inside), read without a distance: the triangles a
     // micron around the point, then which way the first surface along one line faces.
-    bool inside(const Vec3& p) const;
+    bool inside(const Vec3& p) const { return inside_along(p, inside_line(), nullptr); }
+    // The same, looking along `unit_dir` (any line gives the same answer). When the point
+    // is inside, `*reach` receives the distance to the surface that way, as reach_in would.
+    bool inside_along(const Vec3& p, const Vec3& unit_dir, double* reach) const;
     // The one line `inside` looks along: a direction no face of a designed part lies in.
     static Vec3 inside_line() { return Vec3{0.36514837167011, 0.54772255750517, 0.75277265270908}; }
     // The wall's width at `p` along `unit_dir`: the material through `p` in that
@@ -309,6 +312,23 @@ class Domain {
   DomainSpec spec_;
   std::vector<Near> near_skin_;    // one per Protect skin, within its depth
   std::vector<Near> near_shell_;   // one per region (empty for a prism), within its depth
+  // For a flat region: squares of its face that lie wholly inside its edge, or wholly
+  // outside it (the distance to the edge at a square's middle is more than half the
+  // square's diagonal). A point over such a square is answered without measuring to the
+  // outline, which costs a pass over every segment of it.
+  struct Sure {
+    double u0 = 0.0, w0 = 0.0, pitch = 1.0;
+    int nu = 0, nw = 0;
+    std::vector<signed char> side;   // +1 inside, -1 outside, 0 near the edge: measure
+    int at(double du, double dw) const {
+      const double a = (du - u0) / pitch, b = (dw - w0) / pitch;
+      if (!(a >= 0.0) || !(b >= 0.0) || a >= nu || b >= nw) return 0;
+      return side[static_cast<std::size_t>(b) * nu + static_cast<std::size_t>(a)];
+    }
+  };
+  std::vector<Sure> sure_;         // one per region (empty where it does not apply)
+  // region_contains(spec_.regions[i], p), by the squares where they are sure.
+  bool region_holds(std::size_t i, const Vec3& p) const;
 
  public:
   // Readings a layout takes of this domain that do not depend on any cell setting (what
@@ -570,7 +590,7 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads = 0);
 // one cell of its own without meeting anything, in which case it is left as it was. No new
 // direction of strut is made, and no join relies on the part's shell. Returns the number
 // of ends that landed.
-std::size_t join_loose_bars(Bars& bars, const Domain& domain);
+std::size_t join_loose_bars(Bars& bars, const Domain& domain, int threads = 0);
 
 // S4, Finish None: a bar is kept only if each of its ends lands on another bar or on
 // solid. Removes the rest (a cut end in the air or loose in the lattice, and then any

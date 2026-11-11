@@ -70,7 +70,7 @@ Outcome Session::lay(const Settings& settings, int threads) {
   if (settings.bars) {
     t0 = std::chrono::steady_clock::now();
     out.bars = lay_bars(out.layout, *domain_, threads);
-    if (settings.join_loose) join_loose_bars(out.bars, *domain_);
+    if (settings.join_loose) join_loose_bars(out.bars, *domain_, threads);
     if (settings.drop_loose) drop_loose_bars(out.bars);
     out.ms_bars = ms_since(t0);
   }

@@ -101,14 +101,34 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
         bar.width = c.strut;
         bar.cell = c.size;
         bar.region = c.region;
-        // A strut whose two ends and middle are the cell's, in a cell the layout found
-        // whole, is whole. (The layout's own "whole" is not enough: it looks a sixth of
-        // the cell in from each face, and an edge can pass nearer the face than that.)
-        if (!c.cut && node_is_mine(s.a) && node_is_mine(s.b) && mine(0.5)) {
-          bar.a = a;
-          bar.b = b;
-          out.bars.push_back(bar);
-          continue;
+        // A strut is whole when its two ends and its middle are the cell's (and, in a cell
+        // the layout found cut, its quarter points too), and its own line, a hair inside
+        // the cell, meets no surface of the part between its ends. That is asked of every
+        // strut, in a cell the layout found whole as well: the layout looks a sixth of the
+        // cell in from each face, and an edge can pass nearer the face than that. Only a
+        // strut that fails it is read closely.
+        const bool end_a = node_is_mine(s.a), end_b = node_is_mine(s.b);
+        const bool middle = mine(0.5);
+        const bool all = end_a && end_b && middle, none = !end_a && !end_b && !middle;
+        // None of the five: the strut is not this cell's at all. (A piece between two of
+        // them would be under a quarter of the strut long.)
+        if (none && !mine(0.25) && !mine(0.75)) continue;
+        if (all && (!c.cut || (mine(0.25) && mine(0.75)))) {
+          double q0[3], q1[3];
+          inward(0.0, q0);
+          inward(1.0, q1);
+          const Vec3 from = f.at(q0[0], q0[1], q0[2]), to = f.at(q1[0], q1[1], q1[2]);
+          const Vec3 along{to.x - from.x, to.y - from.y, to.z - from.z};
+          const double span = std::sqrt(along.x * along.x + along.y * along.y + along.z * along.z);
+          const double clear = span > 0.0
+              ? probe.part().reach_by_line(from, Vec3{along.x / span, along.y / span, along.z / span})
+              : 0.0;
+          if (clear < 0.0 || clear >= span - 1e-9) {
+            bar.a = a;
+            bar.b = b;
+            out.bars.push_back(bar);
+            continue;
+          }
         }
         // What lies just past a cut end, a little farther along the strut.
         auto past = [&](double t, double step) {
@@ -120,10 +140,14 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
         };
         const int n = std::clamp(static_cast<int>(std::ceil(length / kStep)), 6, 24);
         std::vector<char> in(static_cast<std::size_t>(n) + 1);
-        for (int i = 0; i <= n; ++i) in[static_cast<std::size_t>(i)] = mine(static_cast<double>(i) / n);
+        in[0] = node_is_mine(s.a);   // the two ends are nodes, read once per cell
+        in[static_cast<std::size_t>(n)] = node_is_mine(s.b);
+        for (int i = 1; i < n; ++i) in[static_cast<std::size_t>(i)] = mine(static_cast<double>(i) / n);
         // Between a point that is the cell's and its neighbour that is not: where it changes.
         auto edge = [&](double t_in, double t_out) {
-          for (int k = 0; k < 12; ++k) {
+          // To a few thousandths of a millimetre: the reading itself is taken a fiftieth
+          // of a millimetre inside the cell, so nothing finer is being found.
+          for (int k = 0; k < 7; ++k) {
             const double m = 0.5 * (t_in + t_out);
             if (mine(m)) t_in = m; else t_out = m;
           }
@@ -147,6 +171,16 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
             double in_t = std::clamp(t_edge - sign * 0.1 / length, 0.0, 1.0);
             double out_t = std::clamp(t_edge + sign * 0.1 / length, 0.0, 1.0);
             if (!in_part(in_t) || in_part(out_t)) return t_edge;
+            // One straight line finds it, unless the strut lies IN a surface of the part
+            // (then the line runs along that surface and the answer is searched for).
+            {
+              const Vec3 from{a.x + ab.x * in_t, a.y + ab.y * in_t, a.z + ab.z * in_t};
+              const double reach = probe.part().reach_by_line(from, Vec3{dir.x * sign, dir.y * sign, dir.z * sign});
+              const double hit = in_t + sign * reach / length;
+              if (reach >= 0.0 && (hit - in_t) * sign <= (out_t - in_t) * sign && in_part(hit) &&
+                  !in_part(hit + sign * 1e-6 / length))
+                return hit;
+            }
             for (int k = 0; k < 26; ++k) {
               const double m = 0.5 * (in_t + out_t);
               if (in_part(m)) in_t = m; else out_t = m;
@@ -229,7 +263,7 @@ double approach(const Vec3& p, const Vec3& d, double len, const Vec3& a, const V
 }
 }  // namespace
 
-std::size_t join_loose_bars(Bars& bars, const Domain& domain) {
+std::size_t join_loose_bars(Bars& bars, const Domain& domain, int threads) {
   const std::vector<Bar> before = bars.bars;   // every bar is run on against the bars as laid
   if (before.empty()) return 0;
   // The bars sorted into a grid, to find those near a line.
@@ -248,13 +282,22 @@ std::size_t join_loose_bars(Bars& bars, const Domain& domain) {
         for (long long z = slot(std::min(b.a.z, b.b.z) - widest); z <= slot(std::max(b.a.z, b.b.z) + widest); ++z)
           grid[{x, y, z}].push_back(i);
   }
-  const Domain::Probe probe = domain.probe();
-  std::size_t joined = 0;
-  std::vector<std::size_t> near;
+  // Each loose end on its own, against the bars as laid: shared between threads, and the
+  // same result for any number of them.
+  struct Result { Bar::End kind = Bar::End::Loose; Vec3 to{}; };
+  std::vector<std::pair<std::size_t, int>> ends;
   for (std::size_t i = 0; i < before.size(); ++i)
-    for (int end = 0; end < 2; ++end) {
+    for (int end = 0; end < 2; ++end)
+      if ((end ? before[i].end_b : before[i].end_a) == Bar::End::Loose) ends.push_back({i, end});
+  std::vector<Result> results(ends.size());
+  std::atomic<std::size_t> next{0};
+  auto work = [&]() {
+    const Domain::Probe probe = domain.probe();
+    std::vector<std::size_t> near;
+    for (std::size_t job = next.fetch_add(1); job < ends.size(); job = next.fetch_add(1)) {
+      const std::size_t i = ends[job].first;
+      const int end = ends[job].second;
       const Bar& me = before[i];
-      if ((end ? me.end_b : me.end_a) != Bar::End::Loose) continue;
       const Vec3 p = end ? me.b : me.a, q = end ? me.a : me.b;
       Vec3 d{p.x - q.x, p.y - q.y, p.z - q.z};
       const double own = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
@@ -306,11 +349,27 @@ std::size_t join_loose_bars(Bars& bars, const Domain& domain) {
         break;
       }
       if (kind == Bar::End::Loose) continue;   // met nothing within a cell: left as it was
-      Bar& mine = bars.bars[i];
-      const Vec3 to{p.x + d.x * stop, p.y + d.y * stop, p.z + d.z * stop};
-      if (end) { mine.b = to; mine.end_b = kind; } else { mine.a = to; mine.end_a = kind; }
-      if (kind != Bar::End::Surface) ++joined;
+      results[job].kind = kind;
+      results[job].to = Vec3{p.x + d.x * stop, p.y + d.y * stop, p.z + d.z * stop};
     }
+  };
+  {
+    const int nt = static_cast<int>(std::min<std::size_t>(
+        std::max(1, threads > 0 ? threads : static_cast<int>(std::thread::hardware_concurrency())),
+        std::max<std::size_t>(1, ends.size() / 64)));
+    std::vector<std::thread> pool;
+    for (int t = 1; t < nt; ++t) pool.emplace_back(work);
+    work();
+    for (std::thread& t : pool) t.join();
+  }
+  std::size_t joined = 0;
+  for (std::size_t job = 0; job < ends.size(); ++job) {
+    if (results[job].kind == Bar::End::Loose) continue;
+    Bar& mine = bars.bars[ends[job].first];
+    if (ends[job].second) { mine.b = results[job].to; mine.end_b = results[job].kind; }
+    else { mine.a = results[job].to; mine.end_a = results[job].kind; }
+    if (results[job].kind != Bar::End::Surface) ++joined;
+  }
   bars.joined += joined;
   return joined;
 }

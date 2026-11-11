@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <thread>
+#include <atomic>
 #include <limits>
 #include <utility>
 
@@ -62,6 +64,53 @@ Domain::Domain(const PartMeasure& measure, DomainSpec spec)
                    [](const ProtectSkin& a, const ProtectSkin& b) { return a.id < b.id; });
   for (const ProtectSkin& s : spec_.protect) near_skin_.emplace_back(s.face, protect_depth_mm(s));
   for (const Region& r : spec_.regions) near_shell_.emplace_back(r.shell, r.shell_depth_mm);
+  sure_.resize(spec_.regions.size());
+  for (std::size_t i = 0; i < spec_.regions.size(); ++i) {
+    const Region& r = spec_.regions[i];
+    const ClearanceGeometry& g = r.prism;
+    // Only where measuring to the edge is the costly part: a face's own outline.
+    if (r.is_shell() || !g.valid || g.mask || g.kind != ClearanceKind::Face || g.outline_uv.empty())
+      continue;
+    Sure& s = sure_[i];
+    const double grow = std::max(0.0, r.expand_mm) + 1.0;
+    s.u0 = g.u_lo - grow;
+    s.w0 = g.w_lo - grow;
+    s.nu = static_cast<int>(std::ceil((g.u_hi - g.u_lo + 2 * grow) / s.pitch));
+    s.nw = static_cast<int>(std::ceil((g.w_hi - g.w_lo + 2 * grow) / s.pitch));
+    s.side.assign(static_cast<std::size_t>(std::max(0, s.nu)) * std::max(0, s.nw), 0);
+    const double margin = 0.5 * std::sqrt(2.0) * s.pitch + 1e-6;
+    std::atomic<int> next{0};
+    auto rows = [&]() {
+      for (int j = next.fetch_add(1); j < s.nw; j = next.fetch_add(1))
+        for (int a = 0; a < s.nu; ++a) {
+          const double du = s.u0 + (a + 0.5) * s.pitch, dw = s.w0 + (j + 0.5) * s.pitch;
+          const double d = clearance_outline_signed_distance(g, du, dw) + r.expand_mm;
+          s.side[static_cast<std::size_t>(j) * s.nu + a] = d > margin ? 1 : (d < -margin ? -1 : 0);
+        }
+    };
+    std::vector<std::thread> pool;
+    const int nt = std::min(s.nw, std::max(1, static_cast<int>(std::thread::hardware_concurrency())));
+    for (int t = 1; t < nt; ++t) pool.emplace_back(rows);
+    rows();
+    for (std::thread& t : pool) t.join();
+  }
+}
+
+bool Domain::region_holds(std::size_t i, const Vec3& p) const {
+  const Region& r = spec_.regions[i];
+  const Sure& sure = sure_[i];
+  if (sure.side.empty()) return region_contains(r, p);
+  const ClearanceGeometry& g = r.prism;
+  const Vec3 rel = sub(p, g.origin);
+  const double s = dot(rel, g.normal);
+  if (s < 0.0 || s > g.depth) return false;        // as both paths of region_contains do
+  const double du = dot(rel, g.u), dw = dot(rel, g.w);
+  const int side = sure.at(du, dw);
+  if (side < 0) return false;
+  if (side > 0)   // inside the outline for certain; at Expand 0 also the face's own rectangle
+    return r.expand_mm != 0.0 ||
+           (du >= g.u_lo && du <= g.u_hi && dw >= g.w_lo && dw <= g.w_hi);
+  return region_contains(r, p);
 }
 
 Domain::Near::Near(const TriangleMesh& surface, double within_mm) {
@@ -145,14 +194,17 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
   // D2: a prism only turns existing solid into lattice.
   // A point ON the surface (within a nanometre) is not inside: a width measured from it
   // has nowhere to start, and the distance there is rounding, not geometry.
-  if (!part_.inside(p)) return {Why::Outside, 0};
+  // Outside comes first in MEANING: every answer below is given only for a point inside
+  // the part. It is READ where that is cheapest: under a flat region whose wall is wanted
+  // too, the line that reads the wall says whether the point is inside.
+  auto inside_or = [&](Where inside) { return part_.inside(p) ? inside : Where{Why::Outside, 0}; };
 
   // D5, D15: a Protect skin is solid to its exact depth, measured from the face itself,
   // whatever else covers the point. The lattice starts right behind it.
   for (std::size_t i = 0; i < spec.protect.size(); ++i)
     if (d_->near_skin_[i].maybe(p) &&
         skins_[i].unsigned_distance(p) <= d_->protect_depth_mm(spec.protect[i]))
-      return {Why::ProtectSkin, spec.protect[i].id};
+      return inside_or({Why::ProtectSkin, spec.protect[i].id});
 
   // In the region? For a prism also how far the point is from the face plane; for a
   // shell, from the face itself.
@@ -173,7 +225,7 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
       if (!(along2 > 1e-12)) return false;
       return r.expand_mm >= 0.0 || along2 >= r.expand_mm * r.expand_mm;
     }
-    if (!region_contains(r, p)) return false;
+    if (!d_->region_holds(i, p)) return false;
     if (dist) {
       const Vec3& n = r.prism.normal;
       const double ln = std::sqrt(dot(n, n));
@@ -188,7 +240,7 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
   // D6: No lattice beats Lattice.
   for (std::size_t i = 0; i < spec.regions.size(); ++i)
     if (spec.regions[i].role == Role::NoLattice && holds(i, nullptr))
-      return {Why::NoLattice, spec.regions[i].id};
+      return inside_or({Why::NoLattice, spec.regions[i].id});
 
   // D6: among the Lattice regions that hold the point, the nearer face owns it; on one
   // face plane the deeper; then the lower id (include_wins_plane_tie, as core rules today).
@@ -207,8 +259,18 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
       best = d;
     }
   }
-  if (!owner && spec.start != Start::AllLattice) return {Why::NotAsked, 0};   // D12
+  if (!owner && spec.start != Start::AllLattice) return inside_or({Why::NotAsked, 0});   // D12
   const int id = owner ? owner->id : 0;                                       // D4
+  const bool flat = owner && !owner->is_shell();
+  const bool wall_wanted = spec.min_wall_mm > 0.0 || wall_mm || room;
+  double on_m = 0.0, back_m = 0.0;
+  if (flat && wall_wanted) {
+    const Vec3& n = owner->prism.normal;
+    if (!part_.inside_along(p, n, &on_m)) return {Why::Outside, 0};
+    back_m = part_.reach_in(p, Vec3{-n.x, -n.y, -n.z});
+  } else if (!part_.inside(p)) {
+    return {Why::Outside, 0};
+  }
 
   // S1, S2, S10: the rim. Within its width of the owning region's own edge, where the
   // part's solid backs that edge: one step beyond the nearest point of the edge, at the
@@ -240,13 +302,9 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
   }
 
   // D8: lattice was asked for here; can the wall hold it?
-  if (spec.min_wall_mm > 0.0 || wall_mm || room) {
-    const bool flat = owner && !owner->is_shell();
-    double wall = 0.0, on_m = 0.0, back_m = 0.0;
+  if (wall_wanted) {
+    double wall = 0.0;
     if (flat) {   // the wall's width along the region's direction (PartMeasure::wall_width)
-      const Vec3& n = owner->prism.normal;
-      on_m = part_.reach_in(p, n);
-      back_m = part_.reach_in(p, Vec3{-n.x, -n.y, -n.z});
       wall = on_m + back_m;
     } else {
       wall = part_.thickness(p);

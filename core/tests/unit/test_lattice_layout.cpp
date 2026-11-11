@@ -1702,6 +1702,55 @@ static void test_bars() {
       if (b.piece && bar_length(b) < b.width) ++short_piece;
     CHECK(short_piece == 0);
   }
+  const Vec3 in_y{0, 1, 0};
+  {  // A groove 0.3 mm wide and 2 mm deep in the latticed face of a 12 mm cube, between the
+     // points the layout reads a cell at, so the layout calls its cells whole. A strut
+     // across the groove has both ends and its middle in material; its own line still
+     // meets the groove, and no bar crosses the air (S11).
+    PartMeasure pm(weld_mesh(prism_any({{0, 0}, {1.8, 0}, {1.8, 2}, {2.1, 2}, {2.1, 0}, {12, 0}, {12, 12}, {0, 12}}, 0, 12)));
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, {6, 0, 6}, in_y, 6, 6, 12)};
+    Domain d(pm, s);
+    auto pr = d.probe();
+    CellSpec cs;
+    cs.cell_max_mm = 6;
+    Layout l = lay_cells(d, cs);
+    CHECK(l.cells.size() == 8 && l.solid.empty());
+    set_struts(l, StrutSpec{});
+    const Bars bars = lay_bars(l, d);
+    int in_air = 0, cut_at_groove = 0;
+    for (const Bar& b : bars.bars) {
+      for (int k = 0; k <= 20; ++k) {
+        const double t = k / 20.0;
+        if (pr.part().depth({b.a.x + (b.b.x - b.a.x) * t, b.a.y + (b.b.y - b.a.y) * t, b.a.z + (b.b.z - b.a.z) * t}) < -1e-6)
+          ++in_air;
+      }
+      for (const Vec3& p : {b.a, b.b})
+        if ((std::fabs(p.x - 1.8) < 1e-6 || std::fabs(p.x - 2.1) < 1e-6) && p.y < 2) ++cut_at_groove;
+    }
+    CHECK(in_air == 0);
+    CHECK(cut_at_groove > 10);   // the struts stop at the groove's two walls
+  }
+  {  // Two grooves 0.4 mm wide ON the planes the cells' nodes lie in (x = 3 and x = 6): a
+     // strut in the face from a node in one groove to a node in the other has neither end
+     // in material, and its middle in material. The piece between the grooves is kept.
+    PartMeasure pm(weld_mesh(prism_any({{0, 0}, {2.8, 0}, {2.8, 2}, {3.2, 2}, {3.2, 0}, {5.8, 0}, {5.8, 2},
+                                        {6.2, 2}, {6.2, 0}, {12, 0}, {12, 12}, {0, 12}}, 0, 12)));
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, {6, 0, 6}, in_y, 6, 6, 12)};
+    Domain d(pm, s);
+    CellSpec cs;
+    cs.cell_max_mm = 6;
+    Layout l = lay_cells(d, cs);
+    set_struts(l, StrutSpec{});
+    const Bars bars = lay_bars(l, d);
+    int between = 0;
+    for (const Bar& b : bars.bars)
+      if (b.end_a == Bar::End::Surface && b.end_b == Bar::End::Surface && bar_length(b) > 3.0 &&
+          std::min(b.a.x, b.b.x) > 3.1 && std::max(b.a.x, b.b.x) < 5.9)
+        ++between;
+    CHECK(between > 0);
+  }
   {  // S4, by hand: a chain of three bars from solid out to a cut end in the air. The cut
      // one lands on nothing; with it gone the next holds its node alone; and so on back
      // to the solid. A triangle of bars beside it, standing on solid, stays.
@@ -1907,6 +1956,31 @@ static void test_rim() {
     CHECK((pr.where({26.6, 15, 10}) == Where{Why::Rim, 2}));
     CHECK((pr.where({9, 9.4, 10}) == Where{Why::Rim, 1}));
     CHECK((pr.where({21, 20.6, 10}) == Where{Why::Rim, 2}));
+  }
+}
+
+// Speed: over squares of a face that lie wholly inside or wholly outside a region's edge
+// the Domain answers without measuring to the outline. The answer is the measured one.
+static void test_region_squares() {
+  int L = 0, square = 0, sideA = 0, sideB = 0;
+  const StepModel model = plate_with_L_face(&L, &square, &sideA, &sideB);
+  PartMeasure pm(weld_mesh(model.mesh));
+  for (double expand : {0.0, -1.5, 1.5}) {
+    DomainSpec s;
+    s.regions = {region_from_face(model, L, 1, Role::Lattice, 4.0, expand)};
+    Domain d(pm, s);
+    auto pr = d.probe();
+    int wrong = 0, in = 0, out = 0;
+    for (double x = 0.07; x < 60; x += 0.37)
+      for (double y = 0.05; y < 60; y += 0.41)
+        for (double z : {9.5, 7.0, 5.9}) {   // in its depth, in its depth, below it
+          const Vec3 p{x, y, z};
+          const bool measured = region_contains(s.regions[0], p);
+          if (pr.where(p).lattice() != measured) ++wrong;
+          ++(measured ? in : out);
+        }
+    CHECK(wrong == 0);
+    CHECK(in > 5000 && out > 5000);
   }
 }
 
@@ -2186,6 +2260,7 @@ int main() {
   test_bars_join();
   test_rim();
   test_session();
+  test_region_squares();
   test_struts();
   test_grade_to_shape();
   test_cells_prism();

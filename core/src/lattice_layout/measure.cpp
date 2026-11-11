@@ -240,7 +240,7 @@ double point_triangle_distance2(const Vec3& p, const Vec3& a, const Vec3& b, con
 }
 }  // namespace
 
-bool PartMeasure::Probe::inside(const Vec3& p) const {
+bool PartMeasure::Probe::inside_along(const Vec3& p, const Vec3& unit_dir, double* reach) const {
   const double kSkin = 1e-6;   // mm: the same micron Domain::where has always used
   const RayGrid& g = *grid_;
   const double o[3] = {p.x - g.lo.x, p.y - g.lo.y, p.z - g.lo.z};
@@ -263,9 +263,11 @@ bool PartMeasure::Probe::inside(const Vec3& p) const {
   // inside. Should the line meet an edge between a surface seen from inside and one seen
   // from outside (it only brushes the part there), the distance decides.
   int facing = 0;
-  if (cast(p, inside_line(), &facing) < 0.0) return false;
-  if (facing != 0) return facing > 0;
-  return md_.signed_distance(p) > kSkin;
+  const double t = cast(p, unit_dir, &facing);
+  if (t < 0.0) return false;
+  if (facing < 0 || (facing == 0 && !(md_.signed_distance(p) > kSkin))) return false;
+  if (reach) *reach = t;
+  return true;
 }
 
 double PartMeasure::Probe::reach(const Vec3& p, const Vec3& d, double depth_at_p) const {
