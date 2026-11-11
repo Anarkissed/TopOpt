@@ -188,7 +188,19 @@ class Domain {
     // Rule D1: the answer depends on geometry and settings only. No stress input exists.
     // `wall_mm`, when given and the answer is Lattice or WallTooThin, receives the wall's
     // width at `p` as rule D8 reads it (along the owning prism, or the thickness there).
-    Where where(const Vec3& p, double* wall_mm = nullptr) const;
+    Where where(const Vec3& p, double* wall_mm = nullptr) const { return where(p, wall_mm, nullptr); }
+    // The lattice's own room through `p` under a flat region, along the region's
+    // direction: a Protect skin met before the part's surface ends it (D5: the lattice is
+    // right behind the skin). `back` is toward the region's face, `on` away from it; each
+    // is read only when its flag is set, and is then the distance from `p` to the skin.
+    struct Room {
+      bool skin_back = false, skin_on = false;
+      double back = 0.0, on = 0.0;
+    };
+    Where where(const Vec3& p, double* wall_mm, Room* room) const;
+    // How far `p` is from the nearest Protect skin's solid: negative inside one, and
+    // +infinity when the part has none.
+    double skin_gap(const Vec3& p) const;
     const PartMeasure::Probe& part() const { return part_; }
 
    private:
@@ -196,6 +208,9 @@ class Domain {
     Probe(const Domain& d);
     const Domain* d_;
     PartMeasure::Probe part_;
+    // From `p` along `dir`, the distance at which a Protect skin's solid begins, looking
+    // no farther than `limit`. Negative when none begins that near.
+    double skin_ahead(const Vec3& p, const Vec3& dir, double limit) const;
     std::vector<MeshDistance> skins_;
     std::vector<MeshDistance> shells_;   // one per region, empty mesh for a prism
   };
@@ -269,6 +284,10 @@ struct Cell {
   double lo[3] = {0, 0, 0};   // the cube's low corner, in frame coordinates, mm
   double size = 0.0;    // mm
   bool cut = false;     // the region's edge or the part's surface passes through it (D3)
+  // Under a flat region: the wall it was laid for (index into its WallMap's walls), or -1
+  // for a cell of the space no wall holds. A cut cell is the part of its cube that is
+  // lattice of its own region AND of this wall (see cell_holds).
+  int wall = -1;
   double strut = 0.0;   // strut width, mm (R1). 0 until set_struts has run.
   double own = 0.0;     // the region's (or wall's) own cell at this spot, mm
   // Grade to shape: 0 at the region's outline, 1 at the band's inner edge and beyond.
@@ -277,9 +296,42 @@ struct Cell {
   bool finest = false;  // the smallest cell this spot's ladder allows
   bool operator==(const Cell& o) const {
     return region == o.region && frame == o.frame && lo[0] == o.lo[0] && lo[1] == o.lo[1] &&
-           lo[2] == o.lo[2] && size == o.size && cut == o.cut && strut == o.strut &&
+           lo[2] == o.lo[2] && size == o.size && cut == o.cut && wall == o.wall && strut == o.strut &&
            own == o.own && band == o.band && finest == o.finest;
   }
+};
+
+// ── THE WALLS UNDER A FLAT REGION (C11, C12, C15; settled 2026-11-10, item 6) ──
+// Under one face the material is not one thickness: behind part of it there may be a
+// slot, a step, another face, a Protect skin. Each stretch where the lattice's column
+// (from where it starts below the face, over the smaller of the region's depth and the
+// material there) is ONE start and ONE width is a wall of its own: its cells divide THAT
+// width exactly and are centred on THAT stretch. This is a coarse map of the face, used
+// only to tell the stretches apart; which wall a point belongs to is then decided by the
+// column read at the point itself, so the line between two walls is the true step in the
+// part, not the map's grid.
+struct WallMap {
+  static constexpr double kPitch = 1.0;    // mm between map nodes
+  static constexpr double kBin = 0.05;     // mm: widths this close are one width
+  bool flat = false;         // false: not a flat region's frame, and nothing below is read
+  double depth = 0.0;        // the region's own depth; a wall is never read deeper (C12)
+  double u0 = 0, w0 = 0;
+  int nu = 0, nw = 0;
+  std::vector<long> bin;     // per node: the wall's width in bins, -1 = no lattice here
+  std::vector<long> sbin;    // per node: where the lattice starts below the face, in bins
+  std::vector<int> wall;     // per node: index into `walls`, -1 = not in a wall
+  struct Wall {
+    // `start`: where its lattice begins below the face. 0, or a Protect skin's depth (D5).
+    double start = 0, width = 0, cell = 0;
+    int layers = 0;
+    double lo[2] = {0, 0}, hi[2] = {0, 0};   // its extent on the face
+  };
+  std::vector<Wall> walls;
+
+  static long bin_of(double width);
+  // The wall a point at (u, w) belongs to, whose lattice starts `start` below the face
+  // and is `width` wide; or -1.
+  int find(double u, double w, double start, double width) const;
 };
 
 struct RegionCells {
@@ -295,15 +347,36 @@ struct Layout {
   double bead_mm = 0.0;              // the line width it was laid for
   LatticeTopology topology = LatticeTopology::Octet;
   std::vector<Frame> frames;
+  std::vector<WallMap> walls;        // one per frame
   std::vector<Cell> cells;           // in a fixed order: same input, same bytes (D18)
   // D14: space inside a region no cell covers. Solid, and drawn solid. Same shape as a
-  // cell: the cube that was tried and did not fit.
+  // cell: the cube that was tried and did not fit. This is what the laying found, to
+  // within its own sample points; the rule itself is for whoever draws or builds:
+  // lattice space that cell_holds is true for in no cell is solid.
   std::vector<Cell> solid;
   std::vector<RegionCells> regions;
 };
 
 // `threads`: 0 = all of this machine's; the layout is the same for any number (D18).
 Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads = 0);
+
+// What the layout reads at one point (a, b, c) of a frame: the domain's answer and, under
+// a flat region, the lattice's column there (where it starts below the face, how wide it
+// is) and the wall the point stands in (-1: in none). The one reading both the laying and
+// anyone drawing or building from the layout use.
+struct Reading {
+  Where where;
+  double start = 0.0, width = 0.0;
+  int wall = -1;
+};
+Reading read_at(const Domain::Probe& probe, const Frame& frame, const WallMap& walls,
+                double a, double b, double c);
+
+// Is `p` lattice of this cell: inside its cube, lattice by the domain, of the cell's own
+// region and, under a flat region, of the cell's own wall? A cut cell (D3) is exactly the
+// part of its cube this holds for; two walls' cut cells may overlap as cubes where the
+// walls meet, never as this. Lattice space this holds for in no cell is solid (D14).
+bool cell_holds(const Layout& layout, const Domain::Probe& probe, const Cell& cell, const Vec3& p);
 
 // ── STRUT WIDTH ───────────────────────────────────────────────────────────────
 // What a lattice looks like is one number, strut width over cell size (R9). Octet's

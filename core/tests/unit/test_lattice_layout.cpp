@@ -534,6 +534,8 @@ static Vec3 cell_centre(const Layout& l, const Cell& c) {
 }
 // Over a lattice of probe points: points whose owner does not hold them in exactly one
 // cell, not counting points in space the layout itself lists as solid (D14).
+// A cell counts where it truly is: the part of its cube that is its own wall's lattice
+// (cell_holds). Two walls' cut cells overlap as cubes where the walls meet, never as that.
 static int badly_covered(const Domain& d, const Layout& l, Vec3 lo, Vec3 hi, double step) {
   auto pr = d.probe();
   int bad = 0;
@@ -542,11 +544,14 @@ static int badly_covered(const Domain& d, const Layout& l, Vec3 lo, Vec3 hi, dou
       for (double z = lo.z + 0.43; z < hi.z; z += step) {
         const Where w = pr.where({x, y, z});
         if (!w.lattice()) continue;
-        if (cells_holding(l, {x, y, z}, w.id) == 1) continue;
+        int held = 0;
+        for (const Cell& c : l.cells)
+          if (c.region == w.id && cell_holds(l, pr, c, {x, y, z})) ++held;
+        if (held == 1) continue;
         Layout as_solid;
         as_solid.frames = l.frames;
         as_solid.cells = l.solid;
-        if (cells_holding(as_solid, {x, y, z}, w.id) == 1) continue;
+        if (held == 0 && cells_holding(as_solid, {x, y, z}, w.id) == 1) continue;
         ++bad;
       }
   return bad;
@@ -1250,6 +1255,186 @@ static void test_cells_across_the_narrowest_width() {
   }
 }
 
+// D5, D15, C15: with a Protect skin on a face, the lattice starts at the skin's own depth
+// and its cells divide what is left of the wall. The skin never cuts through a cell.
+static void test_cells_behind_a_protect_skin() {
+  const Vec3 down{0, 0, -1};
+  auto quad = [](double x0, double x1, double z) {
+    TriangleMesh m;
+    m.vertices = {{x0, 0, z}, {x1, 0, z}, {x1, 40, z}, {x0, 40, z}};
+    m.triangles = {{0, 1, 2}, {0, 2, 3}};
+    return m;
+  };
+  PartMeasure pm(weld_mesh(box(40, 40, 20)));
+  const Vec3 top{20, 20, 20};
+  for (Algorithm algo : {Algorithm::Uniform, Algorithm::DefaultGrade, Algorithm::Stepped})
+    for (double skin : {1.2, 0.0}) {
+      // A 12 mm slab under the top face, the face protected: the lattice has 12 less the
+      // skin, in two layers (8 mm cells at most). At 0 mm the skin is two lines, 0.9 mm.
+      DomainSpec s;
+      s.regions = {face_region(1, Role::Lattice, top, down, 20, 20, 12)};
+      s.protect = {{7, quad(0, 40, 20), skin}};
+      Domain d(pm, s);
+      const double from = skin > 0.0 ? skin : 0.9, cell = 0.5 * (12.0 - from);
+      CellSpec cs;
+      cs.algorithm = algo;
+      cs.cell_max_mm = 8;
+      const Layout l = lay_cells(d, cs);
+      CHECK(!l.cells.empty());
+      CHECK(l.solid.empty());
+      int odd = 0;
+      double first = 1e300, last = -1e300;
+      for (const Cell& c : l.cells) {
+        if (std::fabs(c.size - cell) > 1e-5) ++odd;
+        // Every cell begins on the skin's inner side or one cell below it.
+        if (std::fabs(c.lo[2] - from) > 1e-5 && std::fabs(c.lo[2] - from - cell) > 1e-5) ++odd;
+        first = std::min(first, c.lo[2]);
+        last = std::max(last, c.lo[2] + c.size);
+      }
+      CHECK(odd == 0);
+      NEAR(first, from, 1e-5);     // D5: the lattice is right behind the skin
+      NEAR(last, 12.0, 1e-5);      // D15: one slab, one depth
+      CHECK(badly_covered(d, l, {0, 0, 0}, {40, 40, 20}, 1.7) == 0);
+      // The skin itself: solid to its depth, lattice just past it.
+      auto pr = d.probe();
+      CHECK((pr.where({20, 20, 20 - from + 0.005}) == Where{Why::ProtectSkin, 7}));
+      CHECK((pr.where({20, 20, 20 - from - 0.005}) == Where{Why::Lattice, 1}));
+    }
+  {  // The same slab with no skin is laid from the face, as before.
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, top, down, 20, 20, 12)};
+    Domain d(pm, s);
+    CellSpec cs;
+    cs.algorithm = Algorithm::Uniform;
+    cs.cell_max_mm = 8;
+    const Layout l = lay_cells(d, cs);
+    int odd = 0;
+    for (const Cell& c : l.cells)
+      if (std::fabs(c.size - 6.0) > 1e-9 || (std::fabs(c.lo[2]) > 1e-9 && std::fabs(c.lo[2] - 6.0) > 1e-9)) ++odd;
+    CHECK(!l.cells.empty() && odd == 0);
+  }
+  {  // A skin on half the face: two walls, each divided on its own (C15 per wall).
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, top, down, 20, 20, 12)};
+    s.protect = {{7, quad(0, 20, 20), 1.2}};
+    Domain d(pm, s);
+    CellSpec cs;
+    cs.algorithm = Algorithm::Uniform;
+    cs.cell_max_mm = 8;
+    const Layout l = lay_cells(d, cs);
+    int behind = 0, open = 0, odd = 0;
+    for (const Cell& c : l.cells) {
+      const Vec3 at = cell_centre(l, c);
+      if (at.x < 14.0) {          // well under the skin
+        ++behind;
+        if (std::fabs(c.size - 5.4) > 1e-5 || c.lo[2] < 1.2 - 1e-5) ++odd;
+      } else if (at.x > 26.0) {   // well clear of it
+        ++open;
+        if (std::fabs(c.size - 6.0) > 1e-5 || (std::fabs(c.lo[2]) > 1e-5 && std::fabs(c.lo[2] - 6.0) > 1e-5)) ++odd;
+      }
+    }
+    CHECK(behind > 0 && open > 0);
+    CHECK(odd == 0);
+    // Where the two walls meet, each wall's cut cells reach over the line as whole cubes;
+    // what each truly holds does not overlap, and nothing is left bare.
+    CHECK(badly_covered(d, l, {0, 0, 0}, {40, 40, 20}, 1.7) == 0);
+    CHECK(badly_covered(d, l, {17, 0, 0}, {23, 40, 20}, 0.31) == 0);
+    int cubes_overlap = 0;
+    for (double z = 12.3; z < 18.0; z += 1.1)
+      if (cells_holding(l, {19.07, 20.3, z}, 1) > 1) ++cubes_overlap;
+    CHECK(cubes_overlap > 0);
+  }
+  {  // A 6 mm plate, lattice through it, both faces protected 1 mm: one 4 mm cell between.
+    PartMeasure plate(weld_mesh(box(40, 40, 6)));
+    TriangleMesh both = quad(0, 40, 6);
+    const TriangleMesh under = quad(0, 40, 0);
+    for (const Vec3& v : under.vertices) both.vertices.push_back(v);
+    both.triangles.push_back({4, 5, 6});
+    both.triangles.push_back({4, 6, 7});
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, Vec3{20, 20, 6}, down, 20, 20, 8)};
+    s.protect = {{7, both, 1.0}};
+    Domain d(plate, s);
+    CellSpec cs;
+    cs.algorithm = Algorithm::Uniform;
+    cs.cell_max_mm = 8;
+    const Layout l = lay_cells(d, cs);
+    CHECK(!l.cells.empty());
+    CHECK(l.solid.empty());
+    int odd = 0;
+    for (const Cell& c : l.cells)
+      if (std::fabs(c.size - 4.0) > 1e-5 || std::fabs(c.lo[2] - 1.0) > 1e-5) ++odd;
+    CHECK(odd == 0);
+    CHECK(badly_covered(d, l, {0, 0, 0}, {40, 40, 6}, 1.7) == 0);
+    // D8 reads the room between the skins, not the plate: 4 mm holds no 5 mm wall.
+    s.min_wall_mm = 5.0;
+    Domain thin(plate, s);
+    CHECK((thin.probe().where({20, 20, 3}) == Where{Why::WallTooThin, 1}));
+    s.min_wall_mm = 3.9;
+    Domain wide(plate, s);
+    CHECK((wide.probe().where({20, 20, 3}) == Where{Why::Lattice, 1}));
+  }
+}
+
+// G11's two guards, each on a part that tempts it: a wall too thin for an open cell,
+// (a) far from the outline with the band on, (b) with no band at all.
+static void test_finer_cells_stay_in_the_band() {
+  {  // (a) Behind the y = 0 face: 12 mm of material for x < 30, 2 mm for x > 30. A 2 mm
+     // cell is below the open look's floor (2.37 mm on a 0.45 mm line).
+    PartMeasure pm(weld_mesh(prism({{0, 0}, {60, 0}, {60, 2}, {30, 2}, {30, 12}, {0, 12}}, 0, 40)));
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, {30, 0, 20}, {0, 1, 0}, 30, 30, 12)};   // covers the whole face
+    Domain d(pm, s);
+    const Region& region = d.spec().regions[0];
+    const double band = 4.0;
+    for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
+      CellSpec cs;
+      cs.algorithm = algo;
+      cs.grade_to_shape = true;
+      cs.band_mm = band;
+      cs.band_fine_cells = true;
+      const Layout l = lay_cells(d, cs);
+      int in_band = 0, outside = 0;
+      for (const Cell& c : l.cells) {
+        if (c.size >= l.floor_cell_mm - 1e-9) continue;
+        const double e = region_edge_distance(region, cell_centre(l, c));
+        (e - 0.5 * c.size < band ? in_band : outside) += 1;
+      }
+      // The thin wall's rim, inside the band, gets the finer cells. (Stepped. Default Grade
+      // goes below the floor only where the band itself asks for a smaller cell, and this
+      // wall's rim cells stand a whole cell inside the outline: it stays solid there.)
+      if (algo == Algorithm::Stepped) CHECK(in_band > 0);
+      CHECK(outside == 0);     // its middle, 15 mm from the outline, does not
+      auto pr = d.probe();
+      int held = 0;
+      for (const Cell& c : l.cells)
+        if (cell_holds(l, pr, c, {45, 1, 20})) ++held;
+      CHECK(held == 0);        // the middle is solid, as with the switch off (D8)
+    }
+  }
+  {  // (b) No band. A strip 2.6 mm thick and 3 mm wide beside a 12.8 mm wall: the 6.4 mm
+     // cell has no fraction that fits it and prints open, so the strip is solid. A fifth
+     // (1.28 mm) would give a 2.56 mm cell; a fifth does not print open, band or no band.
+    PartMeasure pm(weld_mesh(prism({{0, 0}, {60, 0}, {60, 2.6}, {57, 2.6}, {57, 12.8}, {0, 12.8}}, 0, 8)));
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, {30, 0, 4}, {0, 1, 0}, 30, 30, 12.8)};   // covers the whole face
+    Domain d(pm, s);
+    CellSpec off;
+    off.algorithm = Algorithm::Stepped;
+    CellSpec on = off;
+    on.band_fine_cells = true;
+    const Layout a = lay_cells(d, off), b = lay_cells(d, on);
+    CHECK(!a.cells.empty());
+    CHECK(a.cells == b.cells && a.solid == b.solid);
+    auto pr = d.probe();
+    int held = 0;
+    for (const Cell& c : b.cells)
+      if (cell_holds(b, pr, c, {58.5, 1.3, 4})) ++held;
+    CHECK(held == 0);
+    CHECK((pr.where({58.5, 1.3, 4}) == Where{Why::Lattice, 1}));   // and it was asked for
+  }
+}
+
 static void test_cells_curved_region() {
   int L = -1, square = -1, sideA = -1, sideB = -1;
   const StepModel model = plate_with_L_face(&L, &square, &sideA, &sideB);
@@ -1269,6 +1454,8 @@ static void test_cells_curved_region() {
 }
 
 int main() {
+  test_cells_behind_a_protect_skin();
+  test_finer_cells_stay_in_the_band();
   test_cells_across_the_narrowest_width();
   test_struts();
   test_grade_to_shape();

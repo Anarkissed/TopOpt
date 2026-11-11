@@ -10,47 +10,54 @@
 #include "topopt/stepped_plan.hpp"  // stepped_size_menu, kSteppedPrintsOpenMaxStrutPerCell
 
 namespace topopt::lattice_layout {
-namespace {
 
-// ── THE WALLS UNDER A FLAT REGION (C11, C12, C15; settled 2026-11-10, item 6) ──
-// Under one face the material is not one thickness: behind part of it there may be a
-// slot, a step, another face. Each stretch where the wall (the smaller of the region's
-// depth and the material there) is ONE width is a wall of its own: its cells divide
-// THAT width exactly and are centred on THAT stretch. This is a coarse map of the
-// face, used only to tell the stretches apart; which wall a point belongs to is then
-// decided by the wall's width read at the point itself, so the line between two walls
-// is the true step in the part, not the map's grid.
-struct WallMap {
-  static constexpr double kPitch = 1.0;    // mm between map nodes
-  static constexpr double kBin = 0.05;     // mm: widths this close are one width
-  double u0 = 0, w0 = 0;
-  int nu = 0, nw = 0;
-  std::vector<long> bin;     // per node: the wall's width in bins, -1 = no lattice here
-  std::vector<int> wall;     // per node: index into `walls`, -1 = not in a wall
-  struct Wall {
-    double width = 0, cell = 0;
-    int layers = 0;
-    double lo[2] = {0, 0}, hi[2] = {0, 0};   // its extent on the face
-  };
-  std::vector<Wall> walls;
+long WallMap::bin_of(double width) { return std::lround(width / kBin); }
 
-  static long bin_of(double width) { return std::lround(width / kBin); }
-  // The wall a point at (u, w) with wall width `width` belongs to, or -1.
-  int find(double u, double w, double width) const {
-    if (walls.empty()) return -1;
-    const long b = bin_of(width);
-    const int i = static_cast<int>(std::floor((u - u0) / kPitch));
-    const int j = static_cast<int>(std::floor((w - w0) / kPitch));
-    for (int dj = 0; dj <= 1; ++dj)
-      for (int di = 0; di <= 1; ++di) {
-        const int a = i + di, c = j + dj;
-        if (a < 0 || c < 0 || a >= nu || c >= nw) continue;
-        const std::size_t n = static_cast<std::size_t>(c) * nu + a;
-        if (wall[n] >= 0 && std::labs(bin[n] - b) <= 1) return wall[n];
-      }
-    return -1;
+int WallMap::find(double u, double w, double start, double width) const {
+  if (walls.empty()) return -1;
+  const long b = bin_of(width), sb = bin_of(start);
+  const int i = static_cast<int>(std::floor((u - u0) / kPitch));
+  const int j = static_cast<int>(std::floor((w - w0) / kPitch));
+  for (int dj = 0; dj <= 1; ++dj)
+    for (int di = 0; di <= 1; ++di) {
+      const int a = i + di, c = j + dj;
+      if (a < 0 || c < 0 || a >= nu || c >= nw) continue;
+      const std::size_t n = static_cast<std::size_t>(c) * nu + a;
+      if (wall[n] >= 0 && std::labs(bin[n] - b) <= 1 && std::labs(sbin[n] - sb) <= 1)
+        return wall[n];
+    }
+  return -1;
+}
+
+Reading read_at(const Domain::Probe& probe, const Frame& frame, const WallMap& walls,
+                double a, double b, double c) {
+  Reading r;
+  Domain::Probe::Room room;
+  r.where = probe.where(frame.at(a, b, c), &r.width, walls.flat ? &room : nullptr);
+  if (!r.where.lattice()) return r;
+  // D5, D15: behind a Protect skin the lattice starts at the skin's own depth, and a
+  // skin on the far face ends it: the wall the cells divide is what lies between.
+  if (room.skin_back) r.start = c - room.back;
+  // C12: never more than the region's depth.
+  r.width = std::min(room.skin_on ? c + room.on : r.width, walls.depth) - r.start;
+  if (walls.flat) r.wall = walls.find(a, b, r.start, r.width);
+  return r;
+}
+
+bool cell_holds(const Layout& layout, const Domain::Probe& probe, const Cell& cell, const Vec3& p) {
+  const Frame& f = layout.frames[static_cast<std::size_t>(cell.frame)];
+  const Vec3 rel{p.x - f.origin.x, p.y - f.origin.y, p.z - f.origin.z};
+  double q[3];
+  for (int a = 0; a < 3; ++a) {
+    q[a] = rel.x * f.ax[a].x + rel.y * f.ax[a].y + rel.z * f.ax[a].z;
+    if (q[a] < cell.lo[a] || q[a] >= cell.lo[a] + cell.size) return false;
   }
-};
+  const WallMap& walls = layout.walls[static_cast<std::size_t>(cell.frame)];
+  const Reading r = read_at(probe, f, walls, q[0], q[1], q[2]);
+  return r.where.lattice() && r.where.id == cell.region && (!walls.flat || r.wall == cell.wall);
+}
+
+namespace {
 
 // How closely a wall's width is read, with margin: 10 nanometres on a half-width.
 constexpr double kReadingSlack = 1e-5;   // mm
@@ -62,12 +69,11 @@ struct Pass {
   int region;
   int frame_index;
   Frame frame;
-  double depth_cap;            // a prism's or shell's own depth; the wall is never read deeper (C12)
   std::vector<double> sizes;   // the sizes this region may use, largest first
   std::vector<int> divisors;   // Stepped: the fractions of the base whose unit prints open
   Layout* out;
   RegionCells* tally;
-  const WallMap* walls = nullptr;   // a flat region's walls, if it has any
+  const WallMap* walls = nullptr;   // this frame's walls (flat = false where it has none)
   int wall = -1;                    // the wall this pass lays; -1 = what no wall holds
   const Region* band_region = nullptr;   // a flat region with Grade to shape on
   double base_mm = 0.0;             // this lay's own cell (S_base)
@@ -119,11 +125,10 @@ struct Pass {
   // AND this region owns it (D13: ownership is the Domain's answer at the point, never
   // the order of work) AND, under a flat face, it is in the wall this pass lays.
   bool sample(double a, double b, double c, double* fit) const {
-    double width = 0.0;
-    const Where w = probe->where(frame.at(a, b, c), &width);
-    if (!w.lattice() || w.id != region) return false;
-    width = std::min(width, depth_cap);
-    if (walls && walls->find(a, b, width) != wall) return false;
+    const Reading r = read_at(*probe, frame, *walls, a, b, c);
+    if (!r.where.lattice() || r.where.id != region) return false;
+    if (walls->flat && r.wall != wall) return false;
+    const double width = r.width;
     // C2, C12: never wider than the wall; the wall is the material at this spot along the
     // region's own direction, and never more than the region's depth.
     // C3-C5 (reviewer's ruling 2026-11-11): the cells a wall must hold are counted across
@@ -131,12 +136,37 @@ struct Pass {
     // the face and two deep is one across, not two. (Twice the depth below the surface is
     // a ball that fits, so nothing through the point is narrower than that.)
     double narrow = width;
-    if (walls) {
+    if (walls->flat) {
       const Vec3 p = frame.at(a, b, c);
       if (2.0 * probe->part().depth(p) < width) narrow = std::min(width, probe->part().thickness(p));
     }
     *fit = std::min(width, narrow / spec->min_cells_across);
     return true;
+  }
+
+  // D14: a strip of this pass's lattice thinner than the spacing of a cube's own sample
+  // points slips between them (a ledge under a millimetre wide at the foot of a side
+  // wall; the seam between a protected and an unprotected part of a face). The face's
+  // map saw it: read again at the map's own nodes inside the cube's footprint.
+  bool look_at_nodes(const double lo[3], double s, double* fit) const {
+    if (!walls->flat || walls->nu == 0) return false;
+    const double P = WallMap::kPitch;
+    const int i0 = std::max(0, static_cast<int>(std::ceil((lo[0] - walls->u0) / P - 1e-9)));
+    const int j0 = std::max(0, static_cast<int>(std::ceil((lo[1] - walls->w0) / P - 1e-9)));
+    bool seen = false;
+    for (int j = j0; j < walls->nw && walls->w0 + j * P < lo[1] + s; ++j)
+      for (int i = i0; i < walls->nu && walls->u0 + i * P < lo[0] + s; ++i) {
+        const std::size_t n = static_cast<std::size_t>(j) * walls->nu + i;
+        if (walls->bin[n] < 0 || walls->wall[n] != wall) continue;
+        for (int c = 0; c < 3; ++c) {
+          double f = 0.0;
+          if (!sample(walls->u0 + i * P, walls->w0 + j * P, lo[2] + s * (1 + 2 * c) / 6.0, &f))
+            continue;
+          seen = true;
+          *fit = std::min(*fit, f);
+        }
+      }
+    return seen;
   }
 
   void emit(const double lo[3], double s, bool cut, bool as_cell) {
@@ -146,6 +176,7 @@ struct Pass {
     cell.lo[0] = lo[0]; cell.lo[1] = lo[1]; cell.lo[2] = lo[2];
     cell.size = s;
     cell.cut = cut;
+    cell.wall = wall;
     cell.own = base_mm;
     if (as_cell) {
       cell.band = band_t(lo, s);
@@ -174,7 +205,7 @@ struct Pass {
           ++inside;
           fits = std::min(fits, fit);
         }
-    if (inside == 0) return;   // nothing of this pass here
+    if (inside == 0 && !look_at_nodes(lo, s, &fits)) return;   // nothing of this pass here
     const bool cut = inside < 27;   // D3: a whole cell, cut by the edge
     // A width is read to about a micron (PartMeasure::reach), so a cell that fits its
     // wall exactly must not be refused over the last digits of the reading.
@@ -252,6 +283,8 @@ struct Pass {
                   in[u] = 1;
                   fit[u] = f;
                 }
+            const double at[3] = {lo[0] + t * i, lo[1] + t * j, lo[2] + t * k};
+            if (!in[u] && look_at_nodes(at, t, &fit[u])) in[u] = 1;
           }
       Packed p;
       p.n = n;
@@ -453,9 +486,10 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
     pass.region = region;
     pass.frame_index = static_cast<int>(out.frames.size());
     pass.frame = frame;
-    pass.depth_cap = depth_cap;
     pass.out = &out;
     out.frames.push_back(frame);
+    out.walls.emplace_back();
+    out.walls.back().depth = depth_cap;
     RegionCells tally;
     tally.region = region;
     tally.frame = pass.frame_index;
@@ -467,6 +501,8 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
                  const double lo[3], const double hi[3], bool depth_from_zero) {
     Pass pass = open(region, frame, depth_cap, base);
     pass.tally = &out.regions.back();
+    const WallMap none = out.walls.back();   // not a flat region: no walls
+    pass.walls = &none;
     lay(pass, base, lo, hi, depth_from_zero);
   };
   // C15, C2, C3-C5, C1: the cell that divides a wall of `width` exactly, never wider than
@@ -514,19 +550,48 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
     // The walls under this face: read the wall's width on a coarse map of the face,
     // just under it, and gather the stretches of one width.
     WallMap map;
+    map.flat = true;
+    map.depth = g.depth;
     map.u0 = lo[0]; map.w0 = lo[1];
     map.nu = static_cast<int>(std::ceil((hi[0] - lo[0]) / WallMap::kPitch)) + 1;
     map.nw = static_cast<int>(std::ceil((hi[1] - lo[1]) / WallMap::kPitch)) + 1;
     map.bin.assign(static_cast<std::size_t>(map.nu) * map.nw, -1);
+    map.sbin.assign(map.bin.size(), 0);
     map.wall.assign(map.bin.size(), -1);
     const double under = std::min(0.02, 0.25 * g.depth);
+    // The lattice's column under the face at (u, w): where it starts below the face and
+    // how wide it is. Read just under the face, or just behind a Protect skin on it (D5).
+    auto column = [&](double u, double w, double* start, double* width) {
+      double z = under;
+      for (int hop = 0; hop < 3; ++hop) {
+        double wall = 0.0;
+        Domain::Probe::Room room;
+        const Where h = probe.where(f.at(u, w, z), &wall, &room);
+        if (h.lattice() && h.id == r.id) {
+          *start = room.skin_back ? z - room.back : 0.0;
+          *width = std::min(room.skin_on ? z + room.on : wall, g.depth) - *start;
+          return true;
+        }
+        if (h.why != Why::ProtectSkin) return false;
+        // Straight in through the skin, by its own gap: such a step cannot pass its inner side.
+        for (int it = 0; it < 200; ++it) {
+          const double gap = probe.skin_gap(f.at(u, w, z));
+          if (gap > 0.0) break;
+          z += std::max(-gap, 1e-3);
+          if (z >= g.depth) return false;
+        }
+        z += under;
+        if (z >= g.depth) return false;
+      }
+      return false;
+    };
     for (int j = 0; j < map.nw; ++j)
       for (int i = 0; i < map.nu; ++i) {
-        double width = 0.0;
-        const Where w = probe.where(
-            f.at(map.u0 + i * WallMap::kPitch, map.w0 + j * WallMap::kPitch, under), &width);
-        if (w.lattice() && w.id == r.id)
-          map.bin[static_cast<std::size_t>(j) * map.nu + i] = WallMap::bin_of(std::min(width, g.depth));
+        double start = 0.0, width = 0.0;
+        if (!column(map.u0 + i * WallMap::kPitch, map.w0 + j * WallMap::kPitch, &start, &width))
+          continue;
+        map.bin[static_cast<std::size_t>(j) * map.nu + i] = WallMap::bin_of(width);
+        map.sbin[static_cast<std::size_t>(j) * map.nu + i] = WallMap::bin_of(start);
       }
     std::vector<int> stack;
     for (std::size_t n0 = 0; n0 < map.bin.size(); ++n0) {
@@ -544,7 +609,8 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
         for (const auto& q : nb) {
           if (q[0] < 0 || q[1] < 0 || q[0] >= map.nu || q[1] >= map.nw) continue;
           const std::size_t m = static_cast<std::size_t>(q[1]) * map.nu + q[0];
-          if (map.wall[m] != -1 || map.bin[m] != map.bin[n0]) continue;
+          if (map.wall[m] != -1 || map.bin[m] != map.bin[n0] || map.sbin[m] != map.sbin[n0])
+            continue;
           map.wall[m] = -2;
           stack.push_back(static_cast<int>(m));
         }
@@ -553,11 +619,12 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
       wall.width = map.bin[n0] * WallMap::kBin;
       // The exact width, not the bin's: read it again at the stretch's first node.
       {
-        double width = 0.0;
-        probe.where(f.at(map.u0 + (n0 % map.nu) * WallMap::kPitch,
-                         map.w0 + (n0 / map.nu) * WallMap::kPitch, under), &width);
+        double start = 0.0, width = 0.0;
+        column(map.u0 + (n0 % map.nu) * WallMap::kPitch,
+               map.w0 + (n0 / map.nu) * WallMap::kPitch, &start, &width);
         // ... to the precision it is read at: a 12 mm wall is 12, not 11.9999995.
-        wall.width = std::round(std::min(width, g.depth) * 1e5) / 1e5;
+        wall.start = std::round(start * 1e5) / 1e5;
+        wall.width = std::round((start + width) * 1e5) / 1e5 - wall.start;
       }
       wall.cell = divide(wall.width, &wall.layers);
       // A wall is a stretch wide enough for its own cells (two by two of them) whose
@@ -576,12 +643,12 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
         // The map's nodes stop short of the stretch's true edge by up to one step. Find
         // the edge itself, outward from the outermost nodes, so the cells are centred on
         // the real stretch (and a symmetric one gets a symmetric layout, exactly).
-        const long want = map.bin[n0];
+        const long want = map.bin[n0], want_start = map.sbin[n0];
         auto in_wall = [&](double u, double w) {
-          double width = 0.0;
-          const Where h = probe.where(f.at(u, w, under), &width);
-          return h.lattice() && h.id == r.id &&
-                 std::labs(WallMap::bin_of(std::min(width, g.depth)) - want) <= 1;
+          double start = 0.0, width = 0.0;
+          return column(u, w, &start, &width) &&
+                 std::labs(WallMap::bin_of(width) - want) <= 1 &&
+                 std::labs(WallMap::bin_of(start) - want_start) <= 1;
         };
         double edge[2][2] = {{wall.lo[0], wall.hi[0]}, {wall.lo[1], wall.hi[1]}};
         for (std::size_t n : nodes) {
@@ -624,12 +691,13 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
       const WallMap::Wall& wall = map.walls[i];
       pass.wall = static_cast<int>(i);
       // Centred on the wall's own stretch (C9, per wall).
-      const double wlo3[3] = {wall.lo[0], wall.lo[1], 0.0};
-      const double whi3[3] = {wall.hi[0], wall.hi[1], wall.width};
+      const double wlo3[3] = {wall.lo[0], wall.lo[1], wall.start};
+      const double whi3[3] = {wall.hi[0], wall.hi[1], wall.start + wall.width};
       lay(pass, wall.cell, wlo3, whi3, true);
     }
     pass.wall = -1;   // what no wall holds: cell by cell from the region's own base
     lay(pass, base, lo, hi, true);
+    out.walls[static_cast<std::size_t>(pass.frame_index)] = std::move(map);
   }
   if (ds.start == Start::AllLattice) run(0, world, 1e300, world_base(), wlo, whi, false);
   return out;

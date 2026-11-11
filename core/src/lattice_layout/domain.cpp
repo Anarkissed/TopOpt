@@ -69,7 +69,41 @@ Domain::Probe::Probe(const Domain& d) : d_(&d), part_(d.measure_->probe()) {
   for (const Region& r : d.spec_.regions) shells_.emplace_back(r.shell);
 }
 
-Where Domain::Probe::where(const Vec3& p, double* wall_mm) const {
+double Domain::Probe::skin_gap(const Vec3& p) const {
+  double g = std::numeric_limits<double>::infinity();
+  for (std::size_t i = 0; i < skins_.size(); ++i)
+    g = std::min(g, skins_[i].unsigned_distance(p) - d_->protect_depth_mm(d_->spec_.protect[i]));
+  return g;
+}
+
+// Walk by the gap itself: a step of that length cannot reach a skin, and a skin met
+// square-on is landed on exactly by the first step. Running along one a hair away
+// would crawl, so a step is never under 0.05 mm; a start it then oversteps is found
+// again by halving (as PartMeasure::reach does at the part's surface).
+double Domain::Probe::skin_ahead(const Vec3& p, const Vec3& dir, double limit) const {
+  if (skins_.empty() || !(limit > 0.0)) return -1.0;
+  const double kMinStep = 0.05, kOn = 1e-7;   // mm
+  auto gap_at = [&](double t) {
+    return skin_gap(Vec3{p.x + dir.x * t, p.y + dir.y * t, p.z + dir.z * t});
+  };
+  double t = 0.0, g = gap_at(0.0);
+  while (true) {
+    if (g <= kOn) return t;
+    if (t >= limit) return -1.0;
+    const double prev = t;
+    t = std::min(limit, t + std::max(g, kMinStep));
+    g = gap_at(t);
+    if (g >= -kOn) continue;
+    double out = prev, in = t;   // clear of the skin at `out`, inside it at `in`
+    for (int k = 0; k < 30 && in - out > 1e-7; ++k) {
+      const double m = 0.5 * (in + out);
+      if (gap_at(m) > 0.0) out = m; else in = m;
+    }
+    return 0.5 * (in + out);
+  }
+}
+
+Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
   const DomainSpec& spec = d_->spec_;
   // D2: a prism only turns existing solid into lattice.
   // A point ON the surface (within a nanometre) is not inside: a width measured from it
@@ -136,11 +170,32 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm) const {
   const int id = owner ? owner->id : 0;                                       // D4
 
   // D8: lattice was asked for here; can the wall hold it?
-  if (spec.min_wall_mm > 0.0 || wall_mm) {
-    const double wall = owner && !owner->is_shell() ? part_.wall_width(p, owner->prism.normal)
-                                                     : part_.thickness(p);
+  if (spec.min_wall_mm > 0.0 || wall_mm || room) {
+    const bool flat = owner && !owner->is_shell();
+    double wall = 0.0, on_m = 0.0, back_m = 0.0;
+    if (flat) {   // the wall's width along the region's direction (PartMeasure::wall_width)
+      const Vec3& n = owner->prism.normal;
+      on_m = part_.reach(p, n);
+      back_m = part_.reach(p, Vec3{-n.x, -n.y, -n.z});
+      wall = on_m + back_m;
+    } else {
+      wall = part_.thickness(p);
+    }
     if (wall_mm) *wall_mm = wall;
-    if (spec.min_wall_mm > 0.0 && wall < spec.min_wall_mm) return {Why::WallTooThin, id};
+    double holds_mm = wall;   // the width lattice can use: the wall less its Protect skins
+    if (flat && !skins_.empty()) {
+      // Only within the region's own slab: `best` is how far `p` is below its face.
+      const Vec3& n = owner->prism.normal;
+      const Vec3 toward{-n.x, -n.y, -n.z};
+      Room r;
+      r.back = skin_ahead(p, toward, std::min(back_m, best + 1e-3));
+      r.on = skin_ahead(p, n, std::min(on_m, owner->prism.depth - best + 1e-3));
+      r.skin_back = r.back >= 0.0;
+      r.skin_on = r.on >= 0.0;
+      holds_mm = (r.skin_back ? r.back : back_m) + (r.skin_on ? r.on : on_m);
+      if (room) *room = r;
+    }
+    if (spec.min_wall_mm > 0.0 && holds_mm < spec.min_wall_mm) return {Why::WallTooThin, id};
   }
   return {Why::Lattice, id};
 }

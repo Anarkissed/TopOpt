@@ -22,9 +22,10 @@ Kind of test: **L** reads the layout, **F** reads the file, **A** is an app test
 |---|---|---|
 | D1 | L | The layout with no stress result and the layout with one have the same set of latticed walls. |
 | D2 | F | Every point of the file is inside the part's mesh, within 0.01 mm. Volume of the file ≤ volume of the part. |
-| D3 | L | At an edge with Grade to shape off, every cut cell has the size of its uncut neighbour; no cell position inside the region is empty. |
+| D3 | L | At an edge with Grade to shape off, every cut cell has the size of its uncut neighbour; no cell position inside the region is empty. A cut cell's shape is exact: the part of its cube that is lattice of its own region and its own wall (`cell_holds`). Where two walls meet off a cell boundary their cut cells overlap as cubes and never as that shape: every lattice point is held by exactly one cell. |
 | D4 | L | With All lattice, one layout holds every wall; no cell is listed twice and no two cells overlap by more than 1e-6 mm. |
 | D5 | F | Along a Protect skin face, solid thickness measured inward from the face is the stated depth ± 0.01 mm at every sample (1 mm spacing). At 0 mm it is 2 × bead ± 0.01. The first strut starts at that depth. |
+| D5 | L | A 12 mm slab under a protected face, skin 1.2 mm: the first cell starts 1.2 mm below the face to 1e-5, the last ends at 12, every cell is (12 − 1.2) ÷ 2, nothing is solid, in Uniform, Default Grade and Stepped. At 0 mm the start is two line widths. A 6 mm plate protected 1 mm on both faces: one 4 mm cell between the skins; the wall rule (D8) reads those 4 mm, not the plate's 6. A skin on half a face: two walls, each divided on its own, and the seam between them left bare by no cell. |
 | D6 | L | In the overlap of two prisms every cell belongs to the region with the nearer face; same plane, the deeper; then the earlier. Overlap of Lattice and No lattice holds no cell. |
 | D7 | F | Inside every pocket of the part the file has no material: zero volume within the pocket's mesh, shrunk by 0.01 mm. |
 | D8 | F | A wall refused lattice is solid over its whole width: no void inside it larger than 0.01 mm. |
@@ -33,8 +34,8 @@ Kind of test: **L** reads the layout, **F** reads the file, **A** is an app test
 | D11 | L | Expand of +e and −e moves the region's outline by e ± 0.01 mm in the face's plane; the region's depth is unchanged to 1e-6. Expand 0 gives the same layout as no Expand, byte for byte. |
 | D12 | F | Outside every Lattice region the file equals the part: volume difference under 0.01 mm³ per cm³. |
 | D13 | L | Reversing the region order gives the same layout, byte for byte. |
-| D14 | L, A | Space in a region covered by no cell is listed as solid in the layout, and the preview draws it solid. |
-| D15 | L | A face with both Protect skin and Lattice has one region with one depth. |
+| D14 | L, A | Space in a region covered by no cell is listed as solid in the layout, and the preview draws it solid. Whoever draws or builds from the layout applies the rule itself: lattice space that `cell_holds` is true for in no cell is solid. The list is what the laying found, to within its own sample points and the face map's 1 mm nodes: a strip narrower than that can be unlisted. Measured on the stand (0.25 mm grid, 2026-11-11): unlisted space 0.03% of the front face's lattice (was 0.36%), 0.18% of the back face's. |
+| D15 | L | A face with both Protect skin and Lattice has one region with one depth: the skin's depth is part of the region's, and the cells divide what is left (the D5 slab above ends at 12, not 13.2). |
 | D16 | F | Zero volume of lattice inside a Keep clear. Where the part's own solid enters a Keep clear, the solid is present. |
 | D17 | L | No cell centre lies in material a design box added; that material is solid in the file. |
 | D18 | L | Two launches, same part and settings: the layout's bytes are identical. |
@@ -100,7 +101,7 @@ Kind of test: **L** reads the layout, **F** reads the file, **A** is an app test
 | G8 | L | In the band no strut is thinner than the region's own strut (or the quilt of its cell, if that is less), strut ÷ cell is higher than outside the band in every band cell, never above 0.354, and each strut is a whole number of lines or the quilt. A typed width (R11) holds in the band too. |
 | G9 | L | An outline with an edge facing air: the cells still shrink toward that edge; the rim is absent on it (S2). |
 | G10 | L | Grade to shape on, at Band 12 and at Band 2 (too narrow to hold a large cell off the outline by itself): no cell larger than the finest crosses the outline; the finest may; nothing goes solid and every place is still in a cell. |
-| G11 | L | (Switch off by default, awaiting his pick.) On a 0.45 mm line with the switch on: the band holds cells below the open look's floor and none that one line would close; none of them lies outside the band; nothing goes solid; every strut is at least one line and at most the quilt of its cell. With no band the switch moves no cell. NOT YET CHECKED BY A BREAK: the two guards that keep such cells inside the band (the test part has no wall that fails outside a band). |
+| G11 | L | (Switch off by default, awaiting his pick.) On a 0.45 mm line with the switch on: the band holds cells below the open look's floor and none that one line would close; none of them lies outside the band; nothing goes solid; every strut is at least one line and at most the quilt of its cell. With no band the switch moves no cell. The guards that keep such cells inside the band each have a part that tempts them: a 2 mm wall 15 mm from the outline stays solid with the band on (Default Grade and Stepped), and a 2.6 mm strip beside a 12.8 mm wall is laid the same with the switch on or off when there is no band. Stepped fills a thin wall's rim inside the band with the finer cells; Default Grade does so only where the band itself asks for a smaller cell. |
 
 ## 5. Rim, skin and cut ends
 
