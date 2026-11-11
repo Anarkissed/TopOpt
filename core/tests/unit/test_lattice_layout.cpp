@@ -1449,24 +1449,21 @@ static void test_cells_behind_a_pocket() {
     NEAR(r.start, 0.0, 0.0);
     NEAR(r.width, 13.0, 1e-6);
     CHECK(!reading_at(pr, l, 0, {25, 6, 20}).where.lattice());   // the pocket itself
-    // No cell behind the pocket is wider than the 4 mm it stands in (C2).
-    double widest = 0.0;
-    int held = 0;
+    // The wall behind the pocket is a wall of its own (C15): one layer of 4 mm cells
+    // that start where its material starts, 9 mm below the face. None is wider (C2).
+    int held = 0, other = 0;
     for (double x = 2; x < 48; x += 3.1)
       for (double y = 9.2; y < 12.9; y += 0.45)
         for (double z = 3; z < 37; z += 4.3)
           for (const Cell& c : l.cells)
             if (cell_holds(l, pr, c, {x, y, z})) {
               ++held;
-              widest = std::max(widest, c.size);
+              if (std::fabs(c.size - 4.0) > 1e-5 || std::fabs(c.lo[2] - 9.0) > 1e-5) ++other;
             }
     CHECK(held > 500);
-    CHECK(widest <= 4.0 + 1e-5);
-    // Covered either side of the pocket's end. (The half millimetre of the behind-the-
-    // pocket wall that reaches into the next base cell at x = 49.5 to 50 is in no list:
-    // D14's known limit, a strip thinner than the layout looks. Solid by the rule.)
-    CHECK(badly_covered(d, l, {1, 0, 1}, {49, 13, 39}, 0.97) == 0);
-    CHECK(badly_covered(d, l, {51, 0, 1}, {59, 13, 39}, 0.97) == 0);
+    CHECK(other == 0);
+    CHECK(l.solid.empty());
+    CHECK(badly_covered(d, l, {1, 0, 1}, {59, 13, 39}, 0.97) == 0);   // the pocket's end too
   }
   // Two walls in one column, one base cell deep: a 2 mm wall too thin for any cell, a
   // 2 mm pocket, then solid. The thin wall goes solid; the wall behind it is read on its
@@ -1488,6 +1485,71 @@ static void test_cells_behind_a_pocket() {
     as_solid.frames = l.frames;
     as_solid.cells = l.solid;
     CHECK(cells_holding(as_solid, {25, 1, 20}, 1) == 1);   // listed solid
+  }
+  // D14: a fin 0.6 mm wide hanging into the pocket, its tip 5.6 mm below the face. It is
+  // too thin for any cell and lies between the points a base cell is read at; the face's
+  // map saw it under one row of nodes, and it is read again there, at its own depths.
+  PartMeasure fin(weld_mesh(prism_any({{0, 0}, {60, 0}, {60, 20}, {0, 20}, {0, 16}, {20.7, 16}, {20.7, 5.6},
+                                       {21.3, 5.6}, {21.3, 16}, {50, 16}, {50, 4}, {0, 4}}, 0, 40)));
+  Domain d3(fin, s);
+  for (Algorithm algo : {Algorithm::Stepped, Algorithm::DefaultGrade}) {
+    CellSpec cs;
+    cs.algorithm = algo;
+    const Layout l = lay_cells(d3, cs);
+    Layout as_solid;
+    as_solid.frames = l.frames;
+    as_solid.cells = l.solid;
+    for (double y : {6.0, 10.0, 12.5}) {
+      CHECK((d3.probe().where({21, y, 20}) == Where{Why::Lattice, 1}));
+      CHECK(cells_holding(l, {21, y, 20}, 1) == 0);
+      CHECK(cells_holding(as_solid, {21, y, 20}, 1) >= 1);   // listed solid, tip included
+    }
+    CHECK(cells_holding(l, {30, 2, 20}, 1) == 1);            // the 4 mm wall in front: cells
+  }
+}
+
+// P2: what a layout reads under a face is kept with the domain and reused by the next
+// layout of it. A layout must not depend on which layouts came before it.
+static void test_kept_readings() {
+  // The stepped wall of C12 (12 mm beside 6 mm) with lattice from its flat face, and a
+  // second region on a second part of the face; cell sizes that make different walls.
+  PartMeasure pm(weld_mesh(prism({{0, 0}, {60, 0}, {60, 6}, {30, 6}, {30, 12}, {0, 12}}, 0, 40)));
+  DomainSpec s;
+  s.regions = {face_region(1, Role::Lattice, {15, 0, 20}, {0, 1, 0}, 20, 14, 12),
+               face_region(2, Role::Lattice, {45, 0, 20}, {0, 1, 0}, 20, 14, 6)};
+  auto spec = [](Algorithm algo, double cell, int across) {
+    CellSpec cs;
+    cs.algorithm = algo;
+    cs.cell_max_mm = cell;
+    cs.min_cells_across = across;
+    return cs;
+  };
+  const CellSpec specs[] = {spec(Algorithm::Stepped, 8, 1), spec(Algorithm::DefaultGrade, 3, 1),
+                            spec(Algorithm::Stepped, 4, 2), spec(Algorithm::Uniform, 12, 1)};
+  Domain shared(pm, s);
+  for (int round = 0; round < 2; ++round)
+    for (const CellSpec& cs : specs) {
+      const Layout again = lay_cells(shared, cs);   // after whatever was laid before
+      Domain fresh(pm, s);
+      const Layout first = lay_cells(fresh, cs);     // nothing kept yet
+      CHECK(again.cells == first.cells);
+      CHECK(again.solid == first.solid);
+      CHECK(!first.cells.empty());
+      CHECK((lay_cells(shared, cs, 1).cells == first.cells));
+    }
+  // Each region keeps its own: region 2 alone lays the cells it lays beside region 1.
+  DomainSpec only2;
+  only2.regions = {s.regions[1]};
+  Domain alone(pm, only2);
+  const Layout both = lay_cells(shared, specs[0]), one = lay_cells(alone, specs[0]);
+  std::vector<Cell> of2;
+  for (const Cell& c : both.cells)
+    if (c.region == 2) of2.push_back(c);
+  CHECK(!of2.empty() && of2.size() == one.cells.size());
+  for (std::size_t i = 0; i < of2.size() && i < one.cells.size(); ++i) {
+    CHECK(of2[i].size == one.cells[i].size);
+    CHECK(of2[i].wall == one.cells[i].wall && of2[i].wall >= 0);   // laid as its own wall
+    for (int a = 0; a < 3; ++a) NEAR(of2[i].lo[a], one.cells[i].lo[a], 1e-9);
   }
 }
 
@@ -1732,6 +1794,7 @@ int main() {
   test_cells_across_the_narrowest_width();
   test_cells_behind_a_pocket();
   test_grooves_do_not_narrow_a_wall();
+  test_kept_readings();
   test_struts();
   test_grade_to_shape();
   test_cells_prism();

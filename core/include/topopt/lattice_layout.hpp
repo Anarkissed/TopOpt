@@ -20,7 +20,9 @@
 
 #include <array>
 #include <cstdint>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 #include "topopt/clearance.hpp"
@@ -295,6 +297,26 @@ class Domain {
   DomainSpec spec_;
   std::vector<Near> near_skin_;    // one per Protect skin, within its depth
   std::vector<Near> near_shell_;   // one per region (empty for a prism), within its depth
+
+ public:
+  // Readings a layout takes of this domain that do not depend on any cell setting (what
+  // lies under each flat region's face). The first layout makes them; every later layout
+  // of the same domain reuses them, so dragging a cell-size or band slider does not read
+  // the part again (P2). `make` runs at most once per id. Safe from any thread.
+  template <class T, class Make>
+  std::shared_ptr<const T> kept(int id, Make make) const {
+    std::lock_guard<std::mutex> lock(kept_->mutex);
+    std::shared_ptr<const void>& slot = kept_->by_id[id];
+    if (!slot) slot = make();
+    return std::static_pointer_cast<const T>(slot);
+  }
+
+ private:
+  struct Kept {
+    std::mutex mutex;
+    std::map<int, std::shared_ptr<const void>> by_id;
+  };
+  std::shared_ptr<Kept> kept_ = std::make_shared<Kept>();
 };
 
 // ── CELLS (stage C) ───────────────────────────────────────────────────────────
@@ -386,11 +408,16 @@ struct WallMap {
   double depth = 0.0;        // the region's own depth; a wall is never read deeper (C12)
   double u0 = 0, w0 = 0;
   int nu = 0, nw = 0;
-  std::vector<long> bin;     // per node: the wall's width in bins, -1 = no lattice here
-  std::vector<long> sbin;    // per node: where the lattice starts below the face, in bins
-  std::vector<int> wall;     // per node: index into `walls`, -1 = not in a wall
+  // Under one node there can be more than one stretch of material within the region's
+  // depth (a wall, a pocket, the wall behind it): up to kDeep are kept, the nearest the
+  // face first. The three lists below hold kDeep entries per node.
+  static constexpr int kDeep = 3;
+  std::vector<long> bin;     // per stretch: its width in bins, -1 = none
+  std::vector<long> sbin;    // per stretch: where it starts below the face, in bins
+  std::vector<int> wall;     // per stretch: index into `walls`, -1 = not in a wall
   struct Wall {
-    // `start`: where its lattice begins below the face. 0, or a Protect skin's depth (D5).
+    // `start`: where its lattice begins below the face. 0, a Protect skin's depth (D5),
+    // or where the material begins behind a pocket.
     double start = 0, width = 0, cell = 0;
     int layers = 0;
     double lo[2] = {0, 0}, hi[2] = {0, 0};   // its extent on the face

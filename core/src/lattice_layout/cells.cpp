@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cmath>
 #include <memory>
+#include <mutex>
 #include <thread>
 
 #include "topopt/stepped_plan.hpp"  // stepped_size_menu, kSteppedPrintsOpenMaxStrutPerCell
@@ -23,9 +24,11 @@ int WallMap::find(double u, double w, double start, double width) const {
     for (int di = 0; di <= 1; ++di) {
       const int a = i + di, c = j + dj;
       if (a < 0 || c < 0 || a >= nu || c >= nw) continue;
-      const std::size_t n = static_cast<std::size_t>(c) * nu + a;
-      if (wall[n] >= 0 && std::labs(bin[n] - b) <= 1 && std::labs(sbin[n] - sb) <= 1)
-        return wall[n];
+      for (int k = 0; k < kDeep; ++k) {
+        const std::size_t n = (static_cast<std::size_t>(c) * nu + a) * kDeep + k;
+        if (wall[n] >= 0 && std::labs(bin[n] - b) <= 1 && std::labs(sbin[n] - sb) <= 1)
+          return wall[n];
+      }
     }
   return -1;
 }
@@ -190,17 +193,26 @@ struct Pass {
     const int j0 = std::max(0, static_cast<int>(std::ceil((lo[1] - walls->w0) / P - 1e-9)));
     bool seen = false;
     for (int j = j0; j < walls->nw && walls->w0 + j * P < lo[1] + s; ++j)
-      for (int i = i0; i < walls->nu && walls->u0 + i * P < lo[0] + s; ++i) {
-        const std::size_t n = static_cast<std::size_t>(j) * walls->nu + i;
-        if (walls->bin[n] < 0 || walls->wall[n] != wall) continue;
-        for (int c = 0; c < 3; ++c) {
-          double f = 0.0;
-          if (!sample(walls->u0 + i * P, walls->w0 + j * P, lo[2] + s * (1 + 2 * c) / 6.0, &f))
-            continue;
-          seen = true;
-          *fit = std::min(*fit, f);
+      for (int i = i0; i < walls->nu && walls->u0 + i * P < lo[0] + s; ++i)
+        for (int k = 0; k < WallMap::kDeep; ++k) {
+          const std::size_t n = (static_cast<std::size_t>(j) * walls->nu + i) * WallMap::kDeep + k;
+          if (walls->bin[n] < 0 || walls->wall[n] != wall) continue;
+          // The part of the cube's depth this stretch runs through (all of it, for a
+          // stretch that spans the cube).
+          const double top = walls->sbin[n] * WallMap::kBin;
+          const double end = top + walls->bin[n] * WallMap::kBin;
+          const bool spans = top - WallMap::kBin <= lo[2] && end + WallMap::kBin >= lo[2] + s;
+          const double d0 = spans ? lo[2] : std::max(lo[2], top);
+          const double d1 = spans ? lo[2] + s : std::min(lo[2] + s, end);
+          if (d1 - d0 < 1e-3) continue;
+          for (int c = 0; c < 3; ++c) {
+            double f = 0.0;
+            const double at = spans ? lo[2] + s * (1 + 2 * c) / 6.0 : d0 + (d1 - d0) * (1 + 2 * c) / 6.0;
+            if (!sample(walls->u0 + i * P, walls->w0 + j * P, at, &f)) continue;
+            seen = true;
+            *fit = std::min(*fit, f);
+          }
         }
-      }
     return seen;
   }
 
@@ -415,6 +427,198 @@ void centred(double lo, double hi, double s, double* start, int* count) {
   *start = 0.5 * (lo + hi) - 0.5 * *count * s;
 }
 
+
+// What is read under one flat region's face and kept with the domain: it depends on the
+// part, the region and the Protect skins, never on a cell size, so every layout of the
+// same domain (a cell-size or band slider being dragged) reuses it.
+struct FaceReadings {
+  WallMap map;   // nodes and their stretches (bin, sbin); `wall` and `walls` left empty
+  struct Stretch {
+    std::vector<std::size_t> entries;   // its (node, stretch) places in the map
+    double start = 0.0, width = 0.0;    // exact, read at its first node
+    double lo[2] = {0, 0}, hi[2] = {0, 0};   // its extent on the face: the nodes' own ...
+    bool edged = false;                 // ... or, once set, its true edges, searched for
+  };
+  // The true edges are searched for the first time a layout needs them (a stretch that
+  // could be a wall at that layout's cell size), then kept like the rest.
+  mutable std::vector<Stretch> stretches;
+  mutable std::mutex edging;
+};
+
+// The lattice's columns under a flat region's face at (u, w): where each starts below the
+// face and how wide it is. Read just under the face, or just behind a Protect skin on it
+// (D5); then, through a pocket, just inside the next material; and so on down to the
+// region's depth. Returns how many (at most kDeep).
+int face_columns(const Domain::Probe& pr, const Region& r, const Frame& f, double u, double w,
+                 double* start, double* width) {
+  const double depth = r.prism.depth, under = std::min(0.02, 0.25 * depth);
+  const int deep = WallMap::kDeep;
+  int n = 0;
+  double z = under;
+  for (int hop = 0; hop < 4 * deep && n < deep && z < depth; ++hop) {
+    double wall = 0.0;
+    Domain::Probe::Room room;
+    const Vec3 at = f.at(u, w, z);
+    const Where h = pr.where(at, &wall, &room);
+    if (h.lattice() && h.id == r.id) {
+      column_of(room, z, depth, &start[n], &width[n]);
+      z = start[n] + width[n] + under;
+      ++n;
+    } else if (h.why == Why::ProtectSkin) {
+      // Straight in through the skin, by its own gap: such a step cannot pass its inner side.
+      for (int it = 0; it < 200 && z < depth; ++it) {
+        const double gap = pr.skin_gap(f.at(u, w, z));
+        if (gap > 0.0) break;
+        z += std::max(-gap, 1e-3);
+      }
+      z += under;
+    } else if (h.why == Why::Outside) {
+      // Air (a pocket, or a step down beside the face): straight on to the next surface.
+      const double t = pr.part().reach_by_line(at, f.ax[2]);
+      if (t < 0.0) break;
+      z += t + under;
+    } else {
+      break;   // kept clear, another region's, too thin: nothing of this region's below
+    }
+  }
+  return n;
+}
+
+// Of the columns at (u, w), the one that is the stretch of these bins.
+bool face_column_of(const Domain::Probe& pr, const Region& r, const Frame& f, long want,
+                    long want_start, double u, double w, double* start_out, double* width_out) {
+  double start[WallMap::kDeep], width[WallMap::kDeep];
+  const int n = face_columns(pr, r, f, u, w, start, width);
+  for (int k = 0; k < n; ++k)
+    if (std::labs(WallMap::bin_of(width[k]) - want) <= 1 &&
+        std::labs(WallMap::bin_of(start[k]) - want_start) <= 1) {
+      if (start_out) *start_out = start[k];
+      if (width_out) *width_out = width[k];
+      return true;
+    }
+  return false;
+}
+
+std::shared_ptr<const FaceReadings> read_face(const Domain& domain, const Region& r,
+                                              const Frame& f, const double lo[3],
+                                              const double hi[3], int thread_count) {
+  const ClearanceGeometry& g = r.prism;
+  const Domain::Probe probe = domain.probe();
+  auto made = std::make_shared<FaceReadings>();
+  FaceReadings& out = *made;
+  WallMap& map = out.map;
+  map.flat = true;
+  map.depth = g.depth;
+  map.u0 = lo[0]; map.w0 = lo[1];
+  map.nu = static_cast<int>(std::ceil((hi[0] - lo[0]) / WallMap::kPitch)) + 1;
+  map.nw = static_cast<int>(std::ceil((hi[1] - lo[1]) / WallMap::kPitch)) + 1;
+  const int deep = WallMap::kDeep;
+  map.bin.assign(static_cast<std::size_t>(map.nu) * map.nw * deep, -1);
+  map.sbin.assign(map.bin.size(), 0);
+  map.wall.assign(map.bin.size(), -1);
+  auto node_u = [&](std::size_t e) { return map.u0 + ((e / deep) % map.nu) * WallMap::kPitch; };
+  auto node_w = [&](std::size_t e) { return map.w0 + ((e / deep) / map.nu) * WallMap::kPitch; };
+  // Each row of nodes on its own: shared between threads, the result the same for any number.
+  {
+    std::atomic<int> next{0};
+    auto rows = [&](const Domain::Probe& pr) {
+      for (int j = next.fetch_add(1); j < map.nw; j = next.fetch_add(1))
+        for (int i = 0; i < map.nu; ++i) {
+          double start[WallMap::kDeep], width[WallMap::kDeep];
+          const int n = face_columns(pr, r, f, map.u0 + i * WallMap::kPitch,
+                                     map.w0 + j * WallMap::kPitch, start, width);
+          for (int k = 0; k < n; ++k) {
+            const std::size_t e = (static_cast<std::size_t>(j) * map.nu + i) * deep + k;
+            map.bin[e] = WallMap::bin_of(width[k]);
+            map.sbin[e] = WallMap::bin_of(start[k]);
+          }
+        }
+    };
+    std::vector<std::thread> pool;
+    for (int t = 1; t < std::min(thread_count, map.nw); ++t)
+      pool.emplace_back([&]() { rows(domain.probe()); });
+    rows(probe);
+    for (std::thread& t : pool) t.join();
+  }
+  std::vector<int> mark(map.bin.size(), 0);
+  std::vector<std::size_t> stack;
+  for (std::size_t n0 = 0; n0 < map.bin.size(); ++n0) {
+    if (map.bin[n0] < 0 || mark[n0]) continue;
+    // One stretch: neighbours that start at the same depth and are the same width.
+    FaceReadings::Stretch st;
+    stack.assign(1, n0);
+    mark[n0] = 1;
+    while (!stack.empty()) {
+      const std::size_t n = stack.back();
+      stack.pop_back();
+      st.entries.push_back(n);
+      const int i = static_cast<int>((n / deep) % map.nu), j = static_cast<int>((n / deep) / map.nu);
+      const int nb[4][2] = {{i - 1, j}, {i + 1, j}, {i, j - 1}, {i, j + 1}};
+      for (const auto& q : nb) {
+        if (q[0] < 0 || q[1] < 0 || q[0] >= map.nu || q[1] >= map.nw) continue;
+        for (int k = 0; k < deep; ++k) {
+          const std::size_t m = (static_cast<std::size_t>(q[1]) * map.nu + q[0]) * deep + k;
+          if (mark[m] || map.bin[m] != map.bin[n0] || map.sbin[m] != map.sbin[n0]) continue;
+          mark[m] = 1;
+          stack.push_back(m);
+        }
+      }
+    }
+    // The exact width, not the bin's: read it again at the stretch's first node ...
+    {
+      double start = 0.0, width = 0.0;
+      face_column_of(probe, r, f, map.bin[n0], map.sbin[n0], node_u(n0), node_w(n0), &start, &width);
+      // ... to the precision it is read at: a 12 mm wall is 12, not 11.9999995.
+      st.start = std::round(start * 1e5) / 1e5;
+      st.width = std::round((start + width) * 1e5) / 1e5 - st.start;
+    }
+    st.lo[0] = st.lo[1] = 1e300;
+    st.hi[0] = st.hi[1] = -1e300;
+    for (std::size_t n : st.entries) {
+      const double u = node_u(n), w = node_w(n);
+      st.lo[0] = std::min(st.lo[0], u); st.hi[0] = std::max(st.hi[0], u);
+      st.lo[1] = std::min(st.lo[1], w); st.hi[1] = std::max(st.hi[1], w);
+    }
+    out.stretches.push_back(std::move(st));
+  }
+  return made;
+}
+
+// The map's nodes stop short of a stretch's true edge by up to one step. Find the edge
+// itself, outward from the outermost nodes, so the cells are centred on the real stretch
+// (and a symmetric one gets a symmetric layout, exactly). Once per stretch, then kept.
+void find_edges(const FaceReadings& kept, std::size_t which, const Domain::Probe& probe,
+                const Region& r, const Frame& f) {
+  std::lock_guard<std::mutex> lock(kept.edging);
+  FaceReadings::Stretch& st = kept.stretches[which];
+  if (st.edged) return;
+  const WallMap& map = kept.map;
+  const int deep = WallMap::kDeep;
+  const long want = map.bin[st.entries.front()], want_start = map.sbin[st.entries.front()];
+  double edge[2][2] = {{st.lo[0], st.hi[0]}, {st.lo[1], st.hi[1]}};
+  for (std::size_t n : st.entries) {
+    const double at[2] = {map.u0 + ((n / deep) % map.nu) * WallMap::kPitch,
+                          map.w0 + ((n / deep) / map.nu) * WallMap::kPitch};
+    for (int axis = 0; axis < 2; ++axis)
+      for (int side = 0; side < 2; ++side) {
+        const double extreme = side ? st.hi[axis] : st.lo[axis];
+        if (std::fabs(at[axis] - extreme) > 1e-9) continue;
+        double in = at[axis], outside = at[axis] + (side ? WallMap::kPitch : -WallMap::kPitch);
+        for (int it = 0; it < 50; ++it) {
+          const double m = 0.5 * (in + outside);
+          const bool yes = axis == 0 ? face_column_of(probe, r, f, want, want_start, m, at[1], nullptr, nullptr)
+                                     : face_column_of(probe, r, f, want, want_start, at[0], m, nullptr, nullptr);
+          if (yes) in = m; else outside = m;
+        }
+        const double found = std::round(0.5 * (in + outside) * 1e7) / 1e7;
+        edge[axis][side] = side ? std::max(edge[axis][side], found) : std::min(edge[axis][side], found);
+      }
+  }
+  st.lo[0] = edge[0][0]; st.hi[0] = edge[0][1];
+  st.lo[1] = edge[1][0]; st.hi[1] = edge[1][1];
+  st.edged = true;
+}
+
 }  // namespace
 
 Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
@@ -588,140 +792,39 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
     const double lo[3] = {g.u_lo - e, g.w_lo - e, 0.0};
     const double hi[3] = {g.u_hi + e, g.w_hi + e, g.depth};
 
-    // The walls under this face: read the wall's width on a coarse map of the face,
-    // just under it, and gather the stretches of one width.
-    WallMap map;
-    map.flat = true;
-    map.depth = g.depth;
-    map.u0 = lo[0]; map.w0 = lo[1];
-    map.nu = static_cast<int>(std::ceil((hi[0] - lo[0]) / WallMap::kPitch)) + 1;
-    map.nw = static_cast<int>(std::ceil((hi[1] - lo[1]) / WallMap::kPitch)) + 1;
-    map.bin.assign(static_cast<std::size_t>(map.nu) * map.nw, -1);
-    map.sbin.assign(map.bin.size(), 0);
-    map.wall.assign(map.bin.size(), -1);
-    const double under = std::min(0.02, 0.25 * g.depth);
-    // The lattice's column under the face at (u, w): where it starts below the face and
-    // how wide it is. Read just under the face, or just behind a Protect skin on it (D5).
-    auto column = [&](double u, double w, double* start, double* width) {
-      double z = under;
-      for (int hop = 0; hop < 3; ++hop) {
-        double wall = 0.0;
-        Domain::Probe::Room room;
-        const Where h = probe.where(f.at(u, w, z), &wall, &room);
-        if (h.lattice() && h.id == r.id) {
-          column_of(room, z, g.depth, start, width);
-          return true;
-        }
-        if (h.why != Why::ProtectSkin) return false;
-        // Straight in through the skin, by its own gap: such a step cannot pass its inner side.
-        for (int it = 0; it < 200; ++it) {
-          const double gap = probe.skin_gap(f.at(u, w, z));
-          if (gap > 0.0) break;
-          z += std::max(-gap, 1e-3);
-          if (z >= g.depth) return false;
-        }
-        z += under;
-        if (z >= g.depth) return false;
-      }
-      return false;
-    };
-    for (int j = 0; j < map.nw; ++j)
-      for (int i = 0; i < map.nu; ++i) {
-        double start = 0.0, width = 0.0;
-        if (!column(map.u0 + i * WallMap::kPitch, map.w0 + j * WallMap::kPitch, &start, &width))
-          continue;
-        map.bin[static_cast<std::size_t>(j) * map.nu + i] = WallMap::bin_of(width);
-        map.sbin[static_cast<std::size_t>(j) * map.nu + i] = WallMap::bin_of(start);
-      }
-    std::vector<int> stack;
-    for (std::size_t n0 = 0; n0 < map.bin.size(); ++n0) {
-      if (map.bin[n0] < 0 || map.wall[n0] != -1) continue;
-      // One stretch: neighbours of the same width.
-      std::vector<std::size_t> nodes;
-      stack.assign(1, static_cast<int>(n0));
-      map.wall[n0] = -2;
-      while (!stack.empty()) {
-        const std::size_t n = static_cast<std::size_t>(stack.back());
-        stack.pop_back();
-        nodes.push_back(n);
-        const int i = static_cast<int>(n % map.nu), j = static_cast<int>(n / map.nu);
-        const int nb[4][2] = {{i - 1, j}, {i + 1, j}, {i, j - 1}, {i, j + 1}};
-        for (const auto& q : nb) {
-          if (q[0] < 0 || q[1] < 0 || q[0] >= map.nu || q[1] >= map.nw) continue;
-          const std::size_t m = static_cast<std::size_t>(q[1]) * map.nu + q[0];
-          if (map.wall[m] != -1 || map.bin[m] != map.bin[n0] || map.sbin[m] != map.sbin[n0])
-            continue;
-          map.wall[m] = -2;
-          stack.push_back(static_cast<int>(m));
-        }
-      }
+    // The walls under this face, from the readings kept with the domain: every stretch of
+    // material under each node of a coarse map of the face (a wall, a pocket and the wall
+    // behind the pocket are two), gathered where they start at one depth and are one width.
+    const std::shared_ptr<const FaceReadings> kept = domain.kept<FaceReadings>(
+        r.id, [&]() { return read_face(domain, r, f, lo, hi, thread_count); });
+    WallMap map = kept->map;
+    for (std::size_t which = 0; which < kept->stretches.size(); ++which) {
       WallMap::Wall wall;
-      wall.width = map.bin[n0] * WallMap::kBin;
-      // The exact width, not the bin's: read it again at the stretch's first node.
+      double area = 0.0;
       {
-        double start = 0.0, width = 0.0;
-        column(map.u0 + (n0 % map.nu) * WallMap::kPitch,
-               map.w0 + (n0 / map.nu) * WallMap::kPitch, &start, &width);
-        // ... to the precision it is read at: a 12 mm wall is 12, not 11.9999995.
-        wall.start = std::round(start * 1e5) / 1e5;
-        wall.width = std::round((start + width) * 1e5) / 1e5 - wall.start;
+        std::lock_guard<std::mutex> lock(kept->edging);
+        const FaceReadings::Stretch& st = kept->stretches[which];
+        wall.start = st.start;
+        wall.width = st.width;
+        area = st.entries.size() * WallMap::kPitch * WallMap::kPitch;
       }
       wall.cell = divide(wall.width, &wall.layers);
       // A wall is a stretch wide enough for its own cells (two by two of them) whose
       // cell prints. Anything else is left to the pass below, cell by cell.
-      const double area = nodes.size() * WallMap::kPitch * WallMap::kPitch;
-      const bool is_wall = wall.cell >= smallest && area >= 4.0 * wall.cell * wall.cell;
-      wall.lo[0] = wall.lo[1] = 1e300;
-      wall.hi[0] = wall.hi[1] = -1e300;
-      for (std::size_t n : nodes) {
-        map.wall[n] = is_wall ? static_cast<int>(map.walls.size()) : -3;
-        const double u = map.u0 + (n % map.nu) * WallMap::kPitch, w = map.w0 + (n / map.nu) * WallMap::kPitch;
-        wall.lo[0] = std::min(wall.lo[0], u); wall.hi[0] = std::max(wall.hi[0], u);
-        wall.lo[1] = std::min(wall.lo[1], w); wall.hi[1] = std::max(wall.hi[1], w);
-      }
-      if (is_wall) {
-        // The map's nodes stop short of the stretch's true edge by up to one step. Find
-        // the edge itself, outward from the outermost nodes, so the cells are centred on
-        // the real stretch (and a symmetric one gets a symmetric layout, exactly).
-        const long want = map.bin[n0], want_start = map.sbin[n0];
-        auto in_wall = [&](double u, double w) {
-          double start = 0.0, width = 0.0;
-          return column(u, w, &start, &width) &&
-                 std::labs(WallMap::bin_of(width) - want) <= 1 &&
-                 std::labs(WallMap::bin_of(start) - want_start) <= 1;
-        };
-        double edge[2][2] = {{wall.lo[0], wall.hi[0]}, {wall.lo[1], wall.hi[1]}};
-        for (std::size_t n : nodes) {
-          const double at[2] = {map.u0 + (n % map.nu) * WallMap::kPitch, map.w0 + (n / map.nu) * WallMap::kPitch};
-          for (int axis = 0; axis < 2; ++axis)
-            for (int side = 0; side < 2; ++side) {
-              const double extreme = side ? wall.hi[axis] : wall.lo[axis];
-              if (std::fabs(at[axis] - extreme) > 1e-9) continue;
-              double in = at[axis], outside = at[axis] + (side ? WallMap::kPitch : -WallMap::kPitch);
-              for (int it = 0; it < 50; ++it) {
-                const double m = 0.5 * (in + outside);
-                const bool yes = axis == 0 ? in_wall(m, at[1]) : in_wall(at[0], m);
-                if (yes) in = m; else outside = m;
-              }
-              const double found = std::round(0.5 * (in + outside) * 1e7) / 1e7;
-              edge[axis][side] = side ? std::max(edge[axis][side], found) : std::min(edge[axis][side], found);
-            }
-        }
-        wall.lo[0] = edge[0][0]; wall.hi[0] = edge[0][1];
-        wall.lo[1] = edge[1][0]; wall.hi[1] = edge[1][1];
-        // Its true extent must hold one of its cells each way as well: a ledge a tenth
-        // of a millimetre wide catches a whole row of map nodes and is not a wall. (One,
-        // not two: a rib one cell wide along the face is still a wall of its own depth.)
-        if (wall.hi[0] - wall.lo[0] >= wall.cell - kReadingSlack &&
-            wall.hi[1] - wall.lo[1] >= wall.cell - kReadingSlack) {
-          map.walls.push_back(wall);
-        } else {
-          for (std::size_t n : nodes) map.wall[n] = -3;
-        }
-      }
+      if (wall.cell < smallest || area < 4.0 * wall.cell * wall.cell) continue;
+      find_edges(*kept, which, probe, r, f);
+      const FaceReadings::Stretch& st = kept->stretches[which];   // edged: no longer written
+      wall.lo[0] = st.lo[0]; wall.lo[1] = st.lo[1];
+      wall.hi[0] = st.hi[0]; wall.hi[1] = st.hi[1];
+      // Its true extent must hold one of its cells each way as well: a ledge a tenth of
+      // a millimetre wide catches a whole row of map nodes and is not a wall. (One, not
+      // two: a rib one cell wide along the face is still a wall of its own depth.)
+      if (wall.hi[0] - wall.lo[0] < wall.cell - kReadingSlack ||
+          wall.hi[1] - wall.lo[1] < wall.cell - kReadingSlack)
+        continue;
+      for (std::size_t e : st.entries) map.wall[e] = static_cast<int>(map.walls.size());
+      map.walls.push_back(wall);
     }
-    for (int& w : map.wall)
-      if (w < 0) w = -1;
 
     Pass pass = open(r.id, f, g.depth, base);
     pass.tally = &out.regions.back();
