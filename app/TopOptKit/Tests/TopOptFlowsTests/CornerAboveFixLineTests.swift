@@ -55,7 +55,7 @@ final class CornerAboveFixLineTests: XCTestCase {
         XCTAssertTrue(c.panel.intersects(try XCTUnwrap(c.line).insetBy(dx: 0.5, dy: 0.5)), "the control: behind the fix line")
         CornerPairStyle.controlPanelBehindFixLine = false
 
-        for size in [AppBuildHost.landscape13, AppBuildHost.portrait13, AppBuildHost.landscape11, CGSize(width: 820, height: 1180)] {
+        for size in AppBuildHost.sweep {   // ★ B10: the six windows
             let f = try frames(size, fixLine: true)
             let line = try XCTUnwrap(f.line, "\(size): the fix line")
             XCTAssertLessThanOrEqual(line.maxY, f.split.minY, "\(size): the fix line sits above the pair")

@@ -1792,10 +1792,21 @@ public struct WorkspacePlaceholder: View {
             if rerunOffersCopy { Button(TopologyRerunChoice.saveAsNew.label) { pendingReplacement = nil; saveAsNewProjectAndRun() } }
             Button(TopologyRerunChoice.cancel.label, role: .cancel) { pendingReplacement = nil }
         } }
+        // ★ B10 (U6 / U7, §4.11): Rename project asks in the name sheet, over the whole page (one boxed child: the body stays small)
+        .overlay { AnyView(renameSheetLayer) }
         // ★ B2 (U15): what a number pad kept ("Kept 40 (1 to 40 mm)") is the page's toast
         .numberPadNote { model.toast = $0 }
         // ★ B2 (U16): the top lane's notifications keep clear of every control the page publishes
         .laneControls(laneControls)
+    }
+
+    /// ★ B10: the project's name, asked in the §4.11 name sheet (it was a system alert).
+    @ViewBuilder private var renameSheetLayer: some View {
+        if renaming {
+            NameSheetLayer(title: "Rename project", name: $nameDraft, primary: "Save",
+                           cancel: { renaming = false },
+                           done: { model.renameCurrentProject(to: nameDraft); renaming = false })
+        }
     }
 
     /// The orientation gizmo lives in the ABSOLUTE top-right corner, ALWAYS (design-overhaul
@@ -1816,6 +1827,7 @@ public struct WorkspacePlaceholder: View {
                 OrientationGizmoView(camera: cameraModel,
                                      size: gizmoSize)
                     .latticeBandChipKeepOut()
+                    .background(DSParts.publish("orientationGizmo"))   // ★ B10: the corner's panel keeps off it (B10SweepHostedTests)
             }
             Spacer()
         }
@@ -1844,8 +1856,8 @@ public struct WorkspacePlaceholder: View {
         guard restored else { return }
         let n = run.outcome?.variants.filter { $0.accepted }.count ?? 0
         guard n > 0 else { return }
-        let subject = n == 1 ? "1 variant is" : "\(n) variants are"
-        model.toast = "That run produced no variants, so your previous \(subject) still here."
+        let subject = n == 1 ? "1 result is" : "\(n) results are"
+        model.toast = "That run produced no results, so your previous \(subject) still here."
     }
 
     /// Optimize was tapped. BAR 4: when a finished run is about to be retired, the
@@ -2943,10 +2955,17 @@ public struct WorkspacePlaceholder: View {
             // ── MOVABLE (pill): the pending selection's Anchor/Load/Keep-clear action bar ──
             if let g = activeGroup, force.needsRole(g.id, latticeRoleGroups: latticeRoleGroupIDs),
                let cm = groupCentroidModel(g), let c = proj.project(settledWorld(cm)) {
+                // ★ B10: the chip it DRAWS (the join button over the four roles, measured), not 300 × 44 — it ran off 11″ portrait
+                let chip = chromeGeometry.pendingChipSize ?? CGSize(width: 300, height: 44)
+                // ★ B10: and wholly on the screen from the start (the solver clamps only what it pushes; a chip clear of
+                // everything kept an anchor past the window's edge)
+                let vp = proj.viewportSize, e = PageChrome.edge
+                let anchor = CGPoint(x: Swift.min(Swift.max(c.x, e + chip.width / 2), Swift.max(e + chip.width / 2, vp.width - e - chip.width / 2)),
+                                     y: Swift.min(Swift.max(c.y - 60, e + chip.height / 2), Swift.max(e + chip.height / 2, vp.height - e - chip.height / 2)))
                 elements.append(KeepOutElement(id: "load.pendingchip",
-                                               anchor: CGPoint(x: c.x, y: c.y - 60),
-                                               bounds: CGSize(width: 300, height: 44),
-                                               touch: CGSize(width: 300, height: 44),
+                                               anchor: anchor,
+                                               bounds: chip,
+                                               touch: chip,
                                                priority: .pill, maxShift: Self.keepOutMaxShift))
             }
 
@@ -3037,11 +3056,14 @@ public struct WorkspacePlaceholder: View {
         // ★ His iPad 2026-10-28 (bug 3): "When the weight chip is behind the selections group, the selections group should
         // ABSOLUTELY win … NEVER cover the Selections modal." No chip stays on the panel: it moves just outside it, or —
         // with no room — it is withdrawn (drawn faded, untappable) until the view or the panel moves.
-        if let panel = chromeGeometry.selectionsFrame {   // open or folded to its pill: the frame is whatever is drawn
+        // ★ B10: and the corner's open Settings panel, on the other side (the role picker sat under it at every size)
+        let panels = [chromeGeometry.selectionsFrame,   // open or folded to its pill: the frame is whatever is drawn
+                      setupPanelOpen ? chromeGeometry.cornerPanelFrame : nil].compactMap { $0 }
+        if !panels.isEmpty {
             var sizes: [String: CGSize] = [:]
             for e in base where !e.rigid { sizes[e.id] = e.bounds }
             for e in pass2 { sizes[e.id] = e.bounds }
-            map = SelectionsPanelKeepOut.clear(map, sizes: sizes, panel: panel, viewport: vp)
+            map = SelectionsPanelKeepOut.clear(map, sizes: sizes, panels: panels, viewport: vp)
         }
         return map
     }
@@ -3076,11 +3098,7 @@ public struct WorkspacePlaceholder: View {
                                                 width: 0))
         })
         .latticeBandChipKeepOut()          // ★ the identity row: no band chip under it
-        .alert("Rename project", isPresented: $renaming) {
-            TextField("Name", text: $nameDraft)
-            Button("Save") { model.renameCurrentProject(to: nameDraft) }
-            Button("Cancel", role: .cancel) {}
-        }
+        // (★ B10: Rename project is the name sheet, over the whole page — `renameSheetLayer`, never a system alert)
     }
 
     /// A round Undo/Redo header button, matching the back-chevron chrome. Dims + disables when
@@ -6322,7 +6340,7 @@ public struct WorkspacePlaceholder: View {
                 project.designBox.disable()
             } else if let mesh = viewerMesh {
                 project.designBox.enable(around: mesh.bounds)
-                model.toast = "Design box on — drag the handles to size the space the optimizer can grow into"
+                model.toast = "Allow growth here on — drag the handles to size the space the optimizer can grow into"
             }
         } label: {
             HStack(spacing: DS.Space.s) {
@@ -7451,6 +7469,10 @@ public struct WorkspacePlaceholder: View {
             }
         }
         .latticeBandChipKeepOut()          // ★ the tool column: no band chip under it
+        .background(GeometryReader { g in   // ★ B10: the corner's panel stays under this row (its room ends here)
+            Color.clear.onAppear { chromeGeometry.noteViews(g.frame(in: .global).maxY) }
+                .onChange(of: g.frame(in: .global).maxY) { chromeGeometry.noteViews($0) }
+        }.allowsHitTesting(false))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
         // ★ BELOW THE GIZMO, in the slot `gizmoClearance` defines — the same one
         // the Surface tray uses, so the two stages put the control in one place.
@@ -7481,7 +7503,7 @@ public struct WorkspacePlaceholder: View {
                 .background(Group {   // B2: hosted tests (and ViewCornerParity's red control)
                     if label != ViewCornerParity.controlDropped { CornerPairStyle.publish(on ? "view-\(label)-on" : "view-\(label)") }
                 })
-                .frame(width: 40, height: 40)
+                .frame(width: 40, height: 40)   // §4.2: "40 pt glass circles" (the look); the target round it is 44 (B10)
                 .background(
                     RoundedRectangle(cornerRadius: DS.Radius.pill, style: .continuous)
                         .fill(tint != nil ? tint!.opacity(0.85).color
@@ -7494,8 +7516,10 @@ public struct WorkspacePlaceholder: View {
                 )
                 // ★ B2 (round 1, §4.2): a hold fills a ring round the button over its 3 s
                 .overlay { if onLongPress != nil, viewModePressDown, !HoldRing.controlOff { HoldRing().padding(-3) } }
+                .frame(width: 44, height: 44).contentShape(Rectangle())   // ★ B10 (Touch): the 40 pt circle in a 44 pt target
         }
         .buttonStyle(.plain)
+        .background(CornerPairStyle.publish("viewToggle-\(label)"))   // ★ B10: the toggle's target (Touch: ≥ 44 × 44)
         .disabled(!enabled)
         // ★ A HOLD is a second action on the same button (lattice only). The long
         // press runs alongside the tap so a plain tap still toggles the preview.
@@ -7760,9 +7784,13 @@ public struct WorkspacePlaceholder: View {
             // 21:32Z item 1: (a), in the rail under a divider).
             Rectangle().fill(DS.Color.strokeStrong.color).frame(width: 24, height: 1).padding(.vertical, 2)
             // (its action stays the bare toggle, written out: SurfacePencilToggleExemptionTests)
-            Button { surfacePencilOnly.toggle() } label: { cutRailGlyph("applepencil", on: surfacePencilOnly) }
+            Button { surfacePencilOnly.toggle() } label: {
+                cutRailGlyph("applepencil", on: surfacePencilOnly)
+                    .background(DSParts.publish(surfacePencilOnly ? "cutTool-PencilOnly-on" : "cutTool-PencilOnly"))
+                    .frame(width: 44, height: 44).contentShape(Rectangle())   // ★ B10 (Touch): the 40 pt disc, a 44 pt target
+            }
                 .buttonStyle(.plain)
-                .background(DSParts.publish(surfacePencilOnly ? "cutTool-PencilOnly-on" : "cutTool-PencilOnly"))
+                .background(DSParts.publish("cutToolTarget-PencilOnly"))
                 .accessibilityLabel("Pencil only")
         }
         .padding(6)
@@ -7797,9 +7825,14 @@ public struct WorkspacePlaceholder: View {
     /// One round tool in Cut's rail (mockup .rail button): 40 pt, the accent with a white glyph when on.
     private func cutRailButton(_ icon: String, label: String, on: Bool, key: String,
                                action: @escaping () -> Void) -> some View {
-        Button(action: action) { cutRailGlyph(icon, on: on) }
+        // ★ B10 (Touch): the mockup's 40 pt disc (its frame stays "cutTool-<title>"), in a 44 pt target ("cutToolTarget-…")
+        Button(action: action) {
+            cutRailGlyph(icon, on: on)
+                .background(DSParts.publish(on ? key + "-on" : key))
+                .frame(width: 44, height: 44).contentShape(Rectangle())
+        }
             .buttonStyle(.plain)
-            .background(DSParts.publish(on ? key + "-on" : key))
+            .background(DSParts.publish(key.replacingOccurrences(of: "cutTool-", with: "cutToolTarget-")))
             .accessibilityLabel(label)
     }
 
@@ -8099,7 +8132,7 @@ public struct WorkspacePlaceholder: View {
                         surfaceClusterButton("scissors.badge.ellipsis",
                                              tint: DS.Color.textPrimary) {
                             let faces = Array(similarMatches).sorted()
-                            let name = similar.seeds.first.map { "Face \($0) & like it" }
+                            let name = similar.seeds.first.map { "\(project.faceName($0)) & like it" }
                                 ?? "Isolated"
                             let made = project.commitSurfaceIsolate(faces: faces,
                                                                     named: name)
@@ -9501,7 +9534,7 @@ public struct WorkspacePlaceholder: View {
                             chipsRevealedGroup = gid   // T2: tapping the primitive reveals chips
                         }
                         .position(pt)
-                        .accessibilityLabel("Select primitive to transform")
+                        .accessibilityLabel("Select the \(mp.kind.word) to move it")
                     }
                 }
             }
@@ -9801,7 +9834,7 @@ public struct WorkspacePlaceholder: View {
                     Image(systemName: "plus.square.on.square").font(.system(size: 11, weight: .bold))
                         .foregroundStyle(.white)
                 }
-            }.buttonStyle(.plain).accessibilityLabel(copying ? "Copy on: each move leaves a copy" : "Copy primitive")
+            }.buttonStyle(.plain).accessibilityLabel(copying ? "Copy on: each move leaves a copy" : "Copy \(mp.kind.word)")
                 .accessibilityAddTraits(copying ? .isSelected : [])
 
             // (Round 3 removed the `scope` crosshair toggle here: it read as an aiming/re-centre
@@ -10687,11 +10720,12 @@ public struct WorkspacePlaceholder: View {
                     Menu {
                         // A freshly-placed primitive becomes the gizmo target so the user can move it
                         // straight away (DEFECT 2: PR 190 had no handles to grab it by).
-                        Button("Cylinder") { selectNewPrimitive(project.addManualPrimitive(.bolt, to: g.id), in: g.id) }
-                        Button("Plane") { selectNewPrimitive(project.addManualPrimitive(.face, to: g.id), in: g.id) }
+                        // ★ B10 (ruling 11-11 08:04Z (3)(a)): Allow growth here's words, Box │ Cylinder (the slab is the box)
+                        Button(ManualPrimitive.Kind.face.title) { selectNewPrimitive(project.addManualPrimitive(.face, to: g.id), in: g.id) }
+                        Button(ManualPrimitive.Kind.bolt.title) { selectNewPrimitive(project.addManualPrimitive(.bolt, to: g.id), in: g.id) }
                         Section("A keep-out the finder missed. Place it, then move it onto the part with magnetic detents.") {}
                     } label: {
-                        Label("primitive", systemImage: "plus")
+                        Label("Add", systemImage: "plus")   // ★ B10: "+ Add" (never "+ primitive")
                             .labelStyle(.titleAndIcon)
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(Self.clearanceTint)
@@ -12460,7 +12494,10 @@ public struct WorkspacePlaceholder: View {
                 pieceCard(g, key: Int(p.id), title: ClearanceChipLayout.kindLabel(p.kind) + " \(i + 1)",
                           pickID: "pick-auto-\(p.id)", trashID: "delete-auto-\(p.id)",
                           // G2 / round-2 T6: the move icon converts an auto-found keep-out to a movable primitive
-                          grab: stageList.activeGroupID == g.id ? (id: "grab-auto-\(p.id)", action: {
+                          grab: stageList.activeGroupID == g.id ? (id: "grab-auto-\(p.id)",
+                                                                   word: viewerMesh?.faceGeometry(p.id)?.isCylinder == true
+                                                                       ? ManualPrimitive.Kind.bolt.word : ManualPrimitive.Kind.face.word,
+                                                                   action: {
                               selectNewPrimitive(project.convertAutoClearanceToManual(face: p.id, in: g.id), in: g.id)
                           }) : nil,
                           delete: { project.deleteAutoClearance(face: p.id, in: g.id) }) {
@@ -12490,7 +12527,7 @@ public struct WorkspacePlaceholder: View {
     /// right; its values underneath. The whole card picks the piece (PieceRowPick); a hidden piece's card greys out.
     private func pieceCard<Content: View>(_ g: SelectionGroup, key: Int, title: String, titleColor: Color = DS.Color.textPrimary.color,
                                           pickID: String, trashID: String, info: String? = nil,
-                                          grab: (id: String, action: () -> Void)? = nil, canDelete: Bool = true,
+                                          grab: (id: String, word: String, action: () -> Void)? = nil, canDelete: Bool = true,
                                           delete: @escaping () -> Void,
                                           @ViewBuilder content: () -> Content) -> some View {
         let shown = SelectionArrowRule.pieceDrawn(group: g.id, piece: key, hidden: hiddenPieces)
@@ -12503,11 +12540,11 @@ public struct WorkspacePlaceholder: View {
                     Button(action: grab.action) {
                         Image(systemName: "move.3d").font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(DS.Color.accent.color.opacity(0.9))
-                            .frame(width: 36, height: 36).contentShape(Rectangle())
+                            .frame(width: 44, height: 44).contentShape(Rectangle())   // ★ B10 (Touch): was 36
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier(grab.id)
-                    .accessibilityLabel("Convert to a movable primitive")
+                    .accessibilityLabel("Convert to a movable \(grab.word)")   // ★ B10: the kind it becomes
                 }
                 if let info { InfoPopoverButton(text: info, id: "\(pickID)-info") }
                 pieceEye(g, key, name: title)
@@ -12848,7 +12885,7 @@ public struct WorkspacePlaceholder: View {
         } label: {
             Image(systemName: GroupViewState.eyeSymbol(hidden: hidden)).font(.system(size: 13, weight: .medium))
                 .foregroundStyle((hidden ? DS.Color.textQuaternary : DS.Color.textSecondary).color)
-                .frame(width: 36, height: 36).contentShape(Rectangle())
+                .frame(width: 44, height: 44).contentShape(Rectangle())   // ★ B10 (Touch): was 36
         }
         .buttonStyle(.plain)
         .background(GeometryReader { geo in
@@ -12862,7 +12899,7 @@ public struct WorkspacePlaceholder: View {
     private func pieceTrash(name: String, id: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: "trash").font(.system(size: 13, weight: .medium))
-                .foregroundStyle(DS.Color.textSecondary.color).frame(width: 36, height: 36).contentShape(Rectangle())
+                .foregroundStyle(DS.Color.textSecondary.color).frame(width: 44, height: 44).contentShape(Rectangle())   // ★ B10 (Touch): was 36
         }
         .buttonStyle(.plain)
         .background(GeometryReader { geo in
@@ -13112,8 +13149,8 @@ public struct WorkspacePlaceholder: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(hidden ? "Show this group's primitives and colour"
-                     : "Hide this group's primitives and colour")
+        .help(hidden ? "Show this group's shapes and colour"
+                     : "Hide this group's shapes and colour")
         .accessibilityLabel(hidden ? "Show group" : "Hide group")
         .accessibilityIdentifier("group-hide-\(g.id.uuidString)")
     }
@@ -13256,6 +13293,13 @@ public struct WorkspacePlaceholder: View {
                             anchorLoadChip(g)
                         }
                             .background(DSParts.publish("topologyPendingChip"))
+                            .background(GeometryReader { geo in   // ★ B10: its keep-out is the chip it draws
+                                Color.clear.onAppear { chromeGeometry.notePendingChip(geo.size) }
+                                    .onChange(of: geo.size) { chromeGeometry.notePendingChip($0) }
+                            }.allowsHitTesting(false))
+                            .background(Group {   // ★ B10: no room clear of the panels — withdrawn, and the tests can tell
+                                if placed["load.pendingchip"]?.hidden == true { DSParts.publish("topologyPendingChip-withdrawn") }
+                            })
                             .position(placed["load.pendingchip"]?.center ?? fallback)
                             .withdrawn(placed["load.pendingchip"]?.hidden == true)   // ★ never over the Selections panel
                     }
@@ -14081,7 +14125,10 @@ extension WorkspacePlaceholder {
     /// ★ LOOK PER SCREEN (T3, §4.19 "A Panel (4.3)"): the corner's Settings panel — the header folds it away; a row below the
     /// fold says "N more ⌄". ★ B6 s1: the Lattice corner opens the same one (note 21: its chips and buttons are these rows).
     private var settingsPanel: some View {
-        DSPanel(key: "settingsPanel", title: "Settings", width: showBuildOrientation ? 600 : DSParts.panelWidth, maxHeight: 620,
+        // ★ B10: never taller than its room under the gizmo and the view toggles (at 11″ landscape it climbed over them);
+        // past it, the panel scrolls with its "N more" cue (U10)
+        DSPanel(key: "settingsPanel", title: "Settings", width: showBuildOrientation ? 600 : DSParts.panelWidth,
+                maxHeight: min(620, max(220, chromeGeometry.cornerPanelRoom ?? 620)),
                 open: Binding(get: { true }, set: { if !$0 { withAnimation(DS.Motion.emphasized) { setupPanelOpen = false } } })) {
             topologySetupRows
         }

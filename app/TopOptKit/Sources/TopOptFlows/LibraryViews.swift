@@ -407,8 +407,10 @@ struct LibraryHomeView: View {
                             .padding(.horizontal, DS.Space.ml).frame(height: 36)
                             .background(Capsule().fill(DS.Color.fillSubtle.color))
                             .overlay(Capsule().strokeBorder(DS.Color.strokeStrong.color, lineWidth: 1))
+                            .frame(minHeight: 44).contentShape(Rectangle())   // ★ B10 (Touch): the same capsule, a 44 pt target
                     }
                     .buttonStyle(.plain).accessibilityIdentifier("library-new-project")
+                    .background(DSParts.publish("libraryNewProject"))
                 }
                 .padding(.top, DS.Space.xl5).padding(.bottom, DS.Space.ml)
                 LazyVGrid(columns: columns, spacing: DS.Space.xl3) {
@@ -477,8 +479,10 @@ struct LibraryHomeView: View {
                     .padding(.horizontal, DS.Space.ml).frame(height: 36)
                     .background(Capsule().fill(DS.Color.fillSubtle.color))
                     .overlay(Capsule().strokeBorder(DS.Color.strokeStrong.color, lineWidth: 1))
+                    .frame(minHeight: 44).contentShape(Rectangle())   // ★ B10 (Touch): the same capsule, a 44 pt target
             }
             .buttonStyle(.plain).accessibilityIdentifier("library-storage")
+            .background(DSParts.publish("libraryStorage"))
             Menu {
                 // ★ B5 (app-map §3.1, Q12): ⋯ → Settings · Storage · Ungroup
                 Button { settingsOpen = true } label: { Label("Settings", systemImage: "gearshape") }
@@ -489,6 +493,8 @@ struct LibraryHomeView: View {
                     .frame(width: 36, height: 36)
                     .background(Circle().fill(DS.Color.fillSubtle.color))
                     .overlay(Circle().strokeBorder(DS.Color.strokeStrong.color, lineWidth: 1))
+                    .frame(width: 44, height: 44).contentShape(Rectangle())   // ★ B10 (Touch): the same circle, a 44 pt target
+                    .background(DSParts.publish("libraryMore"))
             }
             .accessibilityIdentifier("library-more")
         }
@@ -513,6 +519,7 @@ struct LibraryHomeView: View {
             .liquidGlass(cornerRadius: 22)
         }
         .buttonStyle(.plain).accessibilityIdentifier("library-continue")
+        .background(DSParts.publish("libraryContinue"))   // ★ B10: the sweep checks it at every window
     }
 
     private func parentPicture(_ part: LibraryPart, _ v: LibraryVersion) -> CGImage? {

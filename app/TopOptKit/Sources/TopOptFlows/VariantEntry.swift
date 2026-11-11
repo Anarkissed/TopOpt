@@ -295,7 +295,7 @@ public struct ResultsReplacementPrompt: Equatable, Sendable, Identifiable {
         let lightest = masses.min()
         let mass = lightest.map { String(format: " (lightest %.1f g)", $0) } ?? ""
         return ResultsReplacementPrompt(
-            message: "Optimizing again replaces the \(n) variant\(n == 1 ? "" : "s") "
+            message: "Optimizing again replaces the \(n) result\(n == 1 ? "" : "s") "
                    + "this project already has\(mass). They can’t be brought back.",
             variantCount: n)
     }

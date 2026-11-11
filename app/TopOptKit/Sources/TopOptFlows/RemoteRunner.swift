@@ -1153,13 +1153,13 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         let (data, resp) = try syncGET(url)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         guard code == 200 else {
-            throw RemoteRunError("could not fetch variant mesh \"\(name)\" from the " +
+            throw RemoteRunError("could not fetch result mesh \"\(name)\" from the " +
                 "worker (HTTP \(code)). The run produced a result on the Mac but its " +
                 "geometry could not be transferred — not showing an empty part.")
         }
         let mesh = parseBinarySTL(data)
         guard !mesh.0.isEmpty, !mesh.1.isEmpty else {
-            throw RemoteRunError("variant mesh \"\(name)\" arrived empty or unreadable " +
+            throw RemoteRunError("result mesh \"\(name)\" arrived empty or unreadable " +
                 "(\(data.count) bytes) — not showing an empty part.")
         }
         return mesh
@@ -1372,7 +1372,7 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                 if let m = facts.margin { margin = m }
             } else {
                 diag("lattice receipt \(cp.reportName) unavailable — the latticed "
-                     + "variant for vf=\(vf) will show without its mass")
+                     + "result for vf=\(vf) will show without its mass")
             }
             // The mesh's SIZE, not the mesh. A HEAD on the same static-file route.
             let bytes = latticeMeshBytes(files.appendingPathComponent(cp.meshName))
@@ -1700,7 +1700,7 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
     /// hand it to `onVariant`, so PR 109's streamed-variant screen grows live.
     private func emitStreamedVariant(_ ev: [String: Any]) {
         guard let meshName = ev["mesh"] as? String, !meshName.isEmpty else {
-            failStream("worker reported a completed variant without a mesh file")
+            failStream("worker reported a completed result without a mesh file")
             return
         }
         // Variant-basename dedup (handoff 101): a replayed variant we already

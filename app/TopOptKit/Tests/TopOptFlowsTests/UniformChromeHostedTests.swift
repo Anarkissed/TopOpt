@@ -45,7 +45,7 @@ final class UniformChromeHostedTests: XCTestCase {
     }
 
     func testTheTopLeftBlockIsTheSameOnEveryPage() throws {
-        for size in [AppBuildHost.landscape13, AppBuildHost.portrait13, AppBuildHost.landscape11] {
+        for size in AppBuildHost.sweep {   // ★ B10: the six windows
             // a Structural lookalike with results: Topology Setup, Results, the Lattice stage, the Cells page, Edit faces
             let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
             let p = r.project
