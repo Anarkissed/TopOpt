@@ -156,7 +156,7 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
 
   // In the region? For a prism also how far the point is from the face plane; for a
   // shell, from the face itself.
-  auto holds = [&](std::size_t i, double* dist) {
+  auto holds_at = [&](std::size_t i, const Vec3& p, double* dist) {
     const Region& r = spec.regions[i];
     if (r.is_shell()) {
       // D20: the surface carried inward along its own normals, to its own outline.
@@ -183,6 +183,8 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
     return true;
   };
 
+  auto holds = [&](std::size_t i, double* dist) { return holds_at(i, p, dist); };
+
   // D6: No lattice beats Lattice.
   for (std::size_t i = 0; i < spec.regions.size(); ++i)
     if (spec.regions[i].role == Role::NoLattice && holds(i, nullptr))
@@ -207,6 +209,35 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
   }
   if (!owner && spec.start != Start::AllLattice) return {Why::NotAsked, 0};   // D12
   const int id = owner ? owner->id : 0;                                       // D4
+
+  // S1, S2, S10: the rim. Within its width of the owning region's own edge, where the
+  // part's solid backs that edge: one step beyond the nearest point of the edge, at the
+  // same depth, there is material, and it is no Lattice region's (a seam).
+  const double rim = d_->rim_width_mm();
+  if (rim > 0.0 && owner && !owner->is_shell()) {
+    const double e = region_edge_distance(*owner, p);
+    if (e < rim) {
+      const ClearanceGeometry& g = owner->prism;
+      const double h = 0.01;
+      const double du = region_edge_distance(*owner, Vec3{p.x + g.u.x * h, p.y + g.u.y * h, p.z + g.u.z * h}) -
+                        region_edge_distance(*owner, Vec3{p.x - g.u.x * h, p.y - g.u.y * h, p.z - g.u.z * h});
+      const double dw = region_edge_distance(*owner, Vec3{p.x + g.w.x * h, p.y + g.w.y * h, p.z + g.w.z * h}) -
+                        region_edge_distance(*owner, Vec3{p.x - g.w.x * h, p.y - g.w.y * h, p.z - g.w.z * h});
+      const double l = std::sqrt(du * du + dw * dw);
+      if (l > 0.0) {
+        // Toward the edge and one step past it.
+        const double go = e + std::max(0.2, 0.5 * rim);
+        const Vec3 out{p.x - (g.u.x * du + g.w.x * dw) / l * go, p.y - (g.u.y * du + g.w.y * dw) / l * go,
+                       p.z - (g.u.z * du + g.w.z * dw) / l * go};
+        if (part_.inside(out)) {
+          bool seam = false;
+          for (std::size_t i = 0; i < spec.regions.size() && !seam; ++i)
+            seam = spec.regions[i].role == Role::Lattice && holds_at(i, out, nullptr);
+          if (!seam) return {Why::Rim, id};
+        }
+      }
+    }
+  }
 
   // D8: lattice was asked for here; can the wall hold it?
   if (spec.min_wall_mm > 0.0 || wall_mm || room) {

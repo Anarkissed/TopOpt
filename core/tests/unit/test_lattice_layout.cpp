@@ -1828,6 +1828,88 @@ static void test_bars_join() {
   CHECK(loose_after == 0);
 }
 
+// S1, S2, S10: Finish Rim. One solid bar round a flat Lattice region's outline, as wide as
+// asked (two line widths by default), only where the part's solid backs it.
+static void test_rim() {
+  const Vec3 down{0, 0, -1};
+  PartMeasure pm(weld_mesh(box(30, 30, 12)));
+  auto domain = [&](double expand, double rim) {
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, {15, 15, 12}, down, 15, 15, 6, expand)};
+    s.rim_mm = rim;
+    return s;
+  };
+  for (double rim : {0.9, -1.0}) {   // asked for, and the default: two 0.45 mm lines
+    // The region pulled 3 mm in from the block's sides: solid all round it.
+    Domain d(pm, domain(-3.0, rim));
+    auto pr = d.probe();
+    CHECK((pr.where({15, 15, 10}) == Where{Why::Lattice, 1}));
+    CHECK((pr.where({3.5, 15, 10}) == Where{Why::Rim, 1}));      // 0.5 mm inside the edge
+    CHECK((pr.where({3.85, 15, 7}) == Where{Why::Rim, 1}));      // 0.85, and deeper: the bar is as deep as the lattice
+    CHECK((pr.where({3.95, 15, 10}) == Where{Why::Lattice, 1})); // 0.95: past the bar
+    CHECK((pr.where({2.5, 15, 10}) == Where{Why::NotAsked, 0})); // outside the region
+    CHECK((pr.where({3.5, 15, 5}) == Where{Why::NotAsked, 0}));  // below its depth
+    CHECK((pr.where({3.4, 3.4, 10}) == Where{Why::Rim, 1}));     // round the corner
+    CHECK((pr.where({26.5, 20, 10}) == Where{Why::Rim, 1}));
+    CHECK((pr.where({15, 26.5, 10}) == Where{Why::Rim, 1}));
+    // Exactly as smooth as the outline: along a straight edge the bar's inner side is a
+    // straight line, whatever the cells are doing.
+    int ragged = 0;
+    for (double y = 5; y < 25; y += 0.137) {
+      if (!(pr.where({3.899, y, 10}) == Where{Why::Rim, 1})) ++ragged;
+      if (!(pr.where({3.901, y, 10}) == Where{Why::Lattice, 1})) ++ragged;
+    }
+    CHECK(ragged == 0);
+    // The cells keep clear of it and the struts run on into it (S11).
+    CellSpec cs;
+    cs.cell_max_mm = 6;
+    Layout l = lay_cells(d, cs);
+    set_struts(l, StrutSpec{});
+    CHECK(!l.cells.empty());
+    int in_rim = 0;
+    for (double x = 3.05; x < 3.9; x += 0.2)
+      for (double y = 4; y < 26; y += 1.3)
+        for (const Cell& c : l.cells)
+          if (cell_holds(l, pr, c, {x, y, 10})) ++in_rim;
+    CHECK(in_rim == 0);
+    const Bars bars = lay_bars(l, d);
+    int into_rim = 0, bad = 0;
+    for (const Bar& b : bars.bars)
+      for (int e = 0; e < 2; ++e) {
+        const Bar::End kind = e ? b.end_b : b.end_a;
+        if (kind == Bar::End::Surface || kind == Bar::End::Loose) ++bad;
+        if (kind == Bar::End::Solid && pr.where(e ? b.b : b.a).why == Why::Rim) ++into_rim;
+      }
+    CHECK(bad == 0);          // nothing cut by air or left loose: the rim holds every cut end
+    CHECK(into_rim > 20);
+  }
+  {  // No rim asked (S8): the same points are lattice.
+    Domain d(pm, domain(-3.0, 0.0));
+    CHECK((d.probe().where({3.5, 15, 10}) == Where{Why::Lattice, 1}));
+  }
+  {  // S2: the region reaching the block's own sides. Its edge faces air: no bar there.
+    Domain d(pm, domain(0.0, 0.9));
+    auto pr = d.probe();
+    CHECK((pr.where({0.5, 15, 10}) == Where{Why::Lattice, 1}));
+    CHECK((pr.where({15, 29.6, 10}) == Where{Why::Lattice, 1}));
+    CHECK((pr.where({0.4, 0.4, 10}) == Where{Why::Lattice, 1}));
+  }
+  {  // S2: two regions side by side. No bar along the seam between them; a bar round the rest.
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, {9, 15, 12}, down, 6, 6, 6),
+                 face_region(2, Role::Lattice, {21, 15, 12}, down, 6, 6, 6)};
+    s.rim_mm = 0.9;
+    Domain d(pm, s);
+    auto pr = d.probe();
+    CHECK((pr.where({14.6, 15, 10}) == Where{Why::Lattice, 1}));   // at the seam, x = 15
+    CHECK((pr.where({15.4, 15, 10}) == Where{Why::Lattice, 2}));
+    CHECK((pr.where({3.4, 15, 10}) == Where{Why::Rim, 1}));
+    CHECK((pr.where({26.6, 15, 10}) == Where{Why::Rim, 2}));
+    CHECK((pr.where({9, 9.4, 10}) == Where{Why::Rim, 1}));
+    CHECK((pr.where({21, 20.6, 10}) == Where{Why::Rim, 2}));
+  }
+}
+
 // D5, D15, C15: with a Protect skin on a face, the lattice starts at the skin's own depth
 // and its cells divide what is left of the wall. The skin never cuts through a cell.
 static void test_cells_behind_a_protect_skin() {
@@ -2035,6 +2117,7 @@ int main() {
   test_kept_readings();
   test_bars();
   test_bars_join();
+  test_rim();
   test_struts();
   test_grade_to_shape();
   test_cells_prism();

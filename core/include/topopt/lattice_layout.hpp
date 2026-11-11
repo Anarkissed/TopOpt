@@ -206,6 +206,13 @@ struct DomainSpec {
   double min_wall_mm = 0.0;
   std::vector<Region> regions;
   std::vector<ProtectSkin> protect;
+  // Finish Rim (S1, S2, S10): one solid bar round each flat Lattice region's outline,
+  // this wide in the plane of the face and as deep as the lattice. It is the band of the
+  // region within this distance of its own edge (so it is exactly as smooth as the
+  // outline, never a row of blocks), and it stands only where the part's solid backs it:
+  // not where the edge faces air, and not along a seam with another Lattice region.
+  // 0 = no rim (S8). < 0 = the default width, two line widths (S10).
+  double rim_mm = 0.0;
 };
 
 enum class Why : std::uint8_t {
@@ -216,6 +223,8 @@ enum class Why : std::uint8_t {
   ProtectSkin,  // solid: within a Protect skin's depth; `id` is that skin (D5)
   WallTooThin,  // solid: lattice was asked for but the wall cannot hold it (D8);
                 // `id` is the region that asked, 0 = the whole part
+  Rim,          // solid: the rim round a flat Lattice region's outline (S1, S2, S10);
+                // `id` is that region
 };
 
 struct Where {
@@ -291,6 +300,8 @@ class Domain {
   double protect_depth_mm(const ProtectSkin& s) const {
     return s.depth_mm > 0.0 ? s.depth_mm : 2.0 * spec_.bead_mm;
   }
+  // The rim's width: the one asked for, or two line widths; 0 with no rim.
+  double rim_width_mm() const { return spec_.rim_mm < 0.0 ? 2.0 * spec_.bead_mm : spec_.rim_mm; }
 
  private:
   const PartMeasure* measure_;
