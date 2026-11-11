@@ -78,6 +78,10 @@ static void test_measure_box() {
   const double r = std::sqrt(0.5);
   NEAR(pr.wall_width({10, 20, 5}, {r, 0, r}), 10.0 / r, 0.01);  // across at 45 degrees
   NEAR(pr.wall_width({10, 20, 12}, {1, 0, 0}), 0.0, 0.0);       // outside: no wall
+  // A width read ALONG a face, half a micron from it: still the wall, 40 mm. (A cell
+  // face lying in a part face; it read 0 until 2026-11-10 and turned edge cells solid.)
+  NEAR(pr.wall_width({0.0005, 20, 5}, {0, 1, 0}), 40.0, 0.01);
+  NEAR(pr.wall_width({10, 20, 9.9995}, {1, 0, 0}), 20.0, 0.01);
 }
 
 static void test_measure_L() {
@@ -109,6 +113,13 @@ static void test_domain() {
     auto pr = d.probe();
     CHECK((pr.where({20, 20, 10}) == Where{Why::NotAsked, 0}));
     CHECK((pr.where({20, 20, 21}) == Where{Why::Outside, 0}));
+  }
+  {  // A point on the surface itself is not inside the part.
+    DomainSpec s;
+    s.start = Start::AllLattice;
+    Domain d(pm, s);
+    CHECK((d.probe().where({20, 20, 20}) == Where{Why::Outside, 0}));
+    CHECK((d.probe().where({0, 20, 10}) == Where{Why::Outside, 0}));
   }
   {  // D4: All lattice, one layout for the whole part.
     DomainSpec s;
@@ -499,7 +510,294 @@ static void test_pocket_and_thin_wall() {
   }
 }
 
+// ── stage C: cells ────────────────────────────────────────────────────────────
+// How many cells of `region` hold the point. The layout is right when the owner of
+// every lattice point holds it in exactly one cell: no gap, no overlap.
+static int cells_holding(const Layout& l, const Vec3& p, int region) {
+  int n = 0;
+  for (const Cell& c : l.cells) {
+    if (c.region != region) continue;
+    const Frame& f = l.frames[c.frame];
+    const Vec3 r{p.x - f.origin.x, p.y - f.origin.y, p.z - f.origin.z};
+    const double q[3] = {r.x * f.ax[0].x + r.y * f.ax[0].y + r.z * f.ax[0].z,
+                         r.x * f.ax[1].x + r.y * f.ax[1].y + r.z * f.ax[1].z,
+                         r.x * f.ax[2].x + r.y * f.ax[2].y + r.z * f.ax[2].z};
+    bool in = true;
+    for (int a = 0; a < 3; ++a) in = in && q[a] >= c.lo[a] && q[a] < c.lo[a] + c.size;
+    if (in) ++n;
+  }
+  return n;
+}
+static Vec3 cell_centre(const Layout& l, const Cell& c) {
+  return l.frames[c.frame].at(c.lo[0] + 0.5 * c.size, c.lo[1] + 0.5 * c.size, c.lo[2] + 0.5 * c.size);
+}
+// Over a lattice of probe points: points whose owner does not hold them in exactly one
+// cell, not counting points in space the layout itself lists as solid (D14).
+static int badly_covered(const Domain& d, const Layout& l, Vec3 lo, Vec3 hi, double step) {
+  auto pr = d.probe();
+  int bad = 0;
+  for (double x = lo.x + 0.37; x < hi.x; x += step)
+    for (double y = lo.y + 0.41; y < hi.y; y += step)
+      for (double z = lo.z + 0.43; z < hi.z; z += step) {
+        const Where w = pr.where({x, y, z});
+        if (!w.lattice()) continue;
+        if (cells_holding(l, {x, y, z}, w.id) == 1) continue;
+        Layout as_solid;
+        as_solid.frames = l.frames;
+        as_solid.cells = l.solid;
+        if (cells_holding(as_solid, {x, y, z}, w.id) == 1) continue;
+        ++bad;
+      }
+  return bad;
+}
+
+static void test_cells_prism() {
+  PartMeasure pm(weld_mesh(box(40, 40, 20)));
+  const Vec3 top{20, 20, 20}, down{0, 0, -1};
+  {  // C3, C15, C1: an 8 mm wall holds 2 cells across: 4 mm cells, 10 x 10 x 2 of them.
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, top, down, 20, 20, 8)};
+    Domain d(pm, s);
+    CellSpec cs;
+    cs.algorithm = Algorithm::Uniform;
+    cs.cell_max_mm = 8;
+    const Layout l = lay_cells(d, cs);
+    NEAR(l.floor_cell_mm, 0.45 * 5.268704, 1e-5);          // C14
+    CHECK(l.cells.size() == 200);
+    CHECK(l.solid.empty());
+    CHECK(l.regions.size() == 1 && l.regions[0].region == 1);
+    NEAR(l.regions[0].base_cell_mm, 4.0, 1e-9);
+    int odd = 0;
+    for (const Cell& c : l.cells) {
+      if (std::fabs(c.size - 4.0) > 1e-9 || c.cut || c.region != 1) ++odd;
+      // C15: the face and the far side of the wall are cell boundaries.
+      if (std::fabs(c.lo[2] - 0.0) > 1e-9 && std::fabs(c.lo[2] - 4.0) > 1e-9) ++odd;
+    }
+    CHECK(odd == 0);
+    CHECK(badly_covered(d, l, {0, 0, 0}, {40, 40, 20}, 1.7) == 0);
+  }
+  {  // C2: "a 13mm cell never be on a 12mm wall; instead have a 12mm cell on the 12mm wall".
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, top, down, 20, 20, 12)};
+    Domain d(pm, s);
+    CellSpec cs;
+    cs.algorithm = Algorithm::Uniform;
+    cs.cell_max_mm = 13;
+    cs.min_cells_across = 1;                               // C4: single-cell members
+    const Layout l = lay_cells(d, cs);
+    CHECK(!l.cells.empty());
+    for (const Cell& c : l.cells) NEAR(c.size, 12.0, 1e-9);
+    cs.cell_max_mm = 8;                                    // C3: two across -> 6 mm
+    cs.min_cells_across = 2;
+    const Layout l2 = lay_cells(d, cs);
+    CHECK(!l2.cells.empty());
+    for (const Cell& c : l2.cells) NEAR(c.size, 6.0, 1e-9);
+    cs.min_cells_across = 5;                               // C5: five across -> 2.4 mm
+    const Layout l5 = lay_cells(d, cs);
+    CHECK(!l5.cells.empty());
+    for (const Cell& c : l5.cells) NEAR(c.size, 2.4, 1e-9);
+  }
+  {  // C9: a symmetric face gets a symmetric layout, whether or not the cells divide it.
+    PartMeasure wide(weld_mesh(box(41, 40, 20)));
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, {20.5, 20, 20}, down, 21, 21, 8)};      // covers the whole face
+    Domain d(wide, s);
+    CellSpec cs;
+    cs.algorithm = Algorithm::Uniform;
+    const Layout l = lay_cells(d, cs);
+    CHECK(!l.cells.empty());
+    int unmatched = 0, cut = 0;
+    for (const Cell& c : l.cells) {
+      if (c.cut) ++cut;
+      bool found = false;
+      for (const Cell& o : l.cells)
+        if (std::fabs(o.lo[0] + o.size + c.lo[0]) < 1e-9 && std::fabs(o.lo[1] + o.size + c.lo[1]) < 1e-9 &&
+            std::fabs(o.lo[2] - c.lo[2]) < 1e-9 && o.size == c.size && o.cut == c.cut)
+          found = true;
+      if (!found) ++unmatched;
+    }
+    CHECK(unmatched == 0);
+    CHECK(cut > 0);   // D3: the cells at the edge are whole cells, cut
+    CHECK(badly_covered(d, l, {0, 0, 0}, {41, 40, 20}, 1.7) == 0);
+  }
+  {  // D13, D18: two regions that overlap. The order they are listed in, and running
+     // twice, change nothing; every lattice point is held once by its owner.
+    std::vector<Region> a = {face_region(1, Role::Lattice, top, down, 20, 20, 12),
+                             face_region(3, Role::Lattice, {20, 20, 0}, {0, 0, 1}, 20, 20, 15)};
+    DomainSpec s1, s2;
+    s1.regions = a;
+    s2.regions.assign(a.rbegin(), a.rend());
+    Domain d1(pm, s1), d2(pm, s2);
+    CellSpec cs;
+    cs.algorithm = Algorithm::Uniform;
+    const Layout l1 = lay_cells(d1, cs), l2 = lay_cells(d2, cs), l3 = lay_cells(d1, cs);
+    CHECK(l1.cells.size() > 100);
+    CHECK(l1.cells == l2.cells);
+    CHECK(l1.cells == l3.cells);
+    CHECK(badly_covered(d1, l1, {0, 0, 0}, {40, 40, 20}, 1.7) == 0);
+    // No region lays a whole cell in space another region owns.
+    int trespass = 0;
+    auto pr = d1.probe();
+    for (const Cell& c : l1.cells)
+      if (!c.cut && !(pr.where(cell_centre(l1, c)) == Where{Why::Lattice, c.region})) ++trespass;
+    CHECK(trespass == 0);
+  }
+}
+
+static void test_cells_walls_under_a_face() {
+  // Behind the y = 0 face the material is 12 mm for x < 30 and 6 mm for x > 30.
+  PartMeasure pm(weld_mesh(prism({{0, 0}, {60, 0}, {60, 6}, {30, 6}, {30, 12}, {0, 12}}, 0, 40)));
+  DomainSpec s;
+  s.regions = {face_region(1, Role::Lattice, {30, 0, 20}, {0, 1, 0}, 30, 30, 12)};   // covers the whole face
+  Domain d(pm, s);
+  for (Algorithm algo : {Algorithm::Uniform, Algorithm::DefaultGrade}) {
+    // C11, C12, C15 (settled 2026-11-10, item 6): each wall's cells divide THAT wall.
+    // Two across: 6 mm cells in the 12 mm wall, 3 mm cells in the 6 mm wall.
+    CellSpec cs;
+    cs.algorithm = algo;
+    const Layout l = lay_cells(d, cs);
+    CHECK(l.solid.empty());
+    int wrong_size = 0, off_wall = 0, thick = 0, thin = 0, cut = 0;
+    for (const Cell& c : l.cells) {
+      const Vec3 m = cell_centre(l, c);
+      const double want = m.x < 30 ? 6.0 : 3.0, wall = m.x < 30 ? 12.0 : 6.0;
+      if (std::fabs(c.size - want) > 1e-9) ++wrong_size;
+      (m.x < 30 ? thick : thin) += 1;
+      // The face and the wall's far side are cell boundaries: depth is a whole number
+      // of cells, and no cell reaches past the wall.
+      const double layer = c.lo[2] / c.size;
+      if (std::fabs(layer - std::round(layer)) > 1e-9 || c.lo[2] + c.size > wall + 1e-9) ++off_wall;
+      if (c.cut) ++cut;
+    }
+    CHECK(wrong_size == 0);
+    CHECK(off_wall == 0);
+    // 30 x 40 of face each: 5 x 7 x 2 cells of 6 mm (40 is not a multiple of 6: seven,
+    // the two end rows cut), and 10 x 14 x 2 cells of 3 mm (fourteen, likewise).
+    CHECK(thick == 5 * 7 * 2);
+    CHECK(thin == 10 * 14 * 2);
+    CHECK(cut == 5 * 2 * 2 + 10 * 2 * 2);   // only the rows cut by the 40 mm height
+    CHECK(badly_covered(d, l, {0, 0, 0}, {60, 12, 40}, 1.3) == 0);
+    const Layout again = lay_cells(d, cs);
+    CHECK(l.cells == again.cells);          // D18
+  }
+}
+
+static void test_cells_ledge_is_not_a_wall() {
+  // A 12 mm wall, a 6 mm wall, and between them a ledge 0.8 mm wide and 7 mm deep that
+  // runs the part's whole 60 mm height. A full row of map nodes lands on the ledge, more
+  // than enough of them to count as a stretch; it is still not a wall, and no 3.5 mm
+  // cells are laid for it.
+  PartMeasure pm(weld_mesh(prism({{0, 0}, {60, 0}, {60, 6}, {31.2, 6}, {31.2, 7}, {30.4, 7}, {30.4, 12}, {0, 12}}, 0, 60)));
+  DomainSpec s;
+  s.regions = {face_region(1, Role::Lattice, {30, 0, 30}, {0, 1, 0}, 30, 30, 12)};
+  Domain d(pm, s);
+  CellSpec cs;
+  cs.algorithm = Algorithm::Uniform;
+  const Layout l = lay_cells(d, cs);
+  int ledge_cells = 0, six = 0, three = 0;
+  for (const Cell& c : l.cells) {
+    if (std::fabs(c.size - 3.5) < 1e-6) ++ledge_cells;
+    if (std::fabs(c.size - 6.0) < 1e-9) ++six;
+    if (std::fabs(c.size - 3.0) < 1e-9) ++three;
+  }
+  CHECK(ledge_cells == 0);
+  CHECK(six > 80);
+  CHECK(three > 300);
+}
+
+static void test_cells_whole_part() {
+  // A 20 mm wall and a 6 mm wall, 40 tall.
+  PartMeasure pm(weld_mesh(prism({{0, 0}, {60, 0}, {60, 6}, {20, 6}, {20, 60}, {0, 60}}, 0, 40)));
+  DomainSpec s;
+  s.start = Start::AllLattice;
+  Domain d(pm, s);
+  const double floor_cell = 0.45 * 5.268704;
+  {  // C7, C17, C12: Default Grade. The base is the floor doubled (4.74 mm, the largest
+     // under 8 whose halves land on the floor); the thin wall takes the half.
+    CellSpec cs;   // Default Grade, Auto, up to 8 mm, two across
+    const Layout l = lay_cells(d, cs);
+    CHECK(l.regions.size() == 1 && l.regions[0].region == 0);
+    NEAR(l.regions[0].base_cell_mm, 2 * floor_cell, 1e-5);
+    int big_in_thin = 0, small_in_thick = 0, off_ladder = 0, too_wide = 0, below_floor = 0;
+    auto pr = d.probe();
+    for (const Cell& c : l.cells) {
+      const bool is_base = std::fabs(c.size - 2 * floor_cell) < 1e-5;
+      const bool is_half = std::fabs(c.size - floor_cell) < 1e-5;
+      if (!is_base && !is_half) ++off_ladder;                 // C7: S, S/2, ...
+      if (c.size < floor_cell - 1e-6) ++below_floor;          // C14
+      const Vec3 m = cell_centre(l, c);
+      if (m.x > 26 && m.y > 0 && m.y < 6 && m.z > 0 && m.z < 40 && !is_half) ++big_in_thin;
+      if (m.x > 6 && m.x < 14 && m.y > 14 && m.y < 54 && m.z > 6 && m.z < 34 && !is_base) ++small_in_thick;
+      if (pr.part().depth(m) > 0 && c.size > pr.part().thickness(m) / 2 + 1e-6) ++too_wide;   // C3
+    }
+    CHECK(!l.cells.empty());
+    CHECK(off_ladder == 0);
+    CHECK(below_floor == 0);
+    CHECK(big_in_thin == 0);
+    CHECK(small_in_thick == 0);   // C1: no smaller than the wall needs
+    CHECK(too_wide == 0);
+    CHECK(l.solid.empty());
+    CHECK(badly_covered(d, l, {0, 0, 0}, {60, 60, 40}, 2.3) == 0);
+  }
+  {  // C16, D8, D14: Manual 4 mm is one size everywhere. The 6 mm wall cannot hold two
+     // 4 mm cells: it is solid, and listed as solid, not left as a hole.
+    CellSpec cs;
+    cs.algorithm = Algorithm::Uniform;
+    cs.cell_mm = 4.0;
+    const Layout l = lay_cells(d, cs);
+    int other_size = 0, cell_in_thin = 0, solid_in_thick = 0;
+    for (const Cell& c : l.cells) {
+      if (std::fabs(c.size - 4.0) > 1e-9) ++other_size;
+      const Vec3 m = cell_centre(l, c);
+      if (m.x > 26 && m.y > 0 && m.y < 6) ++cell_in_thin;
+    }
+    for (const Cell& c : l.solid) {
+      const Vec3 m = cell_centre(l, c);
+      if (m.x > 6 && m.x < 14 && m.y > 14 && m.y < 54 && m.z > 6 && m.z < 34) ++solid_in_thick;
+    }
+    CHECK(!l.cells.empty());
+    CHECK(other_size == 0);
+    CHECK(cell_in_thin == 0);
+    CHECK(!l.solid.empty());
+    CHECK(solid_in_thick == 0);
+    CHECK(l.regions[0].solid == l.solid.size() && l.regions[0].cells == l.cells.size());
+    CHECK(badly_covered(d, l, {0, 0, 0}, {60, 60, 40}, 2.3) == 0);
+    // C4: with single-cell members the same wall holds one 4 mm cell across.
+    cs.min_cells_across = 1;
+    const Layout l1 = lay_cells(d, cs);
+    int in_thin = 0;
+    for (const Cell& c : l1.cells) {
+      const Vec3 m = cell_centre(l1, c);
+      if (m.x > 26 && m.y > 0 && m.y < 6) ++in_thin;
+    }
+    CHECK(in_thin > 0);
+  }
+}
+
+static void test_cells_curved_region() {
+  int L = -1, square = -1, sideA = -1, sideB = -1;
+  const StepModel model = plate_with_L_face(&L, &square, &sideA, &sideB);
+  PartMeasure pm(weld_mesh(model.mesh));
+  DomainSpec s;
+  s.regions = {region_from_faces(model, {sideA, sideB}, 2, Role::Lattice, 5)};
+  Domain d(pm, s);
+  CellSpec cs;   // Default Grade
+  const Layout l = lay_cells(d, cs);
+  // 5 mm deep, two across: cells of at most 2.5 mm, so the floor cell (2.37).
+  CHECK(!l.cells.empty());
+  int wrong = 0;
+  for (const Cell& c : l.cells)
+    if (c.region != 2 || std::fabs(c.size - 0.45 * 5.268704) > 1e-5) ++wrong;
+  CHECK(wrong == 0);
+  CHECK(badly_covered(d, l, {0, 0, 0}, {60, 60, 10}, 1.3) == 0);
+}
+
 int main() {
+  test_cells_prism();
+  test_cells_walls_under_a_face();
+  test_cells_ledge_is_not_a_wall();
+  test_cells_whole_part();
+  test_cells_curved_region();
   test_face_regions();
   test_pocket_and_thin_wall();
   test_measure_box();

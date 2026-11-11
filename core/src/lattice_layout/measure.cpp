@@ -63,15 +63,28 @@ PartMeasure::PartMeasure(TriangleMesh mesh)
 }
 
 // Walk from p along the direction by the exact distance to the surface: a step of that
-// length can never cross it. Each step lands nearer, and on a face met square-on the
-// first step lands on it exactly. Stops within a micron.
+// length can never cross it, and on a face met square-on the first step lands on it
+// exactly. A ray that runs ALONG a surface a hair away from it (a cell face lying in a
+// part face, which round numbers produce all the time) would crawl, so a step is never
+// under 0.01 mm; the crossing it may then overshoot is found again by halving.
 double PartMeasure::Probe::reach(const Vec3& p, const Vec3& d) const {
-  const double kStop = 1e-3;   // mm
-  double t = 0.0;
-  for (int i = 0; i < 4096 && t < max_mm_; ++i) {
-    const double s = md_.signed_distance(Vec3{p.x + d.x * t, p.y + d.y * t, p.z + d.z * t});
-    if (s <= kStop) return i == 0 && s <= 0.0 ? 0.0 : t + std::max(s, 0.0);
-    t += s;
+  const double kMinStep = 0.01;   // mm
+  auto depth_at = [&](double t) {
+    return md_.signed_distance(Vec3{p.x + d.x * t, p.y + d.y * t, p.z + d.z * t});
+  };
+  double t = 0.0, s = depth_at(0.0);
+  if (s <= 0.0) return 0.0;
+  for (int i = 0; i < 100000 && t < max_mm_; ++i) {
+    const double prev = t;
+    t += std::max(s, kMinStep);
+    s = depth_at(t);
+    if (s > 0.0) continue;
+    double in = prev, out = t;          // inside at `in`, not inside at `out`
+    for (int k = 0; k < 24 && out - in > 1e-6; ++k) {
+      const double m = 0.5 * (in + out);
+      if (depth_at(m) > 0.0) in = m; else out = m;
+    }
+    return 0.5 * (in + out);
   }
   return t;
 }

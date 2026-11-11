@@ -57,10 +57,12 @@ Domain::Probe::Probe(const Domain& d) : d_(&d), part_(d.measure_->probe()) {
   for (const Region& r : d.spec_.regions) shells_.emplace_back(r.shell);
 }
 
-Where Domain::Probe::where(const Vec3& p) const {
+Where Domain::Probe::where(const Vec3& p, double* wall_mm) const {
   const DomainSpec& spec = d_->spec_;
   // D2: a prism only turns existing solid into lattice.
-  if (part_.depth(p) <= 0.0) return {Why::Outside, 0};
+  // A point ON the surface (within a nanometre) is not inside: a width measured from it
+  // has nowhere to start, and the distance there is rounding, not geometry.
+  if (part_.depth(p) <= 1e-6) return {Why::Outside, 0};
 
   // D5, D15: a Protect skin is solid to its exact depth, measured from the face itself,
   // whatever else covers the point. The lattice starts right behind it.
@@ -122,10 +124,11 @@ Where Domain::Probe::where(const Vec3& p) const {
   const int id = owner ? owner->id : 0;                                       // D4
 
   // D8: lattice was asked for here; can the wall hold it?
-  if (spec.min_wall_mm > 0.0) {
+  if (spec.min_wall_mm > 0.0 || wall_mm) {
     const double wall = owner && !owner->is_shell() ? part_.wall_width(p, owner->prism.normal)
                                                      : part_.thickness(p);
-    if (wall < spec.min_wall_mm) return {Why::WallTooThin, id};
+    if (wall_mm) *wall_mm = wall;
+    if (spec.min_wall_mm > 0.0 && wall < spec.min_wall_mm) return {Why::WallTooThin, id};
   }
   return {Why::Lattice, id};
 }

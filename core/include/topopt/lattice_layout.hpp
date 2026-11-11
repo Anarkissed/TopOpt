@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "topopt/clearance.hpp"
+#include "topopt/lattice.hpp"
 #include "topopt/mesh.hpp"
 #include "topopt/mesh_distance.hpp"
 #include "topopt/step.hpp"
@@ -185,7 +186,9 @@ class Domain {
   class Probe {
    public:
     // Rule D1: the answer depends on geometry and settings only. No stress input exists.
-    Where where(const Vec3& p) const;
+    // `wall_mm`, when given and the answer is Lattice or WallTooThin, receives the wall's
+    // width at `p` as rule D8 reads it (along the owning prism, or the thickness there).
+    Where where(const Vec3& p, double* wall_mm = nullptr) const;
     const PartMeasure::Probe& part() const { return part_; }
 
    private:
@@ -199,6 +202,7 @@ class Domain {
   Probe probe() const { return Probe(*this); }
 
   const DomainSpec& spec() const { return spec_; }
+  const PartMeasure& measure() const { return *measure_; }
   // The depth a Protect skin is solid to: its own, or two line widths at 0 (rule D5).
   double protect_depth_mm(const ProtectSkin& s) const {
     return s.depth_mm > 0.0 ? s.depth_mm : 2.0 * spec_.bead_mm;
@@ -208,6 +212,72 @@ class Domain {
   const PartMeasure* measure_;
   DomainSpec spec_;
 };
+
+// ── CELLS (stage C) ───────────────────────────────────────────────────────────
+// Where the cells are and how big. One call lays every region; the preview draws the
+// result and the run builds from it.
+enum class Algorithm : std::uint8_t {
+  Uniform,       // one cell size per region; a wall it does not fit is solid (C16)
+  DefaultGrade,  // halves: S, S/2, S/4 ... down to the printable floor (C7)
+};
+
+struct CellSpec {
+  Algorithm algorithm = Algorithm::DefaultGrade;
+  LatticeTopology topology = LatticeTopology::Octet;
+  // Manual cell size, mm. 0 = Auto: the largest cell that fits, up to `cell_max_mm` (C1).
+  double cell_mm = 0.0;
+  double cell_max_mm = 8.0;
+  // No cell smaller than this. 0 = the printable floor alone (C14).
+  double cell_min_mm = 0.0;
+  // Cells a wall must hold across: 2 Aesthetic (C3), 1 with single-cell members (C4),
+  // 5 Structural (C5).
+  int min_cells_across = 2;
+};
+
+// Cells are cubes on a frame: world position = origin + ax[0]*a + ax[1]*b + ax[2]*c.
+// A flat region's frame is its face's own (in-plane, in-plane, inward), so the face is
+// a cell boundary (C15). The whole part, and a curved region, use the part's axes.
+struct Frame {
+  Vec3 origin{};
+  Vec3 ax[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+  Vec3 at(double a, double b, double c) const {
+    return {origin.x + ax[0].x * a + ax[1].x * b + ax[2].x * c,
+            origin.y + ax[0].y * a + ax[1].y * b + ax[2].y * c,
+            origin.z + ax[0].z * a + ax[1].z * b + ax[2].z * c};
+  }
+};
+
+struct Cell {
+  int region = 0;       // the owning region; 0 = the whole part
+  int frame = 0;        // index into Layout::frames
+  double lo[3] = {0, 0, 0};   // the cube's low corner, in frame coordinates, mm
+  double size = 0.0;    // mm
+  bool cut = false;     // the region's edge or the part's surface passes through it (D3)
+  bool operator==(const Cell& o) const {
+    return region == o.region && frame == o.frame && lo[0] == o.lo[0] && lo[1] == o.lo[1] &&
+           lo[2] == o.lo[2] && size == o.size && cut == o.cut;
+  }
+};
+
+struct RegionCells {
+  int region = 0;
+  int frame = 0;
+  double base_cell_mm = 0.0;   // the size the region starts from
+  std::size_t cells = 0;
+  std::size_t solid = 0;       // places lattice was asked for and no allowed cell fits
+};
+
+struct Layout {
+  double floor_cell_mm = 0.0;        // the smallest cell that prints open (C14)
+  std::vector<Frame> frames;
+  std::vector<Cell> cells;           // in a fixed order: same input, same bytes (D18)
+  // D14: space inside a region no cell covers. Solid, and drawn solid. Same shape as a
+  // cell: the cube that was tried and did not fit.
+  std::vector<Cell> solid;
+  std::vector<RegionCells> regions;
+};
+
+Layout lay_cells(const Domain& domain, const CellSpec& spec);
 
 // Is `p` in the region's prism, with its Expand? At Expand 0 this IS
 // point_in_clearance_region(prism, p, 0). Exposed for tests.
