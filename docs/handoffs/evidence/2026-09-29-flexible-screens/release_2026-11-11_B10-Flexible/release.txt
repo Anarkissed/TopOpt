@@ -1,0 +1,16 @@
+# Release 175eb21a — 2026-11-11 B10-Flexible (B10 Flexible plain names, dcb61347), app only
+# Core and worker unchanged: fingerprint 54d2ce825a74; "fingerprint": "54d2ce825a74"
+# Merged onto 5917acbc; the merged app tree equals B10-Flexible's, so its gate applies unchanged.
+# Commits (first parent of B10-Flexible since the release tip):
+#   19e8d0d4 B10 Flexible (#362): plain face names on every Flexible row, chip, card and line (U4 words; the ledger's "Face N 2")
+#   dcb61347 B10 Flexible (#362): merge the release tip 5917acbc (2ed2be45 B9-B10 + evidence); clean
+# Gates:
+#   B10 Flexible plain names (19e8d0d4): build + 8 direct readers green (53/0); all 208 Flexible classes + readers run (1073 passed, 21 skipped, 25 red, every red this change's own pin or cut line); fixed or re-pinned, then 26 classes (197/6) and those 6 (64/0) re-run green. The 3 known 3MF imports stay out (no lib3mf on the Mac test build).
+#   12:41 evidence 5917acbc pushed; release 2ed2be45 DONE
+#   17:59 checks ok: B10-Flexible dcb61347, 2 commit(s), app-only, onto 5917acbc, fingerprint 54d2ce825a74
+#   17:59 merged 175eb21a; app tree == B10-Flexible's, fingerprint 54d2ce825a74
+#   17:59 waiting for HEAVY.lock (free)
+#   17:59 lock taken (15 GB free)
+#   18:06 iPad device build green; lock released
+#   18:06 pushed 175eb21a
+#   18:06 worker /health "fingerprint": "54d2ce825a74" (unchanged, no swap)
