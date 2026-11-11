@@ -1,0 +1,22 @@
+# Release 2ed2be45 — 2026-11-11 B9-B10 (B9 Flexible screens + B10 uniformity sweep, ffa4f51d), app only
+# Core and worker unchanged: fingerprint 54d2ce825a74; "fingerprint": "54d2ce825a74"
+# Merged onto 2ce80139; the merged app tree equals B9-B10's, so its gate applies unchanged.
+# Structural lattice strength results aren't to be trusted for load-bearing parts until the rebuild's stage F.
+# Commits (first parent of B9-B10 since the release tip):
+#   4b975ff2 B9 screens (#362; the reviewer's 20:54Z re-plan; WIP, LOCAL, UNBUILT): Cancel, Export part's plan, the Play view, J-1
+#   2911cdf9 Merge UI-Notes' B9 Flexible Setup (C) ab9b7ea9 into B9 screens (#362); clean, no source clash (showsPrintPlan's signature unchanged)
+#   873c6db1 Merge UI-Notes' B9 Setup follow-up a75e0bd2 (the chip at the face says No lattice; the reviewer's 02:28Z ruling (1)(a)) into B9 screens (#362)
+#   d9b65df7 B9 screens (#362): merge the release (4) tip 2ce80139 (95e66119 + evidence; core 54d2ce825a74); clean
+#   ffa4f51d B9 screens (#362): merge UI-Notes' B10 uniformity sweep 8560bcb6 (on a75e0bd2/ab9b7ea9); one conflict kept both sides
+# Gates:
+#   B9+B10 union gate on ffa4f51d (core 54d2ce825a74): 525 classes. New classes first (27 classes: 84 passed, 0 failed),
+#   then 8 chunks + his stand's 5 classes (HIS_PROJECT_DIR, read only): 3231 passed, 55 skipped, 3 failed.
+#   The 3 reds are the known 3MF imports (the Mac test build has no lib3mf): AppModelTests.testReopenedThreeMFProjectReimportsTheStlWorkingCopy,
+#   testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance, testThreeMFImportOptimisesOnDeviceEndToEnd.
+#   12:34 checks ok: B9-B10 ffa4f51d, 8 commit(s), app-only, onto 2ce80139, fingerprint 54d2ce825a74
+#   12:34 merged 2ed2be45; app tree == B9-B10's, fingerprint 54d2ce825a74
+#   12:34 waiting for HEAVY.lock (free)
+#   12:34 lock taken (15 GB free)
+#   12:40 iPad device build green; lock released
+#   12:41 pushed 2ed2be45
+#   12:41 worker /health "fingerprint": "54d2ce825a74" (unchanged, no swap)
