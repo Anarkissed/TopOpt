@@ -265,7 +265,7 @@ final class FlexibleU21OneDepthNumberTests: XCTestCase {
         let line = autoLine(m)
         print("FLEX-U21-F8 l-bracket 7 mm his curve: RED (today) '\(red)' · now '\(line)' · failures \(m.recommendation?.failures.map { "\($0.face): firm \($0.tooFirm) soft \($0.tooSoft) beyond \($0.beyondData)" } ?? [])")
         XCTAssertEqual(red, FlexibleRowCopy.autoUnreachable, "RED CONTROL: today's line")
-        XCTAssertEqual(line, "Auto: Face 6 needs more weight or less depth", "★ names his face and what it takes")
+        XCTAssertEqual(line, "Auto: Top face 2 \u{00B7} more weight or less depth", "★ names his face and what it takes")
         XCTAssertLessThanOrEqual(line.count, FlexibleRowCopy.maxChars)
         let panel = try FlexibleSource.code("FlexibleFacePanel.swift")
         XCTAssertTrue(panel.contains("blocker: model.autoBlocker(r))"), "★ the More tab's row reads it")
@@ -295,8 +295,8 @@ final class FlexibleU21OneDepthNumberTests: XCTestCase {
         print("FLEX-U21-F9 pad 0.1 mm: '\(line)' · worst \(m.autoName(w.face)) firm \(w.tooFirm) soft \(w.tooSoft) beyond \(w.beyondData) · red '\(autoLine(m, blocker: false))'")
         XCTAssertEqual(autoLine(m, blocker: false), FlexibleRowCopy.autoUnreachable, "RED CONTROL: today's line")
         XCTAssertGreaterThan(w.tooSoft, w.tooFirm, "premise: too soft (even the firmest lattice squishes deeper)")
-        XCTAssertEqual(line, "Auto: \(m.autoName(w.face)) needs less weight or more depth", "★ names the face, the direction from core's counts")
-        XCTAssertTrue(line.hasPrefix("Auto: Face "))
+        XCTAssertEqual(line, "Auto: Right side \u{00B7} less weight or more depth" /* ★ B10: the plain name; 48 > 44, so the short form */, "★ names the face, the direction from core's counts")
+        XCTAssertNil(line.range(of: #"Face \d"#, options: .regularExpression), "★ B10: no face number")
     }
 
     func testAutoNamesTheBlockingPress() async throws {

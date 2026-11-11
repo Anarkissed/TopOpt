@@ -60,7 +60,7 @@ public struct FlexibleCoreRunReport: Equatable, Sendable {
 
     /// The Export step's one line about core.
     public var line: String {
-        if let r = refusal { return Self.refusalLine(r, names: { regionNames[$0] ?? "Face \($0)" }) }
+        if let r = refusal { return Self.refusalLine(r, names: { regionNames[$0] ?? FlexibleRowCopy.aFace }) }
         var parts = ["Core designed it"]
         if let s = scope { parts.append(s) }
         if let t = topology { parts.append(t.prefix(1).uppercased() + t.dropFirst()) }

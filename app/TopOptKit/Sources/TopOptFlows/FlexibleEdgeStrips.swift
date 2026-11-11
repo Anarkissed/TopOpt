@@ -286,7 +286,7 @@ public enum FlexibleEdgeStrips {
     @discardableResult
     public static func surfaceCut(_ m: inout FaceRegionModel, face: Int, target: Int? = nil, point: SIMD3<Double>,
                                   normal: SIMD3<Double>, mesh: ViewerMesh) -> [RegionID] {
-        let t = target ?? m.union(faces: [FaceID(face)], named: "Face \(face)")
+        let t = target ?? m.union(faces: [FaceID(face)], named: FlexibleSectors.dataName(face))
         let kids = m.splitManual(t, point: point, normal: normal)
         var leaves: [RegionID] = []
         for k in kids {
@@ -349,7 +349,7 @@ public enum FlexibleEdgeStrips {
                 let f = all[i].strip.members[k].face
                 let r: Int
                 if let id = made[f] ?? identity(of: f, in: m) { r = id } else {
-                    r = m.union(faces: [FaceID(f)], named: "Face \(f)")
+                    r = m.union(faces: [FaceID(f)], named: FlexibleSectors.dataName(f))
                 }
                 made[f] = r
                 all[i].strip.members[k].root = r
@@ -417,13 +417,13 @@ public enum FlexibleEdgeStrips {
                     cur = kept[0]
                 }
                 guard ok else {
-                    out.refused[p.id] = FlexibleRowCopy.fit("\(p.strip.label) needs two parts of Face \(face)")
+                    out.refused[p.id] = FlexibleRowCopy.fit("\(p.strip.label) needs two parts of its face")
                     continue
                 }
                 pieceOf[p.id, default: [:]][p.k] = cur
             }
             // names: the pick's piece names its pick and the face; the rest keeps the face's name
-            let baseName = r.name.isEmpty ? "Face \(face)" : r.name
+            let baseName = r.name.isEmpty ? FlexibleSectors.dataName(face) : r.name
             for p in picks { if let id = pieceOf[p.id]?[p.k] { m.rename(id, to: "\(p.strip.label) · \(baseName)") } }
             let rest = free.sorted()
             for (i, id) in rest.enumerated() { m.rename(id, to: rest.count == 1 ? baseName : "\(baseName) · part \(i + 1)") }
@@ -440,7 +440,7 @@ public enum FlexibleEdgeStrips {
                 } else if !roots.contains(mb.root), let old = e.regions, k < old.count {
                     regs.append(old[k])   // a chain not re-cut keeps its piece
                 } else if out.refused[e.id] == nil {
-                    out.refused[e.id] = FlexibleRowCopy.fit("\(e.strip.label) · nothing to press on Face \(mb.face)")
+                    out.refused[e.id] = FlexibleRowCopy.fit("\(e.strip.label) · nothing to press on its face")
                 }
             }
             out.regions[e.id] = regs

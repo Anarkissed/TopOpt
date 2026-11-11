@@ -241,7 +241,7 @@ final class FlexibleLatticeEvidenceProbe: XCTestCase {
             let d = try scene.design(materialsPath: FlexibleStageTests.materialsPath, materialID: "varioshore_tpu",
                                      tempC: 220, face: id, rotation: 0, map: Self.map, weightN: kg * 9.80665,
                                      stamp: nil, build: build)
-            XCTAssertNil(d.refusal, "\(regions.name(id, mesh: part))")
+            XCTAssertNil(d.refusal, "\(regions.name(id, mesh: part, plain: { "face \($0)" }))")
             let st = try scene.stack(face: id, rotation: 0)
             let key = FlexFaceKey(region: id, rotation: 0)
             let geo = try FlexFaceGeometry.compute(scene: scene, key: key, stack: st, partFlat: part.flat.positions)
@@ -254,8 +254,8 @@ final class FlexibleLatticeEvidenceProbe: XCTestCase {
         let li = try FlexibleLatticeBuilder.inputs(field: field, part: part, topology: "gyroid", beadsPerWall: 1,
                                                    beadWidthMM: 0.42, buildDir: SIMD3(0, 0, 1), skinOffFaces: [])
         let p = Self.page(part: part, faces: faces, inputs: li, topology: "gyroid", generation: 9)
-        print("FLEX-EVIDENCE split pad: \(regions.name(left, mesh: part)) 10 kg deepest \(p.lattice.faces[0].maxDepthMM) mm; "
-              + "\(regions.name(right, mesh: part)) 25 kg deepest \(p.lattice.faces[1].maxDepthMM) mm; exaggeration × \(p.shown.exaggeration)")
+        print("FLEX-EVIDENCE split pad: \(regions.name(left, mesh: part, plain: { "face \($0)" })) 10 kg deepest \(p.lattice.faces[0].maxDepthMM) mm; "
+              + "\(regions.name(right, mesh: part, plain: { "face \($0)" })) 25 kg deepest \(p.lattice.faces[1].maxDepthMM) mm; exaggeration × \(p.shown.exaggeration)")
         try render(p, device: device, name: "split_pad_10kg_25kg", amplitudes: [("rest", 0), ("full", 1)])
     }
 }

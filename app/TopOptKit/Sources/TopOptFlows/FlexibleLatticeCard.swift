@@ -73,13 +73,13 @@ public enum FlexibleLatticeCard {
         offersSend(state: state, run: run) ? summary() : nil
     }
 
-    /// ① Preview's line from the face-prisms the job sends: ★ the review of R7-D1 — named as Selections names them ("Face 3 +
+    /// ① Preview's line from the face-prisms the job sends: ★ the review of R7-D1 — named as Selections names them ("Top face +
     /// Face 5", the mockup's), the count past two (one line), a split piece by count.
-    static func previewLine(includes inc: [LatticeRegionSpec]) -> String {
+    static func previewLine(includes inc: [LatticeRegionSpec], name: (Int) -> String) -> String {
         guard !inc.isEmpty else { return "built" }
         let depths = Array(Set(inc.map { String(format: "%.1f", $0.depthMM) })).sorted()
         let faces = inc.compactMap { $0.sectorPiece ? nil : $0.faceID }
-        let names = Array(Set(faces)).sorted().map { "Face \($0)" }
+        let names = Array(Set(faces)).sorted().map { name($0) }   // ★ B10: plain names, never "Face 3"
         let n: String
         if faces.count == inc.count, (1...2).contains(names.count) {
             n = names.joined(separator: " + ")
@@ -144,7 +144,7 @@ public enum FlexibleLatticeCard {
         case .idle: return "nothing to squish yet"
         case .fix: return waitsForTheFix   // ★ the review of R7-D1
         default:
-            return previewLine(includes: project.latticeJobRegions().regions.filter { $0.role == .include })
+            return previewLine(includes: project.latticeJobRegions().regions.filter { $0.role == .include }, name: project.plainFaceName)
         }
     }
 }

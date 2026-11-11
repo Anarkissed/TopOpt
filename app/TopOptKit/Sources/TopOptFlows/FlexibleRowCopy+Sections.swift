@@ -5,16 +5,21 @@ import Foundation
 
 extension FlexibleRowCopy {
     /// A tap on the solid part of a face only partly inside a face-prism (his img3 words; one fix: [Go to Lattice]).
-    public static let solidHere = "Solid here · only face-prisms get latticed"
+    public static let solidHere = "No lattice here · only face-prisms get latticed"   // ★ B10: §3 lattice face roles
     /// The fix's button: the main Lattice page (where face-prisms are set).
     public static let goToLattice = "Go to Lattice"
     /// ★ U21 BATCH E (his Img11/12: "if we are going to say 'you need to lattice this first' then it should do so for every
     /// face"): the ONE sentence for any face, or part of a face, with no lattice of its own — a tap on it, a pressed face's
     /// pop-up and pill, the no-face-prism stage. (The plan's "… · set a face-prism first" is 48 characters with "Face 5": the
     /// "first" is dropped to keep his 44, the edge picker's own "· set a face-prism".)
+    /// ★ B10 (plain names): "No lattice under " + tail left 8 characters, so "Left side" read "Left si…". When the
+    /// whole sentence is over 44, the short form "Left side: no lattice · set a face-prism" (13 for the name) is
+    /// said instead — the autoWhatItTakes pattern; the what-to-do is always kept.
     public static func noLatticeUnder(_ name: String) -> String {
         let head = "No lattice under ", tail = " \u{00B7} set a face-prism"
-        return head + fit(name, maxChars - head.count - tail.count) + tail   // the NAME is fitted, the what-to-do kept
+        if (head + name + tail).count <= maxChars { return head + name + tail }
+        let short = ": no lattice" + tail
+        return fit(name, maxChars - short.count) + short   // the NAME is fitted, the what-to-do kept
     }
     /// A face a curved / bolt / holed face-prism meets only partly (D4): kept whole, said.
     public static let curvedNotYet = "Curved lattice here · not yet"

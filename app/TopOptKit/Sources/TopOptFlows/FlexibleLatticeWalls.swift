@@ -116,11 +116,11 @@ public enum FlexibleLatticeWalls {
         }
     }
 
-    /// A target key's words: "wall", "solid under it", "Face 7 skin".
-    public static func targetName(_ t: String) -> String {
+    /// A target key's words: "wall", "solid under it", "Top face skin" (★ B10: the face by its plain name).
+    public static func targetName(_ t: String, name: (Int) -> String) -> String {
         if t == "wall" { return "wall" }
         if t == "under" { return "solid under it" }
-        if t.hasPrefix("skin:f"), let n = Int(t.dropFirst(6)) { return "Face \(n) skin" }
+        if t.hasPrefix("skin:f"), let n = Int(t.dropFirst(6)) { return "\(name(n)) skin" }
         return t
     }
 

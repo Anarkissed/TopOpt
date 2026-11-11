@@ -80,7 +80,7 @@ public enum FlexibleSectorMigration {
         var revertible = Set<Int>()
         for r in roots.sorted() {
             if below(r).isDisjoint(with: used) { revertible.insert(r); continue }
-            let name = faceRegions.region(r).map { $0.name.isEmpty ? "Region \($0.id)" : $0.name } ?? "Region \(r)"
+            let name = faceRegions.region(r).map { $0.name.isEmpty ? FlexibleRowCopy.aCutPiece : $0.name } ?? FlexibleRowCopy.aCutPiece   // ★ B10: never "Region 7"
             report.kept.append((root: r, line: FlexibleRowCopy.cutStaysOnSurface(name)))
         }
         // the Surface stage's regions with the revertible chains given back (I2's own plan, no pick left)
@@ -124,7 +124,7 @@ public enum FlexibleSectorMigration {
                 .map { ($0.wireID, FlexibleEdgeStrips.area(tris, reg.cuts + $0.region.cuts)) }
                 .max { $0.1 < $1.1 }
             if let b = best, b.1 > 1e-6 { map[old] = b.0 } else if reg.isIdentity || !reg.isCut { map[old] = face }
-            owner[old] = "Face \(face)"
+            owner[old] = FlexibleSectors.dataName(face)
         }
         func re(_ id: Int) -> Int { map[id] ?? id }
         for i in flex.faces.indices { flex.faces[i].faceRegionID = re(flex.faces[i].faceRegionID) }

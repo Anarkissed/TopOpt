@@ -79,7 +79,7 @@ final class FlexibleReadinessTests: XCTestCase {
         XCTAssertEqual(FlexibleExitDecision.title(r), "Exit")
         XCTAssertEqual(m.pinches.map { "\($0.a)|\($0.b)" }, ["3|5"], "3 and 5: a pinch in group 1")
         // ★ RED CONTROL: round 3's rule said exactly this one thing
-        XCTAssertEqual(round3Blockers(m), ["Face 3 and Face 5 press the same material"], "control: the old blocker")
+        XCTAssertEqual(round3Blockers(m), ["Right side and Left side press the same material"], "control: the old blocker")
         // ★ BATCH E REVIEW: `his()` restores WITH the [Lattice under it] taps (FlexibleHisProject). AS
         // SAVED — the main page latticing top A only — nothing blocks either; the line says Top B
         let (_, saved) = try await his(asSaved: true)

@@ -437,6 +437,9 @@ final class FlexibleFlatPrismTests: XCTestCase {
         print("FLEX-E1-C corner row: \(title)")
         XCTAssertFalse(title.contains("\u{2026}"), "★ the corner's row is whole: \(title)")
         XCTAssertLessThanOrEqual(title.count, 34)
-        XCTAssertTrue(title.hasPrefix(try XCTUnwrap(press.strip?.label) + " \u{00B7} Faces "), title)
+        // ★ B10 (plain names): "Corner 1 · Top face + 2 more" — whole names, never a face number
+        XCTAssertTrue(title.hasPrefix(try XCTUnwrap(press.strip?.label) + " \u{00B7} "), title)
+        XCTAssertNil(title.range(of: #"Faces? \d"#, options: .regularExpression), "★ no face numbers: \(title)")
+        XCTAssertTrue(title.hasSuffix(" + 2 more") || title.hasSuffix("3 faces"), title)
     }
 }

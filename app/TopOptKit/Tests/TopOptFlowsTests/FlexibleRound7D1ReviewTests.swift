@@ -168,13 +168,15 @@ final class FlexibleRound7D1ReviewTests: XCTestCase {
             r.faceID = face
             return r
         }
-        XCTAssertEqual(FlexibleLatticeCard.previewLine(includes: [inc(3, 25), inc(5, 25)]), "built \u{00B7} Face 3 + Face 5 \u{00B7} 25.0 mm",
+        // ★ RE-PINNED (B10, §3: plain face names, never "Face 3"): the faces by the page's namer
+        let named: (Int) -> String = { [1: "Top face", 3: "Left side", 5: "Right side"][$0] ?? "?" }
+        XCTAssertEqual(FlexibleLatticeCard.previewLine(includes: [inc(3, 25), inc(5, 25)], name: named), "built \u{00B7} Left side + Right side \u{00B7} 25.0 mm",
                        "★ ① names the faces, as the mockup does (RED at D1: '2 face-prisms')")
-        XCTAssertEqual(FlexibleLatticeCard.previewLine(includes: [inc(1, 20)]), "built \u{00B7} Face 1 \u{00B7} 20.0 mm")
-        let four = FlexibleLatticeCard.previewLine(includes: [inc(1, 20), inc(2, 20), inc(3, 25), inc(4, 25)])
+        XCTAssertEqual(FlexibleLatticeCard.previewLine(includes: [inc(1, 20)], name: named), "built \u{00B7} Top face \u{00B7} 20.0 mm")
+        let four = FlexibleLatticeCard.previewLine(includes: [inc(1, 20), inc(2, 20), inc(3, 25), inc(4, 25)], name: named)
         XCTAssertEqual(four, "built \u{00B7} 4 face-prisms \u{00B7} 20.0 / 25.0 mm", "more than two: the count (one line)")
         var piece = inc(7, 10); piece.sectorPiece = true; piece.faceID = nil
-        XCTAssertEqual(FlexibleLatticeCard.previewLine(includes: [piece]), "built \u{00B7} 1 face-prism \u{00B7} 10.0 mm", "a split piece has no face name")
+        XCTAssertEqual(FlexibleLatticeCard.previewLine(includes: [piece], name: named), "built \u{00B7} 1 face-prism \u{00B7} 10.0 mm", "a split piece has no face name")
         for l in [four] { XCTAssertLessThanOrEqual(l.count, 44) }
         // ★ RE-PINNED (B9, U2 — design-system §4.3 "Header: chevron + name + count, nothing else"; the one-app mockup's #flex-squish
         // header reads "Squish · 2 groups" under a stage row that already says Flexible)

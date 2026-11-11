@@ -66,7 +66,7 @@ extension FlexibleStageModel {
             guard let meet = await meetOffMain(), self[keyPath: kp]?.token == token else { return }
             // AP2's list, its one-line reasons in the PANEL's names ("Face 5", "Top A")
             let list = FlexibleEdgeCandidates.make(meet: meet, facts: facts, removed: Set(settings.removedRegions ?? []),
-                                                   name: { [weak self] r in self?.displayName(r) ?? "Face \(r)" })
+                                                   name: { [weak self] r in self?.displayName(r) ?? FlexibleRowCopy.aFace })
             if let why = list.unread {
                 self[keyPath: kp]?.loading = false
                 self[keyPath: kp]?.line = FlexibleRowCopy.fit(why)
@@ -93,7 +93,7 @@ extension FlexibleStageModel {
                 }
                 switch FlexibleEdgeStrips.strip(for: c, label: FlexibleRowCopy.candidateLabel(c), order: order, meet: meet,
                                                 facts: facts, faceRegions: restoredFaceRegions, existing: existing,
-                                                name: { [weak self] r in self?.displayName(r) ?? "Face \(r)" }) {
+                                                name: { [weak self] r in self?.displayName(r) ?? FlexibleRowCopy.aFace }) {
                 case .success(let st): strips[c.number] = st
                 case .failure(let r): greyed[c.number] = r.line
                 }
@@ -287,20 +287,15 @@ extension FlexibleStageModel {
     /// sector names read "Edge 9 · Face 1"; the face is what he knows).
     public func stripTitle(_ id: UUID) -> String {
         guard let p = settings.press(id) else { return "" }
-        guard let st = p.strip else { return p.name { [weak self] r in self?.displayName(r) ?? "Face \(r)" } }
+        guard let st = p.strip else { return p.name { [weak self] r in self?.displayName(r) ?? FlexibleRowCopy.aFace } }
         let names = st.members.map { m -> String in
-            if let r = project.faceRegions.region(m.root), r.isCut { return FlexibleRowCopy.faceName(sector: r.name, face: m.face) }
-            return "Face \(m.face)"
+            if let r = project.faceRegions.region(m.root), r.isCut { return FlexibleRowCopy.faceName(sector: r.name, face: m.face, plain: plainName) }
+            return plainName(m.face)
         }
-        let full = st.label + " \u{00B7} " + names.joined(separator: " + ")
-        if full.count <= 34 { return full }
-        // ★ R7-E1 (looking at the corner's picture: "Corner 2 · Face 3 + Face 1 + Face…"): three whole faces read "Faces 3 + 1 + 2"
-        let numbers = names.compactMap { n -> String? in n.hasPrefix("Face ") && Int(n.dropFirst(5)) != nil ? String(n.dropFirst(5)) : nil }
-        if numbers.count == names.count {
-            let short = st.label + " \u{00B7} Faces " + numbers.joined(separator: " + ")
-            if short.count <= 34 { return short }
-        }
-        return FlexibleRowCopy.fit(full, 34)
+        // ★ R7-E1 (the corner's picture: "Corner 2 · Face 3 + Face 1 + Face…") → ★ B10 (plain names, never numbers): whole
+        // names, then "Top face + 2 more", then "3 faces" — never a name cut mid-word
+        let head = st.label + " \u{00B7} "
+        return head + FlexibleRowCopy.faceList(names, room: 34 - head.count)
     }
 
     /// ★ The face-keeps-the-rest lines of press `id`: one per member face whose rest a face group holds.
@@ -403,17 +398,18 @@ extension FlexibleStageModel {
             return FlexibleRowCopy.fit(text("\(error)"))
         }
         let build = (try? await Task.detached(priority: .userInitiated) { try scene.info() }.value)?.buildDir ?? sceneInfo?.buildDir
+        let plainOf = plainNamer()   // ★ B10: plain face names, one value for the off-main namer
         let source = FlexibleAimSource(
             frame: { r, f in try await Task.detached(priority: .userInitiated) { try scene.regionFrame(r, face: f) }.value },
             verdict: { fp, d in try await Task.detached(priority: .userInitiated) { try scene.pressVerdict(fp, direction: d) }.value },
             triangleLoads: { t in try await Task.detached(priority: .userInitiated) { try scene.triangleLoads(t) }.value },
             faces: { after.faces(of: $0, mesh: mesh) }, mesh: mesh, buildDir: build,
-            name: { after.name($0, mesh: mesh) },
+            name: { after.name($0, mesh: mesh, plain: plainOf) },
             displayName: { r in
                 let sec = after.sector(r)
-                return FlexibleRowCopy.faceName(sector: sec?.name, face: sec == nil ? r : after.faces(of: r, mesh: mesh).first ?? r)
+                return FlexibleRowCopy.faceName(sector: sec?.name, face: sec == nil ? r : after.faces(of: r, mesh: mesh).first ?? r, plain: plainOf)
             },
-            text: { after.renamed($0, mesh: mesh) })
+            text: { after.renamed($0, mesh: mesh, plain: plainOf) })
         // ── each new or re-cut press's default aim: core's halfway on ITS strips
         var aims: [UUID: FlexiblePressAim.Release] = [:]
         for e in entries {
@@ -614,7 +610,7 @@ extension FlexibleStageModel {
         // together — each new or re-cut press's faces keep 0.5 mm beyond every cut there, and every face a strip cuts keeps a piece
         // that is not a strip. The handles and a typed value are held to it first (flatLimits); this never stores what breaks it.
         if !FlexibleEdgeStrips.controlWholeFaces, !Self.controlPerPressRest {
-            if let why = Self.keepsEveryRest(will: will, changed: changed, mesh: mesh, name: { [weak self] f in self?.displayName(f) ?? "Face \(f)" }) {
+            if let why = Self.keepsEveryRest(will: will, changed: changed, mesh: mesh, name: { [weak self] f in self?.displayName(f) ?? FlexibleRowCopy.aFace }) {
                 return .refused(why)
             }
             // a face group's face (or its section) the strips would take whole: no piece left to hold its settings
@@ -622,7 +618,7 @@ extension FlexibleStageModel {
             for root in stripRoots.sorted() where !set.pieces.contains(where: { $0.rootRegion == root && $0.kind != .strip }) {
                 let had = (before.flexible?.pieces ?? []).filter { $0.rootRegion == root && $0.kind != .strip }.map(\.wireID)
                 guard (had.isEmpty ? [root] : had).contains(where: { s0.face($0) != nil }) else { continue }
-                return .refused(FlexibleFlatPrismAngles.line(.rest(0), strip: strips[0].strip, name: { [weak self] _ in self?.displayName(root) ?? "Face \(root)" }))
+                return .refused(FlexibleFlatPrismAngles.line(.rest(0), strip: strips[0].strip, name: { [weak self] _ in self?.displayName(root) ?? FlexibleRowCopy.aFace }))
             }
         }
         let key = sceneKey(regionsKey: after.key)
@@ -644,9 +640,9 @@ extension FlexibleStageModel {
             var names: [Int: String] = [:]
             for id in FlexiblePressAim.regionIDs(reason) {
                 let sec = after.sector(id)
-                names[id] = FlexibleRowCopy.faceName(sector: sec?.name, face: sec == nil ? id : after.faces(of: id, mesh: mesh).first ?? id)
+                names[id] = FlexibleRowCopy.faceName(sector: sec?.name, face: sec == nil ? id : after.faces(of: id, mesh: mesh).first ?? id, plain: plainName)
             }
-            return FlexiblePressAim.plainLine(reason) { names[$0] ?? "Face \($0)" }
+            return FlexiblePressAim.plainLine(reason) { names[$0] ?? FlexibleRowCopy.aFace }
         }
         // ★ R7-E1 REVIEW (the verifier: a neighbour re-cut by another's change was stored unasked): every strip press whose pieces
         // change is asked — the new and re-cut ones, and a neighbour the plan clipped or renumbered

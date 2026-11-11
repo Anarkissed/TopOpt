@@ -75,7 +75,7 @@ extension FlexibleStageModel {
     public var sims: [FlexibleSim] {
         FlexibleSqueezeGroups.sims(sentSqueezeGroups, key: { [weak self] r in self?.key(r) },
                                    area: { [stacks] k in stacks[k]?.areaMM2 ?? 0 },
-                                   name: { [weak self] r in self?.displayName(r) ?? "Face \(r)" })
+                                   name: { [weak self] r in self?.displayName(r) ?? FlexibleRowCopy.aFace })
     }
 
     /// ★ THE PINCHES' TWO-SEGMENT DESIGNS (run with the designs, off the main thread): every

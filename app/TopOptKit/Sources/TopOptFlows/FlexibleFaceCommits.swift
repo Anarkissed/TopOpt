@@ -181,7 +181,7 @@ enum FlexibleFaceCommits {
         let depth = mostCommon(live.map { p.latticeSlabDepthMM($0, in: id) })
             ?? s.lastDepth ?? LatticeSlabDepth.clamp(p.lattice.paintDepthMM)
         let expand = mostCommon(live.map { p.latticeExpandMM($0) }) ?? 0
-        let like = live.filter { abs(p.latticeSlabDepthMM($0, in: id) - depth) < 0.05 }.map { p.latticeSelectableName($0) }
+        let like = live.filter { abs(p.latticeSlabDepthMM($0, in: id) - depth) < 0.05 }.map { p.flexibleName($0) }
         return (LatticeSlabDepth.clamp(depth), expand, like)
     }
 

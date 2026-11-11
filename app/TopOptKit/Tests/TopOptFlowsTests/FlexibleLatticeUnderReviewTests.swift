@@ -216,7 +216,7 @@ final class FlexibleLatticeUnderReviewTests: XCTestCase {
         let groups = p.selection.groups.count
         FlexibleFixPopup.apply(.latticeUnderAll([3, 5]), to: m)
         XCTAssertEqual(p.selection.groups.count, groups + 2, "'Face 3' and 'Face 5'")
-        XCTAssertEqual(m.toast, "Face 3 and Face 5: lattice under them · 2 new protected selections")
+        XCTAssertEqual(m.toast, "Right side and Left side: lattice under them · 2 new protected selections")
         try await FlexibleHisProject.waitFor(150, "the scene re-opened on the new lattice") {
             m.sceneState == .ready && m.loadedKeys.allSatisfy { m.stacks[$0] != nil }
         }

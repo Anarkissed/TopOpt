@@ -84,7 +84,7 @@ final class FlexibleFaceCommitTests: XCTestCase {
         XCTAssertEqual(v.depth, 25, accuracy: 1e-9)
         XCTAssertEqual(v.expand, 2, accuracy: 1e-9)
         XCTAssertEqual(FlexibleSelectionsCopy.joinLabel("Group C"), "Add to Group C as lattice")
-        XCTAssertEqual(FlexibleSelectionsCopy.joinNote(depthMM: v.depth, like: v.like), "25.0 mm deep, the same as Face 3 + Face 5")
+        XCTAssertEqual(FlexibleSelectionsCopy.joinNote(depthMM: v.depth, like: v.like), "25.0 mm deep, the same as Right side + Left side")
         let past = p.undo.past.count
         XCTAssertTrue(FlexibleFaceCommits.join(c, faces: [.face(4)], project: p, session: &s))
         let r4 = LatticeSelectableRef.face(group: c, face: 4)

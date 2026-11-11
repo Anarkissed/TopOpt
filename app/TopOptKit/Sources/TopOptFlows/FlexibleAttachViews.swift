@@ -151,7 +151,7 @@ struct FlexibleAttachStepCard: View {
     @ViewBuilder private func chips(_ st: FlexibleAttachState, _ walls: FlexibleLatticeWalls.Result?) -> some View {
         let list: [Chip] = {
             if let k = st.wall, let w = walls?.wall(k) {
-                return w.target.map { [Chip(id: "target-" + $0, label: FlexibleLatticeWalls.targetName($0), lit: true, tap: .target($0))] } ?? []
+                return w.target.map { [Chip(id: "target-" + $0, label: FlexibleLatticeWalls.targetName($0, name: project.plainFaceName), lit: true, tap: .target($0))] } ?? []
             }
             return (walls?.walls ?? []).map { Chip(id: Self.chipID($0.name), label: $0.name, lit: $0.tappable, tap: .wall($0.key)) }
         }()
@@ -286,7 +286,7 @@ struct FlexibleAttachWallsOverlay: View {
         var items: [(id: String, key: String, label: String, tap: FlexibleAttachTap, quads: [[SIMD3<Double>]], lit: Bool, linked: Bool)] = []
         if let w = picked {
             if let t = w.target, !t.hasPrefix("skin") {
-                items.append(("target-" + t, w.key, FlexibleLatticeWalls.targetName(t), .target(t), w.quads, true, false))
+                items.append(("target-" + t, w.key, FlexibleLatticeWalls.targetName(t, name: project.plainFaceName), .target(t), w.quads, true, false))
             }
         } else {
             for w in all where !w.quads.isEmpty {
@@ -355,7 +355,7 @@ struct FlexibleLinkRow: View {
             Image(systemName: "link").font(.system(size: 13, weight: .semibold))
                 .foregroundStyle((stale ? DS.Color.textTertiary : DS.Color.accent).color)
                 .opacity(asking ? 0 : 1)
-            Text(FlexibleAttach.rowText(link, wallName: wall, state: state)).font(.system(size: 13, weight: .medium))
+            Text(FlexibleAttach.rowText(link, wallName: wall, state: state, name: project.plainFaceName)).font(.system(size: 13, weight: .medium))
                 .foregroundStyle((stale ? DS.Color.textTertiary : DS.Color.textPrimary).color).lineLimit(1).fixedSize()
                 .opacity(asking ? 0 : 1)
                 .accessibilityIdentifier("flexible-sel-link-text-\(id)")
@@ -376,7 +376,7 @@ struct FlexibleLinkRow: View {
                 FlexibleFaceCommits.removeLink(id: link.id, project: project)
                 cardsChanged()
             }, cancel: { ui.linkRemoveAsk = nil }))
-            .accessibilityLabel(FlexibleSelectionsCopy.removeLinkVoice(wall, FlexibleLatticeWalls.targetName(link.target)))
+            .accessibilityLabel(FlexibleSelectionsCopy.removeLinkVoice(wall, FlexibleLatticeWalls.targetName(link.target, name: project.plainFaceName)))
             .accessibilityIdentifier("flexible-sel-link-trash-\(id)")
         }
         .padding(.leading, Self.indent).padding(.trailing, FlexibleSelectionsList.rowTrailing)

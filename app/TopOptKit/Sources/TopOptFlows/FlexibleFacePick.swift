@@ -189,16 +189,41 @@ enum FlexibleFacePick {
         return out
     }
 
-    /// A free face's short name ("Face 3", or the piece's row name).
+    /// A free face's short name ("Top face", or the piece's row name) — ★ B10: plain names, never a number.
     static func name(_ t: FlexibleFreeFace, project p: ProjectModel) -> String {
         switch t {
-        case let .face(f): return "Face \(p.runFaceID(f))"
-        case let .region(r): return p.latticeRegionName(r)
+        case let .face(f): return p.faceName(f)
+        case let .region(r): return p.flexibleRegionName(r)
         }
     }
 
-    /// The chip's title for a pending set: "Face 3 · new", "Face 3 + Face 5 · new".
+    /// The chip's title for a pending set: "Top face · new", "Top face + Underside · new".
     static func pendingTitle(_ faces: [FlexibleFreeFace], project p: ProjectModel) -> String {
         faces.map { name($0, project: p) }.joined(separator: " + ") + " · new"
+    }
+}
+
+// MARK: - ★ B10: the Flexible pages' names (design-system §3 "Faces from Cut: plain names — never Face 104"; his rule 10-24:
+// never a face number). One namer for every Flexible row, chip, card and line: a face by its plain name (`faceName`,
+// FaceNames, as Lattice Setup and Topology name it), a cut piece by its stored name with the face's number read as its name.
+
+extension ProjectModel {
+    /// A face (by its id on the part) by its plain name: "Top face", "Hole, ⌀ 8 mm".
+    public func plainFaceName(_ face: Int) -> String { faceName(FaceID(face)) }
+
+    /// A face region (a cut piece) by its stored name, any "Face 12" in it read as that face's plain name ("Top face A").
+    public func flexibleRegionName(_ rid: RegionID) -> String {
+        guard let r = faceRegions.region(rid), !r.name.isEmpty else { return FlexibleRowCopy.aCutPiece }
+        return FlexibleRowCopy.plainFaces(r.name, plainFaceName)
+    }
+
+    /// A selectable's short name on the Flexible stage's rows, chips and cards (was `latticeSelectableName`, which keeps the
+    /// face's number): a face by its plain name, a piece as `flexibleRegionName`, a zone as §3 names it.
+    public func flexibleName(_ ref: LatticeSelectableRef) -> String {
+        switch ref {
+        case let .face(_, f): return faceName(f)
+        case .primitive: return "Lattice zone"
+        case let .region(_, rid): return flexibleRegionName(rid)
+        }
     }
 }

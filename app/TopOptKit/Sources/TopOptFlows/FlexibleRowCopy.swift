@@ -75,11 +75,35 @@ public enum FlexibleRowCopy {
 
     // MARK: face rows
 
-    /// A face's short name: a sector's own name ("Top A"), else "Face 3".
-    public static func faceName(sector: String?, face: Int) -> String {
-        if let s = sector, !s.isEmpty { return fit(s.prefix(1).uppercased() + s.dropFirst(), 20) }
-        return "Face \(face)"
+    /// A face's short name: a sector's own name ("Top A"), else the face's plain name ("Top face", FaceNames).
+    /// ★ B10 (§3 "Faces from Cut: plain names — never Face 104"; his rule 10-24: never a face number): a stored name keeps
+    /// the face's number as data (the Cut stage's "Face 12 A", Flexible's own "Face 12 · 1"); it is read here as the
+    /// face's plain name ("Top face A").
+    public static func faceName(sector: String?, face: Int, plain: (Int) -> String) -> String {
+        if let s = sector, !s.isEmpty {
+            let t = plainFaces(s, plain)
+            return fit(t.prefix(1).uppercased() + t.dropFirst(), 20)
+        }
+        return plain(face)
     }
+
+    /// ★ B10: every "Face 12" a stored name carries (the data form: a capital F — a plain name never starts "Face "; "Sloped
+    /// face 2" is a plain name's own number and stays), as the face's plain name. Core's "face 12" is `FlexibleRegions.renamed`'s.
+    public static func plainFaces(_ s: String, _ plain: (Int) -> String) -> String {
+        guard let re = try? NSRegularExpression(pattern: #"\bFace (\d+)\b"#) else { return s }
+        let ns = s as NSString
+        var out = s
+        for m in re.matches(in: s, range: NSRange(location: 0, length: ns.length)).reversed() {
+            guard let id = Int(ns.substring(with: m.range(at: 1))) else { continue }
+            out = (out as NSString).replacingCharacters(in: m.range, with: plain(id))
+        }
+        return out
+    }
+
+    /// ★ B10: the words for a face no name reaches (a namer gone with its page) — never its number.
+    public static let aFace = "a face"
+    /// ★ B10: a sector the regions no longer hold — never "sector 3".
+    public static let aCutPiece = "a cut piece"
     public static let noFace = "Tap a face on the part"
 
     /// ★ ROUND 4 (D1): one row of the face LIST — "Top A · Pressed · 10 kg" / "Face 0 · Rests".
@@ -181,9 +205,7 @@ public enum FlexibleRowCopy {
             let s = names.prefix(keep).joined(separator: " + ") + " + \(names.count - keep) more"
             if s.count <= room { return s }
         }
-        // the first name cut to what is left beside "+ N more"; with no room at all, a count
-        let more = " + \(names.count - 1) more"
-        if room - more.count >= 5 { return fit(names[0], room - more.count) + more }
+        // ★ B10 (plain names): never a name cut mid-word ("Right si… + 1 more") — the count instead
         return "\(names.count) faces"
     }
     /// ONE line per group, its faces and its ONE force: "Group 1 · Face 3 + Face 5 · Squeeze 10 kg".
@@ -366,7 +388,7 @@ public enum FlexibleRowCopy {
         public static let filament = "The filament the lattice is printed in. Only colorFabb varioShore TPU has published squish data: its dents are predicted, with a tier and ± band. Every other filament is \"calibrate first\": no squish in mm is predicted and no lattice is sized from it until coupons are measured."
         public static let feel = "Springy bounces back and prefers gyroid (lowest energy loss, best recovery). Damped soaks up the push and prefers honeycomb (bigger loop, firmer). Auto weighs both."
         public static let face = "Pressed: this face carries weight and squishes. Rests: it sits on something and carries no squish of its own. A face in a main-page Load group arrives pressed; an Anchor group's faces arrive resting. Tap a face on the part to select it."
-        public static let weight = "This face's share of its squeeze group's force. The force is set on the group's row above the faces ([10 kg ✎]) — one force per group, written back to the main page's Load group when it comes from one. A main-page group over several faces is split by area, the way the solver spreads it; a press at an angle counts its straight-in part (cos θ)."
+        public static let weight = "This face's share of its squeeze group's weight. The weight is set on the group's row above the faces ([10 kg ✎]) — one weight per group, written back to the main page's Load group when it comes from one. A main-page group over several faces is split by area, the way the solver spreads it; a press at an angle counts its straight-in part (cos θ)."
         public static let shape = "Curves: the face's X and Y curves, always combined — soft only where both say soft. [2D] and [3D] open them in a window over everything: 2D as two tables, X above Y; 3D on one table, turned with the cube — Top shows X head-on, Front shows Y. A point nearer the face is squishier; tap the line to add a point, tap a point for an × to delete it. OK keeps your changes, Cancel puts them back. On the part the selected face shows its indent: where the dent starts, its half and its deepest zone. Stamp: the face is shaped by ONE stamp — what presses it — and sinks the deepest squish under it; drag its handle on the part to move it. One or the other, never both."
         public static let finish = "The whole part's outside. None: the lattice runs to the surface everywhere. Rim: a solid band along every edge, the faces open. Skin: a thin skin over the lattice with round holes in it. Covered: a solid skin everywhere. Only Covered reaches the solver today; Rim and Skin are drawn by the app (the line under the row says so). Rim's band is 2 mm; Skin is 0.8 mm thick with 3 mm holes (1.5 mm radius) 5 mm apart."
         public static let stamp = "What presses this face: pick one from the list, or import an SVG outline or an image (darker presses harder). Its weight is the face's weight."
@@ -381,10 +403,10 @@ public enum FlexibleRowCopy {
         public static let topology = "Auto picks gyroid or honeycomb for the feel you chose. Honeycomb has test data only when pressed along its prism axis, so a side face is gyroid only."
         public static let noFace = "Tap a face on the part to select it, then press it or let it rest. Faces from the main page's Load and Anchor groups are already set."
         /// ★ ROUND 4 (D2).
-        public static let groups = "Faces in one group are squeezed at the same time with the same force — like two hands pressing equally; each face keeps its own curve. Each group is a folder tab on the left; its Squeeze box is its one force: tap it to type, or drag it up or down (it changes the main page's Load group too). To make a group, open the + New tab and pick the face that starts it (here or on the part); in a face's card, tap a group's number to move the face there; × joins this group to the first other one. Two opposite faces in one group are a pinch: each half of the part between them is designed for its own face. Separate groups are separate squeezes: the lattice is built for all of them, and where two groups need the same material the firmer one wins — a group that will squish less than drawn says so on its tab. A main-page Load group is one hand: its faces move together and share its weight by area."
+        public static let groups = "Faces in one group are squeezed at the same time with the same weight — like two hands pressing equally; each face keeps its own curve. Each group is a folder tab on the left; its Squeeze box is its one weight: tap it to type, or drag it up or down (it changes the main page's Load group too). To make a group, open the + New tab and pick the face that starts it (here or on the part); in a face's card, tap a group's number to move the face there; × joins this group to the first other one. Two opposite faces in one group are a pinch: each half of the part between them is designed for its own face. Separate groups are separate squeezes: the lattice is built for all of them, and where two groups need the same material the firmer one wins — a group that will squish less than drawn says so on its tab. A main-page Load group is one hand: its faces move together and share its weight by area."
         public static let groupRow = "Move this face to another squeeze group, or make a new group from it."
         /// ★ ROUND 5 (batch S).
-        public static let squeeze = "The ONE force every face of this group presses with, at the same time — like two hands pressing equally. Tap the number to type it, or drag it up or down. Tap the unit to show weights in kg, lb, N or kN (stored the same). It changes the main page's Load group when a face comes from one."
+        public static let squeeze = "The ONE weight every face of this group presses with, at the same time — like two hands pressing equally. Tap the number to type it, or drag it up or down. Tap the unit to show weights in kg, lb, N or kN (stored the same). It changes the main page's Load group when a face comes from one."
         public static let colour = "This group's colour on the part, on this page only: while its tab is open (or one of its faces is selected) its faces wear a faint glass of it — a face turned away from you shows as a dashed line — and the Groups view (under the cube) shows every group's. Pick a colour another group wears and the two swap. There are eight; from the ninth group on they repeat, and a repeated colour carries its group's number on the tab and, in the Groups view, on its glass."
         public static let curvePoint = "How far the curve squishes at the selected point, in mm of this face's deepest squish. Drag the point on the part, or type it here."
     }

@@ -104,6 +104,10 @@ public enum FlexibleSectors {
         let lo: SIMD3<Double>, hi: SIMD3<Double>
     }
 
+    /// ★ B10: a whole face's STORED name ("Face 12": its number kept as data, as the Cut stage stores its own) — never drawn as
+    /// it is: every Flexible row reads it through FlexibleRowCopy.faceName / plainFaces, which give the face's plain name.
+    static func dataName(_ face: Int) -> String { "Face \(face)" }
+
     /// The roots of the part: his Surface LEAF sectors, then every face no leaf covers (FlexibleMeet's rule).
     static func roots(mesh: ViewerMesh, faceRegions: FaceRegionModel) -> [Root] {
         let own = FlexibleRegions(model: faceRegions, mesh: mesh)
@@ -127,11 +131,11 @@ public enum FlexibleSectors {
             let faces = FaceRegionGeometry.members(of: sec, in: mesh).map { Int($0) }.filter { trisOf[$0] != nil }
             guard !faces.isEmpty else { continue }
             covered.formUnion(faces)
-            let name = FlexibleRowCopy.faceName(sector: sec.name, face: faces[0])
+            let name = sec.name.isEmpty ? Self.dataName(faces[0]) : FlexibleRowCopy.fit(sec.name.prefix(1).uppercased() + sec.name.dropFirst(), 20)
             if let r = make("r\(sec.id)", FlexibleRegions.wireID(sec), sec.id, faces, name, sec.cuts) { out.append(r) }
         }
         for f in trisOf.keys.sorted() where !covered.contains(f) {
-            if let r = make("f\(f)", f, nil, [f], "Face \(f)", []) { out.append(r) }
+            if let r = make("f\(f)", f, nil, [f], Self.dataName(f), []) { out.append(r) }
         }
         return out
     }
@@ -260,7 +264,7 @@ public enum FlexibleSectors {
                 }
                 let sorted = cands.sorted { $0.a > $1.a }
                 guard let best = sorted.first, best.a > fe else {
-                    refusal = FlexibleRowCopy.fit("\(strip.label) · nothing to press on Face \(mb.face)")
+                    refusal = FlexibleRowCopy.fit("\(strip.label) · nothing to press on its face")
                     break
                 }
                 let isNew = newPicks.contains(id)

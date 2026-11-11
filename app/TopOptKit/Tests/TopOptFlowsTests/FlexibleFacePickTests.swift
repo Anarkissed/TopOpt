@@ -35,7 +35,7 @@ final class FlexibleFacePickTests: XCTestCase {
         var s = FlexibleFacePick.tap(.init(), face: 4, point: nil, project: p, mesh: mesh)
         s = FlexibleFacePick.tap(s, face: 2, point: nil, project: p, mesh: mesh)
         XCTAssertEqual(s.scope, .pending([.face(4), .face(2)]))
-        XCTAssertEqual(FlexibleFacePick.pendingTitle([.face(4), .face(2)], project: p), "Face 4 + Face 2 · new")
+        XCTAssertEqual(FlexibleFacePick.pendingTitle([.face(4), .face(2)], project: p), "Back face + Front face · new")
         s = FlexibleFacePick.tap(s, face: 4, point: nil, project: p, mesh: mesh)
         XCTAssertEqual(s.scope, .pending([.face(2)]), "the same face again leaves the set")
         s = FlexibleFacePick.tap(s, face: 2, point: nil, project: p, mesh: mesh)

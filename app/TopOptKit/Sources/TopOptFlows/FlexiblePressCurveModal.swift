@@ -258,8 +258,8 @@ extension FlexibleStageModel {
     func stripFaceNames(_ id: UUID) -> [String] {
         guard let st = settings.press(id)?.strip else { return [] }
         return st.members.map { m in
-            if let r = project.faceRegions.region(m.root), r.isCut { return FlexibleRowCopy.faceName(sector: r.name, face: m.face) }
-            return "Face \(m.face)"
+            if let r = project.faceRegions.region(m.root), r.isCut { return FlexibleRowCopy.faceName(sector: r.name, face: m.face, plain: { project.faceName(FaceID($0)) }) }
+            return project.faceName(FaceID(m.face))
         }
     }
 }

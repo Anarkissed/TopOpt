@@ -626,9 +626,9 @@ public final class FlexibleStageModel: ObservableObject {
     /// The declared regions: every face, plus the Surface stage's split sectors, plus ★ ROUND 7 (M2) the Flexible-only
     /// sectors (lattice sections, edge strips, their rests — FlexibleStageModel+Sectors, memoised).
     public var regions: FlexibleRegions { sectorState().regions }
-    public func name(_ region: Int) -> String { regions.name(region, mesh: project.viewerMesh) }
+    public func name(_ region: Int) -> String { regions.name(region, mesh: project.viewerMesh, plain: plainName) }
     /// Core's sentence with sector ids replaced by the app's names.
-    public func text(_ s: String) -> String { regions.renamed(s, mesh: project.viewerMesh) }
+    public func text(_ s: String) -> String { regions.renamed(s, mesh: project.viewerMesh, plain: plainName) }
 
     /// The region "no pressed face" offers to press (FlexibleReadiness.suggestedFace), cached
     /// per mesh, build direction and split — a split face offers the sector at its centroid.

@@ -76,7 +76,7 @@ final class FlexibleU21OneLatticeRuleTests: XCTestCase {
             XCTAssertEqual(t.selected, 2000008, "★ Face \(face): nothing new is selected")
             XCTAssertEqual(t.faces, before, "★ Face \(face): nothing is pressed")
             let n = try XCTUnwrap(t.notice, "★ Face \(face): the notice")
-            XCTAssertEqual(n.oneLine, "No lattice under Face \(face) \u{00B7} set a face-prism", "★ the same sentence for every face")
+            XCTAssertEqual(n.oneLine, "\([5: "Left side", 1: "Front face", 7: "Right side 2", 2: "Underside"][face] ?? "?"): no lattice \u{00B7} set a face-prism" /* ★ B10: plain names, the short form */, "★ the same sentence for every face")
             XCTAssertFalse(n.blocking)
             XCTAssertEqual(n.fixes, [.goToLattice] + (rests ? [.rest(face)] : []),
                            "★ [Go to Lattice]\(rests ? " [Face \(face) rests]" : " only (the solid part of a partial face cannot rest)")")
@@ -155,15 +155,15 @@ final class FlexibleU21OneLatticeRuleTests: XCTestCase {
         let redPrisms = FlexibleDepthPrism.renderItems(model: m, k: 1, views: [.prisms]).count
         FlexibleStageModel.controlCoreShare = false
         print("FLEX-U21-E4 RED (today) Face 5 pressed: '\(redIssue?.oneLine ?? "-")' fixes \(redIssue?.fixes ?? []) · deepest cap \(redMax ?? -1) mm · prisms \(redPrisms)")
-        XCTAssertEqual(redIssue?.oneLine, "Only 12 % of Face 5 has lattice under it", "RED CONTROL: core's count (his Img11)")
+        XCTAssertEqual(redIssue?.oneLine, "Only 12 % of Left side has lattice under it", "RED CONTROL: core's count (his Img11)")
         XCTAssertEqual(redMax ?? 0, 118.8, accuracy: 0.1, "RED CONTROL: core's 118.8 mm on the card and chip")
 
         let issue = try XCTUnwrap(m.readiness.issues.first { $0.kind == .noLatticeUnder && $0.region == 5 })
         let share = m.latticedShare(5)
         let prisms = FlexibleDepthPrism.renderItems(model: m, k: 1, views: [.prisms]).count
         print("FLEX-U21-E4 Face 5 pressed: '\(issue.oneLine)' pill '\(issue.pill)' fixes \(issue.fixes) · share \(share ?? -1) · deepest \(m.latticeMaxMM(5) ?? -1) · prisms \(prisms) (today \(redPrisms))")
-        XCTAssertEqual(issue.oneLine, "No lattice under Face 5 \u{00B7} set a face-prism", "★ the tap's sentence")
-        XCTAssertEqual(issue.pill, "No lattice under Face 5")
+        XCTAssertEqual(issue.oneLine, "Left side: no lattice \u{00B7} set a face-prism", "★ the tap's sentence")
+        XCTAssertEqual(issue.pill, "No lattice under Left side")
         XCTAssertEqual(issue.fixes, [.goToLattice, .rest(5)], "★ [Go to Lattice] [Face 5 rests]; no [Lattice under it]")
         XCTAssertFalse(issue.blocking, "never blocking")
         XCTAssertEqual(share, 0, "★ share 0, not core's 11.8 %")
@@ -221,6 +221,8 @@ final class FlexibleU21OneLatticeRuleTests: XCTestCase {
             XCTAssertTrue(s.hasSuffix("\u{00B7} set a face-prism"), "the what-to-do is never cut: \(s)")
         }
         XCTAssertEqual(FlexibleRowCopy.noLatticeUnder("Face 5"), "No lattice under Face 5 \u{00B7} set a face-prism")
+        // ★ B10 (plain names): over 44 whole, the short form — the name whole, the what-to-do kept (was "Left si…")
+        XCTAssertEqual(FlexibleRowCopy.noLatticeUnder("Left side"), "Left side: no lattice \u{00B7} set a face-prism")
         XCTAssertEqual(FlexibleFix.goToLattice.title { "Face \($0)" }, "Go to Lattice")
     }
 }

@@ -47,11 +47,13 @@ final class FlexibleRegionsTests: XCTestCase {
         XCTAssertTrue(FlexibleRegions.isSector(left))
         XCTAssertNotEqual(left, right)
         XCTAssertEqual(regions.region(at: SIMD3(50, 0, 10), face: 2, mesh: mesh), 2)
-        // names: a sector reads "face N · <its name>", and core's sentence is renamed
-        XCTAssertTrue(regions.name(right, mesh: mesh).hasPrefix("face \(top[0]) · "))
-        XCTAssertEqual(regions.renamed("face \(right) is too firm", mesh: mesh),
-                       "\(regions.name(right, mesh: mesh)) is too firm")
-        XCTAssertEqual(regions.renamed("face 3 is fine", mesh: mesh), "face 3 is fine")
+        // names: a sector reads "<its face's plain name> · <its name>", and core's sentence is renamed
+        // ★ RE-PINNED (B10, §3: plain face names, never "face 12"): the faces by the page's namer; a whole face is renamed too
+        let plain: (Int) -> String = { "Plain\($0)" }
+        XCTAssertTrue(regions.name(right, mesh: mesh, plain: plain).hasPrefix("Plain\(top[0]) · "))
+        XCTAssertEqual(regions.renamed("face \(right) is too firm", mesh: mesh, plain: plain),
+                       "\(regions.name(right, mesh: mesh, plain: plain)) is too firm")
+        XCTAssertEqual(regions.renamed("face 3 is fine", mesh: mesh, plain: plain), "Plain3 is fine")
         // membership by triangle centroid
         XCTAssertTrue(regions.contains(right, face: top[0], centroid: SIMD3(90, 10, 20), mesh: mesh))
         XCTAssertFalse(regions.contains(right, face: top[0], centroid: SIMD3(10, 10, 20), mesh: mesh))

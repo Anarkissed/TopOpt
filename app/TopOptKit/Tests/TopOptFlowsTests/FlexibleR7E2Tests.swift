@@ -453,14 +453,14 @@ final class FlexibleR7E2Tests: XCTestCase {
         let piece = try XCTUnwrap(m.press(press.id)?.regions.first { m.regions.faces(of: $0, mesh: m.project.viewerMesh) == [3] })
         let area = F.M2.area(m, piece, face: 3)
         print("FLEX-E2-6 shared: '\(v.line ?? "-")' · \(sh.mm2) mm² (Edge 16's piece on Face 3: \(area)) · fixes \(m.pressWarning(press.id)?.fixes.map(\.title) ?? [])")
-        XCTAssertEqual(v.line, "\(label) overlaps Face 3's press (\(Int(area.rounded())) mm\u{00B2})"   /* ★ RE-PINNED (C1): plain words */, "★ in his words")
+        XCTAssertEqual(v.line, "\(label) overlaps Right side's press (\(Int(area.rounded())) mm\u{00B2})"   /* ★ RE-PINNED (C1): plain words */, "★ in his words")
         XCTAssertLessThanOrEqual(v.line?.count ?? 99, 44)
         XCTAssertFalse(m.sentPresses.contains(press.id), "★ the pre-check stops the send")
         XCTAssertFalse(try m.runJobJSON(resting: Set(m.coreHold?.fixes.first?.resting ?? [])).contains("press_direction"), "★ no press is written")
         let fixes = try XCTUnwrap(m.pressWarning(press.id)?.fixes)
         XCTAssertTrue((1...3).contains(fixes.count), "★ 1–3 fixes: \(fixes.map(\.title))")
         XCTAssertTrue(fixes.contains(.remove(press.id, label: label)), "[Remove \(label)]")
-        XCTAssertTrue(fixes.contains(.rest(3, name: "Face 3")), "[Face 3 rests]")
+        XCTAssertTrue(fixes.contains(.rest(3, name: "Right side")), "[Right side rests]")
         // each fix: ONE undo step, and the press is back in the job (or gone, for Remove)
         for f in fixes {
             r.project.sealUndoStep()   // (the edit before is its own step)
@@ -501,12 +501,12 @@ final class FlexibleR7E2Tests: XCTestCase {
         let line = FlexibleCoreRunReport.refusalLine(refusal, names: { m.coreRegionName($0) })
         let raw = FlexibleCoreRunReport.refusalLine(refusal)
         print("FLEX-E2-6 core's refusal: '\(refusal.reason)' → '\(line)' · RED CONTROL '\(raw)'")
-        XCTAssertEqual(line, "Core refused it: " + "\(label) overlaps Face 3's press (\(Int(area.rounded())) mm\u{00B2})"   /* ★ RE-PINNED (C1): plain words */, "★ core's refusal in his words")
+        XCTAssertEqual(line, "Core refused it: " + "\(label) overlaps Right side's press (\(Int(area.rounded())) mm\u{00B2})"   /* ★ RE-PINNED (C1): plain words */, "★ core's refusal in his words")
         XCTAssertTrue(raw.contains("face region") || raw.contains("presses"), "★ RED CONTROL: core's raw sentence")
         XCTAssertFalse(line.contains("face region"))
         let warn = FlexibleRowCopy.faceWarning(refusalCode: refusal.code, refusalReason: refusal.reason, unreachedColumns: 0, side: false,
                                                names: { m.coreRegionName($0) })
-        XCTAssertEqual(warn, "\(label) overlaps Face 3's press (\(Int(area.rounded())) mm\u{00B2})"   /* ★ RE-PINNED (C1): plain words */, "★ the face's warning line too")
+        XCTAssertEqual(warn, "\(label) overlaps Right side's press (\(Int(area.rounded())) mm\u{00B2})"   /* ★ RE-PINNED (C1): plain words */, "★ the face's warning line too")
     }
 
     // MARK: - E2-7
