@@ -165,6 +165,7 @@ final class LatticeThinWallGlowHostedTests: XCTestCase {
         let p = s.pm
         p.lattice.chooseLatticeType(.structural)
         p.lattice.wholePart = true
+        p.lattice.enabled = true   // lattice mode on, as his project is
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("thin-glow-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: root) }
@@ -175,7 +176,11 @@ final class LatticeThinWallGlowHostedTests: XCTestCase {
         h.pump(2)
         try h.pickFromMenu("capsuleMenu", "Structural", what: "the stage menu")
         h.pump(1.5)
-        if h.frames.all["view-Lattice preview-on"] == nil { try h.tap("view-Lattice preview", "the lattice preview", settle: 1) }
+        // ★ the session's first preview opens the Lattice page first (settings before any bake — armLatticePreview); its
+        // Save (the capsule's Setup, as he leaves it) bakes, and the pop-up shows on Lattice Setup only
+        if h.frames.all["view-Lattice preview-on"] == nil { try h.tap("view-Lattice preview", "the lattice preview", settle: 1.5) }
+        if h.frames.all["latticeSettingsPanel"] != nil { try h.tap("capsuleSetup", "the page's Save: the capsule's Setup", settle: 1.5) }
+        XCTAssertNil(h.frames.all["latticeSettingsPanel"], "premise: on Lattice Setup, the page saved and closed")
         // his stand bakes for a while in a debug build
         let end = Date().addingTimeInterval(420)
         while h.frames.all["lattice-thin-walls-card"] == nil, Date() < end { h.pump(2) }

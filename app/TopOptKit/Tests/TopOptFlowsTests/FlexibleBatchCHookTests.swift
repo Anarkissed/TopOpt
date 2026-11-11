@@ -20,7 +20,8 @@ final class FlexibleBatchCHookTests: XCTestCase {
     func testTheWorkspaceHooksAreInPlace() throws {
         let ws = try FlexibleSource.text("WorkspacePlaceholder.swift")
         let pins: [(String, String)] = [
-            ("H4'", "vertexTints: visible.surfaceEditing ? surfaceVertexTints : flexibleMain.tints(project, on: stage, roles: roleTints, stress: latticeStressField),"),
+            // ★ RE-PINNED (release (4), his 11-09 glow): the glow sits before Flexible's tints, up only on Lattice Setup
+            ("H4'", "vertexTints: visible.surfaceEditing ? surfaceVertexTints : latticeThinWallGlowUp ? latticeThinWallTints : flexibleMain.tints(project, on: stage, roles: roleTints, stress: latticeStressField),"),
             // ★ RE-PINNED (batch C verification): the toggles take the workspace's solver
             // (FlexibleStressSolve.swift — the regions the load case reaches, the sim's state said)
             // ★ RE-PINNED (round 4, C2 — his answer 2): the Lattice button, with nothing to show, opens Settings

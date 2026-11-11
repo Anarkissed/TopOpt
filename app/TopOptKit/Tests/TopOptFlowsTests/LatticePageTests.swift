@@ -449,7 +449,12 @@ final class LatticePageTests: XCTestCase {
         // absent (greyed). LatticeFinishWireTests holds the red control.
         XCTAssertEqual(LatticeBoundaryTreatment.none.jobOuterFinish, "none")
         XCTAssertEqual(LatticeBoundaryTreatment.fullSkin.jobOuterFinish, "skin")
-        XCTAssertNil(LatticeBoundaryTreatment.rim.jobOuterFinish)
+        // ★ RE-PINNED (release (4), 868b11bf): the linked core lays a rim on a real part, so Rim is no longer greyed
+        // and states core's open finish; the control (Rim greyed) still sends nothing.
+        XCTAssertEqual(LatticeBoundaryTreatment.rim.jobOuterFinish, "none")
+        LatticeBoundaryTreatment.controlRimGreyed = true
+        XCTAssertNil(LatticeBoundaryTreatment.rim.jobOuterFinish, "CONTROL: Rim greyed sends nothing")
+        LatticeBoundaryTreatment.controlRimGreyed = false
         XCTAssertEqual(LatticeBoundaryTreatment.none.jobSkinValue, "none")
         XCTAssertEqual(LatticeBoundaryTreatment.rim.jobSkinValue, "rim")
         XCTAssertEqual(LatticeBoundaryTreatment.fullSkin.jobSkinValue, "diagrid",
