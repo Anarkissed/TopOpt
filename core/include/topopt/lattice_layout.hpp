@@ -256,9 +256,10 @@ struct Cell {
   double lo[3] = {0, 0, 0};   // the cube's low corner, in frame coordinates, mm
   double size = 0.0;    // mm
   bool cut = false;     // the region's edge or the part's surface passes through it (D3)
+  double strut = 0.0;   // strut width, mm (R1). 0 until set_struts has run.
   bool operator==(const Cell& o) const {
     return region == o.region && frame == o.frame && lo[0] == o.lo[0] && lo[1] == o.lo[1] &&
-           lo[2] == o.lo[2] && size == o.size && cut == o.cut;
+           lo[2] == o.lo[2] && size == o.size && cut == o.cut && strut == o.strut;
   }
 };
 
@@ -272,6 +273,8 @@ struct RegionCells {
 
 struct Layout {
   double floor_cell_mm = 0.0;        // the smallest cell that prints open (C14)
+  double bead_mm = 0.0;              // the line width it was laid for
+  LatticeTopology topology = LatticeTopology::Octet;
   std::vector<Frame> frames;
   std::vector<Cell> cells;           // in a fixed order: same input, same bytes (D18)
   // D14: space inside a region no cell covers. Solid, and drawn solid. Same shape as a
@@ -281,6 +284,44 @@ struct Layout {
 };
 
 Layout lay_cells(const Domain& domain, const CellSpec& spec);
+
+// ── STRUT WIDTH ───────────────────────────────────────────────────────────────
+// What a lattice looks like is one number, strut width over cell size (R9). Octet's
+// neighbouring struts touch at 1/(2*sqrt 2): the quilt, the top of every range.
+inline constexpr double kQuiltStrutPerCell = 0.35355339059327373;
+
+enum class Density : std::uint8_t {
+  Uniform,    // one density for the whole part (R6)
+  PerRegion,  // each region's own dial; a region not listed takes `dial`
+};
+
+struct RegionDial {
+  int region = 0;
+  double dial = 0.45;
+};
+
+struct StrutSpec {
+  Density mode = Density::Uniform;
+  // R10: even steps of strut WIDTH on the largest cell. 0.01 = one line width; 1.0 = the
+  // widest strut allowed (the open look, or the quilt with `allow_quilt`). Auto is 0.45.
+  double dial = 0.45;
+  std::vector<RegionDial> region_dial;   // read in PerRegion only (R6)
+  // R11: a typed strut width, mm. > 0: this width in every cell, whatever the dial says.
+  double width_mm = 0.0;
+  // R2: off, no strut is wider than the open look (kSteppedPrintsOpenMaxStrutPerCell of
+  // its cell). On, a strut may go up to the quilt.
+  bool allow_quilt = false;
+};
+
+struct StrutReport {
+  std::size_t at_bead = 0;      // cells where the asked width was under one line (R5)
+  std::size_t at_ceiling = 0;   // cells where it was over the widest allowed (R2, R9)
+};
+
+// Sets every cell's strut width. Moves no cell. Octet only so far: any other type throws
+// std::invalid_argument and leaves the layout untouched, because the open-look and quilt
+// ratios here are octet's own.
+StrutReport set_struts(Layout& layout, const StrutSpec& spec);
 
 // Is `p` in the region's prism, with its Expand? At Expand 0 this IS
 // point_in_clearance_region(prism, p, 0). Exposed for tests.

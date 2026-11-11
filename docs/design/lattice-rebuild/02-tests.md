@@ -72,16 +72,16 @@ Kind of test: **L** reads the layout, **F** reads the file, **A** is an app test
 | Rule | Kind | Test |
 |---|---|---|
 | R1 | F | Each cell's strut width in the file equals the layout's for that cell ± 0.01 mm. |
-| R2 | L | Octet on Auto: strut ÷ cell ≤ 0.1898 in every cell. With Allow quilt and a hand-set density, up to 0.354. |
+| R2 | L | Octet without Allow quilt: strut ÷ cell ≤ 0.1898 in every cell, at every dial setting and with a typed width. With Allow quilt, up to 0.354. |
 | R3 | L | Inside the Grade to shape band, strut ÷ cell may pass 0.1898 and never passes 0.354. |
 | R4 | L | Minimize plastic on and off give the same layout, byte for byte. |
 | R5 | F | No strut in the file is narrower than the bead − 0.01 mm across its flats. |
-| R6 | L | Uniform: every cell outside a grade band has the same strut ÷ cell to 1e-6. Per-region values are in the layout's input only in Per region mode. |
+| R6 | L | Uniform: every cell outside a grade band has the same strut ÷ cell to 1e-6, except where that would be thinner than one line: there the strut is one line. Per-region dials change nothing in Uniform; in Per region each region takes its own dial, and a region with none takes the main one. |
 | R7 | L | By stress: the lowest strut ÷ cell in the layout matches "Grade from" and the highest matches "Grade to", each ± 1 dial step, on a part with both an idle and a loaded wall. |
 | R8 | L | Each Manual value reaches the layout: strut widths lie between the two stated mm values ± 0.01; changing the response, the target stress or the load set changes the widths. |
 | R9 | L | No cell has strut ÷ cell above 0.354. No cell is solid because of density alone. |
-| R10 | L | Dial at 1%: strut = bead. Dial at 100%: strut = 0.354 × cell. Dial at 50%: strut is halfway between, ± 0.01 mm. |
-| R11 | F | A typed strut width w: every strut in the file is w ± 0.01 mm, inside grade bands too. |
+| R10 | L | Read on the largest cell. Dial at 1%: strut = bead. Dial at 100%: strut = 0.354 × cell with Allow quilt, 0.1898 × cell without. Dial at 50.5%: exactly halfway between. Auto is 45%. Moving the dial moves no cell. |
+| R11 | L, F | A typed strut width w: every cell that can hold it has w exactly, inside grade bands too, and every strut in the file is w ± 0.01 mm. A cell too small for w (w over 0.1898 × cell, or 0.354 with Allow quilt) takes the widest it can, and the layout reports how many such cells there are. |
 | R12 | L, A | By stress: changing a hand-set density does not change the layout, and the control is greyed. |
 | R13 | F | A strut's cross-section area in the file equals π × (width ÷ 2)² of the round strut the law uses, ± 1%. |
 

@@ -261,6 +261,8 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec) {
   Layout out;
   const DomainSpec& ds = domain.spec();
   out.floor_cell_mm = ds.bead_mm / kSteppedPrintsOpenMaxStrutPerCell;   // C14
+  out.bead_mm = ds.bead_mm;
+  out.topology = spec.topology;
   // A hair above the bound itself, so the floor cell is a size core's own menu admits.
   const double smallest = std::max(out.floor_cell_mm * (1.0 + 1e-9), spec.cell_min_mm);
   const double target = spec.cell_mm > 0.0 ? spec.cell_mm : spec.cell_max_mm;

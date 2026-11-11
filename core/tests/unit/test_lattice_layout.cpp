@@ -2,6 +2,7 @@
 // docs/design/lattice-rebuild/01-rules.md; the numbers are those of 02-tests.md.
 #include <cmath>
 #include <cstdio>
+#include <stdexcept>
 #include <vector>
 
 #include "topopt/lattice_layout.hpp"
@@ -875,6 +876,127 @@ static void test_cells_stepped() {
   }
 }
 
+// A layout written by hand: cells of 12, 6 and 2.4 mm in region 1, 8 and 4 mm in region 2.
+static Layout strut_layout(double bead) {
+  Layout l;
+  l.bead_mm = bead;
+  l.floor_cell_mm = bead / 0.1898;
+  l.frames.push_back(Frame{});
+  double x = 0;
+  for (double size : {12.0, 6.0, 6.0, 2.4, 8.0, 4.0}) {
+    Cell c;
+    c.region = size == 8.0 || size == 4.0 ? 2 : 1;
+    c.size = size;
+    c.lo[0] = x;
+    x += size;
+    l.cells.push_back(c);
+  }
+  return l;
+}
+
+static void test_struts() {
+  const double bead = 0.45, open = 0.7592 / 4.0, quilt = kQuiltStrutPerCell;
+  const Layout base = strut_layout(bead);
+  {  // R10 with Allow quilt: 1% is one line, 100% is the quilt, 50.5% is halfway.
+    StrutSpec sp;
+    sp.allow_quilt = true;
+    Layout l = base;
+    sp.dial = 0.01;
+    set_struts(l, sp);
+    for (const Cell& c : l.cells) NEAR(c.strut, bead, 1e-12);
+    sp.dial = 1.0;
+    const StrutReport top = set_struts(l, sp);
+    for (const Cell& c : l.cells) NEAR(c.strut, quilt * c.size, 1e-9);
+    CHECK(top.at_bead == 0 && top.at_ceiling == 0);
+    sp.dial = 0.505;
+    set_struts(l, sp);
+    NEAR(l.cells[0].strut, 0.5 * (bead + quilt * 12.0), 1e-9);
+    // The pass moves no cell (P: density sliders re-lay nothing).
+    for (std::size_t i = 0; i < l.cells.size(); ++i) {
+      Cell a = l.cells[i], b = base.cells[i];
+      a.strut = b.strut = 0;
+      CHECK(a == b);
+    }
+  }
+  {  // R2: without Allow quilt the top of the dial is the open look, in every cell.
+    StrutSpec sp;
+    sp.dial = 1.0;
+    Layout l = base;
+    set_struts(l, sp);
+    for (const Cell& c : l.cells) NEAR(c.strut, std::max(bead, open * c.size), 1e-9);
+    for (double dial : {0.01, 0.2, 0.45, 0.8, 1.0}) {
+      sp.dial = dial;
+      set_struts(l, sp);
+      for (const Cell& c : l.cells) {
+        CHECK(c.strut >= bead - 1e-12);                                  // R5
+        CHECK(c.strut <= std::max(bead, open * c.size) + 1e-9);          // R2
+        CHECK(c.strut <= quilt * c.size + 1e-9);                         // R9
+      }
+    }
+  }
+  {  // R6: Uniform is one strut-to-cell ratio for the whole part, except where that
+     // would be thinner than one line. Per-region dials are not read.
+    StrutSpec sp;   // Auto: 45%
+    Layout l = base;
+    const StrutReport r = set_struts(l, sp);
+    const double ratio = l.cells[0].strut / 12.0;
+    NEAR(l.cells[0].strut, bead + (0.44 / 0.99) * (open * 12.0 - bead), 1e-9);
+    int thin = 0;
+    for (const Cell& c : l.cells) {
+      if (ratio * c.size >= bead) NEAR(c.strut / c.size, ratio, 1e-6);
+      else { NEAR(c.strut, bead, 1e-12); ++thin; }
+    }
+    CHECK(thin == 2 && r.at_bead == 2);   // the 4 and 2.4 mm cells
+    Layout l2 = base;
+    sp.region_dial = {{1, 1.0}, {2, 0.01}};
+    set_struts(l2, sp);
+    CHECK(l2.cells == l.cells);
+    // Per region: each region's dial, read on that region's own largest cell.
+    sp.mode = Density::PerRegion;
+    set_struts(l2, sp);
+    for (const Cell& c : l2.cells) {
+      if (c.region == 1) NEAR(c.strut, std::max(bead, open * c.size), 1e-9);
+      else NEAR(c.strut, bead, 1e-12);
+    }
+    sp.region_dial = {{2, 1.0}};   // region 1 is not listed: it takes the main dial
+    set_struts(l2, sp);
+    for (std::size_t i = 0; i < l.cells.size(); ++i)
+      if (l.cells[i].region == 1) NEAR(l2.cells[i].strut, l.cells[i].strut, 1e-12);
+      else NEAR(l2.cells[i].strut, open * l2.cells[i].size, 1e-9);
+  }
+  {  // R11: a typed width is the width in every cell that can hold it; the report counts
+     // the cells that cannot.
+    StrutSpec sp;
+    sp.width_mm = 1.2;
+    sp.dial = 0.9;   // not read
+    Layout l = base;
+    StrutReport r = set_struts(l, sp);
+    int typed = 0;
+    for (const Cell& c : l.cells) {
+      if (open * c.size >= 1.2) { NEAR(c.strut, 1.2, 1e-12); ++typed; }
+      else NEAR(c.strut, std::max(bead, open * c.size), 1e-9);
+    }
+    CHECK(typed == 2 && r.at_ceiling == 4 && r.at_bead == 0);   // 12 and 8 mm hold it
+    sp.allow_quilt = true;
+    r = set_struts(l, sp);
+    for (const Cell& c : l.cells) NEAR(c.strut, std::min(1.2, quilt * c.size), 1e-9);
+    CHECK(r.at_ceiling == 1);                                   // the 2.4 mm cell
+    sp.width_mm = 0.2;                                          // under one line (R5)
+    r = set_struts(l, sp);
+    for (const Cell& c : l.cells) NEAR(c.strut, bead, 1e-12);
+    CHECK(r.at_bead == l.cells.size());
+  }
+  {  // The ratios are octet's. Another type is refused, never given octet's widths.
+    Layout l = base;
+    l.topology = LatticeTopology::Kelvin;
+    bool refused = false;
+    try { set_struts(l, StrutSpec{}); } catch (const std::invalid_argument&) { refused = true; }
+    CHECK(refused);
+    for (const Cell& c : l.cells) CHECK(c.strut == 0.0);
+  }
+}
+
+
 static void test_cells_curved_region() {
   int L = -1, square = -1, sideA = -1, sideB = -1;
   const StepModel model = plate_with_L_face(&L, &square, &sideA, &sideB);
@@ -894,6 +1016,7 @@ static void test_cells_curved_region() {
 }
 
 int main() {
+  test_struts();
   test_cells_prism();
   test_cells_walls_under_a_face();
   test_cells_ledge_is_not_a_wall();
