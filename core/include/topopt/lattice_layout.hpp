@@ -518,6 +518,41 @@ struct StrutReport {
 // ratios here are octet's own.
 StrutReport set_struts(Layout& layout, const StrutSpec& spec);
 
+// ── BARS (stage D) ────────────────────────────────────────────────────────────
+// The struts themselves: every strut of every cell, once (a strut two cells share is one
+// bar, as wide as the wider cell asks), and for a cut cell the pieces of each strut that
+// lie in the cell's own shape (cell_holds). The cell's own type gives the struts
+// (lattice_strut_cell); a type with no cell there throws std::invalid_argument.
+struct Bar {
+  Vec3 a{}, b{};         // its two ends, in the part's own coordinates
+  double width = 0.0;    // mm
+  int region = 0;
+  // How an end finishes.
+  enum class End : std::uint8_t {
+    Node,      // a node of its cell: other struts meet it there
+    Solid,     // the lattice stops and the part's solid begins: the bar runs on into the
+               // solid by one width, so it is joined to it, not butted against it (S11)
+    Surface,   // cut flat by the part's own surface: air beyond (S11)
+    Loose,     // the cell's shape stops inside the lattice: another wall's or region's
+               // cells begin, or space no cell holds. Transition struts join these (S5).
+  };
+  End end_a = End::Node, end_b = End::Node;
+  bool piece = false;    // part of a strut of a cut cell, not a whole strut
+};
+
+struct Bars {
+  std::vector<Bar> bars;
+  std::size_t stubs = 0;      // pieces shorter than their own width: not kept (S4)
+  std::size_t dropped = 0;    // by drop_loose_bars
+};
+
+Bars lay_bars(const Layout& layout, const Domain& domain, int threads = 0);
+
+// S4, Finish None: a bar is kept only if each of its ends lands on another bar or on
+// solid. Removes the rest (a cut end in the air or loose in the lattice, and then any
+// bar left holding a node alone), and counts them in `dropped`.
+void drop_loose_bars(Bars& bars);
+
 // In the plane of a flat region's face: how far `p` is inside the region's edge (its
 // outline moved by Expand), mm. Negative outside. The depth is left out (G5). A curved
 // region has no such plane: +infinity.

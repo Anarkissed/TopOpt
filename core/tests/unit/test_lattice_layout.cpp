@@ -1,7 +1,9 @@
 // Lattice layout, stage B: measure and domain. Rule numbers are those of
 // docs/design/lattice-rebuild/01-rules.md; the numbers are those of 02-tests.md.
 #include <cmath>
+#include <array>
 #include <cstdio>
+#include <map>
 #include <stdexcept>
 #include <vector>
 
@@ -1590,6 +1592,167 @@ static void test_grooves_do_not_narrow_a_wall() {
   }
 }
 
+// ── stage D: bars ─────────────────────────────────────────────────────────────
+static double bar_length(const Bar& b) {
+  return std::sqrt((b.b.x - b.a.x) * (b.b.x - b.a.x) + (b.b.y - b.a.y) * (b.b.y - b.a.y) +
+                   (b.b.z - b.a.z) * (b.b.z - b.a.z));
+}
+static bool same_bars(const Bars& x, const Bars& y) {
+  if (x.bars.size() != y.bars.size() || x.stubs != y.stubs) return false;
+  for (std::size_t i = 0; i < x.bars.size(); ++i) {
+    const Bar &p = x.bars[i], &q = y.bars[i];
+    if (p.a.x != q.a.x || p.a.y != q.a.y || p.a.z != q.a.z || p.b.x != q.b.x || p.b.y != q.b.y ||
+        p.b.z != q.b.z || p.width != q.width || p.end_a != q.end_a || p.end_b != q.end_b)
+      return false;
+  }
+  return true;
+}
+
+// S4, S11: the struts themselves, once each, cut where their cell is cut.
+static void test_bars() {
+  const Vec3 down{0, 0, -1};
+  {  // A 12 mm cube, all lattice, 6 mm cells: 2 x 2 x 2 whole octet cells.
+    PartMeasure pm(weld_mesh(box(12, 12, 12)));
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, {6, 6, 12}, down, 6, 6, 12)};
+    Domain d(pm, s);
+    CellSpec cs;
+    cs.cell_max_mm = 6;
+    Layout l = lay_cells(d, cs);
+    CHECK(l.cells.size() == 8);
+    set_struts(l, StrutSpec{});
+    Bars bars = lay_bars(l, d);
+    // A cell has 36 struts: 4 on each of its 6 faces, 12 inside. A face two cells share
+    // carries its 4 once: 4 x 36 faces + 12 x 8 cells.
+    CHECK(bars.bars.size() == 240);
+    CHECK(bars.stubs == 0);
+    int odd = 0;
+    for (const Bar& b : bars.bars)
+      if (b.piece || b.end_a != Bar::End::Node || b.end_b != Bar::End::Node ||
+          std::fabs(bar_length(b) - 6.0 * std::sqrt(0.5)) > 1e-9 || !(b.width > 0.0) || b.region != 1)
+        ++odd;
+    CHECK(odd == 0);
+    CHECK(same_bars(lay_bars(l, d, 1), bars));   // any number of threads (D18)
+    drop_loose_bars(bars);
+    CHECK(bars.bars.size() == 240 && bars.dropped == 0);   // nothing loose in a whole block
+  }
+  {  // A 20 x 20 x 12 block, lattice 6 deep from its top, 6 mm cells: the cells along the
+     // sides are cut by the block's own sides, and stand on solid.
+    PartMeasure pm(weld_mesh(box(20, 20, 12)));
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, {10, 10, 12}, down, 10, 10, 6)};
+    Domain d(pm, s);
+    auto pr = d.probe();
+    CellSpec cs;
+    cs.cell_max_mm = 6;
+    Layout l = lay_cells(d, cs);
+    set_struts(l, StrutSpec{});
+    Bars bars = lay_bars(l, d);
+    CHECK(same_bars(lay_bars(l, d, 1), bars));
+    int outside = 0, off_surface = 0, short_piece = 0, surface_ends = 0;
+    double on_top = 0.0;
+    for (const Bar& b : bars.bars) {
+      if (pr.part().depth(b.a) < -1e-6 || pr.part().depth(b.b) < -1e-6) ++outside;   // S11
+      if (b.end_a == Bar::End::Surface) { ++surface_ends; if (std::fabs(pr.part().depth(b.a)) > 1e-6) ++off_surface; }
+      if (b.end_b == Bar::End::Surface) { ++surface_ends; if (std::fabs(pr.part().depth(b.b)) > 1e-6) ++off_surface; }
+      if (b.piece && bar_length(b) < b.width) ++short_piece;                           // S4
+      if (std::fabs(b.a.z - 12) < 1e-9 && std::fabs(b.b.z - 12) < 1e-9) on_top += bar_length(b);
+    }
+    CHECK(outside == 0);           // nothing sticks out of the part
+    CHECK(surface_ends > 20);
+    CHECK(off_surface == 0);       // a bar cut by the part's surface ends ON it
+    CHECK(short_piece == 0);
+    // The struts lying IN the latticed face are part of the lattice, in cut cells too:
+    // the two families of diagonals, 6 mm apart, cut to the 20 mm square. Each family is
+    // sqrt(2) x (20 + 2 x 14 + 2 x 8 + 2 x 2) = 96.17 mm of strut, to the micron.
+    NEAR(on_top, 2.0 * std::sqrt(2.0) * 68.0, 1e-3);
+    drop_loose_bars(bars);
+    CHECK(bars.dropped > 0);
+    std::map<std::array<long long, 3>, int> at;
+    auto key = [](const Vec3& p) {
+      return std::array<long long, 3>{std::llround(p.x * 1e5), std::llround(p.y * 1e5), std::llround(p.z * 1e5)};
+    };
+    for (const Bar& b : bars.bars) { ++at[key(b.a)]; ++at[key(b.b)]; }
+    int loose = 0;
+    for (const Bar& b : bars.bars) {
+      if (b.end_a == Bar::End::Surface || b.end_a == Bar::End::Loose) ++loose;
+      if (b.end_b == Bar::End::Surface || b.end_b == Bar::End::Loose) ++loose;
+      if (b.end_a == Bar::End::Node && at[key(b.a)] < 2) ++loose;
+      if (b.end_b == Bar::End::Node && at[key(b.b)] < 2) ++loose;
+    }
+    CHECK(loose == 0);             // S4: every end left lands on another bar or on solid
+    CHECK(bars.bars.size() > 100);
+  }
+  {  // A 13 mm wide block: its 6 mm cells overhang each side by 2.5 mm, and the struts
+     // that clip the block's edges leave pieces 0.7 mm long, shorter than they are wide.
+     // Such a stub is not kept (S4).
+    PartMeasure pm(weld_mesh(box(13, 13, 12)));
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, {6.5, 6.5, 12}, down, 6.5, 6.5, 6)};
+    Domain d(pm, s);
+    CellSpec cs;
+    cs.cell_max_mm = 6;
+    Layout l = lay_cells(d, cs);
+    set_struts(l, StrutSpec{});
+    const Bars bars = lay_bars(l, d);
+    CHECK(bars.stubs > 0);
+    int short_piece = 0;
+    for (const Bar& b : bars.bars)
+      if (b.piece && bar_length(b) < b.width) ++short_piece;
+    CHECK(short_piece == 0);
+  }
+  {  // S4, by hand: a chain of three bars from solid out to a cut end in the air. The cut
+     // one lands on nothing; with it gone the next holds its node alone; and so on back
+     // to the solid. A triangle of bars beside it, standing on solid, stays.
+    Bars chain;
+    auto bar = [](Vec3 a, Vec3 b, Bar::End ea, Bar::End eb) {
+      Bar x;
+      x.a = a; x.b = b; x.end_a = ea; x.end_b = eb; x.width = 0.5;
+      return x;
+    };
+    chain.bars = {bar({0, 0, 0}, {1, 0, 0}, Bar::End::Solid, Bar::End::Node),
+                  bar({1, 0, 0}, {2, 0, 0}, Bar::End::Node, Bar::End::Node),
+                  bar({2, 0, 0}, {3, 0, 0}, Bar::End::Node, Bar::End::Surface),
+                  bar({0, 5, 0}, {1, 6, 0}, Bar::End::Solid, Bar::End::Node),
+                  bar({2, 5, 0}, {1, 6, 0}, Bar::End::Solid, Bar::End::Node),
+                  bar({5, 5, 0}, {6, 5, 0}, Bar::End::Node, Bar::End::Loose)};
+    drop_loose_bars(chain);
+    CHECK(chain.dropped == 4);
+    CHECK(chain.bars.size() == 2 && chain.bars[0].a.y == 5 && chain.bars[1].a.y == 5);
+  }
+  {  // The same block, the region pulled 2 mm in from the outline: solid all round it.
+     // A bar cut at the region's edge runs on into the solid by its own width (S11).
+    PartMeasure pm(weld_mesh(box(20, 20, 12)));
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, {10, 10, 12}, down, 10, 10, 6, -2.0)};
+    Domain d(pm, s);
+    auto pr = d.probe();
+    CellSpec cs;
+    cs.cell_max_mm = 6;
+    Layout l = lay_cells(d, cs);
+    set_struts(l, StrutSpec{});
+    const Bars bars = lay_bars(l, d);
+    int solid_ends = 0, wrong = 0, surface = 0;
+    for (const Bar& b : bars.bars)
+      for (int e = 0; e < 2; ++e) {
+        const Bar::End kind = e ? b.end_b : b.end_a;
+        const Vec3& p = e ? b.b : b.a;
+        if (kind == Bar::End::Surface) ++surface;
+        if (kind != Bar::End::Solid) continue;
+        ++solid_ends;
+        const double edge = region_edge_distance(s.regions[0], p);
+        // In the solid, past the region's edge, by no more than its own width.
+        if (pr.where(p).lattice() || pr.part().depth(p) < -1e-6) ++wrong;
+        // (An octet strut meets the region's edge at 45 degrees, so one width along it is
+        // 0.7 of a width past the edge.)
+        if (p.z > 6.0 + 1e-6 && !(edge < -0.6 * b.width && edge > -b.width - 1e-6)) ++wrong;
+      }
+    CHECK(solid_ends > 20);
+    CHECK(wrong == 0);
+    CHECK(surface == 0);           // the lattice nowhere reaches the block's sides
+  }
+}
+
 // D5, D15, C15: with a Protect skin on a face, the lattice starts at the skin's own depth
 // and its cells divide what is left of the wall. The skin never cuts through a cell.
 static void test_cells_behind_a_protect_skin() {
@@ -1795,6 +1958,7 @@ int main() {
   test_cells_behind_a_pocket();
   test_grooves_do_not_narrow_a_wall();
   test_kept_readings();
+  test_bars();
   test_struts();
   test_grade_to_shape();
   test_cells_prism();

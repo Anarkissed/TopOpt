@@ -110,14 +110,14 @@ Kind of test: **L** reads the layout, **F** reads the file, **A** is an app test
 | S1 | L, F | Finish Rim: one bar per closed outline, a single path with no step larger than 0.01 mm between its segments. |
 | S2 | L | No rim segment lies where the outline faces air or runs between two latticed regions. |
 | S3 | L, F | Finish Skin: every cut strut end on the face is the end of at least one skin bar. The skin's open area is above 0 (it does not seal). |
-| S4 | L | Finish None: every strut ends on another strut, on solid, or is absent. No strut shorter than its own width remains. Each stepped edge left is listed in the layout's notices with its place. |
-| S5 | L | On every plane where two cell sizes meet, each node of the finer side is the end of at least two struts. |
+| S4 | L | Finish None: every strut ends on another strut, on solid, or is absent. No strut shorter than its own width remains. Each stepped edge left is listed in the layout's notices with its place. Built 2026-11-11 (`lay_bars`, `drop_loose_bars`; `test_bars`): a 12 mm cube of 2 x 2 x 2 whole cells is 240 bars, each strut once; on a 20 mm block the cells cut by its sides give pieces whose cut ends are marked; after dropping, no end is in the air or loose and no bar holds a node alone; a 13 mm block leaves stubs, counted and not kept; a hand-made chain from solid out to a cut end goes entirely, a triangle standing on solid stays. Not built: the notices that list each stepped edge. |
+| S5 | L | On every plane where two cell sizes meet, each node of the finer side is the end of at least two struts. Not built. Measured on his stand 2026-11-11 (band 6, 0.42 line): 39,219 bars, of whose 78,438 ends 6,763 are loose in the lattice (where two walls or two cell sizes meet) and 1,971 are cut by the part's surface; dropping what lands on nothing removes 8,707 bars and opens a gap along the line where the wing meets the centre plate. That gap is what the transition struts close. |
 | S6 | F | The file is one closed solid: every edge shared by exactly two triangles, one connected piece, no self-crossing. |
 | S7 | L | Each Manual value reaches the layout: skin bar width, spacing and pattern, rim width ± 0.01 mm; joint fillet radius; no strut steeper past the overhang limit ± 0.5°. |
 | S8 | A | A new lattice has Finish None. |
 | S9 | F | Finish Covered: the outside of the file equals the part's surface within 0.01 mm; no strut is visible from outside. |
 | S10 | F | Default rim bar width = 2 × bead ± 0.01 mm. |
-| S11 | F | Where a strut meets solid there is no gap (distance 0 within 0.01 mm) and nothing of it lies outside the part (D2). |
+| S11 | F | Where a strut meets solid there is no gap (distance 0 within 0.01 mm) and nothing of it lies outside the part (D2). In the layout (L), built 2026-11-11: no bar end lies outside the part (to a millionth of a millimetre); a bar the part's surface cuts ends on the surface; the struts lying in the latticed face of the 20 mm block total 192.33 mm, the exact length of its two families of diagonals; with the region pulled 2 mm in from the outline, each bar cut at the region's edge ends in solid, 0.6 to 1 width past the edge. Seven deliberate breaks fail. |
 
 ## 6. What the app says
 
