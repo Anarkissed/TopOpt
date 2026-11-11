@@ -132,7 +132,7 @@ extension FlexibleMainStage {
         faceUI.attachTagPick = [:]
         faceUI.attachTagFrozen = [:]
         attachProject = p
-        attach = FlexibleAttach.start(lattice: ref.key, group: g, faceName: p.latticeSelectableName(ref))
+        attach = FlexibleAttach.start(lattice: ref.key, group: g, faceName: p.flexibleName(ref))
     }
 
     /// Back to the normal card, Play restored, nothing else said.
@@ -195,7 +195,7 @@ extension FlexibleMainStage {
         var outside: Set<Int> = []
         if let k = attach.wall, let w = walls?.wall(k), let q = w.frame.first?.first, let mesh = p.viewerMesh,
            let f = FlexibleSolid.of(mesh).faceOnPlane(point: q, normal: w.m, tolMM: FlexibleLatticeWalls.touchMM) { outside = [f] }
-        let (s, e) = FlexibleAttach.step(attach, tap, walls: walls, linked: linked, outsideFaces: outside)
+        let (s, e) = FlexibleAttach.step(attach, tap, walls: walls, linked: linked, outsideFaces: outside, name: p.plainFaceName)
         switch e {
         case .end: endAttach(); return
         case let .link(w, t): FlexibleFaceCommits.addLink(lattice: attach.lattice, wall: w, target: t, project: p)

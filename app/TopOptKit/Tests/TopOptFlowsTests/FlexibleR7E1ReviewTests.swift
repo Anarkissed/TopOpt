@@ -195,7 +195,7 @@ final class FlexibleR7E1ReviewTests: XCTestCase {
             XCTAssertNil(why, "held, then stored")
             XCTAssertLessThan(h2, 40, "★ held short of 40 mm")
             XCTAssertTrue(m.toast?.hasPrefix("Held at ") ?? false, "★ the hold is said: \(m.toast ?? "-")")
-            XCTAssertTrue(m.toast?.hasSuffix("Face 3 keeps the rest") ?? false, "★ his rule named: \(m.toast ?? "-")")
+            XCTAssertTrue(m.toast?.hasSuffix("Right side keeps the rest") ?? false, "★ his rule named: \(m.toast ?? "-")")
             XCTAssertGreaterThan(restArea, 0.5 * 20 - 1e-6, "★ Face 3 keeps at least 0.5 mm of itself across its 20 mm")
             XCTAssertLessThan(restArea, 2000 - 1, "Face 3's rest is not the whole face")
             XCTAssertTrue(shared.isEmpty, "★ no shared footprint")

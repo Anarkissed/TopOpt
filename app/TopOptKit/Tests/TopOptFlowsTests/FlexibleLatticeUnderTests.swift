@@ -140,7 +140,12 @@ final class FlexibleLatticeUnderTests: XCTestCase {
             let own = issues.compactMap(\.region).filter { m.hasOwnLattice($0) }
             print("E-FLEX \(dir.lastPathComponent) issues \(issues.map { "\($0.region ?? -1): \($0.fixes)" }) · own lattice \(own)")
             if dir == FlexibleHisProject.round5Dir {
-                XCTAssertEqual(offered, FlexibleHisProject.latticeUnderTaps(dir), "★ round 5: Face 3 and Face 5 have their own lattice — the one-tap stays")
+                // ★ B10: the page names the new selection plainly ("Right side"); the fixture keeps his saved taps' data names ("Face 3")
+                let taps = FlexibleHisProject.latticeUnderTaps(dir).map { t -> FlexibleLatticeUnder.Plan in
+                    guard case let .newGroup(f, r, n, d) = t else { return t }
+                    return .newGroup(face: f, region: r, name: FlexibleRowCopy.plainFaces(n, m.plainName), depthMM: d)
+                }
+                XCTAssertEqual(offered, taps, "★ round 5: Face 3 and Face 5 have their own lattice — the one-tap stays")
             } else {
                 XCTAssertEqual(offered, [], "★ \(dir.lastPathComponent): no one-tap on Top B (no face-prism of its own)")
             }

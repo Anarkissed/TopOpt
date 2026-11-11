@@ -100,7 +100,7 @@ final class FlexibleMainStageTests: XCTestCase {
         XCTAssertEqual(s.tone, .fix)
         // ★ batch B review: the pill's SHORT form (the whole sentence truncated at 11" portrait)
         XCTAssertEqual(s.line, m.readiness.blocking.first?.pill, "the pill says the one thing to fix")
-        XCTAssertEqual(s.line, "Fix: the weight on Face 5")
+        XCTAssertEqual(s.line, "Fix: the weight on Left side")
         XCTAssertEqual(s.fix?.kind, .noWeight)
         stage.openFix()
         XCTAssertEqual(m.pendingFix?.kind, .noWeight, "a tap opens Settings on that fix")

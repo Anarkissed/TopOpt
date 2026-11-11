@@ -307,7 +307,7 @@ struct FlexibleFaceChip: View {
     private func faceLine(_ g: SelectionGroup, _ ref: LatticeSelectableRef) -> some View {
         let role = project.latticeSelectableRole(ref, in: g.id)
         return HStack(spacing: DS.Space.s) {
-            Text(project.latticeSelectableName(ref)).font(.system(size: 14, weight: .semibold))
+            Text(project.flexibleName(ref)).font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(DS.Color.textPrimary.color).lineLimit(1)
             if role != nil { FlexibleInfoButton(main: main, key: "c-" + ref.key, group: g.id, ref: ref) }
             Spacer(minLength: 0)

@@ -260,8 +260,9 @@ final class FlexibleI2AttachTests: XCTestCase {
         (s, e) = FlexibleAttach.step(s, .wall("side:f7"), walls: w, linked: [])
         XCTAssertEqual(s.step, .pickTarget(wall: "side:f7"))
         XCTAssertEqual(FlexibleAttach.stepLine(s, walls: w), "2 of 2 · Tap what Side 2 connects to")
-        (s, e) = FlexibleAttach.step(s, .face(9), walls: w, linked: [])
-        XCTAssertEqual(s.say, "Face 9 doesn't touch Side 2"); XCTAssertEqual(s.step, .pickTarget(wall: "side:f7"))
+        (s, e) = FlexibleAttach.step(s, .face(9), walls: w, linked: [], name: { $0 == 9 ? "Left side" : "?" })
+        // ★ RE-PINNED (B10, §3: plain face names, never "Face 9"): the face by the page's namer
+        XCTAssertEqual(s.say, "Left side doesn't touch Side 2"); XCTAssertEqual(s.step, .pickTarget(wall: "side:f7"))
         (s, e) = FlexibleAttach.step(s, .back, walls: w, linked: [])
         XCTAssertEqual(s.step, .pickWall)
         (s, _) = FlexibleAttach.step(s, .wall("side:f7"), walls: w, linked: [])
@@ -449,7 +450,7 @@ final class FlexibleI2AttachTests: XCTestCase {
         XCTAssertEqual(rows.count, 1, "★ still listed")
         let l = rows[0]
         XCTAssertEqual(l.state, .stale(" · no solid there now"))
-        XCTAssertEqual(FlexibleAttach.rowText(l.link, wallName: st.wallName(p, lattice: Self.face6.key, wall: "side:f1"), state: l.state),
+        XCTAssertEqual(FlexibleAttach.rowText(l.link, wallName: st.wallName(p, lattice: Self.face6.key, wall: "side:f1"), state: l.state, name: p.plainFaceName),
                        "Side 1 → wall · no solid there now")
         XCTAssertEqual(p.lattice.flexible?.links?.count, 1, "★ still saved")
         XCTAssertEqual(st.liveLinks(p, key: Self.face6.key), [], "the sim ignores it (I3 reads the live ones)")
@@ -491,7 +492,11 @@ final class FlexibleI2AttachTests: XCTestCase {
 
     func testCopyFits() {
         for s in FlexibleSelectionsCopy.attachWorstCases { XCTAssertTrue(FlexibleSelectionsCopy.fits(s), "≤ 44: \(s) (\(s.count))") }
-        XCTAssertEqual(FlexibleSelectionsCopy.attachWorstCases.map(\.count).max() ?? 0, 41, "the longest, as drawn")
+        // ★ RE-PINNED (B10, §3: plain face names): the worst case is the longest plain name ("Sloped face 12, facing down"),
+        // shortened inside its line to exactly 44 — was 41 with "Face 123"
+        XCTAssertEqual(FlexibleSelectionsCopy.attachWorstCases.map(\.count).max() ?? 0, 44, "the longest, as drawn")
+        XCTAssertEqual(FlexibleSelectionsCopy.attachNotTouching("Sloped face 12, facing down", "Side 12"),
+                       "Sloped face 12, facin… doesn't touch Side 12", "★ the name shortens, the line stays one line")
         // ★ RED CONTROL: a 45-character sample (with → and ·, one character each) fails the same checker
         let sample = "Side 12 → wall · " + String(repeating: "x", count: 28)
         XCTAssertEqual(sample.count, 45)

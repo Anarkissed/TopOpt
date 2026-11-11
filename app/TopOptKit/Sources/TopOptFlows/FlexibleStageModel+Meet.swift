@@ -180,7 +180,7 @@ extension FlexibleStageModel {
         } else {
             for (k, t) in tris.enumerated() {
                 guard t < mesh.faceIDs.count, loads.faces[k] == Int(mesh.faceIDs[t]) else {
-                    mismatch = "triangle \(t) is on face \(loads.faces[k]) in core's part, face \(t < mesh.faceIDs.count ? Int(mesh.faceIDs[t]) : -1) on the page"
+                    mismatch = "core's part and the page put a triangle on different faces"   // ★ B10: never a face number
                     break
                 }
                 if let l = loads.loads[k] { byTri[t] = l }
@@ -200,6 +200,6 @@ extension FlexibleStageModel {
         let facts = try await meetFacts()
         guard let meet = await meetOffMain() else { throw TopOptError(message: "The part has no mesh to read.") }
         return FlexibleEdgeCandidates.make(meet: meet, facts: facts, removed: Set(settings.removedRegions ?? []),
-                                           name: { [weak self] r in self?.name(r) ?? "face \(r)" })
+                                           name: { [weak self] r in self?.name(r) ?? FlexibleRowCopy.aFace })
     }
 }

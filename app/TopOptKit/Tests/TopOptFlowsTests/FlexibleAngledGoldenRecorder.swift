@@ -335,6 +335,16 @@ enum FlexibleAngledGoldens {
         return l
     }
 
+    /// A region's name as the goldens record it: core's own lowercase "face N" (B10: the page shows the
+    /// plain names; these files record core's frames, so they keep the data form and stay byte-identical).
+    static func dataName(_ m: FlexibleStageModel, _ region: Int) -> String {
+        let rg = m.regions, mesh = m.project.viewerMesh
+        guard FlexibleRegions.isSector(region), let r = rg.sector(region) else { return rg.name(region, mesh: mesh, plain: { "face \($0)" }) }
+        // a sector: its faces as "face N", then its STORED name verbatim ("face 0 · Face 0 · lattice")
+        let base = rg.faces(of: region, mesh: mesh).map { "face \($0)" }.joined(separator: " + ")
+        return r.name.isEmpty ? base : "\(base) · \(r.name)"
+    }
+
     /// Core's stack for EVERY declared region of the model's open scene (rotation 0) and for every
     /// pressed face's own key — read straight from core through the page's own scene. The face presses
     /// are marked "pressed", resting faces "resting". `perturb` is the red control's door (applied to
@@ -358,7 +368,7 @@ enum FlexibleAngledGoldens {
         for k in sorted {
             let f = m.settings.face(k.region)
             let role = f.map { $0.isLoaded ? (k.rotation == $0.rotationDeg ? "pressed" : "pressed-other-rotation") : "resting" } ?? "-"
-            out.append("region \(k.region) rot \(k.rotation) \(role) \"\(m.name(k.region))\"")
+            out.append("region \(k.region) rot \(k.rotation) \(role) \"\(dataName(m, k.region))\"")
             do {
                 var s = try scene.stack(face: k.region, rotation: k.rotation)
                 if first, let perturb { s = perturb(s) }
@@ -642,7 +652,7 @@ enum FlexibleAngledGoldens {
         var out = ["# core's designs and density fields · \(label)",
                    "# build \(build.topology) beadsPerWall \(build.beadsPerWall) beadWidth \(num(build.beadWidthMM)) · design temp \(m.designTempC.map { num($0) } ?? "-")"]
         for k in sortedKeys(m.loadedKeys) {
-            out.append("design region \(k.region) rot \(k.rotation) \"\(m.name(k.region))\"")
+            out.append("design region \(k.region) rot \(k.rotation) \"\(dataName(m, k.region))\"")
             guard let d = m.designs[k] else { out.append("  none"); continue }
             out += designLines(d, stack: m.stacks[k]).map { "  " + $0 }
         }

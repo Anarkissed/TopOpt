@@ -144,8 +144,8 @@ enum FlexibleFlatPrismUI {
     static func memberName(_ m: FlexibleStageModel, _ st: FlexibleStrip, _ k: Int) -> String {
         guard k >= 0, k < st.members.count else { return "a face" }
         let mb = st.members[k]
-        if let r = m.project.faceRegions.region(mb.root), r.isCut { return FlexibleRowCopy.faceName(sector: r.name, face: mb.face) }
-        return "Face \(mb.face)"
+        if let r = m.project.faceRegions.region(mb.root), r.isCut { return FlexibleRowCopy.faceName(sector: r.name, face: mb.face, plain: m.plainName) }
+        return m.plainName(mb.face)
     }
 
     /// The arrow: through the edge's midpoint (a corner's vertex), its head H on the plane, its tail outside the part.

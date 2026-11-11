@@ -535,7 +535,7 @@ public struct FlexibleOnModelLayer: View {
         let a = info.anchor.offsetBy(dx: -origin.x, dy: -origin.y)
         let size = CGSize(width: FlexibleFaceStatsCard.width, height: FlexibleFaceStatsPlacement.estimatedHeight(rows: rows != nil))
         let r = FlexibleFaceStatsPlacement.frame(anchor: a, chip: chip, size: size, viewport: v, keepOut: keepOut)
-        return FlexibleFaceStatsCard(title: project.latticeSelectableName(info.ref) + " · lattice", rows: rows) { ui.info = nil }
+        return FlexibleFaceStatsCard(title: project.flexibleName(info.ref) + " · lattice", rows: rows) { ui.info = nil }
             .fixedSize()
             .background(GeometryReader { g in Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["statsCard": g.frame(in: .global)]) }
                 .allowsHitTesting(false))

@@ -126,7 +126,7 @@ final class FlexibleSqueezeGroupsUITests: XCTestCase {
             // FlexibleSqueezeGroupsReviewUITests measures it); the faces are listed under it
             XCTAssertEqual(rows.map(\.line), ["Group 1 · Squeeze", "Group 2 · Squeeze"])
             XCTAssertEqual(rows.map(\.value), ["10 kg", "10 kg"])
-            XCTAssertEqual(m.squeezeGroups.map { m.groupLine($0) }, ["Group 1 · Top A + Top B · Squeeze 10 kg", "Group 2 · Face 3 + Face 5 · Squeeze 10 kg"])
+            XCTAssertEqual(m.squeezeGroups.map { m.groupLine($0) }, ["Group 1 · Top A + Top B · Squeeze 10 kg", "Group 2 · 2 faces · Squeeze 10 kg"])
             // ★ RE-PINNED (round 5, S8 — his img 3: "The groups should be separate folders"): each group
             // is its own FOLDER TAB on the rail; the open tab shows ITS header (its name, Squeeze [box],
             // Colour), and the other group's header is not in the list (D2 listed both)

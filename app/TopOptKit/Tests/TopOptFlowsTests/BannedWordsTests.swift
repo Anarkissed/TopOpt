@@ -3,7 +3,7 @@
 // One word per thing. Every string literal the app can put on the screen (TopOptFlows' sources, minus logs, diagnostics,
 // identifiers and comments) is checked against the words the vocabulary table rules out. (The offscreen window's
 // accessibility tree carries only a few menu values, so the strings are read where they are written.)
-// ★ B10: the whole §3 "Never" column on the kept pages (testNoKeptPageSaysASection3NeverWord); the lattice and Flexible
+// ★ B10: the whole §3 "Never" column on the kept pages and (#362) the Flexible pages (testNoKeptPageSaysASection3NeverWord); the lattice
 // pages' hits are listed, not fixed (the reviewer's scope ruling 2026-11-11 03:50Z).
 #if canImport(AppKit)
 import XCTest
@@ -88,9 +88,9 @@ final class BannedWordsTests: XCTestCase {
         Banned(pattern: #"\b[Ff]actor of safety\b"#, use: "Safety margin", batch: "B10"),
     ]
 
-    /// The lattice and Flexible pages' files: listed, never fixed here (the lattice pages wait for the rebuild; #362 fixes the
-    /// Flexible pages).
-    static let listedFilePrefixes = ["Lattice", "Flexible", "Organic", "Relattice", "FrozenRegionLattice", "FaceRegionSheet"]
+    /// The lattice pages' files: listed, never fixed here (the lattice pages wait for the rebuild). ★ B10 (#362): the Flexible
+    /// pages are held to the rule — every Flexible row, chip, card and line names a face by its plain name.
+    static let listedFilePrefixes = ["Lattice", "Organic", "Relattice", "FrozenRegionLattice", "FaceRegionSheet"]
     /// The lattice pages' strings inside the shared files (listed, never fixed here), by file: the string starts with one.
     static let listed: [String: [String]] = [
         "WorkspacePlaceholder.swift": ["this run has no variant here", "This variant can’t be latticed.", "Can’t lattice this variant",
@@ -115,6 +115,14 @@ final class BannedWordsTests: XCTestCase {
         "LibraryModel.swift": ["variants"], "RedesignToStrengthen.swift": ["variants"],
         "RemoteRunner.swift": ["variant", "variants", "rung", "rungs", "clearances"],
         "WorkspacePlaceholder.swift": ["topology-primitive-undo", "topology-primitive", "topology-primitive-field-#"],
+        // ★ B10 (#362), the Flexible pages: a face's STORED name keeps its number as data, as the Cut stage stores its own
+        // (FlexibleSectors.dataName; every row reads it through FlexibleRowCopy.plainFaces → the plain name); core's sentence
+        // searched for its ids (never drawn: FlexibleRegions.renamed draws it); a pure function's default namer, read only by
+        // its tests (the page passes displayName); the I2 read-through's Report, printed by the handoff, never drawn.
+        "FlexibleSectors.swift": ["Face #"],
+        "FlexiblePressAim.swift": ["face region #"],
+        "FlexibleReadiness.swift": ["Face #"],
+        "FlexibleSectorMigration.swift": [##"Surface region # \"#\" removed (an I2 cut, given back)"##, "kept on Surface: region # — #"],
     ]
     // (A Keep clear group's own shapes were asked of the reviewer and answered 11-11 08:04Z, (3)(a): "+ Add" opens
     // Box │ Cylinder, the labels name the kind, "shapes" for several — so "primitive" is held to the rule like every word.)

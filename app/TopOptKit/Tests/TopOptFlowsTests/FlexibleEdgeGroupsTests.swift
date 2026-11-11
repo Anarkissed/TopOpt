@@ -348,7 +348,7 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
         }
         // ★ RE-PINNED (round 7, R7-E1 — his 2026-10-18 words: "There shouldn't be a strip width."): no strip / patch words;
         // was "Face 1 keeps the rest · strip taken for Edge N"
-        XCTAssertTrue(lines.contains("Face 1 keeps the rest \u{00B7} Edge \(c.number)"), "the line names the face and the edge")
+        XCTAssertTrue(lines.contains("Top face keeps the rest \u{00B7} Edge \(c.number)"), "the line names the face and the edge")
         // ★ RE-PINNED (round 7, R7-E1 — his 2026-10-18 words: "There shouldn't be a strip width. It should be a Flat prism that
         // gets wider as it gets dragged further towards the centre of the model from the edge."): was the DEFAULT WIDTH (core's
         // lattice depth under the members, capped at half the face). A pick carries no width now: it carries core's halfway
@@ -563,7 +563,7 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
         XCTAssertEqual(m.groupColour(g), colour.rgba, "the new group wears the pick's colour")
         XCTAssertEqual(m.rail, .group(g.id), "its tab opens")
         XCTAssertEqual(FlexibleSettingsRailView.tabs(model: m).first { $0.tab == .group(g.id) }?.detail, "1 edge")
-        XCTAssertEqual(m.stripTitle(press.id), "Edge \(c.number) \u{00B7} Face 1 + Face 2", "its row names the pick and the faces")
+        XCTAssertEqual(m.stripTitle(press.id), "Edge \(c.number) \u{00B7} Top face + Front face", "its row names the pick and the faces")   // ★ B10: plain names
         // ★ RE-PINNED (R7-E2): sent once core takes it (was: never sent)
         try await FlexibleHisProject.waitFor(180, "core's verdict") { m.pressSupport[press.id]?.inJob == true }
         XCTAssertTrue(m.sentPresses.contains(press.id), "★ sent")

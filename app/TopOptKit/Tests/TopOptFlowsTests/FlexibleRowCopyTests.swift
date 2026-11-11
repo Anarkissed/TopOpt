@@ -40,13 +40,14 @@ final class FlexibleRowCopyTests: XCTestCase {
         }
         lines.append(FlexibleRowCopy.filament(name: nil, hasData: false))
         let longGroup = String(repeating: "Heel pad and toe box ", count: 3)
+        let longest: (Int) -> String = { _ in "Sloped face 12, facing down" }   // ★ B10: the longest plain face name
         for (kg, gkg, n, ob) in [(10.0, 10.0, 1, false), (6.0, 10.0, 2, false), (7.07, 10.0, 1, true), (123.4, 500.0, 5, true)] {
             lines.append(FlexibleRowCopy.weight(kg: kg, group: "Top", groupKg: gkg, groupRegions: n, oblique: ob))
             lines.append(FlexibleRowCopy.weight(kg: kg, group: longGroup, groupKg: gkg, groupRegions: n, oblique: ob))
             lines.append(FlexibleRowCopy.weight(kg: kg, group: nil, groupKg: 0, groupRegions: 0, oblique: false))
         }
-        lines += [FlexibleRowCopy.faceName(sector: "top A", face: 1), FlexibleRowCopy.faceName(sector: longGroup, face: 1),
-                  FlexibleRowCopy.faceName(sector: nil, face: 12), FlexibleRowCopy.noFace,
+        lines += [FlexibleRowCopy.faceName(sector: "top A", face: 1, plain: longest), FlexibleRowCopy.faceName(sector: longGroup, face: 1, plain: longest),
+                  FlexibleRowCopy.faceName(sector: nil, face: 12, plain: longest), FlexibleRowCopy.noFace,
                   FlexibleRowCopy.deepest(3), FlexibleRowCopy.deepest(18.44), FlexibleRowCopy.finish, FlexibleRowCopy.shape,
                   // ★ RE-PINNED (round 4 batch D2): "Shares a stack with …" is gone — two faces on one
                   // stack are a pinch (or separate squeezes), never a warning; its lines instead
@@ -61,8 +62,8 @@ final class FlexibleRowCopyTests: XCTestCase {
                   FlexibleRowCopy.autoNoFace, FlexibleRowCopy.autoUnreachable, FlexibleRowCopy.autoNoPick,
                   FlexibleRowCopy.pressedOnMainPage(group: longGroup), FlexibleRowCopy.relinked(oldKg: 123.4, group: longGroup),
                   // ★ round 4 (D1): the face list, the finish and the Stamp shape's rows
-                  FlexibleRowCopy.faceRow(name: FlexibleRowCopy.faceName(sector: longGroup, face: 1), pressed: true, kg: 123.4),
-                  FlexibleRowCopy.faceRow(name: "Face 12", pressed: false, kg: 0), FlexibleRowCopy.finish,
+                  FlexibleRowCopy.faceRow(name: FlexibleRowCopy.faceName(sector: longGroup, face: 1, plain: longest), pressed: true, kg: 123.4),
+                  FlexibleRowCopy.faceRow(name: "Sloped face 12, facing down", pressed: false, kg: 0), FlexibleRowCopy.finish,
                   FlexibleRowCopy.stamp(name: longGroup),
                   // ★ RE-PINNED (batch S verification): "Width · 20 mm long" beside the width's box is
                   // gone — Width and Length are two rows, each with its own box

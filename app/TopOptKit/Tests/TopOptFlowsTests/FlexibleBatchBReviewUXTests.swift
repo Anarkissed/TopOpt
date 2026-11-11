@@ -100,7 +100,7 @@ final class FlexibleBatchBReviewUXTests: XCTestCase {
         print("FLEX-REVIEW no load: '\(issue.oneLine)' fixes \(issue.fixes) (top face \(top))")
         XCTAssertEqual(issue.kind, .noPressedFace)
         XCTAssertEqual(issue.fixes, [.press(top)])
-        XCTAssertEqual(issue.oneLine, "Press Face \(top) or tap the face that carries weight")
+        XCTAssertEqual(issue.oneLine, "Press Top face or tap the face that carries weight")   // ★ B10: the plain name (was "Press Face \(top) …")
     }
 
     // MARK: the pop-up

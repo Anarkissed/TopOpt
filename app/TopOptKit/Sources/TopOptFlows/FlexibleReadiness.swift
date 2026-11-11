@@ -557,11 +557,22 @@ public struct FlexibleFixPrompt: Equatable, Sendable {
 
 extension FlexibleStageModel {
 
-    /// The face's name as the panel writes it ("Top A", "Face 3").
+    /// The face's name as the panel writes it ("Top A", "Top face") — ★ B10: the plain name, never its number.
     public func displayName(_ region: Int) -> String {
         let sector = regions.sector(region)
         return FlexibleRowCopy.faceName(sector: sector?.name,
-                                        face: sector == nil ? region : regions.faces(of: region, mesh: project.viewerMesh).first ?? region)
+                                        face: sector == nil ? region : regions.faces(of: region, mesh: project.viewerMesh).first ?? region,
+                                        plain: plainName)
+    }
+
+    /// ★ B10: a face's plain name (FaceNames: "Top face", "Hole, ⌀ 8 mm"), as Lattice Setup and Topology name it.
+    public func plainName(_ face: Int) -> String { project.faceName(FaceID(face)) }
+
+    /// ★ B10: the part's plain names as ONE value, for a namer that runs off the main actor (the aim's and the plan's).
+    public func plainNamer() -> @Sendable (Int) -> String {
+        guard let m = project.viewerMesh else { return { _ in FlexibleRowCopy.aFace } }
+        let names = FaceNames.names(in: m, frame: .init(gravity: project.force.gravity))
+        return { names[FaceID($0)] ?? FlexibleRowCopy.aFace }
     }
 
     /// The readiness inputs, read from the model's copies of core's results.
@@ -592,7 +603,7 @@ extension FlexibleStageModel {
             calibrateFirst: calibrateFirst, withData: withData, pressed: pressed,
             nozzleIsAuto: s.nozzleTempC == nil, topologyIsGyroid: s.topology == "gyroid",
             selected: selectedRegion,
-            name: { [weak self] r in self?.displayName(r) ?? "Face \(r)" },
+            name: { [weak self] r in self?.displayName(r) ?? FlexibleRowCopy.aFace },
             removable: { _ in true },   // ★ ROUND 5 (S6): every face can be deleted from the Flexible setup
             inherited: { [mainPageLoads] r in mainPageLoads.entry(r)?.role == .pressed },
             buildFailure: latticeFailure, anyFilament: anyFilament,

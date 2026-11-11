@@ -140,7 +140,7 @@ final class FlexibleSqueezeGroupsModelTests: XCTestCase {
         XCTAssertTrue(m.groupsShareMaterial, "the top's columns and the sides' cross the same pad")
         let g = try await build(m)
         XCTAssertEqual(g.sims.map(\.id), ["group-1", "group-2", "all"])
-        XCTAssertEqual(g.sims[1].title, "Group 2 · Face 3 + Face 5")
+        XCTAssertEqual(g.sims[1].title, "Group 2 · Right side + Left side")
         print("FLEX-GROUPS his top | sides: shared voxels \(g.sharedVoxels) · notes \(g.simNotes)")
         XCTAssertGreaterThan(g.sharedVoxels, 0)
         // each group's own field, then the lattice's: the max of the two everywhere

@@ -157,7 +157,7 @@ extension FlexibleStageModel {
                         designed = true
                     }
                 } else if let e = designErrors[k] {
-                    refusal = FlexibleRowCopy.pressNotDesigned(FlexiblePressAim.plainLine(text(e)) { [weak self] r in self?.coreRegionName(r) ?? "Face \(r)" })
+                    refusal = FlexibleRowCopy.pressNotDesigned(FlexiblePressAim.plainLine(text(e)) { [weak self] r in self?.coreRegionName(r) ?? FlexibleRowCopy.aFace })
                 }
             }
             let facts = FlexiblePressSupport.Facts(schema: core.0, bridge: core.1, api: core.2, stacked: stacked, twoEntries: twice,

@@ -119,7 +119,8 @@ public enum FlexibleAttach {
     /// ★ THE STEP MACHINE. `linked`: this lattice's live links as "wall|target"; `outsideFaces`: the model faces lying on the
     /// picked wall's plane facing out ("Face 2 is the part's outside"). A stray tap never ends the steps.
     public static func step(_ s0: FlexibleAttachState, _ tap: FlexibleAttachTap, walls: FlexibleLatticeWalls.Result?,
-                            linked: Set<String>, outsideFaces: Set<Int> = []) -> (FlexibleAttachState, FlexibleAttachEffect) {
+                            linked: Set<String>, outsideFaces: Set<Int> = [],
+                            name: (Int) -> String = { _ in FlexibleRowCopy.aFace }) -> (FlexibleAttachState, FlexibleAttachEffect) {
         var s = s0
         s.flash = nil
         switch (s.step, tap) {
@@ -146,15 +147,15 @@ public enum FlexibleAttach {
                 return (s, .none)
             }
             guard t == tw else { s.say = stepLine(s, walls: walls); return (s, .none) }
-            if linked.contains("\(k)|\(t)") { s.say = FlexibleSelectionsCopy.attachAlready(w.name, FlexibleLatticeWalls.targetName(t)); return (s, .none) }
+            if linked.contains("\(k)|\(t)") { s.say = FlexibleSelectionsCopy.attachAlready(w.name, FlexibleLatticeWalls.targetName(t, name: name)); return (s, .none) }
             s.step = .pickWall
             s.linkedHere += 1
-            s.say = FlexibleSelectionsCopy.attachLinked(w.name, FlexibleLatticeWalls.targetName(t))
+            s.say = FlexibleSelectionsCopy.attachLinked(w.name, FlexibleLatticeWalls.targetName(t, name: name))
             return (s, .link(wall: k, target: t))
         case let (.pickTarget(k), .face(f)):
             guard let w = walls?.wall(k) else { s.say = stepLine(s, walls: walls); return (s, .none) }
-            if w.target == "skin:f\(f)" { return step(s, .target("skin:f\(f)"), walls: walls, linked: linked, outsideFaces: outsideFaces) }
-            s.say = outsideFaces.contains(f) ? FlexibleSelectionsCopy.attachOutside(f) : FlexibleSelectionsCopy.attachNotTouching(f, w.name)
+            if w.target == "skin:f\(f)" { return step(s, .target("skin:f\(f)"), walls: walls, linked: linked, outsideFaces: outsideFaces, name: name) }
+            s.say = outsideFaces.contains(f) ? FlexibleSelectionsCopy.attachOutside(name(f)) : FlexibleSelectionsCopy.attachNotTouching(name(f), w.name)
             return (s, .none)
         default:
             // a miss, a face tap in step 1, a wall tap in step 2: the step line again — nothing thrown away
@@ -267,8 +268,8 @@ public enum FlexibleAttach {
     }
 
     /// A link's row: "Side 2 → wall", with its stale reason after it.
-    public static func rowText(_ l: FlexibleLatticeLink, wallName: String, state: LinkState) -> String {
-        let base = FlexibleSelectionsCopy.linkRow(wallName, FlexibleLatticeWalls.targetName(l.target))
+    public static func rowText(_ l: FlexibleLatticeLink, wallName: String, state: LinkState, name: (Int) -> String) -> String {
+        let base = FlexibleSelectionsCopy.linkRow(wallName, FlexibleLatticeWalls.targetName(l.target, name: name))
         if case let .stale(why) = state { return base + why }
         return base
     }
@@ -297,8 +298,15 @@ extension FlexibleSelectionsCopy {
     public static func attachSeam(_ wall: String) -> String { "\(wall) runs into another lattice" }
     public static func attachThin(_ wall: String) -> String { "\(wall)'s solid is thinner than a bead" }
     public static func attachGone(_ wall: String) -> String { "\(wall) is gone at this expand" }
-    public static func attachNotTouching(_ face: Int, _ wall: String) -> String { "Face \(face) doesn't touch \(wall)" }
-    public static func attachOutside(_ face: Int) -> String { "Face \(face) is the part's outside" }
+    /// ★ B10: the face by its plain name, shortened (…) so the line stays one line of 44.
+    public static func attachNotTouching(_ face: String, _ wall: String) -> String {
+        let tail = " doesn't touch \(wall)"
+        return FlexibleRowCopy.fit(face, FlexibleRowCopy.maxChars - tail.count) + tail
+    }
+    public static func attachOutside(_ face: String) -> String {
+        let tail = " is the part's outside"
+        return FlexibleRowCopy.fit(face, FlexibleRowCopy.maxChars - tail.count) + tail
+    }
     public static func attachAlready(_ wall: String, _ target: String) -> String { "\(wall) → \(target) is linked already" }
     public static func attachChanged(_ wall: String) -> String { "\(wall) changed · tap a wall again" }
     public static let done = "Done"
@@ -312,14 +320,14 @@ extension FlexibleSelectionsCopy {
     public static let removeLink = "Remove"
     public static func removeLinkVoice(_ wall: String, _ target: String) -> String { "Remove link \(wall) to \(target)" }
 
-    /// Every Attach string with its worst case filled in (Side 12, Face 123, a 16-character name) — `testCopyFits`.
+    /// Every Attach string with its worst case filled in (Side 12, the longest plain face name) — `testCopyFits`.
     public static var attachWorstCases: [String] {
-        let w = "Side 12", f = 123, name = "Face 123"
+        let w = "Side 12", f = "Sloped face 12, facing down", name = f   // ★ B10: the longest plain face name
         return [attach, notAttached, linkedCount(12), nothingTouches, curvedAttach, suggest(12, other: false), suggest(12, other: true),
                 suggest(1, other: true), linkedWalls(12), attachTitle(name), attachStep1, attachStep2(w), attachLinked(w, "solid under it"),
                 attachOpen(w), attachSeam(w), attachThin(w), attachGone(w), attachNotTouching(f, w), attachOutside(f),
                 attachAlready(w, "wall"), attachChanged(w), done, back, cancel,
-                linkRow(w, "Face 123 skin"), linkRow("Floor", "solid under it") + staleThrough, linkRow(w, "wall") + staleNoSolid,
+                linkRow(w, f + " skin"), linkRow("Floor", "solid under it") + staleThrough, linkRow(w, "wall") + staleNoSolid,
                 linkRow(w, "wall") + staleGone, linkRow(w, "wall") + staleOff, removeLinkAsk, removeLink, attachVoice]
     }
 

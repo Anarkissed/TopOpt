@@ -266,9 +266,11 @@ final class FlexibleRound7DesignIntegrationTests: XCTestCase {
             guard case .shell(let sh) = drawn.volume.shape else { return XCTFail("a face-prism is a shell") }
             XCTAssertEqual(FlexibleLatticeHandles.depthText(sh.reachedDepthMM), handle, "★ I3: the drawn prism (\(r.key))")
         }
-        let one = FlexibleLatticeCard.previewLine(includes: p.latticeJobRegions().regions.filter { $0.role == .include })
+        let one = FlexibleLatticeCard.previewLine(includes: p.latticeJobRegions().regions.filter { $0.role == .include }, name: p.plainFaceName)
         XCTAssertTrue(one.hasSuffix("\u{00B7} 20.0 mm"), "★ I3: the card's ① line says the same depth: '\(one)'")
-        XCTAssertTrue(one.contains("Face 3 + Face 5"), "… naming the faces: '\(one)'")
+        // ★ RE-PINNED (B10, §3: plain face names, never "Face 3 + Face 5")
+        XCTAssertTrue(one.contains("\(p.plainFaceName(3)) + \(p.plainFaceName(5))"), "… naming the faces: '\(one)'")
+        XCTAssertFalse(one.contains("Face 3"), "never the number")
     }
 
     // MARK: I4 — step ② says what goes to core

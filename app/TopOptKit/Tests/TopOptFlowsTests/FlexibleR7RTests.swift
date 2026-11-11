@@ -414,7 +414,7 @@ final class FlexibleR7RTests: XCTestCase {
         print("FLEX-R7R-9 rail '\(tab.detail ?? "")' · pinch line '\(line)' (\(line.count) chars)")
         XCTAssertLessThanOrEqual(line.count, 44, "★ one line, ≤ 44 chars")
         XCTAssertFalse(line.contains("…"), "★ whole: '\(line)'")
-        XCTAssertTrue(line.contains("Face 2"), "★ it names the face")
+        XCTAssertTrue(line.contains("Front face"), "★ it names the face")
         // ★ RED CONTROLS: M2's count and the part's name
         FlexibleSettingsRailView.controlRailCountsParts = true
         FlexibleFacePanel.controlPinchPartName = true

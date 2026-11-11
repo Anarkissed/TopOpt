@@ -136,8 +136,8 @@ extension FlexibleStageModel {
             triangleLoads: { [frameWorker] tris in try await frameWorker.withScene { try $0.triangleLoads(tris) } },
             faces: { [weak self] r in self.map { $0.regions.faces(of: r, mesh: $0.project.viewerMesh) } ?? [r] },
             mesh: project.viewerMesh, buildDir: sceneInfo?.buildDir,
-            name: { [weak self] r in self?.name(r) ?? "face \(r)" },
-            displayName: { [weak self] r in self?.displayName(r) ?? "Face \(r)" },
+            name: { [weak self] r in self?.name(r) ?? FlexibleRowCopy.aFace },
+            displayName: { [weak self] r in self?.displayName(r) ?? FlexibleRowCopy.aFace },
             text: { [weak self] s in self?.text(s) ?? s })
     }
 
@@ -196,7 +196,7 @@ extension FlexibleStageModel {
         func line(_ reason: String) -> String {
             var names: [Int: String] = [:]
             for id in FlexiblePressAim.regionIDs(reason) { names[id] = source.displayName(id) }
-            return FlexiblePressAim.plainLine(reason) { names[$0] ?? "Face \($0)" }
+            return FlexiblePressAim.plainLine(reason) { names[$0] ?? FlexibleRowCopy.aFace }
         }
         var asked: [FlexiblePressAimSet.Asked] = []
         for t in candidates {
@@ -253,7 +253,7 @@ extension FlexibleStageModel {
     public func plainLine(_ reason: String) -> String {
         var names: [Int: String] = [:]
         for id in FlexiblePressAim.regionIDs(reason) { names[id] = displayName(id) }
-        return FlexiblePressAim.plainLine(reason) { names[$0] ?? "Face \($0)" }
+        return FlexiblePressAim.plainLine(reason) { names[$0] ?? FlexibleRowCopy.aFace }
     }
 
     /// ★ CORE'S SIDE VERDICT for pressing `regions` along `direction`: face_frame_cut with press_direction — its

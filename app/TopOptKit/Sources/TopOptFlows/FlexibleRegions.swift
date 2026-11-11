@@ -64,24 +64,25 @@ public struct FlexibleRegions {
 
     public func cuts(of id: Int) -> [RegionCut] { sector(id)?.cuts ?? [] }
 
-    /// "face 12", or "face 12 · A" for a sector (its Surface-stage name when it has one).
-    public func name(_ id: Int, mesh: ViewerMesh?) -> String {
-        guard Self.isSector(id) else { return "face \(id)" }
-        guard let r = sector(id) else { return "sector \(id - Self.sectorBase)" }
+    /// "Top face", or "Top face · A" for a sector (its Surface-stage name when it has one). ★ B10: the faces by their plain
+    /// names (`plain`, FaceNames), never their numbers (§3; his rule 10-24).
+    public func name(_ id: Int, mesh: ViewerMesh?, plain: (Int) -> String) -> String {
+        guard Self.isSector(id) else { return plain(id) }
+        guard let r = sector(id) else { return FlexibleRowCopy.aCutPiece }
         let faces = self.faces(of: id, mesh: mesh)
-        let base = faces.count == 1 ? "face \(faces[0])" : "faces \(faces.map(String.init).joined(separator: "+"))"
-        return "\(base) · \(r.name.isEmpty ? "part \(r.id)" : r.name)"
+        let base = faces.map(plain).joined(separator: " + ")
+        return r.name.isEmpty ? base : "\(base) · \(FlexibleRowCopy.plainFaces(r.name, plain))"
     }
 
     /// Core's sentences name regions by id ("face 1000103 …", "face region 1000103 …" — AP3 REVIEW: the press
-    /// verdict's words); show the app's names.
-    public func renamed(_ text: String, mesh: ViewerMesh?) -> String {
+    /// verdict's words); show the app's names. ★ B10: a whole face too ("face 3" → "Top face").
+    public func renamed(_ text: String, mesh: ViewerMesh?, plain: (Int) -> String) -> String {
         guard let re = try? NSRegularExpression(pattern: "\\bface(?:s| region)? (\\d+)") else { return text }
         let ns = text as NSString
         var out = text
         for m in re.matches(in: text, range: NSRange(location: 0, length: ns.length)).reversed() {
-            guard let id = Int(ns.substring(with: m.range(at: 1))), Self.isSector(id) else { continue }
-            out = (out as NSString).replacingCharacters(in: m.range, with: name(id, mesh: mesh))
+            guard let id = Int(ns.substring(with: m.range(at: 1))) else { continue }
+            out = (out as NSString).replacingCharacters(in: m.range, with: name(id, mesh: mesh, plain: plain))
         }
         return out
     }

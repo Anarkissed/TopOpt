@@ -296,7 +296,7 @@ public struct FlexibleSelectionsList: View {
         let opens = picked && !locked
         let dKey = "list-depth-\(r.key)", eKey = "list-expand-\(r.key)"
         return VStack(alignment: .leading, spacing: 0) {
-            DSRow(.face, key: "flexSetupFace-\(r.key)", name: project.latticeSelectableName(r),
+            DSRow(.face, key: "flexSetupFace-\(r.key)", name: project.flexibleName(r),
                   value: opens && role != nil ? nil : value, selected: picked, locked: locked,
                   line: opens && role != nil && shown ? DSRowLine(LatticeSetupCopy.dragItsHandle) : nil,
                   tap: { picked ? main.pickGroup(g.id, project: project) : main.pickFace(r, group: g.id, project: project) }) {
@@ -435,7 +435,7 @@ struct FlexibleInfoButton: View {
                 .onAppear { frame = g.frame(in: .global) }
                 .onChange(of: g.frame(in: .global)) { frame = $0 }
         }.allowsHitTesting(false))
-        .accessibilityLabel("\(main.model?.project.latticeSelectableName(ref) ?? "This face"): its lattice numbers")
+        .accessibilityLabel("\(main.model?.project.flexibleName(ref) ?? "This face"): its lattice numbers")
         .accessibilityIdentifier("flexible-face-info-\(ref.key)")
     }
 }
