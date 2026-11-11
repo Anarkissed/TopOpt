@@ -89,8 +89,8 @@ Kind of test: **L** reads the layout, **F** reads the file, **A** is an app test
 
 | Rule | Kind | Test |
 |---|---|---|
-| G1 | L | With Grade to shape on, cell size never grows as the in-plane distance to the region's outline shrinks (checked along 20 lines from centre to outline per face). Every cell obeys the run's band rule: a cell of size S stands only where distance + S/2 ≥ Band × (S − f) / (S_own − f), f the finest cell and S_own the region's own. |
-| G2 | L | At in-plane distance ≥ Band from the outline, every cell is the region's own cell. At Band 0 the layout holds only the region's cell and its cut pieces. |
+| G1 | L | With Grade to shape on, cell size never grows as the in-plane distance to the region's outline shrinks (checked along 20 lines from centre to outline per face). Every cell obeys the centre rule: a cell of size S stands only where its centre is at least Band × (S − f) / (S_own − f) inside the outline, f the finest cell and S_own the region's own. |
+| G2 | L | Beyond the Band (plus half the difference to the region's own cell, for the inner cells of a divided base cell), every cell is the region's own cell. At Band 0 the layout holds only the region's cell and its cut pieces. |
 | G3 | L | Grade to shape on: the cells at the outline are the smallest cells in the layout there (on a 0.2 mm line and 8 mm cells, 2 mm). No bar is in the layout unless Finish is Rim. One size (Manual) keeps its cells and grades struts only. |
 | G4 | L | Strength 0 is the default raise. A higher Strength gives every strut in the band at least the same width and some more; a lower one never more. Struts outside the band do not move. Strength moves no cell. |
 | G5 | L | A region 16 mm deep with 8 mm cells: both layers hold the same cells, and beyond the Band every cell is the region's own at every depth. Cells do not shrink toward the region's floor. |
@@ -98,6 +98,8 @@ Kind of test: **L** reads the layout, **F** reads the file, **A** is an app test
 | G7 | L | Grade to shape off: the cells touching the outline have the region's own size and are cut by it. |
 | G8 | L | In the band no strut is thinner than the region's own strut (or the quilt of its cell, if that is less), strut ÷ cell is higher than outside the band in every band cell, never above 0.354, and each strut is a whole number of lines or the quilt. A typed width (R11) holds in the band too. |
 | G9 | L | An outline with an edge facing air: the cells still shrink toward that edge; the rim is absent on it (S2). |
+| G10 | L | Grade to shape on, at Band 12 and at Band 2 (too narrow to hold a large cell off the outline by itself): no cell larger than the finest crosses the outline; the finest may; nothing goes solid and every place is still in a cell. |
+| G11 | L | (Switch off by default, awaiting his pick.) On a 0.45 mm line with the switch on: the band holds cells below the open look's floor and none that one line would close; none of them lies outside the band; nothing goes solid; every strut is at least one line and at most the quilt of its cell. With no band the switch moves no cell. NOT YET CHECKED BY A BREAK: the two guards that keep such cells inside the band (the test part has no wall that fails outside a band). |
 
 ## 5. Rim, skin and cut ends
 

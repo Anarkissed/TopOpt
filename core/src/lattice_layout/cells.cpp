@@ -77,13 +77,33 @@ struct Pass {
     const double d = region_edge_distance(*band_region, frame.at(lo[0] + 0.5 * s, lo[1] + 0.5 * s, lo[2] + 0.5 * s));
     return std::clamp(d / spec->band_mm, 0.0, 1.0);
   }
-  // G1-G3, the run's own band rule: may a cell of size s stand here?
+  bool is_finest(double s) const { return s <= finest_mm * (1.0 + 1e-9); }
+  double edge_distance(double a, double b, double c) const {
+    return region_edge_distance(*band_region, frame.at(a, b, c));
+  }
+  // G1-G3, the preview's centre rule: a cell of size s may stand where its centre is at
+  // least band (s - f) / (S_base - f) inside the outline. The region's own cell keeps its
+  // centre a whole band in; the finest always may.
   bool band_allows(const double lo[3], double s) const {
-    if (!band_region) return true;   // (one size has no finer cell: its finest is its own)
-    if (s <= finest_mm * (1.0 + 1e-9) || base_mm <= finest_mm * (1.0 + 1e-9)) return true;
-    const double d = std::max(0.0, region_edge_distance(*band_region,
-                                  frame.at(lo[0] + 0.5 * s, lo[1] + 0.5 * s, lo[2] + 0.5 * s)));
-    return d + 0.5 * s >= spec->band_mm * (s - finest_mm) / (base_mm - finest_mm) - 1e-9;
+    if (!band_region || is_finest(s)) return true;
+    const double d = std::max(0.0, edge_distance(lo[0] + 0.5 * s, lo[1] + 0.5 * s, lo[2] + 0.5 * s));
+    return d >= spec->band_mm * (s - finest_mm) / (base_mm - finest_mm) - 1e-9;
+  }
+  // G10: with Grade to shape on, only the finest cell may be cut by the outline. Any
+  // larger cell must lie whole inside it (read at its corners, edge middles and centre).
+  bool whole_in_outline(const double lo[3], double s) const {
+    if (!band_region || is_finest(s)) return true;
+    for (int b = 0; b < 3; ++b)
+      for (int a = 0; a < 3; ++a)
+        if (edge_distance(lo[0] + 0.5 * s * a, lo[1] + 0.5 * s * b, lo[2] + 0.5 * s) < -1e-6)
+          return false;
+    return true;
+  }
+  // G11: a cell below the open look's floor exists only inside the band.
+  bool fine_allowed(const double lo[3], double s) const {
+    if (s >= out->floor_cell_mm * (1.0 - 1e-9)) return true;
+    if (!band_region) return false;
+    return edge_distance(lo[0] + 0.5 * s, lo[1] + 0.5 * s, lo[2] + 0.5 * s) - 0.5 * s < spec->band_mm;
   }
 
   bool allowed(double s) const {
@@ -118,7 +138,7 @@ struct Pass {
     cell.own = base_mm;
     if (as_cell) {
       cell.band = band_t(lo, s);
-      cell.finest = s <= finest_mm * (1.0 + 1e-9);
+      cell.finest = is_finest(s);
       out->cells.push_back(cell);
       ++tally->cells;
     } else {
@@ -148,13 +168,16 @@ struct Pass {
     // A width is read to about a micron (PartMeasure::reach), so a cell that fits its
     // wall exactly must not be refused over the last digits of the reading.
     const bool fitting = s <= fits + kReadingSlack;
-    const bool held = !band_allows(lo, s);   // too large this close to the outline
+    // Too large this close to the outline, or cut by it (G1-G3, G10).
+    const bool held = !band_allows(lo, s) || !whole_in_outline(lo, s);
     if (fitting && !held) {
       emit(lo, s, cut, true);
       return;
     }
     const double h = 0.5 * s;
-    if (spec->algorithm == Algorithm::DefaultGrade && allowed(h)) {   // C7
+    // C7. Below the open look's floor a cell is divided for the band alone (G11).
+    if (spec->algorithm == Algorithm::DefaultGrade && allowed(h) &&
+        (held || h >= out->floor_cell_mm * (1.0 - 1e-9))) {
       for (int c = 0; c < 2; ++c)
         for (int b = 0; b < 2; ++b)
           for (int a = 0; a < 2; ++a) {
@@ -222,34 +245,50 @@ struct Pass {
       Packed p;
       p.n = n;
       std::vector<unsigned char> taken(N, 0);
+      std::vector<std::pair<double, std::array<int, 3>>> spots;
       for (int m = n - 1; m >= 1; --m) {
         const double size = m * t;
+        spots.clear();
         for (int k = 0; k + m <= n; ++k)
           for (int j = 0; j + m <= n; ++j)
             for (int i = 0; i + m <= n; ++i) {
-              bool free = true;
-              int some = 0, all = 0;
-              double f = 1e300;
-              for (int c = k; c < k + m && free; ++c)
-                for (int b = j; b < j + m && free; ++b)
-                  for (int a = i; a < i + m; ++a) {
-                    const std::size_t u = (static_cast<std::size_t>(c) * n + b) * n + a;
-                    if (taken[u]) { free = false; break; }
-                    some += in[u];
-                    all += 8;
-                    f = std::min(f, fit[u]);
-                  }
-              if (!free || some == 0 || size > f + kReadingSlack) continue;
-              const double at[3] = {lo[0] + i * t, lo[1] + j * t, lo[2] + k * t};
-              if (!band_allows(at, size)) continue;
-              for (int c = k; c < k + m; ++c)
-                for (int b = j; b < j + m; ++b)
-                  for (int a = i; a < i + m; ++a)
-                    taken[(static_cast<std::size_t>(c) * n + b) * n + a] = 1;
-              p.covered += some;
-              p.cubes.push_back({i, j, k, m});
-              p.cut.push_back(some < all);
+              double deep = 0.0;
+              if (band_region)
+                deep = edge_distance(lo[0] + (i + 0.5 * m) * t, lo[1] + (j + 0.5 * m) * t,
+                                     lo[2] + (k + 0.5 * m) * t);
+              spots.push_back({std::round(deep * 1e6) / 1e6, {i, j, k}});
             }
+        // In a band the larger cells take the places farthest from the outline, so the
+        // smaller ones are left toward it (G1). Elsewhere, the order they are read in.
+        if (band_region)
+          std::stable_sort(spots.begin(), spots.end(),
+                           [](const auto& x, const auto& y) { return x.first > y.first; });
+        for (const auto& spot : spots) {
+          const int i = spot.second[0], j = spot.second[1], k = spot.second[2];
+          bool free = true;
+          int some = 0, all = 0;
+          double f = 1e300;
+          for (int c = k; c < k + m && free; ++c)
+            for (int b = j; b < j + m && free; ++b)
+              for (int a = i; a < i + m; ++a) {
+                const std::size_t u = (static_cast<std::size_t>(c) * n + b) * n + a;
+                if (taken[u]) { free = false; break; }
+                some += in[u];
+                all += 8;
+                f = std::min(f, fit[u]);
+              }
+          if (!free || some == 0 || size > f + kReadingSlack) continue;
+          const double at[3] = {lo[0] + i * t, lo[1] + j * t, lo[2] + k * t};
+          if (!band_allows(at, size) || !whole_in_outline(at, size) || !fine_allowed(at, size))
+            continue;
+          for (int c = k; c < k + m; ++c)
+            for (int b = j; b < j + m; ++b)
+              for (int a = i; a < i + m; ++a)
+                taken[(static_cast<std::size_t>(c) * n + b) * n + a] = 1;
+          p.covered += some;
+          p.cubes.push_back({i, j, k, m});
+          p.cut.push_back(some < all);
+        }
       }
       for (int k = 0; k < n; ++k)
         for (int j = 0; j < n; ++j)
@@ -315,17 +354,22 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec) {
   // Lay one pass over the box [lo, hi] of its frame, in slots of `base`.
   auto lay = [&](Pass& pass, double base, const double lo[3], const double hi[3],
                  bool depth_from_zero) {
+    // G11: with "finer cells in the band" on, a band's cells go below the open look's
+    // floor, down to the smallest cell one line can draw without closing it (the quilt).
+    const bool fine = pass.band_region != nullptr && spec.band_fine_cells;
+    const double tile_min =
+        fine ? std::max(spec.cell_min_mm, ds.bead_mm / kQuiltStrutPerCell) : spec.cell_min_mm;
     if (spec.algorithm == Algorithm::DefaultGrade)
       // The halving ladder and its printable floor are core's own (ruling A, C7, C14).
-      pass.sizes = stepped_size_menu(spec.topology, base, ds.bead_mm, spec.cell_min_mm, true,
+      pass.sizes = stepped_size_menu(spec.topology, base, ds.bead_mm, tile_min, !fine,
                                      SteppedMenu::Halves);
     else
       pass.sizes = {base};
     pass.divisors.clear();
     if (spec.algorithm == Algorithm::Stepped)
       // Which fractions' units print open is core's own rule (C6a).
-      pass.divisors = stepped_admitted_divisors(spec.topology, base, ds.bead_mm,
-                                                spec.cell_min_mm, true, SteppedMenu::AnyStep);
+      pass.divisors = stepped_admitted_divisors(spec.topology, base, ds.bead_mm, tile_min,
+                                                !fine, SteppedMenu::AnyStep);
     pass.base_mm = base;
     pass.finest_mm = base;
     for (double a : pass.sizes) pass.finest_mm = std::min(pass.finest_mm, a);

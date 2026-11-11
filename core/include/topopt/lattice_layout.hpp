@@ -235,14 +235,19 @@ struct CellSpec {
   // Cells a wall must hold across: 1 with single-cell walls, which is how Aesthetic
   // starts (C4, his ruling 2026-11-11); 2 with that switch off (C3); 5 Structural (C5).
   int min_cells_across = 1;
-  // Grade to shape (G1-G7): cells shrink toward the outline of a flat Lattice region,
+  // Grade to shape (G1-G7, G10): cells shrink toward the outline of a flat Lattice region,
   // down to the smallest allowed cell, over `band_mm` measured in the plane of its face.
-  // The rule is the run's own (grading.hpp, ruling 2 of 2026-11-06): a cell of size S may
-  // stand where distance + S/2 >= band (S - f) / (S_base - f), f the finest cell and
-  // S_base the region's own; the finest always may. One size (Uniform) keeps its cells
-  // and grades struts only (C16). Off, or band 0: cells are cut where the region ends (G7).
+  // The rule is the preview's centre rule (the run's law of 2026-11-06 states the same at
+  // a cell's nearest voxel): a cell of size S may stand where its centre is at least
+  // band (S - f) / (S_base - f) inside the outline, f the finest cell and S_base the
+  // region's own; the finest always may. Only the finest cell may be cut by the outline;
+  // a larger one must lie whole inside it. One size (Uniform) keeps its cells and grades
+  // struts only (C16). Off, or band 0: cells are cut where the region ends (G7).
   bool grade_to_shape = false;
   double band_mm = 0.0;
+  // G11 (awaiting his pick): inside the band, cells may go below the open look's floor,
+  // down to the smallest cell one line draws without closing it (line / kQuiltStrutPerCell).
+  bool band_fine_cells = false;
 };
 
 // Cells are cubes on a frame: world position = origin + ax[0]*a + ax[1]*b + ax[2]*c.

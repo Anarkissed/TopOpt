@@ -1042,15 +1042,22 @@ static void test_grade_to_shape() {
     CHECK(f < 8.0 - 1e-9);
     const double finest = algo == Algorithm::DefaultGrade ? 2.0 : 8.0 / 6.0;
     int breaks_rule = 0, small_inside = 0, at_edge = 0, at_edge_large = 0, wrong_t = 0, wrong_own = 0;
+    int large_cut = 0, finest_cut = 0;
     int big[2] = {0, 0};
     for (const Cell& c : l.cells) {
       const Vec3 m = cell_centre(l, c);
       const double dist = edge(m);
-      // G1-G3: the run's rule holds for every cell.
+      // G1-G3: the centre rule holds for every cell.
       if (c.size > finest * (1 + 1e-9) &&
-          dist + 0.5 * c.size < band * (c.size - finest) / (8.0 - finest) - 1e-6) ++breaks_rule;
+          dist < band * (c.size - finest) / (8.0 - finest) - 1e-6) ++breaks_rule;
+      // G10: only the finest cell crosses the outline; every larger one lies whole inside it.
+      const double h = 0.5 * c.size;
+      const bool crosses = m.x - h < -1e-6 || m.x + h > 60 + 1e-6 || m.y - h < -1e-6 || m.y + h > 60 + 1e-6;
+      if (crosses) { if (c.size > finest * (1 + 1e-9)) ++large_cut; else ++finest_cut; }
       // G2: beyond the band, the region's own cell.
-      if (dist >= band && std::fabs(c.size - 8.0) > 1e-9) ++small_inside;
+      // (A divided base cell has its centre inside the band; its own cells reach at most
+      // half the difference farther in.)
+      if (dist >= band + 0.5 * (8.0 - c.size) && std::fabs(c.size - 8.0) > 1e-9) ++small_inside;
       // G3: the cells at the outline are the smallest in the layout.
       if (dist <= 0.5 * c.size + 1e-9) { ++at_edge; if (c.size > f + 1e-9) ++at_edge_large; }
       if (std::fabs(c.band - std::min(1.0, dist / band)) > 1e-9) ++wrong_t;
@@ -1059,6 +1066,24 @@ static void test_grade_to_shape() {
       if (std::fabs(c.size - 8.0) < 1e-9) ++big[m.z > 8 ? 1 : 0];
     }
     CHECK(breaks_rule == 0);
+    CHECK(large_cut == 0);
+    // (Default Grade's 2 mm cells meet this outline exactly; Stepped's finest cross it.)
+    if (algo == Algorithm::Stepped) CHECK(finest_cut > 0);
+    {  // G10 with a band too narrow to hold a large cell off the outline by itself.
+      CellSpec narrow = on;
+      narrow.band_mm = 2.0;
+      const Layout n = lay_cells(d, narrow);
+      int cut_large = 0, own = 0;
+      for (const Cell& c : n.cells) {
+        const Vec3 m = cell_centre(n, c);
+        const double h = 0.5 * c.size;
+        if (std::fabs(c.size - 8.0) < 1e-9) ++own;
+        if (c.size > finest * (1 + 1e-9) &&
+            (m.x - h < -1e-6 || m.x + h > 60 + 1e-6 || m.y - h < -1e-6 || m.y + h > 60 + 1e-6)) ++cut_large;
+      }
+      CHECK(cut_large == 0 && own > 0 && n.solid.empty());
+      CHECK(badly_covered(d, n, {0, 0, 0}, {60, 60, 16}, 1.3) == 0);
+    }
     CHECK(small_inside == 0);
     CHECK(at_edge > 50 && at_edge_large == 0);
     CHECK(wrong_t == 0 && wrong_own == 0);
@@ -1082,6 +1107,7 @@ static void test_grade_to_shape() {
     // Struts in the band (G8, R3, G4).
     Layout a = l, b = l, c2 = l;
     StrutSpec sp;
+    sp.dial = 0.05;   // thin enough that the finest cells are not at the quilt already
     set_struts(a, sp);
     sp.strength = 1.0;
     set_struts(b, sp);
@@ -1125,6 +1151,46 @@ static void test_grade_to_shape() {
     for (const Cell& c : a.cells)
       if (c.band < 1.0 && std::fabs(c.strut - std::min(0.6, kQuiltStrutPerCell * c.size)) > 1e-9) ++not_typed;
     CHECK(not_typed == 0);
+  }
+  {  // G11: finer cells in the band, below the open look's floor, and only in the band.
+    DomainSpec s45 = s;
+    s45.bead_mm = 0.45;
+    Domain d45(pm, s45);
+    for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
+      CellSpec on = off;
+      on.algorithm = algo;
+      on.grade_to_shape = true;
+      on.band_mm = band;
+      const Layout open_look = lay_cells(d45, on);
+      on.band_fine_cells = true;
+      const Layout fine = lay_cells(d45, on);
+      const double floor = open_look.floor_cell_mm, closes = 0.45 / kQuiltStrutPerCell;
+      double f0 = 8.0, f1 = 8.0;
+      int outside = 0;
+      for (const Cell& c : open_look.cells) f0 = std::min(f0, c.size);
+      for (const Cell& c : fine.cells) {
+        f1 = std::min(f1, c.size);
+        if (c.size < floor - 1e-9 && edge(cell_centre(fine, c)) - 0.5 * c.size >= band) ++outside;
+      }
+      CHECK(f0 >= floor - 1e-9);                       // off: never below the open look
+      CHECK(f1 < floor - 1e-9 && f1 >= closes - 1e-9); // on: below it, never a closed cell
+      CHECK(outside == 0);
+      CHECK(fine.solid.empty());
+      CHECK(badly_covered(d45, fine, {0, 0, 0}, {60, 60, 16}, 1.3) == 0);
+      Layout z = fine;                                  // and their struts are stated
+      set_struts(z, StrutSpec{});
+      int bad = 0;
+      for (const Cell& c : z.cells)
+        if (c.strut < 0.45 - 1e-9 || c.strut > kQuiltStrutPerCell * c.size + 1e-9) ++bad;
+      CHECK(bad == 0);
+      // Away from a band nothing changes: the switch alone moves no cell.
+      CellSpec plain_fine = off;
+      plain_fine.algorithm = algo;
+      plain_fine.band_fine_cells = true;
+      CellSpec plain_off = off;
+      plain_off.algorithm = algo;
+      CHECK(lay_cells(d45, plain_fine).cells == lay_cells(d45, plain_off).cells);
+    }
   }
   {  // One size keeps its cells and grades struts only (C16).
     CellSpec on = off;
