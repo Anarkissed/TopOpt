@@ -46,6 +46,7 @@ extern "C" __attribute__((used)) const char* const topopt_bridge_vendored_core =
 #include "topopt/cell_plan.hpp"
 #include "topopt/clearance.hpp"
 #include "topopt/face_overrides.hpp"
+#include "topopt/face_region.hpp"
 #include "topopt/fea.hpp"
 #include "topopt/lattice_algorithm.hpp"
 #include "topopt/lattice.hpp"
@@ -679,6 +680,18 @@ topopt::ProductionLoadCase production_loadcase_from_bridge(
   }
   {
     const std::size_t cn = load_case.clearance_face_ids.size();
+    // ★ E4 (j), ruling 2026-11-07 19:55: A KEEP CLEAR ON A CUT PIECE names its face region
+    // (clearance_region_ids[c] >= 0). Its member faces and cuts are resolved HERE, once, from
+    // this load case's own region layer (filled above), as run_job's
+    // production_loadcase_from_job does -- so every copy of `lc` (the pre-flight's
+    // counterfactual too) carries them. A piece that gives no Keep clear of its kind is
+    // refused in his words (std::invalid_argument -> the run's refusal line).
+    std::vector<topopt::ResolvedFaceRegion> clear_regions;
+    for (const int32_t r : load_case.clearance_region_ids)
+      if (r >= 0) {
+        clear_regions = topopt::resolve_face_regions(model, lc.face_regions);
+        break;
+      }
     for (std::size_t c = 0; c < cn; ++c) {
       topopt::ProductionLoadCase::Clearance cl;
       cl.face_id = load_case.clearance_face_ids[c];
@@ -687,10 +700,24 @@ topopt::ProductionLoadCase production_loadcase_from_bridge(
       const bool manual =
           c < load_case.clearance_manual.size() && load_case.clearance_manual[c];
       cl.manual = manual;
+      const int region_id = c < load_case.clearance_region_ids.size()
+                                ? load_case.clearance_region_ids[c]
+                                : -1;
+      const topopt::ResolvedFaceRegion* piece = nullptr;
+      if (region_id >= 0) {
+        for (const topopt::ResolvedFaceRegion& r : clear_regions)
+          if (r.id == region_id) piece = &r;
+        if (piece == nullptr)
+          throw std::invalid_argument(
+              "A Keep clear names a cut piece that is not one of this run's pieces. "
+              "Redo the cut in Edit faces.");
+      }
       double bore_r = 0.0;
       if (bolt) {
         if (manual && c < load_case.clearance_radius_mm.size())
           bore_r = load_case.clearance_radius_mm[c];
+        else if (piece != nullptr)
+          bore_r = topopt::largest_bore_radius_mm(model, piece->member_faces);
         else if (!manual && cl.face_id >= 0 && cl.face_id < model.face_count)
           bore_r = model.faces[static_cast<std::size_t>(cl.face_id)]
                        .cylinder_radius_mm;
@@ -725,6 +752,10 @@ topopt::ProductionLoadCase production_loadcase_from_bridge(
         cl.manual_geom.normal = xyz(load_case.clearance_normal_xyz);
         cl.manual_geom.half_u_mm = scalar(load_case.clearance_half_u_mm);
         cl.manual_geom.half_w_mm = scalar(load_case.clearance_half_w_mm);
+      }
+      if (piece != nullptr) {
+        cl.region_id = region_id;
+        topopt::resolve_clearance_region(cl, *piece, model);  // ★ E4 (j): faces + clips; refuses an empty piece
       }
       lc.clearances.push_back(cl);
     }
@@ -2077,7 +2108,9 @@ OptimizeResult run_minimize_plastic_loadcase(
                  " depth=" + std::to_string(pr.depth_voxels) +
                  (pr.thinner_than_depth ? " thinner-than-depth" : ""));
     for (const auto& cr : setup.clearance_reports)
-      bridge_log("loadcase: clearance face=" + std::to_string(cr.face_id) +
+      bridge_log("loadcase: clearance " +
+                 (cr.region_id >= 0 ? "region=" + std::to_string(cr.region_id)    // ★ E4 (j): a cut piece
+                                    : "face=" + std::to_string(cr.face_id)) +
                  " kind=" + (cr.kind == topopt::ClearanceKind::Bolt ? "bolt" : "face") +
                  " voxels_frozen=" + std::to_string(cr.voxels_frozen) +
                  (cr.in_grid ? "" : " OUTSIDE-GRID"));
@@ -2165,6 +2198,7 @@ OptimizeResult run_minimize_plastic_loadcase(
       result.clearance_voxels_frozen.push_back(
           static_cast<int32_t>(cr.voxels_frozen));
       result.clearance_in_grid.push_back(cr.in_grid ? 1 : 0);
+      result.clearance_region_ids.push_back(cr.region_id);  // ★ E4 (j): >= 0 for a cut piece
     }
     // Handoff 124 — surface what each Face protection preserved so the results
     // screen can state it honestly (which faces, how many voxels, and whether the
@@ -2294,6 +2328,44 @@ std::vector<double> lattice_member_thickness_mm(int nx, int ny, int nz, double s
 
   // core refusing → the guard's empty vector; the caller says it has no number
   return topopt::local_member_thickness_mm(grid, density, 0.5, cap_radius_voxels);
+  });
+}
+
+std::vector<std::uint8_t> lattice_solid_fallback_reasons(int nx, int ny, int nz, double spacing,
+                                                         const std::uint8_t* solid,
+                                                         std::size_t solid_count,
+                                                         const std::string& topology,
+                                                         double cell_mm, double line_width_mm,
+                                                         bool organic) {
+  return guarded_empty("lattice_solid_fallback_reasons", [&]() -> std::vector<std::uint8_t> {
+  const std::size_t want =
+      static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny) *
+      static_cast<std::size_t>(nz);
+  if (nx <= 0 || ny <= 0 || nz <= 0) return {};
+  if (!(spacing > 0.0) || !(cell_mm > 0.0) || !(line_width_mm > 0.0)) return {};
+  if (solid == nullptr || solid_count != want) return {};
+
+  topopt::VoxelGrid grid;
+  grid.nx = nx; grid.ny = ny; grid.nz = nz;
+  grid.spacing = spacing;
+  grid.origin = topopt::Vec3{0.0, 0.0, 0.0};   // no surface is passed, so no frame is needed
+  grid.tags.resize(want, topopt::VoxelTag::Empty);
+  std::vector<double> density(want, 0.0);
+  for (std::size_t i = 0; i < want; ++i) {
+    const bool s = solid[i] != 0;
+    grid.tags[i] = s ? topopt::VoxelTag::Interior : topopt::VoxelTag::Empty;
+    density[i] = s ? 1.0 : 0.0;
+  }
+
+  topopt::GradingLawParams p;
+  p.topology = live_topology(topology);       // core's own resolver; unknown or not live → refused
+  p.cell_mode = topopt::CellSizeMode::Fixed;  // the part's one cell, as the caller resolved it
+  p.target_cell_size_mm = cell_mm;
+  p.min_extrudable_width_mm = line_width_mm;
+  p.organic_geometry = organic;
+  // member_surface stays null: the preview's mesh is not welded for a signed distance, so
+  // members are measured on the voxel staircase (core's rule for an optimized result).
+  return topopt::lattice_solid_fallback_reasons(grid, density, p, 0.5);
   });
 }
 

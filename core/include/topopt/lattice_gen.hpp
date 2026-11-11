@@ -130,6 +130,24 @@ struct LatticeRegion {
 // diagonal families — so no clipped end is left floating (bar B6).
 enum class LatticeSkinMode { None, Rim, Diagrid };
 
+// ★ SKIN PER ZONE (lattice.regions[].skin, the reviewer's ruling 11-08 (1)). What the
+// diagrid pass lays at one point:
+//   Off    nothing (a zone with skin "none", or a part whose skin is "none" or "rim");
+//   Plain  the boundary-finish diagrid: an anchor ball at every landing and chords on
+//          analytic faces only (a part's "diagrid" under a shell or open finish);
+//   Woven  Plain plus the freeform diagrid's chords over the voxel / shell surface (a
+//          zone with skin "diagrid", or a part's "diagrid" with outer_finish "skin" or
+//          "shell+skin").
+enum class LatticeSkinHere { Off, Plain, Woven };
+struct LatticeSkinZones {
+  // The zone a point lies in: 0 = none (the part's own), else 1-based. An anchor ball is
+  // laid by the zone of its landing, a chord by the zone of its MIDPOINT (each chord is
+  // already owned by exactly one cell the same way), so a chord is never split between
+  // two zones. Must outlive the generate call.
+  std::function<int(const Vec3&)> zone_at;
+  std::vector<LatticeSkinHere> here;   // by zone id; here[0] is the part's
+};
+
 struct LatticeSkinSpec {
   LatticeSkinMode mode = LatticeSkinMode::None;
   // The skin's OWN printability clamp (radius, mm): the AUTO skin radius is
@@ -148,6 +166,11 @@ struct LatticeSkinSpec {
   // (bulge across a concavity / tunnel under a convex ridge) are REJECTED and
   // counted, never bent silently. Requires mode == Diagrid to emit anything.
   bool freeform = false;
+  // ★ PER ZONE. Null (default): `mode` and `freeform` hold everywhere, byte for byte.
+  // Set: each anchor ball and chord asks the zone it lies in (LatticeSkinZones above);
+  // `mode` and `freeform` then only open the passes, and the caller arms them for the
+  // most any zone asks (lattice_skin_for in run_job.cpp).
+  const LatticeSkinZones* zones = nullptr;
 };
 
 // ★ THE SAG BUDGET THE FREEFORM SKIN BUYS AGAINST THE BASE SURFACE, in mm —
@@ -269,6 +292,9 @@ struct LatticeGenStats {
   double interior_volume_mm3 = 0.0;
   double skin_volume_mm3 = 0.0;   // diagrid edges + anchor balls
   double rim_volume_mm3 = 0.0;    // rim tori + rim lines (the collar's rings)
+  // ★ PER ZONE (LatticeSkinSpec.zones; empty without): by zone id, what the diagrid pass
+  // laid there ([0] = outside every zone). Each sums to its total above.
+  std::vector<std::uint64_t> zone_anchor_nodes, zone_skin_chords, zone_skin_struts;
 };
 
 // Count the cells the region's predicate accepts (the achieved latticed-cell
@@ -324,6 +350,79 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo,
                                  TriangleSink& sink,
                                  const LatticeSkinSpec& skin = LatticeSkinSpec{},
                                  const LatticeGenObserver* observer = nullptr);
+
+// ★ THE RIM ON A REAL PART (the reviewer's ruling 11-08 (A)). The analytic rim above
+// needs two flat CAD faces in the lattice boundary, and a run's boundary has none (M4), so
+// a run's rim rides the SHARP EDGES of the surface it ships instead (feature_edges.hpp):
+//   * one tube per chain, at the skin radius (the local strut's, never under the skin's
+//     printable clamp), its diameter rounded UP to a whole number of line widths
+//     (Kedziora 2023: whole line widths print as stated);
+//   * at a convex edge the tube lies tangent to both faces from inside, `inset_mm` past
+//     tangency; at a concave edge it lies along the corner line, the same distance in;
+//   * every piece is clipped against the boundary like any strut (the clip proves it
+//     inside), with a ball at each kept span's ends so the pieces of a chain join;
+//   * with `tie_ends` (the open finish: no shell holds the cut ends), each cut end within
+//     one cell of a laid rim is tied to the nearest point of its centre line by a strut
+//     at the cut strut's own radius, clipped the same way; an end the rim already
+//     touches needs none.
+// It is DRESSING: the caller counts it in mass only, never in strength.
+struct LatticeMeshRimChain {
+  std::vector<Vec3> points;              // in order; a closed loop does not repeat its start
+  std::vector<Vec3> left_normal, right_normal;  // per segment, unit, outward
+  std::vector<char> convex;              // per segment
+  bool closed = false;
+};
+struct LatticeMeshRimSpec {
+  std::vector<LatticeMeshRimChain> chains;
+  double line_width_mm = 0.0;   // > 0: the tube's diameter is a whole number of these
+  double inset_mm = 0.02;       // past tangency, so the clip has a margin to certify
+  // > 0: SEAT each station in the clip base. The edge comes from a clean surface (the
+  // part's own mesh, or the CAD-projected design), but the clip base is the shell the file
+  // carries, which sits up to about a voxel off it and chamfers a convex edge. A station
+  // the base does not hold with r + inset_mm to spare moves inward along the edge's
+  // bisector until it does, at most this far; one that cannot is left where it was (the
+  // clip then drops what lies outside) and counted.
+  double max_seat_mm = 0.0;
+  // > 0 (with max_seat_mm): a run longer than this gets stations along it, this far
+  // apart at most, so a straight edge between two corners is seated along its length,
+  // not only at its ends. A corner of three faces never seats (moving along one edge's
+  // bisector does not clear the third face), so a two-point chain left unseated at both
+  // ends lost its whole length to the clip wherever the voxel shell sat in from the
+  // edge (the coupon's tongue end at resolution 64: two edges clipped away, two laid
+  // under 0.3 of 12 mm). The voxel spacing is the natural choice.
+  double station_spacing_mm = 0.0;
+};
+// ★ (A), the OPEN finish: a cut strut end near a sharp edge (its position and the strut's
+// radius), recorded as the lattice is laid; the rim then ties it to its own centre line.
+struct LatticeRimTieEnd {
+  Vec3 pos;
+  double r = 0.0;
+};
+struct LatticeMeshRimReport {
+  long long chains = 0, chains_laid = 0, chains_clipped_away = 0;
+  // The rim dresses the LATTICE: a piece whose cell region.latticed leaves solid is not
+  // laid (that edge is a solid edge already) and is counted here; a chain lying wholly on
+  // solid material is chains_on_solid, never chains_clipped_away.
+  long long chains_on_solid = 0;
+  double length_on_solid_mm = 0.0;
+  long long spans = 0, joints = 0;
+  // the open finish's ties: cut ends within one cell of a laid rim
+  long long tie_ends = 0, ties_laid = 0, ties_touching = 0, ties_out_of_reach = 0,
+            ties_clipped_away = 0;
+  double tie_length_mm = 0.0;
+  double length_laid_mm = 0.0;
+  // seating (max_seat_mm > 0): stations checked, moved in, and left (no room within reach)
+  long long stations = 0, stations_seated = 0, stations_unseated = 0;
+  double seat_max_mm = 0.0;
+  double diameter_min_mm = 0.0, diameter_max_mm = 0.0;
+  int line_widths_min = 0, line_widths_max = 0;
+};
+LatticeGenStats generate_mesh_rims(const LatticeRegion& region, const LatticeRadiusField& radius,
+                                   TriangleSink& sink, const LatticeSkinSpec& skin,
+                                   const LatticeMeshRimSpec& spec,
+                                   LatticeMeshRimReport* report = nullptr,
+                                   const LatticeGenObserver* observer = nullptr,
+                                   const std::vector<LatticeRimTieEnd>* tie_ends = nullptr);
 
 // The RIM loops alone (the skin's first pass), for a lattice with no struts: the sheet
 // lattices (tpms_gen.hpp) take the Rim finish this way (R8). Any skin mode but None emits

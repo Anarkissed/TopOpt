@@ -877,7 +877,7 @@ JobDescription parse_job(const std::string& json_text) {
       for (const JsonValue& cv : cs->arr) {
         require_object(cv, "a clearance");
         reject_unknown_keys(cv,
-                            {"face_id", "geometry", "kind",
+                            {"face_id", "geometry", "region_id", "kind",
                              "concentric_margin_mm", "axial_clearance_mm",
                              "slab_depth_mm"},
                             "a clearance");
@@ -892,12 +892,29 @@ JobDescription parse_job(const std::string& json_text) {
         // primitive supplies the axis/radius/normal/extent the auto path would
         // otherwise derive from the B-rep, so a hand-placed keep-out survives the
         // bridge and job schema intact.
+        // ★ E4 (j): OR a cut piece -- a "region_id" naming one of loads.face_regions,
+        // whose Keep clear is each member face's own, clipped by the piece's cuts.
         const JsonValue* fid_v = find_key(cv, "face_id");
         const JsonValue* geom_v = find_key(cv, "geometry");
-        if ((fid_v == nullptr) == (geom_v == nullptr))
+        const JsonValue* rid_v = find_key(cv, "region_id");
+        if ((fid_v != nullptr) + (geom_v != nullptr) + (rid_v != nullptr) != 1)
           schema_fail(
-              "a clearance must have exactly one of \"face_id\" or \"geometry\"");
-        if (fid_v != nullptr) {
+              "a clearance must have exactly one of \"face_id\", \"geometry\" or "
+              "\"region_id\"");
+        if (rid_v != nullptr) {
+          const double rid = require_number(*rid_v, "clearance region_id");
+          if (rid < 0.0 || rid != std::floor(rid))
+            schema_fail("a clearance \"region_id\" must be a non-negative integer");
+          cl.region_id = static_cast<int>(rid);
+          bool declared = false;
+          for (const FaceRegionSpec& fr : job.loads.face_regions)
+            if (fr.id == cl.region_id) declared = true;
+          if (!declared)
+            schema_fail(
+                "a Keep clear names a cut piece that is not one of this job's face "
+                "regions (\"loads.face_regions\"). A piece must be declared once and "
+                "referred to by its id.");
+        } else if (fid_v != nullptr) {
           const double fid = require_number(*fid_v, "clearance face_id");
           if (fid < 0.0 || fid != std::floor(fid))
             schema_fail("a clearance \"face_id\" must be a non-negative integer");
@@ -1637,7 +1654,7 @@ JobDescription parse_job(const std::string& json_text) {
                                  "synthetic_soft_mm", "label", "rho_min", "rho_max",
                                  "demand_exponent", "grading", "shape_grade",
                                  "shape_grade_band_mm", "cell_min_mm", "cell_max_mm",
-                                 "shape_grade_strength", "outer_finish"},
+                                 "shape_grade_strength", "outer_finish", "skin"},
                             "a lattice region");
         JobLatticeRegion reg;
         // ★ E2.6 + E3: the region's name and its own grading (job.hpp). The band is
@@ -1717,6 +1734,14 @@ JobDescription parse_job(const std::string& json_text) {
           if (reg.outer_finish != "none" && reg.outer_finish != "shell")
             schema_fail(named + ": \"outer_finish\" must be \"none\" (open) or \"shell\" "
                         "(covered) (got \"" + reg.outer_finish + "\")");
+        }
+        // ★ Skin per zone (ruling 11-08 (1)), and Rim per zone (ruling 11-08 (A): the rim
+        // rides the shipped surface's sharp edges, a chain taken by its midpoint's zone).
+        if (const JsonValue* sk = own_grading("skin")) {
+          reg.skin = require_nonempty_string(*sk, "lattice region skin");
+          if (reg.skin != "diagrid" && reg.skin != "rim" && reg.skin != "none")
+            schema_fail(named + ": \"skin\" must be \"diagrid\" (Skin), \"rim\" (Rim) or "
+                        "\"none\" (got \"" + reg.skin + "\")");
         }
         if (const JsonValue* ss = own_grading("shape_grade_strength")) {
           reg.shape_grade_strength = require_number(*ss, "lattice region shape_grade_strength");
@@ -2981,6 +3006,40 @@ JobDescription parse_job(const std::string& json_text) {
             "lattice cannot conjure material there.");
     }
   }
+  // ★ E4 (k): THE SAME TIE, KEYED BY REGION (ruling 2026-11-07 19:55). A cut piece is a
+  // face region, protected by {"region_id"} and latticed by a "region" lattice region:
+  // the same one slab as a face's, with the same deepest-region rule. Ids tie within
+  // their kind only -- a face protection and a region lattice region are two selections.
+  // The refusal names the piece in his words (its name), never its number.
+  for (const JobLatticeRegion& r : job.lattice.regions) {
+    if (r.kind != "region" || r.region_id < 0) continue;
+    bool deeper_on_region = false;
+    for (const JobLatticeRegion& q : job.lattice.regions)
+      if (&q != &r && q.kind == "region" && q.region_id == r.region_id &&
+          q.depth_mm > r.depth_mm)
+        deeper_on_region = true;
+    if (deeper_on_region) continue;
+    for (std::size_t i = 0; i < job.loads.face_protection_region_ids.size(); ++i) {
+      if (job.loads.face_protection_region_ids[i] != r.region_id) continue;
+      double prot = job.loads.face_protection_depth_mm;   // <= 0 => core default
+      if (i < job.loads.face_protection_region_depths_mm.size() &&
+          job.loads.face_protection_region_depths_mm[i] > 0.0)
+        prot = job.loads.face_protection_region_depths_mm[i];
+      if (!(prot > 0.0)) prot = kFaceProtectionDepthDefaultMm;
+      if (std::abs(prot - r.depth_mm) <= 1e-9) continue;
+      std::string piece = "A cut piece";
+      for (const FaceRegionSpec& s : job.loads.face_regions)
+        if (s.id == r.region_id && !s.name.empty()) piece = "“" + s.name + "”";
+      schema_fail(
+          piece + " is BOTH protected and latticed, at two different depths: the "
+          "protection is " + std::to_string(prot) + " mm and the lattice region is " +
+          std::to_string(r.depth_mm) +
+          " mm. They are one slab — the depth the piece is held to IS the depth the "
+          "lattice is allowed. A protection shallower than its region leaves the rest "
+          "of that region as void the optimizer removed, and a lattice cannot conjure "
+          "material there.");
+    }
+  }
 
   // ── ★ ONE RESOLVED TOPOLOGY, WRITTEN BACK INTO BOTH BLOCKS ─────────────
   // The decision is `resolve_lattice_topology` (lattice.cpp), where a test can reach
@@ -3096,6 +3155,23 @@ JobDescription parse_job(const std::string& json_text) {
           job.lattice.topology + ".");
     // (2b) R8: Diagrid anchors where struts meet the surface; a sheet meets it along curves,
     // so there is nothing to anchor. Refused whether stated or the default.
+    // ★ Skin per zone: the same two rules, by the zone's name. A sheet has no struts to
+    // anchor (R8), and organic replaces the cell passes the zone's skin rides.
+    for (const auto* list : {&job.lattice.regions, &job.lattice.whole_part_includes})
+      for (std::size_t i = 0; i < list->size(); ++i) {
+        const JobLatticeRegion& r = (*list)[i];
+        if (r.skin != "diagrid") continue;
+        const std::string zone = r.label.empty() ? "lattice region " + std::to_string(i + 1)
+                                                 : "lattice region \"" + r.label + "\"";
+        if (lattice_topology_is_sheet(topo))
+          schema_fail(zone + " asks for Skin (\"diagrid\"), which anchors where struts meet "
+                      "the surface, and " + job.lattice.topology + " is a sheet with no struts "
+                      "(R8). Give this zone no skin (\"none\").");
+        if (job.grading.present && job.grading.algorithm == "organic")
+          schema_fail(zone + " asks for Skin (\"diagrid\"), and grading \"algorithm\": "
+                      "\"organic\" traces its own curves and lays no cell skin for a zone to "
+                      "take. Use \"doubled\" or \"stepped\", or give this zone no skin.");
+      }
     if (lattice_topology_is_sheet(topo) && job.lattice.present && job.lattice.skin == "diagrid")
       schema_fail(
           "lattice \"skin\": \"diagrid\" anchors where struts meet the surface, and " +

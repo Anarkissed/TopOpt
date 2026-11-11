@@ -1903,6 +1903,14 @@ public struct LatticeSetupWizard: View {
                                 tint: DS.Color.textQuaternary.color)
                         .latticeID("wizard-rim-greyed-note")
                 }
+                // ★ RELEASE (4): None and Rim run open — the faces beside a prism too; the preview draws their skin
+                if model.boundary.jobOuterFinish == "none", !model.finishLockedBySingleCell {
+                    captionLine(Self.openFacesPreviewLine, info: "open-faces",
+                                "The faces beside a Lattice prism, the ones you didn't set to Lattice. Under None and Rim the "
+                                + "run leaves the lattice open there; the preview still draws a thin skin over them.",
+                                tint: DS.Color.textQuaternary.color)
+                        .latticeID("wizard-open-faces-note")
+                }
                 if model.boundary == .covered {
                     captionLine("A solid outer wall over the lattice.", info: "covered",
                                 "At the printer's own wall thickness. The lattice is still "
@@ -2325,9 +2333,18 @@ public struct LatticeSetupWizard: View {
     static func zoneRimSkinLine(_ part: String) -> String {
         "A zone's own finish needs the part on None or Covered; the part is on \(part), so every zone is too."
     }
-    /// ★ B7 slice 2b (the reviewer 11-08 21:32Z, ruling 4): Rim greyed until LatticeTypes' rim on a real part lands
-    /// (then flip this, and the line goes with it).
-    static let rimNeedsEngineWork = true
+    /// ★ RELEASE (4) (reviewer 11-09 19:42Z item 4, LatticeTypes 19:32Z): the zone Finish choices core refuses, greyed,
+    /// each said in one line.
+    static let zoneCoveredUnderSkinLine = "The part is on Skin: its woven finish covers every zone, so a zone can't be Covered."
+    static let zoneSkinOnSheetLine = "Skin weaves struts over the surface; this type is a sheet with no struts, so a zone can't take it."
+    static let zoneRimSkinNeedEngineLine = "Rim and Skin per zone need engine work: this engine takes only None or Covered per zone."
+    /// ★ B7 slice 2b (the reviewer 11-08 21:32Z, ruling 4): Rim greyed until LatticeTypes' rim on a real part lands.
+    /// ★ RELEASE (4) (reviewer 11-09 18:31Z, "un-grey Rim"): it has (4d928a75 + a38af0c6) — greyed only on a core that
+    /// builds no rim on a real part (`LatticeBoundaryTreatment.rimBuilt`).
+    static var rimNeedsEngineWork: Bool { !LatticeBoundaryTreatment.rimBuilt }
+    /// ★ RELEASE (4) (reviewer 11-09 18:31Z, the 03:05Z question): under None and Rim the run is the open lattice, so the
+    /// faces beside a Lattice prism stay open (ruling 11-06 (1)); the preview still draws their skin until B7 slice 3.
+    static let openFacesPreviewLine = "The preview shows a skin on these faces; the run leaves them open."
     static let rimGreyedLine = "Rim needs engine work: the engine builds no rim on a real part yet."
     static let rimStoredLine = "This part is on Rim, which the engine refuses today. Pick another finish."
     static let skinNotCertifiedLine = "Not certified yet: with no solid shell, Results shows this lattice as not accepted."
@@ -2626,31 +2643,54 @@ public struct LatticeSetupWizard: View {
 
     /// ★ B7 slice 2 (release (3), E2.4 per region): a zone's own finish, [None │ Covered] in core's words "none" / "shell";
     /// until set, the part's (Covered when the part is covered, else None). Rim and Skin are the part's, said in one line.
+    /// ★ RELEASE (4) (ruling 11-08 (1), (A); LatticeTypes 19:32Z; reviewer 19:42Z item 4): a zone's Finish is the part's four
+    /// — [None │ Rim │ Skin │ Covered] — sent as the pair core reads (`LatticeAreaGrading.ZoneFinish.words`). Core's refusals
+    /// are greyed and said: Covered under the part's Skin (its woven finish is part-wide), Skin on a sheet type (R8), and
+    /// Rim / Skin on an engine that takes no `regions[].skin`. Organic zones show the organic row instead (no zone skin).
     private func zoneFinishRow(_ gid: UUID) -> AnyView {
-        let own = (latticeAreaEdits ?? project.lattice.areaGrading)[gid]?.outerFinish
-        // ★ B7 slice 2b: under the part's Skin or Rim no zone has its own finish (core's (1b2)) — the row is greyed, nothing
-        // picked, and the line says why; the stored choice comes back when the part is on None or Covered again
-        let partWord = model.boundary.zoneFinishWord
-        let shown = partWord.map { own ?? $0 }
+        let own = (latticeAreaEdits ?? project.lattice.areaGrading)[gid] ?? LatticeAreaGrading()
+        let partOuter = model.boundary.zoneFinishWord   // nil: the part is on Skin (or Rim on an engine without it)
+        let partSkin = model.boundary.jobSkinValue
+        let skinWired = TopOptKit.regionSkinWired && LatticeBoundaryTreatment.rimBuilt
+        let sheet = LatticeSettings.sheetTopologies.contains(model.topologyID)
+        let partOnSkin = model.boundary == .fullSkin
+        let shown = (partOuter == nil && !partOnSkin) ? nil : own.zoneFinish(partOuter: partOuter, partSkin: partSkin)
+        func greyed(_ f: LatticeAreaGrading.ZoneFinish) -> Bool {
+            switch f {
+            case .none: return partOuter == nil && !partOnSkin
+            case .covered: return partOuter == nil
+            case .rim: return !skinWired
+            case .skin: return !skinWired || sheet
+            }
+        }
         let partName = ["None", "Rim", "Skin", "Covered"][boundaryIndex]
         return AnyView(VStack(alignment: .leading, spacing: 5) {
             Text("Finish").font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)
                 .foregroundStyle(DS.Color.textTertiary.color)
             HStack(spacing: 4) {
-                ForEach([("none", "None"), ("shell", "Covered")], id: \.0) { value, title in
-                    segmentButton(title, on: shown == value, greyed: partWord == nil) {
+                ForEach(LatticeAreaGrading.ZoneFinish.allCases, id: \.self) { f in
+                    segmentButton(f.title, on: shown == f, greyed: greyed(f)) {
                         if latticeAreaEdits == nil { latticeAreaEdits = project.lattice.areaGrading }
                         var g = latticeAreaEdits?[gid] ?? LatticeAreaGrading()
-                        g.outerFinish = value
+                        // under the part's Skin a zone sets its skin only (core refuses its own outer_finish there)
+                        g.outerFinish = partOuter == nil ? nil : f.words.outer
+                        g.skin = f.words.skin
                         latticeAreaEdits?[gid] = g
                         rebuild()
                     }
-                    .latticeID("lattice-zone-finish-\(value)")
+                    .latticeID("lattice-zone-finish-\(f.rawValue)")
                 }
             }
             .modifier(LatticeSegmentTrack())
-            if partWord == nil {
+            if partOuter == nil && !partOnSkin {
                 shortNote(Self.zoneRimSkinLine(partName)).latticeID("lattice-zone-rim-skin-note")
+            } else if partOnSkin {
+                shortNote(Self.zoneCoveredUnderSkinLine).latticeID("lattice-zone-covered-under-skin-note")
+            }
+            if !skinWired {
+                shortNote(Self.zoneRimSkinNeedEngineLine).latticeID("lattice-zone-rim-skin-engine-note")
+            } else if sheet {
+                shortNote(Self.zoneSkinOnSheetLine).latticeID("lattice-zone-skin-sheet-note")
             }
         })
     }
@@ -2658,12 +2698,22 @@ public struct LatticeSetupWizard: View {
     /// ★ B7 slice 2 (the reviewer 11-08 21:32Z, ruling 3): the zones whose finish the run gives differently from the part's
     /// — "Zone 1 runs open" — in tab order; empty under Skin / Rim (no zone sends its own) and when core takes none.
     var zonesRunningAnotherFinish: [String] {
-        guard TopOptKit.regionOuterFinishWired, model.cellTransition != .organicGrade,
-              let part = model.boundary.zoneFinishWord else { return [] }
+        guard TopOptKit.regionOuterFinishWired, model.cellTransition != .organicGrade else { return [] }
+        let partOuter = model.boundary.zoneFinishWord, partSkin = model.boundary.jobSkinValue
+        guard partOuter != nil || model.boundary == .fullSkin else { return [] }
+        // ★ release (4): Rim and Skin per zone too — the zone's four against the part's own
+        let part = LatticeAreaGrading().zoneFinish(partOuter: partOuter, partSkin: partSkin)
         let edits = latticeAreaEdits ?? project.lattice.areaGrading
         return project.latticeAreaGroups.compactMap { g in
-            guard let f = edits[g.id]?.outerFinish, f != part else { return nil }
-            return "\(g.name) runs \(f == "none" ? "open" : "covered")"
+            guard let e = edits[g.id], e.outerFinish != nil || e.skin != nil else { return nil }
+            let f = e.zoneFinish(partOuter: partOuter, partSkin: partSkin)
+            guard f != part else { return nil }
+            switch f {
+            case .none: return "\(g.name) runs open"
+            case .rim: return "\(g.name) runs with Rim"
+            case .skin: return "\(g.name) runs with Skin"
+            case .covered: return "\(g.name) runs covered"
+            }
         }
     }
     @ViewBuilder private var zoneFinishPreviewNote: some View {

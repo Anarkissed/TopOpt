@@ -240,6 +240,16 @@ double seg_seg_distance(const Vec3& p1, const Vec3& q1, const Vec3& p2, const Ve
 
 }  // namespace
 
+// ★ The coupon's OUTLINE as one closed solid (ruling 11-08 (A)): the shape a run lattices
+// when the coupon is the part -- the wall, the body and the tongue under one surface, plate
+// included -- so the rim on its sharp edges can be printed and checked on the same block.
+TriangleMesh lattice_coupon_solid() {
+  return profile_prism(
+      0.0, kWidthY, 0.0,
+      [](double y) { return y > kTongueY0 && y < kTongueY1 ? kEndX : kBodyEndX; }, 0.0,
+      {kWallX, kBodyEndX});
+}
+
 LatticeSampleReceipt write_lattice_coupon(const LatticeSampleSpec& spec, TriangleSink& sink) {
   const LatticeGenTopology gt = lattice_gen_topology_from_id(spec.topology);
   const LatticeTopology t = lattice_gen_certificate_topology(gt);

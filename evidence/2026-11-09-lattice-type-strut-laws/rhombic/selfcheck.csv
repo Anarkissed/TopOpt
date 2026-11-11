@@ -1,0 +1,9 @@
+check,value,bar,pass
+S1 solid KUBC peak==macro (K=1),5.928732e-08,1.0e-05,1
+S2 superposition == direct combined solve,1.179868e-08,5.0e-04,1
+S3 |rho_lib - target| via production mapping,2.498002e-15,5.0e-03,1
+S4 periodic solid tensor (4 digits),5.436878e-15,1.0e-04,1
+S6 bound holds on 64 mixed states,-9.720782e-02,1.0e-09,1
+S5_band_lo,0.172450,,1
+S5_band_hi,0.513310,,1
+S5 band sane (0<lo<hi<1),0.000000e+00,5.0e-01,1

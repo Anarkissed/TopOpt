@@ -120,6 +120,7 @@ add_library(topopt
   src/mesh/surface_operator.cpp
   src/mesh/finish.cpp
   src/mesh/lattice_gen.cpp
+  src/mesh/feature_edges.cpp
   src/mesh/lattice_sample.cpp
   src/mesh/lattice_coupon.cpp
   src/mesh/tpms_gen.cpp
@@ -2453,6 +2454,15 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
     TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
   add_test(NAME lattice_no_solid COMMAND test_lattice_no_solid)
+  # Ruling 11-08 (B): each type's own strut-strength law certifies its fully latticed bar.
+  add_executable(test_lattice_type_strut_law tests/validation/test_lattice_type_strut_law.cpp)
+  target_link_libraries(test_lattice_type_strut_law PRIVATE topopt)
+  target_compile_definitions(test_lattice_type_strut_law PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    LAW_EVIDENCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../evidence/2026-11-09-lattice-type-strut-laws")
+  add_test(NAME lattice_type_strut_law COMMAND test_lattice_type_strut_law)
   # E2.4 (ruling 11-06 (1)): outer_finish "none", the open lattice, its cut cells uncredited.
   add_executable(test_lattice_open_finish tests/validation/test_lattice_open_finish.cpp)
   target_link_libraries(test_lattice_open_finish PRIVATE topopt)
@@ -2461,6 +2471,31 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
     TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
   add_test(NAME lattice_open_finish COMMAND test_lattice_open_finish)
+  # Skin per zone (reviewer's ruling 11-08 (1) + (2b)): lattice.regions[].skin.
+  add_executable(test_lattice_zone_skin tests/validation/test_lattice_zone_skin.cpp)
+  target_link_libraries(test_lattice_zone_skin PRIVATE topopt)
+  target_compile_definitions(test_lattice_zone_skin PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME lattice_zone_skin COMMAND test_lattice_zone_skin)
+  # The rim on a real part (reviewer's ruling 11-08 (A)): the shipped surface's sharp edges.
+  add_executable(test_lattice_mesh_rim tests/validation/test_lattice_mesh_rim.cpp)
+  target_link_libraries(test_lattice_mesh_rim PRIVATE topopt)
+  target_compile_definitions(test_lattice_mesh_rim PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    DEMO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME lattice_mesh_rim COMMAND test_lattice_mesh_rim)
+  # Ruling 11-09: the SOLID beside a latticed part -- no sliver, faces on the part's surface.
+  add_executable(test_lattice_solid_companion tests/validation/test_lattice_solid_companion.cpp)
+  target_link_libraries(test_lattice_solid_companion PRIVATE topopt)
+  target_compile_definitions(test_lattice_solid_companion PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME lattice_solid_companion COMMAND test_lattice_solid_companion)
   # E3 (plan.md §B7): an include region's own cell window on the swept plan.
   add_executable(test_lattice_region_cell_window tests/validation/test_lattice_region_cell_window.cpp)
   target_link_libraries(test_lattice_region_cell_window PRIVATE topopt)
@@ -2628,6 +2663,15 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
   target_compile_definitions(test_lattice_depth_tie PRIVATE
     DEMO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo")
   add_test(NAME lattice_depth_tie COMMAND test_lattice_depth_tie)
+
+  # E4 (j), ruling 2026-11-07 19:55: Keep clear on a CUT PIECE ("region_id") clears that
+  # piece only -- the optimizer's overlay, the lattice's keep-out and the predicate, on a
+  # flat piece and a round one, each against the whole face as its control.
+  add_executable(test_keep_clear_region tests/validation/test_keep_clear_region.cpp)
+  target_link_libraries(test_keep_clear_region PRIVATE topopt)
+  target_compile_definitions(test_keep_clear_region PRIVATE
+    DEMO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo")
+  add_test(NAME keep_clear_region COMMAND test_keep_clear_region)
 
   # Small-face load loss (handoff 099): a load face smaller than a voxel footprint
   # at a coarse resolution tags ZERO voxels, so build_production_loadcase skips the

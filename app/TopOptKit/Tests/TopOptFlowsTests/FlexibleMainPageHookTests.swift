@@ -26,7 +26,9 @@ final class FlexibleMainPageHookTests: XCTestCase {
             ("H3", "flexibleLattice: flexibleMain.layer(project, stage: stage, pageUp: fullScreenPageUp))"),
             ("H4", "MetalMeshView(mesh: flexibleMain.mesh(project, on: stage) ?? stageMesh,"),
             // ★ batch C (re-pinned on purpose): the ONE tint array composes Stress and the group colours too
-            ("H4", "vertexTints: visible.surfaceEditing ? surfaceVertexTints : flexibleMain.tints(project, on: stage, roles: roleTints, stress: latticeStressField),"),
+            // ★ RE-PINNED (release (4), his 11-09 glow): the thin-wall glow sits before Flexible's tints; it is up only on
+            // Lattice Setup (`latticeThinWallGlowUp` reads `latticeSetupUp`, false whenever Flexible owns the stage)
+            ("H4", "vertexTints: visible.surfaceEditing ? surfaceVertexTints : latticeThinWallGlowUp ? latticeThinWallTints : flexibleMain.tints(project, on: stage, roles: roleTints, stress: latticeStressField),"),
             ("H4", "settleAnimated: !reduceMotion && !flexibleMain.owns(project, stage),"),
             ("H4", "stressTints: flexibleMain.owns(project, stage) ? nil : stageSurfaceTints,"),
             ("H4", "flexDisplacements: flexibleMain.dents(project, on: stage), flexScale: flexibleMain.dentScale(project, on: stage),"),

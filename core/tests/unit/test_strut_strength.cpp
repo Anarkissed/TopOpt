@@ -377,15 +377,51 @@ int main() {
     CHECK(a.lattice_strut.rho_clamped_voxels == 0,
           "in-band rho: no law-span clamps counted");
 
-    // 7b. NO LAW, NO NUMBER: fcc certifies (it has a tensor) but has no measured
-    // strut law — the report must be ABSENT, not octet's numbers.
+    // 7b. ITS OWN LAW, NEVER OCTET'S (ruling 11-08 (B)): fcc has its own measured
+    // strut law now, so it reports, and from that law: the standalone evaluator on
+    // fcc's table reproduces it, and octet's table on the same field reads otherwise.
     LatticePosture fcc = post;
     fcc.topology = LatticeTopology::Fcc;
     const FixedDesignAnalysis af = analyze_fixed_design(
         g, params, density, bcs, loads, material, Vec3{0, 0, 1}, 1e-8, 0,
         SolverKind::JacobiCG, 0.5, kd, /*load_path_ok=*/true, part_solid, &fcc);
-    CHECK(af.lattice_certified && !af.lattice_strut_report,
-          "a topology without a measured strut law reports NO strut numbers");
+    CHECK(af.lattice_certified && af.lattice_strut_report,
+          "fcc reports strut numbers from its own measured law");
+    const StrutStrengthReport fz = evaluate_strut_strength(
+        LatticeTopology::Fcc, af.stress_tensor_field, fcc.mask, fcc.relative_density,
+        Vec3{0, 0, 1}, material.yield_strength_mpa, material.z_knockdown);
+    const StrutStrengthReport fo = evaluate_strut_strength(
+        LatticeTopology::Octet, af.stress_tensor_field, fcc.mask, fcc.relative_density,
+        Vec3{0, 0, 1}, material.yield_strength_mpa, material.z_knockdown);
+    CHECK(fz.margin_worst_case == af.lattice_strut.margin_worst_case,
+          "fcc's report is fcc's own law (the standalone evaluator reproduces it)");
+    CHECK(fo.margin_worst_case != af.lattice_strut.margin_worst_case,
+          "fcc's report is not octet's numbers");
+    CHECK(af.lattice_strut_out_of_regime,
+          "fcc: the same slab is under fcc's own cells-per-member floor, flagged");
+
+    // 7c. UNDER ITS OWN FLOOR, SAID IN WORDS (ruling 11-08 (B), 11-06 2(a)): Kelvin
+    // latticed EVERYWHERE (root column too), so no solid voxel carries the load and the
+    // lattice's own law decides. The slab is 0.5 cells across, under Kelvin's 8: not
+    // certified, and the reason names Kelvin's floor, not octet's 5.
+    LatticePosture kel = post;
+    kel.topology = LatticeTopology::Kelvin;
+    for (int k = 0; k < kSlabZ; ++k)
+      for (int j = 0; j < g.ny; ++j) {
+        const std::size_t e = g.index(0, j, k);
+        kel.mask[e] = 1;
+        kel.relative_density[e] = 0.31619;
+      }
+    const FixedDesignAnalysis ak = analyze_fixed_design(
+        g, params, density, bcs, loads, material, Vec3{0, 0, 1}, 1e-8, 0,
+        SolverKind::JacobiCG, 0.5, kd, /*load_path_ok=*/true, part_solid, &kel);
+    std::printf("  7c kelvin: %s\n", ak.lattice_not_certified_reason.c_str());
+    CHECK(ak.lattice_strut_report && ak.lattice_strut_out_of_regime,
+          "kelvin: its own law reports, flagged under its floor");
+    CHECK(!ak.accepted, "kelvin under its floor, latticed through, is not accepted");
+    CHECK(ak.lattice_not_certified_reason.find(
+              "below the 8 the strut-strength law is valid for") != std::string::npos,
+          "kelvin: not certified, and the words name its own floor of 8");
   }
 
   std::fprintf(stderr, "%d checks, %d failures\n", g_checks, g_failures);

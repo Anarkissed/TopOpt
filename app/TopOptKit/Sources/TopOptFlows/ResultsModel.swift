@@ -1089,7 +1089,7 @@ public final class ResultsModel: ObservableObject {
     public static func clearanceNotes(_ applied: [AppliedClearance]) -> [String] {
         applied.map { c in
             let kind = c.kind == .face ? "Face clearance" : "Bolt clearance"
-            let face = "face \(c.faceID)"
+            let face = c.regionID >= 0 ? "a cut piece" : "face \(c.faceID)"   // ★ E4 (j): plain words, never its number
             if !c.inGrid {
                 return "\(kind) on \(face): its region fell outside the solved area — "
                      + "no effect. (With no design box, a clearance in unreachable void "

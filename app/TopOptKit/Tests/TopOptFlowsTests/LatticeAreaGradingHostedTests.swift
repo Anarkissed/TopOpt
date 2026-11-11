@@ -235,6 +235,68 @@ final class LatticeAreaGradingHostedTests: XCTestCase {
                        "The preview shows the part's finish; Zone 1 runs open (see Results).")
     }
 
+    /// ★ RELEASE (4) (ruling 11-08 (1), (A); LatticeTypes 19:32Z; reviewer 19:42Z item 4): a zone's Finish is the part's four,
+    /// sent as the pair core reads — None = none + none, Rim = none + rim, Skin = none + diagrid, Covered = shell + none —
+    /// only what differs from the part; under the part's Skin its skin only. Every part finish × zone choice the page offers
+    /// parses in the linked core; the greyed ones (Covered under Skin, Skin on a sheet) are refused by core (the controls).
+    func testAZonesRimAndSkinReachTheJob() throws {
+        XCTAssertTrue(TopOptKit.regionSkinWired, "premise: the linked core takes regions[].skin (LatticeTypes 4d928a75)")
+        XCTAssertTrue(LatticeBoundaryTreatment.rimBuilt, "premise: Rim on a real part")
+        let (p, _, z) = try twoAreas()
+        func block(_ lat: [String: Any]) throws -> Data {
+            let text = String(decoding: try JSONSerialization.data(withJSONObject: lat, options: [.sortedKeys]), as: UTF8.self)
+            return Data(TopOptKit.latticeProbeBaseJob.replacingOccurrences(
+                of: #""output":"#,
+                with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "cell_mm": 4.0}, "lattice": "#
+                    + text + #", "output":"#).utf8)
+        }
+        func job(_ finish: LatticeBoundaryTreatment) throws -> (zone: [String: Any], data: Data) {
+            p.lattice.boundary = finish
+            let regions = p.latticeJobRegions().regions.map(\.wireDictionary)
+            var lat: [String: Any] = ["topology": "octet", "skin": finish.jobSkinValue, "regions": regions]
+            if let of = finish.jobOuterFinish { lat["outer_finish"] = of }
+            return (try zoneRegion(p), try block(lat))
+        }
+        typealias F = LatticeAreaGrading.ZoneFinish
+        let parts: [LatticeBoundaryTreatment] = [.none, .rim, .fullSkin, .covered]
+        for part in parts {
+            for f in F.allCases {
+                if part == .fullSkin && f == .covered { continue }   // greyed: the control below
+                p.lattice.areaGrading[z] = LatticeAreaGrading(outerFinish: part == .fullSkin ? nil : f.words.outer, skin: f.words.skin)
+                let (zone, data) = try job(part)
+                let partOuter = part.jobOuterFinish ?? "shell", partSkin = part.jobSkinValue
+                XCTAssertEqual(zone["outer_finish"] as? String, part == .fullSkin || f.words.outer == partOuter ? nil : f.words.outer,
+                               "★ part \(part), zone \(f.title): its outer_finish only where it differs")
+                XCTAssertEqual(zone["skin"] as? String, f.words.skin == partSkin ? nil : f.words.skin,
+                               "★ part \(part), zone \(f.title): its skin only where it differs")
+                XCTAssertNil(TopOptKit.jobSchemaError(data), "★ core parses part \(part) with a \(f.title) zone")
+            }
+        }
+        // Rim on the part is the open lattice with the rim (LatticeTypes 19:32Z: absent would bury it under the shell)
+        XCTAssertEqual(LatticeBoundaryTreatment.rim.jobOuterFinish, "none")
+        LatticeBoundaryTreatment.controlRimGreyed = true
+        defer { LatticeBoundaryTreatment.controlRimGreyed = false }
+        XCTAssertNil(LatticeBoundaryTreatment.rim.jobOuterFinish, "control: Rim greyed, its job as before")
+        XCTAssertTrue(LatticeSetupWizard.rimNeedsEngineWork, "control: … and the page greys it")
+        LatticeBoundaryTreatment.controlRimGreyed = false
+        XCTAssertFalse(LatticeSetupWizard.rimNeedsEngineWork, "★ Rim is offered")
+        // CONTROLS: what the page greys, core refuses
+        p.lattice.boundary = .fullSkin
+        var regions = p.latticeJobRegions().regions.map(\.wireDictionary)
+        let i = try XCTUnwrap(regions.firstIndex { ($0["kind"] as? String) == "face" && (($0["geometry"] as? [String: Any])?["half_u_mm"] as? Double).map { abs($0 - 15) < 1e-6 } == true })
+        regions[i]["outer_finish"] = "shell"
+        XCTAssertNotNil(TopOptKit.jobSchemaError(try block(["topology": "octet", "skin": "diagrid", "outer_finish": "skin", "regions": regions])),
+                        "★ CONTROL: a Covered zone beside the part's Skin is refused — greyed on the page")
+        regions[i]["outer_finish"] = nil
+        regions[i]["skin"] = "diagrid"
+        XCTAssertNotNil(TopOptKit.jobSchemaError(try block(["topology": "gyroid", "skin": "none", "outer_finish": "none", "regions": regions])),
+                        "★ CONTROL: a Skin zone on a sheet type is refused (R8) — greyed on the page")
+        p.lattice.topologyID = "gyroid"
+        p.lattice.boundary = .covered
+        p.lattice.areaGrading[z] = LatticeAreaGrading(outerFinish: "none", skin: "diagrid")
+        XCTAssertNotEqual(try zoneRegion(p)["skin"] as? String, "diagrid", "★ the app never sends Skin on a sheet")
+    }
+
     /// ★★ His iPad notes 11-08: every group and zone set to No lattice under Start from "All lattice · − Lattice faces" —
     /// the stage said "Nothing to lattice" and greyed Lattice. The project now lattices the whole part minus them.
     func testStartFromMinusWithEverythingNoLatticeRuns() throws {

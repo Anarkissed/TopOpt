@@ -293,13 +293,26 @@ std::vector<char> flexible_region_mask(const JobDescription& job, const StepMode
   LatticeBoundary members;
   // Keep-outs: the job's clearances, resolved exactly as run_job.cpp's
   // lattice_keep_outs_from_job resolves them.
+  // ★ E4 (j): a cut piece's Keep clear -- its member faces' own, clipped by its cuts.
+  std::vector<ResolvedFaceRegion> clear_regions;
+  if (job.loads.present)
+    for (const JobClearance& jc : job.loads.clearances)
+      if (jc.region_id >= 0) {
+        clear_regions = resolve_face_regions(model, job.loads.face_regions);
+        break;
+      }
   if (job.loads.present)
     for (const JobClearance& jc : job.loads.clearances) {
       const bool bolt = jc.kind == "bolt";
+      const ResolvedFaceRegion* piece = nullptr;
+      for (const ResolvedFaceRegion& r : clear_regions)
+        if (jc.region_id >= 0 && r.id == jc.region_id) piece = &r;
       double bore_r = 0.0;
       if (bolt) {
         if (jc.manual)
           bore_r = jc.radius_mm;
+        else if (piece != nullptr)
+          bore_r = largest_bore_radius_mm(model, piece->member_faces);
         else if (jc.face_id >= 0 && jc.face_id < model.face_count)
           bore_r = model.faces[static_cast<std::size_t>(jc.face_id)].cylinder_radius_mm;
       }
@@ -307,6 +320,15 @@ std::vector<char> flexible_region_mask(const JobDescription& job, const StepMode
       if (jc.concentric_margin_mm > 0.0) params.concentric_margin_mm = jc.concentric_margin_mm;
       if (jc.axial_clearance_mm > 0.0) params.axial_clearance_mm = jc.axial_clearance_mm;
       if (jc.slab_depth_mm > 0.0) params.slab_depth_mm = jc.slab_depth_mm;
+      if (piece != nullptr) {
+        try {
+          for (const ClearanceGeometry& g : resolve_clearance_from_region(model, *piece, params))
+            members.add_keep_out(g, g.kind == ClearanceKind::Bolt);
+        } catch (const std::invalid_argument& e) {
+          throw FlexibleError(e.what());
+        }
+        continue;
+      }
       ClearanceGeometry g;
       if (jc.manual) {
         ManualClearanceGeometry mg;
