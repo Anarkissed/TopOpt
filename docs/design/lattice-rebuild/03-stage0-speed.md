@@ -29,11 +29,22 @@ It uses the engine's own exact mesh distance (`MeshDistance`). It is not the lay
 | 4 mm | 3,043 | 56,124 | 1,704 ms | 396 ms |
 | 2.4 mm | 11,887 | 252,479 | 3,668 ms | 956 ms |
 
+## The other three parts (6 threads)
+
+| Part | Read STEP, once | 12 mm | 8 mm | 6 mm | 4 mm | 2.4 mm |
+|---|---|---|---|---|---|---|
+| Base (137 × 98 × 14 mm) | 3.1 s | 15 ms | 76 ms | 58 ms | 200 ms | 514 ms |
+| Top Motor Mount (135 × 113 × 70 mm) | 1.8 s | 57 ms | 113 ms | 155 ms | 423 ms | 1,314 ms |
+| Pressing Plate Mount (60 × 56 × 83 mm) | 1.5 s | 33 ms | 61 ms | 84 ms | 192 ms | 522 ms |
+
+On the Top Motor Mount half of the 2.4 mm time is finding which cells touch the part, done here on one thread and one cell at a time; that step is the easiest to speed up. The app already keeps a part's mesh after import, so the STEP read is not paid on every visit to the Lattice page.
+
 ## What it means
 
 - **A density or strut-width slider** does not move any strut, so it needs no new layout: only the widths change. That is smooth at any cell size.
 - **A cell-size, anchor or angle slider** needs a full new layout. On the Mac that is 31 to 98 ms at 6 mm and larger (10 to 30 pictures a second) and 0.4 to 1 s at the finest cells. So: close to smooth for large cells, a short wait after the finger lifts for fine ones (rule P6, plan B).
-- **Opening a part** costs about 0.2 s before the first layout.
+- **Opening a part** costs 0.2 to 3 s to read the STEP file, once.
+- **His answer, 2026-11-10:** a wait of up to about a second after the finger lifts is acceptable for cell-size changes on fine cells (rule P6).
 
 ## Known ways to make it faster, not yet done
 
@@ -45,6 +56,5 @@ It uses the engine's own exact mesh distance (`MeshDistance`). It is not the lay
 
 - The iPad. Fewer fast cores than this Mac, so expect slower.
 - Stepped and Default Grade packing, grading, rim, skin, and drawing.
-- The other three reference parts.
 
 The program and its raw output are kept outside the repo with the reference parts' setups.

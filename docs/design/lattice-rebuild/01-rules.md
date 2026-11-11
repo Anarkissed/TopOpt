@@ -142,7 +142,7 @@ Section 8 held seven places where two rulings pulled against each other. He sett
 | P3 | The user's own part is shown on the Lattice page only if the layout follows every setting instantly; otherwise the sample. | his, 2026-11-10 |
 | P4 | The picture is never half updated: new geometry is not drawn with the old cells. | his, 2026-08-23: "can you make it so the quilt *never* comes up?" (`LatticeSDFMetal.swift:2672`) |
 | P5 | If a change cannot be shown at once, something on screen shows that it is working. | his, 2026-08-19 (`WorkspacePlaceholder.swift:139`) |
-| P6 | Older rule, kept as plan B under P2: the layout is rebuilt when the finger lifts or a typed number is confirmed, not on every frame of a drag. | his, 2026-08-21 and 2026-08-25 (`WorkspacePlaceholder.swift:3200`, `:789`) |
+| P6 | For cell size, anchor and angle on fine cells, the layout is rebuilt when the finger lifts or a typed number is confirmed, within about a second. Density and strut-width sliders stay smooth (P2). | his, 2026-08-21 and 2026-08-25 (`WorkspacePlaceholder.swift:3200`, `:789`); confirmed 2026-11-10 on the stage 0 numbers: "Yes, acceptable" |
 
 ## 8. Where rulings pulled against each other — settled by him, 2026-11-10
 
