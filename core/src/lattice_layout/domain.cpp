@@ -22,6 +22,18 @@ double segment_distance2(const Vec3& p, const Vec3& a, const Vec3& b) {
 }
 }  // namespace
 
+double region_edge_distance(const Region& r, const Vec3& p) {
+  const ClearanceGeometry& g = r.prism;
+  if (r.is_shell() || !g.valid || g.mask || g.kind != ClearanceKind::Face)
+    return std::numeric_limits<double>::infinity();
+  const Vec3 rel = sub(p, g.origin);
+  const double du = dot(rel, g.u), dw = dot(rel, g.w);
+  const double edge = g.outline_uv.empty()
+      ? std::min(std::min(du - g.u_lo, g.u_hi - du), std::min(dw - g.w_lo, g.w_hi - dw))
+      : clearance_outline_signed_distance(g, du, dw);
+  return edge + r.expand_mm;
+}
+
 bool region_contains(const Region& r, const Vec3& p) {
   if (r.is_shell()) return false;  // a shell is answered by the probe (it needs a distance)
   const ClearanceGeometry& g = r.prism;

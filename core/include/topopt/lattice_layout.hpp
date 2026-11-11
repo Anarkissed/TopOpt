@@ -235,6 +235,14 @@ struct CellSpec {
   // Cells a wall must hold across: 1 with single-cell walls, which is how Aesthetic
   // starts (C4, his ruling 2026-11-11); 2 with that switch off (C3); 5 Structural (C5).
   int min_cells_across = 1;
+  // Grade to shape (G1-G7): cells shrink toward the outline of a flat Lattice region,
+  // down to the smallest allowed cell, over `band_mm` measured in the plane of its face.
+  // The rule is the run's own (grading.hpp, ruling 2 of 2026-11-06): a cell of size S may
+  // stand where distance + S/2 >= band (S - f) / (S_base - f), f the finest cell and
+  // S_base the region's own; the finest always may. One size (Uniform) keeps its cells
+  // and grades struts only (C16). Off, or band 0: cells are cut where the region ends (G7).
+  bool grade_to_shape = false;
+  double band_mm = 0.0;
 };
 
 // Cells are cubes on a frame: world position = origin + ax[0]*a + ax[1]*b + ax[2]*c.
@@ -257,9 +265,15 @@ struct Cell {
   double size = 0.0;    // mm
   bool cut = false;     // the region's edge or the part's surface passes through it (D3)
   double strut = 0.0;   // strut width, mm (R1). 0 until set_struts has run.
+  double own = 0.0;     // the region's (or wall's) own cell at this spot, mm
+  // Grade to shape: 0 at the region's outline, 1 at the band's inner edge and beyond.
+  // 1 when no band applies.
+  double band = 1.0;
+  bool finest = false;  // the smallest cell this spot's ladder allows
   bool operator==(const Cell& o) const {
     return region == o.region && frame == o.frame && lo[0] == o.lo[0] && lo[1] == o.lo[1] &&
-           lo[2] == o.lo[2] && size == o.size && cut == o.cut && strut == o.strut;
+           lo[2] == o.lo[2] && size == o.size && cut == o.cut && strut == o.strut &&
+           own == o.own && band == o.band && finest == o.finest;
   }
 };
 
@@ -311,6 +325,8 @@ struct StrutSpec {
   // R2: off, no strut is wider than the open look (kSteppedPrintsOpenMaxStrutPerCell of
   // its cell). On, a strut may go up to the quilt.
   bool allow_quilt = false;
+  // G4: how much the band raises a strut toward the quilt, as 2^strength, -1 .. 1.
+  double strength = 0.0;
 };
 
 struct StrutReport {
@@ -322,6 +338,11 @@ struct StrutReport {
 // std::invalid_argument and leaves the layout untouched, because the open-look and quilt
 // ratios here are octet's own.
 StrutReport set_struts(Layout& layout, const StrutSpec& spec);
+
+// In the plane of a flat region's face: how far `p` is inside the region's edge (its
+// outline moved by Expand), mm. Negative outside. The depth is left out (G5). A curved
+// region has no such plane: +infinity.
+double region_edge_distance(const Region& r, const Vec3& p);
 
 // Is `p` in the region's prism, with its Expand? At Expand 0 this IS
 // point_in_clearance_region(prism, p, 0). Exposed for tests.

@@ -997,6 +997,148 @@ static void test_struts() {
 }
 
 
+// Grade to shape on a 60 x 60 x 16 block: the whole top face, 16 deep, 8 mm cells, a
+// 0.2 mm line (ladder 8, 4, 2), band 12 mm. The face's outline is the block's own edge,
+// facing air (G9).
+static void test_grade_to_shape() {
+  PartMeasure pm(weld_mesh(box(60, 60, 16)));
+  DomainSpec s;
+  s.bead_mm = 0.2;
+  s.regions = {face_region(1, Role::Lattice, {30, 30, 16}, {0, 0, -1}, 30, 30, 16)};
+  Domain d(pm, s);
+  const double band = 12.0;
+  // In the plane of the face, to its outline: nothing of z in it (G5).
+  auto edge = [](const Vec3& m) { return std::max(0.0, std::min(std::min(m.x, 60 - m.x), std::min(m.y, 60 - m.y))); };
+  auto size_at = [](const Layout& l, const Vec3& p) {
+    for (const Cell& c : l.cells) {
+      const Vec3 m = cell_centre(l, c);
+      if (std::fabs(p.x - m.x) < 0.5 * c.size && std::fabs(p.y - m.y) < 0.5 * c.size &&
+          std::fabs(p.z - m.z) < 0.5 * c.size) return c.size;
+    }
+    return 0.0;
+  };
+  CellSpec off;
+  off.cell_max_mm = 8;
+  const Layout plain = lay_cells(d, off);
+  {  // G7: off, every cell is the region's own, cut where the region ends.
+    int other = 0, cut = 0;
+    for (const Cell& c : plain.cells) { if (std::fabs(c.size - 8.0) > 1e-9) ++other; if (c.cut) ++cut; }
+    CHECK(!plain.cells.empty() && other == 0 && cut > 0);
+    CellSpec zero = off;   // G2: band 0 is the same layout
+    zero.grade_to_shape = true;
+    CHECK(lay_cells(d, zero).cells == plain.cells);
+  }
+  for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
+    CellSpec on = off;
+    on.algorithm = algo;
+    on.grade_to_shape = true;
+    on.band_mm = band;
+    const Layout l = lay_cells(d, on);
+    CHECK(l.solid.empty());                                   // G6
+    CHECK(badly_covered(d, l, {0, 0, 0}, {60, 60, 16}, 1.3) == 0);
+    double f = 8.0;
+    for (const Cell& c : l.cells) f = std::min(f, c.size);
+    if (algo == Algorithm::DefaultGrade) NEAR(f, 2.0, 1e-9);   // G3: down to the finest
+    CHECK(f < 8.0 - 1e-9);
+    const double finest = algo == Algorithm::DefaultGrade ? 2.0 : 8.0 / 6.0;
+    int breaks_rule = 0, small_inside = 0, at_edge = 0, at_edge_large = 0, wrong_t = 0, wrong_own = 0;
+    int big[2] = {0, 0};
+    for (const Cell& c : l.cells) {
+      const Vec3 m = cell_centre(l, c);
+      const double dist = edge(m);
+      // G1-G3: the run's rule holds for every cell.
+      if (c.size > finest * (1 + 1e-9) &&
+          dist + 0.5 * c.size < band * (c.size - finest) / (8.0 - finest) - 1e-6) ++breaks_rule;
+      // G2: beyond the band, the region's own cell.
+      if (dist >= band && std::fabs(c.size - 8.0) > 1e-9) ++small_inside;
+      // G3: the cells at the outline are the smallest in the layout.
+      if (dist <= 0.5 * c.size + 1e-9) { ++at_edge; if (c.size > f + 1e-9) ++at_edge_large; }
+      if (std::fabs(c.band - std::min(1.0, dist / band)) > 1e-9) ++wrong_t;
+      if (std::fabs(c.own - 8.0) > 1e-9) ++wrong_own;
+      // G5: both layers of the 16 mm depth hold the same cells.
+      if (std::fabs(c.size - 8.0) < 1e-9) ++big[m.z > 8 ? 1 : 0];
+    }
+    CHECK(breaks_rule == 0);
+    CHECK(small_inside == 0);
+    CHECK(at_edge > 50 && at_edge_large == 0);
+    CHECK(wrong_t == 0 && wrong_own == 0);
+    CHECK(big[0] > 0 && big[0] == big[1]);
+    // G1: along 20 lines from the middle to the outline the cell never grows.
+    int grew = 0;
+    for (int k = 0; k < 20; ++k) {
+      const double ang = 0.1 + k * 0.31;
+      double before = 1e300;
+      for (double r = 0.0; r < 60.0; r += 0.25) {
+        const Vec3 p{30 + r * std::cos(ang), 30 + r * std::sin(ang), 12.1};
+        if (p.x <= 0.05 || p.x >= 59.95 || p.y <= 0.05 || p.y >= 59.95) break;
+        const double sz = size_at(l, p);
+        if (sz == 0.0) continue;
+        if (sz > before + 1e-9) ++grew;
+        before = sz;
+      }
+    }
+    CHECK(grew == 0);
+
+    // Struts in the band (G8, R3, G4).
+    Layout a = l, b = l, c2 = l;
+    StrutSpec sp;
+    set_struts(a, sp);
+    sp.strength = 1.0;
+    set_struts(b, sp);
+    sp.strength = -1.0;
+    set_struts(c2, sp);
+    double ratio = 0.0;
+    for (const Cell& c : a.cells)
+      if (c.band >= 1.0 && std::fabs(c.size - 8.0) < 1e-9) ratio = c.strut / c.size;
+    CHECK(ratio > 0.0);
+    int thinner = 0, past_quilt = 0, past_open = 0, not_lines = 0, weaker = 0, stronger = 0, moved_outside = 0, denser = 0, band_cells = 0;
+    for (std::size_t i = 0; i < a.cells.size(); ++i) {
+      const Cell& c = a.cells[i];
+      const double q = kQuiltStrutPerCell * c.size;
+      if (c.band >= 1.0) {
+        if (b.cells[i].strut != c.strut || c2.cells[i].strut != c.strut) ++moved_outside;
+        continue;
+      }
+      ++band_cells;
+      if (c.strut < std::min(ratio * 8.0, q) - 1e-9) ++thinner;          // G8
+      if (c.strut > q + 1e-9) ++past_quilt;                               // R3, R9
+      if (c.strut > (0.7592 / 4.0) * c.size + 1e-9) ++past_open;          // R3: allowed here
+      const double lines = c.strut / 0.2;
+      if (std::fabs(lines - std::round(lines)) > 1e-6 && std::fabs(c.strut - q) > 1e-9) ++not_lines;
+      if (c.strut / c.size > ratio + 1e-9) ++denser;
+      if (b.cells[i].strut < c.strut - 1e-12 || c2.cells[i].strut > c.strut + 1e-12) ++weaker;
+      if (b.cells[i].strut > c2.cells[i].strut + 1e-9) ++stronger;
+    }
+    CHECK(band_cells > 100);
+    CHECK(thinner == 0);
+    CHECK(past_quilt == 0);
+    CHECK(past_open > 0);
+    CHECK(not_lines == 0);
+    CHECK(denser == band_cells);          // denser all the way to the outline (G8)
+    CHECK(weaker == 0 && stronger > 0);   // G4
+    CHECK(moved_outside == 0);
+    // R11: a typed width holds inside the band too, up to the quilt.
+    sp = StrutSpec{};
+    sp.width_mm = 0.6;
+    set_struts(a, sp);
+    int not_typed = 0;
+    for (const Cell& c : a.cells)
+      if (c.band < 1.0 && std::fabs(c.strut - std::min(0.6, kQuiltStrutPerCell * c.size)) > 1e-9) ++not_typed;
+    CHECK(not_typed == 0);
+  }
+  {  // One size keeps its cells and grades struts only (C16).
+    CellSpec on = off;
+    on.algorithm = Algorithm::Uniform;
+    on.grade_to_shape = true;
+    on.band_mm = band;
+    const Layout l = lay_cells(d, on);
+    int other = 0, banded = 0;
+    for (const Cell& c : l.cells) { if (std::fabs(c.size - 8.0) > 1e-9) ++other; if (c.band < 1.0) ++banded; }
+    CHECK(other == 0 && banded > 0 && l.cells.size() == plain.cells.size());
+  }
+}
+
+
 static void test_cells_curved_region() {
   int L = -1, square = -1, sideA = -1, sideB = -1;
   const StepModel model = plate_with_L_face(&L, &square, &sideA, &sideB);
@@ -1017,6 +1159,7 @@ static void test_cells_curved_region() {
 
 int main() {
   test_struts();
+  test_grade_to_shape();
   test_cells_prism();
   test_cells_walls_under_a_face();
   test_cells_ledge_is_not_a_wall();

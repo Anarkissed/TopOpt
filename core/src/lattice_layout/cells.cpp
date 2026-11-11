@@ -67,6 +67,24 @@ struct Pass {
   RegionCells* tally;
   const WallMap* walls = nullptr;   // a flat region's walls, if it has any
   int wall = -1;                    // the wall this pass lays; -1 = what no wall holds
+  const Region* band_region = nullptr;   // a flat region with Grade to shape on
+  double base_mm = 0.0;             // this lay's own cell (S_base)
+  double finest_mm = 0.0;           // the smallest cell its ladder allows (f)
+
+  // 0 at the region's outline, 1 at the band's inner edge and beyond (G2, G5).
+  double band_t(const double lo[3], double s) const {
+    if (!band_region) return 1.0;
+    const double d = region_edge_distance(*band_region, frame.at(lo[0] + 0.5 * s, lo[1] + 0.5 * s, lo[2] + 0.5 * s));
+    return std::clamp(d / spec->band_mm, 0.0, 1.0);
+  }
+  // G1-G3, the run's own band rule: may a cell of size s stand here?
+  bool band_allows(const double lo[3], double s) const {
+    if (!band_region) return true;   // (one size has no finer cell: its finest is its own)
+    if (s <= finest_mm * (1.0 + 1e-9) || base_mm <= finest_mm * (1.0 + 1e-9)) return true;
+    const double d = std::max(0.0, region_edge_distance(*band_region,
+                                  frame.at(lo[0] + 0.5 * s, lo[1] + 0.5 * s, lo[2] + 0.5 * s)));
+    return d + 0.5 * s >= spec->band_mm * (s - finest_mm) / (base_mm - finest_mm) - 1e-9;
+  }
 
   bool allowed(double s) const {
     for (double a : sizes)
@@ -97,7 +115,10 @@ struct Pass {
     cell.lo[0] = lo[0]; cell.lo[1] = lo[1]; cell.lo[2] = lo[2];
     cell.size = s;
     cell.cut = cut;
+    cell.own = base_mm;
     if (as_cell) {
+      cell.band = band_t(lo, s);
+      cell.finest = s <= finest_mm * (1.0 + 1e-9);
       out->cells.push_back(cell);
       ++tally->cells;
     } else {
@@ -126,7 +147,9 @@ struct Pass {
     const bool cut = inside < 27;   // D3: a whole cell, cut by the edge
     // A width is read to about a micron (PartMeasure::reach), so a cell that fits its
     // wall exactly must not be refused over the last digits of the reading.
-    if (s <= fits + kReadingSlack) {
+    const bool fitting = s <= fits + kReadingSlack;
+    const bool held = !band_allows(lo, s);   // too large this close to the outline
+    if (fitting && !held) {
       emit(lo, s, cut, true);
       return;
     }
@@ -140,8 +163,9 @@ struct Pass {
           }
       return;
     }
-    if (spec->algorithm == Algorithm::Stepped && top && pack(lo, s)) return;
-    emit(lo, s, cut, false);
+    if (spec->algorithm == Algorithm::Stepped && top && pack(lo, s, held)) return;
+    // G6: a cell that cannot be divided further stands; nothing goes solid for the band.
+    emit(lo, s, cut, fitting);
   }
 
   // ── STEPPED: pack one base cell from one shared unit (C6-C6c, C13) ────────────
@@ -157,7 +181,7 @@ struct Pass {
     std::vector<std::array<int, 3>> bare;    // units with lattice asked and no cell
     std::vector<unsigned char> cut;          // per cube
   };
-  bool pack(const double lo[3], double S) {
+  bool pack(const double lo[3], double S, bool held) {
     Packed best;
     for (int n : divisors) {
       if (n < 2) continue;
@@ -179,6 +203,20 @@ struct Pass {
                     continue;
                   ++in[u];
                   fit[u] = std::min(fit[u], f);
+                }
+            if (in[u]) continue;
+            // None of the eight: look again just inside the unit's corners, so a sliver
+            // of lattice at its edge is seen, and is a cut cell or listed as solid (D14)
+            // rather than left out of the layout.
+            for (int c = 0; c < 2 && !in[u]; ++c)
+              for (int b = 0; b < 2 && !in[u]; ++b)
+                for (int a = 0; a < 2 && !in[u]; ++a) {
+                  double f = 0.0;
+                  if (!sample(lo[0] + t * (i + 0.04 + 0.92 * a), lo[1] + t * (j + 0.04 + 0.92 * b),
+                              lo[2] + t * (k + 0.04 + 0.92 * c), &f))
+                    continue;
+                  in[u] = 1;
+                  fit[u] = f;
                 }
           }
       Packed p;
@@ -202,6 +240,8 @@ struct Pass {
                     f = std::min(f, fit[u]);
                   }
               if (!free || some == 0 || size > f + kReadingSlack) continue;
+              const double at[3] = {lo[0] + i * t, lo[1] + j * t, lo[2] + k * t};
+              if (!band_allows(at, size)) continue;
               for (int c = k; c < k + m; ++c)
                 for (int b = j; b < j + m; ++b)
                   for (int a = i; a < i + m; ++a)
@@ -227,8 +267,10 @@ struct Pass {
       // a sliver, which is solid (C8).
       // Coverage is the share of the lattice asked for here that ends up in a cell.
       const long mine = p.covered * best.asked, theirs = best.covered * p.asked;
-      const bool more = mine * 100 > theirs * 110;
-      const bool same = !more && mine * 110 >= theirs * 100;
+      // Inside a Grade to shape band the finest cells are wanted at the outline, so there
+      // coverage is compared exactly (G3, G6).
+      const bool more = held ? mine > theirs : mine * 100 > theirs * 110;
+      const bool same = !more && (held ? mine == theirs : mine * 110 >= theirs * 100);
       if (best.n == 0 || more || (same && p.cubes.size() < best.cubes.size()))
         best = std::move(p);
     }
@@ -284,6 +326,11 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec) {
       // Which fractions' units print open is core's own rule (C6a).
       pass.divisors = stepped_admitted_divisors(spec.topology, base, ds.bead_mm,
                                                 spec.cell_min_mm, true, SteppedMenu::AnyStep);
+    pass.base_mm = base;
+    pass.finest_mm = base;
+    for (double a : pass.sizes) pass.finest_mm = std::min(pass.finest_mm, a);
+    for (int n : pass.divisors)
+      if (n >= 2) pass.finest_mm = std::min(pass.finest_mm, base / n);
     double start[3];
     int count[3];
     for (int a = 0; a < 3; ++a) centred(lo[a], hi[a], base, &start[a], &count[a]);
@@ -472,6 +519,7 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec) {
     Pass pass = open(r.id, f, g.depth, base);
     pass.tally = &out.regions.back();
     pass.walls = &map;
+    if (spec.grade_to_shape && spec.band_mm > 0.0) pass.band_region = &r;
     for (std::size_t i = 0; i < map.walls.size(); ++i) {
       const WallMap::Wall& wall = map.walls[i];
       pass.wall = static_cast<int>(i);

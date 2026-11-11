@@ -89,14 +89,14 @@ Kind of test: **L** reads the layout, **F** reads the file, **A** is an app test
 
 | Rule | Kind | Test |
 |---|---|---|
-| G1 | L | With Grade to shape on, cell size never grows as the in-plane distance to the region's outline shrinks (checked along 20 lines from centre to outline per face). |
+| G1 | L | With Grade to shape on, cell size never grows as the in-plane distance to the region's outline shrinks (checked along 20 lines from centre to outline per face). Every cell obeys the run's band rule: a cell of size S stands only where distance + S/2 ≥ Band × (S − f) / (S_own − f), f the finest cell and S_own the region's own. |
 | G2 | L | At in-plane distance ≥ Band from the outline, every cell is the region's own cell. At Band 0 the layout holds only the region's cell and its cut pieces. |
-| G3 | L | Grade to shape on: the cells touching the outline are the smallest allowed cell (the floor cell, or the smallest fraction above it). No bar is in the layout unless Finish is Rim. |
-| G4 | L | Strength 0 gives the default band. A higher Strength gives a band at least as wide, cell by cell no larger. |
-| G5 | L | Two regions with the same outline and depths of 10 and 30 mm get the same in-plane cell sizes. |
-| G6 | L | Grade to shape on: wherever the layout is solid inside a region, the neighbouring cell is the smallest allowed cell. |
+| G3 | L | Grade to shape on: the cells at the outline are the smallest cells in the layout there (on a 0.2 mm line and 8 mm cells, 2 mm). No bar is in the layout unless Finish is Rim. One size (Manual) keeps its cells and grades struts only. |
+| G4 | L | Strength 0 is the default raise. A higher Strength gives every strut in the band at least the same width and some more; a lower one never more. Struts outside the band do not move. Strength moves no cell. |
+| G5 | L | A region 16 mm deep with 8 mm cells: both layers hold the same cells, and beyond the Band every cell is the region's own at every depth. Cells do not shrink toward the region's floor. |
+| G6 | L | Grade to shape on: the band makes nothing solid. A place that was lattice with it off is in a cell with it on. |
 | G7 | L | Grade to shape off: the cells touching the outline have the region's own size and are cut by it. |
-| G8 | L | Across the band the strut width is constant to 0.01 mm while the cell shrinks; strut ÷ cell rises toward the outline. |
+| G8 | L | In the band no strut is thinner than the region's own strut (or the quilt of its cell, if that is less), strut ÷ cell is higher than outside the band in every band cell, never above 0.354, and each strut is a whole number of lines or the quilt. A typed width (R11) holds in the band too. |
 | G9 | L | An outline with an edge facing air: the cells still shrink toward that edge; the rim is absent on it (S2). |
 
 ## 5. Rim, skin and cut ends

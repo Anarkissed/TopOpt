@@ -48,12 +48,30 @@ StrutReport set_struts(Layout& layout, const StrutSpec& spec) {
     }
   }
 
+  const double amount = std::pow(2.0, std::clamp(spec.strength, -1.0, 1.0));   // G4
+  constexpr double kCoarseCellBandRaise = 0.35;   // the run's own share (grading.cpp)
   for (Cell& c : layout.cells) {
+    if (c.band < 1.0 && spec.width_mm <= 0.0) {
+      // Inside a Grade to shape band (G8, R3, G4; the run's band law, in width). The
+      // strut keeps the width it has on the region's own cell while the cell shrinks,
+      // then is raised toward the quilt by (1 - t) x share x amount, and to whole lines.
+      // The band is exempt from the open look; the quilt still tops it.
+      const double ratio = spec.mode == Density::PerRegion ? region_ratio[c.region] : part_ratio;
+      const double own = c.own > 0.0 ? c.own : c.size;
+      const double q = std::max(bead, kQuiltStrutPerCell * c.size);
+      double w = std::clamp(ratio * own, bead, q);
+      const double share = c.finest ? 1.0 : kCoarseCellBandRaise;
+      w = std::max(w, std::min(q, w + (q - w) * (1.0 - c.band) * share * amount));
+      w = std::min(q, std::ceil(w / bead - 1e-9) * bead);
+      c.strut = std::max(bead, w);
+      continue;
+    }
     double want = 0.0;
     if (spec.width_mm > 0.0) want = spec.width_mm;                       // R11
     else if (spec.mode == Density::PerRegion) want = region_ratio[c.region] * c.size;
     else want = part_ratio * c.size;                                     // R6
-    const double top = std::max(bead, ceiling * c.size);
+    // R3: a Grade to shape band is exempt from the open look; the quilt still tops it.
+    const double top = std::max(bead, (c.band < 1.0 ? kQuiltStrutPerCell : ceiling) * c.size);
     double w = want;
     if (w < bead * (1.0 - 1e-12)) { w = bead; ++rep.at_bead; }           // R5
     else if (w > top * (1.0 + 1e-12)) { w = top; ++rep.at_ceiling; }     // R2, R9
