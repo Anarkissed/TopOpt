@@ -47,8 +47,8 @@ Kind of test: **L** reads the layout, **F** reads the file, **A** is an app test
 |---|---|---|
 | C1 | L | On a plain block the layout uses one cell size. On each reference part, no cell can be merged with its neighbours into an allowed larger cell that fits. |
 | C2 | L | Every cell's size ≤ the wall's width at its centre + 1e-6. A 12.000 mm wall gets 12.000 mm cells, a 12.999 mm wall does not get a 13 mm cell. |
-| C3 | L | Aesthetic: every wall at least 2 floor cells wide (4.742 mm at 0.45) holds lattice, with stress on or off. |
-| C4 | L | With single-cell members on, a wall between 1 and 2 floor cells wide holds one cell across, sized to the wall. Finish is unchanged by the switch. |
+| C3 | L | Aesthetic, single-cell walls off: every wall at least 2 floor cells wide (4.742 mm at 0.45) holds lattice, with stress on or off; a narrower wall is solid. |
+| C4 | L, A | With nothing set, single-cell walls are on: a 4.2 mm wall at 0.45 holds one cell across and no solid. A wall between 1 and 2 floor cells wide holds one cell across, sized to the wall. Finish is unchanged by the switch. A new project shows the switch on; a saved project keeps what it saved. |
 | C5 | L | Structural: a wall holds lattice only if it takes 5 cells across at or above the floor cell; otherwise solid. |
 | C6 | L | Stepped: every cell in a base slot of size S has size k × S ÷ n, n from 2 to 6, or S. |
 | C6a | L | Stepped at 0.45: a 12 mm base uses only 12, 9.6, 9, 8, 7.2, 6, 4.8, 4, 3, 2.4 mm cells. No 10 mm and no 2 mm cell. At a 0.35 mm bead (floor cell 1.844 mm) the 2 mm and 10 mm cells are allowed. |

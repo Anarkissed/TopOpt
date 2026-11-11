@@ -551,6 +551,13 @@ static int badly_covered(const Domain& d, const Layout& l, Vec3 lo, Vec3 hi, dou
   return bad;
 }
 
+// Single-cell walls switched off (C3). The spec's own default is one across (C4).
+static CellSpec two_across() {
+  CellSpec c;
+  c.min_cells_across = 2;
+  return c;
+}
+
 static void test_cells_prism() {
   PartMeasure pm(weld_mesh(box(40, 40, 20)));
   const Vec3 top{20, 20, 20}, down{0, 0, -1};
@@ -558,7 +565,7 @@ static void test_cells_prism() {
     DomainSpec s;
     s.regions = {face_region(1, Role::Lattice, top, down, 20, 20, 8)};
     Domain d(pm, s);
-    CellSpec cs;
+    CellSpec cs = two_across();
     cs.algorithm = Algorithm::Uniform;
     cs.cell_max_mm = 8;
     const Layout l = lay_cells(d, cs);
@@ -580,7 +587,7 @@ static void test_cells_prism() {
     DomainSpec s;
     s.regions = {face_region(1, Role::Lattice, top, down, 20, 20, 12)};
     Domain d(pm, s);
-    CellSpec cs;
+    CellSpec cs = two_across();
     cs.algorithm = Algorithm::Uniform;
     cs.cell_max_mm = 13;
     cs.min_cells_across = 1;                               // C4: single-cell members
@@ -602,7 +609,7 @@ static void test_cells_prism() {
     DomainSpec s;
     s.regions = {face_region(1, Role::Lattice, {20.5, 20, 20}, down, 21, 21, 8)};      // covers the whole face
     Domain d(wide, s);
-    CellSpec cs;
+    CellSpec cs = two_across();
     cs.algorithm = Algorithm::Uniform;
     const Layout l = lay_cells(d, cs);
     CHECK(!l.cells.empty());
@@ -628,7 +635,7 @@ static void test_cells_prism() {
     s1.regions = a;
     s2.regions.assign(a.rbegin(), a.rend());
     Domain d1(pm, s1), d2(pm, s2);
-    CellSpec cs;
+    CellSpec cs = two_across();
     cs.algorithm = Algorithm::Uniform;
     const Layout l1 = lay_cells(d1, cs), l2 = lay_cells(d2, cs), l3 = lay_cells(d1, cs);
     CHECK(l1.cells.size() > 100);
@@ -653,7 +660,7 @@ static void test_cells_walls_under_a_face() {
   for (Algorithm algo : {Algorithm::Uniform, Algorithm::DefaultGrade}) {
     // C11, C12, C15 (settled 2026-11-10, item 6): each wall's cells divide THAT wall.
     // Two across: 6 mm cells in the 12 mm wall, 3 mm cells in the 6 mm wall.
-    CellSpec cs;
+    CellSpec cs = two_across();
     cs.algorithm = algo;
     const Layout l = lay_cells(d, cs);
     CHECK(l.solid.empty());
@@ -691,7 +698,7 @@ static void test_cells_ledge_is_not_a_wall() {
   DomainSpec s;
   s.regions = {face_region(1, Role::Lattice, {30, 0, 30}, {0, 1, 0}, 30, 30, 12)};
   Domain d(pm, s);
-  CellSpec cs;
+  CellSpec cs = two_across();
   cs.algorithm = Algorithm::Uniform;
   const Layout l = lay_cells(d, cs);
   int ledge_cells = 0, six = 0, three = 0;
@@ -714,7 +721,7 @@ static void test_cells_whole_part() {
   const double floor_cell = 0.45 * 5.268704;
   {  // C7, C17, C12: Default Grade. The base is the floor doubled (4.74 mm, the largest
      // under 8 whose halves land on the floor); the thin wall takes the half.
-    CellSpec cs;   // Default Grade, Auto, up to 8 mm, two across
+    CellSpec cs = two_across();   // Default Grade, Auto, up to 8 mm, two across
     const Layout l = lay_cells(d, cs);
     CHECK(l.regions.size() == 1 && l.regions[0].region == 0);
     NEAR(l.regions[0].base_cell_mm, 2 * floor_cell, 1e-5);
@@ -741,7 +748,7 @@ static void test_cells_whole_part() {
   }
   {  // C16, D8, D14: Manual 4 mm is one size everywhere. The 6 mm wall cannot hold two
      // 4 mm cells: it is solid, and listed as solid, not left as a hole.
-    CellSpec cs;
+    CellSpec cs = two_across();
     cs.algorithm = Algorithm::Uniform;
     cs.cell_mm = 4.0;
     const Layout l = lay_cells(d, cs);
@@ -780,7 +787,7 @@ static void test_cells_stepped() {
   DomainSpec s;
   s.start = Start::AllLattice;
   Domain d(pm, s);
-  CellSpec cs;
+  CellSpec cs = two_across();
   cs.algorithm = Algorithm::Stepped;
   cs.cell_mm = 12.0;
   const Layout l = lay_cells(d, cs);
@@ -836,6 +843,36 @@ static void test_cells_stepped() {
     if (bead == 0.45) CHECK(in_thin == 0);
     else CHECK(in_thin > 50 && twos == in_thin);
   }
+
+  // C4: single-cell walls are on unless switched off (his ruling 2026-11-11). The same
+  // 4.2 mm wall at a 0.45 mm line, with nothing set: one cell across, never solid.
+  // (One size everywhere is not in this list: its Auto size is the thick wall's, C16.)
+  {
+    DomainSpec s3;
+    s3.start = Start::AllLattice;
+    Domain d3(slim, s3);
+    const double floor_cell = 0.45 * 5.268704;
+    for (Algorithm a : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
+      CellSpec def;
+      def.algorithm = a;
+      const Layout l3 = lay_cells(d3, def);
+      int in_thin = 0, wrong = 0, solid_in_thin = 0;
+      for (const Cell& c : l3.cells) {
+        const Vec3 m = cell_centre(l3, c);
+        if (m.x > 26 && m.x < 58 && m.y > 0 && m.y < 4.2 && m.z > 0 && m.z < 40) {
+          ++in_thin;
+          if (c.size > 4.2 + 1e-6 || c.size < floor_cell - 1e-5 || 2 * c.size <= 4.2) ++wrong;
+        }
+      }
+      for (const Cell& c : l3.solid) {
+        const Vec3 m = cell_centre(l3, c);
+        if (m.x > 26 && m.x < 58 && m.y > 0 && m.y < 4.2 && m.z > 0 && m.z < 40) ++solid_in_thin;
+      }
+      CHECK(in_thin > 10);
+      CHECK(wrong == 0);
+      CHECK(solid_in_thin == 0);
+    }
+  }
 }
 
 static void test_cells_curved_region() {
@@ -845,7 +882,7 @@ static void test_cells_curved_region() {
   DomainSpec s;
   s.regions = {region_from_faces(model, {sideA, sideB}, 2, Role::Lattice, 5)};
   Domain d(pm, s);
-  CellSpec cs;   // Default Grade
+  CellSpec cs = two_across();   // Default Grade
   const Layout l = lay_cells(d, cs);
   // 5 mm deep, two across: cells of at most 2.5 mm, so the floor cell (2.37).
   CHECK(!l.cells.empty());

@@ -232,9 +232,9 @@ struct CellSpec {
   double cell_max_mm = 8.0;
   // No cell smaller than this. 0 = the printable floor alone (C14).
   double cell_min_mm = 0.0;
-  // Cells a wall must hold across: 2 Aesthetic (C3), 1 with single-cell members (C4),
-  // 5 Structural (C5).
-  int min_cells_across = 2;
+  // Cells a wall must hold across: 1 with single-cell walls, which is how Aesthetic
+  // starts (C4, his ruling 2026-11-11); 2 with that switch off (C3); 5 Structural (C5).
+  int min_cells_across = 1;
 };
 
 // Cells are cubes on a frame: world position = origin + ax[0]*a + ax[1]*b + ax[2]*c.
