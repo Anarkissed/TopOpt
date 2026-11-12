@@ -205,9 +205,20 @@ struct ProtectSkin {
   double depth_mm = 0.0;
 };
 
+// No strut is thinner than this many line widths. His print of 2026-11-11: an octet of
+// struts about one line wide came out as blobs and strings; the two-line rim beside it,
+// and his July octet with 0.96 mm struts, printed clean. The smallest cell follows from
+// it (C14): the cell whose open look this strut gives. The same for every type until a
+// type has a print of its own.
+inline constexpr double kMinStrutLines = 2.0;
+
 struct DomainSpec {
   Start start = Start::AllSolid;
   double bead_mm = 0.45;
+  // The thinnest strut, in line widths (R5). Leave it alone: it is here so a type with
+  // its own print can carry its own number, and so a test can lay a geometry that was
+  // drawn for one line.
+  double min_strut_lines = kMinStrutLines;
   // Rule D8: a wall narrower than this cannot hold lattice and is solid. The cell rules
   // (C3-C5) set it; 0 switches the check off. Measured through the wall along the owning
   // prism's direction, or as the narrowest width at the spot where there is no prism (C11).
@@ -493,6 +504,7 @@ struct RegionCells {
 struct Layout {
   double floor_cell_mm = 0.0;        // the smallest cell that prints open (C14)
   double bead_mm = 0.0;              // the line width it was laid for
+  double min_strut_mm = 0.0;         // the thinnest strut allowed (R5): lines x line width
   LatticeTopology topology = LatticeTopology::Octet;
   std::vector<Frame> frames;
   std::vector<WallMap> walls;        // one per frame
@@ -561,7 +573,7 @@ struct StrutSpec {
 };
 
 struct StrutReport {
-  std::size_t at_bead = 0;      // cells where the asked width was under one line (R5)
+  std::size_t at_bead = 0;      // cells where the asked width was under the thinnest strut (R5)
   std::size_t at_ceiling = 0;   // cells where it was over the widest allowed (R2, R9)
 };
 
@@ -693,6 +705,7 @@ struct Settings {
   // Where lattice goes.
   Start start = Start::AllSolid;
   double bead_mm = 0.45;
+  double min_strut_lines = kMinStrutLines;
   double min_wall_mm = 0.0;
   double rim_mm = 0.0;           // Finish Rim: 0 none, < 0 two line widths
   double cover_mm = 0.0;         // Finish Covered: 0 none, < 0 two line widths

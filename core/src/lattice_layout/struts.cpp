@@ -20,7 +20,9 @@ StrutReport set_struts(Layout& layout, const StrutSpec& spec) {
                                 lattice_topology_name(layout.topology) + " yet");
 
   StrutReport rep;
-  const double bead = layout.bead_mm;
+  const double line = layout.bead_mm;
+  // R5: the thinnest strut. Two line widths (his print, 2026-11-11), never under one.
+  const double bead = std::max(line, layout.min_strut_mm);
   const double ceiling = spec.allow_quilt ? kQuiltStrutPerCell : kSteppedPrintsOpenMaxStrutPerCell;
 
   // The dial is read on the largest cell: of the part (Uniform), or of each region.
@@ -62,7 +64,7 @@ StrutReport set_struts(Layout& layout, const StrutSpec& spec) {
       double w = std::clamp(ratio * own, bead, q);
       const double share = c.finest ? 1.0 : kCoarseCellBandRaise;
       w = std::max(w, std::min(q, w + (q - w) * (1.0 - c.band) * share * amount));
-      w = std::min(q, std::ceil(w / bead - 1e-9) * bead);
+      w = std::min(q, std::ceil(w / line - 1e-9) * line);   // to whole lines
       c.strut = std::max(bead, w);
       continue;
     }

@@ -97,6 +97,7 @@ struct Pass {
   const Region* band_region = nullptr;   // a flat region with Grade to shape on
   double base_mm = 0.0;             // this lay's own cell (S_base)
   double finest_mm = 0.0;           // the smallest cell its ladder allows (f)
+  double floor_mm = 0.0;            // the smallest cell that may stand in this pass at all
 
   // 0 at the region's outline, 1 at the band's inner edge and beyond (G2, G5).
   double band_t(const double lo[3], double s) const {
@@ -127,6 +128,11 @@ struct Pass {
     return true;
   }
   // G11: a cell below the open look's floor exists only inside the band.
+  // C14: a cell too small to print does not stand, whatever it fits. (A region whose own
+  // depth is under the floor has a base cell that small.)
+  bool prints(const double lo[3], double s) const {
+    return s >= floor_mm * (1.0 - 1e-9) && fine_allowed(lo, s);
+  }
   bool fine_allowed(const double lo[3], double s) const {
     if (s >= out->floor_cell_mm * (1.0 - 1e-9)) return true;
     if (!band_region) return false;
@@ -259,7 +265,8 @@ struct Pass {
     const bool fitting = s <= fits + kReadingSlack;
     // Too large this close to the outline, or cut by it (G1-G3, G10).
     const bool held = !band_allows(lo, s) || !whole_in_outline(lo, s);
-    if (fitting && !held) {
+    const bool printable = prints(lo, s);
+    if (fitting && !held && printable) {
       emit(lo, s, cut, true);
       return;
     }
@@ -277,7 +284,8 @@ struct Pass {
     }
     if (spec->algorithm == Algorithm::Stepped && top && pack(lo, s, held)) return;
     // G6: a cell that cannot be divided further stands; nothing goes solid for the band.
-    emit(lo, s, cut, fitting);
+    // (Unless it is too small to print: C8, C14.)
+    emit(lo, s, cut, fitting && printable);
   }
 
   // ── STEPPED: pack one base cell from one shared unit (C6-C6c, C13) ────────────
@@ -649,8 +657,12 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
   const int thread_count =
       threads > 0 ? threads : std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
   const DomainSpec& ds = domain.spec();
-  out.floor_cell_mm = ds.bead_mm / kSteppedPrintsOpenMaxStrutPerCell;   // C14
+  // R5, C14: the thinnest strut is a number of line widths (two), and the smallest cell is
+  // the one that strut leaves open. Core's own open-look rule is asked with that strut.
+  const double min_strut = std::max(1.0, ds.min_strut_lines) * ds.bead_mm;
+  out.floor_cell_mm = min_strut / kSteppedPrintsOpenMaxStrutPerCell;   // C14
   out.bead_mm = ds.bead_mm;
+  out.min_strut_mm = min_strut;
   out.topology = spec.topology;
   // A hair above the bound itself, so the floor cell is a size core's own menu admits.
   const double smallest = std::max(out.floor_cell_mm * (1.0 + 1e-9), spec.cell_min_mm);
@@ -667,7 +679,7 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
     // G11: how fine a band's cells may go is the user's to set. From the smallest cell
     // that prints open (band_finer 0) down to the smallest one line draws without closing
     // it, the quilt's cell (band_finer 1), in even steps of ratio; or a typed size.
-    const double open_floor = out.floor_cell_mm, quilt_floor = ds.bead_mm / kQuiltStrutPerCell;
+    const double open_floor = out.floor_cell_mm, quilt_floor = min_strut / kQuiltStrutPerCell;
     double band_floor = open_floor;
     if (pass.band_region != nullptr) {
       if (spec.band_cell_mm > 0.0)
@@ -680,16 +692,17 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
         band_floor != open_floor ? std::max(spec.cell_min_mm, band_floor) : spec.cell_min_mm;
     if (spec.algorithm == Algorithm::DefaultGrade)
       // The halving ladder and its printable floor are core's own (ruling A, C7, C14).
-      pass.sizes = stepped_size_menu(spec.topology, base, ds.bead_mm, tile_min, !fine,
+      pass.sizes = stepped_size_menu(spec.topology, base, min_strut, tile_min, !fine,
                                      SteppedMenu::Halves);
     else
       pass.sizes = {base};
     pass.divisors.clear();
     if (spec.algorithm == Algorithm::Stepped)
       // Which fractions' units print open is core's own rule (C6a).
-      pass.divisors = stepped_admitted_divisors(spec.topology, base, ds.bead_mm, tile_min,
+      pass.divisors = stepped_admitted_divisors(spec.topology, base, min_strut, tile_min,
                                                 !fine, SteppedMenu::AnyStep);
     pass.base_mm = base;
+    pass.floor_mm = std::max(spec.cell_min_mm, std::min(band_floor, open_floor));
     pass.finest_mm = base;
     for (double a : pass.sizes) pass.finest_mm = std::min(pass.finest_mm, a);
     for (int n : pass.divisors)
