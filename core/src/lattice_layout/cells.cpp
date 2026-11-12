@@ -666,7 +666,9 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
   const LatticeWidthBounds bounds = lattice_width_bounds(spec.topology);
   out.open_look = bounds.open_look;
   out.touch = bounds.touch;
-  out.floor_cell_mm = min_strut / bounds.open_look;   // C14
+  // C14, R2: the smallest cell is the one the thinnest strut leaves open; with Allow quilt
+  // on, the one it draws without closing (the quilt's cell), on any wall that needs it.
+  out.floor_cell_mm = min_strut / (spec.allow_quilt ? bounds.touch : bounds.open_look);
   out.bead_mm = ds.bead_mm;
   out.min_strut_mm = min_strut;
   out.topology = spec.topology;
@@ -682,18 +684,13 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
   // Lay one pass over the box [lo, hi] of its frame, in slots of `base`.
   auto lay = [&](Pass& pass, double base, const double lo[3], const double hi[3],
                  bool depth_from_zero) {
-    // G11, R2: a band is a size gradient. Without Allow quilt none of its cells is under
-    // the smallest cell that prints open; with it they may go down to the quilt's cell.
-    // A typed smallest cell (Manual) is held at whichever of the two applies.
-    const double open_floor = out.floor_cell_mm, quilt_floor = min_strut / bounds.touch;
-    double band_floor = open_floor;
-    if (pass.band_region != nullptr) {
-      const double limit = spec.allow_quilt ? quilt_floor : open_floor;
-      band_floor = spec.band_cell_mm > 0.0 ? std::max(spec.band_cell_mm, limit) : limit;
-    }
-    const bool fine = band_floor < open_floor * (1.0 - 1e-12);
-    const double tile_min =
-        band_floor != open_floor ? std::max(spec.cell_min_mm, band_floor) : spec.cell_min_mm;
+    // G11: a band is a size gradient down to the smallest cell allowed (the floor above).
+    // A typed smallest cell for the band (Manual) is held at that floor.
+    const double band_floor = pass.band_region != nullptr && spec.band_cell_mm > 0.0
+        ? std::max(spec.band_cell_mm, out.floor_cell_mm) : out.floor_cell_mm;
+    // Core's own menus check the open look; with Allow quilt the floor here stands in for it.
+    const bool fine = spec.allow_quilt;
+    const double tile_min = std::max(spec.cell_min_mm, band_floor);
     if (spec.algorithm == Algorithm::DefaultGrade)
       // The halving ladder and its printable floor are core's own (ruling A, C7, C14).
       pass.sizes = stepped_size_menu(spec.topology, base, min_strut, tile_min, !fine,
@@ -707,7 +704,7 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
                                                 !fine, SteppedMenu::AnyStep);
     pass.base_mm = base;
     pass.skin_most = domain.skin_most_mm();
-    pass.floor_mm = std::max(spec.cell_min_mm, std::min(band_floor, open_floor));
+    pass.floor_mm = std::max(spec.cell_min_mm, out.floor_cell_mm);
     pass.finest_mm = base;
     for (double a : pass.sizes) pass.finest_mm = std::min(pass.finest_mm, a);
     for (int n : pass.divisors)

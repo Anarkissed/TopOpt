@@ -2884,45 +2884,47 @@ static void test_cells_behind_a_protect_skin() {
   }
 }
 
-// G11's two guards, each on a part that tempts it: a wall too thin for an open cell,
-// (a) far from the outline with the band on, (b) with no band at all.
-static void test_finer_cells_stay_in_the_band() {
+// R2 (his rule of 2026-11-12, and "I'd prefer all areas but protected skin to be fully
+// latticed"): a wall too thin for a cell that prints open is solid with Allow quilt off,
+// and is latticed with it on, band or no band. Two parts, each with such a wall.
+static void test_thin_walls_follow_the_quilt_switch() {
   {  // (a) Behind the y = 0 face: 12 mm of material for x < 30, 2 mm for x > 30. A 2 mm
-     // cell is below the open look's floor (2.37 mm on a 0.45 mm line).
+     // cell is below the open look's floor (2.37 mm on a 0.45 mm line) and above the
+     // quilt's cell (1.27 mm).
     PartMeasure pm(weld_mesh(prism({{0, 0}, {60, 0}, {60, 2}, {30, 2}, {30, 12}, {0, 12}}, 0, 40)));
     DomainSpec s;
     s.regions = {face_region(1, Role::Lattice, {30, 0, 20}, {0, 1, 0}, 30, 30, 12)};   // covers the whole face
     Domain d(pm, s);
-    const Region& region = d.spec().regions[0];
-    const double band = 4.0;
-    for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
-      CellSpec cs;
-      cs.algorithm = algo;
-      cs.grade_to_shape = true;
-      cs.band_mm = band;
-      cs.allow_quilt = true;
-      const Layout l = lay_cells(d, cs);
-      int in_band = 0, outside = 0;
-      for (const Cell& c : l.cells) {
-        if (c.size >= l.floor_cell_mm - 1e-9) continue;
-        const double e = region_edge_distance(region, cell_centre(l, c));
-        (e - 0.5 * c.size < band ? in_band : outside) += 1;
-      }
-      // The thin wall's rim, inside the band, gets the finer cells. (Stepped. Default Grade
-      // goes below the floor only where the band itself asks for a smaller cell, and this
-      // wall's rim cells stand a whole cell inside the outline: it stays solid there.)
-      if (algo == Algorithm::Stepped) CHECK(in_band > 0);
-      CHECK(outside == 0);     // its middle, 15 mm from the outline, does not
-      auto pr = d.probe();
-      int held = 0;
-      for (const Cell& c : l.cells)
-        if (cell_holds(l, pr, c, {45, 1, 20})) ++held;
-      CHECK(held == 0);        // the middle is solid, as with the switch off (D8)
-    }
+    auto pr = d.probe();
+    for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped})
+      for (double band : {0.0, 4.0})
+        for (bool quilt : {false, true}) {
+          CellSpec cs;
+          cs.algorithm = algo;
+          cs.grade_to_shape = band > 0.0;
+          cs.band_mm = band;
+          cs.allow_quilt = quilt;
+          const Layout l = lay_cells(d, cs);
+          int under_open = 0, under_quilt = 0, held = 0;
+          for (const Cell& c : l.cells) {
+            if (c.size < 0.45 / (0.7592 / 4.0) - 1e-9) ++under_open;
+            if (c.size < 0.45 / kQuiltStrutPerCell - 1e-9) ++under_quilt;
+            if (cell_holds(l, pr, c, {45, 1, 20})) ++held;   // the middle of the thin wall
+          }
+          NEAR(l.floor_cell_mm, quilt ? 0.45 / kQuiltStrutPerCell : 0.45 / (0.7592 / 4.0), 1e-9);
+          CHECK(under_quilt == 0);                 // nothing under the quilt's cell, ever
+          if (!quilt) {
+            CHECK(under_open == 0 && held == 0);   // off: no such cell; the thin wall is solid
+          } else {
+            CHECK(under_open > 0 && held == 1);    // on: the thin wall takes its 2 mm cells
+          }
+          CHECK(cells_holding(l, {15, 6, 20}, 1) == 1);   // the 12 mm wall is latticed either way
+        }
   }
-  {  // (b) No band. A strip 2.6 mm thick and 3 mm wide beside a 12.8 mm wall: the 6.4 mm
-     // cell has no fraction that fits it and prints open, so the strip is solid. A fifth
-     // (1.28 mm) would give a 2.56 mm cell; a fifth does not print open, band or no band.
+  {  // (b) No band. A strip 2.6 mm thick and 3 mm wide beside a 12.8 mm wall. With the
+     // switch off the 6.4 mm cell has no fraction that fits the strip and prints open
+     // (a fifth, 1.28 mm, would give a 2.56 mm cell): the strip is solid. With it on, it
+     // is latticed.
     PartMeasure pm(weld_mesh(prism({{0, 0}, {60, 0}, {60, 2.6}, {57, 2.6}, {57, 12.8}, {0, 12.8}}, 0, 8)));
     DomainSpec s;
     s.regions = {face_region(1, Role::Lattice, {30, 0, 4}, {0, 1, 0}, 30, 30, 12.8)};   // covers the whole face
@@ -2933,13 +2935,14 @@ static void test_finer_cells_stay_in_the_band() {
     on.allow_quilt = true;
     const Layout a = lay_cells(d, off), b = lay_cells(d, on);
     CHECK(!a.cells.empty());
-    CHECK(a.cells == b.cells && a.solid == b.solid);
     auto pr = d.probe();
-    int held = 0;
+    int held_off = 0, held_on = 0;
+    for (const Cell& c : a.cells)
+      if (cell_holds(a, pr, c, {58.5, 1.3, 4})) ++held_off;
     for (const Cell& c : b.cells)
-      if (cell_holds(b, pr, c, {58.5, 1.3, 4})) ++held;
-    CHECK(held == 0);
-    CHECK((pr.where({58.5, 1.3, 4}) == Where{Why::Lattice, 1}));   // and it was asked for
+      if (cell_holds(b, pr, c, {58.5, 1.3, 4})) ++held_on;
+    CHECK(held_off == 0 && held_on == 1);
+    CHECK((pr.where({58.5, 1.3, 4}) == Where{Why::Lattice, 1}));   // it was asked for either way
   }
 }
 
@@ -2963,7 +2966,7 @@ static void test_cells_curved_region() {
 
 int main() {
   test_cells_behind_a_protect_skin();
-  test_finer_cells_stay_in_the_band();
+  test_thin_walls_follow_the_quilt_switch();
   test_cells_across_the_narrowest_width();
   test_band_never_quilts_without_the_switch();
   test_two_line_struts();

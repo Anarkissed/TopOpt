@@ -425,16 +425,14 @@ struct CellSpec {
   // struts only (C16). Off, or band 0: cells are cut where the region ends (G7).
   bool grade_to_shape = false;
   double band_mm = 0.0;
-  // G11, R2 (his rule, 2026-11-12: "it makes sense to thicken it as it gets closer to the
-  // walls, BUT without 'Allow quilting' set to 'on' it should NEVER QUILT"). The band is
-  // a size gradient; whether anything may close past the open look is the Allow quilt
-  // switch's alone, the same switch as StrutSpec::allow_quilt.
-  //   allow_quilt  off: no cell of a band is under the smallest cell that prints open
-  //                (C14). On: a band's cells may go down to the smallest cell one strut
-  //                draws without closing it (the quilt's cell).
-  //   band_cell_mm Manual: a typed smallest cell for the band, mm; 0 = the limit above.
-  //                Held at that limit when it asks for less.
-  // Inside a Grade to shape band only: outside it no cell is under the open look.
+  // R2, G11 (his rule, 2026-11-12: "without 'Allow quilting' set to 'on' it should NEVER
+  // QUILT", meaning never past the open look). The same switch as StrutSpec::allow_quilt.
+  //   allow_quilt  off: no cell is under the smallest cell that prints open (C14), in a
+  //                Grade to shape band or anywhere else. On: a cell may go down to the
+  //                smallest the thinnest strut draws without closing it (the quilt's
+  //                cell), wherever a wall or a band needs it.
+  //   band_cell_mm Manual: a typed smallest cell for a Grade to shape band, mm; 0 = the
+  //                floor above. Held at that floor when it asks for less.
   bool allow_quilt = false;
   double band_cell_mm = 0.0;
 };
@@ -522,7 +520,7 @@ struct RegionCells {
 };
 
 struct Layout {
-  double floor_cell_mm = 0.0;        // the smallest cell that prints open (C14)
+  double floor_cell_mm = 0.0;        // the smallest cell allowed (C14; the quilt's with Allow quilt)
   double bead_mm = 0.0;              // the line width it was laid for
   double min_strut_mm = 0.0;         // the thinnest strut allowed (R5): lines x line width
   // The type's own two limits, as strut width over cell size (core's lattice_width_bounds):
