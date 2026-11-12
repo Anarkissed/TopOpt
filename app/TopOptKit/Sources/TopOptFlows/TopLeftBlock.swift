@@ -36,6 +36,10 @@ public struct TopLeftBlock: View {
     public static let top: CGFloat = DS.Space.xl3
     public static let leading: CGFloat = DS.Space.xl4
     public static let height: CGFloat = 42
+    /// ★ 11-12: every tap target in the row is 44 tall (the pills are still drawn `height`).
+    public static let target: CGFloat = 44
+    /// ★ 11-12: how far the material's target reaches either side of its word (into the gap after "·" and the pill's end).
+    static let materialReach: CGFloat = 10
 
     /// Where Back goes, in his words: the part's project, else the Library (note 8).
     static func backTitle(_ library: LibraryModel, folder: UUID) -> String {
@@ -72,6 +76,9 @@ public struct TopLeftBlock: View {
                 .frame(minWidth: 44, minHeight: Self.height)
                 .background(Capsule().fill(DS.Surface.bar.color)
                     .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
+                // ★ 11-12 (Touch, design-system §1: every target ≥ 44 × 44; #362's B10 census): the pill is drawn 42, as it
+                // always was; its target is 44, the row's own height
+                .frame(minHeight: Self.target)
                 .contentShape(Capsule())
             }
             .buttonStyle(.plain)
@@ -82,9 +89,13 @@ public struct TopLeftBlock: View {
                 Button { rename?() } label: {
                     Text(name).dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold).lineLimit(1).truncationMode(.tail)
                         .foregroundStyle(DS.Color.textPrimary.color)
+                        // ★ 11-12: the name is a 44 × 44 target (it was the bare words, 18 tall)
+                        .frame(minWidth: Self.target, minHeight: Self.target, alignment: .leading)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .disabled(rename == nil)
+                .background(CornerPairStyle.publish("topLeftRename"))
                 .layoutPriority(-1)   // ★ R-a2: the name gives way before anything else in the pill
                 Rectangle().fill(DS.Color.textPrimary.opacity(0.15).color).frame(width: 1, height: 14)
                 if let v = Self.versionLabel(library, folder: projectID) {
@@ -98,20 +109,30 @@ public struct TopLeftBlock: View {
                     }
                 } label: {
                     Text(material).dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textPrimary.opacity(0.5).color)
+                        // ★ 11-12: the material is a 44 × 44 target (it was the bare word, 15 tall and ~25 wide): 10 pt
+                        // either side of the word and the row's 44 tall, published here; the pill does not grow (below)
+                        .padding(.horizontal, Self.materialReach)
+                        .frame(minWidth: Self.target, minHeight: Self.target)
+                        .contentShape(Rectangle())
+                        .background(CornerPairStyle.publish("topLeftMaterial"))
                 }
                 // ★ LOOK PER SCREEN (11-04, §4.1: "Carriage Arms · v7 draft · PA12"): drawn as plain words — still the menu (no
                 // bordered pop-up or ⌄); Settings › Material is the design's place to change it
                 .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain)
                 .fixedSize()
+                .padding(.horizontal, -Self.materialReach)   // ★ 11-12: the word sits where it always sat
                 if optimized {
                     Text("Optimized \u{2713}").dsStyle(DS.TypeScale.callout).foregroundStyle(DS.Color.okGreen.color).fixedSize()
                 }
             }
-            .padding(.vertical, 9).padding(.horizontal, DS.Space.l)
-            .frame(minHeight: Self.height)
+            .padding(.horizontal, DS.Space.l)
+            // ★ 11-12: the name and the material are 44 tall targets, so the row is 44; the pill is drawn 42 in it, as it
+            // always was (it was 9 pt over and under 18 pt words, at least 42), and "topLeftName" is the pill as drawn
+            .frame(minHeight: Self.target)
             .background(Capsule().fill(DS.Surface.bar.color)
-                .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
-            .background(CornerPairStyle.publish("topLeftName"))
+                .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1))
+                .background(CornerPairStyle.publish("topLeftName"))
+                .padding(.vertical, (Self.target - Self.height) / 2))
             .layoutPriority(-1)   // ★ R-a2: … and the pill before the back pill and undo / redo
 
             HStack(spacing: DS.Space.xs) {
