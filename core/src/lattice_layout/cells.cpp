@@ -98,6 +98,7 @@ struct Pass {
   double base_mm = 0.0;             // this lay's own cell (S_base)
   double finest_mm = 0.0;           // the smallest cell its ladder allows (f)
   double floor_mm = 0.0;            // the smallest cell that may stand in this pass at all
+  double skin_most = 0.0;           // the deepest Protect skin or cover of the domain
 
   // 0 at the region's outline, 1 at the band's inner edge and beyond (G2, G5).
   double band_t(const double lo[3], double s) const {
@@ -182,8 +183,9 @@ struct Pass {
     const Vec3 mid = frame.at(a, b, r.start + 0.5 * r.width);
     double narrow = r.width;
     // Only whether it is narrower than the column is asked, so the measure may stop early.
-    if (2.0 * probe->part().depth(mid) < r.width - kReadingSlack)
-      narrow = std::min(r.width, probe->part().thickness(mid, r.width));
+    // (Between skins: a skin takes at most its own depth off each end of the ball.)
+    if (2.0 * (probe->part().depth(mid) - skin_most) < r.width - kReadingSlack)
+      narrow = std::min(r.width, probe->room_through(mid, r.width));
     columns.push_back({a, b, r.start, r.width, narrow});
     return narrow;
   }
@@ -702,6 +704,7 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
       pass.divisors = stepped_admitted_divisors(spec.topology, base, min_strut, tile_min,
                                                 !fine, SteppedMenu::AnyStep);
     pass.base_mm = base;
+    pass.skin_most = domain.skin_most_mm();
     pass.floor_mm = std::max(spec.cell_min_mm, std::min(band_floor, open_floor));
     pass.finest_mm = base;
     for (double a : pass.sizes) pass.finest_mm = std::min(pass.finest_mm, a);

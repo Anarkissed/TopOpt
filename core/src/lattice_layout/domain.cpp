@@ -192,6 +192,18 @@ double Domain::Probe::skin_ahead(const Vec3& p, const Vec3& dir, double limit) c
   }
 }
 
+double Domain::Probe::room_through(const Vec3& p, double at_least) const {
+  if (!(d_->skin_most_mm() > 0.0)) return part_.thickness_in(p, at_least);
+  // With skins about, the line itself is needed: a skin takes more of a slanted line than
+  // its own depth, so no shortcut on the material's width alone is safe.
+  PartMeasure::Probe::Line line;
+  const double all = part_.thickness_in(p, 0.0, &line);
+  const Vec3 back{-line.dir.x, -line.dir.y, -line.dir.z};
+  const double fwd_skin = skin_ahead(p, line.dir, line.fwd), back_skin = skin_ahead(p, back, line.back);
+  if (fwd_skin < 0.0 && back_skin < 0.0) return all;
+  return (fwd_skin >= 0.0 ? fwd_skin : line.fwd) + (back_skin >= 0.0 ? back_skin : line.back);
+}
+
 Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
   const DomainSpec& spec = d_->spec_;
   // D2: a prism only turns existing solid into lattice.
@@ -317,7 +329,7 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
     } else {
       // A caller that wants the width gets it; one that only needs "can this wall hold
       // lattice?" (D8) lets the measure stop as soon as no line through here is shorter.
-      wall = wall_mm ? part_.thickness_in(p) : part_.thickness_in(p, spec.min_wall_mm);
+      wall = room_through(p, wall_mm ? 0.0 : spec.min_wall_mm);
     }
     if (wall_mm) *wall_mm = wall;
     double holds_mm = wall;   // the width lattice can use: the wall less its Protect skins

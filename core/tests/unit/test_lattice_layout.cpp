@@ -2547,6 +2547,52 @@ static void test_session() {
   CHECK(!kept.read_again);
 }
 
+// C11a (reviewer's ruling 2026-11-11 23:52Z): the cells a member must hold are counted
+// across the room BETWEEN the skins, where the cells live, not across the material.
+static void test_cells_across_the_room_between_skins() {
+  // The rib of C11a, 6 mm wide across the face and 6 deep, two across, on a 0.2 mm line at
+  // one line (so small cells print and the count is what decides).
+  auto side = [](double y) {
+    TriangleMesh m;
+    m.vertices = {{0, y, 0}, {40, y, 0}, {40, y, 6}, {0, y, 6}};
+    m.triangles = {{0, 1, 2}, {0, 2, 3}};
+    return m;
+  };
+  PartMeasure pm(weld_mesh(box(40, 6, 6)));
+  auto largest = [&](double skins, double cover) {
+    DomainSpec s;
+    s.bead_mm = 0.2;
+    s.min_strut_lines = 1.0;
+    s.cover_mm = cover;
+    s.regions = {face_region(1, Role::Lattice, {20, 3, 6}, {0, 0, -1}, 20, 3, 6)};
+    if (skins > 0.0) s.protect = {{1, side(0), skins}, {2, side(6), skins}};
+    Domain d(pm, s);
+    CellSpec cs;
+    cs.min_cells_across = 2;
+    const Layout l = lay_cells(d, cs);
+    double big = 0.0;
+    for (const Cell& c : l.cells) big = std::max(big, c.size);
+    return big;
+  };
+  NEAR(largest(0.0, 0.0), 3.0, 1e-5);        // no skins: two 3 mm cells across the 6 mm
+  // A 1 mm Protect skin on each side of the rib leaves 4 mm between them: two across is
+  // 2 mm cells, not 3 mm cells cut by the skins.
+  CHECK(largest(1.0, 0.0) <= 2.0 + 1e-5 && largest(1.0, 0.0) > 1.0);
+  // A 1 mm cover all round: 4 mm across and 4 mm deep. The same.
+  CHECK(largest(0.0, 1.0) <= 2.0 + 1e-5 && largest(0.0, 1.0) > 1.0);
+  // The room itself, read at the rib's middle: the material, less the two skins.
+  DomainSpec s;
+  s.protect = {{1, side(0), 1.0}, {2, side(6), 1.0}};
+  s.regions = {face_region(1, Role::Lattice, {20, 3, 6}, {0, 0, -1}, 20, 3, 6)};
+  Domain d(pm, s);
+  NEAR(d.probe().room_through({20, 3, 3}), 4.0, 1e-5);
+  NEAR(d.probe().room_through({20, 2.2, 3}), 4.0, 1e-5);
+  NEAR(d.probe().part().thickness({20, 3, 3}), 6.0, 1e-5);
+  DomainSpec bare;
+  Domain d0(pm, bare);
+  NEAR(d0.probe().room_through({20, 3, 3}), 6.0, 1e-5);   // no skin: the thickness itself
+}
+
 // D5, D15, C15: with a Protect skin on a face, the lattice starts at the skin's own depth
 // and its cells divide what is left of the wall. The skin never cuts through a cell.
 static void test_cells_behind_a_protect_skin() {
@@ -2756,6 +2802,7 @@ int main() {
   test_cells_across_the_narrowest_width();
   test_band_fineness_is_a_control();
   test_two_line_struts();
+  test_cells_across_the_room_between_skins();
   test_cells_behind_a_pocket();
   test_grooves_do_not_narrow_a_wall();
   test_kept_readings();

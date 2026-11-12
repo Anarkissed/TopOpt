@@ -372,7 +372,7 @@ Vec3 PartMeasure::Probe::through(const Vec3& p) const {
   return Vec3{g.x / n, g.y / n, g.z / n};
 }
 
-double PartMeasure::Probe::thickness_in(const Vec3& p, double at_least) const {
+double PartMeasure::Probe::thickness_in(const Vec3& p, double at_least, Line* line) const {
   // Candidate widths: straight toward the nearest surface, and 13 fixed directions.
   const double a = std::sqrt(0.5), b = std::sqrt(1.0 / 3.0);
   Vec3 dirs[14] = {through(p), {1, 0, 0}, {0, 1, 0}, {0, 0, 1}, {a, a, 0}, {a, -a, 0},
@@ -387,8 +387,12 @@ double PartMeasure::Probe::thickness_in(const Vec3& p, double at_least) const {
   std::sort(chords, chords + 14, [](const Chord& x, const Chord& y) {
     return x.fwd + x.back != y.fwd + y.back ? x.fwd + x.back < y.fwd + y.back : x.dir < y.dir;
   });
+  auto answer = [&](const Chord& c) {
+    if (line) *line = Line{dirs[c.dir], c.fwd, c.back};
+    return c.fwd + c.back;
+  };
   if (at_least > 0.0 && chords[0].fwd + chords[0].back >= at_least)
-    return chords[0].fwd + chords[0].back;   // nothing through here is narrower
+    return answer(chords[0]);   // nothing through here is narrower
   // A width is a WALL's width only if it is measured square to one of the two surfaces
   // it joins, and does not merely graze the other. A line that clips across a corner
   // meets both at a slant and is not the wall; a line square to the back of a plate that
@@ -428,12 +432,12 @@ double PartMeasure::Probe::thickness_in(const Vec3& p, double at_least) const {
     const double s1 = squareness(d, c.fwd), s2 = squareness(back, c.back);
     if (std::max(s1, s2) >= kSquare && std::min(s1, s2) >= kGraze &&
         !ends_on_inside_corner(d, c.fwd) && !ends_on_inside_corner(back, c.back))
-      return c.fwd + c.back;
+      return answer(c);
   }
   // Nothing qualified (a sharp wedge, a point in a fillet): the width
   // toward the nearest surface is the honest reading.
   for (const Chord& c : chords)
-    if (c.dir == 0) return c.fwd + c.back;
+    if (c.dir == 0) return answer(c);
   return 0.0;
 }
 

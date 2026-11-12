@@ -123,7 +123,10 @@ class PartMeasure {
       return depth(p) <= 0.0 ? 0.0 : thickness_in(p, at_least);
     }
     // The same from a point known to be inside.
-    double thickness_in(const Vec3& p, double at_least = 0.0) const;
+    // `line`, when given, receives the line the answer was measured along: its direction
+    // and how far the surface is each way from `p`.
+    struct Line { Vec3 dir{}; double fwd = 0.0, back = 0.0; };
+    double thickness_in(const Vec3& p, double at_least = 0.0, Line* line = nullptr) const;
 
    private:
     friend class PartMeasure;
@@ -286,6 +289,12 @@ class Domain {
     // +infinity when the part has none. (From Finish Covered's shell it is read no
     // farther than 2 mm: a caller walking by this value takes steps of 2 mm at most.)
     double skin_gap(const Vec3& p) const;
+    // C11a (reviewer's ruling 2026-11-11 23:52Z): the cells a member must hold are counted
+    // across the ROOM BETWEEN THE SKINS, because that is where the cells live. The
+    // material's narrowest width through `p` (PartMeasure::thickness), less what Protect
+    // skins or the cover take of that same line. With neither, it is the thickness.
+    // `at_least` as for thickness.
+    double room_through(const Vec3& p, double at_least = 0.0) const;
     const PartMeasure::Probe& part() const { return part_; }
 
    private:
@@ -328,6 +337,12 @@ class Domain {
   }
   // The rim's width: the one asked for, or two line widths; 0 with no rim.
   double rim_width_mm() const { return spec_.rim_mm < 0.0 ? 2.0 * spec_.bead_mm : spec_.rim_mm; }
+  // The deepest Protect skin or cover there is; 0 with neither.
+  double skin_most_mm() const {
+    double most = cover_depth_mm();
+    for (const ProtectSkin& s : spec_.protect) most = std::max(most, protect_depth_mm(s));
+    return most;
+  }
   // The cover's thickness: the one asked for, or two line widths; 0 with no cover.
   double cover_depth_mm() const { return spec_.cover_mm < 0.0 ? 2.0 * spec_.bead_mm : spec_.cover_mm; }
 
