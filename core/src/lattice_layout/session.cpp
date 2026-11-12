@@ -76,7 +76,9 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
   try {
     // (The reading itself happens inside the first lay_cells of a new domain.)
     CellSpec cells = settings.cells;
-    cells.allow_quilt = settings.struts.allow_quilt;   // one switch (R2)
+    // One switch for the quilt (R2). His per-part choice lets the CELLS go as small, and only the cells: the struts
+    // are still set without the quilt, so a small cell carries the thinnest strut (set_struts: never under it).
+    cells.allow_quilt = settings.struts.allow_quilt || settings.small_cells_in_thin_walls;
     out.layout = lay_cells(*domain_, cells, threads);
     unread_ = false;
     out.struts = set_struts(out.layout, settings.struts);

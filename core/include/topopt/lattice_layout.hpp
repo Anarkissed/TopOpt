@@ -778,6 +778,13 @@ struct Settings {
   // The cells, the struts, and what happens to cut ends.
   CellSpec cells;          // its allow_quilt is not read: the switch is struts.allow_quilt
   StrutSpec struts;
+  // Per part, OFF unless he turns it on (his words, 2026-11-12: "I definitely want it as a per-part choice. Especially
+  // in the app itself."). A wall too thin for a cell that the thinnest strut leaves open (R5, C14) is normally solid.
+  // On, the cells may be as small there as Allow quilt would let them (so the wall is latticed), but no strut is made
+  // thicker for it: a cell too small for the open look carries the THINNEST strut and nothing more, and every other
+  // cell keeps the open look. Denser than the open look in those small cells, never touching. (His v2 stand, printed
+  // with two-line struts: its wing edges, socket walls and spotface walls.) Allow quilt on makes this moot.
+  bool small_cells_in_thin_walls = false;
   bool bars = true;              // false: cells and strut widths only
   bool join_loose = true;        // S5
   bool skin = false;             // Finish Skin (S3)

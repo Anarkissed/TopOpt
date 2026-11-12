@@ -178,6 +178,14 @@ After the two changes that followed (the wall is the lattice's own column; the n
 
 The 33 ms, 1 s and 5 s are my starting numbers. Stage 0 measures what the stand actually takes; the go or no-go at stage E is his.
 
+## 8. The file (stage F)
+
+| Rule | Kind | Test |
+|---|---|---|
+| L1, P1 | L | The printable mesh is made FROM the layout (`lattice_layout_mesh.hpp`: `read_open_space`, `build_mesh`; built 2026-11-12, the writer his v2 stand was printed from, moved into core). `test_lattice_layout_mesh` (ctest `lattice_layout_mesh`), on a 30 x 30 x 12 block latticed 8 mm deep and a 16 mm cube latticed behind a skin on every face: one closed piece as a slicer reads it (corners joined by place: every edge used once each way, no triangle with two corners at one place); inside the part's box; less than the part, more than the solid body, no more than solid plus struts; the same mesh triangle for triangle on every run and on one thread (D18); the open space the same for any number of threads; lattice sealed in behind skins STAYS (two shells), a speck of air under 1 mm3 is filled; two posts corner to corner (two surfaces touching along a line) are parted and the mesh still reads closed; a stop flag gives the work up. Five deliberate breaks fail: no parting, sealed lattice filled, loose bits and specks kept, no bridges, `drop_at` ignored. On his v2 stand (scratch, two-line struts, 2026-11-12): the core writer gives 59,460.0 mm3, the same as the file he printed from to a tenth of a cubic millimetre; layer check identical (bed 2,535.6 mm2 flat, 0 mid-air, 0 one-ended, longest reach 3.30 mm); slicer: manifold, 1 part. 6.5 minutes on the Mac, 4.4 of them reading the open space; peak memory 2.4 GB. |
+| P8 (c) | L | A strut lying under 30 degrees is a square bar with a level underside (`MeshSpec::bridge_rise`); with the rule off no strut is, and the mesh differs. Same test. |
+| R15 | L | `Settings::small_cells_in_thin_walls` (`test_session`): on, with Allow quilt off, the cells are the cubes Allow quilt lays, no strut is thicker than with it, a cell too small for the open look carries exactly the thinnest strut (0.9 mm), every other cell stays within the open look, none touches; off again, the cells are as before. |
+
 ## Reference cases
 
 Four parts: the 2040 extrusion stand, Base, Top Motor Mount, Pressing Plate Mount. The model files and their setups stay out of the repo. For each part the case records the settings by name, the counts the layout must give (cells by size, struts, solid pieces, notices), and a picture he approves. The cases are added here once stage 0 gives a first layout to count.

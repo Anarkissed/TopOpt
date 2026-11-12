@@ -2787,6 +2787,28 @@ static void test_session() {
   const Outcome quilted = session.lay(band);
   NEAR(least(quilted), 10.0 / 3.0, 1e-6);
   CHECK(!quilted.read_again);             // the switch re-lays; it does not read the part again
+  // His per-part choice (2026-11-12), Allow quilt OFF: the cells are the ones Allow quilt lays (3.333 mm, so the
+  // band is latticed), but no strut is thicker for it. A cell too small for the open look carries the thinnest
+  // strut exactly (two lines, 0.9 mm: past the open look, under touching); every other cell keeps the open look.
+  band.struts.allow_quilt = false;
+  band.small_cells_in_thin_walls = true;
+  const Outcome small = session.lay(band);
+  CHECK(!small.read_again);
+  CHECK(small.layout.cells.size() == quilted.layout.cells.size());
+  bool same_cubes = true, never_thicker = true, small_at_thinnest = true, none_touch = true;
+  int past_open_look = 0;
+  for (std::size_t i = 0; i < small.layout.cells.size(); ++i) {
+    const Cell &a = small.layout.cells[i], &b = quilted.layout.cells[i];
+    same_cubes = same_cubes && a.size == b.size && a.lo[0] == b.lo[0] && a.lo[1] == b.lo[1] && a.lo[2] == b.lo[2];
+    never_thicker = never_thicker && a.strut <= b.strut + 1e-12;
+    const double open_look = small.layout.open_look * a.size;
+    if (open_look < 0.9) { small_at_thinnest = small_at_thinnest && std::fabs(a.strut - 0.9) < 1e-12; ++past_open_look; }
+    else never_thicker = never_thicker && a.strut <= open_look + 1e-12;
+    none_touch = none_touch && a.strut < small.layout.touch * a.size;
+  }
+  CHECK(same_cubes && never_thicker && small_at_thinnest && none_touch && past_open_look > 0);
+  band.small_cells_in_thin_walls = false;   // and off again: 5 mm cells, as before
+  NEAR(least(session.lay(band)), 5.0, 1e-6);
 }
 
 // Stage E, cancel (362's bridge: his slider must not wait on a layout nobody wants). A stop flag given to lay() gives
