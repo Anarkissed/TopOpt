@@ -402,6 +402,8 @@ public final class ProjectModel: ObservableObject {
         self.projectCADFaces = snapshot.projectCADFaces ?? true
         self.faceRegions = snapshot.faceRegions ?? FaceRegionModel()
         self.latticePageManual = snapshot.latticePageManual ?? false   // ★ 11-10 (img08)
+        self.newModel = snapshot.newModel   // ★ Upload new version (decision 12): a group that found no face stays until he picks
+        if let lost = snapshot.newModel?.lostGroups, !lost.isEmpty { self.selection.keepWhenEmpty(Set(lost)) }
         // ★ RE-EVALUATE THE PERSISTED REGIONS AGAINST THIS IMPORT, and report what
         // moved (§3c / bar R6). A union is stored as a filter plus a hand
         // add/remove list precisely so it CAN be re-evaluated; the one thing that
@@ -3930,7 +3932,20 @@ public final class ProjectModel: ObservableObject {
                                projectCADFaces: projectCADFaces,
                                faceRegions: faceRegions.isEmpty ? nil : faceRegions,
                                // ★ 11-10 (img08): only Manual is written, so a part that never picked it saves as before
-                               latticePageManual: latticePageManual ? true : nil)
+                               latticePageManual: latticePageManual ? true : nil,
+                               // ★ Upload new version (decision 12): the groups still waiting for faces
+                               newModel: newModel.map { var n = $0; n.lostGroups = lostFaceGroups.map(\.id); return n })
+    }
+
+    /// ★ Upload new version (his ask 2026-11-11, DATA-MODEL.md decision 12): the model this version brought, if it came by
+    /// "Upload new version"; nil otherwise.
+    public var newModel: NewModelNote?
+
+    /// The groups that found no face on the new model and still have none: each blocks Optimize ("A group lost its faces ·
+    /// Pick its faces") until he taps its faces.
+    public var lostFaceGroups: [SelectionGroup] {
+        guard let ids = newModel?.lostGroups, !ids.isEmpty else { return [] }
+        return selection.groups.filter { ids.contains($0.id) && $0.isEmptySelection }
     }
 
     /// The URL of the imported model file to copy into the store on first save.

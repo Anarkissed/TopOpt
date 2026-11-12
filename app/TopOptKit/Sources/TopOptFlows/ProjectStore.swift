@@ -87,6 +87,9 @@ public struct ProjectSnapshot: Codable, Equatable, Sendable {
     /// Auto, so a project that never picked it writes the bytes it always did. Never a setting: `LibrarySettings.same`
     /// leaves it out, so it never opens a draft of a version that ran.
     public var latticePageManual: Bool?
+    /// ★ Upload new version (his ask 2026-11-11, DATA-MODEL.md decision 12): the model this version brought and the groups
+    /// it could not carry yet (`NewModelNote`). nil — never written — on every version that came another way.
+    public var newModel: NewModelNote?
 
     public init(schemaVersion: Int = ProjectSnapshot.currentSchema, id: UUID, name: String,
                 material: String, process: ProcessKind, modelFileName: String,
@@ -96,7 +99,7 @@ public struct ProjectSnapshot: Codable, Equatable, Sendable {
                 optimized: Bool? = nil, printParams: PrintParams? = nil,
                 designBox: DesignBoxModel? = nil, lattice: LatticeSettings? = nil,
                 projectCADFaces: Bool? = nil, faceRegions: FaceRegionModel? = nil,
-                latticePageManual: Bool? = nil) {
+                latticePageManual: Bool? = nil, newModel: NewModelNote? = nil) {
         self.schemaVersion = schemaVersion
         self.id = id
         self.name = name
@@ -116,6 +119,7 @@ public struct ProjectSnapshot: Codable, Equatable, Sendable {
         self.projectCADFaces = projectCADFaces
         self.faceRegions = faceRegions
         self.latticePageManual = latticePageManual
+        self.newModel = newModel
     }
 }
 

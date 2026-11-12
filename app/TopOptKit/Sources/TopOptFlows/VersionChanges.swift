@@ -40,6 +40,11 @@ public enum VersionChanges {
     public static func between(_ a: ProjectSnapshot, _ b: ProjectSnapshot) -> [VersionChange] {
         var out: [VersionChange] = []
 
+        // ★ Upload new version (his ask 2026-11-11, decision 12): a new model is the biggest change of all — said once, on
+        // the version that brought it (a draft of that version holds the same model and says nothing)
+        let newModel = b.newModel.flatMap { $0.modelHash != a.newModel?.modelHash ? $0 : nil }
+        if let m = newModel { out.append(.init(.changed, .goal, "New model: \(m.fileName)", phrase: "New model")) }
+
         // goal and stage
         let minA = a.minimizePlastic ?? true, minB = b.minimizePlastic ?? true
         if minA != minB {
@@ -50,9 +55,11 @@ public enum VersionChanges {
         if stageA != stageB {
             out.append(stageB.map { .init(.added, .goal, "Lattice: \($0)", phrase: "\($0) lattice") }
                        ?? .init(.removed, .goal, "No lattice"))
-        } else if a.lattice != b.lattice, stageB != nil {
+        } else if a.lattice != b.lattice, stageB != nil, newModel?.latticeReset != true {
             out.append(.init(.changed, .goal, "\(stageB!) lattice settings"))
         }
+        // his third answer: the per-face lattice choices went back to Auto — one line says so
+        if newModel?.latticeReset == true { out.append(.init(.changed, .goal, NewModelVersion.latticeLine)) }
 
         // groups: loads, anchors, Keep Clear, Protect
         out += groupChanges(a, b)

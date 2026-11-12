@@ -679,12 +679,14 @@ public final class AppModel: ObservableObject {
         pendingUnitPrompt = nil
         pendingUnitPath = nil
         pendingDiagnostics = nil
+        uploadingTo = nil   // ★ Upload new version (decision 12): cancelled with its question
     }
 
     /// Dismiss the refusal sheet. The import sheet stays open so the user can
     /// pick a different file.
     public func dismissRefusal() {
         importRefusal = nil
+        uploadingTo = nil   // ★ Upload new version (decision 12): a refused file makes no version
     }
 
     /// Import a picked model file at `path`. On success (a watertight mesh) it
@@ -702,6 +704,7 @@ public final class AppModel: ObservableObject {
     @discardableResult
     public func importFile(atPath path: String, displayName: String? = nil,
                            diagnostics: PartDiagnostics? = nil) -> Bool {
+        defer { if importedFile == nil { uploadingTo = nil } }   // ★ Upload new version (decision 12): a failed read makes no version
         let name = displayName ?? (path as NSString).lastPathComponent
         let mesh: ImportedMesh
         do {
@@ -734,7 +737,55 @@ public final class AppModel: ObservableObject {
         // not fail an otherwise-good import.
         importRepairNote = (diagnostics ?? (try? inspector(path)))
             .flatMap { ImportRepairNote.text(for: $0) }
+        if uploadingTo != nil { finishUpload() }   // ★ Upload new version (decision 12): the file is in — make the version
         return true
+    }
+
+    // MARK: - Library: Upload new version (his ask 2026-11-11, DATA-MODEL.md decision 12)
+
+    /// The part a picked file is being read for (a mesh asks what its numbers mean first); nil when none.
+    @Published public internal(set) var uploadingTo: UUID?
+
+    /// "Upload new version" on a part: read the picked file the way New part does (a STEP straight away; a mesh is checked
+    /// and asks its units), then make the part's next version from its newest (`finishUpload`).
+    public func uploadNewVersion(part: UUID, path: String, displayName: String) {
+        uploadingTo = part
+        pickedFile(atPath: path, displayName: displayName)
+        if importRefusal != nil { uploadingTo = nil }   // refused: the refusal sheet says why
+    }
+
+    /// The file is in: the part's next version is a draft from its newest, on the new model, every face matched again
+    /// (`FaceMatch`, `NewModelVersion.draft`), filed in the same part; it opens, and one line says how the faces went.
+    func finishUpload() {
+        guard let partID = uploadingTo else { return }
+        uploadingTo = nil
+        defer { importedFile = nil; importedMesh = nil; importRepairNote = nil }   // New part's sheet starts empty again
+        guard let file = importedFile, let mesh = importedMesh, let part = library.part(partID),
+              let from = part.newestMainLine ?? part.versions.max(by: { $0.number < $1.number }),
+              let parent = store.snapshot(id: from.folderID)
+        else { toast = "Couldn\u{2019}t make the new version."; return }
+        guard let old = try? importer(store.modelPath(id: parent.id, fileName: parent.modelFileName)) else {
+            toast = "Couldn\u{2019}t read v\(from.number)\u{2019}s model."; return
+        }
+        guard let hash = LibraryGrouping.sha256(fileAt: URL(fileURLWithPath: file.path)) else {
+            toast = "Couldn\u{2019}t read \(file.name)."; return
+        }
+        // the stored model's extension follows the working file's content, as `ProjectModel.snapshot` names it
+        let ext = (file.path as NSString).pathExtension.lowercased()
+        let d = NewModelVersion.draft(from: parent, id: UUID(), savedAt: now(),
+                                      modelFileName: ext.isEmpty ? "model" : "model.\(ext)", originalFileName: file.name,
+                                      modelHash: hash, match: FaceMatch.between(old: old, new: mesh))
+        do { try store.save(d, modelSource: URL(fileURLWithPath: file.path)) } catch {
+            toast = "Couldn\u{2019}t save the new version: \(error.localizedDescription)"; return
+        }
+        library.addModel(hash: hash, to: part.id)
+        library.noteParent(parent.id, of: d.id)   // numbered from the newest (v7 → v8)
+        let recent = ProjectDuplication.recent(for: d)
+        recentProjects.insert(recent, at: 0)
+        library.refresh()
+        let number = library.version(d.id).map { "v\($0.number)" } ?? "The new version"
+        open(recent)
+        toast = NewModelVersion.doneLine(version: number, lost: d.newModel?.lostGroups.count ?? 0)
     }
 
     /// Whether Continue is enabled: a watertight file is imported and a material

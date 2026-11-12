@@ -365,9 +365,12 @@ public enum TopologyBlock: Equatable, Sendable {
     case emptyPiece(group: UUID)
     /// ★ T5: a load scenario that can't run (LoadScenarioRule.gap), named.
     case scenarioGap(scenario: UUID, name: String, gap: LoadScenarioRule.Gap)
+    /// ★ Upload new version (his ask 2026-11-11, decision 12): a group that found no face on the new model.
+    case lostFaces(group: UUID, name: String)
 
     public var words: String {
         switch self {
+        case .lostFaces: return "A group lost its faces"
         case .gravity: return "Gravity isn\u{2019}t set"
         case .pendingGroup: return "A group has no role"
         case .noLoadCase: return "Needs an anchor and load"
@@ -383,6 +386,7 @@ public enum TopologyBlock: Equatable, Sendable {
     }
     public var fix: String {
         switch self {
+        case .lostFaces: return "Pick its faces"
         case .gravity: return "Set gravity"
         case .pendingGroup: return "Choose its role"
         case .noLoadCase: return "Open Selections"
@@ -393,6 +397,8 @@ public enum TopologyBlock: Equatable, Sendable {
     }
     public var info: String? {
         switch self {
+        case let .lostFaces(_, name):
+            return "\(name) found no face on the new model, so it holds nothing yet. Tap the faces it should hold; its role and settings are kept."
         case .gravity: return "Tap the face that points at the floor, so the part knows which way is down."
         case .pendingGroup: return "A group with faces but no role can\u{2019}t go to the run. Make it an Anchor, a Load, Keep clear or Protect."
         case .noLoadCase: return "A run needs at least one face that holds (Anchor) and one that carries weight (Load), or Minimize plastic on."
