@@ -736,7 +736,6 @@ static void test_cells_prism() {
   const Vec3 top{20, 20, 20}, down{0, 0, -1};
   {  // C3, C15, C1: an 8 mm wall holds 2 cells across: 4 mm cells, 10 x 10 x 2 of them.
     DomainSpec s;
-    s.min_strut_lines = 1.0;   // drawn for one-line struts; the floor is not what is under test
     s.regions = {face_region(1, Role::Lattice, top, down, 20, 20, 8)};
     Domain d(pm, s);
     CellSpec cs = two_across();
@@ -759,7 +758,6 @@ static void test_cells_prism() {
   }
   {  // C2: "a 13mm cell never be on a 12mm wall; instead have a 12mm cell on the 12mm wall".
     DomainSpec s;
-    s.min_strut_lines = 1.0;   // drawn for one-line struts; the floor is not what is under test
     s.regions = {face_region(1, Role::Lattice, top, down, 20, 20, 12)};
     Domain d(pm, s);
     CellSpec cs = two_across();
@@ -782,7 +780,6 @@ static void test_cells_prism() {
   {  // C9: a symmetric face gets a symmetric layout, whether or not the cells divide it.
     PartMeasure wide(weld_mesh(box(41, 40, 20)));
     DomainSpec s;
-    s.min_strut_lines = 1.0;   // drawn for one-line struts; the floor is not what is under test
     s.regions = {face_region(1, Role::Lattice, {20.5, 20, 20}, down, 21, 21, 8)};      // covers the whole face
     Domain d(wide, s);
     CellSpec cs = two_across();
@@ -831,7 +828,6 @@ static void test_cells_walls_under_a_face() {
   // Behind the y = 0 face the material is 12 mm for x < 30 and 6 mm for x > 30.
   PartMeasure pm(weld_mesh(prism({{0, 0}, {60, 0}, {60, 6}, {30, 6}, {30, 12}, {0, 12}}, 0, 40)));
   DomainSpec s;
-  s.min_strut_lines = 1.0;   // drawn for one-line struts; the floor is not what is under test
   s.regions = {face_region(1, Role::Lattice, {30, 0, 20}, {0, 1, 0}, 30, 30, 12)};   // covers the whole face
   Domain d(pm, s);
   for (Algorithm algo : {Algorithm::Uniform, Algorithm::DefaultGrade}) {
@@ -877,7 +873,6 @@ static void test_cells_ledge_is_not_a_wall() {
   // cells are laid for it.
   PartMeasure pm(weld_mesh(prism({{0, 0}, {60, 0}, {60, 6}, {31.2, 6}, {31.2, 7}, {30.4, 7}, {30.4, 12}, {0, 12}}, 0, 60)));
   DomainSpec s;
-  s.min_strut_lines = 1.0;   // drawn for one-line struts; the floor is not what is under test
   s.regions = {face_region(1, Role::Lattice, {30, 0, 30}, {0, 1, 0}, 30, 30, 12)};
   Domain d(pm, s);
   CellSpec cs = two_across();
@@ -898,7 +893,6 @@ static void test_cells_whole_part() {
   // A 20 mm wall and a 6 mm wall, 40 tall.
   PartMeasure pm(weld_mesh(prism({{0, 0}, {60, 0}, {60, 6}, {20, 6}, {20, 60}, {0, 60}}, 0, 40)));
   DomainSpec s;
-  s.min_strut_lines = 1.0;   // drawn for one-line struts; the floor is not what is under test
   s.start = Start::AllLattice;
   Domain d(pm, s);
   const double floor_cell = 0.45 * 5.268704;
@@ -968,7 +962,6 @@ static void test_cells_stepped() {
   // A 20 mm wall and an 8.5 mm wall, 40 tall. Base cell 12 mm, two across.
   PartMeasure pm(weld_mesh(prism({{0, 0}, {60, 0}, {60, 8.5}, {20, 8.5}, {20, 60}, {0, 60}}, 0, 40)));
   DomainSpec s;
-  s.min_strut_lines = 1.0;   // drawn for one-line struts; the floor is not what is under test
   s.start = Start::AllLattice;
   Domain d(pm, s);
   CellSpec cs = two_across();
@@ -1015,7 +1008,6 @@ static void test_cells_stepped() {
   PartMeasure slim(weld_mesh(prism({{0, 0}, {60, 0}, {60, 4.2}, {20, 4.2}, {20, 60}, {0, 60}}, 0, 40)));
   for (double bead : {0.45, 0.35}) {
     DomainSpec s2;
-    s2.min_strut_lines = 1.0;   // drawn for one-line struts; the floor is not what is under test
     s2.start = Start::AllLattice;
     s2.bead_mm = bead;
     Domain d2(slim, s2);
@@ -1034,7 +1026,6 @@ static void test_cells_stepped() {
   // (One size everywhere is not in this list: its Auto size is the thick wall's, C16.)
   {
     DomainSpec s3;
-    s3.min_strut_lines = 1.0;   // drawn for one-line struts; the floor is not what is under test
     s3.start = Start::AllLattice;
     Domain d3(slim, s3);
     const double floor_cell = 0.45 * 5.268704;
@@ -1204,7 +1195,7 @@ static void test_each_type_has_its_own_limits() {
     Layout l = lay_cells(d, cs);
     NEAR(l.open_look, 0.7592 / 4.0, 1e-12);
     NEAR(l.touch, ty.touch, 1e-6);
-    NEAR(l.floor_cell_mm, 0.9 / (0.7592 / 4.0), 1e-9);   // two-line struts, the open look
+    NEAR(l.floor_cell_mm, 0.45 / (0.7592 / 4.0), 1e-9);  // one-line struts, the open look
     CHECK(!l.cells.empty() && l.cells.front().size == 8.0);
     // Allow quilt off: no strut past the open look, at the dial's top too.
     StrutSpec full;
@@ -1215,11 +1206,11 @@ static void test_each_type_has_its_own_limits() {
     full.allow_quilt = true;
     set_struts(l, full);
     for (const Cell& c : l.cells) NEAR(c.strut, ty.touch * c.size, 1e-6);
-    // The dial's 1% end is two lines whatever the type.
+    // The dial's 1% end is the thinnest strut (one line for a part) whatever the type.
     StrutSpec least;
     least.dial = 0.01;
     set_struts(l, least);
-    for (const Cell& c : l.cells) NEAR(c.strut, 0.9, 1e-12);
+    for (const Cell& c : l.cells) NEAR(c.strut, 0.45, 1e-12);
     // And the type's own struts are laid (its own table: lattice_strut_cell).
     const Bars bars = lay_bars(l, d);
     CHECK(bars.bars.size() > 50);
@@ -1251,7 +1242,6 @@ static void test_each_type_has_its_own_limits() {
 static void test_grade_to_shape() {
   PartMeasure pm(weld_mesh(box(60, 60, 16)));
   DomainSpec s;
-  s.min_strut_lines = 1.0;   // drawn for one-line struts; the floor is not what is under test
   s.bead_mm = 0.2;
   s.regions = {face_region(1, Role::Lattice, {30, 30, 16}, {0, 0, -1}, 30, 30, 16)};
   Domain d(pm, s);
@@ -1464,7 +1454,6 @@ static void test_cells_across_the_narrowest_width() {
   auto lay_rib = [](double wide, double bead, int across) {
     PartMeasure pm(weld_mesh(box(40, wide, 6)));
     DomainSpec s;
-    s.min_strut_lines = 1.0;   // drawn for one-line struts; the floor is not what is under test
     s.bead_mm = bead;
     s.regions = {face_region(1, Role::Lattice, {20, 0.5 * wide, 6}, {0, 0, -1}, 20, 0.5 * wide, 6)};
     Domain d(pm, s);
@@ -1523,7 +1512,6 @@ static void test_cells_behind_a_pocket() {
                            1e-5, &open));
   CHECK(open == 0);
   DomainSpec s;
-  s.min_strut_lines = 1.0;   // drawn for one-line struts; the floor is not what is under test
   s.regions = {face_region(1, Role::Lattice, {30, 0, 20}, {0, 1, 0}, 30, 30, 13)};
   Domain d(pm, s);
   auto pr = d.probe();
@@ -1608,7 +1596,6 @@ static void test_kept_readings() {
   // second region on a second part of the face; cell sizes that make different walls.
   PartMeasure pm(weld_mesh(prism({{0, 0}, {60, 0}, {60, 6}, {30, 6}, {30, 12}, {0, 12}}, 0, 40)));
   DomainSpec s;
-  s.min_strut_lines = 1.0;   // drawn for one-line struts; the floor is not what is under test
   s.regions = {face_region(1, Role::Lattice, {15, 0, 20}, {0, 1, 0}, 20, 14, 12),
                face_region(2, Role::Lattice, {45, 0, 20}, {0, 1, 0}, 20, 14, 6)};
   auto spec = [](Algorithm algo, double cell, int across) {
@@ -1633,7 +1620,6 @@ static void test_kept_readings() {
     }
   // Each region keeps its own: region 2 alone lays the cells it lays beside region 1.
   DomainSpec only2;
-  only2.min_strut_lines = 1.0;   // drawn for one-line struts; the floor is not what is under test
   only2.regions = {s.regions[1]};
   Domain alone(pm, only2);
   const Layout both = lay_cells(shared, specs[0]), one = lay_cells(alone, specs[0]);
@@ -1654,6 +1640,7 @@ static void test_kept_readings() {
 static void test_band_never_quilts_without_the_switch() {
   PartMeasure pm(weld_mesh(box(60, 14, 40)));
   DomainSpec s;
+  s.min_strut_lines = 2.0;   // the numbers below are for two-line struts
   s.regions = {face_region(1, Role::Lattice, {30, 0, 20}, {0, 1, 0}, 30, 30, 14)};
   Domain d(pm, s);
   const double open = kSteppedPrintsOpenMaxStrutPerCell;
@@ -1741,10 +1728,27 @@ static void test_band_never_quilts_without_the_switch() {
   CHECK(lay_cells(d, plain).cells == lay_cells(d, base).cells);
 }
 
-// R5, C14 (his print of 2026-11-11, reviewer's ruling 23:44Z): no strut under two line
-// widths, and no cell smaller than the one such a strut leaves open.
+// R5, C14: the thinnest strut is a number of line widths, and no cell is smaller than the
+// one such a strut leaves open. ONE line for a part; TWO for a piece that is nothing but
+// the smallest lattice (his failed test print of 2026-11-11, and his correction of
+// 2026-11-12 that the two-line rule was for that print only).
 static void test_two_line_struts() {
-  auto wall = [](double thick, double bead, double lines = kMinStrutLines) {
+  {  // A part: one line. 2.371 mm floor at 0.45; a 4 mm wall takes 4 mm cells.
+    PartMeasure pm(weld_mesh(box(60, 4, 40)));
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, {30, 0, 20}, {0, 1, 0}, 30, 30, 4)};
+    CHECK(s.min_strut_lines == 1.0);
+    Domain d(pm, s);
+    Layout l = lay_cells(d, CellSpec{});
+    NEAR(l.min_strut_mm, 0.45, 1e-12);
+    NEAR(l.floor_cell_mm, 2.370917, 1e-5);
+    CHECK(!l.cells.empty() && l.solid.empty());
+    StrutSpec least;
+    least.dial = 0.01;
+    set_struts(l, least);
+    for (const Cell& c : l.cells) NEAR(c.strut, 0.45, 1e-12);
+  }
+  auto wall = [](double thick, double bead, double lines = kMinStrutLinesAllSmallest) {
     PartMeasure* pm = new PartMeasure(weld_mesh(box(60, thick, 40)));   // kept for the layout's life
     DomainSpec s;
     s.bead_mm = bead;
@@ -1755,6 +1759,7 @@ static void test_two_line_struts() {
     delete pm;
     return l;
   };
+  // From here: the test print's setting, two lines.
   {  // An 8 mm wall on a 0.45 mm line: his proven size. 8 mm cells, struts of 0.9 mm or more.
     Layout l = wall(8, 0.45);
     NEAR(l.min_strut_mm, 0.9, 1e-12);
@@ -2631,7 +2636,6 @@ static void test_session() {
   Session session(model);
   CHECK(session.open_edges() == 0);
   Settings st;
-  st.min_strut_lines = 1.0;   // drawn for one-line struts; the floor is not what is under test
   st.regions = {{1, Role::Lattice, {square}, 6.0, 0.0}};
   st.cells.cell_max_mm = 6;
   auto same = [](const Outcome& x, const Outcome& y) {
@@ -2671,7 +2675,6 @@ static void test_session() {
   // Two regions side by side with different cells: the session joins what is loose along
   // the seam (S5) and drops what still lands on nothing (S4), unless told not to.
   Settings two;
-  two.min_strut_lines = 1.0;   // drawn for one-line struts; the floor is not what is under test
   two.regions = {{1, Role::Lattice, {square}, 6.0, 0.0}, {2, Role::Lattice, {L}, 10.0, 0.0}};
   two.cells.cell_max_mm = 6;
   two.join_loose = false;
@@ -2690,10 +2693,11 @@ static void test_session() {
   CHECK(kept.bars.dropped > 0 && kept.bars.bars.size() < joined.bars.bars.size());
   CHECK(!kept.read_again);
   // Allow quilt is ONE switch (R2): the session hands the struts' to the cells. The
-  // 10 mm plate, two-line struts, band 6, the region pulled 1.5 mm in so its outline
-  // cuts cells (only the finest may be cut, G10): off, no cell under 4.742 mm, so 5 mm;
-  // on, 3.333 mm cells.
+  // 10 mm plate, band 6, the region pulled 1.5 mm in so its outline cuts cells (only the
+  // finest may be cut, G10). Laid as the test print is, with two-line struts: off, no
+  // cell under 4.742 mm, so 5 mm; on, 3.333 mm cells.
   Settings band;
+  band.min_strut_lines = 2.0;
   band.regions = {{1, Role::Lattice, {square}, 10.0, -1.5}};
   band.cells.algorithm = Algorithm::Stepped;
   band.cells.cell_max_mm = 10;
@@ -2776,7 +2780,6 @@ static void test_cells_behind_a_protect_skin() {
       // A 12 mm slab under the top face, the face protected: the lattice has 12 less the
       // skin, in two layers (8 mm cells at most). At 0 mm the skin is two lines, 0.9 mm.
       DomainSpec s;
-      s.min_strut_lines = 1.0;   // drawn for one-line struts; the floor is not what is under test
       s.regions = {face_region(1, Role::Lattice, top, down, 20, 20, 12)};
       s.protect = {{7, quad(0, 40, 20), skin}};
       Domain d(pm, s);
@@ -2807,7 +2810,6 @@ static void test_cells_behind_a_protect_skin() {
     }
   {  // The same slab with no skin is laid from the face, as before.
     DomainSpec s;
-    s.min_strut_lines = 1.0;   // drawn for one-line struts; the floor is not what is under test
     s.regions = {face_region(1, Role::Lattice, top, down, 20, 20, 12)};
     Domain d(pm, s);
     CellSpec cs;
@@ -2821,7 +2823,6 @@ static void test_cells_behind_a_protect_skin() {
   }
   {  // A skin on half the face: two walls, each divided on its own (C15 per wall).
     DomainSpec s;
-    s.min_strut_lines = 1.0;   // drawn for one-line struts; the floor is not what is under test
     s.regions = {face_region(1, Role::Lattice, top, down, 20, 20, 12)};
     s.protect = {{7, quad(0, 20, 20), 1.2}};
     Domain d(pm, s);
@@ -2859,7 +2860,6 @@ static void test_cells_behind_a_protect_skin() {
     both.triangles.push_back({4, 5, 6});
     both.triangles.push_back({4, 6, 7});
     DomainSpec s;
-    s.min_strut_lines = 1.0;   // drawn for one-line struts; the floor is not what is under test
     s.regions = {face_region(1, Role::Lattice, Vec3{20, 20, 6}, down, 20, 20, 8)};
     s.protect = {{7, both, 1.0}};
     Domain d(plate, s);
@@ -2948,7 +2948,6 @@ static void test_cells_curved_region() {
   const StepModel model = plate_with_L_face(&L, &square, &sideA, &sideB);
   PartMeasure pm(weld_mesh(model.mesh));
   DomainSpec s;
-  s.min_strut_lines = 1.0;   // drawn for one-line struts; the floor is not what is under test
   s.regions = {region_from_faces(model, {sideA, sideB}, 2, Role::Lattice, 5)};
   Domain d(pm, s);
   CellSpec cs = two_across();   // Default Grade

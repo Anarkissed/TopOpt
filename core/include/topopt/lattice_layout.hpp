@@ -208,19 +208,22 @@ struct ProtectSkin {
   double depth_mm = 0.0;
 };
 
-// No strut is thinner than this many line widths. His print of 2026-11-11: an octet of
-// struts about one line wide came out as blobs and strings; the two-line rim beside it,
-// and his July octet with 0.96 mm struts, printed clean. The smallest cell follows from
-// it (C14): the cell whose open look this strut gives. The same for every type until a
-// type has a print of its own.
-inline constexpr double kMinStrutLines = 2.0;
+// The thinnest strut, in line widths. One, for a part.
+// His print of 2026-11-11 (a coupon that was nothing but the smallest lattice: 4 mm octet
+// cells, struts about one line wide) came out as blobs and strings, and for a day this
+// was 2 for everything. His correction, 2026-11-12: "That rule was ONLY for the test
+// print - the test print was a full model with only the smallest lattice, it wasn't
+// possible to print. This is a mix, it's a completely different case." So a part keeps
+// one line; a piece that is ALL smallest lattice (the test coupon) asks for two.
+inline constexpr double kMinStrutLines = 1.0;
+inline constexpr double kMinStrutLinesAllSmallest = 2.0;
 
 struct DomainSpec {
   Start start = Start::AllSolid;
   double bead_mm = 0.45;
-  // The thinnest strut, in line widths (R5). Leave it alone: it is here so a type with
-  // its own print can carry its own number, and so a test can lay a geometry that was
-  // drawn for one line.
+  // The thinnest strut, in line widths (R5): one for a part, kMinStrutLinesAllSmallest for
+  // a test piece that is nothing but the smallest lattice. Never under one. The smallest
+  // cell follows from it (C14).
   double min_strut_lines = kMinStrutLines;
   // Rule D8: a wall narrower than this cannot hold lattice and is solid. The cell rules
   // (C3-C5) set it; 0 switches the check off. Measured through the wall along the owning
