@@ -169,6 +169,9 @@ add_library(topopt
   src/lattice_layout/bars.cpp
   src/lattice_layout/session.cpp
   src/lattice_layout/solid_mesh.cpp
+  # The lattice file job (docs/design/lattice-rebuild/04-layout-file-job.md): job.json ->
+  # layout -> mesh -> STL. `topopt-cli lattice-file` is its only caller in core.
+  src/lattice_layout/file_job.cpp
   src/orient/orient.cpp
   src/orient/build_orientation.cpp
   src/orient/build_frame.cpp
@@ -520,6 +523,14 @@ add_test(NAME lattice_layout COMMAND test_lattice_layout)
 add_executable(test_lattice_layout_mesh tests/unit/test_lattice_layout_mesh.cpp)
 target_link_libraries(test_lattice_layout_mesh PRIVATE topopt)
 add_test(NAME lattice_layout_mesh COMMAND test_lattice_layout_mesh)
+# The lattice file job: its JSON becomes the settings the bridge would make, a part goes in
+# and a whole binary STL comes out, and every refusal is one plain line, its word, its exit
+# code and no file. Without the Manifold library the job says it cannot, and that is checked.
+add_executable(test_lattice_layout_file tests/unit/test_lattice_layout_file.cpp)
+target_link_libraries(test_lattice_layout_file PRIVATE topopt)
+target_compile_definitions(test_lattice_layout_file PRIVATE
+  LATTICE_FILE_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME lattice_layout_file COMMAND test_lattice_layout_file)
 
 # Harness-side lattice material model C(rho) (multiscale-lattice-feasibility
 # probe, 2026-07-31). The model itself lives in tests/harness/
@@ -2225,6 +2236,21 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
   target_compile_definitions(topopt_cli PRIVATE
     TOPOPT_CLI_DEFAULT_MATERIALS="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
     TOPOPT_CLI_DEFAULT_RULES="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+
+  # `topopt-cli lattice-file` through the real binary, as the worker runs it (--materials is
+  # passed and not read), on the repo's 10 mm cube STEP: made (exit 0), and a region whose
+  # face the cube does not have is refused with its plain line.
+  if(manifold_FOUND)
+    add_test(NAME cli_lattice_file COMMAND topopt_cli lattice-file
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/lattice_file/job.json"
+      --out "${CMAKE_CURRENT_BINARY_DIR}/cli_lattice_file"
+      --materials "${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json")
+    add_test(NAME cli_lattice_file_refused COMMAND topopt_cli lattice-file
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/lattice_file/job_missing_faces.json"
+      --out "${CMAKE_CURRENT_BINARY_DIR}/cli_lattice_file_refused")
+    set_tests_properties(cli_lattice_file_refused PROPERTIES PASS_REGULAR_EXPRESSION
+      "lattice-file: REFUSED \\(region_faces_missing\\): Region 2 points at faces this part does not have")
+  endif()
 
   # M6.2 integration test: the maintainer-authored demo job in
   # tests/fixtures/demo/ end-to-end, asserting the geometry facts and run

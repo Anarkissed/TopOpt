@@ -25,6 +25,7 @@
 
 #include "topopt/fea.hpp"  // SolverStopped (the solver's safety net)
 #include "topopt/job.hpp"
+#include "topopt/lattice_layout_file.hpp"  // `lattice-file` subcommand
 #include "topopt/lattice_sample.hpp"  // `lattice-sample` subcommand
 #include "topopt/stl.hpp"
 #include "topopt/flexible/run.hpp"  // `flexible` subcommand
@@ -119,6 +120,14 @@ int usage(const char* argv0) {
                "         block): per loaded face, SVG heat maps + a CSV of columns, and\n"
                "         run_info.json with the `flexible` receipt. Exit 0 = ran,\n"
                "         3 = the stage REFUSED (reason printed and in the receipt).\n",
+               argv0);
+  std::fprintf(stderr,
+               "       %s lattice-file <job.json> [--out DIR] [--threads N]\n"
+               "         THE LATTICE FILE from the new layout engine (a job with \"mode\":\n"
+               "         \"lattice_file\"; docs/design/lattice-rebuild/04-layout-file-job.md):\n"
+               "         opens the part, lays it with the job's settings, writes a binary\n"
+               "         STL and lattice_file.json to --out. Exit 0 = made, 3 = REFUSED\n"
+               "         (one plain line says why, printed and in lattice_file.json).\n",
                argv0);
   return 2;
 }
@@ -526,6 +535,52 @@ static int run_lattice_sample(int argc, char** argv) {
   }
 }
 
+// `lattice-file` (lattice rebuild; docs/design/lattice-rebuild/04-layout-file-job.md):
+// the printable lattice file made from the new layout engine. Everything is core's
+// (lattice_layout_file.hpp); this parses the flags, makes --out, and says what happened.
+// --materials / --rules are taken and not read, because the worker passes them to every
+// job. Exit 0 = made, 3 = refused, 1 = error, 2 = usage.
+static int run_lattice_file(int argc, char** argv) {
+  if (argc < 3) return usage(argv[0]);
+  const std::string job_path = argv[2];
+  std::string out_dir = ".";
+  int threads = 0;
+  for (int i = 3; i < argc; ++i) {
+    const std::string arg = argv[i];
+    if (i + 1 >= argc) return usage(argv[0]);
+    if (arg == "--out") {
+      out_dir = argv[++i];
+    } else if (arg == "--threads") {
+      threads = std::atoi(argv[++i]);
+      if (threads < 1) return usage(argv[0]);
+    } else if (arg == "--materials" || arg == "--rules") {
+      ++i;
+    } else {
+      return usage(argv[0]);
+    }
+  }
+  std::error_code ec;
+  std::filesystem::create_directories(out_dir, ec);
+  const topopt::lattice_layout::FileResult r = topopt::lattice_layout::run_file_job(
+      job_path, out_dir, threads, [](const char* step) {
+        std::printf("lattice-file: %s\n", step);
+        std::fflush(stdout);
+      });
+  if (r.ok) {
+    std::printf("lattice-file: made %s (%zu cells, %zu struts, %zu triangles, %.1f s)\n",
+                r.file.c_str(), r.cells, r.bars, r.made.mesh.triangles, r.ms_total / 1000.0);
+    std::printf("mesh: %s\n", r.file.c_str());
+  } else {
+    std::printf("lattice-file: %s (%s): %s\n", r.exit_code == 3 ? "REFUSED" : "FAILED",
+                r.code.c_str(), r.why.c_str());
+    if (!r.detail.empty()) std::fprintf(stderr, "topopt-cli: lattice-file: %s\n", r.detail.c_str());
+    // The plain line, alone, as the last thing on stderr: the worker's error event ends with it.
+    std::fprintf(stderr, "%s\n", r.why.c_str());
+  }
+  std::printf("result: %s/%s\n", out_dir.c_str(), topopt::lattice_layout::kFileResultName);
+  return r.exit_code;
+}
+
 // `flexible` subcommand (task 2026-09-28-flexible-squish-maths): run a job's
 // flexible block. Exit 0 = ran, 3 = the stage refused, 1 = error, 2 = usage.
 static int run_flexible(int argc, char** argv) {
@@ -594,7 +649,7 @@ int main(int argc, char** argv) {
     // `lattice_sample=1`: this binary has the lattice-sample subcommand, so a worker
     // can say so without a trial run (the app's brief, item g). An added key: the
     // worker's _kv parser reads key=value tokens and ignores the ones it does not use.
-    std::printf("topopt-cli version=%s fingerprint=%s dirty=%s lattice_sample=1\n",
+    std::printf("topopt-cli version=%s fingerprint=%s dirty=%s lattice_sample=1 lattice_file=1\n",
                 topopt::version(), TOPOPT_BUILD_FINGERPRINT, TOPOPT_BUILD_DIRTY_WORD);
     return 0;
   }
@@ -614,6 +669,7 @@ int main(int argc, char** argv) {
   if (argc >= 2 && std::string(argv[1]) == "flexible") return run_flexible(argc, argv);
   if (argc >= 2 && std::string(argv[1]) == "lattice-sample")
     return run_lattice_sample(argc, argv);
+  if (argc >= 2 && std::string(argv[1]) == "lattice-file") return run_lattice_file(argc, argv);
   if (argc < 3 || std::string(argv[1]) != "run") return usage(argv[0]);
   const std::string job_path = argv[2];
   std::string out_dir = ".";
