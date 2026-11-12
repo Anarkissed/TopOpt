@@ -1,0 +1,16 @@
+# Release 4fb36817 — 2026-11-11 Upload-toast (Upload toast, 9cf99904), app only
+# Core and worker unchanged: fingerprint 54d2ce825a74; "fingerprint": "54d2ce825a74"
+# Merged onto 4dafd4bf; the merged app tree equals Upload-toast's, so its gate applies unchanged.
+# Commits (first parent of Upload-toast since the release tip):
+#   91be672d Upload on Flexible (#362): merge the release tip 4dafd4bf (8bab523c + evidence)
+#   9cf99904 Upload on Flexible (#362): the new version's toast counts a Flexible part's lost faces (UI-Notes' catch)
+# Gates:
+#   Upload toast fix (362, 9cf99904 on 4dafd4bf): UploadNewVersionTests (+ testTheToastCountsAFlexiblePartsLostFaces, red control: the Topology count alone), UploadNewVersionHostedTests, FlexibleNewModelTests: 27 passed, 0 failed.
+#   02:36 evidence 4dafd4bf pushed; release 8bab523c DONE
+#   02:41 checks ok: Upload-toast 9cf99904, 2 commit(s), app-only, onto 4dafd4bf, fingerprint 54d2ce825a74
+#   02:41 merged 4fb36817; app tree == Upload-toast's, fingerprint 54d2ce825a74
+#   02:41 waiting for HEAVY.lock (free)
+#   02:41 lock taken (26 GB free)
+#   02:46 iPad device build green; lock released
+#   02:46 pushed 4fb36817
+#   02:46 worker /health "fingerprint": "54d2ce825a74" (unchanged, no swap)
