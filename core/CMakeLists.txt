@@ -493,6 +493,12 @@ if(Eigen3_FOUND)
   add_test(NAME strut_cell COMMAND test_strut_cell)
 endif()
 
+# Each lattice type's open look and the width at which it closes up (lattice_width_bounds):
+# every strut type's recomputed from its canonical cell, the sheets' pinned to their field.
+add_executable(test_lattice_width_bounds tests/unit/test_lattice_width_bounds.cpp)
+target_link_libraries(test_lattice_width_bounds PRIVATE topopt)
+add_test(NAME lattice_width_bounds COMMAND test_lattice_width_bounds)
+
 # Harness-side lattice material model C(rho) (multiscale-lattice-feasibility
 # probe, 2026-07-31). The model itself lives in tests/harness/
 # lattice_material_model.hpp (nothing in production consumes it); this test

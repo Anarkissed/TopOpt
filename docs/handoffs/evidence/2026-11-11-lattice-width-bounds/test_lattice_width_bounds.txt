@@ -1,0 +1,12 @@
+octet    face view 0.353553  3D 0.500000  touch 0.353553  open look 0.189800
+sc       face view 1.000000  3D 1.000000  touch 1.000000  open look 0.189800
+bcc      face view 0.707107  3D 0.707107  touch 0.707107  open look 0.189800
+fcc      face view 0.707107  3D 0.577350  touch 0.577350  open look 0.189800
+diamond  face view 0.353553  3D 0.433013  touch 0.353553  open look 0.189800
+kelvin   face view 0.353553  3D 0.353553  touch 0.353553  open look 0.189800
+rhombic  face view 0.353553  3D 0.408248  touch 0.353553  open look 0.189800
+gyroid    open look 0.206585 (true wall at rho 0.60069)  touch 0.433013
+schwarz_d open look 0.166458 (true wall at rho 0.60012)  touch 0.350700
+gyroid: clearance 0.216527 at a channel node, 0.229659 at an edge midpoint
+schwarz_d: clearance 0.175703 at a channel edge midpoint
+PASS: 34 checks, 0 failures
