@@ -666,7 +666,26 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads = 0);
 // one cell of its own without meeting anything, in which case it is left as it was. No new
 // direction of strut is made, and no join relies on the part's shell. Returns the number
 // of ends that landed.
-std::size_t join_loose_bars(Bars& bars, const Domain& domain, int threads = 0);
+// `layout`, when given, lets the line know D14: lattice space that no cell holds is
+// solid, and a bar that reaches it ends in it like in any other solid.
+std::size_t join_loose_bars(Bars& bars, const Domain& domain, int threads = 0,
+                            const Layout* layout = nullptr);
+
+// D14, as one question: is `p` solid? Inside the part and either not lattice at all, or
+// lattice that no cell of `layout` holds. Built once for a layout; asked from any thread
+// with that thread's own probe.
+class SolidAt {
+ public:
+  explicit SolidAt(const Layout& layout);
+  bool operator()(const Domain::Probe& probe, const Vec3& p) const;
+  // The same, for a point already read as `w`.
+  bool operator()(const Domain::Probe& probe, const Vec3& p, const Where& w) const;
+
+ private:
+  const Layout* layout_;
+  double pitch_ = 4.0;
+  std::map<std::array<long long, 3>, std::vector<std::uint32_t>> grid_;
+};
 
 // S3, Finish Skin: bars across the part's surface joining the cut strut ends, "a flat
 // lattice over the lattice". It is open and does not seal (that is Protect skin, D5).
@@ -709,11 +728,12 @@ struct Pieces {
 };
 // `adrift_bar`, when given, receives one flag per bar; `piece_of`, the piece each bar is
 // in (pieces numbered from 0 in the order of their first bar).
+// `layout`, when given: a bar standing on lattice space that no cell holds stands on solid (D14).
 Pieces count_pieces(const Bars& bars, const Domain& domain, std::vector<char>* adrift_bar = nullptr,
-                    std::vector<int>* piece_of = nullptr);
+                    std::vector<int>* piece_of = nullptr, const Layout* layout = nullptr);
 // Finish None, completed: a piece that is not joined to the part cannot be printed and is
 // removed. Counted in `dropped`. Returns what count_pieces found before removing.
-Pieces drop_adrift_bars(Bars& bars, const Domain& domain);
+Pieces drop_adrift_bars(Bars& bars, const Domain& domain, const Layout* layout = nullptr);
 
 // ── SESSION (stage E) ─────────────────────────────────────────────────────────
 // What the app holds for one part while its Lattice page is open. It measures the part

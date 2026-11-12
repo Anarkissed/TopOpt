@@ -36,12 +36,51 @@ PointKey key_of(const Vec3& p) {
 
 }  // namespace
 
+SolidAt::SolidAt(const Layout& layout) : layout_(&layout) {
+  auto slot = [&](double x) { return static_cast<long long>(std::floor(x / pitch_)); };
+  for (std::size_t ci = 0; ci < layout.cells.size(); ++ci) {
+    const Cell& c = layout.cells[ci];
+    const Frame& f = layout.frames[static_cast<std::size_t>(c.frame)];
+    double mn[3] = {1e300, 1e300, 1e300}, mx[3] = {-1e300, -1e300, -1e300};
+    for (int k = 0; k < 8; ++k) {
+      const Vec3 v = f.at(c.lo[0] + ((k & 1) ? c.size : 0.0), c.lo[1] + ((k & 2) ? c.size : 0.0),
+                          c.lo[2] + ((k & 4) ? c.size : 0.0));
+      mn[0] = std::min(mn[0], v.x); mx[0] = std::max(mx[0], v.x);
+      mn[1] = std::min(mn[1], v.y); mx[1] = std::max(mx[1], v.y);
+      mn[2] = std::min(mn[2], v.z); mx[2] = std::max(mx[2], v.z);
+    }
+    for (long long x = slot(mn[0]); x <= slot(mx[0]); ++x)
+      for (long long y = slot(mn[1]); y <= slot(mx[1]); ++y)
+        for (long long z = slot(mn[2]); z <= slot(mx[2]); ++z)
+          grid_[{x, y, z}].push_back(static_cast<std::uint32_t>(ci));
+  }
+}
+
+bool SolidAt::operator()(const Domain::Probe& probe, const Vec3& p) const {
+  return (*this)(probe, p, probe.where(p));
+}
+
+bool SolidAt::operator()(const Domain::Probe& probe, const Vec3& p, const Where& w) const {
+  if (w.why == Why::Outside) return false;
+  if (!w.lattice()) return true;
+  const auto it = grid_.find({static_cast<long long>(std::floor(p.x / pitch_)),
+                              static_cast<long long>(std::floor(p.y / pitch_)),
+                              static_cast<long long>(std::floor(p.z / pitch_))});
+  if (it != grid_.end())
+    for (std::uint32_t ci : it->second) {
+      const Cell& c = layout_->cells[ci];
+      if (c.region == w.id && cell_holds(*layout_, probe, c, p)) return false;
+    }
+  return true;   // lattice was asked for here and no cell holds it: solid (D14)
+}
+
 Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
   const StrutCell& type = lattice_strut_cell(layout.topology);   // throws for a type with none
   const std::vector<StrutCellStrut> struts = strut_cell_closed_struts(type);
   const int thread_count =
       threads > 0 ? threads : std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
 
+  const SolidAt solid_at(layout);
   struct Found { std::vector<Bar> bars; std::size_t stubs = 0; };
   std::vector<Found> per_cell(layout.cells.size());
   std::atomic<std::size_t> next{0};
@@ -149,9 +188,12 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
         auto past = [&](double t, double step) {
           double q[3];
           inward(std::clamp(t + step / length, 0.0, 1.0), q);
-          const Where w = probe.where(f.at(q[0], q[1], q[2]));
+          const Vec3 at = f.at(q[0], q[1], q[2]);
+          const Where w = probe.where(at);
           if (w.why == Why::Outside) return Bar::End::Surface;
-          return w.lattice() ? Bar::End::Loose : Bar::End::Solid;
+          // Solid, or lattice that no cell holds, which is solid too (D14); only lattice
+          // that another cell holds leaves the end loose.
+          return solid_at(probe, at, w) ? Bar::End::Solid : Bar::End::Loose;
         };
         const int n = std::clamp(static_cast<int>(std::ceil(length / kStep)), 6, 24);
         std::vector<char> in(static_cast<std::size_t>(n) + 1);
@@ -278,7 +320,8 @@ double approach(const Vec3& p, const Vec3& d, double len, const Vec3& a, const V
 }
 }  // namespace
 
-std::size_t join_loose_bars(Bars& bars, const Domain& domain, int threads) {
+std::size_t join_loose_bars(Bars& bars, const Domain& domain, int threads, const Layout* layout) {
+  const std::unique_ptr<const SolidAt> solid_at = layout ? std::make_unique<const SolidAt>(*layout) : nullptr;
   const std::vector<Bar> before = bars.bars;   // every bar is run on against the bars as laid
   if (before.empty()) return 0;
   // The bars sorted into a grid, to find those near a line.
@@ -361,17 +404,23 @@ std::size_t join_loose_bars(Bars& bars, const Domain& domain, int threads) {
       auto read = [&](double at) {
         return probe.where(Vec3{p.x + d.x * at + lift.x, p.y + d.y * at + lift.y, p.z + d.z * at + lift.z});
       };
+      // Still lattice a bar may run through? Not where no cell holds it: that is solid (D14).
+      auto open_at = [&](double at, const Where& w) {
+        if (!w.lattice()) return false;
+        if (!solid_at) return true;
+        return !(*solid_at)(probe, Vec3{p.x + d.x * at + lift.x, p.y + d.y * at + lift.y, p.z + d.z * at + lift.z}, w);
+      };
       const double reach = land >= 0.0 ? land : limit;
       Bar::End kind = land >= 0.0 ? Bar::End::Joined : Bar::End::Loose;
       double stop = reach;
       for (double t = 0.25; t < reach + 0.25; t += 0.25) {
         const double at = std::min(t, reach);
         const Where w = read(at);
-        if (w.lattice()) continue;
+        if (open_at(at, w)) continue;
         double in = at - 0.25 < 0.0 ? 0.0 : at - 0.25, out = at;   // lattice at `in`, not at `out`
         for (int k = 0; k < 12; ++k) {
           const double m = 0.5 * (in + out);
-          if (read(m).lattice()) in = m; else out = m;
+          if (open_at(m, read(m))) in = m; else out = m;
         }
         if (w.why == Why::Outside) {
           kind = Bar::End::Surface;
@@ -547,7 +596,8 @@ double apart(const Bar& x, const Bar& y) {
 }  // namespace
 
 Pieces count_pieces(const Bars& bars, const Domain& domain, std::vector<char>* adrift_bar,
-                    std::vector<int>* piece_of) {
+                    std::vector<int>* piece_of, const Layout* layout) {
+  const std::unique_ptr<const SolidAt> solid_at = layout ? std::make_unique<const SolidAt>(*layout) : nullptr;
   const std::vector<Bar>& all = bars.bars;
   const std::size_t n = all.size();
   Pieces out;
@@ -633,7 +683,7 @@ Pieces count_pieces(const Bars& bars, const Domain& domain, std::vector<char>* a
           const Vec3 q{p.x + (k == 0) * off - (k == 1) * off, p.y + (k == 2) * off - (k == 3) * off,
                        p.z + (k == 4) * off - (k == 5) * off};
           const Where w = probe.where(q);
-          g.held = !w.lattice() && w.why != Why::Outside;
+          g.held = solid_at ? (*solid_at)(probe, q, w) : (!w.lattice() && w.why != Why::Outside);
         }
       if (g.held) break;
     }
@@ -665,9 +715,9 @@ Pieces count_pieces(const Bars& bars, const Domain& domain, std::vector<char>* a
   return out;
 }
 
-Pieces drop_adrift_bars(Bars& bars, const Domain& domain) {
+Pieces drop_adrift_bars(Bars& bars, const Domain& domain, const Layout* layout) {
   std::vector<char> adrift;
-  const Pieces found = count_pieces(bars, domain, &adrift);
+  const Pieces found = count_pieces(bars, domain, &adrift, nullptr, layout);
   if (found.adrift == 0) return found;
   std::vector<char> keep(adrift.size());
   for (std::size_t i = 0; i < adrift.size(); ++i) keep[i] = !adrift[i];

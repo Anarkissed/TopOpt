@@ -2465,6 +2465,75 @@ static void test_pieces() {
   CHECK(after.adrift == 0);
 }
 
+// D14 for the struts: lattice space that no cell holds is solid, and a strut that reaches
+// it ends IN it, like in any other solid. (Found 2026-11-12: such an end was called loose
+// and dropped, and a lattice standing on such a spot was called adrift.)
+static void test_struts_end_in_no_cell_space() {
+  // A 12 mm wall for x < 32 and a 2 mm wall beyond, lattice from their common face. With
+  // Allow quilt off the 2 mm wall takes no cell: solid by D14, though the Domain still
+  // says "lattice was asked for here". The 6 mm cells of the thick wall run 2 mm past
+  // x = 32 and are cut there.
+  PartMeasure pm(weld_mesh(prism({{0, 0}, {60, 0}, {60, 2}, {32, 2}, {32, 12}, {0, 12}}, 0, 41)));
+  DomainSpec s;
+  s.regions = {face_region(1, Role::Lattice, {30, 0, 20.5}, {0, 1, 0}, 30, 30, 12)};
+  Domain d(pm, s);
+  auto pr = d.probe();
+  CellSpec cs;
+  cs.cell_max_mm = 6;
+  Layout l = lay_cells(d, cs);
+  set_struts(l, StrutSpec{});
+  CHECK(!l.solid.empty());
+  const SolidAt solid(l);
+  CHECK((pr.where({45, 1, 20}) == Where{Why::Lattice, 1}));   // asked for ...
+  CHECK(solid(pr, {45, 1, 20}));                               // ... and solid: no cell holds it
+  CHECK(!solid(pr, {15, 6, 20}));                              // in a cell: lattice
+  CHECK(!solid(pr, {45, 6, 20}));                              // air
+  CHECK(solid(pr, {33, 1, 20}));                               // just past the thick wall's cells
+  Bars bars = lay_bars(l, d);
+  int into_it = 0, loose_there = 0, ran_on = 0;
+  for (const Bar& b : bars.bars)
+    for (int e = 0; e < 2; ++e) {
+      const Vec3& p = e ? b.b : b.a;
+      if (p.x < 31.5 || p.y > 2.0) continue;   // ends at the line where the 2 mm wall begins
+      const Bar::End kind = e ? b.end_b : b.end_a;
+      if (kind == Bar::End::Loose) ++loose_there;
+      if (kind != Bar::End::Solid) continue;
+      ++into_it;
+      // Run on into it by its own width (S11). (A strut lying in the part's surface ends
+      // on the surface: it is read a hair inside.)
+      const Vec3 in{p.x, std::max(p.y, 0.02), std::clamp(p.z, 0.02, 40.98)};
+      if (p.x > 32.0 + 1e-6 && solid(pr, in)) ++ran_on;
+    }
+  CHECK(into_it > 10 && loose_there == 0);
+  CHECK(ran_on == into_it);
+  // Nothing there for the joining or the dropping to do; the lattice stands on the spot.
+  const std::size_t before = bars.bars.size();
+  join_loose_bars(bars, d, 0, &l);
+  drop_loose_bars(bars);
+  int still = 0;
+  for (const Bar& b : bars.bars)
+    if ((b.end_a == Bar::End::Solid && b.a.x > 31.5 && b.a.y < 2.0) || (b.end_b == Bar::End::Solid && b.b.x > 31.5 && b.b.y < 2.0))
+      ++still;
+  CHECK(still == into_it && bars.bars.size() <= before);
+  CHECK(count_pieces(bars, d, nullptr, nullptr, &l).adrift == 0);
+
+  // A bar whose only footing is such a spot is joined to the part once the layout is
+  // given. By hand: a short bar standing in the 2 mm wall's own space (no cell: solid),
+  // and a longer one in the middle of the thick wall's cells, touching nothing.
+  Bars two;
+  Bar on_spot, floating;
+  on_spot.a = {45, 1.0, 20}; on_spot.b = {45, 1.0, 21}; on_spot.width = 0.5;
+  floating.a = {15, 6.0, 19}; floating.b = {15, 6.0, 22}; floating.width = 0.5;
+  two.bars = {on_spot, floating};
+  std::vector<char> with, without;
+  count_pieces(two, d, &with, nullptr, &l);
+  count_pieces(two, d, &without);
+  CHECK((with == std::vector<char>{0, 1}));      // the first stands on solid; the second is adrift
+  // (Without the layout nothing is known to be solid there, so the longer one passes for
+  // the part itself and the one on the spot for adrift: the mistake this fixes.)
+  CHECK((without == std::vector<char>{1, 0}));
+}
+
 // S1, S2, S10: Finish Rim. One solid bar round a flat Lattice region's outline, as wide as
 // asked (two line widths by default), only where the part's solid backs it.
 static void test_rim() {
@@ -2977,6 +3046,7 @@ int main() {
   test_bars();
   test_bars_join();
   test_pieces();
+  test_struts_end_in_no_cell_space();
   test_skin();
   test_stepped_edges();
   test_rim();
