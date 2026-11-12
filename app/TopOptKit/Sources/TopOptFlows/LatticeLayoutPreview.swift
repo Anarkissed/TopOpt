@@ -161,11 +161,13 @@ struct LatticeLayoutPreviewLines: View {
             if let t = preview.timing {
                 Text(t.line).font(.system(size: 11, design: .monospaced)).foregroundStyle(DS.Color.textTertiary.color)
                     .accessibilityIdentifier("new-engine-timing")
+                    .background(CornerPairStyle.publish("new-engine-timing"))   // the hosted tests' frame: core's numbers came back
             }
         }
         .lineLimit(1).minimumScaleFactor(0.8)
         .padding(.horizontal, DS.Space.m).padding(.vertical, DS.Space.xs)
         .background(Capsule().fill(DS.Surface.bar.color))
+        .background(CornerPairStyle.publish("new-engine-lines"))   // the hosted tests' frame (LatticeLayoutSwitchHostedTests)
         .padding(.bottom, 96)   // above the bottom bar and the stage row's own lines
         .allowsHitTesting(false)
         .accessibilityIdentifier("new-engine-lines")
