@@ -305,7 +305,7 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
       const double pa = x.end_a == Bar::End::Surface ? 2.0 * r + 0.3 : 0.0;
       const double pb = x.end_b == Bar::End::Surface ? 2.0 * r + 0.3 : 0.0;
       const Vec3 a{x.a.x - d.x * pa, x.a.y - d.y * pa, x.a.z - d.z * pa};
-      if (spec.bridge_rise > 0.0 && std::fabs(d.z) < spec.bridge_rise) {
+      if (bar_is_bridge(x, spec.bridge_rise)) {
         // A strut that lies flat (under 30 degrees) is printed as a BRIDGE: a square bar as
         // wide and as tall as the strut, its underside level and flat, so the first layer
         // across the gap is one straight full-width line and not the belly of a round bar.
@@ -536,11 +536,18 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
     for (const auto& kv : vol)
       if (kv.second > biggest) { biggest = kv.second; main_piece = kv.first; }
     rep.mm3 = biggest;
+    double fill_under = spec.fill_under_mm3;
+    if (fill_under < 0.0) {
+      double smallest = 0.0;
+      for (const Cell& c : lay.cells) smallest = smallest > 0.0 ? std::min(smallest, c.size) : c.size;
+      fill_under = std::max(1.0, smallest * smallest * smallest);
+    }
+    rep.filled_under_mm3 = fill_under;
     std::map<std::uint32_t, char> stays;
     stays[main_piece] = 1;
     for (const auto& kv : vol) {
       if (kv.first == main_piece) continue;
-      if (kv.second < 0 && -kv.second >= spec.fill_under_mm3) {
+      if (kv.second < 0 && -kv.second >= fill_under) {
         stays[kv.first] = 1;   // sealed lattice: a space inside the part, with its struts
         ++rep.sealed_spaces;
         rep.mm3 += kv.second;

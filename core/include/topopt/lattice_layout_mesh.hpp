@@ -11,8 +11,8 @@
 // What the mesh is cleaned of, because a slicer reads corners by PLACE:
 //   - two surfaces that touch along a line or at a point (separate corners at one place)
 //     are parted by a few microns, each corner drawn back into its own solid;
-//   - specks of air closed inside the material are filled (lattice sealed in behind skins
-//     on every side is not a speck: it stays), loose bits are left out;
+//   - a closed space inside the material that could not hold one cell is filled (lattice
+//     sealed in behind skins on every side is larger: it stays), loose bits are left out;
 //   - no triangle has two corners at one place.
 //
 // His print rules that live here (2026-11-12): a strut that lies flatter than 30 degrees
@@ -55,12 +55,14 @@ struct MeshSpec {
   double grow_mm = 0.02;      // open boxes overlap their neighbours by this, never only touch
   double clean_mm = 0.004;    // no edge shorter than this is left in the mesh
   double part_mm = 0.006;     // how far touching corners are drawn apart
-  // A closed space inside the material smaller than this is a speck of air and is filled;
-  // a larger one is lattice sealed in behind skins and stays.
-  double fill_under_mm3 = 1.0;
+  // A closed space inside the material smaller than this is filled; a larger one is
+  // lattice sealed in behind skins and stays. Below 0 = the volume of the smallest cell
+  // the layout laid: a sealed scrap that could not hold one cell is not lattice anyone
+  // asked for (his stand has one of 4 mm3), and a slicer would count it as a second part.
+  double fill_under_mm3 = -1.0;
   // A strut whose rise is under this share of its length (0.5 = 30 degrees) is a bridge.
   // 0 = every strut round.
-  double bridge_rise = 0.5;
+  double bridge_rise = kBridgeRise;
   int threads = 0;            // 0 = every core
   // From the layer check. A strut whose LOWEST point is at one of these places is left out
   // (it hangs from above with nothing under its tip), and so is a small separate piece of
@@ -91,7 +93,8 @@ struct MeshReport {
   std::size_t slivers_left_out = 0;
   double slivers_mm3 = 0.0;
   std::size_t touching_places = 0; // parted
-  std::size_t air_pockets = 0;     // specks of air: filled
+  double filled_under_mm3 = 0.0;   // the size a closed space had to reach to stay
+  std::size_t air_pockets = 0;     // closed spaces smaller than that: filled
   double air_pockets_mm3 = 0.0;
   std::size_t sealed_spaces = 0;   // lattice sealed in behind skins: kept
   std::size_t loose_bits = 0;      // left out
@@ -111,5 +114,74 @@ bool mesh_available();
 TriangleMesh build_mesh(const PartMeasure& part, const Domain& domain, const Layout& layout,
                         const Bars& bars, const OpenSpace& open, const MeshSpec& spec = MeshSpec{},
                         MeshReport* report = nullptr);
+
+// ── HIS PRINT RULES, JUDGED LAYER BY LAYER (P8) ─────────────────────────────────
+// The mesh as a printer lays it, standing on its lowest z: one cross-section per layer,
+// read at mid-layer on a grid of pixels. "Under" a layer is the layer below grown by one
+// layer height (the usual 45 degree rule).
+//   - BED: is the lowest face flat, and how much of the first layer rests on it.
+//   - MID-AIR: an island of a layer with nothing under it at all. Never allowed (P8 b).
+//   - ONE-ENDED: a patch reaching more than 1 mm past anything under it and held at one
+//     place only (a bridge is held at two or more separate places and is fine).
+//   - the longest reach of any bridge, for the report.
+// Judged on the finished mesh, never strut by strut: a strut-by-strut rule threw out
+// 3,033 good struts on his stand (2026-11-12) and made a 3.3 mm overhang.
+struct LayerSpec {
+  double layer_mm = 0.2;
+  double pixel_mm = 0.05;
+  double one_ended_over_mm = 1.0;
+  // Rule (d), a COUNT only (reviewer, 2026-11-12): an island of a layer thinner than this
+  // (and at least `thin_min_mm2` in area) is about one line wide: a strut lying in a
+  // lattice face's plane, cut in half along its length by the face. His 8 mm sample has
+  // them and printed clean, so nothing is changed for them; every file reports how many.
+  double thin_under_mm = 0.6;
+  double thin_min_mm2 = 0.15;
+  int threads = 0;
+  const std::atomic<bool>* stop = nullptr;
+};
+struct LayerReport {
+  double z_bed = 0.0;
+  double bed_mm2 = 0.0;          // triangles lying flat on the bed
+  double sloped_mm2 = 0.0;       // footprint of downward faces within the first layer that are NOT flat on the bed
+  double first_layer_mm2 = 0.0;  // the first layer's cross-section
+  int layers = 0;
+  struct MidAir { double z = 0, mm2 = 0, x = 0, y = 0, size_x = 0, size_y = 0, below_z = 0; bool anything_below = false; };
+  struct OneEnded { double reach_mm = 0, z = 0, x = 0, y = 0, below_z = 0; bool anything_below = false; };
+  std::vector<MidAir> mid_air;       // in layer order
+  std::vector<OneEnded> one_ended;   // in layer order
+  double longest_reach_mm = 0.0;
+  std::size_t thin_islands = 0;      // rule (d): islands under `thin_under_mm` thick, all layers together
+  int thin_layers = 0;               // layers that have at least one
+  // The bed face is flat (no sloped or curved underside in the first layer worth the name,
+  // and the first layer rests on the bed), nothing starts in mid-air, nothing is one-ended.
+  bool bed_flat() const { return sloped_mm2 <= 0.5 && bed_mm2 >= 0.98 * first_layer_mm2; }
+  bool clean() const { return mid_air.empty() && one_ended.empty(); }
+};
+LayerReport check_layers(const TriangleMesh& mesh, const LayerSpec& spec = LayerSpec{});
+
+// The mesh that PRINTS: made, checked layer by layer, and made again until nothing starts
+// in mid-air and nothing is one-ended. What the check finds is first answered by leaving
+// out the struts (and specks of solid) that start there; when that stops helping, by a
+// post from the first material below. This is the loop his v2 stand file came out of.
+struct PrintableSpec {
+  MeshSpec mesh;       // its drop_at and posts are where the loop starts from (normally empty)
+  LayerSpec layers;
+  int most_passes = 10;
+  // false: nothing is ever left out; what would start in mid-air is tied down with posts from the first pass.
+  bool leave_out = true;
+};
+struct PrintableReport {
+  MeshReport mesh;     // of the mesh returned
+  LayerReport layers;  // of the mesh returned
+  int passes = 0;
+  bool clean = false;  // the loop ended because the check was clean (not because it ran out of passes)
+  std::vector<int> found_per_pass;   // mid-air starts + one-ended overhangs, pass by pass
+  std::vector<Vec3> drop_at;         // what the loop ended with: the same call with these gives the mesh in one pass
+  std::vector<MeshSpec::Post> posts;
+  double ms = 0.0;
+};
+TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain, const Layout& layout,
+                                  const Bars& bars, const OpenSpace& open, const PrintableSpec& spec = PrintableSpec{},
+                                  PrintableReport* report = nullptr);
 
 }  // namespace topopt::lattice_layout
