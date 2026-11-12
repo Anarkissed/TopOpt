@@ -790,6 +790,9 @@ class Session {
   Outcome lay(const Settings& settings, int threads = 0);
   std::size_t open_edges() const { return open_edges_; }
   const PartMeasure& measure() const { return *measure_; }
+  // The domain the last lay() was laid in: null before the first, REPLACED when a "where" setting changes. Read it after a
+  // lay() and never hold it across the next one (362's bridge, the 4th call: a batch of points -> lattice / rim / solid).
+  const Domain* domain() const { return domain_.get(); }
 
  private:
   StepModel model_;
