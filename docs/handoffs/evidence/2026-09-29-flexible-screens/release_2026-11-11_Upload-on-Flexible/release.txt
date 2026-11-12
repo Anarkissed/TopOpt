@@ -1,0 +1,17 @@
+# Release 8bab523c — 2026-11-11 Upload-on-Flexible (Upload on Flexible, 2e89f5f0), app only
+# Core and worker unchanged: fingerprint 54d2ce825a74; "fingerprint": "54d2ce825a74"
+# Merged onto 8cc984ec; the merged app tree equals Upload-on-Flexible's, so its gate applies unchanged.
+# Commits (first parent of Upload-on-Flexible since the release tip):
+#   1e048fcd Upload on Flexible (#362): merge the release tip 8cc984ec (f22331f7 top bar 44 + evidence)
+#   d9fbfdf6 Upload on Flexible (#362), step A: the per-face setup on the new model's faces (his picks 11-12)
+#   2e89f5f0 Upload on Flexible (#362), steps B-E: edge presses re-found, the lost list, the run waits, the gate open (his picks 11-12)
+# Gates:
+#   Upload new version on Flexible parts (362; d9fbfdf6 step A, 2e89f5f0 steps B-E, on the release tip 8cc984ec): FlexibleNewModelTests, FlexibleNewModelRefindTests (his pad A1_0003's Edge 9 re-found; red control: faces that do not meet -> lost), UploadNewVersionTests (re-pinned: Flexible offered), FlexibleReadinessTests, BannedWordsTests, FlexiblePlainNamesTests, FlexibleEdgeGroupsTests, SquishParityHostedTests, FlexibleB10SweepHostedTests: 61 passed, 0 failed.
+#   01:30 evidence 8cc984ec pushed; release f22331f7 DONE
+#   02:30 checks ok: Upload-on-Flexible 2e89f5f0, 3 commit(s), app-only, onto 8cc984ec, fingerprint 54d2ce825a74
+#   02:30 merged 8bab523c; app tree == Upload-on-Flexible's, fingerprint 54d2ce825a74
+#   02:30 waiting for HEAVY.lock (free)
+#   02:30 lock taken (27 GB free)
+#   02:36 iPad device build green; lock released
+#   02:36 pushed 8bab523c
+#   02:36 worker /health "fingerprint": "54d2ce825a74" (unchanged, no swap)
