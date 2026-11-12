@@ -265,7 +265,13 @@ public enum NewModelVersion {
         if var r = d.faceRegions { r.remapFaces(to); d.faceRegions = r }
 
         var reset: Bool?
-        if let l = d.lattice {
+        if var l = d.lattice, let flex = l.flexible {
+            // ★ #362 (his picks 2026-11-12): a FLEXIBLE part's per-face setup is matched — its face-prisms ARE its lattice
+            // (never back to Auto), its pressed faces, presses and the rest on their new faces (FlexibleNewModel)
+            l = FlexibleNewModel.carryLattice(l, match: match)
+            l.flexible = FlexibleNewModel.carry(flex, match: match, faceRegions: d.faceRegions)
+            d.lattice = l
+        } else if let l = d.lattice {
             let fresh = latticeFacesFromAuto(l)
             if fresh != l { reset = true }
             d.lattice = fresh == LatticeSettings() ? nil : fresh
