@@ -210,23 +210,28 @@ struct ProtectSkin {
   double depth_mm = 0.0;
 };
 
-// The thinnest strut, in line widths. One, for a part.
-// His print of 2026-11-11 (a coupon that was nothing but the smallest lattice: 4 mm octet
-// cells, struts about one line wide) came out as blobs and strings, and for a day this
-// was 2 for everything. His correction, 2026-11-12: "That rule was ONLY for the test
-// print - the test print was a full model with only the smallest lattice, it wasn't
-// possible to print. This is a mix, it's a completely different case." So a part keeps
-// one line; a piece that is ALL smallest lattice (the test coupon) asks for two.
-inline constexpr double kMinStrutLines = 1.0;
+// The thinnest strut, in line widths: it follows the NOZZLE (R14).
+// TWO on a 0.4 mm nozzle, for a part as for a test piece: that is what the app and the
+// worker lay with (`Settings::min_strut_lines`). History, all on his own prints: the
+// 2026-11-11 coupon (4 mm octet cells, struts about one line wide) came out as blobs and
+// strings; on 2026-11-12 he took the two-line rule to be for that coupon only and a part
+// went back to one line; the same day his v2 stand, printed at one line, failed too:
+// "Looks like single line does not print well at all. Without a 0.2mm nozzle, we can't
+// print that small." Reviewer's ruling 2026-11-12 20:02Z: two lines, one line withdrawn.
+// ONE is the fewest the engine will lay at all (a 0.2 mm nozzle's case, and what the
+// layout's own rule tests are written at); it is `DomainSpec`'s starting value, and
+// nothing he sees is laid with it.
+inline constexpr double kMinStrutLines = 2.0;
+inline constexpr double kFewestStrutLines = 1.0;
 inline constexpr double kMinStrutLinesAllSmallest = 2.0;
 
 struct DomainSpec {
   Start start = Start::AllSolid;
   double bead_mm = 0.45;
-  // The thinnest strut, in line widths (R5): one for a part, kMinStrutLinesAllSmallest for
-  // a test piece that is nothing but the smallest lattice. Never under one. The smallest
-  // cell follows from it (C14).
-  double min_strut_lines = kMinStrutLines;
+  // The thinnest strut, in line widths (R5, R14). Never under one. The smallest cell
+  // follows from it (C14). Whoever lays for his printer passes kMinStrutLines (the Session
+  // does); this starts at the fewest the engine lays.
+  double min_strut_lines = kFewestStrutLines;
   // Rule D8: a wall narrower than this cannot hold lattice and is solid. The cell rules
   // (C3-C5) set it; 0 switches the check off. Measured through the wall along the owning
   // prism's direction, or as the narrowest width at the spot where there is no prism (C11).

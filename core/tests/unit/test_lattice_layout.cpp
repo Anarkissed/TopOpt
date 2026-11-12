@@ -2708,6 +2708,7 @@ static void test_session() {
   Session session(model);
   CHECK(session.open_edges() == 0);
   Settings st;
+  st.min_strut_lines = kFewestStrutLines;   // these rules are tested at the fewest lines the engine lays
   st.regions = {{1, Role::Lattice, {square}, 6.0, 0.0}};
   st.cells.cell_max_mm = 6;
   auto same = [](const Outcome& x, const Outcome& y) {
@@ -2718,6 +2719,21 @@ static void test_session() {
   CHECK(first.read_again);
   CHECK(!first.layout.cells.empty() && !first.bars.bars.empty() && first.empty_regions.empty());
   CHECK(first.layout.cells.front().strut > 0.0);   // strut widths are set
+  // What the app and the worker lay with unless told otherwise: TWO lines (R14; his stand failed at one, 2026-11-12).
+  {
+    Settings his;
+    CHECK(his.min_strut_lines == 2.0 && kMinStrutLines == 2.0);
+    his.regions = st.regions;
+    his.cells.cell_max_mm = 6;
+    const Outcome two_lines = Session(model).lay(his);
+    NEAR(two_lines.layout.min_strut_mm, 0.9, 1e-12);
+    double thinnest = 1e9;
+    for (const Cell& c : two_lines.layout.cells) thinnest = std::min(thinnest, c.strut);
+    CHECK(!two_lines.layout.cells.empty() && thinnest >= 0.9 - 1e-12);
+    for (const Bar& b : two_lines.bars.bars) thinnest = std::min(thinnest, b.width);
+    CHECK(thinnest >= 0.9 - 1e-12);
+    CHECK(first.layout.min_strut_mm < 0.5);   // this test's own layouts are at one line, by its own asking
+  }
   st.cells.cell_max_mm = 4;                         // a cell setting
   const Outcome smaller = session.lay(st);
   CHECK(!smaller.read_again);
@@ -2747,6 +2763,7 @@ static void test_session() {
   // Two regions side by side with different cells: the session joins what is loose along
   // the seam (S5) and drops what still lands on nothing (S4), unless told not to.
   Settings two;
+  two.min_strut_lines = kFewestStrutLines;   // these rules are tested at the fewest lines the engine lays
   two.regions = {{1, Role::Lattice, {square}, 6.0, 0.0}, {2, Role::Lattice, {L}, 10.0, 0.0}};
   two.cells.cell_max_mm = 6;
   two.join_loose = false;
@@ -2819,6 +2836,7 @@ static void test_session_cancel() {
   int L = 0, square = 0, sideA = 0, sideB = 0;
   const StepModel model = plate_with_L_face(&L, &square, &sideA, &sideB);
   Settings st;
+  st.min_strut_lines = kFewestStrutLines;   // these rules are tested at the fewest lines the engine lays
   st.regions = {{1, Role::Lattice, {square}, 6.0, 0.0}, {2, Role::Lattice, {L}, 10.0, 0.0}};
   st.cells.cell_max_mm = 3;
   auto same = [](const Outcome& x, const Outcome& y) {
