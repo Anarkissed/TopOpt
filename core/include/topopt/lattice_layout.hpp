@@ -522,6 +522,9 @@ struct Layout {
   double floor_cell_mm = 0.0;        // the smallest cell that prints open (C14)
   double bead_mm = 0.0;              // the line width it was laid for
   double min_strut_mm = 0.0;         // the thinnest strut allowed (R5): lines x line width
+  // The type's own two limits, as strut width over cell size (core's lattice_width_bounds):
+  // the open look, and where neighbouring struts touch (the quilt). R2, R9.
+  double open_look = 0.0, touch = 0.0;
   LatticeTopology topology = LatticeTopology::Octet;
   std::vector<Frame> frames;
   std::vector<WallMap> walls;        // one per frame
@@ -595,9 +598,8 @@ struct StrutReport {
   std::size_t at_ceiling = 0;   // cells where it was over the widest allowed (R2, R9)
 };
 
-// Sets every cell's strut width. Moves no cell. Octet only so far: any other type throws
-// std::invalid_argument and leaves the layout untouched, because the open-look and quilt
-// ratios here are octet's own.
+// Sets every cell's strut width. Moves no cell. The two limits are the layout's own type's
+// (Layout::open_look, Layout::touch, from core's lattice_width_bounds).
 StrutReport set_struts(Layout& layout, const StrutSpec& spec);
 
 // ── BARS (stage D) ────────────────────────────────────────────────────────────

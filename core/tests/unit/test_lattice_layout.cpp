@@ -1171,14 +1171,77 @@ static void test_struts() {
     for (const Cell& c : l.cells) NEAR(c.strut, bead, 1e-12);
     CHECK(r.at_bead == l.cells.size());
   }
-  {  // The ratios are octet's. Another type is refused, never given octet's widths.
+  {  // A type with no cell of its own is refused by name, never given another type's widths.
     Layout l = base;
-    l.topology = LatticeTopology::Kelvin;
+    l.topology = LatticeTopology::Bccz;
+    l.open_look = l.touch = 0.0;   // as a layout that never read its type's limits
     bool refused = false;
     try { set_struts(l, StrutSpec{}); } catch (const std::invalid_argument&) { refused = true; }
     CHECK(refused);
     for (const Cell& c : l.cells) CHECK(c.strut == 0.0);
   }
+}
+
+// R1, R2, R9: every strut type has its OWN two limits (core's lattice_width_bounds,
+// LatticeTypes 2026-11-12): the open look is one number for strut types; where the struts
+// touch differs by type. The layout uses the type's own, never octet's.
+static void test_each_type_has_its_own_limits() {
+  PartMeasure pm(weld_mesh(box(40, 40, 16)));
+  DomainSpec s;
+  s.regions = {face_region(1, Role::Lattice, {20, 20, 16}, {0, 0, -1}, 20, 20, 16)};
+  Domain d(pm, s);
+  struct Type { LatticeTopology topo; double touch; };
+  const Type types[] = {{LatticeTopology::Octet, 1.0 / (2.0 * std::sqrt(2.0))},
+                        {LatticeTopology::SimpleCubic, 1.0},
+                        {LatticeTopology::Bcc, std::sqrt(0.5)},
+                        {LatticeTopology::Fcc, 1.0 / std::sqrt(3.0)},
+                        {LatticeTopology::Diamond, 1.0 / (2.0 * std::sqrt(2.0))},
+                        {LatticeTopology::Kelvin, 1.0 / (2.0 * std::sqrt(2.0))},
+                        {LatticeTopology::Rhombic, 1.0 / (2.0 * std::sqrt(2.0))}};
+  for (const Type& ty : types) {
+    CellSpec cs;
+    cs.topology = ty.topo;
+    Layout l = lay_cells(d, cs);
+    NEAR(l.open_look, 0.7592 / 4.0, 1e-12);
+    NEAR(l.touch, ty.touch, 1e-6);
+    NEAR(l.floor_cell_mm, 0.9 / (0.7592 / 4.0), 1e-9);   // two-line struts, the open look
+    CHECK(!l.cells.empty() && l.cells.front().size == 8.0);
+    // Allow quilt off: no strut past the open look, at the dial's top too.
+    StrutSpec full;
+    full.dial = 1.0;
+    set_struts(l, full);
+    for (const Cell& c : l.cells) NEAR(c.strut, l.open_look * c.size, 1e-9);
+    // Allow quilt on: up to where THIS type's struts touch.
+    full.allow_quilt = true;
+    set_struts(l, full);
+    for (const Cell& c : l.cells) NEAR(c.strut, ty.touch * c.size, 1e-6);
+    // The dial's 1% end is two lines whatever the type.
+    StrutSpec least;
+    least.dial = 0.01;
+    set_struts(l, least);
+    for (const Cell& c : l.cells) NEAR(c.strut, 0.9, 1e-12);
+    // And the type's own struts are laid (its own table: lattice_strut_cell).
+    const Bars bars = lay_bars(l, d);
+    CHECK(bars.bars.size() > 50);
+  }
+  // Their strut counts differ: the types are not one type under seven names.
+  auto bars_of = [&](LatticeTopology topo) {
+    CellSpec cs;
+    cs.topology = topo;
+    Layout l = lay_cells(d, cs);
+    set_struts(l, StrutSpec{});
+    return lay_bars(l, d).bars.size();
+  };
+  CHECK(bars_of(LatticeTopology::SimpleCubic) != bars_of(LatticeTopology::Octet));
+  CHECK(bars_of(LatticeTopology::Bcc) != bars_of(LatticeTopology::Octet));
+  // A type with no cell is refused by name where its limits are first asked for.
+  bool refused = false;
+  try {
+    CellSpec cs;
+    cs.topology = LatticeTopology::Reentrant;
+    lay_cells(d, cs);
+  } catch (const std::invalid_argument&) { refused = true; }
+  CHECK(refused);
 }
 
 
@@ -2919,6 +2982,7 @@ int main() {
   test_cover();
   test_region_squares();
   test_struts();
+  test_each_type_has_its_own_limits();
   test_grade_to_shape();
   test_cells_prism();
   test_cells_walls_under_a_face();

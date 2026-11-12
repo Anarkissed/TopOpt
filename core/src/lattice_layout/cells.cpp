@@ -662,7 +662,11 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
   // R5, C14: the thinnest strut is a number of line widths (two), and the smallest cell is
   // the one that strut leaves open. Core's own open-look rule is asked with that strut.
   const double min_strut = std::max(1.0, ds.min_strut_lines) * ds.bead_mm;
-  out.floor_cell_mm = min_strut / kSteppedPrintsOpenMaxStrutPerCell;   // C14
+  // Each type's own open look and quilt (throws, naming the type, for one with no cell).
+  const LatticeWidthBounds bounds = lattice_width_bounds(spec.topology);
+  out.open_look = bounds.open_look;
+  out.touch = bounds.touch;
+  out.floor_cell_mm = min_strut / bounds.open_look;   // C14
   out.bead_mm = ds.bead_mm;
   out.min_strut_mm = min_strut;
   out.topology = spec.topology;
@@ -681,7 +685,7 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
     // G11, R2: a band is a size gradient. Without Allow quilt none of its cells is under
     // the smallest cell that prints open; with it they may go down to the quilt's cell.
     // A typed smallest cell (Manual) is held at whichever of the two applies.
-    const double open_floor = out.floor_cell_mm, quilt_floor = min_strut / kQuiltStrutPerCell;
+    const double open_floor = out.floor_cell_mm, quilt_floor = min_strut / bounds.touch;
     double band_floor = open_floor;
     if (pass.band_region != nullptr) {
       const double limit = spec.allow_quilt ? quilt_floor : open_floor;

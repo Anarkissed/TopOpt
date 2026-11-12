@@ -12,18 +12,19 @@
 namespace topopt::lattice_layout {
 
 StrutReport set_struts(Layout& layout, const StrutSpec& spec) {
-  // The two ratios below (open look, quilt) are octet's. Another type's own pair is a
-  // per-type fact this file does not hold yet: refuse rather than draw octet's widths
-  // under another type's name.
-  if (layout.topology != LatticeTopology::Octet)
-    throw std::invalid_argument(std::string("lattice_layout: strut widths are not stated for ") +
-                                lattice_topology_name(layout.topology) + " yet");
-
   StrutReport rep;
   const double line = layout.bead_mm;
   // R5: the thinnest strut. Two line widths (his print, 2026-11-11), never under one.
   const double bead = std::max(line, layout.min_strut_mm);
-  const double ceiling = spec.allow_quilt ? kQuiltStrutPerCell : kSteppedPrintsOpenMaxStrutPerCell;
+  // R2: the widest strut is the type's open look; its quilt only with Allow quilt. (A layout
+  // made before the type's limits were kept reads them here.)
+  double open_look = layout.open_look, touch = layout.touch;
+  if (!(open_look > 0.0) || !(touch > 0.0)) {
+    const LatticeWidthBounds bounds = lattice_width_bounds(layout.topology);
+    open_look = bounds.open_look;
+    touch = bounds.touch;
+  }
+  const double ceiling = spec.allow_quilt ? touch : open_look;
 
   // The dial is read on the largest cell: of the part (Uniform), or of each region.
   double part_ref = 0.0;
