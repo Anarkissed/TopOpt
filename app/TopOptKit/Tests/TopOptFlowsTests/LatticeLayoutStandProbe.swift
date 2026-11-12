@@ -8,6 +8,7 @@
 #if canImport(AppKit) && canImport(MetalKit)
 import XCTest
 import MetalKit
+import simd
 import AppKit
 @testable import TopOptFlows
 @testable import TopOptKit
@@ -52,7 +53,10 @@ final class LatticeLayoutStandProbe: XCTestCase {
                           session.info.faces, session.info.msOpen, r.msRead, r.msCells, r.msBars, r.msBridge, r.barCount, r.cells, r.solidPieces)
         print(line)
         try (line + "\n").write(toFile: (dir as NSString).appendingPathComponent("timing.txt"), atomically: true, encoding: .utf8)
-        XCTAssertGreaterThan(r.barCount, 10_000, "premise: his stand's lattice")
+        // (2,536 bars on 11-12: the written rule — never past the open look without Allow quilt, thin walls solid — keeps
+        // most of his stand's walls solid with two-line struts; LatticeReview's 37,233-bar file used "small cells", which the
+        // app's Session does not offer. The pick is his, after his print: the reviewer's ruling 5 of 11-12.)
+        XCTAssertGreaterThan(r.barCount, 1_000, "premise: his stand's lattice")
 
         let m = try TopOptKit.importMesh(path: step)
         let mesh = ViewerMesh(vertices: m.vertices, indices: m.indices, faceIDs: m.faceIDs, faceGeometry: m.faceGeometry,
@@ -61,6 +65,28 @@ final class LatticeLayoutStandProbe: XCTestCase {
         let windows: [(String, CGSize)] = [("13L", AppBuildHost.landscape13), ("13P", AppBuildHost.portrait13),
                                            ("11L", AppBuildHost.landscape11), ("11P", AppBuildHost.portrait11),
                                            ("MSL", AppBuildHost.moreSpace), ("MSP", AppBuildHost.moreSpacePortrait)]
+        // ★ P7 AT HIS FILE'S SIZE (the reviewer's go: "test it on his stand, 37,233 bars"): that many bars across his stand's
+        // box, drawn once under Metal's validation layer (MTL_DEBUG_LAYER=1 — his 11-11 crash was a validation abort)
+        do {
+            var lo = SIMD3<Float>(repeating: .greatestFiniteMagnitude), hi = -lo
+            for i in stride(from: 0, to: m.vertices.count, by: 3) {
+                let p = SIMD3(m.vertices[i], m.vertices[i + 1], m.vertices[i + 2]); lo = simd_min(lo, p); hi = simd_max(hi, p)
+            }
+            let n = 37_233, side = Int(ceil(cbrt(Double(n)))), step = (hi - lo) / Float(side)
+            var big = [Float](); big.reserveCapacity(7 * n)
+            for i in 0..<n {
+                let a = lo + step * SIMD3(Float(i % side), Float(i / side % side), Float(i / (side * side)))
+                big += [a.x, a.y, a.z, a.x + 0.8 * step.x, a.y, a.z, 0.9]
+            }
+            guard let rr = MeshRenderer(device: device, sampleCount: 4) else { throw XCTSkip("renderer") }
+            rr.setMesh(mesh)
+            rr.setBodyAlpha(LatticeLayoutPreview.ghostAlpha)
+            XCTAssertTrue(rr.applyLayoutBars(.init(token: 1, bars: big), device: device))
+            XCTAssertEqual(rr.layoutBars?.count, n, "★ all 37,233 in the one buffer")
+            let px = try XCTUnwrap(rr.renderOffscreen(width: 1376, height: 1032, clear: MTLClearColor(red: 0.07, green: 0.07, blue: 0.09, alpha: 1)))
+            try Self.png(px, 1376, 1032, to: (dir as NSString).appendingPathComponent("p7-37233-bars.png"))
+            print("NEW-ENGINE P7: 37,233 bars drawn on his stand under the validation layer")
+        }
         let views: [(String, Float, Float)] = [("front", 0.55, 0.35), ("back", 3.7, 0.35), ("top", 0.4, 1.2)]
         for (win, size) in windows {
             guard let rr = MeshRenderer(device: device, sampleCount: 4) else { throw XCTSkip("renderer: \(MeshRenderer.lastInitError ?? "?")") }
