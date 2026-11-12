@@ -227,6 +227,44 @@ static void test_block() {
     CHECK(rt.ok && rt.posts == 2 && rt.touching_places > 0);
     CHECK(r5.edges_not_twice == 0 && r5.flat == 0 && r5.shells == 1);
   }
+  // The part carved ONCE and handed to every build gives the same mesh, triangle for triangle, whatever is then
+  // left out or added (the make-check-make loop carves once: the slow half does not depend on the struts).
+  {
+    const Carved carved = carve_part(pm, l.layout, open);
+    CHECK(carved.ok && carved.why.empty() && carved.kept);
+    MeshReport rc;
+    CHECK(same_mesh(mesh, build_mesh(pm, d, l.layout, l.bars, carved, MeshSpec{}, &rc)));
+    CHECK(rc.ok && rc.part_mm3 == rep.part_mm3 && rc.solid_mm3 == rep.solid_mm3 && rc.solid_pieces == rep.solid_pieces);
+    MeshSpec a;
+    a.posts = {{15.3, 14.7, 9.0, 4.0}};
+    MeshSpec b;
+    b.bridge_rise = 0.0;
+    const Bar& first = l.bars.bars.front();
+    b.drop_at = {{first.a.z < first.b.z ? first.a.x : first.b.x, first.a.z < first.b.z ? first.a.y : first.b.y,
+                  std::min(first.a.z, first.b.z) - 0.5 * first.width}};
+    // The same carving, used three times over, in any order: each as if carved for it alone.
+    CHECK(same_mesh(build_mesh(pm, d, l.layout, l.bars, carved, a), build_mesh(pm, d, l.layout, l.bars, open, a)));
+    CHECK(same_mesh(build_mesh(pm, d, l.layout, l.bars, carved, b), build_mesh(pm, d, l.layout, l.bars, open, b)));
+    CHECK(same_mesh(mesh, build_mesh(pm, d, l.layout, l.bars, carved, MeshSpec{})));
+    // It is the carving's own overlap that counts, not the build's.
+    MeshSpec wide;
+    wide.grow_mm = 0.3;
+    CHECK(same_mesh(mesh, build_mesh(pm, d, l.layout, l.bars, carved, wide)));
+    CHECK(!same_mesh(mesh, build_mesh(pm, d, l.layout, l.bars, open, wide)));
+    // Nothing carved: said plainly, no mesh.
+    MeshReport rn;
+    CHECK(build_mesh(pm, d, l.layout, l.bars, Carved{}, MeshSpec{}, &rn).empty() && !rn.ok && !rn.why.empty());
+    // A part that is not closed cannot be carved, and the build says why.
+    TriangleMesh holed = box(30, 30, 12);
+    holed.triangles.pop_back();
+    PartMeasure open_part(weld_mesh(holed));
+    const Carved bad = carve_part(open_part, l.layout, open);
+    CHECK(!bad.ok && !bad.why.empty() && !bad.kept);
+    std::atomic<bool> stop{true};
+    bool threw = false;
+    try { (void)carve_part(pm, l.layout, open, 0.02, &stop); } catch (const LayCancelled&) { threw = true; }
+    CHECK(threw);
+  }
   // A stop flag: the work is given up.
   {
     std::atomic<bool> stop{true};

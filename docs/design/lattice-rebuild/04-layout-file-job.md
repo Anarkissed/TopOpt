@@ -124,7 +124,7 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
     "sloped_underside_mm2": 0, "layers": 50, "thin_islands": 0, "thin_layers": 0,
     "found_per_pass": [0], "left_out_at": [], "posts": []},
   "ms": {"import": 27, "measure": 0, "read": 9, "cells": 0, "bars": 1, "open_space": 6,
-         "struts": 47, "solid": 1, "finish": 2, "write": 1, "total": 94}
+         "carve": 5, "struts": 47, "solid": 1, "finish": 2, "write": 1, "total": 94}
 }
 ```
 
@@ -137,6 +137,7 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
   - `left_out_at` ([x, y, z] each): where a strut was left out because it would have started in mid-air. `posts` ([x, y, z_bottom, z_top] each): short posts added to hold up what leaving out could not fix. The preview can show both after a run.
   - `longest_bridge_reach_mm`: the farthest any bridge reaches past its supports (half its span).
   - `thin_islands`: a count only. Slices of the file about one line thick (a strut lying in an open face, cut in half by it).
+- `ms`: `carve` is the part with the open cells taken out, done once; `struts`, `solid` and `finish` are the LAST pass's (each pass repeats them; `total` is everything).
 - `detail` is the technical message behind a failure, for a log. It is not for the maker.
 - The STL is written beside its target and moved in only when whole. A job that fails leaves no STL, and never replaces an earlier good one with half a file.
 

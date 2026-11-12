@@ -27,6 +27,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -107,12 +108,31 @@ struct MeshReport {
 
 bool mesh_available();
 
+// The part with every cell's open space taken out of it: the slow half of the mesh, and
+// the half that does not depend on the struts. Whoever makes the mesh more than once (the
+// make-check-make loop below changes only which struts are left out and which posts are
+// added) carves once and hands it to every build. `kept` is the writer's own.
+struct Carved {
+  bool ok = false;
+  std::string why;      // when not ok: one plain line
+  double ms = 0.0;
+  std::shared_ptr<const void> kept;
+};
+// `grow_mm` as MeshSpec::grow_mm. A stop flag gives the work up by throwing LayCancelled.
+Carved carve_part(const PartMeasure& part, const Layout& layout, const OpenSpace& open, double grow_mm = 0.02,
+                  const std::atomic<bool>* stop = nullptr);
+
 // The mesh of `layout` and `bars` in `part` (the measure the domain was made on).
 // Corners are at 32-bit places (what an STL holds), written into the mesh's doubles
 // exactly, so the file has the corners the checks were made on.
 // The same inputs give the same mesh, triangle for triangle, for any number of threads.
 TriangleMesh build_mesh(const PartMeasure& part, const Domain& domain, const Layout& layout,
                         const Bars& bars, const OpenSpace& open, const MeshSpec& spec = MeshSpec{},
+                        MeshReport* report = nullptr);
+// The same mesh, triangle for triangle, from a part already carved (of the same part,
+// layout and open space; `spec.grow_mm` is not read, the carving's own was used).
+TriangleMesh build_mesh(const PartMeasure& part, const Domain& domain, const Layout& layout,
+                        const Bars& bars, const Carved& carved, const MeshSpec& spec = MeshSpec{},
                         MeshReport* report = nullptr);
 
 // ── HIS PRINT RULES, JUDGED LAYER BY LAYER (P8) ─────────────────────────────────
@@ -178,6 +198,7 @@ struct PrintableReport {
   std::vector<int> found_per_pass;   // mid-air starts + one-ended overhangs, pass by pass
   std::vector<Vec3> drop_at;         // what the loop ended with: the same call with these gives the mesh in one pass
   std::vector<MeshSpec::Post> posts;
+  double ms_carve = 0.0;             // the part carved, once for all the passes
   double ms = 0.0;
 };
 TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain, const Layout& layout,

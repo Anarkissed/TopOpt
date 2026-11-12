@@ -325,6 +325,7 @@ TriangleMesh make_file_mesh(const Session& session, const Outcome& outcome, cons
   TriangleMesh mesh = build_printable_mesh(session.measure(), *domain, outcome.layout, outcome.bars, open, spec, &made);
   report.mesh = made.mesh;
   report.builds = made.passes;
+  report.ms_carve = made.ms_carve;
   report.layers = made.layers;
   report.print_clean = made.clean;
   report.found_per_pass = made.found_per_pass;
@@ -682,9 +683,9 @@ std::string file_result_json(const FileResult& r) {
   }
   std::snprintf(b, sizeof b,
                 "  \"ms\": {\"import\": %.1f, \"measure\": %.1f, \"read\": %.1f, \"cells\": %.1f, "
-                "\"bars\": %.1f, \"open_space\": %.1f, \"struts\": %.1f, \"solid\": %.1f, "
+                "\"bars\": %.1f, \"open_space\": %.1f, \"carve\": %.1f, \"struts\": %.1f, \"solid\": %.1f, "
                 "\"finish\": %.1f, \"write\": %.1f, \"total\": %.1f}\n",
-                r.ms_import, r.ms_measure, r.ms_read, r.ms_cells, r.ms_bars, r.made.ms_open_space,
+                r.ms_import, r.ms_measure, r.ms_read, r.ms_cells, r.ms_bars, r.made.ms_open_space, r.made.ms_carve,
                 m.ms_struts, m.ms_solid, m.ms_finish, r.ms_write, r.ms_total);
   o += b;
   o += "}\n";

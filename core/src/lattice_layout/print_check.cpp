@@ -450,10 +450,13 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
   bool posting = !spec.leave_out;
   int last = -1;
   const int most = std::max(1, spec.most_passes);
+  // The part less the open space is the same on every pass: carved once.
+  const Carved carved = carve_part(part, layout, open, ms.grow_mm, ms.stop);
+  rep.ms_carve = carved.ms;
   const double half_layer = 0.5 * (spec.layers.layer_mm > 0.0 ? spec.layers.layer_mm : 0.2);
   for (int pass = 1; pass <= most; ++pass) {
     rep.passes = pass;
-    mesh = build_mesh(part, domain, layout, bars, open, ms, &rep.mesh);
+    mesh = build_mesh(part, domain, layout, bars, carved, ms, &rep.mesh);
     if (!rep.mesh.ok) { mesh = TriangleMesh{}; break; }
     rep.layers = check_layers(mesh, spec.layers);
     const int n = static_cast<int>(rep.layers.mid_air.size() + rep.layers.one_ended.size());

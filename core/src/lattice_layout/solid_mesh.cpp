@@ -192,13 +192,28 @@ OpenSpace read_open_space(const Domain& domain, const Layout& layout, double pit
 
 bool mesh_available() { return false; }
 
-TriangleMesh build_mesh(const PartMeasure&, const Domain&, const Layout&, const Bars&, const OpenSpace&,
-                        const MeshSpec&, MeshReport* report) {
+namespace {
+const char* const kNoLibrary = "this build has no mesh library (Manifold), so the lattice file cannot be made";
+}
+
+Carved carve_part(const PartMeasure&, const Layout&, const OpenSpace&, double, const std::atomic<bool>*) {
+  Carved c;
+  c.why = kNoLibrary;
+  return c;
+}
+
+TriangleMesh build_mesh(const PartMeasure&, const Domain&, const Layout&, const Bars&, const Carved&, const MeshSpec&,
+                        MeshReport* report) {
   if (report) {
     *report = MeshReport{};
-    report->why = "this build has no mesh library (Manifold), so the lattice file cannot be made";
+    report->why = kNoLibrary;
   }
   return {};
+}
+
+TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layout& lay, const Bars& bars, const OpenSpace&,
+                        const MeshSpec& spec, MeshReport* report) {
+  return build_mesh(pm, domain, lay, bars, Carved{}, spec, report);
 }
 
 #else
@@ -228,9 +243,82 @@ struct FloatPlaceHash {
 
 bool mesh_available() { return true; }
 
+namespace {
+// What a carving keeps: the part, the part less the open space, and that body's separate pieces.
+struct CarvedSolids {
+  Manifold part, solid;
+  std::vector<Manifold> pieces;
+  double part_mm3 = 0.0;
+};
+}  // namespace
+
+Carved carve_part(const PartMeasure& pm, const Layout& lay, const OpenSpace& open_space, double grow,
+                  const std::atomic<bool>* stop) {
+  const auto t0 = std::chrono::steady_clock::now();
+  Carved out;
+  check(stop);
+  auto made = std::make_shared<CarvedSolids>();
+  made->part = [&] {
+    manifold::MeshGL64 g;
+    g.numProp = 3;
+    for (const Vec3& v : pm.mesh().vertices) {
+      g.vertProperties.push_back(v.x);
+      g.vertProperties.push_back(v.y);
+      g.vertProperties.push_back(v.z);
+    }
+    for (const auto& t : pm.mesh().triangles)
+      for (int k = 0; k < 3; ++k) g.triVerts.push_back(static_cast<std::uint64_t>(t[k]));
+    return Manifold(g);
+  }();
+  if (made->part.Status() != Manifold::Error::NoError) {
+    out.why = "the part is not one closed surface, so the lattice file cannot be made from it";
+    return out;
+  }
+  made->part_mm3 = made->part.Volume();
+  made->solid = made->part;
+  if (!open_space.boxes.empty()) {
+    std::vector<Manifold> open;
+    open.reserve(open_space.boxes.size());
+    // Boxes overlap their neighbours instead of only touching, by enough that two solid
+    // columns meeting corner to corner come out clearly apart, not sharing a line.
+    for (const OpenSpace::Box& b : open_space.boxes) {
+      const Frame& f = lay.frames[static_cast<std::size_t>(b.frame)];
+      open.push_back(Manifold::Cube({b.hi[0] - b.lo[0] + 2 * grow, b.hi[1] - b.lo[1] + 2 * grow, b.hi[2] - b.lo[2] + 2 * grow})
+                         .Translate({b.lo[0] - grow, b.lo[1] - grow, b.lo[2] - grow})
+                         .Transform(manifold::mat3x4(mv(f.ax[0]), mv(f.ax[1]), mv(f.ax[2]), mv(f.origin))));
+    }
+    const Manifold open_all = Manifold::BatchBoolean(open, manifold::OpType::Add);
+    open.clear();
+    open.shrink_to_fit();
+    check(stop);
+    made->solid = fresh(made->part - open_all);
+  }
+  if (made->solid.Status() != Manifold::Error::NoError) {
+    out.why = "opening the cells failed";
+    return out;
+  }
+  made->pieces = made->solid.Decompose();
+  check(stop);
+  out.ok = true;
+  out.kept = made;
+  out.ms = ms_since(t0);
+  return out;
+}
+
+TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layout& lay, const Bars& bars, const OpenSpace& open,
+                        const MeshSpec& spec, MeshReport* report) {
+  const Carved carved = carve_part(pm, lay, open, spec.grow_mm, spec.stop);
+  MeshReport rep;
+  const TriangleMesh mesh = build_mesh(pm, domain, lay, bars, carved, spec, &rep);
+  rep.ms_solid += carved.ms;
+  if (report) *report = rep;
+  return mesh;
+}
+
 TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layout& lay, const Bars& all_bars,
-                        const OpenSpace& open_space, const MeshSpec& spec, MeshReport* report) {
+                        const Carved& carved, const MeshSpec& spec, MeshReport* report) {
   (void)domain;
+  (void)pm;
   MeshReport rep;
   auto fail = [&](const std::string& why) {
     rep.ok = false;
@@ -246,21 +334,10 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
   // A bar of SEG flat sides with the same cross-section AREA as the round strut.
   const double kRound = std::sqrt(2.0 * kPi / (SEG * std::sin(2.0 * kPi / SEG)));
 
-  const Manifold part = [&] {
-    manifold::MeshGL64 g;
-    g.numProp = 3;
-    for (const Vec3& v : pm.mesh().vertices) {
-      g.vertProperties.push_back(v.x);
-      g.vertProperties.push_back(v.y);
-      g.vertProperties.push_back(v.z);
-    }
-    for (const auto& t : pm.mesh().triangles)
-      for (int k = 0; k < 3; ++k) g.triVerts.push_back(static_cast<std::uint64_t>(t[k]));
-    return Manifold(g);
-  }();
-  if (part.Status() != Manifold::Error::NoError)
-    return fail("the part is not one closed surface, so the lattice file cannot be made from it");
-  rep.part_mm3 = part.Volume();
+  if (!carved.ok || !carved.kept) return fail(carved.why.empty() ? "the part was not carved before its mesh was asked for" : carved.why);
+  const CarvedSolids& kept = *static_cast<const CarvedSolids*>(carved.kept.get());
+  const Manifold& part = kept.part;
+  rep.part_mm3 = kept.part_mm3;
 
   // ── the struts ────────────────────────────────────────────────────────────
   // Left out first: every strut whose LOWEST point is at a place the layer check found
@@ -396,28 +473,10 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
 
   // ── the part, less the open cell space ────────────────────────────────────
   t0 = std::chrono::steady_clock::now();
-  Manifold solid = part;
-  if (!open_space.boxes.empty()) {
-    std::vector<Manifold> open;
-    open.reserve(open_space.boxes.size());
-    // Boxes overlap their neighbours instead of only touching, by enough that two solid
-    // columns meeting corner to corner come out clearly apart, not sharing a line.
-    const double grow = spec.grow_mm;
-    for (const OpenSpace::Box& b : open_space.boxes) {
-      const Frame& f = lay.frames[static_cast<std::size_t>(b.frame)];
-      open.push_back(Manifold::Cube({b.hi[0] - b.lo[0] + 2 * grow, b.hi[1] - b.lo[1] + 2 * grow, b.hi[2] - b.lo[2] + 2 * grow})
-                         .Translate({b.lo[0] - grow, b.lo[1] - grow, b.lo[2] - grow})
-                         .Transform(manifold::mat3x4(mv(f.ax[0]), mv(f.ax[1]), mv(f.ax[2]), mv(f.origin))));
-    }
-    const Manifold open_all = Manifold::BatchBoolean(open, manifold::OpType::Add);
-    open.clear();
-    open.shrink_to_fit();
-    check(stop);
-    solid = fresh(part - open_all);
-  }
-  if (solid.Status() != Manifold::Error::NoError) return fail("opening the cells failed");
+  // Carved once (carve_part); here only what the layer check asked to be left out.
+  Manifold solid = kept.solid;
   {
-    const std::vector<Manifold> pieces = solid.Decompose();
+    const std::vector<Manifold>& pieces = kept.pieces;
     rep.solid_pieces = pieces.size();
     if (!spec.drop_at.empty()) {
       // A small separate piece of the solid body whose lowest point is one of the mid-air
