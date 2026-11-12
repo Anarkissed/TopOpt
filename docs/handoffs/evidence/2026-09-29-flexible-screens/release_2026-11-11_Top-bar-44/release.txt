@@ -1,0 +1,15 @@
+# Release f22331f7 — 2026-11-11 Top-bar-44 (top bar 44, UI-Notes, 877f896f), app only
+# Core and worker unchanged: fingerprint 54d2ce825a74; "fingerprint": "54d2ce825a74"
+# Merged onto 95ff0c11; the merged app tree equals Top-bar-44's, so its gate applies unchanged.
+# Commits (first parent of Top-bar-44 since the release tip):
+#   877f896f Top bar: Back, the name and the material are 44 pt targets on every page (the pills still drawn 42)
+# Gates:
+#   Top bar 44 (UI-Notes, 877f896f on dc5e8c36): the block's readers, 29 classes, 109 passed; after one frame-key fix UniformChrome, ViewCornerB2, SettingsPanel, B10Sweep, LatticeSampleView, SquishLook, NotificationLane 43/43. Gated by UI-Notes; 362 checked: built on the release (the tip's evidence since is docs only), app only, his Xcode files untouched; the iPad Release build is this release's.
+#   23:37 evidence 95ff0c11 pushed; release dc5e8c36 DONE
+#   01:19 checks ok: Top-bar-44 877f896f, 1 commit(s), app-only, onto 95ff0c11, fingerprint 54d2ce825a74
+#   01:19 merged f22331f7; app tree == Top-bar-44's, fingerprint 54d2ce825a74
+#   01:19 waiting for HEAVY.lock (LatticeTypes single-line rim coupon 4 mm (one res-64 run + mesh fuse/flatten/posts/checks), driver pid 82907 2026-11-12 00:22)
+#   01:23 lock taken (31 GB free)
+#   01:29 iPad device build green; lock released
+#   01:30 pushed f22331f7
+#   01:30 worker /health "fingerprint": "54d2ce825a74" (unchanged, no swap)
