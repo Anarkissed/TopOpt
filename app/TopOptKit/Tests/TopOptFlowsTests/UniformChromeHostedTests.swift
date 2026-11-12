@@ -13,13 +13,15 @@ import SwiftUI
 final class UniformChromeHostedTests: XCTestCase {
 
     struct Block: Equatable, CustomStringConvertible {
-        let back: CGRect, name: CGRect, undo: CGRect, redo: CGRect, stageRowTop: CGFloat
-        var description: String { "back \(back) name \(name) undo \(undo) redo \(redo) stageRow.y \(stageRowTop)" }
+        let back: CGRect, name: CGRect, rename: CGRect, material: CGRect, undo: CGRect, redo: CGRect, stageRowTop: CGFloat
+        var description: String { "back \(back) name \(name) rename \(rename) material \(material) undo \(undo) redo \(redo) stageRow.y \(stageRowTop)" }
     }
 
     func block(_ h: AppBuildHost, _ page: String) throws -> Block {
         Block(back: try h.onScreen("backButton", "\(page): Back"),
               name: try h.onScreen("topLeftName", "\(page): the name pill"),
+              rename: try h.onScreen("topLeftRename", "\(page): the name (tap to rename)"),
+              material: try h.onScreen("topLeftMaterial", "\(page): the material (tap to switch)"),
               undo: try h.onScreen("topLeftUndo", "\(page): Undo"),
               redo: try h.onScreen("topLeftRedo", "\(page): Redo"),
               stageRowTop: try h.onScreen("capsule", "\(page): the stage row").minY)
@@ -27,7 +29,19 @@ final class UniformChromeHostedTests: XCTestCase {
 
     /// The rules every page's block keeps.
     func checkShape(_ b: Block, _ page: String, _ size: CGSize) {
-        XCTAssertGreaterThanOrEqual(b.back.height, 42, "\(page) \(size): Back is a full-size target")
+        // ★ 11-12 (#362's B10 census: "the top-left block's ‹ and name pill are 42 pt tall on every page"; design-system §1:
+        // every tap target ≥ 44 × 44): Back, the name and the material are 44 pt tall targets. Their pills are still drawn 42.
+        XCTAssertGreaterThanOrEqual(b.back.height, 44, "\(page) \(size): Back is a 44 pt target")
+        XCTAssertGreaterThanOrEqual(b.back.width, 44, "\(page) \(size): Back is a 44 pt target")
+        XCTAssertGreaterThanOrEqual(b.rename.height, 44, "\(page) \(size): the name is a 44 pt target")
+        XCTAssertGreaterThanOrEqual(b.rename.width, 44, "\(page) \(size): the name is a 44 pt target")
+        XCTAssertGreaterThanOrEqual(b.material.height, 44, "\(page) \(size): the material is a 44 pt target")
+        XCTAssertGreaterThanOrEqual(b.material.width, 44, "\(page) \(size): the material is a 44 pt target")
+        XCTAssertEqual(b.name.height, TopLeftBlock.height, accuracy: 0.5, "\(page) \(size): the name pill is still drawn 42 (the look kept)")
+        // the targets reach the row's 44: 1 pt over and under the drawn pill (as every pill button's, B10), never past its ends
+        let pill = b.name.insetBy(dx: -0.5, dy: -1.5)
+        XCTAssertTrue(pill.contains(b.rename) && pill.contains(b.material), "\(page) \(size): the name and the material sit in the name pill")
+        XCTAssertLessThanOrEqual(b.rename.maxX, b.material.minX + 0.5, "\(page) \(size): the name's target, then the material's")
         for (f, n) in [(b.undo, "Undo"), (b.redo, "Redo")] {
             XCTAssertGreaterThanOrEqual(f.width, 44, "\(page) \(size): \(n) ≥ 44 pt"); XCTAssertGreaterThanOrEqual(f.height, 44, "\(page) \(size): \(n) ≥ 44 pt")
         }
@@ -42,6 +56,39 @@ final class UniformChromeHostedTests: XCTestCase {
         XCTAssertNil(part, "★ the stage's own part: no words beside the stage row")
         XCTAssertEqual(LatticeStageCopy.builtOn(achievedVolumeFraction: 0.65), "on \u{2212}35 %", "a result keeps its saving")
         XCTAssertEqual(LatticeStageCopy.builtOn(achievedVolumeFraction: 1.2), "on +20 %", "a growth result keeps its own")
+    }
+
+    /// ★ 11-12: the 44 pt targets really take a tap at their edges — 1 pt inside each target's top, where neither the drawn
+    /// 42 pt pill nor the words are. (A frame that only measures 44 would pass the shape check and still miss his finger.)
+    func testTheTopBarTakesATapAtItsTargetsEdges() throws {
+        let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
+        r.project.lattice.flexible = nil   // Topology Setup: the name renames there
+        let h = AppBuildHost(AppBuildRoot(model: r.app), size: AppBuildHost.landscape13, test: self)
+        h.pump(3)
+
+        let rename = try h.onScreen("topLeftRename", "the name")
+        XCTAssertGreaterThanOrEqual(rename.height, 44, "the name's target")   // so its top is ~10 pt above the words
+        h.click(CGPoint(x: rename.midX, y: rename.minY + 1), settle: 1)
+        _ = try h.onScreen("nameSheet", "★ a tap at the name's top edge opens Rename")
+        try h.tap("nameSheetCancel", "Cancel", settle: 0.8)
+        XCTAssertNil(h.frames.all["nameSheet"], "the sheet shut")
+
+        let material = try h.onScreen("topLeftMaterial", "the material")
+        var opened = false
+        let obs = NotificationCenter.default.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: nil) { n in
+            guard let m = n.object as? NSMenu else { return }
+            RunLoop.main.perform(inModes: [.eventTracking, .default, .modalPanel]) { opened = true; m.cancelTracking() }
+        }
+        h.click(CGPoint(x: material.midX, y: material.minY + 1), settle: 1.5)
+        XCTAssertTrue(opened, "★ a tap at the material's top edge opens its menu")
+        opened = false
+        h.click(CGPoint(x: material.minX + 1, y: material.midY), settle: 1.5)   // 9 pt left of the word
+        NotificationCenter.default.removeObserver(obs)
+        XCTAssertTrue(opened, "★ a tap at the material's left edge, beside the word, opens its menu")
+
+        let back = try h.onScreen("backButton", "Back")
+        h.click(CGPoint(x: back.midX, y: back.minY + 0.5), settle: 2)
+        XCTAssertEqual(r.app.screen, .home, "★ a tap at Back's top edge, above the drawn pill, goes back")
     }
 
     func testTheTopLeftBlockIsTheSameOnEveryPage() throws {
