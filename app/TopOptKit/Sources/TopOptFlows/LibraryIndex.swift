@@ -77,6 +77,18 @@ public struct LibraryPart: Codable, Equatable, Sendable, Identifiable {
     public var lastChild: [String: Int]?
     /// ★ His "chosen" answer (11-03): the ONE result chosen for this part, set by Pick this; nil until he picks one.
     public var chosen: LibraryChosen?
+    /// ★ Upload new version (his ask 2026-11-11, DATA-MODEL.md decision 12): the other models this part holds, one per
+    /// upload — a part is no longer one model file. nil (never written) for a part with one model.
+    public var otherModelHashes: [String]?
+
+    /// Whether these bytes are one of this part's models (same bytes = same part, model by model).
+    public func holds(modelHash h: String) -> Bool { modelHash == h || (otherModelHashes ?? []).contains(h) }
+
+    /// The part holds this model from now on (an upload): a folder with its bytes files here, never as a new part.
+    public mutating func addModel(hash h: String) {
+        guard !holds(modelHash: h) else { return }
+        otherModelHashes = (otherModelHashes ?? []) + [h]
+    }
 
     public init(id: UUID = UUID(), name: String, modelHash: String?, versions: [LibraryVersion] = [],
                 lastNumber: Int? = nil, lastChild: [String: Int]? = nil) {

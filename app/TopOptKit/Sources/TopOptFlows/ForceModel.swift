@@ -1099,3 +1099,31 @@ extension ForceModel {
         try c.encodeIfPresent(loadFlips, forKey: .loadFlips)
     }
 }
+
+// MARK: - Upload new version (his ask 2026-11-11, DATA-MODEL.md decision 12)
+
+extension ForceModel {
+    /// Every face this model names, on the new model's faces (`to` gives what an old face became): gravity's face, a bore's
+    /// own clearance numbers, a deleted Keep clear. A face that found none drops out; everything keyed by group stays.
+    public mutating func remapFaces(_ to: (FaceID) -> [FaceID]) {
+        if let f = gravityFace { gravityFace = to(f).first }
+        if let m = clearanceBoreOverrides {
+            var out: [String: ClearanceOverride] = [:]
+            for (key, value) in m {
+                let bits = key.split(separator: ":")
+                guard bits.count == 2, let g = UUID(uuidString: String(bits[0])), let f = FaceID(String(bits[1])) else { continue }
+                for n in to(f) { out[Self.boreKey(g, n)] = value }
+            }
+            clearanceBoreOverrides = out.isEmpty ? nil : out
+        }
+        if let s = suppressedClearanceFaces {
+            let n = Set(s.flatMap(to))
+            suppressedClearanceFaces = n.isEmpty ? nil : n
+        }
+        if let m = suppressedClearanceByGroup {
+            var out: [UUID: Set<Int32>] = [:]
+            for (g, s) in m { let n = Set(s.flatMap(to)); if !n.isEmpty { out[g] = n } }
+            suppressedClearanceByGroup = out.isEmpty ? nil : out
+        }
+    }
+}

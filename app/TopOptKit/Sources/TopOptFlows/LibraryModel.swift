@@ -195,6 +195,14 @@ public final class LibraryModel: ObservableObject {
     /// A new folder was made from `version` (a draft, or "New draft from vN"): number it from that one.
     public func noteParent(_ version: UUID, of folder: UUID) { pendingParents[folder] = version }
 
+    /// ★ Upload new version (his ask 2026-11-11, decision 12): `part` holds this model from now on, so its folder files
+    /// there as the next version.
+    public func addModel(hash: String, to part: UUID) {
+        guard let p = index.parts.firstIndex(where: { $0.id == part }) else { return }
+        index.parts[p].addModel(hash: hash)
+        try? store.saveLibrary(index)
+    }
+
     /// Not now: the sheet closes; today's Home stays, and Library ⋯ offers grouping again.
     public func notNow() { lastProposal = nil }
 

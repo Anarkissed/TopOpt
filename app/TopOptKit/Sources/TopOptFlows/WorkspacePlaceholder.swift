@@ -13616,6 +13616,7 @@ public struct WorkspacePlaceholder: View {
         // ★★ a load with no single direction is refused on the button (2026-10-09)
         guard loadDirectionRefusal == nil else { return false }
         guard emptyRegionRefusal == nil else { return false }   // ★ B1 (note 38): a role names a cut piece with no faces
+        guard project.lostFaceGroups.isEmpty else { return false }   // ★ Upload new version (decision 12): a group lost its faces
         guard scenarioGap == nil else { return false }   // ★ T5: a scenario that can't run is said before the press, not after
         guard force.canOptimize(in: selection.groups,
                                 minimizePlastic: project.minimizePlastic,
@@ -13700,6 +13701,7 @@ public struct WorkspacePlaceholder: View {
         if lattice, let why = latticeDesignBoxConflict { return why }   // ★ B3: only a run that carries the lattice
         if lattice, let why = latticeOptimizeRefusal { return why }
         if !lattice, let b = topologyBlock { return b.words }   // ★ B3 (U6, O2): ≤ 5 words; the fix chip is the corner's fix line
+        if let g = project.lostFaceGroups.first { return TopologyBlock.lostFaces(group: g.id, name: g.name).words }   // ★ decision 12
         if let why = loadDirectionRefusal { return why }
         if let why = emptyRegionRefusal { return why }   // ★ B1 (note 38)
         if force.phase == .setup { return "set gravity first" }
@@ -14246,6 +14248,7 @@ extension WorkspacePlaceholder {
             let k = force.kind(for: g.id)
             return (k.isAnchor || k.isLoad || force.isProtected(g.id)) && g.regionIDs.contains { project.runRegionIDs([$0]).isEmpty }
         }) { return .emptyPiece(group: g.id) }
+        if let g = project.lostFaceGroups.first { return .lostFaces(group: g.id, name: g.name) }   // ★ Upload new version (decision 12)
         if force.phase == .setup { return .gravity }
         if force.hasPending(in: selection.groups, latticeRoleGroups: latticeRoleGroupIDs) { return .pendingGroup }
         let a = force.anchorCount(in: selection.groups), l = force.loadCount(in: selection.groups)
@@ -14280,7 +14283,7 @@ extension WorkspacePlaceholder {
         case .noLoadCase:
             selectionsCollapsed = false
             model.toast = "Tap a face, then choose Anchor or Load"
-        case .noDirection(let g, _), .emptyPiece(let g):
+        case .noDirection(let g, _), .emptyPiece(let g), .lostFaces(let g, _):   // ★ decision 12: taps now add to that group
             selectionsCollapsed = false; selection.setActive(g)
         case let .scenarioGap(s, _, gap):
             // ★ T5: switch its anchors back on, or open the scenario that lacks one (its folder says how to add it)
