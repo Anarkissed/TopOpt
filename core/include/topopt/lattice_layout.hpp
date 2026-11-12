@@ -620,6 +620,10 @@ struct Bar {
   End end_a = End::Node, end_b = End::Node;
   bool piece = false;    // part of a strut of a cut cell, not a whole strut
   bool skin = false;     // a skin bar (S3): it lies on the part's surface, between cut ends
+  // The plane of its cell's own grid that the strut lies in, as that plane's unit normal
+  // (an octet strut lies in exactly one: a cell face, or the plane half way between two).
+  // Zero for a strut that lies in none, or in two. The skin follows these planes.
+  Vec3 flat{};
   // For a Joined end: the bar it ends in (its place in Bars::bars), -1 otherwise. If that
   // bar is removed, this end lands on nothing again (drop_loose_bars follows it).
   int into_a = -1, into_b = -1;
@@ -660,11 +664,17 @@ std::size_t join_loose_bars(Bars& bars, const Domain& domain, int threads = 0);
 
 // S3, Finish Skin: bars across the part's surface joining the cut strut ends, "a flat
 // lattice over the lattice". It is open and does not seal (that is Protect skin, D5).
-// Two cut ends are joined when no other cut end lies in the ball between them (so the
-// bars never cross and every end is joined to its natural neighbours: on a flat face cut
-// through a regular lattice the skin is itself a regular flat lattice), when they are no
-// farther apart than `reach_cells` of the larger of their two cells, and when the bar
-// between them lies on the surface (not across a notch, nor through the part).
+// A REGULAR pattern (his answer, 2026-11-12): the skin is the lattice's own grid drawn on
+// the surface. Every strut lies in one plane of its cells' grid (a cell face, or the
+// plane half way between two), so its cut end lies on the line where that plane meets
+// the surface; the skin joins neighbouring cut ends ALONG that line, and nothing else.
+// On a flat face that gives straight rows, one per plane, a half cell apart, in each of
+// the grid's directions that cross the face; round a boss, rings and uprights.
+// Two cut ends of one plane are joined when no other cut end of that plane lies in or on
+// the ball between them, when they are no farther apart than `reach_cells` of the larger
+// of their two cells, and when the bar between them lies on the surface (not across a
+// notch, nor through the part). Ends of struts that lie in no single plane are joined to
+// each other by the same three tests.
 // A cut end that gets a skin bar has landed (End::Joined). Returns the number of skin bars.
 struct SkinSpec {
   double width_mm = 0.0;      // 0 = as wide as the thinner of the two struts it joins

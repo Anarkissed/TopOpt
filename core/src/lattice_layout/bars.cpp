@@ -111,6 +111,11 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
         bar.width = c.strut;
         bar.cell = c.size;
         bar.region = c.region;
+        {   // the one plane of the cell's grid the strut lies in, if there is exactly one
+          const int along[3] = {s.b.x - s.a.x, s.b.y - s.a.y, s.b.z - s.a.z};
+          const int none = (along[0] == 0) + (along[1] == 0) + (along[2] == 0);
+          if (none == 1) bar.flat = f.ax[along[0] == 0 ? 0 : (along[1] == 0 ? 1 : 2)];
+        }
         // A strut is whole when its two ends and its middle are the cell's (and, in a cell
         // the layout found cut, its quarter points too), and its own line, a hair inside
         // the cell, meets no surface of the part between its ends. That is asked of every
@@ -405,18 +410,37 @@ std::size_t join_loose_bars(Bars& bars, const Domain& domain, int threads) {
 }
 
 std::size_t lay_skin(Bars& bars, const Domain& domain, const SkinSpec& spec) {
-  // The cut ends, each once (two bars can be cut at the same point).
-  struct Tip { Vec3 p; double cell, width; std::vector<std::pair<std::size_t, int>> of; };
+  // The cut ends, each once per plane (two bars can be cut at the same point). `plane` is
+  // -1 for the end of a strut that lies in no single plane of its cells' grid.
+  struct Tip { Vec3 p; double cell, width; int plane; std::vector<std::pair<std::size_t, int>> of; };
+  struct PlaneKey {
+    long long n[3], d;
+    bool operator<(const PlaneKey& o) const {
+      for (int k = 0; k < 3; ++k) if (n[k] != o.n[k]) return n[k] < o.n[k];
+      return d < o.d;
+    }
+  };
   std::vector<Tip> tips;
   {
-    std::map<PointKey, std::size_t> at;
+    std::map<PlaneKey, int> planes;
+    std::map<std::pair<PointKey, int>, std::size_t> at;
     for (std::size_t i = 0; i < bars.bars.size(); ++i)
       for (int end = 0; end < 2; ++end) {
         const Bar& b = bars.bars[i];
         if ((end ? b.end_b : b.end_a) != Bar::End::Surface || b.skin) continue;
         const Vec3& p = end ? b.b : b.a;
-        auto [it, fresh] = at.emplace(key_of(p), tips.size());
-        if (fresh) tips.push_back({p, b.cell, b.width, {}});
+        int plane = -1;
+        Vec3 n = b.flat;
+        if (n.x * n.x + n.y * n.y + n.z * n.z > 0.25) {
+          // One way round, so the two sides of a plane are one plane.
+          const double lead = std::fabs(n.x) > 1e-9 ? n.x : (std::fabs(n.y) > 1e-9 ? n.y : n.z);
+          if (lead < 0.0) n = Vec3{-n.x, -n.y, -n.z};
+          const PlaneKey key{{std::llround(n.x * 1e6), std::llround(n.y * 1e6), std::llround(n.z * 1e6)},
+                             std::llround((p.x * n.x + p.y * n.y + p.z * n.z) * 1e4)};
+          plane = planes.emplace(key, static_cast<int>(planes.size())).first->second;
+        }
+        auto [it, fresh] = at.emplace(std::make_pair(key_of(p), plane), tips.size());
+        if (fresh) tips.push_back({p, b.cell, b.width, plane, {}});
         Tip& t = tips[it->second];
         t.cell = std::max(t.cell, b.cell);
         t.width = std::min(t.width, b.width);
@@ -442,7 +466,9 @@ std::size_t lay_skin(Bars& bars, const Domain& domain, const SkinSpec& spec) {
       for (long long y = slot(p.y) - 1; y <= slot(p.y) + 1; ++y)
         for (long long z = slot(p.z) - 1; z <= slot(p.z) + 1; ++z) {
           const auto it = grid.find({x, y, z});
-          if (it != grid.end()) near.insert(near.end(), it->second.begin(), it->second.end());
+          if (it == grid.end()) continue;
+          for (std::size_t k : it->second)
+            if (tips[k].plane == tips[i].plane) near.push_back(k);   // its own plane's ends only
         }
     std::sort(near.begin(), near.end());
     for (std::size_t j : near) {
@@ -451,8 +477,9 @@ std::size_t lay_skin(Bars& bars, const Domain& domain, const SkinSpec& spec) {
       const Vec3 d{q.x - p.x, q.y - p.y, q.z - p.z};
       const double len2 = d.x * d.x + d.y * d.y + d.z * d.z, len = std::sqrt(len2);
       if (len < 10 * kSame || len > spec.reach_cells * std::max(tips[i].cell, tips[j].cell)) continue;
-      // No other cut end in the ball between them, or on it: four ends at the corners of
-      // a square are joined round the square, and neither diagonal crosses it.
+      // No other cut end of the plane in the ball between them, or on it: along a line the
+      // next one is joined and the one after is not; four at the corners of a square are
+      // joined round the square, and neither diagonal crosses it.
       const Vec3 mid{0.5 * (p.x + q.x), 0.5 * (p.y + q.y), 0.5 * (p.z + q.z)};
       bool empty = true;
       for (std::size_t k : near) {
@@ -472,6 +499,7 @@ std::size_t lay_skin(Bars& bars, const Domain& domain, const SkinSpec& spec) {
       skin.width = spec.width_mm > 0.0 ? spec.width_mm : std::min(tips[i].width, tips[j].width);
       skin.cell = std::max(tips[i].cell, tips[j].cell);
       skin.region = bars.bars[tips[i].of.front().first].region;
+      skin.flat = bars.bars[tips[i].of.front().first].flat;
       if (!landed[i]) landed[i] = static_cast<int>(bars.bars.size()) + 1;   // the bar it ends in, + 1
       if (!landed[j]) landed[j] = static_cast<int>(bars.bars.size()) + 1;
       bars.bars.push_back(skin);

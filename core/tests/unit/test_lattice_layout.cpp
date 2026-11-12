@@ -2143,19 +2143,21 @@ static void test_skin() {
     CHECK(not_skin == 0 && off == 0 && too_long == 0);
     // The block and its cells are the same on all four sides, and so is the skin (C9).
     CHECK(side[0] > 5 && side[0] == side[1] && side[1] == side[2] && side[2] == side[3]);
-    // No two skin bars cross (seen on the side x = 0, in y and z).
-    int crossings = 0;
-    auto turn = [](double ax, double ay, double bx, double by, double cx, double cy) {
-      return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
-    };
-    for (std::size_t i = 0; i < on_x0.size(); ++i)
-      for (std::size_t j = i + 1; j < on_x0.size(); ++j) {
-        const Bar &p = *on_x0[i], &q = *on_x0[j];
-        const double d1 = turn(p.a.y, p.a.z, p.b.y, p.b.z, q.a.y, q.a.z), d2 = turn(p.a.y, p.a.z, p.b.y, p.b.z, q.b.y, q.b.z);
-        const double d3 = turn(q.a.y, q.a.z, q.b.y, q.b.z, p.a.y, p.a.z), d4 = turn(q.a.y, q.a.z, q.b.y, q.b.z, p.b.y, p.b.z);
-        if (d1 * d2 < -1e-9 && d3 * d4 < -1e-9) ++crossings;
-      }
-    CHECK(crossings == 0);
+    // A regular pattern (his answer, 2026-11-12): the lattice's own grid drawn on the
+    // side. On the side x = 0 every skin bar runs straight along y or straight along z,
+    // each lies in a plane of the cells' grid (a multiple of half a cell from the cells'
+    // own origin), and bars that cross do so at right angles.
+    int slanted = 0, off_grid = 0, along_y = 0, along_z = 0;
+    for (const Bar* b : on_x0) {
+      const bool is_y = std::fabs(b->a.z - b->b.z) < 1e-9, is_z = std::fabs(b->a.y - b->b.y) < 1e-9;
+      if (is_y == is_z) { ++slanted; continue; }
+      ++(is_y ? along_y : along_z);
+      // The cells are 6 mm, laid from y = -2 and from the top z = 12: planes every 3 mm.
+      const double at = is_y ? (12.0 - b->a.z) / 3.0 : (b->a.y + 2.0) / 3.0;
+      if (std::fabs(at - std::round(at)) > 1e-6) ++off_grid;
+    }
+    CHECK(slanted == 0 && off_grid == 0);
+    CHECK(along_y > 3 && along_z > 3);
     // A cut end that got a skin bar has landed, and nothing else changed.
     int still_cut = 0, landed = 0, unpointed = 0;
     for (std::size_t i = 0; i < laid.bars.size(); ++i)
@@ -2208,6 +2210,33 @@ static void test_skin() {
     again.bars = {stub(5, 20), stub(10, 20)};
     CHECK(lay_skin(again, d, wide) == 1);
     NEAR(again.bars[2].width, 0.9, 0.0);
+  }
+  {  // By hand: ends of struts that lie in ONE plane of the grid are joined along it; an end
+     // of another plane, though it is nearer, is not.
+    PartMeasure pm(weld_mesh(box(30, 30, 12)));
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, {15, 15, 12}, down, 15, 15, 6)};
+    Domain d(pm, s);
+    auto stub = [](double x, double y, Vec3 flat) {
+      Bar b;
+      b.a = {x, y, 10}; b.b = {x, y, 12}; b.end_b = Bar::End::Surface; b.width = 0.5; b.cell = 6.0;
+      b.flat = flat;
+      return b;
+    };
+    Bars bars;
+    bars.bars = {stub(5, 10, {0, 1, 0}), stub(9, 10, {0, 1, 0}),     // both in the plane y = 10
+                 stub(6, 11, {0, 1, 0}),                             // in the plane y = 11: alone
+                 stub(7, 10, {1, 0, 0})};                            // between the first two, in the plane x = 7
+    CHECK(lay_skin(bars, d) == 1);
+    CHECK(bars.bars.size() == 5);
+    NEAR(bars.bars[4].a.y, 10.0, 0.0);
+    NEAR(bars.bars[4].b.y, 10.0, 0.0);
+    NEAR(bar_length(bars.bars[4]), 4.0, 1e-12);
+    CHECK(bars.bars[2].end_b == Bar::End::Surface && bars.bars[3].end_b == Bar::End::Surface);
+    // The same plane named from its other side is the same plane.
+    Bars flipped;
+    flipped.bars = {stub(5, 10, {0, 1, 0}), stub(9, 10, {0, -1, 0})};
+    CHECK(lay_skin(flipped, d) == 1);
   }
   {  // An L: cut ends on the two walls of its notch. No skin bar runs across the notch.
     PartMeasure pm(weld_mesh(prism({{0, 0}, {60, 0}, {60, 20}, {20, 20}, {20, 60}, {0, 60}}, 0, 12)));
