@@ -86,7 +86,7 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
   std::atomic<std::size_t> next{0};
   auto work = [&]() {
     const Domain::Probe probe = domain.probe();
-    for (std::size_t ci = next.fetch_add(1); ci < layout.cells.size(); ci = next.fetch_add(1)) {
+    for (std::size_t ci = next.fetch_add(1); ci < layout.cells.size() && !domain.stop_asked(); ci = next.fetch_add(1)) {
       const Cell& c = layout.cells[ci];
       const Frame& f = layout.frames[static_cast<std::size_t>(c.frame)];
       const WallMap& walls = layout.walls[static_cast<std::size_t>(c.frame)];
@@ -277,6 +277,7 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
     work();
     for (std::thread& t : pool) t.join();
   }
+  domain.check_stop();   // cells left without their struts
 
   // One bar per strut: two cells that share a strut give the same two ends. The wider
   // asks wins; an end one cell saw cut and the other saw whole stays as the first saw it.
@@ -352,7 +353,7 @@ std::size_t join_loose_bars(Bars& bars, const Domain& domain, int threads, const
   auto work = [&]() {
     const Domain::Probe probe = domain.probe();
     std::vector<std::size_t> near;
-    for (std::size_t job = next.fetch_add(1); job < ends.size(); job = next.fetch_add(1)) {
+    for (std::size_t job = next.fetch_add(1); job < ends.size() && !domain.stop_asked(); job = next.fetch_add(1)) {
       const std::size_t i = ends[job].first;
       const int end = ends[job].second;
       const Bar& me = before[i];
@@ -446,6 +447,7 @@ std::size_t join_loose_bars(Bars& bars, const Domain& domain, int threads, const
     work();
     for (std::thread& t : pool) t.join();
   }
+  domain.check_stop();   // loose ends left unlooked at: no bar is changed
   std::size_t joined = 0;
   for (std::size_t job = 0; job < ends.size(); ++job) {
     if (results[job].kind == Bar::End::Loose) continue;

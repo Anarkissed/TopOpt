@@ -38,8 +38,10 @@ Session::Session(StepModel model) : model_(std::move(model)) {
   measure_ = std::make_unique<PartMeasure>(weld_mesh(model_.mesh, 1e-5, &open_edges_));
 }
 
-Outcome Session::lay(const Settings& settings, int threads) {
+Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bool>* stop) {
   Outcome out;
+  const auto given_up = [] { Outcome none; none.cancelled = true; return none; };
+  if (stop && stop->load(std::memory_order_relaxed)) return given_up();
   auto t0 = std::chrono::steady_clock::now();
   const std::string where = where_text(settings);
   if (!domain_ || where != where_) {
@@ -61,29 +63,45 @@ Outcome Session::lay(const Settings& settings, int threads) {
       spec.protect.push_back({p.id, faces_mesh(model_, p.faces), p.depth_mm});
     domain_ = std::make_unique<Domain>(*measure_, std::move(spec));
     where_ = where;
-    out.read_again = true;
+    unread_ = true;
   }
+  out.read_again = unread_;   // a new domain, or one whose first reading was given up part way
   out.empty_regions = empty_regions_;
-  // (The reading itself happens inside the first lay_cells of a new domain.)
-  CellSpec cells = settings.cells;
-  cells.allow_quilt = settings.struts.allow_quilt;   // one switch (R2)
-  out.layout = lay_cells(*domain_, cells, threads);
-  out.struts = set_struts(out.layout, settings.struts);
-  const double laid = ms_since(t0);
-  (out.read_again ? out.ms_read : out.ms_cells) = laid;
-  if (settings.bars) {
-    t0 = std::chrono::steady_clock::now();
-    out.bars = lay_bars(out.layout, *domain_, threads);
-    if (settings.join_loose) join_loose_bars(out.bars, *domain_, threads, &out.layout);
-    if (settings.skin) lay_skin(out.bars, *domain_, settings.skin_spec);
-    if (settings.drop_loose) {
-      drop_loose_bars(out.bars);
-      out.stepped_edges = stepped_edges(out.bars);
-      out.pieces = drop_adrift_bars(out.bars, *domain_, &out.layout);
-    } else {
-      out.pieces = count_pieces(out.bars, *domain_, nullptr, nullptr, &out.layout);
+  // The domain watches the flag for this lay only (the flag need not outlive the call).
+  struct Watch {
+    Domain& d;
+    Watch(Domain& domain, const std::atomic<bool>* s) : d(domain) { d.watch(s); }
+    ~Watch() { d.watch(nullptr); }
+  } watch(*domain_, stop);
+  try {
+    // (The reading itself happens inside the first lay_cells of a new domain.)
+    CellSpec cells = settings.cells;
+    cells.allow_quilt = settings.struts.allow_quilt;   // one switch (R2)
+    out.layout = lay_cells(*domain_, cells, threads);
+    unread_ = false;
+    out.struts = set_struts(out.layout, settings.struts);
+    const double laid = ms_since(t0);
+    (out.read_again ? out.ms_read : out.ms_cells) = laid;
+    if (settings.bars) {
+      t0 = std::chrono::steady_clock::now();
+      domain_->check_stop();
+      out.bars = lay_bars(out.layout, *domain_, threads);
+      if (settings.join_loose) join_loose_bars(out.bars, *domain_, threads, &out.layout);
+      domain_->check_stop();
+      if (settings.skin) lay_skin(out.bars, *domain_, settings.skin_spec);
+      domain_->check_stop();
+      if (settings.drop_loose) {
+        drop_loose_bars(out.bars);
+        out.stepped_edges = stepped_edges(out.bars);
+        out.pieces = drop_adrift_bars(out.bars, *domain_, &out.layout);
+      } else {
+        out.pieces = count_pieces(out.bars, *domain_, nullptr, nullptr, &out.layout);
+      }
+      out.ms_bars = ms_since(t0);
     }
-    out.ms_bars = ms_since(t0);
+    domain_->check_stop();   // set during the last step: the answer is "cancelled", never a layout nobody waits for
+  } catch (const LayCancelled&) {
+    return given_up();
   }
   return out;
 }

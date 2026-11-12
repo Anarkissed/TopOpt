@@ -19,6 +19,7 @@
 // Nothing here is called by the shipped path. The old path is untouched.
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -265,6 +266,10 @@ struct Where {
   bool operator==(const Where& o) const { return why == o.why && id == o.id; }
 };
 
+// Stage E, cancel: what a step throws when the layout it is part of was asked to stop. Session::lay catches it and
+// answers `cancelled`; a caller that never sets a stop flag never sees it.
+struct LayCancelled {};
+
 class Domain {
  public:
   // `measure` must outlive the domain. The spec is copied; regions are kept sorted by id
@@ -334,6 +339,13 @@ class Domain {
 
   const DomainSpec& spec() const { return spec_; }
   const PartMeasure& measure() const { return *measure_; }
+  // Cancel (stage E; 362's bridge, his slider): the flag one layout of this domain is asked to stop by; null = never.
+  // Every thread loop of the layout reads it and stops taking work; the step then throws LayCancelled from the calling
+  // thread once its threads are done, BEFORE it keeps or returns anything half made, so what the domain keeps for the
+  // next layout is whole. Session::lay sets it for the length of one lay.
+  void watch(const std::atomic<bool>* stop) { stop_ = stop; }
+  bool stop_asked() const { return stop_ && stop_->load(std::memory_order_relaxed); }
+  void check_stop() const { if (stop_asked()) throw LayCancelled{}; }
   // The depth a Protect skin is solid to: its own, or two line widths at 0 (rule D5).
   double protect_depth_mm(const ProtectSkin& s) const {
     return s.depth_mm > 0.0 ? s.depth_mm : 2.0 * spec_.bead_mm;
@@ -352,6 +364,7 @@ class Domain {
  private:
   const PartMeasure* measure_;
   DomainSpec spec_;
+  const std::atomic<bool>* stop_ = nullptr;
   std::vector<Near> near_skin_;    // one per Protect skin, within its depth
   std::vector<Near> near_shell_;   // one per region (empty for a prism), within its depth
   // For a flat region: squares of its face that lie wholly inside its edge, or wholly
@@ -779,6 +792,7 @@ struct Outcome {
   Pieces pieces;                 // as found before any piece adrift was removed
   std::vector<SteppedEdge> stepped_edges;   // what Finish None left ragged (S4)
   bool read_again = false;       // the part was read for this layout (a "where" setting changed)
+  bool cancelled = false;        // the stop flag was set before the layout was whole: nothing else here is filled
   std::vector<int> empty_regions;   // asked-for regions none of whose faces has triangles
   double ms_read = 0.0, ms_cells = 0.0, ms_bars = 0.0;
 };
@@ -787,7 +801,11 @@ class Session {
  public:
   // Welds and measures the model once. `open_edges()` is 0 for a part that can be measured.
   explicit Session(StepModel model);
-  Outcome lay(const Settings& settings, int threads = 0);
+  // `stop`, when given, is read between the steps and inside their thread loops: once it is true the layout is given
+  // up and the answer is `cancelled` with nothing else in it (within one cell's or one row's work, not after the
+  // whole step). What the session keeps for the next lay() is not harmed: the same settings asked again give the
+  // layout a fresh session gives. The flag must outlive the call; the session never writes it.
+  Outcome lay(const Settings& settings, int threads = 0, const std::atomic<bool>* stop = nullptr);
   std::size_t open_edges() const { return open_edges_; }
   const PartMeasure& measure() const { return *measure_; }
   // The domain the last lay() was laid in: null before the first, REPLACED when a "where" setting changes. Read it after a
@@ -800,6 +818,7 @@ class Session {
   std::unique_ptr<PartMeasure> measure_;
   std::string where_;                  // the "where" settings the kept domain was made for
   std::unique_ptr<Domain> domain_;
+  bool unread_ = false;                // the kept domain has not been laid in once yet (its first lay was cancelled)
   std::vector<int> empty_regions_;
 };
 

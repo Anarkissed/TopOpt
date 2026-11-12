@@ -532,7 +532,7 @@ std::shared_ptr<const FaceReadings> read_face(const Domain& domain, const Region
   {
     std::atomic<int> next{0};
     auto rows = [&](const Domain::Probe& pr) {
-      for (int j = next.fetch_add(1); j < map.nw; j = next.fetch_add(1))
+      for (int j = next.fetch_add(1); j < map.nw && !domain.stop_asked(); j = next.fetch_add(1))
         for (int i = 0; i < map.nu; ++i) {
           double start[WallMap::kDeep], width[WallMap::kDeep];
           const int n = face_columns(pr, r, f, map.u0 + i * WallMap::kPitch,
@@ -550,6 +550,7 @@ std::shared_ptr<const FaceReadings> read_face(const Domain& domain, const Region
     rows(probe);
     for (std::thread& t : pool) t.join();
   }
+  domain.check_stop();   // rows left unread: nothing of this reading is kept
   std::vector<int> mark(map.bin.size(), 0);
   std::vector<std::size_t> stack;
   for (std::size_t n0 = 0; n0 < map.bin.size(); ++n0) {
@@ -625,7 +626,7 @@ void find_edges(const FaceReadings& kept, std::size_t which, const Domain& domai
     if (who > 0 && !spare[static_cast<std::size_t>(who)])
       spare[static_cast<std::size_t>(who)] = std::make_unique<Domain::Probe>(domain.probe());
     const Domain::Probe& mine = who > 0 ? *spare[static_cast<std::size_t>(who)] : probe;
-    for (std::size_t i = next.fetch_add(1); i < searches.size(); i = next.fetch_add(1)) {
+    for (std::size_t i = next.fetch_add(1); i < searches.size() && !domain.stop_asked(); i = next.fetch_add(1)) {
       Search& q = searches[i];
       double in = q.at[q.axis], outside = q.at[q.axis] + (q.side ? WallMap::kPitch : -WallMap::kPitch);
       for (int it = 0; it < 50; ++it) {
@@ -644,6 +645,7 @@ void find_edges(const FaceReadings& kept, std::size_t which, const Domain& domai
     work(0);
     for (std::thread& t : pool) t.join();
   }
+  domain.check_stop();   // searches left unrun: the kept stretch is not written (it stays un-edged)
   double edge[2][2] = {{st.lo[0], st.hi[0]}, {st.lo[1], st.hi[1]}};
   for (const Search& q : searches)
     edge[q.axis][q.side] = q.side ? std::max(edge[q.axis][q.side], q.found) : std::min(edge[q.axis][q.side], q.found);
@@ -727,6 +729,7 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
     const int nt = static_cast<int>(std::min<std::size_t>(static_cast<std::size_t>(thread_count), total));
     if (nt <= 1) {
       for (std::size_t i = 0; i < total; ++i) {
+        domain.check_stop();
         double q[3];
         slot(i, q);
         pass.columns.clear();
@@ -748,7 +751,7 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
       p.probe = &mine;
       p.out = &local;
       p.tally = &count_here;
-      for (std::size_t i = next.fetch_add(1); i < total; i = next.fetch_add(1)) {
+      for (std::size_t i = next.fetch_add(1); i < total && !domain.stop_asked(); i = next.fetch_add(1)) {
         double q[3];
         slot(i, q);
         p.columns.clear();
@@ -763,6 +766,7 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
     for (int t = 1; t < nt; ++t) pool.emplace_back(work, t);
     work(0);
     for (std::thread& t : pool) t.join();
+    domain.check_stop();   // base cells left unlaid
     for (const Piece& piece : pieces) {
       out.cells.insert(out.cells.end(), piece.cells.begin(), piece.cells.end());
       out.solid.insert(out.solid.end(), piece.solid.begin(), piece.solid.end());

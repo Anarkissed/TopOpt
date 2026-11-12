@@ -3,9 +3,12 @@
 #include <cmath>
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <map>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 
 #include "topopt/lattice_layout.hpp"
@@ -2786,6 +2789,114 @@ static void test_session() {
   CHECK(!quilted.read_again);             // the switch re-lays; it does not read the part again
 }
 
+// Stage E, cancel (362's bridge: his slider must not wait on a layout nobody wants). A stop flag given to lay() gives
+// the layout up: the answer is `cancelled` and empty, each threaded step throws instead of handing back a part-made
+// result, and NOTHING the domain or the session keeps is harmed: the same settings asked again give the layout a fresh
+// session gives, whenever the stop came.
+static void test_session_cancel() {
+  int L = 0, square = 0, sideA = 0, sideB = 0;
+  const StepModel model = plate_with_L_face(&L, &square, &sideA, &sideB);
+  Settings st;
+  st.regions = {{1, Role::Lattice, {square}, 6.0, 0.0}, {2, Role::Lattice, {L}, 10.0, 0.0}};
+  st.cells.cell_max_mm = 3;
+  auto same = [](const Outcome& x, const Outcome& y) {
+    return x.layout.cells == y.layout.cells && x.layout.solid == y.layout.solid && same_bars(x.bars, y.bars);
+  };
+  auto empty = [](const Outcome& x) {
+    return x.cancelled && x.layout.cells.empty() && x.layout.solid.empty() && x.bars.bars.empty();
+  };
+  const Outcome want = Session(model).lay(st);
+  CHECK(!want.cancelled && !want.layout.cells.empty() && !want.bars.bars.empty());
+
+  // Set before the call: nothing is read, nothing is laid; the session then lays as if it had never been asked.
+  {
+    Session session(model);
+    std::atomic<bool> stop{true};
+    CHECK(empty(session.lay(st, 0, &stop)));
+    CHECK(session.domain() == nullptr);
+    stop = false;
+    const Outcome after = session.lay(st, 0, &stop);
+    CHECK(!after.cancelled && after.read_again && same(after, want));
+  }
+  // Each step on its own, the flag already set: it throws, and keeps nothing part-made (the cells laid in the same
+  // domain afterwards are the ones a new domain gives; a reading kept with rows missing would move them).
+  {
+    size_t open = 0;
+    PartMeasure pm(weld_mesh(model.mesh, 1e-5, &open));
+    auto spec = [&] {
+      DomainSpec s;
+      bool ok = false;
+      s.regions.push_back(region_from_face(model, square, 1, Role::Lattice, 6.0, 0.0, &ok));
+      s.regions.push_back(region_from_face(model, L, 2, Role::Lattice, 10.0, 0.0, &ok));
+      return s;
+    };
+    Domain d(pm, spec());
+    const Domain clean(pm, spec());
+    std::atomic<bool> stop{true};
+    d.watch(&stop);
+    for (int threads : {1, 4}) {
+      bool threw = false;
+      try { (void)lay_cells(d, st.cells, threads); } catch (const LayCancelled&) { threw = true; }
+      CHECK(threw);
+    }
+    d.watch(nullptr);
+    Layout laid = lay_cells(d, st.cells);
+    const Layout fresh = lay_cells(clean, st.cells);
+    CHECK(laid.cells == fresh.cells && laid.solid == fresh.solid && !laid.cells.empty());
+    set_struts(laid, st.struts);
+    Bars bars = lay_bars(laid, d);
+    d.watch(&stop);
+    bool threw = false;
+    try { (void)lay_bars(laid, d); } catch (const LayCancelled&) { threw = true; }
+    CHECK(threw);
+    threw = false;
+    const Bars before = bars;
+    try { (void)join_loose_bars(bars, d, 0, &laid); } catch (const LayCancelled&) { threw = true; }
+    CHECK(threw && same_bars(bars, before));   // no bar was changed
+    d.watch(nullptr);
+    CHECK(!d.stop_asked());
+    // The whole part as lattice: no face is read, so only the cell step itself can notice (one thread, and several).
+    DomainSpec everywhere;
+    everywhere.start = Start::AllLattice;
+    Domain all(pm, everywhere);
+    CHECK(!lay_cells(all, st.cells).cells.empty());
+    all.watch(&stop);
+    for (int threads : {1, 4}) {
+      bool gave_up = false;
+      try { (void)lay_cells(all, st.cells, threads); } catch (const LayCancelled&) { gave_up = true; }
+      CHECK(gave_up);
+    }
+  }
+  // Set from another thread at every moment of a layout, the first of a new session (the part is being read) and
+  // the second (it is not): the answer is the whole layout or `cancelled` and empty, never part of one; and the
+  // same session asked again, with no stop, gives the layout a fresh session gives.
+  {
+    const auto t0 = std::chrono::steady_clock::now();
+    (void)Session(model).lay(st);
+    const double whole_us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0).count();
+    int given_up = 0, whole = 0, bad = 0;
+    const int steps = 120;
+    for (int k = 0; k < steps; ++k) {
+      for (int second = 0; second < 2; ++second) {
+        Session session(model);
+        if (second) (void)session.lay(st);
+        std::atomic<bool> stop{false};
+        const auto wait = std::chrono::duration<double, std::micro>(whole_us * 1.1 * k / steps);
+        std::thread setter([&] { std::this_thread::sleep_for(wait); stop = true; });
+        const Outcome got = session.lay(st, 0, &stop);
+        setter.join();
+        if (got.cancelled) { ++given_up; bad += !empty(got); } else { ++whole; bad += !same(got, want); }
+        const Outcome again = session.lay(st);
+        bad += again.cancelled || !same(again, want);
+      }
+    }
+    CHECK(bad == 0);
+    CHECK(given_up > 0);
+    std::printf("cancel: %d layouts given up part way, %d finished first, of %d (one whole layout %.1f ms)\n", given_up,
+                whole, 2 * steps, whole_us / 1000.0);
+  }
+}
+
 // C11a (reviewer's ruling 2026-11-11 23:52Z): the cells a member must hold are counted
 // across the room BETWEEN the skins, where the cells live, not across the material.
 static void test_cells_across_the_room_between_skins() {
@@ -3051,6 +3162,7 @@ int main() {
   test_stepped_edges();
   test_rim();
   test_session();
+  test_session_cancel();
   test_cover();
   test_region_squares();
   test_struts();
