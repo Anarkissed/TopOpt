@@ -396,6 +396,11 @@ public final class FlexibleStageModel: ObservableObject {
     /// fix pop-up's place under the top line — the SAME sentence and fixes as a pressed face's ("No lattice under Face 5 · set
     /// a face-prism" [Go to Lattice] [Face 5 rests]). It stays until dismissed or the next tap (never a 3.5 s toast).
     @Published public var noLatticeTap: FlexibleIssue?
+    /// ★ Upload new version (his pick 3, 11-12): the lost item [Pick its face] armed — the next face tap gives it that face
+    /// (an edge or corner press: the next edges pick). nil: no pick armed.
+    @Published public var lostPick: Int?
+    /// A re-find of the new model's edge presses is running (its own scene re-open must not start another).
+    var refindInFlight = false
     /// ★ U21 BATCH E: bumped by [Go to Lattice]; the page answers it with its leave for the Lattice page.
     @Published public internal(set) var leaveForLatticeAsks = 0
     /// ★ ROUND 7 (M2): the Flexible-only sectors' numbers for this session (FlexibleSectorNumbers), seeded from the store.
@@ -715,6 +720,10 @@ public final class FlexibleStageModel: ObservableObject {
                     // ★ ROUND 3 (item 1.2): the main page's loads arrive as pressed / resting faces
                     self.adoptMainPageLoads(recompute: false, carry: carry)
                     self.recomputeAll()
+                    // ★ Upload new version (his pick 2, 11-12): an edge or corner press drawn on the old model is re-found
+                    if self.settings.newModel?.refind.isEmpty == false, !self.refindInFlight {
+                        self.track(Task { @MainActor [weak self] in await self?.refindNewModelPresses() })
+                    }
                 }
             } catch {
                 await MainActor.run { self.sceneState = .failed("\(error)") }
@@ -838,6 +847,8 @@ public final class FlexibleStageModel: ObservableObject {
     /// whole face), so the rows below edit it and the part shows it selected.
     public func select(_ region: Int) {
         if edgePick != nil { return }   // ★ ROUND 6 ITEM 2: pick mode selects no face
+        // ★ Upload new version: [Pick its face] armed — this tap gives the lost item its face
+        if let n = lostPick, lostItems.indices.contains(n), !lostItems[n].needsEdge { assignLost(to: region); return }
         dropInPlaceAsks()   // ★ U21: a tap elsewhere drops a delete's ask
         noLatticeTap = nil   // ★ U21 batch E: the next tap drops the no-lattice notice
         curvePoint = nil

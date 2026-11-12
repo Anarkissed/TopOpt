@@ -55,7 +55,10 @@ extension FlexibleStageModel {
     }
 
     /// [Faces] or [Cancel]: pick mode ends; nothing was stored.
-    public func cancelEdgePick() { edgePick = nil }
+    public func cancelEdgePick() {
+        edgePick = nil
+        if let n = lostPick, lostItems.indices.contains(n), lostItems[n].needsEdge { lostPick = nil }   // ★ Upload new version
+    }
 
     /// The candidates, their colours, what cannot be picked and why, and each one's area — then core's verdict on each
     /// pickable one's press (over its whole members, along core's halfway), greying what core refuses.
@@ -250,6 +253,7 @@ extension FlexibleStageModel {
             return why
         }
         edgePick = nil
+        if lostPick != nil, let first = adds.first?.id { adoptLostEdgeSettings(newPress: first) }   // ★ Upload new version
         for (id, n) in startedAt {
             if let d = cuts[id]?.direction { flatExactStops[id] = (FlexiblePressAim.bits(d), n, sceneKey(regionsKey: "")) }
         }

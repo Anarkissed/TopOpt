@@ -177,10 +177,31 @@ final class UploadNewVersionTests: XCTestCase {
         XCTAssertTrue(out.parts[0].holds(modelHash: "h1"))
     }
 
-    func testFlexiblePartsWaitForTheirOwnMatching() {
+    // ★ RE-PINNED (#362, his picks 11-12 replace his 4th answer): a Flexible part's per-face setup is matched now
+    // (FlexibleNewModel), so its part page offers Upload new version too (was: hidden, "Topology parts first")
+    func testFlexiblePartsAreOfferedOnceTheirSetupIsMatched() {
         XCTAssertTrue(NewModelVersion.offered(parent()))
         var l = LatticeSettings(); l.flexible = FlexibleStageSettings()
-        XCTAssertFalse(NewModelVersion.offered(parent(lattice: l)), "his 4th answer: Topology parts first")
+        XCTAssertTrue(NewModelVersion.offered(parent(lattice: l)), "★ his picks of 11-12: Flexible parts too")
+        XCTAssertFalse(NewModelVersion.offered(nil), "nothing to upload onto")
+    }
+
+    /// ★ #362: a Flexible parent's draft is MATCHED (never "Lattice faces back to Auto"): its pressed face on its new number,
+    /// its face-prism with it, `reset` unset (UI-Notes' trap 2), nothing in the Topology lost list (trap 1).
+    func testAFlexibleDraftIsMatchedNotReset() {
+        let g = UUID()
+        var l = LatticeSettings()
+        var flex = FlexibleStageSettings()
+        flex.faces = [FlexibleFaceSettings(faceRegionID: 3, weightKg: 9)]
+        l.flexible = flex
+        l.selectableRoles = ["f:\(g.uuidString):3": .include]
+        let d = NewModelVersion.draft(from: parent(lattice: l), id: UUID(), savedAt: Date(), modelFileName: "model.step",
+                                      originalFileName: "Pad rev2.step", modelHash: "h2",
+                                      match: FaceMatch(map: [3: [7], 4: [4], 6: [6]]))   // (the Topology groups' faces stay)
+        XCTAssertEqual(d.lattice?.flexible?.faces.map(\.faceRegionID), [7], "★ the pressed face on its new face")
+        XCTAssertEqual(d.lattice?.selectableRoles["f:\(g.uuidString):7"], .include, "★ its face-prism with it")
+        XCTAssertNil(d.newModel?.latticeReset, "never 'Lattice faces back to Auto'")
+        XCTAssertEqual(d.newModel?.lostGroups ?? [], [], "Flexible's lost items never go in the Topology groups' list")
     }
 
     // MARK: a group that found no face

@@ -299,6 +299,8 @@ struct FlexibleRailContent: View {
             // selected"): one line, Manual only, a view on
             // (only in the stack when it says something: an empty item still took the stack's spacing in Auto)
             if model.manualViewLine != nil { FlexibleManualViewLine(model: model) }
+            // ★ Upload new version (his pick 3, 11-12): what found no face on the new model, on every tab until it has one
+            if !model.lostItems.isEmpty { FlexibleLostList(model: model) }
             switch model.rail {
             case .model:
                 FlexibleModelTab(model: model, padTarget: $padTarget)

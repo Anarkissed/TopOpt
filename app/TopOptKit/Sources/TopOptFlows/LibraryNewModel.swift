@@ -214,8 +214,9 @@ public enum NewModelVersion {
     /// The one line on a version whose per-face lattice choices went back to Auto (his third answer).
     public static let latticeLine = "Lattice faces back to Auto"
 
-    /// His fourth answer: Topology parts first — a Flexible part waits for #362's matching of its per-face setup.
-    public static func offered(_ newest: ProjectSnapshot?) -> Bool { newest.map { $0.lattice?.flexible == nil } ?? false }
+    /// His fourth answer was "Topology parts first"; ★ #362 (his picks 2026-11-12): a Flexible part's per-face setup is matched
+    /// too (FlexibleNewModel), so every part with a newest version is offered.
+    public static func offered(_ newest: ProjectSnapshot?) -> Bool { newest != nil }
 
     /// The picker's types: New part's own (STEP, STL, 3MF).
     public static let allowedTypes: [UTType] = {

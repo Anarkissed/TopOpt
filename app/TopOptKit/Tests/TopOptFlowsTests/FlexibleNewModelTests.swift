@@ -170,6 +170,46 @@ final class FlexibleNewModelTests: XCTestCase {
         print("FLEX-UPLOAD his pad: \(s.faces.count) faces, \((s.presses ?? []).count) presses (\(strips.count) edges/corners)")
     }
 
+    /// ★ HIS PICK 3: [Pick its face] — the face he taps takes the lost face with every setting; a lost tilted press takes it
+    /// as its region; [Remove] lets one go; the list empties to nil.
+    @MainActor
+    func testAPickedFaceTakesTheLostItemAndRemoveLetsOneGo() {
+        var s = FlexibleStageSettings()
+        let lostFace = face(5, kg: 7, group: 3)
+        let tilt = FlexiblePress(regions: [8], direction: SIMD3(0, 0, -1), settings: face(8), drawnIn: .face(8))
+        s.newModel = FlexibleNewModelState(lostFaces: [lostFace], lostPresses: [tilt])
+        s.removedRegions = [12]
+        FlexibleStageModel.assign(&s, 0, to: 12)
+        var expected = lostFace
+        expected.faceRegionID = 12
+        XCTAssertEqual(s.faces, [expected], "★ the lost face on the face he tapped, every setting kept")
+        XCTAssertNil(s.removedRegions, "a deleted face he picks for it is taken off the deleted list")
+        XCTAssertEqual(s.newModel?.lostItems.count, 1)
+        FlexibleStageModel.assign(&s, 0, to: 14)
+        XCTAssertEqual(s.presses?.first?.regions, [14], "★ the tilted press on its new face")
+        XCTAssertNil(s.presses?.first?.drawnIn, "drawn in its new face's frame")
+        XCTAssertNil(s.newModel, "nothing waits")
+        s.newModel = FlexibleNewModelState(lostFaces: [lostFace])
+        FlexibleStageModel.drop(&s, 0)
+        XCTAssertNil(s.newModel, "★ [Remove] lets it go")
+    }
+
+    /// ★ HIS PICK 3: the run waits — a blocking line with [Pick its face] [Remove] (RED CONTROL: nothing lost, no line).
+    func testTheRunWaitsWhileSomethingIsLost() {
+        var i = FlexibleReadiness.Inputs(materialID: "m", materialName: "M", calibrateFirst: false, withData: nil, pressed: [],
+                                         nozzleIsAuto: true, topologyIsGyroid: false, selected: nil, name: { _ in "A face" },
+                                         removable: { _ in true }, inherited: { _ in false }, buildFailure: nil, anyFilament: nil,
+                                         suggested: nil)
+        i.sentPresses = 1
+        XCTAssertFalse(FlexibleReadiness.evaluate(i).issues.contains { $0.kind == .lostOnNewModel }, "RED CONTROL: nothing lost")
+        i.lostOnNewModel = 2
+        let issue = FlexibleReadiness.evaluate(i).issues.first { $0.kind == .lostOnNewModel }
+        XCTAssertEqual(issue?.blocking, true, "★ the run waits")
+        XCTAssertEqual(issue?.oneLine, "2 pressed faces lost their faces · Pick them")
+        XCTAssertEqual(issue?.fixes, [.pickLost(0), .dropLost(0)])
+        XCTAssertLessThanOrEqual(issue?.oneLine.count ?? 99, FlexibleRowCopy.maxChars)
+    }
+
     /// A setup with nothing waiting writes no `newModel` key (every other project encodes byte-identical).
     func testNothingWaitingWritesNoKey() throws {
         var s = FlexibleStageSettings()

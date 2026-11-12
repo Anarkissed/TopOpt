@@ -116,7 +116,7 @@ struct FlexibleFixPopup: View {
     /// ★ U21: a fix that deletes (a face taken out, a press removed) — it asks first.
     static func removes(_ fix: FlexibleFix) -> Bool {
         switch fix {
-        case .remove: return true
+        case .remove, .dropLost: return true
         case .pressFix(let f): if case .remove = f { return true }; return false
         default: return false
         }
@@ -150,6 +150,8 @@ struct FlexibleFixPopup: View {
         case .latticeUnderAll(let rs): return "lattice-under-all-\(rs.map(String.init).joined(separator: "-"))"
         case .pressFix(let f): return "press-fix-\(f.id)"
         case .goToLattice: return "go-to-lattice"   // ★ U21 batch E
+        case .pickLost(let n): return "pick-lost-\(n)"   // ★ Upload new version
+        case .dropLost(let n): return "drop-lost-\(n)"
         }
     }
 
@@ -168,6 +170,8 @@ struct FlexibleFixPopup: View {
         case .latticeUnderAll(let rs): model.latticeUnder(all: rs)   // ★ batch E review: one tap, one undo step
         case .pressFix(let f): Task { await model.applyPressFix(f) }   // ★ R7-E2 FIX: one undo step
         case .goToLattice: model.askLeaveForLattice()   // ★ U21 batch E: the page leaves for the Lattice page (saved, no bake)
+        case .pickLost(let n): model.pickLost(n)         // ★ Upload new version: the next face tap (or edge pick) takes it
+        case .dropLost(let n): model.dropLost(n)
         }
         follow(fix, model: model)
     }
