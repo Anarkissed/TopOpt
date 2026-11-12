@@ -269,6 +269,17 @@ static void test_whole_part() {
   // lattice STAYS (it is not a speck of air to fill: the file would be a solid block).
   CHECK(r.edges_not_twice == 0 && r.flat == 0);
   CHECK(r.shells == 2 && rep.sealed_spaces == 1);
+  // "Sealed lattice" is a space that could hold a cell. Told that a closed space must reach
+  // 5,000 mm3 to stay, this one (under 2,500) is filled, and the file is the solid cube.
+  {
+    CHECK(std::fabs(rep.filled_under_mm3 - 6.8 * 6.8 * 6.8) < 1e-6);   // by default: one smallest cell
+    MeshSpec big;
+    big.fill_under_mm3 = 5000.0;
+    MeshReport rf;
+    const TriangleMesh filled = build_mesh(pm, d, l.layout, l.bars, open, big, &rf);
+    CHECK(rf.ok && rf.sealed_spaces == 0 && rf.air_pockets >= 1 && filled.triangles.size() == 12);
+    CHECK(std::fabs(rf.mm3 - 4096.0) < 1e-6);
+  }
   CHECK(rep.mm3 < rep.part_mm3 - 500.0 && std::fabs(r.mm3 - rep.mm3) < 1e-3 * rep.mm3);
   CHECK(rep.mm3 > rep.solid_mm3 + 1.0);          // its struts are in it
   CHECK(rep.solid_mm3 < rep.part_mm3 - 500.0);

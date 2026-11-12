@@ -11,8 +11,8 @@
 // What the mesh is cleaned of, because a slicer reads corners by PLACE:
 //   - two surfaces that touch along a line or at a point (separate corners at one place)
 //     are parted by a few microns, each corner drawn back into its own solid;
-//   - specks of air closed inside the material are filled (lattice sealed in behind skins
-//     on every side is not a speck: it stays), loose bits are left out;
+//   - a closed space inside the material that could not hold one cell is filled (lattice
+//     sealed in behind skins on every side is larger: it stays), loose bits are left out;
 //   - no triangle has two corners at one place.
 //
 // His print rules that live here (2026-11-12): a strut that lies flatter than 30 degrees
@@ -55,9 +55,11 @@ struct MeshSpec {
   double grow_mm = 0.02;      // open boxes overlap their neighbours by this, never only touch
   double clean_mm = 0.004;    // no edge shorter than this is left in the mesh
   double part_mm = 0.006;     // how far touching corners are drawn apart
-  // A closed space inside the material smaller than this is a speck of air and is filled;
-  // a larger one is lattice sealed in behind skins and stays.
-  double fill_under_mm3 = 1.0;
+  // A closed space inside the material smaller than this is filled; a larger one is
+  // lattice sealed in behind skins and stays. Below 0 = the volume of the smallest cell
+  // the layout laid: a sealed scrap that could not hold one cell is not lattice anyone
+  // asked for (his stand has one of 4 mm3), and a slicer would count it as a second part.
+  double fill_under_mm3 = -1.0;
   // A strut whose rise is under this share of its length (0.5 = 30 degrees) is a bridge.
   // 0 = every strut round.
   double bridge_rise = kBridgeRise;
@@ -91,7 +93,8 @@ struct MeshReport {
   std::size_t slivers_left_out = 0;
   double slivers_mm3 = 0.0;
   std::size_t touching_places = 0; // parted
-  std::size_t air_pockets = 0;     // specks of air: filled
+  double filled_under_mm3 = 0.0;   // the size a closed space had to reach to stay
+  std::size_t air_pockets = 0;     // closed spaces smaller than that: filled
   double air_pockets_mm3 = 0.0;
   std::size_t sealed_spaces = 0;   // lattice sealed in behind skins: kept
   std::size_t loose_bits = 0;      // left out

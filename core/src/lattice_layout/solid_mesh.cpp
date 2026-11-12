@@ -536,11 +536,18 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
     for (const auto& kv : vol)
       if (kv.second > biggest) { biggest = kv.second; main_piece = kv.first; }
     rep.mm3 = biggest;
+    double fill_under = spec.fill_under_mm3;
+    if (fill_under < 0.0) {
+      double smallest = 0.0;
+      for (const Cell& c : lay.cells) smallest = smallest > 0.0 ? std::min(smallest, c.size) : c.size;
+      fill_under = std::max(1.0, smallest * smallest * smallest);
+    }
+    rep.filled_under_mm3 = fill_under;
     std::map<std::uint32_t, char> stays;
     stays[main_piece] = 1;
     for (const auto& kv : vol) {
       if (kv.first == main_piece) continue;
-      if (kv.second < 0 && -kv.second >= spec.fill_under_mm3) {
+      if (kv.second < 0 && -kv.second >= fill_under) {
         stays[kv.first] = 1;   // sealed lattice: a space inside the part, with its struts
         ++rep.sealed_spaces;
         rep.mm3 += kv.second;
