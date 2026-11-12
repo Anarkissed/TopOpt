@@ -211,6 +211,9 @@ final class UploadNewVersionTests: XCTestCase {
                        "RED CONTROL: the Topology count alone")
         XCTAssertEqual(NewModelVersion.doneLine(version: "v8", lost: 0, flexibleLost: 1), "v8 · New model · 1 pressed face lost its face")
         XCTAssertEqual(NewModelVersion.doneLine(version: "v8", lost: 0, flexibleLost: 2), "v8 · New model · 2 pressed faces lost their faces")
+        XCTAssertEqual(NewModelVersion.doneLine(version: "v8", lost: 1, flexibleLost: 1),
+                       "v8 · New model · 1 pressed face lost its face · 1 group lost its faces", "★ both named (UI-Notes' edge)")
+        XCTAssertEqual(NewModelVersion.doneLine(version: "v8", lost: 2), "v8 · New model · 2 groups lost their faces", "Topology's as before")
         var l = LatticeSettings()
         var flex = FlexibleStageSettings()
         flex.faces = [FlexibleFaceSettings(faceRegionID: 3, weightKg: 9)]
