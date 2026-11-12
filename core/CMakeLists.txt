@@ -169,6 +169,7 @@ add_library(topopt
   src/lattice_layout/bars.cpp
   src/lattice_layout/session.cpp
   src/lattice_layout/solid_mesh.cpp
+  src/lattice_layout/print_check.cpp
   src/orient/orient.cpp
   src/orient/build_orientation.cpp
   src/orient/build_frame.cpp

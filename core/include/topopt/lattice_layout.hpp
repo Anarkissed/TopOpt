@@ -20,6 +20,7 @@
 
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -647,6 +648,16 @@ struct Bar {
   // bar is removed, this end lands on nothing again (drop_loose_bars follows it).
   int into_a = -1, into_b = -1;
 };
+
+// Preview is the spec (reviewer, 2026-11-12): a bar lying flatter than 30 degrees is written to the file as a BRIDGE,
+// a square bar with a level underside (his print rule P8 c), not a round one. `up` is the print direction (the part
+// stands on its lowest z). The file writer and whoever draws the bars ask this one function.
+inline constexpr double kBridgeRise = 0.5;   // rise over length: 30 degrees
+inline bool bar_is_bridge(const Bar& bar, double rise = kBridgeRise) {
+  const double dx = bar.b.x - bar.a.x, dy = bar.b.y - bar.a.y, dz = bar.b.z - bar.a.z;
+  const double len = std::sqrt(dx * dx + dy * dy + dz * dz);
+  return len > 1e-9 && rise > 0.0 && std::fabs(dz) / len < rise;
+}
 
 struct Bars {
   std::vector<Bar> bars;

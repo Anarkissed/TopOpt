@@ -305,7 +305,7 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
       const double pa = x.end_a == Bar::End::Surface ? 2.0 * r + 0.3 : 0.0;
       const double pb = x.end_b == Bar::End::Surface ? 2.0 * r + 0.3 : 0.0;
       const Vec3 a{x.a.x - d.x * pa, x.a.y - d.y * pa, x.a.z - d.z * pa};
-      if (spec.bridge_rise > 0.0 && std::fabs(d.z) < spec.bridge_rise) {
+      if (bar_is_bridge(x, spec.bridge_rise)) {
         // A strut that lies flat (under 30 degrees) is printed as a BRIDGE: a square bar as
         // wide and as tall as the strut, its underside level and flat, so the first layer
         // across the gap is one straight full-width line and not the belly of a round bar.

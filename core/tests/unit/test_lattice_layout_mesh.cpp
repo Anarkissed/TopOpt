@@ -278,6 +278,190 @@ static void test_whole_part() {
   for (int a = 0; a < 3; ++a) CHECK(std::fabs(r.lo[a]) < 1e-6 && std::fabs(r.hi[a] - 16.0) < 1e-6);
 }
 
+// ── his print rules, layer by layer (P8) ─────────────────────────────────────
+static void add_box(MeshSink& s, double x0, double y0, double z0, double x1, double y1, double z1, double shear_x = 0.0) {
+  // `shear_x`: the top is moved this far along x (a leaning box).
+  const Vec3 p[8] = {{x0, y0, z0}, {x1, y0, z0}, {x1, y1, z0}, {x0, y1, z0},
+                     {x0 + shear_x, y0, z1}, {x1 + shear_x, y0, z1}, {x1 + shear_x, y1, z1}, {x0 + shear_x, y1, z1}};
+  const int q[6][4] = {{0, 3, 2, 1}, {4, 5, 6, 7}, {0, 1, 5, 4}, {1, 2, 6, 5}, {2, 3, 7, 6}, {3, 0, 4, 7}};
+  for (const auto& f : q) {
+    s.add_triangle(p[f[0]], p[f[1]], p[f[2]]);
+    s.add_triangle(p[f[0]], p[f[2]], p[f[3]]);
+  }
+}
+static void test_layers() {
+  {  // A plain block: flat on the bed, nothing to find.
+    MeshSink s;
+    add_box(s, 0, 0, 0, 10, 10, 5);
+    const LayerReport r = check_layers(s.mesh);
+    CHECK(r.layers == 25 && std::fabs(r.z_bed) < 1e-12);
+    CHECK(std::fabs(r.bed_mm2 - 100.0) < 1e-9 && r.sloped_mm2 == 0.0 && std::fabs(r.first_layer_mm2 - 100.0) < 1.5);
+    CHECK(r.bed_flat() && r.clean() && r.thin_islands == 0 && r.longest_reach_mm < 0.1);
+    LayerSpec one;
+    one.threads = 1;   // the same on one thread
+    const LayerReport r1 = check_layers(s.mesh, one);
+    CHECK(r1.first_layer_mm2 == r.first_layer_mm2 && r1.clean());
+  }
+  {  // A small block floating 2 mm above it: it starts in mid-air, and the block's top is what lies below.
+    MeshSink s;
+    add_box(s, 0, 0, 0, 10, 10, 5);
+    add_box(s, 4, 3, 7, 6, 5, 8);
+    const LayerReport r = check_layers(s.mesh);
+    CHECK(r.mid_air.size() == 1 && !r.clean());
+    if (r.mid_air.size() == 1) {
+      const LayerReport::MidAir& m = r.mid_air[0];
+      CHECK(std::fabs(m.z - 7.1) < 0.01 && std::fabs(m.mm2 - 4.0) < 0.3 && std::fabs(m.x - 5.0) < 0.06 && std::fabs(m.y - 4.0) < 0.06);
+      CHECK(std::fabs(m.size_x - 2.0) < 0.11 && std::fabs(m.size_y - 2.0) < 0.11);
+      CHECK(m.anything_below && std::fabs(m.below_z - 4.9) < 0.01);
+    }
+  }
+  {  // A post with an arm 6 mm long held at one end: one-ended, and nothing lies under its far end.
+    MeshSink s;
+    add_box(s, 0, 0, 0, 2, 2, 10);
+    add_box(s, 2, 0, 8, 8, 2, 10);
+    const LayerReport r = check_layers(s.mesh);
+    CHECK(r.mid_air.empty() && r.one_ended.size() == 1);
+    if (r.one_ended.size() == 1) {
+      const LayerReport::OneEnded& o = r.one_ended[0];
+      CHECK(o.reach_mm > 5.7 && o.reach_mm < 6.2 && std::fabs(o.z - 8.1) < 0.01 && o.x > 7.5 && !o.anything_below);
+    }
+    CHECK(std::fabs(r.longest_reach_mm - (r.one_ended.empty() ? 0.0 : r.one_ended[0].reach_mm)) < 1e-9);
+  }
+  {  // The same arm held at BOTH ends is a bridge: fine, and its reach is half its span.
+    MeshSink s;
+    add_box(s, 0, 0, 0, 2, 2, 10);
+    add_box(s, 8, 0, 0, 10, 2, 10);
+    add_box(s, 2, 0, 8, 8, 2, 10);
+    const LayerReport r = check_layers(s.mesh);
+    CHECK(r.clean() && r.longest_reach_mm > 2.7 && r.longest_reach_mm < 3.2);
+  }
+  {  // A block leaning at 45 degrees: every layer is held by the one below.
+    MeshSink s;
+    add_box(s, 0, 0, 0, 4, 4, 6, 6.0);
+    const LayerReport r = check_layers(s.mesh);
+    CHECK(r.clean() && r.longest_reach_mm < 0.3);
+    MeshSink t;   // leaning at 63 degrees from upright: too far, each layer hangs past the last... but stays attached
+    add_box(t, 0, 0, 0, 4, 4, 6, 12.0);
+    CHECK(check_layers(t.mesh).longest_reach_mm > 0.15);
+  }
+  {  // An underside that slopes up from one edge: not a bed face.
+    MeshSink s;
+    const Vec3 p[8] = {{0, 0, 0}, {10, 0, 0.15}, {10, 10, 0.15}, {0, 10, 0}, {0, 0, 5}, {10, 0, 5}, {10, 10, 5}, {0, 10, 5}};
+    const int q[6][4] = {{0, 3, 2, 1}, {4, 5, 6, 7}, {0, 1, 5, 4}, {1, 2, 6, 5}, {2, 3, 7, 6}, {3, 0, 4, 7}};
+    for (const auto& f : q) { s.add_triangle(p[f[0]], p[f[1]], p[f[2]]); s.add_triangle(p[f[0]], p[f[2]], p[f[3]]); }
+    const LayerReport r = check_layers(s.mesh);
+    CHECK(r.bed_mm2 == 0.0 && std::fabs(r.sloped_mm2 - 100.0) < 0.01 && !r.bed_flat());
+  }
+  {  // Rule (d), a count: a fin one line thick standing on a block is thin in each of its layers; the block is not.
+    MeshSink s;
+    add_box(s, 0, 0, 0, 10, 10, 2);
+    add_box(s, 3, 2, 2, 3.45, 8, 5);
+    const LayerReport r = check_layers(s.mesh);
+    CHECK(r.clean() && r.thin_islands == 15 && r.thin_layers == 15);
+    MeshSink t;
+    add_box(t, 0, 0, 0, 10, 10, 2);
+    add_box(t, 3, 2, 2, 3.9, 8, 5);   // two lines: not thin
+    CHECK(check_layers(t.mesh).thin_islands == 0);
+  }
+  {  // A stop flag.
+    MeshSink s;
+    add_box(s, 0, 0, 0, 10, 10, 5);
+    std::atomic<bool> stop{true};
+    LayerSpec ls;
+    ls.stop = &stop;
+    bool threw = false;
+    try { (void)check_layers(s.mesh, ls); } catch (const LayCancelled&) { threw = true; }
+    CHECK(threw);
+  }
+}
+
+// The mesh that prints: made, checked, made again. The block of test_block with a strut
+// added by hand that no printer could start: hanging down from a node into open space.
+static void test_printable() {
+  PartMeasure pm(weld_mesh(box(30, 30, 12)));
+  DomainSpec s;
+  s.min_strut_lines = 2.0;
+  s.regions = {face_region(1, {15, 15, 12}, {0, 0, -1}, 15, 15, 8, -2.0)};
+  Domain d(pm, s);
+  CellSpec cs;
+  cs.algorithm = Algorithm::Uniform;
+  cs.cell_max_mm = 8;
+  cs.min_cells_across = 1;
+  const Laid l = lay(d, cs);
+  const OpenSpace open = read_open_space(d, l.layout, 0.25);
+  // As laid, the block prints: the loop makes it once.
+  {
+    PrintableReport pr;
+    const TriangleMesh mesh = build_printable_mesh(pm, d, l.layout, l.bars, open, PrintableSpec{}, &pr);
+    std::printf("printable block: %d pass(es), found per pass %d, bed %.1f of first layer %.1f mm2, longest reach %.2f mm, thin islands %zu\n",
+                pr.passes, pr.found_per_pass.empty() ? -1 : pr.found_per_pass[0], pr.layers.bed_mm2, pr.layers.first_layer_mm2,
+                pr.layers.longest_reach_mm, pr.layers.thin_islands);
+    CHECK(pr.clean && pr.passes == 1 && pr.mesh.ok && pr.layers.clean() && pr.layers.bed_flat());
+    CHECK(pr.drop_at.empty() && pr.posts.empty());
+    CHECK(std::fabs(pr.layers.bed_mm2 - 900.0) < 1e-6);
+    CHECK(same_mesh(mesh, build_mesh(pm, d, l.layout, l.bars, open, MeshSpec{})));
+  }
+  // A node well inside the lattice, half way up, to hang a bad strut from.
+  Vec3 node{};
+  bool have = false;
+  for (const Bar& b : l.bars.bars)
+    for (const Vec3* p : {&b.a, &b.b})
+      if (!have && (p == &b.a ? b.end_a : b.end_b) == Bar::End::Node && std::fabs(p->x - 15) < 5 && std::fabs(p->y - 15) < 5 && p->z > 7.0 && p->z < 9.0) {
+        node = *p;
+        have = true;
+      }
+  CHECK(have);
+  if (!have) return;
+  Bars bad = l.bars;
+  Bar hang;
+  hang.a = node;
+  hang.b = {node.x + 1.3, node.y + 0.9, node.z - 2.6};   // down into open space, ending on nothing
+  hang.width = 0.9;
+  hang.cell = 4.0;
+  hang.region = 1;
+  hang.end_a = Bar::End::Node;
+  hang.end_b = Bar::End::Loose;
+  bad.bars.push_back(hang);
+  // First answer: what starts in mid-air is left out. Then the mesh is clean, and it is the
+  // mesh of the bars as they were (the bad strut is the only thing gone).
+  {
+    PrintableReport pr;
+    const TriangleMesh mesh = build_printable_mesh(pm, d, l.layout, bad, open, PrintableSpec{}, &pr);
+    std::printf("printable, one hanging strut: %d passes, found per pass", pr.passes);
+    for (int n : pr.found_per_pass) std::printf(" %d", n);
+    std::printf("; left out %zu, posts %zu\n", pr.mesh.bars_left_out, pr.mesh.posts);
+    CHECK(pr.clean && pr.passes >= 2 && pr.found_per_pass.front() >= 1 && pr.found_per_pass.back() == 0);
+    CHECK(pr.mesh.bars_left_out == 1 && pr.mesh.posts == 0 && !pr.drop_at.empty());
+    CHECK(pr.layers.clean() && check_layers(mesh).clean());
+    const Read r = read_mesh(mesh);
+    CHECK(r.edges_not_twice == 0 && r.shells == 1);
+    // What the loop ended with gives the same mesh in one pass.
+    MeshSpec again;
+    again.drop_at = pr.drop_at;
+    again.posts = pr.posts;
+    CHECK(same_mesh(mesh, build_mesh(pm, d, l.layout, bad, open, again)));
+    // And a single pass is told the truth: not clean.
+    PrintableSpec once;
+    once.most_passes = 1;
+    PrintableReport p1;
+    (void)build_printable_mesh(pm, d, l.layout, bad, open, once, &p1);
+    CHECK(!p1.clean && p1.passes == 1 && !p1.layers.clean());
+  }
+  // With leaving out switched off, the same strut is tied down with a post from the material below.
+  {
+    PrintableSpec ps;
+    ps.leave_out = false;
+    PrintableReport pr;
+    const TriangleMesh mesh = build_printable_mesh(pm, d, l.layout, bad, open, ps, &pr);
+    std::printf("printable, posts only: %d passes, found per pass", pr.passes);
+    for (int n : pr.found_per_pass) std::printf(" %d", n);
+    std::printf("; left out %zu, posts %zu (%.1f mm)\n", pr.mesh.bars_left_out, pr.mesh.posts, pr.mesh.posts_mm);
+    CHECK(pr.clean && pr.mesh.bars_left_out == 0 && pr.mesh.posts >= 1 && pr.drop_at.empty());
+    CHECK(pr.mesh.posts_mm > 0.5 && check_layers(mesh).clean());
+    CHECK(pr.mesh.bars == l.bars.bars.size() + 1);
+  }
+}
+
 int main() {
   if (!mesh_available()) {
     MeshReport rep;
@@ -290,6 +474,8 @@ int main() {
   }
   test_block();
   test_whole_part();
+  test_layers();
+  test_printable();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }
