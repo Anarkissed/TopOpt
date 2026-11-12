@@ -164,7 +164,7 @@ extension FlexibleU2Tests {
         let cs = FlexiblePressCurveModal.faceCurves3D()
         var pts = FlexibleCurveTable3D.tableCorners(cs)
         for c in cs { for i in 0...10 { let t = Double(i) / 10; pts.append(c.baseline.world(t, 0)); pts.append(c.baseline.world(t, 1)) } }
-        func check(_ yaw: Float, _ tag: String) throws -> (inside: Bool, clear: Bool, line: String) {
+        func check(_ yaw: Float, _ tag: String) throws -> (inside: Bool, clear: Bool, line: String, span: CGFloat, width: CGFloat) {
             let v3 = try XCTUnwrap(h.frames.all["curveView3D"]), gz = try XCTUnwrap(h.frames.all["curveGizmo"])
             var c = cam.camera
             c.setOrientation(azimuth: FlexiblePressCurveModal.homeCamera(corner: false).azimuth + yaw, elevation: c.elevation)
@@ -180,7 +180,7 @@ extension FlexibleU2Tests {
                               v3.width, v3.height, xs.min() ?? -1, xs.max() ?? -1, ys.min() ?? -1, ys.max() ?? -1, "\(gzLocal.integral)",
                               inside ? "yes" : "NO", clear ? "yes" : "NO")
             log.append(line)
-            return (inside, clear, line)
+            return (inside, clear, line, (xs.max() ?? 0) - (xs.min() ?? 0), v3.width)
         }
         let at45 = try check(.pi / 4, "13p 3D")
         XCTAssertTrue(at45.inside, "★ turned 45°, the table's corners and the curves inside the table's view")
@@ -194,7 +194,11 @@ extension FlexibleU2Tests {
         FlexibleCurveWindowLayout.controlNoAspectFit = true
         let red = try check(.pi / 4, "RED no aspect fit")
         FlexibleCurveWindowLayout.controlNoAspectFit = false
-        XCTAssertFalse(red.inside, "RED CONTROL: without the fit the square table runs out of its view")
+        // ★ RE-PINNED (B10 Touch: the 2D │ 3D chips' 44 pt targets made the view 610 × 930, was 610 × 941): the unfitted table ran
+        // only 2 pt past the view's sides (x −2…612), so "out of its view" was a hair-trigger; now it lands at x 1…609. The control
+        // is what the fit changes: without it the table runs to the view's sides (within 4 pt); with it, it keeps a wide margin
+        XCTAssertGreaterThanOrEqual(red.span, red.width - 4, "RED CONTROL: without the fit the table runs to the view's sides: \(red.line)")
+        XCTAssertLessThan(at45.span, red.span - 100, "★ the fit draws it well inside: \(at45.line)")
         m.closeCurveModal(keep: false)
         flush("U21B_lines_3d.txt")
     }

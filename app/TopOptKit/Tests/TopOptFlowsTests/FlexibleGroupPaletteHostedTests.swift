@@ -121,9 +121,10 @@ final class FlexibleGroupPaletteHostedTests: XCTestCase {
             let row = try XCTUnwrap(local(h, "colourSwatches-\(open.number)"), "\(tag): the Colour row is drawn")
             let panel = try XCTUnwrap(local(h, "panel")), rail = try XCTUnwrap(local(h, "rail"))
             let line = try XCTUnwrap(local(h, "groupLine-\(open.number)"), "\(tag): the group's name line")
-            let expected = 8 * FlexibleColourSwatches.swatch.width + 7 * FlexibleColourSwatches.spacing
-            XCTAssertEqual(row.width, expected, accuracy: 0.5, "\(tag): all eight swatches drawn at full size (none squeezed)")
-            XCTAssertLessThanOrEqual(row.height, 36, "\(tag): ONE line")
+            // ★ RE-PINNED (B10 Touch; HIS PICK 11-11, "One colour chip"): the row is one 44 pt chip, "● <colour> ▾", that opens
+            // the eight colours (was eight 26 pt swatches on one line; FlexibleB10SweepHostedTests picks from its menu)
+            XCTAssertGreaterThanOrEqual(row.width, FlexibleColourSwatches.target - 0.5, "\(tag): the chip is a 44 pt target")
+            XCTAssertEqual(row.height, FlexibleColourSwatches.target, accuracy: 0.5, "\(tag): ONE line")
             XCTAssertGreaterThan(row.minX, rail.maxX, "\(tag): beside the rail")
             XCTAssertLessThanOrEqual(row.maxX, panel.maxX - 8, "\(tag): inside the panel")
             XCTAssertGreaterThanOrEqual(row.minX, line.minX, "\(tag): inside the tab's column")
@@ -153,7 +154,7 @@ final class FlexibleGroupPaletteHostedTests: XCTestCase {
                 XCTAssertGreaterThanOrEqual(control.minX - card.minX, groupWords, "\(tag): \"Squeeze group\" keeps its room")
             }
             XCTAssertLessThanOrEqual(control.maxX, card.maxX, "\(tag): inside the card")
-            XCTAssertLessThanOrEqual(control.height, 36, "\(tag): one line")
+            XCTAssertLessThanOrEqual(control.height, FlexChips.target + 0.5, "\(tag): one line")   // ★ B10: a 44 pt target line (was 36)
             report.append("\(tag) group row: \(local(h, "groupChips") != nil ? "chips" : "menu") x \(Int(control.minX))–\(Int(control.maxX))")
             snapshot(h, "C5_\(tag)_six_groups.png")
         }

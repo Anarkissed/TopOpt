@@ -1326,7 +1326,16 @@ struct FlexChips: View {
     var equalWidths = true
     let onPick: (String) -> Void
 
+    /// ★ B10 (Touch, design-system §6: every target 44 × 44 pt): the look stays — a 29 pt chip in its 33 pt track — and each
+    /// chip's TARGET is the row's full 44 pt (it was the 29 pt chip: a tap a few points off it landed on nothing).
+    static let target: CGFloat = 44
+    static let chipHeight: CGFloat = 29
+    static let trackHeight: CGFloat = chipHeight + 4
+    /// Test control only (FlexibleB10SweepHostedTests' red control): the old 29 pt targets.
+    @MainActor static var controlOldTarget = false
+
     var body: some View {
+        let old = Self.controlOldTarget
         HStack(spacing: 4) {
             ForEach(options, id: \.id) { o in
                 let on = o.id == selection
@@ -1337,18 +1346,35 @@ struct FlexChips: View {
                                          : (disabled.contains(o.id) ? DS.Color.textDisabled.color
                                             : DS.Color.textTertiary.color))
                         .lineLimit(1).minimumScaleFactor(0.8)
-                        .padding(.horizontal, 10).padding(.vertical, 7)
+                        .padding(.horizontal, 10)
+                        .frame(minWidth: old ? nil : Self.target)   // ★ B10: "On", "Off", "Rim" were 37–42 pt wide
+                        .frame(height: Self.chipHeight)
                         .frame(maxWidth: equalWidths ? .infinity : nil)
                         .background(Capsule().fill(on ? DS.Color.fillSelected.color : Color.clear))
+                        .frame(minHeight: old ? nil : Self.target)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .background(FlexibleTouch.publish("flexChip-\(id)-\(o.id)"))
                 .accessibilityIdentifier("\(id)-\(o.id)")
                 .flexibleProbe("\(id)-\(o.id)")
             }
         }
-        .padding(2)
+        .padding(.horizontal, 2).padding(.vertical, old ? 2 : 0)
         .background(Capsule().fill(DS.Color.background.opacity(0.35).color)
-            .overlay(Capsule().strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)))
+            .overlay(Capsule().strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1))
+            .frame(height: Self.trackHeight))
+    }
+}
+
+/// ★ B10 (Touch): a Flexible target's frame for the hosted tests (FlexibleKeepOutKey), published only while a test records —
+/// the page's keep-outs never read these keys, and the app never pays for them.
+enum FlexibleTouch {
+    static func publish(_ key: String) -> some View {
+        GeometryReader { g in
+            Color.clear.preference(key: FlexibleKeepOutKey.self, value: FlexibleSaid.recording ? [key: g.frame(in: .global)] : [:])
+        }
+        .allowsHitTesting(false)
     }
 }
 

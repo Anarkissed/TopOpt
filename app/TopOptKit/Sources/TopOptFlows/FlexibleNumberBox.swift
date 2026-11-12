@@ -187,6 +187,11 @@ struct FlexNumberBox: View {
     private var boxHeight: CGFloat { parts ? Self.partsHeight : Self.height }
     /// ★ REVIEW OF R7-D2: his 44 pt target rule.
     static let target: CGFloat = 44
+    /// Test control only (FlexibleB10SweepHostedTests' red control): the Squish page's boxes take taps on their 34 pt look only.
+    @MainActor static var controlOldTarget = false
+    /// ★ B10 (Touch): the Squish page's box keeps its 34 pt look, its number and its unit menu each a 44 pt target (they were
+    /// the 34 pt look); the main page's boxes keep their own `hitHeight` band (above).
+    private var targetHeight: CGFloat { parts && !Self.controlOldTarget ? Self.target : boxHeight }
 
     var body: some View {
         let shown = scrub.map { FlexNumberSpec.format($0.shown, decimals: spec.decimals) } ?? (shownOverride ?? spec.text)
@@ -209,7 +214,7 @@ struct FlexNumberBox: View {
                     // the number (and the up / down hint): a TAP opens the keypad, a vertical DRAG scrubs
                     Button { padTarget = key } label: {
                         number(shown)
-                            .frame(height: boxHeight)
+                            .frame(height: targetHeight)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -221,9 +226,9 @@ struct FlexNumberBox: View {
                         unitView
                     }
                 }
-                .modifier(BoxLook(compact: compact, lit: lit, parts: parts))
+                .modifier(BoxLook(compact: compact, lit: lit, parts: parts, target: targetHeight, published: AnyView(published)))
                 .fixedSize()
-                .background(published)
+                .background(FlexibleTouch.publish("numberBoxTarget-\(key)"))
             }
         }
         .numberPad(Binding(get: { padTarget == key }, set: { if !$0, padTarget == key { padTarget = nil } }),
@@ -288,15 +293,22 @@ struct FlexNumberBox: View {
         let compact: Bool
         let lit: Bool
         var parts = false
+        /// ★ B10 (Touch): the box's layout height (its targets'); the look is drawn `look` tall, centred in it.
+        var target: CGFloat? = nil
+        /// The look's own frame ("numberBox-<key>"), published from the drawn box — never the larger target.
+        var published: AnyView? = nil
         func body(content: Content) -> some View {
             let r: CGFloat = parts ? 12 : 8
+            let look = parts ? FlexNumberBox.partsHeight : FlexNumberBox.height
             content
                 .padding(.horizontal, (compact ? 7 : 9) + (parts ? 1 : 0))
-                .frame(height: parts ? FlexNumberBox.partsHeight : FlexNumberBox.height)
+                .frame(height: max(target ?? look, look))
                 .background(RoundedRectangle(cornerRadius: r, style: .continuous).fill(DS.Color.fillSubtle.color)
                     .overlay(RoundedRectangle(cornerRadius: r, style: .continuous)
                         .strokeBorder((lit ? DS.Color.accent : parts ? DS.Color.strokePanel : DS.Color.strokeStrong).color,
-                                      lineWidth: lit ? 1.5 : 1)))
+                                      lineWidth: lit ? 1.5 : 1))
+                    .frame(height: look)
+                    .background(published))
         }
     }
 
@@ -315,7 +327,7 @@ struct FlexNumberBox: View {
                     Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold))
                 }
                 .foregroundStyle(DS.Color.accent.color)
-                .frame(minHeight: boxHeight)
+                .frame(minHeight: targetHeight)
                 .contentShape(Rectangle())
             }
             .menuIndicator(.hidden)
