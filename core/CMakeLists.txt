@@ -159,6 +159,15 @@ add_library(topopt
   src/fea/lattice_types.cpp
   src/fea/lattice_material.cpp
   src/fea/strut_strength.cpp
+  # The lattice rebuild's layout engine (docs/design/lattice-rebuild): one layout
+  # object from the part's own surface, read by straight lines. No Eigen, no OCCT.
+  src/lattice_layout/measure.cpp
+  src/lattice_layout/domain.cpp
+  src/lattice_layout/face_prism.cpp
+  src/lattice_layout/cells.cpp
+  src/lattice_layout/struts.cpp
+  src/lattice_layout/bars.cpp
+  src/lattice_layout/session.cpp
   src/orient/orient.cpp
   src/orient/build_orientation.cpp
   src/orient/build_frame.cpp
@@ -498,6 +507,12 @@ endif()
 add_executable(test_lattice_width_bounds tests/unit/test_lattice_width_bounds.cpp)
 target_link_libraries(test_lattice_width_bounds PRIVATE topopt)
 add_test(NAME lattice_width_bounds COMMAND test_lattice_width_bounds)
+
+# The lattice rebuild's layout engine: where lattice goes, cells, struts, bars, joins,
+# skin, rim, cover, pieces and the session (docs/design/lattice-rebuild/02-tests.md).
+add_executable(test_lattice_layout tests/unit/test_lattice_layout.cpp)
+target_link_libraries(test_lattice_layout PRIVATE topopt)
+add_test(NAME lattice_layout COMMAND test_lattice_layout)
 
 # Harness-side lattice material model C(rho) (multiscale-lattice-feasibility
 # probe, 2026-07-31). The model itself lives in tests/harness/
