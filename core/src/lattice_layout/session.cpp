@@ -65,7 +65,9 @@ Outcome Session::lay(const Settings& settings, int threads) {
   }
   out.empty_regions = empty_regions_;
   // (The reading itself happens inside the first lay_cells of a new domain.)
-  out.layout = lay_cells(*domain_, settings.cells, threads);
+  CellSpec cells = settings.cells;
+  cells.allow_quilt = settings.struts.allow_quilt;   // one switch (R2)
+  out.layout = lay_cells(*domain_, cells, threads);
   out.struts = set_struts(out.layout, settings.struts);
   const double laid = ms_since(t0);
   (out.read_again ? out.ms_read : out.ms_cells) = laid;

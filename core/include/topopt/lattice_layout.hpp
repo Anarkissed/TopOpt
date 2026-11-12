@@ -422,15 +422,17 @@ struct CellSpec {
   // struts only (C16). Off, or band 0: cells are cut where the region ends (G7).
   bool grade_to_shape = false;
   double band_mm = 0.0;
-  // G11 (his answer, 2026-11-12: not a taste to be picked for the user; something any
-  // user reaches with the controls, Auto or Manual). How fine a band's cells may go:
-  //   band_finer   0 = no finer than the smallest cell that prints open (C14);
-  //                1 = down to the smallest cell one line draws without closing it (the
-  //                quilt's cell, line / kQuiltStrutPerCell); between, even steps of ratio.
-  //   band_cell_mm Manual: a typed smallest cell for the band, mm. Above 0 it is used
-  //                instead of band_finer. Never under the quilt's cell.
-  // Inside a Grade to shape band only (R3): outside it no cell is under the open look.
-  double band_finer = 0.0;
+  // G11, R2 (his rule, 2026-11-12: "it makes sense to thicken it as it gets closer to the
+  // walls, BUT without 'Allow quilting' set to 'on' it should NEVER QUILT"). The band is
+  // a size gradient; whether anything may close past the open look is the Allow quilt
+  // switch's alone, the same switch as StrutSpec::allow_quilt.
+  //   allow_quilt  off: no cell of a band is under the smallest cell that prints open
+  //                (C14). On: a band's cells may go down to the smallest cell one strut
+  //                draws without closing it (the quilt's cell).
+  //   band_cell_mm Manual: a typed smallest cell for the band, mm; 0 = the limit above.
+  //                Held at that limit when it asks for less.
+  // Inside a Grade to shape band only: outside it no cell is under the open look.
+  bool allow_quilt = false;
   double band_cell_mm = 0.0;
 };
 
@@ -581,7 +583,8 @@ struct StrutSpec {
   // R11: a typed strut width, mm. > 0: this width in every cell, whatever the dial says.
   double width_mm = 0.0;
   // R2: off, no strut is wider than the open look (kSteppedPrintsOpenMaxStrutPerCell of
-  // its cell). On, a strut may go up to the quilt.
+  // its cell), in a Grade to shape band as anywhere else: the band still thickens its
+  // struts toward the outline, and stops there. On, a strut may go up to the quilt.
   bool allow_quilt = false;
   // G4: how much the band raises a strut toward the quilt, as 2^strength, -1 .. 1.
   double strength = 0.0;
@@ -737,7 +740,7 @@ struct Settings {
   std::vector<RegionAsk> regions;
   std::vector<ProtectAsk> protect;
   // The cells, the struts, and what happens to cut ends.
-  CellSpec cells;
+  CellSpec cells;          // its allow_quilt is not read: the switch is struts.allow_quilt
   StrutSpec struts;
   bool bars = true;              // false: cells and strut widths only
   bool join_loose = true;        // S5

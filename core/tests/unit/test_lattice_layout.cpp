@@ -1290,9 +1290,12 @@ static void test_grade_to_shape() {
     }
     CHECK(grew == 0);
 
-    // Struts in the band (G8, R3, G4).
+    // Struts in the band (G8, G4), with Allow quilt ON: the band may thicken past the
+    // open look, up to the quilt. (With it off the band stops at the open look:
+    // test_band_never_quilts_without_the_switch.)
     Layout a = l, b = l, c2 = l;
     StrutSpec sp;
+    sp.allow_quilt = true;
     sp.dial = 0.05;   // thin enough that the finest cells are not at the quilt already
     set_struts(a, sp);
     sp.strength = 1.0;
@@ -1313,8 +1316,8 @@ static void test_grade_to_shape() {
       }
       ++band_cells;
       if (c.strut < std::min(ratio * 8.0, q) - 1e-9) ++thinner;          // G8
-      if (c.strut > q + 1e-9) ++past_quilt;                               // R3, R9
-      if (c.strut > (0.7592 / 4.0) * c.size + 1e-9) ++past_open;          // R3: allowed here
+      if (c.strut > q + 1e-9) ++past_quilt;                               // R9
+      if (c.strut > (0.7592 / 4.0) * c.size + 1e-9) ++past_open;          // R2: allowed with the switch on
       const double lines = c.strut / 0.2;
       if (std::fabs(lines - std::round(lines)) > 1e-6 && std::fabs(c.strut - q) > 1e-9) ++not_lines;
       if (c.strut / c.size > ratio + 1e-9) ++denser;
@@ -1329,8 +1332,9 @@ static void test_grade_to_shape() {
     CHECK(denser == band_cells);          // denser all the way to the outline (G8)
     CHECK(weaker == 0 && stronger > 0);   // G4
     CHECK(moved_outside == 0);
-    // R11: a typed width holds inside the band too, up to the quilt.
+    // R11: a typed width holds inside the band too, up to the quilt (the switch on).
     sp = StrutSpec{};
+    sp.allow_quilt = true;
     sp.width_mm = 0.6;
     set_struts(a, sp);
     int not_typed = 0;
@@ -1348,7 +1352,7 @@ static void test_grade_to_shape() {
       on.grade_to_shape = true;
       on.band_mm = band;
       const Layout open_look = lay_cells(d45, on);
-      on.band_finer = 1.0;
+      on.allow_quilt = true;
       const Layout fine = lay_cells(d45, on);
       const double floor = open_look.floor_cell_mm, closes = 0.45 / kQuiltStrutPerCell;
       double f0 = 8.0, f1 = 8.0;
@@ -1372,7 +1376,7 @@ static void test_grade_to_shape() {
       // Away from a band nothing changes: the switch alone moves no cell.
       CellSpec plain_fine = off;
       plain_fine.algorithm = algo;
-      plain_fine.band_finer = 1.0;
+      plain_fine.allow_quilt = true;
       CellSpec plain_off = off;
       plain_off.algorithm = algo;
       CHECK(lay_cells(d45, plain_fine).cells == lay_cells(d45, plain_off).cells);
@@ -1581,44 +1585,92 @@ static void test_kept_readings() {
   }
 }
 
-// G11 (his answer, 2026-11-12): how fine the band goes is a control, Auto or typed, not a
-// switch and not a taste. A 7 mm wall on a 0.45 mm line, band 6, Stepped.
-static void test_band_fineness_is_a_control() {
+// G11, R2 (his rule, 2026-11-12): "it makes sense to thicken it as it gets closer to the
+// walls, BUT without 'Allow quilting' set to 'on' it should NEVER QUILT." A 14 mm wall on
+// a 0.45 mm line, band 6, Stepped, two-line struts.
+static void test_band_never_quilts_without_the_switch() {
   PartMeasure pm(weld_mesh(box(60, 14, 40)));
   DomainSpec s;
   s.regions = {face_region(1, Role::Lattice, {30, 0, 20}, {0, 1, 0}, 30, 30, 14)};
   Domain d(pm, s);
-  auto smallest = [&](double finer, double typed) {
+  const double open = kSteppedPrintsOpenMaxStrutPerCell;
+  auto laid = [&](bool allow_quilt, double typed, double strength = 0.0, double dial = 0.45) {
     CellSpec cs;
     cs.algorithm = Algorithm::Stepped;
     cs.cell_max_mm = 14.0;
     cs.grade_to_shape = true;
     cs.band_mm = 6.0;
-    cs.band_finer = finer;
+    cs.allow_quilt = allow_quilt;
     cs.band_cell_mm = typed;
-    const Layout l = lay_cells(d, cs);
+    Layout l = lay_cells(d, cs);
+    StrutSpec ss;
+    ss.allow_quilt = allow_quilt;
+    ss.strength = strength;
+    ss.dial = dial;
+    set_struts(l, ss);
+    return l;
+  };
+  auto smallest = [](const Layout& l) {
     double least = 1e9;
     for (const Cell& c : l.cells) least = std::min(least, c.size);
     return least;
   };
-  // With two-line struts (0.9 mm) the smallest cell that prints open is 4.742 mm and the
-  // quilt's cell is 2.546 mm. A 14 mm cell divides into 7, 4.667, 3.5, 2.8 (and 2.333,
-  // under even the quilt's).
-  NEAR(smallest(0.0, 0.0), 7.0, 1e-6);            // open look only: 14 and 7
-  NEAR(smallest(0.1, 0.0), 14.0 / 3.0, 1e-6);     // a touch finer admits 4.667
-  NEAR(smallest(0.5, 0.0), 3.5, 1e-6);            // half way (3.474) admits 3.5
-  NEAR(smallest(1.0, 0.0), 2.8, 1e-6);            // the quilt's cell admits 2.8
-  NEAR(smallest(7.0, 0.0), 2.8, 1e-6);            // past the end is the end
-  NEAR(smallest(-1.0, 0.0), 7.0, 1e-6);
-  NEAR(smallest(0.0, 3.0), 3.5, 1e-6);            // typed: nothing under 3 mm
-  NEAR(smallest(1.0, 4.0), 14.0 / 3.0, 1e-6);     // typed wins over the slider
-  NEAR(smallest(0.0, 0.5), 2.8, 1e-6);            // typed under the quilt's cell is held at it
-  NEAR(smallest(0.0, 8.0), 14.0, 1e-6);           // typed above the open floor: a coarser band
-  // Without a band none of it applies.
+  auto most_closed = [](const Layout& l) {   // the widest strut over cell there is
+    double most = 0.0;
+    for (const Cell& c : l.cells) most = std::max(most, c.strut / c.size);
+    return most;
+  };
+  // The smallest cell that prints open is 4.742 mm and the quilt's cell 2.546 mm. A 14 mm
+  // cell divides into 7, 4.667, 3.5, 2.8.
+  // Switch off: cells never under the open look's, struts never past the open look,
+  // whatever the band's strength or the dial ask.
+  for (double strength : {0.0, 1.0})
+    for (double dial : {0.45, 1.0}) {
+      const Layout l = laid(false, 0.0, strength, dial);
+      NEAR(smallest(l), 7.0, 1e-6);
+      CHECK(most_closed(l) <= open + 1e-12);
+    }
+  {  // A typed strut width (R11) obeys it too, in the band and out of it.
+    CellSpec cs;
+    cs.algorithm = Algorithm::Stepped;
+    cs.cell_max_mm = 14.0;
+    cs.grade_to_shape = true;
+    cs.band_mm = 6.0;
+    Layout l = lay_cells(d, cs);
+    StrutSpec typed;
+    typed.width_mm = 3.0;
+    const StrutReport held = set_struts(l, typed);
+    CHECK(most_closed(l) <= open + 1e-12 && held.at_ceiling == l.cells.size());
+    typed.allow_quilt = true;
+    set_struts(l, typed);
+    CHECK(most_closed(l) > open + 1e-6);
+  }
+  NEAR(smallest(laid(false, 3.0)), 7.0, 1e-6);         // a typed 3 mm is held at the open look's
+  NEAR(smallest(laid(false, 8.0)), 14.0, 1e-6);        // a typed coarser band is honoured
+  {  // The band still thickens toward the outline: at the edge the strut is wider than in
+     // the middle of the face, and stops at the open look.
+    const Layout l = laid(false, 0.0, 1.0);
+    double at_edge = 0.0, inside = 1e9;
+    for (const Cell& c : l.cells) {
+      if (c.band < 0.3) at_edge = std::max(at_edge, c.strut / c.size);
+      if (c.band >= 1.0) inside = std::min(inside, c.strut / c.size);
+    }
+    CHECK(at_edge > inside + 1e-6);
+    CHECK(at_edge <= open + 1e-12);
+  }
+  // Switch on: the band may use the smaller, less open cells, and thicken to the quilt.
+  {
+    const Layout l = laid(true, 0.0, 1.0);
+    NEAR(smallest(l), 2.8, 1e-6);
+    CHECK(most_closed(l) > open + 1e-6 && most_closed(l) <= kQuiltStrutPerCell + 1e-12);
+  }
+  NEAR(smallest(laid(true, 3.0)), 3.5, 1e-6);          // typed: nothing under 3 mm
+  NEAR(smallest(laid(true, 0.5)), 2.8, 1e-6);          // typed under the quilt's cell is held at it
+  // Without a band the switch moves no cell.
   CellSpec plain;
   plain.algorithm = Algorithm::Stepped;
   plain.cell_max_mm = 14.0;
-  plain.band_finer = 1.0;
+  plain.allow_quilt = true;
   plain.band_cell_mm = 3.0;
   CellSpec base;
   base.algorithm = Algorithm::Stepped;
@@ -2574,6 +2626,28 @@ static void test_session() {
   const Outcome kept = session.lay(two);
   CHECK(kept.bars.dropped > 0 && kept.bars.bars.size() < joined.bars.bars.size());
   CHECK(!kept.read_again);
+  // Allow quilt is ONE switch (R2): the session hands the struts' to the cells. The
+  // 10 mm plate, two-line struts, band 6, the region pulled 1.5 mm in so its outline
+  // cuts cells (only the finest may be cut, G10): off, no cell under 4.742 mm, so 5 mm;
+  // on, 3.333 mm cells.
+  Settings band;
+  band.regions = {{1, Role::Lattice, {square}, 10.0, -1.5}};
+  band.cells.algorithm = Algorithm::Stepped;
+  band.cells.cell_max_mm = 10;
+  band.cells.grade_to_shape = true;
+  band.cells.band_mm = 6;
+  band.cells.allow_quilt = true;          // not read: the switch is the struts'
+  band.bars = false;
+  auto least = [](const Outcome& o) {
+    double m = 1e9;
+    for (const Cell& c : o.layout.cells) m = std::min(m, c.size);
+    return m;
+  };
+  NEAR(least(session.lay(band)), 5.0, 1e-6);
+  band.struts.allow_quilt = true;
+  const Outcome quilted = session.lay(band);
+  NEAR(least(quilted), 10.0 / 3.0, 1e-6);
+  CHECK(!quilted.read_again);             // the switch re-lays; it does not read the part again
 }
 
 // C11a (reviewer's ruling 2026-11-11 23:52Z): the cells a member must hold are counted
@@ -2763,7 +2837,7 @@ static void test_finer_cells_stay_in_the_band() {
       cs.algorithm = algo;
       cs.grade_to_shape = true;
       cs.band_mm = band;
-      cs.band_finer = 1.0;
+      cs.allow_quilt = true;
       const Layout l = lay_cells(d, cs);
       int in_band = 0, outside = 0;
       for (const Cell& c : l.cells) {
@@ -2793,7 +2867,7 @@ static void test_finer_cells_stay_in_the_band() {
     CellSpec off;
     off.algorithm = Algorithm::Stepped;
     CellSpec on = off;
-    on.band_finer = 1.0;
+    on.allow_quilt = true;
     const Layout a = lay_cells(d, off), b = lay_cells(d, on);
     CHECK(!a.cells.empty());
     CHECK(a.cells == b.cells && a.solid == b.solid);
@@ -2829,7 +2903,7 @@ int main() {
   test_cells_behind_a_protect_skin();
   test_finer_cells_stay_in_the_band();
   test_cells_across_the_narrowest_width();
-  test_band_fineness_is_a_control();
+  test_band_never_quilts_without_the_switch();
   test_two_line_struts();
   test_cells_across_the_room_between_skins();
   test_cells_behind_a_pocket();

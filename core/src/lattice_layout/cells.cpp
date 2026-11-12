@@ -678,16 +678,14 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
   // Lay one pass over the box [lo, hi] of its frame, in slots of `base`.
   auto lay = [&](Pass& pass, double base, const double lo[3], const double hi[3],
                  bool depth_from_zero) {
-    // G11: how fine a band's cells may go is the user's to set. From the smallest cell
-    // that prints open (band_finer 0) down to the smallest one line draws without closing
-    // it, the quilt's cell (band_finer 1), in even steps of ratio; or a typed size.
+    // G11, R2: a band is a size gradient. Without Allow quilt none of its cells is under
+    // the smallest cell that prints open; with it they may go down to the quilt's cell.
+    // A typed smallest cell (Manual) is held at whichever of the two applies.
     const double open_floor = out.floor_cell_mm, quilt_floor = min_strut / kQuiltStrutPerCell;
     double band_floor = open_floor;
     if (pass.band_region != nullptr) {
-      if (spec.band_cell_mm > 0.0)
-        band_floor = std::max(spec.band_cell_mm, quilt_floor);
-      else
-        band_floor = open_floor * std::pow(quilt_floor / open_floor, std::clamp(spec.band_finer, 0.0, 1.0));
+      const double limit = spec.allow_quilt ? quilt_floor : open_floor;
+      band_floor = spec.band_cell_mm > 0.0 ? std::max(spec.band_cell_mm, limit) : limit;
     }
     const bool fine = band_floor < open_floor * (1.0 - 1e-12);
     const double tile_min =
