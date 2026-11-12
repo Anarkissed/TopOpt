@@ -237,8 +237,14 @@ public enum NewModelVersion {
     }
 
     /// The toast once the new version is in.
-    public static func doneLine(version: String, lost: Int) -> String {
-        lost == 0 ? "\(version) · New model · every group found its faces"
+    /// ★ #362 (UI-Notes' catch, 11-12): `flexibleLost` — a Flexible part's pressed or resting faces and presses that found no face
+    /// (FlexibleNewModelState.lostCount), said in the Squish page's own words. Its edge and corner presses are re-found only when
+    /// the scene opens, so they are not counted here (the Squish page's list says them).
+    public static func doneLine(version: String, lost: Int, flexibleLost: Int = 0) -> String {
+        if flexibleLost > 0 {
+            return "\(version) · New model · \(flexibleLost) pressed face\(flexibleLost == 1 ? " lost its face" : "s lost their faces")"
+        }
+        return lost == 0 ? "\(version) · New model · every group found its faces"
             : "\(version) · New model · \(lost) group\(lost == 1 ? " lost its" : "s lost their") faces"
     }
 

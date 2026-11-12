@@ -204,6 +204,25 @@ final class UploadNewVersionTests: XCTestCase {
         XCTAssertEqual(d.newModel?.lostGroups ?? [], [], "Flexible's lost items never go in the Topology groups' list")
     }
 
+    /// ★ #362 (UI-Notes' catch, 11-12): the toast the new version opens with counts a Flexible part's lost faces (RED CONTROL:
+    /// the Topology count alone said "every group found its faces" while the Squish page said one was lost).
+    func testTheToastCountsAFlexiblePartsLostFaces() {
+        XCTAssertEqual(NewModelVersion.doneLine(version: "v8", lost: 0), "v8 · New model · every group found its faces",
+                       "RED CONTROL: the Topology count alone")
+        XCTAssertEqual(NewModelVersion.doneLine(version: "v8", lost: 0, flexibleLost: 1), "v8 · New model · 1 pressed face lost its face")
+        XCTAssertEqual(NewModelVersion.doneLine(version: "v8", lost: 0, flexibleLost: 2), "v8 · New model · 2 pressed faces lost their faces")
+        var l = LatticeSettings()
+        var flex = FlexibleStageSettings()
+        flex.faces = [FlexibleFaceSettings(faceRegionID: 3, weightKg: 9)]
+        l.flexible = flex
+        let d = NewModelVersion.draft(from: parent(lattice: l), id: UUID(), savedAt: Date(), modelFileName: "model.step",
+                                      originalFileName: "Pad rev2.step", modelHash: "h2", match: FaceMatch(map: [4: [4], 6: [6]]))
+        XCTAssertEqual(d.lattice?.flexible?.newModel?.lostCount, 1, "premise: its pressed face found none")
+        XCTAssertEqual(NewModelVersion.doneLine(version: "v8", lost: d.newModel?.lostGroups.count ?? 0,
+                                                flexibleLost: d.lattice?.flexible?.newModel?.lostCount ?? 0),
+                       "v8 · New model · 1 pressed face lost its face", "★ what the toast says for this draft")
+    }
+
     // MARK: a group that found no face
 
     func testALostGroupBlocksOptimizeInFiveWords() {
