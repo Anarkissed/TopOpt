@@ -785,7 +785,8 @@ public final class AppModel: ObservableObject {
         library.refresh()
         let number = library.version(d.id).map { "v\($0.number)" } ?? "The new version"
         open(recent)
-        toast = NewModelVersion.doneLine(version: number, lost: d.newModel?.lostGroups.count ?? 0)
+        toast = NewModelVersion.doneLine(version: number, lost: d.newModel?.lostGroups.count ?? 0,
+                                         flexibleLost: d.lattice?.flexible?.newModel?.lostCount ?? 0)   // ★ #362: Flexible's own
     }
 
     /// Whether Continue is enabled: a watertight file is imported and a material
