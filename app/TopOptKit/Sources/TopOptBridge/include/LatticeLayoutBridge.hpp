@@ -8,8 +8,8 @@
 //
 // Threads: a session lays one layout at a time (its own lock). The app calls from one large-stack worker thread, never main
 // (his 10-28 iPad crash: the main thread's stack is small). `lattice_layout_cancel` makes the layout running now, and any
-// asked before it, come back `cancelled` with nothing in it; core's own lay() is not stopped mid-way yet (a cancel flag inside
-// Session::lay is asked of LatticeReview).
+// asked before it, come back `cancelled` with nothing in it — core's own stop flag (Session::lay's `stop`) gives the running
+// one up within one cell's work.
 #pragma once
 
 #include <cstdint>

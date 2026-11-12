@@ -134,6 +134,8 @@ public struct WorkspacePlaceholder: View {
     /// ★ B6 s3b (R2.2, §4.13): Start from's in-place ask — the mode it would switch to (true: −), nil: none.
     @State private var latticeModeAsk: Bool?
     @StateObject private var flexibleMain = FlexibleMainStage()   // Flexible (PR #362): the ONE Flexible model per project + the main page's lattice (FlexibleMainStage.swift)
+    @StateObject private var newEngine = LatticeLayoutPreview()   // ★ the lattice rebuild's preview, behind "New engine (test)"
+    @ObservedObject private var appSettings = AppSettings.shared
     @State private var strutScene: LatticeSDFScene? = nil
     @State private var strutSceneToken = 0
     /// ★★ WHETHER A STRUT BAKE IS IN FLIGHT (maintainer, 2026-08-19: "There is
@@ -1184,7 +1186,7 @@ public struct WorkspacePlaceholder: View {
                           // each other, with the lattice's albedo alpha as its
                           // mask. Two visible surfaces is a case that pass was
                           // built for; it is no longer "the body OR the struts".
-                          bodyAlpha: flexibleMain.bodyAlpha(project, on: stage) ?? latticePreviewBodyAlpha,   // Flexible H4: X-ray
+                          bodyAlpha: newEngineDrawn ? LatticeLayoutPreview.ghostAlpha : (flexibleMain.bodyAlpha(project, on: stage) ?? latticePreviewBodyAlpha),   // Flexible H4: X-ray
                           // Detent face-highlight pulse (item 2): flash the snapped part face.
                           detentPulse: detentPulse,
                           // Paint mode (handoff 2026-07-25): when on, a one-finger drag brushes
@@ -1228,7 +1230,7 @@ public struct WorkspacePlaceholder: View {
                           // The gate is UNCHANGED — the same `showStrutPreview` and the
                           // same stage conditions the stacked view had, and the same
                           // `bodyAlpha: 0` beside it (bar A3).
-                          latticeLayer: latticeLayerIsDrawn
+                          latticeLayer: latticeLayerIsDrawn && !newEngineDrawn   // ★ the new engine (test) draws in its place
                               ? strutScene.map {
                                   LatticeLayerInputs(scene: $0,
                                                      params: latticeProxy.params,
@@ -1307,9 +1309,13 @@ public struct WorkspacePlaceholder: View {
                                                         || latticeSimIsRunning)
                               }
                               : nil,
-                          flexibleLattice: flexibleMain.layer(project, stage: stage, pageUp: fullScreenPageUp))   // Flexible (PR #362) H3: the main page's lattice + its squish loop (FlexibleMainStage.swift)
+                          flexibleLattice: flexibleMain.layer(project, stage: stage, pageUp: fullScreenPageUp),   // Flexible (PR #362) H3: the main page's lattice + its squish loop (FlexibleMainStage.swift)
+                          layoutBars: newEngineDrawn ? newEngine.bars : nil)   // ★ the new engine (test): its bars (LatticeLayoutPreview)
                 .onEmptyTap { emptyTapClears() }   // ★ his iPad 10-26 (5): a tap on empty space clears the selection
                 .onTapRay(primitiveTapRay)   // ★ his iPad 10-28: a tap on a keep-clear volume picks it
+                .overlay(alignment: .bottom) { if newEngineDrawn { LatticeLayoutPreviewLines(preview: newEngine) } }   // ★ the new engine (test): its lines
+                .onChange(of: newEngineOn) { on in newEngine.update(project: project, on: on) }
+                .onChange(of: project.lattice) { _ in if newEngineOn { newEngine.update(project: project, on: true) } }
                 .ignoresSafeArea()
                 // ★ §6(g) — THE PENCIL HOVER, ON THE MESH VIEW ITSELF.
                 //
@@ -4798,6 +4804,12 @@ public struct WorkspacePlaceholder: View {
         guard let s = strutScene else { return true }
         return s.partInteriorVoxelCount == 0 || s.interiorVoxelCount == 0
     }
+
+    /// ★ THE NEW ENGINE (test) is asked for: App settings' "New engine (test)" (OFF by default) on Lattice Setup with the
+    /// lattice view up. Off, nothing of the new engine runs and the page is today's.
+    private var newEngineOn: Bool { appSettings.newEngineTest && latticeSetupUp && showStrutPreview && latticeViewsUp }
+    /// …and draws in the old engine's place (its bars, the body ghosted, its lines under the view).
+    private var newEngineDrawn: Bool { newEngineOn }
 
     /// ★ THE ONE EXPRESSION that decides whether the raymarched lattice layer is drawn.
     /// Read BOTH by the `latticeLayer:` input and by `latticePreviewBodyAlpha`, because

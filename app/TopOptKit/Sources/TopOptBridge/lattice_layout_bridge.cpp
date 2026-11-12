@@ -45,6 +45,7 @@ struct LayoutSession {
   std::unique_ptr<ll::Outcome> last;
   std::unique_ptr<ll::SolidAt> solid_at;          // built once per layout, on the first "where"
   std::atomic<uint64_t> cancel_gen{0};
+  std::atomic<bool> stop{false};                   // core's own stop (Session::lay): a running layout gives up within one cell's work
 };
 
 std::mutex& g_layout_mu = *new std::mutex;        // never destroyed (the scenes' rule, T1)
@@ -225,9 +226,16 @@ LatticeLayoutResult lattice_layout(int64_t session, const LatticeLayoutSettings&
     const uint64_t gen = s->cancel_gen.load();       // a cancel after this point, or one that came while it waited, wins
     const ll::Settings ask = settings_from(settings);   // a bad setting fails before the wait
     std::lock_guard<std::mutex> lock(s->mu);
+    s->stop = false;                                  // FIRST (LatticeReview's recipe), then the gen test: a cancel after this point stops it
     if (s->cancel_gen.load() != gen) { o.cancelled = true; return; }
     const auto t0 = std::chrono::steady_clock::now();
-    auto out = std::make_unique<ll::Outcome>(s->session->lay(ask));
+    auto out = std::make_unique<ll::Outcome>(s->session->lay(ask, 0, &s->stop));
+    if (out->cancelled) {   // core gave up mid-way; what the session keeps is whole, but its domain may be the new one —
+      s->solid_at.reset();  // so "where" says nothing until the next whole layout (never the old cells on a new domain)
+      s->last.reset();
+      o.cancelled = true;
+      return;
+    }
     // the old layout's SolidAt points into the old outcome: both go together
     s->solid_at.reset();
     s->last = std::move(out);
@@ -281,6 +289,7 @@ void lattice_layout_cancel(int64_t session) {
     if (it == g_layouts.end()) return;
     s = it->second;
   }
+  s->stop = true;
   s->cancel_gen.fetch_add(1);
 }
 
@@ -293,6 +302,7 @@ void lattice_layout_close(int64_t session) {
     s = std::move(it->second);
     g_layouts.erase(it);
   }
+  s->stop = true;
   s->cancel_gen.fetch_add(1);   // anything still waiting on it comes back cancelled; it is freed when the last call returns
 }
 

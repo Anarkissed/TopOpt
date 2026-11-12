@@ -1585,6 +1585,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// byte-for-byte what it was before this task.
     private var latticeLayer: LatticeSDFRenderer?
     var flexibleLattice: FlexibleLatticePass?   // Flexible (PR #362): a third G-buffer writer (FlexibleLatticePass.swift); nil = #354's frame
+    var layoutBars: LatticeLayoutBarsPass?   // the new engine's bars (#362, LatticeLayoutBarsPass.swift); nil = today's frame
     /// The scene token last uploaded, so a bake happens once per scene change and never
     /// per frame (the preview's bar P2, carried over unchanged).
     private var latticeSceneToken: Int = -1
@@ -3480,7 +3481,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // ★ AND WHENEVER A LATTICE IS IN THE FRAME (unified shading). The lattice's
         // pixels are PRODUCED by the prepass now — it is not an optional quality
         // treatment for them, it is where they come from.
-        let wantsLattice = (latticeInFrame || flexibleLatticeInFrame) && latticeGBufferPipeline != nil
+        let wantsLattice = (latticeInFrame || flexibleLatticeInFrame || layoutBarsInFrame) && latticeGBufferPipeline != nil
             && latticeShadePipeline != nil
         let wantsAO = !quality.isDisjoint(with: [.ambientOcclusion, .edges]) && aoPipeline != nil
         // The G-buffer is single-sampled, so it is sized from the RESOLVE target when
@@ -4666,7 +4667,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         let lattice = latticeInFrame ? latticeLayer : nil
         guard let dpipe = depthPrepassPipeline, vertexDrawCount > 0,
               let vbuf = vertexBuffer, let fbuf = flexBuffer,
-              shellVisible || lattice != nil || flexibleLatticeInFrame,
+              shellVisible || lattice != nil || flexibleLatticeInFrame || layoutBarsInFrame,
               let tex = sceneDepthTextures(width: width, height: height) else { return nil }
         let pd = MTLRenderPassDescriptor()
         pd.colorAttachments[0].texture = tex.color
@@ -4827,6 +4828,11 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
            fx.encodeGBuffer(penc, depthState: depthState, camera: camera, modelRotation: modelRotation, modelCenter: modelCenter, aspect: aspect,
                             clipFromModel: uniforms.mvp, eyeFromModel: uniforms.modelView, eyeNormalBasis: uniforms.normalMatrix, squish: flexScale) {
             frameDrawCalls += 1; frameVertices += 3 }
+        // the new engine's bars (#362): the fourth writer — same encoder, attachments and .less + write depth state
+        if layoutBarsInFrame, let bars = layoutBars,
+           bars.encodeGBuffer(penc, depthState: depthState, clipFromModel: uniforms.mvp, eyeFromModel: uniforms.modelView,
+                              eyeNormalBasis: uniforms.normalMatrix) {
+            frameDrawCalls += 1; frameVertices += 36 * bars.count }
         penc.endEncoding()
         return (tex.color, tex.normal, tex.albedo)
     }
@@ -5819,6 +5825,8 @@ struct MeshViewInputs {
     /// byte-for-byte what it was.
     var latticeLayer: LatticeLayerInputs? = nil
     var flexibleLattice: FlexibleLatticeLayerInputs? = nil
+    /// The new engine's bars (#362, LatticeLayoutBarsPass; behind "New engine (test)"). nil = today's frame.
+    var layoutBars: LatticeLayoutBarsInputs? = nil
 }
 
 /// ★ THE LATTICE AS A LAYER OF THE MESH VIEW, NOT A VIEW BESIDE IT.
@@ -6012,7 +6020,7 @@ public struct MetalMeshView: UIViewRepresentable {
                 inputDiscipline: SurfaceInputDiscipline = .off,
                 onPencilSeen: (() -> Void)? = nil,
                 latticeLayer: LatticeLayerInputs? = nil,
-                flexibleLattice: FlexibleLatticeLayerInputs? = nil) {
+                flexibleLattice: FlexibleLatticeLayerInputs? = nil, layoutBars: LatticeLayoutBarsInputs? = nil) {
         inputs = MeshViewInputs(mesh: mesh, camera: camera, selection: selection, faceTints: faceTints,
                                 vertexTints: vertexTints, extraLines: extraLines,
                                 cutRibbon: cutRibbon,
@@ -6036,7 +6044,7 @@ public struct MetalMeshView: UIViewRepresentable {
             brushRequiresPencil: brushRequiresPencil,
             onBrushRefused: onBrushRefused,
             inputDiscipline: inputDiscipline, onPencilSeen: onPencilSeen,
-            latticeLayer: latticeLayer, flexibleLattice: flexibleLattice)
+            latticeLayer: latticeLayer, flexibleLattice: flexibleLattice, layoutBars: layoutBars)
     }
 
     public func makeCoordinator() -> Coordinator { Coordinator() }
@@ -6177,7 +6185,7 @@ public struct MetalMeshView: NSViewRepresentable {
                 inputDiscipline: SurfaceInputDiscipline = .off,
                 onPencilSeen: (() -> Void)? = nil,
                 latticeLayer: LatticeLayerInputs? = nil,
-                flexibleLattice: FlexibleLatticeLayerInputs? = nil) {
+                flexibleLattice: FlexibleLatticeLayerInputs? = nil, layoutBars: LatticeLayoutBarsInputs? = nil) {
         inputs = MeshViewInputs(mesh: mesh, camera: camera, selection: selection, faceTints: faceTints,
                                 vertexTints: vertexTints, extraLines: extraLines,
                                 cutRibbon: cutRibbon,
@@ -6201,7 +6209,7 @@ public struct MetalMeshView: NSViewRepresentable {
             brushRequiresPencil: brushRequiresPencil,
             onBrushRefused: onBrushRefused,
             inputDiscipline: inputDiscipline, onPencilSeen: onPencilSeen,
-            latticeLayer: latticeLayer, flexibleLattice: flexibleLattice)
+            latticeLayer: latticeLayer, flexibleLattice: flexibleLattice, layoutBars: layoutBars)
     }
 
     public func makeCoordinator() -> Coordinator { Coordinator() }
@@ -6915,6 +6923,7 @@ extension MetalMeshView {
             }
 
             if renderer.applyFlexibleLattice(inputs.flexibleLattice, device: view.device, baseScale: appliedFlexScale) { dirty = true }   // token-keyed upload in FlexibleLatticePass.swift; squish frames already dirty via flexScale; baseScale: the view's own squish, back when a loop lets go
+            if renderer.applyLayoutBars(inputs.layoutBars, device: view.device) { dirty = true }   // the new engine's bars (#362): token-keyed upload
             if dirty { redraw(view) }
             // Publish the camera projection (deduped) on the NEXT runloop, never inline:
             // `onProjection` writes the host view's `@State projection`, and `apply` runs

@@ -44,7 +44,7 @@ public final class LatticeLayoutSession: @unchecked Sendable {
     public struct Settings: Sendable, Equatable {
         public var allLattice = false
         public var beadMM = 0.45
-        public var minStrutLines = 1.0
+        public var minStrutLines = 2.0   // ★ two lines (the reviewer's ruling 11-12: one line does not print on his 0.4 mm nozzle)
         public var minWallMM = 0.0
         public var rimMM = 0.0
         public var coverMM = 0.0

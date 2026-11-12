@@ -30,7 +30,7 @@ final class LatticeLayoutSessionTests: XCTestCase {
         return to.path
     }
 
-    func wholePart(cell: Double = 4) -> LatticeLayoutSession.Settings {
+    func wholePart(cell: Double = 6) -> LatticeLayoutSession.Settings {
         var s = LatticeLayoutSession.Settings()
         s.allLattice = true
         s.cellMM = cell
@@ -147,11 +147,11 @@ final class LatticeLayoutSessionTests: XCTestCase {
     func testTheLatestLayWins() async throws {
         let session = try await LatticeLayoutSession.open(path: Self.cubeSTEP)
         let gate = await session.holdWorkerForTests()
-        let a = Task { try await session.lay(self.wholePart(cell: 5)) }
+        let a = Task { try await session.lay(self.wholePart(cell: 7)) }
         try await Task.sleep(nanoseconds: 50_000_000)
-        let b = Task { try await session.lay(self.wholePart(cell: 4.5)) }
+        let b = Task { try await session.lay(self.wholePart(cell: 6.5)) }
         try await Task.sleep(nanoseconds: 50_000_000)
-        let c = Task { try await session.lay(self.wholePart(cell: 4)) }
+        let c = Task { try await session.lay(self.wholePart(cell: 6)) }
         try await Task.sleep(nanoseconds: 50_000_000)
         gate.signal()
         for (name, t) in [("first", a), ("second", b)] {
