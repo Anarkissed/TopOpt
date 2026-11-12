@@ -809,3 +809,17 @@ public extension FaceRegion {
             filterMatchedAtAuthor: filterMatchedAtAuthor)
     }
 }
+
+// MARK: - Upload new version (his ask 2026-11-11, DATA-MODEL.md decision 12)
+
+extension FaceRegionModel {
+    /// Every face a region names by hand (its add and remove lists), on the new model's faces. Its filter is re-evaluated
+    /// on open, as for any re-import, and a change is reported (never absorbed).
+    public mutating func remapFaces(_ to: (FaceID) -> [FaceID]) {
+        func mapped(_ list: [FaceID]) -> [FaceID] { var seen = Set<FaceID>(); return list.flatMap(to).filter { seen.insert($0).inserted } }
+        for i in regions.indices {
+            regions[i].add = mapped(regions[i].add)
+            regions[i].remove = mapped(regions[i].remove)
+        }
+    }
+}

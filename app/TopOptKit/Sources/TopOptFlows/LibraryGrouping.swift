@@ -95,7 +95,7 @@ public enum LibraryGrouping {
             .sorted { ($0.savedAt, $0.id.uuidString) < ($1.savedAt, $1.id.uuidString) }
         for s in new where known.insert(s.id).inserted {
             let h = hash(s).flatMap { $0 == emptyHash ? nil : $0 }
-            if let h, let p = out.parts.firstIndex(where: { $0.modelHash == h }) {
+            if let h, let p = out.parts.firstIndex(where: { $0.holds(modelHash: h) }) {   // ★ decision 12: any of its models
                 let stated = parents[s.id].flatMap { out.parts[p].version(folderID: $0) }
                 let parent = stated ?? out.parts[p].newestMainLine
                 let changes = parent.flatMap { onDisk[$0.folderID] }.map { VersionChanges.between($0, s) } ?? []

@@ -857,6 +857,8 @@ struct PartFolderView: View {
     @State private var renaming: (folder: UUID, name: String)?
     @State private var deleting: LibraryVersion?
     @State private var portrait = false
+    @State private var uploading = false   // ★ Upload new version (decision 12): the file picker
+    @State private var uploadBelow = false   // ★ decision 12: the top row had no room, so it leads the filter row
 
     /// ★ His iPad notes 11-05 (L1): "3 versions per row", as the project page (2 in portrait).
     private var columnCount: Int { portrait ? 2 : 3 }
@@ -908,50 +910,15 @@ struct PartFolderView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: DS.Space.ml) {
-                    LibraryBackPill(title: library.projectOf(part: part.id)?.name ?? "Unfiled", action: back)
-                        .layoutPriority(1)   // B5: at 11P the back target stays whole; the count line gives way first
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(part.name).dsStyle(DS.TypeScale.titleXL)
-                        let done = part.versions.filter { !library.isDraft($0) }.count, drafts = part.versions.count - done
-                        Text("\(library.snapshots[part.versions.first?.folderID ?? UUID()]?.material ?? "") · \(done) version\(done == 1 ? "" : "s")\(drafts > 0 ? " + \(drafts) draft\(drafts == 1 ? "" : "s")" : "")")
-                            .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
-                    }
-                    Spacer()
-                    // ★ B5 (mockup #lib-part): [Compare] [Open v8 draft] [⌄], §4's glass and accent buttons
-                    DSGlassButton("Compare", systemImage: "rectangle.split.2x1", key: "library-compare") {
-                        compare(LibraryCompareRequest(part: part.id, scope: .all))
-                    }
-                    if let t = openTarget {
-                        DSGlassButton(library.isDraft(t) ? "Open v\(t.number) draft" : "Open v\(t.number)", accent: true,
-                                      key: "library-open") { openFolder(t.folderID) }
-                        // his decision 6: the ⌄ lists the drafts (newest first), then every version
-                        Menu {
-                            let drafts = library.drafts(of: part)
-                            if !drafts.isEmpty {
-                                Section("Drafts") {
-                                    ForEach(drafts, id: \.folderID) { d in Button(library.shortTitle(of: d, in: part)) { openFolder(d.folderID) } }
-                                }
-                            }
-                            Section("Versions") {
-                                ForEach(part.versions.filter { !library.isDraft($0) }.sorted { $0.number > $1.number }, id: \.folderID) { d in
-                                    Button(library.shortTitle(of: d, in: part)) { openFolder(d.folderID) }
-                                }
-                            }
-                        } label: {
-                            Image(systemName: "chevron.down").font(.system(size: 15, weight: .bold)).foregroundStyle(DS.Color.textPrimary.color)
-                                .frame(width: DSParts.glassHeight, height: DSParts.glassHeight)
-                                .background(Circle().fill(DS.Surface.bar.color))
-                                .overlay(Circle().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
-                                .contentShape(Circle())
-                        }
-                        .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain).fixedSize()
-                        .background(DSParts.publish("library-open-menu"))
-                        .accessibilityLabel("Open another version")
-                        .accessibilityIdentifier("library-open-menu")
-                    }
+                // ★ Upload new version (his ask 2026-11-11, decision 12): beside Compare when the row has room for it with nothing
+                // wrapped; else this row is exactly as it was, and the button leads the filter row below as a 44 pt icon
+                ViewThatFits(in: .horizontal) {
+                    headerRow(upload: offersUpload).preference(key: LibraryUploadBelowKey.self, value: false)
+                    headerRow(upload: false).preference(key: LibraryUploadBelowKey.self, value: offersUpload)
                 }
+                .onPreferenceChange(LibraryUploadBelowKey.self) { uploadBelow = $0 }
                 HStack(spacing: DS.Space.sm) {
+                    if uploadBelow { uploadIcon }   // ★ decision 12: the top row had no room
                     Spacer()
                     SegmentedGlass([.init(LibraryFilter.all, "All"), .init(.top, "★ 4+"), .init(.print, "Print"), .init(.strong, "Strong enough")],
                                    selection: $filter, small: true)
@@ -1036,11 +1003,111 @@ struct PartFolderView: View {
             }
             Button("Cancel", role: .cancel) { deleting = nil }
         } message: { Text("This permanently removes this version and its results. This can’t be undone.") }
+        // ★ Upload new version (his ask 2026-11-11, decision 12): New part's own file types
+        .fileImporter(isPresented: $uploading, allowedContentTypes: NewModelVersion.allowedTypes,
+                      allowsMultipleSelection: false) { pickedUpload($0) }
+    }
+
+    /// The part page's top row: back, the part's name and count, and its buttons. `upload`: Upload new version beside
+    /// Compare (decision 12).
+    @ViewBuilder private func headerRow(upload: Bool) -> some View {
+        HStack(spacing: DS.Space.ml) {
+            LibraryBackPill(title: library.projectOf(part: part.id)?.name ?? "Unfiled", action: back)
+                .layoutPriority(1)   // B5: at 11P the back target stays whole; the count line gives way first
+            VStack(alignment: .leading, spacing: 2) {
+                Text(part.name).dsStyle(DS.TypeScale.titleXL)
+                let done = part.versions.filter { !library.isDraft($0) }.count, drafts = part.versions.count - done
+                Text("\(library.snapshots[part.versions.first?.folderID ?? UUID()]?.material ?? "") · \(done) version\(done == 1 ? "" : "s")\(drafts > 0 ? " + \(drafts) draft\(drafts == 1 ? "" : "s")" : "")")
+                    .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
+            }
+            Spacer()
+            // ★ Upload new version (his ask 2026-11-11, decision 12): the part's next version from a new model file,
+            // beside Compare in the same glass; Topology parts first (his 4th answer)
+            if upload {
+                DSGlassButton("Upload new version", systemImage: "square.and.arrow.up", key: "library-upload") { uploading = true }
+            }
+            // ★ B5 (mockup #lib-part): [Compare] [Open v8 draft] [⌄], §4's glass and accent buttons
+            DSGlassButton("Compare", systemImage: "rectangle.split.2x1", key: "library-compare") {
+                compare(LibraryCompareRequest(part: part.id, scope: .all))
+            }
+            if let t = openTarget {
+                DSGlassButton(library.isDraft(t) ? "Open v\(t.number) draft" : "Open v\(t.number)", accent: true,
+                              key: "library-open") { openFolder(t.folderID) }
+                // his decision 6: the ⌄ lists the drafts (newest first), then every version
+                Menu {
+                    let drafts = library.drafts(of: part)
+                    if !drafts.isEmpty {
+                        Section("Drafts") {
+                            ForEach(drafts, id: \.folderID) { d in Button(library.shortTitle(of: d, in: part)) { openFolder(d.folderID) } }
+                        }
+                    }
+                    Section("Versions") {
+                        ForEach(part.versions.filter { !library.isDraft($0) }.sorted { $0.number > $1.number }, id: \.folderID) { d in
+                            Button(library.shortTitle(of: d, in: part)) { openFolder(d.folderID) }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "chevron.down").font(.system(size: 15, weight: .bold)).foregroundStyle(DS.Color.textPrimary.color)
+                        .frame(width: DSParts.glassHeight, height: DSParts.glassHeight)
+                        .background(Circle().fill(DS.Surface.bar.color))
+                        .overlay(Circle().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
+                        .contentShape(Circle())
+                }
+                .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain).fixedSize()
+                .background(DSParts.publish("library-open-menu"))
+                .accessibilityLabel("Open another version")
+                .accessibilityIdentifier("library-open-menu")
+            }
+        }
+    }
+
+    /// ★ Upload new version (decision 12): offered on this part (Topology parts first, his 4th answer).
+    private var offersUpload: Bool { NewModelVersion.offered(newest.flatMap { library.snapshots[$0.folderID] }) }
+
+    /// ★ Upload new version (decision 12) where the top row has no room: a 44 pt icon in the ⌄'s glass, leading the filter row.
+    private var uploadIcon: some View {
+        Button { uploading = true } label: {
+            Image(systemName: "square.and.arrow.up").font(.system(size: 15, weight: .bold)).foregroundStyle(DS.Color.textPrimary.color)
+                .frame(width: DSParts.glassHeight, height: DSParts.glassHeight)
+                .background(Circle().fill(DS.Surface.bar.color))
+                .overlay(Circle().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
+                .frame(minWidth: DSParts.target, minHeight: DSParts.target)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).fixedSize()
+        .background(DSParts.publish("library-upload"))
+        .accessibilityLabel("Upload new version")
+        .accessibilityIdentifier("library-upload")
     }
 
     private func openFolder(_ folder: UUID) {
         if let recent = model.recentProjects.first(where: { $0.id == folder }) { model.open(recent) }
     }
+
+    /// ★ Upload new version (decision 12): the version a new model starts from — the newest on the main line.
+    private var newest: LibraryVersion? { part.newestMainLine ?? part.versions.max { $0.number < $1.number } }
+
+    /// ★ Upload new version (decision 12): the picked file, copied where the core can read it again, goes in as New part's do.
+    private func pickedUpload(_ result: Result<[URL], Error>) {
+        switch result {
+        case .failure(let error):
+            model.toast = "Couldn\u{2019}t open file: \(error.localizedDescription)"
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            do {
+                let copy = try NewModelVersion.copyPicked(url)
+                model.uploadNewVersion(part: part.id, path: copy.path, displayName: url.lastPathComponent)
+            } catch {
+                model.toast = "Couldn\u{2019}t read \(url.lastPathComponent): \(error.localizedDescription)"
+            }
+        }
+    }
+}
+
+/// ★ Upload new version (decision 12): true when the part page's top row had no room for it (it leads the filter row).
+struct LibraryUploadBelowKey: PreferenceKey {
+    static var defaultValue = false
+    static func reduce(value: inout Bool, nextValue: () -> Bool) { value = value || nextValue() }
 }
 
 /// ★ His iPad notes 11-05 (ledger L1/L2): which rejected results the part page shows (his answer: a chip beside Newest).
