@@ -869,7 +869,10 @@ class Handler(BaseHTTPRequestHandler):
         # The CLI stays the validator: `run` REFUSES anything but a
         # minimize_plastic job and the parser refuses any unknown mode, so this
         # routing can never widen what actually executes.
-        _MODE_SUBCMD = {"analyze": "analyze", "lattice_variant": "lattice-variant"}
+        # "lattice_file" (lattice rebuild, docs/design/lattice-rebuild/04-layout-file-job.md):
+        # the printable lattice file from the new layout engine (`topopt-cli lattice-file`).
+        _MODE_SUBCMD = {"analyze": "analyze", "lattice_variant": "lattice-variant",
+                        "lattice_file": "lattice-file"}
         subcmd = _MODE_SUBCMD.get(job_doc.get("mode"), "run")
         cmd = [CFG.cli, subcmd, job_path, "--out", out_dir]
         if CFG.materials:
