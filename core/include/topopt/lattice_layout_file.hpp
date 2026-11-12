@@ -46,6 +46,7 @@ struct FileReport {
   MeshReport mesh;              // of the mesh returned (the last build)
   std::size_t open_boxes = 0;   // the open space read from the cells
   double ms_open_space = 0.0;
+  double ms_carve = 0.0;        // the part less the open space, carved once for every build
   int builds = 0;               // how many times the mesh was built
   // His print rules (a) and (b) of 2026-11-12, as measured on the mesh returned:
   // the bridge's LatticeLayoutResult carries the same two. -1 = not measured.
