@@ -16,6 +16,7 @@
 module TopOptBridge {
     header "TopOptBridge.hpp"
     header "FlexibleBridge.hpp"
+    header "LatticeLayoutBridge.hpp"
     requires cplusplus
     export *
 }

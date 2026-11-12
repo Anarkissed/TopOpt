@@ -3101,9 +3101,17 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // prevents is the one this project keeps paying for: a job that asks for
         // something the user's own switch says they turned off. Belt AND braces
         // is correct when the two live in different files.
-        precondition(!(densityMode.needsSimulation && !simulateStresses),
-                     "the Sim density mode cannot outlive the Sim permission — "
-                     + "see LatticeSettings.setSimulateStresses")
+        // ★ LatticeReview 2026-11-10 (J4): this was a `precondition`, and the pair does occur — LatticePage's Density
+        // segment writes `densityMode` alone, and the decoder reads the two fields independently — so it stopped the app.
+        // The switch wins: the job is the one `setSimulateStresses(false)` leaves (nothing simulated), never a crash.
+        if densityMode.needsSimulation && !simulateStresses {
+            var repaired = self
+            repaired.setSimulateStresses(false)
+            return repaired.runSpec(limits: limits, generatable: generatable, memberMM: memberMM,
+                                    lineWidthMM: lineWidthMM, emitSTL: emitSTL, emit3MF: emit3MF, regions: regions,
+                                    capability: capability, cellModes: cellModes, minimizePlastic: minimizePlastic,
+                                    layerHeightMM: layerHeightMM)
+        }
         // AUTO density (task lattice-page-core-hookup stage 4): core's run_job now
         // grades each accepted variant from that variant's OWN final stress field,
         // so the job ships a GRADED spec — a `grading` block, never a uniform
