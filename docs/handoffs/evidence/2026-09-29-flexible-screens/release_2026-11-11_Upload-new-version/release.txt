@@ -1,0 +1,15 @@
+# Release be0bc728 — 2026-11-11 Upload-new-version (Upload new version, UI-Notes, 278ca5ca), app only
+# Core and worker unchanged: fingerprint 54d2ce825a74; "fingerprint": "54d2ce825a74"
+# Merged onto 694c1c1b; the merged app tree equals Upload-new-version's, so its gate applies unchanged.
+# Commits (first parent of Upload-new-version since the release tip):
+#   278ca5ca Upload new version: a part's next version from a new model file, everything carried over with its faces matched again
+# Gates:
+#   Upload new version (UI-Notes, 278ca5ca on 694c1c1b): UploadNewVersionTests + UploadNewVersionHostedTests 12/12; 211 reader classes 1428 passed, 5 red (3 the known lib3mf imports; 2 LibraryPartRowsHostedTests at 11P, fixed: every Library page class re-run 45/45). Gated by UI-Notes; 362 checked: one commit on the release tip, app only, his Xcode files untouched.
+#   18:06 evidence 694c1c1b pushed; release 175eb21a DONE
+#   21:52 checks ok: Upload-new-version 278ca5ca, 1 commit(s), app-only, onto 694c1c1b, fingerprint 54d2ce825a74
+#   21:52 merged be0bc728; app tree == Upload-new-version's, fingerprint 54d2ce825a74
+#   21:52 waiting for HEAVY.lock (362 B10 Flexible gate: build (pid 70767) 21:38 EST)
+#   23:13 lock taken (18 GB free)
+#   23:19 iPad device build green; lock released
+#   23:19 pushed be0bc728
+#   23:19 worker /health "fingerprint": "54d2ce825a74" (unchanged, no swap)
