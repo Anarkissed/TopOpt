@@ -214,8 +214,9 @@ public enum NewModelVersion {
     /// The one line on a version whose per-face lattice choices went back to Auto (his third answer).
     public static let latticeLine = "Lattice faces back to Auto"
 
-    /// His fourth answer: Topology parts first — a Flexible part waits for #362's matching of its per-face setup.
-    public static func offered(_ newest: ProjectSnapshot?) -> Bool { newest.map { $0.lattice?.flexible == nil } ?? false }
+    /// His fourth answer was "Topology parts first"; ★ #362 (his picks 2026-11-12): a Flexible part's per-face setup is matched
+    /// too (FlexibleNewModel), so every part with a newest version is offered.
+    public static func offered(_ newest: ProjectSnapshot?) -> Bool { newest != nil }
 
     /// The picker's types: New part's own (STEP, STL, 3MF).
     public static let allowedTypes: [UTType] = {
@@ -265,7 +266,13 @@ public enum NewModelVersion {
         if var r = d.faceRegions { r.remapFaces(to); d.faceRegions = r }
 
         var reset: Bool?
-        if let l = d.lattice {
+        if var l = d.lattice, let flex = l.flexible {
+            // ★ #362 (his picks 2026-11-12): a FLEXIBLE part's per-face setup is matched — its face-prisms ARE its lattice
+            // (never back to Auto), its pressed faces, presses and the rest on their new faces (FlexibleNewModel)
+            l = FlexibleNewModel.carryLattice(l, match: match)
+            l.flexible = FlexibleNewModel.carry(flex, match: match, faceRegions: d.faceRegions)
+            d.lattice = l
+        } else if let l = d.lattice {
             let fresh = latticeFacesFromAuto(l)
             if fresh != l { reset = true }
             d.lattice = fresh == LatticeSettings() ? nil : fresh

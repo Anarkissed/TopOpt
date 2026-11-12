@@ -60,6 +60,11 @@ public enum FlexibleFix: Hashable, Sendable {
     /// ★ U21 BATCH E (his Img11/12/14): "[Go to Lattice]" — a face with no lattice of its own: leave for the Lattice page,
     /// where face-prisms are set (saved, never the bake). It replaces [Lattice under it] on such a face.
     case goToLattice
+    /// ★ UPLOAD NEW VERSION (his pick 3, 11-12): "[Pick its face]" — the next face he taps takes the lost item `n` (its index in
+    /// FlexibleNewModelState.lostItems), with every setting; an edge or corner press: "[Pick its edge]", the edges list opens.
+    case pickLost(Int)
+    /// "[Remove]": a lost item is let go (it asks first, like every delete).
+    case dropLost(Int)
 
     /// The button's words (one line, ≤ 3 words where it can).
     public func title(_ name: (Int) -> String) -> String {
@@ -75,6 +80,8 @@ public enum FlexibleFix: Hashable, Sendable {
         case .latticeUnderAll(let rs): return FlexibleLatticeUnder.allTitle(rs.count)
         case .pressFix(let f): return f.title
         case .goToLattice: return FlexibleRowCopy.goToLattice
+        case .pickLost: return FlexibleNewModelCopy.pickFace
+        case .dropLost: return FlexibleNewModelCopy.remove
         }
     }
 }
@@ -97,6 +104,9 @@ public struct FlexibleIssue: Equatable, Identifiable, Sendable {
         /// ★ R7-E2 FIX: an edge or corner press core's gate keeps out of the job — a blocker (Exit would build without it),
         /// with its 1–3 fixes.
         case pressKeptOut
+        /// ★ Upload new version (his pick 3, 11-12): faces or presses that found no face on the new model — a blocker with
+        /// [Pick its face] [Remove].
+        case lostOnNewModel
     }
     /// Stable across recomputes: the kind and the faces it names (the pop-up shows a NEW one).
     public let id: String
@@ -260,6 +270,9 @@ public struct FlexibleReadiness: Equatable, Sendable {
         /// ★ D2 REVIEW: the groups that will squish less than designed once the lattice carries
         /// every group (FlexibleGroupEstimate) — said at once, never a blocker.
         public var groupMisses: [FlexibleGroupEstimate.Miss] = []
+        /// ★ Upload new version (his pick 3, 11-12): faces and presses that found no face on the new model, waiting for him
+        /// (a blocker: the run waits until each has a face or is removed).
+        public var lostOnNewModel = 0
         /// A group's first face (the pop-up selects it) and its faces (named).
         public var groupRegions: (Int) -> [Int] = { _ in [] }
         /// ★ BATCH E: [Lattice under it] has a one-tap main-page edit for this face.
@@ -328,6 +341,12 @@ public struct FlexibleReadiness: Equatable, Sendable {
                                      blocking: pick != nil,
                                      fixes: pick.map { [.pickFilament(id: $0.id, name: $0.name)] } ?? [],
                                      pill: "Fix: pick a filament"))
+        }
+        // ★ Upload new version (his pick 3): what found no face on the new model waits for him — the run waits too
+        if i.lostOnNewModel > 0 {
+            out.append(FlexibleIssue(id: "lostOnNewModel", kind: .lostOnNewModel, region: nil,
+                                     oneLine: FlexibleNewModelCopy.lostLine(i.lostOnNewModel), blocking: true,
+                                     fixes: [.pickLost(0), .dropLost(0)], pill: FlexibleNewModelCopy.lostPill))
         }
         // 2. no pressed face — the selected face, else the one most likely to carry weight
         if i.pressed.isEmpty, i.sentPresses == 0 {   // ★ R7-E2: an edges group sent on its own is pressed
@@ -619,6 +638,7 @@ extension FlexibleStageModel {
         i.issueKey = { [weak self] r in self?.issueKey(r) ?? "\(r)" }   // ★ ROUND 7 (S, 4f f)
         i.facePrisms = !noFacePrismKnown   // ★ ROUND 7, M1 VERIFY
         i.sentPresses = Self.controlStripPresses ? 0 : sentPresses.count   // ★ R7-E2
+        i.lostOnNewModel = settings.newModel?.lostCount ?? 0   // ★ Upload new version
         if !Self.controlKeptOutUnsaid {   // ★ R7-E2 FIX
             i.keptOut = (settings.presses ?? []).compactMap { p in
                 guard let st = p.strip, let v = pressSupport[p.id], !v.inJob else { return nil }
