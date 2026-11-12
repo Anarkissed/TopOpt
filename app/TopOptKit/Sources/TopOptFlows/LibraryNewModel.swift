@@ -241,11 +241,13 @@ public enum NewModelVersion {
     /// (FlexibleNewModelState.lostCount), said in the Squish page's own words. Its edge and corner presses are re-found only when
     /// the scene opens, so they are not counted here (the Squish page's list says them).
     public static func doneLine(version: String, lost: Int, flexibleLost: Int = 0) -> String {
+        let groups = "\(lost) group\(lost == 1 ? " lost its" : "s lost their") faces"
         if flexibleLost > 0 {
-            return "\(version) · New model · \(flexibleLost) pressed face\(flexibleLost == 1 ? " lost its face" : "s lost their faces")"
+            let faces = "\(flexibleLost) pressed face\(flexibleLost == 1 ? " lost its face" : "s lost their faces")"
+            // ★ UI-Notes' edge (11-12): a Topology group lost too is named as well (it blocks Optimize on its own page)
+            return "\(version) · New model · \(faces)" + (lost > 0 ? " · \(groups)" : "")
         }
-        return lost == 0 ? "\(version) · New model · every group found its faces"
-            : "\(version) · New model · \(lost) group\(lost == 1 ? " lost its" : "s lost their") faces"
+        return lost == 0 ? "\(version) · New model · every group found its faces" : "\(version) · New model · \(groups)"
     }
 
     /// The draft the upload makes from `parent`: every setting on the new model, its faces matched (`match`).
