@@ -158,6 +158,9 @@ struct FlexibleFaceGroupRow: View {
     /// instead"; his answer 10: the chips show the group NAMES): the named chips beside the words where they fit, else on
     /// their own line under the words (the whole card's width), else that line scrolls — never F's one menu chip, which
     /// every one of his groups fell back to at 13" portrait and 11" landscape.
+    /// The gap between "Squeeze group" and its chips on their own line (B10: 0 — the target's own room is the gap).
+    @MainActor static var underGap: CGFloat { FlexChips.controlOldTarget ? 4 : 0 }
+
     @ViewBuilder private func namedChips(_ mine: FlexibleSqueezeGroup) -> some View {
         let chips = FlexChips(options: Self.options(model: model, region: region), selection: "\(mine.id)",
                               id: "flexible-group", equalWidths: false) { v in pick(v) }
@@ -168,11 +171,13 @@ struct FlexibleFaceGroupRow: View {
             FlexRow(FlexibleRowCopy.groupRow, info: FlexibleRowCopy.Info.groupRow, id: "flexible-row-group") {
                 chips.background(frame("groupChips"))
             }
-            VStack(alignment: .leading, spacing: 4) {
+            // ★ B10 (Touch): no gap under the words — the chips' 44 pt target holds 5.5 pt above the drawn chip, so the chip is
+            // drawn where it was (44 + 4 + 2 before); the line is 7 pt taller, not 11 (his pad's header and card fit at 11" L)
+            VStack(alignment: .leading, spacing: Self.underGap) {
                 words
                 chips.background(frame("groupChips"))
             }
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: Self.underGap) {
                 words
                 // (the drawn control is the scrolling line — its frame, inside the card)
                 ScrollView(.horizontal, showsIndicators: false) { chips }.background(frame("groupChips"))

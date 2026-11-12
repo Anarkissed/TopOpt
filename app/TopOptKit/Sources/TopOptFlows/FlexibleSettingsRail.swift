@@ -414,33 +414,71 @@ struct FlexibleGroupTabHeader: View {
     }
 }
 
-/// ★ S1: the colours, the group's own ringed; a tap picks (a colour another group wears swaps).
-/// ★ C5: EIGHT (his "Add more colour tokens") on the same one line — 26 pt each (the 20 pt dot and
-/// its ring), 3 pt apart; the hosted test measures the row inside the tab at every iPad size.
+/// ★ S1: the colours, the group's own ringed; a pick (a colour another group wears swaps).
+/// ★ C5: EIGHT (his "Add more colour tokens").
+/// ★ B10 (Touch; HIS PICK 11-11, "One colour chip"): eight 44 pt swatches do not fit one line in the tab's column (333–350 pt),
+/// and two lines of four pushed the group's header off the panel at 11" landscape with a face picked — so the row is ONE chip,
+/// "● Green ▾", a 44 pt target, that opens the eight colours (each with its name; the group's own ticked).
 struct FlexibleColourSwatches: View {
     @ObservedObject var model: FlexibleStageModel
     let group: FlexibleSqueezeGroup
-    static let swatch = CGSize(width: 26, height: 32)
-    static let spacing: CGFloat = 3
+    static let target: CGFloat = 44
+    /// Test control only (FlexibleB10SweepHostedTests' red control): the old row — eight 26 × 32 swatches on one line.
+    @MainActor static var controlOldTarget = false
     var body: some View {
+        if Self.controlOldTarget {
+            HStack(spacing: 3) { ForEach(FlexibleGroupColour.allCases) { oldSwatch($0) } }.background(rowFrame)
+        } else {
+            chip.background(rowFrame)
+        }
+    }
+
+    private var chip: some View {
         let mine = FlexibleSqueezeGroups.colourChoice(of: group, in: model.settings)
-        HStack(spacing: Self.spacing) {
+        return Menu {
             ForEach(FlexibleGroupColour.allCases) { c in
                 Button { model.setGroupColour(group.id, c) } label: {
-                    Circle().fill(c.rgba.color).frame(width: 20, height: 20)
-                        .overlay(Circle().strokeBorder(DS.Color.textPrimary.color, lineWidth: c == mine ? 2 : 0).padding(-3))
-                        .frame(width: Self.swatch.width, height: Self.swatch.height).contentShape(Rectangle())
+                    if c == mine { Label(c.name, systemImage: "checkmark") } else { Text(c.name) }
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(c.name)
-                .accessibilityAddTraits(c == mine ? [.isButton, .isSelected] : .isButton)
                 .accessibilityIdentifier("flexible-colour-\(group.number)-\(c.rawValue)")
             }
+        } label: {
+            HStack(spacing: 6) {
+                Circle().fill(mine.rgba.color).frame(width: 14, height: 14)
+                Text(mine.name).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                    .lineLimit(1).fixedSize()
+                Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold)).foregroundStyle(DS.Color.textTertiary.color)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: FlexChips.chipHeight)
+            .background(Capsule().fill(DS.Color.fillSubtle.color)
+                .overlay(Capsule().strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)))
+            .frame(minWidth: Self.target, minHeight: Self.target)
+            .contentShape(Rectangle())
         }
-        // the row's drawn frame (the hosted test: eight swatches, one line, inside the tab)
-        .background(GeometryReader { g in
+        .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain)
+        .fixedSize()
+        .background(FlexibleTouch.publish("colourChip-\(group.number)"))
+        .accessibilityLabel("Colour \(mine.name)")
+        .accessibilityIdentifier("flexible-colour-\(group.number)")
+    }
+
+    private func oldSwatch(_ c: FlexibleGroupColour) -> some View {
+        let mine = FlexibleSqueezeGroups.colourChoice(of: group, in: model.settings)
+        return Button { model.setGroupColour(group.id, c) } label: {
+            Circle().fill(c.rgba.color).frame(width: 20, height: 20)
+                .overlay(Circle().strokeBorder(DS.Color.textPrimary.color, lineWidth: c == mine ? 2 : 0).padding(-3))
+                .frame(width: 26, height: 32).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(FlexibleTouch.publish("colourChip-\(group.number)-old-\(c.rawValue)"))
+    }
+
+    /// the row's drawn frame (the hosted tests: the chip, one line, inside the tab)
+    private var rowFrame: some View {
+        GeometryReader { g in
             Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["colourSwatches-\(group.number)": g.frame(in: .global)])
-        }.allowsHitTesting(false))
+        }.allowsHitTesting(false)
     }
 }
 
