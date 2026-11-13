@@ -2,13 +2,16 @@
 // What is held here: the mesh is ONE closed piece as a slicer reads it (corners joined by
 // place), it never leaves the part, it is the same on every run and for any number of
 // threads, what the layer check asks to be left out is left out, a post is added where
-// asked, a flat strut is a bridge, and a stop flag gives the work up.
+// asked, a flat strut is a bridge, and a stop flag gives the work up. Where the part's
+// surface cuts the cells on a slant or a curve, no crust of that surface is left over the
+// lattice, and nothing solid inside the part is opened (test_no_crust).
 #include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <thread>
 #include <vector>
 
 #include "topopt/lattice_layout.hpp"
@@ -511,6 +514,241 @@ static void test_printable() {
   }
 }
 
+// ── no crust where a curved wall cuts the cells (his major flaw, 2026-11-12) ──
+// A 16 x 16 x 6 block with a round hole through it (64 flat sides, 3 mm radius), TURNED in
+// space, so that no face of it lies along the cells' grid: the hole's wall and the six
+// flat faces all cut the cells and their 0.25 mm reading points on a slant.
+struct Holed {
+  TriangleMesh part;   // closed
+  TriangleMesh wall;   // the hole's wall alone (a Protect skin's face)
+  double mm3 = 0.0;
+  double wall_round_mm = 0.0;   // the hole's outline, all the way round
+  double tall_mm = 0.0;
+};
+// A place of the block as it was drawn (x, y from its middle, z up from its underside), turned.
+static Vec3 turned(double x, double y, double z) {
+  const double kPi = 3.14159265358979323846, ax = 23.0 * kPi / 180.0, az = 37.0 * kPi / 180.0;
+  const double y1 = y * std::cos(ax) - z * std::sin(ax), z1 = y * std::sin(ax) + z * std::cos(ax);
+  return Vec3{x * std::cos(az) - y1 * std::sin(az) + 30.0, x * std::sin(az) + y1 * std::cos(az) + 30.0, z1 + 30.0};
+}
+static const double kHoledHalf = 8.0, kHoledTall = 6.0, kHoledRadius = 3.0;
+static Holed holed_block() {
+  const int N = 64;
+  const double kPi = 3.14159265358979323846, half = kHoledHalf, R = kHoledRadius, tall = kHoledTall;
+  // Round the hole, and straight out from each of its corners to the block's outline
+  // (the block's own corners are at 45 degrees: every eighth).
+  std::vector<std::array<double, 2>> in(N), out(N);
+  for (int m = 0; m < N; ++m) {
+    const double t = 2.0 * kPi * m / N, cx = std::cos(t), sy = std::sin(t);
+    in[static_cast<std::size_t>(m)] = {R * cx, R * sy};
+    const double far = half / std::max(std::fabs(cx), std::fabs(sy));
+    out[static_cast<std::size_t>(m)] = {far * cx, far * sy};
+  }
+  MeshSink part, wall;
+  for (int m = 0; m < N; ++m) {
+    const auto &i0 = in[static_cast<std::size_t>(m)], &i1 = in[static_cast<std::size_t>((m + 1) % N)];
+    const auto &o0 = out[static_cast<std::size_t>(m)], &o1 = out[static_cast<std::size_t>((m + 1) % N)];
+    const Vec3 I0b = turned(i0[0], i0[1], 0), I1b = turned(i1[0], i1[1], 0), I0t = turned(i0[0], i0[1], tall), I1t = turned(i1[0], i1[1], tall);
+    const Vec3 O0b = turned(o0[0], o0[1], 0), O1b = turned(o1[0], o1[1], 0), O0t = turned(o0[0], o0[1], tall), O1t = turned(o1[0], o1[1], tall);
+    part.add_triangle(I0t, O0t, O1t);   // top
+    part.add_triangle(I0t, O1t, I1t);
+    part.add_triangle(I0b, O1b, O0b);   // bottom
+    part.add_triangle(I0b, I1b, O1b);
+    part.add_triangle(O0b, O1b, O1t);   // the block's side
+    part.add_triangle(O0b, O1t, O0t);
+    part.add_triangle(I0b, I1t, I1b);   // the hole's wall
+    part.add_triangle(I0b, I0t, I1t);
+    wall.add_triangle(I0b, I1t, I1b);
+    wall.add_triangle(I0b, I0t, I1t);
+  }
+  Holed h;
+  h.part = part.mesh;
+  h.wall = wall.mesh;
+  h.mm3 = (4.0 * half * half - 0.5 * N * R * R * std::sin(2.0 * kPi / N)) * tall;
+  h.wall_round_mm = 2.0 * N * R * std::sin(kPi / N);
+  h.tall_mm = tall;
+  return h;
+}
+// Counted with no help from the writer: the part's volume that NO cell holds, point by
+// point on a fine grid laid along the block as it was drawn, so not along the cells'
+// (inside the part by the domain, held by `cell_holds`).
+static double unheld_mm3(const Domain& d, const Layout& lay, double h, double* part_mm3) {
+  const int nx = static_cast<int>(std::lround(2.0 * kHoledHalf / h)), ny = nx, nz = static_cast<int>(std::lround(kHoledTall / h));
+  std::vector<long> in(static_cast<std::size_t>(nz), 0), none(static_cast<std::size_t>(nz), 0);
+  std::atomic<int> next{0};
+  auto work = [&] {
+    const Domain::Probe probe = d.probe();
+    for (int z = next.fetch_add(1); z < nz; z = next.fetch_add(1))
+      for (int y = 0; y < ny; ++y)
+        for (int x = 0; x < nx; ++x) {
+          const Vec3 p = turned(-kHoledHalf + (x + 0.5) * h, -kHoledHalf + (y + 0.5) * h, (z + 0.5) * h);
+          if (probe.where(p).why == Why::Outside) continue;
+          ++in[static_cast<std::size_t>(z)];
+          bool held = false;
+          for (std::size_t ci = 0; ci < lay.cells.size() && !held; ++ci) held = cell_holds(lay, probe, lay.cells[ci], p);
+          if (!held) ++none[static_cast<std::size_t>(z)];
+        }
+  };
+  std::vector<std::thread> pool;
+  for (unsigned t = 1; t < std::max(1u, std::thread::hardware_concurrency()); ++t) pool.emplace_back(work);
+  work();
+  for (std::thread& t : pool) t.join();
+  long all_in = 0, all_none = 0;
+  for (int z = 0; z < nz; ++z) { all_in += in[static_cast<std::size_t>(z)]; all_none += none[static_cast<std::size_t>(z)]; }
+  if (part_mm3) *part_mm3 = static_cast<double>(all_in) * h * h * h;
+  return static_cast<double>(all_none) * h * h * h;
+}
+static bool same_boxes(const OpenSpace& x, const OpenSpace& y) {
+  if (x.boxes.size() != y.boxes.size()) return false;
+  for (std::size_t i = 0; i < x.boxes.size(); ++i)
+    if (x.boxes[i].frame != y.boxes[i].frame || std::memcmp(x.boxes[i].lo, y.boxes[i].lo, sizeof x.boxes[i].lo) ||
+        std::memcmp(x.boxes[i].hi, y.boxes[i].hi, sizeof x.boxes[i].hi))
+      return false;
+  return true;
+}
+static void test_no_crust() {
+  const Holed hb = holed_block();
+  std::size_t open_edges = 1;
+  PartMeasure pm(weld_mesh(hb.part, 1e-5, &open_edges));
+  CHECK(open_edges == 0);
+  CellSpec cs;
+  cs.algorithm = Algorithm::Uniform;
+  cs.cell_mm = 5.0;
+  cs.min_cells_across = 1;
+  // The writer's boxes overlap by MeshSpec::grow_mm, which takes that much off every side
+  // of what stays solid. To weigh the solid body against a count it is made with next to
+  // no overlap.
+  MeshSpec exact;
+  exact.grow_mm = 0.001;
+  // (a) The whole part lattice, nothing protected: the lattice runs out through every face
+  // and through the hole's wall. What the writer keeps solid is then only what no cell
+  // holds, and nothing of the part's own surface.
+  {
+    DomainSpec s;
+    s.start = Start::AllLattice;
+    s.min_strut_lines = 2.0;
+    Domain d(pm, s);
+    const Laid l = lay(d, cs);
+    CHECK(!l.layout.cells.empty() && !l.bars.bars.empty());
+    const OpenSpace open = read_open_space(d, l.layout, 0.25);
+    const Carved carved = carve_part(pm, l.layout, open);
+    MeshReport rep, rx;
+    const TriangleMesh mesh = build_mesh(pm, d, l.layout, l.bars, carved, MeshSpec{}, &rep);
+    CHECK(rep.ok);
+    (void)build_mesh(pm, d, l.layout, Bars{}, open, exact, &rx);   // the solid body alone: no struts
+    CHECK(rx.ok);
+    double counted_part = 0.0;
+    const double none = unheld_mm3(d, l.layout, 0.2, &counted_part);
+    std::printf("no crust, whole part lattice: %zu cells, %zu open boxes read in %.0f ms; part %.1f mm3 (counted %.1f); "
+                "solid kept %.2f mm3 in %zu pieces (%.2f in %zu with the usual overlap), held by no cell %.2f mm3\n",
+                l.layout.cells.size(), open.boxes.size(), open.ms, rep.part_mm3, counted_part, rx.solid_mm3, rx.solid_pieces,
+                rep.solid_mm3, rep.solid_pieces, none);
+    CHECK(std::fabs(rep.part_mm3 - hb.mm3) < 1e-6 * hb.mm3);
+    CHECK(std::fabs(counted_part - hb.mm3) < 5e-3 * hb.mm3);   // the count itself is sound
+    // NO CRUST. What is left to differ: the kept solid is made of whole reading points
+    // (0.25 mm cubes) and the count of whole 0.2 mm ones, so each is out by a fraction of a
+    // point along the border of the little there is that no cell holds (two crumbs, about
+    // 2 mm3 in all). Before the fix the writer kept 29.67 mm3 here against the same 2.16:
+    // 27.5 mm3 of the part's own surface, in 159 pieces (794 at the usual overlap, and 695
+    // loose bits in the mesh).
+    CHECK(std::fabs(rx.solid_mm3 - none) < 2.0);
+    CHECK(rep.solid_mm3 <= rx.solid_mm3 + 1e-9 && rep.solid_mm3 > rx.solid_mm3 - 3.0);
+    CHECK(rx.solid_pieces < 40 && rep.solid_pieces < 40);   // crumbs no cell holds, not slats
+    // And none of them a film: the overlap of 0.02 mm neither joins two nor splits one.
+    // (Opening air by faces only, not by edges and corners, leaves 430 against 76; not
+    // looking past the cube's face for the cell's own lattice, 54 against 32.)
+    CHECK(rx.solid_pieces == rep.solid_pieces);
+    const Read r = read_mesh(mesh);
+    std::printf("no crust, whole part lattice: mesh %zu triangles, %.1f mm3, shells %zu, loose bits %zu, air pockets %zu\n",
+                rep.triangles, rep.mm3, r.shells, rep.loose_bits, rep.air_pockets);
+    CHECK(r.edges_not_twice == 0 && r.flat == 0 && r.shells == 1);
+    CHECK(rep.loose_bits < 40);     // 695 before: the slats the struts did not catch
+    // The same mesh again, on one thread (the boxes themselves: in (b)).
+    MeshSpec single;
+    single.threads = 1;
+    CHECK(same_mesh(mesh, build_mesh(pm, d, l.layout, l.bars, carved, single)));
+    std::atomic<bool> stop{true};
+    bool threw = false;
+    try { (void)read_open_space(d, l.layout, 0.25, 0, &stop); } catch (const LayCancelled&) { threw = true; }
+    CHECK(threw);
+  }
+  // (b) Solid INSIDE the part, right beside the lattice: a Protect skin 1 mm deep on the
+  // hole's wall, and a No lattice pillar 4 x 4 mm standing through the block in one corner,
+  // its sides cutting the cells on a slant. Both are whole: nothing inside the part is
+  // opened that no cell holds.
+  {
+    DomainSpec s;
+    s.start = Start::AllLattice;
+    s.min_strut_lines = 2.0;
+    const double skin = 1.0;
+    s.protect.push_back({1, hb.wall, skin});
+    const Vec3 o = turned(5.0, -5.0, kHoledTall), below = turned(5.0, -5.0, kHoledTall - 1.0);
+    Region pillar = face_region(2, o, {below.x - o.x, below.y - o.y, below.z - o.z}, 2.0, 2.0, kHoledTall, 0.0);
+    pillar.role = Role::NoLattice;
+    s.regions = {pillar};
+    Domain d(pm, s);
+    const Laid l = lay(d, cs);
+    CHECK(!l.layout.cells.empty() && !l.bars.bars.empty());
+    const OpenSpace open = read_open_space(d, l.layout, 0.25);
+    CHECK(same_boxes(open, read_open_space(d, l.layout, 0.25, 1)));   // the same boxes on one thread
+    MeshReport rx;
+    const TriangleMesh mesh = build_mesh(pm, d, l.layout, l.bars, open, exact, &rx);
+    CHECK(rx.ok);
+    const double none = unheld_mm3(d, l.layout, 0.2, nullptr);
+    // The skin itself: everything within its depth of the wall, outside the hole.
+    const double kPi = 3.14159265358979323846;
+    const double skin_mm3 = (hb.wall_round_mm * skin + kPi * skin * skin) * hb.tall_mm;
+    const double pillar_mm3 = 4.0 * 4.0 * hb.tall_mm;
+    std::printf("no crust, a skin and a pillar: %zu cells, %zu open boxes read in %.0f ms; solid kept %.2f mm3 in %zu pieces, "
+                "held by no cell %.2f mm3, the skin and the pillar alone %.2f mm3\n", l.layout.cells.size(), open.boxes.size(), open.ms,
+                rx.solid_mm3, rx.solid_pieces, none, skin_mm3 + pillar_mm3);
+    CHECK(none > skin_mm3 + pillar_mm3 && rx.solid_mm3 > skin_mm3 + pillar_mm3);
+    // NOTHING SOLID OPENED, and still no crust: the kept solid is what no cell holds, to
+    // within the same fraction of a reading point along a longer border (the skin's inner
+    // side, the pillar's sides, the faces of the cells that stand beside space no cell
+    // holds). Before the fix: 1,057.11 mm3 kept, in 85 pieces, against the same 1,045.67.
+    // With every point that touches the space opened, air or not: 1,034.31, the 11 mm3
+    // short taken off the pillar's sides.
+    CHECK(std::fabs(rx.solid_mm3 - none) < 4.0);
+    CHECK(rx.solid_pieces == 1);   // the skin and all the rest, one body
+    const Read r = read_mesh(mesh);
+    CHECK(r.edges_not_twice == 0 && r.flat == 0 && r.shells == 1);
+  }
+  // (c) Lattice under the block's top face only, 5 mm deep (a solid floor 1 mm thick): the
+  // cells stand on the face's own frame and are read column by column. The hole's wall and
+  // the block's sides run straight down through the columns and across the cells' sides.
+  // (Read this way the part had no crust before the fix either, 237.31 mm3 kept then as
+  // now: this holds that it stays so, and that the new step takes nothing off the floor.)
+  {
+    const Vec3 o = turned(0, 0, kHoledTall), below = turned(0, 0, kHoledTall - 1.0);
+    DomainSpec s;
+    s.min_strut_lines = 2.0;
+    s.regions = {face_region(1, o, {below.x - o.x, below.y - o.y, below.z - o.z}, 12, 12, 5.0, 0.0)};
+    Domain d(pm, s);
+    CellSpec cf;
+    cf.algorithm = Algorithm::Uniform;
+    cf.cell_max_mm = 8;
+    cf.min_cells_across = 1;
+    const Laid l = lay(d, cf);
+    CHECK(!l.layout.cells.empty() && !l.bars.bars.empty());
+    CHECK(!l.layout.walls.empty() && l.layout.walls[static_cast<std::size_t>(l.layout.cells.front().frame)].flat);
+    const OpenSpace open = read_open_space(d, l.layout, 0.25);
+    CHECK(same_boxes(open, read_open_space(d, l.layout, 0.25, 1)));
+    MeshReport rx;
+    const TriangleMesh mesh = build_mesh(pm, d, l.layout, l.bars, open, exact, &rx);
+    CHECK(rx.ok);
+    const double none = unheld_mm3(d, l.layout, 0.2, nullptr);
+    const double floor_mm3 = hb.mm3 / hb.tall_mm * 1.0;
+    std::printf("no crust, lattice under the top face: %zu cells of %.2f mm, %zu open boxes read in %.0f ms; solid kept %.2f mm3 in %zu "
+                "pieces, held by no cell %.2f mm3, the floor alone %.2f mm3\n", l.layout.cells.size(), l.layout.cells.front().size,
+                open.boxes.size(), open.ms, rx.solid_mm3, rx.solid_pieces, none, floor_mm3);
+    CHECK(none > floor_mm3 - 2.0 && rx.solid_mm3 > floor_mm3 - 2.0);
+    CHECK(std::fabs(rx.solid_mm3 - none) < 4.0);
+    const Read r = read_mesh(mesh);
+    CHECK(r.edges_not_twice == 0 && r.flat == 0 && r.shells == 1);
+  }
+}
+
 int main() {
   if (!mesh_available()) {
     MeshReport rep;
@@ -523,6 +761,7 @@ int main() {
   }
   test_block();
   test_whole_part();
+  test_no_crust();
   test_layers();
   test_printable();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);

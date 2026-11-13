@@ -42,28 +42,103 @@ void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c,
   const int k = std::max(1, static_cast<int>(std::ceil(c.size / pitch - 1e-9)));
   const double s = c.size / k;
   auto at = [&](int i, int j) { return static_cast<std::size_t>(j) * k + i; };
-  // A column read point by point: every run of points the cell holds is a box.
+  // The cube's own points (0 .. k-1 each way) and one more all round it (-1 and k). A
+  // point outside the cube is never opened; it is only asked what stands there.
+  //   kSpace: open space of this cell (a point it holds, or one inside an open column's
+  //           stretch); outside the cube: lattice the cell would hold were its cube larger;
+  //   kBox:   written as a box from the points themselves (a point read as held, or a
+  //           point of air opened beside the space);
+  //   kAsked: a point outside the cube that has been read;
+  //   kOpen:  open already and not the cell's space (air an open column took with it):
+  //           nothing opens for touching it.
+  enum : unsigned char { kSpace = 1, kBox = 2, kAsked = 4, kOpen = 8 };
+  const int n = k + 2;
+  std::vector<unsigned char> pts(static_cast<std::size_t>(n) * n * n, 0);
+  auto pt = [&](int i, int j, int z) -> unsigned char& {
+    return pts[(static_cast<std::size_t>(z + 1) * n + static_cast<std::size_t>(j + 1)) * n + static_cast<std::size_t>(i + 1)];
+  };
+  auto place = [&](int i, int j, int z) {
+    return f.at(c.lo[0] + (i + 0.5) * s, c.lo[1] + (j + 0.5) * s, c.lo[2] + (z + 0.5) * s);
+  };
+  // A column read point by point: every point the cell holds is open.
   auto by_points = [&](int i, int j) {
-    int z0 = -1;
-    for (int z = 0; z <= k; ++z) {
-      const bool held = z < k && cell_holds(lay, probe, c, f.at(c.lo[0] + (i + 0.5) * s, c.lo[1] + (j + 0.5) * s,
-                                                                c.lo[2] + (z + 0.5) * s));
-      if (held && z0 < 0) z0 = z;
-      if (!held && z0 >= 0) {
-        mine.push_back({c.frame, {c.lo[0] + i * s, c.lo[1] + j * s, c.lo[2] + z0 * s},
-                        {c.lo[0] + (i + 1) * s, c.lo[1] + (j + 1) * s, c.lo[2] + z * s}});
-        z0 = -1;
+    for (int z = 0; z < k; ++z)
+      if (cell_holds(lay, probe, c, place(i, j, z))) pt(i, j, z) = kSpace | kBox;
+  };
+  // NO CRUST (his major flaw, 2026-11-12). The points stop at their own grid, the part's
+  // surface does not: a point whose middle is in the AIR while its cube pokes into the
+  // part is not held, and next to open space it was left standing as a film of the part's
+  // own surface over the lattice (slats, where a curved wall crosses the grid). So a point
+  // of air in the cube that touches the cell's space, by a face, an edge or a corner, opens
+  // with it. Against a surface at any angle that is every cube that pokes in: the point
+  // one step inward on each axis lies deeper in the part than the poking one lies out of
+  // it. It also carries a run of held points one point past the surface it ends on.
+  // The space it touches may lie past the cube's face (the next cell's, read as this
+  // cell's own lattice but for the cube): the film is this cell's all the same.
+  // Only AIR opens (the question `where` answers Why::Outside by). A point inside the part
+  // that this cell does not hold (a Protect skin, a No lattice region, lattice no cell
+  // holds, another cell's) is never opened here, whatever it touches.
+  // Nothing opens outside the cube: what stands past its face is another cell's to open,
+  // or lattice no cell holds, which is solid (D14). A cube face lying in the part's
+  // surface is passed by the boxes' own overlap alone, as it always was.
+  auto open_air = [&] {
+    // Which cell of the layout this is (read_open_space passes the layout's own cells).
+    const Cell* first = lay.cells.data();
+    if (&c < first || &c >= first + lay.cells.size()) return;
+    const std::size_t self = static_cast<std::size_t>(&c - first);
+    // Nothing of the part's surface near the cube: no air to open, nothing to ask.
+    const double reach = 1.001 * std::sqrt(3.0) * (0.5 * c.size + s);
+    const double h = 0.5 * c.size;
+    if (probe.part().depth_up_to(f.at(c.lo[0] + h, c.lo[1] + h, c.lo[2] + h), reach) >= reach * (1.0 - 1e-9)) return;
+    for (int z = 0; z < k; ++z)
+      for (int j = 0; j < k; ++j)
+        for (int i = 0; i < k; ++i) {
+          if (pt(i, j, z) & (kSpace | kOpen)) continue;
+          bool touches = false;
+          for (int dz = -1; dz <= 1 && !touches; ++dz)
+            for (int dj = -1; dj <= 1 && !touches; ++dj)
+              for (int di = -1; di <= 1 && !touches; ++di) {
+                const int u = i + di, v = j + dj, w = z + dz;
+                unsigned char& o = pt(u, v, w);
+                if (u >= 0 && v >= 0 && w >= 0 && u < k && v < k && w < k) { touches = o & kSpace; continue; }
+                if (!(o & kAsked)) {
+                  o |= kAsked;
+                  // What cell_holds asks, less the cube.
+                  if (cell_holds_at(lay, probe, self, c.lo[0] + (u + 0.5) * s, c.lo[1] + (v + 0.5) * s, c.lo[2] + (w + 0.5) * s))
+                    o |= kSpace;
+                }
+                touches = o & kSpace;
+              }
+          if (touches && !probe.part().inside(place(i, j, z))) pt(i, j, z) |= kBox;
+        }
+  };
+  // Every run of such points down a column is a box.
+  auto point_boxes = [&] {
+    for (int j = 0; j < k; ++j)
+      for (int i = 0; i < k; ++i) {
+        int z0 = -1;
+        for (int z = 0; z <= k; ++z) {
+          const bool on = z < k && (pt(i, j, z) & kBox);
+          if (on && z0 < 0) z0 = z;
+          if (!on && z0 >= 0) {
+            mine.push_back({c.frame, {c.lo[0] + i * s, c.lo[1] + j * s, c.lo[2] + z0 * s},
+                            {c.lo[0] + (i + 1) * s, c.lo[1] + (j + 1) * s, c.lo[2] + z * s}});
+            z0 = -1;
+          }
+        }
       }
-    }
   };
   if (!walls.flat) {
     // No flat face to read columns from: the cell's own shape point by point.
     for (int j = 0; j < k; ++j)
       for (int i = 0; i < k; ++i) by_points(i, j);
+    open_air();
+    point_boxes();
     return;
   }
   // One reading per column: open over the column's own stretch inside the cube.
-  struct Col { int kind = 0; double c0 = 0, c1 = 0; };   // 0 other, 1 open, 2 air, 3 crossed
+  // `past0`, `past1`: how far past the part's surface each end of the stretch was opened.
+  struct Col { int kind = 0; double c0 = 0, c1 = 0, past0 = 0, past1 = 0; };   // 0 other, 1 open, 2 air, 3 crossed
   std::vector<Col> col(static_cast<std::size_t>(k) * k);
   const double cm = c.lo[2] + 0.5 * c.size;
   for (int j = 0; j < k; ++j)
@@ -72,7 +147,13 @@ void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c,
       const Reading r = read_at(probe, f, walls, a, b, cm);
       Col& o = col[at(i, j)];
       if (r.where.why == Why::Outside) { o.kind = 2; continue; }
-      if (!r.where.lattice() || r.where.id != c.region || r.wall != c.wall) continue;
+      if (!r.where.lattice()) continue;
+      if (r.where.id != c.region || r.wall != c.wall) {
+        // D14b: lattice of ANOTHER region inside this cell's cube may be the cell's all the same (it takes in what
+        // no cell of that region holds). Which points are is asked point by point down the column, below.
+        if (lay.absorb && r.where.id != c.region) o.kind = 3;
+        continue;
+      }
       o.c0 = std::max(c.lo[2], r.start);
       o.c1 = std::min(c.lo[2] + c.size, r.start + r.width);
       if (!(o.c1 > o.c0 + 1e-6)) continue;
@@ -90,8 +171,8 @@ void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c,
       o.kind = 1;
       // Where the stretch ends on the part's own surface, open a little past it: a cut
       // exactly in the surface's plane is asking for a paper-thin leftover.
-      if (probe.where(f.at(a, b, o.c0 - 0.05)).why == Why::Outside) o.c0 -= 0.3;
-      if (probe.where(f.at(a, b, o.c1 + 0.05)).why == Why::Outside) o.c1 += 0.3;
+      if (probe.where(f.at(a, b, o.c0 - 0.05)).why == Why::Outside) { o.c0 -= 0.3; o.past0 = 0.3; }
+      if (probe.where(f.at(a, b, o.c1 + 0.05)).why == Why::Outside) { o.c1 += 0.3; o.past1 = 0.3; }
     }
   // A column of air beside an open one opens with it, so no film is left along the
   // part's side where the grid stops short of the surface.
@@ -154,9 +235,26 @@ void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c,
   }
   for (const Run& r : done)
     mine.push_back({c.frame, {c.lo[0] + r.i0 * s, c.lo[1] + r.j0 * s, r.c0}, {c.lo[0] + r.i1 * s, c.lo[1] + r.j1 * s, r.c1}});
+  // The crossed columns point by point; then the air beside all of it, the open columns'
+  // own stretches included (a wall that crosses the columns on a slant). A column of air
+  // that opened with its neighbour, and the little an open column runs on past the
+  // surface, are open and no more: only what the cell holds brings air with it.
   for (int j = 0; j < k; ++j)
-    for (int i = 0; i < k; ++i)
-      if (col[at(i, j)].kind == 3 && grown[at(i, j)].kind != 1) by_points(i, j);
+    for (int i = 0; i < k; ++i) {
+      const Col& o = grown[at(i, j)];
+      if (o.kind == 1) {
+        const bool air = col[at(i, j)].kind == 2;
+        for (int z = 0; z < k; ++z) {
+          const double cz = c.lo[2] + (z + 0.5) * s;
+          if (!(cz > o.c0 && cz < o.c1)) continue;
+          pt(i, j, z) = !air && cz > o.c0 + o.past0 && cz < o.c1 - o.past1 ? kSpace : kOpen;
+        }
+      } else if (col[at(i, j)].kind == 3) {
+        by_points(i, j);
+      }
+    }
+  open_air();
+  point_boxes();
 }
 
 }  // namespace
