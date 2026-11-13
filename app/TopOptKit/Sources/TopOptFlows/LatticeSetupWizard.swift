@@ -264,6 +264,7 @@ public struct LatticeSetupWizard: View {
                 if (project.lattice.stageMode ?? .structural) == .aesthetic {
                     singleCellSwitch
                 }
+                smallCellsSwitch   // ★ his ask 11-13: per part, every mode
             }
             // ★ NOT IN AESTHETIC (his ruling, 2026-08-24 late: "we should REMOVE
             // the 'too thin to certify' button from the aesthetic mode"). The
@@ -1571,6 +1572,26 @@ public struct LatticeSetupWizard: View {
     /// requirement and SAYS it has, which is the same posture the rest of this panel
     /// takes. Turning it off leaves the finish alone — he may want the skin for its own
     /// sake.
+    /// ★ SMALL CELLS IN THIN WALLS (his ask 11-13: "I definitely want it as a per-part choice. Especially in the app itself."):
+    /// a wall too thin for an open cell takes small, denser cells at the thinnest strut instead of going solid. Off by default.
+    @ViewBuilder private var smallCellsSwitch: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(isOn: Binding(get: { model.smallCellsInThinWalls },
+                                 set: { model.smallCellsInThinWalls = $0; rebuild() })) {
+                Text("Small cells in thin walls")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(DS.Color.textPrimary.color)
+            }
+            .toggleStyle(SwitchToggleStyle(tint: DS.Color.okGreen.color))
+            .latticeID("wizard-small-cells-thin-walls")
+            captionLine(model.smallCellsInThinWalls ? "Thin walls get small, denser cells instead of going solid."
+                                                    : "A wall too thin for an open cell stays solid.",
+                        info: "small-cells",
+                        "New engine only. A wall too thin for an open cell at two-line struts takes small, denser cells "
+                        + "(never touching) instead of going solid.")
+        }
+    }
+
     @ViewBuilder private var singleCellSwitch: some View {
         VStack(alignment: .leading, spacing: 4) {
             Toggle(isOn: Binding(get: { model.singleCellMembers },
@@ -2744,6 +2765,7 @@ public struct LatticeSetupWizard: View {
                 AnyView(gradeStyleRow)
                 if model.gradingMode.fitsShape { AnyView(shapeBandRow) }
                 if !structural { AnyView(singleCellSwitch) }
+                AnyView(smallCellsSwitch)
             }
             if structural { AnyView(subfloorRetentionSwitch) }
             if !organic { AnyView(cellsAddedRows) }

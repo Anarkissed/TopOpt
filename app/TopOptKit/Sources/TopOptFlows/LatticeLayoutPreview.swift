@@ -24,6 +24,8 @@ public final class LatticeLayoutPreview: ObservableObject {
     /// Core's numbers for the debug overlay (stage E's iPad timing): open, read, cells, bars, ms.
     @Published public private(set) var timing: Timing?
     @Published public private(set) var laying = false
+    /// One plain line: what these settings ask that the new engine does not do yet (nil: nothing).
+    @Published public private(set) var note: String?
 
     public struct Timing: Equatable, Sendable {
         public var openMS: Double
@@ -39,6 +41,13 @@ public final class LatticeLayoutPreview: ObservableObject {
     /// The line the preview carries while the drawer draws every bar round (the reviewer's PREVIEW IS THE SPEC).
     public static let roundBarsLine = "Preview: bars drawn round · the print squares flat bridges and adds posts"
     public static let noPartLine = "New engine: this part has no model file to read"
+    public static let organicLine = "New engine: Organic is not drawn yet · this is the old preview"
+    public static let byStressLine = "New engine: no grading by stress yet · it shows the density you set"
+
+    /// The new engine draws the strut types' Uniform, Default Grade and Stepped; Organic keeps the old preview (LatticeReview 11-13).
+    public static func draws(_ l: LatticeSettings) -> Bool { l.resolvedAlgorithm != "organic" }
+    /// One plain line about what the new engine leaves out for these settings, or nil.
+    public static func note(_ l: LatticeSettings) -> String? { l.densityMode == .sim || l.simulateStresses ? byStressLine : nil }
     /// The body while the new engine draws: see-through, so the bars inside it show (the Flexible pass's ghost rules apply).
     public static let ghostAlpha: Float = 0.2
 
@@ -55,6 +64,7 @@ public final class LatticeLayoutPreview: ObservableObject {
     public func update(project p: ProjectModel, on: Bool) {
         guard on else { clear(); return }
         guard let path = p.importedFile?.path else { problem = Self.noPartLine; bars = nil; return }
+        note = Self.note(p.lattice)
         let s = Self.settings(p)
         if path == sessionPath, s == lastSettings, task != nil || bars != nil { return }
         lastSettings = s
@@ -125,7 +135,15 @@ public final class LatticeLayoutPreview: ObservableObject {
         }
         if let t = l.manualStrutThicknessMM, t > 0 { s.strutWidthMM = t }
         s.allowQuilt = l.allowQuilt
+        s.smallCellsInThinWalls = l.smallCellsInThinWalls   // ★ his per-part choice (11-13)
+        // ★ cells across a wall (C3-C5): Structural five; Aesthetic one with "Allow single-cell members", else two
+        let aesthetic = (l.stageMode ?? .structural) == .aesthetic
+        s.minCellsAcross = aesthetic ? (l.singleCellMembers ? 1 : 2) : 5
+        // ★ density (R10): core's dial is the percent he sees / 100 (0.01 thinnest ... 1 widest); a typed strut width wins
+        let rowDensity = l.densityMode != .sim && (l.densityMode == .perRegion || aesthetic)
+        s.perRegion = rowDensity
         var id: Int32 = 1
+        var uniformSet = false
         for g in p.latticeGroups {
             // ★ a Protect skin group is a solid face at its rows' depth (D5), never a No lattice region (11-13: it went as both)
             let skinGroup = l.skinGroups.contains(g.id)
@@ -148,6 +166,12 @@ public final class LatticeLayoutPreview: ObservableObject {
                 } else {
                     s.regions.append(.init(id: id, noLattice: role == .exclude, faces: faces, depthMM: depth,
                                            expandMM: p.latticeExpandMM(ref)))
+                    if role != .exclude, l.densityMode != .sim, let rho = p.latticeSelectableDensity(ref, in: g.id),
+                       let pct = p.latticeDensityPercent(rho: rho, cellMM: l.cellSizeMode == .fixed && l.cellMM > 0
+                                                         ? l.cellMM : (p.latticeSelectableCellMM(ref) ?? s.cellMaxMM)) {
+                        let dial = Swift.min(1, Swift.max(0.01, pct / 100))
+                        if rowDensity { s.regionDials.append((region: id, dial: dial)) } else if !uniformSet { s.dial = dial; uniformSet = true }
+                    }
                 }
                 id += 1
             }
@@ -155,6 +179,19 @@ public final class LatticeLayoutPreview: ObservableObject {
         // Whole part ("In a part"), or no face asked for lattice: the whole part is lattice, less No lattice and Protect skins
         s.allLattice = l.wholePart || !s.regions.contains { !$0.noLattice }
         return s
+    }
+}
+
+/// One plain line where the new engine's lines go, when it does not draw (Organic).
+struct LatticeLayoutPreviewOneLine: View {
+    let text: String
+    var body: some View {
+        Text(text).font(.system(size: 12)).foregroundStyle(DS.Color.textSecondary.color).lineLimit(1).minimumScaleFactor(0.8)
+            .padding(.horizontal, DS.Space.m).padding(.vertical, DS.Space.xs)
+            .background(Capsule().fill(DS.Surface.bar.color))
+            .background(CornerPairStyle.publish("new-engine-lines"))
+            .padding(.bottom, 96)
+            .allowsHitTesting(false)
     }
 }
 
@@ -169,6 +206,9 @@ struct LatticeLayoutPreviewLines: View {
                 Text(p).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.warning.color)
             } else if preview.laying, preview.bars == nil {
                 Text("New engine: laying the lattice…").font(.system(size: 12)).foregroundStyle(DS.Color.textSecondary.color)
+            }
+            if let n = preview.note {
+                Text(n).font(.system(size: 12)).foregroundStyle(DS.Color.warning.color)
             }
             Text(LatticeLayoutPreview.roundBarsLine).font(.system(size: 12)).foregroundStyle(DS.Color.textSecondary.color)
             if let t = preview.timing {

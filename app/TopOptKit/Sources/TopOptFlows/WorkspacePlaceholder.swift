@@ -1313,7 +1313,10 @@ public struct WorkspacePlaceholder: View {
                           layoutBars: newEngineDrawn ? newEngine.bars : nil)   // ★ the new engine (test): its bars (LatticeLayoutPreview)
                 .onEmptyTap { emptyTapClears() }   // ★ his iPad 10-26 (5): a tap on empty space clears the selection
                 .onTapRay(primitiveTapRay)   // ★ his iPad 10-28: a tap on a keep-clear volume picks it
-                .overlay(alignment: .bottom) { if newEngineDrawn { LatticeLayoutPreviewLines(preview: newEngine) } }   // ★ the new engine (test): its lines
+                .overlay(alignment: .bottom) {
+                    if newEngineDrawn { LatticeLayoutPreviewLines(preview: newEngine) }
+                    else if newEngineAsked { LatticeLayoutPreviewOneLine(text: LatticeLayoutPreview.organicLine) }   // ★ Organic: said
+                }   // ★ the new engine (test): its lines
                 .onChange(of: newEngineOn) { on in newEngine.update(project: project, on: on) }
                 .onChange(of: project.lattice) { _ in if newEngineOn { newEngine.update(project: project, on: true) } }
                 .ignoresSafeArea()
@@ -4807,7 +4810,8 @@ public struct WorkspacePlaceholder: View {
 
     /// ★ THE NEW ENGINE (test) is asked for: App settings' "New engine (test)" (OFF by default) on Lattice Setup with the
     /// lattice view up. Off, nothing of the new engine runs and the page is today's.
-    private var newEngineOn: Bool { appSettings.newEngineTest && latticeSetupUp && showStrutPreview && latticeViewsUp }
+    private var newEngineAsked: Bool { appSettings.newEngineTest && latticeSetupUp && showStrutPreview && latticeViewsUp }
+    private var newEngineOn: Bool { newEngineAsked && LatticeLayoutPreview.draws(project.lattice) }   // ★ Organic: the old preview
     /// …and draws in the old engine's place (its bars, the body ghosted, its lines under the view).
     private var newEngineDrawn: Bool { newEngineOn }
 

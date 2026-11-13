@@ -143,6 +143,50 @@ final class LatticeLayoutPreviewTests: XCTestCase {
         XCTAssertTrue(LatticeLayoutPreview.settings(p).allLattice, "★ Whole part: the whole part is lattice")
     }
 
+    /// ★ 11-13 round 2 (LatticeReview's answers): cells across a wall by mode (C3-C5), and the page's density as core's dial
+    /// (R10: the percent he sees / 100).
+    func testCellsAcrossAndDensityReachTheEngine() throws {
+        let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
+        let p = r.project
+        _ = try FlexibleR7M1Fixtures.hisLiveLattice(p)
+        p.lattice.stageMode = .structural
+        XCTAssertEqual(LatticeLayoutPreview.settings(p).minCellsAcross, 5, "★ Structural: five cells across a wall (C5)")
+        p.lattice.stageMode = .aesthetic
+        p.lattice.singleCellMembers = true
+        XCTAssertEqual(LatticeLayoutPreview.settings(p).minCellsAcross, 1, "★ Aesthetic with single-cell members: one (C4)")
+        p.lattice.singleCellMembers = false
+        XCTAssertEqual(LatticeLayoutPreview.settings(p).minCellsAcross, 2, "★ Aesthetic: two (C3)")
+        let g = try XCTUnwrap(p.latticeGroups.first { p.lattice.groupRoles[$0.id] == .include && !p.latticeSelectableRefs($0).isEmpty })
+        let ref = try XCTUnwrap(p.latticeSelectableRefs(g).first)
+        p.lattice.densityMode = .perRegion
+        p.lattice.selectableDensity[ref.key] = 0.2
+        XCTAssertNotNil(p.latticeDensityPercent(rho: 0.2, cellMM: 8), "premise: the page shows a percent for it")
+        let s = LatticeLayoutPreview.settings(p)
+        XCTAssertTrue(s.perRegion, "★ per-row density")
+        XCTAssertFalse(s.regionDials.isEmpty, "★ the rows' densities reach core as dials")
+        XCTAssertTrue(s.regionDials.allSatisfy { $0.dial >= 0.01 && $0.dial <= 1 }, "★ on core's 0.01 ... 1 scale")
+    }
+
+    /// ★ 11-13 round 2: Small cells in thin walls is saved with the part (off is not written) and reaches core; Organic keeps the old
+    /// preview with one plain line; By stress gets one plain line.
+    func testSmallCellsOrganicAndByStress() throws {
+        let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
+        let p = r.project
+        var l = p.lattice
+        let off = String(decoding: try JSONEncoder().encode(l), as: UTF8.self)
+        XCTAssertFalse(off.contains("smallCellsInThinWalls"), "★ off is not written: older bytes unchanged")
+        l.smallCellsInThinWalls = true
+        XCTAssertTrue(try JSONDecoder().decode(LatticeSettings.self, from: JSONEncoder().encode(l)).smallCellsInThinWalls, "★ saved")
+        p.lattice.smallCellsInThinWalls = true
+        XCTAssertTrue(LatticeLayoutPreview.settings(p).smallCellsInThinWalls, "★ reaches core")
+        l.algorithm = "organic"
+        XCTAssertFalse(LatticeLayoutPreview.draws(l), "★ Organic: the new engine does not draw it")
+        l.algorithm = "stepped"
+        XCTAssertTrue(LatticeLayoutPreview.draws(l))
+        l.densityMode = .sim
+        XCTAssertEqual(LatticeLayoutPreview.note(l), LatticeLayoutPreview.byStressLine, "★ By stress: said in one line")
+    }
+
     // MARK: fixtures
 
     /// `n` bars on a grid: a 0.8 mm bar along x from each point.

@@ -71,6 +71,7 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         public var skinWidthMM = 0.0
         public var skinReachCells = 1.2
         public var dropLoose = true
+        public var smallCellsInThinWalls = false   // his per-part choice (11-13)
         public init() {}
         public static func == (a: Settings, b: Settings) -> Bool {
             a.allLattice == b.allLattice && a.beadMM == b.beadMM && a.minStrutLines == b.minStrutLines && a.minWallMM == b.minWallMM
@@ -82,6 +83,7 @@ public final class LatticeLayoutSession: @unchecked Sendable {
                 && a.strutWidthMM == b.strutWidthMM && a.allowQuilt == b.allowQuilt && a.strength == b.strength && a.bars == b.bars
                 && a.joinLoose == b.joinLoose && a.skin == b.skin && a.skinWidthMM == b.skinWidthMM
                 && a.skinReachCells == b.skinReachCells && a.dropLoose == b.dropLoose
+                && a.smallCellsInThinWalls == b.smallCellsInThinWalls
         }
     }
 
@@ -246,6 +248,7 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         o.skin_width_mm = s.skinWidthMM
         o.skin_reach_cells = s.skinReachCells
         o.drop_loose = s.dropLoose
+        o.small_cells_in_thin_walls = s.smallCellsInThinWalls
         return o
     }
 
