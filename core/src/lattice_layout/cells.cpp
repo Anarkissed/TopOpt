@@ -106,9 +106,15 @@ bool in_cube(const Layout& layout, const Cell& cell, const Vec3& p, double q[3])
 bool own(const Layout& layout, const Domain::Probe& probe, const Cell& cell, const double q[3], bool* other) {
   const Frame& f = layout.frames[static_cast<std::size_t>(cell.frame)];
   const WallMap& walls = layout.walls[static_cast<std::size_t>(cell.frame)];
+  if (!walls.flat) {
+    // No wall to name: only "lattice, and whose" is asked, so no width is measured (the costly part of a reading).
+    const Where w = probe.where(f.at(q[0], q[1], q[2]));
+    if (other) *other = w.lattice() && w.id != cell.region;
+    return w.lattice() && w.id == cell.region;
+  }
   const Reading r = read_at(probe, f, walls, q[0], q[1], q[2]);
   if (other) *other = r.where.lattice() && r.where.id != cell.region;
-  return r.where.lattice() && r.where.id == cell.region && (!walls.flat || r.wall == cell.wall);
+  return r.where.lattice() && r.where.id == cell.region && r.wall == cell.wall;
 }
 // D14b: lattice of another region at `p`, inside `cell`'s cube. The cell takes it in when no cell holds it as its
 // own and this cell is the first, in layout order, of the cells of other regions whose cube it is in.
@@ -346,13 +352,25 @@ struct Pass {
           for (int a = 0; a < 3; ++a) {
             if (a == 1 && b == 1 && c == 1) continue;
             const double q[3] = {lo[0] + s * e[a], lo[1] + s * e[b], lo[2] + s * e[c]};
-            double fit = 0.0;
-            if (sample(q[0], q[1], q[2], &fit)) { ++found; fits = std::min(fits, fit); continue; }
-            const Why why = probe->where(frame.at(q[0], q[1], q[2])).why;
-            if (why == Why::Outside) air = true;
-            else if (why != Why::Lattice) solid_too = true;
+            // Asked cheaply first (no width); the width is read only for a cube that turns out to be a sliver.
+            const Where w = probe->where(frame.at(q[0], q[1], q[2]));
+            if (w.lattice() && w.id == region) ++found;
+            else if (w.why == Why::Outside) air = true;
+            else if (w.why != Why::Lattice) solid_too = true;
           }
-      if (found > 0 && air && !solid_too) inside = found;
+      if (found > 0 && air && !solid_too) {
+        int counted = 0;
+        for (int c = 0; c < 3; ++c)
+          for (int b = 0; b < 3; ++b)
+            for (int a = 0; a < 3; ++a) {
+              if (a == 1 && b == 1 && c == 1) continue;
+              double fit = 0.0;
+              if (!sample(lo[0] + s * e[a], lo[1] + s * e[b], lo[2] + s * e[c], &fit)) continue;
+              ++counted;
+              fits = std::min(fits, fit);
+            }
+        inside = counted;
+      }
     }
     if (inside == 0 && !look_at_nodes(lo, s, &fits)) return;   // nothing of this pass here
     const bool cut = inside < 27;   // D3: a whole cell, cut by the edge
