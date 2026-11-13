@@ -2349,6 +2349,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// unchanged — this property is read by the preview's four call sites only, and
     /// the job still asks core.
     public var singleCellMembers: Bool = false
+    /// ★ SMALL CELLS IN THIN WALLS (his ask 11-13, per part): a wall too thin for an open cell takes small, denser cells at the
+    /// thinnest strut instead of going solid (core's Settings::small_cells_in_thin_walls). Read by the new engine only. Not written
+    /// while off, so older bytes are unchanged.
+    public var smallCellsInThinWalls: Bool = false
     /// ★★★ ALLOW QUILT (his ruling, 2026-09-12). Octet only. Off: every density on this
     /// project — simulated, automatic, uniform, per-region — is held under
     /// `LatticeType.aestheticDensityCeiling` (strut = 0.20 of the cell, windows half
@@ -2642,7 +2646,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // keeps asking for the solve it has always asked for.
         case simulateStresses
         // sub-floor retention (task 2026-08-05-lattice-retention-app-control)
-        case retainSubfloorInUnloadedRegions, subfloorStressFraction, singleCellMembers
+        case retainSubfloorInUnloadedRegions, subfloorStressFraction, singleCellMembers, smallCellsInThinWalls
         case allowQuilt
         case subfloorPerRegion, reportRegionCells
         // the enclosed-void rule's OFF control
@@ -2805,6 +2809,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         subfloorPerRegion = try c.decodeIfPresent(Bool.self, forKey: .subfloorPerRegion) ?? false
         // Absent from every older snapshot ⇒ off ⇒ core's floor of 2, unchanged.
         singleCellMembers = try c.decodeIfPresent(Bool.self, forKey: .singleCellMembers) ?? false
+        smallCellsInThinWalls = try c.decodeIfPresent(Bool.self, forKey: .smallCellsInThinWalls) ?? false
         // Absent from every older snapshot ⇒ off ⇒ the ceiling holds, as it should.
         allowQuilt = try c.decodeIfPresent(Bool.self, forKey: .allowQuilt) ?? false
         reportRegionCells = try c.decodeIfPresent(Bool.self, forKey: .reportRegionCells) ?? false
@@ -2910,6 +2915,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(retainSubfloorInUnloadedRegions,
                      forKey: .retainSubfloorInUnloadedRegions)
         try c.encode(singleCellMembers, forKey: .singleCellMembers)
+        if smallCellsInThinWalls { try c.encode(true, forKey: .smallCellsInThinWalls) }   // ★ 11-13: off is not written
         try c.encode(allowQuilt, forKey: .allowQuilt)
         // encodeIfPresent: "the user has not moved it" must round-trip as ABSENT,
         // not as core's number written into the project — the whole point of the

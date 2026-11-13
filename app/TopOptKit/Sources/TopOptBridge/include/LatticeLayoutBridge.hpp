@@ -79,6 +79,7 @@ struct LatticeLayoutSettings {
   bool skin = false;                         // Finish Skin (S3)
   double skin_width_mm = 0.0;                // 0 = as wide as the thinner strut it joins
   double skin_reach_cells = 1.2;
+  bool small_cells_in_thin_walls = false;   // his per-part choice (core Settings::small_cells_in_thin_walls), default off
   bool drop_loose = true;                    // Finish None's rule (S4); pieces adrift go too
 };
 

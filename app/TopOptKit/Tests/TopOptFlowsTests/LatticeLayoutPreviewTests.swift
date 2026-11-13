@@ -80,6 +80,115 @@ final class LatticeLayoutPreviewTests: XCTestCase {
         XCTAssertFalse(s.allLattice, "a face asks for lattice: All solid with regions")
     }
 
+    /// ★ His pick 11-12: Lattice Setup's Finish and Grade to shape reach core (Skin went as Covered; Covered and the grade were
+    /// not sent).
+    func testTheFinishAndGradeReachTheEngine() throws {
+        let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
+        let p = r.project
+        p.lattice.boundary = .fullSkin
+        var s = LatticeLayoutPreview.settings(p)
+        XCTAssertTrue(s.skin, "★ Finish Skin is core's Finish Skin (S3)")
+        XCTAssertEqual(s.coverMM, 0, "★ Skin is not Covered")
+        p.lattice.boundary = .covered
+        s = LatticeLayoutPreview.settings(p)
+        XCTAssertLessThan(s.coverMM, 0, "★ Covered is core's cover (S9)")
+        XCTAssertFalse(s.skin)
+        p.lattice.boundary = .rim
+        s = LatticeLayoutPreview.settings(p)
+        XCTAssertLessThan(s.rimMM, 0, "Rim is core's rim")
+        XCTAssertFalse(s.skin)
+        XCTAssertEqual(s.coverMM, 0)
+        p.lattice.boundary = .none
+        s = LatticeLayoutPreview.settings(p)
+        XCTAssertEqual([s.rimMM, s.coverMM], [0, 0])
+        XCTAssertFalse(s.skin)
+
+        p.lattice.algorithm = "stepped"
+        p.lattice.gradingMode = .fitShape
+        p.lattice.shapeFitBandMM = 6
+        p.lattice.shapeFitGradeStrength = 0.5
+        s = LatticeLayoutPreview.settings(p)
+        XCTAssertTrue(s.gradeToShape, "★ Grade to shape reaches core")
+        XCTAssertEqual(s.bandMM, 6, "★ with its band")
+        XCTAssertEqual(s.strength, 0.5, "★ and its Strength")
+        p.lattice.gradingMode = .stressOnly
+        s = LatticeLayoutPreview.settings(p)
+        XCTAssertFalse(s.gradeToShape, "stress only: no shape grade")
+        XCTAssertEqual(s.bandMM, 0)
+    }
+
+    /// ★ 11-13: a Protect skin group is a Protect skin at its rows' depth (D5), not a No lattice region; Whole part lattices the
+    /// whole part even with face rows set.
+    func testProtectSkinAndWholePartReachTheEngine() throws {
+        let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
+        let p = r.project
+        _ = try FlexibleR7M1Fixtures.hisLiveLattice(p)
+        let g = try XCTUnwrap(p.latticeGroups.first { p.lattice.groupRoles[$0.id] == .include && !p.latticeSelectableRefs($0).isEmpty },
+                              "premise: a Lattice group with face rows")
+        let faces = Set(p.latticeSelectableRefs(g).flatMap { ref -> [Int32] in
+            if case let .face(_, f) = ref { return [Int32(f)] }
+            return []
+        })
+        XCTAssertFalse(faces.isEmpty, "premise: its face rows")
+        p.lattice.skinGroups.insert(g.id)
+        p.lattice.groupRoles[g.id] = .exclude   // as the page stores a Protect skin
+        let s = LatticeLayoutPreview.settings(p)
+        XCTAssertEqual(Set(s.protect.flatMap(\.faces)), faces, "★ its faces are a Protect skin")
+        XCTAssertTrue(s.regions.allSatisfy { Set($0.faces).isDisjoint(with: faces) }, "★ and not a No lattice region")
+        XCTAssertTrue(!s.protect.isEmpty && s.protect.allSatisfy { $0.depthMM > 0.5 }, "★ at its rows' depth, not 0")
+        p.lattice.skinGroups.remove(g.id)
+        p.lattice.groupRoles[g.id] = .include
+        XCTAssertFalse(LatticeLayoutPreview.settings(p).allLattice, "premise: face rows ask for lattice")
+        p.lattice.wholePart = true
+        XCTAssertTrue(LatticeLayoutPreview.settings(p).allLattice, "★ Whole part: the whole part is lattice")
+    }
+
+    /// ★ 11-13 round 2 (LatticeReview's answers): cells across a wall by mode (C3-C5), and the page's density as core's dial
+    /// (R10: the percent he sees / 100).
+    func testCellsAcrossAndDensityReachTheEngine() throws {
+        let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
+        let p = r.project
+        _ = try FlexibleR7M1Fixtures.hisLiveLattice(p)
+        p.lattice.stageMode = .structural
+        XCTAssertEqual(LatticeLayoutPreview.settings(p).minCellsAcross, 5, "★ Structural: five cells across a wall (C5)")
+        p.lattice.stageMode = .aesthetic
+        p.lattice.singleCellMembers = true
+        XCTAssertEqual(LatticeLayoutPreview.settings(p).minCellsAcross, 1, "★ Aesthetic with single-cell members: one (C4)")
+        p.lattice.singleCellMembers = false
+        XCTAssertEqual(LatticeLayoutPreview.settings(p).minCellsAcross, 2, "★ Aesthetic: two (C3)")
+        let pick = p.latticeGroups.flatMap { g in p.latticeSelectableRefs(g).map { (g, $0) } }
+            .first { p.latticeSelectableRole($0.1, in: $0.0.id) == .include }
+        let (g, ref) = try XCTUnwrap(pick, "premise: a Lattice row")
+        p.lattice.densityMode = .perRegion
+        p.writeLatticeDensity(ref, fraction: 0.2, cellMM: 8)   // the page's own write
+        XCTAssertNotNil(p.latticeSelectableDensity(ref, in: g.id), "premise: the row has a density")
+        XCTAssertNotNil(p.latticeDensityPercent(rho: 0.2, cellMM: 8), "premise: the page shows a percent for it")
+        let s = LatticeLayoutPreview.settings(p)
+        XCTAssertTrue(s.perRegion, "★ per-row density")
+        XCTAssertFalse(s.regionDials.isEmpty, "★ the rows' densities reach core as dials")
+        XCTAssertTrue(s.regionDials.allSatisfy { $0.dial >= 0.01 && $0.dial <= 1 }, "★ on core's 0.01 ... 1 scale")
+    }
+
+    /// ★ 11-13 round 2: Small cells in thin walls is saved with the part (off is not written) and reaches core; Organic keeps the old
+    /// preview with one plain line; By stress gets one plain line.
+    func testSmallCellsOrganicAndByStress() throws {
+        let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
+        let p = r.project
+        var l = p.lattice
+        let off = String(decoding: try JSONEncoder().encode(l), as: UTF8.self)
+        XCTAssertFalse(off.contains("smallCellsInThinWalls"), "★ off is not written: older bytes unchanged")
+        l.smallCellsInThinWalls = true
+        XCTAssertTrue(try JSONDecoder().decode(LatticeSettings.self, from: JSONEncoder().encode(l)).smallCellsInThinWalls, "★ saved")
+        p.lattice.smallCellsInThinWalls = true
+        XCTAssertTrue(LatticeLayoutPreview.settings(p).smallCellsInThinWalls, "★ reaches core")
+        l.algorithm = "organic"
+        XCTAssertFalse(LatticeLayoutPreview.draws(l), "★ Organic: the new engine does not draw it")
+        l.algorithm = "stepped"
+        XCTAssertTrue(LatticeLayoutPreview.draws(l))
+        l.densityMode = .sim
+        XCTAssertEqual(LatticeLayoutPreview.note(l), LatticeLayoutPreview.byStressLine, "★ By stress: said in one line")
+    }
+
     // MARK: fixtures
 
     /// `n` bars on a grid: a 0.8 mm bar along x from each point.
