@@ -528,8 +528,11 @@ std::size_t lay_skin(Bars& bars, const Domain& domain, const SkinSpec& spec) {
       }
       if (!empty) continue;
       // On the surface: its middle neither in the air (across a notch) nor deep in the part.
+      // Round a curved wall a straight bar between two points of the surface leaves it by the
+      // bow of the curve (SkinSpec::bow).
       const double depth = probe.part().depth(mid);
-      if (depth < -1e-6 || depth > 0.05 * len + 0.02) continue;
+      const double bow = std::max(0.0, spec.bow) * len;
+      if (depth < -(bow + 1e-6) || depth > std::max(bow, 0.05 * len) + 0.02) continue;
       Bar skin;
       skin.a = p;
       skin.b = q;

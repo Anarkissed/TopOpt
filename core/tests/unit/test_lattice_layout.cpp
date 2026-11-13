@@ -2473,7 +2473,7 @@ static void test_pieces() {
 // lattice under a flat face, and a shell of lattice round a curved pocket cut into the opposite side, the two sharing
 // the wall between them. Without the rule the wedges where one region's share is too thin for its cells are solid,
 // and so is the pocket's own surface wherever a cube is cut too thinly for its sample points to see.
-static void slivers_case(double cx, double slab_mm, long tally[9]) {
+static void slivers_case(double cx, double slab_mm, long tally[13]) {
   // A 40 x 9.83 bar, 20 long, with a half-round pocket (radius 6) in its top edge: 3.83 mm of wall under the
   // pocket at its thinnest, his stand's own number.
   const double H = 9.83;
@@ -2608,13 +2608,44 @@ static void slivers_case(double cx, double slab_mm, long tally[9]) {
   for (const Bar& b : without.bars) len_without += std::sqrt((b.a.x - b.b.x) * (b.a.x - b.b.x) + (b.a.y - b.b.y) * (b.a.y - b.b.y) + (b.a.z - b.b.z) * (b.a.z - b.b.z));
   CHECK(len_with >= len_without - 1e-9);
   tally[6] += static_cast<long>(len_without); tally[7] += static_cast<long>(len_with);
+  // Finish Skin on the pocket's curved wall (his words: "not just with singular vertical lines, but with a lattice all
+  // along the face"). The struts the wall cuts are joined along the wall both ways: along the pocket (lines) AND round
+  // it (rings). A ring's bar is a straight piece between two points of a hollow wall, so its middle is in the air by
+  // the bow of the curve; with no bow allowed there are no rings at all.
+  if (slab_mm == 3.8) {
+    auto skinned = [&](double bow, long* along, long* round, double* worst) {
+      Bars b = lay_bars(ls, d);
+      join_loose_bars(b, d, 0, &ls);
+      SkinSpec sk;
+      sk.bow = bow;
+      const std::size_t made = lay_skin(b, d, sk);
+      *along = *round = 0;
+      *worst = 0.0;
+      for (const Bar& x : b.bars) {
+        if (!x.skin) continue;
+        if (std::hypot((x.a.x + x.b.x) / 2 - cx, (x.a.y + x.b.y) / 2 - H) > 6.6) continue;   // on the pocket's wall,
+        if (std::min(x.a.z, x.b.z) < 0.5 || std::max(x.a.z, x.b.z) > 19.5) continue;         // not on the bar's two ends
+        const double len = std::sqrt((x.a.x - x.b.x) * (x.a.x - x.b.x) + (x.a.y - x.b.y) * (x.a.y - x.b.y) + (x.a.z - x.b.z) * (x.a.z - x.b.z));
+        (std::fabs(x.a.z - x.b.z) > 0.7 * len ? *along : *round) += 1;
+        const double off = std::fabs(pr.part().depth(Vec3{(x.a.x + x.b.x) / 2, (x.a.y + x.b.y) / 2, (x.a.z + x.b.z) / 2}));
+        *worst = std::max(*worst, off - 0.1 * len);
+      }
+      return made;
+    };
+    long along0 = 0, round0 = 0, along1 = 0, round1 = 0;
+    double worst0 = 0, worst1 = 0;
+    const std::size_t made0 = skinned(0.0, &along0, &round0, &worst0), made1 = skinned(0.1, &along1, &round1, &worst1);
+    CHECK(made1 >= made0 && round1 >= round0 && along1 >= along0);
+    CHECK(worst1 <= 0.02 + 1e-6);   // no bar strays from the wall by more than the bow allowed
+    tally[9] += along1; tally[10] += round1; tally[11] += along0; tally[12] += round0;
+  }
   // What it must NOT take in: a wall of the SAME region too thin for its cell stays solid (D8;
   // test_struts_end_in_no_cell_space holds that with the rule on).
 }
 static void test_slivers_are_taken_in() {
   // The pocket at five places across the cells' grid (where a cube is cut thinly depends on where the grid falls),
   // then three deeper slabs (where the two regions' cubes overlap).
-  long tally[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+  long tally[13] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
   for (double cx : {20.0, 20.7, 21.4, 22.1, 22.8}) slivers_case(cx, 3.8, tally);
   for (double slab : {5.0, 6.0, 7.0}) slivers_case(21.4, slab, tally);
   std::printf("slivers, all eight: held by no cell %ld -> %ld; round the wall, of %ld: %ld -> %ld in a cell; cubes laid by the rule %ld; strut length %ld -> %ld mm\n",
@@ -2625,6 +2656,10 @@ static void test_slivers_are_taken_in() {
   CHECK(tally[4] * 100 >= tally[2] * 97);   // round the pocket's wall: consistently, all the way round
   CHECK(tally[5] > 0);
   CHECK(tally[8] > 300);                    // and the seam between the two regions: lattice of one, taken in by the other's cell
+  std::printf("skin on the pocket's wall, five pockets: %ld bars along it and %ld round it (with no bow allowed: %ld along, %ld round)\n",
+              tally[9], tally[10], tally[11], tally[12]);
+  CHECK(tally[9] > 100 && tally[10] > 100);   // a lattice along the face: both ways
+  CHECK(tally[10] > 4 * tally[12]);           // the rings are there because the bow is allowed
   CHECK(tally[7] > tally[6]);
 }
 

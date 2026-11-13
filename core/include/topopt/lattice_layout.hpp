@@ -756,6 +756,12 @@ class SolidAt {
 struct SkinSpec {
   double width_mm = 0.0;      // 0 = as wide as the thinner of the two struts it joins
   double reach_cells = 1.2;
+  // Round a CURVED wall a straight bar between two points of the surface leaves the surface by the bow of the curve:
+  // into the air on a hollow wall (a pocket), into the part on a bulging one. A bar may bow by this share of its own
+  // length and still count as lying on the surface (0.1 is a wall curved as tightly as 1.3 times the bar's length).
+  // At 0 only bars that lie in the surface are made: on a pocket's wall that is lines along its axis and no rings
+  // (his v3 stand, 2026-11-12: "not just with singular vertical lines, but with a lattice all along the face").
+  double bow = 0.1;
 };
 std::size_t lay_skin(Bars& bars, const Domain& domain, const SkinSpec& spec = SkinSpec{});
 
