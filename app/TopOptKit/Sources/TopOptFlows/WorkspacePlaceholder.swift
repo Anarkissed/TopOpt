@@ -135,6 +135,7 @@ public struct WorkspacePlaceholder: View {
     @State private var latticeModeAsk: Bool?
     @StateObject private var flexibleMain = FlexibleMainStage()   // Flexible (PR #362): the ONE Flexible model per project + the main page's lattice (FlexibleMainStage.swift)
     @StateObject private var newEngine = LatticeLayoutPreview()   // ★ the lattice rebuild's preview, behind "New engine (test)"
+    @StateObject private var fileExport = LatticeFileExport()     // ★ his go 11-13: the print file from that preview, on the Mac
     @ObservedObject private var appSettings = AppSettings.shared
     @State private var strutScene: LatticeSDFScene? = nil
     @State private var strutSceneToken = 0
@@ -1314,11 +1315,16 @@ public struct WorkspacePlaceholder: View {
                 .onEmptyTap { emptyTapClears() }   // ★ his iPad 10-26 (5): a tap on empty space clears the selection
                 .onTapRay(primitiveTapRay)   // ★ his iPad 10-28: a tap on a keep-clear volume picks it
                 .overlay(alignment: .bottom) {
-                    if newEngineDrawn { LatticeLayoutPreviewLines(preview: newEngine) }
+                    if newEngineDrawn {
+                        VStack(spacing: 6) {
+                            LatticeFileExportBar(export: fileExport, make: exportPrintFile)   // ★ his go 11-13: Export, on the Mac
+                            LatticeLayoutPreviewLines(preview: newEngine)
+                        }
+                    }
                     else if newEngineAsked { LatticeLayoutPreviewOneLine(text: LatticeLayoutPreview.organicLine) }   // ★ Organic: said
                 }   // ★ the new engine (test): its lines
                 .onChange(of: newEngineOn) { on in newEngine.update(project: project, on: on) }
-                .onChange(of: project.lattice, perform: { _ in if newEngineOn { newEngine.update(project: project, on: true) } })   // (the rebake's lattice trigger stays the page's first: OrganicPreviewBakeInputsTests)
+                .onChange(of: project.lattice, perform: { _ in if newEngineOn { newEngine.update(project: project, on: true); fileExport.settingsChanged() } })   // (the rebake's lattice trigger stays the page's first: OrganicPreviewBakeInputsTests)
                 .ignoresSafeArea()
                 // ★ §6(g) — THE PENCIL HOVER, ON THE MESH VIEW ITSELF.
                 //
@@ -13913,6 +13919,16 @@ public struct WorkspacePlaceholder: View {
 
     /// ★ B1 (note 4, approved design 2026-11-02): look for the remembered Mac for a few seconds, then go on; if it never
     /// answers, Optimize says so in one line. Discovery itself starts as the workspace opens (workspaceCardsHost).
+    /// ★ Export (his go 11-13): the print file from the new engine's preview, made on the chosen Mac (a remembered Mac not
+    /// found yet is looked for first, as Optimize does).
+    private func exportPrintFile() {
+        if compute.wantsRemote, compute.activeRemote == nil {
+            findTheMac { fileExport.make(project: project, config: compute.activeRemote) }
+            return
+        }
+        fileExport.make(project: project, config: compute.activeRemote)
+    }
+
     private func findTheMac(then go: @escaping () -> Void) {
         guard !macFinding else { return }
         macFinding = true
