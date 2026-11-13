@@ -444,6 +444,14 @@ struct CellSpec {
   // struts only (C16). Off, or band 0: cells are cut where the region ends (G7).
   bool grade_to_shape = false;
   double band_mm = 0.0;
+  // D14b (his rule, 2026-11-12, on his v3 stand: "It's either consistently latticed all around the pocket, or it
+  // isn't", "Why can't the pocket just cut the lattices wherever they are positioned"). A cell takes in every bit of
+  // lattice inside its own cube that no cell of that bit's own region and wall holds: the seam where two regions
+  // share a wall, the line between two walls of one face, a wedge beside a curved wall. And a cube that a curved
+  // surface cuts so thinly that none of its sample points is lattice is still laid as a cut cell when the rest of it
+  // is AIR (it faces the open surface): the lattice runs out to the surface instead of stopping at a solid crust.
+  // Off: space no cell of its own holds is solid everywhere (D14 as first built).
+  bool absorb_slivers = true;
   // R2, G11 (his rule, 2026-11-12: "without 'Allow quilting' set to 'on' it should NEVER
   // QUILT", meaning never past the open look). The same switch as StrutSpec::allow_quilt.
   //   allow_quilt  off: no cell is under the smallest cell that prints open (C14), in a
@@ -538,7 +546,16 @@ struct RegionCells {
   std::size_t solid = 0;       // places lattice was asked for and no allowed cell fits
 };
 
+// The cells sorted into a coarse grid of the part's own space, to find the cubes round a point.
+struct CellIndex {
+  double pitch = 4.0;
+  std::map<std::array<long long, 3>, std::vector<std::uint32_t>> grid;   // each list in cell order
+};
+
 struct Layout {
+  // D14b: cells take in lattice slivers inside their cubes (CellSpec::absorb_slivers). `index` is lay_cells' own.
+  bool absorb = false;
+  std::shared_ptr<const CellIndex> index;
   double floor_cell_mm = 0.0;        // the smallest cell allowed (C14; the quilt's with Allow quilt)
   double bead_mm = 0.0;              // the line width it was laid for
   double min_strut_mm = 0.0;         // the thinnest strut allowed (R5): lines x line width
@@ -580,7 +597,13 @@ Reading read_at(const Domain::Probe& probe, const Frame& frame, const WallMap& w
 // region and, under a flat region, of the cell's own wall? A cut cell (D3) is exactly the
 // part of its cube this holds for; two walls' cut cells may overlap as cubes where the
 // walls meet, never as this. Lattice space this holds for in no cell is solid (D14).
+// With Layout::absorb (D14b) it also holds lattice inside its cube that belongs to another region or wall, when no
+// cell of that region and wall holds it and this is the first cell, in layout order, whose cube the point is in.
 bool cell_holds(const Layout& layout, const Domain::Probe& probe, const Cell& cell, const Vec3& p);
+// The same for cell number `cell` of the layout at a point (a, b, c) of the cell's own frame, WITHOUT the cube test
+// (for a point of the cell's own struts, already a hair inside it).
+bool cell_holds_at(const Layout& layout, const Domain::Probe& probe, std::size_t cell, double a, double b, double c);
+std::shared_ptr<const CellIndex> index_cells(const Layout& layout, double pitch = 4.0);
 
 // ── STRUT WIDTH ───────────────────────────────────────────────────────────────
 // What a lattice looks like is one number, strut width over cell size (R9). Octet's
@@ -733,6 +756,12 @@ class SolidAt {
 struct SkinSpec {
   double width_mm = 0.0;      // 0 = as wide as the thinner of the two struts it joins
   double reach_cells = 1.2;
+  // Round a CURVED wall a straight bar between two points of the surface leaves the surface by the bow of the curve:
+  // into the air on a hollow wall (a pocket), into the part on a bulging one. A bar may bow by this share of its own
+  // length and still count as lying on the surface (0.1 is a wall curved as tightly as 1.3 times the bar's length).
+  // At 0 only bars that lie in the surface are made: on a pocket's wall that is lines along its axis and no rings
+  // (his v3 stand, 2026-11-12: "not just with singular vertical lines, but with a lattice all along the face").
+  double bow = 0.1;
 };
 std::size_t lay_skin(Bars& bars, const Domain& domain, const SkinSpec& spec = SkinSpec{});
 

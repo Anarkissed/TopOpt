@@ -69,7 +69,7 @@ bool SolidAt::operator()(const Domain::Probe& probe, const Vec3& p, const Where&
   if (it != grid_.end())
     for (std::uint32_t ci : it->second) {
       const Cell& c = layout_->cells[ci];
-      if (c.region == w.id && cell_holds(*layout_, probe, c, p)) return false;
+      if ((c.region == w.id || layout_->absorb) && cell_holds(*layout_, probe, c, p)) return false;
     }
   return true;   // lattice was asked for here and no cell holds it: solid (D14)
 }
@@ -89,7 +89,6 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
     for (std::size_t ci = next.fetch_add(1); ci < layout.cells.size() && !domain.stop_asked(); ci = next.fetch_add(1)) {
       const Cell& c = layout.cells[ci];
       const Frame& f = layout.frames[static_cast<std::size_t>(c.frame)];
-      const WallMap& walls = layout.walls[static_cast<std::size_t>(c.frame)];
       const double unit = c.size / type.S;
       const double mid[3] = {c.lo[0] + 0.5 * c.size, c.lo[1] + 0.5 * c.size, c.lo[2] + 0.5 * c.size};
       Found& out = per_cell[ci];
@@ -105,14 +104,7 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
         len = std::sqrt(len);
         if (len > 0.0)
           for (int a = 0; a < 3; ++a) q[a] += off[a] * std::min(1.0, kInward / len);
-        bool yes = false;
-        if (!walls.flat) {
-          const Where w = probe.where(f.at(q[0], q[1], q[2]));
-          yes = w.lattice() && w.id == c.region;
-        } else {
-          const Reading r = read_at(probe, f, walls, q[0], q[1], q[2]);
-          yes = r.where.lattice() && r.where.id == c.region && r.wall == c.wall;
-        }
+        const bool yes = cell_holds_at(layout, probe, ci, q[0], q[1], q[2]);
         node_read.emplace(k, yes);
         return yes;
       };
@@ -139,12 +131,7 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
         auto mine = [&](double t) {
           double q[3];
           inward(t, q);
-          if (!walls.flat) {   // no wall to name: only "lattice of this region" is asked
-            const Where w = probe.where(f.at(q[0], q[1], q[2]));
-            return w.lattice() && w.id == c.region;
-          }
-          const Reading r = read_at(probe, f, walls, q[0], q[1], q[2]);
-          return r.where.lattice() && r.where.id == c.region && r.wall == c.wall;
+          return cell_holds_at(layout, probe, ci, q[0], q[1], q[2]);
         };
         Bar bar;
         bar.width = c.strut;
@@ -541,8 +528,11 @@ std::size_t lay_skin(Bars& bars, const Domain& domain, const SkinSpec& spec) {
       }
       if (!empty) continue;
       // On the surface: its middle neither in the air (across a notch) nor deep in the part.
+      // Round a curved wall a straight bar between two points of the surface leaves it by the
+      // bow of the curve (SkinSpec::bow).
       const double depth = probe.part().depth(mid);
-      if (depth < -1e-6 || depth > 0.05 * len + 0.02) continue;
+      const double bow = std::max(0.0, spec.bow) * len;
+      if (depth < -(bow + 1e-6) || depth > std::max(bow, 0.05 * len) + 0.02) continue;
       Bar skin;
       skin.a = p;
       skin.b = q;
