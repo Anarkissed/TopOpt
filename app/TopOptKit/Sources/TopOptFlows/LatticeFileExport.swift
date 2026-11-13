@@ -93,7 +93,9 @@ public enum LatticeFileRun {
     /// Submit, poll, fetch: blocking, so call it off the main thread. The worker's core must be the app's (a different core lays
     /// a different lattice than the preview drew).
     public static func drive(config: RemoteRunnerConfig, modelPath: String, jobJSON: Data, projectName: String,
-                             isCancelled: @escaping @Sendable () -> Bool = { false }) throws -> (stl: Data, report: LatticeFileReport) {
+                             isCancelled: @escaping @Sendable () -> Bool = { false },
+                             onState: @escaping @Sendable (_ state: String, _ position: Int?) -> Void = { _, _ in })
+        throws -> (stl: Data, report: LatticeFileReport) {
         let session = URLSession(configuration: {
             let c = URLSessionConfiguration.ephemeral
             c.timeoutIntervalForRequest = config.controlTimeout
@@ -156,6 +158,7 @@ public enum LatticeFileRun {
                 throw Failure("Lost the job on the Mac")
             }
             state = (o["state"] as? String) ?? "unknown"
+            onState(state, o["position"] as? Int)   // queued (and how many ahead) or running
             if state == "done" { break }
             if state == "failed" || state == "error" || state == "cancelled" {
                 // the CLI's last line carries the same plain why as lattice_file.json (the contract)
@@ -190,6 +193,8 @@ public final class LatticeFileExport: ObservableObject {
         case failed(String)
     }
     @Published public private(set) var state: State = .idle
+    /// While making: the Mac's word for the job ("queued" with how many are ahead, or "running").
+    @Published public private(set) var onMac: (state: String, ahead: Int?)?
     public static let noMacLine = "Choose a Mac to make the print file"
     public static let checkLine = "Check it in your slicer before printing"
 
@@ -221,7 +226,13 @@ public final class LatticeFileExport: ObservableObject {
         state = .making(since: Date())
         Task.detached {
             let outcome: Result<(stl: Data, report: LatticeFileReport), Error> = Result {
-                try LatticeFileRun.drive(config: config, modelPath: path, jobJSON: job, projectName: name, isCancelled: { f.get() })
+                try LatticeFileRun.drive(config: config, modelPath: path, jobJSON: job, projectName: name, isCancelled: { f.get() },
+                                         onState: { st, pos in
+                                             Task { @MainActor [weak self] in
+                                                 guard let self, self.token == t else { return }
+                                                 self.onMac = (st, pos.map { Swift.max(0, $0 - 1) })
+                                             }
+                                         })
             }
             var saved: Result<URL, Error>?
             if case let .success(r) = outcome {
@@ -290,7 +301,12 @@ struct LatticeFileExportBar: View {
             case let .making(since):
                 TimelineView(.periodic(from: since, by: 1)) { ctx in
                     let s = Int(ctx.date.timeIntervalSince(since))
-                    said(String(format: "Making the print file on the Mac · %d:%02d", s / 60, s % 60), key: "new-engine-export-making")
+                    if let m = export.onMac, m.state == "queued" {
+                        said("Waiting for the Mac" + (m.ahead.map { $0 > 0 ? " · \($0) ahead" : "" } ?? "")
+                             + String(format: " · %d:%02d", s / 60, s % 60), key: "new-engine-export-making")
+                    } else {
+                        said(String(format: "Making the print file on the Mac · %d:%02d", s / 60, s % 60), key: "new-engine-export-making")
+                    }
                 }
                 chip("Cancel", key: "new-engine-export-cancel") { export.cancel() }
             case let .ready(_, r):
