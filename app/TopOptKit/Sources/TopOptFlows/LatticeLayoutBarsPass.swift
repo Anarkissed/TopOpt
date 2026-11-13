@@ -24,8 +24,27 @@ public struct LatticeLayoutBarsInputs: Equatable {
     /// 7 per bar: a xyz, b xyz, width mm — the part's own coordinates (the viewer mesh's).
     public var bars: [Float]
     public var hidden: Bool
-    public init(token: Int, bars: [Float], hidden: Bool = false) { self.token = token; self.bars = bars; self.hidden = hidden }
-    public static func == (a: Self, b: Self) -> Bool { a.token == b.token && a.hidden == b.hidden }
+    /// ★ THE SOLID VIEW (his ask 11-13): the engine's map of the part; nil = X-ray (the see-through body).
+    public var solid: LatticeLayoutSolidGrid?
+    public init(token: Int, bars: [Float], hidden: Bool = false, solid: LatticeLayoutSolidGrid? = nil) {
+        self.token = token; self.bars = bars; self.hidden = hidden; self.solid = solid
+    }
+    public static func == (a: Self, b: Self) -> Bool { a.token == b.token && a.hidden == b.hidden && a.solid?.token == b.solid?.token }
+}
+
+/// The engine's map for the solid view (LatticeLayoutSession.grid): 2 signed bytes per voxel (open, inside), x fastest;
+/// voxel (0,0,0)'s centre at `origin`, model mm.
+public struct LatticeLayoutSolidGrid: Equatable {
+    public var token: Int
+    public var origin: SIMD3<Float>
+    public var voxel: Float
+    public var dims: SIMD3<Int32>
+    public var rg: [Int8]
+    public init(token: Int, origin: SIMD3<Float>, voxel: Float, dims: SIMD3<Int32>, rg: [Int8]) {
+        self.token = token; self.origin = origin; self.voxel = voxel; self.dims = dims; self.rg = rg
+    }
+    public static func == (a: Self, b: Self) -> Bool { a.token == b.token }
+    public var isWhole: Bool { dims.x > 0 && dims.y > 0 && dims.z > 0 && rg.count == 2 * Int(dims.x) * Int(dims.y) * Int(dims.z) }
 }
 
 let latticeLayoutBarsShaderSource = """
@@ -142,6 +161,114 @@ fragment BarGBuf bar_gbuffer(BarVOut in [[stage_in]],
     o.depth = clip.z / clip.w;
     return o;
 }
+
+// ── THE SOLID VIEW's CUT WALLS (his ask 11-13) ──
+// Where the body's surface is cut open (the shell clip reads the same map, ShellClip mode 2), this walks each pixel's ray
+// through the engine's map: past air, into the open lattice, and stops at the first solid behind it — the wall the lattice
+// is cut into. A ray that meets the part's surface before any open lattice draws nothing (the body is there).
+struct WallFrame {
+    float4x4 clipFromModel;
+    float4x4 modelFromClip;
+    float4x4 eyeFromModel;
+    float4x4 eyeNormalBasis;
+    float4   albedo;
+    float4   origin;    // voxel (0,0,0)'s centre
+    float4   spacing;   // voxel size
+    float4   dims;      // voxel counts
+};
+
+struct WallVOut {
+    float4 pos [[position]];
+    float4 cpos;
+};
+
+vertex WallVOut wall_vertex(uint vid [[vertex_id]], constant WallFrame& F [[buffer(1)]]) {
+    const int idx[36] = { 0,1,2, 2,1,3, 4,6,5, 5,6,7, 0,4,1, 1,4,5,
+                          2,3,6, 6,3,7, 0,2,4, 4,2,6, 1,5,3, 3,5,7 };
+    int c = idx[vid % 36];
+    float3 lo = F.origin.xyz - 0.5 * F.spacing.xyz;
+    float3 hi = lo + F.dims.xyz * F.spacing.xyz;
+    float3 p = float3((c & 1) ? hi.x : lo.x, (c & 2) ? hi.y : lo.y, (c & 4) ? hi.z : lo.z);
+    WallVOut o;
+    o.pos = F.clipFromModel * float4(p, 1.0);
+    o.cpos = o.pos;
+    return o;
+}
+
+static float3 wall_uvw(float3 p, constant WallFrame& F) {
+    return ((p - F.origin.xyz) / F.spacing.xyz + 0.5) / F.dims.xyz;
+}
+
+fragment BarGBuf wall_gbuffer(WallVOut in [[stage_in]], constant WallFrame& F [[buffer(1)]],
+                              texture3d<float, access::sample> map [[texture(0)]]) {
+    float2 ndc = in.cpos.xy / in.cpos.w;
+    float4 n0 = F.modelFromClip * float4(ndc, 0.0, 1.0);
+    float4 n1 = F.modelFromClip * float4(ndc, 1.0, 1.0);
+    float3 ro = n0.xyz / n0.w;
+    float3 rd = normalize(n1.xyz / n1.w - ro);
+    float3 lo = F.origin.xyz - 0.5 * F.spacing.xyz;
+    float3 hi = lo + F.dims.xyz * F.spacing.xyz;
+    float3 safe = float3(abs(rd.x) < 1e-7 ? 1e-7 : rd.x, abs(rd.y) < 1e-7 ? 1e-7 : rd.y, abs(rd.z) < 1e-7 ? 1e-7 : rd.z);
+    float3 ta = (lo - ro) / safe, tb = (hi - ro) / safe;
+    float t0 = max(max(min(ta.x, tb.x), min(ta.y, tb.y)), min(ta.z, tb.z));
+    float t1 = min(min(max(ta.x, tb.x), max(ta.y, tb.y)), max(ta.z, tb.z));
+    t0 = max(t0, 0.0);
+    if (t1 <= t0) { discard_fragment(); }
+    constexpr sampler sl(coord::normalized, filter::linear, address::clamp_to_edge);
+    float vox = min(F.spacing.x, min(F.spacing.y, F.spacing.z));
+    float step = 0.5 * vox;
+    int steps = int(min((t1 - t0) / step + 2.0, 6000.0));
+    bool seenOpen = false;
+    float t = t0 + 0.5 * step;
+    if (F.albedo.w > 1.5) {   // DEBUG: draw the box's entry
+        float3 p = ro + rd * t0;
+        float4 clip = F.clipFromModel * float4(p, 1.0);
+        BarGBuf o; o.eyeZ = -(F.eyeFromModel * float4(p, 1.0)).z; o.enormal = float4(0, 0, 1, 0); o.albedo = float4(1, 0, 0, 1);
+        o.depth = clip.z / clip.w; return o;
+    }
+    if (F.albedo.w > 0.5 && F.albedo.w < 0.9) {   // DEBUG: colour = what the map says at the box's middle along the ray
+        float tm = 0.5 * (t0 + t1);
+        float2 v = map.sample(sl, wall_uvw(ro + rd * tm, F)).rg;
+        float3 p = ro + rd * tm;
+        float4 clip = F.clipFromModel * float4(p, 1.0);
+        BarGBuf o; o.eyeZ = -(F.eyeFromModel * float4(p, 1.0)).z; o.enormal = float4(0, 0, 1, 0);
+        o.albedo = float4(v.x > 0 ? 1.0 : 0.0, v.y > 0 ? 1.0 : 0.0, 0.2, 1); o.depth = 0.0; return o;
+    }
+    for (int i = 0; i < steps; ++i, t += step) {
+        float2 v = map.sample(sl, wall_uvw(ro + rd * t, F)).rg;
+        bool open = v.x > 0.0, inside = v.y > 0.0;
+        if (!seenOpen) {
+            if (open) { seenOpen = true; } else if (inside) { discard_fragment(); }
+            continue;
+        }
+        if (open) { continue; }
+        if (!inside) { discard_fragment(); }   // out through another opening: nothing to draw
+        float a = t - step, b = t;              // the wall: where the open field crosses zero
+        for (int k = 0; k < 6; ++k) {
+            float m = 0.5 * (a + b);
+            if (map.sample(sl, wall_uvw(ro + rd * m, F)).x > 0.0) { a = m; } else { b = m; }
+        }
+        float3 p = ro + rd * b;
+        float e = 0.5 * vox;
+        float3 g = float3(map.sample(sl, wall_uvw(p + float3(e, 0, 0), F)).x - map.sample(sl, wall_uvw(p - float3(e, 0, 0), F)).x,
+                          map.sample(sl, wall_uvw(p + float3(0, e, 0), F)).x - map.sample(sl, wall_uvw(p - float3(0, e, 0), F)).x,
+                          map.sample(sl, wall_uvw(p + float3(0, 0, e), F)).x - map.sample(sl, wall_uvw(p - float3(0, 0, e), F)).x);
+        float3 n = length(g) > 1e-5 ? normalize(g) : -rd;   // from the solid into the open lattice: the wall's face
+        float4 clip = F.clipFromModel * float4(p, 1.0);
+        float3 eyeP = (F.eyeFromModel * float4(p, 1.0)).xyz;
+        float3 eyeN = normalize((F.eyeNormalBasis * float4(n, 0.0)).xyz);
+        if (eyeN.z < 0.0) { eyeN = -eyeN; }
+        BarGBuf o;
+        o.eyeZ = -eyeP.z;
+        o.enormal = float4(eyeN, 0.0);
+        o.albedo = float4(F.albedo.rgb, 1.0);
+        o.depth = clip.z / clip.w;
+        return o;
+    }
+    discard_fragment();
+    BarGBuf none;
+    return none;
+}
 """
 
 /// The bars, uploaded once per token, drawn into the G-buffer.
@@ -152,6 +279,16 @@ final class LatticeLayoutBarsPass {
 
     let device: MTLDevice
     let pipeline: MTLRenderPipelineState
+    let wallsPipeline: MTLRenderPipelineState
+    /// ★ THE SOLID VIEW: the engine's map as a 3D texture (rg8Snorm: open, inside), and where it sits.
+    private(set) var gridTexture: MTLTexture?
+    private(set) var grid: (origin: SIMD3<Float>, voxel: Float, dims: SIMD3<Int32>)?
+    private(set) var gridToken = -1
+    /// The cut walls' colour: the body's own grey, so a cut reads as the same material.
+    static let wallColour = SIMD4<Float>(0.80, 0.81, 0.83, 1)
+    /// The tests' red control: the same frame without the walls.
+    static var drawWalls = true
+    static var debugMode: Float = 1   // DEBUG
     private(set) var buffer: MTLBuffer?
     private(set) var count = 0
     private(set) var token = -1
@@ -172,6 +309,72 @@ final class LatticeLayoutBarsPass {
         d.colorAttachments[2].pixelFormat = MeshRenderer.gbufferAlbedoFormat
         d.depthAttachmentPixelFormat = MeshRenderer.depthFormat
         pipeline = try device.makeRenderPipelineState(descriptor: d)
+        guard let wv = lib.makeFunction(name: "wall_vertex"), let wf = lib.makeFunction(name: "wall_gbuffer") else {
+            throw NSError(domain: "LatticeLayoutBarsPass", code: 2, userInfo: [NSLocalizedDescriptionKey: "wall functions missing"])
+        }
+        d.vertexFunction = wv
+        d.fragmentFunction = wf
+        wallsPipeline = try device.makeRenderPipelineState(descriptor: d)
+    }
+
+    /// The solid view's map into ONE 3D texture (P7: never inline). nil or a broken map: X-ray (no cut, no walls).
+    func uploadGrid(_ g: LatticeLayoutSolidGrid?) {
+        gridToken = g?.token ?? -1
+        guard let g, g.isWhole else { gridTexture = nil; grid = nil; return }
+        let d = MTLTextureDescriptor()
+        d.textureType = .type3D
+        d.pixelFormat = .rg8Snorm
+        d.width = Int(g.dims.x); d.height = Int(g.dims.y); d.depth = Int(g.dims.z)
+        d.usage = [.shaderRead]
+        d.storageMode = .shared
+        guard let t = device.makeTexture(descriptor: d) else { gridTexture = nil; grid = nil; return }
+        g.rg.withUnsafeBytes { raw in
+            t.replace(region: MTLRegionMake3D(0, 0, 0, d.width, d.height, d.depth), mipmapLevel: 0, slice: 0,
+                      withBytes: raw.baseAddress!, bytesPerRow: 2 * d.width, bytesPerImage: 2 * d.width * d.height)
+        }
+        gridTexture = t
+        grid = (g.origin, g.voxel, g.dims)
+    }
+
+    /// The shell clip that cuts the body's surface open where the map says open lattice (ShellClip mode 2: the cell field,
+    /// nearest, `.r >= 0` is open). nil: X-ray.
+    var shellClip: ShellClipUniform? {
+        guard let g = grid, gridTexture != nil else { return nil }
+        var u = ShellClipUniform()
+        u.grid = SIMD4(g.origin, 1)
+        u.spacing = SIMD4(g.voxel, g.voxel, g.voxel, 0)
+        u.dims = SIMD4(Float(g.dims.x), Float(g.dims.y), Float(g.dims.z), 0)
+        u.gate = SIMD4(-2, 2, 0, 0)
+        return u
+    }
+
+    struct WallFrame {
+        var clipFromModel: simd_float4x4
+        var modelFromClip: simd_float4x4
+        var eyeFromModel: simd_float4x4
+        var eyeNormalBasis: simd_float4x4
+        var albedo: SIMD4<Float>
+        var origin: SIMD4<Float>
+        var spacing: SIMD4<Float>
+        var dims: SIMD4<Float>
+    }
+
+    /// The cut walls into the prepass's G-buffer (after the bars; same encoder, attachments and depth state).
+    func encodeWalls(_ enc: MTLRenderCommandEncoder, depthState: MTLDepthStencilState,
+                     clipFromModel: simd_float4x4, eyeFromModel: simd_float4x4, eyeNormalBasis: simd_float4x4) -> Bool {
+        guard Self.drawWalls, !hidden, let g = grid, let tex = gridTexture, enc.device === device else { return false }
+        var f = WallFrame(clipFromModel: clipFromModel, modelFromClip: clipFromModel.inverse, eyeFromModel: eyeFromModel,
+                          eyeNormalBasis: eyeNormalBasis, albedo: SIMD4(Self.wallColour.x, Self.wallColour.y, Self.wallColour.z, Self.debugMode), origin: SIMD4(g.origin, 0),
+                          spacing: SIMD4(g.voxel, g.voxel, g.voxel, 0),
+                          dims: SIMD4(Float(g.dims.x), Float(g.dims.y), Float(g.dims.z), 0))
+        enc.setRenderPipelineState(wallsPipeline)
+        enc.setDepthStencilState(depthState)
+        enc.setCullMode(.none)
+        enc.setVertexBytes(&f, length: MemoryLayout<WallFrame>.stride, index: 1)
+        enc.setFragmentBytes(&f, length: MemoryLayout<WallFrame>.stride, index: 1)
+        enc.setFragmentTexture(tex, index: 0)
+        enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 36)
+        return true
     }
 
     /// The bars into ONE buffer (P7), packed (a.xyz, r)(b.xyz, 0).
@@ -246,9 +449,11 @@ extension MeshRenderer {
             }
         }
         guard let pass = layoutBars else { return false }
-        if pass.token != inputs.token { pass.upload(inputs); return true }
-        if pass.hidden != inputs.hidden { pass.hidden = inputs.hidden; return true }
-        return false
+        var changed = false
+        if pass.token != inputs.token { pass.upload(inputs); changed = true }
+        if pass.hidden != inputs.hidden { pass.hidden = inputs.hidden; changed = true }
+        if pass.gridToken != (inputs.solid?.token ?? -1) { pass.uploadGrid(inputs.solid); changed = true }
+        return changed
     }
 }
 #endif

@@ -1323,8 +1323,9 @@ public struct WorkspacePlaceholder: View {
                     }
                     else if newEngineAsked { LatticeLayoutPreviewOneLine(text: LatticeLayoutPreview.organicLine) }   // ★ Organic: said
                 }   // ★ the new engine (test): its lines
-                .onChange(of: newEngineOn) { on in newEngine.update(project: project, on: on) }
-                .onChange(of: project.lattice, perform: { _ in if newEngineOn { newEngine.update(project: project, on: true); fileExport.settingsChanged() } })   // (the rebake's lattice trigger stays the page's first: OrganicPreviewBakeInputsTests)
+                .onChange(of: newEngineOn) { on in newEngine.update(project: project, on: on, solid: !surfaceXrayOn) }
+                .onChange(of: surfaceXrayOn) { x in if newEngineOn { newEngine.update(project: project, on: true, solid: !x) } }
+                .onChange(of: project.lattice, perform: { _ in if newEngineOn { newEngine.update(project: project, on: true, solid: !surfaceXrayOn); fileExport.settingsChanged() } })   // (the rebake's lattice trigger stays the page's first: OrganicPreviewBakeInputsTests)
                 .ignoresSafeArea()
                 // ★ §6(g) — THE PENCIL HOVER, ON THE MESH VIEW ITSELF.
                 //
@@ -4755,7 +4756,7 @@ public struct WorkspacePlaceholder: View {
     private var latticePreviewBodyAlpha: Float {
         // ★ lattice only: the body goes — once the lattice is on screen (2026-10-01)
         if latticeOnlyViewOn { return LatticePreviewBodyAlpha.latticeOnly(showing: latticeOnlyShowing) }
-        if newEngineDrawn { return LatticeLayoutPreview.ghostAlpha }   // ★ the new engine (test): see-through, its bars inside
+        if newEngineDrawn { return surfaceXrayOn ? LatticeLayoutPreview.ghostAlpha : 1 }   // ★ 11-13: X-ray off = the solid view   // ★ the new engine (test): see-through, its bars inside
         // ★★★ THE BODY MAY ONLY BE HIDDEN WHERE A LATTICE IS ACTUALLY DRAWN
         // (maintainer, 2026-08-20: his new `M2 verticalStand THICK` opened to a shadow
         // on the stage floor and NOTHING drawn — "rotating doesn't help, so it isn't

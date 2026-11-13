@@ -4354,6 +4354,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // second code path.
         let openEverywhere: [SIMD4<Float>] = [SIMD4(0, 0, 1, 0), .zero, .zero]
 
+        // ★ THE NEW ENGINE's SOLID VIEW (his ask 11-13): its own map cuts the body open where the lattice is (mode 2)
+        if layoutBarsInFrame, let solid = layoutBars?.shellClip { return (solid, openEverywhere) }
         guard latticeInFrame, let layer = latticeLayer else { return (u, openEverywhere) }
         let declared = (layer.scene?.regions ?? []).filter { $0.role == .include }
         guard !declared.isEmpty, let g = layer.regionGrid, layer.regionTexture != nil else {
@@ -4544,6 +4546,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// The texture `shellClipAndDecls` describes: the baked region field when there are
     /// declarations, the neutral "inside everywhere" volume otherwise.
     private var shellClipTexture: MTLTexture? {
+        if layoutBarsInFrame, layoutBars?.shellClip != nil, let t = layoutBars?.gridTexture { return t }   // the new engine's map
         guard latticeInFrame, let layer = latticeLayer else { return neutralShellClipTexture() }
         // Declared ⇒ the region field. Undeclared (the sample block) ⇒ the CELL field,
         // which is what `gate.y == 2` reads. Both are bound here so the uniform and the
@@ -4833,6 +4836,11 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
            bars.encodeGBuffer(penc, depthState: depthState, clipFromModel: uniforms.mvp, eyeFromModel: uniforms.modelView,
                               eyeNormalBasis: uniforms.normalMatrix) {
             frameDrawCalls += 1; frameVertices += 36 * bars.count }
+        // ★ the solid view's cut walls (his ask 11-13): after the bars, the same encoder and depth state
+        if layoutBarsInFrame, let bars = layoutBars,
+           bars.encodeWalls(penc, depthState: depthState, clipFromModel: uniforms.mvp, eyeFromModel: uniforms.modelView,
+                            eyeNormalBasis: uniforms.normalMatrix) {
+            frameDrawCalls += 1; frameVertices += 36 }
         penc.endEncoding()
         return (tex.color, tex.normal, tex.albedo)
     }
