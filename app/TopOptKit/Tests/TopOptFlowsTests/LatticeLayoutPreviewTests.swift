@@ -156,10 +156,12 @@ final class LatticeLayoutPreviewTests: XCTestCase {
         XCTAssertEqual(LatticeLayoutPreview.settings(p).minCellsAcross, 1, "★ Aesthetic with single-cell members: one (C4)")
         p.lattice.singleCellMembers = false
         XCTAssertEqual(LatticeLayoutPreview.settings(p).minCellsAcross, 2, "★ Aesthetic: two (C3)")
-        let g = try XCTUnwrap(p.latticeGroups.first { p.lattice.groupRoles[$0.id] == .include && !p.latticeSelectableRefs($0).isEmpty })
-        let ref = try XCTUnwrap(p.latticeSelectableRefs(g).first)
+        let pick = p.latticeGroups.flatMap { g in p.latticeSelectableRefs(g).map { (g, $0) } }
+            .first { p.latticeSelectableRole($0.1, in: $0.0.id) == .include }
+        let (g, ref) = try XCTUnwrap(pick, "premise: a Lattice row")
         p.lattice.densityMode = .perRegion
-        p.lattice.selectableDensity[ref.key] = 0.2
+        p.writeLatticeDensity(ref, fraction: 0.2, cellMM: 8)   // the page's own write
+        XCTAssertNotNil(p.latticeSelectableDensity(ref, in: g.id), "premise: the row has a density")
         XCTAssertNotNil(p.latticeDensityPercent(rho: 0.2, cellMM: 8), "premise: the page shows a percent for it")
         let s = LatticeLayoutPreview.settings(p)
         XCTAssertTrue(s.perRegion, "★ per-row density")

@@ -167,8 +167,9 @@ public final class LatticeLayoutPreview: ObservableObject {
                     s.regions.append(.init(id: id, noLattice: role == .exclude, faces: faces, depthMM: depth,
                                            expandMM: p.latticeExpandMM(ref)))
                     if role != .exclude, l.densityMode != .sim, let rho = p.latticeSelectableDensity(ref, in: g.id),
-                       let pct = p.latticeDensityPercent(rho: rho, cellMM: l.cellSizeMode == .fixed && l.cellMM > 0
-                                                         ? l.cellMM : (p.latticeSelectableCellMM(ref) ?? s.cellMaxMM)) {
+                       let pct = [l.cellSizeMode == .fixed && l.cellMM > 0 ? l.cellMM : (p.latticeSelectableCellMM(ref) ?? s.cellMaxMM),
+                                  s.cellMaxMM, 8].lazy.compactMap({ p.latticeDensityPercent(rho: rho, cellMM: $0) }).first {
+                        // (the row's cell, else the largest cell: the page's percent is read on a cell its band exists for)
                         let dial = Swift.min(1, Swift.max(0.01, pct / 100))
                         if rowDensity { s.regionDials.append((region: id, dial: dial)) } else if !uniformSet { s.dial = dial; uniformSet = true }
                     }
