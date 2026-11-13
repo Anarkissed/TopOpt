@@ -1,0 +1,16 @@
+# Release f414b402 — 2026-11-13 topology-like-lattice (Topology like Lattice, 06fb458b), app only
+# Core and worker unchanged: fingerprint 6da1b6c3bb0a; "fingerprint": "6da1b6c3bb0a"
+# Merged onto a47bea2f; the merged app tree equals topology-like-lattice's, so its gate applies unchanged.
+# Commits (first parent of topology-like-lattice since the release tip):
+#   c8973293 Topology (362): behaves as Lattice while a group is picked (his ask 11-13)
+#   06fb458b Topology (362): merge the release tip (evidence only)
+# Gates:
+#   17:38 tests: exit 0; 3 passed, 0 failed
+#   17:26 evidence a47bea2f pushed; release 7b07fa26 DONE
+#   17:38 checks ok: topology-like-lattice 06fb458b, 2 commit(s), app-only, onto a47bea2f, fingerprint 6da1b6c3bb0a
+#   17:38 merged f414b402; app tree == topology-like-lattice's, fingerprint 6da1b6c3bb0a
+#   17:38 waiting for HEAVY.lock (free)
+#   17:38 lock taken (26 GB free)
+#   17:44 iPad device build green; lock released
+#   17:44 pushed f414b402
+#   17:44 worker /health "fingerprint": "6da1b6c3bb0a" (unchanged, no swap)
