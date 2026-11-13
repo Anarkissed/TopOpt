@@ -6020,7 +6020,7 @@ public struct MetalMeshView: UIViewRepresentable {
                 inputDiscipline: SurfaceInputDiscipline = .off,
                 onPencilSeen: (() -> Void)? = nil,
                 latticeLayer: LatticeLayerInputs? = nil,
-                flexibleLattice: FlexibleLatticeLayerInputs? = nil, layoutBars: LatticeLayoutBarsInputs? = nil) {
+                layoutBars: LatticeLayoutBarsInputs? = nil, flexibleLattice: FlexibleLatticeLayerInputs? = nil) {
         inputs = MeshViewInputs(mesh: mesh, camera: camera, selection: selection, faceTints: faceTints,
                                 vertexTints: vertexTints, extraLines: extraLines,
                                 cutRibbon: cutRibbon,
@@ -6185,7 +6185,7 @@ public struct MetalMeshView: NSViewRepresentable {
                 inputDiscipline: SurfaceInputDiscipline = .off,
                 onPencilSeen: (() -> Void)? = nil,
                 latticeLayer: LatticeLayerInputs? = nil,
-                flexibleLattice: FlexibleLatticeLayerInputs? = nil, layoutBars: LatticeLayoutBarsInputs? = nil) {
+                layoutBars: LatticeLayoutBarsInputs? = nil, flexibleLattice: FlexibleLatticeLayerInputs? = nil) {
         inputs = MeshViewInputs(mesh: mesh, camera: camera, selection: selection, faceTints: faceTints,
                                 vertexTints: vertexTints, extraLines: extraLines,
                                 cutRibbon: cutRibbon,

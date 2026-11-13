@@ -1186,7 +1186,7 @@ public struct WorkspacePlaceholder: View {
                           // each other, with the lattice's albedo alpha as its
                           // mask. Two visible surfaces is a case that pass was
                           // built for; it is no longer "the body OR the struts".
-                          bodyAlpha: newEngineDrawn ? LatticeLayoutPreview.ghostAlpha : (flexibleMain.bodyAlpha(project, on: stage) ?? latticePreviewBodyAlpha),   // Flexible H4: X-ray
+                          bodyAlpha: flexibleMain.bodyAlpha(project, on: stage) ?? latticePreviewBodyAlpha,   // Flexible H4: X-ray
                           // Detent face-highlight pulse (item 2): flash the snapped part face.
                           detentPulse: detentPulse,
                           // Paint mode (handoff 2026-07-25): when on, a one-finger drag brushes
@@ -1309,8 +1309,8 @@ public struct WorkspacePlaceholder: View {
                                                         || latticeSimIsRunning)
                               }
                               : nil,
-                          flexibleLattice: flexibleMain.layer(project, stage: stage, pageUp: fullScreenPageUp),   // Flexible (PR #362) H3: the main page's lattice + its squish loop (FlexibleMainStage.swift)
-                          layoutBars: newEngineDrawn ? newEngine.bars : nil)   // ★ the new engine (test): its bars (LatticeLayoutPreview)
+                          layoutBars: newEngineDrawn ? newEngine.bars : nil,   // ★ the new engine (test): its bars (LatticeLayoutPreview)
+                          flexibleLattice: flexibleMain.layer(project, stage: stage, pageUp: fullScreenPageUp))   // Flexible (PR #362) H3: the main page's lattice + its squish loop (FlexibleMainStage.swift)
                 .onEmptyTap { emptyTapClears() }   // ★ his iPad 10-26 (5): a tap on empty space clears the selection
                 .onTapRay(primitiveTapRay)   // ★ his iPad 10-28: a tap on a keep-clear volume picks it
                 .overlay(alignment: .bottom) {
@@ -1318,7 +1318,7 @@ public struct WorkspacePlaceholder: View {
                     else if newEngineAsked { LatticeLayoutPreviewOneLine(text: LatticeLayoutPreview.organicLine) }   // ★ Organic: said
                 }   // ★ the new engine (test): its lines
                 .onChange(of: newEngineOn) { on in newEngine.update(project: project, on: on) }
-                .onChange(of: project.lattice) { _ in if newEngineOn { newEngine.update(project: project, on: true) } }
+                .onChange(of: project.lattice, perform: { _ in if newEngineOn { newEngine.update(project: project, on: true) } })   // (the rebake's lattice trigger stays the page's first: OrganicPreviewBakeInputsTests)
                 .ignoresSafeArea()
                 // ★ §6(g) — THE PENCIL HOVER, ON THE MESH VIEW ITSELF.
                 //
@@ -4749,6 +4749,7 @@ public struct WorkspacePlaceholder: View {
     private var latticePreviewBodyAlpha: Float {
         // ★ lattice only: the body goes — once the lattice is on screen (2026-10-01)
         if latticeOnlyViewOn { return LatticePreviewBodyAlpha.latticeOnly(showing: latticeOnlyShowing) }
+        if newEngineDrawn { return LatticeLayoutPreview.ghostAlpha }   // ★ the new engine (test): see-through, its bars inside
         // ★★★ THE BODY MAY ONLY BE HIDDEN WHERE A LATTICE IS ACTUALLY DRAWN
         // (maintainer, 2026-08-20: his new `M2 verticalStand THICK` opened to a shadow
         // on the stage floor and NOTHING drawn — "rotating doesn't help, so it isn't
