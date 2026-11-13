@@ -200,6 +200,23 @@ final class LatticeLayoutPreviewTests: XCTestCase {
         XCTAssertEqual(merged[1].depthMM, 1, "a different depth stays its own skin")
     }
 
+    /// ★ 11-13: the cell window is the one the page RESOLVES (as the old engine's job): never a number its mode does not show.
+    func testTheCellWindowIsThePagesResolvedOne() throws {
+        let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
+        let p = r.project
+        _ = try FlexibleR7M1Fixtures.hisLiveLattice(p)
+        p.lattice.cellSizeMode = .auto
+        p.lattice.cellMinMM = 0.5
+        p.lattice.cellMaxMM = 99   // a stored number Auto does not show
+        let b = LatticeBounds.compute(settings: p.lattice, limits: TopOptKit.latticeLimits(topology: p.lattice.topologyID),
+                                      lineWidthMM: p.printParams.strutLineWidthMM)
+        let plan = p.lattice.resolvedCellPlan(bounds: b, minimizePlastic: false)
+        let s = LatticeLayoutPreview.settings(p)
+        XCTAssertNotEqual(s.cellMaxMM, 99, "★ Auto never sends the stored max it does not show")
+        XCTAssertEqual(s.cellMaxMM, plan.hiMM, accuracy: 1e-9, "★ Auto sends its own range's top")
+        XCTAssertEqual(s.cellMinMM, plan.loMM, accuracy: 1e-9, "★ and its floor")
+    }
+
     // MARK: fixtures
 
     /// `n` bars on a grid: a 0.8 mm bar along x from each point.
