@@ -4,7 +4,8 @@
 //   * one LatticeLayoutSession per part (opened once; core keeps what a change does not touch, rule P2);
 //   * the page's own settings, read where its rows read them (`settings(_:)`): each face row of each lattice group is ONE
 //     region (Lattice or No lattice, its depth and its Expand), a group set as a Protect skin is a skin over its faces, Finish
-//     Rim / Covered, the type, the cell and the strut width; two-line struts always (the reviewer's ruling 11-12);
+//     Rim / Skin / Covered, Grade to shape, the type, the cell and the strut width; two-line struts always (the reviewer's
+//     ruling 11-12);
 //   * latest wins: a setting moved while a layout runs stops that layout (core's stop flag) and lays the new one.
 // What it says, in one plain line each: why there is nothing to draw, and that bars are drawn round where the print file
 // squares flat-bridge undersides and adds posts (PREVIEW IS THE SPEC — until the drawer shows them).
@@ -109,16 +110,28 @@ public final class LatticeLayoutPreview: ObservableObject {
         s.cellMaxMM = l.cellMaxMM > 0 ? l.cellMaxMM : 8
         s.cellMinMM = Swift.max(0, l.cellMinMM)
         switch l.boundary {
-        case .rim: s.rimMM = -1        // two line widths
-        case .fullSkin: s.coverMM = -1
+        case .rim: s.rimMM = -1           // Finish Rim: two line widths
+        case .fullSkin: s.skin = true     // Finish Skin (S3): bars across the face joining the cut strut ends (his pick 11-12:
+                                          // this went as Covered)
+        case .covered: s.coverMM = -1     // Finish Covered (S9): a solid shell over the lattice, two line widths
         default: break
+        }
+        // Grade to shape: the grading mode's shape fit, its band and its Strength, as the old engine's job sends them (Stepped and
+        // Doubled only)
+        if l.gradingMode.fitsShape, ["stepped", "doubled"].contains(l.resolvedAlgorithm) {
+            s.gradeToShape = true
+            s.bandMM = Swift.max(0, l.shapeFitBandMM)
+            s.strength = l.shapeFitGradeStrength
         }
         if let t = l.manualStrutThicknessMM, t > 0 { s.strutWidthMM = t }
         s.allowQuilt = l.allowQuilt
         var id: Int32 = 1
         for g in p.latticeGroups {
+            // ★ a Protect skin group is a solid face at its rows' depth (D5), never a No lattice region (11-13: it went as both)
+            let skinGroup = l.skinGroups.contains(g.id)
             for ref in p.latticeSelectableRefs(g) {
-                guard let role = p.latticeSelectableRole(ref, in: g.id) else { continue }
+                let role = p.latticeSelectableRole(ref, in: g.id)
+                guard skinGroup || role != nil else { continue }
                 let faces: [Int32]
                 switch ref {
                 case let .face(_, f):
@@ -130,17 +143,17 @@ public final class LatticeLayoutPreview: ObservableObject {
                 }
                 guard !faces.isEmpty else { continue }
                 let depth = p.latticeSlabDepthMM(ref, in: g.id)   // the face row's own number (FlexibleSelectionsList's)
-                s.regions.append(.init(id: id, noLattice: role == .exclude, faces: faces, depthMM: depth,
-                                       expandMM: p.latticeExpandMM(ref)))
-                id += 1
-            }
-            if l.skinGroups.contains(g.id), !g.faces.isEmpty {
-                s.protect.append(.init(id: id, faces: g.faces.map { Int32($0) }, depthMM: 0))   // 0 = two line widths
+                if skinGroup {
+                    s.protect.append(.init(id: id, faces: faces, depthMM: depth))
+                } else {
+                    s.regions.append(.init(id: id, noLattice: role == .exclude, faces: faces, depthMM: depth,
+                                           expandMM: p.latticeExpandMM(ref)))
+                }
                 id += 1
             }
         }
-        // no face asked for lattice: the whole part, as the old engine's "In a part" with no face picked
-        s.allLattice = !s.regions.contains { !$0.noLattice }
+        // Whole part ("In a part"), or no face asked for lattice: the whole part is lattice, less No lattice and Protect skins
+        s.allLattice = l.wholePart || !s.regions.contains { !$0.noLattice }
         return s
     }
 }

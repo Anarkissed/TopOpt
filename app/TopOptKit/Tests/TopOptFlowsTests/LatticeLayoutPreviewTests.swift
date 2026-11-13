@@ -80,6 +80,69 @@ final class LatticeLayoutPreviewTests: XCTestCase {
         XCTAssertFalse(s.allLattice, "a face asks for lattice: All solid with regions")
     }
 
+    /// ★ His pick 11-12: Lattice Setup's Finish and Grade to shape reach core (Skin went as Covered; Covered and the grade were
+    /// not sent).
+    func testTheFinishAndGradeReachTheEngine() throws {
+        let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
+        let p = r.project
+        p.lattice.boundary = .fullSkin
+        var s = LatticeLayoutPreview.settings(p)
+        XCTAssertTrue(s.skin, "★ Finish Skin is core's Finish Skin (S3)")
+        XCTAssertEqual(s.coverMM, 0, "★ Skin is not Covered")
+        p.lattice.boundary = .covered
+        s = LatticeLayoutPreview.settings(p)
+        XCTAssertLessThan(s.coverMM, 0, "★ Covered is core's cover (S9)")
+        XCTAssertFalse(s.skin)
+        p.lattice.boundary = .rim
+        s = LatticeLayoutPreview.settings(p)
+        XCTAssertLessThan(s.rimMM, 0, "Rim is core's rim")
+        XCTAssertFalse(s.skin)
+        XCTAssertEqual(s.coverMM, 0)
+        p.lattice.boundary = .none
+        s = LatticeLayoutPreview.settings(p)
+        XCTAssertEqual([s.rimMM, s.coverMM], [0, 0])
+        XCTAssertFalse(s.skin)
+
+        p.lattice.algorithm = "stepped"
+        p.lattice.gradingMode = .fitShape
+        p.lattice.shapeFitBandMM = 6
+        p.lattice.shapeFitGradeStrength = 0.5
+        s = LatticeLayoutPreview.settings(p)
+        XCTAssertTrue(s.gradeToShape, "★ Grade to shape reaches core")
+        XCTAssertEqual(s.bandMM, 6, "★ with its band")
+        XCTAssertEqual(s.strength, 0.5, "★ and its Strength")
+        p.lattice.gradingMode = .stressOnly
+        s = LatticeLayoutPreview.settings(p)
+        XCTAssertFalse(s.gradeToShape, "stress only: no shape grade")
+        XCTAssertEqual(s.bandMM, 0)
+    }
+
+    /// ★ 11-13: a Protect skin group is a Protect skin at its rows' depth (D5), not a No lattice region; Whole part lattices the
+    /// whole part even with face rows set.
+    func testProtectSkinAndWholePartReachTheEngine() throws {
+        let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
+        let p = r.project
+        _ = try FlexibleR7M1Fixtures.hisLiveLattice(p)
+        let g = try XCTUnwrap(p.latticeGroups.first { p.lattice.groupRoles[$0.id] == .include && !p.latticeSelectableRefs($0).isEmpty },
+                              "premise: a Lattice group with face rows")
+        let faces = Set(p.latticeSelectableRefs(g).flatMap { ref -> [Int32] in
+            if case let .face(_, f) = ref { return [Int32(f)] }
+            return []
+        })
+        XCTAssertFalse(faces.isEmpty, "premise: its face rows")
+        p.lattice.skinGroups.insert(g.id)
+        p.lattice.groupRoles[g.id] = .exclude   // as the page stores a Protect skin
+        let s = LatticeLayoutPreview.settings(p)
+        XCTAssertEqual(Set(s.protect.flatMap(\.faces)), faces, "★ its faces are a Protect skin")
+        XCTAssertTrue(s.regions.allSatisfy { Set($0.faces).isDisjoint(with: faces) }, "★ and not a No lattice region")
+        XCTAssertTrue(!s.protect.isEmpty && s.protect.allSatisfy { $0.depthMM > 0.5 }, "★ at its rows' depth, not 0")
+        p.lattice.skinGroups.remove(g.id)
+        p.lattice.groupRoles[g.id] = .include
+        XCTAssertFalse(LatticeLayoutPreview.settings(p).allLattice, "premise: face rows ask for lattice")
+        p.lattice.wholePart = true
+        XCTAssertTrue(LatticeLayoutPreview.settings(p).allLattice, "★ Whole part: the whole part is lattice")
+    }
+
     // MARK: fixtures
 
     /// `n` bars on a grid: a 0.8 mm bar along x from each point.
