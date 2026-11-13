@@ -49,6 +49,7 @@ extension MeshRenderer {
     /// A see-through body stays OUT of the G-buffer while the Flexible pass draws, so the
     /// ghost cannot occlude the walls it is meant to show (rule 1 above).
     var flexibleGhostOutOfGBuffer: Bool {
+        if layoutBarsInFrame { return bodyAlpha < 0.999 }   // the new engine's bars (LatticeLayoutBarsPass): the same two rules
         guard flexibleLatticeInFrame, let fx = flexibleLattice, !fx.controlKeepGhostInGBuffer else { return false }
         return bodyAlpha < 0.999
     }
@@ -56,6 +57,7 @@ extension MeshRenderer {
     /// The see-through body is drawn AFTER the opaque lattice shade, not before it (rule 2).
     /// `latticeShaded`: the shade block runs this frame (the G-buffer exists).
     func flexibleGhostAfterLattice(translucent: Bool, latticeShaded: Bool) -> Bool {
+        if layoutBarsInFrame { return translucent && latticeShaded }   // the new engine's bars: the same rule
         guard flexibleLatticeInFrame, let fx = flexibleLattice, !fx.controlDrawGhostFirst else { return false }
         return translucent && latticeShaded
     }

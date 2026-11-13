@@ -2349,6 +2349,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// unchanged — this property is read by the preview's four call sites only, and
     /// the job still asks core.
     public var singleCellMembers: Bool = false
+    /// ★ SMALL CELLS IN THIN WALLS (his ask 11-13, per part): a wall too thin for an open cell takes small, denser cells at the
+    /// thinnest strut instead of going solid (core's Settings::small_cells_in_thin_walls). Read by the new engine only. Not written
+    /// while off, so older bytes are unchanged.
+    public var smallCellsInThinWalls: Bool = false
     /// ★★★ ALLOW QUILT (his ruling, 2026-09-12). Octet only. Off: every density on this
     /// project — simulated, automatic, uniform, per-region — is held under
     /// `LatticeType.aestheticDensityCeiling` (strut = 0.20 of the cell, windows half
@@ -2642,7 +2646,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // keeps asking for the solve it has always asked for.
         case simulateStresses
         // sub-floor retention (task 2026-08-05-lattice-retention-app-control)
-        case retainSubfloorInUnloadedRegions, subfloorStressFraction, singleCellMembers
+        case retainSubfloorInUnloadedRegions, subfloorStressFraction, singleCellMembers, smallCellsInThinWalls
         case allowQuilt
         case subfloorPerRegion, reportRegionCells
         // the enclosed-void rule's OFF control
@@ -2805,6 +2809,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         subfloorPerRegion = try c.decodeIfPresent(Bool.self, forKey: .subfloorPerRegion) ?? false
         // Absent from every older snapshot ⇒ off ⇒ core's floor of 2, unchanged.
         singleCellMembers = try c.decodeIfPresent(Bool.self, forKey: .singleCellMembers) ?? false
+        smallCellsInThinWalls = try c.decodeIfPresent(Bool.self, forKey: .smallCellsInThinWalls) ?? false
         // Absent from every older snapshot ⇒ off ⇒ the ceiling holds, as it should.
         allowQuilt = try c.decodeIfPresent(Bool.self, forKey: .allowQuilt) ?? false
         reportRegionCells = try c.decodeIfPresent(Bool.self, forKey: .reportRegionCells) ?? false
@@ -2910,6 +2915,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(retainSubfloorInUnloadedRegions,
                      forKey: .retainSubfloorInUnloadedRegions)
         try c.encode(singleCellMembers, forKey: .singleCellMembers)
+        if smallCellsInThinWalls { try c.encode(true, forKey: .smallCellsInThinWalls) }   // ★ 11-13: off is not written
         try c.encode(allowQuilt, forKey: .allowQuilt)
         // encodeIfPresent: "the user has not moved it" must round-trip as ABSENT,
         // not as core's number written into the project — the whole point of the
@@ -3101,9 +3107,17 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // prevents is the one this project keeps paying for: a job that asks for
         // something the user's own switch says they turned off. Belt AND braces
         // is correct when the two live in different files.
-        precondition(!(densityMode.needsSimulation && !simulateStresses),
-                     "the Sim density mode cannot outlive the Sim permission — "
-                     + "see LatticeSettings.setSimulateStresses")
+        // ★ LatticeReview 2026-11-10 (J4): this was a `precondition`, and the pair does occur — LatticePage's Density
+        // segment writes `densityMode` alone, and the decoder reads the two fields independently — so it stopped the app.
+        // The switch wins: the job is the one `setSimulateStresses(false)` leaves (nothing simulated), never a crash.
+        if densityMode.needsSimulation && !simulateStresses {
+            var repaired = self
+            repaired.setSimulateStresses(false)
+            return repaired.runSpec(limits: limits, generatable: generatable, memberMM: memberMM,
+                                    lineWidthMM: lineWidthMM, emitSTL: emitSTL, emit3MF: emit3MF, regions: regions,
+                                    capability: capability, cellModes: cellModes, minimizePlastic: minimizePlastic,
+                                    layerHeightMM: layerHeightMM)
+        }
         // AUTO density (task lattice-page-core-hookup stage 4): core's run_job now
         // grades each accepted variant from that variant's OWN final stress field,
         // so the job ships a GRADED spec — a `grading` block, never a uniform

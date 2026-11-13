@@ -820,6 +820,63 @@ inline double octet_aesthetic_density_ceiling() {
 // (test_grading, test_stepped_plan) and it is the octet branch's implementation.
 double lattice_aesthetic_density_ceiling(LatticeTopology topo);
 
+// ── ★ STRUT WIDTH OVER CELL SIZE: THE TWO BOUNDS, PER TYPE ──────────────────────
+// (LatticeReview's ask for the rebuild's struts.cpp, 2026-11-11.) What a lattice looks
+// like is one number, width over cell (R9). For a strut type "width" is the strut's
+// DIAMETER. For a sheet (gyroid, schwarz_d) it is the sheet's TRUE normal WALL thickness:
+// the number lattice_strut_diameter_mm already returns for a sheet, and what a bead prints.
+//
+// open_look  the widest the open look allows ("Allow quilt" off).
+//   STRUTS: one geometry for every type, 0.7592 / 4 = 0.1898 (R11: "the octet rule applied
+//     per type ... generalises its geometry, not its number"; the geometry itself is ruling
+//     2026-11-02 (c), the same constant as kSteppedPrintsOpenMaxStrutPerCell, asserted
+//     equal in test_lattice_width_bounds). R11's DENSITY ceiling still bisects at 0.20
+//     (kOctetAestheticStrutPerCell): core holds both statements; this is the one the
+//     rebuild uses for octet.
+//   SHEETS: unruled (00-decisions.md Q1: "prints open" has no strut-per-cell reading for a
+//     wall). Until it is, the true wall at the top of the type's resolved band,
+//     lattice_strut_diameter_mm(topo, lattice_rho_max(topo), 1): gyroid 0.2066, schwarz_d
+//     0.1665 (k<Sheet>TrueWall's rho 0.60 row, /4) -- the ceiling R11 already applies to a
+//     sheet's density, read as a wall.
+//
+// touch  where the lattice closes up: the top of every range ("Allow quilt" on, the quilt).
+//   STRUTS: the smaller of two gaps on the type's canonical cell (strut_cell.hpp), the
+//     struts touching when the width reaches it:
+//       face view  seen square-on to a cell face, the gap between two neighbouring
+//                  PARALLEL struts of the front cell layer. Octet's ruled quilt,
+//                  1/(2 sqrt 2), is this gap (his 2026-08-25: its face struts and the
+//                  braces half a cell behind look like one grid at L/(2 sqrt 2) spacing);
+//       in 3D      the gap between two struts that share no node, over the cell and its
+//                  26 neighbours (octet's is 1/2: in 3D its struts meet later than they look).
+//                    face view   3D           touch
+//       octet        0.353553    0.500000     0.353553  1/(2 sqrt 2)
+//       sc           1           1            1         (edges: the cell closes)
+//       bcc          0.707107    0.707107     0.707107  1/sqrt 2
+//       fcc          0.707107    0.577350     0.577350  1/sqrt 3
+//       diamond      0.353553    0.433013     0.353553  1/(2 sqrt 2)
+//       kelvin       0.353553    0.353553     0.353553  1/(2 sqrt 2) (its square windows)
+//       rhombic      0.353553    0.408248     0.353553  1/(2 sqrt 2)
+//     test_lattice_width_bounds recomputes both gaps from lattice_strut_cell, exactly.
+//   SHEETS: where the CHANNELS CLOSE -- the walls facing across a channel meet at its
+//     narrowest throat, so the void on that side stops running through the part (enclosed
+//     pockets: a powder trap). Twice the true distance from the throat to the mid-surface:
+//       gyroid     sqrt 3 / 4 = 0.433013  the throat is at the channel's nodes (the srs net's,
+//                  f's maxima), clearance sqrt 3 / 8; along each branch it widens to 0.2297
+//                  at the edge midpoints. A distance-field percolation bisection agrees
+//                  (0.4174 at 64 voxels a cell, 0.4226 at 96, converging as 1/N).
+//       schwarz_d  0.3507                 the throat is on each channel edge, just off its
+//                  midpoint (f's saddle, clearance 0.17573 there; 0.17534 at 0.03 cell along).
+//     Measured on tpms.hpp's field: docs/handoffs/evidence/2026-11-11-lattice-width-bounds.
+//
+// The tetragonal three (bccz, fccz, reentrant) have no canonical cell and throw
+// std::invalid_argument naming the type: no bound is borrowed from another type (R1).
+struct LatticeWidthBounds {
+  double open_look = 0.0;
+  double touch = 0.0;
+};
+inline constexpr double kLatticeOpenLookStrutPerCell = 0.7592 / 4.0;
+LatticeWidthBounds lattice_width_bounds(LatticeTopology topo);
+
 // The resolution (voxels per cell edge) the octet tensor library was measured at,
 // and the basis octet_relative_density voxelizes on so a printed radius maps onto
 // the same rho scale the library rows carry (PR 198, vpc48).

@@ -1183,6 +1183,38 @@ double lattice_aesthetic_density_ceiling(LatticeTopology topo) {
       "ceiling is not used for another type.");
 }
 
+// lattice.hpp states both bounds, each with its source; test_lattice_width_bounds
+// recomputes every strut type's touch gap from its canonical cell and pins the sheets'.
+LatticeWidthBounds lattice_width_bounds(LatticeTopology topo) {
+  constexpr double kFaceDiagonalGap = 0.35355339059327373;  // 1/(2 sqrt 2)
+  LatticeWidthBounds b;
+  b.open_look = kLatticeOpenLookStrutPerCell;
+  switch (topo) {
+    case LatticeTopology::Octet:       b.touch = kFaceDiagonalGap; return b;
+    case LatticeTopology::SimpleCubic: b.touch = 1.0; return b;
+    case LatticeTopology::Bcc:         b.touch = 0.70710678118654752; return b;  // 1/sqrt 2
+    case LatticeTopology::Fcc:         b.touch = 0.57735026918962576; return b;  // 1/sqrt 3
+    case LatticeTopology::Diamond:     b.touch = kFaceDiagonalGap; return b;
+    case LatticeTopology::Kelvin:      b.touch = kFaceDiagonalGap; return b;
+    case LatticeTopology::Rhombic:     b.touch = kFaceDiagonalGap; return b;
+    case LatticeTopology::Gyroid:
+    case LatticeTopology::SchwarzD:
+      // Q1 unruled: the true wall at the top of the type's resolved band (R11's sheet ceiling).
+      b.open_look = lattice_strut_diameter_mm(topo, lattice_rho_max(topo), 1.0);
+      b.touch = topo == LatticeTopology::Gyroid ? 0.43301270189221932   // sqrt 3 / 4
+                                                : 0.3507;
+      return b;
+    case LatticeTopology::Bccz:
+    case LatticeTopology::Fccz:
+    case LatticeTopology::Reentrant:
+      break;
+  }
+  throw std::invalid_argument(
+      std::string("lattice_width_bounds: \"") + lattice_topology_name(topo) +
+      "\" has no canonical cell (it is tetragonal), so neither its open look nor where its "
+      "struts touch is stated; no other type's bound is used for it (R1).");
+}
+
 LatticeTopologyChoice resolve_lattice_topology(const std::string& lattice_id,
                                                bool lattice_stated,
                                                const std::string& grading_id,
