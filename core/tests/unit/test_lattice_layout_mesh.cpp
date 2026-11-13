@@ -647,22 +647,22 @@ static void test_no_crust() {
     CHECK(std::fabs(counted_part - hb.mm3) < 5e-3 * hb.mm3);   // the count itself is sound
     // NO CRUST. What is left to differ: the kept solid is made of whole reading points
     // (0.25 mm cubes) and the count of whole 0.2 mm ones, so each is out by a fraction of a
-    // point along the border of the little there is that no cell holds (a dozen crumbs
-    // at the block's corners, about 20 mm3 in all). Before the fix the writer kept 45.49 mm3
-    // here against the same 19.58: 26 mm3 of the part's own surface, in 149 pieces (713 at
-    // the usual overlap, and 619 loose bits in the mesh).
+    // point along the border of the little there is that no cell holds (two crumbs, about
+    // 2 mm3 in all). Before the fix the writer kept 29.67 mm3 here against the same 2.16:
+    // 27.5 mm3 of the part's own surface, in 159 pieces (794 at the usual overlap, and 695
+    // loose bits in the mesh).
     CHECK(std::fabs(rx.solid_mm3 - none) < 2.0);
     CHECK(rep.solid_mm3 <= rx.solid_mm3 + 1e-9 && rep.solid_mm3 > rx.solid_mm3 - 3.0);
     CHECK(rx.solid_pieces < 40 && rep.solid_pieces < 40);   // crumbs no cell holds, not slats
     // And none of them a film: the overlap of 0.02 mm neither joins two nor splits one.
-    // (Opening air by faces only, not by edges and corners, leaves 401 against 77; not
-    // looking past the cube's face for the cell's own lattice, 27 against 15.)
+    // (Opening air by faces only, not by edges and corners, leaves 430 against 76; not
+    // looking past the cube's face for the cell's own lattice, 54 against 32.)
     CHECK(rx.solid_pieces == rep.solid_pieces);
     const Read r = read_mesh(mesh);
     std::printf("no crust, whole part lattice: mesh %zu triangles, %.1f mm3, shells %zu, loose bits %zu, air pockets %zu\n",
                 rep.triangles, rep.mm3, r.shells, rep.loose_bits, rep.air_pockets);
     CHECK(r.edges_not_twice == 0 && r.flat == 0 && r.shells == 1);
-    CHECK(rep.loose_bits < 40);     // 619 before: the slats the struts did not catch
+    CHECK(rep.loose_bits < 40);     // 695 before: the slats the struts did not catch
     // The same mesh again, on one thread (the boxes themselves: in (b)).
     MeshSpec single;
     single.threads = 1;
@@ -706,8 +706,8 @@ static void test_no_crust() {
     // NOTHING SOLID OPENED, and still no crust: the kept solid is what no cell holds, to
     // within the same fraction of a reading point along a longer border (the skin's inner
     // side, the pillar's sides, the faces of the cells that stand beside space no cell
-    // holds). Before the fix: 1,059.97 mm3 kept, in 83 pieces, against the same 1,048.86.
-    // With every point that touches the space opened, air or not: 1,037.54, the 11 mm3
+    // holds). Before the fix: 1,057.11 mm3 kept, in 85 pieces, against the same 1,045.67.
+    // With every point that touches the space opened, air or not: 1,034.31, the 11 mm3
     // short taken off the pillar's sides.
     CHECK(std::fabs(rx.solid_mm3 - none) < 4.0);
     CHECK(rx.solid_pieces == 1);   // the skin and all the rest, one body

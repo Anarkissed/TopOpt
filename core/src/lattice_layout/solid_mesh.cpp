@@ -82,6 +82,10 @@ void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c,
   // or lattice no cell holds, which is solid (D14). A cube face lying in the part's
   // surface is passed by the boxes' own overlap alone, as it always was.
   auto open_air = [&] {
+    // Which cell of the layout this is (read_open_space passes the layout's own cells).
+    const Cell* first = lay.cells.data();
+    if (&c < first || &c >= first + lay.cells.size()) return;
+    const std::size_t self = static_cast<std::size_t>(&c - first);
     // Nothing of the part's surface near the cube: no air to open, nothing to ask.
     const double reach = 1.001 * std::sqrt(3.0) * (0.5 * c.size + s);
     const double h = 0.5 * c.size;
@@ -99,15 +103,9 @@ void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c,
                 if (u >= 0 && v >= 0 && w >= 0 && u < k && v < k && w < k) { touches = o & kSpace; continue; }
                 if (!(o & kAsked)) {
                   o |= kAsked;
-                  // What cell_holds asks, less the cube. With no walls to tell apart the
-                  // domain's answer is all of it (and no width need be measured for it).
-                  if (!walls.flat) {
-                    const Where at_o = probe.where(place(u, v, w));
-                    if (at_o.lattice() && at_o.id == c.region) o |= kSpace;
-                  } else {
-                    const Reading r = read_at(probe, f, walls, c.lo[0] + (u + 0.5) * s, c.lo[1] + (v + 0.5) * s, c.lo[2] + (w + 0.5) * s);
-                    if (r.where.lattice() && r.where.id == c.region && r.wall == c.wall) o |= kSpace;
-                  }
+                  // What cell_holds asks, less the cube.
+                  if (cell_holds_at(lay, probe, self, c.lo[0] + (u + 0.5) * s, c.lo[1] + (v + 0.5) * s, c.lo[2] + (w + 0.5) * s))
+                    o |= kSpace;
                 }
                 touches = o & kSpace;
               }
