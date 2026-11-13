@@ -189,6 +189,17 @@ final class LatticeLayoutPreviewTests: XCTestCase {
         XCTAssertEqual(LatticeLayoutPreview.note(l), LatticeLayoutPreview.byStressLine, "★ By stress: said in one line")
     }
 
+    /// ★ 11-13: skins of one depth go as one (his v4 stand: 26 skins of 4 mm, 289 s → 0.7 s on the Mac, the same lattice).
+    func testProtectSkinsOfOneDepthGoAsOne() {
+        let merged = LatticeLayoutPreview.mergedByDepth([.init(id: 1, faces: [1, 2], depthMM: 4), .init(id: 2, faces: [3, 2], depthMM: 4),
+                                                         .init(id: 3, faces: [4], depthMM: 1)])
+        XCTAssertEqual(merged.count, 2, "★ one skin per depth")
+        XCTAssertEqual(merged[0].faces, [1, 2, 3], "★ every face of that depth, once")
+        XCTAssertEqual(merged[0].depthMM, 4)
+        XCTAssertEqual(merged[1].faces, [4])
+        XCTAssertEqual(merged[1].depthMM, 1, "a different depth stays its own skin")
+    }
+
     // MARK: fixtures
 
     /// `n` bars on a grid: a 0.8 mm bar along x from each point.
