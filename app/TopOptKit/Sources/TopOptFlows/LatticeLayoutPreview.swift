@@ -107,6 +107,22 @@ public final class LatticeLayoutPreview: ObservableObject {
 
     // MARK: the page's settings, as core reads them
 
+    /// Protect skins of one depth as one skin, in the order their depths first appear; each face once.
+    static func mergedByDepth(_ skins: [LatticeLayoutSession.Protect]) -> [LatticeLayoutSession.Protect] {
+        var order: [Double] = []
+        var byDepth: [Double: LatticeLayoutSession.Protect] = [:]
+        for g in skins {
+            if var m = byDepth[g.depthMM] {
+                for f in g.faces where !m.faces.contains(f) { m.faces.append(f) }
+                byDepth[g.depthMM] = m
+            } else {
+                byDepth[g.depthMM] = g
+                order.append(g.depthMM)
+            }
+        }
+        return order.compactMap { byDepth[$0] }
+    }
+
     /// Lattice Setup's settings for core's lattice_layout (read where its rows read them).
     public static func settings(_ p: ProjectModel) -> LatticeLayoutSession.Settings {
         var s = LatticeLayoutSession.Settings()
@@ -177,6 +193,9 @@ public final class LatticeLayoutPreview: ObservableObject {
                 id += 1
             }
         }
+        // ★ 11-13: Protect skins of one depth go as ONE skin (the same solid, rule D5). The engine's reading asks every skin in
+        // turn: his v4 stand's 26 skins of 4 mm took 289 s to lay on the Mac, one group of them 0.7 s, the lattice identical.
+        s.protect = Self.mergedByDepth(s.protect)
         // Whole part ("In a part"), or no face asked for lattice: the whole part is lattice, less No lattice and Protect skins
         s.allLattice = l.wholePart || !s.regions.contains { !$0.noLattice }
         return s
