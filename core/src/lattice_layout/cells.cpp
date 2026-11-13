@@ -66,17 +66,96 @@ Reading read_at(const Domain::Probe& probe, const Frame& frame, const WallMap& w
   return r;
 }
 
-bool cell_holds(const Layout& layout, const Domain::Probe& probe, const Cell& cell, const Vec3& p) {
+std::shared_ptr<const CellIndex> index_cells(const Layout& layout, double pitch) {
+  auto made = std::make_shared<CellIndex>();
+  made->pitch = pitch;
+  auto slot = [&](double x) { return static_cast<long long>(std::floor(x / pitch)); };
+  for (std::size_t ci = 0; ci < layout.cells.size(); ++ci) {
+    const Cell& c = layout.cells[ci];
+    const Frame& f = layout.frames[static_cast<std::size_t>(c.frame)];
+    double mn[3] = {1e300, 1e300, 1e300}, mx[3] = {-1e300, -1e300, -1e300};
+    for (int k = 0; k < 8; ++k) {
+      const Vec3 v = f.at(c.lo[0] + ((k & 1) ? c.size : 0.0), c.lo[1] + ((k & 2) ? c.size : 0.0),
+                          c.lo[2] + ((k & 4) ? c.size : 0.0));
+      mn[0] = std::min(mn[0], v.x); mx[0] = std::max(mx[0], v.x);
+      mn[1] = std::min(mn[1], v.y); mx[1] = std::max(mx[1], v.y);
+      mn[2] = std::min(mn[2], v.z); mx[2] = std::max(mx[2], v.z);
+    }
+    for (long long x = slot(mn[0]); x <= slot(mx[0]); ++x)
+      for (long long y = slot(mn[1]); y <= slot(mx[1]); ++y)
+        for (long long z = slot(mn[2]); z <= slot(mx[2]); ++z)
+          made->grid[{x, y, z}].push_back(static_cast<std::uint32_t>(ci));
+  }
+  return made;
+}
+
+namespace {
+// `p` in the cell's own frame; false when it is outside the cell's cube.
+bool in_cube(const Layout& layout, const Cell& cell, const Vec3& p, double q[3]) {
   const Frame& f = layout.frames[static_cast<std::size_t>(cell.frame)];
   const Vec3 rel{p.x - f.origin.x, p.y - f.origin.y, p.z - f.origin.z};
-  double q[3];
   for (int a = 0; a < 3; ++a) {
     q[a] = rel.x * f.ax[a].x + rel.y * f.ax[a].y + rel.z * f.ax[a].z;
     if (q[a] < cell.lo[a] || q[a] >= cell.lo[a] + cell.size) return false;
   }
+  return true;
+}
+// Is the point lattice of the cell's own region and wall? `other`: it is lattice of ANOTHER region.
+// (Lattice of the cell's own region under another wall, or under none, is neither: a wall too thin for its cell
+// is solid by D8 and stays solid, whoever's cube reaches over it.)
+bool own(const Layout& layout, const Domain::Probe& probe, const Cell& cell, const double q[3], bool* other) {
+  const Frame& f = layout.frames[static_cast<std::size_t>(cell.frame)];
   const WallMap& walls = layout.walls[static_cast<std::size_t>(cell.frame)];
+  if (!walls.flat) {
+    // No wall to name: only "lattice, and whose" is asked, so no width is measured (the costly part of a reading).
+    const Where w = probe.where(f.at(q[0], q[1], q[2]));
+    if (other) *other = w.lattice() && w.id != cell.region;
+    return w.lattice() && w.id == cell.region;
+  }
   const Reading r = read_at(probe, f, walls, q[0], q[1], q[2]);
-  return r.where.lattice() && r.where.id == cell.region && (!walls.flat || r.wall == cell.wall);
+  if (other) *other = r.where.lattice() && r.where.id != cell.region;
+  return r.where.lattice() && r.where.id == cell.region && r.wall == cell.wall;
+}
+// D14b: lattice of another region at `p`, inside `cell`'s cube. The cell takes it in when no cell holds it as its
+// own and this cell is the first, in layout order, of the cells of other regions whose cube it is in.
+bool takes_in(const Layout& layout, const Domain::Probe& probe, std::size_t cell, const Vec3& p) {
+  if (!layout.absorb || !layout.index) return false;
+  const CellIndex& ix = *layout.index;
+  const auto it = ix.grid.find({static_cast<long long>(std::floor(p.x / ix.pitch)), static_cast<long long>(std::floor(p.y / ix.pitch)),
+                                static_cast<long long>(std::floor(p.z / ix.pitch))});
+  if (it == ix.grid.end()) return false;
+  long first = -1;
+  for (std::uint32_t ci : it->second) {   // in cell order
+    const Cell& d = layout.cells[ci];
+    double q[3];
+    if (!in_cube(layout, d, p, q)) continue;
+    bool other = false;
+    if (own(layout, probe, d, q, &other)) return false;   // its own cell holds it
+    if (other && first < 0) first = static_cast<long>(ci);
+  }
+  return first == static_cast<long>(cell);
+}
+}  // namespace
+
+bool cell_holds_at(const Layout& layout, const Domain::Probe& probe, std::size_t cell, double a, double b, double c) {
+  const Cell& x = layout.cells[cell];
+  const double q[3] = {a, b, c};
+  bool other = false;
+  if (own(layout, probe, x, q, &other)) return true;
+  if (!other || !layout.absorb) return false;
+  return takes_in(layout, probe, cell, layout.frames[static_cast<std::size_t>(x.frame)].at(a, b, c));
+}
+
+bool cell_holds(const Layout& layout, const Domain::Probe& probe, const Cell& cell, const Vec3& p) {
+  double q[3];
+  if (!in_cube(layout, cell, p, q)) return false;
+  bool other = false;
+  if (own(layout, probe, cell, q, &other)) return true;
+  if (!other || !layout.absorb || layout.cells.empty()) return false;
+  // Which cell of the layout this is (callers pass the layout's own cells).
+  const Cell* first = layout.cells.data();
+  if (&cell < first || &cell >= first + layout.cells.size()) return false;
+  return takes_in(layout, probe, static_cast<std::size_t>(&cell - first), p);
 }
 
 namespace {
@@ -260,6 +339,39 @@ struct Pass {
           ++inside;
           fits = std::min(fits, fit);
         }
+    // D14b: a cube the part's surface cuts so thinly that none of the 27 points is lattice. Look again a hair inside
+    // its faces, edges and corners; lattice found there is a sliver of this pass. It is a cut cell when the rest of
+    // the cube is AIR (the sliver faces the open surface: the lattice runs out to the surface), and nothing when
+    // the cube also holds solid (a sliver under solid must not be opened: it would be a slot nothing can print over).
+    if (inside == 0 && spec->absorb_slivers && !walls->flat) {
+      int found = 0;
+      bool air = false, solid_too = false;
+      const double e[3] = {0.04, 0.5, 0.96};
+      for (int c = 0; c < 3; ++c)
+        for (int b = 0; b < 3; ++b)
+          for (int a = 0; a < 3; ++a) {
+            if (a == 1 && b == 1 && c == 1) continue;
+            const double q[3] = {lo[0] + s * e[a], lo[1] + s * e[b], lo[2] + s * e[c]};
+            // Asked cheaply first (no width); the width is read only for a cube that turns out to be a sliver.
+            const Where w = probe->where(frame.at(q[0], q[1], q[2]));
+            if (w.lattice() && w.id == region) ++found;
+            else if (w.why == Why::Outside) air = true;
+            else if (w.why != Why::Lattice) solid_too = true;
+          }
+      if (found > 0 && air && !solid_too) {
+        int counted = 0;
+        for (int c = 0; c < 3; ++c)
+          for (int b = 0; b < 3; ++b)
+            for (int a = 0; a < 3; ++a) {
+              if (a == 1 && b == 1 && c == 1) continue;
+              double fit = 0.0;
+              if (!sample(lo[0] + s * e[a], lo[1] + s * e[b], lo[2] + s * e[c], &fit)) continue;
+              ++counted;
+              fits = std::min(fits, fit);
+            }
+        inside = counted;
+      }
+    }
     if (inside == 0 && !look_at_nodes(lo, s, &fits)) return;   // nothing of this pass here
     const bool cut = inside < 27;   // D3: a whole cell, cut by the edge
     // A width is read to about a micron (PartMeasure::reach), so a cell that fits its
@@ -894,6 +1006,9 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
     out.walls[static_cast<std::size_t>(pass.frame_index)] = std::move(map);
   }
   if (ds.start == Start::AllLattice) run(0, world, 1e300, world_base(), wlo, whi, false);
+  // D14b: cells take in the lattice slivers inside their cubes.
+  out.absorb = spec.absorb_slivers;
+  if (out.absorb) out.index = index_cells(out);
   return out;
 }
 

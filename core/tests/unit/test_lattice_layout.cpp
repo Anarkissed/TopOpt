@@ -2468,6 +2468,201 @@ static void test_pieces() {
   CHECK(after.adrift == 0);
 }
 
+// D14b (his rule on his v3 stand, 2026-11-12: "It's either consistently latticed all around the pocket, or it
+// isn't"; "Why can't the pocket just cut the lattices wherever they are positioned"). His stand in small: a slab of
+// lattice under a flat face, and a shell of lattice round a curved pocket cut into the opposite side, the two sharing
+// the wall between them. Without the rule the wedges where one region's share is too thin for its cells are solid,
+// and so is the pocket's own surface wherever a cube is cut too thinly for its sample points to see.
+static void slivers_case(double cx, double slab_mm, long tally[13]) {
+  // A 40 x 9.83 bar, 20 long, with a half-round pocket (radius 6) in its top edge: 3.83 mm of wall under the
+  // pocket at its thinnest, his stand's own number.
+  const double H = 9.83;
+  std::vector<std::array<double, 2>> xy = {{0, 0}, {40, 0}, {40, H}, {cx + 6, H}};
+  const int N = 48;
+  for (int i = 1; i < N; ++i) {
+    const double t = 3.14159265358979323846 * i / N;   // from (26, 14) round under to (14, 14)
+    xy.push_back({cx + 6 * std::cos(t), H - 6 * std::sin(t)});
+  }
+  xy.push_back({cx - 6, H});
+  xy.push_back({0, H});
+  const TriangleMesh solid_mesh = prism_any(xy, 0, 20);
+  // The same triangles as a model with faces: the flat underside, the pocket's wall, the rest.
+  StepModel model;
+  model.mesh = solid_mesh;
+  StepFaceInfo under, wall, rest;
+  under.kind = StepSurfaceKind::Plane;
+  under.plane_normal = {0, -1, 0};
+  under.plane_origin = {20, 0, 10};
+  wall.kind = StepSurfaceKind::Other;
+  rest.kind = StepSurfaceKind::Other;
+  model.faces = {under, wall, rest};
+  model.face_count = 3;
+  for (const auto& t : solid_mesh.triangles) {
+    const Vec3 &a = solid_mesh.vertices[static_cast<std::size_t>(t[0])], &b = solid_mesh.vertices[static_cast<std::size_t>(t[1])],
+               &c = solid_mesh.vertices[static_cast<std::size_t>(t[2])];
+    auto on_arc = [H, cx](const Vec3& v) { return std::fabs(std::hypot(v.x - cx, v.y - H) - 6) < 1e-6 && v.y < H + 1e-9; };
+    int f = 2;
+    if (a.y < 1e-9 && b.y < 1e-9 && c.y < 1e-9) f = 0;
+    else if (on_arc(a) && on_arc(b) && on_arc(c) && !(a.z == b.z && b.z == c.z)) f = 1;
+    model.triangle_face.push_back(f);
+  }
+  PartMeasure pm(weld_mesh(model.mesh));
+  auto domain_spec = [&] {
+    DomainSpec s;
+    s.min_strut_lines = 2.0;   // as he prints
+    bool ok = false;
+    // As on his stand: the pocket's shell is region 1, the slab under the flat face region 2.
+    s.regions.push_back(region_from_faces(model, {1}, 1, Role::Lattice, 4.0, 0.0, &ok));
+    CHECK(ok && s.regions.back().is_shell());
+    s.regions.push_back(region_from_faces(model, {0}, 2, Role::Lattice, slab_mm, 0.0, &ok));
+    CHECK(ok && !s.regions.back().is_shell());
+    return s;
+  };
+  Domain d(pm, domain_spec());
+  auto pr = d.probe();
+  CellSpec cs;
+  cs.algorithm = Algorithm::Stepped;
+  cs.cell_max_mm = 8;
+  cs.min_cells_across = 1;
+  cs.allow_quilt = true;     // his per-part choice: small cells in thin walls
+  CHECK(cs.absorb_slivers);   // the rule is on unless switched off
+  CellSpec plain = cs;
+  plain.absorb_slivers = false;
+  const Layout on = lay_cells(d, cs), off = lay_cells(d, plain);
+  CHECK(on.absorb && on.index && !off.absorb);
+  CHECK(!on.cells.empty() && !off.cells.empty());
+  // Every lattice point of three levels, on a quarter-millimetre grid: how many cells hold it.
+  long taken = 0;
+  auto count = [&](const Layout& l, long* unheld, long* twice, long* lattice) {
+    *unheld = *twice = *lattice = 0;
+    for (double z : {4.3, 10.1, 15.7})
+      for (double y = 0.125; y < H; y += 0.25)
+        for (double x = 6.125; x < 34.0; x += 0.25) {
+          const Vec3 p{x, y, z};
+          if (!pr.where(p).lattice()) continue;
+          ++*lattice;
+          int holders = 0;
+          for (const Cell& c : l.cells)
+            if (cell_holds(l, pr, c, p)) {
+              ++holders;
+              if (c.region != pr.where(p).id) ++taken;   // lattice of one region, in a cell of the other
+            }
+          *unheld += holders == 0;
+          *twice += holders > 1;
+        }
+  };
+  long un_off = 0, tw_off = 0, lat = 0, un_on = 0, tw_on = 0;
+  count(off, &un_off, &tw_off, &lat);
+  CHECK(taken == 0);   // without the rule a cell holds its own region's lattice only
+  count(on, &un_on, &tw_on, &lat);
+  tally[8] += taken;
+  std::printf("slivers, pocket at x %.1f, slab %.1f: of %ld lattice points, held by no cell: %ld without the rule, %ld with it (%ld taken in from the other region); held twice: %ld, %ld; cells %zu -> %zu\n",
+              cx, slab_mm, lat, un_off, un_on, taken, tw_off, tw_on, off.cells.size(), on.cells.size());
+  CHECK(un_on <= un_off);
+  CHECK(tw_off == 0 && tw_on == 0);   // never by two cells: no lattice laid twice over
+  tally[0] += un_off; tally[1] += un_on;
+  // The pocket's own wall, a hair inside the surface, all the way round: lattice everywhere the domain says so.
+  long wall_lat = 0, wall_off = 0, wall_on = 0;
+  for (int i = 2; i < 4 * N - 2; ++i)
+    for (double z : {2.2, 6.9, 10.4, 13.3, 17.6}) {
+      const double t = 3.14159265358979323846 * i / (4 * N);
+      const Vec3 p{cx + 6.12 * std::cos(t), H - 6.12 * std::sin(t), z};
+      if (!pr.where(p).lattice()) continue;
+      ++wall_lat;
+      int h_off = 0, h_on = 0;
+      for (const Cell& c : off.cells) h_off += cell_holds(off, pr, c, p);
+      for (const Cell& c : on.cells) h_on += cell_holds(on, pr, c, p);
+      wall_off += h_off > 0;
+      wall_on += h_on > 0;
+    }
+  std::printf("slivers, pocket at x %.1f: round its wall, %ld lattice points: in a cell %ld without the rule, %ld with it\n", cx, wall_lat, wall_off, wall_on);
+  CHECK(wall_lat > 500 && wall_on >= wall_off);
+  tally[2] += wall_lat; tally[3] += wall_off; tally[4] += wall_on;
+  // A cube laid by the rule alone has air in it: a sliver under solid is never opened.
+  auto same_cube = [](const Cell& a, const Cell& b) {
+    return a.frame == b.frame && a.region == b.region && a.size == b.size && a.lo[0] == b.lo[0] && a.lo[1] == b.lo[1] && a.lo[2] == b.lo[2];
+  };
+  int added = 0, added_with_air = 0;
+  for (const Cell& c : on.cells) {
+    bool was = false;
+    for (const Cell& o : off.cells) was = was || same_cube(c, o);
+    if (was) continue;
+    ++added;
+    const Frame& f = on.frames[static_cast<std::size_t>(c.frame)];
+    bool air = false;
+    for (int k = 0; k < 27 && !air; ++k)
+      air = pr.where(f.at(c.lo[0] + c.size * (1 + 2 * (k % 3)) / 6.0, c.lo[1] + c.size * (1 + 2 * ((k / 3) % 3)) / 6.0,
+                          c.lo[2] + c.size * (1 + 2 * (k / 9)) / 6.0)).why == Why::Outside;
+    added_with_air += air;
+  }
+  CHECK(added_with_air == added);
+  tally[5] += added;
+  // The struts follow: more of them, none loose after the joining, the same on every run and on one thread.
+  Layout ls = on, lp = off;
+  set_struts(ls, StrutSpec{});
+  set_struts(lp, StrutSpec{});
+  Bars with = lay_bars(ls, d), without = lay_bars(lp, d);
+  CHECK(same_bars(with, lay_bars(ls, d)) && same_bars(with, lay_bars(ls, d, 1)));
+  double len_with = 0, len_without = 0;
+  for (const Bar& b : with.bars) len_with += std::sqrt((b.a.x - b.b.x) * (b.a.x - b.b.x) + (b.a.y - b.b.y) * (b.a.y - b.b.y) + (b.a.z - b.b.z) * (b.a.z - b.b.z));
+  for (const Bar& b : without.bars) len_without += std::sqrt((b.a.x - b.b.x) * (b.a.x - b.b.x) + (b.a.y - b.b.y) * (b.a.y - b.b.y) + (b.a.z - b.b.z) * (b.a.z - b.b.z));
+  CHECK(len_with >= len_without - 1e-9);
+  tally[6] += static_cast<long>(len_without); tally[7] += static_cast<long>(len_with);
+  // Finish Skin on the pocket's curved wall (his words: "not just with singular vertical lines, but with a lattice all
+  // along the face"). The struts the wall cuts are joined along the wall both ways: along the pocket (lines) AND round
+  // it (rings). A ring's bar is a straight piece between two points of a hollow wall, so its middle is in the air by
+  // the bow of the curve; with no bow allowed there are no rings at all.
+  if (slab_mm == 3.8) {
+    auto skinned = [&](double bow, long* along, long* round, double* worst) {
+      Bars b = lay_bars(ls, d);
+      join_loose_bars(b, d, 0, &ls);
+      SkinSpec sk;
+      sk.bow = bow;
+      const std::size_t made = lay_skin(b, d, sk);
+      *along = *round = 0;
+      *worst = 0.0;
+      for (const Bar& x : b.bars) {
+        if (!x.skin) continue;
+        if (std::hypot((x.a.x + x.b.x) / 2 - cx, (x.a.y + x.b.y) / 2 - H) > 6.6) continue;   // on the pocket's wall,
+        if (std::min(x.a.z, x.b.z) < 0.5 || std::max(x.a.z, x.b.z) > 19.5) continue;         // not on the bar's two ends
+        const double len = std::sqrt((x.a.x - x.b.x) * (x.a.x - x.b.x) + (x.a.y - x.b.y) * (x.a.y - x.b.y) + (x.a.z - x.b.z) * (x.a.z - x.b.z));
+        (std::fabs(x.a.z - x.b.z) > 0.7 * len ? *along : *round) += 1;
+        const double off = std::fabs(pr.part().depth(Vec3{(x.a.x + x.b.x) / 2, (x.a.y + x.b.y) / 2, (x.a.z + x.b.z) / 2}));
+        *worst = std::max(*worst, off - 0.1 * len);
+      }
+      return made;
+    };
+    long along0 = 0, round0 = 0, along1 = 0, round1 = 0;
+    double worst0 = 0, worst1 = 0;
+    const std::size_t made0 = skinned(0.0, &along0, &round0, &worst0), made1 = skinned(0.1, &along1, &round1, &worst1);
+    CHECK(made1 >= made0 && round1 >= round0 && along1 >= along0);
+    CHECK(worst1 <= 0.02 + 1e-6);   // no bar strays from the wall by more than the bow allowed
+    tally[9] += along1; tally[10] += round1; tally[11] += along0; tally[12] += round0;
+  }
+  // What it must NOT take in: a wall of the SAME region too thin for its cell stays solid (D8;
+  // test_struts_end_in_no_cell_space holds that with the rule on).
+}
+static void test_slivers_are_taken_in() {
+  // The pocket at five places across the cells' grid (where a cube is cut thinly depends on where the grid falls),
+  // then three deeper slabs (where the two regions' cubes overlap).
+  long tally[13] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+  for (double cx : {20.0, 20.7, 21.4, 22.1, 22.8}) slivers_case(cx, 3.8, tally);
+  for (double slab : {5.0, 6.0, 7.0}) slivers_case(21.4, slab, tally);
+  std::printf("slivers, all eight: held by no cell %ld -> %ld; round the wall, of %ld: %ld -> %ld in a cell; cubes laid by the rule %ld; strut length %ld -> %ld mm\n",
+              tally[0], tally[1], tally[2], tally[3], tally[4], tally[5], tally[6], tally[7]);
+  CHECK(tally[0] > 300);                    // the fault is there to cure
+  CHECK(tally[1] * 10 <= tally[0] * 6);     // at least four tenths of it is taken in (what is left lies inside, away from the wall)
+  CHECK(tally[4] > tally[3]);
+  CHECK(tally[4] * 100 >= tally[2] * 97);   // round the pocket's wall: consistently, all the way round
+  CHECK(tally[5] > 0);
+  CHECK(tally[8] > 300);                    // and the seam between the two regions: lattice of one, taken in by the other's cell
+  std::printf("skin on the pocket's wall, five pockets: %ld bars along it and %ld round it (with no bow allowed: %ld along, %ld round)\n",
+              tally[9], tally[10], tally[11], tally[12]);
+  CHECK(tally[9] > 100 && tally[10] > 100);   // a lattice along the face: both ways
+  CHECK(tally[10] > 4 * tally[12]);           // the rings are there because the bow is allowed
+  CHECK(tally[7] > tally[6]);
+}
+
 // D14 for the struts: lattice space that no cell holds is solid, and a strut that reaches
 // it ends IN it, like in any other solid. (Found 2026-11-12: such an end was called loose
 // and dropped, and a lattice standing on such a spot was called adrift.)
@@ -3198,6 +3393,7 @@ int main() {
   test_bars_join();
   test_pieces();
   test_struts_end_in_no_cell_space();
+  test_slivers_are_taken_in();
   test_skin();
   test_stepped_edges();
   test_rim();
