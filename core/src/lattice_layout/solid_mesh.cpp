@@ -397,6 +397,8 @@ struct CarvedSolids {
   Manifold part, solid;
   std::vector<Manifold> pieces;
   double part_mm3 = 0.0;
+  double pitch_mm = 0.25;   // the open space's own pitch and the overlap it was carved with: MeshSpec::strut_reach_mm
+  double grow_mm = 0.02;    // reads them, so a carving gives the same mesh whatever the build's own grow_mm
 };
 }  // namespace
 
@@ -406,6 +408,8 @@ Carved carve_part(const PartMeasure& pm, const Layout& lay, const OpenSpace& ope
   Carved out;
   check(stop);
   auto made = std::make_shared<CarvedSolids>();
+  if (open_space.pitch_mm > 0.0) made->pitch_mm = open_space.pitch_mm;
+  made->grow_mm = grow;
   made->part = [&] {
     manifold::MeshGL64 g;
     g.numProp = 3;
@@ -512,6 +516,9 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
     for (char u : used) rep.drop_unanswered += !u;
   }
 
+  // Every strut is written a little longer than its bar (MeshSpec::strut_reach_mm): each end is carried on along the
+  // bar's own line, so a strut that ends on solid is fused into it across the open space's last column.
+  const double reach = spec.strut_reach_mm < 0.0 ? 0.5 * kept.pitch_mm + kept.grow_mm + 0.05 : spec.strut_reach_mm;
   Manifold struts;
   {
     std::vector<Manifold> solids;
@@ -526,9 +533,9 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
       if (len < 1e-9) continue;
       d = {d.x / len, d.y / len, d.z / len};
       // An end ON the part's surface runs past it (the part cuts it flush); every other
-      // end gets a ball, so bars meeting at any angle close up.
-      const double pa = x.end_a == Bar::End::Surface ? 2.0 * r + 0.3 : 0.0;
-      const double pb = x.end_b == Bar::End::Surface ? 2.0 * r + 0.3 : 0.0;
+      // end gets a ball, so bars meeting at any angle close up, and runs on by `reach`.
+      const double pa = x.end_a == Bar::End::Surface ? std::max(2.0 * r + 0.3, reach) : reach;
+      const double pb = x.end_b == Bar::End::Surface ? std::max(2.0 * r + 0.3, reach) : reach;
       const Vec3 a{x.a.x - d.x * pa, x.a.y - d.y * pa, x.a.z - d.z * pa};
       if (bar_is_bridge(x, spec.bridge_rise)) {
         // A strut that lies flat (under 30 degrees) is printed as a BRIDGE: a square bar as

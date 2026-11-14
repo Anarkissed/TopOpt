@@ -432,7 +432,65 @@ static void test_one_grid_key() {
   std::remove(path.c_str());
 }
 
+// The writer's strut reach (MeshSpec::strut_reach_mm): the open space is read in 0.25 mm columns, and an opened
+// column can reach up to half a column past the lattice's true edge, while a strut is cut exactly there. The block
+// of test_thin_slot with its outline at z 28.85 (Expand -1.15): the band's top row of 2 mm cells (z 27 to 29) is cut
+// 1.85 mm thick, the strut and more (left open by rule (f)), and the outline lies 0.1 mm past the column boundary at
+// 28.75. Every strut the layout ends on that solid is fused into it (0.03 mm short of the solid, on its own line,
+// is inside the file), and the file is clean in ONE pass with no post.
+static void test_strut_reach() {
+  if (!mesh_available()) return;
+  FileJob job = parse_file_job(R"({
+    "mode": "lattice_file", "model": "block.step",
+    "layout": {
+      "min_strut_lines": 1,
+      "region_ids": [1], "region_no_lattice": [0], "region_depth_mm": [8], "region_expand_mm": [-1.15],
+      "region_face_counts": [1], "region_faces": [2],
+      "algorithm": "default_grade", "cell_mm": 8, "min_cells_across": 1, "grade_to_shape": true, "band_mm": 4,
+      "strut_width_mm": 0.7, "allow_quilt": true
+    }
+  })");
+  const double edge = 28.85;
+  for (const double reach : {-1.0, 0.0}) {
+    job.options.mesh.strut_reach_mm = reach;
+    Session session(box_model(30, 12, 30));
+    const Outcome out = session.lay(job.settings);
+    FileReport rep;
+    const TriangleMesh mesh = make_file_mesh(session, out, job.options, rep);
+    CHECK(rep.mesh.ok);
+    if (!rep.mesh.ok) return;
+    const PartMeasure file(weld_mesh(mesh));
+    const PartMeasure::Probe in = file.probe();
+    std::size_t ends = 0, fused = 0;
+    for (const Bar& b : out.bars.bars)
+      for (int e = 0; e < 2; ++e) {
+        if ((e ? b.end_b : b.end_a) != Bar::End::Solid) continue;
+        const Vec3 &p = e ? b.b : b.a, &q = e ? b.a : b.b;   // p: the end in the solid; q: the other
+        if (!(p.z > edge && q.z < edge)) continue;   // a strut that ends on the solid above the outline
+        const Vec3 d{p.x - q.x, p.y - q.y, p.z - q.z};
+        const double len = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+        const double t = (edge - q.z) / d.z;   // where its line meets the solid
+        const Vec3 at{q.x + d.x * t - 0.03 * d.x / len, q.y + d.y * t - 0.03 * d.y / len, q.z + d.z * t - 0.03 * d.z / len};
+        if (at.y < 0.05) continue;   // a strut lying in the part's own front face: its line is the mesh's surface
+        ++ends;
+        fused += in.inside(at);
+      }
+    std::size_t posts_under = 0;
+    for (const MeshSpec::Post& p : rep.posts) posts_under += p.z_top > edge - 1.0;
+    std::printf("strut reach %s: %zu of %zu struts ending on the solid fused 0.03 mm short of it; print check %s in %d "
+                "passes, first found %d, %zu posts (%zu under the solid), %zu left out, longest reach %.2f mm\n",
+                reach < 0 ? "on" : "off", fused, ends, rep.print_clean ? "clean" : "NOT clean", rep.builds,
+                rep.found_per_pass.empty() ? -1 : rep.found_per_pass.front(), rep.posts.size(), posts_under,
+                rep.left_out_at.size(), rep.layers.longest_reach_mm);
+    if (reach == 0.0) continue;   // shown for the comparison only
+    CHECK(ends > 0 && fused == ends);
+    CHECK(rep.print_clean && rep.builds == 1 && rep.found_per_pass.size() == 1 && rep.found_per_pass.front() == 0 &&
+          rep.posts.empty() && rep.left_out_at.empty());
+  }
+}
+
 int main() {
+  test_strut_reach();
   test_thin_slot();
   test_parse();
   test_make();

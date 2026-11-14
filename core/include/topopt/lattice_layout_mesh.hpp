@@ -68,6 +68,15 @@ struct MeshSpec {
   // A strut whose rise is under this share of its length (0.5 = 30 degrees) is a bridge.
   // 0 = every strut round.
   double bridge_rise = kBridgeRise;
+  // Every strut is written this much longer at each end, along its own line, than the layout's bar (round struts and
+  // bridges alike; a bridge keeps its level underside; posts are not changed; the struts are still cut to the part).
+  // The open space is read in columns of its pitch, and an opened column can reach up to half a column past the true
+  // edge of the lattice, while a strut is cut exactly at that edge: where lattice ends against solid each strut could
+  // stop up to about 0.1 mm short of the solid it should stand on (his v3 stand: an empty line under each cap, tied
+  // down only by the make-check-make loop's posts). Run on, it is fused into the solid. The layout's bars are not
+  // changed: the preview and the strength check see the same bars. Below 0 = half the open space's pitch + the grow_mm
+  // it was carved with + 0.05 mm (0.195 mm at the defaults); 0 = off, the mesh as before.
+  double strut_reach_mm = -1.0;
   int threads = 0;            // 0 = every core
   // From the layer check. A strut whose LOWEST point is at one of these places is left out
   // (it hangs from above with nothing under its tip), and so is a small separate piece of

@@ -331,6 +331,32 @@ static void test_whole_part() {
   for (int a = 0; a < 3; ++a) CHECK(std::fabs(r.lo[a]) < 1e-6 && std::fabs(r.hi[a] - 16.0) < 1e-6);
 }
 
+// MeshSpec::strut_reach_mm: struts written longer than their bars never leave the part. A 16 mm cube latticed whole
+// with no skin: every strut the cube's faces cut ends in the open (End::Surface), and the mesh stays inside the cube.
+static void test_strut_reach_stays_in_the_part() {
+  PartMeasure pm(weld_mesh(box(16, 16, 16)));
+  DomainSpec s;
+  s.start = Start::AllLattice;
+  s.min_strut_lines = 2.0;
+  Domain d(pm, s);
+  CellSpec cs;
+  cs.algorithm = Algorithm::Uniform;
+  cs.cell_mm = 6.8;
+  Layout layout = lay_cells(d, cs);
+  set_struts(layout, StrutSpec{});
+  const Bars bars = lay_bars(layout, d);   // as laid: the cut ends in the open are kept
+  std::size_t in_air = 0;
+  for (const Bar& b : bars.bars) in_air += (b.end_a == Bar::End::Surface) + (b.end_b == Bar::End::Surface);
+  CHECK(in_air > 0);
+  const OpenSpace open = read_open_space(d, layout, 0.25);
+  MeshReport rep;
+  const TriangleMesh mesh = build_mesh(pm, d, layout, bars, open, MeshSpec{}, &rep);
+  CHECK(rep.ok);
+  const Read r = read_mesh(mesh);
+  for (int a = 0; a < 3; ++a) CHECK(r.lo[a] >= -1e-6 && r.hi[a] <= 16.0 + 1e-6);
+  CHECK(r.edges_not_twice == 0 && r.flat == 0);
+}
+
 // ── his print rules, layer by layer (P8) ─────────────────────────────────────
 static void add_box(MeshSink& s, double x0, double y0, double z0, double x1, double y1, double z1, double shear_x = 0.0) {
   // `shear_x`: the top is moved this far along x (a leaning box).
@@ -1001,6 +1027,7 @@ int main() {
   }
   test_block();
   test_whole_part();
+  test_strut_reach_stays_in_the_part();
   test_no_crust();
   test_column_changes_down_its_depth();
   test_open_space_merged();
