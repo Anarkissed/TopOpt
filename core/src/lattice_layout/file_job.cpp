@@ -112,7 +112,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "per_region", "dial", "dial_region", "dial_value", "strut_width_mm", "allow_quilt",
        "strength", "small_cells_in_thin_walls", "one_grid", "cells_by_stress", "bars", "join_loose", "skin",
        "skin_width_mm", "skin_reach_cells", "drop_loose", "by_stress", "dial_light", "dial_heavy", "width_light_mm",
-       "width_heavy_mm", "reference_mpa", "percentile", "response", "region_own"},
+       "width_heavy_mm", "reference_mpa", "percentile", "response", "region_own", "max_step"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -154,7 +154,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
                            {"algorithm", "cell_mm", "cell_max_mm", "cell_min_mm", "min_cells_across", "grade_to_shape",
                             "band_mm", "band_cell_mm", "cells_by_stress", "by_stress", "dial", "dial_light",
                             "dial_heavy", "strut_width_mm", "width_light_mm", "width_heavy_mm", "strength", "response",
-                            "reference_mpa"},
+                            "reference_mpa", "max_step"},
                            ow);
       AreaOwn& a = s.regions[r].own;
       if (json::find(o, "algorithm")) a.algorithm = algorithm_from(text(o, "algorithm", "", ow), ow + ".algorithm");
@@ -167,6 +167,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
       mm("dial", a.dial); mm("dial_light", a.dial_light); mm("dial_heavy", a.dial_heavy);
       mm("strut_width_mm", a.width_mm); mm("width_light_mm", a.width_light_mm); mm("width_heavy_mm", a.width_heavy_mm);
       mm("strength", a.strength); mm("response", a.response); mm("reference_mpa", a.reference_mpa);
+      mm("max_step", a.max_step);   // C24
     }
   }
   const std::vector<int> pids = wholes(in, "protect_ids", w);
@@ -193,6 +194,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
   s.cells.band_mm = num(in, "band_mm", s.cells.band_mm, w);
   s.cells.band_cell_mm = num(in, "band_cell_mm", s.cells.band_cell_mm, w);
   s.cells.by_stress = flag(in, "cells_by_stress", s.cells.by_stress, w);   // C22
+  s.cells.max_step = num(in, "max_step", s.cells.max_step, w);            // C24
 
   const bool per_region = flag(in, "per_region", false, w), by_stress = flag(in, "by_stress", false, w);
   if (per_region && by_stress) json::fail(w, "by_stress and per_region cannot both be on: pick one density");
@@ -624,6 +626,7 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     r.stepped_edges = out.stepped_edges.size();
     r.thin_solid = out.thin_solid;
     r.cells_by_stress = out.cells_by_stress;
+    r.step_held_at = out.step_held_at;   // C24
     r.floor_cell_mm = out.layout.floor_cell_mm;
     r.min_strut_mm = out.layout.min_strut_mm;
     r.open_look = out.layout.open_look;
@@ -812,11 +815,11 @@ std::string file_result_json(const FileResult& r) {
                 "  \"layout\": {\"cells\": %llu, \"solid_pieces\": %llu, \"bars\": %llu, "
                 "\"at_one_line\": %llu, \"at_widest\": %llu, \"stubs\": %llu, \"joined\": %llu, "
                 "\"dropped\": %llu, \"pieces\": %llu, \"adrift\": %llu, \"stepped_edges\": %llu, "
-                "\"thin_solid\": %llu, \"cells_by_stress\": %s,\n",
+                "\"thin_solid\": %llu, \"cells_by_stress\": %s, \"step_held_at\": %.9g,\n",
                 count(r.cells), count(r.solid_pieces), count(r.bars), count(r.at_one_line),
                 count(r.at_widest), count(r.stubs), count(r.joined), count(r.dropped), count(r.pieces),
                 count(r.adrift), count(r.stepped_edges), count(r.thin_solid),
-                r.cells_by_stress ? "true" : "false");
+                r.cells_by_stress ? "true" : "false", r.step_held_at);
   o += b;
   std::snprintf(b, sizeof b,
                 "    \"floor_cell_mm\": %.9g, \"min_strut_mm\": %.9g, \"open_look\": %.9g, "

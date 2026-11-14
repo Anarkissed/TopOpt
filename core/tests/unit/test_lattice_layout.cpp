@@ -5854,7 +5854,350 @@ static void test_area_own() {
   }
 }
 
+// ── C24: the largest size step between neighbouring cells ─────────────────────
+// Pairs of cells of one region and one frame that share any part of a face and differ in size by more than `limit`.
+static int step_breaks(const Layout& l, double limit, int region = -1) {
+  int n = 0;
+  const double tol = 1e-6;
+  for (std::size_t i = 0; i < l.cells.size(); ++i)
+    for (std::size_t j = i + 1; j < l.cells.size(); ++j) {
+      const Cell& A = l.cells[i];
+      const Cell& B = l.cells[j];
+      if (A.region != B.region || A.frame != B.frame || (region >= 0 && A.region != region)) continue;
+      if (std::max(A.size, B.size) <= limit * std::min(A.size, B.size) * (1 + 1e-9)) continue;
+      int touch = 0, over = 0;
+      for (int a = 0; a < 3; ++a) {
+        if (std::fabs(A.lo[a] + A.size - B.lo[a]) <= tol || std::fabs(B.lo[a] + B.size - A.lo[a]) <= tol) ++touch;
+        else if (std::min(A.lo[a] + A.size, B.lo[a] + B.size) - std::max(A.lo[a], B.lo[a]) > tol) ++over;
+      }
+      n += touch == 1 && over == 2;
+    }
+  return n;
+}
+// The largest step between face neighbours of the layout (1 when none differ).
+static double largest_step(const Layout& l) {
+  double m = 1.0;
+  for (double r = 1.0; r < 16.0; r *= 1.0625)
+    if (step_breaks(l, r) > 0) m = r * 1.0625;
+  return m;
+}
+
+static void test_size_step() {
+  int before = g_fail;
+  auto block = [&](const char* name) {
+    std::printf("C24 %s: %d failed\n", name, g_fail - before);
+    before = g_fail;
+  };
+  // The plate of test_cells_by_stress: 96 x 24 x 8 latticed from its top face, 8 mm deep, at a 0.2 mm line: one
+  // layer of 8 mm cells, ladder 8, 4, 2 (Default Grade) or 8 and its fractions (Stepped). One hot voxel (x 47..48,
+  // y 11..12, z 6..7, 1 to 2 mm under the face, at the reference) inside the base cube x 40..48: that cube goes down to 2 mm cells at its face
+  // x = 48, against the 8 mm cube beside it.
+  PartMeasure pm(weld_mesh(box(96, 24, 8)));
+  DomainSpec s;
+  s.bead_mm = 0.2;
+  s.regions = {face_region(1, Role::Lattice, {48, 12, 8}, {0, 0, -1}, 12, 48, 8)};
+  Domain d(pm, s);
+  const auto hot = stress_field({-2, -2, -2}, 1.0, 100, 28, 12, [](const Vec3& c) {
+    return (c.x > 47 && c.x < 48 && c.y > 11 && c.y < 12 && c.z > 6 && c.z < 7) ? 100.0 : 0.0;
+  });
+  CellSpec off;
+  off.cell_max_mm = 8;
+  off.by_stress = true;
+  off.demand = hot;
+  off.reference_mpa = 100.0;
+  auto with = [](CellSpec c, double step, Algorithm algo = Algorithm::DefaultGrade) {
+    c.algorithm = algo;
+    c.max_step = step;
+    return c;
+  };
+
+  {  // 1. max_step 0 is today's layout, byte for byte, on three parts (and a negative value is none as well).
+    CHECK(step_held(off) == 0.0 && step_held(with(off, -1)) == 0.0);
+    for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
+      CHECK(same_layout(lay_cells(d, with(off, 0, algo)), lay_cells(d, with(off, 0, algo))));
+      CellSpec today = off;
+      today.algorithm = algo;
+      CHECK(same_layout(lay_cells(d, with(off, 0, algo)), lay_cells(d, today)));
+      CHECK(same_layout(lay_cells(d, with(off, -1, algo)), lay_cells(d, today)));
+    }
+    // The pocket part (a 4 mm wall, a 5 mm pocket, the wall behind: walls of their own under one face).
+    PartMeasure pp(weld_mesh(prism_any({{0, 0}, {60, 0}, {60, 20}, {0, 20}, {0, 9}, {50, 9}, {50, 4}, {0, 4}}, 0, 40)));
+    DomainSpec ps;
+    ps.regions = {face_region(1, Role::Lattice, {30, 0, 20}, {0, 1, 0}, 30, 30, 13)};
+    Domain dp(pp, ps);
+    CellSpec band;
+    band.grade_to_shape = true;
+    band.band_mm = 8;
+    CHECK(same_layout(lay_cells(dp, with(band, 0)), lay_cells(dp, band)));
+    // The whole part, All lattice.
+    PartMeasure pw(weld_mesh(box(40, 30, 20)));
+    DomainSpec ws;
+    ws.start = Start::AllLattice;
+    Domain dw(pw, ws);
+    CellSpec whole;
+    whole.algorithm = Algorithm::Stepped;
+    CHECK(same_layout(lay_cells(dw, with(whole, 0, Algorithm::Stepped)), lay_cells(dw, whole)));
+  }
+  block("1 none is today's");
+
+  {  // 2. Default Grade: without the limit an 8 mm cell shares a face with a 2 mm cell; with max_step 2 no pair of face
+     // neighbours differs by more than 2 x, and cells farther than three base cells from any changed place are
+     // unchanged.
+    const Layout free_ = lay_cells(d, off), kept = lay_cells(d, with(off, 2));
+    CHECK(step_breaks(free_, 2.0) > 0 && step_breaks(free_, 3.9) > 0);   // 8 against 2
+    CHECK(step_breaks(kept, 2.0) == 0);
+    CHECK(kept.solid.empty() && kept.cells.size() > free_.cells.size());
+    std::vector<Vec3> changed;
+    for (const Cell& c : kept.cells)
+      if (std::find(free_.cells.begin(), free_.cells.end(), c) == free_.cells.end()) changed.push_back(cell_centre(kept, c));
+    for (const Cell& c : free_.cells)
+      if (std::find(kept.cells.begin(), kept.cells.end(), c) == kept.cells.end()) changed.push_back(cell_centre(free_, c));
+    int far = 0, far_changed = 0;
+    for (const Cell& c : free_.cells) {
+      const Vec3 m = cell_centre(free_, c);
+      double near = 1e300;
+      for (const Vec3& p : changed) near = std::min(near, std::max({std::fabs(p.x - m.x), std::fabs(p.y - m.y), std::fabs(p.z - m.z)}));
+      if (near <= 24.0) continue;
+      ++far;
+      far_changed += std::find(kept.cells.begin(), kept.cells.end(), c) == kept.cells.end();
+    }
+    CHECK(!changed.empty() && far > 10 && far_changed == 0);
+    std::printf("C24 hot spot, Default Grade: largest step %.2f without the limit (%zu cells), %.2f with 2 (%zu cells)\n",
+                largest_step(free_), free_.cells.size(), largest_step(kept), kept.cells.size());
+  }
+  block("2 Default Grade, stress");
+
+  {  // 3. The same with Grade to shape and a narrow band in place of the stress: a plate 89 long, so the end cubes
+     // overhang its outline by 3.5 mm; band 8: the inner half of an end cube is too near the outline for a 4 mm
+     // cell, so 2 mm cells stand against the 8 mm cube beside it.
+    PartMeasure pb(weld_mesh(box(89, 24, 8)));
+    DomainSpec bs;
+    bs.bead_mm = 0.2;
+    bs.regions = {face_region(1, Role::Lattice, {44.5, 12, 8}, {0, 0, -1}, 12, 44.5, 8)};
+    Domain db(pb, bs);
+    CellSpec band;
+    band.cell_max_mm = 8;
+    band.grade_to_shape = true;
+    band.band_mm = 8;
+    const Layout free_ = lay_cells(db, band), kept = lay_cells(db, with(band, 2));
+    CHECK(step_breaks(free_, 3.9) > 0);
+    CHECK(step_breaks(kept, 2.0) == 0);
+    CHECK(kept.solid.size() <= free_.solid.size() && kept.cells.size() > free_.cells.size());
+    std::printf("C24 band, Default Grade: largest step %.2f without the limit (%zu cells), %.2f with 2 (%zu cells)\n",
+                largest_step(free_), free_.cells.size(), largest_step(kept), kept.cells.size());
+  }
+  block("3 Default Grade, band");
+
+  {  // 4. Stepped with max_step 2 and with 3: the rule holds for every pair; with 3 at least one cell is larger.
+    const Layout free_ = lay_cells(d, with(off, 0, Algorithm::Stepped));
+    const Layout two = lay_cells(d, with(off, 2, Algorithm::Stepped)), three = lay_cells(d, with(off, 3, Algorithm::Stepped));
+    CHECK(step_breaks(free_, 3.0) > 0);
+    CHECK(step_breaks(two, 2.0) == 0 && step_breaks(three, 3.0) == 0);
+    int larger = 0, smaller = 0, grew = 0;   // grew: points in a larger cell with a limit than without
+    for (double x = 0.3; x < 96; x += 0.5)
+      for (double y = 0.3; y < 24; y += 0.5)
+        for (double z = 0.3; z < 8; z += 1.0) {
+          const double a = size_holding(two, {x, y, z}), b = size_holding(three, {x, y, z});
+          const double f0 = size_holding(free_, {x, y, z});
+          grew += a > f0 + 1e-9 || b > f0 + 1e-9;
+          larger += b > a + 1e-9;
+          smaller += b < a - 1e-9;
+        }
+    CHECK(larger > 0 && grew == 0);
+    std::printf("C24 Stepped: points in a larger cell with a limit than without: %d\n", grew);
+    CHECK(two.solid.size() <= free_.solid.size() && three.solid.size() <= free_.solid.size());
+    std::printf("C24 hot spot, Stepped: largest step %.2f free (%zu cells), %.2f with 2 (%zu), %.2f with 3 (%zu); "
+                "points in a larger cell with 3 than with 2: %d (in a smaller: %d)\n",
+                largest_step(free_), free_.cells.size(), largest_step(two), two.cells.size(), largest_step(three),
+                three.cells.size(), larger, smaller);
+  }
+  block("4 Stepped");
+
+  {  // 5. 1.5 on Default Grade is held at 2: the layout is the max_step 2 layout. (Stepped keeps 1.5; nothing under 1.)
+    CHECK(step_held(with(off, 1.5)) == 2.0 && step_held(with(off, 3)) == 3.0);
+    CHECK(step_held(with(off, 1.5, Algorithm::Stepped)) == 1.5 && step_held(with(off, 0.5, Algorithm::Stepped)) == 1.0);
+    CHECK(same_layout(lay_cells(d, with(off, 1.5)), lay_cells(d, with(off, 2))));
+    CHECK(!same_layout(lay_cells(d, with(off, 1.5)), lay_cells(d, off)));   // and it is a limit, not none
+    // Through a session: step_held_at is the value used, 0 when none was asked.
+    int L = 0, square = 0, sideA = 0, sideB = 0;
+    Session session(plate_with_L_face(&L, &square, &sideA, &sideB));
+    Settings st;
+    st.min_strut_lines = kFewestStrutLines;
+    st.regions = {{1, Role::Lattice, {square}, 6.0, 0.0}};
+    st.bead_mm = 0.2;
+    st.cells.cell_max_mm = 6;
+    st.bars = false;
+    CHECK(session.lay(st).step_held_at == 0.0);
+    st.cells.max_step = 1.5;
+    const Outcome a = session.lay(st);
+    st.cells.max_step = 2.0;
+    const Outcome b = session.lay(st);
+    CHECK(a.step_held_at == 2.0 && b.step_held_at == 2.0 && a.layout.cells == b.layout.cells);
+    st.cells.algorithm = Algorithm::Stepped;
+    st.cells.max_step = 2.5;
+    CHECK(session.lay(st).step_held_at == 2.5);
+  }
+  block("5 held at 2");
+
+  {  // 6. Nothing goes solid: the pocket part of test_cells_by_stress (4) at a 0.2 mm
+     // line, the stress a step at x = 56.7: the far end of the deep wall behind the pocket (cubes of 6.5 from x 50.125)
+     // goes down to its finest against a 6.5 mm cube. Every point held by a cell
+     // without the limit is held with it (on Default Grade within a millimetre of the surface: the D14 strip under a
+     // halved cube, as C22's test allows), and the layout's solid does not grow.
+    PartMeasure pp(weld_mesh(prism_any({{0, 0}, {60, 0}, {60, 20}, {0, 20}, {0, 9}, {50, 9}, {50, 4}, {0, 4}}, 0, 40)));
+    DomainSpec ps;
+    ps.regions = {face_region(1, Role::Lattice, {30, 0, 20}, {0, 1, 0}, 30, 30, 13)};
+    ps.bead_mm = 0.2;
+    Domain dp(pp, ps);
+    const auto f = stress_field({-2, -2, -2}, 1.0, 64, 24, 44, [](const Vec3& c) { return c.x > 56.7 ? 100.0 : 0.0; });
+    auto pr = dp.probe();
+    const PartMeasure::Probe surface = pp.probe();
+    for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
+      CellSpec plain;
+      plain.algorithm = algo;
+      plain.by_stress = true;
+      plain.demand = f;
+      plain.reference_mpa = 100;
+      const Layout lo_ = lay_cells(dp, plain), hi_ = lay_cells(dp, with(plain, 2, algo));
+      auto held = [&](const Layout& l, const Vec3& p) {
+        for (const Cell& c : l.cells) if (cell_holds(l, pr, c, p)) return true;
+        return false;
+      };
+      int held_off = 0, lost = 0, lost_deep = 0;
+      for (double x = 0.31; x < 60; x += 1.1)
+        for (double y = 0.27; y < 20; y += 0.9)
+          for (double z = 0.33; z < 40; z += 1.3) {
+            const Vec3 p{x, y, z};
+            if (!pr.where(p).lattice() || !held(lo_, p)) continue;
+            ++held_off;
+            if (held(hi_, p)) continue;
+            ++lost;
+            if (surface.depth(p) >= 1.0) ++lost_deep;
+          }
+      double v0 = 0, v1 = 0;
+      for (const Cell& c : lo_.solid) v0 += c.size * c.size * c.size;
+      for (const Cell& c : hi_.solid) v1 += c.size * c.size * c.size;
+      std::printf("C24 pocket part: largest step %.2f without the limit, %.2f with 2\n", largest_step(lo_), largest_step(hi_));
+      CHECK(step_breaks(lo_, 2.0) > 0 && step_breaks(hi_, 2.0) == 0);
+      CHECK(held_off > 1000 && lost_deep == 0);
+      if (algo == Algorithm::Stepped) CHECK(lost == 0);
+      CHECK(v1 <= v0 + 1e-9 && hi_.solid.size() <= lo_.solid.size());
+      std::printf("C24 pocket part, %s: %d points held without the limit; with 2, %d of them in no cell (%d a "
+                  "millimetre or more inside); cells %zu -> %zu, solid %zu -> %zu\n",
+                  algo == Algorithm::Stepped ? "Stepped" : "Default Grade", held_off, lost, lost_deep,
+                  lo_.cells.size(), hi_.cells.size(), lo_.solid.size(), hi_.solid.size());
+    }
+  }
+  block("6 nothing solid");
+
+  {  // 7. Let walls cut cells: the back plate of test_cells_by_stress (12) with a hot voxel by the boss: the rule
+     // holds and no cut cell is above the finest (C20).
+    PartMeasure pg(weld_mesh(prism({{0, 0}, {64, 0}, {64, 6}, {40, 6}, {40, 12}, {32, 12}, {32, 6}, {0, 6}}, 0, 64)));
+    DomainSpec gs;
+    gs.bead_mm = 0.2;
+    gs.regions = {face_region(1, Role::Lattice, {32, 0, 32}, {0, 1, 0}, 32, 32, 8)};
+    Domain dg(pg, gs);
+    const auto g = stress_field({-2, -2, -2}, 1.0, 68, 16, 68, [](const Vec3& c) {
+      return (c.x > 15 && c.x < 16 && c.z > 30 && c.z < 31) ? 100.0 : 0.0;
+    });
+    for (int a = 0; a < 2; ++a) {
+      const Algorithm algo = a == 0 ? Algorithm::DefaultGrade : Algorithm::Stepped;
+      CellSpec grid;
+      grid.algorithm = algo;
+      grid.one_grid = true;
+      grid.by_stress = true;
+      grid.demand = g;
+      grid.reference_mpa = 100;
+      const Layout free_ = lay_cells(dg, grid), kept = lay_cells(dg, with(grid, 2, algo));
+      const double finest = a == 0 ? 2.0 : 8.0 / 6.0;
+      int cut_large = 0;
+      for (const Cell& c : kept.cells) cut_large += c.cut && c.size > finest * (1 + 1e-9);
+      CHECK(step_breaks(free_, 2.0) > 0 && step_breaks(kept, 2.0) == 0 && cut_large == 0);
+      CHECK(kept.solid.size() <= free_.solid.size());
+      std::printf("C24 one grid, %s: %zu cells without the limit, %zu with 2\n", a == 0 ? "Default Grade" : "Stepped",
+                  free_.cells.size(), kept.cells.size());
+    }
+  }
+  block("7 Let walls cut cells");
+
+  {  // 8. A region's own max_step acts on that region only: the block of test_area_own, a hot voxel under each face.
+    PartMeasure pa(weld_mesh(box(46, 46, 16)));
+    DomainSpec as;
+    as.bead_mm = 0.2;
+    as.regions = {face_region(1, Role::Lattice, {23, 23, 16}, {0, 0, -1}, 23, 23, 8),
+                  face_region(2, Role::Lattice, {23, 23, 0}, {0, 0, 1}, 23, 23, 8)};
+    Domain da(pa, as);
+    const auto two_hot = stress_field({-2, -2, -2}, 1.0, 50, 50, 20, [](const Vec3& c) {
+      return (c.x > 22 && c.x < 23 && c.y > 22 && c.y < 23 && (std::fabs(c.z - 12.5) < 0.6 || std::fabs(c.z - 3.5) < 0.6))
+                 ? 100.0 : 0.0;
+    });
+    CellSpec P;
+    P.cell_max_mm = 8;
+    P.by_stress = true;
+    P.demand = two_hot;
+    P.reference_mpa = 100;
+    AreaOwn a;
+    a.max_step = 2.0;
+    AreaOwnMap m;
+    m[1] = a;
+    CHECK(a.any());
+    const Layout free_ = lay_cells(da, P), l = lay_cells(da, P, 0, &m);
+    CHECK(step_breaks(free_, 2.0, 1) > 0 && step_breaks(free_, 2.0, 2) > 0);
+    CHECK(step_breaks(l, 2.0, 1) == 0 && !(cells_of(l, 1) == cells_of(free_, 1)));
+    CHECK(cells_of(l, 2) == cells_of(free_, 2));
+    CHECK(region_cells(P, a).max_step == 2.0 && region_cells(P, AreaOwn{}).max_step == 0.0);
+    // And the reverse: the part asks 2, region 2 states 0 (none).
+    AreaOwn b;
+    b.max_step = 0.0;
+    AreaOwnMap mb;
+    mb[2] = b;
+    const Layout r = lay_cells(da, with(P, 2), 0, &mb);
+    CHECK(step_breaks(r, 2.0, 1) == 0 && cells_of(r, 2) == cells_of(free_, 2) && cells_of(r, 1) == cells_of(l, 1));
+  }
+  block("8 a region's own");
+
+  {  // 9. One thread and eight: the same layout (D18). Speed: about 2,000 cells, a hot spot, against no limit.
+    for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
+      const CellSpec on = with(off, 2, algo);
+      CHECK(same_layout(lay_cells(d, on, 1), lay_cells(d, on, 8)));
+    }
+    PartMeasure pb(weld_mesh(box(128, 128, 64)));
+    DomainSpec bs;
+    bs.bead_mm = 0.2;
+    bs.start = Start::AllLattice;
+    Domain db(pb, bs);
+    const auto spot = stress_field({0, 0, 0}, 2.0, 64, 64, 64, [](const Vec3& c) {
+      const double dx = c.x - 61, dy = c.y - 59, dz = c.z - 33;
+      return std::sqrt(dx * dx + dy * dy + dz * dz) < 10.0 ? 100.0 : 0.0;
+    });
+    CellSpec plain = off;
+    plain.cell_min_mm = 2;   // the whole part's base cell 8 mm (its halves end at 2)
+    plain.demand = spot;
+    const CellSpec limited = with(plain, 2);
+    auto best_ms = [&](const CellSpec& c, Layout* keep) {
+      double best = 1e300;
+      for (int k = 0; k < 3; ++k) {
+        const auto t0 = std::chrono::steady_clock::now();
+        Layout l = lay_cells(db, c);
+        best = std::min(best, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+        *keep = std::move(l);
+      }
+      return best;
+    };
+    (void)lay_cells(db, plain);   // the domain's first reading, not timed
+    Layout a, b;
+    const double t_free = best_ms(plain, &a), t_kept = best_ms(limited, &b);
+    std::printf("C24 speed: no limit %.2f ms (%zu cells, largest step %.0f); max_step 2 %.2f ms (%zu cells, %.2fx)\n",
+                t_free, a.cells.size(), largest_step(a), t_kept, b.cells.size(), t_kept / t_free);
+    CHECK(a.cells.size() > 1500 && a.cells.size() < 3000 && step_breaks(a, 2.0) > 0 && step_breaks(b, 2.0) == 0);
+    CHECK(same_layout(lay_cells(db, limited, 1), b));
+    CHECK(t_kept <= 2.0 * t_free);
+  }
+  block("9 threads and speed");
+}
+
 int main() {
+  test_size_step();
   test_area_own();
   test_cells_by_stress();
   test_by_stress();

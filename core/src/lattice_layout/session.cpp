@@ -122,6 +122,7 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
     out.cells_by_stress = stress_sizes_cells(cells);   // C22
     out.cells_no_stress = cells_want && (!cells.demand || cells.demand->empty() || !(cells.reference_mpa > 0.0));
     out.stress_reference_mpa = reference;
+    out.step_held_at = step_held(cells);   // C24
     out.layout = lay_cells(*domain_, cells, threads, own_or_none);
     unread_ = false;
     StrutSpec struts = settings.struts;

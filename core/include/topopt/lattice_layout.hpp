@@ -519,9 +519,22 @@ struct CellSpec {
   std::shared_ptr<const DemandField> demand;
   double reference_mpa = 0.0;
   double response = 1.0;
+  // C24, the largest step in cell size between neighbours (Manual control 4: "controls how abruptly stiffness
+  // changes"). A ratio; 0 (or less) = no limit, and the layout is today's, byte for byte. With a limit, inside one
+  // region's layout no cell is more than this many times the size of a cell of the same region and frame it shares
+  // any part of a face with (a cut cell counts as its whole cube). Where that would be broken the LARGER cell is
+  // divided as its own ladder divides it (Default Grade halves, Stepped packs), again until the rule holds or the cell
+  // is the finest its ladder allows: the finest always stands. It only ever makes cells smaller, and nothing goes solid
+  // for it. A limit below the ladder's smallest step cannot be met: on Default Grade a value under 2 is held at 2, and
+  // no limit is under 1 (step_held). Across a seam between two regions, or between two frames, the grids do not line
+  // up and the rule is not applied. Uniform has one size and nothing to divide: the limit does not act there.
+  double max_step = 0.0;
 };
 // C22: is cell size by stress applied to a layout laid with `spec` (by_stress on and none of its OFF list)?
 bool stress_sizes_cells(const CellSpec& spec);
+// C24: the limit a layout laid with `spec` keeps: 0 when none is asked (max_step <= 0); else max_step held at the
+// ladder's smallest step (2 on Default Grade) and never under 1.
+double step_held(const CellSpec& spec);
 
 // C23, R19 (the app's area tabs; Manual: "each can be set for the part or per zone or region"): a Lattice region's
 // own cell and strut settings. Each value stated here is the region's own; what is not stated, it takes from the
@@ -545,10 +558,12 @@ struct AreaOwn {
   // By stress, for the struts and for cell size by stress alike: the exponent (held to 0.25 .. 4), and the reference.
   // A reference above 0 is the region's own; 0 or not stated takes the part's resolved one.
   std::optional<double> response, reference_mpa;
+  // C24: the largest size step between neighbouring cells of this region (CellSpec::max_step).
+  std::optional<double> max_step;
   bool any() const {
     return algorithm || cell_mm || cell_max_mm || cell_min_mm || min_cells_across || grade_to_shape || band_mm ||
            band_cell_mm || cells_by_stress || by_stress || dial || dial_light || dial_heavy || width_mm ||
-           width_light_mm || width_heavy_mm || strength || response || reference_mpa;
+           width_light_mm || width_heavy_mm || strength || response || reference_mpa || max_step;
   }
 };
 // The regions' own settings, by region id. A region not listed takes the part's in everything.
@@ -1084,6 +1099,9 @@ struct Outcome {
   // The one stress reference resolved for this lay (the stated one or the part's own), read by the cells and the
   // struts alike; 0 when neither asked for one (no field, or neither by stress) or the part's own is 0.
   double stress_reference_mpa = 0.0;
+  // C24: the part's size-step limit this layout kept (step_held of the part's cells: a value under the ladder's
+  // smallest step is held there, 2 on Default Grade); 0 when none was asked. A region's own limit is not reported here.
+  double step_held_at = 0.0;
 };
 
 class Session {

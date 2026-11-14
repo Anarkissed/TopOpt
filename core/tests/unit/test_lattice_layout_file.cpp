@@ -825,7 +825,45 @@ static void test_region_own_key() {
               plain.layout.cells.size());
 }
 
+// C24, the largest size step between neighbouring cells: the layout key "max_step" reaches CellSpec::max_step, and a
+// region's own in "region_own"; the file's layout reports step_held_at (1.5 on Default Grade is held at 2; 0 when none
+// was asked).
+static void test_max_step_key() {
+  std::string text = kBlockJob;
+  const std::string at = "\"algorithm\": \"uniform\"";
+  text.replace(text.find(at), at.size(), "\"algorithm\": \"default_grade\", \"max_step\": 1.5");
+  FileJob job;
+  bool parsed = true;
+  try { job = parse_file_job(text); } catch (const FileJobError& e) { parsed = false; std::printf("  (%s)\n", e.what()); }
+  CHECK(parsed && job.settings.cells.max_step == 1.5);
+  CHECK(parse_file_job(kBlockJob).settings.cells.max_step == 0.0);   // none unless asked
+  std::string own = text;
+  const std::string tail = "\"min_cells_across\": 1";
+  own.replace(own.find(tail), tail.size(), "\"min_cells_across\": 1, \"region_own\": [{\"max_step\": 3}]");
+  bool own_parsed = true;
+  FileJob oj;
+  try { oj = parse_file_job(own); } catch (const FileJobError& e) { own_parsed = false; std::printf("  (%s)\n", e.what()); }
+  CHECK(own_parsed && oj.settings.regions.size() == 1 && oj.settings.regions[0].own.max_step == 3.0);
+  if (!parsed) return;
+  const std::string path = kTmp + "/lattice_file_max_step.stl";
+  std::remove(path.c_str());
+  const FileResult r = make_lattice_file(box_model(30, 30, 12), job, path);
+  if (!mesh_available()) {
+    check_refused(r, "mesh_unavailable", 3, path);
+    return;
+  }
+  CHECK(r.ok && r.cells > 0 && r.step_held_at == 2.0);
+  CHECK(has(file_result_json(r), "\"step_held_at\": 2,"));
+  FileJob plain = job;
+  plain.settings.cells.max_step = 0.0;
+  const FileResult p = make_lattice_file(box_model(30, 30, 12), plain, path);
+  CHECK(p.ok && p.step_held_at == 0.0 && has(file_result_json(p), "\"step_held_at\": 0,"));
+  std::printf("block, max_step 1.5: held at %g, %zu cells (%zu with none)\n", r.step_held_at, r.cells, p.cells);
+  std::remove(path.c_str());
+}
+
 int main() {
+  test_max_step_key();
   test_region_own_key();
   test_cells_by_stress_key();
   test_by_stress_file();

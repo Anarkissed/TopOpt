@@ -118,6 +118,7 @@ struct FileResult {
   std::size_t stubs = 0, joined = 0, dropped = 0, pieces = 0, adrift = 0, stepped_edges = 0;
   std::size_t thin_solid = 0;   // cut cells print rule P8 (f) made solid (Outcome::thin_solid)
   bool cells_by_stress = false; // cell size by stress was applied to the layout (Outcome::cells_by_stress, C22)
+  double step_held_at = 0.0;    // C24: the part's size-step limit kept (Outcome::step_held_at); 0 when none was asked
   double floor_cell_mm = 0.0, min_strut_mm = 0.0, open_look = 0.0, touch = 0.0;
   std::vector<int> empty_regions;
   // By stress (StrutReport): whether the struts were graded by stress, the reference used, the highest stress any
