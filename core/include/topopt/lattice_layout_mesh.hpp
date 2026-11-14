@@ -47,8 +47,12 @@ struct OpenSpace {
 };
 // `pitch_mm`: how finely each cell's shape is read (0.25 printed clean at a 0.45 mm line).
 // `stop` as in Session::lay: set, the reading is given up and LayCancelled is thrown.
+// Inside a cell, the points read one by one are put back together as few boxes as hold them
+// exactly (neighbouring equal runs in a row, then equal rows); `merge` false leaves every
+// run down a column a box of its own (the same open space, in many more boxes: for the test
+// that holds the two the same).
 OpenSpace read_open_space(const Domain& domain, const Layout& layout, double pitch_mm = 0.25,
-                          int threads = 0, const std::atomic<bool>* stop = nullptr);
+                          int threads = 0, const std::atomic<bool>* stop = nullptr, bool merge = true);
 
 struct MeshSpec {
   int bar_sides = 12;         // a round strut is a bar of this many flat sides, of the same area

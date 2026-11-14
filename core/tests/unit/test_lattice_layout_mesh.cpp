@@ -5,6 +5,7 @@
 // asked, a flat strut is a bridge, and a stop flag gives the work up. Where the part's
 // surface cuts the cells on a slant or a curve, no crust of that surface is left over the
 // lattice, and nothing solid inside the part is opened (test_no_crust).
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
@@ -868,6 +869,126 @@ static void test_column_changes_down_its_depth() {
   }
 }
 
+// ── the open space in as few boxes as hold it ─────────────────────────────────
+// Inside a cell the points read one by one are put back together as few boxes as hold them:
+// equal runs of neighbouring columns, then equal rows. The open space is the same set of
+// points as with a box per run (every point of a 0.05 mm grid through the most-cut cubes
+// is open in both or in neither), no two boxes overlap more than before, the mesh holds the
+// same plastic to a part in a million, and it is far fewer boxes.
+static bool in_any(const std::vector<const OpenSpace::Box*>& v, double a, double b, double c) {
+  for (const OpenSpace::Box* x : v)
+    if (a > x->lo[0] && a < x->hi[0] && b > x->lo[1] && b < x->hi[1] && c > x->lo[2] && c < x->hi[2]) return true;
+  return false;
+}
+static long overlaps(const OpenSpace& o) {
+  long n = 0;
+  for (std::size_t i = 0; i < o.boxes.size(); ++i)
+    for (std::size_t j = i + 1; j < o.boxes.size(); ++j) {
+      const OpenSpace::Box &x = o.boxes[i], &y = o.boxes[j];
+      if (x.frame != y.frame) continue;
+      bool all = true;
+      for (int a = 0; a < 3 && all; ++a) all = std::min(x.hi[a], y.hi[a]) - std::max(x.lo[a], y.lo[a]) > 1e-9;
+      if (all) ++n;
+    }
+  return n;
+}
+static void merged_is_the_same(const char* what, const PartMeasure& pm, const Domain& d, const Laid& l) {
+  const OpenSpace each = read_open_space(d, l.layout, 0.25, 0, nullptr, false);
+  const OpenSpace merged = read_open_space(d, l.layout, 0.25);
+  CHECK(same_boxes(merged, read_open_space(d, l.layout, 0.25, 1)));   // the same boxes on one thread
+  CHECK(merged.boxes.size() < each.boxes.size());
+  // The most-cut cubes: those with the most runs of their own that end inside the cube.
+  std::vector<std::pair<std::size_t, std::size_t>> cut;   // (boxes in the cube, cell)
+  for (std::size_t ci = 0; ci < l.layout.cells.size(); ++ci) {
+    const Cell& c = l.layout.cells[ci];
+    std::size_t n = 0;
+    for (const OpenSpace::Box& x : each.boxes)
+      if (x.frame == c.frame && x.hi[2] - x.lo[2] < c.size - 1e-9 && x.lo[0] >= c.lo[0] - 1e-9 && x.hi[0] <= c.lo[0] + c.size + 1e-9 && x.lo[1] >= c.lo[1] - 1e-9 &&
+          x.hi[1] <= c.lo[1] + c.size + 1e-9 && x.lo[2] >= c.lo[2] - 1e-9 && x.hi[2] <= c.lo[2] + c.size + 1e-9) ++n;
+    cut.push_back({n, ci});
+  }
+  std::sort(cut.rbegin(), cut.rend());
+  long points = 0, differ = 0, open_points = 0;
+  for (std::size_t q = 0; q < std::min<std::size_t>(3, cut.size()); ++q) {
+    const Cell& c = l.layout.cells[cut[q].second];
+    auto near = [&](const OpenSpace& o) {
+      std::vector<const OpenSpace::Box*> v;
+      for (const OpenSpace::Box& x : o.boxes) {
+        bool meets = x.frame == c.frame;
+        for (int a = 0; a < 3 && meets; ++a) meets = x.hi[a] > c.lo[a] && x.lo[a] < c.lo[a] + c.size;
+        if (meets) v.push_back(&x);
+      }
+      return v;
+    };
+    const auto ve = near(each), vm = near(merged);
+    // Off the 0.25 mm points' own faces by half a step, so no grid point lies on a box's face.
+    const int n = static_cast<int>(std::lround(c.size / 0.05));
+    for (int z = 0; z < n; ++z)
+      for (int j = 0; j < n; ++j)
+        for (int i = 0; i < n; ++i) {
+          const double a = c.lo[0] + 0.025 + 0.05 * i, b = c.lo[1] + 0.025 + 0.05 * j, h = c.lo[2] + 0.025 + 0.05 * z;
+          const bool oe = in_any(ve, a, b, h), om = in_any(vm, a, b, h);
+          ++points;
+          if (oe) ++open_points;
+          if (oe != om) ++differ;
+        }
+  }
+  const long ov_each = overlaps(each), ov_merged = overlaps(merged);
+  MeshReport re, rm, se, sm;
+  (void)build_mesh(pm, d, l.layout, l.bars, each, MeshSpec{}, &re);
+  (void)build_mesh(pm, d, l.layout, l.bars, merged, MeshSpec{}, &rm);
+  (void)build_mesh(pm, d, l.layout, Bars{}, each, MeshSpec{}, &se);     // the solid body alone
+  (void)build_mesh(pm, d, l.layout, Bars{}, merged, MeshSpec{}, &sm);
+  std::printf("merged (%s): %zu cells, %zu boxes a run each, %zu merged; %ld grid points in the 3 most-cut cubes (%ld open), "
+              "%ld differ; overlapping pairs %ld -> %ld; mesh %.6f -> %.6f mm3, the part less the open space %.6f -> %.6f mm3\n",
+              what, l.layout.cells.size(), each.boxes.size(), merged.boxes.size(), points, open_points, differ, ov_each, ov_merged,
+              re.mm3, rm.mm3, se.solid_mm3, sm.solid_mm3);
+  CHECK(open_points > 1000 && open_points < points);   // the cubes are really cut
+  CHECK(differ == 0);
+  CHECK(ov_merged <= ov_each);
+  CHECK(re.ok && rm.ok && se.ok && sm.ok);
+  CHECK(std::fabs(rm.mm3 - re.mm3) <= 1e-6 * re.mm3);
+  // The part less the open space, as carved (before the mesh is cleaned): the same shape. (The
+  // body's own mesh may differ by a few hundredths of a mm3 where two of its surfaces touch
+  // along a line: the writer draws such corners apart by microns, and which corners Manifold
+  // gives at one place depends on the boxes it was handed.)
+  CHECK(std::fabs(sm.solid_mm3 - se.solid_mm3) <= 1e-6 * se.solid_mm3);
+}
+static void test_open_space_merged() {
+  {  // The pocket of test_column_changes_down_its_depth, with and without its skin, and laid as one grid.
+    const double side = 24, tall = 14, p0 = 8, p1 = 16, floor_z = 10.5;
+    TriangleMesh pocket;
+    PartMeasure pm(weld_mesh(pocketed_block(side, tall, p0, p1, floor_z, &pocket)));
+    for (int v = 0; v < 3; ++v) {
+      DomainSpec s;
+      s.min_strut_lines = 2.0;
+      s.regions = {face_region(1, {side / 2, side / 2, tall}, {0, 0, -1}, side / 2, side / 2, 10.0, 0.0)};
+      if (v > 0) s.protect.push_back({1, pocket, 1.0});
+      Domain d(pm, s);
+      CellSpec cs;
+      cs.algorithm = Algorithm::Uniform;
+      cs.cell_max_mm = 8;
+      cs.min_cells_across = 1;
+      cs.one_grid = v == 2;
+      merged_is_the_same(v == 0 ? "a pocket" : v == 1 ? "a Protect skin round the pocket" : "the skinned pocket, one grid",
+                         pm, d, lay(d, cs));
+    }
+  }
+  {  // Cut cells with a slanted wall: the turned block with its 16-sided hole, the whole part lattice.
+    const Holed hb = holed_block();
+    PartMeasure pm(weld_mesh(hb.part));
+    DomainSpec s;
+    s.start = Start::AllLattice;
+    s.min_strut_lines = 2.0;
+    Domain d(pm, s);
+    CellSpec cs;
+    cs.algorithm = Algorithm::Uniform;
+    cs.cell_mm = 5.0;
+    cs.min_cells_across = 1;
+    merged_is_the_same("the turned block with a hole, whole part", pm, d, lay(d, cs));
+  }
+}
+
 int main() {
   if (!mesh_available()) {
     MeshReport rep;
@@ -882,6 +1003,7 @@ int main() {
   test_whole_part();
   test_no_crust();
   test_column_changes_down_its_depth();
+  test_open_space_merged();
   test_layers();
   test_printable();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
