@@ -2663,6 +2663,47 @@ static void test_slivers_are_taken_in() {
   CHECK(tally[7] > tally[6]);
 }
 
+// Protect skins of one depth, however many: the same lattice as ONE skin holding all their faces, and no slower for
+// their number (his v4 stand, 2026-11-13: 26 skins of 4 mm took 289 s a layout, the same faces as one skin 0.7 s).
+// Which skin a point is in is still told skin by skin.
+static void test_many_skins_of_one_depth() {
+  int L = 0, square = 0, sideA = 0, sideB = 0;
+  const StepModel model = plate_with_L_face(&L, &square, &sideA, &sideB);
+  PartMeasure pm(weld_mesh(model.mesh));
+  auto lay_with = [&](const std::vector<std::vector<int>>& skins, const std::vector<double>& depth, Bars* bars) {
+    DomainSpec s;
+    bool ok = false;
+    s.regions.push_back(region_from_face(model, square, 1, Role::Lattice, 8.0, 0.0, &ok));
+    for (std::size_t i = 0; i < skins.size(); ++i) s.protect.push_back({10 + static_cast<int>(i), faces_mesh(model, skins[i]), depth[i]});
+    Domain d(pm, s);
+    CellSpec cs;
+    cs.cell_max_mm = 4;
+    Layout l = lay_cells(d, cs);
+    set_struts(l, StrutSpec{});
+    *bars = lay_bars(l, d);
+    join_loose_bars(*bars, d, 0, &l);
+    return l;
+  };
+  Bars b3, b1, b2, b2m;
+  const Layout three = lay_with({{L}, {sideA}, {sideB}}, {1.5, 1.5, 1.5}, &b3);
+  const Layout one = lay_with({{L, sideA, sideB}}, {1.5}, &b1);
+  CHECK(!three.cells.empty() && three.cells == one.cells && three.solid == one.solid && same_bars(b3, b1));
+  // Two depths stay two: the deeper skin takes more of the lattice than the shallower one would.
+  const Layout two = lay_with({{L}, {sideA}, {sideB}}, {3.0, 1.5, 1.5}, &b2);
+  const Layout two_merged = lay_with({{L}, {sideA, sideB}}, {3.0, 1.5}, &b2m);
+  CHECK(two.cells == two_merged.cells && same_bars(b2, b2m) && !(two.cells == three.cells && same_bars(b2, b3)));
+  // And each skin is still named by its own number.
+  DomainSpec s;
+  bool ok = false;
+  s.regions.push_back(region_from_face(model, square, 1, Role::Lattice, 8.0, 0.0, &ok));
+  s.protect.push_back({10, faces_mesh(model, {L}), 1.5});
+  s.protect.push_back({11, faces_mesh(model, {sideA}), 1.5});
+  Domain d(pm, s);
+  auto pr = d.probe();
+  CHECK((pr.where({10, 40, 9.5}) == Where{Why::ProtectSkin, 10}));   // under the L, on the top
+  CHECK((pr.where({0.5, 10, 5}) == Where{Why::ProtectSkin, 11}));    // behind side A
+}
+
 // D14 for the struts: lattice space that no cell holds is solid, and a strut that reaches
 // it ends IN it, like in any other solid. (Found 2026-11-12: such an end was called loose
 // and dropped, and a lattice standing on such a spot was called adrift.)
@@ -3023,6 +3064,44 @@ static void test_session() {
   NEAR(least(session.lay(band)), 5.0, 1e-6);
 }
 
+// "Let walls cut cells" through the session (Settings::one_grid, his ruling 2026-11-14): a per-part switch, off unless
+// the user turns it on. Off is the layout as it was; on is CellSpec::one_grid's layout; on then off again gives back the
+// off layout exactly. It is a cell setting: changing it lays the cells again and never reads the part again. The
+// CellSpec's own one_grid is not read through the session: the switch is the Settings'.
+static void test_session_one_grid() {
+  int L = 0, square = 0, sideA = 0, sideB = 0;
+  const StepModel model = plate_with_L_face(&L, &square, &sideA, &sideB);
+  CHECK(!Settings{}.one_grid);
+  Session session(model);
+  Settings st;
+  st.min_strut_lines = 2.0;
+  st.regions = {{1, Role::Lattice, {square}, 6.0, 0.0}};
+  st.cells.cell_max_mm = 6;
+  st.cells.min_cells_across = 5;   // the wall must hold 5 across (C3-C5): off, a 6 mm wall cannot; one grid ignores it
+  auto same = [](const Outcome& x, const Outcome& y) {
+    return x.layout.cells == y.layout.cells && x.layout.solid == y.layout.solid && same_bars(x.bars, y.bars);
+  };
+  auto fresh = [&](const Settings& s) { return Session(model).lay(s); };
+  const Outcome off = session.lay(st);
+  CHECK(off.read_again);
+  CHECK(same(off, fresh(st)));
+  st.cells.one_grid = true;          // not read: the switch is the Settings'
+  const Outcome ignored = session.lay(st);
+  CHECK(!ignored.read_again && same(ignored, off));
+  st.cells.one_grid = false;
+  st.one_grid = true;
+  const Outcome on = session.lay(st);
+  CHECK(!on.read_again);             // a cell setting: laid again, the part not read again
+  CHECK(on.ms_read == 0.0 && on.ms_cells > 0.0);
+  CHECK(!(on.layout.cells == off.layout.cells));
+  CHECK(same(on, fresh(st)));
+  st.one_grid = false;
+  const Outcome again = session.lay(st);
+  CHECK(!again.read_again && same(again, off));
+  std::printf("session one grid: off %zu cells, %zu solid; on %zu cells, %zu solid\n", off.layout.cells.size(),
+              off.layout.solid.size(), on.layout.cells.size(), on.layout.solid.size());
+}
+
 // Stage E, cancel (362's bridge: his slider must not wait on a layout nobody wants). A stop flag given to lay() gives
 // the layout up: the answer is `cancelled` and empty, each threaded step throws instead of handing back a part-made
 // result, and NOTHING the domain or the session keeps is harmed: the same settings asked again give the layout a fresh
@@ -3379,7 +3458,253 @@ static void test_cells_curved_region() {
   CHECK(badly_covered(d, l, {0, 0, 0}, {60, 60, 10}, 1.3) == 0);
 }
 
+// CellSpec::one_grid (his ruling, 2026-11-14: an option for Aesthetic, off unless the user turns it on): one regular
+// grid per region that every surface, pocket, skin and the region's edge simply cuts. Off is the layout as it was.
+static void test_one_grid() {
+  // The cell of `region` that holds p, or -1; `n`, when given, receives how many do.
+  auto holder = [](const Domain& d, const Layout& l, const Vec3& p, int* n = nullptr) {
+    auto pr = d.probe();
+    int found = -1, count = 0;
+    for (std::size_t i = 0; i < l.cells.size(); ++i)
+      if (cell_holds(l, pr, l.cells[i], p)) { if (found < 0) found = static_cast<int>(i); ++count; }
+    if (n) *n = count;
+    return found;
+  };
+  long tally[6] = {0, 0, 0, 0, 0, 0};
+  {  // ONE cell size across a step in the wall. Behind the y = 0 face the material is 12 mm for x < 30 and 6 mm
+     // for x > 30. Today: 12 mm cells in the one wall, 6 mm cells in the other, each wall its own cells. One grid:
+     // 12 mm cells right across, the one over the step holding both walls, the ones past it cut by the far surface.
+    PartMeasure pm(weld_mesh(prism({{0, 0}, {60, 0}, {60, 6}, {30, 6}, {30, 12}, {0, 12}}, 0, 60)));
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, {30, 0, 30}, {0, 1, 0}, 30, 30, 12)};   // the whole face, 60 x 60
+    Domain d(pm, s);
+    const Vec3 thick{27, 3, 20}, thin{33, 3, 20};   // either side of the step, 3 mm apart
+    for (Algorithm algo : {Algorithm::Uniform, Algorithm::DefaultGrade, Algorithm::Stepped}) {
+      CellSpec off;
+      off.algorithm = algo;
+      off.cell_max_mm = 12;
+      const Layout before = lay_cells(d, off);
+      const int a0 = holder(d, before, thick), b0 = holder(d, before, thin);
+      CHECK(a0 >= 0 && b0 >= 0 && a0 != b0);
+      if (a0 >= 0 && b0 >= 0) {
+        NEAR(before.cells[a0].size, 12.0, 1e-9);                    // C2: each wall its own cell
+        NEAR(before.cells[b0].size, 6.0, 1e-9);
+        CHECK(before.cells[a0].wall >= 0 && before.cells[b0].wall >= 0 && before.cells[a0].wall != before.cells[b0].wall);
+      }
+      CHECK(before.walls.size() == 1 && before.walls[0].flat && before.walls[0].walls.size() == 2);
+      CellSpec on = off;
+      on.one_grid = true;
+      const Layout l = lay_cells(d, on);
+      CHECK(!l.cells.empty() && l.solid.empty());
+      CHECK(l.walls.size() == 1 && !l.walls[0].flat && l.walls[0].walls.empty());   // no wall map
+      NEAR(l.regions[0].base_cell_mm, 12.0, 1e-9);
+      int other = 0, off_face = 0, cut = 0, whole = 0;
+      for (const Cell& c : l.cells) {
+        if (std::fabs(c.size - 12.0) > 1e-9 || c.wall != -1 || c.region != 1) ++other;
+        if (std::fabs(c.lo[2]) > 1e-9) ++off_face;                  // C15: the face is a cell boundary; one layer
+        (c.cut ? cut : whole) += 1;
+      }
+      CHECK(other == 0 && off_face == 0);
+      CHECK(l.cells.size() == 5 * 5);                              // 60 / 12 each way, one layer
+      CHECK(whole == 2 * 5 && cut == 3 * 5);                       // whole: only x < 24; the rest are cut cells
+      int n = 0;
+      const int a1 = holder(d, l, thick, &n);
+      CHECK(a1 >= 0 && n == 1);
+      const int b1 = holder(d, l, thin, &n);
+      CHECK(b1 >= 0 && n == 1);
+      CHECK(a1 == b1);                                             // ONE cell holds both sides of the step
+      if (a1 >= 0) { CHECK(l.cells[a1].cut); NEAR(cell_centre(l, l.cells[a1]).x, 30.0, 1e-9); }   // astride the step
+      CHECK(badly_covered(d, l, {0, 0, 0}, {60, 12, 60}, 1.3) == 0);   // never held twice, nothing left out
+      // D18: the same on every run and for any number of threads.
+      const Layout again = lay_cells(d, on), one = lay_cells(d, on, 1), three = lay_cells(d, on, 3);
+      CHECK(l.cells == again.cells && l.cells == one.cells && l.cells == three.cells);
+      CHECK(l.solid == one.solid && l.regions[0].cells == one.regions[0].cells);
+      // The cells a wall must hold are not counted with the switch on: 1, 2 or 5 across, the same layout.
+      for (int across : {2, 5}) {
+        CellSpec k = on;
+        k.min_cells_across = across;
+        CHECK(lay_cells(d, k).cells == l.cells);
+      }
+      // Off is the layout as it was: asked again after the one grid was laid in the same domain, the same bytes.
+      const Layout back = lay_cells(d, off);
+      CHECK(back.cells == before.cells && back.solid == before.solid);
+      tally[0] += static_cast<long>(l.cells.size());
+      tally[1] += static_cast<long>(before.cells.size());
+    }
+  }
+  {  // A wall thinner than any cell that prints holds cut cells instead of going solid. The same part with 2 mm
+     // behind the face for x > 30 (the smallest cell at a 0.45 mm line is 2.37 mm), a region 9 mm deep.
+    PartMeasure pm(weld_mesh(prism({{0, 0}, {60, 0}, {60, 2}, {30, 2}, {30, 12}, {0, 12}}, 0, 60)));
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, {30, 0, 30}, {0, 1, 0}, 30, 30, 9)};
+    Domain d(pm, s);
+    auto pr = d.probe();
+    const Vec3 thin{45, 1, 20};
+    CHECK(pr.where(thin) == (Where{Why::Lattice, 1}));
+    for (Algorithm algo : {Algorithm::Uniform, Algorithm::DefaultGrade, Algorithm::Stepped}) {
+      CellSpec off;
+      off.algorithm = algo;
+      off.cell_max_mm = 9;
+      const Layout before = lay_cells(d, off);
+      CHECK(holder(d, before, thin) < 0);                          // D8: today the thin wall is solid
+      int thin_cells = 0;
+      for (const Cell& c : before.cells) if (cell_centre(before, c).x > 30.5) ++thin_cells;
+      CHECK(thin_cells == 0 && !before.solid.empty());
+      CellSpec on = off;
+      on.one_grid = true;
+      const Layout l = lay_cells(d, on);
+      int n = 0;
+      const int at = holder(d, l, thin, &n);
+      CHECK(at >= 0 && n == 1);
+      if (at >= 0) { NEAR(l.cells[at].size, 9.0, 1e-9); CHECK(l.cells[at].cut); }
+      int other = 0;
+      for (const Cell& c : l.cells) if (std::fabs(c.size - 9.0) > 1e-9) ++other;
+      CHECK(other == 0 && l.solid.empty());
+      CHECK(badly_covered(d, l, {0, 0, 0}, {60, 12, 60}, 1.3) == 0);
+      // Its struts: pieces of the 9 mm cell's own struts, cut by the wall's far side and landing on nothing loose.
+      if (algo == Algorithm::Uniform) {
+        Layout with = l;
+        set_struts(with, StrutSpec{});
+        const Bars bars = lay_bars(with, d);
+        int in_thin = 0, outside = 0;
+        for (const Bar& b : bars.bars) {
+          const Vec3 m{0.5 * (b.a.x + b.b.x), 0.5 * (b.a.y + b.b.y), 0.5 * (b.a.z + b.b.z)};
+          if (m.x > 31 && m.y < 2.0 + 1e-6) ++in_thin;
+          if (pr.part().depth(b.a) < -1e-6 || pr.part().depth(b.b) < -1e-6) ++outside;
+        }
+        CHECK(in_thin > 50 && outside == 0);
+        tally[2] += in_thin;
+        tally[3] += static_cast<long>(bars.stubs);
+      }
+    }
+  }
+  {  // Grade to shape with one grid: the cells step down toward the region's own outline (G1-G3, G10) and the
+     // base cell is what stands away from it, across the step in the wall as well. A 96 x 96 face, 12 mm behind it
+     // for x < 42 and 6 mm for x > 42 (the middle of a base cell), band 12.
+    PartMeasure pm(weld_mesh(prism({{0, 0}, {96, 0}, {96, 6}, {42, 6}, {42, 12}, {0, 12}}, 0, 96)));
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, {48, 0, 48}, {0, 1, 0}, 48, 48, 12)};
+    Domain d(pm, s);
+    const double band = 12.0;
+    auto edge = [](const Vec3& m) { return std::max(0.0, std::min(std::min(m.x, 96 - m.x), std::min(m.z, 96 - m.z))); };
+    for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
+      CellSpec on;
+      on.algorithm = algo;
+      on.cell_max_mm = 12;
+      on.grade_to_shape = true;
+      on.band_mm = band;
+      on.one_grid = true;
+      const Layout l = lay_cells(d, on);
+      CHECK(l.solid.empty());                                       // G6: the band makes nothing solid
+      CHECK(badly_covered(d, l, {0, 0, 0}, {96, 12, 96}, 1.9) == 0);
+      double f = 12.0;
+      for (const Cell& c : l.cells) f = std::min(f, c.size);
+      // The smallest cell each ladder allows at a 0.45 mm line (floor 2.37 mm): halves stop at 3, fifths at 2.4.
+      const double finest = algo == Algorithm::DefaultGrade ? 3.0 : 12.0 / 5.0;
+      if (algo == Algorithm::DefaultGrade) NEAR(f, finest, 1e-9);
+      CHECK(f >= finest - 1e-9 && f >= l.floor_cell_mm && f < 12.0 - 1e-9);   // never under the layout's floor
+      int breaks_rule = 0, large_cut = 0, at_edge = 0, at_edge_large = 0, small_inside = 0;
+      std::map<long, double> inner, all;   // size (microns) -> the cubes' volume: beyond the band, everywhere
+      for (const Cell& c : l.cells) {
+        const Vec3 m = cell_centre(l, c);
+        const double dist = edge(m), h = 0.5 * c.size;
+        if (c.size > finest * (1 + 1e-9) && dist < band * (c.size - finest) / (12.0 - finest) - 1e-6) ++breaks_rule;
+        if (c.size > finest * (1 + 1e-9) &&
+            (m.x - h < -1e-6 || m.x + h > 96 + 1e-6 || m.z - h < -1e-6 || m.z + h > 96 + 1e-6)) ++large_cut;
+        if (dist <= h + 1e-9) { ++at_edge; if (c.size > f + 1e-9) ++at_edge_large; }
+        if (dist >= band + 0.5 * (12.0 - c.size) && std::fabs(c.size - 12.0) > 1e-9) ++small_inside;
+        all[std::lround(c.size * 1e3)] += c.size * c.size * c.size;
+        if (dist >= band) inner[std::lround(c.size * 1e3)] += c.size * c.size * c.size;
+      }
+      CHECK(breaks_rule == 0);          // G1: a larger cell only where its centre is far enough in
+      CHECK(large_cut == 0);            // G10: only the finest crosses the outline
+      CHECK(at_edge > 50 && at_edge_large == 0);   // G3: the cells at the outline are the smallest
+      CHECK(small_inside == 0);         // G2: beyond the band, the region's own cell
+      CHECK(all.size() >= 3);           // it steps: at least three sizes
+      // Away from the outline the largest cell is the most common by volume: in fact the only one.
+      double inner_total = 0.0;
+      for (const auto& kv : inner) inner_total += kv.second;
+      CHECK(inner_total > 0.0 && inner.count(12000) == 1 && inner[12000] > 0.5 * inner_total);
+      CHECK(inner[12000] >= 6 * 6 * 1728.0 - 1e-6);   // the 6 x 6 base cells whose centres are a band inside
+      // ... and across the step in the wall, well inside the band: one base cell holds both walls.
+      int n = 0;
+      const int a = holder(d, l, {40, 3, 30}, &n);
+      CHECK(a >= 0 && n == 1);
+      const int b = holder(d, l, {44, 3, 30}, &n);
+      CHECK(b >= 0 && n == 1 && a == b);
+      if (a >= 0) NEAR(l.cells[a].size, 12.0, 1e-9);
+      const Layout one = lay_cells(d, on, 1);
+      CHECK(l.cells == one.cells && l.solid == one.solid);          // D18, on one thread
+      // With the band off: the base cell everywhere.
+      CellSpec flat = on;
+      flat.grade_to_shape = false;
+      const Layout plain = lay_cells(d, flat);
+      int not_base = 0;
+      for (const Cell& c : plain.cells) if (std::fabs(c.size - 12.0) > 1e-9) ++not_base;
+      CHECK(plain.cells.size() == 8 * 8 && not_base == 0 && plain.solid.empty());
+      tally[4] += static_cast<long>(l.cells.size());
+    }
+  }
+  {  // A Protect skin cuts the grid like any other surface: the cells start AT the face (not behind the skin, as
+     // they do wall by wall: D5), and no cell holds a point of the skin. A 12 mm slab, the face protected 1.2 mm.
+    TriangleMesh quad;
+    quad.vertices = {{0, 0, 20}, {40, 0, 20}, {40, 40, 20}, {0, 40, 20}};
+    quad.triangles = {{0, 1, 2}, {0, 2, 3}};
+    PartMeasure pm(weld_mesh(box(40, 40, 20)));
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, {20, 20, 20}, {0, 0, -1}, 20, 20, 12)};
+    s.protect = {{7, quad, 1.2}};
+    Domain d(pm, s);
+    CellSpec on;
+    on.algorithm = Algorithm::Uniform;
+    on.cell_max_mm = 8;
+    const Layout before = lay_cells(d, on);
+    on.one_grid = true;
+    const Layout l = lay_cells(d, on);
+    double first0 = 1e300, first1 = 1e300;
+    for (const Cell& c : before.cells) first0 = std::min(first0, c.lo[2]);
+    int top_whole = 0, under_whole = 0;
+    for (const Cell& c : l.cells) {
+      first1 = std::min(first1, c.lo[2]);
+      NEAR(c.size, 6.0, 1e-9);
+      if (!c.cut) (c.lo[2] < 1.0 ? top_whole : under_whole) += 1;
+    }
+    CHECK(top_whole == 0 && under_whole == 5 * 5);                // the skin cuts every cell of the top layer
+    NEAR(first0, 1.2, 1e-5);
+    NEAR(first1, 0.0, 1e-9);
+    CHECK(l.cells.size() == 7 * 7 * 2 && l.solid.empty());
+    int n = 0;
+    CHECK(holder(d, l, {20.3, 20.3, 19.4}, &n) < 0 && n == 0);     // in the skin: solid, in no cell
+    CHECK(holder(d, l, {20.3, 20.3, 18.6}, &n) >= 0 && n == 1);    // just behind it: lattice, in one
+    CHECK(badly_covered(d, l, {0, 0, 0}, {40, 40, 20}, 1.7) == 0);
+  }
+  {  // The whole part, and it applies there the same way: a 2 mm plate, All lattice, 8 mm cells. Today nothing fits
+     // and the plate is solid; with one grid it is 8 mm cells cut by both faces.
+    PartMeasure pm(weld_mesh(box(40, 40, 2)));
+    DomainSpec s;
+    s.start = Start::AllLattice;
+    Domain d(pm, s);
+    CellSpec cs;
+    cs.algorithm = Algorithm::Uniform;
+    cs.cell_mm = 8;
+    const Layout before = lay_cells(d, cs);
+    CHECK(before.cells.empty() && !before.solid.empty());
+    cs.one_grid = true;
+    const Layout l = lay_cells(d, cs);
+    int odd = 0;
+    for (const Cell& c : l.cells) if (std::fabs(c.size - 8.0) > 1e-9 || !c.cut || c.region != 0) ++odd;
+    CHECK(l.cells.size() == 5 * 5 && odd == 0 && l.solid.empty());
+    CHECK(badly_covered(d, l, {0, 0, 0}, {40, 40, 2}, 0.9) == 0);
+    CHECK(lay_cells(d, cs, 1).cells == l.cells);
+    tally[5] += static_cast<long>(l.cells.size());
+  }
+  std::printf("one grid: a 12 | 6 mm wall is %ld cells of 12 mm (wall by wall: %ld cells of 12 and 6); a 2 mm wall holds %ld "
+              "strut pieces (%ld stubs left out); with a band %ld cells; a 2 mm plate, all lattice, %ld cut cells\n",
+              tally[0] / 3, tally[1] / 3, tally[2], tally[3], tally[4], tally[5]);
+}
+
 int main() {
+  test_one_grid();
   test_cells_behind_a_protect_skin();
   test_thin_walls_follow_the_quilt_switch();
   test_cells_across_the_narrowest_width();
@@ -3394,10 +3719,12 @@ int main() {
   test_pieces();
   test_struts_end_in_no_cell_space();
   test_slivers_are_taken_in();
+  test_many_skins_of_one_depth();
   test_skin();
   test_stepped_edges();
   test_rim();
   test_session();
+  test_session_one_grid();
   test_session_cancel();
   test_cover();
   test_region_squares();

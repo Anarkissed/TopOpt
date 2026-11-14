@@ -95,7 +95,7 @@ Algorithm algorithm_from(const std::string& s, const std::string& where) {
 }
 
 // The bridge's LatticeLayoutSettings, key for key (lattice_layout_bridge.cpp, settings_from),
-// and one more that core's Settings has: small_cells_in_thin_walls.
+// and two more that core's Settings has: small_cells_in_thin_walls and one_grid ("Let walls cut cells").
 Settings settings_from(const json::Value& in, const std::string& w) {
   json::reject_unknown(
       in,
@@ -105,7 +105,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "protect_face_counts", "protect_faces", "topology", "algorithm", "cell_mm", "cell_max_mm",
        "cell_min_mm", "min_cells_across", "grade_to_shape", "band_mm", "band_cell_mm",
        "per_region", "dial", "dial_region", "dial_value", "strut_width_mm", "allow_quilt",
-       "strength", "small_cells_in_thin_walls", "bars", "join_loose", "skin", "skin_width_mm",
+       "strength", "small_cells_in_thin_walls", "one_grid", "bars", "join_loose", "skin", "skin_width_mm",
        "skin_reach_cells", "drop_loose"},
       w);
   Settings s;
@@ -171,6 +171,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
   s.struts.allow_quilt = flag(in, "allow_quilt", s.struts.allow_quilt, w);
   s.struts.strength = num(in, "strength", s.struts.strength, w);
   s.small_cells_in_thin_walls = flag(in, "small_cells_in_thin_walls", s.small_cells_in_thin_walls, w);
+  s.one_grid = flag(in, "one_grid", s.one_grid, w);
 
   s.bars = flag(in, "bars", s.bars, w);
   s.join_loose = flag(in, "join_loose", s.join_loose, w);
@@ -479,12 +480,14 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
       return done();
     }
     if (!r.made.print_clean && !job.options.keep_if_not_clean) {
-      const std::size_t mid = r.made.layers.mid_air.size(), one = r.made.layers.one_ended.size();
-      char line[256];
+      const std::size_t mid = r.made.layers.mid_air.size(), one = r.made.layers.one_ended.size(),
+                        far = r.made.layers.long_bridges.size();
+      char line[320];
       std::snprintf(line, sizeof line,
-                    "After %d tries the lattice still has %zu place%s that would start printing in mid-air and %zu overhang%s "
-                    "held at one end only. No file was made. A larger cell or a Protect skin near those places usually fixes it.",
-                    r.made.builds, mid, mid == 1 ? "" : "s", one, one == 1 ? "" : "s");
+                    "After %d tries the lattice still has %zu place%s that would start printing in mid-air, %zu overhang%s "
+                    "held at one end only and %zu bridge%s longer than a printer can span. No file was made. A larger cell "
+                    "or a Protect skin near those places usually fixes it.",
+                    r.made.builds, mid, mid == 1 ? "" : "s", one, one == 1 ? "" : "s", far, far == 1 ? "" : "s");
       refuse(r, kWouldNotPrint, line);
       return done();
     }
@@ -656,10 +659,10 @@ std::string file_result_json(const FileResult& r) {
     const LayerReport& l = r.made.layers;
     std::snprintf(b, sizeof b,
                   "  \"print_check\": {\"bed_contact_mm2\": %.9g, \"midair_starts\": %d, \"clean\": %s, \"passes\": %d,\n"
-                  "    \"one_ended\": %llu, \"longest_bridge_reach_mm\": %.9g, \"bed_flat\": %s, \"first_layer_mm2\": %.9g, "
+                  "    \"one_ended\": %llu, \"long_bridges\": %llu, \"longest_bridge_reach_mm\": %.9g, \"bed_flat\": %s, \"first_layer_mm2\": %.9g, "
                   "\"sloped_underside_mm2\": %.9g,\n    \"layers\": %d, \"thin_islands\": %llu, \"thin_layers\": %d,\n",
                   r.made.bed_contact_mm2, r.made.midair_starts, r.made.print_clean ? "true" : "false", r.made.builds,
-                  count(l.one_ended.size()), l.longest_reach_mm, l.bed_flat() ? "true" : "false", l.first_layer_mm2,
+                  count(l.one_ended.size()), count(l.long_bridges.size()), l.longest_reach_mm, l.bed_flat() ? "true" : "false", l.first_layer_mm2,
                   l.sloped_mm2, l.layers, count(l.thin_islands), l.thin_layers);
     o += b;
     o += "    \"found_per_pass\": [";

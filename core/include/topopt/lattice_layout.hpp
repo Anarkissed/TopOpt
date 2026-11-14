@@ -320,6 +320,7 @@ class Domain {
     // no farther than `limit`. Negative when none begins that near.
     double skin_ahead(const Vec3& p, const Vec3& dir, double limit) const;
     std::vector<MeshDistance> skins_;
+    std::vector<MeshDistance> skin_groups_;   // one per depth (Domain::skin_groups_)
     std::vector<MeshDistance> shells_;   // one per region, empty mesh for a prism
   };
   Probe probe() const { return Probe(*this); }
@@ -372,6 +373,12 @@ class Domain {
   DomainSpec spec_;
   const std::atomic<bool>* stop_ = nullptr;
   std::vector<Near> near_skin_;    // one per Protect skin, within its depth
+  // Every Protect skin of one depth as ONE surface (the distance to several surfaces is the least of their
+  // distances, so nothing an answer is made of changes). How far a point is from "any skin's solid" is then one
+  // question per depth, not one per skin: his v4 stand has 26 skins of 4 mm, and each lay took 289 s against 0.7 s
+  // with them sent as one group (362's measure, 2026-11-13). WHICH skin a point is in is still asked skin by skin.
+  struct SkinGroup { double depth_mm = 0.0; TriangleMesh faces; };
+  std::vector<SkinGroup> skin_groups_;
   std::vector<Near> near_shell_;   // one per region (empty for a prism), within its depth
   // For a flat region: squares of its face that lie wholly inside its edge, or wholly
   // outside it (the distance to the edge at a square's middle is more than half the
@@ -462,6 +469,27 @@ struct CellSpec {
   //                floor above. Held at that floor when it asks for less.
   bool allow_quilt = false;
   double band_cell_mm = 0.0;
+  // "LET WALLS CUT CELLS" (his name for the option, 2026-11-14), off by default. On: one even grid that walls and
+  // pockets cut through. Off: today's whole cells fitted to walls. Aesthetic only; Structural never shows it.
+  // (His words, 2026-11-12: "Why can't the pocket just cut the lattices wherever they are positioned and then a
+  // skin connect all the struts that are left disconnected in a pattern?"; his ruling, 2026-11-14: "I think
+  // aesthetic should allow the one grid cut wherever. Not structural.", "BUT it should be an option available to
+  // the user to select".) A per-part option, OFF unless the user turns it on; off, the layout is what it was, byte
+  // for byte. Core does not know the stage, so whoever offers the switch offers it in Aesthetic and nowhere else
+  // (a certified wall must hold its cells: C5).
+  // On: each region is ONE regular grid of its base cell, and every surface, pocket, hole, Protect skin and the
+  // region's own edge simply CUTS it (D3). A flat region's grid is in its face's own frame, the face a cell boundary
+  // (C15 at the face), its base cell the largest size not above Max cell that divides the region's depth; it is laid
+  // in one frame like a curved region, not wall by wall, and no wall map is read. A curved region and the whole
+  // part keep the grid they had. In every region NO cell is refused for the material it stands in: the wall-fit
+  // test (C2) and the cells a wall must hold (C3-C5) are not applied, and `min_cells_across` is not read at all.
+  // Any cube holding lattice of its region is a cut cell, whose shape is that lattice (cell_holds).
+  // Grade to shape is as before (G1-G7, G10), from the region's own outline; the smaller sizes come from the same
+  // ladders and never go under the layout's floor cell. With no band every cell is the base cell.
+  // What it gives up: C2/C12 (a cell may be wider than its wall), C15 at a wall's FAR side and at a Protect skin's
+  // inner side (those cut through cells), and D8 by cell size (a thin wall is cut cells, not solid; the Domain's own
+  // `min_wall_mm` still makes solid). A cut piece too small to hold a strut longer than its own width has none.
+  bool one_grid = false;
 };
 
 // Cells are cubes on a frame: world position = origin + ax[0]*a + ax[1]*b + ax[2]*c.
@@ -821,7 +849,7 @@ struct Settings {
   std::vector<RegionAsk> regions;
   std::vector<ProtectAsk> protect;
   // The cells, the struts, and what happens to cut ends.
-  CellSpec cells;          // its allow_quilt is not read: the switch is struts.allow_quilt
+  CellSpec cells;          // its allow_quilt and one_grid are not read: the switches are struts.allow_quilt, one_grid
   StrutSpec struts;
   // Per part, OFF unless he turns it on (his words, 2026-11-12: "I definitely want it as a per-part choice. Especially
   // in the app itself."). A wall too thin for a cell that the thinnest strut leaves open (R5, C14) is normally solid.
@@ -830,6 +858,12 @@ struct Settings {
   // cell keeps the open look. Denser than the open look in those small cells, never touching. (His v2 stand, printed
   // with two-line struts: its wing edges, socket walls and spotface walls.) Allow quilt on makes this moot.
   bool small_cells_in_thin_walls = false;
+  // "Let walls cut cells" (his ruling 2026-11-14): per part, OFF unless the user turns it on. The session
+  // hands it to the cells as CellSpec::one_grid (see there): on, each region is one even grid that every wall, pocket,
+  // hole, Protect skin and the region's own edge cuts; off, the layout is what it was, byte for byte. Core does not
+  // know Aesthetic from Structural: the app offers the switch in Aesthetic only. A cell setting: changing it lays the
+  // cells again and does not read the part again.
+  bool one_grid = false;
   bool bars = true;              // false: cells and strut widths only
   bool join_loose = true;        // S5
   bool skin = false;             // Finish Skin (S3)
