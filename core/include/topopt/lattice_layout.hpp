@@ -778,13 +778,16 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads = 0);
 // is solid. Nothing can stand in it (every strut through it is shorter than its own width and is dropped as a stub),
 // and left open it is a slot under material that no printer can print over (his v3 stand: a row of cut cells
 // 0.49 mm thick under the front wall's solid cap left an empty layer 0.09 mm thin, 40 x 6 mm, under the cap).
-// Asked of every CUT cell whose cube lies against solid: read a hair inside its faces, edges and corners and at its 27
-// points, none is air and at least one is inside the part and lattice of no region. (A cube holding only lattice,
-// its own and other regions', is a seam and is left alone, whether or not the other region laid cells there.) Its
-// lattice as cell_holds_at gives it (what it takes in from another region counts), along each of the three axes of
-// its frame, on a 5 x 5 grid of lines through the cube, the longest unbroken run on a line read at steps of a quarter
-// of the strut; the largest run.
-// Thinner than the cell's strut along any axis: the cell leaves `layout.cells` and joins `layout.solid` (D14), so
+// Asked of every CUT cell whose cube holds no AIR (read a hair inside its faces, edges and corners and at its 27
+// points). Its lattice as cell_holds_at gives it (what it takes in from another region counts) is read along each of
+// the three axes of its frame, on a 5 x 5 grid of lines through the cube, the longest unbroken run on a line found at
+// steps of a quarter of the strut and grown to its true ends; when no grid line finds any, on the lines through each
+// of the cube's own sample points that is held. A cell is thin along an axis when no run reaches its strut, and lies
+// against solid along it when, on more than half of the lines that found a run, a hair (0.02 mm) past at least one
+// end of the run is inside the part and lattice of no region. A piece between lattice on both sides (a seam between
+// two regions, or between two walls of one region) is left open however thin: a sheet of solid inside lattice is
+// worse than a gap. Thin and against solid along any axis:
+// the cell leaves `layout.cells` and joins `layout.solid` (D14), so
 // the preview's map, the bars and the file see it solid without knowing this rule, with its reason (NoCell::Sliver:
 // have = its thickness, need = its strut); struts it shared with a neighbour are the neighbour's. A piece facing air,
 // or as thick as its strut, is left alone. Call it after set_struts and

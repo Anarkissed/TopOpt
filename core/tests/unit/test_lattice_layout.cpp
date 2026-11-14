@@ -3652,15 +3652,86 @@ static void test_thin_cut_pieces() {
     CHECK((across == 1 ? other > 0 : other == 0));
     CHECK(top_row(as_laid, 27.0) > 8 && in_row == 0);
   }
+  // (d, one region) A seam between two walls of ONE flat region. A Protect skin 4.3 mm deep on the back face right
+  // of x 15 ends the lattice's column there at 7.7 mm (D5); left of it the column is the region's 8 mm: two walls.
+  // A cell of the left wall placed over the line between them holds a sliver 0.3 mm thin along x, with the right
+  // wall's lattice beyond it and the skin's solid beyond only behind 7.7 mm (one line in five). Left open.
+  {
+    PartMeasure pm(weld_mesh(slot_block()));
+    DomainSpec s;
+    s.regions = {slot_front(-2.6)};
+    MeshSink back;
+    back.add_triangle({15, 12, -1}, {31, 12, -1}, {31, 12, 31});
+    back.add_triangle({15, 12, -1}, {31, 12, 31}, {15, 12, 31});
+    s.protect = {{1, back.mesh, 4.3}};
+    Domain d(pm, s);
+    auto pr = d.probe();
+    Layout l = lay_cells(d, slot_cells());
+    set_struts(l, slot_struts(kSlotStrut));
+    const WallMap& walls = l.walls[0];
+    const Reading left = read_at(pr, l.frames[0], walls, 0.0, -5.0, 7.0), right = read_at(pr, l.frames[0], walls, 0.0, 5.0, 7.0);
+    CHECK(left.wall >= 0 && right.wall >= 0 && left.wall != right.wall);
+    double edge = -5.0;   // where the left wall ends at 7 mm deep (frame x, origin x 15)
+    while (edge < 5.0 && read_at(pr, l.frames[0], walls, 0.0, edge + 0.01, 7.0).wall == left.wall) edge += 0.01;
+    Cell c;
+    for (const Cell& x : l.cells)
+      if (x.region == 1 && x.wall == left.wall) { c = x; break; }
+    c.lo[0] = -2.0;   // z 13 to 15 (the frame's first axis is z, its second x, its third the depth; origin x 15, z 15)
+    c.lo[1] = edge - 0.3;
+    c.lo[2] = 6.0;
+    c.size = 2.0;
+    c.cut = true;
+    c.strut = kSlotStrut;
+    Layout one = l;
+    one.cells = {c};
+    one.absorb = false;
+    one.index.reset();
+    CHECK(cell_holds_at(one, pr, 0, -1.0, edge - 0.15, 7.0) && !cell_holds_at(one, pr, 0, -1.0, edge + 0.5, 7.0));
+    CHECK(pr.where(l.frames[0].at(-1.0, edge + 0.5, 7.9)).why == Why::ProtectSkin);   // a little solid at its end
+    CHECK(solidify_thin_cuts(one, d) == 0);
+  }
+  // (g) A piece the 5 x 5 lines miss: one cell of (a)'s corner, at the outline's far end (x 27.4) under the solid,
+  // moved a quarter millimetre up and along so it holds only 0.15 x 0.15 mm of lattice in its corner. No line of the
+  // grid finds it; the lines through its own held sample points do. Made solid.
+  {
+    PartMeasure pm(weld_mesh(slot_block()));
+    DomainSpec s;
+    s.regions = {slot_front(-2.6)};
+    Domain d(pm, s);
+    auto pr = d.probe();
+    Layout l = lay_cells(d, slot_cells());
+    set_struts(l, slot_struts(kSlotStrut));
+    std::size_t corner = l.cells.size();
+    for (std::size_t ci = 0; ci < l.cells.size(); ++ci) {
+      const Cell& c = l.cells[ci];
+      const Vec3 at = l.frames[static_cast<std::size_t>(c.frame)].at(c.lo[0], c.lo[1], c.lo[2]);
+      if (c.cut && std::fabs(at.z - 27) < 1e-6 && std::fabs(at.x - 27) < 1e-6 && std::fabs(at.y - 2) < 1e-6) corner = ci;
+    }
+    CHECK(corner < l.cells.size());
+    if (corner < l.cells.size()) {
+      Layout one;
+      one = l;
+      one.cells = {l.cells[corner]};
+      one.cells[0].lo[0] += 0.25;   // the frame's first axis is z here, its second x
+      one.cells[0].lo[1] += 0.25;
+      one.absorb = false;
+      one.index.reset();
+      const Cell& c = one.cells[0];
+      CHECK(cell_holds_at(one, pr, 0, c.lo[0] + 0.05, c.lo[1] + 0.05, c.lo[2] + 1.0));
+      std::vector<ThinCut> found;
+      CHECK(solidify_thin_cuts(one, d, 0, &found) == 1 && found.size() == 1);
+      if (found.size() == 1) CHECK(found[0].thick_mm > 0.1 && found[0].thick_mm < 0.2);
+    }
+  }
   // (f) What the rule made solid is never opened again: a cube of ANOTHER region's frame that reaches over it does not
   // take its lattice in (D14b). The block of (a) latticed whole (the part's own frame, 8 mm cells, behind the front
-  // region from y 8), with a No lattice cap 1.5 mm deep on top: the front region's top row is cut 0.4 mm thick
+  // region from y 8), with a No lattice cap 2.6 mm deep on top: the front region's top row is cut 0.4 mm thick
   // against the cap, and the whole part's cubes (y 6 to 14) reach over its back end.
   {
     PartMeasure pm(weld_mesh(slot_block()));
     DomainSpec s;
     s.start = Start::AllLattice;
-    s.regions = {slot_front(-2.6), face_region(3, Role::NoLattice, {15, 6, 30}, {0, 0, -1}, 15, 15, 1.5)};
+    s.regions = {slot_front(-2.6), face_region(3, Role::NoLattice, {15, 6, 30}, {0, 0, -1}, 15, 15, 2.6)};
     Domain d(pm, s);
     auto pr = d.probe();
     Layout l = lay_cells(d, slot_cells());
@@ -3702,13 +3773,13 @@ static void test_thin_cut_pieces() {
     CHECK(!found.empty() && under_other > 0);
     CHECK(opened == 0);
   }
-  // (e) The strut changed after the cells are laid gives what a fresh session lays with that strut. Expand -2.3, the
-  // row 0.7 mm thick: solid under a 0.7 mm strut, open under a 0.5 mm one, and back.
+  // (e) The strut changed after the cells are laid gives what a fresh session lays with that strut. Expand -2.4, the
+  // row 0.6 mm thick: solid under a 0.7 mm strut, open under a 0.5 mm one, and back.
   {
     const StepModel model = slot_model();
     Settings st;
     st.min_strut_lines = kFewestStrutLines;
-    st.regions = {{1, Role::Lattice, {2}, 8.0, -2.3}};
+    st.regions = {{1, Role::Lattice, {2}, 8.0, -2.4}};
     st.cells = slot_cells();
     st.struts = slot_struts(kSlotStrut);
     auto same = [](const Outcome& x, const Outcome& y) {
