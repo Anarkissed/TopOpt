@@ -2663,6 +2663,47 @@ static void test_slivers_are_taken_in() {
   CHECK(tally[7] > tally[6]);
 }
 
+// Protect skins of one depth, however many: the same lattice as ONE skin holding all their faces, and no slower for
+// their number (his v4 stand, 2026-11-13: 26 skins of 4 mm took 289 s a layout, the same faces as one skin 0.7 s).
+// Which skin a point is in is still told skin by skin.
+static void test_many_skins_of_one_depth() {
+  int L = 0, square = 0, sideA = 0, sideB = 0;
+  const StepModel model = plate_with_L_face(&L, &square, &sideA, &sideB);
+  PartMeasure pm(weld_mesh(model.mesh));
+  auto lay_with = [&](const std::vector<std::vector<int>>& skins, const std::vector<double>& depth, Bars* bars) {
+    DomainSpec s;
+    bool ok = false;
+    s.regions.push_back(region_from_face(model, square, 1, Role::Lattice, 8.0, 0.0, &ok));
+    for (std::size_t i = 0; i < skins.size(); ++i) s.protect.push_back({10 + static_cast<int>(i), faces_mesh(model, skins[i]), depth[i]});
+    Domain d(pm, s);
+    CellSpec cs;
+    cs.cell_max_mm = 4;
+    Layout l = lay_cells(d, cs);
+    set_struts(l, StrutSpec{});
+    *bars = lay_bars(l, d);
+    join_loose_bars(*bars, d, 0, &l);
+    return l;
+  };
+  Bars b3, b1, b2, b2m;
+  const Layout three = lay_with({{L}, {sideA}, {sideB}}, {1.5, 1.5, 1.5}, &b3);
+  const Layout one = lay_with({{L, sideA, sideB}}, {1.5}, &b1);
+  CHECK(!three.cells.empty() && three.cells == one.cells && three.solid == one.solid && same_bars(b3, b1));
+  // Two depths stay two: the deeper skin takes more of the lattice than the shallower one would.
+  const Layout two = lay_with({{L}, {sideA}, {sideB}}, {3.0, 1.5, 1.5}, &b2);
+  const Layout two_merged = lay_with({{L}, {sideA, sideB}}, {3.0, 1.5}, &b2m);
+  CHECK(two.cells == two_merged.cells && same_bars(b2, b2m) && !(two.cells == three.cells && same_bars(b2, b3)));
+  // And each skin is still named by its own number.
+  DomainSpec s;
+  bool ok = false;
+  s.regions.push_back(region_from_face(model, square, 1, Role::Lattice, 8.0, 0.0, &ok));
+  s.protect.push_back({10, faces_mesh(model, {L}), 1.5});
+  s.protect.push_back({11, faces_mesh(model, {sideA}), 1.5});
+  Domain d(pm, s);
+  auto pr = d.probe();
+  CHECK((pr.where({10, 40, 9.5}) == Where{Why::ProtectSkin, 10}));   // under the L, on the top
+  CHECK((pr.where({0.5, 10, 5}) == Where{Why::ProtectSkin, 11}));    // behind side A
+}
+
 // D14 for the struts: lattice space that no cell holds is solid, and a strut that reaches
 // it ends IN it, like in any other solid. (Found 2026-11-12: such an end was called loose
 // and dropped, and a lattice standing on such a spot was called adrift.)
@@ -3394,6 +3435,7 @@ int main() {
   test_pieces();
   test_struts_end_in_no_cell_space();
   test_slivers_are_taken_in();
+  test_many_skins_of_one_depth();
   test_skin();
   test_stepped_edges();
   test_rim();

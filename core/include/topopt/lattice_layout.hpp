@@ -320,6 +320,7 @@ class Domain {
     // no farther than `limit`. Negative when none begins that near.
     double skin_ahead(const Vec3& p, const Vec3& dir, double limit) const;
     std::vector<MeshDistance> skins_;
+    std::vector<MeshDistance> skin_groups_;   // one per depth (Domain::skin_groups_)
     std::vector<MeshDistance> shells_;   // one per region, empty mesh for a prism
   };
   Probe probe() const { return Probe(*this); }
@@ -372,6 +373,12 @@ class Domain {
   DomainSpec spec_;
   const std::atomic<bool>* stop_ = nullptr;
   std::vector<Near> near_skin_;    // one per Protect skin, within its depth
+  // Every Protect skin of one depth as ONE surface (the distance to several surfaces is the least of their
+  // distances, so nothing an answer is made of changes). How far a point is from "any skin's solid" is then one
+  // question per depth, not one per skin: his v4 stand has 26 skins of 4 mm, and each lay took 289 s against 0.7 s
+  // with them sent as one group (362's measure, 2026-11-13). WHICH skin a point is in is still asked skin by skin.
+  struct SkinGroup { double depth_mm = 0.0; TriangleMesh faces; };
+  std::vector<SkinGroup> skin_groups_;
   std::vector<Near> near_shell_;   // one per region (empty for a prism), within its depth
   // For a flat region: squares of its face that lie wholly inside its edge, or wholly
   // outside it (the distance to the edge at a square's middle is more than half the
