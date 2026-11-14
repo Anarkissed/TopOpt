@@ -87,6 +87,7 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
     if (settings.bars) {
       t0 = std::chrono::steady_clock::now();
       domain_->check_stop();
+      out.thin_solid = solidify_thin_cuts(out.layout, *domain_, threads);   // P8 (f): before any bar is laid
       out.bars = lay_bars(out.layout, *domain_, threads);
       if (settings.join_loose) join_loose_bars(out.bars, *domain_, threads, &out.layout);
       domain_->check_stop();

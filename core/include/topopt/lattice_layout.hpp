@@ -718,6 +718,27 @@ std::vector<SteppedEdge> stepped_edges(const Bars& bars);
 
 Bars lay_bars(const Layout& layout, const Domain& domain, int threads = 0);
 
+// Print rule P8 (f) (reviewer, 2026-11-14): a cut piece of lattice thinner than its own strut, lying against solid,
+// is solid. Nothing can stand in it (every strut through it is shorter than its own width and is dropped as a stub),
+// and left open it is a slot under material that no printer can print over (his v3 stand: a row of cut cells
+// 0.49 mm thick under the front wall's solid cap left an empty layer 0.09 mm thin, 40 x 6 mm, under the cap).
+// Asked of every CUT cell whose cube holds no AIR (read a hair inside its faces, edges and corners and at its 27
+// points): its lattice as cell_holds_at gives it (what it takes in from another region counts, so a thin piece at a
+// seam between two lattice regions is not thin), along each of the three axes of its frame, on a 5 x 5 grid of lines
+// through the cube, the longest unbroken run on a line read at steps of a quarter of the strut; the largest run.
+// Thinner than the cell's strut along any axis: the cell leaves `layout.cells` and joins `layout.solid` (D14), so
+// the preview's map, the bars and the file see it solid without knowing this rule; struts it shared with a neighbour
+// are the neighbour's. A piece facing air, or as thick as its strut, is left alone. Call it after set_struts and
+// before lay_bars. The same for any number of threads; with no such cell the layout is untouched. Returns how many
+// cells went solid; `found`, when given, receives each one's place in `layout.solid`, its thickness and that axis.
+struct ThinCut {
+  std::size_t solid = 0;   // index into Layout::solid
+  double thick_mm = 0.0;   // along its thinnest axis
+  int axis = 0;            // that axis of its frame
+};
+std::size_t solidify_thin_cuts(Layout& layout, const Domain& domain, int threads = 0,
+                               std::vector<ThinCut>* found = nullptr);
+
 // S5: where two walls with different cells meet (or two regions, or two cell sizes whose
 // cells are cut against each other), each side's struts stop Loose at the line between
 // them. Each such bar is run straight on, in its own direction, until it meets a bar of
@@ -854,6 +875,7 @@ struct Outcome {
   bool cancelled = false;        // the stop flag was set before the layout was whole: nothing else here is filled
   std::vector<int> empty_regions;   // asked-for regions none of whose faces has triangles
   double ms_read = 0.0, ms_cells = 0.0, ms_bars = 0.0;
+  std::size_t thin_solid = 0;    // cut cells print rule P8 (f) made solid (solidify_thin_cuts)
 };
 
 class Session {

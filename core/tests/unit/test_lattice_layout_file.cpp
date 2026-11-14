@@ -353,7 +353,52 @@ static void test_run() {
   for (const std::string& p : {model, job_path, stl, result}) std::remove(p.c_str());
 }
 
+// Print rule P8 (f), in the file: a 30 x 12 x 30 block standing up, lattice under its front face 8 mm deep pulled
+// 2.6 mm in, the band's finest cells (2 mm, Allow quilt) cut 0.4 mm thick under the solid above the outline (z 27 to
+// 27.4). Before the rule that row was opened: its struts were all stubs, the row below's top plane of struts (0.7 mm,
+// so up to z 27.35) left an empty layer under the solid. Now the row is solid: the file holds material everywhere
+// just under z 27.4, and its print check is clean in one pass.
+static void test_thin_slot() {
+  if (!mesh_available()) return;
+  const FileJob job = parse_file_job(R"({
+    "mode": "lattice_file", "model": "block.step",
+    "layout": {
+      "min_strut_lines": 1,
+      "region_ids": [1], "region_no_lattice": [0], "region_depth_mm": [8], "region_expand_mm": [-2.6],
+      "region_face_counts": [1], "region_faces": [2],
+      "algorithm": "default_grade", "cell_mm": 8, "min_cells_across": 1, "grade_to_shape": true, "band_mm": 4,
+      "strut_width_mm": 0.7, "allow_quilt": true
+    }
+  })");
+  const std::string path = kTmp + "/lattice_file_slot.stl";
+  std::remove(path.c_str());
+  const FileResult r = make_lattice_file(box_model(30, 12, 30), job, path);
+  CHECK(r.ok);
+  if (!r.ok) { std::printf("  (%s: %s %s)\n", r.code.c_str(), r.why.c_str(), r.detail.c_str()); return; }
+  // Under the solid, between the row below's struts: material, not an empty layer.
+  const PartMeasure file(weld_mesh(read_stl_file(path).mesh));
+  const PartMeasure::Probe in = file.probe();
+  int empty = 0, asked = 0;
+  for (double x = 5.05; x < 25; x += 0.5)
+    for (double y = 0.55; y < 7.5; y += 0.5) {
+      ++asked;
+      empty += !in.inside({x, y, 27.38});
+    }
+  const LayerReport& l = r.made.layers;
+  std::printf("P8 (f) file: %d of %d points empty at z 27.38 under the solid; print check %s, %zu long bridges, "
+              "longest reach %.2f mm, %zu one-ended, %zu mid-air, first pass found %d, %zu posts, %zu left out\n",
+              empty, asked, r.made.print_clean ? "clean" : "NOT clean", l.long_bridges.size(), l.longest_reach_mm,
+              l.one_ended.size(), l.mid_air.size(), r.made.found_per_pass.empty() ? -1 : r.made.found_per_pass.front(),
+              r.made.posts.size(), r.made.left_out_at.size());
+  CHECK(empty == 0);
+  CHECK(r.made.print_clean && l.clean() && l.long_bridges.empty());
+  CHECK(r.made.found_per_pass.size() == 1 && r.made.found_per_pass.front() == 0 && r.made.posts.empty() &&
+        r.made.left_out_at.empty());
+  std::remove(path.c_str());
+}
+
 int main() {
+  test_thin_slot();
   test_parse();
   test_make();
   test_refusals();
