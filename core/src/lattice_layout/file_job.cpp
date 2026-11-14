@@ -95,7 +95,7 @@ Algorithm algorithm_from(const std::string& s, const std::string& where) {
 }
 
 // The bridge's LatticeLayoutSettings, key for key (lattice_layout_bridge.cpp, settings_from),
-// and one more that core's Settings has: small_cells_in_thin_walls.
+// and two more that core's Settings has: small_cells_in_thin_walls and one_grid ("Let walls cut cells").
 Settings settings_from(const json::Value& in, const std::string& w) {
   json::reject_unknown(
       in,
@@ -105,7 +105,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "protect_face_counts", "protect_faces", "topology", "algorithm", "cell_mm", "cell_max_mm",
        "cell_min_mm", "min_cells_across", "grade_to_shape", "band_mm", "band_cell_mm",
        "per_region", "dial", "dial_region", "dial_value", "strut_width_mm", "allow_quilt",
-       "strength", "small_cells_in_thin_walls", "bars", "join_loose", "skin", "skin_width_mm",
+       "strength", "small_cells_in_thin_walls", "one_grid", "bars", "join_loose", "skin", "skin_width_mm",
        "skin_reach_cells", "drop_loose"},
       w);
   Settings s;
@@ -171,6 +171,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
   s.struts.allow_quilt = flag(in, "allow_quilt", s.struts.allow_quilt, w);
   s.struts.strength = num(in, "strength", s.struts.strength, w);
   s.small_cells_in_thin_walls = flag(in, "small_cells_in_thin_walls", s.small_cells_in_thin_walls, w);
+  s.one_grid = flag(in, "one_grid", s.one_grid, w);
 
   s.bars = flag(in, "bars", s.bars, w);
   s.join_loose = flag(in, "join_loose", s.join_loose, w);

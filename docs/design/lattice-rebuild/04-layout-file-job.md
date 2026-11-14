@@ -79,6 +79,7 @@ Exactly the fields of the bridge's `LatticeLayoutSettings`, under the same names
 | `allow_quilt` | false | |
 | `strength` | 0 | |
 | `small_cells_in_thin_walls` | false | **not in the bridge's struct yet**: core's per-part choice of 2026-11-12 (thin walls get small cells with the thinnest strut) |
+| `one_grid` | false | **not in the bridge's struct yet**: "Let walls cut cells", core's per-part choice of 2026-11-14 (one even grid per region that walls, pockets and skins cut; offered in Aesthetic only) |
 | `bars` | true | a file needs its struts: false is refused (`no_struts`) |
 | `join_loose` | true | |
 | `skin` | false | |
