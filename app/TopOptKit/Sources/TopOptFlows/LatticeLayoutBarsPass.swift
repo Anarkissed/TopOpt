@@ -218,19 +218,24 @@ fragment BarGBuf wall_gbuffer(WallVOut in [[stage_in]], constant WallFrame& F [[
     float vox = min(F.spacing.x, min(F.spacing.y, F.spacing.z));
     float step = 0.5 * vox;
     int steps = int(min((t1 - t0) / step + 2.0, 6000.0));
-    bool seenOpen = false;
-    float insideRun = 0.0;   // how far the ray has been inside the part before any open lattice
+    bool inOpen = false;     // the ray has been in open lattice INSIDE the part (not only the open-marked air at an opening)
+    float insideRun = 0.0;   // solid met before any open lattice: past a voxel of it, the body is there
+    float outRun = 0.0;      // after open lattice: how far outside the part (a hair at the surface is not leaving)
     float t = t0 + 0.5 * step;
     for (int i = 0; i < steps; ++i, t += step) {
         float2 v = map.sample(sl, wall_uvw(ro + rd * t, F)).rg;
         bool open = v.x > 0.0, inside = v.y > 0.0;
-        if (!seenOpen) {
+        if (open && inside) { inOpen = true; outRun = 0.0; continue; }
+        if (!inOpen) {
             // the engine reads a point right on the surface as solid: a voxel of that is not the body; more is
-            if (open) { seenOpen = true; } else if (inside) { insideRun += step; if (insideRun > 1.5 * vox) { discard_fragment(); } }
+            if (inside && !open) { insideRun += step; if (insideRun > 1.5 * vox) { discard_fragment(); } }
             continue;
         }
-        if (open) { continue; }
-        if (!inside) { discard_fragment(); }   // out through another opening: nothing to draw
+        if (!inside) {   // outside again: out through the opening, unless it is only the surface's hair
+            outRun += step;
+            if (outRun > 1.5 * vox) { discard_fragment(); }
+            continue;
+        }
         float a = t - step, b = t;              // the wall: where the open field crosses zero
         for (int k = 0; k < 6; ++k) {
             float m = 0.5 * (a + b);
@@ -274,9 +279,9 @@ final class LatticeLayoutBarsPass {
     private(set) var gridToken = -1
     /// The cut walls' colour: the body's own grey, so a cut reads as the same material.
     static let wallColour = SIMD4<Float>(0.80, 0.81, 0.83, 1)
-    /// The cut walls: OFF until they draw (11-13: the hollow-core test draws 19 pixels of them, not hundreds; and the march
-    /// runs per pixel per frame, so it is not shipped on until it is right and timed on the iPad).
-    static var drawWalls = false
+    /// The cut walls, on (11-13: they draw — the hollow core's solid core behind its lattice; his v4 stand at 2048 × 1536 on
+    /// the Mac: 21 ms a frame without, 25–29 ms with). The tests' red control turns them off.
+    static var drawWalls = true
     private(set) var buffer: MTLBuffer?
     private(set) var count = 0
     private(set) var token = -1
