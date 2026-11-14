@@ -64,6 +64,8 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
     domain_ = std::make_unique<Domain>(*measure_, std::move(spec));
     where_ = where;
     unread_ = true;
+    ref_kept_ = false;
+    ref_field_.reset();
   }
   out.read_again = unread_;   // a new domain, or one whose first reading was given up part way
   out.empty_regions = empty_regions_;
@@ -82,7 +84,27 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
     cells.one_grid = settings.one_grid;   // "Let walls cut cells": the per-part switch is the session's
     out.layout = lay_cells(*domain_, cells, threads);
     unread_ = false;
-    out.struts = set_struts(out.layout, settings.struts);
+    StrutSpec struts = settings.struts;
+    if (settings.stress.demand) {
+      // By stress reads the field, the RESOLVED reference and the response from the stress settings (R17): the stated
+      // reference, else the part's own, kept for as long as the domain, the field and the percentile are the same.
+      const StressGrade& g = settings.stress;
+      struts.demand = g.demand;
+      struts.response = g.response;
+      if (g.reference_mpa > 0.0) {
+        struts.reference_mpa = g.reference_mpa;
+      } else {
+        if (!ref_kept_ || ref_field_ != g.demand || ref_percentile_ != g.percentile) {
+          ref_kept_ = false;
+          ref_mpa_ = stress_reference(*domain_, *g.demand, g.percentile, threads);
+          ref_field_ = g.demand;
+          ref_percentile_ = g.percentile;
+          ref_kept_ = true;
+        }
+        struts.reference_mpa = ref_mpa_;
+      }
+    }
+    out.struts = set_struts(out.layout, struts);
     const double laid = ms_since(t0);
     (out.read_again ? out.ms_read : out.ms_cells) = laid;
     if (settings.bars) {
