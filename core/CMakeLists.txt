@@ -168,6 +168,7 @@ add_library(topopt
   src/lattice_layout/cells.cpp
   src/lattice_layout/struts.cpp
   src/lattice_layout/bars.cpp
+  src/lattice_layout/thin_cuts.cpp
   src/lattice_layout/session.cpp
   src/lattice_layout/solid_mesh.cpp
   src/lattice_layout/print_check.cpp

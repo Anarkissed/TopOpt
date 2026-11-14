@@ -5,6 +5,7 @@
 // asked, a flat strut is a bridge, and a stop flag gives the work up. Where the part's
 // surface cuts the cells on a slant or a curve, no crust of that surface is left over the
 // lattice, and nothing solid inside the part is opened (test_no_crust).
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
@@ -328,6 +329,32 @@ static void test_whole_part() {
   const double shell_mm3 = 16.0 * 16.0 * 16.0 - 14.0 * 14.0 * 14.0;
   CHECK(rep.solid_mm3 > shell_mm3);
   for (int a = 0; a < 3; ++a) CHECK(std::fabs(r.lo[a]) < 1e-6 && std::fabs(r.hi[a] - 16.0) < 1e-6);
+}
+
+// MeshSpec::strut_reach_mm: struts written longer than their bars never leave the part. A 16 mm cube latticed whole
+// with no skin: every strut the cube's faces cut ends in the open (End::Surface), and the mesh stays inside the cube.
+static void test_strut_reach_stays_in_the_part() {
+  PartMeasure pm(weld_mesh(box(16, 16, 16)));
+  DomainSpec s;
+  s.start = Start::AllLattice;
+  s.min_strut_lines = 2.0;
+  Domain d(pm, s);
+  CellSpec cs;
+  cs.algorithm = Algorithm::Uniform;
+  cs.cell_mm = 6.8;
+  Layout layout = lay_cells(d, cs);
+  set_struts(layout, StrutSpec{});
+  const Bars bars = lay_bars(layout, d);   // as laid: the cut ends in the open are kept
+  std::size_t in_air = 0;
+  for (const Bar& b : bars.bars) in_air += (b.end_a == Bar::End::Surface) + (b.end_b == Bar::End::Surface);
+  CHECK(in_air > 0);
+  const OpenSpace open = read_open_space(d, layout, 0.25);
+  MeshReport rep;
+  const TriangleMesh mesh = build_mesh(pm, d, layout, bars, open, MeshSpec{}, &rep);
+  CHECK(rep.ok);
+  const Read r = read_mesh(mesh);
+  for (int a = 0; a < 3; ++a) CHECK(r.lo[a] >= -1e-6 && r.hi[a] <= 16.0 + 1e-6);
+  CHECK(r.edges_not_twice == 0 && r.flat == 0);
 }
 
 // ── his print rules, layer by layer (P8) ─────────────────────────────────────
@@ -727,7 +754,10 @@ static void test_no_crust() {
     // holds). Before the fix: 1,057.11 mm3 kept, in 85 pieces, against the same 1,045.67.
     // With every point that touches the space opened, air or not: 1,034.31, the 11 mm3
     // short taken off the pillar's sides.
-    CHECK(std::fabs(rx.solid_mm3 - none) < 4.0);
+    // S11b (2026-11-14): against solid the file keeps up to one point more solid than the true edge, never less, so
+    // along the skin's inner side and the pillar's sides it now keeps a little more (1,050.34 against the 1,045.67 no
+    // cell holds). The tolerance was 4.0 mm3 when the open space reached half a point past every edge.
+    CHECK(std::fabs(rx.solid_mm3 - none) < 6.0);
     CHECK(rx.solid_pieces == 1);   // the skin and all the rest, one body
     const Read r = read_mesh(mesh);
     CHECK(r.edges_not_twice == 0 && r.flat == 0 && r.shells == 1);
@@ -827,6 +857,20 @@ static void test_column_changes_down_its_depth() {
     // Every reading point of every cube, 0.5 mm or more inside the part (nearer its surface
     // the writer opens a little past what is held, on purpose: no crust).
     long held = 0, held_solid = 0, unheld = 0, unheld_open = 0, changed = 0, changed_solid = 0;
+    long held_solid_far = 0;   // held, solid in the file, and farther than 0.3 mm from any solid (S11b allows none)
+    // Is there solid (inside the part, lattice of no region) within `r` of p? Read on a 0.05 mm grid in the ball.
+    auto solid_within = [&](const Vec3& p, double r) {
+      const int m = static_cast<int>(std::ceil(r / 0.05));
+      for (int z = -m; z <= m; ++z)
+        for (int y = -m; y <= m; ++y)
+          for (int x = -m; x <= m; ++x) {
+            const double dx = x * 0.05, dy = y * 0.05, dz = z * 0.05;
+            if (dx * dx + dy * dy + dz * dz > r * r) continue;
+            const Why w = probe.where({p.x + dx, p.y + dy, p.z + dz}).why;
+            if (w != Why::Lattice && w != Why::Outside) return true;
+          }
+      return false;
+    };
     for (const Cell& c : l.layout.cells) {
       const Frame& f = l.layout.frames[static_cast<std::size_t>(c.frame)];
       const int k = std::max(1, static_cast<int>(std::ceil(c.size / 0.25 - 1e-9)));
@@ -841,7 +885,10 @@ static void test_column_changes_down_its_depth() {
             const bool solid_here = !open_at(c.frame, c.lo[0] + (i + 0.5) * h, c.lo[1] + (j + 0.5) * h, c.lo[2] + (z + 0.5) * h);
             if (any) {
               ++held;
-              if (solid_here) ++held_solid;
+              if (solid_here) {
+                ++held_solid;
+                if (!solid_within(p, 0.3)) ++held_solid_far;
+              }
             } else {
               ++unheld;
               if (!solid_here) ++unheld_open;
@@ -862,10 +909,179 @@ static void test_column_changes_down_its_depth() {
     CHECK(changed > 100);          // the case is really there
     // Before the fix, read at mid-depth only: 5,600 such points left solid under the pocket,
     // 6,456 with the skin.
-    CHECK(changed_solid == 0);     // and is open where the cell holds it
-    CHECK(held_solid == 0);        // open exactly where lattice,
+    if (!skinned) {
+      CHECK(changed_solid == 0);   // and is open where the cell holds it
+      CHECK(held_solid == 0);      // open exactly where lattice,
+    } else {
+      // S11b (2026-11-14): against solid the file keeps up to one point more solid than the true edge. Beside the
+      // skin a held point may be solid in the file, but only within 0.3 mm of solid, and few of them (800 of 399,720
+      // when the rule came in). Was: held_solid == 0 and changed_solid == 0, the exactness S11b gives up on purpose.
+      std::printf("  held and solid in the file: %ld, of them farther than 0.3 mm from solid: %ld\n", held_solid, held_solid_far);
+      CHECK(held_solid_far == 0);
+      CHECK(held_solid * 100 < held);
+    }
     CHECK(unheld_open == 0);       // solid exactly where nothing holds it
   }
+}
+
+// ── the open space in as few boxes as hold it ─────────────────────────────────
+// Inside a cell the points read one by one are put back together as few boxes as hold them:
+// equal runs of neighbouring columns, then equal rows. The open space is the same set of
+// points as with a box per run (every point of a 0.05 mm grid through the most-cut cubes
+// is open in both or in neither), no two boxes overlap more than before, the mesh holds the
+// same plastic to a part in a million, and it is far fewer boxes.
+static bool in_any(const std::vector<const OpenSpace::Box*>& v, double a, double b, double c) {
+  for (const OpenSpace::Box* x : v)
+    if (a > x->lo[0] && a < x->hi[0] && b > x->lo[1] && b < x->hi[1] && c > x->lo[2] && c < x->hi[2]) return true;
+  return false;
+}
+static long overlaps(const OpenSpace& o) {
+  long n = 0;
+  for (std::size_t i = 0; i < o.boxes.size(); ++i)
+    for (std::size_t j = i + 1; j < o.boxes.size(); ++j) {
+      const OpenSpace::Box &x = o.boxes[i], &y = o.boxes[j];
+      if (x.frame != y.frame) continue;
+      bool all = true;
+      for (int a = 0; a < 3 && all; ++a) all = std::min(x.hi[a], y.hi[a]) - std::max(x.lo[a], y.lo[a]) > 1e-9;
+      if (all) ++n;
+    }
+  return n;
+}
+static void merged_is_the_same(const char* what, const PartMeasure& pm, const Domain& d, const Laid& l) {
+  const OpenSpace each = read_open_space(d, l.layout, 0.25, 0, nullptr, false);
+  const OpenSpace merged = read_open_space(d, l.layout, 0.25);
+  CHECK(same_boxes(merged, read_open_space(d, l.layout, 0.25, 1)));   // the same boxes on one thread
+  CHECK(merged.boxes.size() < each.boxes.size());
+  // The most-cut cubes: those with the most runs of their own that end inside the cube.
+  std::vector<std::pair<std::size_t, std::size_t>> cut;   // (boxes in the cube, cell)
+  for (std::size_t ci = 0; ci < l.layout.cells.size(); ++ci) {
+    const Cell& c = l.layout.cells[ci];
+    std::size_t n = 0;
+    for (const OpenSpace::Box& x : each.boxes)
+      if (x.frame == c.frame && x.hi[2] - x.lo[2] < c.size - 1e-9 && x.lo[0] >= c.lo[0] - 1e-9 && x.hi[0] <= c.lo[0] + c.size + 1e-9 && x.lo[1] >= c.lo[1] - 1e-9 &&
+          x.hi[1] <= c.lo[1] + c.size + 1e-9 && x.lo[2] >= c.lo[2] - 1e-9 && x.hi[2] <= c.lo[2] + c.size + 1e-9) ++n;
+    cut.push_back({n, ci});
+  }
+  std::sort(cut.rbegin(), cut.rend());
+  long points = 0, differ = 0, open_points = 0;
+  for (std::size_t q = 0; q < std::min<std::size_t>(3, cut.size()); ++q) {
+    const Cell& c = l.layout.cells[cut[q].second];
+    auto near = [&](const OpenSpace& o) {
+      std::vector<const OpenSpace::Box*> v;
+      for (const OpenSpace::Box& x : o.boxes) {
+        bool meets = x.frame == c.frame;
+        for (int a = 0; a < 3 && meets; ++a) meets = x.hi[a] > c.lo[a] && x.lo[a] < c.lo[a] + c.size;
+        if (meets) v.push_back(&x);
+      }
+      return v;
+    };
+    const auto ve = near(each), vm = near(merged);
+    // Off the 0.25 mm points' own faces by half a step, so no grid point lies on a box's face.
+    const int n = static_cast<int>(std::lround(c.size / 0.05));
+    for (int z = 0; z < n; ++z)
+      for (int j = 0; j < n; ++j)
+        for (int i = 0; i < n; ++i) {
+          const double a = c.lo[0] + 0.025 + 0.05 * i, b = c.lo[1] + 0.025 + 0.05 * j, h = c.lo[2] + 0.025 + 0.05 * z;
+          const bool oe = in_any(ve, a, b, h), om = in_any(vm, a, b, h);
+          ++points;
+          if (oe) ++open_points;
+          if (oe != om) ++differ;
+        }
+  }
+  const long ov_each = overlaps(each), ov_merged = overlaps(merged);
+  MeshReport re, rm, se, sm;
+  (void)build_mesh(pm, d, l.layout, l.bars, each, MeshSpec{}, &re);
+  (void)build_mesh(pm, d, l.layout, l.bars, merged, MeshSpec{}, &rm);
+  (void)build_mesh(pm, d, l.layout, Bars{}, each, MeshSpec{}, &se);     // the solid body alone
+  (void)build_mesh(pm, d, l.layout, Bars{}, merged, MeshSpec{}, &sm);
+  std::printf("merged (%s): %zu cells, %zu boxes a run each, %zu merged; %ld grid points in the 3 most-cut cubes (%ld open), "
+              "%ld differ; overlapping pairs %ld -> %ld; mesh %.6f -> %.6f mm3, the part less the open space %.6f -> %.6f mm3\n",
+              what, l.layout.cells.size(), each.boxes.size(), merged.boxes.size(), points, open_points, differ, ov_each, ov_merged,
+              re.mm3, rm.mm3, se.solid_mm3, sm.solid_mm3);
+  CHECK(open_points > 1000 && open_points < points);   // the cubes are really cut
+  CHECK(differ == 0);
+  CHECK(ov_merged <= ov_each);
+  CHECK(re.ok && rm.ok && se.ok && sm.ok);
+  CHECK(std::fabs(rm.mm3 - re.mm3) <= 1e-6 * re.mm3);
+  // The part less the open space, as carved (before the mesh is cleaned): the same shape. (The
+  // body's own mesh may differ by a few hundredths of a mm3 where two of its surfaces touch
+  // along a line: the writer draws such corners apart by microns, and which corners Manifold
+  // gives at one place depends on the boxes it was handed.)
+  CHECK(std::fabs(sm.solid_mm3 - se.solid_mm3) <= 1e-6 * se.solid_mm3);
+}
+static void test_open_space_merged() {
+  {  // The pocket of test_column_changes_down_its_depth, with and without its skin, and laid as one grid.
+    const double side = 24, tall = 14, p0 = 8, p1 = 16, floor_z = 10.5;
+    TriangleMesh pocket;
+    PartMeasure pm(weld_mesh(pocketed_block(side, tall, p0, p1, floor_z, &pocket)));
+    for (int v = 0; v < 3; ++v) {
+      DomainSpec s;
+      s.min_strut_lines = 2.0;
+      s.regions = {face_region(1, {side / 2, side / 2, tall}, {0, 0, -1}, side / 2, side / 2, 10.0, 0.0)};
+      if (v > 0) s.protect.push_back({1, pocket, 1.0});
+      Domain d(pm, s);
+      CellSpec cs;
+      cs.algorithm = Algorithm::Uniform;
+      cs.cell_max_mm = 8;
+      cs.min_cells_across = 1;
+      cs.one_grid = v == 2;
+      merged_is_the_same(v == 0 ? "a pocket" : v == 1 ? "a Protect skin round the pocket" : "the skinned pocket, one grid",
+                         pm, d, lay(d, cs));
+    }
+  }
+  {  // Cut cells with a slanted wall: the turned block with its 16-sided hole, the whole part lattice.
+    const Holed hb = holed_block();
+    PartMeasure pm(weld_mesh(hb.part));
+    DomainSpec s;
+    s.start = Start::AllLattice;
+    s.min_strut_lines = 2.0;
+    Domain d(pm, s);
+    CellSpec cs;
+    cs.algorithm = Algorithm::Uniform;
+    cs.cell_mm = 5.0;
+    cs.min_cells_across = 1;
+    merged_is_the_same("the turned block with a hole, whole part", pm, d, lay(d, cs));
+  }
+}
+
+// S11b: the file never opens space past the lattice's edge where that edge is against solid. A Protect skin 1 mm
+// deep on the curved wall of the turned block's hole, the whole part latticed: read along the wall's normals, the
+// skin in the mesh is nowhere thinner than its depth (with the step off, an opened point reached into it).
+static void test_skin_never_thinned() {
+  const Holed hb = holed_block();
+  PartMeasure pm(weld_mesh(hb.part));
+  DomainSpec s;
+  s.start = Start::AllLattice;
+  s.min_strut_lines = 2.0;
+  const double skin = 1.0;
+  s.protect.push_back({1, hb.wall, skin});
+  Domain d(pm, s);
+  CellSpec cs;
+  cs.algorithm = Algorithm::Uniform;
+  cs.cell_mm = 5.0;
+  const Laid l = lay(d, cs);
+  const double kPi = 3.14159265358979323846;
+  int thin[2] = {0, 0}, asked = 0;
+  for (int on = 0; on < 2; ++on) {
+    const OpenSpace open = read_open_space(d, l.layout, 0.25, 0, nullptr, true, on == 1);
+    MeshSpec ms;
+    ms.grow_mm = 0.001;
+    MeshReport rep;
+    const TriangleMesh mesh = build_mesh(pm, d, l.layout, Bars{}, open, ms, &rep);   // the solid alone
+    CHECK(rep.ok);
+    const PartMeasure m(weld_mesh(mesh));
+    const PartMeasure::Probe in = m.probe();
+    asked = 0;
+    for (int a = 0; a < 360; ++a)
+      for (int h = 1; h < 12; ++h) {
+        const double t = 2.0 * kPi * (a + 0.5) / 360.0, r = kHoledRadius + skin - 0.02;
+        ++asked;
+        thin[on] += !in.inside(turned(r * std::cos(t), r * std::sin(t), 0.5 * h));
+      }
+  }
+  std::printf("skin never thinned: %d of %d points 0.02 mm inside the skin's depth are empty with the step off, %d with it on\n",
+              thin[0], asked, thin[1]);
+  CHECK(thin[1] == 0);
 }
 
 int main() {
@@ -880,8 +1096,11 @@ int main() {
   }
   test_block();
   test_whole_part();
+  test_strut_reach_stays_in_the_part();
+  test_skin_never_thinned();
   test_no_crust();
   test_column_changes_down_its_depth();
+  test_open_space_merged();
   test_layers();
   test_printable();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);

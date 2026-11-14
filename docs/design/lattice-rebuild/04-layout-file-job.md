@@ -111,7 +111,7 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
   "file_bytes": 82084,
   "part": {"faces": 6, "triangles": 12, "open_edges": 0},
   "layout": {"cells": 4, "solid_pieces": 0, "bars": 36, "at_one_line": 0, "at_widest": 0,
-             "stubs": 0, "joined": 0, "dropped": 60, "pieces": 1, "adrift": 0, "stepped_edges": 1,
+             "stubs": 0, "joined": 0, "dropped": 60, "pieces": 1, "adrift": 0, "stepped_edges": 1, "thin_solid": 0,
              "floor_cell_mm": 2.37, "min_strut_mm": 0.45, "open_look": 0.19, "touch": 0.354,
              "empty_regions": []},
   "mesh": {"triangles": 1640, "mm3": 452.9, "part_mm3": 1000, "struts_mm3": 59.5, "solid_mm3": 398,
@@ -130,6 +130,7 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
 ```
 
 - `layout` holds the counts the bridge's `LatticeLayoutResult` holds, under the same names (`bars` here is how many).
+  `thin_solid`: cut cells print rule P8 (f) made solid (a cut piece thinner than its own strut, lying against solid); they are counted in `solid_pieces` too.
 - `mesh` is core's `MeshReport`. `mm3` is the plastic in the file; `part_mm3` the solid part's.
 - `print_check` is his print rules measured on the mesh the file holds, layer by layer (0.2 mm layers), the part standing on its lowest face:
   - `bed_contact_mm2` (the bridge's name): the area lying flat on the bed; `bed_flat` says it is the whole first layer with no sloped underside.
