@@ -714,7 +714,109 @@ static void test_by_stress_file() {
   std::remove(path.c_str());
 }
 
+// D21: a region's zone in place of its faces (`region_zones`, one entry per region: null, or the zone). Both kinds
+// read into the same Settings as made directly, and lay the same layout; bad numbers refuse the job.
+static void test_zones_key() {
+  const char* job_text = R"({
+    "mode": "lattice_file", "model": "block.step",
+    "layout": {
+      "min_strut_lines": 2,
+      "region_ids": [1, 2, 3], "region_no_lattice": [0, 0, 1], "region_depth_mm": [8, 0, 0],
+      "region_expand_mm": [-2, 0.5, 0], "region_face_counts": [1, 0, 0], "region_faces": [1],
+      "region_zones": [null,
+        {"kind": "box", "centre": [15, 15, 6], "axes": [[0.8, 0.6, 0], [-0.6, 0.8, 0], [0, 0, 1]], "half_mm": [9, 9, 3]},
+        {"kind": "cylinder", "centre": [15, 15, 6], "axis": [0, 0, 1], "radius_mm": 2.5, "half_length_mm": 6}],
+      "algorithm": "uniform", "cell_max_mm": 8, "min_cells_across": 1
+    }
+  })";
+  FileJob job;
+  bool parsed = true;
+  try { job = parse_file_job(job_text); } catch (const FileJobError& e) { parsed = false; std::printf("  (%s)\n", e.what()); }
+  CHECK(parsed && job.settings.regions.size() == 3);
+  if (!parsed || job.settings.regions.size() != 3) return;
+  Settings direct;
+  direct.min_strut_lines = 2;
+  direct.cells.algorithm = Algorithm::Uniform;
+  direct.cells.cell_max_mm = 8;
+  direct.cells.min_cells_across = 1;
+  direct.regions.resize(3);
+  direct.regions[0].id = 1; direct.regions[0].faces = {1}; direct.regions[0].depth_mm = 8; direct.regions[0].expand_mm = -2;
+  direct.regions[1].id = 2; direct.regions[1].expand_mm = 0.5;
+  direct.regions[1].zone.kind = Zone::Kind::Box;
+  direct.regions[1].zone.centre = {15, 15, 6};
+  direct.regions[1].zone.axis[0] = {0.8, 0.6, 0};
+  direct.regions[1].zone.axis[1] = {-0.6, 0.8, 0};
+  direct.regions[1].zone.axis[2] = {0, 0, 1};
+  direct.regions[1].zone.half[0] = 9; direct.regions[1].zone.half[1] = 9; direct.regions[1].zone.half[2] = 3;
+  direct.regions[2].id = 3; direct.regions[2].role = Role::NoLattice;
+  direct.regions[2].zone.kind = Zone::Kind::Cylinder;
+  direct.regions[2].zone.centre = {15, 15, 6};
+  direct.regions[2].zone.axis[2] = {0, 0, 1};
+  direct.regions[2].zone.half[0] = 2.5; direct.regions[2].zone.half[2] = 6;
+  int differ = 0;
+  for (std::size_t r = 0; r < 3; ++r) {
+    const Zone &a = job.settings.regions[r].zone, &b = direct.regions[r].zone;
+    differ += a.kind != b.kind || a.centre.x != b.centre.x || a.centre.y != b.centre.y || a.centre.z != b.centre.z;
+    for (int k = 0; k < 3; ++k)
+      differ += a.axis[k].x != b.axis[k].x || a.axis[k].y != b.axis[k].y || a.axis[k].z != b.axis[k].z ||
+                a.half[k] != b.half[k];
+    differ += job.settings.regions[r].faces != direct.regions[r].faces;
+  }
+  CHECK(differ == 0);
+  const Outcome from_job = Session(box_model(30, 30, 12)).lay(job.settings);
+  const Outcome made = Session(box_model(30, 30, 12)).lay(direct);
+  CHECK(from_job.empty_regions.empty() && !from_job.layout.cells.empty());
+  CHECK(from_job.layout.cells == made.layout.cells && from_job.layout.solid == made.layout.solid);
+  bool zone2 = false;
+  for (const Cell& c : from_job.layout.cells) zone2 = zone2 || c.region == 2;
+  CHECK(zone2);
+
+  // Bad numbers, and a region with faces and a zone, refuse the job, naming the key.
+  const auto refused = [](const std::string& zone, const char* counts, const char* names) {
+    const std::string text = std::string(R"({"mode": "lattice_file", "model": "a.step", "layout": {"region_ids": [1],
+      "region_no_lattice": [0], "region_depth_mm": [0], "region_expand_mm": [0], "region_face_counts": [)") + counts +
+      R"(], "region_faces": [)" + (counts[0] == '1' ? "4" : "") + R"(], "region_zones": [)" + zone + "]}}";
+    try {
+      (void)parse_file_job(text);
+    } catch (const FileJobError& e) {
+      return has(e.what(), names);
+    }
+    return false;
+  };
+  const std::string box = R"({"kind": "box", "centre": [1, 2, 3], "axes": [[1, 0, 0], [0, 1, 0], [0, 0, 1]], "half_mm": [2, 2, 2]})";
+  CHECK(!refused(box, "0", "region_zones"));   // the good one parses
+  CHECK(refused(R"({"kind": "box", "centre": [1, 2, 3], "axes": [[1, 0, 0], [0, 1, 0], [0, 0, 1]], "half_mm": [2, 0, 2]})",
+                "0", "half sizes above 0"));
+  CHECK(refused(R"({"kind": "box", "centre": [1, 2, 3], "axes": [[1, 0, 0], [0.6, 0.8, 0], [0, 0, 1]], "half_mm": [2, 2, 2]})",
+                "0", "right angles"));
+  CHECK(refused(R"({"kind": "cylinder", "centre": [1, 2, 3], "axis": [0, 0, 2], "radius_mm": 1, "half_length_mm": 2})",
+                "0", "unit axis"));
+  CHECK(refused(R"({"kind": "cylinder", "centre": [1, 2, 3], "axis": [0, 0, 1], "radius_mm": -1, "half_length_mm": 2})",
+                "0", "above 0"));
+  CHECK(refused(R"({"kind": "sphere", "centre": [1, 2, 3]})", "0", "sphere"));
+  CHECK(refused(R"({"kind": "box", "centre": [1, 2], "axes": [[1, 0, 0], [0, 1, 0], [0, 0, 1]], "half_mm": [2, 2, 2]})",
+                "0", "centre"));
+  CHECK(refused(R"({"kind": "box", "centre": [1, 2, 3], "axes": [[1, 0, 0], [0, 1, 0], [0, 0, 1]], "half_mm": [2, 2, 2], "radius_mm": 1})",
+                "0", "radius_mm"));
+  CHECK(refused(box, "1", "faces and a zone"));
+  CHECK(refused(box + ", null", "0", "region_zones"));   // not one per region
+
+  // The file job does not take a zone's missing faces for faces the part does not have.
+  const std::string path = kTmp + "/lattice_file_zone.stl";
+  std::remove(path.c_str());
+  FileJob only = job;
+  only.settings.regions = {job.settings.regions[1]};
+  const FileResult r = make_lattice_file(box_model(30, 30, 12), only, path);
+  CHECK(r.code != "region_faces_missing" && r.empty_regions.empty());
+  if (mesh_available()) {
+    CHECK(r.ok && r.cells > 0 && r.bars > 0);
+    if (!r.ok) std::printf("  (%s: %s %s)\n", r.code.c_str(), r.why.c_str(), r.detail.c_str());
+  }
+  std::remove(path.c_str());
+}
+
 int main() {
+  test_zones_key();
   test_by_stress_file();
   test_no_slit_under_solid();
   test_strut_reach();

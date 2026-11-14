@@ -91,6 +91,53 @@ std::vector<std::vector<int>> unflatten(const std::vector<int>& counts, const st
   return out;
 }
 
+// D21: one region's zone, in place of its faces.
+//   {"kind": "box", "centre": [x,y,z], "axes": [[..],[..],[..]], "half_mm": [a,b,c]}
+//   {"kind": "cylinder", "centre": [x,y,z], "axis": [x,y,z], "radius_mm": r, "half_length_mm": h}
+// Numbers region_from_zone would refuse refuse the job here, with the reason.
+Vec3 vec3(const json::Value& o, const char* key, const std::string& where) {
+  const std::string at = where + "." + key;
+  const auto& a = json::as_array(json::require(o, key, where), at).arr;
+  if (a.size() != 3) json::fail(at, "must be three numbers");
+  return {json::as_number(a[0], at), json::as_number(a[1], at), json::as_number(a[2], at)};
+}
+Zone zone_from(const json::Value& v, const std::string& w) {
+  const json::Value& o = json::as_object(v, w);
+  Zone z;
+  const std::string kind = json::as_string(json::require(o, "kind", w), w + ".kind");
+  if (kind == "box") {
+    json::reject_unknown(o, {"kind", "centre", "axes", "half_mm"}, w);
+    z.kind = Zone::Kind::Box;
+    z.centre = vec3(o, "centre", w);
+    const std::string at = w + ".axes";
+    const auto& axes = json::as_array(json::require(o, "axes", w), at).arr;
+    if (axes.size() != 3) json::fail(at, "must be three axes");
+    for (int a = 0; a < 3; ++a) {
+      const auto& e = json::as_array(axes[static_cast<std::size_t>(a)], at).arr;
+      if (e.size() != 3) json::fail(at, "each axis must be three numbers");
+      z.axis[a] = {json::as_number(e[0], at), json::as_number(e[1], at), json::as_number(e[2], at)};
+    }
+    const Vec3 h = vec3(o, "half_mm", w);
+    z.half[0] = h.x; z.half[1] = h.y; z.half[2] = h.z;
+    bool ok = false;
+    (void)region_from_zone(z, 1, Role::Lattice, 0.0, &ok);
+    if (!ok) json::fail(w, "a box zone needs three half sizes above 0 and three unit axes at right angles");
+  } else if (kind == "cylinder") {
+    json::reject_unknown(o, {"kind", "centre", "axis", "radius_mm", "half_length_mm"}, w);
+    z.kind = Zone::Kind::Cylinder;
+    z.centre = vec3(o, "centre", w);
+    z.axis[2] = vec3(o, "axis", w);
+    z.half[0] = json::as_number(json::require(o, "radius_mm", w), w + ".radius_mm");
+    z.half[2] = json::as_number(json::require(o, "half_length_mm", w), w + ".half_length_mm");
+    bool ok = false;
+    (void)region_from_zone(z, 1, Role::Lattice, 0.0, &ok);
+    if (!ok) json::fail(w, "a cylinder zone needs a radius and a half length above 0 and a unit axis");
+  } else {
+    json::fail(w + ".kind", "unknown zone \"" + kind + "\" (box | cylinder)");
+  }
+  return z;
+}
+
 Algorithm algorithm_from(const std::string& s, const std::string& where) {
   if (s == "uniform") return Algorithm::Uniform;
   if (s == "default_grade") return Algorithm::DefaultGrade;
@@ -105,7 +152,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
       in,
       {"all_lattice", "bead_mm", "min_strut_lines", "min_wall_mm", "rim_mm", "cover_mm",
        "region_ids", "region_no_lattice", "region_depth_mm", "region_expand_mm",
-       "region_face_counts", "region_faces", "protect_ids", "protect_depth_mm",
+       "region_face_counts", "region_faces", "region_zones", "protect_ids", "protect_depth_mm",
        "protect_face_counts", "protect_faces", "topology", "algorithm", "cell_mm", "cell_max_mm",
        "cell_min_mm", "min_cells_across", "grade_to_shape", "band_mm", "band_cell_mm",
        "per_region", "dial", "dial_region", "dial_value", "strut_width_mm", "allow_quilt",
@@ -131,6 +178,11 @@ Settings settings_from(const json::Value& in, const std::string& w) {
     json::fail(w, "the region lists (region_ids, region_no_lattice, region_depth_mm, "
                   "region_expand_mm, region_face_counts) are not all one length");
   const auto rf = unflatten(counts, wholes(in, "region_faces", w), w + ".region_faces");
+  // D21: per region, null (its faces) or its zone (and then no faces).
+  const json::Value* zones = json::find(in, "region_zones");
+  const std::string zat = w + ".region_zones";
+  if (zones && json::as_array(*zones, zat).arr.size() != nr)
+    json::fail(w, "region_zones is not as long as region_ids");
   for (std::size_t r = 0; r < nr; ++r) {
     Settings::RegionAsk a;
     a.id = ids[r];
@@ -138,6 +190,10 @@ Settings settings_from(const json::Value& in, const std::string& w) {
     a.faces = rf[r];
     a.depth_mm = depth[r];
     a.expand_mm = expand[r];
+    if (zones && !zones->arr[r].is_null()) {
+      a.zone = zone_from(zones->arr[r], zat);
+      if (!a.faces.empty()) json::fail(zat, "region " + std::to_string(a.id) + " has faces and a zone: one or the other");
+    }
     s.regions.push_back(std::move(a));
   }
   const std::vector<int> pids = wholes(in, "protect_ids", w);
@@ -513,7 +569,8 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     {
       std::vector<int> regions, skins;
       for (const Settings::RegionAsk& a : job.settings.regions)
-        if (faces_mesh(model, a.faces).triangles.empty()) regions.push_back(a.id);
+        if (a.zone.kind == Zone::Kind::None && faces_mesh(model, a.faces).triangles.empty())   // a zone has no faces
+          regions.push_back(a.id);
       for (const Settings::ProtectAsk& a : job.settings.protect)
         if (faces_mesh(model, a.faces).triangles.empty()) skins.push_back(a.id);
       if (!regions.empty()) {

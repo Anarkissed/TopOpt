@@ -198,6 +198,32 @@ inline Region region_from_face(const StepModel& model, int face_id, int id, Role
   return region_from_faces(model, {face_id}, id, role, depth_mm, expand_mm, ok);
 }
 
+// Rule D21: a ZONE, a region the user places instead of picking faces ("A zone lattices a
+// space with no face"): a box or a cylinder in the part's own coordinates, mm.
+//   Box       centre, three unit axes at right angles (axis[0..2]) and three half sizes.
+//   Cylinder  centre, its unit axis in axis[2], its radius in half[0], its half length in
+//             half[2]; axis[0], axis[1] and half[1] are not read.
+struct Zone {
+  enum class Kind : std::uint8_t { None, Box, Cylinder } kind = Kind::None;
+  Vec3 centre{};
+  Vec3 axis[3] = {};
+  double half[3] = {0, 0, 0};
+};
+
+// The region of a zone: a FLAT region whose prism is stated instead of read off a face.
+// The prism starts on the zone's side at centre - axis[2] * half[2], its normal is axis[2]
+// (through the zone to its far side), its depth 2 * half[2]. A box's outline is the
+// rectangle +-half[0] by +-half[1] in (axis[0], axis[1]), and those two axes are the
+// prism's own in-plane axes (u, w), so its cells line up with its sides. A cylinder's
+// outline is one closed loop of 96 straight sides whose area equals the circle's, its
+// first corner on u; its in-plane axes (u, w) are the ones core gives every face prism of
+// that normal (resolve_clearance_manual: plane_basis of the axis). Everything a flat face
+// region does then applies unchanged. `ok` is false, and the region empty, when a size
+// read is not above 0, a number read is not finite, or an axis read is not unit (a box's
+// three: unit and at right angles) to within 1e-6.
+Region region_from_zone(const Zone& zone, int id, Role role, double expand_mm = 0.0,
+                        bool* ok = nullptr);
+
 // The triangles of the given faces, as one open mesh (for ProtectSkin::face).
 TriangleMesh faces_mesh(const StepModel& model, const std::vector<int>& face_ids);
 
@@ -960,6 +986,9 @@ struct Settings {
     std::vector<int> faces;      // the model's own face numbers
     double depth_mm = 0.0;
     double expand_mm = 0.0;
+    // D21: a zone in place of faces (region_from_zone). `depth_mm` is then not read: the
+    // depth is the zone's own. An ask with both faces and a zone is left out and listed.
+    Zone zone;
   };
   struct ProtectAsk {
     int id = 0;
@@ -1008,7 +1037,9 @@ struct Outcome {
   std::vector<SteppedEdge> stepped_edges;   // what Finish None left ragged (S4)
   bool read_again = false;       // the part was read for this layout (a "where" setting changed)
   bool cancelled = false;        // the stop flag was set before the layout was whole: nothing else here is filled
-  std::vector<int> empty_regions;   // asked-for regions none of whose faces has triangles
+  // Asked-for regions none of whose faces has triangles, and zones region_from_zone refused
+  // or asked for together with faces (D21).
+  std::vector<int> empty_regions;
   double ms_read = 0.0, ms_cells = 0.0, ms_bars = 0.0;
   std::size_t thin_solid = 0;    // cut cells print rule P8 (f) made solid (solidify_thin_cuts)
 };

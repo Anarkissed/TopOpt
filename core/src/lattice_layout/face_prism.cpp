@@ -160,4 +160,75 @@ Region region_from_faces(const StepModel& model, const std::vector<int>& face_id
   return r;
 }
 
+// Rule D21: a zone is a flat region whose prism is stated, not read off a face.
+Region region_from_zone(const Zone& zone, int id, Role role, double expand_mm, bool* ok) {
+  Region r;
+  r.id = id;
+  r.role = role;
+  r.expand_mm = expand_mm;
+  if (ok) *ok = false;
+  auto finite = [](const Vec3& v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); };
+  auto unit = [](const Vec3& v) { return std::fabs(std::sqrt(dot(v, v)) - 1.0) <= 1e-6; };
+  if (!finite(zone.centre)) return r;
+  const Vec3& n = zone.axis[2];
+  const double half_depth = zone.half[2];
+  if (!finite(n) || !unit(n) || !std::isfinite(half_depth) || !(half_depth > 0.0)) return r;
+  const Vec3 start{zone.centre.x - n.x * half_depth, zone.centre.y - n.y * half_depth,
+                   zone.centre.z - n.z * half_depth};
+  ClearanceGeometry g;
+  if (zone.kind == Zone::Kind::Box) {
+    for (int a = 0; a < 2; ++a)
+      if (!finite(zone.axis[a]) || !unit(zone.axis[a]) || !std::isfinite(zone.half[a]) || !(zone.half[a] > 0.0))
+        return r;
+    if (std::fabs(dot(zone.axis[0], zone.axis[1])) > 1e-6 || std::fabs(dot(zone.axis[0], n)) > 1e-6 ||
+        std::fabs(dot(zone.axis[1], n)) > 1e-6)
+      return r;
+    // The box's own axes are the prism's in-plane axes. The predicate reads (u, w) as given;
+    // the manual resolver would refuse them (frame_conflict) wherever they are not plane_basis's.
+    const double h0 = zone.half[0], h1 = zone.half[1];
+    g.kind = ClearanceKind::Face;
+    g.origin = start;
+    g.normal = n;
+    g.u = zone.axis[0];
+    g.w = zone.axis[1];
+    g.depth = 2.0 * half_depth;
+    g.u_lo = -h0; g.u_hi = h0; g.w_lo = -h1; g.w_hi = h1;
+    g.outline_uv = {{{-h0, -h1}, {h0, -h1}, {h0, h1}, {-h0, h1}}};
+    g.valid = true;
+  } else if (zone.kind == Zone::Kind::Cylinder) {
+    const double radius = zone.half[0];
+    if (!std::isfinite(radius) || !(radius > 0.0)) return r;
+    ManualClearanceGeometry m;
+    m.kind = ClearanceKind::Face;
+    m.origin = start;
+    m.normal = n;
+    m.half_u_mm = m.half_w_mm = radius;   // replaced below by the loop's own extent
+    ClearanceParams params;
+    params.kind = ClearanceKind::Face;
+    params.slab_depth_mm = 2.0 * half_depth;
+    g = resolve_clearance_manual(m, params);
+    if (!g.valid) return r;
+    // 96 equal sides, corners on a circle of radius R with (96/2) R^2 sin(2 pi / 96) = pi r^2:
+    // the loop's area is the circle's, so it is neither inside nor outside it.
+    constexpr int kSides = 96;
+    const double pi = 3.14159265358979323846;
+    const double corner = radius * std::sqrt(2.0 * pi / (kSides * std::sin(2.0 * pi / kSides)));
+    std::vector<std::array<double, 2>> loop;
+    for (int k = 0; k < kSides; ++k) {
+      const double t = 2.0 * pi * k / kSides;
+      loop.push_back({corner * std::cos(t), corner * std::sin(t)});
+    }
+    g.outline_uv = {std::move(loop)};
+    g.u_lo = g.w_lo = -corner;
+    g.u_hi = g.w_hi = corner;
+  } else {
+    return r;
+  }
+  g.outline_frame = 0;   // the loops are in (u, w)
+  g.declared_region_id = id;
+  r.prism = std::move(g);
+  if (ok) *ok = true;
+  return r;
+}
+
 }  // namespace topopt::lattice_layout

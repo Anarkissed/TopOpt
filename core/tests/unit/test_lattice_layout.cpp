@@ -4951,7 +4951,313 @@ static void test_by_stress_session() {
   CHECK(none.struts.no_stress && none.struts.at_light == none.layout.cells.size());
 }
 
+// D21: zones. A block as a model (faces 0 bottom, 1 top, 2 the front at y = 0, 3..5 the rest), for the Session.
+static StepModel zone_block(double x, double y, double z) {
+  StepModel m;
+  const Vec3 p[8] = {{0, 0, 0}, {x, 0, 0}, {x, y, 0}, {0, y, 0}, {0, 0, z}, {x, 0, z}, {x, y, z}, {0, y, z}};
+  const int q[6][4] = {{0, 3, 2, 1}, {4, 5, 6, 7}, {0, 1, 5, 4}, {1, 2, 6, 5}, {2, 3, 7, 6}, {3, 0, 4, 7}};
+  const Vec3 out[6] = {{0, 0, -1}, {0, 0, 1}, {0, -1, 0}, {1, 0, 0}, {0, 1, 0}, {-1, 0, 0}};
+  for (int f = 0; f < 6; ++f) {
+    StepFaceInfo info;
+    info.kind = StepSurfaceKind::Plane;
+    info.plane_normal = out[f];
+    info.plane_origin = p[q[f][0]];
+    m.faces.push_back(info);
+    for (int t = 0; t < 2; ++t) {
+      const int n = static_cast<int>(m.mesh.vertices.size());
+      m.mesh.vertices.insert(m.mesh.vertices.end(), {p[q[f][0]], p[q[f][t ? 2 : 1]], p[q[f][t ? 3 : 2]]});
+      m.mesh.triangles.push_back({n, n + 1, n + 2});
+      m.triangle_face.push_back(f);
+    }
+  }
+  m.face_count = 6;
+  m.solid_count = 1;
+  return m;
+}
+static Zone box_zone(Vec3 centre, Vec3 a0, Vec3 a1, Vec3 a2, double h0, double h1, double h2) {
+  Zone z;
+  z.kind = Zone::Kind::Box;
+  z.centre = centre;
+  z.axis[0] = a0; z.axis[1] = a1; z.axis[2] = a2;
+  z.half[0] = h0; z.half[1] = h1; z.half[2] = h2;
+  return z;
+}
+static Zone cylinder_zone(Vec3 centre, Vec3 axis, double radius, double half_length) {
+  Zone z;
+  z.kind = Zone::Kind::Cylinder;
+  z.centre = centre;
+  z.axis[2] = axis;
+  z.half[0] = radius;
+  z.half[2] = half_length;
+  return z;
+}
+// A point of a box zone, from its own coordinates.
+static Vec3 in_zone(const Zone& z, double q0, double q1, double q2) {
+  const Vec3* a = z.axis;
+  return {z.centre.x + a[0].x * q0 + a[1].x * q1 + a[2].x * q2, z.centre.y + a[0].y * q0 + a[1].y * q1 + a[2].y * q2,
+          z.centre.z + a[0].z * q0 + a[1].z * q1 + a[2].z * q2};
+}
+static double zone_coord(const Zone& z, const Vec3& p, int a) {
+  const Vec3 r{p.x - z.centre.x, p.y - z.centre.y, p.z - z.centre.z};
+  return r.x * z.axis[a].x + r.y * z.axis[a].y + r.z * z.axis[a].z;
+}
+
+static void test_zones() {
+  const double hair = 0.05;
+  PartMeasure pm(weld_mesh(box(40, 40, 20)));
+  const double c30 = std::cos(3.14159265358979323846 / 6), s30 = 0.5;
+  // 1, 2: a box zone inside a solid block, Start from Solid, square to the part and turned 30 degrees about a2.
+  for (const Zone& z : {box_zone({20, 20, 10}, {1, 0, 0}, {0, 1, 0}, {0, 0, 1}, 8, 6, 5),
+                        box_zone({20, 20, 10}, {c30, s30, 0}, {-s30, c30, 0}, {0, 0, 1}, 8, 6, 5)}) {
+    bool ok = false;
+    DomainSpec s;
+    s.regions = {region_from_zone(z, 3, Role::Lattice, 0.0, &ok)};
+    CHECK(ok);
+    Domain d(pm, s);
+    auto pr = d.probe();
+    int wrong = 0;
+    for (int a = 0; a < 3; ++a)
+      for (int side : {-1, 1})
+        for (double off : {-0.6, 0.0, 0.6}) {   // a few places along each of the six sides
+          double q[3] = {off * z.half[0], off * z.half[1], off * z.half[2]};
+          q[a] = side * (z.half[a] - hair);
+          wrong += !(pr.where(in_zone(z, q[0], q[1], q[2])) == Where{Why::Lattice, 3});
+          q[a] = side * (z.half[a] + hair);
+          wrong += !(pr.where(in_zone(z, q[0], q[1], q[2])) == Where{Why::NotAsked, 0});
+        }
+    CHECK(wrong == 0);
+    CellSpec cs;
+    cs.cell_max_mm = 4;
+    const Layout l = lay_cells(d, cs);
+    int astray = 0;
+    for (const Cell& c : l.cells) {   // each cell's cube meets the box; its centre is within the box's depth
+      const Vec3 m = cell_centre(l, c);
+      astray += c.region != 3 || std::fabs(zone_coord(z, m, 0)) >= z.half[0] + 0.5 * c.size - 1e-9 ||
+                std::fabs(zone_coord(z, m, 1)) >= z.half[1] + 0.5 * c.size - 1e-9 ||
+                std::fabs(zone_coord(z, m, 2)) > z.half[2] + 1e-9;
+    }
+    CHECK(!l.cells.empty() && astray == 0);
+    // The box's own axes are the cells' frame: the cells line up with its sides.
+    if (!l.cells.empty()) {
+      const Vec3& u = l.frames[l.cells.front().frame].ax[0];
+      NEAR(u.x * z.axis[0].x + u.y * z.axis[0].y + u.z * z.axis[0].z, 1.0, 1e-12);
+    }
+  }
+  // 3: a cylinder zone: lattice inside 0.98 r, not outside 1.02 r, at 24 angles and three heights.
+  {
+    const Vec3 axis{0.0, 0.6, 0.8};   // tilted, so the in-plane axes are the engine's own pick
+    const Zone z = cylinder_zone({20, 20, 10}, axis, 7, 5);
+    bool ok = false;
+    DomainSpec s;
+    s.regions = {region_from_zone(z, 4, Role::Lattice, 0.0, &ok)};
+    CHECK(ok);
+    Domain d(pm, s);
+    auto pr = d.probe();
+    const Vec3 e1{1, 0, 0}, e2{0, 0.8, -0.6};   // square to the axis
+    int wrong = 0;
+    for (int k = 0; k < 24; ++k)
+      for (double t : {-4.5, 0.0, 4.5}) {
+        const double ang = 2 * 3.14159265358979323846 * k / 24 + 0.01;
+        auto at = [&](double rr) {
+          return Vec3{20 + axis.x * t + (e1.x * std::cos(ang) + e2.x * std::sin(ang)) * rr,
+                      20 + axis.y * t + (e1.y * std::cos(ang) + e2.y * std::sin(ang)) * rr,
+                      10 + axis.z * t + (e1.z * std::cos(ang) + e2.z * std::sin(ang)) * rr};
+        };
+        wrong += !(pr.where(at(0.98 * 7)) == Where{Why::Lattice, 4});
+        wrong += !(pr.where(at(1.02 * 7)) == Where{Why::NotAsked, 0});
+      }
+    CHECK(wrong == 0);
+    // Its two ends, a hair either side.
+    CHECK((pr.where({20, 20 + 0.6 * 4.95, 10 + 0.8 * 4.95}) == Where{Why::Lattice, 4}));
+    CHECK((pr.where({20, 20 + 0.6 * 5.05, 10 + 0.8 * 5.05}) == Where{Why::NotAsked, 0}));
+    CHECK((pr.where({20, 20 - 0.6 * 4.95, 10 - 0.8 * 4.95}) == Where{Why::Lattice, 4}));
+    CHECK((pr.where({20, 20 - 0.6 * 5.05, 10 - 0.8 * 5.05}) == Where{Why::NotAsked, 0}));
+    // The loop's area is the circle's.
+    double area = 0.0;
+    const auto& loops = s.regions[0].prism.outline_uv;
+    CHECK(loops.size() == 1 && loops[0].size() == 96);
+    for (const auto& loop : loops)
+      for (std::size_t i = 0, j = loop.size() - 1; i < loop.size(); j = i++)
+        area += loop[j][0] * loop[i][1] - loop[i][0] * loop[j][1];
+    NEAR(0.5 * std::fabs(area), 3.14159265358979323846 * 49.0, 1e-9);
+    CellSpec cs;
+    cs.cell_max_mm = 4;
+    CHECK(!lay_cells(d, cs).cells.empty());
+  }
+  // 4: a zone half outside the part: lattice only where the part has material.
+  {
+    const Zone z = box_zone({40, 20, 10}, {1, 0, 0}, {0, 1, 0}, {0, 0, 1}, 8, 6, 5);
+    DomainSpec s;
+    s.regions = {region_from_zone(z, 1, Role::Lattice)};
+    Domain d(pm, s);
+    auto pr = d.probe();
+    CHECK((pr.where({36, 20, 10}) == Where{Why::Lattice, 1}));
+    CHECK((pr.where({39.9, 24, 6}) == Where{Why::Lattice, 1}));
+    CHECK((pr.where({40.1, 20, 10}) == Where{Why::Outside, 0}));
+    CHECK((pr.where({44, 24, 6}) == Where{Why::Outside, 0}));
+    CellSpec cs;
+    cs.cell_max_mm = 4;
+    const Layout l = lay_cells(d, cs);
+    int outside = 0;   // no cell stands wholly outside the part
+    for (const Cell& c : l.cells) outside += cell_centre(l, c).x - 0.5 * c.size >= 40.0;
+    CHECK(!l.cells.empty() && outside == 0);
+  }
+  // 5: Start from All lattice with a No lattice box zone: no lattice inside it, lattice round it.
+  {
+    const Zone z = box_zone({20, 20, 10}, {c30, s30, 0}, {-s30, c30, 0}, {0, 0, 1}, 8, 6, 5);
+    DomainSpec s;
+    s.start = Start::AllLattice;
+    s.regions = {region_from_zone(z, 2, Role::NoLattice)};
+    Domain d(pm, s);
+    auto pr = d.probe();
+    int wrong = 0;
+    for (int a = 0; a < 3; ++a)
+      for (int side : {-1, 1}) {
+        double q[3] = {0, 0, 0};
+        q[a] = side * (z.half[a] - hair);
+        wrong += !(pr.where(in_zone(z, q[0], q[1], q[2])) == Where{Why::NoLattice, 2});
+        q[a] = side * (z.half[a] + hair);
+        wrong += !(pr.where(in_zone(z, q[0], q[1], q[2])) == Where{Why::Lattice, 0});
+      }
+    CHECK(wrong == 0);
+  }
+  // 6: Expand +1 and -1 move the four in-plane sides by that, and leave the two ends alone (D11).
+  for (double e : {1.0, -1.0}) {
+    const Zone z = box_zone({20, 20, 10}, {c30, s30, 0}, {-s30, c30, 0}, {0, 0, 1}, 8, 6, 5);
+    DomainSpec s;
+    s.regions = {region_from_zone(z, 1, Role::Lattice, e)};
+    Domain d(pm, s);
+    auto pr = d.probe();
+    int wrong = 0;
+    for (int a = 0; a < 2; ++a)
+      for (int side : {-1, 1}) {
+        double q[3] = {0, 0, 0};
+        q[a] = side * (z.half[a] + e - hair);
+        wrong += !pr.where(in_zone(z, q[0], q[1], q[2])).lattice();
+        q[a] = side * (z.half[a] + e + hair);
+        wrong += pr.where(in_zone(z, q[0], q[1], q[2])).lattice();
+      }
+    for (int side : {-1, 1}) {
+      wrong += !pr.where(in_zone(z, 0, 0, side * (z.half[2] - hair))).lattice();
+      wrong += pr.where(in_zone(z, 0, 0, side * (z.half[2] + hair))).lattice();
+    }
+    CHECK(wrong == 0);
+  }
+  // 7: Grade to shape in a box zone: the band is measured from the box's outline, not the part's.
+  {
+    PartMeasure big(weld_mesh(box(60, 60, 20)));
+    const Zone z = box_zone({30, 30, 10}, {1, 0, 0}, {0, 1, 0}, {0, 0, 1}, 20, 20, 8);
+    DomainSpec s;
+    s.bead_mm = 0.2;
+    s.regions = {region_from_zone(z, 1, Role::Lattice)};
+    Domain d(big, s);
+    CellSpec cs;
+    cs.cell_max_mm = 8;
+    cs.grade_to_shape = true;
+    cs.band_mm = 8;
+    const Layout l = lay_cells(d, cs);
+    double finest = 1e9, largest = 0.0;
+    for (const Cell& c : l.cells) { finest = std::min(finest, c.size); largest = std::max(largest, c.size); }
+    int wrong_t = 0, at_edge = 0, at_edge_large = 0;
+    for (const Cell& c : l.cells) {
+      const Vec3 m = cell_centre(l, c);
+      const double dist = std::max(0.0, std::min(20 - std::fabs(m.x - 30), 20 - std::fabs(m.y - 30)));
+      if (std::fabs(c.band - std::min(1.0, dist / 8.0)) > 1e-9) ++wrong_t;
+      if (dist <= 0.5 * c.size + 1e-9) { ++at_edge; if (c.size > finest + 1e-9) ++at_edge_large; }
+    }
+    CHECK(!l.cells.empty() && largest == 8.0 && finest < 8.0 - 1e-9);
+    CHECK(wrong_t == 0 && at_edge > 0 && at_edge_large == 0);
+  }
+  // 8: a box zone over part of a face region. The existing order (D6): the nearer face owns the space; the zone's
+  // face is the side it starts on (centre - a2 half2). Face region 1 under the top (z 20, 10 deep, down); zone 2 from
+  // z 9 up to 15: at z the face is 20 - z away and the zone's side z - 9, so the zone owns below z 14.5, the face above.
+  {
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, {20, 20, 20}, {0, 0, -1}, 20, 20, 10),
+                 region_from_zone(box_zone({20, 20, 12}, {1, 0, 0}, {0, 1, 0}, {0, 0, 1}, 6, 6, 3), 2, Role::Lattice)};
+    Domain d(pm, s);
+    auto pr = d.probe();
+    CHECK((pr.where({20, 20, 9.5}) == Where{Why::Lattice, 2}));    // the zone alone
+    CHECK((pr.where({20, 20, 12}) == Where{Why::Lattice, 2}));     // both: the zone's side is nearer
+    CHECK((pr.where({20, 20, 14.9}) == Where{Why::Lattice, 1}));   // both: the face is nearer
+    CHECK((pr.where({30, 20, 12}) == Where{Why::Lattice, 1}));     // the face alone
+    CHECK((pr.where({20, 20, 8.5}) == Where{Why::NotAsked, 0}));
+  }
+  // 9: bad zones are left out and listed; the rest still lay.
+  {
+    const StepModel model = zone_block(40, 40, 20);
+    Settings st;
+    st.min_strut_lines = kFewestStrutLines;
+    st.cells.cell_max_mm = 4;
+    const Zone good = box_zone({20, 20, 10}, {1, 0, 0}, {0, 1, 0}, {0, 0, 1}, 8, 6, 5);
+    Zone flat = good;  flat.half[1] = 0.0;                 // zero size
+    Zone skew = good;  skew.axis[1] = {0.1, 0.995, 0.0};   // not square (and not unit)
+    Zone tilt = good;  tilt.axis[1] = {std::sqrt(0.5), std::sqrt(0.5), 0.0};   // unit, not square
+    Zone nan = good;   nan.centre.x = std::nan("");
+    Zone cyl0 = cylinder_zone({20, 20, 10}, {0, 0, 1}, 0.0, 5);
+    Settings::RegionAsk both{6, Role::Lattice, {1}, 5.0, 0.0};
+    both.zone = good;
+    st.regions = {{1, Role::Lattice, {}, 0.0, 0.0}, {2, Role::Lattice, {}, 0.0, 0.0}, {3, Role::Lattice, {}, 0.0, 0.0},
+                  {4, Role::Lattice, {}, 0.0, 0.0}, {5, Role::Lattice, {}, 0.0, 0.0}, both,
+                  {7, Role::Lattice, {}, 0.0, 0.0}};
+    st.regions[0].zone = good;
+    st.regions[1].zone = flat;
+    st.regions[2].zone = skew;
+    st.regions[3].zone = tilt;
+    st.regions[4].zone = nan;
+    st.regions[6].zone = cyl0;
+    const Outcome out = Session(model).lay(st);
+    CHECK((out.empty_regions == std::vector<int>{2, 3, 4, 5, 6, 7}));
+    Settings only = st;
+    only.regions = {st.regions[0]};
+    const Outcome alone = Session(model).lay(only);
+    CHECK(!out.layout.cells.empty() && out.layout.cells == alone.layout.cells && alone.empty_regions.empty());
+    // 12: with no zone the layout is today's: a Session of face regions lays what the face regions laid directly do.
+    Settings faces = st;
+    faces.bars = false;   // the cells as lay_cells gives them
+    faces.regions = {{1, Role::Lattice, {1}, 6.0, -2.0}};
+    const Outcome by_faces = Session(model).lay(faces);
+    PartMeasure m(weld_mesh(model.mesh));
+    DomainSpec ds;
+    ds.min_strut_lines = kFewestStrutLines;
+    ds.regions = {region_from_faces(model, {1}, 1, Role::Lattice, 6.0, -2.0)};
+    Domain dd(m, ds);
+    CellSpec cs = faces.cells;
+    Layout direct = lay_cells(dd, cs);
+    set_struts(direct, faces.struts);
+    CHECK(!by_faces.layout.cells.empty() && by_faces.layout.cells == direct.cells);
+  }
+  // 10: through a Session, moving a zone reads the part again; a cell-size setting does not.
+  {
+    const StepModel model = zone_block(40, 40, 20);
+    Session session(model);
+    Settings st;
+    st.min_strut_lines = kFewestStrutLines;
+    st.cells.cell_max_mm = 4;
+    st.regions = {{1, Role::Lattice, {}, 0.0, 0.0}};
+    st.regions[0].zone = box_zone({20, 20, 10}, {1, 0, 0}, {0, 1, 0}, {0, 0, 1}, 8, 6, 5);
+    const Outcome first = session.lay(st);
+    CHECK(first.read_again && !first.layout.cells.empty() && first.empty_regions.empty());
+    st.cells.cell_max_mm = 3;
+    const Outcome smaller = session.lay(st);
+    CHECK(!smaller.read_again);
+    st.regions[0].zone.centre.x = 21;   // moved
+    const Outcome moved = session.lay(st);
+    CHECK(moved.read_again && moved.layout.cells == Session(model).lay(st).layout.cells);
+    if (!moved.layout.cells.empty() && !smaller.layout.cells.empty())   // the cells moved with it
+      NEAR(cell_centre(moved.layout, moved.layout.cells.front()).x -
+               cell_centre(smaller.layout, smaller.layout.cells.front()).x, 1.0, 1e-9);
+    st.regions[0].zone.axis[0] = {c30, s30, 0};   // turned
+    st.regions[0].zone.axis[1] = {-s30, c30, 0};
+    CHECK(session.lay(st).read_again);
+    st.regions[0].zone.half[2] = 4;               // shallower
+    CHECK(session.lay(st).read_again);
+    CHECK(!session.lay(st).read_again);           // and asked again: kept
+  }
+}
+
 int main() {
+  test_zones();
   test_by_stress();
   test_by_stress_session();
   test_demand_field();
