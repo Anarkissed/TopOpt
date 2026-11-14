@@ -3515,7 +3515,9 @@ static void test_one_grid_smallest_cut() {
       cut += c.cut;
     }
     CHECK(!l.cells.empty() && l.solid.empty());                    // the smallest is cut, never refused
-    CHECK(smallest < 6.0 && largest == 12.0 && cut > 0);           // a ladder: 12 mm where whole, small at the slot
+    // C21: under the face, the slot cuts exactly half of the 12 mm cubes (2 of 4 columns): half is not more than half,
+    // so the main size is 6 mm (all its first-layer cubes whole), and the slot is lined with smaller cells.
+    CHECK(smallest < 6.0 && largest == 6.0 && cut > 0);
     const C20 r = c20_count(d, l, smallest);
     CHECK(r.cut_large == 0);                                       // every cut cell is the smallest
     CHECK(r.large_not_whole == 0);                                 // every larger cell is whole (53 points)
@@ -3589,6 +3591,88 @@ static void test_one_grid_smallest_cut() {
               tally[0], tally[1], tally[2]);
 }
 
+// C21 with Let walls cut cells on: a region's face shows one main cell size, the largest size of its ladder at which more
+// than half of the cubes on its face stand whole. A few large cells in a field of small ones are not laid.
+static void test_one_grid_main_size() {
+  auto lay_part = [](const std::vector<std::array<double, 2>>& section, Algorithm algo, double cell_max, int threads,
+                     bool one_grid) {
+    PartMeasure pm(weld_mesh(prism(section, 0, 64)));
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, {32, 0, 32}, {0, 1, 0}, 32, 32, 8)};   // the whole 64 x 64 face
+    Domain d(pm, s);
+    CellSpec cs;
+    cs.algorithm = algo;
+    cs.cell_max_mm = cell_max;
+    cs.one_grid = one_grid;
+    return lay_cells(d, cs, threads);
+  };
+  auto largest = [](const Layout& l) {
+    double m = 0.0;
+    for (const Cell& c : l.cells) m = std::max(m, c.size);
+    return m;
+  };
+  long tally[4] = {0, 0, 0, 0};
+  // (1) His back plate: 6 mm behind the face under 8 mm cubes, with one boss 12 mm thick (x 32..40) where a column
+  // of 8 mm cubes would stand whole: 8 of 64, so the main size is 4 mm; no cell larger anywhere in the region.
+  const std::vector<std::array<double, 2>> plate = {{0, 0}, {64, 0}, {64, 6}, {40, 6}, {40, 12}, {32, 12}, {32, 6}, {0, 6}};
+  for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
+    const Layout l = lay_part(plate, algo, 8, 0, true);
+    int at_face = 0, other = 0;
+    for (const Cell& c : l.cells) {
+      if (c.lo[2] == l.cells.front().lo[2]) ++at_face;
+      if (std::fabs(c.size - 4.0) > 1e-9) ++other;
+    }
+    CHECK(!l.cells.empty() && l.solid.empty() && largest(l) == 4.0);      // no cell above the main size
+    // Halves (a ladder of two sizes here, 8 and 4): every cell, on the face and below it, is 4 mm. (Stepped packs each
+    // 8 mm cube from one unit of its own below the main size, C6c; its 6 mm plate takes 8/3 mm units.)
+    if (algo == Algorithm::DefaultGrade) CHECK(at_face == 16 * 16 && other == 0);
+    CHECK(lay_part(plate, algo, 8, 1, true).cells == l.cells && lay_part(plate, algo, 8, 3, true).cells == l.cells);
+    tally[0] += static_cast<long>(l.cells.size());
+  }
+  {  // A ladder of one size: nothing changes, the 8 mm cells stand, cut by the plate's far side.
+    const Layout l = lay_part(plate, Algorithm::Uniform, 8, 0, true);
+    int other = 0;
+    for (const Cell& c : l.cells) other += std::fabs(c.size - 8.0) > 1e-9;
+    CHECK(!l.cells.empty() && other == 0);
+  }
+  {  // Off: the count is not made; the boss's own cells are as wall by wall lays them.
+    const Layout off = lay_part(plate, Algorithm::DefaultGrade, 8, 0, false);
+    CHECK(largest(off) == 8.0);
+  }
+  // (2) A block 24 deep, mostly thick, with one slot from the back down to 5 mm behind the face (x 28..36): it cuts 2 of
+  // the 8 columns of 8 mm cubes under the face, so the main size stays 8 mm. Large cells stand; the smallest line the
+  // slot (C20 unchanged).
+  const std::vector<std::array<double, 2>> slot = {{0, 0}, {64, 0}, {64, 24}, {36, 24}, {36, 5}, {28, 5}, {28, 24}, {0, 24}};
+  {
+    PartMeasure pm(weld_mesh(prism(slot, 0, 64)));
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, {32, 0, 32}, {0, 1, 0}, 32, 32, 8)};
+    Domain d(pm, s);
+    CellSpec cs;
+    cs.algorithm = Algorithm::DefaultGrade;
+    cs.cell_max_mm = 8;
+    cs.one_grid = true;
+    const Layout l = lay_cells(d, cs);
+    int large = 0, small = 0;
+    for (const Cell& c : l.cells) (c.size == 8.0 ? large : small) += 1;
+    CHECK(largest(l) == 8.0 && large == 6 * 8 && small > 0 && l.solid.empty());
+    const C20 r = c20_count(d, l, 4.0);
+    CHECK(r.cut_large == 0 && r.large_not_whole == 0 && r.off_grid == 0);
+    CHECK(lay_cells(d, cs, 1).cells == l.cells && lay_cells(d, cs, 3).cells == l.cells);
+    tally[1] = large, tally[2] = small;
+  }
+  // (3) Exactly half is not more than half: 5 mm behind the face for x < 32, 24 mm for x > 32, so 4 of the 8 columns of
+  // 8 mm cubes are whole: the main size is 4 mm. With the step at x = 24 (5 of 8 whole) it is 8 mm.
+  for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
+    const Layout half = lay_part({{0, 0}, {64, 0}, {64, 24}, {32, 24}, {32, 5}, {0, 5}}, algo, 8, 0, true);
+    const Layout more = lay_part({{0, 0}, {64, 0}, {64, 24}, {24, 24}, {24, 5}, {0, 5}}, algo, 8, 0, true);
+    CHECK(largest(half) == 4.0 && largest(more) == 8.0);
+    tally[3] += static_cast<long>(half.cells.size());
+  }
+  std::printf("main size: a 6 mm plate with a boss is %ld cells of 4 mm (halves and Stepped); a slotted block keeps %ld "
+              "cells of 8 mm and %ld smaller; exactly half whole: 4 mm cells (%ld)\n", tally[0], tally[1], tally[2], tally[3]);
+}
+
 static void test_one_grid() {
   // The cell of `region` that holds p, or -1; `n`, when given, receives how many do.
   auto holder = [](const Domain& d, const Layout& l, const Vec3& p, int* n = nullptr) {
@@ -3651,7 +3735,15 @@ static void test_one_grid() {
           if (std::fabs(c.size - 12.0) < 1e-9 && !c.cut) ++base_whole;
         }
         CHECK(not_mine == 0 && smallest < 12.0 - 1e-9);
-        CHECK(base_whole == 2 * 5);                                // x < 24 keeps its whole 12 mm cells
+        // C21: only 2 of the 5 columns of 12 mm cubes under the face are whole (x < 24), under half, so the region's
+        // main size is 6 mm: no 12 mm cell, and every 6 mm cube under the face is one whole 6 mm cell.
+        double largest = 0.0;
+        int six_whole = 0;
+        for (const Cell& c : l.cells) {
+          largest = std::max(largest, c.size);
+          if (std::fabs(c.size - 6.0) < 1e-9 && !c.cut && c.lo[2] == l.cells.front().lo[2]) ++six_whole;
+        }
+        CHECK(base_whole == 0 && largest == 6.0 && six_whole == 10 * 10);
       }
       int n = 0;
       const int a1 = holder(d, l, thick, &n);
@@ -3774,25 +3866,29 @@ static void test_one_grid() {
       // the step or the thin wall's far side cuts the cube).
       double o[3] = {1e300, 1e300, 1e300};
       for (const Cell& c : l.cells) for (int k = 0; k < 3; ++k) o[k] = std::min(o[k], c.lo[k]);
+      // C21: 24 of the 64 12 mm cubes under the face are whole (x < 36), under half, so the region's main size is 6 mm
+      // (all its first-layer cubes whole): the checks below read the main size M where they read the base cell.
+      const double M = 6.0;
       auto parent_whole = [&](const Layout& lay, const Cell& c) {
         double p[3];
-        for (int k = 0; k < 3; ++k) p[k] = o[k] + 12.0 * std::floor((c.lo[k] - o[k]) / 12.0 + 1e-9);
-        return whole_cube(d, lay, c.frame, p, 12.0);
+        for (int k = 0; k < 3; ++k) p[k] = o[k] + M * std::floor((c.lo[k] - o[k]) / M + 1e-9);
+        return whole_cube(d, lay, c.frame, p, M);
       };
-      // Every base cube whose centre is at least `from` inside the outline and that is whole in lattice is ONE 12 mm
-      // cell (C1, G2, C20): how many such cubes, and how many are not a 12 mm cell.
+      // Every main-size cube under the face whose centre is at least `from` inside the outline and that is whole in
+      // lattice is ONE cell of the main size (C1, G2, C20, C21): how many such cubes, and how many are not one cell.
       auto base_where_whole = [&](const Layout& lay, double from, int* whole_cubes, int* not_one_cell) {
         *whole_cubes = 0, *not_one_cell = 0;
-        for (int j = 0; j < 8; ++j)
-          for (int i = 0; i < 8; ++i) {
-            const double p[3] = {o[0] + 12.0 * i, o[1] + 12.0 * j, o[2]};
-            const double ci = 12.0 * i + 6.0, cj = 12.0 * j + 6.0;
+        const int n = static_cast<int>(std::lround(96.0 / M));
+        for (int j = 0; j < n; ++j)
+          for (int i = 0; i < n; ++i) {
+            const double p[3] = {o[0] + M * i, o[1] + M * j, o[2]};
+            const double ci = M * i + 0.5 * M, cj = M * j + 0.5 * M;
             if (std::min(std::min(ci, 96 - ci), std::min(cj, 96 - cj)) < from - 1e-9) continue;
-            if (!whole_cube(d, lay, lay.cells.front().frame, p, 12.0)) continue;
+            if (!whole_cube(d, lay, lay.cells.front().frame, p, M)) continue;
             ++*whole_cubes;
             bool one = false;
             for (const Cell& c : lay.cells)
-              one = one || (c.size == 12.0 && c.lo[0] == p[0] && c.lo[1] == p[1] && c.lo[2] == p[2]);
+              one = one || (c.size == M && c.lo[0] == p[0] && c.lo[1] == p[1] && c.lo[2] == p[2]);
             if (!one) ++*not_one_cell;
           }
       };
@@ -3814,7 +3910,7 @@ static void test_one_grid() {
         if (c.size > finest * (1 + 1e-9) &&
             (m.x - h < -1e-6 || m.x + h > 96 + 1e-6 || m.z - h < -1e-6 || m.z + h > 96 + 1e-6)) ++large_cut;
         if (dist <= h + 1e-9) { ++at_edge; if (c.size > f_cube[parent_key(c)] + 1e-9) ++at_edge_large; }
-        if (dist >= band + 0.5 * (12.0 - c.size) && std::fabs(c.size - 12.0) > 1e-9 && parent_whole(l, c)) ++small_inside;
+        if (dist >= band + 0.5 * (M - c.size) && std::fabs(c.size - M) > 1e-9 && parent_whole(l, c)) ++small_inside;
         all[std::lround(c.size * 1e3)] += c.size * c.size * c.size;
         if (dist >= band) inner[std::lround(c.size * 1e3)] += c.size * c.size * c.size;
       }
@@ -3825,13 +3921,13 @@ static void test_one_grid() {
       {
         const C20 r = c20(d, l, f);
         CHECK(r.cut_large == 0 && r.large_not_whole == 0);          // C20: only the smallest is cut
-      CHECK(all.size() >= 3);           // it steps: at least three sizes
+      CHECK(all.size() >= 2 && all.rbegin()->first == 6000);   // it steps, and no cell is above the main size (C21)
       }
       // Away from the outline, every base cube that is whole is one base cell (of the 6 x 6 whose centres are a band
       // inside, those the step and the thin wall's far side do not cut).
       int whole_inner = 0, split_inner = 0;
       base_where_whole(l, band + 6.0, &whole_inner, &split_inner);
-      CHECK(whole_inner >= 6 * 2 && split_inner == 0);
+      CHECK(whole_inner > 0 && split_inner == 0);
       // ... and across the step in the wall, well inside the band: C20 splits the base cube the step cuts, so the two
       // sides are two smaller cells, neither of them cut.
       int n = 0;
@@ -4047,6 +4143,7 @@ static void test_solid_why() {
 }
 
 int main() {
+  test_one_grid_main_size();
   test_one_grid_smallest_cut();
   test_solid_why();
   test_one_grid();

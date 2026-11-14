@@ -491,6 +491,8 @@ struct CellSpec {
   // `min_wall_mm` still makes solid). A cut piece too small to hold a strut longer than its own width has none.
   // C20 (his ruling the same day: "let cells shrink towards pockets and walls"): only the smallest cell of the
   // ladder is ever cut; a larger cell that anything would cut is split down first, as G10 splits it at the outline.
+  // C21: a flat region's face shows one main size, the largest of its ladder at which more than half of the cubes in
+  // the first layer under the face stand whole; no larger cell is laid in that region.
   bool one_grid = false;
 };
 
