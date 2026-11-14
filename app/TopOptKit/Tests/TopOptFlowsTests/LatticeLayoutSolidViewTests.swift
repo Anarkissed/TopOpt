@@ -5,7 +5,7 @@
 //   * the map: every voxel inside the part is either open lattice or solid; a whole-part lattice is mostly open;
 //   * the cut: with the map the bars SHOW through the solid body (RED CONTROL: the same solid body without the map hides them);
 //   * the walls: a lattice one face deep has solid walls behind its opening (RED CONTROL: the frame without the walls differs)
-//     — SKIPPED: the walls are off until they draw (11-13).
+//     — read with the bars moved out of view: a lattice this dense hides its core behind its own bars.
 #if canImport(AppKit) && canImport(MetalKit)
 import XCTest
 import MetalKit
@@ -101,7 +101,6 @@ final class LatticeLayoutSolidViewTests: XCTestCase {
 
     /// ★ THE WALLS: a lattice one face deep is cut into the solid; the walls behind its opening are drawn.
     func testTheCutWallsAreDrawnBehindTheOpening() async throws {
-        throw XCTSkip("the cut walls are off until they draw (11-13: 19 pixels here, not hundreds) — the next solid-view step")
         var s = LatticeLayoutSession.Settings()
         s.minStrutLines = 1   // a drawing test: one-line struts let 3 mm cells lay in a 10 mm cube
         s.cellMM = 3
@@ -111,10 +110,13 @@ final class LatticeLayoutSolidViewTests: XCTestCase {
         for i in stride(from: 0, to: g.rg.count, by: 2) where g.rg[i + 1] > 0 { if g.rg[i] > 0 { open += 1 } else { solid += 1 } }
         print("SOLID-VIEW hollow core map: \(open) open, \(solid) solid")
         XCTAssertGreaterThan(solid, 1_000, "premise: a solid core behind the lattice")
+        _ = bars
+        let far: [Float] = [1000, 1000, 1000, 1000, 1000, 1000.1, 0.01]   // the pass on, its bars out of view
+        addTeardownBlock { @MainActor in LatticeLayoutBarsPass.drawWalls = true }
         LatticeLayoutBarsPass.drawWalls = false
-        let without = try frame(mesh, bars: bars, grid: g)
+        let without = try frame(mesh, bars: far, grid: g)
         LatticeLayoutBarsPass.drawWalls = true
-        let with = try frame(mesh, bars: bars, grid: g)
+        let with = try frame(mesh, bars: far, grid: g)
         let changed = zip(with, without).filter { $0 != $1 }.count / 4
         print("SOLID-VIEW walls: \(changed) pixels differ")
         XCTAssertGreaterThan(changed, 500, "★ the walls behind the opening are drawn (RED CONTROL: the frame without them)")
