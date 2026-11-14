@@ -26,8 +26,10 @@ public struct LatticeLayoutBarsInputs: Equatable {
     public var hidden: Bool
     /// ★ THE SOLID VIEW (his ask 11-13): the engine's map of the part; nil = X-ray (the see-through body).
     public var solid: LatticeLayoutSolidGrid?
-    public init(token: Int, bars: [Float], hidden: Bool = false, solid: LatticeLayoutSolidGrid? = nil) {
-        self.token = token; self.bars = bars; self.hidden = hidden; self.solid = solid
+    /// One per bar, core's bar_flags (bit 16: a flat bridge, drawn SQUARE with a level underside, as the print writes it).
+    public var flags: [UInt8]
+    public init(token: Int, bars: [Float], hidden: Bool = false, solid: LatticeLayoutSolidGrid? = nil, flags: [UInt8] = []) {
+        self.token = token; self.bars = bars; self.hidden = hidden; self.solid = solid; self.flags = flags
     }
     public static func == (a: Self, b: Self) -> Bool { a.token == b.token && a.hidden == b.hidden && a.solid?.token == b.solid?.token }
 }
@@ -65,6 +67,17 @@ struct BarVOut {
     uint   iid [[flat]];
 };
 
+// ★ A FLAT BRIDGE (core's bar_flags bit 16, `bar_is_bridge`) is written SQUARE: its width across and tall, centred on its
+// line, its underside level (up is the print direction, +z). Its box's sides are the square's.
+static bool bar_square(float4 B) { return (uint(B.w + 0.5) & 16u) != 0u; }
+static void bar_axes(float3 u, bool square, thread float3& v, thread float3& w) {
+    float3 side = cross(u, float3(0.0, 0.0, 1.0));
+    if (square && length(side) > 1e-4) { v = normalize(side); w = cross(v, u); return; }
+    float3 hlp = abs(u.x) < 0.9 ? float3(1.0, 0.0, 0.0) : float3(0.0, 1.0, 0.0);
+    v = normalize(cross(u, hlp));
+    w = cross(u, v);
+}
+
 // The box around bar `iid`: its ends pushed out by R along the axis, ±R across.
 vertex BarVOut bar_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
                           const device float4* bars [[buffer(0)]],
@@ -74,9 +87,8 @@ vertex BarVOut bar_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
     float3 ax = B.xyz - A.xyz;
     float len = length(ax);
     float3 u = len > 1e-6 ? ax / len : float3(0.0, 0.0, 1.0);
-    float3 hlp = abs(u.x) < 0.9 ? float3(1.0, 0.0, 0.0) : float3(0.0, 1.0, 0.0);
-    float3 v = normalize(cross(u, hlp));
-    float3 w = cross(u, v);
+    float3 v, w;
+    bar_axes(u, bar_square(B), v, w);
     const int idx[36] = { 0,1,2, 2,1,3, 4,6,5, 5,6,7, 0,4,1, 1,4,5,
                           2,3,6, 6,3,7, 0,2,4, 4,2,6, 1,5,3, 3,5,7 };
     int c = idx[vid % 36];
@@ -146,10 +158,31 @@ fragment BarGBuf bar_gbuffer(BarVOut in [[stage_in]],
     float4 n1 = F.modelFromClip * float4(ndc, 1.0, 1.0);
     float3 ro = n0.xyz / n0.w;
     float3 rd = normalize(n1.xyz / n1.w - ro);
-    float t = bar_intersect(ro, rd, A.xyz, B.xyz, R);
-    if (t < 0.0) { discard_fragment(); }
+    float t;
+    float3 n;
+    if (bar_square(B)) {
+        float3 ax = B.xyz - A.xyz;
+        float len = length(ax);
+        float3 u = len > 1e-6 ? ax / len : float3(0.0, 0.0, 1.0);
+        float3 v, w;
+        bar_axes(u, true, v, w);
+        float3 o = ro - A.xyz;
+        float3 lo3 = float3(dot(o, u), dot(o, v), dot(o, w));
+        float3 ld = float3(dot(rd, u), dot(rd, v), dot(rd, w));
+        float3 sd = float3(abs(ld.x) < 1e-7 ? 1e-7 : ld.x, abs(ld.y) < 1e-7 ? 1e-7 : ld.y, abs(ld.z) < 1e-7 ? 1e-7 : ld.z);
+        float3 ta = (float3(-R, -R, -R) - lo3) / sd, tb = (float3(len + R, R, R) - lo3) / sd;
+        float3 tn = min(ta, tb), tf = max(ta, tb);
+        float tN = max(max(tn.x, tn.y), tn.z), tF = min(min(tf.x, tf.y), tf.z);
+        if (tF < max(tN, 0.0)) { discard_fragment(); }
+        t = tN >= 0.0 ? tN : tF;
+        float3 ln = (tN == tn.x) ? float3(-sign(ld.x), 0.0, 0.0) : ((tN == tn.y) ? float3(0.0, -sign(ld.y), 0.0) : float3(0.0, 0.0, -sign(ld.z)));
+        n = normalize(ln.x * u + ln.y * v + ln.z * w);
+    } else {
+        t = bar_intersect(ro, rd, A.xyz, B.xyz, R);
+        if (t < 0.0) { discard_fragment(); }
+        n = bar_normal(ro + rd * t, A.xyz, B.xyz);
+    }
     float3 p = ro + rd * t;
-    float3 n = bar_normal(p, A.xyz, B.xyz);
     float4 clip = F.clipFromModel * float4(p, 1.0);
     float3 eyeP = (F.eyeFromModel * float4(p, 1.0)).xyz;
     float3 eyeN = normalize((F.eyeNormalBasis * float4(n, 0.0)).xyz);
@@ -374,21 +407,21 @@ final class LatticeLayoutBarsPass {
     func upload(_ inputs: LatticeLayoutBarsInputs) {
         token = inputs.token
         hidden = inputs.hidden
-        let packed = Self.pack(inputs.bars)
+        let packed = Self.pack(inputs.bars, flags: inputs.flags)
         count = packed.count / 2
         buffer = packed.isEmpty ? nil : device.makeBuffer(bytes: packed, length: MemoryLayout<SIMD4<Float>>.stride * packed.count,
                                                           options: .storageModeShared)
     }
 
-    /// 7 floats per bar → two float4 per bar (radius = width / 2). Tests read it.
-    static func pack(_ bars: [Float]) -> [SIMD4<Float>] {
+    /// 7 floats per bar → two float4 per bar (radius = width / 2; the second's w = the bar's flags). Tests read it.
+    static func pack(_ bars: [Float], flags: [UInt8] = []) -> [SIMD4<Float>] {
         let n = bars.count / 7
         var out = [SIMD4<Float>]()
         out.reserveCapacity(2 * n)
         for i in 0..<n {
             let k = 7 * i
             out.append(SIMD4(bars[k], bars[k + 1], bars[k + 2], 0.5 * bars[k + 6]))
-            out.append(SIMD4(bars[k + 3], bars[k + 4], bars[k + 5], 0))
+            out.append(SIMD4(bars[k + 3], bars[k + 4], bars[k + 5], i < flags.count ? Float(flags[i]) : 0))
         }
         return out
     }

@@ -42,7 +42,7 @@ public final class LatticeLayoutPreview: ObservableObject {
     }
 
     /// The line the preview carries while the drawer draws every bar round (the reviewer's PREVIEW IS THE SPEC).
-    public static let roundBarsLine = "Preview: bars drawn round · the print squares flat bridges and adds posts"
+    public static let roundBarsLine = "Preview: flat bridges drawn square, as printed · the print adds a few posts"
     public static let noPartLine = "New engine: this part has no model file to read"
     public static let organicLine = "New engine: Organic is not drawn yet · this is the old preview"
     public static let byStressLine = "New engine: no stress yet · cell size and density follow the shape only"
@@ -114,7 +114,7 @@ public final class LatticeLayoutPreview: ObservableObject {
             guard !Task.isCancelled else { return }
             token &+= 1
             // the last map stays until this layout's own lands (no flash of a closed part on every change)
-            bars = LatticeLayoutBarsInputs(token: token, bars: r.bars, solid: solidWanted ? bars?.solid : nil)
+            bars = LatticeLayoutBarsInputs(token: token, bars: r.bars, solid: solidWanted ? bars?.solid : nil, flags: r.barFlags)
             timing = Timing(openMS: openMS, readMS: r.msRead, cellsMS: r.msCells, barsMS: r.msBars, bars: r.barCount)
             problem = r.barCount == 0 ? "New engine: no lattice fits these settings" : nil
             laying = false

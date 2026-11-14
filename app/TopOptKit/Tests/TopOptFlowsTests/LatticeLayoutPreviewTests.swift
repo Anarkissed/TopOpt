@@ -217,6 +217,26 @@ final class LatticeLayoutPreviewTests: XCTestCase {
         XCTAssertEqual(s.cellMinMM, plan.loMM, accuracy: 1e-9, "★ and its floor")
     }
 
+    /// ★ 11-14: a flat bridge (core's bar_flags bit 16) is drawn SQUARE, as the print writes it (RED CONTROL: unflagged, round).
+    func testAFlatBridgeIsDrawnSquare() throws {
+        guard let device = MTLCreateSystemDefaultDevice(), let r = MeshRenderer(device: device, sampleCount: 1) else {
+            throw XCTSkip("no renderer: \(MeshRenderer.lastInitError ?? "?")")
+        }
+        XCTAssertEqual(LatticeLayoutBarsPass.pack([0, 0, 0, 1, 0, 0, 1], flags: [16])[1].w, 16, "the flag rides in the bar's buffer")
+        r.setMesh(Self.cubeMesh(20))
+        r.camera.setOrientation(azimuth: 0.6, elevation: 0.5)
+        r.setBodyAlpha(0.2)
+        let bar: [Float] = [-8, 0, 14, 8, 0, 14, 3]   // level, above the cube
+        let clear = MTLClearColor(red: 0.1, green: 0.1, blue: 0.12, alpha: 1)
+        XCTAssertTrue(r.applyLayoutBars(.init(token: 1, bars: bar), device: device))
+        let round = try XCTUnwrap(r.renderOffscreen(width: 320, height: 240, clear: clear, stage: false))
+        XCTAssertTrue(r.applyLayoutBars(.init(token: 2, bars: bar, flags: [16]), device: device))
+        let square = try XCTUnwrap(r.renderOffscreen(width: 320, height: 240, clear: clear, stage: false))
+        let changed = zip(round, square).filter { $0 != $1 }.count / 4
+        print("NEW-ENGINE square bridge: \(changed) pixels differ from the round bar")
+        XCTAssertGreaterThan(changed, 150, "★ the flagged bar is drawn square")
+    }
+
     // MARK: fixtures
 
     /// `n` bars on a grid: a 0.8 mm bar along x from each point.
