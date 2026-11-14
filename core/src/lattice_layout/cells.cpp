@@ -183,8 +183,6 @@ struct Pass {
   double finest_mm = 0.0;           // the smallest cell its ladder allows (f)
   double floor_mm = 0.0;            // the smallest cell that may stand in this pass at all
   double skin_most = 0.0;           // the deepest Protect skin or cover of the domain
-  bool count_main = false;          // C21: a flat region with Let walls cut cells on counts its main size
-  double main_mm = 0.0;             // C21: no cell larger than this is laid (0 = no such cap)
   // D14c: the region's depth (a wall is never read deeper; 1e300 for the whole part), and, under a flat face, the
   // depth whose own cell prints (0 elsewhere: the cell there does not come from the depth).
   double region_depth = 1e300;
@@ -269,45 +267,16 @@ struct Pass {
     return demand->highest_in(mn, mx);
   }
   // C22, the centre rule of G1-G3 with the stress in the place of the outline: a cell of size s may stand where the
-  // stress inside it asks for no smaller one, t <= (top - s) / (top - f); the finest always may. `top` is the largest
-  // cell the pass may lay: its own cell, or under Let walls cut cells the main size when that is smaller (C21).
+  // stress inside it asks for no smaller one, t <= (S_base - s) / (S_base - f); the finest always may.
   bool stress_allows(const double lo[3], double s) const {
     if (!demand || is_finest(s)) return true;
-    const double top = main_mm > 0.0 ? std::min(base_mm, main_mm) : base_mm;
-    if (top <= finest_mm * (1.0 + 1e-9)) return true;
     const double t = std::pow(std::clamp(demand_in(lo, s) / ref_mpa, 0.0, 1.0), std::clamp(response, 0.25, 4.0));
-    return t <= (top - s) / (top - finest_mm) + 1e-9;
+    return t <= (base_mm - s) / (base_mm - finest_mm) + 1e-9;
   }
   // C20: with Let walls cut cells on (one_grid), only the finest cell is ever cut. A larger cell must lie whole in
   // lattice: its 27 points and the 26 a hair inside its faces, edges and corners (0.04 / 0.5 / 0.96, as D14b looks).
   // Lattice of any region counts (a seam between two lattice regions cuts nothing); a wall, pocket, hole, Protect
   // skin, No lattice region or the part's outside does. Held, the cell is split down its ladder as G10 splits it.
-  // C21: the region's main size, the largest size of its ladder (`cand`, largest first) at which more than half of the
-  // cubes of the region's grid in the first layer under the face that hold any of its lattice stand whole by C20's own
-  // test. None: the smallest. The cubes are the base cubes split, so the grid never moves.
-  double main_size(const std::vector<double>& cand, const double start[3], const int count[3], double base) const {
-    for (double s : cand) {
-      const int k = std::max(1, static_cast<int>(std::llround(base / s)));
-      int held = 0, whole = 0;
-      for (int j = 0; j < count[1] * k; ++j)
-        for (int i = 0; i < count[0] * k; ++i) {
-          const double lo[3] = {start[0] + i * s, start[1] + j * s, start[2]};
-          bool any = false;
-          for (int c = 0; c < 3 && !any; ++c)
-            for (int b = 0; b < 3 && !any; ++b)
-              for (int a = 0; a < 3 && !any; ++a) {
-                const Where w = probe->where(frame.at(lo[0] + s * (1 + 2 * a) / 6.0, lo[1] + s * (1 + 2 * b) / 6.0,
-                                                      lo[2] + s * (1 + 2 * c) / 6.0));
-                any = w.lattice() && w.id == region;
-              }
-          if (!any) continue;
-          ++held;
-          whole += whole_in_lattice(lo, s);
-        }
-      if (2 * whole > held) return s;
-    }
-    return cand.empty() ? base : cand.back();
-  }
   bool whole_in_lattice(const double lo[3], double s) const {
     const double e[2][3] = {{1.0 / 6.0, 0.5, 5.0 / 6.0}, {0.04, 0.5, 0.96}};
     for (int g = 0; g < 2; ++g)
@@ -323,8 +292,7 @@ struct Pass {
   // G10: with Grade to shape on, only the finest cell may be cut by the outline. Any
   // larger cell must lie whole inside it (read at its corners, edge middles and centre).
   bool whole_in_outline(const double lo[3], double s) const {
-    if (spec->one_grid && !is_finest(s) &&
-        ((main_mm > 0.0 && s > main_mm * (1.0 + 1e-9)) || !whole_in_lattice(lo, s)))   // C21, C20
+    if (spec->one_grid && !is_finest(s) && !whole_in_lattice(lo, s))   // C20
       return false;
     if (!band_region || is_finest(s)) return true;
     for (int b = 0; b < 3; ++b)
@@ -1002,18 +970,6 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
       start[2] = lo[2];
       count[2] = std::max(1, static_cast<int>(std::llround((hi[2] - lo[2]) / base)));
     }
-    if (pass.count_main) {   // C21: the sizes that split a base cube exactly, largest first
-      std::vector<double> cand;
-      if (spec.algorithm == Algorithm::Stepped) {
-        cand.push_back(base);
-        for (int n : pass.divisors)
-          if (n >= 2) cand.push_back(base / n);
-      } else {
-        cand = pass.sizes;
-      }
-      std::sort(cand.begin(), cand.end(), [](double x, double y) { return x > y; });
-      if (cand.size() > 1) pass.main_mm = pass.main_size(cand, start, count, base);
-    }
     // Each base cell is laid on its own, so they are shared between threads and put
     // back in the order one thread would have laid them: the layout is the same for any
     // number of threads (D18). A probe serves one thread, so each takes its own.
@@ -1158,7 +1114,6 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
       // (D3). Grade to shape reads the region's own outline, as it does wall by wall.
       Pass pass = open(r.id, f, g.depth, base);
       pass.depth_need = depth_need;
-      pass.count_main = true;   // C21
       pass.tally = &out.regions.back();
       const WallMap none = out.walls.back();   // no walls: a cell's shape is its region's lattice in its cube
       pass.walls = &none;

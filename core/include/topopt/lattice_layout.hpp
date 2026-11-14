@@ -496,20 +496,20 @@ struct CellSpec {
   // `min_wall_mm` still makes solid). A cut piece too small to hold a strut longer than its own width has none.
   // C20 (his ruling the same day: "let cells shrink towards pockets and walls"): only the smallest cell of the
   // ladder is ever cut; a larger cell that anything would cut is split down first, as G10 splits it at the outline.
-  // C21: a flat region's face shows one main size, the largest of its ladder at which more than half of the cubes in
-  // the first layer under the face stand whole; no larger cell is laid in that region.
+  // (Only when the region grades its cells, Default Grade or Stepped: with one cell size the cell is cut wherever the
+  // wall falls.) Any cell of the ladder that lies whole in lattice stands (C21, a cap at one main size per face, was
+  // WITHDRAWN by the owner, 2026-11-14: "if grading is on and a larger cell size can fit, it SHOULD fit").
   bool one_grid = false;
   // C22, cell size by stress (his rule of 2026-08-19: Auto cell size is "any number - as needed based on the stress
   // map"). On, the stress asks for a cell size place by place: the region's own cell where the stress is nothing, the
   // smallest its ladder allows where the stress is at or over the reference, in proportion between. A cell stands only
   // where nothing inside it asks for a smaller one; the smallest always may. With d the highest stress in the
   // axis-aligned box round the cube's eight corners (R16), t = (d / reference, held to 0 .. 1) to the power of the
-  // response (held to 0.25 .. 4), a cell of size s may stand where t <= (top - s) / (top - f), f the finest cell and
-  // top the largest cell the pass may lay: the region's own (S_base), or with Let walls cut cells the region's main
-  // size when that is smaller (C21: min(S_base, main)). A cell the stress does not allow is divided down its ladder as a cell the band does not allow is (Default
+  // response (held to 0.25 .. 4), a cell of size s may stand where t <= (S_base - s) / (S_base - f), f the finest
+  // cell. A cell the stress does not allow is divided down its ladder as a cell the band does not allow is (Default
   // Grade halves, Stepped packs); one that cannot be divided further stands: nothing goes solid for the stress, and
   // the stress never lays a cell under the smallest the layout would otherwise lay there.
-  // With `one_grid` on it applies as anywhere else, together with C20 and C21: a cell must be allowed by all of them.
+  // With `one_grid` on it applies as anywhere else, together with C20: a cell must be allowed by both.
   // OFF, whatever `by_stress` says, when: no field or an empty one; `reference_mpa` <= 0; a typed `cell_mm` (only
   // Manual forces one size, C16); Uniform. Off, the layout is today's, byte for byte.
   // `demand`, `reference_mpa`, `response` are the RESOLVED stress inputs: the session fills them from

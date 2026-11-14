@@ -3856,9 +3856,9 @@ static void test_one_grid_smallest_cut() {
       cut += c.cut;
     }
     CHECK(!l.cells.empty() && l.solid.empty());                    // the smallest is cut, never refused
-    // C21: under the face, the slot cuts exactly half of the 12 mm cubes (2 of 4 columns): half is not more than half,
-    // so the main size is 6 mm (all its first-layer cubes whole), and the slot is lined with smaller cells.
-    CHECK(smallest < 6.0 && largest == 6.0 && cut > 0);
+    // C21 withdrawn: the slot cuts 2 of the 4 columns of 12 mm cubes under the face; the other two stand as 12 mm cells,
+    // and the slot is lined with smaller cells.
+    CHECK(smallest < 6.0 && largest == 12.0 && cut > 0);
     const C20 r = c20_count(d, l, smallest);
     CHECK(r.cut_large == 0);                                       // every cut cell is the smallest
     CHECK(r.large_not_whole == 0);                                 // every larger cell is whole (53 points)
@@ -3932,8 +3932,9 @@ static void test_one_grid_smallest_cut() {
               tally[0], tally[1], tally[2]);
 }
 
-// C21 with Let walls cut cells on: a region's face shows one main cell size, the largest size of its ladder at which more
-// than half of the cubes on its face stand whole. A few large cells in a field of small ones are not laid.
+// C21, WITHDRAWN by the owner 2026-11-14 ("if grading is on and a larger cell size can fit, it SHOULD fit"): with Let walls
+// cut cells on, a larger cell that lies whole in lattice IS laid, however few of them there are on the face. These were
+// C21's cases; their checks now assert the opposite where it mattered.
 static void test_one_grid_main_size() {
   auto lay_part = [](const std::vector<std::array<double, 2>>& section, Algorithm algo, double cell_max, int threads,
                      bool one_grid) {
@@ -3954,19 +3955,20 @@ static void test_one_grid_main_size() {
   };
   long tally[4] = {0, 0, 0, 0};
   // (1) His back plate: 6 mm behind the face under 8 mm cubes, with one boss 12 mm thick (x 32..40) where a column
-  // of 8 mm cubes would stand whole: 8 of 64, so the main size is 4 mm; no cell larger anywhere in the region.
+  // of 8 mm cubes stands whole: those 8 cubes are 8 mm cells; the rest of the plate is cut down to 4 mm (C20).
   const std::vector<std::array<double, 2>> plate = {{0, 0}, {64, 0}, {64, 6}, {40, 6}, {40, 12}, {32, 12}, {32, 6}, {0, 6}};
   for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
     const Layout l = lay_part(plate, algo, 8, 0, true);
-    int at_face = 0, other = 0;
+    int large = 0, other = 0;
     for (const Cell& c : l.cells) {
-      if (c.lo[2] == l.cells.front().lo[2]) ++at_face;
-      if (std::fabs(c.size - 4.0) > 1e-9) ++other;
+      if (c.size == 8.0) ++large;
+      else if (std::fabs(c.size - 4.0) > 1e-9) ++other;
     }
-    CHECK(!l.cells.empty() && l.solid.empty() && largest(l) == 4.0);      // no cell above the main size
-    // Halves (a ladder of two sizes here, 8 and 4): every cell, on the face and below it, is 4 mm. (Stepped packs each
-    // 8 mm cube from one unit of its own below the main size, C6c; its 6 mm plate takes 8/3 mm units.)
-    if (algo == Algorithm::DefaultGrade) CHECK(at_face == 16 * 16 && other == 0);
+    CHECK(!l.cells.empty() && l.solid.empty() && largest(l) == 8.0);      // the boss's whole 8 mm cubes are laid
+    // Halves (a ladder of two sizes here, 8 and 4): the boss's 8 cubes are 8 mm cells, every other cell 4 mm.
+    // (Stepped packs the plate's cubes from one unit of their own, C6c.)
+    CHECK(large == 8);
+    if (algo == Algorithm::DefaultGrade) CHECK(other == 0);
     CHECK(lay_part(plate, algo, 8, 1, true).cells == l.cells && lay_part(plate, algo, 8, 3, true).cells == l.cells);
     tally[0] += static_cast<long>(l.cells.size());
   }
@@ -4002,16 +4004,16 @@ static void test_one_grid_main_size() {
     CHECK(lay_cells(d, cs, 1).cells == l.cells && lay_cells(d, cs, 3).cells == l.cells);
     tally[1] = large, tally[2] = small;
   }
-  // (3) Exactly half is not more than half: 5 mm behind the face for x < 32, 24 mm for x > 32, so 4 of the 8 columns of
-  // 8 mm cubes are whole: the main size is 4 mm. With the step at x = 24 (5 of 8 whole) it is 8 mm.
+  // (3) 5 mm behind the face for x < 32, 24 mm for x > 32 (4 of the 8 columns of 8 mm cubes whole), and the same with the
+  // step at x = 24 (5 of 8 whole): both lay 8 mm cells where they are whole.
   for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
     const Layout half = lay_part({{0, 0}, {64, 0}, {64, 24}, {32, 24}, {32, 5}, {0, 5}}, algo, 8, 0, true);
     const Layout more = lay_part({{0, 0}, {64, 0}, {64, 24}, {24, 24}, {24, 5}, {0, 5}}, algo, 8, 0, true);
-    CHECK(largest(half) == 4.0 && largest(more) == 8.0);
+    CHECK(largest(half) == 8.0 && largest(more) == 8.0);
     tally[3] += static_cast<long>(half.cells.size());
   }
-  std::printf("main size: a 6 mm plate with a boss is %ld cells of 4 mm (halves and Stepped); a slotted block keeps %ld "
-              "cells of 8 mm and %ld smaller; exactly half whole: 4 mm cells (%ld)\n", tally[0], tally[1], tally[2], tally[3]);
+  std::printf("no main size: a 6 mm plate with a boss is %ld cells (halves and Stepped); a slotted block keeps %ld "
+              "cells of 8 mm and %ld smaller; half the columns whole: %ld cells\n", tally[0], tally[1], tally[2], tally[3]);
 }
 
 static void test_one_grid() {
@@ -4076,15 +4078,15 @@ static void test_one_grid() {
           if (std::fabs(c.size - 12.0) < 1e-9 && !c.cut) ++base_whole;
         }
         CHECK(not_mine == 0 && smallest < 12.0 - 1e-9);
-        // C21: only 2 of the 5 columns of 12 mm cubes under the face are whole (x < 24), under half, so the region's
-        // main size is 6 mm: no 12 mm cell, and every 6 mm cube under the face is one whole 6 mm cell.
+        // C21 withdrawn: the 2 of the 5 columns of 12 mm cubes under the face that are whole (x < 24) are 12 mm cells;
+        // beyond them every 6 mm cube under the face is one whole 6 mm cell.
         double largest = 0.0;
         int six_whole = 0;
         for (const Cell& c : l.cells) {
           largest = std::max(largest, c.size);
           if (std::fabs(c.size - 6.0) < 1e-9 && !c.cut && c.lo[2] == l.cells.front().lo[2]) ++six_whole;
         }
-        CHECK(base_whole == 0 && largest == 6.0 && six_whole == 10 * 10);
+        CHECK(base_whole == 2 * 5 && largest == 12.0 && six_whole == 6 * 10);
       }
       int n = 0;
       const int a1 = holder(d, l, thick, &n);
@@ -4207,9 +4209,9 @@ static void test_one_grid() {
       // the step or the thin wall's far side cuts the cube).
       double o[3] = {1e300, 1e300, 1e300};
       for (const Cell& c : l.cells) for (int k = 0; k < 3; ++k) o[k] = std::min(o[k], c.lo[k]);
-      // C21: 24 of the 64 12 mm cubes under the face are whole (x < 36), under half, so the region's main size is 6 mm
-      // (all its first-layer cubes whole): the checks below read the main size M where they read the base cell.
-      const double M = 6.0;
+      // C21 withdrawn (the owner, 2026-11-14): the 24 of the 64 12 mm cubes under the face that are whole (x < 36) are
+      // base cells, however few; M below is the base cell.
+      const double M = 12.0;
       auto parent_whole = [&](const Layout& lay, const Cell& c) {
         double p[3];
         for (int k = 0; k < 3; ++k) p[k] = o[k] + M * std::floor((c.lo[k] - o[k]) / M + 1e-9);
@@ -4262,7 +4264,7 @@ static void test_one_grid() {
       {
         const C20 r = c20(d, l, f);
         CHECK(r.cut_large == 0 && r.large_not_whole == 0);          // C20: only the smallest is cut
-      CHECK(all.size() >= 2 && all.rbegin()->first == 6000);   // it steps, and no cell is above the main size (C21)
+      CHECK(all.size() >= 2 && all.rbegin()->first == 12000);  // it steps, and the whole base cubes are base cells
       }
       // Away from the outline, every base cube that is whole is one base cell (of the 6 x 6 whose centres are a band
       // inside, those the step and the thin wall's far side do not cut).
@@ -5357,10 +5359,9 @@ static void test_cells_by_stress() {
   block("9 session");
 
   {  // 12. Let walls cut cells (the owner, 2026-11-14: it means "ONLY that the cells can be cut by walls. NOTHING
-     // ELSE"): cell size by stress applies, with C20 and C21. The back plate of test_one_grid_main_size (6 mm behind the
-     // face under 8 mm cubes, one 12 mm boss: main size 4 mm on halves) at a 0.2 mm line (halves 8, 4, 2), a ramp
-     // along x: 0 for x < 16, the reference from x = 48. The rule's own cell is the largest the pass may lay, the main
-     // size: top = min(8, main).
+     // ELSE"): cell size by stress applies, with C20 (only the finest cell is cut). The back plate of
+     // test_one_grid_main_size (6 mm behind the face under 8 mm cubes, one 12 mm boss at x 32..40) at a 0.2 mm line
+     // (halves 8, 4, 2), a ramp along x: 0 for x < 16, the reference from x = 48.
     PartMeasure pg(weld_mesh(prism({{0, 0}, {64, 0}, {64, 6}, {40, 6}, {40, 12}, {32, 12}, {32, 6}, {0, 6}}, 0, 64)));
     DomainSpec gs;
     gs.bead_mm = 0.2;
@@ -5382,28 +5383,38 @@ static void test_cells_by_stress() {
       on.demand = gramp;
       CHECK(stress_sizes_cells(on));
       const Layout l = lay_cells(dg, on);
-      double main = 0.0, finest = 1e300;
-      for (const Cell& c : today.cells) main = std::max(main, c.size);
+      double finest = 1e300;
       for (const Cell& c : l.cells) finest = std::min(finest, c.size);
       const double want_finest = a == 0 ? 2.0 : 8.0 / 6.0;
-      const double top = std::min(8.0, main);
-      int breaks = 0, above_main = 0, cut_large = 0, hot = 0, hot_wrong = 0, cold = 0, cold_main = 0;
+      int breaks = 0, cut_large = 0, hot = 0, hot_wrong = 0;
       for (const Cell& c : l.cells) {
-        if (!stress_rule_allows(l, c.frame, c.lo, c.size, top, want_finest, *gramp, ref, 1.0)) ++breaks;
-        if (c.size > main * (1 + 1e-9)) ++above_main;                       // C21
+        if (!stress_rule_allows(l, c.frame, c.lo, c.size, 8.0, want_finest, *gramp, ref, 1.0)) ++breaks;
         if (c.cut && c.size > want_finest * (1 + 1e-9)) ++cut_large;        // C20
-        const double x = cell_centre(l, c).x;
-        if (x > 48.0) { ++hot; if (std::fabs(c.size - want_finest) > 1e-9) ++hot_wrong; }
-        if (x + 0.5 * c.size < 16.0) { ++cold; if (std::fabs(c.size - main) < 1e-9) ++cold_main; }
+        if (cell_centre(l, c).x > 48.0) { ++hot; if (std::fabs(c.size - want_finest) > 1e-9) ++hot_wrong; }
       }
-      CHECK(main < 8.0 - 1e-9);                         // the main size is below the base cell here
+      // Where the stress is nothing (cells wholly at x < 16) the cells are today's.
+      auto cold_cells = [](const Layout& lay) {
+        std::vector<Cell> out;
+        for (const Cell& c : lay.cells) if (cell_centre(lay, c).x + 0.5 * c.size <= 16.0) out.push_back(c);
+        return out;
+      };
       NEAR(finest, want_finest, 1e-9);
-      CHECK(breaks == 0 && above_main == 0 && cut_large == 0);
+      CHECK(breaks == 0 && cut_large == 0);
       CHECK(hot > 0 && hot_wrong == 0);
-      CHECK(cold > 0 && cold_main > 0);
+      CHECK(!cold_cells(today).empty() && cold_cells(l) == cold_cells(today));
       CHECK(l.cells.size() > today.cells.size());
-      std::printf("C22 one grid, %s: main %.3f mm, %zu cells cold, %zu with the ramp\n",
-                  a == 0 ? "Default Grade" : "Stepped", main, today.cells.size(), l.cells.size());
+      std::printf("C22 one grid, %s: %zu cells cold, %zu with the ramp\n", a == 0 ? "Default Grade" : "Stepped",
+                  today.cells.size(), l.cells.size());
+    }
+    {  // C20 acts only when the region grades its cells: with one size (Uniform) the base cell is cut wherever the
+       // wall falls, and none is split.
+      CellSpec uni = off;
+      uni.algorithm = Algorithm::Uniform;
+      uni.one_grid = true;
+      const Layout u = lay_cells(dg, uni);
+      int other = 0, cut = 0;
+      for (const Cell& c : u.cells) { other += std::fabs(c.size - 8.0) > 1e-9; cut += c.cut; }
+      CHECK(!u.cells.empty() && other == 0 && cut > 0 && u.solid.empty());
     }
   }
   block("12 Let walls cut cells");
