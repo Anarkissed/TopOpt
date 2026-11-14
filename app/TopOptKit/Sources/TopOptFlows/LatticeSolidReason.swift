@@ -30,8 +30,9 @@ public struct SolidReason: Equatable, Sendable {
     /// The line and its fixes, or nil when too little is solid to say.
     public static func of(share: Double, nocell: [Int], lattice l: LatticeSettings) -> SolidReason? {
         guard share >= worthSaying, nocell.count >= 5 else { return nil }
-        // the main reason by volume; Sliver is never recorded today (LatticeReview), and Other only when nothing else is
-        let ranked = [Cause.wallNarrow, .tooFewAcross, .regionShallow].sorted { nocell[$0.rawValue] > nocell[$1.rawValue] }
+        // the main reason by volume (ties keep this order); Sliver is P8 (f)'s thin cut piece against solid (LatticeReview
+        // c3b4f855); Other only when nothing else is
+        let ranked = [Cause.wallNarrow, .tooFewAcross, .regionShallow, .sliver].sorted { nocell[$0.rawValue] > nocell[$1.rawValue] }
         let cause: Cause = nocell[ranked[0].rawValue] > 0 ? ranked[0] : .other
         let pct = Int((100 * share).rounded())
         let why: String
@@ -39,7 +40,8 @@ public struct SolidReason: Equatable, Sendable {
         case .wallNarrow: why = "the walls there are too thin for a whole cell"
         case .tooFewAcross: why = "too narrow for the cells across it needs"
         case .regionShallow: why = "the region is too shallow for a cell"
-        case .sliver, .other: why = "no cell fits there"
+        case .sliver: why = "cut pieces there are too thin to hold a strut"
+        case .other: why = "no cell fits there"
         }
         let aesthetic = (l.stageMode ?? .structural) == .aesthetic
         var fixes: [Fix] = []

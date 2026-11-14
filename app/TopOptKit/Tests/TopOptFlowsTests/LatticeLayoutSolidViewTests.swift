@@ -97,6 +97,13 @@ final class LatticeLayoutSolidViewTests: XCTestCase {
         l.stageMode = .aesthetic
         XCTAssertEqual(SolidReason.of(share: 0.3, nocell: [0, 0, 10, 0, 0], lattice: l)?.fixes, [.letWallsCutCells, .oneCellAcross])
         XCTAssertNil(SolidReason.of(share: 0.02, nocell: [0, 10, 0, 0, 0], lattice: l), "RED CONTROL: 2% solid says nothing")
+        // P8 (f), LatticeReview c3b4f855: a cut piece thinner than its strut, lying against solid, is solid (NoCell::Sliver)
+        let thin = SolidReason.of(share: 0.1, nocell: [2, 5, 0, 40, 0], lattice: l)
+        XCTAssertEqual(thin?.cause, .sliver, "★ a thin cut piece is its own reason when it holds the most solid")
+        XCTAssertEqual(thin?.line, "10% of the lattice you asked for is solid: cut pieces there are too thin to hold a strut")
+        XCTAssertEqual(thin?.fixes, [], "★ no fix chip for a thin cut piece (LatticeReview)")
+        XCTAssertEqual(SolidReason.of(share: 0.1, nocell: [0, 40, 0, 5, 0], lattice: l)?.cause, .wallNarrow,
+                       "a few thin pieces under a thin wall: the wall is the reason")
         var applied = l
         SolidReason.apply(.letWallsCutCells, to: &applied)
         XCTAssertTrue(applied.letWallsCutCells, "★ a tap takes the fix")
