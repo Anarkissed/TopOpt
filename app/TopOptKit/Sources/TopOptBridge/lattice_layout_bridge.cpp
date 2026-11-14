@@ -4,6 +4,7 @@
 #include "bridge_guard.hpp"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <map>
@@ -140,6 +141,7 @@ ll::Settings settings_from(const LatticeLayoutSettings& in) {
   s.skin_spec.reach_cells = in.skin_reach_cells;
   s.drop_loose = in.drop_loose;
   s.small_cells_in_thin_walls = in.small_cells_in_thin_walls;
+  s.one_grid = in.one_grid;
   return s;
 }
 
@@ -308,8 +310,11 @@ LatticeLayoutGrid lattice_layout_grid(int64_t session, float origin_x, float ori
     const std::size_t n = static_cast<std::size_t>(nx) * ny * nz;
     std::vector<uint8_t> cls(n, 0);   // 0 outside, 1 solid, 2 open
     std::atomic<int32_t> next{0};
+    std::array<int64_t, 5> nocell_total{};
+    std::mutex nocell_mu;
     auto work = [&] {
       const ll::Domain::Probe probe = domain->probe();   // one per thread
+      std::array<int64_t, 5> local{};
       for (int32_t z = next++; z < nz; z = next++) {
         if (s->stop.load()) return;
         for (int32_t y = 0; y < ny; ++y) {
@@ -318,16 +323,24 @@ LatticeLayoutGrid lattice_layout_grid(int64_t session, float origin_x, float ori
             const ll::Where w = probe.where(p);
             uint8_t c = 1;
             if (w.why == ll::Why::Outside) c = 0;
-            else if (w.why == ll::Why::Lattice) c = solid_at(probe, p, w) ? 3 : 2;   // 3: asked for, no cell holds it (D14: solid)
+            else if (w.why == ll::Why::Lattice) {
+              c = solid_at(probe, p, w) ? 3 : 2;   // 3: asked for, no cell holds it (D14: solid)
+              if (c == 3) ++local[std::min<std::size_t>(4, static_cast<std::size_t>(solid_at.why(probe, p).why))];
+            }
             cls[(static_cast<std::size_t>(z) * ny + y) * nx + x] = c;
           }
         }
       }
+      std::lock_guard<std::mutex> g(nocell_mu);
+      for (std::size_t k = 0; k < 5; ++k) nocell_total[k] += local[k];
     };
     const unsigned threads = std::max(1u, std::thread::hardware_concurrency());
     std::vector<std::thread> pool;
-    for (unsigned i = 1; i < threads; ++i) pool.emplace_back(work);
-    work();
+    auto counted = [&] {
+      work();
+    };
+    for (unsigned i = 1; i < threads; ++i) pool.emplace_back(counted);
+    counted();
     for (auto& t : pool) t.join();
     if (s->stop.load()) return;
     o.rg.assign(2 * n, static_cast<int8_t>(-127));
@@ -349,6 +362,7 @@ LatticeLayoutGrid lattice_layout_grid(int64_t session, float origin_x, float ori
           o.rg[2 * i] = open ? 127 : -127;
           o.rg[2 * i + 1] = c != 0 ? 127 : -127;
         }
+    o.nocell.assign(nocell_total.begin(), nocell_total.end());
     o.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
   });
   if (!why.empty()) {

@@ -2353,6 +2353,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// thinnest strut instead of going solid (core's Settings::small_cells_in_thin_walls). Read by the new engine only. Not written
     /// while off, so older bytes are unchanged.
     public var smallCellsInThinWalls: Bool = false
+    /// ★ "LET WALLS CUT CELLS" (his ruling 11-14 00:55 + 01:00): one even grid of cells that the part's walls, pockets and
+    /// skins cut through, in place of whole cells fitted to each wall. Per part, Aesthetic only (Structural keeps cells fitted
+    /// to walls and the app sends false). Not written while off, so older bytes are unchanged.
+    public var letWallsCutCells: Bool = false
     /// ★★★ ALLOW QUILT (his ruling, 2026-09-12). Octet only. Off: every density on this
     /// project — simulated, automatic, uniform, per-region — is held under
     /// `LatticeType.aestheticDensityCeiling` (strut = 0.20 of the cell, windows half
@@ -2646,7 +2650,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // keeps asking for the solve it has always asked for.
         case simulateStresses
         // sub-floor retention (task 2026-08-05-lattice-retention-app-control)
-        case retainSubfloorInUnloadedRegions, subfloorStressFraction, singleCellMembers, smallCellsInThinWalls
+        case retainSubfloorInUnloadedRegions, subfloorStressFraction, singleCellMembers, smallCellsInThinWalls, letWallsCutCells
         case allowQuilt
         case subfloorPerRegion, reportRegionCells
         // the enclosed-void rule's OFF control
@@ -2810,6 +2814,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // Absent from every older snapshot ⇒ off ⇒ core's floor of 2, unchanged.
         singleCellMembers = try c.decodeIfPresent(Bool.self, forKey: .singleCellMembers) ?? false
         smallCellsInThinWalls = try c.decodeIfPresent(Bool.self, forKey: .smallCellsInThinWalls) ?? false
+        letWallsCutCells = try c.decodeIfPresent(Bool.self, forKey: .letWallsCutCells) ?? false
         // Absent from every older snapshot ⇒ off ⇒ the ceiling holds, as it should.
         allowQuilt = try c.decodeIfPresent(Bool.self, forKey: .allowQuilt) ?? false
         reportRegionCells = try c.decodeIfPresent(Bool.self, forKey: .reportRegionCells) ?? false
@@ -2916,6 +2921,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                      forKey: .retainSubfloorInUnloadedRegions)
         try c.encode(singleCellMembers, forKey: .singleCellMembers)
         if smallCellsInThinWalls { try c.encode(true, forKey: .smallCellsInThinWalls) }   // ★ 11-13: off is not written
+        if letWallsCutCells { try c.encode(true, forKey: .letWallsCutCells) }             // ★ 11-14: off is not written
         try c.encode(allowQuilt, forKey: .allowQuilt)
         // encodeIfPresent: "the user has not moved it" must round-trip as ABSENT,
         // not as core's number written into the project — the whole point of the

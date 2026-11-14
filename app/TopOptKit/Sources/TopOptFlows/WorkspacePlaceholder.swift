@@ -1317,6 +1317,9 @@ public struct WorkspacePlaceholder: View {
                 .overlay(alignment: .bottom) {
                     if newEngineDrawn {
                         VStack(spacing: 6) {
+                            if let why = newEngine.solidReason {   // ★ his ruling 11-14: solid where lattice was asked — why, and fixes
+                                LatticeSolidReasonBar(reason: why) { fix in SolidReason.apply(fix, to: &project.lattice) }
+                            }
                             LatticeFileExportBar(export: fileExport, make: exportPrintFile)   // ★ his go 11-13: Export, on the Mac
                             LatticeLayoutPreviewLines(preview: newEngine)
                         }

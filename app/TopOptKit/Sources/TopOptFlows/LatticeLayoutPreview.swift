@@ -29,6 +29,8 @@ public final class LatticeLayoutPreview: ObservableObject {
     @Published public private(set) var notes: [String] = []
     /// ★ his rule 11-14: "recommend changing to a 0.2mm nozzle" when lattice cannot go where asked — one line, or nil.
     @Published public private(set) var nozzleLine: String?
+    /// ★ his ruling 11-14: where asked-for lattice came out solid, why (one line) and one to three fixes he can take.
+    @Published public private(set) var solidReason: SolidReason?
 
     public struct Timing: Equatable, Sendable {
         public var openMS: Double
@@ -74,6 +76,7 @@ public final class LatticeLayoutPreview: ObservableObject {
     private var box: (lo: SIMD3<Float>, hi: SIMD3<Float>)?
     private var mapTask: Task<Void, Never>?
     private var nozzleSession: LatticeLayoutSession?
+    private var latticeAtLay = LatticeSettings()
     private var nozzlePath: String?
 
     public init() {}
@@ -92,6 +95,7 @@ public final class LatticeLayoutPreview: ObservableObject {
             return
         }
         lastSettings = s
+        latticeAtLay = p.lattice
         task?.cancel()
         laying = true
         task = Task { [weak self] in await self?.lay(path: path, s) }
@@ -101,7 +105,7 @@ public final class LatticeLayoutPreview: ObservableObject {
     public func clear() {
         task?.cancel(); task = nil
         mapTask?.cancel(); mapTask = nil
-        nozzleSession?.close(); nozzleSession = nil; nozzlePath = nil; nozzleLine = nil
+        nozzleSession?.close(); nozzleSession = nil; nozzlePath = nil; nozzleLine = nil; solidReason = nil
         session?.close(); session = nil; sessionPath = nil; lastSettings = nil
         bars = nil; problem = nil; timing = nil; laying = false
     }
@@ -124,7 +128,7 @@ public final class LatticeLayoutPreview: ObservableObject {
             problem = r.barCount == 0 ? "New engine: no lattice fits these settings" : nil
             laying = false
             if solidWanted { await addMap() }
-            await nozzleCheck(path: path, s)   // after the layout and its map: never while a setting moves
+            await nozzleCheck(path: path, s, lattice: latticeAtLay)   // after the layout and its map: never while a setting moves
         } catch is CancellationError {
             // a newer setting is laying
         } catch {
@@ -143,12 +147,18 @@ public final class LatticeLayoutPreview: ObservableObject {
 
     /// Asked-for lattice no cell holds, as a share of all asked-for lattice, from the engine's own map (a coarse one).
     static func unheldShare(_ s: LatticeLayoutSession, _ box: (lo: SIMD3<Float>, hi: SIMD3<Float>)) async throws -> Double? {
+        try await unheldReport(s, box)?.share
+    }
+
+    /// The same, with the unheld voxels by core's reason (NoCell: Other, WallNarrow, TooFewAcross, Sliver, RegionShallow).
+    static func unheldReport(_ s: LatticeLayoutSession, _ box: (lo: SIMD3<Float>, hi: SIMD3<Float>)) async throws
+        -> (share: Double, nocell: [Int])? {
         let ext = simd_max(box.hi - box.lo, SIMD3(repeating: 0.1))
         let voxel = Swift.max(0.6, Float(cbrt(Double(ext.x * ext.y * ext.z) / 250_000)))
         let dims = SIMD3<Int32>(Int32((ext.x / voxel).rounded(.up)) + 3, Int32((ext.y / voxel).rounded(.up)) + 3,
                                 Int32((ext.z / voxel).rounded(.up)) + 3)
         let r = try await s.grid(origin: box.lo - SIMD3(repeating: voxel), voxel: voxel, dims: dims)
-        return r.asked > 0 ? Double(r.unheld) / Double(r.asked) : nil
+        return r.asked > 0 ? (Double(r.unheld) / Double(r.asked), r.nocell) : nil
     }
 
     /// How much of what is solid now a 0.2 mm nozzle would lattice (0 … 1), laying `settings` again in `fine` with only the line
@@ -163,9 +173,15 @@ public final class LatticeLayoutPreview: ObservableObject {
         return Swift.max(0, (now - then) / now)
     }
 
-    private func nozzleCheck(path: String, _ s: LatticeLayoutSession.Settings) async {
+    private func nozzleCheck(path: String, _ s: LatticeLayoutSession.Settings, lattice: LatticeSettings) async {
         nozzleLine = nil
         guard let session, let box, !Task.isCancelled else { return }
+        // ★ his ruling 11-14: why, and the fixes (before the second layout, so the line comes first)
+        if let rep = try? await Self.unheldReport(session, box), !Task.isCancelled {
+            solidReason = SolidReason.of(share: rep.share, nocell: rep.nocell, lattice: lattice)
+        } else {
+            solidReason = nil
+        }
         do {
             if nozzleSession == nil || nozzlePath != path {
                 nozzleSession?.close()
@@ -284,6 +300,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         // ★ cells across a wall (C3-C5): Structural five; Aesthetic one with "Allow single-cell members", else two
         let aesthetic = (l.stageMode ?? .structural) == .aesthetic
         s.minCellsAcross = aesthetic ? (l.singleCellMembers ? 1 : 2) : 5
+        s.oneGrid = aesthetic && l.letWallsCutCells   // ★ his 11-14: Aesthetic only; Structural always sends false
         // ★ density (R10): core's dial is the percent he sees / 100 (0.01 thinnest ... 1 widest); a typed strut width wins
         let rowDensity = l.densityMode != .sim && (l.densityMode == .perRegion || aesthetic)
         s.perRegion = rowDensity
