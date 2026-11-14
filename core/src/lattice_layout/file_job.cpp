@@ -199,7 +199,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
 FileOptions options_from(const json::Value& in, const std::string& w) {
   json::reject_unknown(in,
                        {"pitch_mm", "bar_sides", "block_mm", "grow_mm", "clean_mm", "part_mm",
-                        "fill_under_mm3", "bridge_rise", "post_mm", "layer_mm", "pixel_mm", "most_passes",
+                        "fill_under_mm3", "bridge_rise", "post_mm", "fillet_mm", "layer_mm", "pixel_mm", "most_passes",
                         "leave_out", "keep_if_not_clean"},
                        w);
   FileOptions o;
@@ -212,6 +212,7 @@ FileOptions options_from(const json::Value& in, const std::string& w) {
   o.mesh.fill_under_mm3 = num(in, "fill_under_mm3", o.mesh.fill_under_mm3, w);
   o.mesh.bridge_rise = num(in, "bridge_rise", o.mesh.bridge_rise, w);
   o.mesh.post_mm = num(in, "post_mm", o.mesh.post_mm, w);
+  o.mesh.fillet_mm = num(in, "fillet_mm", o.mesh.fillet_mm, w);
   o.layers.layer_mm = num(in, "layer_mm", o.layers.layer_mm, w);
   o.layers.pixel_mm = num(in, "pixel_mm", o.layers.pixel_mm, w);
   o.most_passes = whole(in, "most_passes", o.most_passes, w);
@@ -223,6 +224,7 @@ FileOptions options_from(const json::Value& in, const std::string& w) {
   if (!(o.pitch_mm > 0.0)) json::fail(w + ".pitch_mm", "must be above 0");
   if (o.mesh.bar_sides < 3) json::fail(w + ".bar_sides", "must be 3 or more");
   if (!(o.mesh.block_mm > 0.0)) json::fail(w + ".block_mm", "must be above 0");
+  if (!(o.mesh.fillet_mm >= 0.0)) json::fail(w + ".fillet_mm", "must be 0 or more");
   return o;
 }
 
@@ -808,9 +810,9 @@ std::string file_result_json(const FileResult& r) {
   o += b;
   std::snprintf(b, sizeof b,
                 "    \"loose_bits\": %llu, \"loose_mm3\": %.9g, \"flat_triangles\": %llu, "
-                "\"open_boxes\": %llu, \"builds\": %d},\n",
+                "\"open_boxes\": %llu, \"builds\": %d,\n    \"fillet_mm\": %.9g, \"flares\": %llu, \"fillet_held\": %llu},\n",
                 count(m.loose_bits), m.loose_mm3, count(m.flat_triangles), count(r.made.open_boxes),
-                r.made.builds);
+                r.made.builds, m.fillet_mm, count(m.flares), count(m.fillet_held));
   o += b;
   {
     // His print rules, as measured on the mesh the file holds, and what the loop did to get there.

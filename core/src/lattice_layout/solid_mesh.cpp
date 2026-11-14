@@ -594,6 +594,9 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
   // Every strut is written a little longer than its bar (MeshSpec::strut_reach_mm): each end is carried on along the
   // bar's own line, so a strut that ends on solid is fused into it across the open space's last column.
   const double reach = spec.strut_reach_mm < 0.0 ? 0.5 * kept.pitch_mm + kept.grow_mm + 0.05 : spec.strut_reach_mm;
+  // S12, the joint fillet. 0 (or below) = off: every strut and ball exactly as before.
+  const double fillet = spec.fillet_mm > 0.0 ? spec.fillet_mm : 0.0;
+  rep.fillet_mm = fillet;
   Manifold struts;
   {
     std::vector<Manifold> solids;
@@ -631,8 +634,46 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
         const double l1 = std::sqrt(e1.x * e1.x + e1.y * e1.y + e1.z * e1.z);
         e1 = {e1.x / l1, e1.y / l1, e1.z / l1};
         const Vec3 e2{d.y * e1.z - d.z * e1.y, d.z * e1.x - d.x * e1.z, d.x * e1.y - d.y * e1.x};
-        solids.push_back(Manifold::Cylinder(len + pa + pb, r * kRound, r * kRound, SEG)
-                             .Transform(manifold::mat3x4(mv(e1), mv(e2), mv(d), mv(a))));
+        // S12: an end the part's surface does not cut flush flares into its joint by f_eff = min(fillet, r).
+        const double fa = fillet > 0.0 && x.end_a != Bar::End::Surface ? std::min(fillet, r) : 0.0;
+        const double fb = fillet > 0.0 && x.end_b != Bar::End::Surface ? std::min(fillet, r) : 0.0;
+        if (fa > 0.0 || fb > 0.0) {
+          rep.flares += (fa > 0.0) + (fb > 0.0);
+          rep.fillet_held += fillet > r;
+          // The strut as a solid turned about its own line: its half width along it (t from the run-on's tip at a,
+          // 0, to the one at b, T) is the largest of its own r and each end's cone. A cone is r + f at its end point
+          // and the run-on past it, and comes down in a straight line to r at r + 3 f from the end point.
+          const double T = len + pa + pb, ta = pa, tb = pa + len;
+          const double la = r + 3.0 * fa, lb = r + 3.0 * fb;
+          auto cone_a = [&](double t) { return fa > 0.0 ? r + fa - fa * std::clamp((t - ta) / la, 0.0, 1.0) : r; };
+          auto cone_b = [&](double t) { return fb > 0.0 ? r + fb - fb * std::clamp((tb - t) / lb, 0.0, 1.0) : r; };
+          auto half = [&](double t) { return std::max(cone_a(t), cone_b(t)); };
+          std::vector<double> at{0.0, T};
+          for (double t : {ta, ta + la, tb - lb, tb})
+            if (t > 0.0 && t < T) at.push_back(t);
+          std::sort(at.begin(), at.end());
+          // Where the two cones cross (a strut shorter than its two flares), the corner of the largest.
+          if (fa > 0.0 && fb > 0.0) {
+            // cone_a = r + fa - fa (t - ta) / la and cone_b = r + fb - fb (tb - t) / lb, on the stretch where both slope.
+            const double ka = fa / la, kb = fb / lb;
+            const double t = (fa - fb + ka * ta + kb * tb) / (ka + kb);
+            if (t > std::max(ta, tb - lb) && t < std::min(ta + la, tb)) at.push_back(t);
+            std::sort(at.begin(), at.end());
+          }
+          manifold::SimplePolygon side;
+          side.push_back({0.0, 0.0});
+          double last = -1.0;
+          for (double t : at) {
+            if (t - last < 1e-9) continue;
+            last = t;
+            side.push_back({half(t) * kRound, t});
+          }
+          side.push_back({0.0, T});
+          solids.push_back(Manifold::Revolve({side}, SEG).Transform(manifold::mat3x4(mv(e1), mv(e2), mv(d), mv(a))));
+        } else {
+          solids.push_back(Manifold::Cylinder(len + pa + pb, r * kRound, r * kRound, SEG)
+                               .Transform(manifold::mat3x4(mv(e1), mv(e2), mv(d), mv(a))));
+        }
       }
       ++rep.bars;
       centres.push_back({0.5 * (x.a.x + x.b.x), 0.5 * (x.a.y + x.b.y), 0.5 * (x.a.z + x.b.z)});
@@ -655,7 +696,9 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
       rep.posts_mm += p.z_top - p.z_bottom;
     }
     for (const auto& kv : balls) {
-      solids.push_back(Manifold::Sphere(kv.second.r * kRound, SEG).Translate(mv(kv.second.at)));
+      // S12: with a fillet the ball is the widest strut's half width plus min(fillet, that half width).
+      const double br = kv.second.r + std::min(fillet, kv.second.r);
+      solids.push_back(Manifold::Sphere(br * kRound, SEG).Translate(mv(kv.second.at)));
       centres.push_back(kv.second.at);
     }
     rep.balls = balls.size();

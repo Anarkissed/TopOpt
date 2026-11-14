@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -1084,6 +1085,303 @@ static void test_skin_never_thinned() {
   CHECK(thin[1] == 0);
 }
 
+// ── S12: the joint fillet (MeshSpec::fillet_mm) ──────────────────────────────
+// The narrowest width square to a line through `p` (the line's direction `d`): across a strut's flats.
+static double across(const PartMeasure::Probe& in, const Vec3& p, Vec3 d) {
+  const double l = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+  d = {d.x / l, d.y / l, d.z / l};
+  Vec3 e1 = std::fabs(d.x) < 0.9 ? Vec3{0, -d.z, d.y} : Vec3{-d.z, 0, d.x};
+  const double l1 = std::sqrt(e1.x * e1.x + e1.y * e1.y + e1.z * e1.z);
+  e1 = {e1.x / l1, e1.y / l1, e1.z / l1};
+  const Vec3 e2{d.y * e1.z - d.z * e1.y, d.z * e1.x - d.x * e1.z, d.x * e1.y - d.y * e1.x};
+  if (in.depth(p) <= 0.0) return 0.0;
+  double narrowest = 1e9;
+  for (int a = 0; a < 360; ++a) {
+    const double t = 3.14159265358979323846 * a / 360.0;
+    narrowest = std::min(narrowest, in.wall_width(p, {std::cos(t) * e1.x + std::sin(t) * e2.x, std::cos(t) * e1.y + std::sin(t) * e2.y,
+                                                      std::cos(t) * e1.z + std::sin(t) * e2.z}));
+  }
+  return narrowest;
+}
+// The narrowest width through `p` over every direction (a ball's width, where nothing wider stands across it).
+static double through_all(const PartMeasure::Probe& in, const Vec3& p) {
+  double narrowest = 1e9;
+  for (int a = 0; a < 90; ++a)
+    for (int b = 0; b < 45; ++b) {
+      const double t = 3.14159265358979323846 * a / 90.0, u = 3.14159265358979323846 * (b + 0.5) / 90.0;
+      narrowest = std::min(narrowest, in.wall_width(p, {std::cos(t) * std::sin(u), std::sin(t) * std::sin(u), std::cos(u)}));
+    }
+  return narrowest;
+}
+static double surface_on(const TriangleMesh& m, int axis, double at) {   // area of the triangles lying in a plane
+  double a = 0.0;
+  for (const auto& t : m.triangles) {
+    const Vec3 &p = m.vertices[static_cast<std::size_t>(t[0])], &q = m.vertices[static_cast<std::size_t>(t[1])],
+               &s = m.vertices[static_cast<std::size_t>(t[2])];
+    const double c[3] = {axis == 0 ? p.x : axis == 1 ? p.y : p.z, axis == 0 ? q.x : axis == 1 ? q.y : q.z, axis == 0 ? s.x : axis == 1 ? s.y : s.z};
+    if (std::fabs(c[0] - at) > 1e-6 || std::fabs(c[1] - at) > 1e-6 || std::fabs(c[2] - at) > 1e-6) continue;
+    const Vec3 e1{q.x - p.x, q.y - p.y, q.z - p.z}, e2{s.x - p.x, s.y - p.y, s.z - p.z};
+    const Vec3 n{e1.y * e2.z - e1.z * e2.y, e1.z * e2.x - e1.x * e2.z, e1.x * e2.y - e1.y * e2.x};
+    a += 0.5 * std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+  }
+  return a;
+}
+static void test_fillet() {
+  // (1) Off: today's mesh, triangle for triangle, on the block of test_block and the skinned cube of test_whole_part.
+  {
+    PartMeasure pm(weld_mesh(box(30, 30, 12)));
+    DomainSpec s;
+    s.min_strut_lines = 2.0;
+    s.regions = {face_region(1, {15, 15, 12}, {0, 0, -1}, 15, 15, 8, -2.0)};
+    Domain d(pm, s);
+    CellSpec cs;
+    cs.algorithm = Algorithm::Uniform;
+    cs.cell_max_mm = 8;
+    cs.min_cells_across = 1;
+    const Laid l = lay(d, cs);
+    const OpenSpace open = read_open_space(d, l.layout, 0.25);
+    MeshSpec off;
+    off.fillet_mm = 0.0;
+    MeshReport r0, r1;
+    const TriangleMesh m0 = build_mesh(pm, d, l.layout, l.bars, open, MeshSpec{}, &r0);
+    const TriangleMesh m1 = build_mesh(pm, d, l.layout, l.bars, open, off, &r1);
+    CHECK(r1.ok && same_mesh(m0, m1) && r1.triangles == r0.triangles && r1.mm3 == r0.mm3);
+    CHECK(r1.fillet_mm == 0.0 && r1.flares == 0 && r1.fillet_held == 0);
+    std::printf("fillet off, block: %zu triangles, %.9g mm3\n", r1.triangles, r1.mm3);
+  }
+  {
+    const TriangleMesh b = box(16, 16, 16);
+    PartMeasure pm(weld_mesh(b));
+    DomainSpec s;
+    s.start = Start::AllLattice;
+    s.min_strut_lines = 2.0;
+    s.protect.push_back({1, b, 1.2});
+    Domain d(pm, s);
+    CellSpec cs;
+    cs.algorithm = Algorithm::Uniform;
+    cs.cell_mm = 6.8;
+    cs.min_cells_across = 1;
+    const Laid l = lay(d, cs);
+    const OpenSpace open = read_open_space(d, l.layout, 0.25);
+    MeshSpec off;
+    off.fillet_mm = 0.0;
+    MeshReport r0, r1;
+    const TriangleMesh m0 = build_mesh(pm, d, l.layout, l.bars, open, MeshSpec{}, &r0);
+    const TriangleMesh m1 = build_mesh(pm, d, l.layout, l.bars, open, off, &r1);
+    CHECK(r1.ok && same_mesh(m0, m1) && r1.triangles == r0.triangles && r1.mm3 == r0.mm3);
+    std::printf("fillet off, skinned cube: %zu triangles, %.9g mm3\n", r1.triangles, r1.mm3);
+  }
+  // (2)-(5), (8): an 8 mm octet block, 0.9 mm struts. A 34 x 34 x 16 block, lattice under its top face 12 mm deep,
+  // pulled 1 mm in from the edge.
+  PartMeasure pm(weld_mesh(box(34, 34, 16)));
+  DomainSpec s;
+  s.min_strut_lines = 2.0;
+  s.regions = {face_region(1, {17, 17, 16}, {0, 0, -1}, 17, 17, 12, -1.0)};
+  Domain d(pm, s);
+  CellSpec cs;
+  cs.algorithm = Algorithm::Uniform;
+  cs.cell_mm = 8;
+  cs.min_cells_across = 1;
+  Laid l;
+  l.layout = lay_cells(d, cs);
+  StrutSpec ss;
+  ss.width_mm = 0.9;
+  set_struts(l.layout, ss);
+  l.bars = lay_bars(l.layout, d);
+  join_loose_bars(l.bars, d, 0, &l.layout);
+  drop_loose_bars(l.bars);
+  drop_adrift_bars(l.bars, d, &l.layout);
+  const double r = 0.45, f = 0.3;
+  bool one_width = !l.bars.bars.empty();
+  for (const Bar& b : l.bars.bars) one_width = one_width && std::fabs(b.width - 0.9) < 1e-12;
+  CHECK(one_width);
+  const OpenSpace open = read_open_space(d, l.layout, 0.25);
+  const Carved carved = carve_part(pm, l.layout, open);
+  CHECK(carved.ok);
+  auto timed = [&](const MeshSpec& ms, MeshReport* rep, double* ms_best) {
+    TriangleMesh m;
+    *ms_best = 1e300;
+    for (int k = 0; k < 2; ++k) {   // the better of two
+      const auto t0 = std::chrono::steady_clock::now();
+      m = build_mesh(pm, d, l.layout, l.bars, carved, ms, rep);
+      *ms_best = std::min(*ms_best, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+    }
+    return m;
+  };
+  MeshSpec at0, atf;
+  atf.fillet_mm = f;
+  MeshReport r0, rf;
+  double t0 = 0.0, tf = 0.0;
+  const TriangleMesh m0 = timed(at0, &r0, &t0);
+  const TriangleMesh mf = timed(atf, &rf, &tf);
+  CHECK(r0.ok && rf.ok);
+  const Read q0 = read_mesh(m0), qf = read_mesh(mf);
+  std::printf("fillet, 8 mm octet block: %zu cells, %zu bars (%zu bridges), %zu balls; f = 0: %zu triangles, %.3f mm3 (struts %.3f), "
+              "%.0f ms; f = %.1f: %zu triangles, %.3f mm3 (struts %.3f), %.0f ms (x %.2f); %zu ends flared, %zu struts held\n",
+              l.layout.cells.size(), rf.bars, rf.bridges, rf.balls, r0.triangles, r0.mm3, r0.struts_mm3, t0, f, rf.triangles, rf.mm3,
+              rf.struts_mm3, tf, tf / t0, rf.flares, rf.fillet_held);
+  // (2) Closed, one piece as before; larger, by less than a quarter (the struts as well as the whole).
+  CHECK(qf.edges_not_twice == 0 && qf.flat == 0 && qf.shells == q0.shells && rf.sealed_spaces == r0.sealed_spaces);
+  CHECK(rf.mm3 > r0.mm3 && rf.mm3 < 1.25 * r0.mm3);
+  CHECK(rf.struts_mm3 > r0.struts_mm3 && rf.struts_mm3 < 1.25 * r0.struts_mm3);
+  CHECK(rf.fillet_mm == f && rf.flares > 0 && rf.fillet_held == 0);
+  // (8) Time: the mesh from the part (carved in it, as build_mesh is asked for it), and the struts and the finish
+  // alone (from the part carved once, as the make-check-make loop builds it); the better of two each.
+  {
+    double c0 = 1e300, cf = 1e300;
+    for (int k = 0; k < 2; ++k)
+      for (const MeshSpec* ms : {&at0, &atf}) {
+        const auto t = std::chrono::steady_clock::now();
+        (void)build_mesh(pm, d, l.layout, l.bars, open, *ms);
+        const double took = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t).count();
+        double& best = ms == &at0 ? c0 : cf;
+        best = std::min(best, took);
+      }
+    std::printf("fillet, time: the mesh from the part %.0f ms at f = 0, %.0f ms at f = %.1f (x %.2f); from the part carved once %.0f "
+                "and %.0f ms (x %.2f)\n", c0, cf, f, cf / c0, t0, tf, tf / t0);
+    CHECK(cf <= 1.5 * c0);
+  }
+  const PartMeasure w0(weld_mesh(m0)), wf(weld_mesh(mf));
+  const PartMeasure::Probe in0 = w0.probe(), inf = wf.probe();
+  // Whole round struts between two nodes, well inside the lattice.
+  std::vector<const Bar*> whole;
+  for (const Bar& b : l.bars.bars)
+    if (!b.piece && !b.skin && !bar_is_bridge(b) && b.end_a == Bar::End::Node && b.end_b == Bar::End::Node &&
+        std::min(b.a.z, b.b.z) > 5.0 && std::max(b.a.z, b.b.z) < 15.0)
+      whole.push_back(&b);
+  CHECK(whole.size() >= 4);
+  // A cut across each strut's middle: the same width as at f = 0.
+  double worst_mid = 0.0;
+  for (const Bar* b : whole) {
+    const Vec3 m{0.5 * (b->a.x + b->b.x), 0.5 * (b->a.y + b->b.y), 0.5 * (b->a.z + b->b.z)};
+    const Vec3 dir{b->b.x - b->a.x, b->b.y - b->a.y, b->b.z - b->a.z};
+    worst_mid = std::max(worst_mid, std::fabs(across(inf, m, dir) - across(in0, m, dir)));
+  }
+  // A cut through each joint: at least 2 (r + f) - 0.02 across the ball.
+  double least_joint = 1e9, least_joint0 = 1e9;
+  for (const Bar* b : whole) {
+    least_joint = std::min(least_joint, through_all(inf, b->a));
+    least_joint0 = std::min(least_joint0, through_all(in0, b->a));
+  }
+  std::printf("fillet, cuts: middles differ from f = 0 by %.4f mm at most (%zu struts); the narrowest cut through a joint %.4f mm "
+              "(%.4f at f = 0), asked at least %.4f\n", worst_mid, whole.size(), least_joint, least_joint0, 2.0 * (r + f) - 0.02);
+  CHECK(worst_mid <= 0.01);
+  CHECK(least_joint >= 2.0 * (r + f) - 0.02);
+  // (3) Along an upright-ish strut, from just past its ball to its middle: never wider toward the middle, and from
+  // r + 3 f on its own width (as at f = 0).
+  {
+    const Bar* up = nullptr;
+    for (const Bar* b : whole) {
+      const double dz = std::fabs(b->b.z - b->a.z), dx = b->b.x - b->a.x, dy = b->b.y - b->a.y;
+      if (dz > 2.0 * std::sqrt(dx * dx + dy * dy)) { up = b; break; }
+    }
+    if (!up)
+      for (const Bar* b : whole)
+        if (!up || std::fabs(b->b.z - b->a.z) > std::fabs(up->b.z - up->a.z)) up = b;
+    CHECK(up != nullptr);
+    if (up) {
+      const Vec3 dir{up->b.x - up->a.x, up->b.y - up->a.y, up->b.z - up->a.z};
+      const double len = std::sqrt(dir.x * dir.x + dir.y * dir.y + dir.z * dir.z);
+      double prev = 1e9, grew = 0.0, worst_own = 0.0;
+      int stations = 0;
+      std::printf("fillet, along a strut (rise %.0f%%):", 100.0 * std::fabs(dir.z) / len);
+      for (double s = r + f + 0.05; s <= 0.5 * len + 1e-9; s += 0.05) {
+        const Vec3 p{up->a.x + dir.x * s / len, up->a.y + dir.y * s / len, up->a.z + dir.z * s / len};
+        const double wnow = across(inf, p, dir);
+        grew = std::max(grew, wnow - prev);
+        prev = wnow;
+        if (s >= r + 3.0 * f + 0.02) worst_own = std::max(worst_own, std::fabs(wnow - across(in0, p, dir)));
+        if (++stations % 4 == 1) std::printf(" %.2f:%.3f", s, wnow);
+      }
+      // Just past its ball it is flared: at s = r + f + 0.05 from the end the cone is wider than the strut by
+      // 2 f (1 - s / (r + 3 f)), 0.24 mm here; asked for more than 0.1.
+      const Vec3 near{up->a.x + dir.x * (r + f + 0.05) / len, up->a.y + dir.y * (r + f + 0.05) / len, up->a.z + dir.z * (r + f + 0.05) / len};
+      const double flared = across(inf, near, dir) - across(in0, near, dir);
+      std::printf("; grew toward the middle by %.4f at most, off its own width past r + 3 f by %.4f at most; just past the ball "
+                  "%.4f wider than at f = 0\n", grew, worst_own, flared);
+      CHECK(stations > 10 && grew <= 0.005 && worst_own <= 0.01);
+      CHECK(flared > 0.1);
+    }
+  }
+  // (4) Bridges stay flat: the layer check on both meshes, one build each.
+  {
+    const LayerReport l0 = check_layers(m0), lf = check_layers(mf);
+    std::printf("fillet, layer check f = 0 / %.1f: mid-air %zu / %zu, one-ended %zu / %zu, long bridges %zu / %zu, sloped underside "
+                "%.3f / %.3f mm2, bed flat %d / %d, longest reach %.2f / %.2f mm\n", f, l0.mid_air.size(), lf.mid_air.size(),
+                l0.one_ended.size(), lf.one_ended.size(), l0.long_bridges.size(), lf.long_bridges.size(), l0.sloped_mm2,
+                lf.sloped_mm2, l0.bed_flat(), lf.bed_flat(), l0.longest_reach_mm, lf.longest_reach_mm);
+    CHECK(rf.bridges > 0);
+    CHECK(l0.mid_air.empty() && lf.mid_air.empty());
+    CHECK(lf.long_bridges.size() <= l0.long_bridges.size() && lf.sloped_mm2 <= l0.sloped_mm2 && lf.bed_flat());
+  }
+  // (5) A fillet wider than the strut's half width is held at it, and counted: f = 0.6 gives the mesh of f = 0.45.
+  {
+    MeshSpec big, at_r;
+    big.fillet_mm = 0.6;
+    at_r.fillet_mm = r;
+    MeshReport rb, rr;
+    const TriangleMesh mb = build_mesh(pm, d, l.layout, l.bars, carved, big, &rb);
+    const TriangleMesh mr = build_mesh(pm, d, l.layout, l.bars, carved, at_r, &rr);
+    std::size_t flared_struts = 0;
+    for (const Bar& b : l.bars.bars)
+      flared_struts += !bar_is_bridge(b) && (b.end_a != Bar::End::Surface || b.end_b != Bar::End::Surface);
+    std::printf("fillet 0.6 on 0.45 struts: %zu struts held (%zu flared), %zu ends flared\n", rb.fillet_held, flared_struts, rb.flares);
+    CHECK(rb.ok && rb.fillet_held == flared_struts && flared_struts > 0 && rr.fillet_held == 0);
+    CHECK(same_mesh(mb, mr) && rb.flares == rr.flares);
+  }
+  // (6) A strut end the surface cuts flush is unchanged: the 16 mm cube latticed whole with no skin (every strut the
+  // cube's faces cut ends in the open). Its bounding box is as at f = 0, and every such end whose strut is long enough
+  // that the flare of its OTHER end stops 0.3 mm or more short of it reads the same width 0.1 mm inside the face.
+  // The area of the mesh lying in the outer faces is printed, not held: a cut strut shorter than r + 3 f flares from
+  // its joint all the way to the face (rule 2), and its cut there is wider (the brief asked it equal; reported).
+  {
+    PartMeasure cube(weld_mesh(box(16, 16, 16)));
+    DomainSpec cs2;
+    cs2.start = Start::AllLattice;
+    cs2.min_strut_lines = 2.0;
+    Domain dc(cube, cs2);
+    CellSpec cc;
+    cc.algorithm = Algorithm::Uniform;
+    cc.cell_mm = 6.8;
+    Layout layout = lay_cells(dc, cc);
+    set_struts(layout, StrutSpec{});
+    const Bars bars = lay_bars(layout, dc);
+    const OpenSpace oc = read_open_space(dc, layout, 0.25);
+    MeshSpec ms;
+    ms.fillet_mm = f;
+    MeshReport a0, a1;
+    const TriangleMesh c0 = build_mesh(cube, dc, layout, bars, oc, MeshSpec{}, &a0);
+    const TriangleMesh c1 = build_mesh(cube, dc, layout, bars, oc, ms, &a1);
+    CHECK(a0.ok && a1.ok && a1.flares > 0);
+    const Read x0 = read_mesh(c0), x1 = read_mesh(c1);
+    double box_off = 0.0, face_off = 0.0;
+    for (int a = 0; a < 3; ++a) box_off = std::max({box_off, std::fabs(x1.lo[a] - x0.lo[a]), std::fabs(x1.hi[a] - x0.hi[a])});
+    for (int a = 0; a < 3; ++a)
+      for (double at : {0.0, 16.0}) face_off = std::max(face_off, std::fabs(surface_on(c1, a, at) - surface_on(c0, a, at)));
+    const PartMeasure p0(weld_mesh(c0)), p1(weld_mesh(c1));
+    const PartMeasure::Probe i0 = p0.probe(), i1 = p1.probe();
+    std::size_t far = 0, near = 0;
+    double worst_end = 0.0;
+    for (const Bar& b : bars.bars) {
+      if (bar_is_bridge(b) || (b.end_a == Bar::End::Surface) == (b.end_b == Bar::End::Surface)) continue;
+      const Vec3 &cut = b.end_a == Bar::End::Surface ? b.a : b.b, &joint = b.end_a == Bar::End::Surface ? b.b : b.a;
+      const Vec3 dir{joint.x - cut.x, joint.y - cut.y, joint.z - cut.z};
+      const double len = std::sqrt(dir.x * dir.x + dir.y * dir.y + dir.z * dir.z), rb = 0.5 * b.width;
+      if (len < rb + 3.0 * std::min(f, rb) + 0.3) { ++near; continue; }
+      ++far;
+      const Vec3 p{cut.x + 0.1 * dir.x / len, cut.y + 0.1 * dir.y / len, cut.z + 0.1 * dir.z / len};
+      worst_end = std::max(worst_end, std::fabs(across(i1, p, dir) - across(i0, p, dir)));
+    }
+    std::printf("fillet, cut ends in the open: bounding box off by %.3g mm; %zu cut struts with their other end's flare 0.3 mm or "
+                "more short of the face, widths 0.1 mm inside it off by %.4f mm at most; %zu cut struts shorter (flared to the "
+                "face); area on an outer face off by %.3g mm2 at most (x = 0: %.4f at f = 0, %.4f at f = %.1f)\n",
+                box_off, far, worst_end, near, face_off, surface_on(c0, 0, 0.0), surface_on(c1, 0, 0.0), f);
+    CHECK(box_off <= 1e-6);
+    CHECK(far > 10 && worst_end <= 0.01);
+    CHECK(x1.edges_not_twice == 0 && x1.flat == 0);
+  }
+}
+
 int main() {
   if (!mesh_available()) {
     MeshReport rep;
@@ -1103,6 +1401,7 @@ int main() {
   test_open_space_merged();
   test_layers();
   test_printable();
+  test_fillet();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }

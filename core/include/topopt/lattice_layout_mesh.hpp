@@ -84,6 +84,17 @@ struct MeshSpec {
   // changed: the preview and the strength check see the same bars. Below 0 = half the open space's pitch + the grow_mm
   // it was carved with + 0.05 mm (0.195 mm at the defaults); 0 = off, the mesh as before.
   double strut_reach_mm = -1.0;
+  // S12, the joint fillet (Manual control 9: "the blend radius where struts meet. Joints are where lattices crack").
+  // 0 = off: the mesh as before, exactly. Above 0, at every strut end the part's surface does not cut flush:
+  //   - the ball at the joint is the widest strut's half width there plus f_eff;
+  //   - a round strut flares into the joint in a straight cone, from its own half width r at r + 3 f_eff from the end
+  //     to r + f_eff at the end (a slope of at most 1 in 3); its middle is not changed, and the run-on past the end
+  //     (strut_reach_mm) keeps the flared width;
+  //   - a bridge does not flare (its underside stays level, P8 c); only the ball at its joint grows.
+  // f_eff = min(fillet_mm, r): a joint is never more than twice its strut (for a ball, r of the widest strut there).
+  // An end that runs into solid flares the same way: the strut meets the wall with a fillet. The layout's bars are
+  // not changed: the preview and the strength check see the same bars.
+  double fillet_mm = 0.0;
   int threads = 0;            // 0 = every core
   // From the layer check. A strut whose LOWEST point is at one of these places is left out
   // (it hangs from above with nothing under its tip), and so is a small separate piece of
@@ -108,6 +119,9 @@ struct MeshReport {
   std::size_t drop_unanswered = 0; // `drop_at` places no strut answered for
   std::size_t posts = 0;
   double posts_mm = 0.0;
+  double fillet_mm = 0.0;          // S12: as asked
+  std::size_t flares = 0;          // round strut ends flared into their joint
+  std::size_t fillet_held = 0;     // round struts flared whose half width is under fillet_mm: held at their half width
   double struts_mm3 = 0.0;         // joined and cut to the part
   double solid_mm3 = 0.0;          // the part less the open space
   std::size_t solid_pieces = 0;

@@ -714,7 +714,40 @@ static void test_by_stress_file() {
   std::remove(path.c_str());
 }
 
+// S12: the joint fillet's key. It lands in the mesh's settings, a negative value is refused by name, and in a made
+// file it reaches the mesh: its struts are flared, and lattice_file.json says so.
+static void test_fillet_key() {
+  {
+    const FileJob j = parse_file_job(R"({"mode": "lattice_file", "model": "a.step", "mesh": {"fillet_mm": 0.25}})");
+    CHECK(j.options.mesh.fillet_mm == 0.25);
+    CHECK(parse_file_job(R"({"mode": "lattice_file", "model": "a.step"})").options.mesh.fillet_mm == 0.0);
+    bool refused = false;
+    try {
+      (void)parse_file_job(R"({"mode": "lattice_file", "model": "a.step", "mesh": {"fillet_mm": -0.1}})");
+    } catch (const FileJobError& e) {
+      refused = has(e.what(), "fillet_mm");
+    }
+    CHECK(refused);
+  }
+  if (!mesh_available()) return;
+  std::string text = kBlockJob;
+  text.replace(text.rfind('}'), 1, R"(, "mesh": {"fillet_mm": 0.3}})");
+  const FileJob job = parse_file_job(text);
+  CHECK(job.options.mesh.fillet_mm == 0.3);
+  const std::string path = kTmp + "/lattice_file_fillet.stl";
+  std::remove(path.c_str());
+  const FileResult r = make_lattice_file(box_model(30, 30, 12), job, path);
+  CHECK(r.ok && r.made.mesh.fillet_mm == 0.3 && r.made.mesh.flares > 0);
+  const std::string t = file_result_json(r);
+  CHECK(has(t, "\"fillet_mm\": 0.3, \"flares\": " + std::to_string(r.made.mesh.flares) + ", \"fillet_held\": " +
+                   std::to_string(r.made.mesh.fillet_held) + "}"));
+  std::printf("fillet key: 0.3 mm in the job, %zu strut ends flared in the file (%zu held), %s\n", r.made.mesh.flares,
+              r.made.mesh.fillet_held, r.made.print_clean ? "print check clean" : "print check NOT clean");
+  std::remove(path.c_str());
+}
+
 int main() {
+  test_fillet_key();
   test_by_stress_file();
   test_no_slit_under_solid();
   test_strut_reach();
