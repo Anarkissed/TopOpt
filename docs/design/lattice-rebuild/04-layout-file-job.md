@@ -28,7 +28,8 @@ The same upload as any job: the model as `step`, the face sidecar as `faces` whe
   "linear_deflection": 0,
   "threads": 0,
   "layout": { },
-  "mesh": { }
+  "mesh": { },
+  "demand": "stress.bin"
 }
 ```
 
@@ -41,6 +42,7 @@ The same upload as any job: the model as `step`, the face sidecar as `faces` whe
 | `threads` | 0 = every core | 0 |
 | `layout` | the lattice settings, below | every default |
 | `mesh` | how the mesh is made, below | every default |
+| `demand` | the stress result for By stress: the name of a file beside the job (a file name only, no folder), in the demand file format below | none: By stress is then refused |
 
 A key the job does not know is refused, so a misspelt setting is never quietly dropped. A key that starts with `_` is a comment and is skipped.
 
@@ -86,6 +88,13 @@ Exactly the fields of the bridge's `LatticeLayoutSettings`, under the same names
 | `skin_width_mm` | 0 | |
 | `skin_reach_cells` | 1.2 | |
 | `drop_loose` | true | |
+| `by_stress` | false | **not in the bridge's struct yet**: By stress (R7, R8, R12, R16 to R18): the stress decides every strut. With `per_region` also true the job is refused (`job_unreadable`). Without `demand` the job is refused (`no_stress_result`) |
+| `dial_light` | 0.01 | By stress, "Grade to": the dial where the stress is nothing |
+| `dial_heavy` | 1.0 | By stress, "Grade from": the dial at or over the reference |
+| `width_light_mm`, `width_heavy_mm` | 0, 0 | By stress, Manual: when BOTH are above 0, the two ends are these strut widths in mm (the same in every cell size) and the dials are not read |
+| `reference_mpa` | 0 | By stress: the stress at which the lattice is at its heavy end. 0 = the part's own: the `percentile` of the stress in the part's lattice space (R17) |
+| `percentile` | 0.95 | read when `reference_mpa` is 0 |
+| `response` | 1 | By stress: the exponent on stress / reference, held to 0.25 .. 4 |
 
 The file matches the preview only if these are the values the preview was laid with.
 
@@ -113,7 +122,8 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
   "layout": {"cells": 4, "solid_pieces": 0, "bars": 36, "at_one_line": 0, "at_widest": 0,
              "stubs": 0, "joined": 0, "dropped": 60, "pieces": 1, "adrift": 0, "stepped_edges": 1, "thin_solid": 0,
              "floor_cell_mm": 2.37, "min_strut_mm": 0.45, "open_look": 0.19, "touch": 0.354,
-             "empty_regions": []},
+             "empty_regions": [],
+             "by_stress": false, "reference_mpa": 0, "highest_mpa": 0, "at_light": 0, "at_heavy": 0},
   "mesh": {"triangles": 1640, "mm3": 452.9, "part_mm3": 1000, "struts_mm3": 59.5, "solid_mm3": 398,
            "bars": 36, "bridges": 12, "balls": 14, "bars_left_out": 0, "bars_left_out_mm": 0,
            "drop_unanswered": 0, "posts": 0, "posts_mm": 0, "solid_pieces": 1, "slivers_left_out": 0,
@@ -131,6 +141,7 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
 
 - `layout` holds the counts the bridge's `LatticeLayoutResult` holds, under the same names (`bars` here is how many).
   `thin_solid`: cut cells print rule P8 (f) made solid (a cut piece thinner than its own strut, lying against solid); they are counted in `solid_pieces` too.
+  `by_stress`: the struts were graded by stress; then `reference_mpa` is the reference used (the stated one or the part's own), `highest_mpa` the highest stress any cell read in its own cube, `at_light` and `at_heavy` the cells at the light end (no stress) and at the heavy end (at or over the reference). All 0 otherwise.
 - `mesh` is core's `MeshReport`. `mm3` is the plastic in the file; `part_mm3` the solid part's.
 - `print_check` is his print rules measured on the mesh the file holds, layer by layer (0.2 mm layers), the part standing on its lowest face:
   - `bed_contact_mm2` (the bridge's name): the area lying flat on the bed; `bed_flat` says it is the whole first layer with no sloped underside.
@@ -159,13 +170,32 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
 | `no_struts` | 3 | The lattice here has no struts left to print, so no file was made. Try a smaller cell or a deeper region. |
 | `would_not_print` | 3 | After 10 tries the lattice still has 2 places that would start printing in mid-air and 1 overhang held at one end only. No file was made. A larger cell or a Protect skin near those places usually fixes it. |
 | `mesh_unavailable` | 3 | The worker on the Mac was built without the part that makes lattice files, so it cannot make one. Update the worker. |
+| `no_stress_result` | 3 | By stress needs a stress result, and none came with this job, so no file was made. Run the stress check first, or pick another density. (Also when the stress result has no stress anywhere in the lattice's space and no reference was stated: R18, never a file at the light end by default.) |
+| `demand_unreadable` | 1 | The stress result sent with the lattice job could not be read, so nothing was made. (`detail` says what is wrong with it: not a demand file, the version, the size, a number that is not finite.) |
 | `job_unreadable` | 1 | The lattice job sent to the Mac could not be read, so nothing was made. (`detail` names the key.) |
 | `mesh_failed` | 1 | the mesh maker's own plain line, or: The lattice file could not be put together. Nothing was made. |
 | `cannot_write` | 1 | The lattice file could not be saved on the Mac (the folder is missing or the disk is full). |
 | `cancelled` | 1 | Stopped before the lattice file was finished. Nothing was made. (Only from code that passes a stop flag. On the worker a cancel stops the whole process and the worker reports it itself.) |
 | `error` | 1 | Something went wrong while making the lattice file, and nothing was made. |
 
-The checks run in this order: the model opens; it has a surface; every region and Protect skin has at least one face that is the part's; the type is a strut type; the worker can make meshes; the part is closed; the layout has cells; the layout has struts.
+The checks run in this order: the stress result (when the job names one) reads; the model opens; it has a surface; every region and Protect skin has at least one face that is the part's; By stress has a stress result; the type is a strut type; the worker can make meshes; the part is closed; the layout has cells; By stress has a reference; the layout has struts.
+
+## The demand file (a stress result, for By stress)
+
+Little-endian, no padding:
+
+| Bytes | What |
+|---|---|
+| 8 | `TODEMAND` |
+| 4 | int32 version: 1 |
+| 4 x 3 | int32 nx, ny, nz: voxels along x, y, z |
+| 8 x 3 | float64 the grid's low corner x, y, z, mm, in the part's own coordinates |
+| 8 | float64 the voxel edge, mm |
+| 4 x nx ny nz | float32 von Mises stress, MPa, one per voxel, in core's VoxelGrid order: index (k ny + j) nx + i; 0 where the solve had no material |
+
+Voxel (i, j, k) is the cube from corner + edge x (i, j, k) to corner + edge x (i+1, j+1, k+1). The file is exactly 56 + 4 nx ny nz bytes. It is refused (`demand_unreadable`) when it does not start with `TODEMAND`, its version is not 1, its grid has no voxels, it is not exactly that size, or any number in it is not finite (or the edge is not above 0). Code: `read_demand_file`, `write_demand_file` in `lattice_layout_file.hpp`.
+
+A cell's stress is the highest value among the voxels its cube shares volume with (R16); a turned cell's cube is read as the axis-aligned box round its eight corners.
 
 ## A worked example
 

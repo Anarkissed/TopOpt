@@ -4,8 +4,13 @@
 // the same values; a part goes in and a whole binary STL comes out with its numbers; and
 // every way the job can fail ends in one plain line, a refusal word, the right exit code
 // and NO file. Without the Manifold library the job says it cannot, and that is checked.
+#include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdio>
+#include <cstring>
+#include <memory>
+#include <vector>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -529,7 +534,188 @@ static void test_no_slit_under_solid() {
   CHECK(empty[1] == 0);
 }
 
+// Install 2a, step 3: By stress in the file job (R16 to R18; 04-layout-file-job.md). The demand file round-trips and
+// a bad one is refused with its reason; the keys land where Settings keeps them; By stress with no stress result is
+// refused; and a made file's struts are wider at the hot end than at the cold end by the layout's own widths.
+static void test_by_stress_file() {
+  const std::string dpath = kTmp + "/lattice_file_demand.bin";
+  DemandField f;
+  f.origin = {-1.5, 2.25, 0.0};
+  f.spacing = 0.75;
+  f.nx = 3; f.ny = 4; f.nz = 5;
+  for (int n = 0; n < 60; ++n) f.mpa.push_back(static_cast<float>(n * 1.25 - 7.0));
+  CHECK(write_demand_file(dpath, f));
+  CHECK(bytes(dpath) == 56 + 4 * 60);
+  {
+    DemandField g;
+    std::string why;
+    CHECK(read_demand_file(dpath, g, &why) && why.empty());
+    CHECK(g.nx == 3 && g.ny == 4 && g.nz == 5 && g.spacing == 0.75 && g.origin.x == -1.5 && g.origin.y == 2.25 &&
+          g.origin.z == 0.0 && g.mpa == f.mpa);
+  }
+  CHECK(!write_demand_file(dpath + ".x", DemandField{}));
+  {  // Each fault refused, with its reason; the field given is left as it was.
+    const std::string good = slurp(dpath);
+    const auto refused = [&](std::string bad, const char* words) {
+      const std::string p = kTmp + "/lattice_file_demand_bad.bin";
+      { std::ofstream o(p, std::ios::binary | std::ios::trunc); o << bad; }
+      DemandField g;
+      g.nx = 9;
+      std::string why;
+      const bool ok = read_demand_file(p, g, &why);
+      std::remove(p.c_str());
+      if (ok || !has(why, words)) std::printf("  (demand file: \"%s\", wanted \"%s\")\n", why.c_str(), words);
+      return !ok && has(why, words) && g.nx == 9;
+    };
+    std::string s = good;
+    s[0] = 'X';
+    CHECK(refused(s, "TODEMAND"));
+    s = good;
+    s[8] = 2;
+    CHECK(refused(s, "version 2"));
+    CHECK(refused(good.substr(0, good.size() - 4), "bytes"));
+    CHECK(refused(good + "x", "bytes"));
+    CHECK(refused(good.substr(0, 30), "cut short"));
+    s = good;
+    s[12] = 0;   // nx 0
+    CHECK(refused(s, "no voxels"));
+    s = good;
+    const float nan = std::nanf("");
+    std::memcpy(&s[56 + 4 * 7], &nan, 4);
+    CHECK(refused(s, "not a finite number"));
+    s = good;
+    const double inf = HUGE_VAL;
+    std::memcpy(&s[48], &inf, 8);
+    CHECK(refused(s, "voxel size"));
+    s = good;
+    std::memcpy(&s[32], &inf, 8);
+    CHECK(refused(s, "corner"));
+    DemandField g;
+    std::string why;
+    CHECK(!read_demand_file(kTmp + "/no_such_demand.bin", g, &why) && !why.empty());
+  }
+  // The keys.
+  {
+    const FileJob j = parse_file_job(R"({"mode": "lattice_file", "model": "a.step", "demand": "stress.bin",
+      "layout": {"by_stress": true, "dial_light": 0.1, "dial_heavy": 0.7, "width_light_mm": 0.6, "width_heavy_mm": 1.1,
+                 "reference_mpa": 80, "percentile": 0.9, "response": 2}})");
+    CHECK(j.demand == "stress.bin" && j.settings.struts.mode == Density::ByStress);
+    CHECK(j.settings.struts.dial_light == 0.1 && j.settings.struts.dial_heavy == 0.7 &&
+          j.settings.struts.width_light_mm == 0.6 && j.settings.struts.width_heavy_mm == 1.1);
+    CHECK(j.settings.stress.reference_mpa == 80.0 && j.settings.stress.percentile == 0.9 &&
+          j.settings.stress.response == 2.0 && !j.settings.stress.demand);
+    const FileJob d = parse_file_job(R"({"mode": "lattice_file", "model": "a.step"})");
+    CHECK(d.demand.empty() && d.settings.struts.mode == Density::Uniform);
+    const auto refused = [](const char* text, const char* names) {
+      try { (void)parse_file_job(text); } catch (const FileJobError& e) { return has(e.what(), names); }
+      return false;
+    };
+    CHECK(refused(R"({"mode": "lattice_file", "model": "a.step", "layout": {"by_stress": true, "per_region": true}})",
+                  "per_region"));
+    CHECK(refused(R"({"mode": "lattice_file", "model": "a.step", "demand": "../s.bin"})", "demand"));
+    CHECK(refused(R"({"mode": "lattice_file", "model": "a.step", "demand": ""})", "demand"));
+  }
+  // By stress with no stress result: refused, never made at the light end (R18).
+  const std::string path = kTmp + "/lattice_file_stress.stl";
+  std::remove(path.c_str());
+  std::string text = kBlockJob;
+  {
+    const std::string at = "\"min_cells_across\": 1";
+    text.replace(text.find(at), at.size(),
+                 "\"min_cells_across\": 1, \"cell_mm\": 8, \"by_stress\": true, \"width_light_mm\": 0.9, "
+                 "\"width_heavy_mm\": 1.3, \"reference_mpa\": 100");
+  }
+  FileJob job = parse_file_job(text);
+  {
+    const FileResult r = make_lattice_file(box_model(60, 30, 12), job, path);
+    check_refused(r, "no_stress_result", 3, path);
+    CHECK(has(r.why, "By stress needs a stress result"));
+    CHECK(has(file_result_json(r), "\"code\": \"no_stress_result\""));
+    FileJob zero = job;   // a field with no stress anywhere gives no reference either
+    zero.settings.stress.reference_mpa = 0.0;
+    auto none = std::make_shared<DemandField>(f);
+    for (float& v : none->mpa) v = 0.0f;
+    zero.settings.stress.demand = none;
+    if (mesh_available()) check_refused(make_lattice_file(box_model(60, 30, 12), zero, path), "no_stress_result", 3, path);
+  }
+  {  // From files: a job that names a stress result that is not one.
+    const std::string job_path = kTmp + "/lattice_file_stress_job.json";
+    const std::string bad = kTmp + "/lattice_file_bad_demand.bin";
+    { std::ofstream o(bad, std::ios::binary | std::ios::trunc); o << "not a stress result"; }
+    { std::ofstream o(job_path, std::ios::binary | std::ios::trunc);
+      o << R"({"mode": "lattice_file", "model": "no_such_part.stl", "demand": "lattice_file_bad_demand.bin",
+               "layout": {"by_stress": true}})"; }
+    const FileResult r = run_file_job(job_path, kTmp);
+    check_refused(r, "demand_unreadable", 1, kTmp + "/lattice.stl");
+    CHECK(has(r.detail, "TODEMAND") && has(slurp(kTmp + "/" + kFileResultName), "\"code\": \"demand_unreadable\""));
+    for (const std::string& p : {job_path, bad, kTmp + "/" + std::string(kFileResultName)}) std::remove(p.c_str());
+  }
+  std::remove(dpath.c_str());
+  if (!mesh_available()) return;
+  // Made: a 60 x 30 x 12 block, lattice under its top face, 8 mm cells; the stress 0 for x under 30, 200 MPa from 30 on
+  // (reference 100): the cold cells at 0.9 mm, the hot ones at 1.3 mm. Read back from the file it wrote: across each
+  // strut's flats at its middle (the narrowest chord square to its line), the hot struts are wider by 0.4 mm +- 0.01.
+  DemandField hot;
+  hot.spacing = 1.0;
+  hot.nx = 60; hot.ny = 30; hot.nz = 12;
+  for (int k = 0; k < 12; ++k)
+    for (int j = 0; j < 30; ++j)
+      for (int i = 0; i < 60; ++i) hot.mpa.push_back(i >= 30 ? 200.0f : 0.0f);
+  CHECK(write_demand_file(dpath, hot));
+  auto field = std::make_shared<DemandField>();
+  CHECK(read_demand_file(dpath, *field));
+  std::remove(dpath.c_str());
+  job.settings.stress.demand = field;
+  const FileResult r = make_lattice_file(box_model(60, 30, 12), job, path);
+  CHECK(r.ok && r.by_stress && r.reference_mpa == 100.0 && r.highest_mpa == 200.0 && r.at_light > 0 && r.at_heavy > 0 &&
+        r.at_light + r.at_heavy == r.cells);
+  if (!r.ok) { std::printf("  (%s: %s %s)\n", r.code.c_str(), r.why.c_str(), r.detail.c_str()); return; }
+  CHECK(has(file_result_json(r), "\"by_stress\": true, \"reference_mpa\": 100, \"highest_mpa\": 200, \"at_light\": " +
+                                     std::to_string(r.at_light) + ", \"at_heavy\": " + std::to_string(r.at_heavy) + "}"));
+  Session session(box_model(60, 30, 12));
+  const Outcome out = session.lay(job.settings);
+  CHECK(out.layout.cells.size() == r.cells && out.bars.bars.size() == r.bars);
+  const PartMeasure file(weld_mesh(read_stl_file(path).mesh));
+  const PartMeasure::Probe in = file.probe();
+  std::vector<double> got[2];
+  int off_width = 0;
+  for (const Bar& b : out.bars.bars) {
+    if (b.piece || b.skin || bar_is_bridge(b) || b.end_a != Bar::End::Node || b.end_b != Bar::End::Node) continue;
+    const int side = std::max(b.a.x, b.b.x) < 20.0 ? 0 : std::min(b.a.x, b.b.x) > 40.0 ? 1 : -1;
+    if (side < 0) continue;
+    if (std::fabs(b.width - (side ? 1.3 : 0.9)) > 1e-12) ++off_width;
+    const Vec3 m{0.5 * (b.a.x + b.b.x), 0.5 * (b.a.y + b.b.y), 0.5 * (b.a.z + b.b.z)};
+    Vec3 d{b.b.x - b.a.x, b.b.y - b.a.y, b.b.z - b.a.z};
+    const double len = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+    d = {d.x / len, d.y / len, d.z / len};
+    // Two directions square to the strut.
+    Vec3 e1 = std::fabs(d.x) < 0.9 ? Vec3{0, -d.z, d.y} : Vec3{-d.z, 0, d.x};
+    const double l1 = std::sqrt(e1.x * e1.x + e1.y * e1.y + e1.z * e1.z);
+    e1 = {e1.x / l1, e1.y / l1, e1.z / l1};
+    const Vec3 e2{d.y * e1.z - d.z * e1.y, d.z * e1.x - d.x * e1.z, d.x * e1.y - d.y * e1.x};
+    if (in.depth(m) <= 0.0) continue;
+    double narrowest = 1e9;
+    for (int a = 0; a < 360; ++a) {
+      const double t = 3.14159265358979323846 * a / 360.0;
+      const Vec3 dir{std::cos(t) * e1.x + std::sin(t) * e2.x, std::cos(t) * e1.y + std::sin(t) * e2.y,
+                     std::cos(t) * e1.z + std::sin(t) * e2.z};
+      narrowest = std::min(narrowest, in.wall_width(m, dir));
+    }
+    got[side].push_back(narrowest);
+  }
+  CHECK(off_width == 0 && got[0].size() >= 4 && got[1].size() >= 4);
+  if (got[0].empty() || got[1].empty()) return;
+  for (auto& g : got) std::sort(g.begin(), g.end());
+  const double cold = got[0][got[0].size() / 2], warm = got[1][got[1].size() / 2];
+  std::printf("by stress, the made file: %zu cold struts %.4f mm across the flats (%.4f .. %.4f), %zu hot struts %.4f mm "
+              "(%.4f .. %.4f): wider by %.4f, the layout's widths by 0.4\n", got[0].size(), cold, got[0].front(),
+              got[0].back(), got[1].size(), warm, got[1].front(), got[1].back(), warm - cold);
+  CHECK(std::fabs((warm - cold) - 0.4) <= 0.01);
+  std::remove(path.c_str());
+}
+
 int main() {
+  test_by_stress_file();
   test_no_slit_under_solid();
   test_strut_reach();
   test_thin_slot();
