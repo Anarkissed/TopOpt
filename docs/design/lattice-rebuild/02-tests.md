@@ -70,6 +70,7 @@ Kind of test: **L** reads the layout, **F** reads the file, **A** is an app test
 | C16 | L | Auto with stress on a part loaded at one end holds more than one cell size. Manual with one size holds exactly one. |
 | C17 | L | Default Grade: the base cell's halves reach a size within one halving of the floor cell, and the wall's covered width is ≥ that of the plain fit. |
 | C18 | L, A | Structural with Unloaded walls on: a wall under 5 cells across and under the load threshold keeps lattice. The switch is absent in Aesthetic. |
+| C19 | L, F | `test_one_grid`: a 12 \| 6 mm wall is one grid of 12 mm cells, one astride the step; a 2 mm wall holds cut 9 mm cells instead of going solid; band rules G1-G3, G10 hold; a Protect skin cuts the top layer; never held twice; any number of threads; off again is the layout as before. `test_session_one_grid`: off is a fresh session's layout, `CellSpec::one_grid` alone is not read, on differs (a plate that must hold 5 across: 0 cells off, 49 on) and matches a fresh session, on then off gives back the off layout exactly, the part is never read again. `test_one_grid_key`: the file job key `one_grid` reaches the setting and makes a file; `one_gird` is refused by name. |
 
 ## 3. Density and strut width
 

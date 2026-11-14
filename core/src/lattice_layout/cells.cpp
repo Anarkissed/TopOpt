@@ -230,6 +230,14 @@ struct Pass {
   // AND this region owns it (D13: ownership is the Domain's answer at the point, never
   // the order of work) AND, under a flat face, it is in the wall this pass lays.
   bool sample(double a, double b, double c, double* fit) const {
+    if (spec->one_grid) {
+      // One grid, cut wherever (CellSpec::one_grid): only "lattice, and whose" is asked. No wall is read, so no cell
+      // is refused for being wider than the material it stands in (C2) or for the cells a wall must hold (C3-C5).
+      const Where w = probe->where(frame.at(a, b, c));
+      if (!w.lattice() || w.id != region) return false;
+      *fit = 1e300;
+      return true;
+    }
     const Reading r = read_at(*probe, frame, *walls, a, b, c);
     if (!r.where.lattice() || r.where.id != region) return false;
     if (walls->flat && r.wall != wall) return false;
@@ -793,7 +801,8 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
   // A probe serves one thread; each worker makes its own once and keeps it for every lay.
   std::vector<std::unique_ptr<Domain::Probe>> spare(static_cast<std::size_t>(thread_count));
   const PartMeasure& part = domain.measure();
-  const int k_min = std::max(1, spec.min_cells_across);
+  // (One grid: the cells a wall must hold are not counted anywhere, so not in a region's base cell either.)
+  const int k_min = spec.one_grid ? 1 : std::max(1, spec.min_cells_across);
 
   // Lay one pass over the box [lo, hi] of its frame, in slots of `base`.
   auto lay = [&](Pass& pass, double base, const double lo[3], const double hi[3],
@@ -954,6 +963,19 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
     const double e = std::max(0.0, r.expand_mm);
     const double lo[3] = {g.u_lo - e, g.w_lo - e, 0.0};
     const double hi[3] = {g.u_hi + e, g.w_hi + e, g.depth};
+
+    if (spec.one_grid) {
+      // ONE grid for the whole region, in the face's own frame, the face a cell boundary (C15), laid in one frame as
+      // a curved region is: no wall map, no wall its own cells. Whatever is not this region's lattice cuts the cells
+      // (D3). Grade to shape reads the region's own outline, as it does wall by wall.
+      Pass pass = open(r.id, f, g.depth, base);
+      pass.tally = &out.regions.back();
+      const WallMap none = out.walls.back();   // no walls: a cell's shape is its region's lattice in its cube
+      pass.walls = &none;
+      if (spec.grade_to_shape && spec.band_mm > 0.0) pass.band_region = &r;
+      lay(pass, base, lo, hi, true);
+      continue;
+    }
 
     // The walls under this face, from the readings kept with the domain: every stretch of
     // material under each node of a coarse map of the face (a wall, a pocket and the wall
