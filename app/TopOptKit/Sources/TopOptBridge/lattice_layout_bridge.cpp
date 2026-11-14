@@ -153,7 +153,7 @@ void fill(LatticeLayoutResult& o, const ll::Outcome& out) {
     o.bars.push_back(static_cast<float>(b.width));
     o.bar_ends.push_back(static_cast<uint8_t>(b.end_a));
     o.bar_ends.push_back(static_cast<uint8_t>(b.end_b));
-    o.bar_flags.push_back(static_cast<uint8_t>((b.piece ? 1 : 0) | (b.skin ? 2 : 0)));
+    o.bar_flags.push_back(static_cast<uint8_t>((b.piece ? 1 : 0) | (b.skin ? 2 : 0) | (ll::bar_is_bridge(b) ? 16 : 0)));
     o.bar_region.push_back(b.region);
   }
   for (const ll::Frame& f : L.frames) {
