@@ -469,6 +469,27 @@ struct CellSpec {
   //                floor above. Held at that floor when it asks for less.
   bool allow_quilt = false;
   double band_cell_mm = 0.0;
+  // "LET WALLS CUT CELLS" (his name for the option, 2026-11-14), off by default. On: one even grid that walls and
+  // pockets cut through. Off: today's whole cells fitted to walls. Aesthetic only; Structural never shows it.
+  // (His words, 2026-11-12: "Why can't the pocket just cut the lattices wherever they are positioned and then a
+  // skin connect all the struts that are left disconnected in a pattern?"; his ruling, 2026-11-14: "I think
+  // aesthetic should allow the one grid cut wherever. Not structural.", "BUT it should be an option available to
+  // the user to select".) A per-part option, OFF unless the user turns it on; off, the layout is what it was, byte
+  // for byte. Core does not know the stage, so whoever offers the switch offers it in Aesthetic and nowhere else
+  // (a certified wall must hold its cells: C5).
+  // On: each region is ONE regular grid of its base cell, and every surface, pocket, hole, Protect skin and the
+  // region's own edge simply CUTS it (D3). A flat region's grid is in its face's own frame, the face a cell boundary
+  // (C15 at the face), its base cell the largest size not above Max cell that divides the region's depth; it is laid
+  // in one frame like a curved region, not wall by wall, and no wall map is read. A curved region and the whole
+  // part keep the grid they had. In every region NO cell is refused for the material it stands in: the wall-fit
+  // test (C2) and the cells a wall must hold (C3-C5) are not applied, and `min_cells_across` is not read at all.
+  // Any cube holding lattice of its region is a cut cell, whose shape is that lattice (cell_holds).
+  // Grade to shape is as before (G1-G7, G10), from the region's own outline; the smaller sizes come from the same
+  // ladders and never go under the layout's floor cell. With no band every cell is the base cell.
+  // What it gives up: C2/C12 (a cell may be wider than its wall), C15 at a wall's FAR side and at a Protect skin's
+  // inner side (those cut through cells), and D8 by cell size (a thin wall is cut cells, not solid; the Domain's own
+  // `min_wall_mm` still makes solid). A cut piece too small to hold a strut longer than its own width has none.
+  bool one_grid = false;
 };
 
 // Cells are cubes on a frame: world position = origin + ax[0]*a + ax[1]*b + ax[2]*c.
