@@ -74,9 +74,22 @@ struct FileJob {
   std::string model;                    // the part's file; relative to the job file's folder
   std::string output = "lattice.stl";   // the STL's name; relative to the output folder
   double linear_deflection = 0.0;       // <= 0: core's default (STEP only), as the bridge's open
+  // The stress result's file (key "demand"): a bare name, beside the job. Empty: none sent. run_file_job reads it
+  // into settings.stress.demand; a caller of make_lattice_file puts the field there itself.
+  std::string demand;
   Settings settings;
   FileOptions options;
 };
+
+// THE DEMAND FILE (a stress result for By stress, R16 to R18), little-endian:
+//   8 bytes "TODEMAND", int32 version (1), int32 nx, ny, nz, float64 origin x, y, z, float64 spacing,
+//   then nx*ny*nz float32 von Mises MPa in core's VoxelGrid order ((k * ny + j) * nx + i).
+// Reading refuses a wrong magic, a version other than 1, a grid of no voxels, a file not exactly the size its grid
+// needs, and any number that is not finite (or a spacing not above 0); `why` then says which, in plain words.
+inline constexpr int kDemandVersion = 1;
+bool read_demand_file(const std::string& path, DemandField& out, std::string* why = nullptr);
+// Writes one (for tests and tools; the app writes its own). False when the file cannot be written or the field is empty.
+bool write_demand_file(const std::string& path, const DemandField& field);
 
 // A job that cannot be read. what() is the reader's own words (which key, what is wrong).
 class FileJobError : public std::runtime_error {
@@ -107,6 +120,11 @@ struct FileResult {
   bool cells_by_stress = false; // cell size by stress was applied to the layout (Outcome::cells_by_stress, C22)
   double floor_cell_mm = 0.0, min_strut_mm = 0.0, open_look = 0.0, touch = 0.0;
   std::vector<int> empty_regions;
+  // By stress (StrutReport): whether the struts were graded by stress, the reference used, the highest stress any
+  // cell read, and the cells at the light and the heavy end.
+  bool by_stress = false;
+  double reference_mpa = 0.0, highest_mpa = 0.0;
+  std::size_t at_light = 0, at_heavy = 0;
   // The mesh.
   FileReport made;
   // Where the time went, ms.

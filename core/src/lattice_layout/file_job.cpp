@@ -3,7 +3,11 @@
 #include "topopt/lattice_layout_file.hpp"
 
 #include <chrono>
+#include <cmath>
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
+#include <memory>
 #include <exception>
 #include <fstream>
 #include <sstream>
@@ -106,8 +110,9 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "protect_face_counts", "protect_faces", "topology", "algorithm", "cell_mm", "cell_max_mm",
        "cell_min_mm", "min_cells_across", "grade_to_shape", "band_mm", "band_cell_mm",
        "per_region", "dial", "dial_region", "dial_value", "strut_width_mm", "allow_quilt",
-       "strength", "small_cells_in_thin_walls", "one_grid", "cells_by_stress", "bars", "join_loose", "skin", "skin_width_mm",
-       "skin_reach_cells", "drop_loose"},
+       "strength", "small_cells_in_thin_walls", "one_grid", "cells_by_stress", "bars", "join_loose", "skin",
+       "skin_width_mm", "skin_reach_cells", "drop_loose", "by_stress", "dial_light", "dial_heavy", "width_light_mm",
+       "width_heavy_mm", "reference_mpa", "percentile", "response"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -161,7 +166,16 @@ Settings settings_from(const json::Value& in, const std::string& w) {
   s.cells.band_cell_mm = num(in, "band_cell_mm", s.cells.band_cell_mm, w);
   s.cells.by_stress = flag(in, "cells_by_stress", s.cells.by_stress, w);   // C22
 
-  s.struts.mode = flag(in, "per_region", false, w) ? Density::PerRegion : Density::Uniform;
+  const bool per_region = flag(in, "per_region", false, w), by_stress = flag(in, "by_stress", false, w);
+  if (per_region && by_stress) json::fail(w, "by_stress and per_region cannot both be on: pick one density");
+  s.struts.mode = by_stress ? Density::ByStress : per_region ? Density::PerRegion : Density::Uniform;
+  s.struts.dial_light = num(in, "dial_light", s.struts.dial_light, w);
+  s.struts.dial_heavy = num(in, "dial_heavy", s.struts.dial_heavy, w);
+  s.struts.width_light_mm = num(in, "width_light_mm", s.struts.width_light_mm, w);
+  s.struts.width_heavy_mm = num(in, "width_heavy_mm", s.struts.width_heavy_mm, w);
+  s.stress.reference_mpa = num(in, "reference_mpa", s.stress.reference_mpa, w);
+  s.stress.percentile = num(in, "percentile", s.stress.percentile, w);
+  s.stress.response = num(in, "response", s.stress.response, w);
   s.struts.dial = num(in, "dial", s.struts.dial, w);
   const std::vector<int> dial_region = wholes(in, "dial_region", w);
   const std::vector<double> dial_value = nums(in, "dial_value", w);
@@ -234,9 +248,11 @@ constexpr Refusal kMeshUnavailable{"mesh_unavailable", 3};
 constexpr Refusal kMeshFailed{"mesh_failed", 1};
 // The file would have something starting in mid-air when printed (his rule P8 b): not written.
 constexpr Refusal kWouldNotPrint{"would_not_print", 3};
+// By stress (R18) or cell size by stress (C22) was asked and there is no stress result to grade by.
+constexpr Refusal kNoStress{"no_stress_result", 3};
+// The stress result sent with the job could not be read (missing, or not a demand file).
+constexpr Refusal kDemandUnreadable{"demand_unreadable", 1};
 constexpr Refusal kCannotWrite{"cannot_write", 1};
-// Cell size by stress was asked for and the job has no stress result (C22).
-constexpr Refusal kNoStressResult{"no_stress_result", 3};
 constexpr Refusal kCancelled{"cancelled", 1};
 constexpr Refusal kError{"error", 1};
 
@@ -343,12 +359,110 @@ TriangleMesh make_file_mesh(const Session& session, const Outcome& outcome, cons
   return mesh;
 }
 
+// ── THE DEMAND FILE ───────────────────────────────────────────────────────────
+namespace {
+constexpr char kDemandMagic[8] = {'T', 'O', 'D', 'E', 'M', 'A', 'N', 'D'};
+constexpr std::size_t kDemandHead = 8 + 4 + 3 * 4 + 3 * 8 + 8;   // 56 bytes before the values
+std::uint32_t u32_at(const unsigned char* p) {
+  return static_cast<std::uint32_t>(p[0]) | static_cast<std::uint32_t>(p[1]) << 8 |
+         static_cast<std::uint32_t>(p[2]) << 16 | static_cast<std::uint32_t>(p[3]) << 24;
+}
+std::uint64_t u64_at(const unsigned char* p) {
+  return static_cast<std::uint64_t>(u32_at(p)) | static_cast<std::uint64_t>(u32_at(p + 4)) << 32;
+}
+std::int32_t i32_at(const unsigned char* p) {
+  const std::uint32_t u = u32_at(p);
+  std::int32_t v;
+  std::memcpy(&v, &u, 4);
+  return v;
+}
+double f64_at(const unsigned char* p) {
+  const std::uint64_t u = u64_at(p);
+  double v;
+  std::memcpy(&v, &u, 8);
+  return v;
+}
+float f32_at(const unsigned char* p) {
+  const std::uint32_t u = u32_at(p);
+  float v;
+  std::memcpy(&v, &u, 4);
+  return v;
+}
+void put_u32(std::string& o, std::uint32_t u) {
+  for (int b = 0; b < 4; ++b) o += static_cast<char>((u >> (8 * b)) & 0xff);
+}
+void put_u64(std::string& o, std::uint64_t u) {
+  put_u32(o, static_cast<std::uint32_t>(u));
+  put_u32(o, static_cast<std::uint32_t>(u >> 32));
+}
+}  // namespace
+
+bool read_demand_file(const std::string& path, DemandField& out, std::string* why) {
+  const auto no = [&](const std::string& reason) {
+    if (why) *why = reason;
+    return false;
+  };
+  std::ifstream f(path, std::ios::binary);
+  if (!f) return no("cannot open " + path);
+  std::ostringstream all;
+  all << f.rdbuf();
+  const std::string bytes = all.str();
+  const auto* p = reinterpret_cast<const unsigned char*>(bytes.data());
+  if (bytes.size() < 8 || std::memcmp(p, kDemandMagic, 8) != 0) return no("not a stress result file (it does not start with TODEMAND)");
+  if (bytes.size() < kDemandHead) return no("the stress result file is cut short");
+  const std::int32_t version = i32_at(p + 8);
+  if (version != kDemandVersion)
+    return no("the stress result file is version " + std::to_string(version) + ", and only version 1 can be read");
+  const std::int32_t nx = i32_at(p + 12), ny = i32_at(p + 16), nz = i32_at(p + 20);
+  if (nx <= 0 || ny <= 0 || nz <= 0) return no("the stress result's grid has no voxels");
+  const std::uint64_t n = static_cast<std::uint64_t>(nx) * static_cast<std::uint64_t>(ny) * static_cast<std::uint64_t>(nz);
+  if (bytes.size() != kDemandHead + 4 * n)
+    return no("the stress result file is " + std::to_string(bytes.size()) + " bytes, and its grid needs " +
+              std::to_string(kDemandHead + 4 * n));
+  DemandField d;
+  d.nx = nx; d.ny = ny; d.nz = nz;
+  d.origin = {f64_at(p + 24), f64_at(p + 32), f64_at(p + 40)};
+  d.spacing = f64_at(p + 48);
+  if (!std::isfinite(d.origin.x) || !std::isfinite(d.origin.y) || !std::isfinite(d.origin.z))
+    return no("the stress result's grid corner is not a finite number");
+  if (!std::isfinite(d.spacing) || !(d.spacing > 0.0)) return no("the stress result's voxel size is not a number above 0");
+  d.mpa.resize(static_cast<std::size_t>(n));
+  for (std::size_t i = 0; i < d.mpa.size(); ++i) {
+    d.mpa[i] = f32_at(p + kDemandHead + 4 * i);
+    if (!std::isfinite(d.mpa[i])) return no("the stress result holds a value that is not a finite number (voxel " + std::to_string(i) + ")");
+  }
+  out = std::move(d);
+  return true;
+}
+
+bool write_demand_file(const std::string& path, const DemandField& field) {
+  if (field.empty()) return false;
+  std::string o(kDemandMagic, 8);
+  put_u32(o, static_cast<std::uint32_t>(kDemandVersion));
+  for (int n : {field.nx, field.ny, field.nz}) put_u32(o, static_cast<std::uint32_t>(n));
+  for (double v : {field.origin.x, field.origin.y, field.origin.z, field.spacing}) {
+    std::uint64_t u;
+    std::memcpy(&u, &v, 8);
+    put_u64(o, u);
+  }
+  for (float v : field.mpa) {
+    std::uint32_t u;
+    std::memcpy(&u, &v, 4);
+    put_u32(o, u);
+  }
+  std::ofstream f(path, std::ios::binary | std::ios::trunc);
+  f.write(o.data(), static_cast<std::streamsize>(o.size()));
+  f.close();
+  return static_cast<bool>(f);
+}
+
 FileJob parse_file_job(const std::string& json_text) {
   try {
     const json::Value doc = json::parse(json_text, "job.json");
     const std::string w = "job.json";
     json::as_object(doc, w);
-    json::reject_unknown(doc, {"mode", "model", "output", "linear_deflection", "threads", "layout", "mesh"}, w);
+    json::reject_unknown(doc, {"mode", "model", "output", "linear_deflection", "threads", "layout", "mesh", "demand"},
+                         w);
     const std::string mode = json::as_string(json::require(doc, "mode", w), w + ".mode");
     if (mode != "lattice_file") json::fail(w + ".mode", "must be \"lattice_file\", not \"" + mode + "\"");
     FileJob job;
@@ -361,6 +475,13 @@ FileJob parse_file_job(const std::string& json_text) {
       json::fail(w + ".output", "must be a file name with no folder in it");
     if (job.output == kFileResultName) json::fail(w + ".output", "is the result file's own name");
     job.linear_deflection = num(doc, "linear_deflection", 0.0, w);
+    // The stress result: a file beside the job, by its bare name.
+    if (json::find(doc, "demand")) {
+      job.demand = text(doc, "demand", "", w);
+      if (job.demand.empty() || job.demand == "." || job.demand == ".." ||
+          job.demand.find_first_of("/\\") != std::string::npos)
+        json::fail(w + ".demand", "must be a file name with no folder in it");
+    }
     if (const json::Value* v = json::find(doc, "layout"))
       job.settings = settings_from(json::as_object(*v, w + ".layout"), w + ".layout");
     if (const json::Value* v = json::find(doc, "mesh"))
@@ -407,6 +528,17 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
         return done();
       }
     }
+    // R18: By stress with no stress result is refused, never made at the light end.
+    const bool by_stress = job.settings.struts.mode == Density::ByStress;
+    const auto no_stress = [&] {
+      refuse(r, kNoStress,
+             "By stress needs a stress result, and none came with this job, so no file was made. Run the stress "
+             "check first, or pick another density.");
+      return done();
+    };
+    if (by_stress && (!job.settings.stress.demand || job.settings.stress.demand->empty()) &&
+        (!job.settings.struts.demand || job.settings.struts.demand->empty()))
+      return no_stress();
     if (lattice_topology_is_sheet(job.settings.cells.topology)) {
       refuse(r, kTypeNotSupported,
              "This lattice type is made of sheets, and a lattice file can only be made from the "
@@ -414,7 +546,7 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
       return done();
     }
     if (job.settings.cells.by_stress && (!job.settings.stress.demand || job.settings.stress.demand->empty())) {
-      refuse(r, kNoStressResult,
+      refuse(r, kNoStress,
              "Cell size by stress needs a stress result, and this job has none, so nothing was made. Send the "
              "part's stress result with it, or turn Cell size by stress off.");
       return done();
@@ -466,6 +598,11 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     r.ms_read = out.ms_read;
     r.ms_cells = out.ms_cells;
     r.ms_bars = out.ms_bars;
+    r.by_stress = by_stress;
+    r.reference_mpa = out.struts.reference_mpa;
+    r.highest_mpa = out.struts.highest_mpa;
+    r.at_light = out.struts.at_light;
+    r.at_heavy = out.struts.at_heavy;
     if (!out.empty_regions.empty()) {
       refuse(r, kRegionFacesMissing, faces_missing("Region", "Regions", out.empty_regions));
       return done();
@@ -476,6 +613,8 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
              "to make. Try a smaller cell, a deeper region, or more of the part.");
       return done();
     }
+    // A field with no stress in the lattice's space gives no reference: no stress result to grade by either (R18).
+    if (by_stress && out.struts.no_stress) return no_stress();
     if (out.bars.bars.empty()) {
       refuse(r, kNoStruts,
              "The lattice here has no struts left to print, so no file was made. Try a smaller cell "
@@ -570,6 +709,16 @@ FileResult run_file_job(const std::string& job_path, const std::string& out_dir,
       }
     }
     if (threads > 0) job.options.threads = threads;
+    if (!job.demand.empty()) {
+      auto field = std::make_shared<DemandField>();
+      std::string why;
+      if (!read_demand_file(folder_of(job_path) + "/" + job.demand, *field, &why)) {
+        refuse(r, kDemandUnreadable, "The stress result sent with the lattice job could not be read, so nothing was made.",
+               why);
+        return;
+      }
+      job.settings.stress.demand = std::move(field);
+    }
     const std::string model_path =
         !job.model.empty() && job.model[0] == '/' ? job.model : folder_of(job_path) + "/" + job.model;
     say(said, "opening the part");
@@ -642,7 +791,12 @@ std::string file_result_json(const FileResult& r) {
   o += b;
   for (std::size_t i = 0; i < r.empty_regions.size(); ++i)
     o += (i ? ", " : "") + std::to_string(r.empty_regions[i]);
-  o += "]},\n";
+  o += "],\n";
+  std::snprintf(b, sizeof b,
+                "    \"by_stress\": %s, \"reference_mpa\": %.9g, \"highest_mpa\": %.9g, \"at_light\": %llu, "
+                "\"at_heavy\": %llu},\n",
+                r.by_stress ? "true" : "false", r.reference_mpa, r.highest_mpa, count(r.at_light), count(r.at_heavy));
+  o += b;
   const MeshReport& m = r.made.mesh;
   std::snprintf(b, sizeof b,
                 "  \"mesh\": {\"triangles\": %llu, \"mm3\": %.9g, \"part_mm3\": %.9g, \"struts_mm3\": %.9g, "
