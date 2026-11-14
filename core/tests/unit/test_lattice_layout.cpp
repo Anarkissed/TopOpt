@@ -3665,7 +3665,137 @@ static void test_one_grid() {
               tally[0] / 3, tally[1] / 3, tally[2], tally[3], tally[4], tally[5]);
 }
 
+// D14c (his ruling 2026-11-14: "a simple explanation of why it doesn't work and one to three ways to fix it"). Every
+// cube recorded solid carries why, and the two sizes; SolidAt::why gives it for a point. Each case below makes one
+// reason happen on a small part, and then shows that the fix the reason points to lays cells there.
+static bool same_why(const Layout& a, const Layout& b) {
+  if (a.solid_why.size() != b.solid_why.size()) return false;
+  for (std::size_t i = 0; i < a.solid_why.size(); ++i)
+    if (a.solid_why[i].why != b.solid_why[i].why || a.solid_why[i].have_mm != b.solid_why[i].have_mm ||
+        a.solid_why[i].need_mm != b.solid_why[i].need_mm)
+      return false;
+  return true;
+}
+static void test_solid_why() {
+  // What a point gets: is it solid where lattice was asked, and why.
+  auto ask = [](const Domain& d, const Layout& l, const Vec3& p, SolidWhy* why) {
+    auto pr = d.probe();
+    const SolidAt at(l);
+    CHECK(l.solid_why.size() == l.solid.size());                    // one reason per solid cube
+    *why = at.why(pr, p);
+    return pr.where(p).lattice() && at(pr, p);
+  };
+  int fixed = 0;
+  {  // WallNarrow: behind the face 12 mm for x < 30 and 2 mm for x > 30, a region 9 mm deep. The 2 mm wall is
+     // narrower than the smallest cell (2.37 mm at a 0.45 mm line).
+    auto part = [](double thin) {
+      return PartMeasure(weld_mesh(prism({{0, 0}, {60, 0}, {60, thin}, {30, thin}, {30, 12}, {0, 12}}, 0, 60)));
+    };
+    const PartMeasure pm = part(2.0);
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, {30, 0, 30}, {0, 1, 0}, 30, 30, 9)};
+    Domain d(pm, s);
+    const Vec3 p{45, 1, 20};
+    for (Algorithm algo : {Algorithm::Uniform, Algorithm::DefaultGrade, Algorithm::Stepped}) {
+      CellSpec cs;
+      cs.algorithm = algo;
+      cs.cell_max_mm = 9;
+      const Layout l = lay_cells(d, cs);
+      SolidWhy w;
+      CHECK(ask(d, l, p, &w));
+      CHECK(w.why == NoCell::WallNarrow);
+      NEAR(w.have_mm, 2.0, 1e-3);
+      CHECK(w.have_mm < w.need_mm && w.need_mm >= l.floor_cell_mm);
+      std::printf("solid why, wall narrow (algorithm %d): have %.3f, need %.3f\n", static_cast<int>(algo), w.have_mm, w.need_mm);
+      // D18: the same reasons on one thread and on three.
+      CHECK(same_why(l, lay_cells(d, cs, 1)) && same_why(l, lay_cells(d, cs, 3)));
+      // Fix 1: Let walls cut cells.
+      CellSpec on = cs;
+      on.one_grid = true;
+      CHECK(!ask(d, lay_cells(d, on), p, &w));
+      // Fix 2: the wall made `need` wide (w is the one-grid point's answer now: ask the first layout again).
+      SolidWhy before;
+      ask(d, l, p, &before);
+      const PartMeasure wider = part(before.need_mm);
+      Domain d2(wider, s);
+      SolidWhy after;
+      const bool still = ask(d2, lay_cells(d2, cs), {45, 0.5 * before.need_mm, 20}, &after);
+      CHECK(!still);
+      fixed += !still;
+    }
+  }
+  {  // TooFewAcross: a 6 mm plate, all lattice, 4 mm cells, two across. A 4 mm cell fits the plate, two of them do not.
+    PartMeasure pm(weld_mesh(box(40, 40, 6)));
+    DomainSpec s;
+    s.start = Start::AllLattice;
+    Domain d(pm, s);
+    CellSpec cs;
+    cs.algorithm = Algorithm::Uniform;
+    cs.cell_mm = 4;
+    cs.min_cells_across = 2;
+    const Layout l = lay_cells(d, cs);
+    const Vec3 p{20, 20, 3};
+    SolidWhy w;
+    CHECK(ask(d, l, p, &w));
+    CHECK(w.why == NoCell::TooFewAcross);
+    NEAR(w.have_mm, 6.0, 1e-3);
+    NEAR(w.need_mm, 8.0, 1e-3);                                       // two cells of 4
+    CHECK(w.have_mm < w.need_mm);
+    CHECK(same_why(l, lay_cells(d, cs, 1)));
+    std::printf("solid why, too few across: have %.3f, need %.3f\n", w.have_mm, w.need_mm);
+    CellSpec one = cs;                                                // Fix 1: single-cell walls
+    one.min_cells_across = 1;
+    const bool a = ask(d, lay_cells(d, one), p, &w);
+    CellSpec on = cs;                                                 // Fix 2: Let walls cut cells
+    on.one_grid = true;
+    const bool b = ask(d, lay_cells(d, on), p, &w);
+    CHECK(!a && !b);
+    fixed += !a + !b;
+  }
+  {  // RegionShallow: a region 1.5 mm deep, under the smallest cell (2.37 mm).
+    PartMeasure pm(weld_mesh(box(40, 40, 20)));
+    auto domain_spec = [](double depth) {
+      DomainSpec s;
+      s.regions = {face_region(1, Role::Lattice, {20, 20, 20}, {0, 0, -1}, 20, 20, depth)};
+      return s;
+    };
+    Domain d(pm, domain_spec(1.5));
+    for (Algorithm algo : {Algorithm::Uniform, Algorithm::DefaultGrade, Algorithm::Stepped}) {
+      CellSpec cs;
+      cs.algorithm = algo;
+      const Layout l = lay_cells(d, cs);
+      SolidWhy w;
+      CHECK(ask(d, l, {20, 20, 19.3}, &w));
+      CHECK(w.why == NoCell::RegionShallow);
+      NEAR(w.have_mm, 1.5, 1e-3);
+      NEAR(w.need_mm, l.floor_cell_mm, 1e-3);
+      CHECK(w.have_mm < w.need_mm);
+      CHECK(same_why(l, lay_cells(d, cs, 1)));
+      std::printf("solid why, region shallow (algorithm %d): have %.3f, need %.3f\n", static_cast<int>(algo), w.have_mm, w.need_mm);
+      // Fix: the region made `need` deep.
+      Domain deeper(pm, domain_spec(w.need_mm));
+      SolidWhy after;
+      const bool still = ask(deeper, lay_cells(deeper, cs), {20, 20, 20 - 0.5 * w.need_mm}, &after);
+      CHECK(!still);
+      fixed += !still;
+    }
+  }
+  {  // A point that is not solid where lattice was asked has no reason, and nor does the part's own solid.
+    PartMeasure pm(weld_mesh(box(40, 40, 20)));
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, {20, 20, 20}, {0, 0, -1}, 20, 20, 8)};
+    Domain d(pm, s);
+    const Layout l = lay_cells(d, CellSpec{});
+    SolidWhy w;
+    CHECK(!ask(d, l, {20, 20, 17}, &w) && w.why == NoCell::Other && w.need_mm == 0.0f);   // lattice, in a cell
+    CHECK(ask(d, l, {20, 20, 5}, &w) == false && w.why == NoCell::Other);                // solid, not lattice
+    CHECK(l.solid.empty() && l.solid_why.empty());
+  }
+  std::printf("solid why: %d fixes tried, each lays cells where the reason was\n", fixed);
+}
+
 int main() {
+  test_solid_why();
   test_one_grid();
   test_cells_behind_a_protect_skin();
   test_thin_walls_follow_the_quilt_switch();

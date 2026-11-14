@@ -580,6 +580,20 @@ struct CellIndex {
   std::map<std::array<long long, 3>, std::vector<std::uint32_t>> grid;   // each list in cell order
 };
 
+// Why lattice that was asked for is solid in a cube no cell could take (D14): for the one line the app shows.
+enum class NoCell : std::uint8_t {
+  Other = 0,       // none of the below; the app says only "no cell fits here"
+  WallNarrow,      // C2: the wall there is narrower than the smallest cell allowed
+  TooFewAcross,    // C3 to C5: a cell fits the wall, but not as many across as the setting asks
+  Sliver,          // D14b: a cut piece of this region's lattice too small for a cell, that no neighbouring cell took in
+  RegionShallow,   // C15: the region is shallower than the smallest cell allowed
+};
+struct SolidWhy {
+  NoCell why = NoCell::Other;
+  float have_mm = 0.0f;   // what is there: the wall's width (WallNarrow, TooFewAcross), the piece's thickness (Sliver), the region's depth (RegionShallow)
+  float need_mm = 0.0f;   // what it would have to be for a cell to be laid there with today's settings
+};
+
 struct Layout {
   // D14b: cells take in lattice slivers inside their cubes (CellSpec::absorb_slivers). `index` is lay_cells' own.
   bool absorb = false;
@@ -599,6 +613,18 @@ struct Layout {
   // within its own sample points; the rule itself is for whoever draws or builds:
   // lattice space that cell_holds is true for in no cell is solid.
   std::vector<Cell> solid;
+  // D14c: why each cube of `solid` got no cell, and the two sizes. A cube is put down to the first of these that holds:
+  //   RegionShallow  the region's own cell is under the smallest cell allowed because the region is too shallow for it
+  //                  (have: the region's depth; need: the depth whose cell prints), or, in a region with no face
+  //                  (curved), the region's depth is what cuts the wall below the cell tried.
+  //   WallNarrow     the wall read there is narrower than the smallest cell tried at that spot (need: that cell).
+  //   TooFewAcross   that cell fits the wall, but not min_cells_across of them (have: the member's narrowest width;
+  //                  need: that many cells).
+  //   Other          anything else (a cell setting under the printable floor; a Stepped unit the band kept empty).
+  // Sliver is not recorded today: every cube recorded solid was refused by what its own points read, so one of the
+  // first three holds for it. The sliver D14b leaves solid (a thin cut piece with solid beyond it) has no cube here.
+  // `need` is rounded up to a micron, so a wall or depth made exactly `need` lays a cell.
+  std::vector<SolidWhy> solid_why;  // one per entry of solid, same order
   std::vector<RegionCells> regions;
 };
 
@@ -760,11 +786,17 @@ class SolidAt {
   bool operator()(const Domain::Probe& probe, const Vec3& p) const;
   // The same, for a point already read as `w`.
   bool operator()(const Domain::Probe& probe, const Vec3& p, const Where& w) const;
+  // D14c: for a point this calls solid where lattice was asked for (lattice by the domain, held by no cell), the
+  // reason recorded with the solid cube that holds it (Layout::solid_why): the first, in layout order, whose cube the
+  // point is in and whose region (and, under a flat region, wall) the point's lattice is. Other when no recorded cube
+  // holds it, and for any point this does not call solid where lattice was asked for.
+  SolidWhy why(const Domain::Probe& probe, const Vec3& p) const;
 
  private:
   const Layout* layout_;
   double pitch_ = 4.0;
   std::map<std::array<long long, 3>, std::vector<std::uint32_t>> grid_;
+  std::map<std::array<long long, 3>, std::vector<std::uint32_t>> solid_grid_;   // the same, of Layout::solid
 };
 
 // S3, Finish Skin: bars across the part's surface joining the cut strut ends, "a flat

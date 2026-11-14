@@ -178,6 +178,55 @@ struct Pass {
   double finest_mm = 0.0;           // the smallest cell its ladder allows (f)
   double floor_mm = 0.0;            // the smallest cell that may stand in this pass at all
   double skin_most = 0.0;           // the deepest Protect skin or cover of the domain
+  // D14c: the region's depth (a wall is never read deeper; 1e300 for the whole part), and, under a flat face, the
+  // depth whose own cell prints (0 elsewhere: the cell there does not come from the depth).
+  double region_depth = 1e300;
+  double depth_need = 0.0;
+
+  // What the counted points of a cube read (D14c): the narrowest wall, the narrowest member.
+  struct Seen {
+    double width = 1e300, narrow = 1e300;
+  };
+  // Rounded up to a micron: a wall or depth made exactly this lays a cell.
+  static float up(double mm) { return static_cast<float>(std::ceil(mm * 1e3 - 1e-6) * 1e-3); }
+  static float down(double mm) { return static_cast<float>(std::floor(mm * 1e3 + 1e-6) * 1e-3); }
+  // D14c: why a cube holding this pass's lattice got no cell. `need` is the smallest cell tried at that spot;
+  // `printable` and `fitting` are place's own tests. In the order of preference: RegionShallow, WallNarrow,
+  // TooFewAcross. (Sliver is never the answer here: a cube recorded solid was refused by what its points read, so the
+  // wall there is narrower than the cell, or holds too few of them. The cut piece that no cube is recorded for is
+  // place's sliver under solid, below.)
+  SolidWhy why_solid(double need, const Seen& seen, bool printable, bool fitting) const {
+    SolidWhy y;
+    if (!printable && depth_need > 0.0 && region_depth < depth_need - kReadingSlack) {
+      y.why = NoCell::RegionShallow;
+      y.have_mm = down(region_depth);
+      y.need_mm = up(depth_need);
+      return y;
+    }
+    if (fitting) return y;   // refused for its size alone (a cell setting under the floor): Other
+    if (!walls->flat && region_depth < need - kReadingSlack && seen.width >= region_depth - kReadingSlack) {
+      // A region with no face: the wall read is cut at the region's depth, and that is what is too thin.
+      y.why = NoCell::RegionShallow;
+      y.have_mm = down(region_depth);
+      y.need_mm = up(need);
+      return y;
+    }
+    const double thinnest = std::min(seen.width, seen.narrow);
+    if (thinnest < need - kReadingSlack) {
+      y.why = NoCell::WallNarrow;
+      y.have_mm = down(thinnest);
+      y.need_mm = up(need);
+      return y;
+    }
+    const int k = std::max(1, spec->min_cells_across);
+    if (k > 1 && seen.narrow / k < need - kReadingSlack) {
+      y.why = NoCell::TooFewAcross;
+      y.have_mm = down(seen.narrow);
+      y.need_mm = up(k * need);
+      return y;
+    }
+    return y;
+  }
 
   // 0 at the region's outline, 1 at the band's inner edge and beyond (G2, G5).
   double band_t(const double lo[3], double s) const {
@@ -229,7 +278,7 @@ struct Pass {
   // this spot allow? A point counts when the layout's one Domain says lattice goes there
   // AND this region owns it (D13: ownership is the Domain's answer at the point, never
   // the order of work) AND, under a flat face, it is in the wall this pass lays.
-  bool sample(double a, double b, double c, double* fit) const {
+  bool sample(double a, double b, double c, double* fit, Seen* seen = nullptr) const {
     if (spec->one_grid) {
       // One grid, cut wherever (CellSpec::one_grid): only "lattice, and whose" is asked. No wall is read, so no cell
       // is refused for being wider than the material it stands in (C2) or for the cells a wall must hold (C3-C5).
@@ -249,6 +298,10 @@ struct Pass {
     // the face and two deep is one across, not two.
     const double narrow = walls->flat ? narrowest(a, b, r) : width;
     *fit = std::min(width, narrow / spec->min_cells_across);
+    if (seen) {
+      seen->width = std::min(seen->width, width);
+      seen->narrow = std::min(seen->narrow, narrow);
+    }
     return true;
   }
 
@@ -281,7 +334,7 @@ struct Pass {
   // points slips between them (a ledge under a millimetre wide at the foot of a side
   // wall; the seam between a protected and an unprotected part of a face). The face's
   // map saw it: read again at the map's own nodes inside the cube's footprint.
-  bool look_at_nodes(const double lo[3], double s, double* fit) const {
+  bool look_at_nodes(const double lo[3], double s, double* fit, Seen* read = nullptr) const {
     if (!walls->flat || walls->nu == 0) return false;
     const double P = WallMap::kPitch;
     const int i0 = std::max(0, static_cast<int>(std::ceil((lo[0] - walls->u0) / P - 1e-9)));
@@ -303,7 +356,7 @@ struct Pass {
           for (int c = 0; c < 3; ++c) {
             double f = 0.0;
             const double at = spans ? lo[2] + s * (1 + 2 * c) / 6.0 : d0 + (d1 - d0) * (1 + 2 * c) / 6.0;
-            if (!sample(walls->u0 + i * P, walls->w0 + j * P, at, &f)) continue;
+            if (!sample(walls->u0 + i * P, walls->w0 + j * P, at, &f, read)) continue;
             seen = true;
             *fit = std::min(*fit, f);
           }
@@ -311,7 +364,7 @@ struct Pass {
     return seen;
   }
 
-  void emit(const double lo[3], double s, bool cut, bool as_cell) {
+  void emit(const double lo[3], double s, bool cut, bool as_cell, const SolidWhy& why = SolidWhy{}) {
     Cell cell;
     cell.region = region;
     cell.frame = frame_index;
@@ -328,6 +381,7 @@ struct Pass {
     } else {
       // D8, D14: lattice was asked for, and no allowed cell fits the wall here. Solid.
       out->solid.push_back(cell);
+      out->solid_why.push_back(why);   // D14c
       ++tally->solid;
     }
   }
@@ -337,12 +391,13 @@ struct Pass {
     // 27 points: the centre and a 3 x 3 x 3 grid a third of the cell apart.
     int inside = 0;
     double fits = 1e300;   // the largest cell every counted point's wall allows
+    Seen seen;             // what they read (D14c)
     for (int c = 0; c < 3; ++c)
       for (int b = 0; b < 3; ++b)
         for (int a = 0; a < 3; ++a) {
           double fit = 0.0;
           if (!sample(lo[0] + s * (1 + 2 * a) / 6.0, lo[1] + s * (1 + 2 * b) / 6.0,
-                      lo[2] + s * (1 + 2 * c) / 6.0, &fit))
+                      lo[2] + s * (1 + 2 * c) / 6.0, &fit, &seen))
             continue;
           ++inside;
           fits = std::min(fits, fit);
@@ -373,14 +428,16 @@ struct Pass {
             for (int a = 0; a < 3; ++a) {
               if (a == 1 && b == 1 && c == 1) continue;
               double fit = 0.0;
-              if (!sample(lo[0] + s * e[a], lo[1] + s * e[b], lo[2] + s * e[c], &fit)) continue;
+              if (!sample(lo[0] + s * e[a], lo[1] + s * e[b], lo[2] + s * e[c], &fit, &seen)) continue;
               ++counted;
               fits = std::min(fits, fit);
             }
         inside = counted;
       }
     }
-    if (inside == 0 && !look_at_nodes(lo, s, &fits)) return;   // nothing of this pass here
+    // Nothing of this pass here; or a sliver under solid (D14b), which no cube is recorded for, so it has no reason of
+    // its own (D14c): SolidAt::why answers Other there.
+    if (inside == 0 && !look_at_nodes(lo, s, &fits, &seen)) return;
     const bool cut = inside < 27;   // D3: a whole cell, cut by the edge
     // A width is read to about a micron (PartMeasure::reach), so a cell that fits its
     // wall exactly must not be refused over the last digits of the reading.
@@ -407,7 +464,13 @@ struct Pass {
     if (spec->algorithm == Algorithm::Stepped && top && pack(lo, s, held)) return;
     // G6: a cell that cannot be divided further stands; nothing goes solid for the band.
     // (Unless it is too small to print: C8, C14.)
-    emit(lo, s, cut, fitting && printable);
+    if (fitting && printable) {
+      emit(lo, s, cut, true);
+      return;
+    }
+    // D14c: the smallest cell tried here is this one, or, when Stepped found no unit that fits, its finest unit.
+    const double tried = spec->algorithm == Algorithm::Stepped && top ? std::min(s, finest_mm) : s;
+    emit(lo, s, cut, false, why_solid(tried, seen, printable, fitting));
   }
 
   // ── STEPPED: pack one base cell from one shared unit (C6-C6c, C13) ────────────
@@ -421,6 +484,7 @@ struct Pass {
     long covered = 0, asked = 0;   // sample points with lattice asked: in a cell / in all
     std::vector<std::array<int, 4>> cubes;   // i, j, k, m (in units)
     std::vector<std::array<int, 3>> bare;    // units with lattice asked and no cell
+    std::vector<SolidWhy> bare_why;          // why, per bare unit (D14c)
     std::vector<unsigned char> cut;          // per cube
   };
   bool pack(const double lo[3], double S, bool held) {
@@ -432,6 +496,7 @@ struct Pass {
       const std::size_t N = static_cast<std::size_t>(n) * n * n;
       std::vector<unsigned char> in(N, 0);
       std::vector<double> fit(N, 1e300);
+      std::vector<Seen> seen(N);                  // D14c: what each unit's points read
       for (int k = 0; k < n; ++k)
         for (int j = 0; j < n; ++j)
           for (int i = 0; i < n; ++i) {
@@ -441,7 +506,7 @@ struct Pass {
                 for (int a = 0; a < 2; ++a) {
                   double f = 0.0;
                   if (!sample(lo[0] + t * (i + 0.25 + 0.5 * a), lo[1] + t * (j + 0.25 + 0.5 * b),
-                              lo[2] + t * (k + 0.25 + 0.5 * c), &f))
+                              lo[2] + t * (k + 0.25 + 0.5 * c), &f, &seen[u]))
                     continue;
                   ++in[u];
                   fit[u] = std::min(fit[u], f);
@@ -455,13 +520,13 @@ struct Pass {
                 for (int a = 0; a < 2 && !in[u]; ++a) {
                   double f = 0.0;
                   if (!sample(lo[0] + t * (i + 0.04 + 0.92 * a), lo[1] + t * (j + 0.04 + 0.92 * b),
-                              lo[2] + t * (k + 0.04 + 0.92 * c), &f))
+                              lo[2] + t * (k + 0.04 + 0.92 * c), &f, &seen[u]))
                     continue;
                   in[u] = 1;
                   fit[u] = f;
                 }
             const double at[3] = {lo[0] + t * i, lo[1] + t * j, lo[2] + t * k};
-            if (!in[u] && look_at_nodes(at, t, &fit[u])) in[u] = 1;
+            if (!in[u] && look_at_nodes(at, t, &fit[u], &seen[u])) in[u] = 1;
           }
       Packed p;
       p.n = n;
@@ -516,7 +581,11 @@ struct Pass {
           for (int i = 0; i < n; ++i) {
             const std::size_t u = (static_cast<std::size_t>(k) * n + j) * n + i;
             p.asked += in[u];
-            if (in[u] && !taken[u]) p.bare.push_back({i, j, k});
+            if (in[u] && !taken[u]) {
+              p.bare.push_back({i, j, k});
+              // D14c: a unit of an admitted fraction prints; one whose wall holds it was kept empty by the band.
+              p.bare_why.push_back(why_solid(t, seen[u], true, t <= fit[u] + kReadingSlack));
+            }
           }
       if (p.cubes.empty()) continue;
       // Most covered, then fewest cells, then the coarser unit (the smaller n).
@@ -541,9 +610,10 @@ struct Pass {
       const double at[3] = {lo[0] + c[0] * t, lo[1] + c[1] * t, lo[2] + c[2] * t};
       emit(at, c[3] * t, best.cut[q] != 0, true);
     }
-    for (const auto& u : best.bare) {
+    for (std::size_t q = 0; q < best.bare.size(); ++q) {
+      const auto& u = best.bare[q];
       const double at[3] = {lo[0] + u[0] * t, lo[1] + u[1] * t, lo[2] + u[2] * t};
-      emit(at, t, true, false);
+      emit(at, t, true, false, best.bare_why[q]);
     }
     return true;
   }
@@ -858,7 +928,7 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
       }
       return;
     }
-    struct Piece { std::vector<Cell> cells, solid; };
+    struct Piece { std::vector<Cell> cells, solid; std::vector<SolidWhy> why; };
     std::vector<Piece> pieces(total);
     std::atomic<std::size_t> next{0};
     auto work = [&](int who) {
@@ -879,8 +949,10 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
         p.place(q, base);
         pieces[i].cells.swap(local.cells);
         pieces[i].solid.swap(local.solid);
+        pieces[i].why.swap(local.solid_why);
         local.cells.clear();
         local.solid.clear();
+        local.solid_why.clear();
       }
     };
     std::vector<std::thread> pool;
@@ -891,6 +963,7 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
     for (const Piece& piece : pieces) {
       out.cells.insert(out.cells.end(), piece.cells.begin(), piece.cells.end());
       out.solid.insert(out.solid.end(), piece.solid.begin(), piece.solid.end());
+      out.solid_why.insert(out.solid_why.end(), piece.why.begin(), piece.why.end());
       pass.tally->cells += piece.cells.size();
       pass.tally->solid += piece.solid.size();
     }
@@ -904,6 +977,7 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
     pass.frame_index = static_cast<int>(out.frames.size());
     pass.frame = frame;
     pass.out = &out;
+    pass.region_depth = depth_cap;   // D14c
     out.frames.push_back(frame);
     out.walls.emplace_back();
     out.walls.back().depth = depth_cap;
@@ -957,6 +1031,10 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
     if (!g.valid || g.kind != ClearanceKind::Face) continue;
     int k = 0;
     const double base = divide(g.depth, &k);
+    // D14c: the depth whose own cell prints, when a deeper region would give one (not when the cell asked for is
+    // itself under the floor).
+    const double floor_here = std::max(spec.cell_min_mm, out.floor_cell_mm);
+    const double depth_need = target >= floor_here ? k_min * floor_here : 0.0;
     Frame f;
     f.origin = g.origin;
     f.ax[0] = g.u; f.ax[1] = g.w; f.ax[2] = g.normal;
@@ -969,6 +1047,7 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
       // a curved region is: no wall map, no wall its own cells. Whatever is not this region's lattice cuts the cells
       // (D3). Grade to shape reads the region's own outline, as it does wall by wall.
       Pass pass = open(r.id, f, g.depth, base);
+      pass.depth_need = depth_need;
       pass.tally = &out.regions.back();
       const WallMap none = out.walls.back();   // no walls: a cell's shape is its region's lattice in its cube
       pass.walls = &none;
@@ -1012,6 +1091,7 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
     }
 
     Pass pass = open(r.id, f, g.depth, base);
+    pass.depth_need = depth_need;
     pass.tally = &out.regions.back();
     pass.walls = &map;
     if (spec.grade_to_shape && spec.band_mm > 0.0) pass.band_region = &r;
