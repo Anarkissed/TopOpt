@@ -430,6 +430,8 @@ enum class Algorithm : std::uint8_t {
   Stepped,
 };
 
+struct DemandField;   // a stress result (below)
+
 struct CellSpec {
   Algorithm algorithm = Algorithm::DefaultGrade;
   LatticeTopology topology = LatticeTopology::Octet;
@@ -494,7 +496,26 @@ struct CellSpec {
   // C21: a flat region's face shows one main size, the largest of its ladder at which more than half of the cubes in
   // the first layer under the face stand whole; no larger cell is laid in that region.
   bool one_grid = false;
+  // C22, cell size by stress (his rule of 2026-08-19: Auto cell size is "any number - as needed based on the stress
+  // map"). On, the stress asks for a cell size place by place: the region's own cell where the stress is nothing, the
+  // smallest its ladder allows where the stress is at or over the reference, in proportion between. A cell stands only
+  // where nothing inside it asks for a smaller one; the smallest always may. With d the highest stress in the
+  // axis-aligned box round the cube's eight corners (R16), t = (d / reference, held to 0 .. 1) to the power of the
+  // response (held to 0.25 .. 4), a cell of size s may stand where t <= (S_base - s) / (S_base - f), f the finest
+  // cell. A cell the stress does not allow is divided down its ladder as a cell the band does not allow is (Default
+  // Grade halves, Stepped packs); one that cannot be divided further stands: nothing goes solid for the stress, and
+  // the stress never lays a cell under the smallest the layout would otherwise lay there.
+  // OFF, whatever `by_stress` says, when: no field or an empty one; `reference_mpa` <= 0; a typed `cell_mm` (only
+  // Manual forces one size, C16); Uniform; `one_grid` (C19: one even grid). Off, the layout is today's, byte for byte.
+  // `demand`, `reference_mpa`, `response` are the RESOLVED stress inputs: the session fills them from
+  // Settings::stress; lay_cells never looks for a percentile.
+  bool by_stress = false;
+  std::shared_ptr<const DemandField> demand;
+  double reference_mpa = 0.0;
+  double response = 1.0;
 };
+// C22: is cell size by stress applied to a layout laid with `spec` (by_stress on and none of its OFF list)?
+bool stress_sizes_cells(const CellSpec& spec);
 
 // Cells are cubes on a frame: world position = origin + ax[0]*a + ax[1]*b + ax[2]*c.
 // A flat region's frame is its face's own (in-plane, in-plane, inward), so the face is
@@ -690,7 +711,7 @@ struct DemandField {
   // its eight corners. That is the rule, not an approximation to be refined.
   double highest_in(const Vec3& lo, const Vec3& hi) const;
 };
-// The stress settings shared by struts (set_struts, By stress) and, later, cells.
+// The stress settings shared by struts (set_struts, By stress) and cells (C22: CellSpec::by_stress).
 struct StressGrade {
   std::shared_ptr<const DemandField> demand;   // null or empty: no stress yet
   double reference_mpa = 0.0;   // > 0: the stress at which the lattice is at its heavy end. 0: the part's own (below)
@@ -953,6 +974,7 @@ struct Settings {
   std::vector<ProtectAsk> protect;
   // The cells, the struts, and what happens to cut ends.
   CellSpec cells;          // its allow_quilt and one_grid are not read: the switches are struts.allow_quilt, one_grid
+                           // (its demand, reference_mpa and response are filled from `stress` when stress.demand is set)
   StrutSpec struts;
   // The stress result the lattice is graded by, and how (R16, R17). Null `demand`: no stress yet.
   StressGrade stress;
@@ -987,6 +1009,8 @@ struct Outcome {
   std::vector<int> empty_regions;   // asked-for regions none of whose faces has triangles
   double ms_read = 0.0, ms_cells = 0.0, ms_bars = 0.0;
   std::size_t thin_solid = 0;    // cut cells print rule P8 (f) made solid (solidify_thin_cuts)
+  bool cells_by_stress = false;  // C22 was applied to this layout (stress_sizes_cells)
+  bool cells_no_stress = false;  // C22 was asked for and there was no stress result, or no reference
 };
 
 class Session {
@@ -1012,6 +1036,12 @@ class Session {
   std::unique_ptr<Domain> domain_;
   bool unread_ = false;                // the kept domain has not been laid in once yet (its first lay was cancelled)
   std::vector<int> empty_regions_;
+  // The part's own stress reference (R17), kept for as long as the domain, the field and the percentile are the same:
+  // a slider move never computes it again. The one reference the cells (C22) are laid with.
+  bool ref_kept_ = false;
+  std::shared_ptr<const DemandField> ref_field_;
+  double ref_percentile_ = 0.0;
+  double ref_mpa_ = 0.0;
 };
 
 // In the plane of a flat region's face: how far `p` is inside the region's edge (its

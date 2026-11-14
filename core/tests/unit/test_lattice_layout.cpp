@@ -4592,7 +4592,436 @@ static void test_demand_field() {
   }
 }
 
+// ── C22: cell size by stress ──────────────────────────────────────────────────
+// A made-up stress field over a box of voxels, each voxel's value from its centre.
+template <class F>
+static std::shared_ptr<DemandField> field_of(Vec3 origin, double spacing, int nx, int ny, int nz, F value) {
+  auto f = std::make_shared<DemandField>();
+  f->origin = origin;
+  f->spacing = spacing;
+  f->nx = nx; f->ny = ny; f->nz = nz;
+  f->mpa.resize(static_cast<std::size_t>(nx) * ny * nz);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i)
+        f->mpa[f->index(i, j, k)] = static_cast<float>(value(Vec3{origin.x + (i + 0.5) * spacing,
+                                                                  origin.y + (j + 0.5) * spacing,
+                                                                  origin.z + (k + 0.5) * spacing}));
+  return f;
+}
+// The highest stress in the axis-aligned box round a cube of the layout's frame (R16), read here on its own.
+static double cube_demand(const Layout& l, int frame, const double lo[3], double s, const DemandField& f) {
+  const Frame& fr = l.frames[static_cast<std::size_t>(frame)];
+  Vec3 mn{1e300, 1e300, 1e300}, mx{-1e300, -1e300, -1e300};
+  for (int k = 0; k < 8; ++k) {
+    const Vec3 v = fr.at(lo[0] + ((k & 1) ? s : 0.0), lo[1] + ((k & 2) ? s : 0.0), lo[2] + ((k & 4) ? s : 0.0));
+    mn = {std::min(mn.x, v.x), std::min(mn.y, v.y), std::min(mn.z, v.z)};
+    mx = {std::max(mx.x, v.x), std::max(mx.y, v.y), std::max(mx.z, v.z)};
+  }
+  return f.highest_in(mn, mx);
+}
+// C22 for one cube: the finest always; otherwise t <= (S_base - s) / (S_base - f).
+static bool stress_rule_allows(const Layout& l, int frame, const double lo[3], double s, double base, double finest,
+                               const DemandField& f, double ref, double response) {
+  if (s <= finest * (1 + 1e-9)) return true;
+  const double t = std::pow(std::clamp(cube_demand(l, frame, lo, s, f) / ref, 0.0, 1.0), response);
+  return t <= (base - s) / (base - finest) + 1e-9;
+}
+static bool same_layout(const Layout& a, const Layout& b) { return a.cells == b.cells && a.solid == b.solid; }
+// The size of the cell whose cube holds p (0: none).
+static double size_holding(const Layout& l, const Vec3& p) {
+  for (const Cell& c : l.cells) {
+    const Vec3 m = cell_centre(l, c);
+    if (std::fabs(p.x - m.x) < 0.5 * c.size && std::fabs(p.y - m.y) < 0.5 * c.size && std::fabs(p.z - m.z) < 0.5 * c.size)
+      return c.size;
+  }
+  return 0.0;
+}
+
+static void test_cells_by_stress() {
+  // A slab 96 x 24 x 8 latticed from its top face, 8 mm deep: one layer of 8 mm cells, ladder 8, 4, 2 (halves, at a
+  // 0.2 mm line) or 8 and its fifths/sixths (Stepped). The made-up field is 0 for x < 16, rises evenly to the
+  // reference (100 MPa) at x = 80 and stays there.
+  PartMeasure pm(weld_mesh(box(96, 24, 8)));
+  DomainSpec s;
+  s.bead_mm = 0.2;
+  s.regions = {face_region(1, Role::Lattice, {48, 12, 8}, {0, 0, -1}, 12, 48, 8)};   // u along y
+  Domain d(pm, s);
+  const double ref = 100.0;
+  auto ramp_value = [](const Vec3& c) { return 100.0 * std::clamp((c.x - 16.0) / 64.0, 0.0, 1.0); };
+  const auto ramp = field_of({-2, -2, -2}, 1.0, 100, 28, 12, ramp_value);
+  CellSpec off;
+  off.cell_max_mm = 8;
+  auto on_with = [&](Algorithm algo, std::shared_ptr<const DemandField> f, double r) {
+    CellSpec c = off;
+    c.algorithm = algo;
+    c.by_stress = true;
+    c.demand = std::move(f);
+    c.reference_mpa = r;
+    return c;
+  };
+  const double finest_of[2] = {2.0, 8.0 / 6.0};   // Default Grade, Stepped
+  int before = g_fail;
+  auto block = [&](const char* name) {
+    std::printf("C22 %s: %d failed\n", name, g_fail - before);
+    before = g_fail;
+  };
+
+  // 1, 2. The ramp, Default Grade and Stepped.
+  Layout ramp_dg;
+  for (int a = 0; a < 2; ++a) {
+    const Algorithm algo = a == 0 ? Algorithm::DefaultGrade : Algorithm::Stepped;
+    const CellSpec on = on_with(algo, ramp, ref);
+    CHECK(stress_sizes_cells(on));
+    const Layout l = lay_cells(d, on);
+    if (a == 0) ramp_dg = l;
+    const double finest = finest_of[a];
+    int breaks = 0, cold = 0, cold_wrong = 0, hot = 0, hot_wrong = 0, wrong_own = 0;
+    for (const Cell& c : l.cells) {
+      if (std::fabs(c.own - 8.0) > 1e-9) ++wrong_own;
+      if (!stress_rule_allows(l, c.frame, c.lo, c.size, 8.0, finest, *ramp, ref, 1.0)) ++breaks;
+      const Vec3 m = cell_centre(l, c);
+      if (m.x < 16.0) { ++cold; if (std::fabs(c.size - 8.0) > 1e-9) ++cold_wrong; }
+      if (m.x > 80.0) { ++hot; if (std::fabs(c.size - finest) > 1e-9) ++hot_wrong; }
+    }
+    CHECK(wrong_own == 0);
+    CHECK(breaks == 0);
+    CHECK(cold == 6 && cold_wrong == 0);            // the cold end: the base cell (2 x 3 of them)
+    CHECK(hot > 0 && hot_wrong == 0);               // the hot end: the finest
+    CHECK(l.solid.empty());                         // nothing goes solid for the stress
+    CHECK(badly_covered(d, l, {0, 0, 0}, {96, 24, 8}, 1.3) == 0);
+    // Along the ramp the cell never grows.
+    int grew = 0, read = 0;
+    for (double y = 0.6; y < 24; y += 2.9)
+      for (double z = 0.3; z < 8; z += 1.9) {
+        double last = 1e300;
+        for (double x = 0.1; x < 96; x += 0.25) {
+          const double sz = size_holding(l, {x, y, z});
+          if (sz == 0.0) continue;
+          ++read;
+          if (sz > last + 1e-9) ++grew;
+          last = sz;
+        }
+      }
+    CHECK(read > 10000 && grew == 0);
+    if (a == 0) {
+      // As large as the rule lets them: no eight sibling cells stand where their parent would be allowed and fits.
+      std::map<std::array<long long, 4>, int> groups;
+      double o[3] = {1e300, 1e300, 1e300};
+      for (const Cell& c : l.cells)
+        for (int k = 0; k < 3; ++k) o[k] = std::min(o[k], c.lo[k]);
+      for (const Cell& c : l.cells) {
+        if (c.size >= 8.0 - 1e-9) continue;
+        const double P = 2 * c.size;
+        groups[{std::llround(std::floor((c.lo[0] - o[0]) / P + 1e-9) * P * 1e3),
+                std::llround(std::floor((c.lo[1] - o[1]) / P + 1e-9) * P * 1e3),
+                std::llround(std::floor((c.lo[2] - o[2]) / P + 1e-9) * P * 1e3), std::llround(c.size * 1e3)}]++;
+      }
+      int full = 0, mergeable = 0;
+      for (const auto& g : groups) {
+        if (g.second != 8) continue;
+        ++full;
+        const double P = 2e-3 * static_cast<double>(g.first[3]);
+        const double plo[3] = {o[0] + g.first[0] * 1e-3, o[1] + g.first[1] * 1e-3, o[2] + g.first[2] * 1e-3};
+        if (stress_rule_allows(l, 0, plo, P, 8.0, finest, *ramp, ref, 1.0)) ++mergeable;
+      }
+      CHECK(full > 10 && mergeable == 0);
+      std::printf("C22 ramp, Default Grade: %zu cells (%d sibling groups, none mergeable)\n", l.cells.size(), full);
+    } else {
+      std::printf("C22 ramp, Stepped: %zu cells\n", l.cells.size());
+    }
+  }
+  block("1-2 ramp");
+
+  {  // 3. Off, whatever the switch says: the layout is today's, byte for byte.
+    for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
+      CellSpec plain = off;
+      plain.algorithm = algo;
+      const Layout today = lay_cells(d, plain);
+      const auto zero = field_of({-2, -2, -2}, 1.0, 100, 28, 12, [](const Vec3&) { return 0.0; });
+      CellSpec no_field = on_with(algo, nullptr, ref);
+      CellSpec empty_field = on_with(algo, std::make_shared<DemandField>(), ref);
+      CellSpec all_zero = on_with(algo, zero, ref);
+      CellSpec no_ref = on_with(algo, ramp, 0.0);
+      CHECK(!stress_sizes_cells(no_field) && !stress_sizes_cells(empty_field) && !stress_sizes_cells(no_ref));
+      CHECK(stress_sizes_cells(all_zero));   // applied, and a field of nothing asks for nothing
+      CHECK(same_layout(lay_cells(d, no_field), today));
+      CHECK(same_layout(lay_cells(d, empty_field), today));
+      CHECK(same_layout(lay_cells(d, all_zero), today));
+      CHECK(same_layout(lay_cells(d, no_ref), today));
+      CHECK(!same_layout(lay_cells(d, on_with(algo, ramp, ref)), today));   // and on, it is not today's
+      CellSpec typed = plain;                // a typed cell size: only Manual forces one size (C16)
+      typed.cell_mm = 8;
+      CellSpec typed_on = on_with(algo, ramp, ref);
+      typed_on.cell_mm = 8;
+      CHECK(!stress_sizes_cells(typed_on) && same_layout(lay_cells(d, typed_on), lay_cells(d, typed)));
+      CellSpec grid = plain;                 // one even grid (C19)
+      grid.one_grid = true;
+      CellSpec grid_on = on_with(algo, ramp, ref);
+      grid_on.one_grid = true;
+      CHECK(!stress_sizes_cells(grid_on) && same_layout(lay_cells(d, grid_on), lay_cells(d, grid)));
+    }
+    CellSpec uni = off;                      // Uniform: one size
+    uni.algorithm = Algorithm::Uniform;
+    CellSpec uni_on = on_with(Algorithm::Uniform, ramp, ref);
+    CHECK(!stress_sizes_cells(uni_on) && same_layout(lay_cells(d, uni_on), lay_cells(d, uni)));
+  }
+  block("3 off");
+
+  {  // 4. Nothing goes solid: the part of test_cells_behind_a_pocket (a 4 mm wall, a 5 mm pocket, the wall behind,
+     // solid beside it), a ramp along x. Every point held by a cell with the option off is held by one with it on, and
+     // the layout's solid does not grow. KNOWN LIMIT (reported 2026-11-14, not changed here): under a flat face a
+     // cut cell that is halved can leave a strip of its lattice under a millimetre thin to a half none of whose sample
+     // points is lattice (here 0.5 mm along the part's bottom), and no cell holds it (D14: "strips under about a
+     // millimetre can be unlisted"). Grade to shape's halving loses the same kind of strip on this part; Stepped loses
+     // none. So on Default Grade a lost point must lie within a millimetre of the part's surface.
+    PartMeasure pp(weld_mesh(prism_any({{0, 0}, {60, 0}, {60, 20}, {0, 20}, {0, 9}, {50, 9}, {50, 4}, {0, 4}}, 0, 40)));
+    DomainSpec ps;
+    ps.regions = {face_region(1, Role::Lattice, {30, 0, 20}, {0, 1, 0}, 30, 30, 13)};
+    Domain dp(pp, ps);
+    const auto f = field_of({-2, -2, -2}, 1.0, 64, 24, 44,
+                            [](const Vec3& c) { return 100.0 * std::clamp((c.x - 10.0) / 40.0, 0.0, 1.0); });
+    auto pr = dp.probe();
+    const PartMeasure::Probe surface = pp.probe();
+    for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
+      CellSpec plain;
+      plain.algorithm = algo;
+      CellSpec on = plain;
+      on.by_stress = true;
+      on.demand = f;
+      on.reference_mpa = 100;
+      CellSpec band = plain;   // the band's own halving, for the comparison
+      band.grade_to_shape = true;
+      band.band_mm = 8;
+      const Layout lo_ = lay_cells(dp, plain), hi_ = lay_cells(dp, on), bd = lay_cells(dp, band);
+      auto held = [&](const Layout& l, const Vec3& p) {
+        for (const Cell& c : l.cells) if (cell_holds(l, pr, c, p)) return true;
+        return false;
+      };
+      int held_off = 0, lost = 0, lost_deep = 0, lost_band = 0;
+      for (double x = 0.31; x < 60; x += 1.1)
+        for (double y = 0.27; y < 20; y += 0.9)
+          for (double z = 0.33; z < 40; z += 1.3) {
+            const Vec3 p{x, y, z};
+            if (!pr.where(p).lattice() || !held(lo_, p)) continue;
+            ++held_off;
+            if (!held(bd, p)) ++lost_band;
+            if (held(hi_, p)) continue;
+            ++lost;
+            if (surface.depth(p) >= 1.0) ++lost_deep;
+          }
+      double v0 = 0, v1 = 0;
+      for (const Cell& c : lo_.solid) v0 += c.size * c.size * c.size;
+      for (const Cell& c : hi_.solid) v1 += c.size * c.size * c.size;
+      CHECK(held_off > 1000 && lost_deep == 0);
+      if (algo == Algorithm::Stepped) CHECK(lost == 0);
+      CHECK(v1 <= v0 + 1e-9 && hi_.solid.size() <= lo_.solid.size());
+      CHECK(hi_.cells.size() > lo_.cells.size());
+      std::printf("C22 pocket part, %s: %d points held with it off; with it on %d of them in no cell (%d a millimetre "
+                  "or more inside); Grade to shape (band 8) leaves %d; cells %zu -> %zu, solid %zu -> %zu\n",
+                  algo == Algorithm::Stepped ? "Stepped" : "Default Grade", held_off, lost, lost_deep, lost_band,
+                  lo_.cells.size(), hi_.cells.size(), lo_.solid.size(), hi_.solid.size());
+    }
+  }
+  block("4 nothing solid");
+
+  {  // 5. Grade to shape on as well (band 6 mm): every cell obeys both rules.
+    for (int a = 0; a < 2; ++a) {
+      const Algorithm algo = a == 0 ? Algorithm::DefaultGrade : Algorithm::Stepped;
+      CellSpec band = off;
+      band.algorithm = algo;
+      band.grade_to_shape = true;
+      band.band_mm = 6;
+      CellSpec both = on_with(algo, ramp, ref);
+      both.grade_to_shape = true;
+      both.band_mm = 6;
+      const Layout lb = lay_cells(d, band), l = lay_cells(d, both);
+      const double finest = finest_of[a];
+      int breaks_band = 0, breaks_stress = 0;
+      for (const Cell& c : l.cells) {
+        const Vec3 m = cell_centre(l, c);
+        const double dist = std::max(0.0, std::min(std::min(m.x, 96 - m.x), std::min(m.y, 24 - m.y)));
+        if (c.size > finest * (1 + 1e-9) && dist < 6.0 * (c.size - finest) / (8.0 - finest) - 1e-6) ++breaks_band;
+        if (!stress_rule_allows(l, c.frame, c.lo, c.size, 8.0, finest, *ramp, ref, 1.0)) ++breaks_stress;
+      }
+      CHECK(breaks_band == 0 && breaks_stress == 0);
+      CHECK(!same_layout(l, lb) && l.cells.size() > lb.cells.size());
+      CHECK(l.solid.empty());
+    }
+  }
+  block("5 with Grade to shape");
+
+  {  // 6. One hot voxel (x 50..51, y 11..12, z 3..4): only the base cube whose box overlaps it differs from the cold
+     // layout, which is the plain one.
+    auto one = field_of({-2, -2, -2}, 1.0, 100, 28, 12, [](const Vec3& c) {
+      return (c.x > 50 && c.x < 51 && c.y > 11 && c.y < 12 && c.z > 3 && c.z < 4) ? 100.0 : 0.0;
+    });
+    for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
+      const auto zero = field_of({-2, -2, -2}, 1.0, 100, 28, 12, [](const Vec3&) { return 0.0; });
+      const Layout cold = lay_cells(d, on_with(algo, zero, ref));
+      const Layout hot = lay_cells(d, on_with(algo, one, ref));
+      int overlap = 0, changed = 0, wrong = 0;
+      for (const Cell& b : cold.cells) {
+        const Vec3 m = cell_centre(cold, b);
+        const bool over = std::fabs(m.x - 50.5) < 4.5 && std::fabs(m.y - 11.5) < 4.5 && std::fabs(m.z - 3.5) < 4.5;
+        std::vector<Cell> in;
+        for (const Cell& c : hot.cells) {
+          const Vec3 n = cell_centre(hot, c);
+          if (std::fabs(n.x - m.x) < 4 && std::fabs(n.y - m.y) < 4 && std::fabs(n.z - m.z) < 4) in.push_back(c);
+        }
+        const bool same = in.size() == 1 && in[0] == b;
+        if (over) { ++overlap; changed += !same; }
+        else if (!same) ++wrong;
+      }
+      CHECK(cold.cells.size() == 36);
+      CHECK(overlap == 1 && changed == 1 && wrong == 0);
+    }
+  }
+  block("6 one hot voxel");
+
+  {  // 7. Response 2 leaves fewer small cells than response 1 on the ramp; both ends are unchanged.
+    for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
+      CellSpec r2 = on_with(algo, ramp, ref);
+      r2.response = 2.0;
+      const Layout a1 = lay_cells(d, on_with(algo, ramp, ref)), a2 = lay_cells(d, r2);
+      auto ends = [](const Layout& l, bool cold) {
+        std::vector<Cell> out;
+        for (const Cell& c : l.cells) {
+          const double x = cell_centre(l, c).x;
+          if (cold ? x < 16.0 : x > 80.0) out.push_back(c);
+        }
+        return out;
+      };
+      CHECK(a2.cells.size() < a1.cells.size());
+      CHECK(ends(a1, true) == ends(a2, true) && ends(a1, false) == ends(a2, false));
+      CHECK(!ends(a1, false).empty());
+      std::printf("C22 response 1: %zu cells, response 2: %zu (%s)\n", a1.cells.size(), a2.cells.size(),
+                  algo == Algorithm::Stepped ? "Stepped" : "Default Grade");
+    }
+  }
+  block("7 response");
+
+  {  // 8. One thread and eight: the same layout (D18).
+    for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
+      const CellSpec on = on_with(algo, ramp, ref);
+      const Layout one = lay_cells(d, on, 1), eight = lay_cells(d, on, 8);
+      CHECK(same_layout(one, eight));
+      CHECK(!same_layout(one, lay_cells(d, off, 1)));
+    }
+  }
+  block("8 threads");
+
+  {  // 9. Through a Session: the reference, kept; cells_by_stress and cells_no_stress.
+    int L = 0, square = 0, sideA = 0, sideB = 0;
+    const StepModel model = plate_with_L_face(&L, &square, &sideA, &sideB);
+    Session session(model);
+    Settings st;
+    st.min_strut_lines = kFewestStrutLines;
+    st.regions = {{1, Role::Lattice, {square}, 6.0, 0.0}};
+    st.bead_mm = 0.2;                                         // a ladder of 6, 3 and 1.5 mm
+    st.cells.cell_max_mm = 6;
+    st.bars = false;
+    auto f = field_of({-2, -2, -2}, 1.0, 64, 64, 14,
+                      [](const Vec3& c) { return 100.0 * std::clamp((c.x - 25.0) / 40.0, 0.0, 1.0); });
+    const Outcome plain = session.lay(st);
+    CHECK(!plain.cells_by_stress && !plain.cells_no_stress);
+    st.cells.by_stress = true;
+    const Outcome none = session.lay(st);                     // asked, no field
+    CHECK(!none.cells_by_stress && none.cells_no_stress && none.layout.cells == plain.layout.cells);
+    st.stress.demand = f;                                     // reference 0: the part's own
+    const Outcome own = session.lay(st);
+    const double want = stress_reference(*session.domain(), *f, st.stress.percentile);
+    CHECK(want > 0.0 && want < 100.0);
+    CHECK(own.cells_by_stress && !own.cells_no_stress);
+    auto laid_with = [&](double r) {
+      CellSpec c = st.cells;
+      c.demand = f;
+      c.reference_mpa = r;
+      Layout l = lay_cells(*session.domain(), c);
+      set_struts(l, st.struts);
+      return l;
+    };
+    CHECK(own.layout.cells == laid_with(want).cells);
+    CHECK(!(own.layout.cells == plain.layout.cells));
+    CHECK(!(laid_with(want).cells == laid_with(2.0 * want).cells));   // the reference decides
+    // Kept while the domain, the field and the percentile are the same: the field changed in place is not read again
+    // for its reference (a slider move never reads it), and a new field pointer is.
+    const std::vector<float> was = f->mpa;
+    for (float& v : f->mpa) v *= 2.0f;
+    const Outcome kept = session.lay(st);
+    CHECK(kept.layout.cells == laid_with(want).cells);
+    CHECK(!(kept.layout.cells == laid_with(2.0 * want).cells));
+    auto g = std::make_shared<DemandField>(*f);
+    st.stress.demand = g;
+    const Outcome fresh = session.lay(st);
+    CHECK(fresh.layout.cells == laid_with(2.0 * want).cells);
+    f->mpa = was;
+    st.stress.demand = f;
+    st.stress.percentile = 0.5;                               // a new percentile: read again
+    const double half = stress_reference(*session.domain(), *f, 0.5);
+    CHECK(session.lay(st).layout.cells == laid_with(half).cells);
+    st.stress.percentile = 0.95;
+    st.stress.reference_mpa = 40.0;                           // a stated reference is used as it is
+    const Outcome stated = session.lay(st);
+    CHECK(stated.cells_by_stress && stated.layout.cells == laid_with(40.0).cells);
+    st.stress.reference_mpa = 0.0;
+    st.stress.demand = field_of({-2, -2, -2}, 1.0, 64, 64, 14, [](const Vec3&) { return 0.0; });
+    const Outcome zero = session.lay(st);                     // the part's own reference of a cold field is 0
+    CHECK(!zero.cells_by_stress && zero.cells_no_stress && zero.layout.cells == plain.layout.cells);
+    st.stress.demand = f;
+    st.cells.cell_mm = 6;                                     // a typed size: off, and not "no stress"
+    const Outcome typed = session.lay(st);
+    CHECK(!typed.cells_by_stress && !typed.cells_no_stress);
+    st.cells.cell_mm = 0;
+    st.one_grid = true;                                       // Let walls cut cells: off
+    const Outcome grid = session.lay(st);
+    CHECK(!grid.cells_by_stress && !grid.cells_no_stress);
+    st.one_grid = false;
+    st.cells.by_stress = false;                               // a field, the switch off
+    const Outcome unasked = session.lay(st);
+    CHECK(!unasked.cells_by_stress && !unasked.cells_no_stress && unasked.layout.cells == plain.layout.cells);
+  }
+  block("9 session");
+
+  {  // 11. Speed: lay_cells with the option on, about 2,000 cells and a 64^3 field, against it off.
+    PartMeasure pb(weld_mesh(box(128, 128, 64)));
+    DomainSpec bs;
+    bs.bead_mm = 0.2;
+    bs.start = Start::AllLattice;
+    Domain db(pb, bs);
+    const auto zero = field_of({0, 0, 0}, 2.0, 64, 64, 64, [](const Vec3&) { return 0.0; });
+    const auto slope = field_of({0, 0, 0}, 2.0, 64, 64, 64,
+                                [](const Vec3& c) { return 100.0 * std::clamp((c.x - 100.0) / 28.0, 0.0, 1.0); });
+    CellSpec plain = off;
+    plain.cell_min_mm = 2;   // the whole part's base cell 8 mm (its halves end at 2)
+    auto with_min = [](CellSpec c) { c.cell_min_mm = 2; return c; };
+    auto best_ms = [&](const CellSpec& c, std::size_t* cells) {
+      double best = 1e300;
+      for (int k = 0; k < 3; ++k) {
+        const auto t0 = std::chrono::steady_clock::now();
+        const Layout l = lay_cells(db, c);
+        best = std::min(best, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+        *cells = l.cells.size();
+      }
+      return best;
+    };
+    std::size_t n0 = 0, n1 = 0, n2 = 0;
+    (void)lay_cells(db, plain);   // the domain's first reading, not timed
+    const double t_off = best_ms(plain, &n0);
+    const double t_on = best_ms(with_min(on_with(Algorithm::DefaultGrade, zero, ref)), &n1);
+    const double t_slope = best_ms(with_min(on_with(Algorithm::DefaultGrade, slope, ref)), &n2);
+    std::printf("C22 speed: off %.2f ms (%zu cells); on, a cold 64^3 field %.2f ms (%zu cells, %.2fx); on, a slope "
+                "over the last 28 mm %.2f ms (%zu cells)\n",
+                t_off, n0, t_on, n1, t_on / t_off, t_slope, n2);
+    CHECK(n0 > 1500 && n0 < 2600 && n1 == n0);
+    CHECK(t_on <= 1.5 * t_off);
+    CHECK(n2 > n0);
+  }
+  block("11 speed");
+}
+
 int main() {
+  test_cells_by_stress();
   test_demand_field();
   test_thin_cut_pieces();
   test_one_grid_main_size();

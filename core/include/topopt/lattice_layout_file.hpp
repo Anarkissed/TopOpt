@@ -104,6 +104,7 @@ struct FileResult {
   std::size_t cells = 0, solid_pieces = 0, bars = 0, at_one_line = 0, at_widest = 0;
   std::size_t stubs = 0, joined = 0, dropped = 0, pieces = 0, adrift = 0, stepped_edges = 0;
   std::size_t thin_solid = 0;   // cut cells print rule P8 (f) made solid (Outcome::thin_solid)
+  bool cells_by_stress = false; // cell size by stress was applied to the layout (Outcome::cells_by_stress, C22)
   double floor_cell_mm = 0.0, min_strut_mm = 0.0, open_look = 0.0, touch = 0.0;
   std::vector<int> empty_regions;
   // The mesh.

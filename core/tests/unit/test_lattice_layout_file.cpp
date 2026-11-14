@@ -4,9 +4,12 @@
 // the same values; a part goes in and a whole binary STL comes out with its numbers; and
 // every way the job can fail ends in one plain line, a refusal word, the right exit code
 // and NO file. Without the Manifold library the job says it cannot, and that is checked.
+#include <algorithm>
 #include <atomic>
+#include <cstdint>
 #include <cstdio>
 #include <fstream>
+#include <memory>
 #include <sstream>
 #include <string>
 
@@ -529,7 +532,94 @@ static void test_no_slit_under_solid() {
   CHECK(empty[1] == 0);
 }
 
+// C22, cell size by stress: the layout key "cells_by_stress" reaches CellSpec::by_stress; a job with it on and no stress
+// result is refused (no_stress_result, exit 3) before anything is made; with one it makes a file whose layout says
+// cells_by_stress. The stress result is the top-level "demand" file of brief A (8 bytes TODEMAND, int32 version 1, int32
+// nx, ny, nz, float64 origin x, y, z, float64 spacing, nx*ny*nz float32), written and read back here by a small reader
+// of this test's own until the job reads the key itself.
+static std::shared_ptr<const DemandField> read_demand(const std::string& path) {
+  std::ifstream f(path, std::ios::binary);
+  char magic[8] = {};
+  std::int32_t version = 0, n[3] = {0, 0, 0};
+  double o[3] = {0, 0, 0}, spacing = 0;
+  f.read(magic, 8);
+  f.read(reinterpret_cast<char*>(&version), 4);
+  f.read(reinterpret_cast<char*>(n), 12);
+  f.read(reinterpret_cast<char*>(o), 24);
+  f.read(reinterpret_cast<char*>(&spacing), 8);
+  if (!f || std::string(magic, 8) != "TODEMAND" || version != 1) return nullptr;
+  auto d = std::make_shared<DemandField>();
+  d->origin = {o[0], o[1], o[2]};
+  d->spacing = spacing;
+  d->nx = n[0]; d->ny = n[1]; d->nz = n[2];
+  d->mpa.resize(static_cast<std::size_t>(n[0]) * n[1] * n[2]);
+  f.read(reinterpret_cast<char*>(d->mpa.data()), static_cast<std::streamsize>(d->mpa.size() * 4));
+  return f ? d : nullptr;
+}
+static void test_cells_by_stress_key() {
+  std::string text = kBlockJob;
+  const std::string at = "\"algorithm\": \"uniform\"";
+  text.replace(text.find(at), at.size(), "\"algorithm\": \"default_grade\", \"cells_by_stress\": true");
+  const std::string lines = "\"min_strut_lines\": 2";   // one line: a ladder of 8 and 4 mm
+  text.replace(text.find(lines), lines.size(), "\"min_strut_lines\": 1");
+  FileJob job;
+  bool parsed = true;
+  try { job = parse_file_job(text); } catch (const FileJobError& e) { parsed = false; std::printf("  (%s)\n", e.what()); }
+  CHECK(parsed && job.settings.cells.by_stress);
+  CHECK(!parse_file_job(kBlockJob).settings.cells.by_stress);   // off unless asked
+  if (!parsed) return;
+  const std::string path = kTmp + "/lattice_file_cells_by_stress.stl";
+  std::remove(path.c_str());
+  {  // No stress result: refused, in plain words, and nothing made.
+    const FileResult r = make_lattice_file(box_model(30, 30, 12), job, path);
+    check_refused(r, "no_stress_result", 3, path);
+    CHECK(has(r.why, "stress result"));
+    CHECK(has(file_result_json(r), "\"code\": \"no_stress_result\""));
+  }
+  // A ramp along x over the block, 1 mm voxels: 0 for x < 8, 100 MPa from x = 22.
+  const std::string demand_path = kTmp + "/cells_by_stress.demand";
+  {
+    std::ofstream f(demand_path, std::ios::binary | std::ios::trunc);
+    const std::int32_t version = 1, n[3] = {34, 34, 16};
+    const double o[3] = {-2, -2, -2}, spacing = 1.0;
+    f.write("TODEMAND", 8);
+    f.write(reinterpret_cast<const char*>(&version), 4);
+    f.write(reinterpret_cast<const char*>(n), 12);
+    f.write(reinterpret_cast<const char*>(o), 24);
+    f.write(reinterpret_cast<const char*>(&spacing), 8);
+    for (int k = 0; k < n[2]; ++k)
+      for (int j = 0; j < n[1]; ++j)
+        for (int i = 0; i < n[0]; ++i) {
+          const double x = o[0] + i + 0.5;
+          const float v = static_cast<float>(100.0 * std::min(1.0, std::max(0.0, (x - 8.0) / 14.0)));
+          f.write(reinterpret_cast<const char*>(&v), 4);
+        }
+  }
+  job.settings.stress.demand = read_demand(demand_path);
+  job.settings.stress.reference_mpa = 100.0;
+  std::remove(demand_path.c_str());
+  CHECK(job.settings.stress.demand && !job.settings.stress.demand->empty());
+  if (!job.settings.stress.demand) return;
+  const FileResult r = make_lattice_file(box_model(30, 30, 12), job, path);
+  if (!mesh_available()) {
+    check_refused(r, "mesh_unavailable", 3, path);
+    return;
+  }
+  CHECK(r.ok && r.code == "ok" && r.cells > 0 && r.cells_by_stress);
+  if (!r.ok) std::printf("  (%s: %s %s)\n", r.code.c_str(), r.why.c_str(), r.detail.c_str());
+  CHECK(has(file_result_json(r), "\"cells_by_stress\": true"));
+  FileJob plain = job;
+  plain.settings.cells.by_stress = false;
+  const FileResult p = make_lattice_file(box_model(30, 30, 12), plain, path);
+  CHECK(p.ok && !p.cells_by_stress && p.cells < r.cells);
+  CHECK(has(file_result_json(p), "\"cells_by_stress\": false"));
+  std::printf("block, cells by stress: %zu cells (%zu with it off); print clean %d\n", r.cells, p.cells,
+              static_cast<int>(r.made.print_clean));
+  std::remove(path.c_str());
+}
+
 int main() {
+  test_cells_by_stress_key();
   test_no_slit_under_solid();
   test_strut_reach();
   test_thin_slot();

@@ -80,6 +80,7 @@ Exactly the fields of the bridge's `LatticeLayoutSettings`, under the same names
 | `strength` | 0 | |
 | `small_cells_in_thin_walls` | false | **not in the bridge's struct yet**: core's per-part choice of 2026-11-12 (thin walls get small cells with the thinnest strut) |
 | `one_grid` | false | **not in the bridge's struct yet**: "Let walls cut cells", core's per-part choice of 2026-11-14 (one even grid per region that walls, pockets and skins cut; offered in Aesthetic only) |
+| `cells_by_stress` | false | **not in the bridge's struct yet**: cell size by stress (C22). It needs the stress result (the top-level `demand` file): without one the job is refused (`no_stress_result`). The reference and response are those of the stress keys |
 | `bars` | true | a file needs its struts: false is refused (`no_struts`) |
 | `join_loose` | true | |
 | `skin` | false | |
@@ -111,7 +112,7 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
   "file_bytes": 82084,
   "part": {"faces": 6, "triangles": 12, "open_edges": 0},
   "layout": {"cells": 4, "solid_pieces": 0, "bars": 36, "at_one_line": 0, "at_widest": 0,
-             "stubs": 0, "joined": 0, "dropped": 60, "pieces": 1, "adrift": 0, "stepped_edges": 1, "thin_solid": 0,
+             "stubs": 0, "joined": 0, "dropped": 60, "pieces": 1, "adrift": 0, "stepped_edges": 1, "thin_solid": 0, "cells_by_stress": false,
              "floor_cell_mm": 2.37, "min_strut_mm": 0.45, "open_look": 0.19, "touch": 0.354,
              "empty_regions": []},
   "mesh": {"triangles": 1640, "mm3": 452.9, "part_mm3": 1000, "struts_mm3": 59.5, "solid_mm3": 398,
@@ -131,6 +132,7 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
 
 - `layout` holds the counts the bridge's `LatticeLayoutResult` holds, under the same names (`bars` here is how many).
   `thin_solid`: cut cells print rule P8 (f) made solid (a cut piece thinner than its own strut, lying against solid); they are counted in `solid_pieces` too.
+  `cells_by_stress`: cell size by stress (C22) was applied to the layout (false when it was not asked for, or one of its OFF cases holds).
 - `mesh` is core's `MeshReport`. `mm3` is the plastic in the file; `part_mm3` the solid part's.
 - `print_check` is his print rules measured on the mesh the file holds, layer by layer (0.2 mm layers), the part standing on its lowest face:
   - `bed_contact_mm2` (the bridge's name): the area lying flat on the bed; `bed_flat` says it is the whole first layer with no sloped underside.
@@ -158,6 +160,7 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
 | `no_cells` | 3 | No lattice cell fits anywhere in this part with these settings, so there is no lattice to make. Try a smaller cell, a deeper region, or more of the part. |
 | `no_struts` | 3 | The lattice here has no struts left to print, so no file was made. Try a smaller cell or a deeper region. |
 | `would_not_print` | 3 | After 10 tries the lattice still has 2 places that would start printing in mid-air and 1 overhang held at one end only. No file was made. A larger cell or a Protect skin near those places usually fixes it. |
+| `no_stress_result` | 3 | Cell size by stress needs a stress result, and this job has none, so nothing was made. Send the part's stress result with it, or turn Cell size by stress off. |
 | `mesh_unavailable` | 3 | The worker on the Mac was built without the part that makes lattice files, so it cannot make one. Update the worker. |
 | `job_unreadable` | 1 | The lattice job sent to the Mac could not be read, so nothing was made. (`detail` names the key.) |
 | `mesh_failed` | 1 | the mesh maker's own plain line, or: The lattice file could not be put together. Nothing was made. |
@@ -165,7 +168,7 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
 | `cancelled` | 1 | Stopped before the lattice file was finished. Nothing was made. (Only from code that passes a stop flag. On the worker a cancel stops the whole process and the worker reports it itself.) |
 | `error` | 1 | Something went wrong while making the lattice file, and nothing was made. |
 
-The checks run in this order: the model opens; it has a surface; every region and Protect skin has at least one face that is the part's; the type is a strut type; the worker can make meshes; the part is closed; the layout has cells; the layout has struts.
+The checks run in this order: the model opens; it has a surface; every region and Protect skin has at least one face that is the part's; the type is a strut type; cell size by stress has its stress result; the worker can make meshes; the part is closed; the layout has cells; the layout has struts.
 
 ## A worked example
 

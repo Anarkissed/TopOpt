@@ -189,6 +189,10 @@ struct Pass {
   // depth whose own cell prints (0 elsewhere: the cell there does not come from the depth).
   double region_depth = 1e300;
   double depth_need = 0.0;
+  // C22: the stress field when cell size by stress applies (null otherwise), its reference and response.
+  const DemandField* demand = nullptr;
+  double ref_mpa = 0.0;
+  double response = 1.0;
 
   // What the counted points of a cube read (D14c): the narrowest wall, the narrowest member.
   struct Seen {
@@ -252,6 +256,24 @@ struct Pass {
     if (!band_region || is_finest(s)) return true;
     const double d = std::max(0.0, edge_distance(lo[0] + 0.5 * s, lo[1] + 0.5 * s, lo[2] + 0.5 * s));
     return d >= spec->band_mm * (s - finest_mm) / (base_mm - finest_mm) - 1e-9;
+  }
+  // R16: the highest stress in the axis-aligned box round the cube's eight corners.
+  double demand_in(const double lo[3], double s) const {
+    Vec3 mn{1e300, 1e300, 1e300}, mx{-1e300, -1e300, -1e300};
+    for (int k = 0; k < 8; ++k) {
+      const Vec3 v = frame.at(lo[0] + ((k & 1) ? s : 0.0), lo[1] + ((k & 2) ? s : 0.0), lo[2] + ((k & 4) ? s : 0.0));
+      mn.x = std::min(mn.x, v.x); mx.x = std::max(mx.x, v.x);
+      mn.y = std::min(mn.y, v.y); mx.y = std::max(mx.y, v.y);
+      mn.z = std::min(mn.z, v.z); mx.z = std::max(mx.z, v.z);
+    }
+    return demand->highest_in(mn, mx);
+  }
+  // C22, the centre rule of G1-G3 with the stress in the place of the outline: a cell of size s may stand where the
+  // stress inside it asks for no smaller one, t <= (S_base - s) / (S_base - f); the finest always may.
+  bool stress_allows(const double lo[3], double s) const {
+    if (!demand || is_finest(s)) return true;
+    const double t = std::pow(std::clamp(demand_in(lo, s) / ref_mpa, 0.0, 1.0), std::clamp(response, 0.25, 4.0));
+    return t <= (base_mm - s) / (base_mm - finest_mm) + 1e-9;
   }
   // C20: with Let walls cut cells on (one_grid), only the finest cell is ever cut. A larger cell must lie whole in
   // lattice: its 27 points and the 26 a hair inside its faces, edges and corners (0.04 / 0.5 / 0.96, as D14b looks).
@@ -494,8 +516,8 @@ struct Pass {
     // A width is read to about a micron (PartMeasure::reach), so a cell that fits its
     // wall exactly must not be refused over the last digits of the reading.
     const bool fitting = s <= fits + kReadingSlack;
-    // Too large this close to the outline, or cut by it (G1-G3, G10).
-    const bool held = !band_allows(lo, s) || !whole_in_outline(lo, s);
+    // Too large this close to the outline, or cut by it (G1-G3, G10), or for the stress inside it (C22).
+    const bool held = !band_allows(lo, s) || !whole_in_outline(lo, s) || !stress_allows(lo, s);
     const bool printable = prints(lo, s);
     if (fitting && !held && printable) {
       emit(lo, s, cut, true);
@@ -591,16 +613,25 @@ struct Pass {
           for (int j = 0; j + m <= n; ++j)
             for (int i = 0; i + m <= n; ++i) {
               double deep = 0.0;
-              if (band_region)
+              if (band_region) {
                 deep = edge_distance(lo[0] + (i + 0.5 * m) * t, lo[1] + (j + 0.5 * m) * t,
                                      lo[2] + (k + 0.5 * m) * t);
-              spots.push_back({std::round(deep * 1e6) / 1e6, {i, j, k}});
+                deep = std::round(deep * 1e6) / 1e6;
+              } else if (demand) {
+                const double at[3] = {lo[0] + i * t, lo[1] + j * t, lo[2] + k * t};
+                deep = demand_in(at, size);   // C22: the stress in the spot's cube
+              }
+              spots.push_back({deep, {i, j, k}});
             }
         // In a band the larger cells take the places farthest from the outline, so the
-        // smaller ones are left toward it (G1). Elsewhere, the order they are read in.
+        // smaller ones are left toward it (G1). With cell size by stress and no band, the
+        // quietest places first (C22). Elsewhere, the order they are read in.
         if (band_region)
           std::stable_sort(spots.begin(), spots.end(),
                            [](const auto& x, const auto& y) { return x.first > y.first; });
+        else if (demand)
+          std::stable_sort(spots.begin(), spots.end(),
+                           [](const auto& x, const auto& y) { return x.first < y.first; });
         for (const auto& spot : spots) {
           const int i = spot.second[0], j = spot.second[1], k = spot.second[2];
           bool free = true;
@@ -617,7 +648,8 @@ struct Pass {
               }
           if (!free || some == 0 || size > f + kReadingSlack) continue;
           const double at[3] = {lo[0] + i * t, lo[1] + j * t, lo[2] + k * t};
-          if (!band_allows(at, size) || !whole_in_outline(at, size) || !fine_allowed(at, size))
+          if (!band_allows(at, size) || !whole_in_outline(at, size) || !fine_allowed(at, size) ||
+              !stress_allows(at, size))
             continue;
           for (int c = k; c < k + m; ++c)
             for (int b = j; b < j + m; ++b)
@@ -898,6 +930,11 @@ void find_edges(const FaceReadings& kept, std::size_t which, const Domain& domai
 
 }  // namespace
 
+bool stress_sizes_cells(const CellSpec& spec) {
+  return spec.by_stress && spec.demand && !spec.demand->empty() && spec.reference_mpa > 0.0 &&
+         !(spec.cell_mm > 0.0) && spec.algorithm != Algorithm::Uniform && !spec.one_grid;
+}
+
 Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
   Layout out;
   const int thread_count =
@@ -925,6 +962,7 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
   const PartMeasure& part = domain.measure();
   // (One grid: the cells a wall must hold are not counted anywhere, so not in a region's base cell either.)
   const int k_min = spec.one_grid ? 1 : std::max(1, spec.min_cells_across);
+  const bool by_stress = stress_sizes_cells(spec);   // C22
 
   // Lay one pass over the box [lo, hi] of its frame, in slots of `base`.
   auto lay = [&](Pass& pass, double base, const double lo[3], const double hi[3],
@@ -1042,6 +1080,11 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
     pass.frame = frame;
     pass.out = &out;
     pass.region_depth = depth_cap;   // D14c
+    if (by_stress) {                 // C22
+      pass.demand = spec.demand.get();
+      pass.ref_mpa = spec.reference_mpa;
+      pass.response = spec.response;
+    }
     out.frames.push_back(frame);
     out.walls.emplace_back();
     out.walls.back().depth = depth_cap;

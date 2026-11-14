@@ -95,7 +95,8 @@ Algorithm algorithm_from(const std::string& s, const std::string& where) {
 }
 
 // The bridge's LatticeLayoutSettings, key for key (lattice_layout_bridge.cpp, settings_from),
-// and two more that core's Settings has: small_cells_in_thin_walls and one_grid ("Let walls cut cells").
+// and more that core's Settings has: small_cells_in_thin_walls, one_grid ("Let walls cut cells") and
+// cells_by_stress (C22).
 Settings settings_from(const json::Value& in, const std::string& w) {
   json::reject_unknown(
       in,
@@ -105,7 +106,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "protect_face_counts", "protect_faces", "topology", "algorithm", "cell_mm", "cell_max_mm",
        "cell_min_mm", "min_cells_across", "grade_to_shape", "band_mm", "band_cell_mm",
        "per_region", "dial", "dial_region", "dial_value", "strut_width_mm", "allow_quilt",
-       "strength", "small_cells_in_thin_walls", "one_grid", "bars", "join_loose", "skin", "skin_width_mm",
+       "strength", "small_cells_in_thin_walls", "one_grid", "cells_by_stress", "bars", "join_loose", "skin", "skin_width_mm",
        "skin_reach_cells", "drop_loose"},
       w);
   Settings s;
@@ -158,6 +159,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
   s.cells.grade_to_shape = flag(in, "grade_to_shape", s.cells.grade_to_shape, w);
   s.cells.band_mm = num(in, "band_mm", s.cells.band_mm, w);
   s.cells.band_cell_mm = num(in, "band_cell_mm", s.cells.band_cell_mm, w);
+  s.cells.by_stress = flag(in, "cells_by_stress", s.cells.by_stress, w);   // C22
 
   s.struts.mode = flag(in, "per_region", false, w) ? Density::PerRegion : Density::Uniform;
   s.struts.dial = num(in, "dial", s.struts.dial, w);
@@ -233,6 +235,8 @@ constexpr Refusal kMeshFailed{"mesh_failed", 1};
 // The file would have something starting in mid-air when printed (his rule P8 b): not written.
 constexpr Refusal kWouldNotPrint{"would_not_print", 3};
 constexpr Refusal kCannotWrite{"cannot_write", 1};
+// Cell size by stress was asked for and the job has no stress result (C22).
+constexpr Refusal kNoStressResult{"no_stress_result", 3};
 constexpr Refusal kCancelled{"cancelled", 1};
 constexpr Refusal kError{"error", 1};
 
@@ -409,6 +413,12 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
              "types made of struts so far. Pick a strut type.");
       return done();
     }
+    if (job.settings.cells.by_stress && (!job.settings.stress.demand || job.settings.stress.demand->empty())) {
+      refuse(r, kNoStressResult,
+             "Cell size by stress needs a stress result, and this job has none, so nothing was made. Send the "
+             "part's stress result with it, or turn Cell size by stress off.");
+      return done();
+    }
     if (!mesh_available()) {
       refuse(r, kMeshUnavailable,
              "The worker on the Mac was built without the part that makes lattice files, so it "
@@ -447,6 +457,7 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     r.adrift = out.pieces.adrift;
     r.stepped_edges = out.stepped_edges.size();
     r.thin_solid = out.thin_solid;
+    r.cells_by_stress = out.cells_by_stress;
     r.floor_cell_mm = out.layout.floor_cell_mm;
     r.min_strut_mm = out.layout.min_strut_mm;
     r.open_look = out.layout.open_look;
@@ -618,10 +629,11 @@ std::string file_result_json(const FileResult& r) {
                 "  \"layout\": {\"cells\": %llu, \"solid_pieces\": %llu, \"bars\": %llu, "
                 "\"at_one_line\": %llu, \"at_widest\": %llu, \"stubs\": %llu, \"joined\": %llu, "
                 "\"dropped\": %llu, \"pieces\": %llu, \"adrift\": %llu, \"stepped_edges\": %llu, "
-                "\"thin_solid\": %llu,\n",
+                "\"thin_solid\": %llu, \"cells_by_stress\": %s,\n",
                 count(r.cells), count(r.solid_pieces), count(r.bars), count(r.at_one_line),
                 count(r.at_widest), count(r.stubs), count(r.joined), count(r.dropped), count(r.pieces),
-                count(r.adrift), count(r.stepped_edges), count(r.thin_solid));
+                count(r.adrift), count(r.stepped_edges), count(r.thin_solid),
+                r.cells_by_stress ? "true" : "false");
   o += b;
   std::snprintf(b, sizeof b,
                 "    \"floor_cell_mm\": %.9g, \"min_strut_mm\": %.9g, \"open_look\": %.9g, "
