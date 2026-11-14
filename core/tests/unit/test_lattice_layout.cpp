@@ -3460,6 +3460,135 @@ static void test_cells_curved_region() {
 
 // CellSpec::one_grid (his ruling, 2026-11-14: an option for Aesthetic, off unless the user turns it on): one regular
 // grid per region that every surface, pocket, skin and the region's edge simply cuts. Off is the layout as it was.
+// C20 (his ruling 2026-11-14: cells shrink toward pockets and walls): only the smallest cell of a ladder is ever cut.
+// A cube is whole when its 27 points and the 26 a hair inside its faces, edges and corners are lattice (of any region).
+static bool whole_cube(const Domain& d, const Layout& l, int frame, const double lo[3], double s) {
+  auto pr = d.probe();
+  const Frame& f = l.frames[static_cast<std::size_t>(frame)];
+  const double e[2][3] = {{1.0 / 6.0, 0.5, 5.0 / 6.0}, {0.04, 0.5, 0.96}};
+  for (int g = 0; g < 2; ++g)
+    for (int c = 0; c < 3; ++c)
+      for (int b = 0; b < 3; ++b)
+        for (int a = 0; a < 3; ++a)
+          if (!pr.where(f.at(lo[0] + s * e[g][a], lo[1] + s * e[g][b], lo[2] + s * e[g][c])).lattice()) return false;
+  return true;
+}
+// Over a layout: cut cells that are not the smallest, larger cells that are not whole, and cell corners off the
+// smallest cell's grid (`unit`, counted from the first cell's corner). Each is 0 under C20.
+struct C20 { int cut_large = 0, large_not_whole = 0, off_grid = 0; };
+static C20 c20_count(const Domain& d, const Layout& l, double unit) {
+  C20 r;
+  for (const Cell& c : l.cells) {
+    if (c.cut && !c.finest) ++r.cut_large;
+    if (!c.finest && !whole_cube(d, l, c.frame, c.lo, c.size)) ++r.large_not_whole;
+    for (int k = 0; k < 3; ++k) {
+      const double q = (c.lo[k] - l.cells.front().lo[k]) / unit;
+      if (std::fabs(q - std::round(q)) > 1e-6) { ++r.off_grid; break; }
+    }
+  }
+  return r;
+}
+
+// C20 with Let walls cut cells on: a block with a slot cut into it from the back, so a pocket whose floor is NOT on
+// any cell boundary but the smallest. Every cut cell is the smallest of its ladder; a larger cell stands only where it
+// is whole; the cells keep one grid; nothing of the region is left without a cell; any number of threads. A ladder of
+// one size is what one grid gave before this rule. Two lattice regions meeting at a seam: the seam cuts nothing.
+static void test_one_grid_smallest_cut() {
+  // Section (x across, y into the part from the face y = 0), extruded z 0..48: 48 wide, 24 deep, a slot from the back
+  // face down to y = 10, x 18..30. Lattice from the face, 24 deep, cells up to 12 mm.
+  PartMeasure pm(weld_mesh(prism({{0, 0}, {48, 0}, {48, 24}, {30, 24}, {30, 10}, {18, 10}, {18, 24}, {0, 24}}, 0, 48)));
+  DomainSpec s;
+  s.regions = {face_region(1, Role::Lattice, {24, 0, 24}, {0, 1, 0}, 24, 24, 24)};
+  Domain d(pm, s);
+  long tally[3] = {0, 0, 0};
+  for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
+    CellSpec cs;
+    cs.algorithm = algo;
+    cs.cell_max_mm = 12;
+    cs.one_grid = true;
+    const Layout l = lay_cells(d, cs);
+    double smallest = 12.0, largest = 0.0;
+    int cut = 0;
+    for (const Cell& c : l.cells) {
+      smallest = std::min(smallest, c.size);
+      largest = std::max(largest, c.size);
+      cut += c.cut;
+    }
+    CHECK(!l.cells.empty() && l.solid.empty());                    // the smallest is cut, never refused
+    CHECK(smallest < 6.0 && largest == 12.0 && cut > 0);           // a ladder: 12 mm where whole, small at the slot
+    const C20 r = c20_count(d, l, smallest);
+    CHECK(r.cut_large == 0);                                       // every cut cell is the smallest
+    CHECK(r.large_not_whole == 0);                                 // every larger cell is whole (53 points)
+    if (algo == Algorithm::DefaultGrade) {
+      CHECK(r.off_grid == 0);                                      // one grid: corners on the smallest cell's grid
+    } else {
+      // Stepped packs each base cube from one unit of its own (C6c): every corner on the base grid's 12 / n grid,
+      // n the cube's own fraction, so the base grid is kept.
+      double o[3] = {1e300, 1e300, 1e300};
+      for (const Cell& c : l.cells) for (int k = 0; k < 3; ++k) o[k] = std::min(o[k], c.lo[k]);
+      auto whole_of = [](double v, double u) { return std::fabs(v / u - std::round(v / u)) < 1e-6; };
+      int off = 0;
+      for (const Cell& c : l.cells) {
+        bool on = false;
+        for (int n = 1; n <= 6 && !on; ++n) {
+          const double u = 12.0 / n;
+          on = whole_of(c.size, u);
+          for (int k = 0; k < 3; ++k) {
+            const double rel = c.lo[k] - o[k] - 12.0 * std::floor((c.lo[k] - o[k]) / 12.0 + 1e-9);
+            on = on && whole_of(rel, u);
+          }
+        }
+        off += !on;
+      }
+      CHECK(off == 0);
+    }
+    CHECK(badly_covered(d, l, {0, 0, 0}, {48, 24, 48}, 0.97) == 0);   // nothing left out, nothing held twice
+    CHECK(lay_cells(d, cs, 1).cells == l.cells && lay_cells(d, cs, 3).cells == l.cells);   // D18
+    tally[algo == Algorithm::Stepped] = static_cast<long>(l.cells.size());
+  }
+  {  // A ladder of ONE size: the cells the slot cuts are base cells, cut, as one grid gave before this rule.
+    CellSpec cs;
+    cs.algorithm = Algorithm::Uniform;
+    cs.cell_max_mm = 12;
+    cs.one_grid = true;
+    const Layout l = lay_cells(d, cs);
+    int other = 0, cut = 0;
+    for (const Cell& c : l.cells) {
+      if (c.size != 12.0 || !c.finest) ++other;
+      cut += c.cut;
+    }
+    CHECK(l.cells.size() == 4 * 2 * 4 && other == 0 && cut > 0 && l.solid.empty());
+    tally[2] = cut;
+  }
+  {  // Two lattice regions meeting at a seam (x = 30), each its own grid centred on its own outline, so the seam runs
+     // through the middle of a cell. Lattice the cell takes in from the other region counts: the cell at the seam
+     // stays the base cell.
+    PartMeasure pm2(weld_mesh(prism({{0, 0}, {60, 0}, {60, 24}, {0, 24}}, 0, 48)));
+    DomainSpec s2;
+    s2.regions = {face_region(1, Role::Lattice, {15, 0, 24}, {0, 1, 0}, 24, 15, 12),   // (the face's u runs along z)
+                  face_region(2, Role::Lattice, {45, 0, 24}, {0, 1, 0}, 24, 15, 12)};
+    Domain d2(pm2, s2);
+    CellSpec cs;
+    cs.algorithm = Algorithm::DefaultGrade;
+    cs.cell_max_mm = 12;
+    cs.one_grid = true;
+    const Layout l = lay_cells(d2, cs);
+    int at_seam = 0, small_at_seam = 0;
+    for (const Cell& c : l.cells) {
+      const Vec3 m = cell_centre(l, c);
+      if (std::fabs(m.x - 30.0) < 0.5 * c.size - 1e-9) {           // the seam runs through it
+        ++at_seam;
+        if (c.size < 12.0 - 1e-9) ++small_at_seam;
+      }
+    }
+    CHECK(at_seam > 0 && small_at_seam == 0);
+    // (A seam cell is flagged cut, for its own region's lattice ends at the seam; it is whole in lattice all the same.)
+    CHECK(c20_count(d2, l, 3.0).large_not_whole == 0 && l.solid.empty());
+  }
+  std::printf("only the smallest cut: a slotted block is %ld cells (halves) and %ld (Stepped); one size: %ld cut 12 mm cells\n",
+              tally[0], tally[1], tally[2]);
+}
+
 static void test_one_grid() {
   // The cell of `region` that holds p, or -1; `n`, when given, receives how many do.
   auto holder = [](const Domain& d, const Layout& l, const Vec3& p, int* n = nullptr) {
@@ -3470,6 +3599,7 @@ static void test_one_grid() {
     if (n) *n = count;
     return found;
   };
+  auto c20 = c20_count;
   long tally[6] = {0, 0, 0, 0, 0, 0};
   {  // ONE cell size across a step in the wall. Behind the y = 0 face the material is 12 mm for x < 30 and 6 mm
      // for x > 30. Today: 12 mm cells in the one wall, 6 mm cells in the other, each wall its own cells. One grid:
@@ -3504,16 +3634,40 @@ static void test_one_grid() {
         if (std::fabs(c.lo[2]) > 1e-9) ++off_face;                  // C15: the face is a cell boundary; one layer
         (c.cut ? cut : whole) += 1;
       }
-      CHECK(other == 0 && off_face == 0);
-      CHECK(l.cells.size() == 5 * 5);                              // 60 / 12 each way, one layer
-      CHECK(whole == 2 * 5 && cut == 3 * 5);                       // whole: only x < 24; the rest are cut cells
+      // C20: with a ladder of more than one size, the cells the step and the far surface cut are split down to the
+      // smallest; a 12 mm cell stands only where it is whole. A ladder of one size (Uniform) is what it was.
+      double smallest = 12.0;
+      for (const Cell& c : l.cells) smallest = std::min(smallest, c.size);
+      if (algo == Algorithm::Uniform) {
+        CHECK(other == 0 && off_face == 0);
+        CHECK(l.cells.size() == 5 * 5);                            // 60 / 12 each way, one layer
+        CHECK(whole == 2 * 5 && cut == 3 * 5);                     // whole: only x < 24; the rest are cut cells
+      } else {
+        const C20 r = c20(d, l, smallest);
+        CHECK(r.cut_large == 0 && r.large_not_whole == 0 && r.off_grid == 0);
+        int not_mine = 0, base_whole = 0;
+        for (const Cell& c : l.cells) {
+          if (c.wall != -1 || c.region != 1) ++not_mine;
+          if (std::fabs(c.size - 12.0) < 1e-9 && !c.cut) ++base_whole;
+        }
+        CHECK(not_mine == 0 && smallest < 12.0 - 1e-9);
+        CHECK(base_whole == 2 * 5);                                // x < 24 keeps its whole 12 mm cells
+      }
       int n = 0;
       const int a1 = holder(d, l, thick, &n);
       CHECK(a1 >= 0 && n == 1);
       const int b1 = holder(d, l, thin, &n);
       CHECK(b1 >= 0 && n == 1);
-      CHECK(a1 == b1);                                             // ONE cell holds both sides of the step
-      if (a1 >= 0) { CHECK(l.cells[a1].cut); NEAR(cell_centre(l, l.cells[a1]).x, 30.0, 1e-9); }   // astride the step
+      if (algo == Algorithm::Uniform) {
+        CHECK(a1 == b1);                                           // ONE cell holds both sides of the step
+        if (a1 >= 0) { CHECK(l.cells[a1].cut); NEAR(cell_centre(l, l.cells[a1]).x, 30.0, 1e-9); }   // astride the step
+      } else {
+        CHECK(a1 != b1);                                           // C20: the step is cut by the smallest cells only
+        int astride = 0;
+        for (const Cell& c : l.cells)
+          if (!c.finest && std::fabs(cell_centre(l, c).x - 30.0) < 0.5 * c.size - 1e-9) ++astride;
+        CHECK(astride == 0);
+      }
       CHECK(badly_covered(d, l, {0, 0, 0}, {60, 12, 60}, 1.3) == 0);   // never held twice, nothing left out
       // D18: the same on every run and for any number of threads.
       const Layout again = lay_cells(d, on), one = lay_cells(d, on, 1), three = lay_cells(d, on, 3);
@@ -3556,10 +3710,20 @@ static void test_one_grid() {
       int n = 0;
       const int at = holder(d, l, thin, &n);
       CHECK(at >= 0 && n == 1);
-      if (at >= 0) { NEAR(l.cells[at].size, 9.0, 1e-9); CHECK(l.cells[at].cut); }
-      int other = 0;
-      for (const Cell& c : l.cells) if (std::fabs(c.size - 9.0) > 1e-9) ++other;
-      CHECK(other == 0 && l.solid.empty());
+      // C20: a ladder of one size (Uniform) holds the thin wall in cut 9 mm cells, as before; a longer ladder holds it
+      // in its smallest cells, cut by the wall's far side, never refused (nothing solid).
+      if (algo == Algorithm::Uniform) {
+        if (at >= 0) { NEAR(l.cells[at].size, 9.0, 1e-9); CHECK(l.cells[at].cut); }
+        int other = 0;
+        for (const Cell& c : l.cells) if (std::fabs(c.size - 9.0) > 1e-9) ++other;
+        CHECK(other == 0 && l.solid.empty());
+      } else {
+        if (at >= 0) CHECK(l.cells[at].cut && l.cells[at].finest && l.cells[at].size < 9.0 - 1e-9);
+        double smallest = 9.0;
+        for (const Cell& c : l.cells) smallest = std::min(smallest, c.size);
+        const C20 r = c20(d, l, smallest);
+        CHECK(r.cut_large == 0 && r.large_not_whole == 0 && r.off_grid == 0 && l.solid.empty());
+      }
       CHECK(badly_covered(d, l, {0, 0, 0}, {60, 12, 60}, 1.3) == 0);
       // Its struts: pieces of the 9 mm cell's own struts, cut by the wall's far side and landing on nothing loose.
       if (algo == Algorithm::Uniform) {
@@ -3605,34 +3769,78 @@ static void test_one_grid() {
       CHECK(f >= finest - 1e-9 && f >= l.floor_cell_mm && f < 12.0 - 1e-9);   // never under the layout's floor
       int breaks_rule = 0, large_cut = 0, at_edge = 0, at_edge_large = 0, small_inside = 0;
       std::map<long, double> inner, all;   // size (microns) -> the cubes' volume: beyond the band, everywhere
+      // C20: the base grid's corner (the frame's lowest cell corner), the base cube holding a cell, and the smallest
+      // cell at the outline in each base cube (Stepped packs each cube from its own unit; C20 makes it finer where
+      // the step or the thin wall's far side cuts the cube).
+      double o[3] = {1e300, 1e300, 1e300};
+      for (const Cell& c : l.cells) for (int k = 0; k < 3; ++k) o[k] = std::min(o[k], c.lo[k]);
+      auto parent_whole = [&](const Layout& lay, const Cell& c) {
+        double p[3];
+        for (int k = 0; k < 3; ++k) p[k] = o[k] + 12.0 * std::floor((c.lo[k] - o[k]) / 12.0 + 1e-9);
+        return whole_cube(d, lay, c.frame, p, 12.0);
+      };
+      // Every base cube whose centre is at least `from` inside the outline and that is whole in lattice is ONE 12 mm
+      // cell (C1, G2, C20): how many such cubes, and how many are not a 12 mm cell.
+      auto base_where_whole = [&](const Layout& lay, double from, int* whole_cubes, int* not_one_cell) {
+        *whole_cubes = 0, *not_one_cell = 0;
+        for (int j = 0; j < 8; ++j)
+          for (int i = 0; i < 8; ++i) {
+            const double p[3] = {o[0] + 12.0 * i, o[1] + 12.0 * j, o[2]};
+            const double ci = 12.0 * i + 6.0, cj = 12.0 * j + 6.0;
+            if (std::min(std::min(ci, 96 - ci), std::min(cj, 96 - cj)) < from - 1e-9) continue;
+            if (!whole_cube(d, lay, lay.cells.front().frame, p, 12.0)) continue;
+            ++*whole_cubes;
+            bool one = false;
+            for (const Cell& c : lay.cells)
+              one = one || (c.size == 12.0 && c.lo[0] == p[0] && c.lo[1] == p[1] && c.lo[2] == p[2]);
+            if (!one) ++*not_one_cell;
+          }
+      };
+      auto parent_key = [&](const Cell& c) {
+        long key = 0;
+        for (int k = 0; k < 3; ++k) key = key * 64 + std::lround(std::floor((c.lo[k] - o[k]) / 12.0 + 1e-9));
+        return key;
+      };
+      std::map<long, double> f_cube;   // base cube -> the smallest cell at the outline in it
+      for (const Cell& c : l.cells) {
+        if (edge(cell_centre(l, c)) > 0.5 * c.size + 1e-9) continue;
+        auto it = f_cube.find(parent_key(c));
+        if (it == f_cube.end()) f_cube[parent_key(c)] = c.size; else it->second = std::min(it->second, c.size);
+      }
       for (const Cell& c : l.cells) {
         const Vec3 m = cell_centre(l, c);
         const double dist = edge(m), h = 0.5 * c.size;
         if (c.size > finest * (1 + 1e-9) && dist < band * (c.size - finest) / (12.0 - finest) - 1e-6) ++breaks_rule;
         if (c.size > finest * (1 + 1e-9) &&
             (m.x - h < -1e-6 || m.x + h > 96 + 1e-6 || m.z - h < -1e-6 || m.z + h > 96 + 1e-6)) ++large_cut;
-        if (dist <= h + 1e-9) { ++at_edge; if (c.size > f + 1e-9) ++at_edge_large; }
-        if (dist >= band + 0.5 * (12.0 - c.size) && std::fabs(c.size - 12.0) > 1e-9) ++small_inside;
+        if (dist <= h + 1e-9) { ++at_edge; if (c.size > f_cube[parent_key(c)] + 1e-9) ++at_edge_large; }
+        if (dist >= band + 0.5 * (12.0 - c.size) && std::fabs(c.size - 12.0) > 1e-9 && parent_whole(l, c)) ++small_inside;
         all[std::lround(c.size * 1e3)] += c.size * c.size * c.size;
         if (dist >= band) inner[std::lround(c.size * 1e3)] += c.size * c.size * c.size;
       }
       CHECK(breaks_rule == 0);          // G1: a larger cell only where its centre is far enough in
       CHECK(large_cut == 0);            // G10: only the finest crosses the outline
-      CHECK(at_edge > 50 && at_edge_large == 0);   // G3: the cells at the outline are the smallest
-      CHECK(small_inside == 0);         // G2: beyond the band, the region's own cell
+      CHECK(at_edge > 50 && at_edge_large == 0);   // G3: the cells at the outline are the smallest (of each base cube)
+      CHECK(small_inside == 0);         // G2: beyond the band, the region's own cell wherever it is whole (C20)
+      {
+        const C20 r = c20(d, l, f);
+        CHECK(r.cut_large == 0 && r.large_not_whole == 0);          // C20: only the smallest is cut
       CHECK(all.size() >= 3);           // it steps: at least three sizes
-      // Away from the outline the largest cell is the most common by volume: in fact the only one.
-      double inner_total = 0.0;
-      for (const auto& kv : inner) inner_total += kv.second;
-      CHECK(inner_total > 0.0 && inner.count(12000) == 1 && inner[12000] > 0.5 * inner_total);
-      CHECK(inner[12000] >= 6 * 6 * 1728.0 - 1e-6);   // the 6 x 6 base cells whose centres are a band inside
-      // ... and across the step in the wall, well inside the band: one base cell holds both walls.
+      }
+      // Away from the outline, every base cube that is whole is one base cell (of the 6 x 6 whose centres are a band
+      // inside, those the step and the thin wall's far side do not cut).
+      int whole_inner = 0, split_inner = 0;
+      base_where_whole(l, band + 6.0, &whole_inner, &split_inner);
+      CHECK(whole_inner >= 6 * 2 && split_inner == 0);
+      // ... and across the step in the wall, well inside the band: C20 splits the base cube the step cuts, so the two
+      // sides are two smaller cells, neither of them cut.
       int n = 0;
       const int a = holder(d, l, {40, 3, 30}, &n);
       CHECK(a >= 0 && n == 1);
       const int b = holder(d, l, {44, 3, 30}, &n);
-      CHECK(b >= 0 && n == 1 && a == b);
-      if (a >= 0) NEAR(l.cells[a].size, 12.0, 1e-9);
+      CHECK(b >= 0 && n == 1 && a != b);
+      if (a >= 0 && b >= 0)
+        CHECK(l.cells[a].size < 12.0 - 1e-9 && l.cells[b].size < 12.0 - 1e-9 && !l.cells[a].cut && !l.cells[b].cut);
       const Layout one = lay_cells(d, on, 1);
       CHECK(l.cells == one.cells && l.solid == one.solid);          // D18, on one thread
       // With the band off: the base cell everywhere.
@@ -3641,7 +3849,13 @@ static void test_one_grid() {
       const Layout plain = lay_cells(d, flat);
       int not_base = 0;
       for (const Cell& c : plain.cells) if (std::fabs(c.size - 12.0) > 1e-9) ++not_base;
-      CHECK(plain.cells.size() == 8 * 8 && not_base == 0 && plain.solid.empty());
+      // C20: the base cell wherever its cube is whole; the cubes the step and the thin wall's far side cut are split,
+      // only the smallest cut, nothing refused.
+      int whole_all = 0, split_all = 0;
+      base_where_whole(plain, 0.0, &whole_all, &split_all);
+      const C20 rp = c20(d, plain, 12.0);
+      CHECK(whole_all > 0 && split_all == 0 && not_base > 0 && plain.solid.empty());
+      CHECK(rp.cut_large == 0 && rp.large_not_whole == 0);
       tally[4] += static_cast<long>(l.cells.size());
     }
   }
@@ -3698,12 +3912,13 @@ static void test_one_grid() {
     CHECK(lay_cells(d, cs, 1).cells == l.cells);
     tally[5] += static_cast<long>(l.cells.size());
   }
-  std::printf("one grid: a 12 | 6 mm wall is %ld cells of 12 mm (wall by wall: %ld cells of 12 and 6); a 2 mm wall holds %ld "
+  std::printf("one grid: a 12 | 6 mm wall is %ld cells, 12 mm where whole (wall by wall: %ld cells of 12 and 6); a 2 mm wall holds %ld "
               "strut pieces (%ld stubs left out); with a band %ld cells; a 2 mm plate, all lattice, %ld cut cells\n",
               tally[0] / 3, tally[1] / 3, tally[2], tally[3], tally[4], tally[5]);
 }
 
 int main() {
+  test_one_grid_smallest_cut();
   test_one_grid();
   test_cells_behind_a_protect_skin();
   test_thin_walls_follow_the_quilt_switch();

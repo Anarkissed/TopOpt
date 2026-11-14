@@ -489,6 +489,8 @@ struct CellSpec {
   // What it gives up: C2/C12 (a cell may be wider than its wall), C15 at a wall's FAR side and at a Protect skin's
   // inner side (those cut through cells), and D8 by cell size (a thin wall is cut cells, not solid; the Domain's own
   // `min_wall_mm` still makes solid). A cut piece too small to hold a strut longer than its own width has none.
+  // C20 (his ruling the same day: "let cells shrink towards pockets and walls"): only the smallest cell of the
+  // ladder is ever cut; a larger cell that anything would cut is split down first, as G10 splits it at the outline.
   bool one_grid = false;
 };
 

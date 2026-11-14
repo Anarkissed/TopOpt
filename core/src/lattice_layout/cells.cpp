@@ -197,9 +197,26 @@ struct Pass {
     const double d = std::max(0.0, edge_distance(lo[0] + 0.5 * s, lo[1] + 0.5 * s, lo[2] + 0.5 * s));
     return d >= spec->band_mm * (s - finest_mm) / (base_mm - finest_mm) - 1e-9;
   }
+  // C20: with Let walls cut cells on (one_grid), only the finest cell is ever cut. A larger cell must lie whole in
+  // lattice: its 27 points and the 26 a hair inside its faces, edges and corners (0.04 / 0.5 / 0.96, as D14b looks).
+  // Lattice of any region counts (a seam between two lattice regions cuts nothing); a wall, pocket, hole, Protect
+  // skin, No lattice region or the part's outside does. Held, the cell is split down its ladder as G10 splits it.
+  bool whole_in_lattice(const double lo[3], double s) const {
+    const double e[2][3] = {{1.0 / 6.0, 0.5, 5.0 / 6.0}, {0.04, 0.5, 0.96}};
+    for (int g = 0; g < 2; ++g)
+      for (int c = 0; c < 3; ++c)
+        for (int b = 0; b < 3; ++b)
+          for (int a = 0; a < 3; ++a) {
+            if (g == 1 && a == 1 && b == 1 && c == 1) continue;
+            if (!probe->where(frame.at(lo[0] + s * e[g][a], lo[1] + s * e[g][b], lo[2] + s * e[g][c])).lattice())
+              return false;
+          }
+    return true;
+  }
   // G10: with Grade to shape on, only the finest cell may be cut by the outline. Any
   // larger cell must lie whole inside it (read at its corners, edge middles and centre).
   bool whole_in_outline(const double lo[3], double s) const {
+    if (spec->one_grid && !is_finest(s) && !whole_in_lattice(lo, s)) return false;   // C20
     if (!band_region || is_finest(s)) return true;
     for (int b = 0; b < 3; ++b)
       for (int a = 0; a < 3; ++a)
