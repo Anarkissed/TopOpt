@@ -34,9 +34,12 @@ std::uint64_t place_key(const Vec3& p) {
   return (a * 0x9E3779B97F4A7C15ULL) ^ (b * 0xC2B2AE3D27D4EB4FULL) ^ (c * 0x165667B19E3779F9ULL);
 }
 
-// One cell's open space, as boxes in its frame.
-void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c, double pitch, bool merge, bool keep_edge,
-                   std::vector<OpenSpace::Box>& mine) {
+// One cube's open space, as boxes in its frame. `holds(p)` is whether the cube's own lattice is at `p` (a point of the
+// cube); `holds_near(a, b, c)` the same at a point of its frame just past the cube, asked only when `near_too` is set
+// (for a cell: what cell_holds asks, less the cube). A cell's cube, or a cube of a weave region's open space (O1).
+template <class Holds, class HoldsNear>
+void open_boxes_with(const Layout& lay, const Domain::Probe& probe, const Cell& c, double pitch, bool merge, bool keep_edge,
+                     std::vector<OpenSpace::Box>& mine, Holds holds, HoldsNear holds_near, bool near_too) {
   const Frame& f = lay.frames[static_cast<std::size_t>(c.frame)];
   const WallMap& walls = lay.walls[static_cast<std::size_t>(c.frame)];
   const int k = std::max(1, static_cast<int>(std::ceil(c.size / pitch - 1e-9)));
@@ -111,7 +114,7 @@ void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c,
   // A column read point by point: every point the cell holds is open.
   auto by_points = [&](int i, int j) {
     for (int z = 0; z < k; ++z)
-      if (cell_holds(lay, probe, c, place(i, j, z))) pt(i, j, z) = kSpace | kBox;
+      if (holds(place(i, j, z))) pt(i, j, z) = kSpace | kBox;
   };
   // NO CRUST (his major flaw, 2026-11-12). The points stop at their own grid, the part's
   // surface does not: a point whose middle is in the AIR while its cube pokes into the
@@ -130,10 +133,7 @@ void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c,
   // or lattice no cell holds, which is solid (D14). A cube face lying in the part's
   // surface is passed by the boxes' own overlap alone, as it always was.
   auto open_air = [&] {
-    // Which cell of the layout this is (read_open_space passes the layout's own cells).
-    const Cell* first = lay.cells.data();
-    if (&c < first || &c >= first + lay.cells.size()) return;
-    const std::size_t self = static_cast<std::size_t>(&c - first);
+    if (!near_too) return;
     // Nothing of the part's surface near the cube: no air to open, nothing to ask.
     const double reach = 1.001 * std::sqrt(3.0) * (0.5 * c.size + s);
     const double h = 0.5 * c.size;
@@ -152,7 +152,7 @@ void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c,
                 if (!(o & kAsked)) {
                   o |= kAsked;
                   // What cell_holds asks, less the cube.
-                  if (cell_holds_at(lay, probe, self, c.lo[0] + (u + 0.5) * s, c.lo[1] + (v + 0.5) * s, c.lo[2] + (w + 0.5) * s))
+                  if (holds_near(c.lo[0] + (u + 0.5) * s, c.lo[1] + (v + 0.5) * s, c.lo[2] + (w + 0.5) * s))
                     o |= kSpace;
                 }
                 touches = o & kSpace;
@@ -252,7 +252,7 @@ void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c,
       for (int z = 0; z < k && whole; ++z) {
         const double cz = c.lo[2] + (z + 0.5) * s;
         if (cz <= o.c0 || cz >= o.c1) continue;
-        whole = cell_holds(lay, probe, c, f.at(a, b, cz));
+        whole = holds(f.at(a, b, cz));
       }
       if (!whole) { o.kind = 3; continue; }
       o.kind = 1;
@@ -271,7 +271,7 @@ void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c,
       Col& o = col[at(i, j)];
       if (o.kind != 0 && o.kind != 2) continue;
       for (int z = 0; z < k; ++z)
-        if (cell_holds(lay, probe, c, place(i, j, z))) { o.kind = 3; break; }
+        if (holds(place(i, j, z))) { o.kind = 3; break; }
     }
   // A column of air beside an open one opens with it, so no film is left along the
   // part's side where the grid stops short of the surface.
@@ -382,6 +382,70 @@ void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c,
   point_boxes();
 }
 
+// One cell's open space, as boxes in its frame.
+void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c, double pitch, bool merge, bool keep_edge,
+                   std::vector<OpenSpace::Box>& mine) {
+  // Which cell of the layout this is (read_open_space passes the layout's own cells): the air past its cube is read
+  // only for one of them.
+  const Cell* first = lay.cells.data();
+  const bool own = &c >= first && &c < first + lay.cells.size();
+  const std::size_t self = own ? static_cast<std::size_t>(&c - first) : 0;
+  open_boxes_with(
+      lay, probe, c, pitch, merge, keep_edge, mine, [&](const Vec3& p) { return cell_holds(lay, probe, c, p); },
+      [&](double a, double b, double z) { return cell_holds_at(lay, probe, self, a, b, z); }, own);
+}
+
+// O1: the cubes a weave region's open space is read in: cubes of `size` on its frame (the part's own axes) over the
+// box round the region, cut to the part's own box. In order: the same for any number of threads.
+std::vector<Cell> weave_cubes(const Domain& domain, const Layout& lay, const Layout::Weave& wv, double size) {
+  std::vector<Cell> out;
+  const Region* r = nullptr;
+  for (const Region& x : domain.spec().regions)
+    if (x.id == wv.region) r = &x;
+  if (!r) return out;
+  double lo[3] = {1e300, 1e300, 1e300}, hi[3] = {-1e300, -1e300, -1e300};
+  auto take = [&](const Vec3& p, double grow) {
+    const double v[3] = {p.x, p.y, p.z};
+    for (int a = 0; a < 3; ++a) { lo[a] = std::min(lo[a], v[a] - grow); hi[a] = std::max(hi[a], v[a] + grow); }
+  };
+  if (r->is_shell()) {
+    for (const Vec3& v : r->shell.vertices) take(v, r->shell_depth_mm);
+  } else {
+    const ClearanceGeometry& g = r->prism;
+    if (!g.valid) return out;
+    const double e = std::max(0.0, r->expand_mm);
+    for (int k = 0; k < 8; ++k) {
+      const double u = (k & 1) ? g.u_hi + e : g.u_lo - e, w = (k & 2) ? g.w_hi + e : g.w_lo - e, d = (k & 4) ? g.depth : 0.0;
+      take(Vec3{g.origin.x + g.u.x * u + g.w.x * w + g.normal.x * d, g.origin.y + g.u.y * u + g.w.y * w + g.normal.y * d,
+                g.origin.z + g.u.z * u + g.w.z * w + g.normal.z * d},
+           0.0);
+    }
+  }
+  const PartMeasure& part = domain.measure();
+  const double plo[3] = {part.lo().x, part.lo().y, part.lo().z}, phi[3] = {part.hi().x, part.hi().y, part.hi().z};
+  const Frame& f = lay.frames[static_cast<std::size_t>(wv.frame)];
+  const double o[3] = {f.origin.x, f.origin.y, f.origin.z};
+  long n0[3], n1[3];
+  for (int a = 0; a < 3; ++a) {
+    const double l = std::max(lo[a], plo[a]) - o[a], h = std::min(hi[a], phi[a]) - o[a];
+    if (!(h > l)) return out;
+    n0[a] = static_cast<long>(std::floor(l / size));
+    n1[a] = static_cast<long>(std::ceil(h / size));
+  }
+  for (long z = n0[2]; z < n1[2]; ++z)
+    for (long y = n0[1]; y < n1[1]; ++y)
+      for (long x = n0[0]; x < n1[0]; ++x) {
+        Cell c;
+        c.region = wv.region;
+        c.frame = wv.frame;
+        c.lo[0] = x * size; c.lo[1] = y * size; c.lo[2] = z * size;
+        c.size = size;
+        c.cut = true;
+        out.push_back(c);
+      }
+  return out;
+}
+
 }  // namespace
 
 OpenSpace read_open_space(const Domain& domain, const Layout& layout, double pitch_mm, int threads,
@@ -407,6 +471,35 @@ OpenSpace read_open_space(const Domain& domain, const Layout& layout, double pit
   }
   check(stop);
   for (const auto& v : of_cell) out.boxes.insert(out.boxes.end(), v.begin(), v.end());
+  // O1: a weave region's open space, read from the domain itself at the same pitch, point by point as a curved
+  // region's cells are (with the same rule at an edge against solid, S11b, and the same air opened beside it), in
+  // cubes of sixteen points; after the cells' boxes.
+  for (const Layout::Weave& wv : layout.weave) {
+    const std::vector<Cell> cubes = weave_cubes(domain, layout, wv, 16.0 * out.pitch_mm);
+    std::vector<std::vector<OpenSpace::Box>> of_cube(cubes.size());
+    std::atomic<std::size_t> next_cube{0};
+    auto work_weave = [&] {
+      const Domain::Probe probe = domain.probe();
+      for (std::size_t k = next_cube.fetch_add(1); k < cubes.size() && !asked(stop); k = next_cube.fetch_add(1)) {
+        const Cell& c = cubes[k];
+        const Frame& f = layout.frames[static_cast<std::size_t>(c.frame)];
+        auto here = [&](const Vec3& p) {
+          const Where w = probe.where(p);
+          return w.lattice() && w.id == c.region;
+        };
+        open_boxes_with(layout, probe, c, out.pitch_mm, merge, keep_edge, of_cube[k], here,
+                        [&](double a, double b, double z) { return here(f.at(a, b, z)); }, true);
+      }
+    };
+    const int nt = static_cast<int>(std::min<std::size_t>(static_cast<std::size_t>(thread_count(threads)),
+                                                           std::max<std::size_t>(1, cubes.size())));
+    std::vector<std::thread> pool;
+    for (int t = 1; t < nt; ++t) pool.emplace_back(work_weave);
+    work_weave();
+    for (std::thread& t : pool) t.join();
+    check(stop);
+    for (const auto& v : of_cube) out.boxes.insert(out.boxes.end(), v.begin(), v.end());
+  }
   out.ms = ms_since(t0);
   return out;
 }
@@ -829,6 +922,9 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
     if (fill_under < 0.0) {
       double smallest = 0.0;
       for (const Cell& c : lay.cells) smallest = smallest > 0.0 ? std::min(smallest, c.size) : c.size;
+      // O2: a weave's smallest spacing stands where a cell's size stands.
+      for (const Layout::Weave& w : lay.weave)
+        if (w.spacing_mm > 0.0) smallest = smallest > 0.0 ? std::min(smallest, w.spacing_mm) : w.spacing_mm;
       fill_under = std::max(1.0, smallest * smallest * smallest);
     }
     rep.filled_under_mm3 = fill_under;

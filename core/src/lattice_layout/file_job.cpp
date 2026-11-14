@@ -607,7 +607,7 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
       refuse(r, kRegionFacesMissing, faces_missing("Region", "Regions", out.empty_regions));
       return done();
     }
-    if (out.layout.cells.empty()) {
+    if (out.layout.cells.empty() && out.layout.weave.empty()) {   // O1: a weave has no cells and is not refused for it
       refuse(r, kNoCells,
              "No lattice cell fits anywhere in this part with these settings, so there is no lattice "
              "to make. Try a smaller cell, a deeper region, or more of the part.");

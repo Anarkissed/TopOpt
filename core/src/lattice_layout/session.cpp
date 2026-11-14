@@ -1,6 +1,7 @@
 // Lattice rebuild, stage E: what the app holds for one part (rule P2). See lattice_layout.hpp.
 #include "topopt/lattice_layout.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 
@@ -21,6 +22,7 @@ std::string where_text(const Settings& s) {
   out += "R";
   for (const Settings::RegionAsk& r : s.regions) {
     whole(r.id); whole(static_cast<long>(r.role)); num(r.depth_mm); num(r.expand_mm);
+    if (r.weave) out += "w,";   // O1 (written only when on: with no weave the text is as it was)
     for (int f : r.faces) whole(f);
     out += ";";
   }
@@ -39,6 +41,16 @@ Session::Session(StepModel model) : model_(std::move(model)) {
 }
 
 Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bool>* stop) {
+  return lay_with(settings, nullptr, threads, stop);
+}
+
+Outcome Session::lay_weave(const Settings& settings, const std::vector<Strand>& strands, int threads,
+                           const std::atomic<bool>* stop) {
+  return lay_with(settings, &strands, threads, stop);
+}
+
+Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* strands, int threads,
+                          const std::atomic<bool>* stop) {
   Outcome out;
   const auto given_up = [] { Outcome none; none.cancelled = true; return none; };
   if (stop && stop->load(std::memory_order_relaxed)) return given_up();
@@ -57,6 +69,7 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
       bool ok = false;
       Region region = region_from_faces(model_, r.faces, r.id, r.role, r.depth_mm, r.expand_mm, &ok);
       if (!ok) { empty_regions_.push_back(r.id); continue; }
+      region.weave = r.weave;
       spec.regions.push_back(std::move(region));
     }
     for (const Settings::ProtectAsk& p : settings.protect)
@@ -112,6 +125,11 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
     out.stress_reference_mpa = reference;
     out.layout = lay_cells(*domain_, cells, threads);
     unread_ = false;
+    if (strands)   // O2: each weave region carries the smallest spacing of its strands
+      for (Layout::Weave& w : out.layout.weave)
+        for (const Strand& s : *strands)
+          if (s.region == w.region && s.spacing_mm > 0.0)
+            w.spacing_mm = w.spacing_mm > 0.0 ? std::min(w.spacing_mm, s.spacing_mm) : s.spacing_mm;
     StrutSpec struts = settings.struts;
     if (stress.demand) {
       // By stress reads the field, the RESOLVED reference (the one the cells were laid with) and the response.
@@ -127,6 +145,12 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
       domain_->check_stop();
       out.thin_solid = solidify_thin_cuts(out.layout, *domain_, threads);   // P8 (f): before any bar is laid
       out.bars = lay_bars(out.layout, *domain_, threads);
+      if (strands) {   // O2: the weave's bars, cut at their crossings, after the cells'
+        Bars weave = weave_bars(*domain_, *strands, threads);
+        split_at_crossings(weave);
+        out.bars.stubs += weave.stubs;
+        out.bars.bars.insert(out.bars.bars.end(), weave.bars.begin(), weave.bars.end());
+      }
       if (settings.join_loose) join_loose_bars(out.bars, *domain_, threads, &out.layout);
       domain_->check_stop();
       if (settings.skin) lay_skin(out.bars, *domain_, settings.skin_spec);

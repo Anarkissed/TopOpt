@@ -1084,6 +1084,304 @@ static void test_skin_never_thinned() {
   CHECK(thin[1] == 0);
 }
 
+// ── ORGANIC (WEAVE), rules O1, O2: the file ──────────────────────────────────
+// The layout test's block (lattice_layout.cpp, weave_block): 40 x 14 x 20 with a half-round pocket (radius 6) in its
+// top edge along z; faces 0 the underside, 1 the pocket's wall, 2 the rest. The same made-up weave.
+static TriangleMesh prism_poly(const std::vector<std::array<double, 2>>& xy, double z0, double z1) {
+  const int n = static_cast<int>(xy.size());
+  auto turn = [&](int a, int b, int c) {
+    return (xy[b][0] - xy[a][0]) * (xy[c][1] - xy[a][1]) - (xy[b][1] - xy[a][1]) * (xy[c][0] - xy[a][0]);
+  };
+  std::vector<int> left(n);
+  for (int i = 0; i < n; ++i) left[i] = i;
+  std::vector<std::array<int, 3>> tris;
+  while (left.size() > 3) {
+    bool cut = false;
+    const int m = static_cast<int>(left.size());
+    for (int i = 0; i < m && !cut; ++i) {
+      const int a = left[(i + m - 1) % m], b = left[i], c = left[(i + 1) % m];
+      if (turn(a, b, c) <= 1e-12) continue;
+      bool empty = true;
+      for (int k : left)
+        if (k != a && k != b && k != c && turn(a, b, k) >= -1e-12 && turn(b, c, k) >= -1e-12 && turn(c, a, k) >= -1e-12) empty = false;
+      if (!empty) continue;
+      tris.push_back({a, b, c});
+      left.erase(left.begin() + i);
+      cut = true;
+    }
+    if (!cut) return {};
+  }
+  tris.push_back({left[0], left[1], left[2]});
+  MeshSink s;
+  auto P = [&](int i, double z) { return Vec3{xy[i % n][0], xy[i % n][1], z}; };
+  for (const auto& t : tris) {
+    s.add_triangle(P(t[0], z1), P(t[1], z1), P(t[2], z1));
+    s.add_triangle(P(t[0], z0), P(t[2], z0), P(t[1], z0));
+  }
+  for (int i = 0; i < n; ++i) {
+    s.add_triangle(P(i, z0), P(i + 1, z0), P(i + 1, z1));
+    s.add_triangle(P(i, z0), P(i + 1, z1), P(i, z1));
+  }
+  return s.mesh;
+}
+static StepModel weave_block() {
+  const double H = 14.0, cx = 20.0, R = 6.0;
+  std::vector<std::array<double, 2>> xy = {{0, 0}, {40, 0}, {40, H}, {cx + R, H}};
+  const int N = 48;
+  for (int i = 1; i < N; ++i) {
+    const double t = 3.14159265358979323846 * i / N;
+    xy.push_back({cx + R * std::cos(t), H - R * std::sin(t)});
+  }
+  xy.push_back({cx - R, H});
+  xy.push_back({0, H});
+  const TriangleMesh solid_mesh = prism_poly(xy, 0, 20);
+  StepModel model;
+  model.mesh = solid_mesh;
+  StepFaceInfo under, wall, rest;
+  under.kind = StepSurfaceKind::Plane;
+  under.plane_normal = {0, -1, 0};
+  under.plane_origin = {20, 0, 10};
+  wall.kind = StepSurfaceKind::Other;
+  rest.kind = StepSurfaceKind::Other;
+  model.faces = {under, wall, rest};
+  model.face_count = 3;
+  for (const auto& t : solid_mesh.triangles) {
+    const Vec3 &a = solid_mesh.vertices[static_cast<std::size_t>(t[0])], &b = solid_mesh.vertices[static_cast<std::size_t>(t[1])],
+               &c = solid_mesh.vertices[static_cast<std::size_t>(t[2])];
+    auto on_arc = [&](const Vec3& v) { return std::fabs(std::hypot(v.x - cx, v.y - H) - R) < 1e-6 && v.y < H + 1e-9; };
+    int f = 2;
+    if (a.y < 1e-9 && b.y < 1e-9 && c.y < 1e-9) f = 0;
+    else if (on_arc(a) && on_arc(b) && on_arc(c) && !(a.z == b.z && b.z == c.z)) f = 1;
+    model.triangle_face.push_back(f);
+  }
+  model.solid_count = 1;
+  return model;
+}
+static Vec3 round_pocket(double r, double deg, double z) {
+  const double t = deg * 3.14159265358979323846 / 180.0;
+  return {20.0 + r * std::cos(t), 14.0 - r * std::sin(t), z};
+}
+static Strand weave_strand(std::vector<Vec3> pts, int region = 1) {
+  Strand s;
+  s.width_mm.assign(pts.size(), 0.9);
+  s.points = std::move(pts);
+  s.region = region;
+  s.spacing_mm = 4.0;
+  return s;
+}
+static std::vector<Strand> made_up_weave() {   // as in the layout test
+  std::vector<Strand> w;
+  const double r = 7.75;
+  for (double z : {4.0, 8.0, 12.0}) {
+    std::vector<Vec3> p;
+    for (double t = -15; t <= 195 + 1e-9; t += 30) p.push_back(round_pocket(r, t, z));
+    w.push_back(weave_strand(p));
+  }
+  {
+    std::vector<Vec3> p;
+    for (double t = 45; t <= 135 + 1e-9; t += 30) p.push_back(round_pocket(r, t, 16.0));
+    w.push_back(weave_strand(p));
+  }
+  for (double t : {30.0, 60.0, 90.0, 120.0, 150.0}) {
+    std::vector<Vec3> p;
+    for (double z = -1; z <= 21 + 1e-9; z += 2) p.push_back(round_pocket(r, t, z));
+    w.push_back(weave_strand(p));
+  }
+  {
+    std::vector<Vec3> p;
+    for (double z = 6; z <= 14 + 1e-9; z += 2) p.push_back(round_pocket(r, 165.0, z));
+    w.push_back(weave_strand(p));
+  }
+  w.push_back(weave_strand({round_pocket(7.0, 60, 10), round_pocket(9.0, 60, 10), round_pocket(11.5, 60, 10)}));
+  w.push_back(weave_strand({round_pocket(9.0, 90, 6), round_pocket(4.5, 90, 6)}));
+  w.push_back(weave_strand({round_pocket(9.6, 45, 16), round_pocket(8.9, 45, 16)}));
+  return w;
+}
+static double to_segment(const Vec3& p, const Vec3& a, const Vec3& b) {
+  const Vec3 d{b.x - a.x, b.y - a.y, b.z - a.z};
+  const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
+  const double t = l2 > 0 ? std::clamp(((p.x - a.x) * d.x + (p.y - a.y) * d.y + (p.z - a.z) * d.z) / l2, 0.0, 1.0) : 0.0;
+  return std::hypot(p.x - a.x - d.x * t, std::hypot(p.y - a.y - d.y * t, p.z - a.z - d.z * t));
+}
+
+// O1, O2, the file of a weave: open between its struts, the struts one body with the part, nothing outside it, no
+// crust at the open surface, no slit against the solid (S11b); the layer check runs to its end.
+static void test_weave_file() {
+  const StepModel model = weave_block();
+  Session session(model);
+  Settings s;
+  s.regions = {{1, Role::Lattice, {1}, 4.0, 0.0, true}, {2, Role::Lattice, {0}, 3.0, 0.0, false}};
+  s.cells.cell_max_mm = 4;
+  s.cells.min_cells_across = 1;
+  s.struts.allow_quilt = true;
+  const Outcome out = session.lay_weave(s, made_up_weave());
+  const Domain& d = *session.domain();
+  auto pr = d.probe();
+  CHECK(!out.cancelled && out.layout.weave.size() == 1 && !out.bars.bars.empty());
+  const OpenSpace open = read_open_space(d, out.layout, 0.25), open1 = read_open_space(d, out.layout, 0.25, 1),
+                  open8 = read_open_space(d, out.layout, 0.25, 8);
+  CHECK(same_boxes(open, open1) && same_boxes(open, open8));
+  OpenSpace cells_only;   // the cells' boxes alone come first and are today's
+  {
+    Layout no_weave = out.layout;
+    no_weave.weave.clear();
+    cells_only = read_open_space(d, no_weave, 0.25);
+    bool first_same = cells_only.boxes.size() < open.boxes.size();
+    for (std::size_t i = 0; first_same && i < cells_only.boxes.size(); ++i) {
+      const OpenSpace::Box &x = cells_only.boxes[i], &y = open.boxes[i];
+      first_same = x.frame == y.frame && std::equal(x.lo, x.lo + 3, y.lo) && std::equal(x.hi, x.hi + 3, y.hi);
+    }
+    CHECK(first_same);
+  }
+  PrintableReport rep;
+  const TriangleMesh mesh = build_printable_mesh(session.measure(), d, out.layout, out.bars, open, PrintableSpec{}, &rep);
+  CHECK(rep.mesh.ok && !mesh.empty());
+  const Read r = read_mesh(mesh);
+  std::printf("weave file: %zu open boxes (%zu of the cells), %zu bars (%zu bridges), %zu triangles, %zu shells, %zu edges not twice; "
+              "%d builds, clean %d, found per pass %s; left out %zu bars, %zu posts; air pockets %zu, sealed %zu, loose bits %zu\n",
+              open.boxes.size(), cells_only.boxes.size(), rep.mesh.bars, rep.mesh.bridges, mesh.triangles.size(), r.shells,
+              r.edges_not_twice, rep.passes, rep.clean ? 1 : 0, [&] {
+                static char buf[128];
+                buf[0] = 0;
+                for (int f : rep.found_per_pass) std::snprintf(buf + std::strlen(buf), sizeof buf - std::strlen(buf), "%d ", f);
+                return buf;
+              }(), rep.mesh.bars_left_out, rep.posts.size(), rep.mesh.air_pockets, rep.mesh.sealed_spaces, rep.mesh.loose_bits);
+  CHECK(r.edges_not_twice == 0 && r.flat == 0);
+  CHECK(r.shells == 1);   // one body: the struts are joined to the part
+  CHECK(rep.passes >= 1 && rep.layers.layers > 0);   // the layer check ran to its end and reported
+  // Nothing outside the part.
+  long outside = 0;
+  for (const Vec3& v : mesh.vertices) outside += pr.part().depth(v) < -0.01;
+  CHECK(outside == 0);
+  // The mesh read back as a solid.
+  std::size_t open_edges = 0;
+  PartMeasure file(weld_mesh(mesh, 1e-6, &open_edges));
+  auto fp = file.probe();
+  auto far_from_struts = [&](const Vec3& p, double by) {
+    for (const Bar& b : out.bars.bars)
+      if (to_segment(p, b.a, b.b) < 0.5 * b.width + by) return false;
+    for (const MeshSpec::Post& q : rep.posts)
+      if (std::hypot(p.x - q.x, p.y - q.y) < 1.5 && p.z < q.z_top + 1.0) return false;
+    return true;
+  };
+  // (a) Open between the struts: points of the weave region away from every strut and from the region's edge.
+  // (b) No crust: the same a fifth of a millimetre under the pocket's wall. (c) No slit: just past the region's far
+  // edge, in the solid behind it.
+  long a_n = 0, a_full = 0, b_n = 0, b_full = 0, c_n = 0, c_empty = 0;
+  for (double z = 1.0; z < 19.5; z += 0.7)
+    for (double deg = 12; deg < 170; deg += 3.1) {
+      for (double rr : {7.0, 8.3, 9.2}) {
+        const Vec3 p = round_pocket(rr, deg, z);
+        const Where w = pr.where(p);
+        if (!w.lattice() || w.id != 1 || !far_from_struts(p, 0.6)) continue;
+        ++a_n;
+        a_full += fp.inside(p);
+      }
+      const Vec3 q = round_pocket(6.2, deg, z);
+      if (pr.where(q).lattice() && far_from_struts(q, 0.6)) { ++b_n; b_full += fp.inside(q); }
+      const Vec3 c = round_pocket(10.4, deg, z);
+      const Where wc = pr.where(c);
+      if (wc.why == Why::NotAsked && far_from_struts(c, 0.6)) { ++c_n; c_empty += !fp.inside(c); }
+    }
+  std::printf("weave file: in the region away from struts %ld points, %ld filled; under the pocket's wall %ld, %ld filled; "
+              "in the solid past the region %ld, %ld empty\n", a_n, a_full, b_n, b_full, c_n, c_empty);
+  CHECK(a_n > 300 && a_full == 0);
+  CHECK(b_n > 100 && b_full == 0);
+  CHECK(c_n > 100 && c_empty == 0);
+  // Left out as build_mesh leaves a strut out: its lowest point at a place the layer check found.
+  auto left_out_bar = [&](const Bar& b) {
+    const double rr = 0.5 * b.width;
+    for (const Vec3& sp : rep.drop_at) {
+      if (std::fabs(std::min(b.a.z, b.b.z) - rr - sp.z) > 0.45) continue;
+      if (to_segment(sp, b.a, b.b) < rr + 0.35) return true;
+    }
+    return false;
+  };
+  // The struts are in the file: the middle of every bar the layer check did not leave out is material.
+  long mids = 0, mids_full = 0;
+  for (const Bar& b : out.bars.bars) {
+    if (b.region != 1 || left_out_bar(b)) continue;
+    const Vec3 m{0.5 * (b.a.x + b.b.x), 0.5 * (b.a.y + b.b.y), 0.5 * (b.a.z + b.b.z)};
+    if (pr.part().depth(m) < 0.3) continue;
+    ++mids;
+    mids_full += fp.inside(m);
+  }
+  std::printf("weave file: %ld weave bars' middles inside the part, %ld of them material\n", mids, mids_full);
+  CHECK(mids > 30 && mids_full == mids);
+
+  // For the review: the weave's shallow bars (under 30 degrees from level), held at both ends, by length, and what the
+  // layer check did with them.
+  {
+    long shallow = 0, held_both = 0, band[4] = {0, 0, 0, 0}, kept = 0, left_out = 0, posted = 0;
+    auto lands = [](Bar::End e) { return e == Bar::End::Node || e == Bar::End::Solid || e == Bar::End::Joined; };
+    for (const Bar& b : out.bars.bars) {
+      if (b.region != 1 || !bar_is_bridge(b)) continue;
+      ++shallow;
+      held_both += lands(b.end_a) && lands(b.end_b);
+      const double len = std::sqrt((b.b.x - b.a.x) * (b.b.x - b.a.x) + (b.b.y - b.a.y) * (b.b.y - b.a.y) + (b.b.z - b.a.z) * (b.b.z - b.a.z));
+      ++band[len <= 5 ? 0 : len <= 10 ? 1 : len <= 20 ? 2 : 3];
+      const double rr = 0.5 * b.width;
+      const bool out_here = left_out_bar(b);
+      bool post_here = false;
+      for (const MeshSpec::Post& q : rep.posts)
+        post_here = post_here || to_segment(Vec3{q.x, q.y, q.z_top}, b.a, b.b) < rr + 0.5;
+      left_out += out_here;
+      posted += !out_here && post_here;
+      kept += !out_here && !post_here;
+    }
+    std::printf("weave shallow bars: %ld under 30 degrees, %ld held at both ends; lengths to 5 mm %ld, 5-10 %ld, 10-20 %ld, over 20 %ld; "
+                "layer check: kept %ld, left out %ld, post under %ld\n", shallow, held_both, band[0], band[1], band[2], band[3], kept,
+                left_out, posted);
+    CHECK(shallow > 0);
+  }
+}
+
+// O2: a sealed space smaller than one spacing cubed is filled; a larger one stays. Two weave regions under the top of
+// a block, sealed in by a Protect skin over the whole top: 3 x 3 x 3 mm (27 mm3, under 4 cubed) and 8 x 8 x 3 mm.
+static void test_weave_sealed() {
+  PartMeasure pm(weld_mesh(box(30, 30, 12)));
+  DomainSpec s;
+  s.min_strut_lines = 2.0;
+  s.regions = {face_region(1, {8, 8, 12}, {0, 0, -1}, 1.5, 1.5, 4.0, 0.0), face_region(2, {20, 20, 12}, {0, 0, -1}, 4, 4, 4.0, 0.0)};
+  for (Region& r : s.regions) r.weave = true;
+  ProtectSkin top;
+  top.id = 1;
+  {
+    MeshSink f;
+    f.add_triangle({0, 0, 12}, {30, 0, 12}, {30, 30, 12});
+    f.add_triangle({0, 0, 12}, {30, 30, 12}, {0, 30, 12});
+    top.face = f.mesh;
+  }
+  top.depth_mm = 1.0;
+  s.protect = {top};
+  Domain d(pm, s);
+  Layout layout = lay_cells(d, CellSpec{});
+  CHECK(layout.cells.empty() && layout.solid.empty() && layout.weave.size() == 2);
+  const std::vector<Strand> strands = {weave_strand({{8, 8, 11.9}, {8, 8, 7.2}}, 1), weave_strand({{20, 20, 11.9}, {20, 20, 7.2}}, 2)};
+  const Bars bars = weave_bars(d, strands);
+  CHECK(bars.bars.size() == 2);
+  for (const Bar& b : bars.bars) CHECK(b.end_a == Bar::End::Solid && b.end_b == Bar::End::Solid);
+  const OpenSpace open = read_open_space(d, layout, 0.25);
+  MeshReport none, spaced;
+  (void)build_mesh(pm, d, layout, bars, open, MeshSpec{}, &none);   // no spacing yet: the floor of 1 mm3
+  for (Layout::Weave& w : layout.weave) w.spacing_mm = 4.0;
+  const TriangleMesh mesh = build_mesh(pm, d, layout, bars, open, MeshSpec{}, &spaced);
+  std::printf("weave sealed: with no spacing filled under %.0f mm3: %zu filled, %zu kept; at 4 mm under %.0f: %zu filled (%.1f mm3), %zu kept\n",
+              none.filled_under_mm3, none.air_pockets, none.sealed_spaces, spaced.filled_under_mm3, spaced.air_pockets,
+              spaced.air_pockets_mm3, spaced.sealed_spaces);
+  CHECK(none.ok && spaced.ok);
+  CHECK(none.sealed_spaces == 2 && none.air_pockets == 0);
+  CHECK(spaced.filled_under_mm3 == 64.0 && spaced.air_pockets == 1 && spaced.sealed_spaces == 1);
+  CHECK(spaced.air_pockets_mm3 > 15.0 && spaced.air_pockets_mm3 < 27.5);
+  // The same for one thread and eight.
+  MeshSpec one, eight;
+  one.threads = 1;
+  eight.threads = 8;
+  CHECK(same_boxes(read_open_space(d, layout, 0.25, 1), read_open_space(d, layout, 0.25, 8)));
+  CHECK(same_mesh(build_mesh(pm, d, layout, bars, open, one), build_mesh(pm, d, layout, bars, open, eight)));
+  CHECK(same_mesh(mesh, build_mesh(pm, d, layout, bars, open, one)));
+}
+
 int main() {
   if (!mesh_available()) {
     MeshReport rep;
@@ -1094,6 +1392,8 @@ int main() {
     std::printf("no mesh library in this build: the writer says so (%d checks, %d failed)\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
   }
+  test_weave_sealed();
+  test_weave_file();
   test_block();
   test_whole_part();
   test_strut_reach_stays_in_the_part();

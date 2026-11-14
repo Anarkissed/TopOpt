@@ -181,6 +181,9 @@ struct Region {
   std::vector<std::array<Vec3, 2>> shell_edge;
   double shell_depth_mm = 0.0;
   bool expand_ignored = false;
+  // Rule O1 (Organic, a weave): a Lattice region filled by a strut list handed in (weave_bars), not by cells.
+  // lay_cells lays nothing in it, and all of its lattice is OPEN space: for the bars and for the file.
+  bool weave = false;
   bool is_shell() const { return !shell.triangles.empty(); }
 };
 
@@ -660,6 +663,17 @@ struct Layout {
   // one of these cubes is never taken in by another region's cell (D14b): what the rule made solid stays solid.
   std::vector<std::uint32_t> thin_solid;
   std::vector<RegionCells> regions;
+  // O1: the weave regions (Region::weave), in region order. Each has no cell; its lattice is open space, read by
+  // read_open_space in `frame` (the part's own axes, as a curved region's). `spacing_mm` is the smallest spacing of
+  // the strands laid in it (0 until a weave is laid: Session::lay_weave fills it); the file fills a sealed space
+  // smaller than its cube, as it does one smaller than the smallest cell.
+  struct Weave { int region = 0; int frame = 0; double spacing_mm = 0.0; };
+  std::vector<Weave> weave;
+  bool is_weave(int region) const {
+    for (const Weave& w : weave)
+      if (w.region == region) return true;
+    return false;
+  }
 };
 
 // `threads`: 0 = all of this machine's; the layout is the same for any number (D18).
@@ -859,6 +873,33 @@ std::vector<SteppedEdge> stepped_edges(const Bars& bars);
 
 Bars lay_bars(const Layout& layout, const Domain& domain, int threads = 0);
 
+// ── ORGANIC: A WEAVE (O1, O2) ─────────────────────────────────────────────────
+// Rule O2: a strut list that belongs to no cell. One strand is a polyline in the part's own coordinates, one width per
+// point, in one weave region. `spacing_mm` is the local distance between neighbouring strands; it stands where a
+// cell's size stands for cube lattices: how far a loose end is run on to be joined (join_loose_bars), and the
+// smallest sealed space the file keeps.
+struct Strand {
+  std::vector<Vec3> points;
+  std::vector<double> width_mm;   // one per point
+  int region = 0;
+  double spacing_mm = 0.0;
+};
+// Each segment of each strand is one Bar (width the mean of its two ends' widths, `cell` the strand's spacing,
+// `region` its region), its ends finished as lay_bars finishes a cut strut's (finish_bar_ends in bars.cpp): where a
+// segment leaves its region's lattice it is cut there, and the new end, and each of the strand's two free ends, is
+// tagged Solid (the part's solid begins: the bar runs on into it by its own width, S11), Surface (cut by the part's
+// own surface, moved onto it) or Loose (in open lattice). Where two segments of a strand meet the ends are Node. A
+// cut piece shorter than its own width is a stub (S4) and is not kept. In strand order; the same for any number of
+// threads. A strand with fewer than two points, or a width list of another length, lays nothing.
+Bars weave_bars(const Domain& domain, const std::vector<Strand>& strands, int threads = 0);
+// Rule O2, crossings: wherever two bars pass within the sum of their half widths of each other, both are cut there and
+// share ONE exact joint, the middle of their closest approach (its ends Node), so that drop_loose_bars stops there
+// and a loose tail never eats a whole strand. A bar whose closest point is its own end has that end moved onto the
+// joint instead of being cut, and it lands there (Node). Two bars that already share an end are left alone; joints
+// within a hundredth of a micron of each other are one. The same result whatever order the bars were found in.
+// Returns the number of joints made.
+std::size_t split_at_crossings(Bars& bars);
+
 // Print rule P8 (f) (reviewer, 2026-11-14): a cut piece of lattice thinner than its own strut, lying against solid,
 // is solid. Nothing can stand in it (every strut through it is shorter than its own width and is dropped as a stub),
 // and left open it is a slot under material that no printer can print over (his v3 stand: a row of cut cells
@@ -986,6 +1027,7 @@ struct Settings {
     std::vector<int> faces;      // the model's own face numbers
     double depth_mm = 0.0;
     double expand_mm = 0.0;
+    bool weave = false;          // O1: filled by a strand list (Session::lay_weave), not by cells
   };
   struct ProtectAsk {
     int id = 0;
@@ -1054,6 +1096,12 @@ class Session {
   // whole step). What the session keeps for the next lay() is not harmed: the same settings asked again give the
   // layout a fresh session gives. The flag must outlive the call; the session never writes it.
   Outcome lay(const Settings& settings, int threads = 0, const std::atomic<bool>* stop = nullptr);
+  // O1, O2: the same lay, with a weave. The cube regions are laid as lay() lays them; the weave regions' bars are made
+  // from `strands` (weave_bars), cut at their crossings (split_at_crossings) and added after the cells' bars; then all
+  // of them are joined, skinned if asked, loose bars dropped and pieces counted as lay() does. The layout's weave
+  // regions carry the smallest spacing of their strands. With no strands it is lay().
+  Outcome lay_weave(const Settings& settings, const std::vector<Strand>& strands, int threads = 0,
+                    const std::atomic<bool>* stop = nullptr);
   std::size_t open_edges() const { return open_edges_; }
   const PartMeasure& measure() const { return *measure_; }
   // The domain the last lay() was laid in: null before the first, REPLACED when a "where" setting changes. Read it after a
@@ -1061,6 +1109,7 @@ class Session {
   const Domain* domain() const { return domain_.get(); }
 
  private:
+  Outcome lay_with(const Settings& settings, const std::vector<Strand>* strands, int threads, const std::atomic<bool>* stop);
   StepModel model_;
   std::size_t open_edges_ = 0;
   std::unique_ptr<PartMeasure> measure_;

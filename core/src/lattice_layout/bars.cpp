@@ -10,6 +10,7 @@
 #include <thread>
 
 #include "topopt/strut_cell.hpp"
+#include "bar_ends.hpp"
 
 namespace topopt::lattice_layout {
 namespace {
@@ -94,6 +95,7 @@ bool SolidAt::operator()(const Domain::Probe& probe, const Vec3& p) const {
 bool SolidAt::operator()(const Domain::Probe& probe, const Vec3& p, const Where& w) const {
   if (w.why == Why::Outside) return false;
   if (!w.lattice()) return true;
+  if (layout_->is_weave(w.id)) return false;   // O1: a weave's lattice is open
   const auto it = grid_.find({static_cast<long long>(std::floor(p.x / pitch_)),
                               static_cast<long long>(std::floor(p.y / pitch_)),
                               static_cast<long long>(std::floor(p.z / pitch_))});
@@ -142,10 +144,9 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
       for (const StrutCellStrut& s : struts) {
         const double qa[3] = {c.lo[0] + s.a.x * unit, c.lo[1] + s.a.y * unit, c.lo[2] + s.a.z * unit};
         const double qb[3] = {c.lo[0] + s.b.x * unit, c.lo[1] + s.b.y * unit, c.lo[2] + s.b.z * unit};
-        const Vec3 a = f.at(qa[0], qa[1], qa[2]), b = f.at(qb[0], qb[1], qb[2]);
-        const Vec3 ab{b.x - a.x, b.y - a.y, b.z - a.z};
-        const double length = std::sqrt(ab.x * ab.x + ab.y * ab.y + ab.z * ab.z);
-        const Vec3 dir{ab.x / length, ab.y / length, ab.z / length};
+        const detail::BarLine line(f.at(qa[0], qa[1], qa[2]), f.at(qb[0], qb[1], qb[2]));
+        const Vec3 &a = line.a, &b = line.b;
+        const double length = line.length;
         // The strut's point at t (0 at a, 1 at b), a hair toward the cell's middle.
         auto inward = [&](double t, double q[3]) {
           double off[3], l = 0.0;
@@ -202,87 +203,29 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
             continue;
           }
         }
-        // What lies just past a cut end, a little farther along the strut.
-        auto past = [&](double t, double step) {
+        // The point read past a cut end at t: on the strut, a hair toward the cell's middle.
+        auto at = [&](double t) {
           double q[3];
-          inward(std::clamp(t + step / length, 0.0, 1.0), q);
-          const Vec3 at = f.at(q[0], q[1], q[2]);
-          const Where w = probe.where(at);
-          if (w.why == Why::Outside) return Bar::End::Surface;
-          // Solid, or lattice that no cell holds, which is solid too (D14); only lattice
-          // that another cell holds leaves the end loose.
-          return solid_at(probe, at, w) ? Bar::End::Solid : Bar::End::Loose;
+          inward(std::clamp(t, 0.0, 1.0), q);
+          return f.at(q[0], q[1], q[2]);
         };
         const int n = std::clamp(static_cast<int>(std::ceil(length / kStep)), 6, 24);
         std::vector<char> in(static_cast<std::size_t>(n) + 1);
         in[0] = node_is_mine(s.a);   // the two ends are nodes, read once per cell
         in[static_cast<std::size_t>(n)] = node_is_mine(s.b);
         for (int i = 1; i < n; ++i) in[static_cast<std::size_t>(i)] = mine(static_cast<double>(i) / n);
-        // Between a point that is the cell's and its neighbour that is not: where it changes.
-        auto edge = [&](double t_in, double t_out) {
-          // To a few thousandths of a millimetre: the reading itself is taken a fiftieth
-          // of a millimetre inside the cell, so nothing finer is being found.
-          for (int k = 0; k < 7; ++k) {
-            const double m = 0.5 * (t_in + t_out);
-            if (mine(m)) t_in = m; else t_out = m;
-          }
-          return t_in;
-        };
         for (int i = 0; i <= n; ++i) {
           if (!in[static_cast<std::size_t>(i)]) continue;
           int j = i;
           while (j < n && in[static_cast<std::size_t>(j) + 1]) ++j;
-          double t0 = static_cast<double>(i) / n, t1 = static_cast<double>(j) / n;
           Bar piece = bar;
           piece.piece = i > 0 || j < n;
-          // A bar the part's surface cuts ends ON the surface (S11). The cell's shape was
-          // read a hair inside the cell, so the end found is within that hair of the
-          // surface: the strut's own line is now followed to the surface itself, between
-          // a point a tenth of a millimetre back (in the part) and one as far on (not).
-          auto to_surface = [&](double t_edge, double sign) {
-            auto in_part = [&](double t) {
-              return probe.part().depth(Vec3{a.x + ab.x * t, a.y + ab.y * t, a.z + ab.z * t}) >= -1e-7;
-            };
-            double in_t = std::clamp(t_edge - sign * 0.1 / length, 0.0, 1.0);
-            double out_t = std::clamp(t_edge + sign * 0.1 / length, 0.0, 1.0);
-            if (!in_part(in_t) || in_part(out_t)) return t_edge;
-            // One straight line finds it, unless the strut lies IN a surface of the part
-            // (then the line runs along that surface and the answer is searched for).
-            {
-              const Vec3 from{a.x + ab.x * in_t, a.y + ab.y * in_t, a.z + ab.z * in_t};
-              const double reach = probe.part().reach_by_line(from, Vec3{dir.x * sign, dir.y * sign, dir.z * sign});
-              const double hit = in_t + sign * reach / length;
-              if (reach >= 0.0 && (hit - in_t) * sign <= (out_t - in_t) * sign && in_part(hit) &&
-                  !in_part(hit + sign * 1e-6 / length))
-                return hit;
-            }
-            for (int k = 0; k < 26; ++k) {
-              const double m = 0.5 * (in_t + out_t);
-              if (in_part(m)) in_t = m; else out_t = m;
-            }
-            return in_t;
-          };
-          if (i > 0) {
-            t0 = edge(t0, static_cast<double>(i - 1) / n);
-            piece.end_a = past(t0, -3.0 * kInward);
-            if (piece.end_a == Bar::End::Surface) t0 = to_surface(t0, -1.0);
-          }
-          if (j < n) {
-            t1 = edge(t1, static_cast<double>(j + 1) / n);
-            piece.end_b = past(t1, 3.0 * kInward);
-            if (piece.end_b == Bar::End::Surface) t1 = to_surface(t1, 1.0);
-          }
+          // Its cut ends finished (S4, S11): found between the last point held and the next not, then tagged.
+          const bool kept = detail::finish_bar_ends(piece, line, static_cast<double>(i) / n, static_cast<double>(j) / n,
+                                                    i > 0, static_cast<double>(i - 1) / n, j < n,
+                                                    static_cast<double>(j + 1) / n, probe, solid_at, mine, at);
           i = j;
-          if ((t1 - t0) * length < c.strut) {   // S4: a stub shorter than one strut width
-            if (piece.piece) { ++out.stubs; continue; }
-          }
-          // S11: where the solid begins the bar runs on into it by its own width.
-          if (piece.end_a == Bar::End::Solid) t0 = std::max(0.0, t0 - c.strut / length);
-          if (piece.end_b == Bar::End::Solid) t1 = std::min(1.0, t1 + c.strut / length);
-          piece.a = Vec3{a.x + dir.x * t0 * length, a.y + dir.y * t0 * length, a.z + dir.z * t0 * length};
-          piece.b = Vec3{a.x + dir.x * t1 * length, a.y + dir.y * t1 * length, a.z + dir.z * t1 * length};
-          if (t0 == 0.0) piece.a = a;   // a node, exactly
-          if (t1 == 1.0) piece.b = b;
+          if (!kept) { ++out.stubs; continue; }
           out.bars.push_back(piece);
         }
       }
@@ -843,6 +786,207 @@ void drop_loose_bars(Bars& bars) {
     }
   }
   keep_only(bars, keep);
+}
+
+// ── ORGANIC: A WEAVE (O1, O2) ─────────────────────────────────────────────────
+
+Bars weave_bars(const Domain& domain, const std::vector<Strand>& strands, int threads) {
+  const int thread_count =
+      threads > 0 ? threads : std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
+  struct Found { std::vector<Bar> bars; std::size_t stubs = 0; };
+  std::vector<Found> per_strand(strands.size());
+  // No layout is read here: inside the part, lattice of any region is open and anything else is solid. (A strand
+  // that reaches a cube region's lattice ends Loose there; joining, which reads the layout, finds what holds it.)
+  auto solid = [](const Domain::Probe&, const Vec3&, const Where& w) { return !w.lattice(); };
+  std::atomic<std::size_t> next{0};
+  auto work = [&]() {
+    const Domain::Probe probe = domain.probe();
+    for (std::size_t si = next.fetch_add(1); si < strands.size() && !domain.stop_asked(); si = next.fetch_add(1)) {
+      const Strand& st = strands[si];
+      Found& out = per_strand[si];
+      if (st.points.size() < 2 || st.width_mm.size() != st.points.size()) continue;
+      const std::size_t last = st.points.size() - 2;   // the last segment
+      for (std::size_t k = 0; k + 1 < st.points.size(); ++k) {
+        const Vec3& p = st.points[k];
+        const Vec3& q = st.points[k + 1];
+        if (!((q.x - p.x) * (q.x - p.x) + (q.y - p.y) * (q.y - p.y) + (q.z - p.z) * (q.z - p.z) > 0.0)) continue;
+        const detail::BarLine line(p, q);
+        // The point at t (the two ends exactly), and t past either end along the line.
+        auto at = [&](double t) {
+          if (t == 0.0) return p;
+          if (t == 1.0) return q;
+          return Vec3{p.x + line.ab.x * t, p.y + line.ab.y * t, p.z + line.ab.z * t};
+        };
+        auto held = [&](double t) {
+          const Where w = probe.where(at(t));
+          return w.lattice() && w.id == st.region;
+        };
+        Bar bar;
+        bar.width = 0.5 * (st.width_mm[k] + st.width_mm[k + 1]);
+        bar.cell = st.spacing_mm;
+        bar.region = st.region;
+        const int n = std::max(2, static_cast<int>(std::ceil(line.length / kStep)));
+        std::vector<char> in(static_cast<std::size_t>(n) + 1);
+        for (int i = 0; i <= n; ++i) in[static_cast<std::size_t>(i)] = held(static_cast<double>(i) / n);
+        for (int i = 0; i <= n; ++i) {
+          if (!in[static_cast<std::size_t>(i)]) continue;
+          int j = i;
+          while (j < n && in[static_cast<std::size_t>(j) + 1]) ++j;
+          Bar piece = bar;
+          piece.piece = i > 0 || j < n;
+          // A cut end is found and tagged; so is the strand's own free end (nothing to find: it is the end).
+          const bool free_a = i == 0 && k == 0, free_b = j == n && k == last;
+          const double none = std::nan("");
+          const bool kept = detail::finish_bar_ends(
+              piece, line, static_cast<double>(i) / n, static_cast<double>(j) / n, i > 0 || free_a,
+              i > 0 ? static_cast<double>(i - 1) / n : none, j < n || free_b, j < n ? static_cast<double>(j + 1) / n : none,
+              probe, solid, held, at);
+          i = j;
+          if (!kept) { ++out.stubs; continue; }
+          out.bars.push_back(piece);
+        }
+      }
+    }
+  };
+  {
+    const int nt = static_cast<int>(std::min<std::size_t>(static_cast<std::size_t>(thread_count), std::max<std::size_t>(1, strands.size())));
+    std::vector<std::thread> pool;
+    for (int t = 1; t < nt; ++t) pool.emplace_back(work);
+    work();
+    for (std::thread& t : pool) t.join();
+  }
+  domain.check_stop();
+  Bars result;
+  for (const Found& found : per_strand) {
+    result.stubs += found.stubs;
+    result.bars.insert(result.bars.end(), found.bars.begin(), found.bars.end());
+  }
+  return result;
+}
+
+namespace {
+// The closest approach of segments p0..p1 and q0..q1: where along each (0 .. 1), and the distance.
+double closest(const Vec3& p0, const Vec3& p1, const Vec3& q0, const Vec3& q1, double* s, double* t) {
+  const Vec3 d1{p1.x - p0.x, p1.y - p0.y, p1.z - p0.z}, d2{q1.x - q0.x, q1.y - q0.y, q1.z - q0.z};
+  const Vec3 r{p0.x - q0.x, p0.y - q0.y, p0.z - q0.z};
+  const double a = d1.x * d1.x + d1.y * d1.y + d1.z * d1.z, e = d2.x * d2.x + d2.y * d2.y + d2.z * d2.z;
+  const double f = d2.x * r.x + d2.y * r.y + d2.z * r.z;
+  double sc = 0.0, tc = 0.0;
+  if (a <= 1e-24 && e <= 1e-24) {
+    sc = tc = 0.0;
+  } else if (a <= 1e-24) {
+    tc = std::clamp(f / e, 0.0, 1.0);
+  } else {
+    const double c = d1.x * r.x + d1.y * r.y + d1.z * r.z;
+    if (e <= 1e-24) {
+      sc = std::clamp(-c / a, 0.0, 1.0);
+    } else {
+      const double b = d1.x * d2.x + d1.y * d2.y + d1.z * d2.z;
+      const double den = a * e - b * b;
+      sc = den > 1e-12 * a * e ? std::clamp((b * f - c * e) / den, 0.0, 1.0) : 0.0;
+      tc = (b * sc + f) / e;
+      if (tc < 0.0) { tc = 0.0; sc = std::clamp(-c / a, 0.0, 1.0); }
+      else if (tc > 1.0) { tc = 1.0; sc = std::clamp((b - c) / a, 0.0, 1.0); }
+    }
+  }
+  *s = sc;
+  *t = tc;
+  const Vec3 g{p0.x + d1.x * sc - q0.x - d2.x * tc, p0.y + d1.y * sc - q0.y - d2.y * tc, p0.z + d1.z * sc - q0.z - d2.z * tc};
+  return std::sqrt(g.x * g.x + g.y * g.y + g.z * g.z);
+}
+}  // namespace
+
+std::size_t split_at_crossings(Bars& bars) {
+  const std::vector<Bar> before = bars.bars;
+  const std::size_t n = before.size();
+  if (n < 2) return 0;
+  // The bars sorted into a grid, to find the pairs that may come close.
+  double widest = 0.0;
+  for (const Bar& b : before) widest = std::max(widest, b.width);
+  const double pitch = 2.0;
+  auto slot = [&](double x) { return static_cast<long long>(std::floor(x / pitch)); };
+  std::map<std::array<long long, 3>, std::vector<std::size_t>> grid;
+  for (std::size_t i = 0; i < n; ++i) {
+    const Bar& b = before[i];
+    for (long long x = slot(std::min(b.a.x, b.b.x) - widest); x <= slot(std::max(b.a.x, b.b.x) + widest); ++x)
+      for (long long y = slot(std::min(b.a.y, b.b.y) - widest); y <= slot(std::max(b.a.y, b.b.y) + widest); ++y)
+        for (long long z = slot(std::min(b.a.z, b.b.z) - widest); z <= slot(std::max(b.a.z, b.b.z) + widest); ++z)
+          grid[{x, y, z}].push_back(i);
+  }
+  std::vector<std::pair<std::size_t, std::size_t>> pairs;
+  for (const auto& cell : grid)
+    for (std::size_t a = 0; a < cell.second.size(); ++a)
+      for (std::size_t b = a + 1; b < cell.second.size(); ++b) pairs.push_back({cell.second[a], cell.second[b]});
+  std::sort(pairs.begin(), pairs.end());
+  pairs.erase(std::unique(pairs.begin(), pairs.end()), pairs.end());
+  // The joints, each once: two found within a hundredth of a micron of each other are one.
+  std::map<PointKey, Vec3> joints;
+  auto joint_at = [&](const Vec3& p) {
+    const PointKey k = key_of(p);
+    for (long long dx = -1; dx <= 1; ++dx)
+      for (long long dy = -1; dy <= 1; ++dy)
+        for (long long dz = -1; dz <= 1; ++dz) {
+          const auto it = joints.find({k.x + dx, k.y + dy, k.z + dz});
+          if (it == joints.end()) continue;
+          const Vec3& q = it->second;
+          if ((q.x - p.x) * (q.x - p.x) + (q.y - p.y) * (q.y - p.y) + (q.z - p.z) * (q.z - p.z) <= kSame * kSame) return q;
+        }
+    joints.emplace(k, p);
+    return p;
+  };
+  struct Cut { double s; Vec3 at; };
+  std::vector<std::vector<Cut>> cuts(n);
+  for (const auto& [i, j] : pairs) {
+    const Bar &x = before[i], &y = before[j];
+    const PointKey xa = key_of(x.a), xb = key_of(x.b), ya = key_of(y.a), yb = key_of(y.b);
+    if (xa == ya || xa == yb || xb == ya || xb == yb) continue;   // they share an end already
+    double s = 0.0, t = 0.0;
+    if (closest(x.a, x.b, y.a, y.b, &s, &t) > 0.5 * (x.width + y.width)) continue;
+    const Vec3 px{x.a.x + (x.b.x - x.a.x) * s, x.a.y + (x.b.y - x.a.y) * s, x.a.z + (x.b.z - x.a.z) * s};
+    const Vec3 py{y.a.x + (y.b.x - y.a.x) * t, y.a.y + (y.b.y - y.a.y) * t, y.a.z + (y.b.z - y.a.z) * t};
+    const Vec3 at = joint_at(Vec3{0.5 * (px.x + py.x), 0.5 * (px.y + py.y), 0.5 * (px.z + py.z)});
+    cuts[i].push_back({s, at});
+    cuts[j].push_back({t, at});
+  }
+  if (joints.empty()) return 0;
+  std::vector<Bar> out;
+  out.reserve(n + 2 * joints.size());
+  for (std::size_t i = 0; i < n; ++i) {
+    Bar bar = before[i];
+    std::vector<Cut>& c = cuts[i];
+    std::stable_sort(c.begin(), c.end(), [](const Cut& p, const Cut& q) { return p.s < q.s; });
+    // A joint at the bar's own end moves that end onto it: it lands there.
+    std::vector<Vec3> inner;
+    for (const Cut& k : c) {
+      if (k.s <= 0.0) { bar.a = k.at; bar.end_a = Bar::End::Node; bar.into_a = -1; continue; }
+      if (k.s >= 1.0) { bar.b = k.at; bar.end_b = Bar::End::Node; bar.into_b = -1; continue; }
+      if (!inner.empty() && key_of(inner.back()) == key_of(k.at)) continue;
+      inner.push_back(k.at);
+    }
+    std::size_t made = 0;
+    Vec3 from = bar.a;
+    Bar::End from_end = bar.end_a;
+    int from_into = bar.into_a;
+    for (const Vec3& p : inner) {
+      if (key_of(p) == key_of(from)) continue;
+      Bar piece = bar;
+      piece.a = from; piece.end_a = from_end; piece.into_a = from_into;
+      piece.b = p; piece.end_b = Bar::End::Node; piece.into_b = -1;
+      out.push_back(piece);
+      ++made;
+      from = p;
+      from_end = Bar::End::Node;
+      from_into = -1;
+    }
+    if (key_of(from) == key_of(bar.b) && made > 0) {   // the last joint fell on the far end
+      out.back().b = bar.b; out.back().end_b = bar.end_b; out.back().into_b = bar.into_b;
+      continue;
+    }
+    bar.a = from; bar.end_a = from_end; bar.into_a = from_into;
+    out.push_back(bar);
+  }
+  bars.bars.swap(out);
+  return joints.size();
 }
 
 }  // namespace topopt::lattice_layout
