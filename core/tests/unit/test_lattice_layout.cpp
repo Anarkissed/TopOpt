@@ -4592,10 +4592,369 @@ static void test_demand_field() {
   }
 }
 
+// The axis-aligned box round a cell's cube (R16).
+static void cell_box(const Layout& l, const Cell& c, Vec3* lo, Vec3* hi) {
+  const Frame& fr = l.frames[static_cast<std::size_t>(c.frame)];
+  for (int k = 0; k < 8; ++k) {
+    const Vec3 p = fr.at(c.lo[0] + ((k & 1) ? c.size : 0.0), c.lo[1] + ((k & 2) ? c.size : 0.0),
+                         c.lo[2] + ((k & 4) ? c.size : 0.0));
+    if (k == 0) { *lo = *hi = p; continue; }
+    *lo = {std::min(lo->x, p.x), std::min(lo->y, p.y), std::min(lo->z, p.z)};
+    *hi = {std::max(hi->x, p.x), std::max(hi->y, p.y), std::max(hi->z, p.z)};
+  }
+}
+// A field of 1 mm voxels over [0, nx] x [0, ny] x [0, nz], every voxel `value(i, j, k)`.
+template <class F>
+static std::shared_ptr<DemandField> field_of(int nx, int ny, int nz, F value, Vec3 origin = {0, 0, 0}) {
+  auto f = std::make_shared<DemandField>();
+  f->origin = origin;
+  f->spacing = 1.0;
+  f->nx = nx; f->ny = ny; f->nz = nz;
+  f->mpa.resize(static_cast<std::size_t>(nx) * ny * nz);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) f->mpa[f->index(i, j, k)] = static_cast<float>(value(i, j, k));
+  return f;
+}
+
+// Install 2a, steps 2 and 4: By stress in set_struts (R7, R8, R12, R16, R17, R18; 02-tests.md R7a to R18a).
+static void test_by_stress() {
+  // A slab 96 x 16 x 8 mm, all lattice, 4 mm cells. The stress ramps 0 -> 100 MPa along its length: 0 over the first
+  // 4 mm, 100 over the last 4 mm, even steps between (by each voxel's middle).
+  PartMeasure pm(weld_mesh(box(96, 16, 8)));
+  DomainSpec ds;
+  ds.start = Start::AllLattice;
+  Domain dom(pm, ds);
+  CellSpec cs;
+  cs.algorithm = Algorithm::Uniform;
+  cs.cell_mm = 4.0;
+  const Layout base = lay_cells(dom, cs);
+  CHECK(base.cells.size() == 24 * 4 * 2);
+  const auto ramp = field_of(96, 16, 8, [](int i, int, int) {
+    return std::clamp((i + 0.5 - 4.0) / 88.0 * 100.0, 0.0, 100.0);
+  });
+  // The dial's strut / cell, as the Uniform mode reads it on the largest cell (R10).
+  const auto ratio_of = [&](double dial) {
+    Layout l = base;
+    StrutSpec u;
+    u.dial = dial;
+    set_struts(l, u);
+    return l.cells[0].strut / l.cells[0].size;
+  };
+  const double r2 = ratio_of(0.2), r8 = ratio_of(0.8);
+  CHECK(r8 > r2 + 0.01);
+  StrutSpec sp;
+  sp.mode = Density::ByStress;
+  sp.dial_light = 0.2;
+  sp.dial_heavy = 0.8;
+  sp.demand = ramp;
+  sp.reference_mpa = 100.0;
+  const auto f_of = [&](const Layout& l, const Cell& c, double ref) {
+    Vec3 lo, hi;
+    cell_box(l, c, &lo, &hi);
+    return std::clamp(ramp->highest_in(lo, hi) / ref, 0.0, 1.0);
+  };
+  {  // 1. Along the ramp the strut / cell never falls; the 0 end is at dial 0.2, the 100 end at dial 0.8; every cell
+     // matches the formula for its own highest voxel.
+    Layout l = base;
+    const StrutReport r = set_struts(l, sp);
+    CHECK(!r.no_stress);
+    NEAR(r.reference_mpa, 100.0, 0.0);
+    NEAR(r.highest_mpa, 100.0, 1e-9);
+    std::vector<std::pair<double, double>> along;   // (cell's middle x, strut / cell)
+    int light = 0, heavy = 0, wrong = 0;
+    for (const Cell& c : l.cells) {
+      const double f = f_of(l, c, 100.0);
+      const double want = (r2 + f * (r8 - r2)) * c.size;
+      if (std::fabs(c.strut - want) > 1e-9) ++wrong;
+      if (f == 0.0) { ++light; NEAR(c.strut, r2 * c.size, 1e-9); }
+      if (f == 1.0) { ++heavy; NEAR(c.strut, r8 * c.size, 1e-9); }
+      Vec3 lo, hi;
+      cell_box(l, c, &lo, &hi);
+      along.push_back({0.5 * (lo.x + hi.x), c.strut / c.size});
+    }
+    CHECK(wrong == 0);
+    CHECK(light == 8 && heavy == 8);   // one column of 4 x 2 cells at each end
+    CHECK(r.at_light == 8 && r.at_heavy == 8);
+    std::sort(along.begin(), along.end());
+    int falls = 0;
+    for (std::size_t i = 1; i < along.size(); ++i)
+      if (along[i].second < along[i - 1].second - 1e-12) ++falls;
+    CHECK(falls == 0);
+    CHECK(along.back().second > along.front().second + 0.01);
+    // Ends given the wrong way round are swapped.
+    Layout sw = base;
+    StrutSpec s2 = sp;
+    std::swap(s2.dial_light, s2.dial_heavy);
+    set_struts(sw, s2);
+    CHECK(sw.cells == l.cells);
+  }
+  {  // 2. Response 2 makes every in-between cell thinner than response 1 and leaves both ends alone.
+    Layout one = base, two = base;
+    set_struts(one, sp);
+    StrutSpec s2 = sp;
+    s2.response = 2.0;
+    set_struts(two, s2);
+    int between = 0, thinner = 0, ends_same = 0, ends = 0;
+    for (std::size_t i = 0; i < one.cells.size(); ++i) {
+      const double f = f_of(one, one.cells[i], 100.0);
+      if (f > 0.0 && f < 1.0) { ++between; if (two.cells[i].strut < one.cells[i].strut - 1e-12) ++thinner; }
+      else { ++ends; if (two.cells[i].strut == one.cells[i].strut) ++ends_same; }
+    }
+    CHECK(between > 100 && thinner == between);
+    CHECK(ends == 16 && ends_same == ends);
+    // The response is held to 0.25 .. 4.
+    Layout big = base, four = base;
+    s2.response = 40.0;
+    set_struts(big, s2);
+    s2.response = 4.0;
+    set_struts(four, s2);
+    CHECK(big.cells == four.cells);
+  }
+  {  // 4. One hot voxel: exactly the cells whose cube's box shares volume with it change. Every other voxel is 10 MPa.
+     // The voxel [3.5, 4.5] x [3.5, 4.5] x [3.5, 4.5] straddles the corner of eight 4 mm cells.
+    const Vec3 at{-0.5, -0.5, -0.5};
+    const auto cold = field_of(98, 18, 10, [](int, int, int) { return 10.0; }, at);
+    const auto hot = field_of(98, 18, 10, [](int i, int j, int k) { return i == 4 && j == 4 && k == 4 ? 90.0 : 10.0; }, at);
+    StrutSpec s = sp;
+    Layout a = base, b = base;
+    s.demand = cold;
+    set_struts(a, s);
+    s.demand = hot;
+    set_struts(b, s);
+    int changed = 0, overlapping = 0, wrong = 0;
+    for (std::size_t i = 0; i < a.cells.size(); ++i) {
+      Vec3 lo, hi;
+      cell_box(a, a.cells[i], &lo, &hi);
+      const bool over = std::min(hi.x, 4.5) > std::max(lo.x, 3.5) && std::min(hi.y, 4.5) > std::max(lo.y, 3.5) &&
+                        std::min(hi.z, 4.5) > std::max(lo.z, 3.5);
+      const bool moved = a.cells[i].strut != b.cells[i].strut;
+      if (over != moved) ++wrong;
+      changed += moved;
+      overlapping += over;
+    }
+    CHECK(wrong == 0);
+    CHECK(overlapping == 8 && changed == 8);
+  }
+  {  // 5. No field (null or empty), or no reference: every cell at its light end, and the report says so (R18).
+    for (int how = 0; how < 3; ++how) {
+      StrutSpec s = sp;
+      if (how == 0) s.demand = nullptr;
+      if (how == 1) s.demand = std::make_shared<DemandField>();
+      if (how == 2) s.reference_mpa = 0.0;
+      Layout l = base;
+      const StrutReport r = set_struts(l, s);
+      CHECK(r.no_stress);
+      CHECK(r.at_light == l.cells.size() && r.at_heavy == 0);
+      for (const Cell& c : l.cells) NEAR(c.strut, r2 * c.size, 1e-9);
+    }
+    // Uniform and PerRegion read none of it: the same as with no stress settings at all, and the report is as before.
+    for (Density m : {Density::Uniform, Density::PerRegion}) {
+      StrutSpec plain;
+      plain.mode = m;
+      plain.dial = 0.6;
+      plain.region_dial = {{0, 0.3}};
+      StrutSpec withs = sp;
+      withs.mode = m;
+      withs.dial = 0.6;
+      withs.region_dial = {{0, 0.3}};
+      Layout x = base, y = base;
+      const StrutReport rx = set_struts(x, plain), ry = set_struts(y, withs);
+      CHECK(x.cells == y.cells);
+      CHECK(!ry.no_stress && ry.reference_mpa == 0.0 && ry.highest_mpa == 0.0 && ry.at_light == 0 && ry.at_heavy == 0);
+      CHECK(rx.at_bead == ry.at_bead && rx.at_ceiling == ry.at_ceiling);
+    }
+  }
+  {  // 6. The cells of a ByStress layout equal the Uniform layout's in everything but the strut.
+    Layout s = base, u = base;
+    set_struts(s, sp);
+    set_struts(u, StrutSpec{});
+    int differ = 0;
+    for (std::size_t i = 0; i < s.cells.size(); ++i) {
+      Cell x = s.cells[i], y = u.cells[i];
+      x.strut = y.strut = 0.0;
+      if (!(x == y)) ++differ;
+    }
+    CHECK(differ == 0 && s.solid == u.solid);
+  }
+  {  // 7. Widths in mm: every strut lies between the two widths, the same in every cell size; the ends exact where the
+     // cell can hold them, and the widest allowed where it cannot.
+    StrutSpec s = sp;
+    s.width_light_mm = 0.5;
+    s.width_heavy_mm = 0.7;
+    s.dial_light = 0.9;   // not read
+    Layout l = base;
+    set_struts(l, s);
+    int outside = 0, wrong = 0;
+    for (const Cell& c : l.cells) {
+      if (c.strut < 0.5 - 1e-12 || c.strut > 0.7 + 1e-12) ++outside;
+      const double f = f_of(l, c, 100.0);
+      if (std::fabs(c.strut - (0.5 + f * 0.2)) > 1e-9) ++wrong;
+    }
+    CHECK(outside == 0 && wrong == 0);
+    // Mixed cell sizes under one stress: one width in every cell that can hold it.
+    const double bead = 0.45, open = 0.7592 / 4.0;
+    Layout mixed = strut_layout(bead);
+    s.demand = field_of(60, 4, 16, [](int, int, int) { return 50.0; }, {-1, -1, -1});
+    s.width_light_mm = 1.6;   // the wrong way round: swapped
+    s.width_heavy_mm = 0.6;
+    const StrutReport r = set_struts(mixed, s);
+    int held = 0;
+    for (const Cell& c : mixed.cells) {
+      const double top = std::max(bead, open * c.size);
+      if (top >= 1.1) { NEAR(c.strut, 1.1, 1e-12); ++held; }
+      else NEAR(c.strut, top, 1e-9);
+    }
+    CHECK(held == 4 && r.at_ceiling == 2);   // 12, 6, 6 and 8 mm hold 1.1 mm; 2.4 and 4 mm do not
+    // The ends exact: all cold, all at the reference.
+    s.demand = field_of(60, 4, 16, [](int, int, int) { return 0.0; }, {-1, -1, -1});
+    set_struts(mixed, s);
+    for (const Cell& c : mixed.cells) NEAR(c.strut, std::min(0.6, std::max(bead, open * c.size)), 1e-12);
+    s.demand = field_of(60, 4, 16, [](int, int, int) { return 300.0; }, {-1, -1, -1});
+    set_struts(mixed, s);
+    for (const Cell& c : mixed.cells) NEAR(c.strut, std::min(1.6, std::max(bead, open * c.size)), 1e-9);
+  }
+  {  // 8. A band cell is never thinner than its by-stress width, and never past the open look without Allow quilt.
+    const double bead = 0.45, open = 0.7592 / 4.0;
+    Layout banded = strut_layout(bead);
+    for (std::size_t i = 0; i < banded.cells.size(); ++i) {
+      banded.cells[i].own = 12.0;
+      banded.cells[i].band = i % 2 ? 0.3 : 1.0;
+      banded.cells[i].finest = banded.cells[i].size < 3.0;
+    }
+    Layout flat = banded;
+    for (Cell& c : flat.cells) c.band = 1.0;
+    StrutSpec s = sp;
+    const auto grad = field_of(60, 4, 16, [](int i, int, int) { return i * 2.0; }, {-1, -1, -1});
+    s.demand = grad;
+    // The dials' strut / cell on this layout's largest cell (12 mm), as Uniform reads them.
+    const auto dial_ratio = [&](double dial) {
+      Layout u = flat;
+      StrutSpec us;
+      us.dial = dial;
+      set_struts(u, us);
+      return u.cells[0].strut / 12.0;
+    };
+    const double lr = dial_ratio(0.2), hr = dial_ratio(0.8);
+    for (bool mm : {false, true}) {
+      s.width_light_mm = mm ? 0.5 : 0.0;
+      s.width_heavy_mm = mm ? 1.0 : 0.0;
+      Layout a = banded, b = flat;
+      set_struts(a, s);
+      set_struts(b, s);
+      int thinner = 0, quilted = 0, raised = 0;
+      for (std::size_t i = 0; i < a.cells.size(); ++i) {
+        // The cell's by-stress width, from the formula.
+        Vec3 lo, hi;
+        cell_box(b, b.cells[i], &lo, &hi);
+        const double f = std::clamp(grad->highest_in(lo, hi) / 100.0, 0.0, 1.0);
+        const double top = std::max(bead, open * b.cells[i].size);
+        const double by = std::clamp(mm ? 0.5 + f * 0.5 : (lr + f * (hr - lr)) * b.cells[i].size, bead, top);
+        NEAR(b.cells[i].strut, by, 1e-9);
+        if (a.cells[i].band >= 1.0) { CHECK(a.cells[i].strut == b.cells[i].strut); continue; }
+        if (a.cells[i].strut < b.cells[i].strut - 1e-12) ++thinner;
+        if (a.cells[i].strut > std::max(bead, open * a.cells[i].size) + 1e-9) ++quilted;
+        if (a.cells[i].strut > b.cells[i].strut + 1e-12) ++raised;
+      }
+      CHECK(thinner == 0 && quilted == 0 && raised > 0);
+    }
+  }
+  {  // 9. A typed width (R11) changes nothing under By stress (R12).
+    Layout a = base, b = base;
+    StrutSpec s = sp;
+    set_struts(a, s);
+    s.width_mm = 1.2;
+    set_struts(b, s);
+    CHECK(a.cells == b.cells);
+  }
+  {  // 11. Speed: 2,000 cells of 4 mm in a 64 mm cube, a 64^3 field of 1 mm voxels.
+    Layout l;
+    l.bead_mm = 0.45;
+    l.frames.push_back(Frame{});
+    for (int n = 0; n < 2000; ++n) {
+      Cell c;
+      c.size = 4.0;
+      c.lo[0] = 4.0 * (n % 16);
+      c.lo[1] = 4.0 * ((n / 16) % 16);
+      c.lo[2] = 4.0 * (n / 256);
+      l.cells.push_back(c);
+    }
+    StrutSpec s = sp;
+    s.demand = field_of(64, 64, 64, [](int i, int j, int k) { return (i * 7 + j * 3 + k) % 120; }, {-0.5, -0.5, -0.5});
+    double best = 1e9;
+    for (int run = 0; run < 5; ++run) {
+      Layout x = l;
+      const auto t0 = std::chrono::steady_clock::now();
+      set_struts(x, s);
+      best = std::min(best, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+    }
+    std::printf("by stress: set_struts on 2,000 cells with a 64^3 field: %.3f ms (best of 5)\n", best);
+    CHECK(best < 5.0);
+  }
+}
+
+// Install 2a, step 2: the session resolves the reference (R17) and keeps it while nothing it is made from changes.
+static void test_by_stress_session() {
+  int L = 0, square = 0, sideA = 0, sideB = 0;
+  const StepModel model = plate_with_L_face(&L, &square, &sideA, &sideB);
+  Session session(model);
+  Settings st;
+  st.start = Start::AllLattice;
+  st.cells.algorithm = Algorithm::Uniform;
+  st.cells.cell_mm = 5.0;
+  st.bars = false;
+  st.struts.mode = Density::ByStress;
+  st.struts.dial_light = 0.2;
+  st.struts.dial_heavy = 0.8;
+  // A 60 x 60 x 10 plate; the stress rises with x and y: 0 .. 118 MPa.
+  auto field = field_of(60, 60, 10, [](int i, int j, int) { return static_cast<double>(i + j); });
+  st.stress.demand = field;
+  // 3. Reference 0: the session's reference is the part's own.
+  const Outcome own = session.lay(st);
+  const double want = stress_reference(*session.domain(), *field, 0.95);
+  CHECK(want > 50.0);
+  NEAR(own.struts.reference_mpa, want, 0.0);
+  CHECK(!own.struts.no_stress && own.struts.at_heavy > 0);
+  // A stated reference half as large puts more cells at the heavy end.
+  st.stress.reference_mpa = 0.5 * want;
+  const Outcome half = session.lay(st);
+  NEAR(half.struts.reference_mpa, 0.5 * want, 0.0);
+  CHECK(half.struts.at_heavy > own.struts.at_heavy);
+  // Kept: the same field (pointer) and percentile on the same domain are not read again. The field's values are
+  // changed behind the session's back here only to show it; the reference stays.
+  st.stress.reference_mpa = 0.0;
+  for (float& v : field->mpa) v *= 2.0f;
+  st.struts.dial_heavy = 0.9;   // a slider move
+  NEAR(session.lay(st).struts.reference_mpa, want, 0.0);
+  // A new field, a new percentile or a new domain: read again.
+  st.stress.demand = std::make_shared<DemandField>(*field);
+  NEAR(session.lay(st).struts.reference_mpa, 2.0 * want, 0.0);
+  st.stress.percentile = 0.5;
+  const double mid = stress_reference(*session.domain(), *field, 0.5);
+  NEAR(session.lay(st).struts.reference_mpa, mid, 0.0);
+  for (float& v : field->mpa) v *= 0.5f;   // the field the session now holds is a copy; this one is back to before
+  st.stress.demand = field;
+  st.min_wall_mm = 0.5;                    // a "where" setting: a new domain
+  const Outcome again = session.lay(st);
+  CHECK(again.read_again);
+  NEAR(again.struts.reference_mpa, stress_reference(*session.domain(), *field, 0.5), 0.0);
+  // The struts' own stress settings, set by a caller, are overwritten only when Settings::stress has a field.
+  Settings direct = st;
+  direct.stress = StressGrade{};
+  direct.struts.demand = field;
+  direct.struts.reference_mpa = 40.0;
+  const Outcome d = session.lay(direct);
+  NEAR(d.struts.reference_mpa, 40.0, 0.0);
+  // No field anywhere: every strut at its light end, and the layout says so (R18).
+  direct.struts.demand = nullptr;
+  const Outcome none = session.lay(direct);
+  CHECK(none.struts.no_stress && none.struts.at_light == none.layout.cells.size());
+}
+
 // ── C22: cell size by stress ──────────────────────────────────────────────────
 // A made-up stress field over a box of voxels, each voxel's value from its centre.
 template <class F>
-static std::shared_ptr<DemandField> field_of(Vec3 origin, double spacing, int nx, int ny, int nz, F value) {
+static std::shared_ptr<DemandField> stress_field(Vec3 origin, double spacing, int nx, int ny, int nz, F value) {
   auto f = std::make_shared<DemandField>();
   f->origin = origin;
   f->spacing = spacing;
@@ -4649,7 +5008,7 @@ static void test_cells_by_stress() {
   Domain d(pm, s);
   const double ref = 100.0;
   auto ramp_value = [](const Vec3& c) { return 100.0 * std::clamp((c.x - 16.0) / 64.0, 0.0, 1.0); };
-  const auto ramp = field_of({-2, -2, -2}, 1.0, 100, 28, 12, ramp_value);
+  const auto ramp = stress_field({-2, -2, -2}, 1.0, 100, 28, 12, ramp_value);
   CellSpec off;
   off.cell_max_mm = 8;
   auto on_with = [&](Algorithm algo, std::shared_ptr<const DemandField> f, double r) {
@@ -4738,7 +5097,7 @@ static void test_cells_by_stress() {
       CellSpec plain = off;
       plain.algorithm = algo;
       const Layout today = lay_cells(d, plain);
-      const auto zero = field_of({-2, -2, -2}, 1.0, 100, 28, 12, [](const Vec3&) { return 0.0; });
+      const auto zero = stress_field({-2, -2, -2}, 1.0, 100, 28, 12, [](const Vec3&) { return 0.0; });
       CellSpec no_field = on_with(algo, nullptr, ref);
       CellSpec empty_field = on_with(algo, std::make_shared<DemandField>(), ref);
       CellSpec all_zero = on_with(algo, zero, ref);
@@ -4779,7 +5138,7 @@ static void test_cells_by_stress() {
     DomainSpec ps;
     ps.regions = {face_region(1, Role::Lattice, {30, 0, 20}, {0, 1, 0}, 30, 30, 13)};
     Domain dp(pp, ps);
-    const auto f = field_of({-2, -2, -2}, 1.0, 64, 24, 44,
+    const auto f = stress_field({-2, -2, -2}, 1.0, 64, 24, 44,
                             [](const Vec3& c) { return 100.0 * std::clamp((c.x - 10.0) / 40.0, 0.0, 1.0); });
     auto pr = dp.probe();
     const PartMeasure::Probe surface = pp.probe();
@@ -4853,11 +5212,11 @@ static void test_cells_by_stress() {
 
   {  // 6. One hot voxel (x 50..51, y 11..12, z 3..4): only the base cube whose box overlaps it differs from the cold
      // layout, which is the plain one.
-    auto one = field_of({-2, -2, -2}, 1.0, 100, 28, 12, [](const Vec3& c) {
+    auto one = stress_field({-2, -2, -2}, 1.0, 100, 28, 12, [](const Vec3& c) {
       return (c.x > 50 && c.x < 51 && c.y > 11 && c.y < 12 && c.z > 3 && c.z < 4) ? 100.0 : 0.0;
     });
     for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
-      const auto zero = field_of({-2, -2, -2}, 1.0, 100, 28, 12, [](const Vec3&) { return 0.0; });
+      const auto zero = stress_field({-2, -2, -2}, 1.0, 100, 28, 12, [](const Vec3&) { return 0.0; });
       const Layout cold = lay_cells(d, on_with(algo, zero, ref));
       const Layout hot = lay_cells(d, on_with(algo, one, ref));
       int overlap = 0, changed = 0, wrong = 0;
@@ -4921,7 +5280,7 @@ static void test_cells_by_stress() {
     st.bead_mm = 0.2;                                         // a ladder of 6, 3 and 1.5 mm
     st.cells.cell_max_mm = 6;
     st.bars = false;
-    auto f = field_of({-2, -2, -2}, 1.0, 64, 64, 14,
+    auto f = stress_field({-2, -2, -2}, 1.0, 64, 64, 14,
                       [](const Vec3& c) { return 100.0 * std::clamp((c.x - 25.0) / 40.0, 0.0, 1.0); });
     const Outcome plain = session.lay(st);
     CHECK(!plain.cells_by_stress && !plain.cells_no_stress);
@@ -4965,7 +5324,7 @@ static void test_cells_by_stress() {
     const Outcome stated = session.lay(st);
     CHECK(stated.cells_by_stress && stated.layout.cells == laid_with(40.0).cells);
     st.stress.reference_mpa = 0.0;
-    st.stress.demand = field_of({-2, -2, -2}, 1.0, 64, 64, 14, [](const Vec3&) { return 0.0; });
+    st.stress.demand = stress_field({-2, -2, -2}, 1.0, 64, 64, 14, [](const Vec3&) { return 0.0; });
     const Outcome zero = session.lay(st);                     // the part's own reference of a cold field is 0
     CHECK(!zero.cells_by_stress && zero.cells_no_stress && zero.layout.cells == plain.layout.cells);
     st.stress.demand = f;
@@ -4980,6 +5339,12 @@ static void test_cells_by_stress() {
     st.cells.by_stress = false;                               // a field, the switch off
     const Outcome unasked = session.lay(st);
     CHECK(!unasked.cells_by_stress && !unasked.cells_no_stress && unasked.layout.cells == plain.layout.cells);
+    // ONE reference for the cells and the struts: with both by stress, the struts read the one the cells were laid with.
+    st.cells.by_stress = true;
+    st.struts.mode = Density::ByStress;
+    const Outcome both = session.lay(st);
+    CHECK(both.cells_by_stress && both.struts.reference_mpa == want);
+    CHECK(both.layout.cells.size() == laid_with(want).cells.size());
   }
   block("9 session");
 
@@ -4989,8 +5354,8 @@ static void test_cells_by_stress() {
     bs.bead_mm = 0.2;
     bs.start = Start::AllLattice;
     Domain db(pb, bs);
-    const auto zero = field_of({0, 0, 0}, 2.0, 64, 64, 64, [](const Vec3&) { return 0.0; });
-    const auto slope = field_of({0, 0, 0}, 2.0, 64, 64, 64,
+    const auto zero = stress_field({0, 0, 0}, 2.0, 64, 64, 64, [](const Vec3&) { return 0.0; });
+    const auto slope = stress_field({0, 0, 0}, 2.0, 64, 64, 64,
                                 [](const Vec3& c) { return 100.0 * std::clamp((c.x - 100.0) / 28.0, 0.0, 1.0); });
     CellSpec plain = off;
     plain.cell_min_mm = 2;   // the whole part's base cell 8 mm (its halves end at 2)
@@ -5022,6 +5387,8 @@ static void test_cells_by_stress() {
 
 int main() {
   test_cells_by_stress();
+  test_by_stress();
+  test_by_stress_session();
   test_demand_field();
   test_thin_cut_pieces();
   test_one_grid_main_size();

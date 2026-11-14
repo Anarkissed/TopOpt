@@ -65,6 +65,7 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
     where_ = where;
     unread_ = true;
     ref_kept_ = false;   // the reference is the new domain's to read again
+    ref_field_.reset();
   }
   out.read_again = unread_;   // a new domain, or one whose first reading was given up part way
   out.empty_regions = empty_regions_;
@@ -81,17 +82,19 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
     // are still set without the quilt, so a small cell carries the thinnest strut (set_struts: never under it).
     cells.allow_quilt = settings.struts.allow_quilt || settings.small_cells_in_thin_walls;
     cells.one_grid = settings.one_grid;   // "Let walls cut cells": the per-part switch is the session's
-    // The stress the lattice is graded by (R16, R17), resolved once, BEFORE the cells: the stated reference, else the
-    // part's own, kept while the domain, the field and the percentile are the same (a slider move never reads it again).
+    // The stress the lattice is graded by (R16, R17), resolved ONCE, before the cells, for the cells (C22) and the
+    // struts (By stress) alike: the stated reference, else the part's own, kept while the domain, the field and the
+    // percentile are the same (a slider move never reads the field again).
     const StressGrade& stress = settings.stress;
+    double reference = 0.0;
     if (stress.demand) {
-      double reference = stress.reference_mpa;
+      reference = stress.reference_mpa;
       if (!(reference > 0.0)) {
         if (!ref_kept_ || ref_field_ != stress.demand || ref_percentile_ != stress.percentile) {
-          const double computed = stress_reference(*domain_, *stress.demand, stress.percentile, threads);
+          ref_kept_ = false;
+          ref_mpa_ = stress_reference(*domain_, *stress.demand, stress.percentile, threads);
           ref_field_ = stress.demand;
           ref_percentile_ = stress.percentile;
-          ref_mpa_ = computed;
           ref_kept_ = true;
         }
         reference = ref_mpa_;
@@ -104,7 +107,14 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
     out.cells_no_stress = cells.by_stress && (!cells.demand || cells.demand->empty() || !(cells.reference_mpa > 0.0));
     out.layout = lay_cells(*domain_, cells, threads);
     unread_ = false;
-    out.struts = set_struts(out.layout, settings.struts);
+    StrutSpec struts = settings.struts;
+    if (stress.demand) {
+      // By stress reads the field, the RESOLVED reference (the one the cells were laid with) and the response.
+      struts.demand = stress.demand;
+      struts.response = stress.response;
+      struts.reference_mpa = reference;
+    }
+    out.struts = set_struts(out.layout, struts);
     const double laid = ms_since(t0);
     (out.read_again ? out.ms_read : out.ms_cells) = laid;
     if (settings.bars) {

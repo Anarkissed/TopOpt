@@ -732,6 +732,7 @@ inline constexpr double kQuiltStrutPerCell = 0.35355339059327373;
 enum class Density : std::uint8_t {
   Uniform,    // one density for the whole part (R6)
   PerRegion,  // each region's own dial; a region not listed takes `dial`
+  ByStress,   // the stress decides every strut, between Grade to and Grade from (R7, R8, R12, R16)
 };
 
 struct RegionDial {
@@ -753,11 +754,34 @@ struct StrutSpec {
   bool allow_quilt = false;
   // G4: how much the band raises a strut toward the quilt, as 2^strength, -1 .. 1.
   double strength = 0.0;
+  // By stress (R7, R8, R12, R16), read in ByStress only. Per cell, d = the highest stress in its own cube
+  // (DemandField::highest_in on the axis-aligned box round its eight corners), f = d / reference_mpa held to 0 .. 1
+  // (0 with no field or no reference: R18), t = f ^ response (response held to 0.25 .. 4). The strut runs from the
+  // light end at t = 0 to the heavy end at t = 1:
+  //   dials        ratio = r_light + t (r_heavy - r_light), r_x the dial's strut / cell read on the part's largest
+  //                cell as `dial` is (R10); the strut is ratio x cell.
+  //   widths in mm when BOTH are > 0 (Manual control 1): width_light_mm + t (width_heavy_mm - width_light_mm), the
+  //                same in every cell size; the dials are not read.
+  // Ends given the wrong way round are swapped. Then the limits of every mode: never under the thinnest strut, never
+  // over the widest allowed for the cell. Inside a Grade to shape band the band law starts from the by-stress width
+  // (G8: it only raises). `width_mm` and the dials of the other modes are not read (R12).
+  double dial_light = 0.01;     // "Grade to": where the stress is nothing
+  double dial_heavy = 1.0;      // "Grade from": at or over the reference
+  double width_light_mm = 0.0, width_heavy_mm = 0.0;
+  std::shared_ptr<const DemandField> demand;
+  double reference_mpa = 0.0;   // the RESOLVED reference (Session::lay fills it from Settings::stress)
+  double response = 1.0;
 };
 
 struct StrutReport {
   std::size_t at_bead = 0;      // cells where the asked width was under the thinnest strut (R5)
   std::size_t at_ceiling = 0;   // cells where it was over the widest allowed (R2, R9)
+  // By stress only (zero / false in the other modes):
+  bool no_stress = false;       // By stress was asked and there was no field or no reference (R18)
+  double reference_mpa = 0.0;   // the reference used
+  double highest_mpa = 0.0;     // the highest stress any cell read
+  std::size_t at_light = 0;     // cells at the light end (f == 0)
+  std::size_t at_heavy = 0;     // cells at the heavy end (f == 1)
 };
 
 // Sets every cell's strut width. Moves no cell. The two limits are the layout's own type's
@@ -1036,8 +1060,9 @@ class Session {
   std::unique_ptr<Domain> domain_;
   bool unread_ = false;                // the kept domain has not been laid in once yet (its first lay was cancelled)
   std::vector<int> empty_regions_;
-  // The part's own stress reference (R17), kept for as long as the domain, the field and the percentile are the same:
-  // a slider move never computes it again. The one reference the cells (C22) are laid with.
+  // R17: the part's own stress reference, kept while the domain, the field and the percentile are the same (a slider
+  // move does not read the field again). Cleared when the domain is made again. ONE reference, read before the cells
+  // are laid, for the cells (C22) and the struts (By stress) alike.
   bool ref_kept_ = false;
   std::shared_ptr<const DemandField> ref_field_;
   double ref_percentile_ = 0.0;
