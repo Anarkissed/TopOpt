@@ -25,6 +25,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -522,6 +523,40 @@ struct CellSpec {
 // C22: is cell size by stress applied to a layout laid with `spec` (by_stress on and none of its OFF list)?
 bool stress_sizes_cells(const CellSpec& spec);
 
+// C23, R19 (the app's area tabs; Manual: "each can be set for the part or per zone or region"): a Lattice region's
+// own cell and strut settings. Each value stated here is the region's own; what is not stated, it takes from the
+// part's. Nothing stated anywhere: every layout is the one laid without it, byte for byte.
+// PART ONLY, never per region: the type, Allow quilt, Let walls cut cells, small cells in thin walls, the line width
+// and strut lines, the stress field itself and its percentile.
+struct AreaOwn {
+  // Cells (C23): as CellSpec's fields of the same names. `cells_by_stress` is CellSpec::by_stress (C22).
+  std::optional<Algorithm> algorithm;
+  std::optional<double> cell_mm, cell_max_mm, cell_min_mm;
+  std::optional<int> min_cells_across;
+  std::optional<bool> grade_to_shape;
+  std::optional<double> band_mm, band_cell_mm;
+  std::optional<bool> cells_by_stress;
+  // Struts (R19). `by_stress`: true = By stress, false = not (the part's Uniform or Per region reading of the dial).
+  // A stated `dial`, or a stated By stress end given as a dial, is read on THIS REGION'S largest cell (as Per region
+  // reads its dials); one not stated is read as the part's is. A stated `dial` wins over the part's region_dial entry
+  // for this region. The rest as StrutSpec's fields of the same names.
+  std::optional<bool> by_stress;
+  std::optional<double> dial, dial_light, dial_heavy, width_mm, width_light_mm, width_heavy_mm, strength;
+  // By stress, for the struts and for cell size by stress alike: the exponent (held to 0.25 .. 4), and the reference.
+  // A reference above 0 is the region's own; 0 or not stated takes the part's resolved one.
+  std::optional<double> response, reference_mpa;
+  bool any() const {
+    return algorithm || cell_mm || cell_max_mm || cell_min_mm || min_cells_across || grade_to_shape || band_mm ||
+           band_cell_mm || cells_by_stress || by_stress || dial || dial_light || dial_heavy || width_mm ||
+           width_light_mm || width_heavy_mm || strength || response || reference_mpa;
+  }
+};
+// The regions' own settings, by region id. A region not listed takes the part's in everything.
+using AreaOwnMap = std::map<int, AreaOwn>;
+// C23: the cells one region is laid with: the part's spec with the region's stated values over it. Its stress field
+// is the part's; its response and reference as AreaOwn says.
+CellSpec region_cells(const CellSpec& part, const AreaOwn& own);
+
 // Cells are cubes on a frame: world position = origin + ax[0]*a + ax[1]*b + ax[2]*c.
 // A flat region's frame is its face's own (in-plane, in-plane, inward), so the face is
 // a cell boundary (C15). The whole part, and a curved region, use the part's axes.
@@ -663,7 +698,9 @@ struct Layout {
 };
 
 // `threads`: 0 = all of this machine's; the layout is the same for any number (D18).
-Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads = 0);
+// `own` (C23): a Lattice region listed there is laid with region_cells(spec, its entry): its own base cell, ladder,
+// floor, cells across, band and stress rule. The whole part's own lattice (region 0) is laid with `spec`.
+Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads = 0, const AreaOwnMap* own = nullptr);
 
 // What the layout reads at one point (a, b, c) of a frame: the domain's answer and, under
 // a flat region, the lattice's column there (where it starts below the face, how wide it
@@ -791,7 +828,10 @@ struct StrutReport {
 
 // Sets every cell's strut width. Moves no cell. The two limits are the layout's own type's
 // (Layout::open_look, Layout::touch, from core's lattice_width_bounds).
-StrutReport set_struts(Layout& layout, const StrutSpec& spec);
+// `own` (R19): the cells of a region listed there take its stated strut settings over the part's (AreaOwn). The
+// report's `no_stress` is set when any By stress, the part's or a region's, has no field or no reference; its
+// `reference_mpa` is the part's; the counts are over every cell read by stress.
+StrutReport set_struts(Layout& layout, const StrutSpec& spec, const AreaOwnMap* own = nullptr);
 
 // ── BARS (stage D) ────────────────────────────────────────────────────────────
 // The struts themselves: every strut of every cell, once (a strut two cells share is one
@@ -986,6 +1026,7 @@ struct Settings {
     std::vector<int> faces;      // the model's own face numbers
     double depth_mm = 0.0;
     double expand_mm = 0.0;
+    AreaOwn own{};               // C23, R19: a Lattice region's own cells and struts (not read for No lattice)
   };
   struct ProtectAsk {
     int id = 0;

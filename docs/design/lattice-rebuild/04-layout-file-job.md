@@ -96,6 +96,7 @@ Exactly the fields of the bridge's `LatticeLayoutSettings`, under the same names
 | `reference_mpa` | 0 | By stress: the stress at which the lattice is at its heavy end. 0 = the part's own: the `percentile` of the stress in the part's lattice space (R17) |
 | `percentile` | 0.95 | read when `reference_mpa` is 0 |
 | `response` | 1 | By stress: the exponent on stress / reference, held to 0.25 .. 4 |
+| `region_own` | absent | **not in the bridge's struct yet**: a Lattice region's own cells and struts (C23, R19). One entry per region, in the order of `region_ids` (a list of another length is refused): `null` for a region that takes the part's settings in everything, or an object holding any of `algorithm`, `cell_mm`, `cell_max_mm`, `cell_min_mm`, `min_cells_across`, `grade_to_shape`, `band_mm`, `band_cell_mm`, `cells_by_stress`, `by_stress`, `dial`, `dial_light`, `dial_heavy`, `strut_width_mm`, `width_light_mm`, `width_heavy_mm`, `strength`, `response`, `reference_mpa`, each read as the part's key of that name is. A key it does not hold, or one that is the part's only (the type, Allow quilt, Let walls cut cells, thin walls, the line width and lines, the percentile), refuses the job (`job_unreadable`). What an entry does not state, the region takes from the part's. A region's `by_stress` or `cells_by_stress` true with no `demand` is refused (`no_stress_result`) as the part's is |
 
 The file matches the preview only if these are the values the preview was laid with.
 

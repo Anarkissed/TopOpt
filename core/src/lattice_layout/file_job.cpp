@@ -112,7 +112,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "per_region", "dial", "dial_region", "dial_value", "strut_width_mm", "allow_quilt",
        "strength", "small_cells_in_thin_walls", "one_grid", "cells_by_stress", "bars", "join_loose", "skin",
        "skin_width_mm", "skin_reach_cells", "drop_loose", "by_stress", "dial_light", "dial_heavy", "width_light_mm",
-       "width_heavy_mm", "reference_mpa", "percentile", "response"},
+       "width_heavy_mm", "reference_mpa", "percentile", "response", "region_own"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -140,6 +140,34 @@ Settings settings_from(const json::Value& in, const std::string& w) {
     a.depth_mm = depth[r];
     a.expand_mm = expand[r];
     s.regions.push_back(std::move(a));
+  }
+  // C23, R19: per region, null (the part's settings in everything) or its own, under the part's own key names.
+  if (const json::Value* own = json::find(in, "region_own")) {
+    const std::string at = w + ".region_own";
+    const auto& list = json::as_array(*own, at).arr;
+    if (list.size() != nr) json::fail(w, "region_own is not as long as region_ids");
+    for (std::size_t r = 0; r < nr; ++r) {
+      if (list[r].is_null()) continue;
+      const std::string ow = at + "[" + std::to_string(r) + "]";
+      const json::Value& o = json::as_object(list[r], ow);
+      json::reject_unknown(o,
+                           {"algorithm", "cell_mm", "cell_max_mm", "cell_min_mm", "min_cells_across", "grade_to_shape",
+                            "band_mm", "band_cell_mm", "cells_by_stress", "by_stress", "dial", "dial_light",
+                            "dial_heavy", "strut_width_mm", "width_light_mm", "width_heavy_mm", "strength", "response",
+                            "reference_mpa"},
+                           ow);
+      AreaOwn& a = s.regions[r].own;
+      if (json::find(o, "algorithm")) a.algorithm = algorithm_from(text(o, "algorithm", "", ow), ow + ".algorithm");
+      const auto mm = [&](const char* key, std::optional<double>& v) { if (json::find(o, key)) v = num(o, key, 0.0, ow); };
+      const auto yes = [&](const char* key, std::optional<bool>& v) { if (json::find(o, key)) v = flag(o, key, false, ow); };
+      mm("cell_mm", a.cell_mm); mm("cell_max_mm", a.cell_max_mm); mm("cell_min_mm", a.cell_min_mm);
+      if (json::find(o, "min_cells_across")) a.min_cells_across = whole(o, "min_cells_across", 1, ow);
+      yes("grade_to_shape", a.grade_to_shape); mm("band_mm", a.band_mm); mm("band_cell_mm", a.band_cell_mm);
+      yes("cells_by_stress", a.cells_by_stress); yes("by_stress", a.by_stress);
+      mm("dial", a.dial); mm("dial_light", a.dial_light); mm("dial_heavy", a.dial_heavy);
+      mm("strut_width_mm", a.width_mm); mm("width_light_mm", a.width_light_mm); mm("width_heavy_mm", a.width_heavy_mm);
+      mm("strength", a.strength); mm("response", a.response); mm("reference_mpa", a.reference_mpa);
+    }
   }
   const std::vector<int> pids = wholes(in, "protect_ids", w);
   const std::vector<double> pdepth = nums(in, "protect_depth_mm", w);
@@ -529,7 +557,13 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
       }
     }
     // R18: By stress with no stress result is refused, never made at the light end.
-    const bool by_stress = job.settings.struts.mode == Density::ByStress;
+    // (A Lattice region's own By stress or cell size by stress, C23 and R19, asks for the stress as the part's does.)
+    bool by_stress = job.settings.struts.mode == Density::ByStress, cells_by_stress = job.settings.cells.by_stress;
+    for (const Settings::RegionAsk& a : job.settings.regions)
+      if (a.role == Role::Lattice) {
+        by_stress = by_stress || (a.own.by_stress && *a.own.by_stress);
+        cells_by_stress = cells_by_stress || (a.own.cells_by_stress && *a.own.cells_by_stress);
+      }
     const auto no_stress = [&] {
       refuse(r, kNoStress,
              "By stress needs a stress result, and none came with this job, so no file was made. Run the stress "
@@ -545,7 +579,7 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
              "types made of struts so far. Pick a strut type.");
       return done();
     }
-    if (job.settings.cells.by_stress && (!job.settings.stress.demand || job.settings.stress.demand->empty())) {
+    if (cells_by_stress && (!job.settings.stress.demand || job.settings.stress.demand->empty())) {
       refuse(r, kNoStress,
              "Cell size by stress needs a stress result, and this job has none, so nothing was made. Send the "
              "part's stress result with it, or turn Cell size by stress off.");

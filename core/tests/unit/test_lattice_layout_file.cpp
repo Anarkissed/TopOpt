@@ -776,7 +776,57 @@ static void test_cells_by_stress_key() {
   std::remove(path.c_str());
 }
 
+// C23, R19: a region's own cells and struts, "region_own" (one entry per region: null, or the part's own key names).
+static void test_region_own_key() {
+  const std::string head = R"({"mode": "lattice_file", "model": "block.step", "layout": {
+    "min_strut_lines": 1,
+    "region_ids": [1, 2], "region_no_lattice": [0, 0], "region_depth_mm": [6, 6], "region_expand_mm": [0, 0],
+    "region_face_counts": [1, 1], "region_faces": [1, 0], "cell_max_mm": 6, "dial": 0.3)";
+  const std::string own = R"(, "region_own": [{"algorithm": "stepped", "cell_mm": 4, "cell_max_mm": 5, "cell_min_mm": 1.5,
+    "min_cells_across": 1, "grade_to_shape": true, "band_mm": 4, "band_cell_mm": 1.6, "cells_by_stress": false,
+    "by_stress": false, "dial": 0.8, "dial_light": 0.1, "dial_heavy": 0.9, "strut_width_mm": 0.7, "width_light_mm": 0.5,
+    "width_heavy_mm": 0.9, "strength": 0.5, "response": 2, "reference_mpa": 40}, null]}})";
+  FileJob job;
+  bool parsed = true;
+  try { job = parse_file_job(head + own); } catch (const FileJobError& e) { parsed = false; std::printf("  (%s)\n", e.what()); }
+  CHECK(parsed && job.settings.regions.size() == 2);
+  if (!parsed || job.settings.regions.size() != 2) return;
+  const AreaOwn& a = job.settings.regions[0].own;
+  CHECK(a.algorithm == Algorithm::Stepped && a.cell_mm == 4.0 && a.cell_max_mm == 5.0 && a.cell_min_mm == 1.5);
+  CHECK(a.min_cells_across == 1 && a.grade_to_shape == true && a.band_mm == 4.0 && a.band_cell_mm == 1.6);
+  CHECK(a.cells_by_stress == false && a.by_stress == false && a.dial == 0.8 && a.dial_light == 0.1 && a.dial_heavy == 0.9);
+  CHECK(a.width_mm == 0.7 && a.width_light_mm == 0.5 && a.width_heavy_mm == 0.9 && a.strength == 0.5);
+  CHECK(a.response == 2.0 && a.reference_mpa == 40.0);
+  CHECK(!job.settings.regions[1].own.any());
+  CHECK(!parse_file_job(head + "}}").settings.regions[0].own.any());   // nothing stated unless asked
+  // The same layout as the Settings made directly.
+  Settings direct = parse_file_job(head + "}}").settings;
+  direct.regions[0].own = a;
+  const Outcome x = Session(box_model(30, 30, 12)).lay(job.settings), y = Session(box_model(30, 30, 12)).lay(direct);
+  const Outcome plain = Session(box_model(30, 30, 12)).lay(parse_file_job(head + "}}").settings);
+  CHECK(!x.layout.cells.empty() && x.layout.cells == y.layout.cells && x.layout.solid == y.layout.solid);
+  CHECK(x.bars.bars.size() == y.bars.bars.size());
+  CHECK(!(x.layout.cells == plain.layout.cells));
+  // An unknown key, a list of the wrong length, or an entry that is not an object refuses the job.
+  const auto refused = [&](const std::string& tail, const char* names) {
+    try { (void)parse_file_job(head + tail); } catch (const FileJobError& e) { return has(e.what(), names); }
+    return false;
+  };
+  CHECK(refused(R"(, "region_own": [{"cell_mn": 4}, null]}})", "cell_mn"));
+  CHECK(refused(R"(, "region_own": [{"topology": "octet"}, null]}})", "topology"));   // part only
+  CHECK(refused(R"(, "region_own": [null]}})", "region_own"));
+  CHECK(refused(R"(, "region_own": [4, null]}})", "region_own"));
+  // A region By stress with no stress result: refused, as the part's is (R18).
+  const FileJob stress = parse_file_job(head + R"(, "region_own": [{"by_stress": true}, null]}})");
+  const std::string path = kTmp + "/lattice_file_region_own.stl";
+  std::remove(path.c_str());
+  check_refused(make_lattice_file(box_model(30, 30, 12), stress, path), "no_stress_result", 3, path);
+  std::printf("region own: %zu cells with region 1's own settings, %zu without\n", x.layout.cells.size(),
+              plain.layout.cells.size());
+}
+
 int main() {
+  test_region_own_key();
   test_cells_by_stress_key();
   test_by_stress_file();
   test_no_slit_under_solid();

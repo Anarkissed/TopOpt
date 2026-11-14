@@ -89,7 +89,19 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
     const StressGrade& stress = settings.stress;
     const bool cells_want = cells.by_stress && !(cells.cell_mm > 0.0) &&
                             cells.algorithm != Algorithm::Uniform;   // C22's OFF list but for the field and the reference
-    const bool asked = settings.struts.mode == Density::ByStress || cells_want;
+    bool asked = settings.struts.mode == Density::ByStress || cells_want;
+    // C23, R19: each Lattice region's own cells and struts. One that asks for the stress (its struts By stress, or its
+    // cells by stress) without a reference of its own reads the part's, so the part's is resolved for it as well.
+    AreaOwnMap own;
+    for (const Settings::RegionAsk& r : settings.regions) {
+      if (r.role != Role::Lattice || !r.own.any()) continue;
+      own[r.id] = r.own;
+      const CellSpec rc = region_cells(cells, r.own);
+      const bool wants = (r.own.by_stress ? *r.own.by_stress : settings.struts.mode == Density::ByStress) ||
+                         (rc.by_stress && !(rc.cell_mm > 0.0) && rc.algorithm != Algorithm::Uniform);
+      if (wants && !(r.own.reference_mpa && *r.own.reference_mpa > 0.0)) asked = true;
+    }
+    const AreaOwnMap* own_or_none = own.empty() ? nullptr : &own;
     double reference = 0.0;
     if (stress.demand) {
       reference = asked ? stress.reference_mpa : 0.0;
@@ -110,7 +122,7 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
     out.cells_by_stress = stress_sizes_cells(cells);   // C22
     out.cells_no_stress = cells_want && (!cells.demand || cells.demand->empty() || !(cells.reference_mpa > 0.0));
     out.stress_reference_mpa = reference;
-    out.layout = lay_cells(*domain_, cells, threads);
+    out.layout = lay_cells(*domain_, cells, threads, own_or_none);
     unread_ = false;
     StrutSpec struts = settings.struts;
     if (stress.demand) {
@@ -119,7 +131,7 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
       struts.response = stress.response;
       struts.reference_mpa = reference;
     }
-    out.struts = set_struts(out.layout, struts);
+    out.struts = set_struts(out.layout, struts, own_or_none);
     const double laid = ms_since(t0);
     (out.read_again ? out.ms_read : out.ms_cells) = laid;
     if (settings.bars) {

@@ -5462,7 +5462,400 @@ static void test_cells_by_stress() {
   block("11 speed");
 }
 
+// ── C23, R19: an area's own cells and struts ──────────────────────────────────
+static std::vector<Cell> cells_of(const Layout& l, int region) {
+  std::vector<Cell> out;
+  for (const Cell& c : l.cells)
+    if (c.region == region) out.push_back(c);
+  return out;
+}
+static std::vector<double> sizes_of(const Layout& l, int region) {
+  std::vector<double> out;
+  for (const Cell& c : l.cells)
+    if (c.region == region && std::find(out.begin(), out.end(), c.size) == out.end()) out.push_back(c.size);
+  std::sort(out.begin(), out.end());
+  return out;
+}
+// R10, as set_struts reads a dial on a cell of `ref` mm.
+static double dial_ratio(const Layout& l, double dial, double ref) {
+  const double bead = std::max(l.bead_mm, l.min_strut_mm);
+  const double t = std::clamp((dial - 0.01) / 0.99, 0.0, 1.0);
+  return (bead + t * (std::max(bead, l.open_look * ref) - bead)) / ref;
+}
+static double held_strut(const Layout& l, double want, double size) {
+  const double bead = std::max(l.bead_mm, l.min_strut_mm);
+  return std::clamp(want, bead, std::max(bead, l.open_look * size));
+}
+static double largest_of(const Layout& l, int region) {
+  double m = 0.0;
+  for (const Cell& c : l.cells)
+    if (c.region == region) m = std::max(m, c.size);
+  return m;
+}
+
+static void test_area_own() {
+  // A block 46 x 46 x 16 at a 0.2 mm line (ladder 8, 4, 2): region A (1) under the top face and region B (2) under
+  // the bottom face, each 8 mm deep. 46 is not a whole number of 8 mm cells, so the outline cuts the outer ring.
+  PartMeasure pm(weld_mesh(box(46, 46, 16)));
+  DomainSpec ds;
+  ds.bead_mm = 0.2;
+  ds.regions = {face_region(1, Role::Lattice, {23, 23, 16}, {0, 0, -1}, 23, 23, 8),
+                face_region(2, Role::Lattice, {23, 23, 0}, {0, 0, 1}, 23, 23, 8)};
+  Domain d(pm, ds);
+  CellSpec P;
+  P.cell_max_mm = 8;
+  const Layout base = lay_cells(d, P);
+  CHECK(sizes_of(base, 1) == std::vector<double>{8.0} && sizes_of(base, 2) == std::vector<double>{8.0});
+  CellSpec P3 = P;   // with Grade to shape, band 8
+  P3.grade_to_shape = true;
+  P3.band_mm = 8;
+  const Layout base3 = lay_cells(d, P3);
+  // A stress ramp along x: 0 for x < 8, 100 MPa from x = 36 on.
+  const auto ramp = stress_field({-2, -2, -2}, 1.0, 48, 48, 20,
+                                 [](const Vec3& c) { return 100.0 * std::clamp((c.x - 8.0) / 28.0, 0.0, 1.0); });
+  const auto only = [](int id, AreaOwn o) { AreaOwnMap m; m[id] = o; return m; };
+
+  {  // 1. Nothing stated: today's layout. Each setting stated equal to the part's: today's layout.
+    AreaOwnMap none;
+    none[1] = AreaOwn{};
+    none[2] = AreaOwn{};
+    CellSpec ps = P3;
+    ps.by_stress = true;
+    ps.demand = ramp;
+    ps.reference_mpa = 100.0;
+    const Layout today = lay_cells(d, ps);
+    CHECK(same_layout(lay_cells(d, ps, 0, &none), today));
+    AreaOwn eq;
+    eq.algorithm = ps.algorithm; eq.cell_mm = ps.cell_mm; eq.cell_max_mm = ps.cell_max_mm;
+    eq.cell_min_mm = ps.cell_min_mm; eq.min_cells_across = ps.min_cells_across; eq.grade_to_shape = ps.grade_to_shape;
+    eq.band_mm = ps.band_mm; eq.band_cell_mm = ps.band_cell_mm; eq.cells_by_stress = ps.by_stress;
+    eq.response = ps.response; eq.reference_mpa = ps.reference_mpa;
+    StrutSpec ss;
+    ss.dial = 0.3;
+    ss.strength = 0.5;
+    ss.demand = ramp;
+    ss.reference_mpa = 100.0;
+    eq.by_stress = false; eq.dial = ss.dial; eq.width_mm = ss.width_mm; eq.strength = ss.strength;
+    eq.dial_light = ss.dial_light; eq.dial_heavy = ss.dial_heavy;
+    eq.width_light_mm = ss.width_light_mm; eq.width_heavy_mm = ss.width_heavy_mm;
+    AreaOwnMap all;
+    all[1] = eq;
+    all[2] = eq;
+    Layout x = lay_cells(d, ps, 0, &all), y = today;
+    CHECK(same_layout(x, today));
+    CHECK(largest_of(today, 1) == largest_of(today, 2) && !today.cells.empty());   // a stated dial reads the same cell
+    Layout z = today;
+    set_struts(x, ss, &all);
+    set_struts(y, ss);
+    set_struts(z, ss, &none);
+    CHECK(x.cells == y.cells && z.cells == y.cells);
+    ss.mode = Density::ByStress;   // and By stress, its ends and widths stated as the part's
+    ss.dial_light = 0.2; ss.dial_heavy = 0.7; ss.width_light_mm = 0.0; ss.response = 1.0;
+    for (auto* o : {&all[1], &all[2]}) {
+      o->by_stress = true; o->dial_light = 0.2; o->dial_heavy = 0.7;
+    }
+    x = today; y = today;
+    const StrutReport rx = set_struts(x, ss, &all), ry = set_struts(y, ss);
+    CHECK(x.cells == y.cells && !rx.no_stress && rx.at_heavy == ry.at_heavy && rx.at_light == ry.at_light);
+  }
+  {  // 2. A states cell_mm 4 while the part's is 8: A's cells are 4 (and its ladder's), B's are 8.
+    AreaOwn a;
+    a.cell_mm = 4.0;
+    const AreaOwnMap m = only(1, a);
+    const Layout l = lay_cells(d, P, 0, &m);
+    CellSpec four = P;
+    four.cell_mm = 4.0;
+    const Layout all4 = lay_cells(d, four);
+    CHECK(cells_of(l, 1) == cells_of(all4, 1) && largest_of(l, 1) == 4.0);
+    CHECK(cells_of(l, 2) == cells_of(base, 2) && largest_of(l, 2) == 8.0);
+    CHECK(l.regions.size() == 2 && l.regions[0].base_cell_mm == 4.0 && l.regions[1].base_cell_mm == 8.0);
+  }
+  {  // 3. A states Stepped while the part is Default Grade (Grade to shape on): A's sizes are Stepped fractions, B's
+     // halves only.
+    AreaOwn a;
+    a.algorithm = Algorithm::Stepped;
+    const AreaOwnMap m = only(1, a);
+    const Layout l = lay_cells(d, P3, 0, &m);
+    CellSpec st = P3;
+    st.algorithm = Algorithm::Stepped;
+    CHECK(cells_of(l, 1) == cells_of(lay_cells(d, st), 1));
+    CHECK(cells_of(l, 2) == cells_of(base3, 2));
+    const auto half = [](double s) { const double k = std::log2(8.0 / s); return std::fabs(k - std::round(k)) < 1e-9; };
+    int a_not_half = 0, b_not_half = 0;
+    for (double s : sizes_of(l, 1)) a_not_half += !half(s);
+    for (double s : sizes_of(l, 2)) b_not_half += !half(s);
+    CHECK(a_not_half > 0 && b_not_half == 0 && sizes_of(l, 2).size() > 1);
+  }
+  {  // 4. A states Uniform: A has one cell size and is cut where it ends; B grades.
+    AreaOwn a;
+    a.algorithm = Algorithm::Uniform;
+    const AreaOwnMap m = only(1, a);
+    const Layout l = lay_cells(d, P3, 0, &m);
+    int past = 0;   // cubes reaching past the face's outline: cut by it
+    for (const Cell& c : cells_of(l, 1)) {
+      Vec3 lo, hi;
+      cell_box(l, c, &lo, &hi);
+      past += lo.x < -1e-9 || lo.y < -1e-9 || hi.x > 46 + 1e-9 || hi.y > 46 + 1e-9;
+    }
+    CHECK(sizes_of(l, 1) == std::vector<double>{8.0} && past > 0);
+    CHECK(sizes_of(l, 2).size() > 1 && cells_of(l, 2) == cells_of(base3, 2));
+  }
+  {  // 5. A states Grade to shape with band 6 while the part has it off: only A's cells shrink toward its outline.
+    AreaOwn a;
+    a.grade_to_shape = true;
+    a.band_mm = 6.0;
+    const AreaOwnMap m = only(1, a);
+    const Layout l = lay_cells(d, P, 0, &m);
+    CellSpec g = P;
+    g.grade_to_shape = true;
+    g.band_mm = 6.0;
+    CHECK(cells_of(l, 1) == cells_of(lay_cells(d, g), 1) && sizes_of(l, 1).front() < 8.0);
+    CHECK(sizes_of(l, 2) == std::vector<double>{8.0} && cells_of(l, 2) == cells_of(base, 2));
+  }
+  {  // 6. A states min_cells_across 1 while the part's is 2, on a plate whose regions hold one cell across:
+     // lattice in A there, solid in B.
+    PartMeasure thin(weld_mesh(box(44, 44, 3)));
+    DomainSpec ts;
+    ts.bead_mm = 0.2;
+    ts.regions = {face_region(1, Role::Lattice, {22, 22, 3}, {0, 0, -1}, 22, 22, 1.5),
+                  face_region(2, Role::Lattice, {22, 22, 0}, {0, 0, 1}, 22, 22, 1.5)};
+    Domain td(thin, ts);
+    CellSpec two = P;
+    two.min_cells_across = 2;
+    const Layout today = lay_cells(td, two);
+    CHECK(today.cells.empty() && !today.solid.empty());
+    AreaOwn a;
+    a.min_cells_across = 1;
+    const AreaOwnMap m = only(1, a);
+    const Layout l = lay_cells(td, two, 0, &m);
+    std::size_t b_solid = 0;
+    for (const Cell& c : l.solid) b_solid += c.region == 2;
+    CHECK(!cells_of(l, 1).empty() && cells_of(l, 2).empty() && b_solid > 0);
+  }
+  {  // 7. A states cell_min_mm above the floor: no cell of A is smaller; B still goes to the floor.
+    AreaOwn a;
+    a.cell_min_mm = 3.0;
+    const AreaOwnMap m = only(1, a);
+    const Layout l = lay_cells(d, P3, 0, &m);
+    CHECK(sizes_of(l, 1).front() >= 3.0 && sizes_of(l, 1).size() > 1);
+    CHECK(sizes_of(l, 2).front() == 2.0 && cells_of(l, 2) == cells_of(base3, 2));
+  }
+  {  // 8. A states cell size by stress off while the part's is on (ramp field): A's cells ignore the stress, B's follow.
+    CellSpec ps = P;
+    ps.by_stress = true;
+    ps.demand = ramp;
+    ps.reference_mpa = 100.0;
+    const Layout stressed = lay_cells(d, ps);
+    CHECK(!(cells_of(stressed, 2) == cells_of(base, 2)));
+    AreaOwn a;
+    a.cells_by_stress = false;
+    const AreaOwnMap m = only(1, a);
+    const Layout l = lay_cells(d, ps, 0, &m);
+    CHECK(cells_of(l, 1) == cells_of(base, 1) && cells_of(l, 2) == cells_of(stressed, 2));
+  }
+  {  // 9. Struts: A states dial 0.9, the part Uniform 0.3: A's strut / cell is the 0.9 dial read on A's largest cell,
+     // B's the part's. With A's cells 4 mm, on A's 4 mm cell, not the part's 8.
+    StrutSpec u;
+    u.dial = 0.3;
+    for (bool small : {false, true}) {
+      AreaOwn a;
+      a.dial = 0.9;
+      if (small) a.cell_mm = 4.0;
+      const AreaOwnMap m = only(1, a);
+      Layout l = lay_cells(d, P, 0, &m);
+      set_struts(l, u, &m);
+      const double ra = dial_ratio(l, 0.9, small ? 4.0 : 8.0), rb = dial_ratio(l, 0.3, 8.0);
+      int wrong = 0;
+      for (const Cell& c : l.cells)
+        if (std::fabs(c.strut - held_strut(l, (c.region == 1 ? ra : rb) * c.size, c.size)) > 1e-12) ++wrong;
+      CHECK(wrong == 0 && largest_of(l, 1) == (small ? 4.0 : 8.0));
+    }
+    // A states width_mm: every cell of A that can hold it has it; B does not.
+    AreaOwn a;
+    a.width_mm = 0.75;
+    const AreaOwnMap m = only(1, a);
+    Layout l = base;
+    set_struts(l, u, &m);
+    int a_has = 0, a_could = 0, b_has = 0;
+    for (const Cell& c : l.cells) {
+      if (c.region == 1 && l.open_look * c.size >= 0.75) { ++a_could; a_has += c.strut == 0.75; }
+      if (c.region == 2) b_has += c.strut == 0.75;
+    }
+    CHECK(a_could > 0 && a_has == a_could && b_has == 0);
+  }
+  {  // 10. A states By stress with its own ends while the part is Uniform (ramp field): A's struts follow the ramp
+     // between A's ends, B's are uniform. And the reverse: the part By stress, A Uniform with its own dial.
+    StrutSpec u;
+    u.dial = 0.3;
+    u.demand = ramp;
+    u.reference_mpa = 100.0;
+    AreaOwn a;
+    a.by_stress = true;
+    a.dial_light = 0.2;
+    a.dial_heavy = 0.8;
+    AreaOwnMap m = only(1, a);
+    Layout l = base;
+    const StrutReport r = set_struts(l, u, &m);
+    const double rl = dial_ratio(l, 0.2, 8.0), rh = dial_ratio(l, 0.8, 8.0), r3 = dial_ratio(l, 0.3, 8.0);
+    int wrong = 0, a_light = 0, a_heavy = 0;
+    for (const Cell& c : l.cells) {
+      const double f = std::clamp(cube_demand(l, c.frame, c.lo, c.size, *ramp) / 100.0, 0.0, 1.0);
+      const double want = c.region == 1 ? (rl + f * (rh - rl)) * c.size : r3 * c.size;
+      if (std::fabs(c.strut - held_strut(l, want, c.size)) > 1e-12) ++wrong;
+      if (c.region == 1) { a_light += f == 0.0; a_heavy += f == 1.0; }
+    }
+    CHECK(wrong == 0 && a_light > 0 && a_heavy > 0 && !r.no_stress);
+    CHECK(r.at_light == static_cast<std::size_t>(a_light) && r.at_heavy == static_cast<std::size_t>(a_heavy));
+    // No field: A at its light end, and the layout says so (R18).
+    StrutSpec nofield = u;
+    nofield.demand = nullptr;
+    Layout n = base;
+    CHECK(set_struts(n, nofield, &m).no_stress);
+    // The reverse.
+    StrutSpec bs = u;
+    bs.mode = Density::ByStress;
+    bs.dial_light = 0.2;
+    bs.dial_heavy = 0.8;
+    AreaOwn b;
+    b.by_stress = false;
+    b.dial = 0.6;
+    m = only(1, b);
+    l = base;
+    set_struts(l, bs, &m);
+    const double r6 = dial_ratio(l, 0.6, 8.0);
+    wrong = 0;
+    for (const Cell& c : l.cells) {
+      const double f = std::clamp(cube_demand(l, c.frame, c.lo, c.size, *ramp) / 100.0, 0.0, 1.0);
+      const double want = c.region == 1 ? r6 * c.size : (rl + f * (rh - rl)) * c.size;
+      if (std::fabs(c.strut - held_strut(l, want, c.size)) > 1e-12) ++wrong;
+    }
+    CHECK(wrong == 0);
+    // Through the session: the part Uniform, a region By stress with no reference of its own reads the part's (R17).
+    int L = 0, square = 0, sideA = 0, sideB = 0;
+    Session session(plate_with_L_face(&L, &square, &sideA, &sideB));
+    Settings st;
+    st.min_strut_lines = kFewestStrutLines;
+    st.bars = false;
+    st.regions = {{1, Role::Lattice, {square}, 6.0, 0.0}, {2, Role::Lattice, {L}, 6.0, 0.0}};
+    st.regions[0].own.by_stress = true;
+    st.cells.cell_max_mm = 6;
+    st.stress.demand = field_of(60, 60, 10, [](int i, int j, int) { return static_cast<double>(i + j); });
+    const Outcome o = session.lay(st);
+    const double part_ref = stress_reference(*session.domain(), *st.stress.demand, 0.95);
+    CHECK(part_ref > 0.0 && o.stress_reference_mpa == part_ref && !o.struts.no_stress && o.struts.at_heavy > 0);
+    std::vector<double> ra, rb;
+    for (const Cell& c : o.layout.cells) {
+      auto& v = c.region == 1 ? ra : rb;
+      if (std::find(v.begin(), v.end(), c.strut / c.size) == v.end()) v.push_back(c.strut / c.size);
+    }
+    CHECK(ra.size() > 2 && rb.size() <= 2);   // B: one ratio, two at most where a cell is held at a limit
+  }
+  {  // 11. A's own response and reference change A's struts and cells and nothing of B's.
+    CellSpec ps = P;
+    ps.by_stress = true;
+    ps.demand = ramp;
+    ps.reference_mpa = 100.0;
+    StrutSpec bs;
+    bs.mode = Density::ByStress;
+    bs.dial_light = 0.2;
+    bs.dial_heavy = 0.8;
+    bs.demand = ramp;
+    bs.reference_mpa = 100.0;
+    Layout before = lay_cells(d, ps);
+    set_struts(before, bs);
+    AreaOwn a;
+    a.response = 2.0;
+    a.reference_mpa = 50.0;
+    const AreaOwnMap m = only(1, a);
+    Layout l = lay_cells(d, ps, 0, &m);
+    set_struts(l, bs, &m);
+    CHECK(cells_of(l, 2) == cells_of(before, 2));
+    CellSpec theirs = ps;
+    theirs.response = 2.0;
+    theirs.reference_mpa = 50.0;
+    std::vector<Cell> want_a = cells_of(lay_cells(d, theirs), 1), got_a = cells_of(l, 1), old_a = cells_of(before, 1);
+    for (Cell& c : got_a) c.strut = 0.0;
+    for (Cell& c : old_a) c.strut = 0.0;
+    CHECK(got_a == want_a && !(got_a == old_a));
+    // A's struts: f = stress / 50, to the power 2, between the part's ends read on the part's largest cell.
+    double part_big = 0.0;
+    for (const Cell& c : l.cells) part_big = std::max(part_big, c.size);
+    const double pl = dial_ratio(l, 0.2, part_big), ph = dial_ratio(l, 0.8, part_big);
+    int wrong = 0;
+    for (const Cell& c : l.cells) {
+      if (c.region != 1) continue;
+      const double f = std::clamp(cube_demand(l, c.frame, c.lo, c.size, *ramp) / 50.0, 0.0, 1.0);
+      if (std::fabs(c.strut - held_strut(l, (pl + f * f * (ph - pl)) * c.size, c.size)) > 1e-12) ++wrong;
+    }
+    CHECK(wrong == 0);
+  }
+  {  // 12. Per region with region_dial is today's; a stated dial wins over the region's region_dial entry.
+    StrutSpec pr;
+    pr.mode = Density::PerRegion;
+    pr.region_dial = {{1, 0.7}, {2, 0.2}};
+    AreaOwnMap none;
+    none[1] = AreaOwn{};
+    Layout x = base, y = base;
+    set_struts(x, pr);
+    set_struts(y, pr, &none);
+    CHECK(x.cells == y.cells);
+    AreaOwn a;
+    a.dial = 0.4;
+    const AreaOwnMap m = only(1, a);
+    Layout l = base;
+    set_struts(l, pr, &m);
+    int wrong = 0;
+    for (std::size_t i = 0; i < l.cells.size(); ++i) {
+      const Cell& c = l.cells[i];
+      const double want = c.region == 1 ? held_strut(l, dial_ratio(l, 0.4, 8.0) * c.size, c.size) : x.cells[i].strut;
+      if (std::fabs(c.strut - want) > 1e-12) ++wrong;
+    }
+    CHECK(wrong == 0 && l.cells[0].region == 1 && l.cells[0].strut != x.cells[0].strut);
+  }
+  {  // 13. One thread and eight give the same layout. Speed: every region stating everything (as the part's values)
+     // takes no more than 1.2 x the same layout stated at part level.
+    AreaOwn a, b;
+    a.algorithm = Algorithm::Stepped; a.cell_mm = 4.0; a.dial = 0.7;
+    b.grade_to_shape = false; b.cell_min_mm = 3.0; b.by_stress = true; b.reference_mpa = 60.0;
+    AreaOwnMap m;
+    m[1] = a;
+    m[2] = b;
+    StrutSpec u;
+    u.demand = ramp;
+    u.reference_mpa = 100.0;
+    Layout one = lay_cells(d, P3, 1, &m), eight = lay_cells(d, P3, 8, &m);
+    set_struts(one, u, &m);
+    set_struts(eight, u, &m);
+    CHECK(same_layout(one, eight) && one.cells == eight.cells);
+    AreaOwn eq;
+    eq.algorithm = P3.algorithm; eq.cell_mm = P3.cell_mm; eq.cell_max_mm = P3.cell_max_mm;
+    eq.cell_min_mm = P3.cell_min_mm; eq.min_cells_across = P3.min_cells_across; eq.grade_to_shape = P3.grade_to_shape;
+    eq.band_mm = P3.band_mm; eq.band_cell_mm = P3.band_cell_mm; eq.cells_by_stress = P3.by_stress;
+    eq.response = 1.0; eq.reference_mpa = 0.0;
+    eq.by_stress = false; eq.dial = u.dial; eq.width_mm = 0.0; eq.strength = 0.0; eq.dial_light = u.dial_light;
+    eq.dial_heavy = u.dial_heavy; eq.width_light_mm = 0.0; eq.width_heavy_mm = 0.0;
+    AreaOwnMap all;
+    all[1] = eq;
+    all[2] = eq;
+    const auto time = [&](const AreaOwnMap* own) {
+      double best = 1e9;
+      for (int run = 0; run < 9; ++run) {
+        const auto t0 = std::chrono::steady_clock::now();
+        Layout l = lay_cells(d, P3, 0, own);
+        set_struts(l, u, own);
+        best = std::min(best, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+      }
+      return best;
+    };
+    const double plain = time(nullptr), stated = time(&all);
+    std::printf("area own: a layout stated at part level %.2f ms, every region stating everything %.2f ms (best of 9)\n",
+                plain, stated);
+    CHECK(stated <= 1.2 * plain);
+  }
+}
+
 int main() {
+  test_area_own();
   test_cells_by_stress();
   test_by_stress();
   test_by_stress_session();
