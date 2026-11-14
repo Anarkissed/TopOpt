@@ -147,6 +147,10 @@ LatticeLayoutWhere lattice_layout_where(int64_t session, const LatticeLayoutPoin
 struct LatticeLayoutGrid {
   std::vector<int8_t> rg;
   double ms = 0.0;
+  // Voxels of lattice asked for (where(p).lattice()), and of those the ones no cell holds (D14: solid). His 0.2 mm nozzle
+  // line (11-14) compares their share between two line widths.
+  int64_t asked = 0;
+  int64_t unheld = 0;
 };
 LatticeLayoutGrid lattice_layout_grid(int64_t session, float origin_x, float origin_y, float origin_z, float voxel_mm,
                                       int32_t nx, int32_t ny, int32_t nz, BridgeError& err);
