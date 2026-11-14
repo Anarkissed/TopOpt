@@ -1,0 +1,17 @@
+# Release 98d90450 — 2026-11-14 nozzle-line (the 0.2 mm nozzle line, c5f96500), app only
+# Core and worker unchanged: fingerprint 6da1b6c3bb0a; "fingerprint": "6da1b6c3bb0a"
+# Merged onto 16d8cb48; the merged app tree equals nozzle-line's, so its gate applies unchanged.
+# Commits (first parent of nozzle-line since the release tip):
+#   48af9fef Nozzle line (362): when lattice cannot go where asked, the preview says how much a 0.2 mm nozzle would lattice (his rule 11-14)
+#   c5f96500 Nozzle line (362): merge the release tip (evidence only)
+# Gates:
+#   01:42 tests: exit 0; 30 passed, 0 failed
+#   NOZZLE thin skin: 99%
+#   01:37 evidence 16d8cb48 pushed; release 522140a0 DONE
+#   01:43 checks ok: nozzle-line c5f96500, 2 commit(s), app-only, onto 16d8cb48, fingerprint 6da1b6c3bb0a
+#   01:43 merged 98d90450; app tree == nozzle-line's, fingerprint 6da1b6c3bb0a
+#   01:43 waiting for HEAVY.lock (free)
+#   01:43 lock taken (52 GB free)
+#   01:48 iPad device build green; lock released
+#   01:49 pushed 98d90450
+#   01:49 worker /health "fingerprint": "6da1b6c3bb0a" (unchanged, no swap)
