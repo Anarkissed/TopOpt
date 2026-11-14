@@ -1,0 +1,23 @@
+# Release c3c8d4afcf6d — 2026-10-28 combined (his pick: option (b))
+## Contents
+#   TO-core: dcd4c31f per-scenario fields (scenario_fields.bin v1) + 9082fd6a scenario weighting (every scenario
+#     normalised by the largest-load scenario's C0; OFF-anchor weak springs scale with (F_s/F_max)^2, floored at 3e-8·E·h;
+#     a scenario under 10 % of the heaviest is refused).
+#   #354 (a6fc67bd → e3b0d743): the Scenario menu swaps the views (worker + on-device); Break at the shown scenario's load;
+#     "Prints in N pieces" (his ruling); his 00:40 iPad bugs (scenario tap ignores unseen groups; hole keep-clears per group
+#     and sorted on reopen; chips off the Selections panel; light-flow Load paths; tap any keep-clear primitive);
+#     his Results notes (layers, exaggeration slider, key reads the bent spot, one Compare key); the 10 % line + (i).
+#   Also on origin since 37a94b81: fast-track 2 (550ff887). The weighting-free revert 5fb246c0 was itself reverted (58f2be01).
+## Gates
+#   core = 9082fd6a byte-identical (git diff 9082fd6a HEAD -- core app/scripts/build_core.sh: empty)
+#   TO-core on 9082fd6a: ctest 166/166 incl. cli_demo; 17-test vs dcd4c31f identical; his Carriage Arms at 10 %:
+#     0 stalls, 0 fallbacks, one body per version, v3 self-connected (no bridge).
+#   #362: build_core.sh rc=0 → CoreFingerprint c3c8d4afcf6d; worker CLI rc=0, core c3c8d4afcf6d dirty=false;
+#     export_3mf + threemf_import 2/2; iPad device build (Release, generic/platform=iOS): BUILD SUCCEEDED
+#   full app suite 14:18-16:09: 4,390 tests, 7 failed = 6 KNOWN pre-existing (3 AppModel 3MF/no macOS lib3mf;
+#     LatticeCellGrading; OrganicSampleCube; OrganicVariantCache) + the known LOAD FLAKE
+#     FlexibleFlatPrismEngineTests.testHisStripsReadThroughWithTheSameReach (alone: 3/3 pass)
+#   23 tracked evidence files rewritten by swift test restored; the stray cube_10mm.stl.clearances.json removed.
+## Worker
+#   build-fix/topopt-cli swapped atomically while /health idle; sha256 af9e398d32113bbe44f46433b610677de27acc242113c281b4dd58693dc233f5
+#   old kept: build-fix/topopt-cli.a66d764fef75-replaced-20261028; copy: worker-bin/c3c8d4afcf6d. /health: c3c8d4afcf6d.

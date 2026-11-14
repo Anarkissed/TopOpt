@@ -184,9 +184,13 @@ int main() {
     // was never uniformly wound in the first place. With every primitive outward
     // the sum is the honest total, 755.5061 mm^3 — and it now agrees exactly
     // with the generator's own analytic accounting, which is the next check.
-    CHECK(close_to(std::fabs(v), 755.506110, 1e-3),
-          "the emitted lattice primitives must total 755.5061 mm^3 on this "
-          "fixture");
+    // ★ AND IT MOVED ONCE MORE, ON PURPOSE (ruling 2026-11-02 (b), Finding 2): each
+    // strut is now emitted at the round strut's AREA and each node at the sphere's
+    // VOLUME, so the sum is 36 x pi x 1^2 x 7.0711 + 14 x 4/3 pi = 799.719 + 58.643 =
+    // 858.362 mm^3 (it was 36 x 20.000 + 14 x 2.536).
+    CHECK(close_to(std::fabs(v), 858.361992, 1e-3),
+          "the emitted lattice primitives must total 858.3620 mm^3 on this "
+          "fixture (round-strut area, sphere volume)");
     // The generator's OWN analytic accounting must agree with the geometry it
     // actually emitted — a flip that changed only one of the two would show up
     // here as a mismatch rather than as a passing sign test.

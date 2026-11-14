@@ -210,6 +210,12 @@ public enum SurfaceTint {
     /// subject is the surface, and group membership is context: enough hue to say
     /// "this one is in the red group", not enough to compete with the selection.
     /// Desaturated toward the stage's own wash and held at its alpha.
+    /// ★ B8 (row 34): a group whose Selections row is lit in Edit faces wears its OWN colour, not the hint — "tapping a
+    /// group row lights that group's faces".
+    public static func litHue(_ groupColour: SIMD3<Float>) -> SIMD4<Float> {
+        SIMD4<Float>(groupColour.x, groupColour.y, groupColour.z, 0.7)
+    }
+
     public static func groupedHue(_ groupColour: SIMD3<Float>) -> SIMD4<Float> {
         let base = SIMD3<Float>(grouped.x, grouped.y, grouped.z)
         let mixed = base * 0.45 + groupColour * 0.55
@@ -225,7 +231,8 @@ public enum SurfaceTint {
                               selected: RegionID?,
                               picked: Set<FaceID> = [],
                               fragmentTested: Set<FaceID> = [],
-                              groupColours: [FaceID: SIMD3<Float>] = [:]) -> [Float] {
+                              groupColours: [FaceID: SIMD3<Float>] = [:],
+                              lit: Set<FaceID> = []) -> [Float] {
         let s = states(mesh: mesh, groupedFaces: groupedFaces,
                        regions: regions, selected: selected, picked: picked,
                        fragmentTested: fragmentTested)
@@ -270,7 +277,7 @@ public enum SurfaceTint {
             // is what says WHICH PIECE rather than which group.
             if !tested, st == .grouped, owner[i] >= 0,
                let gc = groupColours[owner[i]] {
-                c = groupedHue(gc)
+                c = lit.contains(owner[i]) ? litHue(gc) : groupedHue(gc)
             }
             out[i * 8] = c.x; out[i * 8 + 1] = c.y
             out[i * 8 + 2] = c.z; out[i * 8 + 3] = c.w
@@ -296,6 +303,35 @@ public enum SurfaceTint {
                 return SIMD4<Float>(SIMD3<Float>(n), Float(-simd_dot(n, cut.point)))
             }
         }
+    }
+
+    /// ★★ A SELECTED UNION OF PIECES, LIT PIECE BY PIECE (2026-10-08). A union's tint lit every face
+    /// it touches WHOLE — right for a union of whole faces, wrong for one made of pieces: a pattern's
+    /// cell on a union (the Regions task) holds only its share of each part, and lit whole it would
+    /// read as the entire union. So a selected union whose leaves include cut pieces is lit the way
+    /// the Union tool lights its picks — whole leaves as picked faces, cut leaves by the shader's
+    /// half-space chains. nil = nothing to test per piece (no union, or every leaf a whole face).
+    /// The shader takes four chains of four planes (`MeshRenderer.setCutPlane`, the Union tool's own
+    /// limit): a fifth piece and beyond is UNDER-lit (reads as unselected); a piece with more than
+    /// four cuts is tested on its first four only, so it can spill past its own edge (OVER-lit).
+    public struct UnionLighting: Equatable, Sendable {
+        public var picked: Set<FaceID>
+        public var fragmentTested: Set<FaceID>
+        public var chains: [[SIMD4<Float>]]
+    }
+    public static func unionLighting(_ selected: RegionID?, regions: FaceRegionModel,
+                                     mesh: ViewerMesh) -> UnionLighting? {
+        guard let id = selected, let r = regions.region(id), r.isUnionOfParts else { return nil }
+        var u = SurfaceUnion()
+        for leaf in regions.resolvedLeaves(id) { u.toggle(leaf) }
+        let partial = u.partialPicks(regions: regions)
+        guard !partial.isEmpty else { return nil }
+        let partialFaces: Set<FaceID> = Set(partial.flatMap { pid in
+            regions.region(pid).map { FaceRegionGeometry.members(of: $0, in: mesh) } ?? []
+        })
+        return UnionLighting(picked: u.wholeFacePicks(regions: regions, mesh: mesh),
+                             fragmentTested: partialFaces,
+                             chains: pickChains(partial, in: regions))
     }
 
     /// The plane the fragment stage tests, as (normal.xyz, -dot(normal, point)) —

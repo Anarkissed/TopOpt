@@ -1,0 +1,56 @@
+Gate F (81f49eef) on the M2 stand, gyroid, Structural rung 0.52: the export ran 1 h 27 min at 100 % CPU
+after writing variant_052.stl (step (c)'s whole run took 10 min). macOS 'sample' of the CLI for 3 s
+(2026-11-03 23:44), main thread, symbols shortened (~ = topopt::(anonymous namespace)::).
+
+    2210 Thread_503617828   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 2210 start  (in dyld) + 6688  [0x183aebe80]
+    +   2210 main  
+    +     2210 topopt::run_job(topopt::JobDescription const&, std::basic_string<char> const&, std::basic_string<char> const&, std::map<std::basic_stri
+    +       2210 topopt::minimize_plastic(topopt::VoxelGrid const&, topopt::Material const&, std::basic_string<char> const&, std::vector<topopt::Diric
+    +         2210 std::__function::__func<topopt::run_job(topopt::JobDescription const&, std::basic_string<char> const&, std::basic_string<char> cons
+    +           2210 topopt::run_job(topopt::JobDescription const&, std::basic_string<char> const&, std::basic_string<char> const&, std::map<std::basi
+    +             2210 ~lattice_one_variant(...)
+    +               2210 ~export_latticed_variant(...)
+    +                 2210 ~export_latticed_variant(topopt::MinimizePlasticVariant const&, std::basic_string<char> const&, topopt::JobOutput const&, t
+    +                   2210 ~export_latticed_variant(topopt::MinimizePlasticVariant const&, std::basic_string<char> const&, topopt::JobOutput const&,
+    +                     2210 topopt::generate_tpms(topopt::TpmsKind, topopt::TpmsRegion const&, topopt::TpmsWallField const&, topopt::TriangleSink&,
+    +                       2210 topopt::BoundedSimplifySink::flush(bool)  
+    +                         1147 topopt::BoundedSimplifySink::refine()  
+    +                         ! 207 topopt::BoundedSimplifySink::onto_surface(topopt::Vec3 const&, double) const  
+    +                         ! : 179 ~clipped_field(topopt::TpmsKind, topopt::TpmsRegion const&, topopt::TpmsWallField const&, double, topopt::Vec3 c
+    +                         ! : | 177 topopt::LatticeBoundary::sd_excluding_relaxed(topopt::Vec3 const&, int, int, double) const  
+    +                         ! : | + 176 topopt::MeshDistance::signed_distance(topopt::Vec3 const&) const  
+    +                         ! : | + ! 109 topopt::MeshDistance::closest(topopt::Vec3 const&) const  
+    +                         ! : | + ! : 109 topopt::MeshDistance::gather_cell(long, long, long, topopt::Vec3 const&, topopt::MeshDistance::Closest&)
+    +                         ! : | + ! 25 topopt::MeshDistance::closest(topopt::Vec3 const&) const  
+    +                         ! : | + ! : 25 topopt::MeshDistance::gather_cell(long, long, long, topopt::Vec3 const&, topopt::MeshDistance::Closest&) 
+    +                         ! : | + ! 11 topopt::MeshDistance::closest(topopt::Vec3 const&) const  
+    +                         ! : | + ! : 11 topopt::MeshDistance::gather_cell(long, long, long, topopt::Vec3 const&, topopt::MeshDistance::Closest&) 
+    +                         ! : | + ! 9 topopt::MeshDistance::closest(topopt::Vec3 const&) const  
+    +                         ! : | + ! : 9 topopt::MeshDistance::gather_cell(long, long, long, topopt::Vec3 const&, topopt::MeshDistance::Closest&) c
+    +                         ! : | + ! 9 topopt::MeshDistance::closest(topopt::Vec3 const&) const  
+    +                         ! : | + ! 7 topopt::MeshDistance::closest(topopt::Vec3 const&) const  
+  ...
+
+Top of stack, all threads (>= 5 samples; the 19,890 + 2,210 are idle pool threads waiting):
+Sort by top of stack, same collapsed (when >= 5):
+        semaphore_wait_trap  (in libsystem_kernel.dylib)        19890
+        __psynch_cvwait  (in libsystem_kernel.dylib)        2210
+        topopt::MeshDistance::gather_cell(long, long, long, topopt::Vec3 const&, topopt::MeshDistance::Closest&) const  (in topopt-cli.frozen)        
+        topopt::MeshDistance::closest(topopt::Vec3 const&) const  (in topopt-cli.frozen)        92
+        ~clipped_field(topopt::TpmsKind, topopt::TpmsRegion const&, topopt::TpmsWallField const&, double, topopt::Vec3 const&)  (in topopt-cli.frozen)
+        std::__function::__func<topopt::generate_tpms(topopt::TpmsKind, topopt::TpmsRegion const&, topopt::TpmsWallField const&, topopt::TriangleSink&
+        topopt::lattice_sheet_wall_param_mm(topopt::LatticeTopology, double, double)  (in topopt-cli.frozen)        33
+        __sincos_stret  (in libsystem_m.dylib)        30
+        std::__function::__func<~lattice_one_variant(...)  (in topopt-cli.frozen)        30
+        topopt::lattice_strut_diameter_mm(topopt::LatticeTopology, double, double)  (in topopt-cli.frozen)        30
+        std::__function::__func<~lattice_one_variant(...)  (in topopt-cli.frozen)        22
+        topopt::LatticeBoundary::sd_excluding_relaxed(topopt::Vec3 const&, int, int, double) const  (in topopt-cli.frozen)        15
+        topopt::BoundedSimplifySink::refine()  (in topopt-cli.frozen)        13
+        topopt::MeshDistance::signed_distance(topopt::Vec3 const&) const  (in topopt-cli.frozen)        11
+        ???  (in libsystem_m.dylib)  load address 0x194a2e000 + 0x10b0  [0x194a2f0b0]        10
+        ???  (in libsystem_m.dylib)  load address 0x194a2e000 + 0x1158  [0x194a2f158]        10
+        DYLD-STUB$$__sincos_stret  (in topopt-cli.frozen)        8
+        std::__function::__func<~export_latticed_variant(...)  (in topopt-cli.frozen)        7
+        <deduplicated_symbol>  (in topopt-cli.frozen)        5
+

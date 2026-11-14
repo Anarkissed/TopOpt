@@ -89,6 +89,10 @@ public struct OrbitCamera: Equatable {
     /// The point the camera looks at (set to the model centre by `frame`; slid off it by
     /// `pan`, restored by `resetPan`).
     public var target: SIMD3<Float>
+    /// ★ LOOK PER SCREEN (Results, mockup #topo-results-details: "the model moved up so the whole part stays in view"): the
+    /// share of the view's height a drawer covers at the bottom (0 = none). The picture is drawn scaled into the page above
+    /// it — folded into `projectionMatrix`, so the renderer, picking, `CameraProjection.project` and `ray` all agree.
+    public var frameLift: Float = 0
     /// The un-panned orbit centre — the framed model centre `frame` computed. `pan` moves
     /// `target` away from it; `resetPan` (the Home button, round-4 item 2) returns to it, so
     /// Home clears any pan. Captured by `init`/`frame` so it always tracks the current framing.
@@ -108,8 +112,22 @@ public struct OrbitCamera: Equatable {
     /// elevation and does not affect the canonical-view `direction`. `roll == 0` is the
     /// level view Home and every snap return to.
     public private(set) var roll: Float = 0
-    /// Vertical field of view, in radians.
+    /// Vertical field of view, in radians: the LENS. Framing, zoom and pan read this with `distance` in both projections.
     public var fovY: Float
+    /// ★ B2 (ledger note 1, approved design 2026-11-02): ORTHOGRAPHIC. Drawn as a 1° telephoto from far back on the same
+    /// line of sight: lines stay parallel to within about 1 % across a part, and every pass that marches rays from the eye
+    /// (the lattice SDF, Flexible's lattice, the AO pass) stays exact, with no second, orthographic code path in each. What
+    /// is visible at the target is the lens's, so switching keeps the picture's size, and framing / zoom / pan are unchanged.
+    public var orthographic = false
+    /// The telephoto that stands in for an orthographic projection.
+    public static let telephotoFovY: Float = 1 * .pi / 180
+    /// The field of view the frame is DRAWN with (the projection, and any pass that casts rays from `eye`).
+    public var drawFovY: Float { orthographic ? Self.telephotoFovY : fovY }
+    /// How far the eye really is from `target`: `distance` for the lens; far enough back for the telephoto to show the
+    /// same extent at the target.
+    public var eyeDistance: Float {
+        orthographic ? distance * tan(fovY * 0.5) / tan(Self.telephotoFovY * 0.5) : distance
+    }
     public var minDistance: Float
     public var maxDistance: Float
 
@@ -223,7 +241,7 @@ public struct OrbitCamera: Equatable {
     /// `resetPan`/Home can always return.
     public mutating func pan(dx: Float, dy: Float, viewportHeight: Float) {
         guard viewportHeight > 0, dx.isFinite, dy.isFinite else { return }
-        let worldPerPixel = 2 * distance * tan(fovY * 0.5) / viewportHeight
+        let worldPerPixel = 2 * distance * tan(fovY * 0.5) / viewportHeight   // the same extent in both projections
         // Undo roll so a screen-down drag pans down regardless of the horizon tilt (see `orbit`).
         let c = cos(roll), s = sin(roll)
         let rx =  c * dx + s * dy
@@ -263,7 +281,7 @@ public struct OrbitCamera: Equatable {
     }
 
     /// The eye (camera) position in world space.
-    public var eye: SIMD3<Float> { target + direction * distance }
+    public var eye: SIMD3<Float> { target + direction * eyeDistance }
 
     /// The camera up-vector: world +Y rolled about the line of sight by `roll` (Rodrigues
     /// rotation about `direction`). At `roll == 0` this is exactly `(0,1,0)`, so the levelled
@@ -285,17 +303,43 @@ public struct OrbitCamera: Equatable {
     }
 
     /// View → clip space (right-handed, Metal [0,1] depth).
-    public func projectionMatrix(aspect: Float, near: Float = 0.01, far: Float = 10_000) -> simd_float4x4 {
+    /// (probe switch: `TOPOPT_FIXED_NEAR=1` restores the old fixed 0.01 mm near plane for A/B)
+    static let fixedNearForTests = ProcessInfo.processInfo.environment["TOPOPT_FIXED_NEAR"] == "1"
+    public func projectionMatrix(aspect: Float, near nearArg: Float? = nil, far: Float = 10_000) -> simd_float4x4 {
+        // ★★ THE NEAR PLANE FOLLOWS THE ORBIT (2026-09-27, his images 17–20: struts showing through
+        // the blue rim and the grey skin from a distance, clean close up). A fixed 0.01 mm near plane
+        // with a float depth buffer resolves depth to ~d²·6e-8/near — about 1 mm at 400 mm, coarser
+        // than the gap between a strut welded into the rim and the rim's own face. 1 % of the orbit
+        // distance (0.01–5 mm) resolves ~0.003 mm there; nothing is ever that close to the eye.
+        var near = nearArg ?? (Self.fixedNearForTests ? 0.01 : Swift.max(0.01, Swift.min(5, distance * 0.01)))
+        var far = far
+        if orthographic, nearArg == nil {
+            // the telephoto's eye is far back: the near plane sits just in front of the part (its radius is maxDistance/12,
+            // `frame`), so depth resolves as finely as the lens's does
+            let reach = 2 * maxDistance / 12
+            near = Swift.max(near, eyeDistance - reach)
+            far = Swift.max(far, eyeDistance + reach * 6)
+        }
         let a = aspect > 0 ? aspect : 1
-        let ys = 1 / tan(fovY * 0.5)
+        let ys = 1 / tan(drawFovY * 0.5)   // ★ B2: the drawn field of view (the telephoto when orthographic)
         let xs = ys / a
         let zs = far / (near - far)
-        return simd_float4x4(columns: (
+        let p = simd_float4x4(columns: (
             SIMD4<Float>(xs, 0, 0, 0),
             SIMD4<Float>(0, ys, 0, 0),
             SIMD4<Float>(0, 0, zs, -1),
             SIMD4<Float>(0, 0, zs * near, 0)
         ))
+        guard frameLift > 0 else { return p }
+        // ★ the lift: NDC (x, y) → ((1 − f)·x, (1 − f)·y + f) — the whole picture in the top (1 − f) of the view
+        let f = Swift.min(0.9, frameLift)
+        let lift = simd_float4x4(columns: (
+            SIMD4<Float>(1 - f, 0, 0, 0),
+            SIMD4<Float>(0, 1 - f, 0, 0),
+            SIMD4<Float>(0, 0, 1, 0),
+            SIMD4<Float>(0, f, 0, 1)
+        ))
+        return lift * p
     }
 
     /// The normal matrix: the view rotation (upper-left 3×3 of the view matrix).

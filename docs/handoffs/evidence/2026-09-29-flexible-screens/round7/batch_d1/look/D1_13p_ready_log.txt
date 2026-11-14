@@ -1,0 +1,6 @@
+[13p_ready] the Squish page opened by itself: false (H37: never)
+status 'Ready' tone ready · groups [[1]]
+wrote D1_13p_ready_M10_main_ready.png
+  tap the ⌃ (look, never send) [latticeMore (964,1288 44x64)]
+card: capsule (24,76 262x44) · setupChip (516,1304 220x48) · latticeSplit (748,1288 260x64) · mainViews (704,236 304x44) · latticeCard (588,1016 420x260) · sent 0
+wrote D1_13p_ready_M11_card_ready.png

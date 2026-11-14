@@ -1,0 +1,35 @@
+Test Suite 'Selected tests' started at 2026-10-19 08:44:29.773.
+Test Suite 'TopOptKitTests.xctest' started at 2026-10-19 08:44:29.774.
+Test Suite 'TopOptKitTests.xctest' passed at 2026-10-19 08:44:29.774.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-19 08:44:29.774.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Test Suite 'Selected tests' started at 2026-10-19 08:44:29.937.
+Test Suite 'TopOptFlowsTests.xctest' started at 2026-10-19 08:44:29.937.
+Test Suite 'FlexibleR7E2Tests' started at 2026-10-19 08:44:29.937.
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testAPressWhoseArrowMovedWaitsForCoresNewStack]' started.
+2026-10-19 08:44:29.991 xctest[54999:13732166] DIAG shellClip mode=OFF inFrame=false algo=- capsules=-1 capVerts=0 capPipeline=true capsulePipeline=true capsulesReplaceField=false bodyAlpha=1.0 initError=nil regionTex=false skinMM=-1.0 dims=SIMD4<Float>(1.0, 1.0, 1.0, 0.0) regions=[] open=[no census]
+2026-10-19 08:44:30.070 xctest[54999:13732166] DIAG seam occupancy: 128x128x27 in 0.07 s (once per mesh)
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7E2Tests.swift:688: error: -[TopOptFlowsTests.FlexibleR7E2Tests testAPressWhoseArrowMovedWaitsForCoresNewStack] : XCTAssertNil failed: "FlexFaceKey(region: -1002, rotation: 0)" - ★ the old registration is not the press's
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7E2Tests.swift:689: error: -[TopOptFlowsTests.FlexibleR7E2Tests testAPressWhoseArrowMovedWaitsForCoresNewStack] : XCTAssertFalse failed
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7E2Tests.swift:690: error: -[TopOptFlowsTests.FlexibleR7E2Tests testAPressWhoseArrowMovedWaitsForCoresNewStack] : XCTAssertEqual failed: ("nil") is not equal to ("Optional(TopOptFlows.FlexiblePressSupport.Reason.designing)")
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7E2Tests.swift:691: error: -[TopOptFlowsTests.FlexibleR7E2Tests testAPressWhoseArrowMovedWaitsForCoresNewStack] : XCTAssertEqual failed: ("nil") is not equal to ("Optional("Set up · core is designing it")") - ★ 'Set up · core is designing it'
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7E2Tests.swift:692: error: -[TopOptFlowsTests.FlexibleR7E2Tests testAPressWhoseArrowMovedWaitsForCoresNewStack] : XCTAssertFalse failed - ★ no design asked on the old key
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7E2Tests.swift:693: error: -[TopOptFlowsTests.FlexibleR7E2Tests testAPressWhoseArrowMovedWaitsForCoresNewStack] : XCTAssertFalse failed - ★ nothing written while its stack is being read
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testAPressWhoseArrowMovedWaitsForCoresNewStack]' failed (5.237 seconds).
+Test Suite 'FlexibleR7E2Tests' failed at 2026-10-19 08:44:35.174.
+	 Executed 1 test, with 6 failures (0 unexpected) in 5.237 (5.237) seconds
+Test Suite 'TopOptFlowsTests.xctest' failed at 2026-10-19 08:44:35.174.
+	 Executed 1 test, with 6 failures (0 unexpected) in 5.237 (5.237) seconds
+Test Suite 'Selected tests' failed at 2026-10-19 08:44:35.174.
+	 Executed 1 test, with 6 failures (0 unexpected) in 5.237 (5.238) seconds
+FLEX-E2-12 the moment after the twist: key Optional(-1002) · 'in the job' · designed true · RED CONTROL key Optional(-1002) in the job Optional(true) designed true
+FLEX-E2-12 on the way: ["in the job", "designing", "in the job"] · new key -1005 (old -1002)
+Test Suite 'Selected tests' started at 2026-10-19 08:44:35.275.
+Test Suite 'TopOptDesignTests.xctest' started at 2026-10-19 08:44:35.276.
+Test Suite 'TopOptDesignTests.xctest' passed at 2026-10-19 08:44:35.276.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-19 08:44:35.276.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Note: Some test targets reported failures:
+  - TopOptFlowsTests (XCTest)

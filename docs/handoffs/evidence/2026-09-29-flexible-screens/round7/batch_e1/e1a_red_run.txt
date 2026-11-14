@@ -1,0 +1,36 @@
+# R7-E1 follow-ups (Protect lock, the inside-corner groove, the (i)'s outside rule) — the RED run against the stubs (HEAD 0d8ae925 + the stub diff e1a_stubs.diff.txt)
+# swift build --build-tests --scratch-path /tmp/r7e-build; swift test --skip-build --scratch-path /tmp/r7e-build --filter 'FlexibleR7E1FollowUpTests|FlexibleR7E1FollowUpHostedTests'
+
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.002) seconds
+Test Case '-[TopOptFlowsTests.FlexibleR7E1FollowUpHostedTests testTheChipsProtectStaysOnWhileAFaceIsLattice]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7E1FollowUpHostedTests.swift:76: error: -[TopOptFlowsTests.FlexibleR7E1FollowUpHostedTests testTheChipsProtectStaysOnWhileAFaceIsLattice] : XCTUnwrap failed: expected non-nil value of type "CGRect" - the role capsule
+Test Case '-[TopOptFlowsTests.FlexibleR7E1FollowUpHostedTests testTheChipsProtectStaysOnWhileAFaceIsLattice]' failed (14.529 seconds).
+	 Executed 1 test, with 1 failure (0 unexpected) in 14.529 (14.530) seconds
+Test Case '-[TopOptFlowsTests.FlexibleR7E1FollowUpTests testAnInsideCornerKeepsTheUnselectedWallSolid]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7E1FollowUpTests.swift:167: error: -[TopOptFlowsTests.FlexibleR7E1FollowUpTests testAnInsideCornerKeepsTheUnselectedWallSolid] : XCTAssertEqual failed: ("640") is not equal to ("0") - ★ the unselected wall stays solid at the inside corner
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7E1FollowUpTests.swift:177: error: -[TopOptFlowsTests.FlexibleR7E1FollowUpTests testAnInsideCornerKeepsTheUnselectedWallSolid] : XCTAssertFalse failed - it skips the corner's voxels
+Test Case '-[TopOptFlowsTests.FlexibleR7E1FollowUpTests testAnInsideCornerKeepsTheUnselectedWallSolid]' failed (1.444 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E1FollowUpTests testHisLivePadIsUnchangedByTheCornerRule]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7E1FollowUpTests.swift:204: error: -[TopOptFlowsTests.FlexibleR7E1FollowUpTests testHisLivePadIsUnchangedByTheCornerRule] : XCTAssertEqual failed: ("0") is not equal to ("4604") - ★ the top-lid fix's 4 604 voxels, each one outside by core's rule
+Test Case '-[TopOptFlowsTests.FlexibleR7E1FollowUpTests testHisLivePadIsUnchangedByTheCornerRule]' failed (8.498 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E1FollowUpTests testProtectIsLockedOnWhileAnyFaceOfTheGroupIsLattice]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7E1FollowUpTests.swift:57: error: -[TopOptFlowsTests.FlexibleR7E1FollowUpTests testProtectIsLockedOnWhileAnyFaceOfTheGroupIsLattice] : XCTAssertEqual failed: ("["the tap answered done, not .locked", "Protect went OFF (the lattice is exposed to Topology)", "the tap wrote something", "the tap added an undo step", "protectLocked is false on a Lattice group"]") is not equal to ("[]") - ★ Protect stays on while a face of the group is Lattice: ["the tap answered done, not .locked", "Protect went OFF (the lattice is exposed to Topology)", "the tap wrote something", "the tap added an undo step", "protectLocked is false on a Lattice group"]
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7E1FollowUpTests.swift:74: error: -[TopOptFlowsTests.FlexibleR7E1FollowUpTests testProtectIsLockedOnWhileAnyFaceOfTheGroupIsLattice] : XCTAssertTrue failed - ★ a Lattice face locks Protect on
+Test Case '-[TopOptFlowsTests.FlexibleR7E1FollowUpTests testProtectIsLockedOnWhileAnyFaceOfTheGroupIsLattice]' failed (0.036 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E1FollowUpTests testTheInfoDecidesOutsideByCoresOwnRule]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7E1FollowUpTests.swift:249: error: -[TopOptFlowsTests.FlexibleR7E1FollowUpTests testTheInfoDecidesOutsideByCoresOwnRule] : XCTAssertEqual failed: ("50%") is not equal to ("15%") - ★ the voxels core's rule puts outside the part are not the face's lattice
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7E1FollowUpTests.swift:256: error: -[TopOptFlowsTests.FlexibleR7E1FollowUpTests testTheInfoDecidesOutsideByCoresOwnRule] : XCTAssertEqual failed: ("15%") is not equal to ("50%") - ★ core kept them: they are lattice, and the (i) counts them
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7E1FollowUpTests.swift:260: error: -[TopOptFlowsTests.FlexibleR7E1FollowUpTests testTheInfoDecidesOutsideByCoresOwnRule] : XCTAssertFalse failed - the builder records the voxels it added
+Test Case '-[TopOptFlowsTests.FlexibleR7E1FollowUpTests testTheInfoDecidesOutsideByCoresOwnRule]' failed (1.180 seconds).
+	 Executed 4 tests, with 8 failures (0 unexpected) in 11.158 (11.158) seconds
+	 Executed 5 tests, with 9 failures (0 unexpected) in 25.687 (25.688) seconds
+	 Executed 5 tests, with 9 failures (0 unexpected) in 25.687 (25.689) seconds
+FLEX-E1-CR the L's inside corner, the unselected wall within one voxel (7056 points): claimed by the region — fix 640 · control (0d8ae925's fill) 640 · core's own mask 0
+FLEX-E1-CR voxels the fill adds: fix 0 · control 0 · skipped 0
+FLEX-E1-CR his live Balanced pad: added 0 (control 0) · mask identical true · ρ identical true
+FLEX-E1-PL control (Protect unlocked): ["the tap answered done, not .locked", "Protect went OFF (the lattice is exposed to Topology)", "the tap wrote something", "the tap added an undo step", "protectLocked is false on a Lattice group"]
+FLEX-E1-I (a) added voxels the SDF calls inside: core's rule 50% · the SDF's 50%
+FLEX-E1-I (b) core's voxels the SDF calls outside: core's rule 15% · the SDF's 15%
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds

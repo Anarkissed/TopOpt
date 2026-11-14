@@ -1,0 +1,1 @@
+(3) pad Manual Model card · temp 240.0 · facts ["8.8 cells across the depth · walls 0.45 mm", "Data covers 14–36 % (gyroid)"]

@@ -44,6 +44,12 @@ public struct RunRequest: Equatable, Sendable {
     /// face-id contract is shared, handoff 134 + the mesh-optimize work).
     public let anchorFaceIDs: [Int]
     public let loadGroups: [TopOptKit.LoadGroupSpec]
+    /// ★ LOAD SCENARIOS (job `loads.scenarios`): sent only with 2+; `anchorFaceIDs`/`loadGroups` then mirror Scenario 1.
+    public var scenarios: [LoadScenarioWire] = []
+    /// ★ THE SAFETY MARGIN (SafetyMargin.swift): sent under TO-core's key once it is named, and only when not 150 %.
+    public var safetyMargin: Double = SafetyMargin.defaultValue
+    /// ★ EXACT PROTECT (job `keep_regions`, ProtectKeepRegions): the protected holes' and flat faces' regions. Empty ⇒ omitted.
+    public var keepRegions: [KeepRegionSpec] = []
     /// "Minimize plastic": on → the material-reduction ladder; off → one
     /// conservative variant that just handles the forces.
     public let minimizePlastic: Bool
@@ -182,6 +188,7 @@ public struct RunRequest: Equatable, Sendable {
     /// skeleton). Still part of the synthesized `==`, so switching modes
     /// invalidates a stale result rather than reusing it.
     public var jobMode: String
+    public var redesign: String = ""   // Flexible (PR #362) H56a: redesign to strengthen (overnight plan 2026-10-25) — loads.redesign; "" = no key (StrengthenRoute, RunRequest.forWorker)
 
     /// True for a STEP/STP part (B-rep source). NOT a proxy for "has a load case":
     /// an STL/3MF part also carries selectable faces (segmentation pseudo-faces,
@@ -305,7 +312,7 @@ public struct RunProgress: Equatable, Sendable {
     /// names the rung and iteration rather than inventing voxelize/assemble phases.
     public var stageLabel: String {
         rungCount > 1
-            ? "Variant \(rung + 1) of \(rungCount) · SIMP iteration \(iteration)"
+            ? "Result \(rung + 1) of \(rungCount) · SIMP iteration \(iteration)"
             : "SIMP iteration \(iteration)"
     }
 
@@ -521,8 +528,8 @@ public enum RunFailure: Equatable, Sendable {
     public static func stalledDuringSetup(graceSeconds: Double) -> String {
         "The optimizer stalled before it could take its first step, so the run was "
       + "stopped after \(gracePhrase(graceSeconds)) with no progress. This can happen "
-      + "on a dense load case or a fine resolution — try the Fast resolution or a "
-      + "simpler load case, then run again. If you think it just needs longer, tap "
+      + "on a dense load scenario or a fine resolution — try the Fast resolution or a "
+      + "simpler load scenario, then run again. If you think it just needs longer, tap "
       + "Keep waiting."
     }
 
@@ -533,7 +540,7 @@ public enum RunFailure: Equatable, Sendable {
     public static func stalledWithDesignBox(graceSeconds: Double) -> String {
         "The optimizer stalled before it could take its first step, so the run was "
       + "stopped after \(gracePhrase(graceSeconds)) with no progress. The growth space "
-      + "(design box) makes this much more likely — try turning it off or making it "
+      + "(Allow growth here) makes this much more likely — try turning it off or making it "
       + "smaller, or use the Fast resolution, then run again. If you think it just "
       + "needs longer, tap Keep waiting."
     }
@@ -681,7 +688,7 @@ public enum RunFailure: Equatable, Sendable {
                  + "\(r.proposedLabel) → \(at) at the gate."
         case "volume_fraction":
             return "Keep more material (volume fraction \(r.proposedLabel)) → "
-                 + "\(at) at the gate — that rung was solved in this run."
+                 + "\(at) at the gate — that result was solved in this run."
         case "material":
             return "Print it in \(r.proposedLabel) → \(at) at the gate."
         case "resolution":
@@ -832,6 +839,10 @@ public final class LocalRunNotifier: RunNotifier {
 
     public init() {}
 
+    /// Notifications need an app bundle: a process without one (xctest hosting the real RootView) is refused by the system
+    /// with an exception, so it asks nothing (B1's hosted tests). On the iPad the app always has one.
+    static var hasAppBundle: Bool { Bundle.main.bundleURL.pathExtension == "app" }
+
     /// Ask for notification permission up front (handoff 121). A remote run can
     /// finish while the user is in the foreground OR via the cold-launch re-attach,
     /// and either fires a completion notification — so we request permission at app
@@ -839,13 +850,13 @@ public final class LocalRunNotifier: RunNotifier {
     /// means no banners.
     public static func requestAuthorization() {
         #if canImport(UserNotifications)
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        if Self.hasAppBundle { UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in } }
         #endif
     }
 
     public func willRunInBackground() {
         #if canImport(UserNotifications)
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        if Self.hasAppBundle { UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in } }
         #endif
         #if canImport(UIKit)
         endAssertion()
@@ -857,12 +868,14 @@ public final class LocalRunNotifier: RunNotifier {
 
     public func runDidComplete(summary: String) {
         #if canImport(UserNotifications)
+        if Self.hasAppBundle {
         let content = UNMutableNotificationContent()
         content.title = "TopOpt"
         content.body = summary
         content.sound = .default
         UNUserNotificationCenter.current().add(
             UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+        }
         #endif
         #if canImport(UIKit)
         endAssertion()
@@ -1063,6 +1076,18 @@ public final class RunModel: ObservableObject {
                                _ onVariant: @escaping (OptimizeOutcome) -> Void)
                                throws -> OptimizeOutcome
     var runner: Runner
+    /// Hosted tests only (the whole-app build, B1): when set, every run starts with this instead of the runner the workspace
+    /// picked (the bridge or the Mac), so a test lands a run through the REAL Optimize click. The app never sets it.
+    nonisolated(unsafe) static var hostedTestRunner: Runner?
+
+    /// ★ B1 (ledger O1, approved design 2026-11-02: "an engine failure is one plain line on the button that failed, never
+    /// the raw engine text in a card"): this failure is the ENGINE's own text (the runner threw). RunScreen draws no card
+    /// for it; the workspace dismisses it and the button that started the run says so in one line. The text is kept for
+    /// B2's (i). A stall ("Keep waiting") and "Not strong enough to print" are app words and stay sheets (question to the
+    /// reviewer, 2026-11-03).
+    @Published public private(set) var failureShowsOnButton = false
+    /// The engine's own words for the last such failure (for B2's (i); never drawn in a card).
+    @Published public private(set) var lastEngineFailureText: String?
 
     private let scheduler: RunScheduler
     private let notifier: RunNotifier
@@ -1155,12 +1180,36 @@ public final class RunModel: ObservableObject {
             throw RemoteRunError(
                 "the lattice run produced no mesh — see the run's report for why")
         }
-        return try TopOptKit.latticeOutcome(meshPath: mesh, result: r)
+        do {
+            return try TopOptKit.latticeOutcome(meshPath: mesh, result: r)
+        } catch {
+            // ★★★ THE LATTICE STL IS A SOUP, AND THE SOLID IMPORTER MAY REFUSE IT
+            // (found 2026-08-24: two overlapping declared regions → the shared
+            // sheets are written once per region, and the repair correctly reports
+            // "an edge shared by more than two triangles remains" — measured 17,172
+            // duplicated triangles and 194 residual T-junction edges on his own
+            // part). That refusal is about making a SOLID; nothing here needs one.
+            // The certification already ran inside core, and the mesh is only the
+            // picture — so fall back to the same raw parse the RELATTICE path has
+            // always displayed the soup with (`RelatticeRunner` →
+            // `MeshExport.parseBinarySTL`). The LAN and on-device lattice runs now
+            // agree about what this file is.
+            let raw = MeshExport.parseBinarySTL(
+                try Data(contentsOf: URL(fileURLWithPath: mesh)))
+            guard !raw.indices.isEmpty else { throw error }
+            NSLog("DIAG latticeOutcome solid import refused (\(error)); "
+                  + "displaying the soup raw: \(raw.indices.count / 3) triangles")
+            return TopOptKit.latticeOutcome(result: r,
+                                            meshVertices: raw.vertices,
+                                            meshIndices: raw.indices)
+        }
     }
 
     public static func bridgeRunner(_ request: RunRequest,
                                     _ progress: @escaping (Int, Int, Int) -> Bool,
                                     _ onVariant: @escaping (OptimizeOutcome) -> Void) throws -> OptimizeOutcome {
+        // ★ Core's receipts name the core this app links (#358): stated once, before a run.
+        CoreBuildIdentity.state()
         // ★ THE MODE DECIDES WHICH RUN THIS IS (maintainer, 2026-08-17). Routed
         // HERE, at the one on-device entry point every caller already goes
         // through, so a lattice request cannot reach the optimizer by taking a
@@ -1243,6 +1292,7 @@ public final class RunModel: ObservableObject {
         phase = .running
         progress = nil
         failure = nil
+        failureShowsOnButton = false   // ★ B1 (O1)
         canKeepWaiting = false
         // AJ1: HOLD the finished run's variants rather than dropping them. `outcome`
         // still has to be cleared (streamed variants append to it), but a run that
@@ -1269,7 +1319,7 @@ public final class RunModel: ObservableObject {
         let token = CancelToken()
         self.token = token
         runningRequest = request
-        let runner = self.runner
+        let runner = Self.hostedTestRunner ?? self.runner
         let scheduler = self.scheduler
 
         // Arm the setup-stall watchdog — LOCAL runs only (handoff 129). A local run is
@@ -1289,6 +1339,8 @@ public final class RunModel: ObservableObject {
         }
 
         scheduler.runInBackground { [weak self] in
+            let flexCore = remote ? nil : FlexibleCoreGate.claimForRun(); defer { flexCore?.leave() }   // Flexible (PR #362, batch G): a LOCAL run claims core's matrix-free pool (waits while a squish sim holds it; FlexibleCoreGate)
+            if (flexCore?.waitedS ?? 0) > 0.05 { scheduler.runOnMain { guard let s = self, s.token === token, s.watchdogCancel != nil else { return }; s.watchdogCancel?(); s.watchdogCancel = s.watchdog.arm { [weak s] in s?.watchdogFired(token) } } }   // Flexible (batch G): the wait never eats the stall watchdog's grace — re-armed after it
             let result: Result<OptimizeOutcome, Error>
             do {
                 let o = try runner(request, { rung, count, iter in
@@ -1415,10 +1467,15 @@ public final class RunModel: ObservableObject {
     /// and arm the completion notification. The workspace shows a re-open chip.
     public func runInBackground() {
         guard phase == .running else { return }
-        runningInBackground = true
         isMinimized = true
+        // ★ his iPad (2026-10-26): reopening the card and hiding it again must work every time; arm the notifier once
+        guard !runningInBackground else { return }
+        runningInBackground = true
         notifier.willRunInBackground()
     }
+
+    /// The card's "In Background" button is enabled whenever a run is going, including after he reopens the card.
+    public var canSendToBackground: Bool { phase == .running }
 
     /// Re-open the full progress card for a minimized in-flight run.
     public func restore() {
@@ -1598,6 +1655,8 @@ public final class RunModel: ObservableObject {
                 diag("run failed: \(message)")
                 outcome = nil
                 failure = .solver(message)
+                failureShowsOnButton = true      // ★ B1 (O1): engine text, never a card
+                lastEngineFailureText = message
                 phase = .failed
             }
         }
@@ -1630,7 +1689,7 @@ public final class RunModel: ObservableObject {
         switch phase {
         case .succeeded:
             let n = outcome?.acceptedCount ?? 0
-            return "\(request.projectName): \(n) variant\(n == 1 ? "" : "s") ready"
+            return "\(request.projectName): \(n) result\(n == 1 ? "" : "s") ready"
         case .cancelled:
             return "\(request.projectName): optimization cancelled"
         case .failed:

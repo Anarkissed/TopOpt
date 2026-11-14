@@ -25,9 +25,16 @@ import TopOptKit
 /// margin / axial / depth edits, reusing the SAME `ClearanceOverride` an auto
 /// primitive uses, so a manual primitive's chips behave identically.
 public struct ManualPrimitive: Equatable, Sendable, Codable, Identifiable {
+    /// TEST CONTROL (his iPad notes 11-09): a lattice zone drawn and sized on the viewer's `planeBasis`, as before.
+    nonisolated(unsafe) public static var controlZoneDrawnOnViewerBasis = false
     public enum Kind: Int, Equatable, Sendable, Codable {
         case bolt = 0   // swept cylinder (a fastener keep-out)
         case face = 1   // bounded slab (a mounting-face keep-out)
+
+        /// ★ B10 (the reviewer's ruling 11-11 08:04Z (3)(a), design-system §3: never "primitive"): the shape's word on the
+        /// screen — Allow growth here's own two, Box │ Cylinder.
+        public var word: String { self == .bolt ? "cylinder" : "box" }
+        public var title: String { self == .bolt ? "Cylinder" : "Box" }
     }
 
     public let id: UUID

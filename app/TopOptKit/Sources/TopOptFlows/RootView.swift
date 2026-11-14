@@ -20,10 +20,11 @@ public struct RootView: View {
         ZStack {
             switch model.screen {
             case .home:
-                HomeView(model: model)
+                LibraryRootView(model: model)
             case .workspace:
                 if let project = model.project {
                     WorkspacePlaceholder(model: model, project: project)
+                        .id(project.id)   // Flexible (PR #362) H53: a project switch (Save as new project) builds a fresh workspace — its state and onAppear belong to the copy
                 } else {
                     HomeView(model: model)   // no active project — shouldn't happen
                 }
@@ -68,11 +69,12 @@ public struct RootView: View {
             }
 
             if model.printParamsSheetPresented, let project = model.project {
-                printParamsOverlay(project)
+                PrintParamsOverlay(model: model, project: project)
                     .transition(.opacity)
             }
         }
-        .toast($model.toast)
+        .laneToast($model.toast)   // ★ B2 (U16, §4.34): centred, clear of every control, two lines at most — above every sheet (U17)
+        .numberPadNote { model.toast = $0 }   // ★ B2 (U15, U17): a pad in a sheet says what it kept, above the sheet
         .task {
             model.loadMaterials()
             // Ask for notification permission at app runtime (not in AppModel.init,
@@ -240,6 +242,7 @@ public struct RootView: View {
                 .ignoresSafeArea()
                 .onTapGesture(perform: onScrimTap)
             GlassSheet { content() }
+                .background(CornerPairStyle.publish("sheet"))   // ★ B2 (U17): the lane keeps its notifications off the sheet
                 .transition(.scale(scale: 0.97).combined(with: .opacity))
         }
     }
@@ -257,7 +260,14 @@ public struct RootView: View {
         .animation(DS.Motion.sheetIn, value: model.importSheetPresented)
     }
 
-    private func printParamsOverlay(_ project: ProjectModel) -> some View {
+}
+
+/// The print parameters sheet over its scrim, as RootView presents it (the hosted tests mount this).
+struct PrintParamsOverlay: View {
+    @ObservedObject var model: AppModel
+    let project: ProjectModel
+
+    var body: some View {
         ZStack {
             Rectangle()
                 .fill(.ultraThinMaterial)
@@ -265,6 +275,7 @@ public struct RootView: View {
                 .ignoresSafeArea()
                 .onTapGesture { model.closePrintParams() }
             GlassSheet { PrintParamsSheet(model: model, project: project) }
+                .background(CornerPairStyle.publish("sheet"))   // ★ B2 (U17): the lane keeps its notifications off the sheet
                 .transition(.scale(scale: 0.97).combined(with: .opacity))
         }
         .animation(DS.Motion.sheetIn, value: model.printParamsSheetPresented)

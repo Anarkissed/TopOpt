@@ -99,9 +99,20 @@ final class LatticeRegionMaskTests: XCTestCase {
     func testNoDeclaredRegionsLeavesTheGridExactlyAsItWas() {
         let g = fullGrid()
         XCTAssertEqual(LatticeRegionMask.clipped(g, to: []).values, g.values)
-        // …and an exclude-only list is the same case: nothing is latticed.
-        XCTAssertEqual(LatticeRegionMask.clipped(g, to: [faceSlab(role: .exclude)]).values,
-                       g.values)
+        // ★ RE-PINNED (his iPad notes 11-08, Start from −): an exclude-only list was "the same case: nothing is
+        // latticed" — core never did that. With no include core lattices the whole part MINUS the excludes (exclude
+        // beats include), so under "lattice everything" the No-lattice slab is cut out and only it. (The stage's
+        // Start from + passes .latticeNothing and its gate refuses the run.)
+        let cut = LatticeRegionMask.clipped(g, to: [faceSlab(role: .exclude)]).values
+        let all = g.values.filter { $0 != 0 }.count
+        XCTAssertLessThan(cut.filter { $0 != 0 }.count, all, "★ the No-lattice slab is cut out")
+        XCTAssertEqual(cut[11 + 11 * 12 + 11 * 144], 1, "outside it: kept")
+        XCTAssertEqual(cut[2 + 2 * 12 + 2 * 144], 0, "inside it: solid (cut out of the lattice)")
+        // CONTROL: the old clip ignored the exclude
+        LatticeRegionMask.controlIncludesOnly = true
+        defer { LatticeRegionMask.controlIncludesOnly = false }
+        XCTAssertEqual(LatticeRegionMask.clipped(g, to: [faceSlab(role: .exclude)]).values, g.values,
+                       "CONTROL: without the cut, the grid came back whole")
     }
 
     /// Two regions union rather than intersect — a group with a face and a

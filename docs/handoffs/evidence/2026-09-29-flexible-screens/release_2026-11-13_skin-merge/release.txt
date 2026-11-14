@@ -1,0 +1,19 @@
+# Release 06806566 — 2026-11-13 skin-merge (Protect skins of one depth as one skin, 747f24d3), app only
+# Core and worker unchanged: fingerprint 6da1b6c3bb0a; "fingerprint": "6da1b6c3bb0a"
+# Merged onto 870c23a4; the merged app tree equals skin-merge's, so its gate applies unchanged.
+# Commits (first parent of skin-merge since the release tip):
+#   b00b92bd Speed (362): Protect skins of one depth go to the new engine as ONE skin (preview and Export)
+#   747f24d3 Speed (362): merge the release tip (the export's evidence) so the app-only release builds on it
+# Gates:
+#   15:22 built
+#   15:25 tests: exit 0; 24 passed, 0 failed, 0 skipped
+#   LATTICE-FILE cube via the CLI: Print file ready · 240 bars · 35% of the solid part · layer check clean
+#   LATTICE-FILE cube via the worker: Print file ready · 240 bars · 35% of the solid part · layer check clean, 365484 bytes
+#   12:53 evidence 870c23a4 pushed; release a8895265 DONE
+#   15:26 checks ok: skin-merge 747f24d3, 2 commit(s), app-only, onto 870c23a4, fingerprint 6da1b6c3bb0a
+#   15:26 merged 06806566; app tree == skin-merge's, fingerprint 6da1b6c3bb0a
+#   15:26 waiting for HEAVY.lock (free)
+#   15:26 lock taken (28 GB free)
+#   15:32 iPad device build green; lock released
+#   15:32 pushed 06806566
+#   15:32 worker /health "fingerprint": "6da1b6c3bb0a" (unchanged, no swap)

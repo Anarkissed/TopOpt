@@ -1,0 +1,14 @@
+# Release 029fb450 — 2026-11-03 B2b-s1 (UI-Notes' app batch d7b841e1), app only
+# Core and worker unchanged: fingerprint 340f1156e40f; "fingerprint": "340f1156e40f"
+# Merged onto 5b01f4fd; the merged app tree equals B2b-s1's, so the builder's full suite and the reviewer's code check apply unchanged.
+# Commits:
+#   5a36a764 B2 (U15, U11): every number opens the app's pad — its name and range, 7 8 9 ⌫ · 4 5 6 ± · 1 2 3 . · 0 Done; none with a keyboard connected
+#   d7b841e1 B2 (U15, the reviewer's check): the note says the number it kept, then the range — "Kept 150 % (150 % and up)", "Kept 40 (1 to 40 mm)"
+# Gates:
+#   05:30 checks ok: B2b-s1 d7b841e1, 2 commit(s), app-only, base 4deb3a36, onto 5b01f4fd, fingerprint 340f1156e40f
+#   05:30 merged 029fb450; app tree == B2b-s1's, fingerprint 340f1156e40f
+#   05:30 waiting for HEAVY.lock (TO-core E1 gates: flip table on his worker jobs + full ctest 2026-11-03 04:09 EST)
+#   05:45 lock taken
+#   05:51 iPad device build green; lock released
+#   05:51 pushed 029fb450
+#   05:51 worker /health "fingerprint": "340f1156e40f" (unchanged, no swap)

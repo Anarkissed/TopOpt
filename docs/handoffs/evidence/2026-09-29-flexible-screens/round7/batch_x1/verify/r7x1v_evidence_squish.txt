@@ -1,0 +1,6 @@
+# X1 verify evidence — the Squish page (FlexibleR7X1VerifyEvidenceProbe.testTheSquishPageVerifyOnHisPad)
+VX1V_S_G1_xray_heat_13p.png: views 64 · body alpha 0.04 · bend prism 3.8 mm (k 1.0, fe true) · tint SIMD3<Float>(0.9490196, 0.9490196, 0.9607843) · card row "Prism = bend at full load, less than drawn"
+VX1V_S_G1_xray_heat_off_13p.png: views 72 · body alpha 0.04 · bend prism 3.8 mm (k 1.0, fe true) · tint SIMD3<Float>(0.9490196, 0.9490196, 0.9607843) · card row "Prism = bend at full load, less than drawn"
+VX1V_S_G2_xray_heat_13p.png: views 64 · body alpha 0.04 · bend prism 11.7 mm (k 1.0, fe true) · tint SIMD3<Float>(0.9490196, 0.9490196, 0.9607843) · card row "Prism = bend at full load, less than drawn"
+VX1V_S_G2_xray_heat_off_13p.png: views 72 · body alpha 0.04 · bend prism 11.7 mm (k 1.0, fe true) · tint SIMD3<Float>(0.9490196, 0.9490196, 0.9607843) · card row "Prism = bend at full load, less than drawn"
+VX1V_S_G3_xray_heat_13p.png: views 64 · body alpha 0.04 · bend prism 7.2 mm (k 1.0, fe true) · tint SIMD3<Float>(0.9490196, 0.9490196, 0.9607843) · card row "Prism = bend at full load, less than drawn"

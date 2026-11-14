@@ -1,0 +1,47 @@
+# Release 4db20e1f — 2026-11-04 T3_T5_Results (UI-Notes' app batch up to 48785cd8), app only, released before review (his 11-03 pick)
+# Core and worker unchanged: fingerprint 35764048bba3; "fingerprint": "35764048bba3"
+# Merged onto fba3ea86; the merged app tree equals 48785cd8's, so the builder's tests apply unchanged.
+# Commits:
+#   ba8a08c0 Topology rebuild slice 3 (his "look per screen", 11-04): Settings' Runs on, Units and Protect skin as §4.4 values; the Settings panel is §4.3's DSPanel
+#   12f38d30 Release 2026-11-04: merge T3 (ba8a08c0), UI-Notes' app batch (app only; core and worker unchanged at 35764048bba3)
+#   a4ada7ca Merge Topology T3 (ba8a08c0) into B9: Settings rows on §4.4, DSPanel's cue + blur (the Print plan's panel reads it)
+#   430d7b18 Topology rebuild slice 5 (his "look per screen"): the run states as mockup #topo-corner draws them; a scenario's gap is a block before the press
+#   02c47ed3 Merge Topology T5 (430d7b18) into B9: run states per #topo-corner, a scenario's gap blocks before the press; RunProgressReadout says Result N of M
+#   8ae2a135 Release 2026-11-04: merge T5 (430d7b18), UI-Notes' app batch (app only; core and worker unchanged at 35764048bba3)
+#   58dfed6f Results rebuild slice R-a (his "look per screen"): the corner [Compare] [Details] [Export v7b (.stl)] [⌃] and Details as the drawer from the bottom (mockup #topo-results, #topo-results-details)
+#   6d6d8977 Release 2026-11-04: merge R-a (58dfed6f), UI-Notes' app batch (app only; core and worker unchanged at 35764048bba3)
+#   f461ab5e Merge Results R-a (58dfed6f) into B9: the Results corner and the Details drawer
+#   cd30f820 R-a2 (his "look per screen", U1): the Ortho │ Persp pair is a column (mockup v5), and the top-left block never runs under the view corner — a long name gives way first
+#   d3128401 Merge R-a2 (cd30f820) into B9: the Ortho │ Persp column; the top-left block (the Squish page's too) never runs under the view corner
+#   69cb1c50 Release 2026-11-04: merge R-a2 (cd30f820), UI-Notes' app batch (app only; core and worker unchanged at 35764048bba3)
+#   c11b2d40 Results rebuild slice R-b (his "look per screen"): the results panel is §4.3's panel, each result one §4.4 line, Pick this on every line not picked (mockup #topo-results)
+#   2713390f Release 2026-11-04: merge R-b (c11b2d40), UI-Notes' app batch (app only; core and worker unchanged at 35764048bba3)
+#   19f47ebc Merge Results R-b (c11b2d40) into B9: the results panel on DSPanel with one-line rows; DSPanel foldedPill (default off)
+#   c168636f Results rebuild slice R-c (his "look per screen"): Checks is §4.3's panel with "N to look at" in its header, and "Scenario: Worst case ⌄" sits beside it (mockup #topo-results)
+#   73487f27 Merge Results R-c (c168636f) into B9: Checks on DSPanel with its count label; the scenario chip beside it
+#   a9889d00 Release 2026-11-04: merge R-c (c168636f), UI-Notes' app batch (app only; core and worker unchanged at 35764048bba3)
+#   f341d363 Results: the model rises above the Details drawer (mockup #topo-results-details: "the drawer never covers it")
+#   3870d679 Release 2026-11-04: merge R-lift (f341d363), UI-Notes' app batch (app only; core and worker unchanged at 35764048bba3)
+#   b146ae12 Merge Results drawer lift (f341d363) into B9: OrbitCamera.frameLift (0 by default; only Results' own camera sets it)
+#   abbba127 ParityLibraryShots (opt-in PARITY_SHOT_DIR): the Library's Home, project and part pages for B5's side-by-sides — lookalike box parts grouped like mockup v5
+#   462ebfe7 LatticeProtectionFollowsSlabTests re-pinned to B3 s1's line (5b5f6bd0): the lattice spec is sent only when the run lattices, from the same emission — red in the 11-04 daily suite on 51efb534
+#   968869b0 Library rebuild slice L-a (his "look per screen"): the Part folder is mockup #lib-part — one §4.7 version card per version, newest first, Draft on top, a branch 48 pt in with "from v1", and each version's a · b · c inline (picture, weight · strength, stars, Picked ring); a tile tap is Quick look of that result, its ⋯ Pick this · Print this · Reject · Export… (reviewer's pick pending); [Compare] [Open v3 draft] [⌄] on §4's glass button (new accent form)
+#   bbcf4cd5 Library rebuild slice L-b (his "look per screen"): the Project folder is mockup #lib-project — each part a §4.7 DSPartCard (200 pt picture, "PA12 · not optimized yet", grey version strip with the Print this mark kept), app-map's ⋯ per card (Rename… · Move to · Delete part…), §4.7's add tile with the accent disc, + Add part on the accent glass button; 3 across, 2 in portrait (ring + tag wait on the reviewer's "chosen" ruling)
+#   375904de Merge UI-Notes' Library Part folder (968869b0) into B9: one row per version, Quick look on a result, ⋯ Pick · Print · Reject · Export; DSGlassButton accent (off by default); LatticeProtectionFollowsSlab re-pin; ParityLibraryShots (opt-in)
+#   97598f3d B9 tests: FlexibleSquishCopy passes the corner's Settings chip (Q6); SquishParity reads each state once core's design has landed
+#   0617b242 Merge UI-Notes' Library Project folder (bbcf4cd5) into B9: DSPartCard cards with a ⋯ each, DSAddTile, the accent glass Add part; DSVersionChip printed (off by default)
+#   a0b483c5 Release 2026-11-04: merge B9 0617b242 — UI-Notes' Library L-a (968869b0, the Part folder) and L-b (bbcf4cd5, the Project folder), plus B9 test fixes (FlexibleSquishCopy passes the corner's Settings chip, Q6; SquishParity waits for core's design) (app only; core and worker unchanged at 35764048bba3)
+#   81947c5d ParitySquishShots: shoot once core's design has landed (the 11-04 13L shot was taken mid-design: no "Reaches … short" line, the panel a line shorter and scrolled)
+#   3b74a4dc Library slice L-c (his "look per screen"): part pictures on a clear background — the card's own gradient shows, not a black square (mockup #lib-project)
+#   e31ae189 Merge UI-Notes' Library L-c (3b74a4dc) into B9: part pictures on a clear background (MeshThumbnail transparent:, off by default)
+#   f080bdbb Release 2026-11-04: merge B9 e31ae189 — UI-Notes' Library L-c (3b74a4dc, part pictures on a clear background) + ParitySquishShots waits for core's design (test only) (app only; core and worker unchanged at 35764048bba3)
+#   274fa7cf Revert the Library rebuild slices L-a, L-b, L-c: his ruling — keep the Library UI as it was before the new design
+#   48785cd8 Merge UI-Notes' Library revert (274fa7cf) into B9: L-a 968869b0, L-b bbcf4cd5 and L-c 3b74a4dc come out (his ruling: keep the Library design he had; add buttons and processes only)
+#   4db20e1f Release 2026-11-04: merge B9 48785cd8 — UI-Notes' Library revert (274fa7cf: L-a, L-b, L-c out, his ruling to keep his Library design) (app only; core and worker unchanged at 35764048bba3)
+# Gates:
+#   14:13 checks ok: T3_T5_Results, local 4db20e1f over origin fba3ea86 (36 commits); app tree == 48785cd8's, fingerprint 35764048bba3
+#   14:13 waiting for HEAVY.lock (TO-core Keep clear gates @ 1a5a6255: flip table + 17-test + full ctest 2026-11-04 12:25 EST)
+#   14:16 lock taken
+#   14:21 iPad device build green; lock released
+#   14:21 pushed 4db20e1f
+#   14:21 worker /health "fingerprint": "35764048bba3" (unchanged, no swap)

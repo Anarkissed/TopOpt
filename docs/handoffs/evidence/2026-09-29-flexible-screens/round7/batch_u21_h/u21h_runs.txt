@@ -1,0 +1,41 @@
+# U21 batch H runs (app/TopOptKit, --scratch-path /tmp/r7u21-side-build) — 706d73c5 + the working tree
+### runner.log
+start 03:33:06 706d73c5 + working tree (batch H)
+build exit 0 03:33:07
+golden det exit 0 03:33:23
+golden unseeded exit 0 03:33:39
+hashes exit 0 03:34:40
+hashes cmp vs round7/batch_x20b/stage_job_hashes_x20b.txt (whole file): identical
+hashes cmp vs round7/batch_u21_integ1/stage_job_hashes_u21_integ1.txt (whole file): identical
+chunk_aa exit 0 03:48:51
+chunk_ab exit 1 03:51:12
+chunk_ac exit 0 03:55:44
+chunk_ad exit 0 03:55:48
+ALLDONE 03:55:48
+### classes (31: the classes naming the touched files' types — FlexibleLatticeField/Inputs/Builder, FlexGrid, FlexibleLatticePass, FlexibleGroupField, the press cuts / tuned presses / combined field of FlexibleStageModel — plus FlexibleX20bTests, FlexibleR7E2HostedTests, FlexibleSquishCopyTests, LatticeStaleTypeTests; evidence probes, recorders and perf left out), chunks of 10
+FlexibleBatchBReviewTests FlexibleBatchCHookTests FlexibleBatchMVerifyTests FlexibleBatchMXrayTests FlexibleC1Tests FlexibleFEPassTests FlexibleInPassCompositeTests FlexibleLatticeFieldTests FlexibleLatticeGradingTests FlexibleLatticePassTests FlexibleMainViewsTests FlexibleOverlayClipTests FlexiblePinchTests FlexibleR7D2ReviewTests FlexibleR7E1FollowUpTests FlexibleR7E2HostedTests FlexibleR7E2Tests FlexibleR7U21EdgeLookTests FlexibleS1VerifyTests FlexibleSettingsRound4Tests FlexibleSqueezeGroupsModelTests FlexibleSqueezeGroupsReviewTests FlexibleSqueezeGroupsTests FlexibleSquishCopyTests FlexibleSquishTests FlexibleTopLayerHostedTests FlexibleTopLayerTests FlexibleU1Tests FlexibleU21BendTests FlexibleX20bTests LatticeStaleTypeTests
+### goldens
+golden_det: identical 38 · DIFFERS 0 · PART-SKIP 0 · Executed 13 tests, with 0 failures (0 unexpected) in 13.793 (13.795) seconds
+golden_unseeded: identical 32 · DIFFERS 0 · PART-SKIP 1 · Executed 13 tests, with 0 failures (0 unexpected) in 13.782 (13.783) seconds
+### chunks
+chunk_aa.log: Executed 61 tests, with 1 test skipped and 0 failures (0 unexpected) in 849.073 (849.081) seconds
+chunk_ab.log: Executed 77 tests, with 1 test skipped and 1 failure (0 unexpected) in 139.166 (139.176) seconds
+chunk_ac.log: Executed 67 tests, with 1 test skipped and 0 failures (0 unexpected) in 269.545 (269.554) seconds
+chunk_ad.log: Executed 6 tests, with 0 failures (0 unexpected) in 2.121 (2.123) seconds
+### failures (all chunks)
+Tests/TopOptFlowsTests/FlexibleSettingsRound4Tests.swift:369: error: -[TopOptFlowsTests.FlexibleSettingsRound4Tests testTheFinishShapesTheLatticeField] : XCTAssertTrue failed
+  -> a source pin: FlexibleSettingsRound4Tests:369 reads 'skinOffFaces: [], finish: finish)' in FlexibleStageModel.swift; the new pressCuts parameter now comes BEFORE skinOffFaces, so that line is byte-identical again (no test edited)
+### skipped
+Test Case '-[TopOptFlowsTests.FlexibleBatchMVerifyTests testHisImg6RowsAtTheDevicesPixelCount]' skipped (0.002 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU1Tests testU21BendPictures]' skipped (0.002 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7U21EdgeLookTests testEvidenceRenders]' skipped (0.002 seconds).
+signal lines: 0
+### re-run after that reorder (FlexibleSettingsRound4Tests, FlexibleR7U21EdgeLookTests, FlexibleSquishCopyTests, FlexibleLatticePassTests/testCliffParityAndCoverage)
+Executed 21 tests, with 1 test skipped and 0 failures (0 unexpected) in 16.201 (16.204) seconds
+FLEX-SEAM parity: max |gpu − swift| = 0.00027656555 mm over 278 points (278 in a seam cell, 217 where the sides blend); RED CONTROL (the ladder across the cliff) misses by 21.986242 mm
+FLEX-SEAM march page: 76 of 44290 px differ by > 0.05 mm (0.172 %); RED CONTROL (half-cell cap) 1514 (3.449 %)
+FLEX-SEAM march generic: 63 of 32736 px differ by > 0.05 mm (0.192 %); RED CONTROL (half-cell cap) 985 (3.024 %)
+EDGE-LOOK untouched: 2000 random points + 47 cliffs (> 1 rung) away from the presses, 0 differ; seam voxels 3810; RED CONTROL (40-voxel band) 46 differ
+EDGE-LOOK |grad G|/k: SEAM band p50 1.089 p99 2.496 max 10.742, control p99 1.656 · RED CONTROL band p99 13.328 max 65.353, control p99 1.657
+EDGE-LOOK fragments over 151 lines: SEAM band 2 of 132 runs over 452.1 mm = 0.0044 /mm; control 2 of 83 over 436.7 mm = 0.0046 /mm · RED CONTROL (the ladder across the cliff) band 97 of 274 runs over 452.1 mm = 0.2145 /mm; control 2 of 86 over 436.7 mm = 0.0046 /mm
+(the reorder is a call-site argument order only: goldens and hashes above were run before it, no job byte can move)

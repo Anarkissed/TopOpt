@@ -22,7 +22,8 @@
 //   DETERMINISM. Fixed traversal order, no RNG, no threads, no float atomics ->
 //   the same inputs produce a byte-identical file.
 //
-// SCOPE (this task): OCTET ONLY, matching topopt/lattice.hpp's certification enum.
+// SCOPE: octet (PR 201's hand-written tables) plus each round-1 strut type as it goes
+// live (LatticeGenTopology below), each from its canonical cell (strut_cell.hpp).
 // The radius/DENSITY field is an INPUT — uniform, or an externally supplied
 // callback. How that field is DERIVED from stress (the grading law) is a separate
 // task, held until the certifiable density band is measured. This proves the
@@ -40,11 +41,17 @@ namespace topopt {
 
 class LatticeBoundary;  // topopt/lattice_boundary.hpp — the shared predicate
 
-// The strut-lattice topologies. Only Octet is implemented this task (the printed,
-// certified one); the enum leaves room for the rest exactly as lattice.hpp does.
+// The strut-lattice topologies core can GENERATE. A type joins this enum only when it
+// is live (docs/design/lattice-types/02-core-spec.md §4: its own density law, floors,
+// size-step verdict and certificate), in the R2 order. Octet is the hand-written PR 201
+// generator, byte-identical; every other type is built from its canonical cell
+// (topopt/strut_cell.hpp) — the cell its tensor rows were measured on — through the
+// SAME ownership, clipping, skin and streaming machinery.
 // (Explicit underlying type so the enum-probe tripwire in test_lattice_gen can
 // legally test values beyond the last case.)
-enum class LatticeGenTopology : int { Octet };
+enum class LatticeGenTopology : int { Octet, Fcc, Kelvin, Rhombic, Diamond, Bcc, SimpleCubic, Gyroid, SchwarzD };
+
+enum class LatticeTopology;  // topopt/lattice.hpp (the certification library)
 
 // Human-readable name ("octet"), stable for run_info / job serialization.
 // Throws std::logic_error for an enum value with no name — a new case must be
@@ -58,6 +65,21 @@ const char* lattice_gen_topology_name(LatticeGenTopology topo);
 // missing). test_lattice_gen's enum-probe tripwire fails if a new enum case is
 // named in lattice_gen_topology_name but not enumerated here.
 std::vector<std::string> lattice_gen_topology_names();
+
+// The certification library's id for a generatable topology (the tensor the run
+// certifies what it built with). One-to-one; octet -> Octet, fcc -> Fcc, ...
+LatticeTopology lattice_gen_certificate_topology(LatticeGenTopology topo);
+
+// The inverse of lattice_gen_topology_name over the generatable set. A job's
+// `lattice.topology` reaches the generator through here and nowhere else. Throws
+// std::invalid_argument, naming the id, for anything core cannot generate — never
+// a fallback to octet.
+LatticeGenTopology lattice_gen_topology_from_id(const std::string& id);
+
+// The two SHEET lattices (gyroid, schwarz_d) are generatable ids, but they have no struts:
+// generate_lattice refuses them by name and the run builds them with generate_tpms
+// (tpms_gen.hpp) over the same region, boundary and grade. These say which is which.
+bool lattice_gen_is_sheet(LatticeGenTopology topo);
 
 // The lattice REGION: a rectangular block of nx*ny*nz cubic cells of edge
 // `cell_mm`, its (i=0,j=0,k=0) corner at `origin` (model mm). Cell (ci,cj,ck) is
@@ -73,6 +95,21 @@ struct LatticeRegion {
   int nz = 0;
   double cell_mm = 0.0;
   std::function<bool(int, int, int)> latticed;  // null => all cells latticed
+
+  // ── ★ K6 PART 2: DROP A CLIPPED PIECE SHORTER THAN ITS OWN STRUT DIAMETER ────
+  // (Reviewer, 2026-10-10.) The sliver guard is otherwise a fixed 1 um, which exists to
+  // stop a degenerate span becoming a prism with no length. Once a pass is clipped by the
+  // region that OWNS the space, a different kind of piece appears: a short stub left on
+  // the far side of an ownership boundary, shorter than it is thick, which prints as a
+  // bump rather than as a strut and carries no load into anything.
+  //
+  // `diameters` > 0 raises that guard to `diameters x (2r)` for THIS region's passes,
+  // where r is the piece's own radius. 0 (the default) keeps the 1 um guard, so every
+  // existing run is byte-identical -- this cannot be a global constant for exactly that
+  // reason. Dropped pieces are COUNTED (LatticeGenStats::stub_fragments_dropped) and
+  // their length summed, because a guard that silently eats geometry is the thing the
+  // receipts exist to prevent.
+  double min_fragment_diameters = 0.0;
 
   // The boundary finish (handoff 2026-07-29-lattice-boundary-finish). Null =>
   // the legacy whole-strut behaviour, byte-identical to every pre-boundary run.
@@ -93,6 +130,24 @@ struct LatticeRegion {
 // diagonal families — so no clipped end is left floating (bar B6).
 enum class LatticeSkinMode { None, Rim, Diagrid };
 
+// ★ SKIN PER ZONE (lattice.regions[].skin, the reviewer's ruling 11-08 (1)). What the
+// diagrid pass lays at one point:
+//   Off    nothing (a zone with skin "none", or a part whose skin is "none" or "rim");
+//   Plain  the boundary-finish diagrid: an anchor ball at every landing and chords on
+//          analytic faces only (a part's "diagrid" under a shell or open finish);
+//   Woven  Plain plus the freeform diagrid's chords over the voxel / shell surface (a
+//          zone with skin "diagrid", or a part's "diagrid" with outer_finish "skin" or
+//          "shell+skin").
+enum class LatticeSkinHere { Off, Plain, Woven };
+struct LatticeSkinZones {
+  // The zone a point lies in: 0 = none (the part's own), else 1-based. An anchor ball is
+  // laid by the zone of its landing, a chord by the zone of its MIDPOINT (each chord is
+  // already owned by exactly one cell the same way), so a chord is never split between
+  // two zones. Must outlive the generate call.
+  std::function<int(const Vec3&)> zone_at;
+  std::vector<LatticeSkinHere> here;   // by zone id; here[0] is the part's
+};
+
 struct LatticeSkinSpec {
   LatticeSkinMode mode = LatticeSkinMode::None;
   // The skin's OWN printability clamp (radius, mm): the AUTO skin radius is
@@ -111,6 +166,11 @@ struct LatticeSkinSpec {
   // (bulge across a concavity / tunnel under a convex ridge) are REJECTED and
   // counted, never bent silently. Requires mode == Diagrid to emit anything.
   bool freeform = false;
+  // ★ PER ZONE. Null (default): `mode` and `freeform` hold everywhere, byte for byte.
+  // Set: each anchor ball and chord asks the zone it lies in (LatticeSkinZones above);
+  // `mode` and `freeform` then only open the passes, and the caller arms them for the
+  // most any zone asks (lattice_skin_for in run_job.cpp).
+  const LatticeSkinZones* zones = nullptr;
 };
 
 // ★ THE SAG BUDGET THE FREEFORM SKIN BUYS AGAINST THE BASE SURFACE, in mm —
@@ -152,14 +212,28 @@ inline double lattice_skin_min_radius_mm(double min_extrudable_width_mm) {
 // did not change: the winding of both is load-bearing (see lattice_gen.cpp's ★ note
 // on the icosahedron face table) and the octet output is byte-identical either way,
 // which the R2 checksum proves.
+//
+// ★ (ruling 2026-11-02 (b), Finding 2): `r` is the LAW's radius, and the solid written holds
+// the round strut's area and the sphere's volume: the prism's circumradius is
+// r x lattice_strut_emit_scale(nseg) (1.0539 at 8), the icosahedron's r x
+// lattice_node_emit_scale() (1.1824). Anything that keeps the solid inside the part must
+// use those circumradii. The _prism / _icosahedron forms take the circumradius itself (the
+// organic lattice, certified on its own spans, keeps them).
 void lattice_emit_strut(TriangleSink& sink, const Vec3& p0, const Vec3& p1,
                         double r, int nseg);
 void lattice_emit_node(TriangleSink& sink, const Vec3& centre, double r);
+double lattice_strut_emit_scale(int nseg);
+double lattice_node_emit_scale();
+void lattice_emit_prism(TriangleSink& sink, const Vec3& p0, const Vec3& p1,
+                        double circumradius, int nseg);
+void lattice_emit_icosahedron(TriangleSink& sink, const Vec3& centre, double circumradius);
 // Their analytic volumes, on the SOUP basis the stats already use: overlaps between
 // interpenetrating primitives are NOT deducted. State that wherever a total from
 // these is reported.
-double lattice_prism_volume_mm3(double r, double length_mm, int nseg);
-double lattice_node_volume_mm3(double r);
+double lattice_prism_volume_mm3(double r, double length_mm, int nseg);   // = pi r^2 L
+double lattice_node_volume_mm3(double r);                               // = 4/3 pi r^3
+double lattice_ngon_prism_volume_mm3(double circumradius, double length_mm, int nseg);
+double lattice_icosahedron_volume_mm3(double circumradius);
 
 // The strut RADIUS field (mm). `field`, when set, is called at each strut/node
 // MIDPOINT (model mm) and its return is used as the radius; otherwise `uniform_mm`
@@ -191,6 +265,11 @@ struct LatticeGenStats {
   std::uint64_t clipped_struts = 0;    // struts trimmed at the boundary
   std::uint64_t dropped_struts = 0;    // struts entirely outside the eroded region
   std::uint64_t strut_fragments = 0;   // kept sub-struts emitted from clipped struts
+  // ★ K6 part 2: clipped pieces dropped for being shorter than their own strut diameter
+  // (LatticeRegion::min_fragment_diameters), and how much length that was. 0/0 on every
+  // run that does not raise the guard.
+  std::uint64_t stub_fragments_dropped = 0;
+  double stub_fragment_length_mm = 0.0;
   std::uint64_t landings = 0;          // cut ends (the skin's anchor sites)
   std::uint64_t anchor_nodes = 0;      // anchor balls emitted at landings
   std::uint64_t skin_struts = 0;       // diagrid edge fragments emitted
@@ -213,6 +292,9 @@ struct LatticeGenStats {
   double interior_volume_mm3 = 0.0;
   double skin_volume_mm3 = 0.0;   // diagrid edges + anchor balls
   double rim_volume_mm3 = 0.0;    // rim tori + rim lines (the collar's rings)
+  // ★ PER ZONE (LatticeSkinSpec.zones; empty without): by zone id, what the diagrid pass
+  // laid there ([0] = outside every zone). Each sums to its total above.
+  std::vector<std::uint64_t> zone_anchor_nodes, zone_skin_chords, zone_skin_struts;
 };
 
 // Count the cells the region's predicate accepts (the achieved latticed-cell
@@ -258,8 +340,8 @@ struct LatticeGenObserver {
 // Generate `topo` over `region` with `radius`, pushing every triangle to `sink`
 // in a fixed traversal order, and return the emitted counts. Deterministic (no
 // RNG / threads / global state), so a streaming sink writes a byte-identical file
-// for identical inputs. Throws std::invalid_argument if `topo` is not Octet, if
-// the region is degenerate (nx/ny/nz < 1 or cell_mm <= 0), if nseg < 3, or if a
+// for identical inputs. Throws std::invalid_argument if `topo` is not a known
+// enum value, if the region is degenerate (nx/ny/nz < 1 or cell_mm <= 0), if nseg < 3, or if a
 // non-positive radius is produced. `sink` may stream to disk (flat peak memory)
 // or accumulate a MeshSink (bounded meshes / tests).
 LatticeGenStats generate_lattice(LatticeGenTopology topo,
@@ -268,6 +350,87 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo,
                                  TriangleSink& sink,
                                  const LatticeSkinSpec& skin = LatticeSkinSpec{},
                                  const LatticeGenObserver* observer = nullptr);
+
+// ★ THE RIM ON A REAL PART (the reviewer's ruling 11-08 (A)). The analytic rim above
+// needs two flat CAD faces in the lattice boundary, and a run's boundary has none (M4), so
+// a run's rim rides the SHARP EDGES of the surface it ships instead (feature_edges.hpp):
+//   * one tube per chain, at the skin radius (the local strut's, never under the skin's
+//     printable clamp), its diameter rounded UP to a whole number of line widths
+//     (Kedziora 2023: whole line widths print as stated);
+//   * at a convex edge the tube lies tangent to both faces from inside, `inset_mm` past
+//     tangency; at a concave edge it lies along the corner line, the same distance in;
+//   * every piece is clipped against the boundary like any strut (the clip proves it
+//     inside), with a ball at each kept span's ends so the pieces of a chain join;
+//   * with `tie_ends` (the open finish: no shell holds the cut ends), each cut end within
+//     one cell of a laid rim is tied to the nearest point of its centre line by a strut
+//     at the cut strut's own radius, clipped the same way; an end the rim already
+//     touches needs none.
+// It is DRESSING: the caller counts it in mass only, never in strength.
+struct LatticeMeshRimChain {
+  std::vector<Vec3> points;              // in order; a closed loop does not repeat its start
+  std::vector<Vec3> left_normal, right_normal;  // per segment, unit, outward
+  std::vector<char> convex;              // per segment
+  bool closed = false;
+};
+struct LatticeMeshRimSpec {
+  std::vector<LatticeMeshRimChain> chains;
+  double line_width_mm = 0.0;   // > 0: the tube's diameter is a whole number of these
+  double inset_mm = 0.02;       // past tangency, so the clip has a margin to certify
+  // > 0: SEAT each station in the clip base. The edge comes from a clean surface (the
+  // part's own mesh, or the CAD-projected design), but the clip base is the shell the file
+  // carries, which sits up to about a voxel off it and chamfers a convex edge. A station
+  // the base does not hold with r + inset_mm to spare moves inward along the edge's
+  // bisector until it does, at most this far; one that cannot is left where it was (the
+  // clip then drops what lies outside) and counted.
+  double max_seat_mm = 0.0;
+  // > 0 (with max_seat_mm): a run longer than this gets stations along it, this far
+  // apart at most, so a straight edge between two corners is seated along its length,
+  // not only at its ends. A corner of three faces never seats (moving along one edge's
+  // bisector does not clear the third face), so a two-point chain left unseated at both
+  // ends lost its whole length to the clip wherever the voxel shell sat in from the
+  // edge (the coupon's tongue end at resolution 64: two edges clipped away, two laid
+  // under 0.3 of 12 mm). The voxel spacing is the natural choice.
+  double station_spacing_mm = 0.0;
+};
+// ★ (A), the OPEN finish: a cut strut end near a sharp edge (its position and the strut's
+// radius), recorded as the lattice is laid; the rim then ties it to its own centre line.
+struct LatticeRimTieEnd {
+  Vec3 pos;
+  double r = 0.0;
+};
+struct LatticeMeshRimReport {
+  long long chains = 0, chains_laid = 0, chains_clipped_away = 0;
+  // The rim dresses the LATTICE: a piece whose cell region.latticed leaves solid is not
+  // laid (that edge is a solid edge already) and is counted here; a chain lying wholly on
+  // solid material is chains_on_solid, never chains_clipped_away.
+  long long chains_on_solid = 0;
+  double length_on_solid_mm = 0.0;
+  long long spans = 0, joints = 0;
+  // the open finish's ties: cut ends within one cell of a laid rim
+  long long tie_ends = 0, ties_laid = 0, ties_touching = 0, ties_out_of_reach = 0,
+            ties_clipped_away = 0;
+  double tie_length_mm = 0.0;
+  double length_laid_mm = 0.0;
+  // seating (max_seat_mm > 0): stations checked, moved in, and left (no room within reach)
+  long long stations = 0, stations_seated = 0, stations_unseated = 0;
+  double seat_max_mm = 0.0;
+  double diameter_min_mm = 0.0, diameter_max_mm = 0.0;
+  int line_widths_min = 0, line_widths_max = 0;
+};
+LatticeGenStats generate_mesh_rims(const LatticeRegion& region, const LatticeRadiusField& radius,
+                                   TriangleSink& sink, const LatticeSkinSpec& skin,
+                                   const LatticeMeshRimSpec& spec,
+                                   LatticeMeshRimReport* report = nullptr,
+                                   const LatticeGenObserver* observer = nullptr,
+                                   const std::vector<LatticeRimTieEnd>* tie_ends = nullptr);
+
+// The RIM loops alone (the skin's first pass), for a lattice with no struts: the sheet
+// lattices (tpms_gen.hpp) take the Rim finish this way (R8). Any skin mode but None emits
+// the rims; Diagrid's anchored net needs strut landings and is not emitted here.
+LatticeGenStats generate_lattice_rims(const LatticeRegion& region,
+                                      const LatticeRadiusField& radius, TriangleSink& sink,
+                                      const LatticeSkinSpec& skin,
+                                      const LatticeGenObserver* observer = nullptr);
 
 // ── SWEPT CELL SIZE: one pass per dyadic level (handoff 2026-08-01-lattice-cell-
 //    size-sweep) ──────────────────────────────────────────────────────────────

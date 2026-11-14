@@ -81,7 +81,7 @@ final class RunModelTests: XCTestCase {
         XCTAssertEqual(RunProgress(rung: 0, rungCount: 1, iteration: 7).stageLabel,
                        "SIMP iteration 7")
         XCTAssertEqual(RunProgress(rung: 1, rungCount: 3, iteration: 12).stageLabel,
-                       "Variant 2 of 3 · SIMP iteration 12")
+                       "Result 2 of 3 · SIMP iteration 12")
     }
 
     // MARK: - honest progress readout math (run-progress-visibility)
@@ -511,8 +511,45 @@ final class RunModelTests: XCTestCase {
         model.start(request())
         XCTAssertTrue(minimizedDuringRun, "card is dismissed while the run continues")
         XCTAssertEqual(spy.willCount, 1)              // background assertion armed
-        XCTAssertEqual(spy.completions, ["Cube: 3 variants ready"])  // notified on completion
+        XCTAssertEqual(spy.completions, ["Cube: 3 results ready"])  // notified on completion
         XCTAssertFalse(model.isMinimized, "restored on completion so the result can surface")
+    }
+
+    /// ★ HIS iPAD (2026-10-26, problem 1): "If I open up the solver window, 'run in background' is greyed out, so now I can't
+    /// hide it again." Run → In Background → reopen the card → In Background must still be ENABLED and hide it again, as
+    /// often as he likes; the notifier is armed once.
+    func testInBackgroundStaysEnabledAfterReopeningAndHidesAgain() {
+        let spy = NotifierSpy()
+        let model = RunModel(scheduler: SynchronousRunScheduler(), notifier: spy)
+        var checks: [Bool] = []
+        model.runner = { _, progress, _ in
+            _ = progress(0, 3, 1)
+            XCTAssertTrue(model.canSendToBackground, "first time: enabled")
+            model.runInBackground()
+            model.restore()                                     // reopen the solver window to check on it
+            checks.append(model.canSendToBackground)            // ★ must still be enabled
+            model.runInBackground()                             // hide it again
+            checks.append(model.isMinimized)
+            model.restore(); model.runInBackground()            // and again
+            checks.append(model.isMinimized)
+            return self.accepted(count: 3)
+        }
+        model.start(request())
+        XCTAssertEqual(checks, [true, true, true], "★ In Background stays enabled and hides the card every time")
+        XCTAssertEqual(spy.willCount, 1, "the background assertion is armed once")
+        XCTAssertFalse(model.canSendToBackground, "no run, nothing to send to the background")
+        // ★ and after an app relaunch: the run comes back REATTACHED, and the same sequence holds
+        checks = []
+        model.start(request(), remote: true, reattached: true)
+        XCTAssertEqual(checks, [true, true, true], "★ after a relaunch too")
+    }
+
+    /// The button's enablement is the model's, not the latch (source pin): the card reads `canSendToBackground`.
+    func testTheCardReadsCanSendToBackground() throws {
+        var u = URL(fileURLWithPath: #filePath); for _ in 0..<3 { u.deleteLastPathComponent() }
+        let src = try String(contentsOf: u.appendingPathComponent("Sources/TopOptFlows/RunScreen.swift"), encoding: .utf8)
+        XCTAssertTrue(src.contains("isEnabled: model.canSendToBackground"))
+        XCTAssertFalse(src.contains("isEnabled: !model.runningInBackground"))
     }
 
     func testRestoreReopensAMinimizedRun() {
@@ -564,7 +601,7 @@ final class RunModelTests: XCTestCase {
         }
         model.start(request())
         XCTAssertEqual(spy.willCount, 0, "no background assertion for a foreground run")
-        XCTAssertEqual(spy.completions, ["Cube: 2 variants ready"],
+        XCTAssertEqual(spy.completions, ["Cube: 2 results ready"],
                        "an observed remote completion notifies")
     }
 

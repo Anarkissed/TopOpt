@@ -1,0 +1,5 @@
+LAW octet: S=2, 24 struts/cell. CONVERGED = 50-step bisection on the solid fraction (2^20 Halton samples) -> the landed table; B3 = 34-step bisection on the vpc48 voxel density (octet's method), for comparison
+  [writing /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/oct/ends/octet_law.csv]
+  rho    r/L       rho       d@4mm    | B3 d     B3 rho48  B3 gap  | K-rho     K gap   | as-built  gap    
+  0.04   0.030439  0.04500   0.2435   | 0.2500   0.02894   +2.66   | 0.04447   -1.17   | 0.04075   -9.45  
+  0.95   0.227525  0.95000   1.8202   | 1.8162   0.95284   -0.22   | 2.48484   +161.56 | 0.93417   -1.67  

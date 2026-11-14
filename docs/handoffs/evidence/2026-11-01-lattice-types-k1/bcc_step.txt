@@ -1,0 +1,5 @@
+  [writing ../docs/handoffs/evidence/2026-11-01-lattice-types-k1/bcc_step.csv]
+STEP bcc at rho 0.4017 (band middle), S=8 mm, production generator
+  uniform_4x4x4              prims    701  components   1  ends   1024  dangling    0  -> PASS
+  doubled_S|S/2              prims    800  components   1  ends   1152  dangling    0  -> PASS
+  stepped_S|2S/3             prims    406  components   1  ends    560  dangling    0  -> PASS

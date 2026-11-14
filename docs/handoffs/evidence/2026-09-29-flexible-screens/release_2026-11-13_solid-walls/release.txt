@@ -1,0 +1,17 @@
+# Release 940fc5ab — 2026-11-13 solid-walls (the solid view's walls, 8c003fa1), app only
+# Core and worker unchanged: fingerprint 6da1b6c3bb0a; "fingerprint": "6da1b6c3bb0a"
+# Merged onto 713c7a36; the merged app tree equals solid-walls's, so its gate applies unchanged.
+# Commits (first parent of solid-walls since the release tip):
+#   7094a3c2 Solid view (362): the cut walls draw, and are on
+#   8c003fa1 Solid view (362): merge the release tip (evidence only)
+# Gates:
+#   21:19 built
+#   21:20 tests: exit 0; 32 passed, 0 failed, 0 skipped
+#   21:06 evidence 713c7a36 pushed; release 47c878f9 DONE
+#   21:21 checks ok: solid-walls 8c003fa1, 2 commit(s), app-only, onto 713c7a36, fingerprint 6da1b6c3bb0a
+#   21:21 merged 940fc5ab; app tree == solid-walls's, fingerprint 6da1b6c3bb0a
+#   21:21 waiting for HEAVY.lock (free)
+#   21:21 lock taken (25 GB free)
+#   21:26 iPad device build green; lock released
+#   21:26 pushed 940fc5ab
+#   21:26 worker /health "fingerprint": "6da1b6c3bb0a" (unchanged, no swap)

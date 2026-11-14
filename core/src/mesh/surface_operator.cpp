@@ -92,7 +92,8 @@ struct ConstraintCounters {
 
 // Constrain ONE vertex's proposed total displacement. `n` is its outward normal.
 Vec3 constrain_delta(const Vec3& d_in, const Vec3& n, TrustSign sign, double weight,
-                     double radius_mm, ConstraintCounters* c, std::size_t v) {
+                     double radius_mm, ConstraintCounters* c, std::size_t v,
+                     bool c2_hold = false) {
   if (sign == TrustSign::Pinned || weight == 0.0) {
     if (c != nullptr && sign == TrustSign::Pinned) c->ever_pinned[v] = 1;
     return Vec3{0.0, 0.0, 0.0};
@@ -106,8 +107,10 @@ Vec3 constrain_delta(const Vec3& d_in, const Vec3& n, TrustSign sign, double wei
     const bool violates = (sign == TrustSign::OutwardOnly && s < 0.0) ||
                           (sign == TrustSign::InwardOnly && s > 0.0);
     if (violates) {
-      d = sub(d, scale(n, s));
+      d = c2_hold ? Vec3{0.0, 0.0, 0.0} : sub(d, scale(n, s));
       if (c != nullptr) c->ever_c2[v] = 1;
+    } else if (c2_hold) {
+      d = scale(n, s);  // along its normal only: a one-sided vertex never slides
     }
   }
 
@@ -145,7 +148,7 @@ void constrain_field(const std::vector<Vec3>& proposed,
     double w = has_w ? k.vertex_weight[v] : 1.0;
     if (!(w > 0.0)) w = 0.0;  // also catches NaN
     if (w > 1.0) w = 1.0;
-    out[v] = constrain_delta(proposed[v], normals[v], s, w, radius_mm, c, v);
+    out[v] = constrain_delta(proposed[v], normals[v], s, w, radius_mm, c, v, k.c2_hold);
   }
 }
 

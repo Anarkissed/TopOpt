@@ -170,6 +170,8 @@ public enum LoadGroupHealth: Equatable, Sendable {
     case zeroForce
     /// Every face in the group is likely to tag zero voxels at this resolution.
     case mayNotRegister
+    /// ★ A Push or Pull with no single direction (2026-10-09), with the reason in words.
+    case noDirection(String)
 
     /// A group in either non-ok state contributes nothing to the run.
     public var isDead: Bool { self != .ok }
@@ -208,6 +210,16 @@ public enum LoadCasePreflight {
     public static func evaluate(_ diagnoses: [LoadGroupDiagnosis],
                                 qualityTitle: String, spacingMM: Double) -> Verdict {
         guard !diagnoses.isEmpty else { return .allow }
+        // ★★ A LOAD WITH NO DIRECTION BLOCKS, ALWAYS (2026-10-09): unlike a dead load, it is not
+        // "optimize without it" — the user put a force there and the run would drop it or point it
+        // somewhere he never said. Its own words, first.
+        let undirected = diagnoses.compactMap { d -> String? in
+            if case .noDirection(let why) = d.health { return why }
+            return nil
+        }
+        if !undirected.isEmpty {
+            return .block("Can’t optimize — " + undirected.joined(separator: " "))
+        }
         let dead = diagnoses.filter { $0.health.isDead }
         if dead.isEmpty { return .allow }
         if dead.count == diagnoses.count {

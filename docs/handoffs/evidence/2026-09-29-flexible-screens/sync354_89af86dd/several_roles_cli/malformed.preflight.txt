@@ -1,0 +1,4 @@
+$ topopt-cli preflight malformed.job.json --materials core/src/materials/materials.json
+exit 1
+topopt-cli: core b21c5d9a8311 (dirty=false), built Oct 24 2026 21:10:36
+topopt-cli: job.json: "face_protections entry" must be a number

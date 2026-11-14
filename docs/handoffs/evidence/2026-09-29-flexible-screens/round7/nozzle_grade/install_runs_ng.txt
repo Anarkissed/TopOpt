@@ -1,0 +1,11 @@
+Installer run at 91591c7f (one "Nozzle °C" row + temperature grade; includes Auto floor + shape grading), 15 classes + 3 kit law classes once (executed/failed):
+chunk_aa: FlexibleNozzleGradeTests FlexibleManualP1Tests FlexibleM1ManualTests FlexibleManualFollowUpTests -> 18/0
+chunk_ab: FlexibleM2PredictTests FlexibleAutoFloorShapeTests FlexibleRowCopyTests FlexibleSettingsRound4Tests -> 27/0
+chunk_ac: FlexibleBatchBReviewUXTests FlexibleI3LinkSimTests FlexibleI2AttachTests FlexibleR7SettingsTests -> 43/0
+chunk_ad: FlexibleManualP2Tests FlexibleSettingsPageHostedTests FlexibleSquishCopyTests -> 8/1 (FlexibleSettingsPageHostedTests 11l landscape, known)
+chunk_kit: FlexibleSquishModulusTests FlexibleSquishStepsTests FlexibleSquishFETests -> 20/0
+Total 116 executed, 1 failed (known), 0 skipped.
+Goldens (FlexibleAngledGoldenTests 13 tests): deterministic 38 identical / 0 DIFFERS; unseeded 32 identical / 0 DIFFERS / 1 PART-SKIP.
+Stage-job hashes: cmp-identical (whole file) to round7/auto_floor/stage_job_hashes_af.txt (Auto's job bytes unchanged).
+xcodebuild Debug (flexA1, iPad Pro 13 Flexible-A1): BUILD SUCCEEDED at 91591c7f; built TopOpt.debug.dylib sha256 d0e4d4c2252d332ec6f38ae4e73a4b807fbca0a90e9ae0dc8e4d144f69b62bb2 (98665056 bytes); strings 'Shown in the sim only', 'Estimate past tested data', 'softest tested lattice' present.
+pgrep -f TopOpt.app/TopOpt: pid 51427 (started Fri Oct 23 03:03:29) - the app WAS running; NOT terminated, NOT installed. The build is ready to install.

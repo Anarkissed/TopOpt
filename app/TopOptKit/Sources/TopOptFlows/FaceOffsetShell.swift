@@ -174,9 +174,12 @@ public struct FaceOffsetShell: Equatable, Sendable {
                             byMM: expandMM)
 
         // ── 3. the curvature clamp (§2b — it cannot self-intersect) ─────────────
+        // ★ the far end goes DEEPER by the expand (his 2026-09-23: every direction but
+        // the home face), exactly as the emitted region does (`spec(for:…expandMM:)`)
+        let wantDeep = Swift.max(0, want + Swift.max(-want, expandMM))
         let limit = curvatureLimitMM(base: grown, inward: normal, indices: idx)
-        let reached = limit > 0 ? Swift.min(want, limit) : want
-        let clamped = reached < want - 1e-9 ? want : nil
+        let reached = limit > 0 ? Swift.min(wantDeep, limit) : wantDeep
+        let clamped = reached < wantDeep - 1e-9 ? wantDeep : nil
 
         var out = [SIMD3<Float>](repeating: .zero, count: grown.count)
         for k in 0..<grown.count { out[k] = grown[k] + normal[k] * Float(reached) }
@@ -348,7 +351,16 @@ public struct FaceOffsetShell: Equatable, Sendable {
             // 1. NORMAL — outward is −inward, so `+e` moves "up".
             let cosMean = cosCount[k] > 0 ? cosSum[k] / cosCount[k] : 1
             let miter = Swift.min(miterLimit, 1 / Swift.max(0.2, Double(cosMean)))
-            var d = -n * Float(e * miter)
+            // ★★ THE HOME FACE STAYS WHERE IT IS (his 2026-09-23 00:25: "the face should
+            // always be the position of the face-prism's face. They should ALWAYS align";
+            // 00:40: "the home face which the face-prism comes from should always be
+            // in-line"). The 08-18 rule moved every vertex `e` OUT along its normal — the
+            // prism's mouth sat `e` behind the face, "moving the face-prism BACKWARDS".
+            // Expand now grows the patch SIDEWAYS (the rim co-normal below) and the far
+            // end DEEPER (`build` offsets by depth + expand); the base never leaves the
+            // surface.
+            _ = n; _ = miter
+            var d = SIMD3<Float>(repeating: 0)
             // 2. LATERAL — rim only, along the bisector of its edges' co-normals,
             //    with the IN-SURFACE MITER so that every EDGE advances exactly
             //    `e`. For k unit vectors summing to `bis`, the bisector needs

@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <limits>
 #include <string>
 #include <vector>
@@ -245,7 +246,22 @@ FixedDesignAnalysis analyze_fixed_design(
   // malformed-problem throws (bad index, void-only system) are NOT caught and still
   // propagate.
   SimpCompliance sc;
+  // REAL BOLTS (bearing anchors, the reviewer's brief of 2026-10-25 20:10): which side
+  // of each anchor presses is not known in advance, so solve, release the springs in
+  // tension, and re-solve until the contact set stops changing, at most
+  // kContactRounds solves. Glued anchors (no spring entry): one solve, as before.
+  constexpr int kContactRounds = 6;
+  const bool bearing = has_contact_springs(bcs);
+  std::vector<DirichletBC> contact_bcs;
+  if (bearing) contact_bcs = bcs;
+  const std::vector<DirichletBC>& B = bearing ? contact_bcs : bcs;
+  // The voxels the solve held at the floor as LOOSE (empty when none, and on
+  // every path that is not the matrix-free solve). With bearing anchors, the LAST
+  // contact solve's: the set it was solved with is the one the field belongs to.
+  std::vector<char> loose;
   try {
+   for (;;) {
+    loose.clear();
     if (has_lattice) {
       // Composite solve: solid voxels use the scalar-penalized isotropic modulus
       // E(rho) (bit-identical to what simp_compliance builds for them); latticed
@@ -263,14 +279,48 @@ FixedDesignAnalysis analyze_fixed_design(
             if (!lat_mask[e]) elem_youngs[e] = simp_youngs(params, density[e]);
           }
       sc.solution = fea_solve_cg_lattice(grid, elem_youngs, lat_mask, lat_c11,
-                                         lat_c12, lat_c44, params.poisson, bcs,
+                                         lat_c12, lat_c44, params.poisson, B,
                                          loads, cg_tolerance, cg_max_iterations,
                                          &sc.cg);
     } else {
-      sc = simp_compliance(grid, params, density, bcs, loads, cg_tolerance,
+      // THE CONNECTION RULE (ruling 2026-10-25), CERTIFIED: under this forbid
+      // scope the matrix-free solve calls a piece LOOSE only if it is not even
+      // 26-connected (edge / corner contacts included) to a support or a load —
+      // the connectivity load_path_connected accepts the part on — so a piece
+      // hinged to the body is solved at its true stiffness and its stress is
+      // read here (review 2026-10-26, R4). A loose piece is solved at the floor
+      // modulus and carries no load, so the stress loop below reads ZERO there
+      // (at the floor its strain is the void's, which E_solid would turn into a
+      // stress the piece does not carry).
+      FeaIslandDropForbid no_island_drop;
+      sc = simp_compliance(grid, params, density, B, loads, cg_tolerance,
                            cg_max_iterations, /*initial_guess=*/nullptr,
                            /*solver=*/nullptr, solver_kind);
+      if (solver_kind == SolverKind::MultigridCG_Matfree) {
+        const std::vector<int>& lv = fea_matfree_last_dropped_islands();
+        if (!lv.empty()) {
+          loose.assign(grid.voxel_count(), 0);
+          for (int e : lv) loose[static_cast<std::size_t>(e)] = 1;
+        }
+      }
     }
+    out.solve_iterations += sc.cg.iterations;
+    out.solve_ms += sc.t_solve_ms;
+    if (!bearing) break;
+    ++out.contact_rounds;
+    std::vector<DirichletBC> next = contact_bcs;
+    const ContactUpdate cu = contact_update(next, sc.solution.u);
+    std::fprintf(stderr, "[contact] certification solve %d: %d pressing, %d let go, %d changed%s\n",
+                 out.contact_rounds, cu.engaged, cu.released, cu.changed,
+                 cu.kept_last ? " (every anchor pulled away: last set kept)" : "");
+    out.contact_kept_last = out.contact_kept_last || cu.kept_last;
+    if (cu.changed == 0) break;  // settled: the field below is this set's
+    if (out.contact_rounds >= kContactRounds) {
+      out.contact_settled = false;  // reported, never passed silently
+      break;
+    }
+    contact_bcs = std::move(next);
+   }
   } catch (const SolverNonConvergence& e) {
     out.non_convergent = true;
     out.non_convergent_iteration = e.iterations;
@@ -282,6 +332,35 @@ FixedDesignAnalysis analyze_fixed_design(
            "non-convergence rejection: a failed certification solve must never "
            "certify a design");
     return out;
+  }
+
+  if (bearing) {
+    // The set the field was solved with, and how much of the load its engaged
+    // springs carry (the rest is the stabilisation's: near 1 when the supports hold).
+    Vec3 R{0.0, 0.0, 0.0}, T{0.0, 0.0, 0.0}, F{0.0, 0.0, 0.0};
+    for (const DirichletBC& b : contact_bcs) {
+      if (!(b.spring > 0.0) || !b.contact) continue;
+      if (b.released) { ++out.contact_released; continue; }
+      ++out.contact_engaged;
+      const std::size_t d = 3 * static_cast<std::size_t>(b.node);
+      const std::vector<double>& u = sc.solution.u;
+      const double un = u[d] * b.normal.x + u[d + 1] * b.normal.y + u[d + 2] * b.normal.z;
+      R.x += b.spring * un * b.normal.x;
+      R.y += b.spring * un * b.normal.y;
+      R.z += b.spring * un * b.normal.z;
+      T.x += b.spring_tangent * (u[d] - un * b.normal.x);
+      T.y += b.spring_tangent * (u[d + 1] - un * b.normal.y);
+      T.z += b.spring_tangent * (u[d + 2] - un * b.normal.z);
+    }
+    const Vec3 RT{R.x + T.x, R.y + T.y, R.z + T.z};
+    const double rt = std::sqrt(RT.x * RT.x + RT.y * RT.y + RT.z * RT.z);
+    out.contact_tangent_share =
+        rt > 0.0 ? std::sqrt(T.x * T.x + T.y * T.y + T.z * T.z) / rt : 0.0;
+    out.contact_held_by_sliding = out.contact_tangent_share > kAnchorsSlidingShare;
+    for (const NodalLoad& l : loads)
+      (l.component == 0 ? F.x : l.component == 1 ? F.y : F.z) += l.value;
+    const double fm = std::sqrt(F.x * F.x + F.y * F.y + F.z * F.z);
+    out.contact_load_share = fm > 0.0 ? std::sqrt(R.x * R.x + R.y * R.y + R.z * R.z) / fm : 0.0;
   }
 
   // Peak stresses over the PRINTED material (density > iso), using the solid
@@ -352,6 +431,12 @@ FixedDesignAnalysis analyze_fixed_design(
           lat_rho_hi = std::max(lat_rho_hi, rho);
           lat_max_vm = std::max(lat_max_vm, st.von_mises);
           effective_material += rho;
+        } else if (!loose.empty() && loose[idx]) {
+          // LOOSE: printed (it counts toward the mass) but connected through
+          // solid to no support or load, so it carries no load: zero stress,
+          // left out of the strength maxima and the interlayer field. The
+          // export's bridge / item-47 rules decide what happens to it.
+          effective_material += 1.0;
         } else {
           const Hex8Stress st = hex8_stress(params.youngs_modulus, params.poisson,
                                             grid.spacing, ue);
@@ -458,22 +543,36 @@ FixedDesignAnalysis analyze_fixed_design(
     // --- Strut-strength REPORT (task 2026-07-31-lattice-strut-strength-report).
     // REPORT ONLY, evaluated strictly AFTER `accepted`/`margin_effective` were
     // sealed above: the measured PR 259 law (strut_strength.hpp) applied to the
-    // latticed voxels' macro stress TENSORS from this same solve. Octet is the
-    // only topology with a measured law; others report nothing. The build
+    // latticed voxels' macro stress TENSORS from this same solve. Each type with
+    // its OWN measured law (strut_law_measured; ruling 11-08 (B)) is evaluated
+    // from it; a type without one reports nothing (and 2(a) below says so). The build
     // direction is passed through EXPLICITLY (bar L8) — the evaluator never reads
     // it from options, so an orientation scorer can re-call it per direction.
-    if (lattice_voxels > 0 && lattice->topology == LatticeTopology::Octet) {
+    if (lattice_voxels > 0 && strut_law_measured(lattice->topology)) {
       out.lattice_strut = evaluate_strut_strength(
-          out.stress_tensor_field, lat_mask, lattice->relative_density,
+          lattice->topology, out.stress_tensor_field, lat_mask, lattice->relative_density,
           build_dir, material.yield_strength_mpa, material.z_knockdown);
       out.lattice_strut_report = out.lattice_strut.evaluated;
       // Cells-per-member regime guard (bar L4): thinnest LATTICED member's span
       // in cells vs the floor homogenization needs. Reuses the width-aware
       // thickness field when that posture already measured it.
       if (lattice->cell_size_mm > 0.0) {
-        if (member_width_mm.empty())
-          member_width_mm = local_member_thickness_mm(
-              grid, density, kIso, kWidthAwareThicknessCapVoxels);
+        // ★ The width the grading law measured on the part's own surface, when it did
+        // (ruling 11-09): the staircase reads the steps of a curved face as thin
+        // members. Else the staircase, as before.
+        // ★ Rulings 11-09: the grading law's own width when the posture carries it; else
+        // the same measure (lattice_member_width_mm: the grid's outside void, convex
+        // corners joined to their member). Never the knockdown's field, which keeps its
+        // old, conservative reading.
+        const bool own_widths = lattice->member_width_mm.size() == lat_mask.size();
+        std::vector<double> guard_own;
+        if (!own_widths)
+          guard_own = lattice_member_width_mm(
+              grid, density, kIso, kWidthAwareThicknessCapVoxels,
+              lattice_cells_per_member_min(lattice->topology) * lattice->cell_size_mm,
+              lattice->cell_size_mm);
+        const std::vector<double>& guard_width =
+            own_widths ? lattice->member_width_mm : guard_own;
         // SWEPT postures (handoff 2026-08-01-lattice-cell-size-sweep) carry a
         // per-voxel cell size, and then the honest question is each voxel's span at
         // ITS OWN cell rather than one number for the part. An EMPTY field is the
@@ -486,7 +585,7 @@ FixedDesignAnalysis analyze_fixed_design(
           const double ce = per_voxel_cell ? lattice->cell_size_field[e]
                                            : lattice->cell_size_mm;
           if (!(ce > 0.0)) continue;
-          const double cpm = member_width_mm[e] / ce;
+          const double cpm = guard_width[e] / ce;
           if (cpm < min_cpm) min_cpm = cpm;
         }
         out.lattice_min_cells_per_member = min_cpm;
@@ -609,7 +708,7 @@ FixedDesignAnalysis analyze_fixed_design(
       // in-plane term is invariant and comes back identical — U7's own check.
       if (out.lattice_strut_report) {
         out.lattice_strut = evaluate_strut_strength(
-            out.stress_tensor_field, lat_mask, lattice->relative_density,
+            lattice->topology, out.stress_tensor_field, lat_mask, lattice->relative_density,
             out.applied_build_dir, material.yield_strength_mpa,
             material.z_knockdown);
         out.lattice_strut_report = out.lattice_strut.evaluated;
@@ -635,6 +734,51 @@ FixedDesignAnalysis analyze_fixed_design(
       // orientation and are deliberately left alone.
     }
   }
+  // ── ★ A LATTICE IS NEVER "MARGIN INF, ACCEPTED" (ruling 11-06 2(a)) ──────────
+  // The margin above is the SOLID region's; latticed voxels are left out of it. With
+  // no solid voxel under stress it is unbounded, and a part latticed through read
+  // "margin inf, ACCEPTED" without its lattice ever being looked at (1,536 of 1,536
+  // voxels latticed, test_lattice_no_solid). There the latticed voxels carry the load,
+  // so they are certified by the measured strut law over the posture this solve read
+  // (on the run path, each voxel at min(the law's density, what the file holds)),
+  // folded in exactly as `gate_on_strut_strength` folds it. Where the law cannot apply
+  // (no measured law for the type, or below the cells-per-member floor) the answer is
+  // NOT CERTIFIED, in words. Last, after the orientation post-pass, so the scorer's
+  // as-built row still matches the verdict it priced; a job with any solid voxel under
+  // stress never enters.
+  if (has_lattice && out.lattice_voxels > 0 &&
+      !std::isfinite(out.margin_effective_solid_only)) {
+    const char* type = lattice_topology_name(lattice->topology);
+    char why[400];
+    why[0] = '\0';
+    if (!out.lattice_strut_report) {
+      std::snprintf(why, sizeof why,
+                    "Not certified: no solid part carries the load, so the lattice's own "
+                    "strength decides, and %s has no measured strut-strength law to check "
+                    "it with.",
+                    type);
+    } else if (out.lattice_strut_out_of_regime) {
+      std::snprintf(why, sizeof why,
+                    "Not certified: no solid part carries the load, so the lattice's own "
+                    "strength decides, and its thinnest latticed member is %.1f cells "
+                    "across, below the %.0f the strut-strength law is valid for.",
+                    out.lattice_min_cells_per_member,
+                    lattice_cells_per_member_min(lattice->topology));
+    } else if (!out.strut_gated) {
+      out.strut_gated = true;
+      out.lattice_strength_uncertified = false;
+      out.margin_effective = out.lattice_strut.margin_worst_case;
+      out.accepted = load_path_ok && (out.margin_effective >= margin_stop);
+    }
+    if (why[0] != '\0') {
+      out.lattice_not_certified = true;
+      out.lattice_not_certified_reason = why;
+      out.accepted = false;
+    }
+  }
+  // REAL BOLTS: anchors that hold the load only through the weak sliding springs are
+  // no support at all in that direction, so no margin measured on them is a pass.
+  if (out.contact_held_by_sliding) out.accepted = false;
   return out;
 }
 

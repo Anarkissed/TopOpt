@@ -1,0 +1,306 @@
+{
+  "flexible" : {
+    "beads_per_wall" : 1,
+    "faces" : [
+      {
+        "curve_centre_edge" : [
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "deepest_squish_mm" : 1,
+        "face_region_id" : 2000008,
+        "mode" : "centre_edge",
+        "role" : "loaded",
+        "skin_on" : true,
+        "weight_n" : 1
+      }
+    ],
+    "feel" : "springy",
+    "material_id" : "varioshore_tpu",
+    "min_extrudable_width_mm" : 0.45000000000000001,
+    "nozzle_temp_c" : "auto",
+    "regions" : [
+      {
+        "face_id" : 6,
+        "geometry" : {
+          "depth_mm" : 30.5,
+          "frame_u" : [
+            0,
+            0,
+            -1
+          ],
+          "frame_w" : [
+            -0,
+            1,
+            0
+          ],
+          "half_u_mm" : 59.5,
+          "half_w_mm" : 59.5,
+          "normal" : [
+            1,
+            0,
+            0
+          ],
+          "origin" : [
+            75,
+            0,
+            87.5
+          ],
+          "outline_uv" : [
+            [
+              [
+                59.5,
+                -47
+              ],
+              [
+                -59.5,
+                -47
+              ],
+              [
+                -59.5,
+                47
+              ],
+              [
+                59.5,
+                47
+              ]
+            ]
+          ]
+        },
+        "kind" : "face",
+        "role" : "include"
+      }
+    ],
+    "topology" : "auto"
+  },
+  "loads" : {
+    "build_dir" : [
+      -1,
+      0,
+      0
+    ],
+    "face_regions" : [
+      {
+        "add" : [
+          0
+        ],
+        "id" : 0,
+        "name" : "face 0"
+      },
+      {
+        "add" : [
+          1
+        ],
+        "id" : 1,
+        "name" : "face 1"
+      },
+      {
+        "add" : [
+          2
+        ],
+        "id" : 2,
+        "name" : "face 2"
+      },
+      {
+        "add" : [
+          3
+        ],
+        "id" : 3,
+        "name" : "face 3"
+      },
+      {
+        "add" : [
+          4
+        ],
+        "id" : 4,
+        "name" : "face 4"
+      },
+      {
+        "add" : [
+          5
+        ],
+        "id" : 5,
+        "name" : "face 5"
+      },
+      {
+        "add" : [
+          6
+        ],
+        "id" : 6,
+        "name" : "face 6"
+      },
+      {
+        "add" : [
+          7
+        ],
+        "id" : 7,
+        "name" : "face 7"
+      },
+      {
+        "add" : [
+          8
+        ],
+        "id" : 8,
+        "name" : "face 8"
+      },
+      {
+        "add" : [
+          9
+        ],
+        "id" : 9,
+        "name" : "face 9"
+      },
+      {
+        "add" : [
+          10
+        ],
+        "id" : 10,
+        "name" : "face 10"
+      },
+      {
+        "add" : [
+          11
+        ],
+        "id" : 11,
+        "name" : "face 11"
+      },
+      {
+        "add" : [
+          6
+        ],
+        "cuts" : [
+          {
+            "normal" : [
+              0,
+              1,
+              0
+            ],
+            "point" : [
+              75,
+              -47,
+              28
+            ],
+            "strict" : false
+          },
+          {
+            "normal" : [
+              0,
+              0,
+              -1
+            ],
+            "point" : [
+              75,
+              -47,
+              147
+            ],
+            "strict" : false
+          },
+          {
+            "normal" : [
+              0,
+              -1,
+              -0
+            ],
+            "point" : [
+              75,
+              47,
+              147
+            ],
+            "strict" : false
+          },
+          {
+            "normal" : [
+              -0,
+              0,
+              1
+            ],
+            "point" : [
+              75,
+              47,
+              28
+            ],
+            "strict" : false
+          }
+        ],
+        "id" : 2000008,
+        "name" : "Face 6 · lattice"
+      },
+      {
+        "add" : [
+          2
+        ],
+        "cuts" : [
+          {
+            "normal" : [
+              0,
+              1,
+              0
+            ],
+            "point" : [
+              75,
+              -47,
+              28
+            ],
+            "strict" : false
+          },
+          {
+            "normal" : [
+              0,
+              0,
+              -1
+            ],
+            "point" : [
+              75,
+              -47,
+              147
+            ],
+            "strict" : false
+          },
+          {
+            "normal" : [
+              0,
+              -1,
+              -0
+            ],
+            "point" : [
+              75,
+              47,
+              147
+            ],
+            "strict" : false
+          },
+          {
+            "normal" : [
+              -0,
+              0,
+              1
+            ],
+            "point" : [
+              75,
+              47,
+              28
+            ],
+            "strict" : false
+          }
+        ],
+        "id" : 2000009,
+        "name" : "Face 2 · lattice"
+      }
+    ]
+  },
+  "material" : "varioshore_tpu",
+  "mode" : "analyze",
+  "model" : "$ROOT\/DB254706-6972-40D2-9D61-43C6BAAEF7E9\/model.step",
+  "output" : {
+    "mesh_format" : "stl",
+    "mesh_prefix" : "unused",
+    "report" : "report.json"
+  },
+  "resolution" : 128
+}

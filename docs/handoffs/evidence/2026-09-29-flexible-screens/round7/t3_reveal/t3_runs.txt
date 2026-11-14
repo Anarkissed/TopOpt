@@ -1,0 +1,125 @@
+T3 · THE PANEL'S SCROLL RECODED, 2026-10-23, at a5003262 + working tree, scratch-path /tmp/r7x20b-build
+
+== RED (before; T1's runs, t1_tests/t1_runs.txt and the t12 install run) ==
+11l as opened: card 566–812 in the panel's scroll 202–796 (246 pt) ✗ OFF (scroll offset 0)
+
+== FIRST RUN AFTER THE RECODE (08:14:55) ==
+start 08:14:55
+build 0 08:15:20
+rig 0 08:15:41
+hosted 0 08:18:18
+ALLDONE
+FLEX-HOSTED
+  11l as opened: card 550–796 in the panel's scroll 202–796 (246 pt) ✓
+  11l top A: card 409–634 in the panel's scroll 207–796 (225 pt) ✓
+  11l top A · Stamp: card 300–796 in the panel's scroll 202–796 (496 pt) ✓
+  11l face 5 (last pressed): card 550–796 in the panel's scroll 202–796 (246 pt) ✓
+  11l face 4 (last row): card 728–782 in the panel's scroll 550–796 (54 pt) ✓
+  11p as opened: card 1088–1142 in the panel's scroll 910–1156 (54 pt) ✓
+  11p top A: card 769–994 in the panel's scroll 567–1156 (225 pt) ✓
+  11p top A · Stamp: card 498–994 in the panel's scroll 296–1156 (496 pt) ✓
+  11p face 5 (last pressed): card 910–1156 in the panel's scroll 546–1156 (246 pt) ✓
+  11p face 4 (last row): card 1088–1142 in the panel's scroll 910–1156 (54 pt) ✓
+  13p as opened: card 1270–1324 in the panel's scroll 1092–1338 (54 pt) ✓
+  13p top A: card 951–1176 in the panel's scroll 749–1338 (225 pt) ✓
+  13p top A · Stamp: card 680–1176 in the panel's scroll 478–1338 (496 pt) ✓
+  13p face 5 (last pressed): card 1092–1338 in the panel's scroll 728–1338 (246 pt) ✓
+  13p face 4 (last row): card 1270–1324 in the panel's scroll 1092–1338 (54 pt) ✓
+  13l as opened: card 926–980 in the panel's scroll 748–994 (54 pt) ✓
+  13l top A: card 607–832 in the panel's scroll 405–994 (225 pt) ✓
+  13l top A · Stamp: card 336–832 in the panel's scroll 202–994 (496 pt) ✓
+  13l face 5 (last pressed): card 748–994 in the panel's scroll 384–994 (246 pt) ✓
+  13l face 4 (last row): card 926–980 in the panel's scroll 748–994 (54 pt) ✓
+Test Suite 'Selected tests' started at 2026-10-23 08:18:18.566.
+
+== THE ONE RUN ==
+start 08:18:56 a5003262 + working tree
+build exit 0 08:18:57
+chunk_aa exit 0 08:26:48
+chunk_ab exit 0 08:35:35
+chunk_ac exit 0 08:42:58
+chunk_ad exit 0 08:53:29
+chunk_ae exit 0 08:56:20
+chunk_af exit 0 08:58:54
+golden det exit 0 08:59:10
+golden unseeded exit 0 08:59:27
+hashes exit 0 09:00:27
+hashes cmp vs t2_drawing/stage_job_hashes_t12i.txt (whole file): identical
+render exit 0 09:00:55
+ALLDONE 09:00:55
+classes run once (24): FlexibleBatchVHostedTests FlexibleEdgeGroupsHostedTests FlexibleFlatPrismHostedTests FlexibleGroupPaletteHostedTests FlexibleI2AttachHostedTests FlexibleLatticeSectionsHostedTests FlexibleR7E1ReviewHostedTests FlexibleR7E2HostedTests FlexibleR7RHostedTests FlexibleR7SettingsHostedTests FlexibleRevealScrollTests FlexibleRound5SettingsHostedTests FlexibleRound6HostedTests FlexibleRound7D1ReviewTests FlexibleRound7ScreenHostedTests FlexibleRound7ViewsHostedTests FlexibleRowCopyTests FlexibleSettingsPageHostedTests FlexibleSettingsRound4Tests FlexibleSettingsVerifyD1Tests FlexibleShownValuesTests FlexibleSqueezeGroupsReviewUITests FlexibleSqueezeGroupsUITests FlexibleSquishCopyTests
+chunk_aa.log: Executed 17 tests, with 1 test skipped and 0 failures (0 unexpected) in 468.942 (468.944) seconds
+chunk_ab.log: Executed 14 tests, with 0 failures (0 unexpected) in 524.236 (524.239) seconds
+chunk_ac.log: Executed 14 tests, with 0 failures (0 unexpected) in 441.223 (441.226) seconds
+chunk_ad.log: Executed 37 tests, with 0 failures (0 unexpected) in 629.135 (629.140) seconds
+chunk_ae.log: Executed 30 tests, with 0 failures (0 unexpected) in 169.320 (169.323) seconds
+chunk_af.log: Executed 14 tests, with 0 failures (0 unexpected) in 151.079 (151.081) seconds
+total: 126 executed, 1 skipped (opt-in: FlexibleEdgeGroupsHostedTests testEvidenceOnHisPad), 0 failed
+golden_det: identical 38 DIFFERS 0 PART-SKIP 0
+golden_unseeded: identical 32 DIFFERS 0 PART-SKIP 1
+stage-job hashes: stage_job_hashes_t3.txt cmp-identical to t2_drawing/stage_job_hashes_t12i.txt (31 lines)
+
+FLEX-HOSTED
+  11l as opened: card 550–796 in the panel's scroll 202–796 (246 pt) ✓
+  11l top A: card 409–634 in the panel's scroll 207–796 (225 pt) ✓
+  11l top A · Stamp: card 300–796 in the panel's scroll 202–796 (496 pt) ✓
+  11l face 5 (last pressed): card 550–796 in the panel's scroll 202–796 (246 pt) ✓
+  11l face 4 (last row): card 728–782 in the panel's scroll 550–796 (54 pt) ✓
+  11p as opened: card 1088–1142 in the panel's scroll 910–1156 (54 pt) ✓
+  11p top A: card 769–994 in the panel's scroll 567–1156 (225 pt) ✓
+  11p top A · Stamp: card 498–994 in the panel's scroll 296–1156 (496 pt) ✓
+
+  11l Group 1 (faces): trash 44×44 · name 19 pt · chips depthChip-2000003
+  11l Group 2 (faces): trash 44×44 · name 19 pt · chips depthChip-4
+  11l Group 3 (faces): trash 44×44 · name 19 pt · chips depthChip-3
+  11l Group 4 (edges): trash 44×44 · name 19 pt · chips 
+  11l: Group 2's name above the scroll's view ((138.0, 31.5, 57.0, 19.0) vs (118.0, 202.0, 372.0, 594.0)) — not clicked
+  11l rename field 0×0
+  11p Group 1 (faces): trash 44×44 · name 19 pt · chips 
+  11p Group 2 (faces): trash 44×44 · name 19 pt · chips depthChip-4
+  11p Group 3 (faces): trash 44×44 · name 19 pt · chips depthChip-3
+  11p Group 4 (edges): trash 44×44 · name 19 pt · chips 
+  11p rename field 190×26
+  13p Group 1 (faces): trash 44×44 · name 19 pt · chips 
+  13p Group 2 (faces): trash 44×44 · name 19 pt · chips depthChip-4
+  13p Group 3 (faces): trash 44×44 · name 19 pt · chips depthChip-3
+  13p Group 4 (edges): trash 44×44 · name 19 pt · chips 
+  13p rename field 190×26
+  13l Group 1 (faces): trash 44×44 · name 19 pt · chips depthChip-2000003
+  13l Group 2 (faces): trash 44×44 · name 19 pt · chips depthChip-4
+  13l Group 3 (faces): trash 44×44 · name 19 pt · chips depthChip-3
+  13l Group 4 (edges): trash 44×44 · name 19 pt · chips 
+  13l control: chips over the edges tab ["depthChip-2000003"]
+  13l: Group 2's name above the scroll's view ((138.0, 154.5, 57.0, 19.0) vs (118.0, 202.0, 372.0, 792.0)) — not clicked
+  13l rename field 0×0
+  control 1: names ["Palms", "Thumbs", "WWWWWWWWWWWW"] · fields ["groupNameField-1"]
+  control 2: rail WWWWWWWWWWWW
+  control 3: one line 10 pt tall
+FLEX-REVEAL tall 700 pt card: card 240–940 in the scroll 240–834 (594 pt) offset 364 ✗ OFF
+FLEX-REVEAL selection
+  11l as opened (last row): card 588–834 in the scroll 240–834 (594 pt) offset 16 ✓
+  11l first row: card 240–486 in the scroll 240–834 (594 pt) offset 0 ✓
+  11l last row again: card 588–834 in the scroll 240–834 (594 pt) offset 16 ✓
+  11l the row above (in view): card 536–782 in the scroll 240–834 (594 pt) offset 16 ✓
+  11l the card grows to 330: card 504–834 in the scroll 240–834 (594 pt) offset 48 ✓
+  11p as opened (last row): card 854–1100 in the scroll 240–1100 (860 pt) offset 374 ✓
+  11p first row: card 240–486 in the scroll 240–1100 (860 pt) offset 0 ✓
+  11p last row again: card 854–1100 in the scroll 240–1100 (860 pt) offset 374 ✓
+  11p the row above (in view): card 802–1048 in the scroll 240–1100 (860 pt) offset 374 ✓
+  11p the card grows to 330: card 770–1100 in the scroll 240–1100 (860 pt) offset 406 ✓
+  13p as opened (last row): card 1034–1280 in the scroll 240–1280 (1040 pt) offset 506 ✓
+  13p first row: card 240–486 in the scroll 240–1280 (1040 pt) offset 0 ✓
+  13p last row again: card 1034–1280 in the scroll 240–1280 (1040 pt) offset 506 ✓
+  13p the row above (in view): card 982–1228 in the scroll 240–1280 (1040 pt) offset 506 ✓
+  13p the card grows to 330: card 950–1280 in the scroll 240–1280 (1040 pt) offset 538 ✓
+FLEX-REVEAL shrink
+  control (old ask): card 588–834 in the scroll 240–834 (594 pt) offset 16 ✓
+  FlexibleRevealScroll: card 588–834 in the scroll 240–834 (594 pt) offset 16 ✓
+  11l: panel x 24–504 · rail x 38–110 · tab x 118–490 · 5 tabs · titles Exit → Save & Exit
+  11p: panel x 24–504 · rail x 38–110 · tab x 118–490 · 5 tabs · titles Exit → Save & Exit
+  13p: panel x 24–504 · rail x 38–110 · tab x 118–490 · 5 tabs · titles Exit → Save & Exit
+  13l: panel x 24–504 · rail x 38–110 · tab x 118–490 · 5 tabs · titles Exit → Save & Exit
+
+== RENDERS (render2, face 5 selected as the hosted test opens it) ==
+FLEX-P1F T3_01_11l_as_opened.png: selected Face 5 · card 550–796 in the panel's scroll 202–796 (594 pt) ✓
+  T3_02_13p_as_opened.png: selected Face 5 · card 1092–1338 in the panel's scroll 728–1338 (610 pt) ✓

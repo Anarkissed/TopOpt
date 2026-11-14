@@ -1,0 +1,8 @@
+BEND fcc: cell S=5.0 mm, vpc=12, cantilever 6 cells long, target rho 0.30 -> periodic cell rho 0.1991 (r/L 0.12500, 3.0 vox/strut), C11=233.08 C12=98.81 C44=85.01 Zener=1.266
+  [writing ../docs/handoffs/evidence/2026-11-01-lattice-types-k1/fcc_bend.csv]
+    nc=1  block rho 0.1991  K_res 4.1146  K_hom 6.3370  err +54.01 %  dof 37011  255 ms  NO-GO
+    nc=2  block rho 0.1991  K_res 58.2678  K_hom 63.4652  err +8.92 %  dof 136875  927 ms  NO-GO
+    nc=3  block rho 0.1991  K_res 226.7742  K_hom 236.1897  err +4.15 %  dof 299811  2139 ms  NO-GO
+    nc=4  block rho 0.1991  K_res 545.5346  K_hom 559.6103  err +2.58 %  dof 525819  3955 ms  NO-GO
+    nc=5  block rho 0.1991  K_res 1021.6187  K_hom 1039.9857  err +1.80 %  dof 814899  6644 ms  GO
+    nc=6  block rho 0.1991  K_res 1651.1620  K_hom 1672.9345  err +1.32 %  dof 1167051  10004 ms  GO

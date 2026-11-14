@@ -1,0 +1,7 @@
+DG-PROJECT M2 verticalStand THICK (converted: Default Grade) algorithm doubled stage Optional(TopOptFlows.LatticeStageMode.structural) step-halves true density sim cells auto
+DG-PLAN doubled: 4634 cell(s) over 2 region(s) | 12.00=40 6.00=86 4.67=2724 3.00=1784
+DG-PLAN per region: r1=2724 r2=1910
+DG-OVERLAPS 0 same-region pair(s)
+DG-REGIONS voxel=1.838 mm | r1 cells=2724 [4.67=2724] prism=259279 mm3 uncovered=0 mm3 (0.00%) | r2 cells=1910 [12.00=40 6.00=86 3.00=1784] prism=123482 mm3 uncovered=0 mm3 (0.00%)
+DG-SLOT-ORIGINS 2 region(s) carry slot_origin_mm
+DG-PLAN-BASES 2 region(s) carry plan_base_cell_mm | job region 1: 4.6667 mm; job region 2: 12.0000 mm

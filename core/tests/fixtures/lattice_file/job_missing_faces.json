@@ -1,0 +1,13 @@
+{
+  "_comment": "The same job with a region whose face the 10 mm cube does not have (it has faces 0 to 5): refused, exit 3, one plain line. Run by the cli_lattice_file_refused test.",
+  "mode": "lattice_file",
+  "model": "../step/cube.step",
+  "layout": {
+    "region_ids": [2],
+    "region_no_lattice": [0],
+    "region_depth_mm": [6],
+    "region_expand_mm": [0],
+    "region_face_counts": [1],
+    "region_faces": [40]
+  }
+}

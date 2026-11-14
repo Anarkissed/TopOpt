@@ -1,0 +1,6 @@
+  analysis.json                        REAL DIFFERENCE: ['/model']
+  run_info.json                        differs only in timing/identity leaves
+VERDICT: 4 files, 2 byte-identical, 1 real differences
+  analysis.json                        REAL DIFFERENCE: ['/model']
+  run_info.json                        differs only in timing/identity leaves
+VERDICT: 4 files, 2 byte-identical, 1 real differences

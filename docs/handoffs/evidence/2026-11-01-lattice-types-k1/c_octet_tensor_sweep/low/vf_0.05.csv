@@ -1,0 +1,2 @@
+target_vf,vpc_row,vpc_ref,rho_row,rho_ref,r_unit,vox_per_strut,C11,C12,C44_xy,C33,C44_yz,E100_row_MPa,E100_ref_interp_MPa,drift_pct,zener,axial_aniso_pct,shear_aniso_pct,cubic,ndof_active,cg_iters,solve_ms,peak_rss_mb,converged,validated
+0.050,96,128,0.04959,0.05037,0.033350,6.403,36.2534,18.4178,17.2190,36.2534,17.2190,23.8441,24.2036,-1.485,1.9309,0.000,0.000,1,198588,228,9820,2521.1,1,1

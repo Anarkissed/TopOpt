@@ -237,6 +237,61 @@ final class LatticeRetentionControlTests: XCTestCase {
     /// Driven at the LINKED core's real capability, so on a core that takes all
     /// four keys all four are validated, and on an older one the subset it takes is
     /// validated — either way the app is proven not to be building a dead job.
+    /// ★★ RULING 1 (2026-09-29): the re-lattice RUN, the FORECAST and the CHECK-SIZES probe
+    /// carry the synthetic-stress flags on every include wall (never an exclude one), and
+    /// core's own parser accepts all three documents. The control: the same probe
+    /// document under structural intent must be refused FOR the flag, or the acceptance
+    /// above proves nothing about it.
+    func testTheReLatticeRunForecastAndProbeCarryTheFlagsAndCoreAcceptsThem() throws {
+        try XCTSkipUnless(TopOptKit.organicSyntheticStressWired, "no synthetic-stress keys on this core")
+        try XCTSkipUnless(TopOptKit.latticeAlgorithmIsKnown("organic"), "no organic on this core")
+        let p = ProjectModel(id: UUID(), name: "P", material: "PLA", process: .fdm,
+                             importedFile: nil, importedMesh: nil)
+        var sel = SelectionModel(); let gi = sel.addGroup(); let ge = sel.addGroup(); p.selection = sel
+        _ = p.force.addManualPrimitive(.defaultBolt(at: SIMD3(0, 0, 5), radiusMM: 3, halfLengthMM: 5), to: gi)
+        _ = p.force.addManualPrimitive(.defaultBolt(at: SIMD3(20, 0, 5), radiusMM: 3, halfLengthMM: 5), to: ge)
+        // declared groups: the variant's job is the stage's, which lattices only an eligible
+        // group (the face-prism route, 2026-09-29)
+        p.force.sync(groups: p.selection.groups)
+        p.force.setProtected(gi, true); p.force.setProtected(ge, true)
+        p.lattice.enabled = true
+        p.lattice.groupRoles = [gi: .include, ge: .exclude]
+        p.lattice.algorithm = "organic"
+        p.lattice.stageMode = .aesthetic
+        p.lattice.simulateStresses = true
+        p.lattice.organicSyntheticStresses = true
+        let spec = try XCTUnwrap(p.lattice.runSpec(lineWidthMM: 0.45, regions: p.variantLatticeJobRegions().regions),
+                                 "an organic Aesthetic spec")
+        let original = try JSONSerialization.data(withJSONObject: try Self.optimizeJob(lattice: nil), options: [.sortedKeys])
+        let run = try RelatticeJobBuilder.build(original: original, designFingerprint: 0xDEAD_BEEF,
+                                                achievedVolumeFraction: 0.42, designFileName: "design.bin", lattice: spec)
+        let forecast = try RelatticeJobBuilder.build(original: original, designFingerprint: 0xDEAD_BEEF,
+                                                     achievedVolumeFraction: 0.42, designFileName: "design.bin",
+                                                     lattice: spec, forecastOnly: true)
+        let probe = try RelatticeRun.probeJob(run, cellsMM: [3.5], gradesMM: [[3, 5]], recommend: .init())
+        for (label, doc) in [("run", run), ("forecast", forecast), ("probe", probe)] {
+            let obj = try XCTUnwrap(JSONSerialization.jsonObject(with: doc) as? [String: Any])
+            let regions = try XCTUnwrap((obj["lattice"] as? [String: Any])?["regions"] as? [[String: Any]], label)
+            let inc = regions.filter { $0["role"] as? String == "include" }
+            let exc = regions.filter { $0["role"] as? String == "exclude" }
+            XCTAssertEqual(inc.count, 1, label); XCTAssertEqual(exc.count, 1, label)
+            XCTAssertEqual(inc.first?["synthetic_stress"] as? Bool, true, "★ \(label): the include wall is flagged")
+            XCTAssertEqual(inc.first?["synthetic_foci"] as? Int, 4, label)
+            XCTAssertNil(exc.first?["synthetic_stress"], "★ \(label): never the exclude wall")
+            XCTAssertNil(TopOptKit.jobSchemaError(doc), "core refused the \(label) document the app built")
+        }
+        // CONTROL: the flag is what core checks — under structural intent it refuses it
+        var obj = try XCTUnwrap(JSONSerialization.jsonObject(with: probe) as? [String: Any])
+        var grading = try XCTUnwrap(obj["grading"] as? [String: Any])
+        grading["intent"] = "structural"
+        // (organic under structural intent also needs its certificate named — core checks
+        // that first; with it named, the flag is what is left to refuse)
+        grading["organic_structural_certification"] = "beam_network"
+        obj["grading"] = grading
+        let refused = TopOptKit.jobSchemaError(try JSONSerialization.data(withJSONObject: obj))
+        XCTAssertTrue(refused?.contains("synthetic_stress") == true, refused ?? "accepted — the control proves nothing")
+    }
+
     func testEveryJobTheAppBuildsIsAcceptedByCoresOwnParser() throws {
         let cap = LatticeRetentionCapability.fromCore
         try XCTSkipUnless(cap.probeReliable,
@@ -495,12 +550,36 @@ final class LatticeRetentionControlTests: XCTestCase {
         XCTAssertEqual(moved.ceilingText, "12%")
     }
 
+    /// ★★ REPLACED, NOT RELAXED (2026-08-21). This required the literal phrase
+    /// "Density mode to Auto". There is no Auto in the Density row — its chips are
+    /// Sim, Uniform and Per region — so the assertion was pinning an instruction to
+    /// press a button that does not exist, and it held that copy in place while the
+    /// maintainer hunted for the control ("then I change to 'per region' and it says
+    /// to go back to Auto! What the fuck is with this shit?").
+    ///
+    /// The bar the old line was reaching for — a uniform run must say what to change,
+    /// in words that are on screen — is asserted here in full, in the same shape
+    /// `LatticeWizardRetentionTests` and `LatticeCellFitModeTests` now use: the mode
+    /// named must be a REAL CHIP, and the reason must fit in two sentences.
     func testAUniformRunSaysWhyRetentionIsUnavailable() throws {
+        let densityChips = ["Sim", "Uniform", "Per region"]
         let c = LatticeRetentionControl.compute(
             armed: false, graded: false, capability: .all, belowFloorVoxels: nil,
             regionVoxels: nil, ceilingFraction: nil, coreCeilingFraction: 0.2)
         XCTAssertFalse(c.enabled)
-        XCTAssertTrue(try XCTUnwrap(c.disabledReason).contains("Density mode to Auto"))
+        let why = try XCTUnwrap(c.disabledReason)
+        // ★ It must name a chip that is actually in the Density row.
+        let named = densityChips.filter { why.contains($0) }
+        XCTAssertFalse(named.isEmpty,
+                       "a uniform run must name the DENSITY chip to set — one of "
+                       + "\(densityChips): \(why)")
+        // ★ AND NOT one that isn't. "Auto" is the label this copy used to name, and
+        // the Density row has never had it.
+        XCTAssertFalse(why.contains("Auto"),
+                       "★ there is no Auto in the Density row — naming it is the "
+                       + "defect this test now guards: \(why)")
+        XCTAssertLessThan(why.count, 160,
+                          "★ two sentences, not a paragraph: \(why)")
     }
 
     func testAnOlderCoreSaysSoRatherThanFailingSilently() throws {

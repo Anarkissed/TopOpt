@@ -36,6 +36,38 @@ namespace topopt {
 
 enum class LatticeAlgorithm { Doubled, Stepped, Organic };
 
+// ── ★ WHICH CERTIFICATE A RUN ACTUALLY USES (task 2026-09-28-lattice-types-core) ──
+// Two instruments, and until now the choice was implicit in one `if` in run_job.cpp's
+// anonymous namespace, which is why a Stepped job could be FORCED to name
+// `structural_certification: "beam_network"` and then be certified by the tensor
+// anyway -- the key named an instrument core did not run.
+//
+//   BeamNetwork        solves the struts as a frame. It welds ON CONTACT, so a strut
+//                      ending mid-member is fused as the print fuses it, and a seam is
+//                      just geometry being solved.
+//   HomogenisedTensor  the cubic tensor at the emitted density. It ASSUMES SHARED
+//                      NODES, so it over-claims wherever cells of different families
+//                      abut -- a 9 mm cell's face centre lands mid-strut on an 8 mm
+//                      neighbour, and there are thousands of such seams in a plan.
+//
+// `any_step_plan` is "the job carries lattice.stepped_cells". It is the bit that
+// separates ANY-STEP Stepped (families interleaved, nodes unshared, seams everywhere)
+// from LEGACY Stepped (one cell per region, no plan), which keeps the tensor.
+//
+// Pure, and takes the bit rather than reading a job, so every combination is reachable
+// by test -- including the ones no job can produce today.
+enum class LatticeCertificateKind { BeamNetwork, HomogenisedTensor };
+
+LatticeCertificateKind lattice_certificate_kind(LatticeAlgorithm alg,
+                                                bool any_step_plan);
+
+// The algorithms the run certifies with the BEAM NETWORK, for the app's Structural
+// preview floor: it keys on what core ACTUALLY runs, never on what the schema accepts.
+// "stepped" appears here because any-step Stepped is certified that way; legacy
+// Stepped (no plan) is not, and the names cannot express that distinction -- callers
+// that need it ask `lattice_certificate_kind`.
+std::vector<std::string> lattice_beam_network_certified_algorithms();
+
 // "doubled" | "stepped" | "organic". Throws std::logic_error for an enum value with no
 // name — a new case must be named here before anything can serialize it, never a
 // silent fallback (the same posture cell_size_mode_name takes).

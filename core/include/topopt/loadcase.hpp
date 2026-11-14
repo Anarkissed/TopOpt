@@ -95,6 +95,23 @@ struct ProductionLoadCase {
     Vec3 force{0.0, 0.0, 0.0};  // fx, fy, fz in N
   };
   std::vector<LoadGroup> load_groups;
+  // LOAD SCENARIOS (job loads.scenarios, two or more; empty = one load case). Each
+  // scenario's own groups and the anchors ON in it. `anchor_face_ids` must hold their
+  // UNION, and `anchor_region_ids` the union of their region anchors (every anchor is a
+  // support somewhere, so all are tagged and padded), and `load_groups` scenario 1's
+  // (the mirror). REGION anchors: when `region_anchors_named` (the job gave a
+  // scenario "anchor_region_ids"), a region anchor is ON exactly in the scenarios that
+  // name it; otherwise it is ON in every scenario (the jobs before the key).
+  struct Scenario {
+    std::string name;
+    std::vector<LoadGroup> groups;
+    std::vector<int> anchor_face_ids;
+    std::vector<int> anchor_region_ids;
+    bool region_anchors_named = false;
+  };
+  std::vector<Scenario> scenarios;
+  // The user's safety margin (job loads.safety_margin); 0 = the production default.
+  double safety_margin = 0.0;
 
   // WHICH LADDER (task 2026-08-03-growth-ladder). Both modes now SEARCH, both
   // recommend, and each is one line:
@@ -113,6 +130,12 @@ struct ProductionLoadCase {
   // search, no recommendation, and a safety feature silently dropped by a checkbox
   // that reads as an objective toggle. Mirrors BridgeLoadCase::minimize_plastic.
   bool minimize_plastic = true;
+  // CORE LIST item 50 — "Redesign to strengthen" (job loads.redesign): the run is
+  // rebuilt inside the design box from what is frozen (strengthen_part, run_job).
+  bool strengthen = false;
+  // REAL BOLTS (job loads.anchor_model "bearing"): every anchor is a compression-only,
+  // frictionless normal spring (DirichletBC::spring), not a clamp. False = clamped.
+  bool anchor_bearing = false;
 
   // The print/build direction (the interlayer-margin orientation). (0,0,0)
   // defaults to +Z. gravity_direction is set to its unit negation.
@@ -157,6 +180,7 @@ struct ProductionLoadCase {
   bool has_design_box = false;
   DesignBox design_box;
   std::vector<DesignBox> keep_out_boxes;
+  std::vector<KeepRegion> keep_regions;  // item KEEP: frozen exactly (job keep_regions)
 
   // Handoff 100 — "Keep clear" clearance regions. Each entry is a B-rep face and
   // its (editable) clearance distances; build_production_loadcase derives the
@@ -167,6 +191,13 @@ struct ProductionLoadCase {
   // Empty (the default) → no clearance → byte-identical to the pre-100 path.
   struct Clearance {
     int face_id = -1;
+    // ★ E4 (j): a Keep clear on a CUT PIECE (a face region). `region_faces` /
+    // `region_clips` are its member faces and its cuts; build_production_loadcase fills
+    // them from `face_regions` when the caller left them empty (run_job fills them
+    // itself, so the pre-flight probe's copy carries them too). -1 = not a region.
+    int region_id = -1;
+    std::vector<int> region_faces;
+    std::vector<ClearanceClip> region_clips;
     ClearanceParams params;  // kind (Bolt/Face) + the editable mm distances
     // Manual (user-placed) primitives carry their own geometry because they have
     // no B-rep face (handoff group-editing). When `manual` is true the rasterizer
@@ -312,6 +343,7 @@ struct ProductionRunSetup {
   // declared.
   struct ClearanceReport {
     int face_id = -1;
+    int region_id = -1;  // ★ E4 (j): >= 0 for a cut piece; face_id is then -1
     ClearanceKind kind = ClearanceKind::Bolt;
     std::size_t voxels_frozen = 0;  // voxels this clearance set FrozenVoid
     bool in_grid = false;           // the region intersected the solved grid
@@ -459,6 +491,10 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
 // `reports` (optional) receives one entry per clearance ACTUALLY rasterized, in
 // declaration order. Same rasterizer, same precedence guard, same skips (an
 // out-of-range AUTO face id contributes nothing) as the production build.
+// `keeps` (PROTECT, ruling 2026-10-27 03:57): every solved-grid element whose centre
+// is inside a keep region and outside the part joins the overlay, never skipped (a
+// protected hole stays open whatever the counterfactual); `keep_air_voxels` gets how
+// many it added.
 // THE PRE-FLIGHT REFUSAL, in words a person can act on (task 2026-08-03-
 // preflight-feasibility-and-divergence, bar P2). Call it when
 // `preflight_load_path(domain, options).walk` came back DECIDABLE and NOT
@@ -482,11 +518,19 @@ std::string preflight_refusal_report(
     const ProductionLoadCase& lc, const PreflightLoadPath& pf,
     const std::vector<int>& anchor_face_ids);
 
+// ★ E4 (j): fill a cut-piece Keep clear's member faces and clips from its resolved
+// region, and refuse -- std::invalid_argument, in his words, naming the piece -- a piece
+// that gives no Keep clear of the clearance's kind (a bolt on a piece with no round face,
+// a face Keep clear on a piece with no flat face).
+void resolve_clearance_region(ProductionLoadCase::Clearance& c,
+                              const ResolvedFaceRegion& region, const StepModel& model);
+
 DesignMask build_clearance_overlay(
     const StepModel& model, const VoxelGrid& part_grid,
     const VoxelGrid& solved_grid,
     const std::vector<ProductionLoadCase::Clearance>& clearances,
     int skip_index,
-    std::vector<ProductionRunSetup::ClearanceReport>* reports);
+    std::vector<ProductionRunSetup::ClearanceReport>* reports,
+    const std::vector<KeepRegion>& keeps = {}, long long* keep_air_voxels = nullptr);
 
 }  // namespace topopt

@@ -62,6 +62,9 @@ public struct PillButton: View {
             .overlay(border)
             .clipShape(Capsule())
             .dsShadowIf(glow)
+            // ★ B10 (Touch, design-system §1: every target ≥ 44 × 44): the capsule is ~42 tall; its target is 44
+            .frame(minHeight: 44)
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)

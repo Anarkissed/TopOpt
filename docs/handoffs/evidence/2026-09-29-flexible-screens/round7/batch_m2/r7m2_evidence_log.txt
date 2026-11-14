@@ -1,0 +1,28 @@
+live: sections 2000001 Face 0 · lattice B (s:f0:f:2AC5732E-4A99-4195-A0A3-5BBE73DD4D18:3#0) · 2000002 Face 0 · lattice A (s:f0:f:2AC5732E-4A99-4195-A0A3-5BBE73DD4D18:5#0) · 2000003 Face 1 · lattice B (s:f1:f:2AC5732E-4A99-4195-A0A3-5BBE73DD4D18:3#0) · 2000004 Face 1 · lattice A (s:f1:f:2AC5732E-4A99-4195-A0A3-5BBE73DD4D18:5#0) · 2000005 Face 2 · lattice B (s:f2:f:2AC5732E-4A99-4195-A0A3-5BBE73DD4D18:3#0) · 2000006 Face 2 · lattice A (s:f2:f:2AC5732E-4A99-4195-A0A3-5BBE73DD4D18:5#0) · 2000007 Face 4 · lattice B (s:f4:f:2AC5732E-4A99-4195-A0A3-5BBE73DD4D18:3#0) · 2000008 Face 4 · lattice A (s:f4:f:2AC5732E-4A99-4195-A0A3-5BBE73DD4D18:5#0)
+live: faces Face 1 · lattice B [2000003, face [1]] loaded 5.000 kg curves | Face 1 · lattice A [2000004, face [1]] loaded 5.000 kg curves | Face 0 [0, face [0]] resting 10.000 kg curves | Face 4 · lattice B [2000007, face [4]] loaded 4.536 kg group 2 curves | Face 4 · lattice A [2000008, face [4]] loaded 4.536 kg group 2 curves | Face 2 · lattice B [2000005, face [2]] loaded 4.536 kg group 2 curves | Face 2 · lattice A [2000006, face [2]] loaded 4.536 kg group 2 curves | Face 3 [3, face [3]] loaded 2.000 kg group 3 stamp | Face 5 [5, face [5]] loaded 2.000 kg group 3 stamp
+live: toast after the open 'Stamp on solid · the lattice part is Curves'
+wrote R7M2_13p_01_img3_lattice_sections_middle_solid.png
+picked 2000003 (Face 1 · lattice B): curve baselines 100.00 × 25.00 mm · prism columns 1024 of 1024
+wrote R7M2_13p_02_face3_section_picked_curves_25mm_prisms.png
+wrote R7M2_13p_03_group1_two_sections_half_each.png
+group 1: Face 1 · lattice B 5.000 kg, Face 1 · lattice A 5.000 kg
+wrote R7M2_13p_04_solid_tap_line_and_go_to_lattice.png
+solid tap: toast 'Solid here · only face-prisms get latticed' fix goToLattice · selected 2000003
+wrote R7M2_13p_05_violet_where_a_tap_works_face2_unpressed.png
+violet: Face 2's bands [2000005, 2000006] unpressed (the same page: its map rebuilt)
+wrote R7M2_13p_06_edge14_nested_in_face2s_band.png
+edge 14: press [2000009, 2000010] · pieces 2000009 strip Edge 16 · Face 3 · 2000010 strip Edge 16 · Face 2 · lattice B · 2000011 rest Face 3 · 2000012 rest Face 2 · lattice B
+wrote R7M2_13p_07_face3_at_17mm_same_section_curves_kept.png
+depth 25 → 17.26: section 2000003 → 2000003 · curve kept yes · area 1726.0 mm²
+wrote R7M2_13p_08_CONTROL_whole_face1_curves_100mm.png
+control: Face 1 whole — Face 1 [1, face [1]] loaded 10.000 kg curves | Face 0 [0, face [0]] resting 10.000 kg curves | Face 4 [4, face [4]] loaded 4.536 kg group 2 stamp | Face 2 [2, face [2]] loaded 4.536 kg group 2 stamp | Face 3 [3, face [3]] loaded 2.000 kg group 3 stamp | Face 5 [5, face [5]] loaded 2.000 kg group 3 stamp
+wrote R7M2_13p_09_no_face_prism_unchanged.png
+no face-prism: sections 0 · top line 'Set a face to Lattice in Selections first'
+sim A1000001-0000-4000-8000-000000000001 'M2 verticalStand (Structural, copy)': not a Flexible project
+sim A1000001-0000-4000-8000-000000000002 'M2 verticalStand': not a Flexible project
+sim A1000001-0000-4000-8000-000000000003 'Pad 100 x 100 x 20 (Flexible)': I2 strips to move: none
+  sections: 2000001 Face 0 · lattice B · 2000002 Face 0 · lattice A · 2000003 Face 1 · lattice B · 2000004 Face 1 · lattice A · 2000005 Face 2 · lattice B · 2000006 Face 2 · lattice A · 2000007 Face 4 · lattice B · 2000008 Face 4 · lattice A
+  faces after the open: Face 1 · lattice B [2000003, face [1]] loaded 0.454 kg group 2 curves | Face 1 · lattice A [2000004, face [1]] loaded 0.454 kg group 2 curves | Face 0 [0, face [0]] resting 10.000 kg curves | Face 5 [5, face [5]] loaded 2.268 kg curves | Face 3 [3, face [3]] loaded 2.268 kg stamp
+sim A1000001-0000-4000-8000-000000000004 'Pad split top (Flexible)': I2 strips to move: none
+  sections: 
+  faces after the open: Face 0 [0, face [0]] resting 10.000 kg curves | Top A [1000103, face [1]] loaded 2.722 kg curves | Top B [1000104, face [1]] loaded 2.722 kg curves

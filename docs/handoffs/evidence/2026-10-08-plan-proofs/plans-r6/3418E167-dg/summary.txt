@@ -1,0 +1,24 @@
+# 3418E167-8524-4831-A809-827B6B0742D0 dg — round 6 after-run, app cfca986d, core 3952c411 (frozen CLI sync-3952c411, sha 1538ab06)
+
+DG-PROJECT M2 verticalStand THICK (converted: Default Grade) algorithm doubled stage Optional(TopOptFlows.LatticeStageMode.structural) step-halves true density sim cells auto
+DG-PLAN doubled: 2636 cell(s) over 2 region(s) | 12.00=5 6.00=179 4.67=914 3.00=1538
+DG-PLAN per region: r1=914 r2=1722
+DG-PLAN-BASES 2 region(s) carry plan_base_cell_mm | job region 1: 4.6667 mm; job region 2: 12.0000 mm
+DG-OUTLINE r1 expand=0.000 seams=0 diverging=0 wireMovedOffRaw=0.0000mm | r2 expand=0.000 seams=0 diverging=0 wireMovedOffRaw=0.0000mm
+DG-OVERLAPS 0 same-region pair(s)
+DG-REGIONS voxel=1.838 mm | r1 cells=914 [4.67=914] prism=259279 mm3 uncovered=162068 mm3 (62.51%) | r2 cells=1722 [12.00=5 6.00=179 3.00=1538] prism=123482 mm3 uncovered=45266 mm3 (36.66%)
+DG-SLOT-ORIGINS 2 region(s) carry slot_origin_mm
+
+## job_plan: exit 1
+> topopt-cli: lattice_variant: no lattice remains to emit, so there is nothing to certify or print -- refusing rather than writing a file with zero struts in it and calling it a lattice. The grading law latticed 4 of this variant's 63657 candidate voxels, and then the outline beam turned 4 voxel(s) solid -- every one that was left. Its reach is 1.262032733 mm of beam plus 0 mm of bleed = 1.262032733 mm inward from the region outline, set by "shape_grade_band_mm" 1 mm; a band of 25 mm or more adds the bleed. Either narrow the band so the beam does not reach across the region, or widen the region: a lattice needs more depth than the solid beam that frames it. The law's own fallbacks over the voxels it rejected: member_too_thin_for_cell=179, strut_unprintable_at_every_cell=63474, irrecoverable_by_any_cell_size=98.
+## job_noplan: exit 1
+> topopt-cli: lattice_variant: no lattice remains to emit, so there is nothing to certify or print -- refusing rather than writing a file with zero struts in it and calling it a lattice. The grading law latticed 4 of this variant's 63657 candidate voxels, and then the outline beam turned 4 voxel(s) solid -- every one that was left. Its reach is 1.262032733 mm of beam plus 0 mm of bleed = 1.262032733 mm inward from the region outline, set by "shape_grade_band_mm" 1 mm; a band of 25 mm or more adds the bleed. Either narrow the band so the beam does not reach across the region, or widen the region: a lattice needs more depth than the solid beam that frames it. The law's own fallbacks over the voxels it rejected: member_too_thin_for_cell=179, strut_unprintable_at_every_cell=63474, irrecoverable_by_any_cell_size=98.
+## job_plan_spans: exit 1
+> topopt-cli: lattice_variant: no lattice remains to emit, so there is nothing to certify or print -- refusing rather than writing a file with zero struts in it and calling it a lattice. The grading law latticed 4 of this variant's 63657 candidate voxels, and then the outline beam turned 4 voxel(s) solid -- every one that was left. Its reach is 1.262032733 mm of beam plus 0 mm of bleed = 1.262032733 mm inward from the region outline, set by "shape_grade_band_mm" 1 mm; a band of 25 mm or more adds the bleed. Either narrow the band so the beam does not reach across the region, or widen the region: a lattice needs more depth than the solid beam that frames it. The law's own fallbacks over the voxels it rejected: member_too_thin_for_cell=179, strut_unprintable_at_every_cell=63474, irrecoverable_by_any_cell_size=98.
+
+## dropped.txt
+dropped model.step 278521 B
+
+## the published jobs
+job_plan.json: sha256 8fa67c51fab0682fce9706da9af570c4a5f42b7b204d790bdbe2923d3b8d52e2 (321883 B, compacted from the harness's pretty-printed write; same JSON value)
+job_noplan.json: sha256 2d8f39dca21284fe53584167df96bb2f7b2244cf82de63cdaede68c8becc80e1 (7007 B, compacted from the harness's pretty-printed write; same JSON value)

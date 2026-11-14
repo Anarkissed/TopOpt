@@ -1,0 +1,4 @@
+        Start 122: cli_demo
+122/165 Test #122: cli_demo .........................   Passed  1866.12 sec
+100% tests passed out of 165
+Total Test time (real) = 4151.15 sec

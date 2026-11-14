@@ -243,7 +243,8 @@ final class FrozenRegionAsMaterialTests: XCTestCase {
         //
         // ★ THE PROPERTY UNDER TEST IS UNCHANGED and the numbers are core's:
         //   N* x (width / phi(rho_max)) is the member a profile needs.
-        //     0.25 mm -> 3.26 mm   0.45 mm -> 5.87 mm   0.80 mm -> 10.43 mm
+        //     0.25 mm -> 3.10 mm   0.45 mm -> 5.58 mm   0.80 mm -> 9.93 mm
+        //   (★ RE-PINNED, release (2), K1 item 5: octet's full-cell law; 3.26 / 5.87 / 10.43 on the legs-only law)
         // An 8 mm slab straddles the third and not the first two — so the SAME
         // lattice is certifiable on a fine and a mid nozzle and is NOT on a
         // coarse one, which is exactly what the test has always claimed.
@@ -252,23 +253,26 @@ final class FrozenRegionAsMaterialTests: XCTestCase {
         // the 1.6 mm cell an 8 mm slab takes, 0.30 gives 0.390 mm — under 0.45,
         // so the mid arm would fail the PRINT test and the test would flip for
         // the wrong reason.
+        // ★ RE-PINNED (release (2), K1 item 1): 0.70, because on the full octet cell's law a density builds about 0.7
+        // of the legs-only strut — at 0.40 the 1.6 mm cell's strut is 0.33 mm, under the mid bead, and the mid arm
+        // failed the PRINT test (the wrong reason, as above); 0.70 gives 0.49 mm.
         func cardAt(_ width: Double) -> LatticeFaceCard {
             LatticeFaceCardDerivation.card(
                 faceID: 16, depthMM: 8, heldVoxels: 1000, spacingMM: 1.0,
-                densityGCM3: 1.24, topology: topology, declaredDensity: 0.40,
+                densityGCM3: 1.24, topology: topology, declaredDensity: 0.70,
                 minExtrudableWidthMM: width)
         }
         // Same slab, same declared density, three profiles.
         let fine = cardAt(0.25), mid = cardAt(0.45), coarse = cardAt(0.80)
-        XCTAssertEqual(fine.relativeDensity, 0.40, accuracy: 1e-9)
-        XCTAssertEqual(coarse.relativeDensity, 0.40, accuracy: 1e-9,
+        XCTAssertEqual(fine.relativeDensity, 0.70, accuracy: 1e-9)
+        XCTAssertEqual(coarse.relativeDensity, 0.70, accuracy: 1e-9,
                        "★ and the declaration is REPORTED even where it is "
                        + "refused — the verdict carries the refusal, not silence")
         XCTAssertEqual(fine.verdict, .certified,
-                       "a 0.25 mm profile needs only 3.26 mm of member")
-        XCTAssertEqual(mid.verdict, .certified, "a 0.45 mm one needs 5.87 mm")
+                       "a 0.25 mm profile needs only 3.10 mm of member")
+        XCTAssertEqual(mid.verdict, .certified, "a 0.45 mm one needs 5.58 mm")
         XCTAssertEqual(coarse.verdict, .outOfRegime,
-                       "★ a 0.80 mm profile needs 10.43 mm, which an 8 mm slab "
+                       "★ a 0.80 mm profile needs 9.93 mm, which an 8 mm slab "
                      + "does not have — the SAME lattice stops being certifiable, "
                      + "and that is why the width has no default")
         // …and the reason is the CELL being forced coarser, not a print failure.

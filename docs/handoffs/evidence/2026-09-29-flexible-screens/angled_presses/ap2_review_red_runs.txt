@@ -1,0 +1,129 @@
+# Angled presses (task 2026-10-07), batch AP2 REVIEW: the verifier's findings on "which faces meet", confirmed and fixed.
+# (1) TESTS-FIRST red run. The review's tests-first commit carries FlexibleMeetReviewTests (9 tests), the new API as
+#     RED STUBS (app/TopOptKit, the lines marked "AP2 REVIEW RED STUB"):
+#       FlexibleEdgeCandidates.appOnlyFacePairs / coreOnlyFacePairs never computed;
+#       FlexibleStageModel.meetOffMain() = the sync `meet`, built on the main actor;
+#       FlexibleStageModel.pressVerdict(_:direction:) = each member's core load against the direction (the per-member
+#       Swift copy of core's rule that the finding names);
+#     and every other finding red against AP2 AS IT WAS (cb6ac387's logic, unchanged here): facts.adjacency never read;
+#     removedRegions never read; a blend's chain exempt from every check; openSceneKey without the current-regions check;
+#     chain()/midpoint() taking a closed loop's first segment and the first of equal lengths; the closed clip keeping an
+#     on-plane seam for both sectors.
+#     Real in that commit (thin copies of core, nothing to stub): the pass-through flexible_scene_press_verdict (core's
+#     build_press_stack on the open scene; its FlexibleError is the answer, everything else crosses bridge.cpp's one guard)
+#     and its Swift wrapper FlexibleScene.pressVerdict (TopOptKit/FlexibleKit+Meet.swift).
+# Command (app/TopOptKit, built with swift build --build-tests, unseeded):
+#   swift test --skip-build --filter 'TopOptFlowsTests\.(FlexibleMeetReviewTests|FlexibleMeetTests)/'
+# Expected: FlexibleMeetReviewTests 9 run, 9 RED; FlexibleMeetTests (AP2's 10) green.
+# testTheTangentRuleMarginOnTheM2 is a PIN (finding 10 asks for a tripwire, not a fix). It went red here on ITS OWN
+# premise: the 0.5° margin it assumed is not there — the M2's worst smooth seam is 14.751° (58–60, two fillet patches),
+# 0.249° under the rule, and the 14° control did not move the blend count (10 = 10): the seams near 15° are NOT the ones
+# the blends rest on (the finding's "every blend breaks" is refuted). The fix commit re-pins it on the measured values.
+
+FAILED FlexibleMeetReviewTests.testABlendsCurvedMembersTurnNoFurtherThanItsEdge  (3 failure(s))
+         - XCTAssertFalse failed - ★ [9, 41, 1, 42, 4, 31]: a chain member turns further than the edge ([4])
+         - XCTAssertTrue failed - [9, 41, 1, 42, 4, 31]: the line names the member
+         - XCTAssertFalse failed - ★ face 4 spreads 163.11705898983215°
+FAILED FlexibleMeetReviewTests.testAFaceTakenOutOfTheSetupIsListedNotOffered  (3 failure(s))
+         - XCTAssertTrue failed - ★ never offered
+         - XCTAssertTrue failed - one line says why
+         - XCTAssertEqual failed: ("20") is not equal to ("12")
+FAILED FlexibleMeetReviewTests.testASeamOnACutPlaneBelongsOnlyToTheSectorBesideIt  (2 failure(s))
+         - XCTAssertFalse failed - ★ the riser's cap has no area beside the floor wall
+         - XCTAssertFalse failed
+FAILED FlexibleMeetReviewTests.testCoreAdjacencyDecidesWhatIsOffered  (7 failure(s))
+         - XCTAssertFalse failed - ★ core does not see top and x touch: never offered
+         - XCTAssertTrue failed - one line says why
+         - XCTAssertEqual failed: ("[]") is not equal to ("[1–5]")
+         - XCTAssertEqual failed: ("20") is not equal to ("19")
+         - XCTAssertEqual failed: ("20") is not equal to ("0") - ★ core sees no face touch: nothing is offered
+         - XCTAssertEqual failed: ("0") is not equal to ("12")
+         - XCTAssertEqual failed: ("[]") is not equal to ("[0–1]") - a pair the page cannot draw is named
+FAILED FlexibleMeetReviewTests.testCoreFactsWaitForTheSceneOfTheCurrentRegions  (4 failure(s))
+         - failed - ★ meetFacts read the old scene
+         - failed - ★ edgeCandidates read the old scene
+         - failed - ★ regionFrame read the old scene
+         - failed - ★ pressVerdict read the old scene
+FAILED FlexibleMeetReviewTests.testCoreSaysWhichDirectionsAPressTakes  (11 failure(s))
+         - XCTAssertEqualWithAccuracy failed: ("0.0") is not equal to ("45.0") +/- ("1e-09")
+         - XCTAssertTrue failed - core: more than 15° off Z is a side press
+         - XCTAssertGreaterThan failed: ("0") is not greater than ("0")
+         - XCTAssertTrue failed - core's words: a member faces along the direction
+         - XCTAssertTrue failed - core's words: a member faces along the direction
+         - XCTAssertTrue failed - core's words: a member faces along the direction
+         - XCTAssertTrue failed - core's words: a member faces along the direction
+         - XCTAssertFalse failed
+         … 3 more of the same kind
+FAILED FlexibleMeetReviewTests.testNumbersAndPointsIgnoreTheTriangleOrder  (4 failure(s))
+         - XCTAssertEqual failed: ("[[SIMD3<Double>(0.0, 0.0, 0.0), SIMD3<Double>(10.0, 0.0, 0.0), SIMD3<Double>(10.0, 10.0, 0.0), SIMD3<Double>(0.0, 10.0, 0.0), SIMD3<Double>(0.0, 0.0, 0.0)]]") is not equal to ("[[SIMD3<Double>(10.0, 0.0, 0.0), SIMD3<Double>(0.0, 0.0, 0
+         - XCTAssertEqual failed: ("SIMD3<Double>(10.0, 10.0, 0.0)") is not equal to ("SIMD3<Double>(0.0, 10.0, 0.0)")
+         - XCTAssertEqual failed: ("Optional(SIMD3<Double>(2.5, 0.0, 0.0))") is not equal to ("Optional(SIMD3<Double>(2.5, 9.0, 0.0))") - ★ a tie between equal lines is broken by position
+         - XCTAssertEqual failed: ("["#1 corner [1, 6, 7] true @[220000, -200000, 600000]", "#2 corner [1, 2, 7] true @[300000, -200000, 600000]", "#3 corner [3, 6, 7] true @[220000, 200000, 600000]", "#4 corner [2, 3, 7] true @[300000, 200000, 600000]", "#5 corner [0, 1
+FAILED FlexibleMeetReviewTests.testTheMeetIsBuiltOffTheMainActor  (2 failure(s))
+         - XCTAssertEqual failed: ("Optional(true)") is not equal to ("Optional(false)") - ★ built off the main thread
+         - XCTAssertEqual failed: ("Optional(true)") is not equal to ("Optional(false)")
+FAILED FlexibleMeetReviewTests.testTheTangentRuleMarginOnTheM2  (2 failure(s))
+         - XCTAssertLessThanOrEqual failed: ("14.75099244867529") is greater than ("14.5") - ★ a smooth seam (58–60) sits within 0.5° of the rule
+         - XCTAssertLessThan failed: ("10") is not less than ("10") - control: one degree lower, the fillets' first seams crease
+PASSED FlexibleMeetTests.testAFilletChainIsFound
+PASSED FlexibleMeetTests.testCoreAndAppAgreeWhichFacesTouch
+PASSED FlexibleMeetTests.testCornersOfABox
+PASSED FlexibleMeetTests.testEveryEdgeAndCornerOfThePartWithTheFifteenDegreeRule
+PASSED FlexibleMeetTests.testHandlesAreSizedInPoints
+PASSED FlexibleMeetTests.testNumbersAreStableAcrossOpens
+PASSED FlexibleMeetTests.testRegionFramesAreCoresStackLoads
+PASSED FlexibleMeetTests.testSectorsTouchOnlyWhereTheirCutsReachTheEdge
+PASSED FlexibleMeetTests.testTheAnchorSitsOnTheFaces
+PASSED FlexibleMeetTests.testThePassThroughsRunUnderTheOneGuard
+
+RAW Executed 19 tests, with 38 failures (0 unexpected) in 10.804 (10.806) seconds
+
+# the tests' own prints (FLEX-AP2R), raw:
+FLEX-AP2R BLEND #189 [29, 17, 66] edge 128.4° chain spreads ["124.9"] · offered
+FLEX-AP2R BLEND #191 [71, 72, 77, 73] edge 79.1° chain spreads ["24.7", "57.5"] · offered
+FLEX-AP2R BLEND #192 [68, 69, 70] edge 79.1° chain spreads ["77.7"] · offered
+FLEX-AP2R BLEND #206 [9, 41, 1, 42, 4, 31] edge 90.0° chain spreads ["77.8", "15.4", "53.7", "163.1"] · offered
+FLEX-AP2R BLEND #208 [20, 21, 24] edge 90.0° chain spreads ["84.9"] · offered
+FLEX-AP2R BLEND #228 [18, 63, 51] edge 90.0° chain spreads ["80.1"] · offered
+FLEX-AP2R BLEND #229 [18, 64, 52] edge 90.0° chain spreads ["76.4"] · offered
+FLEX-AP2R BLEND #235 [3, 65, 18] edge 90.0° chain spreads ["80.1"] · offered
+FLEX-AP2R BLEND #236 [15, 62, 18] edge 90.0° chain spreads ["76.7"] · offered
+FLEX-AP2R BLEND #237 [2, 61, 18] edge 90.0° chain spreads ["81.7"] · offered
+FLEX-AP2R BLEND M2: 10 blends, 1 with a member that turns further
+FLEX-AP2R REMOVED cube60, top taken out: offered 20 of 20 · #1 true '' | #2 true '' | #3 true '' | #4 true '' | #9 true '' | #10 true '' | #11 true '' | #12 true ''
+FLEX-AP2R ONPLANE L prism: lower–floor wall 40.0000 · upper–floor wall 40.0000 · upper–riser 40.0000 · lower–riser 0.0000 mm
+FLEX-AP2R ONPLANE control: strict rule — upper true lower false
+FLEX-AP2R ADJ cube60 without core's top–x pair: #11 offered true why '' · app-only [] core-only [] · offered 20
+FLEX-AP2R STALE cube60 after a cut: []
+FLEX-AP2R STALE re-opened: 14 edges, 8 corners, offered 22; not offered: 
+FLEX-AP2R VERDICT cube edge halfway: accepted true · 45.0000° / 45.0000° from the faces · build angle 0.0000 side false · 0 columns
+FLEX-AP2R VERDICT cube corner halfway: accepted true · 54.735610° / 54.735610° / 54.735610°
+FLEX-AP2R VERDICT cube edge along the top's normal: accepted false · 'a member faces along the direction'
+FLEX-AP2R VERDICT cube edge along x's normal: accepted false · 'a member faces along the direction'
+FLEX-AP2R VERDICT cube edge along build Z down: accepted false · 'a member faces along the direction'
+FLEX-AP2R VERDICT cube edge along build Z up: accepted false · 'a member faces along the direction'
+FLEX-AP2R VERDICT cube top + bottom: accepted true · ''
+FLEX-AP2R VERDICT M2 face 33: load · down 0.7071, spread 0.0°
+FLEX-AP2R VERDICT M2 face 34: load · down 0.5985, spread 0.0°
+FLEX-AP2R VERDICT M2 face 57: load · down 0.0677, spread 29.0°
+FLEX-AP2R VERDICT M2 [33, 34, 57] along build Z down: per-member check accepts · core accepted true ''
+FLEX-AP2R VERDICT STEP skips 0
+FLEX-AP2R ORDER square loop: middle SIMD3<Double>(10.0, 10.0, 0.0) vs SIMD3<Double>(0.0, 10.0, 0.0) · polylines [[SIMD3<Double>(0.0, 0.0, 0.0), SIMD3<Double>(10.0, 0.0, 0.0), SIMD3<Double>(10.0, 10.0, 0.0), SIMD3<Double>(0.0, 10.0, 0.0), SIMD3<Double>(0.0, 0.0, 0.0)]] vs [[SIMD3<Double>(10.0, 0.0, 0.0), SIMD3<Double>(0.0, 0.0, 0.0), SIMD3<Double>(0.0, 10.0, 0.0), SIMD3<Double>(10.0, 10.0, 0.0), S
+FLEX-AP2R ORDER equal lines: middle Optional(SIMD3<Double>(2.5, 0.0, 0.0)) vs Optional(SIMD3<Double>(2.5, 9.0, 0.0))
+FLEX-AP2R ORDER his r5: 22 candidates · reversed order identical true
+FLEX-AP2R ORDER l bracket: 34 candidates · reversed order identical false · first differences [("#23 edge [0, 6] true @[220000, 0, 80000]", "#23 edge [0, 8] false @[-195000, 0, 80000]"), ("#24 edge [0, 8] false @[-155798, 20575, 80000]", "#24 edge [0, 9] false @[65000, 0, 80000]"), ("#25 edge [0, 9] false @[104202, 20575, 80000]", "#25 edge [0, 6] true @[220000, 0, 80000]"), ("#32 edge [5, 8] fa
+FLEX-AP2R ORDER M2 stand: 237 candidates · reversed order identical true
+FLEX-AP2R ORDER STEP skips 0
+FLEX-AP2R MAIN cube60: built 1 time(s), on the main thread Optional(true)
+FLEX-AP2R MARGIN M2: worst smooth seam 14.751° (58–60), mildest crease 15.738° (1–47) · margins 0.249° / 0.738° · segments per 2.5° from 10°: [10, 16, 10, 11, 12, 2, 7, 2]
+FLEX-AP2R MARGIN control: blends at 15° 10, at 14° 10
+
+    Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+    Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.002) seconds
+    Executed 9 tests, with 38 failures (0 unexpected) in 3.840 (3.841) seconds
+    Executed 10 tests, with 0 failures (0 unexpected) in 6.964 (6.965) seconds
+    Executed 19 tests, with 38 failures (0 unexpected) in 10.804 (10.806) seconds
+    Executed 19 tests, with 38 failures (0 unexpected) in 10.804 (10.807) seconds
+    Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+    Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+EXIT 1

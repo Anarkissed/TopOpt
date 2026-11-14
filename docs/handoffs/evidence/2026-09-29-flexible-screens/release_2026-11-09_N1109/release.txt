@@ -1,0 +1,17 @@
+# Release 6143024b — 2026-11-09 N1109 (his iPad notes 11-09, ef0bc05a), app only
+# Core and worker unchanged: fingerprint db2cc34ef3fe; "fingerprint": "db2cc34ef3fe"
+# Merged onto 927fa1e0; the merged app tree equals N1109's, so its regression set applies unchanged.
+# Commits:
+#   2c3357a5 His iPad notes 11-09 (362's half; app only): Protect stays solid under the lattice, curved No-lattice faces keep their depth, zones and Keep clears drawn on core's axes, the Face prisms view, the Structural thin-wall line
+#   c59903dc His iPad notes 11-09: Lattice Setup taps, zones, panel foot, Expand line and handle, pad to the side, Protect skin words (app only)
+#   7584c4fc His iPad notes 11-09: merge UI-Notes' c59903dc (1, 2.1, 2.2, 2.5, 3.1-3.3) with 362's 2c3357a5 (2.3, 2.4, zones/Keep clears on core's axes, Face prisms view, Structural line); app only
+#   ef0bc05a His iPad notes 11-09 (2.3): LatticeSectorReviewTests pins the Protect keep — a protected face named by no Lattice group as a whole face is kept solid at its own depth (one exclude after the piece); control: latticed whole, no keep
+# Gates:
+#   19:15 regression set on the combined tree (7584c4fc): 1152 passed, 33 skipped, 1 failed + 10 classes green in run 1 (no HIS_PROJECT_DIR); the 1 red (LatticeSectorReviewTests.testAPieceNeverDeepensItsWholeFacesProtection: wire count 2 vs 1 = the 2.3 Protect keep, intended) re-pinned; LatticeSectorReviewTests + LatticeSectorOutlineTests 23/23 green
+#   19:17 checks ok: N1109 ef0bc05a, 4 commit(s), app-only, onto 927fa1e0, fingerprint db2cc34ef3fe
+#   19:17 merged 6143024b; app tree == N1109's, fingerprint db2cc34ef3fe
+#   19:17 waiting for HEAVY.lock (free)
+#   19:17 lock taken
+#   19:22 iPad device build green; lock released
+#   19:22 pushed 6143024b
+#   19:22 worker /health "fingerprint": "db2cc34ef3fe" (unchanged, no swap)

@@ -69,8 +69,9 @@ final class WorkspaceInteractionTests: XCTestCase {
         tap(5, &sel, force); force.makeLoad(sel.groups[0].id)   // A = load {5}
         sel.clearActive()   // production deselect-on-commit (M7.6; see T3 note above)
         tap(6, &sel, force); force.makeAnchor(sel.groups[1].id) // B = anchor {6}, active
+        sel.clearActive()   // Flexible (PR #362) H55c: several roles on one face (owner 2026-10-25) — the production deselect-on-commit: with a group being BUILT, another group's face now joins it (SeveralRolesOnOneFaceTests)
         let a = sel.groups[0].id
-        tap(5, &sel, force)               // tap A's face while B is active
+        tap(5, &sel, force)               // tap A's face while nothing is being built
         XCTAssertEqual(sel.activeGroupID, a, "re-selects A")
         XCTAssertEqual(sel.groups[0].faces, [5], "A keeps its face — no steal")
         XCTAssertEqual(sel.groups[1].faces, [6], "B keeps its face — no steal")
@@ -100,17 +101,25 @@ final class WorkspaceInteractionTests: XCTestCase {
     }
 
     // Item 1: deselect is confined to the ACTIVE group — a face in another group re-selects it.
+    // // Flexible (PR #362) H55c: several roles on one face (owner 2026-10-25): …while nothing is being built; while B is, A's face JOINS B (several groups), and deselecting it
+    // there leaves A's untouched.
     func testTapDeselectDoesNotTouchInactiveGroups() {
         var sel = SelectionModel()
         var force = ForceModel()
         tap(5, &sel, force); force.makeAnchor(sel.groups[0].id)  // A = anchor {5}
         sel.clearActive()   // production deselect-on-commit (M7.6; see T3 note above)
         tap(6, &sel, force)                                      // B = pending {6}, active
-        let a = sel.groups[0].id
-        tap(5, &sel, force)               // A is INACTIVE → re-select it, don't deselect
-        XCTAssertEqual(sel.activeGroupID, a, "an inactive group's face re-selects the group")
+        let a = sel.groups[0].id, b = sel.groups[1].id   // Flexible (PR #362) H55c: several roles on one face (owner 2026-10-25)
+        tap(5, &sel, force)               // A is INACTIVE → its face joins B; A keeps it   // Flexible (PR #362) H55c: several roles on one face (owner 2026-10-25)
+        XCTAssertEqual(sel.activeGroupID, b, "B is still the group being built")   // Flexible (PR #362) H55c: several roles on one face (owner 2026-10-25)
         XCTAssertEqual(sel.groups[0].faces, [5], "A keeps its face — deselect is active-only")
-        XCTAssertEqual(sel.groups[1].faces, [6], "B untouched")
+        XCTAssertEqual(sel.groups[1].faces, [6, 5], "the face joined B")   // Flexible (PR #362) H55c: several roles on one face (owner 2026-10-25)
+        guard sel.groups.count == 2 else { return XCTFail("two groups") }   // Flexible (PR #362) H55c: several roles on one face (owner 2026-10-25)
+        tap(5, &sel, force)               // tapped again: deselected from B only   // Flexible (PR #362) H55c: several roles on one face (owner 2026-10-25)
+        XCTAssertEqual(sel.groups[0].faces, [5], "A untouched")   // Flexible (PR #362) H55c: several roles on one face (owner 2026-10-25)
+        XCTAssertEqual(sel.groups[1].faces, [6], "B as it was")   // Flexible (PR #362) H55c: several roles on one face (owner 2026-10-25)
+        XCTAssertEqual(sel.activeGroupID, b)   // Flexible (PR #362) H55c: several roles on one face (owner 2026-10-25)
+        XCTAssertNotEqual(sel.activeGroupID, a, "A is not re-selected while B is being built")   // Flexible (PR #362) H55c: several roles on one face (owner 2026-10-25)
     }
 
     func testMultiFaceLoopNeverPullsFacesFromASetGroup() {

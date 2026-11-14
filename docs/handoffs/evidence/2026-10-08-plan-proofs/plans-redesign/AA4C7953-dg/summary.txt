@@ -1,0 +1,5 @@
+DG-PROJECT M2 verticalStand THICK (converted: Default Grade) algorithm doubled stage Optional(TopOptFlows.LatticeStageMode.aesthetic) step-halves true density sim cells auto
+DG-PLAN doubled: 0 cell(s) over 0 region(s) | 
+DG-PLAN per region: 
+DG-OVERLAPS 0 same-region pair(s)
+DG-REGIONS voxel=1.838 mm | 

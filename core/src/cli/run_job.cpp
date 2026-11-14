@@ -1,6 +1,14 @@
 #include "topopt/job.hpp"
+#include "topopt/flexible/job_block.hpp"  // refuse_flexible_job
+#include "topopt/lattice_dc.hpp"
+#include "topopt/lattice_union_volume.hpp"
+#include "topopt/lattice_volume_check.hpp"
+#include "topopt/organic_wet_join.hpp"
+#include "topopt/voxel_sdf.hpp"
+#include "topopt/stepped_plan.hpp"
 
 #include <algorithm>
+#include <deque>
 #include <array>
 #include <cassert>
 #include <chrono>
@@ -13,16 +21,19 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <queue>
 #include <set>
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
 #include "topopt/analyze.hpp"
 #include "topopt/build_frame.hpp"
 #include "topopt/cad_project.hpp"
+#include "topopt/finish.hpp"
 #include "topopt/clearance.hpp"
 #include "topopt/face_region.hpp"
 #include "topopt/coarsen.hpp"
@@ -33,7 +44,11 @@
 #include "topopt/lattice.hpp"
 #include "topopt/lattice_algorithm.hpp"
 #include "topopt/lattice_boundary.hpp"
+#include "topopt/lattice_types.hpp"
 #include "topopt/lattice_gen.hpp"
+#include "topopt/feature_edges.hpp"
+#include <unordered_set>
+#include "topopt/tpms_gen.hpp"
 #include "topopt/lattice_void.hpp"
 #include "topopt/beam_network.hpp"
 #include "topopt/organic_lattice.hpp"
@@ -53,6 +68,9 @@
 #include "topopt/threemf_stream.hpp"
 #include "topopt/version.hpp"
 #include "topopt/voxel.hpp"
+#ifdef TOPOPT_HAVE_MANIFOLD
+#include "manifold/manifold.h"
+#endif
 #ifdef TOPOPT_HAVE_3MF
 #include "topopt/threemf.hpp"
 #endif
@@ -549,13 +567,479 @@ std::string export_variant_alpha(const MinimizePlasticVariant& variant,
 // ROTATED so the certified build direction is +Z in the file. Rotated vertices,
 // not a build transform — a 3MF transform is advice that "place on bed" resets,
 // and then the certificate would describe an object the slicer never produces.
-std::string export_variant_mesh(const MinimizePlasticVariant& variant,
-                                const std::string& out_dir, const JobOutput& out,
-                                const VoxelGrid& sg, double printed_iso = 0.5,
-                                const StepModel* cad = nullptr) {
-  const std::string path = join_path(
-      out_dir, mesh_file_name(out.mesh_prefix, variant.requested_volume_fraction,
-                              out.mesh_format));
+// The variant's exported solid in MODEL coordinates (before any build-frame bake):
+// the shell the file carries, so a caller can certify exactly what is exported
+// (CORE LIST item 50 verifies it). export_variant_mesh writes it.
+// CORE LIST item KEEP — inside each keep region the export carries the PART's own
+// geometry, exactly: (export - K) + (part ^ K), one merged shell, by Manifold. The
+// optimizer froze the part there, so the two meet. Without Manifold in this build, or
+// on a mesh Manifold cannot take as a closed manifold, the voxel surface stays and a
+// WARNING says so (the kept material is still frozen, only not exact).
+// The voxel surface pokes up to half a voxel PAST the part's own faces, and outside a
+// region it stays: a region that sits flush on a face keeps those bumps just above it
+// (measured 0.29 mm over a 30-degree face at 1.1 mm voxels). So a region meant to make
+// a face exact reaches at least one voxel out past it, into the air, where the part
+// has nothing to restore (test_keep_oriented).
+// E1 (reviewer's ruling 2026-11-03 02:46): THE WRITTEN FILE IS CLEAN. Manifold's
+// output is manifold in its own indices, but two of its vertices can be distinct and
+// round to ONE float: a zero-area sliver on them puts its long edge on four triangles
+// once the file is read (his squish rig: 4 such edges where a Protect cylinder's end
+// met the voxel surface). And where Protect boxes meet the voxel surface the boolean
+// leaves loose slivers of voxel bump in the air above the face (68 on that rig, 0.00
+// to 0.25 mm3, beside a 99,842 mm3 part). Every shell under one solve voxel
+// (`min_piece_mm3`) goes, in the boolean's own indices first and then welded as
+// written (clean_cut_as_written), never one of the export's own bodies; a result
+// still not clean is tried again with the voxel surface nudged another way, and said
+// if none is.
+#ifdef TOPOPT_HAVE_MANIFOLD
+manifold::Manifold mesh_manifold(const TriangleMesh& m) {
+  manifold::MeshGL g;
+  g.numProp = 3;
+  g.vertProperties.reserve(3 * m.vertices.size());
+  for (const Vec3& v : m.vertices) {
+    g.vertProperties.push_back(static_cast<float>(v.x));
+    g.vertProperties.push_back(static_cast<float>(v.y));
+    g.vertProperties.push_back(static_cast<float>(v.z));
+  }
+  for (const auto& t : m.triangles)
+    for (int k = 0; k < 3; ++k) g.triVerts.push_back(static_cast<uint32_t>(t[k]));
+  return manifold::Manifold(g);
+}
+
+TriangleMesh manifold_mesh(const manifold::MeshGL& g) {
+  TriangleMesh out;
+  out.vertices.reserve(g.NumVert());
+  for (std::size_t v = 0; v < g.NumVert(); ++v)
+    out.vertices.push_back({g.vertProperties[v * g.numProp], g.vertProperties[v * g.numProp + 1],
+                            g.vertProperties[v * g.numProp + 2]});
+  for (std::size_t t = 0; t < g.NumTri(); ++t)
+    out.triangles.push_back({static_cast<int>(g.triVerts[3 * t]),
+                             static_cast<int>(g.triVerts[3 * t + 1]),
+                             static_cast<int>(g.triVerts[3 * t + 2])});
+  return out;
+}
+
+// A keep region as a solid, grown by `grow` mm. Its round side is a 128-gon; `cover`
+// CIRCUMSCRIBES it (the polygon's edges touch the circle from outside, so the solid
+// holds all of the true region), as a cutter must.
+manifold::Manifold keep_region_solid(const KeepRegion& k, double grow, bool cover = false) {
+  constexpr int kSeg = 128;
+  const double rs = cover ? 1.0 / std::cos(3.14159265358979323846 / kSeg) : 1.0;
+  if (k.oriented) {  // centred primitive, then the region's own (right-handed) frame
+    const manifold::Manifold prim =
+        k.cylinder ? manifold::Manifold::Cylinder(2.0 * (k.half.z + grow), rs * (k.half.x + grow),
+                                                  -1.0, kSeg, true)
+                   : manifold::Manifold::Cube({2.0 * (k.half.x + grow),
+                                               2.0 * (k.half.y + grow),
+                                               2.0 * (k.half.z + grow)},
+                                              true);
+    auto col = [](const Vec3& v) { return manifold::vec3{v.x, v.y, v.z}; };
+    return prim.Transform(manifold::mat3x4(col(k.axes[0]), col(k.axes[1]), col(k.axes[2]),
+                                           col(k.center)));
+  }
+  const manifold::vec3 lo{k.min.x - grow, k.min.y - grow, k.min.z - grow};
+  const manifold::vec3 ext{k.max.x - k.min.x + 2 * grow, k.max.y - k.min.y + 2 * grow,
+                           k.max.z - k.min.z + 2 * grow};
+  manifold::Manifold prim;
+  if (!k.cylinder) {
+    prim = manifold::Manifold::Cube(ext).Translate(lo);
+  } else {
+    const double len = k.axis == 0 ? ext.x : k.axis == 1 ? ext.y : ext.z;
+    const double r = rs * 0.5 * (k.axis == 0 ? ext.y : ext.x);
+    prim = manifold::Manifold::Cylinder(len, r, r, kSeg);  // along +Z from 0
+    if (k.axis == 0) prim = prim.Rotate(0.0, 90.0, 0.0);   // +Z -> +X
+    if (k.axis == 1) prim = prim.Rotate(-90.0, 0.0, 0.0);  // +Z -> +Y
+    const manifold::vec3 c{lo.x + 0.5 * ext.x, lo.y + 0.5 * ext.y, lo.z + 0.5 * ext.z};
+    prim = prim.Translate({k.axis == 0 ? lo.x : c.x, k.axis == 1 ? lo.y : c.y,
+                           k.axis == 2 ? lo.z : c.z});
+  }
+  return prim;
+}
+
+// A Keep clear primitive as a solid (clearance.hpp's region, grown by `grow` mm), in its
+// own right-handed frame: the bolt's swept cylinder about its axis (circumscribed, as
+// above), the face's slab on its plane. A voxel-set or outlined region (an include's,
+// never a Keep clear's) has no primitive: empty.
+manifold::Manifold clearance_solid(const ClearanceGeometry& g, double grow) {
+  if (!g.valid || g.mask != nullptr || !g.outline_uv.empty()) return manifold::Manifold();
+  auto col = [](const Vec3& v) { return manifold::vec3{v.x, v.y, v.z}; };
+  auto add = [](const Vec3& a, const Vec3& b) { return Vec3{a.x + b.x, a.y + b.y, a.z + b.z}; };
+  auto mul = [](const Vec3& a, double k) { return Vec3{a.x * k, a.y * k, a.z * k}; };
+  auto dot = [](const Vec3& a, const Vec3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; };
+  auto cross = [](const Vec3& a, const Vec3& b) {
+    return Vec3{a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+  };
+  auto normalize = [&](const Vec3& a) { return mul(a, 1.0 / std::sqrt(dot(a, a))); };
+  // ★ E4 (j): a cut piece's Keep clear is trimmed to its clips' half-spaces, each
+  // pushed out by `grow` as the primitive is. No clips: the primitive, as before E4.
+  auto clip = [&](manifold::Manifold m) {
+    for (const ClearanceClip& c : g.clips) {
+      const Vec3 n = normalize(c.normal);
+      m = m.TrimByPlane(col(n), dot(c.point, n) - grow);
+    }
+    return m;
+  };
+  if (g.kind == ClearanceKind::Bolt) {
+    constexpr int kSeg = 128;
+    const Vec3 a = normalize(g.axis_dir);
+    const Vec3 e1 = normalize(cross(a, std::fabs(a.x) < 0.9 ? Vec3{1.0, 0.0, 0.0} : Vec3{0.0, 1.0, 0.0}));
+    const Vec3 e2 = cross(a, e1);  // e1 x e2 = a
+    const manifold::Manifold prim = manifold::Manifold::Cylinder(
+        g.t_hi - g.t_lo + 2.0 * grow,
+        (g.radius + grow) / std::cos(3.14159265358979323846 / kSeg), -1.0, kSeg);
+    return clip(prim.Transform(manifold::mat3x4(col(e1), col(e2), col(a),
+                                                col(add(g.axis_point, mul(a, g.t_lo - grow))))));
+  }
+  Vec3 u = g.u, w = g.w;
+  double u_lo = g.u_lo, u_hi = g.u_hi, w_lo = g.w_lo, w_hi = g.w_hi;
+  if (dot(cross(u, w), g.normal) < 0.0) {  // the frame (u, w, normal) right-handed
+    std::swap(u, w);
+    std::swap(u_lo, w_lo);
+    std::swap(u_hi, w_hi);
+  }
+  const manifold::Manifold prim = manifold::Manifold::Cube(
+      {u_hi - u_lo + 2.0 * grow, w_hi - w_lo + 2.0 * grow, g.depth + 2.0 * grow});
+  const Vec3 o = add(add(add(g.origin, mul(u, u_lo - grow)), mul(w, w_lo - grow)),
+                     mul(g.normal, -grow));
+  return clip(prim.Transform(manifold::mat3x4(col(u), col(w), col(g.normal), col(o))));
+}
+#endif
+
+TriangleMesh keep_regions_exact(const TriangleMesh& exported, const TriangleMesh& part,
+                                const std::vector<KeepRegion>& keeps,
+                                double min_piece_mm3 = 0.0) {
+  if (keeps.empty()) return exported;
+#ifdef TOPOPT_HAVE_MANIFOLD
+  const auto to_manifold = mesh_manifold;
+  // The part side is taken with each region GROWN by kFuse, so the two pieces
+  // overlap by that much and fuse across a volume: cut exactly at K, they touched
+  // along lines on K's boundary (his plate: 22 four-way edges at r = 7.0).
+  constexpr double kFuse = 0.05;  // mm, below any print resolution
+  manifold::Manifold K, K_part;
+  for (const KeepRegion& k : keeps) {
+    K = K + keep_region_solid(k, 0.0);
+    K_part = K_part + keep_region_solid(k, kFuse);
+  }
+  // The voxel surface is NUDGED 1 um along a slanted direction first. A part face on
+  // a voxel plane (his flat bottom at z = 0) is otherwise exactly where the voxel
+  // surface is, and in the kFuse overlap the two coplanar sheets left edges on four
+  // triangles once written as floats (2 on the tilted test); 1 um apart they fuse
+  // cleanly, far below any print resolution. The part side is never moved.
+  constexpr double kNudge = 1e-3;  // mm
+  // The nudges tried, in order: the first is the one every earlier export used.
+  constexpr double kNudges[3][3] = {
+      {0.5377, 0.8326, 0.1327}, {-0.4103, 0.2311, 0.8821}, {0.7071, -0.5513, 0.4428}};
+  const manifold::Manifold E0 = to_manifold(exported);
+  const manifold::Manifold E = E0.Translate(
+      {kNudge * kNudges[0][0], kNudge * kNudges[0][1], kNudge * kNudges[0][2]});
+  const manifold::Manifold P = to_manifold(part);
+  if (E.Status() != manifold::Manifold::Error::NoError ||
+      P.Status() != manifold::Manifold::Error::NoError) {
+    std::fprintf(stderr,
+                 "WARNING: KEEP regions: the %s mesh is not a closed manifold "
+                 "(Manifold status %d), so the kept regions are exported from the "
+                 "voxels, not exactly.\n",
+                 E.Status() != manifold::Manifold::Error::NoError ? "exported" : "part",
+                 static_cast<int>(E.Status() != manifold::Manifold::Error::NoError
+                                      ? E.Status()
+                                      : P.Status()));
+    return exported;
+  }
+  const int bodies = audit_as_written(exported).bodies;
+  const manifold::Manifold PK = P ^ K_part;
+  TriangleMesh out;
+  int dropped = 0;
+  for (int n = 0; n < 3; ++n) {
+    const manifold::Manifold En =
+        n == 0 ? E
+               : E0.Translate({kNudge * kNudges[n][0], kNudge * kNudges[n][1],
+                               kNudge * kNudges[n][2]});
+    out = manifold_mesh(((En - K) + PK).GetMeshGL());
+    out = clean_cut_as_written(out, min_piece_mm3, bodies, &dropped);
+    const WrittenAudit w = audit_as_written(out);
+    if (w.non_manifold_edges == 0 && w.non_manifold_vertices == 0 && w.boundary_edges == 0) break;
+    if (n == 2)
+      std::fprintf(stderr,
+                   "WARNING: KEEP regions: the exact export still has %d edge(s) on more than "
+                   "two triangles and %d point contact(s) after three tries.\n",
+                   w.non_manifold_edges, w.non_manifold_vertices);
+  }
+  if (dropped > 0)
+    std::fprintf(stderr, "[keep] %d loose sliver(s) under one solve voxel dropped from the "
+                 "exact export\n", dropped);
+  return out;
+#else
+  (void)part;
+  std::fprintf(stderr,
+               "WARNING: KEEP regions: this build has no Manifold, so the kept "
+               "regions are exported from the voxels, not exactly (they are still "
+               "frozen).\n");
+  return exported;
+#endif
+}
+
+// KEEP CLEAR, EXACTLY (reviewer's ruling 2026-11-03 19:55, FINDING 1): a file prints
+// NOTHING inside a Keep clear. The exports put material there on 7 of his jobs (a band
+// up to half a voxel deep where the design meets a Keep clear: 418 to 838 mm3 on
+// efe18e33 and e5909008), though no design voxel is in one. Every file is cut by
+// Manifold, as exact Protect is: file - (Keep clears - part). The Keep clears are every
+// declared primitive (a bolt's swept cylinder, a face's slab, in any orientation) and
+// every Protect region's reach, whose air the optimizer keeps clear too
+// (build_clearance_overlay). The part's own solid wins over a Keep clear, as in
+// rasterize_clearance, so the material around a bore is never cut.
+//
+// THE CUTTER NEVER LIES ON THE FILE. The file's surface is the part's own wherever the
+// CAD projection or exact Protect made it so, and a cutter whose boundary is that same
+// surface re-cuts it: cut against the part itself, efe18e33 lost 13,151 vertices of the
+// part's own surface and gained 6 edges on more than two triangles. So the part is
+// GROWN by `eps` before it is taken away (the union of the part and its 26 copies moved
+// eps along the 3 x 3 x 3 stencil: every face of it stands at least eps / sqrt(3) off the
+// part's, edges and corners included), and a Protect region, which exact Protect has
+// already cut the file at, is cut `eps` inside its own boundary. A declared Keep clear's
+// round side is CIRCUMSCRIBED (no sliver of the true region stays uncut). eps is 2 um, a
+// skin far below any print resolution and two orders above a float's rounding here.
+struct KeepClearCut {
+  bool any = false;  // a cutter to cut with
+  bool part_ok = true;
+  double eps_mm = 0.0;
+#ifdef TOPOPT_HAVE_MANIFOLD
+  manifold::Manifold cutter;
+#endif
+};
+
+// The cutter for try `n` (0, 1, 2): eps 2, 4, 8 um, a declared Keep clear grown n um.
+KeepClearCut make_keep_clear_cut(const TriangleMesh& part,
+                                 const std::vector<ClearanceGeometry>& clears,
+                                 const std::vector<KeepRegion>& keeps, int n = 0) {
+  KeepClearCut c;
+  if ((clears.empty() && keeps.empty()) || part.empty()) return c;
+#ifdef TOPOPT_HAVE_MANIFOLD
+  const manifold::Manifold P = mesh_manifold(part);
+  if (P.Status() != manifold::Manifold::Error::NoError) {
+    c.part_ok = false;
+    return c;
+  }
+  c.eps_mm = 2e-3 * static_cast<double>(1 << n);
+  const double grow = 1e-3 * n;
+  std::vector<manifold::Manifold> grown{P};
+  for (int i = -1; i <= 1; ++i)
+    for (int j = -1; j <= 1; ++j)
+      for (int k = -1; k <= 1; ++k) {
+        if (i == 0 && j == 0 && k == 0) continue;
+        const double s = c.eps_mm / std::sqrt(static_cast<double>(i * i + j * j + k * k));
+        grown.push_back(P.Translate({s * i, s * j, s * k}));
+      }
+  std::vector<manifold::Manifold> K;
+  for (const ClearanceGeometry& g : clears) K.push_back(clearance_solid(g, grow));
+  for (const KeepRegion& k : keeps) {
+    const double h = k.oriented ? std::min({k.half.x, k.half.y, k.half.z})
+                                : 0.5 * std::min({k.max.x - k.min.x, k.max.y - k.min.y,
+                                                  k.max.z - k.min.z});
+    if (h > 2.0 * c.eps_mm) K.push_back(keep_region_solid(k, -c.eps_mm));
+  }
+  c.cutter = manifold::Manifold::BatchBoolean(K, manifold::OpType::Add) -
+             manifold::Manifold::BatchBoolean(grown, manifold::OpType::Add);
+  c.any = !c.cutter.IsEmpty();
+#else
+  (void)n;
+  c.any = true;  // reported as not cut, below
+#endif
+  return c;
+}
+
+// `file` cut out of its Keep clears with `cut` (try 0, made once per run); a result not
+// clean as written is cut again with tries 1 and 2. A file that reaches into none is
+// returned as it is, byte for byte; `cut_mm3` (may be null) is the volume cut.
+// A piece the cut leaves loose goes under one voxel (`min_piece_mm3`) or, given the
+// printable minimum `thin_mm`, under that across (his efe18e33 at 1.10: 0.89 mm3, 0.72
+// mm thin, a voxel being 0.87 mm3) — never one of the file's own bodies.
+TriangleMesh keep_clear_exact(const TriangleMesh& file, const KeepClearCut& cut,
+                              const TriangleMesh& part,
+                              const std::vector<ClearanceGeometry>& clears,
+                              const std::vector<KeepRegion>& keeps, double min_piece_mm3,
+                              double* cut_mm3 = nullptr, double thin_mm = 0.0) {
+  if (cut_mm3) *cut_mm3 = 0.0;
+  if (!cut.part_ok)
+    std::fprintf(stderr, "WARNING: KEEP CLEAR: the part mesh is not a closed manifold, so the "
+                         "file is not cut out of its Keep clears.\n");
+  if (!cut.any) return file;
+#ifdef TOPOPT_HAVE_MANIFOLD
+  // Below this the two only touch.
+  constexpr double kTouchMm3 = 1e-6;
+  const manifold::Manifold E = mesh_manifold(file);
+  if (E.Status() != manifold::Manifold::Error::NoError) {
+    std::fprintf(stderr, "WARNING: KEEP CLEAR: the exported mesh is not a closed manifold "
+                         "(Manifold status %d), so it is not cut out of its Keep clears.\n",
+                 static_cast<int>(E.Status()));
+    return file;
+  }
+  const double v0 = (E ^ cut.cutter).Volume();
+  if (!(v0 > kTouchMm3)) return file;
+  const int bodies = audit_as_written(file).bodies;
+  TriangleMesh out = file;
+  for (int n = 0; n < 3; ++n) {
+    const KeepClearCut retry = n == 0 ? KeepClearCut{} : make_keep_clear_cut(part, clears, keeps, n);
+    const manifold::Manifold& C = n == 0 ? cut.cutter : retry.cutter;
+    if (cut_mm3) *cut_mm3 = n == 0 ? v0 : (E ^ C).Volume();
+    int dropped = 0;
+    out = clean_cut_as_written(manifold_mesh((E - C).GetMeshGL()), min_piece_mm3, bodies,
+                               &dropped, thin_mm);
+    const WrittenAudit w = audit_as_written(out);
+    if (w.non_manifold_edges == 0 && w.non_manifold_vertices == 0 && w.boundary_edges == 0) break;
+    if (n == 2)
+      std::fprintf(stderr,
+                   "WARNING: KEEP CLEAR: the cut file still has %d edge(s) on more than two "
+                   "triangles and %d point contact(s) after three tries.\n",
+                   w.non_manifold_edges, w.non_manifold_vertices);
+  }
+  return out;
+#else
+  (void)part;
+  (void)clears;
+  (void)keeps;
+  (void)min_piece_mm3;
+  std::fprintf(stderr, "WARNING: KEEP CLEAR: this build has no Manifold, so the file is not "
+                       "cut out of its Keep clears.\n");
+  return file;
+#endif
+}
+
+std::vector<ClearanceGeometry> lattice_keep_outs_from_job(const JobDescription& job,
+                                                         const StepModel& model);
+
+// ENGINE BATCH E1 — a run's finishing context (finish.hpp): the printable minimum
+// (2 x the outer wall line width), the export cell, the forbidden voxels (Keep clear
+// and Protect's reach), the box (growth) or the part (reduction), and the CAD.
+struct RunFinish {
+  FinishContext ctx;
+  std::vector<char> part_solid;
+  std::vector<char> part_voxels;  // the part as drawn, either run type (pins without CAD)
+  std::vector<ClearanceGeometry> keep_clears;  // the job's declared Keep clears, resolved
+  const TriangleMesh* part = nullptr;          // the part's own solid (wins over a Keep clear)
+  std::shared_ptr<const KeepClearCut> keep_clear_cut;  // made once (null: nothing to cut)
+};
+
+RunFinish make_run_finish(const JobDescription& job, const MinimizePlasticOptions& o,
+                          const StepModel* cad, const VoxelGrid& sg) {
+  RunFinish f;
+  const double outer = o.wall_line_width_outer_mm > 0.0 ? o.wall_line_width_outer_mm
+                                                         : o.wall_line_width_mm;
+  f.ctx.min_thickness_mm = outer > 0.0 ? 2.0 * outer : 0.0;
+  char src[96];
+  std::snprintf(src, sizeof src, "2 \u00D7 outer wall line width (%.2f mm)", outer);
+  f.ctx.min_thickness_source = src;
+  f.ctx.cell_mm = sg.spacing / static_cast<double>(std::max(1, job.output.smooth_factor));
+  f.ctx.grid = &sg;
+  if (!o.clearance_void.empty() && o.clearance_void.size() == sg.voxel_count())
+    f.ctx.forbidden = &o.clearance_void;
+  f.ctx.keeps = &job.keep_regions;
+  f.ctx.growth = o.design_box.has_value();
+  if (f.ctx.growth) {
+    f.ctx.has_box = true;
+    f.ctx.box = *o.design_box;
+  } else {
+    f.part_solid.resize(sg.voxel_count());
+    for (std::size_t i = 0; i < sg.voxel_count(); ++i) f.part_solid[i] = sg.tags[i] != VoxelTag::Empty;
+  }
+  // CAD faces pin where the projection made them exact, and only there: a STATED face
+  // (STEP) with project_cad_faces on. A fitted face (STL / 3MF segmentation) is not
+  // projected (variant_export_model_mesh), so the export carries the voxel surface
+  // there and an attribution by tolerance would differ between an STL and a 3MF
+  // import of one part; such a part's own faces are told apart by the voxels instead
+  // (thin_spot_cleanup: the part's boundary).
+  f.ctx.cad = job.output.project_cad_faces && cad != nullptr && !cad->faces_are_fitted ? cad : nullptr;
+  f.ctx.cad_spacing_mm = sg.spacing;
+  if (f.ctx.cad == nullptr && cad != nullptr && !cad->mesh.empty()) {
+    // The part as drawn on the solve grid: its own mesh voxelized there (a growth
+    // run's grid tags the design box as material too).
+    const VoxelGrid pv = voxelize_onto_grid(cad->mesh, sg);
+    f.part_voxels.assign(sg.voxel_count(), 0);
+    for (std::size_t i = 0; i < sg.voxel_count() && i < pv.tags.size(); ++i)
+      f.part_voxels[i] = pv.tags[i] != VoxelTag::Empty;
+  }
+  if (cad != nullptr && !cad->mesh.empty()) {  // every file is cut out of its Keep clears
+    f.keep_clears = lattice_keep_outs_from_job(job, *cad);
+    f.part = &cad->mesh;
+    if (!f.keep_clears.empty() || !job.keep_regions.empty())
+      f.keep_clear_cut = std::make_shared<const KeepClearCut>(
+          make_keep_clear_cut(cad->mesh, f.keep_clears, job.keep_regions));
+  }
+  f.ctx.slim_line_mm = 2.0 * f.ctx.min_thickness_mm;  // his ruling 2026-11-03: slim
+  // A latticed job's versions carry a lattice companion built from the unfinished shape.
+  f.ctx.outward_only = job.lattice.present || job.grading.present;
+  return f;
+}
+
+// The same finishing with C2's own thin-section line: the per-version fallback.
+RunFinish safe_finish(const RunFinish& fin) {
+  RunFinish f = fin;
+  f.ctx.slim_line_mm = 0.0;
+  if (!f.part_solid.empty()) f.ctx.part_solid = nullptr;  // re-pointed per use
+  f.ctx.part_voxels = nullptr;
+  return f;
+}
+
+FinishBlock finish_block(const FinishReport& r) {
+  FinishBlock b;
+  b.ran = r.ran;
+  b.min_thickness_mm = r.min_thickness_mm;
+  b.min_thickness_source = r.min_thickness_source;
+  for (const ThinSpot& t : r.fixed) b.fixed.push_back({t.centre_mm, t.before_mm, t.after_mm, ""});
+  for (const ThinSpot& t : r.left) b.left.push_back({t.centre_mm, t.before_mm, t.after_mm, t.reason});
+  b.surface_applied = r.surface_applied;
+  b.stair_step_removed_pct = r.stair_step_removed_pct;
+  b.slim = r.slim;
+  b.finish_fallback = r.fallback;
+  b.finish_fallback_reason = r.fallback_reason;
+  b.volume_before_mm3 = std::fabs(r.volume_before_mm3);
+  b.volume_after_mm3 = std::fabs(r.volume_after_mm3);
+  b.pinned_vertices = r.pinned_vertices;
+  b.pinned_moved = r.pinned_moved;
+  b.roughness_vertices = r.roughness_vertices;
+  b.outward_only_vertices = r.outward_only_vertices;
+  b.slim_guarded_vertices = r.slim_guarded_vertices;
+  b.fold_walked_back = r.fold_held_vertices;
+  b.keep_clear_held = r.keep_clear_held_vertices;
+  b.keep_clear_left = r.keep_clear_left;
+  b.slim_rounds = r.slim_rounds;
+  b.roughness_before_mm = r.roughness_before_mm;
+  b.roughness_after_mm = r.roughness_after_mm;
+  b.seconds = r.seconds;
+  return b;
+}
+
+TriangleMesh variant_export_model_mesh(const MinimizePlasticVariant& variant,
+                                       const JobOutput& out, const VoxelGrid& sg,
+                                       double printed_iso = 0.5,
+                                       const StepModel* cad = nullptr,
+                                       const std::vector<KeepRegion>& keeps = {},
+                                       const RunFinish* fin = nullptr,
+                                       FinishBlock* fb = nullptr,
+                                       TriangleMesh* unfinished = nullptr) {
+  if (fin != nullptr) {  // E1: the finished shape, after CAD projection and exact Protect
+    const TriangleMesh raw = variant_export_model_mesh(variant, out, sg, printed_iso, cad, keeps);
+    FinishContext c = fin->ctx;
+    c.density = &variant.optimization.physical_density;
+    if (!fin->part_solid.empty()) c.part_solid = &fin->part_solid;
+    c.part_voxels = fin->part_voxels.empty() ? nullptr : &fin->part_voxels;
+    FinishReport r;
+    // Welded as written: the file is the shape (a float-coincident sliver goes).
+    TriangleMesh m = weld_as_written(finish_shape(raw, c, &r));
+    double cut = 0.0;
+    if (fin->part != nullptr && fin->keep_clear_cut != nullptr)
+      m = keep_clear_exact(m, *fin->keep_clear_cut, *fin->part, fin->keep_clears, keeps,
+                           sg.spacing * sg.spacing * sg.spacing, &cut, c.min_thickness_mm);
+    if (fb) {
+      *fb = finish_block(r);
+      fb->keep_clear_cut_mm3 = cut;
+    }
+    if (unfinished) *unfinished = raw;
+    return m;
+  }
+  if (!keeps.empty() && cad != nullptr)  // item KEEP: exact inside each keep region
+    return keep_regions_exact(
+        variant_export_model_mesh(variant, out, sg, printed_iso, cad, {}), cad->mesh,
+        keeps, sg.spacing * sg.spacing * sg.spacing);
   const int sf = out.smooth_factor;
   TriangleMesh smooth;  // only populated when sf > 1
   if (sf > 1) {
@@ -563,7 +1047,19 @@ std::string export_variant_mesh(const MinimizePlasticVariant& variant,
         sg.nx, sg.ny, sg.nz, sg.spacing, sg.origin,
         variant.optimization.physical_density, printed_iso, sf,
         ResampleInterp::Tricubic);
-    smooth = keep_largest_component(raw);
+    // CORE LIST item 41 — every body holding an anchor or a load, mapped from the
+    // solve grid's bodies (keep_largest_component's shell on a one-body part).
+    BodyShells shells = carrying_body_shells(
+        raw, sg,
+        printed_bodies(sg, variant.optimization.physical_density, printed_iso));
+    if (shells.bodies_without_shell > 0)
+      std::fprintf(stderr,
+                   "WARNING: variant vf %.2f: %d carrying body(ies) left no shell "
+                   "in the smooth_factor %d resample, so the exported file does "
+                   "not carry them.\n",
+                   variant.requested_volume_fraction, shells.bodies_without_shell,
+                   sf);
+    smooth = std::move(shells.mesh);
   }
   // CAD-FACE PROJECTION (task 2026-08-06-cad-face-projection), DEFAULT OFF.
   //
@@ -603,18 +1099,265 @@ std::string export_variant_mesh(const MinimizePlasticVariant& variant,
   TriangleMesh projected;
   if (out.project_cad_faces && cad != nullptr && !cad->faces.empty() &&
       !cad->faces_are_fitted) {
-    const TriangleMesh& src = (sf > 1) ? smooth : variant.v3.mesh;
+    const TriangleMesh& src = (sf > 1) ? smooth : variant.exported_mesh();
     CadProjectOptions po = cad_project_options_for_grid(sg.spacing);
     po.enabled = true;
     const CadAttribution att = attribute_to_cad_faces(src, *cad, po);
     projected = project_onto_cad_faces(src, *cad, po, att);
   }
-  const TriangleMesh& model_mesh =
-      !projected.vertices.empty() ? projected
-                                  : ((sf > 1) ? smooth : variant.v3.mesh);
+  if (!projected.vertices.empty()) return projected;
+  return (sf > 1) ? smooth : variant.exported_mesh();
+}
+
+// E1 (e) WITH HIS FALLBACK (reviewer's rulings 2026-11-03 02:46 + 02:48): one
+// version's finished shape, re-checked as the FILE it ships as (the normal import:
+// the file is clean), slim first and, when a re-check fails, safe
+// (finish_with_fallback). Margin, Keep clear, pieces, loose pieces and thin joints
+// (edge / corner-only contacts of the file on the solve grid, against the unfinished
+// file's) — the reason is plain words, never a silent pass.
+struct VersionFinish {
+  TriangleMesh mesh;  // the finished shape that ships (model frame)
+  FinishBlock fb;
+  std::string refusal;  // non-empty: refused after finishing, for this reason
+  AnalyzeJobResult analysis;
+};
+// A streamed version's slim finish, made when its file was written: (e) re-checks it
+// instead of finishing the version again.
+struct StreamedFinish {
+  TriangleMesh mesh;  // the finished shape (model frame)
+  TriangleMesh raw;   // the unfinished export it was finished from
+  FinishBlock fb;
+};
+
+// The finished FILE's own checks beside its analysis, filled into `fb`: Keep clear
+// voxels it prints (`exclude`, may be null: voxels not counted, strengthen's frozen
+// part), its bodies, loose pieces and edge-only joints, each against the unfinished
+// file `raw` (only what finishing added refuses), and the analysis's own gate. The
+// caller sets the margin it needs (`rc.margin_required`) before finish_verdict_reason.
+// The solve-grid voxels whose centres a file `m` encloses.
+std::vector<char> file_occupancy(const TriangleMesh& m, const VoxelGrid& sg) {
+  const VoxelGrid fv = voxelize_onto_grid(m, sg);
+  std::vector<char> o(sg.voxel_count(), 0);
+  for (std::size_t i = 0; i < o.size() && i < fv.tags.size(); ++i) o[i] = fv.tags[i] != VoxelTag::Empty;
+  return o;
+}
+
+// Keep clear voxels a file prints (`clearance` may be null: none; `exclude` may be null:
+// voxels it freezes solid, strengthen's frozen part, are not counted).
+long long file_keep_clear_voxels(const std::vector<char>& occ, const DesignMask* clearance,
+                                 const DesignMask* exclude) {
+  long long n = 0;
+  if (clearance != nullptr && clearance->size() == occ.size())
+    for (std::size_t i = 0; i < occ.size(); ++i)
+      n += occ[i] && (*clearance)[i] == MaskValue::FrozenVoid &&
+           !(exclude != nullptr && (*exclude)[i] == MaskValue::FrozenSolid);
+  return n;
+}
+
+double point_triangle_d2(const Vec3& p, const Vec3& a, const Vec3& b, const Vec3& c);
+
+// The same count, each centre CONFIRMED on the file itself: the voxel test's +Z ray
+// parity misreads columns through the thin band an uncut export leaves on a bore wall
+// (his efe18e33: 14,988 voxels by the voxel test, 35 confirmed; 4 and 4 once cut), so
+// every centre it counts is checked by the generalized winding number (mesh_encloses).
+// A centre inside the part's own solid (`part`, may be null) is part material, which
+// wins over a Keep clear (rasterize_clearance's precedence), and one on the part's own
+// face is the part's surface: `in_part` and `on_face` (may be null) count those and
+// they are not in the result.
+long long file_keep_clear_exact(const TriangleMesh& m, const VoxelGrid& sg,
+                                const std::vector<char>& occ, const DesignMask* clearance,
+                                const DesignMask* exclude, const TriangleMesh* part,
+                                long long* in_part = nullptr, long long* on_face = nullptr) {
+  if (in_part) *in_part = 0;
+  if (on_face) *on_face = 0;
+  if (clearance == nullptr || clearance->size() != occ.size()) return 0;
+  const std::size_t nx = static_cast<std::size_t>(sg.nx), nxy = nx * static_cast<std::size_t>(sg.ny);
+  std::vector<Vec3> c;
+  for (std::size_t i = 0; i < occ.size(); ++i)
+    if (occ[i] && (*clearance)[i] == MaskValue::FrozenVoid &&
+        !(exclude != nullptr && (*exclude)[i] == MaskValue::FrozenSolid))
+      c.push_back(sg.voxel_center(static_cast<int>(i % nx), static_cast<int>((i % nxy) / nx),
+                                  static_cast<int>(i / nxy)));
+  // A centre within kOnFace of the part's surface AND of the file's is ON the part's own
+  // face, not material in a Keep clear: the cut holds the part's surface by 2-8 um (so
+  // it never re-cuts it), and the file is written in float (about 4 um at 100 mm). His
+  // efe18e33 kept 4 such centres after the cut, 0.02-0.4 um outside the part's bore
+  // walls, the file's surface 1.6-2 um further out.
+  constexpr double kOnFace = 0.01;  // mm
+  auto near = [](const TriangleMesh& s, const Vec3& p) {
+    for (const auto& t : s.triangles)
+      if (point_triangle_d2(p, s.vertices[t[0]], s.vertices[t[1]], s.vertices[t[2]]) <
+          kOnFace * kOnFace)
+        return true;
+    return false;
+  };
+  // One winding sum is O(triangles): the centres are split over the cores.
+  std::vector<char> enc(c.size(), 0), inp(c.size(), 0), onf(c.size(), 0);
+  const unsigned hc = std::max(1u, std::min(16u, std::thread::hardware_concurrency()));
+  std::vector<std::thread> pool;
+  for (unsigned t = 0; t < hc; ++t)
+    pool.emplace_back([&, t] {
+      for (std::size_t k = t; k < c.size(); k += hc) {
+        enc[k] = mesh_encloses(m, c[k]);
+        if (enc[k] && part != nullptr) inp[k] = mesh_encloses(*part, c[k]);
+        if (enc[k] && !inp[k] && part != nullptr) onf[k] = near(*part, c[k]) && near(m, c[k]);
+      }
+    });
+  for (std::thread& th : pool) th.join();
+  long long n = 0, p = 0, f = 0;
+  for (std::size_t k = 0; k < c.size(); ++k) {
+    n += enc[k] && !inp[k] && !onf[k];
+    p += enc[k] && inp[k];
+    f += onf[k];
+  }
+  if (in_part) *in_part = p;
+  if (on_face) *on_face = f;
+  return n;
+}
+
+FinishRecheck recheck_file(const TriangleMesh& m, const TriangleMesh& raw, const VoxelGrid& sg,
+                           const DesignMask* clearance, const DesignMask* exclude,
+                           const AnalyzeJobResult& a, double margin_required, FinishBlock& fb,
+                           const TriangleMesh* part) {
+  const std::vector<char> occ = file_occupancy(m, sg), occ0 = file_occupancy(raw, sg);
+  fb.recheck_ran = true;
+  fb.margin = a.analysis.margin_effective;
+  // ANY material in a Keep clear refuses (ruling 2026-11-03 19:55), each voxel confirmed
+  // on the file and outside the part's own solid.
+  fb.keep_clear_voxels = file_keep_clear_exact(m, sg, occ, clearance, exclude, part);
+  // Pieces: the file's bodies (positive-volume shells; a sealed void is not one).
+  fb.pieces = positive_volume_bodies(m);
+  // Edge- and corner-only joints, exactly, on the file's own mesh: an edge on more than
+  // two triangles, a vertex where shells touch. (On its voxels a smoother surface flips
+  // a few centres: his unfinished files read 32-42 diagonal contacts each, 2-4 more
+  // finished, none of them in the mesh.)
+  const WrittenAudit wa = audit_as_written(m), wa0 = audit_as_written(raw);
+  fb.thin_joints = wa.non_manifold_edges + wa.non_manifold_vertices;
+  fb.loose_pieces = file_loose_pieces(sg, occ);
+  const FixedDesignAnalysis& an = a.analysis;
+  FinishRecheck rc;
+  rc.ran = true;
+  rc.margin = fb.margin;
+  rc.margin_required = a.margin_required > 0.0 ? a.margin_required : margin_required;
+  rc.non_convergent = an.non_convergent;
+  rc.anchors_slide = an.contact_held_by_sliding;
+  // The file's own gate: accepted = load path && margin (&& not sliding).
+  rc.load_path_ok = an.accepted || an.non_convergent || an.contact_held_by_sliding ||
+                    an.margin_effective < rc.margin_required * (1.0 - 1e-12);
+  rc.keep_clear_voxels = fb.keep_clear_voxels;
+  // A Keep clear closed in on every side refuses too: nothing reaches it.
+  fb.keep_clear_sealed = file_sealed_keep_clears(m, sg, clearance);
+  rc.keep_clear_sealed = fb.keep_clear_sealed;
+  rc.keep_clear_before = file_keep_clear_voxels(occ0, clearance, exclude);
+  if (clearance != nullptr && clearance->size() == occ.size()) {
+    const std::size_t nx = static_cast<std::size_t>(sg.nx), nxy = nx * static_cast<std::size_t>(sg.ny);
+    for (std::size_t i = 0; i < occ.size(); ++i)
+      if (occ[i] && !occ0[i] && (*clearance)[i] == MaskValue::FrozenVoid &&
+          !(exclude != nullptr && (*exclude)[i] == MaskValue::FrozenSolid)) {
+        const Vec3 c = sg.voxel_center(static_cast<int>(i % nx), static_cast<int>((i % nxy) / nx),
+                                       static_cast<int>(i / nxy));
+        rc.keep_clear_added += mesh_encloses(m, c) && !mesh_encloses(raw, c);
+      }
+  }
+  fb.keep_clear_before = rc.keep_clear_before;
+  fb.keep_clear_added = rc.keep_clear_added;
+  // Only a piece the finishing ADDED refuses: the unfinished file's N bodies stay N.
+  rc.pieces = fb.pieces > std::max(1, positive_volume_bodies(raw)) ? fb.pieces : 1;
+  rc.loose_pieces = fb.loose_pieces;
+  rc.loose_pieces_before = file_loose_pieces(sg, occ0);
+  rc.thin_joints = fb.thin_joints;
+  rc.thin_joints_before = wa0.non_manifold_edges + wa0.non_manifold_vertices;
+  return rc;
+}
+
+VersionFinish finish_and_recheck(const MinimizePlasticVariant& v, const JobDescription& job,
+                                 const std::string& job_dir, const VoxelGrid& sg, double iso,
+                                 const StepModel* model, const RunFinish& fin,
+                                 const DesignMask* clearance, double density_g_cm3,
+                                 const MaterialLibrary& materials, const SettingsRules& rules,
+                                 const std::string& check_dir, double margin_before,
+                                 double margin_required, const StreamedFinish* pre = nullptr) {
+  const auto t0 = std::chrono::steady_clock::now();
+  VersionFinish out;
+  const RunFinish safe = safe_finish(fin);
+  TriangleMesh raw;
+  // The finished FILE is re-checked as the solid it is: the job's own analysis, without
+  // what the analyze path adds on top. A "grading" block would run the lattice-only
+  // grading law over the file (and refuse a minimize_plastic job, whose demand
+  // allowable is never set); the lattice companion is built from the unfinished shape.
+  JobDescription file_job = job;
+  file_job.grading.present = false;
+  file_job.has_orientation_recheck = false;
+  auto finish = [&](bool slim) -> const TriangleMesh& {
+    if (slim && pre != nullptr) {  // made when the version streamed
+      out.fb = pre->fb;
+      out.mesh = pre->mesh;
+      if (raw.triangles.empty()) raw = pre->raw;
+      return out.mesh;
+    }
+    out.fb = FinishBlock{};
+    out.mesh = variant_export_model_mesh(v, job.output, sg, iso, model, job.keep_regions,
+                                         slim ? &fin : &safe, &out.fb,
+                                         raw.triangles.empty() ? &raw : nullptr);
+    return out.mesh;
+  };
+  auto check = [&](const TriangleMesh& m) -> std::string {
+    std::error_code mk;
+    std::filesystem::create_directories(check_dir, mk);
+    const std::string stl = join_path(check_dir, "v.stl");
+    write_stl_file(stl, m);
+    try {
+      out.analysis = analyze_job(file_job, job_dir, check_dir, materials, rules, stl, {});
+    } catch (const std::exception& e) {
+      const WrittenAudit w = audit_as_written(m);
+      std::fprintf(stderr, "[finish] version vf %.2f: the finished file could not be re-checked: %s\n",
+                   v.requested_volume_fraction, e.what());
+      if (w.non_manifold_edges > 0 || w.boundary_edges > 0)
+        return "After finishing, the file is not one clean solid (" +
+               std::to_string(w.non_manifold_edges + w.boundary_edges) + " bad edge(s))";
+      return "After finishing, the file could not be re-checked";
+    }
+    FinishBlock& fb = out.fb;
+    fb.margin_before = margin_before;
+    // Mass from the files themselves: the finished one, and the unfinished export.
+    fb.mass_grams = density_g_cm3 * fb.volume_after_mm3 / 1000.0;
+    fb.mass_before_grams = density_g_cm3 * fb.volume_before_mm3 / 1000.0;
+    return finish_verdict_reason(
+        recheck_file(m, raw, sg, clearance, nullptr, out.analysis, margin_required, fb,
+                     fin.part));
+  };
+  const FallbackOutcome o = finish_with_fallback(finish, check);
+  if (o.fallback) {
+    std::string r = o.fallback_reason;
+    const std::string pre = "After finishing, ";
+    if (r.rfind(pre, 0) == 0) r = "With the slim finish, " + r.substr(pre.size());
+    out.fb.finish_fallback = true;
+    out.fb.finish_fallback_reason = r;
+  }
+  out.refusal = o.refusal;
+  out.fb.seconds =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+  return out;
+}
+
+std::string export_variant_mesh(const MinimizePlasticVariant& variant,
+                                const std::string& out_dir, const JobOutput& out,
+                                const VoxelGrid& sg, double printed_iso = 0.5,
+                                const StepModel* cad = nullptr,
+                                const std::vector<KeepRegion>& keeps = {},
+                                const RunFinish* fin = nullptr,
+                                const TriangleMesh* finished = nullptr) {
+  const std::string path = join_path(
+      out_dir, mesh_file_name(out.mesh_prefix, variant.requested_volume_fraction,
+                              out.mesh_format));
+  const TriangleMesh model_mesh =
+      finished != nullptr ? *finished
+                          : variant_export_model_mesh(variant, out, sg, printed_iso, cad, keeps, fin);
   const std::optional<BuildFrameRotation> R = variant_bake_rotation(variant);
   TriangleMesh baked;
-  if (R) baked = rotate_mesh(model_mesh, *R);
+  // A rotated file is welded as written again (unchanged when nothing coincides).
+  if (R) baked = fin != nullptr || finished != nullptr ? weld_as_written(rotate_mesh(model_mesh, *R))
+                                                       : rotate_mesh(model_mesh, *R);
   const TriangleMesh& export_mesh = R ? baked : model_mesh;
   if (out.mesh_format == "3mf") {
 #ifdef TOPOPT_HAVE_3MF
@@ -640,6 +1383,19 @@ std::string export_variant_mesh(const MinimizePlasticVariant& variant,
 struct LatticeExportOutcome {
   std::vector<std::string> paths;  // files written (STL and/or 3MF)
   LatticeGenStats stats;           // generator counts (identical across formats)
+  // ★ Finding 8: a sheet's mesh, simplified (mesh_simplify.hpp). The deviations are
+  // MEASURED on every written triangle: on the sheet's own surface, and at the cuts (kept
+  // as contoured; under solid in a run). samples_past_floor = samples that cut a wall
+  // below its bead (0 = none). The steps (the wall is graded per voxel, so it jumps at a
+  // voxel's face): how many samples lie off their own band within reach of one, how far the
+  // mesh sits from its own voxel's surface there, and what the contouring left outside the
+  // step's band (kept as contoured; inward, a wall under its floor by that much).
+  bool sheet_simplified = false;
+  long long sheet_triangles_contoured = 0, sheet_triangles = 0;
+  double sheet_max_deviation_mm = 0.0, sheet_cut_max_deviation_mm = 0.0;
+  long long sheet_samples_past_floor = 0;
+  double sheet_step_max_deviation_mm = 0.0, sheet_step_worst_outside_band_mm = 0.0;
+  long long sheet_step_samples = 0, sheet_step_samples_outside_band = 0, sheet_samples = 0;
   // ★★ ORGANIC's POST-CLIP connectivity (OrganicGenStats): the connectedness of what
   // was WRITTEN, after the boundary clip trimmed and dropped spans. The tracer's own
   // number describes the lattice it traced; this one describes the file.
@@ -656,11 +1412,12 @@ struct LatticeExportOutcome {
   long long organic_base_mat_stitches = 0;
   long long organic_base_mat_clusters = 0;
   long long organic_fill_mat_cells_outside_region = 0;
-  long long organic_fillet_skipped_spans = 0;   // spans the fillet would have flared, declined by the job
-  bool organic_shape_fit_on = false;
-  long long organic_shape_fit_candidates = 0;
-  long long organic_shape_fit_voxels_shrunk = 0;
-  double organic_shape_fit_min_ratio = 1.0;
+  // ★ spans that run over open air. The overhang fillet that used to flare them was
+  // removed (it deposited blobs up to nine times the strut); the count remains so the
+  // receipt still says how much of the lattice is unsupported.
+  long long organic_unsupported_spans = 0;
+  // (The shape-fit counters live on the variant result, not here: this struct had a
+  // second set that nothing ever wrote and nothing ever read, shadowing the real ones.)
   // ★ synthetic stress for dead walls: what was laid in, so the receipt says it RAN
   SyntheticStressReport organic_synthetic;
   // ★ THE EMITTED SPANS, carried out so the STRUCTURAL CERTIFICATE can read the
@@ -741,9 +1498,9 @@ struct LatticeExportOutcome {
   bool growth_ran = false;
   long long organic_arched_spans = 0;
   double organic_arch_rise = 0.0;
-  long long organic_filleted = 0;
-  long long organic_fillet_unresolved = 0;
-  double organic_fillet_radius = 0.0;
+  // (organic_filleted / organic_fillet_radius are gone with the overhang fillet they
+  // counted. Nothing wrote them and nothing serialised them; the live measurement for
+  // spans over air is `unsupported_spans`.)
   double organic_base_mat_len = 0.0;
   double organic_base_mat_z = 0.0;
   long long organic_fill_cells = 0;
@@ -775,6 +1532,13 @@ struct LatticeExportOutcome {
   long long solid_region_voxels = 0;      // printed, non-keep-out, not latticed
   double solid_region_volume_mm3 = 0.0;   // voxel basis: count × spacing³
   std::uint64_t solid_region_triangles = 0;
+  // ★ THE SOLID ON THE PART'S OWN SURFACE (reviewer's ruling 11-09, the rim coupon's
+  // SOLID). Asked when the part itself is latticed: the companion is the part's own mesh
+  // intersected with the solid zone, so its outer faces ARE the part's faces. Refused
+  // (the voxel body kept, and said why) only when the boolean cannot be made.
+  bool solid_on_part_surface_asked = false;
+  bool solid_on_part_surface = false;
+  std::string solid_on_part_surface_refused;
 
   // ★ THE NO-PROTRUSION INVARIANT, MEASURED ON WHAT WAS WRITTEN (task
   // 2026-08-08-strut-clip-matches-shell, bar R3). Every vertex of every LATTICE
@@ -823,6 +1587,15 @@ struct LatticeExportOutcome {
   // the next reader back to the whole file; naming the pass is the difference
   // between a diagnosis and a puzzle.
   std::string worst_protrusion_pass;
+  // ★ THE RIM ON A REAL PART (ruling 11-08 (A)): the sharp edges found on the shipped
+  // surface, which chains took the rim, and what was laid. `mesh_rim_ran` is false on every
+  // run that asks for no rim, and then no receipt changes.
+  bool mesh_rim_ran = false;
+  FeatureEdgeStats rim_edges;
+  long long rim_chains_other_skin = 0;   // chains whose midpoint zone asks for another skin
+  double rim_line_width_mm = 0.0;
+  std::string rim_rides;                 // which clean surface the chains came from
+  LatticeMeshRimReport rim;
 };
 
 // ── ★★ THE RECEIPT A REFUSED RUN LEAVES BEHIND ────────────────────────────────
@@ -890,6 +1663,10 @@ double mesh_enclosed_volume_mm3(const TriangleMesh& m);
 struct LatticeRoleRegions {
   std::vector<ClearanceGeometry> includes;
   std::vector<ClearanceGeometry> excludes;
+  // ★ E2.2 + E3: lattice.whole_part's include regions, resolved like includes and
+  // numbered 1.. in their own order. They limit nothing; they only say which voxels
+  // take a region's own grading.
+  std::vector<ClearanceGeometry> carriers;
 };
 
 // ★ RESOLVE ONE face REGION INTO A VOXEL MASK (task 2026-08-15-lattice-regions).
@@ -935,7 +1712,11 @@ LatticeRoleRegions lattice_role_regions_from_job(const JobDescription& job,
   LatticeRoleRegions rr;
   std::vector<ResolvedFaceRegion> resolved;
   bool resolved_done = false;
+  // ★ K6: every DECLARED include is numbered, including one that fails to resolve, so
+  // the id survives the skip below.
+  int declared_include = 0;
   for (const JobLatticeRegion& r : job.lattice.regions) {
+    if (r.role == "include") ++declared_include;
     if (r.kind == "region") {
       if (model == nullptr || grid == nullptr)
         throw JobError(
@@ -970,7 +1751,8 @@ LatticeRoleRegions lattice_role_regions_from_job(const JobDescription& job,
             " mm). It would lattice nothing and report success; it is refused "
             "instead. Use a coarser depth, a finer resolution, or a region that "
             "reaches part material.");
-      (r.role == "include" ? rr.includes : rr.excludes).push_back(std::move(g));
+      g.declared_region_id = r.role == "include" ? declared_include : 0;
+    (r.role == "include" ? rr.includes : rr.excludes).push_back(std::move(g));
       continue;
     }
     ManualClearanceGeometry mg;
@@ -991,11 +1773,62 @@ LatticeRoleRegions lattice_role_regions_from_job(const JobDescription& job,
       mg.half_u_mm = r.half_u_mm;
       mg.half_w_mm = r.half_w_mm;
       mg.outline_uv = r.outline_uv;
+      mg.frame_u = r.frame_u;      // zero unless the job stated them
+      mg.frame_w = r.frame_w;
     }
-    const ClearanceGeometry g = resolve_clearance_manual(mg, p);
+    ClearanceGeometry g = resolve_clearance_manual(mg, p);
+    // ★ K6, COMPLETED (#354 reading 3952c411, 2026-10-10). The declared id was set on the
+    // `kind == "region"` branch ONLY, and this path -- the manual face/bolt path, which
+    // carries every region the app plans -- pushed its geometry with the id still 0. So
+    // `stepped_region_owner` fell back to the POSITION for every FACE include, which is
+    // precisely the defect K6 exists to fix: the built vector is compacted by the skip
+    // below, and the app numbers includes without it. Set here, before that skip, so no
+    // later branch can push an unnumbered geometry.
+    g.declared_region_id = r.role == "include" ? declared_include : 0;
+    // ★ A STATED FRAME THAT DISAGREES WITH plane_basis() IS A REFUSAL, and it is
+    // raised HERE because this is where the face can be named. Skipping the region
+    // would drop it silently -- the outline would be gone and the wall unlatticed,
+    // which reads as a modelling choice rather than an error.
+    if (g.frame_conflict)
+      throw JobError(
+          "lattice region " + std::to_string(&r - &job.lattice.regions[0] + 1) +
+          " (face " + std::to_string(r.face_id) + ") states \"frame_u\"/\"frame_w\" "
+          "that do not match the in-plane basis core derives from its normal. The two "
+          "have agreed until now by coincidence of construction, so a disagreement "
+          "means one side has changed its convention: the outline would be read in one "
+          "frame and everything else in another, and a mirrored outline has the same "
+          "AREA as a correct one, so nothing downstream would catch it. Send axes that "
+          "match the normal, or omit them and core will derive the basis as before.");
     if (!g.valid) continue;  // degenerate → the rasterizer's safe no-op
                              // (parse_job already refused zero extents)
     (r.role == "include" ? rr.includes : rr.excludes).push_back(g);
+  }
+  // ── ★ K6: EVERY INCLUDE CARRIES ITS DECLARED NUMBER, CHECKED HERE ────────────
+  // This is the guard that would have caught the defect #354 found by reading. The id was
+  // set on the `kind == "region"` branch only, so the manual face/bolt path -- the one
+  // carrying every region the app plans -- pushed geometries numbered 0, and
+  // `stepped_region_owner` silently fell back to the POSITION, which is the compaction bug
+  // K6 exists to remove. A unit test on the function could not see it, because the test
+  // built its geometries by hand and never came through this builder.
+  //
+  // A branch that forgets to number is now a refusal rather than a silent fallback. It is
+  // a can't-happen today -- an id of 0 would mean this loop pushed an include it never
+  // counted -- and it still refuses, by name, because the failure it replaces was invisible.
+  for (std::size_t i = 0; i < rr.includes.size(); ++i)
+    if (rr.includes[i].declared_region_id <= 0)
+      throw JobError(
+          "internal: include region at position " + std::to_string(i + 1) +
+          " was built without its declared region number. Core resolves which region owns "
+          "a shared voxel by that number (stepped_region_owner), and the built list is "
+          "compacted when an include fails to resolve, so a position is not a number. "
+          "Refusing rather than answering with the position, which is the defect this "
+          "check exists to prevent.");
+  // ★ E2.2 + E3: the whole-part regions, through this same resolver.
+  if (!job.lattice.whole_part_includes.empty()) {
+    JobDescription carried = job;
+    carried.lattice.regions = job.lattice.whole_part_includes;
+    carried.lattice.whole_part_includes.clear();
+    rr.carriers = lattice_role_regions_from_job(carried, model, grid).includes;
   }
   return rr;
 }
@@ -1013,6 +1846,7 @@ void fill_grading_cell_plan(RunInfo& gi, const GradedField& gf) {
   gi.grading_cell_latticed_cells = P.latticed_cells;
   gi.grading_cells_raised_to_floor = P.cells_raised_to_floor;
   gi.grading_cells_dropped_unprintable = P.cells_dropped_unprintable;
+  gi.grading_cells_dropped_by_window = P.cells_dropped_by_window;  // ★ E3
   gi.grading_cells_split_by_balance = P.cells_split_by_balance;
   gi.grading_cell_any_out_of_regime = P.any_out_of_regime;
   gi.grading_cell_levels.clear();
@@ -1194,9 +2028,14 @@ struct FitRegionCell {
 // r0_density_range.txt.
 void fill_fit_region_cell(FitRegionCell& f, LatticeTopology topo,
                           double min_extrudable_width_mm, double n_star,
-                          double stated_density = 0.0) {
-  const LatticeCellDerivation d =
-      lattice_derive_cell_for_member(topo, f.extent_mm, min_extrudable_width_mm);
+                          double stated_density = 0.0,
+                          // ★ D1: the job's density cap. Fit's cell floor and its derived
+                          // density both hang off the smallest printable cell, and that is
+                          // the capped one -- `fit.min_printable_cell_mm` was the capped
+                          // number while the per-region receipt printed the uncapped one.
+                          double max_relative_density = 0.0) {
+  const LatticeCellDerivation d = lattice_derive_cell_for_member(
+      topo, f.extent_mm, min_extrudable_width_mm, 0.0, max_relative_density);
   f.min_printable_cell_mm = d.min_printable_cell_mm;
   f.min_width_certifiable_mm = d.min_member_width_certifiable_mm;
   f.min_width_buildable_mm = d.min_member_width_buildable_mm;
@@ -1206,13 +2045,20 @@ void fill_fit_region_cell(FitRegionCell& f, LatticeTopology topo,
   f.feasible = d.feasible_percolation;
   if (!f.feasible) return;
   f.cell_mm = std::max(f.extent_mm / n_star, d.min_printable_cell_mm);
-  const double rho =
-      lattice_min_density_for_strut(topo, f.cell_mm, min_extrudable_width_mm);
-  f.derived_relative_density = rho >= 0.0 ? rho : lattice_rho_max(topo);
+  const double rho = lattice_min_density_for_strut(
+      topo, f.cell_mm, min_extrudable_width_mm, max_relative_density);
+  // ★ D1: when nothing in the band prints at this cell the fallback is the densest the
+  // JOB allows, not the band's top -- reporting a density the job forbids is the same
+  // defect one line up.
+  const double band_top_allowed =
+      (std::isfinite(max_relative_density) && max_relative_density > 0.0)
+          ? std::min(lattice_rho_max(topo), max_relative_density)
+          : lattice_rho_max(topo);
+  f.derived_relative_density = rho >= 0.0 ? rho : band_top_allowed;
   f.stated_relative_density = stated_density;
   f.relative_density =
       stated_density > 0.0 ? stated_density : f.derived_relative_density;
-  f.strut_mm = octet_strut_diameter_mm(f.relative_density, f.cell_mm);
+  f.strut_mm = lattice_strut_diameter_mm(topo, f.relative_density, f.cell_mm);
   f.cells_per_member = f.extent_mm / f.cell_mm;
   f.out_of_regime = f.cells_per_member < n_star;
 }
@@ -1250,7 +2096,8 @@ std::vector<FitRegionCell> fit_region_cells(const JobDescription& job,
       f.extent_mm =
           region_thinnest_extent_mm(*roles->includes[include_index].mask);
       fill_fit_region_cell(f, topo, min_extrudable_width_mm, n_star,
-                           r.relative_density);
+                           r.relative_density,
+                                                                                                job.grading.max_relative_density);
       out.push_back(f);
       ++include_index;
       continue;
@@ -1275,6 +2122,8 @@ std::vector<FitRegionCell> fit_region_cells(const JobDescription& job,
       mg.half_u_mm = r.half_u_mm;
       mg.half_w_mm = r.half_w_mm;
       mg.outline_uv = r.outline_uv;
+      mg.frame_u = r.frame_u;      // same geometry as the mask path sees
+      mg.frame_w = r.frame_w;
     }
     if (!resolve_clearance_manual(mg, p).valid) continue;
     ++include_index;
@@ -1283,7 +2132,8 @@ std::vector<FitRegionCell> fit_region_cells(const JobDescription& job,
     f.job_region_index = ri;
     f.extent_mm = lattice_region_thinnest_extent_mm(r);
     fill_fit_region_cell(f, topo, min_extrudable_width_mm, n_star,
-                         r.relative_density);
+                         r.relative_density,
+                                                                                            job.grading.max_relative_density);
     out.push_back(f);
   }
   return out;
@@ -1341,11 +2191,11 @@ void refuse_unprintable_stated_density(
     // function's (bar R1'). This wrapper only builds the message. The predicate
     // is asserted in test_lattice_refusal.cpp, including the unreachability that
     // makes a no-override job inert here for EVERY region shape.
-    if (!lattice_stated_density_unprintable(f.stated_relative_density, f.cell_mm,
+    if (!lattice_stated_density_unprintable(topo, f.stated_relative_density, f.cell_mm,
                                             min_extrudable_width_mm))
       continue;
     const double strut =
-        octet_strut_diameter_mm(f.stated_relative_density, f.cell_mm);
+        lattice_strut_diameter_mm(topo, f.stated_relative_density, f.cell_mm);
     throw JobError(
         "lattice region " + std::to_string(r.region_id) +
         ": a stated relative_density of " +
@@ -1404,19 +2254,19 @@ std::vector<double> region_density_field(
         const Vec3 c{grid.origin.x + (i + 0.5) * grid.spacing,
                      grid.origin.y + (j + 0.5) * grid.spacing,
                      grid.origin.z + (k + 0.5) * grid.spacing};
-        for (std::size_t ri = 0; ri < includes.size(); ++ri)
-          if (point_in_clearance_region(includes[ri], c, 0.0)) {
-            out[grid.index(i, j, k)] = cells[ri].stated_relative_density;
-            break;
-          }
+        // the OWNER rule (ruling 4): nearest face plane, tie to the lower id, never declaration order.
+        if (const int ow = stepped_region_owner(c, includes))
+          out[grid.index(i, j, k)] = cells[ow - 1].stated_relative_density;
       }
   return out;
 }
 
 // The per-voxel desired cell the grading law's Fit mode consumes: the derived cell of
 // the include region owning each voxel, 0 elsewhere. Built from the SAME membership
-// test the certification mask uses (`point_in_clearance_region`, first match wins), so
-// the cell a voxel is graded at is the cell derived for the region that voxel is in.
+// test the certification mask uses (`point_in_clearance_region`), resolved by the OWNER
+// rule where prisms overlap (stepped_region_owner: nearest face plane, tie to the lower
+// id), so the cell a voxel is graded at is the cell derived for the region that voxel
+// belongs to -- and not, as it was, for whichever region happened to be declared first.
 std::vector<double> fit_cell_field(const VoxelGrid& grid,
                                    const std::vector<ClearanceGeometry>& includes,
                                    const std::vector<FitRegionCell>& cells) {
@@ -1428,11 +2278,9 @@ std::vector<double> fit_cell_field(const VoxelGrid& grid,
         const Vec3 c{grid.origin.x + (i + 0.5) * grid.spacing,
                      grid.origin.y + (j + 0.5) * grid.spacing,
                      grid.origin.z + (k + 0.5) * grid.spacing};
-        for (std::size_t ri = 0; ri < includes.size(); ++ri)
-          if (point_in_clearance_region(includes[ri], c, 0.0)) {
-            out[grid.index(i, j, k)] = cells[ri].cell_mm;  // 0 when infeasible
-            break;
-          }
+        // the OWNER rule (ruling 4): nearest face plane, tie to the lower id, never declaration order.
+        if (const int ow = stepped_region_owner(c, includes))
+          out[grid.index(i, j, k)] = cells[ow - 1].cell_mm;  // 0 when infeasible
       }
   return out;
 }
@@ -1459,10 +2307,10 @@ void fill_fit_region_voxels(RunInfo& gi, const VoxelGrid& grid,
         const Vec3 c{grid.origin.x + (i + 0.5) * grid.spacing,
                      grid.origin.y + (j + 0.5) * grid.spacing,
                      grid.origin.z + (k + 0.5) * grid.spacing};
-        std::size_t owner = includes.size();
-        for (std::size_t ri = 0; ri < includes.size(); ++ri)
-          if (point_in_clearance_region(includes[ri], c, 0.0)) { owner = ri; break; }
-        if (owner == includes.size()) { ++outside; continue; }
+        // the OWNER rule (ruling 4): nearest face plane, tie to the lower id, never declaration order. A point in no prism has NO owner and is counted outside.
+        const int ow = stepped_region_owner(c, includes);
+        if (ow == 0) { ++outside; continue; }
+        const std::size_t owner = static_cast<std::size_t>(ow - 1);
         RunInfo::GradingFitRegion& R = gi.grading_fit_regions[owner];
         ++R.candidate_voxels;
         if (e < gf.posture.mask.size() && gf.posture.mask[e]) ++R.latticed_voxels;
@@ -1524,12 +2372,19 @@ void fill_grading_fit(RunInfo& gi, const GradedField& gf,
 // caller and that caller documents why (see `multiscale_floor_cell_mm` below); no new
 // code should pass true.
 double planned_cell_mm(const JobDescription& job, bool swept_light_floor) {
+  // ★ THE JOB'S TOPOLOGY, RESOLVED ONCE (task 2026-09-28-lattice-types-core).
+  // This function read `LatticeTopology::Octet` four times under the note "job
+  // schema restricts topology to octet". True while octet was the only id; the
+  // schema now admits any LIVE type, so the planner asks the job.
+  // `lattice_topology_from_id` refuses an unknown id rather than defaulting, and
+  // the schema has already accepted this one, so it cannot throw here.
+  const LatticeTopology topo = lattice_topology_from_id(job.grading.topology);
   const double floor_mm = lattice_cell_printability_floor_mm(
-      LatticeTopology::Octet, job.grading.min_extrudable_width_mm);
+      topo, job.grading.min_extrudable_width_mm);
   // S2: the cell below which NO density in the band prints — the bound Fixed applies.
-  const double abs_floor_mm =
-      job.grading.min_extrudable_width_mm /
-      octet_strut_diameter_mm(lattice_rho_max(LatticeTopology::Octet), 1.0);
+  // ★ D1: ONE function, and it takes the cap. This was the UNCAPPED floor.
+  const double abs_floor_mm = lattice_min_printable_cell_mm(
+      topo, job.grading.min_extrudable_width_mm, job.grading.max_relative_density);
   CellSizeMode mode = CellSizeMode::Fixed;
   if (!resolve_cell_mode(job.grading.cell_mode, mode))
     return floor_mm;  // unknown mode is refused downstream; report the floor
@@ -1554,13 +2409,14 @@ double planned_cell_mm(const JobDescription& job, bool swept_light_floor) {
       return swept_light_floor
                  ? std::max(job.grading.cell_min_mm, floor_mm)
                  : cell_plan_finest_printable_cell_mm(
-                       LatticeTopology::Octet, job.grading.cell_min_mm,
+                       topo, job.grading.cell_min_mm,
                        job.grading.cell_max_mm,
-                       job.grading.min_extrudable_width_mm);
+                       job.grading.min_extrudable_width_mm,
+                       job.grading.max_relative_density);  // D1: the cap
     case CellSizeMode::Fit: {
       double finest = 0.0;
       for (const FitRegionCell& f :
-           fit_region_cells(job, LatticeTopology::Octet,
+           fit_region_cells(job, topo,
                             job.grading.min_extrudable_width_mm))
         if (f.feasible && (finest == 0.0 || f.cell_mm < finest)) finest = f.cell_mm;
       return finest > 0.0 ? finest : abs_floor_mm;
@@ -1696,12 +2552,24 @@ std::vector<ClearanceGeometry> lattice_keep_outs_from_job(
     const JobDescription& job, const StepModel& model) {
   std::vector<ClearanceGeometry> out;
   if (!job.loads.present) return out;
+  // ★ E4 (j): a cut piece's Keep clear -- its member faces' own, clipped by its cuts.
+  std::vector<ResolvedFaceRegion> clear_regions;
+  for (const JobClearance& jc : job.loads.clearances)
+    if (jc.region_id >= 0) {
+      clear_regions = resolve_face_regions(model, job.loads.face_regions);
+      break;
+    }
   for (const JobClearance& jc : job.loads.clearances) {
     const bool bolt = jc.kind == "bolt";
+    const ResolvedFaceRegion* piece = nullptr;
+    for (const ResolvedFaceRegion& r : clear_regions)
+      if (jc.region_id >= 0 && r.id == jc.region_id) piece = &r;
     double bore_r = 0.0;
     if (bolt) {
       if (jc.manual)
         bore_r = jc.radius_mm;
+      else if (piece != nullptr)
+        bore_r = largest_bore_radius_mm(model, piece->member_faces);
       else if (jc.face_id >= 0 && jc.face_id < model.face_count)
         bore_r =
             model.faces[static_cast<std::size_t>(jc.face_id)].cylinder_radius_mm;
@@ -1713,6 +2581,15 @@ std::vector<ClearanceGeometry> lattice_keep_outs_from_job(
     if (jc.axial_clearance_mm > 0.0)
       params.axial_clearance_mm = jc.axial_clearance_mm;
     if (jc.slab_depth_mm > 0.0) params.slab_depth_mm = jc.slab_depth_mm;
+    if (piece != nullptr) {
+      try {
+        for (const ClearanceGeometry& g : resolve_clearance_from_region(model, *piece, params))
+          out.push_back(g);
+      } catch (const std::invalid_argument& e) {
+        throw JobError(e.what());
+      }
+      continue;
+    }
     ClearanceGeometry g;
     if (jc.manual) {
       ManualClearanceGeometry mg;
@@ -1764,8 +2641,158 @@ LatticeSkinSpec lattice_skin_for(const JobLattice& lat) {
   // lattice-skin-freeform): the diagrid extends onto the voxel-derived outer
   // surface — as the outer finish itself ("skin") or laid on the shell
   // ("shell+skin"). Default "shell" leaves it off: byte-identical.
-  S.freeform = lat.outer_finish != "shell";
+  S.freeform = lat.outer_finish == "skin" || lat.outer_finish == "shell+skin";
   return S;
+}
+
+// ★ SKIN PER ZONE (ruling 11-08 (1)): what a skin + finish lays at a point
+// (LatticeSkinHere, lattice_gen.hpp). The part's: "none" and "rim" lay no diagrid,
+// "diagrid" lays the boundary-finish diagrid, woven over the surface only under the
+// freeform finishes. A zone's own "diagrid" is always woven: that is what Skin is.
+LatticeSkinHere lattice_skin_here(const std::string& skin, const std::string& finish) {
+  if (skin != "diagrid") return LatticeSkinHere::Off;
+  return finish == "skin" || finish == "shell+skin" ? LatticeSkinHere::Woven
+                                                    : LatticeSkinHere::Plain;
+}
+
+// ★ THE RIM ON A REAL PART (ruling 11-08 (A)). The edge angle a rim starts at (the
+// reviewer's start; the receipt states it), and a chain's midpoint: the point half its
+// length along it, by which a zone takes the chain (as a skin chord is taken by its own).
+constexpr double kRimFeatureAngleDeg = 30.0;
+Vec3 feature_chain_midpoint(const FeatureChain& c) {
+  const std::size_t np = c.points.size();
+  if (np == 0) return {0, 0, 0};
+  const std::size_t nseg = c.closed ? np : np - 1;
+  double half = 0.5 * c.length_mm;
+  for (std::size_t i = 0; i < nseg; ++i) {
+    const Vec3& a = c.points[i];
+    const Vec3& b = c.points[(i + 1) % np];
+    const double l = std::sqrt((b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y) +
+                               (b.z - a.z) * (b.z - a.z));
+    if (half <= l && l > 0.0) {
+      const double t = half / l;
+      return {a.x + t * (b.x - a.x), a.y + t * (b.y - a.y), a.z + t * (b.z - a.z)};
+    }
+    half -= l;
+  }
+  return c.points.back();
+}
+
+// Whether the export writes the solid shell: "shell" and "shell+skin" do; "skin" and
+// ★ E2.4's "none" (the open lattice) do not.
+bool lattice_shell_written(const JobLattice& lat) {
+  return lat.outer_finish == "shell" || lat.outer_finish == "shell+skin";
+}
+
+// ★ THE SOLID ON THE PART'S OWN SURFACE (reviewer's ruling 11-09, the rim coupon's SOLID).
+// The companion was the marching cubes of the solid voxels, so its outer faces were raw
+// voxel steps. Here it is the part's own mesh INTERSECTED with the solid ZONE:
+//   * inside the part, the zone is the solid voxels (the lattice's voxels, a clearance's
+//     and a design cut's are not in it), so the solid/lattice interface is where it was;
+//   * outside the part, each voxel within two of the printed set takes the label of the
+//     printed voxels beside it (solid wins a tie), so the zone runs past the part's
+//     surface wherever the solid meets air, and the part's faces cut it there.
+// The faces that meet air are therefore the part's own, exactly; the interface stays the
+// voxel boundary the certificate counts. A boolean that cannot be made keeps the voxel
+// body and says why (never a half-written solid).
+struct SolidOnSurface {
+  TriangleMesh mesh;
+  bool ok = false;
+  std::string why;
+};
+double mesh_signed_volume(const TriangleMesh& m) {
+  double v = 0.0;
+  for (const auto& t : m.triangles) {
+    const Vec3& a = m.vertices[static_cast<std::size_t>(t[0])];
+    const Vec3& b = m.vertices[static_cast<std::size_t>(t[1])];
+    const Vec3& c = m.vertices[static_cast<std::size_t>(t[2])];
+    v += a.x * (b.y * c.z - b.z * c.y) - a.y * (b.x * c.z - b.z * c.x) +
+         a.z * (b.x * c.y - b.y * c.x);
+  }
+  return v / 6.0;
+}
+TriangleMesh outward_wound(TriangleMesh m) {
+  if (mesh_signed_volume(m) < 0.0)
+    for (auto& t : m.triangles) std::swap(t[1], t[2]);
+  return m;
+}
+SolidOnSurface solid_on_part_surface(const VoxelGrid& sg, const std::vector<double>& comp,
+                                     const std::vector<double>& dens, double printed_iso,
+                                     const TriangleMesh& surface) {
+  SolidOnSurface out;
+#ifdef TOPOPT_HAVE_MANIFOLD
+  const int pad = 3, nx = sg.nx, ny = sg.ny, nz = sg.nz;
+  const int px = nx + 2 * pad, py = ny + 2 * pad, pz = nz + 2 * pad;
+  const std::size_t np = static_cast<std::size_t>(px) * py * pz;
+  auto at = [&](int i, int j, int k) {
+    return (static_cast<std::size_t>(k) * py + j) * px + i;
+  };
+  std::vector<double> zone(np, 0.0);
+  std::vector<int> layer(np, -1);  // 0: printed; 1, 2: outside, that far; -2: a cut
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const std::size_t e = sg.index(i, j, k);
+        const std::size_t q = at(i + pad, j + pad, k + pad);
+        if (dens[e] >= printed_iso) {
+          layer[q] = 0;
+          zone[q] = comp[e] > 0.5 ? 1.0 : 0.0;
+        } else if (sg.solid(i, j, k)) {
+          layer[q] = -2;  // inside the part, removed by the design: never filled
+        }
+      }
+  const int off[6][3] = {{-1, 0, 0}, {1, 0, 0}, {0, -1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}};
+  for (int d = 1; d <= 2; ++d) {
+    std::vector<std::pair<std::size_t, double>> next;
+    for (int k = 1; k + 1 < pz; ++k)
+      for (int j = 1; j + 1 < py; ++j)
+        for (int i = 1; i + 1 < px; ++i) {
+          const std::size_t q = at(i, j, k);
+          if (layer[q] != -1) continue;
+          bool reached = false, solid = false;
+          for (const auto& o : off) {
+            const std::size_t r = at(i + o[0], j + o[1], k + o[2]);
+            if (layer[r] != d - 1) continue;
+            reached = true;
+            if (zone[r] > 0.5) solid = true;
+          }
+          if (reached) next.emplace_back(q, solid ? 1.0 : 0.0);
+        }
+    for (const auto& [q, z] : next) {
+      layer[q] = d;
+      zone[q] = z;
+    }
+  }
+  const Vec3 o{sg.origin.x - pad * sg.spacing, sg.origin.y - pad * sg.spacing,
+               sg.origin.z - pad * sg.spacing};
+  const TriangleMesh zmesh = outward_wound(marching_cubes(px, py, pz, sg.spacing, o, zone, 0.5));
+  if (zmesh.triangles.empty()) {
+    out.why = "the solid zone is empty";
+    return out;
+  }
+  const manifold::Manifold Z = mesh_manifold(zmesh);
+  if (Z.Status() != manifold::Manifold::Error::NoError) {
+    out.why = "the solid zone's marching-cubes surface is not a closed manifold";
+    return out;
+  }
+  const manifold::Manifold P = mesh_manifold(outward_wound(surface));
+  if (P.Status() != manifold::Manifold::Error::NoError) {
+    out.why = "the part's own mesh is not a closed manifold";
+    return out;
+  }
+  const manifold::Manifold S = P ^ Z;
+  if (S.Status() != manifold::Manifold::Error::NoError || S.IsEmpty()) {
+    out.why = "the part and the solid zone did not intersect cleanly";
+    return out;
+  }
+  out.mesh = manifold_mesh(S.GetMeshGL());
+  out.ok = !out.mesh.triangles.empty();
+  if (!out.ok) out.why = "the intersection came out empty";
+#else
+  (void)sg; (void)comp; (void)dens; (void)printed_iso; (void)surface;
+  out.why = "this build has no boolean (manifold) library";
+#endif
+  return out;
 }
 
 // Export one accepted variant's latticed companion. `cell_mm` and `radius` are
@@ -1806,7 +2833,48 @@ LatticeExportOutcome export_latticed_variant(
     // ★ STEPPED (§4). Null on every other run. Non-null => one ORDINARY generator
     // pass per declared region at that region's OWN cell, no ladder and no stitching
     // (lattice_gen.hpp's generate_lattice_stepped states what that gives up).
-    const std::vector<LatticeSteppedPass>* stepped = nullptr) {
+    const std::vector<LatticeSteppedPass>* stepped = nullptr,
+    // ★ Drive free organic strut ends this far into the solid, then intersect the
+    // welded field with the part (organic_weld). 0 = neither. A grading key, so it
+    // arrives separately from JobLattice.
+    double organic_strut_embed_mm = 0.0,
+    // ★ Mesh the lattice by dual contouring its own SDF, into <prefix>_DC.stl beside the
+    // welded pair. Grading keys, so they arrive separately from JobLattice.
+    bool organic_dual_contour = false, double organic_dc_cell_mm = 0.0,
+    double organic_dc_tolerance_mm = 0.0,
+    // ★ Solve the bead factor against the spans this function EMITS, rather than against
+    // the curves the tracer drew. See the calibration loop below.
+    bool organic_calibrate_on_shipped = true,
+    // ★ K4: EVERY EMITTED ELEMENT, FOR THE CALLER'S OWN LEDGER. The generator already
+    // reports each one through LatticeGenObserver, and lattice_gen.hpp states that
+    // observing never changes the emitted bytes -- but the observer is built INSIDE this
+    // function, so a caller that wants to attribute struts to the plan's cells could not
+    // reach it. This chains onto whichever observer the run already uses, so arming it
+    // adds a callback and nothing else. Null on every run that does not ask.
+    const std::function<void(LatticeGenElement, const Vec3&, const Vec3&, double)>*
+        laid_tap = nullptr,
+    // ★ Finding 7: THE EMITTED SOLID, FOR THE VOLUME CHECK. Non-null => every element of
+    // the FIRST emission is rebuilt into it (the second writer emits the same stream), and
+    // a sheet pass hands it the field its mesh is contoured from. Observing only, so the
+    // bytes cannot move. Null on organic runs, which rebuild their own shipped density.
+    LatticeSolidProbe* solid_probe = nullptr,
+    // ★ Finding 8: the bead a sheet's wall must keep after its mesh is simplified (the
+    // grading's stated minimum extrudable width). 0 = no floor to protect.
+    double sheet_bead_mm = 0.0,
+    // ★ E2.4 per region: the shell re-meshed around the design minus an open pocket
+    // (null: the design's own, variant.v3.mesh).
+    const TriangleMesh* shell_override = nullptr,
+    // ★ Skin per zone (ruling 11-08 (1)): each anchor ball and chord asks its zone. Null:
+    // the lattice's own skin everywhere, byte for byte.
+    const LatticeSkinZones* skin_zones = nullptr,
+    // ★ The rim on a real part (ruling 11-08 (A)): the chains it rides, already chosen
+    // (the caller found them on the shipped surface and kept those its skin asks for).
+    // Null: no rim, byte for byte.
+    const LatticeMeshRimSpec* mesh_rim = nullptr,
+    // ★ The part's own surface, when the part itself is latticed (ruling 11-09): the
+    // solid companion is built on it (solid_on_part_surface). Null: the voxel body, byte
+    // for byte.
+    const TriangleMesh* solid_surface = nullptr) {
   // ── M4: A SKIN MODE THAT PRODUCES NO GEOMETRY MUST SAY SO, NOT RETURN ZERO.
   //
   // ★ THE PREDICATE IS THE MEASURED COUNT, NOT A PREDICTION — and the first version
@@ -1878,9 +2946,25 @@ LatticeExportOutcome export_latticed_variant(
   const std::vector<double>& dens = variant.optimization.physical_density;
   LatticeRegion R = lattice_region_for(sg, cell_mm, &boundary);
   R.latticed = cell_latticed;  // null => every cell (the legacy uniform path)
-  const LatticeSkinSpec skin = lattice_skin_for(lat);
+  // ★ Per zone, the passes open for the most any zone asks: a Woven zone arms the diagrid
+  // and its freeform chords, and each element then asks its own zone (lattice_gen.cpp).
+  const LatticeSkinSpec skin = [&] {
+    LatticeSkinSpec sk = lattice_skin_for(lat);
+    if (skin_zones != nullptr) {
+      sk.zones = skin_zones;
+      for (const LatticeSkinHere h : skin_zones->here) {
+        if (h != LatticeSkinHere::Off && sk.mode == LatticeSkinMode::None)
+          sk.mode = LatticeSkinMode::Diagrid;
+        if (h == LatticeSkinHere::Woven) {
+          sk.mode = LatticeSkinMode::Diagrid;
+          sk.freeform = true;
+        }
+      }
+    }
+    return sk;
+  }();
 
-  const TriangleMesh& shell = variant.v3.mesh;
+  const TriangleMesh& shell = shell_override != nullptr ? *shell_override : variant.v3.mesh;
   auto push_shell = [&shell](TriangleSink& sink) {
     for (const auto& t : shell.triangles)
       sink.add_triangle(shell.vertices[static_cast<std::size_t>(t[0])],
@@ -1916,6 +3000,17 @@ LatticeExportOutcome export_latticed_variant(
         static_cast<double>(oc.solid_region_voxels) * sg.spacing * sg.spacing *
         sg.spacing;
     if (oc.solid_region_voxels > 0) comp_mesh = marching_cubes(sg, comp, 0.5);
+    if (oc.solid_region_voxels > 0 && solid_surface != nullptr &&
+        !solid_surface->triangles.empty()) {
+      oc.solid_on_part_surface_asked = true;
+      SolidOnSurface ss = solid_on_part_surface(sg, comp, dens, printed_iso, *solid_surface);
+      if (ss.ok) {
+        comp_mesh = std::move(ss.mesh);
+        oc.solid_on_part_surface = true;
+      } else {
+        oc.solid_on_part_surface_refused = ss.why;
+      }
+    }
     oc.solid_region_triangles =
         static_cast<std::uint64_t>(comp_mesh.triangles.size());
   }
@@ -1932,7 +3027,7 @@ LatticeExportOutcome export_latticed_variant(
   // Outer finish (task 2026-07-30-lattice-skin-freeform): "skin" REPLACES the
   // solid shell with the freeform diagrid (open, see-through); "shell" and
   // "shell+skin" keep the shell exactly as before.
-  const bool with_shell = lat.outer_finish != "skin";
+  const bool with_shell = shell_override != nullptr || lattice_shell_written(lat);
   // ONE emission routine for both writers, so STL and 3MF can never diverge on
   // which path they took.
   const bool swept = levels && levels->size() > 1 && base_cell_mm > 0.0;
@@ -1966,7 +3061,9 @@ LatticeExportOutcome export_latticed_variant(
   // then no shell for a strut to protrude through: the measurement is SKIPPED
   // and `protrusion_measured` stays false, rather than reporting a vacuous zero
   // against a surface the file does not carry.
-  const MeshDistance shell_dist(shell);
+  // ★ E2.4 per region: measured against the DESIGN's surface, never a re-meshed shell that
+  // leaves an open pocket outside it on purpose (the same mesh on every other run).
+  const MeshDistance shell_dist(variant.v3.mesh);
   const bool measure_protrusion = with_shell && !shell_dist.empty();
   std::vector<float> sd_floor;  // per voxel: a lower bound on shell distance
   const double voxel_reach = 0.5 * std::sqrt(3.0) * sg.spacing;
@@ -2086,7 +3183,6 @@ LatticeExportOutcome export_latticed_variant(
     oc.organic_support_fragment_length_mm = g.support_fragment_length_mm;
     oc.organic_base_mat_stitches = static_cast<long long>(g.base_mat_stitches);
     oc.organic_base_mat_clusters = static_cast<long long>(g.base_mat_clusters);
-    oc.organic_fillet_skipped_spans = static_cast<long long>(g.fillet_skipped_spans);
     oc.organic_fill_mat_cells_outside_region =
         static_cast<long long>(g.fill_mat_cells_outside_region);
 
@@ -2121,6 +3217,14 @@ LatticeExportOutcome export_latticed_variant(
     oc.organic_net_deg1 = static_cast<long long>(g.net_skin_degree_one);
     oc.organic_unsupported_found = static_cast<long long>(g.unsupported_islands_found);
     oc.organic_unsupported_left = static_cast<long long>(g.unsupported_islands_remaining);
+    // ★ SPANS OVER OPEN AIR. This copy was missing, so run_info.json reported 0 on
+    // every organic run no matter how many the pass had actually seen -- and this is
+    // the metric that REPLACED the overhang fillet when that repair was removed for
+    // depositing blobs up to nine times the strut. The repair went; the measurement
+    // was supposed to remain, and instead the receipt read a clean zero on a part
+    // where the old repair had fired on 3,720 spans. A printability condition
+    // reported as absent is worse than one reported loudly.
+    oc.organic_unsupported_spans = static_cast<long long>(g.unsupported_spans_seen);
     oc.organic_support_legs = static_cast<long long>(g.support_legs_added);
     oc.organic_support_leg_len = g.support_leg_length_mm;
     oc.organic_support_rounds = g.support_rounds;
@@ -2151,9 +3255,6 @@ LatticeExportOutcome export_latticed_variant(
     oc.organic_cantilever_islands = static_cast<long long>(g.cantilever_islands);
     oc.organic_arched_spans = static_cast<long long>(g.arched_spans);
     oc.organic_arch_rise = g.arch_max_rise_mm;
-    oc.organic_filleted = static_cast<long long>(g.filleted_spans);
-    oc.organic_fillet_unresolved = static_cast<long long>(g.fillet_unresolved);
-    oc.organic_fillet_radius = g.fillet_max_radius_mm;
     oc.organic_base_mat_len = g.base_mat_length_mm;
     oc.organic_base_mat_z = g.base_mat_z_mm;
     oc.organic_fill_cells = static_cast<long long>(g.fill_mat_cells);
@@ -2179,24 +3280,358 @@ LatticeExportOutcome export_latticed_variant(
   // the weld rasteriser needs, and observing never changes the emitted bytes
   // (lattice_gen.hpp). Without this, doubled and stepped still ship a soup of
   // thousands of closed shells and still trigger the floating-body misread.
-  LatticeGenObserver weld_obs;
-  weld_obs.on_element = [&organic_spans](LatticeGenElement, const Vec3& a,
-                                         const Vec3& b, double r) {
-    organic_spans.push_back({a, b, r});
+  // ── ★★ THE BEAD IS CALIBRATED ON THE SPANS THAT SHIP ────────────────────────
+  // (maintainer, 2026-09-17: "go ahead with the calibration rewrite".) It used to be
+  // solved inside the tracer, against the CURVES. That is not the geometry that ships and
+  // not even a shrunken version of it: measured on the M2 stand, the tracer's basis was
+  // 23,173 spans over 35,068.9 mm holding 63,324 mm3, while the file holds 11,638 spans
+  // over 30,457.5 mm and 41,955 mm3 -- the median strut diameter agrees to 4 %, the
+  // length differs by 13 %, and the VOLUME by 34 %. The emitter is not a filter: the node
+  // merge welds endpoints and the run collapse replaces each chain with fewer, straighter
+  // spans carrying that run's LARGEST radius, so the shipped set has its own overlap
+  // structure (51.5 % against the basis's 61.6 %). Scaling a radius derived from the
+  // first network can only be a guess about the second.
+  //
+  // So the factor is solved against the emitter's own output. Each trial runs the FULL
+  // emission -- clip to the part, node merge, support, prune, stranded drop, finish -- at
+  // a trial radius and measures the union of what comes out. That also removes the reason
+  // this could not simply be done afterwards: scaling radii on already-clipped spans
+  // would fatten every strut through the part's surface, whereas re-emitting clips at the
+  // radius it will ship with. Triangles are discarded during the trials, so a trial costs
+  // the emission and not the mesh.
+  OrganicLattice calibrated_lat;
+  if (organic && organic_calibrate_on_shipped &&
+      organic->report.bead_calibration_target_mm3 > 0.0 && !organic->curves.empty()) {
+    struct DiscardSink : TriangleSink {
+      void add_triangle(const Vec3&, const Vec3&, const Vec3&) override {}
+    };
+    const double target = organic->report.bead_calibration_target_mm3;
+    calibrated_lat = *organic;
+    std::vector<double> base_r(calibrated_lat.curves.size());
+    for (std::size_t q = 0; q < calibrated_lat.curves.size(); ++q)
+      base_r[q] = calibrated_lat.curves[q].radius_mm;
+    std::vector<double> base_c(calibrated_lat.connectors.size());
+    for (std::size_t q = 0; q < calibrated_lat.connectors.size(); ++q)
+      base_c[q] = calibrated_lat.connectors[q].radius_mm;
+    auto set_k = [&](double k) {
+      for (std::size_t q = 0; q < base_r.size(); ++q)
+        calibrated_lat.curves[q].radius_mm = base_r[q] * k;
+      for (std::size_t q = 0; q < base_c.size(); ++q)
+        calibrated_lat.connectors[q].radius_mm = base_c[q] * k;
+    };
+    std::size_t trial_spans = 0;
+    double trial_emitted_mm = 0.0, trial_merged_mm = 0.0, trial_written_mm = 0.0;
+    auto shipped_union = [&](double k) {
+      set_k(k);
+      DiscardSink ds;
+      std::vector<OrganicSpan> sp;
+      const OrganicGenStats gs =
+          generate_organic_lattice(calibrated_lat, ds, &boundary, 8, nullptr, &sp);
+      trial_spans = sp.size();
+      trial_emitted_mm = gs.census_len_mm[OrganicGenStats::CensusEmitted];
+      trial_merged_mm = gs.census_len_mm[OrganicGenStats::CensusNodeMerge];
+      trial_written_mm = gs.census_len_mm[OrganicGenStats::CensusWritten];
+      return sp.empty()
+                 ? 0.0
+                 : lattice_union_volume(sp, kOrganicBeadCalibrationSamples).volume_mm3;
+    };
+    const double t0cal = wall_seconds();
+    const double lt = std::log(target);
+    // ★ EVERY TRIAL IS PRINTED, because the first version of this ran the factor to
+    // 5.7e9 and emitted nothing, and the trial log is what showed why: the shipped union
+    // barely responds to the bead. A secant on a flat function extrapolates to infinity,
+    // so the search is BRACKETED and each step reported.
+    double lk0 = 0.0, lv0 = std::log(std::max(shipped_union(1.0), 1e-12));
+    const double v_at_one = std::exp(lv0);
+    std::fprintf(stderr,
+                 "[bead]   trial x1.0000 -> %.1f mm3 (%zu spans) | length emitted %.0f "
+                 "-> node_merge %.0f -> written %.0f mm\n",
+                 v_at_one, trial_spans, trial_emitted_mm, trial_merged_mm,
+                 trial_written_mm);
+    // The shipped union grows a little slower than the square of the radius, because a
+    // fatter strut is also a more overlapped one; 2.0 is the opening guess and the secant
+    // measures the real exponent from the next point.
+    // The bracket is a hard limit on what a calibration may do to a part, not a numerical
+    // convenience: a factor outside it is not a bead that needs adjusting, it is a
+    // grading target the emitter cannot deliver, and the run must SAY so rather than
+    // quietly shipping a part four times the intended thickness.
+    const double lk_lo = std::log(kOrganicCalibrationFactorMin);
+    const double lk_hi = std::log(kOrganicCalibrationFactorMax);
+    double lk1 = lk0 + (lt - lv0) / 2.0;
+    lk1 = std::min(std::max(lk1, lk_lo), lk_hi);
+    int steps = 0;
+    bool converged = false;
+    double v_final = v_at_one;
+    for (; steps < kOrganicCalibrationShippedSteps; ++steps) {
+      v_final = shipped_union(std::exp(lk1));
+      std::fprintf(stderr,
+                   "[bead]   trial x%.4f -> %.1f mm3 (%zu spans) | length emitted %.0f "
+                   "-> node_merge %.0f -> written %.0f mm\n",
+                   std::exp(lk1), v_final, trial_spans, trial_emitted_mm,
+                   trial_merged_mm, trial_written_mm);
+      const double lv1 = std::log(std::max(v_final, 1e-12));
+      if (std::fabs(lv1 - lt) < kOrganicBeadCalibrationTol) { converged = true; break; }
+      double slope = (lk1 != lk0) ? (lv1 - lv0) / (lk1 - lk0) : 2.0;
+      if (!std::isfinite(slope) || slope < 0.25) slope = 0.25;
+      if (slope > 4.0) slope = 4.0;
+      double lk2 = lk1 + (lt - lv1) / slope;
+      lk2 = std::min(std::max(lk2, lk_lo), lk_hi);
+      if (std::fabs(lk2 - lk1) < 1e-6) break;        // pinned at a bracket: no more to do
+      lk0 = lk1; lv0 = lv1; lk1 = lk2;
+      if (!std::isfinite(lk1)) { lk1 = lk0; break; }
+    }
+    double k = std::exp(lk1);
+    if (!(k > 0.0) || !std::isfinite(k)) k = 1.0;
+    const bool bracketed = k <= kOrganicCalibrationFactorMin * 1.001 ||
+                           k >= kOrganicCalibrationFactorMax * 0.999;
+    // Never below the machine: the printable floor is user input and outranks this, the
+    // same rule the tracer's own calibration was held to.
+    double kmin = 0.0;
+    for (std::size_t q = 0; q < base_r.size(); ++q)
+      if (base_r[q] > 0.0)
+        kmin = std::max(kmin, 0.5 * organic->report.min_extrudable_width_mm / base_r[q]);
+    const bool floored = k < kmin;
+    if (floored) k = kmin;
+    // ★★ AND IF THE TARGET IS OUT OF REACH, SHIP THE UNCALIBRATED PART, NOT A RUINED
+    // ONE. Measured on the M2 stand, the emitter does not merely resist a thicker bead,
+    // it DESTROYS the network under one: at x2.0 the node merge collapsed 25,515 mm of
+    // emitted centreline to 493 mm, 27 spans survived of 13,128, and the run still
+    // reported ACCEPTED. A calibration that cannot reach its target must hand back the
+    // part it started with and say why -- never the one it wrecked reaching for it.
+    if (!converged) {
+      std::fprintf(stderr,
+                   "[bead] TARGET OUT OF REACH: the grading law asks for %.1f mm3 and the "
+                   "emitter delivers %.1f at x1. Thickening does not close it -- the node "
+                   "merge welds a polyline finer than its own bead, so a fatter strut "
+                   "COLLAPSES the curve it belongs to. Shipping the uncalibrated bead.\n",
+                   target, v_at_one);
+      k = 1.0;
+    }
+    set_k(k);
+    std::fprintf(stderr,
+                 "[bead] calibrated ON WHAT SHIPS: x%.4f in %d trial(s)%s%s | target "
+                 "%.1f mm3, shipped union %.1f at x1 -> %.1f at the factor (%+.2f %%), "
+                 "%zu span(s) | %.1f s\n",
+                 k, steps + 1,
+                 converged ? "" : (bracketed ? " (PINNED at the factor bracket -- the "
+                                               "emitter cannot reach this target)"
+                                             : " (NOT converged)"),
+                 floored ? " (FLOORED at the extrudable width)" : "", target, v_at_one,
+                 v_final, target > 0.0 ? 100.0 * (v_final - target) / target : 0.0,
+                 trial_spans, wall_seconds() - t0cal);
+    organic = &calibrated_lat;
+  }
+
+  // ★ THE TYPE THE JOB NAMED, and only that (lattice types round 1). The schema
+  // admits a live type only, and lattice_gen_topology_from_id refuses anything core
+  // cannot build -- never octet in its place.
+  const LatticeGenTopology gen_topo = lattice_gen_topology_from_id(lat.topology);
+  // ★ SHEETS (K2): the same region, boundary and grade, built as the TPMS wall by
+  // generate_tpms instead of struts. The radius field carries HALF THE TRUE WALL (the sheet
+  // reading of "strut diameter", lattice.hpp), which the type's wall law turns into the
+  // field's parameter; the DC cell is a third of the thinnest wall this pass lays. No struts, so no landings and no Diagrid (refused at the parse); Rim is the rim
+  // pass alone. Doubled and Stepped never reach here for a sheet (refused at the parse, R5).
+  const bool sheet = lattice_gen_is_sheet(gen_topo);
+  bool probe_live = solid_probe != nullptr;  // the first emission only
+  auto sheet_pass = [&](TriangleSink& w) {
+    const LatticeTopology ct = lattice_gen_certificate_topology(gen_topo);
+    TpmsRegion TR;
+    TR.anchor = R.origin;
+    TR.nx = R.nx; TR.ny = R.ny; TR.nz = R.nz;
+    TR.cell_mm = R.cell_mm;
+    TR.latticed = R.latticed;
+    TR.boundary = R.boundary;
+    TpmsWallField W;
+    W.field = [&radius, ct, &R](const Vec3& p) {
+      return lattice_sheet_wall_param_mm(ct, 2.0 * radius.radius_at(p), R.cell_mm);
+    };
+    // The thinnest wall laid: the field at each latticed cell's corners, edge and face
+    // midpoints and centre (it is graded per voxel), never below the band's own minimum.
+    // Sizing the DC cell from the band's minimum instead costs (wall ratio)^2 triangles
+    // for nothing: 4x on a 4 mm gyroid graded from 0.30 (sheet_triangle_cost.txt).
+    const double band_min_wall = lattice_strut_diameter_mm(ct, lattice_rho_min(ct), R.cell_mm);
+    double min_wall = std::numeric_limits<double>::infinity();
+    for (int k = 0; k < R.nz; ++k)
+      for (int j = 0; j < R.ny; ++j)
+        for (int i = 0; i < R.nx; ++i) {
+          if (R.latticed && !R.latticed(i, j, k)) continue;
+          for (int c = 0; c < 27; ++c) {
+            const Vec3 p{R.origin.x + (i + 0.5 * (c % 3)) * R.cell_mm,
+                         R.origin.y + (j + 0.5 * (c / 3 % 3)) * R.cell_mm,
+                         R.origin.z + (k + 0.5 * (c / 9)) * R.cell_mm};
+            min_wall = std::min(min_wall, 2.0 * radius.radius_at(p));
+          }
+        }
+    TpmsGenOptions o;
+    o.min_wall_mm = std::isfinite(min_wall) ? std::max(min_wall, band_min_wall) : band_min_wall;
+    // ★ Finding 8: simplified to within kSheetMaxDeviationMm of the true surface, no wall
+    // cut below the bead.
+    o.max_deviation_mm = kSheetMaxDeviationMm;
+    o.bead_mm = sheet_bead_mm;
+    o.true_wall_mm = [&radius](const Vec3& p) { return 2.0 * radius.radius_at(p); };
+    // The wall is the owning voxel's (or its cell's mean): it steps at their faces.
+    o.true_wall_steps = true;
+    {
+      const double wcell = R.cell_mm;
+      o.wall_param_of = [ct, wcell](double wall_mm) {
+        return lattice_sheet_wall_param_mm(ct, wall_mm, wcell);
+      };
+    }
+    const TpmsKind tk =
+        gen_topo == LatticeGenTopology::Gyroid ? TpmsKind::Gyroid : TpmsKind::SchwarzD;
+    const TpmsGenStats ts = generate_tpms(tk, TR, W, w, o);
+    if (solid_probe && probe_live) {
+      // The probe outlives this pass, so it holds copies (the wall reads the caller's
+      // radius field, which outlives the run's export and certification).
+      // The wall the mesh was CONTOURED from (thickened near the bead), which the written
+      // mesh follows to within the bound; the true wall would read it a few % light there.
+      TpmsWallField PW;
+      const double pcell = R.cell_mm, pbead = o.bead_mm, pdev = o.max_deviation_mm;
+      PW.field = [&radius, ct, pcell, pbead, pdev](const Vec3& p) {
+        return lattice_sheet_wall_param_mm(
+            ct, tpms_contoured_wall_mm(2.0 * radius.radius_at(p), pbead, pdev), pcell);
+      };
+      const double ph = ts.dc_cell_mm;
+      solid_probe->set_inside([tk, TR, PW, ph](const Vec3& p) {
+        return tpms_clipped_field(tk, TR, PW, ph, p) < 0.0;
+      });
+    }
+    LatticeGenStats st;
+    if (R.boundary && skin.mode == LatticeSkinMode::Rim)
+      st = generate_lattice_rims(R, radius, w, skin, nullptr);
+    st.latticed_cells = ts.latticed_cells;
+    st.triangles += ts.simplified ? ts.simplify.triangles_out : ts.dc.triangles;
+    if (ts.simplified) {
+      oc.sheet_simplified = true;
+      oc.sheet_triangles_contoured = ts.simplify.triangles_in;
+      oc.sheet_triangles = ts.simplify.triangles_out;
+      oc.sheet_max_deviation_mm =
+          std::max(ts.simplify.max_out_measured_mm, ts.simplify.max_in_measured_mm);
+      oc.sheet_cut_max_deviation_mm =
+          std::max(ts.simplify.cut_max_out_mm, ts.simplify.cut_max_in_mm);
+      oc.sheet_samples_past_floor = ts.simplify.samples_past_max_in;
+      oc.sheet_step_max_deviation_mm =
+          std::max(ts.simplify.step_max_out_mm, ts.simplify.step_max_in_mm);
+      oc.sheet_step_samples = ts.simplify.step_samples;
+      oc.sheet_step_samples_outside_band = ts.simplify.step_samples_outside_band;
+      oc.sheet_step_worst_outside_band_mm = ts.simplify.step_worst_outside_band_mm;
+      oc.sheet_samples = ts.simplify.samples;
+    }
+    return st;
   };
-  const LatticeGenObserver* weld_tap = lat.emit_welded_stl ? &weld_obs : nullptr;
+  LatticeGenObserver weld_obs;
+  auto feed_probe = [&](LatticeGenElement k, const Vec3& a, const Vec3& b, double r) {
+    if (!solid_probe || !probe_live) return;
+    const bool ball = (k == LatticeGenElement::Node || k == LatticeGenElement::AnchorNode);
+    if (ball) solid_probe->add_ball(a, r);
+    else if (k == LatticeGenElement::InteriorStrut) solid_probe->add_strut(a, b, r, radius.nseg);
+    else solid_probe->add_prism(a, b, r, radius.nseg);  // a skin or rim edge: raw (b)
+  };
+  weld_obs.on_element = [&organic_spans, &lat, laid_tap, &feed_probe](
+                            LatticeGenElement k, const Vec3& a, const Vec3& b, double r) {
+    if (lat.emit_welded_stl) organic_spans.push_back({a, b, r});
+    if (laid_tap && *laid_tap) (*laid_tap)(k, a, b, r);
+    feed_probe(k, a, b, r);
+  };
+  // ★ K4: the tap arms the observer on its own, so a run that wants the ledger but not
+  // the welded body still gets one. The welded push is now inside the callback and gated
+  // on its own key, so the body cannot change because the ledger was asked for.
+  const LatticeGenObserver* weld_tap =
+      (lat.emit_welded_stl || (laid_tap && *laid_tap) || solid_probe) ? &weld_obs : nullptr;
+  // ★ THE RIM ON A REAL PART (ruling 11-08 (A)): laid after the lattice, once per
+  // emission, into the same sink. It is DRESSING: its elements reach the welded body and
+  // the protrusion measurement, never the solid probe (the shipped-volume certificate, so
+  // no strength credit) and never the plan's ledger.
+  // ★ (A), the OPEN finish (no shell holds the cut ends): the cut strut ends within one
+  // cell of a sharp edge are recorded as the lattice is laid, and the rim ties each to its
+  // centre line after it. The cells within reach of an edge are marked first, so the
+  // recorder asks the boundary only about ends that could need a tie.
+  const bool rim_ties = mesh_rim != nullptr && !with_shell;
+  std::vector<LatticeRimTieEnd> tie_ends;
+  std::unordered_set<long long> near_edge_cells;
+  const double tie_reach = R.cell_mm;
+  auto cell_key = [tie_reach](const Vec3& p, int di, int dj, int dk) {
+    const long long i = static_cast<long long>(std::floor(p.x / tie_reach)) + di + (1LL << 20);
+    const long long j = static_cast<long long>(std::floor(p.y / tie_reach)) + dj + (1LL << 20);
+    const long long k = static_cast<long long>(std::floor(p.z / tie_reach)) + dk + (1LL << 20);
+    return (i << 42) | (j << 21) | k;
+  };
+  if (rim_ties)
+    for (const LatticeMeshRimChain& c : mesh_rim->chains)
+      for (std::size_t i = 0; i < c.points.size(); ++i) {
+        const Vec3& a = c.points[i];
+        const Vec3& b = c.points[(i + 1) % c.points.size()];
+        const double l = std::sqrt((b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y) +
+                                   (b.z - a.z) * (b.z - a.z));
+        const int n = std::max(1, static_cast<int>(std::ceil(2.0 * l / tie_reach)));
+        for (int t = 0; t <= n; ++t) {
+          const double u = static_cast<double>(t) / n;
+          const Vec3 q{a.x + u * (b.x - a.x), a.y + u * (b.y - a.y), a.z + u * (b.z - a.z)};
+          for (int dk = -1; dk <= 1; ++dk)
+            for (int dj = -1; dj <= 1; ++dj)
+              for (int di = -1; di <= 1; ++di) near_edge_cells.insert(cell_key(q, di, dj, dk));
+        }
+      }
+  auto record_tie_end = [&](LatticeGenElement k, const Vec3& a, const Vec3& b, double r) {
+    if (!rim_ties || k != LatticeGenElement::InteriorStrut) return;
+    for (const Vec3* p : {&a, &b}) {
+      if (!near_edge_cells.count(cell_key(*p, 0, 0, 0))) continue;
+      // a CUT end lies on the clip's offset surface, sd = r (to its tolerance)
+      if (boundary.signed_distance(*p) > r + 0.05) continue;
+      tie_ends.push_back({*p, r});
+    }
+  };
+  auto lay_mesh_rim = [&](TriangleSink& w, const LatticeGenObserver* o, LatticeGenStats& st) {
+    if (mesh_rim == nullptr) return;
+    oc.mesh_rim_ran = true;
+    const LatticeGenStats rs = generate_mesh_rims(R, radius, w, skin, *mesh_rim, &oc.rim, o,
+                                                  rim_ties ? &tie_ends : nullptr);
+    tie_ends.clear();
+    st.rim_elements += rs.rim_elements;
+    st.rim_triangles += rs.rim_triangles;
+    st.triangles += rs.triangles;
+    st.rim_volume_mm3 += rs.rim_volume_mm3;
+    st.uncertified_spans_dropped += rs.uncertified_spans_dropped;
+    if (rs.max_strut_diameter_mm > 0.0) {
+      st.min_strut_diameter_mm = st.max_strut_diameter_mm > 0.0
+                                     ? std::min(st.min_strut_diameter_mm, rs.min_strut_diameter_mm)
+                                     : rs.min_strut_diameter_mm;
+      st.max_strut_diameter_mm = std::max(st.max_strut_diameter_mm, rs.max_strut_diameter_mm);
+    }
+  };
+  LatticeGenObserver rim_obs_plain;
+  rim_obs_plain.on_element = [&organic_spans, &lat](LatticeGenElement, const Vec3& a,
+                                                    const Vec3& b, double r) {
+    if (lat.emit_welded_stl) organic_spans.push_back({a, b, r});
+  };
+  LatticeGenObserver tie_obs;   // the recorder in front of whatever tap the run uses
+  tie_obs.on_element = [&weld_tap, &record_tie_end](LatticeGenElement k, const Vec3& a,
+                                                    const Vec3& b, double r) {
+    record_tie_end(k, a, b, r);
+    if (weld_tap && weld_tap->on_element) weld_tap->on_element(k, a, b, r);
+  };
+  const LatticeGenObserver* lattice_tap = rim_ties ? &tie_obs : weld_tap;
+  LatticeGenObserver tie_only_obs;   // organic keeps its own span ledger: the recorder alone
+  tie_only_obs.on_element = [&record_tie_end](LatticeGenElement k, const Vec3& a,
+                                              const Vec3& b, double r) {
+    record_tie_end(k, a, b, r);
+  };
   auto emit_lattice = [&](TriangleSink& w) {
     if (!measure_protrusion) {
-      if (organic)
-        return organic_stats(generate_organic_lattice(*organic, w, &boundary, 8,
-                                                      nullptr, &organic_spans));
-      if (stepped)
-        return generate_lattice_stepped(LatticeGenTopology::Octet, *stepped, w,
-                                        skin, weld_tap);
-      return swept ? generate_lattice_multilevel(LatticeGenTopology::Octet,
-                                                 Rbase, *levels, w, skin, weld_tap)
-                   : generate_lattice(LatticeGenTopology::Octet, R, radius, w,
-                                      skin, weld_tap);
+      LatticeGenStats st;
+      if (sheet)
+        st = sheet_pass(w);
+      else if (organic)
+        st = organic_stats(generate_organic_lattice(*organic, w, &boundary, 8,
+                                                    rim_ties ? &tie_only_obs : nullptr,
+                                                    &organic_spans));
+      else if (stepped)
+        st = generate_lattice_stepped(gen_topo, *stepped, w, skin, lattice_tap);
+      else
+        st = swept ? generate_lattice_multilevel(gen_topo, Rbase, *levels, w, skin, lattice_tap)
+                   : generate_lattice(gen_topo, R, radius, w, skin, lattice_tap);
+      lay_mesh_rim(w, &rim_obs_plain, st);
+      return st;
     }
     MeasuringSink m;
     m.inner = &w;
@@ -2214,9 +3649,11 @@ LatticeExportOutcome export_latticed_variant(
     // escape to THAT strut -- endpoints and radius -- which is what a clip fix needs.
     long long prev_n_out = 0;
     LatticeGenObserver obs;
-    obs.on_element = [&m, &pass_marks, &organic_spans, &lat, &prev_n_out](
-                         LatticeGenElement k, const Vec3& ea, const Vec3& eb,
-                         double er) {
+    obs.on_element = [&m, &pass_marks, &organic_spans, &lat, &prev_n_out, laid_tap,
+                      &feed_probe, &record_tie_end](LatticeGenElement k, const Vec3& ea,
+                                                    const Vec3& eb, double er) {
+      feed_probe(k, ea, eb, er);
+      record_tie_end(k, ea, eb, er);   // ★ (A) the open finish's cut ends near an edge
       if (m.this_element_out) { ++m.elements_out; m.this_element_out = false; }
       if (m.n_out > prev_n_out && std::getenv("TOPOPT_PROTRUSION_TRACE")) {
         std::fprintf(stderr,
@@ -2230,6 +3667,7 @@ LatticeExportOutcome export_latticed_variant(
       // Same ledger as the non-measuring path above, so the welded body does not
       // depend on whether the protrusion measurement happened to be armed.
       if (lat.emit_welded_stl) organic_spans.push_back({ea, eb, er});
+      if (laid_tap && *laid_tap) (*laid_tap)(k, ea, eb, er);   // ★ K4
       const char* name = "unknown";
       switch (k) {
         case LatticeGenElement::InteriorStrut: name = "interior strut"; break;
@@ -2245,7 +3683,7 @@ LatticeExportOutcome export_latticed_variant(
     // "interior strut" or "node ball" exactly as it is on the octet path. It was
     // "unattributed" once, and that cost a round of guessing about which primitive was
     // escaping the shell.
-    const LatticeGenStats st =
+    LatticeGenStats st =
         organic
             // ★ THE GUARD'S OWN MeshDistance GOES TO THE CLIP. `shell` is
             // `variant.v3.mesh` by const reference and nothing mutates it between
@@ -2257,13 +3695,23 @@ LatticeExportOutcome export_latticed_variant(
             ? organic_stats(generate_organic_lattice(
                   *organic, m, &boundary, 8, &obs, &organic_spans,
                   measure_protrusion ? &shell_dist : nullptr))
-            : (stepped ? generate_lattice_stepped(LatticeGenTopology::Octet,
-                                                  *stepped, m, skin, &obs)
-                       : (swept ? generate_lattice_multilevel(
-                                      LatticeGenTopology::Octet, Rbase, *levels, m,
-                                      skin, &obs)
-                                : generate_lattice(LatticeGenTopology::Octet, R,
-                                                   radius, m, skin, &obs)));
+            : sheet ? sheet_pass(m)
+            : (stepped ? generate_lattice_stepped(gen_topo, *stepped, m, skin, &obs)
+                       : (swept ? generate_lattice_multilevel(gen_topo, Rbase,
+                                                              *levels, m, skin, &obs)
+                                : generate_lattice(gen_topo, R, radius, m, skin,
+                                                   &obs)));
+    {
+      // ★ the rim, measured and attributed like every other pass
+      LatticeGenObserver rim_obs;
+      rim_obs.on_element = [&m, &pass_marks, &organic_spans, &lat](
+                               LatticeGenElement, const Vec3& ea, const Vec3& eb, double er) {
+        if (m.this_element_out) { ++m.elements_out; m.this_element_out = false; }
+        if (lat.emit_welded_stl) organic_spans.push_back({ea, eb, er});
+        pass_marks.emplace_back(m.n_seen, "rim along a sharp edge");
+      };
+      lay_mesh_rim(m, &rim_obs, st);
+    }
     const char* worst_pass = "unattributed";
     if (m.worst_vertex >= 0)
       for (const auto& pm : pass_marks)
@@ -2316,6 +3764,7 @@ LatticeExportOutcome export_latticed_variant(
     if (with_shell) push_shell(out_sink);  // solid shell first, then the lattice
     push_companion(out_sink);              // then the kept-solid regions
     oc.stats = emit_lattice(out_sink);
+    probe_live = false;                    // a second writer emits the same stream
   };
   auto write_with = [&](TriangleSink& writer) {
     if (bake) {
@@ -2394,9 +3843,24 @@ LatticeExportOutcome export_latticed_variant(
     // scatter below the base, but each clipped capsule still carries a hemispherical
     // cap a radius under the plane — 0.5 mm of it on the cube — and those caps ARE
     // the dots. Only the marched field can be cut flat.
+    // ★ THE PART, HANDED TO THE WELD so it can drive free ends into the solid and then
+    // cut back everything that leaves. The density field is the same one the solid's own
+    // surface is built from, which is why the trim lands on that surface rather than a
+    // voxel boundary; see OrganicWeldPart.
+    OrganicWeldPart wpart;
+    wpart.origin = sg.origin; wpart.h = sg.spacing;
+    wpart.nx = sg.nx; wpart.ny = sg.ny; wpart.nz = sg.nz;
+    wpart.density = &dens; wpart.iso = printed_iso;
+    wpart.embed_mm = organic_strut_embed_mm;
     TriangleMesh welded =
         organic_weld(organic_spans, lat.welded_pitch_mm, 40000000LL, ws,
-                     organic_base_trim_z > 0.0 ? organic_base_trim_z : -1e30);
+                     organic_base_trim_z > 0.0 ? organic_base_trim_z : -1e30, wpart);
+    if (std::getenv("TOPOPT_ORGANIC_TRACE"))
+      std::fprintf(stderr,
+                   "[weld] embed %.2f mm: %lld free ends driven into the solid; "
+                   "part clip %s, %lld raster voxels removed for leaving the part\n",
+                   ws.embed_mm, ws.ends_embedded, ws.part_clip_ran ? "RAN" : "did not run",
+                   ws.trimmed_voxels);
     // The SAME rigid motion the streamed soup is rotated by, from the same helper —
     // vertex order and winding preserved (det +1), so the two files describe one
     // placement of one object.
@@ -2406,6 +3870,69 @@ LatticeExportOutcome export_latticed_variant(
     oc.paths.push_back(path);
     oc.weld = ws;
     oc.welded = true;
+    // ★ THE SOLID COMPANION, BESIDE THE WELDED LATTICE (maintainer, 2026-09-08).
+    // The welded file is the lattice ALONE and the interpenetrating soup is the solid
+    // and the lattice fused into one unusable-for-inspection body, so neither file on
+    // its own shows a strut meeting material. This writes the SAME companion body the
+    // soup already contains, unmodified and separately, so the two can be opened
+    // together and the junction judged without anyone reconstructing anything. It is
+    // the same `comp_mesh` and the same rigid motion, so the pair is one placement of
+    // one object.
+    if (!comp_mesh.vertices.empty()) {
+      TriangleMesh solid_out = bake ? rotate_mesh(comp_mesh, *bake) : comp_mesh;
+      const std::string spath = base + "_SOLID.stl";
+      write_stl_file(spath, solid_out);
+      oc.paths.push_back(spath);
+    }
+  }
+
+  // ── ★ THE LATTICE, DUAL CONTOURED FROM ITS OWN SDF ─────────────────────────
+  // Additive and off unless asked for: the welded pair above is untouched. The weld
+  // marches a sampled field and its enclosed volume came out 67 % under the true union;
+  // this contours the exact capsule union instead, and reproduces that volume to within
+  // 1 % while staying watertight. It costs minutes rather than seconds, which is why it
+  // is a key and not the default. See topopt/lattice_dc.hpp.
+  if (organic_dual_contour && !organic_spans.empty()) {
+    LatticeDcOptions dopt;
+    dopt.cell_mm = organic_dc_cell_mm;
+    dopt.simplify_tolerance_mm = organic_dc_tolerance_mm;
+    // The SAME base plane the weld cuts on, so the two files describe one object rather
+    // than differing by a hemispherical cap under the plate on every clipped strut.
+    if (organic_base_trim_z > 0.0) dopt.clip_below_z = organic_base_trim_z;
+    // ── ★★ THE WETTED JOIN, ON, because this file exists to be the preview's ────
+    // The carver is the only mesher that can express it (organic_wet_join.hpp), and the
+    // whole reason a job asks for this file is that it should look like the picture. The
+    // scale is hard-coded at the maintainer's instruction (2026-09-18), so there is no
+    // number here for the two codebases to drift on.
+    //
+    // The part field is built ONCE for the whole grid: an exact Euclidean transform is
+    // three linear sweeps, which is nothing beside the contouring it feeds.
+    std::vector<char> part_solid(sg.voxel_count(), 0);
+    for (std::size_t e = 0; e < sg.voxel_count(); ++e)
+      part_solid[e] = dens[e] >= printed_iso ? 1 : 0;
+    const std::vector<double> part_sdf = voxel_signed_distance_mm(sg, part_solid);
+    // ★ AND THE LATTICED SET, which is where the joints are. The certified mask is the
+    // lattice; everything else inside the part is the solid the struts weld into.
+    const std::vector<double> lat_sdf = voxel_signed_distance_mm(sg, cert_mask);
+    dopt.wet.grid = &sg;
+    dopt.wet.part_sdf_mm = &part_sdf;
+    dopt.wet.lattice_sdf_mm = &lat_sdf;
+    dopt.wet.scale = kOrganicWetScale;
+    LatticeDcStats dst;
+    TriangleMesh dc = lattice_dual_contour(organic_spans, dopt, dst);
+    std::printf(
+        "[dc] cell %.4f mm (asked %.4f) tol %.4f | leaves %zu (%zu merged, %zu split) | "
+        "%zu tris | boundary %zu nonmanifold %zu dropped %zu | %s | volume %.1f mm3 | "
+        "%.1f s\n",
+        dst.cell_mm, dst.cell_mm_requested, dst.simplify_tolerance_mm, dst.cells_active,
+        dst.cells_merged, dst.cells_split, dst.triangles, dst.boundary_edges,
+        dst.nonmanifold_edges, dst.quads_dropped,
+        dst.manifold ? "MANIFOLD" : (dst.watertight ? "closed" : "OPEN"),
+        dst.volume_mm3, dst.seconds);
+    if (bake && !dc.vertices.empty()) dc = rotate_mesh(dc, *bake);
+    const std::string dpath = base + "_DC.stl";
+    write_stl_file(dpath, dc);
+    oc.paths.push_back(dpath);
   }
 
   // The latticed region's SOLID voxel count (the region actually filled): every
@@ -2438,11 +3965,11 @@ LatticeExportOutcome export_latticed_variant(
 // faithful to the exported geometry (which now carries them as the solid
 // companion body). `graded_rho`, when non-null, supplies each voxel its OWN
 // relative density (stage 4); null => the uniform `rho`.
-LatticePosture build_lattice_posture(const VoxelGrid& sg, double cell_mm,
-                                     const std::vector<char>& mask, double rho,
-                                     const std::vector<double>* graded_rho) {
+LatticePosture build_lattice_posture(LatticeTopology topo, const VoxelGrid& sg,
+                                     double cell_mm, const std::vector<char>& mask,
+                                     double rho, const std::vector<double>* graded_rho) {
   LatticePosture post;
-  post.topology = LatticeTopology::Octet;  // job schema restricts topology to octet
+  post.topology = topo;  // the JOB's type: the tensor certifies what was built
   post.cell_size_mm = cell_mm;
   const std::size_t nv = sg.voxel_count();
   post.mask.assign(nv, 0);
@@ -2454,6 +3981,21 @@ LatticePosture build_lattice_posture(const VoxelGrid& sg, double cell_mm,
   }
   return post;
 }
+
+// ★ E3: one include region's latticed voxels and the density range the grading law
+// gave them (LatticeVariantOutcome::region_graded).
+struct LatticeRegionGraded {
+  long long voxels = 0;
+  double rho_lo = 0.0, rho_hi = 0.0;
+  double cell_lo = 0.0, cell_hi = 0.0;  // ★ E3: the cells it got (swept; 0 otherwise)
+  // ★ E3 "off" with no density: the lightest one density that certified (the search).
+  bool searched = false;
+  bool search_certified = false;
+  double search_rho = 0.0, search_floor = 0.0, search_peak = 0.0, search_margin = 0.0;
+  int search_trials = 0;
+  double search_law_rho = 0.0;    // the law search's answer (before the shipped one)
+  int search_shipped_trials = 0;  // whole passes the shipped search ran (0: none needed)
+};
 
 struct LatticeCertOutcome {
   bool ran = false;
@@ -2474,6 +4016,23 @@ struct LatticeCertOutcome {
   double solid_reproduction_relative_delta = 0.0;
   bool solid_reproduces_within_band = false;
   double cert_tolerance = 0.0;         // the solve's own relative-residual bound
+  // ★ E2.1: per scenario the lattice uses (empty without scenarios), in the run's
+  // order: the LATTICED margin and verdict, and the solid re-certification's margin.
+  // `lattice` above is the governing one of these.
+  std::vector<ScenarioReport> scenarios;
+  std::vector<char> scenario_accepted;
+  std::vector<ScenarioReport> solid_scenarios;
+  // ★ E2.4: the OPEN finish (outer_finish "none"). `lattice` above was certified with
+  // the latticed voxels in cells the part's free surface cuts given NO credit.
+  bool open_finish = false;
+  long long open_cut_voxels = 0;        // latticed voxels given no credit
+  long long open_latticed_voxels = 0;   // all latticed voxels in the posture
+  bool open_load_path_ok = true;        // the load path through what keeps credit
+  std::string open_refusal;             // plain words, by region label; "" if certified
+  // ★ E2.4 per region: each open region beside covered ones, and the wall closing it
+  std::vector<std::string> open_region_notes;
+  double region_wall_mm = 0.0;
+  long long region_wall_voxels = 0;
 };
 
 // The exact certification inputs minimize_plastic certified the SOLID design with
@@ -2494,7 +4053,92 @@ struct LatticeCertContext {
   // one. Carried on the context so the SOLID certification, the LATTICED
   // re-certification and the clamp counterfactual cannot drift apart.
   double printed_iso = 0.5;
+  // ★ E2.1: THE SCENARIOS THIS LATTICE IS CERTIFIED UNDER, each with its own
+  // supports and loads on the solved grid. Empty on a job without scenarios: then
+  // `loads` with the caller's bcs is the one load case, exactly as before. Sized on
+  // the run's WHOLE list and only then filtered to lattice.scenarios, because
+  // sized_scenarios scales each scenario's weak springs by the heaviest load in the
+  // list it is given: sizing a subset would certify different springs than the run.
+  std::vector<SimpScenario> scenarios;
 };
+
+// ── ★ E2.1: WHICH OF THE RUN'S SCENARIOS THE LATTICE USES ─────────────────────
+// One flag per entry of `scenarios` (the run's own list, in its order): 1 when the
+// lattice is graded and certified on it. lattice.scenarios not stated = all of them.
+// Matched by name, which parse_job has already checked against loads.scenarios.
+std::vector<char> lattice_scenario_flags(const JobDescription& job,
+                                         const std::vector<SimpScenario>& scenarios) {
+  std::vector<char> on(scenarios.size(), job.lattice.scenarios_stated ? 0 : 1);
+  if (job.lattice.scenarios_stated)
+    for (std::size_t s = 0; s < scenarios.size(); ++s)
+      for (const std::string& name : job.lattice.scenarios)
+        if (scenarios[s].name == name) on[s] = 1;
+  return on;
+}
+
+// ── ★ E2.1: THE FIELD THE LATTICE IS GRADED FROM ──────────────────────────────
+// Per voxel, the WORST von Mises over the scenarios the lattice uses (raw MPa: a
+// light scenario never drives the grade). The governing scenario's field is the
+// variant's own double field, the one the grade always read; the others come from
+// `scenario_fields`, the float32 copies the views carry. So a lattice on the
+// governing scenario alone grades from exactly the field it always did, and a job
+// without scenarios gets `v.von_mises_field` itself, by reference.
+//
+// `source`, when given, receives per voxel the index (in the run's scenario order)
+// of the scenario whose stress the grade read there: -1 without scenarios.
+const std::vector<double>& lattice_grading_stress(
+    const std::vector<double>& governing_field, const std::vector<ScenarioReport>& reps,
+    const std::vector<ScenarioFields>& fields, const std::vector<char>& on,
+    std::vector<double>& storage, std::vector<int>* source) {
+  if (source) source->assign(governing_field.size(), -1);
+  if (reps.empty()) return governing_field;
+  if (on.size() != reps.size() || fields.size() != reps.size())
+    throw JobError(
+        "internal: the analysis carries " + std::to_string(reps.size()) +
+        " scenario reports and " + std::to_string(fields.size()) +
+        " scenario fields, and the lattice was given " + std::to_string(on.size()) +
+        " scenario flags. They are one list in one order; grading from a mismatched "
+        "pair would follow the wrong scenario's stress.");
+  std::size_t gov = reps.size();
+  for (std::size_t s = 0; s < reps.size(); ++s)
+    if (reps[s].governs) gov = s;
+  const std::size_t n = governing_field.size();
+  bool others = false;
+  for (std::size_t s = 0; s < reps.size(); ++s)
+    if (on[s] && s != gov) others = true;
+  if (!others && gov < reps.size() && on[gov]) {
+    if (source) source->assign(n, static_cast<int>(gov));
+    return governing_field;
+  }
+  if (gov < reps.size() && on[gov]) {
+    storage = governing_field;
+    if (source) source->assign(n, static_cast<int>(gov));
+  } else {
+    storage.assign(n, -1.0);
+  }
+  for (std::size_t s = 0; s < reps.size(); ++s) {
+    if (!on[s] || s == gov) continue;
+    const std::vector<float>& f = fields[s].von_mises;
+    if (f.size() != n)
+      throw JobError("internal: scenario \"" + reps[s].name + "\" carries a stress field "
+                     "of " + std::to_string(f.size()) + " voxels on a grid of " +
+                     std::to_string(n) + ".");
+    for (std::size_t e = 0; e < n; ++e)
+      if (static_cast<double>(f[e]) > storage[e]) {
+        storage[e] = static_cast<double>(f[e]);
+        if (source) (*source)[e] = static_cast<int>(s);
+      }
+  }
+  return storage;
+}
+
+const std::vector<double>& lattice_grading_stress(const MinimizePlasticVariant& v,
+                                                  const std::vector<char>& on,
+                                                  std::vector<double>& storage,
+                                                  std::vector<int>* source) {
+  return lattice_grading_stress(v.von_mises_field, v.report.scenarios, v.scenario_fields, on,
+                                storage, source);
+}
 
 // `domain` is THE domain the run solved on (resolve_design_domain, pipeline.hpp):
 // under a design box its grid is the EXPANDED grid and its BCs/loads are already
@@ -2505,7 +4149,8 @@ LatticeCertContext lattice_cert_context(const MinimizePlasticVariant& variant,
                                         const VoxelGrid& part_grid,
                                         const SolvedDesignDomain& domain,
                                         const MinimizePlasticOptions& options,
-                                        const Material& material) {
+                                        const Material& material,
+                                        const JobDescription& job) {
   const VoxelGrid& sg = domain.grid;
   LatticeCertContext cx;
   cx.params.youngs_modulus = material.youngs_modulus_mpa;
@@ -2561,6 +4206,15 @@ LatticeCertContext lattice_cert_context(const MinimizePlasticVariant& variant,
   // real lattice material, and re-certifying at 0.5 would certify an object with
   // that material deleted — a different object than the one the file carries.
   cx.printed_iso = run_printed_iso(options);
+  // ★ E2.1: the scenarios, the way minimize_plastic certified them (sized on the
+  // whole list, on the solved grid), then only those the lattice uses.
+  if (!domain.scenarios.empty()) {
+    const std::vector<SimpScenario> sized =
+        sized_scenarios(domain.scenarios, material.youngs_modulus_mpa, sg.spacing);
+    const std::vector<char> on = lattice_scenario_flags(job, sized);
+    for (std::size_t s = 0; s < sized.size(); ++s)
+      if (on[s]) cx.scenarios.push_back(sized[s]);
+  }
   assert((!options.draft_quality || cx.cert_tol < options.draft_loose_tol) &&
          "E4: latticed certification must run at the tight cert tolerance, never the "
          "draft loose tolerance");
@@ -2570,11 +4224,11 @@ LatticeCertContext lattice_cert_context(const MinimizePlasticVariant& variant,
 FixedDesignAnalysis analyze_variant_with_posture(
     const MinimizePlasticVariant& variant, const VoxelGrid& sg,
     const MinimizePlasticOptions& options, const Material& material,
-    const std::vector<DirichletBC>& bcs, const LatticeCertContext& cx,
-    const LatticePosture* post) {
+    const std::vector<DirichletBC>& bcs, const std::vector<NodalLoad>& loads,
+    const LatticeCertContext& cx, const LatticePosture* post) {
   return analyze_fixed_design(sg, cx.params,
                               variant.optimization.physical_density, bcs,
-                              cx.loads, material, cx.build_dir, cx.cert_tol,
+                              loads, material, cx.build_dir, cx.cert_tol,
                               options.simp.cg_max_iterations, options.simp.solver,
                               options.margin_stop, cx.knockdown, cx.load_path_ok,
                               cx.part_solid, post,
@@ -2589,6 +4243,136 @@ FixedDesignAnalysis analyze_variant_with_posture(
                               cx.printed_iso);
 }
 
+// The one load case of a job without scenarios: the caller's bcs with cx.loads.
+FixedDesignAnalysis analyze_variant_with_posture(
+    const MinimizePlasticVariant& variant, const VoxelGrid& sg,
+    const MinimizePlasticOptions& options, const Material& material,
+    const std::vector<DirichletBC>& bcs, const LatticeCertContext& cx,
+    const LatticePosture* post) {
+  return analyze_variant_with_posture(variant, sg, options, material, bcs, cx.loads, cx,
+                                      post);
+}
+
+// ── ★ E2.1: ONE POSTURE CERTIFIED UNDER EVERY SCENARIO THE LATTICE USES ───────
+// Without scenarios: the one load case (`bcs` with cx.loads), exactly as before.
+// With them: each scenario's own supports and loads (cx.scenarios), the WORST
+// governs by certify_scenarios' own rule (a non-convergent solve first, then the
+// lowest effective margin), and the verdict is ACCEPTED only if every scenario's own
+// analysis is accepted and none is unheld. Before E2.1 a scenario job's lattice was
+// certified under scenario 1 alone, whichever governed.
+struct PostureCertification {
+  FixedDesignAnalysis governing;
+  std::vector<ScenarioReport> reports;  // empty without scenarios
+  std::vector<char> accepted;           // per scenario, in `reports` order
+};
+PostureCertification certify_posture(const MinimizePlasticVariant& variant,
+                                     const VoxelGrid& sg,
+                                     const MinimizePlasticOptions& options,
+                                     const Material& material,
+                                     const std::vector<DirichletBC>& bcs,
+                                     const LatticeCertContext& cx,
+                                     const LatticePosture* post) {
+  PostureCertification pc;
+  if (cx.scenarios.empty()) {
+    pc.governing = analyze_variant_with_posture(variant, sg, options, material, bcs, cx, post);
+    return pc;
+  }
+  // ★ Ruling 11-06 2(a): a scenario whose lattice is NOT CERTIFIED reads an unbounded
+  // margin, so it never governs by the worse rule; its words go on the governing one.
+  std::string not_certified;
+  ScenarioCertification sc = certify_scenarios(
+      sg, cx.scenarios,
+      [&](const std::vector<DirichletBC>& b, const std::vector<NodalLoad>& l) {
+        FixedDesignAnalysis a =
+            analyze_variant_with_posture(variant, sg, options, material, b, l, cx, post);
+        pc.accepted.push_back(a.accepted ? 1 : 0);
+        if (a.lattice_not_certified && not_certified.empty())
+          not_certified = "Under \"" + cx.scenarios[pc.accepted.size() - 1].name + "\": " +
+                          a.lattice_not_certified_reason;
+        return a;
+      },
+      /*keep_fields=*/false);
+  pc.governing = std::move(sc.governing);
+  pc.reports = std::move(sc.reports);
+  for (const char a : pc.accepted)
+    if (!a) pc.governing.accepted = false;
+  if (!not_certified.empty()) {
+    pc.governing.lattice_not_certified = true;
+    pc.governing.lattice_not_certified_reason = not_certified;
+  }
+  return pc;
+}
+
+// ★ E2.1: the organic certificates' load cases: one per scenario the lattice uses,
+// each with its own supports, or the job's one load case when it has none.
+std::vector<OrganicLoadCase> organic_load_cases(const LatticeCertContext& cx,
+                                                const std::vector<DirichletBC>& bcs) {
+  std::vector<OrganicLoadCase> ocs;
+  if (cx.scenarios.empty()) {
+    ocs.push_back({"job", bcs, cx.loads});
+    return ocs;
+  }
+  for (const SimpScenario& sc : cx.scenarios) ocs.push_back({sc.name, sc.bcs, sc.loads});
+  return ocs;
+}
+
+// ── ★ E2.4: THE OPEN LATTICE'S SURFACE CELLS (outer_finish "none", ruling 11-06 (1)) ─
+// Under a solid shell, a cell the part's surface cuts lands its struts on the shell. Open,
+// it does not: Onck, Andrews & Gibson 2001 ("Size effects in ductile cellular solids",
+// Int. J. Mech. Sci. 43(3), Part I modelling doi:10.1016/S0020-7403(00)00042-4, Part II
+// experiments doi:10.1016/S0020-7403(00)00043-6) show the cells cut by a free surface form
+// a weaker boundary layer, and stiffness and strength fall when the part is only a few
+// cells thick. The posture's periodic tensor overstates that layer. So it gets NO credit,
+// the safe floor: no measured knockdown for the layer exists in core, and a reduced credit
+// without one would be a guess.
+//
+// A cell is AT THE FREE SURFACE when any voxel whose centre lies in its box, or one voxel
+// beyond any face of it (the lattice's cell grid: origin at the grid's, the voxel's own
+// cell size on a swept posture), is FREE: outside the grid, outside the part, or not
+// printed (a hole, a keep-clear, a void the optimizer left). That is a cell the surface
+// cuts AND a cell flush against it: neither has the neighbour cell the periodic tensor
+// assumes on that side (measured: on a bar whose 4 mm cells meet its faces flush, a
+// cut-only test found none). A cell touching only solid or latticed material is not:
+// its struts land on material. Returns, per voxel, latticed AND in such a cell.
+std::vector<char> open_finish_cut_cells(const VoxelGrid& g, const std::vector<double>& dens,
+                                        double iso, const LatticePosture& post) {
+  const std::size_t n = g.voxel_count();
+  std::vector<char> cut(n, 0);
+  const double h = g.spacing;
+  const bool per_voxel = post.cell_size_field.size() == n;
+  std::map<std::array<long long, 4>, char> cell_cut;  // (cell um, ix, iy, iz) -> cut
+  auto free_at = [&](int i, int j, int k) {
+    if (i < 0 || j < 0 || k < 0 || i >= g.nx || j >= g.ny || k >= g.nz) return true;
+    return !g.solid(i, j, k) || !(dens[g.index(i, j, k)] > iso);
+  };
+  for (int k = 0; k < g.nz; ++k)
+    for (int j = 0; j < g.ny; ++j)
+      for (int i = 0; i < g.nx; ++i) {
+        const std::size_t e = g.index(i, j, k);
+        if (e >= post.mask.size() || !post.mask[e]) continue;
+        const double c = per_voxel ? post.cell_size_field[e] : post.cell_size_mm;
+        if (!(c > 0.0)) continue;
+        // The cell holding this voxel's centre, in voxel-index units along each axis.
+        const long long ix = static_cast<long long>(std::floor((i + 0.5) * h / c));
+        const long long iy = static_cast<long long>(std::floor((j + 0.5) * h / c));
+        const long long iz = static_cast<long long>(std::floor((k + 0.5) * h / c));
+        const std::array<long long, 4> key{std::llround(c * 1e6), ix, iy, iz};
+        auto it = cell_cut.find(key);
+        if (it == cell_cut.end()) {
+          // Voxels whose centre (v + 0.5) h lies in [ix c, (ix + 1) c), and one beyond.
+          auto lo = [&](long long q) { return static_cast<int>(std::ceil(q * c / h - 0.5)); };
+          bool any = false;
+          for (int kk = lo(iz) - 1; kk <= lo(iz + 1) && !any; ++kk)
+            for (int jj = lo(iy) - 1; jj <= lo(iy + 1) && !any; ++jj)
+              for (int ii = lo(ix) - 1; ii <= lo(ix + 1) && !any; ++ii)
+                if (free_at(ii, jj, kk)) any = true;
+          it = cell_cut.emplace(key, any ? 1 : 0).first;
+        }
+        cut[e] = it->second;
+      }
+  return cut;
+}
+
 // Re-certify one accepted variant as the LATTICED composite: once with a nullptr
 // posture (must reproduce the SOLID margin — a live proof the reconstruction is
 // correct) and once with `post` (the composite margin that describes the exported
@@ -2601,7 +4385,8 @@ LatticeCertOutcome certify_latticed_variant(const MinimizePlasticVariant& varian
                                             const std::vector<DirichletBC>& bcs,
                                             const LatticeCertContext& cx,
                                             const LatticePosture& post,
-                                            double rho_uniform) {
+                                            double rho_uniform,
+                                            const std::vector<char>* open_cut = nullptr) {
   LatticeCertOutcome oc;
   oc.rho = rho_uniform;
 
@@ -2621,24 +4406,89 @@ LatticeCertOutcome certify_latticed_variant(const MinimizePlasticVariant& varian
   // residual tolerance: the margins agree to the band that tolerance justifies, and
   // no further. On the maintainer's own run `solid_reconstruction_exact` has been
   // FALSE on every rung since the recycler was armed, and nothing read it.
-  const FixedDesignAnalysis solid_recert = analyze_variant_with_posture(
-      variant, sg, options, material, bcs, cx, /*post=*/nullptr);
+  //
+  // ★ E2.1: with scenarios, each one the lattice uses is re-certified, and each must
+  // reproduce the margin the run recorded for THAT scenario (its effective margin,
+  // the number ScenarioReport carries). The governing one's worst case is the
+  // reported reproduction.
+  const PostureCertification solid =
+      certify_posture(variant, sg, options, material, bcs, cx, /*post=*/nullptr);
+  const FixedDesignAnalysis& solid_recert = solid.governing;
   oc.solid_margin_reproduced = solid_recert.margin.worst_case;
-  oc.solid_reproduced =
-      (solid_recert.margin.worst_case == variant.report.margin.worst_case);
-  oc.solid_reproduction_relative_delta = margin_reproduction_relative_delta(
-      variant.report.margin.worst_case, solid_recert.margin.worst_case);
-  oc.solid_reproduces_within_band = margin_reproduces(
-      variant.report.margin.worst_case, solid_recert.margin.worst_case,
-      cx.cert_tol);
+  oc.solid_scenarios = solid.reports;
+  if (solid.reports.empty() || variant.report.scenarios.empty()) {
+    oc.solid_reproduced =
+        (solid_recert.margin.worst_case == variant.report.margin.worst_case);
+    oc.solid_reproduction_relative_delta = margin_reproduction_relative_delta(
+        variant.report.margin.worst_case, solid_recert.margin.worst_case);
+    oc.solid_reproduces_within_band = margin_reproduces(
+        variant.report.margin.worst_case, solid_recert.margin.worst_case,
+        cx.cert_tol);
+  } else {
+    oc.solid_reproduced = true;
+    oc.solid_reproduces_within_band = true;
+    for (const ScenarioReport& got : solid.reports) {
+      const ScenarioReport* rec = nullptr;
+      for (const ScenarioReport& r : variant.report.scenarios)
+        if (r.name == got.name) rec = &r;
+      if (rec == nullptr) {
+        oc.solid_reproduced = oc.solid_reproduces_within_band = false;
+        continue;
+      }
+      if (got.margin != rec->margin) oc.solid_reproduced = false;
+      oc.solid_reproduction_relative_delta =
+          std::max(oc.solid_reproduction_relative_delta,
+                   margin_reproduction_relative_delta(rec->margin, got.margin));
+      if (!margin_reproduces(rec->margin, got.margin, cx.cert_tol))
+        oc.solid_reproduces_within_band = false;
+    }
+  }
 
   // (2) Latticed cert — the octet tensor on the shared occupancy. THIS margin
   // describes the exported file. The certifiable BAND is enforced INSIDE
   // analyze_fixed_design PER VOXEL (bars E5 / H4b): any masked voxel whose rho
   // sits outside [rho_min, rho_max] throws LatticeDensityOutOfBand rather than
   // certify against a clamped tensor.
-  oc.lattice =
-      analyze_variant_with_posture(variant, sg, options, material, bcs, cx, &post);
+  //
+  // ★ E2.4: an OPEN finish certifies with its cut cells given no credit: void in the
+  // design this solve reads and out of the posture, and the load path re-walked on what
+  // is left (a load on cut cells alone has no path). The solid re-cert above read the
+  // design as the run certified it.
+  const MinimizePlasticVariant* lat_variant = &variant;
+  const LatticePosture* lat_post = &post;
+  const LatticeCertContext* lat_cx = &cx;
+  MinimizePlasticVariant floored;
+  LatticePosture floored_post;
+  LatticeCertContext floored_cx;
+  if (open_cut) {
+    oc.open_finish = true;
+    for (std::size_t e = 0; e < post.mask.size(); ++e)
+      if (post.mask[e]) {
+        ++oc.open_latticed_voxels;
+        if (e < open_cut->size() && (*open_cut)[e]) ++oc.open_cut_voxels;
+      }
+    if (oc.open_cut_voxels > 0) {
+      floored = variant;
+      floored_post = post;
+      for (std::size_t e = 0; e < open_cut->size(); ++e)
+        if ((*open_cut)[e]) {
+          floored.optimization.physical_density[e] = 0.0;
+          floored_post.mask[e] = 0;
+        }
+      floored_cx = cx;
+      floored_cx.load_path_ok =
+          load_path_connected(sg, floored.optimization.physical_density, cx.printed_iso);
+      oc.open_load_path_ok = floored_cx.load_path_ok;
+      lat_variant = &floored;
+      lat_post = &floored_post;
+      lat_cx = &floored_cx;
+    }
+  }
+  PostureCertification lat =
+      certify_posture(*lat_variant, sg, options, material, bcs, *lat_cx, lat_post);
+  oc.lattice = std::move(lat.governing);
+  oc.scenarios = std::move(lat.reports);
+  oc.scenario_accepted = std::move(lat.accepted);
   oc.ran = true;
   return oc;
 }
@@ -2803,15 +4653,27 @@ struct LatticeAddedMaterialReceipt {
   // ── THE AUDIT (the bar that "certified == exported" is checkable by, not
   // argued for). All three are measured AFTER the geometry is written:
   //   certified_lattice_cells — cells the certification mask implies
-  //                             (|{owning cell of a masked voxel}|);
+  //                             (|{cell covering a masked voxel}|, Finding 7);
   //   emitted_lattice_cells   — cells the GENERATOR actually emitted
   //                             (LatticeGenStats::latticed_cells, its own count);
   //   voxels_strut_and_solid  — printed voxels that are BOTH inside an emitted
-  //                             lattice cell AND written as companion solid.
+  //                             lattice cell that covers NO certified voxel AND
+  //                             written as companion solid;
+  //   voxels_strut_and_solid_bond — the same, inside a cell that DOES cover a
+  //                             certified voxel: the lattice reaching into the solid
+  //                             beside its pocket (the bond), by design since Finding 7.
   // On a uniform design-box run the first two must be EQUAL and the third ZERO.
   long long certified_lattice_cells = 0;
   long long emitted_lattice_cells = 0;
   long long voxels_strut_and_solid = 0;
+  long long voxels_strut_and_solid_bond = 0;
+  // A graded design-box run laying more than one grid (a swept plan's levels, or
+  // passes): the audit is asked of every grid, and these are written only then.
+  //   emitted_cells_covering_no_certified — cells a level or pass emits while
+  //                             covering no voxel of the final mask: struts in a cell
+  //                             the certificate calls solid. Must be 0.
+  bool multi_grid = false;
+  long long emitted_cells_covering_no_certified = 0;
 };
 
 struct LatticeGradedReceipt {
@@ -2892,6 +4754,25 @@ struct LatticeGradedReceipt {
 // composite margin + posture + the honest "strut strength not certified" flag.
 // `cell_mm` is the exported cell (the job's on a uniform run, the grading law's on
 // a graded run); `roles`/`graded` append their sections only when present.
+// ★ SKIN PER ZONE (ruling 11-08 (1)): a lattice_regions row's skin -- the zone's own or
+// the part's, and what the diagrid pass laid in it. A zone that asks for Skin and gets no
+// skin strut says so in a plain line: no silent no-op.
+std::string zone_skin_json(const JobLatticeRegion& r, const JobLattice& lat, std::size_t i,
+                           const LatticeGenStats& gs) {
+  const std::size_t z = i + 1;
+  std::string s = ", \"skin\": " + json_str(r.skin.empty() ? lat.skin : r.skin) +
+                  ", \"skin_source\": " + json_str(r.skin.empty() ? "lattice" : "region") +
+                  ", \"skin_laid\": {\"anchor_nodes\": " + std::to_string(gs.zone_anchor_nodes[z]) +
+                  ", \"skin_chords\": " + std::to_string(gs.zone_skin_chords[z]) +
+                  ", \"skin_struts\": " + std::to_string(gs.zone_skin_struts[z]) + "}";
+  if (r.skin == "diagrid" && gs.zone_skin_struts[z] == 0)
+    s += ", \"skin_note\": " +
+         json_str("Skin laid nothing in " +
+                  (r.label.empty() ? "region " + std::to_string(z) : "\"" + r.label + "\"") +
+                  ": no chord of the outer surface has its midpoint in this zone.");
+  return s;
+}
+
 std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
                                      const JobLattice& lat,
                                      const LatticeCertOutcome& c,
@@ -2909,12 +4790,28 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
                                      // wall time is deliberately not in this
                                      // document — see the cost block below. It
                                      // ships in run_info instead.
-                                     const LatticeVoidEscapeReport* void_escape) {
+                                     const LatticeVoidEscapeReport* void_escape,
+                                     // ★ Finding 7: the volume check, when it ran.
+                                     const LatticeVolumeCheck* volume = nullptr,
+                                     const LatticeVolumeCheck* volume_law = nullptr,
+                                     const long long* shipped_counts = nullptr,
+                                     // ★ E2.1: per voxel, the scenario the grade
+                                     // read (LatticeVariantOutcome::grade_source).
+                                     const std::vector<int>* grade_source = nullptr,
+                                     // ★ E3: the include regions and their owner map.
+                                     const std::vector<JobLatticeRegion>* region_jobs = nullptr,
+                                     const std::vector<int>* region_owner = nullptr,
+                                     const std::vector<LatticeRegionGraded>*
+                                         region_graded = nullptr) {
   const LatticeGenStats& gs = oc.stats;
   const FixedDesignAnalysis& a = c.lattice;
   std::string s = "{\n";
   s += "  \"topology\": \"" + std::string(lattice_topology_name(a.lattice_topology)) +
        "\",\n";
+  {
+    const std::string note = lattice_type_directional_note(lattice_topology_name(a.lattice_topology));
+    if (!note.empty()) s += "  \"directional_note\": \"" + note + "\",\n";
+  }
   s += "  \"cell_mm\": " + json_num(cell_mm) + ",\n";
   s += "  \"strut_radius_mm\": " +
        (graded.present ? std::string("null") : json_num(lat.strut_radius_mm)) +
@@ -2938,7 +4835,7 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
     // volume the closed shell surface encloses (divergence theorem) when the
     // shell is in the file, 0 when the "skin" finish dropped it.
     s += "  \"shell_enclosed_volume_mm3\": " +
-         json_num(lat.outer_finish == "skin"
+         json_num(!lattice_shell_written(lat)
                       ? 0.0
                       : mesh_enclosed_volume_mm3(variant.v3.mesh)) +
          ",\n";
@@ -2967,10 +4864,72 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
          std::to_string(oc.measured_vertices) + ",\n";
   }
   s += "  \"clipped_struts\": " + std::to_string(gs.clipped_struts) + ",\n";
+  // ★ K6 PART 2: WHAT THE STUB GUARD TOOK, never silently. Emitted only when the guard
+  // was raised (an owner-clipped plan pass), so a legacy receipt is byte-identical. A
+  // piece shorter than its own strut diameter prints as a bump and carries no load; the
+  // count and the length say how much of that the ownership clip created.
+  if (gs.stub_fragments_dropped > 0) {
+    s += "  \"stub_fragments_dropped\": " +
+         std::to_string(gs.stub_fragments_dropped) + ",\n";
+    s += "  \"stub_fragment_length_mm\": " +
+         json_num(gs.stub_fragment_length_mm) + ",\n";
+  }
   s += "  \"landings\": " + std::to_string(gs.landings) + ",\n";
   s += "  \"anchor_nodes\": " + std::to_string(gs.anchor_nodes) + ",\n";
   s += "  \"skin_struts\": " + std::to_string(gs.skin_struts) + ",\n";
+  // ★ Skin per zone: what the diagrid pass laid outside every zone (each zone's own is in
+  // its lattice_regions row). Written only when a zone states its own skin.
+  if (!gs.zone_skin_struts.empty())
+    s += "  \"skin_outside_zones\": {\"anchor_nodes\": " +
+         std::to_string(gs.zone_anchor_nodes[0]) +
+         ", \"skin_chords\": " + std::to_string(gs.zone_skin_chords[0]) +
+         ", \"skin_struts\": " + std::to_string(gs.zone_skin_struts[0]) + "},\n";
   s += "  \"rim_elements\": " + std::to_string(gs.rim_elements) + ",\n";
+  // ★ THE RIM ON A REAL PART (ruling 11-08 (A)). Written only when a rim was asked for.
+  if (oc.mesh_rim_ran) {
+    const FeatureEdgeStats& fe = oc.rim_edges;
+    const LatticeMeshRimReport& rr = oc.rim;
+    s += "  \"rim\": {\"rides\": \"the sharp edges of " + oc.rim_rides +
+         ", seated in the shell the struts are clipped to\", "
+         "\"angle_threshold_deg\": " + json_num(fe.angle_threshold_deg) +
+         ", \"min_piece_mm\": " + json_num(fe.min_piece_mm) +
+         ", \"feature_edges\": " + std::to_string(fe.feature_edges) +
+         ", \"open_edges_skipped\": " + std::to_string(fe.open_edges) +
+         ", \"nonmanifold_edges_skipped\": " + std::to_string(fe.nonmanifold_edges) +
+         ", \"pieces\": " + std::to_string(fe.pieces) +
+         ", \"pieces_dropped_short\": " + std::to_string(fe.pieces_dropped_short) +
+         ", \"length_dropped_mm\": " + json_num(fe.length_dropped_mm) +
+         ", \"chains\": " + std::to_string(fe.chains) +
+         ", \"chains_other_skin\": " + std::to_string(oc.rim_chains_other_skin) +
+         ", \"chains_laid\": " + std::to_string(rr.chains_laid) +
+         ", \"chains_clipped_away\": " + std::to_string(rr.chains_clipped_away) +
+         ", \"chains_on_solid\": " + std::to_string(rr.chains_on_solid) +
+         ", \"length_laid_mm\": " + json_num(rr.length_laid_mm) +
+         ", \"length_on_solid_mm\": " + json_num(rr.length_on_solid_mm) +
+         ", \"spans\": " + std::to_string(rr.spans) +
+         ", \"joints\": " + std::to_string(rr.joints) +
+         ", \"stations\": " + std::to_string(rr.stations) +
+         ", \"stations_seated\": " + std::to_string(rr.stations_seated) +
+         ", \"stations_unseated\": " + std::to_string(rr.stations_unseated) +
+         ", \"seat_max_mm\": " + json_num(rr.seat_max_mm) +
+         ", \"tie_ends\": " + std::to_string(rr.tie_ends) +
+         ", \"ties_laid\": " + std::to_string(rr.ties_laid) +
+         ", \"ties_touching\": " + std::to_string(rr.ties_touching) +
+         ", \"ties_out_of_reach\": " + std::to_string(rr.ties_out_of_reach) +
+         ", \"ties_clipped_away\": " + std::to_string(rr.ties_clipped_away) +
+         ", \"tie_length_mm\": " + json_num(rr.tie_length_mm) +
+         ", \"line_width_mm\": " + json_num(oc.rim_line_width_mm) +
+         ", \"diameter_mm\": [" + json_num(rr.diameter_min_mm) + ", " +
+         json_num(rr.diameter_max_mm) + "], \"line_widths\": [" +
+         std::to_string(rr.line_widths_min) + ", " + std::to_string(rr.line_widths_max) +
+         "], \"strength\": \"rim: not counted in strength\"" +
+         (rr.chains_laid == 0
+              ? std::string(", \"note\": \"Rim laid nothing: no sharp edge of the shipped surface "
+                            "longer than one cell lies where the rim was asked for, or none had "
+                            "room inside the part.\"")
+              : std::string()) +
+         "},\n";
+  }
   s += "  \"interior_volume_mm3\": " + json_num(gs.interior_volume_mm3) + ",\n";
   s += "  \"skin_volume_mm3\": " + json_num(gs.skin_volume_mm3) + ",\n";
   s += "  \"rim_volume_mm3\": " + json_num(gs.rim_volume_mm3) + ",\n";
@@ -2986,6 +4945,15 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
          ",\n";
     s += "  \"solid_region_triangles\": " +
          std::to_string(oc.solid_region_triangles) + ",\n";
+    // ★ Ruling 11-09: where the SOLID's outer faces come from, said only when the part
+    // itself was latticed (a legacy receipt keeps its bytes).
+    if (oc.solid_on_part_surface_asked) {
+      s += "  \"solid_faces\": " +
+           json_str(oc.solid_on_part_surface ? "the part's own surface" : "voxel steps") +
+           ",\n";
+      if (!oc.solid_on_part_surface)
+        s += "  \"solid_faces_why\": " + json_str(oc.solid_on_part_surface_refused) + ",\n";
+    }
   }
   // Lattice role regions (stage 1, H1a) — what the roles did, and the tested
   // precedence spelled out so the receipt cannot be misread.
@@ -3107,12 +5075,19 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
          std::to_string(added.emitted_lattice_cells) + ",\n";
     s += "    \"voxels_strut_and_solid\": " +
          std::to_string(added.voxels_strut_and_solid) + ",\n";
+    s += "    \"voxels_strut_and_solid_bond\": " +
+         std::to_string(added.voxels_strut_and_solid_bond) + ",\n";
+    if (added.multi_grid)
+      s += "    \"emitted_cells_covering_no_certified\": " +
+           std::to_string(added.emitted_cells_covering_no_certified) + ",\n";
     s += "    \"audit_note\": \"certified_lattice_cells is the cell set the "
-         "certification mask implies; emitted_lattice_cells is the generator's "
-         "own count of the cells it wrote. On a uniform run they are EQUAL and "
-         "voxels_strut_and_solid is 0 — the exported lattice and the certified "
-         "lattice are the same set of cells, and no voxel carries both a strut "
-         "and companion solid.\",\n";
+         "certification mask implies (every cell covering a latticed voxel); "
+         "emitted_lattice_cells is the generator's own count of the cells it wrote. "
+         "On a uniform run they are EQUAL and voxels_strut_and_solid is 0 — the "
+         "exported lattice and the certified lattice are the same set of cells, and "
+         "no cell that covers no certified voxel writes struts into companion solid. "
+         "voxels_strut_and_solid_bond counts solid voxels a covering cell reaches "
+         "into beside its pocket: the lattice's bond to the solid.\",\n";
     s += "    \"kept_solid_fraction\": " +
          json_num(added.printed_voxels > 0
                       ? static_cast<double>(added.kept_solid_voxels) /
@@ -3138,6 +5113,27 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
     const GradedField& gf = *graded.gf;
     const double latticed = static_cast<double>(gf.latticed_voxels);
     s += "  \"grading\": {\n";
+    // ★ RULING 2: the shape-grade band, written only when one was built.
+    if (gf.band_voxels > 0 || gf.band_solid_voxels > 0) {
+      const double* bx = gf.band_solid_box;
+      s += "    \"shape_band\": {\"band_voxels\": " + std::to_string(gf.band_voxels) +
+           ", \"struts_raised\": " + std::to_string(gf.band_raised_voxels) +
+           ", \"snapped_to_line_width\": " + std::to_string(gf.band_snapped_voxels) +
+           ", \"off_line_width\": " + std::to_string(gf.band_off_line_voxels) +
+           ", \"cells_capped\": " + std::to_string(gf.band_capped_voxels) +
+           ", \"quilt_rho\": " + json_num(gf.band_quilt_rho) +
+           ", \"solid_where_unprintable\": " + std::to_string(gf.band_solid_voxels) +
+           (gf.band_solid_voxels > 0
+                ? ", \"solid_box_mm\": [" + json_num(bx[0]) + ", " + json_num(bx[1]) + ", " +
+                      json_num(bx[2]) + ", " + json_num(bx[3]) + ", " + json_num(bx[4]) + ", " +
+                      json_num(bx[5]) + "]"
+                : std::string()) +
+           (lattice_topology_is_sheet(a.lattice_topology)
+                ? ", \"note\": \"a sheet grades its wall thickness only: no published method "
+                  "grades a TPMS's cell size (04-references R5)\""
+                : std::string()) +
+           "},\n";
+    }
     // ── STAGE E: the per-region cell derivation. Emitted ONLY when the job asked
     // for it, so every other receipt is byte-identical. Every number here is
     // measured on this run or derived at run time from core's own constants —
@@ -3258,6 +5254,15 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
          json_num(gf.fallback_max_member_width_mm) + ",\n";
     s += "      \"member_width_needed_mm\": " +
          json_num(gf.cells_per_member_floor * gf.cell_size_mm) + ",\n";
+    // ★ Rulings 11-09: the convex corners joined to the member they are a corner of.
+    if (gf.corner_residue_voxels > 0)
+      s += "      \"convex_corners\": {\"residue_voxels\": " +
+           std::to_string(gf.corner_residue_voxels) + ", \"joined_to_their_member\": " +
+           std::to_string(gf.corner_joined_voxels) + ", \"reach_mm\": " +
+           json_num(gf.corner_reach_mm) +
+           ", \"note\": \"a voxel under the floor whose residue ends within reach_mm of "
+           "material that holds the floor is a convex corner of that member and is latticed "
+           "with it; where the thin material runs on (a member joining another) it stays solid\"},\n";
     s += "      \"note\": \"member_too_thin_for_cell: the member cannot hold "
          "cells_per_member_floor cells across at this cell size — a SMALLER cell "
          "helps. strut_unprintable_at_every_cell: the strut this density emits is "
@@ -3266,6 +5271,20 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
          "than the floor times the smallest printable cell, so no cell choice can "
          "lattice it; the design itself is too thin here.\"\n";
     s += "    },\n";
+    // ★ SLIVERS (reviewer's ruling 11-09): solid the law left that is in no block 2 line
+    // widths across. Emitted only when the pass ran (2 line widths span more than one
+    // voxel), so a coarse run's receipt keeps its bytes.
+    if (gf.sliver_pass_block_voxels >= 2) {
+      s += "    \"slivers\": {\"block_voxels\": " + std::to_string(gf.sliver_pass_block_voxels) +
+           ", \"latticed_with_neighbours\": " + std::to_string(gf.sliver_voxels_latticed) +
+           ", \"kept_solid\": " + std::to_string(gf.sliver_voxels_kept_solid) +
+           ", \"latticed_min_cells_per_member\": " +
+           json_num(gf.sliver_voxels_latticed > 0 ? gf.sliver_min_cells_per_member : 0.0) +
+           ", \"note\": \"a solid piece under 2 line widths in any direction is latticed with "
+           "its neighbours (their density and cell); one with no lattice beside it, or kept "
+           "solid for a reason no cell answers, stays solid. The reason counts above are "
+           "after this pass; widest_rejected_member_mm is the law's, before it.\"},\n";
+    }
     // ── SUB-FLOOR RETENTION — THE ACCEPTED INACCURACY, NAMED (handoff
     //    2026-08-04-subfloor-lattice-unloaded-regions, bar S2) ───────────────────
     // Retaining below-the-floor material is a decision to accept an error nothing
@@ -3395,17 +5414,24 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
        json_num(lattice_rho_min(a.lattice_topology)) + ", " +
        json_num(lattice_rho_max(a.lattice_topology)) + "],\n";
   s += "  \"lattice_voxels\": " + std::to_string(a.lattice_voxels) + ",\n";
+  // The type's own name where these strings said "octet" (lattice types round 1): an
+  // octet receipt is byte-identical, an FCC receipt no longer claims octet's tensor.
+  const std::string tn = lattice_topology_name(a.lattice_topology);
   if (lat.outer_finish == "skin")
-    s += "  \"describes\": \"the exported latticed mesh (octet interior + freeform "
+    s += "  \"describes\": \"the exported latticed mesh (" + tn + " interior + freeform "
          "2D boundary skin, NO solid shell) — the composite model below is "
          "shell-blind, see finish_note\",\n";
+  else if (lat.outer_finish == "none")
+    s += "  \"describes\": \"the exported latticed mesh (" + tn + " interior, OPEN: no "
+         "solid shell, no freeform skin) solved with the " + tn + " homogenized cubic "
+         "tensor, the cells the part's free surface cuts given no credit (open_finish)\",\n";
   else if (lat.outer_finish == "shell+skin")
-    s += "  \"describes\": \"the exported latticed mesh (solid shell + octet "
-         "interior + decorative freeform skin) solved with the octet homogenized "
+    s += "  \"describes\": \"the exported latticed mesh (solid shell + " + tn + " "
+         "interior + decorative freeform skin) solved with the " + tn + " homogenized "
          "cubic tensor\",\n";
   else
-    s += "  \"describes\": \"the exported latticed mesh (solid shell + octet interior) "
-         "solved with the octet homogenized cubic tensor\",\n";
+    s += "  \"describes\": \"the exported latticed mesh (solid shell + " + tn + " interior) "
+         "solved with the " + tn + " homogenized cubic tensor\",\n";
   // What the SOLID variant mesh certifies (unchanged), and the proof the composite
   // reconstruction reproduces it exactly with a null posture.
   s += "  \"solid_margin_worst_case\": " + json_num(c.solid_margin.worst_case) + ",\n";
@@ -3428,6 +5454,129 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
   s += "  \"lattice_margin_worst_case\": " + json_num(a.margin.worst_case) + ",\n";
   s += "  \"lattice_margin_effective\": " + json_num(a.margin_effective) + ",\n";
   s += "  \"margin_required\": " + json_num(variant.report.margin_required) + ",\n";
+  // ★ E2.1: THE SCENARIOS, when the job has them (absent otherwise, so no other
+  // receipt changes). The lattice is graded from the worst stress over `graded_on`
+  // and certified under each; `lattice_margin_*` above is the governing one's.
+  // `stress_share` is, per scenario, the share of latticed voxels whose grade read
+  // that scenario's stress.
+  if (!c.scenarios.empty()) {
+    std::string gov;
+    for (const ScenarioReport& r : c.scenarios)
+      if (r.governs) gov = r.name;
+    s += "  \"scenarios\": {\n    \"graded_on\": [";
+    for (std::size_t i = 0; i < c.scenarios.size(); ++i)
+      s += std::string(i ? ", " : "") + json_str(c.scenarios[i].name);
+    s += "],\n    \"governing\": " + json_str(gov) + ",\n    \"per_scenario\": [";
+    for (std::size_t i = 0; i < c.scenarios.size(); ++i) {
+      const ScenarioReport& r = c.scenarios[i];
+      double solid = std::numeric_limits<double>::quiet_NaN();
+      for (const ScenarioReport& q : c.solid_scenarios)
+        if (q.name == r.name) solid = q.margin;
+      s += std::string(i ? ", " : "") + "{\"name\": " + json_str(r.name) +
+           ", \"lattice_margin\": " + json_num(r.margin) + ", \"accepted\": " +
+           ((i < c.scenario_accepted.size() && c.scenario_accepted[i]) ? "true" : "false") +
+           ", \"unheld\": " + (r.unheld ? "true" : "false") +
+           ", \"solid_margin\": " + json_num(solid) + "}";
+    }
+    s += "]";
+    if (grade_source && graded.gf && !variant.report.scenarios.empty()) {
+      const std::vector<char>& lm = graded.gf->posture.mask;
+      std::vector<long long> n(variant.report.scenarios.size(), 0);
+      long long total = 0;
+      for (std::size_t e = 0; e < lm.size() && e < grade_source->size(); ++e) {
+        if (!lm[e]) continue;
+        ++total;
+        const int src = (*grade_source)[e];
+        if (src >= 0 && static_cast<std::size_t>(src) < n.size()) ++n[static_cast<std::size_t>(src)];
+      }
+      s += ",\n    \"stress_share\": [";
+      bool first = true;
+      for (std::size_t k = 0; k < n.size(); ++k) {
+        bool used = false;
+        for (const ScenarioReport& r : c.scenarios)
+          if (r.name == variant.report.scenarios[k].name) used = true;
+        if (!used) continue;
+        s += std::string(first ? "" : ", ") + "{\"name\": " +
+             json_str(variant.report.scenarios[k].name) + ", \"share\": " +
+             json_num(total > 0 ? static_cast<double>(n[k]) / static_cast<double>(total) : 0.0) +
+             "}";
+        first = false;
+      }
+      s += "]";
+    }
+    s += "\n  },\n";
+  }
+  // ★ E3: EACH INCLUDE REGION, with its own grading and where each value came from
+  // ("region" = its own, "grading" = the part's). Written only when a region states a
+  // grading of its own, so no other receipt changes.
+  if (region_jobs && region_owner && !region_owner->empty() && region_graded &&
+      region_graded->size() == region_jobs->size()) {
+    s += "  \"lattice_regions\": [";
+    for (std::size_t i = 0; i < region_jobs->size(); ++i) {
+      const JobLatticeRegion& r = (*region_jobs)[i];
+      const long long nlat = (*region_graded)[i].voxels;
+      const double lo = (*region_graded)[i].rho_lo, hi = (*region_graded)[i].rho_hi;
+      auto src = [](bool own) { return std::string(own ? "\"region\"" : "\"grading\""); };
+      s += std::string(i ? ", " : "") + "{\"id\": " + std::to_string(i + 1) +
+           ", \"label\": " + json_str(r.label) + ", \"kind\": " + json_str(r.kind) +
+           ", \"latticed_voxels\": " + std::to_string(nlat) +
+           ", \"rho_min_graded\": " + json_num(nlat ? lo : 0.0) +
+           ", \"rho_max_graded\": " + json_num(nlat ? hi : 0.0) +
+           ", \"grading\": {\"mode\": " + json_str(r.grading.empty() ? "" : r.grading) +
+           ", \"rho_min\": " + json_num(r.rho_min) + ", \"rho_max\": " + json_num(r.rho_max) +
+           ", \"demand_exponent\": " + json_num(r.demand_exponent) +
+           ", \"shape_grade\": " + std::to_string(r.shape_grade) +
+           ", \"shape_grade_band_mm\": " + json_num(r.shape_grade_band_mm) +
+           (r.cell_min_mm > 0.0 || r.cell_max_mm > 0.0
+                ? ", \"cell_min_mm\": " + json_num(r.cell_min_mm) +
+                      ", \"cell_max_mm\": " + json_num(r.cell_max_mm)
+                : std::string()) +
+           // ★ E3 "off" with no density: the search for its lightest one density
+           ((*region_graded)[i].searched
+                ? ", \"one_density\": {\"rho\": " + json_num((*region_graded)[i].search_rho) +
+                      ", \"law_search_rho\": " + json_num((*region_graded)[i].search_law_rho) +
+                      ", \"shipped_passes\": " +
+                      std::to_string((*region_graded)[i].search_shipped_trials) +
+                      ", \"printable_floor\": " + json_num((*region_graded)[i].search_floor) +
+                      ", \"upper_bound_graded_peak\": " +
+                      json_num((*region_graded)[i].search_peak) +
+                      ", \"law_margin\": " + json_num((*region_graded)[i].search_margin) +
+                      ", \"trials\": " + std::to_string((*region_graded)[i].search_trials) +
+                      ", \"law_certified\": " +
+                      ((*region_graded)[i].search_certified ? "true" : "false") +
+                      ((*region_graded)[i].search_certified
+                           ? std::string()
+                           : ", \"refusal\": " +
+                                 json_str(std::string("Region ") +
+                                          (r.label.empty() ? std::to_string(i + 1)
+                                                           : "\"" + r.label + "\"") +
+                                          " (grading off, one density): the lattice does "
+                                          "not certify even with it at its graded peak " +
+                                          json_num((*region_graded)[i].search_peak) +
+                                          " (margin " +
+                                          json_num((*region_graded)[i].search_margin) +
+                                          "), so no lighter one density was searched. Give "
+                                          "it a density, or let it grade.")) +
+                      "}"
+                : std::string()) +
+           // ★ E3: the cells the region got, where the plan sized cells per voxel (swept)
+           (nlat && (*region_graded)[i].cell_hi > 0.0
+                ? ", \"cell_mm_graded\": [" + json_num((*region_graded)[i].cell_lo) + ", " +
+                      json_num((*region_graded)[i].cell_hi) + "]"
+                : std::string()) +
+           "}" +
+           // ★ Skin per zone: the zone's skin (its own, or the part's) and what it laid
+           (!gs.zone_skin_struts.empty() && i + 1 < gs.zone_skin_struts.size()
+                ? zone_skin_json(r, lat, i, gs)
+                : std::string()) +
+           ", \"source\": {\"mode\": " + src(!r.grading.empty()) +
+           ", \"band\": " + src(r.rho_max > 0.0) +
+           ", \"demand_exponent\": " + src(r.demand_exponent > 0.0) +
+           ", \"shape_grade\": " + src(r.shape_grade >= 0) +
+           ", \"shape_grade_band_mm\": " + src(r.shape_grade_band_mm >= 0.0) + "}}";
+    }
+    s += "],\n";
+  }
   // The receipt's verdict. The GATE's own verdict logic is untouched; a "skin"
   // finish is refused UPSTREAM of it (like the density-band fast-fail) because
   // the composite posture assumes every latticed voxel carries at least the
@@ -3438,6 +5587,34 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
   const bool finish_certified = lat.outer_finish != "skin";
   s += "  \"lattice_accepted\": " +
        std::string((a.accepted && finish_certified) ? "true" : "false") + ",\n";
+  // ★ Ruling 11-06 2(a): no solid voxel carries the load and the strut law cannot
+  // certify the lattice (analyze.hpp lattice_not_certified). Written only then.
+  if (a.lattice_not_certified)
+    s += "  \"lattice_not_certified\": true,\n  \"lattice_not_certified_reason\": " +
+         json_str(a.lattice_not_certified_reason) + ",\n";
+  // ★ E2.4: the OPEN finish's certificate (outer_finish "none"), written only then.
+  if (c.open_finish) {
+    s += "  \"open_finish\": {\"cut_cell_voxels\": " + std::to_string(c.open_cut_voxels) +
+         ", \"latticed_voxels\": " + std::to_string(c.open_latticed_voxels) +
+         ", \"cut_cell_credit\": \"none\", \"load_path_after\": " +
+         (c.open_load_path_ok ? "true" : "false") +
+         ", \"basis\": \"the cells at the part's free surface (cut by it or flush against it) form a weaker boundary "
+         "layer (Onck, Andrews & Gibson 2001, Int. J. Mech. Sci. 43(3), Parts I and II, "
+         "doi:10.1016/S0020-7403(00)00042-4 and -00043-6); no measured knockdown for it exists, so they get no strength or "
+         "stiffness: the safe floor. The margins above are that solve's.\"";
+    if (!c.open_refusal.empty()) s += ", \"refusal\": " + json_str(c.open_refusal);
+    if (!c.open_region_notes.empty()) {
+      s += ", \"regions\": [";
+      for (std::size_t i = 0; i < c.open_region_notes.size(); ++i)
+        s += std::string(i ? ", " : "") + json_str(c.open_region_notes[i]);
+      s += "], \"wall_mm\": " + json_num(c.region_wall_mm) +
+           ", \"wall_voxels\": " + std::to_string(c.region_wall_voxels) +
+           ", \"wall_basis\": \"the slicer's wall (loops x line widths, else two line "
+           "widths) in whole voxel layers rounded up: solid in the file and counted by the "
+           "certificate\"";
+    }
+    s += "},\n";
+  }
   if (lat.outer_finish != "shell") {
     s += "  \"finish_certified\": " +
          std::string(finish_certified ? "true" : "false") + ",\n";
@@ -3446,7 +5623,7 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
            "composite certification model is shell-blind (the posture never "
            "credited the shell), so the margins above describe the same model "
            "as a 'shell' run and do NOT certify the open, shell-less object: "
-           "clipped boundary cells fall below the periodic-octet stiffness the "
+           "clipped boundary cells fall below the periodic-" + tn + " stiffness the "
            "posture assumes and the 2D skin's contribution is uncertified. "
            "Refused upstream of the gate; the gate's verdict logic is "
            "unchanged.\",\n";
@@ -3461,14 +5638,15 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
   // stress tensors. REPORT ONLY: none of these numbers feed `lattice_accepted`
   // (its verdict logic above is untouched), and `strut_strength_uncertified`
   // stays true — the maintainer asked for NUMBERS to test against, not a gate.
+  // ★ Except where no solid voxel carries the load (ruling 11-06 2(a)): there the
+  // analysis folded the worst-case margin into the gate, and "gated" says so.
   if (a.lattice_strut_report) {
     const StrutStrengthReport& ss = a.lattice_strut;
     s += "  \"strut_strength\": {\n";
-    s += "    \"law\": \"PR 259 kfit *_cert envelope (bulk/free-surface/cut "
-         "populations), evidence/2026-07-31-lattice-dehomogenization-probe/"
-         "kfit.csv; strut_vm <= Kd(rho)*vm(Sigma) + Kv(rho)*|p(Sigma)|, "
-         "interlayer analogue Kild/Kilv\",\n";
-    s += "    \"gated\": false,\n";
+    // ★ The type's OWN law (ruling 11-08 (B)): octet's text is PR 259's, unchanged.
+    s += "    \"law\": \"" + strut_law_source(a.lattice_topology) + "\",\n";
+    // ★ Ruling 11-06 2(a): gated where no solid voxel carries the load.
+    s += "    \"gated\": " + std::string(a.strut_gated ? "true" : "false") + ",\n";
     // MARGINS — in-plane and interlayer SEPARATELY (bar L6): which one binds is
     // the point. The interlayer margin divides by the UNSOURCED z_knockdown.
     s += "    \"margin_in_plane\": " + json_num(ss.margin_in_plane) + ",\n";
@@ -3509,8 +5687,8 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
          json_num(ss.il_cross_factor) + ",\n";
     // Out-of-band rho accounting (bar L5): law span vs certified band, clamped
     // voxels COUNTED — never silently extrapolated.
-    s += "    \"law_rho_span\": [" + json_num(strut_law_rho_min()) + ", " +
-         json_num(strut_law_rho_max()) + "],\n";
+    s += "    \"law_rho_span\": [" + json_num(strut_law_rho_min(a.lattice_topology)) +
+         ", " + json_num(strut_law_rho_max(a.lattice_topology)) + "],\n";
     s += "    \"rho_clamped_voxels\": " +
          std::to_string(ss.rho_clamped_voxels) + ",\n";
     // Cells-per-member regime guard (bar L4): below the floor the homogenized
@@ -3544,9 +5722,8 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
            "at a 44-276x cost ceiling. This is an accepted unknown, not a clean "
            "bill of health.\",\n";
     }
-    s += "    \"resolution_note\": \"joint-peak law rows are mesh-divergent "
-         "(~log in micro resolution, +10-18% per 32->48 step where measured); "
-         "the band-floor row is a still-rising lower bound\"\n";
+    s += "    \"resolution_note\": \"" + strut_law_resolution_note(a.lattice_topology) +
+         "\"\n";
     s += "  },\n";
   }
   // WHICH FRAME THIS RECEIPT'S DIRECTION-BEARING NUMBERS ARE IN (handoff
@@ -3580,6 +5757,99 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
   // fired — this project has shipped that exact failure twice (a forecast-only
   // job that reported itself as a build; a rim that emitted nothing while
   // succeeding), so a PASS states what it found and how it found it.
+  if (oc.sheet_simplified) {
+    s += "  \"sheet_mesh\": {\n";
+    s += "    \"max_deviation_limit_mm\": " + json_num(kSheetMaxDeviationMm) + ",\n";
+    s += "    \"triangles_contoured\": " + std::to_string(oc.sheet_triangles_contoured) + ",\n";
+    s += "    \"triangles\": " + std::to_string(oc.sheet_triangles) + ",\n";
+    s += "    \"max_deviation_mm\": " + json_num(oc.sheet_max_deviation_mm) + ",\n";
+    s += "    \"cut_max_deviation_mm\": " + json_num(oc.sheet_cut_max_deviation_mm) + ",\n";
+    s += "    \"samples_past_bead_floor\": " + std::to_string(oc.sheet_samples_past_floor) + ",\n";
+    s += "    \"step_max_deviation_mm\": " + json_num(oc.sheet_step_max_deviation_mm) + ",\n";
+    s += "    \"step_samples\": " + std::to_string(oc.sheet_step_samples) + ",\n";
+    s += "    \"step_samples_outside_band\": " +
+         std::to_string(oc.sheet_step_samples_outside_band) + ",\n";
+    s += "    \"step_worst_outside_band_mm\": " +
+         json_num(oc.sheet_step_worst_outside_band_mm) + ",\n";
+    s += "    \"sheet_samples\": " + std::to_string(oc.sheet_samples) + ",\n";
+    s += "    \"note\": \"bounded edge collapse (Garland & Heckbert 1997) checked against the "
+         "true surface; max_deviation is measured on every written triangle of the sheet's "
+         "own surface, cut_max_deviation where it is cut (kept as contoured, under solid); "
+         "where the wall steps between voxels no collapse leaves the band the walls in reach "
+         "span (no wall below the bead), step_max_deviation is the distance from the "
+         "sample's own voxel's surface there, and step_*_outside_band what the contouring "
+         "left outside that band, kept as contoured\"\n";
+    s += "  },\n";
+  }
+  // ── ★ THE VOLUME CHECK (Finding 7): per latticed pocket, the lattice the file holds
+  // against what the certificate reads there. No wall clock (byte-identity comparisons).
+  if (volume && volume->ran) {
+    const LatticeVolumeCheck& vc = *volume;
+    s += "  \"volume_check\": {\n";
+    s += "    \"rule\": \"per latticed pocket (face-connected latticed voxels) of at least one "
+         "cell's volume, the exported lattice volume no more than 10 % BELOW the certified "
+         "density times the pocket's volume; above is reported, never refused\",\n";
+    s += "    \"limit\": " + json_num(kLatticeVolumeGapLimit) + ",\n";
+    s += "    \"pockets\": " + std::to_string(vc.pockets.size()) + ",\n";
+    s += "    \"certified_mm3\": " + json_num(vc.certified_mm3) + ",\n";
+    s += "    \"exported_mm3\": " + json_num(vc.exported_mm3) + ",\n";
+    s += "    \"gap\": " +
+         json_num(vc.certified_mm3 > 0.0 ? vc.exported_mm3 / vc.certified_mm3 - 1.0 : 0.0) +
+         ",\n";
+    s += "    \"worst_gap\": " + json_num(vc.worst_gap) + ",\n";
+    s += "    \"highest_gap\": " + json_num(vc.highest_gap) + ",\n";
+    {
+      char hb[96];
+      std::snprintf(hb, sizeof hb, "file %+.1f %% over certified",
+                    100.0 * (vc.highest >= 0 ? vc.highest_gap : 0.0));
+      s += "    \"high_side\": \"" + std::string(hb) + "\",\n";
+    }
+    s += "    \"refused\": " + std::string(vc.refused() ? "true" : "false") + ",\n";
+    s += "    \"judged_from_mm3\": " + json_num(vc.judge_min_mm3) + ",\n";
+    if (volume_law && volume_law->ran) {
+      // (3): the certificate above is rebuilt from the file; this is the law against it.
+      s += "    \"certified_from\": \"min(the law's density, the file's measured solid "
+           "fraction) per voxel, held at the band floor below it\",\n";
+      s += "    \"law_certified_mm3\": " + json_num(volume_law->certified_mm3) + ",\n";
+      s += "    \"law_gap\": " +
+           json_num(volume_law->certified_mm3 > 0.0
+                        ? volume_law->exported_mm3 / volume_law->certified_mm3 - 1.0
+                        : 0.0) +
+           ",\n";
+      s += "    \"law_lightest_pocket_gap\": " + json_num(volume_law->worst_gap) + ",\n";
+      s += "    \"law_heaviest_pocket_gap\": " + json_num(volume_law->highest_gap) + ",\n";
+      if (shipped_counts) {
+        s += "    \"voxels_lowered_to_file\": " + std::to_string(shipped_counts[0]) + ",\n";
+        s += "    \"voxels_held_at_band_floor\": " + std::to_string(shipped_counts[1]) + ",\n";
+      }
+    }
+    s += "    \"small_pockets_not_judged\": " + std::to_string(vc.small_pockets) + ",\n";
+    s += "    \"small_pockets_certified_mm3\": " + json_num(vc.small_certified_mm3) + ",\n";
+    s += "    \"small_pockets_exported_mm3\": " + json_num(vc.small_exported_mm3) + ",\n";
+    s += "    \"points\": " + std::to_string(vc.points) + ",\n";
+    // The eight JUDGED pockets lightest against their certificate, lightest first.
+    std::vector<std::size_t> order;
+    for (std::size_t i = 0; i < vc.pockets.size(); ++i)
+      if (vc.pockets[i].judged) order.push_back(i);
+    std::stable_sort(order.begin(), order.end(), [&vc](std::size_t a, std::size_t b) {
+      return vc.pockets[a].gap < vc.pockets[b].gap;
+    });
+    if (order.size() > 8) order.resize(8);
+    s += "    \"worst_pockets\": [";
+    for (std::size_t n = 0; n < order.size(); ++n) {
+      const LatticePocketVolume& P = vc.pockets[order[n]];
+      if (n) s += ",";
+      s += "\n      {\"voxels\": " + std::to_string(P.voxels) +
+           ", \"certified_mm3\": " + json_num(P.certified_mm3) +
+           ", \"exported_mm3\": " + json_num(P.exported_mm3) +
+           ", \"gap\": " + json_num(P.gap) +
+           ", \"points_per_voxel\": " + std::to_string(P.points_per_voxel) +
+           ", \"bbox_min_mm\": [" + json_num(P.lo.x) + ", " + json_num(P.lo.y) + ", " +
+           json_num(P.lo.z) + "], \"bbox_max_mm\": [" + json_num(P.hi.x) + ", " +
+           json_num(P.hi.y) + ", " + json_num(P.hi.z) + "]}";
+    }
+    s += "\n    ]\n  },\n";
+  }
   if (void_escape) {
     const LatticeVoidEscapeReport& ve = *void_escape;
     s += "  \"void_escape\": {\n";
@@ -3697,8 +5967,12 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
   }
   s += "  \"note\": \"stiffness and solid-region strength are certified against the "
        "real composite; the lattice region's macro (effective) stress is recovered "
-       "but strut-level strength needs de-homogenization (Phase 2) and is NOT gated. "
-       "Octet tensor magnitudes carry PR 198's +-10% resolution caveat.\"\n";
+       "but strut-level strength needs de-homogenization (Phase 2) and is NOT gated. " +
+       std::string(a.lattice_topology == LatticeTopology::Octet
+                       ? "Octet tensor magnitudes carry PR 198's +-10% resolution caveat."
+                       : "The " + tn + " tensor rows are PR 246's (vpc48, drift under "
+                         "2.4 % against vpc64).") +
+       "\"\n";
   s += "}\n";
   return s;
 }
@@ -3797,7 +6071,7 @@ SteppedOutcome run_stepped_step(const VoxelGrid& grid,
   if (lattice_mask.size() != n || relative_density.size() != n ||
       region_ids.size() != n)
     throw JobError("stepped: the graded posture does not cover this grid");
-  const LatticeTopology topo = LatticeTopology::Octet;
+  const LatticeTopology topo = lattice_topology_from_id(jg.topology);
   const double n_star = lattice_cells_per_member_min(topo);
   const double w = jg.min_extrudable_width_mm;
   if (!(w > 0.0))
@@ -3847,12 +6121,12 @@ SteppedOutcome run_stepped_step(const VoxelGrid& grid,
     // ★ BOTH BOUNDS COME FROM CORE, never from arithmetic spelled out here. phi(rho)
     // is the measured octet diameter per unit cell, so w / phi(rho) is the finest cell
     // whose strut at THIS region's density still prints.
-    const double phi = octet_strut_diameter_mm(rc.median_rho, 1.0);
+    const double phi = lattice_strut_diameter_mm(topo, rc.median_rho, 1.0);
     const double printable_min = phi > 0.0 ? w / phi : 0.0;
     const double homogenizable_max = rc.median_width_mm / n_star;
     rc.cell_mm = std::max(homogenizable_max, printable_min);
     if (!(rc.cell_mm > 0.0)) { ++so.regions_with_no_voxels; continue; }
-    rc.strut_mm = octet_strut_diameter_mm(rc.median_rho, rc.cell_mm);
+    rc.strut_mm = lattice_strut_diameter_mm(topo, rc.median_rho, rc.cell_mm);
     rc.cells_per_member = rc.median_width_mm / rc.cell_mm;
     // Below the ACCURACY floor is COUNTED and reported out of regime, never hidden —
     // the same discipline sub-floor retention and the adaptive floor already hold.
@@ -3908,6 +6182,23 @@ SteppedOutcome run_stepped_step(const VoxelGrid& grid,
 struct LatticeVariantOutcome {
   LatticeExportOutcome oc;
   LatticeCertOutcome cc;
+  // ★ E2.1: per voxel, the index (in the run's scenario order) of the scenario whose
+  // stress the grade read there; -1 everywhere on a job without scenarios.
+  std::vector<int> grade_source;
+  // ★ E3: the include regions (declared order) and per voxel the one that owns it,
+  // for the receipt's lattice_regions. Empty when no region states its own grading.
+  std::vector<JobLatticeRegion> region_jobs;
+  std::vector<int> region_owner;
+  // Per region (declared order): its latticed voxels and the density range the GRADING
+  // LAW gave them, taken before the certificate's as-built rebuild (which reads each laid
+  // cell, and a cell straddling a region's edge carries its neighbour's density).
+  std::vector<LatticeRegionGraded> region_graded;
+  std::string one_density_refusal;  // ★ E3: a searched region no density certified
+  // ★ E2.4 per region: the open regions (name, latticed voxels) and the wall closing them
+  struct OpenRegion { std::string name; long long voxels = 0; };
+  std::vector<OpenRegion> open_regions;
+  double region_wall_mm = 0.0;
+  long long region_wall_voxels = 0;
   // ★ the ORGANIC structural certificate (beam network), when one was run
   OrganicCertificate organic_cert;
   OrganicRecommendation organic_recommendation;   // organic_recommend != off
@@ -3922,6 +6213,10 @@ struct LatticeVariantOutcome {
   SyntheticStressReport organic_synthetic;   // synthetic stress laid into dead walls
   double organic_solid_rim_mm = 0.0;
   long long organic_solid_rim_voxels = 0;
+  // ★ RULING B: the octet's solid outline beam, as DERIVED and as applied.
+  double outline_beam_mm = 0.0;
+  double outline_bleed_mm = 0.0;
+  long long outline_beam_voxels = 0;
   std::string receipt_path;
   std::string receipt_json;
   double cell_mm = 0.0;
@@ -3936,6 +6231,44 @@ struct LatticeVariantOutcome {
   bool organic_ran = false;
   OrganicReport organic;  // meaningful iff `organic_ran`
   bool stepped_ran = false;
+  // ★ the any-step plan as laid down, and the seam census the certificate stands on
+  long long anystep_cells = 0, anystep_regions = 0, anystep_passes = 0;
+  std::string anystep_histogram;
+  // ★ §3: "size=rho/radius_mm", descending by size, beside the histogram.
+  std::string anystep_rho_by_size;
+  // ★ K3 (3): per include region, the volume the PLAN left solid -- printed voxels the
+  // region owns that no plan cell covers. "r1=1234.567, r2=0.000" in mm3.
+  std::string plan_solid_remainder_mm3;
+  double plan_latticed_mm3 = 0.0;
+  // ★ ruling 1's condition: latticed voxels per region whose density came from core's
+  // own grading because the covering cell sent none. "r1=0, r2=0" on a plan that sent
+  // a rho with every cell.
+  std::string plan_rho_fallback_by_region;
+  // ★ ruling 2: how many include regions the outline clip applies to, and how many it
+  // CANNOT apply to (mask-backed: no analytic distance, so no clip term).
+  long long clip_includes_outlined = 0, clip_includes_mask_backed = 0;
+  // ★ ruling 2: per region, the volume its own plan cells cover that the region does
+  // not reach -- the set the outline clip stops struts from filling. "r1=5097.656".
+  std::string clip_outside_region_mm3;
+  // ★ ruling 3b: the same volume split by cause, per region.
+  std::string clip_outside_by_cause_mm3;
+  // ★ K5: where the generator's strut and node radius queries got their density.
+  long long plan_rho_queries_plan = 0, plan_rho_queries_posture = 0,
+            plan_rho_queries_floor = 0;
+  // ★ K4: the plan as laid, per region and per group, and the generator's own ledger.
+  std::vector<RunInfo::PlanRegion> plan_by_region;
+  long long plan_laid_unattributed = 0;
+  // ★ whether the ledger tap ran at all (lattice.emit_plan_laid): without it the laid
+  // counts are not measured and must not be reported as zeros.
+  bool plan_laid_measured = false;
+  // ★ the law graded nothing and the run carried on anyway, because the plan is the
+  // design and carries its own density (ruling of 2026-10-11). Reported, never silent.
+  bool law_ungradeable_reported = false;
+  std::string law_ungradeable_note;
+  double outline_inward_mm = 0.0;
+  long long seam_spans_before = 0, seam_spans_after = 0;
+  double seam_piece_mm = 0.0, seam_longest_before_mm = 0.0;
+  long long seam_welded_nodes = 0, seam_t_junction_ends = 0, seam_floating_ends = 0;
   SteppedOutcome stepped;  // meaningful iff `stepped_ran`
   double organic_trace_seconds = 0.0;
   LatticeAddedMaterialReceipt added_rcpt;  // design-box runs only
@@ -3983,6 +6316,16 @@ struct LatticeVariantOutcome {
   double void_check_seconds = 0.0;
   bool void_sealed = false;
   std::string void_sealed_reason;
+  // ★ Finding 7: the volume check (lattice_volume_check.hpp) on what was just written,
+  // per latticed pocket. A pocket off by more than 10 % refuses the rung exactly as a
+  // sealed cavity does: the ladder skips it, lattice_variant refuses, and the written
+  // lattice files are removed.
+  LatticeVolumeCheck volume_check;      // judged on the certificate rebuilt from the file
+  LatticeVolumeCheck volume_check_law;  // the same file against the law's own density
+  long long shipped_lowered = 0, shipped_at_floor = 0;
+  double shipped_law_mm3 = 0.0, shipped_certified_mm3 = 0.0;
+  bool volume_refused = false;
+  std::string volume_refused_reason;
 };
 
 // ★ THE LATTICE PIPELINE MUST NOT MOVE THE LADDER'S SOLVER STATE
@@ -4065,6 +6408,12 @@ struct OrganicOutcome {
   // that grew and produced nothing is a different fact from a traced run, and the
   // counters above are meaningless in the second case.
   bool growth_ran = false;
+  // ★ The job stated organic_strut_width_mm, so the bead is that number everywhere and
+  // neither the mass coupling nor the calibration touched it.
+  bool bead_is_stated = false;
+  // ★ the rho band the tracer clamped to, carried out so the density can be REBUILT
+  // from the shipped spans on exactly the same terms.
+  double rho_min_used = 0.0, rho_max_used = 0.0;
   // ★★ SHAPE-FIT REPORTING. Reported whether or not the feature is on, so "it did
   // nothing" and "it was never asked to run" are distinguishable in the receipt — a
   // zero that was never measured is not a passing zero.
@@ -4123,7 +6472,35 @@ static std::vector<double> stress_tensor_for_organic(
                rep.regions, rep.voxels_in_regions, rep.voxels_fully_synthetic,
                rep.voxels_blended, rep.dead_threshold, rep.peak_von_mises,
                rep.dead_floor_bound ? "ABSOLUTE 0.005 MPa" : "2% of peak");
+  // ★ RULING H: one line per region saying whether the WALL was judged dead, and on
+  // what measurement. A flagged wall that is carrying load is left alone, and this is
+  // where the user finds out that their flag did nothing.
+  for (const SyntheticStressRegionReport& rr : rep.per_region)
+    std::fprintf(stderr,
+                 "[synthetic] region %d (face %d): p99 %.4g vs threshold %.4g -> %s"
+                 "%s\n", rr.region_id, rr.face_id, rr.p99_von_mises, rep.dead_threshold,
+                 rr.whole_region ? "DEAD, synthesised WHOLE" : "carrying load, UNTOUCHED",
+                 rr.whole_region ? "" : " (the synthetic_stress flag did nothing here)");
   return out;
+}
+
+// ── ★ RULING H: WHICH VOXELS TOOK A MANUFACTURED FIELD ───────────────────────
+// One flag per voxel, from the synthesis report's own region list, so the spacing
+// window can exclude them. Regions the report did not mark whole contribute nothing,
+// and an empty report gives an all-zero mask -- which is byte-identical to the
+// behaviour before this ruling.
+static std::vector<char> organic_synthesised_whole_voxels(
+    const SyntheticStressReport& rep, const std::vector<int>& voxel_region_id,
+    std::size_t n) {
+  std::vector<char> whole(n, 0);
+  if (voxel_region_id.size() != n) return whole;
+  std::set<int> ids;
+  for (const SyntheticStressRegionReport& r : rep.per_region)
+    if (r.whole_region) ids.insert(r.region_id);
+  if (ids.empty()) return whole;
+  for (std::size_t e = 0; e < n; ++e)
+    if (ids.count(voxel_region_id[e])) whole[e] = 1;
+  return whole;
 }
 
 OrganicOutcome run_organic_step(bool shell_is_written,
@@ -4152,7 +6529,13 @@ OrganicOutcome run_organic_step(bool shell_is_written,
                                 // its support question in that discretisation. 0 = not
                                 // stated, and growth falls back to half a voxel.
                                 double layer_height_mm = 0.0,
-                                bool probe_only = false) {
+                                bool probe_only = false,
+                                // ★ RULING H (2026-09-18): the voxels of every region
+                                // that was synthesised WHOLE. Such a wall has no real
+                                // stress left to grade by, so it is excluded from the
+                                // window statistics and takes the window's MIDDLE
+                                // spacing. null / empty = nothing was synthesised.
+                                const std::vector<char>* synthesised_whole = nullptr) {
   OrganicOutcome oo;
   const std::size_t n = grid.voxel_count();
   // NO STRESS TENSOR, NO ORGANIC LATTICE. The whole method is the eigen-decomposition
@@ -4206,16 +6589,44 @@ OrganicOutcome run_organic_step(bool shell_is_written,
   // from one law. f = 1 at the busiest material (tightest spacing, cell_min), f = 0 at
   // the quietest (widest, cell_max). A UNIFORM field gives f = 0 everywhere, i.e. the
   // LARGEST cells, which is the right degenerate answer for "nothing is working hard".
+  // ★ RULING H, SECOND HALF: A WHOLE-SYNTHESISED WALL IS NOT EVIDENCE ABOUT THE PART.
+  // Its field was manufactured and then scaled so its PEAK lands on the dead threshold,
+  // so every voxel in it reads near-zero against a real wall. Left in these statistics
+  // it drags rho_lo down and takes the coarsest spacing in the window -- which is what
+  // put his dead wall at the wide end. It is excluded here and given the window's
+  // MIDDLE below. (`whole` empty = nothing was synthesised, and this is the old code.)
+  const bool have_synth =
+      synthesised_whole && synthesised_whole->size() == n;
+  auto is_synth = [&](std::size_t e) {
+    return have_synth && (*synthesised_whole)[e] != 0; };
   double rho_lo = 0.0, rho_hi = 0.0;
   bool any_rho = false;
+  std::size_t synth_voxels = 0;
   for (std::size_t e = 0; e < n; ++e) {
     if (!lattice_mask[e]) continue;
+    if (is_synth(e)) { ++synth_voxels; continue; }
     const double r = relative_density[e];
     if (!any_rho) { rho_lo = rho_hi = r; any_rho = true; }
     rho_lo = std::min(rho_lo, r);
     rho_hi = std::max(rho_hi, r);
   }
+  // Every latticed voxel synthesised: there is no real wall to normalise against, so
+  // the window statistics are empty and EVERYTHING takes the middle. Better than
+  // normalising a manufactured field against itself.
+  if (!any_rho)
+    for (std::size_t e = 0; e < n; ++e)
+      if (lattice_mask[e]) {
+        const double r = relative_density[e];
+        if (!any_rho) { rho_lo = rho_hi = r; any_rho = true; }
+        rho_lo = std::min(rho_lo, r);
+        rho_hi = std::max(rho_hi, r);
+      }
   const double rho_span = rho_hi - rho_lo;
+  if (synth_voxels && std::getenv("TOPOPT_ORGANIC_TRACE"))
+    std::fprintf(stderr,
+                 "[spacing] %zu voxel(s) in whole-synthesised wall(s) excluded from the "
+                 "window statistics; they take the middle, %.3f mm\n",
+                 synth_voxels, 0.5 * (cell_min_mm + cell_max_mm));
 
   // ★ `minimize_plastic`, AND IT MEANS WHAT HE ASKED IT TO MEAN: ON = THE LARGEST
   // CELLS POSSIBLE. Applied as an exponent on f, so BOTH ENDS OF THE WINDOW ARE
@@ -4231,12 +6642,21 @@ OrganicOutcome run_organic_step(bool shell_is_written,
   // The constant-bead law still stands when there is NO window (fixed/auto/fit cell
   // modes): see organic_default_strut_diameter_mm for why its default is not the
   // nozzle width.
+  // ★ A STATED STRUT WIDTH IS THE WIDTH, EVERYWHERE (maintainer, 2026-09-10). It used
+  // to be honoured only when there was NO cell window: under a swept window the bead was
+  // re-derived per voxel from the mass coupling and the stated number was never read at
+  // all. Measured on the M2 stand asking for 0.8 mm: the quiet wall came out at a 0.760
+  // mm median and the loaded one at 1.209 -- a 59 % spread around a number the job had
+  // stated exactly. The preview has always taken a stated width as a constant and turned
+  // the bead grading off; core now does the same, so the two describe one object. The
+  // CELL is still graded by the window -- only the strut thickness is pinned.
+  const bool bead_is_stated = jg.organic_strut_width_mm > 0.0;
   const double t_fixed =
-      jg.organic_strut_width_mm > 0.0
-          ? jg.organic_strut_width_mm
-          : organic_default_strut_diameter_mm(grid.spacing, 1.0, band_rho_max,
-                                              jg.min_extrudable_width_mm);
+      bead_is_stated ? jg.organic_strut_width_mm
+                     : organic_default_strut_diameter_mm(grid.spacing, 1.0, band_rho_max,
+                                                         jg.min_extrudable_width_mm);
   oo.strut_diameter_mm = t_fixed;
+  oo.bead_is_stated = bead_is_stated;
   oo.window_governed = have_window;
   std::vector<char> cand(n, 0);
   std::vector<double> spacing(n, 0.0);
@@ -4248,15 +6668,23 @@ OrganicOutcome run_organic_step(bool shell_is_written,
     if (!(rho > 0.0)) continue;  // a zero density has no spacing; it is not lattice
     double d;
     if (have_window) {
+      // ★ RULING H: the middle of the window, stated as a spacing and not as an f, so
+      // the minimize_plastic exponent cannot pull a manufactured wall to one end.
       double f = rho_span > 0.0 ? (rho - rho_lo) / rho_span : 0.0;
       f = std::pow(std::min(1.0, std::max(0.0, f)), f_exponent);
-      d = cell_max_mm - (cell_max_mm - cell_min_mm) * f;
-      // The bead the mass coupling asks for at this (rho, d) — floored, always, at the
-      // stated minimum extrudable width. Printability is user input and outranks the
-      // coupling; voxels the floor raised are counted by the tracer.
-      bead[e] = organic_strut_diameter_for(d, rho);
-      if (!(bead[e] > jg.min_extrudable_width_mm))
-        bead[e] = jg.min_extrudable_width_mm;
+      d = is_synth(e) ? 0.5 * (cell_min_mm + cell_max_mm)
+                      : cell_max_mm - (cell_max_mm - cell_min_mm) * f;
+      if (bead_is_stated) {
+        // Asked for by name: no coupling, no floor, no grading. The number is the number.
+        bead[e] = t_fixed;
+      } else {
+        // The bead the mass coupling asks for at this (rho, d) — floored, always, at the
+        // stated minimum extrudable width. Printability is user input and outranks the
+        // coupling; voxels the floor raised are counted by the tracer.
+        bead[e] = organic_strut_diameter_for(d, rho);
+        if (!(bead[e] > jg.min_extrudable_width_mm))
+          bead[e] = jg.min_extrudable_width_mm;
+      }
     } else {
       d = organic_spacing_for(rho, t_fixed);
       bead[e] = t_fixed;
@@ -4322,7 +6750,9 @@ OrganicOutcome run_organic_step(bool shell_is_written,
   // to hold even the finest printable cell is left to those floors, which is the same
   // place Fit sends it — graded back towards solid rather than left as a hole.
   if (jg.organic_shape_fit) {
-    const double n_star = lattice_cells_per_member_min(LatticeTopology::Octet);
+    // (organic runs only with octet: the job schema refuses it for any other type)
+    const double n_star =
+        lattice_cells_per_member_min(lattice_topology_from_id(jg.topology));
     // Distance in voxels to the nearest NON-candidate — the boundary of the region the
     // lattice may occupy, not the part outline, since a role or keep-clear narrows it.
     // Two-pass chamfer over the 6-neighbourhood; consumed as a length cap, not as a
@@ -4400,8 +6830,9 @@ OrganicOutcome run_organic_step(bool shell_is_written,
           // ends in solid must RAISE the relative density as the cell closes, so the
           // strut keeps the thickness the stress gave it while the cell shrinks
           // around it; the rim is then where that ramp reaches density one. The bead
-          // stays as computed from the stress-driven cell; only the cell shrinks.
-          if (!(bead[e] > jg.min_extrudable_width_mm))
+          // stays as computed from the stress-driven cell; only the cell shrinks. A
+          // STATED bead is not touched here at all -- not even by the printable floor.
+          if (!bead_is_stated && !(bead[e] > jg.min_extrudable_width_mm))
             bead[e] = jg.min_extrudable_width_mm;
         }
         oo.shape_fit_voxels_shrunk = shrunk;
@@ -4452,8 +6883,9 @@ OrganicOutcome run_organic_step(bool shell_is_written,
           // ends in solid must RAISE the relative density as the cell closes, so the
           // strut keeps the thickness the stress gave it while the cell shrinks
           // around it; the rim is then where that ramp reaches density one. The bead
-          // stays as computed from the stress-driven cell; only the cell shrinks.
-          if (!(bead[e] > jg.min_extrudable_width_mm))
+          // stays as computed from the stress-driven cell; only the cell shrinks. A
+          // STATED bead is not touched here at all -- not even by the printable floor.
+          if (!bead_is_stated && !(bead[e] > jg.min_extrudable_width_mm))
             bead[e] = jg.min_extrudable_width_mm;
         }
       }
@@ -4532,13 +6964,18 @@ OrganicOutcome run_organic_step(bool shell_is_written,
   op.min_extrudable_width_mm = jg.min_extrudable_width_mm;
   op.strut_diameter_mm = t_fixed;
   op.strut_diameter_field = &bead;
-  // ★★ THE VDI FLOOR OUTRANKS THE LIBRARY BAND. The library's 0.05047 is a
+  op.bead_is_stated = bead_is_stated;
+  // ★★ THE VDI FLOOR OUTRANKS THE LIBRARY BAND. The library's floor (0.0496; 0.05047 on
+  // octet's legs-only rows before ruling 2026-11-02 (c)) is a
   // CERTIFIABILITY limit — the lightest lattice the tensor library can describe. It
   // says nothing about whether the bar can be BUILT, and at that density the slenderness
   // is l/D = 6.8 against the standard's 5. Printability is user input and outranks a
   // modelling limit, so the floor is the larger of the two.
   op.rho_min = std::max(band_rho_min, kOrganicVdiDensityFloor);
   op.rho_max = band_rho_max;
+  op.defer_bead_calibration = jg.organic_calibrate_on_shipped && !bead_is_stated;
+  oo.rho_min_used = op.rho_min;
+  oo.rho_max_used = op.rho_max;
   const double t0 = wall_seconds();
   op.layer_hint_mm = jg.organic_growth ? layer_height_mm : 0.0;
   // ★★ GROW OR TRACE. The growth path is a different ARCHITECTURE, not a different
@@ -4599,6 +7036,34 @@ void fill_organic_run_info(RunInfo& gi, const OrganicOutcome& oo) {
   const OrganicReport& r = oo.lat.report;
   gi.organic_present = true;
   gi.organic_strut_diameter_mm = r.strut_diameter_mm;
+  // ★ THE CALIBRATION IS NOW VISIBLE. It reached no receipt and no log at all, so for
+  // every organic run to date there was no way to see what factor had been applied to
+  // every strut in the part, nor what volume it was aiming at. Printed on the same terms
+  // as [synthetic] and [dc]: the target the grading law asked for, the volume the lattice
+  // really occupies, and how much of the naive sum of its parts was double-counted
+  // overlap -- which is the error the old model was solving against.
+  if (r.bead_calibration_skipped_stated) {
+    std::fprintf(stderr,
+                 "[bead] %.4f mm stated by the job: no calibration, no coupling, "
+                 "no floor -- every strut is that diameter\n", r.strut_diameter_mm);
+  } else if (r.bead_calibration_iterations > 0) {
+    std::fprintf(stderr,
+                 "[bead] calibration x%.4f in %d step(s)%s: target %.1f mm3, union "
+                 "%.1f mm3 (%+.2f %%), naive sum %.1f mm3 (%.1f %% of it overlap); "
+                 "measured on %zu span(s), %.1f mm of centreline, median dia %.4f mm "
+                 "BEFORE the factor\n",
+                 r.bead_calibration, r.bead_calibration_iterations,
+                 r.bead_calibration_floored ? " (FLOORED at the extrudable width)" : "",
+                 r.bead_calibration_target_mm3, r.bead_calibration_union_mm3,
+                 r.bead_calibration_target_mm3 > 0.0
+                     ? 100.0 * (r.bead_calibration_union_mm3 - r.bead_calibration_target_mm3) /
+                           r.bead_calibration_target_mm3
+                     : 0.0,
+                 r.bead_calibration_naive_mm3,
+                 100.0 * r.bead_calibration_overlap_fraction,
+                 r.bead_calibration_spans, r.bead_calibration_length_mm,
+                 r.bead_calibration_median_dia_mm);
+  }
   gi.organic_trace_seconds = oo.trace_seconds;
   copy_growth_stats(gi, oo.growth, oo.growth_ran);
   gi.organic_candidate_voxels = static_cast<long long>(r.candidate_voxels);
@@ -4748,8 +7213,52 @@ void refuse_organic_structural(LatticeAlgorithm alg, const JobGrading& jg) {
       "carries a structural density certified against nothing.");
 }
 
+// ── ★ AND ANY-STEP STEPPED IS REFUSED ON THE SAME TERMS, FOR A DIFFERENT REASON ──
+// (brief of 2026-09-17 §3.) Organic is refused the cubic tensor because its struts follow
+// the principal directions. Stepped's struts are octet and axis-aligned, so that argument
+// does not apply -- but the tensor assumes SHARED NODES, and any-step seams break exactly
+// that: a 9's face centre lands mid-strut on an 8's face, so neighbouring families share
+// no nodes at all. A tensor certificate would over-claim at every seam, and there are
+// thousands of them. The beam network has no such assumption: it welds ON CONTACT, so a
+// strut ending on the middle of another is fused precisely as the print fuses it and the
+// seam is just geometry being solved.
+//
+// So the tensor certificate is not offered for any-step Stepped AT ALL -- not defaulted,
+// not warned about. A stepped job that packs a plan and asks for a structural density
+// must name the instrument.
+void refuse_stepped_structural(LatticeAlgorithm alg, const JobGrading& jg,
+                               const JobLattice& jl) {
+  if (alg != LatticeAlgorithm::Stepped) return;
+  // The same test organic's gate uses, and deliberately not `intent == "structural"`: an
+  // UNSTATED intent must not be the one reading that reaches a tensor certificate.
+  if (jg.intent == "aesthetic") return;
+  if (jl.stepped_cells.empty()) return;      // legacy one-cell-per-region: unchanged
+  if (jg.organic_structural_certification == "beam_network") return;
+  throw JobError(
+      "any-step \"stepped\" under \"intent\": \"structural\" requires "
+      "\"structural_certification\": \"beam_network\" (this job says " +
+      (jg.organic_structural_certification.empty()
+           ? std::string("nothing")
+           : ("\"" + jg.organic_structural_certification + "\"")) +
+      "). This plan places " + std::to_string(jl.stepped_cells.size()) +
+      " cells of several families, and cells of DIFFERENT families share no nodes -- a "
+      "9's face centre lands mid-strut on an 8's face. The homogenised cubic tensor "
+      "assumes shared nodes, so it would over-claim at every seam, and a plan like this "
+      "is nothing but seams. The beam-network certificate makes no such assumption: it "
+      "solves the struts as frame elements and welds on contact, exactly as the print "
+      "fuses them. The tensor certificate is therefore not offered for any-step Stepped "
+      "at all.");
+}
+
 // Resolve the job's algorithm; an ABSENT key is "doubled", which is what keeps every
 // existing job byte-identical (§4d). An unknown one is refused, never defaulted.
+// The one graded lattice a design box still refuses (lattice_variant_job, run_job).
+const char* const kOrganicDesignBoxRefusal =
+    "The organic lattice can't be used with a design box yet: it lays its struts before "
+    "the material the design box added is kept solid, so it could put struts where the "
+    "certificate counts solid. Use the doubled or stepped lattice with the design box, "
+    "or the organic lattice without one.";
+
 LatticeAlgorithm resolve_lattice_algorithm(const JobGrading& jg) {
   if (jg.algorithm.empty()) return LatticeAlgorithm::Doubled;
   LatticeAlgorithm a = LatticeAlgorithm::Doubled;
@@ -4770,12 +7279,32 @@ LatticeAlgorithm resolve_lattice_algorithm(const JobGrading& jg) {
 // seeds a 6-connected flood walks inward through lattice voxels up to `rim_mm`
 // (voxel steps x spacing); everything it reaches leaves the mask and prints solid.
 // Returns the voxels turned solid.
-static std::size_t apply_organic_solid_rim(const VoxelGrid& grid, std::vector<char>& mask,
-                                           const std::vector<double>& density, double printed_iso,
-                                           const std::vector<int>& region_ids,
-                                           const std::vector<Vec3>& region_normals, double rim_mm) {
+// ★ `density` and `printed_iso` USED TO BE ARGUMENTS. They were only ever read by the
+// seed's "the neighbour must be solid" test, which is the bug fixed below; with the seed
+// keyed on the lattice mask alone the rim no longer consults the density field at all.
+// ★★ IT RETURNS THE BAND; IT NO LONGER DELETES IT (maintainer, 2026-09-18, ruling G).
+// Clearing the band from the mask before the tracer ran did two things at once: it made
+// the band print solid, which is the point, AND it took the band out of the tracer's
+// candidates, which was not. The preview keeps the band as candidate, so its curves run
+// THROUGH the band and weld into the solid; the run cut every strut back at the band's
+// inner face. That was the one geometric divergence between the two in source. The caller
+// now traces with the band IN and turns it solid afterwards, so the struts end up embedded
+// in the solid exactly as the picture shows.
+// ★ (d), ruling 11-06: `unowned_from_surface` seeds a lattice voxel NO region owns
+// (id 0: a lattice with no regions, or lattice.whole_part outside its includes) from any
+// non-lattice 6-neighbour. It has no face, so no direction is the open one: its outline
+// is wherever the lattice ends, the part's own surface included. Off (the default, and
+// the organic rim's call) such a voxel seeds nothing, as before, and a shape grade on a
+// lattice with no regions turned 0 voxels solid.
+static std::vector<char> organic_solid_rim_band(const VoxelGrid& grid,
+                                                const std::vector<char>& mask,
+                                                const std::vector<int>& region_ids,
+                                                const std::vector<Vec3>& region_normals,
+                                                double rim_mm,
+                                                bool unowned_from_surface = false) {
   const std::size_t n = grid.voxel_count();
-  if (!(rim_mm > 0.0) || mask.size() != n || region_ids.size() != n) return 0;
+  std::vector<char> band(n, 0);
+  if (!(rim_mm > 0.0) || mask.size() != n || region_ids.size() != n) return band;
   const int di[6] = {1, -1, 0, 0, 0, 0}, dj[6] = {0, 0, 1, -1, 0, 0}, dk[6] = {0, 0, 0, 0, 1, -1};
   std::vector<int> dist(n, -1);
   std::vector<std::size_t> q;
@@ -4785,16 +7314,29 @@ static std::size_t apply_organic_solid_rim(const VoxelGrid& grid, std::vector<ch
         const std::size_t e = grid.index(i, j, k);
         if (!mask[e]) continue;
         const int rid = region_ids[e];
-        if (rid <= 0 || static_cast<std::size_t>(rid) > region_normals.size()) continue;
-        const Vec3& nrm = region_normals[static_cast<std::size_t>(rid - 1)];
+        const bool unowned = rid <= 0 && unowned_from_surface;
+        if (!unowned && (rid <= 0 || static_cast<std::size_t>(rid) > region_normals.size()))
+          continue;
+        const Vec3 nrm = unowned ? Vec3{0.0, 0.0, 0.0}  // no face: every direction seeds
+                                 : region_normals[static_cast<std::size_t>(rid - 1)];
         const double nl = std::sqrt(nrm.x * nrm.x + nrm.y * nrm.y + nrm.z * nrm.z);
         for (int d = 0; d < 6; ++d) {
-          const int i2 = i + di[d], j2 = j + dj[d], k2 = k + dk[d];
-          if (i2 < 0 || j2 < 0 || k2 < 0 || i2 >= grid.nx || j2 >= grid.ny || k2 >= grid.nz) continue;
-          const std::size_t e2 = grid.index(i2, j2, k2);
-          if (mask[e2] || !(density[e2] > printed_iso)) continue;
           const double dot = nl > 0.0 ? (di[d] * nrm.x + dj[d] * nrm.y + dk[d] * nrm.z) / nl : 0.0;
-          if (std::fabs(dot) >= 0.5) continue;   // along the normal: floor or open face
+          if (std::fabs(dot) >= 0.5) continue;   // along the normal: the open faces
+          const int i2 = i + di[d], j2 = j + dj[d], k2 = k + dk[d];
+          const bool outside_grid =
+              i2 < 0 || j2 < 0 || k2 < 0 || i2 >= grid.nx || j2 >= grid.ny || k2 >= grid.nz;
+          // ★ THE OUTLINE ENDS WHEREVER THE LATTICE ENDS -- NOT ONLY AGAINST MATERIAL.
+          // (maintainer, 2026-09-08.) This used to require the neighbour to be SOLID
+          // (`density[e2] > printed_iso`), which works for a pocket cut into a wall and
+          // silently refuses every edge where the region runs out at the PART'S OWN
+          // SURFACE, because the neighbour there is air. On a face prism asked for with
+          // only its front and back open, that is precisely the top and bottom edges:
+          // they got no band at all, so the "outline" was three-sided at best. The seed
+          // now asks only whether the neighbour is outside the lattice, with the face
+          // normal as the single exemption so the open faces stay open. Air off the end
+          // of the grid counts too -- it is the same situation.
+          if (!outside_grid && mask[grid.index(i2, j2, k2)]) continue;   // still lattice
           dist[e] = 0; q.push_back(e); break;
         }
       }
@@ -4813,9 +7355,68 @@ static std::size_t apply_organic_solid_rim(const VoxelGrid& grid, std::vector<ch
       dist[e2] = dist[e] + 1; q.push_back(e2);
     }
   }
+  for (std::size_t e : q) band[e] = 1;
+  return band;
+}
+
+// Clear a band out of a mask, and say how many voxels it took. Separated from the walk so
+// the caller chooses WHEN the band stops being lattice -- which for organic is after the
+// tracer has run through it, not before.
+static std::size_t clear_band_from_mask(std::vector<char>& mask, const std::vector<char>& band) {
   std::size_t turned = 0;
-  for (std::size_t e : q) { mask[e] = 0; ++turned; }
+  for (std::size_t e = 0; e < mask.size() && e < band.size(); ++e)
+    if (band[e] && mask[e]) { mask[e] = 0; ++turned; }
   return turned;
+}
+
+// ★ THE SHAPE-GRADE BAND'S DISTANCE (ruling 2): per lattice voxel, mm from the lattice's
+// outline -- seeded exactly as organic_solid_rim_band seeds its walk (a region's in-plane
+// side walls; with `unowned_from_surface`, every edge of a voxel no region owns), the
+// seed voxel's centre half a voxel in -- then a 26-neighbour chamfer walk through the
+// lattice (steps h, h*sqrt2, h*sqrt3). -1 off the lattice or out of reach of any seed.
+static std::vector<double> lattice_outline_distance_mm(const VoxelGrid& grid,
+                                                       const std::vector<char>& mask,
+                                                       const std::vector<int>& region_ids,
+                                                       const std::vector<Vec3>& region_normals,
+                                                       bool unowned_from_surface) {
+  const std::size_t n = grid.voxel_count();
+  std::vector<double> dist(n, -1.0);
+  if (mask.size() != n || region_ids.size() != n) return dist;
+  // The seeds: one voxel-step walk of organic_solid_rim_band is its seed layer.
+  const std::vector<char> seeds =
+      organic_solid_rim_band(grid, mask, region_ids, region_normals, 0.5 * grid.spacing,
+                             unowned_from_surface);
+  const double h = grid.spacing;
+  using Item = std::pair<double, std::size_t>;
+  std::priority_queue<Item, std::vector<Item>, std::greater<Item>> pq;
+  for (std::size_t e = 0; e < n; ++e)
+    if (seeds[e]) {
+      dist[e] = 0.5 * h;
+      pq.push({dist[e], e});
+    }
+  while (!pq.empty()) {
+    const auto [d, e] = pq.top();
+    pq.pop();
+    if (d > dist[e]) continue;
+    const int i = static_cast<int>(e % static_cast<std::size_t>(grid.nx));
+    const int j = static_cast<int>((e / static_cast<std::size_t>(grid.nx)) % static_cast<std::size_t>(grid.ny));
+    const int k = static_cast<int>(e / (static_cast<std::size_t>(grid.nx) * static_cast<std::size_t>(grid.ny)));
+    for (int dk = -1; dk <= 1; ++dk)
+      for (int dj = -1; dj <= 1; ++dj)
+        for (int di = -1; di <= 1; ++di) {
+          if (!di && !dj && !dk) continue;
+          const int i2 = i + di, j2 = j + dj, k2 = k + dk;
+          if (i2 < 0 || j2 < 0 || k2 < 0 || i2 >= grid.nx || j2 >= grid.ny || k2 >= grid.nz) continue;
+          const std::size_t e2 = grid.index(i2, j2, k2);
+          if (!mask[e2]) continue;
+          const double nd = d + h * std::sqrt(static_cast<double>(di * di + dj * dj + dk * dk));
+          if (dist[e2] < 0.0 || nd < dist[e2] - 1e-12) {
+            dist[e2] = nd;
+            pq.push({nd, e2});
+          }
+        }
+  }
+  return dist;
 }
 
 // quotes, backslashes and newlines out of a string headed into a JSON literal
@@ -4824,15 +7425,68 @@ static std::string json_safe(std::string t) {
   return t;
 }
 
-LatticeVariantOutcome lattice_one_variant(
+// ── ★ E3: THE INCLUDE REGIONS, IN DECLARED ORDER, AND THEIR OWN GRADING ───────
+// The includes of `lattice.regions`, or lattice.whole_part's regions when the job
+// lattices the whole part: the same list, in the same order, that numbers the owner map.
+std::vector<JobLatticeRegion> lattice_include_regions(const JobDescription& job) {
+  if (!job.lattice.whole_part_includes.empty()) return job.lattice.whole_part_includes;
+  std::vector<JobLatticeRegion> out;
+  for (const JobLatticeRegion& r : job.lattice.regions)
+    if (r.role == "include") out.push_back(r);
+  return out;
+}
+// One override per region; EMPTY when no region states a grading of its own, so the
+// grading law is handed nothing and runs exactly as before. (A region that states only
+// a shape grade gets the part's band and curve, which grade exactly as the part's.)
+std::vector<GradingRegionOverride> lattice_region_overrides(
+    const std::vector<JobLatticeRegion>& regions) {
+  std::vector<GradingRegionOverride> out(regions.size());
+  bool any = false;
+  for (std::size_t i = 0; i < regions.size(); ++i) {
+    const JobLatticeRegion& r = regions[i];
+    GradingRegionOverride& o = out[i];
+    o.rho_min = r.rho_min;
+    o.rho_max = r.rho_max;
+    o.demand_exponent = r.demand_exponent;
+    o.flat = r.grading == "off" || r.grading == "shape";
+    o.flat_rho = o.flat ? r.relative_density : 0.0;
+    o.cell_min_mm = r.cell_min_mm;  // ★ E3: its own cell window
+    o.cell_max_mm = r.cell_max_mm;
+    // A region's own shape grade needs the owner map too, so it arms the table.
+    if (r.rho_max > 0.0 || r.demand_exponent > 0.0 || o.flat || r.shape_grade >= 0 ||
+        r.shape_grade_band_mm >= 0.0 || r.cell_min_mm > 0.0 || r.cell_max_mm > 0.0 ||
+        r.shape_grade_strength >= -1.0 || !r.outer_finish.empty() || !r.skin.empty())
+      any = true;
+  }
+  if (!any) out.clear();
+  return out;
+}
+
+// One lattice pass. `fixed_search` (null on the first pass) carries each "off" region's
+// one density chosen by lattice_one_variant's shipped search, laid as is, unsearched.
+LatticeVariantOutcome lattice_one_variant_pass(
     const MinimizePlasticVariant& v, const JobDescription& job,
     const VoxelGrid& part_grid, const SolvedDesignDomain& domain,
     const MinimizePlasticOptions& options, const Material& material,
     const std::vector<ClearanceGeometry>& lattice_kos,
-    const LatticeRoleRegions& lattice_roles, const std::string& out_dir) {
+    const LatticeRoleRegions& lattice_roles, const std::string& out_dir,
+    const std::vector<LatticeRegionGraded>* fixed_search,
+    // ★ (A) the surface a rim rides when the part ITSELF is latticed: its own mesh. Null:
+    // the design's exported surface, made from `cad` (CAD-projected); with neither, the
+    // design's shell (v3.mesh).
+    const TriangleMesh* part_surface = nullptr, const StepModel* cad = nullptr) {
   // FIRST STATEMENT IN THE BODY, so every solve below is covered and the previous
   // enable states are restored however this function returns (including by throw).
   const ScopedLadderSolverIsolation solver_isolation;
+  // ★ THE JOB'S TOPOLOGY FOR THIS VARIANT, RESOLVED ONCE
+  // (task 2026-09-28-lattice-types-core). Every strut size below -- the receipt's,
+  // the emitters' radius fields, the forecast -- read octet's measured diameter
+  // table directly. They now read the JOB's type. Captured BY VALUE into each
+  // radius lambda beside the other scalars, never by reference: those lambdas are
+  // stored in the emit params and a reference to a local here is a lifetime the
+  // next refactor can break silently.
+  const LatticeTopology lat_topo =
+      lattice_topology_from_id(job.grading.topology);
   const VoxelGrid& solved_grid = domain.grid;
   const std::vector<DirichletBC>& bcs = domain.bcs;
   LatticeVariantOutcome R;
@@ -4853,7 +7507,25 @@ LatticeVariantOutcome lattice_one_variant(
   // not allowed to certify. An absent key is "doubled" — §4(d)'s byte-identity.
   R.algorithm = resolve_lattice_algorithm(job.grading);
   refuse_organic_structural(R.algorithm, job.grading);
+  refuse_stepped_structural(R.algorithm, job.grading, job.lattice);
   const bool roles_present = !job.lattice.regions.empty();
+  // ★ E2.1: the scenarios this lattice uses, and the field it is GRADED from: per
+  // voxel the worst von Mises over them (lattice_grading_stress). A job without
+  // scenarios grades from v.von_mises_field itself, by reference.
+  const std::vector<char> lat_scen_on = lattice_scenario_flags(job, domain.scenarios);
+  std::vector<double> vm_grade_storage;
+  const std::vector<double>& vm_grade =
+      lattice_grading_stress(v, lat_scen_on, vm_grade_storage, &R.grade_source);
+  // ★ E3: each include region's own grading, and per voxel the region that owns it
+  // (ruling 4's owner over the includes, or over lattice.whole_part's regions). Empty
+  // when no region states any: the part's grading everywhere, byte for byte.
+  const std::vector<JobLatticeRegion> e3_jobs = lattice_include_regions(job);
+  const std::vector<ClearanceGeometry>& e3_regions =
+      lattice_roles.includes.empty() ? lattice_roles.carriers : lattice_roles.includes;
+  const std::vector<GradingRegionOverride> e3_overrides = lattice_region_overrides(e3_jobs);
+  std::vector<int> e3_owner;
+  // ★ the shape-grade band's per-voxel inputs (grade_lattice reads them by pointer)
+  std::vector<double> band_distance, band_mm, band_amount;
 
   // ── Stage 4: the grading law runs FIRST, on THIS variant's own final
   // certification-recovery von Mises field (H4a — the run's own field, fresh:
@@ -4864,26 +7536,186 @@ LatticeVariantOutcome lattice_one_variant(
   // only the membership primitives (the cell size, which the law itself
   // chooses, plays no part in membership).
   GradedField& gf = R.gf;
+  // ★ what the certificate WOULD have been handed on an organic run: the traced
+  // network's material. Kept so the re-measure after the export can print BOTH, and the
+  // change of basis is auditable rather than silent.
+  double organic_traced_material_mm3 = 0.0;
   double cell = job.lattice.cell_mm;
   // Which DECLARED include region owns each candidate voxel — built inside the graded
   // block below and kept here because STEPPED derives one cell PER REGION and so needs
   // the same membership the law used, not a second reconstruction of it.
   std::vector<int> region_ids_for_stepped;
+  // ── ★ K3: THE PLAN IS READ BEFORE CORE'S OWN LAW DECIDES ANYTHING ───────────
+  // (Reviewer's ruling: on a plan job the plan IS the design.) This work used to sit
+  // AFTER the law's mask, the certification mask and the empty-mask refusal, so core's
+  // own grading gated the plan: on 3418E167 the law left nothing and the run refused
+  // before it had ever looked at the plan. My own D10/E3 commit introduced that ordering
+  // while closing a false acceptance, and under the standing rule it is the wrong way
+  // round for a plan job.
+  //
+  // It can move because K1 severed the dependency: the plan's frame now comes from the
+  // job alone (the sent base), where it used to come from `R.stepped.cells` and so could
+  // not be built until the law had run. Nothing below needs the solve beyond the grid.
+  std::vector<SteppedCellGroup> plan_groups;
+  std::vector<SteppedPlanRegion> plan_regions;
+  SteppedPlanCheck plan_chk;
+  std::vector<char> plan_mask;            // the plan's latticed voxels, K3's own mask
+  if (!job.lattice.stepped_cells.empty()) {
+    // ── ★ K1: THE BASE PER REGION IS THE APP'S, FOR BOTH MENUS ──────────────────
+    // (#354's map of 2026-10-08, reviewer's ruling of the same day.) This had TWO paths.
+    // Doubled took the region's LARGEST SENT CELL -- the app's own rule. Any-step took
+    // `R.stepped.cells`, the cell core's stepped step derives from that region's FEA
+    // density and member width. So every app-sent any-step plan was validated against a
+    // number the app never used, and #354 expected "not on that region's menu" on every
+    // project.
+    //
+    // There is now ONE path, and it is the app's: the largest cell the region placed IS
+    // the top of the ladder it halved, so the ladder is checked against the list's own
+    // evidence and core still validates rather than re-plans. A region that placed only
+    // fine cells simply has a lower top, and its cells still have to be steps of it.
+    //
+    // AND IT SEVERS A DEPENDENCY K3 NEEDS. Built from `R.stepped.cells`, the plan could
+    // not be read until core's grading had produced a mask and the stepped step had run
+    // on it -- which is exactly the gating K3 removes. Built from the job, the plan's
+    // frame depends on nothing but the job.
+    {
+      // ★ K1 CORRECTED (reviewer, 2026-10-09). An earlier cut INFERRED the base as the
+      // region's largest sent cell. That is a silent substitute: a region need not contain
+      // a base-size cell at all. Measured on 3418E167's Aesthetic Stepped plan, region 1
+      // sends only 3.5 mm and 4.6667 mm cells while the app's base is 7 mm -- so the
+      // inference guessed 4.6667 and every menu, alignment and grouping check below ran
+      // against a ladder the app never used. (It also put the sizes a hair off: 3/4 of a
+      // rounded 4.6667 is 3.500025, not the 3.5 the plan sends.)
+      //
+      // The base now travels on the wire, per region, and a region the plan places cells
+      // in MUST carry it. Refused by name otherwise -- production sends no plans yet, so
+      // nothing in the field breaks, and a plan without it would otherwise be checked
+      // against a guess.
+      std::set<int> planned_regions;
+      for (const SteppedCell& c : job.lattice.stepped_cells)
+        planned_regions.insert(c.region_id);
+      int include_index = 0;
+      for (const JobLatticeRegion& jr : job.lattice.regions) {
+        if (jr.role != "include") continue;
+        ++include_index;
+        SteppedPlanRegion pr;
+        pr.region_id = include_index;
+        if (planned_regions.count(include_index) && !(jr.plan_base_cell_mm > 0.0))
+          throw JobError(
+              "lattice region " + std::to_string(include_index) + " (face " +
+              std::to_string(jr.face_id) +
+              ") carries " + std::to_string(std::count_if(
+                                 job.lattice.stepped_cells.begin(),
+                                 job.lattice.stepped_cells.end(),
+                                 [&](const SteppedCell& c) {
+                                   return c.region_id == include_index;
+                                 })) +
+              " planned cell(s) but no \"plan_base_cell_mm\". That is the slot size the "
+              "ladder was built on, and core cannot infer it: a region need not contain a "
+              "base-size cell, so the largest cell sent is a guess and every menu, "
+              "alignment and grouping check would be run against a ladder you never used. "
+              "State it on the region.");
+        pr.base_cell_mm = jr.plan_base_cell_mm > 0.0 ? jr.plan_base_cell_mm
+                                                     : job.grading.cell_mm;
+        // ★ R1: THE SENT SLOT ORIGIN WINS. Where the app states the grid it packed on,
+        // that grid is what every check and the laying measure from -- alignment, depth,
+        // overlap, grouping (stepped_group_cells walks back from this point) and the
+        // region the run lays. Absent, the region origin stands, which is what every
+        // existing job gets. Its in-plane-ness is settled at parse time (job.cpp).
+        pr.slot_origin = jr.slot_origin_stated ? jr.slot_origin_mm : jr.origin;
+        pr.slot_origin_stated = jr.slot_origin_stated;
+        // ★ K2: the region's own plane, which DEPTH is measured from -- the slot origin
+        // above is only the grid phase and may stand off the plane on a tilted facet.
+        pr.plane_origin = jr.origin;
+        pr.plane_origin_stated = true;
+        pr.normal = jr.normal;
+        pr.depth_mm = jr.depth_mm;
+        plan_regions.push_back(pr);
+      }
+    }
+    // ── ★ D5: WHICH PLANS GET THE OPEN BOUND (reviewer's ruling, 2026-10-10) ─────
+    // This was `intent == "aesthetic"` alone, and a DOUBLED job carries no intent at all
+    // (job.cpp refuses the key), so Default Grade plans were checked WITHOUT the bound its
+    // own packer applies. #354's ladder applies it with no intent gate
+    // (LatticeOctreeBake.swift:491-511), so core now does the same for a doubled plan under
+    // either intent.
+    //
+    // Under Stepped it stays aesthetic-only, as before: structural uses the floor alone,
+    // because the beam-network certificate solves every strut rather than averaging them
+    // and nothing structural depends on a cell looking open.
+    const bool prints_open = R.algorithm == LatticeAlgorithm::Doubled
+                                 ? true
+                                 : job.grading.intent == "aesthetic";
+    // ★ D5: THE TILE FLOOR IS THE SMALLEST CELL THAT PRINTS, not the bead. A tile wider
+    // than one bead is not therefore printable: the strut it carries at the densest
+    // density the job allows still has to clear that bead, which is exactly
+    // lattice_min_printable_cell_mm (E1). A doubled job cannot carry
+    // `stepped_min_tile_mm` at all (job.cpp refuses the key), so its floor WAS just over
+    // the bead -- 0.45 mm where the real floor is 2.25 mm at the job's cap.
+    const double printable_floor = lattice_min_printable_cell_mm(
+        lat_topo, job.grading.min_extrudable_width_mm, job.grading.max_relative_density);
+    const double tile_floor = std::max(printable_floor,
+                                       job.grading.stepped_min_tile_mm > 0.0
+                                           ? job.grading.stepped_min_tile_mm
+                                           : 0.0);
+    // ★ RULING A: which MENU the plan is validated against. Doubled admits only the
+    // halving ladder; any-step admits every k*(S/n). Same validator, same grid, prism
+    // and overlap checks -- the menu is the only difference, and it is the difference
+    // that stops a doubled job quietly accepting an any-step plan.
+    const SteppedMenu plan_menu =
+        R.algorithm == LatticeAlgorithm::Doubled ? SteppedMenu::Halves
+                                                 : SteppedMenu::AnyStep;
+    const SteppedPlanCheck chk =
+        stepped_validate_plan(lat_topo, job.lattice.stepped_cells, plan_regions,
+                              job.grading.min_extrudable_width_mm, tile_floor,
+                              prints_open, plan_menu,
+                              // ★ the include geometry, so a cross-region overlap at a
+                              // mitre can be told from a real collision: each cell's
+                              // centre must be owned by its own region (ruling 4).
+                              &lattice_roles.includes,
+                              job.grading.max_relative_density);  // D5: the cap
+    if (!chk.ok)
+      throw JobError("lattice \"stepped_cells\": " + chk.error +
+                     ". Core validates the plan and does not repack it -- the run lays "
+                     "down the arrangement the preview showed, or it stops here.");
+    const std::vector<SteppedCellGroup> groups =
+        stepped_group_cells(job.lattice.stepped_cells, plan_regions);
+    std::fprintf(stderr, "[stepped] %s plan: %zu cell(s) over %zu region(s) in %zu "
+                         "pass(es) | %s\n",
+                 plan_menu == SteppedMenu::Halves ? "doubled (halves)" : "any-step",
+                 chk.cells, chk.regions, groups.size(), chk.histogram_line.c_str());
+    R.anystep_cells = static_cast<long long>(chk.cells);
+    R.anystep_regions = static_cast<long long>(chk.regions);
+    R.anystep_passes = static_cast<long long>(groups.size());
+    R.anystep_histogram = chk.histogram_line;
+    plan_groups = groups;
+    plan_chk = chk;
+  }
+
   if (graded) {
     LatticeBoundary members;
     for (const ClearanceGeometry& g : lattice_kos)
       members.add_keep_out(g, g.kind == ClearanceKind::Bolt);
+    if (!e3_overrides.empty()) e3_owner.assign(solved_grid.voxel_count(), 0);
     for (const ClearanceGeometry& g : lattice_roles.includes)
       members.add_include_region(g);
     for (const ClearanceGeometry& g : lattice_roles.excludes)
       members.add_exclude_region(g);
     std::vector<char> cand(solved_grid.voxel_count(), 0);
     std::vector<int> region_ids(solved_grid.voxel_count(), 0);
+    // ★ GRADING + A DESIGN BOX (reviewer's ruling 2026-11-03 23:05, option (b)): the law
+    // plans its cells from what the certificate can lattice. Material the design box
+    // added (printed, outside the imported part) is certified SOLID by the added-material
+    // policy below, so it is never a candidate: the plan is laid around it, not through
+    // it. Off the box path this is empty and the candidate set is unchanged.
+    const std::vector<char> cand_in_part =
+        domain.expanded ? original_part_voxels(part_grid, domain) : std::vector<char>{};
     for (int k = 0; k < solved_grid.nz; ++k)
       for (int j = 0; j < solved_grid.ny; ++j)
         for (int i = 0; i < solved_grid.nx; ++i) {
           const std::size_t e = solved_grid.index(i, j, k);
           if (!(dens[e] >= printed_iso)) continue;
+          if (!cand_in_part.empty() && !cand_in_part[e]) continue;
           const Vec3 c{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
                        solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
                        solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
@@ -4905,19 +7737,29 @@ LatticeVariantOutcome lattice_one_variant(
             continue;
           cand[e] = 1;
           // WHICH declared include region this voxel belongs to (task per-region
-          // retention). 1-based, in the job's own declaration order, so a receipt
-          // row maps back to the region the user selected; FIRST match wins, which
-          // is the same precedence `in_include_region` applies when it short-
-          // circuits. 0 means "no include regions declared" — the whole printed set
-          // is one anonymous group, which is the union reading exactly.
-          for (std::size_t ri = 0; ri < lattice_roles.includes.size(); ++ri)
-            if (point_in_clearance_region(lattice_roles.includes[ri], c, 0.0)) {
-              region_ids[e] = static_cast<int>(ri) + 1;
-              break;
-            }
+          // retention). The id is 1-based in the job's own declaration order, so a
+          // receipt row still maps back to the region the user selected -- but WHICH
+          // region a shared voxel gets is no longer decided by that order. Where prisms
+          // overlap the owner is the region whose FACE PLANE is nearest, with an exact
+          // tie to the lower id (stepped_region_owner, ruling 4, 2026-10-07). 0 means the
+          // voxel is in no include prism at all: no owner, not "region 1".
+          region_ids[e] = stepped_region_owner(c, lattice_roles.includes);
+          if (!e3_overrides.empty()) e3_owner[e] = stepped_region_owner(c, e3_regions);
         }
     GradingLawParams gp;
-    gp.topology = LatticeTopology::Octet;  // job schema restricts to octet
+    if (!e3_overrides.empty()) {   // ★ E3: each region's own grading
+      gp.region_override_ids = &e3_owner;
+      gp.region_overrides = &e3_overrides;
+    }
+    // ★ THE PART'S OWN SURFACE (reviewer's ruling 11-09, the rim coupon's SOLID): when the
+    // part itself is latticed, its members are measured on its mesh, not on the voxel
+    // staircase, which read the steps of the coupon's arch as a rod and a comb of fins.
+    std::unique_ptr<MeshDistance> part_md;
+    if (part_surface != nullptr && !part_surface->triangles.empty()) {
+      part_md = std::make_unique<MeshDistance>(*part_surface);
+      gp.member_surface = part_md.get();
+    }
+    gp.topology = lat_topo;  // the job's type
     gp.target_cell_size_mm = job.grading.cell_mm;
     gp.min_extrudable_width_mm = job.grading.min_extrudable_width_mm;
     gp.demand_exponent = job.grading.demand_exponent;
@@ -4976,6 +7818,7 @@ LatticeVariantOutcome lattice_one_variant(
     gp.aesthetic_percentile = job.grading.aesthetic_percentile;
     gp.aesthetic_rho_min = job.grading.aesthetic_rho_min;
     gp.aesthetic_rho_max = job.grading.aesthetic_rho_max;
+    gp.max_relative_density = job.grading.max_relative_density;
     gp.aesthetic_adaptive_cells_per_member =
         job.grading.aesthetic_adaptive_cells_per_member;
     gp.aesthetic_error_budget = job.grading.aesthetic_error_budget;
@@ -4986,7 +7829,7 @@ LatticeVariantOutcome lattice_one_variant(
     // on the surface either. Any other combination writes a shell, a skin, a rim or a
     // diagrid, and any of those re-ties the struts trimming severed.
     {
-      const bool shell_written = job.lattice.outer_finish != "skin";
+      const bool shell_written = lattice_shell_written(job.lattice);
       const bool surface_net =
           job.grading.algorithm == "organic"
               ? job.grading.organic_boundary_finish != "clean"
@@ -5056,8 +7899,90 @@ LatticeVariantOutcome lattice_one_variant(
     if (job.grading.subfloor_per_region) gp.region_ids = &region_ids;
     region_ids_for_stepped = region_ids;
     gp.subfloor_aggregate_cap_fraction = job.grading.subfloor_aggregate_cap;
-    gf = grade_lattice(solved_grid, dens, v.von_mises_field, &cand, gp,
+    // ── ★ THE SHAPE-GRADE BAND (ruling 2, 2026-11-06): the doubled lattice's shape grade
+    // is the preview's graded band, built by the law (GradingLawParams::band_*), not a
+    // solid outline. Stepped keeps its beam (its cells arrive graded from the app) and
+    // organic has its own rim. Per voxel: the owner's switch, band and strength (a
+    // region's own, else the part's), and the distance to the outline the beam walked.
+    if (R.algorithm == LatticeAlgorithm::Doubled) {
+      auto own = [&](std::size_t e) -> const JobLatticeRegion* {
+        const int id = !e3_owner.empty() ? e3_owner[e] : region_ids[e];
+        return id >= 1 && static_cast<std::size_t>(id) <= e3_jobs.size()
+                   ? &e3_jobs[static_cast<std::size_t>(id - 1)]
+                   : nullptr;
+      };
+      bool any = false;
+      band_mm.assign(cand.size(), 0.0);
+      band_amount.assign(cand.size(), 1.0);
+      for (std::size_t e = 0; e < cand.size(); ++e) {
+        if (!cand[e]) continue;
+        const JobLatticeRegion* r = own(e);
+        const bool on = r != nullptr && r->shape_grade >= 0 ? r->shape_grade == 1
+                                                             : job.grading.shape_grade;
+        if (!on) continue;
+        const double b = r != nullptr && r->shape_grade_band_mm >= 0.0 ? r->shape_grade_band_mm
+                                                                        : job.grading.shape_grade_band_mm;
+        const double st = r != nullptr && r->shape_grade_strength >= -1.0
+                              ? r->shape_grade_strength
+                              : job.grading.shape_grade_strength;
+        band_mm[e] = b;
+        band_amount[e] = std::pow(2.0, std::min(1.0, std::max(-1.0, st)));
+        if (b > 0.0) any = true;
+      }
+      if (any) {
+        std::vector<Vec3> nrms;
+        for (const JobLatticeRegion& r : e3_jobs) nrms.push_back(r.normal);
+        band_distance = lattice_outline_distance_mm(
+            solved_grid, cand, !e3_owner.empty() ? e3_owner : region_ids, nrms,
+            e3_jobs.empty() || job.lattice.whole_part);
+        gp.band_distance_mm = &band_distance;
+        gp.band_mm = &band_mm;
+        gp.band_amount = &band_amount;
+        gp.band_line_width_mm = job.grading.min_extrudable_width_mm;
+      }
+    }
+    gf = grade_lattice(solved_grid, dens, vm_grade, &cand, gp,
                        printed_iso);
+    // ★ No solid sliver (ruling 11-09): a solid piece under 2 line widths is latticed with
+    // its neighbours, before anything reads the posture.
+    absorb_solid_slivers(gf, solved_grid, dens, &cand, gp.min_extrudable_width_mm,
+                         printed_iso);
+    // ★ ruling 2: where the band stays SOLID, which is only where no cell prints.
+    if (gp.band_distance_mm != nullptr) {
+      double* bx = gf.band_solid_box;
+      for (int k = 0; k < solved_grid.nz; ++k)
+        for (int j = 0; j < solved_grid.ny; ++j)
+          for (int i = 0; i < solved_grid.nx; ++i) {
+            const std::size_t e = solved_grid.index(i, j, k);
+            if (!cand[e] || gf.posture.mask[e] || !(band_mm[e] > 0.0) ||
+                !(band_distance[e] >= 0.0 && band_distance[e] < band_mm[e]))
+              continue;
+            const Vec3 c = solved_grid.voxel_center(i, j, k);
+            if (gf.band_solid_voxels++ == 0) {
+              bx[0] = bx[3] = c.x; bx[1] = bx[4] = c.y; bx[2] = bx[5] = c.z;
+            }
+            bx[0] = std::min(bx[0], c.x); bx[1] = std::min(bx[1], c.y); bx[2] = std::min(bx[2], c.z);
+            bx[3] = std::max(bx[3], c.x); bx[4] = std::max(bx[4], c.y); bx[5] = std::max(bx[5], c.z);
+          }
+      // Evidence, behind an env var like the beam band's dump: every band voxel the law
+      // latticed, with what the preview's curve is checked against.
+      if (const char* bp = std::getenv("TOPOPT_SHAPE_BAND_DUMP")) {
+        std::ofstream bf(bp);
+        bf.precision(10);
+        bf << "# BAND <distance_mm> <band_mm> <amount> <cell_mm> <rho> <strut_mm> <rho_before_band> <finest_printable_cell_mm>\n";
+        for (std::size_t e = 0; e < cand.size(); ++e) {
+          if (!gf.posture.mask[e] || !(band_mm[e] > 0.0) || band_distance[e] < 0.0) continue;
+          const double S = e < gf.posture.cell_size_field.size() && gf.posture.cell_size_field[e] > 0.0
+                               ? gf.posture.cell_size_field[e]
+                               : gf.posture.cell_size_mm;
+          const double r = gf.posture.relative_density[e];
+          bf << "BAND " << band_distance[e] << ' ' << band_mm[e] << ' ' << band_amount[e] << ' '
+             << S << ' ' << r << ' ' << lattice_strut_diameter_mm(lat_topo, r, S) << ' '
+             << (e < gf.band_rho0.size() ? gf.band_rho0[e] : 0.0) << ' '
+             << (e < gf.band_finest_mm.size() ? gf.band_finest_mm[e] : 0.0) << '\n';
+        }
+      }
+    }
     // ── ★ THE ORGANIC CELL-SIZE PROBE (see JobLattice::organic_probe_cells_mm) ──
     // Runs here because everything it needs is in scope and already paid for: the
     // one base solve (v.stress_tensor_field), the law's input candidates (`cand`),
@@ -5090,8 +8015,8 @@ LatticeVariantOutcome lattice_one_variant(
           q.extent_short_mm = 2.0 * std::min(jr.half_u_mm, jr.half_w_mm);
           if (jr.kind == "bolt") { q.depth_mm = 2.0 * jr.radius_mm; q.extent_short_mm = 2.0 * jr.half_length_mm; }
           std::vector<double> vm;
-          for (std::size_t e = 0; e < region_ids.size() && e < v.von_mises_field.size(); ++e)
-            if (region_ids[e] == inc && v.von_mises_field[e] > 0.0) vm.push_back(v.von_mises_field[e]);
+          for (std::size_t e = 0; e < region_ids.size() && e < vm_grade.size(); ++e)
+            if (region_ids[e] == inc && vm_grade[e] > 0.0) vm.push_back(vm_grade[e]);
           if (!vm.empty()) {
             std::sort(vm.begin(), vm.end());
             q.stress_p50 = vm[vm.size() / 2];
@@ -5140,8 +8065,40 @@ LatticeVariantOutcome lattice_one_variant(
             "certifies (0.44x) and may read above the run (1.09x); require margin >= 1.09 x target "
             "for an approval to imply the run certifies\"},\n";
       pj += "  \"candidates\": [\n";
-      const std::vector<double> probe_stress = stress_tensor_for_organic(
-          job, solved_grid, cand, region_ids, v.stress_tensor_field, nullptr);
+      // ★ THE SYNTHESIS MOVED INTO THE LOOP, AND ONTO THE POSTURE MASK (#354's
+      // audit, 2026-09-29). It used to happen ONCE here over `cand` -- the candidate
+      // set -- and without `synthesised_whole`. Two things were wrong with that, and
+      // they are NOT equally serious; the honest split, measured 2026-09-29:
+      //
+      //   (1) THE DOMAIN MOVE IS A NO-OP TODAY, and saying otherwise would be wrong.
+      //       For organic, `grade_lattice` masks EVERY candidate voxel -- all three
+      //       `params.organic_geometry` branches in grading.cpp set `post.mask[e] = 1`
+      //       and `continue` before any octet refusal -- so `cand` and
+      //       `agf.posture.mask` are the SAME SET on every organic run. Measured on
+      //       the cli_organic_dead_parity fixture across cell 3-10 mm, uniform and
+      //       swept windows, min_extrudable_width 0.45-3 mm, three rho bands, a
+      //       manual clearance keep-out and all three outer finishes: cand == posture
+      //       == the run's mask, every time, and the two dead sets were identical
+      //       with `cand` in place. It is written this way for the CONTRACT (the
+      //       probe must name the domain it means), not because it moved a number.
+      //
+      //   (2) `synthesised_whole` WAS MISSING, and that half is real: ruling H hands
+      //       a whole-synthesised wall the window's MIDDLE spacing, so without it the
+      //       probe sized a dead wall against a lattice the run would not build.
+      //
+      //   ★ AND WHAT IS STILL NOT ALIGNED. The run's domain is not the posture: it
+      //   is `lattice_certification_mask(boundary, ...) ∩ gf.posture.mask` (see the
+      //   organic block below), and the probe has no certification mask -- it runs
+      //   before the variant's shell boundary is built. Nothing measurable separated
+      //   the two on the fixture above, so the gap is UNMEASURED rather than closed,
+      //   and it is the one that could still move a verdict on a part whose
+      //   cell-overlap proof or shell clip rejects posture voxels.
+      //
+      // The domain is that candidate's own PRE-RIM posture mask: the run synthesises
+      // before its rim band is cleared (ruling G applies the band after the tracer),
+      // so the probe must too -- and a post-rim domain here IS observable, which is
+      // what cli_organic_dead_parity's positive control uses to go red. Per candidate
+      // this costs one O(n) pass plus a p99 sort beside a full trace and certificate.
       // ★ THE STRESS HALF (2026-09-05). Rooting alone saturates at 100 % on a wall
       // whose every welded network touches the solid, and the certificate's margin
       // is what "approved for structural" has to mean. So each candidate's RAW trace
@@ -5149,7 +8106,7 @@ LatticeVariantOutcome lattice_one_variant(
       // through the same certificate the run will use, with the same loads, material
       // and knockdown. It is a prediction: the support pass and the fill will change
       // the network; its agreement with the run's certificate is the calibration.
-      const LatticeCertContext pcx = lattice_cert_context(v, part_grid, domain, options, material);
+      const LatticeCertContext pcx = lattice_cert_context(v, part_grid, domain, options, material, job);
       for (std::size_t ci = 0; ci < cands.size(); ++ci) {
         const Cand& cc = cands[ci];
         const double t0 = wall_seconds();
@@ -5163,20 +8120,49 @@ LatticeVariantOutcome lattice_one_variant(
         // was its RADIUS, not its legs.)
         JobGrading jg2 = job.grading;
         jg2.cell_min_mm = cc.lo; jg2.cell_max_mm = cc.hi; jg2.cell_mm = cc.hi;
-        const GradedField agf = grade_lattice(solved_grid, dens, v.von_mises_field, &cand, alt, printed_iso);
-        std::vector<char> pmask = agf.posture.mask;
+        GradedField agf = grade_lattice(solved_grid, dens, vm_grade, &cand, alt, printed_iso);
+        absorb_solid_slivers(agf, solved_grid, dens, &cand, alt.min_extrudable_width_mm,
+                             printed_iso);
+        // ★ THE RUN'S DOMAIN, NOT THE POSTURE (reviewer, 2026-09-30). The run builds
+        // its lattice on lattice_certification_mask INTERSECT the posture; the probe
+        // used the posture alone, so it forecast for a set the run does not build.
+        // Same function, same terms, this candidate's own coarsest cell. The boundary
+        // is per candidate because the cell-overlap proof is a function of the cell --
+        // measured cost is stated in the commit; v.v3.mesh is already in hand here.
+        const double pcell = agf.cell_size_mm > 0.0 ? agf.cell_size_mm : cc.hi;
+        const LatticeBoundary pbnd =
+            lattice_boundary_for(solved_grid, dens, pcell, lattice_kos, lattice_roles,
+                                 printed_iso, &v.v3.mesh);
+        const std::vector<char> pdomain = lattice_synthesis_domain(
+            pbnd, solved_grid, dens, printed_iso,
+            solved_grid.origin, pcell, agf.posture.mask);
+        std::vector<char> pmask = pdomain;
+        // the run's order: synthesise over the domain, THEN clear the rim
+        SyntheticStressReport prep;
+        const std::vector<double> probe_stress = stress_tensor_for_organic(
+            job, solved_grid, pdomain, region_ids, v.stress_tensor_field, &prep);
+        // ★ AND THE SAME GRADING INPUT: ruling H hands a whole-synthesised wall the
+        // window's MIDDLE spacing, because its manufactured field has no real stress
+        // to grade by. The probe used to skip this and take the coarsest end, so it
+        // sized a dead wall against a lattice the run would never build.
+        const std::vector<char> probe_synth_whole =
+            organic_synthesised_whole_voxels(prep, region_ids, solved_grid.voxel_count());
         {
           const double rim = job.grading.organic_solid_rim_mm < 0.0 ? cc.lo : job.grading.organic_solid_rim_mm;
           std::vector<Vec3> nrms;
           for (const JobLatticeRegion& r : job.lattice.regions) if (r.role == "include") nrms.push_back(r.normal);
-          apply_organic_solid_rim(solved_grid, pmask, dens, printed_iso, region_ids, nrms, rim);
+          // The probe forecasts a cell size; it ships no geometry, so the band comes out
+          // of its candidate set as before -- ruling G is about what the RUN draws.
+          clear_band_from_mask(
+              pmask, organic_solid_rim_band(solved_grid, pmask, region_ids, nrms, rim));
         }
-        OrganicOutcome po = run_organic_step(job.lattice.outer_finish != "skin", solved_grid, dens,
+        OrganicOutcome po = run_organic_step(lattice_shell_written(job.lattice), solved_grid, dens,
                                              probe_stress, pmask, agf.posture.relative_density,
                                              agf.band_rho_min, agf.band_rho_max, jg2,
                                              job.loads.present && job.loads.minimize_plastic,
                                              v.applied_build_dir, printed_iso, 32,
-                                             job.loads.layer_height_mm, /*probe_only=*/true);
+                                             job.loads.layer_height_mm, /*probe_only=*/true,
+                                             &probe_synth_whole);
         // ★ ONE welded polyline set feeds BOTH measures: thin to 2 mm keeping shared
         // vertices, insert crossing junctions, then root and certify the same curves.
         OrganicLattice plat = po.lat;
@@ -5288,9 +8274,29 @@ LatticeVariantOutcome lattice_one_variant(
         // that cost 10 x 12 s on the M2 run. Run it only when structural intent or a
         // structural recommendation will read the answer.
         const bool want_cert = job.grading.intent == "structural" || recommend_mode == "structural";
-        if (!want_cert)
-          pred = "\"predicted\": {\"ran\": false, \"reason\": \"aesthetic intent: nothing reads a certificate\"}";
-        if (want_cert && !psegs.empty() && psegs.size() <= 600000) {
+        // ★ ONE DECISION, TESTED (organic_probe_certificate_skip). Each branch below
+        // states its OWN reason and no branch may overwrite another's -- see the
+        // helper for what that cost.
+        constexpr std::size_t kProbeSegmentCap = 600000;
+        const OrganicProbeSkip skip =
+            organic_probe_certificate_skip(want_cert, psegs.size(), kProbeSegmentCap);
+        switch (skip) {
+          case OrganicProbeSkip::AestheticIntent:
+            pred = "\"predicted\": {\"ran\": false, \"reason\": \"aesthetic intent: "
+                   "nothing reads a certificate\"}";
+            break;
+          case OrganicProbeSkip::NoSegments:
+            pred = "\"predicted\": {\"ran\": false, \"reason\": \"no segments\"}";
+            break;
+          case OrganicProbeSkip::SegmentCap:
+            pred = "\"predicted\": {\"ran\": false, \"reason\": \"" +
+                   std::to_string(psegs.size()) + " segments exceed the probe's " +
+                   std::to_string(kProbeSegmentCap) + " cap\"}";
+            break;
+          case OrganicProbeSkip::None:
+            break;   // the certificate runs below and writes its own
+        }
+        if (skip == OrganicProbeSkip::None) {
           const double t1 = wall_seconds();
           std::vector<char> hexm(solved_grid.voxel_count(), 0);
           for (std::size_t e = 0; e < solved_grid.voxel_count(); ++e)
@@ -5301,8 +8307,7 @@ LatticeVariantOutcome lattice_one_variant(
             // 2026-09-06: the probe's own network on the run's grid reads 0.80 of the run;
             // the probe's own certificate read 0.63 -- this mask was the difference.
             if (v.optimization.physical_density[e] > pcx.printed_iso && !pmask[e]) hexm[e] = 1;
-          std::vector<OrganicLoadCase> pocs;
-          pocs.push_back({"job", bcs, pcx.loads});
+          const std::vector<OrganicLoadCase> pocs = organic_load_cases(pcx, bcs);
           const OrganicCertificate pc = certify_organic_structural(
               solved_grid, hexm, psegs, pocs, material.youngs_modulus_mpa, material.poisson,
               material.yield_strength_mpa, material.z_knockdown, v.applied_build_dir, cc.hi, true);
@@ -5339,9 +8344,6 @@ LatticeVariantOutcome lattice_one_variant(
                        pc.margin_untagged, pc.stress_p99_untagged_mpa, pc.members_tagged, pc.tagged_p99_mpa,
                        pc.knockdown_used, pc.max_over_allowable, pc.max_over_allowable_distributed,
                        psegs.size(), wall_seconds() - t1);
-        } else if (!psegs.empty()) {
-          pred = "\"predicted\": {\"ran\": false, \"reason\": \"" + std::to_string(psegs.size()) +
-                 " segments exceed the probe's 600000 cap\"}";
         }
         bool ok_s = true, ok_a = true;
         std::string regs;
@@ -5368,26 +8370,44 @@ LatticeVariantOutcome lattice_one_variant(
           if (across < 4.0) advice = "cells_across " + std::to_string(across) + " < 4 (advisory)";
           const bool ok_str = ok_aes;
           ok_s = ok_s && ok_str; ok_a = ok_a && ok_aes;
-          char buf[640];
+          // ★ THE PROBE'S OWN DEAD VERDICT, IN ITS OWN RECEIPT (2026-09-29).
+          // Report-only, and the point of it: the domain fix above is only checkable
+          // if BOTH sides say which walls they called dead. `run_info.json`'s
+          // grading.synthetic_stress_by_region[] carries the same two keys for the
+          // run, and cli_organic_dead_parity compares them. A region with no row in
+          // `prep` was never flagged (or has no voxels in the domain): not dead.
+          const SyntheticStressRegionReport* PS = nullptr;
+          for (const SyntheticStressRegionReport& q : prep.per_region)
+            if (q.region_id == include_index) PS = &q;
+          char buf[800];
           std::snprintf(buf, sizeof buf,
                         "        {\"face_id\": %d, \"region_id\": %d, \"depth_mm\": %.6g, \"cells_across\": %.4g, "
                         "\"curves_per_family\": [%zu, %zu, %zu], \"components\": %zu, "
                         "\"traced_length_mm\": %.6g, \"rooted_length_fraction\": %.6g, "
+                        "\"synthesised_whole\": %s, \"stress_p99\": %.6g, "
                         "\"approved_structural\": %s, \"approved_aesthetic\": %s, \"refusals\": \"%s\", \"advice\": \"%s\"}",
                         jr.face_id, include_index, jr.depth_mm, across,
                         R2 ? R2->curves_per_family[0] : 0, R2 ? R2->curves_per_family[1] : 0, R2 ? R2->curves_per_family[2] : 0,
                         R2 ? R2->components : 0, R2 ? R2->traced_mm : 0.0, rooted,
+                        (PS && PS->whole_region) ? "true" : "false", PS ? PS->p99_von_mises : 0.0,
                         ok_str ? "true" : "false", ok_aes ? "true" : "false", refs.c_str(), advice.c_str());
           regs += std::string(regs.empty() ? "" : ",\n") + buf;
         }
-        char head[400];
+        char head[560];
         std::snprintf(head, sizeof head,
                       "    {\"cell_min_mm\": %.6g, \"cell_max_mm\": %.6g, \"trace_seconds\": %.3g, "
                       "\"curves\": %zu, \"components\": %zu, \"traced_length_mm\": %.6g, "
-                      "\"rooted_length_fraction\": %.6g, \"candidate_voxels\": %zu,\n      \"regions\": [\n",
+                      // \"candidate_voxels\" IS the synthesis domain: it counts the same
+                      // pre-rim posture mask the synthesis ran over, which is the whole
+                      // point of the 2026-09-29 fix. \"dead_threshold\" is the threshold
+                      // the per-region verdicts below were measured against, so a
+                      // disagreement with the run is locatable rather than merely visible.
+                      "\"rooted_length_fraction\": %.6g, \"candidate_voxels\": %zu, "
+                      "\"dead_threshold\": %.6g,\n      \"regions\": [\n",
                       cc.lo, cc.hi, secs, pr.curves, pr.components, pr.traced_mm,
                       pr.traced_mm > 0.0 ? pr.rooted_mm / pr.traced_mm : 0.0,
-                      static_cast<std::size_t>(std::count(agf.posture.mask.begin(), agf.posture.mask.end(), 1)));
+                      static_cast<std::size_t>(std::count(agf.posture.mask.begin(), agf.posture.mask.end(), 1)),
+                      prep.dead_threshold);
         const bool approved_structural = ok_s && cert_ok;
         pj += head + regs + "\n      ],\n      " + pred + ",\n      \"approved_structural\": " +
               (approved_structural ? "true" : "false") +
@@ -5411,20 +8431,37 @@ LatticeVariantOutcome lattice_one_variant(
         R.organic_recommend_ran = true;
         const OrganicRecommendation& RC = R.organic_recommendation;
         char rb[1200];
+        // ── ★ A MARGIN THAT WAS NEVER MEASURED IS null, NOT 0 (2026-09-29) ───────
+        // fit_margin / auto_margin default to 0.0 and were written unconditionally,
+        // so "margin": 0 meant three different things: certified at 0 (impossible),
+        // NO CERTIFICATE RAN (every aesthetic run), or no row found. #354's
+        // Recommended pills read it straight out as "· 0.00". The margin is now the
+        // JSON null where it was not measured, and `certified` states it positively
+        // beside it so no consumer has to infer from a sentinel.
+        char fmb[40] = "null", amb[40] = "null";
+        if (RC.fit_certified) std::snprintf(fmb, sizeof fmb, "%.6g", RC.fit_margin);
+        if (RC.auto_certified) std::snprintf(amb, sizeof amb, "%.6g", RC.auto_margin);
+        const char* fit_margin_json = fmb;
+        const char* auto_margin_json = amb;
         std::snprintf(rb, sizeof rb,
                       "{\"ran\": true, \"mode\": \"%s\", \"band_lo_mm\": %.6g, \"band_hi_mm\": %.6g, "
                       "\"collapsed\": %s, \"printability_floor_mm\": %.6g, \"resolution_floor_mm\": %.6g, "
                       "\"member_ceiling_mm\": %.6g, \"extent_ceiling_mm\": %.6g, \"look_cell_mm\": %.6g, "
                       "\"grade_ratio\": %.6g, \"look_cells_across\": %.6g, \"target_margin\": %.6g,\n"
-                      "    \"fit\": {\"found\": %s, \"cell_mm\": %.6g, \"margin\": %.6g, \"traced_mm\": %.6g, \"source\": \"%s\"},\n"
-                      "    \"auto\": {\"found\": %s, \"cell_min_mm\": %.6g, \"cell_max_mm\": %.6g, \"margin\": %.6g, "
+                      "    \"fit\": {\"found\": %s, \"cell_mm\": %.6g, \"certified\": %s, "
+                      "\"margin\": %s, \"traced_mm\": %.6g, \"source\": \"%s\"},\n"
+                      "    \"auto\": {\"found\": %s, \"cell_min_mm\": %.6g, \"cell_max_mm\": %.6g, "
+                      "\"certified\": %s, \"margin\": %s, "
                       "\"traced_mm\": %.6g, \"source\": \"%s\"},\n    \"rejected\": [",
                       RC.mode.c_str(), B.lo_mm, B.hi_mm, B.collapsed ? "true" : "false", B.printability_floor_mm,
                       B.resolution_floor_mm, B.member_ceiling_mm, B.extent_ceiling_mm, B.look_cell_mm, B.grade_ratio,
                       job.lattice.organic_look_cells_across, job.lattice.organic_recommend_margin,
-                      RC.fit_found ? "true" : "false", RC.fit_mm, RC.fit_margin, RC.fit_traced_mm, RC.fit_source.c_str(),
-                      RC.auto_found ? "true" : "false", RC.auto_lo_mm, RC.auto_hi_mm, RC.auto_margin, RC.auto_traced_mm,
-                      RC.auto_source.c_str());
+                      RC.fit_found ? "true" : "false", RC.fit_mm,
+                      RC.fit_certified ? "true" : "false", fit_margin_json,
+                      RC.fit_traced_mm, RC.fit_source.c_str(),
+                      RC.auto_found ? "true" : "false", RC.auto_lo_mm, RC.auto_hi_mm,
+                      RC.auto_certified ? "true" : "false", auto_margin_json,
+                      RC.auto_traced_mm, RC.auto_source.c_str());
         rj = rb;
         for (std::size_t i = 0; i < RC.rejected.size(); ++i) {
           char e[300];
@@ -5459,9 +8496,12 @@ LatticeVariantOutcome lattice_one_variant(
       // The SAME thickness measure the law reads, at the law's own cap, so a number
       // in this report and a decision inside the law can never disagree about how
       // thick a member is.
-      const std::vector<double> tau = local_member_thickness_mm(
-          solved_grid, dens, printed_iso, gp.thickness_cap_voxels);
-      const std::vector<double>& vm = v.von_mises_field;
+      const std::vector<double> tau =
+          gf.member_width_mm.size() == solved_grid.voxel_count()
+              ? gf.member_width_mm  // the law's own (rulings 11-09)
+              : local_member_thickness_mm(solved_grid, dens, printed_iso,
+                                          gp.thickness_cap_voxels);
+      const std::vector<double>& vm = vm_grade;
 
       // The PART's peak demand — over every printed voxel, region or not. This is
       // the denominator the retention predicate uses, and it is recomputed here
@@ -5487,9 +8527,10 @@ LatticeVariantOutcome lattice_one_variant(
         ids_to_report.push_back(0);
 
       const double w_min = job.grading.min_extrudable_width_mm;
-      const double n_star = lattice_cells_per_member_min(LatticeTopology::Octet);
-      const double phi_hi = octet_strut_diameter_mm(
-          lattice_rho_max(LatticeTopology::Octet), 1.0);
+      const double n_star = lattice_cells_per_member_min(lat_topo);
+      // ★ D1: phi at the densest density THE JOB allows, not the band's top.
+      const double phi_hi =
+          w_min / lattice_min_printable_cell_mm(lat_topo, w_min, job.grading.max_relative_density);
 
       for (int want : ids_to_report) {
         LatticeGradedReceipt::RegionCellReport rc;
@@ -5520,10 +8561,11 @@ LatticeVariantOutcome lattice_one_variant(
         // 0 when the part carries no demand at all — the same convention the law
         // uses, and the reason retention disarms itself in that case.
         rc.stress_fraction = part_peak > 0.0 ? peak / part_peak : 0.0;
-        rc.at_thinnest =
-            lattice_derive_cell_for_member(LatticeTopology::Octet, tmin, w_min);
-        rc.at_thickest =
-            lattice_derive_cell_for_member(LatticeTopology::Octet, tmax, w_min);
+        // ★ D1: with the job's cap, so the row reports the floor the run applies.
+        rc.at_thinnest = lattice_derive_cell_for_member(
+            lat_topo, tmin, w_min, 0.0, job.grading.max_relative_density);
+        rc.at_thickest = lattice_derive_cell_for_member(
+            lat_topo, tmax, w_min, 0.0, job.grading.max_relative_density);
 
         // ── THE VERDICT, resolved from measurements only, in the order §2 states.
         // A region carrying load is kept solid by the law regardless of geometry,
@@ -5572,7 +8614,85 @@ LatticeVariantOutcome lattice_one_variant(
     // carries the predicate, the per-reason counts and the two measured widths,
     // because the whole remedy is the relation between them.
     if (gf.region_ungradeable) {
+      // ── ★ ON A PLAN JOB THIS IS A REPORT, NOT A REFUSAL (ruling, 2026-10-11) ──
+      // The law could grade nothing. On a job that sent no plan that is the end of it:
+      // there is no lattice to emit and the refusal below stands, unchanged.
+      //
+      // On a PLAN job it is not core's decision to make. The plan IS the design: it says
+      // which cells, and with ruling C it says at what density, so core needs the law's
+      // grade for neither the geometry nor the certificate. Measured on 102117B9's
+      // Default Grade plan -- 12,112 cells over 177 regions, every one carrying a rho --
+      // the plan validated and then this line refused the job over 66,710 candidate
+      // voxels the LAW could not grade. That is core's own law gating a design it was
+      // not asked to produce.
+      //
+      // So: reported, and the run carries on. The plan's posture certifies as usual and
+      // can still refuse on its own grounds (the octet band, the strut-strength margin,
+      // the void rule) -- this removes one gate, not the certificate.
+      //
+      // ★ THE CONDITION IS THE PLAN'S OWN DENSITY, not the mere presence of a plan. Every
+      // planned cell must carry a rho; D5 has already proved each of those prints at its
+      // own size. A cell with no rho would have to be sized from the law's field, and the
+      // law has nothing here -- K3's refusal covers exactly that case and is unchanged.
+      bool plan_rho_everywhere = !job.lattice.stepped_cells.empty();
+      std::size_t cells_without_rho = 0;
+      for (const SteppedCell& c : job.lattice.stepped_cells)
+        if (!(c.rho > 0.0)) ++cells_without_rho;
+      if (cells_without_rho > 0) plan_rho_everywhere = false;
+      if (plan_rho_everywhere) {
+        R.law_ungradeable_reported = true;
+        R.law_ungradeable_note =
+            "the grading law could lattice NONE of this variant's " +
+            std::to_string(gf.region_voxels) +
+            " candidate voxels, and the run carried on because the PLAN is the design: " +
+            std::to_string(job.lattice.stepped_cells.size()) +
+            " cell(s), every one carrying its own relative density, so core needs the "
+            "law's grade for neither the geometry nor the certificate. The law's own "
+            "fallbacks over the voxels it rejected: member_too_thin_for_cell=" +
+            std::to_string(gf.fallback_member_too_thin) +
+            ", strut_unprintable_at_every_cell=" +
+            std::to_string(gf.fallback_strut_unprintable) +
+            ", irrecoverable_by_any_cell_size=" +
+            std::to_string(gf.fallback_irrecoverable_by_cell) +
+            ". The plan's posture still certifies, and can still refuse.";
+        std::fprintf(stderr, "[stepped] law ungradeable, REPORTED not refused: %s\n",
+                     R.law_ungradeable_note.c_str());
+        // ★ AND THE WINDOW NEEDS A CELL. `cell` below feeds the boundary's voxel-base
+        // window (2 x cell) and the certification mask's own cell. The law may leave it
+        // at 0 when it graded nothing, so it falls back to the PLAN's coarsest cell --
+        // the plan's own number, never one core invents.
+        double plan_coarsest = 0.0;
+        for (const SteppedCell& c : job.lattice.stepped_cells)
+          if (c.size_mm > plan_coarsest) plan_coarsest = c.size_mm;
+        if (!(gf.cell_size_mm > 0.0) && plan_coarsest > 0.0)
+          gf.cell_size_mm = plan_coarsest;
+      } else {
       R.ungradeable = true;
+      // ★ THE FLOOR IS QUOTED AT THE RUN'S OWN FINEST CELL (reviewer's ruling 11-10). It
+      // used to be quoted at `cell_size_mm`, which a swept or fit run that latticed nothing
+      // leaves at the smallest LEGAL cell (width / phi(rho_max): 0.79 mm at a 0.32 mm
+      // bead), a cell the run never allowed -- so a 12.5 mm member beside "must be at
+      // least 3.97 mm" read as a pass. The finest cell the run allows is the most lenient
+      // floor it could have applied; a member under it is too thin at every cell it had.
+      const double finest_cell =
+          gf.finest_cell_mm > 0.0 ? gf.finest_cell_mm : gf.cell_size_mm;
+      const double floor_at_finest = gf.cells_per_member_floor * finest_cell;
+      const std::string widths =
+          gf.fallback_max_member_width_mm < floor_at_finest
+              ? ". Every member is too thin: the widest is " +
+                    json_num(gf.fallback_max_member_width_mm) +
+                    " mm across, under the " + json_num(floor_at_finest) + " mm that " +
+                    json_num(gf.cells_per_member_floor) +
+                    " cells of this run's finest cell (" + json_num(finest_cell) +
+                    " mm) need"
+              : ". The widest member the law rejected is " +
+                    json_num(gf.fallback_max_member_width_mm) +
+                    " mm across, which would hold " +
+                    json_num(gf.cells_per_member_floor) +
+                    " cells of this run's finest cell (" + json_num(finest_cell) +
+                    " mm, " + json_num(floor_at_finest) +
+                    " mm needed); it was rejected because its own cell is coarser or its "
+                    "strut does not print (the reasons above)";
       R.ungradeable_reason =
           "the grading law could lattice NONE of this variant's " +
           std::to_string(gf.region_voxels) +
@@ -5583,13 +8703,8 @@ LatticeVariantOutcome lattice_one_variant(
           ", strut_unprintable_at_every_cell=" +
           std::to_string(gf.fallback_strut_unprintable) +
           ", irrecoverable_by_any_cell_size=" +
-          std::to_string(gf.fallback_irrecoverable_by_cell) +
-          ". The widest member the law rejected is " +
-          json_num(gf.fallback_max_member_width_mm) +
-          " mm; at this cell size a member must be at least " +
-          json_num(gf.cells_per_member_floor * gf.cell_size_mm) +
-          " mm across to hold " + json_num(gf.cells_per_member_floor) +
-          " cells. A smaller cell needs a finer declared extrusion width "
+          std::to_string(gf.fallback_irrecoverable_by_cell) + widths +
+          ". A smaller cell needs a finer declared extrusion width "
           "(min_extrudable_width_mm " +
           json_num(gp.min_extrudable_width_mm) +
           " mm sets the printability floor at " +
@@ -5597,6 +8712,7 @@ LatticeVariantOutcome lattice_one_variant(
           " mm) — run the pre-flight forecast for the evaluated remedies.";
       R.gf = gf;
       return R;
+      }
     }
     cell = gf.cell_size_mm;
     // The law's cell. In Fixed/Auto this is THE cell; in Swept it is the COARSEST
@@ -5620,23 +8736,493 @@ LatticeVariantOutcome lattice_one_variant(
       lattice_boundary_for(solved_grid, dens, cell, lattice_kos, lattice_roles,
                            printed_iso, &v.v3.mesh);
 
+  // ── ★ K3 / RULING 2: WHAT THE OUTLINE CLIP APPLIES TO, STATED ────────────────
+  // The clip is scope (b) -- every job whose include carries `outline_uv` -- and it is
+  // armed by the geometry itself inside LatticeBoundary::add_include_region, not by a
+  // caller, so there is no switch here to get wrong. What there IS here is the report:
+  // a mask-backed include has no analytic distance and takes NO clip, so its struts are
+  // bounded by the shell alone exactly as before, and that has to be said rather than
+  // left for someone to notice in a mesh.
+  {
+    std::size_t inc_outlined = 0, inc_rect = 0, inc_mask = 0;
+    for (const ClearanceGeometry& g : lattice_roles.includes) {
+      if (!g.valid) continue;
+      if (g.mask) ++inc_mask;
+      else if (!g.outline_uv.empty()) ++inc_outlined;
+      else ++inc_rect;
+    }
+    if (inc_outlined > 0 || inc_mask > 0)
+      std::fprintf(stderr,
+                   "[clip] include regions: %zu clipped to their own outline, %zu "
+                   "analytic without one (no clip term), %zu mask-backed (no clip term, "
+                   "shell only)\n",
+                   inc_outlined, inc_rect, inc_mask);
+    R.clip_includes_outlined = static_cast<long long>(inc_outlined);
+    R.clip_includes_mask_backed = static_cast<long long>(inc_mask);
+  }
+
   // ── THE certification mask — shared by the export (companion + graded cell
   // activation) and the posture. On a graded run it is intersected with the
   // law's own mask (voxels the law kept solid drop out; law-masked voxels the
   // shared predicate's cell-overlap proof rejects are counted, not hidden).
-  std::vector<char> mask = lattice_certification_mask(
-      boundary, solved_grid, dens, printed_iso, solved_grid.origin, cell);
+  // ★ ONE DEFINITION, SHARED WITH THE SIZE PROBE (reviewer, 2026-09-30). This was
+  // five lines here, so the probe -- which exists to forecast this run -- synthesised
+  // over the posture ALONE and worked on a strictly larger set. Both now call
+  // lattice_synthesis_domain(); an empty posture means ungraded, which is the
+  // behaviour the `if (graded)` guard used to express.
   long long dropped_by_overlap = 0;
-  if (graded) {
-    for (std::size_t e = 0; e < mask.size(); ++e) {
-      if (mask[e] && !gf.posture.mask[e]) {
-        mask[e] = 0;  // the law left it solid (too-thin fallback / not a candidate)
-      } else if (!mask[e] && gf.posture.mask[e]) {
-        ++dropped_by_overlap;
+  const std::vector<char> kNoPosture;
+  std::vector<char> mask;
+  // ── ★ K3: ON A PLAN JOB THE DESIGN SET IS THE PLAN'S CELLS ───────────────────
+  // (Reviewer's ruling, 2026-10-10: the companion is printed minus the PLAN's cells,
+  // and the certificate's posture comes from the PLAN's mask, never the law's.)
+  //
+  // This one mask is read by the solid companion, the graded-cell activation, the
+  // certification posture, the min-feature pass, the void check and the empty-mask
+  // refusal. On a plan job it used to be the LAW's: core graded the part its own way
+  // and that decided which voxels the companion filled and which the certificate
+  // credited, while the plan decided only where struts went. The two then disagreed in
+  // both directions -- a voxel the plan latticed but the law kept solid got a strut AND
+  // companion solid around it, and a voxel the law latticed but the plan left bare got
+  // neither, which is the partial-depth strip: the plan's cells stop short of the
+  // region's depth, the law latticed the remainder, so the strip came out as air with
+  // the plan's back nodes ending on nothing.
+  //
+  // The predicate is the same one (printed, keep-out, exclude/include precedence, the
+  // cell-overlap proof); only the owning-cell question is answered by the plan, at the
+  // plan's own cell per voxel rather than at the law's single cell -- see
+  // lattice_certification_mask_per_cell. A printed voxel inside the include union that
+  // no plan cell covers is certified SOLID, exactly like a keep-out voxel, which is what
+  // makes the companion fill the remainder.
+  std::vector<std::vector<char>> plan_occ;        // per group, its own cell grid
+  std::vector<std::vector<double>> plan_cell_rho;  // the sent rho on the same grid
+  // ── ★ K3, RULING 1'S CONDITION (reviewer, 2026-10-10) ────────────────────────
+  // THE POSTURE CERTIFIES A STRUT AT A DENSITY AND THE RADIUS FIELD DRAWS IT AT ONE,
+  // AND THOSE MUST BE THE SAME NUMBER. The way to guarantee that is not two
+  // implementations that agree: a number re-derived can agree with the law while
+  // disagreeing with the geometry, which is the failure this whole section exists to
+  // make impossible. So there is ONE definition and both callers use it; the assertion
+  // further down is a tripwire ON that definition, not the mechanism that makes two of
+  // them line up.
+  //
+  // `plan_cell_rho_at` is the plan's own answer: the rho of the cell that covers the
+  // point, or 0 where no cell does. The plan's groups cannot overlap -- the validator
+  // proves it -- so at most one can answer, and the search order cannot matter. The
+  // per-group rho grid is built once below rather than scanned per point: a linear scan
+  // of the cell list would be O(voxels x cells), which is 22,344 cells on 102117B9.
+  //
+  // ★ IT DELIBERATELY DOES NOT RESTRICT TO ONE GROUP. The radius field used to look only
+  // in its OWN group's grid, so a strut reaching past its cell into a cell of another
+  // group was sized from the voxel fallback while the posture credited that other cell's
+  // rho. Same point, two densities. The density now belongs to the point.
+  // ── ★ K5: AND THE CLOSED BOX, BECAUSE EVERY OCTET NODE SITS ON A BOUNDARY ────
+  // `node_pos` is `origin + g * 0.5 * cell` (lattice_gen.cpp), so a node with an EVEN
+  // index on an axis lies exactly ON a cell plane: a cell corner is shared by eight
+  // cells, an edge node by four, a face node by two. The octet's face-diagonal struts
+  // lie IN the cell faces, so their midpoints -- which is where the generator samples
+  // the radius -- are on a shared plane too. Exact-boundary queries are the NORM here,
+  // not an edge case.
+  //
+  // A half-open `floor` test therefore attributed every one of them to the cell on the
+  // + side, and where that cell is outside the plan -- which is exactly the plan's outer
+  // face, and every pass and group boundary -- the lookup found nothing and fell through
+  // to core's own field. That is K5's defect: the boundary joints, the ones that carry
+  // the load into the solid, were the ones the app's density did not reach.
+  //
+  // So the test is the CLOSED box, and where several of the plan's cells share the
+  // point the density is the LARGEST of theirs. Not an ownership rule and deliberately
+  // not one: a node ball thinner than a strut meeting it is a notch at the joint, so the
+  // shared geometry has to satisfy every incident cell, and `max` is the only answer that
+  // does and is independent of which cell is asked first.
+  auto plan_cell_rho_at = [&plan_groups, &plan_occ, &plan_cell_rho](const Vec3& p) {
+    double best = 0.0;
+    for (std::size_t gi = 0; gi < plan_groups.size(); ++gi) {
+      const SteppedCellGroup& g = plan_groups[gi];
+      const double tol = 1e-9 * g.size_mm;   // the grid is built as origin + k*size
+      const double fx = (p.x - g.origin.x) / g.size_mm;
+      const double fy = (p.y - g.origin.y) / g.size_mm;
+      const double fz = (p.z - g.origin.z) / g.size_mm;
+      const int bx = static_cast<int>(std::floor(fx));
+      const int by = static_cast<int>(std::floor(fy));
+      const int bz = static_cast<int>(std::floor(fz));
+      // On a plane, the cell on the - side shares the point: test it too.
+      const bool ex = std::fabs(fx - std::round(fx)) <= tol;
+      const bool ey = std::fabs(fy - std::round(fy)) <= tol;
+      const bool ez = std::fabs(fz - std::round(fz)) <= tol;
+      for (int sx = 0; sx >= (ex ? -1 : 0); --sx)
+        for (int sy = 0; sy >= (ey ? -1 : 0); --sy)
+          for (int sz = 0; sz >= (ez ? -1 : 0); --sz) {
+            const int ci = bx + sx, cj = by + sy, ck = bz + sz;
+            if (ci < 0 || cj < 0 || ck < 0 || ci >= g.nx || cj >= g.ny || ck >= g.nz)
+              continue;
+            const std::size_t at = (static_cast<std::size_t>(ck) * g.ny + cj) * g.nx + ci;
+            if (plan_occ[gi][at] && plan_cell_rho[gi][at] > best)
+              best = plan_cell_rho[gi][at];
+          }
+    }
+    return best;
+  };
+  // ── ★ WHICH REGION'S PLAN CELL COVERS A POINT ────────────────────────────────
+  // The same walk as `plan_cell_rho_at`, answering the other half: the region id the
+  // covering cell was sent under, or 0 where no cell covers. Ruling 2's receipt needs it
+  // -- the volume the outline clip removes struts from is exactly the volume a region's
+  // own plan cell covers but the region does NOT reach.
+  auto plan_cell_region_at = [&plan_groups, &plan_occ](const Vec3& p) {
+    for (std::size_t gi = 0; gi < plan_groups.size(); ++gi) {
+      const SteppedCellGroup& g = plan_groups[gi];
+      const int ci = static_cast<int>(std::floor((p.x - g.origin.x) / g.size_mm));
+      const int cj = static_cast<int>(std::floor((p.y - g.origin.y) / g.size_mm));
+      const int ck = static_cast<int>(std::floor((p.z - g.origin.z) / g.size_mm));
+      if (ci < 0 || cj < 0 || ck < 0 || ci >= g.nx || cj >= g.ny || ck >= g.nz) continue;
+      const std::size_t at = (static_cast<std::size_t>(ck) * g.ny + cj) * g.nx + ci;
+      if (plan_occ[gi][at]) return g.region_id;
+    }
+    return 0;
+  };
+  // Which voxel of the solved grid holds a point (clamped, as every field here does).
+  auto plan_voxel_of = [&solved_grid](const Vec3& p) {
+    auto cl = [](int v, int hi) { return v < 0 ? 0 : (v > hi ? hi : v); };
+    return solved_grid.index(
+        cl(static_cast<int>(std::floor((p.x - solved_grid.origin.x) / solved_grid.spacing)),
+           solved_grid.nx - 1),
+        cl(static_cast<int>(std::floor((p.y - solved_grid.origin.y) / solved_grid.spacing)),
+           solved_grid.ny - 1),
+        cl(static_cast<int>(std::floor((p.z - solved_grid.origin.z) / solved_grid.spacing)),
+           solved_grid.nz - 1));
+  };
+  // ── ★ THE DENSITY A STRUT IS DRAWN AT, ANYWHERE ──────────────────────────────
+  // The plan's cell where one covers the point; off the plan's cells (a strut reaching
+  // past its own cell's box) the posture's value at that voxel, which on a plan job IS
+  // this function's answer at that voxel's centre -- so the fallback is self-consistent
+  // rather than a second rule. Outside the mask it is the band floor, as before; those
+  // voxels are not certified, so no posture value applies to them.
+  // ── ★ K5: AND THE REACH IS COUNTED, NOT CLAIMED ──────────────────────────────
+  // Every radius query the generator makes lands in one of three places. The third is
+  // the one that must not happen on a plan that sent a rho with every cell: a strut or a
+  // node sized at core's BAND FLOOR, which is the thinnest the law allows, where the
+  // plan asked for something else. The generator is single-threaded (no parallel
+  // construct in lattice_gen.cpp), so plain counters are sound here.
+  long long rho_q_plan = 0, rho_q_posture = 0, rho_q_floor = 0;
+  auto plan_strut_rho_at = [&plan_cell_rho_at, &plan_voxel_of, &mask, &gf, &rho_q_plan,
+                            &rho_q_posture, &rho_q_floor](const Vec3& p) {
+    const double cell = plan_cell_rho_at(p);
+    if (cell > 0.0) { ++rho_q_plan; return cell; }
+    const std::size_t e = plan_voxel_of(p);
+    if (e < mask.size() && mask[e] && e < gf.posture.relative_density.size()) {
+      ++rho_q_posture;
+      return gf.posture.relative_density[e];
+    }
+    ++rho_q_floor;
+    return gf.band_rho_min;
+  };
+  // ── ★ K4: WHICH PLAN CELL AN EMITTED ELEMENT BELONGS TO ──────────────────────
+  // For the ledger, one element must land on exactly ONE cell -- unlike the density,
+  // where a shared node takes the max of its sharers. Every octet node sits on a cell
+  // plane, so the closed box finds several; the tally takes the lex-smallest sharer that
+  // is in the plan (group index, then k, j, i). Deterministic, and every element that
+  // touches the plan is attributed rather than filed as "unattributed".
+  // Returns false when no plan cell shares the point at all.
+  auto plan_cell_slot_at = [&plan_groups, &plan_occ](const Vec3& p, std::size_t* gout,
+                                                     std::size_t* cout) {
+    for (std::size_t gi = 0; gi < plan_groups.size(); ++gi) {
+      const SteppedCellGroup& g = plan_groups[gi];
+      const double tol = 1e-9 * g.size_mm;
+      const double fx = (p.x - g.origin.x) / g.size_mm;
+      const double fy = (p.y - g.origin.y) / g.size_mm;
+      const double fz = (p.z - g.origin.z) / g.size_mm;
+      const int bx = static_cast<int>(std::floor(fx));
+      const int by = static_cast<int>(std::floor(fy));
+      const int bz = static_cast<int>(std::floor(fz));
+      const bool ex = std::fabs(fx - std::round(fx)) <= tol;
+      const bool ey = std::fabs(fy - std::round(fy)) <= tol;
+      const bool ez = std::fabs(fz - std::round(fz)) <= tol;
+      for (int sz = (ez ? -1 : 0); sz <= 0; ++sz)
+        for (int sy = (ey ? -1 : 0); sy <= 0; ++sy)
+          for (int sx = (ex ? -1 : 0); sx <= 0; ++sx) {
+            const int ci = bx + sx, cj = by + sy, ck = bz + sz;
+            if (ci < 0 || cj < 0 || ck < 0 || ci >= g.nx || cj >= g.ny || ck >= g.nz)
+              continue;
+            const std::size_t at = (static_cast<std::size_t>(ck) * g.ny + cj) * g.nx + ci;
+            if (!plan_occ[gi][at]) continue;
+            // The cells list is ascending, so find this cell's index in it.
+            for (std::size_t n = 0; n < g.cells.size(); ++n)
+              if (g.cells[n][0] == ci && g.cells[n][1] == cj && g.cells[n][2] == ck) {
+                *gout = gi;
+                *cout = n;
+                return true;
+              }
+          }
+    }
+    return false;
+  };
+  // ── ★ K6 PART 2: ONE BOUNDARY PER REGION, CLIPPED TO WHAT THAT REGION OWNS ───
+  // Where two include prisms overlap, both regions' passes used to lay a lattice through
+  // the shared volume and the file carried two. Each region gets its own boundary,
+  // clipped by the owner rule (clip_to_owned_region), and its passes point at that.
+  //
+  // ★ A DEQUE, AND AT THIS SCOPE ON PURPOSE. `stepped_passes` holds raw pointers into
+  // these objects and outlives the block that builds them; an earlier cut declared them
+  // inside that block and the generator read freed memory. A deque rather than a vector
+  // because the pointers must stay valid as regions are added. Declared HERE, above the
+  // ledger's classifier, because that classifier asks the pass's own boundary whether
+  // the cell could overlap at all.
+  std::deque<LatticeBoundary> owned_boundaries;
+  std::map<int, const LatticeBoundary*> owned_boundary_for;
+
+  // ── ★ WHY A PLAN CELL GOT NO STRUT (reviewer's ruling 3, 2026-10-11) ─────────
+  // "152 of 4,198 cells have no strut" is a count, not a diagnosis, and the reviewer is
+  // right that any cell the PICTURE draws and core leaves empty is a mismatch. These are
+  // the causes core can actually distinguish, tested in this order so each cell is filed
+  // once, under the FIRST thing that would have stopped it:
+  //
+  //   outside_rect     the centre is outside the region's in-plane rectangle;
+  //   beyond_depth     in-plane but outside [0, depth] along the face normal;
+  //   outside_outline  inside the rectangle and the depth, but outside `outline_uv` --
+  //                    this is ruling 2's clip, and it is the app's outline deciding;
+  //   owned_elsewhere  inside this region, but another region owns the centre (K6);
+  //   no_material      inside and owned, but the optimizer left no printed material, or
+  //                    the final mask does not lattice it (the outline beam's band lands
+  //                    here, since it clears the mask);
+  //   never_generated  none of the above. The cell is inside, owned, printed and masked,
+  //                    and the generator still put nothing in it. THIS is the mismatch;
+  //                    every other row has a reason the app can see.
+  //
+  // Each test is core's own exported predicate, not a re-derivation: the containment is
+  // point_in_clearance_region, the outline is point_in_clearance_outline, the owner is
+  // stepped_region_owner.
+  enum class NoStrutCause { OutsideRect, BeyondDepth, OutsideOutline, OwnedElsewhere,
+                            NoMaterial, CellOverlapDropped, NeverGenerated };
+  auto classify_no_strut = [&](int region_id, const Vec3& centre, double size_mm) {
+    const ClearanceGeometry* R = nullptr;
+    for (std::size_t i = 0; i < lattice_roles.includes.size(); ++i) {
+      const ClearanceGeometry& g = lattice_roles.includes[i];
+      const int id = g.declared_region_id > 0 ? g.declared_region_id
+                                              : static_cast<int>(i) + 1;
+      if (g.valid && id == region_id) { R = &g; break; }
+    }
+    if (R == nullptr) return NoStrutCause::OutsideRect;   // no such region: not ours
+    const Vec3 d{centre.x - R->origin.x, centre.y - R->origin.y, centre.z - R->origin.z};
+    const double nl = std::sqrt(R->normal.x * R->normal.x + R->normal.y * R->normal.y +
+                                R->normal.z * R->normal.z);
+    const double sdep = nl > 0.0 ? (d.x * R->normal.x + d.y * R->normal.y +
+                                    d.z * R->normal.z) / nl
+                                 : 0.0;
+    const double du = d.x * R->u.x + d.y * R->u.y + d.z * R->u.z;
+    const double dw = d.x * R->w.x + d.y * R->w.y + d.z * R->w.z;
+    if (!(du >= R->u_lo && du <= R->u_hi && dw >= R->w_lo && dw <= R->w_hi))
+      return NoStrutCause::OutsideRect;
+    if (nl > 0.0 && !(sdep >= 0.0 && sdep <= R->depth))
+      return NoStrutCause::BeyondDepth;
+    if (!point_in_clearance_outline(*R, du, dw)) return NoStrutCause::OutsideOutline;
+    if (stepped_region_owner(centre, lattice_roles.includes) != region_id)
+      return NoStrutCause::OwnedElsewhere;
+    // ── ★ MATERIAL AND MASK, ON THE CELL'S OWN VOXELS ────────────────────────
+    // Voxels whose CENTRE lies inside the cell's box, and where the cell is smaller
+    // than a voxel and so contains no centre, the voxel the cell's own centre sits in.
+    //
+    // ★ MEASURED WRONG FIRST, and it mattered. The first cut took a +/-1 voxel
+    // neighbourhood, which for 68BF7B74's 2.578 mm cells on a 3.411 mm grid is a 10.2 mm
+    // box -- sixteen times the cell -- so `any_masked` was true almost everywhere and
+    // `no_material` almost never fired. 645 and 965 cells on that project's two arms
+    // came out as `never_generated`, i.e. as core's fault, when the question had simply
+    // been asked of the wrong voxels. A classifier that over-reaches reports its own
+    // reach as a defect.
+    bool any_masked = false;
+    const Vec3 lo{centre.x - 0.5 * size_mm, centre.y - 0.5 * size_mm,
+                  centre.z - 0.5 * size_mm};
+    const Vec3 hi{centre.x + 0.5 * size_mm, centre.y + 0.5 * size_mm,
+                  centre.z + 0.5 * size_mm};
+    auto vox_of = [&](double x, double o) {
+      return static_cast<int>(std::floor((x - o) / solved_grid.spacing));
+    };
+    const int i0 = vox_of(lo.x, solved_grid.origin.x), i1 = vox_of(hi.x, solved_grid.origin.x);
+    const int j0 = vox_of(lo.y, solved_grid.origin.y), j1 = vox_of(hi.y, solved_grid.origin.y);
+    const int k0 = vox_of(lo.z, solved_grid.origin.z), k1 = vox_of(hi.z, solved_grid.origin.z);
+    bool held_a_centre = false;
+    for (int k = k0; k <= k1 && !any_masked; ++k)
+      for (int j = j0; j <= j1 && !any_masked; ++j)
+        for (int i = i0; i <= i1 && !any_masked; ++i) {
+          if (i < 0 || j < 0 || k < 0 || i >= solved_grid.nx || j >= solved_grid.ny ||
+              k >= solved_grid.nz)
+            continue;
+          const Vec3 vc{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
+                        solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
+                        solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
+          if (vc.x < lo.x || vc.x > hi.x || vc.y < lo.y || vc.y > hi.y ||
+              vc.z < lo.z || vc.z > hi.z)
+            continue;                       // that voxel's centre is not in this cell
+          held_a_centre = true;
+          const std::size_t e = solved_grid.index(i, j, k);
+          if (e < mask.size() && mask[e]) any_masked = true;
+        }
+    if (!held_a_centre) {
+      // A cell smaller than a voxel holds no voxel centre at all: ask the voxel its own
+      // centre sits in, which is the voxel every other reader of this cell uses.
+      const int i = vox_of(centre.x, solved_grid.origin.x);
+      const int j = vox_of(centre.y, solved_grid.origin.y);
+      const int k = vox_of(centre.z, solved_grid.origin.z);
+      if (i >= 0 && j >= 0 && k >= 0 && i < solved_grid.nx && j < solved_grid.ny &&
+          k < solved_grid.nz) {
+        const std::size_t e = solved_grid.index(i, j, k);
+        any_masked = e < mask.size() && mask[e] != 0;
       }
     }
+    if (!any_masked) return NoStrutCause::NoMaterial;
+    // ── ★ AND CORE'S OWN CELL-OVERLAP PROOF ──────────────────────────────────
+    // `cell_may_overlap` is the generator's activation test: a cell whose box provably
+    // misses the allowed region is dropped WHOLE, before any strut is considered. That
+    // is a core decision, not a plan one, and it has to be told apart from "inside,
+    // owned, printed, masked and still empty" -- which is the only row that is a real
+    // mismatch. Measured first without this test: 647 and 971 cells on 68BF7B74's two
+    // arms came out as `never_generated`, which was true but useless.
+    //
+    // Asked on the boundary the PASS used -- the region's own owner-clipped copy where
+    // K6 built one -- so the answer is the one the generator acted on and not an
+    // approximation of it.
+    {
+      const Vec3 cmin{centre.x - 0.5 * size_mm, centre.y - 0.5 * size_mm,
+                      centre.z - 0.5 * size_mm};
+      auto ob = owned_boundary_for.find(region_id);
+      const LatticeBoundary& B =
+          ob != owned_boundary_for.end() ? *ob->second : boundary;
+      if (!B.cell_may_overlap(cmin, size_mm)) return NoStrutCause::CellOverlapDropped;
+    }
+    return NoStrutCause::NeverGenerated;
+  };
+  // Per group, per cell (in the group's own ascending order): what the generator laid
+  // there. Filled by the tap below, which fires once per emitted element.
+  std::vector<std::vector<long long>> plan_laid_struts, plan_laid_nodes;
+  long long plan_laid_unattributed = 0;
+  // Where the plan left a voxel's density to core's own grading, per voxel -- so the
+  // receipt can count the fallbacks PER REGION rather than leave them silent. A plan
+  // that sent a rho with every cell shows 0 on every region.
+  std::vector<char> plan_rho_from_law_flag;
+  if (!plan_groups.empty()) {
+    plan_occ.resize(plan_groups.size());
+    plan_cell_rho.resize(plan_groups.size());
+    for (std::size_t gi = 0; gi < plan_groups.size(); ++gi) {
+      const SteppedCellGroup& g = plan_groups[gi];
+      const std::size_t n = static_cast<std::size_t>(g.nx) * g.ny * g.nz;
+      plan_occ[gi].assign(n, 0);
+      plan_cell_rho[gi].assign(n, 0.0);
+      for (std::size_t ci = 0; ci < g.cells.size(); ++ci) {
+        const std::array<int, 3>& c = g.cells[ci];
+        const std::size_t at = (static_cast<std::size_t>(c[2]) * g.ny + c[1]) * g.nx + c[0];
+        plan_occ[gi][at] = 1;
+        if (ci < g.rho.size()) plan_cell_rho[gi][at] = g.rho[ci];
+      }
+    }
+    plan_laid_struts.resize(plan_groups.size());
+    plan_laid_nodes.resize(plan_groups.size());
+    for (std::size_t gi = 0; gi < plan_groups.size(); ++gi) {
+      plan_laid_struts[gi].assign(plan_groups[gi].cells.size(), 0);
+      plan_laid_nodes[gi].assign(plan_groups[gi].cells.size(), 0);
+    }
+    const std::vector<SteppedCellGroup>& pg = plan_groups;
+    const std::vector<std::vector<char>>& po = plan_occ;
+    mask = lattice_certification_mask_per_cell(
+        boundary, solved_grid, dens, printed_iso,
+        [&pg, &po](const Vec3& c, Vec3* cell_min, double* ce) {
+          for (std::size_t gi = 0; gi < pg.size(); ++gi) {
+            const SteppedCellGroup& g = pg[gi];
+            const int ci = static_cast<int>(std::floor((c.x - g.origin.x) / g.size_mm));
+            const int cj = static_cast<int>(std::floor((c.y - g.origin.y) / g.size_mm));
+            const int ck = static_cast<int>(std::floor((c.z - g.origin.z) / g.size_mm));
+            if (ci < 0 || cj < 0 || ck < 0 || ci >= g.nx || cj >= g.ny || ck >= g.nz)
+              continue;
+            if (!po[gi][(static_cast<std::size_t>(ck) * g.ny + cj) * g.nx + ci])
+              continue;
+            *cell_min = Vec3{g.origin.x + ci * g.size_mm, g.origin.y + cj * g.size_mm,
+                             g.origin.z + ck * g.size_mm};
+            *ce = g.size_mm;
+            return true;
+          }
+          return false;   // no cell of the plan covers it: certified SOLID
+        },
+        &dropped_by_overlap);
+    plan_mask = mask;
+    // ── ★ K3 (2): THE POSTURE IS THE PLAN'S, DENSITY AND ALL ────────────────────
+    // A mask without its density is half a posture. Measured on 570B38E2's Default
+    // Grade plan: with the plan's mask alone the run reached the certificate and
+    // `analyze_fixed_design` refused -- "lattice relative density 0.000000 is outside
+    // the certifiable octet band" -- because the density still came from the LAW, which
+    // had graded none of the voxels the plan latticed. So the certificate was being
+    // asked to credit the plan's struts at the law's density, and where the law kept a
+    // voxel solid that density is 0.
+    //
+    // The plan sends a rho PER CELL (ruling C), and that rho is what sizes the strut the
+    // run actually lays (the pass radius field reads it). The posture now reads the same
+    // number, so the certificate credits the geometry that was emitted rather than a
+    // second opinion about it. A cell that sent no rho -- every job written before that
+    // ruling -- falls back to the law's density for its voxels, exactly as the radius
+    // field does.
+    //
+    // This is the same substitution the organic path makes a few hundred lines below
+    // ("the posture the certification consumes is now the TRACED one"): the algorithm
+    // that laid the geometry down owns the posture, and nothing downstream branches.
+    std::vector<double> plan_rho(solved_grid.voxel_count(), 0.0);
+    plan_rho_from_law_flag.assign(solved_grid.voxel_count(), 0);
+    long long plan_rho_from_plan = 0, plan_rho_from_law = 0, plan_rho_absent = 0;
+    for (std::size_t e = 0; e < plan_rho.size(); ++e) {
+      if (!mask[e]) continue;
+      const int i = static_cast<int>(e % static_cast<std::size_t>(solved_grid.nx));
+      const int j = static_cast<int>((e / solved_grid.nx) % static_cast<std::size_t>(solved_grid.ny));
+      const int k = static_cast<int>(e / (static_cast<std::size_t>(solved_grid.nx) * solved_grid.ny));
+      const Vec3 c{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
+                   solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
+                   solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
+      const double rho = plan_cell_rho_at(c);   // ★ the ONE definition, above
+      if (rho > 0.0) { plan_rho[e] = rho; ++plan_rho_from_plan; continue; }
+      if (graded && e < gf.posture.relative_density.size() &&
+          gf.posture.relative_density[e] > 0.0) {
+        plan_rho[e] = gf.posture.relative_density[e];
+        plan_rho_from_law_flag[e] = 1;
+        ++plan_rho_from_law;
+        continue;
+      }
+      // ★ Finding 7: the law graded it, and only the swept plan's cover rule (a cell this
+      // plan does not lay) kept it solid.
+      if (graded && e < gf.cover_dropped_rho.size() && gf.cover_dropped_rho[e] > 0.0) {
+        plan_rho[e] = gf.cover_dropped_rho[e];
+        plan_rho_from_law_flag[e] = 1;
+        ++plan_rho_from_law;
+        continue;
+      }
+      ++plan_rho_absent;
+    }
+    // A can't-happen still refuses, and names what it refuses (the standing rule). A
+    // latticed voxel with no density on either side would reach the certificate as a
+    // zero and be refused there, by a sentence about the octet band that says nothing
+    // about the plan.
+    if (plan_rho_absent > 0)
+      throw JobError(
+          "lattice \"stepped_cells\": " + std::to_string(plan_rho_absent) +
+          " of the " + std::to_string(plan_rho_from_plan + plan_rho_from_law +
+                                      plan_rho_absent) +
+          " voxel(s) this plan lattices have no relative density on either side -- the "
+          "plan sent no \"rho\" for the cell that covers them and core's own grading "
+          "kept them solid, so there is no number to size the strut from or to certify "
+          "it at. Send a \"rho\" with every cell (the app's own demand map is what the "
+          "preview drew the struts from), or state a grading the law can apply here.");
+    gf.posture.mask = plan_mask;
+    gf.posture.relative_density = plan_rho;
+    std::fprintf(stderr,
+                 "[stepped] plan posture: %lld voxel(s) at the plan's own rho, %lld at "
+                 "the law's (cells that sent none), %lld covered voxel(s) dropped by the "
+                 "cell-overlap proof\n",
+                 plan_rho_from_plan, plan_rho_from_law, dropped_by_overlap);
+  } else {
+    mask = lattice_synthesis_domain(
+        boundary, solved_grid, dens, printed_iso, solved_grid.origin, cell,
+        graded ? gf.posture.mask : kNoPosture, &dropped_by_overlap);
   }
-  // ── ★ GRADE TO SOLID AT THE OUTLINE, for organic (see apply_organic_solid_rim) ──
+  // ── ★ GRADE TO SOLID AT THE OUTLINE, for organic (see organic_solid_rim_band) ──
+  // ★★ THE BAND IS COMPUTED HERE AND APPLIED AFTER THE TRACER (ruling G). It used to be
+  // cleared from the mask on this line, which took it out of the tracer's candidates and
+  // cut every strut back at the band's inner face. The preview keeps it as candidate, so
+  // its curves run THROUGH the band and weld into the solid. Tracing with the band IN and
+  // turning it solid afterwards makes the run draw what the picture shows.
+  std::vector<char> organic_rim_band;
   if (graded && R.algorithm == LatticeAlgorithm::Organic) {
     const double rim = job.grading.organic_solid_rim_mm < 0.0
                            ? job.grading.cell_min_mm : job.grading.organic_solid_rim_mm;
@@ -5644,10 +9230,15 @@ LatticeVariantOutcome lattice_one_variant(
     for (const JobLatticeRegion& r : job.lattice.regions)
       if (r.role == "include") nrms.push_back(r.normal);
     R.organic_solid_rim_mm = rim;
-    R.organic_solid_rim_voxels = static_cast<long long>(apply_organic_solid_rim(
-        solved_grid, mask, dens, printed_iso, region_ids_for_stepped, nrms, rim));
+    organic_rim_band =
+        organic_solid_rim_band(solved_grid, mask, region_ids_for_stepped, nrms, rim);
+    std::size_t band_voxels = 0;
+    for (char c : organic_rim_band) band_voxels += c ? 1 : 0;
+    R.organic_solid_rim_voxels = static_cast<long long>(band_voxels);
     if (std::getenv("TOPOPT_ORGANIC_TRACE"))
-      std::fprintf(stderr, "[rim] SOLID_RIM %.3g mm: %lld lattice voxels turned solid at the outline\n",
+      std::fprintf(stderr,
+                   "[rim] SOLID_RIM %.3g mm: %lld voxel(s) in the band, KEPT as tracer "
+                   "candidates and turned solid after the trace\n",
                    rim, R.organic_solid_rim_voxels);
   }
 
@@ -5671,25 +9262,49 @@ LatticeVariantOutcome lattice_one_variant(
     const std::vector<double> organic_stress = stress_tensor_for_organic(
         job, solved_grid, mask, region_ids_for_stepped, v.stress_tensor_field,
         &R.organic_synthetic);
-    organic = run_organic_step(job.lattice.outer_finish != "skin",
+    // ★ RULING H: mark the voxels of every region that was synthesised WHOLE, so the
+    // spacing window can leave them out of its statistics and hand them the middle.
+    const std::vector<char> synth_whole = organic_synthesised_whole_voxels(
+        R.organic_synthetic, region_ids_for_stepped, solved_grid.voxel_count());
+    organic = run_organic_step(lattice_shell_written(job.lattice),
                                solved_grid, dens, organic_stress, mask,
                                gf.posture.relative_density, gf.band_rho_min,
                                gf.band_rho_max, job.grading,
                                job.loads.present && job.loads.minimize_plastic,
                                v.applied_build_dir, printed_iso, 32,
-                               job.loads.layer_height_mm);
+                               job.loads.layer_height_mm, false, &synth_whole);
     // ★ THE WELD'S RASTER PITCH, so the generator can refuse to emit a base mat too
     // thin for that raster to KEEP. Set beside the layer height below for the same
     // reason: both are machine facts the generator cannot infer, and without this one
     // a mat under a voxel tall is erased silently — which is how a deliberately
     // thinned mat vanished from the slice entirely while every stat still read green.
+    // ★★ AND NOW THE BAND BECOMES SOLID (ruling G). The tracer has run with it IN, so the
+    // curves cross it and end inside what is about to be solid material -- welded, as the
+    // preview draws them. It leaves the lattice set here so the band PRINTS solid and the
+    // posture and certificate see solid, which is what the band is for. Both of the
+    // band's jobs are done; they simply happen in the right order now.
+    if (!organic_rim_band.empty()) {
+      const std::size_t cleared = clear_band_from_mask(mask, organic_rim_band);
+      clear_band_from_mask(organic.lat.mask, organic_rim_band);
+      for (std::size_t e = 0; e < organic_rim_band.size() &&
+                              e < organic.lat.relative_density.size(); ++e)
+        if (organic_rim_band[e]) organic.lat.relative_density[e] = 0.0;
+      if (std::getenv("TOPOPT_ORGANIC_TRACE"))
+        std::fprintf(stderr,
+                     "[rim] band applied AFTER the trace: %zu voxel(s) left the lattice "
+                     "set and print solid; the curves that crossed them are embedded\n",
+                     cleared);
+    }
     organic.lat.weld_pitch_hint_mm = job.lattice.welded_pitch_mm;
-    organic.lat.overhang_fillet = job.grading.organic_overhang_fillet;
     // ★ THE LAYER HEIGHT THE MACHINE WILL ACTUALLY USE. The mid-air-start check
     // rasters Z at this pitch; without it the check is COARSER THAN THE PRINTER
     // and passes parts that float for two real layers. 0 = not stated, and the
     // check says so on the receipt rather than inferring one.
     organic.lat.layer_height_mm = job.loads.layer_height_mm;
+    // printability repairs: stated, or they do not run (see OrganicLattice)
+    organic.lat.base_mat = job.grading.organic_base_mat;
+    organic.lat.fill_mat = job.grading.organic_fill_mat;
+    organic.lat.trim_below_base = job.grading.organic_trim_below_base;
     if (!organic.ran || organic.lat.report.latticed_voxels == 0) {
       // Same posture as the law's own L4 refusal: no object was produced, nothing
       // was written, and the caller decides whether that kills the run or skips a
@@ -5725,6 +9340,22 @@ LatticeVariantOutcome lattice_one_variant(
     // The posture the certification consumes is now the TRACED one.
     gf.posture.mask = organic.lat.mask;
     gf.posture.relative_density = organic.lat.relative_density;
+    // ★ AND "TRACED" MEANS BEFORE THE TRIM PASSES, WHICH IS NOT A FREE CHOICE. This
+    // density is the tracer's own snapshot; the clip to the part, the node merge, the
+    // support pass, the prune, the stranded drop, the finish and the base trim all run
+    // AFTERWARDS and on a SEPARATE span list (`organic_spans`, "the POST-CLIP spans...
+    // rather than the traced intent"), so nothing refreshes it. Whatever those passes
+    // remove, the certificate still believes is there. The volume it implies is printed
+    // here so it can be compared with the shipped file's own -- measured on the M2 stand,
+    // and the gap is a third of the material.
+    {
+      double cert_vol = 0.0;
+      const double vox = solved_grid.spacing * solved_grid.spacing * solved_grid.spacing;
+      for (std::size_t e = 0; e < gf.posture.relative_density.size(); ++e)
+        if (e < gf.posture.mask.size() && gf.posture.mask[e])
+          cert_vol += gf.posture.relative_density[e];
+      organic_traced_material_mm3 = cert_vol * vox;
+    }
     // ★ `cell_size_field` IS LEFT EMPTY ON PURPOSE (§3a). An organic lattice has no
     // cells, and filling this with the SEPARATION would silently re-point the
     // certification's cells-per-member guard at the curve-crossing count — the exact
@@ -5743,6 +9374,381 @@ LatticeVariantOutcome lattice_one_variant(
     gf.rho_max_used = organic.lat.report.rho_max_emitted;
   }
 
+  // ── ★ RULING B: THE SOLID OUTLINE BEAM (brief §1.5) ────────────────────────
+  // Organic grades to solid at the outline through organic_solid_rim_mm; with the
+  // shape grade on, the octet does the same thing with a beam whose width is DERIVED
+  // (lattice_outline_beam_mm) rather than stated, so the preview and the run cannot
+  // hold different numbers for it. The beam is centred on the outline, so it reaches
+  // beam/2 inward, plus the bleed at a wide band.
+  //
+  // The band walk is the one organic already uses: a 6-connected flood inward from
+  // every lattice voxel that has a non-lattice neighbour IN THE FACE PLANE. On a voxel
+  // grid that IS a true parallel offset of the outline, and unlike a polygon offset it
+  // cannot self-overlap at a corner -- which is the property §1.5 asks for.
+  // ── ★ D10/E3: WHAT THE GRADE LEFT, counted BEFORE anything downstream clears it ──
+  // `region_ungradeable` above answers "could the law lattice anything at all". It runs
+  // BEFORE the outline beam, and the beam can take every voxel the law kept. Keeping the
+  // count here is what lets the refusal below name which of the two emptied the mask,
+  // instead of blaming the grade for the beam's work.
+  std::size_t latticed_after_grade = 0;
+  if (graded)
+    for (char m : mask)
+      if (m) ++latticed_after_grade;
+
+  // ★ E3: THE SHAPE GRADE PER REGION. A region's own switch and band replace the
+  // part's for the voxels it owns (e3_owner); a voxel no region owns keeps the part's.
+  // When no region states one, `e3_shape` is false and the block below is the part-wide
+  // beam, byte for byte.
+  bool e3_shape = false;
+  for (const JobLatticeRegion& r : e3_jobs)
+    if (r.shape_grade >= 0 || r.shape_grade_band_mm >= 0.0) e3_shape = true;
+  auto shape_on = [&](int id) {
+    if (id >= 1 && static_cast<std::size_t>(id) <= e3_jobs.size() &&
+        e3_jobs[static_cast<std::size_t>(id - 1)].shape_grade >= 0)
+      return e3_jobs[static_cast<std::size_t>(id - 1)].shape_grade == 1;
+    return job.grading.shape_grade;
+  };
+  auto band_of = [&](int id) {
+    if (id >= 1 && static_cast<std::size_t>(id) <= e3_jobs.size() &&
+        e3_jobs[static_cast<std::size_t>(id - 1)].shape_grade_band_mm >= 0.0)
+      return e3_jobs[static_cast<std::size_t>(id - 1)].shape_grade_band_mm;
+    return job.grading.shape_grade_band_mm;
+  };
+  // ★ (d), ruling 11-06: where the lattice belongs to no region -- a lattice with no
+  // include regions, or lattice.whole_part's -- the outline is the part's own surface, so
+  // the walk seeds those voxels from it. Not otherwise: a voxel no prism owns inside a
+  // job with includes (a "region"-kind include) has a face this walk cannot see.
+  const bool part_outline = e3_jobs.empty() || job.lattice.whole_part;
+  bool any_shape = job.grading.shape_grade;
+  if (e3_shape)
+    for (std::size_t i = 0; i < e3_jobs.size(); ++i)
+      if (shape_on(static_cast<int>(i) + 1)) any_shape = true;
+  // ★ ruling 2: the solid outline beam is STEPPED's alone now; the doubled lattice's
+  // shape grade is the band grade_lattice built (band_* above).
+  const bool beam_algorithm = R.algorithm == LatticeAlgorithm::Stepped;
+  if (graded && beam_algorithm && e3_shape && any_shape) {
+    const double beam =
+        lattice_outline_beam_mm(job.grading.min_extrudable_width_mm, solved_grid.spacing);
+    // The walk seeds from each region's own face plane, so it reads the E3 owner map
+    // and the E3 regions' normals (the includes, or lattice.whole_part's regions).
+    std::vector<Vec3> nrms;
+    for (const JobLatticeRegion& r : e3_jobs) nrms.push_back(r.normal);
+    // One band walk per distinct band width, each kept only where the owning region
+    // (or the part, where none owns the voxel) has the shape grade on at that width.
+    std::vector<double> widths;
+    auto want = [&](std::size_t e) {
+      const int id = e < e3_owner.size() ? e3_owner[e] : 0;
+      return shape_on(id) ? band_of(id) : -1.0;
+    };
+    for (std::size_t e = 0; e < mask.size(); ++e)
+      if (mask[e]) {
+        const double b = want(e);
+        if (b >= 0.0 && std::find(widths.begin(), widths.end(), b) == widths.end())
+          widths.push_back(b);
+      }
+    std::vector<char> beam_band(mask.size(), 0);
+    double inward_max = 0.0, bleed_max = 0.0;
+    for (const double b : widths) {
+      const double bleed = lattice_outline_bleed_mm(b);
+      const double inward = beam + bleed;
+      inward_max = std::max(inward_max, inward);
+      bleed_max = std::max(bleed_max, bleed);
+      const std::vector<char> band = organic_solid_rim_band(
+          solved_grid, mask, e3_owner, nrms, inward, part_outline);
+      for (std::size_t e = 0; e < band.size(); ++e)
+        if (band[e] && want(e) == b) beam_band[e] = 1;
+    }
+    const std::size_t cleared = clear_band_from_mask(mask, beam_band);
+    clear_band_from_mask(gf.posture.mask, beam_band);
+    for (std::size_t e = 0; e < beam_band.size() &&
+                            e < gf.posture.relative_density.size(); ++e)
+      if (beam_band[e]) gf.posture.relative_density[e] = 0.0;
+    R.outline_beam_mm = beam;
+    R.outline_bleed_mm = bleed_max;
+    R.outline_beam_voxels = static_cast<long long>(cleared);
+    R.outline_inward_mm = inward_max;
+    std::fprintf(stderr,
+                 "[outline] per region: solid beam %.4f mm, up to %.4f mm inward over %zu "
+                 "band width(s) | %zu voxel(s) turned solid\n",
+                 beam, inward_max, widths.size(), cleared);
+  } else if (graded && beam_algorithm && !e3_shape && job.grading.shape_grade) {
+    const double beam =
+        lattice_outline_beam_mm(job.grading.min_extrudable_width_mm, solved_grid.spacing);
+    const double bleed = lattice_outline_bleed_mm(job.grading.shape_grade_band_mm);
+    // ★ THE DEPTH, SETTLED BY THE APP'S OWN ALGEBRA (2026-09-20). The beam is a
+    // ribbon lying 0..beam INWARD from the outline -- not centred on it, which is what
+    // this assumed first -- and the bleed is solid fill laid over 0..beam+bleed on top
+    // of the lattice. §1.5's dRegion line SHRINKS the latticed set to >= beam/2; it
+    // does not extend it. So the printed union is
+    //
+    //     solid(0 .. beam+bleed)  U  lattice(>= beam/2)
+    //   = solid(0 .. beam+bleed)  U  lattice(>= beam+bleed)
+    //
+    // because the solid covers everything between. The lattice the preview draws
+    // inside the ribbon is BURIED, and burying it changes nothing that prints. Which
+    // means core needs no separate strut clip at all: clipping the lattice at
+    // beam+bleed -- which is what taking these voxels out of the mask does -- yields
+    // the same union the preview yields, and certifies the same object. The app's
+    // words: "Either certifies the same union."
+    const double inward = beam + bleed;
+    std::vector<Vec3> nrms;
+    for (const JobLatticeRegion& r : job.lattice.regions)
+      if (r.role == "include") nrms.push_back(r.normal);
+    const std::vector<char> beam_band = organic_solid_rim_band(
+        solved_grid, mask, region_ids_for_stepped, nrms, inward, part_outline);
+    const std::size_t cleared = clear_band_from_mask(mask, beam_band);
+    clear_band_from_mask(gf.posture.mask, beam_band);
+    for (std::size_t e = 0; e < beam_band.size() &&
+                            e < gf.posture.relative_density.size(); ++e)
+      if (beam_band[e]) gf.posture.relative_density[e] = 0.0;
+    // ── ★ THE BAND'S OWN VOXELS, EXPORTED (reviewer's ruling 4a, 2026-10-10) ────
+    // #354 is measuring how many of these lie inside the PREVIEW's solid band, and the
+    // two bands are not the same width: the formula takes the VOXEL, and the two sides
+    // have different voxels (1.719 mm in the preview, 3.411 mm here on 570B38E2). It
+    // needs the centres to do that, so here they are -- behind an env var, like every
+    // other diagnostic dump in this file, because it is evidence and not an output.
+    //
+    // ★ AND IT STATES max_steps, which is the defect: `floor(inward / spacing)` is 0 on
+    // his grid, so the flood never advances and the band is the SEED LAYER -- one voxel,
+    // 3.4106 mm, where the rule computes 2.0553. Every width from just above 0 to one
+    // whole voxel gives the same band, so the derived number has no effect on his part.
+    if (const char* bp = std::getenv("TOPOPT_BEAM_BAND_DUMP")) {
+      std::ofstream bf(bp);
+      if (bf) {
+        bf.setf(std::ios::fmtflags(0), std::ios::floatfield);
+        bf.precision(10);
+        bf << "# the outline beam's band, as core applies it\n"
+           << "# GRID <origin.x> <origin.y> <origin.z> <spacing> <nx> <ny> <nz>\n"
+           << "# RULE <bead_mm> <voxel_mm> <band_mm> <beam_mm> <bleed_mm> <inward_mm> "
+              "<max_steps>\n"
+           << "#   beam = max(2*bead, clamp(0.35*voxel, 0.10, 0.35) + 0.5*voxel)\n"
+           << "#   bleed = band >= 25 ? 0.5*(band-15) : 0      inward = beam + bleed\n"
+           << "#   max_steps = floor(inward/spacing): 0 means the band is the SEED LAYER\n"
+           << "#   (lattice voxels with a non-lattice 6-neighbour IN the face plane,\n"
+           << "#    |dir.normal| < 0.5; the two directions along the normal are exempt)\n"
+           << "# BAND <i> <j> <k> <cx> <cy> <cz> <region_id>   centres in model mm\n";
+        bf << "GRID " << solved_grid.origin.x << ' ' << solved_grid.origin.y << ' '
+           << solved_grid.origin.z << ' ' << solved_grid.spacing << ' '
+           << solved_grid.nx << ' ' << solved_grid.ny << ' ' << solved_grid.nz << '\n';
+        bf << "RULE " << job.grading.min_extrudable_width_mm << ' '
+           << solved_grid.spacing << ' ' << job.grading.shape_grade_band_mm << ' '
+           << beam << ' ' << bleed << ' ' << inward << ' '
+           << static_cast<int>(std::floor(inward / solved_grid.spacing + 1e-9)) << '\n';
+        std::size_t wrote = 0;
+        for (int k = 0; k < solved_grid.nz; ++k)
+          for (int j = 0; j < solved_grid.ny; ++j)
+            for (int i = 0; i < solved_grid.nx; ++i) {
+              const std::size_t e = solved_grid.index(i, j, k);
+              if (e >= beam_band.size() || !beam_band[e]) continue;
+              bf << "BAND " << i << ' ' << j << ' ' << k << ' '
+                 << (solved_grid.origin.x + (i + 0.5) * solved_grid.spacing) << ' '
+                 << (solved_grid.origin.y + (j + 0.5) * solved_grid.spacing) << ' '
+                 << (solved_grid.origin.z + (k + 0.5) * solved_grid.spacing) << ' '
+                 << (e < region_ids_for_stepped.size() ? region_ids_for_stepped[e] : 0)
+                 << '\n';
+              ++wrote;
+            }
+        std::printf("beam band: %zu voxel(s) written to %s\n", wrote, bp);
+      }
+    }
+    R.outline_beam_mm = beam;
+    R.outline_bleed_mm = bleed;
+    R.outline_beam_voxels = static_cast<long long>(cleared);
+    R.outline_inward_mm = inward;
+    std::fprintf(stderr,
+                 "[outline] solid beam %.4f mm (bead %.3f, voxel %.3f) + bleed %.4f mm "
+                 "(band %.3f) = %.4f mm inward | %zu voxel(s) turned solid\n",
+                 beam, job.grading.min_extrudable_width_mm, solved_grid.spacing, bleed,
+                 job.grading.shape_grade_band_mm, inward, cleared);
+    // ★ THE ONE PLACE THIS IS NOT LITERALLY THE PREVIEW: the preview keeps lattice in
+    // beam/2 .. beam+bleed and covers it with solid; core does not generate it there at
+    // all. The printed union is identical by the algebra above. The difference that
+    // could still matter is the CERTIFICATE: a strut buried in solid is tied to it over
+    // its buried length, while a strut clipped at the solid's face touches it only at
+    // the face. Core's octet certificate ties on contact, so both tie -- but if a
+    // future certificate asks for embedment depth, this is the line to revisit.
+  }
+
+  // ── ★ K3 (3): THE SOLID REMAINDER PER REGION, STATED ─────────────────────────
+  // What the plan left solid inside each include region: printed voxels the region owns
+  // that the final mask does not lattice. The partial-depth strip -- cells that stop
+  // short of the region's depth -- is exactly this number, so a run that silently
+  // latticed it, or silently left it as air, is visible in the receipt instead of only
+  // in the mesh. Owner is the K6 rule (nearest face plane, tie to the lower DECLARED
+  // id), so a voxel in two prisms is counted once.
+  //
+  // MEASURED HERE, not at the mask's construction, because the mask is not final until
+  // the outline beam has run: on 570B38E2 the beam turns 804 of the plan's own voxels
+  // solid, and those belong in the remainder.
+  if (!plan_groups.empty()) {
+    const double vox_mm3 =
+        solved_grid.spacing * solved_grid.spacing * solved_grid.spacing;
+    std::map<int, long long> solid_vox, latticed_vox, law_rho_vox, outside_vox;
+    std::map<int, long long> outside_rect_vox, outside_depth_vox, outside_outline_vox,
+        outside_owned_vox, outside_other_vox;
+    for (int k = 0; k < solved_grid.nz; ++k)
+      for (int j = 0; j < solved_grid.ny; ++j)
+        for (int i = 0; i < solved_grid.nx; ++i) {
+          const std::size_t e = solved_grid.index(i, j, k);
+          if (!(dens[e] >= printed_iso)) continue;
+          const Vec3 c{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
+                       solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
+                       solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
+          const int owner = stepped_region_owner(c, lattice_roles.includes);
+          // ── ★ RULING 2'S RECEIPT: WHAT THE OUTLINE CLIP TAKES, PER REGION ──────
+          // A voxel its own region's plan cell covers, but which the region does NOT
+          // reach -- because the outline excludes it, or because the cell overhangs the
+          // prism. Before the clip, struts filled every one of these while the mask
+          // certified them SOLID; measured on outline_clip_quadrant, 2502.64 mm3 of
+          // lattice was drawn where 427.84 mm3 belongs. This is that set, exactly, and
+          // it is the CAUSE rather than a count of the effect -- one run cannot measure
+          // a counterfactual, and a number that needed two runs would not be a receipt.
+          {
+            const int rid = plan_cell_region_at(c);
+            if (rid != 0 && owner != rid) {
+              ++outside_vox[rid];
+              // ★ ruling 3b: and WHY the region does not reach it, by the same test
+              // order the per-cell classifier uses, so the volume is a diagnosis too.
+              switch (classify_no_strut(rid, c, solved_grid.spacing)) {
+                case NoStrutCause::OutsideRect:    ++outside_rect_vox[rid]; break;
+                case NoStrutCause::BeyondDepth:    ++outside_depth_vox[rid]; break;
+                case NoStrutCause::OutsideOutline: ++outside_outline_vox[rid]; break;
+                case NoStrutCause::OwnedElsewhere: ++outside_owned_vox[rid]; break;
+                default:                           ++outside_other_vox[rid]; break;
+              }
+            }
+          }
+          if (owner == 0) continue;            // outside every include region
+          if (mask[e]) ++latticed_vox[owner];
+          else ++solid_vox[owner];
+          if (mask[e] && e < plan_rho_from_law_flag.size() && plan_rho_from_law_flag[e])
+            ++law_rho_vox[owner];
+          // ── ★ THE TRIPWIRE (ruling 1's condition) ──────────────────────────────
+          // The certificate may never credit a strut other than the one drawn. The
+          // posture's density at this voxel and the density the radius field sizes a
+          // strut from AT THIS VOXEL'S CENTRE come from one function, so they are equal
+          // by construction -- and this is the line that notices if a future edit makes
+          // them two functions again. Bit-exact: there is no arithmetic between them to
+          // justify a tolerance, and a tolerance here would hide exactly the drift it
+          // is meant to catch.
+          if (mask[e]) {
+            const double drawn = plan_strut_rho_at(c);
+            const double certified = e < gf.posture.relative_density.size()
+                                         ? gf.posture.relative_density[e]
+                                         : 0.0;
+            if (!(drawn == certified)) {
+              char buf[256];
+              std::snprintf(buf, sizeof buf,
+                            "region %d: the strut at (%.4f, %.4f, %.4f) is DRAWN at "
+                            "relative density %.17g and CERTIFIED at %.17g",
+                            owner, c.x, c.y, c.z, drawn, certified);
+              throw JobError(
+                  std::string("lattice \"stepped_cells\": the posture and the strut "
+                              "radius disagree about one voxel's density, so the "
+                              "certificate would credit a strut other than the one in "
+                              "the file. ") + buf +
+                  ". These are read from one function (plan_strut_rho_at) and must be "
+                  "equal; refusing rather than certifying geometry that was not drawn.");
+            }
+          }
+        }
+    for (const SteppedPlanRegion& pr : plan_regions) {
+      char rbuf[160];
+      std::snprintf(rbuf, sizeof rbuf, "%sr%d=%.3f",
+                    R.plan_solid_remainder_mm3.empty() ? "" : ", ", pr.region_id,
+                    static_cast<double>(solid_vox[pr.region_id]) * vox_mm3);
+      R.plan_solid_remainder_mm3 += rbuf;
+      R.plan_latticed_mm3 += static_cast<double>(latticed_vox[pr.region_id]) * vox_mm3;
+      // ★ RULING 1'S CONDITION: the voxels whose density the plan did NOT supply, per
+      // region. A plan that sent a rho with every cell shows 0 everywhere; a non-zero
+      // entry says core's own grading is sizing and certifying that many of the plan's
+      // struts, which is a thing to know and not a thing to discover from a picture.
+      std::snprintf(rbuf, sizeof rbuf, "%sr%d=%lld",
+                    R.plan_rho_fallback_by_region.empty() ? "" : ", ", pr.region_id,
+                    law_rho_vox[pr.region_id]);
+      R.plan_rho_fallback_by_region += rbuf;
+      std::snprintf(rbuf, sizeof rbuf, "%sr%d=%.3f",
+                    R.clip_outside_region_mm3.empty() ? "" : ", ", pr.region_id,
+                    static_cast<double>(outside_vox[pr.region_id]) * vox_mm3);
+      R.clip_outside_region_mm3 += rbuf;
+      // ★ ruling 3b: the same volume, split by what put it out of the region's reach.
+      // mm3 on the same voxel basis, so the five add back to the figure above.
+      std::snprintf(rbuf, sizeof rbuf,
+                    "%sr%d: outline=%.3f depth=%.3f rect=%.3f owned=%.3f other=%.3f",
+                    R.clip_outside_by_cause_mm3.empty() ? "" : " | ", pr.region_id,
+                    static_cast<double>(outside_outline_vox[pr.region_id]) * vox_mm3,
+                    static_cast<double>(outside_depth_vox[pr.region_id]) * vox_mm3,
+                    static_cast<double>(outside_rect_vox[pr.region_id]) * vox_mm3,
+                    static_cast<double>(outside_owned_vox[pr.region_id]) * vox_mm3,
+                    static_cast<double>(outside_other_vox[pr.region_id]) * vox_mm3);
+      R.clip_outside_by_cause_mm3 += rbuf;
+    }
+    std::fprintf(stderr,
+                 "[stepped] plan solid remainder per region: %s mm3 | the plan lattices "
+                 "%.3f mm3\n",
+                 R.plan_solid_remainder_mm3.c_str(), R.plan_latticed_mm3);
+  }
+
+  // ── ★ D10/E3: AN EMPTY LATTICE IS A REFUSAL, ON EVERY ALGORITHM ──────────────
+  // (#354's core brief 2026-10-06; reviewer's ruling 2026-10-07.) The ungradeable test
+  // above fires only when the LAW could lattice nothing. When the law latticed voxels and
+  // something downstream took all of them -- the outline beam does exactly that, and on
+  // #354's 3418E167 it took all 4 that survived a swept grade -- the run used to carry on
+  // with an empty mask and finish. Doubled then reported "over 0 voxels" and
+  // "verdict: ACCEPTED" with interior_volume_mm3 0; Stepped refused a few lines below,
+  // but blamed region ids and recommended the algorithm that accepts nothing.
+  //
+  // A refusal costs a solve. THIS costs a print, so it is the more expensive of the two
+  // to get wrong, and it is checked here -- once, for every algorithm, at the point where
+  // the mask is final -- rather than in each algorithm's own branch.
+  //
+  // NOTE on "every algorithm": the beam cannot be the cause under organic, because
+  // `shape_grade` is refused at parse time for organic (job.cpp:2115). The check is still
+  // unconditional, so that anything else that empties the mask is caught by the same
+  // sentence rather than by nothing.
+  if (graded) {
+    std::size_t latticed_now = 0;
+    for (char m : mask)
+      if (m) ++latticed_now;
+    if (latticed_now == 0) {
+      R.ungradeable = true;
+      const long long cleared = R.outline_beam_voxels;
+      std::string why =
+          "no lattice remains to emit, so there is nothing to certify or print -- "
+          "refusing rather than writing a file with zero struts in it and calling it a "
+          "lattice. The grading law latticed " +
+          std::to_string(latticed_after_grade) + " of this variant's " +
+          std::to_string(gf.region_voxels) + " candidate voxels";
+      if (cleared > 0) {
+        // The beam is the cause, and its reach is the number to act on.
+        why += ", and then the outline beam turned " + std::to_string(cleared) +
+               " voxel(s) solid -- every one that was left. Its reach is " +
+               json_num(R.outline_beam_mm) + " mm of beam plus " +
+               json_num(R.outline_bleed_mm) + " mm of bleed = " +
+               json_num(R.outline_inward_mm) +
+               " mm inward from the region outline, set by \"shape_grade_band_mm\" " +
+               json_num(job.grading.shape_grade_band_mm) +
+               " mm; a band of 25 mm or more adds the bleed. Either narrow the band so "
+               "the beam does not reach across the region, or widen the region: a "
+               "lattice needs more depth than the solid beam that frames it.";
+      } else {
+        why +=
+            ", and nothing remained by the time the lattice was emitted. The outline beam "
+            "cleared none, so the loss is upstream of it.";
+      }
+      why += " The law's own fallbacks over the voxels it rejected: "
+             "member_too_thin_for_cell=" +
+             std::to_string(gf.fallback_member_too_thin) +
+             ", strut_unprintable_at_every_cell=" +
+             std::to_string(gf.fallback_strut_unprintable) +
+             ", irrecoverable_by_any_cell_size=" +
+             std::to_string(gf.fallback_irrecoverable_by_cell) + ".";
+      R.ungradeable_reason = why;
+      R.gf = gf;
+      return R;
+    }
+  }
+
   // ── ★ STEPPED (task 2026-08-21-organic-lattice, §4) ────────────────────────
   // One cell per DECLARED region, derived from that region's own FEA-driven density
   // and its own member width, taken VERBATIM. The per-voxel cell field it produces is
@@ -5750,6 +9756,16 @@ LatticeVariantOutcome lattice_one_variant(
   // certification's cells-per-member guard reads it correctly, unlike organic where
   // that field is deliberately left empty (§3a).
   std::vector<LatticeSteppedPass> stepped_passes;
+  // ── ★ K6 PART 2: ONE BOUNDARY PER REGION, CLIPPED TO WHAT THAT REGION OWNS ───
+  // Where two include prisms overlap, both regions' passes used to lay a lattice through
+  // the shared volume and the file carried two. Each region now gets its own boundary,
+  // clipped by the owner rule (clip_to_owned_region), and its passes point at that.
+  //
+  // ★ A DEQUE, AND HOISTED TO THIS SCOPE ON PURPOSE. `stepped_passes` holds raw pointers
+  // into these objects and outlives the block that builds them; an earlier cut declared
+  // them inside that block and the generator read freed memory. A deque rather than a
+  // vector because the pointers must stay valid as regions are added.
+  // (declared above the ledger's classifier, which asks the pass's own boundary)
   if (graded && R.algorithm == LatticeAlgorithm::Stepped) {
     R.stepped = run_stepped_step(solved_grid, dens, mask,
                                  gf.posture.relative_density, region_ids_for_stepped,
@@ -5767,7 +9783,8 @@ LatticeVariantOutcome lattice_one_variant(
           " region(s) had no measurable member width. Stepped derives ONE CELL PER "
           "DECLARED REGION from that region's own FEA density and member width, so a "
           "job whose latticed voxels carry no region id has nothing for it to key "
-          "on — use \"algorithm\": \"doubled\".";
+          "on. No algorithm is recommended here: the one this sentence used to name "
+          "accepts an empty lattice silently, which is the defect above.";
       R.gf = gf;
       return R;
     }
@@ -5804,6 +9821,19 @@ LatticeVariantOutcome lattice_one_variant(
   auto owner_cell = [&](int i, int j, int k) {
     const std::array<int, 3> c = owner_ijk(i, j, k);
     return cidx(c[0], c[1], c[2]);
+  };
+  // ★ Finding 7 (ruling 2026-11-02): EVERY cell covering voxel (i,j,k)'s volume, by the
+  // cover rule (cell_plan.hpp). This is what decides which cells a latticed voxel makes;
+  // `owner_cell` stays the one cell that answers "which cell certifies this voxel".
+  auto for_covering_cells = [&](int i, int j, int k, const auto& fn) {
+    const double s = solved_grid.spacing;
+    int i0, i1, j0, j1, k0, k1;
+    cells_covering_span(solved_grid.origin.x + i * s, s, Rdims.origin.x, cell, ncx, &i0, &i1);
+    cells_covering_span(solved_grid.origin.y + j * s, s, Rdims.origin.y, cell, ncy, &j0, &j1);
+    cells_covering_span(solved_grid.origin.z + k * s, s, Rdims.origin.z, cell, ncz, &k0, &k1);
+    for (int ck = k0; ck <= k1; ++ck)
+      for (int cj = j0; cj <= j1; ++cj)
+        for (int ci = i0; ci <= i1; ++ci) fn(cidx(ci, cj, ck));
   };
 
   // ── ADDED MATERIAL (task 2026-08-03-design-box-recertification). On a design-box
@@ -5852,15 +9882,22 @@ LatticeVariantOutcome lattice_one_variant(
           // accepted cannot be "dropped" by the policy, and counting it here is
           // what makes the two terms partition `outside_part` exactly.
           if (!mask[e]) ++added_rcpt.outside_never_masked;
-          if (kDesignBoxAddedMaterialKeptSolid) cell_has_added[owner_cell(i, j, k)] = 1;
+          // ★ Finding 7: every cell the voxel COVERS (the cover rule the activation uses),
+          // so no cell holding added material can come back on through a neighbour.
+          if (kDesignBoxAddedMaterialKeptSolid)
+            for_covering_cells(i, j, k, [&](std::size_t ce) { cell_has_added[ce] = 1; });
         }
-    // Pass 2 — clear those cells WHOLE.
+    // Pass 2 — clear those cells WHOLE: every masked voxel any such cell covers.
     if (kDesignBoxAddedMaterialKeptSolid)
       for (int k = 0; k < solved_grid.nz; ++k)
         for (int j = 0; j < solved_grid.ny; ++j)
           for (int i = 0; i < solved_grid.nx; ++i) {
             const std::size_t e = solved_grid.index(i, j, k);
-            if (!mask[e] || !cell_has_added[owner_cell(i, j, k)]) continue;
+            if (!mask[e]) continue;
+            bool covered_by_added = false;
+            for_covering_cells(i, j, k,
+                               [&](std::size_t ce) { covered_by_added |= cell_has_added[ce] != 0; });
+            if (!covered_by_added) continue;
             mask[e] = 0;
             ++added_rcpt.kept_solid_voxels;
             if (!in_part[e]) ++added_rcpt.outside_kept_solid;
@@ -5906,11 +9943,8 @@ LatticeVariantOutcome lattice_one_variant(
             const Vec3 c{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
                          solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
                          solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
-            for (std::size_t ri = 0; ri < lattice_roles.includes.size(); ++ri)
-              if (point_in_clearance_region(lattice_roles.includes[ri], c, 0.0)) {
-                void_region_id[e] = static_cast<int>(ri) + 1;
-                break;
-              }
+            // the OWNER rule (ruling 4): nearest face plane, tie to the lower id, never declaration order.
+            void_region_id[e] = stepped_region_owner(c, lattice_roles.includes);
           }
     }
     // `cell` is the SAME cell `lattice_certification_mask` was keyed with above
@@ -5935,6 +9969,214 @@ LatticeVariantOutcome lattice_one_variant(
       // the top of this function), so what the grading law did on the way here
       // travels out with the refusal.
       return R;
+    }
+  }
+
+  // ── ★ E3: "OFF" WITH NO DENSITY -- THE LIGHTEST ONE DENSITY THAT CERTIFIES ───────
+  // (ruling 11-06; agreed 11-04 19:31Z.) A region with grading "off" and no stated
+  // density took its graded PEAK: it certifies wherever the grade does, but it is the
+  // heaviest one density. Here each such region bisects its one density between the
+  // lightest that still PRINTS at its cells (lattice_min_density_for_strut) and that
+  // peak, the upper bound, certifying each trial with the run's own certificate
+  // (certify_posture, every scenario the lattice uses). The upper end is always one that
+  // certified, so the answer certifies whatever the curve's shape; regions are taken in
+  // turn, each against the ones before it at their found density. A region whose peak
+  // does not certify keeps it, and is named by label if the run's certificate refuses.
+  // The shipped certificate below still decides: this only chooses the density.
+  std::vector<LatticeRegionGraded> e3_search;
+  if (fixed_search != nullptr && graded) {  // a shipped-search pass: the density is chosen
+    e3_search = *fixed_search;
+    for (std::size_t e = 0; e < mask.size() && e < e3_owner.size(); ++e) {
+      const int id = e3_owner[e];
+      if (!mask[e] || id < 1 || static_cast<std::size_t>(id) > e3_search.size()) continue;
+      const LatticeRegionGraded& f = e3_search[static_cast<std::size_t>(id - 1)];
+      if (f.searched && f.search_certified) gf.posture.relative_density[e] = f.search_rho;
+    }
+  } else if (graded && !e3_overrides.empty() && R.algorithm != LatticeAlgorithm::Organic) {
+    std::vector<std::size_t> todo;
+    for (std::size_t i = 0; i < e3_overrides.size(); ++i)
+      if (e3_overrides[i].flat && !(e3_overrides[i].flat_rho > 0.0)) todo.push_back(i);
+    if (!todo.empty()) {
+      const LatticeCertContext scx =
+          lattice_cert_context(v, part_grid, domain, options, material, job);
+      std::vector<double> trial = gf.posture.relative_density;
+      double last_margin = 0.0;
+      auto certifies = [&]() {
+        const LatticePosture tp =
+            build_lattice_posture(lat_topo, solved_grid, cell, mask, 0.0, &trial);
+        const PostureCertification pc =
+            certify_posture(v, solved_grid, options, material, bcs, scx, &tp);
+        last_margin = pc.governing.margin_effective;
+        return pc.governing.accepted;
+      };
+      e3_search.assign(e3_jobs.size(), {});
+      for (const std::size_t i : todo) {
+        LatticeRegionGraded& rs = e3_search[i];
+        std::vector<std::size_t> vox;
+        double peak = 0.0, floor = lattice_rho_min(lat_topo);
+        bool prints = true;
+        for (std::size_t e = 0; e < mask.size() && e < e3_owner.size(); ++e) {
+          if (!mask[e] || e3_owner[e] != static_cast<int>(i) + 1) continue;
+          vox.push_back(e);
+          peak = std::max(peak, trial[e]);
+          const double S = e < gf.posture.cell_size_field.size() &&
+                                   gf.posture.cell_size_field[e] > 0.0
+                               ? gf.posture.cell_size_field[e]
+                               : cell;
+          const double pf = lattice_min_density_for_strut(
+              lat_topo, S, job.grading.min_extrudable_width_mm, job.grading.max_relative_density);
+          if (pf < 0.0) prints = false;
+          floor = std::max(floor, pf);
+        }
+        if (vox.empty()) continue;
+        if (!prints || floor > peak) floor = peak;
+        auto set = [&](double r) { for (const std::size_t e : vox) trial[e] = r; };
+        rs.searched = true;
+        rs.search_peak = peak;
+        rs.search_floor = floor;
+        set(peak);
+        ++rs.search_trials;
+        if (!certifies()) {  // the peak itself does not: keep it, the run decides
+          rs.search_rho = peak;
+          rs.search_margin = last_margin;
+          const std::string& lb = e3_jobs[i].label;
+          char tail[200];
+          std::snprintf(tail, sizeof tail,
+                        " (grading off, one density): the lattice does not certify even "
+                        "with it at its graded peak %.4g (margin %.3g), so no lighter one "
+                        "density was searched. Give it a density, or let it grade.",
+                        peak, last_margin);
+          R.one_density_refusal += std::string(R.one_density_refusal.empty() ? "" : " ") +
+                                   "Region " +
+                                   (lb.empty() ? std::to_string(i + 1) : "\"" + lb + "\"") + tail;
+          continue;
+        }
+        double good = peak, good_margin = last_margin, bad = floor;
+        if (floor < peak) {
+          set(floor);
+          ++rs.search_trials;
+          if (certifies()) {
+            good = floor;
+            good_margin = last_margin;
+          } else {
+            for (int it = 0; it < 6 && good - bad > 1e-3; ++it) {
+              const double mid = 0.5 * (good + bad);
+              set(mid);
+              ++rs.search_trials;
+              if (certifies()) {
+                good = mid;
+                good_margin = last_margin;
+              } else {
+                bad = mid;
+              }
+            }
+          }
+        }
+        set(good);
+        rs.search_rho = good;
+        rs.search_margin = good_margin;
+        rs.search_certified = true;
+        std::fprintf(stderr,
+                     "[one-density] region %zu: %.4f (printable floor %.4f, graded peak "
+                     "%.4f) certifies at margin %.4g, %d trial(s)\n",
+                     i + 1, good, floor, peak, good_margin, rs.search_trials);
+      }
+      gf.posture.relative_density = trial;
+    }
+  }
+
+  // ── ★ E2.4 PER REGION (ruling 11-06 (A)): AN OPEN REGION BESIDE COVERED ONES ─────
+  // A region's own outer_finish ("none" open | "shell" covered; "" = the part's). The
+  // open set O is the latticed voxels whose owner is open. When the lattice is mixed:
+  //   * the WALL: the covered latticed voxels within the slicer's wall of O (its loops x
+  //     line widths, else two line widths), in whole voxel layers rounded UP, leave the
+  //     lattice: the solid companion prints them and the certificate counts exactly them;
+  //   * the SHELL is re-meshed around the design minus O, so it closes over the covered
+  //     part and the wall, and leaves O open;
+  //   * O's cells at a free surface get the open floor (open_finish_cut_cells), below.
+  // A lattice all open or all covered keeps the part-wide path.
+  std::vector<char> region_open;  // O
+  TriangleMesh region_shell;
+  bool any_region_finish = false;
+  for (const JobLatticeRegion& r : e3_jobs)
+    if (!r.outer_finish.empty()) any_region_finish = true;
+  if (any_region_finish && !e3_owner.empty()) {
+    auto finish_of = [&](std::size_t e) {
+      const int id = e3_owner[e];
+      if (id >= 1 && static_cast<std::size_t>(id) <= e3_jobs.size() &&
+          !e3_jobs[static_cast<std::size_t>(id - 1)].outer_finish.empty())
+        return e3_jobs[static_cast<std::size_t>(id - 1)].outer_finish;
+      return job.lattice.outer_finish;
+    };
+    region_open.assign(mask.size(), 0);
+    long long n_open = 0, n_cov = 0;
+    for (std::size_t e = 0; e < mask.size() && e < e3_owner.size(); ++e) {
+      if (!mask[e]) continue;
+      if (finish_of(e) == "none") { region_open[e] = 1; ++n_open; }
+      else ++n_cov;
+    }
+    if (n_open > 0 && n_cov > 0) {
+      const double w = job.grading.min_extrudable_width_mm > 0.0 ? job.grading.min_extrudable_width_mm : 0.45;
+      const double inner = job.loads.wall_line_width_mm > 0.0 ? job.loads.wall_line_width_mm : w;
+      const double outer = job.loads.wall_line_width_outer_mm > 0.0 ? job.loads.wall_line_width_outer_mm : inner;
+      const double wall_mm = job.loads.wall_loops > 0 ? outer + (job.loads.wall_loops - 1) * inner : 2.0 * w;
+      const int layers = std::max(1, static_cast<int>(std::ceil(wall_mm / solved_grid.spacing - 1e-9)));
+      // walk `layers` face-steps from O into the covered lattice
+      std::vector<int> step(mask.size(), -1);
+      std::vector<std::size_t> q;
+      for (std::size_t e = 0; e < mask.size(); ++e)
+        if (region_open[e]) { step[e] = 0; q.push_back(e); }
+      const int di[6] = {1, -1, 0, 0, 0, 0}, dj[6] = {0, 0, 1, -1, 0, 0}, dk[6] = {0, 0, 0, 0, 1, -1};
+      std::vector<long long> wall_by_region(e3_jobs.size() + 1, 0), open_by_region(e3_jobs.size() + 1, 0);
+      for (std::size_t h = 0; h < q.size(); ++h) {
+        const std::size_t e = q[h];
+        if (step[e] >= layers) continue;
+        const int i = static_cast<int>(e % static_cast<std::size_t>(solved_grid.nx));
+        const int j = static_cast<int>((e / static_cast<std::size_t>(solved_grid.nx)) % static_cast<std::size_t>(solved_grid.ny));
+        const int k = static_cast<int>(e / (static_cast<std::size_t>(solved_grid.nx) * static_cast<std::size_t>(solved_grid.ny)));
+        for (int d = 0; d < 6; ++d) {
+          const int i2 = i + di[d], j2 = j + dj[d], k2 = k + dk[d];
+          if (i2 < 0 || j2 < 0 || k2 < 0 || i2 >= solved_grid.nx || j2 >= solved_grid.ny || k2 >= solved_grid.nz) continue;
+          const std::size_t e2 = solved_grid.index(i2, j2, k2);
+          if (!mask[e2] || region_open[e2] || step[e2] >= 0) continue;
+          step[e2] = step[e] + 1;
+          q.push_back(e2);
+        }
+      }
+      long long wall = 0;
+      for (std::size_t e = 0; e < mask.size(); ++e) {
+        if (region_open[e]) {
+          const int id = e3_owner[e];
+          ++open_by_region[static_cast<std::size_t>(id >= 1 && static_cast<std::size_t>(id) <= e3_jobs.size() ? id : 0)];
+        }
+        if (step[e] < 1 || region_open[e]) continue;
+        mask[e] = 0;                       // solid: the companion prints it
+        gf.posture.mask[e] = 0;
+        gf.posture.relative_density[e] = 0.0;
+        const int id = e3_owner[e];
+        ++wall_by_region[static_cast<std::size_t>(id >= 1 && static_cast<std::size_t>(id) <= e3_jobs.size() ? id : 0)];
+        ++wall;
+      }
+      // the shell around the design minus O
+      std::vector<double> minus_open = dens;
+      for (std::size_t e = 0; e < minus_open.size(); ++e)
+        if (region_open[e]) minus_open[e] = 0.0;
+      region_shell = marching_cubes(solved_grid, minus_open, printed_iso);
+      R.region_wall_mm = layers * solved_grid.spacing;
+      R.region_wall_voxels = wall;
+      for (std::size_t i = 0; i < e3_jobs.size(); ++i)
+        if (open_by_region[i + 1] > 0) {
+          const std::string& lb = e3_jobs[i].label;
+          R.open_regions.push_back({lb.empty() ? "Region " + std::to_string(i + 1) : lb,
+                                    open_by_region[i + 1]});
+        }
+      std::fprintf(stderr,
+                   "[finish] %lld latticed voxel(s) open beside %lld covered: a %d-layer "
+                   "(%.3f mm) wall of %lld voxel(s) closes the open part from the covered "
+                   "one; the shell re-meshed around the rest\n",
+                   n_open, n_cov, layers, layers * solved_grid.spacing, wall);
+    } else if (n_open == 0) {
+      region_open.clear();
     }
   }
 
@@ -5970,16 +10212,19 @@ LatticeVariantOutcome lattice_one_variant(
           const double cz =
               solved_grid.origin.z + (k + 0.5) * solved_grid.spacing;
           (void)cx; (void)cy; (void)cz;
-          const std::size_t ce = owner_cell(i, j, k);
-          cell_rho_sum[ce] += rho;
-          ++cell_rho_cnt[ce];
+          // ★ Finding 7: every cell covering the voxel, not the centre's alone.
+          for_covering_cells(i, j, k, [&](std::size_t ce) {
+            cell_rho_sum[ce] += rho;
+            ++cell_rho_cnt[ce];
+          });
           gsum += rho;
           ++gcnt;
         }
     gmean = gcnt > 0 ? gsum / static_cast<double>(gcnt) : gf.band_rho_min;
-    // Graded cell activation: a cell is latticed iff it holds >= 1 masked
-    // voxel — the graded silhouette DERIVES from the same mask the posture
-    // certifies, so file and certificate cannot disagree on where lattice is.
+    // Graded cell activation: a cell is latticed iff it COVERS >= 1 masked
+    // voxel (Finding 7's cover rule) — the graded silhouette DERIVES from the same
+    // mask the posture certifies, so file and certificate cannot disagree on where
+    // lattice is, and no part of a certified voxel is left without its cells.
     cell_latticed = [&cell_rho_cnt, cidx](int ci, int cj, int ck) {
       return cell_rho_cnt[cidx(ci, cj, ck)] > 0;
     };
@@ -5991,7 +10236,7 @@ LatticeVariantOutcome lattice_one_variant(
     const VoxelGrid& sgr = solved_grid;
     const std::vector<char>& mref = mask;
     const std::vector<double>& rref = gf.posture.relative_density;
-    G.field = [&sgr, &mref, &rref, &cell_rho_sum, &cell_rho_cnt, cidx, clampi,
+    G.field = [&sgr, &mref, &rref, &cell_rho_sum, &cell_rho_cnt, cidx, clampi, lat_topo,
                cell, gmean, ncx, ncy, ncz, Rdims](Vec3 p) {
       const int i = clampi(
           static_cast<int>(std::floor((p.x - sgr.origin.x) / sgr.spacing)),
@@ -6018,14 +10263,14 @@ LatticeVariantOutcome lattice_one_variant(
                   ? cell_rho_sum[cc] / static_cast<double>(cell_rho_cnt[cc])
                   : gmean;
       }
-      return 0.5 * octet_strut_diameter_mm(rho, cell);
+      return 0.5 * lattice_strut_diameter_mm(lat_topo, rho, cell);
     };
   } else {
     G.uniform_mm = job.lattice.strut_radius_mm;
     // rho the printed geometry (cell + uniform strut radius) implies, on the
     // library basis (the E5 preflight already proved it in-band).
     rho_uniform =
-        octet_relative_density(job.lattice.cell_mm, job.lattice.strut_radius_mm);
+        lattice_density_from_strut(lat_topo, job.lattice.cell_mm, job.lattice.strut_radius_mm);
     // UNIFORM cell activation under a DESIGN BOX (task
     // 2026-08-03-design-box-recertification). The uniform path has always passed a
     // NULL predicate, which means "lattice every cell the boundary cannot prove
@@ -6035,8 +10280,8 @@ LatticeVariantOutcome lattice_one_variant(
     // clears voxels the boundary still considers material: the certificate would
     // say solid and the generator would still write struts there. So under an
     // expanded domain the uniform path derives its cell set FROM THE FINAL MASK,
-    // exactly as the graded path above does — a cell is latticed iff it holds at
-    // least one masked voxel.
+    // exactly as the graded path above does — a cell is latticed iff it covers at
+    // least one masked voxel (Finding 7's cover rule).
     //
     // Off the box path this stays NULL and the emitted geometry is byte-identical
     // to every pre-task run (bar AI3). It is armed on `domain.expanded` rather
@@ -6068,11 +10313,13 @@ LatticeVariantOutcome lattice_one_variant(
     // under this task's bar 5.
     if (domain.expanded || roles_present) {
       uniform_cells.assign(ncells, 0);
+      // ★ Finding 7: every cell COVERING a masked voxel (the cover rule).
       for (int k = 0; k < solved_grid.nz; ++k)
         for (int j = 0; j < solved_grid.ny; ++j)
           for (int i = 0; i < solved_grid.nx; ++i)
             if (mask[solved_grid.index(i, j, k)])
-              uniform_cells[owner_cell(i, j, k)] = 1;
+              for_covering_cells(i, j, k,
+                                 [&](std::size_t ce) { uniform_cells[ce] = 1; });
       cell_latticed = [&uniform_cells, cidx](int ci, int cj, int ck) {
         return uniform_cells[cidx(ci, cj, ck)] != 0;
       };
@@ -6155,7 +10402,39 @@ LatticeVariantOutcome lattice_one_variant(
   //    the whole printability payoff. Empty (fewer than two levels) on every
   //    non-swept run, so the export takes the single-cell path unchanged.
   std::vector<LatticeLevelSpec> levels;
-  if (graded && gf.cell_plan.max_level > 0 &&
+  // ★ GRADING + A DESIGN BOX (ruling 2026-11-03 23:05, option (b)): which cells of each
+  // level, and of each plan pass below, cover a voxel of the FINAL certification mask --
+  // the mask the added-material policy has already cleared whole cells from. A level's
+  // or a pass's own occupancy comes from its plan, so without this a graded design-box
+  // run would write struts into cells the certificate calls solid. Built only on an
+  // expanded domain (the predicates are untouched off the box path, so the file is
+  // byte-identical); a deque, because the predicates hold pointers into it.
+  std::deque<std::vector<char>> certified_cover;
+  auto cover_of_mask = [&](const Vec3& o, double ce, int gnx, int gny, int gnz) {
+    std::vector<char> cov(static_cast<std::size_t>(gnx) * gny * gnz, 0);
+    const double s = solved_grid.spacing;
+    for (int k = 0; k < solved_grid.nz; ++k)
+      for (int j = 0; j < solved_grid.ny; ++j)
+        for (int i = 0; i < solved_grid.nx; ++i) {
+          if (!mask[solved_grid.index(i, j, k)]) continue;
+          int i0, i1, j0, j1, k0, k1;
+          cells_covering_span(solved_grid.origin.x + i * s, s, o.x, ce, gnx, &i0, &i1);
+          cells_covering_span(solved_grid.origin.y + j * s, s, o.y, ce, gny, &j0, &j1);
+          cells_covering_span(solved_grid.origin.z + k * s, s, o.z, ce, gnz, &k0, &k1);
+          for (int ck = k0; ck <= k1; ++ck)
+            for (int cj = j0; cj <= j1; ++cj)
+              for (int ci = i0; ci <= i1; ++ci)
+                cov[(static_cast<std::size_t>(ck) * gny + cj) * gnx + ci] = 1;
+        }
+    certified_cover.push_back(std::move(cov));
+    return &certified_cover.back();
+  };
+  // ★ RULING A: THE DYADIC PLANNER IS NOT CONSULTED WHEN THE LIST IS PRESENT. The app
+  // packed the cells and core lays THOSE down; running the ladder as well would emit a
+  // second, differently-anchored set of passes over the same voxels -- two lattices in
+  // one file. One code path for both algorithms means exactly this: whoever sent cells
+  // owns the arrangement.
+  if (graded && gf.cell_plan.max_level > 0 && job.lattice.stepped_cells.empty() &&
       !gf.posture.cell_size_field.empty()) {
     const CellSizePlan* pl = &gf.cell_plan;
     for (const CellLevelReport& lr : gf.cell_plan.levels) {
@@ -6164,11 +10443,24 @@ LatticeVariantOutcome lattice_one_variant(
       sp.level = lr.level;
       sp.cell_mm = lr.cell_size_mm;
       const int LV = lr.level;
-      sp.latticed = [pl, LV](int ci, int cj, int ck) {
-        const int bi = ci << LV, bj = cj << LV, bk = ck << LV;
-        if (bi >= pl->nx || bj >= pl->ny || bk >= pl->nz) return false;
-        return static_cast<int>(pl->level[pl->index(bi, bj, bk)]) == LV;
-      };
+      if (domain.expanded) {
+        const int lnx = (pl->nx + (1 << LV) - 1) >> LV, lny = (pl->ny + (1 << LV) - 1) >> LV,
+                  lnz = (pl->nz + (1 << LV) - 1) >> LV;
+        const std::vector<char>* cov =
+            cover_of_mask(pl->origin, pl->base_cell_mm * (1 << LV), lnx, lny, lnz);
+        sp.latticed = [pl, LV, cov, lnx, lny](int ci, int cj, int ck) {
+          const int bi = ci << LV, bj = cj << LV, bk = ck << LV;
+          if (bi >= pl->nx || bj >= pl->ny || bk >= pl->nz) return false;
+          return static_cast<int>(pl->level[pl->index(bi, bj, bk)]) == LV &&
+                 (*cov)[(static_cast<std::size_t>(ck) * lny + cj) * lnx + ci] != 0;
+        };
+      } else {
+        sp.latticed = [pl, LV](int ci, int cj, int ck) {
+          const int bi = ci << LV, bj = cj << LV, bk = ck << LV;
+          if (bi >= pl->nx || bj >= pl->ny || bk >= pl->nz) return false;
+          return static_cast<int>(pl->level[pl->index(bi, bj, bk)]) == LV;
+        };
+      }
       // Same fallback chain as the uniform graded field (owning voxel's graded
       // rho, else the level's own band floor) — evaluated at THIS level's cell.
       const VoxelGrid& sgr = solved_grid;
@@ -6177,8 +10469,8 @@ LatticeVariantOutcome lattice_one_variant(
       const double lcell = lr.cell_size_mm;
       const double rlo = gf.band_rho_min;
       sp.radius.nseg = 8;
-      sp.radius.uniform_mm = 0.5 * octet_strut_diameter_mm(rlo, lcell);
-      sp.radius.field = [&sgr, &mref, &rref, lcell, rlo](Vec3 p) {
+      sp.radius.uniform_mm = 0.5 * lattice_strut_diameter_mm(lat_topo, rlo, lcell);
+      sp.radius.field = [&sgr, &mref, &rref, lcell, rlo, lat_topo](Vec3 p) {
         auto cl = [](int val, int hi) { return val < 0 ? 0 : (val > hi ? hi : val); };
         const int i = cl(static_cast<int>(
             std::floor((p.x - sgr.origin.x) / sgr.spacing)), sgr.nx - 1);
@@ -6187,7 +10479,7 @@ LatticeVariantOutcome lattice_one_variant(
         const int k = cl(static_cast<int>(
             std::floor((p.z - sgr.origin.z) / sgr.spacing)), sgr.nz - 1);
         const std::size_t e = sgr.index(i, j, k);
-        return 0.5 * octet_strut_diameter_mm(mref[e] ? rref[e] : rlo, lcell);
+        return 0.5 * lattice_strut_diameter_mm(lat_topo, mref[e] ? rref[e] : rlo, lcell);
       };
       levels.push_back(std::move(sp));
     }
@@ -6202,7 +10494,110 @@ LatticeVariantOutcome lattice_one_variant(
   // the printed diameter is d(rho, cell), so a region at a coarser cell prints a
   // proportionally fatter strut at the same relative density.
   std::vector<std::vector<char>> stepped_cell_active;  // backing store, per pass
-  if (R.stepped_ran) {
+  // ── ★★ ANY-STEP: THE PASSES COME FROM THE PLAN THE JOB STATED ──────────────
+  // (brief of 2026-09-17 §2.1.) The legacy path below derives one cell per region and
+  // anchors every pass at the SOLVED GRID's origin. Any-step cells are not on that grid:
+  // each family sits on its own tile grid inside the region, so each (region, family)
+  // needs its own LatticeRegion.origin. That is the whole of the change -- LatticeRegion
+  // already carries an origin, a cell size and a per-cell predicate.
+  //
+  // ★ AND THE PLAN IS VALIDATED FIRST, WITH THE RUN REFUSED ON A BAD CELL. Core does not
+  // repack: the arrangement the maintainer approved on screen is the arrangement laid
+  // down, or the job stops and names the cell that broke the rule.
+  std::vector<std::vector<char>> anystep_active;
+  // ★ RULING C: per-pass backing store for the sent densities. A deque, not a vector:
+  // the radius lambda holds a pointer into it and a vector would rehome its elements on
+  // the next push_back, leaving every earlier pass reading freed memory.
+  // (the per-pass rho store that used to live here is gone: the radius field reads
+  //  plan_strut_rho_at, which owns the plan's rho -- ruling 1's condition)
+  if (!job.lattice.stepped_cells.empty()) {
+    const std::vector<SteppedCellGroup>& groups = plan_groups;   // K3: built above
+    anystep_active.resize(groups.size());
+    for (std::size_t gi = 0; gi < groups.size(); ++gi) {
+      const SteppedCellGroup& g = groups[gi];
+      LatticeRegion PR;
+      PR.origin = g.origin;                  // ★ the FAMILY's grid, not the solved grid's
+      PR.nx = g.nx; PR.ny = g.ny; PR.nz = g.nz;
+      PR.cell_mm = g.size_mm;
+      // ★ K6 part 2: this pass lays only where its own region owns the space. Built on
+      // demand, once per region, and shared by that region's passes.
+      const LatticeBoundary* pb = &boundary;
+      if (g.region_id > 0) {
+        auto it = owned_boundary_for.find(g.region_id);
+        if (it == owned_boundary_for.end()) {
+          owned_boundaries.push_back(boundary);
+          owned_boundaries.back().clip_to_owned_region(g.region_id);
+          it = owned_boundary_for.emplace(g.region_id, &owned_boundaries.back()).first;
+        }
+        pb = it->second;
+        // ★ K6 part 2: and the stub guard, on exactly the passes the ownership clip
+        // applies to. A piece left on the far side of an ownership boundary, shorter
+        // than it is thick, prints as a bump and carries no load; dropped, and counted.
+        // Only here, so a pass that is not owner-clipped keeps the 1 um sliver guard and
+        // its file is byte-identical.
+        PR.min_fragment_diameters = 1.0;
+      }
+      PR.boundary = pb;
+      std::vector<char>& act = anystep_active[gi];
+      act.assign(static_cast<std::size_t>(g.nx) * g.ny * g.nz, 0);
+      for (const std::array<int, 3>& c : g.cells)
+        act[(static_cast<std::size_t>(c[2]) * g.ny + c[1]) * g.nx + c[0]] = 1;
+      // ★ GRADING + A DESIGN BOX: a plan cell the added-material policy kept solid (it
+      // covers no voxel of the final mask) is not laid. Off the box path, untouched.
+      if (domain.expanded) {
+        const std::vector<char>* cov = cover_of_mask(g.origin, g.size_mm, g.nx, g.ny, g.nz);
+        for (std::size_t a = 0; a < act.size(); ++a) act[a] = act[a] && (*cov)[a];
+      }
+      const std::vector<char>* ap = &act;
+      const int anx = g.nx, any = g.ny, anz = g.nz;
+      PR.latticed = [ap, anx, any, anz](int ci, int cj, int ck) {
+        if (ci < 0 || cj < 0 || ck < 0 || ci >= anx || cj >= any || ck >= anz) return false;
+        return (*ap)[(static_cast<std::size_t>(ck) * any + cj) * anx + ci] != 0;
+      };
+      LatticeSteppedPass sp;
+      sp.region = PR;
+      sp.radius.nseg = 8;
+      // A cell's own density at its OWN size: the printed diameter is d(rho, cell), so a
+      // 9 and a 3 at the same relative density print proportionally different struts.
+      sp.radius.uniform_mm = 0.5 * lattice_strut_diameter_mm(lat_topo, gf.band_rho_min, g.size_mm);
+      const double gcell = g.size_mm;
+      // ── ★ RULING C: THE DENSITY CAME WITH THE CELL ─────────────────────────────
+      // When the job sent a rho per cell, the strut is sized from THAT and core adds no
+      // band term of its own. The quilt raise, the coarse-cell share and the aesthetic
+      // ceiling are the app's arithmetic over its own demand map; core re-deriving them
+      // from a field it grades differently is precisely how the two pictures drift. The
+      // LAW is still core's (octet_strut_diameter_mm) -- only the density is the app's.
+      //
+      // ── ★ AND RULING 1'S CONDITION (reviewer, 2026-10-10) ──────────────────────
+      // This block used to carry its OWN copy of that lookup -- a per-group rho grid, a
+      // per-group index, and its own voxel fallback -- beside the posture's copy a
+      // thousand lines up. Two implementations of one number, with nothing holding them
+      // together. It now calls `plan_strut_rho_at`, which is the same function the
+      // posture was built from, so the strut the certificate credits and the strut the
+      // file carries are sized from one number by construction rather than by agreement.
+      // The assertion over the final mask (above) is the tripwire on that.
+      sp.radius.field = [&plan_strut_rho_at, gcell, lat_topo](Vec3 pt) {
+        return 0.5 * lattice_strut_diameter_mm(lat_topo, plan_strut_rho_at(pt), gcell);
+      };
+      stepped_passes.push_back(std::move(sp));
+      // ★ §3 PARITY: the density and radius this pass ACTUALLY used, recorded as the
+      // pass is built rather than re-derived for the receipt afterwards -- a number
+      // re-derived can agree with the law while disagreeing with the geometry, which
+      // is the failure this whole section exists to make impossible. When the job sent
+      // a rho this IS that rho; when it did not, it is what core derived.
+      {
+        double rho_used = 0.0;
+        for (double rv : g.rho) if (rv > 0.0) { rho_used = rv; break; }
+        if (!(rho_used > 0.0)) rho_used = gf.band_rho_min;
+        char rbuf[96];
+        std::snprintf(rbuf, sizeof rbuf, "%s%.3f=%.4f/%.4f",
+                      R.anystep_rho_by_size.empty() ? "" : ", ", g.size_mm, rho_used,
+                      0.5 * lattice_strut_diameter_mm(lat_topo, rho_used, g.size_mm));
+        R.anystep_rho_by_size += rbuf;
+      }
+    }
+  }
+  if (R.stepped_ran && job.lattice.stepped_cells.empty()) {
     // Distinct cells in ASCENDING order — a fixed emission order (§5a).
     std::vector<double> distinct;
     for (const SteppedRegionCell& rc : R.stepped.cells) distinct.push_back(rc.cell_mm);
@@ -6215,27 +10610,28 @@ LatticeVariantOutcome lattice_one_variant(
       const int pnx = PR.nx, pny = PR.ny, pnz = PR.nz;
       std::vector<char>& active = stepped_cell_active[pi];
       active.assign(static_cast<std::size_t>(pnx) * pny * pnz, 0);
-      // A pass cell is active iff it holds a masked voxel whose region carries THIS
-      // pass's cell — derived from the SAME mask the posture certifies, so the file
-      // and the certificate cannot disagree about where lattice is (bar B7).
+      // A pass cell is active iff it COVERS a masked voxel whose region carries THIS
+      // pass's cell (Finding 7's cover rule) — derived from the SAME mask the posture
+      // certifies, so the file and the certificate cannot disagree about where
+      // lattice is (bar B7).
+      const double s = solved_grid.spacing;
       for (int k = 0; k < solved_grid.nz; ++k)
         for (int j = 0; j < solved_grid.ny; ++j)
           for (int i = 0; i < solved_grid.nx; ++i) {
             const std::size_t e = solved_grid.index(i, j, k);
             if (!mask[e]) continue;
             if (R.stepped.cell_field[e] != pcell) continue;
-            const int ci = static_cast<int>(
-                std::floor((solved_grid.origin.x + (i + 0.5) * solved_grid.spacing -
-                            PR.origin.x) / pcell));
-            const int cj = static_cast<int>(
-                std::floor((solved_grid.origin.y + (j + 0.5) * solved_grid.spacing -
-                            PR.origin.y) / pcell));
-            const int ck = static_cast<int>(
-                std::floor((solved_grid.origin.z + (k + 0.5) * solved_grid.spacing -
-                            PR.origin.z) / pcell));
-            if (ci < 0 || cj < 0 || ck < 0 || ci >= pnx || cj >= pny || ck >= pnz)
-              continue;
-            active[(static_cast<std::size_t>(ck) * pny + cj) * pnx + ci] = 1;
+            int i0, i1, j0, j1, k0, k1;
+            cells_covering_span(solved_grid.origin.x + i * s, s, PR.origin.x, pcell, pnx,
+                                &i0, &i1);
+            cells_covering_span(solved_grid.origin.y + j * s, s, PR.origin.y, pcell, pny,
+                                &j0, &j1);
+            cells_covering_span(solved_grid.origin.z + k * s, s, PR.origin.z, pcell, pnz,
+                                &k0, &k1);
+            for (int ck = k0; ck <= k1; ++ck)
+              for (int cj = j0; cj <= j1; ++cj)
+                for (int ci = i0; ci <= i1; ++ci)
+                  active[(static_cast<std::size_t>(ck) * pny + cj) * pnx + ci] = 1;
           }
       const std::vector<char>* ap = &active;
       PR.latticed = [ap, pnx, pny, pnz](int ci, int cj, int ck) {
@@ -6246,12 +10642,12 @@ LatticeVariantOutcome lattice_one_variant(
       LatticeSteppedPass sp;
       sp.region = PR;
       sp.radius.nseg = 8;
-      sp.radius.uniform_mm = 0.5 * octet_strut_diameter_mm(gf.band_rho_min, pcell);
+      sp.radius.uniform_mm = 0.5 * lattice_strut_diameter_mm(lat_topo, gf.band_rho_min, pcell);
       const VoxelGrid& sgr = solved_grid;
       const std::vector<char>& mref = mask;
       const std::vector<double>& rref = gf.posture.relative_density;
       const double rlo = gf.band_rho_min;
-      sp.radius.field = [&sgr, &mref, &rref, pcell, rlo](Vec3 pt) {
+      sp.radius.field = [&sgr, &mref, &rref, pcell, rlo, lat_topo](Vec3 pt) {
         auto cl = [](int val, int hi) { return val < 0 ? 0 : (val > hi ? hi : val); };
         const int i = cl(static_cast<int>(
             std::floor((pt.x - sgr.origin.x) / sgr.spacing)), sgr.nx - 1);
@@ -6260,14 +10656,116 @@ LatticeVariantOutcome lattice_one_variant(
         const int k = cl(static_cast<int>(
             std::floor((pt.z - sgr.origin.z) / sgr.spacing)), sgr.nz - 1);
         const std::size_t e = sgr.index(i, j, k);
-        return 0.5 * octet_strut_diameter_mm(mref[e] ? rref[e] : rlo, pcell);
+        return 0.5 * lattice_strut_diameter_mm(lat_topo, mref[e] ? rref[e] : rlo, pcell);
       };
       stepped_passes.push_back(std::move(sp));
     }
   }
 
   // (a) geometry — timed alone, so gen_fraction (P6) stays generation-only.
+  // ★ K5: the counters so far are the census's own tripwire queries; the generator's
+  // start here.
+  const long long rho_q_plan0 = rho_q_plan, rho_q_posture0 = rho_q_posture,
+                  rho_q_floor0 = rho_q_floor;
+  // ── ★ K4: THE LEDGER'S TAP, ARMED ONLY WHEN A PLAN RAN AND THE JOB ASKED ─────
+  // One callback per emitted element, attributing it to the plan cell it belongs to.
+  // Not armed on a run with no plan, and not armed without the key, so no existing
+  // job's artifacts or timings change. lattice_gen.hpp: observing never changes the
+  // emitted bytes.
+  std::function<void(LatticeGenElement, const Vec3&, const Vec3&, double)> laid_fn;
+  if (job.lattice.emit_plan_laid && !plan_groups.empty()) {
+    laid_fn = [&plan_cell_slot_at, &plan_laid_struts, &plan_laid_nodes,
+               &plan_laid_unattributed](LatticeGenElement k, const Vec3& a,
+                                        const Vec3& b, double) {
+      // A ball reports a == b and is attributed at its own centre; a strut fragment at
+      // its MIDPOINT, which is where the generator sampled its radius, so the ledger and
+      // the density agree about which cell a strut belongs to.
+      const bool ball = (k == LatticeGenElement::Node ||
+                         k == LatticeGenElement::AnchorNode);
+      const Vec3 at = ball ? a
+                           : Vec3{0.5 * (a.x + b.x), 0.5 * (a.y + b.y),
+                                  0.5 * (a.z + b.z)};
+      std::size_t gi = 0, ci = 0;
+      if (!plan_cell_slot_at(at, &gi, &ci)) { ++plan_laid_unattributed; return; }
+      if (ball) ++plan_laid_nodes[gi][ci];
+      else ++plan_laid_struts[gi][ci];
+    };
+  }
   const double tg0 = wall_seconds();
+  // ★ Finding 7: the emitted solid, for the volume check below (not on organic, which
+  // rebuilds its certified density from its own shipped spans).
+  LatticeSolidProbe solid_probe;
+  // ★ SKIN PER ZONE (ruling 11-08 (1)). Built only when a zone states its own skin; each
+  // anchor ball and chord then asks the zone it lies in, by the SAME membership test the
+  // owner map is built with (stepped_region_owner over e3_regions), so a chord's zone is
+  // the zone of its midpoint. Null otherwise: the part's skin everywhere, byte for byte.
+  LatticeSkinZones skin_zones;
+  bool any_zone_skin = false;
+  for (const JobLatticeRegion& r : e3_jobs)
+    if (!r.skin.empty()) any_zone_skin = true;
+  if (any_zone_skin) {
+    skin_zones.here.assign(e3_jobs.size() + 1,
+                           lattice_skin_here(job.lattice.skin, job.lattice.outer_finish));
+    for (std::size_t i = 0; i < e3_jobs.size(); ++i)
+      if (!e3_jobs[i].skin.empty())
+        skin_zones.here[i + 1] =
+            e3_jobs[i].skin == "diagrid" ? LatticeSkinHere::Woven : LatticeSkinHere::Off;
+    skin_zones.zone_at = [&e3_regions](const Vec3& p) {
+      return stepped_region_owner(p, e3_regions);
+    };
+  }
+  // ★ THE RIM ON A REAL PART (ruling 11-08 (A)). Built only when the part or a zone asks
+  // for "rim": the sharp edges of the surface this file ships (the design's own shell,
+  // v3.mesh), chains under one cell dropped, and each chain kept where its midpoint's skin
+  // is "rim" (a zone's own, else the part's).
+  LatticeMeshRimSpec mesh_rim;
+  FeatureEdgeStats rim_edges;
+  long long rim_other_skin = 0;
+  bool rim_asked = job.lattice.skin == "rim";
+  for (const JobLatticeRegion& r : e3_jobs)
+    if (r.skin == "rim") rim_asked = true;
+  std::string rim_rides;
+  if (rim_asked) {
+    // ★ WHICH SURFACE THE EDGES COME FROM: never the voxel grid, where every step would
+    // read as an edge. The part's own mesh when the part itself is latticed; else the
+    // design's finished surface (CAD-projected, as the plain export writes it) when the
+    // part is in hand; the design's shell (v3.mesh) only when neither is.
+    TriangleMesh finished_surface;
+    const TriangleMesh* src = part_surface;
+    rim_rides = "the part's own mesh";
+    if (src == nullptr && cad != nullptr) {
+      finished_surface =
+          variant_export_model_mesh(v, job.output, solved_grid, printed_iso, cad);
+      src = &finished_surface;
+      rim_rides = "the design's exported surface";
+    }
+    if (src == nullptr) {
+      src = &v.v3.mesh;
+      rim_rides = "the design's shell";
+    }
+    const std::vector<FeatureChain> chains =
+        mesh_feature_chains(*src, kRimFeatureAngleDeg, cell, &rim_edges);
+    for (const FeatureChain& c : chains) {
+      std::string sk = job.lattice.skin;
+      if (!e3_jobs.empty()) {
+        const int z = stepped_region_owner(feature_chain_midpoint(c), e3_regions);
+        if (z >= 1 && static_cast<std::size_t>(z) <= e3_jobs.size() &&
+            !e3_jobs[static_cast<std::size_t>(z - 1)].skin.empty())
+          sk = e3_jobs[static_cast<std::size_t>(z - 1)].skin;
+      }
+      if (sk != "rim") {
+        ++rim_other_skin;
+        continue;
+      }
+      mesh_rim.chains.push_back({c.points, c.left_normal, c.right_normal, c.convex, c.closed});
+    }
+    mesh_rim.line_width_mm =
+        graded ? job.grading.min_extrudable_width_mm : job.lattice.min_extrudable_width_mm;
+    // Seated in the shell the struts are clipped to: it sits up to about a voxel off the
+    // clean surface (half a voxel on a face, more where it chamfers a convex edge).
+    mesh_rim.max_seat_mm = 1.5 * solved_grid.spacing;
+    mesh_rim.station_spacing_mm = solved_grid.spacing;
+  }
   R.oc = export_latticed_variant(
       v, out_dir, job.output, job.lattice, solved_grid, boundary, cell, G,
       mask, cell_latticed,
@@ -6279,13 +10777,211 @@ LatticeVariantOutcome lattice_one_variant(
       levels.empty() ? nullptr : &levels,
       levels.empty() ? 0.0 : gf.cell_plan.base_cell_mm, printed_iso,
       organic.ran ? &organic.lat : nullptr,
-      stepped_passes.empty() ? nullptr : &stepped_passes);
+      stepped_passes.empty() ? nullptr : &stepped_passes,
+      job.grading.organic_strut_embed_mm, job.grading.organic_dual_contour,
+      job.grading.organic_dc_cell_mm, job.grading.organic_dc_tolerance_mm,
+      job.grading.organic_calibrate_on_shipped, laid_fn ? &laid_fn : nullptr,
+      organic.ran ? nullptr : &solid_probe,
+      graded ? job.grading.min_extrudable_width_mm : job.lattice.min_extrudable_width_mm,
+      region_shell.triangles.empty() ? nullptr : &region_shell,
+      any_zone_skin ? &skin_zones : nullptr, rim_asked ? &mesh_rim : nullptr,
+      part_surface);
+  if (rim_asked) {
+    // ★ TOPOPT_RIM_DUMP=<file>: the chains the rim was asked to ride, one "CHAIN" line each
+    // (closed, points, length mm) and then its points -- evidence and tests read where the
+    // rim went without a mesh parser. Never written unless asked.
+    if (const char* dump = std::getenv("TOPOPT_RIM_DUMP")) {
+      if (FILE* f = std::fopen(dump, "w")) {
+        for (const LatticeMeshRimChain& c : mesh_rim.chains) {
+          double len = 0.0;
+          for (std::size_t i = 0; i + 1 < c.points.size(); ++i) {
+            const Vec3& a = c.points[i];
+            const Vec3& b = c.points[i + 1];
+            len += std::sqrt((b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y) +
+                             (b.z - a.z) * (b.z - a.z));
+          }
+          std::fprintf(f, "CHAIN %d %zu %.6f\n", c.closed ? 1 : 0, c.points.size(), len);
+          for (const Vec3& p : c.points) std::fprintf(f, "%.6f %.6f %.6f\n", p.x, p.y, p.z);
+        }
+        std::fclose(f);
+      }
+    }
+    R.oc.rim_edges = rim_edges;
+    R.oc.rim_chains_other_skin = rim_other_skin;
+    R.oc.rim_line_width_mm = mesh_rim.line_width_mm;
+    R.oc.rim_rides = rim_rides;
+  }
   // ★ THE EXPORT'S RETURN REPLACES THE WHOLE OUTCOME, and the growth stats copied
   // onto it above went with it -- the receipt read growth_ran: false and zero ties on
   // every grown run until 2026-09-05. Copy them again, after the replacement.
   R.oc.growth = organic.growth;
   R.oc.growth_ran = organic.growth_ran;
   R.gen_seconds = wall_seconds() - tg0;
+  // ── ★ K4: THE PLAN AS LAID, PER REGION AND PER GROUP ─────────────────────────
+  // The summary (anystep_cells / regions / passes / histogram) says how many. This says
+  // WHICH, and it is built from `plan_groups` and the generator's own ledger rather than
+  // re-derived: every number here is either the plan as validated or what the tap
+  // counted, so the receipt cannot agree with the law while disagreeing with the file.
+  //
+  // ★ WHY THE PHASE IS HERE. `stepped_group_cells` buckets by (region, size, phase),
+  // where the phase is the group origin's offset modulo its OWN size -- two cells of the
+  // same size on offset grids are different passes, and nothing in the receipt said so.
+  // The app packs on the slot grid, so the phase against THAT grid is the number it can
+  // check its own packer against.
+  if (!plan_groups.empty()) {
+    R.plan_laid_unattributed = plan_laid_unattributed;
+    R.plan_laid_measured = (laid_fn != nullptr);
+    for (const SteppedPlanRegion& pr : plan_regions) {
+      RunInfo::PlanRegion rr;
+      rr.region_id = pr.region_id;
+      rr.base_cell_mm = pr.base_cell_mm;
+      rr.slot_origin_mm[0] = pr.slot_origin.x;
+      rr.slot_origin_mm[1] = pr.slot_origin.y;
+      rr.slot_origin_mm[2] = pr.slot_origin.z;
+      rr.slot_origin_stated = pr.slot_origin_stated;
+      rr.plane_origin_mm[0] = pr.plane_origin.x;
+      rr.plane_origin_mm[1] = pr.plane_origin.y;
+      rr.plane_origin_mm[2] = pr.plane_origin.z;
+      rr.normal[0] = pr.normal.x;
+      rr.normal[1] = pr.normal.y;
+      rr.normal[2] = pr.normal.z;
+      rr.depth_mm = pr.depth_mm;
+      // Sizes descending, the same order as the histogram, so the two can be read
+      // against each other entry for entry.
+      std::map<double, long long, std::greater<double>> per_size;
+      for (std::size_t gi = 0; gi < plan_groups.size(); ++gi) {
+        const SteppedCellGroup& g = plan_groups[gi];
+        if (g.region_id != pr.region_id) continue;
+        per_size[g.size_mm] += static_cast<long long>(g.cells.size());
+        RunInfo::PlanGroup gg;
+        gg.size_mm = g.size_mm;
+        gg.origin_mm[0] = g.origin.x;
+        gg.origin_mm[1] = g.origin.y;
+        gg.origin_mm[2] = g.origin.z;
+        const double off[3] = {g.origin.x - pr.slot_origin.x,
+                               g.origin.y - pr.slot_origin.y,
+                               g.origin.z - pr.slot_origin.z};
+        for (int a = 0; a < 3; ++a) {
+          double ph = std::fmod(off[a], g.size_mm);
+          if (ph < 0.0) ph += g.size_mm;        // into [0, size)
+          gg.phase_mm[a] = ph;
+        }
+        gg.nx = g.nx; gg.ny = g.ny; gg.nz = g.nz;
+        gg.cells = static_cast<long long>(g.cells.size());
+        if (gi < plan_laid_struts.size())
+          for (std::size_t n = 0; n < plan_laid_struts[gi].size(); ++n) {
+            gg.struts_laid += plan_laid_struts[gi][n];
+            gg.nodes_laid += plan_laid_nodes[gi][n];
+            if (plan_laid_struts[gi][n] != 0) continue;
+            ++gg.cells_with_no_strut;
+            // ★ ruling 3: and WHY, per cell, so the count is a diagnosis.
+            if (laid_fn == nullptr) continue;   // nobody counted: no cause to give
+            const std::array<int, 3>& c = g.cells[n];
+            const Vec3 ctr{g.origin.x + (c[0] + 0.5) * g.size_mm,
+                           g.origin.y + (c[1] + 0.5) * g.size_mm,
+                           g.origin.z + (c[2] + 0.5) * g.size_mm};
+            switch (classify_no_strut(g.region_id, ctr, g.size_mm)) {
+              case NoStrutCause::OutsideRect:    ++gg.no_strut_outside_rect; break;
+              case NoStrutCause::BeyondDepth:    ++gg.no_strut_beyond_depth; break;
+              case NoStrutCause::OutsideOutline: ++gg.no_strut_outside_outline; break;
+              case NoStrutCause::OwnedElsewhere: ++gg.no_strut_owned_elsewhere; break;
+              case NoStrutCause::NoMaterial:     ++gg.no_strut_no_material; break;
+              case NoStrutCause::CellOverlapDropped:
+                ++gg.no_strut_cell_overlap_dropped; break;
+              case NoStrutCause::NeverGenerated: ++gg.no_strut_never_generated; break;
+            }
+          }
+        rr.groups.push_back(std::move(gg));
+        rr.cells += static_cast<long long>(g.cells.size());
+      }
+      for (const auto& kv : per_size) {
+        char sb[48];
+        std::snprintf(sb, sizeof sb, "%s%.3f=%lld", rr.sizes.empty() ? "" : ", ",
+                      kv.first, kv.second);
+        rr.sizes += sb;
+      }
+      R.plan_by_region.push_back(std::move(rr));
+    }
+    // ── ★ THE LEDGER FILE (job key lattice.emit_plan_laid) ─────────────────────
+    // One line per PLAN cell -- laid or not -- so the app's classifier has core's own
+    // answer per cell instead of having to infer it from a mesh. Written only when the
+    // key is set; a run without it writes nothing, so no existing artifact changes.
+    if (job.lattice.emit_plan_laid) {
+      // The SAME base name the meshes use (lattice_base_name), so the ledger sits
+      // beside its own file and the rung is the file's rung, not one recomputed here.
+      const std::string lp =
+          join_path(out_dir, lattice_base_name(job.output.mesh_prefix,
+                                               v.requested_volume_fraction)) +
+          "_LAID.txt";
+      std::ofstream lf(lp);
+      if (lf) {
+        lf.setf(std::ios::fmtflags(0), std::ios::floatfield);
+        lf.precision(10);
+        lf << "# K4 laid plan. One LAID line per plan cell, in the plan's own order\n"
+              "# (region, then size descending, then cell index). CENTRE is the cell's\n"
+              "# centre in part coordinates. struts/nodes are what the GENERATOR emitted\n"
+              "# and attributed to that cell (a ball at its centre, a strut fragment at\n"
+              "# its midpoint, which is where its radius was sampled).\n"
+              "# LAID <region> <cx> <cy> <cz> <size_mm> <rho> <struts> <nodes> <why>\n"
+              "#   why is \"laid\" when struts > 0, else the FIRST thing that stopped it:\n"
+              "#   outside_rect | beyond_depth | outside_outline | owned_elsewhere |\n"
+              "#   no_material | cell_overlap_dropped | never_generated. Only\n"
+              "#   never_generated is unexplained --\n"
+              "#   every other value is a reason the app can see in its own data.\n";
+        lf << "PLAN " << plan_chk.cells << ' ' << plan_chk.regions << ' '
+           << plan_groups.size() << ' ' << plan_laid_unattributed << '\n';
+        for (std::size_t gi = 0; gi < plan_groups.size(); ++gi) {
+          const SteppedCellGroup& g = plan_groups[gi];
+          for (std::size_t n = 0; n < g.cells.size(); ++n) {
+            const std::array<int, 3>& c = g.cells[n];
+            const Vec3 ctr{g.origin.x + (c[0] + 0.5) * g.size_mm,
+                           g.origin.y + (c[1] + 0.5) * g.size_mm,
+                           g.origin.z + (c[2] + 0.5) * g.size_mm};
+            const long long st = gi < plan_laid_struts.size()
+                                     ? plan_laid_struts[gi][n] : 0;
+            const char* why = "laid";
+            if (st == 0) switch (classify_no_strut(g.region_id, ctr, g.size_mm)) {
+              case NoStrutCause::OutsideRect:    why = "outside_rect"; break;
+              case NoStrutCause::BeyondDepth:    why = "beyond_depth"; break;
+              case NoStrutCause::OutsideOutline: why = "outside_outline"; break;
+              case NoStrutCause::OwnedElsewhere: why = "owned_elsewhere"; break;
+              case NoStrutCause::NoMaterial:     why = "no_material"; break;
+              case NoStrutCause::CellOverlapDropped:
+                why = "cell_overlap_dropped"; break;
+              case NoStrutCause::NeverGenerated: why = "never_generated"; break;
+            }
+            lf << "LAID " << g.region_id << ' ' << ctr.x << ' ' << ctr.y << ' '
+               << ctr.z << ' ' << g.size_mm << ' '
+               << (n < g.rho.size() ? g.rho[n] : 0.0) << ' ' << st << ' '
+               << (gi < plan_laid_nodes.size() ? plan_laid_nodes[gi][n] : 0) << ' '
+               << why << '\n';
+          }
+        }
+        std::printf("plan laid: %zu cell(s) written to %s\n", plan_chk.cells,
+                    lp.c_str());
+      }
+    }
+  }
+
+  // ── ★ K5: WHERE EVERY STRUT AND NODE GOT ITS DENSITY ─────────────────────────
+  // The generator samples the radius at a strut's MIDPOINT and at a node's own position
+  // (lattice_gen.cpp). Both of those sit on cell planes for the octet -- a corner node is
+  // shared by eight cells, a face-diagonal strut's midpoint lies in a shared face -- so
+  // this is the count that says whether the plan's density actually reached them.
+  // `at the band floor` is the one that must be 0 on a plan that sent a rho with every
+  // cell: a boundary joint sized at the thinnest density the law allows, where the plan
+  // asked for something else, is a notch exactly where the load leaves the lattice.
+  if (!plan_groups.empty()) {
+    R.plan_rho_queries_plan = rho_q_plan - rho_q_plan0;
+    R.plan_rho_queries_posture = rho_q_posture - rho_q_posture0;
+    R.plan_rho_queries_floor = rho_q_floor - rho_q_floor0;
+    std::fprintf(stderr,
+                 "[stepped] plan rho reach: %lld strut/node radius queries from the "
+                 "plan's own cells, %lld from the posture (off every plan cell), %lld at "
+                 "the band floor (outside the mask)\n",
+                 R.plan_rho_queries_plan, R.plan_rho_queries_posture,
+                 R.plan_rho_queries_floor);
+  }
 
   // ── ★ THE NO-PROTRUSION INVARIANT, ASSERTED (task 2026-08-08-strut-clip-
   // matches-shell, bar R3). Not eyeballed, not derived from the clip's
@@ -6358,8 +11054,32 @@ LatticeVariantOutcome lattice_one_variant(
   // (lattice_gen.cpp:944-961) needs a PLANE and lattice_boundary_for never makes
   // one. Testing what the generator actually wrote makes the blast radius exact by
   // construction: it cannot fire on a run that emitted geometry.
+  // ★ Per zone: the part's "rim" is judged on its own rim, so a zone's woven skin cannot
+  // stand in for it. (Rim mode lays no diagrid, so without zones this is the same test.)
+  // ★ The rim on a real part (ruling 11-08 (A)): a rim that found no sharp edge to ride
+  // says so in its own words, with the counts that decided it.
+  if (job.lattice.skin == "rim" && R.oc.mesh_rim_ran && R.oc.stats.rim_triangles == 0) {
+    const FeatureEdgeStats& fe = R.oc.rim_edges;
+    throw JobError(
+        "lattice \"skin\": \"rim\" laid no rim on this part: the surface it ships has " +
+        std::to_string(fe.feature_edges) + " edge(s) sharper than " +
+        json_num(fe.angle_threshold_deg) + " degrees, " +
+        std::to_string(fe.pieces_dropped_short) + " piece(s) of them shorter than one cell (" +
+        json_num(fe.min_piece_mm) + " mm, dropped), " +
+        std::to_string(R.oc.rim_chains_other_skin) +
+        " chain(s) in zones that ask for another skin, " +
+        std::to_string(R.oc.rim.chains_on_solid) +
+        " chain(s) along material the lattice leaves solid (a solid edge needs no rim), and " +
+        std::to_string(R.oc.rim.chains_clipped_away) +
+        " chain(s) with no room inside the part for a rim of " +
+        json_num(R.oc.rim.diameter_max_mm) +
+        " mm.\n  Refusing rather than exporting an undressed lattice under a finish the job "
+        "asked for. Set \"skin\": \"none\" to export it undressed.");
+  }
   if (job.lattice.skin != "none" &&
-      R.oc.stats.rim_triangles + R.oc.stats.skin_triangles == 0)
+      R.oc.stats.rim_triangles +
+              (job.lattice.skin == "rim" ? 0 : R.oc.stats.skin_triangles) ==
+          0)
     throw JobError(
         "lattice \"skin\": \"" + job.lattice.skin +
         "\" produced NO geometry on this part (rim_triangles 0, skin_triangles "
@@ -6409,23 +11129,109 @@ LatticeVariantOutcome lattice_one_variant(
                   solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
     return !boundary.in_keep_out(vc, 0.0);
   };
-  if (added_rcpt.present) {
+  // ★ GRADING + A DESIGN BOX: on a SWEPT run (one grid per level) or a run of passes
+  // (stepped, or the app's plan), the same two questions are asked of EVERY grid the
+  // generator lays, through that grid's own activation chain (its predicate AND the
+  // boundary-overlap proof): a cell it emits must cover a voxel of the final mask
+  // (certified == emitted, summed over the grids), and no companion-solid voxel may sit
+  // in an emitted cell that covers none. The single `cell` grid below is what the
+  // uniform and one-cell graded runs lay, and is audited as before.
+  const bool multi_grid = (levels.size() > 1 && gf.cell_plan.base_cell_mm > 0.0) ||
+                          !stepped_passes.empty();
+  if (added_rcpt.present && multi_grid) {
+    added_rcpt.multi_grid = true;
+    struct AuditGrid {
+      Vec3 o;
+      double ce;
+      int nx, ny, nz;
+      std::function<bool(int, int, int)> pred;
+      const LatticeBoundary* b;
+      const std::vector<char>* cov;
+    };
+    std::vector<AuditGrid> grids;
+    if (levels.size() > 1 && gf.cell_plan.base_cell_mm > 0.0) {
+      const CellSizePlan& pl = gf.cell_plan;
+      for (const LatticeLevelSpec& sp : levels) {
+        const int LV = sp.level;
+        const int lnx = (pl.nx + (1 << LV) - 1) >> LV, lny = (pl.ny + (1 << LV) - 1) >> LV,
+                  lnz = (pl.nz + (1 << LV) - 1) >> LV;
+        const double ce = pl.base_cell_mm * (1 << LV);
+        grids.push_back({pl.origin, ce, lnx, lny, lnz, sp.latticed, &boundary,
+                         cover_of_mask(pl.origin, ce, lnx, lny, lnz)});
+      }
+    }
+    for (const LatticeSteppedPass& sp : stepped_passes) {
+      const LatticeRegion& PR = sp.region;
+      grids.push_back({PR.origin, PR.cell_mm, PR.nx, PR.ny, PR.nz, PR.latticed,
+                       PR.boundary != nullptr ? PR.boundary : &boundary,
+                       cover_of_mask(PR.origin, PR.cell_mm, PR.nx, PR.ny, PR.nz)});
+    }
+    auto at = [](const AuditGrid& g, int ci, int cj, int ck) {
+      return (static_cast<std::size_t>(ck) * g.ny + cj) * g.nx + ci;
+    };
+    auto emitted = [&](const AuditGrid& g, int ci, int cj, int ck) {
+      if (g.pred && !g.pred(ci, cj, ck)) return false;
+      return g.b->cell_may_overlap(
+          Vec3{g.o.x + ci * g.ce, g.o.y + cj * g.ce, g.o.z + ck * g.ce}, g.ce);
+    };
+    for (const AuditGrid& g : grids)
+      for (int ck = 0; ck < g.nz; ++ck)
+        for (int cj = 0; cj < g.ny; ++cj)
+          for (int ci = 0; ci < g.nx; ++ci) {
+            if (!emitted(g, ci, cj, ck)) continue;
+            if ((*g.cov)[at(g, ci, cj, ck)]) ++added_rcpt.certified_lattice_cells;
+            else ++added_rcpt.emitted_cells_covering_no_certified;
+          }
+    added_rcpt.emitted_lattice_cells = R.oc.stats.latticed_cells;
+    for (int k = 0; k < solved_grid.nz; ++k)
+      for (int j = 0; j < solved_grid.ny; ++j)
+        for (int i = 0; i < solved_grid.nx; ++i) {
+          if (!is_companion_solid(i, j, k)) continue;
+          const Vec3 c{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
+                       solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
+                       solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
+          int state = 0;  // 0 in no emitted cell, 1 the bond, 2 a cell covering none
+          for (const AuditGrid& g : grids) {
+            const int ci = clampi(static_cast<int>(std::floor((c.x - g.o.x) / g.ce)), g.nx - 1);
+            const int cj = clampi(static_cast<int>(std::floor((c.y - g.o.y) / g.ce)), g.ny - 1);
+            const int ck = clampi(static_cast<int>(std::floor((c.z - g.o.z) / g.ce)), g.nz - 1);
+            if (!emitted(g, ci, cj, ck)) continue;
+            state = std::max(state, (*g.cov)[at(g, ci, cj, ck)] ? 1 : 2);
+          }
+          if (state == 2) ++added_rcpt.voxels_strut_and_solid;
+          else if (state == 1) ++added_rcpt.voxels_strut_and_solid_bond;
+        }
+  }
+  if (added_rcpt.present && !multi_grid) {
+    // ★ Finding 7: the certified cell set is every cell COVERING a masked voxel (the
+    // cover rule the activation now uses), so certified == emitted still holds cell
+    // for cell.
     std::vector<char> certified_cells(ncells, 0);
     for (int k = 0; k < solved_grid.nz; ++k)
       for (int j = 0; j < solved_grid.ny; ++j)
         for (int i = 0; i < solved_grid.nx; ++i)
           if (mask[solved_grid.index(i, j, k)])
-            certified_cells[owner_cell(i, j, k)] = 1;
+            for_covering_cells(i, j, k,
+                               [&](std::size_t ce) { certified_cells[ce] = 1; });
     for (const char c : certified_cells)
       added_rcpt.certified_lattice_cells += (c ? 1 : 0);
     added_rcpt.emitted_lattice_cells = R.oc.stats.latticed_cells;
     // "Inside a strut cell" iff its owning cell is one the generator emitted —
-    // the same cell_active test, asked here with the same inputs.
+    // the same cell_active test, asked here with the same inputs. ★ Finding 7: a
+    // cell covering a certified voxel now reaches into the solid beside it by design
+    // (the bond); that is not the failure this counts. The failure is struts written
+    // into solid by a cell that covers NO certified voxel at all.
     for (int k = 0; k < solved_grid.nz; ++k)
       for (int j = 0; j < solved_grid.ny; ++j)
-        for (int i = 0; i < solved_grid.nx; ++i)
-          if (is_companion_solid(i, j, k) && cell_emitted(owner_ijk(i, j, k)))
+        for (int i = 0; i < solved_grid.nx; ++i) {
+          if (!is_companion_solid(i, j, k)) continue;
+          const std::array<int, 3> c = owner_ijk(i, j, k);
+          if (!cell_emitted(c)) continue;
+          if (certified_cells[cidx(c[0], c[1], c[2])])
+            ++added_rcpt.voxels_strut_and_solid_bond;
+          else
             ++added_rcpt.voxels_strut_and_solid;
+        }
   }
 
   // ── THE SAME AUDIT, SCOPED TO FROZEN MATERIAL (bar 3). Lattice-include over
@@ -6451,8 +11257,12 @@ LatticeVariantOutcome lattice_one_variant(
         for (int i = 0; i < solved_grid.nx; ++i) {
           const std::size_t e = solved_grid.index(i, j, k);
           if (!mask[e]) continue;
-          any_cert_cells[owner_cell(i, j, k)] = 1;
-          if (is_frozen(e)) frozen_cert_cells[owner_cell(i, j, k)] = 1;
+          // ★ Finding 7: the cells COVERING it, as the activation now lays them.
+          const bool fr = is_frozen(e);
+          for_covering_cells(i, j, k, [&](std::size_t ce) {
+            any_cert_cells[ce] = 1;
+            if (fr) frozen_cert_cells[ce] = 1;
+          });
         }
     // Pass 2 — the both-ways counts over frozen voxels.
     for (int k = 0; k < solved_grid.nz; ++k)
@@ -6475,16 +11285,262 @@ LatticeVariantOutcome lattice_one_variant(
           if (!cell_emitted({ci, cj, ck})) ++frozen_rcpt.frozen_cells_not_emitted;
         }
   }
+  // ── ★★ THE DENSITY THE CERTIFICATE JUDGES IS REBUILT FROM WHAT SHIPPED ───────
+  // (maintainer, 2026-09-11: "fix the timing first".) It used to be the tracer's own
+  // snapshot, taken BEFORE the clip to the part, the node merge, the support pass, the
+  // prune, the stranded drop, the finish and the base trim -- all of which run afterwards
+  // and on a SEPARATE span list, so nothing refreshed it. Whatever they removed, the
+  // certificate still believed was there, and the error is in the UNSAFE direction:
+  // more material reads as stiffer and stronger. MEASURED on the M2 stand: the
+  // certificate was handed 77,336 mm3 where the shipped file holds 41,955 -- it was
+  // judging 1.84x the lattice that exists.
+  //
+  // `organic_spans_out` is the post-clip set, the same one the STL and the welded body
+  // are built from, so the certificate and the file now describe one object. The
+  // candidate set and the local separation come from the tracer's own `spacing_used_mm`
+  // (0 marks a voxel off the candidate set), and the clamp band is the one the tracer
+  // used, so nothing about the MEASUREMENT changes -- only which geometry it is taken on.
+  if (organic.ran && graded && !R.oc.organic_spans_out.empty() &&
+      organic.lat.spacing_used_mm.size() == solved_grid.voxel_count()) {
+    std::vector<char> cand(solved_grid.voxel_count(), 0);
+    for (std::size_t e = 0; e < cand.size(); ++e)
+      cand[e] = organic.lat.spacing_used_mm[e] > 0.0 ? 1 : 0;
+    OrganicDensityField df = organic_relative_density(
+        solved_grid, cand, organic.lat.spacing_used_mm, R.oc.organic_spans_out,
+        organic.rho_min_used, organic.rho_max_used,
+        job.grading.organic_density_union_subdiv);
+    const double vox =
+        solved_grid.spacing * solved_grid.spacing * solved_grid.spacing;
+    double shipped = 0.0;
+    for (std::size_t e = 0; e < df.relative_density.size(); ++e)
+      if (df.mask[e]) shipped += df.relative_density[e];
+    shipped *= vox;
+    // ★ AND SOME VOXELS THE TRIM EMPTIED COMPLETELY. The certification mask is the
+    // geometry's, and a voxel in it that the shipped spans never reach now measures
+    // ZERO -- which the octet certifier refuses outright ("relative density 0.000000 is
+    // outside the certifiable band", bar E5), and rightly: there is no lattice there to
+    // homogenise. They are held at the band's FLOOR rather than dropped, because
+    // dropping them would make the certified mask differ from the geometry's, which is
+    // the exact conflation bar E1 exists to prevent. Counted and printed, because the
+    // floor is still GENEROUS for a voxel holding nothing at all.
+    std::size_t emptied = 0;
+    for (std::size_t e = 0; e < df.mask.size() && e < mask.size(); ++e)
+      if (mask[e] && !df.mask[e]) {
+        df.mask[e] = 1;
+        df.relative_density[e] = organic.rho_min_used;
+        ++emptied;
+      }
+    std::fprintf(stderr,
+                 "[posture] certified on the SHIPPED spans (%s): %.1f mm3 of lattice "
+                 "material over %zu voxel(s); the traced network it used to be taken "
+                 "from held %.1f mm3 (%+.1f %%). %zu voxel(s) the trim emptied "
+                 "entirely, held at the band floor %.4f; %zu raised to it and %zu "
+                 "capped at the ceiling by the band\n",
+                 job.grading.organic_density_union_subdiv > 0 ? "UNION" : "deposit",
+                 shipped, df.latticed_voxels, organic_traced_material_mm3,
+                 organic_traced_material_mm3 > 0.0
+                     ? 100.0 * (shipped - organic_traced_material_mm3) /
+                           organic_traced_material_mm3
+                     : 0.0,
+                 emptied, organic.rho_min_used, df.clamped_lo_voxels,
+                 df.clamped_hi_voxels);
+    gf.posture.mask = df.mask;
+    gf.posture.relative_density = df.relative_density;
+  }
+
+  // ── ★ THE VOLUME CHECK (Finding 7, ruling 2026-11-02) ──────────────────────────
+  // Before the certificate is built: per latticed pocket, the lattice the file holds
+  // against the density the certificate is about to read over the same voxels
+  // (lattice_volume_check.hpp). More than 10 % off in any pocket and this rung is
+  // refused, its lattice files removed, exactly as a sealed cavity refuses one.
+  // ★ AND THE CERTIFICATE IS REBUILT FROM WHAT SHIPPED (ruling 2026-11-02 (3)): each
+  // latticed voxel at min(the law's density, the solid fraction the file holds there,
+  // measured on the same exact solids), held at the band's floor where the file holds less
+  // (lattice_certify_shipped). The check then judges the REBUILT certificate: its 10 %
+  // guard is the tripwire on what the floor credits. The law's own gap is kept beside it.
+  std::vector<double> shipped_rho;  // the certified density, when rebuilt
+  if (!organic.ran && solid_probe.has_geometry()) {
+    const std::vector<double>* grho = graded ? &gf.posture.relative_density : nullptr;
+    auto law_rho = [grho, rho_uniform](std::size_t e) { return grho ? (*grho)[e] : rho_uniform; };
+    // A pocket is judged from one cell up: the largest cell this export lays.
+    double judge_cell = cell;
+    for (const LatticeLevelSpec& lv : levels) judge_cell = std::max(judge_cell, lv.cell_mm);
+    for (const LatticeSteppedPass& sp : stepped_passes)
+      judge_cell = std::max(judge_cell, sp.region.cell_mm);
+    const double judge_mm3 = judge_cell * judge_cell * judge_cell;
+    std::vector<double> frac;
+    R.volume_check_law =
+        lattice_volume_check(solved_grid, mask, law_rho, solid_probe, judge_mm3, &frac);
+    const double vox =
+        solved_grid.spacing * solved_grid.spacing * solved_grid.spacing;
+    LatticeShippedPosture sp =
+        lattice_certify_shipped(mask, law_rho, frac, lattice_rho_min(lat_topo), vox);
+    R.shipped_lowered = sp.voxels_lowered;
+    R.shipped_at_floor = sp.voxels_at_floor;
+    R.shipped_law_mm3 = sp.law_mm3;
+    R.shipped_certified_mm3 = sp.certified_mm3;
+    shipped_rho = std::move(sp.relative_density);
+    const std::vector<double>& srho = shipped_rho;
+    R.volume_check = lattice_volume_judge(
+        solved_grid, mask, [&srho](std::size_t e) { return srho[e]; }, frac, judge_mm3);
+    R.volume_check.points = R.volume_check_law.points;
+    std::fprintf(stderr,
+                 "[lattice] vf=%.2f certificate from what shipped: the law counted %.1f mm3, "
+                 "the file holds %.1f; certified %.1f mm3 (%lld voxel(s) lowered to the "
+                 "file, %lld of them held at the band floor %.4f)\n",
+                 v.requested_volume_fraction, sp.law_mm3, R.volume_check_law.exported_mm3,
+                 sp.certified_mm3, sp.voxels_lowered, sp.voxels_at_floor,
+                 lattice_rho_min(lat_topo));
+    const LatticeVolumeCheck& vc = R.volume_check;
+    if (vc.ran && !vc.pockets.empty()) {
+      const long long wvox =
+          vc.worst >= 0 ? vc.pockets[static_cast<std::size_t>(vc.worst)].voxels : 0;
+      std::fprintf(stderr,
+                   "[lattice] vf=%.2f volume check: %zu pocket(s), exported %.1f / "
+                   "certified %.1f mm3 (%+.2f %%); lightest judged pocket %lld voxels %+.2f %% "
+                   "(heaviest %+.2f %%); "
+                   "%lld pocket(s) under one cell not judged (%.1f / %.1f mm3) "
+                   "(%lld points, %.2f s)\n",
+                   v.requested_volume_fraction, vc.pockets.size(), vc.exported_mm3,
+                   vc.certified_mm3,
+                   vc.certified_mm3 > 0.0 ? 100.0 * (vc.exported_mm3 / vc.certified_mm3 - 1.0)
+                                          : 0.0,
+                   wvox, 100.0 * vc.worst_gap, 100.0 * vc.highest_gap, vc.small_pockets,
+                   vc.small_exported_mm3,
+                   vc.small_certified_mm3, vc.points, vc.seconds);
+    }
+    if (vc.refused()) {
+      R.volume_refused = true;
+      R.volume_refused_reason = lattice_volume_refusal(vc);
+      // Everything this export wrote beside the lattice goes with it: the file(s), and the
+      // span and laid-cell ledgers when they were asked for.
+      for (const std::string& path : R.oc.paths) {
+        std::remove(path.c_str());
+        const std::size_t dot = path.find_last_of('.');
+        const std::string stem = dot == std::string::npos ? path : path.substr(0, dot);
+        std::remove((stem + "_SPANS.txt").c_str());
+        std::remove((stem + "_LAID.txt").c_str());
+      }
+      R.oc.paths.clear();
+      return R;
+    }
+  }
+
   // (b) certification of the composite — the octet tensor on the SAME mask the
   // geometry used. The band is enforced PER VOXEL inside the solve (E5/H4b).
   const LatticeCertContext cx =
-      lattice_cert_context(v, part_grid, domain, options, material);
-  const LatticePosture post = build_lattice_posture(
-      solved_grid, cell, mask, rho_uniform,
-      graded ? &gf.posture.relative_density : nullptr);
+      lattice_cert_context(v, part_grid, domain, options, material, job);
+  // ★ (3): the certificate reads the density REBUILT from what shipped, when it was.
+  // ★ E3: each region's graded range, read before the as-built rebuild below.
+  if (!e3_owner.empty()) {
+    R.region_graded.assign(e3_jobs.size(), {});
+    std::vector<char> seen(e3_jobs.size(), 0);
+    for (std::size_t e = 0; e < gf.posture.mask.size() && e < e3_owner.size(); ++e) {
+      const int id = e3_owner[e];
+      if (!gf.posture.mask[e] || id < 1 || static_cast<std::size_t>(id) > e3_jobs.size()) continue;
+      LatticeRegionGraded& g = R.region_graded[static_cast<std::size_t>(id - 1)];
+      const double r = gf.posture.relative_density[e];
+      const double cm = e < gf.posture.cell_size_field.size() ? gf.posture.cell_size_field[e] : 0.0;
+      if (!seen[static_cast<std::size_t>(id - 1)]) {
+        g.rho_lo = g.rho_hi = r;
+        g.cell_lo = g.cell_hi = cm;
+        seen[static_cast<std::size_t>(id - 1)] = 1;
+      }
+      g.rho_lo = std::min(g.rho_lo, r);
+      g.rho_hi = std::max(g.rho_hi, r);
+      g.cell_lo = std::min(g.cell_lo, cm);
+      g.cell_hi = std::max(g.cell_hi, cm);
+      ++g.voxels;
+    }
+    for (std::size_t i = 0; i < e3_search.size() && i < R.region_graded.size(); ++i)
+      if (e3_search[i].searched) {
+        LatticeRegionGraded& g = R.region_graded[i];
+        g.searched = true;
+        g.search_certified = e3_search[i].search_certified;
+        g.search_rho = e3_search[i].search_rho;
+        g.search_floor = e3_search[i].search_floor;
+        g.search_peak = e3_search[i].search_peak;
+        g.search_margin = e3_search[i].search_margin;
+        g.search_trials = e3_search[i].search_trials;
+        g.search_shipped_trials = e3_search[i].search_shipped_trials;
+        g.search_law_rho = e3_search[i].search_law_rho > 0.0 ? e3_search[i].search_law_rho
+                                                             : e3_search[i].search_rho;
+      }
+  }
+  if (graded && !shipped_rho.empty()) gf.posture.relative_density = shipped_rho;
+  const LatticePosture post = [&] {
+    LatticePosture p = build_lattice_posture(
+        lat_topo, solved_grid, cell, mask, rho_uniform,
+        !shipped_rho.empty() ? &shipped_rho : graded ? &gf.posture.relative_density : nullptr);
+    // ★ The widths measured on the part's own surface ride to the certificate's floor
+    // guard (ruling 11-09); empty => it measures the staircase, as before.
+    if (gf.posture.member_width_mm.size() == p.mask.size())
+      p.member_width_mm = gf.posture.member_width_mm;
+    return p;
+  }();
+  // ★ E2.4: the open lattice's cut cells, given no credit (open_finish_cut_cells).
+  std::vector<char> open_cut;
+  if (!region_open.empty()) {  // per region: the open part only, beside its wall
+    open_cut = open_finish_cut_cells(solved_grid, dens, printed_iso, post);
+    for (std::size_t e = 0; e < open_cut.size(); ++e)
+      if (!region_open[e]) open_cut[e] = 0;
+  } else if (job.lattice.outer_finish == "none") {
+    open_cut = open_finish_cut_cells(solved_grid, dens, printed_iso, post);
+  }
   R.cc = certify_latticed_variant(
       v, solved_grid, options, material, bcs, cx, post,
-      graded ? std::numeric_limits<double>::quiet_NaN() : rho_uniform);
+      graded ? std::numeric_limits<double>::quiet_NaN() : rho_uniform,
+      open_cut.empty() ? nullptr : &open_cut);
+  for (const LatticeVariantOutcome::OpenRegion& o : R.open_regions)
+    R.cc.open_region_notes.push_back(
+        o.name + (R.region_wall_voxels > 0
+                      ? " open: a wall closes it from the covered part"
+                      : " open: the part's own solid already closes it from the covered part"));
+  R.cc.region_wall_mm = R.region_wall_mm;
+  R.cc.region_wall_voxels = R.region_wall_voxels;
+  // Refused by label: the regions that hold cut cells (the owner rule the grading used),
+  // or "the part" where a cut cell lies in no include region.
+  if (R.cc.open_finish && !R.cc.lattice.accepted) {
+    const std::vector<ClearanceGeometry>& owners =
+        lattice_roles.includes.empty() ? lattice_roles.carriers : lattice_roles.includes;
+    std::vector<char> named(e3_jobs.size() + 1, 0);
+    for (int k = 0; k < solved_grid.nz; ++k)
+      for (int j = 0; j < solved_grid.ny; ++j)
+        for (int i = 0; i < solved_grid.nx; ++i) {
+          const std::size_t e = solved_grid.index(i, j, k);
+          if (!open_cut[e]) continue;
+          const int id = owners.empty()
+                             ? 0
+                             : stepped_region_owner(solved_grid.voxel_center(i, j, k), owners);
+          named[static_cast<std::size_t>(
+              id >= 1 && static_cast<std::size_t>(id) <= e3_jobs.size() ? id : 0)] = 1;
+        }
+    std::string who;
+    for (std::size_t id = 1; id < named.size(); ++id)
+      if (named[id]) {
+        const std::string& lb = e3_jobs[id - 1].label;
+        who += std::string(who.empty() ? "" : ", ") +
+               (lb.empty() ? "region " + std::to_string(id) : "\"" + lb + "\"");
+      }
+    if (named[0] || who.empty()) who += std::string(who.empty() ? "" : " and ") + "the part";
+    char why[300];
+    if (!R.cc.open_load_path_ok)
+      std::snprintf(why, sizeof why,
+                    "no load path is left through the rest (a load or a support sits on "
+                    "those cells)");
+    else if (R.cc.lattice.lattice_not_certified)
+      std::snprintf(why, sizeof why, "%s", R.cc.lattice.lattice_not_certified_reason.c_str());
+    else
+      std::snprintf(why, sizeof why, "the margin is %.3g against %.3g needed",
+                    R.cc.lattice.margin_effective, options.margin_stop);
+    char counts[200];
+    std::snprintf(counts, sizeof counts,
+                  " does not certify open. With the %lld of %lld latticed voxels in cells "
+                  "at the part's free surface given no strength (the safe floor), ",
+                  R.cc.open_cut_voxels, R.cc.open_latticed_voxels);
+    R.cc.open_refusal = "The open lattice in " + who + counts + why +
+                        ". Covered (a solid shell) holds those cells.";
+  }
 
   // ══════════════════════════════════════════════════════════════════════════
   // ★★★ ORGANIC STRUCTURAL CERTIFICATION — the instrument, where the gate was ★★★
@@ -6517,8 +11573,61 @@ LatticeVariantOutcome lattice_one_variant(
     for (const OrganicSpan& sp : R.oc.organic_spans_out)
       segs.push_back({sp.a, sp.b, sp.r});
 
-    std::vector<OrganicLoadCase> ocs;
-    ocs.push_back({"job", bcs, cx.loads});
+    // ── ★★ THE WELD'S PRECONDITION, ENFORCED HERE RATHER THAN ASSUMED ──────────
+    // (brief of 2026-09-17 §3.2.) build_beam_network welds ENDPOINTS. The organic tracer
+    // emits ~0.85 mm segments and satisfies that by accident of how it draws; an OCTET
+    // strut is one straight member up to a whole base cell long, so a strut ending on the
+    // middle of another has no vertex near the contact and is NOT fused. The failure is
+    // silent -- it reports a lattice in pieces, and a lattice in pieces certifies CLEAN,
+    // because nothing in it is carrying load to find fault with. So every input is cut to
+    // the scale the weld can actually see: the weld joins ends within r_a + r_b, so a
+    // piece no longer than the thinnest strut's DIAMETER puts an endpoint within reach of
+    // any contact along a member. Already-fine input is returned untouched and pays
+    // nothing.
+    {
+      double rmin = 0.0;
+      double longest = 0.0;
+      for (const BeamSegment& sg : segs) {
+        if (sg.radius_mm > 0.0 && (rmin <= 0.0 || sg.radius_mm < rmin)) rmin = sg.radius_mm;
+        const double dx = sg.b.x - sg.a.x, dy = sg.b.y - sg.a.y, dz = sg.b.z - sg.a.z;
+        longest = std::max(longest, std::sqrt(dx * dx + dy * dy + dz * dz));
+      }
+      const double piece = rmin > 0.0 ? 2.0 * rmin : 0.0;
+      const std::size_t before = segs.size();
+      if (piece > 0.0 && longest > piece) segs = subdivide_beam_segments(segs, piece);
+      const BeamNetwork seam_net = build_beam_network(segs);
+      const BeamNetworkSeams seams = beam_network_seams(seam_net);
+      std::fprintf(stderr,
+                   "[seams] %zu span(s) -> %zu after subdivision at %.3f mm (longest was "
+                   "%.2f mm) | %zu welded node(s), %zu T-junction end(s), %zu end(s) on "
+                   "NOTHING\n",
+                   before, segs.size(), piece, longest, seams.welded_nodes,
+                   seams.t_junction_ends, seams.floating_ends);
+      R.seam_spans_before = static_cast<long long>(before);
+      R.seam_spans_after = static_cast<long long>(segs.size());
+      R.seam_piece_mm = piece;
+      R.seam_longest_before_mm = longest;
+      R.seam_welded_nodes = static_cast<long long>(seams.welded_nodes);
+      R.seam_t_junction_ends = static_cast<long long>(seams.t_junction_ends);
+      R.seam_floating_ends = static_cast<long long>(seams.floating_ends);
+      // ★ AND FOR AN ANY-STEP PLAN IT IS A GATE, NOT A REPORT. Organic legitimately has
+      // free tips -- a traced curve ends where the field ran out. An any-step octet plan
+      // does not: every strut belongs to a cell whose neighbours are packed against it,
+      // so an end on nothing is either a seam the weld failed to find or geometry that
+      // never joined, and both mean the network being solved is not the part that prints.
+      if (!job.lattice.stepped_cells.empty() && seams.floating_ends > 0) {
+        R.organic_cert.verdict = OrganicCertificate::Verdict::Refused;
+        R.organic_cert.refusal =
+            "the any-step stepped network has " + std::to_string(seams.floating_ends) +
+            " strut end(s) terminating on NOTHING after the contact weld. Every strut in "
+            "a packed plan belongs to a cell its neighbours are packed against, so an end "
+            "on nothing is a seam the weld did not find or geometry that never joined -- "
+            "and either way the network solved here is not the part that would print. A "
+            "certificate over it would be a claim about a different object.";
+      }
+    }
+
+    const std::vector<OrganicLoadCase> ocs = organic_load_cases(cx, bcs);
 
     // The solid the lattice ties into: every voxel the part keeps that the lattice
     // did not replace. `mask` is the latticed set, so the complement inside the part.
@@ -6541,7 +11650,7 @@ LatticeVariantOutcome lattice_one_variant(
           "cap: support_grid_too_large), so nothing has checked this lattice for "
           "unsupported material; a structural certificate cannot stand on it. "
           "Coarsen the strut floor or raise the raster cap and re-run.";
-    } else
+    } else if (R.organic_cert.verdict != OrganicCertificate::Verdict::Refused)
     R.organic_cert = certify_organic_structural(
         solved_grid, hexm, segs, ocs, material.youngs_modulus_mpa,
         material.poisson, material.yield_strength_mpa,
@@ -6551,6 +11660,47 @@ LatticeVariantOutcome lattice_one_variant(
         // infill knockdown (f^1.5) that stood here before describes a sparse-infill
         // solid, which a strut is not.
         material.z_knockdown, v.applied_build_dir, cell, census_ok);
+    // ── ★ RULING D: A REFUSAL THAT NAMES THE FIX, NOT A BARE MARGIN ────────────
+    // When a structural certificate fails and the grade was already pressed against
+    // the top of its density band -- and that top is the AESTHETIC CEILING rather than
+    // the certifiable one -- the lattice did not fail because it cannot be built strong
+    // enough. It failed because it was not allowed to get denser. That is a setting,
+    // and the user owns it, so the refusal says which setting and what it is called in
+    // the app instead of reporting a number the user cannot act on.
+    //
+    // The three conditions are all MEASURED, never assumed: the verdict, the count of
+    // voxels sitting exactly on the ceiling (a grade that never reached its top was not
+    // capped by it), and the top itself against core's own octet law.
+    if (R.organic_cert.verdict != OrganicCertificate::Verdict::Certified &&
+        R.gf.density_at_ceiling_voxels > 0) {
+      const double ceiling = octet_aesthetic_density_ceiling();
+      const double top = R.gf.rho_max_used > 0.0 ? R.gf.rho_max_used : R.gf.band_rho_max;
+      // within 10 %: the app's own ceiling constant is 0.219 against core's 0.211733,
+      // and a tolerance narrower than that gap would silently never fire.
+      if (top > 0.0 && top <= 1.10 * ceiling) {
+        char note[640];
+        std::snprintf(
+            note, sizeof note,
+            " THE DENSITY BAND, NOT THE GEOMETRY, IS WHAT STOPPED THIS: %zu latticed "
+            "voxel(s) are sitting exactly on the band's top of %.4f, which is the "
+            "AESTHETIC CEILING (%.4f by core's octet law -- the density at which a "
+            "strut is a fifth of its cell across, the point a quilt stops looking "
+            "open). The lattice was not permitted to get any denser, so the certificate "
+            "never saw the material this load needs. In the app this cap is the \"Allow "
+            "quilt\" switch: turn it ON to lift the ceiling and re-run. If it is "
+            "already on, raise \"max relative density\" -- the certifiable band goes to "
+            "%.4f.",
+            R.gf.density_at_ceiling_voxels, top, ceiling, R.gf.band_rho_max);
+        if (R.organic_cert.refusal.empty())
+          R.organic_cert.refusal =
+              "the structural certificate did not pass." + std::string(note);
+        else
+          R.organic_cert.refusal += std::string(note);
+        std::fprintf(stderr, "[cert] refused at the aesthetic ceiling: band top %.4f, "
+                             "%zu voxel(s) on it -- the fix is \"Allow quilt\"\n",
+                     top, R.gf.density_at_ceiling_voxels);
+      }
+    }
     std::printf(
         "organic structural certification: %s  margin %.4g  p99 %.4g MPa  max %.4g "
         "MPa  (%zu case(s), %zu members, %.1f s)  knockdown %.3f (%s, cos^2 %.2f)  "
@@ -6588,27 +11738,110 @@ LatticeVariantOutcome lattice_one_variant(
           cpost.mask[e] = 0;
           cpost.relative_density[e] = 0.0;
         }
-      const FixedDesignAnalysis cf = analyze_variant_with_posture(
-          v, solved_grid, options, material, bcs, cx, &cpost);
+      const FixedDesignAnalysis cf =
+          certify_posture(v, solved_grid, options, material, bcs, cx, &cpost).governing;
       grad_rcpt.clamp_counterfactual_ran = true;
       grad_rcpt.counterfactual_accepted = cf.accepted;
       grad_rcpt.clamp_changed_verdict = (cf.accepted != R.cc.lattice.accepted);
     }
   }
 
+  if (!e3_owner.empty()) {   // ★ E3: for the receipt's lattice_regions
+    R.region_jobs = e3_jobs;
+    R.region_owner = e3_owner;
+  }
+  const long long shipped_counts[2] = {R.shipped_lowered, R.shipped_at_floor};
   R.receipt_path =
       join_path(out_dir, lattice_base_name(job.output.mesh_prefix,
                                            v.requested_volume_fraction) +
                              ".report.json");
   R.receipt_json = lattice_cert_report_json(
       v, job.lattice, R.cc, R.oc, cell, role_rcpt, grad_rcpt, added_rcpt,
-      frozen_rcpt, R.void_check_ran ? &R.void_report : nullptr);
+      frozen_rcpt, R.void_check_ran ? &R.void_report : nullptr, &R.volume_check,
+      &R.volume_check_law, shipped_counts, &R.grade_source, &R.region_jobs, &R.region_owner,
+      &R.region_graded);
   write_text_file(R.receipt_path, R.receipt_json);
   // `grad_rcpt.gf` points at R.gf, which the caller now owns; the receipt is
   // already rendered, so nothing may follow that pointer after the return. Null
   // it rather than leave a dangling-looking field on a returned value.
   grad_rcpt.gf = nullptr;
   return R;
+}
+
+// ── ★ E3 "OFF" WITH NO DENSITY: THE SEARCH CERTIFIES WHAT SHIPS (ruling 11-06) ──────
+// The pass's own search certifies trial densities on the LAW posture, which is cheap (no
+// geometry), and the law reads at or above what the file holds. The run's certificate is
+// min(law, measured) on the emitted file, so the law's answer can still be refused
+// (measured: 1.551 on the law, 1.159 shipped, on a whole-part bar). When it is, the
+// search goes on over whole passes: each searched region's density moves from its law
+// answer toward its graded peak by one shared fraction t, bisected on the shipped
+// verdict (t = 1, every region at its peak, first: if even that refuses, the region is
+// named). The last pass run is the one chosen, so its files are the ones on disk.
+LatticeVariantOutcome lattice_one_variant(
+    const MinimizePlasticVariant& v, const JobDescription& job,
+    const VoxelGrid& part_grid, const SolvedDesignDomain& domain,
+    const MinimizePlasticOptions& options, const Material& material,
+    const std::vector<ClearanceGeometry>& lattice_kos,
+    const LatticeRoleRegions& lattice_roles, const std::string& out_dir,
+    const TriangleMesh* part_surface = nullptr, const StepModel* cad = nullptr) {
+  LatticeVariantOutcome R = lattice_one_variant_pass(
+      v, job, part_grid, domain, options, material, lattice_kos, lattice_roles, out_dir, nullptr,
+      part_surface, cad);
+  bool any = false;
+  for (const LatticeRegionGraded& g : R.region_graded)
+    if (g.searched && g.search_certified && g.search_rho < g.search_peak) any = true;
+  if (!any || !R.cc.ran || R.cc.lattice.accepted) return R;
+  const std::vector<LatticeRegionGraded> base = R.region_graded;
+  int passes = 0;
+  auto at = [&](double t) {
+    std::vector<LatticeRegionGraded> f = base;
+    for (LatticeRegionGraded& g : f)
+      if (g.searched && g.search_certified) {
+        g.search_law_rho = g.search_rho;
+        g.search_rho = g.search_rho + t * (g.search_peak - g.search_rho);
+        g.search_shipped_trials = passes + 1;
+      }
+    return f;
+  };
+  auto pass = [&](double t) {
+    const std::vector<LatticeRegionGraded> f = at(t);
+    ++passes;
+    return lattice_one_variant_pass(v, job, part_grid, domain, options, material, lattice_kos,
+                                    lattice_roles, out_dir, &f, part_surface, cad);
+  };
+  LatticeVariantOutcome top = pass(1.0);
+  if (!top.cc.ran || !top.cc.lattice.accepted) {
+    for (std::size_t i = 0; i < base.size() && i < top.region_jobs.size(); ++i)
+      if (base[i].searched && base[i].search_certified) {
+        const std::string& lb = top.region_jobs[i].label;
+        char tail[220];
+        std::snprintf(tail, sizeof tail,
+                      " (grading off, one density): on what the file holds, the lattice does "
+                      "not certify even with it at its graded peak %.4g (margin %.3g). Give it "
+                      "a density, or let it grade.",
+                      base[i].search_peak, top.cc.lattice.margin_effective);
+        top.one_density_refusal += std::string(top.one_density_refusal.empty() ? "" : " ") +
+                                   "Region " +
+                                   (lb.empty() ? std::to_string(i + 1) : "\"" + lb + "\"") + tail;
+      }
+    return top;
+  }
+  double lo = 0.0, hi = 1.0, last = 1.0;
+  for (int it = 0; it < 4; ++it) {
+    const double mid = 0.5 * (lo + hi);
+    LatticeVariantOutcome m = pass(mid);
+    last = mid;
+    if (m.cc.ran && m.cc.lattice.accepted) {
+      hi = mid;
+      top = std::move(m);
+    } else {
+      lo = mid;
+    }
+  }
+  if (last != hi) top = pass(hi);  // the chosen pass's files are the ones left on disk
+  std::fprintf(stderr, "[one-density] shipped search: t = %.4f after %d whole pass(es)\n", hi,
+               passes);
+  return top;
 }
 
 // --- analyze_job helpers (handoff 2026-07-26-constrained-smooth) -------------
@@ -6718,6 +11951,14 @@ void apply_build_direction_options(MinimizePlasticOptions& options,
 
 }  // namespace
 
+TriangleMesh cut_keep_clears(const TriangleMesh& file, const JobDescription& job,
+                             const StepModel& model, double min_piece_mm3, double* cut_mm3,
+                             double thin_mm) {
+  const std::vector<ClearanceGeometry> clears = lattice_keep_outs_from_job(job, model);
+  return keep_clear_exact(file, make_keep_clear_cut(model.mesh, clears, job.keep_regions),
+                          model.mesh, clears, job.keep_regions, min_piece_mm3, cut_mm3, thin_mm);
+}
+
 // Map a job.json "loads" block onto the front-end-neutral ProductionLoadCase the
 // core builder (build_production_loadcase) consumes. This is the ONE mapping —
 // run_job's optimize path AND analyze_job's re-certification path both call it, so
@@ -6730,6 +11971,43 @@ void apply_build_direction_options(MinimizePlasticOptions& options,
 //
 // Declared in job.hpp (no longer file-local) so job_loadcase_copy can assert the
 // round trip AT THIS SEAM rather than on the value type.
+// ★ THE ONE PLACE THE BINARY'S IDENTITY LIVES. See job.hpp's note. A function-local
+// static, so there is exactly one and its initialisation is thread-safe; the setter is
+// called by main() before any work starts.
+static RunObservability& mutable_build_identity() {
+  static RunObservability id;
+  return id;
+}
+
+void set_build_identity(const std::string& fingerprint,
+                        const std::string& build_time) {
+  RunObservability& id = mutable_build_identity();
+  static bool stated = false;
+  // ★ SET ONCE (reviewer, 2026-10-02). Stating the SAME identity twice is harmless
+  // -- a second entry point in one process legitimately does it -- so that is a no-op.
+  // Stating a DIFFERENT one means two binaries' identities are in flight in one
+  // process, and every receipt written after the second call would carry the wrong
+  // one. That is unrecoverable from the receipt afterwards, so it REFUSES here,
+  // naming both. Not an assert: this must hold in Release, which is what ships.
+  // ★ AN EXPLICIT FLAG, NOT A SENTINEL SNIFF. The first version asked whether the
+  // identity "looked set" (fingerprint != "unknown" or a non-empty build_time), which
+  // cannot tell "nobody has stated it" from "someone deliberately stated unknown" --
+  // and in a process where nobody had stated anything it let a different value through
+  // silently. The test caught that. One bool, one meaning.
+  if (stated && (id.fingerprint != fingerprint || id.build_time != build_time))
+    throw std::invalid_argument(
+        "set_build_identity: the build identity is already \"" + id.fingerprint +
+        "\" / \"" + id.build_time + "\" and something is now setting it to \"" +
+        fingerprint + "\" / \"" + build_time +
+        "\". One process is one binary: a receipt written after this would name the "
+        "wrong core, and nothing downstream could tell. Set it once, before any work.");
+  id.fingerprint = fingerprint;
+  id.build_time = build_time;
+  stated = true;
+}
+
+const RunObservability& build_identity() { return mutable_build_identity(); }
+
 ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
                                                const StepModel& model) {
   // ★ THE FIELD LEDGER — this copy is EXHAUSTIVE BY CONSTRUCTION.
@@ -6762,7 +12040,8 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
                // bool->int, int->double) it COMPILED and silently carried wrong
                // values. test_job_loadcase_copy caught it; that is what it is for.
                j_build_dir, j_infill_percent, j_layer_height_mm,
-               j_minimize_plastic, j_wall_loops,
+               j_minimize_plastic, j_redesign, j_anchor_model, j_scenarios,
+               j_safety_margin, j_wall_loops,
                j_wall_line_width_mm, j_wall_line_width_outer_mm] = job.loads;
   // NOT CARRIED, on purpose: `present` answers "was a loads block given at all",
   // which is the CALLER's question (every call site gates on job.loads.present
@@ -6788,33 +12067,69 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
   lc.anchor_face_ids = j_anchor_face_ids;
   for (const int id : resolve_selectors(model, j_anchors, "anchors"))
     lc.anchor_face_ids.push_back(id);
-  for (const JobLoadGroup& g : j_groups) {
+  auto to_group = [&](const JobLoadGroup& g) {
     ProductionLoadCase::LoadGroup lg;
     lg.face_ids = g.face_ids;
     for (const int id : resolve_selectors(model, g.faces, "loads group faces"))
       lg.face_ids.push_back(id);
     lg.region_ids = g.region_ids;
     lg.force = g.force;
-    lc.load_groups.push_back(std::move(lg));
+    return lg;
+  };
+  for (const JobLoadGroup& g : j_groups) lc.load_groups.push_back(to_group(g));
+  // LOAD SCENARIOS: each scenario's groups and ON anchors; the load case's anchors
+  // become their UNION, faces and regions (scenario 1's groups stay the mirror in
+  // load_groups). A job that names any scenario's region anchors names them all.
+  bool regions_named = false;
+  for (const JobScenario& js : j_scenarios) regions_named = regions_named || js.has_anchor_region_ids;
+  for (const JobScenario& js : j_scenarios) {
+    ProductionLoadCase::Scenario sc;
+    sc.name = js.name;
+    for (const JobLoadGroup& g : js.groups) sc.groups.push_back(to_group(g));
+    sc.anchor_face_ids = js.anchor_face_ids;
+    for (const int f : js.anchor_face_ids)
+      if (std::find(lc.anchor_face_ids.begin(), lc.anchor_face_ids.end(), f) ==
+          lc.anchor_face_ids.end())
+        lc.anchor_face_ids.push_back(f);
+    sc.anchor_region_ids = js.anchor_region_ids;
+    sc.region_anchors_named = regions_named;
+    for (const int r : js.anchor_region_ids)
+      if (std::find(lc.anchor_region_ids.begin(), lc.anchor_region_ids.end(), r) ==
+          lc.anchor_region_ids.end())
+        lc.anchor_region_ids.push_back(r);
+    lc.scenarios.push_back(std::move(sc));
   }
   // Clearances (handoff 100): map each job clearance to a ProductionLoadCase
   // clearance. A distance the job omitted (== 0) defaults to the same spec
   // suggestion the app prefills — for a bolt those depend on the bore radius,
   // read from the imported face geometry, so a hand-authored job need only give
   // face_id + kind.
+  // ★ E4 (j): a Keep clear on a cut piece reads its region -- resolved once, here, from
+  // the same specs the load case carries, so the pre-flight's copy of `lc` has them too.
+  std::vector<ResolvedFaceRegion> clear_regions;
+  for (const JobClearance& jc : j_clearances)
+    if (jc.region_id >= 0) {
+      clear_regions = resolve_face_regions(model, j_face_regions);
+      break;
+    }
   for (const JobClearance& jc : j_clearances) {
     ProductionLoadCase::Clearance c;
     c.face_id = jc.face_id;
     c.manual = jc.manual;
     const bool bolt = jc.kind == "bolt";
+    const ResolvedFaceRegion* piece = nullptr;
+    for (const ResolvedFaceRegion& r : clear_regions)
+      if (jc.region_id >= 0 && r.id == jc.region_id) piece = &r;
     // Default suggestions depend on the bore radius: an auto bolt reads it from
     // the imported face geometry; a manual bolt carries its own radius_mm. A
     // hand-authored job need only give face_id/geometry + kind and the same
-    // spec-suggestion defaults fill the rest.
+    // spec-suggestion defaults fill the rest. A cut piece reads its largest bore.
     double bore_r = 0.0;
     if (bolt) {
       if (jc.manual)
         bore_r = jc.radius_mm;
+      else if (piece != nullptr)
+        bore_r = largest_bore_radius_mm(model, piece->member_faces);
       else if (jc.face_id >= 0 && jc.face_id < model.face_count)
         bore_r = model.faces[static_cast<std::size_t>(jc.face_id)]
                      .cylinder_radius_mm;
@@ -6838,6 +12153,14 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
       c.manual_geom.half_u_mm = jc.half_u_mm;
       c.manual_geom.half_w_mm = jc.half_w_mm;
     }
+    if (piece != nullptr) {
+      c.region_id = jc.region_id;
+      try {
+        resolve_clearance_region(c, *piece, model);
+      } catch (const std::invalid_argument& e) {
+        throw JobError(e.what());
+      }
+    }
     lc.clearances.push_back(c);
   }
   // Face protections (handoff 124): the raw face ids + the ONE global depth. A
@@ -6855,6 +12178,9 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
   lc.face_protection_region_ids = j_face_protection_region_ids;
   lc.face_protection_region_depths_mm = j_face_protection_region_depths_mm;
   lc.minimize_plastic = j_minimize_plastic;
+  lc.strengthen = j_redesign == "strengthen";  // item 50
+  lc.anchor_bearing = j_anchor_model == "bearing";  // REAL BOLTS
+  lc.safety_margin = j_safety_margin;  // the user's safety margin (0 = default)
   lc.build_dir = j_build_dir;
   lc.infill_percent = j_infill_percent;
   lc.wall_loops = j_wall_loops;
@@ -6867,6 +12193,7 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
   // 0.42 / 0.45 job computed — and truthfully reported — an outer width of 0.45.
   // (Device runs never used this path: bridge.cpp writes the field directly.)
   lc.wall_line_width_outer_mm = j_wall_line_width_outer_mm;
+  lc.keep_regions = job.keep_regions;  // item KEEP
   lc.has_design_box = job.has_design_box;
   if (job.has_design_box) {
     lc.design_box = to_design_box(job.design_box);
@@ -6959,7 +12286,11 @@ std::string loadcase_receipt_json(const JobDescription& job,
     s += "  \"clearances\": [\n";
     for (std::size_t i = 0; i < setup->clearance_reports.size(); ++i) {
       const ProductionRunSetup::ClearanceReport& c = setup->clearance_reports[i];
+      // ★ E4 (j): a cut piece's row names its region (face_id -1), as a region
+      // protection's row does; a face's row is unchanged.
       s += "    {\"face_id\": " + std::to_string(c.face_id) +
+           (c.region_id >= 0 ? ", \"region_id\": " + std::to_string(c.region_id)
+                             : std::string()) +
            ", \"kind\": \"" +
            (c.kind == ClearanceKind::Bolt ? "bolt" : "face") +
            "\", \"voxels_frozen\": " + std::to_string(c.voxels_frozen) +
@@ -7166,7 +12497,7 @@ std::vector<char> forecast_candidates(const VoxelGrid& grid,
 
 GradingLawParams forecast_grading_params(const JobDescription& job) {
   GradingLawParams gp;
-  gp.topology = LatticeTopology::Octet;   // the job schema restricts to octet
+  gp.topology = lattice_topology_from_id(job.grading.topology);  // the job's type
   gp.target_cell_size_mm = job.grading.present ? job.grading.cell_mm
                                                : job.lattice.cell_mm;
   gp.min_extrudable_width_mm = job.grading.present
@@ -7288,6 +12619,10 @@ std::string lattice_forecast_json(const JobDescription& job,
     s += "  \"variant_volume_fraction\": " +
          json_num(sd.requested_volume_fraction) + ",\n";
     s += "  \"topology\": \"" + job.lattice.topology + "\",\n";
+    {
+      const std::string note = lattice_type_directional_note(job.lattice.topology);
+      if (!note.empty()) s += "  \"directional_note\": \"" + note + "\",\n";
+    }
     s += "  \"cell_mode\": \"uniform\",\n";
     s += "  \"cell_size_mm\": " + json_num(job.lattice.cell_mm) + ",\n";
     s += "  \"uniform_note\": \"this job carries NO \\\"grading\\\" block, so "
@@ -7453,7 +12788,7 @@ std::string lattice_forecast_json(const JobDescription& job,
     // floor(w) = w / phi(rho_lo, 1) and the threshold inverts it directly.
     const double n_star = lattice_cells_per_member_min(gp.topology);
     const double cell_needed = gf.fallback_max_member_width_mm / n_star;
-    const double phi_unit = octet_strut_diameter_mm(lattice_rho_min(gp.topology), 1.0);
+    const double phi_unit = lattice_strut_diameter_mm(gp.topology, lattice_rho_min(gp.topology), 1.0);
     const double w_threshold = cell_needed * phi_unit;
     // Only offered when it is a REDUCTION the user does not already have. A
     // "remedy" that asks for a wider nozzle than the one declared is not one.
@@ -7541,6 +12876,10 @@ std::string lattice_forecast_json(const JobDescription& job,
   s += "  \"variant_volume_fraction\": " +
        json_num(sd.requested_volume_fraction) + ",\n";
   s += "  \"topology\": \"" + job.lattice.topology + "\",\n";
+  {
+    const std::string note = lattice_type_directional_note(job.lattice.topology);
+    if (!note.empty()) s += "  \"directional_note\": \"" + note + "\",\n";
+  }
   s += "  \"cell_mode\": \"" + std::string(cell_size_mode_name(gf.cell_mode)) +
        "\",\n";
   s += "  \"cell_size_mm\": " + json_num(gf.cell_size_mm) + ",\n";
@@ -7683,12 +13022,113 @@ std::string lattice_forecast_json(const JobDescription& job,
 
 }  // namespace
 
+// E1 (f): the area of the faces that would need support printed along `b` (facing
+// down more than 45 degrees from it, and not on the bed: within 0.5 mm of the lowest
+// point), and the support volume under them (area x height above the bed, projected).
+struct Overhang {
+  double area_mm2 = 0.0;
+  double support_volume_mm3 = 0.0;
+};
+Overhang overhang_of(const TriangleMesh& m, const Vec3& b) {
+  Overhang o;
+  if (m.empty()) return o;
+  double lowest = std::numeric_limits<double>::infinity();
+  for (const Vec3& v : m.vertices) lowest = std::min(lowest, v.x * b.x + v.y * b.y + v.z * b.z);
+  for (const auto& t : m.triangles) {
+    const Vec3& p0 = m.vertices[static_cast<std::size_t>(t[0])];
+    const Vec3& p1 = m.vertices[static_cast<std::size_t>(t[1])];
+    const Vec3& p2 = m.vertices[static_cast<std::size_t>(t[2])];
+    const Vec3 u{p1.x - p0.x, p1.y - p0.y, p1.z - p0.z}, w{p2.x - p0.x, p2.y - p0.y, p2.z - p0.z};
+    const Vec3 c{u.y * w.z - u.z * w.y, u.z * w.x - u.x * w.z, u.x * w.y - u.y * w.x};
+    const double a2 = std::sqrt(c.x * c.x + c.y * c.y + c.z * c.z);
+    if (!(a2 > 0.0)) continue;
+    const double down = -(c.x * b.x + c.y * b.y + c.z * b.z) / a2;  // n . (-b)
+    if (down <= std::cos(M_PI / 4.0)) continue;
+    const double h = ((p0.x + p1.x + p2.x) * b.x + (p0.y + p1.y + p2.y) * b.y +
+                      (p0.z + p1.z + p2.z) * b.z) / 3.0 - lowest;
+    if (h < 0.5) continue;  // on the bed
+    o.area_mm2 += 0.5 * a2;
+    o.support_volume_mm3 += 0.5 * a2 * down * h;
+  }
+  return o;
+}
+
 AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_dir,
                              const std::string& out_dir,
                              const MaterialLibrary& materials,
                              const SettingsRules& rules,
                              const std::string& analyze_mesh_path,
                              const SmoothRequest& smooth) {
+  // E1 (f) — "PRINT IT THIS WAY": the version's exported file re-checked along a new
+  // build direction, without re-optimizing: one analysis solve with the interlayer
+  // knockdown along the NEW Z, the overhang area that would need support (and the
+  // baseline direction's, from the same file), the verdict and a plain reason.
+  if (job.has_orientation_recheck) {
+    JobDescription j = job;
+    j.has_orientation_recheck = false;
+    const Vec3 base_dir = job.loads.present ? job.loads.build_dir
+                          : job.has_build_direction ? job.build_direction
+                                                    : Vec3{0.0, 0.0, 1.0};
+    j.has_build_direction = true;
+    j.build_direction = job.orientation_recheck_dir;
+    if (j.loads.present) j.loads.build_dir = job.orientation_recheck_dir;
+    // The mesh path stays relative to job_dir, as analyze_job takes it, and the file
+    // is read for the overhang through the same import (STL or 3MF).
+    const std::string rel =
+        analyze_mesh_path.empty() ? job.orientation_recheck_mesh : analyze_mesh_path;
+    AnalyzeJobResult r = analyze_job(j, job_dir, out_dir, materials, rules, rel, smooth);
+    TriangleMesh m;
+    try {
+      m = import_part_file_resolved(join_path(job_dir, rel)).mesh;
+    } catch (const std::exception& e) {
+      throw JobError(std::string("orientation re-check: cannot read the mesh: ") + e.what());
+    }
+    const Overhang now = overhang_of(m, job.orientation_recheck_dir);
+    const Overhang base = overhang_of(m, base_dir);
+    const FixedDesignAnalysis& a = r.analysis;
+    auto x = [](double v) {
+      char b[32];
+      std::snprintf(b, sizeof b, "%.2f", v);
+      return std::string(b) + "\u00D7";
+    };
+    char area[64];
+    std::snprintf(area, sizeof area, "%.0f mm\u00B2 needs support", now.area_mm2);
+    std::string reason;
+    if (a.accepted)
+      reason = "Strong enough printed this way: " + x(a.margin_effective) + " (needs " +
+               x(r.margin_required) + "); " + area;
+    else if (a.margin.interlayer <= a.margin.in_plane)
+      reason = "Printed this way the layers would split: " + x(a.margin_effective) + " (needs " +
+               x(r.margin_required) + ")";
+    else
+      reason = "Printed this way it is not strong enough: " + x(a.margin_effective) +
+               " (needs " + x(r.margin_required) + ")";
+    auto v3 = [](const Vec3& v) {
+      return "[" + json_num(v.x) + ", " + json_num(v.y) + ", " + json_num(v.z) + "]";
+    };
+    const std::string block =
+        "  \"orientation_recheck\": {\"build_dir\": " + v3(job.orientation_recheck_dir) +
+        ", \"margin\": " + json_num(a.margin_effective) +
+        ", \"interlayer_margin\": " + json_num(a.margin.interlayer) +
+        ", \"margin_required\": " + json_num(r.margin_required) +
+        ", \"accepted\": " + (a.accepted ? "true" : "false") +
+        ", \"overhang_area_mm2\": " + json_num(now.area_mm2) +
+        ", \"support_volume_mm3\": " + json_num(now.support_volume_mm3) +
+        ", \"reason\": " + json_str(reason) + ", \"baseline\": {\"build_dir\": " +
+        v3(base_dir) + ", \"overhang_area_mm2\": " + json_num(base.area_mm2) + "}}\n";
+    std::ifstream in(r.provenance_path);
+    std::string prov((std::istreambuf_iterator<char>(in)), {});
+    const std::size_t end = prov.rfind("\n}");
+    if (end != std::string::npos) {
+      prov = prov.substr(0, end) + ",\n" + block + "}\n";
+      write_text_file(r.provenance_path, prov);
+    }
+    r.orientation_recheck_reason = reason;
+    r.orientation_recheck_overhang_mm2 = now.area_mm2;
+    r.orientation_recheck_baseline_overhang_mm2 = base.area_mm2;
+    return r;
+  }
+  refuse_flexible_job(job, "analyze_job");  // Flexible stage (flexible/job_block.hpp)
   const auto mat_it = materials.find(job.material);
   if (mat_it == materials.end())
     throw JobError("material \"" + job.material +
@@ -8013,8 +13453,10 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   const KnockdownSpec knockdown = knockdown_spec_for(options);
 
   // ── THE single analysis solve — no optimization ─────────────────────────────
-  result.analysis = analyze_fixed_design(
-      design_grid, params, density, cert_bcs, loads, material, build_dir,
+  auto certify_one = [&](const std::vector<DirichletBC>& cbcs,
+                         const std::vector<NodalLoad>& cloads) {
+    return analyze_fixed_design(
+      design_grid, params, density, cbcs, cloads, material, build_dir,
       options.simp.cg_tolerance, options.simp.cg_max_iterations,
       options.simp.solver, options.margin_stop, knockdown, load_path_ok,
       part_solid, /*lattice=*/nullptr,
@@ -8023,6 +13465,31 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
       // so a part's recommendation cannot change just because it was re-analysed.
       score_orientations, resolve_build_direction_is_inferred(options),
       bake_plan.auto_apply);
+  };
+  // LOAD SCENARIOS (rulings 2026-10-26 03:45 and 12:46): EVERY scenario certified on
+  // this design (the export, for strengthen's verify), the worst governs. Their supports
+  // and loads on the certified grid (the design box's when a mesh was voxelized onto
+  // it), the weak springs sized for the material. One load case: the one solve, as
+  // always.
+  const std::vector<SimpScenario> cert_scenarios =
+      loadcase && !options.scenarios.empty()
+          ? sized_scenarios(expand_for_mesh ? domain.scenarios : options.scenarios,
+                            material.youngs_modulus_mpa, cert_grid.spacing)
+          : std::vector<SimpScenario>();
+  std::vector<ScenarioFields> an_scenario_fields;
+  if (cert_scenarios.empty()) {
+    result.analysis = certify_one(cert_bcs, loads);
+  } else {
+    // ★ E2.1: a graded lattice grades from the worst of the scenarios it uses, so
+    // their fields are kept when there is one to grade.
+    ScenarioCertification sc =
+        certify_scenarios(design_grid, cert_scenarios, certify_one,
+                          /*keep_fields=*/job.lattice.present && job.grading.present);
+    result.analysis = std::move(sc.governing);
+    an_scenario_fields = std::move(sc.fields);
+    result.scenarios = std::move(sc.reports);
+    result.unheld_scenario = std::move(sc.unheld);
+  }
   const FixedDesignAnalysis& a = result.analysis;
   // The orientation this re-analysis certifies, and the rotation the exported
   // geometry carries (empty when the export stays in model coordinates).
@@ -8057,7 +13524,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   // analyze path is byte-identical (bar L1).
   if (job.grading.present) {
     GradingLawParams gp;
-    gp.topology = LatticeTopology::Octet;  // job schema restricts topology to octet
+    gp.topology = lattice_topology_from_id(job.grading.topology);  // the job's type
     gp.target_cell_size_mm = job.grading.cell_mm;
     gp.min_extrudable_width_mm = job.grading.min_extrudable_width_mm;
     gp.demand_exponent = job.grading.demand_exponent;
@@ -8108,6 +13575,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     gp.aesthetic_percentile = job.grading.aesthetic_percentile;
     gp.aesthetic_rho_min = job.grading.aesthetic_rho_min;
     gp.aesthetic_rho_max = job.grading.aesthetic_rho_max;
+    gp.max_relative_density = job.grading.max_relative_density;
     gp.aesthetic_adaptive_cells_per_member =
         job.grading.aesthetic_adaptive_cells_per_member;
     gp.aesthetic_error_budget = job.grading.aesthetic_error_budget;
@@ -8118,7 +13586,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     // on the surface either. Any other combination writes a shell, a skin, a rim or a
     // diagrid, and any of those re-ties the struts trimming severed.
     {
-      const bool shell_written = job.lattice.outer_finish != "skin";
+      const bool shell_written = lattice_shell_written(job.lattice);
       const bool surface_net =
           job.grading.algorithm == "organic"
               ? job.grading.organic_boundary_finish != "clean"
@@ -8153,8 +13621,13 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     // density it is not allowed to certify.
     const LatticeAlgorithm an_alg = resolve_lattice_algorithm(job.grading);
     refuse_organic_structural(an_alg, job.grading);
-    const GradedField gf =
-        grade_lattice(design_grid, density, a.von_mises_field, nullptr, gp);
+    // ★ E2.1: graded from the worst of the scenarios the lattice uses.
+    const std::vector<char> an_scen_on = lattice_scenario_flags(job, cert_scenarios);
+    std::vector<double> an_vm_storage;
+    const std::vector<double>& an_vm =
+        lattice_grading_stress(a.von_mises_field, result.scenarios, an_scenario_fields,
+                               an_scen_on, an_vm_storage, nullptr);
+    const GradedField gf = grade_lattice(design_grid, density, an_vm, nullptr, gp);
 
     // ★ ORGANIC. The grading law above chose the DENSITY (all three algorithms honour
     // the same intent, §4b); this turns that density into a spacing field and traces.
@@ -8180,11 +13653,8 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
             const Vec3 c{design_grid.origin.x + (i + 0.5) * design_grid.spacing,
                          design_grid.origin.y + (j + 0.5) * design_grid.spacing,
                          design_grid.origin.z + (k + 0.5) * design_grid.spacing};
-            for (std::size_t ri = 0; ri < sr.includes.size(); ++ri)
-              if (point_in_clearance_region(sr.includes[ri], c, 0.0)) {
-                ids[e] = static_cast<int>(ri) + 1;
-                break;
-              }
+            // the OWNER rule (ruling 4): nearest face plane, tie to the lower id, never declaration order.
+            ids[e] = stepped_region_owner(c, sr.includes);
           }
       an_ids = ids;
       if (an_alg == LatticeAlgorithm::Stepped)
@@ -8200,7 +13670,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
                                         a.stress_tensor_field, &an_synth_rep)
             : std::vector<double>();
     if (an_alg == LatticeAlgorithm::Organic)
-      an_org = run_organic_step(job.lattice.outer_finish != "skin",
+      an_org = run_organic_step(lattice_shell_written(job.lattice),
                                 design_grid, density, an_stress,
                                 gf.posture.mask, gf.posture.relative_density,
                                 gf.band_rho_min, gf.band_rho_max, job.grading,
@@ -8213,14 +13683,16 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     // a mat under a voxel tall is erased silently — which is how a deliberately
     // thinned mat vanished from the slice entirely while every stat still read green.
     an_org.lat.weld_pitch_hint_mm = job.lattice.welded_pitch_mm;
-    an_org.lat.overhang_fillet = job.grading.organic_overhang_fillet;
     // ★ THE LAYER HEIGHT THE MACHINE WILL ACTUALLY USE. The mid-air-start check
     // rasters Z at this pitch; without it the check is COARSER THAN THE PRINTER
     // and passes parts that float for two real layers. 0 = not stated, and the
     // check says so on the receipt rather than inferring one.
     an_org.lat.layer_height_mm = job.loads.layer_height_mm;
+    an_org.lat.base_mat = job.grading.organic_base_mat;
+    an_org.lat.fill_mat = job.grading.organic_fill_mat;
+    an_org.lat.trim_below_base = job.grading.organic_trim_below_base;
 
-    RunInfo gi = build_run_info(job, options, RunObservability{});
+    RunInfo gi = build_run_info(job, options, build_identity());
     gi.grading_present = true;
     gi.grading_algorithm = lattice_algorithm_name(an_alg);
     // ★ THE COMPARABLE NUMBER (bar R10): the solid volume THIS algorithm's own
@@ -8284,14 +13756,75 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     // Costs a second solve. It runs only when a grading block asked for a structural
     // lattice, so no existing path pays for it.
     if (gf.intent_used == GradingIntent::Structural && gf.latticed_voxels > 0) {
-      const FixedDesignAnalysis relat = analyze_fixed_design(
-          design_grid, params, density, cert_bcs, loads, material, build_dir,
+      // ★ E2.1: re-certified under each scenario the lattice uses; the worst
+      // governs and every one must pass. Before E2.1, scenario 1 alone.
+      // ★ E2.4: an OPEN finish re-certifies with its cut cells given no credit, as the
+      // run path does (open_finish_cut_cells).
+      const std::vector<double>* recert_density = &density;
+      const LatticePosture* recert_post = &gf.posture;
+      bool recert_load_path_ok = load_path_ok;
+      std::vector<double> floored_density;
+      LatticePosture floored_post;
+      if (job.lattice.present && job.lattice.outer_finish == "none") {
+        const std::vector<char> cut = open_finish_cut_cells(design_grid, density, 0.5, gf.posture);
+        long long ncut = 0;
+        floored_density = density;
+        floored_post = gf.posture;
+        for (std::size_t e = 0; e < cut.size(); ++e)
+          if (cut[e]) {
+            floored_density[e] = 0.0;
+            floored_post.mask[e] = 0;
+            ++ncut;
+          }
+        gi.grading_recertified_open_cut_voxels = ncut;
+        recert_density = &floored_density;
+        recert_post = &floored_post;
+        recert_load_path_ok = load_path_connected(design_grid, floored_density, 0.5);
+      }
+      auto recert_one = [&](const std::vector<DirichletBC>& rb,
+                            const std::vector<NodalLoad>& rl) {
+        return analyze_fixed_design(
+          design_grid, params, *recert_density, rb, rl, material, build_dir,
           options.simp.cg_tolerance, options.simp.cg_max_iterations,
-          options.simp.solver, options.margin_stop, knockdown, load_path_ok,
-          part_solid, &gf.posture);
+          options.simp.solver, options.margin_stop, knockdown, recert_load_path_ok,
+          part_solid, recert_post);
+      };
+      FixedDesignAnalysis relat;
+      if (cert_scenarios.empty()) {
+        relat = recert_one(cert_bcs, loads);
+      } else {
+        std::vector<SimpScenario> used;
+        for (std::size_t sx = 0; sx < cert_scenarios.size(); ++sx)
+          if (an_scen_on[sx]) used.push_back(cert_scenarios[sx]);
+        std::vector<char> used_ok;
+        std::string not_certified;  // ★ 11-06 2(a): its words, as certify_posture
+        ScenarioCertification rs = certify_scenarios(
+            design_grid, used,
+            [&](const std::vector<DirichletBC>& rb, const std::vector<NodalLoad>& rl) {
+              FixedDesignAnalysis r = recert_one(rb, rl);
+              used_ok.push_back(r.accepted ? 1 : 0);
+              if (r.lattice_not_certified && not_certified.empty())
+                not_certified = "Under \"" + used[used_ok.size() - 1].name + "\": " +
+                                r.lattice_not_certified_reason;
+              return r;
+            });
+        relat = std::move(rs.governing);
+        for (const char ok : used_ok)
+          if (!ok) relat.accepted = false;
+        if (!not_certified.empty()) {
+          relat.lattice_not_certified = true;
+          relat.lattice_not_certified_reason = not_certified;
+        }
+        for (const ScenarioReport& r : rs.reports) {
+          gi.grading_recertified_scenario_names.push_back(r.name);
+          gi.grading_recertified_scenario_margins.push_back(r.margin);
+          gi.grading_recertified_scenario_governs.push_back(r.governs ? 1 : 0);
+        }
+      }
       gi.grading_recertified = true;
       gi.grading_recertified_margin = relat.margin_effective;
       gi.grading_recertified_accepted = relat.accepted;
+      gi.grading_recertified_not_certified = relat.lattice_not_certified_reason;
       gi.grading_recertified_non_convergent = relat.non_convergent;
       gi.grading_recertified_max_von_mises = relat.max_von_mises;
       gi.grading_solid_margin = a.margin_effective;
@@ -8375,9 +13908,21 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   result.margin_required = margin_required;
   vr.margin_required = margin_required;
   vr.margin_effective = a.margin_effective;
+  vr.contact_rounds = a.contact_rounds;  // REAL BOLTS
+  vr.contact_tangent_share = a.contact_tangent_share;
+  vr.contact_held_by_sliding = a.contact_held_by_sliding;
+  vr.contact_settled = a.contact_settled;
+  vr.contact_kept_last = a.contact_kept_last;
+  vr.contact_engaged = a.contact_engaged;
+  vr.contact_released = a.contact_released;
+  vr.contact_load_share = a.contact_load_share;
+  vr.scenarios = result.scenarios;  // LOAD SCENARIOS (empty when none)
   if (!a.accepted)
-    vr.rejection_reason =
-        load_path_ok ? kMarginBelowRequiredReason : kLoadPathNotConnectedReason;
+    vr.rejection_reason = !load_path_ok ? std::string(kLoadPathNotConnectedReason)
+                          : !result.unheld_scenario.empty()
+                              ? scenario_unheld_reason(result.unheld_scenario)
+                          : a.contact_held_by_sliding ? std::string(kAnchorsSlidingReason)
+                                                      : std::string(kMarginBelowRequiredReason);
   JobReport report;
   report.material = job.material;
   (a.accepted ? report.variants : report.rejected).push_back(vr);
@@ -8557,6 +14102,7 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
                                             const std::string& out_dir,
                                             const MaterialLibrary& materials,
                                             const SettingsRules& rules) {
+  refuse_flexible_job(job, "lattice_variant_job");  // Flexible stage (flexible/job_block.hpp)
   const double t_start = wall_seconds();
   // ★ TWO MODES, ONE PIPELINE (task 2026-08-17-lattice-stage-repair).
   // "lattice_variant" lattices a FINISHED design read from a design.bin;
@@ -8581,23 +14127,26 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
   // design-box refusal that used to sit here is gone — the remap it named now
   // exists, ONCE, in core (resolve_design_domain), and this entry point calls it
   // below like every other site (task 2026-08-03-design-box-recertification).
-  if (job.grading.present && job.has_design_box)
-    throw JobError(
-        "lattice_variant: a \"grading\" block is not yet supported together with "
-        "a \"design_box\" — the grading law chooses its cell plan before the "
-        "added-material policy runs, so a graded design-box run could emit struts "
-        "into cells the certificate calls solid. Re-lattice with a uniform cell + "
-        "strut radius instead.");
+  // GRADING + A DESIGN BOX runs (reviewer's ruling 2026-11-03 23:05, option (b)): the
+  // law plans its cells around the added material and every level and pass lays only
+  // cells covering a voxel of the final mask (lattice_one_variant). The ORGANIC lattice
+  // is the one graded algorithm still refused with a box: its traced network is laid
+  // before the added-material policy keeps whole cells solid, and it has no cell to
+  // keep solid.
+  if (job.grading.present && job.has_design_box &&
+      resolve_lattice_algorithm(job.grading) == LatticeAlgorithm::Organic)
+    throw JobError(kOrganicDesignBoxRefusal);
   if (!job.grading.present) {
     const double lat_rho =
-        octet_relative_density(job.lattice.cell_mm, job.lattice.strut_radius_mm);
-    const double lo = lattice_rho_min(LatticeTopology::Octet);
-    const double hi = lattice_rho_max(LatticeTopology::Octet);
+        lattice_density_from_strut(
+            lattice_topology_from_id(job.grading.topology), job.lattice.cell_mm, job.lattice.strut_radius_mm);
+    const double lo = lattice_rho_min(lattice_topology_from_id(job.grading.topology));
+    const double hi = lattice_rho_max(lattice_topology_from_id(job.grading.topology));
     if (lat_rho < lo || lat_rho > hi)
       throw JobError(
           "lattice cell_mm " + std::to_string(job.lattice.cell_mm) +
           " / strut_radius_mm " + std::to_string(job.lattice.strut_radius_mm) +
-          " implies octet relative density " + std::to_string(lat_rho) +
+          " implies " + job.lattice.topology + " relative density " + std::to_string(lat_rho) +
           ", outside the certifiable band [" + std::to_string(lo) + ", " +
           std::to_string(hi) + "].");
   }
@@ -8699,6 +14248,15 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
     }
   }
   apply_build_direction_options(options, job);
+  // ★ LATTICING THE PART optimizes nothing, so a design box -- drawn, or the one a growth
+  // run derives -- has nothing to grow into: the part is solved, latticed and certified
+  // on its own grid, exactly as with no box. Expanded, every box voxel is solid on the
+  // grid, so the "part" latticed was the BOX (LatticeTypes' finding 2026-11-04 20:24: a
+  // 60 mm bar latticed as its 71 mm growth box, volume fraction 2.84).
+  if (lattice_the_part) {
+    options.design_box.reset();
+    options.keep_out_boxes.clear();
+  }
 
   // ── THE domain the ORIGINAL run solved on, rebuilt through the SAME core call
   // that run used (resolve_design_domain, pipeline.hpp): the expanded grid and
@@ -8961,14 +14519,41 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
   // grid, the material, the stored field — is not the one that produced the
   // variant, and every number after this point would describe a different
   // object. So this is ENFORCED, not reported.
-  result.solid = analyze_fixed_design(
-      cert_grid, params, sd.density, domain.bcs, loads, material, build_dir,
-      options.simp.cg_tolerance, options.simp.cg_max_iterations,
-      options.simp.solver, options.margin_stop, knockdown, load_path_ok,
-      part_solid, /*lattice=*/nullptr, options.build_orientation_report,
-      resolve_build_direction_is_inferred(options),
-      /*auto_apply_build_orientation=*/false);
-  ++result.analysis_solves;
+  auto certify_stored = [&](const std::vector<DirichletBC>& b,
+                            const std::vector<NodalLoad>& l) {
+    return analyze_fixed_design(
+        cert_grid, params, sd.density, b, l, material, build_dir,
+        options.simp.cg_tolerance, options.simp.cg_max_iterations,
+        options.simp.solver, options.margin_stop, knockdown, load_path_ok,
+        part_solid, /*lattice=*/nullptr, options.build_orientation_report,
+        resolve_build_direction_is_inferred(options),
+        /*auto_apply_build_orientation=*/false);
+  };
+  // ★ E2.1: A SCENARIO RUN RECORDED ITS GOVERNING SCENARIO'S MARGIN, so the stored
+  // design is re-certified under every scenario, sized the way minimize_plastic sized
+  // them, and the worst governs, exactly as the run did it. Before E2.1 it was
+  // certified under scenario 1 alone, and every scenario job whose first scenario did
+  // not govern was refused here as "not the one that produced this variant"
+  // (measured on a two-scenario bar: recorded 4.95, reproduced 77.95). Each
+  // scenario's own field goes to the lattice, which grades from the worst of the
+  // ones it uses.
+  std::vector<ScenarioReport> stored_scenarios;
+  std::vector<ScenarioFields> stored_scenario_fields;
+  std::string stored_unheld;
+  if (domain.scenarios.empty()) {
+    result.solid = certify_stored(domain.bcs, loads);
+    ++result.analysis_solves;
+  } else {
+    ScenarioCertification sc = certify_scenarios(
+        cert_grid,
+        sized_scenarios(domain.scenarios, material.youngs_modulus_mpa, cert_grid.spacing),
+        certify_stored, /*keep_fields=*/true);
+    result.analysis_solves += static_cast<int>(sc.reports.size());
+    result.solid = std::move(sc.governing);
+    stored_unheld = std::move(sc.unheld);
+    stored_scenarios = std::move(sc.reports);
+    stored_scenario_fields = std::move(sc.fields);
+  }
   result.reproduced_margin_worst_case = result.solid.margin.worst_case;
   result.reproduction_exact =
       (result.solid.margin.worst_case == sd.margin_worst_case);
@@ -9038,6 +14623,7 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
   v.von_mises_field = result.solid.von_mises_field;
   v.stress_tensor_field = result.solid.stress_tensor_field;
   v.displacement_field = result.solid.displacement_field;
+  v.scenario_fields = std::move(stored_scenario_fields);   // ★ E2.1 (empty without)
   v.mass_grams = result.solid.mass_grams;
   v.support_volume_voxels = result.solid.support_volume_voxels;
   // The orientation and the export frame are the RUN's, carried in the store —
@@ -9076,9 +14662,11 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
   vr.accepted = result.solid.accepted;
   vr.margin_required = options.margin_stop;
   vr.margin_effective = result.solid.margin_effective;
+  vr.scenarios = stored_scenarios;   // ★ E2.1 (empty without scenarios)
   if (!result.solid.accepted)
-    vr.rejection_reason =
-        load_path_ok ? kMarginBelowRequiredReason : kLoadPathNotConnectedReason;
+    vr.rejection_reason = !load_path_ok           ? kLoadPathNotConnectedReason
+                          : !stored_unheld.empty() ? scenario_unheld_reason(stored_unheld)
+                                                   : kMarginBelowRequiredReason;
   v.report = vr;
 
   // ── the SHARED per-variant lattice pipeline. Same body the optimize path
@@ -9090,7 +14678,8 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
       lattice_role_regions_from_job(job, &result.model, &model_grid);
   const LatticeVariantOutcome R =
       lattice_one_variant(v, job, model_grid, domain, options, material,
-                          lattice_kos, lattice_roles, out_dir);
+                          lattice_kos, lattice_roles, out_dir,
+                          lattice_the_part ? &result.model.mesh : nullptr, &result.model);
   // BAR B3 / L3 (task 2026-08-04-variant-volume-fraction-mismatch). This entry
   // point exists to produce ONE latticed object. If the grading law could
   // lattice nothing, there is no object — and the alternative the optimize path
@@ -9106,6 +14695,8 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
   // generator ran — so there is no half-object to clean up.
   if (R.void_sealed)
     throw JobError("lattice_variant: " + R.void_sealed_reason);
+  if (R.volume_refused)
+    throw JobError("lattice_variant: " + R.volume_refused_reason);
   // The pipeline's own solve count: the null-posture reproduction it runs as
   // its internal proof, the composite, and (when band clamping happened) the
   // clamp counterfactual. Counted, never assumed.
@@ -9141,13 +14732,42 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
   // ── run_info.json carrying the grading record, from the SAME filler the
   // analyze path uses so the two receipts cannot drift.
   {
-    RunInfo gi = build_run_info(job, options, RunObservability{});
+    RunInfo gi = build_run_info(job, options, build_identity());
     if (R.graded) {
       gi.grading_present = true;
       gi.grading_topology = lattice_topology_name(R.gf.posture.topology);
       gi.grading_band_rho_min = R.gf.band_rho_min;
       gi.grading_band_rho_max = R.gf.band_rho_max;
       gi.grading_cells_per_member_floor = R.gf.cells_per_member_floor;
+      gi.lattice_outline_beam_mm = R.outline_beam_mm;
+      gi.lattice_outline_bleed_mm = R.outline_bleed_mm;
+      gi.lattice_outline_inward_mm = R.outline_inward_mm;
+      gi.lattice_outline_voxels = R.outline_beam_voxels;
+      gi.stepped_anystep_rho_by_size = R.anystep_rho_by_size;
+      gi.stepped_anystep_cells = R.anystep_cells;
+      gi.stepped_anystep_regions = R.anystep_regions;
+      gi.stepped_anystep_passes = R.anystep_passes;
+      gi.stepped_anystep_histogram = R.anystep_histogram;
+      gi.stepped_plan_solid_remainder_mm3 = R.plan_solid_remainder_mm3;
+      gi.stepped_plan_latticed_mm3 = R.plan_latticed_mm3;
+      gi.stepped_plan_rho_fallback_by_region = R.plan_rho_fallback_by_region;
+      gi.stepped_clip_outside_region_mm3 = R.clip_outside_region_mm3;
+      gi.stepped_clip_outside_by_cause_mm3 = R.clip_outside_by_cause_mm3;
+      gi.stepped_plan_rho_queries_plan = R.plan_rho_queries_plan;
+      gi.stepped_plan_rho_queries_posture = R.plan_rho_queries_posture;
+      gi.stepped_plan_rho_queries_floor = R.plan_rho_queries_floor;
+      gi.stepped_plan_by_region = R.plan_by_region;
+      gi.stepped_plan_laid_unattributed = R.plan_laid_unattributed;
+      gi.stepped_plan_laid_measured = R.plan_laid_measured;
+      gi.stepped_law_ungradeable_reported = R.law_ungradeable_reported;
+      gi.stepped_law_ungradeable_note = R.law_ungradeable_note;
+      gi.stepped_seam_spans_before = R.seam_spans_before;
+      gi.stepped_seam_spans_after = R.seam_spans_after;
+      gi.stepped_seam_piece_mm = R.seam_piece_mm;
+      gi.stepped_seam_longest_before_mm = R.seam_longest_before_mm;
+      gi.stepped_seam_welded_nodes = R.seam_welded_nodes;
+      gi.stepped_seam_t_junction_ends = R.seam_t_junction_ends;
+      gi.stepped_seam_floating_ends = R.seam_floating_ends;
       gi.grading_cell_size_mm = R.gf.cell_size_mm;
       gi.grading_printability_floor_mm = R.gf.printability_floor_mm;
       gi.grading_cell_size_floored = R.gf.cell_size_floored;
@@ -9219,8 +14839,31 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         gi.organic_synthetic_dead_floor_bound = R.organic_synthetic.dead_floor_bound;
         gi.organic_solid_rim_mm = R.organic_solid_rim_mm;
         gi.organic_solid_rim_voxels = R.organic_solid_rim_voxels;
-        gi.organic_overhang_fillet_on = job.grading.organic_overhang_fillet;
-        gi.organic_fillet_skipped_spans = R.oc.organic_fillet_skipped_spans;
+        gi.organic_unsupported_spans = R.oc.organic_unsupported_spans;
+        // ★ §3 PARITY: the SHIPPED span census, measured here over the very vector the
+        // STL is carved from (organic_spans_out, the post-clip set) rather than taken
+        // from any pass's own tally. A census computed from a counter can survive the
+        // geometry it counted being deleted -- which is exactly what the node merge did
+        // to a fifth of this part's material while every counter still read fine.
+        {
+          const std::vector<OrganicSpan>& sp = R.oc.organic_spans_out;
+          gi.organic_span_count = static_cast<long long>(sp.size());
+          double total = 0.0;
+          std::vector<double> radii;
+          radii.reserve(sp.size());
+          for (const OrganicSpan& q : sp) {
+            const double dx = q.b.x - q.a.x, dy = q.b.y - q.a.y, dz = q.b.z - q.a.z;
+            total += std::sqrt(dx * dx + dy * dy + dz * dz);
+            radii.push_back(q.r);
+          }
+          gi.organic_span_length_mm = total;
+          if (!radii.empty()) {
+            std::sort(radii.begin(), radii.end());
+            gi.organic_span_radius_min_mm = radii.front();
+            gi.organic_span_radius_p50_mm = radii[radii.size() / 2];
+            gi.organic_span_radius_max_mm = radii.back();
+          }
+        }
         gi.organic_transfer_ties_on = job.grading.organic_transfer_ties;
         gi.organic_ties_seeded = static_cast<long long>(R.oc.growth.growth_ties_seeded);
         gi.organic_ties_landed = static_cast<long long>(R.oc.growth.growth_ties_landed);
@@ -9250,6 +14893,8 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
           ri.voxels = static_cast<long long>(rr.voxels);
           ri.fully = static_cast<long long>(rr.fully_synthetic);
           ri.blended = static_cast<long long>(rr.blended);
+          ri.whole_region = rr.whole_region;
+          ri.p99_von_mises = rr.p99_von_mises;
           gi.organic_synthetic_by_region.push_back(ri);
         }
         // ★ the organic structural certificate. `verdict` is never absent when one
@@ -9353,9 +14998,6 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         gi.organic_cantilever_islands = R.oc.organic_cantilever_islands;
         gi.organic_arched_spans = R.oc.organic_arched_spans;
         gi.organic_arch_rise = R.oc.organic_arch_rise;
-        gi.organic_filleted = R.oc.organic_filleted;
-        gi.organic_fillet_unresolved = R.oc.organic_fillet_unresolved;
-        gi.organic_fillet_radius = R.oc.organic_fillet_radius;
         gi.organic_base_mat_length_mm = R.oc.organic_base_mat_len;
         gi.organic_base_mat_z_mm = R.oc.organic_base_mat_z;
         gi.organic_fill_mat_cells = R.oc.organic_fill_cells;
@@ -9430,8 +15072,12 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
     lvr.min_feature_warning = min_feature_warning_text(
         rules, result.lattice.v3.min_feature_violations);
     if (!lvr.accepted)
-      lvr.rejection_reason = load_path_ok ? kMarginBelowRequiredReason
-                                          : kLoadPathNotConnectedReason;
+      lvr.rejection_reason = !R.cc.open_refusal.empty() ? R.cc.open_refusal  // ★ E2.4
+                             : !R.one_density_refusal.empty() ? R.one_density_refusal  // ★ E3
+                             : result.lattice.lattice_not_certified
+                                 ? result.lattice.lattice_not_certified_reason
+                             : load_path_ok ? kMarginBelowRequiredReason
+                                            : kLoadPathNotConnectedReason;
     JobReport report;
     report.material = job.material;
     (lvr.accepted ? report.variants : report.rejected).push_back(lvr);
@@ -9834,11 +15480,763 @@ JobSetup build_job_setup(const JobDescription& job, const StepModel& model,
   return S;
 }
 
+// ── "REDESIGN TO STRENGTHEN" (CORE LIST item 50) ─────────────────────────────
+// The reviewer's brief of 2026-10-24 22:59, approved 01:52 (arm B dropped), with
+// the search changed after the sample (02:16): the margin can sit on a plateau
+// set by frozen features, so the fraction is BRACKETED (halved while the aim
+// holds, doubled while it fails, then bisected) instead of moved +-5 % a step.
+//
+// Every optimize is an ordinary one-rung minimize_plastic call on the run's own
+// (domain_box_only, volume_basis_domain) options; no solver file is involved.
+// The coarse runs start fresh; a version's fine run starts from the passing
+// coarse design with its loose pieces taken out (clean_strengthen_start; ruling
+// 2026-10-25), a repair from the design it repairs, cleaned the same way. Each version's fraction is searched on a res/2 grid, the
+// version is then run once at the job's resolution and VERIFIED: its exported
+// solid (variant_export_model_mesh, the shell the file carries) re-voxelized and
+// certified by analyze_job, the same certification `topopt-cli analyze` runs.
+// THE LADDER (his decision of 2026-10-26, replacing 25 / 50 / 75 % less worst stress):
+// version 1's target is the user's safety margin (the lightest redesign that is just
+// safe), versions 2 and 3 each 10 % over the version before, on its VERIFIED margin.
+constexpr double kStrengthenLadderStep = 1.10;
+constexpr double kStrengthenDelta = 0.10;     // aim above the target (da Silva 2021)
+constexpr double kStrengthenGamma = 0.75;     // the repair's exponent
+constexpr double kStrengthenCeilingUse = 0.95;
+constexpr double kStrengthenStepOver = 1.05;  // each version >= 1.05 x the previous
+constexpr int kStrengthenCoarseRuns = 6;
+constexpr int kStrengthenRepairs = 2;
+
+// Move a one-rung result's rung onto `into`, keeping every per-rung vector aligned
+// with `evaluated` (run_info reads them by rung index).
+void append_rung(MinimizePlasticResult& into, MinimizePlasticResult&& from) {
+  auto take = [](auto& a, auto& b) {
+    for (auto& x : b) a.push_back(std::move(x));
+  };
+  take(into.evaluated, from.evaluated);
+  take(into.rung_grayscale_mnd, from.rung_grayscale_mnd);
+  take(into.conditional_projection_fired, from.conditional_projection_fired);
+  take(into.rung_infeasible, from.rung_infeasible);
+  take(into.rung_non_convergent, from.rung_non_convergent);
+  take(into.rung_non_convergent_iteration, from.rung_non_convergent_iteration);
+  take(into.rung_non_convergent_residual, from.rung_non_convergent_residual);
+  take(into.rung_diverged, from.rung_diverged);
+  take(into.rung_diverged_iteration, from.rung_diverged_iteration);
+  take(into.rung_diverged_c_ratio, from.rung_diverged_c_ratio);
+  take(into.rung_diverged_cg_ratio, from.rung_diverged_cg_ratio);
+  take(into.rung_diverged_wall_ratio, from.rung_diverged_wall_ratio);
+  take(into.rung_time_budget, from.rung_time_budget);
+  take(into.rung_time_budget_iteration, from.rung_time_budget_iteration);
+  take(into.rung_time_budget_ms, from.rung_time_budget_ms);
+  take(into.rung_time_budget_elapsed_ms, from.rung_time_budget_elapsed_ms);
+  take(into.rung_time_budget_baseline_ms, from.rung_time_budget_baseline_ms);
+  take(into.rung_time_budget_phase, from.rung_time_budget_phase);
+  take(into.rung_time_budget_phase_ms, from.rung_time_budget_phase_ms);
+  take(into.draft_rung_tail_k, from.draft_rung_tail_k);
+  take(into.draft_rung_c_gap, from.draft_rung_c_gap);
+  take(into.draft_rung_escalated, from.draft_rung_escalated);
+  take(into.draft_rung_probe_flip, from.draft_rung_probe_flip);
+  take(into.draft_rung_probe_cg, from.draft_rung_probe_cg);
+  take(into.draft_rung_probe_tightmove, from.draft_rung_probe_tightmove);
+  take(into.report.variants, from.report.variants);
+  take(into.report.rejected, from.report.rejected);
+}
+
+// Squared distance from p to triangle abc (closest point, Ericson's regions).
+double point_triangle_d2(const Vec3& p, const Vec3& a, const Vec3& b, const Vec3& c) {
+  auto sub = [](const Vec3& u, const Vec3& v) { return Vec3{u.x - v.x, u.y - v.y, u.z - v.z}; };
+  auto dot = [](const Vec3& u, const Vec3& v) { return u.x * v.x + u.y * v.y + u.z * v.z; };
+  auto d2 = [&](const Vec3& q) { const Vec3 e = sub(p, q); return dot(e, e); };
+  const Vec3 ab = sub(b, a), ac = sub(c, a), ap = sub(p, a);
+  const double d1 = dot(ab, ap), d2v = dot(ac, ap);
+  if (d1 <= 0 && d2v <= 0) return d2(a);
+  const Vec3 bp = sub(p, b);
+  const double d3 = dot(ab, bp), d4 = dot(ac, bp);
+  if (d3 >= 0 && d4 <= d3) return d2(b);
+  const double vc = d1 * d4 - d3 * d2v;
+  if (vc <= 0 && d1 >= 0 && d3 <= 0) {
+    const double t = d1 / (d1 - d3);
+    return d2(Vec3{a.x + t * ab.x, a.y + t * ab.y, a.z + t * ab.z});
+  }
+  const Vec3 cp = sub(p, c);
+  const double d5 = dot(ab, cp), d6 = dot(ac, cp);
+  if (d6 >= 0 && d5 <= d6) return d2(c);
+  const double vb = d5 * d2v - d1 * d6;
+  if (vb <= 0 && d2v >= 0 && d6 <= 0) {
+    const double t = d2v / (d2v - d6);
+    return d2(Vec3{a.x + t * ac.x, a.y + t * ac.y, a.z + t * ac.z});
+  }
+  const double va = d3 * d6 - d5 * d4;
+  if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) {
+    const double t = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+    return d2(Vec3{b.x + t * (c.x - b.x), b.y + t * (c.y - b.y), b.z + t * (c.z - b.z)});
+  }
+  const double den = 1.0 / (va + vb + vc);
+  const double v = vb * den, w = vc * den;
+  return d2(Vec3{a.x + ab.x * v + ac.x * w, a.y + ab.y * v + ac.y * w,
+                 a.z + ab.z * v + ac.z * w});
+}
+
+// The ceiling's worst-stress site (the reviewer's ruling of 2026-10-25 03:58).
+void strengthen_cap_site(StrengthenReport& sr, const VoxelGrid& G,
+                         const std::vector<double>& von_mises, const StepModel& model) {
+  if (von_mises.size() != G.voxel_count()) return;
+  std::size_t at = 0;
+  for (std::size_t i = 1; i < von_mises.size(); ++i)
+    if (von_mises[i] > von_mises[at]) at = i;
+  const int x = static_cast<int>(at % static_cast<std::size_t>(G.nx));
+  const int y = static_cast<int>((at / static_cast<std::size_t>(G.nx)) %
+                                 static_cast<std::size_t>(G.ny));
+  const int z = static_cast<int>(at / (static_cast<std::size_t>(G.nx) *
+                                       static_cast<std::size_t>(G.ny)));
+  sr.cap_point = G.voxel_center(x, y, z);
+  double best = std::numeric_limits<double>::infinity();
+  for (std::size_t t = 0; t < model.mesh.triangles.size(); ++t) {
+    const auto& tri = model.mesh.triangles[t];
+    const double d = point_triangle_d2(sr.cap_point, model.mesh.vertices[tri[0]],
+                                       model.mesh.vertices[tri[1]],
+                                       model.mesh.vertices[tri[2]]);
+    if (d < best) {
+      best = d;
+      sr.cap_face_id = model.triangle_face[t];
+    }
+  }
+  for (int dk = -1; dk <= 1; ++dk)
+    for (int dj = -1; dj <= 1; ++dj)
+      for (int di = -1; di <= 1; ++di) {
+        const int i = x + di, j = y + dj, k = z + dk;
+        if (i < 0 || j < 0 || k < 0 || i >= G.nx || j >= G.ny || k >= G.nz) continue;
+        const VoxelTag t = G.tag(i, j, k);
+        if (t == VoxelTag::Fixture) sr.cap_at_anchor_face = true;
+        if (t == VoxelTag::Load) sr.cap_at_load_face = true;
+      }
+  char line[400];
+  std::snprintf(line, sizeof(line),
+                "the box filled solid peaks at (%.1f, %.1f, %.1f) mm, on face %d%s",
+                sr.cap_point.x, sr.cap_point.y, sr.cap_point.z, sr.cap_face_id,
+                sr.cap_at_anchor_face || sr.cap_at_load_face
+                    ? (sr.cap_at_anchor_face
+                           ? ", at the edge of an anchor face: a fixed-support "
+                             "corner, where voxel stress grows with resolution, so "
+                             "this cap may not be real"
+                           : ", at the edge of a load face: where voxel stress "
+                             "grows with resolution, so this cap may not be real")
+                    : "");
+  sr.cap_note = line;
+}
+
+// ── DON'T CARRY SPECKS ACROSS GRIDS (core-loose-pieces, ruling 2026-10-25) ──
+// The fine run of a version starts from a DESIGN, never from a speckled one:
+// the coarse search's passing design (resampled onto the fine grid by voxel
+// centre) or, for a repair, the fine design it repairs. Before it is handed on,
+// its LOOSE pieces — face-connected pieces of material touching no support or
+// load, the solves' own rule (fea_loose_pieces) — lose their design material.
+// Frozen voxels cannot be removed (the run unions them in), so a frozen piece
+// that is loose stays and the solves' connection rule takes it out of each
+// system; `loose_left` counts the NON-frozen loose voxels left, which is 0 by
+// construction and checked by a second census. (Until this, the fine run
+// started from the parametric level set's hole array at the coarse fraction:
+// on his Carriage Arms at that fraction it was 2,038 pieces, 2,031 of them
+// loose, and the first fine solve never ended.)
+struct StrengthenStart {
+  std::vector<double> design;          // on the fine grid; empty = none
+  std::string from;                    // "coarse design" | "repaired design"
+  int loose = 0;                       // loose pieces in the hand-off
+  long long loose_voxels_removed = 0;  // design voxels they lost
+  long long loose_left = 0;            // non-frozen loose voxels left (0)
+  int frozen_loose = 0;                // frozen-only pieces still loose
+  double ms = 0.0;                     // the two censuses' wall time
+};
+
+StrengthenStart clean_strengthen_start(const VoxelGrid& G, std::vector<double> design,
+                                       const DesignMask& mask,
+                                       const SolvedDesignDomain& domain, double iso,
+                                       const char* from) {
+  StrengthenStart out;
+  const std::size_t nv = G.voxel_count();
+  if (design.size() != nv || mask.size() != nv) return out;
+  out.from = from;
+  auto frozen = [&](std::size_t i) {
+    return mask[i] == MaskValue::FrozenSolid || G.tags[i] == VoxelTag::Load ||
+           G.tags[i] == VoxelTag::Fixture;
+  };
+  for (std::size_t i = 0; i < nv; ++i)
+    if (G.tags[i] == VoxelTag::Empty || mask[i] == MaskValue::FrozenVoid)
+      design[i] = 0.0;
+  // What anchors a piece: the run's supports, its declared loads, and every node
+  // of a Load voxel (a superset of the loaded nodes, so the cleaning never
+  // removes a piece a solve would keep).
+  std::vector<NodalLoad> loads = domain.external_loads;
+  for (int k = 0; k < G.nz; ++k)
+    for (int j = 0; j < G.ny; ++j)
+      for (int i = 0; i < G.nx; ++i) {
+        if (G.tag(i, j, k) != VoxelTag::Load) continue;
+        for (int c = 0; c < 8; ++c)
+          loads.push_back({fea_node_index(G, i + (c & 1), j + ((c >> 1) & 1),
+                                          k + ((c >> 2) & 1)),
+                           0, 1.0});
+      }
+  auto census = [&]() {
+    std::vector<char> solid(nv, 0);
+    for (std::size_t i = 0; i < nv; ++i)
+      solid[i] = G.tags[i] != VoxelTag::Empty && (design[i] > iso || frozen(i)) ? 1 : 0;
+    return fea_loose_pieces(G, solid, domain.bcs, loads);
+  };
+  const LoosePieceCensus before = census();
+  out.loose = before.loose;
+  for (int e : before.loose_voxel) {
+    const std::size_t i = static_cast<std::size_t>(e);
+    if (frozen(i)) continue;
+    design[i] = 0.0;
+    ++out.loose_voxels_removed;
+  }
+  const LoosePieceCensus after = census();
+  for (int e : after.loose_voxel)
+    if (!frozen(static_cast<std::size_t>(e))) ++out.loose_left;
+  out.frozen_loose = after.loose;
+  out.ms = before.ms + after.ms;
+  out.design = std::move(design);
+  return out;
+}
+
+// The coarse design, resampled onto the fine grid: each fine voxel takes the
+// density of the coarse voxel holding its centre (0 outside the coarse grid).
+std::vector<double> resample_design(const VoxelGrid& coarse,
+                                    const std::vector<double>& rho,
+                                    const VoxelGrid& fine) {
+  std::vector<double> out;
+  if (rho.size() != coarse.voxel_count() || !(coarse.spacing > 0.0)) return out;
+  out.assign(fine.voxel_count(), 0.0);
+  for (int k = 0; k < fine.nz; ++k)
+    for (int j = 0; j < fine.ny; ++j)
+      for (int i = 0; i < fine.nx; ++i) {
+        const Vec3 c = fine.voxel_center(i, j, k);
+        const int a = static_cast<int>(std::floor((c.x - coarse.origin.x) / coarse.spacing));
+        const int b = static_cast<int>(std::floor((c.y - coarse.origin.y) / coarse.spacing));
+        const int d = static_cast<int>(std::floor((c.z - coarse.origin.z) / coarse.spacing));
+        if (a < 0 || b < 0 || d < 0 || a >= coarse.nx || b >= coarse.ny || d >= coarse.nz)
+          continue;
+        out[fine.index(i, j, k)] = rho[coarse.index(a, b, d)];
+      }
+  return out;
+}
+
+void record_start(StrengthenVersionReport& vr, const StrengthenStart& st, int version,
+                  double vf) {
+  vr.fine_start = st.design.empty() ? "hole array" : st.from;
+  vr.fine_start_loose = st.loose;
+  vr.fine_start_loose_voxels_removed = st.loose_voxels_removed;
+  vr.fine_start_loose_left = st.loose_left;
+  vr.fine_start_frozen_loose = st.frozen_loose;
+  std::fprintf(stderr,
+               "[strengthen] version %d: fine start at vf %.4f from the %s: %d loose "
+               "piece(s) taken out (%lld design voxels), %lld non-frozen loose voxels "
+               "left, %d frozen piece(s) still loose (the solves take them out) ; "
+               "%.1f ms\n",
+               version, vf, vr.fine_start.c_str(), st.loose, st.loose_voxels_removed,
+               st.loose_left, st.frozen_loose, st.ms);
+  std::fflush(stderr);
+}
+
+MinimizePlasticResult strengthen_versions(
+    const JobDescription& job, const std::string& job_dir,
+    const std::string& out_dir, const MaterialLibrary& materials,
+    const SettingsRules& rules, const StepModel& model, bool model_is_mesh,
+    const Material& material, const VoxelGrid& grid,
+    const std::vector<DirichletBC>& bcs, const MinimizePlasticOptions& options,
+    const SolvedDesignDomain& domain, bool emit_progress) {
+  const std::string work = join_path(out_dir, "strengthen");
+  std::filesystem::create_directories(work);
+  StrengthenReport sr;
+  sr.evaluated = true;
+  sr.delta = kStrengthenDelta;
+  sr.gamma = kStrengthenGamma;
+  sr.vf_step = 0.0;  // bracketing search, no per-step cap (see above)
+  sr.margin_required = options.margin_stop;
+  const double iso = run_printed_iso(options);
+
+  // PROGRESS lines through the whole pass (the worker only understands
+  // `PROGRESS rung=<i> rungs=<n> iter=<k>`; extra keys are ignored). The three
+  // versions are the three "rungs" ("Variant k of 3" on the app); within a
+  // version `iter` counts every optimizer iteration of its coarse and fine runs,
+  // cumulatively, so it never runs backwards; it restarts only when the version
+  // (the rung) advances, as a ladder's does. The minimize_plastic runs below
+  // forward nothing of their own (quiet() clears their progress).
+  int p_rung = 0, p_base = 0, p_last = 0;
+  const char* p_step = "reference";
+  auto say = [&](int iter) {
+    if (!emit_progress) return;
+    std::printf("PROGRESS rung=%d rungs=%d iter=%d stage=strengthen step=%s\n", p_rung,
+                3, iter, p_step);
+    std::fflush(stdout);
+  };
+  say(0);
+
+  // The reference: the part as drawn, certified.
+  const AnalyzeJobResult drawn =
+      analyze_job(job, job_dir, join_path(work, "as_drawn"), materials, rules, "", {});
+  // The drawing is measured as INFORMATION only ("your drawing: N x, M g"): the targets
+  // are the safety margin and the versions before (the ladder above).
+  sr.as_drawn_margin = drawn.analysis.margin_effective;
+  sr.reference_margin = sr.margin_required;
+  // LOAD SCENARIOS (ruling 2026-10-26 12:46): every step on the WORST scenario
+  // (analyze_job certifies them all). A part as drawn that cannot carry one of them
+  // has no margin worth referencing: the reference is the requirement alone.
+  const bool with_scenarios = !job.loads.scenarios.empty();
+  sr.as_drawn_unheld = drawn.unheld_scenario;
+  sr.original_mass_grams = drawn.voxel_mass_grams;
+
+  // The ceiling: the domain (box, minus keep-outs and Keep Clears, plus everything
+  // frozen) filled solid, certified the same way.
+  const VoxelGrid& G = domain.grid;
+  const DesignMask mask = design_domain_mask(domain, options);
+  const std::vector<char> drawn_part = original_part_voxels(grid, domain);
+  std::vector<double> filled(G.voxel_count(), 0.0);
+  for (std::size_t i = 0; i < filled.size(); ++i)
+    if (G.tags[i] != VoxelTag::Empty && mask[i] != MaskValue::FrozenVoid)
+      filled[i] = 1.0;
+  if (options.design_box.has_value()) {
+    const DesignBox& b = *options.design_box;
+    for (std::size_t i = 0; i < filled.size(); ++i) {
+      if (mask[i] != MaskValue::FrozenSolid && G.tags[i] != VoxelTag::Load &&
+          G.tags[i] != VoxelTag::Fixture)
+        continue;
+      const int x = static_cast<int>(i % static_cast<std::size_t>(G.nx));
+      const int y = static_cast<int>((i / static_cast<std::size_t>(G.nx)) %
+                                     static_cast<std::size_t>(G.ny));
+      const int z = static_cast<int>(i / (static_cast<std::size_t>(G.nx) *
+                                          static_cast<std::size_t>(G.ny)));
+      const Vec3 c = G.voxel_center(x, y, z);
+      if (c.x < b.min.x || c.x > b.max.x || c.y < b.min.y || c.y > b.max.y ||
+          c.z < b.min.z || c.z > b.max.z)
+        ++sr.frozen_outside_box_voxels;
+    }
+  }
+  const std::string ceiling_stl = join_path(work, "ceiling.stl");
+  write_stl_file(ceiling_stl, keep_largest_component(marching_cubes(G, filled, 0.5)));
+  p_step = "ceiling";
+  say(0);
+  {
+    const AnalyzeJobResult ceil =
+        analyze_job(job, job_dir, join_path(work, "ceiling"), materials, rules,
+                    ceiling_stl, {});
+    sr.ceiling_margin = ceil.analysis.margin_effective;
+    sr.ceiling_unheld = ceil.unheld_scenario;
+    strengthen_cap_site(sr, G, ceil.analysis.von_mises_field, model);
+  }
+
+  // The coarse problem: the same job at half the resolution.
+  JobDescription coarse_job = job;
+  // Half the resolution, but never below 48 (or the job's own when it is finer
+  // than that): at res 32 his Carriage Arms' 3-voxel pads are a third of the part,
+  // and the coarse margin read 5.8 where the job's resolution gave 4.85.
+  coarse_job.resolution =
+      std::min(job.resolution, std::max(job.resolution / 2, 48));
+  sr.coarse_resolution = coarse_job.resolution;
+  JobSetup coarse = build_job_setup(coarse_job, model, model_is_mesh, materials);
+  auto quiet = [](MinimizePlasticOptions o) {
+    o.on_variant = nullptr;  // the caller streams the final versions itself
+    o.on_density_snapshot = nullptr;
+    o.on_iteration = nullptr;
+    o.progress = nullptr;    // the pass speaks for itself (say() above)
+    return o;
+  };
+  const MinimizePlasticOptions coarse_opts = quiet(coarse.options);
+  // LATER COARSE RUNS START FROM A DESIGN (reviewer's order, 2026-10-26): the
+  // first coarse run of the pass starts from the level set's hole array as
+  // before; every later one — the rest of the bracket and every later version's
+  // — starts from the most recent coarse design, its loose pieces taken out
+  // (clean_strengthen_start on the coarse domain). At the low fractions the
+  // bracket reaches, the hole array is a field of disconnected blobs, which is
+  // what sent his Fine job's coarse runs 5-6 into the Jacobi-CG fallback.
+  const SolvedDesignDomain coarse_domain =
+      resolve_design_domain(coarse.grid, coarse.bcs, coarse.options);
+  const DesignMask coarse_mask = design_domain_mask(coarse_domain, coarse.options);
+  std::vector<double> coarse_last;  // the most recent coarse design
+  const MinimizePlasticOptions fine_opts = quiet(options);
+  auto run_one = [&](const JobSetup* s, double vf,
+                     const std::vector<double>& seed) {
+    MinimizePlasticOptions o = s ? coarse_opts : fine_opts;
+    o.volume_fraction_ladder = {vf};
+    o.initial_design = seed;
+    p_step = s ? "coarse" : "fine";
+    p_last = 0;
+    if (emit_progress)
+      o.progress = [&](std::size_t, std::size_t, int it) {
+        p_last = std::max(p_last, it);
+        say(p_base + it);
+      };
+    MinimizePlasticResult r = minimize_plastic(s ? s->grid : grid, material,
+                                               job.material, s ? s->bcs : bcs, rules, o);
+    p_base += p_last;
+    return r;
+  };
+  auto margin_of = [](const MinimizePlasticResult& r) {
+    const MinimizePlasticVariant& v = r.evaluated.front();
+    return v.accepted ? v.report.margin_effective : -1.0;
+  };
+
+  // Load nodes of the solve grid, for the deflection read on the verified solve.
+  std::vector<int> load_nodes;
+  for (int k = 0; k < G.nz; ++k)
+    for (int j = 0; j < G.ny; ++j)
+      for (int i = 0; i < G.nx; ++i) {
+        if (G.tag(i, j, k) != VoxelTag::Load) continue;
+        for (int c = 0; c < 8; ++c)
+          load_nodes.push_back(fea_node_index(G, i + (c & 1), j + ((c >> 1) & 1),
+                                              k + ((c >> 2) & 1)));
+      }
+
+  MinimizePlasticResult out;
+  double prev_vf = 0.0, prev_verified = 0.0;
+  bool prev_ok = true;  // the version before was built (version 1 builds on nothing)
+  for (int k = 0; k < 3; ++k) {
+    const auto t0 = std::chrono::steady_clock::now();
+    StrengthenVersionReport vr;
+    vr.version = k + 1;
+    p_rung = k;
+    p_base = 0;
+    p_step = "search";
+    say(0);
+    vr.stress_cut = 0.0;  // the old ladder's field; the target rule says what it is now
+    vr.target_rule = k == 0 ? "your safety margin"
+                            : "10% over version " + std::to_string(k) + "'s verified margin";
+    const double target =
+        k == 0 ? sr.margin_required
+               : std::max(kStrengthenLadderStep, kStrengthenStepOver) * prev_verified;
+    vr.target_margin = target;
+    if (!prev_ok) {
+      vr.status = "unreachable";
+      vr.note = "version " + std::to_string(k) + " was not built, so there is nothing to " +
+                "build 10% over";
+      vr.target_margin = 0.0;
+      sr.versions.push_back(vr);
+      continue;
+    }
+    prev_ok = false;  // until this version is built (verified, repaired or merged)
+    if (!sr.ceiling_unheld.empty()) {
+      // LOAD SCENARIOS: even the box filled solid gives that load no path.
+      vr.status = "unreachable";
+      vr.note = scenario_unheld_reason(sr.ceiling_unheld) + ", even with the box filled solid";
+      sr.versions.push_back(vr);
+      continue;
+    }
+    if (target > kStrengthenCeilingUse * sr.ceiling_margin) {
+      vr.status = "unreachable";
+      char note[200];
+      std::snprintf(note, sizeof(note),
+                    "above %.2f x the box filled solid (margin %.4g): unreachable "
+                    "in this design space",
+                    kStrengthenCeilingUse, sr.ceiling_margin);
+      vr.note = note;
+      sr.versions.push_back(vr);
+      continue;
+    }
+    // 1. Bracket the fraction on the coarse grid.
+    const double aim = target * (1.0 + kStrengthenDelta);
+    const double floor_vf = std::max(prev_vf, 0.02);
+    double vf = std::clamp(std::pow(target / sr.ceiling_margin, 1.0 / 1.5),
+                           floor_vf, 1.0);
+    double pass_vf = -1.0, fail_vf = -1.0, best_m = -1.0;
+    std::vector<double> pass_design;  // the passing coarse design (coarse grid)
+    VoxelGrid pass_grid;
+    while (vr.coarse_runs < kStrengthenCoarseRuns) {
+      std::vector<double> cseed;
+      if (!coarse_last.empty()) {
+        StrengthenStart cs = clean_strengthen_start(coarse_domain.grid, coarse_last,
+                                                    coarse_mask, coarse_domain, iso,
+                                                    "previous coarse design");
+        if (!cs.design.empty()) {
+          std::fprintf(stderr,
+                       "[strengthen] version %d coarse run %d at vf %.4f: starts from "
+                       "the previous coarse design: %d loose piece(s) taken out (%lld "
+                       "design voxels), %lld non-frozen loose voxels left ; %.1f ms\n",
+                       k + 1, vr.coarse_runs + 1, vf, cs.loose, cs.loose_voxels_removed,
+                       cs.loose_left, cs.ms);
+          cseed = std::move(cs.design);
+          ++vr.coarse_seeded;
+        }
+      }
+      MinimizePlasticResult cr = run_one(&coarse, vf, cseed);
+      const double m = margin_of(cr);
+      ++vr.coarse_runs;
+      if (cr.evaluated.front().optimization.physical_density.size() ==
+          coarse_domain.grid.voxel_count())
+        coarse_last = cr.evaluated.front().optimization.physical_density;
+      best_m = std::max(best_m, m);
+      if (m >= aim) {
+        pass_vf = vf;
+        pass_design = std::move(cr.evaluated.front().optimization.physical_density);
+        pass_grid = std::move(cr.solved_grid);
+        if (vf <= floor_vf + 1e-9) break;
+        vf = fail_vf > 0.0 ? 0.5 * (vf + fail_vf) : std::max(floor_vf, 0.5 * vf);
+      } else {
+        fail_vf = vf;
+        if (vf >= 1.0 - 1e-9) break;
+        vf = pass_vf > 0.0 ? 0.5 * (vf + pass_vf) : std::min(1.0, 2.0 * vf);
+      }
+      if (pass_vf > 0.0 && fail_vf > 0.0 && pass_vf / fail_vf < 1.08) break;
+    }
+    if (pass_vf < 0.0) {
+      vr.status = "unreachable";
+      char note[200];
+      std::snprintf(note, sizeof(note),
+                    "no fraction of the box reached it on the coarse grid (best "
+                    "margin %.4g)",
+                    best_m);
+      vr.note = note;
+      vr.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
+                       .count();
+      sr.versions.push_back(vr);
+      continue;
+    }
+    // 2. Fine run, verify the export, repair at most twice. The fine run starts
+    // from the passing coarse design, its loose pieces taken out (see
+    // clean_strengthen_start): the fine start holds no loose design material.
+    vf = pass_vf;
+    StrengthenStart start = clean_strengthen_start(
+        G, resample_design(pass_grid, pass_design, G), mask, domain, iso,
+        "coarse design");
+    record_start(vr, start, k + 1, vf);
+    const std::vector<double> coarse_start = std::move(start.design);
+    std::vector<double> seed = coarse_start;
+    MinimizePlasticResult best;
+    double best_verified = -1.0;
+    StrengthenAttemptReport best_attempt;
+    int shown_bridges = 0;  // 42-B's straight bridges on the shown attempt
+    bool ok = false;
+    for (int attempt = 0; attempt <= kStrengthenRepairs; ++attempt) {
+      MinimizePlasticResult r = run_one(nullptr, vf, seed);
+      const MinimizePlasticVariant& v = r.evaluated.front();
+      p_step = "verify";
+      say(p_base);
+      const std::string stl =
+          join_path(work, "v" + std::to_string(k + 1) + "_" +
+                              std::to_string(attempt) + ".stl");
+      // E1: the version is verified on its FINISHED file, the one it exports: slim,
+      // and when that file fails, the safe finish's (his fallback ruling 2026-11-03).
+      const RunFinish fin = make_run_finish(job, options, &model, r.solved_grid);
+      const RunFinish safe_fin = safe_finish(fin);
+      auto verify_file = [&](const TriangleMesh& m) {
+        write_stl_file(stl, m);
+        return analyze_job(job, job_dir, join_path(work, "verify"), materials, rules, stl, {});
+      };
+      FinishBlock fb;
+      TriangleMesh raw_mesh;
+      const TriangleMesh slim_mesh = variant_export_model_mesh(
+          v, job.output, r.solved_grid, iso, &model, job.keep_regions, &fin, &fb, &raw_mesh);
+      AnalyzeJobResult a = verify_file(slim_mesh);
+      double verified = a.analysis.margin_effective;
+      // The finished file's own checks (E1): margin against the version's target.
+      const DesignMask* clearance_p =
+          !options.clearance_void.empty() && options.clearance_void.size() == r.solved_grid.voxel_count()
+              ? &options.clearance_void
+              : nullptr;
+      auto file_reason = [&](const TriangleMesh& m, const AnalyzeJobResult& an, FinishBlock& b) {
+        FinishRecheck rc =
+            recheck_file(m, raw_mesh, r.solved_grid, clearance_p, &mask, an, target, b, fin.part);
+        rc.margin = rc.margin_required;  // the margin is the target test below, not this one
+        return finish_verdict_reason(rc);
+      };
+      // What the version prints, against the part as drawn and the Keep Clears.
+      const std::vector<double>& rho = v.optimization.physical_density;
+      long long inter = 0, uni = 0, clear = 0;
+      for (std::size_t i = 0; i < rho.size(); ++i) {
+        const bool printed = rho[i] > iso;
+        inter += printed && drawn_part[i];
+        uni += printed || drawn_part[i];
+        clear += printed && !options.clearance_void.empty() &&
+                 options.clearance_void[i] == MaskValue::FrozenVoid &&
+                 mask[i] != MaskValue::FrozenSolid;
+      }
+      // ITEM 50 ACCEPTANCE (reviewer's ruling 2026-10-26; strengthen_accept.hpp):
+      // the verified export meets the target (already >= 1.05 x the previous
+      // version's), no anchored piece detached / load path severed, no Keep
+      // Clear voxel. Dropped specks are a note, never a refusal.
+      StrengthenAttemptReport att;
+      att.attempt = attempt;
+      att.verified_margin = verified;
+      att.specks = v.v3.specks_dropped;
+      att.speck_volume_mm3 = v.report.speck_volume_mm3;
+      att.keep_clear_voxels = clear;
+      att.anchors_attached = v.report.rejection_reason != kAnchorDetachedReason;
+      att.rejection_reason = v.report.rejection_reason;
+      att.unheld_scenario = a.unheld_scenario;  // LOAD SCENARIOS, on the export
+      if (!att.unheld_scenario.empty())
+        att.unheld_reason = scenario_unheld_reason(att.unheld_scenario);
+      att.finish_reason = file_reason(slim_mesh, a, fb);
+      // The safe finish is tried only where finishing can change the outcome: not for a
+      // detached anchor, a design-level Keep clear or the variant's own refusal.
+      const bool finish_can_help =
+          att.anchors_attached && att.keep_clear_voxels == 0 &&
+          !strengthen_structural_rejection(att, kMarginBelowRequiredReason);
+      if (finish_can_help && !strengthen_attempt_accepted(att, target, kMarginBelowRequiredReason)) {
+        FinishBlock sfb;
+        const TriangleMesh safe_mesh = variant_export_model_mesh(
+            v, job.output, r.solved_grid, iso, &model, job.keep_regions, &safe_fin, &sfb);
+        AnalyzeJobResult sa = verify_file(safe_mesh);
+        StrengthenAttemptReport satt = att;
+        satt.verified_margin = sa.analysis.margin_effective;
+        satt.unheld_scenario = sa.unheld_scenario;
+        satt.unheld_reason =
+            sa.unheld_scenario.empty() ? "" : scenario_unheld_reason(sa.unheld_scenario);
+        satt.finish_reason = file_reason(safe_mesh, sa, sfb);
+        if (strengthen_attempt_accepted(satt, target, kMarginBelowRequiredReason)) {
+          FinishRecheck rc;
+          rc.ran = true;
+          rc.margin = verified;
+          rc.margin_required = target;
+          std::string why = !att.unheld_reason.empty()   ? att.unheld_reason
+                            : !att.finish_reason.empty() ? att.finish_reason
+                                                         : finish_verdict_reason(rc);
+          const std::string pre = "After finishing, ";
+          if (why.rfind(pre, 0) == 0) why = "With the slim finish, " + why.substr(pre.size());
+          sfb.finish_fallback = true;
+          sfb.finish_fallback_reason = why;
+          std::fprintf(stderr, "[finish] strengthen version %d uses the safe finish: %s\n",
+                       k + 1, why.c_str());
+          fb = sfb;
+          a = std::move(sa);
+          att = satt;
+          verified = att.verified_margin;
+        } else {
+          write_stl_file(stl, slim_mesh);  // the attempt shown is the slim one, as before
+        }
+      }
+      double defl = 0.0;
+      if (a.analysis.displacement_field.size() ==
+          static_cast<std::size_t>(3 * fea_node_count(G)))
+        for (const int n : load_nodes) {
+          const double* u = &a.analysis.displacement_field[3 * static_cast<std::size_t>(n)];
+          defl = std::max(defl, std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]));
+        }
+      vr.attempts.push_back(att);
+      const bool accepted_here =
+          strengthen_attempt_accepted(att, target, kMarginBelowRequiredReason);
+      // A repair warm-starts from this design only if it kept every anchor:
+      // warm-starting from a design that let anchored pieces go kept them loose.
+      std::vector<double> next_seed =
+          v.report.rejection_reason != kAnchorDetachedReason
+              ? v.optimization.physical_density
+              : std::vector<double>();
+      // The version shows the ACCEPTED attempt when there is one, else the best
+      // verified one.
+      if (accepted_here || verified > best_verified) {
+        best_verified = verified;
+        vr.volume_fraction = vf;
+        vr.in_loop_margin = v.report.margin_effective;
+        vr.verified_margin = verified;
+        vr.mass_grams = v.mass_grams;
+        vr.mass_fraction_of_original =
+            sr.original_mass_grams > 0.0 ? v.mass_grams / sr.original_mass_grams : 0.0;
+        vr.max_deflection_mm = defl;
+        vr.iou_with_original =
+            uni > 0 ? static_cast<double>(inter) / static_cast<double>(uni) : 0.0;
+        vr.essentially_original = vr.iou_with_original > 0.9;
+        vr.anchors_attached = v.report.rejection_reason != kAnchorDetachedReason;
+        vr.specks = v.v3.specks_dropped;
+        vr.keep_clear_voxels = clear;
+        // E1: strengthen's verify IS the finished-shape re-check (recheck_file filled
+        // the file's Keep clear, pieces, loose pieces and joints).
+        fb.recheck_ran = true;
+        fb.margin = verified;
+        fb.margin_before = v.report.margin_effective;
+        // Mass from the files themselves: the finished one, and the unfinished export.
+        fb.mass_grams = material.density_g_cm3 * fb.volume_after_mm3 / 1000.0;
+        fb.mass_before_grams = material.density_g_cm3 * fb.volume_before_mm3 / 1000.0;
+        vr.finish = fb;
+        vr.repairs = attempt;
+        vr.scenarios = a.scenarios;  // LOAD SCENARIOS: every one, on this export
+        shown_bridges = v.report.bridges;
+        best_attempt = att;
+        best = std::move(r);
+      }
+      if (accepted_here) {
+        ok = true;
+        break;
+      }
+      // Repair: raise the fraction by the shortfall (at least x1.25, so two repairs
+      // can cover a coarse-to-fine gap), from this design — its loose pieces
+      // taken out first — or, if it let an anchor go, from the clean coarse
+      // start again (never from a speckled hole array).
+      seed = next_seed.empty()
+                 ? coarse_start
+                 : clean_strengthen_start(G, std::move(next_seed), mask, domain, iso,
+                                          "repaired design")
+                       .design;
+      const double ratio = verified > 0.0 ? target / verified : 2.0;
+      vf = std::min(1.0, vf * std::max(1.25, std::pow(ratio, 1.0 / kStrengthenGamma)));
+    }
+    vr.seconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    if (!ok) {
+      // The REAL reason, from the attempt shown (strengthen_refusal_note).
+      vr.status = "unreachable";
+      vr.note = strengthen_refusal_note(best_attempt, target, kMarginBelowRequiredReason,
+                                        static_cast<int>(vr.attempts.size()) - 1,
+                                        kStrengthenRepairs);
+      sr.versions.push_back(vr);
+      continue;
+    }
+    // Two versions at the same design are one.
+    if (!out.evaluated.empty() && std::fabs(vr.volume_fraction - prev_vf) <= 0.01 * prev_vf) {
+      vr.status = "merged";
+      vr.note = "the same design as version " + std::to_string(k);
+      prev_ok = true;
+      prev_verified = vr.verified_margin;
+      sr.versions.push_back(vr);
+      continue;
+    }
+    vr.status = vr.repairs > 0 ? "repaired" : "verified";
+    if (vr.essentially_original) vr.note = "essentially your original";
+    if (with_scenarios && shown_bridges > 0) {
+      // LOAD SCENARIOS: the scenarios did not grow the connection on their own; the
+      // fallback joined the split (said, never silent).
+      const std::string b = "the split was joined by the straight bridge (" +
+                            std::to_string(shown_bridges) + "), the fallback";
+      vr.note = vr.note.empty() ? b : vr.note + "; " + b;
+    }
+    {
+      const std::string specks = strengthen_speck_note(best_attempt);
+      if (!specks.empty()) vr.note = vr.note.empty() ? specks : vr.note + "; " + specks;
+    }
+    prev_vf = vr.volume_fraction;
+    prev_verified = vr.verified_margin;
+    prev_ok = true;
+    sr.versions.push_back(vr);
+    out.solved_grid = best.solved_grid;
+    out.used_multigrid = best.used_multigrid;
+    out.mg_levels = best.mg_levels;
+    out.mg_hierarchy_ever_built = best.mg_hierarchy_ever_built;
+    out.growth_ladder = false;
+    // A version accepted on its VERIFIED export margin (strengthen_accept.hpp: the
+    // in-loop margin never refuses it) is that version's design even when its in-loop
+    // margin sat under the gate: it is written and listed with the accepted variants, at
+    // the margin it was accepted on. Without this a version was "verified" with no file
+    // (test_keep_strengthen: in loop 1.32, verified 2.43, target 1.5).
+    MinimizePlasticVariant& shown = best.evaluated.front();
+    shown.report.finish = vr.finish;  // E1: the export finishes it as it was verified
+    for (VariantReport& rv : best.report.variants) rv.finish = vr.finish;  // one rung
+    if (!shown.accepted) {
+      shown.accepted = true;
+      shown.report.accepted = true;
+      shown.report.margin_effective = vr.verified_margin;
+      shown.report.rejection_reason.clear();
+      best.report.rejected.clear();  // a version's run is one rung
+      best.report.variants = {shown.report};
+    }
+    append_rung(out, std::move(best));
+  }
+  if (out.evaluated.empty()) out.solved_grid = domain.grid;
+  out.report.material = job.material;
+  out.report.strengthen = std::move(sr);
+  return out;
+}
+
 }  // namespace
 
 PreflightJobResult preflight_job(const JobDescription& job,
                                  const std::string& job_dir,
                                  const MaterialLibrary& materials) {
+  refuse_flexible_job(job, "preflight_job");  // Flexible stage (flexible/job_block.hpp)
   const double t0 = steady_clock_ms();
   PreflightJobResult out;
   if (job.mode != "minimize_plastic")
@@ -9878,6 +16276,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                      const MaterialLibrary& materials,
                      const SettingsRules& rules, bool emit_progress,
                      const RunObservability& obs) {
+  refuse_flexible_job(job, "run_job");  // Flexible stage (flexible/job_block.hpp)
   // Fail fast on everything checkable before heavy work: the mode, the
   // material, and whether this build can write the requested mesh format.
   // MODE VALIDATION STAYS STRICT (H3a): run_job optimizes minimize_plastic jobs
@@ -9927,26 +16326,17 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
         "final stress field, so without a lattice there is nothing to grade "
         "into. Add a \"lattice\" block (without cell_mm/strut_radius_mm — the "
         "graded run derives those) or drop \"grading\".");
-  // GRADING + a DESIGN BOX is refused, and this is a NARROWER refusal than the
-  // one that stood before this task (which refused the whole design-box + lattice
-  // combination). Reason, precisely: a graded run's cell PLAN comes from
-  // grade_lattice, which runs before the added-material policy can speak, and the
-  // SWEPT multilevel emission takes its per-level cell occupancy from that plan
-  // rather than from the final certification mask. So on a graded design-box run
-  // the generator could still write struts into cells the certificate calls
-  // solid — the exact certified-object-is-not-the-exported-object failure the
-  // uniform path just closed. Rather than ship a second shape of it, refuse until
-  // the law's candidate set is made added-material-aware. Uniform lattice + a
-  // design box is supported and tested.
-  if (job.grading.present && job.has_design_box)
-    throw JobError(
-        "a \"grading\" block is not yet supported together with a \"design_box\": "
-        "the grading law chooses its cell plan before the added-material policy "
-        "runs, and the swept multilevel emission takes its cell occupancy from "
-        "that plan rather than from the final certification mask — so a graded "
-        "design-box run could emit struts into cells the certificate calls "
-        "solid. Run the design-box lattice job WITHOUT grading (uniform cell + "
-        "strut radius), or run the graded job without a design box.");
+  // GRADING + a DESIGN BOX runs (reviewer's ruling 2026-11-03 23:05, option (b)). It
+  // was refused because the graded cell PLAN came from grade_lattice before the
+  // added-material policy could speak, and the SWEPT levels (and the plan's passes)
+  // took their cells from that plan rather than from the final certification mask: a
+  // graded design-box run could write struts into cells the certificate calls solid.
+  // Now the law's candidates leave the added material out, and every level and pass
+  // lays only cells covering a voxel of the final mask (lattice_one_variant, audited
+  // per grid in the added-material receipt). Organic stays refused with a box.
+  if (job.grading.present && job.has_design_box &&
+      resolve_lattice_algorithm(job.grading) == LatticeAlgorithm::Organic)
+    throw JobError(kOrganicDesignBoxRefusal);
   if (job.lattice.present) {
     // A DESIGN BOX no longer refuses (task 2026-08-03-design-box-recertification).
     // The refusal existed because the latticed re-certification reconstructed the
@@ -9964,14 +16354,15 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     // still enforced per voxel inside analyze_fixed_design (E5 / H4b).
     if (!job.grading.present) {
       const double lat_rho =
-          octet_relative_density(job.lattice.cell_mm, job.lattice.strut_radius_mm);
-      const double lo = lattice_rho_min(LatticeTopology::Octet);
-      const double hi = lattice_rho_max(LatticeTopology::Octet);
+          lattice_density_from_strut(
+              lattice_topology_from_id(job.grading.topology), job.lattice.cell_mm, job.lattice.strut_radius_mm);
+      const double lo = lattice_rho_min(lattice_topology_from_id(job.grading.topology));
+      const double hi = lattice_rho_max(lattice_topology_from_id(job.grading.topology));
       if (lat_rho < lo || lat_rho > hi)
         throw JobError(
             "lattice cell_mm " + std::to_string(job.lattice.cell_mm) +
             " / strut_radius_mm " + std::to_string(job.lattice.strut_radius_mm) +
-            " implies octet relative density " + std::to_string(lat_rho) +
+            " implies " + job.lattice.topology + " relative density " + std::to_string(lat_rho) +
             ", outside the certifiable band [" + std::to_string(lo) + ", " +
             std::to_string(hi) +
             "]. The gate refuses to certify against a clamped tensor (bar E5); choose a "
@@ -10007,7 +16398,8 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     // mask on existing paths, which this task's bar 5 makes a blocked-stop. So
     // this states the number and changes nothing.
     if (!job.lattice.regions.empty()) {
-      const LatticeTopology topo = LatticeTopology::Octet;
+      const LatticeTopology topo =
+          lattice_topology_from_id(job.grading.topology);
       const double n_star = lattice_cells_per_member_min(topo);
       // The cell this run will actually use, by the SAME rules the law applies:
       // AUTO takes the printability floor, FIXED the target raised to the floor that
@@ -10075,8 +16467,9 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       // own gate table.
       std::string swept_unprintable_note;
       if (job.grading.present && pf_mode == CellSizeMode::Swept && w_min_fc > 0.0) {
+        // ★ D1: the swept frontier is the capped floor -- the plan can lay no rung below it.
         const double frontier_mm =
-            w_min_fc / octet_strut_diameter_mm(lattice_rho_max(topo), 1.0);
+            lattice_min_printable_cell_mm(topo, w_min_fc, job.grading.max_relative_density);
         if (job.grading.cell_max_mm < frontier_mm)
           swept_unprintable_note =
               "\n     ★ AND SEPARATELY: your whole swept window (" +
@@ -10327,8 +16720,8 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
           include_regions > 0 && w_min_fc > 0.0 && !(pf_fit && fit_any_feasible);
       if (pf_decidable) {
         const double perc_floor = lattice_percolation_cells_per_member_min(topo);
-        const LatticeCellDerivation d =
-            lattice_derive_cell_for_member(topo, thinnest_mm, w_min_fc);
+        const LatticeCellDerivation d = lattice_derive_cell_for_member(
+            topo, thinnest_mm, w_min_fc, 0.0, job.grading.max_relative_density);
         // Does the PLANNED cell percolate across the thinnest declared region?
         const double planned_cpm = thinnest_mm / cell_mm;
         const bool planned_percolates = planned_cpm >= perc_floor;
@@ -10354,7 +16747,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
               json_num(d.min_member_width_certifiable_mm) +
               " mm for a CERTIFIED one — or use a strut line width of at most " +
               json_num((thinnest_mm / perc_floor) *
-                       octet_strut_diameter_mm(lattice_rho_max(topo), 1.0)) +
+                       (w_min_fc / lattice_min_printable_cell_mm(topo, w_min_fc, job.grading.max_relative_density))) +
               " mm. Your thinnest region has " + json_num(thinnest_mm) +
               " mm. Both are your call, not this pipeline's.";
           std::string why =
@@ -10442,8 +16835,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
           // this message names is a remedy the code path no longer overrides.
           if (job.grading.present)
             why += "     A graded cell is raised only to " +
-                   json_num(w_min_fc / octet_strut_diameter_mm(
-                                           lattice_rho_max(topo), 1.0)) +
+                   json_num(lattice_min_printable_cell_mm(topo, w_min_fc, job.grading.max_relative_density)) +
                    " mm (the cell below which no density in the band prints), and "
                    "the density is raised with it so the strut still clears your "
                    "strut line width.\n";
@@ -10886,6 +17278,10 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     // nothing to the aggregates below.
     bool void_check_ran = false;
     int void_sealed_variants = 0;
+    int volume_refused_variants = 0;  // ★ Finding 7: rungs the volume check refused
+    bool volume_check_ran = false;
+    double volume_worst_gap = 0.0;     // the largest |gap| over every checked rung
+    double volume_certified_mm3 = 0.0, volume_exported_mm3 = 0.0;  // accepted rungs
     long long void_sealed_cells = 0, void_sealed_voxels = 0;
     double void_sealed_volume_mm3 = 0.0;
     long long void_latticed_reached = 0, void_latticed_cells = 0;
@@ -10955,6 +17351,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     RunInfo g_cell_ri;
   } lat_agg;
   std::vector<std::string> lattice_paths;  // merged into result.mesh_paths at end
+  std::map<double, std::vector<std::string>> lattice_paths_by_vf;  // E1: per version
   // Emit ONE accepted variant's latticed companion: generate the mesh, RE-CERTIFY it
   // against the octet tensor (bar E1 — the margin then describes the exported file,
   // not the solid design), write the per-variant certification receipt, fold both into
@@ -10998,12 +17395,12 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     CellSizeMode preflight_mode = CellSizeMode::Fixed;
     if (resolve_cell_mode(job.grading.cell_mode, preflight_mode) &&
         preflight_mode == CellSizeMode::Fit) {
+      const LatticeTopology job_topo = lattice_topology_from_id(job.grading.topology);
       const std::vector<FitRegionCell> early_cells = fit_region_cells(
-          job, LatticeTopology::Octet, job.grading.min_extrudable_width_mm,
-          &lattice_roles);
+          job, job_topo, job.grading.min_extrudable_width_mm, &lattice_roles);
       refuse_infeasible_region_lattice(job, early_cells,
                                        job.grading.min_extrudable_width_mm);
-      refuse_unprintable_stated_density(job, early_cells, LatticeTopology::Octet,
+      refuse_unprintable_stated_density(job, early_cells, job_topo,
                                         job.grading.min_extrudable_width_mm);
     }
   }
@@ -11023,7 +17420,9 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
           "run_job: lattice.multiscale was requested but this build withholds the "
           "permission (production_multiscale_lattice_to() is false)");
     options.multiscale_lattice = true;
-    options.multiscale_topology = LatticeTopology::Octet;  // schema restricts to octet
+    // The job's type. minimize_plastic refuses any type whose material model cannot
+    // steer a design loop (lattice_material_model_trustworthy), naming why.
+    options.multiscale_topology = lattice_topology_from_id(job.grading.topology);
     options.multiscale_region =
         multiscale_region_mask(solved_grid, lattice_kos, lattice_roles);
     options.multiscale_floor_cell_mm = multiscale_floor_cell_mm(job);
@@ -11118,14 +17517,15 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       run_info.multiscale_region_frozen_void = static_cast<long long>(frozen_void);
     }
     std::fprintf(stderr,
-                 "[multiscale] armed: topology=octet region_voxels=%zu "
+                 "[multiscale] armed: topology=%s region_voxels=%zu "
                  "floor_cell=%.4f mm floor_cells=%.1f\n",
+                 lattice_topology_name(options.multiscale_topology),
                  static_cast<std::size_t>(
                      std::count_if(options.multiscale_region.begin(),
                                    options.multiscale_region.end(),
                                    [](char c) { return c != 0; })),
                  options.multiscale_floor_cell_mm,
-                 lattice_cells_per_member_min(LatticeTopology::Octet));
+                 lattice_cells_per_member_min(options.multiscale_topology));
     std::fflush(stderr);
   }
 
@@ -11139,7 +17539,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     // the run-level AGGREGATION and the streaming checkpoint line.
     const LatticeVariantOutcome R =
         lattice_one_variant(v, job, grid, domain, options, material,
-                            lattice_kos, lattice_roles, out_dir);
+                            lattice_kos, lattice_roles, out_dir, nullptr, &result.model);
     // ── THIS RUNG PRODUCED NO LATTICE (task
     // 2026-08-04-variant-volume-fraction-mismatch, bar B3 / L3).
     //
@@ -11198,6 +17598,24 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       std::fflush(stderr);
       lat_agg.any = true;
       ++lat_agg.void_sealed_variants;
+      return;
+    }
+    if (R.volume_check.ran) {
+      lat_agg.volume_check_ran = true;
+      if (R.volume_check.worst_gap < lat_agg.volume_worst_gap)
+        lat_agg.volume_worst_gap = R.volume_check.worst_gap;
+      if (!R.volume_refused) {
+        lat_agg.volume_certified_mm3 += R.volume_check.certified_mm3;
+        lat_agg.volume_exported_mm3 += R.volume_check.exported_mm3;
+      }
+    }
+    // ★ Finding 7: the volume check's refusal skips the rung the same way.
+    if (R.volume_refused) {
+      std::fprintf(stderr, "[lattice] vf=%.2f NO LATTICE EMITTED — %s\n",
+                   v.requested_volume_fraction, R.volume_refused_reason.c_str());
+      std::fflush(stderr);
+      lat_agg.any = true;
+      ++lat_agg.volume_refused_variants;
       return;
     }
     lat_agg.wall_s += R.gen_seconds;
@@ -11300,6 +17718,47 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                                v.optimization.physical_density,
                                run_printed_iso(options), lattice_roles.includes, gf);
       fill_grading_subfloor(lat_agg.g_cell_ri, gf);
+      // ── ★ THE PLAN'S OWN RECEIPTS, ON THIS PATH TOO (found by running his job) ──
+      // This path -- the ladder, which is what `lattice-variant` takes on his jobs --
+      // aggregates per-variant lattice numbers into `lat_agg` and copies a hand-kept
+      // list into run_info. The plan receipts (K3's remainder, K4's per-region detail,
+      // K5's density reach, ruling 2's clip volume) were wired only into the OTHER
+      // receipt writer, the single-variant one at lattice_variant_job's tail. So every
+      // one of them was absent from run_info on 570B38E2 -- the run printed them on
+      // stderr and the receipt did not carry one.
+      //
+      // Found by running HIS job and reading the file, not by reading the code: my own
+      // fixtures take the single-variant path, where the keys were there all along. A
+      // receipt wired into one of two writers is a receipt that is missing exactly where
+      // it is needed.
+      //
+      // Carried from the last graded variant, which is the convention every grading
+      // field above already follows (g_cell_ri's own comment says so). The plan's cells,
+      // regions, passes, sizes and phases are identical across rungs -- they are the
+      // job's -- so only the LAID counts and the voxel-basis volumes are rung-dependent.
+      lat_agg.g_cell_ri.stepped_anystep_cells = R.anystep_cells;
+      lat_agg.g_cell_ri.stepped_anystep_regions = R.anystep_regions;
+      lat_agg.g_cell_ri.stepped_anystep_passes = R.anystep_passes;
+      lat_agg.g_cell_ri.stepped_anystep_histogram = R.anystep_histogram;
+      lat_agg.g_cell_ri.stepped_anystep_rho_by_size = R.anystep_rho_by_size;
+      lat_agg.g_cell_ri.stepped_plan_solid_remainder_mm3 = R.plan_solid_remainder_mm3;
+      lat_agg.g_cell_ri.stepped_plan_latticed_mm3 = R.plan_latticed_mm3;
+      lat_agg.g_cell_ri.stepped_plan_rho_fallback_by_region =
+          R.plan_rho_fallback_by_region;
+      lat_agg.g_cell_ri.stepped_clip_outside_region_mm3 = R.clip_outside_region_mm3;
+      lat_agg.g_cell_ri.stepped_clip_outside_by_cause_mm3 = R.clip_outside_by_cause_mm3;
+      lat_agg.g_cell_ri.stepped_plan_rho_queries_plan = R.plan_rho_queries_plan;
+      lat_agg.g_cell_ri.stepped_plan_rho_queries_posture = R.plan_rho_queries_posture;
+      lat_agg.g_cell_ri.stepped_plan_rho_queries_floor = R.plan_rho_queries_floor;
+      lat_agg.g_cell_ri.stepped_plan_by_region = R.plan_by_region;
+      lat_agg.g_cell_ri.stepped_plan_laid_unattributed = R.plan_laid_unattributed;
+      lat_agg.g_cell_ri.stepped_plan_laid_measured = R.plan_laid_measured;
+      lat_agg.g_cell_ri.stepped_law_ungradeable_reported = R.law_ungradeable_reported;
+      lat_agg.g_cell_ri.stepped_law_ungradeable_note = R.law_ungradeable_note;
+      lat_agg.g_cell_ri.lattice_outline_beam_mm = R.outline_beam_mm;
+      lat_agg.g_cell_ri.lattice_outline_bleed_mm = R.outline_bleed_mm;
+      lat_agg.g_cell_ri.lattice_outline_inward_mm = R.outline_inward_mm;
+      lat_agg.g_cell_ri.lattice_outline_voxels = R.outline_beam_voxels;
     }
     lat_agg.cells += oc.stats.latticed_cells;
     lat_agg.voxels += oc.region_voxels;
@@ -11358,6 +17817,8 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       lat_agg.strut_clamped += static_cast<long long>(ss.rho_clamped_voxels);
     }
     lattice_paths.insert(lattice_paths.end(), oc.paths.begin(), oc.paths.end());
+    lattice_paths_by_vf[v.requested_volume_fraction].insert(
+        lattice_paths_by_vf[v.requested_volume_fraction].end(), oc.paths.begin(), oc.paths.end());
     if (stream_lines)
       for (const std::string& p : oc.paths) {
         if (graded) {
@@ -11438,6 +17899,13 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     // THE ENCLOSED-VOID RULE (task 2026-08-05-lattice-void-reaches-exterior).
     // Only when the check actually ran; otherwise every field stays at its zero
     // default and the serializer writes no key at all (bar R1).
+    if (lat_agg.volume_check_ran) {
+      run_info.lattice_volume_check_ran = true;
+      run_info.lattice_volume_refused_variants = lat_agg.volume_refused_variants;
+      run_info.lattice_volume_worst_gap = lat_agg.volume_worst_gap;
+      run_info.lattice_volume_certified_mm3 = lat_agg.volume_certified_mm3;
+      run_info.lattice_volume_exported_mm3 = lat_agg.volume_exported_mm3;
+    }
     if (lat_agg.void_check_ran) {
       run_info.lattice_void_check_ran = true;
       run_info.lattice_void_sealed_variants = lat_agg.void_sealed_variants;
@@ -11569,6 +18037,8 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
           lat_agg.g_cell_ri.grading_cells_raised_to_floor;
       run_info.grading_cells_dropped_unprintable =
           lat_agg.g_cell_ri.grading_cells_dropped_unprintable;
+      run_info.grading_cells_dropped_by_window =
+          lat_agg.g_cell_ri.grading_cells_dropped_by_window;
       run_info.grading_cells_split_by_balance =
           lat_agg.g_cell_ri.grading_cells_split_by_balance;
       run_info.grading_cell_any_out_of_regime =
@@ -11588,6 +18058,41 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       run_info.grading_fit_printed_outside_regions =
           lat_agg.g_cell_ri.grading_fit_printed_outside_regions;
       run_info.grading_fit_regions = lat_agg.g_cell_ri.grading_fit_regions;
+      // ★ and the plan's own receipts, carried the same way (see the note above).
+      run_info.stepped_anystep_cells = lat_agg.g_cell_ri.stepped_anystep_cells;
+      run_info.stepped_anystep_regions = lat_agg.g_cell_ri.stepped_anystep_regions;
+      run_info.stepped_anystep_passes = lat_agg.g_cell_ri.stepped_anystep_passes;
+      run_info.stepped_anystep_histogram = lat_agg.g_cell_ri.stepped_anystep_histogram;
+      run_info.stepped_anystep_rho_by_size =
+          lat_agg.g_cell_ri.stepped_anystep_rho_by_size;
+      run_info.stepped_plan_solid_remainder_mm3 =
+          lat_agg.g_cell_ri.stepped_plan_solid_remainder_mm3;
+      run_info.stepped_plan_latticed_mm3 = lat_agg.g_cell_ri.stepped_plan_latticed_mm3;
+      run_info.stepped_plan_rho_fallback_by_region =
+          lat_agg.g_cell_ri.stepped_plan_rho_fallback_by_region;
+      run_info.stepped_clip_outside_region_mm3 =
+          lat_agg.g_cell_ri.stepped_clip_outside_region_mm3;
+      run_info.stepped_clip_outside_by_cause_mm3 =
+          lat_agg.g_cell_ri.stepped_clip_outside_by_cause_mm3;
+      run_info.stepped_plan_rho_queries_plan =
+          lat_agg.g_cell_ri.stepped_plan_rho_queries_plan;
+      run_info.stepped_plan_rho_queries_posture =
+          lat_agg.g_cell_ri.stepped_plan_rho_queries_posture;
+      run_info.stepped_plan_rho_queries_floor =
+          lat_agg.g_cell_ri.stepped_plan_rho_queries_floor;
+      run_info.stepped_plan_by_region = lat_agg.g_cell_ri.stepped_plan_by_region;
+      run_info.stepped_plan_laid_unattributed =
+          lat_agg.g_cell_ri.stepped_plan_laid_unattributed;
+      run_info.stepped_plan_laid_measured =
+          lat_agg.g_cell_ri.stepped_plan_laid_measured;
+      run_info.stepped_law_ungradeable_reported =
+          lat_agg.g_cell_ri.stepped_law_ungradeable_reported;
+      run_info.stepped_law_ungradeable_note =
+          lat_agg.g_cell_ri.stepped_law_ungradeable_note;
+      run_info.lattice_outline_beam_mm = lat_agg.g_cell_ri.lattice_outline_beam_mm;
+      run_info.lattice_outline_bleed_mm = lat_agg.g_cell_ri.lattice_outline_bleed_mm;
+      run_info.lattice_outline_inward_mm = lat_agg.g_cell_ri.lattice_outline_inward_mm;
+      run_info.lattice_outline_voxels = lat_agg.g_cell_ri.lattice_outline_voxels;
     }
     // Certification (handoff 2026-07-29-lattice-certification-e2e, bars E1/E3) — WHAT
     // the composite gate certified, so a variant's provenance is recoverable.
@@ -11621,6 +18126,10 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   };
 
   std::vector<std::string> streamed_paths;
+  // E1: each streamed version's slim finish (reused by the re-check), and the latticed
+  // companions each version wrote (withdrawn with it if finishing refuses it).
+  std::map<double, StreamedFinish> streamed_finish;
+  const bool strengthen_run = job.loads.present && job.loads.redesign == "strengthen";
   // ── THE DESIGN CONTAINER, PUBLISHED AS THE LADDER GOES (task
   //    2026-08-03-variant-postprocessing-fix, defect 1) ────────────────────────
   // design.bin used to be written ONCE, after the whole ladder (see the write at
@@ -11690,6 +18199,11 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       write_fields_file(fields_stream_path, so_far, solved_grid);
     } catch (const std::exception&) {
     }
+    try {  // LOAD SCENARIOS: every scenario's own fields (none without 2+)
+      write_scenario_fields_file(join_path(out_dir, "scenario_fields.bin"), so_far,
+                                 solved_grid);
+    } catch (const std::exception&) {
+    }
   };
   if (emit_progress) {
     options.progress = [](std::size_t rung, std::size_t rungs, int iter) {
@@ -11707,9 +18221,21 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       // identical files it always did.
       publish_artifacts_so_far(evaluated_so_far);
       if (!v.accepted) return;
-      const std::string p =
-          export_variant_mesh(v, out_dir, job.output, solved_grid,
-                              run_printed_iso(options), &result.model);
+      const RunFinish fin = make_run_finish(job, options, &result.model, solved_grid);
+      const RunFinish safe = safe_finish(fin);  // a strengthen version that fell back
+      std::string p;
+      if (strengthen_run) {  // verified (and finished) inside strengthen_versions
+        p = export_variant_mesh(v, out_dir, job.output, solved_grid, run_printed_iso(options),
+                                &result.model, job.keep_regions,
+                                v.report.finish.finish_fallback ? &safe : &fin);
+      } else {  // finished slim once, here; (e) re-checks this very shape
+        StreamedFinish& sf = streamed_finish[v.requested_volume_fraction];
+        sf.mesh = variant_export_model_mesh(v, job.output, solved_grid, run_printed_iso(options),
+                                            &result.model, job.keep_regions, &fin, &sf.fb,
+                                            &sf.raw);
+        p = export_variant_mesh(v, out_dir, job.output, solved_grid, run_printed_iso(options),
+                                &result.model, job.keep_regions, &fin, &sf.mesh);
+      }
       streamed_paths.push_back(p);
       // The analytic design, written BESIDE the mesh into out_dir (S1(d)).
       // ★ AND DELIBERATELY NOT PUSHED INTO THE PATH LIST. `mesh_paths` means
@@ -11771,8 +18297,20 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   // arm reports `mg_algebraic_level1: false` and reads as a null result.
   run_info.mg_algebraic_level1 = fea_mg_algebraic_level1_enabled();
   run_info.mixed_precision = fea_matfree_mixed_precision_enabled();
-  result.pipeline =
-      minimize_plastic(grid, material, job.material, bcs, rules, options);
+  if (job.loads.present && job.loads.redesign == "strengthen") {
+    // CORE LIST item 50 — the versions are searched and verified inside; only the
+    // final ones are streamed, through the same callback a ladder rung uses.
+    result.pipeline =
+        strengthen_versions(job, job_dir, out_dir, materials, rules, result.model,
+                            model_is_mesh, material, grid, bcs, options, domain,
+                            emit_progress);
+    if (options.on_variant)
+      for (const MinimizePlasticVariant& v : result.pipeline.evaluated)
+        options.on_variant(v, result.pipeline.evaluated);
+  } else {
+    result.pipeline =
+        minimize_plastic(grid, material, job.material, bcs, rules, options);
+  }
 
   // LOUD FALLBACK (handoff: multigrid-coarsenability-padding). Record the OBSERVED
   // multigrid outcome now the run is done (the up-front write left it null), and —
@@ -12201,9 +18739,197 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     std::fflush(stderr);
   }
 
+  // CORE LIST item 47 — LOUD DETACHMENT: a rung whose design let go of an
+  // anchored piece is rejected; say which anchors, once per rung.
+  for (std::size_t i = 0; i < result.pipeline.evaluated.size(); ++i) {
+    const MinimizePlasticVariant& v = result.pipeline.evaluated[i];
+    if (v.report.rejection_reason != kAnchorDetachedReason) continue;
+    std::string faces;
+    for (const int f : v.report.lost_anchor_face_ids)
+      faces += (faces.empty() ? "" : ", ") + std::to_string(f);
+    for (const int r : v.report.lost_anchor_region_ids)
+      faces += (faces.empty() ? "region " : ", region ") + std::to_string(r);
+    std::fprintf(stderr,
+                 "WARNING: rung %zu (vf %.2f) was REJECTED — %s. %d anchored "
+                 "piece(s) (%lld voxels; anchor face(s): %s) hold no load in this "
+                 "design: the material joining them to the part was removed, so "
+                 "the bolt there would hold nothing. No mesh is exported for it "
+                 "and no later rung inherits its design. See report.json "
+                 "rejected_variants.\n",
+                 i, v.requested_volume_fraction, kAnchorDetachedReason,
+                 v.report.anchored_pieces_lost, v.report.lost_anchor_voxels,
+                 faces.empty() ? "not named" : faces.c_str());
+    std::fflush(stderr);
+  }
+
+  // CORE LIST item 40 — LOUD STARVATION. A rung that asked for less than the frozen
+  // material alone prints got the density floor as its target and printed the
+  // frozen share instead; the worker log says so once, with the numbers.
+  if (result.pipeline.report.frozen_share.evaluated) {
+    const FrozenShareReport& fs = result.pipeline.report.frozen_share;
+    std::size_t protections = 0;
+    for (const FrozenSourceCount& s : fs.sources)
+      if (s.source == "face_protection") ++protections;
+    std::fprintf(stderr,
+                 "WARNING: %.3g of the part (%lld of %lld voxels) is FROZEN — the "
+                 "anchor and load faces, the anchor pad and %zu face "
+                 "protection(s) — so every rung that asked for less clamped to the "
+                 "density floor: it removed every free voxel and printed the frozen "
+                 "material alone. %zu later rung(s) would only repeat that design "
+                 "and were skipped. To reduce further, release protections. See "
+                 "report.json frozen_share.\n",
+                 fs.share, fs.frozen_voxels, fs.part_solid_voxels, protections,
+                 fs.skipped_rungs.size());
+    std::fflush(stderr);
+  }
+
   // Handoff 114 — record how many density snapshots were written (0 unless
   // opt-in snapshots ran). The CSV/run_info paths are already set above.
   if (snaps) result.snapshot_count = snaps->written();
+
+  // ──▶ E1 (e): EVERY CHECK ON THE FINISHED SHAPE. Each accepted version's exported
+  // shape (CAD projection, exact Protect, thin-spot cleanup, surface finish) is
+  // re-certified as a file, exactly as strengthen verifies its versions: margin, Keep
+  // clear, pieces, thin joints, thin spots left, mass. A version whose finished shape
+  // fails is refused with the plain reason — never accepted silently. Strengthen runs
+  // did all of this per version already.
+  std::map<double, TriangleMesh> finished_meshes;  // by requested_volume_fraction
+  if (!(job.loads.present && job.loads.redesign == "strengthen")) {
+    const VoxelGrid& sg = result.pipeline.solved_grid;
+    const RunFinish fin = make_run_finish(job, options, &result.model, sg);
+    const std::string check_dir = join_path(out_dir, "finish_check");
+    const DesignMask* clearance =
+        !options.clearance_void.empty() && options.clearance_void.size() == sg.voxel_count()
+            ? &options.clearance_void
+            : nullptr;
+    for (MinimizePlasticVariant& v : result.pipeline.evaluated) {
+      if (!v.accepted) continue;
+      const auto streamed = streamed_finish.find(v.requested_volume_fraction);
+      VersionFinish f = finish_and_recheck(
+          v, job, job_dir, sg, run_printed_iso(options), &result.model, fin, clearance,
+          material.density_g_cm3, materials, rules, check_dir, v.report.margin_effective,
+          v.report.margin_required,
+          streamed != streamed_finish.end() ? &streamed->second : nullptr);
+      FinishBlock& fb = f.fb;
+      if (!f.refusal.empty()) {
+        fb.verdict_changed = true;
+        fb.verdict_reason = f.refusal;
+        v.accepted = false;
+        v.report.accepted = false;
+        v.report.rejection_reason = f.refusal;
+        std::fprintf(stderr, "[finish] version vf %.2f refused after finishing: %s\n",
+                     v.requested_volume_fraction, f.refusal.c_str());
+      } else {
+        if (fb.finish_fallback)
+          std::fprintf(stderr, "[finish] version vf %.2f uses the safe finish: %s\n",
+                       v.requested_volume_fraction, fb.finish_fallback_reason.c_str());
+        finished_meshes[v.requested_volume_fraction] = std::move(f.mesh);
+      }
+      v.report.finish = fb;
+      // The report's own lists carry copies of the line: update them, and move a
+      // refused one to the rejected list.
+      auto& acc = result.pipeline.report.variants;
+      for (std::size_t q = 0; q < acc.size(); ++q)
+        if (acc[q].requested_volume_fraction == v.requested_volume_fraction) {
+          acc[q].finish = fb;
+          if (fb.verdict_changed) {
+            acc[q].accepted = false;
+            acc[q].rejection_reason = fb.verdict_reason;
+            result.pipeline.report.rejected.push_back(acc[q]);
+            acc.erase(acc.begin() + static_cast<std::ptrdiff_t>(q));
+          }
+          break;
+        }
+      std::fprintf(stderr, "[finish] version vf %.2f: %zu thin spot(s) fixed, %zu left; surface "
+                   "%.1f %% stair-step removed; margin %.4g -> %.4g; mass %.4g -> %.4g g; %.1f s\n",
+                   v.requested_volume_fraction, fb.fixed.size(), fb.left.size(),
+                   fb.stair_step_removed_pct, fb.margin_before, fb.margin, fb.mass_before_grams,
+                   fb.mass_grams, fb.seconds);
+      if (fb.keep_clear_cut_mm3 > 0.0 || fb.keep_clear_sealed > 0)
+        std::fprintf(stderr, "[keep clear] version vf %.2f: %.4g mm3 cut out of its Keep clears; "
+                     "%d sealed inside the part\n",
+                     v.requested_volume_fraction, fb.keep_clear_cut_mm3, fb.keep_clear_sealed);
+    }
+    // A version refused after finishing joins the rejected list in ladder order (a run
+    // with no refusal keeps its list as it was).
+    bool any_refused = false;
+    for (const MinimizePlasticVariant& v : result.pipeline.evaluated)
+      any_refused = any_refused || v.report.finish.verdict_changed;
+    if (any_refused) {
+      auto rank = [&](double vf) {
+        for (std::size_t q = 0; q < result.pipeline.evaluated.size(); ++q)
+          if (result.pipeline.evaluated[q].requested_volume_fraction == vf) return q;
+        return result.pipeline.evaluated.size();
+      };
+      std::stable_sort(result.pipeline.report.rejected.begin(),
+                       result.pipeline.report.rejected.end(),
+                       [&](const VariantReport& a, const VariantReport& b) {
+                         return rank(a.requested_volume_fraction) <
+                                rank(b.requested_volume_fraction);
+                       });
+    }
+    std::error_code rm;
+    std::filesystem::remove_all(check_dir, rm);
+    // STREAMED RUNS: a version's file went out as it finished optimizing (slim). Once
+    // (e) has decided, every streamed version gets one FINISH line on stdout:
+    //   FINISH vf=<requested> status=slim|safe|refused mesh=<path>[ reason=<plain words>]
+    // "safe": the file was written again as the safe finish (re-fetch it); "refused":
+    // the file, its alpha design and its latticed companions are withdrawn. report.json
+    // is the final word either way.
+    if (emit_progress) {
+      auto mesh_path_of = [&](const MinimizePlasticVariant& v) {
+        return join_path(out_dir, mesh_file_name(job.output.mesh_prefix,
+                                                 v.requested_volume_fraction,
+                                                 job.output.mesh_format));
+      };
+      std::vector<std::string> kept;
+      for (const std::string& path : streamed_paths) {
+        bool refused = false;
+        for (const MinimizePlasticVariant& v : result.pipeline.evaluated)
+          if (!v.accepted && v.report.finish.verdict_changed && path == mesh_path_of(v))
+            refused = true;
+        if (refused) std::remove(path.c_str()); else kept.push_back(path);
+      }
+      streamed_paths = std::move(kept);
+      for (const MinimizePlasticVariant& v : result.pipeline.evaluated) {
+        if (streamed_finish.count(v.requested_volume_fraction) == 0) continue;  // never streamed
+        const std::string path = mesh_path_of(v);
+        const char* status = "slim";
+        if (!v.accepted && v.report.finish.verdict_changed) {
+          status = "refused";
+          char digits[8];
+          std::snprintf(digits, sizeof(digits), "%03d",
+                        static_cast<int>(std::lround(v.requested_volume_fraction * 100.0)));
+          const std::string stem =
+              join_path(out_dir, job.output.mesh_prefix + "_" + digits + "_alpha");
+          std::remove((stem + ".f64").c_str());
+          std::remove((stem + ".meta").c_str());
+          const auto lp = lattice_paths_by_vf.find(v.requested_volume_fraction);
+          if (lp != lattice_paths_by_vf.end())
+            for (const std::string& q : lp->second) {
+              std::remove(q.c_str());
+              lattice_paths.erase(std::remove(lattice_paths.begin(), lattice_paths.end(), q),
+                                  lattice_paths.end());
+            }
+        } else if (v.accepted && v.report.finish.finish_fallback) {
+          // Streamed slim, re-checked safe: the file is written again as that shape.
+          status = "safe";
+          const auto m = finished_meshes.find(v.requested_volume_fraction);
+          if (m != finished_meshes.end())
+            (void)export_variant_mesh(v, out_dir, job.output, sg, run_printed_iso(options),
+                                      &result.model, job.keep_regions, &fin, &m->second);
+        } else if (!v.accepted) {
+          continue;
+        }
+        const std::string& why = std::string(status) == "refused"
+                                     ? v.report.finish.verdict_reason
+                                     : v.report.finish.finish_fallback_reason;
+        std::printf("FINISH vf=%.6f status=%s mesh=%s%s%s\n", v.requested_volume_fraction, status,
+                    path.c_str(), why.empty() ? "" : " reason=", why.c_str());
+      }
+      std::fflush(stdout);
+    }
+  }
 
   // ──▶ report (both paths).
   result.report_json = job_report_json(result.pipeline.report);
@@ -12245,11 +18971,20 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     result.mesh_paths = std::move(streamed_paths);
     // Lattice companions were generated in the on_variant callback (streaming).
   } else {
+    // E1: every file is the finished shape — the very mesh (e) re-checked, or, on a
+    // strengthen run, the same finishing its verify ran.
+    const RunFinish final_fin =
+        make_run_finish(job, options, &result.model, result.pipeline.solved_grid);
+    const RunFinish final_safe = safe_finish(final_fin);
     for (const MinimizePlasticVariant& variant : result.pipeline.evaluated) {
       if (!variant.accepted) continue;
+      const auto cached = finished_meshes.find(variant.requested_volume_fraction);
+      // A strengthen version that fell back in its verify exports the safe finish.
       result.mesh_paths.push_back(export_variant_mesh(
           variant, out_dir, job.output, result.pipeline.solved_grid,
-          run_printed_iso(options), &result.model));
+          run_printed_iso(options), &result.model, job.keep_regions,
+          variant.report.finish.finish_fallback ? &final_safe : &final_fin,
+          cached != finished_meshes.end() ? &cached->second : nullptr));
       // The analytic design, written beside the mesh (S1(d)) and NOT added to
       // `mesh_paths` — see the streaming branch above for why.
       (void)export_variant_alpha(variant, out_dir, job.output,
@@ -12321,6 +19056,12 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   result.fields_variant_count =
       write_fields_file(result.fields_path, result.pipeline,
                         result.pipeline.solved_grid);
+  // LOAD SCENARIOS — every scenario's own fields beside it (the Scenario menu's
+  // views); fields.bin stays the governing scenario's. No file without 2+ scenarios.
+  result.scenario_fields_variant_count = write_scenario_fields_file(
+      join_path(out_dir, "scenario_fields.bin"), result.pipeline, result.pipeline.solved_grid);
+  if (result.scenario_fields_variant_count > 0)
+    result.scenario_fields_path = join_path(out_dir, "scenario_fields.bin");
 
   // ──▶ the DESIGN container (task 2026-08-02-lattice-a-variant): each evaluated
   // variant's own density field, the thing "lattice this variant" needs and the
@@ -12335,6 +19076,234 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                         result.pipeline.solved_grid);
 
   return result;
+}
+
+
+// E1 — THE FLIP TABLE (reviewer's brief 2026-11-02): a finished job's stored designs
+// (its out/design.bin) re-finished WITHOUT re-optimizing. Per accepted version the
+// unfinished export (today's file) and the finished one are each re-certified as a
+// file (analyze_job), so mass, margin and the verdict compare like for like. One JSON
+// line per version; a job whose solve grid no longer matches its store says so.
+std::vector<std::string> refinish_job(const JobDescription& job, const std::string& job_dir,
+                                      const std::string& design_path,
+                                      const std::string& out_dir,
+                                      const MaterialLibrary& materials,
+                                      const SettingsRules& rules, bool export_only) {
+  std::vector<std::string> lines;
+  const StepModel model = import_part_file_resolved(join_path(job_dir, job.model));
+  const bool model_is_mesh = part_format_for_path(job.model) != PartFormat::Step;
+  JobSetup setup = build_job_setup(job, model, model_is_mesh, materials);
+  const VoxelGrid sg = minimize_plastic_solved_grid(setup.grid, setup.options);
+  const DesignStore ds = read_design_file(design_path);
+  if (ds.nx != sg.nx || ds.ny != sg.ny || ds.nz != sg.nz) {
+    lines.push_back("{\"error\": \"the stored designs' grid " + std::to_string(ds.nx) + "x" +
+                    std::to_string(ds.ny) + "x" + std::to_string(ds.nz) +
+                    " is not this core's solve grid " + std::to_string(sg.nx) + "x" +
+                    std::to_string(sg.ny) + "x" + std::to_string(sg.nz) + "\"}");
+    return lines;
+  }
+  const Material& material = materials.at(job.material);
+  const RunFinish fin = make_run_finish(job, setup.options, &model, sg);
+  const double iso = run_printed_iso(setup.options);
+  std::error_code mk;
+  std::filesystem::create_directories(out_dir, mk);
+  for (const StoredDesign& d : ds.variants) {
+    if (!d.accepted || d.density.size() != sg.voxel_count()) continue;
+    const auto t0 = std::chrono::steady_clock::now();
+    MinimizePlasticVariant v;
+    v.requested_volume_fraction = d.requested_volume_fraction;
+    v.accepted = true;
+    v.optimization.physical_density = d.density;
+    const TriangleMesh raw = weld_as_written(
+        variant_export_model_mesh(v, job.output, sg, iso, &model, job.keep_regions));
+    if (export_only) {  // the written file's edges, stage by stage (no solves)
+      FinishBlock fb;
+      const TriangleMesh done =
+          variant_export_model_mesh(v, job.output, sg, iso, &model, job.keep_regions, &fin, &fb);
+      const DesignMask* clear_p =
+          setup.options.clearance_void.size() == sg.voxel_count() ? &setup.options.clearance_void : nullptr;
+      auto kc = [&](const TriangleMesh& m) {
+        return file_keep_clear_voxels(file_occupancy(m, sg), clear_p, nullptr);
+      };
+      const TriangleMesh raw_unwelded =
+          variant_export_model_mesh(v, job.output, sg, iso, &model, job.keep_regions);
+      // The cut moves nothing away from the Keep clears: every vertex of the uncut
+      // finished file outside them (by 0.05 mm) is in the cut file, bit for bit, or in a
+      // piece the cut left loose (gone as every loose piece goes: on e5909008 a cap 0.5 mm
+      // thick that sat on the part's face only through a Keep clear 0.17 mm past it).
+      // Lost vertices: in a loose piece, then by place: on the part's own surface (CAD /
+      // Protect, must be 0), in a Protect region, in a declared Keep clear (the cut),
+      // elsewhere (must be 0).
+      long long cut_lost = 0, cut_lost_far = 0, cut_lost_part = 0, cut_lost_keep = 0, cut_lost_loose = 0;
+      {
+        RunFinish nocut = fin;
+        nocut.part = nullptr;
+        nocut.keep_clear_cut = nullptr;
+        FinishBlock fb0;
+        const TriangleMesh done0 =
+            variant_export_model_mesh(v, job.output, sg, iso, &model, job.keep_regions, &nocut, &fb0);
+        auto f3 = [](const Vec3& q) {
+          return std::array<float, 3>{static_cast<float>(q.x), static_cast<float>(q.y), static_cast<float>(q.z)};
+        };
+        std::set<std::array<float, 3>> have, whole;  // the cut file; the cut before its loose pieces go
+        for (const Vec3& q : done.vertices) have.insert(f3(q));
+#ifdef TOPOPT_HAVE_MANIFOLD
+        if (fin.keep_clear_cut != nullptr && fin.keep_clear_cut->any)  // try 0's cutter
+          for (const Vec3& q :
+               weld_as_written(manifold_mesh((mesh_manifold(done0) - fin.keep_clear_cut->cutter).GetMeshGL()))
+                   .vertices)
+            whole.insert(f3(q));
+#endif
+        for (const Vec3& q : done0.vertices) {
+          if (have.count(f3(q))) continue;
+          ++cut_lost;
+          if (whole.count(f3(q))) { ++cut_lost_loose; continue; }
+          double d2 = 1e30;
+          for (const auto& t : model.mesh.triangles)
+            d2 = std::min(d2, point_triangle_d2(q, model.mesh.vertices[t[0]], model.mesh.vertices[t[1]],
+                                                model.mesh.vertices[t[2]]));
+          if (d2 < 1e-8) { ++cut_lost_part; continue; }  // within 0.1 um of the part's surface
+          bool in_clear = false, in_keep = false;
+          for (const ClearanceGeometry& g : fin.keep_clears) in_clear = in_clear || point_in_clearance_region(g, q, 0.05);
+          for (const KeepRegion& k : job.keep_regions) in_keep = in_keep || k.contains(q);
+          cut_lost_keep += in_keep && !in_clear;
+          cut_lost_far += !in_keep && !in_clear;
+        }
+      }
+      long long kc_part = 0, kc_face = 0;  // confirmed on the file: inside the part / on its face
+      const long long kc_exact = file_keep_clear_exact(done, sg, file_occupancy(done, sg), clear_p,
+                                                       nullptr, &model.mesh, &kc_part, &kc_face);
+      const long long kc_unwelded = kc(raw_unwelded);
+      long long design_kc = 0;  // the design's own: printed voxels (rho > iso) kept clear
+      if (clear_p != nullptr)
+        for (std::size_t i = 0; i < d.density.size(); ++i)
+          design_kc += d.density[i] > iso && (*clear_p)[i] == MaskValue::FrozenVoid;
+      auto au = [](const char* name, const TriangleMesh& m) {
+        const WrittenAudit w = audit_as_written(m);
+        char b[256];
+        std::snprintf(b, sizeof b, "\"%s\": [%d, %d, %d, %d, %d]", name, w.non_manifold_edges,
+                      w.boundary_edges, w.non_manifold_vertices, w.shells, w.bodies);
+        std::string s = b;
+        for (const Vec3& p : w.bad_edge_midpoints) {
+          std::snprintf(b, sizeof b, " (%.3f %.3f %.3f)", p.x, p.y, p.z);
+          s += b;
+        }
+        return s;
+      };
+      lines.push_back("{\"vf\": " + std::to_string(d.requested_volume_fraction) + ", " +
+                      au("mc", variant_export_model_mesh(v, job.output, sg, iso, nullptr, {})) + ", " +
+                      au("cad", variant_export_model_mesh(v, job.output, sg, iso, &model, {})) + ", " +
+                      au("keep", raw) + ", " + au("finished", done) + ", \"keep_clear\": [" +
+                      std::to_string(kc(variant_export_model_mesh(v, job.output, sg, iso, nullptr, {}))) + ", " +
+                      std::to_string(kc(variant_export_model_mesh(v, job.output, sg, iso, &model, {}))) + ", " +
+                      std::to_string(kc(raw)) + ", " + std::to_string(kc(done)) + "], " +
+                      "\"design_keep_clear\": " + std::to_string(design_kc) + ", \"thin_joints\": [" +
+                      std::to_string(file_thin_joints(sg, file_occupancy(raw, sg))) + ", " +
+                      std::to_string(file_thin_joints(sg, file_occupancy(done, sg))) + "], \"held\": " +
+                      std::to_string(fb.keep_clear_held) + ", \"left\": " + std::to_string(fb.keep_clear_left) +
+                      ", \"kc_unwelded_raw\": " + std::to_string(kc_unwelded) +
+                      ", \"kc_exact\": [" + std::to_string(kc_exact) + ", " + std::to_string(kc_part) + ", " +
+                      std::to_string(kc_face) + "]" +
+                      ", \"kc_cut_mm3\": " + std::to_string(fb.keep_clear_cut_mm3) +
+                      ", \"kc_sealed\": " + std::to_string(file_sealed_keep_clears(done, sg, clear_p)) +
+                      ", \"cut_lost\": [" + std::to_string(cut_lost) + ", " + std::to_string(cut_lost_part) + ", " +
+                      std::to_string(cut_lost_keep) + ", " + std::to_string(cut_lost_far) + ", " +
+                      std::to_string(cut_lost_loose) + "]" + ", \"stair_step_pct\": " +
+                      std::to_string(fb.stair_step_removed_pct) + ", \"slim\": " +
+                      (fb.slim ? "true" : "false") + ", \"diag\": [" +
+                      std::to_string(done.vertices.size()) + ", " + std::to_string(fb.pinned_vertices) +
+                      ", " + std::to_string(fb.outward_only_vertices) + ", " +
+                      std::to_string(fb.roughness_vertices) + ", " +
+                      std::to_string(fb.slim_rounds) + ", " +
+                      std::to_string(fb.slim_guarded_vertices) + ", " +
+                      std::to_string(fb.fold_walked_back) + ", " +
+                      std::to_string(fb.roughness_before_mm) + ", " +
+                      std::to_string(fb.roughness_after_mm) + "], \"why\": " +
+                      json_str(fb.finish_fallback_reason) + "}");
+      continue;
+    }
+    // Before: the unfinished file, re-certified (welded as written, as a file is).
+    const std::string a_stl = join_path(out_dir, "before.stl");
+    write_stl_file(a_stl, raw);
+    AnalyzeJobResult a;
+    std::string a_err;
+    try {
+      a = analyze_job(job, job_dir, join_path(out_dir, "a"), materials, rules, a_stl, {});
+    } catch (const std::exception& e) {
+      a_err = e.what();
+    }
+    // After: what a run ships — slim, the safe finish on a failing re-check.
+    const DesignMask* clearance =
+        !setup.options.clearance_void.empty() &&
+                setup.options.clearance_void.size() == sg.voxel_count()
+            ? &setup.options.clearance_void
+            : nullptr;
+    const double req0 = a_err.empty() ? a.margin_required : 0.0;
+    VersionFinish f = finish_and_recheck(v, job, job_dir, sg, iso, &model, fin, clearance,
+                                         material.density_g_cm3, materials, rules,
+                                         join_path(out_dir, "b"),
+                                         a_err.empty() ? a.analysis.margin_effective : 0.0, req0);
+    const FinishBlock& fb = f.fb;
+    const TriangleMesh& done = f.mesh;
+    const WrittenAudit w = audit_as_written(done);
+    // The bar's own measures: a member newly under the slim line (by moving material
+    // in; and as the surface measure reads it), a pinned vertex moved (CAD / Protect
+    // bit-identical), on the same vertex indices.
+    int new_under = 0, new_under_measured = 0, pinned_moved = 0;
+    double thinnest_new = 0.0;
+    {
+      const ThinnedCount tc = count_thinned(raw, done, fin.ctx.slim_line_mm);
+      new_under = tc.comparable ? tc.by_inward : -1;  // -1: the weld merged vertices
+      new_under_measured = tc.comparable ? tc.measured : -1;
+      thinnest_new = tc.thinnest_mm;
+    }
+    pinned_moved = static_cast<int>(fb.pinned_moved);
+    const double req = f.analysis.margin_required > 0.0 ? f.analysis.margin_required : req0;
+    const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    char buf[1500];
+    std::snprintf(buf, sizeof buf,
+                  "{\"vf\": %.4f, \"mass_before_g\": %.4f, \"mass_after_g\": %.4f, "
+                  "\"margin_before\": %.4f, \"margin_after\": %.4f, \"margin_required\": %.4f, "
+                  "\"accept_before\": %s, \"accept_after\": %s, \"thin_fixed\": %zu, "
+                  "\"thin_left\": %zu, \"stair_step_pct\": %.1f, \"style\": \"%s\", "
+                  "\"fallback\": %s, \"pieces_before\": %d, \"pieces_after\": %d, "
+                  "\"bad_edges\": %d, \"open_edges\": %d, \"point_contacts\": %d, "
+                  "\"shells\": %d, \"bodies\": %d, \"new_under_line\": %d, "
+                  "\"new_under_line_measured\": %d, "
+                  "\"thinnest_new_mm\": %.3f, \"pinned_moved\": %d, \"keep_clear_voxels\": %lld, "
+                  "\"keep_clear_before\": %lld, \"keep_clear_added\": %lld, \"keep_clear_left\": %zu, "
+                  "\"thin_joints\": %d, \"keep_clear_cut_mm3\": %.4f, \"keep_clear_sealed\": %d, "
+                  "\"finish_s\": %.2f, "
+                  "\"seconds\": %.1f}",
+                  d.requested_volume_fraction,
+                  material.density_g_cm3 * std::fabs(signed_volume(raw)) / 1000.0,
+                  material.density_g_cm3 * std::fabs(signed_volume(done)) / 1000.0,
+                  a_err.empty() ? a.analysis.margin_effective : -1.0, fb.margin, req,
+                  a_err.empty() && a.analysis.margin_effective >= req ? "true" : "false",
+                  f.refusal.empty() ? "true" : "false", fb.fixed.size(), fb.left.size(),
+                  fb.stair_step_removed_pct, fb.slim ? "slim" : "safe",
+                  fb.finish_fallback ? "true" : "false", positive_volume_bodies(raw),
+                  positive_volume_bodies(done), w.non_manifold_edges, w.boundary_edges,
+                  w.non_manifold_vertices, w.shells, w.bodies, new_under, new_under_measured,
+                  thinnest_new,
+                  pinned_moved, fb.keep_clear_voxels, fb.keep_clear_before, fb.keep_clear_added,
+                  fb.keep_clear_left, fb.thin_joints, fb.keep_clear_cut_mm3, fb.keep_clear_sealed,
+                  fb.seconds, secs);
+    std::map<std::string, int> why;
+    for (const FinishPlace& p : fb.left) ++why[p.reason];
+    std::string wr;
+    for (const auto& kv : why) wr += (wr.empty() ? "" : "; ") + kv.first + " " + std::to_string(kv.second);
+    std::string line = buf;
+    line.pop_back();
+    line += ", \"left_reasons\": " + json_str(wr) + ", \"fallback_reason\": " +
+            json_str(fb.finish_fallback_reason) + ", \"refusal\": " + json_str(f.refusal) +
+            ", \"before_error\": " + json_str(a_err) + ", \"vertices\": " +
+            std::to_string(done.vertices.size()) + ", \"pinned\": " +
+            std::to_string(fb.pinned_vertices) + ", \"measured\": " +
+            std::to_string(fb.roughness_vertices) + "}";
+    lines.push_back(line);
+  }
+  return lines;
 }
 
 }  // namespace topopt

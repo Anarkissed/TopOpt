@@ -1,0 +1,23 @@
+M2 stand, Simple cubic (jobs from make_stand_jobs.py sc <dir>: the default swept cell ladder, which SC allows; binary: the pipeline's frozen archive build of 7ae8eea7).
+
+analyze struct {"topology": "sc", "intent": "structural", "band_rho_min": 0.08659, "band_rho_max": 0.49638, "cells_per_member_floor": 4, "cell_size_mm": 4, "rho_min_used": 0.08659, "rho_max_used": 0.08659, "latticed_voxels": 82261, "recertified_margin": 63.91321551, "recertified_accepted": true}
+analyze aes    {"topology": "sc", "intent": "aesthetic", "band_rho_min": 0.08659, "band_rho_max": 0.49638, "cells_per_member_floor": 4, "cell_size_mm": 2, "rho_min_used": 0.2, "rho_max_used": 0.49638, "latticed_voxels": 107699, "recertified_margin": null, "recertified_accepted": null}
+run struct LATTICE vf=0.680000 topology=sc cell_mm=2 graded=1 rho_min=0.0910565 rho_max=0.49638 cells=672 tris=293980 lattice_margin=1642.8 lattice_accepted=1
+run struct LATTICE vf=0.520000 topology=sc cell_mm=2 graded=1 rho_min=0.0912744 rho_max=0.49638 cells=464 tris=204064 lattice_margin=1624.02 lattice_accepted=1
+run struct LATTICE vf=0.380000 topology=sc cell_mm=2 graded=1 rho_min=0.0914298 rho_max=0.49638 cells=154 tris=66660 lattice_margin=1671.08 lattice_accepted=1
+run struct LATTICE vf=0.260000 topology=sc cell_mm=2 graded=1 rho_min=0.0913213 rho_max=0.49638 cells=167 tris=72752 lattice_margin=1631.67 lattice_accepted=1
+run aes    LATTICE vf=0.680000 topology=sc cell_mm=2 graded=1 rho_min=0.200222 rho_max=0.49638 cells=1249 tris=533628 lattice_margin=1656.41 lattice_accepted=1
+run aes    LATTICE vf=0.520000 topology=sc cell_mm=2 graded=1 rho_min=0.200101 rho_max=0.49638 cells=811 tris=347736 lattice_margin=1653.39 lattice_accepted=1
+run aes    LATTICE vf=0.380000 topology=sc cell_mm=2 graded=1 rho_min=0.200138 rho_max=0.49638 cells=476 tris=199988 lattice_margin=1663.57 lattice_accepted=1
+run aes    LATTICE vf=0.260000 topology=sc cell_mm=2 graded=1 rho_min=0.200403 rho_max=0.49638 cells=474 tris=199324 lattice_margin=1626.43 lattice_accepted=1
+
+lattice-variant (the pipeline's default rung 0.38 of the Structural run, out_lv_sc):
+  reproduction: recorded margin 1686.08 == reproduced 1686.08 (enforced)
+  lattice: graded cell 2 mm, rho 0.09143..0.4964 over 154 voxels (latticed_cells 154)
+  solid margin 1686 -> latticed margin 1671 (effective 346.0)
+  verdict: ACCEPTED
+
+Receipts name the type: every run report says "topology": "sc" and carries
+  "directional_note": "Strongly directional: best when the load runs along the cell axes."
+Aesthetic rho_min_used 0.2 is the Aesthetic floor every type shows (Diamond, Kelvin, Rhombic the same);
+SC's R11 ceiling (0.0831) lies below its band (0.0866), Finding 6, so no Aesthetic density prints open by R11.

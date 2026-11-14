@@ -65,6 +65,8 @@
 // DETERMINISTIC. Pure integer/arithmetic sweeps in a fixed cell order, no RNG, no
 // threads, no atomics: the same inputs always produce a byte-identical plan.
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <vector>
 
@@ -73,6 +75,26 @@
 #include "topopt/voxel.hpp"    // VoxelGrid
 
 namespace topopt {
+
+// ── ★ THE COVER RULE (Finding 7, ruling 2026-11-02) ──────────────────────────────────
+// A latticed voxel gets EVERY cell that covers part of its volume, not only the cell
+// holding its centre. The centre rule left a cell finer than the voxel with one cell per
+// voxel: on the M2 stand (3.41 mm voxels, 2 mm cells) about 80 % of every pocket voxel
+// was empty while the certificate read it at full density, and a pocket one voxel thick
+// floated lone cells. Per axis, the voxel span [v0, v0 + s) meets cells [lo, hi] of edge
+// `cell` anchored at `o`, clamped to [0, n - 1]. A shared face (to 1e-9 of a cell) is
+// not an overlap, so a grid whose cell is a whole number of voxels on the same origin
+// gets exactly the centre's cell.
+inline void cells_covering_span(double v0, double s, double o, double cell, int n, int* lo,
+                                int* hi) {
+  const double a = (v0 - o) / cell, b = (v0 + s - o) / cell;
+  int l = static_cast<int>(std::floor(a + 1e-9));
+  int h = static_cast<int>(std::ceil(b - 1e-9)) - 1;
+  l = std::min(std::max(l, 0), n - 1);
+  h = std::min(std::max(h, 0), n - 1);
+  *lo = l;
+  *hi = std::max(l, h);
+}
 
 // How the cell size is chosen.
 //   Fixed — the caller's target cell, raised to the printability floor. ONE cell for
@@ -141,6 +163,8 @@ struct CellSizePlan {
   //   2 — STRUT UNPRINTABLE: no level in the ladder emits a strut at this cell's
   //       thinnest density that reaches the stated minimum width. A COARSER cell
   //       helps — the opposite remedy.
+  //   3 — ★ E3 REGION WINDOW: a level printed and homogenized here, but none inside
+  //       the region's own cell window (or the 2:1 balance pushed the cell out of it).
   // The two causes were already separated for the aggregate counters; carrying them
   // PER CELL is what lets the voxel-level receipt say which one bound each voxel,
   // and therefore which remedy (if any) is worth offering.
@@ -160,6 +184,7 @@ struct CellSizePlan {
   // Cells the two bounds CROSSED on: no dyadic cell is both printable and
   // homogenizable there, so they stay SOLID (the per-cell L4 fallback).
   long long cells_dropped_unprintable = 0;  // needed a coarser cell than N* allows
+  long long cells_dropped_by_window = 0;    // ★ E3: reject reason 3
   long long cells_split_by_balance = 0;     // octree cells split (into 8) to hold
                                             //   the 2:1 balance
   double min_strut_diameter_mm = 0.0;       // across the WHOLE swept part (bar R3)
@@ -198,6 +223,11 @@ struct CellPlanParams {
 
   // The STATED minimum extrudable strut width (mm) — the printability bound.
   double min_extrudable_width_mm = 0.0;
+  // ★ D1: THE JOB'S DENSITY CAP. The swept plan's per-cell predicate asks "does the
+  // densest density print at this cell?", and the densest density is the JOB'S, not the
+  // band's. Without it the plan admitted rungs whose struts the job can never reach --
+  // the same uncapped floor D1 found on four other paths. 0 = not sent.
+  double max_relative_density = 0.0;
   // The local-member-thickness EDT radius cap (voxels), mirroring grading.hpp.
   int thickness_cap_voxels = 32;
 
@@ -212,6 +242,20 @@ struct CellPlanParams {
   // Set >0 ONLY by the aesthetic adaptive rule, which computes it from the measured
   // error curve and what the material actually carries (lattice.hpp).
   double cells_per_member_floor_override = 0.0;
+
+  // ★ E3: A REGION'S OWN CELL WINDOW, as ladder levels per voxel (grid-indexed). Null
+  // (the default) bounds nothing and the plan is the plan it always was. A voxel's
+  // `level_lo` raises the finest level its base cells may take; `level_hi` caps the
+  // coarsest (-1 = no bound on that side). A base cell takes the tightest bounds of the
+  // voxels it covers, and one they leave with no level drops to SOLID with reject
+  // reason 3, counted in cells_dropped_by_window.
+  const std::vector<signed char>* voxel_level_lo = nullptr;
+  const std::vector<signed char>* voxel_level_hi = nullptr;
+  // ★ RULING 2: the shape-grade band's PREFERRED level per voxel (-1 = none). It raises
+  // the level a cell is CHOSEN at (the preview's ramp lays the coarsest cell its centre
+  // rule allows, where the planner alone takes the finest printable), but it is not a
+  // window: a cell the 2:1 balance splits below it stays latticed if it still prints.
+  const std::vector<signed char>* voxel_level_prefer = nullptr;
 };
 
 // Build the SWEPT plan over `grid`'s candidate set (throws for any other mode — the
@@ -299,6 +343,12 @@ CellSizePlan plan_cell_sizes_fit(const VoxelGrid& grid,
 // evaluated at each voxel's OWN cell rather than one number for the part.
 std::vector<double> cell_size_field(const VoxelGrid& grid,
                                     const CellSizePlan& plan);
+// ★ Finding 7: a voxel is latticed only if EVERY base cell covering it is (the cover
+// rule above), so cell_size_field gives 0 to a voxel any covering cell left unlatticed.
+// This is WHY: the reason of the covering cells that refused it -- 2 (strut
+// unprintable) if any did, else 1 (member too thin), else 0.
+signed char cell_plan_voxel_reject_reason(const VoxelGrid& grid, const CellSizePlan& plan,
+                                          int i, int j, int k);
 
 // ── THE SWEPT LADDER, AS ONE RULE (task 2026-08-07-cell-mode-fit-and-swept-floor) ──
 //
@@ -330,7 +380,8 @@ int cell_plan_max_level(double min_cell_size_mm, double max_cell_size_mm);
 double cell_plan_finest_printable_cell_mm(LatticeTopology topo,
                                           double min_cell_size_mm,
                                           double max_cell_size_mm,
-                                          double min_extrudable_width_mm);
+                                          double min_extrudable_width_mm,
+                                          double max_relative_density = 0.0);
 
 }  // namespace topopt
 

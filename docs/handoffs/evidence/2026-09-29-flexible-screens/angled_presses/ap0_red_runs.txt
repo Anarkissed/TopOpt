@@ -1,0 +1,201 @@
+# Angled presses (task 2026-10-07), batch AP0 — the RED runs. Every golden comparison is proven to go RED.
+# Base 01ec5e3c, core 523dd2f90b04, SWIFT_DETERMINISTIC_HASHING=1, swift test --skip-build (debug), 2026-10-07.
+#
+# (1) perturbed: FLEX_AP_GOLDEN_DIR = a copy of Fixtures/angled_press_goldens with ONE byte changed in every file
+#     (a digit in its second half; the probe's "unknown" -> "Unknown"; the held send's "resting [3]" -> "[4]").
+#     Every comparison fails; the only test that stays green is the stage-job control, which reads no golden.
+#     (The two FlexibleAngledGoldenTests in-test controls that read c1_pad_pure_run_job.json also fail there,
+#     because the perturbed golden is their reference — they measure the change against the golden.)
+# (2)-(6) FLEX_AP_MUTATE feeds each named RED control's change into the MAIN comparison:
+#     weight        the pressed face at +0.001 kg            -> c1_pad_pure_run_job.json differs (1 line: weight_n)
+#     other-send    his r5's OTHER send (Group 2 only)        -> his_r5_held_send_run_job.json differs
+#     nil-rule      groupColours = [:] where nil was saved    -> the flexible blocks and the subtrees differ
+#     ulp           one column's entry + 1 ulp                -> frames_c1_pad.txt differs (2 lines: sha256-depth, col[0])
+#     edge-as-tilt  the edge pinned to the tilt's text        -> the probe test fails (each form has its own base text)
+# (7) the stage-hash positive control is a row of stage_job_hashes_base.txt (control+): the hash moves.
+#
+# Counts (TopOptFlowsTests bundle, raw):
+#   perturbed: Executed 10 tests, with 21 failures (0 unexpected) in 5.843 (5.844) seconds
+#   weight: Executed 1 test, with 1 failure (0 unexpected) in 0.542 (0.542) seconds
+#   other-send: Executed 1 test, with 1 failure (0 unexpected) in 0.660 (0.660) seconds
+#   nil-rule: Executed 1 test, with 4 failures (0 unexpected) in 0.066 (0.067) seconds
+#   ulp: Executed 2 tests, with 1 failure (0 unexpected) in 2.645 (2.646) seconds
+#   edge-as-tilt: Executed 1 test, with 1 failure (0 unexpected) in 0.057 (0.058) seconds
+#
+RUN perturbed (env: FLEX_AP_GOLDEN_DIR=<scratch>/perturbed_goldens) filter FlexibleAngledGoldenTests|FlexiblePressFixturesTests -> exit 1
+    RED FlexibleAngledGoldenTests.testFacePressFramesAreTheGolden: failed - frames_c1_pad.txt: 1 line(s) differ from the golden (first at line 110)
+    RED FlexibleAngledGoldenTests.testFacePressFramesAreTheGolden: failed - frames_his_0004.txt: 1 line(s) differ from the golden (first at line 146)
+    RED FlexibleAngledGoldenTests.testFacePressFramesAreTheGolden: failed - frames_his_0004_r5.txt: 1 line(s) differ from the golden (first at line 146)
+    RED FlexibleAngledGoldenTests.testFacePressFramesAreTheGolden: failed - frames_cube60.txt: 1 line(s) differ from the golden (first at line 110)
+    RED FlexibleAngledGoldenTests.testFacePressFramesAreTheGoldenOnTheM2Stand: failed - frames_m2.txt: 1 line(s) differ from the golden (first at line 1080)
+    RED FlexibleAngledGoldenTests.testFacePressRunJobBytesUnchanged: failed - c1_pad_pure_run_job.json: 1 line(s) differ from the golden (first at line 54)
+    RED FlexibleAngledGoldenTests.testFacePressRunJobBytesUnchanged: failed - c1_pad_pure_stamp_run_job.json: 1 line(s) differ from the golden (first at line 310)
+    RED FlexibleAngledGoldenTests.testFacePressRunJobBytesUnchanged: failed - c1_pad_model_run_job.json: 1 line(s) differ from the golden (first at line 55)
+    RED FlexibleAngledGoldenTests.testFacePressRunJobBytesUnchanged: XCTAssertEqual failed: ("2") is not equal to ("1") - control: exactly the one weight line moves
+    RED FlexibleAngledGoldenTests.testFacePressRunJobBytesUnchanged: XCTAssertEqual failed: ("535") is not equal to ("1") - control: a one-byte change is seen
+    RED FlexibleAngledGoldenTests.testHisRound5HeldSendBytesUnchanged: XCTAssertTrue failed - the same send: title Send Group 1 only
+    RED FlexibleAngledGoldenTests.testHisRound5HeldSendBytesUnchanged: failed - his_r5_held_send_run_job.json: 1 line(s) differ from the golden (first at line 2196)
+    RED FlexibleAngledGoldenTests.testLatticeSubtreesReEncodeIdentically: XCTAssertEqual failed: ("{"beadsPerWall":1,"checkStamps":[{"faceRegionID":3,"stamp":{"centreU":53.442982643840161,"centreV":12.386727071011231,"id":"4A072986-D66F-4CF8-9F62-C161CEF76441"
+    RED FlexibleAngledGoldenTests.testLatticeSubtreesReEncodeIdentically: XCTAssertEqual failed: ("{"beadsPerWall":1,"checkStamps":[],"curveConvention":1,"faces":[{"curveCentreEdge":{"x":[0,1],"y":[0.29999999999999999,1]},"curveX":{"x":[0,0.5,1],"y":[0.2999999
+    RED FlexibleAngledGoldenTests.testLatticeSubtreesReEncodeIdentically: failed - lattice_subtree_0004.json: 1 line(s) differ from the golden (first at line 1)
+    RED FlexibleAngledGoldenTests.testLatticeSubtreesReEncodeIdentically: failed - lattice_subtree_0004_r5.json: 1 line(s) differ from the golden (first at line 1)
+    RED FlexibleAngledGoldenTests.testLatticeSubtreesReEncodeIdentically: failed - lattice_subtree_102117B9.json: 1 line(s) differ from the golden (first at line 1)
+    RED FlexibleAngledGoldenTests.testProbeDocumentsGetTheRecordedBaseRefusals: XCTAssertEqual failed: ("Optional("job.json: flexible: flexible.faces[0]: unknown key \"press_direction\"")") is not equal to ("Optional("job.json: flexible: flexible.faces[0]: Unk
+    RED FlexibleAngledGoldenTests.testSceneJobBytesUnchanged: failed - c1_pad_model_scene_job.json: 1 line(s) differ from the golden (first at line 46)
+    RED FlexibleAngledGoldenTests.testSceneJobBytesUnchanged: failed - his_r5_scene_job.json: 1 line(s) differ from the golden (first at line 110)
+    RED FlexiblePressFixturesTests.testFixturesAreWhatTheyClaim: failed - rounded_slab.txt: 1 line(s) differ from the golden (first at line 6)
+    FlexibleAngledGoldenTests.testTheStageJobSeesALatticeSettingButNeverFlexible passed (0.101 seconds).
+    FlexiblePressFixturesTests.testHisPadAndTheStandRestore passed (0.180 seconds).
+RUN weight (env: FLEX_AP_MUTATE=weight) filter FlexibleAngledGoldenTests/testFacePressRunJobBytesUnchanged -> exit 1
+    RED FlexibleAngledGoldenTests.testFacePressRunJobBytesUnchanged: failed - c1_pad_pure_run_job.json: 1 line(s) differ from the golden (first at line 36)
+RUN other-send (env: FLEX_AP_MUTATE=other-send) filter FlexibleAngledGoldenTests/testHisRound5HeldSendBytesUnchanged -> exit 1
+    RED FlexibleAngledGoldenTests.testHisRound5HeldSendBytesUnchanged: failed - his_r5_held_send_run_job.json: 4329 line(s) differ from the golden (first at line 11)
+RUN nil-rule (env: FLEX_AP_MUTATE=nil-rule) filter FlexibleAngledGoldenTests/testLatticeSubtreesReEncodeIdentically -> exit 1
+    RED FlexibleAngledGoldenTests.testLatticeSubtreesReEncodeIdentically: XCTAssertEqual failed: ("{"beadsPerWall":1,"checkStamps":[{"faceRegionID":3,"stamp":{"centreU":53.442982643840161,"centreV":12.386727071011231,"id":"4A072986-D66F-4CF8-9F62-C161CEF76441"
+    RED FlexibleAngledGoldenTests.testLatticeSubtreesReEncodeIdentically: XCTAssertEqual failed: ("{"beadsPerWall":1,"checkStamps":[],"curveConvention":1,"faces":[{"curveCentreEdge":{"x":[0,1],"y":[0.29999999999999999,1]},"curveX":{"x":[0,0.5,1],"y":[0.2999999
+    RED FlexibleAngledGoldenTests.testLatticeSubtreesReEncodeIdentically: failed - lattice_subtree_0004.json: 1 line(s) differ from the golden (first at line 1)
+    RED FlexibleAngledGoldenTests.testLatticeSubtreesReEncodeIdentically: failed - lattice_subtree_0004_r5.json: 1 line(s) differ from the golden (first at line 1)
+RUN ulp (env: FLEX_AP_MUTATE=ulp) filter FlexibleAngledGoldenTests/testFacePressFramesAreTheGolden -> exit 1
+    RED FlexibleAngledGoldenTests.testFacePressFramesAreTheGolden: failed - frames_c1_pad.txt: 2 line(s) differ from the golden (first at line 18)
+    FlexibleAngledGoldenTests.testFacePressFramesAreTheGoldenOnTheM2Stand passed (0.684 seconds).
+RUN edge-as-tilt (env: FLEX_AP_MUTATE=edge-as-tilt) filter FlexibleAngledGoldenTests/testProbeDocumentsGetTheRecordedBaseRefusals -> exit 1
+    RED FlexibleAngledGoldenTests.testProbeDocumentsGetTheRecordedBaseRefusals: XCTAssertEqual failed: ("Optional("job.json: flexible: flexible.faces[0]: unknown key \"press_direction\"")") is not equal to ("Optional("job.json: flexible: flexible.faces[0]: mis
+
+################################################################################################################
+# AP0 FIX-UP (verifier findings, 2026-10-08), after ef65fc29 — every run below WITHOUT SWIFT_DETERMINISTIC_HASHING
+# (as CI runs it) unless marked; swift test --skip-build (debug), base 01ec5e3c, core 523dd2f90b04.
+#
+# (A) the AP0 goldens under ANY hash seed. Recorder launched 3 times unseeded into scratch folders (RECORD=1, the
+#     recorder's own deterministic-hashing assert failing as expected): his_r5_held_send_run_job.json and
+#     his_r5_scene_job.json identical to the goldens 3 of 3; lattice_subtree_0004 / _0004_r5 differed in 2 of 3 (the
+#     positive control that the seed varied). FlexibleAngledGoldenTests + FlexiblePressFixturesTests, unseeded, 3 launches:
+#     run 1: Executed 15 tests, with 0 failures (0 unexpected) in 14.294 (14.296) seconds
+#     run 2: Executed 15 tests, with 0 failures (0 unexpected) in 13.997 (14.000) seconds
+#     run 3: Executed 15 tests, with 0 failures (0 unexpected) in 14.514 (14.517) seconds
+#     (no skip; testLatticeSubtreesReEncodeIdentically prints its PART-SKIP for the RAW bytes only — the canonical
+#     subtrees and the flexible blocks were compared). The stage-job control passed unseeded 3 of 3.
+#     Under SWIFT_DETERMINISTIC_HASHING=1 (+ FlexibleStageTests): Executed 30 tests, with 0 failures (0 unexpected) in 15.669 (15.673) seconds
+#
+# (B) the fingerprint is never compared. CoreFingerprint.generated.swift set to 45122a0b1783 (what build_core.sh at
+#     45122a0b would write; core unchanged since 523dd2f9), rebuilt, FlexibleAngledGoldenTests + FlexiblePressFixturesTests:
+#     Executed 15 tests, with 0 failures (0 unexpected) in 15.093 (15.095) seconds
+#     FLEX-AP fingerprints ["45122a0b1783", "523dd2f90b04"] (this build's, the goldens'): absent from 43 compared golden(s)
+#     Then restored to 523dd2f90b04 (touched, rebuilt; the test binary prints ["523dd2f90b04"] again).
+#
+# (C) perturbed goldens, UNSEEDED: FLEX_AP_GOLDEN_DIR = a copy of the 45 compared files with ONE digit changed in the
+#     second half of each (the probe's 'unknown' -> 'Unknown'; the held send's 'resting [3]' -> '[4]'; MANIFEST left).
+#     Executed 15 tests, with 53 failures (0 unexpected) in 15.022 (15.025) seconds
+#     Every file went red — his r5's jobs and all six subtrees now INCLUDED without the variable (AP0 missed them there):
+#     each job/scene/frames/fields/slab file by 'FLEX-AP GOLDEN <file>: DIFFERS', each subtree by its canonical comparison,
+#     each <set>_sends.txt by the sends-offered assertion, his_r5_held_send.txt by 'the same send', the probe by its text.
+#     Green in that run, by design: testNoComparedGoldenCarriesTheCoreFingerprint (no digit of a fingerprint was changed),
+#     testTheStageJobSeesALatticeSettingButNeverFlexible (reads no golden), testHisPadAndTheStandRestore (reads none).
+#
+# (D) FLEX_AP_MUTATE feeds each control's change into the MAIN comparison (unseeded, the one test each):
+#     weight       Executed 1 test, with 1 failure (0 unexpected) in 0.521 (0.522) seconds
+#     other-send   Executed 1 test, with 1 failure (0 unexpected) in 0.655 (0.656) seconds
+#     nil-rule     Executed 1 test, with 10 failures (0 unexpected) in 0.072 (0.073) seconds
+#     depth        Executed 1 test, with 4 failures (0 unexpected) in 0.072 (0.073) seconds
+#     ulp          Executed 1 test, with 1 failure (0 unexpected) in 2.339 (2.340) seconds
+#     edge-as-tilt Executed 1 test, with 1 failure (0 unexpected) in 0.053 (0.054) seconds
+#     send-weight  Executed 1 test, with 6 failures (0 unexpected) in 4.845 (4.846) seconds
+#     owner        Executed 1 test, with 3 failures (0 unexpected) in 3.327 (3.328) seconds
+#     depth       = his Top group depth + 1 mm, a NON-flexible lattice field: red through the canonical subtree in CI mode
+#                   (0004, r5, 102117B9, A1-0004 — the subtrees that state a group depth). (The verifier's case, cellMinMM 4 -> 5,
+#                   is another non-flexible field; run (C)'s line-1 digit in each raw subtree is caught the same way.)
+#     send-weight = the first loaded face + 0.001 kg on every send set: each send that presses it goes red (6 of 11).
+#     owner       = one lattice voxel's owner + 1 in the first field digested: fields_c1_pad / _his_0004 / _his_0004_r5 red.
+#
+# (E) the stage-hash inputs: one changed letter in a copy of s0_frozen/a1/…-0003/project.json -> stage_job_hashes.sh
+#     'MOVED INPUT a1/A1000001-0000-4000-8000-000000000003/project.json … (recorded 3dc594eb…)', exit 2, no row dumped.
+#     From the frozen copies: all 13 source lines and all 16 rows identical to AP0's (stage_job_hashes_base.txt).
+
+RUN perturbed -> Executed 15 tests, with 53 failures (0 unexpected) in 15.022 (15.025) seconds
+    RED FlexibleAngledGoldenTests testCoreFieldsAndDesignsAreTheGolden: failed - fields_c1_pad.txt: 1 line(s) differ from the golden (first at line 21)
+    RED FlexibleAngledGoldenTests testCoreFieldsAndDesignsAreTheGolden: failed - fields_his_0004.txt: 1 line(s) differ from the golden (first at line 67)
+    RED FlexibleAngledGoldenTests testCoreFieldsAndDesignsAreTheGolden: failed - fields_his_0004_r5.txt: 1 line(s) differ from the golden (first at line 70)
+    RED FlexibleAngledGoldenTests testEveryExistingSendKeepsItsJobBytes: XCTAssertEqual failed: ("# his_0004: the Export step's sends as the project stands (FlexibleCoreHold; 'direct' = nothing held)
+    RED FlexibleAngledGoldenTests testEveryExistingSendKeepsItsJobBytes: failed - his_0004_send1_run_job.json: 1 line(s) differ from the golden (first at line 152)
+    RED FlexibleAngledGoldenTests testEveryExistingSendKeepsItsJobBytes: failed - his_0004_send2_run_job.json: 1 line(s) differ from the golden (first at line 144)
+    RED FlexibleAngledGoldenTests testEveryExistingSendKeepsItsJobBytes: failed - his_0004_scene_job.json: 1 line(s) differ from the golden (first at line 90)
+    RED FlexibleAngledGoldenTests testEveryExistingSendKeepsItsJobBytes: XCTAssertEqual failed: ("# his_r5: the Export step's sends as the project stands (FlexibleCoreHold; 'direct' = nothing held)
+    RED FlexibleAngledGoldenTests testEveryExistingSendKeepsItsJobBytes: failed - his_r5_held_send_run_job.json: 1 line(s) differ from the golden (first at line 2196)
+    RED FlexibleAngledGoldenTests testEveryExistingSendKeepsItsJobBytes: failed - his_r5_send2_run_job.json: 1 line(s) differ from the golden (first at line 1193)
+    RED FlexibleAngledGoldenTests testEveryExistingSendKeepsItsJobBytes: failed - his_r5_scene_job.json: 1 line(s) differ from the golden (first at line 110)
+    RED FlexibleAngledGoldenTests testEveryExistingSendKeepsItsJobBytes: XCTAssertEqual failed: ("# A1_0002: the Export step's sends as the project stands (FlexibleCoreHold; 'direct' = nothing held)
+    RED FlexibleAngledGoldenTests testEveryExistingSendKeepsItsJobBytes: failed - A1_0002_send1_run_job.json: 1 line(s) differ from the golden (first at line 536)
+    RED FlexibleAngledGoldenTests testEveryExistingSendKeepsItsJobBytes: failed - A1_0002_send2_run_job.json: 1 line(s) differ from the golden (first at line 572)
+    RED FlexibleAngledGoldenTests testEveryExistingSendKeepsItsJobBytes: failed - A1_0002_scene_job.json: 1 line(s) differ from the golden (first at line 298)
+    RED FlexibleAngledGoldenTests testEveryExistingSendKeepsItsJobBytes: XCTAssertEqual failed: ("# A1_0003: the Export step's sends as the project stands (FlexibleCoreHold; 'direct' = nothing held)
+    RED FlexibleAngledGoldenTests testEveryExistingSendKeepsItsJobBytes: failed - A1_0003_send1_run_job.json: 1 line(s) differ from the golden (first at line 1719)
+    RED FlexibleAngledGoldenTests testEveryExistingSendKeepsItsJobBytes: failed - A1_0003_send2_run_job.json: 1 line(s) differ from the golden (first at line 498)
+    RED FlexibleAngledGoldenTests testEveryExistingSendKeepsItsJobBytes: failed - A1_0003_send3_run_job.json: 1 line(s) differ from the golden (first at line 230)
+    RED FlexibleAngledGoldenTests testEveryExistingSendKeepsItsJobBytes: failed - A1_0003_scene_job.json: 1 line(s) differ from the golden (first at line 46)
+    RED FlexibleAngledGoldenTests testEveryExistingSendKeepsItsJobBytes: XCTAssertEqual failed: ("# A1_0004: the Export step's sends as the project stands (FlexibleCoreHold; 'direct' = nothing held)
+    RED FlexibleAngledGoldenTests testEveryExistingSendKeepsItsJobBytes: failed - A1_0004_send1_run_job.json: 1 line(s) differ from the golden (first at line 1787)
+    RED FlexibleAngledGoldenTests testEveryExistingSendKeepsItsJobBytes: failed - A1_0004_send2_run_job.json: 1 line(s) differ from the golden (first at line 1193)
+    RED FlexibleAngledGoldenTests testEveryExistingSendKeepsItsJobBytes: failed - A1_0004_scene_job.json: 1 line(s) differ from the golden (first at line 110)
+    RED FlexibleAngledGoldenTests testFacePressFramesAreTheGolden: failed - frames_c1_pad.txt: 1 line(s) differ from the golden (first at line 137)
+    RED FlexibleAngledGoldenTests testFacePressFramesAreTheGolden: failed - frames_his_0004.txt: 1 line(s) differ from the golden (first at line 183)
+    RED FlexibleAngledGoldenTests testFacePressFramesAreTheGolden: failed - frames_his_0004_r5.txt: 1 line(s) differ from the golden (first at line 183)
+    RED FlexibleAngledGoldenTests testFacePressFramesAreTheGolden: failed - frames_cube60.txt: 1 line(s) differ from the golden (first at line 146)
+    RED FlexibleAngledGoldenTests testFacePressFramesAreTheGoldenOnTheM2Stand: failed - frames_m2.txt: 1 line(s) differ from the golden (first at line 821)
+    RED FlexibleAngledGoldenTests testFacePressRunJobBytesUnchanged: failed - c1_pad_pure_run_job.json: 1 line(s) differ from the golden (first at line 54)
+    RED FlexibleAngledGoldenTests testFacePressRunJobBytesUnchanged: failed - c1_pad_pure_stamp_run_job.json: 1 line(s) differ from the golden (first at line 310)
+    RED FlexibleAngledGoldenTests testFacePressRunJobBytesUnchanged: failed - c1_pad_model_run_job.json: 1 line(s) differ from the golden (first at line 55)
+    RED FlexibleAngledGoldenTests testFacePressRunJobBytesUnchanged: XCTAssertEqual failed: ("2") is not equal to ("1") - control: exactly the one weight line moves
+    RED FlexibleAngledGoldenTests testFacePressRunJobBytesUnchanged: XCTAssertEqual failed: ("535") is not equal to ("1") - control: a one-byte change is seen
+    RED FlexibleAngledGoldenTests testFramesAreTheGoldenOnStepParts: failed - frames_step_cube.txt: 1 line(s) differ from the golden (first at line 144)
+    RED FlexibleAngledGoldenTests testFramesAreTheGoldenOnStepParts: failed - frames_l_bracket.txt: 1 line(s) differ from the golden (first at line 186)
+    RED FlexibleAngledGoldenTests testHisRound5HeldSendBytesUnchanged: XCTAssertTrue failed - the same send: title Send Group 1 only
+    RED FlexibleAngledGoldenTests testHisRound5HeldSendBytesUnchanged: failed - his_r5_held_send_run_job.json: 1 line(s) differ from the golden (first at line 2196)
+    RED FlexibleAngledGoldenTests testHisRound5SceneJobBytesUnchanged: failed - his_r5_scene_job.json: 1 line(s) differ from the golden (first at line 110)
+    RED FlexibleAngledGoldenTests testLatticeSubtreesReEncodeIdentically: XCTAssertEqual failed: ("{"beadsPerWall":1,"checkStamps":[{"faceRegionID":3,"stamp":{"centreU":53.442982643840161,"centreV":12.386727071011231,"id":"4A072986-D66F-4CF8-9F62-C161CEF76441"
+    RED FlexibleAngledGoldenTests testLatticeSubtreesReEncodeIdentically: XCTAssertEqual failed: ("{
+    RED FlexibleAngledGoldenTests testLatticeSubtreesReEncodeIdentically: XCTAssertEqual failed: ("{"beadsPerWall":1,"checkStamps":[],"curveConvention":1,"faces":[{"curveCentreEdge":{"x":[0,1],"y":[0.29999999999999999,1]},"curveX":{"x":[0,0.5,1],"y":[0.2999999
+    RED FlexibleAngledGoldenTests testLatticeSubtreesReEncodeIdentically: XCTAssertEqual failed: ("{
+    RED FlexibleAngledGoldenTests testLatticeSubtreesReEncodeIdentically: XCTAssertEqual failed: ("{
+    RED FlexibleAngledGoldenTests testLatticeSubtreesReEncodeIdentically: XCTAssertEqual failed: ("{
+    RED FlexibleAngledGoldenTests testLatticeSubtreesReEncodeIdentically: XCTAssertEqual failed: ("{"beadsPerWall":1,"checkStamps":[],"curveConvention":1,"faces":[{"curveCentreEdge":{"x":[0,1],"y":[0.29999999999999999,1]},"curveX":{"x":[0,0.5,1],"y":[0.2999999
+    RED FlexibleAngledGoldenTests testLatticeSubtreesReEncodeIdentically: XCTAssertEqual failed: ("{
+    RED FlexibleAngledGoldenTests testLatticeSubtreesReEncodeIdentically: XCTAssertEqual failed: ("{"beadsPerWall":1,"checkStamps":[],"curveConvention":1,"faces":[{"curveCentreEdge":{"x":[0,1],"y":[0.29999999999999999,1]},"curveX":{"x":[0,0.5,1],"y":[0.2999999
+    RED FlexibleAngledGoldenTests testLatticeSubtreesReEncodeIdentically: XCTAssertEqual failed: ("{
+    RED FlexibleAngledGoldenTests testLatticeSubtreesReEncodeIdentically: XCTAssertEqual failed: ("2") is not equal to ("1") - control: one depth is one canonical line
+    RED FlexibleAngledGoldenTests testProbeDocumentsGetTheRecordedBaseRefusals: XCTAssertEqual failed: ("Optional("job.json: flexible: flexible.faces[0]: unknown key \"press_direction\"")") is not equal to ("Optional("job.json: flexible: flexible.faces[0]: Unk
+    RED FlexibleAngledGoldenTests testSceneJobBytesUnchanged: failed - c1_pad_model_scene_job.json: 1 line(s) differ from the golden (first at line 46)
+    RED FlexiblePressFixturesTests testFixturesAreWhatTheyClaim: failed - rounded_slab.txt: 1 line(s) differ from the golden (first at line 6)
+RUN weight -> Executed 1 test, with 1 failure (0 unexpected) in 0.521 (0.522) seconds
+    RED FlexibleAngledGoldenTests testFacePressRunJobBytesUnchanged: failed - c1_pad_pure_run_job.json: 1 line(s) differ from the golden (first at line 36)
+RUN other-send -> Executed 1 test, with 1 failure (0 unexpected) in 0.655 (0.656) seconds
+    RED FlexibleAngledGoldenTests testHisRound5HeldSendBytesUnchanged: failed - his_r5_held_send_run_job.json: 4329 line(s) differ from the golden (first at line 11)
+RUN nil-rule -> Executed 1 test, with 10 failures (0 unexpected) in 0.072 (0.073) seconds
+    RED FlexibleAngledGoldenTests testLatticeSubtreesReEncodeIdentically: XCTAssertEqual failed: ("{"beadsPerWall":1,"checkStamps":[{"faceRegionID":3,"stamp":{"centreU":53.442982643840161,"centreV":12.386727071011231,"id":"4A072986-D66F-4CF8-9F62-C161CEF76441"
+    RED FlexibleAngledGoldenTests testLatticeSubtreesReEncodeIdentically: XCTAssertEqual failed: ("{
+    RED FlexibleAngledGoldenTests testLatticeSubtreesReEncodeIdentically: XCTAssertEqual failed: ("{"beadsPerWall":1,"checkStamps":[],"curveConvention":1,"faces":[{"curveCentreEdge":{"x":[0,1],"y":[0.29999999999999999,1]},"curveX":{"x":[0,0.5,1],"y":[0.2999999
+    RED FlexibleAngledGoldenTests testLatticeSubtreesReEncodeIdentically: XCTAssertEqual failed: ("{
+    RED FlexibleAngledGoldenTests testLatticeSubtreesReEncodeIdentically: XCTAssertEqual failed: ("{"beadsPerWall":1,"checkStamps":[{"faceRegionID":2,"stamp":{"centreU":213.01724899472993,"centreV":101.01899100313601,"id":"330ED61D-D041-46C2-8891-85801A961ADF"
+    RED FlexibleAngledGoldenTests testLatticeSubtreesReEncodeIdentically: XCTAssertEqual failed: ("{
+    RED FlexibleAngledGoldenTests testLatticeSubtreesReEncodeIdentically: XCTAssertEqual failed: ("{"beadsPerWall":1,"checkStamps":[],"curveConvention":1,"faces":[{"curveCentreEdge":{"x":[0,1],"y":[0.29999999999999999,1]},"curveX":{"x":[0,0.5,1],"y":[0.2999999
+    RED FlexibleAngledGoldenTests testLatticeSubtreesReEncodeIdentically: XCTAssertEqual failed: ("{
+    RED FlexibleAngledGoldenTests testLatticeSubtreesReEncodeIdentically: XCTAssertEqual failed: ("{"beadsPerWall":1,"checkStamps":[],"curveConvention":1,"faces":[{"curveCentreEdge":{"x":[0,1],"y":[0.29999999999999999,1]},"curveX":{"x":[0,0.5,1],"y":[0.2999999
+    RED FlexibleAngledGoldenTests testLatticeSubtreesReEncodeIdentically: XCTAssertEqual failed: ("{
+RUN depth -> Executed 1 test, with 4 failures (0 unexpected) in 0.072 (0.073) seconds
+    RED FlexibleAngledGoldenTests testLatticeSubtreesReEncodeIdentically: XCTAssertEqual failed: ("{
+    RED FlexibleAngledGoldenTests testLatticeSubtreesReEncodeIdentically: XCTAssertEqual failed: ("{
+    RED FlexibleAngledGoldenTests testLatticeSubtreesReEncodeIdentically: XCTAssertEqual failed: ("{
+    RED FlexibleAngledGoldenTests testLatticeSubtreesReEncodeIdentically: XCTAssertEqual failed: ("{
+RUN ulp -> Executed 1 test, with 1 failure (0 unexpected) in 2.339 (2.340) seconds
+    RED FlexibleAngledGoldenTests testFacePressFramesAreTheGolden: failed - frames_c1_pad.txt: 3 line(s) differ from the golden (first at line 18)
+RUN edge-as-tilt -> Executed 1 test, with 1 failure (0 unexpected) in 0.053 (0.054) seconds
+    RED FlexibleAngledGoldenTests testProbeDocumentsGetTheRecordedBaseRefusals: XCTAssertEqual failed: ("Optional("job.json: flexible: flexible.faces[0]: unknown key \"press_direction\"")") is not equal to ("Optional("job.json: flexible: flexible.faces[0]: mis
+RUN send-weight -> Executed 1 test, with 6 failures (0 unexpected) in 4.845 (4.846) seconds
+    RED FlexibleAngledGoldenTests testEveryExistingSendKeepsItsJobBytes: failed - his_0004_send1_run_job.json: 1 line(s) differ from the golden (first at line 43)
+    RED FlexibleAngledGoldenTests testEveryExistingSendKeepsItsJobBytes: failed - his_0004_send2_run_job.json: 1 line(s) differ from the golden (first at line 43)
+    RED FlexibleAngledGoldenTests testEveryExistingSendKeepsItsJobBytes: failed - his_r5_held_send_run_job.json: 1 line(s) differ from the golden (first at line 52)
+    RED FlexibleAngledGoldenTests testEveryExistingSendKeepsItsJobBytes: failed - A1_0002_send1_run_job.json: 1 line(s) differ from the golden (first at line 39)
+    RED FlexibleAngledGoldenTests testEveryExistingSendKeepsItsJobBytes: failed - A1_0003_send1_run_job.json: 1 line(s) differ from the golden (first at line 3373)
+    RED FlexibleAngledGoldenTests testEveryExistingSendKeepsItsJobBytes: failed - A1_0004_send1_run_job.json: 1 line(s) differ from the golden (first at line 52)
+RUN owner -> Executed 1 test, with 3 failures (0 unexpected) in 3.327 (3.328) seconds
+    RED FlexibleAngledGoldenTests testCoreFieldsAndDesignsAreTheGolden: failed - fields_c1_pad.txt: 3 line(s) differ from the golden (first at line 36)
+    RED FlexibleAngledGoldenTests testCoreFieldsAndDesignsAreTheGolden: failed - fields_his_0004.txt: 3 line(s) differ from the golden (first at line 131)
+    RED FlexibleAngledGoldenTests testCoreFieldsAndDesignsAreTheGolden: failed - fields_his_0004_r5.txt: 3 line(s) differ from the golden (first at line 129)

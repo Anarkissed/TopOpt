@@ -132,7 +132,7 @@ struct SmoothingPanel: View {
             ("Peak stress", String(format: "%.1f MPa", r.maxStressMPa)),
             ("Mass (voxel / mesh)",
              String(format: "%.1f / %.1f g", r.voxelMassGrams, r.meshMassGrams)),
-            ("Frozen vertices", "\(r.frozenVertices) / \(r.totalVertices)"),
+            ("Protected vertices", "\(r.frozenVertices) / \(r.totalVertices)"),
             ("Taubin pairs", "\(r.pairsApplied) / \(r.pairsRequested)"),
         ]
         VStack(spacing: 4) {

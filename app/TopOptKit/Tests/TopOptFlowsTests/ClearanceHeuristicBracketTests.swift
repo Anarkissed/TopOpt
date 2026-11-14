@@ -68,9 +68,10 @@ final class ClearanceHeuristicBracketTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(oldBores, 20, "the old 5° test over-found (regression captured)")
         XCTAssertGreaterThan(oldBlank, 0, "the old test produced blank-Auto rows")
 
-        // The fix: exactly the 2 clean through-holes (the Ø4 + one Ø9); the 3rd hole
-        // is segmentation-fragmented and left to the escape hatch (documented caveat).
-        XCTAssertEqual(newBores, 2, "the gate proposes the real through-holes, not 24 misfits")
+        // The fix: the 2 clean through-holes (the Ø4 + one Ø9) AND — ★ his iPad 2026-10-27, note 3 ("primitives not
+        // automatically being made when a hole is selected") — the 3rd hole, split by the B-rep into two half faces that
+        // were left to the escape hatch: its halves wrap the axis together. 4 bore faces, 3 holes.
+        XCTAssertEqual(newBores, 4, "the gate proposes the real through-holes (the split one's two halves), not 24 misfits")
 
         // No absurd magnitude: a fastener keep-out can't exceed the part's min dimension
         // (bracket thickness ≈ 20 mm). The old worst was a 443 mm axial.
@@ -96,7 +97,7 @@ final class ClearanceHeuristicBracketTests: XCTestCase {
         p.force.makeAnchor(gid)
 
         let specs = p.clearanceSpecs()
-        XCTAssertEqual(specs.count, 2, "two bolt clearances, not 24")
+        XCTAssertEqual(specs.count, 3, "★ three bolt clearances — one per hole, the split one once (note 3) — not 24")
         XCTAssertTrue(specs.allSatisfy { $0.kind == .bolt })
 
         // Every derived clearance resolves to a real margin + axial (never a blank pill).
@@ -106,9 +107,9 @@ final class ClearanceHeuristicBracketTests: XCTestCase {
             XCTAssertGreaterThan(m.resolved, 0)
             XCTAssertGreaterThan(a.resolved, 0)
         }
-        // The rendered volumes agree (two live cylinders, no degenerate blanks).
+        // The rendered volumes agree (three live cylinders, no degenerate blanks).
         let vols = p.clearanceVolumes()
-        XCTAssertEqual(vols.count, 2)
+        XCTAssertEqual(vols.count, 3)
         XCTAssertTrue(vols.allSatisfy { !$0.volume.isDegenerate })
     }
 }

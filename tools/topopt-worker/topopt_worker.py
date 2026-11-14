@@ -804,6 +804,11 @@ class Handler(BaseHTTPRequestHandler):
         step_name = os.path.basename(step_name)
         with open(os.path.join(tmpdir, step_name), "wb") as f:
             f.write(fields["step"]["data"])
+        # The face-overrides sidecar (B5): the painted faces the job's groups reference. Core's import reads
+        # `<model>.faces` beside the model, so it is saved under the model's own name whatever the client called it.
+        if "faces" in fields:
+            with open(os.path.join(tmpdir, step_name + ".faces"), "wb") as f:
+                f.write(fields["faces"]["data"])
         try:
             job_doc = json.loads(fields["job"]["data"].decode("utf-8"))
         except (ValueError, UnicodeDecodeError) as e:
@@ -864,7 +869,10 @@ class Handler(BaseHTTPRequestHandler):
         # The CLI stays the validator: `run` REFUSES anything but a
         # minimize_plastic job and the parser refuses any unknown mode, so this
         # routing can never widen what actually executes.
-        _MODE_SUBCMD = {"analyze": "analyze", "lattice_variant": "lattice-variant"}
+        # "lattice_file" (lattice rebuild, docs/design/lattice-rebuild/04-layout-file-job.md):
+        # the printable lattice file from the new layout engine (`topopt-cli lattice-file`).
+        _MODE_SUBCMD = {"analyze": "analyze", "lattice_variant": "lattice-variant",
+                        "lattice_file": "lattice-file"}
         subcmd = _MODE_SUBCMD.get(job_doc.get("mode"), "run")
         cmd = [CFG.cli, subcmd, job_path, "--out", out_dir]
         if CFG.materials:

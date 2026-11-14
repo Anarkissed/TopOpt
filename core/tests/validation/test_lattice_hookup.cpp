@@ -338,16 +338,21 @@ static void section_graded() {
   job.lattice.emit_stl = true;
   job.grading.present = true;
   job.grading.topology = "octet";
-  job.grading.min_extrudable_width_mm = 0.4;
+  // 0.28 mm since ruling 2026-11-02 (c): on octet's full-cell law the floor at a 0.4 mm bead
+  // is 6.25 mm, and 5 of those cells need 31.2 mm, more than this 30 mm cylinder holds, so
+  // nothing would grade. At 0.28 mm the floor is 4.37 mm, the cell this fixture was built
+  // around (4.3834 mm at 0.4 mm on the legs-only law).
+  job.grading.min_extrudable_width_mm = 0.28;
   // ★ PINNED to the rho_min printability floor, READ from core (task
   // 2026-08-05-lattice-cell-fit-mode, S2). It was 3.0 mm, which the pre-S2 law RAISED
-  // to exactly this value (4.3834 mm at a 0.4 mm bead) — so every assertion below,
+  // to exactly this value (4.3834 mm at a 0.4 mm bead then) — so every assertion below,
   // including the L4 solid-fallback bar and the receipt/law equality, was measured at
   // that cell. S2 stops raising a target some band density can print at, which would
   // silently re-point this whole fixture at a 3.0 mm cell that lattices MORE and
   // falls back on nothing. The S2 behaviour itself is asserted directly below.
   job.grading.cell_mm =
-      lattice_cell_printability_floor_mm(LatticeTopology::Octet, 0.4);
+      lattice_cell_printability_floor_mm(LatticeTopology::Octet,
+                                         job.grading.min_extrudable_width_mm);
   job.grading.demand_exponent = 1.0;
 
   auto run = [&](const std::string& sub) {
@@ -393,8 +398,17 @@ static void section_graded() {
                                          v.von_mises_field, &cand, gp);
     CHECK(gf.latticed_voxels > 0,
           "graded fixture: the thick cylinder really grades (not ungradeable)");
-    CHECK(gf.solid_fallback_voxels > 0,
-          "graded fixture: near-surface members fall back solid (L4 live)");
+    // ★ RULING 11-09 20:10Z (the corner criterion): "a corner residue thinner than a
+    // cell, beside a member that holds the floor, joins that member." This cylinder's
+    // near-surface fallbacks were its voxel staircase -- convex corner residues beside
+    // the thick core -- so they now JOIN the core rather than fall back solid. L4 stays
+    // live as the join: residues found and joined, counted on the field.
+    std::printf("[hookup] graded fixture: latticed %zu, solid fallback %zu, corner residues "
+                "%lld, joined %lld (reach %.3f mm)\n",
+                gf.latticed_voxels, gf.solid_fallback_voxels, gf.corner_residue_voxels,
+                gf.corner_joined_voxels, gf.corner_reach_mm);
+    CHECK(gf.corner_joined_voxels > 0,
+          "graded fixture: near-surface staircase residues join their member (L4 live)");
     CHECK(json_number(rcpt, "latticed_voxels") ==
               static_cast<double>(gf.latticed_voxels),
           "H4a: receipt latticed count == law on THIS variant's own field");

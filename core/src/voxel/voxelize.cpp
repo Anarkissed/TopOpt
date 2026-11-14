@@ -17,12 +17,15 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <map>
+#include <queue>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "topopt/coarsen.hpp"
+#include "topopt/mesh_distance.hpp"
 #include "topopt/mesh.hpp"
 
 namespace topopt {
@@ -545,7 +548,8 @@ std::vector<double> squared_edt(const std::vector<char>& seed, int nx, int ny,
 
 std::vector<double> local_member_thickness_mm(const VoxelGrid& grid,
                                               const std::vector<double>& density,
-                                              double iso, int cap_radius_voxels) {
+                                              double iso, int cap_radius_voxels,
+                                              bool grid_outside_is_void) {
   if (density.size() != grid.voxel_count())
     throw std::invalid_argument(
         "local_member_thickness_mm: density size != grid.voxel_count()");
@@ -566,13 +570,30 @@ std::vector<double> local_member_thickness_mm(const VoxelGrid& grid,
       }
 
   // d²(v): squared distance from each printed voxel to the nearest VOID voxel
-  // (seeds = void). Out-of-grid is NOT seeded, so a member filling to a grid face
-  // reads no thinner there — the design grid pads the part with void, which is the
-  // free surface. A fully-solid grid has no void seed → d² stays large → every
-  // voxel resolves as "thick" (no wall rescue), the conservative degenerate.
-  std::vector<char> seed_void(n);
-  for (std::size_t idx = 0; idx < n; ++idx) seed_void[idx] = printed[idx] ? 0 : 1;
-  const std::vector<double> d2 = squared_edt(seed_void, nx, ny, nz);
+  // (seeds = void). Out-of-grid is NOT seeded by default, so a member filling to a grid
+  // face reads no thinner there: a fully-solid grid resolves as "thick" (no wall rescue),
+  // the conservative degenerate for the width-aware knockdown.
+  // ★ `grid_outside_is_void` (reviewer's ruling 11-09 (2)), for the LATTICE's member
+  // width: the grid is the part's bounding box with no padding, so a member reaching a
+  // grid face is at the part's free surface there. Unseeded, a part that fills its own
+  // grid (a plain bar) read infinitely thick and was never under any cells-per-member
+  // floor, where "thick" is the UNSAFE side. One ring of void around the grid is that
+  // free surface.
+  const int pad = grid_outside_is_void ? 1 : 0;
+  const int px = nx + 2 * pad, py = ny + 2 * pad, pz = nz + 2 * pad;
+  auto at_padded = [&](int i, int j, int k) {
+    return (static_cast<std::size_t>(k + pad) * py + (j + pad)) * px + (i + pad);
+  };
+  std::vector<char> seed_void(static_cast<std::size_t>(px) * py * pz, 1);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i)
+        seed_void[at_padded(i, j, k)] = printed[grid.index(i, j, k)] ? 0 : 1;
+  const std::vector<double> d2_padded = squared_edt(seed_void, px, py, pz);
+  std::vector<double> d2(n);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) d2[grid.index(i, j, k)] = d2_padded[at_padded(i, j, k)];
 
   // Granulometric opening: for r = 1..cap, S_r = { printed voxel with d ≥ r } is the
   // erosion by a radius-r ball; a voxel SURVIVES the opening by that ball iff it lies
@@ -604,6 +625,218 @@ std::vector<double> local_member_thickness_mm(const VoxelGrid& grid,
                          : 2.0 * static_cast<double>(level[idx]) * grid.spacing;
   }
   return thickness;
+}
+
+std::vector<double> local_member_thickness_mm(const VoxelGrid& grid,
+                                              const std::vector<double>& density,
+                                              double iso, int cap_radius_voxels,
+                                              const MeshDistance& surface) {
+  if (density.size() != grid.voxel_count())
+    throw std::invalid_argument(
+        "local_member_thickness_mm: density size != grid.voxel_count()");
+  if (cap_radius_voxels <= 0)
+    throw std::invalid_argument(
+        "local_member_thickness_mm: cap_radius_voxels must be > 0");
+  const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
+  const std::size_t n = grid.voxel_count();
+  const double h = grid.spacing;
+
+  std::vector<char> printed(n, 0);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const std::size_t idx = grid.index(i, j, k);
+        printed[idx] = (grid.solid(i, j, k) && density[idx] > iso) ? 1 : 0;
+      }
+
+  // The staircase radius from the voids INSIDE the part (solid tag, not printed): a cut
+  // the design made has no other surface to read. None => no bound from it.
+  std::vector<char> seed_in(n, 0);
+  bool any_in = false;
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const std::size_t idx = grid.index(i, j, k);
+        if (grid.solid(i, j, k) && !printed[idx]) seed_in[idx] = 1, any_in = true;
+      }
+  const std::vector<double> d2_in =
+      any_in ? squared_edt(seed_in, nx, ny, nz) : std::vector<double>(n, 1e300);
+
+  // A cheap bound first, so a voxel deeper than the cap is never queried: the staircase
+  // distance to the part's outside, the grid's own outside included (a one-voxel ring of
+  // void around it). The surface lies within a voxel diagonal of that staircase.
+  const int px = nx + 2, py = ny + 2, pz = nz + 2;
+  std::vector<char> seed_out(static_cast<std::size_t>(px) * py * pz, 1);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i)
+        if (grid.solid(i, j, k))
+          seed_out[(static_cast<std::size_t>(k + 1) * py + (j + 1)) * px + (i + 1)] = 0;
+  const std::vector<double> d2_out = squared_edt(seed_out, px, py, pz);
+
+  // The ball radius at each printed voxel, in voxels.
+  const double deep = static_cast<double>(cap_radius_voxels) + 1.0;
+  std::vector<double> radius(n, 0.0);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const std::size_t idx = grid.index(i, j, k);
+        if (!printed[idx]) continue;
+        const double vox_out =
+            std::sqrt(d2_out[(static_cast<std::size_t>(k + 1) * py + (j + 1)) * px + (i + 1)]);
+        double r_out = deep;
+        if (vox_out - 2.0 <= deep) {
+          const double depth = std::max(0.0, surface.signed_distance(grid.voxel_center(i, j, k)));
+          r_out = std::min(deep, (depth + 0.5 * h) / h);
+        }
+        radius[idx] = std::min(r_out, std::sqrt(d2_in[idx]));
+      }
+
+  // The granulometry above, on these radii. A radius a rounding under a whole level
+  // (a face on a voxel boundary: depth + h/2 = d * h in floating point) counts as that
+  // level, so a grid-aligned box reads exactly as the staircase does.
+  std::vector<int> level(n, 0);
+  std::vector<char> seed_s(n);
+  for (int r = 1; r <= cap_radius_voxels; ++r) {
+    const double r2 = static_cast<double>(r) * r;
+    bool any = false;
+    for (std::size_t idx = 0; idx < n; ++idx) {
+      const bool in = printed[idx] && radius[idx] >= static_cast<double>(r) - 1e-6;
+      seed_s[idx] = in ? 1 : 0;
+      any = any || in;
+    }
+    if (!any) break;
+    const std::vector<double> dr2 = squared_edt(seed_s, nx, ny, nz);
+    for (std::size_t idx = 0; idx < n; ++idx)
+      if (printed[idx] && dr2[idx] <= r2) level[idx] = r;
+  }
+
+  std::vector<double> thickness(n, 0.0);
+  const double inf = std::numeric_limits<double>::infinity();
+  for (std::size_t idx = 0; idx < n; ++idx) {
+    if (!printed[idx]) continue;
+    thickness[idx] = (level[idx] >= cap_radius_voxels)
+                         ? inf
+                         : 2.0 * static_cast<double>(level[idx]) * h;
+  }
+  return thickness;
+}
+
+std::vector<double> lattice_member_width_mm(const VoxelGrid& grid,
+                                            const std::vector<double>& density, double iso,
+                                            int cap_radius_voxels, double floor_mm,
+                                            double cell_mm, const MeshDistance* surface,
+                                            CornerJoinStats* stats, std::vector<char>* joined) {
+  std::vector<double> width =
+      surface != nullptr
+          ? local_member_thickness_mm(grid, density, iso, cap_radius_voxels, *surface)
+          : local_member_thickness_mm(grid, density, iso, cap_radius_voxels,
+                                      /*grid_outside_is_void=*/true);
+  const std::size_t n = grid.voxel_count();
+  if (joined != nullptr) joined->assign(n, 0);
+  const double h = grid.spacing;
+  if (!(floor_mm > 0.0) || !(cell_mm > 0.0) || !(h > 0.0)) return width;
+  const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
+  auto printed = [&](int i, int j, int k) {
+    return i >= 0 && j >= 0 && k >= 0 && i < nx && j < ny && k < nz && grid.solid(i, j, k) &&
+           density[grid.index(i, j, k)] > iso;
+  };
+  // The floor in whole levels of the granulometry, and the width that clears it.
+  const int need = std::max(1, static_cast<int>(std::ceil(floor_mm / (2.0 * h) - 1e-9)));
+  const double member_mm = 2.0 * static_cast<double>(need) * h;
+  // The reach, in voxels: a right-angle edge's residue plus one cell, or a three-face
+  // corner's residue plus one voxel (its quantization), whichever is further.
+  const double reach = std::max((std::sqrt(2.0) - 1.0) * static_cast<double>(need) + cell_mm / h,
+                                (std::sqrt(3.0) - 1.0) * static_cast<double>(need) + 1.0);
+  if (stats != nullptr) {
+    stats->floor_mm = floor_mm;
+    stats->reach_mm = reach * h;
+  }
+  std::vector<char> holds(n, 0);
+  bool any = false;
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const std::size_t e = grid.index(i, j, k);
+        if (printed(i, j, k) && !(width[e] < floor_mm)) holds[e] = 1, any = true;
+      }
+  if (!any) return width;
+  const std::vector<double> d2 = squared_edt(holds, nx, ny, nz);
+  // How far each under-floor voxel's residue runs from the floor-holding material: the
+  // largest distance reachable from it through under-floor material along STRICTLY rising
+  // distance (26 neighbours). In a convex corner the distance rises to the corner's apex and
+  // stops there; in a thin member it keeps rising to the member's far end. Strict, so a
+  // corner's apex line (one distance along the whole edge) is not a road into a member at
+  // the edge's end. Computed in falling distance order, so each voxel reads finished values.
+  std::vector<std::size_t> under;
+  for (std::size_t e = 0; e < n; ++e) {
+    const int i = static_cast<int>(e % static_cast<std::size_t>(nx));
+    const int j = static_cast<int>((e / static_cast<std::size_t>(nx)) % static_cast<std::size_t>(ny));
+    const int k = static_cast<int>(e / (static_cast<std::size_t>(nx) * ny));
+    if (printed(i, j, k) && !holds[e]) under.push_back(e);
+  }
+  std::sort(under.begin(), under.end(), [&](std::size_t a, std::size_t b) {
+    return d2[a] != d2[b] ? d2[a] > d2[b] : a < b;
+  });
+  std::vector<double> runs(n, 0.0);
+  for (const std::size_t e : under) {
+    const int i = static_cast<int>(e % static_cast<std::size_t>(nx));
+    const int j = static_cast<int>((e / static_cast<std::size_t>(nx)) % static_cast<std::size_t>(ny));
+    const int k = static_cast<int>(e / (static_cast<std::size_t>(nx) * ny));
+    double r = std::sqrt(d2[e]);
+    for (int dk = -1; dk <= 1; ++dk)
+      for (int dj = -1; dj <= 1; ++dj)
+        for (int di = -1; di <= 1; ++di) {
+          if (di == 0 && dj == 0 && dk == 0) continue;
+          const int a = i + di, b = j + dj, c = k + dk;
+          if (!printed(a, b, c)) continue;
+          const std::size_t w = grid.index(a, b, c);
+          if (holds[w] || !(d2[w] > d2[e])) continue;
+          r = std::max(r, runs[w]);
+        }
+    runs[e] = r;
+  }
+  std::vector<char> cand(n, 0);
+  for (const std::size_t e : under) {
+    if (!(std::sqrt(d2[e]) <= reach)) continue;
+    if (stats != nullptr) ++stats->residue_voxels;
+    if (runs[e] <= reach) cand[e] = 1;
+  }
+  // ★ A CORNER IS PART OF ITS MEMBER, SO IT TOUCHES IT THROUGH MATERIAL. The distance above
+  // is straight-line, through air too: a thin fin a voxel off a thick wall reads within
+  // reach of it, and a voxel meeting the member only at an edge or a vertex is not joined
+  // to it by a face. Either one, latticed, is a lattice island of its own (measured on
+  // test_lattice_variant's Z4 part: 1 pocket became 21). So a candidate joins only when a
+  // FACE path through joined voxels leads to the floor-holding member.
+  std::vector<char> join(n, 0);
+  {
+    std::vector<std::size_t> q;
+    for (std::size_t e = 0; e < n; ++e)
+      if (holds[e]) q.push_back(e);
+    static const int d6[6][3] = {{-1, 0, 0}, {1, 0, 0}, {0, -1, 0},
+                                 {0, 1, 0},  {0, 0, -1}, {0, 0, 1}};
+    for (std::size_t at = 0; at < q.size(); ++at) {
+      const std::size_t e = q[at];
+      const int i = static_cast<int>(e % static_cast<std::size_t>(nx));
+      const int j = static_cast<int>((e / static_cast<std::size_t>(nx)) % static_cast<std::size_t>(ny));
+      const int k = static_cast<int>(e / (static_cast<std::size_t>(nx) * ny));
+      for (const auto& d : d6) {
+        const int a = i + d[0], b = j + d[1], c = k + d[2];
+        if (a < 0 || b < 0 || c < 0 || a >= nx || b >= ny || c >= nz) continue;
+        const std::size_t w = grid.index(a, b, c);
+        if (!cand[w] || join[w]) continue;
+        join[w] = 1;
+        q.push_back(w);
+      }
+    }
+  }
+  for (std::size_t e = 0; e < n; ++e)
+    if (join[e]) {
+      width[e] = member_mm;
+      if (stats != nullptr) ++stats->joined_voxels;
+    }
+  if (joined != nullptr) *joined = std::move(join);
+  return width;
 }
 
 LoadPathWalk walk_load_path(const VoxelGrid& grid,
@@ -725,6 +958,336 @@ bool load_path_connected(const VoxelGrid& grid,
   return walk_load_path(grid, density, iso).connected;
 }
 
+// ── CORE LIST items 41 + 47: the printed material as bodies (voxel.hpp) ──────
+PrintedBodies printed_bodies(const VoxelGrid& grid,
+                             const std::vector<double>& density, double iso) {
+  if (density.size() != grid.voxel_count())
+    throw std::invalid_argument(
+        "printed_bodies: density size != grid.voxel_count()");
+  const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
+  PrintedBodies pb;
+  pb.body_of_voxel.assign(grid.voxel_count(), -1);
+  // Decidable exactly when the load-path belt is: BOTH a Load and a Fixture voxel
+  // exist. A self-weight run (no load faces) keeps today's single largest shell.
+  bool any_load = false, any_anchor = false;
+  for (const VoxelTag t : grid.tags) {
+    if (t == VoxelTag::Load) any_load = true;
+    if (t == VoxelTag::Fixture) any_anchor = true;
+  }
+  pb.decidable = any_load && any_anchor;
+  auto printed_at = [&](std::size_t idx) {
+    return grid.tags[idx] != VoxelTag::Empty && density[idx] > iso;
+  };
+  std::vector<std::size_t> stack;
+  for (std::size_t seed = 0; seed < grid.voxel_count(); ++seed) {
+    if (pb.body_of_voxel[seed] >= 0 || !printed_at(seed)) continue;
+    const int id = static_cast<int>(pb.bodies.size());
+    pb.bodies.emplace_back();
+    PrintedBody& body = pb.bodies.back();
+    pb.body_of_voxel[seed] = id;
+    stack.assign(1, seed);
+    while (!stack.empty()) {
+      const std::size_t idx = stack.back();
+      stack.pop_back();
+      ++body.voxels;
+      if (grid.tags[idx] == VoxelTag::Load) ++body.load_voxels;
+      if (grid.tags[idx] == VoxelTag::Fixture) ++body.anchor_voxels;
+      const int i = static_cast<int>(idx % static_cast<std::size_t>(nx));
+      const int j = static_cast<int>((idx / static_cast<std::size_t>(nx)) %
+                                     static_cast<std::size_t>(ny));
+      const int k = static_cast<int>(idx / (static_cast<std::size_t>(nx) *
+                                            static_cast<std::size_t>(ny)));
+      for (int dk = -1; dk <= 1; ++dk)
+        for (int dj = -1; dj <= 1; ++dj)
+          for (int di = -1; di <= 1; ++di) {
+            const int ni = i + di, nj = j + dj, nk = k + dk;
+            if (ni < 0 || nj < 0 || nk < 0 || ni >= nx || nj >= ny || nk >= nz)
+              continue;
+            const std::size_t nidx = grid.index(ni, nj, nk);
+            if (pb.body_of_voxel[nidx] >= 0 || !printed_at(nidx)) continue;
+            pb.body_of_voxel[nidx] = id;
+            stack.push_back(nidx);
+          }
+    }
+  }
+  return pb;
+}
+
+BodyShells carrying_body_shells(const TriangleMesh& raw, const VoxelGrid& grid,
+                                const PrintedBodies& bodies) {
+  BodyShells out;
+  const TriangleMesh clean = clean_degenerate_triangles(raw);
+  if (clean.triangles.empty()) return out;
+  int comps = 0;
+  const std::vector<int> root = triangle_component_roots(clean, comps);
+  // The largest shell, with keep_largest_component's tie-break (the smallest
+  // root among those holding the most triangles).
+  std::vector<int> tri_count(clean.triangles.size(), 0);
+  for (int r : root) ++tri_count[static_cast<std::size_t>(r)];
+  int best_root = -1;
+  for (std::size_t r = 0; r < tri_count.size(); ++r)
+    if (tri_count[r] > 0 &&
+        (best_root < 0 || tri_count[r] > tri_count[static_cast<std::size_t>(best_root)]))
+      best_root = static_cast<int>(r);
+
+  std::vector<char> keep(clean.triangles.size(), 0);
+  bool same = true;
+  if (bodies.decidable) {
+    // Each vertex votes for the nearest printed voxel centre near it.
+    const double h = grid.spacing;
+    std::vector<int> vertex_body(clean.vertices.size(), -1);
+    for (std::size_t vi = 0; vi < clean.vertices.size(); ++vi) {
+      const Vec3& p = clean.vertices[vi];
+      const double u[3] = {(p.x - grid.origin.x) / h - 0.5,
+                           (p.y - grid.origin.y) / h - 0.5,
+                           (p.z - grid.origin.z) / h - 0.5};
+      const int c[3] = {static_cast<int>(std::lround(u[0])),
+                        static_cast<int>(std::lround(u[1])),
+                        static_cast<int>(std::lround(u[2]))};
+      double best_d2 = std::numeric_limits<double>::infinity();
+      for (int dk = -1; dk <= 1; ++dk)
+        for (int dj = -1; dj <= 1; ++dj)
+          for (int di = -1; di <= 1; ++di) {
+            const int i = c[0] + di, j = c[1] + dj, k = c[2] + dk;
+            if (i < 0 || j < 0 || k < 0 || i >= grid.nx || j >= grid.ny ||
+                k >= grid.nz)
+              continue;
+            const int b = bodies.body_of_voxel[grid.index(i, j, k)];
+            if (b < 0) continue;
+            const double d2 = (u[0] - i) * (u[0] - i) + (u[1] - j) * (u[1] - j) +
+                              (u[2] - k) * (u[2] - k);
+            if (d2 < best_d2) {
+              best_d2 = d2;
+              vertex_body[vi] = b;
+            }
+          }
+    }
+    // Each shell goes to the body most of its vertices voted for (the smallest
+    // body id on a tie). Tallied per shell, not per triangle.
+    std::vector<int> shell_index(clean.triangles.size(), -1);
+    std::vector<int> shell_root;
+    for (std::size_t r = 0; r < tri_count.size(); ++r)
+      if (tri_count[r] > 0) {
+        shell_index[r] = static_cast<int>(shell_root.size());
+        shell_root.push_back(static_cast<int>(r));
+      }
+    std::vector<std::map<int, int>> tally(shell_root.size());
+    for (std::size_t t = 0; t < clean.triangles.size(); ++t) {
+      std::map<int, int>& m =
+          tally[static_cast<std::size_t>(shell_index[static_cast<std::size_t>(root[t])])];
+      for (int w = 0; w < 3; ++w) {
+        const int b = vertex_body[static_cast<std::size_t>(clean.triangles[t][w])];
+        if (b >= 0) ++m[b];
+      }
+    }
+    std::vector<int> shell_body(clean.triangles.size(), -1);
+    for (std::size_t s = 0; s < shell_root.size(); ++s) {
+      int best = -1, best_n = 0;
+      for (const auto& kv : tally[s])
+        if (kv.second > best_n) {
+          best_n = kv.second;
+          best = kv.first;
+        }
+      shell_body[static_cast<std::size_t>(shell_root[s])] = best;
+    }
+    // Per carrying body, its largest shell.
+    std::vector<int> body_shell(bodies.bodies.size(), -1);
+    for (std::size_t r = 0; r < shell_body.size(); ++r) {
+      const int b = shell_body[r];
+      if (b < 0 || !bodies.bodies[static_cast<std::size_t>(b)].carries()) continue;
+      int& s = body_shell[static_cast<std::size_t>(b)];
+      if (s < 0 || tri_count[r] > tri_count[static_cast<std::size_t>(s)])
+        s = static_cast<int>(r);
+    }
+    for (std::size_t b = 0; b < bodies.bodies.size(); ++b) {
+      if (!bodies.bodies[b].carries()) {
+        ++out.specks_dropped;
+        out.speck_voxels += bodies.bodies[b].voxels;
+        continue;
+      }
+      if (body_shell[b] < 0) {
+        ++out.bodies_without_shell;
+        continue;
+      }
+      keep[static_cast<std::size_t>(body_shell[b])] = 1;
+      ++out.bodies_exported;
+    }
+    // No carrying body has a shell (a field whose tagged voxels are not printed):
+    // nothing to tell apart, so the largest shell, as before.
+    same = out.bodies_exported == 0 ||
+           (out.bodies_exported == 1 && keep[static_cast<std::size_t>(best_root)]);
+  }
+  if (same) {
+    std::fill(keep.begin(), keep.end(), 0);
+    keep[static_cast<std::size_t>(best_root)] = 1;
+  }
+  out.same_as_largest = same;
+  out.mesh = rebuild_from_components(clean, root, keep);
+  return out;
+}
+
+LostAnchors lost_anchored_pieces(const VoxelGrid& grid, const PrintedBodies& as_drawn,
+                                 const PrintedBodies& design) {
+  LostAnchors lost;
+  bool any_load = false;
+  for (const VoxelTag t : grid.tags)
+    if (t == VoxelTag::Load) {
+      any_load = true;
+      break;
+    }
+  if (!any_load) return lost;
+  std::vector<char> counted(design.bodies.size(), 0);
+  for (std::size_t idx = 0; idx < grid.voxel_count(); ++idx) {
+    if (grid.tags[idx] != VoxelTag::Fixture) continue;
+    const int a = as_drawn.body_of_voxel[idx];
+    const int d = design.body_of_voxel[idx];
+    if (a < 0 || d < 0) continue;  // not part material as drawn, or carved away
+    if (as_drawn.bodies[static_cast<std::size_t>(a)].load_voxels == 0) continue;
+    if (design.bodies[static_cast<std::size_t>(d)].load_voxels > 0) continue;
+    lost.fixture_voxels.push_back(idx);
+    if (!counted[static_cast<std::size_t>(d)]) {
+      counted[static_cast<std::size_t>(d)] = 1;
+      lost.design_bodies.push_back(d);
+      lost.voxels += design.bodies[static_cast<std::size_t>(d)].voxels;
+    }
+  }
+  return lost;
+}
+
+BridgeResult bridge_split_bodies(const VoxelGrid& grid, std::vector<double>& density,
+                                 double iso, const PrintedBodies& as_drawn,
+                                 const std::vector<char>& allowed, int radius) {
+  BridgeResult out;
+  if (density.size() != grid.voxel_count() || allowed.size() != grid.voxel_count())
+    throw std::invalid_argument("bridge_split_bodies: size != grid.voxel_count()");
+  if (!as_drawn.decidable) return out;
+  const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
+  auto decode = [&](std::size_t idx, int& i, int& j, int& k) {
+    i = static_cast<int>(idx % static_cast<std::size_t>(nx));
+    j = static_cast<int>((idx / static_cast<std::size_t>(nx)) % static_cast<std::size_t>(ny));
+    k = static_cast<int>(idx / (static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny)));
+  };
+  // Per as-drawn body, repeat until its carrying design bodies are one.
+  for (int guard = 0; guard < 64; ++guard) {
+    const PrintedBodies design = printed_bodies(grid, density, iso);
+    // The as-drawn body each carrying design body belongs to (by its BC voxels).
+    std::vector<int> group(design.bodies.size(), -1);
+    for (std::size_t idx = 0; idx < grid.voxel_count(); ++idx) {
+      const VoxelTag t = grid.tags[idx];
+      if (t != VoxelTag::Load && t != VoxelTag::Fixture) continue;
+      const int d = design.body_of_voxel[idx], a = as_drawn.body_of_voxel[idx];
+      if (d >= 0 && a >= 0 && group[static_cast<std::size_t>(d)] < 0)
+        group[static_cast<std::size_t>(d)] = a;
+    }
+    // The first as-drawn group with more than one design body: its largest body
+    // is the source, its other bodies the targets.
+    int g = -1, source = -1;
+    std::vector<char> target(design.bodies.size(), 0);
+    for (std::size_t b = 0; b < design.bodies.size() && g < 0; ++b) {
+      if (group[b] < 0) continue;
+      int members = 0;
+      for (std::size_t c = 0; c < design.bodies.size(); ++c) members += group[c] == group[b];
+      if (members > 1) g = group[b];
+    }
+    if (g < 0) break;
+    for (std::size_t b = 0; b < design.bodies.size(); ++b) {
+      if (group[b] != g) continue;
+      if (source < 0 || design.bodies[b].voxels >
+                            design.bodies[static_cast<std::size_t>(source)].voxels)
+        source = static_cast<int>(b);
+    }
+    for (std::size_t b = 0; b < design.bodies.size(); ++b)
+      target[b] = group[b] == g && static_cast<int>(b) != source;
+    // Dijkstra from the source body through allowed voxels to the nearest target.
+    std::vector<double> dist(grid.voxel_count(), std::numeric_limits<double>::infinity());
+    std::vector<long long> prev(grid.voxel_count(), -1);
+    using Item = std::pair<double, std::size_t>;
+    std::priority_queue<Item, std::vector<Item>, std::greater<Item>> pq;
+    for (std::size_t idx = 0; idx < grid.voxel_count(); ++idx)
+      if (design.body_of_voxel[idx] == source) {
+        dist[idx] = 0.0;
+        pq.push({0.0, idx});
+      }
+    long long hit = -1;
+    while (!pq.empty()) {
+      const auto [d, idx] = pq.top();
+      pq.pop();
+      if (d > dist[idx]) continue;
+      const int b = design.body_of_voxel[idx];
+      if (b >= 0 && target[static_cast<std::size_t>(b)]) {
+        hit = static_cast<long long>(idx);
+        break;
+      }
+      int i, j, k;
+      decode(idx, i, j, k);
+      for (int dk = -1; dk <= 1; ++dk)
+        for (int dj = -1; dj <= 1; ++dj)
+          for (int di = -1; di <= 1; ++di) {
+            if (!di && !dj && !dk) continue;
+            const int ni = i + di, nj = j + dj, nk = k + dk;
+            if (ni < 0 || nj < 0 || nk < 0 || ni >= nx || nj >= ny || nk >= nz) continue;
+            const std::size_t n = grid.index(ni, nj, nk);
+            const int nb = design.body_of_voxel[n];
+            const bool passable = (nb >= 0 && (nb == source || target[static_cast<std::size_t>(nb)])) ||
+                                  (allowed[n] && grid.tags[n] != VoxelTag::Empty);
+            if (!passable) continue;
+            const double step = std::sqrt(static_cast<double>(di * di + dj * dj + dk * dk));
+            const double nd = d + (nb >= 0 ? 0.0 : step);  // bodies are free to cross
+            if (nd < dist[n]) {
+              dist[n] = nd;
+              prev[n] = static_cast<long long>(idx);
+              pq.push({nd, n});
+            }
+          }
+    }
+    if (hit < 0) {
+      // No path inside the allowed space: this group stays split, and a second pass
+      // would find the same group first, so stop (the belt and item 47 judge it).
+      ++out.groups_left_split;
+      break;
+    }
+    // Lay the path, thickened by `radius` voxels within the allowed space.
+    LaidBridge b;
+    for (long long v = hit; v >= 0; v = prev[static_cast<std::size_t>(v)]) {
+      if (design.body_of_voxel[static_cast<std::size_t>(v)] < 0)
+        b.path.push_back(static_cast<std::size_t>(v));
+    }
+    const int joined = design.body_of_voxel[static_cast<std::size_t>(hit)];
+    for (std::size_t idx = 0; idx < grid.voxel_count(); ++idx)
+      if (design.body_of_voxel[idx] == joined) b.target.push_back(idx);
+    out.voxels += lay_bridge(grid, density, iso, allowed, b, radius);
+    out.laid.push_back(std::move(b));
+    ++out.bridges;
+  }
+  return out;
+}
+
+long long lay_bridge(const VoxelGrid& grid, std::vector<double>& density, double iso,
+                     const std::vector<char>& allowed, LaidBridge& b, int radius) {
+  const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
+  long long printed = 0;
+  for (const std::size_t p : b.path) {
+    const int i = static_cast<int>(p % static_cast<std::size_t>(nx));
+    const int j = static_cast<int>((p / static_cast<std::size_t>(nx)) % static_cast<std::size_t>(ny));
+    const int k = static_cast<int>(p / (static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny)));
+    for (int dk = -radius; dk <= radius; ++dk)
+      for (int dj = -radius; dj <= radius; ++dj)
+        for (int di = -radius; di <= radius; ++di) {
+          const int ni = i + di, nj = j + dj, nk = k + dk;
+          if (ni < 0 || nj < 0 || nk < 0 || ni >= nx || nj >= ny || nk >= nz) continue;
+          const std::size_t n = grid.index(ni, nj, nk);
+          if (!(n == p || (allowed[n] && grid.tags[n] != VoxelTag::Empty))) continue;
+          if (density[n] < 1.0) {
+            if (!(density[n] > iso)) ++printed;
+            b.laid.push_back({n, density[n]});
+            density[n] = 1.0;
+          }
+        }
+  }
+  b.radius = radius;
+  return printed;
+}
+
 V3Report check_v3(const VoxelGrid& grid, const std::vector<double>& density,
                   double iso) {
   if (density.size() != grid.voxel_count())
@@ -812,6 +1375,16 @@ V3Report check_v3(const VoxelGrid& grid, const std::vector<double>& density,
       keep_largest_and_marked_components(raw, vertex_frozen, extra);
   r.load_fixture_islands = extra;
   r.mesh = extra == 0 ? std::move(marked) : keep_largest_component(raw);
+  // CORE LIST item 41 — the shells the export carries: every body holding an
+  // anchor or a load, not just the largest. Kept apart from `mesh` (see voxel.hpp).
+  {
+    BodyShells shells =
+        carrying_body_shells(raw, grid, printed_bodies(grid, density, iso));
+    r.bodies_exported = shells.same_as_largest ? 1 : shells.bodies_exported;
+    r.specks_dropped = shells.specks_dropped;
+    r.speck_voxels = shells.speck_voxels;
+    if (!shells.same_as_largest) r.export_mesh = std::move(shells.mesh);
+  }
   r.watertight = check_watertight(r.mesh);
   r.mesh_components = count_components(r.mesh);
 

@@ -1,0 +1,896 @@
+// FlexibleOverlay — the squish map drawn ON THE PART (task 2026-09-29-flexible-screens S2,
+// M11: "3D view with an overlay on the actual part").
+//
+// ★ WHAT IS DRAWN, AND FROM WHERE. One small quad per stack COLUMN, centred where core's
+// column ray enters the face (from_uv(u, v) + load × entry_t), in the frame's own X / Y
+// directions, one column pitch wide — so the map sits on the face exactly where core's
+// columns are. Its colour is a per-column number core returned (drawn squish, buildable
+// squish, a stamp's dent). Nothing here computes a squish.
+//
+// ★ THE DENT (02 §6): "u(z) = depth · (z − z_bottom) / h" through the lattice height —
+// the face moves the full depth, the far end not at all. Applied (exaggerated, labelled)
+// to the column quads AND to the part's own vertices inside the stack, using core's
+// column entry/exit along the load; the renderer scales it (`flexScale`).
+//
+// The part and the quads are ONE mesh so taps on the map pick the face under it.
+
+import Foundation
+import simd
+import TopOptDesign
+import TopOptKit
+
+public struct FlexibleOverlayFace {
+    public let key: FlexFaceKey
+    /// The part faces the region covers, and its cuts (a split sector); the map replaces
+    /// exactly the part of those faces on the sector's side of every cut (FlexibleFacePieces).
+    public let faces: Set<Int>
+    public let cuts: [RegionCut]
+    public let stack: FlexStackInfo
+    /// Core's from_uv at every column centre (u_mm, v_mm), in column order.
+    public let centres: [SIMD3<Double>]
+}
+
+public struct FlexibleOverlayMesh {
+    /// ★ R7-E1 REVIEW, RED CONTROL only: a cut region's column quads drawn as they come — past the face's outer edge where its
+    /// frame turns (a flat corner's rest), with notches between them (the sawtooth he would see along the Top's edges).
+    nonisolated(unsafe) public static var controlNoEdgeFill = false
+    public let mesh: ViewerMesh
+    public let partFlatVertices: Int
+    /// Per kept part triangle: its SOURCE triangle in the part (a triangle a sector cut
+    /// crosses is kept as its pieces outside the pressed sectors, so a source can repeat).
+    /// A loaded region's own part is replaced by its column quads, so the dent is not
+    /// hidden under the undented face.
+    public let keptTriangles: [Int]
+    /// Per face: the first FLAT vertex of its quads (6 flat vertices per column).
+    public let flatStart: [FlexFaceKey: Int]
+    /// Per kept part triangle: its face id and centroid (per-sector tinting — exact, since
+    /// every piece lies on one side of every sector cut).
+    public let keptFace: [Int]
+    public let keptCentroid: [SIMD3<Double>]
+    /// Per kept FLAT vertex: its barycentric weights in its source triangle
+    /// (`keptTriangles[v / 3]`). The dent's uvt is interpolated from them; core's to_uv + t
+    /// is affine, so the interpolation is exact (FlexibleOverlayClipTests).
+    public let keptWeights: [SIMD3<Double>]
+    /// ★ BATCH C VERIFICATION (the Stress view): the part's triangles SUBDIVIDED for colour
+    /// (`build(maxEdgeMM:)`), nil when not. His pad is 12 triangles: Stress, sampled per vertex,
+    /// read its corners only (24 flat vertices, every one 0.000 MPa) — a flat blue while the
+    /// legend claimed 0 … 0.05 MPa, and a tap read another number than the colour under it.
+    /// Each kept triangle is split by longest-edge bisection to `maxEdgeMM`; the DENT of a
+    /// sub-vertex is the linear blend of its kept triangle's corner dents, so the drawn
+    /// geometry is exactly the unsubdivided one (no new seam) — only the colour gets finer.
+    public let subdivision: Subdivision?
+    /// ★ R7-E1 REVIEW: per kept part triangle of an edge fill's band (FlexibleOverlayMesh.build), the region and the column whose
+    /// square lies over it — the band takes that square's colour, so where it shows between the squares no colour steps.
+    public var bandColumn: [Int: (key: FlexFaceKey, column: Int)] = [:]
+
+    public struct Subdivision {
+        /// Per kept (unsubdivided) triangle: its source triangle, and its three corners'
+        /// barycentric weights in that source (3 per kept triangle).
+        public let source: [Int]
+        public let cornerWeights: [SIMD3<Double>]
+        /// Per drawn part triangle: the kept triangle it was cut from.
+        public let subOf: [Int]
+        /// Per drawn part FLAT vertex: its barycentric weights in that kept triangle.
+        public let bary: [SIMD3<Double>]
+    }
+
+    /// The main page's subdivision edge for `part`: ~1.3 of a 64-voxel solve's voxels along its
+    /// longest side (the Stress field's own pitch), so a colour is never interpolated across
+    /// more than about one voxel.
+    public static func stressEdgeMM(_ part: ViewerMesh) -> Double {
+        let b = part.bounds
+        let e = b.max - b.min
+        return Swift.max(0.5, Double(Swift.max(e.x, Swift.max(e.y, e.z))) / 48)
+    }
+    /// The most sub-triangles one kept triangle is cut into (2^14), and in all.
+    static let maxSubdivisionDepth = 14
+    public static let maxSubTriangles = 400_000
+
+    /// The part's own mesh (minus the pressed regions) plus one quad per column of every face.
+    ///
+    /// ★ ROUND 3, ITEM 2 — THE HOLE. A triangle of a face with sectors is CUT along the
+    /// sectors' planes (`splitPlanes`, plus every pressed region's own cuts) before anything
+    /// is dropped; only the pieces inside a pressed region go. So the part's own surface runs
+    /// right up to the map along the cut, and never under it.
+    public static func build(part: ViewerMesh, faces: [FlexibleOverlayFace],
+                             splitPlanes: [Int: [RegionCut]] = [:], maxEdgeMM: Double? = nil,
+                             maxTriangles: Int = maxSubTriangles) -> FlexibleOverlayMesh {
+        var pos = part.positions
+        var idx: [Int32] = []
+        var fid: [Int32] = []
+        var kept: [Int] = []
+        var keptFace: [Int] = [], keptCentroid: [SIMD3<Double>] = [], weights: [SIMD3<Double>] = []
+        // ★ the subdivision (nil ⇒ none: every kept triangle is drawn as it was)
+        let edge = maxEdgeMM.map { e -> Double in
+            // never more than maxSubTriangles in all: the edge grows with the part's area
+            var area = 0.0
+            for t in 0..<part.triangleCount {
+                let v = (0..<3).map { j -> SIMD3<Double> in
+                    let b = Int(part.indices[3 * t + j]) * 3
+                    return SIMD3(Double(part.positions[b]), Double(part.positions[b + 1]), Double(part.positions[b + 2]))
+                }
+                area += simd_length(simd_cross(v[1] - v[0], v[2] - v[0])) / 2
+            }
+            let each = Swift.max(e, 1e-3)
+            let estimate = area / (0.25 * each * each)
+            return estimate > Double(maxTriangles) ? each * (estimate / Double(maxTriangles)).squareRoot() : each
+        }
+        var subSource: [Int] = [], subCorners: [SIMD3<Double>] = [], subOf: [Int] = [], subBary: [SIMD3<Double>] = []
+        let unit = [SIMD3<Double>(1, 0, 0), SIMD3(0, 1, 0), SIMD3(0, 0, 1)]
+        /// One kept triangle (source `t`, face `f`, corners `p` with source weights `w`; `at`:
+        /// the vertices already in `pos`, or nil to append them) — drawn whole, or cut to `edge`.
+        func emit(_ t: Int, _ f: Int, _ p: [SIMD3<Double>], _ w: [SIMD3<Double>], at: [Int32]?) {
+            let longest = Swift.max(simd_distance(p[0], p[1]), Swift.max(simd_distance(p[1], p[2]), simd_distance(p[2], p[0])))
+            guard let edge, longest > edge else {
+                kept.append(t); keptFace.append(f); keptCentroid.append((p[0] + p[1] + p[2]) / 3)
+                weights += w
+                if let at { idx += at } else {
+                    let base = Int32(pos.count / 3)
+                    for q in p { pos += [Float(q.x), Float(q.y), Float(q.z)] }
+                    idx += [base, base + 1, base + 2]
+                }
+                fid.append(Int32(f))
+                if edge != nil {
+                    subOf.append(subSource.count); subBary += unit
+                    subSource.append(t); subCorners += w
+                }
+                return
+            }
+            let me = subSource.count
+            subSource.append(t); subCorners += w
+            // longest-edge bisection, in barycentric coordinates of this kept triangle (the
+            // winding is kept: each half is (A, M, C) / (M, B, C) of its longest edge AB)
+            var stack: [([SIMD3<Double>], Int)] = [(unit, 0)]
+            func at3(_ b: SIMD3<Double>) -> SIMD3<Double> { b.x * p[0] + b.y * p[1] + b.z * p[2] }
+            while let top = stack.popLast() {
+                let (b, depth) = top
+                let q = b.map(at3)
+                let l = [simd_distance(q[0], q[1]), simd_distance(q[1], q[2]), simd_distance(q[2], q[0])]
+                let i = l[0] >= l[1] && l[0] >= l[2] ? 0 : (l[1] >= l[2] ? 1 : 2)
+                if l[i] > edge, depth < maxSubdivisionDepth {
+                    // (a, c, o) is the triangle rotated cyclically (same winding) so the split
+                    // edge a–c comes first; both halves keep that winding
+                    let a = b[i], c = b[(i + 1) % 3], o = b[(i + 2) % 3]
+                    let m = (a + c) / 2
+                    stack.append(([m, c, o], depth + 1)); stack.append(([a, m, o], depth + 1))
+                    continue
+                }
+                kept.append(t); keptFace.append(f); keptCentroid.append((q[0] + q[1] + q[2]) / 3)
+                let base = Int32(pos.count / 3)
+                for j in 0..<3 {
+                    pos += [Float(q[j].x), Float(q[j].y), Float(q[j].z)]
+                    weights.append(b[j].x * w[0] + b[j].y * w[1] + b[j].z * w[2])
+                }
+                idx += [base, base + 1, base + 2]
+                fid.append(Int32(f))
+                subOf.append(me); subBary += b
+            }
+        }
+        var planes = splitPlanes
+        for f in faces where !f.cuts.isEmpty {
+            for face in f.faces { for c in f.cuts { FlexibleFacePieces.add(c, to: &planes[face, default: []]) } }
+        }
+        let pfid = part.faceIDs
+        func vtx(_ i: UInt32) -> SIMD3<Double> {
+            let b = Int(i) * 3
+            return SIMD3(Double(part.positions[b]), Double(part.positions[b + 1]), Double(part.positions[b + 2]))
+        }
+        let identity = [SIMD3<Double>(1, 0, 0), SIMD3(0, 1, 0), SIMD3(0, 0, 1)]
+        // ★ R7-E1 REVIEW (the verifier: a flat corner made every top edge of his pad a sawtooth): a region WITH cuts is drawn by
+        // core's column quads on core's grid — its frame is its footprint's principal axis, so a flat corner's pentagonal rest is
+        // framed at 45° to the Top's edges and its quads stepped past the outer edge and left notches along it. Per pressed region
+        // with cuts: each part face's OUTER edges (a face's triangle edges used once), the strip one pitch wide inside each — that
+        // band of the region keeps its own part pieces (under the quads, dented by the ramp like every part vertex), and no quad
+        // corner is left past the face's edge — only for a region whose quads DO step past its face's edge (a turned frame; a face
+        // of at most 64 triangles). A whole face, and every region whose quads never cross its face's edge, draw as before.
+        struct Band { let key: FlexFaceKey; let faces: Set<Int>; let cuts: [RegionCut]; let strips: [Int: [RegionCut]]; let surface: [SIMD3<Double>] }
+        var bandColumn: [Int: (key: FlexFaceKey, column: Int)] = [:]
+        var bands: [Band] = []
+        var faceTris: [Int: [[SIMD3<Double>]]] = [:]
+        func trisOf(_ f: Int) -> [[SIMD3<Double>]] {
+            if let t = faceTris[f] { return t }
+            var out: [[SIMD3<Double>]] = []
+            for t in 0..<part.triangleCount where t < pfid.count && Int(pfid[t]) == f {
+                out.append([vtx(part.indices[3 * t]), vtx(part.indices[3 * t + 1]), vtx(part.indices[3 * t + 2])])
+            }
+            faceTris[f] = out
+            return out
+        }
+        // only where a quad DOES step past the face's edge (a turned frame); planar faces of a few triangles (a curved face, many)
+        var stepsOut = Set<FlexFaceKey>()
+        if !controlNoEdgeFill {
+            for f in faces where !f.cuts.isEmpty && f.stack.pitchMM > 0 {
+                let tris = f.faces.sorted().flatMap { trisOf($0) }
+                guard !tris.isEmpty, tris.count <= 64 else { continue }
+                let st = f.stack
+                let x = st.xAxis * (st.pitchMM / 2), y = st.yAxis * (st.pitchMM / 2)
+                let out = st.columns.indices.contains { k in
+                    let p = f.centres[k] + st.load * st.columns[k].entryT
+                    return [p - x - y, p + x - y, p + x + y, p - x + y].contains { simd_distance(Self.ontoFace($0, tris), $0) > 1e-3 }
+                }
+                guard out else { continue }
+                stepsOut.insert(f.key)
+                var strips: [Int: [RegionCut]] = [:]
+                for face in f.faces {
+                    // its outer edges, and (found by looking at the corner) its own cut lines: the strip one pitch inside each
+                    strips[face] = outerStrips(trisOf(face), width: f.stack.pitchMM)
+                        + Self.inPlaneCuts(f.cuts, trisOf(face)).map { RegionCut(point: $0.point + $0.normal * f.stack.pitchMM, normal: SIMD3<Double>.zero - $0.normal) }
+                }
+                bands.append(Band(key: f.key, faces: f.faces, cuts: f.cuts, strips: strips,
+                                  surface: st.columns.indices.map { f.centres[$0] + st.load * st.columns[$0].entryT }))
+            }
+        }
+        for t in 0..<part.triangleCount {
+            let f = t < pfid.count ? Int(pfid[t]) : -1
+            let pressed = faces.filter { $0.faces.contains(f) }
+            // a whole face pressed: its map replaces all of it
+            if pressed.contains(where: { $0.cuts.isEmpty }) { continue }
+            let i0 = part.indices[3 * t], i1 = part.indices[3 * t + 1], i2 = part.indices[3 * t + 2]
+            let a = vtx(i0), b = vtx(i1), c = vtx(i2)
+            let facePlanes = planes[f] ?? []
+            guard !facePlanes.isEmpty else {
+                // no sector on this face: the triangle as it is
+                emit(t, f, [a, b, c], identity, at: [Int32(i0), Int32(i1), Int32(i2)])
+                continue
+            }
+            for piece in FlexibleFacePieces.pieces(a, b, c, planes: facePlanes) {
+                // replaced by a pressed sector's map: this piece is on its side of every cut
+                if pressed.contains(where: { FaceRegionGeometry.inside(piece.centroid, $0.cuts) }) {
+                    // ★ R7-E1 REVIEW: its band along the face's outer edges stays, under the quads
+                    if let band = bands.first(where: { $0.faces.contains(f) && FaceRegionGeometry.inside(piece.centroid, $0.cuts) }) {
+                        for strip in band.strips[f] ?? [] {
+                            let poly = FlexibleMeet.clipPolygon(piece.points, [strip])
+                            guard poly.count >= 3, FlexibleMeet.area(poly) > FlexibleFacePieces.slivermm2 else { continue }
+                            let w = poly.map { FlexibleFacePieces.barycentric($0, a, b, c) }
+                            for (x, y, z) in FlexibleFacePieces.fan(poly.count) {
+                                let first = kept.count
+                                emit(t, f, [poly[x], poly[y], poly[z]], [w[x], w[y], w[z]], at: nil)
+                                // the square over it: the column nearest its middle
+                                let mid = (poly[x] + poly[y] + poly[z]) / 3
+                                if let col = band.surface.indices.min(by: { simd_distance_squared(band.surface[$0], mid) < simd_distance_squared(band.surface[$1], mid) }) {
+                                    for i in first..<kept.count { bandColumn[i] = (band.key, col) }
+                                }
+                            }
+                        }
+                    }
+                    continue
+                }
+                if piece.whole {
+                    if edge == nil {
+                        kept.append(t); keptFace.append(f); keptCentroid.append(piece.centroid)
+                        weights += identity
+                        idx += [Int32(i0), Int32(i1), Int32(i2)]
+                        fid.append(Int32(f))
+                    } else {
+                        emit(t, f, [a, b, c], identity, at: [Int32(i0), Int32(i1), Int32(i2)])
+                    }
+                    continue
+                }
+                if edge == nil {
+                    let base = Int32(pos.count / 3)
+                    for p in piece.points { pos += [Float(p.x), Float(p.y), Float(p.z)] }
+                    for (x, y, z) in FlexibleFacePieces.fan(piece.points.count) {
+                        kept.append(t); keptFace.append(f)
+                        keptCentroid.append((piece.points[x] + piece.points[y] + piece.points[z]) / 3)
+                        weights += [piece.weights[x], piece.weights[y], piece.weights[z]]
+                        idx += [base + Int32(x), base + Int32(y), base + Int32(z)]
+                        fid.append(Int32(f))
+                    }
+                    continue
+                }
+                for (x, y, z) in FlexibleFacePieces.fan(piece.points.count) {
+                    emit(t, f, [piece.points[x], piece.points[y], piece.points[z]],
+                         [piece.weights[x], piece.weights[y], piece.weights[z]], at: nil)
+                }
+            }
+        }
+        var flatStart: [FlexFaceKey: Int] = [:]
+        var tri = kept.count
+        for f in faces {
+            flatStart[f.key] = tri * 3
+            let st = f.stack
+            let x = st.xAxis * (st.pitchMM / 2), y = st.yAxis * (st.pitchMM / 2)
+            let lift = -st.load * 0.05
+            // ★ R7-E1 REVIEW: a region with cuts — no quad corner past its face's outer edge (moved in the face's plane onto it)
+            let clampTris: [[SIMD3<Double>]]? = stepsOut.contains(f.key) ? f.faces.sorted().flatMap { trisOf($0) } : nil
+            let clampCuts = clampTris.map { Self.inPlaneCuts(f.cuts, $0) } ?? []
+            for (k, c) in st.columns.enumerated() {
+                let p = f.centres[k] + st.load * c.entryT + lift
+                let base = Int32(pos.count / 3)
+                for q0 in [p - x - y, p + x - y, p + x + y, p - x + y] {
+                    var q = q0
+                    if let tris = clampTris {
+                        // onto the face, behind the region's own cut lines, onto the face again (a corner where the two meet)
+                        q = Self.ontoFace(q, tris)
+                        for cut in clampCuts {
+                            let d = simd_dot(q - cut.point, cut.normal)
+                            if d < 0 { q -= cut.normal * d }
+                        }
+                        q = Self.ontoFace(q, tris)
+                    }
+                    pos += [Float(q.x), Float(q.y), Float(q.z)]
+                }
+                // wound so the quad faces out of the part (along −load)
+                idx += [base, base + 2, base + 1, base, base + 3, base + 2]
+                let face = Int32(f.faces.min() ?? -1)
+                fid += [face, face]
+                tri += 2
+            }
+        }
+        let mesh = ViewerMesh(vertices: pos, indices: idx, faceIDs: fid,
+                              faceGeometry: part.faceGeometry, pseudoFaces: part.pseudoFaces)
+        var built = FlexibleOverlayMesh(mesh: mesh, partFlatVertices: kept.count * 3, keptTriangles: kept,
+                                        flatStart: flatStart, keptFace: keptFace, keptCentroid: keptCentroid,
+                                        keptWeights: weights,
+                                        subdivision: edge == nil ? nil : Subdivision(source: subSource, cornerWeights: subCorners,
+                                                                                     subOf: subOf, bary: subBary))
+        built.bandColumn = bandColumn
+        return built
+    }
+
+    // MARK: ★ R7-E1 REVIEW — the edge fill's geometry
+
+    /// The strips `width` wide inside each OUTER edge of a face (its triangle edges used once), as the half-planes that keep them:
+    /// RegionCut(point on the edge + inward·width, normal −inward) keeps the points within `width` of that edge's line.
+    static func outerStrips(_ tris: [[SIMD3<Double>]], width: Double) -> [RegionCut] {
+        struct E: Hashable { let a: [Int64], b: [Int64] }
+        func key(_ p: SIMD3<Double>) -> [Int64] { [Int64((p.x * 1e5).rounded()), Int64((p.y * 1e5).rounded()), Int64((p.z * 1e5).rounded())] }
+        var count: [E: Int] = [:]
+        var owner: [E: (SIMD3<Double>, SIMD3<Double>, SIMD3<Double>)] = [:]
+        for t in tris where t.count == 3 {
+            for i in 0..<3 {
+                let p = t[i], q = t[(i + 1) % 3], r = t[(i + 2) % 3]
+                let ka = key(p), kb = key(q)
+                let e = ka.lexicographicallyPrecedes(kb) ? E(a: ka, b: kb) : E(a: kb, b: ka)
+                count[e, default: 0] += 1
+                owner[e] = (p, q, r)
+            }
+        }
+        var out: [RegionCut] = []
+        for (e, n) in count where n == 1 {
+            guard let (p, q, r) = owner[e] else { continue }
+            let normal = simd_cross(q - p, r - p)
+            guard simd_length(normal) > 1e-12 else { continue }
+            var inward = simd_normalize(simd_cross(simd_normalize(normal), q - p))
+            if simd_dot(inward, r - p) < 0 { inward = -inward }
+            out.append(RegionCut(point: p + inward * width, normal: -inward))
+        }
+        return out.sorted { ($0.point.x, $0.point.y, $0.point.z) < ($1.point.x, $1.point.y, $1.point.z) }
+    }
+
+    /// A region's cuts whose normals lie in the face's plane (the in-face cuts a sector, a rest or a flat prism lays), unit.
+    static func inPlaneCuts(_ cuts: [RegionCut], _ tris: [[SIMD3<Double>]]) -> [RegionCut] {
+        guard let t = tris.first, t.count == 3 else { return [] }
+        let n = simd_cross(t[1] - t[0], t[2] - t[0])
+        guard simd_length(n) > 1e-12 else { return [] }
+        let nf = simd_normalize(n)
+        return cuts.compactMap { c in
+            let l = simd_length(c.normal)
+            guard l > 1e-12, abs(simd_dot(c.normal / l, nf)) < 1e-6 else { return nil }
+            return RegionCut(point: c.point, normal: c.normal / l)
+        }
+    }
+
+    /// `q` moved in its nearest face triangle's plane onto the face where it lies past the face's edge (its offset off the plane
+    /// kept); unchanged where it lies over the face.
+    static func ontoFace(_ q: SIMD3<Double>, _ tris: [[SIMD3<Double>]]) -> SIMD3<Double> {
+        var best: (d: Double, c: SIMD3<Double>, n: SIMD3<Double>)?
+        for t in tris where t.count == 3 {
+            let c = closest(q, t[0], t[1], t[2])
+            let d = simd_distance_squared(q, c)
+            if best == nil || d < best!.d {
+                let n = simd_cross(t[1] - t[0], t[2] - t[0])
+                best = (d, c, simd_length(n) > 1e-12 ? simd_normalize(n) : .zero)
+            }
+        }
+        guard let b = best else { return q }
+        let off = q - b.c
+        let inPlane = off - b.n * simd_dot(off, b.n)
+        return simd_length(inPlane) > 1e-6 ? q - inPlane : q
+    }
+
+    /// The point of triangle (a, b, c) nearest `p` (Ericson, Real-Time Collision Detection 5.1.5).
+    static func closest(_ p: SIMD3<Double>, _ a: SIMD3<Double>, _ b: SIMD3<Double>, _ c: SIMD3<Double>) -> SIMD3<Double> {
+        let ab = b - a, ac = c - a, ap = p - a
+        let d1 = simd_dot(ab, ap), d2 = simd_dot(ac, ap)
+        if d1 <= 0, d2 <= 0 { return a }
+        let bp = p - b
+        let d3 = simd_dot(ab, bp), d4 = simd_dot(ac, bp)
+        if d3 >= 0, d4 <= d3 { return b }
+        let vc = d1 * d4 - d3 * d2
+        if vc <= 0, d1 >= 0, d3 <= 0 { return a + ab * (d1 / (d1 - d3)) }
+        let cp = p - c
+        let d5 = simd_dot(ab, cp), d6 = simd_dot(ac, cp)
+        if d6 >= 0, d5 <= d6 { return c }
+        let vb = d5 * d2 - d1 * d6
+        if vb <= 0, d2 >= 0, d6 <= 0 { return a + ac * (d2 / (d2 - d6)) }
+        let va = d3 * d6 - d5 * d4
+        if va <= 0, d4 - d3 >= 0, d5 - d6 >= 0 { return b + (c - b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6))) }
+        let den = 1 / (va + vb + vc)
+        return a + ab * (vb * den) + ac * (vc * den)
+    }
+
+    // MARK: colour
+
+    /// Part triangles tinted per triangle (`partTint(face, centroid)`, nil = clay), and one
+    /// RGBA per column of each loaded region's map.
+    /// ★ X-RAY (maintainer, 2026-09-29: "more ghostly … with the bent plane showing the
+    /// dent"): with `ghost` set, every vertex that is not the opaque map is flagged
+    /// flags.z = 1 and drawn by MetalMeshView as a ghost — faint face-on, lit at the
+    /// silhouette — in its own tint, or in `ghost` where it had none.
+    /// ★ BATCH M (M5, his round-5 img 5: "The dent colours are not expanding out and graded. They are
+    /// a singular colour and have a direct cut between colours"): `vertexColour` colours each map
+    /// VERTEX (a quad corner) on its own — the GPU then blends it across the quad, so the heat runs
+    /// continuously from corner to corner (FlexiblePageChannels hands the corner's own value: the
+    /// same corner mean the dent moves it by, or the 3D sim's dent there). A column quad with no colour
+    /// (alpha 0: solid) stays uncoloured; nil ⇒ the column's own colour (a "no number" grey).
+    public func tints(partTint: (Int, SIMD3<Double>) -> SIMD4<Float>?,
+                      columnColours: [FlexFaceKey: [SIMD4<Float>]],
+                      vertexColour: ((Int) -> SIMD4<Float>?)? = nil,
+                      ghost: SIMD4<Float>? = nil) -> [Float] {
+        let n = mesh.flat.vertexCount
+        var out = [Float](repeating: 0, count: n * 8)
+        for t in 0..<keptFace.count {
+            // ★ R7-E1 REVIEW: an edge fill's band wears the colour of the square over it (clay where the square is clay)
+            if let b = bandColumn[t] {
+                guard let cols = columnColours[b.key], b.column < cols.count, cols[b.column].w > 0 else { continue }
+                let c = cols[b.column]
+                for j in 0..<3 {
+                    let v = t * 3 + j
+                    out[v * 8] = c.x; out[v * 8 + 1] = c.y; out[v * 8 + 2] = c.z; out[v * 8 + 3] = c.w
+                    out[v * 8 + 5] = 1
+                }
+                continue
+            }
+            guard let c = partTint(keptFace[t], keptCentroid[t]) else { continue }
+            for j in 0..<3 {
+                let v = t * 3 + j
+                out[v * 8] = c.x; out[v * 8 + 1] = c.y; out[v * 8 + 2] = c.z; out[v * 8 + 3] = c.w
+            }
+        }
+        for (k, start) in flatStart {
+            guard let cols = columnColours[k] else { continue }
+            for (c, col) in cols.enumerated() {
+                for j in 0..<6 {
+                    let v = start + c * 6 + j
+                    guard v < n else { break }
+                    let col = col.w > 0 ? (vertexColour?(v) ?? col) : col
+                    out[v * 8] = col.x; out[v * 8 + 1] = col.y; out[v * 8 + 2] = col.z; out[v * 8 + 3] = col.w
+                    // flags.y: the map stays fully opaque when the body is drawn see-through
+                    if col.w > 0 { out[v * 8 + 5] = 1 }
+                }
+            }
+        }
+        if let g = ghost { Self.markGhost(&out, colour: g) }
+        return out
+    }
+
+    /// flags.z = 1 on every vertex that is not flagged opaque (flags.y); clay takes `colour`.
+    public static func markGhost(_ out: inout [Float], colour g: SIMD4<Float>) {
+        for v in 0..<(out.count / 8) where out[v * 8 + 5] < 0.5 {
+            out[v * 8 + 6] = 1
+            if out[v * 8 + 3] <= 0 {
+                out[v * 8] = g.x; out[v * 8 + 1] = g.y; out[v * 8 + 2] = g.z; out[v * 8 + 3] = g.w
+            }
+        }
+    }
+
+    // MARK: the dent (02 §6)
+
+    /// Per-flat-vertex displacement (mm, before the renderer's exaggeration).
+    /// `depth[k]` per column (nil / ≤ 0 ⇒ that column does not move); `partUVT` is
+    /// core's to_uv + t for every part flat vertex, per face.
+    /// `joinRegions` (default on; off only as a test's red control): a quad corner that two
+    /// loaded regions share — the two sectors of a split face — takes the mean over BOTH
+    /// regions' columns, so their maps meet along the cut instead of stepping apart.
+    /// ★ ROUND 7 (M2): `still(key, t)` — part triangle `t` (a drawn part triangle) does not ride `key`'s ramp: the SOLID
+    /// rest of a face only partly latticed (his img3 words: "It must only be the lattice section"). nil: every part
+    /// triangle rides it, as before.
+    /// ★ U21 (BEND-TOP, his note of 2026-10-21, Img1: "The bend view still does not bend the top and bottom layers"): `perVertex`
+    /// (the Squish page's column preview only; the main page keeps false) — every drawn part vertex takes its depth from the SAME
+    /// quad-corner means the pressed face's squares move by (`cornerGrid`, bilinear in u / v over the face grid, its far-edge row
+    /// included) times the ramp, so a skin's edge lands on the side's outer squares and fades to 0 across the lattice. Before:
+    /// each sub-vertex was the blend of its kept triangle's corner ramps (it missed the dent between corners), and `rampValue`
+    /// gave nothing at all on the face grid's far v edge (its last row has no column: his pad's Face 5 is 20 mm, 20 rows of
+    /// 1.04 mm, the last row's centres off the face), so the Top's edge along Face 5 stayed straight.
+    public func displacements(depths: [FlexFaceKey: [Double?]], stacks: [FlexFaceKey: FlexStackInfo],
+                              partUVT: [FlexFaceKey: [Double]], joinRegions: Bool = true,
+                              still: ((FlexFaceKey, Int) -> Bool)? = nil, perVertex: Bool = false) -> [Float] {
+        let n = mesh.flat.vertexCount
+        var out = [Float](repeating: 0, count: n * 3)
+        let shared = joinRegions ? SharedCorners(self, depths: depths, stacks: stacks) : nil
+        let perVertex = perVertex && !Self.controlCornerBlend
+        for (k, d) in depths {
+            guard let st = stacks[k] else { continue }
+            let l = st.load
+            if perVertex, let uvt = partUVT[k], st.pitchMM > 0 {
+                // the squares first (unchanged), then every part vertex from the squares' own corners
+                if let start = flatStart[k] {
+                    for (c, cs) in quadCorners(k, d, st, shared: shared) {
+                        for j in 0..<6 {
+                            let v = start + c * 6 + j, dd = cs[Self.quadOrder[j]] ?? 0
+                            guard v < n, dd > 0 else { continue }
+                            out[v * 3] += Float(l.x * dd); out[v * 3 + 1] += Float(l.y * dd); out[v * 3 + 2] += Float(l.z * dd)
+                        }
+                    }
+                }
+                let grid = cornerGrid(k, d, st, shared: shared)
+                for v in 0..<partFlatVertices {
+                    if let still, still(k, v / 3) { continue }
+                    let (src, wv) = sourceWeights(v)
+                    guard 3 * (3 * src + 2) + 2 < uvt.count else { continue }
+                    var u = 0.0, w = 0.0, t = 0.0
+                    for j in 0..<3 where wv[j] != 0 {
+                        let b = 3 * (3 * src + j)
+                        u += wv[j] * uvt[b]; w += wv[j] * uvt[b + 1]; t += wv[j] * uvt[b + 2]
+                    }
+                    guard let x = grid.dent(u: u, w: w, t: t), x != 0 else { continue }
+                    out[v * 3] += Float(l.x * x); out[v * 3 + 1] += Float(l.y * x); out[v * 3 + 2] += Float(l.z * x)
+                }
+                continue
+            }
+            // the column quads: the full depth, each CORNER the mean of the columns that
+            // share it, so neighbouring quads stay joined and the dented surface is closed
+            if let start = flatStart[k] {
+                for (c, cs) in quadCorners(k, d, st, shared: shared) {
+                    for j in 0..<6 {
+                        let v = start + c * 6 + j, dd = cs[Self.quadOrder[j]] ?? 0
+                        guard v < n, dd > 0 else { continue }
+                        out[v * 3] += Float(l.x * dd); out[v * 3 + 1] += Float(l.y * dd); out[v * 3 + 2] += Float(l.z * dd)
+                    }
+                }
+            }
+            // the part: the linear ramp from the face (full) to the far end (none)
+            guard let uvt = partUVT[k], st.pitchMM > 0 else { continue }
+            /// The dent (mm along the load) at the point with barycentric weights `wv` in source
+            /// triangle `src / 3` — nil where this face's stack does not move it.
+            func ramp(src: Int, _ wv: SIMD3<Double>) -> (dd: Double, r: Double)? {
+                guard 3 * (src + 2) + 2 < uvt.count else { return nil }
+                var u = 0.0, w = 0.0, t = 0.0
+                for j in 0..<3 where wv[j] != 0 {
+                    u += wv[j] * uvt[3 * (src + j)]; w += wv[j] * uvt[3 * (src + j) + 1]; t += wv[j] * uvt[3 * (src + j) + 2]
+                }
+                return Self.rampValue(u: u, w: w, t: t, d: d, st: st)
+            }
+            if let s = subdivision {
+                // ★ each drawn vertex: the linear blend of its KEPT triangle's corner dents — the
+                // geometry is the unsubdivided one's exactly; only the colour is finer
+                var corner = [Double](repeating: 0, count: s.cornerWeights.count)
+                for i in s.source.indices {
+                    for j in 0..<3 { corner[3 * i + j] = ramp(src: s.source[i] * 3, s.cornerWeights[3 * i + j]).map { $0.dd * $0.r } ?? 0 }
+                }
+                for v in 0..<Swift.min(partFlatVertices, s.bary.count) {
+                    if let still, still(k, v / 3) { continue }
+                    let i = s.subOf[v / 3], b = s.bary[v]
+                    let x = b.x * corner[3 * i] + b.y * corner[3 * i + 1] + b.z * corner[3 * i + 2]
+                    guard x != 0 else { continue }
+                    out[v * 3] += Float(l.x * x); out[v * 3 + 1] += Float(l.y * x); out[v * 3 + 2] += Float(l.z * x)
+                }
+                continue
+            }
+            for v in 0..<partFlatVertices {
+                if let still, still(k, v / 3) { continue }
+                // ★ its source triangle's corners in the ORIGINAL part's flat buffer (the uvt
+                // order), weighted by where this vertex sits in it (a clipped piece's corner
+                // lies inside its source; an uncut triangle's weights are the identity)
+                guard v < keptWeights.count, let x = ramp(src: keptTriangles[v / 3] * 3, keptWeights[v]) else { continue }
+                let dd = x.dd, r = x.r
+                out[v * 3] += Float(l.x * dd * r); out[v * 3 + 1] += Float(l.y * dd * r); out[v * 3 + 2] += Float(l.z * dd * r)
+            }
+        }
+        return out
+    }
+
+    /// The dent's ramp at (u, w, t) in stack `st`'s frame: its column's depth and the share of it here (the face full, the far end
+    /// none) — nil where the stack does not move the point.
+    static func rampValue(u: Double, w: Double, t: Double, d: [Double?], st: FlexStackInfo) -> (dd: Double, r: Double)? {
+        guard st.nu > 0, st.nv > 0, st.pitchMM > 0 else { return nil }
+        let iu = Int((u / st.pitchMM).rounded(.down)), iv = Int((w / st.pitchMM).rounded(.down))
+        let iuC = min(max(iu, 0), st.nu - 1), ivC = min(max(iv, 0), st.nv - 1)
+        // a vertex on the face's own edge sits half a pitch outside the last column
+        guard abs(iu - iuC) <= 1, abs(iv - ivC) <= 1 else { return nil }
+        let col = st.cell[ivC * st.nu + iuC]
+        guard col >= 0, col < d.count, let dd = d[col], dd > 0 else { return nil }
+        let c = st.columns[col]
+        let span = c.exitT - c.entryT
+        guard span > 1e-6, t >= c.entryT - 0.5 * st.pitchMM, t <= c.exitT + 0.5 * st.pitchMM else { return nil }
+        return (dd, max(0, min(1, (c.exitT - t) / span)))
+    }
+
+    // MARK: ★ U21 (BEND-TOP, LBR-EDGES) — the squares' own corners, anywhere over the face
+
+    /// ★ RED CONTROL only (BEND-TOP): today's rule on the Squish page — each sub-vertex the blend of its kept triangle's corner
+    /// ramps, those through `rampValue` (no `perVertex`).
+    nonisolated(unsafe) public static var controlCornerBlend = false
+    /// ★ RED CONTROL only (BEND-TOP's second control): the per-vertex rule with ONLY rampValue's far-edge gate put back — a
+    /// vertex whose nearest grid cell has no column takes no dent.
+    nonisolated(unsafe) public static var controlFarEdgeGate = false
+
+    /// Drawn part flat vertex `v`: its SOURCE triangle in the part and its barycentric weights there.
+    func sourceWeights(_ v: Int) -> (Int, SIMD3<Double>) {
+        if let s = subdivision, v / 3 < s.subOf.count, v < s.bary.count {
+            let i = s.subOf[v / 3], b = s.bary[v]
+            return (s.source[i], b.x * s.cornerWeights[3 * i] + b.y * s.cornerWeights[3 * i + 1] + b.z * s.cornerWeights[3 * i + 2])
+        }
+        guard v / 3 < keptTriangles.count, v < keptWeights.count else { return (-1, .zero) }
+        return (keptTriangles[v / 3], keptWeights[v])
+    }
+
+    /// One pressed face's dent as its squares carry it: every quad corner (cu, cv) of the column grid with the value the
+    /// renderer moves it by (`quadCorners` — the column means, across a split face's cut too).
+    public struct CornerGrid {
+        public let stack: FlexStackInfo
+        let values: [SIMD2<Int32>: Double]
+        /// The corners' extent (mm on the face grid): the first and last corner that has a value, along u and along w.
+        public var extent: (u: ClosedRange<Double>, w: ClosedRange<Double>)? {
+            guard let a = values.keys.map(\.x).min(), let b = values.keys.map(\.x).max(),
+                  let c = values.keys.map(\.y).min(), let d = values.keys.map(\.y).max() else { return nil }
+            let p = stack.pitchMM
+            return (Double(a) * p...Double(b) * p, Double(c) * p...Double(d) * p)
+        }
+
+        /// The bilinear blend of the four corners around (u, w) (mm on the face grid), over those that have a value (a missing
+        /// one — past the grid, or around no column — drops out and the others are renormalised): the face's bend there,
+        /// before the ramp. nil where none of the four has a value (more than a pitch off the squares).
+        public func bend(u: Double, w: Double) -> Double? {
+            let p = stack.pitchMM
+            guard p > 0 else { return nil }
+            let fu = u / p, fw = w / p
+            let cu = Int32(fu.rounded(.down)), cv = Int32(fw.rounded(.down))
+            let a = fu - Double(cu), b = fw - Double(cv)
+            var sum = 0.0, wsum = 0.0
+            for (du, dv, wt) in [(Int32(0), Int32(0), (1 - a) * (1 - b)), (1, 0, a * (1 - b)), (1, 1, a * b), (0, 1, (1 - a) * b)] {
+                guard let x = values[SIMD2(cu + du, cv + dv)] else { continue }
+                let ww = Swift.max(wt, 1e-12)
+                sum += ww * x; wsum += ww
+            }
+            return wsum > 0 ? sum / wsum : nil
+        }
+
+        /// The column whose entry / exit the ramp at (u, w) reads: the grid cell's own, else the nearest one (ring search).
+        func column(u: Double, w: Double) -> FlexColumn? {
+            let st = stack
+            guard st.nu > 0, st.nv > 0, st.pitchMM > 0 else { return nil }
+            let iu = Swift.min(st.nu - 1, Swift.max(0, Int((u / st.pitchMM).rounded(.down))))
+            let iv = Swift.min(st.nv - 1, Swift.max(0, Int((w / st.pitchMM).rounded(.down))))
+            for r in 0..<Swift.max(st.nu, st.nv) {
+                var best: (Int, Int)?
+                for dv in -r...r { for du in -r...r where abs(du) == r || abs(dv) == r {
+                    let c = st.column(iu + du, iv + dv)
+                    if c >= 0, best == nil || du * du + dv * dv < best!.1 { best = (c, du * du + dv * dv) }
+                } }
+                if let b = best { return st.columns[b.0] }
+            }
+            return nil
+        }
+
+        /// The dent (mm along the load) of a part point at (u, w, t): the face's bend there × the ramp (the face full, the far
+        /// end none). nil where the squares do not reach or the point is not within the stack along the load.
+        public func dent(u: Double, w: Double, t: Double) -> Double? {
+            let st = stack
+            if FlexibleOverlayMesh.controlFarEdgeGate {
+                let iu = Int((u / st.pitchMM).rounded(.down)), iv = Int((w / st.pitchMM).rounded(.down))
+                let iuC = Swift.min(Swift.max(iu, 0), st.nu - 1), ivC = Swift.min(Swift.max(iv, 0), st.nv - 1)
+                guard abs(iu - iuC) <= 1, abs(iv - ivC) <= 1, st.cell[ivC * st.nu + iuC] >= 0 else { return nil }
+            }
+            guard let b = bend(u: u, w: w), b > 0, let c = column(u: u, w: w) else { return nil }
+            let span = c.exitT - c.entryT
+            guard span > 1e-6, t >= c.entryT - 0.5 * st.pitchMM, t <= c.exitT + 0.5 * st.pitchMM else { return nil }
+            return b * Swift.max(0, Swift.min(1, (c.exitT - t) / span))
+        }
+    }
+
+    /// Face `k`'s squares' corners as a grid (`depths` per column, the page's own; `shared` across a split face's cut).
+    func cornerGrid(_ k: FlexFaceKey, _ d: [Double?], _ st: FlexStackInfo, shared: SharedCorners?) -> CornerGrid {
+        var values: [SIMD2<Int32>: Double] = [:]
+        for (c, cs) in quadCorners(k, d, st, shared: shared) {
+            let col = st.columns[c]
+            let at = [SIMD2<Int32>(Int32(col.iu), Int32(col.iv)), SIMD2(Int32(col.iu + 1), Int32(col.iv)),
+                      SIMD2(Int32(col.iu + 1), Int32(col.iv + 1)), SIMD2(Int32(col.iu), Int32(col.iv + 1))]
+            for i in 0..<4 { if let x = cs[i] { values[at[i]] = x } }
+        }
+        return CornerGrid(stack: st, values: values)
+    }
+
+    /// Every dented face's corner grid (the page's depths), for posing what is drawn ON a pressed face (LBR-EDGES).
+    public func cornerGrids(depths: [FlexFaceKey: [Double?]], stacks: [FlexFaceKey: FlexStackInfo], joinRegions: Bool = true) -> [FlexFaceKey: CornerGrid] {
+        let shared = joinRegions ? SharedCorners(self, depths: depths, stacks: stacks) : nil
+        var out: [FlexFaceKey: CornerGrid] = [:]
+        for (k, d) in depths { if let st = stacks[k] { out[k] = cornerGrid(k, d, st, shared: shared) } }
+        return out
+    }
+
+    /// ★ X20b (his answer of 2026-10-20 ~16:05: a face pressed by ANOTHER group lying over the squished lattice BENDS ALONG too —
+    /// any surface over the squished lattice moves with it, whichever group; supersedes round 5's "another group's face stands
+    /// still" for this case): the column quads of `riders` (faces NOT dented by `depths`) ride each dented face's ramp where they lie
+    /// over its stack — a quad vertex placed in the stack's frame from its own point (`origins[k]`: core's from_uv(0, 0) of `k`; the
+    /// frame's X, Y and load). Added to `out`.
+    public func addRiders(_ out: inout [Float], depths: [FlexFaceKey: [Double?]], stacks: [FlexFaceKey: FlexStackInfo],
+                          origins: [FlexFaceKey: SIMD3<Double>], riders: [FlexFaceKey]) {
+        let n = mesh.flat.vertexCount
+        let pos = mesh.flat.positions
+        for (k, d) in depths {
+            guard let st = stacks[k], let o = origins[k] else { continue }
+            for r in riders where depths[r] == nil {
+                guard let start = flatStart[r], let rs = stacks[r] else { continue }
+                for v in start..<Swift.min(start + rs.columns.count * 6, n) {
+                    let p = SIMD3<Double>(Double(pos[3 * v]), Double(pos[3 * v + 1]), Double(pos[3 * v + 2])) - o
+                    guard let x = Self.rampValue(u: simd_dot(p, st.xAxis), w: simd_dot(p, st.yAxis), t: simd_dot(p, st.load), d: d, st: st)
+                    else { continue }
+                    let dd = x.dd * x.r
+                    out[v * 3] += Float(st.load.x * dd); out[v * 3 + 1] += Float(st.load.y * dd); out[v * 3 + 2] += Float(st.load.z * dd)
+                }
+            }
+        }
+    }
+
+    /// Corner i (build order: (iu, iv), (iu+1, iv), (iu+1, iv+1), (iu, iv+1)) of a column
+    /// quad is its flat vertex `flatOfCorner[i]` (the quad's flat order is [0, 2, 1, 0, 3, 2]).
+    static let flatOfCorner = [0, 2, 1, 4]
+    /// A quad's six flat vertices, as corners (build order).
+    static let quadOrder = [0, 2, 1, 0, 3, 2]
+
+    /// Face `k`'s column quads' four corner values (build order) from `d` (one value per column,
+    /// nil = none): each corner the MEAN of the columns that share it — and, across a split face's
+    /// cut, of the other loaded regions' columns at that very place (`shared`) — nil where none of
+    /// them has a value. Only for columns with a value of their own. The ONE rule for the dent's
+    /// corners and (★ batch M, M5) the heat's: the colour at a corner is the depth it moved by.
+    func quadCorners(_ k: FlexFaceKey, _ d: [Double?], _ st: FlexStackInfo, shared: SharedCorners?) -> [(Int, [Double?])] {
+        guard let start = flatStart[k] else { return [] }
+        func depth(_ iu: Int, _ iv: Int) -> Double? {
+            let c = st.column(iu, iv)
+            guard c >= 0, c < d.count else { return nil }
+            return d[c]
+        }
+        // `flat`: one flat vertex AT this corner (its place, for the other regions)
+        func corner(_ cu: Int, _ cv: Int, flat v: Int) -> Double? {
+            var sum = 0.0, n = 0
+            for (du, dv) in [(-1, -1), (0, -1), (-1, 0), (0, 0)] {
+                if let x = depth(cu + du, cv + dv) { sum += x; n += 1 }
+            }
+            // ★ ACROSS THE CUT: the other loaded regions' columns at this very corner
+            // (same place, same load) — the sectors of a split face stay joined
+            if let shared {
+                for x in shared.depths(at: v, load: st.load, except: k) { sum += x; n += 1 }
+            }
+            return n > 0 ? sum / Double(n) : nil
+        }
+        var out: [(Int, [Double?])] = []
+        for (c, col) in st.columns.enumerated() where c < d.count {
+            let q = start + c * 6
+            out.append((c, [corner(col.iu, col.iv, flat: q + Self.flatOfCorner[0]),
+                            corner(col.iu + 1, col.iv, flat: q + Self.flatOfCorner[1]),
+                            corner(col.iu + 1, col.iv + 1, flat: q + Self.flatOfCorner[2]),
+                            corner(col.iu, col.iv + 1, flat: q + Self.flatOfCorner[3])]))
+        }
+        return out
+    }
+
+    /// ★ BATCH M (M5): per flat vertex, the map's value AT THAT VERTEX (NaN where it has none): each
+    /// quad corner of a column that has a value takes the corner mean `quadCorners` gives — the very
+    /// number the dent moves that corner by — so the colour is continuous across every quad edge and
+    /// every sector cut, and graded inside each quad by the GPU (no block, no hard step). A column
+    /// with no value (a "no number", a solid one) keeps NaN on its six vertices.
+    public func mapCornerValues(_ values: [FlexFaceKey: [Double?]], stacks: [FlexFaceKey: FlexStackInfo],
+                                joinRegions: Bool = true) -> [Float] {
+        let n = mesh.flat.vertexCount
+        var out = [Float](repeating: .nan, count: n)
+        let shared = joinRegions ? SharedCorners(self, depths: values, stacks: stacks) : nil
+        for (k, d) in values {
+            guard let st = stacks[k], let start = flatStart[k] else { continue }
+            for (c, cs) in quadCorners(k, d, st, shared: shared) where d[c] != nil {
+                for j in 0..<6 {
+                    let v = start + c * 6 + j
+                    guard v < n, let x = cs[Self.quadOrder[j]] else { continue }
+                    out[v] = Float(x)
+                }
+            }
+        }
+        return out
+    }
+
+    /// Every loaded region's column-quad corners, by PLACE: what a corner of one region
+    /// finds of the others at the same point. Places are hashed on a 0.01 mm grid (and its
+    /// neighbours, so a point on a cell's boundary is not lost), matched within 0.005 mm;
+    /// only regions pressing along the SAME load join (a corner shared by two faces of an
+    /// edge moves along two directions, and averaging them would close nothing).
+    struct SharedCorners {
+        struct Entry { let key: FlexFaceKey; let load: SIMD3<Double>; let depth: Double; let p: SIMD3<Float> }
+        private var byCell: [SIMD3<Int32>: [Entry]] = [:]
+        private let positions: [Float]
+        static let cellMM: Float = 0.01
+
+        init(_ o: FlexibleOverlayMesh, depths: [FlexFaceKey: [Double?]], stacks: [FlexFaceKey: FlexStackInfo]) {
+            positions = o.mesh.flat.positions
+            guard depths.count > 1 else { return }   // one region: nothing to join
+            for (k, d) in depths {
+                guard let st = stacks[k], let start = o.flatStart[k] else { continue }
+                for c in st.columns.indices where c < d.count {
+                    guard let x = d[c] else { continue }
+                    for j in FlexibleOverlayMesh.flatOfCorner {
+                        let p = Self.place(positions, start + c * 6 + j)
+                        byCell[Self.cell(p), default: []].append(Entry(key: k, load: st.load, depth: x, p: p))
+                    }
+                }
+            }
+        }
+
+        static func place(_ pos: [Float], _ v: Int) -> SIMD3<Float> {
+            guard 3 * v + 2 < pos.count else { return SIMD3(repeating: .nan) }
+            return SIMD3(pos[3 * v], pos[3 * v + 1], pos[3 * v + 2])
+        }
+        static func cell(_ p: SIMD3<Float>) -> SIMD3<Int32> {
+            guard p.x.isFinite, p.y.isFinite, p.z.isFinite else { return SIMD3(repeating: Int32.min) }
+            return SIMD3<Int32>(p / cellMM, rounding: .toNearestOrEven)
+        }
+
+        /// The depths of the OTHER regions' columns whose quads have a corner at flat vertex
+        /// `v`'s place, pressing along `load`.
+        func depths(at v: Int, load: SIMD3<Double>, except k: FlexFaceKey) -> [Double] {
+            guard !byCell.isEmpty else { return [] }
+            let p = Self.place(positions, v)
+            let c = Self.cell(p)
+            guard c.x != Int32.min else { return [] }
+            var out: [Double] = []
+            for dz in -1...1 { for dy in -1...1 { for dx in -1...1 {
+                for e in byCell[c &+ SIMD3(Int32(dx), Int32(dy), Int32(dz))] ?? []
+                where e.key != k && simd_distance(e.p, p) <= 0.5 * Self.cellMM && simd_dot(e.load, load) > 0.999 {
+                    out.append(e.depth)
+                }
+            } } }
+            return out
+        }
+    }
+}
+
+/// Colours for the overlay: the depth ramp and the flags, all from DS tokens. Never purple.
+@MainActor
+public enum FlexibleColours {
+    public nonisolated static func depth(_ mm: Double, max: Double) -> SIMD4<Float> {
+        let c = depthColour(fraction: max > 0 ? mm / max : 0)
+        return SIMD4(Float(c.r), Float(c.g), Float(c.b), 0.95)
+    }
+    /// ★ BATCH M (M7, his round-5 img 6): "the FEA physics view and the dent view can't be viewed
+    /// together … we can use the same colours. Please switch the dent colours to the original FEA
+    /// legend colours" — "in BOTH views". The dent's ramp IS the FEA legend's rainbow
+    /// (ResultsModel.stressColor: blue → cyan → green → yellow → red, deeper = hotter), on the
+    /// Settings page and the main page, the map AND every legend that shows it; the main page's
+    /// Stress view reads the SAME ramp (`stressTint` — the two views are never on together, so one
+    /// rainbow serves both). It overturns his "deep blue → cyan → white" of 2026-09-30 and round 3's
+    /// "the dent ramp is its own" (FlexibleShownValuesTests pins the new rule). Never purple.
+    /// (The FEA legend's own five stops — `ResultsModel.stressColor`, a main-actor member, has them
+    /// too; this twin is callable from any context and FlexibleShownValuesTests holds the two equal
+    /// at 41 fractions.)
+    public nonisolated static let depthStops: [RGBA] = [
+        RGBA(28, 60, 170), RGBA(0, 170, 220), RGBA(60, 190, 110), RGBA(250, 220, 60), RGBA(255, 70, 50),
+    ]
+    public nonisolated static func depthColour(fraction f: Double) -> RGBA {
+        let x = min(1, max(0, f.isFinite ? f : 0)) * Double(depthStops.count - 1)
+        let i = min(depthStops.count - 2, Int(x)), t = x - Double(i)
+        return mix(depthStops[i], depthStops[i + 1], t)
+    }
+    /// The main page's Stress view on the part (and the walls): the SAME rainbow, opaque.
+    public nonisolated static func stressTint(fraction f: Double) -> SIMD4<Float> {
+        let c = depthColour(fraction: f)
+        return SIMD4(Float(c.r), Float(c.g), Float(c.b), 1)
+    }
+    /// a + (b − a)·t, per channel (two stops blended).
+    nonisolated static func mix(_ a: RGBA, _ b: RGBA, _ t: Double) -> RGBA {
+        RGBA((a.r + (b.r - a.r) * t) * 255, (a.g + (b.g - a.g) * t) * 255, (a.b + (b.b - a.b) * t) * 255)
+    }
+    public static func token(_ c: RGBA, _ a: Float) -> SIMD4<Float> {
+        SIMD4(Float(c.r), Float(c.g), Float(c.b), a)
+    }
+    /// A column core could not give a number for (past the data / solid).
+    public static let noNumber = token(DS.Color.textQuaternary, 0.9)
+    public static let refused = token(DS.Color.danger, 0.9)
+    public static let loadedFace = token(DS.Color.accentGreen, 0.35)
+    /// ★ Not the map's green (verification of round 3): the on-part colour, like the curves.
+    public static let selectedFace = token(DS.Color.textPrimary, 0.45)
+    public static let linkedEnd = token(DS.Color.accentCyan, 0.45)
+    public static let restingFace = token(DS.Color.accentCyan, 0.25)
+    /// The X-ray ghost's glow (the body's clay under X-ray).
+    /// ★ Neutral white, not cyan: the dent ramp is the FEA rainbow (batch M), and a saturated ghost
+    /// would read as part of the map.
+    public static let ghost = token(DS.Color.textPrimary, 1)
+}

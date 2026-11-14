@@ -3,10 +3,14 @@
 #include "topopt/grading.hpp"
 
 #include "topopt/lattice.hpp"
+#include "topopt/lattice_gen.hpp"  // lattice_gen_topology_names: the LIVE set
+#include "topopt/lattice_types.hpp"  // R4: the per-type cell-mode verdicts
 
 #include "topopt/cell_plan.hpp"  // cell_size_mode_from_name (the ONE mode vocabulary)
 #include "topopt/lattice_algorithm.hpp"  // the ONE algorithm vocabulary (§4)
+#include "topopt/flexible/job_block.hpp"  // the Flexible stage block
 
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstddef>
@@ -240,6 +244,61 @@ class JsonParser {
   throw JobError("job.json: " + msg);
 }
 
+// ── ★ ONE GATE FOR A TOPOLOGY ID (task 2026-09-28-lattice-types-core) ───────
+// Both `lattice.topology` and `grading.topology` came through a literal
+// `!= "octet"` test. That was correct while octet was the only type and it is the
+// wrong SHAPE for a round that adds eight: it conflates "I have never heard of this
+// id" with "I know this id and it is not ready", and it would have to be edited in
+// two places for every go-live.
+//
+// ★ AND "READY" IS BOTH SETS, NOT ONE (M6, reviewer 2026-09-30). DECISIONS
+// 2026-09-28 item 2: a type is offered only when core reports it both GENERATABLE and
+// CERTIFIABLE. An earlier draft of this gate asked only about the generatable set,
+// which would have refused FCC with the wrong reason -- FCC's tensor rows are landed,
+// so what it lacks is a generator, and a user told "not certifiable" would go looking
+// for the wrong thing. `lattice_type_readiness` asks both and names which is missing.
+//
+// Today no type is live, so this refuses exactly what the literal test refused: which
+// jobs core accepts is UNCHANGED. Only the message changes.
+void require_live_topology(const std::string& id, const char* where) {
+  const std::vector<std::string> gen = topopt::lattice_gen_topology_names();
+  const std::vector<std::string> cert = topopt::lattice_certifiable_topology_names();
+  const topopt::LatticeTypeReadiness r =
+      topopt::lattice_type_readiness(id, gen, cert);
+  if (r == topopt::LatticeTypeReadiness::Live) return;
+
+  std::string live;
+  for (const std::string& n : gen) {
+    bool both = false;
+    for (const std::string& c : cert) if (c == n) { both = true; break; }
+    if (both) live += (live.empty() ? "" : ", ") + ("\"" + n + "\"");
+  }
+  if (live.empty()) live = "(none)";
+
+  const std::string head = std::string(where) + " \"topology\": \"" + id + "\" ";
+  const std::string tail = " Types available now: " + live + ".";
+  switch (r) {
+    case topopt::LatticeTypeReadiness::UnknownId:
+      schema_fail(head + "is not a lattice topology core knows." + tail);
+    case topopt::LatticeTypeReadiness::NotGeneratable:
+      schema_fail(head +
+                  "is CERTIFIABLE -- its tensor rows are landed -- but core has no "
+                  "GENERATOR for it yet, so it cannot be built "
+                  "(docs/design/lattice-types, R1)." + tail);
+    case topopt::LatticeTypeReadiness::NotCertifiable:
+      schema_fail(head +
+                  "can be GENERATED but core has no validated cubic tensor rows for "
+                  "it, so it cannot be certified -- and every user-facing result is "
+                  "certified (M6)." + tail);
+    case topopt::LatticeTypeReadiness::NotEither:
+      schema_fail(head +
+                  "is a topology core knows but can neither generate nor certify "
+                  "yet." + tail);
+    case topopt::LatticeTypeReadiness::Live:
+      break;   // returned above
+  }
+}
+
 // A maintainer-comment key: ignored everywhere (the demo fixture's _comment /
 // _fixture_note / _gravity_note / _output_note).
 bool is_comment_key(const std::string& key) {
@@ -390,9 +449,98 @@ JobBox parse_box(const JsonValue& v, const std::string& name) {
   return b;
 }
 
+// An ORIENTED keep region (ruling 2026-10-26 23:48), keys as in parse_job. The frame
+// is stored right-handed and exactly orthonormal: a box's axes are checked to 1e-4
+// and then re-orthonormalized (a box is symmetric, so flipping the third axis to make
+// the frame right-handed is the same region); a cylinder's frame is built about its
+// unit axis. min/max become the bounding box.
+KeepRegion parse_oriented_keep_region(const JsonValue& kv, bool cylinder) {
+  const std::string where = cylinder ? "an oriented cylinder keep region"
+                                     : "an oriented box keep region";
+  auto dot3 = [](const Vec3& a, const Vec3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; };
+  auto unit = [&](const Vec3& a) {
+    const double n = std::sqrt(dot3(a, a));
+    return Vec3{a.x / n, a.y / n, a.z / n};
+  };
+  auto cross3 = [](const Vec3& a, const Vec3& b) {
+    return Vec3{a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+  };
+  KeepRegion k;
+  k.cylinder = cylinder;
+  k.oriented = true;
+  if (cylinder) {
+    reject_unknown_keys(kv, {"shape", "axis_point", "axis_dir", "radius_mm", "half_length_mm"},
+                        where);
+    k.center = parse_vec3(require_key(kv, "axis_point", where), "keep region axis_point");
+    const Vec3 d = parse_vec3(require_key(kv, "axis_dir", where), "keep region axis_dir");
+    if (!(std::sqrt(dot3(d, d)) > 1e-9))
+      schema_fail("a keep region \"axis_dir\" must not be zero");
+    const double r = require_number(require_key(kv, "radius_mm", where), "keep region radius_mm");
+    const double hl =
+        require_number(require_key(kv, "half_length_mm", where), "keep region half_length_mm");
+    if (!(r > 0.0) || !(hl > 0.0))
+      schema_fail("a keep region \"radius_mm\" and \"half_length_mm\" must be > 0");
+    const Vec3 w = unit(d);
+    const Vec3 e = std::fabs(w.x) < 0.9 ? Vec3{1.0, 0.0, 0.0} : Vec3{0.0, 1.0, 0.0};
+    const double ew = dot3(e, w);
+    const Vec3 u = unit(Vec3{e.x - ew * w.x, e.y - ew * w.y, e.z - ew * w.z});
+    k.axes[0] = u;
+    k.axes[1] = cross3(w, u);
+    k.axes[2] = w;
+    k.half = Vec3{r, r, hl};
+  } else {
+    reject_unknown_keys(kv, {"shape", "center", "axes", "half_extents_mm"}, where);
+    k.center = parse_vec3(require_key(kv, "center", where), "keep region center");
+    const JsonValue& av = require_key(kv, "axes", where);
+    if (av.type != JsonValue::Type::Array || av.arr.size() != 3)
+      schema_fail("a keep region \"axes\" must be an array of 3 vectors");
+    Vec3 a[3];
+    for (int i = 0; i < 3; ++i)
+      a[i] = parse_vec3(av.arr[static_cast<std::size_t>(i)], "keep region axes");
+    constexpr double kTol = 1e-4;
+    for (int i = 0; i < 3; ++i) {
+      if (std::fabs(std::sqrt(dot3(a[i], a[i])) - 1.0) > kTol)
+        schema_fail("a keep region's \"axes\" must be unit vectors");
+      for (int j = i + 1; j < 3; ++j)
+        if (std::fabs(dot3(a[i], a[j])) > kTol)
+          schema_fail("a keep region's \"axes\" must be at right angles to each other");
+    }
+    const Vec3 u = unit(a[0]);
+    const double vu = dot3(a[1], u);
+    const Vec3 v = unit(Vec3{a[1].x - vu * u.x, a[1].y - vu * u.y, a[1].z - vu * u.z});
+    k.axes[0] = u;
+    k.axes[1] = v;
+    k.axes[2] = cross3(u, v);
+    k.half = parse_vec3(require_key(kv, "half_extents_mm", where), "keep region half_extents_mm");
+    if (!(k.half.x > 0.0 && k.half.y > 0.0 && k.half.z > 0.0))
+      schema_fail("a keep region's \"half_extents_mm\" must all be > 0");
+  }
+  const double c[3] = {k.center.x, k.center.y, k.center.z};
+  double ext[3];
+  for (int i = 0; i < 3; ++i) {
+    auto comp = [i](const Vec3& p) { return i == 0 ? p.x : i == 1 ? p.y : p.z; };
+    if (cylinder) {
+      const double wi = comp(k.axes[2]);
+      ext[i] = std::fabs(wi) * k.half.z + k.half.x * std::sqrt(std::max(0.0, 1.0 - wi * wi));
+    } else {
+      ext[i] = std::fabs(comp(k.axes[0])) * k.half.x + std::fabs(comp(k.axes[1])) * k.half.y +
+               std::fabs(comp(k.axes[2])) * k.half.z;
+    }
+  }
+  k.min = Vec3{c[0] - ext[0], c[1] - ext[1], c[2] - ext[2]};
+  k.max = Vec3{c[0] + ext[0], c[1] + ext[1], c[2] + ext[2]};
+  return k;
+}
+
 }  // namespace
 
 JobDescription parse_job(const std::string& json_text) {
+  // ★ TWO KEYS, ONE TYPE (reviewer, 2026-09-30). `lattice.topology` and
+  // `grading.topology` describe the same physical lattice, and the blocks are parsed
+  // far apart, so statedness is recorded here and reconciled once below -- after both
+  // blocks, because either may be absent.
+  bool lattice_topology_stated = false;
+  bool grading_topology_stated = false;
   JsonParser parser(json_text);
   const JsonValue root = parser.parse();
   if (root.type != JsonValue::Type::Object)
@@ -403,9 +551,10 @@ JobDescription parse_job(const std::string& json_text) {
                        "resolution", "fixture_faces", "gravity", "ladder",
                        "margin_stop", "simp", "draft", "warm_start", "output",
                        "lattice", "grading", "loads", "design_box", "keep_outs",
+                       "keep_regions",
                        "build_direction", "build_orientation_report",
                        "bake_build_orientation", "variant", "semdot",
-                       "plsm"},
+                       "plsm", "flexible", "orientation_recheck"},
                       "the job");
 
   JobDescription job;
@@ -451,6 +600,23 @@ JobDescription parse_job(const std::string& json_text) {
       schema_fail("\"build_direction\" must be non-zero");
     job.has_build_direction = true;
   }
+  // E1 (f) — "Print it this way": an analyze job re-checks a version's exported file
+  // printed along a new build direction. {"mesh": "<the version's file, beside the
+  // job>", "build_dir": [x, y, z]}; analyze mode only.
+  if (const JsonValue* orc = find_key(root, "orientation_recheck")) {
+    require_object(*orc, "\"orientation_recheck\"");
+    reject_unknown_keys(*orc, {"mesh", "build_dir"}, "\"orientation_recheck\"");
+    job.orientation_recheck_mesh = require_nonempty_string(
+        require_key(*orc, "mesh", "\"orientation_recheck\""), "orientation_recheck mesh");
+    const Vec3 d = parse_vec3(require_key(*orc, "build_dir", "\"orientation_recheck\""),
+                              "orientation_recheck build_dir");
+    const double n = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+    if (!(n > 0.0)) schema_fail("\"orientation_recheck\" build_dir must be non-zero");
+    job.orientation_recheck_dir = Vec3{d.x / n, d.y / n, d.z / n};
+    job.has_orientation_recheck = true;
+    if (job.mode != "analyze")
+      schema_fail("\"orientation_recheck\" is for an analyze job (mode \"analyze\")");
+  }
   if (const JsonValue* br = find_key(root, "build_orientation_report")) {
     if (br->type != JsonValue::Type::Bool)
       schema_fail("\"build_orientation_report\" must be a boolean");
@@ -487,7 +653,10 @@ JobDescription parse_job(const std::string& json_text) {
         lv, {"anchors", "anchor_face_ids", "face_regions", "anchor_region_ids",
              "groups", "clearances",
              "face_protections", "face_protection_depth_mm", "build_dir",
-             "infill_percent", "minimize_plastic", "wall_loops", "layer_height_mm",
+             "infill_percent", "minimize_plastic", "redesign", "anchor_model", "scenarios",
+             "safety_margin",
+             "wall_loops",
+             "layer_height_mm",
              "wall_line_width_mm", "wall_line_width_outer_mm"},
         "loads");
     job.loads.present = true;
@@ -612,10 +781,12 @@ JobDescription parse_job(const std::string& json_text) {
       job.loads.anchor_face_ids = parse_int_array(*aid, "anchor_face_ids");
     // groups: optional (empty => self-weight fallback). Each group's faces are
     // {"faces":[selectors]} OR {"face_ids":[ids]}, plus a "force":[fx,fy,fz].
-    if (const JsonValue* gs = find_key(lv, "groups")) {
-      if (gs->type != JsonValue::Type::Array)
-        schema_fail("\"loads.groups\" must be an array");
-      for (const JsonValue& gv : gs->arr) {
+    // One "groups" array (loads.groups, or a LOAD SCENARIO's own) into `into`.
+    auto parse_groups = [&](const JsonValue& gs, const char* what,
+                            std::vector<JobLoadGroup>& into) {
+      if (gs.type != JsonValue::Type::Array)
+        schema_fail(std::string("\"") + what + "\" must be an array");
+      for (const JsonValue& gv : gs.arr) {
         require_object(gv, "a loads group");
         reject_unknown_keys(gv, {"faces", "face_ids", "region_ids", "force"},
                             "a loads group");
@@ -634,7 +805,66 @@ JobDescription parse_job(const std::string& json_text) {
               "\"region_ids\"");
         grp.force = parse_vec3(require_key(gv, "force", "a loads group"),
                                "a loads group force");
-        job.loads.groups.push_back(std::move(grp));
+        into.push_back(std::move(grp));
+      }
+    };
+    if (const JsonValue* gs = find_key(lv, "groups"))
+      parse_groups(*gs, "loads.groups", job.loads.groups);
+    // LOAD SCENARIOS (the reviewer's overnight ruling of 2026-10-26 03:45; the shared
+    // key): [{"name", "groups": [as loads.groups], "anchor_face_ids": [its ON
+    // anchors]}], sent only with two or more (then loads.groups / anchor_face_ids
+    // mirror scenario 1 for older readers). One scenario is today's job: ignored.
+    // A scenario may also name its ON REGION anchors, "anchor_region_ids": [ids into
+    // loads.face_regions] (a cut piece as an anchor; UI-Notes 2026-11-03, the
+    // reviewer's routing 04:16); with it, "anchor_face_ids" may be left out.
+    if (const JsonValue* ss = find_key(lv, "scenarios")) {
+      if (ss->type != JsonValue::Type::Array)
+        schema_fail("\"loads.scenarios\" must be an array");
+      std::vector<JobScenario> scenarios;
+      for (const JsonValue& sv : ss->arr) {
+        require_object(sv, "a load scenario");
+        reject_unknown_keys(sv, {"name", "groups", "anchor_face_ids", "anchor_region_ids"},
+                            "a load scenario");
+        JobScenario sc;
+        sc.name = require_nonempty_string(require_key(sv, "name", "a load scenario"),
+                                          "a load scenario's name");
+        // His words, read verbatim in the failure sheet (the integrator's wording of
+        // 2026-10-26): plain lines, the scenario named in curly quotes.
+        const std::string named = "Scenario \u201C" + sc.name + "\u201D";
+        parse_groups(require_key(sv, "groups", "a load scenario"), "a scenario's groups",
+                     sc.groups);
+        if (sc.groups.empty()) schema_fail(named + " has no load");
+        // Either list may be empty (that kind of anchor is OFF in it); not both.
+        auto ids_or_none = [](const JsonValue& v, const char* what) {
+          return v.type == JsonValue::Type::Array && v.arr.empty() ? std::vector<int>{}
+                                                                    : parse_int_array(v, what);
+        };
+        const JsonValue* rv = find_key(sv, "anchor_region_ids");
+        if (rv != nullptr) {
+          sc.anchor_region_ids = ids_or_none(*rv, "a load scenario's anchor_region_ids");
+          sc.has_anchor_region_ids = true;
+        }
+        const JsonValue* av = rv != nullptr ? find_key(sv, "anchor_face_ids")
+                                            : &require_key(sv, "anchor_face_ids", "a load scenario");
+        if (av != nullptr) sc.anchor_face_ids = ids_or_none(*av, "anchor_face_ids");
+        if (sc.anchor_face_ids.empty() && sc.anchor_region_ids.empty())
+          schema_fail(named + " has no anchor switched on");
+        scenarios.push_back(std::move(sc));
+      }
+      if (scenarios.size() >= 2) {
+        // The lightest scenario (his decision, 2026-10-28): under 3 % of the heaviest
+        // one's load it cannot shape the part, so it is refused with a plain line.
+        std::vector<std::pair<std::string, double>> sizes;
+        for (const JobScenario& sc : scenarios) {
+          double n = 0.0;
+          for (const JobLoadGroup& g : sc.groups)
+            n += std::sqrt(g.force.x * g.force.x + g.force.y * g.force.y +
+                           g.force.z * g.force.z);
+          sizes.push_back({sc.name, n});
+        }
+        const std::string light = scenario_too_light_reason(sizes);
+        if (!light.empty()) schema_fail(light);
+        job.loads.scenarios = std::move(scenarios);
       }
     }
     // clearances: optional "Keep clear" keep-out regions (handoff 100). Each is a
@@ -647,7 +877,7 @@ JobDescription parse_job(const std::string& json_text) {
       for (const JsonValue& cv : cs->arr) {
         require_object(cv, "a clearance");
         reject_unknown_keys(cv,
-                            {"face_id", "geometry", "kind",
+                            {"face_id", "geometry", "region_id", "kind",
                              "concentric_margin_mm", "axial_clearance_mm",
                              "slab_depth_mm"},
                             "a clearance");
@@ -662,12 +892,29 @@ JobDescription parse_job(const std::string& json_text) {
         // primitive supplies the axis/radius/normal/extent the auto path would
         // otherwise derive from the B-rep, so a hand-placed keep-out survives the
         // bridge and job schema intact.
+        // ★ E4 (j): OR a cut piece -- a "region_id" naming one of loads.face_regions,
+        // whose Keep clear is each member face's own, clipped by the piece's cuts.
         const JsonValue* fid_v = find_key(cv, "face_id");
         const JsonValue* geom_v = find_key(cv, "geometry");
-        if ((fid_v == nullptr) == (geom_v == nullptr))
+        const JsonValue* rid_v = find_key(cv, "region_id");
+        if ((fid_v != nullptr) + (geom_v != nullptr) + (rid_v != nullptr) != 1)
           schema_fail(
-              "a clearance must have exactly one of \"face_id\" or \"geometry\"");
-        if (fid_v != nullptr) {
+              "a clearance must have exactly one of \"face_id\", \"geometry\" or "
+              "\"region_id\"");
+        if (rid_v != nullptr) {
+          const double rid = require_number(*rid_v, "clearance region_id");
+          if (rid < 0.0 || rid != std::floor(rid))
+            schema_fail("a clearance \"region_id\" must be a non-negative integer");
+          cl.region_id = static_cast<int>(rid);
+          bool declared = false;
+          for (const FaceRegionSpec& fr : job.loads.face_regions)
+            if (fr.id == cl.region_id) declared = true;
+          if (!declared)
+            schema_fail(
+                "a Keep clear names a cut piece that is not one of this job's face "
+                "regions (\"loads.face_regions\"). A piece must be declared once and "
+                "referred to by its id.");
+        } else if (fid_v != nullptr) {
           const double fid = require_number(*fid_v, "clearance face_id");
           if (fid < 0.0 || fid != std::floor(fid))
             schema_fail("a clearance \"face_id\" must be a non-negative integer");
@@ -823,6 +1070,30 @@ JobDescription parse_job(const std::string& json_text) {
         schema_fail("\"loads.minimize_plastic\" must be a boolean");
       job.loads.minimize_plastic = (mp->num != 0.0);
     }
+    // CORE LIST item 50 — the only value is "strengthen" (validated with the box
+    // at the end of the parse). Absent => the growth ladder, byte for byte.
+    if (const JsonValue* rd = find_key(lv, "redesign")) {
+      job.loads.redesign = require_string(*rd, "loads.redesign");
+      if (job.loads.redesign != "strengthen")
+        schema_fail("\"loads.redesign\" must be \"strengthen\" (got \"" +
+                    job.loads.redesign + "\")");
+    }
+    // REAL BOLTS — how anchors hold: "glued" (clamped, the default) or "bearing"
+    // (compression-only, frictionless springs). Absent => glued, byte for byte.
+    if (const JsonValue* am = find_key(lv, "anchor_model")) {
+      job.loads.anchor_model = require_string(*am, "loads.anchor_model");
+      if (job.loads.anchor_model != "glued" && job.loads.anchor_model != "bearing")
+        schema_fail("\"loads.anchor_model\" must be \"glued\" or \"bearing\" (got \"" +
+                    job.loads.anchor_model + "\")");
+    }
+    // THE SAFETY MARGIN (his decision of 2026-10-26): a multiple of the load, 1.5 at the
+    // least. His words for a lower one, read verbatim.
+    if (const JsonValue* sm = find_key(lv, "safety_margin")) {
+      const double v = require_number(*sm, "loads.safety_margin");
+      if (!std::isfinite(v) || v < 1.5)
+        schema_fail("The safety margin can't be below 150% of the load");
+      job.loads.safety_margin = v;
+    }
     // Width-aware knockdown slicer metadata (handoff 2026-07-26-width-aware-knockdown).
     if (const JsonValue* wl = find_key(lv, "wall_loops")) {
       const double n = require_number(*wl, "loads.wall_loops");
@@ -889,6 +1160,56 @@ JobDescription parse_job(const std::string& json_text) {
     job.margin_stop = require_number(
         require_key(root, "margin_stop", "the job"), "margin_stop");
     if (job.margin_stop < 0.0) schema_fail("\"margin_stop\" must be >= 0");
+  }
+
+  // keep_regions (CORE LIST item KEEP): [{"shape": "box" | "cylinder", "min", "max",
+  // "axis" (cylinder only: 0 | 1 | 2)}]. A cylinder's cross-section must be square.
+  // Or ORIENTED (ruling 2026-10-26 23:48), in the clearances' vocabulary:
+  //   {"shape": "cylinder", "axis_point", "axis_dir", "radius_mm", "half_length_mm"}
+  //     (axis_point is the middle: axis_point + t*axis_dir, |t| <= half_length_mm);
+  //   {"shape": "box", "center", "axes": [3 orthonormal vectors], "half_extents_mm"}.
+  // A region is oriented when it carries any of those keys, and then only those.
+  if (const JsonValue* krs = find_key(root, "keep_regions")) {
+    if (krs->type != JsonValue::Type::Array)
+      schema_fail("\"keep_regions\" must be an array");
+    for (const JsonValue& kv : krs->arr) {
+      require_object(kv, "a keep region");
+      bool oriented = false;
+      for (const char* key : {"axis_point", "axis_dir", "radius_mm", "half_length_mm",
+                              "center", "axes", "half_extents_mm"})
+        oriented = oriented || find_key(kv, key) != nullptr;
+      if (!oriented) reject_unknown_keys(kv, {"shape", "min", "max", "axis"}, "a keep region");
+      KeepRegion k;
+      const std::string shape =
+          require_string(require_key(kv, "shape", "a keep region"), "keep region shape");
+      if (shape != "box" && shape != "cylinder")
+        schema_fail("a keep region \"shape\" must be \"box\" or \"cylinder\"");
+      k.cylinder = shape == "cylinder";
+      if (oriented) {
+        job.keep_regions.push_back(parse_oriented_keep_region(kv, k.cylinder));
+        continue;
+      }
+      k.min = parse_vec3(require_key(kv, "min", "a keep region"), "keep region min");
+      k.max = parse_vec3(require_key(kv, "max", "a keep region"), "keep region max");
+      if (!(k.max.x > k.min.x && k.max.y > k.min.y && k.max.z > k.min.z))
+        schema_fail("a keep region's \"max\" must exceed its \"min\" on every axis");
+      if (const JsonValue* av = find_key(kv, "axis")) {
+        if (!k.cylinder) schema_fail("a keep region \"axis\" is for a cylinder only");
+        const double a = require_number(*av, "keep region axis");
+        if (a != 0.0 && a != 1.0 && a != 2.0)
+          schema_fail("a keep region \"axis\" must be 0, 1 or 2");
+        k.axis = static_cast<int>(a);
+      } else if (k.cylinder) {
+        schema_fail("a cylinder keep region needs an \"axis\" (0, 1 or 2)");
+      }
+      if (k.cylinder) {
+        const double ext[3] = {k.max.x - k.min.x, k.max.y - k.min.y, k.max.z - k.min.z};
+        const double a = ext[(k.axis + 1) % 3], b = ext[(k.axis + 2) % 3];
+        if (std::fabs(a - b) > 1e-6 * std::max(a, b))
+          schema_fail("a cylinder keep region's cross-section must be square");
+      }
+      job.keep_regions.push_back(k);
+    }
   }
 
   // design_box + keep_outs: optional in BOTH modes (the "add material" feature).
@@ -1215,7 +1536,9 @@ JobDescription parse_job(const std::string& json_text) {
                         {"topology", "cell_mm", "strut_radius_mm", "emit_stl",
                          "emit_3mf", "skin", "min_extrudable_width_mm",
                          "outer_finish", "emit_welded_stl", "welded_pitch_mm", "emit_organic_spans",
+                         "emit_plan_laid",
                          "regions", "multiscale",
+                         "stepped_cells", "scenarios", "whole_part",
                          "forecast_only", "organic_probe_cells_mm", "organic_probe_grades_mm",
                          "organic_recommend", "organic_look_cells_across",
                          "organic_recommend_margin", "organic_recommend_steps",
@@ -1225,9 +1548,8 @@ JobDescription parse_job(const std::string& json_text) {
     job.lattice.present = true;
     if (const JsonValue* t = find_key(lat, "topology")) {
       job.lattice.topology = require_nonempty_string(*t, "lattice.topology");
-      if (job.lattice.topology != "octet")
-        schema_fail("lattice \"topology\" must be \"octet\" (got \"" +
-                    job.lattice.topology + "\")");
+      lattice_topology_stated = true;
+      require_live_topology(job.lattice.topology, "lattice");
     }
     // Uniform geometry (cell_mm + strut_radius_mm): REQUIRED without a "grading"
     // block, REJECTED with one — a graded run derives the cell from
@@ -1258,6 +1580,69 @@ JobDescription parse_job(const std::string& json_text) {
     // lattice, byte-identical. Each entry is {role, kind, geometry} with the
     // SAME manual-primitive geometry a manual clearance carries; a malformed
     // role/kind is REFUSED, never defaulted (H1e).
+    // ── ★ ANY-STEP STEPPED: the cells the app placed ───────────────────────────
+    // (maintainer, 2026-09-18: "Send the cell list to core".) The app sends the exact
+    // arrangement approved on screen and core lays down those cells; it runs no packer of
+    // its own. `region_id` is 1-based in the job's own include-region order and
+    // `origin_mm` is the cell's minimum corner in MODEL space, so the frame is derived
+    // from the region named -- there is no second array to keep in step with this one.
+    // What this stage refuses is malformed JSON and the wrong algorithm; what the RUN
+    // refuses is a cell that breaks the menu rule, named.
+    if (const JsonValue* sc = find_key(lat, "stepped_cells")) {
+      if (sc->type != JsonValue::Type::Array)
+        schema_fail("lattice \"stepped_cells\" must be an array");
+      job.lattice.stepped_cells.reserve(sc->arr.size());
+      for (const JsonValue& cv : sc->arr) {
+        require_object(cv, "a lattice.stepped_cells entry");
+        reject_unknown_keys(cv, {"region_id", "origin_mm", "size_mm", "rho"},
+                            "a lattice.stepped_cells entry");
+        SteppedCell c;
+        const double id = require_number(
+            require_key(cv, "region_id", "a lattice.stepped_cells entry"),
+            "lattice.stepped_cells region_id");
+        if (id < 1.0 || id != std::floor(id))
+          schema_fail(
+              "lattice.stepped_cells \"region_id\" must be a positive integer -- it is "
+              "1-based in the job's own include-region order");
+        c.region_id = static_cast<int>(id);
+        c.origin = parse_vec3(require_key(cv, "origin_mm", "a lattice.stepped_cells entry"),
+                              "lattice.stepped_cells origin_mm");
+        c.size_mm = require_number(
+            require_key(cv, "size_mm", "a lattice.stepped_cells entry"),
+            "lattice.stepped_cells size_mm");
+        if (!(c.size_mm > 0.0) || !std::isfinite(c.size_mm))
+          schema_fail("lattice.stepped_cells \"size_mm\" must be finite and > 0");
+        // ★ RULING C: the cell's own density, optional. Absent = core derives it.
+        if (const JsonValue* rv2 = find_key(cv, "rho")) {
+          c.rho = require_number(*rv2, "lattice.stepped_cells rho");
+          if (!(c.rho > 0.0) || !(c.rho <= 1.0) || !std::isfinite(c.rho))
+            schema_fail(
+                "lattice.stepped_cells \"rho\" must be finite and in (0, 1] -- it is a "
+                "RELATIVE density, the fraction of the cell that is material, not a "
+                "strut width");
+        }
+        job.lattice.stepped_cells.push_back(c);
+      }
+    }
+    // ★ E2.1: the scenarios this lattice is graded and certified on (job.hpp). The
+    // names are checked against loads.scenarios after both blocks have parsed.
+    if (const JsonValue* sv = find_key(lat, "scenarios")) {
+      if (sv->type != JsonValue::Type::Array)
+        schema_fail("\"lattice.scenarios\" must be an array of scenario names");
+      if (sv->arr.empty())
+        schema_fail(
+            "\"lattice.scenarios\" is empty: a lattice graded on no scenario has no "
+            "stress to follow and nothing to be certified against. Name at least one "
+            "of the job's load scenarios, or leave the key out to use all of them.");
+      for (const JsonValue& nv : sv->arr) {
+        const std::string name = require_nonempty_string(nv, "a lattice.scenarios name");
+        for (const std::string& seen : job.lattice.scenarios)
+          if (seen == name)
+            schema_fail("\"lattice.scenarios\" names \"" + name + "\" twice");
+        job.lattice.scenarios.push_back(name);
+      }
+      job.lattice.scenarios_stated = true;
+    }
     if (const JsonValue* regs = find_key(lat, "regions")) {
       if (regs->type != JsonValue::Type::Array)
         schema_fail("\"lattice.regions\" must be an array");
@@ -1266,9 +1651,105 @@ JobDescription parse_job(const std::string& json_text) {
         reject_unknown_keys(rv, {"role", "kind", "geometry", "face_id",
                                  "region_id", "relative_density",
                                  "synthetic_stress", "synthetic_foci",
-                                 "synthetic_soft_mm"},
+                                 "synthetic_soft_mm", "label", "rho_min", "rho_max",
+                                 "demand_exponent", "grading", "shape_grade",
+                                 "shape_grade_band_mm", "cell_min_mm", "cell_max_mm",
+                                 "shape_grade_strength", "outer_finish", "skin"},
                             "a lattice region");
         JobLatticeRegion reg;
+        // ★ E2.6 + E3: the region's name and its own grading (job.hpp). The band is
+        // checked against the TYPE's certifiable band once the type is resolved.
+        if (const JsonValue* lv2 = find_key(rv, "label"))
+          reg.label = require_nonempty_string(*lv2, "a lattice region label");
+        const std::string named =
+            reg.label.empty() ? "lattice region " + std::to_string(job.lattice.regions.size() + 1)
+                              : "lattice region \"" + reg.label + "\"";
+        auto own_grading = [&](const char* key) -> const JsonValue* {
+          const JsonValue* v = find_key(rv, key);
+          if (v != nullptr && find_key(rv, "role") != nullptr &&
+              find_key(rv, "role")->type == JsonValue::Type::String &&
+              find_key(rv, "role")->str != "include")
+            schema_fail(named + ": \"" + key + "\" is an include region's own grading; "
+                        "an exclude region is kept SOLID and has no lattice to grade");
+          return v;
+        };
+        {
+          const JsonValue* lo = own_grading("rho_min");
+          const JsonValue* hi = own_grading("rho_max");
+          if ((lo != nullptr) != (hi != nullptr))
+            schema_fail(named + ": \"rho_min\" and \"rho_max\" are the region's density "
+                        "band and come together");
+          if (lo && hi) {
+            reg.rho_min = require_number(*lo, "lattice region rho_min");
+            reg.rho_max = require_number(*hi, "lattice region rho_max");
+            if (!(reg.rho_min > 0.0) || !(reg.rho_max > reg.rho_min) || !(reg.rho_max <= 1.0))
+              schema_fail(named + ": its band needs 0 < rho_min < rho_max <= 1 (got " +
+                          fmt_g(reg.rho_min) + ", " + fmt_g(reg.rho_max) + ")");
+            if (find_key(rv, "relative_density"))
+              schema_fail(named + ": states both a \"relative_density\" and a band "
+                          "(\"rho_min\", \"rho_max\"). One density or one band, not both.");
+          }
+        }
+        if (const JsonValue* ge = own_grading("demand_exponent")) {
+          reg.demand_exponent = require_number(*ge, "lattice region demand_exponent");
+          if (!(reg.demand_exponent > 0.0) || !std::isfinite(reg.demand_exponent))
+            schema_fail(named + ": \"demand_exponent\" must be finite and > 0");
+        }
+        if (const JsonValue* gm = own_grading("grading")) {
+          reg.grading = require_nonempty_string(*gm, "lattice region grading");
+          if (reg.grading != "off" && reg.grading != "stress" && reg.grading != "shape" &&
+              reg.grading != "stress_shape")
+            schema_fail(named + ": \"grading\" must be \"off\", \"stress\", \"shape\" "
+                        "or \"stress_shape\" (got \"" + reg.grading + "\")");
+        }
+        if (const JsonValue* sg = own_grading("shape_grade")) {
+          if (sg->type != JsonValue::Type::Bool)
+            schema_fail(named + ": \"shape_grade\" must be a boolean");
+          reg.shape_grade = sg->num != 0.0 ? 1 : 0;
+          if (!reg.grading.empty() &&
+              (reg.grading == "shape" || reg.grading == "stress_shape") != (reg.shape_grade == 1))
+            schema_fail(named + ": \"grading\": \"" + reg.grading + "\" already sets the "
+                        "shape grade " + (reg.shape_grade == 1 ? "off" : "on") +
+                        ", and \"shape_grade\" says the opposite");
+        }
+        if (const JsonValue* sb = own_grading("shape_grade_band_mm")) {
+          reg.shape_grade_band_mm = require_number(*sb, "lattice region shape_grade_band_mm");
+          if (!(reg.shape_grade_band_mm >= 0.0) || !std::isfinite(reg.shape_grade_band_mm))
+            schema_fail(named + ": \"shape_grade_band_mm\" must be finite and >= 0");
+        }
+        // ★ E3: the region's own cell window (swept only; checked once the grading
+        // block is read, below).
+        for (const char* key : {"cell_min_mm", "cell_max_mm"})
+          if (const JsonValue* cv = own_grading(key)) {
+            const double mm = require_number(*cv, (std::string("lattice region ") + key).c_str());
+            if (!(mm > 0.0) || !std::isfinite(mm))
+              schema_fail(named + ": \"" + key + "\" must be finite and > 0");
+            (std::string(key) == "cell_min_mm" ? reg.cell_min_mm : reg.cell_max_mm) = mm;
+          }
+        if (reg.cell_min_mm > 0.0 && reg.cell_max_mm > 0.0 && reg.cell_max_mm < reg.cell_min_mm)
+          schema_fail(named + ": its cell window needs cell_min_mm <= cell_max_mm (got " +
+                      fmt_g(reg.cell_min_mm) + ", " + fmt_g(reg.cell_max_mm) + ")");
+        if (const JsonValue* of = own_grading("outer_finish")) {
+          reg.outer_finish = require_nonempty_string(*of, "lattice region outer_finish");
+          if (reg.outer_finish != "none" && reg.outer_finish != "shell")
+            schema_fail(named + ": \"outer_finish\" must be \"none\" (open) or \"shell\" "
+                        "(covered) (got \"" + reg.outer_finish + "\")");
+        }
+        // ★ Skin per zone (ruling 11-08 (1)), and Rim per zone (ruling 11-08 (A): the rim
+        // rides the shipped surface's sharp edges, a chain taken by its midpoint's zone).
+        if (const JsonValue* sk = own_grading("skin")) {
+          reg.skin = require_nonempty_string(*sk, "lattice region skin");
+          if (reg.skin != "diagrid" && reg.skin != "rim" && reg.skin != "none")
+            schema_fail(named + ": \"skin\" must be \"diagrid\" (Skin), \"rim\" (Rim) or "
+                        "\"none\" (got \"" + reg.skin + "\")");
+        }
+        if (const JsonValue* ss = own_grading("shape_grade_strength")) {
+          reg.shape_grade_strength = require_number(*ss, "lattice region shape_grade_strength");
+          if (!(reg.shape_grade_strength >= -1.0 && reg.shape_grade_strength <= 1.0))
+            schema_fail(named + ": \"shape_grade_strength\" must be in [-1, 1]");
+        }
+        if (!reg.grading.empty())
+          reg.shape_grade = (reg.grading == "shape" || reg.grading == "stress_shape") ? 1 : 0;
         if (const JsonValue* sv = find_key(rv, "synthetic_stress")) {
           if (sv->type != JsonValue::Type::Bool)
             schema_fail("lattice region \"synthetic_stress\" must be a boolean");
@@ -1386,8 +1867,125 @@ JobDescription parse_job(const std::string& json_text) {
                         "zero-depth region marks nothing)");
         } else {  // face
           reject_unknown_keys(
-              gv, {"origin", "normal", "half_u_mm", "half_w_mm", "depth_mm", "outline_uv"},
+              gv, {"origin", "normal", "half_u_mm", "half_w_mm", "depth_mm", "outline_uv",
+                   "frame_u", "frame_w", "slot_origin_mm", "plan_base_cell_mm"},
               "a face lattice region geometry");
+          // ── ★ WHICH WALL (reviewer, 2026-09-30) ──────────────────────────
+          // The run-time refusal these checks replace named the region -- "lattice
+          // region N (face F)" -- and a parse-time refusal that names neither sends
+          // the user to hunt through a list. The declared position is the region's
+          // 1-based place in `lattice.regions`, which is what `regions.size() + 1` is
+          // here because the region is pushed at the end of this iteration; the face
+          // id is included when the job states one.
+          const std::string which =
+              "lattice region " +
+              std::to_string(job.lattice.regions.size() + 1) +
+              (reg.face_id >= 0 ? " (face " + std::to_string(reg.face_id) + ")" : "");
+          // ── ★ origin AND normal ARE PARSED FIRST, BECAUSE THE FRAME CHECK READS
+          // THE NORMAL (#354, 2026-09-30) ────────────────────────────────────
+          // These two used to be parsed BELOW the frame block, so the "frame axes must
+          // lie IN the face plane" test ran against `reg.normal`'s default Vec3{0,0,0}
+          // and both dot products were 0 for every job ever submitted. The check could
+          // not fire: an out-of-plane frame parsed clean and was caught only at run
+          // time, by clearance.cpp's `frame_conflict`, after a solve. Order is the
+          // whole fix -- and a zero normal is refused HERE, before anything divides by
+          // its length.
+          reg.origin = parse_vec3(
+              require_key(gv, "origin", "a face lattice region geometry"),
+              "lattice region origin");
+          reg.normal = parse_vec3(
+              require_key(gv, "normal", "a face lattice region geometry"),
+              "lattice region normal");
+          {
+            const Vec3& nn = reg.normal;
+            if (nn.x * nn.x + nn.y * nn.y + nn.z * nn.z <= 0.0)
+              schema_fail(which + ": a face lattice region \"normal\" must be non-zero");
+          }
+          // ── ★ THE FRAME outline_uv IS IN, WHEN THE JOB STATES IT (app, 2026-09-22)
+          // Both axes or neither: one alone cannot define a frame, and guessing the
+          // other from the normal would silently reinstate the fitted convention this
+          // key exists to retire. Unit length and mutual perpendicularity are checked
+          // here because a frame that is neither is not a frame, and the failure
+          // downstream would be a quietly skewed outline rather than an error.
+          {
+            const JsonValue* fu = find_key(gv, "frame_u");
+            const JsonValue* fw = find_key(gv, "frame_w");
+            if ((fu != nullptr) != (fw != nullptr))
+              schema_fail(
+                  which + ": a face lattice region geometry states one of \"frame_u\" / "
+                  "\"frame_w\" without the other -- a frame needs both axes, and "
+                  "deriving the missing one would put the outline back on the "
+                  "convention these keys exist to replace");
+            if (fu && fw) {
+              reg.frame_u = parse_vec3(*fu, "a face lattice region \"frame_u\"");
+              reg.frame_w = parse_vec3(*fw, "a face lattice region \"frame_w\"");
+              auto len = [](const Vec3& v) {
+                return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z); };
+              const double lu = len(reg.frame_u), lw = len(reg.frame_w);
+              if (!(std::fabs(lu - 1.0) < 1e-6) || !(std::fabs(lw - 1.0) < 1e-6))
+                schema_fail(
+                    which + ": a face lattice region's \"frame_u\" / \"frame_w\" must be UNIT "
+                    "vectors (got lengths " + std::to_string(lu) + " and " +
+                    std::to_string(lw) + ")");
+              const double uw = reg.frame_u.x * reg.frame_w.x +
+                                reg.frame_u.y * reg.frame_w.y +
+                                reg.frame_u.z * reg.frame_w.z;
+              if (!(std::fabs(uw) < 1e-6))
+                schema_fail(
+                    which + ": a face lattice region's \"frame_u\" and \"frame_w\" must be "
+                    "PERPENDICULAR (u . w = " + std::to_string(uw) + ")");
+              // ★ AGAINST THE UNIT normal, AND THE DIRECTION OF THE EFFECT IS THIS
+              // WAY ROUND (reviewer, 2026-09-30 -- the first version of this comment
+              // had it backwards). u . n = |n| (u . n_hat), so the raw test
+              // |u . n| < 1e-6 accepts |u . n_hat| < 1e-6 / |n|: a LONG normal makes
+              // it STRICTER (on [0,0,3], 3.3e-7 rad) and a SHORT one makes it LOOSER
+              // (on [0,0,1e-3] it admits a 1e-3 rad tilt, a thousand times the
+              // intended bound). The loose case is the dangerous one and it is a short
+              // normal, not a long one. Lying in the plane is a property of the
+              // DIRECTION, so the tolerance must be too. (|n| > 0 is refused above.)
+              const double ln = len(reg.normal);
+              const Vec3 un{reg.normal.x / ln, reg.normal.y / ln, reg.normal.z / ln};
+              const double nu = reg.frame_u.x * un.x + reg.frame_u.y * un.y +
+                                reg.frame_u.z * un.z;
+              const double nw = reg.frame_w.x * un.x + reg.frame_w.y * un.y +
+                                reg.frame_w.z * un.z;
+              if (!(std::fabs(nu) < 1e-6) || !(std::fabs(nw) < 1e-6))
+                schema_fail(
+                    which + ": a face lattice region's frame axes must lie IN the face plane "
+                    "(u . n = " + std::to_string(nu) + ", w . n = " +
+                    std::to_string(nw) + ") -- an axis out of plane means the frame "
+                    "and the normal describe different faces");
+            }
+          }
+          // ── ★ R1 / K2: THE IN-PLANE SLOT ORIGIN, AS A GRID PHASE ───────────────
+          // This used to refuse a slot origin that did not lie in the face plane, on the
+          // ruling of 2026-10-05. The reviewer corrected that on 2026-10-08: it is wrong
+          // for a TILTED facet, whose grid in the app is world-aligned, so the point it
+          // packed from legitimately stands off the plane. Core takes the point as the
+          // grid PHASE and measures depth from the region's own plane instead
+          // (SteppedPlanRegion::plane_origin), so a component along the normal changes the
+          // phase and cannot move the prism. There is therefore nothing left to check
+          // here: any point of the region's slot lattice is a valid phase, and core cannot
+          // know that lattice independently of this point.
+          if (const JsonValue* sv = find_key(gv, "slot_origin_mm")) {
+            reg.slot_origin_mm =
+                parse_vec3(*sv, "a face lattice region \"slot_origin_mm\"");
+            reg.slot_origin_stated = true;
+          }
+          // ── ★ K1: THE PLAN'S BASE CELL, SENT ──────────────────────────────────
+          // The slot size the app's ladder was built on. Not inferable from the plan: a
+          // region need not contain a base-size cell. Validated here as a positive,
+          // finite length; whether the plan's cells are steps of it is the validator's
+          // question, and whether the region needs one at all is the run's (only a region
+          // the plan places cells in does).
+          if (const JsonValue* pb = find_key(gv, "plan_base_cell_mm")) {
+            reg.plan_base_cell_mm =
+                require_number(*pb, "lattice region plan_base_cell_mm");
+            if (!(std::isfinite(reg.plan_base_cell_mm) && reg.plan_base_cell_mm > 0.0))
+              schema_fail(which + ": a face lattice region \"plan_base_cell_mm\" must be "
+                                  "finite and > 0 (got " +
+                          std::to_string(reg.plan_base_cell_mm) + ")");
+          }
           if (const JsonValue* ov = find_key(gv, "outline_uv")) {
             if (ov->type != JsonValue::Type::Array)
               schema_fail("a face lattice region \"outline_uv\" must be an array of loops");
@@ -1405,12 +2003,6 @@ JobDescription parse_job(const std::string& json_text) {
               reg.outline_uv.push_back(std::move(pts));
             }
           }
-          reg.origin = parse_vec3(
-              require_key(gv, "origin", "a face lattice region geometry"),
-              "lattice region origin");
-          reg.normal = parse_vec3(
-              require_key(gv, "normal", "a face lattice region geometry"),
-              "lattice region normal");
           reg.half_u_mm = require_number(
               require_key(gv, "half_u_mm", "a face lattice region geometry"),
               "lattice region half_u_mm");
@@ -1424,12 +2016,36 @@ JobDescription parse_job(const std::string& json_text) {
               !(reg.depth_mm > 0.0))
             schema_fail("a face lattice region half_u_mm/half_w_mm/depth_mm "
                         "must be > 0 (a zero-extent region marks nothing)");
-          const Vec3& nn = reg.normal;
-          if (nn.x * nn.x + nn.y * nn.y + nn.z * nn.z <= 0.0)
-            schema_fail("a face lattice region \"normal\" must be non-zero");
         }
         job.lattice.regions.push_back(std::move(reg));
       }
+    }
+    // ★ E2.2: THE "- LATTICE FACES" MODE (job.hpp). The include regions stop limiting
+    // the lattice: they leave `regions` for `whole_part_includes`, so every reader of
+    // `regions` sees the whole part minus the excludes.
+    if (const JsonValue* wp = find_key(lat, "whole_part")) {
+      if (wp->type != JsonValue::Type::Bool)
+        schema_fail("lattice \"whole_part\" must be a boolean");
+      job.lattice.whole_part = (wp->num != 0.0);
+    }
+    if (job.lattice.whole_part) {
+      std::vector<JobLatticeRegion> kept;
+      for (JobLatticeRegion& r : job.lattice.regions) {
+        if (r.role != "include") {
+          kept.push_back(std::move(r));
+          continue;
+        }
+        if (r.relative_density > 0.0 || r.synthetic_stress)
+          schema_fail(
+              "lattice \"whole_part\" latticed the whole part, so an include region "
+              "there only carries its own grading: rho_min / rho_max, demand_exponent, "
+              "grading and the shape grade. This include "
+              "states \"" + std::string(r.relative_density > 0.0 ? "relative_density"
+                                                                 : "synthetic_stress") +
+              "\", which is not carried in that mode yet; it is refused rather than dropped.");
+        job.lattice.whole_part_includes.push_back(std::move(r));
+      }
+      job.lattice.regions = std::move(kept);
     }
     // MULTISCALE (task multiscale-lattice-to). Absent => false => the two-step
     // pipeline, byte-identical. It needs a "grading" block: a multiscale design is
@@ -1490,6 +2106,13 @@ JobDescription parse_job(const std::string& json_text) {
         schema_fail("lattice \"emit_organic_spans\" must be a boolean");
       job.lattice.emit_organic_spans = (os->num != 0.0);
     }
+    // ★ K4: the laid-plan ledger (job.hpp). A plain boolean, refused otherwise, and
+    // the writer itself does nothing on a run that sent no plan.
+    if (const JsonValue* pl = find_key(lat, "emit_plan_laid")) {
+      if (pl->type != JsonValue::Type::Bool)
+        schema_fail("lattice \"emit_plan_laid\" must be a boolean");
+      job.lattice.emit_plan_laid = (pl->num != 0.0);
+    }
     if (const JsonValue* wp = find_key(lat, "welded_pitch_mm")) {
       job.lattice.welded_pitch_mm =
           require_number(*wp, "lattice.welded_pitch_mm");
@@ -1502,10 +2125,13 @@ JobDescription parse_job(const std::string& json_text) {
           require_nonempty_string(*f, "lattice.outer_finish");
       if (job.lattice.outer_finish != "shell" &&
           job.lattice.outer_finish != "skin" &&
-          job.lattice.outer_finish != "shell+skin")
-        schema_fail("lattice \"outer_finish\" must be \"shell\", \"skin\" or "
-                    "\"shell+skin\" (got \"" + job.lattice.outer_finish + "\")");
-      if (job.lattice.outer_finish != "shell" && job.lattice.skin != "diagrid")
+          job.lattice.outer_finish != "shell+skin" &&
+          job.lattice.outer_finish != "none")
+        schema_fail("lattice \"outer_finish\" must be \"shell\", \"skin\", "
+                    "\"shell+skin\" or \"none\" (got \"" + job.lattice.outer_finish + "\")");
+      // ★ E2.4: "none" is the open lattice with whatever skin the job asks for.
+      if ((job.lattice.outer_finish == "skin" || job.lattice.outer_finish == "shell+skin") &&
+          job.lattice.skin != "diagrid")
         schema_fail("lattice outer_finish \"" + job.lattice.outer_finish +
                     "\" needs skin \"diagrid\" — the diagrid IS the outer "
                     "finish that replaces or dresses the shell");
@@ -1585,6 +2211,7 @@ JobDescription parse_job(const std::string& json_text) {
     reject_unknown_keys(
         gr, {"topology", "cell_mm", "min_extrudable_width_mm", "demand_exponent",
              "intent", "aesthetic_percentile", "aesthetic_rho_min",
+             "max_relative_density",
              "aesthetic_rho_max", "aesthetic_adaptive_cells_per_member",
              "aesthetic_error_budget",
              "cell_mode", "cell_min_mm", "cell_max_mm",
@@ -1594,16 +2221,21 @@ JobDescription parse_job(const std::string& json_text) {
              "algorithm", "organic_strut_width_mm",
              "organic_overhang_angle_deg", "organic_boundary_finish",
              "organic_shape_fit", "organic_shape_fit_only",
-             "organic_scale", "organic_growth", "organic_overhang_fillet",
+             "organic_scale", "organic_growth",
              "organic_transfer_ties", "organic_tie_swirl", "organic_solid_rim_mm",
-             "organic_structural_certification"},
+             "shape_grade", "shape_grade_band_mm", "shape_grade_strength",
+             "organic_base_mat", "organic_fill_mat", "organic_trim_below_base",
+             "organic_strut_embed_mm",
+             "organic_dual_contour", "organic_dc_cell_mm", "organic_dc_tolerance_mm",
+             "organic_density_union_subdiv", "organic_calibrate_on_shipped",
+             "stepped_min_tile_mm",
+             "organic_structural_certification", "structural_certification"},
         "grading");
     job.grading.present = true;
     if (const JsonValue* t = find_key(gr, "topology")) {
       job.grading.topology = require_nonempty_string(*t, "grading.topology");
-      if (job.grading.topology != "octet")
-        schema_fail("grading \"topology\" must be \"octet\" (got \"" +
-                    job.grading.topology + "\")");
+      grading_topology_stated = true;
+      require_live_topology(job.grading.topology, "grading");
     }
     // Cell-size mode (handoff 2026-08-01-lattice-cell-size-sweep). Absent => "fixed",
     // which is the pre-sweep schema exactly: cell_mm required, no ladder keys.
@@ -1708,6 +2340,23 @@ JobDescription parse_job(const std::string& json_text) {
     // network tied into the solid, which is the one instrument that does not read a
     // density against the octet tensor. A structural organic run certified against
     // that tensor would report a margin for a material this lattice is not.
+    // ★ "structural_certification" is the name now that Stepped needs it too; the
+    // organic spelling stays as an ALIAS so every job already in flight keeps working.
+    // Naming both is refused rather than resolved -- a job that says the instrument twice
+    // has an opinion about it, and silently picking one would hide a disagreement.
+    if (find_key(gr, "structural_certification") &&
+        find_key(gr, "organic_structural_certification"))
+      schema_fail(
+          "grading names both \"structural_certification\" and its alias "
+          "\"organic_structural_certification\"; state one");
+    if (const JsonValue* v = find_key(gr, "structural_certification")) {
+      job.grading.organic_structural_certification =
+          require_nonempty_string(*v, "grading.structural_certification");
+      if (job.grading.organic_structural_certification != "beam_network")
+        schema_fail(
+            "grading \"structural_certification\" must be \"beam_network\" (got \"" +
+            job.grading.organic_structural_certification + "\")");
+    }
     if (const JsonValue* v = find_key(gr, "organic_structural_certification")) {
       job.grading.organic_structural_certification =
           require_nonempty_string(*v, "grading.organic_structural_certification");
@@ -1751,11 +2400,32 @@ JobDescription parse_job(const std::string& json_text) {
             "REQUIRED for an organic lattice under structural intent. The certificate "
             "for organic is the beam network solved over the emitted spans; the "
             "density-against-octet-tensor path does not describe traced geometry.");
-      if (!organic_structural &&
+      // ★ AND STEPPED MAY NAME IT TOO (brief of 2026-09-17 §3.1). Any-step Stepped is
+      // not offered the tensor certificate at all -- cells of different families share no
+      // nodes, and the tensor assumes they do -- so the beam network is its structural
+      // instrument exactly as it is organic's. The key is therefore meaningful for BOTH
+      // algorithms; it stays refused everywhere else, where nothing would consume it.
+      // ★ stepped_cells is meaningful for ONE algorithm. Refused elsewhere rather than
+      // ignored, so a job that packs a plan and then asks for doubled or organic fails
+      // loudly instead of silently shipping a lattice that is not the one on screen.
+      // ★ RULING A (maintainer, 2026-09-18): DEFAULT GRADE SENDS ITS CELLS TOO. The
+      // app packs the doubled ladder in the same bake that packs any-step, so the list
+      // is the picture for both and there is ONE code path that lays cells down. The
+      // dyadic planner is not consulted when the list is present. Organic has no cells
+      // at all, so it is still refused there.
+      if (!job.lattice.stepped_cells.empty() && job.grading.algorithm != "stepped" &&
+          job.grading.algorithm != "doubled")
+        schema_fail(
+            "lattice \"stepped_cells\" is only allowed with \"algorithm\": \"stepped\" "
+            "or \"doubled\" (this job says \"" + job.grading.algorithm + "\"). The cell "
+            "list IS the plan the preview drew; organic has no cells to send.");
+      const bool stepped_may_name =
+          job.grading.algorithm == "stepped" && job.grading.intent != "aesthetic";
+      if (!organic_structural && !stepped_may_name &&
           !job.grading.organic_structural_certification.empty())
         schema_fail(
-            "grading \"organic_structural_certification\" is only meaningful for an "
-            "organic lattice under structural intent (algorithm is \"" +
+            "grading \"structural_certification\" is only meaningful for an organic or "
+            "a stepped lattice under structural intent (algorithm is \"" +
             job.grading.algorithm + "\", intent is \"" + job.grading.intent + "\")");
     }
     // ★★ SHAPE-FIT GRADING REQUIRES THE AESTHETIC INTENT, and is REFUSED under any
@@ -1787,6 +2457,87 @@ JobDescription parse_job(const std::string& json_text) {
             "algorithm \"organic\"");
       job.grading.organic_transfer_ties = (tv->num != 0.0);
     }
+    if (const JsonValue* em = find_key(gr, "organic_strut_embed_mm")) {
+      if (em->type != JsonValue::Type::Number || !std::isfinite(em->num) || em->num < 0.0)
+        schema_fail(
+            "grading \"organic_strut_embed_mm\" must be a finite number >= 0 (0 = off)");
+      if (!organic_alg)
+        schema_fail(
+            "grading \"organic_strut_embed_mm\" is only allowed with "
+            "algorithm \"organic\"");
+      job.grading.organic_strut_embed_mm = em->num;
+    }
+    if (const JsonValue* dcv = find_key(gr, "organic_dual_contour")) {
+      if (dcv->type != JsonValue::Type::Bool)
+        schema_fail("grading \"organic_dual_contour\" must be a boolean");
+      if (!organic_alg)
+        schema_fail(
+            "grading \"organic_dual_contour\" is only allowed with "
+            "algorithm \"organic\"");
+      job.grading.organic_dual_contour = (dcv->num != 0.0);
+    }
+    for (const char* k : {"organic_dc_cell_mm", "organic_dc_tolerance_mm"}) {
+      const JsonValue* v = find_key(gr, k);
+      if (!v) continue;
+      if (v->type != JsonValue::Type::Number || !std::isfinite(v->num) || v->num < 0.0)
+        schema_fail(std::string("grading \"") + k +
+                    "\" must be a finite number >= 0 (0 = derived)");
+      if (!organic_alg)
+        schema_fail(std::string("grading \"") + k +
+                    "\" is only allowed with algorithm \"organic\"");
+      if (std::string(k) == "organic_dc_cell_mm") job.grading.organic_dc_cell_mm = v->num;
+      else job.grading.organic_dc_tolerance_mm = v->num;
+    }
+    if (const JsonValue* mt = find_key(gr, "stepped_min_tile_mm")) {
+      if (mt->type != JsonValue::Type::Number || !std::isfinite(mt->num) || mt->num < 0.0)
+        schema_fail("grading \"stepped_min_tile_mm\" must be a finite number >= 0");
+      if (job.grading.algorithm != "stepped")
+        schema_fail(
+            "grading \"stepped_min_tile_mm\" is only allowed with \"algorithm\": "
+            "\"stepped\" (this job says \"" + job.grading.algorithm +
+            "\"). It bounds an any-step TILE; note it is NOT \"cell_min_mm\", which is "
+            "the swept window's lower end and a different quantity.");
+      job.grading.stepped_min_tile_mm = mt->num;
+    }
+    if (const JsonValue* cs = find_key(gr, "organic_calibrate_on_shipped")) {
+      if (cs->type != JsonValue::Type::Bool)
+        schema_fail("grading \"organic_calibrate_on_shipped\" must be a boolean");
+      if (!organic_alg)
+        schema_fail("grading \"organic_calibrate_on_shipped\" is only allowed with "
+                    "algorithm \"organic\"");
+      job.grading.organic_calibrate_on_shipped = (cs->num != 0.0);
+    }
+    if (const JsonValue* uv = find_key(gr, "organic_density_union_subdiv")) {
+      if (uv->type != JsonValue::Type::Number || !std::isfinite(uv->num) ||
+          uv->num < 0.0 || uv->num > 32.0 || uv->num != std::floor(uv->num))
+        schema_fail("grading \"organic_density_union_subdiv\" must be an integer 0..32 "
+                    "(0 = the deposit)");
+      if (!organic_alg)
+        schema_fail("grading \"organic_density_union_subdiv\" is only allowed with "
+                    "algorithm \"organic\"");
+      job.grading.organic_density_union_subdiv = static_cast<int>(uv->num);
+    }
+    if (const JsonValue* pv = find_key(gr, "organic_base_mat")) {
+      if (pv->type != JsonValue::Type::Bool)
+        schema_fail("grading \"organic_base_mat\" must be a boolean");
+      if (!organic_alg)
+        schema_fail("grading \"organic_base_mat\" is only allowed with algorithm \"organic\"");
+      job.grading.organic_base_mat = (pv->num != 0.0);
+    }
+    if (const JsonValue* pv = find_key(gr, "organic_fill_mat")) {
+      if (pv->type != JsonValue::Type::Bool)
+        schema_fail("grading \"organic_fill_mat\" must be a boolean");
+      if (!organic_alg)
+        schema_fail("grading \"organic_fill_mat\" is only allowed with algorithm \"organic\"");
+      job.grading.organic_fill_mat = (pv->num != 0.0);
+    }
+    if (const JsonValue* pv = find_key(gr, "organic_trim_below_base")) {
+      if (pv->type != JsonValue::Type::Bool)
+        schema_fail("grading \"organic_trim_below_base\" must be a boolean");
+      if (!organic_alg)
+        schema_fail("grading \"organic_trim_below_base\" is only allowed with algorithm \"organic\"");
+      job.grading.organic_trim_below_base = (pv->num != 0.0);
+    }
     if (const JsonValue* rm = find_key(gr, "organic_solid_rim_mm")) {
       if (rm->type != JsonValue::Type::Number || !(rm->num >= 0.0) || !std::isfinite(rm->num))
         schema_fail("grading \"organic_solid_rim_mm\" must be a finite number >= 0 (0 = off)");
@@ -1794,21 +2545,47 @@ JobDescription parse_job(const std::string& json_text) {
         schema_fail("grading \"organic_solid_rim_mm\" is only allowed with algorithm \"organic\"");
       job.grading.organic_solid_rim_mm = rm->num;
     }
+    // ★ RULING B: the shape grade, and the band the bleed rule reads. Octet only --
+    // organic's counterpart is organic_solid_rim_mm, and a job naming both would be
+    // asking two different mechanisms for one outline.
+    if (const JsonValue* sg = find_key(gr, "shape_grade")) {
+      if (sg->type != JsonValue::Type::Bool)
+        schema_fail("grading \"shape_grade\" must be a boolean");
+      if (organic_alg)
+        schema_fail(
+            "grading \"shape_grade\" is the OCTET outline beam (brief §1.5) and is not "
+            "allowed with algorithm \"organic\" -- organic grades to solid at the "
+            "outline through \"organic_solid_rim_mm\", which is the same requirement "
+            "answered by the mechanism that path already has");
+      job.grading.shape_grade = (sg->num != 0.0);
+    }
+    if (const JsonValue* sb = find_key(gr, "shape_grade_band_mm")) {
+      if (sb->type != JsonValue::Type::Number || !(sb->num >= 0.0) ||
+          !std::isfinite(sb->num))
+        schema_fail(
+            "grading \"shape_grade_band_mm\" must be a finite number >= 0 (0 = no bleed)");
+      if (!job.grading.shape_grade)
+        schema_fail(
+            "grading \"shape_grade_band_mm\" is the band the outline beam's BLEED rule "
+            "reads, so it needs \"shape_grade\": true -- without the shape grade there "
+            "is no outline beam to bleed");
+      job.grading.shape_grade_band_mm = sb->num;
+    }
+    // ★ ruling 2: the band's strength (job.hpp)
+    if (const JsonValue* ss = find_key(gr, "shape_grade_strength")) {
+      if (ss->type != JsonValue::Type::Number || !(ss->num >= -1.0 && ss->num <= 1.0))
+        schema_fail("grading \"shape_grade_strength\" must be a number in [-1, 1]");
+      if (!job.grading.shape_grade)
+        schema_fail("grading \"shape_grade_strength\" scales the shape-grade band, so it "
+                    "needs \"shape_grade\": true");
+      job.grading.shape_grade_strength = ss->num;
+    }
     if (const JsonValue* sw = find_key(gr, "organic_tie_swirl")) {
       if (sw->type != JsonValue::Type::Number || !(sw->num >= 0.0 && sw->num <= 1.0))
         schema_fail("grading \"organic_tie_swirl\" must be a number in [0, 1]");
       if (!organic_alg)
         schema_fail("grading \"organic_tie_swirl\" is only allowed with algorithm \"organic\"");
       job.grading.organic_tie_swirl = sw->num;
-    }
-    if (const JsonValue* fv = find_key(gr, "organic_overhang_fillet")) {
-      if (fv->type != JsonValue::Type::Bool)
-        schema_fail("grading \"organic_overhang_fillet\" must be a boolean");
-      if (!organic_alg)
-        schema_fail(
-            "grading \"organic_overhang_fillet\" is only allowed with "
-            "algorithm \"organic\"");
-      job.grading.organic_overhang_fillet = (fv->num != 0.0);
     }
     if (const JsonValue* sv = find_key(gr, "organic_shape_fit")) {
       if (sv->type != JsonValue::Type::Bool)
@@ -1939,6 +2716,15 @@ JobDescription parse_job(const std::string& json_text) {
           require_number(*v, "grading.aesthetic_error_budget");
       if (!(job.grading.aesthetic_error_budget > 0.0))
         schema_fail("grading \"aesthetic_error_budget\" must be > 0");
+    }
+    if (const JsonValue* v = find_key(gr, "max_relative_density")) {
+      job.grading.max_relative_density = require_number(*v, "grading.max_relative_density");
+      if (!(job.grading.max_relative_density > 0.0) ||
+          !(job.grading.max_relative_density <= 1.0) ||
+          !std::isfinite(job.grading.max_relative_density))
+        schema_fail(
+            "grading \"max_relative_density\" must be finite and in (0, 1] -- it caps "
+            "the top of the certifiable density band, under EITHER intent");
     }
     if (const JsonValue* v = find_key(gr, "aesthetic_rho_max"))
       job.grading.aesthetic_rho_max =
@@ -2160,6 +2946,25 @@ JobDescription parse_job(const std::string& json_text) {
           "it emits");
   }
 
+  // ★ E2.1: every name in lattice.scenarios is one of the job's load scenarios.
+  // A name that matches none would grade and certify the lattice on fewer
+  // scenarios than the user switched on, silently.
+  for (const std::string& name : job.lattice.scenarios) {
+    bool found = false;
+    for (const JobScenario& sc : job.loads.scenarios)
+      if (sc.name == name) found = true;
+    if (!found)
+      schema_fail(
+          job.loads.scenarios.empty()
+              ? "\"lattice.scenarios\" names \"" + name +
+                    "\", but this job has no load scenarios (\"loads.scenarios\"): "
+                    "it has one load case, which the lattice always uses. Leave "
+                    "\"lattice.scenarios\" out."
+              : "\"lattice.scenarios\" names \"" + name +
+                    "\", which is not one of this job's load scenarios. A name must "
+                    "match a \"loads.scenarios\" entry exactly.");
+  }
+
   // ★★ THE DEPTH TIE (task 2026-08-12 §0a, bar R2). A face marked protect AND
   // "lattice here" is ONE slab: the depth the user drags is how deep TO may not
   // cut AND how deep the lattice is allowed. When a face-kind lattice region
@@ -2171,8 +2976,17 @@ JobDescription parse_job(const std::string& json_text) {
   //
   // Checked only when the region carries `face_id`; the app always emits it. A
   // hand-authored job with no id keeps the pre-task freedom, unchecked.
+  //
+  // ★ E2.5: TWO REGIONS ON ONE FACE each keep their own depth, so it is the DEEPEST
+  // region naming a protected face that must equal its protection; a shallower one lies
+  // inside that slab. With one region per face this is the same check as before.
   for (const JobLatticeRegion& r : job.lattice.regions) {
     if (r.kind != "face" || r.face_id < 0) continue;
+    bool deeper_on_face = false;
+    for (const JobLatticeRegion& q : job.lattice.regions)
+      if (&q != &r && q.kind == "face" && q.face_id == r.face_id && q.depth_mm > r.depth_mm)
+        deeper_on_face = true;
+    if (deeper_on_face) continue;
     for (std::size_t i = 0; i < job.loads.face_protection_face_ids.size(); ++i) {
       if (job.loads.face_protection_face_ids[i] != r.face_id) continue;
       double prot = job.loads.face_protection_depth_mm;   // <= 0 => core default
@@ -2192,7 +3006,231 @@ JobDescription parse_job(const std::string& json_text) {
             "lattice cannot conjure material there.");
     }
   }
+  // ★ E4 (k): THE SAME TIE, KEYED BY REGION (ruling 2026-11-07 19:55). A cut piece is a
+  // face region, protected by {"region_id"} and latticed by a "region" lattice region:
+  // the same one slab as a face's, with the same deepest-region rule. Ids tie within
+  // their kind only -- a face protection and a region lattice region are two selections.
+  // The refusal names the piece in his words (its name), never its number.
+  for (const JobLatticeRegion& r : job.lattice.regions) {
+    if (r.kind != "region" || r.region_id < 0) continue;
+    bool deeper_on_region = false;
+    for (const JobLatticeRegion& q : job.lattice.regions)
+      if (&q != &r && q.kind == "region" && q.region_id == r.region_id &&
+          q.depth_mm > r.depth_mm)
+        deeper_on_region = true;
+    if (deeper_on_region) continue;
+    for (std::size_t i = 0; i < job.loads.face_protection_region_ids.size(); ++i) {
+      if (job.loads.face_protection_region_ids[i] != r.region_id) continue;
+      double prot = job.loads.face_protection_depth_mm;   // <= 0 => core default
+      if (i < job.loads.face_protection_region_depths_mm.size() &&
+          job.loads.face_protection_region_depths_mm[i] > 0.0)
+        prot = job.loads.face_protection_region_depths_mm[i];
+      if (!(prot > 0.0)) prot = kFaceProtectionDepthDefaultMm;
+      if (std::abs(prot - r.depth_mm) <= 1e-9) continue;
+      std::string piece = "A cut piece";
+      for (const FaceRegionSpec& s : job.loads.face_regions)
+        if (s.id == r.region_id && !s.name.empty()) piece = "“" + s.name + "”";
+      schema_fail(
+          piece + " is BOTH protected and latticed, at two different depths: the "
+          "protection is " + std::to_string(prot) + " mm and the lattice region is " +
+          std::to_string(r.depth_mm) +
+          " mm. They are one slab — the depth the piece is held to IS the depth the "
+          "lattice is allowed. A protection shallower than its region leaves the rest "
+          "of that region as void the optimizer removed, and a lattice cannot conjure "
+          "material there.");
+    }
+  }
 
+  // ── ★ ONE RESOLVED TOPOLOGY, WRITTEN BACK INTO BOTH BLOCKS ─────────────
+  // The decision is `resolve_lattice_topology` (lattice.cpp), where a test can reach
+  // it; this is the refusal and the write-back. Both fields carry the resolved value
+  // afterwards, so sizing (`grading.topology`) and generation (`lattice.topology`)
+  // cannot read different types however a caller reaches them.
+  {
+    const LatticeTopologyChoice tc = resolve_lattice_topology(
+        job.lattice.topology, lattice_topology_stated, job.grading.topology,
+        grading_topology_stated);
+    if (tc.conflict)
+      schema_fail(
+          "\"lattice.topology\" is \"" + tc.lattice_id + "\" and "
+          "\"grading.topology\" is \"" + tc.grading_id +
+          "\". They describe ONE lattice -- the geometry the generator builds is the "
+          "geometry the grading law sizes -- so they must name the same type. State "
+          "one of them, or state both the same.");
+    job.lattice.topology = tc.id;
+    job.grading.topology = tc.id;
+  }
+
+  // ── ★ WHAT THE RESOLVED TYPE NOW DECIDES (lattice types round 1) ──────────
+  // Two checks read the type, so they run once it is known. Both are no-ops for octet.
+  {
+    const LatticeTopology topo = lattice_topology_from_id(job.lattice.topology);
+    // (1) A stated region density is checked against octet's band where the region is
+    // parsed (the type is not known yet there). Octet's band contains every live
+    // type's, so that check never refuses a density this one admits; this one applies
+    // THE TYPE's band, so a density only octet has a tensor for is refused by name.
+    if (topo != LatticeTopology::Octet)
+      for (std::size_t i = 0; i < job.lattice.regions.size(); ++i) {
+        const double rho = job.lattice.regions[i].relative_density;
+        if (!(rho > 0.0)) continue;
+        const double lo = lattice_rho_min(topo), hi = lattice_rho_max(topo);
+        if (!(rho >= lo && rho <= hi))
+          schema_fail(
+              "lattice region " + std::to_string(i + 1) + " states \"relative_density\" " +
+              fmt_g(rho) + ", outside " + job.lattice.topology + "'s certifiable band [" +
+              fmt_g(lo) + ", " + fmt_g(hi) + "]. Outside it the type's homogenized "
+              "tensor has no measurement behind it, so the density cannot be certified.");
+      }
+    // (1b) ★ E3: a region's own band, against THE TYPE's certifiable band, for every
+    // type (octet included: unlike relative_density nothing checked it at the parse).
+    {
+      std::vector<const JobLatticeRegion*> all;
+      for (const JobLatticeRegion& r : job.lattice.regions) all.push_back(&r);
+      for (const JobLatticeRegion& r : job.lattice.whole_part_includes) all.push_back(&r);
+      for (std::size_t i = 0; i < all.size(); ++i) {
+        const JobLatticeRegion& r = *all[i];
+        if (!(r.rho_max > 0.0)) continue;
+        const double lo = lattice_rho_min(topo), hi = lattice_rho_max(topo);
+        if (!(r.rho_min >= lo && r.rho_max <= hi))
+          schema_fail(
+              (r.label.empty() ? "lattice region " + std::to_string(i + 1)
+                               : "lattice region \"" + r.label + "\"") +
+              ": its band [" + fmt_g(r.rho_min) + ", " + fmt_g(r.rho_max) + "] leaves " +
+              job.lattice.topology + "'s certifiable band [" + fmt_g(lo) + ", " + fmt_g(hi) +
+              "]. Outside it the type's homogenized tensor has no measurement behind it.");
+      }
+    }
+    // (1b2) ★ E2.4: a region's own finish rides on the part's open or covered finish;
+    // the freeform skin finishes are part-wide.
+    for (const auto* list : {&job.lattice.regions, &job.lattice.whole_part_includes})
+     for (const JobLatticeRegion& r : *list)
+      if (!r.outer_finish.empty() && job.lattice.outer_finish != "shell" &&
+          job.lattice.outer_finish != "none")
+        schema_fail((r.label.empty() ? std::string("a lattice region") : "lattice region \"" + r.label + "\"") +
+                    ": its own \"outer_finish\" needs the part's lattice.outer_finish \"shell\" "
+                    "or \"none\" (got \"" + job.lattice.outer_finish + "\"); the freeform "
+                    "skin finishes are part-wide");
+    // (1c) ★ E3: a region's own cell window. It holds the region to the part's swept
+    // ladder (cell_plan.hpp), so it needs the swept plan, and it must hold at least one
+    // of the ladder's cells: base cell_min_mm x 2^L (the base is the part's; a region
+    // cannot go finer than it).
+    {
+      std::vector<const JobLatticeRegion*> all;
+      for (const JobLatticeRegion& r : job.lattice.regions) all.push_back(&r);
+      for (const JobLatticeRegion& r : job.lattice.whole_part_includes) all.push_back(&r);
+      for (std::size_t i = 0; i < all.size(); ++i) {
+        const JobLatticeRegion& r = *all[i];
+        if (!(r.cell_min_mm > 0.0) && !(r.cell_max_mm > 0.0)) continue;
+        const std::string named = r.label.empty() ? "lattice region " + std::to_string(i + 1)
+                                                  : "lattice region \"" + r.label + "\"";
+        if (!job.grading.present || job.grading.cell_mode != "swept")
+          schema_fail(named + ": its own cell window (cell_min_mm, cell_max_mm) needs the "
+                      "swept cell plan (grading \"cell_mode\": \"swept\"), where cells of "
+                      "more than one size can meet");
+        const double S0 = job.grading.cell_min_mm;
+        const double lo = r.cell_min_mm > 0.0 ? r.cell_min_mm : S0;
+        const double hi = r.cell_max_mm > 0.0 ? r.cell_max_mm : job.grading.cell_max_mm;
+        bool holds = false;
+        std::string ladder;
+        for (int L = 0; L < 12 && S0 * std::ldexp(1.0, L) <= std::max(hi, job.grading.cell_max_mm) * (1.0 + 1e-9); ++L) {
+          const double S = S0 * std::ldexp(1.0, L);
+          ladder += std::string(L ? ", " : "") + fmt_g(S);
+          if (S >= lo * (1.0 - 1e-9) && S <= hi * (1.0 + 1e-9)) holds = true;
+        }
+        if (!holds)
+          schema_fail(named + ": its cell window [" + fmt_g(lo) + ", " + fmt_g(hi) +
+                      "] mm holds none of the part's ladder cells (" + ladder +
+                      " mm: grading cell_min_mm doubled). Widen it to hold one.");
+      }
+    }
+    // (2) ORGANIC traces its own curves -- it builds no cell of any type -- and its
+    // strut law, calibration and beam certificate are octet's. A job naming another
+    // type with it is asking for a lattice organic does not make.
+    if (topo != LatticeTopology::Octet && job.grading.present &&
+        job.grading.algorithm == "organic")
+      schema_fail(
+          "grading \"algorithm\": \"organic\" traces its own strut curves and builds "
+          "no cell type, so it runs only with \"topology\": \"octet\" (this job says \"" +
+          job.lattice.topology + "\"). Use \"doubled\" or \"stepped\" to build " +
+          job.lattice.topology + ".");
+    // (2b) R8: Diagrid anchors where struts meet the surface; a sheet meets it along curves,
+    // so there is nothing to anchor. Refused whether stated or the default.
+    // ★ Skin per zone: the same two rules, by the zone's name. A sheet has no struts to
+    // anchor (R8), and organic replaces the cell passes the zone's skin rides.
+    for (const auto* list : {&job.lattice.regions, &job.lattice.whole_part_includes})
+      for (std::size_t i = 0; i < list->size(); ++i) {
+        const JobLatticeRegion& r = (*list)[i];
+        if (r.skin != "diagrid") continue;
+        const std::string zone = r.label.empty() ? "lattice region " + std::to_string(i + 1)
+                                                 : "lattice region \"" + r.label + "\"";
+        if (lattice_topology_is_sheet(topo))
+          schema_fail(zone + " asks for Skin (\"diagrid\"), which anchors where struts meet "
+                      "the surface, and " + job.lattice.topology + " is a sheet with no struts "
+                      "(R8). Give this zone no skin (\"none\").");
+        if (job.grading.present && job.grading.algorithm == "organic")
+          schema_fail(zone + " asks for Skin (\"diagrid\"), and grading \"algorithm\": "
+                      "\"organic\" traces its own curves and lays no cell skin for a zone to "
+                      "take. Use \"doubled\" or \"stepped\", or give this zone no skin.");
+      }
+    if (lattice_topology_is_sheet(topo) && job.lattice.present && job.lattice.skin == "diagrid")
+      schema_fail(
+          "lattice \"skin\": \"diagrid\" anchors where struts meet the surface, and " +
+          job.lattice.topology + " is a sheet with no struts (R8). State \"skin\": \"rim\" "
+          "or \"none\".");
+    // (3) R4: cells of two sizes are offered for a type only where core has PROVED its
+    // struts join across the step (lattice_types.hpp). Octet and every type that
+    // passed keep today's behaviour exactly.
+    if (job.grading.present) {
+      // Swept AND Fit both lay the dyadic ladder (cell_plan.cpp: both set max_level from
+      // it, and run_job builds a level per rung whenever max_level > 0).
+      const bool doubled_steps =
+          (job.grading.algorithm.empty() || job.grading.algorithm == "doubled") &&
+          (job.grading.cell_mode == "swept" || job.grading.cell_mode == "fit" ||
+           !job.lattice.stepped_cells.empty());
+      if (doubled_steps) {
+        const LatticeOption ok = lattice_type_doubled(topo);
+        if (!ok.allowed) schema_fail(ok.reason);
+      }
+      if (job.grading.algorithm == "stepped") {
+        const LatticeOption ok = lattice_type_stepped(topo);
+        if (!ok.allowed) schema_fail(ok.reason);
+      }
+      // ★ Finding 6: BCC and SC are Structural only.
+      if (job.grading.intent == "aesthetic") {
+        const LatticeOption ok = lattice_type_aesthetic(topo);
+        if (!ok.allowed) schema_fail(ok.reason);
+      }
+    }
+  }
+
+  // ── THE FLEXIBLE STAGE (task 2026-09-28-flexible-squish-maths) ── its own module
+  // parses its own block (topopt/flexible/job_block.hpp). It is a different lattice
+  // stage, so it cannot share a job with the lattice or grading blocks.
+  if (find_key(root, "flexible") != nullptr) {
+    if (job.lattice.present || job.grading.present)
+      schema_fail("a job may carry \"flexible\" or \"lattice\"/\"grading\", not both: "
+                  "Flexible is its own lattice stage with its own recipe");
+    try {
+      job.flexible = parse_flexible_block(json_text);
+    } catch (const flexible::FlexibleError& e) {
+      schema_fail(std::string("flexible: ") + e.what());
+    }
+  }
+
+  // CORE LIST item 50 — "Redesign to strengthen" rebuilds the part inside its design
+  // box, so it needs both: the growth side of the checkbox and a box to build in.
+  // LOAD SCENARIOS: what they do not combine with yet. With "Redesign to strengthen"
+  // they do (the reviewer's ruling of 2026-10-26 12:46).
+  if (!job.loads.scenarios.empty() && job.loads.anchor_model == "bearing")
+    schema_fail("Load scenarios can't be combined with bolt bearings yet");
+  if (job.loads.redesign == "strengthen") {
+    if (job.loads.minimize_plastic)
+      schema_fail("\"loads.redesign\": \"strengthen\" needs "
+                  "\"loads.minimize_plastic\": false (it is the strengthen side)");
+    if (!job.has_design_box)
+      schema_fail("\"loads.redesign\": \"strengthen\" needs a \"design_box\": it "
+                  "rebuilds the part inside the box");
+  }
   return job;
 }
 

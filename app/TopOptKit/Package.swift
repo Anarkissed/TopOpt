@@ -109,8 +109,11 @@ var packageTargets: [Target] = [
         // product (below); the bridge itself references OCCT only through the
         // core, so it needs no binary dependency — just the compile define.
         dependencies: ["TopOptCore"],
+        // Clipper2 2.0.1, vendored (Boost licence) for the lattice outline's union (P4, 2026-10-10)
+        exclude: ["clipper2/LICENSE", "clipper2/README.md"],
         cxxSettings: [
             .headerSearchPath("../../vendor/include"),
+            .headerSearchPath("clipper2/include"),
             .define("TOPOPT_BRIDGE_HAS_OCCT", .when(platforms: occtPlatforms)),
             // -stdlib=libc++ so the C++ standard-library include path reaches
             // the module build under Xcode's explicit-modules scanner, where
@@ -183,6 +186,12 @@ var packageTargets: [Target] = [
     .target(
         name: "TopOptFlows",
         dependencies: ["TopOptKit", "TopOptDesign"],
+        // ★ THE ORGANIC SAMPLE IS THE PR 353 TEST CUBE, AS PRINTED (maintainer,
+        // 2026-09-03): its emitted spans and receipt ride as resources, so the wizard's
+        // sample is real traced geometry through the run's own preview path.
+        // (The folder is NOT named "Resources": a shallow iOS bundle with a top-level
+        // directory of that name fails CodeSign — "bundle format unrecognized".)
+        resources: [.copy("OrganicSample")],
         swiftSettings: [.interoperabilityMode(.Cxx)]
     ),
     .testTarget(

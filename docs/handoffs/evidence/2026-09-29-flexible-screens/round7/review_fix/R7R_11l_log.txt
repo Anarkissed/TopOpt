@@ -1,0 +1,47 @@
+[11l] arrival on the Flexible stage: the Squish page opened by itself: false
+M01 main at open (settled true): heat true heatAll false xray false play false · views 8 · tapped group none · selectedSim group-1 shownSim nil sims ["group-1", "group-2", "group-3", "all"] · pill 'Preview · core runs one group at a time' · legend ["dent=Squish · mm"] · lattice true stale false
+wrote 11l_M01_main_open.png (renderers 1; cam page → az 0.79 el 0.52)
+W Face 1 · lattice B [2000003] root faces [1] · 5.000 kg (11.02 lb) · linked · group 1
+W Face 1 · lattice A [2000004] root faces [1] · 5.000 kg (11.02 lb) · linked · group 1
+W Face 4 · lattice B [2000007] root faces [4] · 2.268 kg (5.00 lb) · own · group 2
+W Face 4 · lattice A [2000008] root faces [4] · 2.268 kg (5.00 lb) · own · group 2
+W Face 2 · lattice B [2000005] root faces [2] · 2.268 kg (5.00 lb) · own · group 2
+W Face 2 · lattice A [2000006] root faces [2] · 2.268 kg (5.00 lb) · own · group 2
+W Face 3 [3] root faces [3] · 2.000 kg (4.41 lb) · own · group 3
+W Face 5 [5] root faces [5] · 2.000 kg (4.41 lb) · own · group 3
+H Group 1 hands: 22.05 lb on Face 1 · lattice B+Face 1 · lattice A · group force 22.05 lb
+H Group 2 hands: 10.00 lb on Face 4 · lattice B+Face 4 · lattice A | 10.00 lb on Face 2 · lattice B+Face 2 · lattice A · group force 10.00 lb
+H Group 3 hands: 4.41 lb on Face 3 | 4.41 lb on Face 5 · group force 4.41 lb
+M02 a tap on Face 4's solid middle: heat true heatAll false xray false play false · views 8 · tapped group 2 · selectedSim group-2 shownSim group-2 sims ["group-1", "group-2", "group-3", "all"] · pill 'Preview · core runs one group at a time' · legend ["dent=Squish · mm"] · lattice true stale false
+  tap Settings (the Squish page) at (895,48)
+S09 Group 2's face card: views 8 heatScope off · rail group(2) tab face · selected Face 4 · lattice B [2000007] · toast '' fix none · groupDeleteAsk nil · empty false · groups [Group 1: Face 1 · lattice B 11.02 lb, Face 1 · lattice A 11.02 lb | Group 2: Face 4 · lattice B 5.00 lb, Face 4 · lattice A 5.00 lb, Face 2 · lattice B 5.00 lb, Face 2 · lattice A 5.00 lb | Group 3: Face 3 4.41 lb, Face 5 4.41 lb] · frames colourSwatches-2,exitButton,exitRow,exitTitle:Exit,faceCard,faceList,faceRemove-2000007,faceRow-2000005,faceRow-2000006,faceRow-2000008,flexible-rail-group-1,flexible-rail-group-2,flexible-rail-group-3,flexible-rail-model,flexible-rail-new,flexible-rail-rests,groupChips,groupLine-2,groupRemove-2,groupRow-2,notice,numberBox-deepest-2000007,numberBox-group-2,page,panel,panelScroll,rail,resetAll,stage,viewButtons
+  rail tabs: Model  · Group 1 1 face · Group 2 2 faces · Group 3 2 faces · Rests 1 face · New 
+  chips (130,495 274x33) · menu none · take-out faceRemove-2000007 (386,353 44x44)
+  pinch line: Pinched with Face 2 · two halves · weight line: none (the group's force)
+wrote 11l_S09_group2_face_card_named_chips.png (renderers 2; cam img4 (left-front) → az -0.80 el 0.62)
+  11l_S09: 0 AX; overlapping buttons: none; under 44 pt: 0 
+  tap Squish Bend (Group 2) at (1054,255)
+S06b Bend on, Group 2: views 40 heatScope off · rail group(2) tab face · selected Face 4 · lattice B [2000007] · toast '' fix none · groupDeleteAsk nil · empty false · groups [Group 1: Face 1 · lattice B 11.02 lb, Face 1 · lattice A 11.02 lb | Group 2: Face 4 · lattice B 5.00 lb, Face 4 · lattice A 5.00 lb, Face 2 · lattice B 5.00 lb, Face 2 · lattice A 5.00 lb | Group 3: Face 3 4.41 lb, Face 5 4.41 lb] · frames colourSwatches-2,exitButton,exitRow,exitTitle:Exit,faceCard,faceList,faceRemove-2000007,faceRow-2000005,faceRow-2000006,faceRow-2000008,flexible-rail-group-1,flexible-rail-group-2,flexible-rail-group-3,flexible-rail-model,flexible-rail-new,flexible-rail-rests,groupChips,groupLine-2,groupRemove-2,groupRow-2,notice,numberBox-deepest-2000007,numberBox-group-2,page,panel,panelScroll,rail,resetAll,stage,viewButtons · chip none
+wrote 11l_S06b_group2_bend_on_img4cam.png (renderers 2; cam img4 (left-front) → az -0.80 el 0.62)
+  tap Squish Bend off at (1054,255)
+  Bend off · chip none
+wrote 11l_S06c_group2_bend_off_img4cam.png (renderers 2; cam img4 (left-front) → az -0.80 el 0.62)
+  tap Group 2's trash [groupRemove-2 (394,170 44x44)] at (416,192)
+S10 trash tapped: views 8 heatScope off · rail group(2) tab face · selected Face 4 · lattice B [2000007] · toast '' fix none · groupDeleteAsk 2 · empty false · groups [Group 1: Face 1 · lattice B 11.02 lb, Face 1 · lattice A 11.02 lb | Group 2: Face 4 · lattice B 5.00 lb, Face 4 · lattice A 5.00 lb, Face 2 · lattice B 5.00 lb, Face 2 · lattice A 5.00 lb | Group 3: Face 3 4.41 lb, Face 5 4.41 lb] · frames colourSwatches-2,exitButton,exitRow,exitTitle:Exit,faceCard,faceList,faceRemove-2000007,faceRow-2000005,faceRow-2000006,faceRow-2000008,flexible-rail-group-1,flexible-rail-group-2,flexible-rail-group-3,flexible-rail-model,flexible-rail-new,flexible-rail-rests,groupChips,groupDeleteConfirm,groupDeleteKeep,groupLine-2,groupRemove-2,groupRow-2,notice,numberBox-deepest-2000007,numberBox-group-2,page,panel,panelScroll,rail,stage,viewButtons · Delete (361,114 65x44) Keep (434,114 56x44)
+wrote 11l_S10_group2_trash_asks.png (renderers 2; cam img4 (left-front) → az -0.80 el 0.62)
+  tap Keep [groupDeleteKeep (434,114 56x44)] at (462,136)
+  tap Squish Bend (Group 1) at (1054,255)
+S06a Bend on, Group 1: views 40 heatScope off · rail group(1) tab face · selected Face 1 · lattice B [2000003] · toast '' fix none · groupDeleteAsk nil · empty false · groups [Group 1: Face 1 · lattice B 11.02 lb, Face 1 · lattice A 11.02 lb | Group 2: Face 4 · lattice B 5.00 lb, Face 4 · lattice A 5.00 lb, Face 2 · lattice B 5.00 lb, Face 2 · lattice A 5.00 lb | Group 3: Face 3 4.41 lb, Face 5 4.41 lb] · frames colourSwatches-1,exitButton,exitRow,exitTitle:Exit,faceCard,faceList,faceRemove-2000003,faceRow-2000004,flexible-rail-group-1,flexible-rail-group-2,flexible-rail-group-3,flexible-rail-model,flexible-rail-new,flexible-rail-rests,groupChips,groupLine-1,groupRemove-1,groupRow-1,notice,numberBox-deepest-2000003,numberBox-group-1,page,panel,panelScroll,rail,resetAll,stage,viewButtons
+wrote 11l_S06a_group1_bend_on_img3cam.png (renderers 2; cam img3 (front, low) → az 0.00 el 0.50)
+  tap Squish Bend off at (1054,255)
+  tap Squish Heat 3.4 s hold at (1006,255) held 3.4 s
+  tap Reset all [resetAll (370,174 70x44)] at (404,196)
+  Reset all asks · Reset (354,174 60x44)
+  tap Reset (confirm) [resetConfirm (354,174 60x44)] at (384,196)
+S11 after Reset all: views 8 heatScope off · rail newGroup tab face · selected none · toast '' fix none · groupDeleteAsk nil · empty true · groups [] · frames exitButton,exitRow,exitTitle:Save & Exit,flexible-rail-model,flexible-rail-new,legend,legendSectionsRow,newKind,notice,page,panel,panelScroll,rail,resetAll,stage,viewButtons · legend sections row true
+wrote 11l_S11_after_reset_all_empty_img3cam.png (renderers 2; cam img3 (front, low) → az 0.00 el 0.50)
+  11l_S11: 0 AX; overlapping buttons: none; under 44 pt: 0 
+  tap Exit after Reset all (empty) [exitRow (24,24 234x44)] at (64,46)
+M06 the main page after an empty Exit: heat true heatAll false xray false play false · views 8 · tapped group none · selectedSim group-2 shownSim group-2 sims ["group-1", "group-2", "group-3", "all"] · pill 'Nothing to squish yet' · legend [] · lattice true stale true · heat lit false · Squish page still up false · status line AX ''
+wrote 11l_M06_main_after_empty_exit.png (renderers 1; cam page → az 0.79 el 0.52)
+  11l_M06: 0 AX; overlapping buttons: none; under 44 pt: 0 

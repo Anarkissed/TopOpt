@@ -7,8 +7,10 @@
 #include <optional>  // the optional design-volume box (M7.dom-core)
 #include <stdexcept>  // the driver throws std::invalid_argument (see below)
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "topopt/analyze.hpp"            // FixedDesignAnalysis (load scenarios)
 #include "topopt/build_frame.hpp"        // BakeBuildOrientation
 #include "topopt/plsm.hpp"               // PlsmOptions / PlsmMode (default Off)
 #include "topopt/build_orientation.hpp"  // BuildOrientationReport
@@ -166,6 +168,56 @@ struct MinimizePlasticOptions {
   // EMPTY (default) the driver uses make_active_mask(grid) — byte-identical to
   // every existing caller. Must be empty or size grid.voxel_count().
   DesignMask design_mask;
+  // CORE LIST item 40 — WHAT FROZE `design_mask`, as the caller built it. RECEIPT
+  // ONLY: the optimizer never reads it. One entry per source of the mask's
+  // FrozenSolid voxels (build_production_loadcase: the anchor pad, then each face
+  // protection), each counting only the voxels no earlier entry and no Load/Fixture
+  // tag froze, so the entries add up. Copied into report.frozen_share.sources when
+  // a rung's target clamps to the density floor; any frozen voxel the entries do
+  // not cover is reported there as "other". Empty (the default) attributes the
+  // whole mask to "other".
+  std::vector<FrozenSourceCount> frozen_mask_sources;
+  // CORE LIST item 47 — WHICH ANCHOR a Fixture voxel came from: per anchor face
+  // (or region), the part-grid voxels its own tagging made Fixture. Read only to
+  // NAME the faces of an anchored piece a rung let go of (kAnchorDetachedReason);
+  // the verdict itself reads the grid's tags. Empty (the default) names none.
+  struct AnchorVoxels {
+    int face_id = -1;
+    int region_id = -1;
+    std::vector<std::size_t> part_voxels;
+  };
+  std::vector<AnchorVoxels> anchor_voxels;
+
+  // CORE LIST item 50 — "Redesign to strengthen" (run_job's strengthen_part drives
+  // one-rung calls with these). All three default off, so every other run is
+  // untouched.
+  //   domain_box_only    — on the design-box path the part's own voxels OUTSIDE the
+  //                        box are not design space unless something froze them
+  //                        (a protection, a pad, an anchor or load skin): they are
+  //                        emptied, so the run builds from the box and the frozen
+  //                        material only.
+  //   volume_basis_domain — a rung's fraction is of the DOMAIN (the Active
+  //                        envelope), not of the part: no part-relative rescale.
+  //   initial_design     — when non-empty (size of the solved grid), the first
+  //                        rung starts from it instead of uniform (a repair's warm
+  //                        start). Ignored when warm_start_coarse is armed.
+  bool domain_box_only = false;
+  bool volume_basis_domain = false;
+  // CORE LIST item 42, option B — ONE PIECE (voxel.hpp bridge_split_bodies): after a
+  // rung's optimize, carrying bodies the part as drawn held in one body are bridged
+  // back together before the rung is certified, and the line says "bridged". Off by
+  // default; the production load case arms it.
+  bool bridge_pieces = false;
+  // LOAD SCENARIOS (the reviewer's overnight ruling of 2026-10-26 03:45): two or more
+  // load cases, node-indexed on the PART grid like `bcs` / external_loads (each
+  // scenario's own supports and loads; an anchor OFF in it is a weak non-contact
+  // spring). Empty (the DEFAULT) = the one load case, byte for byte. Every rung
+  // optimises the smooth max of them (SimpOptions::scenarios) and is certified on each:
+  // the worst governs the margin, and a scenario whose weak springs carry more than
+  // kScenarioUnheldShare of its load is "unheld" (its load has no path to its
+  // anchors) and the rung is rejected.
+  std::vector<SimpScenario> scenarios;
+  std::vector<double> initial_design;
 
   // M7.dom-core — the "add material" feature: an optional user-defined DESIGN
   // VOLUME (an axis-aligned box in model space, mm), typically LARGER than the
@@ -605,6 +657,10 @@ struct MinimizePlasticOptions {
   // `minimize_plastic` REFUSES a frozen-lattice run that does not state it.
   // Printability cannot be assumed and it cannot be skipped.
   double frozen_lattice_min_extrudable_width_mm = 0.0;
+  // ★ D1: the job's density cap, for the frozen-lattice floors. Without it the lightest
+  // printable density and the cell bounds were computed against the BAND's top, which can
+  // be a density the job forbids. 0 = not sent.
+  double frozen_lattice_max_relative_density = 0.0;
 
   // Refuse any region whose median cells-per-member is below
   // `lattice_cells_per_member_min` (5 for octet). true is the shipped posture and
@@ -1005,6 +1061,91 @@ inline constexpr const char* kLoadPathNotConnectedReason =
 inline constexpr const char* kRungNonConvergentReason =
     "linear solve did not converge";
 
+// CORE LIST item 47 — the rung's design left an ANCHORED piece the part as drawn
+// joined to a load holding no load of its own (voxel.hpp lost_anchored_pieces):
+// a bolted hole the design cut away from the part (his Carriage Arms, 13185527:
+// 13 anchored holes, dropped by the export without a word). The rung WAS analysed,
+// so its numbers are measurements, of a part that no longer holds that bolt. Like
+// a severed rung it does not stop the ladder and does not seed the next rung; its
+// line's "bodies" block names the anchored faces. Below the connectivity reason
+// in precedence, above the margin.
+inline constexpr const char* kAnchorDetachedReason = "anchored piece detached";
+
+// REAL BOLTS (bearing anchors; the reviewer's ruling of 2026-10-25 21:45): more than
+// kAnchorsSlidingShare (analyze.hpp) of the anchors' total reaction is carried by the weak sliding
+// (tangential) springs, so the anchors cannot hold the load in some direction: the
+// part is held by springs that stand for no real support. Not a pass, whatever the
+// margin says. Below the connectivity facts, above the margin.
+// LOAD SCENARIOS: above this share of a scenario's load carried by its weak springs
+// (the anchors OFF in it), its load has no path to its anchors: "Scenario “<name>”'s
+// load has no path to its anchors" (scenario_unheld_reason), and the rung is rejected.
+inline constexpr double kScenarioUnheldShare = 0.05;
+// ...and their stiffness: this fraction of the part's own element stiffness per node
+// (E x h), isotropic. Weak enough to carry nothing a real path carries; never zero, so
+// the solve is never singular.
+inline constexpr double kScenarioWeakSpringRel = 1e-6;
+// THE LIGHTEST SCENARIO (his decisions, 2026-10-28: "make it fail with a notice", then
+// the line at 10 %: "Let it fail with a simple error note"). A scenario whose load (the
+// sum of its groups' force sizes) is under this share of the heaviest scenario's is
+// REFUSED, with the plain line scenario_too_light_reason. Measured on his Carriage Arms
+// (51 kg main, two twists): with load-scaled springs, multigrid stalled in version 1's
+// coarse search at 1, 3, 5, 7 and 9 % (each within its first 25 min); 9.8 % ran clean for
+// 2 h+. Below it a light arm hangs on springs too soft for the solver.
+inline constexpr double kScenarioMinLoadShare = 0.10;
+// ...times (F_s / F_max)^2 for scenario s, F the 2-norm of its nodal loads (his ask of
+// 2026-10-28: the springs follow the load), never below this (springs >= this x 1e-6 E h).
+// Softer (1e-8 E h at a 10 % load) left an arm nearly floating on his Carriage Arms and
+// multigrid stalled (residual growing) at every share tried; today's fixed 1e-6 E h never
+// did. The value is the softest floor whose run on his arms went through clean.
+inline constexpr double kScenarioWeakSpringMinScale = 0.03;
+// "" when every scenario carries at least kScenarioMinLoadShare of the heaviest one's
+// load, else the plain line for the first that does not: "Scenario “4” is too light: its
+// load is 5 kg, but it needs at least 5.1 kg (10% of Scenario “1”'s 51 kg). Raise it or
+// remove the scenario." Loads in N
+// (each scenario: the sum of its groups' force sizes), named in kg (/ 9.80665) to 3
+// significant figures in plain decimals, trailing zeros dropped (1534 kg -> "1530").
+std::string scenario_too_light_reason(
+    const std::vector<std::pair<std::string, double>>& name_and_load_n);
+// The plain wording he reads: "Scenario “<name>”'s load has no path to its anchors".
+std::string scenario_unheld_reason(const std::string& name);
+
+// LOAD SCENARIOS — the one per-scenario certification, shared by the rung gate
+// (minimize_plastic), analyze_job and "Redesign to strengthen": `certify` is run on
+// every scenario's supports and loads; the WORST (a non-convergent one first, else the
+// lowest margin_effective) governs and its analysis is returned; each scenario's
+// margin, peak and where, and the share of its load its weak springs carry (over
+// kScenarioUnheldShare = unheld: the governing analysis is then not accepted).
+// One scenario's OWN result fields on a design (his "the scenario selector changes the
+// views", 2026-10-27): the per-voxel von Mises (MPa, grid-indexed) and the per-node
+// displacement (mm, DOF-ordered) of that scenario's certification solve, in the
+// layout of MinimizePlasticVariant::von_mises_field / displacement_field, narrowed to
+// float32 as fields.bin narrows them (so a governing entry is fields.bin's bytes).
+struct ScenarioFields {
+  std::string name;
+  std::vector<float> von_mises;
+  std::vector<float> displacement;
+};
+struct ScenarioCertification {
+  FixedDesignAnalysis governing;
+  std::vector<ScenarioReport> reports;
+  std::string unheld;  // the first unheld scenario's name; "" = every one is held
+  // Every scenario's own fields, in `reports` order: filled only when `keep_fields`.
+  std::vector<ScenarioFields> fields;
+};
+ScenarioCertification certify_scenarios(
+    const VoxelGrid& grid, const std::vector<SimpScenario>& scenarios,
+    const std::function<FixedDesignAnalysis(const std::vector<DirichletBC>&,
+                                            const std::vector<NodalLoad>&)>& certify,
+    bool keep_fields = false);
+// The weak springs (an anchor OFF in a scenario) sized for the material, grid and load:
+// kScenarioWeakSpringRel x E x h x max((F_s / F_max)^2, kScenarioWeakSpringMinScale)
+// per node, isotropic.
+std::vector<SimpScenario> sized_scenarios(std::vector<SimpScenario> scenarios,
+                                          double youngs_modulus_mpa, double spacing);
+
+inline constexpr const char* kAnchorsSlidingReason =
+    "anchors cannot hold the load in some direction (held by the sliding springs)";
+
 // Task 2026-08-03-preflight-feasibility-and-divergence — the FIFTH and SIXTH
 // rejection_reason values, from the two DIVERGENCE guards. Both are distinct
 // from kRungInfeasibleReason on purpose: neither claims the load path was lost.
@@ -1293,12 +1434,19 @@ struct MinimizePlasticVariant {
   // which nodes/voxels are "printed". Empty for a cancelled rung (its analysis
   // is skipped, exactly like von_mises_field).
   std::vector<double> displacement_field;
+  // LOAD SCENARIOS: every scenario's own fields on this rung's design, in
+  // report.scenarios order (the governing one's are the two fields above, narrowed).
+  // Empty without scenarios, and for a rung whose certification never ran.
+  std::vector<ScenarioFields> scenario_fields;
 
   // (b) The extracted + cleaned variant isosurface, exposed for display. It is
   // ALREADY computed by check_v3 (stored in `v3.mesh`); this accessor exposes it
   // without recomputing marching cubes or copying the mesh. Empty for a
   // cancelled rung (its `v3` is default-constructed).
   const TriangleMesh& mesh() const { return v3.mesh; }
+  // CORE LIST item 41 — the solid the export writes: every body holding an anchor
+  // or a load (V3Report::exported_mesh). Equal to mesh() on a one-body part.
+  const TriangleMesh& exported_mesh() const { return v3.exported_mesh(); }
 
   // --- Optimization-history keyframes (app playback) -----------------------
   // Raw marching-cubes isosurfaces of the analysis density at snapshots through
@@ -1710,6 +1858,7 @@ struct SolvedDesignDomain {
   // Node-indexed inputs REMAPPED onto `grid` (verbatim copies when !expanded).
   std::vector<DirichletBC> bcs;
   std::vector<NodalLoad> external_loads;  // empty when the caller declared none
+  std::vector<SimpScenario> scenarios;    // LOAD SCENARIOS, remapped (empty when none)
 };
 
 // Resolve the domain `minimize_plastic(part_grid, ..., options)` solves on.

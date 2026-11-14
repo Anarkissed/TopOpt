@@ -1,0 +1,227 @@
+TopOptFlowsTests.BottomBarMeasurementTests  # pins WorkspacePlaceholder.swift
+TopOptFlowsTests.CoreBuildIdentityTests  # changed; pins bridge.cpp; reads the Sources directory
+TopOptFlowsTests.FlexibleAngledGoldenRecorder  # Flexible*; named
+TopOptFlowsTests.FlexibleAngledGoldenTests  # Flexible*; named; reads the Sources directory
+TopOptFlowsTests.FlexibleBatchBReviewTests  # Flexible*
+TopOptFlowsTests.FlexibleBatchBReviewUXTests  # Flexible*; pins FlexibleMainStage.swift
+TopOptFlowsTests.FlexibleBatchCHookTests  # Flexible*; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.FlexibleBatchCVerifyTests  # Flexible*; pins FlexibleMainLegends.swift
+TopOptFlowsTests.FlexibleBatchM2Probe  # Flexible*
+TopOptFlowsTests.FlexibleBatchM2Tests  # Flexible*
+TopOptFlowsTests.FlexibleBatchM2VerifyTests  # Flexible*
+TopOptFlowsTests.FlexibleBatchMDentTests  # Flexible*
+TopOptFlowsTests.FlexibleBatchMGroupTests  # Flexible*
+TopOptFlowsTests.FlexibleBatchMLegendTests  # Flexible*; pins FlexibleMainLegends.swift
+TopOptFlowsTests.FlexibleBatchMProbe  # Flexible*
+TopOptFlowsTests.FlexibleBatchMStressTests  # Flexible*
+TopOptFlowsTests.FlexibleBatchMVerifyTests  # Flexible*; pins FlexibleMainLegends.swift; pins FlexibleMainStage+Views.swift
+TopOptFlowsTests.FlexibleBatchMXrayTests  # Flexible*
+TopOptFlowsTests.FlexibleBatchNEvidenceProbe  # Flexible*
+TopOptFlowsTests.FlexibleBatchNProbe  # Flexible*
+TopOptFlowsTests.FlexibleBatchNRefineTests  # Flexible*
+TopOptFlowsTests.FlexibleBatchNVerifyTests  # Flexible*
+TopOptFlowsTests.FlexibleCoreClaimTests  # Flexible*
+TopOptFlowsTests.FlexibleCurveEditTests  # Flexible*
+TopOptFlowsTests.FlexibleDepthPrismTests  # Flexible*
+TopOptFlowsTests.FlexibleFEFieldTests  # Flexible*
+TopOptFlowsTests.FlexibleFEPassPerfTests  # Flexible*
+TopOptFlowsTests.FlexibleFEPassTests  # Flexible*
+TopOptFlowsTests.FlexibleFEVerifyGTests  # Flexible*
+TopOptFlowsTests.FlexibleGeometryOnlyLatticeTests  # Flexible*
+TopOptFlowsTests.FlexibleGroupFieldPerfTests  # Flexible*
+TopOptFlowsTests.FlexibleGroupPaletteEvidenceProbe  # Flexible*
+TopOptFlowsTests.FlexibleGroupPaletteHostedTests  # Flexible*
+TopOptFlowsTests.FlexibleGroupPaletteTests  # Flexible*
+TopOptFlowsTests.FlexibleInPassCompositeTests  # Flexible*
+TopOptFlowsTests.FlexibleLatticeEvidenceProbe  # Flexible*
+TopOptFlowsTests.FlexibleLatticeFieldTests  # Flexible*
+TopOptFlowsTests.FlexibleLatticeGradingTests  # Flexible*
+TopOptFlowsTests.FlexibleLatticePassPerfTests  # Flexible*
+TopOptFlowsTests.FlexibleLatticePassTests  # Flexible*
+TopOptFlowsTests.FlexibleLatticeUnderReviewTests  # Flexible*
+TopOptFlowsTests.FlexibleLatticeUnderTests  # Flexible*
+TopOptFlowsTests.FlexibleLegendPlacementTests  # Flexible*; changed; pins FlexibleMainStatusPill.swift
+TopOptFlowsTests.FlexibleMainPageHookTests  # Flexible*; pins LatticeSettings.swift; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.FlexibleMainPageLoadsTests  # Flexible*
+TopOptFlowsTests.FlexibleMainPageRound4HostedTests  # Flexible*; changed
+TopOptFlowsTests.FlexibleMainPageRound4Tests  # Flexible*; changed; pins FlexibleMainStatusPill.swift; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.FlexibleMainPageRound4VerifyTests  # Flexible*
+TopOptFlowsTests.FlexibleMainStageTests  # Flexible*
+TopOptFlowsTests.FlexibleMainViewsTests  # Flexible*
+TopOptFlowsTests.FlexibleMergeR5SMTests  # Flexible*
+TopOptFlowsTests.FlexibleOverlayClipTests  # Flexible*
+TopOptFlowsTests.FlexibleOverlaySeamTests  # Flexible*
+TopOptFlowsTests.FlexiblePinchTests  # Flexible*
+TopOptFlowsTests.FlexiblePressFixturesTests  # Flexible*
+TopOptFlowsTests.FlexiblePressProbeTripwireTests  # Flexible*; named
+TopOptFlowsTests.FlexiblePressReframeTests  # Flexible*
+TopOptFlowsTests.FlexiblePressReviewTests  # Flexible*
+TopOptFlowsTests.FlexiblePressSaveTests  # Flexible*
+TopOptFlowsTests.FlexibleReadinessTests  # Flexible*
+TopOptFlowsTests.FlexibleRegionsTests  # Flexible*
+TopOptFlowsTests.FlexibleRound5EvidenceProbe  # Flexible*
+TopOptFlowsTests.FlexibleRound5SettingsHostedTests  # Flexible*
+TopOptFlowsTests.FlexibleRound5SettingsTests  # Flexible*
+TopOptFlowsTests.FlexibleRound5SettingsVerifyTests  # Flexible*
+TopOptFlowsTests.FlexibleRound5SquishExitTests  # Flexible*
+TopOptFlowsTests.FlexibleRound6EvidenceProbe  # Flexible*; changed
+TopOptFlowsTests.FlexibleRound6HostedTests  # Flexible*; changed; pins FlexibleMainLegends.swift; pins FlexibleMainStatusPill.swift; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.FlexibleRound6Tests  # Flexible*; changed; pins FlexibleMainStage+Views.swift; pins FlexibleMainStage.swift; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.FlexibleRowCopyTests  # Flexible*; reads the Sources directory
+TopOptFlowsTests.FlexibleS1VerifyTests  # Flexible*; pins FlexibleMainLegends.swift; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.FlexibleSettingsMigrationTests  # Flexible*
+TopOptFlowsTests.FlexibleSettingsPageHostedTests  # Flexible*
+TopOptFlowsTests.FlexibleSettingsRound4Tests  # Flexible*; pins WorkspacePlaceholder.swift; reads the Sources directory
+TopOptFlowsTests.FlexibleSettingsVerifyD1Tests  # Flexible*; pins FlexibleMainStage+Views.swift; reads the Sources directory
+TopOptFlowsTests.FlexibleShownValuesTests  # Flexible*
+TopOptFlowsTests.FlexibleSqueezeGroupsModelTests  # Flexible*
+TopOptFlowsTests.FlexibleSqueezeGroupsPressTests  # Flexible*
+TopOptFlowsTests.FlexibleSqueezeGroupsReviewTests  # Flexible*
+TopOptFlowsTests.FlexibleSqueezeGroupsReviewUITests  # Flexible*; pins FlexibleMainStatusPill.swift
+TopOptFlowsTests.FlexibleSqueezeGroupsReviewUXTests  # Flexible*
+TopOptFlowsTests.FlexibleSqueezeGroupsTests  # Flexible*
+TopOptFlowsTests.FlexibleSqueezeGroupsUITests  # Flexible*; pins FlexibleMainStatusPill.swift
+TopOptFlowsTests.FlexibleSquishCoarsenTests  # Flexible*
+TopOptFlowsTests.FlexibleSquishEvidenceProbe  # Flexible*
+TopOptFlowsTests.FlexibleSquishPerfProbe  # Flexible*
+TopOptFlowsTests.FlexibleSquishPlayAllTests  # Flexible*
+TopOptFlowsTests.FlexibleSquishPlayerTests  # Flexible*
+TopOptFlowsTests.FlexibleSquishSolverTests  # Flexible*
+TopOptFlowsTests.FlexibleSquishTests  # Flexible*; pins FlexibleMainStage.swift
+TopOptFlowsTests.FlexibleSquishVerifyGTests  # Flexible*
+TopOptFlowsTests.FlexibleStageTests  # Flexible*
+TopOptFlowsTests.FlexibleSurfaceNavTests  # Flexible*; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.FrozenRegionAsMaterialTests  # pins LatticeSettings.swift; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.GroupViewEnforcementTests  # pins WorkspacePlaceholder.swift
+TopOptFlowsTests.GroupViewStateTests  # pins WorkspacePlaceholder.swift
+TopOptFlowsTests.LatticeAutoDensityIsDerivedTests  # pins LatticeFaceCard.swift; pins WorkspacePlaceholder.swift; pins bridge.cpp
+TopOptFlowsTests.LatticeBandChipsTests  # pins WorkspacePlaceholder.swift
+TopOptFlowsTests.LatticeBeamNetworkFactTests  # pins LatticeRegionCells.swift; pins LatticeSettings.swift; pins TopOptKit.swift; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.LatticeCoreOwnerParityProof  # changed
+TopOptFlowsTests.LatticeCoreOwnerTests  # changed
+TopOptFlowsTests.LatticeCorePlanRulesTests  # changed
+TopOptFlowsTests.LatticeDefaultGradePlanProof  # changed
+TopOptFlowsTests.LatticeDefaultGradePlanSwitchTests  # pins WorkspacePlaceholder.swift
+TopOptFlowsTests.LatticeDefaultGradePlanTests  # pins WorkspacePlaceholder.swift
+TopOptFlowsTests.LatticeDepthIsOneValueTests  # pins LatticeFaceCard.swift; pins WorkspacePlaceholder.swift; pins bridge.cpp
+TopOptFlowsTests.LatticeDrawerCellIsTheBakesTests  # changed; pins LatticeRegionCells.swift; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.LatticeDrawerCellsAcrossSourceTests  # changed; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.LatticeE1PrintableFloorTests  # changed; pins LatticeRegionCells.swift; pins WorkspacePlaceholder.swift; pins bridge.cpp
+TopOptFlowsTests.LatticeGradeToSolidBandTests  # pins LatticeSDFMetal.swift; pins LatticeSetupWizard.swift
+TopOptFlowsTests.LatticeGradingWiringTests  # pins WorkspacePlaceholder.swift
+TopOptFlowsTests.LatticeHalfFloatRungTests  # pins LatticeSetupWizard.swift
+TopOptFlowsTests.LatticeIncludeGateTests  # pins LatticePage.swift; pins LatticeSetupWizard.swift; pins ProjectModel.swift; pins WorkspacePlaceholder.swift; reads the Sources directory
+TopOptFlowsTests.LatticeLegendColourTests  # pins LatticeSDFMetal.swift; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.LatticeModeTests  # pins LatticePage.swift; pins LatticeSettings.swift
+TopOptFlowsTests.LatticeNamedNoOctetFallbackTests  # pins WorkspacePlaceholder.swift
+TopOptFlowsTests.LatticeOctreeManyRegionsTests  # pins LatticeOctreeBake.swift
+TopOptFlowsTests.LatticeOldRetainedRunTests  # pins LatticePage.swift; pins ProjectModel.swift; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.LatticePageRound2Tests  # pins LatticePage.swift; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.LatticePlanNotSentLineTests  # pins WorkspacePlaceholder.swift
+TopOptFlowsTests.LatticePreviewBodyAlphaTests  # pins WorkspacePlaceholder.swift
+TopOptFlowsTests.LatticePreviewNoticeCaptionTests  # pins WorkspacePlaceholder.swift
+TopOptFlowsTests.LatticeProbeSamplingTests  # pins WorkspacePlaceholder.swift
+TopOptFlowsTests.LatticeProtectionFollowsSlabTests  # pins ProjectModel.swift
+TopOptFlowsTests.LatticeRunSpecSharedTests  # pins WorkspacePlaceholder.swift
+TopOptFlowsTests.LatticeSampleRefreshTests  # pins LatticeSetupWizard.swift
+TopOptFlowsTests.LatticeSectorOutlineTests  # pins WorkspacePlaceholder.swift
+TopOptFlowsTests.LatticeSettingsPersistTests  # named
+TopOptFlowsTests.LatticeShapeFitLadderTests  # pins LatticeSetupWizard.swift
+TopOptFlowsTests.LatticeSimSolveTriggerTests  # named; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.LatticeSlotOriginTests  # changed; pins RelatticeRunner.swift; pins RemoteRunner.swift
+TopOptFlowsTests.LatticeSolidFillTests  # pins LatticeSDFMetal.swift
+TopOptFlowsTests.LatticeStageRepairEvidence  # pins LatticeFaceCard.swift; pins WorkspacePlaceholder.swift; pins bridge.cpp
+TopOptFlowsTests.LatticeStaleTypeTests  # changed; named; pins LatticeSettings.swift; pins LatticeSetupWizard.swift; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.LatticeSteppedCellListTests  # pins LatticeSettings.swift
+TopOptFlowsTests.LatticeStressTintTests  # pins WorkspacePlaceholder.swift
+TopOptFlowsTests.LatticeStructuralPrismProbe  # pins ProjectModel.swift; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.LatticeStructuralRegionFloorTests  # pins LatticeSetupWizard.swift
+TopOptFlowsTests.LatticeStructuralSteppedGateTests  # changed; pins LatticePage.swift; pins LatticeSetupWizard.swift; pins ProjectModel.swift; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.LatticeStructuralViewStateTests  # pins ProjectModel.swift; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.LatticeTypeCatalogTests  # pins LatticePage.swift; pins LatticeSetupWizard.swift
+TopOptFlowsTests.LatticeTypeNoBandTests  # changed; pins LatticePage.swift; pins LatticeSetupWizard.swift; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.LatticeTypeReadinessFromCoreTests  # changed; pins bridge.cpp; reads the Sources directory
+TopOptFlowsTests.LatticeVariantFaceWallsTests  # pins LatticePage.swift; pins LatticeSetupWizard.swift; pins ProjectModel.swift; pins WorkspacePlaceholder.swift; reads the Sources directory
+TopOptFlowsTests.LatticeVariantTests  # pins LatticePage.swift; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.LatticeWizardOneLineCaptionTests  # pins LatticeSetupWizard.swift
+TopOptFlowsTests.OrganicAutoGradeAndFreezeTests  # pins LatticeSDFMetal.swift; pins LatticeSetupWizard.swift; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.OrganicBandNotBuiltLineTests  # changed; pins LatticeSDFMetal.swift
+TopOptFlowsTests.OrganicCapsuleEvidenceGen  # reads the Sources directory
+TopOptFlowsTests.OrganicCapsuleImpostorTests  # pins LatticeSDFMetal.swift
+TopOptFlowsTests.OrganicDeadWallParityTests  # pins LatticeSDFMetal.swift; pins LatticeSettings.swift; pins ProjectModel.swift; pins WorkspacePlaceholder.swift; pins bridge.cpp
+TopOptFlowsTests.OrganicForecastRouteTests  # pins LatticeSettings.swift; pins LatticeSetupWizard.swift; pins WorkspacePlaceholder.swift; reads the Sources directory
+TopOptFlowsTests.OrganicJobsCoreAcceptsTests  # pins LatticeSetupWizard.swift
+TopOptFlowsTests.OrganicLookAndVisibilityTests  # pins LatticeSDFMetal.swift; pins LatticeSetupWizard.swift; pins TopOptKit.swift; pins WorkspacePlaceholder.swift; pins bridge.cpp
+TopOptFlowsTests.OrganicMainWiringTests  # pins LatticeSetupWizard.swift
+TopOptFlowsTests.OrganicPreviewBakeInputsTests  # pins WorkspacePlaceholder.swift
+TopOptFlowsTests.OrganicPreviewMatchesTheJobTests  # pins LatticeSDFMetal.swift; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.OrganicPreviewParameterParityTests  # pins WorkspacePlaceholder.swift; pins bridge.cpp
+TopOptFlowsTests.OrganicPreviewSpeedAndRimTests  # pins LatticeSetupWizard.swift; pins WorkspacePlaceholder.swift; pins bridge.cpp
+TopOptFlowsTests.OrganicRegionFillProbe  # pins LatticeSettings.swift
+TopOptFlowsTests.OrganicRenderMarchTests  # pins LatticeSDFMetal.swift
+TopOptFlowsTests.OrganicSizeCheckTests  # pins LatticeSetupWizard.swift
+TopOptFlowsTests.OrganicSolidRimTests  # pins LatticeSDFMetal.swift; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.OrganicSyntheticStressTests  # pins ProjectModel.swift; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.OrganicVariantGeneratorTests  # reads the Sources directory
+TopOptFlowsTests.OrganicWalk0907EveningTests  # pins LatticeSDFMetal.swift; pins LatticeSetupWizard.swift; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.ProjectStoreTests  # named
+TopOptFlowsTests.ProtectFreezeVsSolidityTests  # pins WorkspacePlaceholder.swift
+TopOptFlowsTests.RemoteLongStreamMemoryTests  # pins RemoteRunner.swift
+TopOptFlowsTests.RenderQualityEvidenceGen  # pins LatticeSetupWizard.swift
+TopOptFlowsTests.RenderQualityLiveViewTests  # pins LatticeSetupWizard.swift
+TopOptFlowsTests.RunModelTests  # pins bridge.cpp
+TopOptFlowsTests.SectorDensityTests  # pins RelatticeRunner.swift; pins RemoteRunner.swift
+TopOptFlowsTests.SmoothingPageRound2Tests  # named; pins LatticePage.swift; pins WorkspacePlaceholder.swift; pins bridge.cpp
+TopOptFlowsTests.SmoothingPageTests  # pins LatticePage.swift; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.SmoothingPreviewGateTests  # pins WorkspacePlaceholder.swift
+TopOptFlowsTests.SmoothingRound3Tests  # pins WorkspacePlaceholder.swift
+TopOptFlowsTests.SmoothingRound4Tests  # pins WorkspacePlaceholder.swift
+TopOptFlowsTests.SmoothingViewerTests  # pins bridge.cpp
+TopOptFlowsTests.StrutLineWidthTests  # pins LatticeSetupWizard.swift; pins ProjectModel.swift; pins RemoteRunner.swift; reads the Sources directory
+TopOptFlowsTests.SurfaceClipTests  # changed
+TopOptFlowsTests.SurfaceCurvedPatternTests  # changed
+TopOptFlowsTests.SurfaceCutCommitTests  # changed
+TopOptFlowsTests.SurfaceCutDetentTests  # changed; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.SurfaceCutLineTests  # changed
+TopOptFlowsTests.SurfaceFinalisationTests  # changed
+TopOptFlowsTests.SurfaceGridDistinctnessTests  # changed
+TopOptFlowsTests.SurfaceGridExactnessTests  # changed
+TopOptFlowsTests.SurfaceHandoffTests  # changed
+TopOptFlowsTests.SurfaceInputDisciplineTests  # changed; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.SurfaceIsolateTests  # changed
+TopOptFlowsTests.SurfacePatternAreaTests  # changed
+TopOptFlowsTests.SurfacePatternAxisTests  # changed
+TopOptFlowsTests.SurfacePencilToggleExemptionTests  # changed; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.SurfacePickChainTests  # changed
+TopOptFlowsTests.SurfacePieceReassignmentTests  # changed
+TopOptFlowsTests.SurfaceRegionToolTests  # changed; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.SurfaceRegionsTaskTests  # changed; pins ForceModel.swift
+TopOptFlowsTests.SurfaceRibbonSpineTests  # changed
+TopOptFlowsTests.SurfaceSecondCutTests  # changed
+TopOptFlowsTests.SurfaceSimilarTests  # changed
+TopOptFlowsTests.SurfaceStageNoRegressionTests  # changed; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.SurfaceStageRenderSeamTests  # changed
+TopOptFlowsTests.SurfaceStageTests  # changed
+TopOptFlowsTests.SurfaceTapMeaningTests  # changed; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.SurfaceTintTests  # changed
+TopOptFlowsTests.SurfaceToolTests  # changed
+TopOptFlowsTests.SurfaceUndoTests  # changed
+TopOptFlowsTests.SurfaceUnionDefectControlTests  # changed; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.SurfaceUnionPartsTests  # changed
+TopOptFlowsTests.SurfaceUnionTests  # changed
+TopOptFlowsTests.SurfaceWholeFaceHighlightTests  # changed
+TopOptFlowsTests.ThreeStageVisibilityTests  # changed; pins WorkspacePlaceholder.swift
+TopOptFlowsTests.UndoHistoryTests  # named
+TopOptFlowsTests.UnifiedShadingTests  # pins bridge.cpp
+TopOptFlowsTests.UnreadableProjectTests  # reads the Sources directory
+TopOptFlowsTests.VariantEntryGatingTests  # pins WorkspacePlaceholder.swift; pins bridge.cpp; reads the Sources directory
+TopOptFlowsTests.VariantRetentionTests  # pins WorkspacePlaceholder.swift
+TopOptFlowsTests.ViewerTests  # named
+TopOptKitTests.BridgeGuardTests  # pins TopOptBridge.hpp; pins bridge.cpp
+TopOptKitTests.FlexibleBridgeTests  # Flexible*
+TopOptKitTests.FlexibleSliceProbe  # Flexible*
+TopOptKitTests.FlexibleSquishFETests  # Flexible*
+TopOptKitTests.FlexibleSquishModulusTests  # Flexible*
+TopOptKitTests.FlexibleSquishStepsTests  # Flexible*
+TopOptKitTests.FlexibleTimingProbe  # Flexible*
+TopOptKitTests.FrozenLatticeNeverArmedBareTests  # changed; pins bridge.cpp; reads the Sources directory

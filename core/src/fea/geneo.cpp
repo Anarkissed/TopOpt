@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <climits>
 #include <cmath>
@@ -747,9 +748,33 @@ bool build_basis(GeneoState& S, const MatfreeReduced& m,
     bool ok = false;
   };
   std::vector<SubBuild> built(cores.size());
+  // DYNAMIC scheduling. The pool splits a range into one contiguous chunk per
+  // thread, and the per-core LOBPCG cost varies by orders of magnitude (a
+  // void-filler core converges at once; a thin-plate core runs to the
+  // iteration cap), so contiguous chunks left one thread doing the build alone
+  // (Carriage Arms res 96: 877 s, 1 of 6 threads busy at the end). Each worker
+  // instead pulls the next core from a shared counter. A core's result depends
+  // only on its own index (its LocalOp, its seed) and `built` is merged in
+  // core order below, so the basis is bit-identical to the static split.
+  const int ncores = static_cast<int>(cores.size());
+  std::atomic<int> next_core{0};
+  // THE SAFETY NET (fea.hpp SolverStopped): the calling Jacobi-CG solve's
+  // deadline (0 = none). A build still running at it stands down — no basis,
+  // the solve stays plain — so the net fires at its next poll instead of after
+  // the whole build. Read here, on the solver's thread; the workers get the
+  // value. A build that finishes in time is untouched (bit-identical).
+  const double net_deadline = mf_safety_net_deadline();
+  std::atomic<bool> abandoned{false};
   mf_parallel_ranges(
-      0, static_cast<int>(cores.size()), 1, [&](int lo, int hi) {
-        for (int si = lo; si < hi; ++si) {
+      0, std::max(1, std::min(ncores, mf_thread_count())), 1,
+      [&](int wlo, int whi) {
+        for (int w = wlo; w < whi; ++w)
+        for (int si = next_core.fetch_add(1); si < ncores;
+             si = next_core.fetch_add(1)) {
+          if (net_deadline > 0.0 && mf_steady_ms() >= net_deadline) {
+            abandoned.store(true);
+            break;
+          }
           LocalOp L = build_local(g, emod, cores[si], cfg.overlap, K0, fixed,
                                   W, ctx.lattice, KAp, KBp, KCp);
           if (L.n < 24) continue;
@@ -779,6 +804,7 @@ bool build_basis(GeneoState& S, const MatfreeReduced& m,
         }
       });
 
+  if (abandoned.load()) return false;  // past the safety net: no basis
   S.cols.clear();
   long long bytes = 0;
   for (std::size_t si = 0; si < built.size(); ++si) {
@@ -790,7 +816,19 @@ bool build_basis(GeneoState& S, const MatfreeReduced& m,
   }
   S.Nt = static_cast<int>(S.cols.size());
   S.basis_bytes = bytes;
-  if (bytes > static_cast<long long>(kGeneoMaxBasisMB) * 1024 * 1024) {
+  // The second refusal: a basis wider than kGeneoCoarseDenseCap. Above the cap
+  // the coarse solve is the capped inner-CG on a DENSE N_t x N_t matrix
+  // (coarse_inner_cg): an N_t^2 Galerkin assembly, an N_t^2 * 8-byte operator
+  // and 40 dense matvecs inside EVERY outer CG iteration - and, being a capped
+  // iterative solve, a preconditioner that changes with its input under a CG
+  // that assumes a fixed one. Phase 2 left that path unmeasured at production
+  // extents. Measured on the maintainer's Carriage Arms (res 96, ng 1,195,776,
+  // 2026-10-23): N_t = 15,734, a 1.98 GB coarse matrix, the first solve still
+  // in the coarse apply after 40 min (91 % of samples in a dense Eigen gemv).
+  // Refusing keeps the solve plain Jacobi-CG - exact, the same outcome as the
+  // memory refusal - and is recorded the same way (action 4).
+  if (S.Nt > kGeneoCoarseDenseCap ||
+      bytes > static_cast<long long>(kGeneoMaxBasisMB) * 1024 * 1024) {
     S.cols.clear();
     S.Nt = 0;
     S.basis_bytes = 0;

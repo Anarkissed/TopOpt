@@ -34,10 +34,10 @@ struct ClearanceSyncRowCheckbox: View {
         }
         .buttonStyle(.plain)
         .help(isOn
-              ? "Synced — this site shares one clearance with the other checked sites. Uncheck to give it its own."
-              : "Independent — this site keeps its own clearance. Check to adopt the shared value.")
-        .accessibilityLabel("Sync clearance for this site")
+              ? "Synced — this site shares one Keep clear distance with the other checked sites. Uncheck to give it its own."
+              : "Independent — this site keeps its own Keep clear distance. Check to adopt the shared value.")
+        .accessibilityLabel("Sync the Keep clear distance for this site")
         .accessibilityValue(isOn ? "On" : "Off")
-        .accessibilityHint("Checked sites share one clearance; unchecked sites are independent.")
+        .accessibilityHint("Checked sites share one Keep clear distance; unchecked sites are independent.")
     }
 }

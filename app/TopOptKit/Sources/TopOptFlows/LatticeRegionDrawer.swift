@@ -53,9 +53,15 @@ public struct LatticeDrawerRow: Equatable, Sendable {
         /// The relative density, as a PERCENT in the UI and a fraction in the
         /// model. Typeable only, and only under the per-region mode.
         case density
+        /// ★ The per-face CELL, in mm (2026-08-25, the grading options) — a
+        /// control only under the No-grade / Fit-shape modes; a fact otherwise.
+        case cell
         /// ★ THE IN-PLANE EXPAND, in mm (maintainer, 2026-08-17) — how far the
         /// slab reaches PAST the face it came from, in x and y, never in depth.
         case expand
+        /// ★ Synthetic foci for an unloaded wall (1…5, or Auto) — a pill row,
+        /// not a keypad (2026-09-05).
+        case foci
     }
 
     /// One or two words.
@@ -64,15 +70,21 @@ public struct LatticeDrawerRow: Equatable, Sendable {
     public let value: String
     /// ★ §4b — anything but `.fact` is a control. Everything else is a FACT.
     public let kind: Kind
+    /// ★ A control that must not act (2026-09-05): the Foci row on a wall core found to
+    /// CARRY LOAD (its verdict, since 2026-09-29) — shown greyed, taps ignored.
+    public var disabled: Bool = false
+    /// ★ A few words under the value saying whose number it is (ruling A, 2026-10-08:
+    /// "estimate, core checks it"); nil = none.
+    public var note: String? = nil
 
     /// The unit the keypad shows for this row — and the unit is part of the
     /// CORRECTNESS, not the styling: "DENSITY 35 mm" is how the wrong-setter bug
     /// looked on screen.
     public var unit: String {
         switch kind {
-        case .depth, .expand: return "mm"
+        case .depth, .expand, .cell: return "mm"
         case .density: return "%"
-        case .fact: return ""
+        case .fact, .foci: return ""
         }
     }
 
@@ -158,12 +170,50 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
                             held: Bool,
                             latticeReachesTheRun: Bool = true,
                             perRegionDensity: Bool = false,
-                            expandMM: Double = 0) -> LatticeRegionDrawer {
+                            // ★ Density row FIRST + emphasized (his fixes 5.2/5.4,
+                            // 2026-08-24 night) — single-cell aesthetic only.
+                            densityFirst: Bool = false,
+                            // ★ Overrides the card's absolute % — the RELATIVE
+                            // reading against the printable→quilt band (fix 5.5).
+                            densityDisplay: String? = nil,
+                            // ★ The Cell row as a CONTROL (2026-08-25): only
+                            // under the No-grade / Fit-shape grading modes, and
+                            // shown directly ABOVE Density (his spec).
+                            cellControl: Bool = false,
+                            cellDisplay: String? = nil,
+                            expandMM: Double = 0,
+                            // ★ The Foci row (2026-09-05): present ONLY when the
+                            // lattice is organic, the stage Aesthetic and synthetic
+                            // stresses are on — every other drawer is unchanged.
+                            syntheticFoci: String? = nil,
+                            // ★ Greyed on a wall core found to carry load — foci are
+                            // never allowed there.
+                            fociDisabled: Bool = false,
+                            // ★ Core's verdict on the wall in plain words ("Carries
+                            // load" / "Barely loaded — a made-up load can be added"),
+                            // a FACT row under Foci; nil until a bake has asked core.
+                            wallStress: String? = nil,
+                            // ★ Q2 (2026-10-05): a type core does not call live has no band and
+                            // no derived cell, density or strut — core's readiness words lead,
+                            // and those rows show nothing rather than octet's numbers or zeros.
+                            typeRefusal: String? = nil) -> LatticeRegionDrawer {
+        if let t = typeRefusal, latticeReachesTheRun {
+            return LatticeRegionDrawer(
+                headline: Headline(text: t, verdict: .outOfRegime),
+                collapsedValue: "—",
+                verdict: .outOfRegime,
+                rows: [LatticeDrawerRow(label: "Depth", value: String(format: "%.1f mm", depthMM),
+                                        kind: .depth),
+                       LatticeDrawerRow(label: "Hands over", value: card?.heldText ?? "—"),
+                       LatticeDrawerRow(label: "Expand", value: String(format: "%.1f mm", expandMM),
+                                        kind: .expand)],
+                held: held)
+        }
         guard latticeReachesTheRun else {
             return LatticeRegionDrawer(
-                headline: Headline(text: "Frozen, not latticed", verdict: .outOfRegime),
+                headline: Headline(text: LatticeSectorOutline.notLatticedWords(protected: held), verdict: .noMaterial),
                 collapsedValue: card?.heldText ?? "—",
-                verdict: .outOfRegime,
+                verdict: .noMaterial,   // ★ batch E: no surface to lattice — never "Out of regime"
                 rows: [LatticeDrawerRow(label: "Depth",
                                         value: String(format: "%.1f mm", depthMM),
                                         modifiable: true),
@@ -185,14 +235,22 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
         case .outOfRegime:
             // ★ The failure that produced empty lattices for weeks, named before
             // the run: the slab is thinner than the cells the certifier needs.
-            head = Headline(text: String(format: "%.1f cells across", c.cellsPerMember),
-                            verdict: .outOfRegime)
+            // ★★ ruling A (2026-10-08): an estimate says so; organic has no octet count to give
+            switch c.cellsAcrossSource {
+            case .core:
+                head = Headline(text: String(format: "%.1f cells across", c.cellsPerMember), verdict: .outOfRegime)
+            case .estimate:
+                head = Headline(text: String(format: "%.1f cells across (estimate)", c.cellsPerMember),
+                                verdict: .outOfRegime)
+            case .none:
+                head = nil
+            }
         case .noMaterial:
             head = Headline(text: "Holds no material", verdict: .noMaterial)
         case .certified:
             head = nil
         }
-        let rows = [
+        var rows = [
             // ★ THE DEPTH ROW PRINTS THE DEPTH IT WAS HANDED, NOT THE CARD'S
             // (task 2026-08-17-lattice-stage-repair §2). `depthMM` is the value
             // `ProjectModel.latticeSlabDepthMM(ref:in:)` resolves for the thing
@@ -211,17 +269,23 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
             // and that number was one multiplication away and not on screen.
             LatticeDrawerRow(label: "As lattice", value: c.latticedText),
             LatticeDrawerRow(label: "Saved", value: c.savedText),
-            LatticeDrawerRow(label: "Cell", value: c.cellText),
+            LatticeDrawerRow(label: "Cell", value: cellDisplay ?? c.cellText,
+                             kind: cellControl ? .cell : .fact),
             // ★ A FACT in every mode but one. Under per-region the user states
             // this number, so there it is the second control — and ONLY there
             // (maintainer, 2026-08-17: "ensure this can be editable — only when
             // the per-region setting has been selected"). `.density` carries its
             // own setter and its own unit; before this task it inherited the
             // DEPTH's, which is why typing here wrote millimetres of depth.
-            LatticeDrawerRow(label: "Density", value: c.densityText,
+            LatticeDrawerRow(label: "Density", value: densityDisplay ?? c.densityText,
                              kind: perRegionDensity ? .density : .fact),
             LatticeDrawerRow(label: "Strut", value: c.strutText),
-            LatticeDrawerRow(label: "Cells across", value: c.cellsText),
+            // ★★ ruling A (2026-10-08): core's count plainly; the bake's estimate labelled; organic "—"
+            { () -> LatticeDrawerRow in
+                var r = LatticeDrawerRow(label: "Cells across", value: c.cellsAcrossSource == .none ? "—" : c.cellsText)
+                if c.cellsAcrossSource == .estimate, c.cellsPerMember > 0 { r.note = LatticeFaceCard.estimateNote }
+                return r
+            }(),
             // ★ HOW FAR THIS SLAB REACHES PAST ITS FACE (maintainer,
             // 2026-08-17). A second CONTROL, in mm like the depth, and the only
             // other one — it grows x and y, never the depth. 0 mm is "exactly the
@@ -230,6 +294,29 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
                              value: String(format: "%.1f mm", expandMM),
                              kind: .expand),
         ]
+        // ★ 5.2 — the density leads the list when the caller says it is the
+        // face's primary dial (single-cell aesthetic).
+        if densityFirst, let i = rows.firstIndex(where: { $0.label == "Density" }) {
+            let r = rows.remove(at: i)
+            rows.insert(r, at: 0)
+        }
+        // ★ The CELL sits directly ABOVE the density whenever it is a control
+        // ("include a cell size value above 'density'" — 2026-08-25).
+        if cellControl, let ci = rows.firstIndex(where: { $0.label == "Cell" }) {
+            let r = rows.remove(at: ci)
+            let di = rows.firstIndex(where: { $0.label == "Density" }) ?? rows.count
+            rows.insert(r, at: di)
+        }
+        // ★ Foci sits directly BELOW Density: the wall's own synthetic count.
+        if let f = syntheticFoci {
+            let di = rows.firstIndex(where: { $0.label == "Density" }).map { $0 + 1 } ?? rows.count
+            var row = LatticeDrawerRow(label: "Foci", value: f, kind: .foci)
+            row.disabled = fociDisabled
+            rows.insert(row, at: di)
+            if let w = wallStress {
+                rows.insert(LatticeDrawerRow(label: "Stress on wall", value: w), at: di + 1)
+            }
+        }
         return LatticeRegionDrawer(headline: head, collapsedValue: c.heldText,
                                    verdict: c.verdict, rows: rows, held: held)
     }

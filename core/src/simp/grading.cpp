@@ -5,9 +5,11 @@
 #include <limits>
 #include <map>
 #include <stdexcept>
+#include <utility>
 
 #include "topopt/lattice.hpp"  // lattice_rho_min/max, lattice_cells_per_member_min,
                                // octet_strut_diameter_mm
+#include "topopt/mesh_distance.hpp"
 #include "topopt/voxel.hpp"    // local_member_thickness_mm
 
 namespace topopt {
@@ -35,14 +37,27 @@ namespace {
 // across. `floor_mm` is the printability floor: below n_star * floor_mm no LEGAL
 // cell exists for this member at all, so the voxel is irrecoverable by any cell
 // choice and any remedy naming a cell size would be a guess.
-void note_member_too_thin(GradedField& out, double width_mm, double n_star,
+//
+// ★ D11: IT MUST BE THE FINEST CELL ANY MODE CAN REACH -- `abs_floor_mm`, the dense
+// floor at the job's cap -- and the same one on every path. Uniform and swept used to
+// pass the LIGHT floor (w/phi(rho_min), 4.931 mm on octet at a 0.45 mm bead) while Fit
+// passed the capped dense floor (2.25 mm). With N* = 5 that is "irrecoverable" declared
+// below 24.66 mm on one path and below 11.25 mm on another, for the same part: a member
+// of 15 mm was called beyond rescue on uniform while Fit could in fact reach it. The
+// refusal sentence and the forecast's remedies both read this count.
+// Returns the voxel's fallback_reason: 1, or 2 when no legal cell could ever hold it.
+char note_member_too_thin(GradedField& out, double width_mm, double n_star,
                           double floor_mm) {
   ++out.fallback_member_too_thin;
   if (std::isfinite(width_mm)) {
     if (width_mm > out.fallback_max_member_width_mm)
       out.fallback_max_member_width_mm = width_mm;
-    if (width_mm < n_star * floor_mm) ++out.fallback_irrecoverable_by_cell;
+    if (width_mm < n_star * floor_mm) {
+      ++out.fallback_irrecoverable_by_cell;
+      return 2;
+    }
   }
+  return 1;
 }
 
 }  // namespace
@@ -177,7 +192,18 @@ GradedField grade_lattice(const VoxelGrid& grid,
   GradedField out;
   // ── the limits, READ from core (never hardcoded here) ──────────────────────────
   const double rho_lo = lattice_rho_min(topo);
-  const double rho_hi = lattice_rho_max(topo);
+  // ★ THE STATED CAP, UNDER EITHER INTENT (see GradingLawParams). Lowering the band's
+  // TOP, not the density of any one voxel: everything downstream -- the aesthetic
+  // range, the percentile, the histogram's ceiling count that ruling D's refusal reads
+  // -- then answers to the capped band without a second notion of "the top" existing.
+  const double rho_hi_band = lattice_rho_max(topo);
+  const double rho_hi = params.max_relative_density > 0.0
+                            ? std::min(rho_hi_band, params.max_relative_density)
+                            : rho_hi_band;
+  if (params.max_relative_density > 0.0 && !(rho_hi > rho_lo))
+    throw std::invalid_argument(
+        "grade_lattice: max_relative_density is at or below the certifiable band's "
+        "floor, so no density is admissible");
   const double n_star = lattice_cells_per_member_min(topo);
   out.band_rho_min = rho_lo;
   out.band_rho_max = rho_hi;
@@ -246,7 +272,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
   // construction and measured (bar R1).
   const double abs_floor_mm =
       params.min_extrudable_width_mm /
-      octet_strut_diameter_mm(rho_hi, 1.0);  // = w / phi(rho_max)
+      lattice_strut_diameter_mm(params.topology, rho_hi, 1.0);  // = w / phi(rho_max)
   // AUTO takes `floor_mm` itself — UNCHANGED, deliberately (bar S4): past runs stay
   // reproducible and the default path stays byte-identical. FIXED takes the caller's
   // target, raised only to the floor that actually binds. SWEPT's cell is per-region
@@ -269,16 +295,32 @@ GradedField grade_lattice(const VoxelGrid& grid,
   // in the limit — rather than to 0, which would silently emit an under-width strut.
   // The same resolution lattice_derive_cell_for_member applies, for the same reason.
   auto print_rho_floor = [&](double S) {
+    // ★ D1: the job's cap, so the floor handed out is the floor grade_lattice applies.
     const double r = lattice_min_density_for_strut(topo, S,
-                                                   params.min_extrudable_width_mm);
+                                                   params.min_extrudable_width_mm,
+                                                   params.max_relative_density);
     return r >= 0.0 ? r : rho_hi;
   };
   out.cell_size_mm = cell;
+  out.finest_cell_mm = cell;  // Fixed / Auto; Swept and Fit set their own below
   out.cell_mode = params.cell_mode;
 
   // ── the local member width field (PR 206) ───────────────────────────────────────
-  const std::vector<double> width =
-      local_member_thickness_mm(grid, density, iso, params.thickness_cap_voxels);
+  // ★ THE LATTICE'S MEMBER WIDTH (reviewer's rulings 11-09): on the part's own surface when
+  // the caller has it, else the voxel staircase with the grid's outside void (a part that
+  // fills its own grid is measured, not read as infinitely thick), and each convex corner's
+  // residue joined to the member it is a corner of (lattice_member_width_mm), so a thick
+  // member's edges are not read as thin members.
+  CornerJoinStats corner;
+  std::vector<char> corner_joined;
+  const std::vector<double> width = lattice_member_width_mm(
+      grid, density, iso, params.thickness_cap_voxels, n_star * cell, cell,
+      params.member_surface, &corner, &corner_joined);
+  out.member_width_mm = width;
+  out.corner_residue_voxels = corner.residue_voxels;
+  out.corner_joined_voxels = corner.joined_voxels;
+  out.corner_reach_mm = corner.reach_mm;
+  out.corner_joined = std::move(corner_joined);
 
   // ── normalise demand over the candidate set ─────────────────────────────────────
   double demand_max = 0.0;
@@ -401,7 +443,12 @@ GradedField grade_lattice(const VoxelGrid& grid,
   post.cell_size_mm = cell;
   post.mask.assign(n, 0);
   post.relative_density.assign(n, 0.0);
+  // The width the certificate's own floor guard reads: the law's, so the two never
+  // disagree about how thick a member is.
+  post.member_width_mm = width;
+  out.fallback_reason.assign(n, 0);
   out.clamp_flags.assign(n, 0);
+  out.cover_dropped_rho.assign(n, 0.0);
 
   const double kInf = std::numeric_limits<double>::infinity();
   double rho_min_used = kInf, rho_max_used = 0.0;
@@ -488,9 +535,103 @@ GradedField grade_lattice(const VoxelGrid& grid,
     }
   }
 
+  // ★ E3: the region that owns voxel e and its own grading, or null.
+  if (params.region_override_ids != nullptr && params.region_override_ids->size() != n)
+    throw std::invalid_argument("grade_lattice: region_override_ids->size() != voxel_count");
+  auto override_at = [&](std::size_t e) -> const GradingRegionOverride* {
+    if (params.region_override_ids == nullptr || params.region_overrides == nullptr)
+      return nullptr;
+    const int id = (*params.region_override_ids)[e];
+    if (id < 1 || static_cast<std::size_t>(id) > params.region_overrides->size())
+      return nullptr;
+    return &(*params.region_overrides)[static_cast<std::size_t>(id - 1)];
+  };
+
+  // ★ THE SHAPE-GRADE BAND (GradingLawParams::band_*). `band_t` is the voxel's place in
+  // its band, 0 at the outline .. 1 at the inner edge; a voxel in no band reads 1.
+  const bool banded = params.band_distance_mm != nullptr && params.band_mm != nullptr &&
+                      params.band_amount != nullptr &&
+                      params.band_distance_mm->size() == n && params.band_mm->size() == n &&
+                      params.band_amount->size() == n;
+  auto band_t = [&](std::size_t e) {
+    if (!banded) return 1.0;
+    const double b = (*params.band_mm)[e];
+    if (!(b > 0.0)) return 1.0;
+    return std::min(1.0, std::max(0.0, (*params.band_distance_mm)[e] / b));
+  };
+  // q: the QUILT ROW, the lightest density whose strut is as thick as the type's law
+  // ever draws it (the app's quiltRowDensity), under the band's top and the job's cap.
+  double band_q = 0.0;
+  if (banded) {
+    const double dmax = lattice_strut_diameter_mm(topo, 1.0, 1.0);
+    double lo = 0.0, hi = 1.0;
+    for (int it = 0; it < 64; ++it) {
+      const double mid = 0.5 * (lo + hi);
+      if (lattice_strut_diameter_mm(topo, mid, 1.0) >= dmax * (1.0 - 1e-3)) hi = mid;
+      else lo = mid;
+    }
+    out.band_quilt_rho = hi;
+    band_q = std::min(hi, rho_hi);
+    if (params.max_relative_density > 0.0) band_q = std::min(band_q, params.max_relative_density);
+  }
+  // The preview's raise (LatticeOctreeBake shapedRho): toward q by (1 - t) x share x amount.
+  auto band_raise = [&](std::size_t e, double r, double share) {
+    const double t = band_t(e);
+    if (t >= 1.0 || !(band_q > r)) return r;
+    const double a = (*params.band_amount)[e] > 0.0 ? (*params.band_amount)[e] : 1.0;
+    return std::max(r, std::min(band_q, r + (band_q - r) * (1.0 - t) * share * a));
+  };
+  constexpr double kCoarseCellBandRaise = 0.35;  // the app's coarseCellBandRaise
+  // the swept band's per-voxel planned level and finest printable cell (mm)
+  std::vector<signed char> band_pref;
+  std::vector<double> band_finest_mm;
+
   // The demand -> density map (requirement 1 / L2), identical in every cell mode:
   // density depends on DEMAND alone, never on cell size. That is exactly what lets
   // the cell-size plan consume it without circularity.
+  //
+  // ★ E3: a region's own band and exponent replace the part's for the voxels it owns.
+  // Its floor raises the grade (it is the user's band, not a clamp to certify); its
+  // ceiling is where the curve tops out. Both lie inside the certifiable band (parse).
+  auto rho_graded = [&](std::size_t e) {
+    const GradingRegionOverride* ov = override_at(e);
+    const double g_e = ov && ov->demand_exponent > 0.0 ? ov->demand_exponent : gamma;
+    const bool own_band = ov && ov->rho_max > 0.0;
+    if (aesthetic) {
+      const double lo_e = own_band ? std::max(rho_lo, ov->rho_min) : aes_lo;
+      const double hi_e = own_band ? std::min(rho_hi, ov->rho_max) : aes_hi;
+      const double f = grading_demand_fraction(GradingIntent::Aesthetic, demand[e],
+                                               aes_ref, 1.0);
+      return lo_e + (hi_e - lo_e) * std::pow(f, g_e * aes_w);
+    }
+    double frac;
+    if (allowable > 0.0) {
+      frac = grading_demand_fraction(GradingIntent::Structural, demand[e],
+                                     allowable, u_target);
+    } else {
+      frac = demand_max > 0.0
+                 ? std::min(1.0, std::max(0.0, demand[e] / demand_max))
+                 : 0.0;
+    }
+    const double hi_e = own_band ? std::min(rho_hi, ov->rho_max) : rho_hi;
+    const double r = hi_e * std::pow(frac, g_e);
+    return own_band ? std::max(r, ov->rho_min) : r;
+  };
+  // ★ E3: a region graded "off" or "shape" takes ONE density: its stated one, or the
+  // peak of its own grade over the voxels it owns (so it is at least as dense as the
+  // grade everywhere, and certifies wherever the grade does). Measured here, once.
+  std::vector<double> flat_peak;
+  if (params.region_overrides != nullptr && params.region_override_ids != nullptr) {
+    flat_peak.assign(params.region_overrides->size(), 0.0);
+    for (std::size_t e = 0; e < n; ++e) {
+      const GradingRegionOverride* ov = override_at(e);
+      if (!ov || !ov->flat || ov->flat_rho > 0.0) continue;
+      const bool candidate = density[e] > iso && (!region || (*region)[e] != 0);
+      if (!candidate || !std::isfinite(demand[e])) continue;
+      const std::size_t k = static_cast<std::size_t>((*params.region_override_ids)[e] - 1);
+      flat_peak[k] = std::max(flat_peak[k], std::min(rho_hi, std::max(rho_lo, rho_graded(e))));
+    }
+  }
   auto rho_of = [&](std::size_t e) {
     // MULTISCALE (task multiscale-lattice-to): the optimizer already chose this
     // voxel's relative density and paid a compliance objective evaluated at the
@@ -506,6 +647,14 @@ GradedField grade_lattice(const VoxelGrid& grid,
     if (params.region_relative_density != nullptr &&
         (*params.region_relative_density)[e] > 0.0)
       return (*params.region_relative_density)[e];
+    // ★ E3: a region's one density, then a region's own band and exponent.
+    if (const GradingRegionOverride* ov = override_at(e)) {
+      if (ov->flat) {
+        const std::size_t k = static_cast<std::size_t>((*params.region_override_ids)[e] - 1);
+        return ov->flat_rho > 0.0 ? ov->flat_rho : flat_peak[k];
+      }
+      return rho_graded(e);
+    }
     // ★ THE LAW (task 2026-08-20-lattice-only-grading, §0). Two normalisations,
     // one arithmetic. The DENOMINATOR is the whole difference:
     //   * ABSOLUTE  — the material allowable. `frac` is UTILISATION, a real
@@ -592,7 +741,8 @@ GradedField grade_lattice(const VoxelGrid& grid,
     const double rho_r = std::min(rho_hi, std::max(rho_lo, rho_of(e)));
     for (int L = 0; L <= out.cell_plan.max_level; ++L) {
       const double S = out.cell_plan.cell_mm_at_level(L);
-      if (octet_strut_diameter_mm(rho_r, S) >= params.min_extrudable_width_mm)
+      if (lattice_strut_diameter_mm(params.topology, rho_r, S) >=
+          params.min_extrudable_width_mm)
         return S;
     }
     return 0.0;
@@ -687,7 +837,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
           out.subfloor_flags[e] = 1;
           ++out.subfloor_retained_voxels;
           if (GradedField::SubfloorRegion* rr = region_record(e)) ++rr->retained_voxels;
-          const double d_r = octet_strut_diameter_mm(rho_r, cell);
+          const double d_r = lattice_strut_diameter_mm(params.topology, rho_r, cell);
           if (rho_r < rho_min_used) rho_min_used = rho_r;
           if (rho_r > rho_max_used) rho_max_used = rho_r;
           if (width[e] < min_width) min_width = width[e];
@@ -708,7 +858,9 @@ GradedField grade_lattice(const VoxelGrid& grid,
         // the printability floor by construction (`uniform_cell` above), so no
         // voxel can be rejected for an unprintable strut. A receipt reading
         // `unprintable: 0` on this path means "impossible here", not "none today".
-        note_member_too_thin(out, width[e], n_star, floor_mm);
+        // ★ D11: the capped dense floor, the same one Fit passes -- it is the finest
+        // cell any mode can reach, so it is what "irrecoverable by ANY cell" means.
+        out.fallback_reason[e] = note_member_too_thin(out, width[e], n_star, abs_floor_mm);
         continue;
       }
 
@@ -737,7 +889,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
       if (rho > rho_max_used) rho_max_used = rho;
       if (width[e] < min_width) min_width = width[e];
       if (cpm < min_cpm) min_cpm = cpm;
-      const double d = octet_strut_diameter_mm(rho, cell);
+      const double d = lattice_strut_diameter_mm(params.topology, rho, cell);
       if (d < min_d) min_d = d;
       if (d > max_d) max_d = d;
       if (d < params.min_extrudable_width_mm) out.any_strut_below_min = true;
@@ -779,6 +931,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
         // guessing is the defect this mode exists to remove.
         ++out.solid_fallback_voxels;
         ++out.fit_no_derivation_voxels;
+        out.fallback_reason[e] = 4;
         continue;
       }
       cand[e] = 1;
@@ -786,9 +939,11 @@ GradedField grade_lattice(const VoxelGrid& grid,
       if (want[e] < s_min) s_min = want[e];
       if (want[e] > s_max) s_max = want[e];
     }
+    if (s_max > 0.0) out.finest_cell_mm = s_min;  // the finest cell any region asked for
 
     if (s_max > 0.0) {
       CellPlanParams pp;
+      pp.max_relative_density = params.max_relative_density;  // D1: the cap reaches the plan
     // ★ The planner chooses the CELL; relaxing only grade_lattice's post-hoc check
     // would change nothing (measured: +0 voxels). It receives the LOOSEST floor the
     // adaptive rule permits anywhere; each voxel is still held to its OWN requirement
@@ -848,7 +1003,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
         // band-top one, so measuring irrecoverability against the rho_min floor would
         // call a member irrecoverable that fit can in fact reach.
         ++out.solid_fallback_voxels;
-        note_member_too_thin(out, width[e], n_star, abs_floor_mm);
+        out.fallback_reason[e] = note_member_too_thin(out, width[e], n_star, abs_floor_mm);
         continue;
       }
       // ★ THE PERCOLATION FLOOR, measured against the DESIGN's own member width
@@ -858,7 +1013,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
       const double cpm = width[e] / ce;
       if (cpm < perc_floor) {
         ++out.solid_fallback_voxels;
-        note_member_too_thin(out, width[e], n_star, abs_floor_mm);
+        out.fallback_reason[e] = note_member_too_thin(out, width[e], n_star, abs_floor_mm);
         continue;
       }
       // Clamp FIRST, raise second — see the ordering note on the uniform path: the
@@ -876,7 +1031,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
       if (rho > rho_max_used) rho_max_used = rho;
       if (width[e] < min_width) min_width = width[e];
       if (cpm < min_cpm) min_cpm = cpm;
-      const double d = octet_strut_diameter_mm(rho, ce);
+      const double d = lattice_strut_diameter_mm(params.topology, rho, ce);
       if (d < min_d) min_d = d;
       if (d > max_d) max_d = d;
       if (d < params.min_extrudable_width_mm) out.any_strut_below_min = true;
@@ -908,9 +1063,12 @@ GradedField grade_lattice(const VoxelGrid& grid,
       // voxels that end up latticed, so the accounting means what it means on the
       // uniform paths.
       rho_raw[e] = std::min(rho_hi, std::max(rho_lo, rho_of(e)));
+      // ★ the band is raised after the plan (below), once, for every type: a sheet's band
+      // thickens its wall only, so the plan never sees it and its cells do not move
     }
 
     CellPlanParams pp;
+    pp.max_relative_density = params.max_relative_density;  // D1: the cap reaches the plan
     // ★ The planner chooses the CELL; relaxing only grade_lattice's post-hoc check
     // would change nothing (measured: +0 voxels). It receives the LOOSEST floor the
     // adaptive rule permits anywhere; each voxel is still held to its OWN requirement
@@ -919,9 +1077,101 @@ GradedField grade_lattice(const VoxelGrid& grid,
     pp.topology = topo;
     pp.mode = CellSizeMode::Swept;
     pp.min_cell_size_mm = params.min_cell_size_mm;
+    if (params.min_cell_size_mm > 0.0) out.finest_cell_mm = params.min_cell_size_mm;  // the ladder's base
     pp.max_cell_size_mm = params.max_cell_size_mm;
     pp.min_extrudable_width_mm = params.min_extrudable_width_mm;
     pp.thickness_cap_voxels = params.thickness_cap_voxels;
+    // ★ E3: each region's own cell window, as the part's ladder levels per voxel. The
+    // ladder's BASE stays the part's (a region cannot go finer than it: the octree is
+    // one dyadic ladder); its TOP rises to the coarsest region max, and every voxel no
+    // window covers is capped at the part's own top, so its plan is unchanged.
+    std::vector<signed char> lvl_lo, lvl_hi;
+    {
+      const double S0 = params.min_cell_size_mm;
+      const int part_top = cell_plan_max_level(S0, params.max_cell_size_mm);
+      auto level_lo = [&](double mm) {   // the finest ladder cell at or above mm
+        int L = 0;
+        while (S0 * std::ldexp(1.0, L) < mm * (1.0 - 1e-9)) ++L;
+        return L;
+      };
+      auto level_hi = [&](double mm) {   // the coarsest ladder cell at or below mm
+        int L = -1;
+        while (S0 * std::ldexp(1.0, L + 1) <= mm * (1.0 + 1e-9)) ++L;
+        return L;
+      };
+      int top = part_top;
+      bool any = false;
+      if (params.region_overrides != nullptr)
+        for (const GradingRegionOverride& o : *params.region_overrides)
+          if (o.cell_max_mm > 0.0) {
+            any = true;
+            top = std::max(top, level_hi(o.cell_max_mm));
+          } else if (o.cell_min_mm > 0.0) {
+            any = true;
+          }
+      const bool band_cells = banded && !lattice_topology_is_sheet(topo);
+      if (any || band_cells) {
+        lvl_lo.assign(n, -1);
+        lvl_hi.assign(n, static_cast<signed char>(part_top));
+        for (std::size_t e = 0; e < n; ++e) {
+          const GradingRegionOverride* o = override_at(e);
+          if (o == nullptr || (o->cell_min_mm <= 0.0 && o->cell_max_mm <= 0.0)) continue;
+          lvl_lo[e] = static_cast<signed char>(o->cell_min_mm > 0.0 ? level_lo(o->cell_min_mm) : 0);
+          lvl_hi[e] = static_cast<signed char>(o->cell_max_mm > 0.0 ? level_hi(o->cell_max_mm)
+                                                                    : part_top);
+        }
+        // ★ THE BAND'S CELLS, the preview's way (LatticeOctreeBake): the ramp starts at
+        // the voxel's finest PRINTABLE cell f (its strut at the whole raise reaches the line
+        // width) and runs to its coarsest S_base, a cell of size S allowed once
+        // distance + S/2 >= band (S - f) / (S_base - f); the voxel is PLANNED at the
+        // coarsest such cell (the preview lays the largest cell that passes), raised by the
+        // finest's whole share there or the coarser 0.35, and preferred at it.
+        if (band_cells) {
+          band_pref.assign(n, -1);
+          band_finest_mm.assign(n, 0.0);
+          const double w = params.band_line_width_mm > 0.0 ? params.band_line_width_mm
+                                                           : params.min_extrudable_width_mm;
+          for (std::size_t e = 0; e < n; ++e) {
+            if (!cand[e] || band_t(e) >= 1.0) continue;
+            const int lo_l = std::max(0, static_cast<int>(lvl_lo[e]));
+            const int hi_l = lvl_hi[e];
+            const double r0 = rho_raw[e];
+            auto S_at = [&](int L) { return S0 * std::ldexp(1.0, L); };
+            const double full = band_raise(e, r0, 1.0);
+            int Lf = -1;
+            for (int L = lo_l; L <= hi_l && Lf < 0; ++L)
+              if (lattice_strut_diameter_mm(topo, full, S_at(L)) >= w) Lf = L;
+            if (Lf < 0) {  // no cell prints even at the whole raise: the plan drops it
+              rho_raw[e] = full;
+              continue;
+            }
+            const double f = S_at(Lf), sb = S_at(hi_l);
+            const double d = (*params.band_distance_mm)[e], b = (*params.band_mm)[e];
+            int Lr = Lf;
+            if (sb > f * (1.0 + 1e-9))
+              for (int L = Lf + 1; L <= hi_l; ++L) {
+                if (d + 0.5 * S_at(L) >= b * (S_at(L) - f) / (sb - f) - 1e-9) Lr = L;
+                else break;
+              }
+            double rp = band_raise(e, r0, Lr == Lf ? 1.0 : kCoarseCellBandRaise);
+            while (Lr < hi_l && lattice_strut_diameter_mm(topo, rp, S_at(Lr)) < w) {
+              ++Lr;  // the coarser share does not print here: one cell coarser
+              rp = band_raise(e, r0, kCoarseCellBandRaise);
+            }
+            rho_raw[e] = rp;
+            band_pref[e] = static_cast<signed char>(Lr);
+            band_finest_mm[e] = f;
+            // a PREFERENCE, not a window: the plan takes the coarsest level up to it that
+            // its cells' printability allows, and coarser only where they need it
+            if (Lr < hi_l) ++out.band_capped_voxels;
+          }
+          pp.voxel_level_prefer = &band_pref;
+        }
+        pp.max_cell_size_mm = S0 * std::ldexp(1.0, top);
+        pp.voxel_level_lo = &lvl_lo;
+        pp.voxel_level_hi = &lvl_hi;
+      }
+    }
     out.cell_plan = plan_cell_sizes(grid, rho_raw, cand, width, pp);
     voxel_cell = cell_size_field(grid, out.cell_plan);
     apply_aggregate_cap(/*swept_mode=*/true);
@@ -964,30 +1214,40 @@ GradedField grade_lattice(const VoxelGrid& grid,
         // Both can occur in swept mode and their remedies are opposite (a finer
         // cell for a thin member, a coarser one for an unprintable strut), so the
         // receipt reports them separately or reports nothing useful.
-        // Voxel -> base cell, by the voxel CENTRE — the SAME convention
-        // plan_cell_sizes used to build the aggregates, so the attribution reads
-        // the reason of the cell that actually decided this voxel.
+        // Voxel -> the base cells COVERING it (Finding 7's cover rule, the SAME one
+        // plan_cell_sizes built the aggregates with), so the attribution reads the
+        // reason of a cell that actually refused part of this voxel.
         const int vi = static_cast<int>(e % static_cast<std::size_t>(grid.nx));
         const int vj = static_cast<int>((e / static_cast<std::size_t>(grid.nx)) %
                                         static_cast<std::size_t>(grid.ny));
         const int vk = static_cast<int>(e / (static_cast<std::size_t>(grid.nx) *
                                              static_cast<std::size_t>(grid.ny)));
-        const double S0 = out.cell_plan.base_cell_mm;
-        const int ci = std::min(out.cell_plan.nx - 1, std::max(0,
-            static_cast<int>(std::floor((vi + 0.5) * grid.spacing / S0))));
-        const int cj = std::min(out.cell_plan.ny - 1, std::max(0,
-            static_cast<int>(std::floor((vj + 0.5) * grid.spacing / S0))));
-        const int ck = std::min(out.cell_plan.nz - 1, std::max(0,
-            static_cast<int>(std::floor((vk + 0.5) * grid.spacing / S0))));
-        const std::size_t c = out.cell_plan.index(ci, cj, ck);
         const signed char why =
-            c < out.cell_plan.reject_reason.size()
-                ? out.cell_plan.reject_reason[c] : 0;
+            cell_plan_voxel_reject_reason(grid, out.cell_plan, vi, vj, vk);
+        // ★ Finding 7: the voxel's OWN (centre) cell is laid, and only another cell
+        // covering it is not. It goes solid outright: retention would certify it at a cell
+        // the swept export never lays there, and a part of it would be empty.
+        {
+          const double S0 = out.cell_plan.base_cell_mm;
+          const int ci = std::min(out.cell_plan.nx - 1, std::max(0,
+              static_cast<int>(std::floor((vi + 0.5) * grid.spacing / S0))));
+          const int cj = std::min(out.cell_plan.ny - 1, std::max(0,
+              static_cast<int>(std::floor((vj + 0.5) * grid.spacing / S0))));
+          const int ck = std::min(out.cell_plan.nz - 1, std::max(0,
+              static_cast<int>(std::floor((vk + 0.5) * grid.spacing / S0))));
+          if (out.cell_plan.cell_size_at(ci, cj, ck) > 0.0) {
+            out.cover_dropped_rho[e] = clamp_rho(e, rho_of(e));
+            ++out.solid_fallback_voxels;
+            out.fallback_reason[e] = 4;
+            continue;
+          }
+        }
         if (why == 2) {
           // An unprintable strut is a fact about the PRINTER, not about load. Sub-floor
           // retention has nothing to say about it and never rescues one.
           ++out.solid_fallback_voxels;
           ++out.fallback_strut_unprintable;
+          out.fallback_reason[e] = 3;
           continue;
         }
         ++out.subfloor_candidate_voxels;
@@ -1009,7 +1269,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
             post.relative_density[e] = rho_c;
             ++out.latticed_voxels;
             const double cpm_r = width[e] / ce_r;
-            const double d_r = octet_strut_diameter_mm(rho_c, ce_r);
+            const double d_r = lattice_strut_diameter_mm(params.topology, rho_c, ce_r);
             // IS THIS VOXEL ACTUALLY BELOW THE FLOOR? Not necessarily, and the
             // difference matters. The plan rejects a base cell using the THINNEST
             // member anywhere in it, so a cell can be rejected while individual
@@ -1049,10 +1309,13 @@ GradedField grade_lattice(const VoxelGrid& grid,
           // sub-floor-retainable, and it is recorded as what it actually is.
           ++out.solid_fallback_voxels;
           ++out.fallback_strut_unprintable;
+          out.fallback_reason[e] = 3;
           continue;
         }
         ++out.solid_fallback_voxels;
-        note_member_too_thin(out, width[e], n_star, floor_mm);
+        // ★ D11: the capped dense floor, the same one Fit passes -- it is the finest
+        // cell any mode can reach, so it is what "irrecoverable by ANY cell" means.
+        out.fallback_reason[e] = note_member_too_thin(out, width[e], n_star, abs_floor_mm);
         continue;
       }
       const double rho = clamp_rho(e, rho_of(e));
@@ -1065,7 +1328,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
       if (rho > rho_max_used) rho_max_used = rho;
       if (width[e] < min_width) min_width = width[e];
       if (cpm < min_cpm) min_cpm = cpm;
-      const double d = octet_strut_diameter_mm(rho, ce);
+      const double d = lattice_strut_diameter_mm(params.topology, rho, ce);
       if (d < min_d) min_d = d;
       if (d > max_d) max_d = d;
       if (d < params.min_extrudable_width_mm) out.any_strut_below_min = true;
@@ -1080,6 +1343,55 @@ GradedField grade_lattice(const VoxelGrid& grid,
       post.cell_size_mm = coarsest;
     }
     post.cell_size_field = voxel_cell;
+  }
+
+  // ── ★ THE BAND'S STRUTS, ON THE CELLS THE PLAN CHOSE (ruling 2) ──────────────────
+  // The finest cell gets the whole raise, a coarser one the preview's 0.35 share (a sheet,
+  // which grades its wall only, always the whole raise); then the strut goes to a whole
+  // number of line widths at its own cell: up where the band's top (q, the cap) allows,
+  // else down to the last whole one that is still at least the law's own density. Where
+  // neither is, the raise stands, counted (band_off_line_voxels). The band never thins a
+  // strut below its law, so a cell the plan proved printable stays printable.
+  if (banded) {
+    const double w = params.band_line_width_mm;
+    const double S0 = params.cell_mode == CellSizeMode::Swept ? params.min_cell_size_mm : 0.0;
+    out.band_rho0.assign(n, 0.0);
+    out.band_finest_mm.assign(n, 0.0);
+    for (std::size_t e = 0; e < n; ++e) {
+      if (!post.mask[e] || band_t(e) >= 1.0) continue;
+      ++out.band_voxels;
+      const double S = e < post.cell_size_field.size() && post.cell_size_field[e] > 0.0
+                           ? post.cell_size_field[e]
+                           : post.cell_size_mm;
+      const double fin = e < band_finest_mm.size() && band_finest_mm[e] > 0.0 ? band_finest_mm[e]
+                                                                               : S0;
+      const bool finest = !(fin > 0.0) || S <= fin * (1.0 + 1e-9);
+      out.band_rho0[e] = post.relative_density[e];
+      out.band_finest_mm[e] = fin;
+      const double r0 = post.relative_density[e];
+      const bool whole = finest || lattice_topology_is_sheet(topo);
+      double r = band_raise(e, r0, whole ? 1.0 : kCoarseCellBandRaise);
+      if (r > r0 + 1e-12) ++out.band_raised_voxels;
+      if (w > 0.0 && S > 0.0) {
+        const double d = lattice_strut_diameter_mm(topo, r, S);
+        const double k = std::ceil(d / w - 1e-9);
+        const double top = std::max(band_q, r);
+        double r2 = lattice_min_density_for_strut(topo, S, k * w, params.max_relative_density);
+        if (!(r2 > 0.0 && r2 >= r - 1e-12 && r2 <= top) && k > 1.0) {
+          r2 = lattice_min_density_for_strut(topo, S, (k - 1.0) * w, params.max_relative_density);
+          if (!(r2 >= r0 - 1e-12)) r2 = 0.0;  // down, but never under the law
+        }
+        if (r2 > 0.0 && r2 <= top) {
+          if (std::fabs(r2 - r) > 1e-12) ++out.band_snapped_voxels;
+          r = r2;
+        } else {
+          ++out.band_off_line_voxels;  // no whole width between the law and the top
+        }
+      }
+      post.relative_density[e] = r;
+      rho_max_used = std::max(rho_max_used, r);
+      max_d = std::max(max_d, lattice_strut_diameter_mm(topo, r, S));
+    }
   }
 
   if (out.latticed_voxels > 0) {
@@ -1168,7 +1480,8 @@ GradedField grade_lattice(const VoxelGrid& grid,
     // ★ the octet strut width is not organic's strut width: organic's bead is
     // floored at the extrudable width in its own candidate loop.
     if (!params.organic_geometry &&
-        !(octet_strut_diameter_mm(rho, ce) >= params.min_extrudable_width_mm) &&
+        !(lattice_strut_diameter_mm(params.topology, rho, ce) >=
+          params.min_extrudable_width_mm) &&
         (swept || fit))
       throw std::logic_error(
           "grade_lattice: plan emitted a strut under the stated minimum "
@@ -1296,6 +1609,154 @@ GradedField grade_lattice(const VoxelGrid& grid,
         out.min_strut_diameter_mm, 45.0, params.min_extrudable_width_mm);
   }
 
+  return out;
+}
+
+void absorb_solid_slivers(GradedField& gf, const VoxelGrid& grid,
+                          const std::vector<double>& density,
+                          const std::vector<char>* region, double line_width_mm,
+                          double iso) {
+  const double h = grid.spacing;
+  if (!(line_width_mm > 0.0) || !(h > 0.0)) return;
+  const int kb = static_cast<int>(std::ceil(2.0 * line_width_mm / h - 1e-9));
+  if (kb <= 1) return;  // every voxel is already 2 line widths across
+  const std::size_t n = grid.voxel_count();
+  LatticePosture& post = gf.posture;
+  if (density.size() != n || post.mask.size() != n || post.relative_density.size() != n ||
+      gf.fallback_reason.size() != n)
+    return;
+  (void)region;  // the law's own reasons say which voxels it left solid
+  const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
+  gf.sliver_pass_block_voxels = kb;
+  gf.sliver_min_cells_per_member = std::numeric_limits<double>::infinity();
+
+  // The solid the law left beside the lattice: printed and not latticed (a frozen pad
+  // or a voxel outside every region counts as solid here, and never changes).
+  std::vector<char> solid(n, 0);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const std::size_t e = grid.index(i, j, k);
+        solid[e] = grid.solid(i, j, k) && density[e] > iso && !post.mask[e] ? 1 : 0;
+      }
+  // block[c]: the kb-cube whose low corner is c lies wholly in `solid`. Separable: a run
+  // of kb along x, then of those along y, then along z.
+  auto run_forward = [&](std::vector<char>& f, int len, int stride, std::size_t base) {
+    int count = 0;  // set voxels from here to the end of the line, capped
+    for (int q = len - 1; q >= 0; --q) {
+      const std::size_t e = base + static_cast<std::size_t>(q) * stride;
+      count = f[e] ? count + 1 : 0;
+      f[e] = count >= kb ? 1 : 0;
+    }
+  };
+  std::vector<char> block = solid;
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j) run_forward(block, nx, 1, grid.index(0, j, k));
+  for (int k = 0; k < nz; ++k)
+    for (int i = 0; i < nx; ++i) run_forward(block, ny, nx, grid.index(i, 0, k));
+  for (int j = 0; j < ny; ++j)
+    for (int i = 0; i < nx; ++i)
+      run_forward(block, nz, nx * ny, grid.index(i, j, 0));
+  // covered[v]: some block's low corner lies within kb-1 behind v on every axis.
+  auto spread_back = [&](std::vector<char>& f, int len, int stride, std::size_t base) {
+    int since = kb;  // voxels since the last set one, looking backward
+    for (int q = 0; q < len; ++q) {
+      const std::size_t e = base + static_cast<std::size_t>(q) * stride;
+      since = f[e] ? 0 : since + 1;
+      f[e] = since < kb ? 1 : 0;
+    }
+  };
+  std::vector<char> covered = block;
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j) spread_back(covered, nx, 1, grid.index(0, j, k));
+  for (int k = 0; k < nz; ++k)
+    for (int i = 0; i < nx; ++i) spread_back(covered, ny, nx, grid.index(i, 0, k));
+  for (int j = 0; j < ny; ++j)
+    for (int i = 0; i < nx; ++i)
+      spread_back(covered, nz, nx * ny, grid.index(i, j, 0));
+
+  std::vector<char> sliver(n, 0);
+  for (std::size_t e = 0; e < n; ++e)
+    if (solid[e] && !covered[e] && gf.fallback_reason[e] != 0) sliver[e] = 1;
+
+  // Lattice them from their latticed neighbours, a layer at a time (a layer's choices are
+  // taken from the state before it, so the result does not depend on the sweep order).
+  const bool per_voxel_cell = post.cell_size_field.size() == n;
+  const int off[6][3] = {{-1, 0, 0}, {1, 0, 0}, {0, -1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}};
+  for (;;) {
+    std::vector<std::pair<std::size_t, std::size_t>> take;  // sliver, the neighbour it copies
+    for (int k = 0; k < nz; ++k)
+      for (int j = 0; j < ny; ++j)
+        for (int i = 0; i < nx; ++i) {
+          const std::size_t e = grid.index(i, j, k);
+          if (!sliver[e] || gf.fallback_reason[e] == 4) continue;
+          std::size_t best = n;
+          for (const auto& o : off) {
+            const int a = i + o[0], b = j + o[1], c = k + o[2];
+            if (a < 0 || b < 0 || c < 0 || a >= nx || b >= ny || c >= nz) continue;
+            const std::size_t f = grid.index(a, b, c);
+            if (!post.mask[f]) continue;
+            if (best == n || post.relative_density[f] > post.relative_density[best]) best = f;
+          }
+          if (best != n) take.emplace_back(e, best);
+        }
+    if (take.empty()) break;
+    for (const auto& [e, f] : take) {
+      post.mask[e] = 1;
+      post.relative_density[e] = post.relative_density[f];
+      if (per_voxel_cell) post.cell_size_field[e] = post.cell_size_field[f];
+      switch (gf.fallback_reason[e]) {
+        case 1: --gf.fallback_member_too_thin; break;
+        case 2: --gf.fallback_member_too_thin; --gf.fallback_irrecoverable_by_cell; break;
+        case 3: --gf.fallback_strut_unprintable; break;
+        default: break;
+      }
+      gf.fallback_reason[e] = 0;
+      if (gf.sliver_latticed.size() != n) gf.sliver_latticed.assign(n, 0);
+      gf.sliver_latticed[e] = 1;
+      sliver[e] = 0;
+      --gf.solid_fallback_voxels;
+      ++gf.latticed_voxels;
+      ++gf.sliver_voxels_latticed;
+      const double ce = per_voxel_cell ? post.cell_size_field[e] : post.cell_size_mm;
+      if (e < gf.member_width_mm.size() && ce > 0.0)
+        gf.sliver_min_cells_per_member =
+            std::min(gf.sliver_min_cells_per_member, gf.member_width_mm[e] / ce);
+    }
+  }
+  for (std::size_t e = 0; e < n; ++e)
+    if (sliver[e]) ++gf.sliver_voxels_kept_solid;
+}
+
+}  // namespace topopt
+
+namespace topopt {
+
+std::vector<std::uint8_t> lattice_solid_fallback_reasons(const VoxelGrid& grid,
+                                                         const std::vector<double>& density,
+                                                         const GradingLawParams& params,
+                                                         double iso) {
+  const std::size_t n = grid.voxel_count();
+  if (density.size() != n)
+    throw std::invalid_argument("lattice_solid_fallback_reasons: density.size() != voxel_count");
+  const std::vector<double> flat(n, 1.0);
+  GradedField gf = grade_lattice(grid, density, flat, nullptr, params, iso);
+  absorb_solid_slivers(gf, grid, density, nullptr, params.min_extrudable_width_mm, iso);
+  std::vector<std::uint8_t> out(n, 255);
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i) {
+        const std::size_t e = grid.index(i, j, k);
+        if (!(grid.solid(i, j, k) && density[e] > iso)) continue;
+        if (gf.posture.mask[e]) {
+          out[e] = e < gf.sliver_latticed.size() && gf.sliver_latticed[e]   ? 5
+                   : e < gf.corner_joined.size() && gf.corner_joined[e]     ? 6
+                                                                             : 0;
+        } else {
+          const char r = e < gf.fallback_reason.size() ? gf.fallback_reason[e] : 0;
+          out[e] = r >= 1 && r <= 4 ? static_cast<std::uint8_t>(r) : 4;
+        }
+      }
   return out;
 }
 
