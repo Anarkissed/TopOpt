@@ -64,6 +64,7 @@ Exactly the fields of the bridge's `LatticeLayoutSettings`, under the same names
 | `region_expand_mm` | [] | per region |
 | `region_face_counts` | [] | per region: how many of `region_faces` are its |
 | `region_faces` | [] | the model's own face numbers, region after region |
+| `region_zones` | none | **not in the bridge's struct yet**: rule D21, a zone in place of a region's faces. When given, one entry per region: `null` for a region of faces, or its zone, `{"kind": "box", "centre": [x,y,z], "axes": [[..],[..],[..]], "half_mm": [a,b,c]}` or `{"kind": "cylinder", "centre": [x,y,z], "axis": [x,y,z], "radius_mm": r, "half_length_mm": h}`, in the part's own coordinates, mm. A zone's region has a face count of 0; its `region_depth_mm` is not read (the depth is the zone's own: 2 × the third half size, or 2 × the half length); `region_no_lattice` and `region_expand_mm` are read as for faces. Refused (`job_unreadable`, `detail` saying why): sizes not above 0, axes not unit (a box's: not at right angles) to 1e-6, a kind other than box or cylinder, a key the zone does not know, faces and a zone on one region, a list not one per region |
 | `protect_ids`, `protect_depth_mm`, `protect_face_counts`, `protect_faces` | [] | Protect skins, the same way; depth 0 = two line widths |
 | `topology` | "octet" | core's type names |
 | `algorithm` | "default_grade" | `uniform`, `default_grade` or `stepped` |

@@ -22,6 +22,12 @@ std::string where_text(const Settings& s) {
   for (const Settings::RegionAsk& r : s.regions) {
     whole(r.id); whole(static_cast<long>(r.role)); num(r.depth_mm); num(r.expand_mm);
     for (int f : r.faces) whole(f);
+    // D21: every number of the zone, so a moved zone reads the part again.
+    out += "Z";
+    whole(static_cast<long>(r.zone.kind));
+    num(r.zone.centre.x); num(r.zone.centre.y); num(r.zone.centre.z);
+    for (const Vec3& a : r.zone.axis) { num(a.x); num(a.y); num(a.z); }
+    for (double h : r.zone.half) num(h);
     out += ";";
   }
   out += "P";
@@ -55,7 +61,10 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
     empty_regions_.clear();
     for (const Settings::RegionAsk& r : settings.regions) {
       bool ok = false;
-      Region region = region_from_faces(model_, r.faces, r.id, r.role, r.depth_mm, r.expand_mm, &ok);
+      const bool zone = r.zone.kind != Zone::Kind::None;   // D21: a zone, in place of faces; both is refused
+      Region region = !zone ? region_from_faces(model_, r.faces, r.id, r.role, r.depth_mm, r.expand_mm, &ok)
+                      : r.faces.empty() ? region_from_zone(r.zone, r.id, r.role, r.expand_mm, &ok)
+                                        : Region{};
       if (!ok) { empty_regions_.push_back(r.id); continue; }
       spec.regions.push_back(std::move(region));
     }
