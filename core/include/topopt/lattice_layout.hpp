@@ -668,6 +668,41 @@ bool cell_holds(const Layout& layout, const Domain::Probe& probe, const Cell& ce
 bool cell_holds_at(const Layout& layout, const Domain::Probe& probe, std::size_t cell, double a, double b, double c);
 std::shared_ptr<const CellIndex> index_cells(const Layout& layout, double pitch = 4.0);
 
+// ── STRESS (Install 2a) ───────────────────────────────────────────────────────
+// A stress result the lattice is graded by: one value per voxel of a regular grid in the part's own coordinates.
+// Indexed like core's VoxelGrid: (k * ny + j) * nx + i; voxel (i,j,k) is the cube origin + spacing * (i..i+1, ...).
+struct DemandField {
+  Vec3 origin{};              // the grid's low corner, mm
+  double spacing = 0.0;       // voxel edge, mm
+  int nx = 0, ny = 0, nz = 0;
+  std::vector<float> mpa;     // von Mises, MPa; 0 where the solve had no material
+  // No voxels, or spacing <= 0, or mpa.size() != nx*ny*nz.
+  bool empty() const;
+  std::size_t index(int i, int j, int k) const {
+    return (static_cast<std::size_t>(k) * static_cast<std::size_t>(ny) + static_cast<std::size_t>(j)) *
+               static_cast<std::size_t>(nx) +
+           static_cast<std::size_t>(i);
+  }
+  // The highest value among the voxels whose cube overlaps the box [lo, hi] (part coordinates); 0 when none does.
+  // A voxel overlaps when the two share some volume: a voxel that only touches the box on a face, an edge or a corner
+  // is not counted. A box with no width along an axis (lo == hi there) counts the voxel that holds it along that axis.
+  // R16: a cell's stress is the highest in its own cube; a turned cell's cube is read as the axis-aligned box round
+  // its eight corners. That is the rule, not an approximation to be refined.
+  double highest_in(const Vec3& lo, const Vec3& hi) const;
+};
+// The stress settings shared by struts (set_struts, By stress) and, later, cells.
+struct StressGrade {
+  std::shared_ptr<const DemandField> demand;   // null or empty: no stress yet
+  double reference_mpa = 0.0;   // > 0: the stress at which the lattice is at its heavy end. 0: the part's own (below)
+  double percentile = 0.95;     // read when reference_mpa is 0
+  double response = 1.0;        // the exponent on (stress / reference); held to 0.25 .. 4
+};
+// R17: the part's own reference. The `percentile` of the field over the voxels whose CENTRE is lattice space of the
+// domain (Domain::Probe::where says lattice; zero-valued voxels count). Sorted, index floor(q * (n - 1)), q held to
+// 0 .. 1. 0 when there are none, or the field is empty. `threads`: 0 = all of this machine's; the answer is the same
+// for any number. Reads the domain's stop flag like every step of a layout (LayCancelled).
+double stress_reference(const Domain& domain, const DemandField& field, double percentile, int threads = 0);
+
 // ── STRUT WIDTH ───────────────────────────────────────────────────────────────
 // What a lattice looks like is one number, strut width over cell size (R9). Octet's
 // neighbouring struts touch at 1/(2*sqrt 2): the quilt, the top of every range.
@@ -919,6 +954,8 @@ struct Settings {
   // The cells, the struts, and what happens to cut ends.
   CellSpec cells;          // its allow_quilt and one_grid are not read: the switches are struts.allow_quilt, one_grid
   StrutSpec struts;
+  // The stress result the lattice is graded by, and how (R16, R17). Null `demand`: no stress yet.
+  StressGrade stress;
   // Per part, OFF unless he turns it on (his words, 2026-11-12: "I definitely want it as a per-part choice. Especially
   // in the app itself."). A wall too thin for a cell that the thinnest strut leaves open (R5, C14) is normally solid.
   // On, the cells may be as small there as Allow quilt would let them (so the wall is latticed), but no strut is made

@@ -4483,7 +4483,117 @@ static void test_solid_why() {
   std::printf("solid why: %d fixes tried, each lays cells where the reason was\n", fixed);
 }
 
+// Install 2a, step 1: the stress result (R16, R17). Indexing as core's VoxelGrid; the highest value in a box reads
+// exactly the voxels that share volume with it; the part's own reference is the percentile over its lattice space.
+static void test_demand_field() {
+  {  // Indexing and emptiness.
+    DemandField f;
+    CHECK(f.empty());
+    f.nx = 5; f.ny = 4; f.nz = 3; f.spacing = 2.0;
+    CHECK(f.empty());                       // no values
+    f.mpa.assign(60, 0.0f);
+    CHECK(!f.empty());
+    f.spacing = 0.0;
+    CHECK(f.empty());
+    f.spacing = 2.0;
+    f.mpa.push_back(1.0f);
+    CHECK(f.empty());                       // one value too many
+    f.mpa.pop_back();
+    CHECK(f.index(0, 0, 0) == 0 && f.index(1, 0, 0) == 1 && f.index(0, 1, 0) == 5 && f.index(0, 0, 1) == 20);
+    CHECK(f.index(4, 3, 2) == 59);
+    CHECK(f.highest_in({-100, -100, -100}, {100, 100, 100}) == 0.0);   // all cold
+  }
+  {  // One hot voxel: exactly the boxes that share volume with it see it.
+    DemandField f;
+    f.origin = {1, 2, 3};
+    f.spacing = 2.0;
+    f.nx = 5; f.ny = 4; f.nz = 3;
+    f.mpa.assign(60, 0.0f);
+    f.mpa[f.index(2, 1, 1)] = 7.0f;
+    const double vlo[3] = {5, 4, 5}, vhi[3] = {7, 6, 7};   // that voxel's cube
+    int seen = 0, unseen = 0, wrong = 0;
+    for (double x0 = -1.0; x0 <= 12.0; x0 += 1.0)
+      for (double y0 = 0.0; y0 <= 11.0; y0 += 1.0)
+        for (double z0 = 1.0; z0 <= 10.0; z0 += 1.5)
+          for (double s : {0.5, 1.0, 2.0, 3.5}) {
+            const double lo[3] = {x0, y0, z0}, hi[3] = {x0 + s, y0 + s * 0.5, z0 + s};
+            bool overlap = true;
+            for (int a = 0; a < 3; ++a) overlap = overlap && std::min(hi[a], vhi[a]) > std::max(lo[a], vlo[a]);
+            const double got = f.highest_in({lo[0], lo[1], lo[2]}, {hi[0], hi[1], hi[2]});
+            if (got != (overlap ? 7.0 : 0.0)) ++wrong;
+            (overlap ? seen : unseen)++;
+          }
+    CHECK(wrong == 0);
+    CHECK(seen > 50 && unseen > 500);
+    // Touching the voxel on a face only is not overlapping it; a box with no width inside it is.
+    CHECK(f.highest_in({7, 4, 5}, {9, 6, 7}) == 0.0);
+    CHECK(f.highest_in({6.9, 4, 5}, {9, 6, 7}) == 7.0);
+    CHECK(f.highest_in({6, 5, 6}, {6, 5, 6}) == 7.0);
+    // A box outside the grid sees 0; one round the whole grid sees the hot voxel.
+    CHECK(f.highest_in({20, 20, 20}, {30, 30, 30}) == 0.0);
+    CHECK(f.highest_in({-9, -9, -9}, {1, 2, 3}) == 0.0);
+    CHECK(f.highest_in({-100, -100, -100}, {100, 100, 100}) == 7.0);
+  }
+  {  // The highest of many: against reading every voxel.
+    DemandField f;
+    f.origin = {-3, 0, 0};
+    f.spacing = 1.5;
+    f.nx = 7; f.ny = 6; f.nz = 5;
+    f.mpa.resize(210);
+    for (std::size_t n = 0; n < f.mpa.size(); ++n) f.mpa[n] = static_cast<float>((n * 37) % 101);
+    int wrong = 0;
+    for (double x0 = -4.0; x0 < 8.0; x0 += 0.7)
+      for (double y0 = -1.0; y0 < 9.0; y0 += 1.1) {
+        const Vec3 lo{x0, y0, 1.2}, hi{x0 + 2.3, y0 + 1.9, 4.6};
+        double want = 0.0;
+        for (int k = 0; k < f.nz; ++k)
+          for (int j = 0; j < f.ny; ++j)
+            for (int i = 0; i < f.nx; ++i) {
+              const double a0 = -3 + 1.5 * i, b0 = 1.5 * j, c0 = 1.5 * k;
+              if (std::min(hi.x, a0 + 1.5) > std::max(lo.x, a0) && std::min(hi.y, b0 + 1.5) > std::max(lo.y, b0) &&
+                  std::min(hi.z, c0 + 1.5) > std::max(lo.z, c0))
+                want = std::max(want, static_cast<double>(f.mpa[f.index(i, j, k)]));
+            }
+        if (f.highest_in(lo, hi) != want) ++wrong;
+      }
+    CHECK(wrong == 0);
+  }
+  {  // R17: the part's own reference, a block with a known ramp. 40 x 40 x 20 mm, voxels of 2 mm: 4,000 voxels in
+     // the part, 200 of each value 0 .. 19 (the value is the voxel's i). Sorted, 95% is index floor(0.95 x 3999) =
+     // 3799, value 18. A ring of voxels outside the part, all at 1000 MPa, never counts.
+    PartMeasure pm(weld_mesh(box(40, 40, 20)));
+    DomainSpec s;
+    s.start = Start::AllLattice;
+    Domain d(pm, s);
+    DemandField f;
+    f.origin = {-2, -2, -2};
+    f.spacing = 2.0;
+    f.nx = 22; f.ny = 22; f.nz = 12;
+    f.mpa.assign(static_cast<std::size_t>(22) * 22 * 12, 1000.0f);
+    for (int k = 1; k <= 10; ++k)
+      for (int j = 1; j <= 20; ++j)
+        for (int i = 1; i <= 20; ++i) f.mpa[f.index(i, j, k)] = static_cast<float>(i - 1);
+    NEAR(stress_reference(d, f, 0.95), 18.0, 0.0);
+    NEAR(stress_reference(d, f, 0.95, 1), 18.0, 0.0);   // the same for any number of threads
+    NEAR(stress_reference(d, f, 0.0), 0.0, 0.0);
+    NEAR(stress_reference(d, f, 1.0), 19.0, 0.0);
+    NEAR(stress_reference(d, f, 0.5), 9.0, 0.0);         // index 1999: value 9
+    // Nothing is lattice: 0. An empty field: 0.
+    Domain none(pm, {});
+    NEAR(stress_reference(none, f, 0.95), 0.0, 0.0);
+    NEAR(stress_reference(d, DemandField{}, 0.95), 0.0, 0.0);
+    // Only lattice space counts: a No lattice region over x < 20 leaves the values 10 .. 19 (2,000 voxels; zero-
+    // valued voxels count where they are lattice, and here there are none). 95%: index 1899, value 19.
+    DomainSpec half = s;
+    half.regions.push_back(face_region(2, Role::NoLattice, {0, 20, 10}, {1, 0, 0}, 20, 20, 20));
+    Domain dh(pm, half);
+    NEAR(stress_reference(dh, f, 0.95), 19.0, 0.0);
+    NEAR(stress_reference(dh, f, 0.0), 10.0, 0.0);
+  }
+}
+
 int main() {
+  test_demand_field();
   test_thin_cut_pieces();
   test_one_grid_main_size();
   test_one_grid_smallest_cut();
