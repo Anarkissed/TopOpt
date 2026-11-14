@@ -87,6 +87,7 @@ Exactly the fields of the bridge's `LatticeLayoutSettings`, under the same names
 | `small_cells_in_thin_walls` | false | **not in the bridge's struct yet**: core's per-part choice of 2026-11-12 (thin walls get small cells with the thinnest strut) |
 | `one_grid` | false | **not in the bridge's struct yet**: "Let walls cut cells", core's per-part choice of 2026-11-14 (walls, pockets and skins may cut the cells, and nothing else changes; offered in Aesthetic only) |
 | `cells_by_stress` | false | **not in the bridge's struct yet**: cell size by stress (C22). It needs the stress result (the top-level `demand` file): without one the job is refused (`no_stress_result`). The reference and response are those of the stress keys |
+| `max_step` | 0 | **not in the bridge's struct yet**: the largest size step between neighbouring cells (C24), a ratio; 0 = no limit (the layout is the one laid without it, byte for byte). Within one region's layout no cell is more than this many times the size of a cell it shares a face with; the larger cell is divided down its own ladder. On Default Grade a value under 2 is held at 2; no value is under 1. The file reports the value kept as `step_held_at` |
 | `bars` | true | a file needs its struts: false is refused (`no_struts`) |
 | `join_loose` | true | |
 | `skin` | false | |
@@ -100,7 +101,7 @@ Exactly the fields of the bridge's `LatticeLayoutSettings`, under the same names
 | `reference_mpa` | 0 | By stress: the stress at which the lattice is at its heavy end. 0 = the part's own: the `percentile` of the stress in the part's lattice space (R17) |
 | `percentile` | 0.95 | read when `reference_mpa` is 0 |
 | `response` | 1 | By stress: the exponent on stress / reference, held to 0.25 .. 4 |
-| `region_own` | absent | **not in the bridge's struct yet**: a Lattice region's own cells and struts (C23, R19). One entry per region, in the order of `region_ids` (a list of another length is refused): `null` for a region that takes the part's settings in everything, or an object holding any of `algorithm`, `cell_mm`, `cell_max_mm`, `cell_min_mm`, `min_cells_across`, `grade_to_shape`, `band_mm`, `band_cell_mm`, `cells_by_stress`, `by_stress`, `dial`, `dial_light`, `dial_heavy`, `strut_width_mm`, `width_light_mm`, `width_heavy_mm`, `strength`, `response`, `reference_mpa`, each read as the part's key of that name is. A key it does not hold, or one that is the part's only (the type, Allow quilt, Let walls cut cells, thin walls, the line width and lines, the percentile), refuses the job (`job_unreadable`). What an entry does not state, the region takes from the part's. A region's `by_stress` or `cells_by_stress` true with no `demand` is refused (`no_stress_result`) as the part's is |
+| `region_own` | absent | **not in the bridge's struct yet**: a Lattice region's own cells and struts (C23, R19). One entry per region, in the order of `region_ids` (a list of another length is refused): `null` for a region that takes the part's settings in everything, or an object holding any of `algorithm`, `cell_mm`, `cell_max_mm`, `cell_min_mm`, `min_cells_across`, `grade_to_shape`, `band_mm`, `band_cell_mm`, `cells_by_stress`, `by_stress`, `dial`, `dial_light`, `dial_heavy`, `strut_width_mm`, `width_light_mm`, `width_heavy_mm`, `strength`, `response`, `reference_mpa`, `max_step`, each read as the part's key of that name is. A key it does not hold, or one that is the part's only (the type, Allow quilt, Let walls cut cells, thin walls, the line width and lines, the percentile), refuses the job (`job_unreadable`). What an entry does not state, the region takes from the part's. A region's `by_stress` or `cells_by_stress` true with no `demand` is refused (`no_stress_result`) as the part's is |
 
 The file matches the preview only if these are the values the preview was laid with.
 
@@ -126,7 +127,7 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
   "file_bytes": 82084,
   "part": {"faces": 6, "triangles": 12, "open_edges": 0},
   "layout": {"cells": 4, "solid_pieces": 0, "bars": 36, "at_one_line": 0, "at_widest": 0,
-             "stubs": 0, "joined": 0, "dropped": 60, "pieces": 1, "adrift": 0, "stepped_edges": 1, "thin_solid": 0, "cells_by_stress": false,
+             "stubs": 0, "joined": 0, "dropped": 60, "pieces": 1, "adrift": 0, "stepped_edges": 1, "thin_solid": 0, "cells_by_stress": false, "step_held_at": 0,
              "floor_cell_mm": 2.37, "min_strut_mm": 0.45, "open_look": 0.19, "touch": 0.354,
              "empty_regions": [],
              "by_stress": false, "reference_mpa": 0, "highest_mpa": 0, "at_light": 0, "at_heavy": 0},
@@ -148,6 +149,7 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
 - `layout` holds the counts the bridge's `LatticeLayoutResult` holds, under the same names (`bars` here is how many).
   `thin_solid`: cut cells print rule P8 (f) made solid (a cut piece thinner than its own strut, lying against solid); they are counted in `solid_pieces` too.
   `cells_by_stress`: cell size by stress (C22) was applied to the layout (false when it was not asked for, or one of its OFF cases holds).
+  `step_held_at`: the part's size-step limit the layout kept (C24, `max_step` held at the ladder's smallest step: 1.5 on Default Grade is kept as 2); 0 when none was asked. A region's own `max_step` is not reported here.
   `by_stress`: the struts were graded by stress; then `reference_mpa` is the reference used (the stated one or the part's own), `highest_mpa` the highest stress any cell read in its own cube, `at_light` and `at_heavy` the cells at the light end (no stress) and at the heavy end (at or over the reference). All 0 otherwise.
 - `mesh` is core's `MeshReport`. `mm3` is the plastic in the file; `part_mm3` the solid part's.
 - `print_check` is his print rules measured on the mesh the file holds, layer by layer (0.2 mm layers), the part standing on its lowest face:
