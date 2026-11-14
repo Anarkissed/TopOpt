@@ -353,11 +353,46 @@ static void test_run() {
   for (const std::string& p : {model, job_path, stl, result}) std::remove(p.c_str());
 }
 
+// "Let walls cut cells" (his ruling 2026-11-14): the layout key "one_grid" reaches Settings::one_grid, a job with it on
+// makes a file, and a misspelt key is still refused as unknown, by its own name.
+static void test_one_grid_key() {
+  std::string text = kBlockJob;
+  const std::string at = "\"min_cells_across\": 1";
+  text.replace(text.find(at), at.size(), "\"min_cells_across\": 1, \"one_grid\": true");
+  FileJob job;
+  bool parsed = true;
+  try { job = parse_file_job(text); } catch (const FileJobError& e) { parsed = false; std::printf("  (%s)\n", e.what()); }
+  CHECK(parsed && job.settings.one_grid && !job.settings.cells.one_grid);
+  CHECK(!parse_file_job(kBlockJob).settings.one_grid);   // off unless asked
+  bool refused = false;
+  try {
+    (void)parse_file_job(R"({"mode": "lattice_file", "model": "a.step", "layout": {"one_gird": true}})");
+  } catch (const FileJobError& e) {
+    refused = has(e.what(), "one_gird");
+  }
+  CHECK(refused);
+  if (!parsed) return;
+  const std::string path = kTmp + "/lattice_file_one_grid.stl";
+  std::remove(path.c_str());
+  const FileResult r = make_lattice_file(box_model(30, 30, 12), job, path);
+  if (!mesh_available()) {
+    check_refused(r, "mesh_unavailable", 3, path);
+    return;
+  }
+  CHECK(r.ok && r.code == "ok" && r.cells > 0 && r.bars > 0);
+  if (!r.ok) std::printf("  (%s: %s %s)\n", r.code.c_str(), r.why.c_str(), r.detail.c_str());
+  CHECK(r.file == path && exists(path) && r.file_bytes == 84 + 50 * r.made.mesh.triangles && bytes(path) == r.file_bytes);
+  std::printf("block, one grid: %zu cells, %zu bars; mesh %zu triangles; print clean %d\n", r.cells, r.bars,
+              r.made.mesh.triangles, static_cast<int>(r.made.print_clean));
+  std::remove(path.c_str());
+}
+
 int main() {
   test_parse();
   test_make();
   test_refusals();
   test_run();
+  test_one_grid_key();
   if (!mesh_available()) std::printf("no mesh library in this build: the job says so\n");
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;

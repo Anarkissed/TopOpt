@@ -38,22 +38,53 @@ PointKey key_of(const Vec3& p) {
 
 SolidAt::SolidAt(const Layout& layout) : layout_(&layout) {
   auto slot = [&](double x) { return static_cast<long long>(std::floor(x / pitch_)); };
-  for (std::size_t ci = 0; ci < layout.cells.size(); ++ci) {
-    const Cell& c = layout.cells[ci];
-    const Frame& f = layout.frames[static_cast<std::size_t>(c.frame)];
-    double mn[3] = {1e300, 1e300, 1e300}, mx[3] = {-1e300, -1e300, -1e300};
-    for (int k = 0; k < 8; ++k) {
-      const Vec3 v = f.at(c.lo[0] + ((k & 1) ? c.size : 0.0), c.lo[1] + ((k & 2) ? c.size : 0.0),
-                          c.lo[2] + ((k & 4) ? c.size : 0.0));
-      mn[0] = std::min(mn[0], v.x); mx[0] = std::max(mx[0], v.x);
-      mn[1] = std::min(mn[1], v.y); mx[1] = std::max(mx[1], v.y);
-      mn[2] = std::min(mn[2], v.z); mx[2] = std::max(mx[2], v.z);
+  auto file = [&](const std::vector<Cell>& cubes, std::map<std::array<long long, 3>, std::vector<std::uint32_t>>& grid) {
+    for (std::size_t ci = 0; ci < cubes.size(); ++ci) {
+      const Cell& c = cubes[ci];
+      const Frame& f = layout.frames[static_cast<std::size_t>(c.frame)];
+      double mn[3] = {1e300, 1e300, 1e300}, mx[3] = {-1e300, -1e300, -1e300};
+      for (int k = 0; k < 8; ++k) {
+        const Vec3 v = f.at(c.lo[0] + ((k & 1) ? c.size : 0.0), c.lo[1] + ((k & 2) ? c.size : 0.0),
+                            c.lo[2] + ((k & 4) ? c.size : 0.0));
+        mn[0] = std::min(mn[0], v.x); mx[0] = std::max(mx[0], v.x);
+        mn[1] = std::min(mn[1], v.y); mx[1] = std::max(mx[1], v.y);
+        mn[2] = std::min(mn[2], v.z); mx[2] = std::max(mx[2], v.z);
+      }
+      for (long long x = slot(mn[0]); x <= slot(mx[0]); ++x)
+        for (long long y = slot(mn[1]); y <= slot(mx[1]); ++y)
+          for (long long z = slot(mn[2]); z <= slot(mx[2]); ++z)
+            grid[{x, y, z}].push_back(static_cast<std::uint32_t>(ci));
     }
-    for (long long x = slot(mn[0]); x <= slot(mx[0]); ++x)
-      for (long long y = slot(mn[1]); y <= slot(mx[1]); ++y)
-        for (long long z = slot(mn[2]); z <= slot(mx[2]); ++z)
-          grid_[{x, y, z}].push_back(static_cast<std::uint32_t>(ci));
+  };
+  file(layout.cells, grid_);
+  if (layout.solid_why.size() == layout.solid.size()) file(layout.solid, solid_grid_);
+}
+
+SolidWhy SolidAt::why(const Domain::Probe& probe, const Vec3& p) const {
+  const Where w = probe.where(p);
+  if (!w.lattice() || !(*this)(probe, p, w)) return {};
+  const auto it = solid_grid_.find({static_cast<long long>(std::floor(p.x / pitch_)),
+                                    static_cast<long long>(std::floor(p.y / pitch_)),
+                                    static_cast<long long>(std::floor(p.z / pitch_))});
+  if (it == solid_grid_.end()) return {};
+  for (std::uint32_t si : it->second) {   // in layout order
+    const Cell& c = layout_->solid[si];
+    if (c.region != w.id) continue;
+    const Frame& f = layout_->frames[static_cast<std::size_t>(c.frame)];
+    const Vec3 rel{p.x - f.origin.x, p.y - f.origin.y, p.z - f.origin.z};
+    double q[3];
+    bool in = true;
+    for (int a = 0; a < 3 && in; ++a) {
+      q[a] = rel.x * f.ax[a].x + rel.y * f.ax[a].y + rel.z * f.ax[a].z;
+      in = q[a] >= c.lo[a] && q[a] < c.lo[a] + c.size;
+    }
+    if (!in) continue;
+    // Under a flat region: the cube's own wall (the wall the pass that recorded it laid).
+    const WallMap& walls = layout_->walls[static_cast<std::size_t>(c.frame)];
+    if (walls.flat && read_at(probe, f, walls, q[0], q[1], q[2]).wall != c.wall) continue;
+    return layout_->solid_why[si];
   }
+  return {};
 }
 
 bool SolidAt::operator()(const Domain::Probe& probe, const Vec3& p) const {

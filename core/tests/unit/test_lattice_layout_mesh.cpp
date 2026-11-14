@@ -387,6 +387,24 @@ static void test_layers() {
     const LayerReport r = check_layers(s.mesh);
     CHECK(r.clean() && r.longest_reach_mm > 2.7 && r.longest_reach_mm < 3.2);
   }
+  {  // Rule (e): the same bridge 14 mm long reaches 7 mm from either post: too far, though held at both ends.
+    MeshSink s;
+    add_box(s, 0, 0, 0, 2, 2, 10);
+    add_box(s, 16, 0, 0, 18, 2, 10);
+    add_box(s, 2, 0, 8, 16, 2, 10);
+    const LayerReport r = check_layers(s.mesh);
+    CHECK(r.mid_air.empty() && r.one_ended.empty() && r.long_bridges.size() == 1 && !r.clean());
+    if (r.long_bridges.size() == 1) {
+      const LayerReport::OneEnded& b = r.long_bridges[0];
+      CHECK(b.reach_mm > 6.7 && b.reach_mm < 7.2 && std::fabs(b.z - 8.1) < 0.01 && std::fabs(b.x - 9.0) < 0.3 && !b.anything_below);
+    }
+    LayerSpec loose;
+    loose.reach_limit_mm = 8.0;   // his number, when he names one
+    CHECK(check_layers(s.mesh, loose).clean());
+    LayerSpec off;
+    off.reach_limit_mm = 0.0;     // 0 = no limit
+    CHECK(check_layers(s.mesh, off).clean());
+  }
   {  // A block leaning at 45 degrees: every layer is held by the one below.
     MeshSink s;
     add_box(s, 0, 0, 0, 4, 4, 6, 6.0);
@@ -749,6 +767,107 @@ static void test_no_crust() {
   }
 }
 
+// ── a column that changes along its depth ─────────────────────────────────────
+// A 24 x 24 x 14 block with a square pocket 8 x 8 mm down from its top face, lattice under
+// the top face 10 mm deep. The pocket ends part-way down the top row of cells, below their
+// mid-depth: a column through the pocket is air at the cube's middle and the cell's own
+// lattice under the pocket's floor. With a Protect skin on the pocket's walls and floor,
+// the columns beside the pocket are skin at the cube's middle and lattice below the skin.
+// The writer opens exactly where `cell_holds` says lattice and solid where nothing holds
+// the place, on both sides of the change (it once read each column at mid-depth only, and
+// left such a column solid as a whole).
+static TriangleMesh pocketed_block(double side, double tall, double p0, double p1, double floor_z, TriangleMesh* pocket) {
+  MeshSink s, w;
+  const Vec3 b[4] = {{0, 0, 0}, {side, 0, 0}, {side, side, 0}, {0, side, 0}};
+  auto quad = [](MeshSink& m, Vec3 a, Vec3 b2, Vec3 c, Vec3 d) { m.add_triangle(a, b2, c); m.add_triangle(a, c, d); };
+  auto up = [](Vec3 v, double z) { return Vec3{v.x, v.y, z}; };
+  quad(s, b[0], b[3], b[2], b[1]);   // the bed face
+  for (int q = 0; q < 4; ++q) quad(s, b[q], b[(q + 1) % 4], up(b[(q + 1) % 4], tall), up(b[q], tall));
+  const Vec3 t[4] = {{p0, p0, tall}, {p1, p0, tall}, {p1, p1, tall}, {p0, p1, tall}};
+  for (int q = 0; q < 4; ++q) quad(s, up(b[q], tall), up(b[(q + 1) % 4], tall), t[(q + 1) % 4], t[q]);   // the top, round the pocket
+  for (int q = 0; q < 4; ++q) {   // the pocket's walls, facing into it
+    quad(s, t[q], t[(q + 1) % 4], up(t[(q + 1) % 4], floor_z), up(t[q], floor_z));
+    quad(w, t[q], t[(q + 1) % 4], up(t[(q + 1) % 4], floor_z), up(t[q], floor_z));
+  }
+  quad(s, up(t[0], floor_z), up(t[1], floor_z), up(t[2], floor_z), up(t[3], floor_z));   // its floor, facing up
+  quad(w, up(t[0], floor_z), up(t[1], floor_z), up(t[2], floor_z), up(t[3], floor_z));
+  if (pocket) *pocket = w.mesh;
+  return s.mesh;
+}
+static void test_column_changes_down_its_depth() {
+  // The top row of cells is 5 mm, from 14 down to 9: its middle (11.5) is above the floor.
+  const double side = 24, tall = 14, p0 = 8, p1 = 16, floor_z = 10.5;
+  TriangleMesh pocket;
+  std::size_t open_edges = 1;
+  PartMeasure pm(weld_mesh(pocketed_block(side, tall, p0, p1, floor_z, &pocket), 1e-5, &open_edges));
+  CHECK(open_edges == 0);
+  for (int skinned = 0; skinned < 2; ++skinned) {
+    DomainSpec s;
+    s.min_strut_lines = 2.0;
+    s.regions = {face_region(1, {side / 2, side / 2, tall}, {0, 0, -1}, side / 2, side / 2, 10.0, 0.0)};
+    if (skinned) s.protect.push_back({1, pocket, 1.0});
+    Domain d(pm, s);
+    CellSpec cs;
+    cs.algorithm = Algorithm::Uniform;
+    cs.cell_max_mm = 8;
+    cs.min_cells_across = 1;
+    const Laid l = lay(d, cs);
+    CHECK(!l.layout.cells.empty());
+    CHECK(!l.layout.walls.empty() && l.layout.walls[static_cast<std::size_t>(l.layout.cells.front().frame)].flat);
+    const OpenSpace open = read_open_space(d, l.layout, 0.25);
+    CHECK(same_boxes(open, read_open_space(d, l.layout, 0.25, 1)));   // the same boxes on one thread
+    // A place is open in the file where it is inside one of the boxes the writer carves out
+    // of the part (a box is in its cell's frame).
+    auto open_at = [&](int frame, double a, double b, double c) {
+      for (const OpenSpace::Box& x : open.boxes)
+        if (x.frame == frame && a > x.lo[0] && a < x.hi[0] && b > x.lo[1] && b < x.hi[1] && c > x.lo[2] && c < x.hi[2]) return true;
+      return false;
+    };
+    const Domain::Probe probe = d.probe();
+    // Every reading point of every cube, 0.5 mm or more inside the part (nearer its surface
+    // the writer opens a little past what is held, on purpose: no crust).
+    long held = 0, held_solid = 0, unheld = 0, unheld_open = 0, changed = 0, changed_solid = 0;
+    for (const Cell& c : l.layout.cells) {
+      const Frame& f = l.layout.frames[static_cast<std::size_t>(c.frame)];
+      const int k = std::max(1, static_cast<int>(std::ceil(c.size / 0.25 - 1e-9)));
+      const double h = c.size / k;
+      for (int z = 0; z < k; ++z)
+        for (int j = 0; j < k; ++j)
+          for (int i = 0; i < k; ++i) {
+            const Vec3 p = f.at(c.lo[0] + (i + 0.5) * h, c.lo[1] + (j + 0.5) * h, c.lo[2] + (z + 0.5) * h);
+            if (probe.part().depth(p) < 0.5) continue;
+            bool any = false;
+            for (const Cell& o : l.layout.cells) if ((any = cell_holds(l.layout, probe, o, p))) break;
+            const bool solid_here = !open_at(c.frame, c.lo[0] + (i + 0.5) * h, c.lo[1] + (j + 0.5) * h, c.lo[2] + (z + 0.5) * h);
+            if (any) {
+              ++held;
+              if (solid_here) ++held_solid;
+            } else {
+              ++unheld;
+              if (!solid_here) ++unheld_open;
+            }
+            // Under the pocket and beside it, below its floor, in a cell whose middle is above the floor.
+            const bool below_mid = p.z < floor_z && p.x > p0 - 1.5 && p.x < p1 + 1.5 && p.y > p0 - 1.5 && p.y < p1 + 1.5;
+            if (any && below_mid) {
+              const Vec3 mid = f.at(c.lo[0] + (i + 0.5) * h, c.lo[1] + (j + 0.5) * h, c.lo[2] + 0.5 * c.size);
+              if (mid.z > floor_z) { ++changed; if (solid_here) ++changed_solid; }
+            }
+          }
+    }
+    std::printf("column changes down its depth (%s): %zu cells, %zu open boxes; points held %ld (solid in the file %ld), "
+                "held by none %ld (open in the file %ld); held under the pocket's floor in a cube whose middle is above it %ld "
+                "(solid in the file %ld)\n", skinned ? "a Protect skin round the pocket" : "a pocket", l.layout.cells.size(),
+                open.boxes.size(), held, held_solid, unheld, unheld_open, changed, changed_solid);
+    CHECK(held > 1000);
+    CHECK(changed > 100);          // the case is really there
+    // Before the fix, read at mid-depth only: 5,600 such points left solid under the pocket,
+    // 6,456 with the skin.
+    CHECK(changed_solid == 0);     // and is open where the cell holds it
+    CHECK(held_solid == 0);        // open exactly where lattice,
+    CHECK(unheld_open == 0);       // solid exactly where nothing holds it
+  }
+}
+
 int main() {
   if (!mesh_available()) {
     MeshReport rep;
@@ -762,6 +881,7 @@ int main() {
   test_block();
   test_whole_part();
   test_no_crust();
+  test_column_changes_down_its_depth();
   test_layers();
   test_printable();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
