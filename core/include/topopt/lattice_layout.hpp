@@ -621,10 +621,14 @@ struct Layout {
   //   TooFewAcross   that cell fits the wall, but not min_cells_across of them (have: the member's narrowest width;
   //                  need: that many cells).
   //   Other          anything else (a cell setting under the printable floor; a Stepped unit the band kept empty).
-  // Sliver is not recorded today: every cube recorded solid was refused by what its own points read, so one of the
-  // first three holds for it. The sliver D14b leaves solid (a thin cut piece with solid beyond it) has no cube here.
+  //   Sliver         print rule P8 (f) (solidify_thin_cuts): a cut cell whose piece was thinner than its strut against
+  //                  solid (have: the piece's thickness; need: its strut). lay_cells itself records no Sliver: every
+  //                  cube it records solid was refused by what its own points read, so one of the first three holds. The sliver D14b leaves solid (a thin cut piece with solid beyond it) has no cube here.
   // `need` is rounded up to a micron, so a wall or depth made exactly `need` lays a cell.
   std::vector<SolidWhy> solid_why;  // one per entry of solid, same order
+  // Print rule P8 (f): the entries of `solid` that solidify_thin_cuts put there, in the order it put them. Space inside
+  // one of these cubes is never taken in by another region's cell (D14b): what the rule made solid stays solid.
+  std::vector<std::uint32_t> thin_solid;
   std::vector<RegionCells> regions;
 };
 
@@ -652,7 +656,8 @@ Reading read_at(const Domain::Probe& probe, const Frame& frame, const WallMap& w
 // part of its cube this holds for; two walls' cut cells may overlap as cubes where the
 // walls meet, never as this. Lattice space this holds for in no cell is solid (D14).
 // With Layout::absorb (D14b) it also holds lattice inside its cube that belongs to another region or wall, when no
-// cell of that region and wall holds it and this is the first cell, in layout order, whose cube the point is in.
+// cell of that region and wall holds it and this is the first cell, in layout order, whose cube the point is in; never
+// inside a cube print rule P8 (f) made solid (Layout::thin_solid).
 bool cell_holds(const Layout& layout, const Domain::Probe& probe, const Cell& cell, const Vec3& p);
 // The same for cell number `cell` of the layout at a point (a, b, c) of the cell's own frame, WITHOUT the cube test
 // (for a point of the cell's own struts, already a hair inside it).
@@ -769,13 +774,16 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads = 0);
 // is solid. Nothing can stand in it (every strut through it is shorter than its own width and is dropped as a stub),
 // and left open it is a slot under material that no printer can print over (his v3 stand: a row of cut cells
 // 0.49 mm thick under the front wall's solid cap left an empty layer 0.09 mm thin, 40 x 6 mm, under the cap).
-// Asked of every CUT cell whose cube holds no AIR (read a hair inside its faces, edges and corners and at its 27
-// points): its lattice as cell_holds_at gives it (what it takes in from another region counts, so a thin piece at a
-// seam between two lattice regions is not thin), along each of the three axes of its frame, on a 5 x 5 grid of lines
-// through the cube, the longest unbroken run on a line read at steps of a quarter of the strut; the largest run.
+// Asked of every CUT cell whose cube lies against solid: read a hair inside its faces, edges and corners and at its 27
+// points, none is air and at least one is inside the part and lattice of no region. (A cube holding only lattice,
+// its own and other regions', is a seam and is left alone, whether or not the other region laid cells there.) Its
+// lattice as cell_holds_at gives it (what it takes in from another region counts), along each of the three axes of
+// its frame, on a 5 x 5 grid of lines through the cube, the longest unbroken run on a line read at steps of a quarter
+// of the strut; the largest run.
 // Thinner than the cell's strut along any axis: the cell leaves `layout.cells` and joins `layout.solid` (D14), so
-// the preview's map, the bars and the file see it solid without knowing this rule; struts it shared with a neighbour
-// are the neighbour's. A piece facing air, or as thick as its strut, is left alone. Call it after set_struts and
+// the preview's map, the bars and the file see it solid without knowing this rule, with its reason (NoCell::Sliver:
+// have = its thickness, need = its strut); struts it shared with a neighbour are the neighbour's. A piece facing air,
+// or as thick as its strut, is left alone. Call it after set_struts and
 // before lay_bars. The same for any number of threads; with no such cell the layout is untouched. Returns how many
 // cells went solid; `found`, when given, receives each one's place in `layout.solid`, its thickness and that axis.
 struct ThinCut {

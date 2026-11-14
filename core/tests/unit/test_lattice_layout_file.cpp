@@ -391,6 +391,7 @@ static void test_thin_slot() {
               l.one_ended.size(), l.mid_air.size(), r.made.found_per_pass.empty() ? -1 : r.made.found_per_pass.front(),
               r.made.posts.size(), r.made.left_out_at.size());
   CHECK(empty == 0);
+  CHECK(r.thin_solid > 0 && has(file_result_json(r), "\"thin_solid\": " + std::to_string(r.thin_solid)));
   CHECK(r.made.print_clean && l.clean() && l.long_bridges.empty());
   CHECK(r.made.found_per_pass.size() == 1 && r.made.found_per_pass.front() == 0 && r.made.posts.empty() &&
         r.made.left_out_at.empty());

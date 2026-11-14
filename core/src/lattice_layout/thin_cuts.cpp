@@ -10,25 +10,32 @@
 namespace topopt::lattice_layout {
 namespace {
 
-// Does the cell's cube hold AIR? Asked a hair inside its faces, edges and corners and at its 27 points, as the
-// laying asks it of a sliver (D14b).
-bool holds_air(const Domain::Probe& probe, const Frame& f, const Cell& c) {
+// Does the cell's cube lie against solid and not face air? Asked a hair inside its faces, edges and corners and at
+// its 27 points, as the laying asks it of a sliver (D14b): no point reads Outside, and at least one reads inside the
+// part and lattice of no region (a cap, a skin, the region's edge inside the part). A cube that holds only lattice,
+// its own and other regions', is not against solid.
+bool against_solid(const Domain::Probe& probe, const Frame& f, const Cell& c) {
+  bool solid = false;
+  auto look = [&](double a, double b, double cc) {
+    const Why why = probe.where(f.at(a, b, cc)).why;
+    if (why == Why::Outside) return false;
+    if (why != Why::Lattice) solid = true;
+    return true;
+  };
   const double e[3] = {0.04, 0.5, 0.96};
   for (int k = 0; k < 3; ++k)
     for (int j = 0; j < 3; ++j)
       for (int i = 0; i < 3; ++i) {
         if (i == 1 && j == 1 && k == 1) continue;
-        if (probe.where(f.at(c.lo[0] + c.size * e[i], c.lo[1] + c.size * e[j], c.lo[2] + c.size * e[k])).why ==
-            Why::Outside)
-          return true;
+        if (!look(c.lo[0] + c.size * e[i], c.lo[1] + c.size * e[j], c.lo[2] + c.size * e[k])) return false;
       }
   for (int k = 0; k < 3; ++k)
     for (int j = 0; j < 3; ++j)
       for (int i = 0; i < 3; ++i)
-        if (probe.where(f.at(c.lo[0] + c.size * (1 + 2 * i) / 6.0, c.lo[1] + c.size * (1 + 2 * j) / 6.0,
-                             c.lo[2] + c.size * (1 + 2 * k) / 6.0)).why == Why::Outside)
-          return true;
-  return false;
+        if (!look(c.lo[0] + c.size * (1 + 2 * i) / 6.0, c.lo[1] + c.size * (1 + 2 * j) / 6.0,
+                  c.lo[2] + c.size * (1 + 2 * k) / 6.0))
+          return false;
+  return solid;
 }
 
 // The cell's own lattice (cell_holds_at: what it takes in from another region counts) along one axis of its frame:
@@ -76,7 +83,8 @@ std::size_t solidify_thin_cuts(Layout& layout, const Domain& domain, int threads
     for (std::size_t ci = next.fetch_add(1); ci < total && !domain.stop_asked(); ci = next.fetch_add(1)) {
       const Cell& c = layout.cells[ci];
       if (!c.cut || !(c.strut > 0.0)) continue;
-      if (holds_air(probe, layout.frames[static_cast<std::size_t>(c.frame)], c)) continue;   // it faces air: left open
+      // Facing air, or lying only against lattice (a seam): left open.
+      if (!against_solid(probe, layout.frames[static_cast<std::size_t>(c.frame)], c)) continue;
       double least = c.strut;
       int which = -1;
       for (int axis = 0; axis < 3; ++axis) {
@@ -106,7 +114,14 @@ std::size_t solidify_thin_cuts(Layout& layout, const Domain& domain, int threads
     const Cell& c = layout.cells[ci];
     if (thin[ci] < 0.0) { kept.push_back(c); continue; }
     if (found) found->push_back({layout.solid.size(), thin[ci], thin_axis[ci]});
+    layout.thin_solid.push_back(static_cast<std::uint32_t>(layout.solid.size()));
     layout.solid.push_back(c);
+    // D14c: a sliver, as thick as it is, where a strut needs its own width.
+    SolidWhy why;
+    why.why = NoCell::Sliver;
+    why.have_mm = static_cast<float>(thin[ci]);
+    why.need_mm = static_cast<float>(c.strut);
+    layout.solid_why.push_back(why);
     for (RegionCells& r : layout.regions)
       if (r.frame == c.frame && r.region == c.region) {
         if (r.cells > 0) --r.cells;
