@@ -170,6 +170,7 @@ add_library(topopt
   src/lattice_layout/thin_cuts.cpp
   src/lattice_layout/stress.cpp
   src/lattice_layout/session.cpp
+  src/lattice_layout/organic.cpp
   src/lattice_layout/solid_mesh.cpp
   src/lattice_layout/print_check.cpp
   # The lattice file job (docs/design/lattice-rebuild/04-layout-file-job.md): job.json ->
@@ -526,6 +527,10 @@ add_test(NAME lattice_layout COMMAND test_lattice_layout)
 add_executable(test_lattice_layout_mesh tests/unit/test_lattice_layout_mesh.cpp)
 target_link_libraries(test_lattice_layout_mesh PRIVATE topopt)
 add_test(NAME lattice_layout_mesh COMMAND test_lattice_layout_mesh)
+# Organic stage 1b (O3, O4): the owner's Traced placement through the new engine, on made-up parts and fields.
+add_executable(test_organic_traced tests/unit/test_organic_traced.cpp)
+target_link_libraries(test_organic_traced PRIVATE topopt)
+add_test(NAME organic_traced COMMAND test_organic_traced)
 # The lattice file job: its JSON becomes the settings the bridge would make, a part goes in
 # and a whole binary STL comes out, and every refusal is one plain line, its word, its exit
 # code and no file. Without the Manifold library the job says it cannot, and that is checked.

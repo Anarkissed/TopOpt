@@ -5853,6 +5853,48 @@ static void test_weave_bars() {
   CHECK(pieces.pieces >= 1 && pieces.adrift == 0);
 }
 
+// O2, S1b: a strand with a vertex next to a crossing stays in one piece. Line A along the pocket (out through both
+// ends of the block) has a vertex 0.3 mm above the ring B it crosses (within their half widths, 0.9 mm): both of A's
+// bars there cross B. The crossing is made AT A's vertex: A's bars share their ends end to end (one piece), and the
+// one point where A and B meet is A's own vertex, exactly, where four bars end.
+static void test_weave_crossing_at_a_vertex() {
+  const StepModel model = weave_block();
+  PartMeasure pm(weld_mesh(model.mesh));
+  Domain d(pm, weave_domain(model, true, false));
+  const Vec3 vertex = round_pocket(7.75, 90, 10.3);
+  std::vector<Strand> strands;
+  strands.push_back(weave_strand({round_pocket(7.75, 90, -1), round_pocket(7.75, 90, 8), vertex, round_pocket(7.75, 90, 21)}));
+  {
+    std::vector<Vec3> p;
+    for (double t = -15; t <= 195 + 1e-9; t += 30) p.push_back(round_pocket(7.75, t, 10.0));
+    strands.push_back(weave_strand(p));
+  }
+  Bars bars = weave_bars(d, strands);
+  const std::size_t joints = split_at_crossings(bars);
+  auto on_a = [&](const Vec3& p) { return std::fabs(p.x - vertex.x) < 1e-6 && std::fabs(p.y - vertex.y) < 1e-6; };
+  std::vector<const Bar*> a;
+  for (const Bar& b : bars.bars)
+    if (on_a(b.a) && on_a(b.b)) a.push_back(&b);
+  // A's pieces, joined end to end where they share an exact end.
+  std::vector<int> up(a.size());
+  for (std::size_t i = 0; i < a.size(); ++i) up[i] = static_cast<int>(i);
+  auto find = [&](int v) { while (up[static_cast<std::size_t>(v)] != v) v = up[static_cast<std::size_t>(v)]; return v; };
+  for (std::size_t i = 0; i < a.size(); ++i)
+    for (std::size_t j = i + 1; j < a.size(); ++j)
+      if (share_end(*a[i], *a[j])) up[static_cast<std::size_t>(find(static_cast<int>(j)))] = find(static_cast<int>(i));
+  std::size_t pieces = 0;
+  for (std::size_t i = 0; i < a.size(); ++i) pieces += find(static_cast<int>(i)) == static_cast<int>(i);
+  int at_vertex = 0, b_at_vertex = 0;
+  for (const Bar& b : bars.bars)
+    for (const Vec3& p : {b.a, b.b})
+      if (same_point(p, vertex)) { ++at_vertex; b_at_vertex += !(on_a(b.a) && on_a(b.b)); }
+  std::printf("weave crossing at a vertex: %zu joint(s), line A in %zu bars, %zu piece(s); %d bars end at A's vertex (%d of ring B)\n",
+              joints, a.size(), pieces, at_vertex, b_at_vertex);
+  CHECK(joints == 1);
+  CHECK(pieces == 1 && a.size() == 3);
+  CHECK(at_vertex == 4 && b_at_vertex == 2);
+}
+
 // O1, O2 through the session: the cube region laid as lay() lays it, the weave's bars after its bars, the spacing
 // carried by the layout; the same on one thread and on eight.
 static void test_weave_session() {
@@ -5882,6 +5924,7 @@ int main() {
   test_lay_bars_unchanged();
   test_weave_cells();
   test_weave_bars();
+  test_weave_crossing_at_a_vertex();
   test_weave_session();
   test_cells_by_stress();
   test_by_stress();

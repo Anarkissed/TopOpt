@@ -49,12 +49,7 @@ Outcome Session::lay_weave(const Settings& settings, const std::vector<Strand>& 
   return lay_with(settings, &strands, threads, stop);
 }
 
-Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* strands, int threads,
-                          const std::atomic<bool>* stop) {
-  Outcome out;
-  const auto given_up = [] { Outcome none; none.cancelled = true; return none; };
-  if (stop && stop->load(std::memory_order_relaxed)) return given_up();
-  auto t0 = std::chrono::steady_clock::now();
+void Session::ready_domain(const Settings& settings) {
   const std::string where = where_text(settings);
   if (!domain_ || where != where_) {
     DomainSpec spec;
@@ -80,6 +75,15 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
     ref_kept_ = false;   // the reference is the new domain's to read again
     ref_field_.reset();
   }
+}
+
+Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* strands, int threads,
+                          const std::atomic<bool>* stop) {
+  Outcome out;
+  const auto given_up = [] { Outcome none; none.cancelled = true; return none; };
+  if (stop && stop->load(std::memory_order_relaxed)) return given_up();
+  auto t0 = std::chrono::steady_clock::now();
+  ready_domain(settings);
   out.read_again = unread_;   // a new domain, or one whose first reading was given up part way
   out.empty_regions = empty_regions_;
   // The domain watches the flag for this lay only (the flag need not outlive the call).

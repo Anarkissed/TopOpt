@@ -936,6 +936,8 @@ std::size_t split_at_crossings(Bars& bars) {
   };
   struct Cut { double s; Vec3 at; };
   std::vector<std::vector<Cut>> cuts(n);
+  std::map<PointKey, int> ends_at;   // how many bars end at each point, as found
+  for (const Bar& b : before) { ++ends_at[key_of(b.a)]; ++ends_at[key_of(b.b)]; }
   for (const auto& [i, j] : pairs) {
     const Bar &x = before[i], &y = before[j];
     const PointKey xa = key_of(x.a), xb = key_of(x.b), ya = key_of(y.a), yb = key_of(y.b);
@@ -944,7 +946,31 @@ std::size_t split_at_crossings(Bars& bars) {
     if (closest(x.a, x.b, y.a, y.b, &s, &t) > 0.5 * (x.width + y.width)) continue;
     const Vec3 px{x.a.x + (x.b.x - x.a.x) * s, x.a.y + (x.b.y - x.a.y) * s, x.a.z + (x.b.z - x.a.z) * s};
     const Vec3 py{y.a.x + (y.b.x - y.a.x) * t, y.a.y + (y.b.y - y.a.y) * t, y.a.z + (y.b.z - y.a.z) * t};
-    const Vec3 at = joint_at(Vec3{0.5 * (px.x + py.x), 0.5 * (px.y + py.y), 0.5 * (px.z + py.z)});
+    Vec3 mid{0.5 * (px.x + py.x), 0.5 * (px.y + py.y), 0.5 * (px.z + py.z)};
+    // A crossing within the two half widths of an existing vertex of either bar (an end where two or more bars of
+    // the list meet: a strand's own vertex) is made AT that vertex (the nearest; the first of x.a, x.b, y.a, y.b at
+    // a tie): no new joint a hair beside it. Each of the strand's two bars there crosses the same bar: both now share
+    // the one joint, and the strand stays whole (S1b). A free end is not such a vertex: a bar whose closest point is
+    // its own free end lands on the joint as before.
+    {
+      const Vec3* end[4] = {&x.a, &x.b, &y.a, &y.b};
+      const PointKey key[4] = {xa, xb, ya, yb};
+      const double reach = 0.5 * (x.width + y.width);
+      int which = -1;
+      double best = 0.0;
+      for (int e = 0; e < 4; ++e) {
+        const auto met = ends_at.find(key[e]);
+        if (met == ends_at.end() || met->second < 2) continue;
+        const Vec3& v = *end[e];
+        const double d = std::sqrt((v.x - mid.x) * (v.x - mid.x) + (v.y - mid.y) * (v.y - mid.y) + (v.z - mid.z) * (v.z - mid.z));
+        if (d <= reach && (which < 0 || d < best)) { which = e; best = d; }
+      }
+      if (which >= 0) {
+        mid = *end[which];
+        if (which == 0) s = 0.0; else if (which == 1) s = 1.0; else if (which == 2) t = 0.0; else t = 1.0;
+      }
+    }
+    const Vec3 at = joint_at(mid);
     cuts[i].push_back({s, at});
     cuts[j].push_back({t, at});
   }

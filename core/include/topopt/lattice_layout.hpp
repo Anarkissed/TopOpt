@@ -895,7 +895,9 @@ Bars weave_bars(const Domain& domain, const std::vector<Strand>& strands, int th
 // Rule O2, crossings: wherever two bars pass within the sum of their half widths of each other, both are cut there and
 // share ONE exact joint, the middle of their closest approach (its ends Node), so that drop_loose_bars stops there
 // and a loose tail never eats a whole strand. A bar whose closest point is its own end has that end moved onto the
-// joint instead of being cut, and it lands there (Node). Two bars that already share an end are left alone; joints
+// joint instead of being cut, and it lands there (Node). A crossing within the two half widths of an existing vertex
+// of either bar (an end where two or more bars meet: a strand's own vertex) is made AT that vertex, so the strand's
+// two bars there share the one joint and it stays whole (S1b). Two bars that already share an end are left alone; joints
 // within a hundredth of a micron of each other are one. The same result whatever order the bars were found in.
 // Returns the number of joints made.
 std::size_t split_at_crossings(Bars& bars);
@@ -1020,6 +1022,8 @@ Pieces drop_adrift_bars(Bars& bars, const Domain& domain, const Layout* layout =
 // once, and between two layouts keeps everything the changed settings do not touch (P2):
 // a cell-size, band or strut slider re-lays the cells without reading the part again; a
 // region, depth, Expand, Protect skin, rim or line-width change reads it again, once.
+struct TensorField;   // Organic, Traced (lattice_layout_organic.hpp)
+struct OrganicAsk;
 struct Settings {
   struct RegionAsk {
     int id = 0;
@@ -1102,6 +1106,12 @@ class Session {
   // regions carry the smallest spacing of their strands. With no strands it is lay().
   Outcome lay_weave(const Settings& settings, const std::vector<Strand>& strands, int threads = 0,
                     const std::atomic<bool>* stop = nullptr);
+  // O3, O4 (Organic, Traced; lattice_layout_organic.hpp): the owner's Traced placement for each weave region of the
+  // settings (trace_strands on `field` with `ask`, in region order), then exactly lay_weave with those strands. With
+  // no weave region it is lay(). The trace itself is not cancelled part way; the stop flag is read before it and in
+  // everything after it.
+  Outcome lay_organic(const Settings& settings, const TensorField& field, const OrganicAsk& ask, int threads = 0,
+                      const std::atomic<bool>* stop = nullptr);
   std::size_t open_edges() const { return open_edges_; }
   const PartMeasure& measure() const { return *measure_; }
   // The domain the last lay() was laid in: null before the first, REPLACED when a "where" setting changes. Read it after a
@@ -1110,6 +1120,8 @@ class Session {
 
  private:
   Outcome lay_with(const Settings& settings, const std::vector<Strand>* strands, int threads, const std::atomic<bool>* stop);
+  // The domain for these settings' "where": kept when it is the same, made again when it is not.
+  void ready_domain(const Settings& settings);
   StepModel model_;
   std::size_t open_edges_ = 0;
   std::unique_ptr<PartMeasure> measure_;
