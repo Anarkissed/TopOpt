@@ -174,6 +174,18 @@ void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c,
       if (probe.where(f.at(a, b, o.c0 - 0.05)).why == Why::Outside) { o.c0 -= 0.3; o.past0 = 0.3; }
       if (probe.where(f.at(a, b, o.c1 + 0.05)).why == Why::Outside) { o.c1 += 0.3; o.past1 = 0.3; }
     }
+  // The reading above is taken once, at the cube's mid-depth. A column whose mid-depth is
+  // not the cell's own lattice (a Protect skin, a pocket's air, other solid) may still hold
+  // the cell's lattice above or below that one point, where the skin or the pocket ends
+  // part-way down the cell. Where the cell holds any point of such a column, the column is
+  // read point by point (below) instead of being left solid as a whole.
+  for (int j = 0; j < k; ++j)
+    for (int i = 0; i < k; ++i) {
+      Col& o = col[at(i, j)];
+      if (o.kind != 0 && o.kind != 2) continue;
+      for (int z = 0; z < k; ++z)
+        if (cell_holds(lay, probe, c, place(i, j, z))) { o.kind = 3; break; }
+    }
   // A column of air beside an open one opens with it, so no film is left along the
   // part's side where the grid stops short of the surface.
   std::vector<Col> grown = col;
