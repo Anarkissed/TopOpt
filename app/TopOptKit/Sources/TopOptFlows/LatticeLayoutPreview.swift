@@ -284,6 +284,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         // ★ cells across a wall (C3-C5): Structural five; Aesthetic one with "Allow single-cell members", else two
         let aesthetic = (l.stageMode ?? .structural) == .aesthetic
         s.minCellsAcross = aesthetic ? (l.singleCellMembers ? 1 : 2) : 5
+        s.oneGrid = aesthetic && l.letWallsCutCells   // ★ his 11-14: Aesthetic only; Structural always sends false
         // ★ density (R10): core's dial is the percent he sees / 100 (0.01 thinnest ... 1 widest); a typed strut width wins
         let rowDensity = l.densityMode != .sim && (l.densityMode == .perRegion || aesthetic)
         s.perRegion = rowDensity

@@ -140,6 +140,7 @@ ll::Settings settings_from(const LatticeLayoutSettings& in) {
   s.skin_spec.reach_cells = in.skin_reach_cells;
   s.drop_loose = in.drop_loose;
   s.small_cells_in_thin_walls = in.small_cells_in_thin_walls;
+  s.one_grid = in.one_grid;
   return s;
 }
 

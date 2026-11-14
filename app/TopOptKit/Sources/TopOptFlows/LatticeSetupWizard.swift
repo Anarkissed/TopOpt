@@ -265,6 +265,7 @@ public struct LatticeSetupWizard: View {
                     singleCellSwitch
                 }
                 smallCellsSwitch   // ★ his ask 11-13: per part, every mode
+                if (project.lattice.stageMode ?? .structural) == .aesthetic { cutCellsSwitch }   // ★ his 11-14: Aesthetic only
             }
             // ★ NOT IN AESTHETIC (his ruling, 2026-08-24 late: "we should REMOVE
             // the 'too thin to certify' button from the aesthetic mode"). The
@@ -1574,6 +1575,26 @@ public struct LatticeSetupWizard: View {
     /// sake.
     /// ★ SMALL CELLS IN THIN WALLS (his ask 11-13: "I definitely want it as a per-part choice. Especially in the app itself."):
     /// a wall too thin for an open cell takes small, denser cells at the thinnest strut instead of going solid. Off by default.
+    /// ★ "LET WALLS CUT CELLS" (his rulings 11-14 00:55 and 01:00 — his words for the label): one even grid of cells that walls,
+    /// pockets and skins cut through, in place of whole cells fitted to each wall. Aesthetic only; off by default.
+    @ViewBuilder private var cutCellsSwitch: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(isOn: Binding(get: { model.letWallsCutCells },
+                                 set: { model.letWallsCutCells = $0; rebuild() })) {
+                Text("Let walls cut cells")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(DS.Color.textPrimary.color)
+            }
+            .toggleStyle(SwitchToggleStyle(tint: DS.Color.okGreen.color))
+            .latticeID("wizard-let-walls-cut-cells")
+            captionLine(model.letWallsCutCells ? "One even grid; walls and pockets cut through it."
+                                               : "Whole cells, fitted between walls.",
+                        info: "cut-cells",
+                        "New engine only. On: one even grid of cells across the part, cut wherever a wall, pocket or skin "
+                        + "falls. Off: whole cells, each sized to fit its wall.")
+        }
+    }
+
     @ViewBuilder private var smallCellsSwitch: some View {
         VStack(alignment: .leading, spacing: 4) {
             Toggle(isOn: Binding(get: { model.smallCellsInThinWalls },
@@ -2768,6 +2789,7 @@ public struct LatticeSetupWizard: View {
                 if model.gradingMode.fitsShape { AnyView(shapeBandRow) }
                 if !structural { AnyView(singleCellSwitch) }
                 AnyView(smallCellsSwitch)
+                if !structural { AnyView(cutCellsSwitch) }
             }
             if structural { AnyView(subfloorRetentionSwitch) }
             if !organic { AnyView(cellsAddedRows) }
