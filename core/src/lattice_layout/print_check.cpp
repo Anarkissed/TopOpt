@@ -165,7 +165,7 @@ struct Distance {
 
 struct LayerFound {
   std::vector<LayerReport::MidAir> mid_air;
-  std::vector<LayerReport::OneEnded> one_ended;
+  std::vector<LayerReport::OneEnded> one_ended, long_bridges;
   double reach = 0.0;
   std::size_t thin = 0;
 };
@@ -286,6 +286,14 @@ LayerFound judge(const Section* s_below, const Section& s_here, double z, const 
     const double reach = std::sqrt(far2) * g.px;
     out.reach = std::max(out.reach, reach);
     if (!(reach > over_mm)) continue;
+    auto far_point = [&] {
+      LayerReport::OneEnded o;
+      o.reach_mm = reach;
+      o.z = z;
+      o.x = g.x0 + (far_at % W + 0.5) * g.px;
+      o.y = g.y0 + (far_at / W + 0.5) * g.px;
+      return o;
+    };
     // The held material within two pixels of the patch: in how many separate places?
     const int wx0 = std::max(x_lo - 3, 0), wx1 = std::min(x_hi + 3, W - 1), wy0 = std::max(y_lo - 3, 0), wy1 = std::min(y_hi + 3, H - 1);
     const int ww = wx1 - wx0 + 1, wh = wy1 - wy0 + 1;
@@ -322,13 +330,11 @@ LayerFound judge(const Section* s_below, const Section& s_here, double z, const 
           }
       }
     }
-    if (places >= 2) continue;   // a bridge: held at two places or more
-    LayerReport::OneEnded o;
-    o.reach_mm = reach;
-    o.z = z;
-    o.x = g.x0 + (far_at % W + 0.5) * g.px;
-    o.y = g.y0 + (far_at / W + 0.5) * g.px;
-    out.one_ended.push_back(o);
+    if (places >= 2) {   // a bridge: held at two places or more. Fine, unless it reaches too far (rule e).
+      if (spec.reach_limit_mm > 0.0 && reach > spec.reach_limit_mm) out.long_bridges.push_back(far_point());
+      continue;
+    }
+    out.one_ended.push_back(far_point());
   }
   return out;
 }
@@ -437,6 +443,7 @@ LayerReport check_layers(const TriangleMesh& mesh, const LayerSpec& spec) {
     rep.thin_layers += f.thin > 0;
     for (LayerReport::MidAir& m : f.mid_air) { m.anything_below = below(m.x, m.y, k, &m.below_z); rep.mid_air.push_back(m); }
     for (LayerReport::OneEnded& o : f.one_ended) { o.anything_below = below(o.x, o.y, k, &o.below_z); rep.one_ended.push_back(o); }
+    for (LayerReport::OneEnded& o : f.long_bridges) { o.anything_below = below(o.x, o.y, k, &o.below_z); rep.long_bridges.push_back(o); }
   }
   return rep;
 }
@@ -459,7 +466,7 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
     mesh = build_mesh(part, domain, layout, bars, carved, ms, &rep.mesh);
     if (!rep.mesh.ok) { mesh = TriangleMesh{}; break; }
     rep.layers = check_layers(mesh, spec.layers);
-    const int n = static_cast<int>(rep.layers.mid_air.size() + rep.layers.one_ended.size());
+    const int n = static_cast<int>(rep.layers.mid_air.size() + rep.layers.one_ended.size() + rep.layers.long_bridges.size());
     rep.found_per_pass.push_back(n);
     if (n == 0) { rep.clean = true; break; }
     if (pass == most) break;
@@ -469,6 +476,9 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
       for (const LayerReport::OneEnded& o : rep.layers.one_ended)
         ms.posts.push_back({o.x, o.y, o.z, o.anything_below ? std::max(o.below_z, rep.layers.z_bed) : rep.layers.z_bed});
     };
+    // A bridge that reaches too far is never cured by leaving a strut out: it gets a post under its far point.
+    for (const LayerReport::OneEnded& o : rep.layers.long_bridges)
+      ms.posts.push_back({o.x, o.y, o.z, o.anything_below ? std::max(o.below_z, rep.layers.z_bed) : rep.layers.z_bed});
     if (!posting) {
       // First answer: leave out what starts there (the bottom of that layer).
       for (const LayerReport::MidAir& m : rep.layers.mid_air) ms.drop_at.push_back({m.x, m.y, m.z - half_layer});

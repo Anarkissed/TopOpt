@@ -150,6 +150,10 @@ struct LayerSpec {
   double layer_mm = 0.2;
   double pixel_mm = 0.05;
   double one_ended_over_mm = 1.0;
+  // Print rule (e) (reviewer, 2026-11-14, until he names his own number): no bridge reaches more than this past
+  // what holds it (a bridge held at both ends reaches half its span). Clean files reach 1.4 to 3.3 mm; the two
+  // faults of 2026-11-12 (a cap printed over a paper-thin slot) showed only as reaches of 8.88 and 20.01 mm.
+  double reach_limit_mm = 5.0;
   // Rule (d), a COUNT only (reviewer, 2026-11-12): an island of a layer thinner than this
   // (and at least `thin_min_mm2` in area) is about one line wide: a strut lying in a
   // lattice face's plane, cut in half along its length by the face. His 8 mm sample has
@@ -169,13 +173,14 @@ struct LayerReport {
   struct OneEnded { double reach_mm = 0, z = 0, x = 0, y = 0, below_z = 0; bool anything_below = false; };
   std::vector<MidAir> mid_air;       // in layer order
   std::vector<OneEnded> one_ended;   // in layer order
+  std::vector<OneEnded> long_bridges;   // held at two places or more, but reaching past `reach_limit_mm`; in layer order
   double longest_reach_mm = 0.0;
   std::size_t thin_islands = 0;      // rule (d): islands under `thin_under_mm` thick, all layers together
   int thin_layers = 0;               // layers that have at least one
   // The bed face is flat (no sloped or curved underside in the first layer worth the name,
   // and the first layer rests on the bed), nothing starts in mid-air, nothing is one-ended.
   bool bed_flat() const { return sloped_mm2 <= 0.5 && bed_mm2 >= 0.98 * first_layer_mm2; }
-  bool clean() const { return mid_air.empty() && one_ended.empty(); }
+  bool clean() const { return mid_air.empty() && one_ended.empty() && long_bridges.empty(); }
 };
 LayerReport check_layers(const TriangleMesh& mesh, const LayerSpec& spec = LayerSpec{});
 

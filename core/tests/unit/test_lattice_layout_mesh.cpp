@@ -387,6 +387,24 @@ static void test_layers() {
     const LayerReport r = check_layers(s.mesh);
     CHECK(r.clean() && r.longest_reach_mm > 2.7 && r.longest_reach_mm < 3.2);
   }
+  {  // Rule (e): the same bridge 14 mm long reaches 7 mm from either post: too far, though held at both ends.
+    MeshSink s;
+    add_box(s, 0, 0, 0, 2, 2, 10);
+    add_box(s, 16, 0, 0, 18, 2, 10);
+    add_box(s, 2, 0, 8, 16, 2, 10);
+    const LayerReport r = check_layers(s.mesh);
+    CHECK(r.mid_air.empty() && r.one_ended.empty() && r.long_bridges.size() == 1 && !r.clean());
+    if (r.long_bridges.size() == 1) {
+      const LayerReport::OneEnded& b = r.long_bridges[0];
+      CHECK(b.reach_mm > 6.7 && b.reach_mm < 7.2 && std::fabs(b.z - 8.1) < 0.01 && std::fabs(b.x - 9.0) < 0.3 && !b.anything_below);
+    }
+    LayerSpec loose;
+    loose.reach_limit_mm = 8.0;   // his number, when he names one
+    CHECK(check_layers(s.mesh, loose).clean());
+    LayerSpec off;
+    off.reach_limit_mm = 0.0;     // 0 = no limit
+    CHECK(check_layers(s.mesh, off).clean());
+  }
   {  // A block leaning at 45 degrees: every layer is held by the one below.
     MeshSink s;
     add_box(s, 0, 0, 0, 4, 4, 6, 6.0);
