@@ -1584,7 +1584,9 @@ public struct LatticeSetupWizard: View {
             }
             .toggleStyle(SwitchToggleStyle(tint: DS.Color.okGreen.color))
             .latticeID("wizard-small-cells-thin-walls")
-            captionLine(model.smallCellsInThinWalls ? "Thin walls get small, denser cells instead of going solid."
+            .disabled(project.lattice.allowQuilt)   // ★ 11-13: Allow quilt already lets cells go this small (the engine reads either)
+            captionLine(project.lattice.allowQuilt ? "Allow quilt is on: it already lets cells go this small."
+                        : model.smallCellsInThinWalls ? "Thin walls get small, denser cells instead of going solid."
                                                     : "A wall too thin for an open cell stays solid.",
                         info: "small-cells",
                         "New engine only. A wall too thin for an open cell at two-line struts takes small, denser cells "

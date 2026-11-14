@@ -189,6 +189,34 @@ final class LatticeLayoutPreviewTests: XCTestCase {
         XCTAssertEqual(LatticeLayoutPreview.note(l), LatticeLayoutPreview.byStressLine, "★ By stress: said in one line")
     }
 
+    /// ★ 11-13: skins of one depth go as one (his v4 stand: 26 skins of 4 mm, 289 s → 0.7 s on the Mac, the same lattice).
+    func testProtectSkinsOfOneDepthGoAsOne() {
+        let merged = LatticeLayoutPreview.mergedByDepth([.init(id: 1, faces: [1, 2], depthMM: 4), .init(id: 2, faces: [3, 2], depthMM: 4),
+                                                         .init(id: 3, faces: [4], depthMM: 1)])
+        XCTAssertEqual(merged.count, 2, "★ one skin per depth")
+        XCTAssertEqual(merged[0].faces, [1, 2, 3], "★ every face of that depth, once")
+        XCTAssertEqual(merged[0].depthMM, 4)
+        XCTAssertEqual(merged[1].faces, [4])
+        XCTAssertEqual(merged[1].depthMM, 1, "a different depth stays its own skin")
+    }
+
+    /// ★ 11-13: the cell window is the one the page RESOLVES (as the old engine's job): never a number its mode does not show.
+    func testTheCellWindowIsThePagesResolvedOne() throws {
+        let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
+        let p = r.project
+        _ = try FlexibleR7M1Fixtures.hisLiveLattice(p)
+        p.lattice.cellSizeMode = .auto
+        p.lattice.cellMinMM = 0.5
+        p.lattice.cellMaxMM = 99   // a stored number Auto does not show
+        let b = LatticeBounds.compute(settings: p.lattice, limits: TopOptKit.latticeLimits(topology: p.lattice.topologyID),
+                                      lineWidthMM: p.printParams.strutLineWidthMM)
+        let plan = p.lattice.resolvedCellPlan(bounds: b, minimizePlastic: false)
+        let s = LatticeLayoutPreview.settings(p)
+        XCTAssertNotEqual(s.cellMaxMM, 99, "★ Auto never sends the stored max it does not show")
+        XCTAssertEqual(s.cellMaxMM, plan.hiMM, accuracy: 1e-9, "★ Auto sends its own range's top")
+        XCTAssertEqual(s.cellMinMM, plan.loMM, accuracy: 1e-9, "★ and its floor")
+    }
+
     // MARK: fixtures
 
     /// `n` bars on a grid: a 0.8 mm bar along x from each point.

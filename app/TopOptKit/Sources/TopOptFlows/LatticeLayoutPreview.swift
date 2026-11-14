@@ -26,7 +26,7 @@ public final class LatticeLayoutPreview: ObservableObject {
     @Published public private(set) var timing: Timing?
     @Published public private(set) var laying = false
     /// One plain line: what these settings ask that the new engine does not do yet (nil: nothing).
-    @Published public private(set) var note: String?
+    @Published public private(set) var notes: [String] = []
 
     public struct Timing: Equatable, Sendable {
         public var openMS: Double
@@ -45,12 +45,19 @@ public final class LatticeLayoutPreview: ObservableObject {
     public static let roundBarsLine = "Preview: bars drawn round · the print squares flat bridges and adds posts"
     public static let noPartLine = "New engine: this part has no model file to read"
     public static let organicLine = "New engine: Organic is not drawn yet · this is the old preview"
-    public static let byStressLine = "New engine: no grading by stress yet · it shows the density you set"
+    public static let byStressLine = "New engine: no stress yet · cell size and density follow the shape only"
+    public static let perAreaLine = "New engine: one cell range, grade style and band for the whole part, not per area yet"
 
     /// The new engine draws the strut types' Uniform, Default Grade and Stepped; Organic keeps the old preview (LatticeReview 11-13).
     public static func draws(_ l: LatticeSettings) -> Bool { l.resolvedAlgorithm != "organic" }
-    /// One plain line about what the new engine leaves out for these settings, or nil.
-    public static func note(_ l: LatticeSettings) -> String? { l.densityMode == .sim || l.simulateStresses ? byStressLine : nil }
+    /// One plain line each for what the new engine leaves out for these settings.
+    public static func notes(_ l: LatticeSettings) -> [String] {
+        var out: [String] = []
+        if l.densityMode == .sim || l.simulateStresses { out.append(byStressLine) }
+        if l.areaGrading.values.contains(where: { !$0.isEmpty }) { out.append(perAreaLine) }
+        return out
+    }
+    public static func note(_ l: LatticeSettings) -> String? { notes(l).first }
     /// The body while the new engine draws: see-through, so the bars inside it show (the Flexible pass's ghost rules apply).
     public static let ghostAlpha: Float = 0.2
 
@@ -74,7 +81,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         if path != sessionPath || box == nil { box = Self.box(p.importedMesh?.vertices ?? []) }
         let solidChanged = solid != solidWanted
         solidWanted = solid
-        note = Self.note(p.lattice)
+        notes = Self.notes(p.lattice)
         let s = Self.settings(p)
         if path == sessionPath, s == lastSettings, task != nil || bars != nil {
             if solidChanged, task == nil || bars != nil { solidToggled() }
@@ -170,6 +177,22 @@ public final class LatticeLayoutPreview: ObservableObject {
 
     // MARK: the page's settings, as core reads them
 
+    /// Protect skins of one depth as one skin, in the order their depths first appear; each face once.
+    static func mergedByDepth(_ skins: [LatticeLayoutSession.Protect]) -> [LatticeLayoutSession.Protect] {
+        var order: [Double] = []
+        var byDepth: [Double: LatticeLayoutSession.Protect] = [:]
+        for g in skins {
+            if var m = byDepth[g.depthMM] {
+                for f in g.faces where !m.faces.contains(f) { m.faces.append(f) }
+                byDepth[g.depthMM] = m
+            } else {
+                byDepth[g.depthMM] = g
+                order.append(g.depthMM)
+            }
+        }
+        return order.compactMap { byDepth[$0] }
+    }
+
     /// Lattice Setup's settings for core's lattice_layout (read where its rows read them).
     public static func settings(_ p: ProjectModel) -> LatticeLayoutSession.Settings {
         var s = LatticeLayoutSession.Settings()
@@ -179,9 +202,14 @@ public final class LatticeLayoutPreview: ObservableObject {
         s.minStrutLines = 2   // ★ the reviewer's ruling 11-12: one line does not print on his 0.4 mm nozzle
         s.topology = l.topologyID.isEmpty ? "octet" : l.topologyID
         s.algorithm = l.resolvedAlgorithm == "stepped" ? "stepped" : "default_grade"
+        // ★ 11-13: the cell window the page RESOLVES, as the old engine's job reads it (Auto: the floor to the type's ceiling;
+        // Swept: the typed window, never under the floor) — never the stored numbers a mode does not show
+        let bounds = LatticeBounds.compute(settings: l, limits: TopOptKit.latticeLimits(topology: l.topologyID),
+                                           lineWidthMM: s.beadMM)
+        let plan = l.resolvedCellPlan(bounds: bounds, minimizePlastic: false)
         s.cellMM = l.cellSizeMode == .fixed ? l.cellMM : 0
-        s.cellMaxMM = l.cellMaxMM > 0 ? l.cellMaxMM : 8
-        s.cellMinMM = Swift.max(0, l.cellMinMM)
+        s.cellMinMM = Swift.max(0, plan.loMM)
+        s.cellMaxMM = plan.hiMM > 0 ? plan.hiMM : (l.cellMaxMM > 0 ? l.cellMaxMM : 8)
         switch l.boundary {
         case .rim: s.rimMM = -1           // Finish Rim: two line widths
         case .fullSkin: s.skin = true     // Finish Skin (S3): bars across the face joining the cut strut ends (his pick 11-12:
@@ -240,6 +268,9 @@ public final class LatticeLayoutPreview: ObservableObject {
                 id += 1
             }
         }
+        // ★ 11-13: Protect skins of one depth go as ONE skin (the same solid, rule D5). The engine's reading asks every skin in
+        // turn: his v4 stand's 26 skins of 4 mm took 289 s to lay on the Mac, one group of them 0.7 s, the lattice identical.
+        s.protect = Self.mergedByDepth(s.protect)
         // Whole part ("In a part"), or no face asked for lattice: the whole part is lattice, less No lattice and Protect skins
         s.allLattice = l.wholePart || !s.regions.contains { !$0.noLattice }
         return s
@@ -271,7 +302,7 @@ struct LatticeLayoutPreviewLines: View {
             } else if preview.laying, preview.bars == nil {
                 Text("New engine: laying the lattice…").font(.system(size: 12)).foregroundStyle(DS.Color.textSecondary.color)
             }
-            if let n = preview.note {
+            ForEach(preview.notes, id: \.self) { n in
                 Text(n).font(.system(size: 12)).foregroundStyle(DS.Color.warning.color)
             }
             Text(LatticeLayoutPreview.roundBarsLine).font(.system(size: 12)).foregroundStyle(DS.Color.textSecondary.color)

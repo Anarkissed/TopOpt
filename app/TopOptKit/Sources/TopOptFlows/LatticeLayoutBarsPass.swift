@@ -219,26 +219,14 @@ fragment BarGBuf wall_gbuffer(WallVOut in [[stage_in]], constant WallFrame& F [[
     float step = 0.5 * vox;
     int steps = int(min((t1 - t0) / step + 2.0, 6000.0));
     bool seenOpen = false;
+    float insideRun = 0.0;   // how far the ray has been inside the part before any open lattice
     float t = t0 + 0.5 * step;
-    if (F.albedo.w > 1.5) {   // DEBUG: draw the box's entry
-        float3 p = ro + rd * t0;
-        float4 clip = F.clipFromModel * float4(p, 1.0);
-        BarGBuf o; o.eyeZ = -(F.eyeFromModel * float4(p, 1.0)).z; o.enormal = float4(0, 0, 1, 0); o.albedo = float4(1, 0, 0, 1);
-        o.depth = clip.z / clip.w; return o;
-    }
-    if (F.albedo.w > 0.5 && F.albedo.w < 0.9) {   // DEBUG: colour = what the map says at the box's middle along the ray
-        float tm = 0.5 * (t0 + t1);
-        float2 v = map.sample(sl, wall_uvw(ro + rd * tm, F)).rg;
-        float3 p = ro + rd * tm;
-        float4 clip = F.clipFromModel * float4(p, 1.0);
-        BarGBuf o; o.eyeZ = -(F.eyeFromModel * float4(p, 1.0)).z; o.enormal = float4(0, 0, 1, 0);
-        o.albedo = float4(v.x > 0 ? 1.0 : 0.0, v.y > 0 ? 1.0 : 0.0, 0.2, 1); o.depth = 0.0; return o;
-    }
     for (int i = 0; i < steps; ++i, t += step) {
         float2 v = map.sample(sl, wall_uvw(ro + rd * t, F)).rg;
         bool open = v.x > 0.0, inside = v.y > 0.0;
         if (!seenOpen) {
-            if (open) { seenOpen = true; } else if (inside) { discard_fragment(); }
+            // the engine reads a point right on the surface as solid: a voxel of that is not the body; more is
+            if (open) { seenOpen = true; } else if (inside) { insideRun += step; if (insideRun > 1.5 * vox) { discard_fragment(); } }
             continue;
         }
         if (open) { continue; }
@@ -286,9 +274,9 @@ final class LatticeLayoutBarsPass {
     private(set) var gridToken = -1
     /// The cut walls' colour: the body's own grey, so a cut reads as the same material.
     static let wallColour = SIMD4<Float>(0.80, 0.81, 0.83, 1)
-    /// The tests' red control: the same frame without the walls.
-    static var drawWalls = true
-    static var debugMode: Float = 1   // DEBUG
+    /// The cut walls: OFF until they draw (11-13: the hollow-core test draws 19 pixels of them, not hundreds; and the march
+    /// runs per pixel per frame, so it is not shipped on until it is right and timed on the iPad).
+    static var drawWalls = false
     private(set) var buffer: MTLBuffer?
     private(set) var count = 0
     private(set) var token = -1
@@ -364,7 +352,7 @@ final class LatticeLayoutBarsPass {
                      clipFromModel: simd_float4x4, eyeFromModel: simd_float4x4, eyeNormalBasis: simd_float4x4) -> Bool {
         guard Self.drawWalls, !hidden, let g = grid, let tex = gridTexture, enc.device === device else { return false }
         var f = WallFrame(clipFromModel: clipFromModel, modelFromClip: clipFromModel.inverse, eyeFromModel: eyeFromModel,
-                          eyeNormalBasis: eyeNormalBasis, albedo: SIMD4(Self.wallColour.x, Self.wallColour.y, Self.wallColour.z, Self.debugMode), origin: SIMD4(g.origin, 0),
+                          eyeNormalBasis: eyeNormalBasis, albedo: Self.wallColour, origin: SIMD4(g.origin, 0),
                           spacing: SIMD4(g.voxel, g.voxel, g.voxel, 0),
                           dims: SIMD4(Float(g.dims.x), Float(g.dims.y), Float(g.dims.z), 0))
         enc.setRenderPipelineState(wallsPipeline)

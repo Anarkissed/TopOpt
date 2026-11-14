@@ -194,6 +194,8 @@ public struct SelectionsList: View {
     /// nil: no button (the picked group alone shows its rows, as before).
     var isOpen: ((UUID) -> Bool)? = nil
     var toggleOpen: ((UUID) -> Void)? = nil
+    /// ★ his ask 11-13 (Topology like Lattice): false = a picked group's rows close on its chevron and it stays picked.
+    var pickedStaysOpen = true
     /// ★ his ask: the list's height, set by dragging the grip under it (nil: as tall as its rows, up to the screen).
     /// No binding: no grip.
     var chosenHeight: Binding<CGFloat?>? = nil
@@ -255,9 +257,9 @@ public struct SelectionsList: View {
 
     /// The same list with an open/close button per group and a resize grip (Topology, his iPad 2026-10-26).
     func openAndResize(isOpen: @escaping (UUID) -> Bool, toggleOpen: @escaping (UUID) -> Void,
-                       height: Binding<CGFloat?>) -> SelectionsList {
+                       height: Binding<CGFloat?>, pickedStaysOpen: Bool = true) -> SelectionsList {
         var copy = self
-        copy.isOpen = isOpen; copy.toggleOpen = toggleOpen; copy.chosenHeight = height
+        copy.isOpen = isOpen; copy.toggleOpen = toggleOpen; copy.chosenHeight = height; copy.pickedStaysOpen = pickedStaysOpen
         return copy
     }
 
@@ -429,7 +431,9 @@ public struct SelectionsList: View {
                 .modifier(SelectedRowLook(on: lineLook != nil && isPicked && lineLook?(g.id) == true,
                                           outlineKey: "selOutline-\(g.id.uuidString)", oldBar: g.color))
             if deleteAsk == g.id, here, !DeleteConfirm.controlOldHeaderLine { deleteConfirm(g) }
-            if isPicked || (isOpen?(g.id) == true && here) { rows(g) }
+            if (pickedStaysOpen && isPicked) || (isOpen?(g.id) == true && here) {
+                rows(g).background(publish("selRows-\(g.id.uuidString)"))   // the hosted tests: this group's rows are open
+            }
         }
         // ★ B2 (round 1, R2.3 / R4, design-system §4.4): a selected row reads as selected at a glance — the fill, the 3 pt
         // accent bar and a 1.5 pt accent outline inset 4 pt; every row is its own line, a hairline under it
@@ -497,7 +501,7 @@ public struct SelectionsList: View {
         let select = folder?.select
         return HStack(spacing: DS.Space.s) {
             if let toggleOpen, let isOpen {
-                let open = (isOpen(g.id) && here) || isPicked
+                let open = (isOpen(g.id) && here) || (pickedStaysOpen && isPicked)
                 Button { select?(g.id); toggleOpen(g.id) } label: {
                     Image(systemName: open ? "chevron.down" : "chevron.right")
                         .font(.system(size: 11, weight: .bold)).foregroundStyle(DS.Color.textTertiary.color)

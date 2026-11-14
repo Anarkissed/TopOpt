@@ -2435,13 +2435,15 @@ public struct WorkspacePlaceholder: View {
     /// The keep-out volumes (keep-clear v2 Part 3), each tagged whether its group is
     /// the ACTIVE selection so the viewport brightens it. Built from the same
     /// resolved geometry the run freezes (`ProjectModel.clearanceVolumes`).
-    private var keepOutRenderItems: [ClearanceRenderItem] {
+    private var keepOutRenderItems: [ClearanceRenderItem] {   // (TopologyFocus: a picked group draws only its own)
         let active = selection.activeGroupID
         // ★ a hidden piece, and every group outside the open scenario, draws no volume; a switched-off anchor's are faint
         // (his iPad 2026-10-26 14:13). The same volumes in the same order, with their piece.
         let filtering = !hiddenPieces.isEmpty || (scenariosApply && force.hasScenarios)
-        let pieces = filtering ? project.groupView.showing(project.clearancePieceVolumes()) { $0.groupID }.map { ($0.groupID, $0.piece) } : []
-        return project.groupView.showing(project.clearanceVolumes()) { $0.groupID }.map {   // Flexible (PR #362) H49a: a hidden group draws no keep-out / protect / load / anchor volume (GroupEyeHides)
+        // ★ his ask 11-13 (as Lattice): while a group is picked, only ITS volumes draw (TopologyFocus)
+        let pieces = filtering ? TopologyFocus.only(project.groupView.showing(project.clearancePieceVolumes()) { $0.groupID },
+                                                    active: active) { $0.groupID }.map { ($0.groupID, $0.piece) } : []
+        return TopologyFocus.only(project.groupView.showing(project.clearanceVolumes()) { $0.groupID }, active: active) { $0.groupID }.map {   // Flexible (PR #362) H49a: a hidden group draws no keep-out / protect / load / anchor volume (GroupEyeHides)
             ClearanceRenderItem(volume: $0.volume, selected: $0.groupID == active)
         }
         .keepOutsDrawn(filtering ? pieces : nil, hidden: hiddenPieces) { force.scenarioDraw($0, applies: scenariosApply) }
@@ -2838,8 +2840,11 @@ public struct WorkspacePlaceholder: View {
         let origin = o, dir = d
         let unseen = unseenGroups
         var best: (group: UUID, key: Int, t: Float)?
+        // ★ his ask 11-13 (as Lattice): while a group is picked only ITS shapes draw, so only its shapes take a tap — a tap
+        // on another group's (now unseen) shape is a tap into nothing, and clears the pick
+        let focus = selection.activeGroupID
         for v in project.clearancePieceVolumes()
-        where !unseen.contains(v.groupID) && project.groupView.canEdit(v.groupID)
+        where !unseen.contains(v.groupID) && project.groupView.canEdit(v.groupID) && (focus == nil || v.groupID == focus)
             && !hiddenPieces.contains(SelectionArrowRule.PieceRef(group: v.groupID, key: v.piece)) {
             guard let t = v.volume.rayEntry(origin: origin, dir: dir) else { continue }
             if let s = surface, t > s + 0.5 { continue }   // behind the part: not what he tapped
@@ -14720,7 +14725,9 @@ extension WorkspacePlaceholder {
                 .scenarioHooks(folders: scenarioFolders, loose: scenarioLooseGroups, lineAccessory: { scenarioLineSwitch($0) }, footer: selectionsFooter)   // ★ load scenarios (reviewer 2026-10-26 13:22)
                 .openAndResize(isOpen: { openGroups.contains($0) },
                                toggleOpen: { id in if openGroups.contains(id) { openGroups.remove(id) } else { openGroups.insert(id) } },
-                               height: $selectionsHeight)   // ★ his iPad 2026-10-26: open buttons, resizable
+                               height: $selectionsHeight,
+                               pickedStaysOpen: false)   // ★ his ask 11-13 (as Lattice): the chevron closes a picked group, which stays picked
+                .onChange(of: selection.activeGroupID) { id in if let id { openGroups.insert(id) } }   // picking a group opens it   // ★ his iPad 2026-10-26: open buttons, resizable
             if !selectionsCollapsed {
                 HStack(spacing: DS.Space.s) {
                     if let t = topoTrashed, project.canUndoTrash(t) {
