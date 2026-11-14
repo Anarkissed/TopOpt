@@ -1010,7 +1010,115 @@ static void test_area_finish_file() {
   std::remove(path.c_str());
 }
 
+// D22 in the file job: "region_pieces" and "protect_pieces", one entry per region / Protect skin: null, or its pieces
+// (with pieces its faces are not read: the bridge may send the parent faces as well). They read into the same Settings
+// as made directly and lay the same layout; bad numbers or a wrong length refuse the job naming the key; pieces that
+// leave no surface are refused as faces the part does not have. A made file with a Protect skin on the left half of
+// the top (x <= 15) over lattice under the whole top is closed over that half and open over the other.
+static void test_pieces_key() {
+  const std::string text = R"({
+    "mode": "lattice_file", "model": "block.step",
+    "layout": {
+      "min_strut_lines": 2,
+      "region_ids": [1, 2], "region_no_lattice": [0, 1], "region_depth_mm": [8, 3], "region_expand_mm": [0, 0],
+      "region_face_counts": [1, 1], "region_faces": [1, 2],
+      "region_pieces": [null, [{"faces": [2], "cuts": [{"point": [20, 0, 0], "normal": [1, 0, 0], "strict": true}]}]],
+      "protect_ids": [7], "protect_depth_mm": [1.2], "protect_face_counts": [1], "protect_faces": [1],
+      "protect_pieces": [[{"faces": [1], "cuts": [{"point": [15, 0, 0], "normal": [-1, 0, 0]}]}]],
+      "algorithm": "uniform", "cell_max_mm": 8, "min_cells_across": 1
+    }
+  })";
+  FileJob job;
+  bool parsed = true;
+  try { job = parse_file_job(text); } catch (const FileJobError& e) { parsed = false; std::printf("  (%s)\n", e.what()); }
+  CHECK(parsed && job.settings.regions.size() == 2 && job.settings.protect.size() == 1);
+  if (!parsed || job.settings.regions.size() != 2 || job.settings.protect.size() != 1) return;
+  Settings direct;
+  direct.min_strut_lines = 2;
+  direct.cells.algorithm = Algorithm::Uniform;
+  direct.cells.cell_max_mm = 8;
+  direct.cells.min_cells_across = 1;
+  direct.regions = {{1, Role::Lattice, {1}, 8.0, 0.0}, {2, Role::NoLattice, {2}, 3.0, 0.0}};
+  direct.regions[1].pieces = {FacePiece{{2}, {FaceCut{{20, 0, 0}, {1, 0, 0}, true}}}};
+  direct.protect = {{7, {1}, 1.2, {FacePiece{{1}, {FaceCut{{15, 0, 0}, {-1, 0, 0}, false}}}}}};
+  auto same_pieces = [](const std::vector<FacePiece>& a, const std::vector<FacePiece>& b) {
+    if (a.size() != b.size()) return false;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+      if (a[i].faces != b[i].faces || a[i].cuts.size() != b[i].cuts.size()) return false;
+      for (std::size_t k = 0; k < a[i].cuts.size(); ++k) {
+        const FaceCut &p = a[i].cuts[k], &q = b[i].cuts[k];
+        if (p.point.x != q.point.x || p.point.y != q.point.y || p.point.z != q.point.z || p.normal.x != q.normal.x ||
+            p.normal.y != q.normal.y || p.normal.z != q.normal.z || p.strict != q.strict)
+          return false;
+      }
+    }
+    return true;
+  };
+  CHECK(job.settings.regions[0].pieces.empty() && same_pieces(job.settings.regions[1].pieces, direct.regions[1].pieces));
+  CHECK(same_pieces(job.settings.protect[0].pieces, direct.protect[0].pieces));
+  const Outcome from_job = Session(box_model(30, 30, 12)).lay(job.settings);
+  const Outcome made = Session(box_model(30, 30, 12)).lay(direct);
+  CHECK(from_job.empty_regions.empty() && !from_job.layout.cells.empty());
+  CHECK(from_job.layout.cells == made.layout.cells && from_job.layout.solid == made.layout.solid);
+
+  // Bad numbers, a wrong length, pieces with a zone: refused, naming the key.
+  const auto refused = [&](const char* from, const char* to, const char* names) {
+    std::string t = text;
+    const std::size_t at = t.find(from);
+    if (at == std::string::npos) return false;
+    t.replace(at, std::strlen(from), to);
+    try {
+      (void)parse_file_job(t);
+    } catch (const FileJobError& e) {
+      return has(e.what(), names);
+    }
+    return false;
+  };
+  CHECK(refused(R"("normal": [1, 0, 0])", R"("normal": [0, 0, 0])", "region_pieces"));
+  CHECK(refused(R"("point": [20, 0, 0])", R"("point": [20, 0])", "region_pieces"));
+  CHECK(refused(R"("strict": true)", R"("strict": true, "plane": 1)", "plane"));
+  CHECK(refused(R"([null, [{"faces")", R"([[{"faces")", "region_pieces"));   // not one per region
+  CHECK(refused(R"([null, [{"faces")", R"([[], [{"faces")", "region_pieces"));   // an empty list
+  CHECK(refused(R"("normal": [-1, 0, 0])", R"("normal": [0, 0, 0])", "protect_pieces"));
+  CHECK(refused(R"("protect_pieces": [[)", R"("protect_pieces": [null, [)", "protect_pieces"));
+  CHECK(refused(R"("region_face_counts": [1, 1], "region_faces": [1, 2],)",
+                R"("region_face_counts": [1, 0], "region_faces": [1], "region_zones": [null, {"kind": "box",
+                   "centre": [15, 15, 6], "axes": [[1, 0, 0], [0, 1, 0], [0, 0, 1]], "half_mm": [3, 3, 3]}],)",
+                "pieces and a zone"));
+
+  const std::string path = kTmp + "/lattice_file_pieces.stl";
+  {  // Pieces that leave nothing: refused before anything is made, as faces the part does not have.
+    FileJob none = job;
+    none.settings.regions[1].pieces[0].cuts[0].point.x = 100;
+    std::remove(path.c_str());
+    const FileResult r = make_lattice_file(box_model(30, 30, 12), none, path);
+    CHECK(r.code == "region_faces_missing" && (r.empty_regions == std::vector<int>{2}) && !exists(path));
+    none = job;
+    none.settings.protect[0].pieces[0].faces = {42};
+    const FileResult s = make_lattice_file(box_model(30, 30, 12), none, path);
+    CHECK(s.code == "protect_faces_missing" && !exists(path));
+  }
+  if (!mesh_available()) return;
+  std::remove(path.c_str());
+  const FileResult r = make_lattice_file(box_model(30, 30, 12), job, path);
+  CHECK(r.ok && r.cells > 0 && r.bars > 0);
+  if (!r.ok) { std::printf("  (%s: %s %s)\n", r.code.c_str(), r.why.c_str(), r.detail.c_str()); return; }
+  // Points a quarter of a millimetre under the top, over each half (clear of the cut and of region 2).
+  const PartMeasure file(weld_mesh(read_stl_file(path).mesh));
+  const PartMeasure::Probe in = file.probe();
+  int skinned = 0, open = 0;
+  for (double v = 8.1; v < 26; v += 0.25)
+    for (double u = 1.1; u < 13; u += 0.25) {
+      skinned += !in.inside(Vec3{u, v, 12 - 0.25});
+      open += !in.inside(Vec3{u + 16, v, 12 - 0.25});
+    }
+  std::printf("pieces file: %d empty points under the skinned half of the top, %d under the other half\n", skinned, open);
+  CHECK(skinned == 0 && open > 100);
+  std::remove(path.c_str());
+}
+
 int main() {
+  test_pieces_key();
   test_region_own_key();
   test_area_finish_file();
   test_cells_by_stress_key();

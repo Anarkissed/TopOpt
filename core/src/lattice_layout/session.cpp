@@ -16,12 +16,29 @@ std::string where_text(const Settings& s) {
   char buf[96];
   auto num = [&](double v) { std::snprintf(buf, sizeof buf, "%.17g,", v); out += buf; };
   auto whole = [&](long v) { std::snprintf(buf, sizeof buf, "%ld,", v); out += buf; };
+  // D22: every piece, its faces and every number of its cuts, so a moved cut reads the part
+  // again. Nothing is written for an ask with no pieces.
+  auto pieces = [&](const std::vector<FacePiece>& list) {
+    if (list.empty()) return;
+    out += "Q";
+    for (const FacePiece& p : list) {
+      out += "F";
+      for (int f : p.faces) whole(f);
+      for (const FaceCut& c : p.cuts) {
+        out += "C";
+        num(c.point.x); num(c.point.y); num(c.point.z);
+        num(c.normal.x); num(c.normal.y); num(c.normal.z);
+        whole(c.strict ? 1 : 0);
+      }
+    }
+  };
   whole(static_cast<long>(s.start));
   num(s.bead_mm); num(s.min_strut_lines); num(s.min_wall_mm); num(s.rim_mm); num(s.cover_mm);
   out += "R";
   for (const Settings::RegionAsk& r : s.regions) {
     whole(r.id); whole(static_cast<long>(r.role)); num(r.depth_mm); num(r.expand_mm);
     for (int f : r.faces) whole(f);
+    pieces(r.pieces);
     // D21: every number of the zone, so a moved zone reads the part again.
     out += "Z";
     whole(static_cast<long>(r.zone.kind));
@@ -37,6 +54,7 @@ std::string where_text(const Settings& s) {
   for (const Settings::ProtectAsk& p : s.protect) {
     whole(p.id); num(p.depth_mm);
     for (int f : p.faces) whole(f);
+    pieces(p.pieces);
     out += ";";
   }
   return out;
@@ -65,16 +83,19 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
     for (const Settings::RegionAsk& r : settings.regions) {
       bool ok = false;
       const bool zone = r.zone.kind != Zone::Kind::None;   // D21: a zone, in place of faces; both is refused
-      Region region = !zone ? region_from_faces(model_, r.faces, r.id, r.role, r.depth_mm, r.expand_mm, &ok)
-                      : r.faces.empty() ? region_from_zone(r.zone, r.id, r.role, r.expand_mm, &ok)
-                                        : Region{};
+      const bool cut = !r.pieces.empty();                   // D22: pieces, in place of faces; with a zone refused
+      Region region = zone ? (r.faces.empty() && !cut ? region_from_zone(r.zone, r.id, r.role, r.expand_mm, &ok)
+                                                      : Region{})
+                      : cut ? region_from_pieces(model_, r.pieces, r.id, r.role, r.depth_mm, r.expand_mm, &ok)
+                            : region_from_faces(model_, r.faces, r.id, r.role, r.depth_mm, r.expand_mm, &ok);
       if (!ok) { empty_regions_.push_back(r.id); continue; }
       region.rim_mm = r.rim_mm;       // S13: its own, else the part's
       region.cover_mm = r.cover_mm;
       spec.regions.push_back(std::move(region));
     }
     for (const Settings::ProtectAsk& p : settings.protect)
-      spec.protect.push_back({p.id, faces_mesh(model_, p.faces), p.depth_mm});
+      spec.protect.push_back({p.id, p.pieces.empty() ? faces_mesh(model_, p.faces) : pieces_mesh(model_, p.pieces),
+                              p.depth_mm});
     domain_ = std::make_unique<Domain>(*measure_, std::move(spec));
     where_ = where;
     unread_ = true;

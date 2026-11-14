@@ -235,6 +235,37 @@ Region region_from_zone(const Zone& zone, int id, Role role, double expand_mm = 
 // The triangles of the given faces, as one open mesh (for ProtectSkin::face).
 TriangleMesh faces_mesh(const StepModel& model, const std::vector<int>& face_ids);
 
+// Rule D22: a PIECE of the model's faces, as the app's Edit faces cuts them: some faces and
+// a list of cuts. A cut is a half-space, core's FaceRegionSpec cut exactly: a point p is
+// kept when (p - point) . normal >= 0, or > 0 when `strict`. The piece's surface is its
+// faces' surface where every cut holds.
+struct FaceCut {
+  Vec3 point{}, normal{};
+  bool strict = false;
+};
+struct FacePiece {
+  std::vector<int> faces;
+  std::vector<FaceCut> cuts;
+};
+
+// The surface of some pieces, as one open mesh: the union of the pieces' surfaces. Every
+// triangle of the pieces' faces is cut exactly by every cut of every piece (so two pieces
+// that share a cut, or a cut that ends on another piece, join with no seam and no gap),
+// and each part of it is kept when some piece holding its face keeps it. A triangle no cut
+// crosses is the model's own, unchanged. `ok` is false, and the mesh empty, when there is
+// no piece, a piece has no faces, a face has no triangles, a cut's normal is zero or a
+// number is not finite, or the cuts leave nothing.
+TriangleMesh pieces_mesh(const StepModel& model, const std::vector<FacePiece>& pieces, bool* ok = nullptr);
+
+// The region of some pieces (rule D22): everything region_from_faces does with its faces'
+// triangles it does with the pieces' surface (pieces_mesh): the true outline read off the
+// triangles, cut edges included (D10); one region, one depth, one outline, no seam between
+// the pieces (D20); a flat surface (its faces one plane) a prism, anything else a shell;
+// Expand in the plane (D11). `ok` is false, and the region empty, when pieces_mesh is not
+// ok or the depth is not above 0.
+Region region_from_pieces(const StepModel& model, const std::vector<FacePiece>& pieces, int id, Role role,
+                          double depth_mm, double expand_mm = 0.0, bool* ok = nullptr);
+
 // Rule D5: a solid face at exactly the stated depth, the lattice right behind it.
 // `face` is the face's own triangles (need not be closed). 0 mm means the thinnest face
 // that prints: two line widths.
@@ -1104,11 +1135,17 @@ struct Settings {
     std::optional<double> rim_mm, cover_mm;
     std::optional<bool> skin;
     std::optional<double> skin_width_mm, skin_reach_cells;
+    // D22: pieces of faces in place of whole faces (region_from_pieces). When there are any,
+    // `faces` is not read. An ask with pieces and a zone is left out and listed.
+    std::vector<FacePiece> pieces;
   };
   struct ProtectAsk {
     int id = 0;
     std::vector<int> faces;
     double depth_mm = 0.0;       // 0 = two line widths (D5)
+    // D22: the skin under pieces of faces (pieces_mesh) in place of whole faces; when there
+    // are any, `faces` is not read. Pieces pieces_mesh refuses give the skin no surface.
+    std::vector<FacePiece> pieces;
   };
   // Where lattice goes.
   Start start = Start::AllSolid;
@@ -1153,8 +1190,9 @@ struct Outcome {
   std::vector<SteppedEdge> stepped_edges;   // what Finish None left ragged (S4)
   bool read_again = false;       // the part was read for this layout (a "where" setting changed)
   bool cancelled = false;        // the stop flag was set before the layout was whole: nothing else here is filled
-  // Asked-for regions none of whose faces has triangles, and zones region_from_zone refused
-  // or asked for together with faces (D21).
+  // Asked-for regions none of whose faces has triangles, zones region_from_zone refused
+  // or asked for together with faces (D21), and pieces region_from_pieces refused or asked
+  // for together with a zone (D22).
   std::vector<int> empty_regions;
   double ms_read = 0.0, ms_cells = 0.0, ms_bars = 0.0;
   std::size_t thin_solid = 0;    // cut cells print rule P8 (f) made solid (solidify_thin_cuts)

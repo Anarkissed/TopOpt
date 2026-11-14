@@ -6407,7 +6407,406 @@ static void test_zones() {
   }
 }
 
+// D22: a region, and a Protect skin, given as pieces of faces (the app's Edit faces). zone_block(40, 40, 20): face 1
+// is the top (z = 20), 0 the bottom, 2 the front (y = 0), 3 x = 40, 4 the back, 5 x = 0.
+static FacePiece face_piece(std::vector<int> faces, std::vector<FaceCut> cuts) {
+  FacePiece p;
+  p.faces = std::move(faces);
+  p.cuts = std::move(cuts);
+  return p;
+}
+// A block 40 (x) by 20 (y) whose top is a cylinder about y (radius 25, axis at x 20, z -5, so its top is z 20 at
+// x 20 and z 10 at either side), in 96 flat strips: faces 0 the bottom, 1 the right side, 2 the arch (Cylinder),
+// 3 the left side, 4 the front (y = 0), 5 the back (y = 20).
+static StepModel arch_block() {
+  const double R = 25, cx = 20, cz = -5;
+  std::vector<std::array<double, 2>> xz = {{0, 0}, {40, 0}, {40, 10}};
+  const double a0 = std::asin(20.0 / R);   // the arch runs from +a0 (x 40) to -a0 (x 0), angle from the top
+  for (int k = 1; k < 96; ++k) {
+    const double a = a0 - 2.0 * a0 * k / 96.0;
+    xz.push_back({cx + R * std::sin(a), cz + R * std::cos(a)});
+  }
+  xz.push_back({0, 10});
+  const int n = static_cast<int>(xz.size());
+  ModelBuilder b;
+  const int bottom = b.face(StepSurfaceKind::Plane, {0, 0, -1}, {0, 0, 0});
+  const int right = b.face(StepSurfaceKind::Plane, {1, 0, 0}, {40, 0, 0});
+  const int arch = b.face(StepSurfaceKind::Cylinder, {0, 0, 0}, {0, 0, 0});
+  const int left = b.face(StepSurfaceKind::Plane, {-1, 0, 0}, {0, 0, 0});
+  const int front = b.face(StepSurfaceKind::Plane, {0, -1, 0}, {0, 0, 0});
+  const int back = b.face(StepSurfaceKind::Plane, {0, 1, 0}, {0, 20, 0});
+  const Vec3 mid{20, 10, 8};
+  auto out_tri = [&](int f, Vec3 p, Vec3 q, Vec3 r) {   // wound to face away from the middle (the block is convex)
+    const Vec3 u{q.x - p.x, q.y - p.y, q.z - p.z}, v{r.x - p.x, r.y - p.y, r.z - p.z};
+    const Vec3 nn{u.y * v.z - u.z * v.y, u.z * v.x - u.x * v.z, u.x * v.y - u.y * v.x};
+    const Vec3 c{(p.x + q.x + r.x) / 3 - mid.x, (p.y + q.y + r.y) / 3 - mid.y, (p.z + q.z + r.z) / 3 - mid.z};
+    if (nn.x * c.x + nn.y * c.y + nn.z * c.z >= 0) b.tri(f, p, q, r); else b.tri(f, p, r, q);
+  };
+  for (int i = 0; i < n; ++i) {
+    const int j = (i + 1) % n;
+    const int f = i == 0 ? bottom : i == 1 ? right : i == n - 1 ? left : arch;
+    const Vec3 p0{xz[i][0], 0, xz[i][1]}, p1{xz[j][0], 0, xz[j][1]}, q0{xz[i][0], 20, xz[i][1]}, q1{xz[j][0], 20, xz[j][1]};
+    out_tri(f, p0, p1, q1);
+    out_tri(f, p0, q1, q0);
+  }
+  for (int i = 1; i + 1 < n; ++i) {
+    out_tri(front, {xz[0][0], 0, xz[0][1]}, {xz[i][0], 0, xz[i][1]}, {xz[i + 1][0], 0, xz[i + 1][1]});
+    out_tri(back, {xz[0][0], 20, xz[0][1]}, {xz[i][0], 20, xz[i][1]}, {xz[i + 1][0], 20, xz[i + 1][1]});
+  }
+  b.m.solid_count = 1;
+  return b.m;
+}
+
+static void test_face_pieces() {
+  const StepModel model = zone_block(40, 40, 20);
+  PartMeasure pm(weld_mesh(model.mesh));
+  const double hair = 0.01;
+  // A slanted cut across the top: kept (left) where (p - c) . n >= 0.
+  const Vec3 c{20, 20, 0};
+  const double nl = std::sqrt(1.0 + 0.09);
+  const Vec3 n{-1.0 / nl, -0.3 / nl, 0}, along{-0.3 / nl, 1.0 / nl, 0};
+  const FaceCut keep_left{c, {-1, -0.3, 0}, false}, keep_right{c, {1, 0.3, 0}, true};
+  auto off = [&](double s, double side, double z) {   // s along the cut, side across it (+ = the left piece)
+    return Vec3{c.x + along.x * s + n.x * side, c.y + along.y * s + n.y * side, z};
+  };
+  CellSpec cs;
+  cs.cell_max_mm = 4;
+
+  // 1: the left piece alone: lattice a hair left of the cut and not a hair right, along it and at three depths;
+  // cells only under the piece.
+  {
+    bool ok = false;
+    DomainSpec s;
+    s.regions = {region_from_pieces(model, {face_piece({1}, {keep_left})}, 1, Role::Lattice, 6.0, 0.0, &ok)};
+    CHECK(ok && !s.regions[0].is_shell());
+    Domain d(pm, s);
+    auto pr = d.probe();
+    int wrong = 0;
+    for (double t : {-15.0, -7.0, 0.0, 7.0, 15.0})
+      for (double z : {19.5, 17.0, 14.5}) {
+        wrong += !(pr.where(off(t, hair, z)) == Where{Why::Lattice, 1});
+        wrong += !(pr.where(off(t, -hair, z)) == Where{Why::NotAsked, 0});
+      }
+    CHECK(wrong == 0);
+    const Layout l = lay_cells(d, cs);
+    int astray = 0;
+    for (const Cell& cell : l.cells) {   // each cube reaches the kept side of the cut
+      const Vec3 m = cell_centre(l, cell);
+      const double side = (m.x - c.x) * n.x + (m.y - c.y) * n.y;
+      astray += cell.region != 1 || side < -0.5 * cell.size * (std::fabs(n.x) + std::fabs(n.y)) - 1e-9;
+    }
+    CHECK(!l.cells.empty() && astray == 0);
+  }
+
+  // 2: the left piece one region, the right piece another (its cut strict): every point under the face is held by
+  // exactly one, points exactly on a cut along x included. Which one takes those is the prism's own edge rule: printed.
+  {
+    const FacePiece L = face_piece({1}, {keep_left}), Rp = face_piece({1}, {keep_right});
+    DomainSpec a, b;
+    a.regions = {region_from_pieces(model, {L}, 1, Role::Lattice, 6.0)};
+    b.regions = {region_from_pieces(model, {Rp}, 2, Role::Lattice, 6.0)};
+    Domain da(pm, a), db(pm, b);
+    auto pa = da.probe(), pb = db.probe();
+    int twice = 0, never = 0, points = 0;
+    for (double x = 0.37; x < 40; x += 0.83)
+      for (double y = 0.41; y < 40; y += 0.79) {
+        const Vec3 p{x, y, 17.3};
+        const int held = (pa.where(p) == Where{Why::Lattice, 1}) + (pb.where(p) == Where{Why::Lattice, 2});
+        twice += held > 1;
+        never += held < 1;
+        ++points;
+      }
+    CHECK(points > 2000 && twice == 0 && never == 0);
+    // Exactly on an axis cut x = 20, both senses of strict.
+    for (bool left_strict : {false, true}) {
+      DomainSpec e, f;
+      e.regions = {region_from_pieces(model, {face_piece({1}, {{{20, 0, 0}, {-1, 0, 0}, left_strict}})}, 1, Role::Lattice, 6.0)};
+      f.regions = {region_from_pieces(model, {face_piece({1}, {{{20, 0, 0}, {1, 0, 0}, !left_strict}})}, 2, Role::Lattice, 6.0)};
+      Domain de(pm, e), df(pm, f);
+      auto pe = de.probe(), pf = df.probe();
+      int on_twice = 0, on_never = 0, to_left = 0, to_right = 0;
+      for (double y = 0.5; y < 40; y += 1.5) {
+        const Vec3 p{20, y, 17.0};
+        const bool l = pe.where(p) == Where{Why::Lattice, 1}, r = pf.where(p) == Where{Why::Lattice, 2};
+        on_twice += l && r;
+        on_never += !l && !r;
+        to_left += l && !r;
+        to_right += r && !l;
+      }
+      CHECK(on_twice == 0 && on_never == 0);
+      std::printf("face pieces, on the cut x = 20 (left %s, right %s): %d points to the left piece, %d to the right\n",
+                  left_strict ? "strict" : "not strict", left_strict ? "not strict" : "strict", to_left, to_right);
+    }
+  }
+
+  // 3: ONE region of both pieces is the region of the whole face: the same `where` at 2,000 points and the same cells.
+  {
+    bool ok = false;
+    DomainSpec a, b;
+    a.regions = {region_from_pieces(model, {face_piece({1}, {keep_left}), face_piece({1}, {keep_right})}, 1,
+                                    Role::Lattice, 6.0, 0.0, &ok)};
+    b.regions = {region_from_faces(model, {1}, 1, Role::Lattice, 6.0)};
+    CHECK(ok && a.regions[0].prism.outline_uv.size() == 1);
+    Domain da(pm, a), db(pm, b);
+    auto pa = da.probe(), pb = db.probe();
+    int differ = 0, points = 0;
+    for (int i = 0; i < 2000; ++i) {
+      const Vec3 p{-1 + 42 * std::fmod(i * 0.6180339887, 1.0), -1 + 42 * std::fmod(i * 0.7548776662, 1.0),
+                   10 + 11 * std::fmod(i * 0.5698402910, 1.0)};
+      differ += !(pa.where(p) == pb.where(p));
+      ++points;
+    }
+    CHECK(points == 2000 && differ == 0);
+    const Layout la = lay_cells(da, cs), lb = lay_cells(db, cs);
+    CHECK(!la.cells.empty() && la.cells == lb.cells && la.solid == lb.solid);
+  }
+
+  // 4: a T. The top cut at x 14, x 26 and y 28 into six pieces (each takes its lower side as it is, its upper side
+  // strict, as core's own splits do); the region is the bar (y >= 28) and the stem (14 <= x <= 26).
+  {
+    auto cell_piece = [&](int i, int j) {   // i: x band 0..2, j: y band 0..1
+      const double xs[4] = {0, 14, 26, 40}, ys[3] = {0, 28, 40};
+      std::vector<FaceCut> cuts;
+      if (i > 0) cuts.push_back({{xs[i], 0, 0}, {1, 0, 0}, false});
+      if (i < 2) cuts.push_back({{xs[i + 1], 0, 0}, {-1, 0, 0}, true});
+      if (j > 0) cuts.push_back({{0, ys[j], 0}, {0, 1, 0}, false});
+      if (j < 1) cuts.push_back({{0, ys[j + 1], 0}, {0, -1, 0}, true});
+      return face_piece({1}, cuts);
+    };
+    bool ok = false;
+    DomainSpec s;
+    s.rim_mm = 1.0;
+    s.regions = {region_from_pieces(model, {cell_piece(0, 1), cell_piece(1, 1), cell_piece(2, 1), cell_piece(1, 0)}, 1,
+                                    Role::Lattice, 6.0, 0.0, &ok)};
+    CHECK(ok && !s.regions[0].is_shell() && s.regions[0].prism.outline_uv.size() == 1);   // one outline
+    DomainSpec plain = s;
+    plain.rim_mm = 0.0;
+    Domain d(pm, plain), rim(pm, s);
+    auto pr = d.probe(), rr = rim.probe();
+    auto in_t = [](double x, double y) { return x > 0 && x < 40 && y > 0 && y < 40 && (y >= 28 || (x >= 14 && x <= 26)); };
+    // A hair inside and outside each of the T's eight edges, at three places along each.
+    struct Edge { double x0, y0, x1, y1; };
+    const Edge edges[8] = {{0, 28, 0, 40}, {0, 40, 40, 40}, {40, 40, 40, 28}, {40, 28, 26, 28},
+                           {26, 28, 26, 0}, {26, 0, 14, 0}, {14, 0, 14, 28}, {14, 28, 0, 28}};
+    int wrong = 0, tried = 0;
+    for (const Edge& e : edges)
+      for (double t : {0.2, 0.5, 0.8}) {
+        const double x = e.x0 + (e.x1 - e.x0) * t, y = e.y0 + (e.y1 - e.y0) * t;
+        const double len = std::hypot(e.x1 - e.x0, e.y1 - e.y0);
+        const double nx = (e.y1 - e.y0) / len, ny = -(e.x1 - e.x0) / len;   // one side of it
+        for (double side : {hair, -hair}) {
+          const double px = x + nx * side, py = y + ny * side;
+          const bool want = in_t(px, py);
+          wrong += pr.where({px, py, 17}).lattice() != want;
+          ++tried;
+        }
+      }
+    CHECK(tried == 48 && wrong == 0);
+    // Finish Rim follows the T: on its edges inside the part (the stem's sides, the bar's underside), not on the part's.
+    int rim_wrong = 0;
+    for (double y : {5.0, 15.0, 25.0}) {
+      rim_wrong += !(rr.where({14.5, y, 17}) == Where{Why::Rim, 1}) + !(rr.where({25.5, y, 17}) == Where{Why::Rim, 1});
+      rim_wrong += !(rr.where({16, y, 17}) == Where{Why::Lattice, 1});
+    }
+    for (double x : {5.0, 35.0}) {
+      rim_wrong += !(rr.where({x, 28.5, 17}) == Where{Why::Rim, 1});
+      rim_wrong += !(rr.where({x, 30, 17}) == Where{Why::Lattice, 1});
+    }
+    rim_wrong += !(rr.where({0.5, 34, 17}) == Where{Why::Lattice, 1});   // the part's own edge: no rim
+    CHECK(rim_wrong == 0);
+  }
+
+  // 5: Protect skin on the left piece (x <= 20) over a Lattice region of the whole top, 12 deep: the skin under that
+  // piece only, the lattice under the other running to the surface; the cells start below the skin only there.
+  {
+    DomainSpec s;
+    s.regions = {region_from_faces(model, {1}, 1, Role::Lattice, 12.0)};
+    s.protect = {{7, pieces_mesh(model, {face_piece({1}, {{{20, 0, 0}, {-1, 0, 0}, false}})}), 1.2}};
+    Domain d(pm, s);
+    auto pr = d.probe();
+    CHECK((pr.where({10, 20, 19.4}) == Where{Why::ProtectSkin, 7}));
+    CHECK((pr.where({10, 20, 18.7}) == Where{Why::Lattice, 1}));
+    CHECK((pr.where({30, 20, 19.99}) == Where{Why::Lattice, 1}));
+    CHECK((pr.where({21.5, 20, 19.4}) == Where{Why::Lattice, 1}));   // more than the skin's depth past the cut
+    CellSpec u;
+    u.algorithm = Algorithm::Uniform;
+    u.cell_max_mm = 8;
+    const Layout l = lay_cells(d, u);
+    int behind = 0, open = 0, odd = 0;
+    for (const Cell& cell : l.cells) {
+      const Vec3 at = cell_centre(l, cell);
+      if (at.x < 14.0) {
+        ++behind;
+        if (std::fabs(cell.size - 5.4) > 1e-5 || cell.lo[2] < 1.2 - 1e-5) ++odd;
+      } else if (at.x > 26.0) {
+        ++open;
+        if (std::fabs(cell.size - 6.0) > 1e-5 || (std::fabs(cell.lo[2]) > 1e-5 && std::fabs(cell.lo[2] - 6.0) > 1e-5)) ++odd;
+      }
+    }
+    CHECK(behind > 0 && open > 0 && odd == 0);
+  }
+
+  // 6: No lattice on a piece inside Start from All lattice: solid under the piece only.
+  {
+    DomainSpec s;
+    s.start = Start::AllLattice;
+    s.regions = {region_from_pieces(model, {face_piece({1}, {keep_left})}, 2, Role::NoLattice, 6.0)};
+    Domain d(pm, s);
+    auto pr = d.probe();
+    int wrong = 0;
+    for (double t : {-12.0, 0.0, 12.0}) {
+      wrong += !(pr.where(off(t, hair, 17)) == Where{Why::NoLattice, 2});
+      wrong += !(pr.where(off(t, -hair, 17)) == Where{Why::Lattice, 0});
+      wrong += !(pr.where(off(t, 3, 13.9)) == Where{Why::Lattice, 0});   // below its depth
+    }
+    CHECK(wrong == 0);
+  }
+
+  // 7: a curved face cut by a plane (x >= 26): lattice under the kept side only; the cut is the region's edge.
+  {
+    const StepModel archm = arch_block();
+    PartMeasure am(weld_mesh(archm.mesh));
+    bool ok = false;
+    DomainSpec s;
+    s.regions = {region_from_pieces(archm, {face_piece({2}, {{{26, 0, 0}, {1, 0, 0}, false}})}, 3, Role::Lattice, 4.0,
+                                    0.0, &ok)};
+    CHECK(ok && s.regions[0].is_shell());
+    int west = 0;
+    for (const auto& e : s.regions[0].shell_edge) west += e[0].x < 26 - 1e-9 || e[1].x < 26 - 1e-9;
+    CHECK(west == 0 && !s.regions[0].shell_edge.empty());
+    Domain d(am, s);
+    auto pr = d.probe();
+    const double R = 25;
+    auto under = [&](double x_on_face, double y, double depth) {   // `depth` in along the radius from the face at x
+      const double a = std::asin((x_on_face - 20) / R);
+      return Vec3{20 + (R - depth) * std::sin(a), y, -5 + (R - depth) * std::cos(a)};
+    };
+    int wrong = 0;
+    for (double y : {5.0, 10.0, 15.0})
+      for (double depth : {0.5, 2.0, 3.5}) {
+        wrong += !(pr.where(under(26.1, y, depth)) == Where{Why::Lattice, 3});
+        wrong += !(pr.where(under(25.9, y, depth)) == Where{Why::NotAsked, 0});
+        wrong += !(pr.where(under(33, y, depth)) == Where{Why::Lattice, 3});
+        wrong += !(pr.where(under(14, y, depth)) == Where{Why::NotAsked, 0});
+      }
+    CHECK(wrong == 0);
+  }
+
+  // 8: Expand +1 and -1 on the left piece (cut x <= 20) move its whole outline, the cut edge included.
+  for (double e : {1.0, -1.0}) {
+    DomainSpec s;
+    s.regions = {region_from_pieces(model, {face_piece({1}, {{{20, 0, 0}, {-1, 0, 0}, false}})}, 1, Role::Lattice, 6.0, e)};
+    Domain d(pm, s);
+    auto pr = d.probe();
+    int wrong = 0;
+    for (double y : {10.0, 20.0, 30.0}) {
+      wrong += !pr.where({20 + e - 0.05, y, 17}).lattice();
+      wrong += pr.where({20 + e + 0.05, y, 17}).lattice();
+    }
+    if (e < 0) {   // the part's own edges move in too
+      wrong += !pr.where({10, 1.05, 17}).lattice() + pr.where({10, 0.95, 17}).lattice();
+      wrong += !pr.where({1.05, 20, 17}).lattice() + pr.where({0.95, 20, 17}).lattice();
+    }
+    CHECK(wrong == 0);
+  }
+
+  // 9, 10, 12: through a Session.
+  Settings st;
+  st.min_strut_lines = kFewestStrutLines;
+  st.cells.cell_max_mm = 4;
+  {  // 9: a cut that keeps nothing, a zero or not finite normal, a piece with no faces, a face with no triangles,
+     // pieces with a zone: left out and listed; the rest still lay. A piece that keeps nothing beside one that does
+     // is not refused.
+    const FacePiece good = face_piece({1}, {keep_left});
+    st.regions.assign(9, Settings::RegionAsk{});
+    for (int i = 0; i < 9; ++i) {
+      st.regions[i].id = i + 1;
+      st.regions[i].depth_mm = 6.0;
+    }
+    st.regions[0].pieces = {good};
+    st.regions[1].pieces = {face_piece({1}, {{{100, 0, 0}, {1, 0, 0}, false}})};   // keeps nothing
+    st.regions[2].pieces = {face_piece({1}, {{{20, 0, 0}, {0, 0, 0}, false}})};    // zero normal
+    st.regions[3].pieces = {face_piece({}, {})};                                  // no faces
+    st.regions[4].pieces = {face_piece({99}, {})};                                // a face the part does not have
+    st.regions[5].pieces = {face_piece({1}, {{{20, 0, 0}, {std::nan(""), 0, 0}, false}})};
+    st.regions[6].pieces = {good};
+    st.regions[6].zone.kind = Zone::Kind::Box;   // a zone with pieces
+    st.regions[6].zone.centre = {20, 20, 10};
+    st.regions[6].zone.axis[0] = {1, 0, 0}; st.regions[6].zone.axis[1] = {0, 1, 0}; st.regions[6].zone.axis[2] = {0, 0, 1};
+    st.regions[6].zone.half[0] = st.regions[6].zone.half[1] = st.regions[6].zone.half[2] = 4;
+    st.regions[7].pieces = {face_piece({1}, {{{100, 0, 0}, {1, 0, 0}, false}}), face_piece({0}, {})};   // half kept
+    st.regions[7].depth_mm = 3.0;
+    st.regions[8].pieces = {good, face_piece({0}, {{{20, 0, 0}, {0, 0, 0}, false}})};   // one bad piece of two
+    const Outcome out = Session(model).lay(st);
+    CHECK((out.empty_regions == std::vector<int>{2, 3, 4, 5, 6, 7, 9}));
+    Settings only = st;
+    only.regions = {st.regions[0], st.regions[7]};
+    const Outcome alone = Session(model).lay(only);
+    CHECK(!out.layout.cells.empty() && out.layout.cells == alone.layout.cells && alone.empty_regions.empty());
+    bool p8 = false;
+    for (const Cell& cell : alone.layout.cells) p8 = p8 || cell.region == 8;
+    CHECK(p8);
+    bool made = true;   // a Protect skin of a refused piece has no surface
+    pieces_mesh(model, {face_piece({1}, {{{20, 0, 0}, {0, 0, 0}, false}})}, &made);
+    CHECK(!made);
+  }
+  {  // 10: moving a cut reads the part again; so does turning it strict; a cell size does not.
+    Session session(model);
+    Settings s = st;
+    s.regions = {Settings::RegionAsk{}};
+    s.regions[0].id = 1;
+    s.regions[0].depth_mm = 6.0;
+    s.regions[0].pieces = {face_piece({1}, {{{20, 0, 0}, {-1, 0, 0}, false}})};
+    CHECK(session.lay(s).read_again);
+    s.cells.cell_max_mm = 3;
+    CHECK(!session.lay(s).read_again);
+    s.regions[0].pieces[0].cuts[0].point.x = 21;
+    const Outcome moved = session.lay(s);
+    CHECK(moved.read_again && moved.layout.cells == Session(model).lay(s).layout.cells);
+    s.regions[0].pieces[0].cuts[0].strict = true;
+    CHECK(session.lay(s).read_again);
+    s.protect = {{5, {}, 1.0, {face_piece({1}, {{{20, 0, 0}, {1, 0, 0}, false}})}}};
+    CHECK(session.lay(s).read_again);
+    s.protect[0].pieces[0].cuts[0].normal.y = 0.1;
+    CHECK(session.lay(s).read_again);
+    CHECK(!session.lay(s).read_again);
+  }
+  {  // 12: no pieces is today's: three parts, each region and skin also given as one piece of its faces with no cut,
+     // lay the same cells, solid and bars.
+    int L = 0, square = 0, sideA = 0, sideB = 0;
+    const StepModel plate = plate_with_L_face(&L, &square, &sideA, &sideB);
+    const StepModel finish = finish_block();
+    int differ = 0, laid = 0;
+    for (int part = 0; part < 3; ++part) {
+      Settings s;
+      s.min_strut_lines = kFewestStrutLines;
+      s.cells.cell_max_mm = 6;
+      s.rim_mm = -1.0;
+      if (part == 0) {
+        s.regions = {{1, Role::Lattice, {1}, 6.0, -2.0}, {2, Role::NoLattice, {2}, 4.0, 0.0}};
+        s.protect = {{5, {1}, 1.0}};
+      } else if (part == 1) {
+        s.regions = {{1, Role::Lattice, {L}, 6.0, -1.0}, {2, Role::Lattice, {sideA, sideB}, 4.0, 0.0}};
+        s.protect = {{5, {square}, 0.0}};
+      } else {
+        s.start = Start::AllLattice;
+        s.regions = {{1, Role::Lattice, {1}, 6.0, 0.0}, {2, Role::NoLattice, {0}, 3.0, 0.0}};
+      }
+      Settings p = s;
+      for (Settings::RegionAsk& r : p.regions) r.pieces = {face_piece(r.faces, {})};
+      for (Settings::ProtectAsk& k : p.protect) k.pieces = {face_piece(k.faces, {})};
+      const StepModel& m = part == 0 ? model : part == 1 ? plate : finish;
+      const Outcome a = Session(m).lay(s), b = Session(m).lay(p);
+      differ += !(a.layout.cells == b.layout.cells && a.layout.solid == b.layout.solid && same_bars(a.bars, b.bars) &&
+                  a.empty_regions.empty() && b.empty_regions.empty());
+      laid += !a.layout.cells.empty() && !a.bars.bars.empty();
+    }
+    CHECK(differ == 0 && laid == 3);
+  }
+}
+
 int main() {
+  test_face_pieces();
   test_area_own();
   test_area_finish();
   test_cells_by_stress();

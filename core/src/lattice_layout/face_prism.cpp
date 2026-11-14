@@ -25,23 +25,13 @@ TriangleMesh faces_mesh(const StepModel& model, const std::vector<int>& face_ids
   return sink.mesh;
 }
 
-Region region_from_faces(const StepModel& model, const std::vector<int>& face_ids, int id,
-                         Role role, double depth_mm, double expand_mm, bool* ok) {
-  Region r;
-  r.id = id;
-  r.role = role;
-  r.expand_mm = expand_mm;
-  if (ok) *ok = false;
-  if (!(depth_mm > 0.0)) return r;
-  std::vector<int> ids;
-  for (int f : face_ids)
-    if (f >= 0 && f < model.face_count) ids.push_back(f);
-  std::sort(ids.begin(), ids.end());
-  ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
-  if (ids.empty()) return r;
-  TriangleMesh face = faces_mesh(model, ids);
-  if (face.triangles.empty()) return r;
-
+namespace {
+// The region under a surface (`face`, not empty) made of the listed faces of the model
+// (`ids`, sorted, none repeated, not empty): from here on a region of whole faces and one
+// of pieces (D22) are the same code.
+Region region_from_surface(const StepModel& model, const std::vector<int>& ids, TriangleMesh face, Region r,
+                           double depth_mm, double expand_mm, bool* ok) {
+  const int id = r.id;
   // One flat face? Every listed face a plane, facing the same way, in the same plane.
   const StepFaceInfo& info = model.faces[static_cast<std::size_t>(ids[0])];
   const Vec3 out = info.plane_normal;
@@ -158,6 +148,180 @@ Region region_from_faces(const StepModel& model, const std::vector<int>& face_id
   r.prism = std::move(g);
   if (ok) *ok = true;
   return r;
+}
+}  // namespace
+
+Region region_from_faces(const StepModel& model, const std::vector<int>& face_ids, int id,
+                         Role role, double depth_mm, double expand_mm, bool* ok) {
+  Region r;
+  r.id = id;
+  r.role = role;
+  r.expand_mm = expand_mm;
+  if (ok) *ok = false;
+  if (!(depth_mm > 0.0)) return r;
+  std::vector<int> ids;
+  for (int f : face_ids)
+    if (f >= 0 && f < model.face_count) ids.push_back(f);
+  std::sort(ids.begin(), ids.end());
+  ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+  if (ids.empty()) return r;
+  TriangleMesh face = faces_mesh(model, ids);
+  if (face.triangles.empty()) return r;
+  return region_from_surface(model, ids, std::move(face), std::move(r), depth_mm, expand_mm, ok);
+}
+
+namespace {
+// Rule D22. One convex part of a model triangle, and on which side of each cut it lies:
+// +1 where (p - point) . normal >= 0 holds all over it, -1 where it fails, 0 when the part
+// lies in the cut's plane.
+struct CutPart {
+  std::vector<Vec3> v;
+  std::vector<signed char> side;
+};
+// The surface of the pieces, and the faces it keeps a triangle of (sorted).
+TriangleMesh cut_surface(const StepModel& model, const std::vector<FacePiece>& pieces, bool* ok,
+                         std::vector<int>* kept_faces) {
+  if (ok) *ok = false;
+  if (pieces.empty()) return {};
+  const std::size_t nt = std::min(model.mesh.triangles.size(), model.triangle_face.size());
+  std::vector<int> per_face(static_cast<std::size_t>(std::max(0, model.face_count)), 0);
+  for (std::size_t t = 0; t < nt; ++t) {
+    const int f = model.triangle_face[t];
+    if (f >= 0 && f < model.face_count) ++per_face[static_cast<std::size_t>(f)];
+  }
+  auto finite = [](const Vec3& v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); };
+  // Every cut of every piece, its normal made unit; each piece's own cuts are its numbers here.
+  std::vector<Vec3> at, n;
+  std::vector<bool> strict;
+  std::vector<std::vector<std::size_t>> owns(pieces.size());
+  std::map<int, std::vector<std::size_t>> pieces_of;   // face -> the pieces that list it
+  for (std::size_t p = 0; p < pieces.size(); ++p) {
+    if (pieces[p].faces.empty()) return {};
+    for (int f : pieces[p].faces) {
+      if (f < 0 || f >= model.face_count || per_face[static_cast<std::size_t>(f)] == 0) return {};
+      std::vector<std::size_t>& list = pieces_of[f];
+      if (list.empty() || list.back() != p) list.push_back(p);
+    }
+    for (const FaceCut& c : pieces[p].cuts) {
+      const double len = std::sqrt(dot(c.normal, c.normal));
+      if (!finite(c.point) || !finite(c.normal) || !std::isfinite(len) || !(len > 0.0)) return {};
+      owns[p].push_back(at.size());
+      at.push_back(c.point);
+      n.push_back(Vec3{c.normal.x / len, c.normal.y / len, c.normal.z / len});
+      strict.push_back(c.strict);
+    }
+  }
+  // A point within a nanometre of a cut's plane is on it: two cuts in one plane (one piece's
+  // and its neighbour's, the other way) then cut at the same points, with no sliver between.
+  const double kOn = 1e-9;
+  // Where a cut crosses an edge, from the edge's two ends taken in one fixed order: every
+  // triangle that has the edge gets the very same point.
+  auto cross = [](const Vec3& a, double da, const Vec3& b, double db) {
+    const bool swap = b.x < a.x || (b.x == a.x && (b.y < a.y || (b.y == a.y && b.z < a.z)));
+    const Vec3& p = swap ? b : a;
+    const Vec3& q = swap ? a : b;
+    const double dp = swap ? db : da, dq = swap ? da : db;
+    const double t = dp / (dp - dq);
+    return Vec3{p.x + t * (q.x - p.x), p.y + t * (q.y - p.y), p.z + t * (q.z - p.z)};
+  };
+  MeshSink sink;
+  std::vector<int> kept;
+  std::vector<CutPart> parts, next;
+  std::vector<double> d;
+  for (std::size_t t = 0; t < nt; ++t) {
+    const auto found = pieces_of.find(model.triangle_face[t]);
+    if (found == pieces_of.end()) continue;
+    const auto& tri = model.mesh.triangles[t];
+    parts.assign(1, CutPart{{model.mesh.vertices[tri[0]], model.mesh.vertices[tri[1]], model.mesh.vertices[tri[2]]},
+                            std::vector<signed char>(at.size(), 0)});
+    for (std::size_t k = 0; k < at.size(); ++k) {
+      next.clear();
+      for (CutPart& part : parts) {
+        d.resize(part.v.size());
+        bool above = false, below = false;
+        for (std::size_t i = 0; i < part.v.size(); ++i) {
+          d[i] = dot(sub(part.v[i], at[k]), n[k]);
+          above = above || d[i] > kOn;
+          below = below || d[i] < -kOn;
+        }
+        if (!below || !above) {
+          part.side[k] = above ? 1 : below ? -1 : 0;
+          next.push_back(std::move(part));
+          continue;
+        }
+        CutPart up{{}, part.side}, down{{}, part.side};
+        up.side[k] = 1;
+        down.side[k] = -1;
+        for (std::size_t i = 0; i < part.v.size(); ++i) {
+          const std::size_t j = (i + 1) % part.v.size();
+          if (d[i] >= -kOn) up.v.push_back(part.v[i]);
+          if (d[i] <= kOn) down.v.push_back(part.v[i]);
+          if ((d[i] > kOn && d[j] < -kOn) || (d[i] < -kOn && d[j] > kOn)) {
+            const Vec3 x = cross(part.v[i], d[i], part.v[j], d[j]);
+            up.v.push_back(x);
+            down.v.push_back(x);
+          }
+        }
+        next.push_back(std::move(up));
+        next.push_back(std::move(down));
+      }
+      parts.swap(next);
+    }
+    for (const CutPart& part : parts) {
+      bool keep = false;
+      for (std::size_t p : found->second) {
+        bool all = true;
+        for (std::size_t k : owns[p]) all = all && (part.side[k] > 0 || (part.side[k] == 0 && !strict[k]));
+        keep = keep || all;
+      }
+      if (!keep || part.v.size() < 3) continue;
+      if (part.v.size() == 3) {   // a whole triangle, or a corner cut off one: as it is
+        sink.add_triangle(part.v[0], part.v[1], part.v[2]);
+      } else {
+        // Its corners can stand in a straight line (where a neighbour was cut), so it is
+        // cut into triangles from its middle, none of them flat.
+        Vec3 c{0, 0, 0}, e{0, 0, 0};
+        for (std::size_t i = 0; i < part.v.size(); ++i) {
+          const Vec3& a = part.v[i];
+          const Vec3& b = part.v[(i + 1) % part.v.size()];
+          c = Vec3{c.x + a.x, c.y + a.y, c.z + a.z};
+          e = Vec3{e.x + (a.y - b.y) * (a.z + b.z), e.y + (a.z - b.z) * (a.x + b.x), e.z + (a.x - b.x) * (a.y + b.y)};
+        }
+        if (!(dot(e, e) > 0.0)) continue;   // no area
+        const double m = 1.0 / static_cast<double>(part.v.size());
+        c = Vec3{c.x * m, c.y * m, c.z * m};
+        for (std::size_t i = 0; i < part.v.size(); ++i)
+          sink.add_triangle(c, part.v[i], part.v[(i + 1) % part.v.size()]);
+      }
+      kept.push_back(model.triangle_face[t]);
+    }
+  }
+  if (sink.mesh.triangles.empty()) return {};
+  std::sort(kept.begin(), kept.end());
+  kept.erase(std::unique(kept.begin(), kept.end()), kept.end());
+  if (kept_faces) *kept_faces = std::move(kept);
+  if (ok) *ok = true;
+  return std::move(sink.mesh);
+}
+}  // namespace
+
+TriangleMesh pieces_mesh(const StepModel& model, const std::vector<FacePiece>& pieces, bool* ok) {
+  return cut_surface(model, pieces, ok, nullptr);
+}
+
+Region region_from_pieces(const StepModel& model, const std::vector<FacePiece>& pieces, int id, Role role,
+                          double depth_mm, double expand_mm, bool* ok) {
+  Region r;
+  r.id = id;
+  r.role = role;
+  r.expand_mm = expand_mm;
+  if (ok) *ok = false;
+  if (!(depth_mm > 0.0)) return r;
+  bool good = false;
+  std::vector<int> ids;
+  TriangleMesh face = cut_surface(model, pieces, &good, &ids);
+  if (!good) return r;
+  return region_from_surface(model, ids, std::move(face), std::move(r), depth_mm, expand_mm, ok);
 }
 
 // Rule D21: a zone is a flat region whose prism is stated, not read off a face.

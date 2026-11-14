@@ -138,6 +138,41 @@ Zone zone_from(const json::Value& v, const std::string& w) {
   return z;
 }
 
+// D22: one region's or Protect skin's pieces, in place of its faces:
+//   [{"faces": [..], "cuts": [{"point": [x,y,z], "normal": [x,y,z], "strict": false}]}, ..]
+// A cut's normal of nothing is refused here; faces the part does not have are found later,
+// with every other face the job names (region_faces_missing, protect_faces_missing).
+std::vector<FacePiece> pieces_from(const json::Value& v, const std::string& w) {
+  std::vector<FacePiece> out;
+  const auto& list = json::as_array(v, w).arr;
+  for (std::size_t i = 0; i < list.size(); ++i) {
+    const std::string pw = w + "[" + std::to_string(i) + "]";
+    const json::Value& o = json::as_object(list[i], pw);
+    json::reject_unknown(o, {"faces", "cuts"}, pw);
+    FacePiece piece;
+    for (const json::Value& f : json::as_array(json::require(o, "faces", pw), pw + ".faces").arr)
+      piece.faces.push_back(json::as_int(f, pw + ".faces"));
+    if (const json::Value* cuts = json::find(o, "cuts")) {
+      const auto& cl = json::as_array(*cuts, pw + ".cuts").arr;
+      for (std::size_t k = 0; k < cl.size(); ++k) {
+        const std::string cw = pw + ".cuts[" + std::to_string(k) + "]";
+        const json::Value& c = json::as_object(cl[k], cw);
+        json::reject_unknown(c, {"point", "normal", "strict"}, cw);
+        FaceCut cut;
+        cut.point = vec3(c, "point", cw);
+        cut.normal = vec3(c, "normal", cw);
+        cut.strict = flag(c, "strict", false, cw);
+        const Vec3& n = cut.normal;
+        if (!(n.x * n.x + n.y * n.y + n.z * n.z > 0.0) || !std::isfinite(n.x * n.x + n.y * n.y + n.z * n.z))
+          json::fail(cw + ".normal", "a cut's normal must not be zero");
+        piece.cuts.push_back(cut);
+      }
+    }
+    out.push_back(std::move(piece));
+  }
+  return out;
+}
+
 Algorithm algorithm_from(const std::string& s, const std::string& where) {
   if (s == "uniform") return Algorithm::Uniform;
   if (s == "default_grade") return Algorithm::DefaultGrade;
@@ -153,8 +188,8 @@ Settings settings_from(const json::Value& in, const std::string& w) {
       in,
       {"all_lattice", "bead_mm", "min_strut_lines", "min_wall_mm", "rim_mm", "cover_mm",
        "region_ids", "region_no_lattice", "region_depth_mm", "region_expand_mm",
-       "region_face_counts", "region_faces", "region_zones", "region_finish", "protect_ids", "protect_depth_mm",
-       "protect_face_counts", "protect_faces", "topology", "algorithm", "cell_mm", "cell_max_mm",
+       "region_face_counts", "region_faces", "region_zones", "region_finish", "region_pieces", "protect_ids", "protect_depth_mm",
+       "protect_face_counts", "protect_faces", "protect_pieces", "topology", "algorithm", "cell_mm", "cell_max_mm",
        "cell_min_mm", "min_cells_across", "grade_to_shape", "band_mm", "band_cell_mm",
        "per_region", "dial", "dial_region", "dial_value", "strut_width_mm", "allow_quilt",
        "strength", "small_cells_in_thin_walls", "one_grid", "cells_by_stress", "bars", "join_loose", "skin",
@@ -196,6 +231,20 @@ Settings settings_from(const json::Value& in, const std::string& w) {
       if (!a.faces.empty()) json::fail(zat, "region " + std::to_string(a.id) + " has faces and a zone: one or the other");
     }
     s.regions.push_back(std::move(a));
+  }
+  // D22: per region, null (its faces, or its zone) or its pieces; with pieces its faces are not read.
+  if (const json::Value* pieces = json::find(in, "region_pieces")) {
+    const std::string at = w + ".region_pieces";
+    const auto& list = json::as_array(*pieces, at).arr;
+    if (list.size() != nr) json::fail(w, "region_pieces is not as long as region_ids");
+    for (std::size_t r = 0; r < nr; ++r) {
+      if (list[r].is_null()) continue;
+      const std::string pw = at + "[" + std::to_string(r) + "]";
+      s.regions[r].pieces = pieces_from(list[r], pw);
+      if (s.regions[r].pieces.empty()) json::fail(pw, "a region's pieces, when given, must not be an empty list");
+      if (s.regions[r].zone.kind != Zone::Kind::None)
+        json::fail(pw, "region " + std::to_string(s.regions[r].id) + " has pieces and a zone: one or the other");
+    }
   }
   // C23, R19: per region, null (the part's settings in everything) or its own, under the part's own key names.
   if (const json::Value* own = json::find(in, "region_own")) {
@@ -251,7 +300,19 @@ Settings settings_from(const json::Value& in, const std::string& w) {
     json::fail(w, "the Protect skin lists (protect_ids, protect_depth_mm, protect_face_counts) "
                   "are not all one length");
   const auto pf = unflatten(pcounts, wholes(in, "protect_faces", w), w + ".protect_faces");
-  for (std::size_t p = 0; p < np; ++p) s.protect.push_back({pids[p], pf[p], pdepth[p]});
+  for (std::size_t p = 0; p < np; ++p) s.protect.push_back({pids[p], pf[p], pdepth[p], {}});
+  // D22: per Protect skin, null (its faces) or its pieces; with pieces its faces are not read.
+  if (const json::Value* pieces = json::find(in, "protect_pieces")) {
+    const std::string at = w + ".protect_pieces";
+    const auto& list = json::as_array(*pieces, at).arr;
+    if (list.size() != np) json::fail(w, "protect_pieces is not as long as protect_ids");
+    for (std::size_t p = 0; p < np; ++p) {
+      if (list[p].is_null()) continue;
+      const std::string pw = at + "[" + std::to_string(p) + "]";
+      s.protect[p].pieces = pieces_from(list[p], pw);
+      if (s.protect[p].pieces.empty()) json::fail(pw, "a Protect skin's pieces, when given, must not be an empty list");
+    }
+  }
 
   s.cells.algorithm = algorithm_from(text(in, "algorithm", "default_grade", w), w + ".algorithm");
   try {
@@ -616,11 +677,17 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     // Before the long work: the faces every region and Protect skin names must be the part's.
     {
       std::vector<int> regions, skins;
+      // A zone has no faces; pieces (D22) stand in for the faces and must leave a surface.
+      auto none = [&](const std::vector<int>& faces, const std::vector<FacePiece>& pieces) {
+        if (pieces.empty()) return faces_mesh(model, faces).triangles.empty();
+        bool ok = false;
+        (void)pieces_mesh(model, pieces, &ok);
+        return !ok;
+      };
       for (const Settings::RegionAsk& a : job.settings.regions)
-        if (a.zone.kind == Zone::Kind::None && faces_mesh(model, a.faces).triangles.empty())   // a zone has no faces
-          regions.push_back(a.id);
+        if (a.zone.kind == Zone::Kind::None && none(a.faces, a.pieces)) regions.push_back(a.id);
       for (const Settings::ProtectAsk& a : job.settings.protect)
-        if (faces_mesh(model, a.faces).triangles.empty()) skins.push_back(a.id);
+        if (none(a.faces, a.pieces)) skins.push_back(a.id);
       if (!regions.empty()) {
         r.empty_regions = regions;
         refuse(r, kRegionFacesMissing, faces_missing("Region", "Regions", regions));
