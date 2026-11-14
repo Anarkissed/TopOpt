@@ -11,6 +11,7 @@
 // squares flat-bridge undersides and adds posts (PREVIEW IS THE SPEC — until the drawer shows them).
 import Foundation
 import SwiftUI
+import simd
 import TopOptKit
 import TopOptDesign
 
@@ -33,8 +34,10 @@ public final class LatticeLayoutPreview: ObservableObject {
         public var cellsMS: Double
         public var barsMS: Double
         public var bars: Int
+        public var mapMS: Double = 0   // the solid view's map (0: X-ray, or not yet)
         public var line: String {
             String(format: "New engine · open %.0f · read %.0f · cells %.0f · bars %.0f ms · %d bars", openMS, readMS, cellsMS, barsMS, bars)
+                + (mapMS > 0 ? String(format: " · solid %.0f ms", mapMS) : "")
         }
     }
 
@@ -64,16 +67,26 @@ public final class LatticeLayoutPreview: ObservableObject {
     private var lastSettings: LatticeLayoutSession.Settings?
     private var token = 0
     private var task: Task<Void, Never>?
+    /// ★ THE SOLID VIEW (his ask 11-13): X-ray off draws the part solid, cut open where the lattice is (the engine's map).
+    private var solidWanted = false
+    private var box: (lo: SIMD3<Float>, hi: SIMD3<Float>)?
+    private var mapTask: Task<Void, Never>?
 
     public init() {}
 
     /// The page's one call, on every change of the part or its lattice settings (cheap when nothing changed).
-    public func update(project p: ProjectModel, on: Bool) {
+    public func update(project p: ProjectModel, on: Bool, solid: Bool = false) {
         guard on else { clear(); return }
         guard let path = p.importedFile?.path else { problem = Self.noPartLine; bars = nil; return }
+        if path != sessionPath || box == nil { box = Self.box(p.importedMesh?.vertices ?? []) }
+        let solidChanged = solid != solidWanted
+        solidWanted = solid
         notes = Self.notes(p.lattice)
         let s = Self.settings(p)
-        if path == sessionPath, s == lastSettings, task != nil || bars != nil { return }
+        if path == sessionPath, s == lastSettings, task != nil || bars != nil {
+            if solidChanged, task == nil || bars != nil { solidToggled() }
+            return
+        }
         lastSettings = s
         task?.cancel()
         laying = true
@@ -83,6 +96,7 @@ public final class LatticeLayoutPreview: ObservableObject {
     /// Off: the session closed, nothing drawn.
     public func clear() {
         task?.cancel(); task = nil
+        mapTask?.cancel(); mapTask = nil
         session?.close(); session = nil; sessionPath = nil; lastSettings = nil
         bars = nil; problem = nil; timing = nil; laying = false
     }
@@ -99,10 +113,12 @@ public final class LatticeLayoutPreview: ObservableObject {
             let r = try await session.lay(s)
             guard !Task.isCancelled else { return }
             token &+= 1
-            bars = LatticeLayoutBarsInputs(token: token, bars: r.bars)
+            // the last map stays until this layout's own lands (no flash of a closed part on every change)
+            bars = LatticeLayoutBarsInputs(token: token, bars: r.bars, solid: solidWanted ? bars?.solid : nil)
             timing = Timing(openMS: openMS, readMS: r.msRead, cellsMS: r.msCells, barsMS: r.msBars, bars: r.barCount)
             problem = r.barCount == 0 ? "New engine: no lattice fits these settings" : nil
             laying = false
+            if solidWanted { await addMap() }
         } catch is CancellationError {
             // a newer setting is laying
         } catch {
@@ -110,6 +126,53 @@ public final class LatticeLayoutPreview: ObservableObject {
             bars = nil
             laying = false
         }
+    }
+
+    // MARK: the solid view's map
+
+    /// X-ray was switched: off asks for the map (once per layout), on drops it.
+    private func solidToggled() {
+        guard var b = bars else { return }
+        if !solidWanted { b.solid = nil; bars = b; timing?.mapMS = 0; return }
+        mapTask?.cancel()   // never the layout's own task: a layout in flight maps itself when it lands
+        mapTask = Task { [weak self] in await self?.addMap() }
+    }
+
+    private func addMap() async {
+        guard let session, let box, let b = bars, b.solid?.token != b.token else { return }
+        do {
+            let m = try await Self.map(session, box, token: b.token)
+            guard !Task.isCancelled, solidWanted, var now = bars, now.token == b.token else { return }
+            now.solid = m.grid
+            bars = now
+            timing?.mapMS = m.ms
+        } catch {
+            // the bars stay; the body stays whole where the map could not be read
+        }
+    }
+
+    /// The part's box, from the imported mesh (x y z per vertex).
+    static func box(_ v: [Float]) -> (lo: SIMD3<Float>, hi: SIMD3<Float>)? {
+        guard v.count >= 3 else { return nil }
+        var lo = SIMD3<Float>(repeating: .greatestFiniteMagnitude), hi = -lo
+        for i in stride(from: 0, to: v.count - 2, by: 3) {
+            let p = SIMD3(v[i], v[i + 1], v[i + 2])
+            lo = simd_min(lo, p); hi = simd_max(hi, p)
+        }
+        return (lo, hi)
+    }
+
+    /// The engine's map over the part's box with a voxel of air all round: about a million voxels at most, never finer than
+    /// 0.35 mm.
+    static func map(_ s: LatticeLayoutSession, _ box: (lo: SIMD3<Float>, hi: SIMD3<Float>), token: Int) async throws
+        -> (grid: LatticeLayoutSolidGrid, ms: Double) {
+        let ext = simd_max(box.hi - box.lo, SIMD3(repeating: 0.1))
+        let voxel = Swift.max(0.35, Float(cbrt(Double(ext.x * ext.y * ext.z) / 1_000_000)))
+        let dims = SIMD3<Int32>(Int32((ext.x / voxel).rounded(.up)) + 3, Int32((ext.y / voxel).rounded(.up)) + 3,
+                                Int32((ext.z / voxel).rounded(.up)) + 3)
+        let origin = box.lo - SIMD3(repeating: voxel)
+        let r = try await s.grid(origin: origin, voxel: voxel, dims: dims)
+        return (LatticeLayoutSolidGrid(token: token, origin: origin, voxel: voxel, dims: dims, rg: r.rg), r.ms)
     }
 
     // MARK: the page's settings, as core reads them

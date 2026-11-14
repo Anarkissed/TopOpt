@@ -93,6 +93,9 @@ struct LatticeLayoutResult {
   // The solid pieces the layout lists (D14: a cube tried and not fitted), each with its reason. Cubes sit on frames.
   std::vector<float> frames;                 // 12 per frame: origin xyz, then its three axes (unit) xyz each
   std::vector<float> solid_cubes;            // 4 per piece: low corner a b c (frame mm), size mm
+  // Per laid cell, 5 each (LatticeReview's test 2, 11-13: what set this cell's size): size mm, own mm (the wall's or
+  // region's own cell here), band (0 at the outline, 1 at the band's inner edge and beyond), finest (1/0), cut (1/0).
+  std::vector<float> cell_info;
   std::vector<int32_t> solid_frame;          // 1 per piece
   std::vector<int32_t> solid_region;         // 1 per piece
   std::vector<uint8_t> solid_why;            // 1 per piece: a LatticeLayoutWhy
@@ -134,6 +137,16 @@ struct LatticeLayoutPoints {
   std::vector<float> xyz;
 };
 LatticeLayoutWhere lattice_layout_where(int64_t session, const LatticeLayoutPoints& points, BridgeError& err);
+// THE SOLID VIEW's map (his ask 11-13: the everyday view solid, not X-ray): what is at every voxel centre of a box, for the
+// LAST layout laid, on every core. Two bytes per voxel, x fastest then y then z, as rg8Snorm: OPEN (+127: lattice a cell
+// holds, also on an outside voxel next to one so a surface right at the opening reads it; -127 otherwise) and INSIDE the part
+// (+127 / -127). Empty before the first layout.
+struct LatticeLayoutGrid {
+  std::vector<int8_t> rg;
+  double ms = 0.0;
+};
+LatticeLayoutGrid lattice_layout_grid(int64_t session, float origin_x, float origin_y, float origin_z, float voxel_mm,
+                                      int32_t nx, int32_t ny, int32_t nz, BridgeError& err);
 // Every layout of `session` running now or waiting comes back cancelled. Safe from any thread.
 void lattice_layout_cancel(int64_t session);
 void lattice_layout_close(int64_t session);

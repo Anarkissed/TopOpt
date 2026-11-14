@@ -96,6 +96,7 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         public var barRegion: [Int32] = []
         public var frames: [Float] = []        // 12 per frame: origin, then three unit axes
         public var solidCubes: [Float] = []    // 4 per solid piece: low corner (frame mm) and size
+        public var cellInfo: [Float] = []      // 5 per laid cell: size, own, band, finest, cut (LatticeLayoutBridge.hpp)
         public var solidFrame: [Int32] = []
         public var solidRegion: [Int32] = []
         public var solidWhy: [UInt8] = []      // a Why per solid piece
@@ -185,6 +186,18 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         }
     }
 
+    /// THE SOLID VIEW's map for the last layout (LatticeLayoutBridge.hpp, lattice_layout_grid): 2 signed bytes per voxel (open,
+    /// inside), x fastest; voxel (0,0,0)'s centre at `origin`. Empty before the first layout.
+    public func grid(origin: SIMD3<Float>, voxel: Float, dims: SIMD3<Int32>) async throws -> (rg: [Int8], ms: Double) {
+        let sid = id
+        return try await worker.run {
+            var err = topoptbridge.BridgeError()
+            let r = topoptbridge.lattice_layout_grid(sid, origin.x, origin.y, origin.z, voxel, dims.x, dims.y, dims.z, &err)
+            if !err.ok { throw TopOptError(message: String(err.message)) }
+            return (Array(r.rg), r.ms)
+        }
+    }
+
     /// Every layout running or waiting comes back cancelled.
     public func cancel() {
         lock.withLock { generation &+= 1 }
@@ -260,6 +273,7 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         o.barRegion = Array(r.bar_region)
         o.frames = Array(r.frames)
         o.solidCubes = Array(r.solid_cubes)
+        o.cellInfo = Array(r.cell_info)
         o.solidFrame = Array(r.solid_frame)
         o.solidRegion = Array(r.solid_region)
         o.solidWhy = Array(r.solid_why)
