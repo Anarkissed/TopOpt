@@ -27,6 +27,8 @@ public final class LatticeLayoutPreview: ObservableObject {
     @Published public private(set) var laying = false
     /// One plain line: what these settings ask that the new engine does not do yet (nil: nothing).
     @Published public private(set) var notes: [String] = []
+    /// ★ his rule 11-14: "recommend changing to a 0.2mm nozzle" when lattice cannot go where asked — one line, or nil.
+    @Published public private(set) var nozzleLine: String?
 
     public struct Timing: Equatable, Sendable {
         public var openMS: Double
@@ -71,6 +73,8 @@ public final class LatticeLayoutPreview: ObservableObject {
     private var solidWanted = false
     private var box: (lo: SIMD3<Float>, hi: SIMD3<Float>)?
     private var mapTask: Task<Void, Never>?
+    private var nozzleSession: LatticeLayoutSession?
+    private var nozzlePath: String?
 
     public init() {}
 
@@ -97,6 +101,7 @@ public final class LatticeLayoutPreview: ObservableObject {
     public func clear() {
         task?.cancel(); task = nil
         mapTask?.cancel(); mapTask = nil
+        nozzleSession?.close(); nozzleSession = nil; nozzlePath = nil; nozzleLine = nil
         session?.close(); session = nil; sessionPath = nil; lastSettings = nil
         bars = nil; problem = nil; timing = nil; laying = false
     }
@@ -119,12 +124,61 @@ public final class LatticeLayoutPreview: ObservableObject {
             problem = r.barCount == 0 ? "New engine: no lattice fits these settings" : nil
             laying = false
             if solidWanted { await addMap() }
+            await nozzleCheck(path: path, s)   // after the layout and its map: never while a setting moves
         } catch is CancellationError {
             // a newer setting is laying
         } catch {
             problem = FlexibleRowCopy.fit("New engine: \(error)", 60)
             bars = nil
             laying = false
+        }
+    }
+
+    // MARK: his 0.2 mm nozzle line (11-14)
+
+    /// A 0.2 mm nozzle's line width; only the line width changes (Min and Max cell stay his; two lines still).
+    public static let fineBeadMM = 0.22
+    /// Below this share of asked-for lattice left solid, nothing is said; below this cure, nothing either (LatticeReview).
+    static let worthLooking = 0.05, worthSaying = 0.2
+
+    /// Asked-for lattice no cell holds, as a share of all asked-for lattice, from the engine's own map (a coarse one).
+    static func unheldShare(_ s: LatticeLayoutSession, _ box: (lo: SIMD3<Float>, hi: SIMD3<Float>)) async throws -> Double? {
+        let ext = simd_max(box.hi - box.lo, SIMD3(repeating: 0.1))
+        let voxel = Swift.max(0.6, Float(cbrt(Double(ext.x * ext.y * ext.z) / 250_000)))
+        let dims = SIMD3<Int32>(Int32((ext.x / voxel).rounded(.up)) + 3, Int32((ext.y / voxel).rounded(.up)) + 3,
+                                Int32((ext.z / voxel).rounded(.up)) + 3)
+        let r = try await s.grid(origin: box.lo - SIMD3(repeating: voxel), voxel: voxel, dims: dims)
+        return r.asked > 0 ? Double(r.unheld) / Double(r.asked) : nil
+    }
+
+    /// How much of what is solid now a 0.2 mm nozzle would lattice (0 … 1), laying `settings` again in `fine` with only the line
+    /// width changed; nil when there is too little left solid to ask.
+    static func cure(main: LatticeLayoutSession, fine: LatticeLayoutSession, settings: LatticeLayoutSession.Settings,
+                     box: (lo: SIMD3<Float>, hi: SIMD3<Float>)) async throws -> Double? {
+        guard settings.beadMM > fineBeadMM + 0.05, let now = try await unheldShare(main, box), now >= worthLooking else { return nil }
+        var s = settings
+        s.beadMM = fineBeadMM
+        _ = try await fine.lay(s)
+        let then = try await unheldShare(fine, box) ?? now
+        return Swift.max(0, (now - then) / now)
+    }
+
+    private func nozzleCheck(path: String, _ s: LatticeLayoutSession.Settings) async {
+        nozzleLine = nil
+        guard let session, let box, !Task.isCancelled else { return }
+        do {
+            if nozzleSession == nil || nozzlePath != path {
+                nozzleSession?.close()
+                nozzleSession = try await LatticeLayoutSession.open(path: path)
+                nozzlePath = path
+            }
+            guard let fine = nozzleSession, !Task.isCancelled else { return }
+            guard let c = try await Self.cure(main: session, fine: fine, settings: s, box: box), !Task.isCancelled else { return }
+            if c >= Self.worthSaying {
+                nozzleLine = String(format: "A 0.2 mm nozzle would lattice %.0f%% of what is solid now", 100 * c)
+            }
+        } catch {
+            // no line: the preview stands as it is
         }
     }
 
@@ -304,6 +358,10 @@ struct LatticeLayoutPreviewLines: View {
             }
             ForEach(preview.notes, id: \.self) { n in
                 Text(n).font(.system(size: 12)).foregroundStyle(DS.Color.warning.color)
+            }
+            if let z = preview.nozzleLine {
+                Text(z).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                    .background(CornerPairStyle.publish("new-engine-nozzle"))
             }
             Text(LatticeLayoutPreview.roundBarsLine).font(.system(size: 12)).foregroundStyle(DS.Color.textSecondary.color)
             if let t = preview.timing {

@@ -318,7 +318,7 @@ LatticeLayoutGrid lattice_layout_grid(int64_t session, float origin_x, float ori
             const ll::Where w = probe.where(p);
             uint8_t c = 1;
             if (w.why == ll::Why::Outside) c = 0;
-            else if (w.why == ll::Why::Lattice && !solid_at(probe, p, w)) c = 2;   // D14: lattice no cell holds is solid
+            else if (w.why == ll::Why::Lattice) c = solid_at(probe, p, w) ? 3 : 2;   // 3: asked for, no cell holds it (D14: solid)
             cls[(static_cast<std::size_t>(z) * ny + y) * nx + x] = c;
           }
         }
@@ -340,6 +340,8 @@ LatticeLayoutGrid lattice_layout_grid(int64_t session, float origin_x, float ori
         for (int32_t x = 0; x < nx; ++x) {
           const std::size_t i = (static_cast<std::size_t>(z) * ny + y) * nx + x;
           const uint8_t c = cls[i];
+          if (c >= 2) ++o.asked;
+          if (c == 3) ++o.unheld;
           bool open = c == 2;
           if (c == 0)   // an outside voxel next to open lattice reads open: the surface at the opening is cut
             open = at(x - 1, y, z) == 2 || at(x + 1, y, z) == 2 || at(x, y - 1, z) == 2 || at(x, y + 1, z) == 2 ||

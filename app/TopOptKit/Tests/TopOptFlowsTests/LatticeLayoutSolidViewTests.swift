@@ -58,6 +58,28 @@ final class LatticeLayoutSolidViewTests: XCTestCase {
         return n
     }
 
+    /// ★ His 0.2 mm nozzle rule (11-14): a 3 mm skin of lattice on every face of the cube has no room for a two-line cell at
+    /// 0.45 mm, and room at 0.22 mm, so the line says so (RED CONTROL: a whole-part lattice with nothing left solid says nothing).
+    func testTheNozzleLineMeasuresTheSolidAFinerNozzleWouldLattice() async throws {
+        let main = try await LatticeLayoutSession.open(path: Self.cube), fine = try await LatticeLayoutSession.open(path: Self.cube)
+        defer { main.close(); fine.close() }
+        let m = try TopOptKit.importMesh(path: Self.cube)
+        let box = try XCTUnwrap(LatticeLayoutPreview.box(m.vertices))
+        var thin = LatticeLayoutSession.Settings()
+        thin.regions = (0..<6).map { .init(id: Int32($0 + 1), faces: [Int32($0)], depthMM: 3) }
+        _ = try await main.lay(thin)
+        let cured = try await LatticeLayoutPreview.cure(main: main, fine: fine, settings: thin, box: box)
+        print("NOZZLE thin skin: \(cured.map { String(format: "%.0f%%", 100 * $0) } ?? "nothing to say")")
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(cured, "★ a solid skin to ask about"), LatticeLayoutPreview.worthSaying,
+                                    "★ the finer nozzle lattices it")
+        var whole = LatticeLayoutSession.Settings()
+        whole.allLattice = true
+        whole.cellMM = 5
+        _ = try await main.lay(whole)
+        let none = try await LatticeLayoutPreview.cure(main: main, fine: fine, settings: whole, box: box)
+        XCTAssertTrue(none == nil || none! < LatticeLayoutPreview.worthSaying, "RED CONTROL: nothing solid to cure, no line")
+    }
+
     func testTheMapSaysOpenOrSolidInsideThePart() async throws {
         var s = LatticeLayoutSession.Settings()
         s.allLattice = true

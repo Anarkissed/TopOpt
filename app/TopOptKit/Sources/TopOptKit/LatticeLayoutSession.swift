@@ -188,13 +188,14 @@ public final class LatticeLayoutSession: @unchecked Sendable {
 
     /// THE SOLID VIEW's map for the last layout (LatticeLayoutBridge.hpp, lattice_layout_grid): 2 signed bytes per voxel (open,
     /// inside), x fastest; voxel (0,0,0)'s centre at `origin`. Empty before the first layout.
-    public func grid(origin: SIMD3<Float>, voxel: Float, dims: SIMD3<Int32>) async throws -> (rg: [Int8], ms: Double) {
+    public func grid(origin: SIMD3<Float>, voxel: Float, dims: SIMD3<Int32>) async throws
+        -> (rg: [Int8], ms: Double, asked: Int, unheld: Int) {
         let sid = id
         return try await worker.run {
             var err = topoptbridge.BridgeError()
             let r = topoptbridge.lattice_layout_grid(sid, origin.x, origin.y, origin.z, voxel, dims.x, dims.y, dims.z, &err)
             if !err.ok { throw TopOptError(message: String(err.message)) }
-            return (Array(r.rg), r.ms)
+            return (Array(r.rg), r.ms, Int(r.asked), Int(r.unheld))
         }
     }
 
