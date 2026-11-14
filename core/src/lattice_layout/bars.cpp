@@ -481,7 +481,17 @@ std::size_t join_loose_bars(Bars& bars, const Domain& domain, int threads, const
 std::size_t lay_skin(Bars& bars, const Domain& domain, const SkinSpec& spec) {
   // The cut ends, each once per plane (two bars can be cut at the same point). `plane` is
   // -1 for the end of a strut that lies in no single plane of its cells' grid.
-  struct Tip { Vec3 p; double cell, width; int plane; std::vector<std::pair<std::size_t, int>> of; };
+  // `skin_width` and `reach`: what its regions ask of a skin bar (S13), the least of them.
+  struct Tip {
+    Vec3 p; double cell, width; int plane; std::vector<std::pair<std::size_t, int>> of;
+    double skin_width, reach;
+  };
+  // S13: each region's own Skin; a region not listed takes the part's.
+  auto skin_of = [&](int region) {
+    for (const SkinSpec::RegionSkin& r : spec.regions)
+      if (r.region == region) return r;
+    return SkinSpec::RegionSkin{region, spec.on, spec.width_mm, spec.reach_cells};
+  };
   struct PlaneKey {
     long long n[3], d;
     bool operator<(const PlaneKey& o) const {
@@ -497,6 +507,8 @@ std::size_t lay_skin(Bars& bars, const Domain& domain, const SkinSpec& spec) {
       for (int end = 0; end < 2; ++end) {
         const Bar& b = bars.bars[i];
         if ((end ? b.end_b : b.end_a) != Bar::End::Surface || b.skin) continue;
+        const SkinSpec::RegionSkin own = skin_of(b.region);
+        if (!own.on) continue;   // S13: only ends of bars whose region has Skin on
         const Vec3& p = end ? b.b : b.a;
         int plane = -1;
         Vec3 n = b.flat;
@@ -509,16 +521,19 @@ std::size_t lay_skin(Bars& bars, const Domain& domain, const SkinSpec& spec) {
           plane = planes.emplace(key, static_cast<int>(planes.size())).first->second;
         }
         auto [it, fresh] = at.emplace(std::make_pair(key_of(p), plane), tips.size());
-        if (fresh) tips.push_back({p, b.cell, b.width, plane, {}});
+        const double skin_width = own.width_mm > 0.0 ? own.width_mm : b.width;
+        if (fresh) tips.push_back({p, b.cell, b.width, plane, {}, skin_width, own.reach_cells});
         Tip& t = tips[it->second];
         t.cell = std::max(t.cell, b.cell);
         t.width = std::min(t.width, b.width);
+        t.skin_width = std::min(t.skin_width, skin_width);
+        t.reach = std::min(t.reach, own.reach_cells);
         t.of.push_back({i, end});
       }
   }
   if (tips.size() < 2) return 0;
   double reach_most = 0.0;
-  for (const Tip& t : tips) reach_most = std::max(reach_most, spec.reach_cells * t.cell);
+  for (const Tip& t : tips) reach_most = std::max(reach_most, t.reach * t.cell);
   const double pitch = std::max(0.5, reach_most);
   auto slot = [&](double x) { return static_cast<long long>(std::floor(x / pitch)); };
   std::map<std::array<long long, 3>, std::vector<std::size_t>> grid;
@@ -545,7 +560,8 @@ std::size_t lay_skin(Bars& bars, const Domain& domain, const SkinSpec& spec) {
       const Vec3& q = tips[j].p;
       const Vec3 d{q.x - p.x, q.y - p.y, q.z - p.z};
       const double len2 = d.x * d.x + d.y * d.y + d.z * d.z, len = std::sqrt(len2);
-      if (len < 10 * kSame || len > spec.reach_cells * std::max(tips[i].cell, tips[j].cell)) continue;
+      if (len < 10 * kSame || len > std::min(tips[i].reach, tips[j].reach) * std::max(tips[i].cell, tips[j].cell))
+        continue;
       // No other cut end of the plane in the ball between them, or on it: along a line the
       // next one is joined and the one after is not; four at the corners of a square are
       // joined round the square, and neither diagonal crosses it.
@@ -568,7 +584,7 @@ std::size_t lay_skin(Bars& bars, const Domain& domain, const SkinSpec& spec) {
       skin.a = p;
       skin.b = q;
       skin.skin = true;
-      skin.width = spec.width_mm > 0.0 ? spec.width_mm : std::min(tips[i].width, tips[j].width);
+      skin.width = std::min(tips[i].skin_width, tips[j].skin_width);
       skin.cell = std::max(tips[i].cell, tips[j].cell);
       skin.region = bars.bars[tips[i].of.front().first].region;
       skin.flat = bars.bars[tips[i].of.front().first].flat;

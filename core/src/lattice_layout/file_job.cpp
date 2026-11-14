@@ -153,7 +153,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
       in,
       {"all_lattice", "bead_mm", "min_strut_lines", "min_wall_mm", "rim_mm", "cover_mm",
        "region_ids", "region_no_lattice", "region_depth_mm", "region_expand_mm",
-       "region_face_counts", "region_faces", "region_zones", "protect_ids", "protect_depth_mm",
+       "region_face_counts", "region_faces", "region_zones", "region_finish", "protect_ids", "protect_depth_mm",
        "protect_face_counts", "protect_faces", "topology", "algorithm", "cell_mm", "cell_max_mm",
        "cell_min_mm", "min_cells_across", "grade_to_shape", "band_mm", "band_cell_mm",
        "per_region", "dial", "dial_region", "dial_value", "strut_width_mm", "allow_quilt",
@@ -223,6 +223,24 @@ Settings settings_from(const json::Value& in, const std::string& w) {
       mm("dial", a.dial); mm("dial_light", a.dial_light); mm("dial_heavy", a.dial_heavy);
       mm("strut_width_mm", a.width_mm); mm("width_light_mm", a.width_light_mm); mm("width_heavy_mm", a.width_heavy_mm);
       mm("strength", a.strength); mm("response", a.response); mm("reference_mpa", a.reference_mpa);
+    }
+  }
+  // S13: per region, null (the part's Finish) or its own: any of rim_mm, cover_mm, skin,
+  // skin_width_mm, skin_reach_cells; what it leaves out is the part's.
+  if (const json::Value* fin = json::find(in, "region_finish")) {
+    const std::string at = w + ".region_finish";
+    const auto& list = json::as_array(*fin, at).arr;
+    if (list.size() != nr) json::fail(w, "region_finish is not as long as region_ids");
+    for (std::size_t r = 0; r < nr; ++r) {
+      if (list[r].is_null()) continue;
+      const json::Value& o = json::as_object(list[r], at);
+      json::reject_unknown(o, {"rim_mm", "cover_mm", "skin", "skin_width_mm", "skin_reach_cells"}, at);
+      Settings::RegionAsk& a = s.regions[r];
+      if (json::find(o, "rim_mm")) a.rim_mm = num(o, "rim_mm", 0.0, at);
+      if (json::find(o, "cover_mm")) a.cover_mm = num(o, "cover_mm", 0.0, at);
+      if (json::find(o, "skin")) a.skin = flag(o, "skin", false, at);
+      if (json::find(o, "skin_width_mm")) a.skin_width_mm = num(o, "skin_width_mm", 0.0, at);
+      if (json::find(o, "skin_reach_cells")) a.skin_reach_cells = num(o, "skin_reach_cells", 0.0, at);
     }
   }
   const std::vector<int> pids = wholes(in, "protect_ids", w);

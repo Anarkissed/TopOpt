@@ -926,8 +926,93 @@ static void test_zones_key() {
   std::remove(path.c_str());
 }
 
+// S13 in the file job: a region may carry its own Finish in "region_finish" (null = the part's). The keys land in the
+// region's RegionAsk and lay exactly what the same Settings made directly lay; an unknown key, or a list of the wrong
+// length, refuses the job by name. A made file with region A (the top) covered and region B (the front) not is closed
+// over A's face and open over B's; with A's Finish left to the part's (none), A's face is open too.
+static void test_area_finish_file() {
+  const std::string text = R"({
+    "mode": "lattice_file", "model": "block.step",
+    "layout": {
+      "min_strut_lines": 2,
+      "region_ids": [1, 2], "region_no_lattice": [0, 0], "region_depth_mm": [8, 6], "region_expand_mm": [-2, -2],
+      "region_face_counts": [1, 1], "region_faces": [1, 2],
+      "region_finish": [{"rim_mm": 0, "cover_mm": 1.2, "skin": true, "skin_width_mm": 0.9, "skin_reach_cells": 1.0}, null],
+      "algorithm": "uniform", "cell_max_mm": 8, "min_cells_across": 1
+    }
+  })";
+  FileJob job;
+  bool parsed = true;
+  try { job = parse_file_job(text); } catch (const FileJobError& e) { parsed = false; std::printf("  (%s)\n", e.what()); }
+  CHECK(parsed);
+  if (!parsed) return;
+  const Settings::RegionAsk &a = job.settings.regions[0], &b = job.settings.regions[1];
+  CHECK(a.rim_mm && *a.rim_mm == 0.0 && a.cover_mm && *a.cover_mm == 1.2 && a.skin && *a.skin &&
+        a.skin_width_mm && *a.skin_width_mm == 0.9 && a.skin_reach_cells && *a.skin_reach_cells == 1.0);
+  CHECK(!b.rim_mm && !b.cover_mm && !b.skin && !b.skin_width_mm && !b.skin_reach_cells);
+  {  // The same Settings, made directly.
+    Settings direct;
+    direct.min_strut_lines = 2;
+    direct.regions = {{1, Role::Lattice, {1}, 8.0, -2.0}, {2, Role::Lattice, {2}, 6.0, -2.0}};
+    direct.regions[0].rim_mm = 0.0;
+    direct.regions[0].cover_mm = 1.2;
+    direct.regions[0].skin = true;
+    direct.regions[0].skin_width_mm = 0.9;
+    direct.regions[0].skin_reach_cells = 1.0;
+    direct.cells.algorithm = Algorithm::Uniform;
+    direct.cells.cell_max_mm = 8;
+    direct.cells.min_cells_across = 1;
+    const Outcome x = Session(box_model(30, 30, 12)).lay(job.settings), y = Session(box_model(30, 30, 12)).lay(direct);
+    bool same = x.layout.cells == y.layout.cells && x.layout.solid == y.layout.solid &&
+                x.bars.bars.size() == y.bars.bars.size() && !x.bars.bars.empty();
+    for (std::size_t i = 0; same && i < x.bars.bars.size(); ++i) {
+      const Bar &p = x.bars.bars[i], &q = y.bars.bars[i];
+      same = p.a.x == q.a.x && p.a.y == q.a.y && p.a.z == q.a.z && p.b.x == q.b.x && p.b.y == q.b.y &&
+             p.b.z == q.b.z && p.width == q.width && p.end_a == q.end_a && p.end_b == q.end_b && p.skin == q.skin;
+    }
+    CHECK(same);
+  }
+  for (const char* bad : {R"([{"cover": 1.2}, null])", R"([null])"}) {
+    std::string t = text;
+    const std::size_t from = t.find("[{\"rim_mm\""), to = t.find("null]") + 5;
+    t.replace(from, to - from, bad);
+    bool refused = false;
+    try { (void)parse_file_job(t); } catch (const FileJobError& e) { refused = has(e.what(), "region_finish"); }
+    CHECK(refused);
+  }
+  if (!mesh_available()) return;
+  // Points a quarter of a millimetre inside each face, over the middle of its region (A's away from where B's reaches).
+  auto empty_under = [](const std::string& path, int face) {
+    const PartMeasure file(weld_mesh(read_stl_file(path).mesh));
+    const PartMeasure::Probe in = file.probe();
+    int empty = 0;
+    for (double u = 4.1; u < 26; u += 0.25)
+      for (double v = (face == 1 ? 10.1 : 3.1); v < (face == 1 ? 26 : 9); v += 0.25)
+        empty += !in.inside(face == 1 ? Vec3{u, v, 12 - 0.25} : Vec3{u, 0.25, v});
+    return empty;
+  };
+  const std::string path = kTmp + "/lattice_file_area_finish.stl";
+  int covered[2] = {0, 0}, open[2] = {0, 0};
+  for (int own = 1; own >= 0; --own) {
+    FileJob j = job;
+    if (!own) j.settings.regions[0] = Settings::RegionAsk{1, Role::Lattice, {1}, 8.0, -2.0, {}, {}, {}, {}, {}};
+    std::remove(path.c_str());
+    const FileResult r = make_lattice_file(box_model(30, 30, 12), j, path);
+    CHECK(r.ok && r.cells > 0 && r.bars > 0);
+    if (!r.ok) { std::printf("  (%s: %s %s)\n", r.code.c_str(), r.why.c_str(), r.detail.c_str()); return; }
+    covered[own] = empty_under(path, 1);
+    open[own] = empty_under(path, 2);
+  }
+  std::printf("area finish file: A covered %d empty points under its face (%d with the part's Finish); B %d empty "
+              "points under its face (%d)\n", covered[1], covered[0], open[1], open[0]);
+  CHECK(covered[1] == 0 && covered[0] > 100);   // closed over A's face; open there without its own cover
+  CHECK(open[1] > 100 && open[0] > 100);        // open over B's face either way
+  std::remove(path.c_str());
+}
+
 int main() {
   test_region_own_key();
+  test_area_finish_file();
   test_cells_by_stress_key();
   test_zones_key();
   test_by_stress_file();
