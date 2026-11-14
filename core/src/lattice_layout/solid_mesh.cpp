@@ -35,7 +35,7 @@ std::uint64_t place_key(const Vec3& p) {
 }
 
 // One cell's open space, as boxes in its frame.
-void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c, double pitch,
+void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c, double pitch, bool merge,
                    std::vector<OpenSpace::Box>& mine) {
   const Frame& f = lay.frames[static_cast<std::size_t>(c.frame)];
   const WallMap& walls = lay.walls[static_cast<std::size_t>(c.frame)];
@@ -112,21 +112,59 @@ void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c,
           if (touches && !probe.part().inside(place(i, j, z))) pt(i, j, z) |= kBox;
         }
   };
-  // Every run of such points down a column is a box.
+  // Every run of such points down a column is a box; then, as few boxes as hold exactly
+  // those points: neighbouring columns of a row whose runs are the same (to the point) are
+  // one box, and neighbouring rows whose boxes are the same are one slab. Every edge of a
+  // box is c.lo + a whole number of points, read the same way for every box, so the boxes
+  // hold the same points as the runs did, and touch where the runs touched.
   auto point_boxes = [&] {
-    for (int j = 0; j < k; ++j)
-      for (int i = 0; i < k; ++i) {
-        int z0 = -1;
-        for (int z = 0; z <= k; ++z) {
-          const bool on = z < k && (pt(i, j, z) & kBox);
-          if (on && z0 < 0) z0 = z;
-          if (!on && z0 >= 0) {
-            mine.push_back({c.frame, {c.lo[0] + i * s, c.lo[1] + j * s, c.lo[2] + z0 * s},
-                            {c.lo[0] + (i + 1) * s, c.lo[1] + (j + 1) * s, c.lo[2] + z * s}});
-            z0 = -1;
+    struct Slab { int i0, i1, z0, z1, j0, j1; };
+    std::vector<Slab> open_slabs, done;
+    std::vector<unsigned char> used(static_cast<std::size_t>(k) * k, 0);   // (i, z) of this row taken by a box
+    for (int j = 0; j <= k; ++j) {
+      std::vector<Slab> row;
+      if (j < k) {
+        std::fill(used.begin(), used.end(), 0);
+        auto on = [&](int i, int z) { return (pt(i, j, z) & kBox) != 0; };
+        for (int i = 0; i < k; ++i)
+          for (int z = 0; z < k;) {
+            if (!on(i, z) || used[at(z, i)]) { ++z; continue; }
+            int z1 = z;
+            while (z1 < k && on(i, z1)) ++z1;
+            // The same run in the next column: its ends there, and nothing more.
+            auto same = [&](int e) {
+              if (used[at(z, e)] || (z > 0 && on(e, z - 1))) return false;
+              for (int q = z; q < z1; ++q) if (!on(e, q)) return false;
+              return z1 == k || !on(e, z1);
+            };
+            int e = i + 1;
+            while (merge && e < k && same(e)) ++e;
+            for (int u = i; u < e; ++u)
+              for (int q = z; q < z1; ++q) used[at(q, u)] = 1;
+            row.push_back({i, e, z, z1, j, j + 1});
+            z = z1;
           }
-        }
       }
+      std::vector<Slab> keep;
+      for (const Slab& r : row) {
+        bool grew = false;
+        for (Slab& p : open_slabs)
+          if (merge && p.j1 == j && p.i0 == r.i0 && p.i1 == r.i1 && p.z0 == r.z0 && p.z1 == r.z1) {
+            p.j1 = j + 1;
+            keep.push_back(p);
+            p.j1 = -1;
+            grew = true;
+            break;
+          }
+        if (!grew) keep.push_back(r);
+      }
+      for (const Slab& p : open_slabs)
+        if (p.j1 != -1) done.push_back(p);
+      open_slabs = keep;
+    }
+    for (const Slab& b : done)
+      mine.push_back({c.frame, {c.lo[0] + b.i0 * s, c.lo[1] + b.j0 * s, c.lo[2] + b.z0 * s},
+                      {c.lo[0] + b.i1 * s, c.lo[1] + b.j1 * s, c.lo[2] + b.z1 * s}});
   };
   if (!walls.flat) {
     // No flat face to read columns from: the cell's own shape point by point.
@@ -272,7 +310,7 @@ void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c,
 }  // namespace
 
 OpenSpace read_open_space(const Domain& domain, const Layout& layout, double pitch_mm, int threads,
-                          const std::atomic<bool>* stop) {
+                          const std::atomic<bool>* stop, bool merge) {
   const auto t0 = std::chrono::steady_clock::now();
   OpenSpace out;
   out.pitch_mm = pitch_mm > 0.0 ? pitch_mm : 0.25;
@@ -282,7 +320,7 @@ OpenSpace read_open_space(const Domain& domain, const Layout& layout, double pit
   auto work = [&] {
     const Domain::Probe probe = domain.probe();
     for (std::size_t ci = next.fetch_add(1); ci < layout.cells.size() && !asked(stop); ci = next.fetch_add(1))
-      open_boxes_of(layout, probe, layout.cells[ci], out.pitch_mm, of_cell[ci]);
+      open_boxes_of(layout, probe, layout.cells[ci], out.pitch_mm, merge, of_cell[ci]);
   };
   {
     const int nt = static_cast<int>(std::min<std::size_t>(static_cast<std::size_t>(thread_count(threads)),
