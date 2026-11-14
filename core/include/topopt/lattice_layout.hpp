@@ -1035,6 +1035,9 @@ struct Outcome {
   std::size_t thin_solid = 0;    // cut cells print rule P8 (f) made solid (solidify_thin_cuts)
   bool cells_by_stress = false;  // C22 was applied to this layout (stress_sizes_cells)
   bool cells_no_stress = false;  // C22 was asked for and there was no stress result, or no reference
+  // The one stress reference resolved for this lay (the stated one or the part's own), read by the cells and the
+  // struts alike; 0 when neither asked for one (no field, or neither by stress) or the part's own is 0.
+  double stress_reference_mpa = 0.0;
 };
 
 class Session {

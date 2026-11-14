@@ -5283,7 +5283,18 @@ static void test_cells_by_stress() {
     auto f = stress_field({-2, -2, -2}, 1.0, 64, 64, 14,
                       [](const Vec3& c) { return 100.0 * std::clamp((c.x - 25.0) / 40.0, 0.0, 1.0); });
     const Outcome plain = session.lay(st);
-    CHECK(!plain.cells_by_stress && !plain.cells_no_stress);
+    CHECK(!plain.cells_by_stress && !plain.cells_no_stress && plain.stress_reference_mpa == 0.0);
+    {  // A field sent under Uniform struts with cells by stress off is never read for a reference: none is reported and
+       // the layout is the one with no field.
+      Settings sent = st;
+      sent.stress.demand = f;
+      const Outcome quiet = session.lay(sent);
+      CHECK(quiet.stress_reference_mpa == 0.0 && !quiet.cells_by_stress && !quiet.cells_no_stress);
+      CHECK(quiet.layout.cells == plain.layout.cells);
+      sent.cells.by_stress = true;   // asked for, but a typed size turns it off: still no reference read
+      sent.cells.cell_mm = 6;
+      CHECK(session.lay(sent).stress_reference_mpa == 0.0);
+    }
     st.cells.by_stress = true;
     const Outcome none = session.lay(st);                     // asked, no field
     CHECK(!none.cells_by_stress && none.cells_no_stress && none.layout.cells == plain.layout.cells);
@@ -5291,7 +5302,7 @@ static void test_cells_by_stress() {
     const Outcome own = session.lay(st);
     const double want = stress_reference(*session.domain(), *f, st.stress.percentile);
     CHECK(want > 0.0 && want < 100.0);
-    CHECK(own.cells_by_stress && !own.cells_no_stress);
+    CHECK(own.cells_by_stress && !own.cells_no_stress && own.stress_reference_mpa == want);
     auto laid_with = [&](double r) {
       CellSpec c = st.cells;
       c.demand = f;
@@ -5343,8 +5354,10 @@ static void test_cells_by_stress() {
     st.cells.by_stress = true;
     st.struts.mode = Density::ByStress;
     const Outcome both = session.lay(st);
-    CHECK(both.cells_by_stress && both.struts.reference_mpa == want);
+    CHECK(both.cells_by_stress && both.struts.reference_mpa == want && both.stress_reference_mpa == want);
     CHECK(both.layout.cells.size() == laid_with(want).cells.size());
+    st.cells.by_stress = false;   // the struts alone ask for it
+    CHECK(session.lay(st).stress_reference_mpa == want);
   }
   block("9 session");
 
@@ -5372,6 +5385,12 @@ static void test_cells_by_stress() {
     };
     std::size_t n0 = 0, n1 = 0, n2 = 0;
     (void)lay_cells(db, plain);   // the domain's first reading, not timed
+    {  // What the part's own reference costs, once, on a 64^3 field (the session keeps it: R17).
+      const auto t0 = std::chrono::steady_clock::now();
+      const double r = stress_reference(db, *slope, 0.95);
+      std::printf("C22 stress_reference on a 64^3 field: %.2f ms (%.3f MPa)\n",
+                  std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count(), r);
+    }
     const double t_off = best_ms(plain, &n0);
     const double t_on = best_ms(with_min(on_with(Algorithm::DefaultGrade, zero, ref)), &n1);
     const double t_slope = best_ms(with_min(on_with(Algorithm::DefaultGrade, slope, ref)), &n2);

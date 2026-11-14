@@ -84,12 +84,16 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
     cells.one_grid = settings.one_grid;   // "Let walls cut cells": the per-part switch is the session's
     // The stress the lattice is graded by (R16, R17), resolved ONCE, before the cells, for the cells (C22) and the
     // struts (By stress) alike: the stated reference, else the part's own, kept while the domain, the field and the
-    // percentile are the same (a slider move never reads the field again).
+    // percentile are the same (a slider move never reads the field again). Resolved only when it is asked for: the
+    // struts By stress, or cells by stress that would be applied (a field sent under Uniform is never read for it).
     const StressGrade& stress = settings.stress;
+    const bool cells_want = cells.by_stress && !(cells.cell_mm > 0.0) && cells.algorithm != Algorithm::Uniform &&
+                            !cells.one_grid;   // C22's OFF list but for the field and the reference
+    const bool asked = settings.struts.mode == Density::ByStress || cells_want;
     double reference = 0.0;
     if (stress.demand) {
-      reference = stress.reference_mpa;
-      if (!(reference > 0.0)) {
+      reference = asked ? stress.reference_mpa : 0.0;
+      if (asked && !(reference > 0.0)) {
         if (!ref_kept_ || ref_field_ != stress.demand || ref_percentile_ != stress.percentile) {
           ref_kept_ = false;
           ref_mpa_ = stress_reference(*domain_, *stress.demand, stress.percentile, threads);
@@ -104,7 +108,8 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
       cells.response = stress.response;
     }
     out.cells_by_stress = stress_sizes_cells(cells);   // C22
-    out.cells_no_stress = cells.by_stress && (!cells.demand || cells.demand->empty() || !(cells.reference_mpa > 0.0));
+    out.cells_no_stress = cells_want && (!cells.demand || cells.demand->empty() || !(cells.reference_mpa > 0.0));
+    out.stress_reference_mpa = reference;
     out.layout = lay_cells(*domain_, cells, threads);
     unread_ = false;
     StrutSpec struts = settings.struts;
