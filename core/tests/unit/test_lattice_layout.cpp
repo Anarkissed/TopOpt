@@ -3064,6 +3064,44 @@ static void test_session() {
   NEAR(least(session.lay(band)), 5.0, 1e-6);
 }
 
+// "Let walls cut cells" through the session (Settings::one_grid, his ruling 2026-11-14): a per-part switch, off unless
+// the user turns it on. Off is the layout as it was; on is CellSpec::one_grid's layout; on then off again gives back the
+// off layout exactly. It is a cell setting: changing it lays the cells again and never reads the part again. The
+// CellSpec's own one_grid is not read through the session: the switch is the Settings'.
+static void test_session_one_grid() {
+  int L = 0, square = 0, sideA = 0, sideB = 0;
+  const StepModel model = plate_with_L_face(&L, &square, &sideA, &sideB);
+  CHECK(!Settings{}.one_grid);
+  Session session(model);
+  Settings st;
+  st.min_strut_lines = 2.0;
+  st.regions = {{1, Role::Lattice, {square}, 6.0, 0.0}};
+  st.cells.cell_max_mm = 6;
+  st.cells.min_cells_across = 5;   // the wall must hold 5 across (C3-C5): off, a 6 mm wall cannot; one grid ignores it
+  auto same = [](const Outcome& x, const Outcome& y) {
+    return x.layout.cells == y.layout.cells && x.layout.solid == y.layout.solid && same_bars(x.bars, y.bars);
+  };
+  auto fresh = [&](const Settings& s) { return Session(model).lay(s); };
+  const Outcome off = session.lay(st);
+  CHECK(off.read_again);
+  CHECK(same(off, fresh(st)));
+  st.cells.one_grid = true;          // not read: the switch is the Settings'
+  const Outcome ignored = session.lay(st);
+  CHECK(!ignored.read_again && same(ignored, off));
+  st.cells.one_grid = false;
+  st.one_grid = true;
+  const Outcome on = session.lay(st);
+  CHECK(!on.read_again);             // a cell setting: laid again, the part not read again
+  CHECK(on.ms_read == 0.0 && on.ms_cells > 0.0);
+  CHECK(!(on.layout.cells == off.layout.cells));
+  CHECK(same(on, fresh(st)));
+  st.one_grid = false;
+  const Outcome again = session.lay(st);
+  CHECK(!again.read_again && same(again, off));
+  std::printf("session one grid: off %zu cells, %zu solid; on %zu cells, %zu solid\n", off.layout.cells.size(),
+              off.layout.solid.size(), on.layout.cells.size(), on.layout.solid.size());
+}
+
 // Stage E, cancel (362's bridge: his slider must not wait on a layout nobody wants). A stop flag given to lay() gives
 // the layout up: the answer is `cancelled` and empty, each threaded step throws instead of handing back a part-made
 // result, and NOTHING the domain or the session keeps is harmed: the same settings asked again give the layout a fresh
@@ -3686,6 +3724,7 @@ int main() {
   test_stepped_edges();
   test_rim();
   test_session();
+  test_session_one_grid();
   test_session_cancel();
   test_cover();
   test_region_squares();

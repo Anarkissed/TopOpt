@@ -849,7 +849,7 @@ struct Settings {
   std::vector<RegionAsk> regions;
   std::vector<ProtectAsk> protect;
   // The cells, the struts, and what happens to cut ends.
-  CellSpec cells;          // its allow_quilt is not read: the switch is struts.allow_quilt
+  CellSpec cells;          // its allow_quilt and one_grid are not read: the switches are struts.allow_quilt, one_grid
   StrutSpec struts;
   // Per part, OFF unless he turns it on (his words, 2026-11-12: "I definitely want it as a per-part choice. Especially
   // in the app itself."). A wall too thin for a cell that the thinnest strut leaves open (R5, C14) is normally solid.
@@ -858,6 +858,12 @@ struct Settings {
   // cell keeps the open look. Denser than the open look in those small cells, never touching. (His v2 stand, printed
   // with two-line struts: its wing edges, socket walls and spotface walls.) Allow quilt on makes this moot.
   bool small_cells_in_thin_walls = false;
+  // "Let walls cut cells" (his ruling 2026-11-14): per part, OFF unless the user turns it on. The session
+  // hands it to the cells as CellSpec::one_grid (see there): on, each region is one even grid that every wall, pocket,
+  // hole, Protect skin and the region's own edge cuts; off, the layout is what it was, byte for byte. Core does not
+  // know Aesthetic from Structural: the app offers the switch in Aesthetic only. A cell setting: changing it lays the
+  // cells again and does not read the part again.
+  bool one_grid = false;
   bool bars = true;              // false: cells and strut widths only
   bool join_loose = true;        // S5
   bool skin = false;             // Finish Skin (S3)
