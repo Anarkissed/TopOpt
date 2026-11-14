@@ -35,7 +35,7 @@ std::uint64_t place_key(const Vec3& p) {
 }
 
 // One cell's open space, as boxes in its frame.
-void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c, double pitch, bool merge,
+void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c, double pitch, bool merge, bool keep_edge,
                    std::vector<OpenSpace::Box>& mine) {
   const Frame& f = lay.frames[static_cast<std::size_t>(c.frame)];
   const WallMap& walls = lay.walls[static_cast<std::size_t>(c.frame)];
@@ -59,6 +59,54 @@ void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c,
   };
   auto place = [&](int i, int j, int z) {
     return f.at(c.lo[0] + (i + 0.5) * s, c.lo[1] + (j + 0.5) * s, c.lo[2] + (z + 0.5) * s);
+  };
+  // NEVER PAST AN EDGE AGAINST SOLID (reviewer, 2026-11-14). A point or a column is opened when its middle is held,
+  // so its footprint can reach up to half a point past the lattice's true edge. Against air that is wanted (no crust
+  // at an open surface). Against SOLID it opened a slit under his v3 stand's caps, the full thickness of the wall,
+  // and thinned Protect skins by up to 0.11 mm. So where opened space ends, a point (or a column) one of whose
+  // footprint's corners, or a half step along the column, reads solid (inside the part and lattice of no region) is
+  // not opened: against solid the file keeps up to one point more solid than the true edge, never less. A corner
+  // that reads air or lattice of any region changes nothing.
+  const double inset = 0.5 * s - std::min(0.01, 0.1 * s);   // a hair inside the footprint, off its own edge
+  auto solid_at = [&](double a, double b, double z) {
+    const Why w = probe.where(f.at(a, b, z)).why;
+    return w != Why::Lattice && w != Why::Outside;
+  };
+  auto corner_solid = [&](double a, double b, double z, bool along) {
+    for (int q = 0; q < 4; ++q)
+      if (solid_at(a + ((q & 1) ? inset : -inset), b + ((q & 2) ? inset : -inset), z)) return true;
+    return along && (solid_at(a, b, z - inset) || solid_at(a, b, z + inset));
+  };
+  // A neighbour past the cube's face counts as not opened only where it is solid (what stands there otherwise is
+  // another cell's lattice, or air).
+  auto beyond_solid = [&](int i, int j, double z) {
+    return solid_at(c.lo[0] + (i + 0.5) * s, c.lo[1] + (j + 0.5) * s, z);
+  };
+  // The points read point by point that the cell holds, at the edge of what is opened, against solid: not opened.
+  auto keep_solid_points = [&] {
+    if (!keep_edge) return;
+    const std::vector<unsigned char> was = pts;   // edges read on the points as they were, for any order
+    auto was_at = [&](int i, int j, int z) {
+      return was[(static_cast<std::size_t>(z + 1) * n + static_cast<std::size_t>(j + 1)) * n + static_cast<std::size_t>(i + 1)];
+    };
+    for (int z = 0; z < k; ++z)
+      for (int j = 0; j < k; ++j)
+        for (int i = 0; i < k; ++i) {
+          unsigned char& p = pt(i, j, z);
+          if (!(p & kSpace) || !(p & kBox)) continue;
+          const double a = c.lo[0] + (i + 0.5) * s, b = c.lo[1] + (j + 0.5) * s, cz = c.lo[2] + (z + 0.5) * s;
+          bool edge = false;
+          const int d6[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+          for (int q = 0; q < 6 && !edge; ++q) {
+            const int u = i + d6[q][0], v = j + d6[q][1], w = z + d6[q][2];
+            if (u >= 0 && v >= 0 && w >= 0 && u < k && v < k && w < k) {
+              edge = !(was_at(u, v, w) & (kSpace | kOpen));
+            } else {
+              edge = solid_at(c.lo[0] + (u + 0.5) * s, c.lo[1] + (v + 0.5) * s, c.lo[2] + (w + 0.5) * s);
+            }
+          }
+          if (edge && corner_solid(a, b, cz, true)) p = 0;
+        }
   };
   // A column read point by point: every point the cell holds is open.
   auto by_points = [&](int i, int j) {
@@ -170,6 +218,7 @@ void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c,
     // No flat face to read columns from: the cell's own shape point by point.
     for (int j = 0; j < k; ++j)
       for (int i = 0; i < k; ++i) by_points(i, j);
+    keep_solid_points();
     open_air();
     point_boxes();
     return;
@@ -252,6 +301,31 @@ void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c,
           for (int q = i; q < e; ++q) g(q, j) = g(i - 1, j);
         i = e;
       }
+  // An open column (read open, not grown or filled) at the edge of what is opened, with solid at a corner of its
+  // footprint anywhere down its stretch, is read point by point instead, and its points are judged one by one.
+  if (keep_edge) {
+    std::vector<int> to_points;
+    for (int j = 0; j < k; ++j)
+      for (int i = 0; i < k; ++i) {
+        const Col& o = grown[at(i, j)];
+        if (o.kind != 1 || col[at(i, j)].kind != 1) continue;
+        const double mid = 0.5 * (o.c0 + o.c1);
+        bool edge = false;
+        const int di[4] = {1, -1, 0, 0}, dj[4] = {0, 0, 1, -1};
+        for (int q = 0; q < 4 && !edge; ++q) {
+          const int u = i + di[q], v = j + dj[q];
+          edge = (u < 0 || v < 0 || u >= k || v >= k) ? beyond_solid(u, v, mid) : grown[at(u, v)].kind != 1;
+        }
+        if (!edge) continue;
+        const double a = c.lo[0] + (i + 0.5) * s, b = c.lo[1] + (j + 0.5) * s;
+        for (int z = 0; z < k; ++z) {
+          const double cz = c.lo[2] + (z + 0.5) * s;
+          if (!(cz > o.c0 && cz < o.c1)) continue;
+          if (corner_solid(a, b, cz, false)) { to_points.push_back(static_cast<int>(at(i, j))); break; }
+        }
+      }
+    for (int x : to_points) { grown[static_cast<std::size_t>(x)].kind = 3; col[static_cast<std::size_t>(x)].kind = 3; }
+  }
   // Rows of equal columns, then equal rows stacked.
   struct Run { int i0, i1; double c0, c1; int j0, j1; };
   std::vector<Run> open_runs, done;
@@ -303,6 +377,7 @@ void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c,
         by_points(i, j);
       }
     }
+  keep_solid_points();
   open_air();
   point_boxes();
 }
@@ -310,7 +385,7 @@ void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c,
 }  // namespace
 
 OpenSpace read_open_space(const Domain& domain, const Layout& layout, double pitch_mm, int threads,
-                          const std::atomic<bool>* stop, bool merge) {
+                          const std::atomic<bool>* stop, bool merge, bool keep_edge) {
   const auto t0 = std::chrono::steady_clock::now();
   OpenSpace out;
   out.pitch_mm = pitch_mm > 0.0 ? pitch_mm : 0.25;
@@ -320,7 +395,7 @@ OpenSpace read_open_space(const Domain& domain, const Layout& layout, double pit
   auto work = [&] {
     const Domain::Probe probe = domain.probe();
     for (std::size_t ci = next.fetch_add(1); ci < layout.cells.size() && !asked(stop); ci = next.fetch_add(1))
-      open_boxes_of(layout, probe, layout.cells[ci], out.pitch_mm, merge, of_cell[ci]);
+      open_boxes_of(layout, probe, layout.cells[ci], out.pitch_mm, merge, keep_edge, of_cell[ci]);
   };
   {
     const int nt = static_cast<int>(std::min<std::size_t>(static_cast<std::size_t>(thread_count(threads)),

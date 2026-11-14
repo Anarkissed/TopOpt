@@ -489,7 +489,48 @@ static void test_strut_reach() {
   }
 }
 
+// S11b: the file never opens space past the lattice's edge where that edge is against solid. The block of
+// test_strut_reach with Finish Skin, its outline at z 28.9 (Expand -1.1): the band's top row of points ends with the
+// column from 28.75 to 29.0, whose middle (28.875) is held, so it used to be opened 0.1 mm past the outline. Now no
+// point of a 0.02 mm column grid between 28.80 and 28.98 (0.1 mm in x and y) is empty: the slit between the edge's
+// bars and the solid is gone. With the step off it is there.
+static void test_no_slit_under_solid() {
+  if (!mesh_available()) return;
+  FileJob job = parse_file_job(R"({
+    "mode": "lattice_file", "model": "block.step",
+    "layout": {
+      "min_strut_lines": 1,
+      "region_ids": [1], "region_no_lattice": [0], "region_depth_mm": [8], "region_expand_mm": [-1.1],
+      "region_face_counts": [1], "region_faces": [2],
+      "algorithm": "default_grade", "cell_mm": 8, "min_cells_across": 1, "grade_to_shape": true, "band_mm": 4,
+      "strut_width_mm": 0.7, "allow_quilt": true, "skin": true
+    }
+  })");
+  int empty[2] = {0, 0}, asked = 0;
+  for (int on = 0; on < 2; ++on) {
+    Session session(box_model(30, 12, 30));
+    const Outcome out = session.lay(job.settings);
+    const OpenSpace open = read_open_space(*session.domain(), out.layout, job.options.pitch_mm, 0, nullptr, true, on == 1);
+    MeshReport rep;
+    const TriangleMesh mesh = build_mesh(session.measure(), *session.domain(), out.layout, out.bars, open, job.options.mesh, &rep);
+    CHECK(rep.ok);
+    const PartMeasure file(weld_mesh(mesh));
+    const PartMeasure::Probe in = file.probe();
+    asked = 0;
+    for (double x = 5.05; x < 25; x += 0.1)
+      for (double y = 0.55; y < 7.5; y += 0.1)
+        for (double z = 28.80; z < 28.99; z += 0.02) {
+          ++asked;
+          empty[on] += !in.inside({x, y, z});
+        }
+  }
+  std::printf("no slit under the solid: %d of %d points between z 28.80 and 28.98 empty with the step off, %d with it on\n",
+              empty[0], asked, empty[1]);
+  CHECK(empty[1] == 0);
+}
+
 int main() {
+  test_no_slit_under_solid();
   test_strut_reach();
   test_thin_slot();
   test_parse();
