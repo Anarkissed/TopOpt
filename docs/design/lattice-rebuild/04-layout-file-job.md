@@ -81,7 +81,7 @@ Exactly the fields of the bridge's `LatticeLayoutSettings`, under the same names
 | `allow_quilt` | false | |
 | `strength` | 0 | |
 | `small_cells_in_thin_walls` | false | **not in the bridge's struct yet**: core's per-part choice of 2026-11-12 (thin walls get small cells with the thinnest strut) |
-| `one_grid` | false | **not in the bridge's struct yet**: "Let walls cut cells", core's per-part choice of 2026-11-14 (one even grid per region that walls, pockets and skins cut; offered in Aesthetic only) |
+| `one_grid` | false | **not in the bridge's struct yet**: "Let walls cut cells", core's per-part choice of 2026-11-14 (walls, pockets and skins may cut the cells, and nothing else changes; offered in Aesthetic only) |
 | `cells_by_stress` | false | **not in the bridge's struct yet**: cell size by stress (C22). It needs the stress result (the top-level `demand` file): without one the job is refused (`no_stress_result`). The reference and response are those of the stress keys |
 | `bars` | true | a file needs its struts: false is refused (`no_struts`) |
 | `join_loose` | true | |

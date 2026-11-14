@@ -269,11 +269,14 @@ struct Pass {
     return demand->highest_in(mn, mx);
   }
   // C22, the centre rule of G1-G3 with the stress in the place of the outline: a cell of size s may stand where the
-  // stress inside it asks for no smaller one, t <= (S_base - s) / (S_base - f); the finest always may.
+  // stress inside it asks for no smaller one, t <= (top - s) / (top - f); the finest always may. `top` is the largest
+  // cell the pass may lay: its own cell, or under Let walls cut cells the main size when that is smaller (C21).
   bool stress_allows(const double lo[3], double s) const {
     if (!demand || is_finest(s)) return true;
+    const double top = main_mm > 0.0 ? std::min(base_mm, main_mm) : base_mm;
+    if (top <= finest_mm * (1.0 + 1e-9)) return true;
     const double t = std::pow(std::clamp(demand_in(lo, s) / ref_mpa, 0.0, 1.0), std::clamp(response, 0.25, 4.0));
-    return t <= (base_mm - s) / (base_mm - finest_mm) + 1e-9;
+    return t <= (top - s) / (top - finest_mm) + 1e-9;
   }
   // C20: with Let walls cut cells on (one_grid), only the finest cell is ever cut. A larger cell must lie whole in
   // lattice: its 27 points and the 26 a hair inside its faces, edges and corners (0.04 / 0.5 / 0.96, as D14b looks).
@@ -932,7 +935,7 @@ void find_edges(const FaceReadings& kept, std::size_t which, const Domain& domai
 
 bool stress_sizes_cells(const CellSpec& spec) {
   return spec.by_stress && spec.demand && !spec.demand->empty() && spec.reference_mpa > 0.0 &&
-         !(spec.cell_mm > 0.0) && spec.algorithm != Algorithm::Uniform && !spec.one_grid;
+         !(spec.cell_mm > 0.0) && spec.algorithm != Algorithm::Uniform;
 }
 
 Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {

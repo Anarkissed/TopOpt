@@ -87,8 +87,8 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
     // percentile are the same (a slider move never reads the field again). Resolved only when it is asked for: the
     // struts By stress, or cells by stress that would be applied (a field sent under Uniform is never read for it).
     const StressGrade& stress = settings.stress;
-    const bool cells_want = cells.by_stress && !(cells.cell_mm > 0.0) && cells.algorithm != Algorithm::Uniform &&
-                            !cells.one_grid;   // C22's OFF list but for the field and the reference
+    const bool cells_want = cells.by_stress && !(cells.cell_mm > 0.0) &&
+                            cells.algorithm != Algorithm::Uniform;   // C22's OFF list but for the field and the reference
     const bool asked = settings.struts.mode == Density::ByStress || cells_want;
     double reference = 0.0;
     if (stress.demand) {

@@ -5114,11 +5114,6 @@ static void test_cells_by_stress() {
       CellSpec typed_on = on_with(algo, ramp, ref);
       typed_on.cell_mm = 8;
       CHECK(!stress_sizes_cells(typed_on) && same_layout(lay_cells(d, typed_on), lay_cells(d, typed)));
-      CellSpec grid = plain;                 // one even grid (C19)
-      grid.one_grid = true;
-      CellSpec grid_on = on_with(algo, ramp, ref);
-      grid_on.one_grid = true;
-      CHECK(!stress_sizes_cells(grid_on) && same_layout(lay_cells(d, grid_on), lay_cells(d, grid)));
     }
     CellSpec uni = off;                      // Uniform: one size
     uni.algorithm = Algorithm::Uniform;
@@ -5343,9 +5338,9 @@ static void test_cells_by_stress() {
     const Outcome typed = session.lay(st);
     CHECK(!typed.cells_by_stress && !typed.cells_no_stress);
     st.cells.cell_mm = 0;
-    st.one_grid = true;                                       // Let walls cut cells: off
+    st.one_grid = true;                                       // Let walls cut cells: applied as anywhere else
     const Outcome grid = session.lay(st);
-    CHECK(!grid.cells_by_stress && !grid.cells_no_stress);
+    CHECK(grid.cells_by_stress && !grid.cells_no_stress && grid.stress_reference_mpa == want);
     st.one_grid = false;
     st.cells.by_stress = false;                               // a field, the switch off
     const Outcome unasked = session.lay(st);
@@ -5360,6 +5355,58 @@ static void test_cells_by_stress() {
     CHECK(session.lay(st).stress_reference_mpa == want);
   }
   block("9 session");
+
+  {  // 12. Let walls cut cells (the owner, 2026-11-14: it means "ONLY that the cells can be cut by walls. NOTHING
+     // ELSE"): cell size by stress applies, with C20 and C21. The back plate of test_one_grid_main_size (6 mm behind the
+     // face under 8 mm cubes, one 12 mm boss: main size 4 mm on halves) at a 0.2 mm line (halves 8, 4, 2), a ramp
+     // along x: 0 for x < 16, the reference from x = 48. The rule's own cell is the largest the pass may lay, the main
+     // size: top = min(8, main).
+    PartMeasure pg(weld_mesh(prism({{0, 0}, {64, 0}, {64, 6}, {40, 6}, {40, 12}, {32, 12}, {32, 6}, {0, 6}}, 0, 64)));
+    DomainSpec gs;
+    gs.bead_mm = 0.2;
+    gs.regions = {face_region(1, Role::Lattice, {32, 0, 32}, {0, 1, 0}, 32, 32, 8)};
+    Domain dg(pg, gs);
+    const auto gramp = stress_field({-2, -2, -2}, 1.0, 68, 16, 68,
+                                    [](const Vec3& c) { return 100.0 * std::clamp((c.x - 16.0) / 32.0, 0.0, 1.0); });
+    for (int a = 0; a < 2; ++a) {
+      const Algorithm algo = a == 0 ? Algorithm::DefaultGrade : Algorithm::Stepped;
+      CellSpec grid = off;
+      grid.algorithm = algo;
+      grid.one_grid = true;
+      const Layout today = lay_cells(dg, grid);
+      CellSpec no_field = grid;          // (b) no field: today's one-grid layout, byte for byte
+      no_field.by_stress = true;
+      no_field.reference_mpa = ref;
+      CHECK(same_layout(lay_cells(dg, no_field), today));
+      CellSpec on = no_field;            // (a) the ramp
+      on.demand = gramp;
+      CHECK(stress_sizes_cells(on));
+      const Layout l = lay_cells(dg, on);
+      double main = 0.0, finest = 1e300;
+      for (const Cell& c : today.cells) main = std::max(main, c.size);
+      for (const Cell& c : l.cells) finest = std::min(finest, c.size);
+      const double want_finest = a == 0 ? 2.0 : 8.0 / 6.0;
+      const double top = std::min(8.0, main);
+      int breaks = 0, above_main = 0, cut_large = 0, hot = 0, hot_wrong = 0, cold = 0, cold_main = 0;
+      for (const Cell& c : l.cells) {
+        if (!stress_rule_allows(l, c.frame, c.lo, c.size, top, want_finest, *gramp, ref, 1.0)) ++breaks;
+        if (c.size > main * (1 + 1e-9)) ++above_main;                       // C21
+        if (c.cut && c.size > want_finest * (1 + 1e-9)) ++cut_large;        // C20
+        const double x = cell_centre(l, c).x;
+        if (x > 48.0) { ++hot; if (std::fabs(c.size - want_finest) > 1e-9) ++hot_wrong; }
+        if (x + 0.5 * c.size < 16.0) { ++cold; if (std::fabs(c.size - main) < 1e-9) ++cold_main; }
+      }
+      CHECK(main < 8.0 - 1e-9);                         // the main size is below the base cell here
+      NEAR(finest, want_finest, 1e-9);
+      CHECK(breaks == 0 && above_main == 0 && cut_large == 0);
+      CHECK(hot > 0 && hot_wrong == 0);
+      CHECK(cold > 0 && cold_main > 0);
+      CHECK(l.cells.size() > today.cells.size());
+      std::printf("C22 one grid, %s: main %.3f mm, %zu cells cold, %zu with the ramp\n",
+                  a == 0 ? "Default Grade" : "Stepped", main, today.cells.size(), l.cells.size());
+    }
+  }
+  block("12 Let walls cut cells");
 
   {  // 11. Speed: lay_cells with the option on, about 2,000 cells and a 64^3 field, against it off.
     PartMeasure pb(weld_mesh(box(128, 128, 64)));

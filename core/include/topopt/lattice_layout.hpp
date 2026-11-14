@@ -471,15 +471,18 @@ struct CellSpec {
   //                floor above. Held at that floor when it asks for less.
   bool allow_quilt = false;
   double band_cell_mm = 0.0;
-  // "LET WALLS CUT CELLS" (his name for the option, 2026-11-14), off by default. On: one even grid that walls and
-  // pockets cut through. Off: today's whole cells fitted to walls. Aesthetic only; Structural never shows it.
+  // "LET WALLS CUT CELLS" (his name for the option, 2026-11-14), off by default. On: walls and pockets may cut the
+  // cells. Off: today's whole cells fitted to walls. Aesthetic only; Structural never shows it.
   // (His words, 2026-11-12: "Why can't the pocket just cut the lattices wherever they are positioned and then a
   // skin connect all the struts that are left disconnected in a pattern?"; his ruling, 2026-11-14: "I think
   // aesthetic should allow the one grid cut wherever. Not structural.", "BUT it should be an option available to
   // the user to select".) A per-part option, OFF unless the user turns it on; off, the layout is what it was, byte
   // for byte. Core does not know the stage, so whoever offers the switch offers it in Aesthetic and nowhere else
-  // (a certified wall must hold its cells: C5).
-  // On: each region is ONE regular grid of its base cell, and every surface, pocket, hole, Protect skin and the
+  // (a certified wall must hold its cells: C5). The owner, 2026-11-14: "this shouldn't mean that the cell size is one
+  // even grid. If someone wants an even grid they will specify that by not asking for a cell size gradient. This
+  // means ONLY that the cells can be cut by walls. NOTHING ELSE." The cell sizes stay whatever is asked for: a grade
+  // by shape (G1-G11) or by stress (C22) applies as it does with the option off.
+  // On: each region is laid as ONE layout on the grid of its base cell, and every surface, pocket, hole, Protect skin and the
   // region's own edge simply CUTS it (D3). A flat region's grid is in its face's own frame, the face a cell boundary
   // (C15 at the face), its base cell the largest size not above Max cell that divides the region's depth; it is laid
   // in one frame like a curved region, not wall by wall, and no wall map is read. A curved region and the whole
@@ -501,12 +504,14 @@ struct CellSpec {
   // smallest its ladder allows where the stress is at or over the reference, in proportion between. A cell stands only
   // where nothing inside it asks for a smaller one; the smallest always may. With d the highest stress in the
   // axis-aligned box round the cube's eight corners (R16), t = (d / reference, held to 0 .. 1) to the power of the
-  // response (held to 0.25 .. 4), a cell of size s may stand where t <= (S_base - s) / (S_base - f), f the finest
-  // cell. A cell the stress does not allow is divided down its ladder as a cell the band does not allow is (Default
+  // response (held to 0.25 .. 4), a cell of size s may stand where t <= (top - s) / (top - f), f the finest cell and
+  // top the largest cell the pass may lay: the region's own (S_base), or with Let walls cut cells the region's main
+  // size when that is smaller (C21: min(S_base, main)). A cell the stress does not allow is divided down its ladder as a cell the band does not allow is (Default
   // Grade halves, Stepped packs); one that cannot be divided further stands: nothing goes solid for the stress, and
   // the stress never lays a cell under the smallest the layout would otherwise lay there.
+  // With `one_grid` on it applies as anywhere else, together with C20 and C21: a cell must be allowed by all of them.
   // OFF, whatever `by_stress` says, when: no field or an empty one; `reference_mpa` <= 0; a typed `cell_mm` (only
-  // Manual forces one size, C16); Uniform; `one_grid` (C19: one even grid). Off, the layout is today's, byte for byte.
+  // Manual forces one size, C16); Uniform. Off, the layout is today's, byte for byte.
   // `demand`, `reference_mpa`, `response` are the RESOLVED stress inputs: the session fills them from
   // Settings::stress; lay_cells never looks for a percentile.
   bool by_stress = false;
@@ -1010,8 +1015,8 @@ struct Settings {
   // with two-line struts: its wing edges, socket walls and spotface walls.) Allow quilt on makes this moot.
   bool small_cells_in_thin_walls = false;
   // "Let walls cut cells" (his ruling 2026-11-14): per part, OFF unless the user turns it on. The session
-  // hands it to the cells as CellSpec::one_grid (see there): on, each region is one even grid that every wall, pocket,
-  // hole, Protect skin and the region's own edge cuts; off, the layout is what it was, byte for byte. Core does not
+  // hands it to the cells as CellSpec::one_grid (see there): on, every wall, pocket, hole, Protect skin and the
+  // region's own edge may cut the cells, and that is all it changes (the cell sizes stay whatever is asked for); off, the layout is what it was, byte for byte. Core does not
   // know Aesthetic from Structural: the app offers the switch in Aesthetic only. A cell setting: changing it lays the
   // cells again and does not read the part again.
   bool one_grid = false;
