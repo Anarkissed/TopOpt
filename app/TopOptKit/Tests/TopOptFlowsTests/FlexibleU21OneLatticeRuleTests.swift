@@ -155,8 +155,14 @@ final class FlexibleU21OneLatticeRuleTests: XCTestCase {
         let redPrisms = FlexibleDepthPrism.renderItems(model: m, k: 1, views: [.prisms]).count
         FlexibleStageModel.controlCoreShare = false
         print("FLEX-U21-E4 RED (today) Face 5 pressed: '\(redIssue?.oneLine ?? "-")' fixes \(redIssue?.fixes ?? []) · deepest cap \(redMax ?? -1) mm · prisms \(redPrisms)")
-        XCTAssertEqual(redIssue?.oneLine, "Only 12 % of Face 5 has lattice under it", "RED CONTROL: core's count (his Img11)")
-        XCTAssertEqual(redMax ?? 0, 118.8, accuracy: 0.1, "RED CONTROL: core's 118.8 mm on the card and chip")
+        // ★ RE-PINNED (C2 WIRING W1b): core's stack counts a face's OWN lattice now (the run's flexible_face_lattice_mask), so
+        // core's count for Face 5 is 0 too — no longer 11.8 % of Face 6's lattice. The control still speaks today's words: the
+        // old sentence, the one-tap [Lattice under it], the prism drawn (below: one more than the fix draws). Was "Only 12 % of
+        // Face 5 has lattice under it" and core's 118.8 mm (his Img11, before the wiring).
+        XCTAssertEqual(redIssue?.oneLine, "Face 5 has no lattice under it, so it can't squish", "RED CONTROL: today's sentence")
+        XCTAssertEqual(redIssue?.fixes, [.latticeUnder(5), .rest(5)], "RED CONTROL: today's one-tap [Lattice under it]")
+        XCTAssertEqual(redMax ?? -1, 0, accuracy: 1e-9, "core's own count: no lattice of Face 5's own (W1b)")
+        XCTAssertEqual(m.stack(5)?.latticedColumns, 0, "core's count, read directly: none of Face 5's columns in its own lattice")
 
         let issue = try XCTUnwrap(m.readiness.issues.first { $0.kind == .noLatticeUnder && $0.region == 5 })
         let share = m.latticedShare(5)

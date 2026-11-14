@@ -247,10 +247,14 @@ final class FlexibleBatchBReviewTests: XCTestCase {
         }
         await m.waitForIdle()
         print("FLEX-REVIEW undo of [Face 5 rests]: pill '\(stage.status.line)' \(stage.status.tone) · pinches \(m.pinches.count)")
-        // ★ RE-PINNED (round 4 C2 verification): rebuilt — and, the pinch being the app's preview
-        // only (core brief #6), the pill is a PREVIEW, never the green Ready (nor "Building…")
-        XCTAssertEqual(stage.status.line, FlexibleCoreHold.pill(.pinch, shapeOnlyLabel: nil))
-        XCTAssertEqual(stage.status.tone, .preview)
+        // ★ RE-PINNED (C2 WIRING W2, ruling 5 (a)): rebuilt — and, the pinch being core's to design now, the green Ready (never
+        // "Building…"). Was (round 4 C2 verification): a PREVIEW, the pinch the app's only. RED CONTROL: the app before C2.
+        XCTAssertEqual(stage.status.line, FlexibleMainStatus.ready)
+        XCTAssertEqual(stage.status.tone, .ready)
+        FlexibleAngledGoldens.preC2 {
+            XCTAssertEqual(stage.status.line, FlexibleCoreHold.pill(.pinch, shapeOnlyLabel: nil), "RED CONTROL: before C2")
+            XCTAssertEqual(stage.status.tone, .preview)
+        }
         XCTAssertEqual(m.pinches.map { "\($0.a)|\($0.b)" }, ["3|5"], "control: the conflict round 3 blocked on is still core's")
     }
 

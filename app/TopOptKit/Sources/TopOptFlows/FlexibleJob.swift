@@ -56,6 +56,16 @@ public enum FlexibleJob {
         /// with no face-prism, FlexibleCoreDoor): its scene lattices the whole part, so its run job keeps core's default
         /// (`whole_part`) and states no `no_include_region`. The app never sends a job with no face-prism (FlexibleCoreRun).
         public var wholePartWithoutPrism = false
+        /// ★ C2 WIRING W2 (the reviewer's ruling 5 (a), 11-08): the job's HANDS (FlexibleSqueezeGroups.hands — a main-page Load
+        /// group's faces and presses, or a face of his own's lattice parts), each by its entries' ids (a face's region, a press's
+        /// first region — the id core names the press by). A hand of TWO OR MORE entries in this job is sent as one core squeeze
+        /// group (`faces` = its entries; `force_n` = the SUM of the weights its entries would state — the hand's weight, each
+        /// entry's share as the app worked it out) and its entries state no `weight_n` (core splits force_n by area,
+        /// run.cpp:860). A hand of one is not listed: its entry states its own weight_n and is its own hand — today's bytes.
+        /// Each hand is its own load case (core's combination, API 7). ★ The sum, never a Load group's whole weight: a send that
+        /// rests one of its faces drops that face's share (as before C2), and a Load group whose faces sit in two squeeze groups
+        /// is never sent twice over.
+        public var hands: [[Int]] = []
 
         public init(modelPath: String, resolution: Int, beadWidthMM: Double, faceCount: Int,
                     settings: FlexibleStageSettings, regions: [[String: Any]] = [],
@@ -64,6 +74,14 @@ public enum FlexibleJob {
             self.faceCount = faceCount; self.settings = settings; self.regions = regions
             self.stampGrids = stampGrids
         }
+    }
+
+    /// ★ C2 WIRING W2: one core squeeze group as the job states it.
+    public struct JobHand: Equatable, Sendable {
+        /// Its entries' ids: a face's region, a press's first region (the id core names the press by).
+        public let entries: [Int]
+        public let forceN: Double
+        public init(entries: [Int], forceN: Double) { self.entries = entries; self.forceN = forceN }
     }
 
     /// ★ R7-E2: one edge or corner press as the job states it (core's C1 addendum keys).
@@ -91,6 +109,13 @@ public enum FlexibleJob {
     /// edge or corner press its `flat_prism`. OFF = the bytes before the wiring: the golden comparisons turn it off to prove
     /// every OTHER byte unchanged, and `FlexibleC2WiringTests` proves ON = OFF + exactly these keys.
     nonisolated(unsafe) static var sendsC2W1 = true
+
+    /// ★ C2 WIRING W2 (B9, 11-09; the reviewer's ruling 5 (a); core API 5-8): several squeeze groups and a pinch are SENT —
+    /// core designs each hand as its own load case (the combination) and a pinch inside one hand as two halves — instead of
+    /// refused (`.squeezeGroups` / `.pinch`, the hold's "Preview · core runs one group at a time"). A hand of two or more
+    /// entries is one `squeeze_groups` entry. OFF = the app before C2 (refuse, hold): the goldens and the hold's own tests
+    /// turn it off; `FlexibleC2W2Tests` proves ON.
+    nonisolated(unsafe) static var sendsC2W2 = true
 
     /// ★ RED CONTROL only (FlexibleR7E2Tests): the press's pieces written as plain face entries (no face_region_ids, no
     /// press_direction) — core would design each piece along its own normal.
@@ -132,15 +157,30 @@ public enum FlexibleJob {
         guard !i.settings.loadedFaces.isEmpty || !i.presses.isEmpty else { throw EncodeError.noLoadedFace }
         // ★ ROUND 4 (D2): core designs ONE squeeze (core brief: load cases)
         // ★ AP1: only groups with something SENT count — ★ R7-E2: the presses in the job (Inputs.presses)
-        guard FlexibleSqueezeGroups.groups(i.settings, sent: Set(i.presses.map(\.id))).count <= 1 else { throw EncodeError.squeezeGroups }
-        guard i.pinches.isEmpty else { throw EncodeError.pinch }
+        // ★ C2 WIRING W2: core designs several groups and a pinch — refused only with the switch off (the app before C2)
+        if !sendsC2W2 {
+            guard FlexibleSqueezeGroups.groups(i.settings, sent: Set(i.presses.map(\.id))).count <= 1 else { throw EncodeError.squeezeGroups }
+            guard i.pinches.isEmpty else { throw EncodeError.pinch }
+        }
+        let squeeze = sendsC2W2 ? squeezeGroups(i) : []
+        let grouped = Set(squeeze.flatMap(\.entries))
         var faces: [[String: Any]] = []
         let finish = i.settings.finishMode
-        for f in i.settings.faces { faces.append(try faceEntry(f, finish: finish, stamps: i.stampGrids)) }
+        for f in i.settings.faces {
+            var e = try faceEntry(f, finish: finish, stamps: i.stampGrids)
+            if grouped.contains(f.faceRegionID) { e["weight_n"] = nil }   // ★ W2: its share of the group's force_n
+            faces.append(e)
+        }
         // ★ R7-E2: each press AFTER the face entries (every face entry byte-identical)
-        for p in i.presses { faces += pressEntries(p, finish: finish) }
+        for p in i.presses {
+            var es = pressEntries(p, finish: finish)
+            if let first = p.regions.first, grouped.contains(first) { for k in es.indices { es[k]["weight_n"] = nil } }
+            faces += es
+        }
         var block = header(i, material: material)
         block["faces"] = faces
+        // ★ C2 WIRING W2: one entry per hand of two or more (core: "one force per hand, split by area")
+        if !squeeze.isEmpty { block["squeeze_groups"] = squeeze.map { ["faces": $0.entries, "force_n": $0.forceN] as [String: Any] } }
         // ★ C2 WIRING W1 (the run job only; the scene reads no faces) — ★ W1b: not for the stage as before ruling 6 (a test control)
         if sendsC2W1 && !i.wholePartWithoutPrism { block["no_include_region"] = "no_lattice" }
         let checks = try i.settings.checkStamps.map { c -> [String: Any] in
@@ -167,6 +207,24 @@ public enum FlexibleJob {
     }
 
     // MARK: pieces
+
+    /// ★ C2 WIRING W2: the hands sent as core squeeze groups — each hand's entries that are LOADED entries of this job (a face
+    /// resting in it, or a press left out, is no entry), kept when two or more remain, in the hands' order; `force_n` = the sum
+    /// of the weight_n those entries would state. Hands never share an entry.
+    static func squeezeGroups(_ i: Inputs) -> [JobHand] {
+        var weightN: [Int: Double] = [:]
+        for f in i.settings.faces where f.isLoaded { weightN[f.faceRegionID] = f.weightN }
+        for p in i.presses { if let first = p.regions.first, weightN[first] == nil { weightN[first] = p.weightN } }
+        var taken = Set<Int>()
+        return i.hands.compactMap { h in
+            var seen = Set<Int>()
+            let es = h.filter { weightN[$0] != nil && !taken.contains($0) && seen.insert($0).inserted }
+            let force = es.reduce(0.0) { $0 + (weightN[$1] ?? 0) }
+            guard es.count >= 2, force > 0 else { return nil }
+            taken.formUnion(es)
+            return JobHand(entries: es, forceN: force)
+        }
+    }
 
     static func header(_ i: Inputs, material: String) -> [String: Any] {
         var b: [String: Any] = [

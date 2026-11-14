@@ -256,24 +256,36 @@ final class FlexibleR7M1VerifyTests: XCTestCase {
         XCTAssertEqual(m.squeezeGroups.map(\.kind), [.faces, .faces, .edges], "premise: two face groups beside an edges group")
         let run = stage.coreRun
         run.runner = { _, _, _, _ in FlexRunInfo(refusal: nil, receiptJSON: "{\"faces\":[{}],\"topology\":\"gyroid\"}", files: []) }
-        XCTAssertEqual(m.coreHoldKind, .squeezeGroups)
+        // ★ RE-PINNED (C2 WIRING W2, ruling 5 (a)): core designs both face groups in ONE job — the export makes them both, and the
+        // edges group left out is still said first (ruling 4: never silently drop a group); its one send is the job as it stands.
+        // Was: "Each export makes one group only.", a send per face group.
+        XCTAssertEqual(m.coreHoldKind, .edgesBeside)
         let hold = try XCTUnwrap(m.coreHold)
-        XCTAssertEqual(hold.line, "Each export makes one group only.", "★ said before anything is sent")
-        XCTAssertEqual(hold.note, FlexibleRowCopy.edgesExportSeparately)
-        XCTAssertEqual(hold.fixes.map(\.title), ["Send Group 1 only", "Send Group 2 only"], "one button per face group")
+        XCTAssertEqual(hold.line, "This export makes Group 1 and Group 2 only.", "★ said before anything is sent")
+        XCTAssertNil(hold.note, "★ W2: faces and edges are not separate exports any more")
+        XCTAssertEqual(hold.fixes.map(\.title), ["Send Group 1 and Group 2 only"], "★ one send: both face groups")
+        XCTAssertEqual(hold.fixes.map(\.resting), [[]], "★ nothing rests")
         XCTAssertTrue(hold.why.contains("Group 3 (edges and corners) is not in this export"), "★ the edges group named behind the (i): \(hold.why)")
         stage.refresh()
         stage.pillTapped(stage.status, open: { XCTFail("a preview never opens Settings") })
         guard case .notSent(let line, _) = run.phase else { return XCTFail("said, not sent: \(run.phase)") }
-        XCTAssertEqual(line, "Each export makes one group only.")
+        XCTAssertEqual(line, "This export makes Group 1 and Group 2 only.")
         XCTAssertEqual(run.runs, 0, "★ nothing is exported before his tap")
-        // ★ RED CONTROL: the edges group not counted — the plain squeeze-groups line, no note
+        XCTAssertNoThrow(try FlexibleCore.parseJobBlock(try m.runJobJSON(resting: Set(hold.fixes[0].resting))), "★ core parses its send")
+        // ★ RED CONTROL 1 (the app before C2): one group per export, a send per face group, the note
+        try FlexibleAngledGoldens.preC2 {
+            XCTAssertEqual(m.coreHoldKind, .squeezeGroups)
+            let old = try XCTUnwrap(m.coreHold)
+            XCTAssertEqual(old.line, "Each export makes one group only.")
+            XCTAssertEqual(old.note, FlexibleRowCopy.edgesExportSeparately)
+            XCTAssertEqual(old.fixes.map(\.title), ["Send Group 1 only", "Send Group 2 only"])
+        }
+        // ★ RED CONTROL 2: the edges group not counted — nothing held: both face groups sent, the edges group dropped unsaid
         FlexibleCoreHold.controlEdgesSilentlyDropped = true
         let control = m.coreHold
         FlexibleCoreHold.controlEdgesSilentlyDropped = false
-        XCTAssertEqual(control?.line, FlexibleCoreRun.notSentLine(.squeezeGroups), "★ RED CONTROL: the edges group dropped unsaid")
-        XCTAssertNil(control?.note, "★ RED CONTROL: no note")
-        print("FLEX-R7M1V-V6 '\(hold.line)' / '\(hold.note ?? "-")' · \(hold.fixes.map(\.title)) · control '\(control?.line ?? "-")'")
+        XCTAssertNil(control, "★ RED CONTROL: the edges group dropped unsaid")
+        print("FLEX-R7M1V-V6 '\(hold.line)' / '\(hold.note ?? "-")' · \(hold.fixes.map(\.title)) · control \(control == nil ? "nothing held" : control!.line)")
     }
 
     func testTheExportNamesTheSqueezeGroupByItsNumberNeverItsSquishName() async throws {

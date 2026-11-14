@@ -268,8 +268,10 @@ final class FlexibleMainPageRound4Tests: XCTestCase {
         }
     }
 
-    /// What core cannot run yet (a pinch, several squeeze groups) is said in one line and never
-    /// sent; with the pinch undone the same tap sends it, and core's answer comes back.
+    /// What core cannot run yet is said in one line and never sent. ★ RE-PINNED (C2 WIRING W2, ruling 5 (a)): his pinch is
+    /// core's now — the same tap sends his project with both ends pressed, and core's answer comes back (what C2 still refuses,
+    /// a pressed face with no lattice, is said not sent on his project as saved: FlexibleLatticeUnderReviewTests). RED CONTROL
+    /// (the app before C2): the line named his two faces and nothing was sent.
     @MainActor
     func testWhatCoreCannotRunIsSaidNotSent() async throws {
         let (_, stage, m) = try hisStage()
@@ -279,22 +281,17 @@ final class FlexibleMainPageRound4Tests: XCTestCase {
         }
         await m.waitForIdle()
         XCTAssertFalse(m.pinches.isEmpty, "premise: his faces 3 and 5 pinch the pad")
+        // ★ RED CONTROL (the app before C2): the line names his two faces (FlexibleCoreHold); the send is held
+        XCTAssertEqual(FlexibleAngledGoldens.preC2 { m.coreHold?.line },
+                       "Not sent: core can\u{2019}t press \(m.displayName(3)) and \(m.displayName(5)) at once")
+        XCTAssertNil(m.coreHold, "★ W2: nothing held")
         let run = stage.coreRun
         run.send(m)
         XCTAssertTrue(run.shown)
-        guard case .notSent(let line, let why) = run.phase else { return XCTFail("not sent: \(run.phase)") }
-        print("FLEX-CORE his project as saved: '\(line)' · (i) '\(why)'")
-        // ★ RE-PINNED (C2 verification): the line names his two faces (FlexibleCoreHold), and the
-        // step offers each end resting (FlexibleMainPageRound4VerifyTests)
-        XCTAssertEqual(line, "Not sent: core can\u{2019}t press \(m.displayName(3)) and \(m.displayName(5)) at once")
-        XCTAssertEqual(run.runs, 0, "nothing reached core")
-        // ★ POSITIVE CONTROL: face 5 rests — the same tap sends it (the counter can move)
-        m.rest(5)
-        await m.waitForIdle()
-        run.send(m)
-        try await FlexibleHisProject.waitFor(180, "core's answer") { !run.isSending }
-        XCTAssertEqual(run.runs, 1, "control: sent once the pinch is gone")
-        print("FLEX-CORE his project, face 5 resting: '\(run.line)' · (i) '\(run.info ?? "-")'")
+        try await FlexibleHisProject.waitFor(240, "core's answer") { !run.isSending }
+        XCTAssertEqual(run.runs, 1, "★ W2: his pinch is sent")
+        XCTAssertFalse(m.pinches.isEmpty, "his pinch, as he set it")
+        print("FLEX-CORE his project (W2), his pinch sent: '\(run.line)' · (i) '\(run.info ?? "-")'")
         switch run.phase {
         case .ran: break
         default: XCTFail("core answered: \(run.phase)")

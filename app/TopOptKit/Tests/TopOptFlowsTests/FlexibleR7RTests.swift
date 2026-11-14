@@ -145,8 +145,9 @@ final class FlexibleR7RTests: XCTestCase {
         XCTAssertEqual(force.upperBound, savedKg[4] ?? 0, accuracy: 1e-6, "★ the group's force row: his 10 lb")
         // the run job: in every send, each face's parts together press its saved weight
         let mesh = try XCTUnwrap(r.project.viewerMesh)
-        for send in FlexibleAngledGoldens.sends(m) {
-            let job = try m.runJobJSON(resting: Set(send.resting))
+        // ★ C2 WIRING W2 (ruling 5 (a)): a face's parts are ONE hand — one core squeeze group, its force_n their sum (each part
+        // states no weight); checked in the job sent now and, as before, in the app before C2's sends (each part its weight_n)
+        func perFace(_ job: String, _ label: String) throws -> [Int: Double] {
             let doc = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(job.utf8)) as? [String: Any])
             let loads = doc["loads"] as? [String: Any]
             let flex = try XCTUnwrap(loads?["flexible"] as? [String: Any] ?? doc["flexible"] as? [String: Any])
@@ -155,9 +156,28 @@ final class FlexibleR7RTests: XCTestCase {
                 let id = try XCTUnwrap(f["face_region_id"] as? Int)
                 for face in m.regions.faces(of: id, mesh: mesh) { byFace[face, default: 0] += f["weight_n"] as? Double ?? 0 }
             }
-            for (face, n) in byFace {
+            for g in flex["squeeze_groups"] as? [[String: Any]] ?? [] {
+                let ids = try XCTUnwrap(g["faces"] as? [Int]), n = try XCTUnwrap(g["force_n"] as? Double)
+                let faces = Set(ids.flatMap { m.regions.faces(of: $0, mesh: mesh) })
+                print("FLEX-R7R-1 \(label): squeeze group \(ids) → faces \(faces.sorted()) · \(n) N")
+                XCTAssertEqual(faces.count, 1, "★ \(label): one face's parts per hand: \(ids)")
+                if let face = faces.first { byFace[face, default: 0] += n }
+            }
+            return byFace
+        }
+        var jobs: [(String, String)] = []
+        for send in FlexibleAngledGoldens.sends(m) { jobs.append(("W2 send resting \(send.resting.sorted())", try m.runJobJSON(resting: Set(send.resting)))) }
+        let w2Groups = (try JSONSerialization.jsonObject(with: Data(jobs[0].1.utf8)) as? [String: Any]).flatMap {
+            (($0["loads"] as? [String: Any])?["flexible"] as? [String: Any] ?? $0["flexible"] as? [String: Any])?["squeeze_groups"] as? [[String: Any]]
+        } ?? []
+        XCTAssertGreaterThanOrEqual(w2Groups.count, 2, "★ W2: Face 4's parts and Face 2's parts — a squeeze group each")
+        for send in FlexibleAngledGoldens.sendsPreC2(m) {
+            jobs.append(("before C2, send resting \(send.resting.sorted())", try FlexibleAngledGoldens.preC2 { try m.runJobJSON(resting: Set(send.resting)) }))
+        }
+        for (label, job) in jobs {
+            for (face, n) in try perFace(job, label) {
                 XCTAssertEqual(n, FlexibleUnits.newtons(kg: savedKg[face] ?? 0), accuracy: 1e-6,
-                               "★ send resting \(send.resting.sorted()): Face \(face) presses its own weight (\(n) N)")
+                               "★ \(label): Face \(face) presses its own weight (\(n) N)")
             }
         }
         // his group force box: each face takes it, shared by its parts

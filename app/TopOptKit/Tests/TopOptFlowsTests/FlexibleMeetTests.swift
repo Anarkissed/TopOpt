@@ -300,20 +300,23 @@ final class FlexibleMeetTests: XCTestCase {
     // MARK: - (6) region frames are core's stack loads
 
     /// ★ SPEC AP2-6. regionFrame(r).load == stack(face: r).load bit for bit on every stackable region of C1's pad
-    /// (its top split at x = 99.5) and of the one-fillet slab; the 0.5 mm sector, narrower than one pitch, has a
-    /// valid frame where core's stack throws "no column". RED (run here): ViewerMesh.faceNormal (Float) differs in
+    /// (its top split at x = 99.5) and of the one-fillet slab — the 0.5 mm sector, narrower than one pitch, among them (★ C2
+    /// wiring: core finds a column under it now). RED (run here): ViewerMesh.faceNormal (Float) differs in
     /// bits from core's load on the slab's slanted face.
     func testRegionFramesAreCoresStackLoads() async throws {
-        let pm = try FlexiblePressFixtures.padProject()
-        let mesh = try XCTUnwrap(pm.viewerMesh)
-        let top = FlexibleHisProject.topFace(mesh)
-        var fr = pm.faceRegions
-        let topID = fr.union(faces: [FaceID(top)], named: "top")
-        let halves = fr.splitManual(topID, point: SIMD3(99.5, 0, 20), normal: SIMD3(1, 0, 0))
-        XCTAssertEqual(halves.count, 2)
-        pm.faceRegions = fr
-        let narrow = FlexibleRegions.wireID(try XCTUnwrap(fr.region(halves[0])))
-        var narrowSeen = false, compared = 0
+        func splitPadProject() throws -> (ProjectModel, Int) {
+            let pm = try FlexiblePressFixtures.padProject()
+            let mesh = try XCTUnwrap(pm.viewerMesh)
+            let top = FlexibleHisProject.topFace(mesh)
+            var fr = pm.faceRegions
+            let topID = fr.union(faces: [FaceID(top)], named: "top")
+            let halves = fr.splitManual(topID, point: SIMD3(99.5, 0, 20), normal: SIMD3(1, 0, 0))
+            XCTAssertEqual(halves.count, 2)
+            pm.faceRegions = fr
+            return (pm, FlexibleRegions.wireID(try XCTUnwrap(fr.region(halves[0]))))
+        }
+        let (pm, narrow) = try splitPadProject()
+        var narrowSeen = false, narrowCompared = false, compared = 0
         let splitPad = try await G.openModel(self, pm, "the split pad")
         let slabModel = try await G.openModel(self, try FlexiblePressFixtures.oneFilletSlabProject(), "one-fillet slab")
         for (label, model) in [("C1 pad split at 99.5", splitPad), ("one-fillet slab", slabModel)] {
@@ -330,6 +333,7 @@ final class FlexibleMeetTests: XCTestCase {
                     XCTAssertEqual(frame.side, st.side)
                     XCTAssertEqual(frame.buildAngleDeg.bitPattern, st.buildAngleDeg.bitPattern)
                     compared += 1
+                    if r.id == narrow, model === splitPad { narrowCompared = true }
                 } catch {
                     print("FLEX-AP2 FRAMES \(label) region \(r.id): stack refused — \(error) · frame valid \(frame.valid)")
                     if "\(error)".contains("no column") {
@@ -341,9 +345,13 @@ final class FlexibleMeetTests: XCTestCase {
                 }
             }
         }
-        print("FLEX-AP2 FRAMES compared \(compared) stack loads bit for bit; narrow sector framed \(narrowSeen)")
+        print("FLEX-AP2 FRAMES compared \(compared) stack loads bit for bit; narrow sector: stack compared \(narrowCompared) · framed with no column \(narrowSeen)")
         XCTAssertGreaterThanOrEqual(compared, 10)
-        XCTAssertTrue(narrowSeen, "the 0.5 mm sector: no column, still a frame")
+        // ★ RE-PINNED (C2 WIRING, B9's core): the 0.5 mm sector has a column now, and its frame IS core's stack load bit for bit.
+        // Not the grid: a scene opened before the wiring (FlexibleScene.controlStacksBeforeC2, the Legacy grid) found a column
+        // under it too (w2c, 11-09: "Legacy grid: the narrow sector has a column"). Was: "no column, still a frame".
+        XCTAssertTrue(narrowCompared, "★ the 0.5 mm sector: core's column, its frame core's load")
+        XCTAssertFalse(narrowSeen)
 
         // ★ RED CONTROL: the viewer's Float normal is not core's load
         let slab = try FlexiblePressFixtures.oneFilletSlabProject()

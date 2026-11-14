@@ -109,11 +109,14 @@ final class FlexibleMainStageTests: XCTestCase {
         XCTAssertEqual(stage.status.line, FlexibleMainStatus.building)
         try await FlexibleHisProject.waitFor(120, "the lattice") { m.lattice != nil || m.latticeError != nil }
         await m.waitForIdle()
-        // ★ RE-PINNED (round 4 C2 verification): faces 3 and 5 pinch again — the preview is built,
-        // but core can't take a pinch yet, so the pill is a PREVIEW, never the green Ready (a tap
-        // opens the Export step on each end resting — FlexibleCoreHold)
-        XCTAssertEqual(stage.status.line, FlexibleCoreHold.pill(.pinch, shapeOnlyLabel: nil))
-        XCTAssertEqual(stage.status.tone, .preview)
+        // ★ RE-PINNED (C2 WIRING W2, ruling 5 (a)): faces 3 and 5 pinch again — core designs the pinch, so the pill is the green
+        // Ready. Was (round 4 C2 verification): a PREVIEW, core could not take a pinch. RED CONTROL: the app before C2.
+        XCTAssertEqual(stage.status.line, FlexibleMainStatus.ready)
+        XCTAssertEqual(stage.status.tone, .ready)
+        FlexibleAngledGoldens.preC2 {
+            XCTAssertEqual(stage.status.line, FlexibleCoreHold.pill(.pinch, shapeOnlyLabel: nil), "RED CONTROL: before C2")
+            XCTAssertEqual(stage.status.tone, .preview)
+        }
         XCTAssertEqual(FlexibleMainStatus.of(model: nil).line, FlexibleMainStatus.notOpened, "before the stage ever opened")
     }
 

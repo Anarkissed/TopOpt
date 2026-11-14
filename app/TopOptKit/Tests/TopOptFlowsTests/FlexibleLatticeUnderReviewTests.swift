@@ -190,9 +190,61 @@ final class FlexibleLatticeUnderReviewTests: XCTestCase {
         stage.pillTapped(s, open: { XCTFail("★ never Settings again") }, goToLattice: { XCTFail("already there") })
         let run = stage.coreRun
         XCTAssertTrue(run.shown, "the Export step")
-        XCTAssertEqual(run.line, "Not sent: core can\u{2019}t press \(m.displayName(3)) and \(m.displayName(5)) at once",
-                       "the step says his pinch")
-        XCTAssertEqual(run.runs, 0)
+        // ★ RE-PINNED (C2 WIRING W2, the reviewer's ruling 5 (a) — the hold item): his pinch is core's now, but C2's run refuses
+        // a pressed face with no lattice under it (no_lattice_under_press) — so the step names Top B and offers the send with it
+        // resting (in the job only); nothing is sent. Was (round 4): "the step says his pinch".
+        // The faces are core's count on the stacks the run builds (W1b: each face's OWN lattice) — printed per pressed face.
+        let counts = m.settings.loadedFaces.map { f -> String in
+            let st = m.stack(f.faceRegionID)
+            return "\(m.displayName(f.faceRegionID)) \(st?.latticedColumns ?? -1)/\(st?.columns.count ?? -1)"
+        }
+        print("E-REVIEW r3 as saved (W2): core's lattice columns per pressed face \(counts) · held \(m.pressedWithoutLattice.map { m.displayName($0) })")
+        let bare = m.pressedWithoutLattice
+        XCTAssertTrue(bare.contains(b), "★ Top B: none of core's columns enter lattice")
+        for f in m.settings.loadedFaces {
+            let st = try XCTUnwrap(m.stack(f.faceRegionID))
+            XCTAssertEqual(bare.contains(f.faceRegionID), st.latticedColumns == 0, "\(m.displayName(f.faceRegionID)): held ⇔ core's count is 0")
+        }
+        XCTAssertTrue(m.sentPressesWithoutLattice.isEmpty, "no press in his r3")
+        let names = FlexibleRowCopy.andList(FlexibleCoreHold.faceNames(bare, name: { m.displayName($0) }))
+        XCTAssertEqual(run.line, FlexibleRowCopy.notSentNoLatticeUnder(names), "★ the step names them")
+        XCTAssertEqual(run.runs, 0, "★ nothing core would refuse is sent")
+        let h = try XCTUnwrap(run.hold)
+        XCTAssertEqual(h.kind, .noLatticeUnder)
+        XCTAssertEqual(h.fixes.map(\.title), ["Send with \(names) resting"])
+        XCTAssertEqual(h.fixes.map(\.resting), [bare])
+        print("E-REVIEW r3 as saved (W2): step '\(run.line)' · (i) '\(h.why)' · \(h.fixes.map(\.title))")
+        let job = try m.runJobJSON(resting: Set(h.fixes[0].resting))
+        let pressed = try FlexibleCore.parseJobBlock(job).faces.filter { $0.role == "loaded" }.map(\.faceRegionID)
+        XCTAssertTrue(Set(pressed).isDisjoint(with: bare), "★ its send: they rest in the job")
+        XCTAssertFalse(pressed.isEmpty, "★ something still presses")
+        // ★ RED CONTROL 1 (the app before C2): the step said his pinch
+        XCTAssertEqual(FlexibleAngledGoldens.preC2 { m.coreHold?.line },
+                       "Not sent: core can\u{2019}t press \(m.displayName(3)) and \(m.displayName(5)) at once")
+        // ★ RED CONTROL 2 (W2 slice A before the hold item): nothing held — the job goes to core AS IT STANDS, and C2's run
+        // refuses it (core's own verdict, one real run)
+        FlexibleCoreHold.controlNoLatticeSent = true
+        XCTAssertNil(m.coreHoldKind, "RED CONTROL: sent as it stands")
+        run.send(m)
+        FlexibleCoreHold.controlNoLatticeSent = false
+        try await FlexibleHisProject.waitFor(240, "core's answer (as it stands)") { !run.isSending }
+        print("E-REVIEW r3 as saved (W2) RED CONTROL 2: sent as it stands → runs \(run.runs) · \(run.phase)")
+        XCTAssertEqual(run.runs, 1, "RED CONTROL: sent")
+        guard case .ran(let refused) = run.phase else { return XCTFail("RED CONTROL: core answers: \(run.phase)") }
+        XCTAssertEqual(refused.refusal?.code, "no_lattice_under_press", "RED CONTROL: core refuses it as it stands (\(run.line))")
+        // ★ the hold's own send (one real run): core no longer refuses it for no lattice — what it says next is its own.
+        // ★ FINDING (w2c, 11-09; reported to the reviewer): it is C2's combination refusal. With Top B and Face 5 resting, Top A
+        // and Face 3 are two hands, so two load cases (Q-C1), and C2's first-order combination (B2b, "not proven impossible")
+        // finds no one lattice for both on his r3 as saved: 925 columns miss by up to 2.59 mm. So under C2 his r3 as saved does
+        // not design either way. Core's hull certificate, or his depths and forces, decide it. Pinned so a change in core shows.
+        run.send(m, fix: h.fixes[0])
+        try await FlexibleHisProject.waitFor(240, "core's answer (the hold's send)") { !run.isSending }
+        print("E-REVIEW r3 as saved (W2): '\(h.fixes[0].title)' → runs \(run.runs) · '\(run.line)' · (i) '\(run.info ?? "-")'")
+        XCTAssertEqual(run.runs, 2, "★ the hold's send went")
+        XCTAssertEqual(run.sentJob, job, "★ the job above: Top B and Face 5 resting")
+        guard case .ran(let ran) = run.phase else { return XCTFail("★ core answers the send: \(run.phase)") }
+        XCTAssertNotEqual(ran.refusal?.code, "no_lattice_under_press", "★ the hold's reason is gone")
+        XCTAssertEqual(ran.refusal?.code, "combination_not_reachable", "★ FINDING: core's next answer, its combination (\(run.line))")
     }
 
     /// ★ ROUND 5 COPY AS SAVED: Faces 3 and 5 have lattice under 23 % of their columns. ONE tap

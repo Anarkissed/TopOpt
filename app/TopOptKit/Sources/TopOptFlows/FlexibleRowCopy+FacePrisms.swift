@@ -26,6 +26,22 @@ extension FlexibleRowCopy {
     public static let edgesExportSeparately = "Edges and faces go in separate exports for now."
     /// The main page's pill (a preview: its tap opens the Export step on the line above).
     public static let edgesBesidePill = "Preview \u{00B7} one group per export"
+    /// ★ C2 WIRING W2: core designs every face group in ONE job (the combination); an edges group whose presses are kept out (each
+    /// by its own reason) is still SAID before the send (ruling 4: "never silently drop a group") — the pill and the line name
+    /// what the export makes, and nothing says "one group per export" any more.
+    public static let edgesNotInExportPill = "Preview \u{00B7} edges not in this export"
+    /// ★ C2 WIRING W2: a pressed face with no lattice under it — C2's run squishes only lattice and refuses the job. The pill (the
+    /// face's own "No lattice under Face 5" comes first), the Export step's line and its (i).
+    public static let noLatticeUnderPressPill = "Preview \u{00B7} a pressed face has no lattice"
+    public static func notSentNoLatticeUnder(_ names: String) -> String { "Not sent: no lattice under \(names)" }
+    public static func noLatticeUnderWhy(_ names: String, one: Bool) -> String {
+        "Core squishes only lattice, and \(names) \(one ? "has" : "have") none under \(one ? "it" : "them"). Set a face-prism under "
+            + "\(one ? "it" : "them"), or send with \(one ? "it" : "them") resting."
+    }
+    /// "Group 1", "Group 1 and Group 2", "Group 1, Group 2 and Group 3".
+    public static func andList(_ names: [String]) -> String {
+        names.count <= 1 ? (names.first ?? "") : names.dropLast().joined(separator: ", ") + " and " + names.last!
+    }
 }
 
 extension FlexibleRowCopy.Info {

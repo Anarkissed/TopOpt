@@ -62,7 +62,10 @@ public enum FlexibleCoreFix: Hashable, Sendable {
 public struct FlexibleCoreHold: Equatable, Sendable {
     /// ★ ROUND 7, M1 (5): `edgesBeside` — an edges/corners group beside face groups (the reviewer's ruling 4): core designs
     /// one squeeze group per job and takes no edge press yet, so the export makes ONE group, said before anything is sent.
-    public enum Kind: Equatable, Sendable { case shapeOnly, squeezeGroups, pinch, edgesBeside }
+    /// ★ C2 WIRING W2: `noLatticeUnder` — a pressed face in the job with no lattice under it: C2's run squishes only lattice and
+    /// refuses the job (no_lattice_under_press), so the Export step says the face and offers the send with it resting (the
+    /// reviewer's ruling 5 (a), the hold item).
+    public enum Kind: Equatable, Sendable { case shapeOnly, squeezeGroups, pinch, edgesBeside, noLatticeUnder }
     public let kind: Kind
     /// The Export step's ONE line ("Not sent: …").
     public let line: String
@@ -78,6 +81,20 @@ public struct FlexibleCoreHold: Equatable, Sendable {
         self.kind = kind; self.line = line; self.why = why; self.fixes = fixes; self.note = note
     }
 
+    /// ★ RED CONTROL only (C2 WIRING W2): the job is sent with a pressed face that has no lattice under it (slice A before the
+    /// hold item: core refuses it, no_lattice_under_press).
+    nonisolated(unsafe) static var controlNoLatticeSent = false
+
+    /// "Face 2 · lattice B" and "Face 2 · lattice C" read once, by the face ("Face 2"), in their order.
+    static func faceNames(_ rs: [Int], name: (Int) -> String) -> [String] {
+        var seen = Set<String>(), out: [String] = []
+        for n in rs.map(name) {
+            let face = n.components(separatedBy: " \u{00B7} lattice").first ?? n
+            if seen.insert(face).inserted { out.append(face) }
+        }
+        return out
+    }
+
     /// Test control only (M1): today's rule — an edges group that core does not take yet is not counted (no hold: the face
     /// group is sent and the edges group dropped without a word).
     nonisolated(unsafe) static var controlEdgesSilentlyDropped = false
@@ -86,8 +103,17 @@ public struct FlexibleCoreHold: Equatable, Sendable {
     /// several squeeze groups, then a pinch (the encoder's order).
     /// ★ M1 (5): `edgesBeside` — an edges group core does not take yet sits beside the face groups sent; after several face
     /// groups (their hold already makes one group per export), before a pinch (its sends are made one group's).
-    public static func kind(calibrateFirst: Bool, groups: Int, pinches: Int, edgesBeside: Bool = false) -> Kind? {
+    public static func kind(calibrateFirst: Bool, groups: Int, pinches: Int, edgesBeside: Bool = false,
+                            noLatticeUnder: Bool = false) -> Kind? {
         if calibrateFirst { return .shapeOnly }
+        // ★ C2 WIRING W2: core designs several groups (the combination) and a pinch in one hand — neither is held any more (the
+        // switch off: the app before C2). A pressed face with no lattice under it is held (core refuses the job); an edges group
+        // whose presses are kept out beside the groups sent is still SAID first (ruling 4, "never silently drop a group"): its
+        // hold sends the job as it is.
+        if FlexibleJob.sendsC2W2 {
+            if noLatticeUnder, !controlNoLatticeSent { return .noLatticeUnder }
+            return edgesBeside && !controlEdgesSilentlyDropped ? .edgesBeside : nil
+        }
         if groups > 1 { return .squeezeGroups }
         if edgesBeside, !controlEdgesSilentlyDropped { return .edgesBeside }
         if pinches > 0 { return .pinch }
@@ -101,7 +127,8 @@ public struct FlexibleCoreHold: Equatable, Sendable {
         case .shapeOnly: return shapeOnlyLabel ?? "Shape only \u{2014} no squish predicted"
         case .squeezeGroups: return "Preview \u{00B7} core runs one group at a time"
         case .pinch: return "Preview \u{00B7} core can\u{2019}t pinch yet"
-        case .edgesBeside: return FlexibleRowCopy.edgesBesidePill   // ★ M1 (5)
+        case .edgesBeside: return FlexibleJob.sendsC2W2 ? FlexibleRowCopy.edgesNotInExportPill : FlexibleRowCopy.edgesBesidePill   // ★ M1 (5)
+        case .noLatticeUnder: return FlexibleRowCopy.noLatticeUnderPressPill   // ★ C2 WIRING W2 (the face's own pill says it first)
         }
     }
 
@@ -183,7 +210,33 @@ extension FlexibleStageModel {
                                          groups: FlexibleSqueezeGroups.groups(settings, sent: []).count, pinches: pinches.count)
         }
         return FlexibleCoreHold.kind(calibrateFirst: material?.noPrediction != nil, groups: sentSqueezeGroups.count, pinches: pinches.count,
-                                     edgesBeside: !unsentEdgeGroups.isEmpty && !sentSqueezeGroups.isEmpty)
+                                     edgesBeside: !unsentEdgeGroups.isEmpty && !sentSqueezeGroups.isEmpty,
+                                     noLatticeUnder: FlexibleJob.sendsC2W2 && !(pressedWithoutLattice.isEmpty && sentPressesWithoutLattice.isEmpty))
+    }
+
+    /// ★ C2 WIRING W2: the pressed faces of the job core finds NO lattice under — core's own count on the stack the run builds
+    /// (W1b: a face's OWN lattice, the run's flexible_face_lattice_mask): no column enters lattice, so C2's run refuses the job
+    /// (no_lattice_under_press). Core's count, never the app's own-lattice rule (U21): the two agree on his projects, and where
+    /// they part (a stage that asks core with no face-prism runs the whole part) core's is what the run does. Not known before a
+    /// face's stack (not said); nothing while the stage has no face-prism: held (that hold comes first), or a test control that
+    /// asks core anyway — its run job lattices the WHOLE part (`wholePartWithoutPrism`), while the stacks the app keeps are its
+    /// own no-lattice copies (M1, FlexStackInfo.withoutLattice), not the run's.
+    public var pressedWithoutLattice: [Int] {
+        guard !heldWithoutFacePrism, facePrismsSet else { return [] }
+        return settings.loadedFaces.map(\.faceRegionID).filter { Self.noLatticeEnters(stack($0)) }
+    }
+
+    /// ★ C2 WIRING W2: the sent presses core finds no lattice under (their press stacks, restricted as the run restricts them —
+    /// W1b) — the same refusal; a send leaves one out by its first region (sentPressMarker).
+    public var sentPressesWithoutLattice: [UUID] {
+        guard !heldWithoutFacePrism, facePrismsSet else { return [] }
+        return (settings.presses ?? []).map(\.id).filter { sentPresses.contains($0) && Self.noLatticeEnters(pressStack($0)) }
+    }
+
+    /// No column of core's stack enters lattice (nil: not known yet).
+    static func noLatticeEnters(_ st: FlexStackInfo?) -> Bool {
+        guard let st, !st.columns.isEmpty else { return false }
+        return st.latticedColumns == 0
     }
 
     /// ★ ROUND 7, M1 (5): the edges/corners groups with no press in the job (since R7-E2: each kept out by its own gate reason) — never
@@ -212,6 +265,30 @@ extension FlexibleStageModel {
                                     fixes: FlexibleCoreHold.sends(groups: sentSqueezeGroups, pinches: pinches, name: { self.displayName($0) },
                                                                   pressMarker: { self.sentPressMarker($0) }),   // ★ R7-E2
                                     note: edges.isEmpty ? nil : FlexibleRowCopy.edgesExportSeparately)
+        case .noLatticeUnder:
+            // ★ C2 WIRING W2: the faces, by name; the one send rests them all (in the job only), offered while something else
+            // still presses; an edges group left out is said under it (never dropped without a word)
+            let bareFaces = pressedWithoutLattice, barePresses = sentPressesWithoutLattice
+            let list = FlexibleCoreHold.faceNames(bareFaces, name: { self.displayName($0) }) + barePresses.map { stripTitle($0) }
+            let names = FlexibleRowCopy.andList(list)
+            let one = list.count == 1
+            let bare = bareFaces + barePresses.compactMap { sentPressMarker($0) }
+            let rest = Set(bareFaces)
+            let left = settings.loadedFaces.contains { !rest.contains($0.faceRegionID) }
+                || sentPresses.contains { !barePresses.contains($0) }
+            let scope = "\(names) resting"
+            let edges = sentSqueezeGroups.isEmpty ? [] : unsentEdgeGroups
+            return FlexibleCoreHold(kind: .noLatticeUnder, line: FlexibleRowCopy.notSentNoLatticeUnder(names),
+                                    why: FlexibleRowCopy.noLatticeUnderWhy(names, one: one),
+                                    fixes: left ? [.send(resting: bare, title: "Send with \(scope)", scope: scope)] : [],
+                                    note: edges.isEmpty ? nil : String(edgesWhy(edges).drop { $0 == " " }))
+        case .edgesBeside where FlexibleJob.sendsC2W2:
+            // ★ C2 WIRING W2: every group sent is in the one job; the line names them all, the (i) names the edges group(s) left
+            // out and each one's own reason; the one send is the job as it stands (nothing rests)
+            let names = FlexibleRowCopy.andList(sentSqueezeGroups.map { exportName($0) })
+            return FlexibleCoreHold(kind: .edgesBeside, line: FlexibleRowCopy.exportMakesOnly(names),
+                                    why: String(edgesWhy(unsentEdgeGroups).drop { $0 == " " }),
+                                    fixes: [.send(resting: [], title: "Send \(names) only", scope: "\(names) only")])
         case .edgesBeside:
             // ★ M1 (5, the reviewer's ruling 4): ONE face group beside the edges group(s) — "This export makes Group 1 only."
             // and "Edges and faces go in separate exports for now.", before anything is sent; his name for the group

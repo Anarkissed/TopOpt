@@ -40,7 +40,7 @@ final class FlexibleSqueezeGroupsPressTests: XCTestCase {
         XCTAssertEqual(FlexibleSqueezeGroups.groups(s, sent: []).map(\.id), [1], "nothing of group 2 is sent")
         XCTAssertEqual(FlexibleSqueezeGroups.groups(s, sent: [Self.pressID]).map(\.id), [1, 2], "a SENT press would count (AP9)")
         // the pure encoder: no throw, and the golden's bytes
-        let job = G.normalised(try FlexibleJob.runJobJSON(FlexibleStageTests.inputs(s)), [G.repo])
+        let job = G.normalised(try G.preC2 { try FlexibleJob.runJobJSON(FlexibleStageTests.inputs(s)) }, [G.repo])   // (the goldens: before C2)
         try G.assertGolden(job, "c1_pad_pure_run_job.json")
         XCTAssertFalse(job.contains("press_direction") || job.contains("face_region_ids"), "no press key in the job")
 
@@ -57,6 +57,18 @@ final class FlexibleSqueezeGroupsPressTests: XCTestCase {
         // SAY so before export … Never silently drop a group"): an EDGES group (this two-region press) beside a face group
         // now raises the hold — the export makes Group 1 only and says so first; its one send is this very job (nothing of
         // group 2 is in it, still). A tilted one-region press alone is not an edges group and raises nothing (as before).
+        print("FLEX-AP3 pad + press: the app's lattice columns under the top \(m.stack(FlexibleHisProject.topFace(mesh))?.latticedColumns ?? -1)/\(m.stack(FlexibleHisProject.topFace(mesh))?.columns.count ?? -1) · press \(m.pressStack(id).map { "\($0.latticedColumns)/\($0.columns.count)" } ?? "-") · no lattice under \(m.pressedWithoutLattice) + \(m.sentPressesWithoutLattice.count) presses · hold \(String(describing: m.coreHoldKind))")
+        // ★ C2 WIRING W2 (the no-lattice hold reads core's count on the stack the RUN builds): this pad asks core with no
+        // face-prism (a test control, FlexiblePressFixtures) — its run job lattices the WHOLE part (no include region, no
+        // `no_include_region`), while the app keeps its stacks without lattice (M1). So the top's 0 columns are the app's copy,
+        // not the run's, and nothing is held for no lattice. RED (w2c, 11-09: the hold before it read facePrismsSet):
+        // `.noLatticeUnder` naming the top.
+        XCTAssertFalse(m.facePrismsSet, "premise: no face-prism on this pad")
+        XCTAssertEqual(m.stack(FlexibleHisProject.topFace(mesh))?.latticedColumns, 0, "premise: the app's copy has no lattice (M1)")
+        let wholeJob = try FlexibleC2WiringTests.block(try m.runJobJSON())
+        XCTAssertNil(wholeJob["no_include_region"], "★ the run lattices the whole part (core's default)")
+        XCTAssertNil(wholeJob["regions"], "★ …with no include region of its own")
+        XCTAssertEqual(m.pressedWithoutLattice, [], "★ so no pressed face lacks the run's lattice")
         XCTAssertEqual(m.coreHoldKind, .edgesBeside, "★ said before export: this export makes Group 1 only")
         XCTAssertEqual(m.coreHold?.fixes.map(\.resting), [[]], "its one send rests nothing: the job below")
         XCTAssertEqual(m.sims.count, 1, "one sim: the press plays nothing until core builds it")

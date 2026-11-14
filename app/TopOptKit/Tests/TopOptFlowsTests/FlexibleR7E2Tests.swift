@@ -343,7 +343,10 @@ final class FlexibleR7E2Tests: XCTestCase {
         XCTAssertTrue(m.sentPresses.contains(press.id))
         let g = try XCTUnwrap(m.squeezeGroup(ofPress: press.id))
         XCTAssertTrue(m.sentSqueezeGroups.contains { $0.id == g.id }, "★ its group is sent")
-        let hold = try XCTUnwrap(m.coreHold, "Group 1 (the Top) beside the edges group: one group per export")
+        // ★ C2 WIRING W2: nothing is held (core designs both groups in one job); the edges group's job ALONE is the app before C2's
+        // send of it (Group 1 resting) — this test reads the press's own entry
+        XCTAssertNil(m.coreHold, "★ W2: both groups in one job")
+        let hold = try XCTUnwrap(G.preC2 { m.coreHold }, "Group 1 (the Top) beside the edges group: before C2, one group per export")
         let send = try XCTUnwrap(hold.fixes.first { $0.scope == "Group \(g.number) only" }, "a send of the edges group alone")
         let job = try m.runJobJSON(resting: Set(send.resting))
         let block = try FlexibleCore.parseJobBlock(job)
@@ -496,7 +499,8 @@ final class FlexibleR7E2Tests: XCTestCase {
         }
         // core's own refusal: the edges group's job with Face 3 loaded beside the press
         let g = try XCTUnwrap(m.squeezeGroup(ofPress: press.id))
-        let send = try XCTUnwrap(m.coreHold?.fixes.first { $0.scope == "Group \(g.number) only" })
+        // (★ C2 WIRING W2: the edges group's job alone — the app before C2's send of it; W2 holds nothing here)
+        let send = try XCTUnwrap(G.preC2 { m.coreHold?.fixes.first { $0.scope == "Group \(g.number) only" } })
         m.edit { s in s.setFace(FlexibleFaceSettings(faceRegionID: 3, role: "resting")) }
         try await FlexibleHisProject.waitFor(120, "Edge 16 back in") { m.pressSupport[press.id]?.inJob == true }
         var obj = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(try m.runJobJSON(resting: Set(send.resting)).utf8)) as? [String: Any])
@@ -621,23 +625,32 @@ final class FlexibleR7E2Tests: XCTestCase {
         }
         let g = try XCTUnwrap(m.squeezeGroup(ofPress: ps[0].id))
         XCTAssertEqual(m.sentSqueezeGroups.map(\.number), [1, g.number], "premise: Group 1 and the edges group, both sent")
-        XCTAssertEqual(m.coreHoldKind, .squeezeGroups, "★ the notice shows before Export")
-        let hold = try XCTUnwrap(m.coreHold)
-        let titles = hold.fixes.map(\.title)
-        print("FLEX-E2-9 hold '\(hold.line)' · why '\(hold.why)' · sends \(titles)")
-        XCTAssertTrue(titles.contains("Send Group 1 only") && titles.contains("Send Group \(g.number) only"), "★ a send per group: \(titles)")
-        for f in hold.fixes {
-            let job = try m.runJobJSON(resting: Set(f.resting))
-            let block = try FlexibleCore.parseJobBlock(job)
-            let presses = block.faces.filter { !$0.footprintRegionIDs.isEmpty }
-            let faces = block.faces.filter { $0.footprintRegionIDs.isEmpty && $0.role == "loaded" }
-            print("FLEX-E2-9 [\(f.title)] presses \(presses.count) · loaded faces \(faces.map(\.faceRegionID))")
-            if f.title == "Send Group 1 only" {
-                XCTAssertEqual(presses.count, 0, "★ Group 1's job carries no press")
-                XCTAssertEqual(Set(faces.map(\.faceRegionID)), Set(m.squeezeGroups.first { $0.number == 1 }?.regions ?? []), "Group 1's faces")
-            } else {
-                XCTAssertEqual(presses.count, 2, "★ the edges group's job carries both presses")
-                XCTAssertTrue(faces.isEmpty, "★ and no loaded face")
+        // ★ RE-PINNED (C2 WIRING W2, ruling 5 (a)): core designs both groups in ONE job — nothing is held, none dropped: the job
+        // carries Group 1's faces and both presses, read by core's own parser. RED CONTROL (the app before C2): the notice before
+        // Export, a send per group, each its own job.
+        XCTAssertNil(m.coreHoldKind, "★ W2: both groups in one job")
+        let whole = try FlexibleCore.parseJobBlock(try m.runJobJSON())
+        XCTAssertEqual(whole.faces.filter { !$0.footprintRegionIDs.isEmpty }.count, 2, "★ both presses in the job")
+        XCTAssertEqual(Set(whole.faces.filter { $0.footprintRegionIDs.isEmpty && $0.role == "loaded" }.map(\.faceRegionID)),
+                       Set(m.squeezeGroups.first { $0.number == 1 }?.regions ?? []), "★ and Group 1's faces")
+        try G.preC2 {
+            XCTAssertEqual(m.coreHoldKind, .squeezeGroups, "RED CONTROL: before C2 the notice showed before Export")
+            let hold = try XCTUnwrap(m.coreHold)
+            let titles = hold.fixes.map(\.title)
+            print("FLEX-E2-9 (before C2) hold '\(hold.line)' · why '\(hold.why)' · sends \(titles)")
+            XCTAssertTrue(titles.contains("Send Group 1 only") && titles.contains("Send Group \(g.number) only"), "a send per group: \(titles)")
+            for f in hold.fixes {
+                let job = try m.runJobJSON(resting: Set(f.resting))
+                let block = try FlexibleCore.parseJobBlock(job)
+                let presses = block.faces.filter { !$0.footprintRegionIDs.isEmpty }
+                let faces = block.faces.filter { $0.footprintRegionIDs.isEmpty && $0.role == "loaded" }
+                if f.title == "Send Group 1 only" {
+                    XCTAssertEqual(presses.count, 0, "Group 1's job carries no press")
+                    XCTAssertEqual(Set(faces.map(\.faceRegionID)), Set(m.squeezeGroups.first { $0.number == 1 }?.regions ?? []), "Group 1's faces")
+                } else {
+                    XCTAssertEqual(presses.count, 2, "the edges group's job carries both presses")
+                    XCTAssertTrue(faces.isEmpty, "and no loaded face")
+                }
             }
         }
         // the edges group the only one sent: step ② names it
@@ -655,10 +668,13 @@ final class FlexibleR7E2Tests: XCTestCase {
         XCTAssertLessThanOrEqual(summary.count, 44)
         for r in group1 { m.press(r) }
         try await FlexibleHisProject.waitFor(60, "Group 1 back") { m.sentSqueezeGroups.count == 2 }
-        // ★ RED CONTROL: the hold before E2 — Ready with both groups, the edges group dropped without a word
-        FlexibleStageModel.controlHoldIgnoresPresses = true
-        let kind = m.coreHoldKind
-        FlexibleStageModel.controlHoldIgnoresPresses = false
+        // ★ RED CONTROL: the hold before E2 (in the app before C2) — Ready with both groups, the edges group dropped without a word
+        let kind: FlexibleCoreHold.Kind? = G.preC2 {
+            FlexibleStageModel.controlHoldIgnoresPresses = true
+            defer { FlexibleStageModel.controlHoldIgnoresPresses = false }
+            return m.coreHoldKind
+        }
+        XCTAssertEqual(G.preC2 { m.coreHoldKind }, .squeezeGroups, "control: before C2 without it, the notice")
         print("FLEX-E2-9 RED CONTROL hold kind: \(String(describing: kind))")
         XCTAssertNil(kind, "★ RED CONTROL: no notice — one group would be dropped unsaid")
     }

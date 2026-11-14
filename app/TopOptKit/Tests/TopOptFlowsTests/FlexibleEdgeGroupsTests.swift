@@ -575,16 +575,21 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
         let mine = "Send Group \(g.number) only"
         // (his rule "1-3 fix buttons": with four sent groups — his pad's three face groups and this one — the hold offers the
         // first three; the edges group's own send is offered once three or fewer groups are sent — FlexibleR7E2Tests E2-9)
-        print("FLEX-I2-6 (R7-E2) sends \(G.sends(m).map(\.title)) · sent groups \(m.sentSqueezeGroups.map(\.number))")
+        // ★ C2 WIRING W2 (ruling 5 (a)): core designs all four groups in ONE job — nothing held, the press in it with its pieces.
+        // The sends below are the app before C2's (one group per job), kept as its record.
+        XCTAssertNil(m.coreHold, "★ W2: four groups in one job")
+        let wholeJob = try FlexibleCore.parseJobBlock(try m.runJobJSON())
+        XCTAssertEqual(wholeJob.faces.first { !$0.footprintRegionIDs.isEmpty }?.footprintRegionIDs, press.regions, "★ W2: the press is written")
+        print("FLEX-I2-6 (R7-E2) sends before C2 \(G.sendsPreC2(m).map(\.title)) · sent groups \(m.sentSqueezeGroups.map(\.number))")
         // ★ RE-PINNED (U21 checkpoint 2, for batch R — the reviewer's ruling E(1) of 2026-10-21: "one [More…] listing every group,
         // one per row; no fourth fixed button"): was "offered only within his three"; now every sent group has its send (past
         // three, the row shows two buttons + [More…]). RED CONTROL `controlSendsCapAtThree` (the old cap) still drops it.
-        XCTAssertTrue(G.sends(m).contains { $0.title == mine }, "★ (U21 R, E(1)) the edges group's own send, a fourth group included")
+        XCTAssertTrue(G.sendsPreC2(m).contains { $0.title == mine }, "★ (U21 R, E(1)) the edges group's own send, a fourth group included")
         FlexibleCoreHold.controlSendsCapAtThree = true
-        let redHasMine = G.sends(m).contains { $0.title == mine }
+        let redHasMine = G.sendsPreC2(m).contains { $0.title == mine }
         FlexibleCoreHold.controlSendsCapAtThree = false
         XCTAssertEqual(redHasMine, m.sentSqueezeGroups.count <= 3, "RED control (the cap at three): the fourth group's send is dropped")
-        for send in G.sends(m) {
+        for send in G.sendsPreC2(m) {
             let job = try m.runJobJSON(resting: Set(send.resting))
             let block = try FlexibleCore.parseJobBlock(job)
             if send.title == mine {
@@ -753,9 +758,9 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
         defer { FlexibleBackend.sendsPresses = true }   // ★ C1: the default
         let (r, m) = try await hisPad()
         try await G.settleAllowingRefusedStacks(m, "A1_0003")   // the sends as the Export step reads them, settled
-        func entries() throws -> [String: [Int: String]] {
+        func entries(_ sends: [(title: String, resting: [Int])]) throws -> [String: [Int: String]] {
             var out: [String: [Int: String]] = [:]
-            for send in G.sends(m) {
+            for send in sends {
                 let job = try m.runJobJSON(resting: Set(send.resting))
                 let doc = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(job.utf8)) as? [String: Any])
                 let flex = try XCTUnwrap((doc["loads"] as? [String: Any])?["flexible"] as? [String: Any] ?? doc["flexible"] as? [String: Any],
@@ -771,8 +776,11 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
             }
             return out
         }
-        let before = try entries()
-        let sendsBefore = Set(G.sends(m).map(\.title))
+        // ★ C2 WIRING W2: the sends below are the app before C2's (one group per job); the one job W2 sends ("direct", nothing
+        // held) is checked beside them
+        let before = try entries(G.sendsPreC2(m))
+        let directBefore = try entries(G.sends(m))
+        let sendsBefore = Set(G.sendsPreC2(m).map(\.title))
         let p = try await pickMode(m)
         m.toggleEdgePick(try XCTUnwrap(candidate(p, [1, 2])).number)
         let why9 = try await done(m)
@@ -781,7 +789,8 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
         // ★ RE-PINNED (round 7, R7-E2 — AP9: the edges group is SENT once core takes its press): was "the same sends (the edges group
         // sends nothing)"; now every send of before, and one more — the edges group's own
         try await FlexibleHisProject.waitFor(180, "the press sent") { m.sentPresses.count == 1 }
-        let after = try entries()
+        let after = try entries(G.sendsPreC2(m))
+        let directAfter = try entries(G.sends(m))
         XCTAssertTrue(Set(before.keys).isSubset(of: Set(after.keys)), "every send of before is still offered")
         // the edges group's own send — within his three buttons ("1-3 fix buttons"): his pad's three face groups fill them
         let added = Set(after.keys).subtracting(sendsBefore)
@@ -790,7 +799,7 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
         // was "only when his three leave room"; now the edges group's own send is always added (RED CONTROL: the cap at three)
         XCTAssertEqual(added.count, 1, "★ (U21 R, E(1)) the edges group's own send is added: \(added)")
         FlexibleCoreHold.controlSendsCapAtThree = true
-        let redAdded = Set(G.sends(m).map(\.title)).subtracting(sendsBefore)
+        let redAdded = Set(G.sendsPreC2(m).map(\.title)).subtracting(sendsBefore)
         FlexibleCoreHold.controlSendsCapAtThree = false
         XCTAssertEqual(redAdded.count, sendsBefore.count < 3 ? 1 : 0, "RED control (the cap at three): \(redAdded)")
         var same = 0
@@ -804,6 +813,17 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
             XCTAssertNil(after[send]?[1]); XCTAssertNil(after[send]?[2])
         }
         XCTAssertGreaterThan(same, 0)
+        // ★ C2 WIRING W2: the job sent now keeps faces 0, 3, 4, 5's entries byte-identical too; faces 1, 2 are their rests
+        var sameDirect = 0
+        for (send, ids) in directBefore where directAfter[send] != nil {
+            for id in [0, 3, 4, 5] where ids[id] != nil {
+                XCTAssertEqual(directAfter[send]?[id], ids[id], "★ W2 \(send): face \(id)'s entry byte-identical")
+                sameDirect += 1
+            }
+            XCTAssertNil(directAfter[send]?[1]); XCTAssertNil(directAfter[send]?[2])
+        }
+        XCTAssertGreaterThan(sameDirect, 0, "★ W2: compared")
+        print("FLEX-I2-9 (W2) the job sent: \(directBefore.keys.sorted()) → \(directAfter.keys.sorted()) · \(sameDirect) entries byte-identical")
         // the store's encoding round-trips the press and its strip
         let enc = JSONEncoder()
         enc.outputFormatting = [.sortedKeys]

@@ -148,7 +148,13 @@ final class FlexibleC2WiringTests: XCTestCase {
         }
         let withPrism = try run(on)
         XCTAssertNil(withPrism.refusal, "★ core's own runner takes the job: \(withPrism.refusal.map { "\($0.code): \($0.reason)" } ?? "")")
-        let off = try FlexibleAngledGoldens.preC2 { try m.runJobJSON(resting: resting) }
+        // ★ C2 WIRING W2: the RED is the job before W1's flat_prism only — W2 stays on (its groups are core's to run: with preC2
+        // the two groups this send now carries would be refused before core sees the prism)
+        let off = try { () throws -> String in
+            FlexibleJob.sendsC2W1 = false
+            defer { FlexibleJob.sendsC2W1 = true }
+            return try m.runJobJSON(resting: resting)
+        }()
         let without = try run(off)
         func measure(_ i: FlexRunInfo) -> String {
             guard let st = i.stacks.last else { return "no stack" }

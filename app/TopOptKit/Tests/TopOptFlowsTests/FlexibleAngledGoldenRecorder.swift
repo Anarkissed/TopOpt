@@ -132,9 +132,10 @@ enum FlexibleAngledGoldens {
     /// `FlexibleJob.sendsC2W1` off, so every OTHER byte is still proven unchanged; `FlexibleC2WiringTests` proves the job as
     /// sent = this job + exactly `no_include_region` and each press's `flat_prism`.
     static func preC2<T>(_ body: () throws -> T) rethrows -> T {
-        let was = FlexibleJob.sendsC2W1
+        let was = FlexibleJob.sendsC2W1, was2 = FlexibleJob.sendsC2W2
         FlexibleJob.sendsC2W1 = false
-        defer { FlexibleJob.sendsC2W1 = was }
+        FlexibleJob.sendsC2W2 = false   // ★ C2 WIRING W2: the app before C2 refuses several groups and a pinch, and sends no squeeze_groups
+        defer { FlexibleJob.sendsC2W1 = was; FlexibleJob.sendsC2W2 = was2 }
         return try body()
     }
 
@@ -196,7 +197,9 @@ enum FlexibleAngledGoldens {
         let r = try FlexiblePressFixtures.hisRound5(test)
         let m = try await FlexibleHisProject.openedModel(r.project, test: test)
         try await FlexibleSquishFixture.settle(m, "his r5")
-        let hold = try XCTUnwrap(m.coreHold, "premise: his r5 as saved is held (two squeeze groups)")
+        // ★ C2 WIRING W2: the HELD send is the app before C2's (core now designs his two groups in one job: nothing is held —
+        // FlexibleC2W2Tests sends his r5 whole)
+        let hold = try XCTUnwrap(preC2 { m.coreHold }, "premise: his r5 as saved is held before C2 (two squeeze groups)")
         let first = try XCTUnwrap(hold.fixes.first, "premise: core hold offers a send")
         return (r, m, first)
     }
@@ -546,6 +549,8 @@ enum FlexibleAngledGoldens {
 
     /// What the Export step sends for the project as it stands: each FlexibleCoreHold send (its
     /// resting faces), or — nothing held — the job itself ("direct", resting none).
+    /// ★ C2 WIRING W2: the goldens are the sends of the app before C2 — `sendsPreC2` (live, nothing of these is held any more).
+    static func sendsPreC2(_ m: FlexibleStageModel) -> [(title: String, resting: [Int])] { preC2 { sends(m) } }
     static func sends(_ m: FlexibleStageModel) -> [(title: String, resting: [Int])] {
         guard let hold = m.coreHold else { return [("direct", [])] }
         return hold.fixes.compactMap { f in f.scope == nil ? nil : (f.title, f.resting) }
@@ -838,7 +843,7 @@ final class FlexibleAngledGoldenRecorder: XCTestCase {
     func testRecord8EverySendsJob() async throws {
         for label in G.sendSets {
             let (roots, m) = try await G.sendSetModel(label, self)
-            let s = G.sends(m)
+            let s = G.sendsPreC2(m)   // ★ C2 WIRING W2: the goldens are the app before C2's sends
             print("FLEX-AP RECORD \(label): \(s.count) send(s) \(s.map(\.title))")
             try G.write("\(label)_sends.txt", G.sendIndex(label, s))
             for (n, send) in s.enumerated() {

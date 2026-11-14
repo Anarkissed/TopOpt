@@ -233,11 +233,19 @@ final class FlexibleSqueezeGroupsModelTests: XCTestCase {
 
     @MainActor
     func testTheRunJobSaysWhatCoreCannotRunYet() async throws {
+        defer { FlexibleJob.sendsC2W2 = true }
         let (_, m) = try await his()
+        // ★ C2 WIRING W2: core designs a pinch and several groups — the job is SENT, and core's parser takes it
+        XCTAssertNoThrow(try FlexibleCore.parseJobBlock(try m.runJobJSON()), "★ W2: one group with a pinch is sent")
+        // the app before C2 (the switch off) refused them — this test's original pins, now its RED CONTROLS
+        FlexibleJob.sendsC2W2 = false
         XCTAssertThrowsError(try m.runJobJSON(), "one group with a pinch") { XCTAssertEqual($0 as? FlexibleJob.EncodeError, .pinch) }
         sidesApart(m)
         try await settle(m)
         XCTAssertThrowsError(try m.runJobJSON(), "two groups") { XCTAssertEqual($0 as? FlexibleJob.EncodeError, .squeezeGroups) }
+        FlexibleJob.sendsC2W2 = true
+        XCTAssertNoThrow(try FlexibleCore.parseJobBlock(try m.runJobJSON()), "★ W2: two groups are sent")
+        FlexibleJob.sendsC2W2 = false
         // ★ RED CONTROL: one group, no pinch — core's job round-trips
         m.removeGroup(m.squeezeGroups[1].id)
         m.rest(5)

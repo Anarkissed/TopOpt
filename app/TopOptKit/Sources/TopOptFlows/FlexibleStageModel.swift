@@ -1871,9 +1871,13 @@ public final class FlexibleStageModel: ObservableObject {
         // ★ R7-E2: the presses IN THE JOB, but those a send leaves out (one of their regions among `resting` — a press is never a
         // resting entry); written after the face entries
         let pressEntries = Self.controlStripPresses ? [] : pressJobEntries(excluding: resting)
-        // ★ ROUND 4 (D2): what core cannot run yet (core brief) is said, never sent to be refused
-        if FlexibleSqueezeGroups.groups(s, sent: Set(pressEntries.map(\.id))).count > 1 { throw FlexibleJob.EncodeError.squeezeGroups }
-        if !pinches.isEmpty { throw FlexibleJob.EncodeError.pinch }
+        // ★ ROUND 4 (D2): what core cannot run yet (core brief) is said, never sent to be refused — ★ C2 WIRING W2: core runs
+        // several groups and a pinch now; refused only with the switch off (the app before C2)
+        let sentGroups = FlexibleSqueezeGroups.groups(s, sent: Set(pressEntries.map(\.id)))
+        if !FlexibleJob.sendsC2W2 {
+            if sentGroups.count > 1 { throw FlexibleJob.EncodeError.squeezeGroups }
+            if !pinches.isEmpty { throw FlexibleJob.EncodeError.pinch }
+        }
         let faceCount = max(file.faceCount, (project.viewerMesh?.faceIDs.max().map { Int($0) + 1 }) ?? 0)
         var inputs = FlexibleJob.Inputs(
             modelPath: file.path, resolution: project.quality.resolution,
@@ -1890,6 +1894,14 @@ public final class FlexibleStageModel: ObservableObject {
         (inputs.buildDir, inputs.plateDir) = buildDirections
         inputs.pinches = pinches.map { [$0.a, $0.b] }
         inputs.presses = pressEntries
+        // ★ C2 WIRING W2 (ruling 5 (a)): every sent group's hands — a press by its first region; the encoder keeps those of 2+
+        if FlexibleJob.sendsC2W2 {
+            var marker: [UUID: Int] = [:]
+            for p in pressEntries { if let first = p.regions.first { marker[p.id] = first } }
+            inputs.hands = sentGroups.flatMap {
+                FlexibleSqueezeGroups.hands($0, settings: s, loads: mainPageLoads, liveKg: liveMainKg, root: rootOf)
+            }.map { h in h.regions + h.presses.compactMap { marker[$0] } }
+        }
         // ★ C2 WIRING W1b: a stage that asks core with no face-prism (the tests' ruling-6 controls only) runs the whole part, as its scene
         inputs.wholePartWithoutPrism = !facePrismsNow && mayAskCore(facePrism: false)
         return try FlexibleJob.runJobJSON(inputs)

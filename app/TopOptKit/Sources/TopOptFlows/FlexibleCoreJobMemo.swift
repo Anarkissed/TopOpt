@@ -20,6 +20,8 @@ final class FlexibleCoreJobMemo {
         let stamps: [UUID: FlexStamp]
         let generation: Int?
         let resting: [Int]
+        /// ★ C2 WIRING W2: the switch (tests flip it on one model; the app never does) — another switch, another answer.
+        let c2w2: Bool
     }
     enum Now: Equatable { case job(String), notSent(String) }
 
@@ -29,7 +31,7 @@ final class FlexibleCoreJobMemo {
     private(set) var computed = 0
 
     func now(_ m: FlexibleStageModel, resting: Set<Int>) -> (now: Now, holdFixes: [FlexibleCoreFix]) {
-        let key = Key(settings: m.settings, stamps: m.stampGrids, generation: m.lattice?.generation, resting: resting.sorted())
+        let key = Key(settings: m.settings, stamps: m.stampGrids, generation: m.lattice?.generation, resting: resting.sorted(), c2w2: FlexibleJob.sendsC2W2)
         if let hit = entries.first(where: { $0.key == key }) { return (hit.now, hit.fixes) }
         computed += 1
         let hold = m.coreHold

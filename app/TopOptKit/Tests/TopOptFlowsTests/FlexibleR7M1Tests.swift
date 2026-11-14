@@ -398,18 +398,25 @@ final class FlexibleR7M1Tests: XCTestCase {
         await m.waitForIdle()
         stage.refresh()
         XCTAssertEqual(m.coreHoldKind, .edgesBeside)
-        XCTAssertEqual(stage.status.line, FlexibleRowCopy.edgesBesidePill)
+        // ★ RE-PINNED (C2 WIRING W2): core designs every face group in one job, so the pill no longer says "one group per export" —
+        // the edges group left out is still said first (ruling 4). RED CONTROL (the app before C2): the old pill and note.
+        XCTAssertEqual(stage.status.line, FlexibleRowCopy.edgesNotInExportPill)
         XCTAssertEqual(stage.status.tone, .preview)
+        FlexibleAngledGoldens.preC2 {
+            XCTAssertEqual(stage.status.line, FlexibleRowCopy.edgesBesidePill, "RED CONTROL: before C2")
+            XCTAssertEqual(m.coreHold?.note, "Edges and faces go in separate exports for now.", "RED CONTROL: before C2")
+        }
         // ★ SAID BEFORE anything is sent
         let hold = try XCTUnwrap(m.coreHold)
         XCTAssertEqual(hold.line, "This export makes Group 1 only.")
-        XCTAssertEqual(hold.note, "Edges and faces go in separate exports for now.")
+        XCTAssertNil(hold.note, "★ W2: faces and edges are not separate exports any more")
+        XCTAssertTrue(hold.why.contains("Group 2 (edges and corners) is not in this export"), "★ the edges group named: \(hold.why)")
         XCTAssertEqual(hold.fixes, [.send(resting: [], title: "Send Group 1 only", scope: "Group 1 only")])
         stage.pillTapped(stage.status, open: { XCTFail("a preview never opens Settings") })
         XCTAssertTrue(run.shown)
         guard case .notSent(let line, _) = run.phase else { return XCTFail("★ said, not sent: \(run.phase)") }
         XCTAssertEqual(line, "This export makes Group 1 only.")
-        XCTAssertEqual(run.hold?.note, FlexibleRowCopy.edgesExportSeparately)
+        XCTAssertNil(run.hold?.note, "★ W2 (above)")
         XCTAssertEqual(run.runs, 0, "★ nothing is exported before his tap")
         // his tap on [Send Group 1 only]: the face group's job, said so in core's answer line
         stage.coreFix(hold.fixes[0])

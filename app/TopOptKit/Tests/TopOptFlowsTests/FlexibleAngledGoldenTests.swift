@@ -76,12 +76,12 @@ final class FlexibleAngledGoldenTests: XCTestCase {
         let recorded = try G.read("his_r5_held_send.txt")
         print("FLEX-AP his r5 held send: [\(first.title)] resting \(first.resting)")
         XCTAssertTrue(recorded.hasPrefix("title \(first.title)\nresting \(first.resting)\n"), "the same send: \(recorded)")
-        let sent = G.mutation == "other-send" ? try XCTUnwrap(m.coreHold?.fixes.last) : first
+        let sent = G.mutation == "other-send" ? try XCTUnwrap(G.preC2 { m.coreHold?.fixes.last }) : first
         let job = try G.runJob(m, resting: Set(sent.resting), roots: G.rootToken(r))
         XCTAssertFalse(job.contains(r.root.lastPathComponent), "no temp path left in the bytes")
         try G.assertGolden(job, "his_r5_held_send_run_job.json")
         // ★ RED CONTROL: the OTHER send (Group 2 only) is a different job
-        let fixes = try XCTUnwrap(m.coreHold?.fixes)
+        let fixes = try XCTUnwrap(G.preC2 { m.coreHold?.fixes })
         if fixes.count > 1 {
             let other = try G.runJob(m, resting: Set(fixes[1].resting), roots: G.rootToken(r))
             XCTAssertNotEqual(other, try G.read("his_r5_held_send_run_job.json"), "control: [\(fixes[1].title)] is not the golden")
@@ -118,7 +118,7 @@ final class FlexibleAngledGoldenTests: XCTestCase {
             if G.mutation == "send-weight", let k = m.loadedKeys.first {
                 m.edit({ s in if var f = s.face(k.region) { f.weightKg += 0.001; s.setFace(f) } }, recompute: false)
             }
-            let s = G.sends(m)
+            let s = G.sendsPreC2(m)   // ★ C2 WIRING W2: the sends of the app before C2 (the goldens')
             print("FLEX-AP \(label): \(s.count) send(s) \(s.map { "\($0.title) resting \($0.resting)" })")
             XCTAssertEqual(G.sendIndex(label, s), try G.read("\(label)_sends.txt"), "\(label): the sends offered are the recorded ones")
             var jobs: [String] = []

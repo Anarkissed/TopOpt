@@ -243,7 +243,9 @@ final class FlexibleR7E2HostedTests: XCTestCase {
             FlexRunInfo(refusal: nil, receiptJSON: "{\"faces\":[{\"press\":{\"footprint_face_region_ids\":[\(regs.map(String.init).joined(separator: ","))],\"direction\":[-0.707107,0.707107,0],\"build_angle_deg\":90,\"side\":true}}],\"topology\":\"gyroid\"}", files: [])
         }
         let g = try XCTUnwrap(m.squeezeGroup(ofPress: ps[0].id))
-        let fix = try XCTUnwrap(m.coreHold?.fixes.first { $0.scope == "Group \(g.number) only" }, "the edges group's send")
+        // (★ C2 WIRING W2: the edges group's job alone — the app before C2's send of it; W2 holds nothing here)
+        let fix = try XCTUnwrap(FlexibleAngledGoldens.preC2 { m.coreHold?.fixes.first { $0.scope == "Group \(g.number) only" } },
+                                "the edges group's send")
         run.send(m, fix: fix)
         XCTAssertTrue(pumpUntil(30) { !run.isSending })
         print("FLEX-E2-H3 export: '\(run.line)' · note '\(run.pressNote ?? "-")'")

@@ -448,7 +448,10 @@ final class FlexibleMeetReviewTests: XCTestCase {
         let src = try String(contentsOf: FlexibleHisProject.repoRoot.appendingPathComponent(
             "app/TopOptKit/Sources/TopOptBridge/flexible_bridge.cpp"), encoding: .utf8)
         XCTAssertTrue(src.contains("bridge_guard_run(\"flexible_scene_press_verdict\""), "the verdict runs under the one guard")
-        XCTAssertTrue(src.contains("fx::build_press_stack(s->model, fp, s->regions, s->grid, s->mask, 0, s->build,"), "core's own press stack")
+        // ★ RE-PINNED (C2 WIRING W1b): over the run's lattice (Scene::lattice — the region mask before C2, so the RED control
+        // FlexibleScene.controlStacksBeforeC2 builds it as before); was s->mask
+        XCTAssertTrue(src.contains("fx::build_press_stack(s->model, fp, s->regions, s->grid, s->lattice, 0, s->build,"), "core's own press stack")
+        XCTAssertFalse(src.contains("fx::build_press_stack(s->model, fp, s->regions, s->grid, s->mask,"), "never the region mask")
 
         // the M2: core's rule is per TRIANGLE, the per-member check is not
         var skips: [String] = []

@@ -258,6 +258,7 @@ final class FlexibleSqueezeGroupsReviewTests: XCTestCase {
 
     // MARK: the static run job
 
+    @MainActor
     func testTheStaticRunJobRefusesAPinchItself() throws {
         var s = FlexibleStageSettings(materialID: "varioshore_tpu")
         s.setFace(FlexibleFaceSettings(faceRegionID: 3))
@@ -266,6 +267,11 @@ final class FlexibleSqueezeGroupsReviewTests: XCTestCase {
         // ★ RED CONTROL: without the pinch named, the encoder sends it (D2 had no other check)
         XCTAssertNoThrow(try FlexibleJob.runJobJSON(i), "control: a job with no pinch named is written")
         i.pinches = [[3, 5]]
-        XCTAssertThrowsError(try FlexibleJob.runJobJSON(i)) { XCTAssertEqual($0 as? FlexibleJob.EncodeError, .pinch) }
+        // ★ RE-PINNED (C2 WIRING W2, ruling 5 (a)): core designs a pinch — the encoder writes it (core reads it from the stacks);
+        // the refusal is the app before C2's (its RED CONTROL)
+        XCTAssertNoThrow(try FlexibleJob.runJobJSON(i), "★ W2: a pinch is written")
+        XCTAssertThrowsError(try FlexibleAngledGoldens.preC2 { try FlexibleJob.runJobJSON(i) }) {
+            XCTAssertEqual($0 as? FlexibleJob.EncodeError, .pinch, "RED CONTROL: before C2 the encoder refused it itself")
+        }
     }
 }

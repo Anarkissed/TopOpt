@@ -35,10 +35,11 @@ final class FlexibleMainPageRound4VerifyTests: XCTestCase {
     /// His project restored, on the Lattice stage, `tweak` applied in Settings, Save & Exit, the
     /// lattice built.
     @MainActor
-    private func hisBuilt(_ tweak: (FlexibleStageModel) -> Void = { _ in }) async throws
+    private func hisBuilt(before: (ProjectModel) throws -> Void = { _ in }, _ tweak: (FlexibleStageModel) -> Void = { _ in }) async throws
         -> (FlexibleHisProject.Restored, FlexibleMainStage, FlexibleStageModel) {
         let r = try FlexibleHisProject.restore()
         addTeardownBlock { r.cleanup() }
+        try before(r.project)   // (a main-page edit, before the stage opens)
         let stage = FlexibleMainStage()
         stage.reduceMotion = { true }
         let m = stage.model(for: r.project, materialsPath: FlexibleHisProject.materialsPath,
@@ -163,6 +164,7 @@ final class FlexibleMainPageRound4VerifyTests: XCTestCase {
     // MARK: the pill never promises what core will refuse (his project as saved, two groups, TPU 95A)
 
     /// The rule as values: what core can run instead, 1–3 buttons.
+    @MainActor
     func testTheHoldRuleOffersWhatCoreCanRun() {
         let name: (Int) -> String = { "Face \($0)" }
         func g(_ id: Int, _ n: Int, _ r: [Int]) -> FlexibleSqueezeGroup { FlexibleSqueezeGroup(id: id, number: n, regions: r) }
@@ -189,11 +191,23 @@ final class FlexibleMainPageRound4VerifyTests: XCTestCase {
         XCTAssertEqual(FlexibleCoreHold.slots(four).count, 3)
         // the order: a calibrate-first filament first (any send would be refused), then groups, then a pinch
         XCTAssertEqual(FlexibleCoreHold.kind(calibrateFirst: true, groups: 2, pinches: 1), .shapeOnly)
-        XCTAssertEqual(FlexibleCoreHold.kind(calibrateFirst: false, groups: 2, pinches: 1), .squeezeGroups)
-        XCTAssertEqual(FlexibleCoreHold.kind(calibrateFirst: false, groups: 1, pinches: 1), .pinch)
+        // ★ RE-PINNED (C2 WIRING W2, the reviewer's ruling 5 (a)): core designs several groups and a pinch — neither is held; a
+        // pressed face with no lattice under it is (core refuses it), before an edges group left out (said first)
+        XCTAssertNil(FlexibleCoreHold.kind(calibrateFirst: false, groups: 2, pinches: 1), "★ W2: two groups and a pinch are core's")
+        XCTAssertNil(FlexibleCoreHold.kind(calibrateFirst: false, groups: 1, pinches: 1))
+        XCTAssertEqual(FlexibleCoreHold.kind(calibrateFirst: false, groups: 2, pinches: 1, edgesBeside: true, noLatticeUnder: true),
+                       .noLatticeUnder)
+        XCTAssertEqual(FlexibleCoreHold.kind(calibrateFirst: false, groups: 2, pinches: 1, edgesBeside: true), .edgesBeside)
+        XCTAssertEqual(FlexibleCoreHold.kind(calibrateFirst: true, groups: 1, pinches: 0, noLatticeUnder: true), .shapeOnly)
+        // ★ RED CONTROL (the app before C2): groups, then a pinch; no-lattice is never its hold
+        FlexibleAngledGoldens.preC2 {
+            XCTAssertEqual(FlexibleCoreHold.kind(calibrateFirst: false, groups: 2, pinches: 1), .squeezeGroups)
+            XCTAssertEqual(FlexibleCoreHold.kind(calibrateFirst: false, groups: 1, pinches: 1), .pinch)
+            XCTAssertNil(FlexibleCoreHold.kind(calibrateFirst: false, groups: 1, pinches: 0, noLatticeUnder: true))
+        }
         XCTAssertNil(FlexibleCoreHold.kind(calibrateFirst: false, groups: 1, pinches: 0))
         // one line each on the pill (it is 300 pt at 10.5 pt)
-        for k in [FlexibleCoreHold.Kind.pinch, .squeezeGroups] {
+        for k in [FlexibleCoreHold.Kind.pinch, .squeezeGroups, .edgesBeside, .noLatticeUnder] {
             XCTAssertLessThanOrEqual(FlexibleCoreHold.pill(k, shapeOnlyLabel: nil).count, 44)
         }
         // ★ the Preview pill is not the Ready pill's green
@@ -203,50 +217,45 @@ final class FlexibleMainPageRound4VerifyTests: XCTestCase {
     }
 
     /// His project (with the [Lattice under it] tap FlexibleHisProject replays — AS SAVED the pill
-    /// names Top B first: FlexibleLatticeUnderReviewTests): faces 3 and 5 pinch the pad. C2's pill read the green "Ready" and a
-    /// tap ended on "Not sent" with nothing to do. Now the pill says what it is (a preview core
-    /// can't take yet), and the Export step names the faces and offers each end.
+    /// names Top B first: FlexibleLatticeUnderReviewTests): faces 3 and 5 pinch the pad. ★ RE-PINNED (C2 WIRING W2, the
+    /// reviewer's ruling 5 (a): "a pinch inside one Load group = core's pinch; hands are separate load cases"): core designs his
+    /// pinch, so the pill is the green Ready and its tap sends the WHOLE job — both ends pressed — and core's own runner designs
+    /// it. Was (round 4, C2 verification): a preview, the Export step offering each end resting. RED CONTROL (the app before C2):
+    /// that preview, its line naming the faces and its two sends.
     @MainActor
     func testHisPinchIsAPreviewAndTheStepSendsEitherEnd() async throws {
         let (_, stage, m) = try await hisBuilt()
         XCTAssertEqual(m.pinches.map { "\($0.a)|\($0.b)" }, ["3|5"], "premise: his faces 3 and 5 pinch the pad")
+        let a = m.displayName(3), b = m.displayName(5)
+        // ★ RED CONTROL: the app before C2 — never the green Ready; the step names the faces and offers each end
+        try FlexibleAngledGoldens.preC2 {
+            XCTAssertEqual(stage.status.tone, .preview, "RED CONTROL: before C2, a preview")
+            XCTAssertEqual(stage.status.line, FlexibleCoreHold.pill(.pinch, shapeOnlyLabel: nil))
+            let h = try XCTUnwrap(m.coreHold)
+            XCTAssertEqual(h.line, "Not sent: core can\u{2019}t press \(a) and \(b) at once", "the faces, named")
+            XCTAssertEqual(h.fixes.map(\.title), ["Send with \(b) resting", "Send with \(a) resting"])
+        }
         let s = stage.status
-        print("FLEX-C2V pinch: pill '\(s.line)' tone \(s.tone)")
-        XCTAssertEqual(s.tone, .preview, "never the green Ready while core can't take it")
-        XCTAssertEqual(s.line, FlexibleCoreHold.pill(.pinch, shapeOnlyLabel: nil))
+        print("FLEX-C2W2 his pinch: pill '\(s.line)' tone \(s.tone)")
+        XCTAssertEqual(s.tone, .ready, "★ W2: core designs his pinch — the green Ready")
+        XCTAssertEqual(s.line, FlexibleMainStatus.ready)
+        XCTAssertNil(m.coreHold, "★ nothing held")
+        let all = m.settings.loadedFaces.map(\.faceRegionID).sorted()
+        let settings = m.settings
         stage.pillTapped(s, open: { XCTFail("no Settings") }, goToLattice: { XCTFail("already there") })
         let run = stage.coreRun
         XCTAssertTrue(run.shown)
-        XCTAssertEqual(run.runs, 0, "nothing core would refuse is sent")
-        let a = m.displayName(3), b = m.displayName(5)
-        XCTAssertEqual(run.line, "Not sent: core can\u{2019}t press \(a) and \(b) at once", "the faces, named")
-        let fixes = try XCTUnwrap(run.hold?.fixes)
-        print("FLEX-C2V pinch: step '\(run.line)' · (i) '\(run.info ?? "-")' · buttons \(fixes.map(\.title))")
-        XCTAssertEqual(fixes.map(\.title), ["Send with \(b) resting", "Send with \(a) resting"])
-        let all = m.settings.loadedFaces.map(\.faceRegionID).sorted()
-        let settings = m.settings
-        // [Send with Face 5 resting]
-        run.onFix?(fixes[0])
-        try await FlexibleHisProject.waitFor(180, "core's answer") { !run.isSending }
-        XCTAssertEqual(run.runs, 1)
-        guard case .ran(let rep1) = run.phase else { return XCTFail("core ran it: \(run.phase)") }
-        XCTAssertEqual(try Self.pressed(try XCTUnwrap(run.sentJob)), all.filter { $0 != 5 }, "Face 5 rests in the job")
-        XCTAssertTrue(run.line.contains("\(b) resting"), run.line)
-        XCTAssertEqual(m.settings, settings, "his settings keep the pinch")
-        XCTAssertFalse(m.pinches.isEmpty)
-        print("FLEX-C2V pinch: [\(fixes[0].title)] → '\(run.line)' · (i) '\(run.info ?? "-")'")
+        try await FlexibleHisProject.waitFor(240, "core's answer") { !run.isSending }
+        print("FLEX-C2W2 his pinch: step '\(run.line)' · (i) '\(run.info ?? "-")'")
+        XCTAssertEqual(run.runs, 1, "★ sent")
+        guard case .ran(let rep) = run.phase, rep.refusal == nil else { return XCTFail("★ core designed his pinch: \(run.phase)") }
+        let job = try XCTUnwrap(run.sentJob)
+        XCTAssertEqual(try Self.pressed(job), all, "★ both ends pressed in the one job")
+        XCTAssertTrue(all.contains(3) && all.contains(5))
+        let groups = (try FlexibleC2WiringTests.block(job)["squeeze_groups"] as? [[String: Any]]) ?? []
+        print("FLEX-C2W2 his pinch: squeeze_groups \(groups) · pinches \(m.pinches.map { [$0.a, $0.b] })")
+        XCTAssertEqual(m.settings, settings, "his settings as they were")
         XCTAssertFalse((run.info ?? "").contains("/"), "no temp path he cannot open behind the (i)")
-        // the pill again: that answer stands, both buttons stay
-        stage.pillTapped(stage.status, open: {}, goToLattice: {})
-        XCTAssertEqual(run.runs, 1, "the same answer is not asked twice")
-        if case .ran = run.phase {} else { XCTFail("the answer stands: \(run.phase)") }
-        XCTAssertEqual(run.hold?.fixes.count, 2)
-        // the other end; the first run's temp folder is cleaned up
-        run.onFix?(fixes[1])
-        try await FlexibleHisProject.waitFor(180, "core's answer") { !run.isSending }
-        XCTAssertEqual(run.runs, 2)
-        XCTAssertEqual(try Self.pressed(try XCTUnwrap(run.sentJob)), all.filter { $0 != 3 })
-        XCTAssertFalse(FileManager.default.fileExists(atPath: rep1.outDir), "the previous run's temp folder is deleted")
     }
 
     /// His img 4 (the sides in Group 2): each group alone — Group 2 with one end of its pinch resting.
@@ -257,29 +266,114 @@ final class FlexibleMainPageRound4VerifyTests: XCTestCase {
             if let g2 = m.squeezeGroup(of: 3) { m.moveToGroup(5, g2.id) }
         }
         XCTAssertEqual(m.squeezeGroups.count, 2, "premise: two squeeze groups")
+        // ★ RED CONTROL (the app before C2): a preview; the step offers each group alone, each send's job parsed by core
+        try FlexibleAngledGoldens.preC2 {
+            XCTAssertEqual(stage.status.tone, .preview)
+            XCTAssertEqual(stage.status.line, FlexibleCoreHold.pill(.squeezeGroups, shapeOnlyLabel: nil))
+            let h = try XCTUnwrap(m.coreHold)
+            XCTAssertEqual(h.line, FlexibleCoreRun.notSentLine(.squeezeGroups))
+            XCTAssertEqual(h.fixes.count, 2)
+            XCTAssertTrue(h.fixes[0].title.hasPrefix("Send Group 1 only"))
+            XCTAssertTrue(h.fixes[1].title.hasPrefix("Send Group 2 only"))
+            let all = m.settings.loadedFaces.map(\.faceRegionID)
+            for f in h.fixes {
+                XCTAssertEqual(try Self.pressed(try m.runJobJSON(resting: Set(f.resting))), all.filter { !f.resting.contains($0) }.sorted(),
+                               "\(f.title): core's own parser reads the faces it presses")
+            }
+        }
+        // ★ RE-PINNED (C2 WIRING W2, ruling 5 (a): "hands are separate load cases"): core designs both groups in ONE job (its
+        // combination) — the green Ready, and the tap sends every pressed face of both groups; core's own runner designs it
         let s = stage.status
-        XCTAssertEqual(s.tone, .preview)
-        XCTAssertEqual(s.line, FlexibleCoreHold.pill(.squeezeGroups, shapeOnlyLabel: nil))
+        print("FLEX-C2W2 his two groups: \(m.squeezeGroups.map { m.groupLine($0) }) · pill '\(s.line)' \(s.tone)")
+        XCTAssertEqual(s.tone, .ready, "★ W2: two groups are core's")
+        XCTAssertEqual(s.line, FlexibleMainStatus.ready)
+        XCTAssertNil(m.coreHold)
+        let all = m.settings.loadedFaces.map(\.faceRegionID).sorted()
         stage.pillTapped(s, open: { XCTFail("no Settings") }, goToLattice: {})
         let run = stage.coreRun
-        XCTAssertEqual(run.runs, 0)
-        XCTAssertEqual(run.line, FlexibleCoreRun.notSentLine(.squeezeGroups))
-        let fixes = try XCTUnwrap(run.hold?.fixes)
-        print("FLEX-C2V groups: \(m.squeezeGroups.map { m.groupLine($0) }) · pill '\(s.line)' · buttons \(fixes.map(\.title))")
-        XCTAssertEqual(fixes.count, 2)
-        XCTAssertTrue(fixes[0].title.hasPrefix("Send Group 1 only"))
-        XCTAssertTrue(fixes[1].title.hasPrefix("Send Group 2 only"))
-        let all = m.settings.loadedFaces.map(\.faceRegionID)
-        for f in fixes {
-            XCTAssertEqual(try Self.pressed(try m.runJobJSON(resting: Set(f.resting))), all.filter { !f.resting.contains($0) }.sorted(),
-                           "\(f.title): core's own parser reads the faces it presses")
-        }
-        run.onFix?(fixes[1])
-        try await FlexibleHisProject.waitFor(180, "core's answer") { !run.isSending }
-        print("FLEX-C2V groups: [\(fixes[1].title)] → '\(run.line)'")
+        try await FlexibleHisProject.waitFor(240, "core's answer") { !run.isSending }
+        print("FLEX-C2W2 his two groups: '\(run.line)' · (i) '\(run.info ?? "-")'")
         XCTAssertEqual(run.runs, 1)
-        if case .ran = run.phase {} else { XCTFail("core answered: \(run.phase)") }
-        XCTAssertTrue(run.line.contains("Group 2 only"), run.line)
+        guard case .ran(let rep) = run.phase, rep.refusal == nil else { return XCTFail("★ core designed both groups: \(run.phase)") }
+        let job = try XCTUnwrap(run.sentJob)
+        XCTAssertEqual(try Self.pressed(job), all, "★ both groups' faces in the one job")
+        let groups = (try FlexibleC2WiringTests.block(job)["squeeze_groups"] as? [[String: Any]]) ?? []
+        print("FLEX-C2W2 his two groups: squeeze_groups \(groups)")
+    }
+
+    /// ★ C2 WIRING W2 END TO END (ruling 5 (a): "a core squeeze group = one app HAND with 2+ entries"): his main page's Top
+    /// Load group over BOTH tops (his edit: Top B added to Top) is ONE hand — the job's one squeeze group, its force_n Top's
+    /// 10 kg, neither top stating a weight of its own. Core reads it as ONE hand ("group 1") and its receipt carries that force
+    /// over the two — sent as it stands (refused by C2's combination beside Face 3: a FINDING, below) and alone, which core's
+    /// own runner designs. RED CONTROL: his Top as saved (Top A only) — no hand of two, no squeeze group (the two-groups test
+    /// above prints it: squeeze_groups []).
+    @MainActor
+    func testHisTopGroupOverBothTopsIsOneSqueezeGroupCoreDesigns() async throws {
+        let a = FlexibleHisProject.topA, b = FlexibleHisProject.topB
+        let (r, stage, m) = try await hisBuilt(before: { p in
+            let top = try XCTUnwrap(p.selection.groups.first { $0.name == "Top" })
+            XCTAssertEqual(top.regionIDs, [103], "premise: his Top presses Top A as saved")
+            p.selection.addRegions([104], to: top.id)
+        })
+        let topID = try XCTUnwrap(r.project.selection.groups.first { $0.name == "Top" }?.id)
+        XCTAssertEqual(m.settings.face(a)?.weightFrom, topID, "premise: Top presses Top A")
+        XCTAssertEqual(m.settings.face(b)?.weightFrom, topID, "premise: …and Top B (his edit)")
+        let kgA = try XCTUnwrap(m.settings.face(a)?.weightKg), kgB = try XCTUnwrap(m.settings.face(b)?.weightKg)
+        XCTAssertEqual(kgA + kgB, 10, accuracy: 1e-9, "premise: Top's 10 kg, split by area")
+        let s = stage.status
+        print("FLEX-C2W2 his Top over both: Top A \(kgA) kg · Top B \(kgB) kg · \(m.squeezeGroups.map { m.groupLine($0) }) · pill '\(s.line)' \(s.tone)")
+        XCTAssertEqual(s.tone, .ready, "★ core's: nothing held")
+        XCTAssertNil(m.coreHold)
+        let job = try m.runJobJSON()
+        let block = try FlexibleC2WiringTests.block(job)
+        let groups = try XCTUnwrap(block["squeeze_groups"] as? [[String: Any]], "★ a squeeze group is sent")
+        print("FLEX-C2W2 his Top over both: squeeze_groups \(groups)")
+        XCTAssertEqual(groups.count, 1, "★ ONE hand of two")
+        XCTAssertEqual(Set((groups.first?["faces"] as? [Int]) ?? []), [a, b], "★ the two tops")
+        XCTAssertEqual((groups.first?["force_n"] as? Double) ?? 0, FlexibleUnits.newtons(kg: 10), accuracy: 1e-9, "★ Top's 10 kg")
+        for e in (block["faces"] as? [[String: Any]]) ?? [] where [a, b].contains(e["face_region_id"] as? Int ?? -1) {
+            XCTAssertNil(e["weight_n"], "★ \(e["face_region_id"] ?? "?"): its share is the group's, by area, core's")
+        }
+        // core's receipt (written on a refusal too): ONE squeeze group, Top's 10 kg, split over the two tops
+        func receiptGroups(_ rep: FlexibleCoreRunReport, _ label: String) throws {
+            let info = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: rep.outDir).appendingPathComponent("run_info.json")))
+            let receipt = try XCTUnwrap((info as? [String: Any])?["flexible"] as? [String: Any], "\(label): core's receipt")
+            let got = try XCTUnwrap(receipt["squeeze_groups"] as? [[String: Any]], "★ \(label): core's receipt has the squeeze group")
+            print("FLEX-C2W2 his Top over both (\(label)): core's receipt squeeze_groups \(got)")
+            XCTAssertEqual(got.count, 1, label)
+            XCTAssertEqual((got.first?["force_n"] as? Double) ?? 0, FlexibleUnits.newtons(kg: 10), accuracy: 1e-6, "★ \(label): core read Top's force")
+            let split = (got.first?["split"] as? [String: Any] ?? [:]).values.compactMap { $0 as? Double }
+            XCTAssertEqual(split.count, 2, "★ \(label): split over the two tops")
+            XCTAssertEqual(split.reduce(0, +), FlexibleUnits.newtons(kg: 10), accuracy: 1e-6, "★ \(label): the split sums to the group's force")
+        }
+        // core's own runner, the job as it stands. ★ FINDING (w2c, 11-09; reported to the reviewer): Faces 3 and 5 are hands of
+        // their own beside Top's, so separate load cases (Q-C1), and C2's first-order combination (B2b, "not proven impossible")
+        // refuses Face 3 beside Top's hand — core names that hand "group 1": the two tops are ONE hand to core. Pinned so a
+        // change in core shows.
+        stage.pillTapped(s, open: { XCTFail("no Settings") }, goToLattice: {})
+        let run = stage.coreRun
+        try await FlexibleHisProject.waitFor(240, "core's answer") { !run.isSending }
+        print("FLEX-C2W2 his Top over both: '\(run.line)' · (i) '\(run.info ?? "-")'")
+        XCTAssertEqual(run.runs, 1)
+        XCTAssertEqual(run.sentJob, job, "★ the job above is what went")
+        guard case .ran(let whole) = run.phase else { return XCTFail("★ core answers: \(run.phase)") }
+        XCTAssertEqual(whole.refusal?.code, "combination_not_reachable", "★ FINDING: core's combination (\(run.line))")
+        let reason = whole.refusal?.reason ?? ""
+        XCTAssertTrue(reason.contains("group 1"), "★ core names Top's hand as one group: \(reason)")
+        XCTAssertFalse(reason.contains("face \(a)") || reason.contains("face \(b)"), "★ never a top on its own: \(reason)")
+        try receiptGroups(whole, "as it stands")
+        // ★ Top's hand ALONE (the other faces resting, in the job only): one load case — core designs the hand of two
+        let others = m.settings.loadedFaces.map(\.faceRegionID).filter { ![a, b].contains($0) }.sorted()
+        XCTAssertFalse(others.isEmpty, "premise: Top's hand presses beside other faces")
+        run.send(m, fix: .send(resting: others, title: "Send Top alone", scope: "Top alone"))
+        try await FlexibleHisProject.waitFor(240, "core's answer (Top alone)") { !run.isSending }
+        print("FLEX-C2W2 his Top over both, Top alone: '\(run.line)' · (i) '\(run.info ?? "-")'")
+        XCTAssertEqual(run.runs, 2)
+        let alone = try XCTUnwrap(run.sentJob)
+        XCTAssertEqual(try Self.pressed(alone), [a, b].sorted(), "★ only the two tops press")
+        XCTAssertEqual((try FlexibleC2WiringTests.block(alone)["squeeze_groups"] as? [[String: Any]])?.count, 1, "★ still one squeeze group")
+        guard case .ran(let rep) = run.phase, rep.refusal == nil else { return XCTFail("★ core designs the hand of two: \(run.phase)") }
+        try receiptGroups(rep, "Top alone")
     }
 
     /// img 1 (TPU 95A): the shape-only lattice's pill was the green Ready, and a tap sent a job core
