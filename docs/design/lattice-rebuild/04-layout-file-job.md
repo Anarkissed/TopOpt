@@ -64,6 +64,7 @@ Exactly the fields of the bridge's `LatticeLayoutSettings`, under the same names
 | `region_expand_mm` | [] | per region |
 | `region_face_counts` | [] | per region: how many of `region_faces` are its |
 | `region_faces` | [] | the model's own face numbers, region after region |
+| `region_finish` | none | per region: `null` (the part's Finish) or the region's own (S13), an object with any of `rim_mm`, `cover_mm` (0 none for this region, below 0 two line widths), `skin` (true / false), `skin_width_mm` (0 = as wide as the thinner strut), `skin_reach_cells`. What a region leaves out is the part's. An unknown key, or a list not as long as `region_ids`, refuses the job. **Not in the bridge's struct yet** |
 | `protect_ids`, `protect_depth_mm`, `protect_face_counts`, `protect_faces` | [] | Protect skins, the same way; depth 0 = two line widths |
 | `topology` | "octet" | core's type names |
 | `algorithm` | "default_grade" | `uniform`, `default_grade` or `stepped` |

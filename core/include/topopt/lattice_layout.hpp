@@ -25,6 +25,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -182,6 +183,13 @@ struct Region {
   double shell_depth_mm = 0.0;
   bool expand_ignored = false;
   bool is_shell() const { return !shell.triangles.empty(); }
+  // S13: a Lattice region's own Finish. What it does not state it takes from the part's
+  // (DomainSpec::rim_mm, cover_mm), with the same meaning: 0 none for this region (even when
+  // the part has one), < 0 two line widths, > 0 that width or thickness. Its rim is the band
+  // of ITS lattice within that distance of its own edge where the part's solid backs it; its
+  // cover makes solid ITS lattice within that distance of the part's surface, and its cells
+  // start behind it. Neither acts on another region's lattice.
+  std::optional<double> rim_mm, cover_mm;
 };
 
 // The region under one or more faces of the model, from the faces themselves (rule D10:
@@ -317,8 +325,17 @@ class Domain {
     const Domain* d_;
     PartMeasure::Probe part_;
     // From `p` along `dir`, the distance at which a Protect skin's solid begins, looking
-    // no farther than `limit`. Negative when none begins that near.
-    double skin_ahead(const Vec3& p, const Vec3& dir, double limit) const;
+    // no farther than `limit`. Negative when none begins that near. `cover` is the cover
+    // of the lattice being read (S13).
+    double skin_ahead(const Vec3& p, const Vec3& dir, double limit, double cover) const;
+    double skin_gap(const Vec3& p, double cover) const;
+    double room_through(const Vec3& p, double at_least, double cover) const;
+    // Is `p` in region i (and how far from its face)? The Lattice region that owns `p`
+    // (D6), null for none; `best`, its distance from the face.
+    bool holds_at(std::size_t i, const Vec3& p, double* dist) const;
+    const Region* owner_of(const Vec3& p, double* best) const;
+    // S13: the cover of the lattice that owns `p` (the part's when no region states its own).
+    double cover_at(const Vec3& p) const;
     std::vector<MeshDistance> skins_;
     std::vector<MeshDistance> skin_groups_;   // one per depth (Domain::skin_groups_)
     std::vector<MeshDistance> shells_;   // one per region, empty mesh for a prism
@@ -357,16 +374,26 @@ class Domain {
   double protect_depth_mm(const ProtectSkin& s) const {
     return s.depth_mm > 0.0 ? s.depth_mm : 2.0 * spec_.bead_mm;
   }
-  // The rim's width: the one asked for, or two line widths; 0 with no rim.
-  double rim_width_mm() const { return spec_.rim_mm < 0.0 ? 2.0 * spec_.bead_mm : spec_.rim_mm; }
-  // The deepest Protect skin or cover there is; 0 with neither.
+  // The rim's width: the one asked for, or two line widths; 0 with no rim. With `owner`, the
+  // rim of that region's lattice (S13: its own, else the part's); without, the part's.
+  double rim_width_mm(const Region* owner = nullptr) const {
+    const double v = owner && owner->rim_mm ? *owner->rim_mm : spec_.rim_mm;
+    return v < 0.0 ? 2.0 * spec_.bead_mm : v;
+  }
+  // The deepest Protect skin or cover there is (any region's own cover included); 0 with neither.
   double skin_most_mm() const {
     double most = cover_depth_mm();
+    for (const Region& r : spec_.regions)
+      if (r.cover_mm) most = std::max(most, cover_depth_mm(&r));
     for (const ProtectSkin& s : spec_.protect) most = std::max(most, protect_depth_mm(s));
     return most;
   }
-  // The cover's thickness: the one asked for, or two line widths; 0 with no cover.
-  double cover_depth_mm() const { return spec_.cover_mm < 0.0 ? 2.0 * spec_.bead_mm : spec_.cover_mm; }
+  // The cover's thickness: the one asked for, or two line widths; 0 with no cover. With
+  // `owner`, the cover of that region's lattice (S13: its own, else the part's).
+  double cover_depth_mm(const Region* owner = nullptr) const {
+    const double v = owner && owner->cover_mm ? *owner->cover_mm : spec_.cover_mm;
+    return v < 0.0 ? 2.0 * spec_.bead_mm : v;
+  }
 
  private:
   const PartMeasure* measure_;
@@ -395,6 +422,7 @@ class Domain {
     }
   };
   std::vector<Sure> sure_;         // one per region (empty where it does not apply)
+  bool own_cover_ = false;         // some region states its own cover (S13)
   // region_contains(spec_.regions[i], p), by the squares where they are sure.
   bool region_holds(std::size_t i, const Vec3& p) const;
 
@@ -943,6 +971,21 @@ struct SkinSpec {
   // At 0 only bars that lie in the surface are made: on a pocket's wall that is lines along its axis and no rings
   // (his v3 stand, 2026-11-12: "not just with singular vertical lines, but with a lattice all along the face").
   double bow = 0.1;
+  // S13: a region's own Skin. `on` is for the cut ends of every region not listed in
+  // `regions` (the part's Skin), with the width and reach above. A region listed decides
+  // for its own ends: off, they get no skin bar; on, with its own width and reach (the
+  // caller fills in the part's where the region states none). An end's width is its
+  // region's width, or the thinner strut's at 0; a skin bar takes the smaller of its two
+  // ends' widths and is no longer than the smaller of their reaches allows. Called with no
+  // list, lay_skin is what it always was.
+  struct RegionSkin {
+    int region = 0;
+    bool on = true;
+    double width_mm = 0.0;
+    double reach_cells = 1.2;
+  };
+  bool on = true;
+  std::vector<RegionSkin> regions;
 };
 std::size_t lay_skin(Bars& bars, const Domain& domain, const SkinSpec& spec = SkinSpec{});
 
@@ -986,6 +1029,12 @@ struct Settings {
     std::vector<int> faces;      // the model's own face numbers
     double depth_mm = 0.0;
     double expand_mm = 0.0;
+    // S13: the region's own Finish; what is not stated is the part's. rim_mm and cover_mm
+    // are "where" settings (Region::rim_mm, cover_mm); the skin ones are not
+    // (SkinSpec::RegionSkin). skin_width_mm 0 = as wide as the thinner strut.
+    std::optional<double> rim_mm, cover_mm;
+    std::optional<bool> skin;
+    std::optional<double> skin_width_mm, skin_reach_cells;
   };
   struct ProtectAsk {
     int id = 0;

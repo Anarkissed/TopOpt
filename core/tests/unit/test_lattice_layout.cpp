@@ -2935,6 +2935,254 @@ static void test_cover() {
   }
 }
 
+// S13: a Lattice region's own Finish (rim, cover, skin). What it does not state it takes from the part's. A 20 x 20 x
+// 12 block as a model (faces 0 bottom, 1 top, 2 front y = 0, 3 x = 20, 4 back, 5 x = 0); region A under its top,
+// region B under its bottom, each 6 mm deep, so they meet at z = 6.
+static StepModel finish_block() {
+  StepModel m;
+  const double x = 20, y = 20, z = 12;
+  const Vec3 p[8] = {{0, 0, 0}, {x, 0, 0}, {x, y, 0}, {0, y, 0}, {0, 0, z}, {x, 0, z}, {x, y, z}, {0, y, z}};
+  const int q[6][4] = {{0, 3, 2, 1}, {4, 5, 6, 7}, {0, 1, 5, 4}, {1, 2, 6, 5}, {2, 3, 7, 6}, {3, 0, 4, 7}};
+  const Vec3 out[6] = {{0, 0, -1}, {0, 0, 1}, {0, -1, 0}, {1, 0, 0}, {0, 1, 0}, {-1, 0, 0}};
+  for (int f = 0; f < 6; ++f) {
+    StepFaceInfo info;
+    info.kind = StepSurfaceKind::Plane;
+    info.plane_normal = out[f];
+    info.plane_origin = p[q[f][0]];
+    m.faces.push_back(info);
+    for (int t = 0; t < 2; ++t) {
+      const int n = static_cast<int>(m.mesh.vertices.size());
+      m.mesh.vertices.insert(m.mesh.vertices.end(), {p[q[f][0]], p[q[f][t ? 2 : 1]], p[q[f][t ? 3 : 2]]});
+      m.mesh.triangles.push_back({n, n + 1, n + 2});
+      m.triangle_face.push_back(f);
+    }
+  }
+  m.face_count = 6;
+  m.solid_count = 1;
+  return m;
+}
+static Settings finish_settings(double expand) {
+  Settings s;
+  s.min_strut_lines = kFewestStrutLines;
+  s.regions = {{1, Role::Lattice, {1}, 6.0, expand}, {2, Role::Lattice, {0}, 6.0, expand}};   // A top, B bottom
+  s.cells.cell_max_mm = 6;
+  return s;
+}
+static void test_area_finish() {
+  const StepModel model = finish_block();
+  auto same = [](const Outcome& x, const Outcome& y) {
+    return x.layout.cells == y.layout.cells && x.layout.solid == y.layout.solid && same_bars(x.bars, y.bars);
+  };
+  auto skin_bars = [](const Outcome& o) {
+    std::size_t n = 0;
+    for (const Bar& b : o.bars.bars) n += b.skin;
+    return n;
+  };
+  // 1. Nothing stated: each part Finish in turn (None, Rim, Skin, Covered) gives the layout and bars it gives with every
+  // region stating the part's own value; and the four are four different layouts.
+  {
+    std::vector<Outcome> laid;
+    for (int finish = 0; finish < 4; ++finish) {
+      Settings plain = finish_settings(finish == 1 ? -3.0 : 0.0);
+      if (finish == 1) plain.rim_mm = -1.0;
+      if (finish == 2) { plain.skin = true; plain.skin_spec.width_mm = 0.5; }
+      if (finish == 3) plain.cover_mm = -1.0;
+      Settings stated = plain;
+      for (Settings::RegionAsk& r : stated.regions) {
+        r.rim_mm = plain.rim_mm;
+        r.cover_mm = plain.cover_mm;
+        r.skin = plain.skin;
+        r.skin_width_mm = plain.skin_spec.width_mm;
+        r.skin_reach_cells = plain.skin_spec.reach_cells;
+      }
+      const Outcome a = Session(model).lay(plain), b = Session(model).lay(stated);
+      CHECK(!a.layout.cells.empty() && !a.bars.bars.empty());
+      CHECK(same(a, b));
+      laid.push_back(a);
+    }
+    CHECK(skin_bars(laid[0]) == 0 && skin_bars(laid[2]) > 20);
+    CHECK(!(laid[0].layout.cells == laid[3].layout.cells));   // the cover moved the cells
+    Session s(model);
+    const Outcome rimmed = s.lay([&] { Settings r = finish_settings(-3.0); r.rim_mm = -1.0; return r; }());
+    CHECK((s.domain()->probe().where({3.5, 10, 9}) == Where{Why::Rim, 1}));
+    CHECK((s.domain()->probe().where({3.5, 10, 3}) == Where{Why::Rim, 2}));
+  }
+  // 2. Part Rim (two lines, 0.9 mm), A states rim 0: rim along B's backed edges, lattice along A's.
+  {
+    Settings st = finish_settings(-3.0);   // pulled 3 mm in: solid backs every edge
+    st.rim_mm = -1.0;
+    st.regions[0].rim_mm = 0.0;
+    Session s(model);
+    s.lay(st);
+    const Domain::Probe pr = s.domain()->probe();
+    int a_rim = 0, b_lattice = 0, asked = 0;
+    for (double t = 4; t <= 16; t += 0.5)
+      for (const Vec3& p : {Vec3{3.5, t, 9}, Vec3{16.5, t, 9}, Vec3{t, 3.5, 9}, Vec3{t, 16.5, 10.5}}) {
+        ++asked;
+        a_rim += !(pr.where(p) == Where{Why::Lattice, 1});
+        b_lattice += !(pr.where(Vec3{p.x, p.y, 12 - p.z}) == Where{Why::Rim, 2});
+      }
+    CHECK(asked > 90 && a_rim == 0 && b_lattice == 0);
+    CHECK((pr.where({10, 10, 9}) == Where{Why::Lattice, 1}) && (pr.where({10, 10, 3}) == Where{Why::Lattice, 2}));
+  }
+  // 3. Part no rim, A states rim 1.5: rim within 1.5 mm of A's backed edges only, a hair inside 1.5 rim, a hair outside
+  // lattice; B has none.
+  {
+    Settings st = finish_settings(-3.0);
+    st.regions[0].rim_mm = 1.5;
+    Session s(model);
+    s.lay(st);
+    const Domain::Probe pr = s.domain()->probe();
+    int wrong = 0;
+    for (double t = 5; t <= 15; t += 0.25) {
+      for (double z : {6.5, 9.0, 11.5}) {
+        wrong += !(pr.where({3 + 1.5 - 0.01, t, z}) == Where{Why::Rim, 1});
+        wrong += !(pr.where({3 + 1.5 + 0.01, t, z}) == Where{Why::Lattice, 1});
+        wrong += !(pr.where({t, 17 - 1.5 + 0.01, z}) == Where{Why::Rim, 1});
+        wrong += !(pr.where({t, 17 - 1.5 - 0.01, z}) == Where{Why::Lattice, 1});
+        wrong += !(pr.where({3.2, t, 12 - z}) == Where{Why::Lattice, 2});   // B: no rim of its own, none of the part's
+      }
+    }
+    CHECK(wrong == 0);
+  }
+  // A's and B's cells: the shallowest any of them starts below its own face.
+  auto first_below_face = [](const Outcome& o, int region) {
+    double first = 1e9;
+    for (const Cell& c : o.layout.cells)
+      if (c.region == region) first = std::min(first, c.lo[2]);
+    return first;
+  };
+  // 4. Part no cover, A states cover 0.9: A's lattice within 0.9 mm of the part's surface is solid and its cells start
+  // behind it; B's lattice runs to the surface as today.
+  {
+    Settings st = finish_settings(-3.0);
+    st.regions[0].cover_mm = 0.9;
+    Session s(model);
+    const Outcome o = s.lay(st);
+    const Domain::Probe pr = s.domain()->probe();
+    CHECK((pr.where({10, 10, 12 - 0.45}) == Where{Why::Cover, 1}));
+    CHECK((pr.where({10, 10, 12 - 0.89}) == Where{Why::Cover, 1}));
+    CHECK((pr.where({10, 10, 12 - 0.91}) == Where{Why::Lattice, 1}));
+    CHECK((pr.where({10, 10, 0.2}) == Where{Why::Lattice, 2}));
+    NEAR(first_below_face(o, 1), 0.9, 1e-5);
+    NEAR(first_below_face(o, 2), 0.0, 1e-9);
+    // Its cells divide what is left of its 6 mm exactly (C15): one layer of 5.1 mm.
+    int a = 0, other = 0;
+    for (const Cell& c : o.layout.cells)
+      if (c.region == 1) { ++a; other += std::fabs(c.size - 5.1) > 1e-5; }
+    CHECK(a > 0 && other == 0);
+  }
+  // 5. Part cover on (0.9), A states cover 0: A is not covered, B is.
+  {
+    Settings st = finish_settings(-3.0);
+    st.cover_mm = 0.9;
+    st.regions[0].cover_mm = 0.0;
+    Session s(model);
+    const Outcome o = s.lay(st);
+    const Domain::Probe pr = s.domain()->probe();
+    CHECK((pr.where({10, 10, 12 - 0.2}) == Where{Why::Lattice, 1}));
+    CHECK((pr.where({10, 10, 0.45}) == Where{Why::Cover, 2}));
+    CHECK((pr.where({10, 10, 0.91}) == Where{Why::Lattice, 2}));
+    NEAR(first_below_face(o, 1), 0.0, 1e-9);
+    NEAR(first_below_face(o, 2), 0.9, 1e-5);
+  }
+  // The regions of the bars whose cut ends lie at a point (1 = A, 2 = B, 3 = both), from the bars as laid.
+  auto ends_of = [](const Outcome& o) {
+    std::map<std::array<double, 3>, int> at;
+    for (const Bar& b : o.bars.bars) {
+      if (b.skin) continue;
+      for (int e = 0; e < 2; ++e) {
+        const Bar::End k = e ? b.end_b : b.end_a;
+        if (k != Bar::End::Surface && k != Bar::End::Joined) continue;
+        const Vec3& p = e ? b.b : b.a;
+        at[{p.x, p.y, p.z}] |= b.region == 1 ? 1 : 2;
+      }
+    }
+    return at;
+  };
+  auto mask_at = [](const std::map<std::array<double, 3>, int>& m, const Vec3& p) {
+    const auto it = m.find({p.x, p.y, p.z});
+    return it == m.end() ? 0 : it->second;
+  };
+  // 6. Part Skin off, A states Skin on: skin bars exist; every one joins ends of A's bars, and no end of B's is joined.
+  {
+    Settings st = finish_settings(0.0);   // the whole faces: the block's sides cut both regions' cells
+    st.drop_loose = false;
+    st.regions[0].skin = true;
+    const Outcome o = Session(model).lay(st);
+    const auto ends = ends_of(o);
+    int not_a = 0, b_joined = 0, b_cut = 0;
+    for (const Bar& b : o.bars.bars)
+      if (b.skin) {
+        not_a += !(mask_at(ends, b.a) & 1) || !(mask_at(ends, b.b) & 1);
+      } else if (b.region == 2) {
+        for (int e = 0; e < 2; ++e) {
+          const Bar::End k = e ? b.end_b : b.end_a;
+          const int into = e ? b.into_b : b.into_a;
+          b_cut += k == Bar::End::Surface;
+          b_joined += k == Bar::End::Joined && into >= 0 && o.bars.bars[static_cast<std::size_t>(into)].skin;
+        }
+      }
+    CHECK(skin_bars(o) > 20);
+    CHECK(not_a == 0 && b_joined == 0 && b_cut > 20);
+  }
+  // 7. Both on, with different widths and reach (A 0.8 mm and 1.5 cells, B 0.6 mm and 0.6 cells): a bar between A's
+  // ends has A's width; a bar joining A to B has the smaller width and is no longer than the smaller reach allows.
+  {
+    Settings st = finish_settings(0.0);
+    st.drop_loose = false;
+    st.regions[0].skin = true; st.regions[0].skin_width_mm = 0.8; st.regions[0].skin_reach_cells = 1.5;
+    st.regions[1].skin = true; st.regions[1].skin_width_mm = 0.6; st.regions[1].skin_reach_cells = 0.6;
+    const Outcome o = Session(model).lay(st);
+    const auto ends = ends_of(o);
+    int in_a = 0, in_b = 0, a_to_b = 0, wrong_width = 0, too_long = 0, past_b_reach = 0;
+    for (const Bar& b : o.bars.bars) {
+      if (!b.skin) continue;
+      const int m = mask_at(ends, b.a), n = mask_at(ends, b.b);
+      const double len = bar_length(b);
+      if (m == 1 && n == 1) {
+        ++in_a;
+        wrong_width += std::fabs(b.width - 0.8) > 1e-12;
+        too_long += len > 1.5 * b.cell + 1e-9;
+        past_b_reach += len > 0.6 * b.cell + 1e-9;
+      } else if (m == 2 && n == 2) {
+        ++in_b;
+        wrong_width += std::fabs(b.width - 0.6) > 1e-12;
+        too_long += len > 0.6 * b.cell + 1e-9;
+      } else if ((m == 1 && n == 2) || (m == 2 && n == 1)) {
+        ++a_to_b;
+        wrong_width += std::fabs(b.width - 0.6) > 1e-12;
+        too_long += len > 0.6 * b.cell + 1e-9;
+      }
+    }
+    std::printf("area finish: skin bars %d in A, %d in B, %d A to B (%d of A's longer than B's reach)\n", in_a, in_b,
+                a_to_b, past_b_reach);
+    CHECK(in_a > 10 && in_b > 10 && a_to_b > 0 && past_b_reach > 0);
+    CHECK(wrong_width == 0 && too_long == 0);
+  }
+  // 8. A's own rim or cover change reads the part again; its skin change does not.
+  {
+    Session s(model);
+    Settings st = finish_settings(-3.0);
+    CHECK(s.lay(st).read_again);
+    st.regions[0].rim_mm = 1.5;
+    CHECK(s.lay(st).read_again);
+    CHECK(!s.lay(st).read_again);
+    st.regions[0].cover_mm = 0.9;
+    CHECK(s.lay(st).read_again);
+    st.regions[0].cover_mm = 1.2;
+    CHECK(s.lay(st).read_again);
+    st.regions[0].skin = true;
+    const Outcome skinned = s.lay(st);
+    CHECK(!skinned.read_again && same(skinned, Session(model).lay(st)));
+    st.regions[0].skin_width_mm = 0.7;
+    st.regions[0].skin_reach_cells = 1.0;
+    CHECK(!s.lay(st).read_again);
+    st.regions[0].rim_mm.reset();   // back to the part's
+    CHECK(s.lay(st).read_again);
+  }
+}
+
 // P2, stage E: the session the app holds for a part. A cell or strut setting re-lays
 // without reading the part again; a "where" setting reads it again; either way the
 // layout is the one a fresh session gives.
@@ -5463,6 +5711,7 @@ static void test_cells_by_stress() {
 }
 
 int main() {
+  test_area_finish();
   test_cells_by_stress();
   test_by_stress();
   test_by_stress_session();

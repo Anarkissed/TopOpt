@@ -22,6 +22,9 @@ std::string where_text(const Settings& s) {
   for (const Settings::RegionAsk& r : s.regions) {
     whole(r.id); whole(static_cast<long>(r.role)); num(r.depth_mm); num(r.expand_mm);
     for (int f : r.faces) whole(f);
+    // S13: a region's own rim and cover decide where lattice goes (its own skin does not).
+    if (r.rim_mm) { out += "r"; num(*r.rim_mm); }
+    if (r.cover_mm) { out += "c"; num(*r.cover_mm); }
     out += ";";
   }
   out += "P";
@@ -57,6 +60,8 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
       bool ok = false;
       Region region = region_from_faces(model_, r.faces, r.id, r.role, r.depth_mm, r.expand_mm, &ok);
       if (!ok) { empty_regions_.push_back(r.id); continue; }
+      region.rim_mm = r.rim_mm;       // S13: its own, else the part's
+      region.cover_mm = r.cover_mm;
       spec.regions.push_back(std::move(region));
     }
     for (const Settings::ProtectAsk& p : settings.protect)
@@ -129,7 +134,17 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
       out.bars = lay_bars(out.layout, *domain_, threads);
       if (settings.join_loose) join_loose_bars(out.bars, *domain_, threads, &out.layout);
       domain_->check_stop();
-      if (settings.skin) lay_skin(out.bars, *domain_, settings.skin_spec);
+      // S13: the part's Skin, and each region's own where it states one.
+      SkinSpec skin = settings.skin_spec;
+      skin.on = settings.skin;
+      bool any_skin = settings.skin;
+      for (const Settings::RegionAsk& r : settings.regions) {
+        if (!r.skin && !r.skin_width_mm && !r.skin_reach_cells) continue;
+        skin.regions.push_back({r.id, r.skin.value_or(settings.skin), r.skin_width_mm.value_or(skin.width_mm),
+                                r.skin_reach_cells.value_or(skin.reach_cells)});
+        any_skin = any_skin || skin.regions.back().on;
+      }
+      if (any_skin) lay_skin(out.bars, *domain_, skin);
       domain_->check_stop();
       if (settings.drop_loose) {
         drop_loose_bars(out.bars);
