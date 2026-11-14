@@ -14,6 +14,35 @@ namespace topopt::lattice_layout {
 namespace {
 double dot(const Vec3& a, const Vec3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
 Vec3 sub(const Vec3& a, const Vec3& b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
+// D22: does every cut of at least one of the skin's pieces hold at `p`? (A skin of whole
+// faces has no pieces: yes.)
+bool skin_cuts_hold(const ProtectSkin& s, const Vec3& p) {
+  if (s.pieces.empty()) return true;
+  for (const FacePiece& piece : s.pieces) {
+    bool all = true;
+    for (const FaceCut& c : piece.cuts) {
+      const double d = dot(sub(p, c.point), c.normal);
+      all = all && (c.strict ? d > 0.0 : d >= 0.0);
+    }
+    if (all) return true;
+  }
+  return false;
+}
+// D22: how far `p` is, at least, from where the skin's cuts hold: for each piece the most
+// any one of its cuts fails by (each a half-space), the least over its pieces. 0 or below
+// where some piece's cuts all hold.
+double skin_cut_gap(const ProtectSkin& s, const Vec3& p) {
+  double best = std::numeric_limits<double>::infinity();
+  for (const FacePiece& piece : s.pieces) {
+    double worst = -std::numeric_limits<double>::infinity();
+    for (const FaceCut& c : piece.cuts) {
+      const double len = std::sqrt(dot(c.normal, c.normal));
+      if (len > 0.0) worst = std::max(worst, -dot(sub(p, c.point), c.normal) / len);
+    }
+    best = std::min(best, worst);
+  }
+  return best;
+}
 double segment_distance2(const Vec3& p, const Vec3& a, const Vec3& b) {
   const Vec3 ab = sub(b, a), ap = sub(p, a);
   const double l2 = dot(ab, ab);
@@ -63,7 +92,12 @@ Domain::Domain(const PartMeasure& measure, DomainSpec spec)
   std::stable_sort(spec_.protect.begin(), spec_.protect.end(),
                    [](const ProtectSkin& a, const ProtectSkin& b) { return a.id < b.id; });
   for (const ProtectSkin& s : spec_.protect) near_skin_.emplace_back(s.face, protect_depth_mm(s));
-  for (const ProtectSkin& s : spec_.protect) {   // in id order: the same groups however the caller listed them
+  for (std::size_t i = 0; i < spec_.protect.size(); ++i) {   // in id order: the same groups however the caller listed them
+    const ProtectSkin& s = spec_.protect[i];
+    // D22: a skin whose cuts stand up out of its face is not one of a group: its distance is its own.
+    bool cut = false;
+    for (const FacePiece& piece : s.pieces) cut = cut || !piece.cuts.empty();
+    if (cut) { cut_skins_.push_back(i); continue; }
     const double depth = protect_depth_mm(s);
     SkinGroup* g = nullptr;
     for (SkinGroup& have : skin_groups_)
@@ -180,6 +214,10 @@ double Domain::Probe::skin_gap(const Vec3& p, double cover) const {
   double g = std::numeric_limits<double>::infinity();
   for (std::size_t i = 0; i < skin_groups_.size(); ++i)   // one question per depth, not per skin
     g = std::min(g, skin_groups_[i].unsigned_distance(p) - d_->skin_groups_[i].depth_mm);
+  for (std::size_t i : d_->cut_skins_) {   // D22: within its depth AND where its cuts hold
+    const ProtectSkin& s = d_->spec_.protect[i];
+    g = std::min(g, std::max(skins_[i].unsigned_distance(p) - d_->protect_depth_mm(s), skin_cut_gap(s, p)));
+  }
   // Finish Covered is a skin on every face of the part (S13: the cover of the lattice read).
   if (cover > 0.0) g = std::min(g, part_.depth_up_to(p, cover + 2.0) - cover);
   return g;
@@ -293,7 +331,8 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
   // whatever else covers the point. The lattice starts right behind it.
   for (std::size_t i = 0; i < spec.protect.size(); ++i)
     if (d_->near_skin_[i].maybe(p) &&
-        skins_[i].unsigned_distance(p) <= d_->protect_depth_mm(spec.protect[i]))
+        skins_[i].unsigned_distance(p) <= d_->protect_depth_mm(spec.protect[i]) &&
+        skin_cuts_hold(spec.protect[i], p))   // D22: the cuts stand up out of the face
       return inside_or({Why::ProtectSkin, spec.protect[i].id});
 
   auto holds = [&](std::size_t i, double* dist) { return holds_at(i, p, dist); };

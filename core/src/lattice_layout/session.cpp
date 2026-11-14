@@ -95,7 +95,7 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
     }
     for (const Settings::ProtectAsk& p : settings.protect)
       spec.protect.push_back({p.id, p.pieces.empty() ? faces_mesh(model_, p.faces) : pieces_mesh(model_, p.pieces),
-                              p.depth_mm});
+                              p.depth_mm, p.pieces});
     domain_ = std::make_unique<Domain>(*measure_, std::move(spec));
     where_ = where;
     unread_ = true;

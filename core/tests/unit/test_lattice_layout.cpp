@@ -6646,6 +6646,47 @@ static void test_face_pieces() {
     CHECK(behind > 0 && open > 0 && odd == 0);
   }
 
+  // 5b: the cuts stand up out of the face. A Protect skin on the left piece (x <= 20) does not reach past the cut:
+  // 0.05 mm, half its depth and 0.9 of its depth past it, at the surface and half its depth down, is the lattice
+  // under the right side; the same distances on the kept side are skin. Given through a Session as well. A Lattice
+  // region and a No lattice region on the same piece stop at the cut too.
+  {
+    const double depth = 1.2;
+    const FacePiece left = face_piece({1}, {{{20, 0, 0}, {-1, 0, 0}, false}});
+    DomainSpec s;
+    s.regions = {region_from_faces(model, {1}, 1, Role::Lattice, 12.0)};
+    s.protect = {{7, pieces_mesh(model, {left}), depth, {left}}};
+    Domain d(pm, s);
+    Settings st5;
+    st5.min_strut_lines = kFewestStrutLines;
+    st5.cells.cell_max_mm = 8;
+    st5.regions = {{1, Role::Lattice, {1}, 12.0, 0.0}};
+    st5.protect = {{7, {1}, depth, {left}}};
+    Session session(model);
+    session.lay(st5);
+    DomainSpec lat, nol;
+    lat.regions = {region_from_pieces(model, {left}, 2, Role::Lattice, 6.0)};
+    nol.start = Start::AllLattice;
+    nol.regions = {region_from_pieces(model, {left}, 3, Role::NoLattice, 6.0)};
+    Domain dl(pm, lat), dn(pm, nol);
+    auto pr = d.probe(), ps = session.domain()->probe(), pl = dl.probe(), pn = dn.probe();
+    int skin_past = 0, skin_kept = 0, region_past = 0;
+    for (double past : {0.05, 0.5 * depth, 0.9 * depth})
+      for (double down : {0.01, 0.5 * depth})
+        for (double y : {5.0, 20.0, 35.0}) {
+          const Vec3 out{20 + past, y, 20 - down}, in{20 - past, y, 20 - down};
+          skin_past += !(pr.where(out) == Where{Why::Lattice, 1}) + !(ps.where(out) == Where{Why::Lattice, 1});
+          skin_kept += !(pr.where(in) == Where{Why::ProtectSkin, 7}) + !(ps.where(in) == Where{Why::ProtectSkin, 7});
+          region_past += !(pl.where(out) == Where{Why::NotAsked, 0}) + !(pn.where(out) == Where{Why::Lattice, 0});
+          region_past += !(pl.where(in) == Where{Why::Lattice, 2}) + !(pn.where(in) == Where{Why::NoLattice, 3});
+        }
+    CHECK(skin_past == 0);
+    CHECK(skin_kept == 0);
+    CHECK(region_past == 0);
+    std::printf("face pieces, cut skin: %d points past the cut taken by the skin, %d on the kept side missed, "
+                "%d region answers wrong\n", skin_past, skin_kept, region_past);
+  }
+
   // 6: No lattice on a piece inside Start from All lattice: solid under the piece only.
   {
     DomainSpec s;

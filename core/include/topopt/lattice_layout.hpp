@@ -273,6 +273,10 @@ struct ProtectSkin {
   int id = 0;
   TriangleMesh face;
   double depth_mm = 0.0;
+  // D22: a skin given as pieces (`face` is then their surface, pieces_mesh). The cuts stand
+  // up out of the face: a point is in the skin only if it is within the depth of `face`
+  // AND every cut of at least one piece holds at it. Empty: a skin of whole faces.
+  std::vector<FacePiece> pieces;
 };
 
 // The thinnest strut, in line widths: it follows the NOZZLE (R14).
@@ -463,6 +467,7 @@ class Domain {
   // with them sent as one group (362's measure, 2026-11-13). WHICH skin a point is in is still asked skin by skin.
   struct SkinGroup { double depth_mm = 0.0; TriangleMesh faces; };
   std::vector<SkinGroup> skin_groups_;
+  std::vector<std::size_t> cut_skins_;   // D22: the skins given as pieces with cuts, by index; in no group
   std::vector<Near> near_shell_;   // one per region (empty for a prism), within its depth
   // For a flat region: squares of its face that lie wholly inside its edge, or wholly
   // outside it (the distance to the edge at a square's middle is more than half the
