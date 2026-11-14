@@ -331,6 +331,32 @@ static void test_whole_part() {
   for (int a = 0; a < 3; ++a) CHECK(std::fabs(r.lo[a]) < 1e-6 && std::fabs(r.hi[a] - 16.0) < 1e-6);
 }
 
+// MeshSpec::strut_reach_mm: struts written longer than their bars never leave the part. A 16 mm cube latticed whole
+// with no skin: every strut the cube's faces cut ends in the open (End::Surface), and the mesh stays inside the cube.
+static void test_strut_reach_stays_in_the_part() {
+  PartMeasure pm(weld_mesh(box(16, 16, 16)));
+  DomainSpec s;
+  s.start = Start::AllLattice;
+  s.min_strut_lines = 2.0;
+  Domain d(pm, s);
+  CellSpec cs;
+  cs.algorithm = Algorithm::Uniform;
+  cs.cell_mm = 6.8;
+  Layout layout = lay_cells(d, cs);
+  set_struts(layout, StrutSpec{});
+  const Bars bars = lay_bars(layout, d);   // as laid: the cut ends in the open are kept
+  std::size_t in_air = 0;
+  for (const Bar& b : bars.bars) in_air += (b.end_a == Bar::End::Surface) + (b.end_b == Bar::End::Surface);
+  CHECK(in_air > 0);
+  const OpenSpace open = read_open_space(d, layout, 0.25);
+  MeshReport rep;
+  const TriangleMesh mesh = build_mesh(pm, d, layout, bars, open, MeshSpec{}, &rep);
+  CHECK(rep.ok);
+  const Read r = read_mesh(mesh);
+  for (int a = 0; a < 3; ++a) CHECK(r.lo[a] >= -1e-6 && r.hi[a] <= 16.0 + 1e-6);
+  CHECK(r.edges_not_twice == 0 && r.flat == 0);
+}
+
 // ── his print rules, layer by layer (P8) ─────────────────────────────────────
 static void add_box(MeshSink& s, double x0, double y0, double z0, double x1, double y1, double z1, double shear_x = 0.0) {
   // `shear_x`: the top is moved this far along x (a leaning box).
@@ -728,7 +754,10 @@ static void test_no_crust() {
     // holds). Before the fix: 1,057.11 mm3 kept, in 85 pieces, against the same 1,045.67.
     // With every point that touches the space opened, air or not: 1,034.31, the 11 mm3
     // short taken off the pillar's sides.
-    CHECK(std::fabs(rx.solid_mm3 - none) < 4.0);
+    // S11b (2026-11-14): against solid the file keeps up to one point more solid than the true edge, never less, so
+    // along the skin's inner side and the pillar's sides it now keeps a little more (1,050.34 against the 1,045.67 no
+    // cell holds). The tolerance was 4.0 mm3 when the open space reached half a point past every edge.
+    CHECK(std::fabs(rx.solid_mm3 - none) < 6.0);
     CHECK(rx.solid_pieces == 1);   // the skin and all the rest, one body
     const Read r = read_mesh(mesh);
     CHECK(r.edges_not_twice == 0 && r.flat == 0 && r.shells == 1);
@@ -828,6 +857,20 @@ static void test_column_changes_down_its_depth() {
     // Every reading point of every cube, 0.5 mm or more inside the part (nearer its surface
     // the writer opens a little past what is held, on purpose: no crust).
     long held = 0, held_solid = 0, unheld = 0, unheld_open = 0, changed = 0, changed_solid = 0;
+    long held_solid_far = 0;   // held, solid in the file, and farther than 0.3 mm from any solid (S11b allows none)
+    // Is there solid (inside the part, lattice of no region) within `r` of p? Read on a 0.05 mm grid in the ball.
+    auto solid_within = [&](const Vec3& p, double r) {
+      const int m = static_cast<int>(std::ceil(r / 0.05));
+      for (int z = -m; z <= m; ++z)
+        for (int y = -m; y <= m; ++y)
+          for (int x = -m; x <= m; ++x) {
+            const double dx = x * 0.05, dy = y * 0.05, dz = z * 0.05;
+            if (dx * dx + dy * dy + dz * dz > r * r) continue;
+            const Why w = probe.where({p.x + dx, p.y + dy, p.z + dz}).why;
+            if (w != Why::Lattice && w != Why::Outside) return true;
+          }
+      return false;
+    };
     for (const Cell& c : l.layout.cells) {
       const Frame& f = l.layout.frames[static_cast<std::size_t>(c.frame)];
       const int k = std::max(1, static_cast<int>(std::ceil(c.size / 0.25 - 1e-9)));
@@ -842,7 +885,10 @@ static void test_column_changes_down_its_depth() {
             const bool solid_here = !open_at(c.frame, c.lo[0] + (i + 0.5) * h, c.lo[1] + (j + 0.5) * h, c.lo[2] + (z + 0.5) * h);
             if (any) {
               ++held;
-              if (solid_here) ++held_solid;
+              if (solid_here) {
+                ++held_solid;
+                if (!solid_within(p, 0.3)) ++held_solid_far;
+              }
             } else {
               ++unheld;
               if (!solid_here) ++unheld_open;
@@ -863,8 +909,17 @@ static void test_column_changes_down_its_depth() {
     CHECK(changed > 100);          // the case is really there
     // Before the fix, read at mid-depth only: 5,600 such points left solid under the pocket,
     // 6,456 with the skin.
-    CHECK(changed_solid == 0);     // and is open where the cell holds it
-    CHECK(held_solid == 0);        // open exactly where lattice,
+    if (!skinned) {
+      CHECK(changed_solid == 0);   // and is open where the cell holds it
+      CHECK(held_solid == 0);      // open exactly where lattice,
+    } else {
+      // S11b (2026-11-14): against solid the file keeps up to one point more solid than the true edge. Beside the
+      // skin a held point may be solid in the file, but only within 0.3 mm of solid, and few of them (800 of 399,720
+      // when the rule came in). Was: held_solid == 0 and changed_solid == 0, the exactness S11b gives up on purpose.
+      std::printf("  held and solid in the file: %ld, of them farther than 0.3 mm from solid: %ld\n", held_solid, held_solid_far);
+      CHECK(held_solid_far == 0);
+      CHECK(held_solid * 100 < held);
+    }
     CHECK(unheld_open == 0);       // solid exactly where nothing holds it
   }
 }
@@ -989,6 +1044,46 @@ static void test_open_space_merged() {
   }
 }
 
+// S11b: the file never opens space past the lattice's edge where that edge is against solid. A Protect skin 1 mm
+// deep on the curved wall of the turned block's hole, the whole part latticed: read along the wall's normals, the
+// skin in the mesh is nowhere thinner than its depth (with the step off, an opened point reached into it).
+static void test_skin_never_thinned() {
+  const Holed hb = holed_block();
+  PartMeasure pm(weld_mesh(hb.part));
+  DomainSpec s;
+  s.start = Start::AllLattice;
+  s.min_strut_lines = 2.0;
+  const double skin = 1.0;
+  s.protect.push_back({1, hb.wall, skin});
+  Domain d(pm, s);
+  CellSpec cs;
+  cs.algorithm = Algorithm::Uniform;
+  cs.cell_mm = 5.0;
+  const Laid l = lay(d, cs);
+  const double kPi = 3.14159265358979323846;
+  int thin[2] = {0, 0}, asked = 0;
+  for (int on = 0; on < 2; ++on) {
+    const OpenSpace open = read_open_space(d, l.layout, 0.25, 0, nullptr, true, on == 1);
+    MeshSpec ms;
+    ms.grow_mm = 0.001;
+    MeshReport rep;
+    const TriangleMesh mesh = build_mesh(pm, d, l.layout, Bars{}, open, ms, &rep);   // the solid alone
+    CHECK(rep.ok);
+    const PartMeasure m(weld_mesh(mesh));
+    const PartMeasure::Probe in = m.probe();
+    asked = 0;
+    for (int a = 0; a < 360; ++a)
+      for (int h = 1; h < 12; ++h) {
+        const double t = 2.0 * kPi * (a + 0.5) / 360.0, r = kHoledRadius + skin - 0.02;
+        ++asked;
+        thin[on] += !in.inside(turned(r * std::cos(t), r * std::sin(t), 0.5 * h));
+      }
+  }
+  std::printf("skin never thinned: %d of %d points 0.02 mm inside the skin's depth are empty with the step off, %d with it on\n",
+              thin[0], asked, thin[1]);
+  CHECK(thin[1] == 0);
+}
+
 int main() {
   if (!mesh_available()) {
     MeshReport rep;
@@ -1001,6 +1096,8 @@ int main() {
   }
   test_block();
   test_whole_part();
+  test_strut_reach_stays_in_the_part();
+  test_skin_never_thinned();
   test_no_crust();
   test_column_changes_down_its_depth();
   test_open_space_merged();

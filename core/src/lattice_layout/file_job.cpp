@@ -446,6 +446,7 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     r.pieces = out.pieces.pieces;
     r.adrift = out.pieces.adrift;
     r.stepped_edges = out.stepped_edges.size();
+    r.thin_solid = out.thin_solid;
     r.floor_cell_mm = out.layout.floor_cell_mm;
     r.min_strut_mm = out.layout.min_strut_mm;
     r.open_look = out.layout.open_look;
@@ -616,10 +617,11 @@ std::string file_result_json(const FileResult& r) {
   std::snprintf(b, sizeof b,
                 "  \"layout\": {\"cells\": %llu, \"solid_pieces\": %llu, \"bars\": %llu, "
                 "\"at_one_line\": %llu, \"at_widest\": %llu, \"stubs\": %llu, \"joined\": %llu, "
-                "\"dropped\": %llu, \"pieces\": %llu, \"adrift\": %llu, \"stepped_edges\": %llu,\n",
+                "\"dropped\": %llu, \"pieces\": %llu, \"adrift\": %llu, \"stepped_edges\": %llu, "
+                "\"thin_solid\": %llu,\n",
                 count(r.cells), count(r.solid_pieces), count(r.bars), count(r.at_one_line),
                 count(r.at_widest), count(r.stubs), count(r.joined), count(r.dropped), count(r.pieces),
-                count(r.adrift), count(r.stepped_edges));
+                count(r.adrift), count(r.stepped_edges), count(r.thin_solid));
   o += b;
   std::snprintf(b, sizeof b,
                 "    \"floor_cell_mm\": %.9g, \"min_strut_mm\": %.9g, \"open_look\": %.9g, "

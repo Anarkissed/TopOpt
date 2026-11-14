@@ -103,6 +103,7 @@ struct FileResult {
   // The layout (the bridge's LatticeLayoutResult counts, under the same names).
   std::size_t cells = 0, solid_pieces = 0, bars = 0, at_one_line = 0, at_widest = 0;
   std::size_t stubs = 0, joined = 0, dropped = 0, pieces = 0, adrift = 0, stepped_edges = 0;
+  std::size_t thin_solid = 0;   // cut cells print rule P8 (f) made solid (Outcome::thin_solid)
   double floor_cell_mm = 0.0, min_strut_mm = 0.0, open_look = 0.0, touch = 0.0;
   std::vector<int> empty_regions;
   // The mesh.

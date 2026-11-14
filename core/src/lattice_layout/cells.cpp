@@ -120,6 +120,11 @@ bool own(const Layout& layout, const Domain::Probe& probe, const Cell& cell, con
 // own and this cell is the first, in layout order, of the cells of other regions whose cube it is in.
 bool takes_in(const Layout& layout, const Domain::Probe& probe, std::size_t cell, const Vec3& p) {
   if (!layout.absorb || !layout.index) return false;
+  // P8 (f): a cube the thin-piece rule made solid stays solid; no cell of another region takes its lattice in.
+  for (std::uint32_t si : layout.thin_solid) {
+    double q[3];
+    if (in_cube(layout, layout.solid[si], p, q)) return false;
+  }
   const CellIndex& ix = *layout.index;
   const auto it = ix.grid.find({static_cast<long long>(std::floor(p.x / ix.pitch)), static_cast<long long>(std::floor(p.y / ix.pitch)),
                                 static_cast<long long>(std::floor(p.z / ix.pitch))});
