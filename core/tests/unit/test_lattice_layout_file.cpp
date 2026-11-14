@@ -5,16 +5,19 @@
 // every way the job can fail ends in one plain line, a refusal word, the right exit code
 // and NO file. Without the Manifold library the job says it cannot, and that is checked.
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <vector>
 #include <fstream>
 #include <sstream>
 #include <string>
 
+#include "topopt/face_overrides.hpp"
 #include "topopt/lattice_layout_file.hpp"
 #include "topopt/stl.hpp"
 
@@ -776,7 +779,375 @@ static void test_cells_by_stress_key() {
   std::remove(path.c_str());
 }
 
+// ── ORGANIC, TRACED, THROUGH THE FILE JOB (S1c) ──────────────────────────────
+// The tensor file (TOTENSOR): it round-trips, and each fault is refused with its reason. The job's keys: region_weave,
+// tensor, organic_spacing_mm, organic_width_mm. A job that names a tensor file that is not one: tensor_unreadable.
+static void test_tensor_file() {
+  const std::string tpath = kTmp + "/lattice_file_tensor.bin";
+  TensorField f;
+  f.origin = {-1.5, 2.25, 0.5};
+  f.spacing = 0.75;
+  f.nx = 3; f.ny = 4; f.nz = 5;
+  for (int n = 0; n < 6 * 60; ++n) f.voigt.push_back(n * 0.25 - 30.0);   // each a float32 exactly
+  CHECK(write_tensor_file(tpath, f));
+  CHECK(bytes(tpath) == 56 + 24 * 60);
+  {
+    TensorField g;
+    std::string why;
+    CHECK(read_tensor_file(tpath, g, &why) && why.empty());
+    CHECK(g.nx == 3 && g.ny == 4 && g.nz == 5 && g.spacing == 0.75 && g.origin.x == -1.5 && g.origin.y == 2.25 &&
+          g.origin.z == 0.5 && g.voigt == f.voigt);
+    // The order within a voxel is TensorField's: voxel (i 1, j 2, k 3)'s xy is the 4th of its six.
+    CHECK(g.voigt[6 * g.index(1, 2, 3) + 3] == f.voigt[6 * ((3 * 4 + 2) * 3 + 1) + 3]);
+  }
+  CHECK(!write_tensor_file(tpath + ".x", TensorField{}));
+  {  // Each fault refused, with its reason; the field given is left as it was.
+    const std::string good = slurp(tpath);
+    const auto refused = [&](std::string bad, const char* words) {
+      const std::string p = kTmp + "/lattice_file_tensor_bad.bin";
+      { std::ofstream o(p, std::ios::binary | std::ios::trunc); o << bad; }
+      TensorField g;
+      g.nx = 9;
+      std::string why;
+      const bool ok = read_tensor_file(p, g, &why);
+      std::remove(p.c_str());
+      if (ok || !has(why, words)) std::printf("  (tensor file: \"%s\", wanted \"%s\")\n", why.c_str(), words);
+      return !ok && has(why, words) && g.nx == 9;
+    };
+    std::string s = good;
+    s[0] = 'X';
+    CHECK(refused(s, "TOTENSOR"));
+    CHECK(refused(slurp(tpath).replace(0, 8, "TODEMAND"), "TOTENSOR"));   // a demand file is not a tensor file
+    s = good;
+    s[8] = 2;
+    CHECK(refused(s, "version 2"));
+    CHECK(refused(good.substr(0, good.size() - 4), "bytes"));
+    CHECK(refused(good + "x", "bytes"));
+    CHECK(refused(good.substr(0, 30), "cut short"));
+    s = good;
+    s[16] = 0;   // ny 0
+    CHECK(refused(s, "no voxels"));
+    s = good;
+    const float nan = std::nanf("");
+    std::memcpy(&s[56 + 4 * 13], &nan, 4);
+    CHECK(refused(s, "not a finite number (voxel 2)"));
+    s = good;
+    const double inf = HUGE_VAL;
+    std::memcpy(&s[48], &inf, 8);
+    CHECK(refused(s, "voxel size"));
+    s = good;
+    std::memcpy(&s[24], &inf, 8);
+    CHECK(refused(s, "corner"));
+    TensorField g;
+    std::string why;
+    CHECK(!read_tensor_file(kTmp + "/no_such_tensor.bin", g, &why) && !why.empty());
+  }
+  // The keys.
+  {
+    const FileJob j = parse_file_job(R"({"mode": "lattice_file", "model": "a.step", "tensor": "stress.tensor",
+      "layout": {"region_ids": [3, 4], "region_no_lattice": [0, 0], "region_depth_mm": [4, 4], "region_expand_mm": [0, 0],
+                 "region_face_counts": [1, 1], "region_faces": [1, 2], "region_weave": [true, 0],
+                 "organic_spacing_mm": 4.5, "organic_width_mm": 1.2}})");
+    CHECK(j.tensor == "stress.tensor" && !j.tensor_field);
+    CHECK(j.settings.regions.size() == 2 && j.settings.regions[0].weave && !j.settings.regions[1].weave);
+    CHECK(j.organic.spacing_mm == 4.5 && j.organic.width_mm == 1.2);
+    const FileJob d = parse_file_job(R"({"mode": "lattice_file", "model": "a.step",
+      "layout": {"region_ids": [3], "region_no_lattice": [0], "region_depth_mm": [4], "region_expand_mm": [0],
+                 "region_face_counts": [1], "region_faces": [1]}})");
+    CHECK(d.tensor.empty() && !d.settings.regions[0].weave && d.organic.spacing_mm == 0.0 && d.organic.width_mm == 0.0);
+    const auto refused = [](const std::string& layout, const char* names, const char* top = "") {
+      const std::string text = std::string(R"({"mode": "lattice_file", "model": "a.step", )") + top +
+                               R"("layout": {"region_ids": [3], "region_no_lattice": [0], "region_depth_mm": [4],
+                               "region_expand_mm": [0], "region_face_counts": [1], "region_faces": [1])" + layout + "}}";
+      try { (void)parse_file_job(text); } catch (const FileJobError& e) {
+        if (!has(e.what(), names)) std::printf("  (refused for \"%s\", wanted %s)\n", e.what(), names);
+        return has(e.what(), names);
+      }
+      std::printf("  (not refused: %s)\n", layout.c_str());
+      return false;
+    };
+    CHECK(refused(R"(, "region_weave": [true, false], "organic_spacing_mm": 4)", "region_weave"));   // wrong length
+    CHECK(refused(R"(, "region_weave": [], "organic_spacing_mm": 4)", "region_weave"));
+    CHECK(refused(R"(, "region_weave": [2], "organic_spacing_mm": 4)", "region_weave"));
+    CHECK(refused(R"(, "region_weave": [true])", "organic_spacing_mm"));                             // no spacing
+    CHECK(refused(R"(, "region_weave": [true], "organic_spacing_mm": 0)", "organic_spacing_mm"));
+    CHECK(refused(R"(, "region_weave": [true], "organic_spacing_mm": -4)", "organic_spacing_mm"));
+    CHECK(refused(R"(, "region_weave": [true], "organic_spacing_mm": "4")", "organic_spacing_mm"));
+    CHECK(refused(R"(, "region_weave": [true], "organic_spacing_mm": 4, "organic_width_mm": -1)", "organic_width_mm"));
+    // Under the thinnest strut (0.45 x 2 = 0.9 mm at the defaults).
+    CHECK(refused(R"(, "region_weave": [true], "organic_spacing_mm": 4, "organic_width_mm": 0.6)", "organic_width_mm"));
+    CHECK(refused(R"(, "organic_spacing_mm": 0)", "organic_spacing_mm"));
+    CHECK(refused("", "tensor", R"("tensor": "../t.bin", )"));
+    CHECK(refused("", "tensor", R"("tensor": "", )"));
+  }
+  {  // From files: a job that names a tensor file that is not one.
+    const std::string job_path = kTmp + "/lattice_file_tensor_job.json";
+    const std::string bad = kTmp + "/lattice_file_bad_tensor.bin";
+    { std::ofstream o(bad, std::ios::binary | std::ios::trunc); o << "not a tensor file"; }
+    { std::ofstream o(job_path, std::ios::binary | std::ios::trunc);
+      o << R"({"mode": "lattice_file", "model": "no_such_part.stl", "tensor": "lattice_file_bad_tensor.bin"})"; }
+    const FileResult r = run_file_job(job_path, kTmp);
+    check_refused(r, "tensor_unreadable", 1, kTmp + "/lattice.stl");
+    CHECK(has(r.detail, "TOTENSOR") && has(slurp(kTmp + "/" + kFileResultName), "\"code\": \"tensor_unreadable\""));
+    for (const std::string& p : {job_path, bad, kTmp + "/" + std::string(kFileResultName)}) std::remove(p.c_str());
+  }
+  std::remove(tpath.c_str());
+}
+
+// Stage 1b's made-up curved pocket (test_organic_traced.cpp, C): a 40 x 14 x 20 block with a half-round pocket
+// (radius 6, axis (20, 14) along z) in its top edge, the weave region 4 mm deep under the pocket's wall; the made-up
+// stress runs round the pocket (10 MPa round its axis, 3 along it, 1 across the wall).
+static TriangleMesh prism_poly(const std::vector<std::array<double, 2>>& xy, double z0, double z1) {
+  const int n = static_cast<int>(xy.size());
+  auto turn = [&](int a, int b, int c) {
+    return (xy[b][0] - xy[a][0]) * (xy[c][1] - xy[a][1]) - (xy[b][1] - xy[a][1]) * (xy[c][0] - xy[a][0]);
+  };
+  std::vector<int> left(n);
+  for (int i = 0; i < n; ++i) left[i] = i;
+  std::vector<std::array<int, 3>> tris;
+  while (left.size() > 3) {
+    bool cut = false;
+    const int m = static_cast<int>(left.size());
+    for (int i = 0; i < m && !cut; ++i) {
+      const int a = left[(i + m - 1) % m], b = left[i], c = left[(i + 1) % m];
+      if (turn(a, b, c) <= 1e-12) continue;
+      bool empty = true;
+      for (int k : left)
+        if (k != a && k != b && k != c && turn(a, b, k) >= -1e-12 && turn(b, c, k) >= -1e-12 && turn(c, a, k) >= -1e-12) empty = false;
+      if (!empty) continue;
+      tris.push_back({a, b, c});
+      left.erase(left.begin() + i);
+      cut = true;
+    }
+    if (!cut) return {};
+  }
+  tris.push_back({left[0], left[1], left[2]});
+  MeshSink s;
+  auto P = [&](int i, double z) { return Vec3{xy[i % n][0], xy[i % n][1], z}; };
+  for (const auto& t : tris) {
+    s.add_triangle(P(t[0], z1), P(t[1], z1), P(t[2], z1));
+    s.add_triangle(P(t[0], z0), P(t[2], z0), P(t[1], z0));
+  }
+  for (int i = 0; i < n; ++i) {
+    s.add_triangle(P(i, z0), P(i + 1, z0), P(i + 1, z1));
+    s.add_triangle(P(i, z0), P(i + 1, z1), P(i, z1));
+  }
+  return s.mesh;
+}
+static TriangleMesh pocket_mesh() {
+  const double H = 14.0, cx = 20.0, R = 6.0;
+  std::vector<std::array<double, 2>> xy = {{0, 0}, {40, 0}, {40, H}, {cx + R, H}};
+  const int N = 48;
+  for (int i = 1; i < N; ++i) {
+    const double t = 3.14159265358979323846 * i / N;
+    xy.push_back({cx + R * std::cos(t), H - R * std::sin(t)});
+  }
+  xy.push_back({cx - R, H});
+  xy.push_back({0, H});
+  return prism_poly(xy, 0, 20);
+}
+static bool on_pocket_wall(const TriangleMesh& m, const std::array<int, 3>& t) {
+  bool all = true, level = true;
+  for (int c = 0; c < 3; ++c) {
+    const Vec3& v = m.vertices[static_cast<std::size_t>(t[c])];
+    all = all && std::fabs(std::hypot(v.x - 20.0, v.y - 14.0) - 6.0) < 1e-4 && v.y < 14.0 + 1e-9;
+    level = level && v.z == m.vertices[static_cast<std::size_t>(t[0])].z;
+  }
+  return all && !level;
+}
+static TensorField hoop_field() {
+  TensorField f;
+  f.spacing = 0.5;
+  f.nx = 80; f.ny = 28; f.nz = 40;
+  f.voigt.assign(6 * static_cast<std::size_t>(f.nx) * f.ny * f.nz, 0.0);
+  for (int k = 0; k < f.nz; ++k)
+    for (int j = 0; j < f.ny; ++j)
+      for (int i = 0; i < f.nx; ++i) {
+        const double x = (i + 0.5) * f.spacing - 20.0, y = (j + 0.5) * f.spacing - 14.0, r = std::hypot(x, y);
+        if (!(r > 1e-9)) continue;
+        const double rx = x / r, ry = y / r, tx = -ry, ty = rx;
+        double* v = &f.voigt[6 * f.index(i, j, k)];
+        v[0] = 10 * tx * tx + rx * rx;
+        v[1] = 10 * ty * ty + ry * ry;
+        v[2] = 3.0;
+        v[3] = 10 * tx * ty + rx * ry;
+      }
+  return f;
+}
+// The mesh as a slicer reads it: corners at one place are one corner; its shells, its edges not used exactly twice.
+static std::pair<std::size_t, std::size_t> shells_and_open(const TriangleMesh& m) {
+  std::map<std::array<double, 3>, int> at;
+  std::vector<int> id(m.vertices.size());
+  for (std::size_t v = 0; v < m.vertices.size(); ++v)
+    id[v] = at.emplace(std::array<double, 3>{m.vertices[v].x, m.vertices[v].y, m.vertices[v].z}, static_cast<int>(at.size())).first->second;
+  std::vector<int> up(at.size());
+  for (std::size_t i = 0; i < up.size(); ++i) up[i] = static_cast<int>(i);
+  auto find = [&](int v) { while (up[static_cast<std::size_t>(v)] != v) v = up[static_cast<std::size_t>(v)] = up[static_cast<std::size_t>(up[static_cast<std::size_t>(v)])]; return v; };
+  std::map<std::pair<int, int>, int> way;
+  for (const auto& t : m.triangles) {
+    const int c[3] = {id[static_cast<std::size_t>(t[0])], id[static_cast<std::size_t>(t[1])], id[static_cast<std::size_t>(t[2])]};
+    for (int q = 0; q < 3; ++q) {
+      ++way[{c[q], c[(q + 1) % 3]}];
+      up[static_cast<std::size_t>(find(c[q]))] = find(c[0]);
+    }
+  }
+  std::size_t open = 0;
+  for (const auto& kv : way) {
+    const auto back = way.find({kv.first.second, kv.first.first});
+    if (kv.second != 1 || back == way.end() || back->second != 1) ++open;
+  }
+  std::map<int, int> roots;
+  for (const auto& t : m.triangles) ++roots[find(id[static_cast<std::size_t>(t[0])])];
+  return {roots.size(), open};
+}
+
+// 2, 3: the pocket as a job: the part an STL with the pocket's wall painted as its own face (the face sidecar), the
+// weave region on it, the tensor file beside the job. The CLI's job makes the file; the weave bars it reports are the
+// bars lay_organic gives directly; the file is one body, open between its struts. Then the refusals of a weave job.
+static void test_organic_job() {
+  const std::string model_path = kTmp + "/lattice_file_pocket.stl";
+  const std::string tensor_path = kTmp + "/lattice_file_pocket.tensor";
+  const std::string job_path = kTmp + "/lattice_file_pocket_job.json";
+  const std::string stl = kTmp + "/pocket_lattice.stl";
+  const std::string result = kTmp + "/" + kFileResultName;
+  std::remove(stl.c_str());
+  write_stl_file(model_path, pocket_mesh());
+  int wall = -1;
+  {
+    std::remove(face_overrides_sidecar_path(model_path).c_str());
+    const StepModel plain = import_part_file_resolved(model_path);
+    FaceOverrides ov;
+    ov.paint_faces.emplace_back();
+    for (std::size_t t = 0; t < plain.mesh.triangles.size(); ++t)
+      if (on_pocket_wall(plain.mesh, plain.mesh.triangles[t])) ov.paint_faces.back().push_back(static_cast<int>(t));
+    CHECK(ov.paint_faces.back().size() == 2 * 48);
+    save_face_overrides(face_overrides_sidecar_path(model_path), ov);
+    wall = plain.face_count;
+  }
+  CHECK(write_tensor_file(tensor_path, hoop_field()));
+  const auto write_job = [&](const std::string& top, const std::string& layout) {
+    std::ofstream f(job_path, std::ios::binary | std::ios::trunc);
+    f << R"({"mode": "lattice_file", "model": "lattice_file_pocket.stl", "output": "pocket_lattice.stl", )" << top
+      << R"("layout": {"region_ids": [1], "region_no_lattice": [0], "region_depth_mm": [4], "region_expand_mm": [0],
+                "region_face_counts": [1], "region_faces": [)" << wall << "]" << layout << "}}";
+  };
+  const std::string weave = R"(, "region_weave": [true], "organic_spacing_mm": 4, "organic_width_mm": 0.9)";
+  // 3: a weave with no stress tensor: refused (OR14), nothing made.
+  write_job("", weave);
+  {
+    const FileResult r = run_file_job(job_path, kTmp);
+    check_refused(r, "no_stress_result", 3, stl);
+    CHECK(has(r.why, "Organic") && has(slurp(result), "\"code\": \"no_stress_result\""));
+  }
+  // 3: no spacing: the job is refused, with the key named.
+  write_job(R"("tensor": "lattice_file_pocket.tensor", )", R"(, "region_weave": [true])");
+  {
+    const FileResult r = run_file_job(job_path, kTmp);
+    check_refused(r, "job_unreadable", 1, stl);
+    CHECK(has(r.detail, "organic_spacing_mm"));
+  }
+  // 2: made.
+  write_job(R"("tensor": "lattice_file_pocket.tensor", )", weave);
+  const FileResult r = run_file_job(job_path, kTmp);
+  if (!mesh_available()) {
+    check_refused(r, "mesh_unavailable", 3, stl);
+  } else {
+    CHECK(r.ok && r.exit_code == 0 && r.file == stl);
+    if (!r.ok) std::printf("  (%s: %s %s)\n", r.code.c_str(), r.why.c_str(), r.detail.c_str());
+    // The bars lay_organic gives directly, from the same part, settings and the field as the file holds it.
+    const FileJob job = parse_file_job(slurp(job_path));
+    TensorField field;
+    CHECK(read_tensor_file(tensor_path, field));
+    Session session(import_part_file_resolved(model_path));
+    const Outcome out = session.lay_organic(job.settings, field, job.organic);
+    std::size_t weave_bars = 0;
+    for (const Bar& b : out.bars.bars) weave_bars += b.region == 1;
+    CHECK(r.weave_regions == 1 && r.cells == 0 && r.strands == out.strands && r.strands > 0);
+    CHECK(r.weave_bars == weave_bars && r.bars == out.bars.bars.size() && weave_bars > 20);
+    const std::string text = slurp(result);
+    CHECK(has(text, "\"weave_regions\": 1, \"strands\": " + std::to_string(out.strands) + ", \"weave_bars\": " +
+                        std::to_string(weave_bars) + ","));
+    CHECK(has(text, "\"organic\": {\"ms_trace\": ") && has(text, "\"run_bands\": ["));
+    // The table is the one shallow_bar_table makes of those bars, with what the layer check did.
+    const ShallowTable t = shallow_bar_table(out.bars, {1}, r.made.left_out_at, r.made.posts);
+    CHECK(r.shallow.bars == t.bars && r.shallow.runs == t.runs && r.shallow.longest_run_mm == t.longest_run_mm && t.bars > 0);
+    // The file: one body, every edge used twice, nothing outside the part; open between the struts.
+    const TriangleMesh mesh = read_stl_file(stl).mesh;
+    const auto [shells, open_edges] = shells_and_open(mesh);
+    const PartMeasure part(weld_mesh(pocket_mesh()));
+    const PartMeasure::Probe pp = part.probe();
+    long outside = 0;
+    for (const Vec3& v : mesh.vertices) outside += pp.depth(v) < -0.01;
+    CHECK(shells == 1 && open_edges == 0 && outside == 0);
+    const PartMeasure file(weld_mesh(mesh));
+    const PartMeasure::Probe fp = file.probe();
+    const Domain::Probe dp = session.domain()->probe();
+    long away = 0, filled = 0;
+    for (double z = 1.0; z < 19.5; z += 0.7)
+      for (double deg = 12; deg < 170; deg += 3.1)
+        for (double rr : {7.0, 8.3, 9.2}) {
+          const double a = deg * 3.14159265358979323846 / 180.0;
+          const Vec3 p{20.0 + rr * std::cos(a), 14.0 - rr * std::sin(a), z};
+          const Where w = dp.where(p);
+          if (!w.lattice() || w.id != 1) continue;
+          bool near = false;
+          for (const Bar& b : out.bars.bars) {
+            const Vec3 d{b.b.x - b.a.x, b.b.y - b.a.y, b.b.z - b.a.z};
+            const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
+            const double s = l2 > 0 ? std::clamp(((p.x - b.a.x) * d.x + (p.y - b.a.y) * d.y + (p.z - b.a.z) * d.z) / l2, 0.0, 1.0) : 0.0;
+            near = near || std::hypot(b.a.x + s * d.x - p.x, std::hypot(b.a.y + s * d.y - p.y, b.a.z + s * d.z - p.z)) < 0.5 * b.width + 0.6;
+          }
+          for (const MeshSpec::Post& q : r.made.posts) near = near || (std::hypot(p.x - q.x, p.y - q.y) < 1.5 && p.z < q.z_top + 1.0);
+          if (near) continue;
+          ++away;
+          filled += fp.inside(p);
+        }
+    CHECK(away > 100 && filled == 0);
+    std::printf("organic job: %zu strands, %zu weave bars (lay_organic directly: %zu); file %zu triangles, %zu shells, %zu open edges; "
+                "%ld points of the region away from the struts, %ld filled; trace %.0f ms, total %.0f ms\n", r.strands, r.weave_bars,
+                weave_bars, mesh.triangles.size(), shells, open_edges, away, filled, r.ms_trace, r.ms_total);
+    std::printf("organic job shallow bars (under 30 degrees): %zu; held at both ends %zu, one %zu, none %zu; %zu whole runs, longest "
+                "%.3f mm\n", r.shallow.bars, r.shallow.held_both, r.shallow.held_one, r.shallow.held_none, r.shallow.runs,
+                r.shallow.longest_run_mm);
+    const char* names[4] = {"to 5 mm", "5 to 10", "10 to 20", "over 20"};
+    for (int k = 0; k < 4; ++k)
+      std::printf("  %-8s %3zu runs: kept %zu, left out %zu, post %zu\n", names[k], r.shallow.bands[k].runs, r.shallow.bands[k].kept,
+                  r.shallow.bands[k].left_out, r.shallow.bands[k].post);
+  }
+  for (const std::string& p : {model_path, face_overrides_sidecar_path(model_path), tensor_path, job_path, stl, result})
+    std::remove(p.c_str());
+}
+
+// 4: a job with no weave region makes the file it made before, byte for byte: the block's job, and the same job with
+// region_weave all false, the organic keys and a stress tensor.
+static void test_no_weave_same_file() {
+  if (!mesh_available()) return;
+  const std::string a = kTmp + "/lattice_file_noweave_a.stl", b = kTmp + "/lattice_file_noweave_b.stl";
+  FileJob plain = parse_file_job(kBlockJob);
+  std::string text = kBlockJob;
+  const std::string at = "\"min_cells_across\": 1";
+  text.replace(text.find(at), at.size(), "\"min_cells_across\": 1, \"region_weave\": [false], \"organic_spacing_mm\": 4, "
+                                         "\"organic_width_mm\": 0");
+  FileJob with = parse_file_job(text);
+  TensorField f;
+  f.spacing = 1.0;
+  f.nx = 30; f.ny = 30; f.nz = 12;
+  f.voigt.assign(6 * 30 * 30 * 12, 0.0);
+  for (std::size_t e = 0; e < 30 * 30 * 12; ++e) f.voigt[6 * e] = 5.0;
+  with.tensor_field = std::make_shared<TensorField>(f);
+  const FileResult x = make_lattice_file(box_model(30, 30, 12), plain, a);
+  const FileResult y = make_lattice_file(box_model(30, 30, 12), with, b);
+  CHECK(x.ok && y.ok && !slurp(a).empty() && slurp(a) == slurp(b));
+  CHECK(y.weave_regions == 0 && y.strands == 0 && y.weave_bars == 0 && y.shallow.bars == 0 && y.ms_trace == 0.0);
+  std::printf("no weave region: the file %zu bytes, the same with the organic keys %d\n", x.file_bytes, slurp(a) == slurp(b) ? 1 : 0);
+  std::remove(a.c_str());
+  std::remove(b.c_str());
+}
+
 int main() {
+  test_tensor_file();
+  test_organic_job();
+  test_no_weave_same_file();
   test_cells_by_stress_key();
   test_by_stress_file();
   test_no_slit_under_solid();

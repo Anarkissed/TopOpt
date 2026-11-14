@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "topopt/lattice_layout.hpp"
+#include "topopt/lattice_layout_file.hpp"
 #include "topopt/lattice_layout_mesh.hpp"
 #include "topopt/lattice_layout_organic.hpp"
 #include "topopt/organic_lattice.hpp"
@@ -528,11 +529,86 @@ static void test_no_weave_is_lay() {
   CHECK(same);
 }
 
+// F (S1c, the file job's shallow-bar table): a WHOLE run is counted once, at its full length, not as its pieces.
+// The field forces one long level run across the pocket: 10 MPa along x, and in the y-z plane 3 and 1 MPa along the two
+// diagonals at 45 degrees, the same everywhere. The x family is the only one lying level (the two diagonal families
+// rise at 45 degrees, steeper than 30), so its curves cross the pocket under its floor as straight level lines, and
+// the diagonal curves that cross them cut each into pieces at joints where exactly two shallow bars (the line's two
+// pieces) meet in line. At 5 mm spacing the line at z 14.75 (y 7.75, from x 11.3 to 28.7, ending in the solid on both
+// sides) is made of several pieces; the table holds it as ONE run of the line's whole length, in the 10 to 20 band.
+static TensorField diagonal_field() {
+  TensorField f;
+  f.spacing = 0.5;
+  f.nx = 80; f.ny = 28; f.nz = 40;
+  f.voigt.assign(6 * static_cast<std::size_t>(f.nx) * f.ny * f.nz, 0.0);
+  for (std::size_t e = 0; e < static_cast<std::size_t>(f.nx) * f.ny * f.nz; ++e) {
+    f.voigt[6 * e + 0] = 10.0;   // xx
+    f.voigt[6 * e + 1] = 2.0;    // yy = 3 c^2 + 1 s^2, c = s = sqrt(1/2)
+    f.voigt[6 * e + 2] = 2.0;    // zz
+    f.voigt[6 * e + 4] = 1.0;    // yz = (3 - 1) c s
+  }
+  return f;
+}
+static void test_whole_run() {
+  const StepModel model = pocket_block();
+  Session session(model);
+  const TensorField field = diagonal_field();
+  const OrganicAsk ask{5.0, 0.9, {0, 0, 1}};
+  const Outcome out = session.lay_organic(pocket_settings(), field, ask);
+  const Domain& d = *session.domain();
+  const std::vector<Strand> strands = trace_strands(d, 1, field, ask);
+  // The line: the traced level strand at z 14.75 across the pocket (straightened to its two ends).
+  const Strand* line = nullptr;
+  for (const Strand& x : strands)
+    if (x.points.size() == 2 && x.points[0].z == x.points[1].z && std::fabs(x.points[0].z - 14.75) < 1e-9 &&
+        dist(x.points[0], x.points[1]) > 15.0)
+      line = &x;
+  CHECK(line != nullptr);
+  if (!line) return;
+  // Its pieces: the shallow bars lying along it (both ends within half a millimetre of it).
+  int pieces = 0;
+  double along = 0.0, longest_piece = 0.0, longest_bar = 0.0;
+  for (const Bar& b : out.bars.bars) {
+    if (b.region != 1 || !bar_is_bridge(b)) continue;
+    longest_bar = std::max(longest_bar, bar_length(b));
+    if (to_segment(b.a, line->points[0], line->points[1]) > 0.5 || to_segment(b.b, line->points[0], line->points[1]) > 0.5) continue;
+    ++pieces;
+    along += bar_length(b);
+    longest_piece = std::max(longest_piece, bar_length(b));
+  }
+  // The table, with what the layer check did (the file made as the file job makes it).
+  const OpenSpace open = read_open_space(d, out.layout, 0.25);
+  PrintableReport rep;
+  const TriangleMesh mesh = build_printable_mesh(session.measure(), d, out.layout, out.bars, open, PrintableSpec{}, &rep);
+  CHECK(rep.mesh.ok && !mesh.empty());
+  const ShallowTable t = shallow_bar_table(out.bars, {1}, rep.drop_at, rep.posts);
+  std::printf("whole run: the level line across the pocket is %.4f mm, laid as %d pieces (longest %.4f) totalling %.4f mm; the table's "
+              "longest run %.4f mm\n", dist(line->points[0], line->points[1]), pieces, longest_piece, along, t.longest_run_mm);
+  std::printf("whole run table: %zu shallow bars (held both %zu, one %zu, none %zu); %zu runs, longest %.4f mm\n", t.bars, t.held_both,
+              t.held_one, t.held_none, t.runs, t.longest_run_mm);
+  const char* names[4] = {"to 5 mm", "5 to 10", "10 to 20", "over 20"};
+  for (int k = 0; k < 4; ++k)
+    std::printf("  %-8s %3zu runs: kept %zu, left out %zu, post %zu\n", names[k], t.bands[k].runs, t.bands[k].kept, t.bands[k].left_out,
+                t.bands[k].post);
+  CHECK(pieces >= 3 && std::fabs(along - dist(line->points[0], line->points[1])) < 0.01);   // in pieces, the whole line
+  CHECK(std::fabs(t.longest_run_mm - along) < 1e-9);     // ONE run, the line's whole length
+  CHECK(t.longest_run_mm > longest_bar + 5.0);          // not any of its pieces, nor any other single bar
+  CHECK(t.bands[2].runs >= 1 && t.bands[3].runs == 0);  // 10 to 20 mm
+  CHECK(t.runs < t.bars);
+  std::size_t banded = 0;
+  for (const ShallowTable::Band& b : t.bands) {
+    banded += b.runs;
+    CHECK(b.kept + b.left_out + b.post == b.runs);
+  }
+  CHECK(banded == t.runs && t.held_both + t.held_one + t.held_none == t.bars);
+}
+
 int main() {
   test_traced_block();
   test_traced_repeat();
   test_no_weave_is_lay();
   test_traced_pocket_and_file();
+  test_whole_run();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }

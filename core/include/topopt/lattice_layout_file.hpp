@@ -16,12 +16,14 @@
 
 #include <atomic>
 #include <cstddef>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 #include "topopt/lattice_layout.hpp"
 #include "topopt/lattice_layout_mesh.hpp"
+#include "topopt/lattice_layout_organic.hpp"
 #include "topopt/mesh.hpp"
 #include "topopt/step.hpp"
 
@@ -77,6 +79,13 @@ struct FileJob {
   // The stress result's file (key "demand"): a bare name, beside the job. Empty: none sent. run_file_job reads it
   // into settings.stress.demand; a caller of make_lattice_file puts the field there itself.
   std::string demand;
+  // Organic, Traced (layout key "region_weave"): the stress tensor's file (key "tensor"), a bare name beside the job,
+  // as "demand". Empty: none sent. run_file_job reads it into `tensor_field`; a caller of make_lattice_file puts the
+  // field there itself. A job with a weave region and no field is refused (no_stress_result, OR14).
+  std::string tensor;
+  std::shared_ptr<const TensorField> tensor_field;
+  // The trace's ask (layout keys "organic_spacing_mm", "organic_width_mm"); read only when a region is a weave.
+  OrganicAsk organic;
   Settings settings;
   FileOptions options;
 };
@@ -90,6 +99,39 @@ inline constexpr int kDemandVersion = 1;
 bool read_demand_file(const std::string& path, DemandField& out, std::string* why = nullptr);
 // Writes one (for tests and tools; the app writes its own). False when the file cannot be written or the field is empty.
 bool write_demand_file(const std::string& path, const DemandField& field);
+
+// THE TENSOR FILE (a stress result for Organic, Traced: the full tensor, so the trace has directions), little-endian:
+//   8 bytes "TOTENSOR", int32 version (1), int32 nx, ny, nz, float64 origin x, y, z, float64 spacing,
+//   then 6 float32 per voxel in core's VoxelGrid order ((k * ny + j) * nx + i), each voxel's six in TensorField's
+//   order: xx, yy, zz, xy, yz, zx, MPa.
+// Reading refuses what read_demand_file refuses (a wrong magic, a version other than 1, a grid of no voxels, a file
+// not exactly the size its grid needs, any number that is not finite, a spacing not above 0); `why` says which.
+inline constexpr int kTensorVersion = 1;
+bool read_tensor_file(const std::string& path, TensorField& out, std::string* why = nullptr);
+// Writes one (for tests and tools). Each value is written as a float32. False when the file cannot be written or the
+// field is empty.
+bool write_tensor_file(const std::string& path, const TensorField& field);
+
+// THE SHALLOW-BAR TABLE of a weave (for the owner's bridge rules, OR8 to OR10): of the bars of `regions` (the weave
+// regions), those lying under 30 degrees (bar_is_bridge), how they are held, and their WHOLE runs.
+//   Held: an end is held when it is Node, Solid or Joined (on another bar or in the solid); Surface and Loose are not.
+//   A whole run: shallow bars chained through joints where EXACTLY two shallow bars end (at one exact point) and they
+//   go on in line within 15 degrees. A shallow bar that chains to nothing is a run of one. A run's length is the sum
+//   of its bars'.
+//   Bands of run length: to 5 mm, over 5 to 10, over 10 to 20, over 20.
+//   What the layer check did with each run (from the file's make-check-make loop): left out when any of its bars was
+//   left out (its lowest point at a place of `drop_at`, read as the file writer reads it); else post when a post's
+//   top is within half the bar's width + 0.5 mm of one of its bars; else kept.
+struct ShallowTable {
+  std::size_t bars = 0;                        // shallow bars of the weave
+  std::size_t held_both = 0, held_one = 0, held_none = 0;
+  std::size_t runs = 0;
+  double longest_run_mm = 0.0;
+  struct Band { std::size_t runs = 0, kept = 0, left_out = 0, post = 0; };
+  Band bands[4];                               // to 5 mm, 5 to 10, 10 to 20, over 20
+};
+ShallowTable shallow_bar_table(const Bars& bars, const std::vector<int>& regions, const std::vector<Vec3>& drop_at,
+                               const std::vector<MeshSpec::Post>& posts);
 
 // A job that cannot be read. what() is the reader's own words (which key, what is wrong).
 class FileJobError : public std::runtime_error {
@@ -125,6 +167,11 @@ struct FileResult {
   bool by_stress = false;
   double reference_mpa = 0.0, highest_mpa = 0.0;
   std::size_t at_light = 0, at_heavy = 0;
+  // Organic, Traced: the weave regions laid, the strands traced for them, the bars of those regions, the trace's time,
+  // and the shallow-bar table (filled once the file is made).
+  std::size_t weave_regions = 0, strands = 0, weave_bars = 0;
+  double ms_trace = 0.0;
+  ShallowTable shallow;
   // The mesh.
   FileReport made;
   // Where the time went, ms.

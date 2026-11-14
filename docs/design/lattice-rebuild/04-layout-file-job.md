@@ -29,7 +29,8 @@ The same upload as any job: the model as `step`, the face sidecar as `faces` whe
   "threads": 0,
   "layout": { },
   "mesh": { },
-  "demand": "stress.bin"
+  "demand": "stress.bin",
+  "tensor": "stress.tensor"
 }
 ```
 
@@ -43,6 +44,7 @@ The same upload as any job: the model as `step`, the face sidecar as `faces` whe
 | `layout` | the lattice settings, below | every default |
 | `mesh` | how the mesh is made, below | every default |
 | `demand` | the stress result for By stress: the name of a file beside the job (a file name only, no folder), in the demand file format below | none: By stress is then refused |
+| `tensor` | **not sent by the app yet**: the stress result for Organic (Traced), the full stress tensor so the trace has directions: the name of a file beside the job (a file name only, no folder), in the tensor file format below | none: a weave region is then refused (`no_stress_result`, OR14) |
 
 A key the job does not know is refused, so a misspelt setting is never quietly dropped. A key that starts with `_` is a comment and is skipped.
 
@@ -96,6 +98,9 @@ Exactly the fields of the bridge's `LatticeLayoutSettings`, under the same names
 | `reference_mpa` | 0 | By stress: the stress at which the lattice is at its heavy end. 0 = the part's own: the `percentile` of the stress in the part's lattice space (R17) |
 | `percentile` | 0.95 | read when `reference_mpa` is 0 |
 | `response` | 1 | By stress: the exponent on stress / reference, held to 0.25 .. 4 |
+| `region_weave` | all false | **not in the bridge's struct yet**: Organic (Traced), per region: true or 1 = the region is filled by the Traced weave (`RegionAsk::weave`), not by cells. Not as long as `region_ids`: refused (`job_unreadable`). With any true the job runs `Session::lay_organic` in place of `lay`, and needs `tensor` |
+| `organic_spacing_mm` | none | Organic: the distance between neighbouring strands, mm, above 0 (`OrganicAsk::spacing_mm`; the tracer raises it to its print and resolution floors where they bind). Needed when a region is a weave: without it the job is refused (`job_unreadable`, the key named) |
+| `organic_width_mm` | 0 | Organic: the strut diameter, mm (`OrganicAsk::width_mm`); 0 = the thinnest strut (`bead_mm` x `min_strut_lines`). Under 0, or above 0 and under the thinnest strut: refused (`job_unreadable`) |
 
 The file matches the preview only if these are the values the preview was laid with.
 
@@ -124,6 +129,7 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
              "stubs": 0, "joined": 0, "dropped": 60, "pieces": 1, "adrift": 0, "stepped_edges": 1, "thin_solid": 0, "cells_by_stress": false,
              "floor_cell_mm": 2.37, "min_strut_mm": 0.45, "open_look": 0.19, "touch": 0.354,
              "empty_regions": [],
+             "weave_regions": 0, "strands": 0, "weave_bars": 0,
              "by_stress": false, "reference_mpa": 0, "highest_mpa": 0, "at_light": 0, "at_heavy": 0},
   "mesh": {"triangles": 1640, "mm3": 452.9, "part_mm3": 1000, "struts_mm3": 59.5, "solid_mm3": 398,
            "bars": 36, "bridges": 12, "balls": 14, "bars_left_out": 0, "bars_left_out_mm": 0,
@@ -135,6 +141,12 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
     "one_ended": 0, "longest_bridge_reach_mm": 1.2, "bed_flat": true, "first_layer_mm2": 100,
     "sloped_underside_mm2": 0, "layers": 50, "thin_islands": 0, "thin_layers": 0,
     "found_per_pass": [0], "left_out_at": [], "posts": []},
+  "organic": {"ms_trace": 0, "shallow_bars": 0, "held_both": 0, "held_one": 0, "held_none": 0,
+    "runs": 0, "longest_run_mm": 0, "run_bands": [
+      {"band": "to 5 mm", "runs": 0, "kept": 0, "left_out": 0, "post": 0},
+      {"band": "5 to 10 mm", "runs": 0, "kept": 0, "left_out": 0, "post": 0},
+      {"band": "10 to 20 mm", "runs": 0, "kept": 0, "left_out": 0, "post": 0},
+      {"band": "over 20 mm", "runs": 0, "kept": 0, "left_out": 0, "post": 0}]},
   "ms": {"import": 27, "measure": 0, "read": 9, "cells": 0, "bars": 1, "open_space": 6,
          "carve": 5, "struts": 47, "solid": 1, "finish": 2, "write": 1, "total": 94}
 }
@@ -143,6 +155,7 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
 - `layout` holds the counts the bridge's `LatticeLayoutResult` holds, under the same names (`bars` here is how many).
   `thin_solid`: cut cells print rule P8 (f) made solid (a cut piece thinner than its own strut, lying against solid); they are counted in `solid_pieces` too.
   `cells_by_stress`: cell size by stress (C22) was applied to the layout (false when it was not asked for, or one of its OFF cases holds).
+  `weave_regions`, `strands`, `weave_bars` (Organic, Traced): the weave regions laid, the strands the trace gave for them, and the bars of those regions (in `bars` too). All 0 with no weave region.
   `by_stress`: the struts were graded by stress; then `reference_mpa` is the reference used (the stated one or the part's own), `highest_mpa` the highest stress any cell read in its own cube, `at_light` and `at_heavy` the cells at the light end (no stress) and at the heavy end (at or over the reference). All 0 otherwise.
 - `mesh` is core's `MeshReport`. `mm3` is the plastic in the file; `part_mm3` the solid part's.
 - `print_check` is his print rules measured on the mesh the file holds, layer by layer (0.2 mm layers), the part standing on its lowest face:
@@ -152,6 +165,11 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
   - `left_out_at` ([x, y, z] each): the PLACES the make-check-make loop left struts out at, as it ended (core's `PrintableReport::drop_at`), gathered over all its passes: each mid-air start or one-ended overhang the layer check found, half a layer below it. Every strut whose lowest point is at one of these places is left out, and so is a small separate piece of the solid body that starts there. It is a list of places, not a count and not a list of struts: one place may leave out several struts, or none (`mesh.drop_unanswered` counts those). `posts` ([x, y, z_bottom, z_top] each): short posts added to hold up what leaving out could not fix. The preview can show both after a run.
   - `longest_bridge_reach_mm`: the farthest any bridge reaches past its supports (half its span).
   - `thin_islands`: a count only. Slices of the file about one line thick (a strut lying in an open face, cut in half by it).
+- `organic` (Organic, Traced; all 0 with no weave region): `ms_trace` is the trace's time, ms (every weave region; it is in none of `ms`'s steps, only in its `total`). The rest is THE SHALLOW-BAR TABLE the owner's bridge rules (OR8 to OR10) need, from the weave's bars as laid (`shallow_bar_table` in `lattice_layout_file.hpp`):
+  - `shallow_bars`: the weave's bars lying under 30 degrees (`bar_is_bridge`). `held_both`, `held_one`, `held_none`: how many of their two ends are held (an end is held when it is a node, in the solid, or joined to another bar; an end on the part's surface or loose in the lattice is not).
+  - `runs`: WHOLE runs: shallow bars chained through joints where exactly two shallow bars end at one point and go on in line within 15 degrees (a crossing of two level strands is four, and ends both runs there). A shallow bar that chains to nothing is a run of one. `longest_run_mm`: the longest run, the sum of its bars' lengths.
+  - `run_bands`: the runs by length (to 5 mm, over 5 to 10, over 10 to 20, over 20) and what the layer check did with each run: `left_out` when any of its bars was left out (its lowest point at one of `print_check.left_out_at`, read as the file writer reads it), else `post` when a post's top is within half the bar's width + 0.5 mm of one of its bars, else `kept`.
+  - The table is filled when the mesh was made, so a `would_not_print` refusal carries it too.
 - `ms`: `carve` is the part with the open cells taken out, done once; `struts`, `solid` and `finish` are the LAST pass's (each pass repeats them; `total` is everything).
 - `detail` is the technical message behind a failure, for a log. It is not for the maker.
 - The STL is written beside its target and moved in only when whole. A job that fails leaves no STL, and never replaces an earlier good one with half a file.
@@ -173,6 +191,8 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
 | `would_not_print` | 3 | After 10 tries the lattice still has 2 places that would start printing in mid-air and 1 overhang held at one end only. No file was made. A larger cell or a Protect skin near those places usually fixes it. |
 | `mesh_unavailable` | 3 | The worker on the Mac was built without the part that makes lattice files, so it cannot make one. Update the worker. |
 | `no_stress_result` | 3 | By stress needs a stress result, and none came with this job, so no file was made. Run the stress check first, or pick another density. (Also when the stress result has no stress anywhere in the lattice's space and no reference was stated: R18, never a file at the light end by default.) The same word for cell size by stress (`cells_by_stress`) with no stress result: Cell size by stress needs a stress result, and this job has none, so nothing was made. Send the part's stress result with it, or turn Cell size by stress off. |
+| `no_stress_result` (Organic) | 3 | Organic follows the part's stress, and no stress result came with this job, so no file was made. Run the stress check first. (A region is a weave and no `tensor` came with the job. OR14: nothing is exported from a made-up stress here.) |
+| `tensor_unreadable` | 1 | The stress tensor sent with the lattice job could not be read, so nothing was made. (`detail` says what is wrong with it: not a tensor file, the version, the size, a number that is not finite.) |
 | `demand_unreadable` | 1 | The stress result sent with the lattice job could not be read, so nothing was made. (`detail` says what is wrong with it: not a demand file, the version, the size, a number that is not finite.) |
 | `job_unreadable` | 1 | The lattice job sent to the Mac could not be read, so nothing was made. (`detail` names the key.) |
 | `mesh_failed` | 1 | the mesh maker's own plain line, or: The lattice file could not be put together. Nothing was made. |
@@ -180,7 +200,7 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
 | `cancelled` | 1 | Stopped before the lattice file was finished. Nothing was made. (Only from code that passes a stop flag. On the worker a cancel stops the whole process and the worker reports it itself.) |
 | `error` | 1 | Something went wrong while making the lattice file, and nothing was made. |
 
-The checks run in this order: the stress result (when the job names one) reads; the model opens; it has a surface; every region and Protect skin has at least one face that is the part's; By stress has a stress result; the type is a strut type; cell size by stress has a stress result; the worker can make meshes; the part is closed; the layout has cells; By stress has a reference; the layout has struts.
+The checks run in this order: the stress result (when the job names one) reads; the stress tensor (when the job names one) reads; the model opens; it has a surface; every region and Protect skin has at least one face that is the part's; By stress has a stress result; a weave has a stress tensor; the type is a strut type; cell size by stress has a stress result; the worker can make meshes; the part is closed; the layout has cells; By stress has a reference; the layout has struts.
 
 ## The demand file (a stress result, for By stress)
 
@@ -198,6 +218,38 @@ Little-endian, no padding:
 Voxel (i, j, k) is the cube from corner + edge x (i, j, k) to corner + edge x (i+1, j+1, k+1). The file is exactly 56 + 4 nx ny nz bytes. It is refused (`demand_unreadable`) when it does not start with `TODEMAND`, its version is not 1, its grid has no voxels, it is not exactly that size, or any number in it is not finite (or the edge is not above 0). Code: `read_demand_file`, `write_demand_file` in `lattice_layout_file.hpp`.
 
 A cell's stress is the highest value among the voxels its cube shares volume with (R16); a turned cell's cube is read as the axis-aligned box round its eight corners. Cell size by stress (`cells_by_stress`, C22) reads the same file.
+
+## The tensor file (the stress tensor, for Organic)
+
+Little-endian, no padding; the demand file's header with its own magic:
+
+| Bytes | What |
+|---|---|
+| 8 | `TOTENSOR` |
+| 4 | int32 version: 1 |
+| 4 x 3 | int32 nx, ny, nz: voxels along x, y, z |
+| 8 x 3 | float64 the grid's low corner x, y, z, mm, in the part's own coordinates |
+| 8 | float64 the voxel edge, mm |
+| 24 x nx ny nz | six float32 per voxel, in core's VoxelGrid order (index (k ny + j) nx + i); each voxel's six in `TensorField`'s order: xx, yy, zz, xy, yz, zx, MPa, true shear (not engineering); all 0 where the solve had no material |
+
+The file is exactly 56 + 24 nx ny nz bytes. It is refused (`tensor_unreadable`) when it does not start with `TOTENSOR`, its version is not 1, its grid has no voxels, it is not exactly that size, or any number in it is not finite (or the edge is not above 0). Code: `read_tensor_file`, `write_tensor_file` in `lattice_layout_file.hpp`. The trace reads it as `TensorField` (`lattice_layout_organic.hpp`): the candidate voxels are those whose centre is lattice of the weave region.
+
+A weave job (made-up numbers): lattice 4 mm deep under face 7, filled by the weave, strands 4 mm apart at the thinnest strut, the tensor file beside the job:
+
+```json
+{
+  "mode": "lattice_file",
+  "model": "wing.step",
+  "tensor": "wing.tensor",
+  "layout": {
+    "region_ids": [1], "region_no_lattice": [0], "region_depth_mm": [4], "region_expand_mm": [0],
+    "region_face_counts": [1], "region_faces": [7],
+    "region_weave": [true], "organic_spacing_mm": 4, "organic_width_mm": 0
+  }
+}
+```
+
+A job with no weave region makes the same file it made before these keys, byte for byte (the organic keys and a tensor file are read and not used).
 
 ## A worked example
 

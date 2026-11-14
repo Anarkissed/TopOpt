@@ -1089,6 +1089,10 @@ struct Outcome {
   // The one stress reference resolved for this lay (the stated one or the part's own), read by the cells and the
   // struts alike; 0 when neither asked for one (no field, or neither by stress) or the part's own is 0.
   double stress_reference_mpa = 0.0;
+  // Organic, Traced (lay_organic only; 0 from lay() and lay_weave()): the strands traced for the weave regions, and the
+  // time the trace took, ms (trace_strands, every weave region).
+  std::size_t strands = 0;
+  double ms_trace = 0.0;
 };
 
 class Session {

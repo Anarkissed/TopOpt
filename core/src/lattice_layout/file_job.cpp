@@ -2,6 +2,8 @@
 // docs/design/lattice-rebuild/04-layout-file-job.md.
 #include "topopt/lattice_layout_file.hpp"
 
+#include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -10,6 +12,7 @@
 #include <memory>
 #include <exception>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <utility>
 
@@ -112,7 +115,8 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "per_region", "dial", "dial_region", "dial_value", "strut_width_mm", "allow_quilt",
        "strength", "small_cells_in_thin_walls", "one_grid", "cells_by_stress", "bars", "join_loose", "skin",
        "skin_width_mm", "skin_reach_cells", "drop_loose", "by_stress", "dial_light", "dial_heavy", "width_light_mm",
-       "width_heavy_mm", "reference_mpa", "percentile", "response"},
+       "width_heavy_mm", "reference_mpa", "percentile", "response", "region_weave", "organic_spacing_mm",
+       "organic_width_mm"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -131,6 +135,10 @@ Settings settings_from(const json::Value& in, const std::string& w) {
   if (no_lattice.size() != nr || depth.size() != nr || expand.size() != nr || counts.size() != nr)
     json::fail(w, "the region lists (region_ids, region_no_lattice, region_depth_mm, "
                   "region_expand_mm, region_face_counts) are not all one length");
+  // Organic, Traced: which regions are filled by the weave. Absent: none.
+  const std::vector<bool> weave = flags(in, "region_weave", w);
+  if (json::find(in, "region_weave") && weave.size() != nr)
+    json::fail(w + ".region_weave", "is not as long as region_ids (one true or false for each region)");
   const auto rf = unflatten(counts, wholes(in, "region_faces", w), w + ".region_faces");
   for (std::size_t r = 0; r < nr; ++r) {
     Settings::RegionAsk a;
@@ -139,6 +147,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
     a.faces = rf[r];
     a.depth_mm = depth[r];
     a.expand_mm = expand[r];
+    a.weave = !weave.empty() && weave[r];
     s.regions.push_back(std::move(a));
   }
   const std::vector<int> pids = wholes(in, "protect_ids", w);
@@ -198,6 +207,32 @@ Settings settings_from(const json::Value& in, const std::string& w) {
   return s;
 }
 
+// Organic, Traced: the trace's ask, from the layout object (its keys are let through by settings_from). The spacing is
+// needed when any region is a weave; the width is 0 (the thinnest strut) or at least the thinnest strut.
+OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::string& w) {
+  OrganicAsk a;
+  bool any_weave = false;
+  for (const Settings::RegionAsk& r : s.regions) any_weave = any_weave || r.weave;
+  const bool has_spacing = json::find(in, "organic_spacing_mm") != nullptr;
+  a.spacing_mm = num(in, "organic_spacing_mm", 0.0, w);
+  a.width_mm = num(in, "organic_width_mm", 0.0, w);
+  if (has_spacing && !(std::isfinite(a.spacing_mm) && a.spacing_mm > 0.0))
+    json::fail(w + ".organic_spacing_mm", "must be above 0");
+  if (any_weave && !has_spacing)
+    json::fail(w + ".organic_spacing_mm", "is needed when a region is filled by the weave (region_weave): the distance "
+                                          "between neighbouring strands, mm");
+  const double thinnest = s.bead_mm * s.min_strut_lines;
+  if (!(std::isfinite(a.width_mm) && a.width_mm >= 0.0))
+    json::fail(w + ".organic_width_mm", "must be 0 (the thinnest strut) or more");
+  if (a.width_mm > 0.0 && a.width_mm < thinnest) {
+    char b[160];
+    std::snprintf(b, sizeof b, "is under the thinnest strut (%.9g mm: bead_mm x min_strut_lines); 0 gives the thinnest",
+                  thinnest);
+    json::fail(w + ".organic_width_mm", b);
+  }
+  return a;
+}
+
 FileOptions options_from(const json::Value& in, const std::string& w) {
   json::reject_unknown(in,
                        {"pitch_mm", "bar_sides", "block_mm", "grow_mm", "clean_mm", "part_mm",
@@ -252,6 +287,8 @@ constexpr Refusal kWouldNotPrint{"would_not_print", 3};
 constexpr Refusal kNoStress{"no_stress_result", 3};
 // The stress result sent with the job could not be read (missing, or not a demand file).
 constexpr Refusal kDemandUnreadable{"demand_unreadable", 1};
+// The tensor file sent with the job (Organic, Traced) could not be read.
+constexpr Refusal kTensorUnreadable{"tensor_unreadable", 1};
 constexpr Refusal kCannotWrite{"cannot_write", 1};
 constexpr Refusal kCancelled{"cancelled", 1};
 constexpr Refusal kError{"error", 1};
@@ -456,12 +493,168 @@ bool write_demand_file(const std::string& path, const DemandField& field) {
   return static_cast<bool>(f);
 }
 
+// ── THE TENSOR FILE ───────────────────────────────────────────────────────────
+namespace {
+constexpr char kTensorMagic[8] = {'T', 'O', 'T', 'E', 'N', 'S', 'O', 'R'};
+constexpr std::size_t kTensorHead = kDemandHead;   // the same 56 bytes before the values
+}  // namespace
+
+bool read_tensor_file(const std::string& path, TensorField& out, std::string* why) {
+  const auto no = [&](const std::string& reason) {
+    if (why) *why = reason;
+    return false;
+  };
+  std::ifstream f(path, std::ios::binary);
+  if (!f) return no("cannot open " + path);
+  std::ostringstream all;
+  all << f.rdbuf();
+  const std::string bytes = all.str();
+  const auto* p = reinterpret_cast<const unsigned char*>(bytes.data());
+  if (bytes.size() < 8 || std::memcmp(p, kTensorMagic, 8) != 0)
+    return no("not a stress tensor file (it does not start with TOTENSOR)");
+  if (bytes.size() < kTensorHead) return no("the stress tensor file is cut short");
+  const std::int32_t version = i32_at(p + 8);
+  if (version != kTensorVersion)
+    return no("the stress tensor file is version " + std::to_string(version) + ", and only version 1 can be read");
+  const std::int32_t nx = i32_at(p + 12), ny = i32_at(p + 16), nz = i32_at(p + 20);
+  if (nx <= 0 || ny <= 0 || nz <= 0) return no("the stress tensor's grid has no voxels");
+  const std::uint64_t n = static_cast<std::uint64_t>(nx) * static_cast<std::uint64_t>(ny) * static_cast<std::uint64_t>(nz);
+  if (bytes.size() != kTensorHead + 24 * n)
+    return no("the stress tensor file is " + std::to_string(bytes.size()) + " bytes, and its grid needs " +
+              std::to_string(kTensorHead + 24 * n));
+  TensorField t;
+  t.nx = nx; t.ny = ny; t.nz = nz;
+  t.origin = {f64_at(p + 24), f64_at(p + 32), f64_at(p + 40)};
+  t.spacing = f64_at(p + 48);
+  if (!std::isfinite(t.origin.x) || !std::isfinite(t.origin.y) || !std::isfinite(t.origin.z))
+    return no("the stress tensor's grid corner is not a finite number");
+  if (!std::isfinite(t.spacing) || !(t.spacing > 0.0)) return no("the stress tensor's voxel size is not a number above 0");
+  t.voigt.resize(static_cast<std::size_t>(6 * n));
+  for (std::size_t i = 0; i < t.voigt.size(); ++i) {
+    const float v = f32_at(p + kTensorHead + 4 * i);
+    if (!std::isfinite(v))
+      return no("the stress tensor holds a value that is not a finite number (voxel " + std::to_string(i / 6) + ")");
+    t.voigt[i] = v;
+  }
+  out = std::move(t);
+  return true;
+}
+
+bool write_tensor_file(const std::string& path, const TensorField& field) {
+  if (field.empty()) return false;
+  std::string o(kTensorMagic, 8);
+  put_u32(o, static_cast<std::uint32_t>(kTensorVersion));
+  for (int n : {field.nx, field.ny, field.nz}) put_u32(o, static_cast<std::uint32_t>(n));
+  for (double v : {field.origin.x, field.origin.y, field.origin.z, field.spacing}) {
+    std::uint64_t u;
+    std::memcpy(&u, &v, 8);
+    put_u64(o, u);
+  }
+  for (double d : field.voigt) {
+    const float v = static_cast<float>(d);
+    std::uint32_t u;
+    std::memcpy(&u, &v, 4);
+    put_u32(o, u);
+  }
+  std::ofstream f(path, std::ios::binary | std::ios::trunc);
+  f.write(o.data(), static_cast<std::streamsize>(o.size()));
+  f.close();
+  return static_cast<bool>(f);
+}
+
+// ── THE SHALLOW-BAR TABLE ─────────────────────────────────────────────────────
+ShallowTable shallow_bar_table(const Bars& all, const std::vector<int>& regions, const std::vector<Vec3>& drop_at,
+                               const std::vector<MeshSpec::Post>& posts) {
+  ShallowTable t;
+  const auto length = [](const Bar& b) {
+    return std::sqrt((b.b.x - b.a.x) * (b.b.x - b.a.x) + (b.b.y - b.a.y) * (b.b.y - b.a.y) + (b.b.z - b.a.z) * (b.b.z - b.a.z));
+  };
+  const auto to_segment = [](const Vec3& p, const Vec3& a, const Vec3& b) {
+    const Vec3 d{b.x - a.x, b.y - a.y, b.z - a.z};
+    const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
+    const double s = l2 > 0.0 ? std::clamp(((p.x - a.x) * d.x + (p.y - a.y) * d.y + (p.z - a.z) * d.z) / l2, 0.0, 1.0) : 0.0;
+    const double ex = a.x + s * d.x - p.x, ey = a.y + s * d.y - p.y, ez = a.z + s * d.z - p.z;
+    return std::sqrt(ex * ex + ey * ey + ez * ez);
+  };
+  const auto holds = [](Bar::End e) { return e == Bar::End::Node || e == Bar::End::Solid || e == Bar::End::Joined; };
+  // The shallow bars of the weave, in bar order.
+  std::vector<const Bar*> sb;
+  for (const Bar& b : all.bars)
+    if (std::find(regions.begin(), regions.end(), b.region) != regions.end() && bar_is_bridge(b)) sb.push_back(&b);
+  t.bars = sb.size();
+  for (const Bar* b : sb) {
+    const int h = holds(b->end_a) + holds(b->end_b);
+    (h == 2 ? t.held_both : h == 1 ? t.held_one : t.held_none) += 1;
+  }
+  // The joints: the shallow bars' ends, by exact point.
+  using Key = std::array<double, 3>;
+  std::map<Key, std::vector<std::pair<std::size_t, int>>> at;   // (shallow bar, which end: 0 a, 1 b)
+  for (std::size_t i = 0; i < sb.size(); ++i) {
+    at[{sb[i]->a.x, sb[i]->a.y, sb[i]->a.z}].push_back({i, 0});
+    at[{sb[i]->b.x, sb[i]->b.y, sb[i]->b.z}].push_back({i, 1});
+  }
+  // Chained through a joint of exactly two shallow bars, in line within 15 degrees.
+  std::vector<std::size_t> up(sb.size());
+  for (std::size_t i = 0; i < up.size(); ++i) up[i] = i;
+  const auto find = [&](std::size_t v) {
+    while (up[v] != v) v = up[v] = up[up[v]];
+    return v;
+  };
+  const double in_line = std::cos(15.0 * 3.14159265358979323846 / 180.0);
+  for (const auto& kv : at) {
+    if (kv.second.size() != 2) continue;
+    const auto [i, ei] = kv.second[0];
+    const auto [j, ej] = kv.second[1];
+    if (i == j) continue;
+    // Into the joint along bar i, and out of it along bar j.
+    const Vec3& p = ei ? sb[i]->b : sb[i]->a;
+    const Vec3& pi = ei ? sb[i]->a : sb[i]->b;
+    const Vec3& pj = ej ? sb[j]->a : sb[j]->b;
+    const Vec3 u{p.x - pi.x, p.y - pi.y, p.z - pi.z}, v{pj.x - p.x, pj.y - p.y, pj.z - p.z};
+    const double lu = std::sqrt(u.x * u.x + u.y * u.y + u.z * u.z), lv = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+    if (!(lu > 0.0) || !(lv > 0.0)) continue;
+    if ((u.x * v.x + u.y * v.y + u.z * v.z) / (lu * lv) >= in_line) up[find(i)] = find(j);
+  }
+  // Each run: its length and what the layer check did with it.
+  const auto left_out = [&](const Bar& x) {   // as the file writer leaves a bar out (solid_mesh.cpp)
+    const double r = 0.5 * x.width;
+    for (const Vec3& s : drop_at) {
+      if (std::fabs(std::min(x.a.z, x.b.z) - r - s.z) > 0.45) continue;
+      if (to_segment(s, x.a, x.b) < r + 0.35) return true;
+    }
+    return false;
+  };
+  const auto under_post = [&](const Bar& x) {
+    for (const MeshSpec::Post& q : posts)
+      if (to_segment(Vec3{q.x, q.y, q.z_top}, x.a, x.b) < 0.5 * x.width + 0.5) return true;
+    return false;
+  };
+  struct Run { double mm = 0.0; bool out = false, post = false; };
+  std::map<std::size_t, Run> runs;
+  for (std::size_t i = 0; i < sb.size(); ++i) {
+    Run& r = runs[find(i)];
+    r.mm += length(*sb[i]);
+    r.out = r.out || left_out(*sb[i]);
+    r.post = r.post || under_post(*sb[i]);
+  }
+  t.runs = runs.size();
+  for (const auto& kv : runs) {
+    const Run& r = kv.second;
+    t.longest_run_mm = std::max(t.longest_run_mm, r.mm);
+    ShallowTable::Band& b = t.bands[r.mm <= 5.0 ? 0 : r.mm <= 10.0 ? 1 : r.mm <= 20.0 ? 2 : 3];
+    ++b.runs;
+    (r.out ? b.left_out : r.post ? b.post : b.kept) += 1;
+  }
+  return t;
+}
+
 FileJob parse_file_job(const std::string& json_text) {
   try {
     const json::Value doc = json::parse(json_text, "job.json");
     const std::string w = "job.json";
     json::as_object(doc, w);
-    json::reject_unknown(doc, {"mode", "model", "output", "linear_deflection", "threads", "layout", "mesh", "demand"},
+    json::reject_unknown(doc, {"mode", "model", "output", "linear_deflection", "threads", "layout", "mesh", "demand",
+                               "tensor"},
                          w);
     const std::string mode = json::as_string(json::require(doc, "mode", w), w + ".mode");
     if (mode != "lattice_file") json::fail(w + ".mode", "must be \"lattice_file\", not \"" + mode + "\"");
@@ -482,8 +675,17 @@ FileJob parse_file_job(const std::string& json_text) {
           job.demand.find_first_of("/\\") != std::string::npos)
         json::fail(w + ".demand", "must be a file name with no folder in it");
     }
-    if (const json::Value* v = json::find(doc, "layout"))
+    // The stress tensor (Organic, Traced): a file beside the job, by its bare name.
+    if (json::find(doc, "tensor")) {
+      job.tensor = text(doc, "tensor", "", w);
+      if (job.tensor.empty() || job.tensor == "." || job.tensor == ".." ||
+          job.tensor.find_first_of("/\\") != std::string::npos)
+        json::fail(w + ".tensor", "must be a file name with no folder in it");
+    }
+    if (const json::Value* v = json::find(doc, "layout")) {
       job.settings = settings_from(json::as_object(*v, w + ".layout"), w + ".layout");
+      job.organic = organic_from(*v, job.settings, w + ".layout");
+    }
     if (const json::Value* v = json::find(doc, "mesh"))
       job.options = options_from(json::as_object(*v, w + ".mesh"), w + ".mesh");
     job.options.threads = whole(doc, "threads", 0, w);
@@ -539,6 +741,15 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     if (by_stress && (!job.settings.stress.demand || job.settings.stress.demand->empty()) &&
         (!job.settings.struts.demand || job.settings.struts.demand->empty()))
       return no_stress();
+    // OR14: the weave is traced from the part's own stress, never from a made-up one here.
+    bool any_weave = false;
+    for (const Settings::RegionAsk& a : job.settings.regions) any_weave = any_weave || a.weave;
+    if (any_weave && (!job.tensor_field || job.tensor_field->empty())) {
+      refuse(r, kNoStress,
+             "Organic follows the part's stress, and no stress result came with this job, so no file was made. Run the "
+             "stress check first.");
+      return done();
+    }
     if (lattice_topology_is_sheet(job.settings.cells.topology)) {
       refuse(r, kTypeNotSupported,
              "This lattice type is made of sheets, and a lattice file can only be made from the "
@@ -572,7 +783,9 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     }
 
     say(said, "laying the lattice");
-    const Outcome out = session.lay(job.settings, job.options.threads, stop);
+    const Outcome out = any_weave ? session.lay_organic(job.settings, *job.tensor_field, job.organic,
+                                                        job.options.threads, stop)
+                                  : session.lay(job.settings, job.options.threads, stop);
     if (out.cancelled) {
       refuse(r, kCancelled, "Stopped before the lattice file was finished. Nothing was made.");
       return done();
@@ -603,6 +816,13 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     r.highest_mpa = out.struts.highest_mpa;
     r.at_light = out.struts.at_light;
     r.at_heavy = out.struts.at_heavy;
+    std::vector<int> weave_regions;
+    for (const Layout::Weave& w : out.layout.weave) weave_regions.push_back(w.region);
+    r.weave_regions = weave_regions.size();
+    r.strands = out.strands;
+    r.ms_trace = out.ms_trace;
+    for (const Bar& b : out.bars.bars)
+      r.weave_bars += std::find(weave_regions.begin(), weave_regions.end(), b.region) != weave_regions.end();
     if (!out.empty_regions.empty()) {
       refuse(r, kRegionFacesMissing, faces_missing("Region", "Regions", out.empty_regions));
       return done();
@@ -630,6 +850,8 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
                                      : r.made.mesh.why);
       return done();
     }
+    if (!weave_regions.empty())
+      r.shallow = shallow_bar_table(out.bars, weave_regions, r.made.left_out_at, r.made.posts);
     if (!r.made.print_clean && !job.options.keep_if_not_clean) {
       const std::size_t mid = r.made.layers.mid_air.size(), one = r.made.layers.one_ended.size(),
                         far = r.made.layers.long_bridges.size();
@@ -719,6 +941,16 @@ FileResult run_file_job(const std::string& job_path, const std::string& out_dir,
       }
       job.settings.stress.demand = std::move(field);
     }
+    if (!job.tensor.empty()) {
+      auto field = std::make_shared<TensorField>();
+      std::string why;
+      if (!read_tensor_file(folder_of(job_path) + "/" + job.tensor, *field, &why)) {
+        refuse(r, kTensorUnreadable,
+               "The stress tensor sent with the lattice job could not be read, so nothing was made.", why);
+        return;
+      }
+      job.tensor_field = std::move(field);
+    }
     const std::string model_path =
         !job.model.empty() && job.model[0] == '/' ? job.model : folder_of(job_path) + "/" + job.model;
     say(said, "opening the part");
@@ -784,6 +1016,9 @@ std::string file_result_json(const FileResult& r) {
                 count(r.adrift), count(r.stepped_edges), count(r.thin_solid),
                 r.cells_by_stress ? "true" : "false");
   o += b;
+  std::snprintf(b, sizeof b, "    \"weave_regions\": %llu, \"strands\": %llu, \"weave_bars\": %llu,\n",
+                count(r.weave_regions), count(r.strands), count(r.weave_bars));
+  o += b;
   std::snprintf(b, sizeof b,
                 "    \"floor_cell_mm\": %.9g, \"min_strut_mm\": %.9g, \"open_look\": %.9g, "
                 "\"touch\": %.9g, \"empty_regions\": [",
@@ -848,6 +1083,24 @@ std::string file_result_json(const FileResult& r) {
     for (std::size_t i = 0; i < r.made.posts.size(); ++i) {
       const MeshSpec::Post& p = r.made.posts[i];
       std::snprintf(b, sizeof b, "%s[%.4f, %.4f, %.4f, %.4f]", i ? ", " : "", p.x, p.y, p.z_bottom, p.z_top);
+      o += b;
+    }
+    o += "]},\n";
+  }
+  {
+    // Organic, Traced: the trace's time and the shallow-bar table (ShallowTable).
+    const ShallowTable& t = r.shallow;
+    std::snprintf(b, sizeof b,
+                  "  \"organic\": {\"ms_trace\": %.1f, \"shallow_bars\": %llu, \"held_both\": %llu, \"held_one\": %llu, "
+                  "\"held_none\": %llu,\n    \"runs\": %llu, \"longest_run_mm\": %.9g, \"run_bands\": [",
+                  r.ms_trace, count(t.bars), count(t.held_both), count(t.held_one), count(t.held_none), count(t.runs),
+                  t.longest_run_mm);
+    o += b;
+    const char* names[4] = {"to 5 mm", "5 to 10 mm", "10 to 20 mm", "over 20 mm"};
+    for (int k = 0; k < 4; ++k) {
+      const ShallowTable::Band& d = t.bands[k];
+      std::snprintf(b, sizeof b, "%s\n      {\"band\": \"%s\", \"runs\": %llu, \"kept\": %llu, \"left_out\": %llu, \"post\": %llu}",
+                    k ? "," : "", names[k], count(d.runs), count(d.kept), count(d.left_out), count(d.post));
       o += b;
     }
     o += "]},\n";

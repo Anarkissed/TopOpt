@@ -3,6 +3,7 @@
 #include "topopt/lattice_layout_organic.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 
@@ -174,13 +175,20 @@ Outcome Session::lay_organic(const Settings& settings, const TensorField& field,
     return none;
   }
   ready_domain(settings);
+  const auto t0 = std::chrono::steady_clock::now();
   std::vector<Strand> strands;
   for (const Region& r : domain_->spec().regions) {
     if (r.role != Role::Lattice || !r.weave) continue;
     std::vector<Strand> traced = trace_strands(*domain_, r.id, field, ask);
     strands.insert(strands.end(), std::make_move_iterator(traced.begin()), std::make_move_iterator(traced.end()));
   }
-  return lay_with(settings, &strands, threads, stop);
+  const double ms_trace = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+  Outcome out = lay_with(settings, &strands, threads, stop);
+  if (!out.cancelled) {
+    out.strands = strands.size();
+    out.ms_trace = ms_trace;
+  }
+  return out;
 }
 
 }  // namespace topopt::lattice_layout
