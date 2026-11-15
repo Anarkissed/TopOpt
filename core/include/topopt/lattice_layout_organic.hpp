@@ -146,12 +146,14 @@ std::vector<Strand> trace_strands(const Domain& domain, int region, const Tensor
 // split_at_crossings, join_loose_bars, drop_loose_bars, drop_adrift_bars, as Session::lay_weave runs them on a weave
 // alone). Every laid segment is counted once: grown = kept + every cut below.
 struct GrowReport {
-  // Seeds (G2): on the floor, one per local spacing; on the walls with walls_out; refused when their turn came.
+  // Seeds (G2): on the floor, 1.15 x the window's lower limit apart; on the walls with walls_out; refused at their first step.
   std::size_t seeds_floor = 0, seeds_wall = 0, seeds_refused_room = 0, seeds_refused_support = 0;
   std::size_t strands_grown = 0, steps = 0, clamped = 0;   // tips grown, steps laid, headings held up to the cone
   // How tips ended (G3 to G5): at the region's edge, on a step with nothing under it, joined into a neighbour.
   std::size_t ended_edge = 0, ended_unsupported = 0, ended_joined = 0;
-  std::size_t crowded_climbed_on = 0;   // crowded, the run to join over 3 mm, not within the lower limit: climbed on
+  std::size_t crowded_climbed_on = 0;   // too dense for the place (G5, rule C), no join to make: climbed on
+  std::size_t joined_dense = 0;         // too dense for the place (G5, rule C): joined into the neighbour, ended there
+  std::size_t leaned = 0;               // steps held to 78 degrees from level (G3, rule F)
   // Branches (G6, G7): offered, grown, refused by cause; a crowded branch with a short run is a link instead.
   std::size_t branches_offered = 0, branches_grown = 0, links = 0;
   std::size_t refused_region = 0, refused_support = 0, refused_crowded = 0, refused_room = 0;

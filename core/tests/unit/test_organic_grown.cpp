@@ -225,7 +225,10 @@ struct Gaps {
   std::size_t under = 0;       // sample places under the lower limit, away from joints
   std::vector<double> nearest; // per strand: its nearest neighbour, away from joints
 };
-static Gaps gaps(const std::vector<Strand>& ss, double lower, double touch) {
+// `forks` (G6, rule E as amended, LatticeReview's ruling of 2026-11-15): a branch is exempt from its parent until it is
+// first `lower` from it, so a strand whose start lies on another (a branch on its parent) is not counted against that
+// parent from its fork to its first point `lower` from it, nor the parent's stretch facing that.
+static Gaps gaps(const std::vector<Strand>& ss, double lower, double touch, bool forks = false) {
   Gaps g;
   g.nearest.assign(ss.size(), 1e300);
   std::vector<std::vector<Vec3>> sm(ss.size());
@@ -234,6 +237,19 @@ static Gaps gaps(const std::vector<Strand>& ss, double lower, double touch) {
     sm[i] = samples(ss[i].points, 0.1);
     box_of(ss[i].points, lo[i], hi[i]);
   }
+  std::vector<int> parent(ss.size(), -1);
+  std::vector<std::size_t> leaving(ss.size(), 0);   // samples of the branch from its fork until it is `lower` clear
+  std::vector<std::vector<Vec3>> stretch(ss.size());
+  if (forks)
+    for (std::size_t a = 0; a < ss.size(); ++a) {
+      for (std::size_t c = 0; c < ss.size() && parent[a] < 0; ++c)
+        if (c != a && to_polyline(ss[a].points.front(), ss[c].points) < 1e-6) parent[a] = static_cast<int>(c);
+      if (parent[a] < 0) continue;
+      std::size_t k = 0;
+      while (k < sm[a].size() && to_polyline(sm[a][k], ss[static_cast<std::size_t>(parent[a])].points) < lower) ++k;
+      leaving[a] = k;
+      stretch[a].assign(sm[a].begin(), sm[a].begin() + static_cast<long>(std::min(k + 1, sm[a].size())));
+    }
   const double reach = 2.0 * 8.0;
   for (std::size_t a = 0; a < ss.size(); ++a)
     for (std::size_t b = 0; b < ss.size(); ++b) {
@@ -244,6 +260,10 @@ static Gaps gaps(const std::vector<Strand>& ss, double lower, double touch) {
       std::vector<double> d(sm[a].size());
       for (std::size_t k = 0; k < sm[a].size(); ++k) d[k] = to_polyline(sm[a][k], ss[b].points);
       for (std::size_t k = 0; k < sm[a].size(); ++k) {
+        if (forks && parent[a] == static_cast<int>(b) && k < leaving[a]) continue;   // the branch leaving its parent
+        if (forks && parent[b] == static_cast<int>(a) && stretch[b].size() >= 2 &&
+            to_polyline(sm[a][k], stretch[b]) <= d[k] + 1e-9)
+          continue;   // the parent's stretch facing it
         bool joint = false;
         for (std::size_t m = 0; m < sm[a].size() && !joint; ++m)
           joint = d[m] < touch && dist(sm[a][m], sm[a][k]) <= lower;
@@ -326,16 +346,20 @@ static void test_uniform_block() {
               g.smallest, far);
   CHECK(g.under == 0 && g.smallest >= 3.0 - kStraightened);
   CHECK(far <= 1.5 * 5.5 && far > 0.0);
-  // No fence at the floor: no two strands start closer than the local spacing.
+  // Re-pinned 2026-11-15 (rule A as amended, LatticeReview's ruling 1): the floor is seeded 1.15 x L apart (L = 3),
+  // whatever the local spacing: about one seed per (1.15 L)^2 of floor, and no two strands start closer than that
+  // stride, less the two roots' run-in (each runs back into the solid by its width along a heading of 78 degrees).
+  const double stride = 1.15 * 3.0, run_in = 0.9 * std::cos(78.0 * 3.14159265358979323846 / 180.0);
   std::size_t fence = 0;
   for (std::size_t i = 0; i < ss.size(); ++i)
     for (std::size_t j = i + 1; j < ss.size(); ++j)
       if (ss[i].points.front().z < 3.5 && ss[j].points.front().z < 3.5 &&
           std::hypot(ss[i].points.front().x - ss[j].points.front().x, ss[i].points.front().y - ss[j].points.front().y) <
-              5.5 - 1e-6)
+              stride - 2.0 * run_in - 1e-6)
         ++fence;
+  std::printf("G-1 floor seeds %zu (about %.0f at one per (1.15 L)^2)\n", rep.seeds_floor, 24.0 * 24.0 / (stride * stride));
   CHECK(fence == 0);
-  CHECK(rep.seeds_floor <= static_cast<std::size_t>(std::ceil(24.0 / 5.5) * std::ceil(24.0 / 5.5)) + 1);
+  CHECK(rep.seeds_floor >= 0.9 * 24.0 * 24.0 / (stride * stride) && rep.seeds_floor <= 1.1 * 24.0 * 24.0 / (stride * stride) + 1);
 }
 
 // ── G2, G7: a stress ramp across the block ───────────────────────────────────
@@ -371,15 +395,21 @@ static Part converging() {
 }
 static void test_rewind() {
   Part b = converging();
-  b.ask.reference_mpa = 2.0;   // spacing 5.5 (at_5_5), lower limit 3
+  // Re-pinned in its set-up only (LatticeReview's ruling, 2026-11-15): at spacing 5.5 the density rule (G5, rule C)
+  // merges converging vines at 0.6 x 5.5 = 3.3 mm, before any comes under the lower limit, so GR-REWIND never fires.
+  // This test is for the rewind where rule C does not act: spacing 4.5 (0.6 x 4.5 = 2.7, under the lower limit 3).
+  b.ask.reference_mpa = 2.0;
   at_5_5(b.ask);
+  b.ask.spacing_max_mm = 4.5;
   GrowReport rep, again;
   const std::vector<Strand> ss = grow_strands(b.d, 1, b.field, b.ask, &rep);
   const std::vector<Strand> s2 = grow_strands(b.d, 1, b.field, b.ask, &again);
   print_report("G-3 converging", rep);
   CHECK(rep.rewinds > 0);
   CHECK(rep.rewind_places == rep.rewind_grew_on + rep.rewind_joined + rep.rewind_ended_on_joint);
-  const Gaps g = gaps(ss, 3.0, 0.9);
+  // Rule E as amended (LatticeReview's ruling of 2026-11-15): a branch is exempt from its parent from its fork until it
+  // is first L from it; that stretch (and the parent's facing it) is forgiven here. Nothing else is.
+  const Gaps g = gaps(ss, 3.0, 0.9, true);
   std::printf("G-3 after GR-REWIND: smallest gap away from joints %.3f mm, places under 3 mm %zu\n", g.smallest, g.under);
   CHECK(g.under == 0);
   // No loose tail: both ends of every strand are held (solid, the part's surface, or another strand).

@@ -888,6 +888,7 @@ struct Strand {
   std::vector<double> width_mm;   // one per point
   int region = 0;
   double spacing_mm = 0.0;
+  bool tie = false;   // G9: a Grown transfer tie (read by its tests; the path lays it as any strand)
 };
 // Each segment of each strand is one Bar (width the mean of its two ends' widths, `cell` the strand's spacing,
 // `region` its region), its ends finished as lay_bars finishes a cut strut's (finish_bar_ends in bars.cpp): where a
