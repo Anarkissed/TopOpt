@@ -196,23 +196,21 @@ struct Part {
 };
 
 static void print_report(const char* what, const GrowReport& g) {
-  std::printf("%s: %zu strands (%zu grown); seeds floor %zu wall %zu, refused room %zu support %zu; steps %zu, clamped %zu; "
-              "ended edge %zu unsupported %zu joined %zu; climbed on crowded %zu\n",
-              what, g.strands, g.strands_grown, g.seeds_floor, g.seeds_wall, g.seeds_refused_room, g.seeds_refused_support,
-              g.steps, g.clamped, g.ended_edge, g.ended_unsupported, g.ended_joined, g.crowded_climbed_on);
-  std::printf("  branches offered %zu grown %zu links %zu, refused region %zu support %zu crowded %zu room %zu; rewinds %zu at %zu "
-              "places: grew on %zu, joined %zu, ended on a joint %zu (taken back %.1f mm)\n",
-              g.branches_offered, g.branches_grown, g.links, g.refused_region, g.refused_support, g.refused_crowded,
-              g.refused_room, g.rewinds, g.rewind_places, g.rewind_grew_on, g.rewind_joined, g.rewind_ended_on_joint,
-              g.taken_back_mm);
-  std::printf("  thinned %zu (joined %zu); regrow rounds %zu, holes %zu, landed %zu, failed %zu; ties seeded %zu laid %zu, "
-              "refused minor %zu reach %zu support %zu\n",
-              g.thinned, g.thinned_joined, g.regrow_rounds, g.holes, g.regrow_landed, g.regrow_failed, g.ties_seeded,
-              g.ties_laid, g.ties_refused_minor, g.ties_refused_reach, g.ties_refused_support);
-  std::printf("  grown %.1f mm, kept %.1f mm; cut: outside %.1f, unsupported %.1f, leads to nothing %.1f, crowded %.1f, "
-              "repeat %.1f; %.0f ms\n",
-              g.grown_mm, g.kept_mm, g.cut_outside_mm, g.cut_unsupported_mm, g.cut_nothing_mm, g.cut_crowded_mm,
-              g.cut_repeat_mm, g.ms);
+  std::printf("%s: %zu strands (%zu grown); seeds floor %zu wall %zu, refused support %zu; tips %zu (budget hit %zu); "
+              "steps %zu, clamped %zu; ended edge %zu unsupported %zu on the 7th join %zu\n",
+              what, g.strands, g.strands_grown, g.seeds_floor, g.seeds_wall, g.seeds_refused_support, g.tips,
+              g.tip_budget_hit, g.steps, g.clamped, g.ended_edge, g.ended_unsupported, g.ended_joins);
+  std::printf("  joins %zu (grew on after %zu), crowded with a longer run climbed on %zu; branches offered %zu grown %zu "
+              "links %zu, refused region %zu support %zu crowded %zu\n",
+              g.joins, g.grew_on_after_join, g.joins_refused_span, g.branches_offered, g.branches_grown, g.links,
+              g.refused_region, g.refused_support, g.refused_crowded);
+  std::printf("  bare %.1f %% before re-seeding, %.1f %% after; re-seeded voids %zu landed %zu failed %zu (%.1f mm); "
+              "ties seeded %zu laid %zu, refused minor %zu reach %zu\n",
+              100.0 * g.bare_before, 100.0 * g.bare_after, g.reseed_voids, g.reseed_landed, g.reseed_failed,
+              g.reseed_mm, g.ties_seeded, g.ties_laid, g.ties_refused_minor, g.ties_refused_reach);
+  std::printf("  grown %.1f mm, kept %.1f mm; cut: outside %.1f, unsupported %.1f, leads to nothing %.1f, repeat %.1f; "
+              "%.0f ms\n",
+              g.grown_mm, g.kept_mm, g.cut_outside_mm, g.cut_unsupported_mm, g.cut_nothing_mm, g.cut_repeat_mm, g.ms);
 }
 
 // The strands returned are straightened (P9: each point within 0.25 x the radius, 0.1125 mm at 0.9 mm, of its line), so
@@ -337,29 +335,33 @@ static void test_uniform_block() {
   std::size_t started = 0;
   for (std::size_t i = 0; i < ss.size(); ++i) started += ss[i].points.front().z <= 3.0 + 1e-6 || end_held(pr, ss, i, ss[i].points.front());
   CHECK(started == ss.size());
-  // Neighbours: no closer than the lower limit (away from joints), no farther than about the local spacing.
+  // Neighbours: no farther than about the local spacing. (SUPERSEDED 2026-11-15, brief G4: "no closer than the lower
+  // limit" pinned GR-REWIND and the thinning to the window, both gone; the original's separation test, 0.5 x the local
+  // spacing against recorded vertices, is what keeps vines apart now. The smallest gap is printed, not checked.)
   const Gaps g = gaps(ss, 3.0, 0.9);
   double far = 0.0;
   for (double n : g.nearest)
     if (n < 1e299) far = std::max(far, n);
-  std::printf("G-1 gaps: smallest %.3f mm, largest nearest-neighbour %.3f mm (window 3 to 8, local spacing 5.5)\n",
-              g.smallest, far);
-  CHECK(g.under == 0 && g.smallest >= 3.0 - kStraightened);
+  std::printf("G-1 gaps: smallest %.3f mm, largest nearest-neighbour %.3f mm (local spacing 5.5)\n", g.smallest, far);
   CHECK(far <= 1.5 * 5.5 && far > 0.0);
-  // Re-pinned 2026-11-15 (rule A as amended, LatticeReview's ruling 1): the floor is seeded 1.15 x L apart (L = 3),
-  // whatever the local spacing: about one seed per (1.15 L)^2 of floor, and no two strands start closer than that
-  // stride, less the two roots' run-in (each runs back into the solid by its width along a heading of 78 degrees).
-  const double stride = 1.15 * 3.0, run_in = 0.9 * std::cos(78.0 * 3.14159265358979323846 / 180.0);
-  std::size_t fence = 0;
-  for (std::size_t i = 0; i < ss.size(); ++i)
-    for (std::size_t j = i + 1; j < ss.size(); ++j)
-      if (ss[i].points.front().z < 3.5 && ss[j].points.front().z < 3.5 &&
-          std::hypot(ss[i].points.front().x - ss[j].points.front().x, ss[i].points.front().y - ss[j].points.front().y) <
-              stride - 2.0 * run_in - 1e-6)
-        ++fence;
-  std::printf("G-1 floor seeds %zu (about %.0f at one per (1.15 L)^2)\n", rep.seeds_floor, 24.0 * 24.0 / (stride * stride));
-  CHECK(fence == 0);
-  CHECK(rep.seeds_floor >= 0.9 * 24.0 * 24.0 / (stride * stride) && rep.seeds_floor <= 1.1 * 24.0 * 24.0 / (stride * stride) + 1);
+  // Re-pinned 2026-11-15 (brief G4; the owner: "I think we need to have LOADS of seeds, vines, and directions"): one
+  // floor seed per stride cell of 0.25 x the median spacing (5.5) each way, placed at random in its cell: about
+  // (24 / 1.375)^2, at most the 18 x 18 cells that touch the floor.
+  const double stride = 0.25 * 5.5;
+  std::printf("G-1 floor seeds %zu (about %.0f at one per (0.25 d)^2)\n", rep.seeds_floor, 24.0 * 24.0 / (stride * stride));
+  CHECK(rep.seeds_floor >= 0.9 * 24.0 * 24.0 / (stride * stride) && rep.seeds_floor <= 18u * 18u);
+  // G2 (brief G4): each seed's first heading is random inside the cone, uniformly over the cap from 30 degrees above
+  // level to the build direction: most leave more than 15 degrees off it (93 % of the cap), the foot holding it for
+  // two widths. Under a uniform upward stress every heading after that turns up.
+  std::size_t floor_strands = 0, off15 = 0;
+  for (const Strand& s : ss) {
+    if (s.points.front().z > 3.0 + 1e-6 || s.points.size() < 2) continue;
+    ++floor_strands;
+    const Vec3 a = s.points[0], b = s.points[1];
+    off15 += (b.z - a.z) / dist(a, b) < std::cos(15.0 * 3.14159265358979323846 / 180.0);
+  }
+  std::printf("G-1 floor strands %zu, leaving more than 15 degrees off the build direction %zu\n", floor_strands, off15);
+  CHECK(floor_strands > 0 && off15 >= floor_strands / 2);
 }
 
 // ── G2, G7: a stress ramp across the block ───────────────────────────────────
@@ -393,34 +395,28 @@ static Part converging() {
     return along({s * std::sin(t), 0.0, std::cos(t)}, 1.0);
   });
 }
-static void test_rewind() {
+// Re-pinned 2026-11-15 (brief G4): GR-REWIND is gone (the owner's OR33). Two families driven into each other: a tip
+// crowded within 0.5 x the local spacing by another strand's recorded vertex, the run 3 mm or less, JOINS it, moves
+// onto it, is re-aimed away at the cone and GROWS ON (a deflection); no loose tail; a fixed number of steps.
+static void test_joins() {
   Part b = converging();
-  // Re-pinned in its set-up only (LatticeReview's ruling, 2026-11-15): at spacing 5.5 the density rule (G5, rule C)
-  // merges converging vines at 0.6 x 5.5 = 3.3 mm, before any comes under the lower limit, so GR-REWIND never fires.
-  // This test is for the rewind where rule C does not act: spacing 4.5 (0.6 x 4.5 = 2.7, under the lower limit 3).
   b.ask.reference_mpa = 2.0;
   at_5_5(b.ask);
-  b.ask.spacing_max_mm = 4.5;
   GrowReport rep, again;
   const std::vector<Strand> ss = grow_strands(b.d, 1, b.field, b.ask, &rep);
   const std::vector<Strand> s2 = grow_strands(b.d, 1, b.field, b.ask, &again);
   print_report("G-3 converging", rep);
-  CHECK(rep.rewinds > 0);
-  CHECK(rep.rewind_places == rep.rewind_grew_on + rep.rewind_joined + rep.rewind_ended_on_joint);
-  // Rule E as amended (LatticeReview's ruling of 2026-11-15): a branch is exempt from its parent from its fork until it
-  // is first L from it; that stretch (and the parent's facing it) is forgiven here. Nothing else is.
-  const Gaps g = gaps(ss, 3.0, 0.9, true);
-  std::printf("G-3 after GR-REWIND: smallest gap away from joints %.3f mm, places under 3 mm %zu\n", g.smallest, g.under);
-  CHECK(g.under == 0);
+  CHECK(rep.joins > 0 && rep.grew_on_after_join > 0);
   // No loose tail: both ends of every strand are held (solid, the part's surface, or another strand).
   const Domain::Probe pr = b.d.probe();
   std::size_t loose = 0;
   for (std::size_t i = 0; i < ss.size(); ++i)
     loose += !end_held(pr, ss, i, ss[i].points.front()) + !end_held(pr, ss, i, ss[i].points.back());
-  std::printf("G-3 loose ends: %zu of %zu strands' ends\n", loose, 2 * ss.size());
+  std::printf("G-3 joins %zu, grew on after %zu; loose ends: %zu of %zu strands' ends\n", rep.joins,
+              rep.grew_on_after_join, loose, 2 * ss.size());
   CHECK(loose == 0);
   // A fixed number of steps: the same on a repeat, and bounded.
-  CHECK(again.steps == rep.steps && again.rewinds == rep.rewinds && rep.steps < 200000);
+  CHECK(again.steps == rep.steps && again.joins == rep.joins && rep.steps < 2000000);
 }
 
 // ── G3: a notch a climbing strand would leave ─────────────────────────────────
@@ -585,6 +581,14 @@ static void test_same_every_time() {
       same = a[i].points[k].x == c[i].points[k].x && a[i].points[k].y == c[i].points[k].y && a[i].points[k].z == c[i].points[k].z;
   }
   CHECK(same && !a.empty());
+  // G2 (brief G4): the randomness is the ask's seed number: another number, other strands.
+  OrganicAsk other = b.ask;
+  other.seed = 2;
+  const std::vector<Strand> o = grow_strands(b.d, 1, b.field, other);
+  bool differ = o.size() != a.size();
+  for (std::size_t i = 0; !differ && i < a.size(); ++i)
+    differ = a[i].points.size() != o[i].points.size() || a[i].points.front().x != o[i].points.front().x;
+  CHECK(differ);
   Session session(box_model(24, 24, 20));
   OrganicAsk ask = b.ask;
   // sigma2 half of sigma1 (ties are laid), the major direction leaning with x
@@ -738,6 +742,39 @@ static void test_file_job() {
   for (const std::string& p : {gstl, a, b}) std::remove(p.c_str());
 }
 
+// ── G3 (brief G4; the owner's OR35): vines reach for every face ───────────────
+// A block 24 x 24 x 30 with no stress: a tip keeps its heading, pulled 0.25 toward the nearest face of the region that
+// is not its floor. Near a side that face is the side: the strands' segments within 3 mm of a side (not within 3 mm of
+// two), below the middle height, run on the whole toward that side (their movement toward it, summed, over their
+// length, above 0.05). With the pull straight up and random first headings it would be about 0.
+static void test_faces() {
+  Part b(box(24, 24, 30), 24, 24, 30, 3, [](const Vec3&) { return std::array<double, 6>{0, 0, 0, 0, 0, 0}; });
+  at_5_5(b.ask);
+  GrowReport rep;
+  const std::vector<Strand> ss = grow_strands(b.d, 1, b.field, b.ask, &rep);
+  print_report("G-12 no stress", rep);
+  double toward = 0.0, length = 0.0;
+  for (const Strand& s : ss)
+    for (std::size_t k = 0; k + 1 < s.points.size(); ++k) {
+      const Vec3 a = s.points[k], e = s.points[k + 1];
+      const Vec3 m{(a.x + e.x) / 2, (a.y + e.y) / 2, (a.z + e.z) / 2};
+      if (m.z < 3.0 || m.z > 15.0 || e.z < a.z) continue;   // climbing segments, lower half
+      const double d[4] = {m.x, 24.0 - m.x, m.y, 24.0 - m.y};
+      int q = 0, near = 0;
+      for (int i = 0; i < 4; ++i) {
+        near += d[i] < 3.0;
+        if (d[i] < d[q]) q = i;
+      }
+      if (near != 1) continue;
+      const double mv[4] = {a.x - e.x, e.x - a.x, a.y - e.y, e.y - a.y};   // movement toward side q
+      toward += mv[q];
+      length += dist(a, e);
+    }
+  std::printf("G-12 climbing segments within 3 mm of one side: %.0f mm, moving toward it %.0f mm (%.3f)\n", length, toward,
+              length > 0.0 ? toward / length : 0.0);
+  CHECK(length > 0.0 && toward / length > 0.05);
+}
+
 // ── G1: time, a 40 mm cube with a made-up bending-and-twist field ────────────
 static void test_cube_time() {
   Part b(box(40, 40, 40), 40, 40, 40, 4, [](const Vec3& p) {
@@ -755,7 +792,7 @@ static void test_cube_time() {
   std::printf("G-10 the 40 mm cube: %zu strands, %.0f mm, in %.0f ms (under 5 s)\n", ss.size(), mm, ms);
   CHECK(!ss.empty() && ms < 5000.0);
   // The lengths add up: every laid segment is kept or cut once.
-  const double cut = rep.cut_outside_mm + rep.cut_unsupported_mm + rep.cut_nothing_mm + rep.cut_crowded_mm + rep.cut_repeat_mm;
+  const double cut = rep.cut_outside_mm + rep.cut_unsupported_mm + rep.cut_nothing_mm + rep.cut_repeat_mm;
   std::printf("G-10 grown %.3f = kept %.3f + cut %.3f (difference %.6f mm)\n", rep.grown_mm, rep.kept_mm, cut,
               rep.grown_mm - rep.kept_mm - cut);
   CHECK(std::fabs(rep.grown_mm - rep.kept_mm - cut) < 1e-6 * std::max(1.0, rep.grown_mm));
@@ -764,7 +801,8 @@ static void test_cube_time() {
 int main() {
   test_uniform_block();
   test_ramp();
-  test_rewind();
+  test_joins();
+  test_faces();
   test_notch();
   test_ties();
   test_walls_out();

@@ -1200,28 +1200,26 @@ std::string file_result_json(const FileResult& r) {
     char gb[4096];
     std::snprintf(gb, sizeof gb,
                   "  \"grown\": {\"strands\": %llu, \"grown_mm\": %.9g, \"kept_mm\": %.9g, \"cut_mm\": {\"outside\": %.9g, "
-                  "\"unsupported\": %.9g, \"leads_to_nothing\": %.9g, \"crowded\": %.9g, \"repeat\": %.9g},\n"
-                  "    \"seeds_floor\": %llu, \"seeds_wall\": %llu, \"seeds_refused_room\": %llu, \"seeds_refused_support\": %llu, "
-                  "\"strands_grown\": %llu, \"steps\": %llu, \"clamped\": %llu,\n"
-                  "    \"ended_edge\": %llu, \"ended_unsupported\": %llu, \"ended_joined\": %llu, \"crowded_climbed_on\": %llu,\n"
+                  "\"unsupported\": %.9g, \"leads_to_nothing\": %.9g, \"repeat\": %.9g},\n"
+                  "    \"seeds_floor\": %llu, \"seeds_wall\": %llu, \"seeds_refused_support\": %llu, "
+                  "\"strands_grown\": %llu, \"steps\": %llu, \"clamped\": %llu, \"tips\": %llu, \"tip_budget_hit\": %llu,\n"
+                  "    \"ended_edge\": %llu, \"ended_unsupported\": %llu, \"ended_joins\": %llu, \"joins\": %llu, "
+                  "\"grew_on_after_join\": %llu, \"joins_refused_span\": %llu,\n"
                   "    \"branches_offered\": %llu, \"branches_grown\": %llu, \"links\": %llu, \"refused_region\": %llu, "
-                  "\"refused_support\": %llu, \"refused_crowded\": %llu, \"refused_room\": %llu,\n"
-                  "    \"rewinds\": %llu, \"rewind_places\": %llu, \"rewind_grew_on\": %llu, \"rewind_joined\": %llu, "
-                  "\"rewind_ended_on_joint\": %llu, \"taken_back_mm\": %.9g,\n"
-                  "    \"thinned\": %llu, \"thinned_joined\": %llu, \"regrow_rounds\": %llu, \"holes\": %llu, \"regrow_landed\": %llu, "
-                  "\"regrow_failed\": %llu,\n"
+                  "\"refused_support\": %llu, \"refused_crowded\": %llu,\n"
+                  "    \"bare_before\": %.9g, \"bare_after\": %.9g, \"reseed_voids\": %llu, \"reseed_landed\": %llu, "
+                  "\"reseed_failed\": %llu, \"reseed_mm\": %.9g,\n"
                   "    \"ties_seeded\": %llu, \"ties_laid\": %llu, \"ties_refused_minor\": %llu, \"ties_refused_reach\": %llu, "
-                  "\"ties_refused_support\": %llu, \"ms\": %.1f},\n",
+                  "\"ms\": %.1f},\n",
                   count(g.strands), g.grown_mm, g.kept_mm, g.cut_outside_mm, g.cut_unsupported_mm, g.cut_nothing_mm,
-                  g.cut_crowded_mm, g.cut_repeat_mm, count(g.seeds_floor), count(g.seeds_wall), count(g.seeds_refused_room),
-                  count(g.seeds_refused_support), count(g.strands_grown), count(g.steps), count(g.clamped),
-                  count(g.ended_edge), count(g.ended_unsupported), count(g.ended_joined), count(g.crowded_climbed_on),
-                  count(g.branches_offered), count(g.branches_grown), count(g.links), count(g.refused_region),
-                  count(g.refused_support), count(g.refused_crowded), count(g.refused_room), count(g.rewinds),
-                  count(g.rewind_places), count(g.rewind_grew_on), count(g.rewind_joined), count(g.rewind_ended_on_joint),
-                  g.taken_back_mm, count(g.thinned), count(g.thinned_joined), count(g.regrow_rounds), count(g.holes),
-                  count(g.regrow_landed), count(g.regrow_failed), count(g.ties_seeded), count(g.ties_laid),
-                  count(g.ties_refused_minor), count(g.ties_refused_reach), count(g.ties_refused_support), g.ms);
+                  g.cut_repeat_mm, count(g.seeds_floor), count(g.seeds_wall), count(g.seeds_refused_support),
+                  count(g.strands_grown), count(g.steps), count(g.clamped), count(g.tips), count(g.tip_budget_hit),
+                  count(g.ended_edge), count(g.ended_unsupported), count(g.ended_joins), count(g.joins),
+                  count(g.grew_on_after_join), count(g.joins_refused_span), count(g.branches_offered),
+                  count(g.branches_grown), count(g.links), count(g.refused_region), count(g.refused_support),
+                  count(g.refused_crowded), g.bare_before, g.bare_after, count(g.reseed_voids), count(g.reseed_landed),
+                  count(g.reseed_failed), g.reseed_mm, count(g.ties_seeded), count(g.ties_laid),
+                  count(g.ties_refused_minor), count(g.ties_refused_reach), g.ms);
     o += gb;
   }
   std::snprintf(b, sizeof b,

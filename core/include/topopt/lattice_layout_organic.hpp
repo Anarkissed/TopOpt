@@ -57,6 +57,11 @@ struct OrganicAsk {
   double layer_mm = 0.2;          // one step of growth is one layer along build_dir, mm; > 0
   bool ties = true;               // G9: the transfer ties (the old job's default: on)
   double tie_swirl = 1.0;         // G9: the ties' swirl, 0 .. 1 (the old job's default: 1)
+  // G2: the floor's seeds, one per stride cell of seed_stride x the median spacing each way, each placed at random in
+  // its cell, its first heading at random inside the cone. The randomness is this fixed number: the same part and
+  // settings give the same strands every time, on any thread count.
+  double seed_stride = 0.25;      // > 0
+  std::uint64_t seed = 1;
 };
 
 // O16, the net skin: Finish Skin (Settings::skin) on a weave region (the old finish step "Skin", organic_lattice.cpp,
@@ -146,45 +151,45 @@ std::vector<Strand> trace_strands(const Domain& domain, int region, const Tensor
 // split_at_crossings, join_loose_bars, drop_loose_bars, drop_adrift_bars, as Session::lay_weave runs them on a weave
 // alone). Every laid segment is counted once: grown = kept + every cut below.
 struct GrowReport {
-  // Seeds (G2): on the floor, 1.15 x the window's lower limit apart; on the walls with walls_out; refused at their first step.
-  std::size_t seeds_floor = 0, seeds_wall = 0, seeds_refused_room = 0, seeds_refused_support = 0;
+  // Seeds (G2): on the floor, one per stride cell; on the walls with walls_out; refused at their first step.
+  std::size_t seeds_floor = 0, seeds_wall = 0, seeds_refused_support = 0;
   std::size_t strands_grown = 0, steps = 0, clamped = 0;   // tips grown, steps laid, headings held up to the cone
-  // How tips ended (G3 to G5): at the region's edge, on a step with nothing under it, joined into a neighbour.
-  std::size_t ended_edge = 0, ended_unsupported = 0, ended_joined = 0;
-  std::size_t crowded_climbed_on = 0;   // too dense for the place (G5, rule C), no join to make: climbed on
-  std::size_t joined_dense = 0;         // too dense for the place (G5, rule C): joined into the neighbour, ended there
-  std::size_t leaned = 0;               // steps held to 78 degrees from level (G3, rule F)
-  // Branches (G6, G7): offered, grown, refused by cause; a crowded branch with a short run is a link instead.
+  // How tips ended (G3 to G5): at the region's edge, on a step with nothing under it, on their seventh join.
+  std::size_t ended_edge = 0, ended_unsupported = 0, ended_joins = 0;
+  // G5: crowded tips. Joined into the neighbour (the run 3 mm or less), then deflected; of those joins, the ones the
+  // tip grew on from; crowded with a longer run: climbed on.
+  std::size_t joins = 0, grew_on_after_join = 0, joins_refused_span = 0;
+  // Branches (G6): offered (two each time), grown, refused by cause; a crowded branch with a short run is a link.
   std::size_t branches_offered = 0, branches_grown = 0, links = 0;
-  std::size_t refused_region = 0, refused_support = 0, refused_crowded = 0, refused_room = 0;
-  // GR-REWIND (G5): each try, and each place a tip was rewound to, by how it ended.
-  std::size_t rewinds = 0, rewind_places = 0, rewind_grew_on = 0, rewind_joined = 0, rewind_ended_on_joint = 0;
-  double taken_back_mm = 0.0;
-  // Thinning to the window (G10, pruning step 4): stretches of a weaker strand left out; of those, joined into the other.
-  std::size_t thinned = 0, thinned_joined = 0;
-  // Regrowth into holes after the path's pruning (G11, step 5).
-  std::size_t regrow_rounds = 0, holes = 0, regrow_landed = 0, regrow_failed = 0;
+  std::size_t refused_region = 0, refused_support = 0, refused_crowded = 0;
+  std::size_t tips = 0, tip_budget_hit = 0;   // tips pushed (seeds, branches, re-seeds); 1 when the 200,000 were reached
+  // Re-seeding after the first pruning (G11): the bare share of the region before and after it (candidate voxels with
+  // no kept strand within 1.5 x their spacing), the bare places found, stubs landed and failed, the stubs' length.
+  double bare_before = 0.0, bare_after = 0.0;
+  std::size_t reseed_voids = 0, reseed_landed = 0, reseed_failed = 0;
+  double reseed_mm = 0.0;
   // Transfer ties (G9).
-  std::size_t ties_seeded = 0, ties_laid = 0, ties_refused_minor = 0, ties_refused_reach = 0, ties_refused_support = 0;
-  // Lengths, mm (G12, step 6).
+  std::size_t ties_seeded = 0, ties_laid = 0, ties_refused_minor = 0, ties_refused_reach = 0;
+  // Lengths, mm (G12).
   double grown_mm = 0.0, kept_mm = 0.0;
-  double cut_outside_mm = 0.0, cut_unsupported_mm = 0.0, cut_nothing_mm = 0.0, cut_crowded_mm = 0.0,
-         cut_repeat_mm = 0.0;
+  double cut_outside_mm = 0.0, cut_unsupported_mm = 0.0, cut_nothing_mm = 0.0, cut_repeat_mm = 0.0;
   std::size_t strands = 0;      // returned
   double ms = 0.0;
   void add(const GrowReport& o);
 };
 
 // G1 to G12: the owner's Grown placement of one weave region (OR26: "strands grown like organic vines, top to bottom
-// or walls-out"), new code in this engine; the old generator (grow_organic_lattice) is neither edited nor called. The
-// spacing is organic_spacing's (O12), the directions the `field`'s, the width the domain's thinnest strut or
-// `ask.width_mm` (never under it: G8), one step one `ask.layer_mm` along `ask.build_dir`. Strands grow from seeds (G2),
-// each step following the stress (G3), held to the cone and supported (G4), kept to the spacing window by crowding,
-// joins and GR-REWIND (G5); branches (G6, G7); then repeats merged (G10, step 1), thinned to the window (step 4), the
-// path's pruning run (steps 2, 3) and holes regrown (G11, step 5), the transfer ties laid (G9), every cut counted (G12).
-// The strands returned go through exactly Traced's path (Session::lay_organic). The same strands for the same inputs,
-// every time. An empty field, or no candidate voxel, gives none. Throws std::invalid_argument for a range
-// organic_spacing refuses, a width under the thinnest strut, a layer not above 0 or a degenerate build direction.
+// or walls-out"), new code in this engine with the ORIGINAL Grown's growing rules and numbers (brief G4); the old
+// generator (grow_organic_lattice) is neither edited nor called. The spacing is organic_spacing's (O12), the
+// directions the `field`'s, the width the domain's thinnest strut or `ask.width_mm` (never under it: G8), one step one
+// `ask.layer_mm` along `ask.build_dir`. Seeds placed at random by `ask.seed` (G2); each step follows the stress and is
+// pulled toward the nearest face of the region that is not its floor (G3), held to the cone and supported (G4);
+// crowded tips join, deflect and grow on (G5); branches and links (G6); transfer ties (G9). Then the pruning (G10, the
+// path's own answer, G11), ONE round of re-seeding in the bare places it leaves, grown and pruned the same way, every
+// cut counted (G12). The strands returned go through exactly Traced's path (Session::lay_organic). The same strands
+// for the same inputs, every time. An empty field, or no candidate voxel, gives none. Throws std::invalid_argument for
+// a range organic_spacing refuses, a width under the thinnest strut, a layer or a seed stride not above 0, or a
+// degenerate build direction.
 std::vector<Strand> grow_strands(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask,
                                  GrowReport* report = nullptr);
 

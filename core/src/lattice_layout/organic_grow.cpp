@@ -1,7 +1,9 @@
-// Lattice rebuild, Organic, Grown (rules G1 to G12): the owner's Grown placement, written new in this engine.
-// See lattice_layout_organic.hpp and docs/design/lattice-rebuild/01-rules.md section 11. The old generator
-// (core/src/mesh/organic_lattice.cpp, grow_organic_lattice) was read for its kept rules and numbers only; nothing of it
-// is called. Nothing here decides an order by an unordered container: every list is walked in index order.
+// Lattice rebuild, Organic, Grown (rules G1 to G12): the owner's Grown placement, written new in this engine, with
+// the ORIGINAL Grown's own growing rules and numbers (brief G4; organic/map-grown-pruning.md section 1). See
+// lattice_layout_organic.hpp and docs/design/lattice-rebuild/01-rules.md section 11. The original generator
+// (core/src/mesh/organic_lattice.cpp, grow_organic_lattice) was read for its rules and numbers only; nothing of it is
+// called. Nothing here decides an order by an unordered container, the clock or the thread count: the randomness is
+// the ask's fixed seed number.
 #include "topopt/lattice_layout_organic.hpp"
 
 #include <algorithm>
@@ -10,6 +12,8 @@
 #include <cstdint>
 #include <limits>
 #include <map>
+#include <set>
+#include <array>
 #include <stdexcept>
 #include <tuple>
 #include <utility>
@@ -18,58 +22,45 @@
 namespace topopt::lattice_layout {
 
 void GrowReport::add(const GrowReport& o) {
-  seeds_floor += o.seeds_floor; seeds_wall += o.seeds_wall;
-  seeds_refused_room += o.seeds_refused_room; seeds_refused_support += o.seeds_refused_support;
+  seeds_floor += o.seeds_floor; seeds_wall += o.seeds_wall; seeds_refused_support += o.seeds_refused_support;
   strands_grown += o.strands_grown; steps += o.steps; clamped += o.clamped;
-  ended_edge += o.ended_edge; ended_unsupported += o.ended_unsupported; ended_joined += o.ended_joined;
-  crowded_climbed_on += o.crowded_climbed_on; joined_dense += o.joined_dense; leaned += o.leaned;
+  ended_edge += o.ended_edge; ended_unsupported += o.ended_unsupported; ended_joins += o.ended_joins;
+  joins += o.joins; grew_on_after_join += o.grew_on_after_join; joins_refused_span += o.joins_refused_span;
   branches_offered += o.branches_offered; branches_grown += o.branches_grown; links += o.links;
-  refused_region += o.refused_region; refused_support += o.refused_support;
-  refused_crowded += o.refused_crowded; refused_room += o.refused_room;
-  rewinds += o.rewinds; rewind_places += o.rewind_places; rewind_grew_on += o.rewind_grew_on;
-  rewind_joined += o.rewind_joined; rewind_ended_on_joint += o.rewind_ended_on_joint;
-  taken_back_mm += o.taken_back_mm;
-  thinned += o.thinned; thinned_joined += o.thinned_joined;
-  regrow_rounds = std::max(regrow_rounds, o.regrow_rounds);
-  holes += o.holes; regrow_landed += o.regrow_landed; regrow_failed += o.regrow_failed;
+  refused_region += o.refused_region; refused_support += o.refused_support; refused_crowded += o.refused_crowded;
+  tips += o.tips; tip_budget_hit = std::max(tip_budget_hit, o.tip_budget_hit);
+  bare_before = std::max(bare_before, o.bare_before); bare_after = std::max(bare_after, o.bare_after);
+  reseed_voids += o.reseed_voids; reseed_landed += o.reseed_landed; reseed_failed += o.reseed_failed;
+  reseed_mm += o.reseed_mm;
   ties_seeded += o.ties_seeded; ties_laid += o.ties_laid; ties_refused_minor += o.ties_refused_minor;
-  ties_refused_reach += o.ties_refused_reach; ties_refused_support += o.ties_refused_support;
+  ties_refused_reach += o.ties_refused_reach;
   grown_mm += o.grown_mm; kept_mm += o.kept_mm;
   cut_outside_mm += o.cut_outside_mm; cut_unsupported_mm += o.cut_unsupported_mm; cut_nothing_mm += o.cut_nothing_mm;
-  cut_crowded_mm += o.cut_crowded_mm; cut_repeat_mm += o.cut_repeat_mm;
+  cut_repeat_mm += o.cut_repeat_mm;
   strands += o.strands; ms += o.ms;
 }
 
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
-// The old numbers, kept (organic_lattice.hpp and .cpp; map-grown-pruning.md section 1):
-constexpr double kBlendHeading = 0.35, kBlendField = 0.65;   // G3: the heading follows the stress
-constexpr double kUpwardBias = 0.25;                         // G3: the pull upward
+// The original Grown's numbers (organic_lattice.hpp and .cpp; map-grown-pruning.md section 1), kept as they were:
+constexpr double kBlendHeading = 0.35, kBlendField = 0.65;   // G3: 0.35 x its own direction + 0.65 x the stress
+constexpr double kUpwardBias = 0.25;                         // G3: the pull ("reach for the light")
 constexpr double kConeDeg = 30.0;                            // G4: never flatter than this from level
 constexpr double kSupportRadii = 1.25;                       // G4: material within 1.25 r under the underside
-constexpr double kCrowdedRatio = 0.5;                        // G9: a tie is not seeded within 0.5 x spacing of a tie
-constexpr double kJoinRunMm = 3.0;                           // G5: GR-REWIND's join, when no turn has room, runs 3 mm or less
-constexpr double kBranchEveryRatio = 0.5;                    // G6: a branch offered every 0.5 x spacing of climb
-constexpr double kHoleRatio = 1.5;                           // G11: a hole is 1.5 x the local spacing from anything
-constexpr int kRegrowRounds = 4;                             // G11 (LatticeReview's ruling 4, 2026-11-15)
+constexpr double kTestRatio = 0.5;                           // G5: crowded within 0.5 x the local spacing
+constexpr double kRecordRadii = 6.0;                         // G5: a vertex recorded every 6 r of travel
+constexpr double kJoinRunMm = 3.0;                           // G5, G6: a join or a link runs 3 mm or less
+constexpr int kMaxJoins = 6;                                 // G5: a tip ends on its seventh join
+constexpr double kBranchEveryRatio = 0.5;                    // G6: branches offered every 0.5 x spacing of climb
+constexpr double kVoidRatio = 1.5;                           // G11: a bare place is 1.5 x the spacing from any vine
 constexpr double kTieMinorRatio = 0.10;                      // G9: |sigma2| / |sigma1| at least this
-constexpr double kTieSwirlDeg = 28.0, kTieSwirlWavelengthRatio = 3.5;   // G9, G3 (rule F's lean)
-// The new numbers (GR-REWIND, G5; G10):
-constexpr double kRewindTurnDeg = 35.0;
-constexpr int kRewindTries = 3;
-constexpr double kRepeatMm = 0.02;
-// The rulings of 2026-11-15 (brief G3, rules A to H):
-constexpr double kDenseRatio = 0.6;        // G5 (rule C): too dense for the place = within 0.6 x d, where that is over L
-constexpr double kBranchRoomRatio = 0.9;   // G6 (rule D): room = nothing within 0.9 x d of the point one d out
-constexpr double kSteepestDeg = 78.0;      // G3 (rule F): a vine never steeper than this from level (leans 12 degrees)
-constexpr double kTieClimbDeg = 35.0;      // G9 (rule G): a tie climbs at least this from level
-constexpr double kTieLengthRatio = 1.5;    // G9 (rule G): a tie no longer than 1.5 x d
-// LatticeReview's rulings of 2026-11-15 (after the third build's first report):
-constexpr double kBranchLeaveDeg = 45.0;   // G6 (rule E as amended): a branch leaves its parent at 45 degrees or more
-constexpr double kBranchClearRatio = 1.5;  // G6 (rule E as amended): L clear of its parent within 1.5 x d of the fork
-constexpr double kSeedStrideRatio = 1.15;  // G2 (rule A): seeds 1.15 x L apart, so a 12 degree lean keeps fresh neighbours past L
-constexpr double kLeanTurnPeriod = 4.0;    // G3 (rule F): with no level stress to lean toward, the lean turns once per 4 d
+constexpr double kTieReachRatio = 8.0;                       // G9: a tie reaches 8 spacings at most
+constexpr double kTieSwirlDeg = 28.0, kTieSwirlWavelengthRatio = 3.5;   // G9: the swirl
+// The limits the record shows were hit, raised (brief G4): tips, and the re-seeded stubs.
+constexpr std::size_t kMaxTips = 200000;
+constexpr std::size_t kReseedMax = 5000;
+constexpr double kRepeatMm = 0.02;                           // G10: a repeat lies within 0.02 mm
 
 Vec3 add(const Vec3& a, const Vec3& b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
 Vec3 sub(const Vec3& a, const Vec3& b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
@@ -177,12 +168,14 @@ struct Boxes {
   }
 };
 
-// One strand while it grows: its points, a stamp per segment (a segment taken back by a rewind loses its stamp, so
-// its points in the boxes are no longer read), the strand it grew from (or landed on), its family, a tie or not.
+// One strand while it grows: its points, a stamp per segment (a segment cut back loses its stamp, so its samples in
+// the boxes are no longer read), which points are RECORDED (the separation test's vertices, G5), the strand it grew
+// from, its family, a tie or not.
 struct Line {
   std::vector<Vec3> pts;
   std::vector<std::uint64_t> stamp;   // per segment
   std::vector<char> dead;             // per segment: dropped by the path's pruning (G11): no longer material
+  std::vector<char> rec;              // per point: a recorded vertex (G5)
   int parent = -1;
   int family = 0;
   bool tie = false;
@@ -196,13 +189,29 @@ struct Near {
 };
 
 struct Tip {
-  enum Kind { Floor, Wall, Branch, Regrow };
+  enum Kind { Floor, Wall, Branch, Reseed };
   Kind kind = Floor;
-  Vec3 root{}, dir{}, target{};
+  Vec3 root{}, dir{};
   Vec3 from{};   // where growth begins: the root, or (a seed run into the solid) the point on the region's edge
   int parent = -1, family = 0;
-  double hold = 0.0;   // a regrown branch holds its aim this far (G11, ruling 4)
+  int line = -1;   // a re-seeded tip grows on from the top of its stub (that line)
 };
+
+// A fixed, stated randomness (G2): splitmix64 of the ask's seed and the place, never the clock, never the order.
+std::uint64_t mix(std::uint64_t x) {
+  x += 0x9E3779B97F4A7C15ULL;
+  x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ULL;
+  x = (x ^ (x >> 27)) * 0x94D049BB133111EBULL;
+  return x ^ (x >> 31);
+}
+double rnd(std::uint64_t seed, std::uint64_t what, long long a, long long b, int k) {
+  std::uint64_t h = mix(seed);
+  h = mix(h ^ what);
+  h = mix(h ^ static_cast<std::uint64_t>(a));
+  h = mix(h ^ static_cast<std::uint64_t>(b));
+  h = mix(h ^ static_cast<std::uint64_t>(k));
+  return static_cast<double>(h >> 11) * (1.0 / 9007199254740992.0);
+}
 
 class Grower {
  public:
@@ -220,12 +229,16 @@ class Grower {
   Domain::Probe probe_;
   OrganicSpacing sp_;
   Vec3 up_{}, u_{}, v_{};
-  double layer_ = 0.2, width_ = 0.9, r_ = 0.45, lower_ = 3.0, sep_hi_ = 8.0, bed_ = 0.0, ds_ = 0.2;
-  double cone_sin_ = 0.5, cone_cos_ = 0.0, steep_sin_ = 1.0, steep_cos_ = 0.0;
+  double layer_ = 0.2, width_ = 0.9, r_ = 0.45, sep_hi_ = 8.0, median_ = 5.0, bed_ = 0.0, ds_ = 0.2;
+  double cone_sin_ = 0.5, cone_cos_ = 0.0;
   double laid_mm_ = 0.0;
   std::uint64_t next_stamp_ = 1;
-  Boxes boxes_;
+  Boxes boxes_;   // samples along every laid segment (support, pruning)
+  Boxes rec_;     // the recorded vertices (the separation test, G5)
   std::vector<Line> lines_;
+  std::vector<Vec3> light_;   // G3: per voxel, the nearest point of the region's boundary that is not its floor
+  std::vector<char> lit_;
+  std::size_t tips_ = 0;
 
   double h(const Vec3& p) const { return dot(p, up_); }
   Vec3 level(const Vec3& d) const { return sub(d, mul(up_, dot(d, up_))); }
@@ -278,15 +291,25 @@ class Grower {
     f = dot(vec[0], up_) < 0.0 ? mul(vec[0], -1.0) : vec[0];
     return true;
   }
-  double stress_along(const Vec3& p, const Vec3& t) const {
+  // G3, the pull (the owner's OR35): toward the nearest point of the region's boundary that is not its floor; up
+  // where there is none (off the candidates, or on that point).
+  Vec3 light(const Vec3& p) const {
     int i, j, k;
-    if (!voxel(p, i, j, k)) return 0.0;
-    const double* s = &field_.voigt[6 * field_.index(i, j, k)];
-    return std::fabs(t.x * t.x * s[0] + t.y * t.y * s[1] + t.z * t.z * s[2] +
-                     2.0 * (t.x * t.y * s[3] + t.y * t.z * s[4] + t.z * t.x * s[5]));
+    if (!voxel(p, i, j, k)) return up_;
+    const std::size_t e = field_.index(i, j, k);
+    if (!lit_[e]) return up_;
+    const Vec3 d = sub(light_[e], p);
+    return len(d) > 1e-9 ? unit(d) : up_;
+  }
+  // A uniformly random direction over the cap from the cone (30 degrees from level) up to the build direction.
+  Vec3 cap(std::uint64_t what, long long a, long long b) const {
+    const double z = cone_sin_ + (1.0 - cone_sin_) * rnd(ask_.seed, what, a, b, 0);
+    const double az = 2.0 * kPi * rnd(ask_.seed, what, a, b, 1);
+    const double s = std::sqrt(std::max(0.0, 1.0 - z * z));
+    return add(mul(up_, z), add(mul(u_, s * std::cos(az)), mul(v_, s * std::sin(az))));
   }
 
-  // A sample of a segment still on its line (not taken back).
+  // A sample of a segment still on its line (not cut back).
   bool current(const Sample& s) const {
     const Line& L = lines_[static_cast<std::size_t>(s.line)];
     return static_cast<std::size_t>(s.seg) < L.stamp.size() && L.stamp[static_cast<std::size_t>(s.seg)] == s.stamp;
@@ -294,6 +317,12 @@ class Grower {
   // ... and material: not dropped by the path's pruning.
   bool live(const Sample& s) const {
     return current(s) && !lines_[static_cast<std::size_t>(s.line)].dead[static_cast<std::size_t>(s.seg)];
+  }
+  // A recorded vertex still on its line (rec_: `seg` is the point's index).
+  bool rec_current(const Sample& s) const {
+    const Line& L = lines_[static_cast<std::size_t>(s.line)];
+    const std::size_t k = static_cast<std::size_t>(s.seg);
+    return k < L.pts.size() && L.rec[k] && L.pts[k].x == s.p.x && L.pts[k].y == s.p.y && L.pts[k].z == s.p.z;
   }
   void stamp_segment(int li, std::size_t seg) {
     Line& L = lines_[static_cast<std::size_t>(li)];
@@ -306,28 +335,32 @@ class Grower {
     for (int t = 0; t <= n; ++t)
       boxes_.put(Sample{li, static_cast<int>(seg), st, add(a, mul(sub(b, a), static_cast<double>(t) / n))});
   }
-  // A new segment at the end of a line, to `b`.
-  void lay(int li, const Vec3& b) {
+  // A new segment at the end of a line, to `b`; `record`: b is a recorded vertex.
+  void lay(int li, const Vec3& b, bool record = false) {
     Line& L = lines_[static_cast<std::size_t>(li)];
     laid_mm_ += dist(L.pts.back(), b);
     L.pts.push_back(b);
+    L.rec.push_back(record ? 1 : 0);
     stamp_segment(li, L.pts.size() - 2);
+    if (record) rec_.put(Sample{li, static_cast<int>(L.pts.size() - 1), 0, b});
   }
   int new_line(const Vec3& root, int parent, int family, bool tie = false) {
     Line L;
     L.pts.push_back(root);
+    L.rec.push_back(0);
     L.parent = parent;
     L.family = family;
     L.tie = tie;
     lines_.push_back(std::move(L));
     return static_cast<int>(lines_.size()) - 1;
   }
-  // Take a line back to point `keep` (its segments after it are no longer material).
+  // Cut a line back to point `keep` (its segments after it are no longer material).
   double take_back(int li, std::size_t keep) {
     Line& L = lines_[static_cast<std::size_t>(li)];
     double mm = 0.0;
     for (std::size_t s = keep; s + 1 < L.pts.size(); ++s) mm += dist(L.pts[s], L.pts[s + 1]);
     L.pts.resize(keep + 1);
+    L.rec.resize(keep + 1);
     L.stamp.resize(keep);
     L.dead.resize(keep);
     return mm;
@@ -337,125 +370,54 @@ class Grower {
     for (std::size_t li = 0; li < lines_.size(); ++li) {
       lines_[li].stamp.clear();
       lines_[li].dead.resize(lines_[li].pts.size() ? lines_[li].pts.size() - 1 : 0, 0);
+      lines_[li].rec.resize(lines_[li].pts.size(), 0);
       for (std::size_t s = 0; s + 1 < lines_[li].pts.size(); ++s) stamp_segment(static_cast<int>(li), s);
     }
+    rebuild_rec();
   }
-  static double line_mm(const Line& L) {
-    double mm = 0.0;
-    for (std::size_t s = 0; s + 1 < L.pts.size(); ++s) mm += dist(L.pts[s], L.pts[s + 1]);
-    return mm;
+  // The recorded vertices on what is still material (a vertex on a segment the path keeps).
+  void rebuild_rec() {
+    rec_.clear();
+    for (std::size_t li = 0; li < lines_.size(); ++li) {
+      const Line& L = lines_[li];
+      for (std::size_t k = 0; k < L.pts.size(); ++k) {
+        if (!L.rec[k]) continue;
+        const bool on = (k > 0 && !L.dead[k - 1]) || (k + 1 < L.pts.size() && !L.dead[k]);
+        if (on) rec_.put(Sample{static_cast<int>(li), static_cast<int>(k), 0, L.pts[k]});
+      }
+    }
   }
 
-  // The nearest point of any other strand within R of q: not `self`, not a strand grown from `self` within the lower
-  // limit of where that starts. `parent`: with no `part`, not that strand at all; with `part` (growth, G5 rule E), not
-  // the parent, nor a sibling (a strand of the same parent starting at the same point), within one local spacing of
-  // `part`, the point where they part; beyond that they count as any strand. The first of equally near ones, in the
-  // boxes' order. Every strand of the plant counts (growth keeps its spacing to all of them, those the path will drop
-  // included); `live_only`: only what the path keeps.
-  Near nearest(const Vec3& q, double R, int self, int parent, bool ties_only = false, bool no_ties = false,
-               bool live_only = false, const Vec3* part = nullptr) const {
+  // G5, the separation test (the original's, Jobard and Lefer's): the nearest recorded vertex of another strand
+  // within 0.5 x the local spacing at q; not `self`, not `parent`, not one `spared` (a strand the tip has joined, until
+  // it is past that distance from the join).
+  Near too_close(const Vec3& q, int self, int parent, const std::vector<std::pair<int, Vec3>>* spared = nullptr) const {
     Near out;
-    const double part_sep = part ? sep(*part) : 0.0;
-    boxes_.near(q, R + ds_, [&](const Sample& s) {
-      if (s.line == self || (!part && s.line == parent) || !(live_only ? live(s) : current(s))) return;
-      const Line& L = lines_[static_cast<std::size_t>(s.line)];
-      if ((ties_only && !L.tie) || (no_ties && L.tie)) return;
-      const Vec3 c = closest_on(q, L.pts[static_cast<std::size_t>(s.seg)], L.pts[static_cast<std::size_t>(s.seg) + 1]);
-      if (self >= 0 && L.parent == self && dist(c, L.pts.front()) <= lower_) return;   // grown from it, at its root
-      if (part && parent >= 0 &&
-          (s.line == parent || (L.parent == parent && !L.pts.empty() && dist(L.pts.front(), *part) < 1e-6)) &&
-          dist(c, *part) <= part_sep)
-        return;   // its parent or a sibling, near where they part (rule E)
-      const double d = dist(q, c);
-      if (d <= R && d < out.d) {
+    const double lim = kTestRatio * sep(q);
+    rec_.near(q, lim, [&](const Sample& s) {
+      if (s.line == self || s.line == parent || !rec_current(s)) return;
+      if (spared)
+        for (const auto& x : *spared)
+          if (x.first == s.line) return;
+      const double d = dist(q, s.p);
+      if (d < lim && (d < out.d || (d == out.d && s.line < out.line))) {
         out.found = true;
         out.d = d;
-        out.hit = c;
+        out.hit = s.p;
         out.line = s.line;
       }
     });
     return out;
   }
-  double to_line(const Vec3& q, int line, double R) const {
-    double best = std::numeric_limits<double>::infinity();
+  // Any segment the path keeps within R of q.
+  bool live_within(const Vec3& q, double R) const {
+    bool found = false;
     boxes_.near(q, R + ds_, [&](const Sample& s) {
-      if (s.line != line || !live(s)) return;
+      if (found || !live(s)) return;
       const Line& L = lines_[static_cast<std::size_t>(s.line)];
-      best = std::min(best, dist(q, closest_on(q, L.pts[static_cast<std::size_t>(s.seg)],
-                                              L.pts[static_cast<std::size_t>(s.seg) + 1])));
+      found = dist(q, closest_on(q, L.pts[static_cast<std::size_t>(s.seg)], L.pts[static_cast<std::size_t>(s.seg) + 1])) <= R;
     });
-    return best;
-  }
-
-  // The distance from q to strand `line` (its segments still on it), looked for within R; infinity beyond.
-  // The distance from q to the nearest other strand than `self` (not ties excepted), its segments still on it, within 1 mm.
-  double to_current_other(const Vec3& q, int self) const {
-    double best = std::numeric_limits<double>::infinity();
-    boxes_.near(q, 1.0 + ds_, [&](const Sample& s) {
-      if (s.line == self || !current(s)) return;
-      const Line& L = lines_[static_cast<std::size_t>(s.line)];
-      best = std::min(best, dist(q, closest_on(q, L.pts[static_cast<std::size_t>(s.seg)], L.pts[static_cast<std::size_t>(s.seg) + 1])));
-    });
-    return best;
-  }
-  double to_current(const Vec3& q, int line, double R) const {
-    double best = std::numeric_limits<double>::infinity();
-    boxes_.near(q, R + ds_, [&](const Sample& s) {
-      if (s.line != line || !current(s)) return;
-      const Line& L = lines_[static_cast<std::size_t>(s.line)];
-      best = std::min(best, dist(q, closest_on(q, L.pts[static_cast<std::size_t>(s.seg)], L.pts[static_cast<std::size_t>(s.seg) + 1])));
-    });
-    return best;
-  }
-  // G5 (rule C): where a tip at p joins strand `line`: its nearest point within `most` of p that lies at the cone or
-  // steeper above p. False when there is none.
-  bool landing(const Vec3& p, int line, double most, Vec3& at) const {
-    double best = std::numeric_limits<double>::infinity();
-    boxes_.near(p, most + ds_, [&](const Sample& s) {
-      if (s.line != line || !current(s)) return;
-      const double d = dist(p, s.p);
-      if (d > most || d < 1e-9 || dot(sub(s.p, p), up_) < cone_sin_ * d - 1e-12) return;
-      if (d < best) { best = d; at = s.p; }
-    });
-    return best < std::numeric_limits<double>::infinity();
-  }
-  // G9, G3 (rule F): the transfer tie's direction at p, the old code's closed form: the second principal direction
-  // (sign as `principal` gives it) turned by the swirl (28 degrees x tie_swirl x the phase, wavelength 3.5 spacings)
-  // about the axis across it and the major direction. False where there is no stress.
-  bool swirl(const Vec3& p, Vec3& dir) const {
-    double ev[3];
-    Vec3 f3[3];
-    if (!frame(p, ev, f3)) return false;
-    dir = f3[1];
-    if (ask_.tie_swirl > 0.0) {
-      const double lam = kTieSwirlWavelengthRatio * sep(p);
-      const double k1 = 2.0 * kPi / lam, k2 = k1 * 0.618, k3 = k1 * 1.414;
-      const double phase = std::sin(k1 * p.x + 0.7) * std::cos(k2 * p.z + 1.9) +
-                           0.5 * std::sin(k3 * (p.x + p.z) + 0.3) * std::cos(k1 * p.y + 2.4);
-      const double ang = ask_.tie_swirl * kTieSwirlDeg * kPi / 180.0 * std::clamp(phase, -1.0, 1.0);
-      const Vec3 axis = unit(cross(dir, f3[0]));
-      if (len(axis) > 1e-9) {
-        const double c = std::cos(ang), sn = std::sin(ang);
-        dir = unit(add(add(mul(dir, c), mul(cross(axis, dir), sn)), mul(axis, dot(axis, dir) * (1.0 - c))));
-      }
-    }
-    return len(dir) > 1e-9;
-  }
-  // G3 (rule F, the owner's OR23: "The struts shouldn't be going straight up"): a heading steeper than 78 degrees from
-  // level is held at 78, leaning toward the level part of the stress direction at p; where that is under a tenth of
-  // it (or there is no stress), toward the direction turned about the build direction by 2 pi (x + y) / (4 d) from the
-  // first in-plane axis (x, y the point's in-plane coordinates, d the local spacing; LatticeReview's ruling 2), so
-  // neighbours lean different ways and cross.
-  Vec3 lean(const Vec3& want, const Vec3& p) {
-    if (dot(want, up_) <= steep_sin_ + 1e-12) return want;
-    Vec3 hdir{0, 0, 0}, f;
-    if (stress_dir(p, f) && len(level(f)) >= 0.1 * len(f)) hdir = unit(level(f));
-    if (len(hdir) < 0.5) {
-      const double a = 2.0 * kPi * (dot(p, u_) + dot(p, v_)) / (kLeanTurnPeriod * sep(p));
-      hdir = add(mul(u_, std::cos(a)), mul(v_, std::sin(a)));
-    }
-    ++rep_.leaned;
-    return add(mul(up_, steep_sin_), mul(hdir, steep_cos_));
+    return found;
   }
 
   // G4: is the underside of a strut centred at q held? Material (a strand, the part's solid, or the bed) within
@@ -506,30 +468,86 @@ class Grower {
     return add(in, mul(d, past_solid ? at + width_ : at));
   }
 
+  void lighting();
   void seeds(std::vector<Tip>& tips);
   void grow(std::vector<Tip> tips);
   void grow_tip(const Tip& t, std::vector<Tip>& tips);
-  bool turn(const Vec3& at, int li, int parent, const Vec3& part, const Vec3& heading, const std::vector<Vec3>& tried,
-            Vec3& out) const;
-  void offer_branches(int li, const Vec3& p, const Vec3& dir, std::size_t& floor_idx, std::vector<Tip>& tips);
-  std::vector<int> links_made_;   // by the tip growing now
+  void offer_branches(int li, const Vec3& p, const Vec3& dir, std::vector<Tip>& tips);
   void repeats();
-  void thin();
   void settle();
   struct Fate {
     std::vector<std::vector<char>> seg;   // per line, per segment: 0 kept, 1 outside, 2 nothing, 3 unsupported
     std::vector<double> bar_mm;           // per line: the length of its bars the path keeps (G12, ruling 5)
   };
   Fate pass();
+  void prune();
+  double bare() const;
   void account(const Fate& f);
-  void regrow_holes(std::vector<Tip>& tips);
-  void ties();
+  void reseed(std::vector<Tip>& tips);
+  void ties(std::size_t from);
   std::vector<Strand> strands() const;
 };
 
+// G3, the pull's target: for every candidate voxel the nearest point of the region's boundary that is not its floor
+// (the middle of a candidate's face whose neighbour across it is not a candidate, unless that face looks down along
+// the build direction). Spread from those faces to their neighbours (26) in index order, each voxel keeping the
+// nearest point any neighbour offers: the same answer every time.
+void Grower::lighting() {
+  const std::size_t n = static_cast<std::size_t>(field_.nx) * field_.ny * field_.nz;
+  light_.assign(n, Vec3{});
+  lit_.assign(n, 0);
+  std::vector<double> best(n, std::numeric_limits<double>::infinity());
+  std::vector<std::size_t> queue;
+  static const int nb[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+  const double hv = field_.spacing;
+  for (int k = 0; k < field_.nz; ++k)
+    for (int j = 0; j < field_.ny; ++j)
+      for (int i = 0; i < field_.nx; ++i) {
+        const std::size_t e = field_.index(i, j, k);
+        if (!sp_.candidate[e]) continue;
+        const Vec3 c = centre(i, j, k);
+        for (int f = 0; f < 6; ++f) {
+          const int a = i + nb[f][0], b = j + nb[f][1], cc = k + nb[f][2];
+          if (a >= 0 && b >= 0 && cc >= 0 && a < field_.nx && b < field_.ny && cc < field_.nz &&
+              sp_.candidate[field_.index(a, b, cc)])
+            continue;
+          const Vec3 o{static_cast<double>(nb[f][0]), static_cast<double>(nb[f][1]), static_cast<double>(nb[f][2])};
+          if (dot(o, up_) < -0.5) continue;   // the floor
+          const Vec3 site = add(c, mul(o, 0.5 * hv));
+          const double d = dist(site, c);
+          if (d < best[e]) { best[e] = d; light_[e] = site; }
+        }
+        if (best[e] < std::numeric_limits<double>::infinity()) {
+          lit_[e] = 1;
+          queue.push_back(e);
+        }
+      }
+  for (std::size_t q = 0; q < queue.size(); ++q) {
+    const std::size_t e = queue[q];
+    const int i = static_cast<int>(e % static_cast<std::size_t>(field_.nx));
+    const int j = static_cast<int>((e / static_cast<std::size_t>(field_.nx)) % static_cast<std::size_t>(field_.ny));
+    const int k = static_cast<int>(e / (static_cast<std::size_t>(field_.nx) * field_.ny));
+    for (int dk = -1; dk <= 1; ++dk)
+      for (int dj = -1; dj <= 1; ++dj)
+        for (int di = -1; di <= 1; ++di) {
+          const int a = i + di, b = j + dj, c = k + dk;
+          if ((!di && !dj && !dk) || a < 0 || b < 0 || c < 0 || a >= field_.nx || b >= field_.ny || c >= field_.nz) continue;
+          const std::size_t f = field_.index(a, b, c);
+          if (!sp_.candidate[f]) continue;
+          const double d = dist(light_[e], centre(a, b, c));
+          if (d < best[f] - 1e-12) {
+            best[f] = d;
+            light_[f] = light_[e];
+            lit_[f] = 1;
+            queue.push_back(f);
+          }
+        }
+  }
+}
+
 void Grower::seeds(std::vector<Tip>& tips) {
   const double hv = field_.spacing;
-  // G2 (idea B): the lowest candidate of each column, a column measured along the build direction.
+  // G2: the lowest candidate of each column, a column measured along the build direction.
   std::map<std::pair<long long, long long>, std::pair<double, Vec3>> low;
   for (int k = 0; k < field_.nz; ++k)
     for (int j = 0; j < field_.ny; ++j)
@@ -541,26 +559,24 @@ void Grower::seeds(std::vector<Tip>& tips) {
         auto it = low.find(key);
         if (it == low.end() || h(c) < it->second.first) low[key] = {h(c), c};
       }
-  // G2 (amended 2026-11-15, rule A; the owner's OR31: "Might it be important to seed more than what you expect to
-  // have, assuming a lot will be pruned? There are so few seeds on the base. It needs to be filled."): seeds on rows
-  // L apart across the build plane, L apart along a row, alternate rows offset by half of it (L the window's lower
-  // limit, whatever the local spacing). A point is seeded where its column (the nearest one) has candidates: at the
-  // height of the column's lowest, moved down to the region's edge. No room test.
   if (low.empty()) return;
+  // G2 (brief G4; the owner, 2026-11-15: "I think we need to have LOADS of seeds, vines, and directions, then pruning
+  // and a round of re-seeding in bare areas."): one seed per stride cell of the build plane (seed_stride x the median
+  // spacing each way), placed at random inside its cell, seeded where its column has candidates: at the height of the
+  // column's lowest, moved down to the region's edge. Its first heading is at random inside the cone.
   double ua = std::numeric_limits<double>::infinity(), ub = -ua, va = ua, vb = -ua;
   for (const auto& kv : low) {
     const Vec3 c = kv.second.second;
     ua = std::min(ua, dot(c, u_) - 0.5 * hv); ub = std::max(ub, dot(c, u_) + 0.5 * hv);
     va = std::min(va, dot(c, v_) - 0.5 * hv); vb = std::max(vb, dot(c, v_) + 0.5 * hv);
   }
-  const double stride = kSeedStrideRatio * lower_;
-  std::vector<Vec3> taken;   // the seeds' own points (the walls keep L from them)
-  const int rows = static_cast<int>(std::floor((vb - va) / stride + 1e-9));
-  for (int r = 0; r <= rows; ++r) {
-    const double vv = va + 0.5 * stride + r * stride;
-    if (vv > vb) break;
-    const double off = (r % 2) ? 0.5 * stride : 0.0;
-    for (double uu = ua + 0.5 * stride + off; uu <= ub + 1e-9; uu += stride) {
+  const double stride = ask_.seed_stride * median_;
+  const long long na = static_cast<long long>(std::ceil((ub - ua) / stride - 1e-9));
+  const long long nb = static_cast<long long>(std::ceil((vb - va) / stride - 1e-9));
+  for (long long b = 0; b < nb; ++b)
+    for (long long a = 0; a < na; ++a) {
+      const double uu = ua + (a + rnd(ask_.seed, 1, a, b, 0)) * stride;
+      const double vv = va + (b + rnd(ask_.seed, 1, a, b, 1)) * stride;
       auto it = low.find({static_cast<long long>(std::floor(uu / hv)), static_cast<long long>(std::floor(vv / hv))});
       if (it == low.end()) continue;
       const Vec3 cc = it->second.second;
@@ -569,65 +585,62 @@ void Grower::seeds(std::vector<Tip>& tips) {
       const Vec3 down = mul(up_, -1.0);
       const double at = edge(c, down, 2.0 * hv);
       const Vec3 on = at >= 0.0 ? add(c, mul(down, at)) : c;
-      taken.push_back(on);
       Tip t;
       t.kind = Tip::Floor;
-      // Its foot leaves the floor in its first heading (G3: the stress, the pull upward, the cone, rule F's lean) and
-      // its root runs back along it into the solid by its width.
-      Vec3 f;
-      Vec3 w = stress_dir(on, f) ? add(mul(up_, kBlendHeading), mul(f, kBlendField)) : up_;
-      w = unit(add(w, mul(up_, kUpwardBias)));
-      if (dot(w, up_) < cone_sin_) {
-        const Vec3 side = unit(level(w));
-        w = len(side) > 0.5 ? add(mul(side, cone_cos_), mul(up_, cone_sin_)) : up_;
-      }
-      t.dir = lean(w, on);
+      t.dir = cap(2, a, b);
+      // Its foot leaves the floor on that heading; its root runs back along it into the solid by its width (S4).
       t.root = at < 0.0 ? c : solid(sub(on, mul(t.dir, width_ + 0.06))) ? sub(on, mul(t.dir, width_)) : on;
-      t.target = on;
       t.from = on;
       tips.push_back(t);
       ++rep_.seeds_floor;
     }
-  }
   if (!ask_.walls_out) return;
-  auto room_for = [&](const Vec3& p) {   // rule A on the walls: no two seeds closer than L
-    for (const Vec3& q : taken)
-      if (dist(p, q) < stride - 1e-9) return false;
-    return true;
-  };
   // G2 (idea C): on the region's walls: a candidate whose neighbour across a side face (one that is not above or
-  // below it) is the part's solid. Lowest first, then by column.
+  // below it) is the part's solid; one per stride cell (seed_stride x the median spacing, in the part's frame), the
+  // wall candidate of the cell nearest a point placed at random in it.
   struct W { long long hk, a, b; int n; Vec3 c, w; };
-  std::vector<W> walls;
-  static const int nb[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+  std::map<std::tuple<long long, long long, long long>, std::vector<W>> cells;
+  static const int nb6[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
   for (int k = 0; k < field_.nz; ++k)
     for (int j = 0; j < field_.ny; ++j)
       for (int i = 0; i < field_.nx; ++i) {
         if (!sp_.candidate[field_.index(i, j, k)]) continue;
         const Vec3 c = centre(i, j, k);
         for (int n = 0; n < 6; ++n) {
-          const Vec3 off{static_cast<double>(nb[n][0]), static_cast<double>(nb[n][1]), static_cast<double>(nb[n][2])};
+          const Vec3 off{static_cast<double>(nb6[n][0]), static_cast<double>(nb6[n][1]), static_cast<double>(nb6[n][2])};
           if (std::fabs(dot(off, up_)) >= 0.5) continue;
-          const int a = i + nb[n][0], b = j + nb[n][1], cc = k + nb[n][2];
+          const int a = i + nb6[n][0], b = j + nb6[n][1], cc = k + nb6[n][2];
           if (a >= 0 && b >= 0 && cc >= 0 && a < field_.nx && b < field_.ny && cc < field_.nz &&
               sp_.candidate[field_.index(a, b, cc)])
             continue;
           if (!solid(add(c, mul(off, hv)))) continue;
-          walls.push_back({std::llround(h(c) / hv), std::llround(dot(c, u_) / hv), std::llround(dot(c, v_) / hv), n, c,
-                           unit(level(off))});
+          const auto key = std::make_tuple(static_cast<long long>(std::floor(h(c) / stride)),
+                                           static_cast<long long>(std::floor(dot(c, u_) / stride)),
+                                           static_cast<long long>(std::floor(dot(c, v_) / stride)));
+          cells[key].push_back({std::llround(h(c) / hv), std::llround(dot(c, u_) / hv), std::llround(dot(c, v_) / hv), n,
+                                c, unit(level(off))});
           break;
         }
       }
-  std::sort(walls.begin(), walls.end(), [](const W& x, const W& y) {
-    return std::tie(x.hk, x.a, x.b, x.n) < std::tie(y.hk, y.a, y.b, y.n);
-  });
-  for (const W& w : walls) {
+  for (const auto& kv : cells) {
+    const long long ck = std::get<0>(kv.first), ca = std::get<1>(kv.first), cb = std::get<2>(kv.first);
+    const Vec3 pick = add(mul(up_, (ck + rnd(ask_.seed, 3, ca, cb, static_cast<int>(ck) * 3)) * stride),
+                          add(mul(u_, (ca + rnd(ask_.seed, 3, ca, cb, static_cast<int>(ck) * 3 + 1)) * stride),
+                              mul(v_, (cb + rnd(ask_.seed, 3, ca, cb, static_cast<int>(ck) * 3 + 2)) * stride)));
+    const W* best = nullptr;
+    double bd = std::numeric_limits<double>::infinity();
+    for (const W& w : kv.second) {
+      const Vec3 c3{dot(w.c, u_), dot(w.c, v_), h(w.c)};
+      const Vec3 p3{dot(pick, u_), dot(pick, v_), h(pick)};
+      const double d = dist(c3, p3);
+      if (d < bd) { bd = d; best = &w; }
+    }
+    if (!best) continue;
+    const W& w = *best;
     const double at = edge(w.c, w.w, 2.0 * hv);
     if (at < 0.0) continue;
     const Vec3 on = add(w.c, mul(w.w, at));
-    if (!room_for(on)) continue;
-    // Rule A (LatticeReview's ruling, 2026-11-15): no wall seed within one stride of a corner, where its wall meets
-    // another wall: along the wall, either way, the region's edge with the solid past it lies that near.
+    // No wall seed within one stride of a corner, where its wall meets another wall (LatticeReview's ruling).
     bool corner = false;
     const Vec3 along = unit(cross(up_, w.w));
     for (int sg = -1; sg <= 1 && !corner; sg += 2) {
@@ -636,59 +649,21 @@ void Grower::seeds(std::vector<Tip>& tips) {
       corner = e >= 0.0 && solid(add(w.c, mul(dir, e + 0.06)));
     }
     if (corner) continue;
-    taken.push_back(on);
     Tip t;
     t.kind = Tip::Wall;
     t.root = end_at_edge(w.c, w.w, at);
     t.dir = add(mul(w.w, -cone_cos_), mul(up_, cone_sin_));   // inward, at the cone
-    t.target = on;
     t.from = on;
     tips.push_back(t);
     ++rep_.seeds_wall;
   }
 }
 
-// GR-REWIND's turn: among the directions within 35 degrees of the stress (the heading where there is none), on the
-// cone or steeper, whose first step is in the region and supported, and not tried here before: the one whose point
-// one local spacing ahead lies farthest from every other strand (the first of equals). False when none has room
-// (that point within the lower limit of another strand).
-bool Grower::turn(const Vec3& at, int li, int parent, const Vec3& part, const Vec3& heading,
-                  const std::vector<Vec3>& tried, Vec3& out) const {
-  Vec3 f;
-  if (!stress_dir(at, f)) f = heading;
-  f = unit(f);
-  Vec3 a1 = unit(cross(f, std::fabs(f.x) < 0.9 ? Vec3{1, 0, 0} : Vec3{0, 1, 0}));
-  Vec3 a2 = cross(f, a1);
-  std::vector<Vec3> fan{f};
-  for (double tilt : {0.5 * kRewindTurnDeg, kRewindTurnDeg})
-    for (int k = 0; k < 8; ++k) {
-      const double t = tilt * kPi / 180.0, az = k * kPi / 4.0;
-      fan.push_back(add(mul(f, std::cos(t)), mul(add(mul(a1, std::cos(az)), mul(a2, std::sin(az))), std::sin(t))));
-    }
-  const double s = sep(at), look = 1.5 * sep_hi_;
-  double best = -1.0;
-  for (const Vec3& d : fan) {
-    const double rise = dot(d, up_);
-    if (rise < cone_sin_ - 1e-12) continue;
-    bool seen = false;
-    for (const Vec3& t : tried) seen = seen || dot(t, d) > 1.0 - 1e-9;
-    if (seen) continue;
-    const Vec3 q = add(at, mul(d, layer_ / rise));
-    if (!inreg(q) || !supported(q)) continue;
-    const Near n = nearest(add(at, mul(d, s)), look, li, parent, false, false, false, &part);
-    const double room = n.found ? n.d : look;
-    if (room > best) {
-      best = room;
-      out = d;
-    }
-  }
-  return best >= lower_;
-}
-
-void Grower::offer_branches(int li, const Vec3& p, const Vec3& dir, std::size_t& floor_idx, std::vector<Tip>& tips) {
-  // G6: across the heading, along whichever of the two minor principal directions is least along it (a side axis
-  // of the build plane where there is no stress), leaving at the cone. One branch is offered, to the side with the
-  // more room (rule D).
+// G6, the original's branches: across the heading, along whichever of the two minor principal directions is least
+// along it, flattened out of the heading (a side axis where there is no stress), TWO branches, one to each side,
+// leaving at the cone. Refused: out of the region, unsupported, or crowded (then a link to what crowded it when the
+// run is 3 mm or less).
+void Grower::offer_branches(int li, const Vec3& p, const Vec3& dir, std::vector<Tip>& tips) {
   double ev[3];
   Vec3 fr[3];
   Vec3 tr{0, 0, 0};
@@ -700,146 +675,77 @@ void Grower::offer_branches(int li, const Vec3& p, const Vec3& dir, std::size_t&
   const Vec3 side = unit(level(tr));
   if (len(side) < 0.5) return;
   const Line& me = lines_[static_cast<std::size_t>(li)];
-  const double d = sep(p);
-  ++rep_.branches_offered;
-  int best_sgn = 0, why = 0;   // why: 1 out of the region, 2 unsupported
-  double best_room = -1.0;
-  Vec3 best_dir{}, best_target{};
+  const int family = (me.family + 1) % 3;
   for (int sgn = -1; sgn <= 1; sgn += 2) {
     const Vec3 bdir = add(mul(side, sgn * cone_cos_), mul(up_, cone_sin_));
-    // G6 (rule E as amended, LatticeReview's ruling 1): a branch leaves its parent at 45 degrees or more from the
-    // parent's direction at the fork.
-    if (dot(bdir, unit(dir)) > std::cos(kBranchLeaveDeg * kPi / 180.0) + 1e-12) { why = std::max(why, 1); continue; }
-    const Vec3 bq = add(p, mul(bdir, layer_ / cone_sin_));
-    const Vec3 target = add(p, mul(bdir, d));
-    if (!inreg(bq) || !inreg(target)) { why = std::max(why, 1); continue; }
-    if (!supported(bq)) { why = 2; continue; }
-    // G6 (rule D): room = no other strand within 0.9 x d of the point one d out along its first direction; the strand
-    // it grows from is its parent (rule E).
-    const double look = kBranchRoomRatio * d;
-    const Near n = nearest(target, look, li, -1);
-    const double room = n.found ? n.d : look + 1.0;
-    if (room > best_room) {
-      best_room = room;
-      best_sgn = sgn;
-      best_dir = bdir;
-      best_target = target;
+    const Vec3 bq = add(p, mul(bdir, layer_));
+    ++rep_.branches_offered;
+    if (!inreg(bq)) { ++rep_.refused_region; continue; }
+    if (!supported(bq)) { ++rep_.refused_support; continue; }
+    const Near n = too_close(bq, li, -1);
+    if (n.found) {
+      ++rep_.refused_crowded;
+      if (len(level(sub(n.hit, p))) <= kJoinRunMm && dist(n.hit, p) > 1e-9) {
+        const int l = new_line(p, li, family);
+        lay(l, n.hit);
+        ++rep_.links;
+      }
+      continue;
     }
+    if (tips_ >= kMaxTips) { rep_.tip_budget_hit = 1; continue; }
+    Tip t;
+    t.kind = Tip::Branch;
+    t.root = t.from = p;
+    t.dir = bdir;
+    t.parent = li;
+    t.family = family;
+    tips.push_back(t);
+    ++tips_;
   }
-  if (best_sgn == 0) {
-    if (why == 2) ++rep_.refused_support; else ++rep_.refused_region;
-    return;
-  }
-  if (best_room < kBranchRoomRatio * d) { ++rep_.refused_room; return; }
-  Tip t;
-  t.kind = Tip::Branch;
-  t.root = p;
-  t.from = p;
-  t.dir = best_dir;
-  t.target = best_target;
-  t.parent = li;
-  t.family = (me.family + 1) % 3;
-  tips.push_back(t);
-  floor_idx = lines_[static_cast<std::size_t>(li)].pts.size() - 1;
 }
 
+// G3 to G5, the original's tip loop, step by step.
 void Grower::grow_tip(const Tip& t, std::vector<Tip>& tips) {
-  // G7 (rule D), asked again at its turn for a branch or a regrown tip: no other strand (its parent and siblings
-  // near where they part not counted, rule E) within 0.9 x d of the point one d out along its first direction (a
-  // regrown tip's: up). A seed has no room test (rule A).
-  if (t.kind == Tip::Branch || t.kind == Tip::Regrow) {
-    const double d = sep(t.from);
-    const Vec3 ahead = add(t.from, mul(unit(t.dir), d));
-    const Near n = nearest(ahead, kBranchRoomRatio * d, -1, t.parent, false, false, false, &t.from);
-    if (n.found) {
-      if (t.kind == Tip::Branch) ++rep_.refused_room;
-      else ++rep_.regrow_failed;
-      return;
-    }
-  }
-  // A branch (or a regrown branch) whose fork is no longer on its parent (taken back since it was offered) does not grow.
-  const bool branchy = t.kind == Tip::Branch || (t.kind == Tip::Regrow && t.parent >= 0);
-  if (branchy && !(to_current(t.from, t.parent, 1e-6) < 1e-6)) {
-    if (t.kind == Tip::Branch) ++rep_.refused_room;
-    else ++rep_.regrow_failed;
-    return;
-  }
-  const int li = new_line(t.root, t.parent, t.family);
-  int parent = t.parent;
-  // G6 (rule E as amended, LatticeReview's ruling 1): a branch is exempt from its parent only until it is first L from
-  // it; while exempt it holds its first direction and its distance to the parent never shrinks; not L clear within
-  // 1.5 x d of the fork: taken back, it does not grow.
-  bool exempt = branchy, aborted = false;
-  double parent_gap = 0.0;
-  // A seed starts on the region's edge; its first point is run into the solid by its width (as O4 runs an end), so
-  // its first segment crosses the edge and weave_bars cuts it there and finds it Solid.
+  const int li = t.line >= 0 ? t.line : new_line(t.root, t.parent, t.family);
+  const int parent = t.parent;
   const Vec3 start = t.from;
   Vec3 p = start, dir = t.dir;
-  std::size_t floor_idx = 0;   // never rewound past (G5)
-  double since_branch = 0.0;
-  // The first step of a branch (and of a wall seed) is the direction it was offered in; a turn holds for one spacing.
-  double hold = (t.kind == Tip::Branch || t.kind == Tip::Wall) ? 1e-9 : 0.0;
-  Vec3 hold_dir = t.dir;
-  // A tip that starts on the floor's solid (a floor seed, or a regrown tip that landed on the solid) climbs its first two widths
-  // straight on in its seed's direction (its foot): its first segment, run into the solid by its width, then crosses
-  // the region's edge in one line and leaves a piece in the lattice longer than its width, so weave_bars finds that
-  // end Solid and does not drop it as a stub (S4). It is never rewound past its foot.
-  bool foot = t.kind == Tip::Floor || (t.kind == Tip::Regrow && t.parent < 0);
-  if (foot) hold = 2.0 * width_;
-  if (t.hold > 0.0) hold = t.hold;
-  std::map<std::size_t, std::vector<Vec3>> tried;
-  long long open_place = -1;
-  bool first = true;
+  double since_branch = 0.0, since_record = 0.0;
+  // A floor seed's foot (S4): it climbs its first two widths straight on its first heading, so its first bar,
+  // run into the solid by its width, crosses the region's edge in one line and is not a stub.
+  double foot = t.kind == Tip::Floor ? 2.0 * width_ : 0.0;
+  int joins_used = 0;
+  std::vector<std::pair<int, Vec3>> spared;
+  bool after_join = false, first = true;
   const int layers = static_cast<int>(std::ceil((domain_.measure().diagonal_mm() + 1.0) / layer_)) + 4;
   const long long guard = 16LL * layers;
-  enum End { Edge, Unsupported, Joined, GaveUp, Guard } how = Guard;
+  enum End { Edge, Unsupported, Joins, Guard } how = Guard;
   for (long long it = 0; it < guard; ++it) {
     Vec3 want;
-    if (exempt) {
-      want = lean(hold_dir, p);
-    } else if (hold > 0.0) {
-      want = foot ? hold_dir : lean(hold_dir, p);
+    if (foot > 0.0) {
+      want = dir;
     } else {
       Vec3 f;
       want = stress_dir(p, f) ? add(mul(dir, kBlendHeading), mul(f, kBlendField)) : dir;
-      want = add(want, mul(up_, kUpwardBias));
+      want = add(want, mul(light(p), kUpwardBias));   // the pull, toward the nearest face (OR35)   // the pull, toward the nearest face (OR35)
+      if (!(len(want) > 1e-12)) { how = Unsupported; break; }
       want = unit(want);
-      if (len(want) < 0.5) { how = Unsupported; break; }
       if (dot(want, up_) < cone_sin_) {
         ++rep_.clamped;
         const Vec3 side = unit(level(want));
         want = len(side) > 0.5 ? add(mul(side, cone_cos_), mul(up_, cone_sin_)) : up_;
       }
-      want = lean(want, p);   // G3 (rule F)
     }
-    const double rise = std::max(dot(want, up_), 1e-9);
-    const Vec3 q = add(p, mul(want, layer_ / rise));
-    if (exempt) {
-      const double g = to_current(q, t.parent, lower_ + 1.0);
-      if (g < parent_gap - 1e-9 || dist(q, start) > kBranchClearRatio * sep(start)) {
-        aborted = true;
-        break;
-      }
-      parent_gap = g;
-      if (g >= lower_) {   // L clear: from here parent and branch are judged as any two strands
-        exempt = false;
-        parent = -1;
-        lines_[static_cast<std::size_t>(li)].parent = -1;
-      }
-    }
+    const Vec3 q = add(p, mul(want, layer_));
     if (!inreg(q)) {
       // G3: it leaves the region: it ends at the edge (on into the solid by its width where solid is past it).
-      const double step = dist(p, q);
-      const double at = edge(p, want, step + 0.05);
+      const double at = edge(p, want, layer_ + 0.05);
       const Vec3 e = end_at_edge(p, want, at >= 0.0 ? at : 0.0);
       if (dist(e, p) > 1e-9) lay(li, e);
       how = Edge;
       break;
     }
-    // The tip's own root stands on what it started on (a seed's solid, the strand it grew from or landed on).
-    const bool on_root = lines_[static_cast<std::size_t>(li)].pts.size() == 1 && len(level(sub(q, start))) <= 2.0 * r_ &&
-                         h(start) <= h(q) && (t.kind == Tip::Regrow || t.kind == Tip::Branch);
-    if (!on_root && !supported(q)) {
+    if (!supported(q)) {
       if (first && (t.kind == Tip::Floor || t.kind == Tip::Wall)) {
         ++rep_.seeds_refused_support;
         laid_mm_ -= take_back(li, 0);   // nothing of a seed that cannot take its first step is laid
@@ -847,128 +753,61 @@ void Grower::grow_tip(const Tip& t, std::vector<Tip>& tips) {
       how = Unsupported;
       break;
     }
-    const double s = sep(q);
-    const double dense = kDenseRatio * s;
-    const Near n = nearest(q, std::max(lower_, dense), li, parent, false, false, false, &start);
-    if (n.found && (n.d < lower_ || (dense > lower_ && n.d < dense))) {
-      const double run = len(level(sub(n.hit, p)));
-      if (n.d >= lower_) {
-        // G5 (rule C): too dense for the place. The tip joins the neighbour where the run to it is at most d and
-        // climbs at the cone or steeper, and ends there (two vines merge into one); else it grows on.
-        Vec3 at;
-        if (landing(p, n.line, s, at)) {
-          lay(li, at);
-          ++rep_.joined_dense;
-          how = Joined;
-          break;
+    if (foot <= 0.0) {
+      const Near n = too_close(q, li, parent, &spared);
+      if (n.found) {
+        if (len(level(sub(n.hit, p))) > kJoinRunMm) {
+          ++rep_.joins_refused_span;   // a longer run is no join: it climbs on as if uncrowded
+        } else {
+          // JOIN the neighbour, move onto it, and DEFLECT: re-aimed away from where it came from, at the cone.
+          if (dist(n.hit, p) > 1e-9) lay(li, n.hit);
+          ++rep_.joins;
+          if (++joins_used > kMaxJoins) { how = Joins; break; }
+          Vec3 away = level(sub(p, n.hit));
+          if (len(away) < 1e-9) away = level(cross(up_, dir));
+          if (len(away) < 1e-9) away = u_;
+          away = unit(away);
+          dir = add(mul(away, cone_cos_), mul(up_, cone_sin_));
+          p = n.hit;
+          // A strand it joined does not crowd it again until it is past the separation from that join: else it would
+          // join the same vertex at once, or bounce between two neighbours, and end there (the original's tip did;
+          // the intent is that it goes on).
+          spared.push_back({n.line, n.hit});
+          since_record = kRecordRadii * r_;   // the deflection's first point is recorded
+          after_join = true;
+          continue;
         }
-        ++rep_.crowded_climbed_on;
-      } else if (exempt) {
-        aborted = true;   // a branch still leaving its parent is not rewound: it does not grow
-        break;
-      } else {
-        // GR-REWIND: back to the last point that had its local spacing to every other strand, never past the floor.
-        Line& L = lines_[static_cast<std::size_t>(li)];
-        std::size_t back = floor_idx;
-        for (std::size_t k = L.pts.size() - 1; k > floor_idx; --k) {
-          const double sk = sep(L.pts[k]);
-          const Near m = nearest(L.pts[k], sk, li, parent, false, false, false, &start);
-          if (!m.found || m.d >= sk) { back = k; break; }
-        }
-        std::vector<Vec3>& here = tried[back];
-        Vec3 d;
-        const bool can = static_cast<int>(here.size()) < kRewindTries &&
-                         turn(back == 0 ? start : L.pts[back], li, parent, start, dir, here, d);
-        if (open_place != static_cast<long long>(back)) {
-          if (open_place >= 0) ++rep_.rewind_grew_on;
-          ++rep_.rewind_places;
-          open_place = static_cast<long long>(back);
-        }
-        if (!can) {
-          // No room: join the neighbour when the run is short, else end at the last joint (never a loose tail).
-          if (run <= kJoinRunMm) {
-            if (dist(n.hit, p) > 1e-9) lay(li, n.hit);
-            ++rep_.rewind_joined;
-            how = Joined;
-          } else {
-            // LatticeReview's ruling 2: back to its seed (or the fork it grew from); the branches it offered grow only
-            // after it, so none has grown yet, and those it offered on what is taken back do not grow.
-            rep_.cut_crowded_mm += take_back(li, 0);
-            ++rep_.rewind_ended_on_joint;
-            how = GaveUp;
-          }
-          open_place = -1;
-          break;
-        }
-        here.push_back(d);
-        ++rep_.rewinds;
-        const double mm = take_back(li, back);
-        rep_.taken_back_mm += mm;
-        laid_mm_ -= mm;
-        p = lines_[static_cast<std::size_t>(li)].pts.size() == 1 ? start : lines_[static_cast<std::size_t>(li)].pts.back();
-        dir = d;
-        hold_dir = d;
-        hold = sep(p);
-        if (foot && lines_[static_cast<std::size_t>(li)].pts.size() == 1) {
-          // Rewound to its seed: its foot is laid again in the new direction (held to 78 degrees, rule F), its root
-          // run back along it into the solid.
-          hold_dir = dir = lean(d, start);
-          hold = 2.0 * width_;
-          Vec3& root = lines_[static_cast<std::size_t>(li)].pts[0];
-          if (dist(root, start) > 1e-9) root = sub(start, mul(dir, width_));
-        }
-        since_branch = 0.0;
-        continue;
       }
     }
-    lay(li, q);
+    since_record += layer_;
+    const bool record = since_record >= kRecordRadii * r_;
+    if (record) since_record = 0.0;
+    lay(li, q, record);
     first = false;
     ++rep_.steps;
-    const double stepped = dist(p, q);
-    since_branch += stepped;
-    if (hold > 0.0) hold = std::max(0.0, hold - stepped);
-    if (foot && hold <= 0.0) {
-      foot = false;
-      floor_idx = lines_[static_cast<std::size_t>(li)].pts.size() - 1;
-    }
+    if (after_join) { ++rep_.grew_on_after_join; after_join = false; }
+    spared.erase(std::remove_if(spared.begin(), spared.end(),
+                                [&](const std::pair<int, Vec3>& x) { return dist(q, x.second) >= kTestRatio * sep(x.second); }),
+                 spared.end());
     p = q;
     dir = want;
-    if (since_branch >= std::max(stepped, kBranchEveryRatio * sep(p))) {
+    if (foot > 0.0) { foot -= layer_; continue; }
+    since_branch += layer_;
+    if (since_branch >= std::max(layer_, kBranchEveryRatio * sep(p))) {
       since_branch = 0.0;
-      offer_branches(li, p, dir, floor_idx, tips);
+      offer_branches(li, p, dir, tips);
     }
   }
-  if (aborted) {
-    laid_mm_ -= take_back(li, 0);
-    if (t.kind == Tip::Branch) ++rep_.refused_room;
-    else ++rep_.regrow_failed;
-    links_made_.clear();
-    return;
-  }
-  if (open_place >= 0) ++rep_.rewind_grew_on;
-  // A link the tip made is not kept where the tip itself went on to the same place (it would lie along the tip).
-  for (int l : links_made_) {
-    const Line& K = lines_[static_cast<std::size_t>(l)];
-    if (K.pts.size() == 2 && to_line(K.pts.back(), li, width_) < width_) {
-      laid_mm_ -= take_back(l, 0);
-      --rep_.links;
-    }
-  }
-  links_made_.clear();
   {
-    // A tip that grew less than its own width is a stub (S4): taken back.
+    // A tip that grew less than its own width is a stub (S4): taken back (a re-seeded one keeps its stub).
     Line& L = lines_[static_cast<std::size_t>(li)];
     double mm = 0.0;
     for (std::size_t k = 0; k + 1 < L.pts.size(); ++k) mm += dist(L.pts[k], L.pts[k + 1]);
-    if (L.pts.size() >= 2 && mm < width_) {
-      const double back = take_back(li, 0);
-      laid_mm_ -= back;
-      rep_.taken_back_mm += back;
-    }
+    if (t.line < 0 && L.pts.size() >= 2 && mm < width_) laid_mm_ -= take_back(li, 0);
   }
   if (how == Edge) ++rep_.ended_edge;
   else if (how == Unsupported) ++rep_.ended_unsupported;
-  else if (how == Joined) ++rep_.ended_joined;
+  else if (how == Joins) ++rep_.ended_joins;
   if (lines_[static_cast<std::size_t>(li)].pts.size() >= 2) {
     ++rep_.strands_grown;
     if (t.kind == Tip::Branch) ++rep_.branches_grown;
@@ -981,13 +820,12 @@ void Grower::grow(std::vector<Tip> tips) {
     const Tip t = tips[i];
     grow_tip(t, tips);
   }
-  settle();
 }
 
-// LatticeReview's ruling 2: a vine never ends in mid-air with nothing joined to it. A strand (not a tie) whose upper
-// end is not held (past the region's edge a hair on, or on another strand) is cut back to its last joint: the
-// farthest place along it where another strand's end lies on it; with none, the strand goes. Repeated until no cut
-// leaves another end loose.
+// No vine ends in mid-air (LatticeReview's ruling 2): a strand (not a tie) whose upper end is neither past the
+// region's edge a hair on nor on another strand is cut back to its last joint (the farthest point of it that is a
+// point of another strand, or where another strand's end lies on it); with none, it goes. Repeated until nothing is
+// loose.
 void Grower::settle() {
   auto edge_held = [&](const Vec3& e) {
     static const Vec3 off[6] = {{0.05, 0, 0}, {-0.05, 0, 0}, {0, 0.05, 0}, {0, -0.05, 0}, {0, 0, 0.05}, {0, 0, -0.05}};
@@ -995,47 +833,90 @@ void Grower::settle() {
       if (!inreg(add(e, o))) return true;
     return false;
   };
-  for (int round = 0; round < 8; ++round) {
-    bool changed = false;
+  auto key = [](const Vec3& p) {
+    return std::array<long long, 3>{std::llround(p.x * 1e6), std::llround(p.y * 1e6), std::llround(p.z * 1e6)};
+  };
+  for (;;) {
+    std::map<std::array<long long, 3>, std::vector<int>> at;
     for (std::size_t l = 0; l < lines_.size(); ++l) {
+      if (lines_[l].pts.size() < 2) continue;
+      for (const Vec3& p : lines_[l].pts) {
+        std::vector<int>& v = at[key(p)];
+        if (v.empty() || v.back() != static_cast<int>(l)) v.push_back(static_cast<int>(l));
+      }
+    }
+    // the back end of line l: held, or cut back to its last joint (true)
+    auto cut_back = [&](std::size_t l) -> bool {
       Line& L = lines_[l];
-      if (L.tie || L.pts.size() < 2) continue;
       const Vec3 e = L.pts.back();
-      if (edge_held(e) || to_current_other(e, static_cast<int>(l)) < 1e-6) continue;
-      // the farthest joint along it: another strand's end on one of its segments
-      std::size_t seg = 0;
-      double tt = -1.0;
-      Vec3 at{};
-      for (std::size_t o = 0; o < lines_.size(); ++o) {
-        if (o == l || lines_[o].pts.size() < 2) continue;
-        for (const Vec3& x : {lines_[o].pts.front(), lines_[o].pts.back()})
-          for (std::size_t k = 0; k + 1 < L.pts.size(); ++k) {
-            const Vec3 c = closest_on(x, L.pts[k], L.pts[k + 1]);
+      if (edge_held(e) || at[key(e)].size() > 1) return false;
+      bool on_other = false;
+      boxes_.near(e, ds_, [&](const Sample& s) {
+        if (on_other || s.line == static_cast<int>(l) || !current(s)) return;
+        const Line& O = lines_[static_cast<std::size_t>(s.line)];
+        on_other = dist(e, closest_on(e, O.pts[static_cast<std::size_t>(s.seg)], O.pts[static_cast<std::size_t>(s.seg) + 1])) < 1e-6;
+      });
+      if (on_other) return false;
+      // the farthest joint: a point shared with another strand, or another strand's end lying on a segment
+      double best = -1.0;
+      Vec3 best_at{};
+      for (std::size_t k = 0; k + 1 < L.pts.size(); ++k)
+        if (at[key(L.pts[k])].size() > 1) { best = static_cast<double>(k); best_at = L.pts[k]; }
+      for (std::size_t k = 0; k + 1 < L.pts.size(); ++k) {
+        const Vec3 a = L.pts[k], b = L.pts[k + 1];
+        boxes_.near(mul(add(a, b), 0.5), 0.5 * dist(a, b) + ds_, [&](const Sample& s) {
+          if (s.line == static_cast<int>(l) || !current(s)) return;
+          const Line& O = lines_[static_cast<std::size_t>(s.line)];
+          for (const Vec3& x : {O.pts.front(), O.pts.back()}) {
+            const Vec3 c = closest_on(x, a, b);
             if (dist(c, x) >= 1e-6) continue;
-            const double ab = dist(L.pts[k], L.pts[k + 1]);
-            const double f = ab > 0.0 ? dist(L.pts[k], c) / ab : 0.0;
-            if (static_cast<double>(k) + f > static_cast<double>(seg) + tt) { seg = k; tt = f; at = x; }
+            const double ab = dist(a, b);
+            const double f = ab > 0.0 ? dist(a, c) / ab : 0.0;
+            if (f < 1.0 - 1e-9 && static_cast<double>(k) + f > best) { best = static_cast<double>(k) + f; best_at = x; }
           }
+        });
       }
       double gone = 0.0;
-      if (tt < 0.0) {
-        gone = take_back(l, 0);
+      if (best < 0.0) {
+        gone = take_back(static_cast<int>(l), 0);
       } else {
-        gone = take_back(l, seg + 1);   // keeps points 0..seg+1, then ends it at the joint
-        Line& M = lines_[l];
-        gone += dist(M.pts[seg], M.pts[seg + 1]) - dist(M.pts[seg], at);
-        M.pts.back() = at;
-        stamp_segment(static_cast<int>(l), seg);
-        if (dist(M.pts[seg], at) < 1e-9) { M.pts.pop_back(); M.stamp.pop_back(); M.dead.pop_back(); }
+        const std::size_t seg = static_cast<std::size_t>(std::floor(best + 1e-12));
+        const bool on_vertex = dist(L.pts[seg], best_at) < 1e-9;
+        gone = take_back(static_cast<int>(l), on_vertex ? seg : seg + 1);
+        if (!on_vertex) {
+          Line& M = lines_[l];
+          gone += dist(M.pts[seg], M.pts[seg + 1]) - dist(M.pts[seg], best_at);
+          M.pts.back() = best_at;
+          M.rec.back() = 0;
+          stamp_segment(static_cast<int>(l), seg);
+        }
       }
       rep_.cut_nothing_mm += gone;   // laid, then cut: leads to nothing
-      changed = true;
+      return true;
+    };
+    // a line turned end for end (its samples stamped again)
+    auto flip = [&](std::size_t l) {
+      Line& L = lines_[l];
+      std::reverse(L.pts.begin(), L.pts.end());
+      std::reverse(L.rec.begin(), L.rec.end());
+      std::reverse(L.dead.begin(), L.dead.end());
+      for (std::size_t k = 0; k + 1 < L.pts.size(); ++k) stamp_segment(static_cast<int>(l), k);
+    };
+    bool changed = false;
+    for (std::size_t l = 0; l < lines_.size(); ++l) {
+      if (lines_[l].tie || lines_[l].pts.size() < 2) continue;
+      if (cut_back(l)) changed = true;
+      if (lines_[l].pts.size() < 2) continue;
+      // its lower end too (brief G4: "no strand may end in mid-air"): turned, cut the same way, turned back
+      flip(l);
+      if (cut_back(l)) changed = true;
+      if (lines_[l].pts.size() >= 2) flip(l);
     }
     if (!changed) break;
   }
 }
 
-// G10, pruning step 1: a segment lying within 0.02 mm of a strand already kept, along its whole length, is a repeat
+// G10, pruning, merging repeats: a segment lying within 0.02 mm of a strand already kept, along its whole length, is a repeat
 // and is left out (the strand is split there). Strands are read in order; the first keeps it. Because the strands
 // returned are straightened (each within 0.25 r of its line), "within 0.02 mm" is read here as within 0.02 mm and
 // the two straightenings (0.5 r).
@@ -1045,6 +926,7 @@ void Grower::repeats() {
   Boxes kept = boxes_;
   kept.clear();
   std::vector<Line> keep_lines;
+  std::vector<std::array<char, 2>> split;   // per kept piece: its front, its back left by a dropped repeat
   auto dist_to = [&](const Vec3& q, std::size_t line) {
     double best = std::numeric_limits<double>::infinity();
     kept.near(q, near_mm + ds_, [&](const Sample& s) {
@@ -1091,15 +973,22 @@ void Grower::repeats() {
     }
     std::size_t s = 0;
     while (s < dup.size()) {
+      const std::size_t s0 = s;
       if (dup[s]) { rep_.cut_repeat_mm += dist(L.pts[s], L.pts[s + 1]); ++s; continue; }
       Line run;
       run.parent = -1;
       run.family = L.family;
       run.tie = L.tie;
       run.pts.push_back(L.pts[s]);
-      while (s < dup.size() && !dup[s]) { run.dead.push_back(L.dead[s]); run.pts.push_back(L.pts[++s]); }
+      run.rec.push_back(L.rec[s]);
+      while (s < dup.size() && !dup[s]) {
+        run.dead.push_back(L.dead[s]);
+        run.pts.push_back(L.pts[++s]);
+        run.rec.push_back(L.rec[s]);
+      }
       const std::size_t id = keep_lines.size();
       keep_lines.push_back(run);
+      split.push_back({static_cast<char>(s0 > 0 && dup[s0 - 1]), static_cast<char>(s < dup.size() && dup[s])});
       for (std::size_t k = 0; k + 1 < run.pts.size(); ++k) {
         const Vec3 a = run.pts[k], b = run.pts[k + 1];
         const int n = std::max(1, static_cast<int>(std::ceil(dist(a, b) / ds_)));
@@ -1112,202 +1001,43 @@ void Grower::repeats() {
   rebuild_boxes();
   // LatticeReview's ruling 3: the kept copy takes over every join and root that pointed at a dropped copy: an end that
   // lay on another strand before and lies on none now is moved onto the nearest strand within the repeat distance.
-  bool moved = false;
+  // Moved until each such end lies on another strand (an end moved onto a strand whose own end then moves is moved
+  // again), at most 8 times.
+  std::vector<std::pair<std::size_t, int>> need;
   for (std::size_t l = 0; l < lines_.size(); ++l) {
     Line& L = lines_[l];
     if (L.pts.size() < 2) continue;
     for (int end = 0; end < 2; ++end) {
-      Vec3& e = end ? L.pts.back() : L.pts.front();
-      bool was = false;
+      const Vec3& e = end ? L.pts.back() : L.pts.front();
+      bool was = split[l][static_cast<std::size_t>(end)] != 0;   // the piece went on along the dropped copy
       for (const Vec3& j : joints) was = was || dist(j, e) < 1e-9;
-      if (!was) continue;
+      if (was) need.push_back({l, end});
+    }
+  }
+  for (int round = 0; round < 8; ++round) {
+    bool moved = false;
+    for (const auto& ne : need) {
+      Line& L = lines_[ne.first];
+      if (L.pts.size() < 2) continue;
+      Vec3& e = ne.second ? L.pts.back() : L.pts.front();
       Near on;
       boxes_.near(e, near_mm + ds_, [&](const Sample& x) {
-        if (static_cast<std::size_t>(x.line) == l || !current(x)) return;
+        if (static_cast<std::size_t>(x.line) == ne.first || !current(x)) return;
         const Line& O = lines_[static_cast<std::size_t>(x.line)];
         const Vec3 c = closest_on(e, O.pts[static_cast<std::size_t>(x.seg)], O.pts[static_cast<std::size_t>(x.seg) + 1]);
         const double dd = dist(c, e);
         if (dd <= near_mm + 1e-6 && dd < on.d) { on.found = true; on.d = dd; on.hit = c; }
       });
-      if (on.found && on.d > 1e-6) { e = on.hit; moved = true; }
-    }
-  }
-  if (moved) rebuild_boxes();
-}
-
-// G10, pruning step 4, thinning to the window: where a stretch of one strand lies closer than the lower limit to
-// another, away from any joint of the two (a place within the lower limit where they touch: a crossing, a branch's
-// root, a join or a link), the strand carrying less stress along it (the mean of |t . sigma . t| over its length;
-// the earlier of equals stays) is left out there; each end that leaves is joined into the other when the run is 3 mm
-// or less, else cut. LatticeReview's ruling 3 (2026-11-15): a strand another strand stands on or has joined into (an
-// end of it lies on this one: a join, a branch's root, a tie, a regrown tip) is never cut; of two too close, the one
-// nothing depends on goes (both carrying others: neither). An end a cut leaves that is not joined is cut back to its
-// last joint (a place another strand touches it); no joint: the piece goes. No loose end remains.
-void Grower::thin() {
-  const std::size_t nl = lines_.size();
-  std::vector<double> score(nl, 0.0);
-  for (std::size_t l = 0; l < nl; ++l) {
-    const Line& L = lines_[l];
-    double s = 0.0, w = 0.0;
-    for (std::size_t k = 0; k + 1 < L.pts.size(); ++k) {
-      const double m = dist(L.pts[k], L.pts[k + 1]);
-      s += m * stress_along(mul(add(L.pts[k], L.pts[k + 1]), 0.5), unit(sub(L.pts[k + 1], L.pts[k])));
-      w += m;
-    }
-    score[l] = w > 0.0 ? s / w : 0.0;
-  }
-  auto stronger = [&](std::size_t a, std::size_t b) { return score[a] > score[b] || (score[a] == score[b] && a < b); };
-  std::vector<char> carries(nl, 0);
-  for (std::size_t l = 0; l < nl; ++l) {
-    const Line& E = lines_[l];
-    if (E.pts.size() < 2) continue;
-    for (const Vec3& e : {E.pts.front(), E.pts.back()})
-      boxes_.near(e, ds_ + 1e-6, [&](const Sample& x) {
-        if (static_cast<std::size_t>(x.line) == l || !live(x)) return;
-        const Line& O = lines_[static_cast<std::size_t>(x.line)];
-        if (dist(e, closest_on(e, O.pts[static_cast<std::size_t>(x.seg)], O.pts[static_cast<std::size_t>(x.seg) + 1])) < 1e-6)
-          carries[static_cast<std::size_t>(x.line)] = 1;
-      });
-  }
-  // of the pair: does `l` go for `a`?
-  auto goes = [&](std::size_t l, std::size_t a) { return !carries[l] && (carries[a] || stronger(a, l)); };
-  struct Cut { bool on = false; std::size_t by = 0; };
-  std::vector<std::vector<Cut>> cut(nl);
-  for (std::size_t l = 0; l < nl; ++l) {
-    const Line& B = lines_[l];
-    if (B.tie || B.pts.size() < 2) continue;
-    cut[l].assign(B.pts.size() - 1, Cut{});
-    for (std::size_t k = 0; k + 1 < B.pts.size(); ++k) {
-      if (B.dead[k]) continue;   // the path drops it anyway
-      const Vec3 a = B.pts[k], b = B.pts[k + 1];
-      const int n = std::max(1, static_cast<int>(std::ceil(dist(a, b) / ds_)));
-      for (int t = 0; t <= n && !cut[l][k].on; ++t) {
-        const Vec3 x = add(a, mul(sub(b, a), double(t) / n));
-        std::vector<int> others;
-        boxes_.near(x, lower_ + ds_, [&](const Sample& s) {
-          if (s.line == static_cast<int>(l) || !live(s) || lines_[static_cast<std::size_t>(s.line)].tie) return;
-          if (std::find(others.begin(), others.end(), s.line) == others.end()) others.push_back(s.line);
-        });
-        std::sort(others.begin(), others.end());
-        for (int A : others) {
-          if (to_line(x, A, lower_) >= lower_) continue;
-          // A joint of the two within the lower limit of here: a point of B, that near, touching A.
-          bool joint = false;
-          boxes_.near(x, lower_ + ds_, [&](const Sample& s) {
-            if (joint || s.line != static_cast<int>(l) || !live(s) || dist(s.p, x) > lower_) return;
-            if (to_line(s.p, A, width_) < width_) joint = true;
-          });
-          if (!joint) {
-            boxes_.near(x, lower_ + ds_, [&](const Sample& s) {
-              if (joint || s.line != A || !live(s) || dist(s.p, x) > lower_) return;
-              if (to_line(s.p, static_cast<int>(l), width_) < width_) joint = true;
-            });
-          }
-          if (joint) continue;
-          if (goes(l, static_cast<std::size_t>(A))) {
-            cut[l][k] = Cut{true, static_cast<std::size_t>(A)};
-            break;
-          }
-        }
+      if (on.found && on.d > 1e-9) {
+        const Vec3 nb = ne.second ? L.pts[L.pts.size() - 2] : L.pts[1];
+        laid_mm_ += dist(nb, on.hit) - dist(nb, e);   // the end moved onto the kept copy (G12: grown = kept + cuts)
+        e = on.hit;
+        moved = true;
       }
     }
+    if (!moved) break;
+    rebuild_boxes();
   }
-  std::vector<Line> out;
-  for (std::size_t l = 0; l < nl; ++l) {
-    const Line& B = lines_[l];
-    if (B.pts.size() < 2) continue;
-    if (cut[l].empty()) { out.push_back(B); continue; }
-    auto join_end = [&](std::size_t by, const Vec3& e, Vec3& to) {
-      double best = std::numeric_limits<double>::infinity();
-      const Line& A = lines_[by];
-      for (std::size_t k = 0; k + 1 < A.pts.size(); ++k) {
-        const Vec3 c = closest_on(e, A.pts[k], A.pts[k + 1]);
-        if (dist(c, e) < best) { best = dist(c, e); to = c; }
-      }
-      if (!(best < std::numeric_limits<double>::infinity() && len(level(sub(to, e))) <= kJoinRunMm)) return false;
-      // Ruling 3: the join keeps the lower limit to every other strand (it is a strut like any other); else the end is
-      // cut back instead.
-      const int n = std::max(1, static_cast<int>(std::ceil(dist(e, to) / ds_)));
-      for (int q = 0; q <= n; ++q)
-        if (nearest(add(e, mul(sub(to, e), static_cast<double>(q) / n)), lower_, static_cast<int>(l), static_cast<int>(by),
-                    false, true, true).found)
-          return false;
-      return true;
-    };
-    std::size_t k = 0;
-    const std::size_t ns = B.pts.size() - 1;
-    while (k < ns) {
-      if (cut[l][k].on) {
-        std::size_t e = k;
-        while (e < ns && cut[l][e].on) { rep_.cut_crowded_mm += dist(B.pts[e], B.pts[e + 1]); ++e; }
-        ++rep_.thinned;
-        k = e;
-        continue;
-      }
-      Line run;
-      run.family = B.family;
-      run.tie = B.tie;
-      const std::size_t s0 = k;
-      while (k < ns && !cut[l][k].on) ++k;
-      for (std::size_t q = s0; q <= k; ++q) run.pts.push_back(B.pts[q]);
-      for (std::size_t q = s0; q < k; ++q) run.dead.push_back(B.dead[q]);
-      Vec3 to;
-      bool loose_front = false, loose_back = false;
-      if (s0 > 0) {
-        if (join_end(cut[l][s0 - 1].by, run.pts.front(), to) && dist(to, run.pts.front()) > 1e-9) {
-          laid_mm_ += dist(to, run.pts.front());
-          run.pts.insert(run.pts.begin(), to);
-          run.dead.insert(run.dead.begin(), 0);
-          ++rep_.thinned_joined;
-        } else {
-          loose_front = true;
-        }
-      }
-      if (k < ns) {
-        if (join_end(cut[l][k].by, run.pts.back(), to) && dist(to, run.pts.back()) > 1e-9) {
-          laid_mm_ += dist(to, run.pts.back());
-          run.pts.push_back(to);
-          run.dead.push_back(0);
-          ++rep_.thinned_joined;
-        } else {
-          loose_back = true;
-        }
-      }
-      // Ruling 3: a loose end is cut back to the run's last joint.
-      auto joint = [&](const Vec3& x) {
-        bool j = false;
-        boxes_.near(x, width_ + ds_, [&](const Sample& y) {
-          if (j || static_cast<std::size_t>(y.line) == l || !live(y)) return;
-          const Line& O = lines_[static_cast<std::size_t>(y.line)];
-          j = dist(x, closest_on(x, O.pts[static_cast<std::size_t>(y.seg)], O.pts[static_cast<std::size_t>(y.seg) + 1])) < width_;
-        });
-        return j;
-      };
-      std::size_t lo = 0, hi = run.pts.size() - 1;
-      if (loose_front) {
-        while (lo < hi && !joint(run.pts[lo])) ++lo;
-      }
-      if (loose_back) {
-        while (hi > lo && !joint(run.pts[hi])) --hi;
-      }
-      if (lo > 0 || hi + 1 < run.pts.size()) {
-        double gone = 0.0;
-        for (std::size_t q = 0; q + 1 < run.pts.size(); ++q)
-          if (q < lo || q >= hi) gone += dist(run.pts[q], run.pts[q + 1]);
-        rep_.cut_crowded_mm += gone;
-        if (hi <= lo) continue;
-        Line keep;
-        keep.family = run.family;
-        keep.tie = run.tie;
-        keep.pts.assign(run.pts.begin() + static_cast<long>(lo), run.pts.begin() + static_cast<long>(hi) + 1);
-        keep.dead.assign(run.dead.begin() + static_cast<long>(lo), run.dead.begin() + static_cast<long>(hi));
-        run = std::move(keep);
-      }
-      out.push_back(std::move(run));
-    }
-  }
-  lines_ = std::move(out);
-  rebuild_boxes();
 }
 
 std::vector<Strand> Grower::strands() const {
@@ -1388,9 +1118,9 @@ std::vector<Strand> Grower::strands() const {
   return out;
 }
 
-// Steps 2 and 3: the path's own pruning, run on the weave alone, as Session::lay_weave runs it. Each segment's fate:
-// kept when a bar of it is left; else where its last bar went (cut to the region: outside the model; dropped loose:
-// leads to nothing; dropped as a piece not joined to the part: unsupported).
+// The path's own pruning, run on the weave alone, as Session::lay_weave runs it. Each segment's fate: kept when a bar
+// of it is left; else where its last bar went (cut to the region: outside the model; dropped loose: leads to nothing;
+// dropped as a piece not joined to the part: unsupported).
 Grower::Fate Grower::pass() {
   const std::vector<Strand> ss = strands();
   Fate f;
@@ -1441,6 +1171,73 @@ Grower::Fate Grower::pass() {
   return f;
 }
 
+// G10: the pruning, in order: repeats merged (the kept copy takes over what depended on a dropped one), no strand
+// ending in mid-air, then the path's own answer per segment (outside the model, the joining, the loose and adrift
+// drops): what it leaves out is no longer material.
+void Grower::prune() {
+  repeats();
+  settle();
+  const Fate f = pass();
+  for (std::size_t l = 0; l < lines_.size(); ++l)
+    for (std::size_t k = 0; k < f.seg[l].size(); ++k) lines_[l].dead[k] = f.seg[l][k] != 0;
+  rebuild_rec();
+}
+
+// G11: the share of the region's candidate voxels with no strand the path keeps within 1.5 x their spacing. The
+// distance from each voxel's centre to the nearest point of a kept segment (read every ds along it) is spread from
+// the voxels those points lie in to their neighbours (26), each keeping the nearest point offered, in index order.
+double Grower::bare() const {
+  const std::size_t n = static_cast<std::size_t>(field_.nx) * field_.ny * field_.nz;
+  std::vector<double> best(n, std::numeric_limits<double>::infinity());
+  std::vector<Vec3> site(n);
+  std::vector<std::size_t> queue;
+  std::vector<char> queued(n, 0);
+  for (std::size_t l = 0; l < lines_.size(); ++l) {
+    const Line& L = lines_[l];
+    for (std::size_t k = 0; k + 1 < L.pts.size(); ++k) {
+      if (L.dead[k]) continue;
+      const Vec3 a = L.pts[k], b = L.pts[k + 1];
+      const int m = std::max(1, static_cast<int>(std::ceil(dist(a, b) / ds_)));
+      for (int t = 0; t <= m; ++t) {
+        const Vec3 p = add(a, mul(sub(b, a), static_cast<double>(t) / m));
+        int i, j, kk;
+        if (!voxel(p, i, j, kk)) continue;
+        const std::size_t e = field_.index(i, j, kk);
+        const double d = dist(p, centre(i, j, kk));
+        if (d < best[e]) { best[e] = d; site[e] = p; }
+        if (!queued[e]) { queued[e] = 1; queue.push_back(e); }
+      }
+    }
+  }
+  for (std::size_t q = 0; q < queue.size(); ++q) {
+    const std::size_t e = queue[q];
+    queued[e] = 0;
+    const int i = static_cast<int>(e % static_cast<std::size_t>(field_.nx));
+    const int j = static_cast<int>((e / static_cast<std::size_t>(field_.nx)) % static_cast<std::size_t>(field_.ny));
+    const int k = static_cast<int>(e / (static_cast<std::size_t>(field_.nx) * field_.ny));
+    for (int dk = -1; dk <= 1; ++dk)
+      for (int dj = -1; dj <= 1; ++dj)
+        for (int di = -1; di <= 1; ++di) {
+          const int a = i + di, b = j + dj, c = k + dk;
+          if ((!di && !dj && !dk) || a < 0 || b < 0 || c < 0 || a >= field_.nx || b >= field_.ny || c >= field_.nz) continue;
+          const std::size_t f = field_.index(a, b, c);
+          const double d = dist(site[e], centre(a, b, c));
+          if (d < best[f] - 1e-12) {
+            best[f] = d;
+            site[f] = site[e];
+            if (!queued[f]) { queued[f] = 1; queue.push_back(f); }
+          }
+        }
+  }
+  std::size_t cand = 0, bare_n = 0;
+  for (std::size_t e = 0; e < n; ++e) {
+    if (!sp_.candidate[e]) continue;
+    ++cand;
+    bare_n += best[e] > kVoidRatio * sp_.spacing_mm[e];
+  }
+  return cand ? static_cast<double>(bare_n) / static_cast<double>(cand) : 0.0;
+}
+
 // G12 (LatticeReview's ruling 5): a strand's kept length is the length of its bars the path keeps (at most its own
 // length: a bar runs on into the solid by its width); what is not kept is cut, shared among the reasons its segments
 // give (leads to nothing when they give none). Grown = kept + the cuts.
@@ -1467,118 +1264,164 @@ void Grower::account(const Fate& f) {
   }
 }
 
-// G11, pruning step 5: holes the pruning leaves, regrown (up to 4 rounds, LatticeReview's ruling 4). A hole is a
-// candidate voxel centre (on a stride of half the median spacing) with nothing within 1.5 x its spacing, one per 1.5
-// spacings. Into each, a branch from the nearest point of a kept strand (not a tie) below the hole's centre, aimed at
-// the centre (held up to the cone where the aim is flatter), holding that aim to the centre (at most one spacing);
-// judged by rule D's room test at its far end only, then grown by every rule above. With no kept strand below: as
-// before, straight down along the build direction to the first place a strut would be held, a tip starting there.
-void Grower::regrow_holes(std::vector<Tip>& tips) {
-  std::vector<double> all;
-  for (std::size_t e = 0; e < sp_.candidate.size(); ++e)
-    if (sp_.candidate[e]) all.push_back(sp_.spacing_mm[e]);
-  if (all.empty()) return;
-  std::sort(all.begin(), all.end());
-  const double median = all[all.size() / 2];
-  const int stride = std::max(1, static_cast<int>(0.5 * median / field_.spacing));
-  std::vector<Vec3> voids;
+// G11, the original's void re-seeding (1.5), run ONCE after the first pruning (the owner, 2026-11-15: "then pruning
+// and a round of re-seeding in bare areas"). Bare places: candidate voxel centres on a stride of half the median
+// spacing with no strand the path keeps within 1.5 x their spacing, no two within that distance (first come). From
+// each, a stub walks DOWN the candidate grid (to the neighbour, of the 26, that descends most; then the one the
+// stress leans toward; then the shortest hop; never twice through a voxel), at most the region's height and two
+// spacings, until it is within the strut's radius and a voxel of the floor's solid (or the bed), or, after more than
+// two radii, within max(2 r, 0.5 x spacing) of a kept strand. Landed, it is a strand from its landing up to the bare
+// place, and a new tip starts there with a random first heading inside the cone, grown by every rule above.
+void Grower::reseed(std::vector<Tip>& tips) {
+  const double hv = field_.spacing;
+  const int stride = std::max(1, static_cast<int>(0.5 * median_ / hv));
+  double hlo = std::numeric_limits<double>::infinity(), hhi = -hlo;
+  for (int k = 0; k < field_.nz; ++k)
+    for (int j = 0; j < field_.ny; ++j)
+      for (int i = 0; i < field_.nx; ++i)
+        if (sp_.candidate[field_.index(i, j, k)]) {
+          hlo = std::min(hlo, h(centre(i, j, k)));
+          hhi = std::max(hhi, h(centre(i, j, k)));
+        }
+  std::vector<std::array<int, 3>> voids;
+  std::vector<Vec3> at;
   for (int k = 0; k < field_.nz; k += stride)
     for (int j = 0; j < field_.ny; j += stride)
       for (int i = 0; i < field_.nx; i += stride) {
-        if (!sp_.candidate[field_.index(i, j, k)]) continue;
+        const std::size_t e = field_.index(i, j, k);
+        if (!sp_.candidate[e]) continue;
         const Vec3 q = centre(i, j, k);
-        const double lim = kHoleRatio * sep(q);
-        if (nearest(q, lim, -1, -1, false, false, true).found) continue;
-        bool near_void = false;
-        for (const Vec3& o : voids) near_void = near_void || dist(o, q) < lim;
-        if (!near_void) voids.push_back(q);
+        const double lim = kVoidRatio * sp_.spacing_mm[e];
+        if (live_within(q, lim)) continue;
+        bool near = false;
+        for (const Vec3& o : at) near = near || dist(o, q) < lim;
+        if (near) continue;
+        voids.push_back({i, j, k});
+        at.push_back(q);
       }
-  rep_.holes += voids.size();
-  const double most = domain_.measure().diagonal_mm();
-  for (const Vec3& q : voids) {
-    {
-      const double d = sep(q);
-      const double look = 4.0 * d;
-      Near best;
-      int best_seg = -1;
-      boxes_.near(q, look + ds_, [&](const Sample& x) {
-        if (!live(x) || lines_[static_cast<std::size_t>(x.line)].tie || h(x.p) > h(q) - layer_) return;
-        const double dd = dist(x.p, q);
-        if (dd <= look && dd < best.d) { best.found = true; best.d = dd; best.hit = x.p; best.line = x.line; best_seg = x.seg; }
-      });
-      if (best.found) {
-        Vec3 aim = unit(sub(q, best.hit));
-        // Rule E as amended: nearer the parent's direction at the fork than 45 degrees, it is turned to 45 degrees, on
-        // the hole's side; then held up to the cone.
-        const Line& P = lines_[static_cast<std::size_t>(best.line)];
-        const Vec3 pd = unit(sub(P.pts[static_cast<std::size_t>(best_seg) + 1], P.pts[static_cast<std::size_t>(best_seg)]));
-        const double c45 = std::cos(kBranchLeaveDeg * kPi / 180.0);
-        if (dot(aim, pd) > c45) {
-          Vec3 across = sub(aim, mul(pd, dot(aim, pd)));
-          if (len(across) < 1e-9) across = cross(pd, std::fabs(dot(pd, u_)) < 0.9 ? u_ : v_);
-          aim = unit(add(mul(pd, c45), mul(unit(across), std::sin(kBranchLeaveDeg * kPi / 180.0))));
-        }
-        if (dot(aim, up_) < cone_sin_) {
-          const Vec3 side = unit(level(aim));
-          aim = len(side) > 0.5 ? add(mul(side, cone_cos_), mul(up_, cone_sin_)) : up_;
-        }
-        if (dot(aim, pd) > c45 + 1e-9) { ++rep_.regrow_failed; continue; }
-        Tip t;
-        t.kind = Tip::Regrow;
-        t.root = t.from = best.hit;
-        t.dir = aim;
-        t.target = q;
-        t.parent = best.line;
-        t.family = (lines_[static_cast<std::size_t>(best.line)].family + 1) % 3;
-        t.hold = std::min(best.d, d);
-        tips.push_back(t);
-        ++rep_.regrow_landed;
-        continue;
-      }
-    }
+  rep_.reseed_voids += voids.size();
+  const Vec3 down = mul(up_, -1.0);
+  for (std::size_t vi = 0; vi < voids.size(); ++vi) {
+    if (rep_.reseed_landed + rep_.reseed_failed >= kReseedMax) break;
+    int ci = voids[vi][0], cj = voids[vi][1], ck = voids[vi][2];
+    const Vec3 sp = centre(ci, cj, ck);
+    const double reach = (hhi - hlo) + 2.0 * sep(sp);
+    const double land_r = std::max(2.0 * r_, kTestRatio * sep(sp));
+    std::vector<Vec3> path{sp};
+    std::set<std::size_t> visited{field_.index(ci, cj, ck)};
+    Vec3 q = sp;
+    double travelled = 0.0;
     bool landed = false;
-    Vec3 x = q;
-    for (int k = 1; k * layer_ <= most; ++k) {
-      x = sub(q, mul(up_, k * layer_));
-      if (supported(x)) { landed = true; break; }
-      if (!inreg(x)) break;
-    }
-    if (!landed || !inreg(x)) { ++rep_.regrow_failed; continue; }
-    Tip t;
-    t.kind = Tip::Regrow;
-    t.root = t.from = x;
-    t.dir = up_;
-    t.target = q;
-    const Near on = nearest(x, 2.0 * r_ + kSupportRadii * r_ + r_, -1, -1, false, false, true);
-    if (on.found) {   // on a strand: it starts on it
-      t.parent = on.line;
-      t.root = t.from = on.hit;
-      t.family = (lines_[static_cast<std::size_t>(on.line)].family + 1) % 3;
-    } else {          // on the solid (or the bed): it starts on the region's edge below, run into the solid as a seed
-      const Vec3 down = mul(up_, -1.0);
-      const double at = edge(x, down, 2.0 * (r_ + kSupportRadii * r_ + layer_));
-      if (at >= 0.0) {
-        t.from = add(x, mul(down, at));
-        t.root = end_at_edge(x, down, at);
+    const int max_walk = static_cast<int>(reach / hv) + 8;
+    for (int w = 0; w < max_walk && !landed; ++w) {
+      Vec3 f = down;
+      if (stress_dir(q, f)) f = mul(f, -1.0);   // the stress, turned to point down
+      int bi = -1, bj = -1, bk = -1;
+      double best = std::numeric_limits<double>::infinity();
+      for (int dk = -1; dk <= 1; ++dk)
+        for (int dj = -1; dj <= 1; ++dj)
+          for (int di = -1; di <= 1; ++di) {
+            if (!di && !dj && !dk) continue;
+            const int i2 = ci + di, j2 = cj + dj, k2 = ck + dk;
+            if (i2 < 0 || j2 < 0 || k2 < 0 || i2 >= field_.nx || j2 >= field_.ny || k2 >= field_.nz) continue;
+            const std::size_t e2 = field_.index(i2, j2, k2);
+            if (!sp_.candidate[e2] || visited.count(e2)) continue;
+            const Vec3 o{static_cast<double>(di), static_cast<double>(dj), static_cast<double>(dk)};
+            const double score = dot(o, up_) * 10.0 - dot(o, f) + 0.1 * (std::abs(di) + std::abs(dj) + std::abs(dk));
+            if (score < best) { best = score; bi = i2; bj = j2; bk = k2; }
+          }
+      if (bi < 0) break;   // boxed in
+      ci = bi; cj = bj; ck = bk;
+      visited.insert(field_.index(ci, cj, ck));
+      const Vec3 nq = centre(ci, cj, ck);
+      travelled += dist(nq, q);
+      q = nq;
+      if (dist(q, path.back()) >= kRecordRadii * r_) path.push_back(q);
+      const Vec3 below = sub(q, mul(up_, r_ + hv));
+      if (h(below) <= bed_ || solid(below)) {
+        if (dist(path.back(), q) > 1e-6) path.push_back(q);
+        const double e = edge(q, down, 2.0 * (r_ + hv));
+        if (e >= 0.0) path.push_back(end_at_edge(q, down, e));   // on into the floor's solid by its width
+        landed = true;
+        break;
       }
+      if (travelled > 2.0 * r_) {
+        Near hit;
+        boxes_.near(q, land_r + ds_, [&](const Sample& s) {
+          if (!live(s)) return;
+          const Line& L = lines_[static_cast<std::size_t>(s.line)];
+          for (std::size_t end = 0; end < 2; ++end) {   // onto a point of it (a vertex: a joint both keep)
+            const Vec3 x = L.pts[static_cast<std::size_t>(s.seg) + end];
+            const double d = dist(x, q);
+            if (d <= land_r && (d < hit.d || (d == hit.d && s.line < hit.line))) {
+              hit.found = true;
+              hit.d = d;
+              hit.hit = x;
+              hit.line = s.line;
+            }
+          }
+        });
+        if (hit.found) {
+          if (dist(hit.hit, path.back()) > 1e-6) path.push_back(hit.hit);
+          landed = true;
+          break;
+        }
+      }
+      if (travelled > reach) break;   // out of reach
     }
+    if (!landed || path.size() < 2) { ++rep_.reseed_failed; continue; }
+    const int li = new_line(path.back(), -1, 0);
+    for (std::size_t k = path.size() - 1; k-- > 0;) {
+      rep_.reseed_mm += dist(path[k + 1], path[k]);
+      lay(li, path[k], true);
+    }
+    ++rep_.reseed_landed;
+    Tip t;
+    t.kind = Tip::Reseed;
+    t.line = li;
+    t.root = t.from = sp;
+    t.dir = cap(4, static_cast<long long>(vi), 0);
     tips.push_back(t);
-    ++rep_.regrow_landed;
+    ++tips_;
   }
 }
 
-// G9 (amended 2026-11-15, rule G): the transfer ties. Along every pillar (family 0) once per local spacing, not within
-// half a spacing of another tie, where the minor stress is at least 0.10 of the major: both ways along the tie's
-// direction there (the second principal direction turned by the swirl, the old closed form), a tie leaves the pillar
-// and lands on a neighbouring vine at a point HIGHER up it: of the points of other vines (not ties; only what the path
-// keeps, from the first regrowth on) on that side, within 1.5 x d of where it leaves and climbing to them at 35
-// degrees or more from level, each vine's nearest; of those the vine lying most nearly along the tie's direction. The
-// tie is straight; its ends are not moved (the vine it lands on is cut at the landing point, as every joint is). No
-// such point: no tie.
-void Grower::ties() {
+// G9, the original's transfer ties (1.6). Along every pillar (family 0) grown from `from` on, once per local spacing
+// of its length, not within half a spacing of another tie, where the minor stress is at least 0.10 of the major: both
+// ways along the second principal direction (midpoint steps of one layer, the sign kept), turned by the swirl (28
+// degrees x tie_swirl x a fixed product of sines, wavelength 3.5 spacings, about the axis across it and the major
+// direction), up to 8 spacings, stopping where it leaves the region. On the way it welds onto a recorded vertex of
+// another strand within max(2 r, 0.75 layer) (more than 2 r from its last weld, not the strand it last welded to);
+// after a spacing, within half a spacing of another tie's point, it welds there and stops. With no weld it is no tie.
+// Its free points are thinned to 8 r apart (welds kept). A tie is a strut like any other: the path's support and
+// bridge rules judge it.
+void Grower::ties(std::size_t from) {
+  std::vector<Vec3> tie_pts;
+  Boxes tie_box = rec_;
+  tie_box.clear();
+  for (const Line& L : lines_)
+    if (L.tie)
+      for (const Vec3& p : L.pts) tie_box.put(Sample{0, 0, 0, p});
+  auto near_tie = [&](const Vec3& q, double lim, Vec3* hit) {
+    bool found = false;
+    double best = lim;
+    tie_box.near(q, lim, [&](const Sample& s) {
+      const double d = dist(q, s.p);
+      if (d < best) { best = d; found = true; if (hit) *hit = s.p; }
+    });
+    return found;
+  };
+  auto minor = [&](const Vec3& p, Vec3& e2, double& ratio, Vec3& e1) {
+    double ev[3];
+    Vec3 fr[3];
+    if (!frame(p, ev, fr)) return false;
+    e2 = fr[1];
+    e1 = fr[0];
+    ratio = std::fabs(ev[1]) / std::fabs(ev[0]);
+    return len(e2) > 1e-9;
+  };
   const std::size_t pillars = lines_.size();
-  const double climb = std::sin(kTieClimbDeg * kPi / 180.0);
-  for (std::size_t ci = 0; ci < pillars; ++ci) {
+  for (std::size_t ci = from; ci < pillars; ++ci) {
     if (lines_[ci].family != 0 || lines_[ci].tie || lines_[ci].pts.size() < 2) continue;
     double since = 0.0;
     const std::vector<Vec3> pc = lines_[ci].pts;
@@ -1586,47 +1429,94 @@ void Grower::ties() {
       since += dist(pc[pi], pc[pi - 1]);
       const Vec3 p = pc[pi];
       if (lines_[ci].dead[pi - 1]) continue;   // not on what the path drops
-      const double d = sep(p);
-      if (since < d) continue;
+      if (since < sep(p)) continue;
       since = 0.0;
-      if (nearest(p, kCrowdedRatio * d, -1, -1, true).found) continue;   // not within half a spacing of a tie
-      double ev[3];
-      Vec3 fr[3];
-      if (!frame(p, ev, fr)) continue;
-      if (std::fabs(ev[1]) / std::fabs(ev[0]) < kTieMinorRatio) { ++rep_.ties_refused_minor; continue; }
-      Vec3 tdir;
-      if (!swirl(p, tdir)) continue;
-      const Vec3 th = unit(level(tdir));
+      if (near_tie(p, kTestRatio * sep(p), nullptr)) continue;
+      Vec3 e2, e1;
+      double ratio = 0.0;
+      if (!minor(p, e2, ratio, e1)) continue;
+      if (ratio < kTieMinorRatio) { ++rep_.ties_refused_minor; continue; }
       for (int sgn = -1; sgn <= 1; sgn += 2) {
         ++rep_.ties_seeded;
-        const double most = kTieLengthRatio * d;
-        // per vine, its nearest landing point on this side
-        std::map<int, std::pair<double, Vec3>> per;
-        boxes_.near(p, most + ds_, [&](const Sample& x) {
-          if (x.line == static_cast<int>(ci) || !live(x) || lines_[static_cast<std::size_t>(x.line)].tie) return;
-          const Vec3 w = sub(x.p, p);
-          const double l = len(w);
-          if (l > most || l < 2.0 * width_ || dot(w, up_) < climb * l - 1e-12) return;
-          if (len(th) > 0.5 && sgn * dot(level(w), th) <= 0.0) return;
-          auto it = per.find(x.line);
-          if (it == per.end() || l < it->second.first) per[x.line] = {l, x.p};
-        });
-        int pick = -1;
-        double align = -2.0;
-        Vec3 at{};
-        for (const auto& kv : per) {   // in vine order: the first of equals
-          const Vec3 lw = unit(level(sub(kv.second.second, p)));
-          const double a = len(th) > 0.5 && len(lw) > 0.5 ? sgn * dot(lw, th) : 0.0;
-          if (a > align + 1e-12) { align = a; pick = kv.first; at = kv.second.second; }
+        const double max_reach = kTieReachRatio * sep(p);
+        Vec3 dir = mul(e2, sgn);
+        Vec3 q = p;
+        double travelled = 0.0;
+        std::vector<Vec3> path{p};
+        std::vector<char> must{1};
+        int joins = 0, last_line = static_cast<int>(ci);
+        Vec3 last_join = p;
+        while (travelled < max_reach) {
+          Vec3 ea, em, xa, xm;
+          double ra, rm;
+          if (!minor(q, ea, ra, xa)) break;
+          if (dot(ea, dir) < 0.0) ea = mul(ea, -1.0);
+          const Vec3 mid = add(q, mul(ea, 0.5 * layer_));
+          if (!minor(mid, em, rm, xm)) break;
+          if (dot(em, dir) < 0.0) em = mul(em, -1.0);
+          dir = unit(em);
+          if (ask_.tie_swirl > 0.0) {
+            const double lam = kTieSwirlWavelengthRatio * sep(q);
+            const double k1 = 2.0 * kPi / lam, k2 = k1 * 0.618, k3 = k1 * 1.414;
+            const double phase = std::sin(k1 * q.x + 0.7) * std::cos(k2 * q.z + 1.9) +
+                                 0.5 * std::sin(k3 * (q.x + q.z) + 0.3) * std::cos(k1 * q.y + 2.4);
+            const double ang = ask_.tie_swirl * kTieSwirlDeg * kPi / 180.0 * std::clamp(phase, -1.0, 1.0);
+            const Vec3 axis = unit(cross(dir, xa));
+            if (len(axis) > 1e-9) {
+              const double c = std::cos(ang), sn = std::sin(ang);
+              dir = unit(add(add(mul(dir, c), mul(cross(axis, dir), sn)), mul(axis, dot(axis, dir) * (1.0 - c))));
+            }
+          }
+          const Vec3 nq = add(q, mul(dir, layer_));
+          if (!inreg(nq)) break;
+          q = nq;
+          travelled += layer_;
+          path.push_back(q);
+          must.push_back(0);
+          if (dist(q, last_join) > 2.0 * r_) {
+            Near w;
+            const double wr = std::max(2.0 * r_, 0.75 * layer_);
+            rec_.near(q, wr, [&](const Sample& s) {
+              if (s.line == static_cast<int>(ci) || !rec_current(s)) return;
+              const double d = dist(q, s.p);
+              if (d < wr && (d < w.d || (d == w.d && s.line < w.line))) { w.found = true; w.d = d; w.hit = s.p; w.line = s.line; }
+            });
+            if (w.found && w.line != last_line) {
+              path.back() = w.hit;
+              must.back() = 1;
+              q = w.hit;
+              ++joins;
+              last_line = w.line;
+              last_join = w.hit;
+            }
+          }
+          Vec3 tv;
+          if (travelled > sep(p) && near_tie(q, kTestRatio * sep(q), &tv)) {
+            path.push_back(tv);
+            must.push_back(1);
+            ++joins;
+            break;
+          }
         }
-        if (pick < 0) { ++rep_.ties_refused_reach; continue; }
-        // the tie stays in the region along its length
-        bool in = true;
-        const int n = std::max(2, static_cast<int>(std::ceil(dist(p, at) / 0.5)));
-        for (int k = 1; k < n && in; ++k) in = inreg(add(p, mul(sub(at, p), static_cast<double>(k) / n)));
-        if (!in) { ++rep_.ties_refused_reach; continue; }
-        const int l = new_line(p, static_cast<int>(ci), 1, true);
-        lay(l, at);
+        if (joins < 1) { ++rep_.ties_refused_reach; continue; }
+        {
+          const double keep_d = 8.0 * r_;
+          std::vector<Vec3> thin;
+          std::size_t next_must = 0;
+          for (std::size_t k = 0; k < path.size(); ++k) {
+            if (must[k]) { thin.push_back(path[k]); continue; }
+            next_must = std::max(next_must, k);
+            while (next_must < path.size() && !must[next_must]) ++next_must;
+            const double to_next = next_must < path.size() ? dist(path[next_must], path[k]) : 1e9;
+            if (dist(path[k], thin.back()) >= keep_d && to_next >= keep_d) thin.push_back(path[k]);
+          }
+          path.swap(thin);
+        }
+        if (path.size() < 2) { ++rep_.ties_refused_reach; continue; }
+        const int l = new_line(path[0], static_cast<int>(ci), 1, true);
+        for (std::size_t k = 1; k < path.size(); ++k)
+          if (dist(path[k], lines_[static_cast<std::size_t>(l)].pts.back()) > 1e-9) lay(l, path[k]);
+        for (const Vec3& v : path) tie_box.put(Sample{0, 0, 0, v});
         ++rep_.ties_laid;
       }
     }
@@ -1639,6 +1529,8 @@ std::vector<Strand> Grower::run() {
     throw std::invalid_argument("grow_strands: the build direction must not be zero");
   if (!(ask_.layer_mm > 0.0) || !std::isfinite(ask_.layer_mm))
     throw std::invalid_argument("grow_strands: layer_mm must be above 0");
+  if (!(ask_.seed_stride > 0.0) || !std::isfinite(ask_.seed_stride))
+    throw std::invalid_argument("grow_strands: seed_stride must be above 0");
   const double thinnest = domain_.spec().bead_mm * domain_.spec().min_strut_lines;
   if (ask_.width_mm != 0.0 && !(ask_.width_mm >= thinnest - 1e-12))
     throw std::invalid_argument("grow_strands: the strut width is under the thinnest strut (G8)");
@@ -1651,12 +1543,16 @@ std::vector<Strand> Grower::run() {
   width_ = ask_.width_mm > 0.0 ? ask_.width_mm : thinnest;   // G8 (idea A): never under two lines
   r_ = 0.5 * width_;
   ds_ = std::min(layer_, 0.5 * r_);
-  lower_ = ask_.spacing_mm > 0.0 ? ask_.spacing_mm : ask_.spacing_min_mm;
   sep_hi_ = ask_.spacing_mm > 0.0 ? ask_.spacing_mm : ask_.spacing_max_mm;
+  {
+    std::vector<double> all;
+    for (std::size_t e = 0; e < sp_.candidate.size(); ++e)
+      if (sp_.candidate[e]) all.push_back(sp_.spacing_mm[e]);
+    std::sort(all.begin(), all.end());
+    median_ = all[all.size() / 2];
+  }
   cone_sin_ = std::sin(kConeDeg * kPi / 180.0);
   cone_cos_ = std::cos(kConeDeg * kPi / 180.0);
-  steep_sin_ = std::sin(kSteepestDeg * kPi / 180.0);
-  steep_cos_ = std::cos(kSteepestDeg * kPi / 180.0);
   bed_ = std::numeric_limits<double>::infinity();
   for (const Vec3& p : domain_.measure().mesh().vertices) bed_ = std::min(bed_, h(p));
   {
@@ -1664,31 +1560,31 @@ std::vector<Strand> Grower::run() {
     const Vec3 hi = add(field_.origin, Vec3{field_.nx * field_.spacing + sep_hi_, field_.ny * field_.spacing + sep_hi_,
                                             field_.nz * field_.spacing + sep_hi_});
     boxes_.init(lo, hi, 2.0);
+    rec_.init(lo, hi, std::max(1e-3, kTestRatio * median_ * 2.0));
   }
+  lighting();
+  // The owner's order (2026-11-15): grow, prune, then one round of re-seeding in the bare areas, grown and pruned
+  // the same way.
   std::vector<Tip> tips;
   seeds(tips);
+  tips_ = tips.size();
   grow(std::move(tips));
-  if (ask_.ties) ties();
+  if (ask_.ties) ties(0);
+  prune();
+  rep_.bare_before = bare();
+  const std::size_t first_new = lines_.size();
+  std::vector<Tip> more;
+  reseed(more);
+  grow(std::move(more));
+  if (ask_.ties) ties(first_new);
   repeats();
   settle();
-  thin();
-  for (int round = 0; round < kRegrowRounds; ++round) {
-    // The path's pruning: what it drops is no longer material for the regrowth (it stays in the plant returned,
-    // and the path drops it again).
-    const Fate f = pass();
-    for (std::size_t l = 0; l < lines_.size(); ++l)
-      for (std::size_t k = 0; k < f.seg[l].size(); ++k) lines_[l].dead[k] = f.seg[l][k] != 0;
-    std::vector<Tip> more;
-    regrow_holes(more);
-    if (more.empty()) break;
-    ++rep_.regrow_rounds;
-    grow(std::move(more));
-    if (ask_.ties) ties();
-    repeats();
-    settle();
-    thin();
-  }
-  account(pass());   // what the path keeps of the strands returned, and what it cuts
+  const Fate f = pass();
+  account(f);
+  for (std::size_t l = 0; l < lines_.size(); ++l)
+    for (std::size_t k = 0; k < f.seg[l].size(); ++k) lines_[l].dead[k] = f.seg[l][k] != 0;
+  rep_.bare_after = bare();
+  rep_.tips = tips_;
   rep_.grown_mm = laid_mm_;
   std::vector<Strand> out = strands();
   rep_.strands = out.size();
