@@ -1,7 +1,9 @@
 // AppAsks1114HostedTests — the owner's app-only asks of 11-14, on the real page at the sweep's six windows:
 //   (a) the thin-wall pop-up sits in the centre of the screen, wholly on it, its buttons working;
 //   (c) in Edit faces the other half of a selected cut piece is tinted only while Union (the tool that joins the halves back)
-//       is armed — not under Select, Similar, Cut, Pattern, Region or Paint.
+//       is armed — not under Select, Similar, Cut, Pattern, Region or Paint;
+//   (d) Edit faces' rail opens to the left on its arrow: every tool's name above its icon and its (i), each (i) its own 44 pt
+//       target showing exactly its text; closed, the rail is today's to the point.
 #if canImport(AppKit) && canImport(MetalKit)
 import XCTest
 import SwiftUI
@@ -133,6 +135,119 @@ final class AppAsksCutSiblingTintHostedTests: XCTestCase {
             let union = try armed("Union")
             XCTAssertGreaterThan(union.pickGroups, 0, "\(name): premise: Union picked the piece")
             XCTAssertTrue(siblingDrawn(union), "★ \(name): Union — the other half is lit (Union joins the halves back)")
+        }
+    }
+}
+// MARK: (d)
+
+final class AppAsksToolRailHostedTests: XCTestCase {
+
+    private let names = SurfaceTool.allCases.map(\.title) + ["Paint", "Pencil only"]
+    private func targetKey(_ n: String) -> String { n == "Pencil only" ? "cutToolTarget-PencilOnly" : "cutToolTarget-\(n)" }
+
+    /// Today's closed rail (printed on the base, 0379e639, at all six windows): the capsule 80 pt in from the right edge at
+    /// y 299.5, 56 × 417; its targets 74 pt in, 50 pt apart from y 305.5, Paint at 605.5, Pencil only at 666.5.
+    private func todays(_ size: CGSize) -> [String: CGRect] {
+        var t: [String: CGRect] = ["cutRail": CGRect(x: size.width - 80, y: 299.5, width: 56, height: 417)]
+        for (i, tool) in SurfaceTool.allCases.enumerated() {
+            t["cutToolTarget-\(tool.title)"] = CGRect(x: size.width - 74, y: 305.5 + 50 * CGFloat(i), width: 44, height: 44)
+        }
+        t["cutToolTarget-Paint"] = CGRect(x: size.width - 74, y: 605.5, width: 44, height: 44)
+        t["cutToolTarget-PencilOnly"] = CGRect(x: size.width - 74, y: 666.5, width: 44, height: 44)
+        return t
+    }
+
+    private func same(_ a: CGRect, _ b: CGRect) -> Bool {
+        abs(a.minX - b.minX) < 0.5 && abs(a.minY - b.minY) < 0.5 && abs(a.width - b.width) < 0.5 && abs(a.height - b.height) < 0.5
+    }
+
+    /// The owner's words for each (i), exactly (the brief of 11-14). A hosted popover's words cannot be read back (no
+    /// accessibility tree; its root view holds no Text when mirrored), so the page's (i)s are held to `CutRailInfo` here and
+    /// each (i) is tapped to show that it opens its popover.
+    private let owners: [String: String] = [
+        "Select": "Picks one face. Tap a face to select it.",
+        "Similar": "Picks every face that looks like the one you tap, such as all the bolt holes at once. Tap one of them.",
+        "Cut": "Splits a face into two pieces along a line. Tap the face where the cut goes, turn or tilt the line on its bar, then tap ✓.",
+        "Union": "Joins faces into one, or joins a cut face's pieces back together. Tap the faces to join, then ✓.",
+        "Pattern": "Splits a face into a grid of pieces. Tap the face, set the grid, then ✓.",
+        "Region": "Adds faces to a region or takes them out. Tap the region, then the faces to add or drop.",
+        "Paint": "On an STL part, paints a face of your own where the file has none. Brush over the part; the eraser takes paint off.",
+        "Pencil only": "On: only the Apple Pencil picks and cuts; your finger turns and zooms the part.",
+    ]
+
+    @MainActor
+    func testTheArrowOpensTheRailWithNamesAndInfo() throws {
+        for (name, size) in zip(sweepNames, AppBuildHost.sweep) {
+            let (h, _) = try ParityCutShots.cut(size, test: self)
+            func either(_ k: String) -> String { h.frames.all[k + "-on"] != nil ? k + "-on" : k }
+
+            // closed: today's rail, to the point
+            for (k, want) in todays(size) {
+                let got = try h.onScreen(k, "\(name): \(k)")
+                XCTAssertTrue(same(got, want), "★ \(name): closed, \(k) is today's \(want): got \(got)")
+            }
+            XCTAssertTrue(h.frames.all.keys.filter { $0.hasPrefix("info-cutRail") || $0.hasPrefix("cutRailName-") }.isEmpty,
+                          "\(name): closed, no names and no (i)")
+            try h.tap(either("cutTool-Union"), "\(name): closed, a tap on Union's icon")
+            XCTAssertNotNil(h.frames.all["cutTool-Union-on"], "★ \(name): closed, a tap on the icon picks the tool")
+
+            // the arrow opens it to the left
+            let arrow = try h.probe("cutRailArrow", "★ \(name): the rail's arrow, a 44 pt target")
+            let closedRail = try XCTUnwrap(h.frames.all["cutRail"])
+            XCTAssertLessThanOrEqual(arrow.maxX, closedRail.minX + 0.5, "\(name): the arrow is beside the rail, on its left")
+            try h.tap("cutRailArrow", "\(name): the arrow", settle: 1)
+            let rail = try h.onScreen("cutRail", "★ \(name): the open rail, wholly on the screen")
+            print("OPEN RAIL \(name) \(Int(size.width))×\(Int(size.height)): \(rail) (closed \(closedRail))")
+            XCTAssertEqual(rail.maxX, closedRail.maxX, accuracy: 0.5, "★ \(name): it opens to the LEFT (its right edge stays)")
+            XCTAssertLessThan(rail.minX, closedRail.minX - 40, "★ \(name): … and is wider")
+            _ = try h.probe("cutRailArrow-on", "\(name): the arrow, open")
+
+            var infos: [CGRect] = []
+            for n in names {
+                let label = try h.onScreen("cutRailName-\(n)", "★ \(name): \(n)'s name")
+                let target = try h.probe(targetKey(n), "\(name): \(n)'s target")
+                XCTAssertTrue(target.insetBy(dx: -0.5, dy: -0.5).contains(label), "★ \(name): \(n)'s name is in its target (a tap on it picks it)")
+                let icon = try h.onScreen(either(n == "Pencil only" ? "cutTool-PencilOnly" : "cutTool-\(n)"), "\(name): \(n)'s icon")
+                XCTAssertLessThanOrEqual(label.maxY, icon.minY + 0.5, "★ \(name): \(n)'s name is above its icon")
+                let info = try h.probe("info-cutRail-\(n)", "★ \(name): \(n)'s (i), its own 44 pt target")
+                XCTAssertFalse(info.intersects(target.insetBy(dx: 0.5, dy: 0.5)), "\(name): \(n)'s (i) is its own target")
+                XCTAssertTrue(rail.insetBy(dx: -0.5, dy: -0.5).contains(info), "\(name): \(n)'s (i) is in the rail")
+                infos.append(info)
+            }
+            for i in infos.indices { for j in infos.indices where j > i {
+                XCTAssertFalse(infos[i].insetBy(dx: 0.5, dy: 0.5).intersects(infos[j]), "★ \(name): no two (i)s overlap")
+            } }
+            // it covers no other control
+            let own = ["cutRail", "cutTool", "info-cutRail", "cutRailName-", "cutRailHint", "cutPaintWhy"]
+            for (k, f) in h.frames.all where !own.contains(where: { k.hasPrefix($0) }) {
+                if f.insetBy(dx: -0.5, dy: -0.5).contains(rail) { continue }   // the page round it
+                XCTAssertFalse(rail.insetBy(dx: 0.5, dy: 0.5).intersects(f), "★ \(name): the open rail covers \(k) \(f)")
+            }
+            // each (i) holds exactly its text, and opens its popover
+            for n in names {
+                XCTAssertEqual(CutRailInfo.text(n), owners[n], "★ \(n)'s (i) says exactly the owner's words")
+                try h.tap("info-cutRail-\(n)", "\(name): \(n)'s (i)", settle: 0.6)
+                XCTAssertNotNil(NSApp.windows.first { $0 !== h.window && $0.isVisible && $0.className.contains("Popover") },
+                                "★ \(name): \(n)'s (i) opens its popover")
+                NSApp.windows.filter { $0 !== h.window && $0.className.contains("Popover") }.forEach { $0.orderOut(nil) }
+                h.pump(0.4)
+            }
+            // a tap on a name picks the tool, open
+            try h.tap("cutRailName-Region", "\(name): open, Region's name", settle: 0.8)
+            XCTAssertNotNil(h.frames.all["cutTool-Region-on"], "★ \(name): open, a tap on the name picks the tool")
+            try h.tap(either("cutTool-Similar"), "\(name): open, Similar's icon", settle: 0.8)
+            XCTAssertNotNil(h.frames.all["cutTool-Similar-on"], "★ \(name): open, a tap on the icon picks the tool")
+            try h.tap("cutRailName-Pencil only", "\(name): open, Pencil only's name", settle: 0.8)
+            XCTAssertNotNil(h.frames.all["cutTool-PencilOnly-on"], "★ \(name): open, a tap on Pencil only's name turns it on")
+            try h.tap("cutRailName-Pencil only", "\(name): … and off", settle: 0.8)
+            XCTAssertNil(h.frames.all["cutTool-PencilOnly-on"], "\(name): Pencil only is off again")
+
+            // the arrow closes it: today's rail again
+            try h.tap("cutRailArrow-on", "\(name): the arrow again", settle: 1)
+            for (k, want) in todays(size) {
+                let got = try h.onScreen(k, "\(name): \(k)")
+                XCTAssertTrue(same(got, want), "★ \(name): closed again, \(k) is today's \(want): got \(got)")
+            }
         }
     }
 }

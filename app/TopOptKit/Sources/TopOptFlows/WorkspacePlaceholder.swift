@@ -428,6 +428,8 @@ public struct WorkspacePlaceholder: View {
     /// option to do movement with fingers only and actions with the pencil only".
     /// ★ OFF BY DEFAULT (§2b) — both inputs do everything, as today.
     @State private var surfacePencilOnly = false
+    /// ★ his 11-14: Edit faces' rail opened to the left, each tool's name and (i) shown (`CutRailOpen.swift`). Closed on every launch.
+    @State private var cutRailOpen = false
     /// ★ §2(c) — SET THE FIRST TIME A PENCIL TOUCHES THE VIEWPORT. There is no
     /// "pencil paired" API to ask; the discipline stays inert until this is true,
     /// so the button can never leave a finger-only user unable to edit.
@@ -7808,7 +7810,7 @@ public struct WorkspacePlaceholder: View {
     @ViewBuilder private var surfaceToolsPanel: some View {
         // ★ B8 (mockup #cut, its .rail): ONE glass capsule of round 40 pt tools, the armed one in the accent. Outlines and
         // X-ray left it for the view corner (R0: "Cut: Outlines · X-ray" in the corner, as on every stage).
-        VStack(spacing: 6) {
+        VStack(spacing: cutRailOpen ? 0 : 6) {   // ★ his 11-14: open, the names take the gaps (the rail stays on an 11″ landscape)
             ForEach(SurfaceTool.allCases, id: \.rawValue) { tool in
                 // Abandons the last tool's work in progress, then arms this one on whatever is still selected — see
                 // `surfaceSwitch` (which also puts Paint down: one tool at a time).
@@ -7826,19 +7828,24 @@ public struct WorkspacePlaceholder: View {
             Rectangle().fill(DS.Color.strokeStrong.color).frame(width: 24, height: 1).padding(.vertical, 2)
             // (its action stays the bare toggle, written out: SurfacePencilToggleExemptionTests)
             Button { surfacePencilOnly.toggle() } label: {
+                CutRailLabel(open: cutRailOpen, name: CutRailInfo.pencilOnly) {   // ★ his 11-14: open, its name above it
                 cutRailGlyph("applepencil", on: surfacePencilOnly)
                     .background(DSParts.publish(surfacePencilOnly ? "cutTool-PencilOnly-on" : "cutTool-PencilOnly"))
                     .frame(width: 44, height: 44).contentShape(Rectangle())   // ★ B10 (Touch): the 40 pt disc, a 44 pt target
+                }
             }
                 .buttonStyle(.plain)
                 .background(DSParts.publish("cutToolTarget-PencilOnly"))
                 .accessibilityLabel("Pencil only")
+                .modifier(CutRailInfoTip(open: cutRailOpen, name: CutRailInfo.pencilOnly))   // ★ his 11-14: open, its (i)
         }
         .padding(6)
         .background(Capsule().fill(DS.Surface.bar.color)
             .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
         .dsShadow(DS.Shadow.panel)
         .background(DSParts.publish("cutRail"))
+        // ★ his 11-14: the arrow beside the rail opens it to the left (names and (i)s) and closes it again
+        .overlay(alignment: .leading) { CutRailArrow(open: $cutRailOpen).offset(x: -48) }
         // ONE LINE saying what a tap does, to the LEFT of the rail (the mockup's: 12 pt, secondary, 12 pt off the rail,
         // 10 pt under its top) — a rail of icons must not be a guessing game.
         .overlay(alignment: .topLeading) {
@@ -7867,14 +7874,18 @@ public struct WorkspacePlaceholder: View {
     private func cutRailButton(_ icon: String, label: String, on: Bool, key: String,
                                action: @escaping () -> Void) -> some View {
         // ★ B10 (Touch): the mockup's 40 pt disc (its frame stays "cutTool-<title>"), in a 44 pt target ("cutToolTarget-…")
+        // ★ his 11-14: open, the tool's name above its icon (one target: a tap on the name picks it too) and its (i) beside them
         Button(action: action) {
-            cutRailGlyph(icon, on: on)
-                .background(DSParts.publish(on ? key + "-on" : key))
-                .frame(width: 44, height: 44).contentShape(Rectangle())
+            CutRailLabel(open: cutRailOpen, name: label) {
+                cutRailGlyph(icon, on: on)
+                    .background(DSParts.publish(on ? key + "-on" : key))
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
+            }
         }
             .buttonStyle(.plain)
             .background(DSParts.publish(key.replacingOccurrences(of: "cutTool-", with: "cutToolTarget-")))
             .accessibilityLabel(label)
+            .modifier(CutRailInfoTip(open: cutRailOpen, name: label))
     }
 
     /// A rail tool's face: 40 pt round, the accent with a white glyph when on.
