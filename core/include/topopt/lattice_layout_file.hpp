@@ -93,7 +93,9 @@ struct FileJob {
   // field there itself. A job with a weave region and no field is refused (no_stress_result, OR14).
   std::string tensor;
   std::shared_ptr<const TensorField> tensor_field;
-  // The trace's ask (layout keys "organic_spacing_mm", "organic_width_mm"); read only when a region is a weave.
+  // The trace's ask (layout keys "organic_spacing_mm", or "organic_spacing_min_mm" with "organic_spacing_max_mm" and
+  // "organic_spacing_exponent" (O12); "organic_width_mm"; the reference is the layout's "reference_mpa" and
+  // "percentile"); read only when a region is a weave.
   OrganicAsk organic;
   Settings settings;
   FileOptions options;
@@ -185,6 +187,8 @@ struct FileResult {
   // and the shallow-bar table (filled once the file is made).
   std::size_t weave_regions = 0, strands = 0, weave_bars = 0;
   double ms_trace = 0.0;
+  // O12: the spacing the trace used over the weave regions' candidates (Outcome::spacing_*), mm; 0 with no weave.
+  double spacing_smallest_mm = 0.0, spacing_largest_mm = 0.0, spacing_mean_mm = 0.0;
   ShallowTable shallow;
   // The mesh.
   FileReport made;

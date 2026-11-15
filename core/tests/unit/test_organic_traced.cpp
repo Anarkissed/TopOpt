@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <map>
+#include <stdexcept>
 #include <vector>
 
 #include "topopt/lattice_layout.hpp"
@@ -603,12 +604,139 @@ static void test_whole_run() {
   CHECK(banded == t.runs && t.held_both + t.held_one + t.held_none == t.bars);
 }
 
+// G (O12): the spacing is a range that follows the stress.
+// G1: the range with both ends at 4 mm gives stage 1b's strands (one spacing of 4 mm) to the bit.
+static bool same_strands(const std::vector<Strand>& x, const std::vector<Strand>& y) {
+  bool same = x.size() == y.size() && !x.empty();
+  for (std::size_t k = 0; same && k < x.size(); ++k) {
+    same = x[k].points.size() == y[k].points.size() && x[k].width_mm == y[k].width_mm && x[k].region == y[k].region &&
+           x[k].spacing_mm == y[k].spacing_mm;
+    for (std::size_t i = 0; same && i < x[k].points.size(); ++i)
+      same = std::memcmp(&x[k].points[i], &y[k].points[i], sizeof(Vec3)) == 0;
+  }
+  return same;
+}
+static void test_range_equal_ends() {
+  Block b;
+  OrganicAsk range = b.ask;
+  range.spacing_mm = 0.0;
+  range.spacing_min_mm = range.spacing_max_mm = 4.0;
+  OrganicTraceStats st;
+  const std::vector<Strand> one = trace_strands(b.d, 1, b.field, b.ask), two = trace_strands(b.d, 1, b.field, range, &st);
+  const bool same = same_strands(one, two);
+  std::printf("range 4 to 4: %zu strands, the same as one spacing of 4 mm %d; spacing used %.4f to %.4f, mean %.4f\n", two.size(),
+              same ? 1 : 0, st.spacing_smallest_mm, st.spacing_largest_mm, st.spacing_mean_mm);
+  CHECK(same);
+  CHECK(st.candidates == 12u * 12u * 24u && st.spacing_smallest_mm == 4.0 && st.spacing_largest_mm == 4.0);
+  // The ask refuses a range that is not one.
+  auto refuses = [&](double lo, double hi, double e) {
+    OrganicAsk a = range;
+    a.spacing_min_mm = lo; a.spacing_max_mm = hi; a.spacing_exponent = e;
+    try { (void)organic_spacing(b.d, 1, b.field, a); } catch (const std::invalid_argument&) { return true; }
+    return false;
+  };
+  CHECK(refuses(0.0, 8.0, 1.0) && refuses(5.0, 4.0, 1.0) && refuses(3.0, 8.0, 0.0) && !refuses(3.0, 8.0, 1.0));
+}
+
+// G2, G3: a 48 x 12 x 12 mm block, all of it one weave region, under a stress that rises along x from almost nothing
+// at x = 0 to 24 MPa at x = 48 (sxx = s, syy = 0.3 s, szz = 0.1 s; von Mises 0.8888 s). The range 3 to 8, exponent 1,
+// the reference the region's 95th percentile. The spacing asked falls from near 8 at the cold end to 3 over the last
+// twentieth (at or over the reference), and the strands are closer together at the hot end: more of them cross a
+// plane square to x there than at the cold end.
+struct Ramp {
+  PartMeasure pm{weld_mesh(box(48, 12, 12))};
+  Domain d{pm, [] {
+             DomainSpec s;
+             s.regions = {face_region(1, {24, 6, 0}, {0, 0, 1}, 6, 24, 12)};
+             s.regions[0].weave = true;
+             return s;
+           }()};
+  TensorField field;
+  OrganicAsk ask;
+  Ramp() {
+    field.nx = 48; field.ny = 12; field.nz = 12;
+    field.spacing = 1.0;
+    field.voigt.assign(6 * 48 * 12 * 12, 0.0);
+    for (int k = 0; k < 12; ++k)
+      for (int j = 0; j < 12; ++j)
+        for (int i = 0; i < 48; ++i) {
+          const double sv = 24.0 * (i + 0.5) / 48.0;
+          double* v = &field.voigt[6 * field.index(i, j, k)];
+          v[0] = sv; v[1] = 0.3 * sv; v[2] = 0.1 * sv;
+        }
+    ask.width_mm = 0.9;   // spacing_mm 0: the range, 3 to 8 by default
+  }
+};
+static void test_range_ramp() {
+  Ramp r;
+  CHECK(r.ask.spacing_mm == 0.0 && r.ask.spacing_min_mm == 3.0 && r.ask.spacing_max_mm == 8.0 && r.ask.spacing_exponent == 1.0);
+  const OrganicSpacing sp = organic_spacing(r.d, 1, r.field, r.ask);
+  // The spacing asked, per slice of x (every voxel of a slice the same).
+  std::vector<double> slice(48, 0.0);
+  bool flat = true;
+  for (int i = 0; i < 48; ++i) {
+    slice[static_cast<std::size_t>(i)] = sp.spacing_mm[r.field.index(i, 0, 0)];
+    for (int k = 0; k < 12; ++k)
+      for (int j = 0; j < 12; ++j) flat = flat && sp.spacing_mm[r.field.index(i, j, k)] == slice[static_cast<std::size_t>(i)];
+  }
+  bool falls = true;
+  for (int i = 1; i < 48; ++i) falls = falls && slice[static_cast<std::size_t>(i)] <= slice[static_cast<std::size_t>(i - 1)];
+  const double vm_at = [&](int i) { return 0.888819442 * 24.0 * (i + 0.5) / 48.0; }(0);
+  std::printf("ramp: reference %.4f MPa (95th percentile); spacing asked at x 0.5 %.4f, 12.5 %.4f, 24.5 %.4f, 36.5 %.4f, 44.5 %.4f, "
+              "47.5 %.4f; von Mises at x 0.5 %.4f\n", sp.reference_mpa, slice[0], slice[12], slice[24], slice[36], slice[44], slice[47],
+              vm_at);
+  CHECK(sp.candidates == 48u * 12u * 12u && flat && falls);
+  CHECK(slice[0] > 7.9 && slice[47] == 3.0 && slice[46] == 3.0);
+  // The line itself: d = 8 - 5 f, f = s / reference.
+  for (int i : {0, 12, 24, 36}) {
+    const double* t = &r.field.voigt[6 * r.field.index(i, 0, 0)];
+    const double a = t[0] - t[1], b = t[1] - t[2], c = t[2] - t[0];
+    const double vm = std::sqrt(0.5 * (a * a + b * b + c * c));
+    CHECK(std::fabs(slice[static_cast<std::size_t>(i)] - (8.0 - 5.0 * std::min(1.0, vm / sp.reference_mpa))) < 1e-12);
+  }
+  // The trace: the spacing it used, and the strands at the two ends.
+  OrganicTraceStats st;
+  const std::vector<Strand> strands = trace_strands(r.d, 1, r.field, r.ask, &st);
+  // Across two slices, one at each end (x 0 to 12, x 36 to 48): the strands crossing the slice's middle plane square
+  // to y (y = 6) and square to z (z = 6) within it. Strands that run along x, the first family, cross both ends alike.
+  auto crossings = [&](double x0, double x1) {
+    std::size_t c = 0;
+    for (const Strand& s : strands)
+      for (std::size_t q = 0; q + 1 < s.points.size(); ++q) {
+        const Vec3 &a = s.points[q], &b = s.points[q + 1];
+        for (int axis : {1, 2}) {
+          const double ua = axis == 1 ? a.y : a.z, ub = axis == 1 ? b.y : b.z;
+          if ((ua - 6.0) * (ub - 6.0) >= 0.0) continue;
+          const double t = (6.0 - ua) / (ub - ua), x = a.x + (b.x - a.x) * t;
+          c += x >= x0 && x < x1;
+        }
+      }
+    return c;
+  };
+  const std::size_t cold = crossings(0.0, 12.0), hot = crossings(36.0, 48.0);
+  std::printf("ramp traced: %zu strands; spacing used %.4f to %.4f, mean %.4f; strands across the cold slice %zu, the hot slice %zu\n",
+              strands.size(), st.spacing_smallest_mm, st.spacing_largest_mm, st.spacing_mean_mm, cold, hot);
+  CHECK(st.spacing_smallest_mm == 3.0 && st.spacing_largest_mm > 7.9 && st.spacing_mean_mm > 3.0 && st.spacing_mean_mm < 8.0);
+  CHECK(cold > 0 && hot >= 2 * cold);
+  // The strands' own spacing: the smallest under their points, so the strands at the hot end carry the tight end.
+  double hot_strand = 1e9, cold_strand = 0.0;
+  for (const Strand& s : strands) {
+    bool all_hot = true, all_cold = true;
+    for (const Vec3& p : s.points) { all_hot = all_hot && p.x > 44.0; all_cold = all_cold && p.x < 4.0; }
+    if (all_hot) hot_strand = std::min(hot_strand, s.spacing_mm);
+    if (all_cold) cold_strand = std::max(cold_strand, s.spacing_mm);
+  }
+  CHECK(hot_strand == 3.0 && cold_strand > 7.0);
+}
+
 int main() {
   test_traced_block();
   test_traced_repeat();
   test_no_weave_is_lay();
   test_traced_pocket_and_file();
   test_whole_run();
+  test_range_equal_ends();
+  test_range_ramp();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }

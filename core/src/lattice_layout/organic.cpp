@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <stdexcept>
 
 #include "topopt/organic_lattice.hpp"
 #include "topopt/voxel.hpp"
@@ -92,8 +93,70 @@ std::vector<std::size_t> straighten_points(const std::vector<Vec3>& points, doub
   return kept;
 }
 
-std::vector<Strand> trace_strands(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask) {
+// O12. The old run (run_job.cpp, run_organic_step, with a cell window) sets d = cell_max - (cell_max - cell_min) * f^e
+// per candidate, f = (rho - rho_lo) / (rho_hi - rho_lo): the grading law's relative density normalised over the latticed
+// voxels, the exponent e 0.5 (minimize_plastic off) or 2 (on). Its rho is itself a function of the von Mises s:
+// Aesthetic, rho = lo + (hi - lo) * (s / P95)^(g * w) (w again 0.5 or 2); Structural, rho = rho_max * (s / (allowable
+// x utilisation))^g, held to the band. Here f is s / reference directly, held to 0 .. 1, with one exponent; so where
+// the old run's region minimum stress is 0 and g * w * e = exponent, the two agree. They differ: (a) a uniform stress
+// gives f = 1 here (the tightest) and f = 0 there (rho_hi = rho_lo: the widest); (b) the old f is rescaled so the
+// quietest latticed voxel is always at cell_max and the busiest at cell_min, here only stress at or over the reference
+// reaches min and only zero stress reaches max; (c) no whole-synthesised wall takes the middle (no made-up stress here).
+OrganicSpacing organic_spacing(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask) {
+  OrganicSpacing out;
+  if (field.empty()) return out;
+  if (ask.spacing_mm != 0.0 && !(ask.spacing_mm > 0.0 && std::isfinite(ask.spacing_mm)))
+    throw std::invalid_argument("organic_spacing: spacing_mm must be above 0 (or 0 for the range)");
+  const bool one = ask.spacing_mm > 0.0;
+  const double lo = one ? ask.spacing_mm : ask.spacing_min_mm, hi = one ? ask.spacing_mm : ask.spacing_max_mm;
+  if (!one && !(lo > 0.0 && std::isfinite(lo)))
+    throw std::invalid_argument("organic_spacing: spacing_min_mm must be above 0");
+  if (!one && !(hi >= lo && std::isfinite(hi)))
+    throw std::invalid_argument("organic_spacing: spacing_max_mm must be at least spacing_min_mm");
+  if (!one && !(ask.spacing_exponent > 0.0 && std::isfinite(ask.spacing_exponent)))
+    throw std::invalid_argument("organic_spacing: spacing_exponent must be above 0");
+  const std::size_t n = static_cast<std::size_t>(field.nx) * field.ny * field.nz;
+  out.candidate.assign(n, 0);
+  out.spacing_mm.assign(n, 0.0);
+  const Domain::Probe probe = domain.probe();
+  std::vector<double> vm(n, 0.0);
+  std::vector<double> seen;
+  for (int k = 0; k < field.nz; ++k)
+    for (int j = 0; j < field.ny; ++j)
+      for (int i = 0; i < field.nx; ++i) {
+        const Vec3 c{field.origin.x + (i + 0.5) * field.spacing, field.origin.y + (j + 0.5) * field.spacing,
+                     field.origin.z + (k + 0.5) * field.spacing};
+        const Where w = probe.where(c);
+        if (!w.lattice() || w.id != region) continue;
+        const std::size_t e = field.index(i, j, k);
+        out.candidate[e] = 1;
+        ++out.candidates;
+        const double* t = &field.voigt[6 * e];
+        const double a = t[0] - t[1], b = t[1] - t[2], d = t[2] - t[0];
+        vm[e] = std::sqrt(std::max(0.0, 0.5 * (a * a + b * b + d * d) + 3.0 * (t[3] * t[3] + t[4] * t[4] + t[5] * t[5])));
+        seen.push_back(vm[e]);
+      }
+  if (out.candidates == 0) return out;
+  double ref = ask.reference_mpa;
+  if (!(ref > 0.0) && !one) {
+    std::sort(seen.begin(), seen.end());
+    const double q = std::clamp(ask.percentile, 0.0, 1.0);
+    ref = seen[static_cast<std::size_t>(std::floor(q * static_cast<double>(seen.size() - 1)))];
+  }
+  out.reference_mpa = one ? 0.0 : ref;
+  for (std::size_t e = 0; e < n; ++e) {
+    if (!out.candidate[e]) continue;
+    if (one || hi == lo) { out.spacing_mm[e] = lo; continue; }
+    const double f = ref > 0.0 ? std::clamp(vm[e] / ref, 0.0, 1.0) : 0.0;
+    out.spacing_mm[e] = hi - (hi - lo) * std::pow(f, ask.spacing_exponent);
+  }
+  return out;
+}
+
+std::vector<Strand> trace_strands(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask,
+                                  OrganicTraceStats* stats) {
   std::vector<Strand> out;
+  if (stats) *stats = OrganicTraceStats{};
   if (field.empty()) return out;
   const std::size_t n = static_cast<std::size_t>(field.nx) * field.ny * field.nz;
   // The tracer reads only nx, ny, nz, spacing and origin of the grid; its tags must be sized to the grid (its voxel
@@ -105,28 +168,39 @@ std::vector<Strand> trace_strands(const Domain& domain, int region, const Tensor
   grid.spacing = field.spacing;
   grid.origin = field.origin;
   grid.tags.assign(n, VoxelTag::Interior);
-  // The candidates: voxels whose centre is lattice of the weave region.
+  // The candidates (voxels whose centre is lattice of the weave region) and the spacing asked of each (O12).
   const Domain::Probe probe = domain.probe();
-  std::vector<char> candidate(n, 0);
-  std::vector<double> spacing(n, 0.0);
-  std::size_t candidates = 0;
-  for (int k = 0; k < field.nz; ++k)
-    for (int j = 0; j < field.ny; ++j)
-      for (int i = 0; i < field.nx; ++i) {
-        const Where w = probe.where(grid.voxel_center(i, j, k));
-        if (!w.lattice() || w.id != region) continue;
-        const std::size_t e = field.index(i, j, k);
-        candidate[e] = 1;
-        spacing[e] = ask.spacing_mm;
-        ++candidates;
-      }
-  if (candidates == 0) return out;
+  const OrganicSpacing asked = organic_spacing(domain, region, field, ask);
+  if (asked.candidates == 0) return out;
+  const std::vector<char>& candidate = asked.candidate;
+  const std::vector<double>& spacing = asked.spacing_mm;
   OrganicParams params;
   params.min_extrudable_width_mm = domain.spec().bead_mm * domain.spec().min_strut_lines;
   params.strut_diameter_mm = ask.width_mm;
   params.bead_is_stated = true;   // no calibration: the width is the width
   params.build_dir = ask.build_dir;
+  // As the old run sets them for a Traced job with its defaults (run_job.cpp, run_organic_step): the overhang clamp off
+  // (organic_overhang_angle_deg 0), ties transferred with full swirl (read by Grown only), curve ends that leave the
+  // region anchored (anchor_at_region_boundary, the tracer's default), families, ratios and limits the tracer's own.
+  params.overhang_angle_deg = 0.0;
+  params.transfer_ties = true;
+  params.tie_swirl = 1.0;
   const OrganicLattice lat = trace_organic_lattice(grid, candidate, field.voigt, spacing, nullptr, params);
+  if (stats) {
+    stats->candidates = asked.candidates;
+    stats->reference_mpa = asked.reference_mpa;
+    double sum = 0.0;
+    bool any = false;
+    for (std::size_t e = 0; e < n; ++e) {
+      if (!candidate[e]) continue;
+      const double v = lat.spacing_used_mm[e];
+      stats->spacing_smallest_mm = any ? std::min(stats->spacing_smallest_mm, v) : v;
+      stats->spacing_largest_mm = any ? std::max(stats->spacing_largest_mm, v) : v;
+      sum += v;
+      any = true;
+    }
+    stats->spacing_mean_mm = sum / static_cast<double>(asked.candidates);
+  }
 
   // The spacing the tracer used under a point; 0 off its candidates.
   auto spacing_at = [&](const Vec3& p) {
@@ -142,7 +216,8 @@ std::vector<Strand> trace_strands(const Domain& domain, int region, const Tensor
       const double v = spacing_at(p);
       if (v > 0.0) s = s > 0.0 ? std::min(s, v) : v;
     }
-    return s > 0.0 ? s : ask.spacing_mm;   // (never off the candidates: a curve's points are all on them)
+    return s > 0.0 ? s : (ask.spacing_mm > 0.0 ? ask.spacing_mm : ask.spacing_min_mm);   // (never off the candidates:
+                                                                                         // a curve's points are on them)
   };
   auto strand_of = [&](const std::vector<Vec3>& traced, double radius) {
     Strand s;
@@ -177,9 +252,18 @@ Outcome Session::lay_organic(const Settings& settings, const TensorField& field,
   ready_domain(settings);
   const auto t0 = std::chrono::steady_clock::now();
   std::vector<Strand> strands;
+  double smallest = 0.0, largest = 0.0, sum = 0.0;
+  std::size_t candidates = 0;
   for (const Region& r : domain_->spec().regions) {
     if (r.role != Role::Lattice || !r.weave) continue;
-    std::vector<Strand> traced = trace_strands(*domain_, r.id, field, ask);
+    OrganicTraceStats st;
+    std::vector<Strand> traced = trace_strands(*domain_, r.id, field, ask, &st);
+    if (st.candidates > 0) {
+      smallest = candidates ? std::min(smallest, st.spacing_smallest_mm) : st.spacing_smallest_mm;
+      largest = candidates ? std::max(largest, st.spacing_largest_mm) : st.spacing_largest_mm;
+      sum += st.spacing_mean_mm * static_cast<double>(st.candidates);
+      candidates += st.candidates;
+    }
     strands.insert(strands.end(), std::make_move_iterator(traced.begin()), std::make_move_iterator(traced.end()));
   }
   const double ms_trace = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
@@ -187,6 +271,9 @@ Outcome Session::lay_organic(const Settings& settings, const TensorField& field,
   if (!out.cancelled) {
     out.strands = strands.size();
     out.ms_trace = ms_trace;
+    out.spacing_smallest_mm = smallest;
+    out.spacing_largest_mm = largest;
+    out.spacing_mean_mm = candidates ? sum / static_cast<double>(candidates) : 0.0;
   }
   return out;
 }

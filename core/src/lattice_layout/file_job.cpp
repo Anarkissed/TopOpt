@@ -116,7 +116,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "strength", "small_cells_in_thin_walls", "one_grid", "cells_by_stress", "bars", "join_loose", "skin",
        "skin_width_mm", "skin_reach_cells", "drop_loose", "by_stress", "dial_light", "dial_heavy", "width_light_mm",
        "width_heavy_mm", "reference_mpa", "percentile", "response", "region_weave", "organic_spacing_mm",
-       "organic_width_mm"},
+       "organic_width_mm", "organic_spacing_min_mm", "organic_spacing_max_mm", "organic_spacing_exponent"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -208,19 +208,48 @@ Settings settings_from(const json::Value& in, const std::string& w) {
 }
 
 // Organic, Traced: the trace's ask, from the layout object (its keys are let through by settings_from). The spacing is
-// needed when any region is a weave; the width is 0 (the thinnest strut) or at least the thinnest strut.
+// needed when any region is a weave: one spacing ("organic_spacing_mm", both ends), or the range (O12:
+// "organic_spacing_min_mm" and "organic_spacing_max_mm" together, "organic_spacing_exponent" 1 when not given), never
+// both. The reference is the layout's own ("reference_mpa", "percentile"). The width is 0 (the thinnest strut) or at
+// least the thinnest strut.
 OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::string& w) {
   OrganicAsk a;
   bool any_weave = false;
   for (const Settings::RegionAsk& r : s.regions) any_weave = any_weave || r.weave;
   const bool has_spacing = json::find(in, "organic_spacing_mm") != nullptr;
+  const bool has_min = json::find(in, "organic_spacing_min_mm") != nullptr;
+  const bool has_max = json::find(in, "organic_spacing_max_mm") != nullptr;
+  const bool has_exp = json::find(in, "organic_spacing_exponent") != nullptr;
   a.spacing_mm = num(in, "organic_spacing_mm", 0.0, w);
   a.width_mm = num(in, "organic_width_mm", 0.0, w);
   if (has_spacing && !(std::isfinite(a.spacing_mm) && a.spacing_mm > 0.0))
     json::fail(w + ".organic_spacing_mm", "must be above 0");
-  if (any_weave && !has_spacing)
+  if (has_spacing && (has_min || has_max || has_exp))
+    json::fail(w + ".organic_spacing_mm", "is one spacing for both ends; give it, or the range "
+                                          "(organic_spacing_min_mm, organic_spacing_max_mm), not both");
+  if (has_min != has_max)
+    json::fail(w + (has_min ? ".organic_spacing_max_mm" : ".organic_spacing_min_mm"),
+               "is needed with the other end of the range");
+  if (has_exp && !has_min)
+    json::fail(w + ".organic_spacing_exponent", "is read only with the range (organic_spacing_min_mm, "
+                                                "organic_spacing_max_mm)");
+  if (has_min) {
+    a.spacing_min_mm = num(in, "organic_spacing_min_mm", a.spacing_min_mm, w);
+    a.spacing_max_mm = num(in, "organic_spacing_max_mm", a.spacing_max_mm, w);
+    a.spacing_exponent = num(in, "organic_spacing_exponent", a.spacing_exponent, w);
+    if (!(std::isfinite(a.spacing_min_mm) && a.spacing_min_mm > 0.0))
+      json::fail(w + ".organic_spacing_min_mm", "must be above 0");
+    if (!(std::isfinite(a.spacing_max_mm) && a.spacing_max_mm >= a.spacing_min_mm))
+      json::fail(w + ".organic_spacing_max_mm", "must be at least organic_spacing_min_mm");
+    if (!(std::isfinite(a.spacing_exponent) && a.spacing_exponent > 0.0))
+      json::fail(w + ".organic_spacing_exponent", "must be above 0");
+  }
+  if (any_weave && !has_spacing && !has_min)
     json::fail(w + ".organic_spacing_mm", "is needed when a region is filled by the weave (region_weave): the distance "
-                                          "between neighbouring strands, mm");
+                                          "between neighbouring strands, mm (or the range: organic_spacing_min_mm and "
+                                          "organic_spacing_max_mm)");
+  a.reference_mpa = s.stress.reference_mpa;
+  a.percentile = s.stress.percentile;
   const double thinnest = s.bead_mm * s.min_strut_lines;
   if (!(std::isfinite(a.width_mm) && a.width_mm >= 0.0))
     json::fail(w + ".organic_width_mm", "must be 0 (the thinnest strut) or more");
@@ -833,6 +862,9 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     r.weave_regions = weave_regions.size();
     r.strands = out.strands;
     r.ms_trace = out.ms_trace;
+    r.spacing_smallest_mm = out.spacing_smallest_mm;
+    r.spacing_largest_mm = out.spacing_largest_mm;
+    r.spacing_mean_mm = out.spacing_mean_mm;
     for (const Bar& b : out.bars.bars)
       r.weave_bars += std::find(weave_regions.begin(), weave_regions.end(), b.region) != weave_regions.end();
     if (!out.empty_regions.empty()) {
@@ -1105,11 +1137,13 @@ std::string file_result_json(const FileResult& r) {
     // Organic, Traced: the trace's time and the shallow-bar table (ShallowTable).
     const ShallowTable& t = r.shallow;
     std::snprintf(b, sizeof b,
-                  "  \"organic\": {\"ms_trace\": %.1f, \"shallow_bars\": %llu, \"held_both\": %llu, \"held_one\": %llu, "
+                  "  \"organic\": {\"ms_trace\": %.1f, \"spacing_used_mm\": {\"smallest\": %.9g, \"largest\": %.9g, "
+                  "\"mean\": %.9g},\n    \"shallow_bars\": %llu, \"held_both\": %llu, \"held_one\": %llu, "
                   "\"held_none\": %llu,\n    \"kept_any_length\": %llu, \"weave_left_unheld\": %llu, \"stands_added\": %llu,"
                   "\n    \"feet\": %llu, \"feet_held\": %llu, \"feet_mm3\": %.9g,"
                   "\n    \"runs\": %llu, \"longest_run_mm\": %.9g, \"run_bands\": [",
-                  r.ms_trace, count(t.bars), count(t.held_both), count(t.held_one), count(t.held_none),
+                  r.ms_trace, r.spacing_smallest_mm, r.spacing_largest_mm, r.spacing_mean_mm, count(t.bars),
+                  count(t.held_both), count(t.held_one), count(t.held_none),
                   count(t.kept_any_length), count(t.weave_left_unheld), count(t.stands_added),
                   count(r.made.mesh.feet), count(r.made.mesh.feet_held), r.made.mesh.feet_mm3, count(t.runs),
                   t.longest_run_mm);

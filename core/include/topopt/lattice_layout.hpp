@@ -1093,6 +1093,8 @@ struct Outcome {
   // time the trace took, ms (trace_strands, every weave region).
   std::size_t strands = 0;
   double ms_trace = 0.0;
+  // O12: the spacing the trace used over every weave region's candidates (smallest, largest, mean); 0 with no trace.
+  double spacing_smallest_mm = 0.0, spacing_largest_mm = 0.0, spacing_mean_mm = 0.0;
 };
 
 class Session {

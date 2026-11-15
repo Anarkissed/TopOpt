@@ -99,7 +99,9 @@ Exactly the fields of the bridge's `LatticeLayoutSettings`, under the same names
 | `percentile` | 0.95 | read when `reference_mpa` is 0 |
 | `response` | 1 | By stress: the exponent on stress / reference, held to 0.25 .. 4 |
 | `region_weave` | all false | **not in the bridge's struct yet**: Organic (Traced), per region: true or 1 = the region is filled by the Traced weave (`RegionAsk::weave`), not by cells. Not as long as `region_ids`: refused (`job_unreadable`). With any true the job runs `Session::lay_organic` in place of `lay`, and needs `tensor` |
-| `organic_spacing_mm` | none | Organic: the distance between neighbouring strands, mm, above 0 (`OrganicAsk::spacing_mm`; the tracer raises it to its print and resolution floors where they bind). Needed when a region is a weave: without it the job is refused (`job_unreadable`, the key named) |
+| `organic_spacing_mm` | none | Organic: one distance between neighbouring strands, mm, above 0, both ends of the range (`OrganicAsk::spacing_mm`; the tracer raises it to its print and resolution floors where they bind). It, or the range below, is needed when a region is a weave: without either the job is refused (`job_unreadable`, the key named). Given with any range key: refused |
+| `organic_spacing_min_mm`, `organic_spacing_max_mm` | none | Organic, rule O12: the range, mm, given together: the spacing at or over the reference stress (min, above 0) and with no stress (max, at least min). Per voxel d = max - (max - min) f^exponent, f = von Mises / reference held to 0 .. 1; the reference is the layout's `reference_mpa`, or its `percentile` of the region's von Mises. One alone, min 0 or less, max under min: refused (`job_unreadable`) |
+| `organic_spacing_exponent` | 1 | Organic, rule O12: the exponent above, above 0; read only with the range (alone: refused) |
 | `organic_width_mm` | 0 | Organic: the strut diameter, mm (`OrganicAsk::width_mm`); 0 = the thinnest strut (`bead_mm` x `min_strut_lines`). Under 0, or above 0 and under the thinnest strut: refused (`job_unreadable`) |
 
 The file matches the preview only if these are the values the preview was laid with.
@@ -141,7 +143,8 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
     "one_ended": 0, "longest_bridge_reach_mm": 1.2, "bed_flat": true, "first_layer_mm2": 100,
     "sloped_underside_mm2": 0, "layers": 50, "thin_islands": 0, "thin_layers": 0,
     "found_per_pass": [0], "left_out_at": [], "posts": []},
-  "organic": {"ms_trace": 0, "shallow_bars": 0, "held_both": 0, "held_one": 0, "held_none": 0,
+  "organic": {"ms_trace": 0, "spacing_used_mm": {"smallest": 0, "largest": 0, "mean": 0},
+    "shallow_bars": 0, "held_both": 0, "held_one": 0, "held_none": 0,
     "kept_any_length": 0, "weave_left_unheld": 0, "stands_added": 0,
     "feet": 0, "feet_held": 0, "feet_mm3": 0,
     "runs": 0, "longest_run_mm": 0, "run_bands": [

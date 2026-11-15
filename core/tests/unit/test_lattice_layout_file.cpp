@@ -1274,6 +1274,83 @@ static void test_organic_foot() {
     std::remove(p.c_str());
 }
 
+// O12, the file job's keys for the spacing range: organic_spacing_min_mm with organic_spacing_max_mm, and
+// organic_spacing_exponent; organic_spacing_mm alone still means both ends; the reference is the layout's own. The
+// result's "organic" object carries the spacing used (smallest, largest, mean).
+static void test_organic_range_keys() {
+  const std::string head = R"({"mode": "lattice_file", "model": "a.step", "tensor": "stress.tensor",
+      "layout": {"region_ids": [3], "region_no_lattice": [0], "region_depth_mm": [4], "region_expand_mm": [0],
+                 "region_face_counts": [1], "region_faces": [1], "region_weave": [true])";
+  const FileJob j = parse_file_job(head + R"(, "organic_spacing_min_mm": 3, "organic_spacing_max_mm": 8,
+                 "organic_spacing_exponent": 1.5, "reference_mpa": 12, "percentile": 0.9}})");
+  CHECK(j.organic.spacing_mm == 0.0 && j.organic.spacing_min_mm == 3.0 && j.organic.spacing_max_mm == 8.0 &&
+        j.organic.spacing_exponent == 1.5 && j.organic.reference_mpa == 12.0 && j.organic.percentile == 0.9);
+  const FileJob e = parse_file_job(head + R"(, "organic_spacing_min_mm": 4, "organic_spacing_max_mm": 4}})");
+  CHECK(e.organic.spacing_min_mm == 4.0 && e.organic.spacing_max_mm == 4.0 && e.organic.spacing_exponent == 1.0 &&
+        e.organic.reference_mpa == 0.0 && e.organic.percentile == 0.95);
+  const FileJob o = parse_file_job(head + R"(, "organic_spacing_mm": 5}})");
+  CHECK(o.organic.spacing_mm == 5.0);
+  const auto refused = [&](const std::string& keys, const char* name) {
+    try { (void)parse_file_job(head + keys + "}}"); } catch (const FileJobError& x) {
+      if (!has(x.what(), name)) std::printf("  (refused for \"%s\", wanted %s)\n", x.what(), name);
+      return has(x.what(), name);
+    }
+    std::printf("  (not refused: %s)\n", keys.c_str());
+    return false;
+  };
+  CHECK(refused(R"(, "organic_spacing_min_mm": 3)", "organic_spacing_max_mm"));
+  CHECK(refused(R"(, "organic_spacing_max_mm": 8)", "organic_spacing_min_mm"));
+  CHECK(refused(R"(, "organic_spacing_min_mm": 0, "organic_spacing_max_mm": 8)", "organic_spacing_min_mm"));
+  CHECK(refused(R"(, "organic_spacing_min_mm": 5, "organic_spacing_max_mm": 4)", "organic_spacing_max_mm"));
+  CHECK(refused(R"(, "organic_spacing_min_mm": 3, "organic_spacing_max_mm": 8, "organic_spacing_exponent": 0)",
+                "organic_spacing_exponent"));
+  CHECK(refused(R"(, "organic_spacing_mm": 4, "organic_spacing_min_mm": 3, "organic_spacing_max_mm": 8)", "organic_spacing_mm"));
+  CHECK(refused(R"(, "organic_spacing_mm": 4, "organic_spacing_exponent": 2)", "organic_spacing_mm"));
+  CHECK(refused(R"(, "organic_spacing_exponent": 2)", "organic_spacing_exponent"));
+  // A file with the range: the spacing used is in the result, inside the range.
+  const std::string model_path = kTmp + "/lattice_file_range.stl";
+  const std::string tensor_path = kTmp + "/lattice_file_range.tensor";
+  const std::string job_path = kTmp + "/lattice_file_range_job.json";
+  write_stl_file(model_path, pocket_mesh());
+  int wall = -1;
+  {
+    std::remove(face_overrides_sidecar_path(model_path).c_str());
+    const StepModel plain = import_part_file_resolved(model_path);
+    FaceOverrides ov;
+    ov.paint_faces.emplace_back();
+    for (std::size_t t = 0; t < plain.mesh.triangles.size(); ++t)
+      if (on_pocket_wall(plain.mesh, plain.mesh.triangles[t])) ov.paint_faces.back().push_back(static_cast<int>(t));
+    save_face_overrides(face_overrides_sidecar_path(model_path), ov);
+    wall = plain.face_count;
+  }
+  {  // the hoop field, scaled along x from nothing to its full size, so the spacing has a range to follow
+    TensorField ramp = hoop_field();
+    for (int k = 0; k < ramp.nz; ++k)
+      for (int j = 0; j < ramp.ny; ++j)
+        for (int i = 0; i < ramp.nx; ++i)
+          for (int c = 0; c < 6; ++c) ramp.voigt[6 * ramp.index(i, j, k) + static_cast<std::size_t>(c)] *= (i + 0.5) / ramp.nx;
+    CHECK(write_tensor_file(tensor_path, ramp));
+  }
+  {
+    std::ofstream f(job_path, std::ios::binary | std::ios::trunc);
+    f << R"({"mode": "lattice_file", "model": "lattice_file_range.stl", "output": "range_lattice.stl", "tensor": "lattice_file_range.tensor",
+      "layout": {"region_ids": [1], "region_no_lattice": [0], "region_depth_mm": [4], "region_expand_mm": [0],
+                "region_face_counts": [1], "region_faces": [)" << wall
+      << R"(], "region_weave": [true], "organic_spacing_min_mm": 3, "organic_spacing_max_mm": 8, "organic_width_mm": 0.9}})";
+  }
+  const FileResult r = run_file_job(job_path, kTmp);
+  const std::string text = slurp(kTmp + "/" + kFileResultName);
+  std::printf("organic range file: ok %d, spacing used %.4f to %.4f, mean %.4f\n", r.ok ? 1 : 0, r.spacing_smallest_mm,
+              r.spacing_largest_mm, r.spacing_mean_mm);
+  CHECK(r.ok && r.strands > 0);
+  CHECK(r.spacing_smallest_mm >= 3.0 && r.spacing_largest_mm <= 8.0 && r.spacing_smallest_mm < r.spacing_largest_mm &&
+        r.spacing_mean_mm > r.spacing_smallest_mm && r.spacing_mean_mm < r.spacing_largest_mm);
+  char b[200];
+  std::snprintf(b, sizeof b, "\"spacing_used_mm\": {\"smallest\": %.9g, \"largest\": %.9g, \"mean\": %.9g}", r.spacing_smallest_mm,
+                r.spacing_largest_mm, r.spacing_mean_mm);
+  CHECK(has(text, b));
+}
+
 int main() {
   test_tensor_file();
   test_organic_job();
@@ -1290,6 +1367,7 @@ int main() {
   test_one_grid_key();
   test_organic_foot();
   test_cube_files_any_foot();
+  test_organic_range_keys();
   if (!mesh_available()) std::printf("no mesh library in this build: the job says so\n");
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
