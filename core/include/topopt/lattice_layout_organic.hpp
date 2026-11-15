@@ -64,7 +64,7 @@ struct OrganicAsk {
   std::uint64_t seed = 1;
   // G13 (brief G5): the floor's feet compete after the first pruning; a foot is kept only where no kept foot stands
   // within foot_gap x the local spacing of its floor point (measured on the floor).
-  double foot_gap = 1.0;          // > 0
+  double foot_gap = 1.0;          // > 0 (the made-up cube's floor is at most 80 % covered by true feet at 2.5)
 };
 
 // O16, the net skin: Finish Skin (Settings::skin) on a weave region (the old finish step "Skin", organic_lattice.cpp,
@@ -178,6 +178,9 @@ struct GrowReport {
   // hung only on a vine removed whole (counted, in the lengths below, under "leads to nothing").
   std::size_t feet_kept = 0, feet_cut_at_joint = 0, vines_removed = 0;
   double feet_cut_mm = 0.0;
+  // ... of which above half the region's height: the length, and the strands it was taken from.
+  double feet_cut_high_mm = 0.0;
+  std::size_t feet_cut_high_strands = 0;
   // A join or a link whose segment would leave the region's candidates: not made.
   std::size_t joins_refused_outside = 0, links_refused_outside = 0;
   // Lengths, mm (G12).

@@ -35,7 +35,8 @@ void GrowReport::add(const GrowReport& o) {
   ties_seeded += o.ties_seeded; ties_laid += o.ties_laid; ties_refused_minor += o.ties_refused_minor;
   ties_refused_reach += o.ties_refused_reach;
   feet_kept += o.feet_kept; feet_cut_at_joint += o.feet_cut_at_joint; vines_removed += o.vines_removed;
-  feet_cut_mm += o.feet_cut_mm;
+  feet_cut_mm += o.feet_cut_mm; feet_cut_high_mm += o.feet_cut_high_mm;
+  feet_cut_high_strands += o.feet_cut_high_strands;
   joins_refused_outside += o.joins_refused_outside; links_refused_outside += o.links_refused_outside;
   grown_mm += o.grown_mm; kept_mm += o.kept_mm;
   cut_outside_mm += o.cut_outside_mm; cut_unsupported_mm += o.cut_unsupported_mm; cut_nothing_mm += o.cut_nothing_mm;
@@ -1404,11 +1405,37 @@ void Grower::feet(const std::vector<int>& parent, const std::vector<char>& branc
       }
     }
   }
+  // What the cuts take above half the region's height (counted for the lead, brief G5): the length of a segment above
+  // the middle height of the region's candidates.
+  double hlo = std::numeric_limits<double>::infinity(), hhi = -hlo;
+  for (int k = 0; k < field_.nz; ++k)
+    for (int j = 0; j < field_.ny; ++j)
+      for (int i = 0; i < field_.nx; ++i)
+        if (sp_.candidate[field_.index(i, j, k)]) {
+          hlo = std::min(hlo, h(centre(i, j, k)));
+          hhi = std::max(hhi, h(centre(i, j, k)));
+        }
+  const double hmid = 0.5 * (hlo + hhi);
+  auto high = [&](const Vec3& a, const Vec3& b) {
+    const double ha = h(a), hb = h(b), l = dist(a, b);
+    if (ha >= hmid && hb >= hmid) return l;
+    if (ha <= hmid && hb <= hmid) return 0.0;
+    return l * (std::max(ha, hb) - hmid) / std::fabs(hb - ha);
+  };
+  auto count_high = [&](const Line& L, std::size_t upto) {
+    double mm = 0.0;
+    for (std::size_t k = 0; k < upto && k + 1 < L.pts.size(); ++k) mm += high(L.pts[k], L.pts[k + 1]);
+    if (mm > 0.0) {
+      rep_.feet_cut_high_mm += mm;
+      ++rep_.feet_cut_high_strands;
+    }
+  };
   for (std::size_t l = 0; l < lines_.size(); ++l) {
     if (!gone[l] || slot.count(l)) continue;
     Line& L = lines_[l];
     double mm = 0.0;
     for (std::size_t k = 0; k + 1 < L.pts.size(); ++k) mm += dist(L.pts[k], L.pts[k + 1]);
+    count_high(L, L.pts.size());
     L.pts.resize(1);
     L.rec.resize(1);
     L.stamp.clear();
@@ -1422,6 +1449,7 @@ void Grower::feet(const std::vector<int>& parent, const std::vector<char>& branc
     double mm = 0.0;
     if (at_joint[r] < 0) {
       for (std::size_t k = 0; k + 1 < L.pts.size(); ++k) mm += dist(L.pts[k], L.pts[k + 1]);
+      count_high(L, L.pts.size());
       L.pts.resize(1);
       L.rec.resize(1);
       ++rep_.vines_removed;
@@ -1429,6 +1457,7 @@ void Grower::feet(const std::vector<int>& parent, const std::vector<char>& branc
       const Joint& x = joints[r][static_cast<std::size_t>(at_joint[r])];
       const std::size_t k = static_cast<std::size_t>(std::floor(x.pos + 1e-12));
       for (std::size_t s = 0; s < k; ++s) mm += dist(L.pts[s], L.pts[s + 1]);
+      count_high(L, k);
       if (dist(L.pts[k], x.x) < 1e-9) {
         L.pts.erase(L.pts.begin(), L.pts.begin() + static_cast<long>(k));
         L.rec.erase(L.rec.begin(), L.rec.begin() + static_cast<long>(k));
