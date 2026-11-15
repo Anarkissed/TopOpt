@@ -939,6 +939,26 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
   if (spec.weave_foot_mm != 0.0)
     for (const Layout::Weave& w : lay.weave) foot_regions.push_back(w.region);
   std::unique_ptr<const SolidAt> wall_at = foot_regions.empty() ? nullptr : std::make_unique<const SolidAt>(lay);
+  // O14: a weave's shallow struts are written with a round top (a D section) when asked; cube-lattice bridges never.
+  std::vector<int> round_top_regions;
+  if (spec.weave_round_top)
+    for (const Layout::Weave& w : lay.weave) round_top_regions.push_back(w.region);
+  const int HALF = std::max(2, SEG / 2);   // the half round's flat facets: half a round strut's sides
+  // The D section in a bridge's frame, at `at`: its underside at up = -r from the bar's line, `half` either side, its
+  // sides straight up to the line, its top a half round of radius `half` about the line (corners on the round).
+  auto d_section = [&](std::vector<manifold::vec3>& pts, const Vec3& at, const Vec3& side, const Vec3& up, double r, double half) {
+    auto put = [&](double s, double v) {
+      pts.push_back(mv(Vec3{at.x + side.x * s + up.x * v, at.y + side.y * s + up.y * v, at.z + side.z * s + up.z * v}));
+    };
+    put(-half, -r);
+    put(half, -r);
+    for (int k = 0; k <= HALF; ++k) {
+      const double t = kPi * k / HALF;
+      put(half * std::cos(t), half * std::sin(t));
+    }
+  };
+  // The D section's area: the straight lower half and the faceted half round.
+  auto d_area = [&](double r, double half) { return 2.0 * half * r + 0.5 * HALF * half * half * std::sin(kPi / HALF); };
   std::optional<Domain::Probe> wall_probe;
   if (wall_at) wall_probe.emplace(domain.probe());
   Manifold struts;
@@ -959,7 +979,22 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
       const double pa = x.end_a == Bar::End::Surface ? std::max(2.0 * r + 0.3, reach) : reach;
       const double pb = x.end_b == Bar::End::Surface ? std::max(2.0 * r + 0.3, reach) : reach;
       const Vec3 a{x.a.x - d.x * pa, x.a.y - d.y * pa, x.a.z - d.z * pa};
-      if (bar_is_bridge(x, spec.bridge_rise)) {
+      const bool round_top = bar_is_bridge(x, spec.bridge_rise) && in_regions(round_top_regions, x.region);
+      if (round_top) {
+        // O14: a weave's shallow strut, its underside the square bar's exactly (the same frame, the same plane, the
+        // same width), its top a half round: a D section from end to end.
+        Vec3 side{-d.y, d.x, 0.0};
+        const double ls = std::sqrt(side.x * side.x + side.y * side.y);
+        side = {side.x / ls, side.y / ls, 0.0};
+        Vec3 up{d.y * side.z - d.z * side.y, d.z * side.x - d.x * side.z, d.x * side.y - d.y * side.x};
+        if (up.z < 0) { up = {-up.x, -up.y, -up.z}; side = {-side.x, -side.y, 0.0}; }
+        const Vec3 b{x.b.x + d.x * pb, x.b.y + d.y * pb, x.b.z + d.z * pb};
+        std::vector<manifold::vec3> pts;
+        d_section(pts, a, side, up, r, r);
+        d_section(pts, b, side, up, r, r);
+        solids.push_back(Manifold::Hull(pts));
+        ++rep.bridges;
+      } else if (bar_is_bridge(x, spec.bridge_rise)) {
         // A strut that lies flat (under 30 degrees) is printed as a BRIDGE: a square bar as
         // wide and as tall as the strut, its underside level and flat, so the first layer
         // across the gap is one straight full-width line and not the belly of a round bar.
@@ -1029,7 +1064,21 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
           auto added = [&](double area0, double areaM, double areaL, double strut) {
             return L / 6.0 * (area0 + 4.0 * areaM + areaL) - strut * L;
           };
-          if (bar_is_bridge(x, spec.bridge_rise)) {
+          if (round_top) {
+            // O14 with O11: the D section widened by f each side and f upward (its round's radius r + f), the
+            // underside (up = -r) kept exactly, in the same straight tapers as the square bar's foot.
+            Vec3 side{-d.y, d.x, 0.0};
+            const double ls = std::sqrt(side.x * side.x + side.y * side.y);
+            side = {side.x / ls, side.y / ls, 0.0};
+            Vec3 up{d.y * side.z - d.z * side.y, d.z * side.x - d.x * side.z, d.x * side.y - d.y * side.x};
+            if (up.z < 0) up = {-up.x, -up.y, -up.z};
+            std::vector<manifold::vec3> pts;
+            d_section(pts, deep, side, up, r, r + f);
+            d_section(pts, W, side, up, r, r + f);
+            d_section(pts, Vec3{W.x + u.x * L, W.y + u.y * L, W.z + u.z * L}, side, up, r, r + f * g);
+            solids.push_back(Manifold::Hull(pts));
+            rep.feet_mm3 += added(d_area(r, r + f), d_area(r, r + f * (1.0 + g) * 0.5), d_area(r, r + f * g), d_area(r, r));
+          } else if (bar_is_bridge(x, spec.bridge_rise)) {
             // The bridge's own frame, as above; its underside (up = -r) is kept exactly.
             Vec3 side{-d.y, d.x, 0.0};
             const double ls = std::sqrt(side.x * side.x + side.y * side.y);

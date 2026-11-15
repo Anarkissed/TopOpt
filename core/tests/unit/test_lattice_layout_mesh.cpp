@@ -1843,6 +1843,172 @@ static void test_weave_foot_leaves_joints() {
   CHECK(near_floor > near_floor0 + 0.1);
 }
 
+// ── O14, a round top on a weave's shallow struts ──────────────────────────────
+// The mesh's lowest faces over x0 .. x1 near y (within 45 degrees of `want`, straight down from the bar).
+template <class Each>
+static void lowest_faces(const TriangleMesh& m, double x0, double x1, double y, const Vec3& want, Each&& each) {
+  for (const auto& t : m.triangles) {
+    const Vec3 &p = m.vertices[static_cast<std::size_t>(t[0])], &q = m.vertices[static_cast<std::size_t>(t[1])],
+               &s = m.vertices[static_cast<std::size_t>(t[2])];
+    const Vec3 c{(p.x + q.x + s.x) / 3, (p.y + q.y + s.y) / 3, (p.z + q.z + s.z) / 3};
+    if (c.x < x0 || c.x > x1 || std::fabs(c.y - y) > 1.2 || c.z < 1.0) continue;
+    const Vec3 e1{q.x - p.x, q.y - p.y, q.z - p.z}, e2{s.x - p.x, s.y - p.y, s.z - p.z};
+    Vec3 n{e1.y * e2.z - e1.z * e2.y, e1.z * e2.x - e1.x * e2.z, e1.x * e2.y - e1.y * e2.x};
+    const double ln = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+    if (ln < 1e-12) continue;
+    n = {n.x / ln, n.y / ln, n.z / ln};
+    if (n.x * want.x + n.y * want.y + n.z * want.z < std::cos(3.14159265358979323846 / 4)) continue;
+    each(n, p, q, s);
+  }
+}
+// Across a cut, at the height v (the cut's second axis): from the leftmost to the rightmost crossing of its outline.
+static double chord(const Cut& c, double v) {
+  double lo = 1e300, hi = -1e300;
+  for (const auto& s : c.seg) {
+    if ((s[1] - v) * (s[3] - v) > 0.0 || s[1] == s[3]) continue;
+    const double x = s[0] + (v - s[1]) / (s[3] - s[1]) * (s[2] - s[0]);
+    lo = std::min(lo, x);
+    hi = std::max(hi, x);
+  }
+  return hi > lo ? hi - lo : 0.0;
+}
+
+// O14 test 1: a level and a 10 degree weave bar between the walls: with the round top their lowest faces lie in the
+// plane they lie in with it off (within 1 degree and 0.01 mm), wall to wall; the mesh is not the square bar's and holds
+// less; the same bars as cube-lattice bars are the same mesh with the switch on and off.
+static void test_weave_round_top_underside() {
+  const BridgeBlock k(20.5);
+  const double deg10 = 10.0 * 3.14159265358979323846 / 180.0;
+  const Bars level = weave_bars(k.d, {level_strand({2, 20, 10}, {38, 20, 10})});
+  const Bars ten = weave_bars(k.d, {level_strand({2, 12, 7}, {38, 12, 7 + 36 * std::tan(deg10)})});
+  struct Case { const char* what; const Bars* bars; double y, deg; };
+  for (const Case& c : {Case{"level", &level, 20.0, 0.0}, Case{"10 degrees", &ten, 12.0, deg10}}) {
+    CHECK(c.bars->bars.size() == 1);
+    MeshSpec off, on;
+    on.weave_round_top = true;
+    MeshReport r0, r1;
+    const TriangleMesh m0 = build_mesh(k.pm, k.d, k.layout, *c.bars, k.open, off, &r0);
+    const TriangleMesh m1 = build_mesh(k.pm, k.d, k.layout, *c.bars, k.open, on, &r1);
+    const Vec3 want{std::sin(c.deg), 0.0, -std::cos(c.deg)};
+    double plane = 0.0;
+    long n0 = 0;
+    lowest_faces(m0, 12, 28, c.y, want, [&](const Vec3&, const Vec3& p, const Vec3&, const Vec3&) {
+      plane += p.x * want.x + p.y * want.y + p.z * want.z;
+      ++n0;
+    });
+    plane /= std::max(1L, n0);
+    long faces = 0, off_angle = 0, off_plane = 0;
+    double worst_deg = 0.0, worst_mm = 0.0;
+    lowest_faces(m1, 5.0, 35.0, c.y, want, [&](const Vec3& n, const Vec3& p, const Vec3& q, const Vec3& s) {
+      ++faces;
+      const double a = std::acos(std::clamp(n.x * want.x + n.y * want.y + n.z * want.z, -1.0, 1.0)) * 180.0 / 3.14159265358979323846;
+      worst_deg = std::max(worst_deg, a);
+      off_angle += a > 1.0;
+      for (const Vec3* v : {&p, &q, &s}) {
+        const double mm = std::fabs(v->x * want.x + v->y * want.y + v->z * want.z - plane);
+        worst_mm = std::max(worst_mm, mm);
+        off_plane += mm > 0.01;
+      }
+    });
+    const bool cube_same = same_mesh(build_mesh(k.pm, k.d, k.as_cube(), *c.bars, k.open, off),
+                                     build_mesh(k.pm, k.d, k.as_cube(), *c.bars, k.open, on));
+    std::printf("round top underside, %s: %ld lowest faces wall to wall, worst %.4f degrees and %.5f mm off the square bar's "
+                "underside (%ld faces); %.4f mm3 square, %.4f round; the mesh changed %d; as cube bars the same mesh %d\n", c.what,
+                faces, worst_deg, worst_mm, n0, r0.mm3, r1.mm3, same_mesh(m0, m1) ? 0 : 1, cube_same ? 1 : 0);
+    CHECK(r0.ok && r1.ok && r1.bridges == 1);
+    CHECK(n0 >= 2 && faces >= 2 && off_angle == 0 && off_plane == 0);
+    CHECK(!same_mesh(m0, m1) && r1.mm3 < r0.mm3);
+    CHECK(cube_same);
+  }
+}
+
+// O14 test 2: a cut square to the 10 degree weave bar at its middle: as wide and as tall as the strut (0.9), the full
+// width across its lower half, a rounded top (narrower near the top than a square), its area w^2 (1/2 + pi/8) within
+// 2 %; the body closed, one piece.
+static void test_weave_round_top_section() {
+  const BridgeBlock k(20.5);
+  const double deg = 10.0 * 3.14159265358979323846 / 180.0, t10 = std::tan(deg), w = 0.9;
+  const Bars bars = weave_bars(k.d, {level_strand({2, 12, 7}, {38, 12, 7 + 36 * t10})});
+  CHECK(bars.bars.size() == 1);
+  MeshSpec on;
+  on.weave_round_top = true;
+  MeshReport rep;
+  const TriangleMesh mesh = build_mesh(k.pm, k.d, k.layout, bars, k.open, on, &rep);
+  const Vec3 d{std::cos(deg), 0.0, std::sin(deg)}, up{-std::sin(deg), 0.0, std::cos(deg)};
+  const Cut c = cut_mesh(mesh, {20.0, 12.0, 7.0 + 18.0 * t10}, d, {0, 1, 0}, up, 1.6);
+  const double wide = c.hi(0) - c.lo(0), tall = c.hi(1) - c.lo(1), base = c.lo(1);
+  double worst_lower = 0.0;
+  for (double v = 0.01; v <= 0.5 * w - 0.01 + 1e-9; v += 0.01) worst_lower = std::max(worst_lower, std::fabs(chord(c, base + v) - w));
+  const double near_top = chord(c, base + 0.9 * w), want = w * w * (0.5 + 3.14159265358979323846 / 8.0);
+  const Read rd = read_mesh(mesh);
+  std::printf("round top section, 10 degrees: %.4f wide, %.4f tall, lower half worst %.5f off full width, across at 0.9 of its "
+              "height %.4f (a square %.4f), area %.5f mm2 (w^2 (1/2 + pi/8) %.5f, %.2f %% off); %zu shells, %zu open edges\n",
+              wide, tall, worst_lower, near_top, w, c.area(), want, 100.0 * (c.area() - want) / want, rd.shells, rd.edges_not_twice);
+  CHECK(rep.ok && rep.bridges == 1);
+  CHECK(std::fabs(wide - w) <= 0.01 && std::fabs(tall - w) <= 0.01);
+  CHECK(worst_lower <= 0.01);
+  CHECK(near_top < 0.75 * w);
+  CHECK(std::fabs(c.area() - want) <= 0.02 * want);
+  CHECK(rd.shells == 1 && rd.edges_not_twice == 0);
+}
+
+// O14 test 3: stage 2's test parts through the make-check-make loop with the round top off and on: the layer check
+// ends the same (the same kept, left out, posts, stands, findings); the mesh of every part with a kept shallow weave bar
+// is not the square bar's.
+static void test_weave_round_top_layers() {
+  const BridgeBlock k(20.5), floor(14.0);
+  const double t10 = std::tan(10.0 * 3.14159265358979323846 / 180.0), t25 = std::tan(25.0 * 3.14159265358979323846 / 180.0);
+  Bars crossed = weave_bars(floor.d, {level_strand({2, 20, 12.45}, {38, 20, 12.45}), level_strand({20, 20, 3}, {20, 20, 21})});
+  (void)split_at_crossings(crossed);
+  auto pair = [](bool far_end_held) {
+    Bars b;
+    b.bars.push_back(hand_bar({4.1, 26, 10}, Bar::End::Solid, {far_end_held ? 35.9 : 15.0, 26, 10},
+                              far_end_held ? Bar::End::Solid : Bar::End::Loose));
+    b.bars.push_back(hand_bar({4.1, 20, 10}, Bar::End::Solid, {12, 26, 10}, Bar::End::Joined, 0));
+    return b;
+  };
+  struct Part { const char* what; const BridgeBlock* k; Bars bars; bool kept_shallow; };
+  const Part parts[] = {
+      {"level 30 mm", &k, weave_bars(k.d, {level_strand({2, 20, 10}, {38, 20, 10})}), true},
+      {"sloping 10 and 25", &k, weave_bars(k.d, {level_strand({2, 12, 7}, {38, 12, 7 + 36 * t10}), level_strand({2, 28, 2}, {38, 28, 2 + 36 * t25})}), true},
+      {"level over a floor", &floor, weave_bars(floor.d, {level_strand({2, 20, 12.45}, {38, 20, 12.45})}), true},
+      {"crossed over a floor", &floor, crossed, true},
+      {"held at one end", &k, weave_bars(k.d, {level_strand({2, 20, 10}, {15, 20, 10})}), false},
+      {"landing on a bar left out", &k, pair(false), false},
+      {"landing on a bar held at both ends", &k, pair(true), true},
+  };
+  long differ = 0;
+  for (const Part& p : parts) {
+    PrintableSpec off, on;
+    on.mesh.weave_round_top = true;
+    PrintableReport r0, r1;
+    const TriangleMesh m0 = build_printable_mesh(p.k->pm, p.k->d, p.k->layout, p.bars, p.k->open, off, &r0);
+    const TriangleMesh m1 = build_printable_mesh(p.k->pm, p.k->d, p.k->layout, p.bars, p.k->open, on, &r1);
+    bool same_posts = r0.posts.size() == r1.posts.size();
+    for (std::size_t i = 0; same_posts && i < r0.posts.size(); ++i)
+      same_posts = std::fabs(r0.posts[i].x - r1.posts[i].x) < 1e-9 && std::fabs(r0.posts[i].y - r1.posts[i].y) < 1e-9 &&
+                   std::fabs(r0.posts[i].z_top - r1.posts[i].z_top) < 1e-9 && std::fabs(r0.posts[i].z_bottom - r1.posts[i].z_bottom) < 1e-9;
+    bool same_drop = r0.drop_at.size() == r1.drop_at.size();
+    for (std::size_t i = 0; same_drop && i < r0.drop_at.size(); ++i)
+      same_drop = std::fabs(r0.drop_at[i].x - r1.drop_at[i].x) < 1e-9 && std::fabs(r0.drop_at[i].y - r1.drop_at[i].y) < 1e-9 &&
+                  std::fabs(r0.drop_at[i].z - r1.drop_at[i].z) < 1e-9;
+    const bool changed = !same_mesh(m0, m1);
+    std::printf("round top layers, %s: ", p.what);
+    say_bridges("off", r0);
+    std::printf("round top layers, %s: ", p.what);
+    say_bridges("on ", r1);
+    CHECK(r0.mesh.ok && r1.mesh.ok && r0.clean == r1.clean && r0.passes == r1.passes && r0.found_per_pass == r1.found_per_pass);
+    CHECK(r0.mesh.kept_any_length == r1.mesh.kept_any_length && r0.mesh.weave_left_unheld == r1.mesh.weave_left_unheld);
+    CHECK(r0.mesh.bars == r1.mesh.bars && r0.mesh.bars_left_out == r1.mesh.bars_left_out && same_drop);
+    CHECK(same_posts && r0.stands_added == r1.stands_added);
+    CHECK(r0.layers.mid_air.size() == r1.layers.mid_air.size() && r0.layers.one_ended.size() == r1.layers.one_ended.size() &&
+          r0.layers.long_bridges.size() == r1.layers.long_bridges.size());
+    CHECK(changed == p.kept_shallow);
+    differ += changed;
+  }
+  CHECK(differ == 5);
+}
+
 int main() {
   if (!mesh_available()) {
     MeshReport rep;
@@ -1873,6 +2039,9 @@ int main() {
   test_weave_foot_shallow();
   test_weave_foot_held();
   test_weave_foot_leaves_joints();
+  test_weave_round_top_underside();
+  test_weave_round_top_section();
+  test_weave_round_top_layers();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }
