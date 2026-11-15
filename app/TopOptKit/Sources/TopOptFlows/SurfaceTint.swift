@@ -68,6 +68,13 @@ public enum SurfaceTint {
         case selected          // the piece an action will act on
     }
 
+    /// ★ his 11-14: the other half of a selected cut piece is tinted only while a tool that undoes the cut is armed — Union,
+    /// which joins the halves back. Cut has no remove-a-cut action of its own; under every other tool (and Paint, which arms
+    /// Select) that half wears the plain wash the shader is handed for it.
+    public static func siblingShows(tool: SurfaceTool) -> Bool {
+        tool == .union
+    }
+
     public static func colour(_ s: State) -> SIMD4<Float> {
         switch s {
         case .untinted: return .zero
