@@ -5,6 +5,7 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -183,6 +184,9 @@ struct Pass {
   Frame frame;
   std::vector<double> sizes;   // the sizes this region may use, largest first
   std::vector<int> divisors;   // Stepped: the fractions of the base whose unit prints open
+  // C22: every size this pass can lay, largest first, each once: Default Grade its `sizes`; Stepped the base and every
+  // m x base / n for each of its `divisors` n and m = 1 .. n - 1 (what `place` and `pack` can lay); Uniform the base.
+  std::vector<double> ladder;
   Layout* out;
   RegionCells* tally;
   const WallMap* walls = nullptr;   // this frame's walls (flat = false where it has none)
@@ -277,12 +281,22 @@ struct Pass {
     }
     return demand->highest_in(mn, mx);
   }
-  // C22, the centre rule of G1-G3 with the stress in the place of the outline: a cell of size s may stand where the
-  // stress inside it asks for no smaller one, t <= (S_base - s) / (S_base - f); the finest always may.
+  // C22's next size down: the largest size of the ladder strictly under s (0: none).
+  double size_below(double s) const {
+    for (double a : ladder)
+      if (a < s * (1.0 - 1e-9)) return a;
+    return 0.0;
+  }
+  // C22 (LatticeReview's ruling 2026-11-15: the nearest size): the stress asks for a size S* = S_base - t (S_base - f),
+  // and a cell takes the size of its ladder nearest to it: a cell of size s may stand where S* >= (s + s_below) / 2,
+  // s_below the ladder's next size down. A tie keeps the larger; the finest, and a size with none below, always may.
   bool stress_allows(const double lo[3], double s) const {
     if (!demand || is_finest(s)) return true;
+    const double below = size_below(s);
+    if (below <= 0.0) return true;
     const double t = std::pow(std::clamp(demand_in(lo, s) / ref_mpa, 0.0, 1.0), std::clamp(response, 0.25, 4.0));
-    return t <= (base_mm - s) / (base_mm - finest_mm) + 1e-9;
+    const double asked = base_mm - t * (base_mm - finest_mm);
+    return asked >= 0.5 * (s + below) - 1e-9 * base_mm;
   }
   // C24: a cell of size s may stand where no cap whose box shares volume with its cube is smaller; the finest always
   // may. A cell held here is divided down its ladder as one the band does not allow.
@@ -1192,6 +1206,15 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads, const 
     for (double a : pass.sizes) pass.finest_mm = std::min(pass.finest_mm, a);
     for (int n : pass.divisors)
       if (n >= 2) pass.finest_mm = std::min(pass.finest_mm, base / n);
+    // C22: the pass's ladder, built here once from its own sizes and fractions.
+    pass.ladder = pass.sizes;
+    for (int n : pass.divisors)
+      if (n >= 2)
+        for (int m = 1; m < n; ++m) pass.ladder.push_back(m * (base / n));
+    std::sort(pass.ladder.begin(), pass.ladder.end(), std::greater<double>());
+    pass.ladder.erase(std::unique(pass.ladder.begin(), pass.ladder.end(),
+                                  [](double a, double b) { return std::fabs(a - b) <= 1e-9 * std::max(a, b); }),
+                      pass.ladder.end());
     double start[3];
     int count[3];
     for (int a = 0; a < 3; ++a) centred(lo[a], hi[a], base, &start[a], &count[a]);
