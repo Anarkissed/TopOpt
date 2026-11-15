@@ -72,6 +72,7 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         public var skinReachCells = 1.2
         public var dropLoose = true
         public var smallCellsInThinWalls = false   // his per-part choice (11-13)
+        public var oneGrid = false                 // "Let walls cut cells" (11-14; Aesthetic only, the app's to enforce)
         public init() {}
         public static func == (a: Settings, b: Settings) -> Bool {
             a.allLattice == b.allLattice && a.beadMM == b.beadMM && a.minStrutLines == b.minStrutLines && a.minWallMM == b.minWallMM
@@ -83,7 +84,7 @@ public final class LatticeLayoutSession: @unchecked Sendable {
                 && a.strutWidthMM == b.strutWidthMM && a.allowQuilt == b.allowQuilt && a.strength == b.strength && a.bars == b.bars
                 && a.joinLoose == b.joinLoose && a.skin == b.skin && a.skinWidthMM == b.skinWidthMM
                 && a.skinReachCells == b.skinReachCells && a.dropLoose == b.dropLoose
-                && a.smallCellsInThinWalls == b.smallCellsInThinWalls
+                && a.smallCellsInThinWalls == b.smallCellsInThinWalls && a.oneGrid == b.oneGrid
         }
     }
 
@@ -189,13 +190,13 @@ public final class LatticeLayoutSession: @unchecked Sendable {
     /// THE SOLID VIEW's map for the last layout (LatticeLayoutBridge.hpp, lattice_layout_grid): 2 signed bytes per voxel (open,
     /// inside), x fastest; voxel (0,0,0)'s centre at `origin`. Empty before the first layout.
     public func grid(origin: SIMD3<Float>, voxel: Float, dims: SIMD3<Int32>) async throws
-        -> (rg: [Int8], ms: Double, asked: Int, unheld: Int) {
+        -> (rg: [Int8], ms: Double, asked: Int, unheld: Int, nocell: [Int]) {
         let sid = id
         return try await worker.run {
             var err = topoptbridge.BridgeError()
             let r = topoptbridge.lattice_layout_grid(sid, origin.x, origin.y, origin.z, voxel, dims.x, dims.y, dims.z, &err)
             if !err.ok { throw TopOptError(message: String(err.message)) }
-            return (Array(r.rg), r.ms, Int(r.asked), Int(r.unheld))
+            return (Array(r.rg), r.ms, Int(r.asked), Int(r.unheld), Array(r.nocell).map { Int($0) })
         }
     }
 
@@ -263,6 +264,7 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         o.skin_reach_cells = s.skinReachCells
         o.drop_loose = s.dropLoose
         o.small_cells_in_thin_walls = s.smallCellsInThinWalls
+        o.one_grid = s.oneGrid
         return o
     }
 

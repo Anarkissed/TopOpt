@@ -237,6 +237,25 @@ final class LatticeLayoutPreviewTests: XCTestCase {
         XCTAssertGreaterThan(changed, 150, "★ the flagged bar is drawn square")
     }
 
+    /// ★ 11-14: "Let walls cut cells" is saved with the part (off not written), reaches core in Aesthetic, and NEVER in
+    /// Structural (his ruling: "aesthetic should allow the one grid cut wherever. Not structural."); the export job carries it.
+    func testLetWallsCutCellsIsAestheticOnly() throws {
+        let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
+        let p = r.project
+        var l = p.lattice
+        XCTAssertFalse(String(decoding: try JSONEncoder().encode(l), as: UTF8.self).contains("letWallsCutCells"), "★ off is not written")
+        l.letWallsCutCells = true
+        XCTAssertTrue(try JSONDecoder().decode(LatticeSettings.self, from: JSONEncoder().encode(l)).letWallsCutCells, "★ saved")
+        p.lattice.letWallsCutCells = true
+        p.lattice.stageMode = .aesthetic
+        let a = LatticeLayoutPreview.settings(p)
+        XCTAssertTrue(a.oneGrid, "★ Aesthetic: core lays one grid the walls cut")
+        let job = try XCTUnwrap(try JSONSerialization.jsonObject(with: LatticeFileJob.build(a, modelName: "m.step")) as? [String: Any])
+        XCTAssertEqual((job["layout"] as? [String: Any])?["one_grid"] as? Bool, true, "★ and the print file is laid the same way")
+        p.lattice.stageMode = .structural
+        XCTAssertFalse(LatticeLayoutPreview.settings(p).oneGrid, "★ Structural never sends it (RED CONTROL: the stored switch is on)")
+    }
+
     // MARK: fixtures
 
     /// `n` bars on a grid: a 0.8 mm bar along x from each point.

@@ -79,6 +79,7 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
     // One switch for the quilt (R2). His per-part choice lets the CELLS go as small, and only the cells: the struts
     // are still set without the quilt, so a small cell carries the thinnest strut (set_struts: never under it).
     cells.allow_quilt = settings.struts.allow_quilt || settings.small_cells_in_thin_walls;
+    cells.one_grid = settings.one_grid;   // "Let walls cut cells": the per-part switch is the session's
     out.layout = lay_cells(*domain_, cells, threads);
     unread_ = false;
     out.struts = set_struts(out.layout, settings.struts);
@@ -87,6 +88,7 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
     if (settings.bars) {
       t0 = std::chrono::steady_clock::now();
       domain_->check_stop();
+      out.thin_solid = solidify_thin_cuts(out.layout, *domain_, threads);   // P8 (f): before any bar is laid
       out.bars = lay_bars(out.layout, *domain_, threads);
       if (settings.join_loose) join_loose_bars(out.bars, *domain_, threads, &out.layout);
       domain_->check_stop();

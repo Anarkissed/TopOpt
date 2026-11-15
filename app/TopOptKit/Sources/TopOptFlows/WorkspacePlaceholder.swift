@@ -231,6 +231,8 @@ public struct WorkspacePlaceholder: View {
     @State private var hiddenPieces: Set<SelectionArrowRule.PieceRef> = []
     // ★ his iPad 14:13: groups and scenario folders kept open by their button; the list's dragged height
     @State private var openGroups: Set<UUID> = []
+    // ★ his ask 11-13 (Topology as Lattice): picked groups whose chevron closed them; kept only while that group stays picked
+    @State private var closedWhilePicked: Set<UUID> = []
     @State private var openFolders: Set<UUID> = []
     @State private var closedFolders: Set<UUID> = []
     @State private var selectionsHeight: CGFloat? = nil
@@ -1317,6 +1319,9 @@ public struct WorkspacePlaceholder: View {
                 .overlay(alignment: .bottom) {
                     if newEngineDrawn {
                         VStack(spacing: 6) {
+                            if let why = newEngine.solidReason {   // ★ his ruling 11-14: solid where lattice was asked — why, and fixes
+                                LatticeSolidReasonBar(reason: why) { fix in SolidReason.apply(fix, to: &project.lattice) }
+                            }
                             LatticeFileExportBar(export: fileExport, make: exportPrintFile)   // ★ his go 11-13: Export, on the Mac
                             LatticeLayoutPreviewLines(preview: newEngine)
                         }
@@ -2435,18 +2440,24 @@ public struct WorkspacePlaceholder: View {
     /// The keep-out volumes (keep-clear v2 Part 3), each tagged whether its group is
     /// the ACTIVE selection so the viewport brightens it. Built from the same
     /// resolved geometry the run freezes (`ProjectModel.clearanceVolumes`).
+    /// Topology's open rule: a picked group is open (until its chevron closes it), any other only by its button.
+    private func topologyGroupOpen(_ id: UUID) -> Bool {
+        openGroups.contains(id) || (selection.activeGroupID == id && !closedWhilePicked.contains(id))
+    }
+
     private var keepOutRenderItems: [ClearanceRenderItem] {   // (TopologyFocus: a picked group draws only its own)
         let active = selection.activeGroupID
         // ★ a hidden piece, and every group outside the open scenario, draws no volume; a switched-off anchor's are faint
         // (his iPad 2026-10-26 14:13). The same volumes in the same order, with their piece.
-        let filtering = !hiddenPieces.isEmpty || (scenariosApply && force.hasScenarios)
-        // ★ his ask 11-13 (as Lattice): while a group is picked, only ITS volumes draw (TopologyFocus)
-        let pieces = filtering ? TopologyFocus.only(project.groupView.showing(project.clearancePieceVolumes()) { $0.groupID },
-                                                    active: active) { $0.groupID }.map { ($0.groupID, $0.piece) } : []
-        return TopologyFocus.only(project.groupView.showing(project.clearanceVolumes()) { $0.groupID }, active: active) { $0.groupID }.map {   // Flexible (PR #362) H49a: a hidden group draws no keep-out / protect / load / anchor volume (GroupEyeHides)
+        // ★ his ask 11-13 (as Lattice): while a group is picked, only ITS volumes draw (TopologyFocus, in the draw step below)
+        let filtering = !hiddenPieces.isEmpty || (scenariosApply && force.hasScenarios) || active != nil
+        let pieces = filtering ? project.groupView.showing(project.clearancePieceVolumes()) { $0.groupID }.map { ($0.groupID, $0.piece) } : []
+        return project.groupView.showing(project.clearanceVolumes()) { $0.groupID }.map {   // Flexible (PR #362) H49a: a hidden group draws no keep-out / protect / load / anchor volume (GroupEyeHides)
             ClearanceRenderItem(volume: $0.volume, selected: $0.groupID == active)
         }
-        .keepOutsDrawn(filtering ? pieces : nil, hidden: hiddenPieces) { force.scenarioDraw($0, applies: scenariosApply) }
+        .keepOutsDrawn(filtering ? pieces : nil, hidden: hiddenPieces) {
+            TopologyFocus.draws($0, active: active) ? force.scenarioDraw($0, applies: scenariosApply) : .hidden
+        }
     }
 
     /// ★ §3d — THE LATTICE DEPTH PLANES: one slab per latticed face or primitive,
@@ -14723,11 +14734,16 @@ extension WorkspacePlaceholder {
                            toggleEye: { toggleTopologyEye($0) },
                            ask: TopologySelectionsCopy.deleteAsk)
                 .scenarioHooks(folders: scenarioFolders, loose: scenarioLooseGroups, lineAccessory: { scenarioLineSwitch($0) }, footer: selectionsFooter)   // ★ load scenarios (reviewer 2026-10-26 13:22)
-                .openAndResize(isOpen: { openGroups.contains($0) },
-                               toggleOpen: { id in if openGroups.contains(id) { openGroups.remove(id) } else { openGroups.insert(id) } },
+                .openAndResize(isOpen: { topologyGroupOpen($0) },
+                               toggleOpen: { id in
+                                   if topologyGroupOpen(id) {
+                                       openGroups.remove(id)
+                                       if selection.activeGroupID == id { closedWhilePicked.insert(id) }
+                                   } else { closedWhilePicked.remove(id); openGroups.insert(id) }
+                               },
                                height: $selectionsHeight,
                                pickedStaysOpen: false)   // ★ his ask 11-13 (as Lattice): the chevron closes a picked group, which stays picked
-                .onChange(of: selection.activeGroupID) { id in if let id { openGroups.insert(id) } }   // picking a group opens it   // ★ his iPad 2026-10-26: open buttons, resizable
+                .onChange(of: selection.activeGroupID) { id in closedWhilePicked = closedWhilePicked.filter { $0 == id } }   // ★ his iPad 2026-10-26: open buttons, resizable
             if !selectionsCollapsed {
                 HStack(spacing: DS.Space.s) {
                     if let t = topoTrashed, project.canUndoTrash(t) {

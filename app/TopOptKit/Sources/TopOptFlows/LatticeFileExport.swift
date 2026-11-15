@@ -24,7 +24,7 @@ public enum LatticeFileJob {
         "perRegion": "per_region", "dial": "dial", "regionDials": "dial_region/dial_value", "strutWidthMM": "strut_width_mm",
         "allowQuilt": "allow_quilt", "strength": "strength", "bars": "bars", "joinLoose": "join_loose", "skin": "skin",
         "skinWidthMM": "skin_width_mm", "skinReachCells": "skin_reach_cells", "dropLoose": "drop_loose",
-        "smallCellsInThinWalls": "small_cells_in_thin_walls",
+        "smallCellsInThinWalls": "small_cells_in_thin_walls", "oneGrid": "one_grid",
     ]
 
     /// The job document, keys sorted (the same settings give the same bytes).
@@ -42,7 +42,7 @@ public enum LatticeFileJob {
             "band_mm": s.bandMM, "band_cell_mm": s.bandCellMM, "per_region": s.perRegion, "dial": s.dial,
             "dial_region": s.regionDials.map { Int($0.region) }, "dial_value": s.regionDials.map(\.dial),
             "strut_width_mm": s.strutWidthMM, "allow_quilt": s.allowQuilt, "strength": s.strength,
-            "small_cells_in_thin_walls": s.smallCellsInThinWalls,
+            "small_cells_in_thin_walls": s.smallCellsInThinWalls, "one_grid": s.oneGrid,
             "bars": true,   // a file needs its struts (the job refuses false)
             "join_loose": s.joinLoose, "skin": s.skin, "skin_width_mm": s.skinWidthMM, "skin_reach_cells": s.skinReachCells,
             "drop_loose": s.dropLoose,

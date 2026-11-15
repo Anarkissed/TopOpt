@@ -30,7 +30,7 @@ final class TopologyLikeLatticeHostedTests: XCTestCase {
         let r = try XCTUnwrap(ws.range(of: "private func pickPrimitive("))
         let body = String(ws[r.lowerBound...].prefix(1800))
         XCTAssertTrue(body.contains("(focus == nil || v.groupID == focus)"), "★ only the picked group's shapes take a tap")
-        XCTAssertTrue(ws.contains("TopologyFocus.only(project.groupView.showing(project.clearanceVolumes())"), "★ and only they draw")
+        XCTAssertTrue(ws.contains("TopologyFocus.draws($0, active: active) ? force.scenarioDraw"), "★ and only they draw")
     }
 
     func testOnlyThePickedGroupsShapesDraw() {

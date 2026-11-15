@@ -47,8 +47,19 @@ struct OpenSpace {
 };
 // `pitch_mm`: how finely each cell's shape is read (0.25 printed clean at a 0.45 mm line).
 // `stop` as in Session::lay: set, the reading is given up and LayCancelled is thrown.
+// Inside a cell, the points read one by one are put back together as few boxes as hold them
+// exactly (neighbouring equal runs in a row, then equal rows); `merge` false leaves every
+// run down a column a box of its own (the same open space, in many more boxes: for the test
+// that holds the two the same).
+// `keep_edge` (S11b, default on): the file never opens space past the lattice's edge where that edge is against
+// solid. A point or column is opened when its middle is held, so its footprint can reach up to half a point past the
+// true edge: against air that is wanted (no crust at an open surface), against solid it opened a slit under his v3
+// stand's caps and thinned Protect skins by up to 0.11 mm. On, where opened space ends, a point whose footprint has
+// solid at a corner (or half a step along its column) is not opened; against solid the file keeps up to one point
+// more solid than the true edge, never less. Off: the reading as it was.
 OpenSpace read_open_space(const Domain& domain, const Layout& layout, double pitch_mm = 0.25,
-                          int threads = 0, const std::atomic<bool>* stop = nullptr);
+                          int threads = 0, const std::atomic<bool>* stop = nullptr, bool merge = true,
+                          bool keep_edge = true);
 
 struct MeshSpec {
   int bar_sides = 12;         // a round strut is a bar of this many flat sides, of the same area
@@ -64,6 +75,15 @@ struct MeshSpec {
   // A strut whose rise is under this share of its length (0.5 = 30 degrees) is a bridge.
   // 0 = every strut round.
   double bridge_rise = kBridgeRise;
+  // Every strut is written this much longer at each end, along its own line, than the layout's bar (round struts and
+  // bridges alike; a bridge keeps its level underside; posts are not changed; the struts are still cut to the part).
+  // The open space is read in columns of its pitch, and an opened column can reach up to half a column past the true
+  // edge of the lattice, while a strut is cut exactly at that edge: where lattice ends against solid each strut could
+  // stop up to about 0.1 mm short of the solid it should stand on (his v3 stand: an empty line under each cap, tied
+  // down only by the make-check-make loop's posts). Run on, it is fused into the solid. The layout's bars are not
+  // changed: the preview and the strength check see the same bars. Below 0 = half the open space's pitch + the grow_mm
+  // it was carved with + 0.05 mm (0.195 mm at the defaults); 0 = off, the mesh as before.
+  double strut_reach_mm = -1.0;
   int threads = 0;            // 0 = every core
   // From the layer check. A strut whose LOWEST point is at one of these places is left out
   // (it hangs from above with nothing under its tip), and so is a small separate piece of
@@ -150,6 +170,10 @@ struct LayerSpec {
   double layer_mm = 0.2;
   double pixel_mm = 0.05;
   double one_ended_over_mm = 1.0;
+  // Print rule (e) (reviewer, 2026-11-14, until he names his own number): no bridge reaches more than this past
+  // what holds it (a bridge held at both ends reaches half its span). Clean files reach 1.4 to 3.3 mm; the two
+  // faults of 2026-11-12 (a cap printed over a paper-thin slot) showed only as reaches of 8.88 and 20.01 mm.
+  double reach_limit_mm = 5.0;
   // Rule (d), a COUNT only (reviewer, 2026-11-12): an island of a layer thinner than this
   // (and at least `thin_min_mm2` in area) is about one line wide: a strut lying in a
   // lattice face's plane, cut in half along its length by the face. His 8 mm sample has
@@ -169,13 +193,14 @@ struct LayerReport {
   struct OneEnded { double reach_mm = 0, z = 0, x = 0, y = 0, below_z = 0; bool anything_below = false; };
   std::vector<MidAir> mid_air;       // in layer order
   std::vector<OneEnded> one_ended;   // in layer order
+  std::vector<OneEnded> long_bridges;   // held at two places or more, but reaching past `reach_limit_mm`; in layer order
   double longest_reach_mm = 0.0;
   std::size_t thin_islands = 0;      // rule (d): islands under `thin_under_mm` thick, all layers together
   int thin_layers = 0;               // layers that have at least one
   // The bed face is flat (no sloped or curved underside in the first layer worth the name,
   // and the first layer rests on the bed), nothing starts in mid-air, nothing is one-ended.
   bool bed_flat() const { return sloped_mm2 <= 0.5 && bed_mm2 >= 0.98 * first_layer_mm2; }
-  bool clean() const { return mid_air.empty() && one_ended.empty(); }
+  bool clean() const { return mid_air.empty() && one_ended.empty() && long_bridges.empty(); }
 };
 LayerReport check_layers(const TriangleMesh& mesh, const LayerSpec& spec = LayerSpec{});
 

@@ -63,6 +63,16 @@ Domain::Domain(const PartMeasure& measure, DomainSpec spec)
   std::stable_sort(spec_.protect.begin(), spec_.protect.end(),
                    [](const ProtectSkin& a, const ProtectSkin& b) { return a.id < b.id; });
   for (const ProtectSkin& s : spec_.protect) near_skin_.emplace_back(s.face, protect_depth_mm(s));
+  for (const ProtectSkin& s : spec_.protect) {   // in id order: the same groups however the caller listed them
+    const double depth = protect_depth_mm(s);
+    SkinGroup* g = nullptr;
+    for (SkinGroup& have : skin_groups_)
+      if (have.depth_mm == depth) g = &have;
+    if (!g) { skin_groups_.push_back({depth, {}}); g = &skin_groups_.back(); }
+    const int base = static_cast<int>(g->faces.vertices.size());
+    g->faces.vertices.insert(g->faces.vertices.end(), s.face.vertices.begin(), s.face.vertices.end());
+    for (const auto& t : s.face.triangles) g->faces.triangles.push_back({t[0] + base, t[1] + base, t[2] + base});
+  }
   for (const Region& r : spec_.regions) near_shell_.emplace_back(r.shell, r.shell_depth_mm);
   sure_.resize(spec_.regions.size());
   for (std::size_t i = 0; i < spec_.regions.size(); ++i) {
@@ -151,14 +161,16 @@ Domain::Near::Near(const TriangleMesh& surface, double within_mm) {
 Domain::Probe::Probe(const Domain& d) : d_(&d), part_(d.measure_->probe()) {
   skins_.reserve(d.spec_.protect.size());
   for (const ProtectSkin& s : d.spec_.protect) skins_.emplace_back(s.face);
+  skin_groups_.reserve(d.skin_groups_.size());
+  for (const SkinGroup& g : d.skin_groups_) skin_groups_.emplace_back(g.faces);
   shells_.reserve(d.spec_.regions.size());
   for (const Region& r : d.spec_.regions) shells_.emplace_back(r.shell);
 }
 
 double Domain::Probe::skin_gap(const Vec3& p) const {
   double g = std::numeric_limits<double>::infinity();
-  for (std::size_t i = 0; i < skins_.size(); ++i)
-    g = std::min(g, skins_[i].unsigned_distance(p) - d_->protect_depth_mm(d_->spec_.protect[i]));
+  for (std::size_t i = 0; i < skin_groups_.size(); ++i)   // one question per depth, not per skin
+    g = std::min(g, skin_groups_[i].unsigned_distance(p) - d_->skin_groups_[i].depth_mm);
   // Finish Covered is a skin on every face of the part.
   const double cover = d_->cover_depth_mm();
   if (cover > 0.0) g = std::min(g, part_.depth_up_to(p, cover + 2.0) - cover);

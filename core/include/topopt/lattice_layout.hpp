@@ -320,6 +320,7 @@ class Domain {
     // no farther than `limit`. Negative when none begins that near.
     double skin_ahead(const Vec3& p, const Vec3& dir, double limit) const;
     std::vector<MeshDistance> skins_;
+    std::vector<MeshDistance> skin_groups_;   // one per depth (Domain::skin_groups_)
     std::vector<MeshDistance> shells_;   // one per region, empty mesh for a prism
   };
   Probe probe() const { return Probe(*this); }
@@ -372,6 +373,12 @@ class Domain {
   DomainSpec spec_;
   const std::atomic<bool>* stop_ = nullptr;
   std::vector<Near> near_skin_;    // one per Protect skin, within its depth
+  // Every Protect skin of one depth as ONE surface (the distance to several surfaces is the least of their
+  // distances, so nothing an answer is made of changes). How far a point is from "any skin's solid" is then one
+  // question per depth, not one per skin: his v4 stand has 26 skins of 4 mm, and each lay took 289 s against 0.7 s
+  // with them sent as one group (362's measure, 2026-11-13). WHICH skin a point is in is still asked skin by skin.
+  struct SkinGroup { double depth_mm = 0.0; TriangleMesh faces; };
+  std::vector<SkinGroup> skin_groups_;
   std::vector<Near> near_shell_;   // one per region (empty for a prism), within its depth
   // For a flat region: squares of its face that lie wholly inside its edge, or wholly
   // outside it (the distance to the edge at a square's middle is more than half the
@@ -462,6 +469,31 @@ struct CellSpec {
   //                floor above. Held at that floor when it asks for less.
   bool allow_quilt = false;
   double band_cell_mm = 0.0;
+  // "LET WALLS CUT CELLS" (his name for the option, 2026-11-14), off by default. On: one even grid that walls and
+  // pockets cut through. Off: today's whole cells fitted to walls. Aesthetic only; Structural never shows it.
+  // (His words, 2026-11-12: "Why can't the pocket just cut the lattices wherever they are positioned and then a
+  // skin connect all the struts that are left disconnected in a pattern?"; his ruling, 2026-11-14: "I think
+  // aesthetic should allow the one grid cut wherever. Not structural.", "BUT it should be an option available to
+  // the user to select".) A per-part option, OFF unless the user turns it on; off, the layout is what it was, byte
+  // for byte. Core does not know the stage, so whoever offers the switch offers it in Aesthetic and nowhere else
+  // (a certified wall must hold its cells: C5).
+  // On: each region is ONE regular grid of its base cell, and every surface, pocket, hole, Protect skin and the
+  // region's own edge simply CUTS it (D3). A flat region's grid is in its face's own frame, the face a cell boundary
+  // (C15 at the face), its base cell the largest size not above Max cell that divides the region's depth; it is laid
+  // in one frame like a curved region, not wall by wall, and no wall map is read. A curved region and the whole
+  // part keep the grid they had. In every region NO cell is refused for the material it stands in: the wall-fit
+  // test (C2) and the cells a wall must hold (C3-C5) are not applied, and `min_cells_across` is not read at all.
+  // Any cube holding lattice of its region is a cut cell, whose shape is that lattice (cell_holds).
+  // Grade to shape is as before (G1-G7, G10), from the region's own outline; the smaller sizes come from the same
+  // ladders and never go under the layout's floor cell. With no band every cell is the base cell.
+  // What it gives up: C2/C12 (a cell may be wider than its wall), C15 at a wall's FAR side and at a Protect skin's
+  // inner side (those cut through cells), and D8 by cell size (a thin wall is cut cells, not solid; the Domain's own
+  // `min_wall_mm` still makes solid). A cut piece too small to hold a strut longer than its own width has none.
+  // C20 (his ruling the same day: "let cells shrink towards pockets and walls"): only the smallest cell of the
+  // ladder is ever cut; a larger cell that anything would cut is split down first, as G10 splits it at the outline.
+  // C21: a flat region's face shows one main size, the largest of its ladder at which more than half of the cubes in
+  // the first layer under the face stand whole; no larger cell is laid in that region.
+  bool one_grid = false;
 };
 
 // Cells are cubes on a frame: world position = origin + ax[0]*a + ax[1]*b + ax[2]*c.
@@ -552,6 +584,20 @@ struct CellIndex {
   std::map<std::array<long long, 3>, std::vector<std::uint32_t>> grid;   // each list in cell order
 };
 
+// Why lattice that was asked for is solid in a cube no cell could take (D14): for the one line the app shows.
+enum class NoCell : std::uint8_t {
+  Other = 0,       // none of the below; the app says only "no cell fits here"
+  WallNarrow,      // C2: the wall there is narrower than the smallest cell allowed
+  TooFewAcross,    // C3 to C5: a cell fits the wall, but not as many across as the setting asks
+  Sliver,          // D14b: a cut piece of this region's lattice too small for a cell, that no neighbouring cell took in
+  RegionShallow,   // C15: the region is shallower than the smallest cell allowed
+};
+struct SolidWhy {
+  NoCell why = NoCell::Other;
+  float have_mm = 0.0f;   // what is there: the wall's width (WallNarrow, TooFewAcross), the piece's thickness (Sliver), the region's depth (RegionShallow)
+  float need_mm = 0.0f;   // what it would have to be for a cell to be laid there with today's settings
+};
+
 struct Layout {
   // D14b: cells take in lattice slivers inside their cubes (CellSpec::absorb_slivers). `index` is lay_cells' own.
   bool absorb = false;
@@ -571,6 +617,22 @@ struct Layout {
   // within its own sample points; the rule itself is for whoever draws or builds:
   // lattice space that cell_holds is true for in no cell is solid.
   std::vector<Cell> solid;
+  // D14c: why each cube of `solid` got no cell, and the two sizes. A cube is put down to the first of these that holds:
+  //   RegionShallow  the region's own cell is under the smallest cell allowed because the region is too shallow for it
+  //                  (have: the region's depth; need: the depth whose cell prints), or, in a region with no face
+  //                  (curved), the region's depth is what cuts the wall below the cell tried.
+  //   WallNarrow     the wall read there is narrower than the smallest cell tried at that spot (need: that cell).
+  //   TooFewAcross   that cell fits the wall, but not min_cells_across of them (have: the member's narrowest width;
+  //                  need: that many cells).
+  //   Other          anything else (a cell setting under the printable floor; a Stepped unit the band kept empty).
+  //   Sliver         print rule P8 (f) (solidify_thin_cuts): a cut cell whose piece was thinner than its strut against
+  //                  solid (have: the piece's thickness; need: its strut). lay_cells itself records no Sliver: every
+  //                  cube it records solid was refused by what its own points read, so one of the first three holds. The sliver D14b leaves solid (a thin cut piece with solid beyond it) has no cube here.
+  // `need` is rounded up to a micron, so a wall or depth made exactly `need` lays a cell.
+  std::vector<SolidWhy> solid_why;  // one per entry of solid, same order
+  // Print rule P8 (f): the entries of `solid` that solidify_thin_cuts put there, in the order it put them. Space inside
+  // one of these cubes is never taken in by another region's cell (D14b): what the rule made solid stays solid.
+  std::vector<std::uint32_t> thin_solid;
   std::vector<RegionCells> regions;
 };
 
@@ -598,7 +660,8 @@ Reading read_at(const Domain::Probe& probe, const Frame& frame, const WallMap& w
 // part of its cube this holds for; two walls' cut cells may overlap as cubes where the
 // walls meet, never as this. Lattice space this holds for in no cell is solid (D14).
 // With Layout::absorb (D14b) it also holds lattice inside its cube that belongs to another region or wall, when no
-// cell of that region and wall holds it and this is the first cell, in layout order, whose cube the point is in.
+// cell of that region and wall holds it and this is the first cell, in layout order, whose cube the point is in; never
+// inside a cube print rule P8 (f) made solid (Layout::thin_solid).
 bool cell_holds(const Layout& layout, const Domain::Probe& probe, const Cell& cell, const Vec3& p);
 // The same for cell number `cell` of the layout at a point (a, b, c) of the cell's own frame, WITHOUT the cube test
 // (for a point of the cell's own struts, already a hair inside it).
@@ -711,6 +774,33 @@ std::vector<SteppedEdge> stepped_edges(const Bars& bars);
 
 Bars lay_bars(const Layout& layout, const Domain& domain, int threads = 0);
 
+// Print rule P8 (f) (reviewer, 2026-11-14): a cut piece of lattice thinner than its own strut, lying against solid,
+// is solid. Nothing can stand in it (every strut through it is shorter than its own width and is dropped as a stub),
+// and left open it is a slot under material that no printer can print over (his v3 stand: a row of cut cells
+// 0.49 mm thick under the front wall's solid cap left an empty layer 0.09 mm thin, 40 x 6 mm, under the cap).
+// Asked of every CUT cell whose cube holds no AIR (read a hair inside its faces, edges and corners and at its 27
+// points). Its lattice as cell_holds_at gives it (what it takes in from another region counts) is read along each of
+// the three axes of its frame, on a 5 x 5 grid of lines through the cube, the longest unbroken run on a line found at
+// steps of a quarter of the strut and grown to its true ends; when no grid line finds any, on the lines through each
+// of the cube's own sample points that is held. A cell is thin along an axis when no run reaches its strut, and lies
+// against solid along it when, on more than half of the lines that found a run, a hair (0.02 mm) past at least one
+// end of the run is inside the part and lattice of no region. A piece between lattice on both sides (a seam between
+// two regions, or between two walls of one region) is left open however thin: a sheet of solid inside lattice is
+// worse than a gap. Thin and against solid along any axis:
+// the cell leaves `layout.cells` and joins `layout.solid` (D14), so
+// the preview's map, the bars and the file see it solid without knowing this rule, with its reason (NoCell::Sliver:
+// have = its thickness, need = its strut); struts it shared with a neighbour are the neighbour's. A piece facing air,
+// or as thick as its strut, is left alone. Call it after set_struts and
+// before lay_bars. The same for any number of threads; with no such cell the layout is untouched. Returns how many
+// cells went solid; `found`, when given, receives each one's place in `layout.solid`, its thickness and that axis.
+struct ThinCut {
+  std::size_t solid = 0;   // index into Layout::solid
+  double thick_mm = 0.0;   // along its thinnest axis
+  int axis = 0;            // that axis of its frame
+};
+std::size_t solidify_thin_cuts(Layout& layout, const Domain& domain, int threads = 0,
+                               std::vector<ThinCut>* found = nullptr);
+
 // S5: where two walls with different cells meet (or two regions, or two cell sizes whose
 // cells are cut against each other), each side's struts stop Loose at the line between
 // them. Each such bar is run straight on, in its own direction, until it meets a bar of
@@ -732,11 +822,17 @@ class SolidAt {
   bool operator()(const Domain::Probe& probe, const Vec3& p) const;
   // The same, for a point already read as `w`.
   bool operator()(const Domain::Probe& probe, const Vec3& p, const Where& w) const;
+  // D14c: for a point this calls solid where lattice was asked for (lattice by the domain, held by no cell), the
+  // reason recorded with the solid cube that holds it (Layout::solid_why): the first, in layout order, whose cube the
+  // point is in and whose region (and, under a flat region, wall) the point's lattice is. Other when no recorded cube
+  // holds it, and for any point this does not call solid where lattice was asked for.
+  SolidWhy why(const Domain::Probe& probe, const Vec3& p) const;
 
  private:
   const Layout* layout_;
   double pitch_ = 4.0;
   std::map<std::array<long long, 3>, std::vector<std::uint32_t>> grid_;
+  std::map<std::array<long long, 3>, std::vector<std::uint32_t>> solid_grid_;   // the same, of Layout::solid
 };
 
 // S3, Finish Skin: bars across the part's surface joining the cut strut ends, "a flat
@@ -821,7 +917,7 @@ struct Settings {
   std::vector<RegionAsk> regions;
   std::vector<ProtectAsk> protect;
   // The cells, the struts, and what happens to cut ends.
-  CellSpec cells;          // its allow_quilt is not read: the switch is struts.allow_quilt
+  CellSpec cells;          // its allow_quilt and one_grid are not read: the switches are struts.allow_quilt, one_grid
   StrutSpec struts;
   // Per part, OFF unless he turns it on (his words, 2026-11-12: "I definitely want it as a per-part choice. Especially
   // in the app itself."). A wall too thin for a cell that the thinnest strut leaves open (R5, C14) is normally solid.
@@ -830,6 +926,12 @@ struct Settings {
   // cell keeps the open look. Denser than the open look in those small cells, never touching. (His v2 stand, printed
   // with two-line struts: its wing edges, socket walls and spotface walls.) Allow quilt on makes this moot.
   bool small_cells_in_thin_walls = false;
+  // "Let walls cut cells" (his ruling 2026-11-14): per part, OFF unless the user turns it on. The session
+  // hands it to the cells as CellSpec::one_grid (see there): on, each region is one even grid that every wall, pocket,
+  // hole, Protect skin and the region's own edge cuts; off, the layout is what it was, byte for byte. Core does not
+  // know Aesthetic from Structural: the app offers the switch in Aesthetic only. A cell setting: changing it lays the
+  // cells again and does not read the part again.
+  bool one_grid = false;
   bool bars = true;              // false: cells and strut widths only
   bool join_loose = true;        // S5
   bool skin = false;             // Finish Skin (S3)
@@ -847,6 +949,7 @@ struct Outcome {
   bool cancelled = false;        // the stop flag was set before the layout was whole: nothing else here is filled
   std::vector<int> empty_regions;   // asked-for regions none of whose faces has triangles
   double ms_read = 0.0, ms_cells = 0.0, ms_bars = 0.0;
+  std::size_t thin_solid = 0;    // cut cells print rule P8 (f) made solid (solidify_thin_cuts)
 };
 
 class Session {

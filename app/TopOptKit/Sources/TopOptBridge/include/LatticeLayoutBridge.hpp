@@ -80,6 +80,7 @@ struct LatticeLayoutSettings {
   double skin_width_mm = 0.0;                // 0 = as wide as the thinner strut it joins
   double skin_reach_cells = 1.2;
   bool small_cells_in_thin_walls = false;   // his per-part choice (core Settings::small_cells_in_thin_walls), default off
+  bool one_grid = false;   // "Let walls cut cells" (his 11-14, Aesthetic only): one grid the walls cut (core Settings::one_grid)
   bool drop_loose = true;                    // Finish None's rule (S4); pieces adrift go too
 };
 
@@ -151,6 +152,9 @@ struct LatticeLayoutGrid {
   // line (11-14) compares their share between two line widths.
   int64_t asked = 0;
   int64_t unheld = 0;
+  // The unheld voxels by core's reason (SolidAt::why, NoCell): Other, WallNarrow, TooFewAcross, Sliver, RegionShallow (his
+  // ruling 11-14: solid where lattice was asked is never silent — the line says why and offers fixes).
+  std::vector<int64_t> nocell;
 };
 LatticeLayoutGrid lattice_layout_grid(int64_t session, float origin_x, float origin_y, float origin_z, float voxel_mm,
                                       int32_t nx, int32_t ny, int32_t nz, BridgeError& err);

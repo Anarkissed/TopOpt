@@ -274,6 +274,8 @@ public struct LatticeWizardModel: Equatable, Sendable {
     public var singleCellMembers: Bool = false
     /// ★ "Small cells in thin walls" — see `LatticeSettings.smallCellsInThinWalls` (his ask 11-13).
     public var smallCellsInThinWalls: Bool = false
+    /// ★ "Let walls cut cells" — see `LatticeSettings.letWallsCutCells` (his 11-14).
+    public var letWallsCutCells: Bool = false
 
     /// ★ THE PERMISSION'S SETTER, AND IT DELEGATES. The migration rule (density
     /// `.sim ⇒ .uniform`, cell `.swept ⇒ .fixed`) lives in `LatticeSettings`
@@ -354,6 +356,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
         self.gradeAlong = s.gradeAlong
         self.singleCellMembers = s.singleCellMembers
         self.smallCellsInThinWalls = s.smallCellsInThinWalls
+        self.letWallsCutCells = s.letWallsCutCells
         self.shapeFitGradeStrength = s.shapeFitGradeStrength
         // ★ the rule holds on load too: a saved single-cell project opens with Skin
         if s.singleCellMembers, self.boundary != .fullSkin { self.boundary = .fullSkin }
@@ -413,6 +416,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
         // written into the setting — his choice stays his.
         out.singleCellMembers = singleCellMembers
         out.smallCellsInThinWalls = smallCellsInThinWalls
+        out.letWallsCutCells = letWallsCutCells
         // ★ ORGANIC picks travel whatever the algorithm; `gradingDictionary()` writes
         // none of them unless organic was chosen and the linked core accepts the key.
         out.organicGrowth = organicGrowth

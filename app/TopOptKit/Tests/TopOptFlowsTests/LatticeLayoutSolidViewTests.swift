@@ -80,6 +80,51 @@ final class LatticeLayoutSolidViewTests: XCTestCase {
         XCTAssertTrue(none == nil || none! < LatticeLayoutPreview.worthSaying, "RED CONTROL: nothing solid to cure, no line")
     }
 
+    /// ★ His ruling 11-14: solid where lattice was asked says why and offers fixes, chosen by rule.
+    func testTheSolidReasonLineAndItsFixes() {
+        var l = LatticeSettings()
+        l.stageMode = .aesthetic
+        let wall = SolidReason.of(share: 0.12, nocell: [3, 997, 0, 0, 0], lattice: l)
+        XCTAssertEqual(wall?.cause, .wallNarrow, "★ the main reason by volume")
+        XCTAssertEqual(wall?.line, "12% of the lattice you asked for is solid: the walls there are too thin for a whole cell")
+        XCTAssertEqual(wall?.fixes, [.letWallsCutCells, .smallCells], "★ the fixes that open a thin wall")
+        l.letWallsCutCells = true
+        XCTAssertEqual(SolidReason.of(share: 0.12, nocell: [3, 997, 0, 0, 0], lattice: l)?.fixes, [.smallCells], "a fix already on is not offered")
+        l.stageMode = .structural
+        l.letWallsCutCells = false
+        XCTAssertEqual(SolidReason.of(share: 0.12, nocell: [0, 10, 0, 0, 0], lattice: l)?.fixes, [.aestheticCutCells, .smallCells],
+                       "★ Structural: his own example, change to Aesthetic and let walls cut cells")
+        l.stageMode = .aesthetic
+        XCTAssertEqual(SolidReason.of(share: 0.3, nocell: [0, 0, 10, 0, 0], lattice: l)?.fixes, [.letWallsCutCells, .oneCellAcross])
+        XCTAssertNil(SolidReason.of(share: 0.02, nocell: [0, 10, 0, 0, 0], lattice: l), "RED CONTROL: 2% solid says nothing")
+        // P8 (f), LatticeReview c3b4f855: a cut piece thinner than its strut, lying against solid, is solid (NoCell::Sliver)
+        let thin = SolidReason.of(share: 0.1, nocell: [2, 5, 0, 40, 0], lattice: l)
+        XCTAssertEqual(thin?.cause, .sliver, "★ a thin cut piece is its own reason when it holds the most solid")
+        XCTAssertEqual(thin?.line, "10% of the lattice you asked for is solid: cut pieces there are too thin to hold a strut")
+        XCTAssertEqual(thin?.fixes, [], "★ no fix chip for a thin cut piece (LatticeReview)")
+        XCTAssertEqual(SolidReason.of(share: 0.1, nocell: [0, 40, 0, 5, 0], lattice: l)?.cause, .wallNarrow,
+                       "a few thin pieces under a thin wall: the wall is the reason")
+        var applied = l
+        SolidReason.apply(.letWallsCutCells, to: &applied)
+        XCTAssertTrue(applied.letWallsCutCells, "★ a tap takes the fix")
+    }
+
+    /// ★ The engine's reasons reach the app: every unheld voxel of the map is counted under one of core's reasons.
+    func testTheMapCountsTheReasonsForEveryUnheldVoxel() async throws {
+        let session = try await LatticeLayoutSession.open(path: Self.cube)
+        defer { session.close() }
+        var s = LatticeLayoutSession.Settings()
+        s.regions = (0..<6).map { .init(id: Int32($0 + 1), faces: [Int32($0)], depthMM: 3) }   // too thin for a two-line cell
+        _ = try await session.lay(s)
+        let m = try TopOptKit.importMesh(path: Self.cube)
+        let box = try XCTUnwrap(LatticeLayoutPreview.box(m.vertices))
+        let r = try await session.grid(origin: box.lo, voxel: 0.5, dims: SIMD3(22, 22, 22))
+        print("SOLID-REASONS cube: asked \(r.asked), unheld \(r.unheld), by reason \(r.nocell)")
+        XCTAssertGreaterThan(r.unheld, 0, "premise: lattice asked for and left solid")
+        XCTAssertEqual(r.nocell.count, 5)
+        XCTAssertEqual(r.nocell.reduce(0, +), r.unheld, "★ every unheld voxel has a reason")
+    }
+
     func testTheMapSaysOpenOrSolidInsideThePart() async throws {
         var s = LatticeLayoutSession.Settings()
         s.allLattice = true
