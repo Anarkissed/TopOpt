@@ -101,6 +101,17 @@ struct MeshSpec {
   // where the run enters the solid. 0 = never. The number is the lead's (LatticeReview, 2026-11-14), not the owner's.
   // Read by build_printable_mesh only.
   double weave_stand_every_mm = 20.0;
+  // O11, the blended foot (the owner's OR17: "blended when a strut meets a wall"). ONLY a bar of a weave region, and
+  // ONLY at an end tagged Solid (it runs into the part's solid wall), is given a foot of this size f where it meets
+  // the wall (the first point back from that end, along the bar, that is not solid: SolidAt, as the end was tagged).
+  // A round strut flares in a straight cone from its own radius r, 3 f along the strut from the wall, to r + f at the
+  // wall, and runs on into the solid at that radius. A shallow strut (a bridge, O5) keeps its flat underside exactly:
+  // its foot widens by f each side and by f upward over the same 3 f, in straight tapers, and runs on into the solid
+  // at that section. The taper never runs past the bar's other end. f is held at r (a foot is never more than twice
+  // its strut). 0 = no foot: the mesh as before (the writer's own default, so every caller that does not ask is
+  // unchanged). Below 0 = half the bar's own width (the file job's default: FileOptions). Joints between struts, ends
+  // cut by the open surface and every cube-lattice bar are unchanged.
+  double weave_foot_mm = 0.0;
   // Set, the work is given up between its steps and LayCancelled is thrown.
   const std::atomic<bool>* stop = nullptr;
 };
@@ -118,6 +129,10 @@ struct MeshReport {
   // The owner's bridge rules for a weave (O6, O7, O9; weave_holds): its shallow bars kept with both ends held, at any
   // length, and those left out because an end is held by nothing kept. Both 0 with no weave region.
   std::size_t kept_any_length = 0, weave_left_unheld = 0;
+  // O11: the weave ends given a foot, of them those whose f was held at r, and the material the feet add (each foot
+  // as written between the wall and 3 f out, less the strut it wraps there; what runs on into the solid adds none).
+  std::size_t feet = 0, feet_held = 0;
+  double feet_mm3 = 0.0;
   double struts_mm3 = 0.0;         // joined and cut to the part
   double solid_mm3 = 0.0;          // the part less the open space
   std::size_t solid_pieces = 0;

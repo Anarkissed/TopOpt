@@ -1593,6 +1593,256 @@ static void test_weave_bridge_leads_to_nothing() {
   }
 }
 
+// ── O11, the blended foot where a weave strut meets a wall ─────────────────────
+// The mesh cut by the plane through `o` square to the unit `n`: its segments, each running so that the material lies on
+// its left seen from +n, in the plane's own axes (`e1`, `e2`), kept only within `within` of `o`.
+struct Cut {
+  std::vector<std::array<double, 4>> seg;   // x0 y0 x1 y1
+  double area() const {
+    double a = 0.0;
+    for (const auto& s : seg) a += 0.5 * (s[0] * s[3] - s[2] * s[1]);
+    return a;
+  }
+  double lo(int axis) const {
+    double v = 1e300;
+    for (const auto& s : seg) v = std::min({v, s[axis], s[axis + 2]});
+    return v;
+  }
+  double hi(int axis) const {
+    double v = -1e300;
+    for (const auto& s : seg) v = std::max({v, s[axis], s[axis + 2]});
+    return v;
+  }
+};
+static Cut cut_mesh(const TriangleMesh& m, const Vec3& o, const Vec3& n, const Vec3& e1, const Vec3& e2, double within) {
+  Cut c;
+  auto dot = [](const Vec3& a, const Vec3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; };
+  for (const auto& t : m.triangles) {
+    Vec3 p[3];
+    double d[3];
+    for (int q = 0; q < 3; ++q) {
+      const Vec3& v = m.vertices[static_cast<std::size_t>(t[static_cast<std::size_t>(q)])];
+      p[q] = {v.x - o.x, v.y - o.y, v.z - o.z};
+      d[q] = dot(p[q], n);
+    }
+    std::vector<Vec3> hit;
+    for (int q = 0; q < 3; ++q) {
+      const int r = (q + 1) % 3;
+      if ((d[q] < 0) != (d[r] < 0)) {
+        const double s = d[q] / (d[q] - d[r]);
+        hit.push_back({p[q].x + s * (p[r].x - p[q].x), p[q].y + s * (p[r].y - p[q].y), p[q].z + s * (p[r].z - p[q].z)});
+      }
+    }
+    if (hit.size() != 2) continue;
+    const Vec3 a{p[1].x - p[0].x, p[1].y - p[0].y, p[1].z - p[0].z}, b{p[2].x - p[0].x, p[2].y - p[0].y, p[2].z - p[0].z};
+    const Vec3 N{a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+    const Vec3 way{n.y * N.z - n.z * N.y, n.z * N.x - n.x * N.z, n.x * N.y - n.y * N.x};   // n x N: material on the left
+    Vec3 h0 = hit[0], h1 = hit[1];
+    if (dot(Vec3{h1.x - h0.x, h1.y - h0.y, h1.z - h0.z}, way) < 0) std::swap(h0, h1);
+    if (std::sqrt(dot(h0, h0)) > within || std::sqrt(dot(h1, h1)) > within) continue;
+    c.seg.push_back({dot(h0, e1), dot(h0, e2), dot(h1, e1), dot(h1, e2)});
+  }
+  return c;
+}
+// Across a round strut cut square to it: the width of the circle of the same area.
+static double round_width(const Cut& c) { return 2.0 * std::sqrt(std::max(0.0, c.area()) / 3.14159265358979323846); }
+
+// Test 1 (mesh): f = 0 (the writer's own default) is today's mesh on stage 2's test parts (triangle count and volume, as
+// the unchanged writer made them); the file job's default foot (below 0) changes them, and only where a weave bar runs
+// into the solid.
+static void test_weave_foot_off_is_today() {
+  const BridgeBlock k(20.5);
+  const double t10 = std::tan(10.0 * 3.14159265358979323846 / 180.0), t25 = std::tan(25.0 * 3.14159265358979323846 / 180.0);
+  const Bars level = weave_bars(k.d, {level_strand({2, 20, 10}, {38, 20, 10})});
+  const Bars sloping = weave_bars(k.d, {level_strand({2, 12, 7}, {38, 12, 7 + 36 * t10}), level_strand({2, 28, 2}, {38, 28, 2 + 36 * t25})});
+  const BridgeBlock floor(14.0);
+  const Bars upright = weave_bars(floor.d, {level_strand({20, 20, 19.9}, {20, 20, 3}), level_strand({12, 14, 19.9}, {14, 16, 3})});
+  struct Today { const char* what; const BridgeBlock* k; const Bars* bars; std::size_t feet, tri; double mm3; };
+  const Today today[3] = {{"level 30 mm", &k, &level, 2, 1656, 13975.088308262024},
+                          {"sloping 10 and 25", &k, &sloping, 4, 1686, 14002.311519950097},
+                          {"two upright over a floor", &floor, &upright, 2, 1372, 19365.685272698138}};
+  for (const Today& t : today) {
+    MeshSpec off, dflt;
+    off.weave_foot_mm = 0.0;
+    dflt.weave_foot_mm = -1.0;   // the file job's default
+    MeshReport r0, rd, rn;
+    const TriangleMesh m0 = build_mesh(t.k->pm, t.k->d, t.k->layout, *t.bars, t.k->open, off, &r0);
+    const TriangleMesh mn = build_mesh(t.k->pm, t.k->d, t.k->layout, *t.bars, t.k->open, MeshSpec{}, &rn);   // not asked
+    const TriangleMesh md = build_mesh(t.k->pm, t.k->d, t.k->layout, *t.bars, t.k->open, dflt, &rd);
+    const TriangleMesh mc = build_mesh(t.k->pm, t.k->d, t.k->as_cube(), *t.bars, t.k->open, dflt);
+    const TriangleMesh mc0 = build_mesh(t.k->pm, t.k->d, t.k->as_cube(), *t.bars, t.k->open, off);
+    std::printf("foot off, %s: f = 0 %zu triangles, %.17g mm3 (today %zu, %.17g); default foot %zu feet, %zu triangles, %.6f mm3, "
+                "feet add %.4f mm3\n", t.what, m0.triangles.size(), r0.mm3, t.tri, t.mm3, rd.feet, md.triangles.size(), rd.mm3,
+                rd.feet_mm3);
+    CHECK(r0.ok && rd.ok && r0.feet == 0 && r0.feet_mm3 == 0.0);
+    CHECK(m0.triangles.size() == t.tri && r0.mm3 == t.mm3);
+    CHECK(rn.feet == 0 && same_mesh(m0, mn));   // the writer's own default is no foot
+    CHECK(rd.feet == t.feet && rd.feet_held == 0 && rd.feet_mm3 > 0.0 && rd.mm3 > r0.mm3 && !same_mesh(m0, md));
+    CHECK(same_mesh(mc, mc0));   // cube-lattice bars: no foot at any setting
+  }
+}
+
+// Test 2: an upright round weave bar into the floor, r = 0.45, f = 0.3: 2 (r + f) across at the wall, 2 r from 3 f
+// up, never wider farther from the wall; one closed body.
+static void test_weave_foot_round() {
+  const BridgeBlock k(14.0);   // the floor's top at z = 6
+  const Bars bars = weave_bars(k.d, {level_strand({20, 20, 19.9}, {20, 20, 3})});
+  CHECK(bars.bars.size() == 1);
+  if (bars.bars.size() != 1) return;
+  CHECK(bars.bars[0].end_b == Bar::End::Solid);
+  MeshSpec spec;
+  spec.weave_foot_mm = 0.3;
+  MeshReport rep;
+  const TriangleMesh mesh = build_mesh(k.pm, k.d, k.layout, bars, k.open, spec, &rep);
+  const Read rd = read_mesh(mesh);
+  CHECK(rep.ok && rep.feet == 1 && rep.feet_held == 0 && rd.edges_not_twice == 0 && rd.shells == 1);
+  auto width_at = [&](double z) { return round_width(cut_mesh(mesh, {20, 20, z}, {0, 0, 1}, {1, 0, 0}, {0, 1, 0}, 2.0)); };
+  const double at_wall = width_at(6.001);
+  double grows = 0.0, prev = at_wall, worst_far = 0.0;
+  for (double z = 6.02; z < 6.9; z += 0.02) {
+    const double w = width_at(z);
+    grows = std::max(grows, w - prev);
+    prev = w;
+  }
+  for (double z = 6.9; z < 15.0; z += 0.37) worst_far = std::max(worst_far, std::fabs(width_at(z) - 0.9));
+  std::printf("foot round, r 0.45 f 0.3: across at the wall %.4f mm (want 1.5), most it grows going up %.5f mm, "
+              "from 3 f up worst off 0.9 %.5f mm; feet add %.4f mm3; %zu shells\n", at_wall, grows, worst_far, rep.feet_mm3, rd.shells);
+  CHECK(std::fabs(at_wall - 1.5) <= 0.03);
+  CHECK(grows <= 1e-6);
+  CHECK(worst_far <= 0.01);
+}
+
+// Test 3: a shallow weave bar at 10 degrees between the walls: its underside the same plane as at f = 0 right up to
+// each wall; a cut at the wall 2 f wider sideways and f taller (square to the bar) than at f = 0.
+static void test_weave_foot_shallow() {
+  const BridgeBlock k(20.5);   // the walls at x = 5 and x = 35
+  const double deg = 10.0 * 3.14159265358979323846 / 180.0, t10 = std::tan(deg);
+  const Bars bars = weave_bars(k.d, {level_strand({2, 12, 7}, {38, 12, 7 + 36 * t10})});
+  CHECK(bars.bars.size() == 1);
+  if (bars.bars.size() != 1) return;
+  MeshSpec off, on;
+  off.weave_foot_mm = 0.0;
+  on.weave_foot_mm = 0.3;
+  MeshReport r0, r1;
+  const TriangleMesh m0 = build_mesh(k.pm, k.d, k.layout, bars, k.open, off, &r0);
+  const TriangleMesh m1 = build_mesh(k.pm, k.d, k.layout, bars, k.open, on, &r1);
+  CHECK(r0.ok && r1.ok && r1.feet == 2 && r1.bridges == 1 && read_mesh(m1).shells == 1);
+  // The underside: the plane at f = 0 (its downward faces' normal and offset over the bar's middle).
+  const Vec3 want{std::sin(deg), 0.0, -std::cos(deg)};
+  auto downward = [&](const TriangleMesh& m, double x0, double x1, auto&& each) {
+    for (const auto& t : m.triangles) {
+      const Vec3 &p = m.vertices[static_cast<std::size_t>(t[0])], &q = m.vertices[static_cast<std::size_t>(t[1])],
+                 &s = m.vertices[static_cast<std::size_t>(t[2])];
+      const Vec3 c{(p.x + q.x + s.x) / 3, (p.y + q.y + s.y) / 3, (p.z + q.z + s.z) / 3};
+      if (c.x < x0 || c.x > x1 || std::fabs(c.y - 12.0) > 1.2 || c.z < 3.0) continue;
+      const Vec3 e1{q.x - p.x, q.y - p.y, q.z - p.z}, e2{s.x - p.x, s.y - p.y, s.z - p.z};
+      Vec3 n{e1.y * e2.z - e1.z * e2.y, e1.z * e2.x - e1.x * e2.z, e1.x * e2.y - e1.y * e2.x};
+      const double ln = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+      if (ln < 1e-12) continue;
+      n = {n.x / ln, n.y / ln, n.z / ln};
+      if (n.x * want.x + n.y * want.y + n.z * want.z < std::cos(3.14159265358979323846 / 4)) continue;   // its lowest faces
+      each(n, p, q, s);
+    }
+  };
+  double plane = 0.0;
+  long n0 = 0;
+  downward(m0, 12, 28, [&](const Vec3&, const Vec3& p, const Vec3&, const Vec3&) {
+    plane += p.x * want.x + p.y * want.y + p.z * want.z;
+    ++n0;
+  });
+  plane /= std::max(1L, n0);
+  long faces = 0, off_angle = 0, off_plane = 0;
+  double worst_deg = 0.0, worst_mm = 0.0;
+  downward(m1, 5.0, 35.0, [&](const Vec3& n, const Vec3& p, const Vec3& q, const Vec3& s) {
+    ++faces;
+    const double a = std::acos(std::clamp(n.x * want.x + n.y * want.y + n.z * want.z, -1.0, 1.0)) * 180.0 / 3.14159265358979323846;
+    worst_deg = std::max(worst_deg, a);
+    off_angle += a > 1.0;
+    for (const Vec3* v : {&p, &q, &s}) {
+      const double mm = std::fabs(v->x * want.x + v->y * want.y + v->z * want.z - plane);
+      worst_mm = std::max(worst_mm, mm);
+      off_plane += mm > 0.01;
+    }
+  });
+  // Sideways: a cut parallel to each wall, 0.02 mm out from it (the wall is not in it): 2 f wider than at f = 0.
+  // Taller: a cut square to the bar, as near each wall as its whole section is clear of the wall ((r + f) tan 10
+  // degrees + 0.02 mm along the bar): f taller than the bar's own section, less the taper over that distance.
+  const Vec3 d{std::cos(deg), 0.0, std::sin(deg)}, up{-std::sin(deg), 0.0, std::cos(deg)};
+  const double r = 0.45, f = 0.3, s0 = (r + f) * t10 + 0.02, g = 1.0 - s0 / (3.0 * f);
+  auto axis_at = [&](double x) { return Vec3{x, 12.0, 7.0 + (x - 2.0) * t10}; };
+  double worst_wide = 0.0, worst_tall = 0.0;
+  for (int end = 0; end < 2; ++end) {
+    const double xw = end == 0 ? 5.0 : 35.0, out = end == 0 ? 1.0 : -1.0;
+    const Cut w0 = cut_mesh(m0, axis_at(xw + 0.02 * out), {1, 0, 0}, {0, 1, 0}, {0, 0, 1}, 2.0),
+              w1 = cut_mesh(m1, axis_at(xw + 0.02 * out), {1, 0, 0}, {0, 1, 0}, {0, 0, 1}, 2.0);
+    const double wide = (w1.hi(0) - w1.lo(0)) - (w0.hi(0) - w0.lo(0));
+    const Vec3 o = axis_at(xw + out * s0 * std::cos(deg));
+    // Only the bar's own section: the wall's face crosses this plane 0.86 mm above the bar's line and higher.
+    auto bar_only = [](Cut c) {
+      Cut k;
+      for (const auto& g : c.seg)
+        if (std::fabs(g[1]) < 0.85 && std::fabs(g[3]) < 0.85) k.seg.push_back(g);
+      return k;
+    };
+    const Cut c0 = bar_only(cut_mesh(m0, o, d, {0, 1, 0}, up, 1.6)), c1 = bar_only(cut_mesh(m1, o, d, {0, 1, 0}, up, 1.6));
+    const double tall = (c1.hi(1) - c1.lo(1)) - (c0.hi(1) - c0.lo(1)), low = c1.lo(1) - c0.lo(1);
+    std::printf("foot shallow at the wall x %.0f: 0.02 mm out, %.4f wide at f = 0, %.4f at f = 0.3 (+%.4f); square to the bar "
+                "%.3f mm out, %.4f tall at f = 0, %.4f at f = 0.3 (+%.4f, the taper there %.4f), underside moved %.5f\n", xw,
+                w0.hi(0) - w0.lo(0), w1.hi(0) - w1.lo(0), wide, s0, c0.hi(1) - c0.lo(1), c1.hi(1) - c1.lo(1), tall, f * g, low);
+    worst_wide = std::max(worst_wide, std::fabs(wide - 2.0 * f));
+    worst_tall = std::max(worst_tall, std::fabs(tall - f * g));
+    CHECK(std::fabs(low) <= 0.01 && std::fabs(c0.hi(0) - c0.lo(0) - 2.0 * r) < 0.01);
+  }
+  std::printf("foot shallow, 10 degrees, f 0.3: %ld downward faces from wall to wall, worst %.4f degrees and %.5f mm off the "
+              "f = 0 underside (%ld f = 0 faces); at the walls: wider by 2 f within %.4f, taller by f (less its taper) within %.4f; "
+              "feet add %.4f mm3\n",
+              faces, worst_deg, worst_mm, n0, worst_wide, worst_tall, r1.feet_mm3);
+  CHECK(n0 >= 2 && faces >= 2 && off_angle == 0 && off_plane == 0);
+  CHECK(worst_wide <= 0.03 && worst_tall <= 0.01);
+}
+
+// Test 4: f larger than r is held at r and counted: the mesh is the one at f = r.
+static void test_weave_foot_held() {
+  const BridgeBlock k(14.0);
+  const Bars bars = weave_bars(k.d, {level_strand({20, 20, 19.9}, {20, 20, 3})});
+  MeshSpec big, at_r;
+  big.weave_foot_mm = 0.8;
+  at_r.weave_foot_mm = 0.45;
+  MeshReport rb, rr;
+  const TriangleMesh mb = build_mesh(k.pm, k.d, k.layout, bars, k.open, big, &rb);
+  const TriangleMesh mr = build_mesh(k.pm, k.d, k.layout, bars, k.open, at_r, &rr);
+  std::printf("foot held: f 0.8 on r 0.45: %zu feet, %zu held, the mesh at f = r %d\n", rb.feet, rb.feet_held, same_mesh(mb, mr) ? 1 : 0);
+  CHECK(rb.ok && rb.feet == 1 && rb.feet_held == 1 && rr.feet == 1 && rr.feet_held == 0 && same_mesh(mb, mr));
+  CHECK(rb.feet_mm3 == rr.feet_mm3);
+}
+
+// Test 5: a joint between two weave struts, and an end cut by the open surface, are as at f = 0.
+static void test_weave_foot_leaves_joints() {
+  const BridgeBlock k(14.0);
+  const Bars bars = weave_bars(k.d, {weave_strand({{20, 20, 19.9}, {20, 20, 12}, {24, 20, 3}}, 1)});
+  CHECK(bars.bars.size() == 2);
+  MeshSpec off, dflt;
+  off.weave_foot_mm = 0.0;
+  dflt.weave_foot_mm = -1.0;
+  MeshReport r0, rd;
+  const TriangleMesh m0 = build_mesh(k.pm, k.d, k.layout, bars, k.open, off, &r0);
+  const TriangleMesh md = build_mesh(k.pm, k.d, k.layout, bars, k.open, dflt, &rd);
+  double worst = 0.0;
+  long cuts = 0;
+  for (double z = 10.3; z < 19.95; z += 0.29) {   // the joint at z = 12, the cut end at the top surface
+    const Cut a = cut_mesh(m0, {20, 20, z}, {0, 0, 1}, {1, 0, 0}, {0, 1, 0}, 3.0), b = cut_mesh(md, {20, 20, z}, {0, 0, 1}, {1, 0, 0}, {0, 1, 0}, 3.0);
+    worst = std::max(worst, std::fabs(a.area() - b.area()));
+    ++cuts;
+  }
+  const double near_floor0 = cut_mesh(m0, {23.4, 20, 6.1}, {0, 0, 1}, {1, 0, 0}, {0, 1, 0}, 3.0).area(),
+               near_floor = cut_mesh(md, {23.4, 20, 6.1}, {0, 0, 1}, {1, 0, 0}, {0, 1, 0}, 3.0).area();
+  std::printf("foot leaves joints: %zu feet; %ld cuts from the joint to the open surface, worst area change %.2e mm2; "
+              "at the floor %.4f -> %.4f mm2\n", rd.feet, cuts, worst, near_floor0, near_floor);
+  CHECK(r0.ok && rd.ok && rd.feet == 1 && r0.feet == 0);
+  CHECK(worst <= 1e-4);
+  CHECK(near_floor > near_floor0 + 0.1);
+}
+
 int main() {
   if (!mesh_available()) {
     MeshReport rep;
@@ -1618,6 +1868,11 @@ int main() {
   test_open_space_merged();
   test_layers();
   test_printable();
+  test_weave_foot_off_is_today();
+  test_weave_foot_round();
+  test_weave_foot_shallow();
+  test_weave_foot_held();
+  test_weave_foot_leaves_joints();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }

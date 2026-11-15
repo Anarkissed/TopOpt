@@ -237,7 +237,7 @@ FileOptions options_from(const json::Value& in, const std::string& w) {
   json::reject_unknown(in,
                        {"pitch_mm", "bar_sides", "block_mm", "grow_mm", "clean_mm", "part_mm",
                         "fill_under_mm3", "bridge_rise", "post_mm", "layer_mm", "pixel_mm", "most_passes",
-                        "leave_out", "keep_if_not_clean", "weave_stand_every_mm"},
+                        "leave_out", "keep_if_not_clean", "weave_stand_every_mm", "weave_foot_mm"},
                        w);
   FileOptions o;
   o.pitch_mm = num(in, "pitch_mm", o.pitch_mm, w);
@@ -251,6 +251,7 @@ FileOptions options_from(const json::Value& in, const std::string& w) {
   o.mesh.post_mm = num(in, "post_mm", o.mesh.post_mm, w);
   o.mesh.weave_stand_every_mm = num(in, "weave_stand_every_mm", o.mesh.weave_stand_every_mm, w);
   if (!(o.mesh.weave_stand_every_mm >= 0.0)) json::fail(w + ".weave_stand_every_mm", "must be 0 (never) or more");
+  o.mesh.weave_foot_mm = num(in, "weave_foot_mm", o.mesh.weave_foot_mm, w);   // O11: 0 = no foot, below 0 = half the bar's width
   o.layers.layer_mm = num(in, "layer_mm", o.layers.layer_mm, w);
   o.layers.pixel_mm = num(in, "pixel_mm", o.layers.pixel_mm, w);
   o.most_passes = whole(in, "most_passes", o.most_passes, w);
@@ -1106,9 +1107,11 @@ std::string file_result_json(const FileResult& r) {
     std::snprintf(b, sizeof b,
                   "  \"organic\": {\"ms_trace\": %.1f, \"shallow_bars\": %llu, \"held_both\": %llu, \"held_one\": %llu, "
                   "\"held_none\": %llu,\n    \"kept_any_length\": %llu, \"weave_left_unheld\": %llu, \"stands_added\": %llu,"
+                  "\n    \"feet\": %llu, \"feet_held\": %llu, \"feet_mm3\": %.9g,"
                   "\n    \"runs\": %llu, \"longest_run_mm\": %.9g, \"run_bands\": [",
                   r.ms_trace, count(t.bars), count(t.held_both), count(t.held_one), count(t.held_none),
-                  count(t.kept_any_length), count(t.weave_left_unheld), count(t.stands_added), count(t.runs),
+                  count(t.kept_any_length), count(t.weave_left_unheld), count(t.stands_added),
+                  count(r.made.mesh.feet), count(r.made.mesh.feet_held), r.made.mesh.feet_mm3, count(t.runs),
                   t.longest_run_mm);
     o += b;
     const char* names[4] = {"to 5 mm", "5 to 10 mm", "10 to 20 mm", "over 20 mm"};

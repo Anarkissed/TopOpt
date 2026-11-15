@@ -29,10 +29,18 @@
 
 namespace topopt::lattice_layout {
 
+// The writer's settings a file job starts from: MeshSpec's, with the blended foot on (O11: half the bar's width, for
+// a weave's ends in the solid; nothing else changes).
+inline MeshSpec file_mesh_defaults() {
+  MeshSpec m;
+  m.weave_foot_mm = -1.0;
+  return m;
+}
+
 // How the mesh is made from a layout.
 struct FileOptions {
   double pitch_mm = 0.25;   // how finely each cell's shape is read (read_open_space)
-  MeshSpec mesh;            // its `threads` and `stop` are set from the two below
+  MeshSpec mesh = file_mesh_defaults();   // its `threads` and `stop` are set from the two below
   int threads = 0;          // 0 = every core
   // His print rules (P8): the mesh is made, checked layer by layer and made again until
   // nothing starts in mid-air (build_printable_mesh). A file that still has such a place

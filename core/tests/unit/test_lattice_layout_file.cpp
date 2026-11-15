@@ -1151,6 +1151,129 @@ static void test_no_weave_same_file() {
   std::remove(b.c_str());
 }
 
+// O11, the blended foot (test 1, the file): three cube parts make the same file, byte for byte, at any weave_foot_mm
+// (no key, 0, 0.7, below 0); no foot is written and the file's json says so.
+static void test_cube_files_any_foot() {
+  if (!mesh_available()) return;
+  const double sizes[3][3] = {{30, 30, 12}, {40, 24, 14}, {24, 36, 10}};
+  const char* keys[4] = {"", R"("mesh": {"weave_foot_mm": 0}, )", R"("mesh": {"weave_foot_mm": 0.7}, )", R"("mesh": {"weave_foot_mm": -1}, )"};
+  for (const auto& sz : sizes) {
+    std::string first;
+    bool same = true;
+    std::size_t feet = 0, bytes_made = 0;
+    for (int k = 0; k < 4; ++k) {
+      std::string text = kBlockJob;
+      const std::string at = "\"layout\": {";
+      text.replace(text.find(at), at.size(), std::string(keys[k]) + at);
+      const std::string path = kTmp + "/lattice_file_cube_foot.stl";
+      std::remove(path.c_str());
+      const FileResult r = make_lattice_file(box_model(sz[0], sz[1], sz[2]), parse_file_job(text), path);
+      CHECK(r.ok);
+      const std::string made = slurp(path);
+      if (k == 0) { first = made; bytes_made = made.size(); }
+      same = same && !made.empty() && made == first;
+      feet += r.made.mesh.feet + r.made.mesh.feet_held;
+      CHECK(r.made.mesh.feet_mm3 == 0.0);
+      std::remove(path.c_str());
+    }
+    std::printf("cube part %.0f x %.0f x %.0f: the file %zu bytes, the same at every foot %d, feet %zu\n", sz[0], sz[1], sz[2], bytes_made,
+                same ? 1 : 0, feet);
+    CHECK(same && feet == 0);
+  }
+}
+
+// O11 (tests 6, 7 of the foot): stage 1b's traced pocket through the file job, at f = 0 and with the default foot.
+// With feet: still one body; the layer check ends clean, leaves out no bar it kept at f = 0 and adds no post it did
+// not add at f = 0; the feet are counted in the file's json; the mesh takes no more than 1.5 x the time.
+static void test_organic_foot() {
+  if (!mesh_available()) return;
+  const std::string model_path = kTmp + "/lattice_file_foot.stl";
+  const std::string tensor_path = kTmp + "/lattice_file_foot.tensor";
+  const std::string job_path = kTmp + "/lattice_file_foot_job.json";
+  const std::string stl = kTmp + "/foot_lattice.stl";
+  const std::string result = kTmp + "/" + kFileResultName;
+  write_stl_file(model_path, pocket_mesh());
+  int wall = -1;
+  {
+    std::remove(face_overrides_sidecar_path(model_path).c_str());
+    const StepModel plain = import_part_file_resolved(model_path);
+    FaceOverrides ov;
+    ov.paint_faces.emplace_back();
+    for (std::size_t t = 0; t < plain.mesh.triangles.size(); ++t)
+      if (on_pocket_wall(plain.mesh, plain.mesh.triangles[t])) ov.paint_faces.back().push_back(static_cast<int>(t));
+    save_face_overrides(face_overrides_sidecar_path(model_path), ov);
+    wall = plain.face_count;
+  }
+  CHECK(write_tensor_file(tensor_path, hoop_field()));
+  struct Made { FileResult r; std::string text; TriangleMesh mesh; };
+  auto make = [&](const std::string& mesh_key) {
+    std::ofstream f(job_path, std::ios::binary | std::ios::trunc);
+    f << R"({"mode": "lattice_file", "model": "lattice_file_foot.stl", "output": "foot_lattice.stl", "tensor": "lattice_file_foot.tensor", )"
+      << mesh_key
+      << R"("layout": {"region_ids": [1], "region_no_lattice": [0], "region_depth_mm": [4], "region_expand_mm": [0],
+                "region_face_counts": [1], "region_faces": [)" << wall
+      << R"(], "region_weave": [true], "organic_spacing_mm": 4, "organic_width_mm": 0.9}})";
+    f.close();
+    std::remove(stl.c_str());
+    Made m;
+    m.r = run_file_job(job_path, kTmp);
+    m.text = slurp(result);
+    m.mesh = read_stl_file(stl).mesh;
+    return m;
+  };
+  const Made off = make(R"("mesh": {"weave_foot_mm": 0}, )");
+  const Made on = make("");
+  CHECK(off.r.ok && on.r.ok);
+  if (!off.r.ok || !on.r.ok) return;
+  // The bars the job laid (lay_organic directly, as test_organic_job reads them).
+  const FileJob job = parse_file_job(slurp(job_path));
+  TensorField field;
+  CHECK(read_tensor_file(tensor_path, field));
+  Session session(import_part_file_resolved(model_path));
+  const Outcome out = session.lay_organic(job.settings, field, job.organic);
+  const std::vector<char> kept_off = bars_present(out.bars, off.r.made.left_out_at), kept_on = bars_present(out.bars, on.r.made.left_out_at);
+  long out_off = 0, out_on = 0, newly_out = 0;
+  for (std::size_t i = 0; i < out.bars.bars.size(); ++i) {
+    out_off += !kept_off[i];
+    out_on += !kept_on[i];
+    newly_out += kept_off[i] && !kept_on[i];
+  }
+  long new_posts = 0;
+  for (const MeshSpec::Post& p : on.r.made.posts) {
+    bool was = false;
+    for (const MeshSpec::Post& q : off.r.made.posts) was = was || (std::hypot(p.x - q.x, p.y - q.y) < 0.01 && std::fabs(p.z_top - q.z_top) < 0.01);
+    new_posts += !was;
+  }
+  const auto [shells_off, open_off] = shells_and_open(off.mesh);
+  const auto [shells_on, open_on] = shells_and_open(on.mesh);
+  const MeshReport &m0 = off.r.made.mesh, &m1 = on.r.made.mesh;
+  const double ms0 = m0.ms_struts + m0.ms_solid + m0.ms_finish, ms1 = m1.ms_struts + m1.ms_solid + m1.ms_finish;
+  for (const Made* m : {&off, &on}) {
+    std::printf("organic foot %s: %zu triangles, %zu shells, %zu open edges, %.3f mm3; layer check clean %d, builds %d, found per pass",
+                m == &off ? "f = 0  " : "default", m->mesh.triangles.size(), m == &off ? shells_off : shells_on,
+                m == &off ? open_off : open_on, m->r.made.mesh.mm3, m->r.made.print_clean ? 1 : 0, m->r.made.builds);
+    for (int x : m->r.made.found_per_pass) std::printf(" %d", x);
+    std::printf("; left out at %zu places (%ld bars), weave left unheld %zu, posts %zu (stands %zu); feet %zu (held %zu), "
+                    "feet add %.4f mm3; struts %.3f mm3; mesh (last build) %.0f ms, the whole job %.0f ms\n",
+                    m->r.made.left_out_at.size(), m == &off ? out_off : out_on, m->r.made.mesh.weave_left_unheld, m->r.made.posts.size(),
+                    m->r.made.stands_added, m->r.made.mesh.feet, m->r.made.mesh.feet_held, m->r.made.mesh.feet_mm3,
+                    m->r.made.mesh.struts_mm3, m == &off ? ms0 : ms1, m->r.ms_total);
+  }
+  std::printf("organic foot: the feet add %.4f mm3, %.2f %% of the struts' material at f = 0 (%.3f mm3); bars left out with the foot "
+              "that were kept without %ld, posts not at f = 0 %ld; mesh time with / without %.2f\n", m1.feet_mm3,
+              100.0 * m1.feet_mm3 / std::max(1e-9, m0.struts_mm3), m0.struts_mm3, newly_out, new_posts, ms1 / std::max(1e-9, ms0));
+  CHECK(shells_on == 1 && open_on == 0 && on.r.made.print_clean);
+  CHECK(m1.feet > 0 && m1.feet_held == 0 && m1.feet_mm3 > 0.0 && m0.feet == 0);
+  CHECK(newly_out == 0 && out_on <= out_off && new_posts == 0 && on.r.made.posts.size() <= off.r.made.posts.size());
+  CHECK(m1.weave_left_unheld == m0.weave_left_unheld);
+  char b[160];
+  std::snprintf(b, sizeof b, "\"feet\": %zu, \"feet_held\": %zu, \"feet_mm3\": %.9g,", m1.feet, m1.feet_held, m1.feet_mm3);
+  CHECK(has(on.text, b) && has(off.text, "\"feet\": 0, \"feet_held\": 0, \"feet_mm3\": 0,"));
+  CHECK(ms1 <= 1.5 * ms0);
+  for (const std::string& p : {model_path, face_overrides_sidecar_path(model_path), tensor_path, job_path, stl, result})
+    std::remove(p.c_str());
+}
+
 int main() {
   test_tensor_file();
   test_organic_job();
@@ -1165,6 +1288,8 @@ int main() {
   test_refusals();
   test_run();
   test_one_grid_key();
+  test_organic_foot();
+  test_cube_files_any_foot();
   if (!mesh_available()) std::printf("no mesh library in this build: the job says so\n");
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;

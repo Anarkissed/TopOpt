@@ -8,6 +8,8 @@
 #include <cstdint>
 #include <cstring>
 #include <map>
+#include <memory>
+#include <optional>
 #include <thread>
 #include <unordered_map>
 
@@ -932,6 +934,13 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
   // Every strut is written a little longer than its bar (MeshSpec::strut_reach_mm): each end is carried on along the
   // bar's own line, so a strut that ends on solid is fused into it across the open space's last column.
   const double reach = spec.strut_reach_mm < 0.0 ? 0.5 * kept.pitch_mm + kept.grow_mm + 0.05 : spec.strut_reach_mm;
+  // O11: the blended foot, only where a weave bar runs into the solid. With f = 0 or no weave region: nothing here.
+  std::vector<int> foot_regions;
+  if (spec.weave_foot_mm != 0.0)
+    for (const Layout::Weave& w : lay.weave) foot_regions.push_back(w.region);
+  std::unique_ptr<const SolidAt> wall_at = foot_regions.empty() ? nullptr : std::make_unique<const SolidAt>(lay);
+  std::optional<Domain::Probe> wall_probe;
+  if (wall_at) wall_probe.emplace(domain.probe());
   Manifold struts;
   {
     std::vector<Manifold> solids;
@@ -974,6 +983,96 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
       }
       ++rep.bars;
       centres.push_back({0.5 * (x.a.x + x.b.x), 0.5 * (x.a.y + x.b.y), 0.5 * (x.a.z + x.b.z)});
+      // O11: a foot at each end of a weave bar that runs into the solid.
+      if (wall_at && in_regions(foot_regions, x.region))
+        for (int e = 0; e < 2; ++e) {
+          if ((e == 0 ? x.end_a : x.end_b) != Bar::End::Solid) continue;
+          const Vec3 E = e == 0 ? x.a : x.b;
+          const double sg = e == 0 ? 1.0 : -1.0;   // along d, from the end into the bar
+          const Vec3 u{d.x * sg, d.y * sg, d.z * sg};
+          double f = spec.weave_foot_mm < 0.0 ? r : spec.weave_foot_mm;
+          if (f > r) { f = r; ++rep.feet_held; }
+          // Where it meets the wall: the first point back from the end, along the bar, that is not solid (as the end
+          // was tagged: SolidAt, or outside the part). Not found within twice its width and a half millimetre: one
+          // width back (S11's run-in).
+          auto solid_here = [&](double t) {
+            const Vec3 p{E.x + u.x * t, E.y + u.y * t, E.z + u.z * t};
+            const Where w = wall_probe->where(p);
+            return w.why != Why::Outside && (*wall_at)(*wall_probe, p, w);
+          };
+          double tw = std::min(x.width, len);
+          {
+            const double most = std::min(len, 2.0 * x.width + 0.5);
+            double in = 0.0;
+            bool found = false;
+            for (double t = 0.0; t <= most + 1e-12; t += 0.05) {
+              if (!solid_here(t)) { found = true; tw = t; break; }
+              in = t;
+            }
+            if (found && tw > 0.0) {
+              double out = tw;
+              for (int k = 0; k < 14; ++k) {
+                const double m = 0.5 * (in + out);
+                if (solid_here(m)) in = m; else out = m;
+              }
+              tw = out;
+            }
+          }
+          // The taper: 3 f, never past the bar's other end.
+          const double L = std::min(3.0 * f, len - tw);
+          if (!(L > 1e-6)) continue;
+          const double g = 1.0 - L / (3.0 * f);   // the share of f left where the taper stops (0 unless cut short)
+          const Vec3 W{E.x + u.x * tw, E.y + u.y * tw, E.z + u.z * tw};
+          const double run = tw + (e == 0 ? pa : pb);   // from the wall on into the solid, as far as the strut runs
+          const Vec3 deep{W.x - u.x * run, W.y - u.y * run, W.z - u.z * run};
+          // Added between the wall and the taper's end, less the strut there (Simpson: the area is quadratic in s).
+          auto added = [&](double area0, double areaM, double areaL, double strut) {
+            return L / 6.0 * (area0 + 4.0 * areaM + areaL) - strut * L;
+          };
+          if (bar_is_bridge(x, spec.bridge_rise)) {
+            // The bridge's own frame, as above; its underside (up = -r) is kept exactly.
+            Vec3 side{-d.y, d.x, 0.0};
+            const double ls = std::sqrt(side.x * side.x + side.y * side.y);
+            side = {side.x / ls, side.y / ls, 0.0};
+            Vec3 up{d.y * side.z - d.z * side.y, d.z * side.x - d.x * side.z, d.x * side.y - d.y * side.x};
+            if (up.z < 0) up = {-up.x, -up.y, -up.z};
+            std::vector<manifold::vec3> pts;
+            auto section = [&](const Vec3& at, double grow) {
+              for (int q = 0; q < 4; ++q) {
+                const double s = (q & 1) ? r + grow : -(r + grow), v = (q & 2) ? r + grow : -r;
+                pts.push_back(mv(Vec3{at.x + side.x * s + up.x * v, at.y + side.y * s + up.y * v, at.z + side.z * s + up.z * v}));
+              }
+            };
+            section(deep, f);
+            section(W, f);
+            section(Vec3{W.x + u.x * L, W.y + u.y * L, W.z + u.z * L}, f * g);
+            solids.push_back(Manifold::Hull(pts));
+            auto area = [&](double grow) { return (2.0 * r + 2.0 * grow) * (2.0 * r + grow); };
+            rep.feet_mm3 += added(area(f), area(f * (1.0 + g) * 0.5), area(f * g), 4.0 * r * r);
+          } else {
+            // The strut's own frame, as above, so the cone's sides meet the strut's.
+            const Vec3 ref = std::fabs(d.x) < 0.9 ? Vec3{1, 0, 0} : Vec3{0, 1, 0};
+            Vec3 e1{d.y * ref.z - d.z * ref.y, d.z * ref.x - d.x * ref.z, d.x * ref.y - d.y * ref.x};
+            const double l1 = std::sqrt(e1.x * e1.x + e1.y * e1.y + e1.z * e1.z);
+            e1 = {e1.x / l1, e1.y / l1, e1.z / l1};
+            const Vec3 e2{d.y * e1.z - d.z * e1.y, d.z * e1.x - d.x * e1.z, d.x * e1.y - d.y * e1.x};
+            const double rw = (r + f) * kRound, rt = (r + f * g) * kRound;
+            Manifold cone, in;
+            if (e == 0) {
+              cone = Manifold::Cylinder(L, rw, rt, SEG).Transform(manifold::mat3x4(mv(e1), mv(e2), mv(d), mv(W)));
+              in = Manifold::Cylinder(run, rw, rw, SEG).Transform(manifold::mat3x4(mv(e1), mv(e2), mv(d), mv(deep)));
+            } else {
+              const Vec3 top{W.x + u.x * L, W.y + u.y * L, W.z + u.z * L};
+              cone = Manifold::Cylinder(L, rt, rw, SEG).Transform(manifold::mat3x4(mv(e1), mv(e2), mv(d), mv(top)));
+              in = Manifold::Cylinder(run, rw, rw, SEG).Transform(manifold::mat3x4(mv(e1), mv(e2), mv(d), mv(W)));
+            }
+            solids.push_back(Manifold::Hull(std::vector<Manifold>{cone, in}));
+            auto area = [&](double grow) { return kPi * (r + grow) * (r + grow); };
+            rep.feet_mm3 += added(area(f), area(f * (1.0 + g) * 0.5), area(f * g), kPi * r * r);
+          }
+          centres.push_back(W);
+          ++rep.feet;
+        }
       for (int e = 0; e < 2; ++e) {
         if ((e == 0 ? x.end_a : x.end_b) == Bar::End::Surface) continue;
         const Vec3& p = e == 0 ? x.a : x.b;
