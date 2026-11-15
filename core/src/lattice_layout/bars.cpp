@@ -752,17 +752,24 @@ std::vector<SteppedEdge> stepped_edges(const Bars& bars) {
   return out;
 }
 
-void drop_loose_bars(Bars& bars) {
+void drop_loose_bars(Bars& bars, const std::vector<int>* arrived) {
   // A cut end that lands on nothing: in the air, or loose in the lattice.
   auto lands = [](Bar::End e) {
     return e == Bar::End::Node || e == Bar::End::Solid || e == Bar::End::Joined;
   };
+  // G11: a Grown vine's upper Surface end on a steep bar has arrived.
+  auto arrived_at = [&](const Bar& b, bool end_b) {
+    if (!arrived || (end_b ? b.end_b : b.end_a) != Bar::End::Surface || bar_is_bridge(b)) return false;
+    if (std::find(arrived->begin(), arrived->end(), b.region) == arrived->end()) return false;
+    return end_b ? b.b.z > b.a.z : b.a.z > b.b.z;
+  };
   std::vector<char> keep(bars.bars.size(), 1);
   for (std::size_t i = 0; i < bars.bars.size(); ++i) {
     const Bar& b = bars.bars[i];
-    if (!lands(b.end_a) || !lands(b.end_b)) keep[i] = 0;
-    if (b.end_a == Bar::End::Surface) bars.cut_in_air.push_back({b.a, b.region, b.cell});
-    if (b.end_b == Bar::End::Surface) bars.cut_in_air.push_back({b.b, b.region, b.cell});
+    const bool in_a = arrived_at(b, false), in_b = arrived_at(b, true);
+    if (!(lands(b.end_a) || in_a) || !(lands(b.end_b) || in_b)) keep[i] = 0;
+    if (b.end_a == Bar::End::Surface && !in_a) bars.cut_in_air.push_back({b.a, b.region, b.cell});
+    if (b.end_b == Bar::End::Surface && !in_b) bars.cut_in_air.push_back({b.b, b.region, b.cell});
   }
   // A node end lands on another bar only while another bar is still there: take away
   // bars that hold a node alone, until none does. (A Solid end has landed already.)

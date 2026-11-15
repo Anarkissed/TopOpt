@@ -1065,7 +1065,8 @@ Grower::Fate Grower::pass() {
   mark(bars, 2, 1);   // reached the bars: not cut at the model's edge
   split_at_crossings(bars);
   join_loose_bars(bars, domain_, 1, nullptr);
-  drop_loose_bars(bars);
+  const std::vector<int> arrived{region_};   // G11: a vine that reached the part's surface has arrived
+  drop_loose_bars(bars, &arrived);
   mark(bars, 3, 2);   // survived the loose drop
   drop_adrift_bars(bars, domain_, nullptr);
   mark(bars, 0, 3);   // survived the adrift drop: kept

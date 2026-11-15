@@ -288,10 +288,20 @@ static bool end_held(const Domain::Probe& pr, const std::vector<Strand>& ss, std
   return false;
 }
 
+// Re-pinned 2026-11-15 (LatticeReview's ruling 1): these tests were written for the first spacing law, under which a
+// uniform stress at reference 2 gave 5.5 mm. Under the corrected O12 a uniform stress gives the WIDEST spacing, and the
+// O13 shape fit (on by default) pulls a 24 mm test block toward 3 mm. So the tests that want "5.5 everywhere, lower
+// limit 3" ask for it: the range 3 to 5.5 (a uniform stress sits at its wide end) and the fit off.
+static void at_5_5(OrganicAsk& a) {
+  a.spacing_max_mm = 5.5;
+  a.shape_fit = false;
+}
+
 // ── G1 to G4: a block under uniform upward stress ────────────────────────────
 static void test_uniform_block() {
   Part b(box(24, 24, 30), 24, 24, 30, 3, [](const Vec3&) { return along({0, 0, 1}, 1.0); });
-  b.ask.reference_mpa = 2.0;   // f = 0.5: spacing 5.5 everywhere, the window's lower limit 3
+  b.ask.reference_mpa = 2.0;   // spacing 5.5 everywhere (at_5_5), the window's lower limit 3
+  at_5_5(b.ask);
   GrowReport rep;
   const std::vector<Strand> ss = grow_strands(b.d, 1, b.field, b.ask, &rep);
   print_report("G-1 uniform block", rep);
@@ -332,6 +342,7 @@ static void test_uniform_block() {
 static void test_ramp() {
   Part b(box(30, 24, 24), 30, 24, 24, 3, [](const Vec3& p) { return along({0, 0, 1}, p.x / 30.0); });
   b.ask.reference_mpa = 1.0;   // hot end 3 mm, cold end 8 mm
+  b.ask.shape_fit = false;     // re-pinned (corrected O12, O13): the fit would pull this 30 mm block toward 3 mm everywhere
   GrowReport rep;
   const std::vector<Strand> ss = grow_strands(b.d, 1, b.field, b.ask, &rep);
   print_report("G-2 ramp", rep);
@@ -360,7 +371,8 @@ static Part converging() {
 }
 static void test_rewind() {
   Part b = converging();
-  b.ask.reference_mpa = 2.0;   // spacing 5.5, lower limit 3
+  b.ask.reference_mpa = 2.0;   // spacing 5.5 (at_5_5), lower limit 3
+  at_5_5(b.ask);
   GrowReport rep, again;
   const std::vector<Strand> ss = grow_strands(b.d, 1, b.field, b.ask, &rep);
   const std::vector<Strand> s2 = grow_strands(b.d, 1, b.field, b.ask, &again);
@@ -424,6 +436,7 @@ static void test_ties() {
   // sigma1 along z, sigma2 along x at half of it: the gate (0.10) is met.
   Part b(box(24, 24, 24), 24, 24, 24, 3, [](const Vec3&) { return std::array<double, 6>{0.5, 0.0, 1.0, 0, 0, 0}; });
   b.ask.reference_mpa = 2.0;
+  at_5_5(b.ask);
   GrowReport on, off;
   const std::vector<Strand> with = grow_strands(b.d, 1, b.field, b.ask, &on);
   print_report("G-5 ties", on);
@@ -435,6 +448,7 @@ static void test_ties() {
   // The gate not met: sigma2 a twentieth of sigma1.
   Part c(box(24, 24, 24), 24, 24, 24, 3, [](const Vec3&) { return std::array<double, 6>{0.05, 0.0, 1.0, 0, 0, 0}; });
   c.ask.reference_mpa = 2.0;
+  at_5_5(c.ask);
   grow_strands(c.d, 1, c.field, c.ask, &off);
   CHECK(off.ties_laid == 0 && off.ties_refused_minor > 0);
 }
@@ -445,6 +459,7 @@ static void test_walls_out() {
   // The stress leans 45 degrees toward +x, so the strands from the floor leave the -x wall bare as they climb.
   Part b(box(24, 24, 24), 24, 24, 24, 3, [](const Vec3&) { return along({1, 0, 1}, 1.0); }, 3.0);
   b.ask.reference_mpa = 2.0;
+  at_5_5(b.ask);
   b.ask.walls_out = true;
   GrowReport rep;
   const std::vector<Strand> ss = grow_strands(b.d, 1, b.field, b.ask, &rep);
@@ -497,12 +512,14 @@ static std::pair<std::size_t, std::size_t> repeats(const std::vector<Strand>& ss
 static void test_no_repeats() {
   Part b = converging();
   b.ask.reference_mpa = 2.0;
+  at_5_5(b.ask);
   GrowReport rep;
   const std::vector<Strand> s1 = grow_strands(b.d, 1, b.field, b.ask, &rep);
   CHECK(!s1.empty());
   const auto [ends, along] = repeats(s1);
   Part c(box(24, 24, 24), 24, 24, 24, 3, [](const Vec3&) { return std::array<double, 6>{0.5, 0.0, 1.0, 0, 0, 0}; });
   c.ask.reference_mpa = 2.0;
+  at_5_5(c.ask);
   GrowReport rep2;
   const std::vector<Strand> s2 = grow_strands(c.d, 1, c.field, c.ask, &rep2);
   CHECK(!s2.empty() && rep2.ties_laid > 0);
@@ -556,6 +573,36 @@ static void test_same_every_time() {
   std::printf("G-8 lay_organic grown: %zu strands, %zu bars with 1 thread and %zu with 8\n", one.strands,
               one.bars.bars.size(), eight.bars.bars.size());
   CHECK(bars && one.grown && eight.grown && one.strands == eight.strands);
+}
+
+// ── G11 (brief G2 change 3, LatticeReview's ruling 4), O16 (ruling 2) ────────
+// A 24 x 24 x 30 box, the weave under its top face 26 mm deep and 3 mm in from the sides (a 4 mm floor), a uniform
+// upward stress (spacing 5.5: at_5_5): the vines climb from the floor to the top face. A vine that reaches the part's
+// surface has arrived: its upper end stays Surface and it is kept back to the floor, not cut as "leads to nothing".
+// With Finish Skin, Grown lays the net skin, its reach the median of the spacing field.
+static void test_vines_arrive() {
+  Session session(box_model(24, 24, 30));
+  const TensorField field = make_field(24, 24, 30, [](const Vec3&) { return along({0, 0, 1}, 1.0); });
+  OrganicAsk ask;
+  ask.mode = OrganicMode::Grown;
+  ask.spacing_min_mm = 3.0;
+  ask.width_mm = 0.9;
+  ask.layer_mm = 0.2;
+  at_5_5(ask);
+  Settings s = pocket_settings(26);
+  const Outcome none = session.lay_organic(s, field, ask, 1);
+  std::size_t at_top = 0;
+  for (const Bar& b : none.bars.bars)
+    at_top += (b.end_b == Bar::End::Surface && b.b.z > 30.0 - 1e-3 && b.b.z > b.a.z) ||
+              (b.end_a == Bar::End::Surface && b.a.z > 30.0 - 1e-3 && b.a.z > b.b.z);
+  const double kept = none.grown ? none.grown->kept_mm / std::max(1e-9, none.grown->grown_mm) : 0.0;
+  std::printf("G-11 vines arrive: %zu bars, %zu end at the top face; kept %.1f %% of the grown length (leads to nothing %.1f mm)\n",
+              none.bars.bars.size(), at_top, 100.0 * kept, none.grown ? none.grown->cut_nothing_mm : -1.0);
+  CHECK(none.grown && at_top > 0 && kept >= 0.9);
+  s.skin = true;
+  const Outcome skin = session.lay_organic(s, field, ask, 1);
+  std::printf("G-11 Grown with Finish Skin: %zu net struts, %.1f mm\n", skin.net_struts, skin.net_mm);
+  CHECK(skin.net_struts > 0 && skin.net_mm > 0.0);
 }
 
 // ── G1, G12: through lay_organic and the file job, on a made-up pocket ───────
@@ -693,6 +740,7 @@ int main() {
   test_walls_out();
   test_no_repeats();
   test_same_every_time();
+  test_vines_arrive();
   test_file_job();
   test_cube_time();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);

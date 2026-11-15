@@ -1005,7 +1005,10 @@ std::size_t lay_skin(Bars& bars, const Domain& domain, const SkinSpec& spec = Sk
 // S4, Finish None: a bar is kept only if each of its ends lands on another bar or on
 // solid. Removes the rest (a cut end in the air or loose in the lattice, and then any
 // bar left holding a node alone), and counts them in `dropped`.
-void drop_loose_bars(Bars& bars);
+// G11 (Grown, the brief G2 change 3): in the regions of `arrived` (the Grown weave regions; null or empty: none), the
+// Surface end of a steep bar (not a bridge, bar_is_bridge) that is its UPPER end (the higher z) has landed: a vine that
+// climbed to the part's surface has arrived, and the Finish decides what joins it. Its lower end is judged as before.
+void drop_loose_bars(Bars& bars, const std::vector<int>* arrived = nullptr);
 
 // S4, S5, S6: is the lattice one piece, and is it joined to the part? Bars are one piece
 // when they share an end, when an end of one lies inside the other, or when their middle
@@ -1148,6 +1151,7 @@ class Session {
   // O16: what lay_organic adds with Finish Skin on: per weave region, the net skin's reach.
   struct WeaveFinish {
     std::vector<std::pair<int, double>> net_reach;   // (region, reach mm); empty: no net skin
+    std::vector<int> arrived;   // G11 (Grown only): weave regions whose vines that reach the surface have arrived
   };
   Outcome lay_with(const Settings& settings, const std::vector<Strand>* strands, int threads, const std::atomic<bool>* stop,
                    const WeaveFinish* finish = nullptr);

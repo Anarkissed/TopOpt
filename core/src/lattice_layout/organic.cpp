@@ -360,12 +360,27 @@ Outcome Session::lay_organic(const Settings& settings, const TensorField& field,
     if (r.role != Role::Lattice || !r.weave) continue;
     OrganicTraceStats st;
     std::vector<Strand> traced;
+    // O16, the net skin's reach: Traced, the trace's own median spacing (as the old run); Grown, which has no trace, the
+    // median of the spacing field over the region's candidates (the field it is laid with). LatticeReview's ruling 2
+    // (2026-11-15) asked the field's median for both; on the made-up cube it changed Traced's net from 5,145 struts
+    // (12,626 mm) to 5,932 (24,424 mm), so Traced keeps its own until that is ruled on.
+    const OrganicSpacing sp =
+        ask.mode == OrganicMode::Grown ? organic_spacing(*domain_, r.id, field, ask) : OrganicSpacing{};
+    double median = 0.0;
+    {
+      std::vector<double> all;
+      for (std::size_t e = 0; e < sp.candidate.size(); ++e)
+        if (sp.candidate[e]) all.push_back(sp.spacing_mm[e]);
+      if (!all.empty()) {
+        std::sort(all.begin(), all.end());
+        median = all[all.size() / 2];
+      }
+    }
     if (ask.mode == OrganicMode::Grown) {
       GrowReport one;
       traced = grow_strands(*domain_, r.id, field, ask, &one);
       if (!grown) grown = std::make_shared<GrowReport>();
       grown->add(one);
-      const OrganicSpacing sp = organic_spacing(*domain_, r.id, field, ask);
       for (std::size_t e = 0; e < sp.candidate.size(); ++e) {
         if (!sp.candidate[e]) continue;
         const double v = sp.spacing_mm[e];
@@ -378,7 +393,9 @@ Outcome Session::lay_organic(const Settings& settings, const TensorField& field,
     } else {
       traced = trace_strands(*domain_, r.id, field, ask, &st);
     }
-    if (settings.skin && st.spacing_median_mm > 0.0) finish.net_reach.push_back({r.id, st.spacing_median_mm});   // O16
+    const double reach = ask.mode == OrganicMode::Grown ? median : st.spacing_median_mm;
+    if (settings.skin && reach > 0.0) finish.net_reach.push_back({r.id, reach});   // O16
+    if (ask.mode == OrganicMode::Grown) finish.arrived.push_back(r.id);   // G11: a vine that reached the surface
     if (st.candidates > 0) {
       smallest = candidates ? std::min(smallest, st.spacing_smallest_mm) : st.spacing_smallest_mm;
       largest = candidates ? std::max(largest, st.spacing_largest_mm) : st.spacing_largest_mm;

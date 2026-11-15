@@ -170,7 +170,7 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
         lay_net_skin(out.bars, *domain_, finish->net_reach, settings.skin_spec.width_mm);
       domain_->check_stop();
       if (settings.drop_loose) {
-        drop_loose_bars(out.bars);
+        drop_loose_bars(out.bars, finish && !finish->arrived.empty() ? &finish->arrived : nullptr);   // G11
         out.stepped_edges = stepped_edges(out.bars);
         out.pieces = drop_adrift_bars(out.bars, *domain_, &out.layout);
       } else {

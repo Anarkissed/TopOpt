@@ -116,8 +116,8 @@ struct OrganicTraceStats {
   std::size_t candidates = 0;
   double spacing_smallest_mm = 0.0, spacing_largest_mm = 0.0, spacing_mean_mm = 0.0;
   double reference_mpa = 0.0;
-  // O16: the trace's own median spacing (its report's achieved_spacing_median_mm): the net skin's reach, as the old run
-  // sets it.
+  // O16: the trace's own median spacing (its report's achieved_spacing_median_mm): the net skin's reach for Traced, as
+  // the old run sets it (Grown reads the spacing field's median instead).
   double spacing_median_mm = 0.0;
 };
 
