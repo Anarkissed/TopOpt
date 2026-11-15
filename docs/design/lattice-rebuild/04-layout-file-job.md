@@ -103,6 +103,8 @@ Exactly the fields of the bridge's `LatticeLayoutSettings`, under the same names
 | `organic_spacing_min_mm`, `organic_spacing_max_mm` | none | Organic, rule O12: the range, mm, given together: the spacing at or over the reference stress (min, above 0) and with no stress (max, at least min). Per voxel d = max - (max - min) f^exponent, f = von Mises / reference held to 0 .. 1; the reference is the layout's `reference_mpa`, or its `percentile` of the region's von Mises. One alone, min 0 or less, max under min: refused (`job_unreadable`) |
 | `organic_spacing_exponent` | 1 | Organic, rule O12: the exponent above, above 0; read only with the range (alone: refused) |
 | `organic_width_mm` | 0 | Organic: the strut diameter, mm (`OrganicAsk::width_mm`); 0 = the thinnest strut (`bead_mm` x `min_strut_lines`). Under 0, or above 0 and under the thinnest strut: refused (`job_unreadable`) |
+| `organic_rim_mm` | -1 | Organic, rule O15 (`OrganicAsk::rim_mm`): the Organic rim. 0 = none; above 0 = that width, mm; below 0 = the width the app sends with "Solid rim at edges" on: max(1.535 x `bead_mm`, the tensor file's voxel). Not a number: refused (`job_unreadable`). Read only when a region is a weave |
+| `organic_net_skin` | true | Organic, rule O16 (`OrganicAsk::net_skin`): the net skin over each open face of a weave region; false = none. Not true or false: refused (`job_unreadable`). Read only when a region is a weave |
 
 The file matches the preview only if these are the values the preview was laid with.
 
@@ -144,6 +146,7 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
     "sloped_underside_mm2": 0, "layers": 50, "thin_islands": 0, "thin_layers": 0,
     "found_per_pass": [0], "left_out_at": [], "posts": []},
   "organic": {"ms_trace": 0, "spacing_used_mm": {"smallest": 0, "largest": 0, "mean": 0},
+    "rim_mm": 0, "net_struts": 0, "net_mm": 0,
     "shallow_bars": 0, "held_both": 0, "held_one": 0, "held_none": 0,
     "kept_any_length": 0, "weave_left_unheld": 0, "stands_added": 0,
     "feet": 0, "feet_held": 0, "feet_mm3": 0,
@@ -170,7 +173,7 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
   - `left_out_at` ([x, y, z] each): the PLACES the make-check-make loop left struts out at, as it ended (core's `PrintableReport::drop_at`), gathered over all its passes: each mid-air start or one-ended overhang the layer check found, half a layer below it. Every strut whose lowest point is at one of these places is left out, and so is a small separate piece of the solid body that starts there. It is a list of places, not a count and not a list of struts: one place may leave out several struts, or none (`mesh.drop_unanswered` counts those). `posts` ([x, y, z_bottom, z_top] each): short posts added to hold up what leaving out could not fix. The preview can show both after a run.
   - `longest_bridge_reach_mm`: the farthest any bridge reaches past its supports (half its span).
   - `thin_islands`: a count only. Slices of the file about one line thick (a strut lying in an open face, cut in half by it).
-- `organic` (Organic, Traced; all 0 with no weave region): `ms_trace` is the trace's time, ms (every weave region; it is in none of `ms`'s steps, only in its `total`). The rest is THE SHALLOW-BAR TABLE the owner's bridge rules (OR8 to OR10) need, from the weave's bars as laid (`shallow_bar_table` in `lattice_layout_file.hpp`):
+- `organic` (Organic, Traced; all 0 with no weave region): `ms_trace` is the trace's time, ms (every weave region; it is in none of `ms`'s steps, only in its `total`). `rim_mm` is the Organic rim's width used (O15; 0 none), `net_struts` and `net_mm` the net skin's struts as laid (O16; after loose bars are dropped) and their length, mm. The rest is THE SHALLOW-BAR TABLE the owner's bridge rules (OR8 to OR10) need, from the weave's bars as laid (`shallow_bar_table` in `lattice_layout_file.hpp`):
   - `shallow_bars`: the weave's bars lying under 30 degrees (`bar_is_bridge`). `held_both`, `held_one`, `held_none`: how many of their two ends are held (an end is held when it is a node, in the solid, or joined to another bar; an end on the part's surface or loose in the lattice is not).
   - `runs`: WHOLE runs: shallow bars chained through joints where exactly two shallow bars end at one point and go on in line within 15 degrees (a crossing of two level strands is four, and ends both runs there). A shallow bar that chains to nothing is a run of one. `longest_run_mm`: the longest run, the sum of its bars' lengths.
   - `kept_any_length`, `weave_left_unheld`, `stands_added`: the owner's bridge rules (01-rules.md, O6 to O9): the shallow bars kept because both ends are held (in the solid, or on a bar that is itself kept), at any length; those left out because an end leads to nothing (never posted instead); the posts put under long shallow runs as stands (O8; they are in `print_check.posts` too).

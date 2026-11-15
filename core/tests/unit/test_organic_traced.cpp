@@ -729,6 +729,224 @@ static void test_range_ramp() {
   CHECK(hot_strand == 3.0 && cold_strand > 7.0);
 }
 
+
+// ── H (O15, O16): the Organic rim and the net skin, each an option ──────────────
+// A made-up 30 x 30 x 20 box on the bed (faces 0 the underside, 1 the top, 2 to 5 the sides), the weave region under
+// its top face, 16 mm deep; a made-up stress, the same everywhere, three directions apart (2, 1 and 3 MPa along x, y
+// and z) on a 1 mm grid, so curves run along all three axes and the upright ones end on the open top face.
+static StepModel box_part(double x, double y, double z) {
+  StepModel m;
+  const Vec3 p[8] = {{0, 0, 0}, {x, 0, 0}, {x, y, 0}, {0, y, 0}, {0, 0, z}, {x, 0, z}, {x, y, z}, {0, y, z}};
+  const int q[6][4] = {{0, 3, 2, 1}, {4, 5, 6, 7}, {0, 1, 5, 4}, {1, 2, 6, 5}, {2, 3, 7, 6}, {3, 0, 4, 7}};
+  const Vec3 out[6] = {{0, 0, -1}, {0, 0, 1}, {0, -1, 0}, {1, 0, 0}, {0, 1, 0}, {-1, 0, 0}};
+  for (int f = 0; f < 6; ++f) {
+    StepFaceInfo info;
+    info.kind = StepSurfaceKind::Plane;
+    info.plane_normal = out[f];
+    info.plane_origin = p[q[f][0]];
+    m.faces.push_back(info);
+    for (int second = 0; second < 2; ++second) {
+      const int n = static_cast<int>(m.mesh.vertices.size());
+      m.mesh.vertices.insert(m.mesh.vertices.end(), {p[q[f][0]], p[q[f][second ? 2 : 1]], p[q[f][second ? 3 : 2]]});
+      m.mesh.triangles.push_back({n, n + 1, n + 2});
+      m.triangle_face.push_back(f);
+    }
+  }
+  m.face_count = 6;
+  m.solid_count = 1;
+  return m;
+}
+static TensorField box_field() {
+  TensorField f;
+  f.spacing = 1.0;
+  f.nx = 30; f.ny = 30; f.nz = 20;
+  f.voigt.assign(6 * static_cast<std::size_t>(f.nx) * f.ny * f.nz, 0.0);
+  for (std::size_t e = 0; e < static_cast<std::size_t>(f.nx) * f.ny * f.nz; ++e) {
+    f.voigt[6 * e + 0] = 2.0;
+    f.voigt[6 * e + 1] = 1.0;
+    f.voigt[6 * e + 2] = 3.0;
+  }
+  return f;
+}
+static Settings box_settings(double expand = 0.0) {
+  Settings s;
+  s.regions = {{1, Role::Lattice, {1}, 16.0, expand, true}};
+  return s;
+}
+
+// H1 (O15): where says solid (Rim) within the rim of the region's outline in the face's plane and of the part's side
+// surface, lattice elsewhere: not under the open face, not over the floor, not along a seam with lattice.
+static void test_rim_where() {
+  const StepModel model = box_part(30, 30, 20);
+  const PartMeasure pm(weld_mesh(model.mesh));
+  auto where_at = [&](double rim, double expand, bool seam, const Vec3& p) {
+    DomainSpec s;
+    bool ok = false;
+    s.regions = {region_from_faces(model, {1}, 1, Role::Lattice, 16.0, expand, &ok)};
+    s.regions[0].weave = true;
+    if (seam) s.regions.push_back(region_from_faces(model, {5}, 2, Role::Lattice, 5.0, 0.0, &ok));   // the x = 0 side
+    s.weave_rim_mm = rim;
+    const Domain d(pm, std::move(s));
+    return d.probe().where(p);
+  };
+  const Where rim1{Why::Rim, 1}, lat1{Why::Lattice, 1};
+  int wrong = 0;
+  auto expect = [&](double rim, double expand, bool seam, const Vec3& p, const Where& w) {
+    const Where got = where_at(rim, expand, seam, p);
+    if (!(got == w)) {
+      ++wrong;
+      std::printf("  rim %.2f expand %.1f seam %d at (%.2f %.2f %.2f): why %d id %d, expected why %d id %d\n", rim, expand, seam ? 1 : 0,
+                  p.x, p.y, p.z, static_cast<int>(got.why), got.id, static_cast<int>(w.why), w.id);
+    }
+  };
+  // The face's own outline, the part's sides beyond it (air): 1.2 mm of rim on every side, the whole depth.
+  for (double z : {19.5, 10.0, 4.5}) {
+    expect(1.2, 0.0, false, {1.15, 15, z}, rim1);
+    expect(1.2, 0.0, false, {1.25, 15, z}, lat1);
+    expect(1.2, 0.0, false, {28.85, 15, z}, rim1);
+    expect(1.2, 0.0, false, {15, 0.6, z}, rim1);
+    expect(1.2, 0.0, false, {15, 29.4, z}, rim1);
+    expect(1.2, 0.0, false, {0.3, 0.3, z}, rim1);
+    expect(0.0, 0.0, false, {0.6, 15, z}, lat1);   // off: no rim
+  }
+  // Not along the region's direction: under the open face and over the floor stays lattice.
+  expect(1.2, 0.0, false, {15, 15, 19.95}, lat1);
+  expect(1.2, 0.0, false, {15, 15, 4.05}, lat1);
+  // The outline grown past the part (Expand 3): the rim stands on the part's side surface alone.
+  expect(1.2, 3.0, false, {1.15, 15, 10}, rim1);
+  expect(1.2, 3.0, false, {1.25, 15, 10}, lat1);
+  // The outline inside the part (Expand -5): the rim stands on the outline, backed by the part's solid.
+  expect(1.2, -5.0, false, {6.15, 15, 10}, rim1);
+  expect(1.2, -5.0, false, {6.25, 15, 10}, lat1);
+  expect(1.2, -5.0, false, {23.85, 15, 10}, rim1);
+  expect(1.2, -5.0, false, {4.5, 15, 10}, (Where{Why::NotAsked, 0}));
+  // A seam: lattice of another region beyond the outline (the x = 0 side's region, 5 mm deep) carries no rim; the far
+  // side, backed by solid, does.
+  expect(1.2, -5.0, true, {5.6, 15, 10}, lat1);
+  expect(1.2, -5.0, true, {24.4, 15, 10}, rim1);
+  // Lattice that is not a weave region's never carries the Organic rim.
+  {
+    DomainSpec s;
+    bool ok = false;
+    s.regions = {region_from_faces(model, {1}, 1, Role::Lattice, 16.0, 0.0, &ok)};
+    s.weave_rim_mm = 1.2;
+    const Domain d(pm, std::move(s));
+    if (!(d.probe().where({0.6, 15, 10}) == lat1)) ++wrong;
+  }
+  std::printf("organic rim (O15): %d answers of where not as the rule says\n", wrong);
+  CHECK(wrong == 0);
+}
+
+// H2 (O15): through lay_organic. Below 0 is the app's default (max(1.535 x line width, the field's voxel)); the rim is a
+// "where" setting (changing it reads the part again; the same rim does not); the weave's bars end where the rim's
+// solid begins (Solid, run in by their width) and none runs inside it beyond that; 0 is the base, bar for bar.
+static void test_rim_lay() {
+  const StepModel model = box_part(30, 30, 20);
+  const TensorField field = box_field();
+  OrganicAsk ask{4.0, 0.9, {0, 0, 1}};
+  Session base(model), session(model);
+  const Outcome none = base.lay_organic(box_settings(), field, ask);
+  OrganicAsk zero = ask;
+  zero.rim_mm = 0.0;
+  const Outcome off = session.lay_organic(box_settings(), field, zero);
+  bool same = none.bars.bars.size() == off.bars.bars.size() && !none.bars.bars.empty() && off.rim_mm == 0.0;
+  for (std::size_t i = 0; same && i < none.bars.bars.size(); ++i)
+    same = std::memcmp(&none.bars.bars[i].a, &off.bars.bars[i].a, sizeof(Vec3)) == 0 &&
+           std::memcmp(&none.bars.bars[i].b, &off.bars.bars[i].b, sizeof(Vec3)) == 0;
+  OrganicAsk def = ask;
+  def.rim_mm = -1.0;
+  const Outcome on = session.lay_organic(box_settings(), field, def);
+  const double expect_rim = std::max(0.5 * std::sqrt(3.0 * 3.14159265358979323846) * 0.45, 1.0);
+  const Outcome again = session.lay_organic(box_settings(), field, def);
+  const Domain::Probe pr = session.domain()->probe();
+  const bool rim_there = pr.where({0.5, 15, 10}) == Where{Why::Rim, 1} && pr.where({1.05, 15, 10}) == Where{Why::Lattice, 1};
+  // No bar of the weave reaches into the rim farther than its own run-in (its width) past the rim's inner face.
+  std::size_t deep = 0, solid_ends = 0;
+  for (const Bar& b : again.bars.bars) {
+    if (b.region != 1) continue;
+    for (int e = 0; e < 2; ++e) {
+      const Vec3& p = e ? b.b : b.a;
+      solid_ends += (e ? b.end_b : b.end_a) == Bar::End::Solid;
+      const double in = std::min({p.x, 30 - p.x, p.y, 30 - p.y});
+      deep += in < expect_rim - b.width - 1e-3;
+    }
+  }
+  std::printf("organic rim through lay_organic: off == base %d (%zu bars); default %.4f mm (expected %.4f), read again %d then %d; "
+              "rim where 1 %d; %zu bars, %zu ends Solid, %zu ends deeper in the rim than their run-in\n", same ? 1 : 0,
+              none.bars.bars.size(), on.rim_mm, expect_rim, on.read_again ? 1 : 0, again.read_again ? 1 : 0, rim_there ? 1 : 0,
+              again.bars.bars.size(), solid_ends, deep);
+  CHECK(same);
+  CHECK(std::fabs(on.rim_mm - expect_rim) < 1e-12 && on.read_again && !again.read_again && rim_there);
+  CHECK(solid_ends > off.bars.bars.size() / 50 && deep == 0);
+}
+
+// H3 (O16): the net skin. Off is the base. On: the open top face carries a net (net struts lying in the face within
+// 0.1 mm; the rest join landings up to half a reach under the face, and the open sides), every net strut is held at both ends (its ends exactly where another bar ends, as the bridge rules read
+// "held"), more of the weave's bars reach the open face than without; the file is one body, nothing outside the part,
+// and the layer check ends clean.
+static void test_net_skin() {
+  const StepModel model = box_part(30, 30, 20);
+  const TensorField field = box_field();
+  OrganicAsk ask{4.0, 0.9, {0, 0, 1}};
+  Session a(model), b(model);
+  OrganicAsk off = ask;
+  off.net_skin = false;
+  const Outcome base = a.lay_organic(box_settings(), field, ask), none = b.lay_organic(box_settings(), field, off);
+  bool same = base.bars.bars.size() == none.bars.bars.size() && none.net_struts == 0;
+  for (std::size_t i = 0; same && i < base.bars.bars.size(); ++i)
+    same = std::memcmp(&base.bars.bars[i].a, &none.bars.bars[i].a, sizeof(Vec3)) == 0 &&
+           std::memcmp(&base.bars.bars[i].b, &none.bars.bars[i].b, sizeof(Vec3)) == 0;
+  OrganicAsk with = ask;
+  with.net_skin = true;
+  Session c(model);
+  const Outcome net = c.lay_organic(box_settings(), field, with);
+  std::map<std::array<double, 3>, int> ends;
+  for (const Bar& x : net.bars.bars) {
+    ++ends[{x.a.x, x.a.y, x.a.z}];
+    ++ends[{x.b.x, x.b.y, x.b.z}];
+  }
+  std::size_t nets = 0, in_face = 0, in_sides = 0, unheld = 0, region_wrong = 0;
+  double len = 0.0;
+  for (const Bar& x : net.bars.bars) {
+    if (!x.net) continue;
+    ++nets;
+    len += bar_length(x);
+    in_face += std::fabs(x.a.z - 20.0) <= 0.1 && std::fabs(x.b.z - 20.0) <= 0.1;
+    for (int k = 0; k < 4; ++k) {   // the four sides are open faces of the region too (no rim here)
+      auto at = [&](const Vec3& v) { return k == 0 ? v.x : k == 1 ? 30.0 - v.x : k == 2 ? v.y : 30.0 - v.y; };
+      in_sides += at(x.a) <= 0.1 && at(x.b) <= 0.1;
+    }
+    unheld += x.end_a != Bar::End::Node || x.end_b != Bar::End::Node || ends[{x.a.x, x.a.y, x.a.z}] < 2 ||
+              ends[{x.b.x, x.b.y, x.b.z}] < 2;
+    region_wrong += x.region != 1;
+  }
+  auto on_top = [](const Outcome& o) {
+    std::size_t n = 0;
+    for (const Bar& x : o.bars.bars) n += !x.net && (x.a.z > 19.9 || x.b.z > 19.9);
+    return n;
+  };
+  // The file, made as the file job makes it.
+  const Domain& d = *c.domain();
+  const OpenSpace open = read_open_space(d, net.layout, 0.25);
+  PrintableReport rep;
+  const TriangleMesh mesh = build_printable_mesh(c.measure(), d, net.layout, net.bars, open, PrintableSpec{}, &rep);
+  const Read rd = read_mesh(mesh);
+  const PartMeasure::Probe pp = c.measure().probe();
+  long outside = 0;
+  for (const Vec3& v : mesh.vertices) outside += pp.depth(v) < -0.01;
+  std::printf("net skin (O16): off == base %d; on: %zu net struts (%zu reported, %.1f mm), %zu lying in the top face, %zu in a side, %zu not held at "
+              "both ends; weave bars reaching the top face %zu without, %zu with; file %zu triangles, %zu shells, %zu edges not used "
+              "twice, %ld vertices outside, layer check clean %d, weave left unheld %zu\n", same ? 1 : 0, nets, net.net_struts, len,
+              in_face, in_sides, unheld, on_top(none), on_top(net), mesh.triangles.size(), rd.shells, rd.edges_not_twice, outside,
+              rep.clean ? 1 : 0, rep.mesh.weave_left_unheld);
+  CHECK(same);
+  CHECK(nets > 20 && nets == net.net_struts && std::fabs(len - net.net_mm) < 1e-6 && region_wrong == 0);
+  CHECK(in_face >= 20 && in_sides >= 20);
+  CHECK(unheld == 0);
+  CHECK(on_top(net) > on_top(none));
+  CHECK(rep.mesh.ok && rd.shells == 1 && rd.edges_not_twice == 0 && outside == 0 && rep.clean);
+}
+
 int main() {
   test_traced_block();
   test_traced_repeat();
@@ -737,6 +955,9 @@ int main() {
   test_whole_run();
   test_range_equal_ends();
   test_range_ramp();
+  test_rim_where();
+  test_rim_lay();
+  test_net_skin();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }

@@ -171,6 +171,7 @@ add_library(topopt
   src/lattice_layout/stress.cpp
   src/lattice_layout/session.cpp
   src/lattice_layout/organic.cpp
+  src/lattice_layout/organic_finish.cpp
   src/lattice_layout/solid_mesh.cpp
   src/lattice_layout/print_check.cpp
   # The lattice file job (docs/design/lattice-rebuild/04-layout-file-job.md): job.json ->
