@@ -1,4 +1,4 @@
-// Lattice rebuild, Organic, Grown (rules G1 to G12): the owner's Grown placement, written new in this engine, with
+// Lattice rebuild, Organic, Grown (rules G1 to G13): the owner's Grown placement, written new in this engine, with
 // the ORIGINAL Grown's own growing rules and numbers (brief G4; organic/map-grown-pruning.md section 1). See
 // lattice_layout_organic.hpp and docs/design/lattice-rebuild/01-rules.md section 11. The original generator
 // (core/src/mesh/organic_lattice.cpp, grow_organic_lattice) was read for its rules and numbers only; nothing of it is
@@ -34,6 +34,9 @@ void GrowReport::add(const GrowReport& o) {
   reseed_mm += o.reseed_mm;
   ties_seeded += o.ties_seeded; ties_laid += o.ties_laid; ties_refused_minor += o.ties_refused_minor;
   ties_refused_reach += o.ties_refused_reach;
+  feet_kept += o.feet_kept; feet_cut_at_joint += o.feet_cut_at_joint; vines_removed += o.vines_removed;
+  feet_cut_mm += o.feet_cut_mm;
+  joins_refused_outside += o.joins_refused_outside; links_refused_outside += o.links_refused_outside;
   grown_mm += o.grown_mm; kept_mm += o.kept_mm;
   cut_outside_mm += o.cut_outside_mm; cut_unsupported_mm += o.cut_unsupported_mm; cut_nothing_mm += o.cut_nothing_mm;
   cut_repeat_mm += o.cut_repeat_mm;
@@ -179,6 +182,13 @@ struct Line {
   int parent = -1;
   int family = 0;
   bool tie = false;
+  // G13: the line it was grown as (its index then: repeats split a line, its pieces keep it); a branch (G6) of
+  // `parent`; a floor seed's strand (`seed_no` its seed's order, `root0` its root, `floor_pt` where it leaves the floor).
+  int origin = -1;
+  bool branch = false;
+  bool floor_seed = false;
+  int seed_no = -1;
+  Vec3 root0{}, floor_pt{};
 };
 
 struct Near {
@@ -195,6 +205,7 @@ struct Tip {
   Vec3 from{};   // where growth begins: the root, or (a seed run into the solid) the point on the region's edge
   int parent = -1, family = 0;
   int line = -1;   // a re-seeded tip grows on from the top of its stub (that line)
+  int seed_no = -1;   // a floor seed: its order
 };
 
 // A fixed, stated randomness (G2): splitmix64 of the ask's seed and the place, never the clock, never the order.
@@ -301,6 +312,16 @@ class Grower {
     const Vec3 d = sub(light_[e], p);
     return len(d) > 1e-9 ? unit(d) : up_;
   }
+  // 3 (brief G5): the line from a to b stays on the region's candidates (read every ds between its ends).
+  bool on_candidates(const Vec3& a, const Vec3& b) const {
+    const int n = std::max(1, static_cast<int>(std::ceil(dist(a, b) / ds_)));
+    for (int t = 1; t < n; ++t) {
+      int i, j, k;
+      if (!voxel(add(a, mul(sub(b, a), static_cast<double>(t) / n)), i, j, k) || !sp_.candidate[field_.index(i, j, k)])
+        return false;
+    }
+    return true;
+  }
   // A uniformly random direction over the cap from the cone (30 degrees from level) up to the build direction.
   Vec3 cap(std::uint64_t what, long long a, long long b) const {
     const double z = cone_sin_ + (1.0 - cone_sin_) * rnd(ask_.seed, what, a, b, 0);
@@ -351,6 +372,7 @@ class Grower {
     L.parent = parent;
     L.family = family;
     L.tie = tie;
+    L.origin = static_cast<int>(lines_.size());
     lines_.push_back(std::move(L));
     return static_cast<int>(lines_.size()) - 1;
   }
@@ -474,6 +496,7 @@ class Grower {
   void grow_tip(const Tip& t, std::vector<Tip>& tips);
   void offer_branches(int li, const Vec3& p, const Vec3& dir, std::vector<Tip>& tips);
   void repeats();
+  void feet(const std::vector<int>& parent, const std::vector<char>& branch, const std::vector<char>& seeded);
   void settle();
   struct Fate {
     std::vector<std::vector<char>> seg;   // per line, per segment: 0 kept, 1 outside, 2 nothing, 3 unsupported
@@ -591,6 +614,7 @@ void Grower::seeds(std::vector<Tip>& tips) {
       // Its foot leaves the floor on that heading; its root runs back along it into the solid by its width (S4).
       t.root = at < 0.0 ? c : solid(sub(on, mul(t.dir, width_ + 0.06))) ? sub(on, mul(t.dir, width_)) : on;
       t.from = on;
+      t.seed_no = static_cast<int>(rep_.seeds_floor);
       tips.push_back(t);
       ++rep_.seeds_floor;
     }
@@ -686,6 +710,10 @@ void Grower::offer_branches(int li, const Vec3& p, const Vec3& dir, std::vector<
     if (n.found) {
       ++rep_.refused_crowded;
       if (len(level(sub(n.hit, p))) <= kJoinRunMm && dist(n.hit, p) > 1e-9) {
+        if (!on_candidates(p, n.hit)) {   // 3 (brief G5): a link that would leave the region is not made
+          ++rep_.links_refused_outside;
+          continue;
+        }
         const int l = new_line(p, li, family);
         lay(l, n.hit);
         ++rep_.links;
@@ -707,6 +735,16 @@ void Grower::offer_branches(int li, const Vec3& p, const Vec3& dir, std::vector<
 // G3 to G5, the original's tip loop, step by step.
 void Grower::grow_tip(const Tip& t, std::vector<Tip>& tips) {
   const int li = t.line >= 0 ? t.line : new_line(t.root, t.parent, t.family);
+  if (t.line < 0) {
+    Line& L = lines_[static_cast<std::size_t>(li)];
+    L.branch = t.kind == Tip::Branch;
+    if (t.kind == Tip::Floor) {
+      L.floor_seed = true;
+      L.seed_no = t.seed_no;
+      L.root0 = t.root;
+      L.floor_pt = t.from;
+    }
+  }
   const int parent = t.parent;
   const Vec3 start = t.from;
   Vec3 p = start, dir = t.dir;
@@ -758,6 +796,8 @@ void Grower::grow_tip(const Tip& t, std::vector<Tip>& tips) {
       if (n.found) {
         if (len(level(sub(n.hit, p))) > kJoinRunMm) {
           ++rep_.joins_refused_span;   // a longer run is no join: it climbs on as if uncrowded
+        } else if (!on_candidates(p, n.hit)) {
+          ++rep_.joins_refused_outside;   // 3 (brief G5): a join that would leave the region: as if out of reach
         } else {
           // JOIN the neighbour, move onto it, and DEFLECT: re-aimed away from where it came from, at the cone.
           if (dist(n.hit, p) > 1e-9) lay(li, n.hit);
@@ -979,6 +1019,14 @@ void Grower::repeats() {
       run.parent = -1;
       run.family = L.family;
       run.tie = L.tie;
+      run.origin = L.origin;
+      run.branch = L.branch;
+      if (s0 == 0 && L.floor_seed) {   // the piece that keeps the seed's root is still its foot
+        run.floor_seed = true;
+        run.seed_no = L.seed_no;
+        run.root0 = L.root0;
+        run.floor_pt = L.floor_pt;
+      }
       run.pts.push_back(L.pts[s]);
       run.rec.push_back(L.rec[s]);
       while (s < dup.size() && !dup[s]) {
@@ -1171,11 +1219,250 @@ Grower::Fate Grower::pass() {
   return f;
 }
 
+// G13 (brief G5; the owner, 2026-11-15: "We seeded so much assuming a bunch of vines would get pruned out completely.
+// ... Are we not pruning the entirety of the plant?"): the feet compete. A foot is a floor seed's strand; its worth the
+// length still laid of everything that hangs on it (its own, its branches', theirs, and so on; not strands that merely
+// join it). In order of worth (greatest first; ties by seed order) a foot is kept when no kept foot stands within
+// foot_gap x the local spacing of its floor point, measured on the floor; else it is removed: cut from the floor up to
+// its first joint with a strand of another plant that is not removed (a strand that is itself a removed foot counts
+// only above its own cut), or, with none, taken whole. What hung on a removed foot is left to the mid-air pass that
+// follows. `parent`, `branch`, `seeded`: per line as grown (before the repeats split them).
+void Grower::feet(const std::vector<int>& parent, const std::vector<char>& branch, const std::vector<char>& seeded) {
+  const std::size_t no = parent.size();
+  std::vector<std::vector<int>> kids(no);
+  for (std::size_t o = 0; o < no; ++o)
+    if (branch[o] && parent[o] >= 0 && static_cast<std::size_t>(parent[o]) < no)
+      kids[static_cast<std::size_t>(parent[o])].push_back(static_cast<int>(o));
+  std::vector<int> plant(no, -1);   // per grown line: the floor seed's line it hangs on (by branches), or -1
+  for (std::size_t o = 0; o < no; ++o) {
+    if (!seeded[o]) continue;
+    std::vector<int> stack{static_cast<int>(o)};
+    while (!stack.empty()) {
+      const int x = stack.back();
+      stack.pop_back();
+      if (plant[static_cast<std::size_t>(x)] >= 0) continue;
+      plant[static_cast<std::size_t>(x)] = static_cast<int>(o);
+      for (int c : kids[static_cast<std::size_t>(x)]) stack.push_back(c);
+    }
+  }
+  auto plant_of = [&](std::size_t l) {
+    const int o = lines_[l].origin;
+    return o >= 0 && static_cast<std::size_t>(o) < no ? plant[static_cast<std::size_t>(o)] : -1;
+  };
+  std::vector<double> worth(no, 0.0);
+  for (std::size_t l = 0; l < lines_.size(); ++l) {
+    const int pl = plant_of(l);
+    if (pl < 0) continue;
+    const Line& L = lines_[l];
+    for (std::size_t k = 0; k + 1 < L.pts.size(); ++k) worth[static_cast<std::size_t>(pl)] += dist(L.pts[k], L.pts[k + 1]);
+  }
+  struct Foot { std::size_t line; int seed_no; double worth; };
+  std::vector<Foot> all;
+  for (std::size_t l = 0; l < lines_.size(); ++l) {
+    const Line& L = lines_[l];
+    if (!L.floor_seed || L.pts.size() < 2 || dist(L.pts.front(), L.root0) > 1e-9) continue;
+    all.push_back({l, L.seed_no, worth[static_cast<std::size_t>(L.origin)]});
+  }
+  std::sort(all.begin(), all.end(), [](const Foot& a, const Foot& b) {
+    return a.worth != b.worth ? a.worth > b.worth : a.seed_no < b.seed_no;
+  });
+  std::vector<std::size_t> removed;
+  std::vector<Vec3> kept;   // the kept feet's floor points
+  for (const Foot& f : all) {
+    const Vec3 fp = lines_[f.line].floor_pt;
+    const double lim = ask_.foot_gap * sep(fp);
+    bool near = false;
+    for (const Vec3& k : kept) near = near || len(level(sub(k, fp))) < lim;
+    if (near) {
+      removed.push_back(f.line);
+    } else {
+      kept.push_back(fp);
+      ++rep_.feet_kept;
+    }
+  }
+  if (removed.empty()) return;
+  std::sort(removed.begin(), removed.end());
+  std::map<std::size_t, std::size_t> slot;   // a removed foot's line -> its place in `removed`
+  for (std::size_t i = 0; i < removed.size(); ++i) slot[removed[i]] = i;
+  auto key = [](const Vec3& p) {
+    return std::array<long long, 3>{std::llround(p.x * 1e6), std::llround(p.y * 1e6), std::llround(p.z * 1e6)};
+  };
+  std::map<std::array<long long, 3>, std::vector<int>> at;
+  for (std::size_t l = 0; l < lines_.size(); ++l) {
+    if (lines_[l].pts.size() < 2) continue;
+    for (const Vec3& p : lines_[l].pts) {
+      std::vector<int>& v = at[key(p)];
+      if (v.empty() || v.back() != static_cast<int>(l)) v.push_back(static_cast<int>(l));
+    }
+  }
+  // where along line g (its segment index + the fraction) the point x lies
+  auto along = [&](std::size_t g, const Vec3& x) {
+    const Line& G = lines_[g];
+    double best = std::numeric_limits<double>::infinity(), pos = 0.0;
+    for (std::size_t k = 0; k + 1 < G.pts.size(); ++k) {
+      const Vec3 c = closest_on(x, G.pts[k], G.pts[k + 1]);
+      const double d = dist(c, x), ab = dist(G.pts[k], G.pts[k + 1]);
+      if (d < best - 1e-12) { best = d; pos = static_cast<double>(k) + (ab > 0.0 ? dist(G.pts[k], c) / ab : 0.0); }
+    }
+    return pos;
+  };
+  struct Joint { double pos; std::size_t g; Vec3 x; double posg; };
+  // The joints of line f with the strands of other plants, above the height `above`, in order along f.
+  auto joints_of = [&](std::size_t f, double above) {
+    const Line& L = lines_[f];
+    const int mine = plant_of(f);
+    std::vector<Joint> J;
+    auto take = [&](double pos, std::size_t g, const Vec3& x) {
+      if (g == f || lines_[g].pts.size() < 2 || plant_of(g) == mine || h(x) <= above) return;
+      J.push_back({pos, g, x, slot.count(g) ? along(g, x) : 0.0});
+    };
+    for (std::size_t k = 0; k < L.pts.size(); ++k) {
+      for (int g : at[key(L.pts[k])]) take(static_cast<double>(k), static_cast<std::size_t>(g), L.pts[k]);
+      boxes_.near(L.pts[k], ds_ + 1e-6, [&](const Sample& sm) {   // a point of it on another strand's segment
+        if (static_cast<std::size_t>(sm.line) == f || !current(sm)) return;
+        const Line& O = lines_[static_cast<std::size_t>(sm.line)];
+        const Vec3 a = O.pts[static_cast<std::size_t>(sm.seg)], b = O.pts[static_cast<std::size_t>(sm.seg) + 1];
+        if (dist(L.pts[k], closest_on(L.pts[k], a, b)) < 1e-6) take(static_cast<double>(k), static_cast<std::size_t>(sm.line), L.pts[k]);
+      });
+      if (k + 1 == L.pts.size()) break;
+      const Vec3 a = L.pts[k], b = L.pts[k + 1];
+      const double ab = dist(a, b);
+      boxes_.near(mul(add(a, b), 0.5), 0.5 * ab + ds_, [&](const Sample& sm) {   // another strand's end on a segment
+        if (static_cast<std::size_t>(sm.line) == f || !current(sm)) return;
+        const Line& O = lines_[static_cast<std::size_t>(sm.line)];
+        for (const Vec3& x : {O.pts.front(), O.pts.back()}) {
+          const Vec3 c = closest_on(x, a, b);
+          if (dist(c, x) >= 1e-6) continue;
+          take(static_cast<double>(k) + (ab > 0.0 ? dist(a, c) / ab : 0.0), static_cast<std::size_t>(sm.line), x);
+        }
+      });
+    }
+    std::sort(J.begin(), J.end(), [](const Joint& a, const Joint& b) {
+      return std::tie(a.pos, a.g) < std::tie(b.pos, b.g);
+    });
+    return J;
+  };
+  std::vector<std::vector<Joint>> joints(removed.size());
+  for (std::size_t r = 0; r < removed.size(); ++r)
+    joints[r] = joints_of(removed[r], h(lines_[removed[r]].floor_pt) + 1e-6);
+  // The cuts, to a fixed point. Each removed foot starts cut at its first joint; a joint HOLDS while the strand there
+  // stays: it is not gone, and, when it is a removed foot, the joint lies above that foot's cut. A foot whose joint
+  // does not hold is cut at its next one that does; with none it goes whole, and so does each strand of its plant
+  // (its branches, theirs, and so on) with no joint that holds with another plant's strand: everything that hangs only
+  // on it. Cuts only move up and what is gone only grows, so this ends.
+  const double whole = std::numeric_limits<double>::infinity();
+  std::vector<double> cut(removed.size(), whole);
+  std::vector<long> at_joint(removed.size(), -1);
+  std::vector<char> gone(lines_.size(), 0);
+  for (std::size_t r = 0; r < removed.size(); ++r) {
+    if (joints[r].empty()) {
+      gone[removed[r]] = 1;
+    } else {
+      at_joint[r] = 0;
+      cut[r] = joints[r][0].pos;
+    }
+  }
+  auto holds = [&](const Joint& x) {
+    if (gone[x.g]) return false;
+    const auto it = slot.find(x.g);
+    return it == slot.end() || (cut[it->second] < whole && x.posg > cut[it->second] + 1e-9);
+  };
+  std::map<int, std::vector<std::size_t>> members;   // per plant, its strands
+  for (std::size_t l = 0; l < lines_.size(); ++l)
+    if (lines_[l].pts.size() >= 2 && plant_of(l) >= 0) members[plant_of(l)].push_back(l);
+  std::map<std::size_t, std::vector<Joint>> member_joints;
+  for (bool changed = true; changed;) {
+    changed = false;
+    for (std::size_t r = 0; r < removed.size(); ++r) {
+      if (at_joint[r] < 0) continue;
+      std::size_t j = static_cast<std::size_t>(at_joint[r]);
+      while (j < joints[r].size() && !holds(joints[r][j])) ++j;
+      if (j == static_cast<std::size_t>(at_joint[r])) continue;
+      changed = true;
+      if (j < joints[r].size()) {
+        at_joint[r] = static_cast<long>(j);
+        cut[r] = joints[r][j].pos;
+      } else {
+        at_joint[r] = -1;
+        cut[r] = whole;
+        gone[removed[r]] = 1;
+      }
+    }
+    for (std::size_t r = 0; r < removed.size(); ++r) {
+      if (at_joint[r] >= 0) continue;
+      for (std::size_t l : members[plant_of(removed[r])]) {
+        if (gone[l]) continue;
+        auto it = member_joints.find(l);
+        if (it == member_joints.end())
+          it = member_joints.emplace(l, joints_of(l, -std::numeric_limits<double>::infinity())).first;
+        bool held = false;
+        for (const Joint& x : it->second) held = held || holds(x);
+        if (!held) {
+          gone[l] = 1;
+          changed = true;
+        }
+      }
+    }
+  }
+  for (std::size_t l = 0; l < lines_.size(); ++l) {
+    if (!gone[l] || slot.count(l)) continue;
+    Line& L = lines_[l];
+    double mm = 0.0;
+    for (std::size_t k = 0; k + 1 < L.pts.size(); ++k) mm += dist(L.pts[k], L.pts[k + 1]);
+    L.pts.resize(1);
+    L.rec.resize(1);
+    L.stamp.clear();
+    L.dead.clear();
+    rep_.feet_cut_mm += mm;
+    rep_.cut_nothing_mm += mm;
+  }
+  for (std::size_t r = 0; r < removed.size(); ++r) {
+    Line& L = lines_[removed[r]];
+    L.floor_seed = false;
+    double mm = 0.0;
+    if (at_joint[r] < 0) {
+      for (std::size_t k = 0; k + 1 < L.pts.size(); ++k) mm += dist(L.pts[k], L.pts[k + 1]);
+      L.pts.resize(1);
+      L.rec.resize(1);
+      ++rep_.vines_removed;
+    } else {
+      const Joint& x = joints[r][static_cast<std::size_t>(at_joint[r])];
+      const std::size_t k = static_cast<std::size_t>(std::floor(x.pos + 1e-12));
+      for (std::size_t s = 0; s < k; ++s) mm += dist(L.pts[s], L.pts[s + 1]);
+      if (dist(L.pts[k], x.x) < 1e-9) {
+        L.pts.erase(L.pts.begin(), L.pts.begin() + static_cast<long>(k));
+        L.rec.erase(L.rec.begin(), L.rec.begin() + static_cast<long>(k));
+      } else {
+        mm += dist(L.pts[k], x.x);
+        L.pts.erase(L.pts.begin(), L.pts.begin() + static_cast<long>(k) + 1);
+        L.rec.erase(L.rec.begin(), L.rec.begin() + static_cast<long>(k) + 1);
+        L.pts.insert(L.pts.begin(), x.x);
+        L.rec.insert(L.rec.begin(), 0);
+      }
+      ++rep_.feet_cut_at_joint;
+    }
+    L.stamp.clear();
+    L.dead.assign(L.pts.size() > 0 ? L.pts.size() - 1 : 0, 0);
+    rep_.feet_cut_mm += mm;
+    rep_.cut_nothing_mm += mm;   // counted under "leads to nothing" (G12)
+  }
+  rebuild_boxes();
+}
+
 // G10: the pruning, in order: repeats merged (the kept copy takes over what depended on a dropped one), no strand
-// ending in mid-air, then the path's own answer per segment (outside the model, the joining, the loose and adrift
+// ending in mid-air, the feet competing (G13) and the mid-air pass again, then the path's own answer per segment (outside the model, the joining, the loose and adrift
 // drops): what it leaves out is no longer material.
 void Grower::prune() {
+  std::vector<int> parent(lines_.size());
+  std::vector<char> branch(lines_.size()), seeded(lines_.size());
+  for (std::size_t l = 0; l < lines_.size(); ++l) {
+    parent[l] = lines_[l].parent;
+    branch[l] = lines_[l].branch;
+    seeded[l] = lines_[l].floor_seed;
+  }
   repeats();
+  settle();
+  feet(parent, branch, seeded);   // G13
   settle();
   const Fate f = pass();
   for (std::size_t l = 0; l < lines_.size(); ++l)
@@ -1531,6 +1818,8 @@ std::vector<Strand> Grower::run() {
     throw std::invalid_argument("grow_strands: layer_mm must be above 0");
   if (!(ask_.seed_stride > 0.0) || !std::isfinite(ask_.seed_stride))
     throw std::invalid_argument("grow_strands: seed_stride must be above 0");
+  if (!(ask_.foot_gap > 0.0) || !std::isfinite(ask_.foot_gap))
+    throw std::invalid_argument("grow_strands: foot_gap must be above 0");
   const double thinnest = domain_.spec().bead_mm * domain_.spec().min_strut_lines;
   if (ask_.width_mm != 0.0 && !(ask_.width_mm >= thinnest - 1e-12))
     throw std::invalid_argument("grow_strands: the strut width is under the thinnest strut (G8)");

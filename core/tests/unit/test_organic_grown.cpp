@@ -798,6 +798,132 @@ static void test_cube_time() {
   CHECK(std::fabs(rep.grown_mm - rep.kept_mm - cut) < 1e-6 * std::max(1.0, rep.grown_mm));
 }
 
+// ── G13 (brief G5): the feet compete ─────────────────────────────────────────
+// The owner (2026-11-15): "We seeded so much assuming a bunch of vines would get pruned out completely. ... Are we
+// not pruning the entirety of the plant?" A slab 24 x 24 x 12 on a 3 mm floor, the spacing 5.5 everywhere, seeds on a
+// stride of 0.25 x the spacing. The feet left (strands that run into the floor's solid) stand at least foot_gap x the
+// spacing apart where they leave the floor; feet were removed, some whole (with what hung only on them); a removed foot
+// leaves nothing at the floor (against the same growth with every foot kept); nothing ends in mid-air; the lengths add
+// up. What is left standing on nothing is the path's to drop, as before (printed: the pieces it finds adrift).
+static std::vector<Vec3> feet_of(const std::vector<Strand>& ss, double floor) {
+  std::vector<Vec3> feet;   // where each strand that runs into the floor crosses it
+  for (const Strand& s : ss) {
+    if (!(s.points.front().z < floor - 1e-6)) continue;
+    for (std::size_t k = 0; k + 1 < s.points.size(); ++k) {
+      const Vec3 a = s.points[k], e = s.points[k + 1];
+      if (a.z < floor && e.z >= floor) {
+        const double t = (floor - a.z) / (e.z - a.z);
+        feet.push_back({a.x + (e.x - a.x) * t, a.y + (e.y - a.y) * t, floor});
+        break;
+      }
+    }
+  }
+  return feet;
+}
+static void test_feet() {
+  Part b(box(24, 24, 12), 24, 24, 12, 3, [](const Vec3&) { return along({0, 0, 1}, 1.0); });
+  b.ask.reference_mpa = 2.0;
+  at_5_5(b.ask);
+  b.ask.seed_stride = 0.25;
+  b.ask.foot_gap = 1.0;
+  GrowReport rep;
+  const std::vector<Strand> ss = grow_strands(b.d, 1, b.field, b.ask, &rep);
+  print_report("G-13 slab", rep);
+  const std::vector<Vec3> feet = feet_of(ss, 3.0);
+  std::size_t close = 0;
+  double nearest = 1e300;
+  for (std::size_t i = 0; i < feet.size(); ++i)
+    for (std::size_t j = i + 1; j < feet.size(); ++j) {
+      const double d = std::hypot(feet[i].x - feet[j].x, feet[i].y - feet[j].y);
+      nearest = std::min(nearest, d);
+      close += d < b.ask.foot_gap * 5.5 - 2.0 * kStraightened;
+    }
+  std::printf("G-13 seeds %zu, feet kept %zu (in the file: %zu), removed at a joint %zu, whole %zu; nearest two feet %.2f mm "
+              "(foot_gap x spacing %.2f); pairs closer %zu\n",
+              rep.seeds_floor, rep.feet_kept, feet.size(), rep.feet_cut_at_joint, rep.vines_removed, nearest,
+              b.ask.foot_gap * 5.5, close);
+  CHECK(!feet.empty() && close == 0);
+  CHECK(rep.feet_kept > 0 && rep.vines_removed > 0 && rep.feet_cut_at_joint + rep.vines_removed + rep.feet_kept ==
+                                                            rep.seeds_floor - rep.seeds_refused_support);
+  // Against the same growth with every foot kept (a gap no two feet are under): each foot not kept is cut from the floor:
+  // nothing runs into the floor within a width of where it left it (unless a kept foot stands within two widths).
+  OrganicAsk all = b.ask;
+  all.foot_gap = 1e-9;
+  const std::vector<Vec3> every = feet_of(grow_strands(b.d, 1, b.field, all), 3.0);
+  std::size_t removed = 0, left = 0;
+  for (const Vec3& f : every) {
+    bool kept = false;
+    for (const Vec3& k : feet) kept = kept || std::hypot(f.x - k.x, f.y - k.y) <= 2.0 * 0.9;
+    if (kept) continue;
+    ++removed;
+    bool any = false;
+    for (const Strand& s : ss)
+      for (const Vec3& p : samples(s.points, 0.05)) any = any || (p.z < 3.0 - 1e-6 && std::hypot(p.x - f.x, p.y - f.y) <= 0.9);
+    left += any;
+  }
+  const Domain::Probe pr = b.d.probe();
+  // an end is held as end_held says, or lies on another strand within the two straightenings (P9)
+  std::size_t loose = 0;
+  for (std::size_t i = 0; i < ss.size(); ++i)
+    for (const Vec3& e : {ss[i].points.front(), ss[i].points.back()}) {
+      bool on = end_held(pr, ss, i, e);
+      for (std::size_t j = 0; j < ss.size() && !on; ++j) on = j != i && to_polyline(e, ss[j].points) <= kStraightened;
+      loose += !on;
+    }
+  Bars bars = weave_bars(b.d, ss, 1);
+  split_at_crossings(bars);
+  join_loose_bars(bars, b.d, 1, nullptr);
+  const std::vector<int> arrived{1};
+  drop_loose_bars(bars, &arrived);
+  const Pieces adrift = drop_adrift_bars(bars, b.d, nullptr);
+  std::printf("G-13 feet with every foot kept %zu; of those removed here (%zu), any left at the floor %zu; loose ends %zu; "
+              "the path finds %zu pieces adrift (%.1f mm)\n",
+              every.size(), removed, left, loose, adrift.adrift, adrift.adrift_mm);
+  CHECK(removed > 0 && left == 0);
+  CHECK(loose == 0);
+  // The lengths still add up (the feet's cuts are counted).
+  const double cut = rep.cut_outside_mm + rep.cut_unsupported_mm + rep.cut_nothing_mm + rep.cut_repeat_mm;
+  CHECK(std::fabs(rep.grown_mm - rep.kept_mm - cut) < 1e-6 * std::max(1.0, rep.grown_mm));
+  // The file job's key: 1 when not given, read when given, refused at 0 with the key named.
+  const auto job = [](const std::string& more) {
+    return parse_file_job(std::string(R"({"mode": "lattice_file", "model": "pocket.stl", "output": "grown.stl",
+      "layout": {"bead_mm": 0.45, "min_strut_lines": 2, "region_ids": [1], "region_no_lattice": [0],
+        "region_depth_mm": [12], "region_expand_mm": [-3], "region_face_counts": [1], "region_faces": [1],
+        "region_weave": [true], "organic_spacing_min_mm": 3, "organic_spacing_max_mm": 8, "organic_mode": "grown")") +
+                          more + "}}");
+  };
+  bool refused = false;
+  try {
+    job(R"(, "organic_foot_gap": 0)");
+  } catch (const std::exception& e) {
+    refused = has(e.what(), "organic_foot_gap");
+  }
+  CHECK(job("").organic.foot_gap == 1.0 && job(R"(, "organic_foot_gap": 2.5)").organic.foot_gap == 2.5 && refused);
+}
+
+// ── 3 (brief G5): a join or a link stays inside the region ────────────────────
+// A block 24 x 16 x 24 with a slot of air 1 mm wide (x 12 to 13) down from the top to z 8, the stress leaning toward the
+// slot from both sides, so vines crowd across it. No strand crosses the slot (a join or link over it is not made).
+static void test_joins_inside() {
+  const TriangleMesh m = cubes_mesh(24, 16, 24, [](int i, int, int k) { return !(i == 12 && k >= 8); });
+  Part b(m, 24, 16, 24, 3, [](const Vec3& p) {
+    const double s = p.x < 12.5 ? 1.0 : -1.0;
+    const double t = 40.0 * 3.14159265358979323846 / 180.0;
+    return along({s * std::sin(t), 0.0, std::cos(t)}, 1.0);
+  });
+  b.ask.reference_mpa = 2.0;
+  at_5_5(b.ask);
+  GrowReport rep;
+  const std::vector<Strand> ss = grow_strands(b.d, 1, b.field, b.ask, &rep);
+  print_report("G-15 slot", rep);
+  std::size_t across = 0;
+  for (const Strand& s : ss)
+    for (const Vec3& p : samples(s.points, 0.05)) across += p.x > 12.05 && p.x < 12.95 && p.z > 8.05;
+  std::printf("G-15 joins refused outside %zu, links %zu; points in the slot %zu\n", rep.joins_refused_outside,
+              rep.links_refused_outside, across);
+  CHECK(across == 0);
+}
+
 int main() {
   test_uniform_block();
   test_ramp();
@@ -811,6 +937,8 @@ int main() {
   test_vines_arrive();
   test_file_job();
   test_cube_time();
+  test_feet();
+  test_joins_inside();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail == 0 ? 0 : 1;
 }

@@ -62,6 +62,9 @@ struct OrganicAsk {
   // settings give the same strands every time, on any thread count.
   double seed_stride = 0.25;      // > 0
   std::uint64_t seed = 1;
+  // G13 (brief G5): the floor's feet compete after the first pruning; a foot is kept only where no kept foot stands
+  // within foot_gap x the local spacing of its floor point (measured on the floor).
+  double foot_gap = 1.0;          // > 0
 };
 
 // O16, the net skin: Finish Skin (Settings::skin) on a weave region (the old finish step "Skin", organic_lattice.cpp,
@@ -170,6 +173,13 @@ struct GrowReport {
   double reseed_mm = 0.0;
   // Transfer ties (G9).
   std::size_t ties_seeded = 0, ties_laid = 0, ties_refused_minor = 0, ties_refused_reach = 0;
+  // G13, the feet (floor seeds' strands) after the first pruning: kept; removed, cut from the floor up to their first
+  // joint that holds with another plant's strand; removed whole (no such joint); the length those cuts took, with what
+  // hung only on a vine removed whole (counted, in the lengths below, under "leads to nothing").
+  std::size_t feet_kept = 0, feet_cut_at_joint = 0, vines_removed = 0;
+  double feet_cut_mm = 0.0;
+  // A join or a link whose segment would leave the region's candidates: not made.
+  std::size_t joins_refused_outside = 0, links_refused_outside = 0;
   // Lengths, mm (G12).
   double grown_mm = 0.0, kept_mm = 0.0;
   double cut_outside_mm = 0.0, cut_unsupported_mm = 0.0, cut_nothing_mm = 0.0, cut_repeat_mm = 0.0;
@@ -184,12 +194,12 @@ struct GrowReport {
 // directions the `field`'s, the width the domain's thinnest strut or `ask.width_mm` (never under it: G8), one step one
 // `ask.layer_mm` along `ask.build_dir`. Seeds placed at random by `ask.seed` (G2); each step follows the stress and is
 // pulled toward the nearest face of the region that is not its floor (G3), held to the cone and supported (G4);
-// crowded tips join, deflect and grow on (G5); branches and links (G6); transfer ties (G9). Then the pruning (G10, the
-// path's own answer, G11), ONE round of re-seeding in the bare places it leaves, grown and pruned the same way, every
-// cut counted (G12). The strands returned go through exactly Traced's path (Session::lay_organic). The same strands
-// for the same inputs, every time. An empty field, or no candidate voxel, gives none. Throws std::invalid_argument for
-// a range organic_spacing refuses, a width under the thinnest strut, a layer or a seed stride not above 0, or a
-// degenerate build direction.
+// crowded tips join, deflect and grow on (G5; never across what is not the region); branches and links (G6); transfer
+// ties (G9). Then the pruning (G10, the feet competing in the first, G13; the path's own answer, G11), ONE round of
+// re-seeding in the bare places it leaves, grown and pruned the same way, every cut counted (G12). The strands returned
+// go through exactly Traced's path (Session::lay_organic). The same strands for the same inputs, every time. An empty
+// field, or no candidate voxel, gives none. Throws std::invalid_argument for a range organic_spacing refuses, a width
+// under the thinnest strut, a layer, a seed stride or a foot gap not above 0, or a degenerate build direction.
 std::vector<Strand> grow_strands(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask,
                                  GrowReport* report = nullptr);
 

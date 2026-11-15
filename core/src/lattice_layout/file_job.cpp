@@ -117,7 +117,8 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "skin_width_mm", "skin_reach_cells", "drop_loose", "by_stress", "dial_light", "dial_heavy", "width_light_mm",
        "width_heavy_mm", "reference_mpa", "percentile", "response", "region_weave", "organic_spacing_mm",
        "organic_width_mm", "organic_spacing_min_mm", "organic_spacing_max_mm", "organic_spacing_exponent",
-       "organic_shape_fit", "organic_mode", "organic_walls_out", "organic_ties", "organic_tie_swirl"},
+       "organic_shape_fit", "organic_mode", "organic_walls_out", "organic_ties", "organic_tie_swirl",
+       "organic_foot_gap"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -262,6 +263,8 @@ OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::str
   a.ties = flag(in, "organic_ties", a.ties, w);
   a.tie_swirl = num(in, "organic_tie_swirl", a.tie_swirl, w);
   if (!(a.tie_swirl >= 0.0 && a.tie_swirl <= 1.0)) json::fail(w + ".organic_tie_swirl", "must be 0 to 1");
+  a.foot_gap = num(in, "organic_foot_gap", a.foot_gap, w);
+  if (!(std::isfinite(a.foot_gap) && a.foot_gap > 0.0)) json::fail(w + ".organic_foot_gap", "must be above 0");
   const double thinnest = s.bead_mm * s.min_strut_lines;
   if (!(std::isfinite(a.width_mm) && a.width_mm >= 0.0))
     json::fail(w + ".organic_width_mm", "must be 0 (the thinnest strut) or more");
