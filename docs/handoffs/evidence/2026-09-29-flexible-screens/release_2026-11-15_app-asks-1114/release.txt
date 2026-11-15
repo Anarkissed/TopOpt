@@ -1,0 +1,18 @@
+# Release b9f8c871 — 2026-11-15 app-asks-1114 (his 11-14 iPad asks, 61ce6489), app only
+# Core and worker unchanged: fingerprint 8e530b3b607e
+# Merged onto 0379e639; the merged app tree equals app-asks-1114's, so its gate applies unchanged.
+# Commits (first parent of app-asks-1114 since the release tip):
+#   d5b8910a App asks 11-14 (a), (c): the thin-wall pop-up sits in the centre of the screen; the other half of a cut piece is tinted under Union only
+#   61ce6489 App ask 11-14 (d): an arrow opens Edit faces' rail to the left, each tool's name above its icon and its (i)
+# Gates:
+#   Builder (LatticeReview's helper, claude/app-asks-1114 on 0379e639): AppAsks1114HostedTests (new) and the standing classes 53/53
+#   green at the tip 61ce6489; hook classes green; SurfaceStageRenderSeamTests green at d5b8910a. Checked by a second agent against
+#   the brief. Merge-tree clean against claude/flexible-screens, claude/install2-app and claude/install2-main.
+#   362: diff read (5 app files); app-only fast track, the merged app tree equals the branch's, so the builder's gate applies.
+#   15:56 checks ok: app-asks-1114 61ce6489, 2 commit(s), app-only, onto 0379e639, fingerprint 8e530b3b607e
+#   15:56 merged b9f8c871; app tree == app-asks-1114's, fingerprint 8e530b3b607e
+#   15:56 waiting for HEAVY.lock (LatticeReview builder grown5 (brief G5): organic grown tests / files, pid 69278 15:28 EST)
+#   16:00 lock taken (37 GB free)
+#   16:05 iPad device build green; lock released
+#   16:05 pushed b9f8c871
+#   16:05 worker /health fingerprint 8e530b3b607e (unchanged, no swap)
