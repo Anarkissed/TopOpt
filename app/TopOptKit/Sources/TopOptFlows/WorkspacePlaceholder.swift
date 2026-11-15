@@ -1316,6 +1316,7 @@ public struct WorkspacePlaceholder: View {
                           flexibleLattice: flexibleMain.layer(project, stage: stage, pageUp: fullScreenPageUp))   // Flexible (PR #362) H3: the main page's lattice + its squish loop (FlexibleMainStage.swift)
                 .onEmptyTap { emptyTapClears() }   // ★ his iPad 10-26 (5): a tap on empty space clears the selection
                 .onTapRay(primitiveTapRay)   // ★ his iPad 10-28: a tap on a keep-clear volume picks it
+                .cutSibling(SurfaceTint.siblingShows(tool: surfaceTool))   // ★ his 11-14: the other half is tinted under Union only
                 .overlay(alignment: .bottom) {
                     if newEngineDrawn {
                         VStack(spacing: 6) {
@@ -9138,8 +9139,8 @@ public struct WorkspacePlaceholder: View {
             .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(DS.Surface.panel.color))
             .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
             .shadow(color: .black.opacity(0.35), radius: 24, y: 8)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-            .padding(.bottom, bottomBarClearance + DS.Space.l)
+            .background(CornerPairStyle.publish("lattice-thin-walls-panel"))   // ★ his 11-14: the pop-up's own frame (the card's is the screen's)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)   // ★ his 11-14: in the centre of the screen
             .background(CornerPairStyle.publish("lattice-thin-walls-card"))
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("lattice-thin-walls-card")

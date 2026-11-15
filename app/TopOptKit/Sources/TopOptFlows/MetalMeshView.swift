@@ -1419,7 +1419,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     nonisolated(unsafe) static var xrayBodyByWindow: [Int: [ObjectIdentifier: Bool]] = [:]
     /// The opacity the body is DRAWN with: the X-ray look, never more opaque than the lattice preview's own rule asks.
     static func bodyDrawAlpha(_ bodyAlpha: Float, xray: Bool) -> Float { xray ? min(bodyAlpha, XrayLook.bodyAlpha) : bodyAlpha }
-    private var cutUniforms = CutUniformsSwift(plane: .zero, colSelected: .zero,
+    private(set) var cutUniforms = CutUniformsSwift(plane: .zero, colSelected: .zero,
                                                colSibling: .zero, enabled: 0)
     private var wireframeVertexCount = 0
     /// M7.viz.4 load-path: the expanded THICK-RIBBON geometry (stride-12: segStart xyz,
@@ -5690,6 +5690,9 @@ struct MeshViewInputs {
     /// §6 — the picked pieces, each as its own chain of half-spaces, so the
     /// fragment stage can light the PIECE rather than its whole face.
     var pickChains: [[SIMD4<Float>]] = []
+    /// ★ his 11-14: whether the fragment stage tints the other half of a selected cut piece (`SurfaceTint.siblingShows`);
+    /// off, that half is drawn in the plain wash.
+    var cutSibling: Bool = true
     /// §6 — X-RAY: the line set draws through the solid. Separate from
     /// `showWireframe`, which decides whether there are lines at all.
     var xray: Bool = false
@@ -6305,6 +6308,7 @@ extension MetalMeshView {
         private var appliedCutPlane: SIMD4<Float>??
         private var appliedRibbonCount = -1
         private var appliedPickShape: [Int] = []
+        private var appliedCutSibling = true
         private var lastSettleVector: SIMD4<Float>?
         /// M7.8: whether a stress overlay is currently uploaded, and the last reveal.
         private var appliedStress = false
@@ -6626,12 +6630,13 @@ extension MetalMeshView {
                     dirty = true
                 }
                 let pkey = inputs.pickChains.map(\.count)
-                if inputs.cutPlane != appliedCutPlane || pkey != appliedPickShape {
+                if inputs.cutPlane != appliedCutPlane || pkey != appliedPickShape || inputs.cutSibling != appliedCutSibling {
                     appliedCutPlane = inputs.cutPlane
                     appliedPickShape = pkey
+                    appliedCutSibling = inputs.cutSibling
                     renderer.setCutPlane(inputs.cutPlane ?? .zero,
                                          selected: SurfaceTint.selected,
-                                         sibling: SurfaceTint.sibling,
+                                         sibling: inputs.cutSibling ? SurfaceTint.sibling : SurfaceTint.grouped,
                                          enabled: inputs.cutPlane != nil,
                                          pickGroups: inputs.pickChains)
                     dirty = true
@@ -7469,6 +7474,17 @@ extension MetalMeshView {
 #if canImport(MetalKit)
         var copy = self
         copy.inputs.onLatticeProbeExit = action
+        return copy
+#else
+        self
+#endif
+    }
+
+    /// ★ his 11-14: tint the other half of a selected cut piece, or draw it in the plain wash (`SurfaceTint.siblingShows`).
+    public func cutSibling(_ shows: Bool) -> MetalMeshView {
+#if canImport(MetalKit)
+        var copy = self
+        copy.inputs.cutSibling = shows
         return copy
 #else
         self
