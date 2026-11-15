@@ -270,6 +270,8 @@ DELETE-only cancel — no Xcode needed. See `docs/handoffs/101-remote-run-livene
 `e2e/demand_field_e2e.py` (pure-Python) proves the optional multipart `demand`
 field (a stress result for density by stress): saved beside the job as
 `demand.bin` and named `"demand": "demand.bin"` in the job; absent, nothing changes.
+`e2e/crlf_body_bytes_e2e.py` (pure-Python) proves an uploaded model, design or demand
+file that begins or ends with CR/LF bytes reaches disk byte-identical.
 
 The **handoff-121 queue** harness is pure-Python too (`./run_e2e.sh queue`):
 - `e2e/queue_state_machine.py` — headless proof of the `Scheduler` state machine

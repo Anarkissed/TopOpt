@@ -33,7 +33,7 @@ STUB = os.path.join(HERE, "stub_cli.py")
 
 # Bytes that would be mangled by any text handling: NULs, CR/LF pairs, high bytes.
 DEMAND = bytes(range(256)) + b"\r\n\r\n--not-a-boundary\r\n" + b"\x00" * 64
-DESIGN = b"DESIGN\r\n" + bytes(reversed(range(256)))
+DESIGN = b"DESIGN" + bytes(reversed(range(256))) + b"\r\n"
 
 failures = 0
 

@@ -627,7 +627,13 @@ def parse_multipart(body, content_type):
     delim = b"--" + boundary.encode()
     fields = {}
     for part in body.split(delim):
-        part = part.strip(b"\r\n")
+        # Drop exactly the one framing CRLF at each end (after the boundary line,
+        # before the next boundary) and nothing more: a file whose own bytes begin
+        # or end with CR or LF must reach disk whole.
+        if part.startswith(b"\r\n"):
+            part = part[2:]
+        if part.endswith(b"\r\n"):
+            part = part[:-2]
         if not part or part == b"--":
             continue
         head, _, data = part.partition(b"\r\n\r\n")
