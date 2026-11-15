@@ -267,6 +267,9 @@ fields (`fields.bin`, which `stub_cli.py` now writes) and the WORKER's recorded
 duration, not the client's attach window. `e2e/protocol_smoke.py`
 is a pure-Python, HTTP-level proof of the heartbeat, the reconnect replay, and
 DELETE-only cancel — no Xcode needed. See `docs/handoffs/101-remote-run-liveness.md`.
+`e2e/demand_field_e2e.py` (pure-Python) proves the optional multipart `demand`
+field (a stress result for density by stress): saved beside the job as
+`demand.bin` and named `"demand": "demand.bin"` in the job; absent, nothing changes.
 
 The **handoff-121 queue** harness is pure-Python too (`./run_e2e.sh queue`):
 - `e2e/queue_state_machine.py` — headless proof of the `Scheduler` state machine

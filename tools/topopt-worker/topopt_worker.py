@@ -614,8 +614,9 @@ def _signal_child(job, sig):
 # ---------------------------------------------------------------------------
 # Minimal multipart/form-data parser (stdlib `cgi` was removed in 3.13). Handles
 # the fields this API needs: `step` (a file), `job` (the job.json text), the
-# optional `project` label, and the optional `design` blob (a previous run's
-# design.bin, for a lattice_variant job).
+# optional `project` label, the optional `design` blob (a previous run's
+# design.bin, for a lattice_variant job), and the optional `demand` blob (a stress
+# result, saved as demand.bin).
 
 
 def parse_multipart(body, content_type):
@@ -832,6 +833,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(400, {
                 "error": "a lattice_variant job must upload the originating "
                          "run's design.bin as the multipart 'design' field"})
+        # The STRESS RESULT for density by stress (Install 2): uploaded as its own
+        # multipart field "demand", saved beside the model as demand.bin and named in
+        # the job the same way the design is. The worker does not judge it: a job that
+        # asks for stress grading without one is refused by core (no_stress_result),
+        # and that refusal comes back like any other core refusal. No field, no key.
+        if "demand" in fields:
+            with open(os.path.join(tmpdir, "demand.bin"), "wb") as f:
+                f.write(fields["demand"]["data"])
+            job_doc["demand"] = "demand.bin"
         job_path = os.path.join(tmpdir, "job.json")
         with open(job_path, "w") as f:
             json.dump(job_doc, f)
