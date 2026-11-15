@@ -1575,8 +1575,9 @@ public struct LatticeSetupWizard: View {
     /// sake.
     /// ★ SMALL CELLS IN THIN WALLS (his ask 11-13: "I definitely want it as a per-part choice. Especially in the app itself."):
     /// a wall too thin for an open cell takes small, denser cells at the thinnest strut instead of going solid. Off by default.
-    /// ★ "LET WALLS CUT CELLS" (his rulings 11-14 00:55 and 01:00 — his words for the label): one even grid of cells that walls,
-    /// pockets and skins cut through, in place of whole cells fitted to each wall. Aesthetic only; off by default.
+    /// ★ "LET WALLS CUT CELLS" (his rulings 11-14 00:55 and 01:00 — his words for the label; 11-14 13:27: "This means ONLY that
+    /// the cells can be cut by walls. NOTHING ELSE."): cells may be cut wherever a wall, pocket or skin falls, in place of whole
+    /// cells fitted to each wall. It changes no grade. Aesthetic only; off by default.
     @ViewBuilder private var cutCellsSwitch: some View {
         VStack(alignment: .leading, spacing: 4) {
             Toggle(isOn: Binding(get: { model.letWallsCutCells },
@@ -1587,11 +1588,11 @@ public struct LatticeSetupWizard: View {
             }
             .toggleStyle(SwitchToggleStyle(tint: DS.Color.okGreen.color))
             .latticeID("wizard-let-walls-cut-cells")
-            captionLine(model.letWallsCutCells ? "One even grid; walls and pockets cut through it."
-                                               : "Whole cells, fitted between walls.",
+            captionLine(model.letWallsCutCells ? "Walls and pockets may cut through cells."
+                                               : "Whole cells, each fitted between walls.",
                         info: "cut-cells",
-                        "New engine only. On: one even grid of cells across the part, cut wherever a wall, pocket or skin "
-                        + "falls. Off: whole cells, each sized to fit its wall.")
+                        "New engine only. On: cells may be cut wherever a wall, pocket or skin falls. "
+                        + "Off: whole cells, each sized to fit its wall.")
         }
     }
 

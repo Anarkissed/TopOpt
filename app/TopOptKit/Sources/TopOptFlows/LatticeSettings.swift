@@ -2353,9 +2353,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// thinnest strut instead of going solid (core's Settings::small_cells_in_thin_walls). Read by the new engine only. Not written
     /// while off, so older bytes are unchanged.
     public var smallCellsInThinWalls: Bool = false
-    /// ★ "LET WALLS CUT CELLS" (his ruling 11-14 00:55 + 01:00): one even grid of cells that the part's walls, pockets and
-    /// skins cut through, in place of whole cells fitted to each wall. Per part, Aesthetic only (Structural keeps cells fitted
-    /// to walls and the app sends false). Not written while off, so older bytes are unchanged.
+    /// ★ "LET WALLS CUT CELLS" (his ruling 11-14 00:55 + 01:00; 13:27 "ONLY that the cells can be cut by walls. NOTHING
+    /// ELSE."): cells may be cut wherever the part's walls, pockets and skins fall, in place of whole cells fitted to each wall;
+    /// no grade changes. Per part, Aesthetic only (Structural keeps cells fitted to walls and the app sends false). Not
+    /// written while off, so older bytes are unchanged.
     public var letWallsCutCells: Bool = false
     /// ★★★ ALLOW QUILT (his ruling, 2026-09-12). Octet only. Off: every density on this
     /// project — simulated, automatic, uniform, per-region — is held under

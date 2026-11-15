@@ -9,4 +9,7 @@ enum TopologyFocus {
         guard let active else { return items }
         return items.filter { group($0) == active }
     }
+
+    /// Whether a group's shapes draw: every group's with none picked, else only the picked one's.
+    static func draws(_ group: UUID, active: UUID?) -> Bool { active == nil || group == active }
 }
