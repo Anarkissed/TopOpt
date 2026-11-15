@@ -2215,6 +2215,221 @@ static void test_weave_round_top_layers() {
   CHECK(differ == 5);
 }
 
+// ── O17, O18: what happens to a sag (the owner's OR29; brief S7) ──────────────
+// A made-up 40 x 40 x 20 box as an imported model (faces 0 bottom, 1 top, 2..5 the sides), a weave region under its
+// top face pulled 5 mm in from the edge (solid walls 5 mm thick all round), `depth` deep: 20.5 runs through to the
+// bed (nothing under the lattice), 14 leaves a solid floor 6 mm thick. Strands laid through Session::lay_weave.
+static StepModel sag_box_model() {
+  const double x = 40, y = 40, z = 20;
+  StepModel m;
+  const Vec3 p[8] = {{0, 0, 0}, {x, 0, 0}, {x, y, 0}, {0, y, 0}, {0, 0, z}, {x, 0, z}, {x, y, z}, {0, y, z}};
+  const int q[6][4] = {{0, 3, 2, 1}, {4, 5, 6, 7}, {0, 1, 5, 4}, {1, 2, 6, 5}, {2, 3, 7, 6}, {3, 0, 4, 7}};
+  const Vec3 out[6] = {{0, 0, -1}, {0, 0, 1}, {0, -1, 0}, {1, 0, 0}, {0, 1, 0}, {-1, 0, 0}};
+  for (int f = 0; f < 6; ++f) {
+    StepFaceInfo info;
+    info.kind = StepSurfaceKind::Plane;
+    info.plane_normal = out[f];
+    info.plane_origin = p[q[f][0]];
+    m.faces.push_back(info);
+    for (int second = 0; second < 2; ++second) {
+      const int n = static_cast<int>(m.mesh.vertices.size());
+      m.mesh.vertices.insert(m.mesh.vertices.end(), {p[q[f][0]], p[q[f][second ? 2 : 1]], p[q[f][second ? 3 : 2]]});
+      m.mesh.triangles.push_back({n, n + 1, n + 2});
+      m.triangle_face.push_back(f);
+    }
+  }
+  m.face_count = 6;
+  m.solid_count = 1;
+  m.brep_volume = x * y * z;
+  return m;
+}
+struct SagBox {
+  Session session;
+  Outcome out;
+  OpenSpace open;
+  SagBox(double depth, const std::vector<Strand>& strands) : session(sag_box_model()) {
+    Settings s;
+    s.regions = {{1, Role::Lattice, {1}, depth, -5.0, true}};
+    out = session.lay_weave(s, strands, 1);
+    open = read_open_space(*session.domain(), out.layout, 0.25);
+  }
+  PrintableReport make(const PrintableSpec& spec, TriangleMesh* mesh = nullptr) const {
+    PrintableReport rep;
+    const TriangleMesh m = build_printable_mesh(session.measure(), *session.domain(), out.layout, out.bars, open, spec, &rep);
+    if (mesh) *mesh = m;
+    return rep;
+  }
+};
+static PrintableSpec sag_spec(double lift, bool legs) {
+  PrintableSpec s;
+  s.mesh.weave_sag_lift_mm = lift;
+  s.mesh.weave_sag_legs = legs;
+  return s;
+}
+// A strand from wall to wall along x at y, level at `held` except a U in its middle: down to `held - sag` at x = 20.
+static Strand u_strand(double y, double held, double sag) {
+  return weave_strand({{2, y, held}, {12, y, held}, {16, y, held - 0.5 * sag}, {20, y, held - sag}, {24, y, held - 0.5 * sag},
+                       {28, y, held}, {38, y, held}});
+}
+static void say_sags(const char* what, const PrintableReport& rep) {
+  const SagReport& s = rep.sags;
+  std::printf("sags %s: low nodes %zu, lifted %zu (largest %.3f mm), legs %zu (%zu bars, %.3f mm), unsupported %zu, not covered %zu, "
+              "open arm %zu; bars changed %d\n", what, s.low_nodes, s.lifted, s.lift_largest_mm, s.legs, s.leg_bars, s.legs_mm,
+              s.unsupported, s.not_covered, s.open_arm, rep.sagged ? 1 : 0);
+  say_bridges(what, rep);
+}
+
+// O17 (test 1): a U sagging 0.5 mm between two held nodes, nothing under it, with a tie from its low point to a level
+// strand beside it: lifted straight (every bar of the strand level at its held height), kept whole, the tie's end moved
+// with it; nothing left out, no post, nothing starts in mid-air.
+static void test_sag_lifted() {
+  const SagBox k(20.5, {u_strand(20, 12, 0.5), weave_strand({{2, 26, 12}, {38, 26, 12}}), weave_strand({{20, 20, 11.5}, {20, 26, 12}})});
+  TriangleMesh mesh;
+  const PrintableReport rep = k.make(PrintableSpec{}, &mesh);
+  say_sags("U 0.5 mm, nothing below", rep);
+  CHECK(rep.mesh.ok && rep.sags.low_nodes == 1 && rep.sags.lifted == 1 && rep.sags.legs == 0 && rep.sagged != nullptr);
+  CHECK(std::fabs(rep.sags.lift_largest_mm - 0.5) < 1e-9);
+  if (!rep.sagged) return;
+  long strand_bars = 0, level = 0, tie_at_low = 0;
+  for (const Bar& b : rep.sagged->bars) {
+    if (b.region != 1) continue;
+    if (std::fabs(b.a.y - 20) < 1e-9 && std::fabs(b.b.y - 20) < 1e-9) {
+      ++strand_bars;
+      level += b.a.z == 12.0 && b.b.z == 12.0;
+    }
+    for (const Vec3& p : {b.a, b.b})
+      if (std::fabs(b.a.x - 20) < 1e-9 && std::fabs(b.b.x - 20) < 1e-9 && std::fabs(p.y - 20) < 1e-9) tie_at_low += p.z == 12.0;
+  }
+  std::printf("sag lifted: %ld bars of the strand, %ld level at 12; the tie's end at the low point lifted %ld\n", strand_bars, level,
+              tie_at_low);
+  CHECK(strand_bars >= 4 && level == strand_bars && tie_at_low == 1);
+  CHECK(rep.sagged->bars.size() == k.out.bars.bars.size());
+  CHECK(rep.clean && rep.mesh.bars == k.out.bars.bars.size() && rep.mesh.bars_left_out == 0 && rep.mesh.weave_left_unheld == 0);
+  CHECK(rep.posts.empty() && rep.layers.mid_air.empty() && rep.drop_at.empty());
+  CHECK(material_at(mesh, {20, 20, 12.2}) && material_at(mesh, {20, 23, 12}) && !material_at(mesh, {20, 20, 11.3}));
+  // The bars handed in are not touched.
+  bool same_in = true;
+  for (const Bar& b : k.out.bars.bars)
+    if (std::fabs(b.a.x - 20) < 1e-9 && std::fabs(b.a.y - 20) < 1e-9) same_in = same_in && b.a.z == 11.5;
+  CHECK(same_in);
+}
+
+// O18 (test 2): a U sagging 3 mm, its low point 5 mm over a solid floor: a leg in the old engine's shape, from the floor
+// straight up to the low point (nothing to lean toward), its foot run into the floor; the leg is held piece by piece
+// from the floor up, nothing starts in mid-air, the arms are kept. With a strut standing on the floor 2 mm to the side,
+// the leg leans toward it at 50 degrees from level and lands in it.
+static void test_sag_leg() {
+  {
+    const SagBox k(14.0, {u_strand(20, 14, 3)});
+    TriangleMesh mesh;
+    const PrintableReport rep = k.make(PrintableSpec{}, &mesh);
+    say_sags("U 3 mm over a floor", rep);
+    CHECK(rep.mesh.ok && rep.sags.low_nodes == 1 && rep.sags.lifted == 0 && rep.sags.legs == 1 && rep.sags.leg_bars == 1);
+    CHECK(rep.sagged != nullptr);
+    if (!rep.sagged) return;
+    const Bar& leg = rep.sagged->bars.back();
+    std::printf("sag leg: from (%.3f %.3f %.3f) %d to (%.3f %.3f %.3f) %d, %.2f mm wide; %.3f mm\n", leg.a.x, leg.a.y, leg.a.z,
+                static_cast<int>(leg.end_a), leg.b.x, leg.b.y, leg.b.z, static_cast<int>(leg.end_b), leg.width, rep.sags.legs_mm);
+    CHECK(leg.end_a == Bar::End::Solid && leg.end_b == Bar::End::Node && leg.region == 1 && leg.width == 0.9);
+    CHECK(leg.a.x == 20 && leg.a.y == 20 && std::fabs(leg.a.z - (6.0 - 0.9)) < 1e-6);   // run 0.9 mm into the floor
+    CHECK(leg.b.x == 20 && leg.b.y == 20 && leg.b.z == 11);
+    CHECK(std::fabs(rep.sags.legs_mm - 5.9) < 1e-6);
+    const WeaveHolds h = weave_holds(*rep.sagged, {1});
+    CHECK(h.left_unheld == 0);
+    CHECK(rep.clean && rep.mesh.bars == rep.sagged->bars.size() && rep.mesh.bars_left_out == 0 && rep.mesh.weave_left_unheld == 0);
+    CHECK(rep.posts.empty() && rep.layers.mid_air.empty() && rep.drop_at.empty());
+    CHECK(material_at(mesh, {20, 20, 8}) && material_at(mesh, {20, 20, 11}) && material_at(mesh, {14, 20, 13.25}));
+  }
+  {
+    // The strut beside it: up from the floor at (20, 22), then on to the wall (both of its bars stand).
+    const SagBox k(14.0, {u_strand(20, 14, 3), weave_strand({{20, 22, 4}, {20, 22, 10}, {38, 22, 16}})});
+    const PrintableReport rep = k.make(PrintableSpec{});
+    say_sags("U 3 mm over a floor, a strut beside it", rep);
+    CHECK(rep.mesh.ok && rep.sags.legs == 1 && rep.sagged != nullptr);
+    if (!rep.sagged) return;
+    const std::size_t first = k.out.bars.bars.size();
+    double steepest_off = 0.0, most_lean = 0.0;
+    bool chained = true;
+    for (std::size_t i = first; i < rep.sagged->bars.size(); ++i) {
+      const Bar& b = rep.sagged->bars[i];
+      const double h = std::hypot(b.b.x - b.a.x, b.b.y - b.a.y), v = b.b.z - b.a.z;
+      steepest_off = std::max(steepest_off, 50.0 - std::atan2(v, h) * 180.0 / 3.14159265358979323846);
+      most_lean = std::max(most_lean, h / v);
+      if (i > first) chained = chained && b.a.x == rep.sagged->bars[i - 1].b.x && b.a.y == rep.sagged->bars[i - 1].b.y &&
+                                b.a.z == rep.sagged->bars[i - 1].b.z && b.end_a == Bar::End::Node;
+      std::printf("  leg bar %zu: (%.3f %.3f %.3f) %d -> (%.3f %.3f %.3f) %d, into %d\n", i - first, b.a.x, b.a.y, b.a.z,
+                  static_cast<int>(b.end_a), b.b.x, b.b.y, b.b.z, static_cast<int>(b.end_b), b.into_a);
+    }
+    const Bar& foot = rep.sagged->bars[first];
+    const Bar& top = rep.sagged->bars.back();
+    CHECK(foot.end_a == Bar::End::Joined && foot.into_a >= 0 && rep.sagged->bars[static_cast<std::size_t>(foot.into_a)].a.y == 22.0);
+    CHECK(top.b.x == 20 && top.b.y == 20 && top.b.z == 11 && chained);
+    CHECK(steepest_off < 1e-6 && most_lean > 0.8 && most_lean < std::tan(40.0 * 3.14159265358979323846 / 180.0) + 1e-9);
+    CHECK(weave_holds(*rep.sagged, {1}).left_unheld == 0);
+    CHECK(rep.clean && rep.mesh.bars_left_out == 0 && rep.mesh.weave_left_unheld == 0 && rep.posts.empty() && rep.layers.mid_air.empty());
+  }
+}
+
+// O18 (test 3): the same 3 mm sag with nothing below (the lattice runs through to the bed): no leg, counted, and left
+// to the layer check exactly as with both switches off.
+static void test_sag_unsupported() {
+  const SagBox k(20.5, {u_strand(20, 14, 3)});
+  TriangleMesh on, off;
+  const PrintableReport a = k.make(PrintableSpec{}, &on), b = k.make(sag_spec(0.0, false), &off);
+  say_sags("U 3 mm, nothing below", a);
+  say_sags("U 3 mm, nothing below, both switches off", b);
+  CHECK(a.mesh.ok && a.sags.low_nodes == 1 && a.sags.unsupported == 1 && a.sags.legs == 0 && a.sags.lifted == 0 && !a.sagged);
+  CHECK(b.sags.low_nodes == 0 && b.sags.unsupported == 0 && !b.sagged);
+  CHECK(same_mesh(on, off) && mesh_hash(on, a) == mesh_hash(off, b));
+  CHECK(a.mesh.bars_left_out + a.mesh.weave_left_unheld > 0);   // left out, as before
+}
+
+// O17, O18 (test 4): with both switches off the 0.5 mm U and the 3 mm U over the floor are judged as before: no bar
+// moved or added, and the sag is left out by the layer check; each switch alone does only its own rule.
+static void test_sag_switches_off() {
+  const SagBox small(20.5, {u_strand(20, 12, 0.5)}), deep(14.0, {u_strand(20, 14, 3)});
+  const PrintableReport s_off = small.make(sag_spec(0.0, false)), d_off = deep.make(sag_spec(0.0, false));
+  const PrintableReport s_legs = small.make(sag_spec(0.0, true)), d_lift = deep.make(sag_spec(0.9, false));
+  say_sags("U 0.5 mm, off", s_off);
+  say_sags("U 3 mm over a floor, off", d_off);
+  say_sags("U 0.5 mm, legs only", s_legs);
+  say_sags("U 3 mm over a floor, lift only", d_lift);
+  for (const PrintableReport* r : {&s_off, &d_off}) {
+    CHECK(r->mesh.ok && !r->sagged && r->sags.lifted == 0 && r->sags.legs == 0);
+    CHECK(r->mesh.bars_left_out + r->mesh.weave_left_unheld > 0);
+  }
+  CHECK(s_legs.sags.lifted == 0 && s_legs.sags.unsupported == 1 && !s_legs.sagged);   // nothing below the small one
+  CHECK(d_lift.sags.lifted == 0 && d_lift.sags.legs == 0 && !d_lift.sagged);           // too deep to lift, no legs
+}
+
+// O17, O18 (test 5): cube-lattice bars are never read: the same parts as test 15 made with the sag switches set every
+// way are the same, mesh and loop, and so are the 3 mm U's bars judged as cube-lattice bars.
+static void test_sag_cube_parts_as_before() {
+  const BridgeBlock k(20.5);
+  Bars landing;
+  landing.bars.push_back(hand_bar({4.1, 26, 10}, Bar::End::Solid, {15.0, 26, 10}, Bar::End::Loose));
+  landing.bars.push_back(hand_bar({4.1, 20, 10}, Bar::End::Solid, {12, 26, 10}, Bar::End::Joined, 0));
+  const SagBox u(14.0, {u_strand(20, 14, 3)});
+  Layout u_cube = u.out.layout;
+  u_cube.weave.clear();
+  const unsigned long long want[2] = {0xf0c261ac0bf71552ULL, 0xfc83ca98a6fda5a2ULL};
+  int same = 0, asked = 0;
+  for (const PrintableSpec& spec : {sag_spec(0.0, false), sag_spec(0.9, true), sag_spec(5.0, true), sag_spec(0.0, true)}) {
+    PrintableReport r1, r2, r3, r0;
+    const TriangleMesh m1 = build_printable_mesh(k.pm, k.d, k.as_cube(), landing, k.open, spec, &r1);
+    const TriangleMesh m2 = build_printable_mesh(k.pm, k.d, k.as_cube(), thin_v(0.9), k.open, spec, &r2);
+    const TriangleMesh m3 = build_printable_mesh(u.session.measure(), *u.session.domain(), u_cube, u.out.bars, u.open, spec, &r3);
+    const TriangleMesh m0 = build_printable_mesh(u.session.measure(), *u.session.domain(), u_cube, u.out.bars, u.open,
+                                                 sag_spec(0.0, false), &r0);
+    asked += 3;
+    same += mesh_hash(m1, r1) == want[0];
+    same += mesh_hash(m2, r2) == want[1];
+    same += mesh_hash(m3, r3) == mesh_hash(m0, r0) && !r3.sagged && r3.sags.low_nodes == 0;
+  }
+  std::printf("sags, cube parts as before: %d of %d the same\n", same, asked);
+  CHECK(same == asked);
+}
+
 int main() {
   if (!mesh_available()) {
     MeshReport rep;
@@ -2254,6 +2469,11 @@ int main() {
   test_weave_round_top_underside();
   test_weave_round_top_section();
   test_weave_round_top_layers();
+  test_sag_lifted();
+  test_sag_leg();
+  test_sag_unsupported();
+  test_sag_switches_off();
+  test_sag_cube_parts_as_before();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }

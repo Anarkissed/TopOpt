@@ -825,6 +825,7 @@ Bars weave_bars(const Domain& domain, const std::vector<Strand>& strands, int th
         bar.width = 0.5 * (st.width_mm[k] + st.width_mm[k + 1]);
         bar.cell = st.spacing_mm;
         bar.region = st.region;
+        bar.strand = static_cast<int>(si);
         const int n = std::max(2, static_cast<int>(std::ceil(line.length / kStep)));
         std::vector<char> in(static_cast<std::size_t>(n) + 1);
         for (int i = 0; i <= n; ++i) in[static_cast<std::size_t>(i)] = held(static_cast<double>(i) / n);

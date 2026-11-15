@@ -266,7 +266,8 @@ FileOptions options_from(const json::Value& in, const std::string& w) {
   json::reject_unknown(in,
                        {"pitch_mm", "bar_sides", "block_mm", "grow_mm", "clean_mm", "part_mm",
                         "fill_under_mm3", "bridge_rise", "post_mm", "layer_mm", "pixel_mm", "most_passes",
-                        "leave_out", "keep_if_not_clean", "weave_stand_every_mm", "weave_foot_mm", "weave_round_top"},
+                        "leave_out", "keep_if_not_clean", "weave_stand_every_mm", "weave_foot_mm", "weave_round_top",
+                        "weave_sag_lift_mm", "weave_sag_legs"},
                        w);
   FileOptions o;
   o.pitch_mm = num(in, "pitch_mm", o.pitch_mm, w);
@@ -282,6 +283,9 @@ FileOptions options_from(const json::Value& in, const std::string& w) {
   if (!(o.mesh.weave_stand_every_mm >= 0.0)) json::fail(w + ".weave_stand_every_mm", "must be 0 (never) or more");
   o.mesh.weave_foot_mm = num(in, "weave_foot_mm", o.mesh.weave_foot_mm, w);   // O11: 0 = no foot, below 0 = half the bar's width
   o.mesh.weave_round_top = flag(in, "weave_round_top", o.mesh.weave_round_top, w);   // O14: false = the square bar
+  o.mesh.weave_sag_lift_mm = num(in, "weave_sag_lift_mm", o.mesh.weave_sag_lift_mm, w);   // O17: 0 = never lift
+  if (!(o.mesh.weave_sag_lift_mm >= 0.0)) json::fail(w + ".weave_sag_lift_mm", "must be 0 (never) or more");
+  o.mesh.weave_sag_legs = flag(in, "weave_sag_legs", o.mesh.weave_sag_legs, w);   // O18: false = no leg
   o.layers.layer_mm = num(in, "layer_mm", o.layers.layer_mm, w);
   o.layers.pixel_mm = num(in, "pixel_mm", o.layers.pixel_mm, w);
   o.most_passes = whole(in, "most_passes", o.most_passes, w);
@@ -425,6 +429,8 @@ TriangleMesh make_file_mesh(const Session& session, const Outcome& outcome, cons
   report.stands_added = made.stands_added;
   report.weave_specks_ignored = made.weave_specks_ignored;
   report.weave_held_ignored = made.weave_held_ignored;
+  report.sags = made.sags;
+  report.sagged = made.sagged;
   if (made.mesh.ok) {
     report.bed_contact_mm2 = made.layers.bed_mm2;
     report.midair_starts = static_cast<int>(made.layers.mid_air.size());
@@ -894,7 +900,8 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
       return done();
     }
     if (!weave_regions.empty()) {
-      r.shallow = shallow_bar_table(out.bars, weave_regions, r.made.left_out_at, r.made.posts, job.options.layers.layer_mm);
+      r.shallow = shallow_bar_table(r.made.sagged ? *r.made.sagged : out.bars, weave_regions, r.made.left_out_at, r.made.posts,
+                                    job.options.layers.layer_mm);
       r.shallow.stands_added = r.made.stands_added;
     }
     if (!r.made.print_clean && !job.options.keep_if_not_clean) {
@@ -1158,6 +1165,13 @@ std::string file_result_json(const FileResult& r) {
     if (r.weave_regions > 0) {   // O10: only a job with a weave says them (a cube-lattice file is as before)
       std::snprintf(b, sizeof b, ",\n    \"weave_specks_ignored\": %llu, \"weave_held_ignored\": %llu",
                     count(r.made.weave_specks_ignored), count(r.made.weave_held_ignored));
+      o += b;
+      // O17, O18: what was done with the weave's sags.
+      std::snprintf(b, sizeof b,
+                    ",\n    \"sags_lifted\": %llu, \"sag_lift_largest_mm\": %.9g, \"sag_legs\": %llu, \"sag_legs_mm\": %.9g, "
+                    "\"sags_unsupported\": %llu",
+                    count(r.made.sags.lifted), r.made.sags.lift_largest_mm, count(r.made.sags.legs), r.made.sags.legs_mm,
+                    count(r.made.sags.unsupported));
       o += b;
     }
     o += "},\n";

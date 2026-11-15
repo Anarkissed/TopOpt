@@ -455,10 +455,18 @@ LayerReport check_layers(const TriangleMesh& mesh, const LayerSpec& spec) {
   return rep;
 }
 
-TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain, const Layout& layout, const Bars& bars,
+TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain, const Layout& layout, const Bars& laid,
                                   const OpenSpace& open, const PrintableSpec& spec, PrintableReport* report) {
   const auto t0 = std::chrono::steady_clock::now();
   PrintableReport rep;
+  // O17, O18: a weave's sags, once, on the layout's bars before the writer; every pass is made of what this leaves.
+  if (!layout.weave.empty() && (spec.mesh.weave_sag_lift_mm > 0.0 || spec.mesh.weave_sag_legs)) {
+    auto sagged = std::make_shared<Bars>(laid);
+    rep.sags = lift_weave_sags(domain, layout, *sagged, spec.mesh.weave_sag_lift_mm, spec.mesh.weave_sag_legs,
+                               spec.layers.layer_mm > 0.0 ? spec.layers.layer_mm : 0.2);
+    if (rep.sags.changed()) rep.sagged = std::move(sagged);
+  }
+  const Bars& bars = rep.sagged ? *rep.sagged : laid;
   MeshSpec ms = spec.mesh;
   TriangleMesh mesh;
   bool posting = !spec.leave_out;

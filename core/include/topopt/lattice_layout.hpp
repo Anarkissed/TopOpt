@@ -837,6 +837,9 @@ struct Bar {
   // For a Joined end: the bar it ends in (its place in Bars::bars), -1 otherwise. If that
   // bar is removed, this end lands on nothing again (drop_loose_bars follows it).
   int into_a = -1, into_b = -1;
+  // O17: the strand of a weave it was laid from (its place in the list weave_bars was given), -1 for every other bar.
+  // Read only to walk along a strand (lift_weave_sags).
+  int strand = -1;
 };
 
 // Preview is the spec (reviewer, 2026-11-12): a bar lying flatter than 30 degrees is written to the file as a BRIDGE,

@@ -71,6 +71,10 @@ struct FileReport {
   std::vector<MeshSpec::Post> posts; // the posts added (the preview can draw them)
   std::size_t stands_added = 0;      // of `posts`, those under a weave's long shallow runs (O8)
   std::size_t weave_specks_ignored = 0, weave_held_ignored = 0;   // O10: PrintableReport's
+  // O17, O18: PrintableReport's: what the sag pass did, and the bars the file was made of when it changed any (null:
+  // the layout's own). `left_out_at` and `posts` are read against those.
+  SagReport sags;
+  std::shared_ptr<const Bars> sagged;
 };
 
 // THE ONE PLACE THE MESH IS MADE for a file: the open space of the layout's cells, then
