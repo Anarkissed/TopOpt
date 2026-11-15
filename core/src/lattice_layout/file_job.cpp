@@ -117,7 +117,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "skin_width_mm", "skin_reach_cells", "drop_loose", "by_stress", "dial_light", "dial_heavy", "width_light_mm",
        "width_heavy_mm", "reference_mpa", "percentile", "response", "region_weave", "organic_spacing_mm",
        "organic_width_mm", "organic_spacing_min_mm", "organic_spacing_max_mm", "organic_spacing_exponent",
-       "organic_shape_fit"},
+       "organic_shape_fit", "organic_rim_mm", "organic_net_skin"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -262,6 +262,10 @@ OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::str
                   thinnest);
     json::fail(w + ".organic_width_mm", b);
   }
+  // O15, O16: the app's defaults when not given: the rim at its default width, the net skin on.
+  a.rim_mm = num(in, "organic_rim_mm", -1.0, w);
+  if (!std::isfinite(a.rim_mm)) json::fail(w + ".organic_rim_mm", "must be a number (0 none, below 0 the default)");
+  a.net_skin = flag(in, "organic_net_skin", true, w);
   return a;
 }
 
@@ -869,6 +873,9 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     r.spacing_smallest_mm = out.spacing_smallest_mm;
     r.spacing_largest_mm = out.spacing_largest_mm;
     r.spacing_mean_mm = out.spacing_mean_mm;
+    r.rim_mm = out.rim_mm;
+    r.net_struts = out.net_struts;
+    r.net_mm = out.net_mm;
     for (const Bar& b : out.bars.bars)
       r.weave_bars += std::find(weave_regions.begin(), weave_regions.end(), b.region) != weave_regions.end();
     if (!out.empty_regions.empty()) {
@@ -1043,7 +1050,7 @@ FileResult run_file_job(const std::string& job_path, const std::string& out_dir,
 
 std::string file_result_json(const FileResult& r) {
   std::string o;
-  char b[512];
+  char b[1024];
   const auto count = [](std::size_t n) { return static_cast<unsigned long long>(n); };
   o += "{\n";
   o += std::string("  \"ok\": ") + (r.ok ? "true" : "false") + ",\n";
@@ -1142,11 +1149,13 @@ std::string file_result_json(const FileResult& r) {
     const ShallowTable& t = r.shallow;
     std::snprintf(b, sizeof b,
                   "  \"organic\": {\"ms_trace\": %.1f, \"spacing_used_mm\": {\"smallest\": %.9g, \"largest\": %.9g, "
-                  "\"mean\": %.9g},\n    \"shallow_bars\": %llu, \"held_both\": %llu, \"held_one\": %llu, "
+                  "\"mean\": %.9g},\n    \"rim_mm\": %.9g, \"net_struts\": %llu, \"net_mm\": %.9g,"
+                  "\n    \"shallow_bars\": %llu, \"held_both\": %llu, \"held_one\": %llu, "
                   "\"held_none\": %llu,\n    \"kept_any_length\": %llu, \"weave_left_unheld\": %llu, \"stands_added\": %llu,"
                   "\n    \"feet\": %llu, \"feet_held\": %llu, \"feet_mm3\": %.9g,"
                   "\n    \"runs\": %llu, \"longest_run_mm\": %.9g, \"run_bands\": [",
-                  r.ms_trace, r.spacing_smallest_mm, r.spacing_largest_mm, r.spacing_mean_mm, count(t.bars),
+                  r.ms_trace, r.spacing_smallest_mm, r.spacing_largest_mm, r.spacing_mean_mm, r.rim_mm,
+                  count(r.net_struts), r.net_mm, count(t.bars),
                   count(t.held_both), count(t.held_one), count(t.held_none),
                   count(t.kept_any_length), count(t.weave_left_unheld), count(t.stands_added),
                   count(r.made.mesh.feet), count(r.made.mesh.feet_held), r.made.mesh.feet_mm3, count(t.runs),

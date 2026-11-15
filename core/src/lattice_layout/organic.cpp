@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 
 #include "topopt/grading.hpp"
@@ -296,6 +297,7 @@ std::vector<Strand> trace_strands(const Domain& domain, int region, const Tensor
       any = true;
     }
     stats->spacing_mean_mm = sum / static_cast<double>(asked.candidates);
+    stats->spacing_median_mm = lat.report.achieved_spacing_median_mm;
   }
 
   // The spacing the tracer used under a point; 0 off its candidates.
@@ -345,7 +347,22 @@ Outcome Session::lay_organic(const Settings& settings, const TensorField& field,
     none.cancelled = true;
     return none;
   }
-  ready_domain(settings);
+  // O15: the Organic rim is a "where" setting of the domain the weave is laid in. The trace runs with the rim's band
+  // IN (the old run's ruling G): its curves cross the band and are cut where the solid begins (weave_bars: Solid, run
+  // in by their width), so they end embedded in the rim.
+  bool any_weave = false;
+  for (const Settings::RegionAsk& r : settings.regions) any_weave = any_weave || (r.weave && r.role == Role::Lattice);
+  WeaveFinish finish;
+  if (any_weave)
+    finish.rim_mm = ask.rim_mm < 0.0 ? organic_rim_default_mm(settings.bead_mm, field.spacing) : ask.rim_mm;
+  ready_domain(settings, finish.rim_mm);
+  std::unique_ptr<Domain> without_rim;
+  if (finish.rim_mm > 0.0) {
+    DomainSpec spec = domain_->spec();
+    spec.weave_rim_mm = 0.0;
+    without_rim = std::make_unique<Domain>(*measure_, std::move(spec));
+  }
+  const Domain& trace_in = without_rim ? *without_rim : *domain_;
   const auto t0 = std::chrono::steady_clock::now();
   std::vector<Strand> strands;
   double smallest = 0.0, largest = 0.0, sum = 0.0;
@@ -353,7 +370,8 @@ Outcome Session::lay_organic(const Settings& settings, const TensorField& field,
   for (const Region& r : domain_->spec().regions) {
     if (r.role != Role::Lattice || !r.weave) continue;
     OrganicTraceStats st;
-    std::vector<Strand> traced = trace_strands(*domain_, r.id, field, ask, &st);
+    std::vector<Strand> traced = trace_strands(trace_in, r.id, field, ask, &st);
+    if (ask.net_skin && st.spacing_median_mm > 0.0) finish.net_reach.push_back({r.id, st.spacing_median_mm});   // O16
     if (st.candidates > 0) {
       smallest = candidates ? std::min(smallest, st.spacing_smallest_mm) : st.spacing_smallest_mm;
       largest = candidates ? std::max(largest, st.spacing_largest_mm) : st.spacing_largest_mm;
@@ -363,8 +381,9 @@ Outcome Session::lay_organic(const Settings& settings, const TensorField& field,
     strands.insert(strands.end(), std::make_move_iterator(traced.begin()), std::make_move_iterator(traced.end()));
   }
   const double ms_trace = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-  Outcome out = lay_with(settings, &strands, threads, stop);
+  Outcome out = lay_with(settings, &strands, threads, stop, &finish);
   if (!out.cancelled) {
+    out.rim_mm = finish.rim_mm;
     out.strands = strands.size();
     out.ms_trace = ms_trace;
     out.spacing_smallest_mm = smallest;

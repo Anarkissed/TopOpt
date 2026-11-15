@@ -1,8 +1,10 @@
 // Lattice rebuild, stage E: what the app holds for one part (rule P2). See lattice_layout.hpp.
 #include "topopt/lattice_layout.hpp"
+#include "topopt/lattice_layout_organic.hpp"
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 
 namespace topopt::lattice_layout {
@@ -12,7 +14,7 @@ double ms_since(std::chrono::steady_clock::time_point t0) {
 }
 // Every setting that decides WHERE lattice goes, written out exactly: two settings with
 // the same text read the part the same way.
-std::string where_text(const Settings& s) {
+std::string where_text(const Settings& s, double weave_rim_mm) {
   std::string out;
   char buf[96];
   auto num = [&](double v) { std::snprintf(buf, sizeof buf, "%.17g,", v); out += buf; };
@@ -32,6 +34,10 @@ std::string where_text(const Settings& s) {
     for (int f : p.faces) whole(f);
     out += ";";
   }
+  if (weave_rim_mm != 0.0) {   // O15 (written only when on: with no Organic rim the text is as it was)
+    out += "O";
+    num(weave_rim_mm);
+  }
   return out;
 }
 }  // namespace
@@ -49,8 +55,8 @@ Outcome Session::lay_weave(const Settings& settings, const std::vector<Strand>& 
   return lay_with(settings, &strands, threads, stop);
 }
 
-void Session::ready_domain(const Settings& settings) {
-  const std::string where = where_text(settings);
+void Session::ready_domain(const Settings& settings, double weave_rim_mm) {
+  const std::string where = where_text(settings, weave_rim_mm);
   if (!domain_ || where != where_) {
     DomainSpec spec;
     spec.start = settings.start;
@@ -59,6 +65,7 @@ void Session::ready_domain(const Settings& settings) {
     spec.min_wall_mm = settings.min_wall_mm;
     spec.rim_mm = settings.rim_mm;
     spec.cover_mm = settings.cover_mm;
+    spec.weave_rim_mm = weave_rim_mm;
     empty_regions_.clear();
     for (const Settings::RegionAsk& r : settings.regions) {
       bool ok = false;
@@ -78,12 +85,12 @@ void Session::ready_domain(const Settings& settings) {
 }
 
 Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* strands, int threads,
-                          const std::atomic<bool>* stop) {
+                          const std::atomic<bool>* stop, const WeaveFinish* finish) {
   Outcome out;
   const auto given_up = [] { Outcome none; none.cancelled = true; return none; };
   if (stop && stop->load(std::memory_order_relaxed)) return given_up();
   auto t0 = std::chrono::steady_clock::now();
-  ready_domain(settings);
+  ready_domain(settings, finish ? finish->rim_mm : 0.0);
   out.read_again = unread_;   // a new domain, or one whose first reading was given up part way
   out.empty_regions = empty_regions_;
   // The domain watches the flag for this lay only (the flag need not outlive the call).
@@ -159,6 +166,8 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
       domain_->check_stop();
       if (settings.skin) lay_skin(out.bars, *domain_, settings.skin_spec);
       domain_->check_stop();
+      if (finish && !finish->net_reach.empty()) lay_net_skin(out.bars, *domain_, finish->net_reach);   // O16
+      domain_->check_stop();
       if (settings.drop_loose) {
         drop_loose_bars(out.bars);
         out.stepped_edges = stepped_edges(out.bars);
@@ -166,6 +175,12 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
       } else {
         out.pieces = count_pieces(out.bars, *domain_, nullptr, nullptr, &out.layout);
       }
+      for (const Bar& b : out.bars.bars)
+        if (b.net) {
+          ++out.net_struts;
+          out.net_mm += std::sqrt((b.b.x - b.a.x) * (b.b.x - b.a.x) + (b.b.y - b.a.y) * (b.b.y - b.a.y) +
+                                  (b.b.z - b.a.z) * (b.b.z - b.a.z));
+        }
       out.ms_bars = ms_since(t0);
     }
     domain_->check_stop();   // set during the last step: the answer is "cancelled", never a layout nobody waits for
