@@ -1485,49 +1485,24 @@ static void test_organic_shape_fit_key() {
   CHECK(refused);
 }
 
-// O15, O16, the file job's keys for the Organic rim and the net skin: organic_rim_mm (not given: below 0, the app's
-// default width) and organic_net_skin (not given: on); a wrong value is refused by name. Neither changes a job with no
-// weave region (the same file, byte for byte). With a weave the result's "organic" object carries rim_mm, net_struts
-// and net_mm as laid.
+// OR30, the file job's Finish for a weave region: the regular layout keys ("rim_mm", "cover_mm", "skin",
+// "skin_width_mm"). The Organic rim's and net skin's own keys are gone: "organic_rim_mm" and "organic_net_skin" are
+// refused as unknown keys, by name. A weave under the top of a 30 x 20 x 16 box (its outline on the part's sides, facing
+// air): with no Finish keys (None) no net strut; "skin": true lays the net (in lattice_file.json's "organic" object);
+// "rim_mm": -1 makes the same file as None, byte for byte (the outline faces air: no rim).
 static void test_organic_finish_keys() {
   const std::string head = R"({"mode": "lattice_file", "model": "a.step", "tensor": "stress.tensor",
       "layout": {"region_ids": [3], "region_no_lattice": [0], "region_depth_mm": [4], "region_expand_mm": [0],
                  "region_face_counts": [1], "region_faces": [1], "region_weave": [true], "organic_spacing_mm": 4)";
-  const FileJob d = parse_file_job(head + "}}");
-  CHECK(d.organic.rim_mm < 0.0 && d.organic.net_skin);
-  const FileJob o = parse_file_job(head + R"(, "organic_rim_mm": 0, "organic_net_skin": false}})");
-  CHECK(o.organic.rim_mm == 0.0 && !o.organic.net_skin);
-  const FileJob w = parse_file_job(head + R"(, "organic_rim_mm": 1.5, "organic_net_skin": true}})");
-  CHECK(w.organic.rim_mm == 1.5 && w.organic.net_skin);
   const auto refused = [&](const std::string& keys, const char* name) {
     try { (void)parse_file_job(head + keys + "}}"); } catch (const FileJobError& x) { return has(x.what(), name); }
     return false;
   };
-  CHECK(refused(R"(, "organic_net_skin": "yes")", "organic_net_skin"));
-  CHECK(refused(R"(, "organic_rim_mm": "wide")", "organic_rim_mm"));
+  CHECK(refused(R"(, "organic_rim_mm": 1.5)", "organic_rim_mm"));
+  CHECK(refused(R"(, "organic_net_skin": true)", "organic_net_skin"));
+  const FileJob k = parse_file_job(head + R"(, "rim_mm": -1, "cover_mm": 0, "skin": true, "skin_width_mm": 1.1}})");
+  CHECK(k.settings.rim_mm == -1.0 && k.settings.skin && k.settings.skin_spec.width_mm == 1.1);
   if (!mesh_available()) return;
-  // No weave region: the same file with the keys, either way.
-  TensorField f;
-  f.spacing = 1.0;
-  f.nx = 30; f.ny = 30; f.nz = 12;
-  f.voigt.assign(6 * 30 * 30 * 12, 0.0);
-  for (std::size_t e = 0; e < 30 * 30 * 12; ++e) f.voigt[6 * e] = 5.0;
-  const std::string a = kTmp + "/lattice_file_finish_a.stl", b = kTmp + "/lattice_file_finish_b.stl";
-  const FileResult x = make_lattice_file(box_model(30, 30, 12), parse_file_job(kBlockJob), a);
-  bool same = x.ok && !slurp(a).empty();
-  for (const char* keys : {R"("organic_rim_mm": 1.5, "organic_net_skin": true)", R"("organic_rim_mm": 0, "organic_net_skin": false)"}) {
-    std::string text = kBlockJob;
-    const std::string at = "\"min_cells_across\": 1";
-    text.replace(text.find(at), at.size(), at + ", \"region_weave\": [false], \"organic_spacing_mm\": 4, " + keys);
-    FileJob with = parse_file_job(text);
-    with.tensor_field = std::make_shared<TensorField>(f);
-    std::remove(b.c_str());
-    const FileResult y = make_lattice_file(box_model(30, 30, 12), with, b);
-    same = same && y.ok && slurp(a) == slurp(b) && y.rim_mm == 0.0 && y.net_struts == 0;
-  }
-  std::printf("organic rim and net skin keys, no weave region: the same file %d\n", same ? 1 : 0);
-  CHECK(same);
-  // A weave under the top of a 30 x 20 x 16 box: the defaults lay the app's rim and a net; off, neither.
   TensorField g;
   g.spacing = 1.0;
   g.nx = 30; g.ny = 20; g.nz = 16;
@@ -1537,25 +1512,30 @@ static void test_organic_finish_keys() {
       "layout": {"min_strut_lines": 2, "region_ids": [1], "region_no_lattice": [0], "region_depth_mm": [12], "region_expand_mm": [0],
                  "region_face_counts": [1], "region_faces": [1], "region_weave": [true], "organic_spacing_mm": 4,
                  "organic_width_mm": 0.9)";
-  FileResult on, off;
-  for (int k = 0; k < 2; ++k) {
-    FileJob j = parse_file_job(weave_job + (k ? R"(, "organic_rim_mm": 0, "organic_net_skin": false}})" : "}}"));
+  const std::string a = kTmp + "/lattice_file_finish_a.stl", b = kTmp + "/lattice_file_finish_b.stl";
+  FileResult none, skin, rim;
+  for (int n = 0; n < 3; ++n) {
+    FileJob j = parse_file_job(weave_job + (n == 0 ? "}}" : n == 1 ? R"(, "skin": true}})" : R"(, "rim_mm": -1}})"));
     j.tensor_field = std::make_shared<TensorField>(g);
-    std::remove(b.c_str());
-    (k ? off : on) = make_lattice_file(box_model(30, 20, 16), j, b);
+    const std::string& out = n == 2 ? b : a;
+    std::remove(out.c_str());
+    (n == 0 ? none : n == 1 ? skin : rim) = make_lattice_file(box_model(30, 20, 16), j, out);
+    if (n == 0) std::rename(a.c_str(), (a + ".none").c_str());
   }
-  const std::string text = file_result_json(on);
+  const bool rim_same = none.ok && rim.ok && !slurp(a + ".none").empty() && slurp(a + ".none") == slurp(b);
+  const std::string text = file_result_json(skin);
   char want[200];
-  std::snprintf(want, sizeof want, "\"rim_mm\": %.9g, \"net_struts\": %llu, \"net_mm\": %.9g,", on.rim_mm,
-                static_cast<unsigned long long>(on.net_struts), on.net_mm);
-  std::printf("organic rim and net skin, the defaults: rim %.4f mm, %zu net struts (%.1f mm), file ok %d clean %d; off: rim %.4f, %zu "
-              "net struts, file ok %d\n", on.rim_mm, on.net_struts, on.net_mm, on.ok ? 1 : 0, on.made.print_clean ? 1 : 0, off.rim_mm,
-              off.net_struts, off.ok ? 1 : 0);
-  CHECK(on.ok && off.ok && on.rim_mm == std::max(0.5 * std::sqrt(3.0 * 3.14159265358979323846) * 0.45, 1.0) && on.net_struts > 0 &&
-        on.net_mm > 0.0);
-  CHECK(off.rim_mm == 0.0 && off.net_struts == 0 && off.net_mm == 0.0);
-  CHECK(has(text, want) && has(file_result_json(off), "\"rim_mm\": 0, \"net_struts\": 0, \"net_mm\": 0,"));
+  std::snprintf(want, sizeof want, "},\n    \"net_struts\": %llu, \"net_mm\": %.9g,",
+                static_cast<unsigned long long>(skin.net_struts), skin.net_mm);
+  std::printf("weave Finish by the regular keys: None %zu net struts, file ok %d; Skin %zu net struts (%.1f mm), file ok %d clean %d; "
+              "Rim (edges facing air) the same file as None %d\n", none.net_struts, none.ok ? 1 : 0, skin.net_struts, skin.net_mm,
+              skin.ok ? 1 : 0, skin.made.print_clean ? 1 : 0, rim_same ? 1 : 0);
+  CHECK(none.ok && none.net_struts == 0 && none.net_mm == 0.0);
+  CHECK(has(file_result_json(none), "},\n    \"net_struts\": 0, \"net_mm\": 0,"));
+  CHECK(skin.ok && skin.net_struts > 0 && skin.net_mm > 0.0 && has(text, want));
+  CHECK(rim_same);
   std::remove(a.c_str());
+  std::remove((a + ".none").c_str());
   std::remove(b.c_str());
 }
 

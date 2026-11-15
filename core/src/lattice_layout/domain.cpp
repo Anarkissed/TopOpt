@@ -74,33 +74,6 @@ Domain::Domain(const PartMeasure& measure, DomainSpec spec)
     for (const auto& t : s.face.triangles) g->faces.triangles.push_back({t[0] + base, t[1] + base, t[2] + base});
   }
   for (const Region& r : spec_.regions) near_shell_.emplace_back(r.shell, r.shell_depth_mm);
-  // O15: for each flat weave region, with an Organic rim, the part's side surface: the triangles whose normal is more
-  // than 60 degrees from the region's direction (|n . N| < 0.5, the old run's test on a step's direction).
-  weave_side_.resize(spec_.regions.size());
-  near_weave_side_.resize(spec_.regions.size());
-  if (spec_.weave_rim_mm > 0.0)
-    for (std::size_t i = 0; i < spec_.regions.size(); ++i) {
-      const Region& r = spec_.regions[i];
-      if (r.role != Role::Lattice || !r.weave || r.is_shell()) continue;
-      const Vec3& nr = r.prism.normal;
-      const double ln = std::sqrt(dot(nr, nr));
-      if (!(ln > 0.0)) continue;
-      const TriangleMesh& part = measure_->mesh();
-      TriangleMesh& side = weave_side_[i];
-      for (const auto& t : part.triangles) {
-        const Vec3& a = part.vertices[static_cast<std::size_t>(t[0])];
-        const Vec3& b = part.vertices[static_cast<std::size_t>(t[1])];
-        const Vec3& c = part.vertices[static_cast<std::size_t>(t[2])];
-        const Vec3 u = sub(b, a), v = sub(c, a);
-        const Vec3 n{u.y * v.z - u.z * v.y, u.z * v.x - u.x * v.z, u.x * v.y - u.y * v.x};
-        const double l = std::sqrt(dot(n, n));
-        if (!(l > 0.0) || std::fabs(dot(n, nr)) / (l * ln) >= 0.5) continue;
-        const int base = static_cast<int>(side.vertices.size());
-        side.vertices.insert(side.vertices.end(), {a, b, c});
-        side.triangles.push_back({base, base + 1, base + 2});
-      }
-      near_weave_side_[i] = Near(side, spec_.weave_rim_mm);
-    }
   sure_.resize(spec_.regions.size());
   for (std::size_t i = 0; i < spec_.regions.size(); ++i) {
     const Region& r = spec_.regions[i];
@@ -192,8 +165,6 @@ Domain::Probe::Probe(const Domain& d) : d_(&d), part_(d.measure_->probe()) {
   for (const SkinGroup& g : d.skin_groups_) skin_groups_.emplace_back(g.faces);
   shells_.reserve(d.spec_.regions.size());
   for (const Region& r : d.spec_.regions) shells_.emplace_back(r.shell);
-  weave_sides_.reserve(d.weave_side_.size());
-  for (const TriangleMesh& m : d.weave_side_) weave_sides_.emplace_back(m);
 }
 
 double Domain::Probe::skin_gap(const Vec3& p) const {
@@ -355,46 +326,6 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
         }
       }
     }
-  }
-
-  // O15: the Organic rim, in a flat weave region. Within its width of the part's side surface, or of the region's own
-  // outline in the face's plane where one step past the outline (at the same depth) is not lattice: outside the part
-  // (it stands where the edge faces air), or inside it and in no Lattice region (and, under All lattice, in a No
-  // lattice region). Lattice beyond is a seam and carries none.
-  const double wrim = spec.weave_rim_mm;
-  if (wrim > 0.0 && owner && owner->weave && !owner->is_shell()) {
-    const std::size_t oi = static_cast<std::size_t>(owner - spec.regions.data());
-    bool rim = !d_->weave_side_[oi].triangles.empty() && d_->near_weave_side_[oi].maybe(p) &&
-               weave_sides_[oi].unsigned_distance(p) < wrim;
-    if (!rim) {
-      const double e = region_edge_distance(*owner, p);
-      if (e < wrim) {
-        const ClearanceGeometry& g = owner->prism;
-        const double h = 0.01;
-        const double du = region_edge_distance(*owner, Vec3{p.x + g.u.x * h, p.y + g.u.y * h, p.z + g.u.z * h}) -
-                          region_edge_distance(*owner, Vec3{p.x - g.u.x * h, p.y - g.u.y * h, p.z - g.u.z * h});
-        const double dw = region_edge_distance(*owner, Vec3{p.x + g.w.x * h, p.y + g.w.y * h, p.z + g.w.z * h}) -
-                          region_edge_distance(*owner, Vec3{p.x - g.w.x * h, p.y - g.w.y * h, p.z - g.w.z * h});
-        const double l = std::sqrt(du * du + dw * dw);
-        if (l > 0.0) {
-          const double go = e + std::max(0.2, 0.5 * wrim);
-          const Vec3 out{p.x - (g.u.x * du + g.w.x * dw) / l * go, p.y - (g.u.y * du + g.w.y * dw) / l * go,
-                         p.z - (g.u.z * du + g.w.z * dw) / l * go};
-          bool lattice_beyond = false;
-          if (part_.inside(out)) {
-            bool no_lattice = false;
-            for (std::size_t i = 0; i < spec.regions.size() && !lattice_beyond; ++i) {
-              if (!holds_at(i, out, nullptr)) continue;
-              if (spec.regions[i].role == Role::Lattice) lattice_beyond = true;
-              else no_lattice = true;
-            }
-            if (!lattice_beyond && spec.start == Start::AllLattice && !no_lattice) lattice_beyond = true;
-          }
-          rim = !lattice_beyond;
-        }
-      }
-    }
-    if (rim) return {Why::Rim, id};
   }
 
   // D8: lattice was asked for here; can the wall hold it?

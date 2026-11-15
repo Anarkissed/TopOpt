@@ -46,21 +46,12 @@ struct OrganicAsk {
   double reference_mpa = 0.0;     // > 0: a stated stress for the top of the law. 0: the percentile below (the old run)
   double percentile = 0.95;       // read when reference_mpa is 0 (the old run's grading.aesthetic_percentile)
   bool shape_fit = true;          // O13 (the old run's grading.organic_shape_fit, on when the job does not say)
-  // O15, the Organic rim (an option): 0 = none; > 0 = that width, mm; below 0 = the width the app sends when its
-  // "Solid rim at edges" switch is on (organic_rim_default_mm). A "where" setting: changing it reads the part again.
-  // 0 here so a caller that does not ask is unchanged; the file job's default is below 0 (the app's).
-  double rim_mm = 0.0;
-  // O16, the Organic net skin (an option): on, a net of struts over each open face of every weave region
-  // (lay_net_skin). false here; the file job's default is on (the app's).
-  bool net_skin = false;
+  // OR30: the Finish is the regular lattices' own (Settings::rim_mm, cover_mm, skin, skin_spec), nothing here. Rim and
+  // Covered are "where" settings of the domain the weave is traced and laid in; Skin on lays the net skin (O16).
 };
 
-// O15: the rim the app sends with its switch on (LatticeSettings.organicSolidRimForJobMM, OrganicSizeCheck.floor):
-// the printability floor, max(1.535 x the line width, one voxel of the stress result's grid). 1.535 is
-// 0.5 x sqrt(3 pi), the app's printFloorPerBead.
-double organic_rim_default_mm(double bead_mm, double voxel_mm);
-
-// O16, the net skin (the old finish step "Skin", organic_lattice.cpp, read for its rules and numbers only). For each
+// O16, the net skin: Finish Skin (Settings::skin) on a weave region (the old finish step "Skin", organic_lattice.cpp,
+// read for its rules and numbers only). For each
 // (region, reach) asked, over that weave region's open face (the part's surface where the region's lattice meets it,
 // read a hair inside the nearest point of the surface):
 //   landings: the ends of the region's bars within their own half width + 0.5 x reach of that open face (the old
@@ -73,11 +64,12 @@ double organic_rim_default_mm(double bead_mm, double voxel_mm);
 //   each landing wants its 3 nearest such partners (the old net_skin_degree); a pair wanted both ways is joined; then
 //     every landing with fewer than 1, then fewer than 2, joins takes its nearest partner within 1.5 reach (0.55
 //     reach at least), by the same tests; a pair is joined once.
-// A join is a weave bar (`net`): as wide as the thinner landing, `cell` the reach, its ends Node exactly at the two
+// A join is a weave bar (`net`): as wide as the thinner landing (or `width_mm` when above 0: SkinSpec::width_mm), `cell` the reach, its ends Node exactly at the two
 // landings; a landing that is a cut end on the surface (Surface) has landed (Joined into the net strut). Nothing is
 // pruned here: drop_loose_bars and the writer's bridge rules (O6 to O10) judge net struts as every bar.
 // Returns the number of net struts laid. The same for any number of threads (it runs on one).
-std::size_t lay_net_skin(Bars& bars, const Domain& domain, const std::vector<std::pair<int, double>>& reach);
+std::size_t lay_net_skin(Bars& bars, const Domain& domain, const std::vector<std::pair<int, double>>& reach,
+                         double width_mm = 0.0);
 
 // O12: the spacing handed to the tracer, one per voxel of the field's grid (0 off the candidates), with the candidates
 // (voxels whose CENTRE is lattice of `region`). It is the old run's field for an ordinary Traced job (run_job.cpp,

@@ -253,12 +253,6 @@ struct DomainSpec {
   // instead, on every face; the cells start behind it as they do behind a Protect skin.
   // 0 = no cover. < 0 = the default thickness, two line widths.
   double cover_mm = 0.0;
-  // O15, the Organic rim (an option; Session::lay_organic sets it from OrganicAsk::rim_mm): in a flat WEAVE region,
-  // the lattice within this distance of the region's outline in the face's plane is solid (Why::Rim): within it of
-  // the prism's own outline where what lies beyond is not lattice (the part's solid or air; not a seam with lattice),
-  // and within it of the part's SIDE surface (a triangle whose normal is more than 60 degrees from the region's
-  // direction). Not along the region's direction: the open face and the floor carry none. 0 = none.
-  double weave_rim_mm = 0.0;
 };
 
 enum class Why : std::uint8_t {
@@ -331,7 +325,6 @@ class Domain {
     std::vector<MeshDistance> skins_;
     std::vector<MeshDistance> skin_groups_;   // one per depth (Domain::skin_groups_)
     std::vector<MeshDistance> shells_;   // one per region, empty mesh for a prism
-    std::vector<MeshDistance> weave_sides_;   // O15: one per region, empty but for a flat weave region with a rim
   };
   Probe probe() const { return Probe(*this); }
 
@@ -390,9 +383,6 @@ class Domain {
   struct SkinGroup { double depth_mm = 0.0; TriangleMesh faces; };
   std::vector<SkinGroup> skin_groups_;
   std::vector<Near> near_shell_;   // one per region (empty for a prism), within its depth
-  // O15: per region, the part's side surface for a flat weave region's rim (empty otherwise), and where it is near.
-  std::vector<TriangleMesh> weave_side_;
-  std::vector<Near> near_weave_side_;
   // For a flat region: squares of its face that lie wholly inside its edge, or wholly
   // outside it (the distance to the edge at a square's middle is more than half the
   // square's diagonal). A point over such a square is answered without measuring to the
@@ -988,8 +978,9 @@ class SolidAt {
 // notch, nor through the part). Ends of struts that lie in no single plane are joined to
 // each other by the same three tests.
 // A cut end that gets a skin bar has landed (End::Joined). Returns the number of skin bars.
+// The bars of a weave region (Organic) are not read: a weave's skin is its net skin (O16, lay_net_skin).
 struct SkinSpec {
-  double width_mm = 0.0;      // 0 = as wide as the thinner of the two struts it joins
+  double width_mm = 0.0;      // 0 = as wide as the thinner of the two struts it joins (O16: a weave's net struts too)
   double reach_cells = 1.2;
   // Round a CURVED wall a straight bar between two points of the surface leaves the surface by the bow of the curve:
   // into the air on a hollow wall (a pocket), into the part on a bulging one. A bar may bow by this share of its own
@@ -1106,9 +1097,7 @@ struct Outcome {
   double ms_trace = 0.0;
   // O12: the spacing the trace used over every weave region's candidates (smallest, largest, mean); 0 with no trace.
   double spacing_smallest_mm = 0.0, spacing_largest_mm = 0.0, spacing_mean_mm = 0.0;
-  // O15, O16 (lay_organic only): the Organic rim's width used (0: none), and the net skin's struts in `bars` and
-  // their length, mm.
-  double rim_mm = 0.0;
+  // O16 (lay_organic only): the net skin's struts in `bars` and their length, mm.
   std::size_t net_struts = 0;
   double net_mm = 0.0;
 };
@@ -1141,15 +1130,14 @@ class Session {
   const Domain* domain() const { return domain_.get(); }
 
  private:
-  // O15, O16: what lay_organic adds: the Organic rim (a "where" setting) and, per weave region, the net skin's reach.
+  // O16: what lay_organic adds with Finish Skin on: per weave region, the net skin's reach.
   struct WeaveFinish {
-    double rim_mm = 0.0;
     std::vector<std::pair<int, double>> net_reach;   // (region, reach mm); empty: no net skin
   };
   Outcome lay_with(const Settings& settings, const std::vector<Strand>* strands, int threads, const std::atomic<bool>* stop,
                    const WeaveFinish* finish = nullptr);
-  // The domain for these settings' "where" (and the Organic rim): kept when it is the same, made again when it is not.
-  void ready_domain(const Settings& settings, double weave_rim_mm = 0.0);
+  // The domain for these settings' "where": kept when it is the same, made again when it is not.
+  void ready_domain(const Settings& settings);
   StepModel model_;
   std::size_t open_edges_ = 0;
   std::unique_ptr<PartMeasure> measure_;

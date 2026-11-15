@@ -1,4 +1,4 @@
-// Lattice rebuild, Organic: the rim's default width (O15) and the net skin (O16). See lattice_layout_organic.hpp.
+// Lattice rebuild, Organic: the net skin (O16), Finish Skin on a weave region. See lattice_layout_organic.hpp.
 // The old finish step (organic_lattice.cpp, "THE NET-SKIN") is read for its rules and numbers only; nothing of it is
 // called. Its constants are the old header's own, so the numbers cannot drift.
 #include "topopt/lattice_layout_organic.hpp"
@@ -38,12 +38,8 @@ Key key_of(const Vec3& p) { return {p.x, p.y, p.z}; }
 
 }  // namespace
 
-double organic_rim_default_mm(double bead_mm, double voxel_mm) {
-  const double per_bead = 0.5 * std::sqrt(3.0 * 3.14159265358979323846);   // 1.535
-  return std::max(bead_mm > 0.0 ? per_bead * bead_mm : 0.0, std::max(0.0, voxel_mm));
-}
-
-std::size_t lay_net_skin(Bars& bars, const Domain& domain, const std::vector<std::pair<int, double>>& reach_of) {
+std::size_t lay_net_skin(Bars& bars, const Domain& domain, const std::vector<std::pair<int, double>>& reach_of,
+                         double width_mm) {
   const Domain::Probe probe = domain.probe();
   const PartMeasure::Probe& part = probe.part();
   // The surface's inward normal at `p`: the depth's gradient, read `h` either side (the old sdf_normal at 2 r).
@@ -172,7 +168,7 @@ std::size_t lay_net_skin(Bars& bars, const Domain& domain, const std::vector<std
       Bar net;
       net.a = L[i].p;
       net.b = L[j].p;
-      net.width = std::min(L[i].width, L[j].width);
+      net.width = width_mm > 0.0 ? width_mm : std::min(L[i].width, L[j].width);
       net.cell = reach;
       net.region = region;
       net.net = true;

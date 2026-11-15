@@ -14,7 +14,7 @@ double ms_since(std::chrono::steady_clock::time_point t0) {
 }
 // Every setting that decides WHERE lattice goes, written out exactly: two settings with
 // the same text read the part the same way.
-std::string where_text(const Settings& s, double weave_rim_mm) {
+std::string where_text(const Settings& s) {
   std::string out;
   char buf[96];
   auto num = [&](double v) { std::snprintf(buf, sizeof buf, "%.17g,", v); out += buf; };
@@ -34,10 +34,6 @@ std::string where_text(const Settings& s, double weave_rim_mm) {
     for (int f : p.faces) whole(f);
     out += ";";
   }
-  if (weave_rim_mm != 0.0) {   // O15 (written only when on: with no Organic rim the text is as it was)
-    out += "O";
-    num(weave_rim_mm);
-  }
   return out;
 }
 }  // namespace
@@ -55,8 +51,8 @@ Outcome Session::lay_weave(const Settings& settings, const std::vector<Strand>& 
   return lay_with(settings, &strands, threads, stop);
 }
 
-void Session::ready_domain(const Settings& settings, double weave_rim_mm) {
-  const std::string where = where_text(settings, weave_rim_mm);
+void Session::ready_domain(const Settings& settings) {
+  const std::string where = where_text(settings);
   if (!domain_ || where != where_) {
     DomainSpec spec;
     spec.start = settings.start;
@@ -65,7 +61,6 @@ void Session::ready_domain(const Settings& settings, double weave_rim_mm) {
     spec.min_wall_mm = settings.min_wall_mm;
     spec.rim_mm = settings.rim_mm;
     spec.cover_mm = settings.cover_mm;
-    spec.weave_rim_mm = weave_rim_mm;
     empty_regions_.clear();
     for (const Settings::RegionAsk& r : settings.regions) {
       bool ok = false;
@@ -90,7 +85,7 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
   const auto given_up = [] { Outcome none; none.cancelled = true; return none; };
   if (stop && stop->load(std::memory_order_relaxed)) return given_up();
   auto t0 = std::chrono::steady_clock::now();
-  ready_domain(settings, finish ? finish->rim_mm : 0.0);
+  ready_domain(settings);
   out.read_again = unread_;   // a new domain, or one whose first reading was given up part way
   out.empty_regions = empty_regions_;
   // The domain watches the flag for this lay only (the flag need not outlive the call).
@@ -166,7 +161,8 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
       domain_->check_stop();
       if (settings.skin) lay_skin(out.bars, *domain_, settings.skin_spec);
       domain_->check_stop();
-      if (finish && !finish->net_reach.empty()) lay_net_skin(out.bars, *domain_, finish->net_reach);   // O16
+      if (settings.skin && finish && !finish->net_reach.empty())   // O16: Finish Skin on a weave region
+        lay_net_skin(out.bars, *domain_, finish->net_reach, settings.skin_spec.width_mm);
       domain_->check_stop();
       if (settings.drop_loose) {
         drop_loose_bars(out.bars);

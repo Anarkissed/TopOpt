@@ -96,9 +96,8 @@ struct FileJob {
   std::shared_ptr<const TensorField> tensor_field;
   // The trace's ask (layout keys "organic_spacing_mm", or "organic_spacing_min_mm" with "organic_spacing_max_mm" and
   // "organic_spacing_exponent" (O12); "organic_width_mm"; the reference is the layout's "reference_mpa" and
-  // "percentile"; "organic_shape_fit" (O13), true when not given); read only when a region is a weave. O15, O16:
-  // "organic_rim_mm" (below 0 when not given: the app's default rim) and "organic_net_skin" (true when not given: the
-  // app's default).
+  // "percentile"; "organic_shape_fit" (O13), true when not given); read only when a region is a weave. The Finish is
+  // the regular layout keys' (OR30: "rim_mm", "cover_mm", "skin", "skin_width_mm").
   OrganicAsk organic;
   Settings settings;
   FileOptions options;
@@ -192,8 +191,7 @@ struct FileResult {
   double ms_trace = 0.0;
   // O12: the spacing the trace used over the weave regions' candidates (Outcome::spacing_*), mm; 0 with no weave.
   double spacing_smallest_mm = 0.0, spacing_largest_mm = 0.0, spacing_mean_mm = 0.0;
-  // O15, O16: the Organic rim's width used (0: none) and the net skin's struts laid and their length, mm.
-  double rim_mm = 0.0;
+  // O16: the net skin's struts laid (Finish Skin on a weave region) and their length, mm.
   std::size_t net_struts = 0;
   double net_mm = 0.0;
   ShallowTable shallow;

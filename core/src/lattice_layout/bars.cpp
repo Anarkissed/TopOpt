@@ -433,6 +433,10 @@ std::size_t lay_skin(Bars& bars, const Domain& domain, const SkinSpec& spec) {
     }
   };
   std::vector<Tip> tips;
+  // A weave region's skin is its net skin (O16): its bars are not read here.
+  std::vector<int> weave;
+  for (const Region& r : domain.spec().regions)
+    if (r.weave) weave.push_back(r.id);
   {
     std::map<PlaneKey, int> planes;
     std::map<std::pair<PointKey, int>, std::size_t> at;
@@ -440,6 +444,7 @@ std::size_t lay_skin(Bars& bars, const Domain& domain, const SkinSpec& spec) {
       for (int end = 0; end < 2; ++end) {
         const Bar& b = bars.bars[i];
         if ((end ? b.end_b : b.end_a) != Bar::End::Surface || b.skin) continue;
+        if (!weave.empty() && std::find(weave.begin(), weave.end(), b.region) != weave.end()) continue;
         const Vec3& p = end ? b.b : b.a;
         int plane = -1;
         Vec3 n = b.flat;
