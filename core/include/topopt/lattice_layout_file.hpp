@@ -60,6 +60,7 @@ struct FileReport {
   std::vector<int> found_per_pass;   // mid-air starts + one-ended overhangs, pass by pass
   std::vector<Vec3> left_out_at;     // where struts were left out (the preview can mark them)
   std::vector<MeshSpec::Post> posts; // the posts added (the preview can draw them)
+  std::size_t stands_added = 0;      // of `posts`, those under a weave's long shallow runs (O8)
 };
 
 // THE ONE PLACE THE MESH IS MADE for a file: the open space of the layout's cells, then
@@ -120,8 +121,12 @@ bool write_tensor_file(const std::string& path, const TensorField& field);
 //   of its bars'.
 //   Bands of run length: to 5 mm, over 5 to 10, over 10 to 20, over 20.
 //   What the layer check did with each run (from the file's make-check-make loop): left out when any of its bars was
-//   left out (its lowest point at a place of `drop_at`, read as the file writer reads it); else post when a post's
-//   top is within half the bar's width + 0.5 mm of one of its bars; else kept.
+//   left out (its lowest point at a place of `drop_at`, read as the file writer reads it, or by the owner's bridge
+//   rules: weave_holds after those places); else post when a post's top is within half the bar's width + 0.5 mm of
+//   one of its bars; else kept.
+//   The owner's bridge rules (O6 to O9, weave_holds after `drop_at`): `kept_any_length`, the shallow bars kept with
+//   both ends held, at any length; `weave_left_unheld`, those left out because an end leads to nothing.
+//   `stands_added` (O8) is not read from the bars: the file job fills it from the loop's report.
 struct ShallowTable {
   std::size_t bars = 0;                        // shallow bars of the weave
   std::size_t held_both = 0, held_one = 0, held_none = 0;
@@ -129,6 +134,7 @@ struct ShallowTable {
   double longest_run_mm = 0.0;
   struct Band { std::size_t runs = 0, kept = 0, left_out = 0, post = 0; };
   Band bands[4];                               // to 5 mm, 5 to 10, 10 to 20, over 20
+  std::size_t kept_any_length = 0, weave_left_unheld = 0, stands_added = 0;
 };
 ShallowTable shallow_bar_table(const Bars& bars, const std::vector<int>& regions, const std::vector<Vec3>& drop_at,
                                const std::vector<MeshSpec::Post>& posts);

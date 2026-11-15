@@ -445,6 +445,13 @@ LayerReport check_layers(const TriangleMesh& mesh, const LayerSpec& spec) {
     for (LayerReport::OneEnded& o : f.one_ended) { o.anything_below = below(o.x, o.y, k, &o.below_z); rep.one_ended.push_back(o); }
     for (LayerReport::OneEnded& o : f.long_bridges) { o.anything_below = below(o.x, o.y, k, &o.below_z); rep.long_bridges.push_back(o); }
   }
+  // What lies straight below each place asked: from the highest layer whose middle is under the height given.
+  for (const Vec3& q : spec.below_of) {
+    LayerReport::Below b;
+    const int k = std::min(nl, std::max(0, static_cast<int>(std::ceil((q.z - zmin - 1e-5) / L - 0.5))));
+    b.anything = below(q.x, q.y, k, &b.z);
+    rep.below.push_back(b);
+  }
   return rep;
 }
 
@@ -461,15 +468,64 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
   const Carved carved = carve_part(part, layout, open, ms.grow_mm, ms.stop);
   rep.ms_carve = carved.ms;
   const double half_layer = 0.5 * (spec.layers.layer_mm > 0.0 ? spec.layers.layer_mm : 0.2);
+  // The owner's bridge rules for a weave (O5 to O10); with no weave region nothing below changes.
+  std::vector<int> weave_regions;
+  for (const Layout::Weave& w : layout.weave) weave_regions.push_back(w.region);
+  std::vector<Vec3> stands_asked;   // O8: the middles of long stretches already asked about (posted or not)
   for (int pass = 1; pass <= most; ++pass) {
     rep.passes = pass;
     mesh = build_mesh(part, domain, layout, bars, carved, ms, &rep.mesh);
     if (!rep.mesh.ok) { mesh = TriangleMesh{}; break; }
-    rep.layers = check_layers(mesh, spec.layers);
+    LayerSpec layers = spec.layers;
+    WeaveHolds holds;
+    std::vector<WeaveStand> stands;
+    if (!weave_regions.empty()) {
+      // The bars the writer kept on this pass (weave_holds after `drop_at`), and their runs' long stretches.
+      holds = weave_holds(bars, weave_regions, bars_present(bars, ms.drop_at), ms.bridge_rise);
+      for (const WeaveStand& w : weave_stands_wanted(bars, weave_regions, holds.kept, ms.weave_stand_every_mm, ms.bridge_rise)) {
+        bool before = false;
+        for (const Vec3& p : stands_asked) before = before || (p.x == w.at.x && p.y == w.at.y && p.z == w.at.z);
+        if (before) continue;
+        stands.push_back(w);
+        layers.below_of.push_back({w.at.x, w.at.y, w.below_z});
+      }
+    }
+    rep.layers = check_layers(mesh, layers);
+    const std::vector<LayerReport::Below> below = std::move(rep.layers.below);
+    rep.layers.below.clear();
+    if (!weave_regions.empty()) {
+      // O7: a shallow weave bar the rules keep is kept at any length: what the check finds ON it held at one end, or
+      // reaching past the limit, is not a finding (read on the bar as `drop_at` is: within its half width + 0.35 mm).
+      auto on_kept_shallow = [&](const LayerReport::OneEnded& o) {
+        for (std::size_t i = 0; i < bars.bars.size(); ++i) {
+          if (!holds.shallow[i] || !holds.kept[i]) continue;
+          const Bar& x = bars.bars[i];
+          const Vec3 d{x.b.x - x.a.x, x.b.y - x.a.y, x.b.z - x.a.z};
+          const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
+          const double t = l2 > 0 ? std::clamp(((o.x - x.a.x) * d.x + (o.y - x.a.y) * d.y + (o.z - x.a.z) * d.z) / l2, 0.0, 1.0) : 0.0;
+          const double ex = x.a.x + t * d.x - o.x, ey = x.a.y + t * d.y - o.y, ez = x.a.z + t * d.z - o.z;
+          if (std::sqrt(ex * ex + ey * ey + ez * ez) < 0.5 * x.width + 0.35) return true;
+        }
+        return false;
+      };
+      for (std::vector<LayerReport::OneEnded>* v : {&rep.layers.one_ended, &rep.layers.long_bridges})
+        v->erase(std::remove_if(v->begin(), v->end(), on_kept_shallow), v->end());
+    }
+    // O8: a post at the middle of each long stretch that has material straight below it, from that material up into
+    // the bar. With nothing below, the run stands as it is.
+    std::vector<MeshSpec::Post> stand_posts;
+    for (std::size_t i = 0; i < stands.size(); ++i) {
+      stands_asked.push_back(stands[i].at);
+      if (i < below.size() && below[i].anything)
+        stand_posts.push_back({stands[i].at.x, stands[i].at.y, stands[i].at.z, std::max(below[i].z, rep.layers.z_bed)});
+    }
     const int n = static_cast<int>(rep.layers.mid_air.size() + rep.layers.one_ended.size() + rep.layers.long_bridges.size());
     rep.found_per_pass.push_back(n);
-    if (n == 0) { rep.clean = true; break; }
-    if (pass == most) break;
+    if (n == 0 && stand_posts.empty()) { rep.clean = true; break; }
+    if (pass == most) { rep.clean = n == 0; break; }
+    for (const MeshSpec::Post& p : stand_posts) ms.posts.push_back(p);
+    rep.stands_added += stand_posts.size();
+    if (n == 0) { last = n; continue; }   // only the stands to add: made again with them
     auto post_all = [&] {
       for (const LayerReport::MidAir& m : rep.layers.mid_air)
         ms.posts.push_back({m.x, m.y, m.z, m.anything_below ? std::max(m.below_z, rep.layers.z_bed) : rep.layers.z_bed});

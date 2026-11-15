@@ -1113,6 +1113,13 @@ static void test_organic_job() {
     for (int k = 0; k < 4; ++k)
       std::printf("  %-8s %3zu runs: kept %zu, left out %zu, post %zu\n", names[k], r.shallow.bands[k].runs, r.shallow.bands[k].kept,
                   r.shallow.bands[k].left_out, r.shallow.bands[k].post);
+    // The owner's bridge rules (O6 to O9): the table carries what they did, and so does the file's json.
+    std::printf("organic job bridge rules: kept at any length %zu, left out leading to nothing %zu, stands added %zu; "
+                "the file's posts %zu, left out at %zu places, builds %d\n", r.shallow.kept_any_length,
+                r.shallow.weave_left_unheld, r.shallow.stands_added, r.made.posts.size(), r.made.left_out_at.size(), r.made.builds);
+    CHECK(r.shallow.kept_any_length == t.kept_any_length && r.shallow.weave_left_unheld == t.weave_left_unheld);
+    CHECK(has(text, "\"kept_any_length\": " + std::to_string(t.kept_any_length) + ", \"weave_left_unheld\": " +
+                        std::to_string(t.weave_left_unheld) + ", \"stands_added\": " + std::to_string(r.made.stands_added)));
   }
   for (const std::string& p : {model_path, face_overrides_sidecar_path(model_path), tensor_path, job_path, stl, result})
     std::remove(p.c_str());

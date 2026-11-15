@@ -94,6 +94,13 @@ struct MeshSpec {
   struct Post { double x = 0.0, y = 0.0, z_top = 0.0, z_bottom = 0.0; };
   std::vector<Post> posts;
   double post_mm = 0.9;
+  // O8, stands along the way (the owner's OR10: "a preference for stands along the way to keep it up"). A whole
+  // shallow run of a weave (stage 1c's run, of the bars the bridge rules keep) that goes farther than this between two
+  // stands gets one post at the middle of that stretch, when there is material straight below it (the post starts on
+  // that material); with none below it stands as it is. A stand is a joint where another kept bar meets the run, or
+  // where the run enters the solid. 0 = never. The number is the lead's (LatticeReview, 2026-11-14), not the owner's.
+  // Read by build_printable_mesh only.
+  double weave_stand_every_mm = 20.0;
   // Set, the work is given up between its steps and LayCancelled is thrown.
   const std::atomic<bool>* stop = nullptr;
 };
@@ -108,6 +115,9 @@ struct MeshReport {
   std::size_t drop_unanswered = 0; // `drop_at` places no strut answered for
   std::size_t posts = 0;
   double posts_mm = 0.0;
+  // The owner's bridge rules for a weave (O6, O7, O9; weave_holds): its shallow bars kept with both ends held, at any
+  // length, and those left out because an end is held by nothing kept. Both 0 with no weave region.
+  std::size_t kept_any_length = 0, weave_left_unheld = 0;
   double struts_mm3 = 0.0;         // joined and cut to the part
   double solid_mm3 = 0.0;          // the part less the open space
   std::size_t solid_pieces = 0;
@@ -127,6 +137,36 @@ struct MeshReport {
 };
 
 bool mesh_available();
+
+// ── THE OWNER'S BRIDGE RULES FOR A WEAVE (O6, O7, O9) ───────────────────────────
+// They apply ONLY to the shallow bars of a weave region (bar_is_bridge at `rise`, region one of `weave_regions`); every
+// other bar is kept here, and judged as before.
+//   O6, held: an end of such a bar is held when it is in the part's solid (Solid), or shares a joint with another bar
+//     that is itself kept: a Node end at exactly the point where a kept bar has an end, a Joined end in a bar
+//     (`into_a`, `into_b`) that is kept. A Surface or Loose end is held by nothing.
+//   O7, any length: a shallow weave bar with both ends held is kept, whatever its length and slope.
+//   O9, leads to nothing: one with an end not held is left out; then whatever it held is judged again, until nothing
+//     changes (a bar whose end lands on a bar that is left out is left out too). It is never given a post instead.
+// `present`: the bars still in the file (the layer check's `drop_at` leaves some out first); empty = all of them.
+// The writer (build_mesh) leaves out what this leaves out; the layer check's loop reads the same answer.
+struct WeaveHolds {
+  std::vector<char> kept;         // per bar of `bars`: 1 kept (absent bars are 0)
+  std::vector<char> shallow;      // per bar: a shallow bar of a weave region
+  std::size_t kept_any_length = 0, left_unheld = 0;
+};
+WeaveHolds weave_holds(const Bars& bars, const std::vector<int>& weave_regions, const std::vector<char>& present = {},
+                       double rise = kBridgeRise);
+// The bars a list of `drop_at` places leaves in the file, as build_mesh reads it (per bar: 1 present).
+std::vector<char> bars_present(const Bars& bars, const std::vector<Vec3>& drop_at);
+// O8: where a weave's whole shallow runs (of the bars `kept` keeps) go farther than `every_mm` between stands, the
+// middle of each such stretch, on the run's centre line (`width`: the bar's there; `below_z`: the lowest point of the
+// bar within 0.45 mm round it, where material under it is looked for). Runs as stage 1c's table chains them: joints
+// where exactly two kept shallow weave bars end at one point and go on in line within 15 degrees. A stand is a joint of
+// the run where an end of it is Solid or Joined, or another kept bar has an end, or where another kept bar's Joined end
+// lands in one of its bars. A run with no stand (a closed ring tied to nothing) has no stretch. In bar order.
+struct WeaveStand { Vec3 at{}; double width = 0.0, below_z = 0.0; };
+std::vector<WeaveStand> weave_stands_wanted(const Bars& bars, const std::vector<int>& weave_regions,
+                                            const std::vector<char>& kept, double every_mm, double rise = kBridgeRise);
 
 // The part with every cell's open space taken out of it: the slow half of the mesh, and
 // the half that does not depend on the struts. Whoever makes the mesh more than once (the
@@ -180,6 +220,9 @@ struct LayerSpec {
   // them and printed clean, so nothing is changed for them; every file reports how many.
   double thin_under_mm = 0.6;
   double thin_min_mm2 = 0.15;
+  // Places (x, y, and the height under which to look) to ask what material lies straight below: the same reading as
+  // a post's foot (the highest layer under it with anything within 0.45 mm). Answered in LayerReport::below.
+  std::vector<Vec3> below_of;
   int threads = 0;
   const std::atomic<bool>* stop = nullptr;
 };
@@ -197,6 +240,9 @@ struct LayerReport {
   double longest_reach_mm = 0.0;
   std::size_t thin_islands = 0;      // rule (d): islands under `thin_under_mm` thick, all layers together
   int thin_layers = 0;               // layers that have at least one
+  // One per LayerSpec::below_of: anything below, and the middle of the highest layer that has it.
+  struct Below { bool anything = false; double z = 0.0; };
+  std::vector<Below> below;
   // The bed face is flat (no sloped or curved underside in the first layer worth the name,
   // and the first layer rests on the bed), nothing starts in mid-air, nothing is one-ended.
   bool bed_flat() const { return sloped_mm2 <= 0.5 && bed_mm2 >= 0.98 * first_layer_mm2; }
@@ -208,6 +254,11 @@ LayerReport check_layers(const TriangleMesh& mesh, const LayerSpec& spec = Layer
 // in mid-air and nothing is one-ended. What the check finds is first answered by leaving
 // out the struts (and specks of solid) that start there; when that stops helping, by a
 // post from the first material below. This is the loop his v2 stand file came out of.
+// With a weave region, the owner's bridge rules (O5 to O10): the writer leaves out the shallow weave bars that lead
+// to nothing (weave_holds); a one-ended overhang or a bridge reaching past `reach_limit_mm` found ON a kept shallow
+// weave bar (within its half width + 0.35 mm, as `drop_at` is read) is not a finding: it is kept at any length (O7);
+// a stretch of a shallow run longer than MeshSpec::weave_stand_every_mm between stands gets one post at its middle
+// where material lies straight below (O8). Everything else, mid-air starts first of all, is judged as before (O10).
 struct PrintableSpec {
   MeshSpec mesh;       // its drop_at and posts are where the loop starts from (normally empty)
   LayerSpec layers;
@@ -223,6 +274,7 @@ struct PrintableReport {
   std::vector<int> found_per_pass;   // mid-air starts + one-ended overhangs, pass by pass
   std::vector<Vec3> drop_at;         // what the loop ended with: the same call with these gives the mesh in one pass
   std::vector<MeshSpec::Post> posts;
+  std::size_t stands_added = 0;      // O8: of `posts`, those put under a weave's long shallow runs
   double ms_carve = 0.0;             // the part carved, once for all the passes
   double ms = 0.0;
 };

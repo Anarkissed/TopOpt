@@ -106,7 +106,7 @@ The file matches the preview only if these are the values the preview was laid w
 
 ### `mesh` (all optional; leave it out unless there is a reason)
 
-`pitch_mm` (0.25: how finely each cell's shape is read), `bar_sides` (12), `block_mm` (12), `grow_mm` (0.02), `clean_mm` (0.004), `part_mm` (0.006), `fill_under_mm3` (-1: a closed space inside the material smaller than one smallest cell is filled; lattice sealed in behind skins is larger and stays), `bridge_rise` (0.5: a strut flatter than 30 degrees is printed as a bridge; 0 = every strut round), `post_mm` (0.9). They are core's `MeshSpec`. For the print check: `layer_mm` (0.2), `pixel_mm` (0.05), `most_passes` (10), `leave_out` (true: a strut that would start in mid-air is left out first, posts come second; false: posts only), `keep_if_not_clean` (false).
+`pitch_mm` (0.25: how finely each cell's shape is read), `bar_sides` (12), `block_mm` (12), `grow_mm` (0.02), `clean_mm` (0.004), `part_mm` (0.006), `fill_under_mm3` (-1: a closed space inside the material smaller than one smallest cell is filled; lattice sealed in behind skins is larger and stays), `bridge_rise` (0.5: a strut flatter than 30 degrees is printed as a bridge; 0 = every strut round), `post_mm` (0.9), `weave_stand_every_mm` (20: Organic, rule O8: a whole shallow run of a weave that goes farther than this between stands gets one post at the middle of that stretch where material lies straight below it; 0 = never; under 0 is refused, `job_unreadable`. The number is the lead's, not the owner's). They are core's `MeshSpec`. For the print check: `layer_mm` (0.2), `pixel_mm` (0.05), `most_passes` (10), `leave_out` (true: a strut that would start in mid-air is left out first, posts come second; false: posts only), `keep_if_not_clean` (false).
 
 ## What comes back
 
@@ -142,6 +142,7 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
     "sloped_underside_mm2": 0, "layers": 50, "thin_islands": 0, "thin_layers": 0,
     "found_per_pass": [0], "left_out_at": [], "posts": []},
   "organic": {"ms_trace": 0, "shallow_bars": 0, "held_both": 0, "held_one": 0, "held_none": 0,
+    "kept_any_length": 0, "weave_left_unheld": 0, "stands_added": 0,
     "runs": 0, "longest_run_mm": 0, "run_bands": [
       {"band": "to 5 mm", "runs": 0, "kept": 0, "left_out": 0, "post": 0},
       {"band": "5 to 10 mm", "runs": 0, "kept": 0, "left_out": 0, "post": 0},
@@ -168,7 +169,8 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
 - `organic` (Organic, Traced; all 0 with no weave region): `ms_trace` is the trace's time, ms (every weave region; it is in none of `ms`'s steps, only in its `total`). The rest is THE SHALLOW-BAR TABLE the owner's bridge rules (OR8 to OR10) need, from the weave's bars as laid (`shallow_bar_table` in `lattice_layout_file.hpp`):
   - `shallow_bars`: the weave's bars lying under 30 degrees (`bar_is_bridge`). `held_both`, `held_one`, `held_none`: how many of their two ends are held (an end is held when it is a node, in the solid, or joined to another bar; an end on the part's surface or loose in the lattice is not).
   - `runs`: WHOLE runs: shallow bars chained through joints where exactly two shallow bars end at one point and go on in line within 15 degrees (a crossing of two level strands is four, and ends both runs there). A shallow bar that chains to nothing is a run of one. `longest_run_mm`: the longest run, the sum of its bars' lengths.
-  - `run_bands`: the runs by length (to 5 mm, over 5 to 10, over 10 to 20, over 20) and what the layer check did with each run: `left_out` when any of its bars was left out (its lowest point at one of `print_check.left_out_at`, read as the file writer reads it), else `post` when a post's top is within half the bar's width + 0.5 mm of one of its bars, else `kept`.
+  - `kept_any_length`, `weave_left_unheld`, `stands_added`: the owner's bridge rules (01-rules.md, O6 to O9): the shallow bars kept because both ends are held (in the solid, or on a bar that is itself kept), at any length; those left out because an end leads to nothing (never posted instead); the posts put under long shallow runs as stands (O8; they are in `print_check.posts` too).
+  - `run_bands`: the runs by length (to 5 mm, over 5 to 10, over 10 to 20, over 20) and what the layer check did with each run: `left_out` when any of its bars was left out (its lowest point at one of `print_check.left_out_at`, read as the file writer reads it, or by the bridge rules, O9), else `post` when a post's top is within half the bar's width + 0.5 mm of one of its bars, else `kept`.
   - The table is filled when the mesh was made, so a `would_not_print` refusal carries it too.
 - `ms`: `carve` is the part with the open cells taken out, done once; `struts`, `solid` and `finish` are the LAST pass's (each pass repeats them; `total` is everything).
 - `detail` is the technical message behind a failure, for a log. It is not for the maker.

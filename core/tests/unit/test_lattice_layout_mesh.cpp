@@ -1382,6 +1382,217 @@ static void test_weave_sealed() {
   CHECK(same_mesh(mesh, build_mesh(pm, d, layout, bars, open, one)));
 }
 
+// ── The owner's bridge rules for a weave (O5 to O10) ──────────────────────────
+// A made-up 40 x 40 x 20 block, a weave region under its top face 30 x 30 (solid walls 5 mm thick all round), `depth`
+// deep: 20.5 runs through to the bed (nothing under the lattice), 14 leaves a solid floor 6 mm thick. Bars made from
+// made-up strands (weave_bars), or built by hand. `weave` false: the same block and open space, but the layout names
+// no weave region, so every bar is judged as a cube-lattice bar.
+struct BridgeBlock {
+  PartMeasure pm;
+  Domain d;
+  Layout layout;
+  OpenSpace open;
+  static DomainSpec spec(double depth) {
+    DomainSpec s;
+    s.min_strut_lines = 2.0;
+    s.regions = {face_region(1, {20, 20, 20}, {0, 0, -1}, 15, 15, depth, 0.0)};
+    s.regions[0].weave = true;
+    return s;
+  }
+  explicit BridgeBlock(double depth)
+      : pm(weld_mesh(box(40, 40, 20))), d(pm, spec(depth)), layout(lay_cells(d, CellSpec{})), open(read_open_space(d, layout, 0.25)) {
+    for (Layout::Weave& w : layout.weave) w.spacing_mm = 4.0;
+  }
+  Layout as_cube() const {
+    Layout l = layout;
+    l.weave.clear();
+    return l;
+  }
+};
+static Strand level_strand(Vec3 a, Vec3 b) { return weave_strand({a, b}, 1); }
+static Bar hand_bar(Vec3 a, Bar::End ea, Vec3 b, Bar::End eb, int into_b = -1) {
+  Bar x;
+  x.a = a; x.b = b; x.width = 0.9; x.cell = 4.0; x.region = 1; x.end_a = ea; x.end_b = eb; x.into_b = into_b;
+  return x;
+}
+static bool material_at(const TriangleMesh& mesh, const Vec3& p) {
+  PartMeasure file(weld_mesh(mesh, 1e-6));
+  return file.probe().inside(p);
+}
+static void say_bridges(const char* what, const PrintableReport& rep) {
+  std::printf("bridges %s: %zu bars written (%zu bridges), kept any length %zu, left unheld %zu, left out at places %zu; "
+              "%d builds, found per pass", what, rep.mesh.bars, rep.mesh.bridges, rep.mesh.kept_any_length,
+              rep.mesh.weave_left_unheld, rep.mesh.bars_left_out, rep.passes);
+  for (int f : rep.found_per_pass) std::printf(" %d", f);
+  std::printf("; posts %zu (stands %zu)", rep.posts.size(), rep.stands_added);
+  for (const MeshSpec::Post& p : rep.posts) std::printf(" [%.2f %.2f %.2f..%.2f]", p.x, p.y, p.z_bottom, p.z_top);
+  std::printf("; mid-air %zu, one-ended %zu, long bridges %zu, longest reach %.2f mm, clean %d\n", rep.layers.mid_air.size(),
+              rep.layers.one_ended.size(), rep.layers.long_bridges.size(), rep.layers.longest_reach_mm, rep.clean ? 1 : 0);
+}
+
+// O7, O8, O10 (tests 1, 6, 8): a level weave bar 30 mm long between the pocket's two walls, nothing under it, is kept
+// with no post; the same bar judged as a cube-lattice bar is not (the 5 mm reach rule still bites).
+static void test_weave_bridge_any_length() {
+  const BridgeBlock k(20.5);
+  const Bars bars = weave_bars(k.d, {level_strand({2, 20, 10}, {38, 20, 10})});
+  CHECK(bars.bars.size() == 1);
+  if (bars.bars.size() != 1) return;
+  CHECK(bars.bars[0].end_a == Bar::End::Solid && bars.bars[0].end_b == Bar::End::Solid);
+  // The same bar as a cube-lattice bar: today's rules, a bridge reaching 15 mm past what holds it.
+  PrintableReport cube;
+  (void)build_printable_mesh(k.pm, k.d, k.as_cube(), bars, k.open, PrintableSpec{}, &cube);
+  say_bridges("level 30 mm, as a cube bar", cube);
+  CHECK(cube.mesh.ok && !cube.found_per_pass.empty() && cube.found_per_pass[0] >= 1);
+  CHECK(cube.posts.size() + cube.mesh.bars_left_out >= 1);   // posted or left out
+  CHECK(cube.mesh.kept_any_length == 0 && cube.mesh.weave_left_unheld == 0 && cube.stands_added == 0);
+  // As a weave bar: kept at any length, no post (nothing below it), nothing found.
+  PrintableReport rep;
+  const TriangleMesh mesh = build_printable_mesh(k.pm, k.d, k.layout, bars, k.open, PrintableSpec{}, &rep);
+  say_bridges("level 30 mm, weave", rep);
+  CHECK(rep.mesh.ok && rep.clean && rep.passes == 1);
+  CHECK(rep.mesh.kept_any_length == 1 && rep.mesh.weave_left_unheld == 0 && rep.mesh.bars_left_out == 0);
+  CHECK(rep.mesh.bridges == 1 && rep.posts.empty() && rep.stands_added == 0);
+  CHECK(rep.layers.mid_air.empty() && rep.layers.one_ended.empty() && rep.layers.long_bridges.empty());
+  CHECK(rep.layers.longest_reach_mm > 10.0);   // the check still measures it
+  CHECK(material_at(mesh, {20, 20, 10}) && material_at(mesh, {8, 20, 10}) && !material_at(mesh, {20, 20, 5}));
+  CHECK(read_mesh(mesh).shells == 1);
+}
+
+// O5 (test 2): the same bar sloping at 10 and at 25 degrees between the walls: kept, and its underside in the mesh is
+// one flat plane along the bar (the downward faces over its middle share one normal within 1 degree, square to the
+// bar's own line and its level side).
+static void test_weave_bridge_flat_underside() {
+  const BridgeBlock k(20.5);
+  const double t10 = std::tan(10.0 * 3.14159265358979323846 / 180.0), t25 = std::tan(25.0 * 3.14159265358979323846 / 180.0);
+  const Bars bars = weave_bars(k.d, {level_strand({2, 12, 7}, {38, 12, 7 + 36 * t10}), level_strand({2, 28, 2}, {38, 28, 2 + 36 * t25})});
+  CHECK(bars.bars.size() == 2);
+  if (bars.bars.size() != 2) return;
+  PrintableReport rep;
+  const TriangleMesh mesh = build_printable_mesh(k.pm, k.d, k.layout, bars, k.open, PrintableSpec{}, &rep);
+  say_bridges("sloping 10 and 25 degrees, weave", rep);
+  CHECK(rep.mesh.ok && rep.clean && rep.mesh.kept_any_length == 2 && rep.mesh.bridges == 2 && rep.mesh.weave_left_unheld == 0);
+  CHECK(rep.posts.empty() && rep.layers.mid_air.empty());
+  for (int q = 0; q < 2; ++q) {
+    const Bar& b = bars.bars[static_cast<std::size_t>(q)];
+    const double y = q == 0 ? 12.0 : 28.0;
+    Vec3 d{b.b.x - b.a.x, b.b.y - b.a.y, b.b.z - b.a.z};
+    const double l = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+    d = {d.x / l, d.y / l, d.z / l};
+    const Vec3 want{d.z * (d.x > 0 ? 1.0 : -1.0), 0.0, -std::fabs(d.x)};   // square to the bar, in its upright plane, down
+    long faces = 0, off = 0;
+    double worst = 0.0;
+    for (const auto& t : mesh.triangles) {
+      const Vec3 &p = mesh.vertices[static_cast<std::size_t>(t[0])], &r = mesh.vertices[static_cast<std::size_t>(t[1])],
+                 &s = mesh.vertices[static_cast<std::size_t>(t[2])];
+      const Vec3 c{(p.x + r.x + s.x) / 3, (p.y + r.y + s.y) / 3, (p.z + r.z + s.z) / 3};
+      if (c.x < 12 || c.x > 28 || std::fabs(c.y - y) > 0.6) continue;
+      const Vec3 e1{r.x - p.x, r.y - p.y, r.z - p.z}, e2{s.x - p.x, s.y - p.y, s.z - p.z};
+      Vec3 n{e1.y * e2.z - e1.z * e2.y, e1.z * e2.x - e1.x * e2.z, e1.x * e2.y - e1.y * e2.x};
+      const double ln = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+      if (ln < 1e-12) continue;
+      n = {n.x / ln, n.y / ln, n.z / ln};
+      if (n.z > -0.05) continue;   // the faces that look down: the underside
+      ++faces;
+      const double deg = std::acos(std::clamp(n.x * want.x + n.y * want.y + n.z * want.z, -1.0, 1.0)) * 180.0 / 3.14159265358979323846;
+      worst = std::max(worst, deg);
+      off += deg > 1.0;
+    }
+    std::printf("bridges flat underside at %s degrees: %ld downward faces over its middle, worst %.4f degrees off one plane\n",
+                q == 0 ? "10" : "25", faces, worst);
+    CHECK(faces >= 2 && off == 0);
+  }
+}
+
+// O8 (test 3): the 30 mm level bar over a solid floor 6 mm below: one post at its middle with the default 20 mm; none
+// with 0; none when a kept crossing bar already stands under its middle.
+static void test_weave_bridge_stands() {
+  const BridgeBlock k(14.0);
+  const Bars bars = weave_bars(k.d, {level_strand({2, 20, 12.45}, {38, 20, 12.45})});
+  CHECK(bars.bars.size() == 1);
+  if (bars.bars.size() != 1) return;
+  {
+    PrintableReport rep;
+    const TriangleMesh mesh = build_printable_mesh(k.pm, k.d, k.layout, bars, k.open, PrintableSpec{}, &rep);
+    say_bridges("level 30 mm over a floor, stand every 20", rep);
+    CHECK(rep.mesh.ok && rep.clean && rep.mesh.kept_any_length == 1);
+    CHECK(rep.stands_added == 1 && rep.posts.size() == 1);
+    if (rep.posts.size() == 1) {
+      const MeshSpec::Post& p = rep.posts[0];
+      CHECK(std::fabs(p.x - 20.0) < 0.01 && std::fabs(p.y - 20.0) < 1e-9 && p.z_top == 12.45);
+      CHECK(p.z_bottom > 5.0 && p.z_bottom < 6.0);   // it starts on the floor
+    }
+    CHECK(rep.layers.mid_air.empty() && rep.layers.one_ended.empty() && rep.layers.long_bridges.empty());
+    CHECK(material_at(mesh, {20, 20, 9}) && !material_at(mesh, {12, 20, 9}));
+  }
+  {
+    PrintableSpec never;
+    never.mesh.weave_stand_every_mm = 0.0;
+    PrintableReport rep;
+    (void)build_printable_mesh(k.pm, k.d, k.layout, bars, k.open, never, &rep);
+    say_bridges("level 30 mm over a floor, stands off", rep);
+    CHECK(rep.mesh.ok && rep.clean && rep.posts.empty() && rep.stands_added == 0 && rep.layers.mid_air.empty());
+  }
+  {
+    // A strand rising from the floor through the bar's middle: the crossing is a stand, 15.9 mm from each end.
+    Bars crossed = weave_bars(k.d, {level_strand({2, 20, 12.45}, {38, 20, 12.45}), level_strand({20, 20, 3}, {20, 20, 21})});
+    const std::size_t joints = split_at_crossings(crossed);
+    CHECK(joints == 1 && crossed.bars.size() == 4);
+    PrintableReport rep;
+    (void)build_printable_mesh(k.pm, k.d, k.layout, crossed, k.open, PrintableSpec{}, &rep);
+    say_bridges("level 30 mm over a floor, crossed at its middle", rep);
+    CHECK(rep.mesh.ok && rep.clean && rep.mesh.kept_any_length == 2 && rep.posts.empty() && rep.stands_added == 0);
+    CHECK(rep.layers.mid_air.empty());
+  }
+}
+
+// O9 (tests 4, 5): a shallow bar held at one end only is left out before the check, counted, never posted; one whose
+// far end lands on a bar that is itself left out is left out too (held means held by something kept).
+static void test_weave_bridge_leads_to_nothing() {
+  const BridgeBlock k(20.5);
+  {
+    const Bars bars = weave_bars(k.d, {level_strand({2, 20, 10}, {15, 20, 10})});
+    CHECK(bars.bars.size() == 1 && bars.bars[0].end_a == Bar::End::Solid && bars.bars[0].end_b == Bar::End::Loose);
+    PrintableReport rep;
+    const TriangleMesh mesh = build_printable_mesh(k.pm, k.d, k.layout, bars, k.open, PrintableSpec{}, &rep);
+    say_bridges("held at one end", rep);
+    CHECK(rep.mesh.ok && rep.clean && rep.passes == 1 && rep.found_per_pass == std::vector<int>{0});
+    CHECK(rep.mesh.weave_left_unheld == 1 && rep.mesh.kept_any_length == 0 && rep.mesh.bars == 0 && rep.mesh.bars_left_out == 0);
+    CHECK(rep.posts.empty() && rep.stands_added == 0 && rep.layers.mid_air.empty());
+    CHECK(!material_at(mesh, {10, 20, 10}));
+  }
+  // By hand: bar 0 from the wall to the air (held at one end); bar 1 from the wall to a point of bar 0 (Joined in it).
+  auto pair = [](bool far_end_held) {
+    Bars b;
+    b.bars.push_back(hand_bar({4.1, 26, 10}, Bar::End::Solid, {far_end_held ? 35.9 : 15.0, 26, 10},
+                              far_end_held ? Bar::End::Solid : Bar::End::Loose));
+    b.bars.push_back(hand_bar({4.1, 20, 10}, Bar::End::Solid, {12, 26, 10}, Bar::End::Joined, 0));
+    return b;
+  };
+  {
+    PrintableReport rep;
+    const TriangleMesh mesh = build_printable_mesh(k.pm, k.d, k.layout, pair(false), k.open, PrintableSpec{}, &rep);
+    say_bridges("landing on a bar left out", rep);
+    CHECK(rep.mesh.ok && rep.clean && rep.found_per_pass == std::vector<int>{0});
+    CHECK(rep.mesh.weave_left_unheld == 2 && rep.mesh.kept_any_length == 0 && rep.mesh.bars == 0);
+    CHECK(rep.posts.empty() && rep.layers.mid_air.empty());
+    CHECK(!material_at(mesh, {8.05, 23, 10}) && !material_at(mesh, {10, 26, 10}));
+  }
+  {
+    PrintableReport rep;
+    (void)build_printable_mesh(k.pm, k.d, k.layout, pair(true), k.open, PrintableSpec{}, &rep);
+    say_bridges("landing on a bar held at both ends", rep);
+    CHECK(rep.mesh.ok && rep.mesh.weave_left_unheld == 0 && rep.mesh.kept_any_length == 2 && rep.mesh.bars == 2);
+    CHECK(rep.layers.mid_air.empty());
+  }
+  // The same three bars as cube-lattice bars: judged as today (the check finds them, nothing is left out before it).
+  {
+    PrintableReport rep;
+    (void)build_printable_mesh(k.pm, k.d, k.as_cube(), pair(false), k.open, PrintableSpec{}, &rep);
+    say_bridges("landing on a bar left out, as cube bars", rep);
+    CHECK(rep.mesh.ok && rep.mesh.weave_left_unheld == 0 && !rep.found_per_pass.empty() && rep.found_per_pass[0] >= 1);
+  }
+}
+
 int main() {
   if (!mesh_available()) {
     MeshReport rep;
@@ -1392,6 +1603,10 @@ int main() {
     std::printf("no mesh library in this build: the writer says so (%d checks, %d failed)\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
   }
+  test_weave_bridge_any_length();
+  test_weave_bridge_flat_underside();
+  test_weave_bridge_stands();
+  test_weave_bridge_leads_to_nothing();
   test_weave_sealed();
   test_weave_file();
   test_block();

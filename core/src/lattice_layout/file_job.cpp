@@ -237,7 +237,7 @@ FileOptions options_from(const json::Value& in, const std::string& w) {
   json::reject_unknown(in,
                        {"pitch_mm", "bar_sides", "block_mm", "grow_mm", "clean_mm", "part_mm",
                         "fill_under_mm3", "bridge_rise", "post_mm", "layer_mm", "pixel_mm", "most_passes",
-                        "leave_out", "keep_if_not_clean"},
+                        "leave_out", "keep_if_not_clean", "weave_stand_every_mm"},
                        w);
   FileOptions o;
   o.pitch_mm = num(in, "pitch_mm", o.pitch_mm, w);
@@ -249,6 +249,8 @@ FileOptions options_from(const json::Value& in, const std::string& w) {
   o.mesh.fill_under_mm3 = num(in, "fill_under_mm3", o.mesh.fill_under_mm3, w);
   o.mesh.bridge_rise = num(in, "bridge_rise", o.mesh.bridge_rise, w);
   o.mesh.post_mm = num(in, "post_mm", o.mesh.post_mm, w);
+  o.mesh.weave_stand_every_mm = num(in, "weave_stand_every_mm", o.mesh.weave_stand_every_mm, w);
+  if (!(o.mesh.weave_stand_every_mm >= 0.0)) json::fail(w + ".weave_stand_every_mm", "must be 0 (never) or more");
   o.layers.layer_mm = num(in, "layer_mm", o.layers.layer_mm, w);
   o.layers.pixel_mm = num(in, "pixel_mm", o.layers.pixel_mm, w);
   o.most_passes = whole(in, "most_passes", o.most_passes, w);
@@ -389,6 +391,7 @@ TriangleMesh make_file_mesh(const Session& session, const Outcome& outcome, cons
   report.found_per_pass = made.found_per_pass;
   report.left_out_at = made.drop_at;
   report.posts = made.posts;
+  report.stands_added = made.stands_added;
   if (made.mesh.ok) {
     report.bed_contact_mm2 = made.layers.bed_mm2;
     report.midair_starts = static_cast<int>(made.layers.mid_air.size());
@@ -629,12 +632,20 @@ ShallowTable shallow_bar_table(const Bars& all, const std::vector<int>& regions,
       if (to_segment(Vec3{q.x, q.y, q.z_top}, x.a, x.b) < 0.5 * x.width + 0.5) return true;
     return false;
   };
+  // The owner's bridge rules on what the places leave (weave_holds): a bar they leave out is left out.
+  const WeaveHolds rules = weave_holds(all, regions, bars_present(all, drop_at));
+  t.kept_any_length = rules.kept_any_length;
+  t.weave_left_unheld = rules.left_unheld;
+  const auto unheld = [&](const Bar* x) {
+    const std::size_t i = static_cast<std::size_t>(x - all.bars.data());
+    return rules.shallow[i] && !rules.kept[i];
+  };
   struct Run { double mm = 0.0; bool out = false, post = false; };
   std::map<std::size_t, Run> runs;
   for (std::size_t i = 0; i < sb.size(); ++i) {
     Run& r = runs[find(i)];
     r.mm += length(*sb[i]);
-    r.out = r.out || left_out(*sb[i]);
+    r.out = r.out || left_out(*sb[i]) || unheld(sb[i]);
     r.post = r.post || under_post(*sb[i]);
   }
   t.runs = runs.size();
@@ -850,8 +861,10 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
                                      : r.made.mesh.why);
       return done();
     }
-    if (!weave_regions.empty())
+    if (!weave_regions.empty()) {
       r.shallow = shallow_bar_table(out.bars, weave_regions, r.made.left_out_at, r.made.posts);
+      r.shallow.stands_added = r.made.stands_added;
+    }
     if (!r.made.print_clean && !job.options.keep_if_not_clean) {
       const std::size_t mid = r.made.layers.mid_air.size(), one = r.made.layers.one_ended.size(),
                         far = r.made.layers.long_bridges.size();
@@ -1092,8 +1105,10 @@ std::string file_result_json(const FileResult& r) {
     const ShallowTable& t = r.shallow;
     std::snprintf(b, sizeof b,
                   "  \"organic\": {\"ms_trace\": %.1f, \"shallow_bars\": %llu, \"held_both\": %llu, \"held_one\": %llu, "
-                  "\"held_none\": %llu,\n    \"runs\": %llu, \"longest_run_mm\": %.9g, \"run_bands\": [",
-                  r.ms_trace, count(t.bars), count(t.held_both), count(t.held_one), count(t.held_none), count(t.runs),
+                  "\"held_none\": %llu,\n    \"kept_any_length\": %llu, \"weave_left_unheld\": %llu, \"stands_added\": %llu,"
+                  "\n    \"runs\": %llu, \"longest_run_mm\": %.9g, \"run_bands\": [",
+                  r.ms_trace, count(t.bars), count(t.held_both), count(t.held_one), count(t.held_none),
+                  count(t.kept_any_length), count(t.weave_left_unheld), count(t.stands_added), count(t.runs),
                   t.longest_run_mm);
     o += b;
     const char* names[4] = {"to 5 mm", "5 to 10 mm", "10 to 20 mm", "over 20 mm"};
