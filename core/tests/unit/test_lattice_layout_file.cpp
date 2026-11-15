@@ -1468,7 +1468,30 @@ static void test_organic_range_keys() {
   CHECK(has(text, b));
 }
 
+// O6 (joints a hair apart, test 9): in the shallow-bar table two level bars in line whose joint's two ends are 4e-6 mm
+// apart are one joint: one run, held at both ends. 2e-5 mm apart: two runs.
+static void test_shallow_table_hair_apart() {
+  for (double gap : {4e-6, 2e-5}) {
+    Bars b;
+    for (int q = 0; q < 2; ++q) {
+      Bar x;
+      x.a = q == 0 ? Vec3{4.1, 20, 10} : Vec3{20 + gap, 20, 10};
+      x.b = q == 0 ? Vec3{20, 20, 10} : Vec3{35.9, 20, 10};
+      x.width = 0.9; x.cell = 4.0; x.region = 1;
+      x.end_a = q == 0 ? Bar::End::Solid : Bar::End::Node;
+      x.end_b = q == 0 ? Bar::End::Node : Bar::End::Solid;
+      b.bars.push_back(x);
+    }
+    const ShallowTable t = shallow_bar_table(b, {1}, {}, {});
+    std::printf("shallow table, joint %.0e mm apart: %zu bars, %zu runs, longest %.2f mm, kept any length %zu, unheld %zu\n",
+                gap, t.bars, t.runs, t.longest_run_mm, t.kept_any_length, t.weave_left_unheld);
+    if (gap < 1e-5) CHECK(t.bars == 2 && t.runs == 1 && t.longest_run_mm > 31.7 && t.kept_any_length == 2 && t.weave_left_unheld == 0);
+    else CHECK(t.bars == 2 && t.runs == 2 && t.kept_any_length == 0 && t.weave_left_unheld == 2);
+  }
+}
+
 int main() {
+  test_shallow_table_hair_apart();
   test_tensor_file();
   test_organic_job();
   test_no_weave_same_file();

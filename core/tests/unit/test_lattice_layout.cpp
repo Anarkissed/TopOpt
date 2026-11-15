@@ -5920,12 +5920,85 @@ static void test_weave_session() {
   CHECK(plain.layout.cells == a.layout.cells && plain.bars.bars.size() == slab_bars);
 }
 
+// O2 (one bar per two points, test 16): of a weave's bars, those on the same two points (within a hundredth of a
+// micron, either way round) are one, of the widest width; its ends take the best-landed tag of the repeats; a Joined
+// end in a repeat lands in the bar kept; a cube region's bar on the same points, and a bar 2e-5 mm off, are not touched.
+static Bar repeat_bar(Vec3 a, Vec3 b, double w, int region, Bar::End ea, Bar::End eb, int into_b = -1) {
+  Bar x;
+  x.a = a; x.b = b; x.width = w; x.cell = 4.0; x.region = region; x.end_a = ea; x.end_b = eb; x.into_b = into_b;
+  return x;
+}
+static void test_weave_repeats() {
+  const Vec3 A{10, 10, 10}, B{14, 10, 11};
+  const Bar::End N = Bar::End::Node, J = Bar::End::Joined, S = Bar::End::Solid;
+  Bars b;
+  b.bars.push_back(repeat_bar(A, B, 0.9, 1, N, N));                                     // 0
+  b.bars.push_back(repeat_bar(B, {A.x + 5e-6, A.y, A.z}, 1.2, 1, N, N));                // 1 the other way round, 5e-6 off
+  b.bars.push_back(repeat_bar(A, B, 0.8, 1, N, J, 5));                                  // 2 its b end Joined in bar 5
+  b.bars.push_back(repeat_bar(A, B, 0.9, 2, N, N));                                     // 3 a cube region's
+  b.bars.push_back(repeat_bar({12, 14, 10}, {12, 10.2, 10.5}, 0.9, 1, S, J, 2));        // 4 Joined in repeat 2
+  b.bars.push_back(repeat_bar({14, 10, 9}, {14, 12, 13}, 0.9, 1, S, S));                // 5
+  b.bars.push_back(repeat_bar({A.x + 2e-5, A.y, A.z}, B, 0.9, 1, N, N));                // 6 2e-5 off: not a repeat
+  Bars untouched = b;
+  CHECK(merge_repeated_bars(untouched, {}) == 0 && bars_hash(untouched) == bars_hash(b) && untouched.repeats == 0);
+  const std::size_t merged = merge_repeated_bars(b, {1});
+  std::printf("weave repeats by hand: %zu merged, %zu bars left; kept width %.2f, ends %d %d (into %d); bar 4 into %d\n",
+              merged, b.bars.size(), b.bars.empty() ? 0.0 : b.bars[0].width, b.bars.empty() ? -1 : static_cast<int>(b.bars[0].end_a),
+              b.bars.empty() ? -1 : static_cast<int>(b.bars[0].end_b), b.bars.empty() ? -9 : b.bars[0].into_b,
+              b.bars.size() > 2 ? b.bars[2].into_b : -9);
+  CHECK(merged == 2 && b.repeats == 2 && b.bars.size() == 5 && b.dropped == 0);
+  if (b.bars.size() == 5) {
+    CHECK(b.bars[0].width == 1.2 && b.bars[0].a.x == A.x && b.bars[0].b.x == B.x);
+    CHECK(b.bars[0].end_a == N && b.bars[0].end_b == J && b.bars[0].into_b == 3);   // bar 5 is now 3
+    CHECK(b.bars[1].region == 2 && b.bars[1].width == 0.9);
+    CHECK(b.bars[2].end_b == J && b.bars[2].into_b == 0);
+    CHECK(b.bars[4].a.x == A.x + 2e-5);
+  }
+  // Through the session: the made-up weave with one of its rings laid twice (the second 1.1 mm wide) lays exactly the
+  // bars of the weave laid once, that ring's at 1.1 mm; no two weave bars on the same two points.
+  const StepModel model = weave_block();
+  Session session(model);
+  Settings s;
+  s.regions = {{1, Role::Lattice, {1}, 4.0, 0.0, true}, {2, Role::Lattice, {0}, 3.0, 0.0, false}};
+  s.cells = weave_cells();
+  s.struts.allow_quilt = true;
+  const std::vector<Strand> once = made_up_weave();
+  std::vector<Strand> twice = once;
+  Strand again = once[0];
+  again.width_mm.assign(again.points.size(), 1.1);
+  twice.push_back(again);
+  const Outcome a = session.lay_weave(s, once, 1);
+  const Outcome t = session.lay_weave(s, twice, 1);
+  auto weave_count = [](const Bars& x) {
+    std::size_t n = 0;
+    for (const Bar& y : x.bars) n += y.region == 1;
+    return n;
+  };
+  auto repeats_left = [](const Bars& x) {
+    std::size_t n = 0;
+    for (std::size_t i = 0; i < x.bars.size(); ++i)
+      for (std::size_t j = i + 1; j < x.bars.size(); ++j) {
+        const Bar &p = x.bars[i], &q = x.bars[j];
+        if (p.region != 1 || q.region != 1) continue;
+        n += (same_point(p.a, q.a) && same_point(p.b, q.b)) || (same_point(p.a, q.b) && same_point(p.b, q.a));
+      }
+    return n;
+  };
+  std::size_t wide = 0;
+  for (const Bar& y : t.bars.bars) wide += y.region == 1 && y.width == 1.1;
+  std::printf("weave repeats in the session: once %zu weave bars, ring twice %zu (merged %zu, %zu at 1.1 mm), repeats left %zu\n",
+              weave_count(a.bars), weave_count(t.bars), t.bars.repeats, wide, repeats_left(t.bars));
+  CHECK(weave_count(t.bars) == weave_count(a.bars) && t.bars.repeats > 0 && wide > 0 && repeats_left(t.bars) == 0);
+  CHECK(repeats_left(a.bars) == 0);
+}
+
 int main() {
   test_lay_bars_unchanged();
   test_weave_cells();
   test_weave_bars();
   test_weave_crossing_at_a_vertex();
   test_weave_session();
+  test_weave_repeats();
   test_cells_by_stress();
   test_by_stress();
   test_by_stress_session();

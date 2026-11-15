@@ -70,6 +70,7 @@ struct FileReport {
   std::vector<Vec3> left_out_at;     // where struts were left out (the preview can mark them)
   std::vector<MeshSpec::Post> posts; // the posts added (the preview can draw them)
   std::size_t stands_added = 0;      // of `posts`, those under a weave's long shallow runs (O8)
+  std::size_t weave_specks_ignored = 0, weave_held_ignored = 0;   // O10: PrintableReport's
 };
 
 // THE ONE PLACE THE MESH IS MADE for a file: the open space of the layout's cells, then
@@ -127,13 +128,14 @@ bool write_tensor_file(const std::string& path, const TensorField& field);
 // THE SHALLOW-BAR TABLE of a weave (for the owner's bridge rules, OR8 to OR10): of the bars of `regions` (the weave
 // regions), those lying under 30 degrees (bar_is_bridge), how they are held, and their WHOLE runs.
 //   Held: an end is held when it is Node, Solid or Joined (on another bar or in the solid); Surface and Loose are not.
-//   A whole run: shallow bars chained through joints where EXACTLY two shallow bars end (at one exact point) and they
+//   A whole run: shallow bars chained through joints where EXACTLY two shallow bars end (at one point: ends within a
+//   hundredth of a micron are one, O6) and they
 //   go on in line within 15 degrees. A shallow bar that chains to nothing is a run of one. A run's length is the sum
 //   of its bars'.
 //   Bands of run length: to 5 mm, over 5 to 10, over 10 to 20, over 20.
 //   What the layer check did with each run (from the file's make-check-make loop): left out when any of its bars was
-//   left out (its lowest point at a place of `drop_at`, read as the file writer reads it, or by the owner's bridge
-//   rules: weave_holds after those places); else post when a post's top is within half the bar's width + 0.5 mm of
+//   left out (by a place of `drop_at`, read as the file writer reads it: bars_present with `regions` at `layer_mm`, O10;
+//   or by the owner's bridge rules: weave_holds after those places); else post when a post's top is within half the bar's width + 0.5 mm of
 //   one of its bars; else kept.
 //   The owner's bridge rules (O6 to O9, weave_holds after `drop_at`): `kept_any_length`, the shallow bars kept with
 //   both ends held, at any length; `weave_left_unheld`, those left out because an end leads to nothing.
@@ -148,7 +150,7 @@ struct ShallowTable {
   std::size_t kept_any_length = 0, weave_left_unheld = 0, stands_added = 0;
 };
 ShallowTable shallow_bar_table(const Bars& bars, const std::vector<int>& regions, const std::vector<Vec3>& drop_at,
-                               const std::vector<MeshSpec::Post>& posts);
+                               const std::vector<MeshSpec::Post>& posts, double layer_mm = 0.2);
 
 // A job that cannot be read. what() is the reader's own words (which key, what is wrong).
 class FileJobError : public std::runtime_error {

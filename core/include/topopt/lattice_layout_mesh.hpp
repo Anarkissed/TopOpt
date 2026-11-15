@@ -88,8 +88,11 @@ struct MeshSpec {
   int threads = 0;            // 0 = every core
   // From the layer check. A strut whose LOWEST point is at one of these places is left out
   // (it hangs from above with nothing under its tip), and so is a small separate piece of
-  // the solid body that starts there.
+  // the solid body that starts there. A weave's bar is left out only when its lowest end is not held (O10:
+  // bars_present with the weave regions, at `layer_mm`).
   std::vector<Vec3> drop_at;
+  // The layer check's layer height, read for a weave's bars only (O10, a level end); build_printable_mesh sets it.
+  double layer_mm = 0.2;
   // A vertical post, two lines across, from the first material below (`z_bottom`) up to
   // something that would otherwise start in mid-air or reach out held at one end (`z_top`).
   struct Post { double x = 0.0, y = 0.0, z_top = 0.0, z_bottom = 0.0; };
@@ -165,25 +168,48 @@ struct MeshReport {
 bool mesh_available();
 
 // ── THE OWNER'S BRIDGE RULES FOR A WEAVE (O6, O7, O9) ───────────────────────────
-// They apply ONLY to the shallow bars of a weave region (bar_is_bridge at `rise`, region one of `weave_regions`); every
-// other bar is kept here, and judged as before.
+// They apply ONLY to the bars of a weave region (region one of `weave_regions`); every other bar is kept here, and
+// judged as before.
 //   O6, held: an end of such a bar is held when it is in the part's solid (Solid), or shares a joint with another bar
-//     that is itself kept: a Node end at exactly the point where a kept bar has an end, a Joined end in a bar
-//     (`into_a`, `into_b`) that is kept. A Surface or Loose end is held by nothing.
-//   O7, any length: a shallow weave bar with both ends held is kept, whatever its length and slope.
-//   O9, leads to nothing: one with an end not held is left out; then whatever it held is judged again, until nothing
-//     changes (a bar whose end lands on a bar that is left out is left out too). It is never given a post instead.
+//     that is itself kept: a Node end at the joint (ends within 1e-5 mm are one, end_joints) where a kept bar has an
+//     end, a Joined end in a bar (`into_a`, `into_b`) that is kept. A Surface or Loose end is held by nothing.
+//   O7, any length: a shallow weave bar (bar_is_bridge at `rise`) with both ends held is kept, whatever its length.
+//   O9, leads to nothing: a shallow one with an end not held, or any other weave bar with its LOWEST end not held (the a
+//     end at a tie), is left out; then whatever it held is judged again, until nothing changes (a bar whose end lands
+//     on a bar that is left out is left out too). It is never given a post instead. `left_unheld` counts both kinds.
 // `present`: the bars still in the file (the layer check's `drop_at` leaves some out first); empty = all of them.
 // The writer (build_mesh) leaves out what this leaves out; the layer check's loop reads the same answer.
 struct WeaveHolds {
   std::vector<char> kept;         // per bar of `bars`: 1 kept (absent bars are 0)
   std::vector<char> shallow;      // per bar: a shallow bar of a weave region
-  std::size_t kept_any_length = 0, left_unheld = 0;
+  std::size_t kept_any_length = 0, left_unheld = 0;   // shallow kept; weave bars (shallow or not) left out here
 };
 WeaveHolds weave_holds(const Bars& bars, const std::vector<int>& weave_regions, const std::vector<char>& present = {},
                        double rise = kBridgeRise);
-// The bars a list of `drop_at` places leaves in the file, as build_mesh reads it (per bar: 1 present).
+// The bars a list of `drop_at` places leaves in the file, as build_mesh reads it (per bar: 1 present). A place reaches a
+// bar when the bar's lowest point is within 0.45 mm of it in height and the place within half the bar's width + 0.35 mm
+// of its line; a bar a place reaches is left out. This form reads every bar so (a cube lattice's rule).
 std::vector<char> bars_present(const Bars& bars, const std::vector<Vec3>& drop_at);
+// The same, with the bars of `weave_regions` judged by O10 (a finding at a held end, a level end): a place leaves such
+// a bar out only when the bar's own LOWEST end (a at a tie) is not held from below or level by what is still present:
+// in the solid (Solid), or a Node end where another present bar ends whose other end is less than one layer
+// (`layer_mm`, the layer check's height) above it, or a Joined end in a present bar whose lowest end is less than one
+// layer above it. An end less than one layer below the bar's other end, when that end is so held, is at its level: the
+// bar starts where it is held, and is not left out. Judged again until nothing changes. Every other bar as above; with
+// no weave region exactly the form above. `used`, when given: per place, 1 when it left out a bar.
+std::vector<char> bars_present(const Bars& bars, const std::vector<Vec3>& drop_at, const std::vector<int>& weave_regions,
+                               double layer_mm = 0.2, std::vector<char>* used = nullptr);
+// O6 (joints a hair apart): each bar end's joint, ends within a hundredth of a micron (1e-5 mm) of a point already seen
+// being that point, as drop_loose_bars reads a joint. Per bar two numbers (a, b): `[2 i]`, `[2 i + 1]`.
+std::vector<std::size_t> end_joints(const Bars& bars);
+// O10, for the make-check-make loop: what a place of the layer check reaches (as `bars_present` reads it) of the bars
+// still `present` (empty = all): how many bars, how many of them cube-lattice bars, how many weave bars held at their
+// lowest end from below or level, how many held only at their level (an end less than a layer below a held end), and
+// whether the place lies on a weave bar (within its half width + 0.35 mm of its line).
+struct WeaveFinding { std::size_t reached = 0, cube = 0, held = 0, level = 0; bool on_weave = false; };
+std::vector<WeaveFinding> weave_findings(const Bars& bars, const std::vector<int>& weave_regions,
+                                         const std::vector<char>& present, const std::vector<Vec3>& places,
+                                         double layer_mm = 0.2);
 // O8: where a weave's whole shallow runs (of the bars `kept` keeps) go farther than `every_mm` between stands, the
 // middle of each such stretch, on the run's centre line (`width`: the bar's there; `below_z`: the lowest point of the
 // bar within 0.45 mm round it, where material under it is looked for). Runs as stage 1c's table chains them: joints
@@ -301,6 +327,10 @@ struct PrintableReport {
   std::vector<Vec3> drop_at;         // what the loop ended with: the same call with these gives the mesh in one pass
   std::vector<MeshSpec::Post> posts;
   std::size_t stands_added = 0;      // O8: of `posts`, those put under a weave's long shallow runs
+  // O10, mid-air findings that are not findings for a weave, all passes together: a speck (an island smaller than
+  // half a line width both ways, on a weave bar, reaching no cube-lattice bar), and a held start (a place that would
+  // leave out no bar: every bar it reaches is a weave bar that starts where it is held, WeaveFinding held + level).
+  std::size_t weave_specks_ignored = 0, weave_held_ignored = 0;
   double ms_carve = 0.0;             // the part carved, once for all the passes
   double ms = 0.0;
 };
