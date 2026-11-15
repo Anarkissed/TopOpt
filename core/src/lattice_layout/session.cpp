@@ -158,6 +158,11 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
         out.bars.bars.insert(out.bars.bars.end(), weave.bars.begin(), weave.bars.end());
       }
       if (settings.join_loose) join_loose_bars(out.bars, *domain_, threads, &out.layout);
+      if (strands) {   // O2 (one bar per two points): a weave's bars laid more than once on the same two ends are one
+        std::vector<int> weave_regions;
+        for (const Layout::Weave& w : out.layout.weave) weave_regions.push_back(w.region);
+        merge_repeated_bars(out.bars, weave_regions);
+      }
       domain_->check_stop();
       if (settings.skin) lay_skin(out.bars, *domain_, settings.skin_spec);
       domain_->check_stop();

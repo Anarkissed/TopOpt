@@ -455,10 +455,18 @@ LayerReport check_layers(const TriangleMesh& mesh, const LayerSpec& spec) {
   return rep;
 }
 
-TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain, const Layout& layout, const Bars& bars,
+TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain, const Layout& layout, const Bars& laid,
                                   const OpenSpace& open, const PrintableSpec& spec, PrintableReport* report) {
   const auto t0 = std::chrono::steady_clock::now();
   PrintableReport rep;
+  // O17, O18: a weave's sags, once, on the layout's bars before the writer; every pass is made of what this leaves.
+  if (!layout.weave.empty() && (spec.mesh.weave_sag_lift_mm > 0.0 || spec.mesh.weave_sag_legs)) {
+    auto sagged = std::make_shared<Bars>(laid);
+    rep.sags = lift_weave_sags(domain, layout, *sagged, spec.mesh.weave_sag_lift_mm, spec.mesh.weave_sag_legs,
+                               spec.layers.layer_mm > 0.0 ? spec.layers.layer_mm : 0.2);
+    if (rep.sags.changed()) rep.sagged = std::move(sagged);
+  }
+  const Bars& bars = rep.sagged ? *rep.sagged : laid;
   MeshSpec ms = spec.mesh;
   TriangleMesh mesh;
   bool posting = !spec.leave_out;
@@ -468,6 +476,7 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
   const Carved carved = carve_part(part, layout, open, ms.grow_mm, ms.stop);
   rep.ms_carve = carved.ms;
   const double half_layer = 0.5 * (spec.layers.layer_mm > 0.0 ? spec.layers.layer_mm : 0.2);
+  ms.layer_mm = 2.0 * half_layer;   // O10: a weave bar's level end is read at the check's own layer height
   // The owner's bridge rules for a weave (O5 to O10); with no weave region nothing below changes.
   std::vector<int> weave_regions;
   for (const Layout::Weave& w : layout.weave) weave_regions.push_back(w.region);
@@ -478,10 +487,12 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
     if (!rep.mesh.ok) { mesh = TriangleMesh{}; break; }
     LayerSpec layers = spec.layers;
     WeaveHolds holds;
+    std::vector<char> present;
     std::vector<WeaveStand> stands;
     if (!weave_regions.empty()) {
       // The bars the writer kept on this pass (weave_holds after `drop_at`), and their runs' long stretches.
-      holds = weave_holds(bars, weave_regions, bars_present(bars, ms.drop_at), ms.bridge_rise);
+      present = bars_present(bars, ms.drop_at, weave_regions, ms.layer_mm);
+      holds = weave_holds(bars, weave_regions, present, ms.bridge_rise);
       for (const WeaveStand& w : weave_stands_wanted(bars, weave_regions, holds.kept, ms.weave_stand_every_mm, ms.bridge_rise)) {
         bool before = false;
         for (const Vec3& p : stands_asked) before = before || (p.x == w.at.x && p.y == w.at.y && p.z == w.at.z);
@@ -510,6 +521,37 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
       };
       for (std::vector<LayerReport::OneEnded>* v : {&rep.layers.one_ended, &rep.layers.long_bridges})
         v->erase(std::remove_if(v->begin(), v->end(), on_kept_shallow), v->end());
+      // O10: two kinds of mid-air finding are not findings for a weave. A speck: an island smaller than half a line
+      // width both ways (no printer lays it down), lying on a weave bar, that reaches no cube-lattice bar. A held
+      // start: a place that would leave out no bar, because every bar it reaches is a weave bar that starts where it
+      // is held (its lowest end held from below or level, or less than a layer below its held other end).
+      // Read where `drop_at` would put the place (the bottom of its layer), against the bars the writer kept.
+      std::vector<Vec3> places;
+      for (const LayerReport::MidAir& m : rep.layers.mid_air) places.push_back({m.x, m.y, m.z - half_layer});
+      const std::vector<WeaveFinding> wf = weave_findings(bars, weave_regions, holds.kept, places, ms.layer_mm);
+      const double speck = 0.5 * layout.bead_mm;
+      std::vector<LayerReport::MidAir> still, specks;
+      for (std::size_t q = 0; q < rep.layers.mid_air.size(); ++q) {
+        const LayerReport::MidAir& m = rep.layers.mid_air[q];
+        const WeaveFinding& f = wf[q];
+        if (m.size_x < speck && m.size_y < speck && f.on_weave && f.cube == 0) {
+          ++rep.weave_specks_ignored;
+          specks.push_back(m);
+          continue;
+        }
+        if (f.reached > 0 && f.cube == 0 && f.held + f.level == f.reached) { ++rep.weave_held_ignored; continue; }
+        still.push_back(m);
+      }
+      rep.layers.mid_air.swap(still);
+      // A speck held by nothing below is also seen as an overhang held at one place: the same island, in the same
+      // layer within half a line width of the speck's middle, is not a finding either.
+      auto at_speck = [&](const LayerReport::OneEnded& o) {
+        for (const LayerReport::MidAir& m : specks)
+          if (o.z == m.z && std::hypot(o.x - m.x, o.y - m.y) < speck) return true;
+        return false;
+      };
+      rep.layers.one_ended.erase(std::remove_if(rep.layers.one_ended.begin(), rep.layers.one_ended.end(), at_speck),
+                                 rep.layers.one_ended.end());
     }
     // O8: a post at the middle of each long stretch that has material straight below it, from that material up into
     // the bar. With nothing below, the run stands as it is.
@@ -548,6 +590,24 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
   }
   rep.drop_at = ms.drop_at;
   rep.posts = ms.posts;
+  // O18: a leg the hold rules or the layer check left out (with the bar it landed on) is no leg: its sag is unsupported.
+  if (rep.sagged && !rep.sags.leg_at.empty()) {
+    const std::vector<char> present = bars_present(bars, ms.drop_at, weave_regions, ms.layer_mm);
+    const WeaveHolds holds = weave_holds(bars, weave_regions, present, ms.bridge_rise);
+    for (const auto& [first, count] : rep.sags.leg_at) {
+      bool kept = true;
+      for (std::size_t i = first; i < first + count && i < bars.bars.size(); ++i) kept = kept && holds.kept[i];
+      if (kept) continue;
+      ++rep.sags.legs_left_out;
+      ++rep.sags.unsupported;
+      --rep.sags.legs;
+      rep.sags.leg_bars -= count;
+      for (std::size_t i = first; i < first + count && i < bars.bars.size(); ++i) {
+        const Bar& x = bars.bars[i];
+        rep.sags.legs_mm -= std::sqrt((x.b.x - x.a.x) * (x.b.x - x.a.x) + (x.b.y - x.a.y) * (x.b.y - x.a.y) + (x.b.z - x.a.z) * (x.b.z - x.a.z));
+      }
+    }
+  }
   rep.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
   if (report) *report = rep;
   return mesh;

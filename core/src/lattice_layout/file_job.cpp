@@ -269,7 +269,8 @@ FileOptions options_from(const json::Value& in, const std::string& w) {
   json::reject_unknown(in,
                        {"pitch_mm", "bar_sides", "block_mm", "grow_mm", "clean_mm", "part_mm",
                         "fill_under_mm3", "bridge_rise", "post_mm", "layer_mm", "pixel_mm", "most_passes",
-                        "leave_out", "keep_if_not_clean", "weave_stand_every_mm", "weave_foot_mm", "weave_round_top"},
+                        "leave_out", "keep_if_not_clean", "weave_stand_every_mm", "weave_foot_mm", "weave_round_top",
+                        "weave_sag_lift_mm", "weave_sag_legs"},
                        w);
   FileOptions o;
   o.pitch_mm = num(in, "pitch_mm", o.pitch_mm, w);
@@ -285,6 +286,9 @@ FileOptions options_from(const json::Value& in, const std::string& w) {
   if (!(o.mesh.weave_stand_every_mm >= 0.0)) json::fail(w + ".weave_stand_every_mm", "must be 0 (never) or more");
   o.mesh.weave_foot_mm = num(in, "weave_foot_mm", o.mesh.weave_foot_mm, w);   // O11: 0 = no foot, below 0 = half the bar's width
   o.mesh.weave_round_top = flag(in, "weave_round_top", o.mesh.weave_round_top, w);   // O14: false = the square bar
+  o.mesh.weave_sag_lift_mm = num(in, "weave_sag_lift_mm", o.mesh.weave_sag_lift_mm, w);   // O17: 0 = never lift
+  if (!(o.mesh.weave_sag_lift_mm >= 0.0)) json::fail(w + ".weave_sag_lift_mm", "must be 0 (never) or more");
+  o.mesh.weave_sag_legs = flag(in, "weave_sag_legs", o.mesh.weave_sag_legs, w);   // O18: false = no leg
   o.layers.layer_mm = num(in, "layer_mm", o.layers.layer_mm, w);
   o.layers.pixel_mm = num(in, "pixel_mm", o.layers.pixel_mm, w);
   o.most_passes = whole(in, "most_passes", o.most_passes, w);
@@ -426,6 +430,10 @@ TriangleMesh make_file_mesh(const Session& session, const Outcome& outcome, cons
   report.left_out_at = made.drop_at;
   report.posts = made.posts;
   report.stands_added = made.stands_added;
+  report.weave_specks_ignored = made.weave_specks_ignored;
+  report.weave_held_ignored = made.weave_held_ignored;
+  report.sags = made.sags;
+  report.sagged = made.sagged;
   if (made.mesh.ok) {
     report.bed_contact_mm2 = made.layers.bed_mm2;
     report.midair_starts = static_cast<int>(made.layers.mid_air.size());
@@ -601,7 +609,7 @@ bool write_tensor_file(const std::string& path, const TensorField& field) {
 
 // ── THE SHALLOW-BAR TABLE ─────────────────────────────────────────────────────
 ShallowTable shallow_bar_table(const Bars& all, const std::vector<int>& regions, const std::vector<Vec3>& drop_at,
-                               const std::vector<MeshSpec::Post>& posts) {
+                               const std::vector<MeshSpec::Post>& posts, double layer_mm) {
   ShallowTable t;
   const auto length = [](const Bar& b) {
     return std::sqrt((b.b.x - b.a.x) * (b.b.x - b.a.x) + (b.b.y - b.a.y) * (b.b.y - b.a.y) + (b.b.z - b.a.z) * (b.b.z - b.a.z));
@@ -623,12 +631,13 @@ ShallowTable shallow_bar_table(const Bars& all, const std::vector<int>& regions,
     const int h = holds(b->end_a) + holds(b->end_b);
     (h == 2 ? t.held_both : h == 1 ? t.held_one : t.held_none) += 1;
   }
-  // The joints: the shallow bars' ends, by exact point.
-  using Key = std::array<double, 3>;
-  std::map<Key, std::vector<std::pair<std::size_t, int>>> at;   // (shallow bar, which end: 0 a, 1 b)
+  // The joints: the shallow bars' ends, ends within a hundredth of a micron being one point (O6, end_joints).
+  const std::vector<std::size_t> joint = end_joints(all);
+  std::map<std::size_t, std::vector<std::pair<std::size_t, int>>> at;   // (shallow bar, which end: 0 a, 1 b)
   for (std::size_t i = 0; i < sb.size(); ++i) {
-    at[{sb[i]->a.x, sb[i]->a.y, sb[i]->a.z}].push_back({i, 0});
-    at[{sb[i]->b.x, sb[i]->b.y, sb[i]->b.z}].push_back({i, 1});
+    const std::size_t k = static_cast<std::size_t>(sb[i] - all.bars.data());
+    at[joint[2 * k]].push_back({i, 0});
+    at[joint[2 * k + 1]].push_back({i, 1});
   }
   // Chained through a joint of exactly two shallow bars, in line within 15 degrees.
   std::vector<std::size_t> up(sb.size());
@@ -653,21 +662,16 @@ ShallowTable shallow_bar_table(const Bars& all, const std::vector<int>& regions,
     if ((u.x * v.x + u.y * v.y + u.z * v.z) / (lu * lv) >= in_line) up[find(i)] = find(j);
   }
   // Each run: its length and what the layer check did with it.
-  const auto left_out = [&](const Bar& x) {   // as the file writer leaves a bar out (solid_mesh.cpp)
-    const double r = 0.5 * x.width;
-    for (const Vec3& s : drop_at) {
-      if (std::fabs(std::min(x.a.z, x.b.z) - r - s.z) > 0.45) continue;
-      if (to_segment(s, x.a, x.b) < r + 0.35) return true;
-    }
-    return false;
-  };
+  // As the file writer leaves a bar out (solid_mesh.cpp: bars_present with the weave regions, O10).
+  const std::vector<char> present = bars_present(all, drop_at, regions, layer_mm);
+  const auto left_out = [&](const Bar& x) { return !present[static_cast<std::size_t>(&x - all.bars.data())]; };
   const auto under_post = [&](const Bar& x) {
     for (const MeshSpec::Post& q : posts)
       if (to_segment(Vec3{q.x, q.y, q.z_top}, x.a, x.b) < 0.5 * x.width + 0.5) return true;
     return false;
   };
   // The owner's bridge rules on what the places leave (weave_holds): a bar they leave out is left out.
-  const WeaveHolds rules = weave_holds(all, regions, bars_present(all, drop_at));
+  const WeaveHolds rules = weave_holds(all, regions, present);
   t.kept_any_length = rules.kept_any_length;
   t.weave_left_unheld = rules.left_unheld;
   const auto unheld = [&](const Bar* x) {
@@ -901,7 +905,8 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
       return done();
     }
     if (!weave_regions.empty()) {
-      r.shallow = shallow_bar_table(out.bars, weave_regions, r.made.left_out_at, r.made.posts);
+      r.shallow = shallow_bar_table(r.made.sagged ? *r.made.sagged : out.bars, weave_regions, r.made.left_out_at, r.made.posts,
+                                    job.options.layers.layer_mm);
       r.shallow.stands_added = r.made.stands_added;
     }
     if (!r.made.print_clean && !job.options.keep_if_not_clean) {
@@ -1163,7 +1168,20 @@ std::string file_result_json(const FileResult& r) {
                     k ? "," : "", names[k], count(d.runs), count(d.kept), count(d.left_out), count(d.post));
       o += b;
     }
-    o += "]},\n";
+    o += "]";
+    if (r.weave_regions > 0) {   // O10: only a job with a weave says them (a cube-lattice file is as before)
+      std::snprintf(b, sizeof b, ",\n    \"weave_specks_ignored\": %llu, \"weave_held_ignored\": %llu",
+                    count(r.made.weave_specks_ignored), count(r.made.weave_held_ignored));
+      o += b;
+      // O17, O18: what was done with the weave's sags.
+      std::snprintf(b, sizeof b,
+                    ",\n    \"sags_lifted\": %llu, \"sag_lift_largest_mm\": %.9g, \"sag_legs\": %llu, \"sag_legs_mm\": %.9g, "
+                    "\"sags_unsupported\": %llu",
+                    count(r.made.sags.lifted), r.made.sags.lift_largest_mm, count(r.made.sags.legs), r.made.sags.legs_mm,
+                    count(r.made.sags.unsupported));
+      o += b;
+    }
+    o += "},\n";
   }
   std::snprintf(b, sizeof b,
                 "  \"ms\": {\"import\": %.1f, \"measure\": %.1f, \"read\": %.1f, \"cells\": %.1f, "

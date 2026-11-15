@@ -1539,7 +1539,115 @@ static void test_organic_finish_keys() {
   std::remove(b.c_str());
 }
 
+// O6 (joints a hair apart, test 9): in the shallow-bar table two level bars in line whose joint's two ends are 4e-6 mm
+// apart are one joint: one run, held at both ends. 2e-5 mm apart: two runs.
+static void test_shallow_table_hair_apart() {
+  for (double gap : {4e-6, 2e-5}) {
+    Bars b;
+    for (int q = 0; q < 2; ++q) {
+      Bar x;
+      x.a = q == 0 ? Vec3{4.1, 20, 10} : Vec3{20 + gap, 20, 10};
+      x.b = q == 0 ? Vec3{20, 20, 10} : Vec3{35.9, 20, 10};
+      x.width = 0.9; x.cell = 4.0; x.region = 1;
+      x.end_a = q == 0 ? Bar::End::Solid : Bar::End::Node;
+      x.end_b = q == 0 ? Bar::End::Node : Bar::End::Solid;
+      b.bars.push_back(x);
+    }
+    const ShallowTable t = shallow_bar_table(b, {1}, {}, {});
+    std::printf("shallow table, joint %.0e mm apart: %zu bars, %zu runs, longest %.2f mm, kept any length %zu, unheld %zu\n",
+                gap, t.bars, t.runs, t.longest_run_mm, t.kept_any_length, t.weave_left_unheld);
+    if (gap < 1e-5) CHECK(t.bars == 2 && t.runs == 1 && t.longest_run_mm > 31.7 && t.kept_any_length == 2 && t.weave_left_unheld == 0);
+    else CHECK(t.bars == 2 && t.runs == 2 && t.kept_any_length == 0 && t.weave_left_unheld == 2);
+  }
+}
+
+// O17, O18, the file job's keys: mesh "weave_sag_lift_mm" (0.9 by default, 0 = never, below 0 refused) and
+// "weave_sag_legs" (true by default); a cube-lattice job's file is the same byte for byte whatever they say, and its
+// result says nothing of sags; a weave job's result carries what the sag pass did.
+static void test_sag_keys() {
+  const std::string head = R"({"mode": "lattice_file", "model": "a.step", )";
+  const std::string tail = R"("layout": {"region_ids": [1], "region_no_lattice": [0], "region_depth_mm": [4], "region_expand_mm": [0],
+                 "region_face_counts": [1], "region_faces": [1]}})";
+  {
+    const FileJob plain = parse_file_job(head + tail);
+    const FileJob set = parse_file_job(head + R"("mesh": {"weave_sag_lift_mm": 0.4, "weave_sag_legs": false}, )" + tail);
+    CHECK(plain.options.mesh.weave_sag_lift_mm == 0.9 && plain.options.mesh.weave_sag_legs);
+    CHECK(set.options.mesh.weave_sag_lift_mm == 0.4 && !set.options.mesh.weave_sag_legs);
+    CHECK(parse_file_job(head + R"("mesh": {"weave_sag_lift_mm": 0}, )" + tail).options.mesh.weave_sag_lift_mm == 0.0);
+  }
+  for (const char* bad : {R"("mesh": {"weave_sag_lift_mm": -1}, )", R"("mesh": {"weave_sag_legs": 2}, )"}) {
+    bool refused = false;
+    try { (void)parse_file_job(head + bad + tail); } catch (const FileJobError& x) { refused = has(x.what(), "weave_sag_"); }
+    CHECK(refused);
+  }
+  if (!mesh_available()) return;
+  const double sizes[3][3] = {{30, 30, 12}, {40, 24, 14}, {24, 36, 10}};
+  const char* keys[3] = {"", R"("mesh": {"weave_sag_lift_mm": 0, "weave_sag_legs": false}, )",
+                         R"("mesh": {"weave_sag_lift_mm": 5, "weave_sag_legs": true}, )"};
+  for (const auto& sz : sizes) {
+    std::string first;
+    bool same = true, quiet = true;
+    for (int k = 0; k < 3; ++k) {
+      std::string text = kBlockJob;
+      const std::string at = "\"layout\": {";
+      text.replace(text.find(at), at.size(), std::string(keys[k]) + at);
+      const std::string path = kTmp + "/lattice_file_cube_sags.stl";
+      std::remove(path.c_str());
+      const FileResult r = make_lattice_file(box_model(sz[0], sz[1], sz[2]), parse_file_job(text), path);
+      CHECK(r.ok);
+      const std::string made = slurp(path);
+      if (k == 0) first = made;
+      same = same && !made.empty() && made == first;
+      quiet = quiet && !has(file_result_json(r), "sags_") && !r.made.sagged && r.made.sags.low_nodes == 0;
+      std::remove(path.c_str());
+    }
+    std::printf("cube part %.0f x %.0f x %.0f: the same file with the sag keys any way %d, nothing said of sags %d\n", sz[0], sz[1],
+                sz[2], same ? 1 : 0, quiet ? 1 : 0);
+    CHECK(same && quiet);
+  }
+  // The traced pocket (stage 1b's): the result says what the sag pass did.
+  const std::string model_path = kTmp + "/lattice_file_sags.stl";
+  const std::string tensor_path = kTmp + "/lattice_file_sags.tensor";
+  const std::string job_path = kTmp + "/lattice_file_sags_job.json";
+  const std::string stl = kTmp + "/sags_lattice.stl";
+  const std::string result = kTmp + "/" + kFileResultName;
+  write_stl_file(model_path, pocket_mesh());
+  int wall = -1;
+  {
+    std::remove(face_overrides_sidecar_path(model_path).c_str());
+    const StepModel plain = import_part_file_resolved(model_path);
+    FaceOverrides ov;
+    ov.paint_faces.emplace_back();
+    for (std::size_t t = 0; t < plain.mesh.triangles.size(); ++t)
+      if (on_pocket_wall(plain.mesh, plain.mesh.triangles[t])) ov.paint_faces.back().push_back(static_cast<int>(t));
+    save_face_overrides(face_overrides_sidecar_path(model_path), ov);
+    wall = plain.face_count;
+  }
+  CHECK(write_tensor_file(tensor_path, hoop_field()));
+  {
+    std::ofstream f(job_path, std::ios::binary | std::ios::trunc);
+    f << R"({"mode": "lattice_file", "model": "lattice_file_sags.stl", "output": "sags_lattice.stl", "tensor": "lattice_file_sags.tensor", )"
+      << R"("layout": {"region_ids": [1], "region_no_lattice": [0], "region_depth_mm": [4], "region_expand_mm": [0],
+                "region_face_counts": [1], "region_faces": [)" << wall
+      << R"(], "region_weave": [true], "organic_spacing_mm": 4, "organic_width_mm": 0.9}})";
+  }
+  const FileResult r = run_file_job(job_path, kTmp);
+  CHECK(r.ok);
+  const std::string text = slurp(result);
+  char want[256];
+  std::snprintf(want, sizeof want, "\"sags_lifted\": %zu, \"sag_lift_largest_mm\": %.9g, \"sag_legs\": %zu, \"sag_legs_mm\": %.9g, "
+                "\"sags_unsupported\": %zu", r.made.sags.lifted, r.made.sags.lift_largest_mm, r.made.sags.legs, r.made.sags.legs_mm,
+                r.made.sags.unsupported);
+  std::printf("organic job sags: %s (low nodes %zu, not covered %zu, open arm %zu)\n", want, r.made.sags.low_nodes,
+              r.made.sags.not_covered, r.made.sags.open_arm);
+  CHECK(has(text, want));
+  CHECK((r.made.sagged != nullptr) == r.made.sags.changed());
+  for (const std::string& p : {model_path, face_overrides_sidecar_path(model_path), tensor_path, job_path, stl, result})
+    std::remove(p.c_str());
+}
+
 int main() {
+  test_shallow_table_hair_apart();
   test_tensor_file();
   test_organic_job();
   test_no_weave_same_file();
@@ -1560,6 +1668,7 @@ int main() {
   test_cube_files_round_top();
   test_organic_round_top();
   test_organic_finish_keys();
+  test_sag_keys();
   if (!mesh_available()) std::printf("no mesh library in this build: the job says so\n");
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;

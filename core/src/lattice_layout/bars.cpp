@@ -830,6 +830,7 @@ Bars weave_bars(const Domain& domain, const std::vector<Strand>& strands, int th
         bar.width = 0.5 * (st.width_mm[k] + st.width_mm[k + 1]);
         bar.cell = st.spacing_mm;
         bar.region = st.region;
+        bar.strand = static_cast<int>(si);
         const int n = std::max(2, static_cast<int>(std::ceil(line.length / kStep)));
         std::vector<char> in(static_cast<std::size_t>(n) + 1);
         for (int i = 0; i <= n; ++i) in[static_cast<std::size_t>(i)] = held(static_cast<double>(i) / n);
@@ -1018,6 +1019,98 @@ std::size_t split_at_crossings(Bars& bars) {
   }
   bars.bars.swap(out);
   return joints.size();
+}
+
+
+std::size_t merge_repeated_bars(Bars& bars, const std::vector<int>& regions) {
+  const std::size_t n = bars.bars.size();
+  auto ours = [&](const Bar& b) { return std::find(regions.begin(), regions.end(), b.region) != regions.end(); };
+  // Each end of a bar of `regions` to one point id: ends within kSame of a point already seen are that point.
+  std::map<PointKey, std::vector<std::pair<Vec3, std::size_t>>> seen;
+  std::size_t points = 0;
+  auto point_of = [&](const Vec3& p) {
+    const PointKey k = key_of(p);
+    for (long long dx = -1; dx <= 1; ++dx)
+      for (long long dy = -1; dy <= 1; ++dy)
+        for (long long dz = -1; dz <= 1; ++dz) {
+          const auto it = seen.find({k.x + dx, k.y + dy, k.z + dz});
+          if (it == seen.end()) continue;
+          for (const auto& [q, id] : it->second)
+            if ((q.x - p.x) * (q.x - p.x) + (q.y - p.y) * (q.y - p.y) + (q.z - p.z) * (q.z - p.z) <= kSame * kSame) return id;
+        }
+    seen[k].push_back({p, points});
+    return points++;
+  };
+  std::map<std::pair<std::size_t, std::size_t>, std::vector<std::size_t>> by_ends;   // in list order
+  std::vector<std::size_t> id_a(n, 0);
+  for (std::size_t i = 0; i < n; ++i) {
+    const Bar& b = bars.bars[i];
+    if (!ours(b)) continue;
+    const std::size_t pa = point_of(b.a), pb = point_of(b.b);
+    id_a[i] = pa;
+    if (pa == pb) continue;
+    by_ends[{std::min(pa, pb), std::max(pa, pb)}].push_back(i);
+  }
+  std::vector<int> into_kept(n, -1);   // a repeat merged away: the bar kept in its place
+  std::size_t merged = 0;
+  for (const auto& kv : by_ends) {
+    const std::vector<std::size_t>& g = kv.second;
+    if (g.size() < 2) continue;
+    for (std::size_t q = 1; q < g.size(); ++q) into_kept[g[q]] = static_cast<int>(g[0]);
+    merged += g.size() - 1;
+  }
+  if (merged == 0) return 0;
+  // The bar kept: the widest width; at each of its ends the best-landed tag of the repeats there.
+  auto rank = [](Bar::End e) {
+    switch (e) {
+      case Bar::End::Solid: return 0;
+      case Bar::End::Joined: return 1;
+      case Bar::End::Node: return 2;
+      case Bar::End::Surface: return 3;
+      case Bar::End::Loose: return 4;
+    }
+    return 5;
+  };
+  for (const auto& kv : by_ends) {
+    const std::vector<std::size_t>& g = kv.second;
+    if (g.size() < 2) continue;
+    Bar kept = bars.bars[g[0]];
+    auto in_group = [&](int into) {
+      return into >= 0 && std::find(g.begin(), g.end(), static_cast<std::size_t>(into)) != g.end();
+    };
+    for (int e = 0; e < 2; ++e) {
+      Bar::End best = e == 0 ? kept.end_a : kept.end_b;
+      int best_into = e == 0 ? kept.into_a : kept.into_b;
+      if (best == Bar::End::Joined && in_group(best_into)) best = Bar::End::Node, best_into = -1;
+      for (std::size_t q = 1; q < g.size(); ++q) {
+        const Bar& r = bars.bars[g[q]];
+        // r's end at the kept bar's end e: the same point, whichever way round r runs.
+        const bool r_a = (e == 0) == (id_a[g[q]] == id_a[g[0]]);
+        Bar::End te = r_a ? r.end_a : r.end_b;
+        int ti = r_a ? r.into_a : r.into_b;
+        if (te == Bar::End::Joined && in_group(ti)) te = Bar::End::Node, ti = -1;
+        if (rank(te) < rank(best)) { best = te; best_into = ti; }
+      }
+      (e == 0 ? kept.end_a : kept.end_b) = best;
+      (e == 0 ? kept.into_a : kept.into_b) = best == Bar::End::Joined ? best_into : -1;
+    }
+    for (std::size_t q = 1; q < g.size(); ++q) kept.width = std::max(kept.width, bars.bars[g[q]].width);
+    bars.bars[g[0]] = kept;
+  }
+  std::vector<char> keep(n, 1);
+  for (std::size_t i = 0; i < n; ++i) keep[i] = into_kept[i] < 0;
+  // A Joined end that landed in a repeat lands in the bar kept in its place (keep_only then renumbers it).
+  for (Bar& b : bars.bars) {
+    if (b.into_a >= 0 && static_cast<std::size_t>(b.into_a) < n && into_kept[static_cast<std::size_t>(b.into_a)] >= 0)
+      b.into_a = into_kept[static_cast<std::size_t>(b.into_a)];
+    if (b.into_b >= 0 && static_cast<std::size_t>(b.into_b) < n && into_kept[static_cast<std::size_t>(b.into_b)] >= 0)
+      b.into_b = into_kept[static_cast<std::size_t>(b.into_b)];
+  }
+  const std::size_t dropped = bars.dropped;
+  keep_only(bars, keep);
+  bars.dropped = dropped;   // not drop_loose_bars' count
+  bars.repeats += merged;
+  return merged;
 }
 
 }  // namespace topopt::lattice_layout

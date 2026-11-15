@@ -838,6 +838,9 @@ struct Bar {
   // For a Joined end: the bar it ends in (its place in Bars::bars), -1 otherwise. If that
   // bar is removed, this end lands on nothing again (drop_loose_bars follows it).
   int into_a = -1, into_b = -1;
+  // O17: the strand of a weave it was laid from (its place in the list weave_bars was given), -1 for every other bar.
+  // Read only to walk along a strand (lift_weave_sags).
+  int strand = -1;
 };
 
 // Preview is the spec (reviewer, 2026-11-12): a bar lying flatter than 30 degrees is written to the file as a BRIDGE,
@@ -855,6 +858,7 @@ struct Bars {
   std::size_t stubs = 0;      // pieces shorter than their own width: not kept (S4)
   std::size_t dropped = 0;    // by drop_loose_bars
   std::size_t joined = 0;     // ends, by join_loose_bars
+  std::size_t repeats = 0;    // weave bars that repeated another on the same two ends, merged into it (merge_repeated_bars)
   // Where drop_loose_bars removed a strut that the part's surface had cut and nothing
   // held: the places a stepped edge is left (S4).
   struct CutEnd { Vec3 at{}; int region = 0; double cell = 0.0; };
@@ -902,6 +906,13 @@ Bars weave_bars(const Domain& domain, const std::vector<Strand>& strands, int th
 // within a hundredth of a micron of each other are one. The same result whatever order the bars were found in.
 // Returns the number of joints made.
 std::size_t split_at_crossings(Bars& bars);
+// Rule O2 (one bar per two points): of the bars of `regions` (a weave's), two with the same two ends (each within a
+// hundredth of a micron, either order) are ONE bar, of the wider width. The first in list order is kept, at the widest
+// width of its repeats; each of its ends takes the best-landed tag any of them has there (Solid, then Joined into a bar
+// that is not one of the repeats, then Node, Surface, Loose; the first at a tie), and a Joined end of any other bar
+// that landed in a repeat lands in the bar kept. Bars of other regions are never read or changed. Returns (and adds
+// to `repeats`) how many bars were merged away. With no bar of `regions` the list is untouched.
+std::size_t merge_repeated_bars(Bars& bars, const std::vector<int>& regions);
 
 // Print rule P8 (f) (reviewer, 2026-11-14): a cut piece of lattice thinner than its own strut, lying against solid,
 // is solid. Nothing can stand in it (every strut through it is shorter than its own width and is dropped as a stub),
