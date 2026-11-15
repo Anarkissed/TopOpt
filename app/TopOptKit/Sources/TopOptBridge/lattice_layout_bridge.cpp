@@ -116,7 +116,48 @@ ll::Settings settings_from(const LatticeLayoutSettings& in) {
   if (in.protect_depth_mm.size() != np || in.protect_face_counts.size() != np)
     throw std::invalid_argument("lattice layout: the Protect skin lists are not all one length");
   const auto pf = unflatten(in.protect_face_counts, in.protect_faces, "Protect skins");
-  for (std::size_t p = 0; p < np; ++p) s.protect.push_back({in.protect_ids[p], pf[p], in.protect_depth_mm[p]});
+  for (std::size_t p = 0; p < np; ++p) {
+    ll::Settings::ProtectAsk a;
+    a.id = in.protect_ids[p];
+    a.faces = pf[p];
+    a.depth_mm = in.protect_depth_mm[p];
+    s.protect.push_back(std::move(a));
+  }
+  // D22: the pieces (each a list of faces and a list of cuts), handed out to the regions, then the skins, in order
+  if (!in.region_piece_counts.empty() && in.region_piece_counts.size() != nr)
+    throw std::invalid_argument("lattice layout: region_piece_counts is not one per region");
+  if (!in.protect_piece_counts.empty() && in.protect_piece_counts.size() != np)
+    throw std::invalid_argument("lattice layout: protect_piece_counts is not one per Protect skin");
+  const auto piece_faces = unflatten(in.piece_face_counts, in.piece_faces, "pieces");
+  if (in.piece_cut_counts.size() != piece_faces.size())
+    throw std::invalid_argument("lattice layout: piece_cut_counts is not one per piece");
+  std::vector<ll::FacePiece> pieces(piece_faces.size());
+  std::size_t at = 0;
+  for (std::size_t k = 0; k < pieces.size(); ++k) {
+    pieces[k].faces = piece_faces[k];
+    const int32_t c = in.piece_cut_counts[k];
+    if (c < 0 || at + 7 * static_cast<std::size_t>(c) > in.piece_cuts.size())
+      throw std::invalid_argument("lattice layout: the cut counts run past the cuts listed");
+    for (int32_t i = 0; i < c; ++i, at += 7) {
+      ll::FaceCut cut;
+      cut.point = {in.piece_cuts[at], in.piece_cuts[at + 1], in.piece_cuts[at + 2]};
+      cut.normal = {in.piece_cuts[at + 3], in.piece_cuts[at + 4], in.piece_cuts[at + 5]};
+      cut.strict = in.piece_cuts[at + 6] != 0.0;
+      pieces[k].cuts.push_back(cut);
+    }
+  }
+  if (at != in.piece_cuts.size()) throw std::invalid_argument("lattice layout: cuts listed that no piece claims");
+  std::size_t next = 0;
+  const auto take = [&](int32_t n) {
+    if (n < 0 || next + static_cast<std::size_t>(n) > pieces.size())
+      throw std::invalid_argument("lattice layout: the piece counts run past the pieces listed");
+    std::vector<ll::FacePiece> out(pieces.begin() + static_cast<long>(next), pieces.begin() + static_cast<long>(next + n));
+    next += static_cast<std::size_t>(n);
+    return out;
+  };
+  for (std::size_t r = 0; r < in.region_piece_counts.size(); ++r) s.regions[r].pieces = take(in.region_piece_counts[r]);
+  for (std::size_t p = 0; p < in.protect_piece_counts.size(); ++p) s.protect[p].pieces = take(in.protect_piece_counts[p]);
+  if (next != pieces.size()) throw std::invalid_argument("lattice layout: pieces listed that no region or skin claims");
   s.cells.algorithm = algorithm_from(in.algorithm);
   s.cells.topology = topopt::lattice_topology_from_id(in.topology);
   s.cells.cell_mm = in.cell_mm;

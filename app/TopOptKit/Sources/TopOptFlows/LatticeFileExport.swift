@@ -29,7 +29,7 @@ public enum LatticeFileJob {
 
     /// The job document, keys sorted (the same settings give the same bytes).
     public static func build(_ s: LatticeLayoutSession.Settings, modelName: String, linearDeflection: Double = 0) throws -> Data {
-        let layout: [String: Any] = [
+        var layout: [String: Any] = [
             "all_lattice": s.allLattice, "bead_mm": s.beadMM, "min_strut_lines": s.minStrutLines, "min_wall_mm": s.minWallMM,
             "rim_mm": s.rimMM, "cover_mm": s.coverMM,
             "region_ids": s.regions.map { Int($0.id) }, "region_no_lattice": s.regions.map { $0.noLattice ? 1 : 0 },
@@ -47,6 +47,18 @@ public enum LatticeFileJob {
             "join_loose": s.joinLoose, "skin": s.skin, "skin_width_mm": s.skinWidthMM, "skin_reach_cells": s.skinReachCells,
             "drop_loose": s.dropLoose,
         ]
+        // ★ his ask 11-14 (D22): the cut pieces, as the preview lays them; the lists only when some piece exists, so a job with
+        // none is the bytes it was
+        func pieces(_ ps: [LatticeLayoutSession.Piece]) -> Any {
+            ps.isEmpty ? NSNull() : ps.map { pc -> [String: Any] in
+                ["faces": pc.faces.map { Int($0) },
+                 "cuts": pc.cuts.map { c -> [String: Any] in
+                     ["point": [c.point.x, c.point.y, c.point.z], "normal": [c.normal.x, c.normal.y, c.normal.z], "strict": c.strict]
+                 }]
+            }
+        }
+        if s.regions.contains(where: { !$0.pieces.isEmpty }) { layout["region_pieces"] = s.regions.map { pieces($0.pieces) } }
+        if s.protect.contains(where: { !$0.pieces.isEmpty }) { layout["protect_pieces"] = s.protect.map { pieces($0.pieces) } }
         let job: [String: Any] = ["mode": "lattice_file", "model": modelName, "output": outputName,
                                   "linear_deflection": linearDeflection, "threads": 0, "layout": layout]
         return try JSONSerialization.data(withJSONObject: job, options: [.sortedKeys])

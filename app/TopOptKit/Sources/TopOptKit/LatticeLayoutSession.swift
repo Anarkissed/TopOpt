@@ -22,14 +22,36 @@ public final class LatticeLayoutSession: @unchecked Sendable {
     /// How a bar's end finishes (core's Bar::End).
     public enum End: UInt8, Sendable { case node = 0, solid, surface, loose, joined }
 
+    /// One half-space of an Edit faces cut (core's FaceCut, rule D22): a point p is kept when (p - point) . normal >= 0, or
+    /// > 0 when `strict`.
+    public struct Cut: Sendable, Equatable, Codable {
+        public var point: SIMD3<Double>
+        public var normal: SIMD3<Double>
+        public var strict: Bool
+        public init(point: SIMD3<Double>, normal: SIMD3<Double>, strict: Bool = false) {
+            self.point = point; self.normal = normal; self.strict = strict
+        }
+    }
+
+    /// A piece of the model's faces as Edit faces cut it (core's FacePiece): its faces' surface where every cut holds.
+    public struct Piece: Sendable, Equatable {
+        public var faces: [Int32]
+        public var cuts: [Cut]
+        public init(faces: [Int32], cuts: [Cut]) { self.faces = faces; self.cuts = cuts }
+    }
+
     public struct Region: Sendable, Equatable {
         public var id: Int32            // > 0
         public var noLattice: Bool
         public var faces: [Int32]       // the model's own face numbers (the app's FaceIDs)
         public var depthMM: Double
         public var expandMM: Double
-        public init(id: Int32, noLattice: Bool = false, faces: [Int32], depthMM: Double, expandMM: Double = 0) {
+        /// ★ his ask 11-14 (D22): the cut pieces this region is, in place of whole faces; empty = `faces` as they are.
+        public var pieces: [Piece] = []
+        public init(id: Int32, noLattice: Bool = false, faces: [Int32], depthMM: Double, expandMM: Double = 0,
+                    pieces: [Piece] = []) {
             self.id = id; self.noLattice = noLattice; self.faces = faces; self.depthMM = depthMM; self.expandMM = expandMM
+            self.pieces = pieces
         }
     }
 
@@ -37,7 +59,11 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         public var id: Int32
         public var faces: [Int32]
         public var depthMM: Double      // 0 = two line widths
-        public init(id: Int32, faces: [Int32], depthMM: Double = 0) { self.id = id; self.faces = faces; self.depthMM = depthMM }
+        /// ★ his ask 11-14 (D22): the cut pieces under this skin, in place of whole faces; empty = `faces` as they are.
+        public var pieces: [Piece] = []
+        public init(id: Int32, faces: [Int32], depthMM: Double = 0, pieces: [Piece] = []) {
+            self.id = id; self.faces = faces; self.depthMM = depthMM; self.pieces = pieces
+        }
     }
 
     /// Core's settings, one for one (LatticeLayoutBridge.hpp says what each does).
@@ -241,6 +267,21 @@ public final class LatticeLayoutSession: @unchecked Sendable {
             o.protect_depth_mm.push_back(p.depthMM)
             o.protect_face_counts.push_back(Int32(p.faces.count))
             for f in p.faces { o.protect_faces.push_back(f) }
+        }
+        // D22: the cut pieces, the regions' first and then the skins' (the counts sent only when some piece exists)
+        if s.regions.contains(where: { !$0.pieces.isEmpty }) || s.protect.contains(where: { !$0.pieces.isEmpty }) {
+            for r in s.regions { o.region_piece_counts.push_back(Int32(r.pieces.count)) }
+            for p in s.protect { o.protect_piece_counts.push_back(Int32(p.pieces.count)) }
+            for piece in s.regions.flatMap(\.pieces) + s.protect.flatMap(\.pieces) {
+                o.piece_face_counts.push_back(Int32(piece.faces.count))
+                for f in piece.faces { o.piece_faces.push_back(f) }
+                o.piece_cut_counts.push_back(Int32(piece.cuts.count))
+                for c in piece.cuts {
+                    for v in [c.point.x, c.point.y, c.point.z, c.normal.x, c.normal.y, c.normal.z, c.strict ? 1 : 0] {
+                        o.piece_cuts.push_back(v)
+                    }
+                }
+            }
         }
         o.topology = std.string(s.topology)
         o.algorithm = std.string(s.algorithm)

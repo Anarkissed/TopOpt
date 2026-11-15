@@ -253,7 +253,13 @@ public final class LatticeLayoutPreview: ObservableObject {
         var byDepth: [Double: LatticeLayoutSession.Protect] = [:]
         for g in skins {
             if var m = byDepth[g.depthMM] {
-                for f in g.faces where !m.faces.contains(f) { m.faces.append(f) }
+                if m.pieces.isEmpty && g.pieces.isEmpty {
+                    for f in g.faces where !m.faces.contains(f) { m.faces.append(f) }
+                } else {
+                    // ★ D22: one skin holding cut pieces takes the others as pieces too (a whole face = a piece with no cuts)
+                    m.pieces = Self.asPieces(m) + Self.asPieces(g)
+                    for f in g.faces where !m.faces.contains(f) { m.faces.append(f) }
+                }
                 byDepth[g.depthMM] = m
             } else {
                 byDepth[g.depthMM] = g
@@ -261,6 +267,26 @@ public final class LatticeLayoutPreview: ObservableObject {
             }
         }
         return order.compactMap { byDepth[$0] }
+    }
+
+    /// A skin's surface as pieces: its own pieces, or its faces as one piece with no cut.
+    static func asPieces(_ s: LatticeLayoutSession.Protect) -> [LatticeLayoutSession.Piece] {
+        s.pieces.isEmpty ? (s.faces.isEmpty ? [] : [.init(faces: s.faces, cuts: [])]) : s.pieces
+    }
+
+    /// ★ HIS ASK 11-14: "ALL modifications done in cut faces is respected without question." An Edit faces piece goes to the
+    /// new engine as itself (core's FacePiece, rule D22): each leaf of the region (a union resolves to its leaves) with its
+    /// faces and the WHOLE chain of cuts that made it. A region no cut made (a face, or a union of whole faces) gives none,
+    /// so it goes as its faces, as before.
+    static func pieces(_ p: ProjectModel, region rid: RegionID) -> [LatticeLayoutSession.Piece] {
+        guard let mesh = p.viewerMesh else { return [] }
+        let leaves = p.faceRegions.resolvedLeaves(rid).compactMap { p.faceRegions.region($0) }
+        guard leaves.contains(where: { !$0.cuts.isEmpty }) else { return [] }
+        return leaves.compactMap { r in
+            let faces = FaceRegionGeometry.members(of: r, in: mesh).sorted().map { Int32($0) }
+            guard !faces.isEmpty else { return nil }
+            return .init(faces: faces, cuts: r.cuts.map { .init(point: $0.point, normal: $0.normal, strict: $0.strict) })
+        }
     }
 
     /// Lattice Setup's settings for core's lattice_layout (read where its rows read them).
@@ -313,21 +339,23 @@ public final class LatticeLayoutPreview: ObservableObject {
                 let role = p.latticeSelectableRole(ref, in: g.id)
                 guard skinGroup || role != nil else { continue }
                 let faces: [Int32]
+                var pieces: [LatticeLayoutSession.Piece] = []
                 switch ref {
                 case let .face(_, f):
                     faces = [Int32(f)]
                 case let .region(_, rid):
                     faces = p.surfaceResolvedFaces(rid).map { Int32($0) }
+                    pieces = Self.pieces(p, region: rid)   // ★ his 11-14: a cut piece is itself, never its whole face (D22)
                 case .primitive:
                     continue   // a zone is a shape, not a face: the new engine takes faces only (first cut)
                 }
                 guard !faces.isEmpty else { continue }
                 let depth = p.latticeSlabDepthMM(ref, in: g.id)   // the face row's own number (FlexibleSelectionsList's)
                 if skinGroup {
-                    s.protect.append(.init(id: id, faces: faces, depthMM: depth))
+                    s.protect.append(.init(id: id, faces: faces, depthMM: depth, pieces: pieces))
                 } else {
                     s.regions.append(.init(id: id, noLattice: role == .exclude, faces: faces, depthMM: depth,
-                                           expandMM: p.latticeExpandMM(ref)))
+                                           expandMM: p.latticeExpandMM(ref), pieces: pieces))
                     if role != .exclude, l.densityMode != .sim, let rho = p.latticeSelectableDensity(ref, in: g.id),
                        let pct = [l.cellSizeMode == .fixed && l.cellMM > 0 ? l.cellMM : (p.latticeSelectableCellMM(ref) ?? s.cellMaxMM),
                                   s.cellMaxMM, 8].lazy.compactMap({ p.latticeDensityPercent(rho: rho, cellMM: $0) }).first {

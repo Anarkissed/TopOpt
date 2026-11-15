@@ -55,6 +55,17 @@ struct LatticeLayoutSettings {
   std::vector<double> protect_depth_mm;
   std::vector<int32_t> protect_face_counts;
   std::vector<int32_t> protect_faces;
+  // Face cuts (core's rule D22, his ask 11-14: every Edit faces cut respected): pieces of faces in place of whole faces,
+  // flattened. Region r has region_piece_counts[r] pieces (0: its faces as listed), Protect skin p protect_piece_counts[p];
+  // either list may be empty (no pieces there). The pieces, the regions' first and then the skins', in order: piece k has
+  // piece_face_counts[k] faces of piece_faces, and piece_cut_counts[k] cuts of piece_cuts at 7 numbers each: point xyz,
+  // normal xyz, strict (1 or 0). A point p is kept when (p - point) . normal >= 0, or > 0 when strict.
+  std::vector<int32_t> region_piece_counts;
+  std::vector<int32_t> protect_piece_counts;
+  std::vector<int32_t> piece_face_counts;
+  std::vector<int32_t> piece_faces;
+  std::vector<int32_t> piece_cut_counts;
+  std::vector<double> piece_cuts;
   // ── the cells (a change here re-lays without reading the part) ──
   std::string topology = "octet";            // core's ids (lattice_topology_from_id)
   std::string algorithm = "default_grade";   // uniform | default_grade | stepped
