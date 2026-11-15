@@ -122,18 +122,36 @@ Graph read_graph(const Bars& bars, const std::vector<int>& regions, double layer
   return g;
 }
 
-// The bars of strand `s` with an end at node j.
-std::vector<std::pair<std::size_t, int>> strand_at(const Graph& g, const Bars& bars, std::size_t j, int s) {
-  std::vector<std::pair<std::size_t, int>> out;
+constexpr std::size_t kNone = static_cast<std::size_t>(-1);
+
+// The weave bars with an end at node j (each once; a bar with both ends there is not one).
+std::vector<std::size_t> weave_at(const Graph& g, std::size_t j) {
+  std::vector<std::size_t> out;
   for (const auto& be : g.at[j])
-    if (g.weave[be.first] && bars.bars[be.first].strand == s && g.joint[2 * be.first] != g.joint[2 * be.first + 1])
-      out.push_back(be);
+    if (g.weave[be.first] && g.joint[2 * be.first] != g.joint[2 * be.first + 1] &&
+        std::find(out.begin(), out.end(), be.first) == out.end())
+      out.push_back(be.first);
   return out;
 }
 
-// Along strand s from node j through bar `via`: the nodes met, until one is held from below (`end_held` true: it is
-// the last of the list) or the strand ends or comes back on itself (false).
-std::vector<std::size_t> walk_arm(const Graph& g, const Bars& bars, std::size_t j, int s, std::size_t via, bool* end_held) {
+// Come to node `at` by bar `bar`: the bar an arm goes on along. The one bar there of the same strand, else the one
+// other weave bar there; none (kNone) when neither is one bar.
+std::size_t go_on(const Graph& g, const Bars& bars, std::size_t at, std::size_t bar) {
+  std::vector<std::size_t> others = weave_at(g, at);
+  others.erase(std::remove(others.begin(), others.end(), bar), others.end());
+  const int s = bars.bars[bar].strand;
+  if (s >= 0) {
+    std::vector<std::size_t> same;
+    for (std::size_t i : others)
+      if (bars.bars[i].strand == s) same.push_back(i);
+    if (same.size() == 1) return same[0];
+  }
+  return others.size() == 1 ? others[0] : kNone;
+}
+
+// From node j along bar `via` and on (go_on): the nodes met, until one is held from below (`end_held` true: it is the
+// last of the list), or the arm ends or comes back on itself (false).
+std::vector<std::size_t> walk_arm(const Graph& g, const Bars& bars, std::size_t j, std::size_t via, bool* end_held) {
   std::vector<std::size_t> out;
   std::set<std::size_t> seen{j};
   std::size_t cur = j, bar = via;
@@ -143,59 +161,58 @@ std::vector<std::size_t> walk_arm(const Graph& g, const Bars& bars, std::size_t 
     if (!seen.insert(nxt).second) return out;
     out.push_back(nxt);
     if (g.held[nxt]) { *end_held = true; return out; }
-    const auto here = strand_at(g, bars, nxt, s);
-    if (here.size() != 2) return out;
-    bar = here[0].first == bar ? here[1].first : here[0].first;
+    bar = go_on(g, bars, nxt, bar);
+    if (bar == kNone) return out;
     cur = nxt;
   }
 }
 
-// The height of the first node along strand s from j through `via` that is not at j's height.
-bool first_other_height(const Graph& g, const Bars& bars, std::size_t j, int s, std::size_t via, double* z) {
+// The height of the first node from j along bar `via` and on that is not at j's height.
+bool first_other_height(const Graph& g, const Bars& bars, std::size_t j, std::size_t via, double* z) {
   std::set<std::size_t> seen{j};
   std::size_t cur = j, bar = via;
   for (;;) {
     const std::size_t nxt = g.joint[2 * bar] == cur ? g.joint[2 * bar + 1] : g.joint[2 * bar];
     if (!seen.insert(nxt).second) return false;
     if (std::fabs(g.pos[nxt].z - g.pos[j].z) > kSameHeight) { *z = g.pos[nxt].z; return true; }
-    const auto here = strand_at(g, bars, nxt, s);
-    if (here.size() != 2) return false;
-    bar = here[0].first == bar ? here[1].first : here[0].first;
+    bar = go_on(g, bars, nxt, bar);
+    if (bar == kNone) return false;
     cur = nxt;
   }
 }
 
-struct LowNode { std::size_t node; int strand; std::size_t bar0, bar1; };
+// A low node and the weave bars leaving it (its arms, in bar order).
+struct LowNode { std::size_t node; std::vector<std::size_t> arms; };
 
-// Every low node, lowest first (then in node order, then by strand).
+// Every low node, lowest first (then in node order): a node not held from below, every bar there a weave's, two or
+// more of them, and lower than every node they join it to (one at exactly its height passed over).
 std::vector<LowNode> low_nodes(const Graph& g, const Bars& bars) {
   std::vector<LowNode> out;
   for (std::size_t j = 0; j < g.at.size(); ++j) {
     if (g.held[j]) continue;
-    std::vector<int> strands;
-    for (const auto& [i, e] : g.at[j])
-      if (g.weave[i] && bars.bars[i].strand >= 0) strands.push_back(bars.bars[i].strand);
-    std::sort(strands.begin(), strands.end());
-    strands.erase(std::unique(strands.begin(), strands.end()), strands.end());
-    for (int s : strands) {
-      const auto two = strand_at(g, bars, j, s);
-      if (two.size() != 2) continue;
-      double z0 = 0.0, z1 = 0.0;
-      if (!first_other_height(g, bars, j, s, two[0].first, &z0) || !first_other_height(g, bars, j, s, two[1].first, &z1))
-        continue;
-      if (z0 > g.pos[j].z && z1 > g.pos[j].z) out.push_back({j, s, two[0].first, two[1].first});
+    bool all_weave = true;
+    for (const auto& be : g.at[j]) all_weave = all_weave && g.weave[be.first];
+    if (!all_weave) continue;
+    const std::vector<std::size_t> arms = weave_at(g, j);
+    if (arms.size() < 2) continue;
+    bool low = true;
+    for (std::size_t i : arms) {
+      double z = 0.0;
+      low = low && first_other_height(g, bars, j, i, &z) && z > g.pos[j].z;
     }
+    if (low) out.push_back({j, arms});
   }
   std::stable_sort(out.begin(), out.end(), [&](const LowNode& a, const LowNode& b) { return g.pos[a.node].z < g.pos[b.node].z; });
   return out;
 }
 
-// Material at p for a leg: inside a standing bar of `near` (the first within its half width of p); -1 when none.
-int bar_at(const Bars& bars, const Graph& g, const Vec3& p, const std::vector<std::size_t>& near) {
+// Material at p for a leg: inside a bar of `near` (the first within its half width of p; with `standing`, only a
+// standing bar); -1 when none.
+int bar_at(const Bars& bars, const Graph& g, const Vec3& p, const std::vector<std::size_t>& near, bool standing) {
   for (std::size_t i : near) {
     const Bar& x = bars.bars[i];
     const double r = 0.5 * x.width;
-    if (!g.standing[i] || p.z < std::min(x.a.z, x.b.z) - r || p.z > std::max(x.a.z, x.b.z) + r) continue;
+    if ((standing && !g.standing[i]) || p.z < std::min(x.a.z, x.b.z) - r || p.z > std::max(x.a.z, x.b.z) + r) continue;
     if (to_line(p, x) <= r) return static_cast<int>(i);
   }
   return -1;
@@ -223,7 +240,7 @@ SagReport lift_weave_sags(const Domain& domain, const Layout& layout, Bars& bars
     LowNode low{};
     bool found = false;
     for (const LowNode& l : lows) {
-      const std::pair<std::size_t, int> key{l.bar0, g.joint[2 * l.bar0] == l.node ? 0 : 1};
+      const std::pair<std::size_t, int> key{l.arms[0], g.joint[2 * l.arms[0]] == l.node ? 0 : 1};
       if (!tried.insert(key).second) continue;
       low = l;
       found = true;
@@ -231,15 +248,34 @@ SagReport lift_weave_sags(const Domain& domain, const Layout& layout, Bars& bars
     }
     if (!found) break;
     const std::size_t j = low.node;
-    bool held0 = false, held1 = false;
-    const std::vector<std::size_t> arm0 = walk_arm(g, bars, j, low.strand, low.bar0, &held0);
-    const std::vector<std::size_t> arm1 = walk_arm(g, bars, j, low.strand, low.bar1, &held1);
-    if (!held0 || !held1) { ++rep.open_arm; continue; }
-    const Vec3 h0 = g.pos[arm0.back()], h1 = g.pos[arm1.back()];
-    const double depth = std::min(h0.z, h1.z) - g.pos[j].z;
-    // ── O17: lifted onto the straight line between its two held nodes ──
-    if (lift_mm > 0.0 && depth <= lift_mm) {
-      // The sag's nodes in order from h0 to h1 (both excluded), and how far along the strand in plan each lies.
+    // Each arm to its nearest held node.
+    std::vector<std::vector<std::size_t>> arm;
+    bool all_held = true;
+    for (std::size_t i : low.arms) {
+      bool held = false;
+      arm.push_back(walk_arm(g, bars, j, i, &held));
+      all_held = all_held && held;
+    }
+    // The two arms the line runs along: the only two, or of more, the two of the one strand that passes through it
+    // (the others, its ties, ride with the low point as any bar end there does).
+    std::size_t pa = 0, pb = 1;
+    bool pair = arm.size() == 2;
+    for (std::size_t x = 0; !pair && x < low.arms.size(); ++x) {
+      const int st = bars.bars[low.arms[x]].strand;
+      if (st < 0) continue;
+      std::vector<std::size_t> same;
+      for (std::size_t y = 0; y < low.arms.size(); ++y)
+        if (bars.bars[low.arms[y]].strand == st) same.push_back(y);
+      if (same.size() == 2) { pa = same[0]; pb = same[1]; pair = true; }
+    }
+    if (!all_held) ++rep.open_arm;            // no line to lift it onto: a leg (O18)
+    else if (!pair) ++rep.not_covered;
+    // ── O17: lifted onto the straight line between its two held nodes, when no node moves more than lift_mm ──
+    if (lift_mm > 0.0 && all_held && pair) {
+      const std::vector<std::size_t>& arm0 = arm[pa];
+      const std::vector<std::size_t>& arm1 = arm[pb];
+      const Vec3 h0 = g.pos[arm0.back()], h1 = g.pos[arm1.back()];
+      // The sag's nodes in order from h0 to h1 (both excluded), and how far along the arms in plan each lies.
       std::vector<std::size_t> run(arm0.rbegin() + 1, arm0.rend());
       run.push_back(j);
       run.insert(run.end(), arm1.begin(), arm1.end() - 1);
@@ -252,19 +288,19 @@ SagReport lift_weave_sags(const Domain& domain, const Layout& layout, Bars& bars
         prev = g.pos[run[q]];
       }
       total += std::hypot(h1.x - prev.x, h1.y - prev.y);
-      if (!(total > 1e-9)) { ++rep.not_covered; continue; }
       std::vector<double> to(g.at.size(), 0.0);
       std::vector<char> moved(g.at.size(), 0);
-      bool fits = true, under = false;
-      for (std::size_t q = 0; q < run.size(); ++q) {
+      double most = 0.0;
+      for (std::size_t q = 0; q < run.size() && total > 1e-9; ++q) {
         const double z = h0.z + (h1.z - h0.z) * (s[q] / total);
-        if (g.pos[run[q]].z >= z + layer) fits = false;
-        if (run[q] == j) under = g.pos[j].z < z;
+        most = std::max(most, std::fabs(z - g.pos[run[q]].z));
         to[run[q]] = z;
         moved[run[q]] = 1;
       }
-      if (!fits || !under) { ++rep.not_covered; continue; }
-      for (std::size_t q = 0; q < run.size(); ++q) rep.lift_largest_mm = std::max(rep.lift_largest_mm, to[run[q]] - g.pos[run[q]].z);
+      if (!(total > 1e-9)) ++rep.not_covered;
+      else if (most > lift_mm) ++rep.too_far;   // a node would move more than lift_mm: a leg (O18)
+      else {
+      rep.lift_largest_mm = std::max(rep.lift_largest_mm, most);
       // Every weave bar end at a moved node; then each Joined end landing in a bar that moved, with the bar.
       const std::vector<Bar> before = bars.bars;
       for (std::size_t i = 0; i < bars.bars.size(); ++i) {
@@ -290,11 +326,12 @@ SagReport lift_weave_sags(const Domain& domain, const Layout& layout, Bars& bars
       }
       ++rep.lifted;
       continue;
+      }
     }
     if (!legs) continue;
     // ── O18: a zig-zag leg from the material below up to the low point ──
     const Vec3 top = g.pos[j];
-    const int region = bars.bars[low.bar0].region;
+    const int region = bars.bars[low.arms[0]].region;
     double width = 0.0;
     for (std::size_t i = 0; i < bars.bars.size(); ++i)
       if (g.weave[i] && bars.bars[i].region == region && bars.bars[i].width > 0.0)
@@ -307,6 +344,7 @@ SagReport lift_weave_sags(const Domain& domain, const Layout& layout, Bars& bars
     for (const Bar& x : bars.bars) widest = std::max(widest, x.width);
     std::vector<std::size_t> near;
     for (std::size_t i = 0; i < bars.bars.size(); ++i) {
+      if (std::find(low.arms.begin(), low.arms.end(), i) != low.arms.end()) continue;   // its own arms are not under it
       const Bar& x = bars.bars[i];
       const double low_z = std::min(x.a.z, x.b.z);
       if (low_z - widest > top.z) continue;
@@ -320,7 +358,7 @@ SagReport lift_weave_sags(const Domain& domain, const Layout& layout, Bars& bars
     bool below = false;
     for (double z = top.z - layer;; z -= layer) {
       const Vec3 p{top.x, top.y, z};
-      if (solid(p) || bar_at(bars, g, p, near) >= 0) { below = true; break; }
+      if (solid(p) || bar_at(bars, g, p, near, false) >= 0) { below = true; break; }
       if (probe.where(p).why == Why::Outside) break;
     }
     if (!below) { ++rep.unsupported; continue; }
@@ -338,7 +376,7 @@ SagReport lift_weave_sags(const Domain& domain, const Layout& layout, Bars& bars
       for (int dj = -kLegReachCells; dj <= kLegReachCells; ++dj)
         for (int di = -kLegReachCells; di <= kLegReachCells; ++di) {
           const double d = (di * r) * (di * r) + (dj * r) * (dj * r);
-          if (d >= best || bar_at(bars, g, Vec3{tip.x + di * r, tip.y + dj * r, zn}, near) < 0) continue;
+          if (d >= best || bar_at(bars, g, Vec3{tip.x + di * r, tip.y + dj * r, zn}, near, true) < 0) continue;
           best = d;
           bx = tip.x + di * r;
           by = tip.y + dj * r;
@@ -364,7 +402,7 @@ SagReport lift_weave_sags(const Domain& domain, const Layout& layout, Bars& bars
         foot_end = Bar::End::Solid;
         break;
       }
-      const int y = bar_at(bars, g, np, near);
+      const int y = bar_at(bars, g, np, near, false);   // the first bar it meets, standing or not
       pts.push_back(np);
       if (y >= 0) {
         foot_end = Bar::End::Joined;
@@ -384,7 +422,8 @@ SagReport lift_weave_sags(const Domain& domain, const Layout& layout, Bars& bars
       if (c < 1.0 - 1e-12) corner.push_back(p);
     }
     corner.push_back(top);
-    const double cell = bars.bars[low.bar0].cell;
+    const double cell = bars.bars[low.arms[0]].cell;
+    rep.leg_at.push_back({bars.bars.size(), corner.size() - 1});
     for (std::size_t q = 0; q + 1 < corner.size(); ++q) {
       Bar leg;
       leg.a = corner[q];

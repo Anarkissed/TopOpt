@@ -590,6 +590,24 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
   }
   rep.drop_at = ms.drop_at;
   rep.posts = ms.posts;
+  // O18: a leg the hold rules or the layer check left out (with the bar it landed on) is no leg: its sag is unsupported.
+  if (rep.sagged && !rep.sags.leg_at.empty()) {
+    const std::vector<char> present = bars_present(bars, ms.drop_at, weave_regions, ms.layer_mm);
+    const WeaveHolds holds = weave_holds(bars, weave_regions, present, ms.bridge_rise);
+    for (const auto& [first, count] : rep.sags.leg_at) {
+      bool kept = true;
+      for (std::size_t i = first; i < first + count && i < bars.bars.size(); ++i) kept = kept && holds.kept[i];
+      if (kept) continue;
+      ++rep.sags.legs_left_out;
+      ++rep.sags.unsupported;
+      --rep.sags.legs;
+      rep.sags.leg_bars -= count;
+      for (std::size_t i = first; i < first + count && i < bars.bars.size(); ++i) {
+        const Bar& x = bars.bars[i];
+        rep.sags.legs_mm -= std::sqrt((x.b.x - x.a.x) * (x.b.x - x.a.x) + (x.b.y - x.a.y) * (x.b.y - x.a.y) + (x.b.z - x.a.z) * (x.b.z - x.a.z));
+      }
+    }
+  }
   rep.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
   if (report) *report = rep;
   return mesh;

@@ -2273,9 +2273,9 @@ static Strand u_strand(double y, double held, double sag) {
 }
 static void say_sags(const char* what, const PrintableReport& rep) {
   const SagReport& s = rep.sags;
-  std::printf("sags %s: low nodes %zu, lifted %zu (largest %.3f mm), legs %zu (%zu bars, %.3f mm), unsupported %zu, not covered %zu, "
-              "open arm %zu; bars changed %d\n", what, s.low_nodes, s.lifted, s.lift_largest_mm, s.legs, s.leg_bars, s.legs_mm,
-              s.unsupported, s.not_covered, s.open_arm, rep.sagged ? 1 : 0);
+  std::printf("sags %s: low nodes %zu, lifted %zu (largest move %.3f mm), too far %zu, legs %zu (%zu bars, %.3f mm, left out %zu), "
+              "unsupported %zu, not covered %zu, open arm %zu; bars changed %d\n", what, s.low_nodes, s.lifted, s.lift_largest_mm,
+              s.too_far, s.legs, s.leg_bars, s.legs_mm, s.legs_left_out, s.unsupported, s.not_covered, s.open_arm, rep.sagged ? 1 : 0);
   say_bridges(what, rep);
 }
 
@@ -2430,6 +2430,91 @@ static void test_sag_cube_parts_as_before() {
   CHECK(same == asked);
 }
 
+// LatticeReview's rulings of 2026-11-15 on S7's first build (tests 6 to 9).
+// Ruling 1 (test 6): a U only 0.5 mm under its lower held node, whose line would move its low point 1.2 mm (its held
+// nodes at 12 and 13.4 mm), is not lifted: it gets a leg to the floor.
+static void test_sag_moves_too_far() {
+  const SagBox k(14.0, {weave_strand({{2, 20, 12}, {12, 20, 12}, {20, 20, 11.5}, {28, 20, 13.4}, {38, 20, 13.4}})});
+  const PrintableReport rep = k.make(PrintableSpec{});
+  say_sags("U whose line moves a node 1.2 mm", rep);
+  CHECK(rep.mesh.ok && rep.sags.low_nodes == 1 && rep.sags.lifted == 0 && rep.sags.too_far == 1 && rep.sags.legs == 1);
+  CHECK(rep.sags.lift_largest_mm == 0.0 && rep.sagged != nullptr);
+  if (!rep.sagged) return;
+  const Bar& leg = rep.sagged->bars.back();
+  CHECK(leg.b.x == 20 && leg.b.y == 20 && leg.b.z == 11.5 && leg.end_a == Bar::End::Solid);
+  CHECK(rep.clean && rep.mesh.bars_left_out == 0 && rep.mesh.weave_left_unheld == 0 && rep.posts.empty());
+}
+
+// Ruling 2 (test 7): a low point made of a curve's END and a tie (no strand passes through it): lifted when shallow
+// (0.5 mm, nothing below), a leg to the floor when deep (3 mm); kept whole either way.
+static void test_sag_curve_end_and_tie() {
+  {
+    const SagBox k(20.5, {weave_strand({{2, 20, 12}, {12, 20, 12}, {20, 20, 11.5}}), weave_strand({{2, 26, 12}, {38, 26, 12}}),
+                          weave_strand({{20, 20, 11.5}, {20, 26, 12}})});
+    const PrintableReport rep = k.make(PrintableSpec{});
+    say_sags("curve end and tie, 0.5 mm", rep);
+    CHECK(rep.mesh.ok && rep.sags.low_nodes == 1 && rep.sags.lifted == 1 && rep.sags.legs == 0 && rep.sagged != nullptr);
+    CHECK(std::fabs(rep.sags.lift_largest_mm - 0.5) < 1e-9);
+    long at_low = 0;
+    if (rep.sagged)
+      for (const Bar& b : rep.sagged->bars)
+        for (const Vec3& p : {b.a, b.b}) at_low += std::fabs(p.x - 20) < 1e-9 && std::fabs(p.y - 20) < 1e-9 && p.z == 12.0;
+    CHECK(at_low == 2);   // the curve's end and the tie's, both on the line
+    CHECK(rep.clean && rep.mesh.bars_left_out == 0 && rep.mesh.weave_left_unheld == 0 && rep.posts.empty());
+  }
+  {
+    const SagBox k(14.0, {weave_strand({{2, 20, 14}, {12, 20, 14}, {20, 20, 11}}), weave_strand({{2, 26, 14}, {38, 26, 14}}),
+                          weave_strand({{20, 20, 11}, {20, 26, 14}})});
+    const PrintableReport rep = k.make(PrintableSpec{});
+    say_sags("curve end and tie, 3 mm over a floor", rep);
+    CHECK(rep.mesh.ok && rep.sags.low_nodes == 1 && rep.sags.lifted == 0 && rep.sags.legs == 1 && rep.sagged != nullptr);
+    if (rep.sagged) CHECK(rep.sagged->bars.back().b.z == 11 && rep.sagged->bars.back().end_a == Bar::End::Solid);
+    CHECK(rep.clean && rep.mesh.bars_left_out == 0 && rep.mesh.weave_left_unheld == 0 && rep.posts.empty());
+  }
+}
+
+// Ruling 3 (test 8): a low point one of whose arms ends Loose with no held node on it: a leg to the floor.
+static void test_sag_open_arm() {
+  const BridgeBlock k(14.0);
+  Bars b;
+  b.bars.push_back(hand_bar({4.1, 20, 14}, Bar::End::Solid, {12, 20, 14}, Bar::End::Node));
+  b.bars.push_back(hand_bar({12, 20, 14}, Bar::End::Node, {20, 20, 11}, Bar::End::Node));
+  b.bars.push_back(hand_bar({20, 20, 11}, Bar::End::Node, {26, 20, 12.5}, Bar::End::Loose));
+  PrintableReport rep;
+  (void)build_printable_mesh(k.pm, k.d, k.layout, b, k.open, PrintableSpec{}, &rep);
+  say_sags("an open arm over a floor", rep);
+  CHECK(rep.mesh.ok && rep.sags.low_nodes == 1 && rep.sags.open_arm == 1 && rep.sags.legs == 1 && rep.sagged != nullptr);
+  if (!rep.sagged) return;
+  const Bar& leg = rep.sagged->bars.back();
+  CHECK(leg.b.x == 20 && leg.b.y == 20 && leg.b.z == 11 && leg.end_a == Bar::End::Solid);
+  const WeaveHolds h = weave_holds(*rep.sagged, {1});
+  CHECK(h.kept[0] && h.kept[1] && h.kept[3]);   // the held arm and the leg; the Loose arm leads to nothing
+}
+
+// Ruling 4 (test 9): a level bar 3 mm under the low point of a 3 mm U over the floor, held by nothing (both ends
+// Loose): the leg stops on it (Joined), never passing through. The hold rules then leave that bar out and the leg goes
+// with it: no leg, the sag unsupported.
+static void test_sag_leg_stops_on_a_bar() {
+  const BridgeBlock k(14.0);
+  Bars b;
+  b.bars.push_back(hand_bar({4.1, 20, 14}, Bar::End::Solid, {12, 20, 14}, Bar::End::Node));
+  b.bars.push_back(hand_bar({12, 20, 14}, Bar::End::Node, {20, 20, 11}, Bar::End::Node));
+  b.bars.push_back(hand_bar({20, 20, 11}, Bar::End::Node, {28, 20, 14}, Bar::End::Node));
+  b.bars.push_back(hand_bar({28, 20, 14}, Bar::End::Node, {35.9, 20, 14}, Bar::End::Solid));
+  b.bars.push_back(hand_bar({16, 20, 8}, Bar::End::Loose, {24, 20, 8}, Bar::End::Loose));
+  Bars s = b;
+  const SagReport r = lift_weave_sags(k.d, k.layout, s, 0.9, true, 0.2);
+  std::printf("sags: a bar under the low point: legs %zu, %zu bars; foot %d into %d at z %.3f\n", r.legs, r.leg_bars,
+              s.bars.size() > 5 ? static_cast<int>(s.bars[5].end_a) : -1, s.bars.size() > 5 ? s.bars[5].into_a : -9,
+              s.bars.size() > 5 ? s.bars[5].a.z : 0.0);
+  CHECK(r.legs == 1 && s.bars.size() == 6);
+  if (s.bars.size() == 6) CHECK(s.bars[5].end_a == Bar::End::Joined && s.bars[5].into_a == 4 && s.bars[5].a.z > 8.0 && s.bars[5].a.z <= 8.45);
+  PrintableReport rep;
+  (void)build_printable_mesh(k.pm, k.d, k.layout, b, k.open, PrintableSpec{}, &rep);
+  say_sags("a bar under the low point, through the loop", rep);
+  CHECK(rep.mesh.ok && rep.sags.legs == 0 && rep.sags.legs_left_out == 1 && rep.sags.unsupported == 1 && rep.sags.leg_bars == 0);
+}
+
 int main() {
   if (!mesh_available()) {
     MeshReport rep;
@@ -2474,6 +2559,10 @@ int main() {
   test_sag_unsupported();
   test_sag_switches_off();
   test_sag_cube_parts_as_before();
+  test_sag_moves_too_far();
+  test_sag_curve_end_and_tie();
+  test_sag_open_arm();
+  test_sag_leg_stops_on_a_bar();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }

@@ -219,51 +219,56 @@ std::vector<WeaveFinding> weave_findings(const Bars& bars, const std::vector<int
                                          const std::vector<char>& present, const std::vector<Vec3>& places,
                                          double layer_mm = 0.2);
 // ── WHAT HAPPENS TO A SAG (O17, O18; the owner's OR29) ─────────────────────────
-// Only the bars of a weave region laid from a strand (Bar::strand) are read; every other bar is never moved.
+// Only the bars of a weave region are read and moved; every other bar is never moved.
 // HELD FROM BELOW (a node, a joint of end_joints): in the solid (a Solid end), or an end of a bar that is not a weave's,
 // or reached by a bar from a node held from below whose far end is not a layer (`layer_mm`) or more below it, or the
 // Joined end of a bar landing in a STANDING bar (its lowest node held from below, and, when it lies under 30 degrees,
 // both) whose lowest end is less than a layer above it. Read walking upward from the solid, so the two arms of a V
 // never hold each other.
-// A LOW NODE: a node of a strand, not held from below, lower than its neighbours on both sides along the strand (a
-// neighbour at exactly its height is passed over). Its SAG runs along the strand each way to the nearest node held
-// from below (its held nodes); its depth is how far the low node lies below the lower of the two.
+// A LOW NODE: a node not held from below where only weave bars end, two or more of them (its ARMS: two of one strand,
+// a curve's end and a tie, or more), lower than every node they join it to (a node at exactly its height is passed
+// over). An arm runs from it along its bar and on (along the same strand where that strand goes on, else into the one
+// other weave bar there) to the nearest node held from below (its held node), or to an end with none (an OPEN arm).
 // Lowest low nodes first, each judged on the bars as the sags before it left them:
-//   O17, lifted: depth no more than `lift_mm` (> 0): every node strictly between the two held nodes is moved straight
-//     up (or down, by less than a layer) onto the straight line between them, the line read along the strand's length
-//     in plan (each node at its share of the way, x and y kept). Every weave bar end at a moved node moves with it (the
-//     strand's own, its crossings', its ties'); a Joined end landing inside a moved bar moves with the bar at its
-//     place along it. Not lifted (left as before, counted `not_covered`): a node of the sag a layer or more above the
-//     line, or the low node not under it.
-//   O18, a leg: deeper (or `lift_mm` 0), `legs` on, and material straight below the low point (the solid, or a
-//     standing bar within its half width of the plumb line) before the line leaves the part: a leg in the shape the
-//     old engine grew its branched supports (organic_lattice.cpp, "BRANCHED SUPPORT"): from the low point it steps
-//     down ONE LAYER at a time; each step leans toward the nearest material of a standing bar in the layer below,
-//     looked for on a grid of half the leg's width out to 8 such steps (the old raster's 8 cells of the thinnest
-//     radius), by at most tan(40 degrees) of a layer sideways (never flatter than 50 degrees from level), straight
-//     down when nothing is in reach; a step that would come within half the leg's width of the part's surface goes
-//     straight down instead, and if that would too, the leg is not made. It ends where a step reaches material: in
-//     the solid (cut where the solid begins and run on into it by its own width, end Solid, S11), or inside a standing
-//     bar (end Joined into it). Its width is the thinnest weave bar of its region, never under Layout::min_strut_mm;
-//     the steps going on in one direction are one bar. Its bars are laid from the foot up (`a` the lower end), each
-//     lower end on the one below, the top end on the low node (Node), so every piece is held from below. Legs laid
-//     before count as standing bars for the next. No material below, or no leg could be made: `unsupported`, the sag
-//     left as before.
-//   A low node whose sag reaches a strand's end with no held node on one side is not a sag of O17 or O18: counted
-//     `open_arm`, left as before.
-// The bars of the sag are never cut for it. The hold rules (weave_holds) and the layer check then judge the result.
+//   O17, lifted: every arm reaching a held node, and two arms to lift along (the only two, or of more the two of the
+//     one strand passing through it; the others, its ties, ride with it), and `lift_mm` > 0: every node strictly
+//     between those two held nodes would be moved straight up or down onto the straight line between them, the line read along the arms'
+//     length in plan (each node at its share of the way, x and y kept). It is lifted only if no node would move more
+//     than `lift_mm`, up or down; else it gets a leg (O18, counted `too_far`). Every weave bar end at a moved node moves
+//     with it (the strand's own, its crossings', its ties'); a Joined end landing inside a moved bar moves with the bar
+//     at its place along it. An open arm (`open_arm`), more than two arms with no strand through it, or a sag with no
+//     length in plan (`not_covered`) has no line to lift it onto: it gets a leg.
+//   O18, a leg: `legs` on, and material straight below the low point (the solid, or any bar but its own arms within
+//     its half width of the plumb line) before the line leaves the part: a leg in the shape the old engine grew its
+//     branched supports (organic_lattice.cpp, "BRANCHED SUPPORT"): from the low point it steps down ONE LAYER at a time;
+//     each step leans toward the nearest material of a standing bar in the layer below, looked for on a grid of half
+//     the leg's width out to 8 such steps (the old raster's 8 cells of the thinnest radius), by at most tan(40 degrees)
+//     of a layer sideways (never flatter than 50 degrees from level), straight down when nothing is in reach; a step
+//     that would come within half the leg's width of the part's surface goes straight down instead, and if that would
+//     too, the leg is not made. It ends at the first material a step reaches: the solid (cut where the solid begins
+//     and run on into it by its own width, end Solid, S11), or any bar but its own arms, standing or not (end Joined
+//     into it): it never passes through a bar. Its width is the thinnest weave bar of its region, never under
+//     Layout::min_strut_mm; the steps going on in one direction are one bar. Its bars are laid from the foot up (`a`
+//     the lower end), each lower end on the one below, the top end on the low node (Node). Legs laid before are
+//     material for the next. No material below, or no leg could be made: `unsupported`, the sag left as before.
+// The bars of a sag are never cut for it. The hold rules (weave_holds) and the layer check then judge the result
+// (build_printable_mesh: a leg they leave out, with the bar it landed on, is taken off `legs` and counted unsupported).
 // Nothing changes with `lift_mm` 0 and `legs` false, with no weave region, or with no low node.
 struct SagReport {
   std::size_t low_nodes = 0;       // low nodes found on the bars as laid
   std::size_t lifted = 0;          // O17: sags lifted
-  double lift_largest_mm = 0.0;    // the largest any node was moved up
-  std::size_t legs = 0;            // O18: legs laid
+  double lift_largest_mm = 0.0;    // the most any node of a lifted sag moved, up or down
+  std::size_t too_far = 0;         // O17: not lifted, a node would have moved more than lift_mm
+  std::size_t open_arm = 0;        // an arm reached an end with no held node
+  std::size_t not_covered = 0;     // more than two arms and no strand through it, or no length in plan
+  std::size_t legs = 0;            // O18: legs laid (and, after build_printable_mesh, kept)
   std::size_t leg_bars = 0;        // their bars
   double legs_mm = 0.0;            // their length, run-in included
-  std::size_t unsupported = 0;     // O18: no material straight below, or no leg could be made
-  std::size_t not_covered = 0;     // O17's line does not fit the sag (a node a layer above it, or the low node over it)
-  std::size_t open_arm = 0;        // a strand's end reached on one side with no held node
-  bool changed() const { return lifted + legs > 0; }
+  std::size_t legs_left_out = 0;   // build_printable_mesh: legs the hold rules or the layer check left out
+  std::size_t unsupported = 0;     // O18: no material straight below, no leg could be made, or its leg left out
+  // Per leg laid: its first bar in the bars after the pass, and how many.
+  std::vector<std::pair<std::size_t, std::size_t>> leg_at;
+  bool changed() const { return lifted + leg_at.size() > 0; }
 };
 SagReport lift_weave_sags(const Domain& domain, const Layout& layout, Bars& bars, double lift_mm, bool legs,
                           double layer_mm = 0.2);
