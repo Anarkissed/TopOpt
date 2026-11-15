@@ -117,7 +117,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "skin_width_mm", "skin_reach_cells", "drop_loose", "by_stress", "dial_light", "dial_heavy", "width_light_mm",
        "width_heavy_mm", "reference_mpa", "percentile", "response", "region_weave", "organic_spacing_mm",
        "organic_width_mm", "organic_spacing_min_mm", "organic_spacing_max_mm", "organic_spacing_exponent",
-       "organic_shape_fit"},
+       "organic_shape_fit", "organic_mode", "organic_walls_out", "organic_ties", "organic_tie_swirl"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -253,6 +253,15 @@ OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::str
   a.reference_mpa = s.stress.reference_mpa;
   a.percentile = s.stress.percentile;
   a.shape_fit = flag(in, "organic_shape_fit", a.shape_fit, w);
+  // G1: Traced (the default) or Grown; the keys read by Grown only (its layer is the mesh's "layer_mm").
+  const std::string mode = text(in, "organic_mode", "traced", w);
+  if (mode != "traced" && mode != "grown")
+    json::fail(w + ".organic_mode", "must be \"traced\" or \"grown\", not \"" + mode + "\"");
+  a.mode = mode == "grown" ? OrganicMode::Grown : OrganicMode::Traced;
+  a.walls_out = flag(in, "organic_walls_out", a.walls_out, w);
+  a.ties = flag(in, "organic_ties", a.ties, w);
+  a.tie_swirl = num(in, "organic_tie_swirl", a.tie_swirl, w);
+  if (!(a.tie_swirl >= 0.0 && a.tie_swirl <= 1.0)) json::fail(w + ".organic_tie_swirl", "must be 0 to 1");
   const double thinnest = s.bead_mm * s.min_strut_lines;
   if (!(std::isfinite(a.width_mm) && a.width_mm >= 0.0))
     json::fail(w + ".organic_width_mm", "must be 0 (the thinnest strut) or more");
@@ -737,6 +746,7 @@ FileJob parse_file_job(const std::string& json_text) {
     }
     if (const json::Value* v = json::find(doc, "mesh"))
       job.options = options_from(json::as_object(*v, w + ".mesh"), w + ".mesh");
+    job.organic.layer_mm = job.options.layers.layer_mm;   // G1: Grown grows one printed layer per step
     job.options.threads = whole(doc, "threads", 0, w);
     if (job.options.threads < 0) json::fail(w + ".threads", "must be 0 (every core) or more");
     return job;
@@ -875,6 +885,7 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     r.spacing_mean_mm = out.spacing_mean_mm;
     r.net_struts = out.net_struts;
     r.net_mm = out.net_mm;
+    r.grown = out.grown;
     for (const Bar& b : out.bars.bars)
       r.weave_bars += std::find(weave_regions.begin(), weave_regions.end(), b.region) != weave_regions.end();
     if (!out.empty_regions.empty()) {
@@ -1182,6 +1193,36 @@ std::string file_result_json(const FileResult& r) {
       o += b;
     }
     o += "},\n";
+  }
+  if (r.grown) {
+    // G12: written only for Grown, so a Traced file's result is as it was.
+    const GrowReport& g = *r.grown;
+    char gb[4096];
+    std::snprintf(gb, sizeof gb,
+                  "  \"grown\": {\"strands\": %llu, \"grown_mm\": %.9g, \"kept_mm\": %.9g, \"cut_mm\": {\"outside\": %.9g, "
+                  "\"unsupported\": %.9g, \"leads_to_nothing\": %.9g, \"crowded\": %.9g, \"repeat\": %.9g},\n"
+                  "    \"seeds_floor\": %llu, \"seeds_wall\": %llu, \"seeds_refused_room\": %llu, \"seeds_refused_support\": %llu, "
+                  "\"strands_grown\": %llu, \"steps\": %llu, \"clamped\": %llu,\n"
+                  "    \"ended_edge\": %llu, \"ended_unsupported\": %llu, \"ended_joined\": %llu, \"crowded_climbed_on\": %llu,\n"
+                  "    \"branches_offered\": %llu, \"branches_grown\": %llu, \"links\": %llu, \"refused_region\": %llu, "
+                  "\"refused_support\": %llu, \"refused_crowded\": %llu, \"refused_room\": %llu,\n"
+                  "    \"rewinds\": %llu, \"rewind_places\": %llu, \"rewind_grew_on\": %llu, \"rewind_joined\": %llu, "
+                  "\"rewind_ended_on_joint\": %llu, \"taken_back_mm\": %.9g,\n"
+                  "    \"thinned\": %llu, \"thinned_joined\": %llu, \"regrow_rounds\": %llu, \"holes\": %llu, \"regrow_landed\": %llu, "
+                  "\"regrow_failed\": %llu,\n"
+                  "    \"ties_seeded\": %llu, \"ties_laid\": %llu, \"ties_refused_minor\": %llu, \"ties_refused_reach\": %llu, "
+                  "\"ties_refused_support\": %llu, \"ms\": %.1f},\n",
+                  count(g.strands), g.grown_mm, g.kept_mm, g.cut_outside_mm, g.cut_unsupported_mm, g.cut_nothing_mm,
+                  g.cut_crowded_mm, g.cut_repeat_mm, count(g.seeds_floor), count(g.seeds_wall), count(g.seeds_refused_room),
+                  count(g.seeds_refused_support), count(g.strands_grown), count(g.steps), count(g.clamped),
+                  count(g.ended_edge), count(g.ended_unsupported), count(g.ended_joined), count(g.crowded_climbed_on),
+                  count(g.branches_offered), count(g.branches_grown), count(g.links), count(g.refused_region),
+                  count(g.refused_support), count(g.refused_crowded), count(g.refused_room), count(g.rewinds),
+                  count(g.rewind_places), count(g.rewind_grew_on), count(g.rewind_joined), count(g.rewind_ended_on_joint),
+                  g.taken_back_mm, count(g.thinned), count(g.thinned_joined), count(g.regrow_rounds), count(g.holes),
+                  count(g.regrow_landed), count(g.regrow_failed), count(g.ties_seeded), count(g.ties_laid),
+                  count(g.ties_refused_minor), count(g.ties_refused_reach), count(g.ties_refused_support), g.ms);
+    o += gb;
   }
   std::snprintf(b, sizeof b,
                 "  \"ms\": {\"import\": %.1f, \"measure\": %.1f, \"read\": %.1f, \"cells\": %.1f, "

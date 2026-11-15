@@ -200,6 +200,8 @@ struct FileResult {
   // O16: the net skin's struts laid (Finish Skin on a weave region) and their length, mm.
   std::size_t net_struts = 0;
   double net_mm = 0.0;
+  // G12: what Grown did (Outcome::grown); null for Traced and cube lattices (then not written).
+  std::shared_ptr<const GrowReport> grown;
   ShallowTable shallow;
   // The mesh.
   FileReport made;

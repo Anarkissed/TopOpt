@@ -172,6 +172,7 @@ add_library(topopt
   src/lattice_layout/session.cpp
   src/lattice_layout/organic.cpp
   src/lattice_layout/organic_finish.cpp
+  src/lattice_layout/organic_grow.cpp
   src/lattice_layout/solid_mesh.cpp
   src/lattice_layout/print_check.cpp
   src/lattice_layout/weave_sags.cpp
@@ -533,6 +534,12 @@ add_test(NAME lattice_layout_mesh COMMAND test_lattice_layout_mesh)
 add_executable(test_organic_traced tests/unit/test_organic_traced.cpp)
 target_link_libraries(test_organic_traced PRIVATE topopt)
 add_test(NAME organic_traced COMMAND test_organic_traced)
+# Organic, Grown (G1 to G12): the owner's Grown placement written new in the new engine, on made-up parts and fields.
+add_executable(test_organic_grown tests/unit/test_organic_grown.cpp)
+target_link_libraries(test_organic_grown PRIVATE topopt)
+target_compile_definitions(test_organic_grown PRIVATE
+  ORGANIC_GROWN_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME organic_grown COMMAND test_organic_grown)
 # The lattice file job: its JSON becomes the settings the bridge would make, a part goes in
 # and a whole binary STL comes out, and every refusal is one plain line, its word, its exit
 # code and no file. Without the Manifold library the job says it cannot, and that is checked.

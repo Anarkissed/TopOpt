@@ -1037,6 +1037,7 @@ Pieces drop_adrift_bars(Bars& bars, const Domain& domain, const Layout* layout =
 // region, depth, Expand, Protect skin, rim or line-width change reads it again, once.
 struct TensorField;   // Organic, Traced (lattice_layout_organic.hpp)
 struct OrganicAsk;
+struct GrowReport;   // Organic, Grown (lattice_layout_organic.hpp)
 struct Settings {
   struct RegionAsk {
     int id = 0;
@@ -1111,6 +1112,9 @@ struct Outcome {
   // O16 (lay_organic only): the net skin's struts in `bars` and their length, mm.
   std::size_t net_struts = 0;
   double net_mm = 0.0;
+  // G1 (Organic, Grown; lay_organic with OrganicAsk::mode Grown): what the growth did, every weave region together;
+  // null otherwise.
+  std::shared_ptr<const GrowReport> grown;
 };
 
 class Session {

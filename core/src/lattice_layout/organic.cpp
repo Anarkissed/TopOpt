@@ -355,10 +355,29 @@ Outcome Session::lay_organic(const Settings& settings, const TensorField& field,
   std::vector<Strand> strands;
   double smallest = 0.0, largest = 0.0, sum = 0.0;
   std::size_t candidates = 0;
+  std::shared_ptr<GrowReport> grown;   // G1: Grown in place of Traced; the spacing stats are then O12's, as asked
   for (const Region& r : domain_->spec().regions) {
     if (r.role != Role::Lattice || !r.weave) continue;
     OrganicTraceStats st;
-    std::vector<Strand> traced = trace_strands(*domain_, r.id, field, ask, &st);
+    std::vector<Strand> traced;
+    if (ask.mode == OrganicMode::Grown) {
+      GrowReport one;
+      traced = grow_strands(*domain_, r.id, field, ask, &one);
+      if (!grown) grown = std::make_shared<GrowReport>();
+      grown->add(one);
+      const OrganicSpacing sp = organic_spacing(*domain_, r.id, field, ask);
+      for (std::size_t e = 0; e < sp.candidate.size(); ++e) {
+        if (!sp.candidate[e]) continue;
+        const double v = sp.spacing_mm[e];
+        st.spacing_smallest_mm = st.candidates ? std::min(st.spacing_smallest_mm, v) : v;
+        st.spacing_largest_mm = st.candidates ? std::max(st.spacing_largest_mm, v) : v;
+        st.spacing_mean_mm += v;
+        ++st.candidates;
+      }
+      if (st.candidates) st.spacing_mean_mm /= static_cast<double>(st.candidates);
+    } else {
+      traced = trace_strands(*domain_, r.id, field, ask, &st);
+    }
     if (settings.skin && st.spacing_median_mm > 0.0) finish.net_reach.push_back({r.id, st.spacing_median_mm});   // O16
     if (st.candidates > 0) {
       smallest = candidates ? std::min(smallest, st.spacing_smallest_mm) : st.spacing_smallest_mm;
@@ -376,6 +395,7 @@ Outcome Session::lay_organic(const Settings& settings, const TensorField& field,
     out.spacing_smallest_mm = smallest;
     out.spacing_largest_mm = largest;
     out.spacing_mean_mm = candidates ? sum / static_cast<double>(candidates) : 0.0;
+    out.grown = grown;
   }
   return out;
 }

@@ -106,6 +106,10 @@ Exactly the fields of the bridge's `LatticeLayoutSettings`, under the same names
 | `organic_width_mm` | 0 | Organic: the strut diameter, mm (`OrganicAsk::width_mm`); 0 = the thinnest strut (`bead_mm` x `min_strut_lines`). Under 0, or above 0 and under the thinnest strut: refused (`job_unreadable`) |
 | ~~`organic_rim_mm`~~ | gone | WITHDRAWN 2026-11-15 with rule O15: refused as an unknown key (`job_unreadable`). It was rule O15 (`OrganicAsk::rim_mm`): the Organic rim. 0 = none; above 0 = that width, mm; below 0 = the width the app sends with "Solid rim at edges" on: max(1.535 x `bead_mm`, the tensor file's voxel). Not a number: refused (`job_unreadable`). Read only when a region is a weave |
 | ~~`organic_net_skin`~~ | gone | Gone 2026-11-15: refused as an unknown key (`job_unreadable`); the switch is `skin`. It was rule O16 (`OrganicAsk::net_skin`): the net skin over each open face of a weave region; false = none. Not true or false: refused (`job_unreadable`). Read only when a region is a weave |
+| `organic_mode` | `"traced"` | Organic, rule G1: `"traced"` (stage 1b's placement, `trace_strands`) or `"grown"` (the owner's Grown, written new: `grow_strands`). Anything else: refused (`job_unreadable`, the key named). Grown grows one layer per step: the layer is the `mesh` object's `layer_mm` (0.2) |
+| `organic_walls_out` | false | Grown only, rule G2 (idea C): seeds on the region's walls too, growing inward (`OrganicAsk::walls_out`) |
+| `organic_ties` | true | Grown only, rule G9: the transfer ties (`OrganicAsk::ties`) |
+| `organic_tie_swirl` | 1 | Grown only, rule G9: the ties' swirl, 0 to 1 (`OrganicAsk::tie_swirl`); outside it: refused |
 
 **Organic takes the regular Finish** (OR30, rule O16): a job with a weave region uses `rim_mm`, `cover_mm`, `skin` and `skin_width_mm` exactly as a cell lattice does. Rim stands only where the part's solid backs the region's outline; Covered closes every face; `skin` true lays the net skin over a weave region's open faces (its struts `skin_width_mm` wide when above 0); all off is None. There is no Organic finish key of its own.
 
@@ -158,12 +162,20 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
       {"band": "5 to 10 mm", "runs": 0, "kept": 0, "left_out": 0, "post": 0},
       {"band": "10 to 20 mm", "runs": 0, "kept": 0, "left_out": 0, "post": 0},
       {"band": "over 20 mm", "runs": 0, "kept": 0, "left_out": 0, "post": 0}]},
+  "grown": {"strands": 0, "grown_mm": 0, "kept_mm": 0, "cut_mm": {"outside": 0, "unsupported": 0,
+    "leads_to_nothing": 0, "crowded": 0, "repeat": 0}, "seeds_floor": 0, ...},   (Grown only)
   "ms": {"import": 27, "measure": 0, "read": 9, "cells": 0, "bars": 1, "open_space": 6,
          "carve": 5, "struts": 47, "solid": 1, "finish": 2, "write": 1, "total": 94}
 }
 ```
 
 - `layout` holds the counts the bridge's `LatticeLayoutResult` holds, under the same names (`bars` here is how many).
+- `grown` is written only when `organic_mode` is `"grown"` (a Traced or cube-lattice job's result is as it was): the
+  `GrowReport` (rule G12): the strands returned, the length grown and kept (curve length, mm; grown = kept + every
+  cut), the length cut by reason, then the seeds, steps, tip ends, branches and their refusals by cause, links,
+  GR-REWIND (`rewinds`, `rewind_places` and how each place ended: `rewind_grew_on`, `rewind_joined`,
+  `rewind_ended_on_joint`, `taken_back_mm`), thinning, regrowth (`holes`, `regrow_landed`, `regrow_failed`), ties
+  and the time, ms.
   `thin_solid`: cut cells print rule P8 (f) made solid (a cut piece thinner than its own strut, lying against solid); they are counted in `solid_pieces` too.
   `cells_by_stress`: cell size by stress (C22) was applied to the layout (false when it was not asked for, or one of its OFF cases holds).
   `weave_regions`, `strands`, `weave_bars` (Organic, Traced): the weave regions laid, the strands the trace gave for them, and the bars of those regions (in `bars` too). All 0 with no weave region.
