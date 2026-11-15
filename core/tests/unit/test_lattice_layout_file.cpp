@@ -1274,6 +1274,123 @@ static void test_organic_foot() {
     std::remove(p.c_str());
 }
 
+// O14, the round top (the file): the key reaches the mesh (true by default, false and true read, anything not a
+// yes/no refused); three cube parts make the same file, byte for byte, with no key, false and true.
+static void test_cube_files_round_top() {
+  const std::string head = R"({"mode": "lattice_file", "model": "a.step", )";
+  const std::string tail = R"("layout": {"region_ids": [1], "region_no_lattice": [0], "region_depth_mm": [4], "region_expand_mm": [0],
+                 "region_face_counts": [1], "region_faces": [1]}})";
+  CHECK(parse_file_job(head + tail).options.mesh.weave_round_top);
+  CHECK(!parse_file_job(head + R"("mesh": {"weave_round_top": false}, )" + tail).options.mesh.weave_round_top);
+  CHECK(parse_file_job(head + R"("mesh": {"weave_round_top": true}, )" + tail).options.mesh.weave_round_top);
+  bool refused = false;
+  try { (void)parse_file_job(head + R"("mesh": {"weave_round_top": 2}, )" + tail); } catch (const FileJobError& x) {
+    refused = has(x.what(), "weave_round_top");
+  }
+  CHECK(refused);
+  if (!mesh_available()) return;
+  const double sizes[3][3] = {{30, 30, 12}, {40, 24, 14}, {24, 36, 10}};
+  const char* keys[3] = {"", R"("mesh": {"weave_round_top": false}, )", R"("mesh": {"weave_round_top": true}, )"};
+  for (const auto& sz : sizes) {
+    std::string first;
+    bool same = true;
+    std::size_t bytes_made = 0;
+    for (int k = 0; k < 3; ++k) {
+      std::string text = kBlockJob;
+      const std::string at = "\"layout\": {";
+      text.replace(text.find(at), at.size(), std::string(keys[k]) + at);
+      const std::string path = kTmp + "/lattice_file_cube_round_top.stl";
+      std::remove(path.c_str());
+      const FileResult r = make_lattice_file(box_model(sz[0], sz[1], sz[2]), parse_file_job(text), path);
+      CHECK(r.ok);
+      const std::string made = slurp(path);
+      if (k == 0) { first = made; bytes_made = made.size(); }
+      same = same && !made.empty() && made == first;
+      std::remove(path.c_str());
+    }
+    std::printf("cube part %.0f x %.0f x %.0f: the file %zu bytes, the same with the round top on and off %d\n", sz[0], sz[1], sz[2],
+                bytes_made, same ? 1 : 0);
+    CHECK(same);
+  }
+}
+
+// O14 (the traced pocket): stage 1b's traced pocket through the file job with the round top off and on (the default,
+// feet as default): the layer check ends the same (clean, the same places left out, the same posts and stands, the same
+// weave bars kept and left unheld); with the round top the file is not the square bars' file, and is one closed body.
+static void test_organic_round_top() {
+  if (!mesh_available()) return;
+  const std::string model_path = kTmp + "/lattice_file_round_top.stl";
+  const std::string tensor_path = kTmp + "/lattice_file_round_top.tensor";
+  const std::string job_path = kTmp + "/lattice_file_round_top_job.json";
+  const std::string stl = kTmp + "/round_top_lattice.stl";
+  const std::string result = kTmp + "/" + kFileResultName;
+  write_stl_file(model_path, pocket_mesh());
+  int wall = -1;
+  {
+    std::remove(face_overrides_sidecar_path(model_path).c_str());
+    const StepModel plain = import_part_file_resolved(model_path);
+    FaceOverrides ov;
+    ov.paint_faces.emplace_back();
+    for (std::size_t t = 0; t < plain.mesh.triangles.size(); ++t)
+      if (on_pocket_wall(plain.mesh, plain.mesh.triangles[t])) ov.paint_faces.back().push_back(static_cast<int>(t));
+    save_face_overrides(face_overrides_sidecar_path(model_path), ov);
+    wall = plain.face_count;
+  }
+  CHECK(write_tensor_file(tensor_path, hoop_field()));
+  struct Made { FileResult r; TriangleMesh mesh; };
+  auto make = [&](const std::string& mesh_key) {
+    std::ofstream f(job_path, std::ios::binary | std::ios::trunc);
+    f << R"({"mode": "lattice_file", "model": "lattice_file_round_top.stl", "output": "round_top_lattice.stl", "tensor": "lattice_file_round_top.tensor", )"
+      << mesh_key
+      << R"("layout": {"region_ids": [1], "region_no_lattice": [0], "region_depth_mm": [4], "region_expand_mm": [0],
+                "region_face_counts": [1], "region_faces": [)" << wall
+      << R"(], "region_weave": [true], "organic_spacing_mm": 4, "organic_width_mm": 0.9}})";
+    f.close();
+    std::remove(stl.c_str());
+    Made m;
+    m.r = run_file_job(job_path, kTmp);
+    m.mesh = read_stl_file(stl).mesh;
+    return m;
+  };
+  const Made off = make(R"("mesh": {"weave_round_top": false}, )");
+  const Made on = make("");
+  CHECK(off.r.ok && on.r.ok);
+  if (!off.r.ok || !on.r.ok) return;
+  const auto& a = off.r.made;
+  const auto& b = on.r.made;
+  bool same_drop = a.left_out_at.size() == b.left_out_at.size();
+  for (std::size_t i = 0; same_drop && i < a.left_out_at.size(); ++i)
+    same_drop = std::fabs(a.left_out_at[i].x - b.left_out_at[i].x) < 1e-9 && std::fabs(a.left_out_at[i].y - b.left_out_at[i].y) < 1e-9 &&
+                std::fabs(a.left_out_at[i].z - b.left_out_at[i].z) < 1e-9;
+  bool same_posts = a.posts.size() == b.posts.size();
+  for (std::size_t i = 0; same_posts && i < a.posts.size(); ++i)
+    same_posts = std::fabs(a.posts[i].x - b.posts[i].x) < 1e-9 && std::fabs(a.posts[i].y - b.posts[i].y) < 1e-9 &&
+                 std::fabs(a.posts[i].z_top - b.posts[i].z_top) < 1e-9 && std::fabs(a.posts[i].z_bottom - b.posts[i].z_bottom) < 1e-9;
+  const auto [shells_off, open_off] = shells_and_open(off.mesh);
+  const auto [shells_on, open_on] = shells_and_open(on.mesh);
+  bool same_file = off.mesh.triangles.size() == on.mesh.triangles.size();
+  for (std::size_t i = 0; same_file && i < off.mesh.vertices.size(); ++i)
+    same_file = off.mesh.vertices[i].x == on.mesh.vertices[i].x && off.mesh.vertices[i].y == on.mesh.vertices[i].y &&
+                off.mesh.vertices[i].z == on.mesh.vertices[i].z;
+  for (const Made* m : {&off, &on}) {
+    const auto& x = m->r.made;
+    std::printf("organic round top %s: %zu triangles, %.3f mm3, %zu bridges; layer check clean %d, builds %d, found per pass",
+                m == &off ? "off" : "on ", m->mesh.triangles.size(), x.mesh.mm3, x.mesh.bridges, x.print_clean ? 1 : 0, x.builds);
+    for (int v : x.found_per_pass) std::printf(" %d", v);
+    std::printf("; left out at %zu places, kept any length %zu, weave left unheld %zu, posts %zu (stands %zu); feet %zu; "
+                "%zu shells, %zu open edges\n", x.left_out_at.size(), x.mesh.kept_any_length, x.mesh.weave_left_unheld,
+                x.posts.size(), x.stands_added, x.mesh.feet, m == &off ? shells_off : shells_on, m == &off ? open_off : open_on);
+  }
+  CHECK(a.print_clean == b.print_clean && a.builds == b.builds && a.found_per_pass == b.found_per_pass);
+  CHECK(same_drop && same_posts && a.stands_added == b.stands_added);
+  CHECK(a.mesh.kept_any_length == b.mesh.kept_any_length && a.mesh.weave_left_unheld == b.mesh.weave_left_unheld &&
+        a.mesh.bars == b.mesh.bars && a.mesh.bridges == b.mesh.bridges);
+  CHECK(b.mesh.bridges > 0 && !same_file && b.mesh.mm3 < a.mesh.mm3);
+  CHECK(shells_on == 1 && open_on == 0);
+  for (const std::string& p : {model_path, face_overrides_sidecar_path(model_path), tensor_path, job_path, stl, result})
+    std::remove(p.c_str());
+}
+
 // O12, the file job's keys for the spacing range: organic_spacing_min_mm with organic_spacing_max_mm, and
 // organic_spacing_exponent; organic_spacing_mm alone still means both ends; the reference is the layout's own. The
 // result's "organic" object carries the spacing used (smallest, largest, mean).
@@ -1368,6 +1485,8 @@ int main() {
   test_organic_foot();
   test_cube_files_any_foot();
   test_organic_range_keys();
+  test_cube_files_round_top();
+  test_organic_round_top();
   if (!mesh_available()) std::printf("no mesh library in this build: the job says so\n");
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;

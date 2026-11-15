@@ -17,7 +17,8 @@
 //
 // His print rules that live here (2026-11-12): a strut that lies flatter than 30 degrees
 // is a BRIDGE: a square bar, its underside level, so its first layer across the gap is one
-// straight full-width line. The part is printed standing on its lowest z.
+// straight full-width line (a weave's may have a round top over that underside: O14, `weave_round_top`). The part is
+// printed standing on its lowest z.
 // The other two (flat bed face, nothing starting in mid-air) are judged on the finished
 // mesh layer by layer; what they find comes back in as `drop_at` and `posts`.
 //
@@ -112,6 +113,16 @@ struct MeshSpec {
   // unchanged). Below 0 = half the bar's own width (the file job's default: FileOptions). Joints between struts, ends
   // cut by the open surface and every cube-lattice bar are unchanged.
   double weave_foot_mm = 0.0;
+  // O14, a round top on a weave's shallow struts (the owner approved "give shallow struts a flat bottom with a rounded
+  // top instead of a square bar", 2026-11-14). ONLY a bar of a weave region that is a bridge (bar_is_bridge) is written
+  // with a D-shaped section: its underside the same flat plane as the square bar's (same plane, same width), its two
+  // sides rising straight for half the strut's width, its top a half round of the strut's width made of half
+  // `bar_sides` flat facets (its corners on the round); as wide and as tall as the square bar. Its run-on, its foot
+  // (O11: the D widened by f each side and f upward, its round's radius r + f, the underside kept) and the balls at its
+  // joints are as for the square bar. Every cube-lattice bridge stays square. false = the square bar, the mesh as
+  // before: the writer's own default, so every caller that does not ask is unchanged; the file job's default is true
+  // (file_mesh_defaults).
+  bool weave_round_top = false;
   // Set, the work is given up between its steps and LayCancelled is thrown.
   const std::atomic<bool>* stop = nullptr;
 };

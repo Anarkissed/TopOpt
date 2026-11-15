@@ -30,10 +30,11 @@
 namespace topopt::lattice_layout {
 
 // The writer's settings a file job starts from: MeshSpec's, with the blended foot on (O11: half the bar's width, for
-// a weave's ends in the solid; nothing else changes).
+// a weave's ends in the solid) and the round top on a weave's shallow struts (O14); nothing else changes.
 inline MeshSpec file_mesh_defaults() {
   MeshSpec m;
   m.weave_foot_mm = -1.0;
+  m.weave_round_top = true;
   return m;
 }
 
