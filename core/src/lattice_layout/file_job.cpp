@@ -116,7 +116,8 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "strength", "small_cells_in_thin_walls", "one_grid", "cells_by_stress", "bars", "join_loose", "skin",
        "skin_width_mm", "skin_reach_cells", "drop_loose", "by_stress", "dial_light", "dial_heavy", "width_light_mm",
        "width_heavy_mm", "reference_mpa", "percentile", "response", "region_weave", "organic_spacing_mm",
-       "organic_width_mm", "organic_spacing_min_mm", "organic_spacing_max_mm", "organic_spacing_exponent"},
+       "organic_width_mm", "organic_spacing_min_mm", "organic_spacing_max_mm", "organic_spacing_exponent",
+       "organic_shape_fit"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -210,8 +211,9 @@ Settings settings_from(const json::Value& in, const std::string& w) {
 // Organic, Traced: the trace's ask, from the layout object (its keys are let through by settings_from). The spacing is
 // needed when any region is a weave: one spacing ("organic_spacing_mm", both ends), or the range (O12:
 // "organic_spacing_min_mm" and "organic_spacing_max_mm" together, "organic_spacing_exponent" 1 when not given), never
-// both. The reference is the layout's own ("reference_mpa", "percentile"). The width is 0 (the thinnest strut) or at
-// least the thinnest strut.
+// both. The reference is the layout's own ("reference_mpa", "percentile"). O13, "organic_shape_fit": true when not
+// given, as the old run reads a job that does not say. The width is 0 (the thinnest strut) or at least the thinnest
+// strut.
 OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::string& w) {
   OrganicAsk a;
   bool any_weave = false;
@@ -250,6 +252,7 @@ OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::str
                                           "organic_spacing_max_mm)");
   a.reference_mpa = s.stress.reference_mpa;
   a.percentile = s.stress.percentile;
+  a.shape_fit = flag(in, "organic_shape_fit", a.shape_fit, w);
   const double thinnest = s.bead_mm * s.min_strut_lines;
   if (!(std::isfinite(a.width_mm) && a.width_mm >= 0.0))
     json::fail(w + ".organic_width_mm", "must be 0 (the thinnest strut) or more");

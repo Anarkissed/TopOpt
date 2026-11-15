@@ -8,6 +8,8 @@
 #include <limits>
 #include <stdexcept>
 
+#include "topopt/grading.hpp"
+#include "topopt/lattice.hpp"
 #include "topopt/organic_lattice.hpp"
 #include "topopt/voxel.hpp"
 
@@ -93,15 +95,26 @@ std::vector<std::size_t> straighten_points(const std::vector<Vec3>& points, doub
   return kept;
 }
 
-// O12. The old run (run_job.cpp, run_organic_step, with a cell window) sets d = cell_max - (cell_max - cell_min) * f^e
-// per candidate, f = (rho - rho_lo) / (rho_hi - rho_lo): the grading law's relative density normalised over the latticed
-// voxels, the exponent e 0.5 (minimize_plastic off) or 2 (on). Its rho is itself a function of the von Mises s:
-// Aesthetic, rho = lo + (hi - lo) * (s / P95)^(g * w) (w again 0.5 or 2); Structural, rho = rho_max * (s / (allowable
-// x utilisation))^g, held to the band. Here f is s / reference directly, held to 0 .. 1, with one exponent; so where
-// the old run's region minimum stress is 0 and g * w * e = exponent, the two agree. They differ: (a) a uniform stress
-// gives f = 1 here (the tightest) and f = 0 there (rho_hi = rho_lo: the widest); (b) the old f is rescaled so the
-// quietest latticed voxel is always at cell_max and the busiest at cell_min, here only stress at or over the reference
-// reaches min and only zero stress reaches max; (c) no whole-synthesised wall takes the middle (no made-up stress here).
+// O12 and O13: the old run's own spacing field for an ordinary Traced job (run_job.cpp, run_organic_step, with a cell
+// window; its density from grade_lattice, Aesthetic intent). What the old run does, step by step:
+//   1. grade_lattice gives each latticed voxel rho = lo + (hi - lo) * u^(g * w), u = von Mises / the 95th percentile
+//      of the region's von Mises held to 0 .. 1, g the job's demand_exponent, w = 2 (on the geometry path w is always 2;
+//      on the analyze path it follows minimize_plastic: 2 on, 0.5 off); lo and hi the aesthetic band (2 x octet's
+//      rho_min and its rho_max), inside the certifiable band, so no clamp acts.
+//   2. run_organic_step stretches it over the latticed voxels, f = (rho - rho_lo) / (rho_hi - rho_lo) (0 when they are
+//      equal), f = f^e with e = 2 (minimize_plastic on) or 0.5 (off), and d = cell_max - (cell_max - cell_min) * f. The
+//      band ends lo and hi cancel in that stretch, so no material number is needed: f = ((g - g_lo) / span)^2 with
+//      g = u^(2 g). Here both exponents are 2, fixed (minimize_plastic on, the app's default; the owner's rule is that
+//      minimize_plastic has no bearing on the lattice).
+//   3. The floors: a voxel is traced only where rho > 0 and d > 0 (always, here); the shape fit never goes under
+//      cell_min; the tracer raises the spacing to its print floor (0.5 t sqrt(3 pi)) and to one voxel, as it does here.
+//   4. Shape fit (grading.organic_shape_fit, on unless the job turns it off), see the header: cap = min(W / N*, 2 k h),
+//      held to cell_min, and the spacing takes the cap where it is smaller.
+// Where it is not the old run: a whole-synthesised wall takes the window's middle there (there is no made-up stress
+// on this path); a stated reference (reference_mpa) replaces the percentile (the old run has no such key).
+// Structural (not built here): rho = rho_max * (s / s_max)^g (s_max the region's highest von Mises, not a percentile)
+// held to octet's band [rho_min, rho_max], so every voxel under (rho_min / rho_max)^(1/g) of the peak sits at rho_min,
+// the widest end; then the same stretch and exponent e.
 OrganicSpacing organic_spacing(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask) {
   OrganicSpacing out;
   if (field.empty()) return out;
@@ -118,8 +131,15 @@ OrganicSpacing organic_spacing(const Domain& domain, int region, const TensorFie
   const std::size_t n = static_cast<std::size_t>(field.nx) * field.ny * field.nz;
   out.candidate.assign(n, 0);
   out.spacing_mm.assign(n, 0.0);
+  std::vector<char> weave_ids;   // by region id: is it a weave region
+  for (const Region& r : domain.spec().regions)
+    if (r.role == Role::Lattice && r.weave && r.id >= 0) {
+      if (static_cast<std::size_t>(r.id) >= weave_ids.size()) weave_ids.resize(static_cast<std::size_t>(r.id) + 1, 0);
+      weave_ids[static_cast<std::size_t>(r.id)] = 1;
+    }
   const Domain::Probe probe = domain.probe();
   std::vector<double> vm(n, 0.0);
+  std::vector<char> weave(n, 0), in_part(n, 0);
   std::vector<double> seen;
   for (int k = 0; k < field.nz; ++k)
     for (int j = 0; j < field.ny; ++j)
@@ -127,28 +147,104 @@ OrganicSpacing organic_spacing(const Domain& domain, int region, const TensorFie
         const Vec3 c{field.origin.x + (i + 0.5) * field.spacing, field.origin.y + (j + 0.5) * field.spacing,
                      field.origin.z + (k + 0.5) * field.spacing};
         const Where w = probe.where(c);
-        if (!w.lattice() || w.id != region) continue;
         const std::size_t e = field.index(i, j, k);
-        out.candidate[e] = 1;
-        ++out.candidates;
+        in_part[e] = w.why != Why::Outside;
+        const bool of_weave = w.lattice() && (w.id == region || (w.id >= 0 && static_cast<std::size_t>(w.id) <
+                                                                                     weave_ids.size() &&
+                                                                 weave_ids[static_cast<std::size_t>(w.id)]));
+        if (!of_weave) continue;
+        weave[e] = 1;
         const double* t = &field.voigt[6 * e];
         const double a = t[0] - t[1], b = t[1] - t[2], d = t[2] - t[0];
         vm[e] = std::sqrt(std::max(0.0, 0.5 * (a * a + b * b + d * d) + 3.0 * (t[3] * t[3] + t[4] * t[4] + t[5] * t[5])));
         seen.push_back(vm[e]);
+        if (w.id != region) continue;
+        out.candidate[e] = 1;
+        ++out.candidates;
       }
   if (out.candidates == 0) return out;
+  if (one || hi == lo) {
+    for (std::size_t e = 0; e < n; ++e)
+      if (out.candidate[e]) out.spacing_mm[e] = lo;
+    return out;
+  }
+  // O12: the reference, then g per weave voxel and its least and greatest over the weave.
   double ref = ask.reference_mpa;
-  if (!(ref > 0.0) && !one) {
+  if (!(ref > 0.0)) {
     std::sort(seen.begin(), seen.end());
     const double q = std::clamp(ask.percentile, 0.0, 1.0);
     ref = seen[static_cast<std::size_t>(std::floor(q * static_cast<double>(seen.size() - 1)))];
   }
-  out.reference_mpa = one ? 0.0 : ref;
+  out.reference_mpa = ref;
+  const double g_exp = ask.spacing_exponent * kAestheticOpenExponent;   // the grading law's u^(g * w)
+  std::vector<double> g(n, 0.0);
+  double g_lo = 0.0, g_hi = 0.0;
+  bool any = false;
+  for (std::size_t e = 0; e < n; ++e) {
+    if (!weave[e]) continue;
+    const double u = grading_demand_fraction(GradingIntent::Aesthetic, vm[e], ref, 1.0);
+    g[e] = std::pow(u, g_exp);
+    g_lo = any ? std::min(g_lo, g[e]) : g[e];
+    g_hi = any ? std::max(g_hi, g[e]) : g[e];
+    any = true;
+  }
+  const double span = g_hi - g_lo;
   for (std::size_t e = 0; e < n; ++e) {
     if (!out.candidate[e]) continue;
-    if (one || hi == lo) { out.spacing_mm[e] = lo; continue; }
-    const double f = ref > 0.0 ? std::clamp(vm[e] / ref, 0.0, 1.0) : 0.0;
-    out.spacing_mm[e] = hi - (hi - lo) * std::pow(f, ask.spacing_exponent);
+    double f = span > 0.0 ? (g[e] - g_lo) / span : 0.0;
+    f = std::pow(std::min(1.0, std::max(0.0, f)), kAestheticOpenExponent);   // run_organic_step's f_exponent, on
+    out.spacing_mm[e] = hi - (hi - lo) * f;
+  }
+  if (!ask.shape_fit) return out;
+  // O13: the steps to the weave's outline (two passes over the faces' neighbours; a voxel on the grid's face is one
+  // step from it), and the part's member width.
+  const int nx = field.nx, ny = field.ny, nz = field.nz;
+  const long long big = 1LL << 30;
+  std::vector<long long> steps(n, big);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const std::size_t e = field.index(i, j, k);
+        if (!weave[e]) steps[e] = 0;
+        else if (i == 0 || j == 0 || k == 0 || i == nx - 1 || j == ny - 1 || k == nz - 1) steps[e] = 1;
+      }
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const std::size_t e = field.index(i, j, k);
+        if (i) steps[e] = std::min(steps[e], steps[field.index(i - 1, j, k)] + 1);
+        if (j) steps[e] = std::min(steps[e], steps[field.index(i, j - 1, k)] + 1);
+        if (k) steps[e] = std::min(steps[e], steps[field.index(i, j, k - 1)] + 1);
+      }
+  for (int k = nz - 1; k >= 0; --k)
+    for (int j = ny - 1; j >= 0; --j)
+      for (int i = nx - 1; i >= 0; --i) {
+        const std::size_t e = field.index(i, j, k);
+        if (i + 1 < nx) steps[e] = std::min(steps[e], steps[field.index(i + 1, j, k)] + 1);
+        if (j + 1 < ny) steps[e] = std::min(steps[e], steps[field.index(i, j + 1, k)] + 1);
+        if (k + 1 < nz) steps[e] = std::min(steps[e], steps[field.index(i, j, k + 1)] + 1);
+      }
+  VoxelGrid grid;
+  grid.nx = nx;
+  grid.ny = ny;
+  grid.nz = nz;
+  grid.spacing = field.spacing;
+  grid.origin = field.origin;
+  grid.tags.assign(n, VoxelTag::Interior);
+  std::vector<double> part(n, 0.0);
+  for (std::size_t e = 0; e < n; ++e) part[e] = in_part[e] ? 1.0 : 0.0;
+  const std::vector<double> width = local_member_thickness_mm(grid, part, 0.5, 32);
+  const double n_star = lattice_cells_per_member_min(LatticeTopology::Octet);
+  for (std::size_t e = 0; e < n; ++e) {
+    if (!out.candidate[e]) continue;
+    const double w = width[e];
+    const double cap_member = (w > 0.0 && std::isfinite(w)) ? w / n_star : std::numeric_limits<double>::infinity();
+    const double cap_outline = 2.0 * static_cast<double>(steps[e]) * field.spacing;
+    double cap = std::min(cap_member, cap_outline);
+    if (cap < lo) cap = lo;
+    if (!(cap > 0.0) || !(cap < out.spacing_mm[e])) continue;
+    out.spacing_mm[e] = cap;
+    ++out.shape_fit_tightened;
   }
   return out;
 }

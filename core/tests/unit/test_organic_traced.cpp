@@ -8,10 +8,13 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <map>
 #include <stdexcept>
 #include <vector>
 
+#include "topopt/grading.hpp"
+#include "topopt/lattice.hpp"
 #include "topopt/lattice_layout.hpp"
 #include "topopt/lattice_layout_file.hpp"
 #include "topopt/lattice_layout_mesh.hpp"
@@ -729,6 +732,227 @@ static void test_range_ramp() {
   CHECK(hot_strand == 3.0 && cold_strand > 7.0);
 }
 
+// G4 (O12, O13): the field equals the old run's own, to 1e-6, on a made-up block. The old law, called as the old run
+// calls it: grade_lattice (Aesthetic, organic geometry, the job's demand exponent) for the density, then
+// run_organic_step's arithmetic as it stands in run_job.cpp (it sits in a file of its own and cannot be called): the
+// stretch over the latticed voxels, f^2 (minimize_plastic on), the window line, and its shape fit (2 x the steps to the
+// nearest voxel not latticed, the member width over 5, held to cell_min). The block is 24 x 16 x 20 mm on a grid with
+// 2 mm of air round it; the weave is under its top face, 14 mm deep (6 mm of solid floor); the stress varies in all
+// three axes and is nowhere zero.
+static std::vector<double> old_run_spacing(const VoxelGrid& grid, const std::vector<double>& density,
+                                           const std::vector<double>& vm, const std::vector<char>& region, double gamma,
+                                           double cell_min, double cell_max, bool shape_fit) {
+  GradingLawParams gp;
+  gp.topology = LatticeTopology::Octet;
+  gp.cell_mode = CellSizeMode::Fixed;
+  gp.target_cell_size_mm = cell_min;
+  gp.min_extrudable_width_mm = 0.9;
+  gp.demand_exponent = gamma;
+  gp.organic_geometry = true;
+  gp.intent = GradingIntent::Aesthetic;
+  const GradedField gf = grade_lattice(grid, density, vm, &region, gp, 0.5);
+  const std::vector<char>& lattice_mask = gf.posture.mask;
+  const std::vector<double>& relative_density = gf.posture.relative_density;
+  const std::size_t n = grid.voxel_count();
+  // run_organic_step, with a window and minimize_plastic on:
+  double rho_lo = 0.0, rho_hi = 0.0;
+  bool any_rho = false;
+  for (std::size_t e = 0; e < n; ++e) {
+    if (!lattice_mask[e]) continue;
+    const double r = relative_density[e];
+    if (!any_rho) { rho_lo = rho_hi = r; any_rho = true; }
+    rho_lo = std::min(rho_lo, r);
+    rho_hi = std::max(rho_hi, r);
+  }
+  const double rho_span = rho_hi - rho_lo;
+  const double f_exponent = kAestheticOpenExponent;
+  std::vector<char> cand(n, 0);
+  std::vector<double> spacing(n, 0.0);
+  for (std::size_t e = 0; e < n; ++e) {
+    if (!lattice_mask[e]) continue;
+    const double rho = relative_density[e];
+    if (!(rho > 0.0)) continue;
+    double f = rho_span > 0.0 ? (rho - rho_lo) / rho_span : 0.0;
+    f = std::pow(std::min(1.0, std::max(0.0, f)), f_exponent);
+    const double d = cell_max - (cell_max - cell_min) * f;
+    if (!(d > 0.0)) continue;
+    cand[e] = 1;
+    spacing[e] = d;
+  }
+  if (!shape_fit) return spacing;
+  const std::vector<double> width = local_member_thickness_mm(grid, density, 0.5, 32);
+  const double n_star = lattice_cells_per_member_min(LatticeTopology::Octet);
+  const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
+  const long long BIG = 1LL << 30;
+  std::vector<long long> dist(n, BIG);
+  auto at = [&](int i, int j, int k) { return (static_cast<std::size_t>(k) * ny + j) * nx + i; };
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const std::size_t e = at(i, j, k);
+        if (!cand[e]) { dist[e] = 0; continue; }
+        if (i == 0 || j == 0 || k == 0 || i == nx - 1 || j == ny - 1 || k == nz - 1) dist[e] = 1;
+      }
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const std::size_t e = at(i, j, k);
+        if (i) dist[e] = std::min(dist[e], dist[at(i - 1, j, k)] + 1);
+        if (j) dist[e] = std::min(dist[e], dist[at(i, j - 1, k)] + 1);
+        if (k) dist[e] = std::min(dist[e], dist[at(i, j, k - 1)] + 1);
+      }
+  for (int k = nz - 1; k >= 0; --k)
+    for (int j = ny - 1; j >= 0; --j)
+      for (int i = nx - 1; i >= 0; --i) {
+        const std::size_t e = at(i, j, k);
+        if (i + 1 < nx) dist[e] = std::min(dist[e], dist[at(i + 1, j, k)] + 1);
+        if (j + 1 < ny) dist[e] = std::min(dist[e], dist[at(i, j + 1, k)] + 1);
+        if (k + 1 < nz) dist[e] = std::min(dist[e], dist[at(i, j, k + 1)] + 1);
+      }
+  for (std::size_t e = 0; e < n; ++e) {
+    if (!cand[e]) continue;
+    const double w = width[e];
+    const double cap_member = (w > 0.0 && std::isfinite(w)) ? w / n_star : std::numeric_limits<double>::infinity();
+    const double cap_boundary = 2.0 * static_cast<double>(dist[e]) * grid.spacing;
+    double cap = std::min(cap_member, cap_boundary);
+    if (cap < cell_min) cap = cell_min;
+    if (!(cap > 0.0) || !(cap < spacing[e])) continue;
+    spacing[e] = cap;
+  }
+  return spacing;
+}
+static void test_old_law_block() {
+  PartMeasure pm{weld_mesh(box(24, 16, 20))};
+  Domain d{pm, [] {
+             DomainSpec s;
+             s.regions = {face_region(1, {12, 8, 20}, {0, 0, -1}, 12, 8, 14)};
+             s.regions[0].weave = true;
+             return s;
+           }()};
+  TensorField field;
+  field.origin = {-2, -2, -2};
+  field.spacing = 1.0;
+  field.nx = 28; field.ny = 20; field.nz = 24;
+  const std::size_t n = 28u * 20u * 24u;
+  field.voigt.assign(6 * n, 0.0);
+  VoxelGrid grid;
+  grid.nx = field.nx; grid.ny = field.ny; grid.nz = field.nz; grid.spacing = 1.0; grid.origin = field.origin;
+  grid.tags.assign(n, VoxelTag::Interior);
+  std::vector<double> density(n, 0.0), vm(n, 0.0);
+  std::vector<char> region(n, 0);
+  auto pr = d.probe();
+  std::size_t in_region = 0;
+  for (int k = 0; k < field.nz; ++k)
+    for (int j = 0; j < field.ny; ++j)
+      for (int i = 0; i < field.nx; ++i) {
+        const Vec3 c = grid.voxel_center(i, j, k);
+        const std::size_t e = field.index(i, j, k);
+        double* v = &field.voigt[6 * e];
+        v[0] = 2.0 + 0.04 * c.x * c.x;
+        v[1] = 3.0 * std::sin(0.3 * c.y) * std::sin(0.3 * c.y);
+        v[2] = 0.15 * c.z * c.x / 24.0;
+        v[3] = 0.05 * c.z;
+        v[4] = 0.02 * c.x * c.y / 10.0;
+        const double a = v[0] - v[1], b = v[1] - v[2], cc = v[2] - v[0];
+        vm[e] = std::sqrt(0.5 * (a * a + b * b + cc * cc) + 3.0 * (v[3] * v[3] + v[4] * v[4] + v[5] * v[5]));
+        const Where w = pr.where(c);
+        density[e] = w.why != Why::Outside ? 1.0 : 0.0;
+        if (w.lattice() && w.id == 1) { region[e] = 1; ++in_region; }
+      }
+  for (const double gamma : {1.0, 1.5})
+    for (const bool fit : {true, false}) {
+      OrganicAsk ask;
+      ask.spacing_exponent = gamma;
+      ask.shape_fit = fit;
+      const OrganicSpacing sp = organic_spacing(d, 1, field, ask);
+      const std::vector<double> old = old_run_spacing(grid, density, vm, region, gamma, 3.0, 8.0, fit);
+      double worst = 0.0, sum = 0.0, lo = 1e9, hi = 0.0;
+      std::size_t both = 0, one_only = 0;
+      for (std::size_t e = 0; e < n; ++e) {
+        const bool a = sp.candidate[e] != 0, b = old[e] > 0.0;
+        if (a != b) { ++one_only; continue; }
+        if (!a) continue;
+        ++both;
+        const double diff = std::fabs(sp.spacing_mm[e] - old[e]);
+        worst = std::max(worst, diff);
+        sum += diff;
+        lo = std::min(lo, old[e]);
+        hi = std::max(hi, old[e]);
+      }
+      std::printf("old law, demand exponent %.1f, shape fit %d: %zu voxels in both (%zu in one only), old field %.4f to %.4f; "
+                  "largest difference %.3g mm, mean %.3g; shape fit tightened %zu\n", gamma, fit ? 1 : 0, both, one_only, lo, hi,
+                  worst, both ? sum / static_cast<double>(both) : 0.0, sp.shape_fit_tightened);
+      CHECK(both == in_region && in_region > 0 && one_only == 0);
+      CHECK(worst <= 1e-6);
+      // the old law reaches both ends; with the fit, this 16 mm wide member (W / 5 = 3.2 mm) holds nothing wider
+      CHECK(lo == 3.0 && (fit ? hi < 8.0 : hi == 8.0));
+      CHECK(fit ? sp.shape_fit_tightened > 0 : sp.shape_fit_tightened == 0);
+    }
+}
+
+// G5 (O13): the shape fit tightens the spacing toward the weave's outline, over a band of half the spacing, and
+// leaves the middle alone. A 32 mm cube, all of it one weave region, with no stress (every voxel at the widest), the
+// range 3 to 5, a grid with 2 mm of air round it. Along the line in from the top face's middle: 3 (one step from the
+// outline: 2 mm, held to 3), 4 (two steps), then 5 (three steps give 6: no cap). The middle 20 mm (three steps or more
+// from every face) stays at 5; nothing is ever wider than with the fit off, nor under 3.
+static void test_shape_fit() {
+  PartMeasure pm{weld_mesh(box(32, 32, 32))};
+  Domain d{pm, [] {
+             DomainSpec s;
+             s.regions = {face_region(1, {16, 16, 32}, {0, 0, -1}, 16, 16, 32)};
+             s.regions[0].weave = true;
+             return s;
+           }()};
+  TensorField field;
+  field.origin = {-2, -2, -2};
+  field.spacing = 1.0;
+  field.nx = field.ny = field.nz = 36;
+  field.voigt.assign(6u * 36u * 36u * 36u, 0.0);
+  OrganicAsk ask;
+  ask.spacing_min_mm = 3.0;
+  ask.spacing_max_mm = 5.0;
+  CHECK(ask.shape_fit);   // on when not asked
+  const OrganicSpacing on = organic_spacing(d, 1, field, ask);
+  ask.shape_fit = false;
+  const OrganicSpacing off = organic_spacing(d, 1, field, ask);
+  std::size_t wider = 0, under = 0, middle_moved = 0, middle = 0, tightened = 0;
+  for (int k = 0; k < 36; ++k)
+    for (int j = 0; j < 36; ++j)
+      for (int i = 0; i < 36; ++i) {
+        const std::size_t e = field.index(i, j, k);
+        if (!on.candidate[e]) continue;
+        wider += on.spacing_mm[e] > off.spacing_mm[e];
+        under += on.spacing_mm[e] < 3.0;
+        tightened += on.spacing_mm[e] < off.spacing_mm[e];
+        const bool mid = i >= 8 && i <= 27 && j >= 8 && j <= 27 && k >= 8 && k <= 27;
+        middle += mid;
+        middle_moved += mid && on.spacing_mm[e] != 5.0;
+      }
+  const double top1 = on.spacing_mm[field.index(18, 18, 33)], top2 = on.spacing_mm[field.index(18, 18, 32)],
+               top3 = on.spacing_mm[field.index(18, 18, 31)], top4 = on.spacing_mm[field.index(18, 18, 30)];
+  std::printf("shape fit, 32 mm cube, no stress, 3 to 5: in from the top %.4f %.4f %.4f %.4f; tightened %zu of %zu; middle %zu, "
+              "moved %zu; wider than off %zu, under 3 %zu\n", top1, top2, top3, top4, tightened, on.candidates, middle,
+              middle_moved, wider, under);
+  CHECK(off.candidates == 32u * 32u * 32u && on.candidates == off.candidates);
+  for (std::size_t e = 0; e < off.spacing_mm.size(); ++e)
+    if (off.candidate[e] && off.spacing_mm[e] != 5.0) { CHECK(false); break; }
+  CHECK(top1 == 3.0 && top2 == 4.0 && top3 == 5.0 && top4 == 5.0);
+  CHECK(middle == 20u * 20u * 20u && middle_moved == 0);
+  CHECK(wider == 0 && under == 0 && tightened == on.shape_fit_tightened && tightened > 0 && off.shape_fit_tightened == 0);
+}
+
+// G6: with the shape fit on (as by default), the range 4 to 4 still gives stage 1b's strands, to the bit.
+static void test_range_equal_ends_fit() {
+  Block b;
+  OrganicAsk range = b.ask;
+  range.spacing_mm = 0.0;
+  range.spacing_min_mm = range.spacing_max_mm = 4.0;
+  range.shape_fit = true;
+  const OrganicSpacing sp = organic_spacing(b.d, 1, b.field, range);
+  CHECK(sp.shape_fit_tightened == 0);
+  CHECK(same_strands(trace_strands(b.d, 1, b.field, b.ask), trace_strands(b.d, 1, b.field, range)));
+}
+
 int main() {
   test_traced_block();
   test_traced_repeat();
@@ -737,6 +961,9 @@ int main() {
   test_whole_run();
   test_range_equal_ends();
   test_range_ramp();
+  test_old_law_block();
+  test_shape_fit();
+  test_range_equal_ends_fit();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }

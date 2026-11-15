@@ -1351,6 +1351,23 @@ static void test_organic_range_keys() {
   CHECK(has(text, b));
 }
 
+// O13, the file job's key for the shape fit: "organic_shape_fit", true when not given (as the old run reads a job
+// that does not say); false turns it off; anything but true or false is refused, the key named.
+static void test_organic_shape_fit_key() {
+  const std::string head = R"({"mode": "lattice_file", "model": "a.step", "tensor": "stress.tensor",
+      "layout": {"region_ids": [3], "region_no_lattice": [0], "region_depth_mm": [4], "region_expand_mm": [0],
+                 "region_face_counts": [1], "region_faces": [1], "region_weave": [true],
+                 "organic_spacing_min_mm": 3, "organic_spacing_max_mm": 8)";
+  CHECK(parse_file_job(head + "}}").organic.shape_fit);
+  CHECK(parse_file_job(head + R"(, "organic_shape_fit": true}})").organic.shape_fit);
+  CHECK(!parse_file_job(head + R"(, "organic_shape_fit": false}})").organic.shape_fit);
+  bool refused = false;
+  try { (void)parse_file_job(head + R"(, "organic_shape_fit": 1}})"); } catch (const FileJobError& x) {
+    refused = has(x.what(), "organic_shape_fit");
+  }
+  CHECK(refused);
+}
+
 int main() {
   test_tensor_file();
   test_organic_job();
@@ -1368,6 +1385,7 @@ int main() {
   test_organic_foot();
   test_cube_files_any_foot();
   test_organic_range_keys();
+  test_organic_shape_fit_key();
   if (!mesh_available()) std::printf("no mesh library in this build: the job says so\n");
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;

@@ -32,33 +32,49 @@ struct TensorField {
 //   the minimum extrudable width is the domain's thinnest strut, its line width times its strut lines
 //   (DomainSpec::bead_mm * min_strut_lines), and the bead is taken as stated (bead_is_stated), so no calibration runs
 //   and every strand is exactly the width the trace gives it.
-// O12, the spacing is a RANGE that follows the stress (organic_spacing): tight (spacing_min_mm) where the stress is at
-// or over the reference, wide (spacing_max_mm) where there is none. `spacing_mm` > 0 is the one spacing of stage 1b:
-// both ends at that number (the range is then not read).
+// O12, the spacing is a RANGE that follows the stress, by the old run's own law (organic_spacing): spacing_min_mm at
+// the busiest voxel of the weave, spacing_max_mm at the quietest. `spacing_mm` > 0 is the one spacing of stage 1b:
+// both ends at that number (the range is then not read). O13, shape fit: the spacing is also tightened toward the
+// weave's outline and in thin members, as the old run does it.
 struct OrganicAsk {
   double spacing_mm = 0.0;        // > 0: one spacing everywhere (both ends of the range); 0: the range below
   double width_mm = 0.0;          // the strut diameter; 0 = the generator's own: the minimum extrudable width
   Vec3 build_dir{0.0, 0.0, 1.0};  // up, as printed (the tracer's overhang clamp reads it; the clamp is off)
-  double spacing_min_mm = 3.0;    // the spacing at or over the reference stress, mm; > 0
-  double spacing_max_mm = 8.0;    // the spacing where there is no stress, mm; >= spacing_min_mm
-  double spacing_exponent = 1.0;  // the curve from stress to spacing (f^exponent below); > 0
-  double reference_mpa = 0.0;     // > 0: the stress at which the spacing is the smallest. 0: the region's own (below)
-  double percentile = 0.95;       // read when reference_mpa is 0
+  double spacing_min_mm = 3.0;    // the spacing at the busiest voxel, mm; > 0 (the old run's grading.cell_min_mm)
+  double spacing_max_mm = 8.0;    // the spacing at the quietest voxel, mm; >= spacing_min_mm (its cell_max_mm)
+  double spacing_exponent = 1.0;  // the grading law's demand exponent (the old run's grading.demand_exponent); > 0
+  double reference_mpa = 0.0;     // > 0: a stated stress for the top of the law. 0: the percentile below (the old run)
+  double percentile = 0.95;       // read when reference_mpa is 0 (the old run's grading.aesthetic_percentile)
+  bool shape_fit = true;          // O13 (the old run's grading.organic_shape_fit, on when the job does not say)
 };
 
 // O12: the spacing handed to the tracer, one per voxel of the field's grid (0 off the candidates), with the candidates
-// (voxels whose CENTRE is lattice of `region`). Per candidate, from the tensor's von Mises s (true shear):
-//   f = s / reference held to 0 .. 1;  d = max - (max - min) * f^exponent
-// reference: the stated one, or the `percentile` of s over the region's candidates (sorted, index floor(q * (n - 1)),
-// as stress_reference reads its percentile). A reference of 0 (no stress in the region) gives f = 0: the widest.
-// The old run (run_job.cpp, run_organic_step) uses the same line, d = cell_max - (cell_max - cell_min) * f^exp, but
-// its f is the grading law's relative density normalised over the region, (rho - rho_lo) / (rho_hi - rho_lo); see the
-// comment in organic.cpp for where the two differ. Throws std::invalid_argument for min <= 0, max < min, exponent <= 0.
+// (voxels whose CENTRE is lattice of `region`). It is the old run's field for an ordinary Traced job (run_job.cpp,
+// run_organic_step, with the Aesthetic grading law of grade_lattice), with minimize_plastic ON fixed: the owner's
+// rule is that minimize_plastic has no bearing on the lattice, and on is what the app sends by default. The weave is
+// every voxel that is lattice of ANY weave region (the old run's lattice set). s is the tensor's von Mises (true
+// shear); per candidate:
+//   u = s / reference held to 0 .. 1 (reference: the stated one, or the `percentile` of s over the weave, sorted,
+//       index floor(q * (n - 1)); a reference of 0 gives u = 0)
+//   g = u^(2 * spacing_exponent)                    (the grading law's density, less its constant band ends)
+//   f = ((g - g_lo) / (g_hi - g_lo))^2, held to 0 .. 1, g_lo and g_hi the weave's least and greatest g (f = 0 when
+//       they are equal: a uniform stress gives the widest)
+//   d = max - (max - min) * f
+// The two 2s are the old run's exponents with minimize_plastic on (kAestheticOpenExponent; off, both are 0.5).
+// O13, shape fit (ask.shape_fit, a range with max > min): d = min(d, max(min, cap)), cap the smaller of
+//   2 * k * h: k the number of voxel steps (faces only) from the voxel to the nearest voxel that is not of the weave,
+//     1 for a voxel on the field grid's own face; h the voxel. A cell of size d centred there would cross the outline.
+//   W / 5: W the part's member width there (local_member_thickness_mm: the largest ball inside the part that holds
+//     the voxel, over the voxels whose centre is inside the part, read no farther than 32 voxels: wider is no cap),
+//     5 the cells across a member octet needs (lattice_cells_per_member_min). A thin member holds smaller cells.
+// It only ever tightens, never under min. With min = max nothing changes. Throws std::invalid_argument for min <= 0,
+// max < min, exponent <= 0.
 struct OrganicSpacing {
   std::vector<char> candidate;
   std::vector<double> spacing_mm;
   std::size_t candidates = 0;
-  double reference_mpa = 0.0;   // the reference used (stated, or the region's percentile)
+  double reference_mpa = 0.0;           // the reference used (stated, or the weave's percentile)
+  std::size_t shape_fit_tightened = 0;  // O13: candidates the shape fit tightened
 };
 OrganicSpacing organic_spacing(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask);
 
