@@ -6,6 +6,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <functional>
 #include <map>
 #include <stdexcept>
 #include <thread>
@@ -5229,12 +5230,65 @@ static double cube_demand(const Layout& l, int frame, const double lo[3], double
   }
   return f.highest_in(mn, mx);
 }
-// C22 for one cube: the finest always; otherwise t <= (S_base - s) / (S_base - f).
-static bool stress_rule_allows(const Layout& l, int frame, const double lo[3], double s, double base, double finest,
+// The sizes a pass of base cell `base` can lay, largest first, each once, read here from core's own menus: Default
+// Grade its halves; Stepped the base and m x base / n for each admitted fraction n and m = 1 .. n - 1; Uniform the base.
+static std::vector<double> ladder_of(const Layout& l, const CellSpec& c, double base) {
+  const double tile_min = std::max(c.cell_min_mm, l.floor_cell_mm);
+  std::vector<double> out;
+  if (c.algorithm == Algorithm::DefaultGrade)
+    out = stepped_size_menu(l.topology, base, l.min_strut_mm, tile_min, !c.allow_quilt, SteppedMenu::Halves);
+  else
+    out = {base};
+  if (c.algorithm == Algorithm::Stepped)
+    for (int n : stepped_admitted_divisors(l.topology, base, l.min_strut_mm, tile_min, !c.allow_quilt,
+                                           SteppedMenu::AnyStep))
+      for (int m = 1; m < n; ++m) out.push_back(m * (base / n));
+  std::sort(out.begin(), out.end(), std::greater<double>());
+  out.erase(std::unique(out.begin(), out.end(), [](double a, double b) { return std::fabs(a - b) <= 1e-9 * std::max(a, b); }),
+            out.end());
+  return out;
+}
+// The stress's t at a cube (R16, the response).
+static double stress_t(const Layout& l, int frame, const double lo[3], double s, const DemandField& f, double ref,
+                       double response) {
+  return std::pow(std::clamp(cube_demand(l, frame, lo, s, f) / ref, 0.0, 1.0), response);
+}
+// C22 for one cube (LatticeReview's ruling 2026-11-15: the nearest size): S* = S_base - t (S_base - f); a cell of size s
+// may stand where S* >= (s + s_below) / 2, s_below the ladder's next size down; the finest, and a size with none below,
+// always may; a tie keeps the larger.
+static bool stress_rule_allows(const Layout& l, int frame, const double lo[3], double s, const std::vector<double>& ladder,
                                const DemandField& f, double ref, double response) {
+  const double base = ladder.front(), finest = ladder.back();
   if (s <= finest * (1 + 1e-9)) return true;
-  const double t = std::pow(std::clamp(cube_demand(l, frame, lo, s, f) / ref, 0.0, 1.0), response);
-  return t <= (base - s) / (base - finest) + 1e-9;
+  double below = 0.0;
+  for (double a : ladder)
+    if (a < s * (1 - 1e-9)) { below = a; break; }
+  if (below <= 0.0) return true;
+  const double asked = base - stress_t(l, frame, lo, s, f, ref, response) * (base - finest);
+  return asked >= 0.5 * (s + below) - 1e-9 * base;
+}
+// The rule as it was before 2026-11-15 (a cell stood only where S* >= s), for the check that the new one never
+// allows less.
+static bool old_stress_rule_allows(const Layout& l, int frame, const double lo[3], double s,
+                                   const std::vector<double>& ladder, const DemandField& f, double ref, double response) {
+  const double base = ladder.front(), finest = ladder.back();
+  if (s <= finest * (1 + 1e-9)) return true;
+  return stress_t(l, frame, lo, s, f, ref, response) <= (base - s) / (base - finest) + 1e-9;
+}
+// At every cell's place, every size of its ladder that the old rule allowed there the new one allows too (the new
+// threshold is always under s): nothing that was lattice becomes solid for the change. Returns the places it fails.
+static int tighter_than_old(const Layout& l, const CellSpec& spec, const DemandField& f, double ref, double response) {
+  int tighter = 0;
+  std::map<long long, std::vector<double>> ladders;
+  for (const Cell& c : l.cells) {
+    auto& lad = ladders[std::llround(c.own * 1e6)];
+    if (lad.empty()) lad = ladder_of(l, spec, c.own);
+    for (double s : lad)
+      if (old_stress_rule_allows(l, c.frame, c.lo, s, lad, f, ref, response) &&
+          !stress_rule_allows(l, c.frame, c.lo, s, lad, f, ref, response))
+        ++tighter;
+  }
+  return tighter;
 }
 static bool same_layout(const Layout& a, const Layout& b) { return a.cells == b.cells && a.solid == b.solid; }
 // The size of the cell whose cube holds p (0: none).
@@ -5285,10 +5339,13 @@ static void test_cells_by_stress() {
     const Layout l = lay_cells(d, on);
     if (a == 0) ramp_dg = l;
     const double finest = finest_of[a];
+    const std::vector<double> ladder = ladder_of(l, on, 8.0);
+    NEAR(ladder.back(), finest, 1e-12);
+    CHECK(tighter_than_old(l, on, *ramp, ref, 1.0) == 0);
     int breaks = 0, cold = 0, cold_wrong = 0, hot = 0, hot_wrong = 0, wrong_own = 0;
     for (const Cell& c : l.cells) {
       if (std::fabs(c.own - 8.0) > 1e-9) ++wrong_own;
-      if (!stress_rule_allows(l, c.frame, c.lo, c.size, 8.0, finest, *ramp, ref, 1.0)) ++breaks;
+      if (!stress_rule_allows(l, c.frame, c.lo, c.size, ladder, *ramp, ref, 1.0)) ++breaks;
       const Vec3 m = cell_centre(l, c);
       if (m.x < 16.0) { ++cold; if (std::fabs(c.size - 8.0) > 1e-9) ++cold_wrong; }
       if (m.x > 80.0) { ++hot; if (std::fabs(c.size - finest) > 1e-9) ++hot_wrong; }
@@ -5332,7 +5389,7 @@ static void test_cells_by_stress() {
         ++full;
         const double P = 2e-3 * static_cast<double>(g.first[3]);
         const double plo[3] = {o[0] + g.first[0] * 1e-3, o[1] + g.first[1] * 1e-3, o[2] + g.first[2] * 1e-3};
-        if (stress_rule_allows(l, 0, plo, P, 8.0, finest, *ramp, ref, 1.0)) ++mergeable;
+        if (stress_rule_allows(l, 0, plo, P, ladder, *ramp, ref, 1.0)) ++mergeable;
       }
       CHECK(full > 10 && mergeable == 0);
       std::printf("C22 ramp, Default Grade: %zu cells (%d sibling groups, none mergeable)\n", l.cells.size(), full);
@@ -5398,6 +5455,7 @@ static void test_cells_by_stress() {
       band.grade_to_shape = true;
       band.band_mm = 8;
       const Layout lo_ = lay_cells(dp, plain), hi_ = lay_cells(dp, on), bd = lay_cells(dp, band);
+      CHECK(tighter_than_old(hi_, on, *f, 100.0, 1.0) == 0);
       auto held = [&](const Layout& l, const Vec3& p) {
         for (const Cell& c : l.cells) if (cell_holds(l, pr, c, p)) return true;
         return false;
@@ -5441,12 +5499,15 @@ static void test_cells_by_stress() {
       both.band_mm = 6;
       const Layout lb = lay_cells(d, band), l = lay_cells(d, both);
       const double finest = finest_of[a];
+      const std::vector<double> ladder = ladder_of(l, both, 8.0);
+      NEAR(ladder.back(), finest, 1e-12);
+      CHECK(tighter_than_old(l, both, *ramp, ref, 1.0) == 0);
       int breaks_band = 0, breaks_stress = 0;
       for (const Cell& c : l.cells) {
         const Vec3 m = cell_centre(l, c);
         const double dist = std::max(0.0, std::min(std::min(m.x, 96 - m.x), std::min(m.y, 24 - m.y)));
         if (c.size > finest * (1 + 1e-9) && dist < 6.0 * (c.size - finest) / (8.0 - finest) - 1e-6) ++breaks_band;
-        if (!stress_rule_allows(l, c.frame, c.lo, c.size, 8.0, finest, *ramp, ref, 1.0)) ++breaks_stress;
+        if (!stress_rule_allows(l, c.frame, c.lo, c.size, ladder, *ramp, ref, 1.0)) ++breaks_stress;
       }
       CHECK(breaks_band == 0 && breaks_stress == 0);
       CHECK(!same_layout(l, lb) && l.cells.size() > lb.cells.size());
@@ -5464,6 +5525,7 @@ static void test_cells_by_stress() {
       const auto zero = stress_field({-2, -2, -2}, 1.0, 100, 28, 12, [](const Vec3&) { return 0.0; });
       const Layout cold = lay_cells(d, on_with(algo, zero, ref));
       const Layout hot = lay_cells(d, on_with(algo, one, ref));
+      CHECK(tighter_than_old(hot, on_with(algo, one, ref), *one, ref, 1.0) == 0);
       int overlap = 0, changed = 0, wrong = 0;
       for (const Cell& b : cold.cells) {
         const Vec3 m = cell_centre(cold, b);
@@ -5488,6 +5550,7 @@ static void test_cells_by_stress() {
       CellSpec r2 = on_with(algo, ramp, ref);
       r2.response = 2.0;
       const Layout a1 = lay_cells(d, on_with(algo, ramp, ref)), a2 = lay_cells(d, r2);
+      CHECK(tighter_than_old(a2, r2, *ramp, ref, 2.0) == 0);
       auto ends = [](const Layout& l, bool cold) {
         std::vector<Cell> out;
         for (const Cell& c : l.cells) {
@@ -5557,6 +5620,7 @@ static void test_cells_by_stress() {
       return l;
     };
     CHECK(own.layout.cells == laid_with(want).cells);
+    CHECK(tighter_than_old(own.layout, st.cells, *f, want, 1.0) == 0);
     CHECK(!(own.layout.cells == plain.layout.cells));
     CHECK(!(laid_with(want).cells == laid_with(2.0 * want).cells));   // the reference decides
     // Kept while the domain, the field and the percentile are the same: the field changed in place is not read again
@@ -5634,9 +5698,12 @@ static void test_cells_by_stress() {
       double finest = 1e300;
       for (const Cell& c : l.cells) finest = std::min(finest, c.size);
       const double want_finest = a == 0 ? 2.0 : 8.0 / 6.0;
+      const std::vector<double> ladder = ladder_of(l, on, 8.0);
+      NEAR(ladder.back(), want_finest, 1e-12);
+      CHECK(tighter_than_old(l, on, *gramp, ref, 1.0) == 0);
       int breaks = 0, cut_large = 0, hot = 0, hot_wrong = 0;
       for (const Cell& c : l.cells) {
-        if (!stress_rule_allows(l, c.frame, c.lo, c.size, 8.0, want_finest, *gramp, ref, 1.0)) ++breaks;
+        if (!stress_rule_allows(l, c.frame, c.lo, c.size, ladder, *gramp, ref, 1.0)) ++breaks;
         if (c.cut && c.size > want_finest * (1 + 1e-9)) ++cut_large;        // C20
         if (cell_centre(l, c).x > 48.0) { ++hot; if (std::fabs(c.size - want_finest) > 1e-9) ++hot_wrong; }
       }
@@ -5666,6 +5733,93 @@ static void test_cells_by_stress() {
     }
   }
   block("12 Let walls cut cells");
+
+  {  // 13. The nearest size (LatticeReview's ruling 2026-11-15). The slab with a smallest cell of 4: a ladder of exactly
+     // two sizes, 8 and 4, on both algorithms; the 8 stands where t <= 0.5.
+    for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
+      const char* name = algo == Algorithm::Stepped ? "Stepped" : "Default Grade";
+      auto two = [&](std::shared_ptr<const DemandField> f) {
+        CellSpec c = on_with(algo, std::move(f), ref);
+        c.cell_min_mm = 4;
+        return c;
+      };
+      auto flat = [](double mpa) {
+        return stress_field({-2, -2, -2}, 1.0, 100, 28, 12, [mpa](const Vec3&) { return mpa; });
+      };
+      auto sizes = [](const Layout& l) {
+        std::map<long long, int> n;
+        for (const Cell& c : l.cells) n[std::llround(c.size * 1e3)]++;
+        return n;
+      };
+      const auto quarter = flat(25.0), three = flat(75.0);
+      const Layout lq = lay_cells(d, two(quarter)), l3 = lay_cells(d, two(three)), lr = lay_cells(d, two(ramp));
+      const std::vector<double> ladder = ladder_of(lq, two(quarter), 8.0);
+      CHECK(ladder.size() == 2 && std::fabs(ladder[0] - 8) < 1e-12 && std::fabs(ladder[1] - 4) < 1e-12);
+      const auto nq = sizes(lq), n3 = sizes(l3);
+      CHECK(nq.size() == 1 && nq.count(8000) && nq.at(8000) == 36);   // t = 0.25: every cell the region's own
+      CHECK(n3.size() == 1 && n3.count(4000) && n3.at(4000) == 288);  // t = 0.75: every cell the smallest
+      // The ramp (t = 0.5 at x = 48): every cell wholly at x < 40 is 8, every one wholly at x > 56 is 4, and both
+      // sizes stand.
+      int left = 0, left_wrong = 0, right = 0, right_wrong = 0;
+      for (const Cell& c : lr.cells) {
+        const Vec3 m = cell_centre(lr, c);
+        if (m.x + 0.5 * c.size <= 40.0 + 1e-9) { ++left; left_wrong += std::fabs(c.size - 8) > 1e-9; }
+        if (m.x - 0.5 * c.size >= 56.0 - 1e-9) { ++right; right_wrong += std::fabs(c.size - 4) > 1e-9; }
+      }
+      CHECK(left > 0 && left_wrong == 0 && right > 0 && right_wrong == 0);
+      CHECK(lq.solid.empty() && l3.solid.empty() && lr.solid.empty());
+      CHECK(tighter_than_old(lr, two(ramp), *ramp, ref, 1.0) == 0);
+      std::printf("C22 nearest, two sizes, %s: t 0.25 %zu cells, t 0.75 %zu, ramp %zu (%d cells wholly under x 40, all 8; "
+                  "%d wholly over x 56, all 4)\n", name, lq.cells.size(), l3.cells.size(), lr.cells.size(), left, right);
+    }
+    // The lead's example: base 12, smallest cell 4, Stepped admits 2 and 3: the ladder 12, 8, 6, 4; 12 stands where
+    // S* >= 10, 8 where S* >= 7, 6 where S* >= 5, 4 always. S* = 12 - 8 t. A slab 96 x 24 x 12 under its top face.
+    PartMeasure p12(weld_mesh(box(96, 24, 12)));
+    DomainSpec s12;
+    s12.bead_mm = 0.2;
+    s12.regions = {face_region(1, Role::Lattice, {48, 12, 12}, {0, 0, -1}, 12, 48, 12)};
+    Domain d12(p12, s12);
+    auto at = [&](double t) {
+      CellSpec c = off;
+      c.algorithm = Algorithm::Stepped;
+      c.cell_max_mm = 12;
+      c.cell_min_mm = 4;
+      c.by_stress = true;
+      c.demand = stress_field({-2, -2, -2}, 1.0, 100, 28, 16, [t](const Vec3&) { return 100.0 * t; });
+      c.reference_mpa = ref;
+      return c;
+    };
+    const Layout tie = lay_cells(d12, at(0.25));   // S* = 10 exactly: a tie keeps the larger
+    const std::vector<double> lad = ladder_of(tie, at(0.25), 12.0);
+    CHECK(lad.size() == 4 && std::fabs(lad[0] - 12) < 1e-9 && std::fabs(lad[1] - 8) < 1e-9 &&
+          std::fabs(lad[2] - 6) < 1e-9 && std::fabs(lad[3] - 4) < 1e-9);
+    auto largest = [](const Layout& l) {
+      double m = 0;
+      for (const Cell& c : l.cells) m = std::max(m, c.size);
+      return m;
+    };
+    auto smallest = [](const Layout& l) {
+      double m = 1e300;
+      for (const Cell& c : l.cells) m = std::min(m, c.size);
+      return m;
+    };
+    int all12 = 0;
+    for (const Cell& c : tie.cells) all12 += std::fabs(c.size - 12) < 1e-9;
+    CHECK(!tie.cells.empty() && all12 == static_cast<int>(tie.cells.size()));
+    const Layout under10 = lay_cells(d12, at(0.30));   // S* = 9.6: no 12; a cell is never larger than 8
+    CHECK(largest(under10) <= 8 + 1e-9 && smallest(under10) >= 6 - 1e-9);
+    const Layout at7 = lay_cells(d12, at(0.625));      // S* = 7: 8 may stand
+    CHECK(largest(at7) <= 8 + 1e-9 && smallest(at7) >= 6 - 1e-9);
+    const Layout under7 = lay_cells(d12, at(0.70));    // S* = 6.4: 6 at most, nothing under it
+    CHECK(largest(under7) <= 6 + 1e-9 && smallest(under7) >= 6 - 1e-9);
+    const Layout under5 = lay_cells(d12, at(0.90));    // S* = 4.8: the smallest
+    CHECK(largest(under5) <= 4 + 1e-9 && !under5.cells.empty());
+    for (const Layout* l : {&tie, &under10, &at7, &under7, &under5}) CHECK(l->solid.empty());
+    std::printf("C22 nearest, base 12 (12, 8, 6, 4): S* 10 -> %zu cells, largest %.2f; 9.6 -> %.2f..%.2f; 7 -> "
+                "%.2f..%.2f; 6.4 -> %.2f..%.2f; 4.8 -> %.2f\n", tie.cells.size(), largest(tie), smallest(under10),
+                largest(under10), smallest(at7), largest(at7), smallest(under7), largest(under7), largest(under5));
+  }
+  block("13 nearest size");
 
   {  // 11. Speed: lay_cells with the option on, about 2,000 cells and a 64^3 field, against it off.
     PartMeasure pb(weld_mesh(box(128, 128, 64)));
