@@ -35,15 +35,24 @@ struct TensorField {
 // O12, the spacing is a RANGE that follows the stress (organic_spacing): tight (spacing_min_mm) where the stress is at
 // or over the reference, wide (spacing_max_mm) where there is none. `spacing_mm` > 0 is the one spacing of stage 1b:
 // both ends at that number (the range is then not read).
+// G1: Organic's two placements, the owner's OR25 and OR26. Traced (trace_strands) is stage 1b's; Grown (grow_strands)
+// is the rewrite of 2026-11-15 in this engine (organic_grow.cpp).
+enum class OrganicMode : std::uint8_t { Traced, Grown };
 struct OrganicAsk {
   double spacing_mm = 0.0;        // > 0: one spacing everywhere (both ends of the range); 0: the range below
   double width_mm = 0.0;          // the strut diameter; 0 = the generator's own: the minimum extrudable width
-  Vec3 build_dir{0.0, 0.0, 1.0};  // up, as printed (the tracer's overhang clamp reads it; the clamp is off)
+  Vec3 build_dir{0.0, 0.0, 1.0};  // up, as printed (the tracer's overhang clamp reads it; Grown grows along it)
   double spacing_min_mm = 3.0;    // the spacing at or over the reference stress, mm; > 0
   double spacing_max_mm = 8.0;    // the spacing where there is no stress, mm; >= spacing_min_mm
   double spacing_exponent = 1.0;  // the curve from stress to spacing (f^exponent below); > 0
   double reference_mpa = 0.0;     // > 0: the stress at which the spacing is the smallest. 0: the region's own (below)
   double percentile = 0.95;       // read when reference_mpa is 0
+  // Read by Grown only (grow_strands); Traced does not read them:
+  OrganicMode mode = OrganicMode::Traced;
+  bool walls_out = false;         // G2 (idea C): seeds on the region's walls too, growing inward
+  double layer_mm = 0.2;          // one step of growth is one layer along build_dir, mm; > 0
+  bool ties = true;               // G9: the transfer ties (the old job's default: on)
+  double tie_swirl = 1.0;         // G9: the ties' swirl, 0 .. 1 (the old job's default: 1)
 };
 
 // O12: the spacing handed to the tracer, one per voxel of the field's grid (0 off the candidates), with the candidates
@@ -88,6 +97,52 @@ struct OrganicTraceStats {
 // `stats`, when given, receives the spacing used (OrganicTraceStats).
 std::vector<Strand> trace_strands(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask,
                                   OrganicTraceStats* stats = nullptr);
+
+// ── GROWN (G1 to G12, docs/design/lattice-rebuild/01-rules.md section 11) ─────
+// What one Grown placement did. Lengths are curve lengths, mm, measured the same way for "grown" and "kept": the
+// length of the strands' own segments. A segment is kept when a bar of it is left after the path's pruning (weave_bars,
+// split_at_crossings, join_loose_bars, drop_loose_bars, drop_adrift_bars, as Session::lay_weave runs them on a weave
+// alone). Every laid segment is counted once: grown = kept + every cut below.
+struct GrowReport {
+  // Seeds (G2): on the floor, one per local spacing; on the walls with walls_out; refused when their turn came.
+  std::size_t seeds_floor = 0, seeds_wall = 0, seeds_refused_room = 0, seeds_refused_support = 0;
+  std::size_t strands_grown = 0, steps = 0, clamped = 0;   // tips grown, steps laid, headings held up to the cone
+  // How tips ended (G3 to G5): at the region's edge, on a step with nothing under it, joined into a neighbour.
+  std::size_t ended_edge = 0, ended_unsupported = 0, ended_joined = 0;
+  std::size_t crowded_climbed_on = 0;   // crowded, the run to join over 3 mm, not within the lower limit: climbed on
+  // Branches (G6, G7): offered, grown, refused by cause; a crowded branch with a short run is a link instead.
+  std::size_t branches_offered = 0, branches_grown = 0, links = 0;
+  std::size_t refused_region = 0, refused_support = 0, refused_crowded = 0, refused_room = 0;
+  // GR-REWIND (G5): each try, and each place a tip was rewound to, by how it ended.
+  std::size_t rewinds = 0, rewind_places = 0, rewind_grew_on = 0, rewind_joined = 0, rewind_ended_on_joint = 0;
+  double taken_back_mm = 0.0;
+  // Thinning to the window (G10, pruning step 4): stretches of a weaker strand left out; of those, joined into the other.
+  std::size_t thinned = 0, thinned_joined = 0;
+  // Regrowth into holes after the path's pruning (G11, step 5).
+  std::size_t regrow_rounds = 0, holes = 0, regrow_landed = 0, regrow_failed = 0;
+  // Transfer ties (G9).
+  std::size_t ties_seeded = 0, ties_laid = 0, ties_refused_minor = 0, ties_refused_reach = 0, ties_refused_support = 0;
+  // Lengths, mm (G12, step 6).
+  double grown_mm = 0.0, kept_mm = 0.0;
+  double cut_outside_mm = 0.0, cut_unsupported_mm = 0.0, cut_nothing_mm = 0.0, cut_crowded_mm = 0.0,
+         cut_repeat_mm = 0.0;
+  std::size_t strands = 0;      // returned
+  double ms = 0.0;
+  void add(const GrowReport& o);
+};
+
+// G1 to G12: the owner's Grown placement of one weave region (OR26: "strands grown like organic vines, top to bottom
+// or walls-out"), new code in this engine; the old generator (grow_organic_lattice) is neither edited nor called. The
+// spacing is organic_spacing's (O12), the directions the `field`'s, the width the domain's thinnest strut or
+// `ask.width_mm` (never under it: G8), one step one `ask.layer_mm` along `ask.build_dir`. Strands grow from seeds (G2),
+// each step following the stress (G3), held to the cone and supported (G4), kept to the spacing window by crowding,
+// joins and GR-REWIND (G5); branches (G6, G7); then repeats merged (G10, step 1), thinned to the window (step 4), the
+// path's pruning run (steps 2, 3) and holes regrown (G11, step 5), the transfer ties laid (G9), every cut counted (G12).
+// The strands returned go through exactly Traced's path (Session::lay_organic). The same strands for the same inputs,
+// every time. An empty field, or no candidate voxel, gives none. Throws std::invalid_argument for a range
+// organic_spacing refuses, a width under the thinnest strut, a layer not above 0 or a degenerate build direction.
+std::vector<Strand> grow_strands(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask,
+                                 GrowReport* report = nullptr);
 
 // O3 alone, exposed for tests: the fewest of the strand's points that keep each of its points within `tolerance_mm`
 // of the line through the kept ones, both ends kept (the first of several equally short answers, by index).

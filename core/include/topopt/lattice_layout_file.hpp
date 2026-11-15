@@ -189,6 +189,8 @@ struct FileResult {
   double ms_trace = 0.0;
   // O12: the spacing the trace used over the weave regions' candidates (Outcome::spacing_*), mm; 0 with no weave.
   double spacing_smallest_mm = 0.0, spacing_largest_mm = 0.0, spacing_mean_mm = 0.0;
+  // G12: what Grown did (Outcome::grown); null for Traced and cube lattices (then not written).
+  std::shared_ptr<const GrowReport> grown;
   ShallowTable shallow;
   // The mesh.
   FileReport made;
