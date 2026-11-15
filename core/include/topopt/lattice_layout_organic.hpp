@@ -64,7 +64,9 @@ struct OrganicAsk {
   std::uint64_t seed = 1;
   // G13 (brief G5): the floor's feet compete after the first pruning; a foot is kept only where no kept foot stands
   // within foot_gap x the local spacing of its floor point (measured on the floor).
-  double foot_gap = 1.0;          // > 0 (the made-up cube's floor is at most 80 % covered by true feet at 2.5)
+  // The lead's ruling (brief G5): 2.5, the smallest of 1, 1.5, 2, 2.5 that leaves the made-up cube's floor at most
+  // 80 % covered by true feet. 0 or less: the feet do not compete (every foot is kept).
+  double foot_gap = 2.5;
 };
 
 // O16, the net skin: Finish Skin (Settings::skin) on a weave region (the old finish step "Skin", organic_lattice.cpp,
@@ -202,7 +204,8 @@ struct GrowReport {
 // re-seeding in the bare places it leaves, grown and pruned the same way, every cut counted (G12). The strands returned
 // go through exactly Traced's path (Session::lay_organic). The same strands for the same inputs, every time. An empty
 // field, or no candidate voxel, gives none. Throws std::invalid_argument for a range organic_spacing refuses, a width
-// under the thinnest strut, a layer, a seed stride or a foot gap not above 0, or a degenerate build direction.
+// under the thinnest strut, a layer or a seed stride not above 0, a foot gap not a number, or a degenerate build
+// direction.
 std::vector<Strand> grow_strands(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask,
                                  GrowReport* report = nullptr);
 

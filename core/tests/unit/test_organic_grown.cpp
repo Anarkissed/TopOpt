@@ -320,6 +320,7 @@ static void test_uniform_block() {
   Part b(box(24, 24, 30), 24, 24, 30, 3, [](const Vec3&) { return along({0, 0, 1}, 1.0); });
   b.ask.reference_mpa = 2.0;   // spacing 5.5 everywhere (at_5_5), the window's lower limit 3
   at_5_5(b.ask);
+  b.ask.foot_gap = 0.0;   // the lead's ruling (brief G5): its neighbour and first-heading checks test the seeding, not G13
   GrowReport rep;
   const std::vector<Strand> ss = grow_strands(b.d, 1, b.field, b.ask, &rep);
   print_report("G-1 uniform block", rep);
@@ -848,7 +849,7 @@ static void test_feet() {
   // Against the same growth with every foot kept (a gap no two feet are under): each foot not kept is cut from the floor:
   // nothing runs into the floor within a width of where it left it (unless a kept foot stands within two widths).
   OrganicAsk all = b.ask;
-  all.foot_gap = 1e-9;
+  all.foot_gap = 0.0;
   const std::vector<Vec3> every = feet_of(grow_strands(b.d, 1, b.field, all), 3.0);
   std::size_t removed = 0, left = 0;
   for (const Vec3& f : every) {
@@ -884,7 +885,7 @@ static void test_feet() {
   // The lengths still add up (the feet's cuts are counted).
   const double cut = rep.cut_outside_mm + rep.cut_unsupported_mm + rep.cut_nothing_mm + rep.cut_repeat_mm;
   CHECK(std::fabs(rep.grown_mm - rep.kept_mm - cut) < 1e-6 * std::max(1.0, rep.grown_mm));
-  // The file job's key: 1 when not given, read when given, refused at 0 with the key named.
+  // The file job's key: 2.5 when not given, read when given (0: the feet do not compete), refused when not a number.
   const auto job = [](const std::string& more) {
     return parse_file_job(std::string(R"({"mode": "lattice_file", "model": "pocket.stl", "output": "grown.stl",
       "layout": {"bead_mm": 0.45, "min_strut_lines": 2, "region_ids": [1], "region_no_lattice": [0],
@@ -894,11 +895,12 @@ static void test_feet() {
   };
   bool refused = false;
   try {
-    job(R"(, "organic_foot_gap": 0)");
+    job(R"(, "organic_foot_gap": "wide")");
   } catch (const std::exception& e) {
     refused = has(e.what(), "organic_foot_gap");
   }
-  CHECK(job("").organic.foot_gap == 1.0 && job(R"(, "organic_foot_gap": 2.5)").organic.foot_gap == 2.5 && refused);
+  CHECK(job("").organic.foot_gap == 2.5 && job(R"(, "organic_foot_gap": 1.5)").organic.foot_gap == 1.5 &&
+        job(R"(, "organic_foot_gap": 0)").organic.foot_gap == 0.0 && refused);
 }
 
 // ── 3 (brief G5): a join or a link stays inside the region ────────────────────

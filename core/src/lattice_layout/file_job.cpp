@@ -264,7 +264,8 @@ OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::str
   a.tie_swirl = num(in, "organic_tie_swirl", a.tie_swirl, w);
   if (!(a.tie_swirl >= 0.0 && a.tie_swirl <= 1.0)) json::fail(w + ".organic_tie_swirl", "must be 0 to 1");
   a.foot_gap = num(in, "organic_foot_gap", a.foot_gap, w);
-  if (!(std::isfinite(a.foot_gap) && a.foot_gap > 0.0)) json::fail(w + ".organic_foot_gap", "must be above 0");
+  // G13: 0 or less: the feet do not compete.
+  if (!std::isfinite(a.foot_gap)) json::fail(w + ".organic_foot_gap", "must be a number (0 or less: feet do not compete)");
   const double thinnest = s.bead_mm * s.min_strut_lines;
   if (!(std::isfinite(a.width_mm) && a.width_mm >= 0.0))
     json::fail(w + ".organic_width_mm", "must be 0 (the thinnest strut) or more");

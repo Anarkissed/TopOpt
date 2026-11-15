@@ -1491,7 +1491,7 @@ void Grower::prune() {
   }
   repeats();
   settle();
-  feet(parent, branch, seeded);   // G13
+  if (ask_.foot_gap > 0.0) feet(parent, branch, seeded);   // G13 (0 or less: the feet do not compete)
   settle();
   const Fate f = pass();
   for (std::size_t l = 0; l < lines_.size(); ++l)
@@ -1847,8 +1847,7 @@ std::vector<Strand> Grower::run() {
     throw std::invalid_argument("grow_strands: layer_mm must be above 0");
   if (!(ask_.seed_stride > 0.0) || !std::isfinite(ask_.seed_stride))
     throw std::invalid_argument("grow_strands: seed_stride must be above 0");
-  if (!(ask_.foot_gap > 0.0) || !std::isfinite(ask_.foot_gap))
-    throw std::invalid_argument("grow_strands: foot_gap must be above 0");
+  if (!std::isfinite(ask_.foot_gap)) throw std::invalid_argument("grow_strands: foot_gap must be a number");
   const double thinnest = domain_.spec().bead_mm * domain_.spec().min_strut_lines;
   if (ask_.width_mm != 0.0 && !(ask_.width_mm >= thinnest - 1e-12))
     throw std::invalid_argument("grow_strands: the strut width is under the thinnest strut (G8)");
