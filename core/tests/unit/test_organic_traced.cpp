@@ -643,9 +643,14 @@ static void test_range_equal_ends() {
 
 // G2, G3: a 48 x 12 x 12 mm block, all of it one weave region, under a stress that rises along x from almost nothing
 // at x = 0 to 24 MPa at x = 48 (sxx = s, syy = 0.3 s, szz = 0.1 s; von Mises 0.8888 s). The range 3 to 8, exponent 1,
-// the reference the region's 95th percentile. The spacing asked falls from near 8 at the cold end to 3 over the last
-// twentieth (at or over the reference), and the strands are closer together at the hot end: more of them cross a
-// plane square to x there than at the cold end.
+// the reference the region's 95th percentile. The spacing asked is the old run's law (O12, corrected 2026-11-15): 8 at
+// the quietest slice (x = 0), 3 over the last twentieth (at or over the reference), and the strands are closer together
+// at the hot end: more of them cross a plane square to x there than at the cold end. The shape fit (O13) is OFF here:
+// on this 12 mm thick block its member-width cap (12 / 5 = 2.4 mm, held to 3) would make every voxel 3 mm; G4 and G5
+// test it.
+static std::vector<double> old_run_spacing(const VoxelGrid& grid, const std::vector<double>& density,
+                                           const std::vector<double>& vm, const std::vector<char>& region, double gamma,
+                                           double cell_min, double cell_max, bool shape_fit);
 struct Ramp {
   PartMeasure pm{weld_mesh(box(48, 12, 12))};
   Domain d{pm, [] {
@@ -668,6 +673,7 @@ struct Ramp {
           v[0] = sv; v[1] = 0.3 * sv; v[2] = 0.1 * sv;
         }
     ask.width_mm = 0.9;   // spacing_mm 0: the range, 3 to 8 by default
+    ask.shape_fit = false;
   }
 };
 static void test_range_ramp() {
@@ -689,14 +695,21 @@ static void test_range_ramp() {
               "47.5 %.4f; von Mises at x 0.5 %.4f\n", sp.reference_mpa, slice[0], slice[12], slice[24], slice[36], slice[44], slice[47],
               vm_at);
   CHECK(sp.candidates == 48u * 12u * 12u && flat && falls);
-  CHECK(slice[0] > 7.9 && slice[47] == 3.0 && slice[46] == 3.0);
-  // The line itself: d = 8 - 5 f, f = s / reference.
-  for (int i : {0, 12, 24, 36}) {
-    const double* t = &r.field.voigt[6 * r.field.index(i, 0, 0)];
+  CHECK(slice[0] == 8.0 && slice[47] == 3.0 && slice[46] == 3.0);
+  // The law itself: the old run's field (as G4 makes it: grade_lattice, then run_organic_step's arithmetic), to 1e-6.
+  VoxelGrid grid;
+  grid.nx = 48; grid.ny = 12; grid.nz = 12; grid.spacing = 1.0;
+  grid.tags.assign(48 * 12 * 12, VoxelTag::Interior);
+  std::vector<double> part(grid.tags.size(), 1.0), vms(grid.tags.size(), 0.0);
+  const std::vector<char> all(grid.tags.size(), 1);
+  for (std::size_t e = 0; e < vms.size(); ++e) {
+    const double* t = &r.field.voigt[6 * e];
     const double a = t[0] - t[1], b = t[1] - t[2], c = t[2] - t[0];
-    const double vm = std::sqrt(0.5 * (a * a + b * b + c * c));
-    CHECK(std::fabs(slice[static_cast<std::size_t>(i)] - (8.0 - 5.0 * std::min(1.0, vm / sp.reference_mpa))) < 1e-12);
+    vms[e] = std::sqrt(0.5 * (a * a + b * b + c * c));
   }
+  const std::vector<double> old = old_run_spacing(grid, part, vms, all, 1.0, 3.0, 8.0, false);
+  for (int i : {0, 12, 24, 36})
+    CHECK(std::fabs(slice[static_cast<std::size_t>(i)] - old[r.field.index(i, 0, 0)]) < 1e-6);
   // The trace: the spacing it used, and the strands at the two ends.
   OrganicTraceStats st;
   const std::vector<Strand> strands = trace_strands(r.d, 1, r.field, r.ask, &st);
