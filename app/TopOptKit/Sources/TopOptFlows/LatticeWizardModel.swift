@@ -276,6 +276,14 @@ public struct LatticeWizardModel: Equatable, Sendable {
     public var smallCellsInThinWalls: Bool = false
     /// ★ "Let walls cut cells" — see `LatticeSettings.letWallsCutCells` (his 11-14).
     public var letWallsCutCells: Bool = false
+    /// ★ Install 2: the Manual controls — see LatticeSettings' of the same names.
+    public var strutFromMM: Double? = nil, strutToMM: Double? = nil
+    public var cellsAcrossMin: Int? = nil
+    public var neverSkipCellSize: Bool = false
+    public var demandExponent: Double = 1
+    public var stressTargetMPa: Double? = nil
+    public var skinBarWidthMM: Double? = nil, skinReachCells: Double? = nil
+    public var rimWidthMM: Double? = nil
 
     /// ★ THE PERMISSION'S SETTER, AND IT DELEGATES. The migration rule (density
     /// `.sim ⇒ .uniform`, cell `.swept ⇒ .fixed`) lives in `LatticeSettings`
@@ -357,6 +365,13 @@ public struct LatticeWizardModel: Equatable, Sendable {
         self.singleCellMembers = s.singleCellMembers
         self.smallCellsInThinWalls = s.smallCellsInThinWalls
         self.letWallsCutCells = s.letWallsCutCells
+        self.strutFromMM = s.strutFromMM; self.strutToMM = s.strutToMM
+        self.cellsAcrossMin = s.cellsAcrossMin
+        self.neverSkipCellSize = s.neverSkipCellSize
+        self.demandExponent = s.demandExponent
+        self.stressTargetMPa = s.stressTargetMPa
+        self.skinBarWidthMM = s.skinBarWidthMM; self.skinReachCells = s.skinReachCells
+        self.rimWidthMM = s.rimWidthMM
         self.shapeFitGradeStrength = s.shapeFitGradeStrength
         // ★ the rule holds on load too: a saved single-cell project opens with Skin
         if s.singleCellMembers, self.boundary != .fullSkin { self.boundary = .fullSkin }
@@ -417,6 +432,13 @@ public struct LatticeWizardModel: Equatable, Sendable {
         out.singleCellMembers = singleCellMembers
         out.smallCellsInThinWalls = smallCellsInThinWalls
         out.letWallsCutCells = letWallsCutCells
+        out.strutFromMM = strutFromMM; out.strutToMM = strutToMM
+        out.cellsAcrossMin = cellsAcrossMin
+        out.neverSkipCellSize = neverSkipCellSize
+        out.demandExponent = demandExponent
+        out.stressTargetMPa = stressTargetMPa
+        out.skinBarWidthMM = skinBarWidthMM; out.skinReachCells = skinReachCells
+        out.rimWidthMM = rimWidthMM
         // ★ ORGANIC picks travel whatever the algorithm; `gradingDictionary()` writes
         // none of them unless organic was chosen and the linked core accepts the key.
         out.organicGrowth = organicGrowth

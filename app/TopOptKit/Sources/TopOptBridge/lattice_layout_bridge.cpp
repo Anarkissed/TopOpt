@@ -7,6 +7,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -49,6 +50,7 @@ struct LayoutSession {
   std::unique_ptr<ll::SolidAt> solid_at;          // built once per layout, on the first "where"
   std::atomic<uint64_t> cancel_gen{0};
   std::atomic<bool> stop{false};                   // core's own stop (Session::lay): a running layout gives up within one cell's work
+  std::shared_ptr<const ll::DemandField> demand;  // Install 2: the stress result, one pointer between lays (set_demand)
 };
 
 std::mutex& g_layout_mu = *new std::mutex;        // never destroyed (the scenes' rule, T1)
@@ -158,6 +160,63 @@ ll::Settings settings_from(const LatticeLayoutSettings& in) {
   for (std::size_t r = 0; r < in.region_piece_counts.size(); ++r) s.regions[r].pieces = take(in.region_piece_counts[r]);
   for (std::size_t p = 0; p < in.protect_piece_counts.size(); ++p) s.protect[p].pieces = take(in.protect_piece_counts[p]);
   if (next != pieces.size()) throw std::invalid_argument("lattice layout: pieces listed that no region or skin claims");
+  // Install 2: an area's own settings, its own Finish, zones (NaN = not stated)
+  const auto stated = [](double v) { return !std::isnan(v); };
+  if (!in.region_own.empty()) {
+    if (in.region_own.size() != 20 * nr) throw std::invalid_argument("lattice layout: region_own is not 20 per region");
+    for (std::size_t r = 0; r < nr; ++r) {
+      const double* v = &in.region_own[20 * r];
+      ll::AreaOwn& o = s.regions[r].own;
+      if (stated(v[0])) {
+        const int a = static_cast<int>(v[0]);
+        if (a < 0 || a > 2) throw std::invalid_argument("lattice layout: region_own algorithm is not 0, 1 or 2");
+        o.algorithm = a == 0 ? ll::Algorithm::Uniform : a == 1 ? ll::Algorithm::DefaultGrade : ll::Algorithm::Stepped;
+      }
+      if (stated(v[1])) o.cell_mm = v[1];
+      if (stated(v[2])) o.cell_max_mm = v[2];
+      if (stated(v[3])) o.cell_min_mm = v[3];
+      if (stated(v[4])) o.min_cells_across = static_cast<int>(v[4]);
+      if (stated(v[5])) o.grade_to_shape = v[5] != 0.0;
+      if (stated(v[6])) o.band_mm = v[6];
+      if (stated(v[7])) o.band_cell_mm = v[7];
+      if (stated(v[8])) o.cells_by_stress = v[8] != 0.0;
+      if (stated(v[9])) o.by_stress = v[9] != 0.0;
+      if (stated(v[10])) o.dial = v[10];
+      if (stated(v[11])) o.dial_light = v[11];
+      if (stated(v[12])) o.dial_heavy = v[12];
+      if (stated(v[13])) o.width_mm = v[13];
+      if (stated(v[14])) o.width_light_mm = v[14];
+      if (stated(v[15])) o.width_heavy_mm = v[15];
+      if (stated(v[16])) o.strength = v[16];
+      if (stated(v[17])) o.response = v[17];
+      if (stated(v[18])) o.reference_mpa = v[18];
+      if (stated(v[19])) o.max_step = v[19];
+    }
+  }
+  if (!in.region_finish.empty()) {
+    if (in.region_finish.size() != 5 * nr) throw std::invalid_argument("lattice layout: region_finish is not 5 per region");
+    for (std::size_t r = 0; r < nr; ++r) {
+      const double* v = &in.region_finish[5 * r];
+      ll::Settings::RegionAsk& a = s.regions[r];
+      if (stated(v[0])) a.rim_mm = v[0];
+      if (stated(v[1])) a.cover_mm = v[1];
+      if (stated(v[2])) a.skin = v[2] != 0.0;
+      if (stated(v[3])) a.skin_width_mm = v[3];
+      if (stated(v[4])) a.skin_reach_cells = v[4];
+    }
+  }
+  if (!in.region_zone.empty()) {
+    if (in.region_zone.size() != 16 * nr) throw std::invalid_argument("lattice layout: region_zone is not 16 per region");
+    for (std::size_t r = 0; r < nr; ++r) {
+      const double* v = &in.region_zone[16 * r];
+      ll::Zone& z = s.regions[r].zone;
+      z.kind = v[0] == 1.0 ? ll::Zone::Kind::Box : v[0] == 2.0 ? ll::Zone::Kind::Cylinder : ll::Zone::Kind::None;
+      if (z.kind == ll::Zone::Kind::None) continue;
+      z.centre = {v[1], v[2], v[3]};
+      for (int k = 0; k < 3; ++k) z.axis[k] = {v[4 + 3 * k], v[5 + 3 * k], v[6 + 3 * k]};
+      for (int k = 0; k < 3; ++k) z.half[k] = v[13 + k];
+    }
+  }
   s.cells.algorithm = algorithm_from(in.algorithm);
   s.cells.topology = topopt::lattice_topology_from_id(in.topology);
   s.cells.cell_mm = in.cell_mm;
@@ -167,7 +226,16 @@ ll::Settings settings_from(const LatticeLayoutSettings& in) {
   s.cells.grade_to_shape = in.grade_to_shape;
   s.cells.band_mm = in.band_mm;
   s.cells.band_cell_mm = in.band_cell_mm;
-  s.struts.mode = in.per_region ? ll::Density::PerRegion : ll::Density::Uniform;
+  s.struts.mode = in.by_stress ? ll::Density::ByStress : in.per_region ? ll::Density::PerRegion : ll::Density::Uniform;
+  s.struts.dial_light = in.dial_light;
+  s.struts.dial_heavy = in.dial_heavy;
+  s.struts.width_light_mm = in.width_light_mm;
+  s.struts.width_heavy_mm = in.width_heavy_mm;
+  s.cells.by_stress = in.cells_by_stress;
+  s.cells.max_step = in.max_step;
+  s.stress.reference_mpa = in.reference_mpa;
+  s.stress.percentile = in.percentile;
+  s.stress.response = in.response;
   s.struts.dial = in.dial;
   if (in.dial_region.size() != in.dial_value.size())
     throw std::invalid_argument("lattice layout: dial_region and dial_value are not one length");
@@ -238,6 +306,16 @@ void fill(LatticeLayoutResult& o, const ll::Outcome& out) {
   o.open_look = L.open_look;
   o.touch = L.touch;
   o.read_again = out.read_again;
+  o.no_stress = out.struts.no_stress;
+  o.reference_mpa = out.struts.reference_mpa;
+  o.highest_mpa = out.struts.highest_mpa;
+  o.at_light = static_cast<int32_t>(out.struts.at_light);
+  o.at_heavy = static_cast<int32_t>(out.struts.at_heavy);
+  o.cells_by_stress = out.cells_by_stress;
+  o.cells_no_stress = out.cells_no_stress;
+  o.stress_reference_mpa = out.stress_reference_mpa;
+  o.step_held_at = out.step_held_at;
+  o.thin_solid = static_cast<int32_t>(out.thin_solid);
   o.ms_read = out.ms_read;
   o.ms_cells = out.ms_cells;
   o.ms_bars = out.ms_bars;
@@ -278,8 +356,9 @@ LatticeLayoutResult lattice_layout(int64_t session, const LatticeLayoutSettings&
   const std::string why = bridge_guard_run("lattice_layout", [&] {
     auto s = layout_at(session);
     const uint64_t gen = s->cancel_gen.load();       // a cancel after this point, or one that came while it waited, wins
-    const ll::Settings ask = settings_from(settings);   // a bad setting fails before the wait
+    ll::Settings ask = settings_from(settings);   // a bad setting fails before the wait
     std::lock_guard<std::mutex> lock(s->mu);
+    ask.stress.demand = s->demand;                    // Install 2: the session's stress result, the same pointer every lay
     s->stop = false;                                  // FIRST (LatticeReview's recipe), then the gen test: a cancel after this point stops it
     if (s->cancel_gen.load() != gen) { o.cancelled = true; return; }
     const auto t0 = std::chrono::steady_clock::now();
@@ -302,6 +381,25 @@ LatticeLayoutResult lattice_layout(int64_t session, const LatticeLayoutSettings&
     failed(err, why);
   }
   return o;
+}
+
+void lattice_layout_set_demand(int64_t session, const LatticeLayoutDemand& d, BridgeError& err) {
+  const std::string why = bridge_guard_run("lattice_layout_set_demand", [&] {
+    auto s = layout_at(session);
+    std::shared_ptr<const ll::DemandField> field;
+    if (!d.mpa.empty()) {
+      auto f = std::make_shared<ll::DemandField>();
+      f->origin = {d.origin_x, d.origin_y, d.origin_z};
+      f->spacing = d.spacing;
+      f->nx = d.nx; f->ny = d.ny; f->nz = d.nz;
+      f->mpa = d.mpa;
+      if (f->empty()) throw std::invalid_argument("lattice layout: the stress result is not nx*ny*nz values on a spacing above 0");
+      field = std::move(f);
+    }
+    std::lock_guard<std::mutex> lock(s->mu);
+    s->demand = std::move(field);
+  });
+  if (!why.empty()) failed(err, why);
 }
 
 LatticeLayoutWhere lattice_layout_where(int64_t session, const LatticeLayoutPoints& points, BridgeError& err) {

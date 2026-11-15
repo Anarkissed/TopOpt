@@ -1322,15 +1322,15 @@ public struct WorkspacePlaceholder: View {
                             if let why = newEngine.solidReason {   // ★ his ruling 11-14: solid where lattice was asked — why, and fixes
                                 LatticeSolidReasonBar(reason: why) { fix in SolidReason.apply(fix, to: &project.lattice) }
                             }
-                            LatticeFileExportBar(export: fileExport, make: exportPrintFile)   // ★ his go 11-13: Export, on the Mac
+                            LatticeFileExportBar(export: fileExport, make: exportPrintFile, runStressCheck: runNewEngineStressCheck)   // ★ his go 11-13: Export, on the Mac
                             LatticeLayoutPreviewLines(preview: newEngine)
                         }
                     }
                     else if newEngineAsked { LatticeLayoutPreviewOneLine(text: LatticeLayoutPreview.organicLine) }   // ★ Organic: said
                 }   // ★ the new engine (test): its lines
-                .onChange(of: newEngineOn) { on in newEngine.update(project: project, on: on, solid: !surfaceXrayOn) }
-                .onChange(of: surfaceXrayOn) { x in if newEngineOn { newEngine.update(project: project, on: true, solid: !x) } }
-                .onChange(of: project.lattice, perform: { _ in if newEngineOn { newEngine.update(project: project, on: true, solid: !surfaceXrayOn); fileExport.settingsChanged() } })   // (the rebake's lattice trigger stays the page's first: OrganicPreviewBakeInputsTests)
+                .onChange(of: newEngineOn) { on in newEngine.update(project: project, on: on, solid: !surfaceXrayOn, stress: newEngineStress) }
+                .onChange(of: surfaceXrayOn) { x in if newEngineOn { newEngine.update(project: project, on: true, solid: !x, stress: newEngineStress) } }
+                .onChange(of: project.lattice, perform: { _ in if newEngineOn { newEngine.update(project: project, on: true, solid: !surfaceXrayOn, stress: newEngineStress); fileExport.settingsChanged() } })   // (the rebake's lattice trigger stays the page's first: OrganicPreviewBakeInputsTests)
                 .ignoresSafeArea()
                 // ★ §6(g) — THE PENCIL HOVER, ON THE MESH VIEW ITSELF.
                 //
@@ -3329,6 +3329,7 @@ public struct WorkspacePlaceholder: View {
         .onChange(of: latticeStressFieldKey) { _ in
             refreshLatticeStressPeak()
             if showStrutPreview, project.lattice.enabled { buildStrutScene() }
+            if newEngineOn { newEngine.update(project: project, on: true, solid: !surfaceXrayOn, stress: newEngineStress) }   // ★ Install 2: the field landed
         }
         .onAppear {
             syncLatticeProxy()
@@ -3957,18 +3958,20 @@ public struct WorkspacePlaceholder: View {
             NSLog("DIAG solve: not needed (enabled %d, needsStressSolve %d)", project.lattice.enabled ? 1 : 0, project.lattice.needsStressSolve ? 1 : 0)
             return
         }
-        guard let ctx = model.makeLatticeSimContext() else {
+        // ★ Install 2 (control 6): one solve per load scenario switched on for the lattice, the worst at each place
+        let ctxs = model.makeLatticeSimContexts()
+        guard !ctxs.isEmpty else {
             NSLog("DIAG solve: NOT STARTED — no sim context (loads/anchors not ready)")
             return
         }
         // A field we already have, for these exact inputs, is the answer.
-        if latticeSim.field != nil, !latticeSim.isStale(against: ctx.fingerprint) {
+        if latticeSim.field != nil, !latticeSim.isStale(against: ctxs) {
             NSLog("DIAG solve: field already current")
             return
         }
         simBannerDismissed = false          // a NEW solve gets a fresh banner
         NSLog("DIAG solve: started (phase was %@)", String(describing: latticeSim.phase))
-        latticeSim.run(ctx)
+        latticeSim.run(ctxs)
     }
 
     /// ★ THE STRESS FIELD THE PAGE MAY GRADE BY, whatever produced it: a finished
@@ -4683,6 +4686,24 @@ public struct WorkspacePlaceholder: View {
 
     private var latticeStressField: LatticeDemandField? {
         latticePageVariantField ?? latticeSim.field
+    }
+
+    /// ★ Install 2: what the new engine grades by — the page's field (by its key) and the Structural reference: the printed
+    /// yield over the project's Safety margin (his 11-14 carry-over from Topology; no lattice control of its own yet).
+    private var newEngineStress: LatticeLayoutPreview.Stress {
+        let margin = project.force.safetyMargin ?? SafetyMargin.defaultValue
+        return .init(key: latticeStressFieldKey, field: latticeStressField,
+                     referenceMPa: model.printedYieldMPa(for: project.material) / Swift.max(1, margin))
+    }
+
+    /// ★ Install 2: the stress check the new engine grades by — the stage's quick solve, whatever the old preview asks (its
+    /// needsStressSolve covers By stress and Swept only; the new engine also sizes Auto cells by stress).
+    private func runNewEngineStressCheck() {
+        let ctxs = model.makeLatticeSimContexts()   // ★ control 6: the loads switched on for the lattice, the worst of them
+        guard !ctxs.isEmpty else { return }
+        if latticeSim.field != nil, !latticeSim.isStale(against: ctxs) { return }
+        simBannerDismissed = false
+        latticeSim.run(ctxs)
     }
 
     /// ★★ THE FIELD'S OWN IDENTITY — AND THE REBAKE NOBODY WAS FIRING
@@ -13940,10 +13961,10 @@ public struct WorkspacePlaceholder: View {
     /// found yet is looked for first, as Optimize does).
     private func exportPrintFile() {
         if compute.wantsRemote, compute.activeRemote == nil {
-            findTheMac { fileExport.make(project: project, config: compute.activeRemote) }
+            findTheMac { fileExport.make(project: project, config: compute.activeRemote, stress: newEngineStress) }
             return
         }
-        fileExport.make(project: project, config: compute.activeRemote)
+        fileExport.make(project: project, config: compute.activeRemote, stress: newEngineStress)
     }
 
     private func findTheMac(then go: @escaping () -> Void) {

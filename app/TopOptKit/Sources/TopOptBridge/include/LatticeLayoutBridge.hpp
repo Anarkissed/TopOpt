@@ -93,6 +93,31 @@ struct LatticeLayoutSettings {
   bool small_cells_in_thin_walls = false;   // his per-part choice (core Settings::small_cells_in_thin_walls), default off
   bool one_grid = false;   // "Let walls cut cells" (his 11-14, Aesthetic only): one grid the walls cut (core Settings::one_grid)
   bool drop_loose = true;                    // Finish None's rule (S4); pieces adrift go too
+  // ── Install 2 (core's install-2 engine): stress, an area's own settings, zones, the size step ──
+  // The stress result itself is the session's (lattice_layout_set_demand); these say how it grades.
+  bool by_stress = false;                    // struts By stress (R7, R8, R12, R16): per_region is then not read
+  double dial_light = 0.01;                  // By stress, "Grade to": the dial where the stress is nothing
+  double dial_heavy = 1.0;                   // By stress, "Grade from": the dial at or over the reference
+  double width_light_mm = 0.0;               // both > 0: the two ends in mm (Manual 1), the dials not read
+  double width_heavy_mm = 0.0;
+  bool cells_by_stress = false;              // C22: cell size by stress
+  double reference_mpa = 0.0;                // > 0: stated; 0 = the part's own (R17: the percentile below)
+  double percentile = 0.95;
+  double response = 1.0;                     // the exponent on stress / reference, held to 0.25 .. 4
+  double max_step = 0.0;                     // C24: the largest size step between neighbours; 0 = none
+  // An area's own cells and struts (C23, R19): 20 numbers per region, in this order, NaN = not stated (the part's):
+  //   algorithm (0 uniform, 1 default_grade, 2 stepped), cell_mm, cell_max_mm, cell_min_mm, min_cells_across,
+  //   grade_to_shape (0/1), band_mm, band_cell_mm, cells_by_stress (0/1), by_stress (0/1), dial, dial_light,
+  //   dial_heavy, width_mm, width_light_mm, width_heavy_mm, strength, response, reference_mpa, max_step.
+  // Empty: no region states anything.
+  std::vector<double> region_own;
+  // An area's own Finish (S13): 5 per region, NaN = the part's: rim_mm, cover_mm, skin (0/1), skin_width_mm,
+  // skin_reach_cells. Empty: none.
+  std::vector<double> region_finish;
+  // A zone in place of a region's faces (D21): 16 per region: kind (0 none, 1 box, 2 cylinder), centre xyz, axis 0 xyz,
+  // axis 1 xyz, axis 2 xyz, half xyz (core's Zone: a cylinder's axis is axis 2, its radius half x, its half length
+  // half z). Empty: no zones.
+  std::vector<double> region_zone;
 };
 
 struct LatticeLayoutResult {
@@ -126,6 +151,15 @@ struct LatticeLayoutResult {
   double bed_contact_mm2 = -1.0;
   int32_t midair_starts = -1;
   bool read_again = false;                   // the part was read for this layout
+  // Install 2. By stress (core's StrutReport): no field or no reference (R18), the reference used, the highest stress a
+  // cell read, the cells at each end. Cell size by stress applied / asked with no stress; the one resolved reference;
+  // the size step kept (C24); cut cells made solid by P8 (f).
+  bool no_stress = false;
+  double reference_mpa = 0.0, highest_mpa = 0.0;
+  int32_t at_light = 0, at_heavy = 0;
+  bool cells_by_stress = false, cells_no_stress = false;
+  double stress_reference_mpa = 0.0, step_held_at = 0.0;
+  int32_t thin_solid = 0;
   double ms_read = 0.0, ms_cells = 0.0, ms_bars = 0.0, ms_bridge = 0.0;
 };
 
@@ -169,6 +203,15 @@ struct LatticeLayoutGrid {
 };
 LatticeLayoutGrid lattice_layout_grid(int64_t session, float origin_x, float origin_y, float origin_z, float voxel_mm,
                                       int32_t nx, int32_t ny, int32_t nz, BridgeError& err);
+// THE STRESS RESULT the session grades by (Install 2): von Mises, MPa, x fastest then y then z, on a grid whose low corner
+// is `origin` and whose voxel edge is `spacing` (core's DemandField). Kept by the session (one pointer between lays: core
+// keeps the part's own reference by it) until set again; an empty `mpa` clears it (no stress yet).
+struct LatticeLayoutDemand {
+  std::vector<float> mpa;
+  double origin_x = 0.0, origin_y = 0.0, origin_z = 0.0, spacing = 0.0;
+  int32_t nx = 0, ny = 0, nz = 0;
+};
+void lattice_layout_set_demand(int64_t session, const LatticeLayoutDemand& demand, BridgeError& err);
 // Every layout of `session` running now or waiting comes back cancelled. Safe from any thread.
 void lattice_layout_cancel(int64_t session);
 void lattice_layout_close(int64_t session);

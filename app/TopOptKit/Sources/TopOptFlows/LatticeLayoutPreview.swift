@@ -49,19 +49,42 @@ public final class LatticeLayoutPreview: ObservableObject {
     public static let roundBarsLine = "Preview: flat bridges drawn square, as printed · the print adds a few posts"
     public static let noPartLine = "New engine: this part has no model file to read"
     public static let organicLine = "New engine: Organic is not drawn yet · this is the old preview"
-    public static let byStressLine = "New engine: no stress yet · cell size and density follow the shape only"
+    public static let byStressLine = "New engine: no stress result yet · run the stress check to grade by stress"
     public static let perAreaLine = "New engine: one cell range, grade style and band for the whole part, not per area yet"
 
     /// The new engine draws the strut types' Uniform, Default Grade and Stepped; Organic keeps the old preview (LatticeReview 11-13).
     public static func draws(_ l: LatticeSettings) -> Bool { l.resolvedAlgorithm != "organic" }
     /// One plain line each for what the new engine leaves out for these settings.
-    public static func notes(_ l: LatticeSettings) -> [String] {
+    public static func notes(_ l: LatticeSettings, hasStress: Bool = false) -> [String] {
         var out: [String] = []
-        if l.densityMode == .sim || l.simulateStresses { out.append(byStressLine) }
-        if l.areaGrading.values.contains(where: { !$0.isEmpty }) { out.append(perAreaLine) }
+        if needsStress(l), !hasStress { out.append(byStressLine) }
         return out
     }
     public static func note(_ l: LatticeSettings) -> String? { notes(l).first }
+
+    /// ★ Install 2: the stress result the page grades by (the stage's quick solve, or a run's variant), its identity (the
+    /// page's latticeStressFieldKey: one hash, never a scan per frame) and the Structural reference. Equal when the key and
+    /// the reference are.
+    public struct Stress: Equatable {
+        public var key: Int
+        public var field: LatticeDemandField?
+        public var referenceMPa: Double
+        public init(key: Int = 0, field: LatticeDemandField? = nil, referenceMPa: Double = 0) {
+            self.key = key; self.field = field; self.referenceMPa = referenceMPa
+        }
+        public static func == (a: Stress, b: Stress) -> Bool { a.key == b.key && a.referenceMPa == b.referenceMPa }
+    }
+
+    /// Whether these settings grade by stress at all (By stress struts, or cell size by stress).
+    public static func needsStress(_ l: LatticeSettings) -> Bool {
+        let s = settings(l)
+        return s.byStress || s.cellsByStress
+    }
+    /// The stress half of the settings, read off the lattice settings alone.
+    static func settings(_ l: LatticeSettings) -> (byStress: Bool, cellsByStress: Bool) {
+        let follows = l.simulateStresses && l.gradingMode != .none && l.gradingMode.followsStress
+        return (follows && l.densityMode == .sim, follows && l.cellSizeMode != .fixed)
+    }
     /// The body while the new engine draws: see-through, so the bars inside it show (the Flexible pass's ghost rules apply).
     public static let ghostAlpha: Float = 0.2
 
@@ -78,19 +101,24 @@ public final class LatticeLayoutPreview: ObservableObject {
     private var nozzleSession: LatticeLayoutSession?
     private var latticeAtLay = LatticeSettings()
     private var nozzlePath: String?
+    private var stress = Stress()
+    private var sessionStressKey: Int?   // the field the session holds (setDemand), by its key
+    private var nozzleStressKey: Int?
 
     public init() {}
 
     /// The page's one call, on every change of the part or its lattice settings (cheap when nothing changed).
-    public func update(project p: ProjectModel, on: Bool, solid: Bool = false) {
+    public func update(project p: ProjectModel, on: Bool, solid: Bool = false, stress: Stress = Stress()) {
         guard on else { clear(); return }
         guard let path = p.importedFile?.path else { problem = Self.noPartLine; bars = nil; return }
         if path != sessionPath || box == nil { box = Self.box(p.importedMesh?.vertices ?? []) }
         let solidChanged = solid != solidWanted
         solidWanted = solid
-        notes = Self.notes(p.lattice)
-        let s = Self.settings(p)
-        if path == sessionPath, s == lastSettings, task != nil || bars != nil {
+        notes = Self.notes(p.lattice, hasStress: stress.field != nil)
+        let s = Self.settings(p, referenceMPa: stress.referenceMPa)
+        let stressMoved = stress.key != self.stress.key
+        self.stress = stress
+        if path == sessionPath, s == lastSettings, !stressMoved, task != nil || bars != nil {
             if solidChanged, task == nil || bars != nil { solidToggled() }
             return
         }
@@ -106,7 +134,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         task?.cancel(); task = nil
         mapTask?.cancel(); mapTask = nil
         nozzleSession?.close(); nozzleSession = nil; nozzlePath = nil; nozzleLine = nil; solidReason = nil
-        session?.close(); session = nil; sessionPath = nil; lastSettings = nil
+        session?.close(); session = nil; sessionPath = nil; lastSettings = nil; sessionStressKey = nil; nozzleStressKey = nil
         bars = nil; problem = nil; timing = nil; laying = false
     }
 
@@ -116,9 +144,10 @@ public final class LatticeLayoutPreview: ObservableObject {
                 session?.close()
                 let opened = try await LatticeLayoutSession.open(path: path)
                 guard !Task.isCancelled else { return }
-                session = opened; sessionPath = path; openMS = opened.info.msOpen
+                session = opened; sessionPath = path; openMS = opened.info.msOpen; sessionStressKey = nil
             }
             guard let session else { return }
+            sessionStressKey = try await Self.give(stress, to: session, holding: sessionStressKey)
             let r = try await session.lay(s)
             guard !Task.isCancelled else { return }
             token &+= 1
@@ -136,6 +165,17 @@ public final class LatticeLayoutPreview: ObservableObject {
             bars = nil
             laying = false
         }
+    }
+
+    /// The stress result into a session once per field (core keeps the part's own reference by its pointer).
+    static func give(_ stress: Stress, to session: LatticeLayoutSession, holding key: Int?) async throws -> Int? {
+        guard key != stress.key else { return key }
+        if let f = stress.field {
+            try await session.setDemand(mpa: f.vonMises, nx: f.nx, ny: f.ny, nz: f.nz, origin: f.origin, spacingMM: f.spacingMM)
+        } else {
+            try await session.setDemand(mpa: nil, nx: 0, ny: 0, nz: 0, origin: .zero, spacingMM: 0)
+        }
+        return stress.key
     }
 
     // MARK: his 0.2 mm nozzle line (11-14)
@@ -269,6 +309,73 @@ public final class LatticeLayoutPreview: ObservableObject {
         return order.compactMap { byDepth[$0] }
     }
 
+    /// ★ Install 2 (C23, R19, S13): an area's own tab (LatticeSettings.areaGrading) as the region's own settings — its grade,
+    /// band, Strength and Finish; what it leaves unset is the part's. A Lattice region only (core reads no own for No lattice).
+    static func areaOwn(_ l: LatticeSettings, group: UUID, into r: inout LatticeLayoutSession.Region, coverMM: Double = -1) {
+        guard let a = l.areaGrading[group], !a.isEmpty else { return }
+        var o = LatticeLayoutSession.AreaOwn()
+        if let m = a.gradingMode {
+            if m == .none {
+                // his 08-25 "No grade — one cell, one density", for this area
+                o.algorithm = "uniform"; o.gradeToShape = false; o.byStress = false; o.cellsByStress = false
+            } else {
+                o.gradeToShape = m.fitsShape && ["stepped", "doubled"].contains(l.resolvedAlgorithm)
+                let follows = l.simulateStresses && m.followsStress
+                o.byStress = follows && l.densityMode == .sim
+                o.cellsByStress = follows && l.cellSizeMode != .fixed
+            }
+        }
+        if let b = a.shapeFitBandMM { o.bandMM = Swift.max(0, b) }
+        if let st = a.shapeGradeStrength { o.strength = Swift.min(1, Swift.max(-1, st)) }
+        // ★ Install 2: this area's Manual controls 1, 2, 4, 5
+        if let lo = a.strutFromMM, let hi = a.strutToMM, lo > 0, hi >= lo { o.widthLightMM = lo; o.widthHeavyMM = hi }
+        if let n = a.cellsAcrossMin, n >= 1 { o.minCellsAcross = Int32(n) }
+        if let k = a.neverSkipCellSize { o.maxStep = k ? 2 : 0 }
+        if let g = a.response { o.response = Swift.min(4, Swift.max(0.25, g)) }
+        if let t = a.stressTargetMPa, t > 0 { o.referenceMPa = t }
+        r.own = o
+        // a zone's Finish (release (4)'s four), as the region's own: what the page shows is what goes
+        var f = LatticeLayoutSession.RegionFinish()
+        var own: LatticeAreaGrading.ZoneFinish?
+        let partOuter = l.boundary.zoneFinishWord
+        if a.outerFinish != nil || a.skin != nil, partOuter != nil || l.boundary == .fullSkin {
+            let z = a.zoneFinish(partOuter: partOuter, partSkin: l.boundary.jobSkinValue)
+            own = z
+            switch z {
+            case .none: f.rimMM = 0; f.coverMM = 0; f.skin = false
+            case .rim: f.rimMM = -1; f.coverMM = 0; f.skin = false
+            case .skin: f.rimMM = 0; f.coverMM = 0; f.skin = true
+            case .covered: f.rimMM = 0; f.coverMM = coverMM; f.skin = false   // at the printer's wall, as the part's
+            }
+        }
+        // ★ Install 2, controls 7 and 8: the rim's width and the skin's bars where this area runs Rim or Skin (its own Finish,
+        // else the part's); on its own Finish the part's numbers go with it
+        let runs = own ?? LatticeManualControl.partFinish(l)
+        if runs == .rim, let w = a.rimWidthMM ?? (own == .rim ? l.rimWidthMM : nil), w > 0 { f.rimMM = Swift.max(0.1, w) }
+        if runs == .skin {
+            if let w = a.skinBarWidthMM ?? (own == .skin ? l.skinBarWidthMM : nil), w > 0 { f.skinWidthMM = w }
+            if let k = a.skinReachCells ?? (own == .skin ? l.skinReachCells : nil), k > 0 { f.skinReachCells = k }
+        }
+        if f.any { r.finish = f }
+    }
+
+    /// ★ Install 2 (D21): a Lattice zone's shape for core — a Box about its middle, its axes the depth planes' own (as its
+    /// handles draw it), its half sizes width, depth and height over two; a Cylinder about its centre along its axis.
+    static func zone(_ p: ProjectModel, group: UUID, primitive pid: UUID) -> LatticeLayoutSession.Zone? {
+        guard let prim = p.latticeZonePrimitive(group), prim.id == pid, let size = p.latticeZoneSize(group) else { return nil }
+        let up = simd_normalize(ManualPrimitive.unit(prim.axis))
+        let (uf, _) = corePlaneBasis(normal: SIMD3<Float>(up))
+        var u = SIMD3<Double>(uf)
+        u = simd_normalize(u - up * simd_dot(u, up))
+        let v = simd_normalize(simd_cross(up, u))
+        if prim.kind == .bolt {
+            return .init(kind: .cylinder, centre: prim.center, axes: [u, v, up],
+                         half: SIMD3(size.width / 2, size.width / 2, size.height / 2))
+        }
+        return .init(kind: .box, centre: p.latticeZoneMiddle(prim), axes: [u, v, up],
+                     half: SIMD3(size.width / 2, size.depth / 2, size.height / 2))
+    }
+
     /// A skin's surface as pieces: its own pieces, or its faces as one piece with no cut.
     static func asPieces(_ s: LatticeLayoutSession.Protect) -> [LatticeLayoutSession.Piece] {
         s.pieces.isEmpty ? (s.faces.isEmpty ? [] : [.init(faces: s.faces, cuts: [])]) : s.pieces
@@ -290,14 +397,19 @@ public final class LatticeLayoutPreview: ObservableObject {
     }
 
     /// Lattice Setup's settings for core's lattice_layout (read where its rows read them).
-    public static func settings(_ p: ProjectModel) -> LatticeLayoutSession.Settings {
+    public static func settings(_ p: ProjectModel, referenceMPa: Double = 0) -> LatticeLayoutSession.Settings {
         var s = LatticeLayoutSession.Settings()
         let l = p.lattice
         let bead = p.printParams.strutLineWidthMM
         s.beadMM = bead > 0 ? bead : 0.45
         s.minStrutLines = 2   // ★ the reviewer's ruling 11-12: one line does not print on his 0.4 mm nozzle
         s.topology = l.topologyID.isEmpty ? "octet" : l.topologyID
-        s.algorithm = l.resolvedAlgorithm == "stepped" ? "stepped" : "default_grade"
+        // ★ "Grade the lattice" off (his 08-25: "No grade — one cell, one density"): core's uniform
+        let graded = l.gradingMode != .none
+        // ★ Install 2 (the reviewer 10-08): Stepped is Aesthetic only — the page blocks it in Structural, and a stored one goes
+        // as Default Grade there
+        let stepped = l.resolvedAlgorithm == "stepped" && (l.stageMode ?? .structural) == .aesthetic
+        s.algorithm = !graded ? "uniform" : stepped ? "stepped" : "default_grade"
         // ★ 11-13: the cell window the page RESOLVES, as the old engine's job reads it (Auto: the floor to the type's ceiling;
         // Swept: the typed window, never under the floor) — never the stored numbers a mode does not show
         let bounds = LatticeBounds.compute(settings: l, limits: TopOptKit.latticeLimits(topology: l.topologyID),
@@ -307,31 +419,67 @@ public final class LatticeLayoutPreview: ObservableObject {
         s.cellMinMM = Swift.max(0, plan.loMM)
         s.cellMaxMM = plan.hiMM > 0 ? plan.hiMM : (l.cellMaxMM > 0 ? l.cellMaxMM : 8)
         switch l.boundary {
-        case .rim: s.rimMM = -1           // Finish Rim: two line widths
+        case .rim: s.rimMM = l.rimWidthMM.map { Swift.max(0.1, $0) } ?? -1   // Finish Rim: two line widths, or his (control 8)
         case .fullSkin: s.skin = true     // Finish Skin (S3): bars across the face joining the cut strut ends (his pick 11-12:
                                           // this went as Covered)
-        case .covered: s.coverMM = -1     // Finish Covered (S9): a solid shell over the lattice, two line widths
+            if let w = l.skinBarWidthMM, w > 0 { s.skinWidthMM = w }        // ★ control 7: the skin's bars
+            if let k = l.skinReachCells, k > 0 { s.skinReachCells = k }
+        case .covered:                    // Finish Covered (S9): a solid shell over the lattice — ★ Install 2: at the printer's
+                                          // own wall (his 08-19 caption, faceSkinMM); two line widths with none set
+            let ring = p.printParams.wallRingMM
+            s.coverMM = ring > 0 ? ring : -1
         default: break
         }
+        // ★ Install 2 (his 09-18: single-cell members lock the Finish to Skin; jobSkinResolved): a one-cell member's struts are
+        // tied by the skin, whatever None or Rim the page holds
+        if l.singleCellMembers, l.boundary == .none || l.boundary == .rim { s.skin = true }
         // Grade to shape: the grading mode's shape fit, its band and its Strength, as the old engine's job sends them (Stepped and
         // Doubled only)
-        if l.gradingMode.fitsShape, ["stepped", "doubled"].contains(l.resolvedAlgorithm) {
+        if graded, l.gradingMode.fitsShape, ["stepped", "doubled"].contains(l.resolvedAlgorithm) {
             s.gradeToShape = true
             s.bandMM = Swift.max(0, l.shapeFitBandMM)
             s.strength = l.shapeFitGradeStrength
         }
-        if let t = l.manualStrutThicknessMM, t > 0 { s.strutWidthMM = t }
+        // ★ Install 2: by stress (his 08-17 permission, the 08-25 grades; LatticeReview's Install 2 engine)
+        let stressHalf = Self.settings(l)
+        s.byStress = stressHalf.byStress
+        s.cellsByStress = stressHalf.cellsByStress
+        if s.byStress || s.cellsByStress {
+            s.response = Swift.min(4, Swift.max(0.25, l.demandExponent))
+            s.percentile = 0.95
+            // Structural: the printed yield over his Safety margin (his 11-14 carry-over); Aesthetic: the part's own
+            s.referenceMPa = (l.stageMode ?? .structural) == .structural ? Swift.max(0, referenceMPa) : 0
+            if let t = l.stressTargetMPa, t > 0 { s.referenceMPa = t }   // ★ control 5: his target stress
+        }
+        if s.byStress {
+            // Grade to (light) and Grade from (heavy), on the dial the page's densities use (R10, the largest cell)
+            func dial(_ rho: Double, _ fallback: Double) -> Double {
+                guard rho > 0 else { return fallback }
+                let pct = p.latticeDensityPercent(rho: rho, cellMM: s.cellMaxMM) ?? rho * 100
+                return Swift.min(1, Swift.max(0.01, pct / 100))
+            }
+            s.dialLight = dial(l.minRelativeDensity, 0.01)
+            s.dialHeavy = dial(l.maxRelativeDensity, 1)
+            // ★ control 1: the two ends typed in mm
+            if let a = l.strutFromMM, let b = l.strutToMM, a > 0, b >= a { s.widthLightMM = a; s.widthHeavyMM = b }
+        }
+        // ★ a typed Thickness only with the simulation off (his 08-19), and never under By stress
+        if !l.simulateStresses, !s.byStress, let t = l.manualStrutThicknessMM, t > 0 { s.strutWidthMM = t }
         s.allowQuilt = l.allowQuilt
         s.smallCellsInThinWalls = l.smallCellsInThinWalls   // ★ his per-part choice (11-13)
         // ★ cells across a wall (C3-C5): Structural five; Aesthetic one with "Allow single-cell members", else two
         let aesthetic = (l.stageMode ?? .structural) == .aesthetic
         s.minCellsAcross = aesthetic ? (l.singleCellMembers ? 1 : 2) : 5
+        if let n = l.cellsAcrossMin, n >= 1 { s.minCellsAcross = Int32(n) }   // ★ control 2: his minimum
+        if l.neverSkipCellSize, s.algorithm == "default_grade" { s.maxStep = 2 }   // ★ control 4 (Default Grade only)
         s.oneGrid = aesthetic && l.letWallsCutCells   // ★ his 11-14: Aesthetic only; Structural always sends false
         // ★ density (R10): core's dial is the percent he sees / 100 (0.01 thinnest ... 1 widest); a typed strut width wins
-        let rowDensity = l.densityMode != .sim && (l.densityMode == .perRegion || aesthetic)
+        // ★ Install 2: the rows' densities only in Per region (the proposal: "Shown only in this mode, sent only in this mode")
+        let rowDensity = l.densityMode == .perRegion && !s.byStress
         s.perRegion = rowDensity
         var id: Int32 = 1
         var uniformSet = false
+        let ring = p.printParams.wallRingMM, cover = ring > 0 ? ring : -1   // Covered's shell: the printer's own wall
         for g in p.latticeGroups {
             // ★ a Protect skin group is a solid face at its rows' depth (D5), never a No lattice region (11-13: it went as both)
             let skinGroup = l.skinGroups.contains(g.id)
@@ -346,16 +494,26 @@ public final class LatticeLayoutPreview: ObservableObject {
                 case let .region(_, rid):
                     faces = p.surfaceResolvedFaces(rid).map { Int32($0) }
                     pieces = Self.pieces(p, region: rid)   // ★ his 11-14: a cut piece is itself, never its whole face (D22)
-                case .primitive:
-                    continue   // a zone is a shape, not a face: the new engine takes faces only (first cut)
+                case let .primitive(pid):
+                    // ★ Install 2 (D21): a Lattice zone is a shape — a Box or a Cylinder of its own, no face
+                    guard !skinGroup, l.zoneGroups.contains(g.id), let z = Self.zone(p, group: g.id, primitive: pid) else { continue }
+                    var r = LatticeLayoutSession.Region(id: id, noLattice: role == .exclude, faces: [], depthMM: 0,
+                                                        expandMM: p.latticeExpandMM(ref))
+                    r.zone = z
+                    if role != .exclude { Self.areaOwn(l, group: g.id, into: &r, coverMM: cover) }
+                    s.regions.append(r)
+                    id += 1
+                    continue
                 }
                 guard !faces.isEmpty else { continue }
                 let depth = p.latticeSlabDepthMM(ref, in: g.id)   // the face row's own number (FlexibleSelectionsList's)
                 if skinGroup {
                     s.protect.append(.init(id: id, faces: faces, depthMM: depth, pieces: pieces))
                 } else {
-                    s.regions.append(.init(id: id, noLattice: role == .exclude, faces: faces, depthMM: depth,
-                                           expandMM: p.latticeExpandMM(ref), pieces: pieces))
+                    var r = LatticeLayoutSession.Region(id: id, noLattice: role == .exclude, faces: faces, depthMM: depth,
+                                                        expandMM: p.latticeExpandMM(ref), pieces: pieces)
+                    if role != .exclude { Self.areaOwn(l, group: g.id, into: &r, coverMM: cover) }   // ★ Install 2: the area's own tab
+                    s.regions.append(r)
                     if role != .exclude, l.densityMode != .sim, let rho = p.latticeSelectableDensity(ref, in: g.id),
                        let pct = [l.cellSizeMode == .fixed && l.cellMM > 0 ? l.cellMM : (p.latticeSelectableCellMM(ref) ?? s.cellMaxMM),
                                   s.cellMaxMM, 8].lazy.compactMap({ p.latticeDensityPercent(rho: rho, cellMM: $0) }).first {

@@ -242,6 +242,96 @@ public final class LatticeSimModel: ObservableObject {
         }
     }
 
+    /// ★ INSTALL 2, MANUAL CONTROL 6: one solve per load scenario switched on for the lattice, and the field the worst of them
+    /// at each place (the highest von Mises, with that solve's own stress there; unweighted — LatticeReview's design). One
+    /// context: exactly `run(_:)`. The headline numbers are the worst of the solves'.
+    public func run(_ ctxs: [Context], now: Date = Date()) {
+        guard let first = ctxs.first else { return }
+        guard ctxs.count > 1 else { run(first, now: now); return }
+        guard phase != .running else { return }
+        phase = .running
+        generation += 1
+        let gen = generation
+        let runner = self.runner
+        let fp = Self.fingerprint(of: ctxs)
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let outcome: Result<[TopOptKit.SimAnalysisResult], Error> =
+                Result { try ctxs.map { c in try FlexibleCoreGate.whileInCore { try runner(c) } } }
+            await MainActor.run { [weak self] in
+                guard let self, self.generation == gen else { return }  // cancelled/superseded
+                switch outcome {
+                case .failure(let e):
+                    self.phase = .failed(String(describing: e))
+                case .success(let rs) where rs.contains(where: \.nonConvergent):
+                    self.phase = .failed("The sim could not converge at this resolution — no field was produced.")
+                case .success(let rs):
+                    let r = Self.worstOf(rs)
+                    let summary = Summary(maxDisplacementMM: r.maxDisplacementMM,
+                                          maxStressMPa: r.maxStressMPa,
+                                          safety: r.marginWorstCase,
+                                          date: now, resolution: first.resolution)
+                    self.field = LatticeDemandField(
+                        vonMises: r.vonMisesField, stressTensor: r.stressTensorField,
+                        nx: r.gridNX, ny: r.gridNY,
+                        nz: r.gridNZ, origin: r.gridOrigin, spacingMM: r.spacingMM,
+                        provenance: .solidSim(date: now, resolution: first.resolution))
+                    self.fingerprint = fp
+                    self.phase = .complete(summary)
+                }
+            }
+        }
+    }
+
+    /// The worst of several solves on one grid: at each voxel the highest von Mises and that solve's own six stresses; the
+    /// largest displacement and stress, the smallest margin. Solves on different grids (never at one resolution of one
+    /// part): the one with the highest stress, whole.
+    nonisolated static func worstOf(_ rs: [TopOptKit.SimAnalysisResult]) -> TopOptKit.SimAnalysisResult {
+        guard let a = rs.first else { preconditionFailure("no solve") }
+        let n = a.vonMisesField.count
+        guard rs.count > 1, rs.allSatisfy({ $0.vonMisesField.count == n && $0.gridNX == a.gridNX && $0.gridNY == a.gridNY
+                                            && $0.gridNZ == a.gridNZ }) else {
+            return rs.max { $0.maxStressMPa < $1.maxStressMPa } ?? a
+        }
+        var vm = a.vonMisesField
+        var who = [Int](repeating: 0, count: n)
+        for (k, r) in rs.enumerated().dropFirst() {
+            for i in 0..<n where r.vonMisesField[i] > vm[i] { vm[i] = r.vonMisesField[i]; who[i] = k }
+        }
+        let tensors = rs.allSatisfy { $0.stressTensorField.count == 6 * n }
+        var t = tensors ? a.stressTensorField : []
+        if tensors {
+            for i in 0..<n where who[i] != 0 {
+                for j in 0..<6 { t[6 * i + j] = rs[who[i]].stressTensorField[6 * i + j] }
+            }
+        }
+        return TopOptKit.SimAnalysisResult(
+            accepted: rs.allSatisfy(\.accepted), nonConvergent: false,
+            maxStressMPa: rs.map(\.maxStressMPa).max() ?? a.maxStressMPa,
+            marginWorstCase: rs.map(\.marginWorstCase).min() ?? a.marginWorstCase,
+            marginRequired: a.marginRequired,
+            maxDisplacementMM: rs.map(\.maxDisplacementMM).max() ?? a.maxDisplacementMM,
+            vonMisesField: vm, stressTensorField: t,
+            gridNX: a.gridNX, gridNY: a.gridNY, gridNZ: a.gridNZ, gridOrigin: a.gridOrigin, spacingMM: a.spacingMM)
+    }
+
+    /// The fingerprint of several solves: one context's own; several, every one's inputs in order.
+    public static func fingerprint(of ctxs: [Context]) -> LatticeSimFingerprint? {
+        guard let first = ctxs.first else { return nil }
+        guard ctxs.count > 1 else { return first.fingerprint }
+        let fps = ctxs.map(\.fingerprint)
+        return LatticeSimFingerprint(
+            modelPath: first.modelPath, material: first.material, resolution: first.resolution,
+            anchorFaceIDs: fps.flatMap { $0.anchorFaceIDs + [-1] }, loadGroups: fps.flatMap(\.loadGroups),
+            anchorRegionIDs: fps.flatMap { $0.anchorRegionIDs + [-1] },
+            regionSignature: fps.map { "\($0.regionSignature)#\($0.anchorFaceIDs.count)/\($0.loadGroups.count)" }.joined(separator: "||"))
+    }
+
+    /// Whether a completed field is stale against these solves' inputs.
+    public func isStale(against ctxs: [Context]) -> Bool {
+        guard let fp = Self.fingerprint(of: ctxs) else { return false }
+        return isStale(against: fp)
+    }
+
     /// Cancel: abandon the in-flight result (the bridge solve has no cancel flag —
     /// it finishes in the background and is discarded on arrival).
     public func cancel() {

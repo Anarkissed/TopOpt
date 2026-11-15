@@ -91,7 +91,9 @@ final class LatticeLayoutPreviewTests: XCTestCase {
         XCTAssertEqual(s.coverMM, 0, "★ Skin is not Covered")
         p.lattice.boundary = .covered
         s = LatticeLayoutPreview.settings(p)
-        XCTAssertLessThan(s.coverMM, 0, "★ Covered is core's cover (S9)")
+        XCTAssertNotEqual(s.coverMM, 0, "★ Covered is core's cover (S9)")
+        XCTAssertEqual(s.coverMM, p.printParams.wallRingMM > 0 ? p.printParams.wallRingMM : -1, accuracy: 1e-9,
+                       "★ Install 2: at the printer's own wall")
         XCTAssertFalse(s.skin)
         p.lattice.boundary = .rim
         s = LatticeLayoutPreview.settings(p)
@@ -185,8 +187,10 @@ final class LatticeLayoutPreviewTests: XCTestCase {
         XCTAssertFalse(LatticeLayoutPreview.draws(l), "★ Organic: the new engine does not draw it")
         l.algorithm = "stepped"
         XCTAssertTrue(LatticeLayoutPreview.draws(l))
+        l.setSimulateStresses(true)
         l.densityMode = .sim
-        XCTAssertEqual(LatticeLayoutPreview.note(l), LatticeLayoutPreview.byStressLine, "★ By stress: said in one line")
+        XCTAssertEqual(LatticeLayoutPreview.note(l), LatticeLayoutPreview.byStressLine, "★ By stress with no stress result yet: said in one line")
+        XCTAssertNil(LatticeLayoutPreview.notes(l, hasStress: true).first, "★ Install 2: with a stress result nothing is left out")
     }
 
     /// ★ 11-13: skins of one depth go as one (his v4 stand: 26 skins of 4 mm, 289 s → 0.7 s on the Mac, the same lattice).
