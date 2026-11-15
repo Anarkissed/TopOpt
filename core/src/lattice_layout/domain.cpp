@@ -14,6 +14,35 @@ namespace topopt::lattice_layout {
 namespace {
 double dot(const Vec3& a, const Vec3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
 Vec3 sub(const Vec3& a, const Vec3& b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
+// D22: does every cut of at least one of the skin's pieces hold at `p`? (A skin of whole
+// faces has no pieces: yes.)
+bool skin_cuts_hold(const ProtectSkin& s, const Vec3& p) {
+  if (s.pieces.empty()) return true;
+  for (const FacePiece& piece : s.pieces) {
+    bool all = true;
+    for (const FaceCut& c : piece.cuts) {
+      const double d = dot(sub(p, c.point), c.normal);
+      all = all && (c.strict ? d > 0.0 : d >= 0.0);
+    }
+    if (all) return true;
+  }
+  return false;
+}
+// D22: how far `p` is, at least, from where the skin's cuts hold: for each piece the most
+// any one of its cuts fails by (each a half-space), the least over its pieces. 0 or below
+// where some piece's cuts all hold.
+double skin_cut_gap(const ProtectSkin& s, const Vec3& p) {
+  double best = std::numeric_limits<double>::infinity();
+  for (const FacePiece& piece : s.pieces) {
+    double worst = -std::numeric_limits<double>::infinity();
+    for (const FaceCut& c : piece.cuts) {
+      const double len = std::sqrt(dot(c.normal, c.normal));
+      if (len > 0.0) worst = std::max(worst, -dot(sub(p, c.point), c.normal) / len);
+    }
+    best = std::min(best, worst);
+  }
+  return best;
+}
 double segment_distance2(const Vec3& p, const Vec3& a, const Vec3& b) {
   const Vec3 ab = sub(b, a), ap = sub(p, a);
   const double l2 = dot(ab, ab);
@@ -63,7 +92,12 @@ Domain::Domain(const PartMeasure& measure, DomainSpec spec)
   std::stable_sort(spec_.protect.begin(), spec_.protect.end(),
                    [](const ProtectSkin& a, const ProtectSkin& b) { return a.id < b.id; });
   for (const ProtectSkin& s : spec_.protect) near_skin_.emplace_back(s.face, protect_depth_mm(s));
-  for (const ProtectSkin& s : spec_.protect) {   // in id order: the same groups however the caller listed them
+  for (std::size_t i = 0; i < spec_.protect.size(); ++i) {   // in id order: the same groups however the caller listed them
+    const ProtectSkin& s = spec_.protect[i];
+    // D22: a skin whose cuts stand up out of its face is not one of a group: its distance is its own.
+    bool cut = false;
+    for (const FacePiece& piece : s.pieces) cut = cut || !piece.cuts.empty();
+    if (cut) { cut_skins_.push_back(i); continue; }
     const double depth = protect_depth_mm(s);
     SkinGroup* g = nullptr;
     for (SkinGroup& have : skin_groups_)
@@ -74,6 +108,7 @@ Domain::Domain(const PartMeasure& measure, DomainSpec spec)
     for (const auto& t : s.face.triangles) g->faces.triangles.push_back({t[0] + base, t[1] + base, t[2] + base});
   }
   for (const Region& r : spec_.regions) near_shell_.emplace_back(r.shell, r.shell_depth_mm);
+  for (const Region& r : spec_.regions) own_cover_ = own_cover_ || (r.role == Role::Lattice && r.cover_mm);
   sure_.resize(spec_.regions.size());
   for (std::size_t i = 0; i < spec_.regions.size(); ++i) {
     const Region& r = spec_.regions[i];
@@ -167,12 +202,23 @@ Domain::Probe::Probe(const Domain& d) : d_(&d), part_(d.measure_->probe()) {
   for (const Region& r : d.spec_.regions) shells_.emplace_back(r.shell);
 }
 
-double Domain::Probe::skin_gap(const Vec3& p) const {
+double Domain::Probe::cover_at(const Vec3& p) const {
+  if (!d_->own_cover_) return d_->cover_depth_mm();
+  double best = 0.0;
+  return d_->cover_depth_mm(owner_of(p, &best));
+}
+
+double Domain::Probe::skin_gap(const Vec3& p) const { return skin_gap(p, cover_at(p)); }
+
+double Domain::Probe::skin_gap(const Vec3& p, double cover) const {
   double g = std::numeric_limits<double>::infinity();
   for (std::size_t i = 0; i < skin_groups_.size(); ++i)   // one question per depth, not per skin
     g = std::min(g, skin_groups_[i].unsigned_distance(p) - d_->skin_groups_[i].depth_mm);
-  // Finish Covered is a skin on every face of the part.
-  const double cover = d_->cover_depth_mm();
+  for (std::size_t i : d_->cut_skins_) {   // D22: within its depth AND where its cuts hold
+    const ProtectSkin& s = d_->spec_.protect[i];
+    g = std::min(g, std::max(skins_[i].unsigned_distance(p) - d_->protect_depth_mm(s), skin_cut_gap(s, p)));
+  }
+  // Finish Covered is a skin on every face of the part (S13: the cover of the lattice read).
   if (cover > 0.0) g = std::min(g, part_.depth_up_to(p, cover + 2.0) - cover);
   return g;
 }
@@ -181,11 +227,11 @@ double Domain::Probe::skin_gap(const Vec3& p) const {
 // square-on is landed on exactly by the first step. Running along one a hair away
 // would crawl, so a step is never under 0.05 mm; a start it then oversteps is found
 // again by halving (as PartMeasure::reach does at the part's surface).
-double Domain::Probe::skin_ahead(const Vec3& p, const Vec3& dir, double limit) const {
-  if ((skins_.empty() && !(d_->cover_depth_mm() > 0.0)) || !(limit > 0.0)) return -1.0;
+double Domain::Probe::skin_ahead(const Vec3& p, const Vec3& dir, double limit, double cover) const {
+  if ((skins_.empty() && !(cover > 0.0)) || !(limit > 0.0)) return -1.0;
   const double kMinStep = 0.05, kOn = 1e-7;   // mm
   auto gap_at = [&](double t) {
-    return skin_gap(Vec3{p.x + dir.x * t, p.y + dir.y * t, p.z + dir.z * t});
+    return skin_gap(Vec3{p.x + dir.x * t, p.y + dir.y * t, p.z + dir.z * t}, cover);
   };
   double t = 0.0, g = gap_at(0.0);
   while (true) {
@@ -206,14 +252,69 @@ double Domain::Probe::skin_ahead(const Vec3& p, const Vec3& dir, double limit) c
 
 double Domain::Probe::room_through(const Vec3& p, double at_least) const {
   if (!(d_->skin_most_mm() > 0.0)) return part_.thickness_in(p, at_least);
+  return room_through(p, at_least, cover_at(p));
+}
+
+double Domain::Probe::room_through(const Vec3& p, double at_least, double cover) const {
+  if (!(d_->skin_most_mm() > 0.0)) return part_.thickness_in(p, at_least);
   // With skins about, the line itself is needed: a skin takes more of a slanted line than
   // its own depth, so no shortcut on the material's width alone is safe.
   PartMeasure::Probe::Line line;
   const double all = part_.thickness_in(p, 0.0, &line);
   const Vec3 back{-line.dir.x, -line.dir.y, -line.dir.z};
-  const double fwd_skin = skin_ahead(p, line.dir, line.fwd), back_skin = skin_ahead(p, back, line.back);
+  const double fwd_skin = skin_ahead(p, line.dir, line.fwd, cover), back_skin = skin_ahead(p, back, line.back, cover);
   if (fwd_skin < 0.0 && back_skin < 0.0) return all;
   return (fwd_skin >= 0.0 ? fwd_skin : line.fwd) + (back_skin >= 0.0 ? back_skin : line.back);
+}
+
+// In region i? For a prism also how far the point is from the face plane; for a shell,
+// from the face itself.
+bool Domain::Probe::holds_at(std::size_t i, const Vec3& p, double* dist) const {
+  const Region& r = d_->spec_.regions[i];
+  if (r.is_shell()) {
+    // D20: the surface carried inward along its own normals, to its own outline.
+    if (!d_->near_shell_[i].maybe(p)) return false;   // farther than its depth
+    const double d = shells_[i].unsigned_distance(p);
+    if (dist) *dist = d;
+    if (d > r.shell_depth_mm) return false;
+    if (r.shell_edge.empty()) return true;          // a closed surface has no outline
+    double e2 = std::numeric_limits<double>::infinity();
+    for (const auto& seg : r.shell_edge) e2 = std::min(e2, segment_distance2(p, seg[0], seg[1]));
+    // The nearest point of the surface is inside its outline exactly when the surface
+    // is nearer than its border. How far inside, along the surface: the other leg.
+    const double along2 = e2 - d * d;
+    if (!(along2 > 1e-12)) return false;
+    return r.expand_mm >= 0.0 || along2 >= r.expand_mm * r.expand_mm;
+  }
+  if (!d_->region_holds(i, p)) return false;
+  if (dist) {
+    const Vec3& n = r.prism.normal;
+    const double ln = std::sqrt(dot(n, n));
+    *dist = ln > 0.0 ? std::fabs(dot(sub(p, r.prism.origin), n) / ln)
+                     : std::numeric_limits<double>::infinity();
+  }
+  return true;
+}
+
+// D6: among the Lattice regions that hold the point, the nearer face owns it; on one
+// face plane the deeper; then the lower id (include_wins_plane_tie, as core rules today).
+const Region* Domain::Probe::owner_of(const Vec3& p, double* best) const {
+  const DomainSpec& spec = d_->spec_;
+  const Region* owner = nullptr;
+  for (std::size_t i = 0; i < spec.regions.size(); ++i) {
+    const Region& r = spec.regions[i];
+    double d = 0.0;
+    if (r.role != Role::Lattice || !holds_at(i, p, &d)) continue;
+    bool wins = !owner || d < *best;
+    if (!wins && d == *best)   // regions are in id order, so a shell tie keeps the lower id
+      wins = !r.is_shell() && !owner->is_shell() &&
+             include_wins_plane_tie(r.prism, r.id, owner->prism, owner->id);
+    if (wins) {
+      owner = &r;
+      *best = d;
+    }
+  }
+  return owner;
 }
 
 Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
@@ -230,37 +331,9 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
   // whatever else covers the point. The lattice starts right behind it.
   for (std::size_t i = 0; i < spec.protect.size(); ++i)
     if (d_->near_skin_[i].maybe(p) &&
-        skins_[i].unsigned_distance(p) <= d_->protect_depth_mm(spec.protect[i]))
+        skins_[i].unsigned_distance(p) <= d_->protect_depth_mm(spec.protect[i]) &&
+        skin_cuts_hold(spec.protect[i], p))   // D22: the cuts stand up out of the face
       return inside_or({Why::ProtectSkin, spec.protect[i].id});
-
-  // In the region? For a prism also how far the point is from the face plane; for a
-  // shell, from the face itself.
-  auto holds_at = [&](std::size_t i, const Vec3& p, double* dist) {
-    const Region& r = spec.regions[i];
-    if (r.is_shell()) {
-      // D20: the surface carried inward along its own normals, to its own outline.
-      if (!d_->near_shell_[i].maybe(p)) return false;   // farther than its depth
-      const double d = shells_[i].unsigned_distance(p);
-      if (dist) *dist = d;
-      if (d > r.shell_depth_mm) return false;
-      if (r.shell_edge.empty()) return true;          // a closed surface has no outline
-      double e2 = std::numeric_limits<double>::infinity();
-      for (const auto& seg : r.shell_edge) e2 = std::min(e2, segment_distance2(p, seg[0], seg[1]));
-      // The nearest point of the surface is inside its outline exactly when the surface
-      // is nearer than its border. How far inside, along the surface: the other leg.
-      const double along2 = e2 - d * d;
-      if (!(along2 > 1e-12)) return false;
-      return r.expand_mm >= 0.0 || along2 >= r.expand_mm * r.expand_mm;
-    }
-    if (!d_->region_holds(i, p)) return false;
-    if (dist) {
-      const Vec3& n = r.prism.normal;
-      const double ln = std::sqrt(dot(n, n));
-      *dist = ln > 0.0 ? std::fabs(dot(sub(p, r.prism.origin), n) / ln)
-                       : std::numeric_limits<double>::infinity();
-    }
-    return true;
-  };
 
   auto holds = [&](std::size_t i, double* dist) { return holds_at(i, p, dist); };
 
@@ -269,23 +342,8 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
     if (spec.regions[i].role == Role::NoLattice && holds(i, nullptr))
       return inside_or({Why::NoLattice, spec.regions[i].id});
 
-  // D6: among the Lattice regions that hold the point, the nearer face owns it; on one
-  // face plane the deeper; then the lower id (include_wins_plane_tie, as core rules today).
-  const Region* owner = nullptr;
   double best = 0.0;
-  for (std::size_t i = 0; i < spec.regions.size(); ++i) {
-    const Region& r = spec.regions[i];
-    double d = 0.0;
-    if (r.role != Role::Lattice || !holds(i, &d)) continue;
-    bool wins = !owner || d < best;
-    if (!wins && d == best)   // regions are in id order, so a shell tie keeps the lower id
-      wins = !r.is_shell() && !owner->is_shell() &&
-             include_wins_plane_tie(r.prism, r.id, owner->prism, owner->id);
-    if (wins) {
-      owner = &r;
-      best = d;
-    }
-  }
+  const Region* owner = owner_of(p, &best);
   if (!owner && spec.start != Start::AllLattice) return inside_or({Why::NotAsked, 0});   // D12
   const int id = owner ? owner->id : 0;                                       // D4
   const bool flat = owner && !owner->is_shell();
@@ -302,7 +360,7 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
   // S1, S2, S10: the rim. Within its width of the owning region's own edge, where the
   // part's solid backs that edge: one step beyond the nearest point of the edge, at the
   // same depth, there is material, and it is no Lattice region's (a seam).
-  const double rim = d_->rim_width_mm();
+  const double rim = d_->rim_width_mm(owner);   // S13: the owner's own, else the part's
   if (rim > 0.0 && owner && !owner->is_shell()) {
     const double e = region_edge_distance(*owner, p);
     if (e < rim) {
@@ -331,7 +389,7 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
   // D8: lattice was asked for here; can the wall hold it?
   // S9: Finish Covered. Lattice within the cover's thickness of the part's surface is
   // the solid shell instead.
-  const double cover = d_->cover_depth_mm();
+  const double cover = d_->cover_depth_mm(owner);   // S13: the owner's own, else the part's
   if (cover > 0.0 && part_.depth_up_to(p, cover * (1.0 + 1e-9) + 1e-9) <= cover) return {Why::Cover, id};
 
   if (wall_wanted) {
@@ -341,7 +399,7 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
     } else {
       // A caller that wants the width gets it; one that only needs "can this wall hold
       // lattice?" (D8) lets the measure stop as soon as no line through here is shorter.
-      wall = room_through(p, wall_mm ? 0.0 : spec.min_wall_mm);
+      wall = room_through(p, wall_mm ? 0.0 : spec.min_wall_mm, cover);
     }
     if (wall_mm) *wall_mm = wall;
     double holds_mm = wall;   // the width lattice can use: the wall less its Protect skins
@@ -350,8 +408,8 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
       const Vec3& n = owner->prism.normal;
       const Vec3 toward{-n.x, -n.y, -n.z};
       Room r;
-      r.back = skin_ahead(p, toward, std::min(back_m, best + 1e-3));
-      r.on = skin_ahead(p, n, std::min(on_m, owner->prism.depth - best + 1e-3));
+      r.back = skin_ahead(p, toward, std::min(back_m, best + 1e-3), cover);
+      r.on = skin_ahead(p, n, std::min(on_m, owner->prism.depth - best + 1e-3), cover);
       r.skin_back = r.back >= 0.0;
       r.skin_on = r.on >= 0.0;
       holds_mm = (r.skin_back ? r.back : back_m) + (r.skin_on ? r.on : on_m);

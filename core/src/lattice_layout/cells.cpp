@@ -5,9 +5,11 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <unordered_map>
 
 #include "topopt/stepped_plan.hpp"  // stepped_size_menu, kSteppedPrintsOpenMaxStrutPerCell
 
@@ -165,6 +167,13 @@ bool cell_holds(const Layout& layout, const Domain::Probe& probe, const Cell& ce
 
 namespace {
 
+// C24: a size cap on a place of one base cell: no cell whose cube shares volume with the box may be larger than
+// `size` (the finest always may).
+struct Cap {
+  double lo[3], hi[3];
+  double size;
+};
+
 // One region's pass.
 struct Pass {
   const Domain::Probe* probe;
@@ -183,12 +192,16 @@ struct Pass {
   double finest_mm = 0.0;           // the smallest cell its ladder allows (f)
   double floor_mm = 0.0;            // the smallest cell that may stand in this pass at all
   double skin_most = 0.0;           // the deepest Protect skin or cover of the domain
-  bool count_main = false;          // C21: a flat region with Let walls cut cells on counts its main size
-  double main_mm = 0.0;             // C21: no cell larger than this is laid (0 = no such cap)
   // D14c: the region's depth (a wall is never read deeper; 1e300 for the whole part), and, under a flat face, the
   // depth whose own cell prints (0 elsewhere: the cell there does not come from the depth).
   double region_depth = 1e300;
   double depth_need = 0.0;
+  // C22: the stress field when cell size by stress applies (null otherwise), its reference and response.
+  const DemandField* demand = nullptr;
+  double ref_mpa = 0.0;
+  double response = 1.0;
+  // C24: the size caps on the base cell being laid (null: none, the case whenever no size step is asked).
+  const std::vector<Cap>* caps = nullptr;
 
   // What the counted points of a cube read (D14c): the narrowest wall, the narrowest member.
   struct Seen {
@@ -253,36 +266,40 @@ struct Pass {
     const double d = std::max(0.0, edge_distance(lo[0] + 0.5 * s, lo[1] + 0.5 * s, lo[2] + 0.5 * s));
     return d >= spec->band_mm * (s - finest_mm) / (base_mm - finest_mm) - 1e-9;
   }
+  // R16: the highest stress in the axis-aligned box round the cube's eight corners.
+  double demand_in(const double lo[3], double s) const {
+    Vec3 mn{1e300, 1e300, 1e300}, mx{-1e300, -1e300, -1e300};
+    for (int k = 0; k < 8; ++k) {
+      const Vec3 v = frame.at(lo[0] + ((k & 1) ? s : 0.0), lo[1] + ((k & 2) ? s : 0.0), lo[2] + ((k & 4) ? s : 0.0));
+      mn.x = std::min(mn.x, v.x); mx.x = std::max(mx.x, v.x);
+      mn.y = std::min(mn.y, v.y); mx.y = std::max(mx.y, v.y);
+      mn.z = std::min(mn.z, v.z); mx.z = std::max(mx.z, v.z);
+    }
+    return demand->highest_in(mn, mx);
+  }
+  // C22, the centre rule of G1-G3 with the stress in the place of the outline: a cell of size s may stand where the
+  // stress inside it asks for no smaller one, t <= (S_base - s) / (S_base - f); the finest always may.
+  bool stress_allows(const double lo[3], double s) const {
+    if (!demand || is_finest(s)) return true;
+    const double t = std::pow(std::clamp(demand_in(lo, s) / ref_mpa, 0.0, 1.0), std::clamp(response, 0.25, 4.0));
+    return t <= (base_mm - s) / (base_mm - finest_mm) + 1e-9;
+  }
+  // C24: a cell of size s may stand where no cap whose box shares volume with its cube is smaller; the finest always
+  // may. A cell held here is divided down its ladder as one the band does not allow.
+  bool cap_allows(const double lo[3], double s) const {
+    if (!caps || is_finest(s)) return true;
+    for (const Cap& c : *caps) {
+      bool overlap = true;
+      for (int a = 0; a < 3 && overlap; ++a)
+        overlap = std::min(lo[a] + s, c.hi[a]) - std::max(lo[a], c.lo[a]) > 1e-6;
+      if (overlap && s > c.size * (1.0 + 1e-9)) return false;
+    }
+    return true;
+  }
   // C20: with Let walls cut cells on (one_grid), only the finest cell is ever cut. A larger cell must lie whole in
   // lattice: its 27 points and the 26 a hair inside its faces, edges and corners (0.04 / 0.5 / 0.96, as D14b looks).
   // Lattice of any region counts (a seam between two lattice regions cuts nothing); a wall, pocket, hole, Protect
   // skin, No lattice region or the part's outside does. Held, the cell is split down its ladder as G10 splits it.
-  // C21: the region's main size, the largest size of its ladder (`cand`, largest first) at which more than half of the
-  // cubes of the region's grid in the first layer under the face that hold any of its lattice stand whole by C20's own
-  // test. None: the smallest. The cubes are the base cubes split, so the grid never moves.
-  double main_size(const std::vector<double>& cand, const double start[3], const int count[3], double base) const {
-    for (double s : cand) {
-      const int k = std::max(1, static_cast<int>(std::llround(base / s)));
-      int held = 0, whole = 0;
-      for (int j = 0; j < count[1] * k; ++j)
-        for (int i = 0; i < count[0] * k; ++i) {
-          const double lo[3] = {start[0] + i * s, start[1] + j * s, start[2]};
-          bool any = false;
-          for (int c = 0; c < 3 && !any; ++c)
-            for (int b = 0; b < 3 && !any; ++b)
-              for (int a = 0; a < 3 && !any; ++a) {
-                const Where w = probe->where(frame.at(lo[0] + s * (1 + 2 * a) / 6.0, lo[1] + s * (1 + 2 * b) / 6.0,
-                                                      lo[2] + s * (1 + 2 * c) / 6.0));
-                any = w.lattice() && w.id == region;
-              }
-          if (!any) continue;
-          ++held;
-          whole += whole_in_lattice(lo, s);
-        }
-      if (2 * whole > held) return s;
-    }
-    return cand.empty() ? base : cand.back();
-  }
   bool whole_in_lattice(const double lo[3], double s) const {
     const double e[2][3] = {{1.0 / 6.0, 0.5, 5.0 / 6.0}, {0.04, 0.5, 0.96}};
     for (int g = 0; g < 2; ++g)
@@ -298,8 +315,7 @@ struct Pass {
   // G10: with Grade to shape on, only the finest cell may be cut by the outline. Any
   // larger cell must lie whole inside it (read at its corners, edge middles and centre).
   bool whole_in_outline(const double lo[3], double s) const {
-    if (spec->one_grid && !is_finest(s) &&
-        ((main_mm > 0.0 && s > main_mm * (1.0 + 1e-9)) || !whole_in_lattice(lo, s)))   // C21, C20
+    if (spec->one_grid && !is_finest(s) && !whole_in_lattice(lo, s))   // C20
       return false;
     if (!band_region || is_finest(s)) return true;
     for (int b = 0; b < 3; ++b)
@@ -494,8 +510,9 @@ struct Pass {
     // A width is read to about a micron (PartMeasure::reach), so a cell that fits its
     // wall exactly must not be refused over the last digits of the reading.
     const bool fitting = s <= fits + kReadingSlack;
-    // Too large this close to the outline, or cut by it (G1-G3, G10).
-    const bool held = !band_allows(lo, s) || !whole_in_outline(lo, s);
+    // Too large this close to the outline, or cut by it (G1-G3, G10), or for the stress inside it (C22), or for a
+    // size step to a neighbour (C24).
+    const bool held = !band_allows(lo, s) || !whole_in_outline(lo, s) || !stress_allows(lo, s) || !cap_allows(lo, s);
     const bool printable = prints(lo, s);
     if (fitting && !held && printable) {
       emit(lo, s, cut, true);
@@ -591,16 +608,25 @@ struct Pass {
           for (int j = 0; j + m <= n; ++j)
             for (int i = 0; i + m <= n; ++i) {
               double deep = 0.0;
-              if (band_region)
+              if (band_region) {
                 deep = edge_distance(lo[0] + (i + 0.5 * m) * t, lo[1] + (j + 0.5 * m) * t,
                                      lo[2] + (k + 0.5 * m) * t);
-              spots.push_back({std::round(deep * 1e6) / 1e6, {i, j, k}});
+                deep = std::round(deep * 1e6) / 1e6;
+              } else if (demand) {
+                const double at[3] = {lo[0] + i * t, lo[1] + j * t, lo[2] + k * t};
+                deep = demand_in(at, size);   // C22: the stress in the spot's cube
+              }
+              spots.push_back({deep, {i, j, k}});
             }
         // In a band the larger cells take the places farthest from the outline, so the
-        // smaller ones are left toward it (G1). Elsewhere, the order they are read in.
+        // smaller ones are left toward it (G1). With cell size by stress and no band, the
+        // quietest places first (C22). Elsewhere, the order they are read in.
         if (band_region)
           std::stable_sort(spots.begin(), spots.end(),
                            [](const auto& x, const auto& y) { return x.first > y.first; });
+        else if (demand)
+          std::stable_sort(spots.begin(), spots.end(),
+                           [](const auto& x, const auto& y) { return x.first < y.first; });
         for (const auto& spot : spots) {
           const int i = spot.second[0], j = spot.second[1], k = spot.second[2];
           bool free = true;
@@ -617,7 +643,8 @@ struct Pass {
               }
           if (!free || some == 0 || size > f + kReadingSlack) continue;
           const double at[3] = {lo[0] + i * t, lo[1] + j * t, lo[2] + k * t};
-          if (!band_allows(at, size) || !whole_in_outline(at, size) || !fine_allowed(at, size))
+          if (!band_allows(at, size) || !whole_in_outline(at, size) || !fine_allowed(at, size) ||
+              !stress_allows(at, size) || !cap_allows(at, size))
             continue;
           for (int c = k; c < k + m; ++c)
             for (int b = j; b < j + m; ++b)
@@ -898,7 +925,36 @@ void find_edges(const FaceReadings& kept, std::size_t which, const Domain& domai
 
 }  // namespace
 
-Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
+bool stress_sizes_cells(const CellSpec& spec) {
+  return spec.by_stress && spec.demand && !spec.demand->empty() && spec.reference_mpa > 0.0 &&
+         !(spec.cell_mm > 0.0) && spec.algorithm != Algorithm::Uniform;
+}
+
+CellSpec region_cells(const CellSpec& part, const AreaOwn& own) {
+  CellSpec c = part;
+  if (own.algorithm) c.algorithm = *own.algorithm;
+  if (own.cell_mm) c.cell_mm = *own.cell_mm;
+  if (own.cell_max_mm) c.cell_max_mm = *own.cell_max_mm;
+  if (own.cell_min_mm) c.cell_min_mm = *own.cell_min_mm;
+  if (own.min_cells_across) c.min_cells_across = *own.min_cells_across;
+  if (own.grade_to_shape) c.grade_to_shape = *own.grade_to_shape;
+  if (own.band_mm) c.band_mm = *own.band_mm;
+  if (own.band_cell_mm) c.band_cell_mm = *own.band_cell_mm;
+  if (own.cells_by_stress) c.by_stress = *own.cells_by_stress;
+  if (own.response) c.response = *own.response;
+  if (own.reference_mpa && *own.reference_mpa > 0.0) c.reference_mpa = *own.reference_mpa;
+  if (own.max_step) c.max_step = *own.max_step;
+  return c;
+}
+
+double step_held(const CellSpec& spec) {
+  if (!(spec.max_step > 0.0)) return 0.0;
+  // A ratio of the larger cell to the smaller is never under 1; Default Grade's sizes are halves, so its smallest step
+  // is 2 and a limit under it could only be met by the finest cell everywhere.
+  return std::max(spec.max_step, spec.algorithm == Algorithm::DefaultGrade ? 2.0 : 1.0);
+}
+
+Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads, const AreaOwnMap* own) {
   Layout out;
   const int thread_count =
       threads > 0 ? threads : std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
@@ -916,19 +972,201 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
   out.bead_mm = ds.bead_mm;
   out.min_strut_mm = min_strut;
   out.topology = spec.topology;
+  // C23: each Lattice region's own cells (the part's, with its stated values over them). A region not listed, and the
+  // whole part, are laid with `spec` itself.
+  std::map<int, CellSpec> resolved;
+  if (own)
+    for (const auto& [id, o] : *own)
+      if (id > 0 && o.any()) resolved.emplace(id, region_cells(spec, o));
+  const auto spec_of = [&](int region) -> const CellSpec& {
+    const auto it = resolved.find(region);
+    return it == resolved.end() ? spec : it->second;
+  };
   // A hair above the bound itself, so the floor cell is a size core's own menu admits.
-  const double smallest = std::max(out.floor_cell_mm * (1.0 + 1e-9), spec.cell_min_mm);
-  const double target = spec.cell_mm > 0.0 ? spec.cell_mm : spec.cell_max_mm;
+  const auto smallest_of = [&](const CellSpec& cs) { return std::max(out.floor_cell_mm * (1.0 + 1e-9), cs.cell_min_mm); };
+  const auto target_of = [](const CellSpec& cs) { return cs.cell_mm > 0.0 ? cs.cell_mm : cs.cell_max_mm; };
   const Domain::Probe probe = domain.probe();
   // A probe serves one thread; each worker makes its own once and keeps it for every lay.
   std::vector<std::unique_ptr<Domain::Probe>> spare(static_cast<std::size_t>(thread_count));
   const PartMeasure& part = domain.measure();
   // (One grid: the cells a wall must hold are not counted anywhere, so not in a region's base cell either.)
-  const int k_min = spec.one_grid ? 1 : std::max(1, spec.min_cells_across);
+  const auto k_min_of = [](const CellSpec& cs) { return cs.one_grid ? 1 : std::max(1, cs.min_cells_across); };
 
-  // Lay one pass over the box [lo, hi] of its frame, in slots of `base`.
+  // C24: one lay kept base cell by base cell, so that a base cell can be laid again with size caps on it. Only made
+  // when the region asks for a size step; otherwise every lay goes straight into the layout, as it always has.
+  struct Laid {
+    Pass pass;
+    double base = 0.0, start[3] = {0, 0, 0};
+    int count[3] = {0, 0, 0};
+    struct Piece { std::vector<Cell> cells, solid; std::vector<SolidWhy> why; };
+    std::vector<Piece> pieces;            // per base cell, in the order one thread lays them
+    std::vector<std::vector<Cap>> caps;   // per base cell
+    void slot(std::size_t i, double q[3]) const {
+      const std::size_t a = i % count[0], b = (i / count[0]) % count[1],
+                        c = i / (static_cast<std::size_t>(count[0]) * count[1]);
+      q[0] = start[0] + a * base; q[1] = start[1] + b * base; q[2] = start[2] + c * base;
+    }
+  };
+  // Lay the base cells `jobs` ({lay, base cell}, sorted) of `lays` again, each with its own caps; shared between
+  // threads, each base cell on its own, so the result is the same for any number of threads (D18).
+  auto lay_slots = [&](std::vector<Laid>& lays, const std::vector<std::array<std::size_t, 2>>& jobs) {
+    const int nt = static_cast<int>(std::min<std::size_t>(static_cast<std::size_t>(thread_count), jobs.size()));
+    std::atomic<std::size_t> next{0};
+    auto work = [&](int who) {
+      if (who > 0 && !spare[static_cast<std::size_t>(who)])
+        spare[static_cast<std::size_t>(who)] = std::make_unique<Domain::Probe>(domain.probe());
+      const Domain::Probe& mine = who > 0 ? *spare[static_cast<std::size_t>(who)] : probe;
+      Layout local;
+      local.floor_cell_mm = out.floor_cell_mm;
+      RegionCells count_here;
+      std::size_t at = static_cast<std::size_t>(-1);
+      Pass p;
+      for (std::size_t i = next.fetch_add(1); i < jobs.size() && !domain.stop_asked(); i = next.fetch_add(1)) {
+        Laid& L = lays[jobs[i][0]];
+        const std::size_t k = jobs[i][1];
+        if (jobs[i][0] != at) {
+          at = jobs[i][0];
+          p = L.pass;
+          p.probe = &mine;
+          p.out = &local;
+          p.tally = &count_here;
+        }
+        p.caps = L.caps[k].empty() ? nullptr : &L.caps[k];
+        double q[3];
+        L.slot(k, q);
+        p.columns.clear();
+        p.place(q, L.base);
+        L.pieces[k].cells.swap(local.cells);
+        L.pieces[k].solid.swap(local.solid);
+        L.pieces[k].why.swap(local.solid_why);
+        local.cells.clear();
+        local.solid.clear();
+        local.solid_why.clear();
+      }
+    };
+    std::vector<std::thread> pool;
+    for (int t = 1; t < nt; ++t) pool.emplace_back(work, t);
+    work(0);
+    for (std::thread& t : pool) t.join();
+    domain.check_stop();   // base cells left unlaid
+  };
+  // C24: no cell of these lays (one region, one frame) more than `limit` times the size of a cell it shares any part
+  // of a face with. Each round finds every pair that breaks it and caps the LARGER cell's place at `limit` times the
+  // smaller (unless the larger is the finest of its ladder: it stands), and every other cell of that base cell at its
+  // own size (so nothing there comes out larger), then lays the base cells holding a new or lowered cap again; a
+  // capped cell is divided down its own ladder. Then the lays go into the layout, in order.
+  // Why it ends: a cap is only ever added, or lowered on its own box, never raised or removed, and a round that adds or
+  // lowers none is the last. The boxes are cubes of cells laid in that base cell (places on its ladder's own grid)
+  // and the caps are `limit` times a cell size: both finite sets, so only finitely many rounds can add one.
+  auto keep_steps = [&](std::vector<Laid>& lays, double limit) {
+    const double tol = 1e-6;
+    struct Ref { std::size_t lay, slot, idx; };
+    for (;;) {
+      std::vector<Ref> refs;
+      double big_mm = 0.0;
+      for (std::size_t li = 0; li < lays.size(); ++li)
+        for (std::size_t k = 0; k < lays[li].pieces.size(); ++k)
+          for (std::size_t j = 0; j < lays[li].pieces[k].cells.size(); ++j) {
+            refs.push_back({li, k, j});
+            big_mm = std::max(big_mm, lays[li].pieces[k].cells[j].size);
+          }
+      if (refs.size() < 2) break;
+      const auto cell_of = [&](const Ref& r) -> const Cell& { return lays[r.lay].pieces[r.slot].cells[r.idx]; };
+      // The cells sorted by their low corner into a grid of the largest cell's pitch: the low corners of two cells that
+      // share a face are at most that far apart, so they lie in the same bucket or in neighbouring ones.
+      struct Key {
+        long long v[3];
+        bool operator==(const Key& o) const { return v[0] == o.v[0] && v[1] == o.v[1] && v[2] == o.v[2]; }
+      };
+      struct KeyHash {
+        std::size_t operator()(const Key& k) const {
+          return std::hash<long long>()(k.v[0] * 73856093LL ^ k.v[1] * 19349663LL ^ k.v[2] * 83492791LL);
+        }
+      };
+      const double pitch = big_mm * (1.0 + 1e-6) + 1e-5;
+      std::unordered_map<Key, std::vector<std::uint32_t>, KeyHash> grid;
+      std::vector<Key> key(refs.size());
+      for (std::size_t r = 0; r < refs.size(); ++r) {
+        const Cell& c = cell_of(refs[r]);
+        for (int a = 0; a < 3; ++a) key[r].v[a] = static_cast<long long>(std::floor(c.lo[a] / pitch));
+        grid[key[r]].push_back(static_cast<std::uint32_t>(r));
+      }
+      // The cap each breaking larger cell gets: `limit` times its smallest neighbour that breaks the rule.
+      std::map<std::array<std::size_t, 3>, double> want;
+      for (std::size_t i = 0; i < refs.size(); ++i) {
+        const Cell& A = cell_of(refs[i]);
+        for (int dz = -1; dz <= 1; ++dz)
+          for (int dy = -1; dy <= 1; ++dy)
+            for (int dx = -1; dx <= 1; ++dx) {
+              const auto it = grid.find(Key{{key[i].v[0] + dx, key[i].v[1] + dy, key[i].v[2] + dz}});
+              if (it == grid.end()) continue;
+              for (std::uint32_t j : it->second) {
+                if (j <= i) continue;   // each pair once
+                const Cell& B = cell_of(refs[j]);
+                const bool a_big = A.size >= B.size;
+                const Cell& big = a_big ? A : B;
+                const Cell& small = a_big ? B : A;
+                if (big.finest || big.size <= limit * small.size * (1.0 + 1e-9)) continue;
+                int touch = 0, over = 0;
+                for (int a = 0; a < 3; ++a) {
+                  if (std::fabs(A.lo[a] + A.size - B.lo[a]) <= tol || std::fabs(B.lo[a] + B.size - A.lo[a]) <= tol)
+                    ++touch;
+                  else if (std::min(A.lo[a] + A.size, B.lo[a] + B.size) - std::max(A.lo[a], B.lo[a]) > tol)
+                    ++over;
+                }
+                if (touch != 1 || over != 2) continue;   // not a shared face
+                const Ref& r = refs[a_big ? i : j];
+                const double v = limit * small.size;
+                const auto w = want.find({r.lay, r.slot, r.idx});
+                if (w == want.end()) want.emplace(std::array<std::size_t, 3>{r.lay, r.slot, r.idx}, v);
+                else w->second = std::min(w->second, v);
+              }
+            }
+      }
+      // New caps, or lower ones on a box already capped; the base cells that hold one are laid again.
+      const auto cap = [&](std::vector<Cap>& caps, const Cell& c, double v) {   // true: new or lowered
+        for (Cap& k : caps)
+          if (std::fabs(k.lo[0] - c.lo[0]) <= tol && std::fabs(k.lo[1] - c.lo[1]) <= tol &&
+              std::fabs(k.lo[2] - c.lo[2]) <= tol && std::fabs(k.hi[0] - (c.lo[0] + c.size)) <= tol) {
+            if (!(v < k.size * (1.0 - 1e-9))) return false;
+            k.size = v;
+            return true;
+          }
+        caps.push_back({{c.lo[0], c.lo[1], c.lo[2]}, {c.lo[0] + c.size, c.lo[1] + c.size, c.lo[2] + c.size}, v});
+        return true;
+      };
+      std::vector<std::array<std::size_t, 2>> jobs;
+      for (const auto& w : want) {
+        Laid& L = lays[w.first[0]];
+        if (cap(L.caps[w.first[1]], L.pieces[w.first[1]].cells[w.first[2]], w.second) &&
+            (jobs.empty() || jobs.back()[0] != w.first[0] || jobs.back()[1] != w.first[1]))
+          jobs.push_back({w.first[0], w.first[1]});
+      }
+      // Laid again, no cell of the base cell may come out larger than the cell that held its place before (a Stepped
+      // base cell is packed again and could take another family): every other cell of it is capped at its own size.
+      for (const auto& j : jobs) {
+        Laid& L = lays[j[0]];
+        for (const Cell& c : L.pieces[j[1]].cells)
+          cap(L.caps[j[1]], c, c.size);
+      }
+      if (jobs.empty()) break;
+      lay_slots(lays, jobs);
+    }
+    for (Laid& L : lays)
+      for (const Laid::Piece& piece : L.pieces) {
+        out.cells.insert(out.cells.end(), piece.cells.begin(), piece.cells.end());
+        out.solid.insert(out.solid.end(), piece.solid.begin(), piece.solid.end());
+        out.solid_why.insert(out.solid_why.end(), piece.why.begin(), piece.why.end());
+        L.pass.tally->cells += piece.cells.size();
+        L.pass.tally->solid += piece.solid.size();
+      }
+  };
+
+  // Lay one pass over the box [lo, hi] of its frame, in slots of `base`. With `keep` (C24) the base cells are kept
+  // in it, one by one, and not put in the layout.
   auto lay = [&](Pass& pass, double base, const double lo[3], const double hi[3],
-                 bool depth_from_zero) {
+                 bool depth_from_zero, std::vector<Laid>* keep = nullptr) {
+    const CellSpec& spec = *pass.spec;   // the pass's own (C23)
     // G11: a band is a size gradient down to the smallest cell allowed (the floor above).
     // A typed smallest cell for the band (Manual) is held at that floor.
     const double band_floor = pass.band_region != nullptr && spec.band_cell_mm > 0.0
@@ -961,22 +1199,23 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
       start[2] = lo[2];
       count[2] = std::max(1, static_cast<int>(std::llround((hi[2] - lo[2]) / base)));
     }
-    if (pass.count_main) {   // C21: the sizes that split a base cube exactly, largest first
-      std::vector<double> cand;
-      if (spec.algorithm == Algorithm::Stepped) {
-        cand.push_back(base);
-        for (int n : pass.divisors)
-          if (n >= 2) cand.push_back(base / n);
-      } else {
-        cand = pass.sizes;
-      }
-      std::sort(cand.begin(), cand.end(), [](double x, double y) { return x > y; });
-      if (cand.size() > 1) pass.main_mm = pass.main_size(cand, start, count, base);
-    }
     // Each base cell is laid on its own, so they are shared between threads and put
     // back in the order one thread would have laid them: the layout is the same for any
     // number of threads (D18). A probe serves one thread, so each takes its own.
     const std::size_t total = static_cast<std::size_t>(count[0]) * count[1] * count[2];
+    if (keep) {   // C24: kept base cell by base cell (keep_steps puts them in the layout)
+      keep->emplace_back();
+      Laid& L = keep->back();
+      L.pass = pass;
+      L.base = base;
+      for (int a = 0; a < 3; ++a) { L.start[a] = start[a]; L.count[a] = count[a]; }
+      L.pieces.resize(total);
+      L.caps.resize(total);
+      std::vector<std::array<std::size_t, 2>> jobs(total);
+      for (std::size_t i = 0; i < total; ++i) jobs[i] = {keep->size() - 1, i};
+      lay_slots(*keep, jobs);
+      return;
+    }
     auto slot = [&](std::size_t i, double q[3]) {
       const std::size_t a = i % count[0], b = (i / count[0]) % count[1], c = i / (static_cast<std::size_t>(count[0]) * count[1]);
       q[0] = start[0] + a * base; q[1] = start[1] + b * base; q[2] = start[2] + c * base;
@@ -1032,8 +1271,14 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
       pass.tally->solid += piece.solid.size();
     }
   };
+  // C24: the size-step limit a region's cells keep; 0 = none (also on Uniform, which has nothing to divide).
+  const auto step_of = [&](int region) {
+    const CellSpec& cs = spec_of(region);
+    return cs.algorithm == Algorithm::Uniform ? 0.0 : step_held(cs);
+  };
   // A region's frame and its tally; returns the pass to lay with.
   auto open = [&](int region, const Frame& frame, double depth_cap, double base) {
+    const CellSpec& spec = spec_of(region);
     Pass pass;
     pass.probe = &probe;
     pass.spec = &spec;
@@ -1042,6 +1287,11 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
     pass.frame = frame;
     pass.out = &out;
     pass.region_depth = depth_cap;   // D14c
+    if (stress_sizes_cells(spec)) {   // C22
+      pass.demand = spec.demand.get();
+      pass.ref_mpa = spec.reference_mpa;
+      pass.response = spec.response;
+    }
     out.frames.push_back(frame);
     out.walls.emplace_back();
     out.walls.back().depth = depth_cap;
@@ -1058,12 +1308,19 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
     pass.tally = &out.regions.back();
     const WallMap none = out.walls.back();   // not a flat region: no walls
     pass.walls = &none;
+    const double limit = step_of(region);
+    if (limit > 0.0) {   // C24
+      std::vector<Laid> lays;
+      lay(pass, base, lo, hi, depth_from_zero, &lays);
+      keep_steps(lays, limit);
+      return;
+    }
     lay(pass, base, lo, hi, depth_from_zero);
   };
   // C15, C2, C3-C5, C1: the cell that divides a wall of `width` exactly, never wider than
   // it, holding at least the cells it must, otherwise as few and as large as allowed.
-  auto divide = [&](double width, int* layers) {
-    *layers = std::max(k_min, static_cast<int>(std::ceil(width / target - 1e-9)));
+  auto divide = [&](const CellSpec& cs, double width, int* layers) {
+    *layers = std::max(k_min_of(cs), static_cast<int>(std::ceil(width / target_of(cs) - 1e-9)));
     return width / *layers;
   };
 
@@ -1077,9 +1334,10 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
   // The base cell where no wall names it. Auto under Default Grade: the largest size
   // not above the target whose halves land exactly on the smallest cell, so the ladder
   // reaches the floor instead of stopping a fraction above it (C17).
-  auto world_base = [&]() {
-    if (spec.algorithm != Algorithm::DefaultGrade || spec.cell_mm > 0.0) return target;
-    double s = smallest;
+  auto world_base = [&](const CellSpec& cs) {
+    const double target = target_of(cs);
+    if (cs.algorithm != Algorithm::DefaultGrade || cs.cell_mm > 0.0) return target;
+    double s = smallest_of(cs);
     while (s * 2.0 <= target * (1.0 + 1e-9)) s *= 2.0;
     return s;
   };
@@ -1087,14 +1345,17 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
   // Regions are already in id order (D13), the whole part last.
   for (const Region& r : ds.regions) {
     if (r.role != Role::Lattice) continue;
+    const CellSpec& spec = spec_of(r.id);   // C23: this region's own
+    const double target = target_of(spec), smallest = smallest_of(spec);
+    const int k_min = k_min_of(spec);
     if (r.is_shell()) {
-      run(r.id, world, r.shell_depth_mm, world_base(), wlo, whi, false);
+      run(r.id, world, r.shell_depth_mm, world_base(spec), wlo, whi, false);
       continue;
     }
     const ClearanceGeometry& g = r.prism;
     if (!g.valid || g.kind != ClearanceKind::Face) continue;
     int k = 0;
-    const double base = divide(g.depth, &k);
+    const double base = divide(spec, g.depth, &k);
     // D14c: the depth whose own cell prints, when a deeper region would give one (not when the cell asked for is
     // itself under the floor).
     const double floor_here = std::max(spec.cell_min_mm, out.floor_cell_mm);
@@ -1112,11 +1373,16 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
       // (D3). Grade to shape reads the region's own outline, as it does wall by wall.
       Pass pass = open(r.id, f, g.depth, base);
       pass.depth_need = depth_need;
-      pass.count_main = true;   // C21
       pass.tally = &out.regions.back();
       const WallMap none = out.walls.back();   // no walls: a cell's shape is its region's lattice in its cube
       pass.walls = &none;
       if (spec.grade_to_shape && spec.band_mm > 0.0) pass.band_region = &r;
+      if (const double limit = step_of(r.id); limit > 0.0) {   // C24
+        std::vector<Laid> lays;
+        lay(pass, base, lo, hi, true, &lays);
+        keep_steps(lays, limit);
+        continue;
+      }
       lay(pass, base, lo, hi, true);
       continue;
     }
@@ -1137,7 +1403,7 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
         wall.width = st.width;
         area = st.entries.size() * WallMap::kPitch * WallMap::kPitch;
       }
-      wall.cell = divide(wall.width, &wall.layers);
+      wall.cell = divide(spec, wall.width, &wall.layers);
       // A wall is a stretch wide enough for its own cells (two by two of them) whose
       // cell prints. Anything else is left to the pass below, cell by cell.
       if (wall.cell < smallest || area < 4.0 * wall.cell * wall.cell) continue;
@@ -1160,19 +1426,25 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads) {
     pass.tally = &out.regions.back();
     pass.walls = &map;
     if (spec.grade_to_shape && spec.band_mm > 0.0) pass.band_region = &r;
+    // C24: with a size step asked, every lay of the region is kept and the rule is kept across all of them (its walls
+    // and what no wall holds share one frame) before any goes into the layout.
+    const double limit = step_of(r.id);
+    std::vector<Laid> lays;
+    std::vector<Laid>* keep = limit > 0.0 ? &lays : nullptr;
     for (std::size_t i = 0; i < map.walls.size(); ++i) {
       const WallMap::Wall& wall = map.walls[i];
       pass.wall = static_cast<int>(i);
       // Centred on the wall's own stretch (C9, per wall).
       const double wlo3[3] = {wall.lo[0], wall.lo[1], wall.start};
       const double whi3[3] = {wall.hi[0], wall.hi[1], wall.start + wall.width};
-      lay(pass, wall.cell, wlo3, whi3, true);
+      lay(pass, wall.cell, wlo3, whi3, true, keep);
     }
     pass.wall = -1;   // what no wall holds: cell by cell from the region's own base
-    lay(pass, base, lo, hi, true);
+    lay(pass, base, lo, hi, true, keep);
+    if (keep) keep_steps(lays, limit);
     out.walls[static_cast<std::size_t>(pass.frame_index)] = std::move(map);
   }
-  if (ds.start == Start::AllLattice) run(0, world, 1e300, world_base(), wlo, whi, false);
+  if (ds.start == Start::AllLattice) run(0, world, 1e300, world_base(spec), wlo, whi, false);
   // D14b: cells take in the lattice slivers inside their cubes.
   out.absorb = spec.absorb_slivers;
   if (out.absorb) out.index = index_cells(out);
