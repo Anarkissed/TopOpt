@@ -1,0 +1,79 @@
+# Release 85d25b639dee — 2026-11-16: release (7), install 2 — claude/install2-app 90da15cc, one worker swap (8e530b3b607e -> 85d25b639dee)
+# His order 11-14 (density by stress and the missing settings), his pick: ONE install. Behind "New engine (test)",
+# OFF by default — off, his app and his LAN runs are as before; on, Lattice Setup's new-engine preview and export read
+# By stress grading, cell size by stress, an area's own controls and Finish, zones as a Box or a Cylinder, and the
+# Manual controls 1, 2, 4, 5, 6, 7, 8; the quick stress check takes the worst of the scenarios switched on.
+# The new engine's Structural strength check is NOT in this install (Install 3); the page says so in one line.
+# Core tip: LatticeReview's claude/install2-main 996db1af (C22 on 13ba279d). LatticeTypes' 181deb12 is NOT in this release.
+# Gates in the gate tree (b9-screens-362, its own vendor, iOS slices with OCCT):
+#   16:14 install2-app 6b6f184a (release tip 93abae0c + LatticeReview's install-2 engine + the install-2 page); core fingerprint 85d25b639dee
+#   16:25 build_core green: topopt_vendored_core_85d25b639dee + lattice_layout::Session::lay in the pinned include and all three slices
+#   16:31 iPad build: exit 0 ** BUILD SUCCEEDED **
+#   16:32 CLI: topopt-cli: core 85d25b639dee (dirty=false), built Nov 15 2026 16:32:04
+#   16:32 app_core_capability_mirror passed
+#   16:34 core's lattice_layout ctests: 100% tests passed out of 6
+#   16:34 preflight on his latest job FAILED (preflight.log)
+#   16:41 17-test: 17/17 identical, 93abae0c vs 6b6f184a
+#   16:44 STAND SHOTS: exit 0 (20 files) NEW-ENGINE his v2 stand: 92 faces, open 222 ms, read 252, cells 0, bars 138 ms, bridge 1.3 ms; 2795 bars, 161 cells, 705 solid pieces
+#   17:37 chunk_first.txt: exit 0; so far 118 passed, 0 failed
+#   18:16 chunk_aa: exit 1; so far 573 passed, 3 failed
+#   19:02 chunk_ab: exit 0; so far 868 passed, 3 failed
+#   19:32 chunk_ac: exit 0; so far 1176 passed, 3 failed
+#   20:31 chunk_ad: exit 0; so far 1494 passed, 3 failed
+#   21:10 chunk_ae: exit 0; so far 1890 passed, 3 failed
+#   22:30 chunk_af: exit 0; so far 2148 passed, 3 failed
+#   23:18 chunk_ag: exit 0; so far 2455 passed, 3 failed
+#   23:43 chunk_ah: exit 0; so far 2809 passed, 3 failed
+#   00:00 chunk_ai: exit 0; so far 3179 passed, 3 failed
+#   00:41 chunk_aj: exit 0; so far 3536 passed, 3 failed
+#   00:51 chunk_ak: exit 0; so far 3995 passed, 3 failed
+#   01:00 chunk_al: exit 1; so far 4316 passed, 4 failed
+#   01:07 chunk_am: exit 0; so far 4585 passed, 4 failed
+#   01:16 stand classes: exit 0
+#   01:16 B + stand: 4596 passed, 208 skipped, 4 failed, build failures 0
+#   FP=85d25b639dee HEAD=6b6f184a
+# Commits:
+#   b6db8d40 Lattice rebuild, Install 2a step 1: the stress result a lattice is graded by
+#   dfda7fbf Lattice rebuild, Install 2a step 2: struts by stress
+#   c33908ea Lattice rebuild C22: cell size by stress
+#   49f940c4 Merge origin/claude/install2-stress (struts by stress) into claude/install2-cells
+#   b0c0c30e Lattice rebuild, Install 2a step 3: By stress in the lattice file job
+#   73f69d41 Lattice rebuild, Install 2a step 4: the rules and tests of By stress
+#   ded87880 Merge origin/claude/install2-stress (By stress in the file job, its rules) into claude/install2-cells
+#   62edbb06 Lattice rebuild C22: the stress reference is read only when it is asked for
+#   7735497a Lattice rebuild C22 with Let walls cut cells: the stress grades the cells there too
+#   f63ff6ae Lattice rebuild: C21 withdrawn; C20 only when the region grades its cells
+#   440b8bd5 Lattice rebuild D21: a lattice zone is a box or a cylinder placed in the part, in place of faces
+#   2b56b790 Lattice rebuild S13: a Lattice region may state its own Finish (rim, cover, skin)
+#   8a905260 Lattice rebuild C23, R19: a Lattice region may state its own cells and struts
+#   55e01ae7 Merge claude/install2-zones (D21 zones) into the install 2 main branch
+#   bfad0efa Merge claude/install2-finish (S13 a region's own Finish) into the install 2 main branch
+#   44688c29 Lattice rebuild C24: the largest size step between neighbouring cells
+#   d51e5d5d Lattice rebuild D22: a region or Protect skin may be given as cut pieces of faces
+#   27e9ac03 Lattice rebuild D22: a Protect skin given as pieces stops at its cuts
+#   13ba279d Merge claude/install2-step (C24 the largest size step) into the install 2 main branch
+#   82481827 Install 2 (362): merge LatticeReview's install-2 engine 13ba279d (stress, area own, zones, finish, face cuts D22, size step C24)
+#   eefb231e Worker: a job may carry a stress result as the multipart field "demand"
+#   fef09fed Worker: an uploaded file keeps every byte, even a CR or LF at either end
+#   413e1a3f Install 2 (362): every Edit faces cut reaches the new engine (D22): a cut piece is itself, never its whole face
+#   31c160e3 Install 2 (362): merge the worker's demand field and its multipart fix (claude/install2-worker-demand fef09fed)
+#   996db1af Lattice rebuild C22: a cell takes the size on its ladder nearest to what the stress asks
+#   8a315db6 Install 2 (362): merge LatticeReview's GATE THIS engine tip 996db1af (C22: cell size by stress takes the nearest ladder size; no key, header or bridge change)
+#   ef5af7da Install 2 (362): every lattice setting he picked reaches the new engine — stress grading, area own, zones, the Manual controls
+#   6b6f184a Install 2 (362): merge the release tip (b9f8c871 his 11-14 asks + evidence) before the gate
+#   90da15cc Install 2 (362): his pick 11-15 for the new engine's notices — very bottom in landscape, just above Settings in portrait
+#   fd7303ee Release (7) install 2 2026-11-16: merge claude/install2-app 90da15cc — core = LatticeReview's install-2 engine (claude/install2-main 996db1af: stress grading, cell size by stress at the nearest ladder size, an area's own cell
+# Gates (this tree):
+#   01:41 his uncommitted files (left alone): app/TopOpt-Info.plist app/TopOpt.xcodeproj/project.pbxproj app/TopOpt.xcodeproj/xcshareddata/xcschemes/TopOpt.xcscheme 
+#   01:41 his latest OPTIMISATION job for the preflight: /Users/nadim/.topopt-worker/f9c8124fd2df48b3 (read only; his newer Export print-file jobs are not preflight's)
+#   01:41 merged install2-app as fd7303ee (local); app + core == its; fingerprint 85d25b639dee
+#   ==> building iOS simulator slice (Eigen + OCCT + lib3mf, arm64)
+#   ==> building iOS device slice (Eigen + OCCT + lib3mf, arm64)
+#   01:43 build_core green: topopt_vendored_core_85d25b639dee + build_identity + lattice_variant_job + lattice_solid_fallback_reasons + lattice_layout::Session::lay in every slice and arch
+#   01:44 worker CLI built: topopt-cli: core 85d25b639dee (dirty=false), built Nov 16 2026 01:44:10; 3 data paths, all under the release worktree
+#   01:44 app_core_capability_mirror passed
+#   01:50 iPad device build green (this tree's own pair)
+#   01:51 preflight on his latest job: preflight: load path CONNECTED
+#   01:51 pushed fd7303ee
+#   01:52 worker swapped: /health "fingerprint": "85d25b639dee"; data paths under the release worktree; preflight again OK; old kept as build-fix/topopt-cli.8e530b3b607e-replaced-20261116
+#   01:52 the app_release scripts now expect 85d25b639dee
