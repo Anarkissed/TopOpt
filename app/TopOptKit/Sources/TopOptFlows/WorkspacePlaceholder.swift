@@ -7954,10 +7954,24 @@ public struct WorkspacePlaceholder: View {
                 .modifier(CutRailInfoTip(open: cutRailOpen, name: CutRailInfo.pencilOnly))   // ★ his 11-14: open, its (i)
         }
         .padding(6)
-        .background(Capsule().fill(DS.Surface.bar.color)
-            .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+        // ★ his iPad 11-16: "the tools don't fit the expanding pill … more of a squircle than a pill": open, a squircle (the
+        // names and (i)s no longer crowd into a capsule's round ends); closed, the pill it always was (28 = half its width)
+        .background(RoundedRectangle(cornerRadius: cutRailOpen ? CutRailInfo.openCorner : 28, style: .continuous).fill(DS.Surface.bar.color)
+            .overlay(RoundedRectangle(cornerRadius: cutRailOpen ? CutRailInfo.openCorner : 28, style: .continuous)
+                .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
         .dsShadow(DS.Shadow.panel)
         .background(DSParts.publish("cutRail"))
+        // ★ his iPad 11-16 (the "T"): a cut piece whose other half is gone — one line, one tap makes its face whole again
+        .overlay(alignment: .bottomLeading) {
+            if !project.surfaceOrphanedCutPieces.isEmpty {
+                EditFacesOrphanCard {
+                    project.surfaceRepairOrphanedCutPieces()
+                    surfaceSelected = nil
+                    surfaceSelectedFace = nil
+                }
+                .offset(x: -(EditFacesOrphanCard.width + 12))   // to the rail's left, 12 pt off it
+            }
+        }
         // ★ his 11-14: the arrow beside the rail opens it to the left (names and (i)s) and closes it again
         .overlay(alignment: .leading) { CutRailArrow(open: $cutRailOpen).offset(x: -48) }
         // ONE LINE saying what a tap does, to the LEFT of the rail (the mockup's: 12 pt, secondary, 12 pt off the rail,

@@ -83,6 +83,8 @@ final class FlexibleBatchCVerifyTests: XCTestCase {
         let flexible = FlexibleStressContext.reached(app)
         print("FLEX-STRESS his regions: sent by the app \(app.faceRegions.map(\.id)) · reached \(flexible.faceRegions.map(\.id)) · anchors \(app.anchorFaceIDs) · loads \(app.loadGroups.map { "\($0.faceIDs)/\($0.regionIDs)" })")
         XCTAssertEqual(Set(flexible.faceRegions.map(\.id)), [102, 103], "the loaded sector and its parent — nothing else")
+        // ★ his 11-16: the app itself now sends only the pieces the solve uses, with their parents (FaceRegionSend.used)
+        XCTAssertEqual(Set(app.faceRegions.map(\.id)), [102, 103], "★ the app's own context: the loaded sector and its parent")
         XCTAssertEqual(flexible.anchorFaceIDs, app.anchorFaceIDs)
         XCTAssertEqual(flexible.loadGroups, app.loadGroups, "the faces and forces are unchanged")
         XCTAssertNil(FlexibleStressContext.blocker(flexible))
@@ -92,9 +94,12 @@ final class FlexibleBatchCVerifyTests: XCTestCase {
                                                loadGroups: c.loadGroups, buildDirection: c.buildDirection,
                                                faceRegions: c.faceRegions, anchorRegionIDs: c.anchorRegionIDs)
         }
-        // ★ RED CONTROL: the context the app builds (every region) is refused
+        // ★ RED CONTROL: the context the app built before 11-16 (every region) is refused
+        FaceRegionSend.controlSendEveryPiece = true
+        let every = try XCTUnwrap(r.app.makeLatticeSimContext())
+        FaceRegionSend.controlSendEveryPiece = false
         var refused = ""
-        XCTAssertThrowsError(try solve(app), "control: his stale region refuses the whole solve") { refused = "\($0)" }
+        XCTAssertThrowsError(try solve(every), "control: his stale region refuses the whole solve") { refused = "\($0)" }
         print("FLEX-STRESS the app's context: THROWS '\(refused)'")
         XCTAssertTrue(refused.contains("101") || refused.contains("23"), "…on region 101 / face 23")
         let t0 = Date()

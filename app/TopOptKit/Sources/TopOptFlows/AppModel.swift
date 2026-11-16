@@ -266,7 +266,9 @@ public final class AppModel: ObservableObject {
             anchorFaceIDs: lc.anchorFaceIDs, loadGroups: lc.loadGroups,
             buildDirection: lc.buildDirection,
             // ★ the same region layer the run request sends (2026-09-05)
-            faceRegions: project.faceRegions.regions.map(\.kitSpec),
+            // ★ his 11-16: only the pieces this solve's anchors and loads name (a leftover piece refused his runs)
+            faceRegions: FaceRegionSend.used(project.faceRegions.regions, anchors: lc.anchorRegionIDs, loads: lc.loadGroups)
+                .map(\.kitSpec),
             anchorRegionIDs: lc.anchorRegionIDs)
     }
 

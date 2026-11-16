@@ -96,13 +96,11 @@ final class SurfaceUnionDefectControlTests: XCTestCase {
         // twin: the parts are plain regions and carry their faces
         XCTAssertEqual(try entry(a)["add"] as? [Int], [1])
         XCTAssertEqual(try entry(b)["add"] as? [Int], [2])
-        // the union itself is declared too
-        let ue = try entry(u)
-        print("UNION-WIRE union entry: \(ue)")
-        XCTExpectFailure("DEFECT (2026-10-08): face_regions never carries `parts`; a union ships with no add and no filter",
-                         strict: true) {
-            XCTAssertTrue(ue["add"] != nil || ue["filter"] != nil,
-                          "★ a declared region carries a membership core can resolve")
+        // ★ DEFECT 2 FIXED AT THE WIRE (his 11-16, FaceRegionSend.onWire): the union is never declared — a role names it by
+        // its parts, and a region with no membership is never sent
+        XCTAssertNil(entries.first { ($0["id"] as? Int) == Int(u) }, "★ the union itself is not declared")
+        for e in entries {
+            XCTAssertTrue(e["add"] != nil || e["filter"] != nil, "★ every declared region carries a membership core can resolve")
         }
         // ★ AND CORE'S OWN PARSER REFUSES THE JOB (frozen CLI on his 102117B9 job + this entry:
         // "face region 900 declares neither a filter nor any \"add\" faces — it would resolve to
@@ -112,9 +110,11 @@ final class SurfaceUnionDefectControlTests: XCTestCase {
         XCTAssertNil(TopOptKit.jobSchemaError(try jobData(twin)), "control: the parts alone parse")
         let refusal = TopOptKit.jobSchemaError(try jobData(p))
         print("UNION-WIRE core's parser: \(refusal ?? "accepted")")
-        XCTExpectFailure("DEFECT (2026-10-08): core's parser refuses a job carrying a Surface union", strict: true) {
-            XCTAssertNil(refusal, "★ a project with a union writes a job core accepts")
-        }
+        XCTAssertNil(refusal, "★ a project with a union writes a job core accepts")
+        // RED CONTROL: every region sent, as before 11-16 — the union goes out empty and core's parser refuses the job
+        FaceRegionSend.controlSendEveryPiece = true
+        defer { FaceRegionSend.controlSendEveryPiece = false }
+        XCTAssertNotNil(TopOptKit.jobSchemaError(try jobData(p)), "RED CONTROL: core refuses the union sent empty")
     }
 
     private func faceRegionEntries(_ p: ProjectModel) throws -> [[String: Any]] {
@@ -123,11 +123,18 @@ final class SurfaceUnionDefectControlTests: XCTestCase {
         return try XCTUnwrap(loads["face_regions"] as? [[String: Any]], "the regions are declared")
     }
 
+    /// The load presses every non-union region the project holds (the union's parts, in the defect test): a job sends only the
+    /// pieces it uses (his 11-16).
+    private static func loadRegions(_ p: ProjectModel) -> [Int] {
+        p.faceRegions.regions.filter { !$0.isUnionOfParts }.map(\.id)
+    }
+
     private func jobData(_ p: ProjectModel) throws -> Data {
         let request = RunRequest(modelPath: "/tmp/part.step", material: "PLA", materialsPath: "",
                                  rulesPath: "", resolution: 64, projectName: "union",
                                  anchorFaceIDs: [0],
-                                 loadGroups: [TopOptKit.LoadGroupSpec(faceIDs: [2], force: SIMD3(0, 0, -60))],
+                                 loadGroups: [TopOptKit.LoadGroupSpec(faceIDs: [2], force: SIMD3(0, 0, -60),
+                                                                      regionIDs: Self.loadRegions(p))],   // ★ 11-16: a load uses the pieces
                                  faceRegions: p.faceRegions.regions)
         let cfg = RemoteRunnerConfig(host: "127.0.0.1", port: 8757, expectedFingerprint: "test")
         let run = RemoteRun(config: cfg, request: request, progress: { _, _, _ in true }, onVariant: { _ in })

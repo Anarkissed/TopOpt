@@ -55,6 +55,41 @@ final class NoEmptyRegionTests: XCTestCase {
         XCTAssertTrue(Set(pieces).isSubset(of: Set(sent.compactMap { $0["id"] as? Int })), "the pieces it names are sent")
     }
 
+    /// ★ His 11-16 jobs (e84c7315, 79b695c5 and five before): "region 101 "Face 25 A" holds 3 voxels at resolution 96 —
+    /// under the floor of 16". No group used that piece; the app sent every piece the project held, core builds every
+    /// declared region, and his whole run was refused. A run sends only the pieces it uses — on the Mac's job, on the
+    /// device's own run, and in the lattice's quick stress solve. RED CONTROL: every piece sent, the leftover with it.
+    func testALeftoverPieceNoGroupUsesIsNeverSent() throws {
+        let r = try project()
+        let p = r.project
+        let bottom = try XCTUnwrap(p.selection.groups.first { $0.name == "Bottom" })
+        var m = p.faceRegions
+        let whole = m.union(faces: [try XCTUnwrap(bottom.faces.first)], named: "Bottom face")
+        let pieces = m.splitManual(whole, point: .zero, normal: SIMD3(1, 0, 0))
+        XCTAssertEqual(pieces.count, 2)
+        p.faceRegions = m
+        p.selection.setRegions([pieces[0]], for: bottom.id)   // one half anchors; the other is left over, used by nothing
+
+        func sent() throws -> Set<Int> {
+            let req = try XCTUnwrap(r.app.makeRunRequest())
+            let job = try XCTUnwrap(JSONSerialization.jsonObject(with: RemoteRun.buildJobJSON(req)) as? [String: Any])
+            let ids = Set(faceRegions(job).compactMap { $0["id"] as? Int })
+            XCTAssertEqual(Set(FaceRegionSend.onWire(req).map(\.id)), ids, "the device's own run sends the same pieces")
+            return ids
+        }
+        let ids = try sent()
+        XCTAssertTrue(ids.contains(pieces[0]), "the piece the anchor uses is sent")
+        XCTAssertFalse(ids.contains(pieces[1]), "★ the leftover piece no group uses is never sent")
+        XCTAssertEqual(ids, [whole, pieces[0]], "the used piece and the face it was cut from (a parent holds at least as much)")
+        let load = TopOptKit.LoadGroupSpec(faceIDs: [], force: SIMD3(0, 0, -10), regionIDs: [pieces[0]])
+        XCTAssertEqual(Set(FaceRegionSend.used(p.faceRegions.regions, anchors: [], loads: [load]).map(\.id)), [whole, pieces[0]],
+                       "★ the quick stress solve sends only its loads' and anchors' pieces")
+
+        FaceRegionSend.controlSendEveryPiece = true
+        defer { FaceRegionSend.controlSendEveryPiece = false }
+        XCTAssertTrue(try sent().contains(pieces[1]), "RED CONTROL: every piece sent, the leftover with it")
+    }
+
     func testAnAnchorHoldingOnlyAFacelessPieceIsRefusedOnTheButtonAndNothingIsSent() throws {
         let r = try project()
         let p = r.project

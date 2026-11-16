@@ -87,7 +87,8 @@ enum FlexibleFacePick {
     static func target(face: FaceID, point: SIMD3<Float>?, project p: ProjectModel, mesh: ViewerMesh) -> FlexibleFreeFace {
         let covering = p.faceRegions.regions.filter { FaceRegionGeometry.members(of: $0, in: mesh).contains(face) }
         guard !covering.isEmpty else { return .face(face) }
-        let hit = point.flatMap {
+        // ★ his 11-16: with a point, the point decides (no piece there = the bare face); the deepest piece only when unknown
+        let hit = point.map {
             SurfaceTint.regionAt(point: SIMD3<Double>($0), face: face, mesh: mesh, regions: p.faceRegions)
         } ?? p.surfaceCutTarget(face: face)
         guard let h = hit else { return .face(face) }

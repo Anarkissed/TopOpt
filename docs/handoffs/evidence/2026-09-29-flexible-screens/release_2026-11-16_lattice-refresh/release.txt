@@ -1,0 +1,17 @@
+# Release c6a2e362 — 2026-11-16 lattice-refresh (his 11-16 ask: the lattice view load, 32fc9439), app only
+# Core and worker unchanged: fingerprint 85d25b639dee
+# Merged onto b15449f1; the merged app tree equals lattice-refresh's, so its gate applies unchanged.
+# Commits (first parent of lattice-refresh since the release tip):
+#   32fc9439 Lattice view load (362): his 11-16 ask — Live preview / Click to refresh, the glow holds, Live waits, nozzle check on request, half resolution while turning
+# Gates:
+#   claude/lattice-refresh 32fc9439 (on install2-app 90da15cc, whose app tree is release fd7303ee's), built against core 85d25b639dee:
+#   run 1: 111/112 (LatticePreviewMode, glow, new-engine switch, bake inputs, stress tint, hook pins, BannedWords, app asks, export, manual, preview) — the one red was the stack test's red control (rode on the nozzle check's redraw); fixed in the test
+#   run 2: 129/130 across 24 lattice-page hosted classes — the one red was LatticeCornerHostedTests counting the arrow's five items (now five + his pair); fixed in the test
+#   run 3: LatticeCornerHostedTests + BannedWordsTests 10/10
+#   02:58 checks ok: lattice-refresh 32fc9439, 1 commit(s), app-only, onto b15449f1, fingerprint 85d25b639dee
+#   02:58 merged c6a2e362; app tree == lattice-refresh's, fingerprint 85d25b639dee
+#   02:58 waiting for HEAVY.lock (free)
+#   02:58 lock taken (39 GB free)
+#   03:03 iPad device build green; lock released
+#   03:04 pushed c6a2e362
+#   03:04 worker /health fingerprint 85d25b639dee (unchanged, no swap)

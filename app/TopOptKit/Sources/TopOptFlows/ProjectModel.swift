@@ -2255,10 +2255,26 @@ public final class ProjectModel: ObservableObject {
         beginFaceEdit(); defer { endFaceEdit(.undoSplit) }
         guard SurfaceRegionTool.canUndoSplit(id, regions: faceRegions) else { return [] }
         let before = Set(faceRegions.regions.map(\.id))
-        faceRegions.revertSplit(id)
+        faceRegions.revertSplit(id, includingLent: true)   // ★ his 11-16: both halves, even one a union took
         let dropped = before.subtracting(faceRegions.regions.map(\.id)).sorted()
         selection.removeRegions(dropped)
         syncForceGroups()   // ★ B6: both lists
+        objectWillChange.send()
+        return dropped
+    }
+
+    /// ★ his 11-16 (the "T"): cut pieces whose split is gone (`FaceRegionModel.orphanedCutPieces`) — Edit faces offers to make
+    /// their faces whole again.
+    public var surfaceOrphanedCutPieces: [RegionID] { faceRegions.orphanedCutPieces }
+
+    /// Make those faces whole again, as one undo step: the pieces go, their unions let them go, no group keeps their ids.
+    @discardableResult
+    public func surfaceRepairOrphanedCutPieces() -> [RegionID] {
+        beginFaceEdit(); defer { endFaceEdit(.undoSplit) }
+        let dropped = faceRegions.repairOrphanedCutPieces()
+        guard !dropped.isEmpty else { return [] }
+        selection.removeRegions(dropped)
+        syncForceGroups()
         objectWillChange.send()
         return dropped
     }
