@@ -3463,6 +3463,11 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// Whether the lattice marched into the G-buffer in the most recently ENCODED
     /// frame. See `latticeMaskDump`.
     private(set) var lastFrameHadLatticeGBuffer = false
+    /// The clip-from-model and aspect the G-buffer above was drawn with (★ his pick 11-16 (B)).
+    private var lastGBufferMVP = simd_float4x4()
+    private var lastGBufferAspect: Float = 0
+    /// The long side of the G-buffer last encoded (★ his pick 11-16 (C)).
+    private(set) var lastGBufferLongSide = 0
     private var frameDrawCalls = 0
     private var frameVertices = 0
 
@@ -3509,6 +3514,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         let wantsLattice = (latticeInFrame || flexibleLatticeInFrame || layoutBarsInFrame) && latticeGBufferPipeline != nil
             && latticeShadePipeline != nil
         let wantsAO = !quality.isDisjoint(with: [.ambientOcclusion, .edges]) && aoPipeline != nil
+            && LatticePreviewMode.aoDrawn(turning: turning, latticeShown: wantsLattice)   // ★ his pick 11-16 (D)
         // The G-buffer is single-sampled, so it is sized from the RESOLVE target when
         // the colour pass is multisampled (§3b) — `resolveTexture` is the 1× surface.
         let colorTex = rpd.colorAttachments[0].resolveTexture ?? rpd.colorAttachments[0].texture
@@ -3521,6 +3527,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             mainSize = (ctex.width, ctex.height)
             gbufferScale = SIMD2<Float>(Float(g.w) / Float(Swift.max(ctex.width, 1)),
                                         Float(g.h) / Float(Swift.max(ctex.height, 1)))
+            lastGBufferLongSide = Swift.max(g.w, g.h)   // ★ his pick 11-16 (C): tests read it
             gbuffer = encodeDepthPrepass(width: g.w, height: g.h,
                                          uniforms: uniforms, aspect: aspect, into: cmd)
             sceneDepthTex = gbuffer?.depth
@@ -3540,6 +3547,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // stale one for the same reason: a "before" that reports the "after"'s
         // coverage is worse than no number at all.
         lastFrameHadLatticeGBuffer = wantsLattice && gbuffer != nil
+        lastGBufferMVP = uniforms.mvp; lastGBufferAspect = aspect   // ★ his pick 11-16 (B): what a tap may read it for
         var shade = makeShadeParams(mainSize: haveAO ? mainSize : nil)
 
         // ★ §3c: the footprint, in its OWN pass before the main one (a render pass
@@ -3940,6 +3948,9 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// ★ his pick 11-16 (6): a lattice is drawn (the old preview's march, the Flexible pass or the new engine's bars) — the
     /// view then draws at half resolution while he turns it (`LatticePreviewMode.drawScale`).
     var latticeDrawnForScale: Bool { latticeInFrame || flexibleLatticeInFrame || layoutBarsInFrame }
+    /// ★ his picks 11-16 (C, D): a camera gesture is down with a lattice drawn (the coordinator sets it). While it is, the
+    /// lattice's layer is drawn smaller and the soft shading in the gaps and the edge lines are left out.
+    var turning = false
 
 
     /// THE ONE ENTRY POINT for putting the lattice in this renderer's passes. The
@@ -4167,11 +4178,15 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
 
     /// Face-role tints on the lattice (the preview's bar A4), baked from the SAME
     /// dictionary the body is tinted with. Re-baked only when the selection changes.
+    private(set) var faceTintBakes = 0
     func setLatticeFaceTints(_ tints: [FaceID: SIMD4<Float>]) {
         guard let layer = latticeLayer else { return }
         if latticeAppliedTints != tints {
             latticeAppliedTints = tints
-            layer.setFaceTints(tints)
+            // ★ his pick 11-16 (B): NOT BAKED. A selection change re-coloured a whole 3D volume on the main thread that no
+            // shader has read since the lattice's hue became its structure (LatticeSDFAlignmentTests: `lsdf_albedo` no longer
+            // mixes `tintTex`). RED CONTROL: bake it as before.
+            if LatticePreviewMode.controlTapDrawsWholeFrames { layer.setFaceTints(tints); faceTintBakes += 1 }
         }
     }
 
@@ -4179,10 +4194,14 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// colour target unless a lattice is in the frame, in which case the long side is
     /// capped — see `latticeGBufferMaxPixels` for why (the march is fill-bound).
     private func gbufferSize(width: Int, height: Int) -> (w: Int, h: Int) {
-        guard latticeInFrame || flexibleLatticeInFrame else { return (width, height) }   // the Flexible march inherits latticeGBufferMaxPixels = 1152
+        // the Flexible march inherits latticeGBufferMaxPixels = 1152; ★ his pick 11-16 (C): while turning, every lattice (the
+        // new engine's bars too) is drawn at `LatticePreviewMode.turningGBufferMaxPixels`
+        guard let cap = LatticePreviewMode.gbufferCap(turning: turning, marched: latticeInFrame || flexibleLatticeInFrame,
+                                                      bars: layoutBarsInFrame, restCap: Self.latticeGBufferMaxPixels)
+        else { return (width, height) }
         let long = Swift.max(width, height)
-        guard long > Self.latticeGBufferMaxPixels else { return (width, height) }
-        let s = Double(Self.latticeGBufferMaxPixels) / Double(long)
+        guard long > cap else { return (width, height) }
+        let s = Double(cap) / Double(long)
         return (Swift.max(1, Int((Double(width) * s).rounded())),
                 Swift.max(1, Int((Double(height) * s).rounded())))
     }
@@ -5472,6 +5491,15 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// the pixel is not lattice — the caller then falls through to ordinary picking.
     func latticeProbe(atNormalizedPoint p: CGPoint, width: Int, height: Int) -> LatticeProbeHit? {
         guard vertexDrawCount > 0, latticeInFrame || flexibleLatticeInFrame, width > 0, height > 0 else { return nil }   // Flexible (PR #362) M4: a tap on a Flexible wall is found too
+        // ★ his pick 11-16 (B): the frame on screen already holds the lattice's layer for THIS camera and shape — read the
+        // tap from it, never draw a second whole frame for one tap. Another camera, shape or size falls back to drawing one.
+        if !LatticePreviewMode.controlTapDrawsWholeFrames, lastFrameHadLatticeGBuffer,
+           gbufferAlbedoTex != nil, sceneDepthColorTex != nil, lastGBufferAspect == self.aspect,
+           lastGBufferMVP == makeUniforms(aspect: self.aspect).mvp, let cmd = queue.makeCommandBuffer() {
+            probesFromScreen += 1
+            return probeRead(cmd, at: p, aspect: self.aspect)
+        }
+        probesDrawn += 1
         sceneDepthColorTex = nil; sceneDepthZTex = nil
         sceneNormalTex = nil; gbufferAlbedoTex = nil
         let cdesc = MTLTextureDescriptor.texture2DDescriptor(
@@ -5500,6 +5528,14 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         rpd.depthAttachment.storeAction = .dontCare
         let aspect = Float(width) / Float(Swift.max(1, height))
         encode(into: rpd, aspect: aspect, into: cmd, drawStage: false)
+        return probeRead(cmd, at: p, aspect: aspect)
+    }
+    /// Probes answered from the frame on screen / by drawing a frame (tests count them: his pick B).
+    private(set) var probesFromScreen = 0
+    private(set) var probesDrawn = 0
+
+    /// The tap's nearest strut texel in the lattice's layer last encoded into `cmd`'s queue, and the point it is.
+    private func probeRead(_ cmd: MTLCommandBuffer, at p: CGPoint, aspect: Float) -> LatticeProbeHit? {
         guard lastFrameHadLatticeGBuffer,
               let alb = gbufferAlbedoTex, let eyeZTex = sceneDepthColorTex,
               let blit = cmd.makeBlitCommandEncoder() else { cmd.commit(); return nil }
@@ -5610,13 +5646,64 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     }
 
     func pickFacePass(atNormalizedPoint p: CGPoint, width: Int, height: Int) -> FaceIDPass {
-        guard let ids = renderFaceIDOffscreen(width: width, height: height)
-        else { return .unavailable }
+        guard width > 0, height > 0 else { return .unavailable }
         let px = Swift.min(Swift.max(Int(p.x * CGFloat(width)), 0), width - 1)
         let py = Swift.min(Swift.max(Int(p.y * CGFloat(height)), 0), height - 1)
-        let raw = ids[py * width + px]
+        let raw: UInt32
+        if LatticePreviewMode.controlTapDrawsWholeFrames {   // RED CONTROL: the whole screen drawn and read back for one pixel
+            guard let ids = renderFaceIDOffscreen(width: width, height: height) else { return .unavailable }
+            raw = ids[py * width + px]
+        } else {
+            guard let one = renderFaceIDPixel(px: px, py: py, width: width, height: height) else { return .unavailable }
+            raw = one
+        }
         return raw == idBackground ? .background : .face(FaceID(bitPattern: raw))
     }
+
+    /// ★ his pick 11-16 (B): the face under ONE pixel of a `width`×`height` view, drawn into a 1×1 target — the view's own
+    /// projection followed by a pick matrix that blows that pixel up to the whole target (`LatticePreviewMode.pixelPick`).
+    /// The whole-screen pass allocated two screen-sized textures and copied every pixel back to read one.
+    func renderFaceIDPixel(px: Int, py: Int, width: Int, height: Int) -> UInt32? {
+        guard vertexDrawCount > 0, let idPipeline, let idbuf = idVertexBuffer,
+              width > 0, height > 0, let cmd = queue.makeCommandBuffer() else { return nil }
+        if idPixelColor == nil || idPixelDepth == nil {
+            let cdesc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: Self.idFormat, width: 1, height: 1, mipmapped: false)
+            cdesc.usage = [.renderTarget, .shaderRead]
+            cdesc.storageMode = .shared
+            let ddesc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: Self.depthFormat, width: 1, height: 1, mipmapped: false)
+            ddesc.usage = [.renderTarget]
+            ddesc.storageMode = .private
+            idPixelColor = device.makeTexture(descriptor: cdesc)
+            idPixelDepth = device.makeTexture(descriptor: ddesc)
+        }
+        guard let color = idPixelColor, let depth = idPixelDepth else { return nil }
+        let rpd = MTLRenderPassDescriptor()
+        rpd.colorAttachments[0].texture = color
+        rpd.colorAttachments[0].loadAction = .clear
+        rpd.colorAttachments[0].clearColor = MTLClearColor(red: Double(idBackground), green: 0, blue: 0, alpha: 0)
+        rpd.colorAttachments[0].storeAction = .store
+        rpd.depthAttachment.texture = depth
+        rpd.depthAttachment.loadAction = .clear
+        rpd.depthAttachment.clearDepth = 1.0
+        rpd.depthAttachment.storeAction = .dontCare
+        guard let enc = cmd.makeRenderCommandEncoder(descriptor: rpd) else { return nil }
+        var uniforms = makeUniforms(aspect: Float(width) / Float(height))
+        uniforms.mvp = LatticePreviewMode.pixelPick(px: px, py: py, width: width, height: height) * uniforms.mvp
+        enc.setRenderPipelineState(idPipeline)
+        enc.setDepthStencilState(depthState)
+        enc.setCullMode(.none)
+        enc.setVertexBuffer(idbuf, offset: 0, index: 0)
+        enc.setVertexBytes(&uniforms, length: MemoryLayout<ViewerUniforms>.stride, index: 1)
+        enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: vertexDrawCount)
+        enc.endEncoding()
+        cmd.commit()
+        cmd.waitUntilCompleted()
+        var one: UInt32 = 0
+        color.getBytes(&one, bytesPerRow: 4, from: MTLRegionMake2D(0, 0, 1, 1), mipmapLevel: 0)
+        return one
+    }
+    private var idPixelColor: MTLTexture?
+    private var idPixelDepth: MTLTexture?
 
     /// Resolve the face id at a normalized tap point (x,y ∈ [0,1], y down) via the
     /// id pass. Returns nil on a miss / when the id pass is unavailable — the caller
@@ -5773,6 +5860,9 @@ struct MeshViewInputs {
     var onTapRay: ((SIMD3<Float>, SIMD3<Float>, Float?) -> Bool)? = nil
     /// Published each time the camera changes, so overlays can project 3D points.
     var onProjection: ((CameraProjection) -> Void)?
+    /// ★ his pick 11-16 (A): true when he starts turning the view with a lattice drawn, false when he lets go (the page hides
+    /// its chips and legends and stops following the camera in between). Set with `.onLatticeTurning`.
+    var onLatticeTurning: ((Bool) -> Void)? = nil
     /// Round-6 item 4: a two-finger DOUBLE-tap on the viewport undoes; a two-finger TRIPLE-tap
     /// redoes. nil disables the gesture (previews / thumbnails). iOS only — a Mac trackpad
     /// two-finger tap is not a `UITapGestureRecognizer` event, so the header buttons stand in there.
@@ -6326,10 +6416,12 @@ extension MetalMeshView {
 
     @MainActor
     public final class Coordinator: NSObject {
+        /// Every page pass that reached the viewer (tests count them: his pick A, a drag must not re-read the page).
+        nonisolated(unsafe) static var appliesRun = 0
         var renderer: MeshRenderer?
         /// The shared camera source of truth (STEP 1), when the host provides one. The
         /// renderer's own `camera` becomes a mirror kept in sync from this via `sink`.
-        private var cameraModel: OrbitCameraModel?
+        private(set) var cameraModel: OrbitCameraModel?
         private var cameraCancellable: AnyCancellable?
         private weak var boundView: MTKView?
         private var appliedSignature: ViewerMeshSignature?
@@ -6468,6 +6560,8 @@ extension MetalMeshView {
             onSurfacePoint = inputs.onSurfacePoint
             onTapRay = inputs.onTapRay
             onProjection = inputs.onProjection
+            onLatticeTurning = inputs.onLatticeTurning
+            Self.appliesRun += 1
             onUndo = inputs.onUndo
             onRedo = inputs.onRedo
             paintActive = inputs.paintActive
@@ -7013,6 +7107,9 @@ extension MetalMeshView {
         /// Compute + publish the camera→screen projection when it has changed.
         private func publishProjection(from view: MTKView) {
             guard let renderer, let onProjection else { return }
+            // ★ his pick 11-16 (A): while a lattice turns the page does not follow the camera (its chips and legends are
+            // hidden); the last gesture's end publishes once
+            guard !latticeTurning || LatticePreviewMode.controlPageFollowsCamera else { return }
             let size = view.bounds.size
             guard size.width > 0, size.height > 0 else { return }
             let proj = CameraProjection(camera: renderer.camera, viewportSize: size)
@@ -7022,10 +7119,75 @@ extension MetalMeshView {
         }
 
         private func redraw(_ view: MTKView) {
+            // ★ his pick 11-16 (E): while a lattice is turned, at most 60 frames a second; a request inside the gap is
+            // drawn once, at the gap's end, so the last position always lands
+            if latticeTurning {
+                let now = CACurrentMediaTime()
+                let wait = LatticePreviewMode.turnFrameWait(now: now, lastDraw: lastTurnDraw)
+                if wait > 0 {
+                    guard !turnRedrawPending else { return }
+                    turnRedrawPending = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self, weak view] in
+                        guard let self, let view else { return }
+                        self.turnRedrawPending = false
+                        self.lastTurnDraw = CACurrentMediaTime()
+                        self.requestDisplay(view)
+                    }
+                    return
+                }
+                lastTurnDraw = now
+            }
+            requestDisplay(view)
+        }
+
+        /// Displays asked of the view (tests count them: his pick E).
+        private(set) var displayRequests = 0
+        private func requestDisplay(_ view: MTKView) {
+            displayRequests += 1
             #if os(iOS)
             view.setNeedsDisplay()
             #elseif os(macOS)
             view.needsDisplay = true
+            #endif
+        }
+
+        // MARK: ★ his picks 11-16 — turning a lattice (A, C, D, E; half resolution from the first round)
+
+        /// The camera gestures down right now (pan, pinch, the Mac's drag and magnify).
+        private var turning = Set<ObjectIdentifier>()
+        /// A camera gesture is down and a lattice was drawn when it started: the page has been told (its chips and legends
+        /// are hidden and it stops following the camera), the renderer draws lighter, frames are capped at 60.
+        private(set) var latticeTurning = false
+        private var lastTurnDraw: Double = 0
+        private var turnRedrawPending = false
+        /// The page's ear for A: true when a lattice starts turning, false when the last gesture lets go.
+        private var onLatticeTurning: ((Bool) -> Void)?
+
+        /// One camera gesture went down (began / changed) or up (anything else).
+        func cameraGesture(_ id: ObjectIdentifier, down: Bool, in view: MTKView) {
+            if down { turning.insert(id) } else { turning.remove(id) }
+            let want = !turning.isEmpty && (latticeTurning || (renderer?.latticeDrawnForScale ?? false))
+            if want != latticeTurning {
+                latticeTurning = want
+                renderer?.turning = want
+                if want {
+                    onLatticeTurning?(true)
+                } else {
+                    // the page comes back to where the model now is: its projection, published even if unchanged
+                    lastPublished = nil
+                    publishProjection(from: view)
+                    onLatticeTurning?(false)
+                    turnRedrawPending = false
+                    requestDisplay(view)   // a full-detail frame at rest
+                }
+            }
+            #if os(iOS)
+            let native = view.traitCollection.displayScale > 0 ? view.traitCollection.displayScale : 2
+            let scale = LatticePreviewMode.drawScale(native: native, turning: latticeTurning, latticeShown: latticeTurning)
+            if abs(view.contentScaleFactor - scale) > 0.01 {
+                view.contentScaleFactor = scale
+                requestDisplay(view)
+            }
             #endif
         }
 
@@ -7247,18 +7409,8 @@ extension MetalMeshView {
             g.scale = 1
         }
 
-        /// ★ his pick 11-16 (6) — "impossibly slow and laggy" with the lattice view on: while a camera gesture is down and a
-        /// lattice is drawn, the view draws at half the screen's resolution; the last gesture to end puts it back.
-        private var turning = Set<ObjectIdentifier>()
         private func noteTurning(_ g: UIGestureRecognizer, in view: MTKView) {
-            if g.state == .began || g.state == .changed { turning.insert(ObjectIdentifier(g)) } else { turning.remove(ObjectIdentifier(g)) }
-            let native = view.traitCollection.displayScale > 0 ? view.traitCollection.displayScale : 2
-            let want = LatticePreviewMode.drawScale(native: native, turning: !turning.isEmpty,
-                                                    latticeShown: renderer?.latticeDrawnForScale ?? false)
-            if abs(view.contentScaleFactor - want) > 0.01 {
-                view.contentScaleFactor = want
-                redraw(view)
-            }
+            cameraGesture(ObjectIdentifier(g), down: g.state == .began || g.state == .changed, in: view)
         }
 
         @objc func handleTap(_ g: UITapGestureRecognizer) {
@@ -7357,6 +7509,7 @@ extension MetalMeshView {
         #elseif os(macOS)
         @objc func handlePan(_ g: NSPanGestureRecognizer) {
             guard let view = g.view as? MTKView else { return }
+            cameraGesture(ObjectIdentifier(g), down: g.state == .began || g.state == .changed, in: view)   // ★ his picks 11-16
             let t = g.translation(in: view)
             // AppKit y is up → negate to the screen-down convention `pan`/`orbit` take. A two-finger
             // trackpad drag isn't a pan-recognizer event on macOS, so Option-drag pans (item 2); a
@@ -7380,6 +7533,7 @@ extension MetalMeshView {
 
         @objc func handleMagnify(_ g: NSMagnificationGestureRecognizer) {
             guard let view = g.view as? MTKView else { return }
+            cameraGesture(ObjectIdentifier(g), down: g.state == .began || g.state == .changed, in: view)   // ★ his picks 11-16
             if let model = cameraModel {
                 model.zoom(Float(1 / (1 + g.magnification)))
             } else {
@@ -7546,6 +7700,17 @@ extension MetalMeshView {
 #if canImport(MetalKit)
         var copy = self
         copy.inputs.onEmptyTap = action
+        return copy
+#else
+        self
+#endif
+    }
+
+    /// ★ his pick 11-16 (A): told true when he starts turning the view with a lattice drawn, false when he lets go.
+    public func onLatticeTurning(_ action: @escaping (Bool) -> Void) -> MetalMeshView {
+#if canImport(MetalKit)
+        var copy = self
+        copy.inputs.onLatticeTurning = action
         return copy
 #else
         self

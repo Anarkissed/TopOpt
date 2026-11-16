@@ -223,7 +223,13 @@ public struct FlexibleMainLegends: View {
     /// (the main page draws no squish prism any more).
     static let prismsOnlyTab = FlexibleRowCopy.mainFacePrismsTab
 
+    /// ★ his pick 11-16 (A): hidden while he turns the view with a lattice drawn
+    @Environment(\.latticeTurning) private var latticeTurning
     public var body: some View {
+        if !latticeTurning { shownBody }
+    }
+
+    @ViewBuilder private var shownBody: some View {
         // the view a tap comes through, for the readings (no publish)
         let _ = main.noteView(projection: projection, settle: settle)
         let kinds = main.legendKinds

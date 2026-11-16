@@ -184,4 +184,96 @@ final class LatticePreviewModeHostedTests: XCTestCase {
         h.pump(1)
     }
 }
+
+/// ★ His second ask of 11-16, picks A and E on the real page (the new engine's bars drawn): while he turns the view with a
+/// lattice up, the page does not re-read itself on every step (A: the camera reaches the 3D view directly), its projection-led
+/// chips are gone and come back where the model now is when he lets go, and frames are capped at 60 a second (E). RED
+/// CONTROLS: the page following every step; frames as asked.
+final class LatticeTurningHostedTests: XCTestCase {
+    @MainActor
+    func testTurningALatticeOnThePage() throws {
+        let settings = AppSettings.shared
+        let wasEngine = settings.newEngineTest
+        addTeardownBlock { @MainActor in
+            AppSettings.shared.newEngineTest = wasEngine
+            LatticePreviewMode.controlPageFollowsCamera = false
+            LatticePreviewMode.controlFullDetailWhileTurning = false
+        }
+        settings.newEngineTest = false
+        let (h, _) = try armedLatticeSetup(AppBuildHost.landscape13, self)
+        // the page's 3D view with a lattice in it (the old engine's preview; the page holds other Metal views too)
+        func viewers() -> [(MTKView, MetalMeshView.Coordinator)] {
+            var out: [(MTKView, MetalMeshView.Coordinator)] = []
+            func walk(_ v: NSView) {
+                if let m = v as? MTKView,
+                   let c = m.gestureRecognizers.first(where: { ($0 as? NSClickGestureRecognizer)?.numberOfClicksRequired == 1 })?
+                    .target as? MetalMeshView.Coordinator { out.append((m, c)) }
+                v.subviews.forEach(walk)
+            }
+            walk(h.view)
+            return out
+        }
+        var found: (MTKView, MetalMeshView.Coordinator)?
+        let end = Date().addingTimeInterval(120)
+        while found == nil, Date() < end {
+            h.pump(0.5)
+            found = viewers().first { $0.1.renderer?.latticeDrawnForScale == true }
+        }
+        print("TURNING viewers: \(viewers().map { "\($0.0.bounds.size) lattice \($0.1.renderer?.latticeDrawnForScale ?? false)" })")
+        let (mtk, viewer) = try XCTUnwrap(found, "premise: a lattice is drawn in the page's 3D view")
+        let renderer = try XCTUnwrap(viewer.renderer)
+        let camera = try XCTUnwrap(viewer.cameraModel, "the page's camera")
+        let keysAtRest = Set(h.frames.all.keys)
+
+        func turn(steps: Int, pumping: Bool) -> (applies: Int, displays: Int) {
+            let g = NSObject()
+            let a0 = MetalMeshView.Coordinator.appliesRun, d0 = viewer.displayRequests
+            viewer.cameraGesture(ObjectIdentifier(g), down: true, in: mtk)
+            h.pump(0.3)
+            let a1 = MetalMeshView.Coordinator.appliesRun, d1 = viewer.displayRequests
+            for _ in 0..<steps {
+                camera.orbit(dx: 3, dy: 0)
+                if pumping { h.pump(0.02) }
+            }
+            let a2 = MetalMeshView.Coordinator.appliesRun, d2 = viewer.displayRequests
+            _ = (a0, d0)
+            viewer.cameraGesture(ObjectIdentifier(g), down: false, in: mtk)
+            h.pump(0.5)
+            return (a2 - a1, d2 - d1)
+        }
+
+        // A: thirty steps of a turn re-read the page (almost) never; the 3D view turns; the chips go and come back
+        let yaw0 = camera.camera.azimuth
+        let g = NSObject()
+        viewer.cameraGesture(ObjectIdentifier(g), down: true, in: mtk)
+        h.pump(0.5)
+        XCTAssertTrue(viewer.latticeTurning && renderer.turning, "★ a turn with a lattice up is a lattice turn")
+        let keysTurning = Set(h.frames.all.keys)
+        viewer.cameraGesture(ObjectIdentifier(g), down: false, in: mtk)
+        h.pump(1)
+        XCTAssertFalse(viewer.latticeTurning || renderer.turning, "★ letting go ends it")
+        print("TURNING frames hidden while turning: \(keysAtRest.subtracting(keysTurning).sorted())")
+        XCTAssertTrue(keysTurning.isSubset(of: keysAtRest), "nothing new appears while turning")
+        XCTAssertEqual(Set(h.frames.all.keys), keysAtRest, "★ everything that hid comes back when he lets go")
+
+        let quiet = turn(steps: 30, pumping: true)
+        XCTAssertNotEqual(camera.camera.azimuth, yaw0, "the camera turned")
+        XCTAssertLessThanOrEqual(quiet.applies, 3, "★ A: thirty steps re-read the page at most a few times (got \(quiet.applies))")
+        // E: thirty steps asked in one go draw at most two frames (one now, one at the gap's end)
+        let burst = turn(steps: 30, pumping: false)
+        XCTAssertLessThanOrEqual(burst.displays, 2, "★ E: at most 60 a second (got \(burst.displays) displays for 30 steps)")
+
+        // RED CONTROLS
+        LatticePreviewMode.controlPageFollowsCamera = true
+        let loud = turn(steps: 30, pumping: true)
+        XCTAssertGreaterThanOrEqual(loud.applies, 25, "RED CONTROL: the page re-reads itself on every step (got \(loud.applies))")
+        LatticePreviewMode.controlPageFollowsCamera = false
+        LatticePreviewMode.controlFullDetailWhileTurning = true
+        let every = turn(steps: 30, pumping: false)
+        XCTAssertGreaterThanOrEqual(every.displays, 30, "RED CONTROL: every step asks a frame")
+        LatticePreviewMode.controlFullDetailWhileTurning = false
+        settings.newEngineTest = false
+        h.pump(1)
+    }
+}
 #endif

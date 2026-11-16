@@ -46,7 +46,12 @@ public struct WorkspacePlaceholder: View {
     @State private var projection: CameraProjection?
     /// The ONE shared orbit camera for the workspace stage (STEP 1) — driven by both the
     /// Metal viewer's drag and the orientation gizmo.
-    @StateObject private var cameraModel = OrbitCameraModel(followsViewProjection: true)   // ★ B2 (note 1)
+    // ★ B2 (note 1): the page's one camera. ★ his pick 11-16 (A): held through a relay, so the page re-reads itself on a
+    // camera change only while no lattice is being turned (the 3D view and the gizmos take the camera directly)
+    @StateObject private var cameraRelay = PageCameraRelay(model: OrbitCameraModel(followsViewProjection: true))
+    private var cameraModel: OrbitCameraModel { cameraRelay.model }
+    /// ★ his pick 11-16 (A): he is turning the view with a lattice drawn: the chips and legends are hidden until he lets go
+    @State private var latticeTurning = false
     /// WHERE the run executes (handoff 097): iPad by default, or a LAN worker
     /// discovered by Bonjour. Owned here so the choice + discovery live for the
     /// workspace session; nil `activeRemote` → the on-device bridge runner (unchanged).
@@ -1324,6 +1329,7 @@ public struct WorkspacePlaceholder: View {
                           layoutBars: newEngineDrawn ? newEngine.bars : nil,   // ★ the new engine (test): its bars (LatticeLayoutPreview)
                           flexibleLattice: flexibleMain.layer(project, stage: stage, pageUp: fullScreenPageUp))   // Flexible (PR #362) H3: the main page's lattice + its squish loop (FlexibleMainStage.swift)
                 .onEmptyTap { emptyTapClears() }   // ★ his iPad 10-26 (5): a tap on empty space clears the selection
+                .onLatticeTurning { latticeTurningChanged($0) }   // ★ his pick 11-16 (A): chips and legends hide while he turns a lattice
                 .onTapRay(primitiveTapRay)   // ★ his iPad 10-28: a tap on a keep-clear volume picks it
                 .cutSibling(SurfaceTint.siblingShows(tool: surfaceTool))   // ★ his 11-14: the other half is tinted under Union only
                 .overlay(alignment: .bottom) {
@@ -1831,6 +1837,7 @@ public struct WorkspacePlaceholder: View {
         .numberPadNote { model.toast = $0 }
         // ★ B2 (U16): the top lane's notifications keep clear of every control the page publishes
         .laneControls(laneControls)
+        .environment(\.latticeTurning, latticeTurning && !LatticePreviewMode.controlPageFollowsCamera)   // ★ his pick 11-16 (A)
     }
 
     /// ★ B10: the project's name, asked in the §4.11 name sheet (it was a system alert).
@@ -4332,7 +4339,11 @@ public struct WorkspacePlaceholder: View {
     /// settings' typed range, so a floor raised by printability shows up here.
     /// Both ends are labelled as a density AND as the strut thickness it produces,
     /// which is the quantity a person can measure on the print.
+    /// ★ his pick 11-16 (A): hidden while he turns the view with a lattice drawn
     @ViewBuilder private var latticeDensityLegend: some View {
+        if !latticeTurning || LatticePreviewMode.controlPageFollowsCamera { latticeDensityLegendShown }
+    }
+    @ViewBuilder private var latticeDensityLegendShown: some View {
         let span = latticeProxy.params.densitySpan
         let cell = latticeProxy.params.cellMM
         let topo = latticeProxy.params.lattice
@@ -4501,7 +4512,11 @@ public struct WorkspacePlaceholder: View {
 
     /// ★ THE CALLOUT AT THE TAP, the other half of "Both": an arrow at the point he
     /// touched, labelled with the same two numbers the key's arrow is pointing at.
+    /// ★ his pick 11-16 (A): hidden while he turns the view with a lattice drawn
     @ViewBuilder private var latticeProbeCallout: some View {
+        if !latticeTurning || LatticePreviewMode.controlPageFollowsCamera { latticeProbeCalloutShown }
+    }
+    @ViewBuilder private var latticeProbeCalloutShown: some View {
         // ★ RE-PROJECTED EVERY RENDER, so the callout rides the geometry through an
         // orbit instead of sitting where the finger used to be. `projection` is
         // republished by the coordinator on every camera change, so this recomputes
@@ -4612,7 +4627,11 @@ public struct WorkspacePlaceholder: View {
         }
     }
 
+    /// ★ his pick 11-16 (A): hidden while he turns the view with a lattice drawn
     @ViewBuilder private var stressLegend: some View {
+        if !latticeTurning || LatticePreviewMode.controlPageFollowsCamera { stressLegendShown }
+    }
+    @ViewBuilder private var stressLegendShown: some View {
         if latticeStressField != nil {
             let peak = latticeStressPeakMPa
             let ticks = LatticeStressTint.legendTicks(peakMPa: peak)
@@ -4716,6 +4735,16 @@ public struct WorkspacePlaceholder: View {
         let margin = project.force.safetyMargin ?? SafetyMargin.defaultValue
         return .init(key: latticeStressFieldKey, field: latticeStressField,
                      referenceMPa: model.printedYieldMPa(for: project.material) / Swift.max(1, margin))
+    }
+
+    /// ★ his pick 11-16 (A): he started turning the view with a lattice drawn (true) or let go (false). While he turns, the
+    /// page stops following the camera, and every chip that follows the model hides with the projection; the viewer
+    /// publishes the projection again as he lets go, so they come back where the model now is.
+    private func latticeTurningChanged(_ on: Bool) {
+        guard !LatticePreviewMode.controlPageFollowsCamera else { return }
+        latticeTurning = on
+        cameraRelay.setQuiet(on)
+        if on { projection = nil }
     }
 
     /// ★ his picks 11-16: the new engine's answer to a settings change — Live preview lays half a second after the last
