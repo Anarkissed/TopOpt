@@ -353,7 +353,7 @@ public struct FaceRegionModel: Equatable, Sendable, Codable {
     /// Dissolving a region also dissolves everything split out of it — those
     /// children are cells of a shape that no longer exists.
     @discardableResult
-    public mutating func dissolve(_ id: RegionID, resolvedMembers: [FaceID] = [])
+    public mutating func dissolve(_ id: RegionID, resolvedMembers: [FaceID] = [], includingLent: Bool = false)
         -> [FaceID] {
         guard let r = region(id) else { return [] }
         let members = resolvedMembers.isEmpty ? r.add : resolvedMembers
@@ -371,13 +371,67 @@ public struct FaceRegionModel: Equatable, Sendable, Codable {
         var changed = true
         while changed {
             changed = false
-            for c in regions where drop.contains(c.parentID) && !drop.contains(c.id) {
+            // ★ his 11-16 (the "T"): a piece cut from a dropped region goes with it EVEN WHEN A UNION HAS TAKEN IT — it was
+            // left behind, still cut, its other half gone, and a tap on that half picked it (and so the union)
+            // (Edit faces asks for it with `includingLent`; Flexible's scratch derivation keeps its own rule)
+            for c in regions where !drop.contains(c.id)
+                && (drop.contains(c.parentID) || (includingLent && (origin(of: c.id).map { drop.contains($0) } ?? false))) {
                 drop.insert(c.id)
                 changed = true
             }
         }
         regions.removeAll { drop.contains($0.id) }
+        if includingLent {
+            // no union keeps a part that is gone; a union left with no part goes too
+            releaseFromUnions(drop)
+            let emptied = regions.filter { $0.parts.isEmpty && $0.partParents != nil && $0.add.isEmpty && !$0.filter.any }.map(\.id)
+            for u in emptied where region(u) != nil { _ = dissolve(u, includingLent: true) }
+        }
         return members
+    }
+
+    /// ★ his 11-16: the region a piece was cut from, through any union that has taken it (`partParents` holds the parent
+    /// it had before); nil for a root.
+    public func origin(of id: RegionID) -> RegionID? {
+        guard let r = region(id), r.parentID >= 0 else { return nil }
+        if let u = region(r.parentID), let k = u.parts.firstIndex(of: id) {
+            guard let pp = u.partParents, k < pp.count, pp[k] >= 0 else { return nil }
+            return pp[k]
+        }
+        return r.parentID
+    }
+
+    /// ★ his 11-16: no union keeps a part that is gone (its `parts` and `partParents` stay in step).
+    mutating func releaseFromUnions(_ gone: Set<RegionID>) {
+        for i in regions.indices where regions[i].parts.contains(where: { gone.contains($0) }) {
+            var keepParts: [RegionID] = [], keepParents: [RegionID] = []
+            for (k, pid) in regions[i].parts.enumerated() where !gone.contains(pid) {
+                keepParts.append(pid)
+                if let pp = regions[i].partParents, k < pp.count { keepParents.append(pp[k]) }
+            }
+            regions[i].parts = keepParts
+            if regions[i].partParents != nil { regions[i].partParents = keepParents }
+        }
+    }
+
+    /// ★ his 11-16 (the "T"): cut pieces whose split no longer exists — the region they were cut from is gone (a split face
+    /// dissolved, or its split taken back, while a union held one of its pieces, before the fix above). The piece still
+    /// carries its cut, so its other half is covered by nothing and a tap there picked the piece.
+    public var orphanedCutPieces: [RegionID] {
+        regions.filter { r in
+            guard r.isCut else { return false }
+            guard let o = origin(of: r.id) else { return true }
+            return region(o) == nil
+        }.map(\.id)
+    }
+
+    /// Make every orphaned piece's face whole again: the piece (and anything cut from it) goes, and its union lets it go.
+    /// Returns the ids that went.
+    @discardableResult
+    public mutating func repairOrphanedCutPieces() -> [RegionID] {
+        let before = Set(regions.map(\.id))
+        for id in orphanedCutPieces where region(id) != nil { _ = dissolve(id, includingLent: true) }
+        return before.subtracting(regions.map(\.id)).sorted()
     }
 
     // MARK: - splits (§4)
@@ -484,11 +538,15 @@ public struct FaceRegionModel: Equatable, Sendable, Codable {
 
     /// Undo the LAST split of a region: drop its immediate children (and theirs).
     /// Splits are a revertable stack (§4d).
-    public mutating func revertSplit(_ id: RegionID) {
+    public mutating func revertSplit(_ id: RegionID, includingLent: Bool = false) {
         // ★ a union's parts hang off it too — they are what it IS, not a split of it (2026-10-08)
         let own = Set(region(id)?.parts ?? [])
         let kids = children(of: id).map(\.id).filter { !own.contains($0) }
-        for k in kids { _ = dissolve(k) }
+        // ★ his 11-16 (the "T"): and the pieces of this split a union has taken — taking a cut back takes back BOTH halves;
+        // the union keeps its other parts
+        let lent = includingLent
+            ? regions.filter { $0.parentID != id && !own.contains($0.id) && origin(of: $0.id) == id }.map(\.id) : []
+        for k in kids + lent where region(k) != nil { _ = dissolve(k, includingLent: includingLent) }
     }
 
     /// ★★ A PATTERN ON A UNION SPLITS THE WHOLE UNION (the Regions task ruling, 2026-10-08:

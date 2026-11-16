@@ -80,8 +80,13 @@ final class FlexibleSectorMigrationTests: XCTestCase {
     func testI2StripsMoveToFlexibleAndSurfaceIsAsBeforeTheCut() async throws {
         let l = try await makeLegacy()
         let r = try reload(l)
+        // ★ his 11-16 (send-used-pieces, released 77de729a): a job sends only the pieces it uses, so I2's strips, which no
+        // Topology group uses, never reached Topology's job even before the move; on the wire as it was (every piece sent) they did
+        XCTAssertEqual(try F.otherStages(r.app).topology, l.topology, "★ the strips nothing uses stay off Topology's job")
+        FaceRegionSend.controlSendEveryPiece = true
         let leaked = try F.otherStages(r.app)
-        XCTAssertNotEqual(leaked.topology, l.topology, "premise: I2's strips reach Topology's job")
+        FaceRegionSend.controlSendEveryPiece = false
+        XCTAssertNotEqual(leaked.topology, l.topology, "premise (the old wire): I2's strips reach Topology's job")
         let (_, m) = try await open(r)
         let p = r.project
         XCTAssertEqual(p.faceRegions.regions, l.preCut.regions, "★ the Surface stage's regions as before the cut")
@@ -108,6 +113,8 @@ final class FlexibleSectorMigrationTests: XCTestCase {
         let rc = try reload(l)
         _ = try await open(rc)
         XCTAssertEqual(rc.project.faceRegions, l.regions, "control: the Surface stage keeps I2's cuts")
+        FaceRegionSend.controlSendEveryPiece = true   // (the old wire: every piece sent)
+        defer { FaceRegionSend.controlSendEveryPiece = false }
         XCTAssertNotEqual(try F.otherStages(rc.app).topology, l.topology, "control: Topology still carries them")
     }
 

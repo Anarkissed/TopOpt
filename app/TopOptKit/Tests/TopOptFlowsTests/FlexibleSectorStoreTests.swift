@@ -104,6 +104,10 @@ final class FlexibleSectorStoreTests: XCTestCase {
         // ★ RED CONTROL: I2's route (round 6, before sections: whole faces) — the strips written into the Surface stage's regions
         FlexibleLatticeSections.controlWholeFace = true
         defer { FlexibleLatticeSections.controlWholeFace = false }
+        // (and every Surface region on the wire, as before 11-16: a job now sends only the pieces it uses, so strips nothing
+        // in Topology uses would never reach its job even on I2's route)
+        FaceRegionSend.controlSendEveryPiece = true
+        defer { FaceRegionSend.controlSendEveryPiece = false }
         let (r2, _, m2) = try await F.pad(self)
         let topo2 = try F.otherStages(r2.app).topology
         FlexibleSectors.controlSurfaceRoute = true

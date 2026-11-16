@@ -39,6 +39,8 @@ enum CutRailInfo {
 
     /// The open rail's name column: the longest name ("Pencil only") at the rail line's 12 pt, whole.
     static let nameWidth: CGFloat = 76
+    /// ★ his iPad 11-16: the open rail's corner — a squircle, not a pill
+    static let openCorner: CGFloat = 18
 }
 
 /// A rail tool's face: open, its name above the icon (one target with it); closed, the icon alone, as it was.
