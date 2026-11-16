@@ -214,6 +214,13 @@ public struct LatticeAreaGrading: Codable, Equatable, Sendable {
     /// (Skin), "rim" (Rim) or "none" — sent as `regions[].skin`; nil = the part's. A zone's Finish is the pair:
     /// None = none + none, Rim = none + rim, Skin = none + diagrid, Covered = shell + none.
     public var skin: String?
+    /// ★ Install 2: this area's own Manual controls (LatticeSettings' of the same names); nil = the part's.
+    public var strutFromMM: Double? = nil, strutToMM: Double? = nil
+    public var cellsAcrossMin: Int? = nil
+    public var neverSkipCellSize: Bool? = nil
+    public var response: Double? = nil, stressTargetMPa: Double? = nil
+    public var skinBarWidthMM: Double? = nil, skinReachCells: Double? = nil
+    public var rimWidthMM: Double? = nil
     public init(gradingMode: LatticeGradingMode? = nil, shapeFitBandMM: Double? = nil, shapeGradeStrength: Double? = nil,
                 outerFinish: String? = nil, skin: String? = nil) {
         self.gradingMode = gradingMode; self.shapeFitBandMM = shapeFitBandMM; self.shapeGradeStrength = shapeGradeStrength
@@ -221,6 +228,8 @@ public struct LatticeAreaGrading: Codable, Equatable, Sendable {
     }
     public var isEmpty: Bool {
         gradingMode == nil && shapeFitBandMM == nil && shapeGradeStrength == nil && outerFinish == nil && skin == nil
+            && strutFromMM == nil && strutToMM == nil && cellsAcrossMin == nil && neverSkipCellSize == nil && response == nil
+            && stressTargetMPa == nil && skinBarWidthMM == nil && skinReachCells == nil && rimWidthMM == nil
     }
 
     /// ★ RELEASE (4): a zone's Finish as the four the page offers, from its own pair or the part's.
@@ -2358,6 +2367,24 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// no grade changes. Per part, Aesthetic only (Structural keeps cells fitted to walls and the app sends false). Not
     /// written while off, so older bytes are unchanged.
     public var letWallsCutCells: Bool = false
+    /// ★ INSTALL 2, THE MANUAL CONTROLS (00-proposal.md, "Manual controls for engineers — DECIDED"; his 11-14 pick 1, 2, 4,
+    /// 5, 6, 7, 8). Each nil (or off) is Auto: the engine chooses, as before. None is written while Auto, so older bytes are
+    /// unchanged. Read by the new engine only. An area's own (LatticeAreaGrading) wins over these on its regions.
+    /// 1 — the thinnest and the thickest strut in mm, under By stress (Auto: Grade to and Grade from).
+    public var strutFromMM: Double? = nil
+    public var strutToMM: Double? = nil
+    /// 2 — cells across a wall, at least (Auto: Structural five; Aesthetic two, or one with Allow single-cell members).
+    public var cellsAcrossMin: Int? = nil
+    /// 4 — never skip a cell size: neighbours differ by one step at most (Default Grade only; core's max_step 2).
+    public var neverSkipCellSize: Bool = false
+    /// 5 — the stress the lattice is sized to, MPa (Auto: Structural, the printed yield over his Safety margin; Aesthetic,
+    /// the part's own). The response is `demandExponent`.
+    public var stressTargetMPa: Double? = nil
+    /// 7 — the skin's bars: width in mm and reach in cells (Auto: two line widths, 1.2 cells).
+    public var skinBarWidthMM: Double? = nil
+    public var skinReachCells: Double? = nil
+    /// 8 — the rim's width in mm (Auto: two line widths).
+    public var rimWidthMM: Double? = nil
     /// ★★★ ALLOW QUILT (his ruling, 2026-09-12). Octet only. Off: every density on this
     /// project — simulated, automatic, uniform, per-region — is held under
     /// `LatticeType.aestheticDensityCeiling` (strut = 0.20 of the cell, windows half
@@ -2420,11 +2447,11 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             for g in areas {
                 let mode = out[g]?.gradingMode ?? partMode, band = out[g]?.shapeFitBandMM ?? partBand
                 let strength = out[g]?.shapeGradeStrength ?? partStrength
-                let own = LatticeAreaGrading(gradingMode: mode != leadMode ? mode : nil,
-                                             shapeFitBandMM: band != leadBand ? band : nil,
-                                             shapeGradeStrength: strength != leadStrength ? strength : nil,
-                                             outerFinish: out[g]?.outerFinish,   // ★ a finish is the area's, never the lead's
-                                             skin: out[g]?.skin)
+                // ★ a finish and (Install 2) the Manual controls are the area's, never the lead's
+                var own = out[g] ?? LatticeAreaGrading()
+                own.gradingMode = mode != leadMode ? mode : nil
+                own.shapeFitBandMM = band != leadBand ? band : nil
+                own.shapeGradeStrength = strength != leadStrength ? strength : nil
                 if !own.isEmpty { lead[g] = own }
             }
             gradingMode = leadMode
@@ -2653,6 +2680,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // sub-floor retention (task 2026-08-05-lattice-retention-app-control)
         case retainSubfloorInUnloadedRegions, subfloorStressFraction, singleCellMembers, smallCellsInThinWalls, letWallsCutCells
         case allowQuilt
+        // ★ Install 2: the Manual controls (none written while Auto)
+        case strutFromMM, strutToMM, cellsAcrossMin, neverSkipCellSize, stressTargetMPa, skinBarWidthMM, skinReachCells
+        case rimWidthMM, demandExponent
         case subfloorPerRegion, reportRegionCells
         // the enclosed-void rule's OFF control
         // (task 2026-08-06-arm-projection-and-void-check)
@@ -2816,6 +2846,16 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         singleCellMembers = try c.decodeIfPresent(Bool.self, forKey: .singleCellMembers) ?? false
         smallCellsInThinWalls = try c.decodeIfPresent(Bool.self, forKey: .smallCellsInThinWalls) ?? false
         letWallsCutCells = try c.decodeIfPresent(Bool.self, forKey: .letWallsCutCells) ?? false
+        // ★ Install 2: the Manual controls; absent ⇒ Auto
+        strutFromMM = try c.decodeIfPresent(Double.self, forKey: .strutFromMM)
+        strutToMM = try c.decodeIfPresent(Double.self, forKey: .strutToMM)
+        cellsAcrossMin = try c.decodeIfPresent(Int.self, forKey: .cellsAcrossMin)
+        neverSkipCellSize = try c.decodeIfPresent(Bool.self, forKey: .neverSkipCellSize) ?? false
+        stressTargetMPa = try c.decodeIfPresent(Double.self, forKey: .stressTargetMPa)
+        skinBarWidthMM = try c.decodeIfPresent(Double.self, forKey: .skinBarWidthMM)
+        skinReachCells = try c.decodeIfPresent(Double.self, forKey: .skinReachCells)
+        rimWidthMM = try c.decodeIfPresent(Double.self, forKey: .rimWidthMM)
+        demandExponent = try c.decodeIfPresent(Double.self, forKey: .demandExponent) ?? 1
         // Absent from every older snapshot ⇒ off ⇒ the ceiling holds, as it should.
         allowQuilt = try c.decodeIfPresent(Bool.self, forKey: .allowQuilt) ?? false
         reportRegionCells = try c.decodeIfPresent(Bool.self, forKey: .reportRegionCells) ?? false
@@ -2923,6 +2963,16 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(singleCellMembers, forKey: .singleCellMembers)
         if smallCellsInThinWalls { try c.encode(true, forKey: .smallCellsInThinWalls) }   // ★ 11-13: off is not written
         if letWallsCutCells { try c.encode(true, forKey: .letWallsCutCells) }             // ★ 11-14: off is not written
+        // ★ Install 2: the Manual controls, only where set
+        try c.encodeIfPresent(strutFromMM, forKey: .strutFromMM)
+        try c.encodeIfPresent(strutToMM, forKey: .strutToMM)
+        try c.encodeIfPresent(cellsAcrossMin, forKey: .cellsAcrossMin)
+        if neverSkipCellSize { try c.encode(true, forKey: .neverSkipCellSize) }
+        try c.encodeIfPresent(stressTargetMPa, forKey: .stressTargetMPa)
+        try c.encodeIfPresent(skinBarWidthMM, forKey: .skinBarWidthMM)
+        try c.encodeIfPresent(skinReachCells, forKey: .skinReachCells)
+        try c.encodeIfPresent(rimWidthMM, forKey: .rimWidthMM)
+        if demandExponent != 1 { try c.encode(demandExponent, forKey: .demandExponent) }
         try c.encode(allowQuilt, forKey: .allowQuilt)
         // encodeIfPresent: "the user has not moved it" must round-trip as ABSENT,
         // not as core's number written into the project — the whole point of the

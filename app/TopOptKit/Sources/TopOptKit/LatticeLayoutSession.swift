@@ -22,14 +22,95 @@ public final class LatticeLayoutSession: @unchecked Sendable {
     /// How a bar's end finishes (core's Bar::End).
     public enum End: UInt8, Sendable { case node = 0, solid, surface, loose, joined }
 
+    /// One half-space of an Edit faces cut (core's FaceCut, rule D22): a point p is kept when (p - point) . normal >= 0, or
+    /// > 0 when `strict`.
+    public struct Cut: Sendable, Equatable, Codable {
+        public var point: SIMD3<Double>
+        public var normal: SIMD3<Double>
+        public var strict: Bool
+        public init(point: SIMD3<Double>, normal: SIMD3<Double>, strict: Bool = false) {
+            self.point = point; self.normal = normal; self.strict = strict
+        }
+    }
+
+    /// A piece of the model's faces as Edit faces cut it (core's FacePiece): its faces' surface where every cut holds.
+    public struct Piece: Sendable, Equatable {
+        public var faces: [Int32]
+        public var cuts: [Cut]
+        public init(faces: [Int32], cuts: [Cut]) { self.faces = faces; self.cuts = cuts }
+    }
+
+    /// An area's own cells and struts (core's AreaOwn, C23 / R19): nil = the part's. `algorithm` is core's id.
+    public struct AreaOwn: Sendable, Equatable {
+        public var algorithm: String?
+        public var cellMM: Double?, cellMaxMM: Double?, cellMinMM: Double?
+        public var minCellsAcross: Int32?
+        public var gradeToShape: Bool?
+        public var bandMM: Double?, bandCellMM: Double?
+        public var cellsByStress: Bool?
+        public var byStress: Bool?
+        public var dial: Double?, dialLight: Double?, dialHeavy: Double?
+        public var widthMM: Double?, widthLightMM: Double?, widthHeavyMM: Double?
+        public var strength: Double?, response: Double?, referenceMPa: Double?, maxStep: Double?
+        public init() {}
+        public var any: Bool { self != AreaOwn() }
+        /// The bridge's 20 numbers (LatticeLayoutBridge.hpp's order), NaN where not stated.
+        var wire: [Double] {
+            func d(_ v: Double?) -> Double { v ?? .nan }
+            func b(_ v: Bool?) -> Double { v.map { $0 ? 1 : 0 } ?? .nan }
+            let alg: Double = algorithm.map { $0 == "uniform" ? 0 : $0 == "stepped" ? 2 : 1 } ?? .nan
+            return [alg, d(cellMM), d(cellMaxMM), d(cellMinMM), minCellsAcross.map(Double.init) ?? .nan, b(gradeToShape),
+                    d(bandMM), d(bandCellMM), b(cellsByStress), b(byStress), d(dial), d(dialLight), d(dialHeavy), d(widthMM),
+                    d(widthLightMM), d(widthHeavyMM), d(strength), d(response), d(referenceMPa), d(maxStep)]
+        }
+    }
+
+    /// An area's own Finish (core's S13): nil = the part's. Rim / cover: 0 none, < 0 two line widths, > 0 that width.
+    public struct RegionFinish: Sendable, Equatable {
+        public var rimMM: Double?, coverMM: Double?
+        public var skin: Bool?
+        public var skinWidthMM: Double?, skinReachCells: Double?
+        public init() {}
+        public var any: Bool { self != RegionFinish() }
+        var wire: [Double] {
+            [rimMM ?? .nan, coverMM ?? .nan, skin.map { $0 ? 1 : 0 } ?? .nan, skinWidthMM ?? .nan, skinReachCells ?? .nan]
+        }
+    }
+
+    /// A zone in place of a region's faces (core's Zone, D21), in the part's own coordinates, mm. A box: three unit axes at
+    /// right angles and three half sizes. A cylinder: its unit axis is `axes[2]`, its radius `half.x`, its half length `half.z`.
+    public struct Zone: Sendable, Equatable {
+        public enum Kind: Sendable, Equatable { case box, cylinder }
+        public var kind: Kind
+        public var centre: SIMD3<Double>
+        public var axes: [SIMD3<Double>]
+        public var half: SIMD3<Double>
+        public init(kind: Kind, centre: SIMD3<Double>, axes: [SIMD3<Double>], half: SIMD3<Double>) {
+            self.kind = kind; self.centre = centre; self.axes = axes; self.half = half
+        }
+        var wire: [Double] {
+            let a = axes + Array(repeating: SIMD3<Double>(0, 0, 0), count: max(0, 3 - axes.count))
+            return [kind == .box ? 1 : 2, centre.x, centre.y, centre.z] + a.prefix(3).flatMap { [$0.x, $0.y, $0.z] }
+                + [half.x, half.y, half.z]
+        }
+    }
+
     public struct Region: Sendable, Equatable {
         public var id: Int32            // > 0
         public var noLattice: Bool
         public var faces: [Int32]       // the model's own face numbers (the app's FaceIDs)
         public var depthMM: Double
         public var expandMM: Double
-        public init(id: Int32, noLattice: Bool = false, faces: [Int32], depthMM: Double, expandMM: Double = 0) {
+        /// ★ his ask 11-14 (D22): the cut pieces this region is, in place of whole faces; empty = `faces` as they are.
+        public var pieces: [Piece] = []
+        /// Install 2: the area's own cells and struts, its own Finish, and a zone in place of faces.
+        public var own = AreaOwn()
+        public var finish = RegionFinish()
+        public var zone: Zone?
+        public init(id: Int32, noLattice: Bool = false, faces: [Int32], depthMM: Double, expandMM: Double = 0,
+                    pieces: [Piece] = []) {
             self.id = id; self.noLattice = noLattice; self.faces = faces; self.depthMM = depthMM; self.expandMM = expandMM
+            self.pieces = pieces
         }
     }
 
@@ -37,7 +118,11 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         public var id: Int32
         public var faces: [Int32]
         public var depthMM: Double      // 0 = two line widths
-        public init(id: Int32, faces: [Int32], depthMM: Double = 0) { self.id = id; self.faces = faces; self.depthMM = depthMM }
+        /// ★ his ask 11-14 (D22): the cut pieces under this skin, in place of whole faces; empty = `faces` as they are.
+        public var pieces: [Piece] = []
+        public init(id: Int32, faces: [Int32], depthMM: Double = 0, pieces: [Piece] = []) {
+            self.id = id; self.faces = faces; self.depthMM = depthMM; self.pieces = pieces
+        }
     }
 
     /// Core's settings, one for one (LatticeLayoutBridge.hpp says what each does).
@@ -73,6 +158,16 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         public var dropLoose = true
         public var smallCellsInThinWalls = false   // his per-part choice (11-13)
         public var oneGrid = false                 // "Let walls cut cells" (11-14; Aesthetic only, the app's to enforce)
+        // Install 2: By stress (the session's stress result, `setDemand`), cell size by stress, the stress grade, the size step
+        public var byStress = false
+        public var dialLight = 0.01               // "Grade to"
+        public var dialHeavy = 1.0                // "Grade from"
+        public var widthLightMM = 0.0, widthHeavyMM = 0.0
+        public var cellsByStress = false
+        public var referenceMPa = 0.0             // 0 = the part's own (the percentile)
+        public var percentile = 0.95
+        public var response = 1.0
+        public var maxStep = 0.0                  // his switch "Never skip a cell size": 2 on Default Grade
         public init() {}
         public static func == (a: Settings, b: Settings) -> Bool {
             a.allLattice == b.allLattice && a.beadMM == b.beadMM && a.minStrutLines == b.minStrutLines && a.minWallMM == b.minWallMM
@@ -85,6 +180,10 @@ public final class LatticeLayoutSession: @unchecked Sendable {
                 && a.joinLoose == b.joinLoose && a.skin == b.skin && a.skinWidthMM == b.skinWidthMM
                 && a.skinReachCells == b.skinReachCells && a.dropLoose == b.dropLoose
                 && a.smallCellsInThinWalls == b.smallCellsInThinWalls && a.oneGrid == b.oneGrid
+                && a.byStress == b.byStress && a.dialLight == b.dialLight && a.dialHeavy == b.dialHeavy
+                && a.widthLightMM == b.widthLightMM && a.widthHeavyMM == b.widthHeavyMM && a.cellsByStress == b.cellsByStress
+                && a.referenceMPa == b.referenceMPa && a.percentile == b.percentile && a.response == b.response
+                && a.maxStep == b.maxStep
         }
     }
 
@@ -110,6 +209,13 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         public var bedContactMM2: Double?
         public var midairStarts: Int?
         public var readAgain = false
+        // Install 2: By stress and the cells (LatticeLayoutBridge.hpp)
+        public var noStress = false
+        public var referenceMPa = 0.0, highestMPa = 0.0
+        public var atLight = 0, atHeavy = 0
+        public var cellsByStress = false, cellsNoStress = false
+        public var stressReferenceMPa = 0.0, stepHeldAt = 0.0
+        public var thinSolid = 0
         public var msRead = 0.0, msCells = 0.0, msBars = 0.0, msBridge = 0.0
         public var barCount: Int { bars.count / 7 }
     }
@@ -200,6 +306,25 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         }
     }
 
+    /// The stress result a layout grades by (core's DemandField): von Mises MPa, x fastest, on a grid whose LOW CORNER is
+    /// `origin`. Kept by the session until set again (one pointer between lays: core keeps the part's own reference by
+    /// it), so set it once per field, never per lay. nil clears it (no stress yet).
+    public func setDemand(mpa: [Float]?, nx: Int, ny: Int, nz: Int, origin: SIMD3<Double>, spacingMM: Double) async throws {
+        let sid = id
+        try await worker.run {
+            var d = topoptbridge.LatticeLayoutDemand()
+            if let mpa {
+                d.mpa.reserve(mpa.count)
+                for v in mpa { d.mpa.push_back(v) }
+                d.origin_x = origin.x; d.origin_y = origin.y; d.origin_z = origin.z; d.spacing = spacingMM
+                d.nx = Int32(nx); d.ny = Int32(ny); d.nz = Int32(nz)
+            }
+            var err = topoptbridge.BridgeError()
+            topoptbridge.lattice_layout_set_demand(sid, d, &err)
+            if !err.ok { throw TopOptError(message: String(err.message)) }
+        }
+    }
+
     /// Every layout running or waiting comes back cancelled.
     public func cancel() {
         lock.withLock { generation &+= 1 }
@@ -242,6 +367,37 @@ public final class LatticeLayoutSession: @unchecked Sendable {
             o.protect_face_counts.push_back(Int32(p.faces.count))
             for f in p.faces { o.protect_faces.push_back(f) }
         }
+        // D22: the cut pieces, the regions' first and then the skins' (the counts sent only when some piece exists)
+        if s.regions.contains(where: { !$0.pieces.isEmpty }) || s.protect.contains(where: { !$0.pieces.isEmpty }) {
+            for r in s.regions { o.region_piece_counts.push_back(Int32(r.pieces.count)) }
+            for p in s.protect { o.protect_piece_counts.push_back(Int32(p.pieces.count)) }
+            for piece in s.regions.flatMap(\.pieces) + s.protect.flatMap(\.pieces) {
+                o.piece_face_counts.push_back(Int32(piece.faces.count))
+                for f in piece.faces { o.piece_faces.push_back(f) }
+                o.piece_cut_counts.push_back(Int32(piece.cuts.count))
+                for c in piece.cuts {
+                    for v in [c.point.x, c.point.y, c.point.z, c.normal.x, c.normal.y, c.normal.z, c.strict ? 1 : 0] {
+                        o.piece_cuts.push_back(v)
+                    }
+                }
+            }
+        }
+        // Install 2: an area's own settings, its Finish, zones (each list only when some region states one)
+        if s.regions.contains(where: { $0.own.any }) { for r in s.regions { for v in r.own.wire { o.region_own.push_back(v) } } }
+        if s.regions.contains(where: { $0.finish.any }) { for r in s.regions { for v in r.finish.wire { o.region_finish.push_back(v) } } }
+        if s.regions.contains(where: { $0.zone != nil }) {
+            for r in s.regions { for v in r.zone?.wire ?? Array(repeating: 0, count: 16) { o.region_zone.push_back(v) } }
+        }
+        o.by_stress = s.byStress
+        o.dial_light = s.dialLight
+        o.dial_heavy = s.dialHeavy
+        o.width_light_mm = s.widthLightMM
+        o.width_heavy_mm = s.widthHeavyMM
+        o.cells_by_stress = s.cellsByStress
+        o.reference_mpa = s.referenceMPa
+        o.percentile = s.percentile
+        o.response = s.response
+        o.max_step = s.maxStep
         o.topology = std.string(s.topology)
         o.algorithm = std.string(s.algorithm)
         o.cell_mm = s.cellMM
@@ -289,6 +445,12 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         o.bedContactMM2 = r.bed_contact_mm2 >= 0 ? r.bed_contact_mm2 : nil
         o.midairStarts = r.midair_starts >= 0 ? Int(r.midair_starts) : nil
         o.readAgain = r.read_again
+        o.noStress = r.no_stress
+        o.referenceMPa = r.reference_mpa; o.highestMPa = r.highest_mpa
+        o.atLight = Int(r.at_light); o.atHeavy = Int(r.at_heavy)
+        o.cellsByStress = r.cells_by_stress; o.cellsNoStress = r.cells_no_stress
+        o.stressReferenceMPa = r.stress_reference_mpa; o.stepHeldAt = r.step_held_at
+        o.thinSolid = Int(r.thin_solid)
         o.msRead = r.ms_read; o.msCells = r.ms_cells; o.msBars = r.ms_bars; o.msBridge = r.ms_bridge
         return o
     }

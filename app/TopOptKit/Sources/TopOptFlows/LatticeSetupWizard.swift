@@ -2400,6 +2400,9 @@ public struct LatticeSetupWizard: View {
     }
     /// ★ E3: on an area's tab, which rows are its own (it replaces "These settings apply to every region today.")
     static let latticeAreaOwnLine = "The grade, its band and the finish are this area's; the other rows are the whole part's."
+    /// ★ Install 2: the Manual controls' headers — the part's (Part tab, beside areas) and an area's own (its tab)
+    static let manualPartHeader = "Whole part"
+    static let manualAreaHeader = "This area's own"
     /// ★ The reviewer's words (ruling (2), 2026-11-06), under the shape grade until core's band is real.
     static let shapeGradeRunLine = "The run's shape grade is a solid outline; the band and Strength are preview only."
     /// Where an area's grade differs from the part's: the preview draws one grade, the run grades this area its own way.
@@ -2432,10 +2435,11 @@ public struct LatticeSetupWizard: View {
         guard let part = latticePartGrade, let c = cellsPage, let gid = latticeAreaGroupID(c) else { return }
         let mode = part.gradingMode ?? model.gradingMode, band = part.shapeFitBandMM ?? model.shapeFitBandMM
         let strength = part.shapeGradeStrength ?? model.shapeFitGradeStrength
-        let own = LatticeAreaGrading(gradingMode: model.gradingMode != mode ? model.gradingMode : nil,
-                                     shapeFitBandMM: model.shapeFitBandMM != band ? model.shapeFitBandMM : nil,
-                                     shapeGradeStrength: model.shapeFitGradeStrength != strength ? model.shapeFitGradeStrength : nil,
-                                     outerFinish: latticeAreaEdits?[gid]?.outerFinish)
+        // ★ Install 2: what the area holds of its own (its Finish pair, its Manual controls) stays; its grade is set again
+        var own = latticeAreaEdits?[gid] ?? LatticeAreaGrading()
+        own.gradingMode = model.gradingMode != mode ? model.gradingMode : nil
+        own.shapeFitBandMM = model.shapeFitBandMM != band ? model.shapeFitBandMM : nil
+        own.shapeGradeStrength = model.shapeFitGradeStrength != strength ? model.shapeFitGradeStrength : nil
         latticeAreaEdits?[gid] = own.isEmpty ? nil : own
         model.gradingMode = mode
         model.shapeFitBandMM = band
@@ -2669,6 +2673,7 @@ public struct LatticeSetupWizard: View {
                 // ★ B7 slice 2: the part's finish is set here once an area can have its own (Rim / Skin stay the part's)
                 if !organic, TopOptKit.regionOuterFinishWired { AnyView(settingControl(.finish, titled: true)) }
                 zoneFinishPreviewNote
+                if latticeManual, !organic { manualControlRows(zone: nil, header: Self.manualPartHeader) }   // ★ Install 2
             }
         } else if let area {
             Text(area.uppercased()).font(.system(size: 10.5, weight: .bold)).tracking(0.8)
@@ -2794,6 +2799,7 @@ public struct LatticeSetupWizard: View {
             }
             if structural { AnyView(subfloorRetentionSwitch) }
             if !organic { AnyView(cellsAddedRows) }
+            if !organic { manualControlRows(zone: zone, header: zone == nil ? nil : Self.manualAreaHeader) }   // ★ Install 2
         }
         })
     }
@@ -2921,7 +2927,8 @@ public struct LatticeSetupWizard: View {
                             Text("density").dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
                         }
                     case .strength:
-                        shortNote(LatticeCellsRow.strengthLine)
+                        shortNote(UserDefaults.standard.bool(forKey: AppSettings.newEngineKey)
+                                  ? LatticeCellsRow.strengthNewEngineLine : LatticeCellsRow.strengthLine)
                     case .along, .ties, .overhangs:
                         EmptyView()   // ★ B7 slice 2: off the page (`LatticeCellsRow.rows` never lists them)
                     }
@@ -3099,3 +3106,200 @@ struct WizardPanelRowsHeightKey: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
+// MARK: ★ INSTALL 2 — THE MANUAL CONTROLS (00-proposal.md 1, 2, 4, 5, 7, 8; his pick 11-14)
+//
+// "Auto is for makers. Manual is for engineers." Each row is a number the new engine already chooses: Auto (an area's tab:
+// "Part's") leaves it to the engine (or the part), Set shows it and lets it be typed or scrubbed. On the Part tab a row is the
+// part's (LatticeSettings), on an area's tab the area's own (LatticeAreaGrading), sent on its regions only. Which rows show is
+// LatticeManualControl.shown — each only where the engine reads it.
+extension LatticeSetupWizard {
+
+    /// The settings the rows read: the page's, with the open area's grade on them.
+    private var manualSettings: LatticeSettings { model.applied(to: project.lattice) }
+
+    private var manualBeadMM: Double {
+        let b = project.printParams.strutLineWidthMM
+        return b > 0 ? b : 0.45
+    }
+
+    private func manualArea(_ gid: UUID) -> LatticeAreaGrading {
+        (latticeAreaEdits ?? project.lattice.areaGrading)[gid] ?? LatticeAreaGrading()
+    }
+
+    private func setManualArea(_ gid: UUID, _ edit: (inout LatticeAreaGrading) -> Void) {
+        if latticeAreaEdits == nil { latticeAreaEdits = project.lattice.areaGrading }
+        var g = latticeAreaEdits?[gid] ?? LatticeAreaGrading()
+        edit(&g)
+        latticeAreaEdits?[gid] = g.isEmpty ? nil : g
+        rebuild()
+    }
+
+    /// The rows for the Part tab (`zone` nil) or an area's tab.
+    func manualControlRows(zone gid: UUID?, header: String?) -> AnyView {
+        let l = manualSettings
+        let own = gid.map(manualArea)
+        let partOuter = l.boundary.zoneFinishWord
+        let areaFinish: LatticeAreaGrading.ZoneFinish? = own.flatMap { a in
+            guard a.outerFinish != nil || a.skin != nil, partOuter != nil || l.boundary == .fullSkin else { return nil }
+            return a.zoneFinish(partOuter: partOuter, partSkin: l.boundary.jobSkinValue)
+        }
+        let rows = LatticeManualControl.shown(l, areaFinish: areaFinish)
+        return AnyView(VStack(alignment: .leading, spacing: DS.Space.s) {
+            if let header, !rows.isEmpty {
+                Text(header.uppercased()).font(.system(size: 10.5, weight: .bold)).tracking(0.8)
+                    .foregroundStyle(DS.Color.accent.color)
+                    .padding(.top, 4)
+                    .latticeID("lattice-manual-header")
+            }
+            ForEach(rows, id: \.rawValue) { row in manualRow(row, l: l, zone: gid, own: own) }
+        })
+    }
+
+    /// [Auto │ Set] (an area: [Part's │ Set]) and, set, the number to scrub or type.
+    private func manualNumber(_ id: String, value: Double?, seed: Double, unit: String, step: Double,
+                              range: ClosedRange<Double>, area: Bool, set: @escaping (Double?) -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            segmentRow([area ? "Part's" : "Auto", "Set"], selected: value == nil ? 0 : 1) { i in
+                set(i == 0 ? nil : Swift.min(range.upperBound, Swift.max(range.lowerBound, value ?? seed)))
+            }
+            .latticeID("lattice-manual-\(id)")
+            if let v = value {
+                scrubRow("manual-\(id)", value: v, unit: unit, step: step, range: range) { set($0) }
+            }
+        }
+    }
+
+    private func manualRow(_ row: LatticeManualControl, l: LatticeSettings, zone gid: UUID?, own: LatticeAreaGrading?) -> AnyView {
+        let area = gid != nil
+        let bead = manualBeadMM
+        let floor = 2 * bead   // two lines: the thinnest strut that prints (the reviewer's ruling 11-12)
+        switch row {
+        case .strutWidth:
+            let from = area ? own?.strutFromMM : model.strutFromMM
+            let to = area ? own?.strutToMM : model.strutToMM
+            let hi = Swift.max(floor + 0.1, thicknessRangeMM.upperBound, 3 * floor)
+            func write(_ a: Double?, _ b: Double?) {
+                if let gid { setManualArea(gid) { $0.strutFromMM = a; $0.strutToMM = b } }
+                else { model.strutFromMM = a; model.strutToMM = b; rebuild() }
+            }
+            return AnyView(VStack(alignment: .leading, spacing: 5) {
+                sectionTitle("Strut width", info: "manual-strut-width",
+                             "The thinnest strut, where the stress is nothing, and the thickest, at the target stress, in mm. "
+                             + "Auto takes them from Grade to and Grade from. Tap Set, then drag or tap a number to type it.")
+                segmentRow([area ? "Part's" : "Auto", "Set"], selected: from != nil && to != nil ? 1 : 0) { i in
+                    if i == 0 { write(nil, nil); return }
+                    let a = Swift.min(hi, Swift.max(floor, from ?? model.strutFromMM ?? floor))
+                    write(a, Swift.min(hi, Swift.max(a, to ?? model.strutToMM ?? 2 * a)))
+                }
+                .latticeID("lattice-manual-strut-width")
+                if let a = from, let b = to {
+                    captionLine("From (no stress)", info: "manual-strut-from")
+                    scrubRow("manual-strut-from", value: a, unit: "mm", step: 0.02, range: floor...hi) { v in write(v, Swift.max(v, b)) }
+                    captionLine("To (at the target stress)", info: "manual-strut-to")
+                    scrubRow("manual-strut-to", value: b, unit: "mm", step: 0.02, range: floor...hi) { v in write(Swift.min(a, v), v) }
+                    captionLine("Two lines, \(mmText(floor)), is the thinnest strut that prints.", info: "manual-strut-floor")
+                } else {
+                    captionLine(area ? "As the whole part." : "From Grade to and Grade from.", info: "manual-strut-auto")
+                }
+            })
+        case .cellsAcross:
+            let v = area ? own?.cellsAcrossMin : model.cellsAcrossMin
+            let autoN = LatticeManualControl.autoCellsAcross(l)
+            let partN = model.cellsAcrossMin ?? autoN
+            func write(_ n: Int?) {
+                if let gid { setManualArea(gid) { $0.cellsAcrossMin = n } } else { model.cellsAcrossMin = n; rebuild() }
+            }
+            return AnyView(VStack(alignment: .leading, spacing: 5) {
+                sectionTitle("Cells across a wall", info: "manual-cells-across",
+                             "The fewest whole cells a wall must hold across its thickness to take lattice; a thinner wall "
+                             + "stays solid. Auto: \(autoN) here (Structural 5; Aesthetic 2, or 1 with Allow single-cell members).")
+                segmentRow([area ? "Part's" : "Auto"] + (1...6).map(String.init), selected: v.map { Swift.min(6, $0) } ?? 0) { i in
+                    write(i == 0 ? nil : i)
+                }
+                .latticeID("lattice-manual-cells-across")
+                if let n = v, let w = LatticeManualControl.cellsAcrossWarning(n, l) {
+                    shortNote(w, warning: true).latticeID("lattice-manual-cells-across-warning")
+                } else {
+                    captionLine(v.map { "At least \($0) across." } ?? (area ? "As the whole part: \(partN)." : "Auto: \(autoN) across."),
+                                info: "manual-cells-across-line")
+                }
+            })
+        case .neverSkip:
+            let on = area ? own?.neverSkipCellSize : model.neverSkipCellSize
+            return AnyView(VStack(alignment: .leading, spacing: 5) {
+                sectionTitle("Never skip a cell size", info: "manual-never-skip",
+                             "On: neighbouring cells differ by one size at most (a cell is half or double the next), so the "
+                             + "stiffness changes gently. Off: the size may jump where the shape or the stress asks.")
+                segmentRow(area ? ["Part's", "Off", "On"] : ["Off", "On"],
+                           selected: area ? (on.map { $0 ? 2 : 1 } ?? 0) : ((on ?? false) ? 1 : 0)) { i in
+                    if let gid { setManualArea(gid) { $0.neverSkipCellSize = i == 0 ? nil : i == 2 } }
+                    else { model.neverSkipCellSize = i == 1; rebuild() }
+                }
+                .latticeID("lattice-manual-never-skip")
+            })
+        case .response:
+            let v = area ? own?.response : model.demandExponent
+            func write(_ g: Double?) {
+                if let gid { setManualArea(gid) { $0.response = g } } else { model.demandExponent = g ?? 1; rebuild() }
+            }
+            return AnyView(VStack(alignment: .leading, spacing: 5) {
+                sectionTitle("Grade response", info: "manual-response",
+                             "How steeply the struts follow the stress. 1: in step with it. Under 1: they thicken sooner. "
+                             + "Over 1: only the highest stress thickens them. The stress is the quick check's, the worst at "
+                             + "each place of the loads switched on for this lattice.")
+                if area {
+                    manualNumber("response", value: v, seed: model.demandExponent, unit: "", step: 0.02, range: 0.25...4,
+                                 area: true, set: write)
+                } else {
+                    scrubRow("manual-response", value: model.demandExponent, unit: "", step: 0.02, range: 0.25...4) { write($0) }
+                }
+            })
+        case .target:
+            let v = area ? own?.stressTargetMPa : model.stressTargetMPa
+            let structural = (l.stageMode ?? .structural) == .structural
+            func write(_ t: Double?) {
+                if let gid { setManualArea(gid) { $0.stressTargetMPa = t } } else { model.stressTargetMPa = t; rebuild() }
+            }
+            return AnyView(VStack(alignment: .leading, spacing: 5) {
+                sectionTitle("Target stress", info: "manual-target",
+                             "The stress at which a strut reaches its thickest; under it the struts thin with the stress. "
+                             + "Auto: " + (structural ? "the printed strength over your Safety margin." : "the part's own stress."))
+                manualNumber("target", value: v, seed: model.stressTargetMPa ?? 10, unit: "MPa", step: 0.1, range: 0.1...500,
+                             area: area, set: write)
+                if v == nil {
+                    captionLine(area ? "As the whole part." : structural ? "Auto: printed strength over your Safety margin."
+                                                                         : "Auto: the part's own stress.",
+                                info: "manual-target-line")
+                }
+            })
+        case .skinBars:
+            let w = area ? own?.skinBarWidthMM : model.skinBarWidthMM
+            let k = area ? own?.skinReachCells : model.skinReachCells
+            return AnyView(VStack(alignment: .leading, spacing: 5) {
+                sectionTitle("Skin bars", info: "manual-skin-bars",
+                             "The skin's bars across the faces: their width in mm, and how far in they reach, in cells. "
+                             + "Auto: two lines wide, reaching 1.2 cells.")
+                captionLine("Width", info: "manual-skin-width")
+                manualNumber("skin-width", value: w, seed: model.skinBarWidthMM ?? floor, unit: "mm", step: 0.02,
+                             range: floor...Swift.max(floor + 0.1, 4 * floor), area: area) { v in
+                    if let gid { setManualArea(gid) { $0.skinBarWidthMM = v } } else { model.skinBarWidthMM = v; rebuild() }
+                }
+                captionLine("Reach", info: "manual-skin-reach")
+                manualNumber("skin-reach", value: k, seed: model.skinReachCells ?? 1.2, unit: "cells", step: 0.02,
+                             range: 0.5...3, area: area) { v in
+                    if let gid { setManualArea(gid) { $0.skinReachCells = v } } else { model.skinReachCells = v; rebuild() }
+                }
+            })
+        case .rimWidth:
+            let w = area ? own?.rimWidthMM : model.rimWidthMM
+            return AnyView(VStack(alignment: .leading, spacing: 5) {
+                sectionTitle("Rim width", info: "manual-rim-width",
+                             "The width of the rim bar round the lattice's open edges, in mm. Auto: two lines wide.")
+                manualNumber("rim-width", value: w, seed: model.rimWidthMM ?? floor, unit: "mm", step: 0.02,
+                             range: floor...Swift.max(floor + 0.1, 6 * floor), area: area) { v in
+                    if let gid { setManualArea(gid) { $0.rimWidthMM = v } } else { model.rimWidthMM = v; rebuild() }
+                }
+            })
+        }
+    }
+}

@@ -736,7 +736,7 @@ public final class ProjectModel: ObservableObject {
     /// load groups → their faces + model-frame force (kgf → N). The build direction
     /// (print up) is the negated gravity, or +Z if gravity is unset. Empty for an
     /// STL project (no face selection) — the run then falls back to self-weight.
-    public func loadCase(leavingOut: Set<UUID> = []) -> (anchorFaceIDs: [Int], loadGroups: [TopOptKit.LoadGroupSpec],
+    public func loadCase(leavingOut: Set<UUID> = [], scenario: UUID? = nil) -> (anchorFaceIDs: [Int], loadGroups: [TopOptKit.LoadGroupSpec],
                                buildDirection: SIMD3<Double>,
                                plateDirection: SIMD3<Double>,
                                anchorRegionIDs: [RegionID]) {
@@ -745,7 +745,7 @@ public final class ProjectModel: ObservableObject {
         var loads: [TopOptKit.LoadGroupSpec] = []
         // ★ LOAD SCENARIOS (overnight release 2026-10-26): with 2+ scenarios the top level mirrors Scenario 1 for
         // older readers (`scenarioWires` carries each one). With none, both filters pass everything.
-        let first = force.scenarioList[0].id
+        let first = scenario ?? force.scenarioList[0].id   // ★ Install 2 (control 6): one scenario's own load case
         for g in selection.groups where !leavingOut.contains(g.id) {   // ★ B6: a lattice job's switched-off groups
             let kind = force.kind(for: g.id)
             if kind.isAnchor, force.anchorIsOn(g.id, in: first) {

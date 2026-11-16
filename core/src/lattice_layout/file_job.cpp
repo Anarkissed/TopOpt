@@ -3,7 +3,11 @@
 #include "topopt/lattice_layout_file.hpp"
 
 #include <chrono>
+#include <cmath>
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
+#include <memory>
 #include <exception>
 #include <fstream>
 #include <sstream>
@@ -87,6 +91,88 @@ std::vector<std::vector<int>> unflatten(const std::vector<int>& counts, const st
   return out;
 }
 
+// D21: one region's zone, in place of its faces.
+//   {"kind": "box", "centre": [x,y,z], "axes": [[..],[..],[..]], "half_mm": [a,b,c]}
+//   {"kind": "cylinder", "centre": [x,y,z], "axis": [x,y,z], "radius_mm": r, "half_length_mm": h}
+// Numbers region_from_zone would refuse refuse the job here, with the reason.
+Vec3 vec3(const json::Value& o, const char* key, const std::string& where) {
+  const std::string at = where + "." + key;
+  const auto& a = json::as_array(json::require(o, key, where), at).arr;
+  if (a.size() != 3) json::fail(at, "must be three numbers");
+  return {json::as_number(a[0], at), json::as_number(a[1], at), json::as_number(a[2], at)};
+}
+Zone zone_from(const json::Value& v, const std::string& w) {
+  const json::Value& o = json::as_object(v, w);
+  Zone z;
+  const std::string kind = json::as_string(json::require(o, "kind", w), w + ".kind");
+  if (kind == "box") {
+    json::reject_unknown(o, {"kind", "centre", "axes", "half_mm"}, w);
+    z.kind = Zone::Kind::Box;
+    z.centre = vec3(o, "centre", w);
+    const std::string at = w + ".axes";
+    const auto& axes = json::as_array(json::require(o, "axes", w), at).arr;
+    if (axes.size() != 3) json::fail(at, "must be three axes");
+    for (int a = 0; a < 3; ++a) {
+      const auto& e = json::as_array(axes[static_cast<std::size_t>(a)], at).arr;
+      if (e.size() != 3) json::fail(at, "each axis must be three numbers");
+      z.axis[a] = {json::as_number(e[0], at), json::as_number(e[1], at), json::as_number(e[2], at)};
+    }
+    const Vec3 h = vec3(o, "half_mm", w);
+    z.half[0] = h.x; z.half[1] = h.y; z.half[2] = h.z;
+    bool ok = false;
+    (void)region_from_zone(z, 1, Role::Lattice, 0.0, &ok);
+    if (!ok) json::fail(w, "a box zone needs three half sizes above 0 and three unit axes at right angles");
+  } else if (kind == "cylinder") {
+    json::reject_unknown(o, {"kind", "centre", "axis", "radius_mm", "half_length_mm"}, w);
+    z.kind = Zone::Kind::Cylinder;
+    z.centre = vec3(o, "centre", w);
+    z.axis[2] = vec3(o, "axis", w);
+    z.half[0] = json::as_number(json::require(o, "radius_mm", w), w + ".radius_mm");
+    z.half[2] = json::as_number(json::require(o, "half_length_mm", w), w + ".half_length_mm");
+    bool ok = false;
+    (void)region_from_zone(z, 1, Role::Lattice, 0.0, &ok);
+    if (!ok) json::fail(w, "a cylinder zone needs a radius and a half length above 0 and a unit axis");
+  } else {
+    json::fail(w + ".kind", "unknown zone \"" + kind + "\" (box | cylinder)");
+  }
+  return z;
+}
+
+// D22: one region's or Protect skin's pieces, in place of its faces:
+//   [{"faces": [..], "cuts": [{"point": [x,y,z], "normal": [x,y,z], "strict": false}]}, ..]
+// A cut's normal of nothing is refused here; faces the part does not have are found later,
+// with every other face the job names (region_faces_missing, protect_faces_missing).
+std::vector<FacePiece> pieces_from(const json::Value& v, const std::string& w) {
+  std::vector<FacePiece> out;
+  const auto& list = json::as_array(v, w).arr;
+  for (std::size_t i = 0; i < list.size(); ++i) {
+    const std::string pw = w + "[" + std::to_string(i) + "]";
+    const json::Value& o = json::as_object(list[i], pw);
+    json::reject_unknown(o, {"faces", "cuts"}, pw);
+    FacePiece piece;
+    for (const json::Value& f : json::as_array(json::require(o, "faces", pw), pw + ".faces").arr)
+      piece.faces.push_back(json::as_int(f, pw + ".faces"));
+    if (const json::Value* cuts = json::find(o, "cuts")) {
+      const auto& cl = json::as_array(*cuts, pw + ".cuts").arr;
+      for (std::size_t k = 0; k < cl.size(); ++k) {
+        const std::string cw = pw + ".cuts[" + std::to_string(k) + "]";
+        const json::Value& c = json::as_object(cl[k], cw);
+        json::reject_unknown(c, {"point", "normal", "strict"}, cw);
+        FaceCut cut;
+        cut.point = vec3(c, "point", cw);
+        cut.normal = vec3(c, "normal", cw);
+        cut.strict = flag(c, "strict", false, cw);
+        const Vec3& n = cut.normal;
+        if (!(n.x * n.x + n.y * n.y + n.z * n.z > 0.0) || !std::isfinite(n.x * n.x + n.y * n.y + n.z * n.z))
+          json::fail(cw + ".normal", "a cut's normal must not be zero");
+        piece.cuts.push_back(cut);
+      }
+    }
+    out.push_back(std::move(piece));
+  }
+  return out;
+}
+
 Algorithm algorithm_from(const std::string& s, const std::string& where) {
   if (s == "uniform") return Algorithm::Uniform;
   if (s == "default_grade") return Algorithm::DefaultGrade;
@@ -95,18 +181,20 @@ Algorithm algorithm_from(const std::string& s, const std::string& where) {
 }
 
 // The bridge's LatticeLayoutSettings, key for key (lattice_layout_bridge.cpp, settings_from),
-// and two more that core's Settings has: small_cells_in_thin_walls and one_grid ("Let walls cut cells").
+// and more that core's Settings has: small_cells_in_thin_walls, one_grid ("Let walls cut cells") and
+// cells_by_stress (C22).
 Settings settings_from(const json::Value& in, const std::string& w) {
   json::reject_unknown(
       in,
       {"all_lattice", "bead_mm", "min_strut_lines", "min_wall_mm", "rim_mm", "cover_mm",
        "region_ids", "region_no_lattice", "region_depth_mm", "region_expand_mm",
-       "region_face_counts", "region_faces", "protect_ids", "protect_depth_mm",
-       "protect_face_counts", "protect_faces", "topology", "algorithm", "cell_mm", "cell_max_mm",
+       "region_face_counts", "region_faces", "region_zones", "region_finish", "region_pieces", "protect_ids", "protect_depth_mm",
+       "protect_face_counts", "protect_faces", "protect_pieces", "topology", "algorithm", "cell_mm", "cell_max_mm",
        "cell_min_mm", "min_cells_across", "grade_to_shape", "band_mm", "band_cell_mm",
        "per_region", "dial", "dial_region", "dial_value", "strut_width_mm", "allow_quilt",
-       "strength", "small_cells_in_thin_walls", "one_grid", "bars", "join_loose", "skin", "skin_width_mm",
-       "skin_reach_cells", "drop_loose"},
+       "strength", "small_cells_in_thin_walls", "one_grid", "cells_by_stress", "bars", "join_loose", "skin",
+       "skin_width_mm", "skin_reach_cells", "drop_loose", "by_stress", "dial_light", "dial_heavy", "width_light_mm",
+       "width_heavy_mm", "reference_mpa", "percentile", "response", "region_own", "max_step"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -126,6 +214,11 @@ Settings settings_from(const json::Value& in, const std::string& w) {
     json::fail(w, "the region lists (region_ids, region_no_lattice, region_depth_mm, "
                   "region_expand_mm, region_face_counts) are not all one length");
   const auto rf = unflatten(counts, wholes(in, "region_faces", w), w + ".region_faces");
+  // D21: per region, null (its faces) or its zone (and then no faces).
+  const json::Value* zones = json::find(in, "region_zones");
+  const std::string zat = w + ".region_zones";
+  if (zones && json::as_array(*zones, zat).arr.size() != nr)
+    json::fail(w, "region_zones is not as long as region_ids");
   for (std::size_t r = 0; r < nr; ++r) {
     Settings::RegionAsk a;
     a.id = ids[r];
@@ -133,7 +226,72 @@ Settings settings_from(const json::Value& in, const std::string& w) {
     a.faces = rf[r];
     a.depth_mm = depth[r];
     a.expand_mm = expand[r];
+    if (zones && !zones->arr[r].is_null()) {
+      a.zone = zone_from(zones->arr[r], zat);
+      if (!a.faces.empty()) json::fail(zat, "region " + std::to_string(a.id) + " has faces and a zone: one or the other");
+    }
     s.regions.push_back(std::move(a));
+  }
+  // D22: per region, null (its faces, or its zone) or its pieces; with pieces its faces are not read.
+  if (const json::Value* pieces = json::find(in, "region_pieces")) {
+    const std::string at = w + ".region_pieces";
+    const auto& list = json::as_array(*pieces, at).arr;
+    if (list.size() != nr) json::fail(w, "region_pieces is not as long as region_ids");
+    for (std::size_t r = 0; r < nr; ++r) {
+      if (list[r].is_null()) continue;
+      const std::string pw = at + "[" + std::to_string(r) + "]";
+      s.regions[r].pieces = pieces_from(list[r], pw);
+      if (s.regions[r].pieces.empty()) json::fail(pw, "a region's pieces, when given, must not be an empty list");
+      if (s.regions[r].zone.kind != Zone::Kind::None)
+        json::fail(pw, "region " + std::to_string(s.regions[r].id) + " has pieces and a zone: one or the other");
+    }
+  }
+  // C23, R19: per region, null (the part's settings in everything) or its own, under the part's own key names.
+  if (const json::Value* own = json::find(in, "region_own")) {
+    const std::string at = w + ".region_own";
+    const auto& list = json::as_array(*own, at).arr;
+    if (list.size() != nr) json::fail(w, "region_own is not as long as region_ids");
+    for (std::size_t r = 0; r < nr; ++r) {
+      if (list[r].is_null()) continue;
+      const std::string ow = at + "[" + std::to_string(r) + "]";
+      const json::Value& o = json::as_object(list[r], ow);
+      json::reject_unknown(o,
+                           {"algorithm", "cell_mm", "cell_max_mm", "cell_min_mm", "min_cells_across", "grade_to_shape",
+                            "band_mm", "band_cell_mm", "cells_by_stress", "by_stress", "dial", "dial_light",
+                            "dial_heavy", "strut_width_mm", "width_light_mm", "width_heavy_mm", "strength", "response",
+                            "reference_mpa", "max_step"},
+                           ow);
+      AreaOwn& a = s.regions[r].own;
+      if (json::find(o, "algorithm")) a.algorithm = algorithm_from(text(o, "algorithm", "", ow), ow + ".algorithm");
+      const auto mm = [&](const char* key, std::optional<double>& v) { if (json::find(o, key)) v = num(o, key, 0.0, ow); };
+      const auto yes = [&](const char* key, std::optional<bool>& v) { if (json::find(o, key)) v = flag(o, key, false, ow); };
+      mm("cell_mm", a.cell_mm); mm("cell_max_mm", a.cell_max_mm); mm("cell_min_mm", a.cell_min_mm);
+      if (json::find(o, "min_cells_across")) a.min_cells_across = whole(o, "min_cells_across", 1, ow);
+      yes("grade_to_shape", a.grade_to_shape); mm("band_mm", a.band_mm); mm("band_cell_mm", a.band_cell_mm);
+      yes("cells_by_stress", a.cells_by_stress); yes("by_stress", a.by_stress);
+      mm("dial", a.dial); mm("dial_light", a.dial_light); mm("dial_heavy", a.dial_heavy);
+      mm("strut_width_mm", a.width_mm); mm("width_light_mm", a.width_light_mm); mm("width_heavy_mm", a.width_heavy_mm);
+      mm("strength", a.strength); mm("response", a.response); mm("reference_mpa", a.reference_mpa);
+      mm("max_step", a.max_step);   // C24
+    }
+  }
+  // S13: per region, null (the part's Finish) or its own: any of rim_mm, cover_mm, skin,
+  // skin_width_mm, skin_reach_cells; what it leaves out is the part's.
+  if (const json::Value* fin = json::find(in, "region_finish")) {
+    const std::string at = w + ".region_finish";
+    const auto& list = json::as_array(*fin, at).arr;
+    if (list.size() != nr) json::fail(w, "region_finish is not as long as region_ids");
+    for (std::size_t r = 0; r < nr; ++r) {
+      if (list[r].is_null()) continue;
+      const json::Value& o = json::as_object(list[r], at);
+      json::reject_unknown(o, {"rim_mm", "cover_mm", "skin", "skin_width_mm", "skin_reach_cells"}, at);
+      Settings::RegionAsk& a = s.regions[r];
+      if (json::find(o, "rim_mm")) a.rim_mm = num(o, "rim_mm", 0.0, at);
+      if (json::find(o, "cover_mm")) a.cover_mm = num(o, "cover_mm", 0.0, at);
+      if (json::find(o, "skin")) a.skin = flag(o, "skin", false, at);
+      if (json::find(o, "skin_width_mm")) a.skin_width_mm = num(o, "skin_width_mm", 0.0, at);
+      if (json::find(o, "skin_reach_cells")) a.skin_reach_cells = num(o, "skin_reach_cells", 0.0, at);
+    }
   }
   const std::vector<int> pids = wholes(in, "protect_ids", w);
   const std::vector<double> pdepth = nums(in, "protect_depth_mm", w);
@@ -143,7 +301,19 @@ Settings settings_from(const json::Value& in, const std::string& w) {
     json::fail(w, "the Protect skin lists (protect_ids, protect_depth_mm, protect_face_counts) "
                   "are not all one length");
   const auto pf = unflatten(pcounts, wholes(in, "protect_faces", w), w + ".protect_faces");
-  for (std::size_t p = 0; p < np; ++p) s.protect.push_back({pids[p], pf[p], pdepth[p]});
+  for (std::size_t p = 0; p < np; ++p) s.protect.push_back({pids[p], pf[p], pdepth[p], {}});
+  // D22: per Protect skin, null (its faces) or its pieces; with pieces its faces are not read.
+  if (const json::Value* pieces = json::find(in, "protect_pieces")) {
+    const std::string at = w + ".protect_pieces";
+    const auto& list = json::as_array(*pieces, at).arr;
+    if (list.size() != np) json::fail(w, "protect_pieces is not as long as protect_ids");
+    for (std::size_t p = 0; p < np; ++p) {
+      if (list[p].is_null()) continue;
+      const std::string pw = at + "[" + std::to_string(p) + "]";
+      s.protect[p].pieces = pieces_from(list[p], pw);
+      if (s.protect[p].pieces.empty()) json::fail(pw, "a Protect skin's pieces, when given, must not be an empty list");
+    }
+  }
 
   s.cells.algorithm = algorithm_from(text(in, "algorithm", "default_grade", w), w + ".algorithm");
   try {
@@ -158,8 +328,19 @@ Settings settings_from(const json::Value& in, const std::string& w) {
   s.cells.grade_to_shape = flag(in, "grade_to_shape", s.cells.grade_to_shape, w);
   s.cells.band_mm = num(in, "band_mm", s.cells.band_mm, w);
   s.cells.band_cell_mm = num(in, "band_cell_mm", s.cells.band_cell_mm, w);
+  s.cells.by_stress = flag(in, "cells_by_stress", s.cells.by_stress, w);   // C22
+  s.cells.max_step = num(in, "max_step", s.cells.max_step, w);            // C24
 
-  s.struts.mode = flag(in, "per_region", false, w) ? Density::PerRegion : Density::Uniform;
+  const bool per_region = flag(in, "per_region", false, w), by_stress = flag(in, "by_stress", false, w);
+  if (per_region && by_stress) json::fail(w, "by_stress and per_region cannot both be on: pick one density");
+  s.struts.mode = by_stress ? Density::ByStress : per_region ? Density::PerRegion : Density::Uniform;
+  s.struts.dial_light = num(in, "dial_light", s.struts.dial_light, w);
+  s.struts.dial_heavy = num(in, "dial_heavy", s.struts.dial_heavy, w);
+  s.struts.width_light_mm = num(in, "width_light_mm", s.struts.width_light_mm, w);
+  s.struts.width_heavy_mm = num(in, "width_heavy_mm", s.struts.width_heavy_mm, w);
+  s.stress.reference_mpa = num(in, "reference_mpa", s.stress.reference_mpa, w);
+  s.stress.percentile = num(in, "percentile", s.stress.percentile, w);
+  s.stress.response = num(in, "response", s.stress.response, w);
   s.struts.dial = num(in, "dial", s.struts.dial, w);
   const std::vector<int> dial_region = wholes(in, "dial_region", w);
   const std::vector<double> dial_value = nums(in, "dial_value", w);
@@ -232,6 +413,10 @@ constexpr Refusal kMeshUnavailable{"mesh_unavailable", 3};
 constexpr Refusal kMeshFailed{"mesh_failed", 1};
 // The file would have something starting in mid-air when printed (his rule P8 b): not written.
 constexpr Refusal kWouldNotPrint{"would_not_print", 3};
+// By stress (R18) or cell size by stress (C22) was asked and there is no stress result to grade by.
+constexpr Refusal kNoStress{"no_stress_result", 3};
+// The stress result sent with the job could not be read (missing, or not a demand file).
+constexpr Refusal kDemandUnreadable{"demand_unreadable", 1};
 constexpr Refusal kCannotWrite{"cannot_write", 1};
 constexpr Refusal kCancelled{"cancelled", 1};
 constexpr Refusal kError{"error", 1};
@@ -339,12 +524,110 @@ TriangleMesh make_file_mesh(const Session& session, const Outcome& outcome, cons
   return mesh;
 }
 
+// ── THE DEMAND FILE ───────────────────────────────────────────────────────────
+namespace {
+constexpr char kDemandMagic[8] = {'T', 'O', 'D', 'E', 'M', 'A', 'N', 'D'};
+constexpr std::size_t kDemandHead = 8 + 4 + 3 * 4 + 3 * 8 + 8;   // 56 bytes before the values
+std::uint32_t u32_at(const unsigned char* p) {
+  return static_cast<std::uint32_t>(p[0]) | static_cast<std::uint32_t>(p[1]) << 8 |
+         static_cast<std::uint32_t>(p[2]) << 16 | static_cast<std::uint32_t>(p[3]) << 24;
+}
+std::uint64_t u64_at(const unsigned char* p) {
+  return static_cast<std::uint64_t>(u32_at(p)) | static_cast<std::uint64_t>(u32_at(p + 4)) << 32;
+}
+std::int32_t i32_at(const unsigned char* p) {
+  const std::uint32_t u = u32_at(p);
+  std::int32_t v;
+  std::memcpy(&v, &u, 4);
+  return v;
+}
+double f64_at(const unsigned char* p) {
+  const std::uint64_t u = u64_at(p);
+  double v;
+  std::memcpy(&v, &u, 8);
+  return v;
+}
+float f32_at(const unsigned char* p) {
+  const std::uint32_t u = u32_at(p);
+  float v;
+  std::memcpy(&v, &u, 4);
+  return v;
+}
+void put_u32(std::string& o, std::uint32_t u) {
+  for (int b = 0; b < 4; ++b) o += static_cast<char>((u >> (8 * b)) & 0xff);
+}
+void put_u64(std::string& o, std::uint64_t u) {
+  put_u32(o, static_cast<std::uint32_t>(u));
+  put_u32(o, static_cast<std::uint32_t>(u >> 32));
+}
+}  // namespace
+
+bool read_demand_file(const std::string& path, DemandField& out, std::string* why) {
+  const auto no = [&](const std::string& reason) {
+    if (why) *why = reason;
+    return false;
+  };
+  std::ifstream f(path, std::ios::binary);
+  if (!f) return no("cannot open " + path);
+  std::ostringstream all;
+  all << f.rdbuf();
+  const std::string bytes = all.str();
+  const auto* p = reinterpret_cast<const unsigned char*>(bytes.data());
+  if (bytes.size() < 8 || std::memcmp(p, kDemandMagic, 8) != 0) return no("not a stress result file (it does not start with TODEMAND)");
+  if (bytes.size() < kDemandHead) return no("the stress result file is cut short");
+  const std::int32_t version = i32_at(p + 8);
+  if (version != kDemandVersion)
+    return no("the stress result file is version " + std::to_string(version) + ", and only version 1 can be read");
+  const std::int32_t nx = i32_at(p + 12), ny = i32_at(p + 16), nz = i32_at(p + 20);
+  if (nx <= 0 || ny <= 0 || nz <= 0) return no("the stress result's grid has no voxels");
+  const std::uint64_t n = static_cast<std::uint64_t>(nx) * static_cast<std::uint64_t>(ny) * static_cast<std::uint64_t>(nz);
+  if (bytes.size() != kDemandHead + 4 * n)
+    return no("the stress result file is " + std::to_string(bytes.size()) + " bytes, and its grid needs " +
+              std::to_string(kDemandHead + 4 * n));
+  DemandField d;
+  d.nx = nx; d.ny = ny; d.nz = nz;
+  d.origin = {f64_at(p + 24), f64_at(p + 32), f64_at(p + 40)};
+  d.spacing = f64_at(p + 48);
+  if (!std::isfinite(d.origin.x) || !std::isfinite(d.origin.y) || !std::isfinite(d.origin.z))
+    return no("the stress result's grid corner is not a finite number");
+  if (!std::isfinite(d.spacing) || !(d.spacing > 0.0)) return no("the stress result's voxel size is not a number above 0");
+  d.mpa.resize(static_cast<std::size_t>(n));
+  for (std::size_t i = 0; i < d.mpa.size(); ++i) {
+    d.mpa[i] = f32_at(p + kDemandHead + 4 * i);
+    if (!std::isfinite(d.mpa[i])) return no("the stress result holds a value that is not a finite number (voxel " + std::to_string(i) + ")");
+  }
+  out = std::move(d);
+  return true;
+}
+
+bool write_demand_file(const std::string& path, const DemandField& field) {
+  if (field.empty()) return false;
+  std::string o(kDemandMagic, 8);
+  put_u32(o, static_cast<std::uint32_t>(kDemandVersion));
+  for (int n : {field.nx, field.ny, field.nz}) put_u32(o, static_cast<std::uint32_t>(n));
+  for (double v : {field.origin.x, field.origin.y, field.origin.z, field.spacing}) {
+    std::uint64_t u;
+    std::memcpy(&u, &v, 8);
+    put_u64(o, u);
+  }
+  for (float v : field.mpa) {
+    std::uint32_t u;
+    std::memcpy(&u, &v, 4);
+    put_u32(o, u);
+  }
+  std::ofstream f(path, std::ios::binary | std::ios::trunc);
+  f.write(o.data(), static_cast<std::streamsize>(o.size()));
+  f.close();
+  return static_cast<bool>(f);
+}
+
 FileJob parse_file_job(const std::string& json_text) {
   try {
     const json::Value doc = json::parse(json_text, "job.json");
     const std::string w = "job.json";
     json::as_object(doc, w);
-    json::reject_unknown(doc, {"mode", "model", "output", "linear_deflection", "threads", "layout", "mesh"}, w);
+    json::reject_unknown(doc, {"mode", "model", "output", "linear_deflection", "threads", "layout", "mesh", "demand"},
+                         w);
     const std::string mode = json::as_string(json::require(doc, "mode", w), w + ".mode");
     if (mode != "lattice_file") json::fail(w + ".mode", "must be \"lattice_file\", not \"" + mode + "\"");
     FileJob job;
@@ -357,6 +640,13 @@ FileJob parse_file_job(const std::string& json_text) {
       json::fail(w + ".output", "must be a file name with no folder in it");
     if (job.output == kFileResultName) json::fail(w + ".output", "is the result file's own name");
     job.linear_deflection = num(doc, "linear_deflection", 0.0, w);
+    // The stress result: a file beside the job, by its bare name.
+    if (json::find(doc, "demand")) {
+      job.demand = text(doc, "demand", "", w);
+      if (job.demand.empty() || job.demand == "." || job.demand == ".." ||
+          job.demand.find_first_of("/\\") != std::string::npos)
+        json::fail(w + ".demand", "must be a file name with no folder in it");
+    }
     if (const json::Value* v = json::find(doc, "layout"))
       job.settings = settings_from(json::as_object(*v, w + ".layout"), w + ".layout");
     if (const json::Value* v = json::find(doc, "mesh"))
@@ -389,10 +679,17 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     // Before the long work: the faces every region and Protect skin names must be the part's.
     {
       std::vector<int> regions, skins;
+      // A zone has no faces; pieces (D22) stand in for the faces and must leave a surface.
+      auto none = [&](const std::vector<int>& faces, const std::vector<FacePiece>& pieces) {
+        if (pieces.empty()) return faces_mesh(model, faces).triangles.empty();
+        bool ok = false;
+        (void)pieces_mesh(model, pieces, &ok);
+        return !ok;
+      };
       for (const Settings::RegionAsk& a : job.settings.regions)
-        if (faces_mesh(model, a.faces).triangles.empty()) regions.push_back(a.id);
+        if (a.zone.kind == Zone::Kind::None && none(a.faces, a.pieces)) regions.push_back(a.id);
       for (const Settings::ProtectAsk& a : job.settings.protect)
-        if (faces_mesh(model, a.faces).triangles.empty()) skins.push_back(a.id);
+        if (none(a.faces, a.pieces)) skins.push_back(a.id);
       if (!regions.empty()) {
         r.empty_regions = regions;
         refuse(r, kRegionFacesMissing, faces_missing("Region", "Regions", regions));
@@ -403,10 +700,33 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
         return done();
       }
     }
+    // R18: By stress with no stress result is refused, never made at the light end.
+    // (A Lattice region's own By stress or cell size by stress, C23 and R19, asks for the stress as the part's does.)
+    bool by_stress = job.settings.struts.mode == Density::ByStress, cells_by_stress = job.settings.cells.by_stress;
+    for (const Settings::RegionAsk& a : job.settings.regions)
+      if (a.role == Role::Lattice) {
+        by_stress = by_stress || (a.own.by_stress && *a.own.by_stress);
+        cells_by_stress = cells_by_stress || (a.own.cells_by_stress && *a.own.cells_by_stress);
+      }
+    const auto no_stress = [&] {
+      refuse(r, kNoStress,
+             "By stress needs a stress result, and none came with this job, so no file was made. Run the stress "
+             "check first, or pick another density.");
+      return done();
+    };
+    if (by_stress && (!job.settings.stress.demand || job.settings.stress.demand->empty()) &&
+        (!job.settings.struts.demand || job.settings.struts.demand->empty()))
+      return no_stress();
     if (lattice_topology_is_sheet(job.settings.cells.topology)) {
       refuse(r, kTypeNotSupported,
              "This lattice type is made of sheets, and a lattice file can only be made from the "
              "types made of struts so far. Pick a strut type.");
+      return done();
+    }
+    if (cells_by_stress && (!job.settings.stress.demand || job.settings.stress.demand->empty())) {
+      refuse(r, kNoStress,
+             "Cell size by stress needs a stress result, and this job has none, so nothing was made. Send the "
+             "part's stress result with it, or turn Cell size by stress off.");
       return done();
     }
     if (!mesh_available()) {
@@ -447,6 +767,8 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     r.adrift = out.pieces.adrift;
     r.stepped_edges = out.stepped_edges.size();
     r.thin_solid = out.thin_solid;
+    r.cells_by_stress = out.cells_by_stress;
+    r.step_held_at = out.step_held_at;   // C24
     r.floor_cell_mm = out.layout.floor_cell_mm;
     r.min_strut_mm = out.layout.min_strut_mm;
     r.open_look = out.layout.open_look;
@@ -455,6 +777,11 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     r.ms_read = out.ms_read;
     r.ms_cells = out.ms_cells;
     r.ms_bars = out.ms_bars;
+    r.by_stress = by_stress;
+    r.reference_mpa = out.struts.reference_mpa;
+    r.highest_mpa = out.struts.highest_mpa;
+    r.at_light = out.struts.at_light;
+    r.at_heavy = out.struts.at_heavy;
     if (!out.empty_regions.empty()) {
       refuse(r, kRegionFacesMissing, faces_missing("Region", "Regions", out.empty_regions));
       return done();
@@ -465,6 +792,8 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
              "to make. Try a smaller cell, a deeper region, or more of the part.");
       return done();
     }
+    // A field with no stress in the lattice's space gives no reference: no stress result to grade by either (R18).
+    if (by_stress && out.struts.no_stress) return no_stress();
     if (out.bars.bars.empty()) {
       refuse(r, kNoStruts,
              "The lattice here has no struts left to print, so no file was made. Try a smaller cell "
@@ -559,6 +888,16 @@ FileResult run_file_job(const std::string& job_path, const std::string& out_dir,
       }
     }
     if (threads > 0) job.options.threads = threads;
+    if (!job.demand.empty()) {
+      auto field = std::make_shared<DemandField>();
+      std::string why;
+      if (!read_demand_file(folder_of(job_path) + "/" + job.demand, *field, &why)) {
+        refuse(r, kDemandUnreadable, "The stress result sent with the lattice job could not be read, so nothing was made.",
+               why);
+        return;
+      }
+      job.settings.stress.demand = std::move(field);
+    }
     const std::string model_path =
         !job.model.empty() && job.model[0] == '/' ? job.model : folder_of(job_path) + "/" + job.model;
     say(said, "opening the part");
@@ -618,10 +957,11 @@ std::string file_result_json(const FileResult& r) {
                 "  \"layout\": {\"cells\": %llu, \"solid_pieces\": %llu, \"bars\": %llu, "
                 "\"at_one_line\": %llu, \"at_widest\": %llu, \"stubs\": %llu, \"joined\": %llu, "
                 "\"dropped\": %llu, \"pieces\": %llu, \"adrift\": %llu, \"stepped_edges\": %llu, "
-                "\"thin_solid\": %llu,\n",
+                "\"thin_solid\": %llu, \"cells_by_stress\": %s, \"step_held_at\": %.9g,\n",
                 count(r.cells), count(r.solid_pieces), count(r.bars), count(r.at_one_line),
                 count(r.at_widest), count(r.stubs), count(r.joined), count(r.dropped), count(r.pieces),
-                count(r.adrift), count(r.stepped_edges), count(r.thin_solid));
+                count(r.adrift), count(r.stepped_edges), count(r.thin_solid),
+                r.cells_by_stress ? "true" : "false", r.step_held_at);
   o += b;
   std::snprintf(b, sizeof b,
                 "    \"floor_cell_mm\": %.9g, \"min_strut_mm\": %.9g, \"open_look\": %.9g, "
@@ -630,7 +970,12 @@ std::string file_result_json(const FileResult& r) {
   o += b;
   for (std::size_t i = 0; i < r.empty_regions.size(); ++i)
     o += (i ? ", " : "") + std::to_string(r.empty_regions[i]);
-  o += "]},\n";
+  o += "],\n";
+  std::snprintf(b, sizeof b,
+                "    \"by_stress\": %s, \"reference_mpa\": %.9g, \"highest_mpa\": %.9g, \"at_light\": %llu, "
+                "\"at_heavy\": %llu},\n",
+                r.by_stress ? "true" : "false", r.reference_mpa, r.highest_mpa, count(r.at_light), count(r.at_heavy));
+  o += b;
   const MeshReport& m = r.made.mesh;
   std::snprintf(b, sizeof b,
                 "  \"mesh\": {\"triangles\": %llu, \"mm3\": %.9g, \"part_mm3\": %.9g, \"struts_mm3\": %.9g, "

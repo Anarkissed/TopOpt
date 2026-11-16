@@ -25,6 +25,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -182,6 +183,13 @@ struct Region {
   double shell_depth_mm = 0.0;
   bool expand_ignored = false;
   bool is_shell() const { return !shell.triangles.empty(); }
+  // S13: a Lattice region's own Finish. What it does not state it takes from the part's
+  // (DomainSpec::rim_mm, cover_mm), with the same meaning: 0 none for this region (even when
+  // the part has one), < 0 two line widths, > 0 that width or thickness. Its rim is the band
+  // of ITS lattice within that distance of its own edge where the part's solid backs it; its
+  // cover makes solid ITS lattice within that distance of the part's surface, and its cells
+  // start behind it. Neither acts on another region's lattice.
+  std::optional<double> rim_mm, cover_mm;
 };
 
 // The region under one or more faces of the model, from the faces themselves (rule D10:
@@ -198,8 +206,65 @@ inline Region region_from_face(const StepModel& model, int face_id, int id, Role
   return region_from_faces(model, {face_id}, id, role, depth_mm, expand_mm, ok);
 }
 
+// Rule D21: a ZONE, a region the user places instead of picking faces ("A zone lattices a
+// space with no face"): a box or a cylinder in the part's own coordinates, mm.
+//   Box       centre, three unit axes at right angles (axis[0..2]) and three half sizes.
+//   Cylinder  centre, its unit axis in axis[2], its radius in half[0], its half length in
+//             half[2]; axis[0], axis[1] and half[1] are not read.
+struct Zone {
+  enum class Kind : std::uint8_t { None, Box, Cylinder } kind = Kind::None;
+  Vec3 centre{};
+  Vec3 axis[3] = {};
+  double half[3] = {0, 0, 0};
+};
+
+// The region of a zone: a FLAT region whose prism is stated instead of read off a face.
+// The prism starts on the zone's side at centre - axis[2] * half[2], its normal is axis[2]
+// (through the zone to its far side), its depth 2 * half[2]. A box's outline is the
+// rectangle +-half[0] by +-half[1] in (axis[0], axis[1]), and those two axes are the
+// prism's own in-plane axes (u, w), so its cells line up with its sides. A cylinder's
+// outline is one closed loop of 96 straight sides whose area equals the circle's, its
+// first corner on u; its in-plane axes (u, w) are the ones core gives every face prism of
+// that normal (resolve_clearance_manual: plane_basis of the axis). Everything a flat face
+// region does then applies unchanged. `ok` is false, and the region empty, when a size
+// read is not above 0, a number read is not finite, or an axis read is not unit (a box's
+// three: unit and at right angles) to within 1e-6.
+Region region_from_zone(const Zone& zone, int id, Role role, double expand_mm = 0.0,
+                        bool* ok = nullptr);
+
 // The triangles of the given faces, as one open mesh (for ProtectSkin::face).
 TriangleMesh faces_mesh(const StepModel& model, const std::vector<int>& face_ids);
+
+// Rule D22: a PIECE of the model's faces, as the app's Edit faces cuts them: some faces and
+// a list of cuts. A cut is a half-space, core's FaceRegionSpec cut exactly: a point p is
+// kept when (p - point) . normal >= 0, or > 0 when `strict`. The piece's surface is its
+// faces' surface where every cut holds.
+struct FaceCut {
+  Vec3 point{}, normal{};
+  bool strict = false;
+};
+struct FacePiece {
+  std::vector<int> faces;
+  std::vector<FaceCut> cuts;
+};
+
+// The surface of some pieces, as one open mesh: the union of the pieces' surfaces. Every
+// triangle of the pieces' faces is cut exactly by every cut of every piece (so two pieces
+// that share a cut, or a cut that ends on another piece, join with no seam and no gap),
+// and each part of it is kept when some piece holding its face keeps it. A triangle no cut
+// crosses is the model's own, unchanged. `ok` is false, and the mesh empty, when there is
+// no piece, a piece has no faces, a face has no triangles, a cut's normal is zero or a
+// number is not finite, or the cuts leave nothing.
+TriangleMesh pieces_mesh(const StepModel& model, const std::vector<FacePiece>& pieces, bool* ok = nullptr);
+
+// The region of some pieces (rule D22): everything region_from_faces does with its faces'
+// triangles it does with the pieces' surface (pieces_mesh): the true outline read off the
+// triangles, cut edges included (D10); one region, one depth, one outline, no seam between
+// the pieces (D20); a flat surface (its faces one plane) a prism, anything else a shell;
+// Expand in the plane (D11). `ok` is false, and the region empty, when pieces_mesh is not
+// ok or the depth is not above 0.
+Region region_from_pieces(const StepModel& model, const std::vector<FacePiece>& pieces, int id, Role role,
+                          double depth_mm, double expand_mm = 0.0, bool* ok = nullptr);
 
 // Rule D5: a solid face at exactly the stated depth, the lattice right behind it.
 // `face` is the face's own triangles (need not be closed). 0 mm means the thinnest face
@@ -208,6 +273,10 @@ struct ProtectSkin {
   int id = 0;
   TriangleMesh face;
   double depth_mm = 0.0;
+  // D22: a skin given as pieces (`face` is then their surface, pieces_mesh). The cuts stand
+  // up out of the face: a point is in the skin only if it is within the depth of `face`
+  // AND every cut of at least one piece holds at it. Empty: a skin of whole faces.
+  std::vector<FacePiece> pieces;
 };
 
 // The thinnest strut, in line widths: it follows the NOZZLE (R14).
@@ -317,8 +386,17 @@ class Domain {
     const Domain* d_;
     PartMeasure::Probe part_;
     // From `p` along `dir`, the distance at which a Protect skin's solid begins, looking
-    // no farther than `limit`. Negative when none begins that near.
-    double skin_ahead(const Vec3& p, const Vec3& dir, double limit) const;
+    // no farther than `limit`. Negative when none begins that near. `cover` is the cover
+    // of the lattice being read (S13).
+    double skin_ahead(const Vec3& p, const Vec3& dir, double limit, double cover) const;
+    double skin_gap(const Vec3& p, double cover) const;
+    double room_through(const Vec3& p, double at_least, double cover) const;
+    // Is `p` in region i (and how far from its face)? The Lattice region that owns `p`
+    // (D6), null for none; `best`, its distance from the face.
+    bool holds_at(std::size_t i, const Vec3& p, double* dist) const;
+    const Region* owner_of(const Vec3& p, double* best) const;
+    // S13: the cover of the lattice that owns `p` (the part's when no region states its own).
+    double cover_at(const Vec3& p) const;
     std::vector<MeshDistance> skins_;
     std::vector<MeshDistance> skin_groups_;   // one per depth (Domain::skin_groups_)
     std::vector<MeshDistance> shells_;   // one per region, empty mesh for a prism
@@ -357,16 +435,26 @@ class Domain {
   double protect_depth_mm(const ProtectSkin& s) const {
     return s.depth_mm > 0.0 ? s.depth_mm : 2.0 * spec_.bead_mm;
   }
-  // The rim's width: the one asked for, or two line widths; 0 with no rim.
-  double rim_width_mm() const { return spec_.rim_mm < 0.0 ? 2.0 * spec_.bead_mm : spec_.rim_mm; }
-  // The deepest Protect skin or cover there is; 0 with neither.
+  // The rim's width: the one asked for, or two line widths; 0 with no rim. With `owner`, the
+  // rim of that region's lattice (S13: its own, else the part's); without, the part's.
+  double rim_width_mm(const Region* owner = nullptr) const {
+    const double v = owner && owner->rim_mm ? *owner->rim_mm : spec_.rim_mm;
+    return v < 0.0 ? 2.0 * spec_.bead_mm : v;
+  }
+  // The deepest Protect skin or cover there is (any region's own cover included); 0 with neither.
   double skin_most_mm() const {
     double most = cover_depth_mm();
+    for (const Region& r : spec_.regions)
+      if (r.cover_mm) most = std::max(most, cover_depth_mm(&r));
     for (const ProtectSkin& s : spec_.protect) most = std::max(most, protect_depth_mm(s));
     return most;
   }
-  // The cover's thickness: the one asked for, or two line widths; 0 with no cover.
-  double cover_depth_mm() const { return spec_.cover_mm < 0.0 ? 2.0 * spec_.bead_mm : spec_.cover_mm; }
+  // The cover's thickness: the one asked for, or two line widths; 0 with no cover. With
+  // `owner`, the cover of that region's lattice (S13: its own, else the part's).
+  double cover_depth_mm(const Region* owner = nullptr) const {
+    const double v = owner && owner->cover_mm ? *owner->cover_mm : spec_.cover_mm;
+    return v < 0.0 ? 2.0 * spec_.bead_mm : v;
+  }
 
  private:
   const PartMeasure* measure_;
@@ -379,6 +467,7 @@ class Domain {
   // with them sent as one group (362's measure, 2026-11-13). WHICH skin a point is in is still asked skin by skin.
   struct SkinGroup { double depth_mm = 0.0; TriangleMesh faces; };
   std::vector<SkinGroup> skin_groups_;
+  std::vector<std::size_t> cut_skins_;   // D22: the skins given as pieces with cuts, by index; in no group
   std::vector<Near> near_shell_;   // one per region (empty for a prism), within its depth
   // For a flat region: squares of its face that lie wholly inside its edge, or wholly
   // outside it (the distance to the edge at a square's middle is more than half the
@@ -395,6 +484,7 @@ class Domain {
     }
   };
   std::vector<Sure> sure_;         // one per region (empty where it does not apply)
+  bool own_cover_ = false;         // some region states its own cover (S13)
   // region_contains(spec_.regions[i], p), by the squares where they are sure.
   bool region_holds(std::size_t i, const Vec3& p) const;
 
@@ -429,6 +519,8 @@ enum class Algorithm : std::uint8_t {
   // n = 2..6 (C6-C6c, C13; his ruling 2026-11-10 22:54: shared-unit splits only).
   Stepped,
 };
+
+struct DemandField;   // a stress result (below)
 
 struct CellSpec {
   Algorithm algorithm = Algorithm::DefaultGrade;
@@ -469,15 +561,18 @@ struct CellSpec {
   //                floor above. Held at that floor when it asks for less.
   bool allow_quilt = false;
   double band_cell_mm = 0.0;
-  // "LET WALLS CUT CELLS" (his name for the option, 2026-11-14), off by default. On: one even grid that walls and
-  // pockets cut through. Off: today's whole cells fitted to walls. Aesthetic only; Structural never shows it.
+  // "LET WALLS CUT CELLS" (his name for the option, 2026-11-14), off by default. On: walls and pockets may cut the
+  // cells. Off: today's whole cells fitted to walls. Aesthetic only; Structural never shows it.
   // (His words, 2026-11-12: "Why can't the pocket just cut the lattices wherever they are positioned and then a
   // skin connect all the struts that are left disconnected in a pattern?"; his ruling, 2026-11-14: "I think
   // aesthetic should allow the one grid cut wherever. Not structural.", "BUT it should be an option available to
   // the user to select".) A per-part option, OFF unless the user turns it on; off, the layout is what it was, byte
   // for byte. Core does not know the stage, so whoever offers the switch offers it in Aesthetic and nowhere else
-  // (a certified wall must hold its cells: C5).
-  // On: each region is ONE regular grid of its base cell, and every surface, pocket, hole, Protect skin and the
+  // (a certified wall must hold its cells: C5). The owner, 2026-11-14: "this shouldn't mean that the cell size is one
+  // even grid. If someone wants an even grid they will specify that by not asking for a cell size gradient. This
+  // means ONLY that the cells can be cut by walls. NOTHING ELSE." The cell sizes stay whatever is asked for: a grade
+  // by shape (G1-G11) or by stress (C22) applies as it does with the option off.
+  // On: each region is laid as ONE layout on the grid of its base cell, and every surface, pocket, hole, Protect skin and the
   // region's own edge simply CUTS it (D3). A flat region's grid is in its face's own frame, the face a cell boundary
   // (C15 at the face), its base cell the largest size not above Max cell that divides the region's depth; it is laid
   // in one frame like a curved region, not wall by wall, and no wall map is read. A curved region and the whole
@@ -491,10 +586,80 @@ struct CellSpec {
   // `min_wall_mm` still makes solid). A cut piece too small to hold a strut longer than its own width has none.
   // C20 (his ruling the same day: "let cells shrink towards pockets and walls"): only the smallest cell of the
   // ladder is ever cut; a larger cell that anything would cut is split down first, as G10 splits it at the outline.
-  // C21: a flat region's face shows one main size, the largest of its ladder at which more than half of the cubes in
-  // the first layer under the face stand whole; no larger cell is laid in that region.
+  // (Only when the region grades its cells, Default Grade or Stepped: with one cell size the cell is cut wherever the
+  // wall falls.) Any cell of the ladder that lies whole in lattice stands (C21, a cap at one main size per face, was
+  // WITHDRAWN by the owner, 2026-11-14: "if grading is on and a larger cell size can fit, it SHOULD fit").
   bool one_grid = false;
+  // C22, cell size by stress (his rule of 2026-08-19: Auto cell size is "any number - as needed based on the stress
+  // map"). On, the stress asks for a cell size place by place: the region's own cell where the stress is nothing, the
+  // smallest its ladder allows where the stress is at or over the reference, in proportion between. A cell stands only
+  // where nothing inside it asks for a smaller one; the smallest always may. With d the highest stress in the
+  // axis-aligned box round the cube's eight corners (R16), t = (d / reference, held to 0 .. 1) to the power of the
+  // response (held to 0.25 .. 4), a cell of size s may stand where t <= (S_base - s) / (S_base - f), f the finest
+  // cell. A cell the stress does not allow is divided down its ladder as a cell the band does not allow is (Default
+  // Grade halves, Stepped packs); one that cannot be divided further stands: nothing goes solid for the stress, and
+  // the stress never lays a cell under the smallest the layout would otherwise lay there.
+  // With `one_grid` on it applies as anywhere else, together with C20: a cell must be allowed by both.
+  // OFF, whatever `by_stress` says, when: no field or an empty one; `reference_mpa` <= 0; a typed `cell_mm` (only
+  // Manual forces one size, C16); Uniform. Off, the layout is today's, byte for byte.
+  // `demand`, `reference_mpa`, `response` are the RESOLVED stress inputs: the session fills them from
+  // Settings::stress; lay_cells never looks for a percentile.
+  bool by_stress = false;
+  std::shared_ptr<const DemandField> demand;
+  double reference_mpa = 0.0;
+  double response = 1.0;
+  // C24, the largest step in cell size between neighbours (Manual control 4: "controls how abruptly stiffness
+  // changes"). A ratio; 0 (or less) = no limit, and the layout is today's, byte for byte. With a limit, inside one
+  // region's layout no cell is more than this many times the size of a cell of the same region and frame it shares
+  // any part of a face with (a cut cell counts as its whole cube). Where that would be broken the LARGER cell is
+  // divided as its own ladder divides it (Default Grade halves, Stepped packs), again until the rule holds or the cell
+  // is the finest its ladder allows: the finest always stands. It only ever makes cells smaller, and nothing goes solid
+  // for it. A limit below the ladder's smallest step cannot be met: on Default Grade a value under 2 is held at 2, and
+  // no limit is under 1 (step_held). Across a seam between two regions, or between two frames, the grids do not line
+  // up and the rule is not applied. Uniform has one size and nothing to divide: the limit does not act there.
+  double max_step = 0.0;
 };
+// C22: is cell size by stress applied to a layout laid with `spec` (by_stress on and none of its OFF list)?
+bool stress_sizes_cells(const CellSpec& spec);
+// C24: the limit a layout laid with `spec` keeps: 0 when none is asked (max_step <= 0); else max_step held at the
+// ladder's smallest step (2 on Default Grade) and never under 1.
+double step_held(const CellSpec& spec);
+
+// C23, R19 (the app's area tabs; Manual: "each can be set for the part or per zone or region"): a Lattice region's
+// own cell and strut settings. Each value stated here is the region's own; what is not stated, it takes from the
+// part's. Nothing stated anywhere: every layout is the one laid without it, byte for byte.
+// PART ONLY, never per region: the type, Allow quilt, Let walls cut cells, small cells in thin walls, the line width
+// and strut lines, the stress field itself and its percentile.
+struct AreaOwn {
+  // Cells (C23): as CellSpec's fields of the same names. `cells_by_stress` is CellSpec::by_stress (C22).
+  std::optional<Algorithm> algorithm;
+  std::optional<double> cell_mm, cell_max_mm, cell_min_mm;
+  std::optional<int> min_cells_across;
+  std::optional<bool> grade_to_shape;
+  std::optional<double> band_mm, band_cell_mm;
+  std::optional<bool> cells_by_stress;
+  // Struts (R19). `by_stress`: true = By stress, false = not (the part's Uniform or Per region reading of the dial).
+  // A stated `dial`, or a stated By stress end given as a dial, is read on THIS REGION'S largest cell (as Per region
+  // reads its dials); one not stated is read as the part's is. A stated `dial` wins over the part's region_dial entry
+  // for this region. The rest as StrutSpec's fields of the same names.
+  std::optional<bool> by_stress;
+  std::optional<double> dial, dial_light, dial_heavy, width_mm, width_light_mm, width_heavy_mm, strength;
+  // By stress, for the struts and for cell size by stress alike: the exponent (held to 0.25 .. 4), and the reference.
+  // A reference above 0 is the region's own; 0 or not stated takes the part's resolved one.
+  std::optional<double> response, reference_mpa;
+  // C24: the largest size step between neighbouring cells of this region (CellSpec::max_step).
+  std::optional<double> max_step;
+  bool any() const {
+    return algorithm || cell_mm || cell_max_mm || cell_min_mm || min_cells_across || grade_to_shape || band_mm ||
+           band_cell_mm || cells_by_stress || by_stress || dial || dial_light || dial_heavy || width_mm ||
+           width_light_mm || width_heavy_mm || strength || response || reference_mpa || max_step;
+  }
+};
+// The regions' own settings, by region id. A region not listed takes the part's in everything.
+using AreaOwnMap = std::map<int, AreaOwn>;
+// C23: the cells one region is laid with: the part's spec with the region's stated values over it. Its stress field
+// is the part's; its response and reference as AreaOwn says.
+CellSpec region_cells(const CellSpec& part, const AreaOwn& own);
 
 // Cells are cubes on a frame: world position = origin + ax[0]*a + ax[1]*b + ax[2]*c.
 // A flat region's frame is its face's own (in-plane, in-plane, inward), so the face is
@@ -637,7 +802,9 @@ struct Layout {
 };
 
 // `threads`: 0 = all of this machine's; the layout is the same for any number (D18).
-Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads = 0);
+// `own` (C23): a Lattice region listed there is laid with region_cells(spec, its entry): its own base cell, ladder,
+// floor, cells across, band and stress rule. The whole part's own lattice (region 0) is laid with `spec`.
+Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads = 0, const AreaOwnMap* own = nullptr);
 
 // What the layout reads at one point (a, b, c) of a frame: the domain's answer and, under
 // a flat region, the lattice's column there (where it starts below the face, how wide it
@@ -668,6 +835,41 @@ bool cell_holds(const Layout& layout, const Domain::Probe& probe, const Cell& ce
 bool cell_holds_at(const Layout& layout, const Domain::Probe& probe, std::size_t cell, double a, double b, double c);
 std::shared_ptr<const CellIndex> index_cells(const Layout& layout, double pitch = 4.0);
 
+// ── STRESS (Install 2a) ───────────────────────────────────────────────────────
+// A stress result the lattice is graded by: one value per voxel of a regular grid in the part's own coordinates.
+// Indexed like core's VoxelGrid: (k * ny + j) * nx + i; voxel (i,j,k) is the cube origin + spacing * (i..i+1, ...).
+struct DemandField {
+  Vec3 origin{};              // the grid's low corner, mm
+  double spacing = 0.0;       // voxel edge, mm
+  int nx = 0, ny = 0, nz = 0;
+  std::vector<float> mpa;     // von Mises, MPa; 0 where the solve had no material
+  // No voxels, or spacing <= 0, or mpa.size() != nx*ny*nz.
+  bool empty() const;
+  std::size_t index(int i, int j, int k) const {
+    return (static_cast<std::size_t>(k) * static_cast<std::size_t>(ny) + static_cast<std::size_t>(j)) *
+               static_cast<std::size_t>(nx) +
+           static_cast<std::size_t>(i);
+  }
+  // The highest value among the voxels whose cube overlaps the box [lo, hi] (part coordinates); 0 when none does.
+  // A voxel overlaps when the two share some volume: a voxel that only touches the box on a face, an edge or a corner
+  // is not counted. A box with no width along an axis (lo == hi there) counts the voxel that holds it along that axis.
+  // R16: a cell's stress is the highest in its own cube; a turned cell's cube is read as the axis-aligned box round
+  // its eight corners. That is the rule, not an approximation to be refined.
+  double highest_in(const Vec3& lo, const Vec3& hi) const;
+};
+// The stress settings shared by struts (set_struts, By stress) and cells (C22: CellSpec::by_stress).
+struct StressGrade {
+  std::shared_ptr<const DemandField> demand;   // null or empty: no stress yet
+  double reference_mpa = 0.0;   // > 0: the stress at which the lattice is at its heavy end. 0: the part's own (below)
+  double percentile = 0.95;     // read when reference_mpa is 0
+  double response = 1.0;        // the exponent on (stress / reference); held to 0.25 .. 4
+};
+// R17: the part's own reference. The `percentile` of the field over the voxels whose CENTRE is lattice space of the
+// domain (Domain::Probe::where says lattice; zero-valued voxels count). Sorted, index floor(q * (n - 1)), q held to
+// 0 .. 1. 0 when there are none, or the field is empty. `threads`: 0 = all of this machine's; the answer is the same
+// for any number. Reads the domain's stop flag like every step of a layout (LayCancelled).
+double stress_reference(const Domain& domain, const DemandField& field, double percentile, int threads = 0);
+
 // ── STRUT WIDTH ───────────────────────────────────────────────────────────────
 // What a lattice looks like is one number, strut width over cell size (R9). Octet's
 // neighbouring struts touch at 1/(2*sqrt 2): the quilt, the top of every range.
@@ -676,6 +878,7 @@ inline constexpr double kQuiltStrutPerCell = 0.35355339059327373;
 enum class Density : std::uint8_t {
   Uniform,    // one density for the whole part (R6)
   PerRegion,  // each region's own dial; a region not listed takes `dial`
+  ByStress,   // the stress decides every strut, between Grade to and Grade from (R7, R8, R12, R16)
 };
 
 struct RegionDial {
@@ -697,16 +900,42 @@ struct StrutSpec {
   bool allow_quilt = false;
   // G4: how much the band raises a strut toward the quilt, as 2^strength, -1 .. 1.
   double strength = 0.0;
+  // By stress (R7, R8, R12, R16), read in ByStress only. Per cell, d = the highest stress in its own cube
+  // (DemandField::highest_in on the axis-aligned box round its eight corners), f = d / reference_mpa held to 0 .. 1
+  // (0 with no field or no reference: R18), t = f ^ response (response held to 0.25 .. 4). The strut runs from the
+  // light end at t = 0 to the heavy end at t = 1:
+  //   dials        ratio = r_light + t (r_heavy - r_light), r_x the dial's strut / cell read on the part's largest
+  //                cell as `dial` is (R10); the strut is ratio x cell.
+  //   widths in mm when BOTH are > 0 (Manual control 1): width_light_mm + t (width_heavy_mm - width_light_mm), the
+  //                same in every cell size; the dials are not read.
+  // Ends given the wrong way round are swapped. Then the limits of every mode: never under the thinnest strut, never
+  // over the widest allowed for the cell. Inside a Grade to shape band the band law starts from the by-stress width
+  // (G8: it only raises). `width_mm` and the dials of the other modes are not read (R12).
+  double dial_light = 0.01;     // "Grade to": where the stress is nothing
+  double dial_heavy = 1.0;      // "Grade from": at or over the reference
+  double width_light_mm = 0.0, width_heavy_mm = 0.0;
+  std::shared_ptr<const DemandField> demand;
+  double reference_mpa = 0.0;   // the RESOLVED reference (Session::lay fills it from Settings::stress)
+  double response = 1.0;
 };
 
 struct StrutReport {
   std::size_t at_bead = 0;      // cells where the asked width was under the thinnest strut (R5)
   std::size_t at_ceiling = 0;   // cells where it was over the widest allowed (R2, R9)
+  // By stress only (zero / false in the other modes):
+  bool no_stress = false;       // By stress was asked and there was no field or no reference (R18)
+  double reference_mpa = 0.0;   // the reference used
+  double highest_mpa = 0.0;     // the highest stress any cell read
+  std::size_t at_light = 0;     // cells at the light end (f == 0)
+  std::size_t at_heavy = 0;     // cells at the heavy end (f == 1)
 };
 
 // Sets every cell's strut width. Moves no cell. The two limits are the layout's own type's
 // (Layout::open_look, Layout::touch, from core's lattice_width_bounds).
-StrutReport set_struts(Layout& layout, const StrutSpec& spec);
+// `own` (R19): the cells of a region listed there take its stated strut settings over the part's (AreaOwn). The
+// report's `no_stress` is set when any By stress, the part's or a region's, has no field or no reference; its
+// `reference_mpa` is the part's; the counts are over every cell read by stress.
+StrutReport set_struts(Layout& layout, const StrutSpec& spec, const AreaOwnMap* own = nullptr);
 
 // ── BARS (stage D) ────────────────────────────────────────────────────────────
 // The struts themselves: every strut of every cell, once (a strut two cells share is one
@@ -858,6 +1087,21 @@ struct SkinSpec {
   // At 0 only bars that lie in the surface are made: on a pocket's wall that is lines along its axis and no rings
   // (his v3 stand, 2026-11-12: "not just with singular vertical lines, but with a lattice all along the face").
   double bow = 0.1;
+  // S13: a region's own Skin. `on` is for the cut ends of every region not listed in
+  // `regions` (the part's Skin), with the width and reach above. A region listed decides
+  // for its own ends: off, they get no skin bar; on, with its own width and reach (the
+  // caller fills in the part's where the region states none). An end's width is its
+  // region's width, or the thinner strut's at 0; a skin bar takes the smaller of its two
+  // ends' widths and is no longer than the smaller of their reaches allows. Called with no
+  // list, lay_skin is what it always was.
+  struct RegionSkin {
+    int region = 0;
+    bool on = true;
+    double width_mm = 0.0;
+    double reach_cells = 1.2;
+  };
+  bool on = true;
+  std::vector<RegionSkin> regions;
 };
 std::size_t lay_skin(Bars& bars, const Domain& domain, const SkinSpec& spec = SkinSpec{});
 
@@ -901,11 +1145,27 @@ struct Settings {
     std::vector<int> faces;      // the model's own face numbers
     double depth_mm = 0.0;
     double expand_mm = 0.0;
+    AreaOwn own{};               // C23, R19: a Lattice region's own cells and struts (not read for No lattice)
+    // D21: a zone in place of faces (region_from_zone). `depth_mm` is then not read: the
+    // depth is the zone's own. An ask with both faces and a zone is left out and listed.
+    Zone zone;
+    // S13: the region's own Finish; what is not stated is the part's. rim_mm and cover_mm
+    // are "where" settings (Region::rim_mm, cover_mm); the skin ones are not
+    // (SkinSpec::RegionSkin). skin_width_mm 0 = as wide as the thinner strut.
+    std::optional<double> rim_mm, cover_mm;
+    std::optional<bool> skin;
+    std::optional<double> skin_width_mm, skin_reach_cells;
+    // D22: pieces of faces in place of whole faces (region_from_pieces). When there are any,
+    // `faces` is not read. An ask with pieces and a zone is left out and listed.
+    std::vector<FacePiece> pieces;
   };
   struct ProtectAsk {
     int id = 0;
     std::vector<int> faces;
     double depth_mm = 0.0;       // 0 = two line widths (D5)
+    // D22: the skin under pieces of faces (pieces_mesh) in place of whole faces; when there
+    // are any, `faces` is not read. Pieces pieces_mesh refuses give the skin no surface.
+    std::vector<FacePiece> pieces;
   };
   // Where lattice goes.
   Start start = Start::AllSolid;
@@ -918,7 +1178,10 @@ struct Settings {
   std::vector<ProtectAsk> protect;
   // The cells, the struts, and what happens to cut ends.
   CellSpec cells;          // its allow_quilt and one_grid are not read: the switches are struts.allow_quilt, one_grid
+                           // (its demand, reference_mpa and response are filled from `stress` when stress.demand is set)
   StrutSpec struts;
+  // The stress result the lattice is graded by, and how (R16, R17). Null `demand`: no stress yet.
+  StressGrade stress;
   // Per part, OFF unless he turns it on (his words, 2026-11-12: "I definitely want it as a per-part choice. Especially
   // in the app itself."). A wall too thin for a cell that the thinnest strut leaves open (R5, C14) is normally solid.
   // On, the cells may be as small there as Allow quilt would let them (so the wall is latticed), but no strut is made
@@ -927,8 +1190,8 @@ struct Settings {
   // with two-line struts: its wing edges, socket walls and spotface walls.) Allow quilt on makes this moot.
   bool small_cells_in_thin_walls = false;
   // "Let walls cut cells" (his ruling 2026-11-14): per part, OFF unless the user turns it on. The session
-  // hands it to the cells as CellSpec::one_grid (see there): on, each region is one even grid that every wall, pocket,
-  // hole, Protect skin and the region's own edge cuts; off, the layout is what it was, byte for byte. Core does not
+  // hands it to the cells as CellSpec::one_grid (see there): on, every wall, pocket, hole, Protect skin and the
+  // region's own edge may cut the cells, and that is all it changes (the cell sizes stay whatever is asked for); off, the layout is what it was, byte for byte. Core does not
   // know Aesthetic from Structural: the app offers the switch in Aesthetic only. A cell setting: changing it lays the
   // cells again and does not read the part again.
   bool one_grid = false;
@@ -947,9 +1210,20 @@ struct Outcome {
   std::vector<SteppedEdge> stepped_edges;   // what Finish None left ragged (S4)
   bool read_again = false;       // the part was read for this layout (a "where" setting changed)
   bool cancelled = false;        // the stop flag was set before the layout was whole: nothing else here is filled
-  std::vector<int> empty_regions;   // asked-for regions none of whose faces has triangles
+  // Asked-for regions none of whose faces has triangles, zones region_from_zone refused
+  // or asked for together with faces (D21), and pieces region_from_pieces refused or asked
+  // for together with a zone (D22).
+  std::vector<int> empty_regions;
   double ms_read = 0.0, ms_cells = 0.0, ms_bars = 0.0;
   std::size_t thin_solid = 0;    // cut cells print rule P8 (f) made solid (solidify_thin_cuts)
+  bool cells_by_stress = false;  // C22 was applied to this layout (stress_sizes_cells)
+  bool cells_no_stress = false;  // C22 was asked for and there was no stress result, or no reference
+  // The one stress reference resolved for this lay (the stated one or the part's own), read by the cells and the
+  // struts alike; 0 when neither asked for one (no field, or neither by stress) or the part's own is 0.
+  double stress_reference_mpa = 0.0;
+  // C24: the part's size-step limit this layout kept (step_held of the part's cells: a value under the ladder's
+  // smallest step is held there, 2 on Default Grade); 0 when none was asked. A region's own limit is not reported here.
+  double step_held_at = 0.0;
 };
 
 class Session {
@@ -975,6 +1249,13 @@ class Session {
   std::unique_ptr<Domain> domain_;
   bool unread_ = false;                // the kept domain has not been laid in once yet (its first lay was cancelled)
   std::vector<int> empty_regions_;
+  // R17: the part's own stress reference, kept while the domain, the field and the percentile are the same (a slider
+  // move does not read the field again). Cleared when the domain is made again. ONE reference, read before the cells
+  // are laid, for the cells (C22) and the struts (By stress) alike.
+  bool ref_kept_ = false;
+  std::shared_ptr<const DemandField> ref_field_;
+  double ref_percentile_ = 0.0;
+  double ref_mpa_ = 0.0;
 };
 
 // In the plane of a flat region's face: how far `p` is inside the region's edge (its

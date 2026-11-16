@@ -25,11 +25,37 @@ public enum LatticeFileJob {
         "allowQuilt": "allow_quilt", "strength": "strength", "bars": "bars", "joinLoose": "join_loose", "skin": "skin",
         "skinWidthMM": "skin_width_mm", "skinReachCells": "skin_reach_cells", "dropLoose": "drop_loose",
         "smallCellsInThinWalls": "small_cells_in_thin_walls", "oneGrid": "one_grid",
+        "byStress": "by_stress", "dialLight": "dial_light", "dialHeavy": "dial_heavy", "widthLightMM": "width_light_mm",
+        "widthHeavyMM": "width_heavy_mm", "cellsByStress": "cells_by_stress", "referenceMPa": "reference_mpa",
+        "percentile": "percentile", "response": "response", "maxStep": "max_step",
     ]
 
+    /// The stress result's name beside the job (core's top-level "demand"; the demand file format of 04-layout-file-job.md).
+    public static let demandName = "demand.bin"
+
+    /// The stress result as core reads it (04-layout-file-job.md, the demand file): "TODEMAND", int32 version 1, int32 nx ny
+    /// nz, float64 origin xyz (the grid's LOW CORNER), float64 spacing, then nx*ny*nz float32 von Mises MPa, x fastest;
+    /// little-endian.
+    public static func demandFile(_ f: LatticeDemandField) -> Data {
+        var d = Data("TODEMAND".utf8)
+        func i32(_ v: Int) { var x = Int32(v).littleEndian; d.append(Data(bytes: &x, count: 4)) }
+        func f64(_ v: Double) { var x = v.bitPattern.littleEndian; d.append(Data(bytes: &x, count: 8)) }
+        i32(1); i32(f.nx); i32(f.ny); i32(f.nz)
+        f64(f.origin.x); f64(f.origin.y); f64(f.origin.z); f64(f.spacingMM)
+        d.reserveCapacity(d.count + 4 * f.vonMises.count)
+        for v in f.vonMises { var x = v.bitPattern.littleEndian; d.append(Data(bytes: &x, count: 4)) }
+        return d
+    }
+
+    /// Whether the job needs the stress result: By stress or cell size by stress, for the part or for any area.
+    public static func needsStress(_ s: LatticeLayoutSession.Settings) -> Bool {
+        s.byStress || s.cellsByStress || s.regions.contains { $0.own.byStress == true || $0.own.cellsByStress == true }
+    }
+
     /// The job document, keys sorted (the same settings give the same bytes).
-    public static func build(_ s: LatticeLayoutSession.Settings, modelName: String, linearDeflection: Double = 0) throws -> Data {
-        let layout: [String: Any] = [
+    public static func build(_ s: LatticeLayoutSession.Settings, modelName: String, linearDeflection: Double = 0,
+                             demand: String? = nil) throws -> Data {
+        var layout: [String: Any] = [
             "all_lattice": s.allLattice, "bead_mm": s.beadMM, "min_strut_lines": s.minStrutLines, "min_wall_mm": s.minWallMM,
             "rim_mm": s.rimMM, "cover_mm": s.coverMM,
             "region_ids": s.regions.map { Int($0.id) }, "region_no_lattice": s.regions.map { $0.noLattice ? 1 : 0 },
@@ -47,8 +73,82 @@ public enum LatticeFileJob {
             "join_loose": s.joinLoose, "skin": s.skin, "skin_width_mm": s.skinWidthMM, "skin_reach_cells": s.skinReachCells,
             "drop_loose": s.dropLoose,
         ]
-        let job: [String: Any] = ["mode": "lattice_file", "model": modelName, "output": outputName,
+        // ★ his ask 11-14 (D22): the cut pieces, as the preview lays them; the lists only when some piece exists, so a job with
+        // none is the bytes it was
+        func pieces(_ ps: [LatticeLayoutSession.Piece]) -> Any {
+            ps.isEmpty ? NSNull() : ps.map { pc -> [String: Any] in
+                ["faces": pc.faces.map { Int($0) },
+                 "cuts": pc.cuts.map { c -> [String: Any] in
+                     ["point": [c.point.x, c.point.y, c.point.z], "normal": [c.normal.x, c.normal.y, c.normal.z], "strict": c.strict]
+                 }]
+            }
+        }
+        if s.regions.contains(where: { !$0.pieces.isEmpty }) { layout["region_pieces"] = s.regions.map { pieces($0.pieces) } }
+        if s.protect.contains(where: { !$0.pieces.isEmpty }) { layout["protect_pieces"] = s.protect.map { pieces($0.pieces) } }
+        // Install 2: the stress keys, cell size by stress and the size step (core's defaults are the job's bytes as before
+        // only by value: the keys are always written, as every other layout key is)
+        layout["by_stress"] = s.byStress
+        layout["dial_light"] = s.dialLight
+        layout["dial_heavy"] = s.dialHeavy
+        layout["width_light_mm"] = s.widthLightMM
+        layout["width_heavy_mm"] = s.widthHeavyMM
+        layout["cells_by_stress"] = s.cellsByStress
+        layout["reference_mpa"] = s.referenceMPa
+        layout["percentile"] = s.percentile
+        layout["response"] = s.response
+        layout["max_step"] = s.maxStep
+        if s.byStress { layout["per_region"] = false }   // core refuses By stress with Per region
+        // an area's own settings (C23), its Finish (S13), zones (D21): one entry per region, null where it states nothing
+        func own(_ o: LatticeLayoutSession.AreaOwn) -> Any {
+            guard o.any else { return NSNull() }
+            var d: [String: Any] = [:]
+            if let v = o.algorithm { d["algorithm"] = v }
+            if let v = o.cellMM { d["cell_mm"] = v }
+            if let v = o.cellMaxMM { d["cell_max_mm"] = v }
+            if let v = o.cellMinMM { d["cell_min_mm"] = v }
+            if let v = o.minCellsAcross { d["min_cells_across"] = Int(v) }
+            if let v = o.gradeToShape { d["grade_to_shape"] = v }
+            if let v = o.bandMM { d["band_mm"] = v }
+            if let v = o.bandCellMM { d["band_cell_mm"] = v }
+            if let v = o.cellsByStress { d["cells_by_stress"] = v }
+            if let v = o.byStress { d["by_stress"] = v }
+            if let v = o.dial { d["dial"] = v }
+            if let v = o.dialLight { d["dial_light"] = v }
+            if let v = o.dialHeavy { d["dial_heavy"] = v }
+            if let v = o.widthMM { d["strut_width_mm"] = v }
+            if let v = o.widthLightMM { d["width_light_mm"] = v }
+            if let v = o.widthHeavyMM { d["width_heavy_mm"] = v }
+            if let v = o.strength { d["strength"] = v }
+            if let v = o.response { d["response"] = v }
+            if let v = o.referenceMPa { d["reference_mpa"] = v }
+            if let v = o.maxStep { d["max_step"] = v }
+            return d
+        }
+        func finish(_ f: LatticeLayoutSession.RegionFinish) -> Any {
+            guard f.any else { return NSNull() }
+            var d: [String: Any] = [:]
+            if let v = f.rimMM { d["rim_mm"] = v }
+            if let v = f.coverMM { d["cover_mm"] = v }
+            if let v = f.skin { d["skin"] = v }
+            if let v = f.skinWidthMM { d["skin_width_mm"] = v }
+            if let v = f.skinReachCells { d["skin_reach_cells"] = v }
+            return d
+        }
+        func zone(_ z: LatticeLayoutSession.Zone?) -> Any {
+            guard let z else { return NSNull() }
+            let v3 = { (v: SIMD3<Double>) -> [Double] in [v.x, v.y, v.z] }
+            switch z.kind {
+            case .box: return ["kind": "box", "centre": v3(z.centre), "axes": z.axes.map(v3), "half_mm": v3(z.half)]
+            case .cylinder: return ["kind": "cylinder", "centre": v3(z.centre), "axis": v3(z.axes.count > 2 ? z.axes[2] : .zero),
+                                    "radius_mm": z.half.x, "half_length_mm": z.half.z]
+            }
+        }
+        if s.regions.contains(where: { $0.own.any }) { layout["region_own"] = s.regions.map { own($0.own) } }
+        if s.regions.contains(where: { $0.finish.any }) { layout["region_finish"] = s.regions.map { finish($0.finish) } }
+        if s.regions.contains(where: { $0.zone != nil }) { layout["region_zones"] = s.regions.map { zone($0.zone) } }
+        var job: [String: Any] = ["mode": "lattice_file", "model": modelName, "output": outputName,
                                   "linear_deflection": linearDeflection, "threads": 0, "layout": layout]
+        if let demand { job["demand"] = demand }
         return try JSONSerialization.data(withJSONObject: job, options: [.sortedKeys])
     }
 }
@@ -93,6 +193,7 @@ public enum LatticeFileRun {
     /// Submit, poll, fetch: blocking, so call it off the main thread. The worker's core must be the app's (a different core lays
     /// a different lattice than the preview drew).
     public static func drive(config: RemoteRunnerConfig, modelPath: String, jobJSON: Data, projectName: String,
+                             demand: Data? = nil,
                              isCancelled: @escaping @Sendable () -> Bool = { false },
                              onState: @escaping @Sendable (_ state: String, _ position: Int?) -> Void = { _, _ in })
         throws -> (stl: Data, report: LatticeFileReport) {
@@ -124,7 +225,13 @@ public enum LatticeFileRun {
         let model = try Data(contentsOf: URL(fileURLWithPath: modelPath))
         let boundary = "topopt-\(UUID().uuidString)"
         var body = Data()
-        for p in RemoteRun.uploadParts(modelPath: modelPath, model: model, jobJSON: jobJSON, projectName: projectName) {
+        var parts = RemoteRun.uploadParts(modelPath: modelPath, model: model, jobJSON: jobJSON, projectName: projectName)
+        // ★ Install 2: the stress result beside the job (the worker saves the "demand" part as demand.bin)
+        if let demand {
+            parts.append(RemoteRun.UploadPart(name: "demand", filename: LatticeFileJob.demandName,
+                                              contentType: "application/octet-stream", data: demand))
+        }
+        for p in parts {
             var head = "Content-Disposition: form-data; name=\"\(p.name)\""
             if let f = p.filename { head += "; filename=\"\(f)\"" }
             if let t = p.contentType { head += "\r\nContent-Type: \(t)" }
@@ -197,6 +304,9 @@ public final class LatticeFileExport: ObservableObject {
     @Published public private(set) var onMac: (state: String, ahead: Int?)?
     public static let noMacLine = "Choose a Mac to make the print file"
     public static let checkLine = "Check it in your slicer before printing"
+    /// ★ Install 2: By stress with no stress result — one line, and the bar offers the check itself.
+    public static let noStressLine = "Grading by stress needs the stress check first"
+    @Published public private(set) var needsStressCheck = false
 
     private final class Flag: @unchecked Sendable {
         private let lock = NSLock()
@@ -210,12 +320,21 @@ public final class LatticeFileExport: ObservableObject {
     public init() {}
 
     /// Make the print file for this part, with the preview's own settings, on the chosen Mac.
-    public func make(project p: ProjectModel, config: RemoteRunnerConfig?) {
+    public func make(project p: ProjectModel, config: RemoteRunnerConfig?, stress: LatticeLayoutPreview.Stress = .init()) {
+        needsStressCheck = false
         guard let config else { state = .failed(Self.noMacLine); return }
         guard let path = p.importedFile?.path else { state = .failed(LatticeLayoutPreview.noPartLine); return }
+        let settings = LatticeLayoutPreview.settings(p, referenceMPa: stress.referenceMPa)
+        let needs = LatticeFileJob.needsStress(settings)
+        var demand: Data?
+        if needs {
+            guard let f = stress.field else { needsStressCheck = true; state = .failed(Self.noStressLine); return }
+            demand = LatticeFileJob.demandFile(f)
+        }
         let job: Data
         do {
-            job = try LatticeFileJob.build(LatticeLayoutPreview.settings(p), modelName: (path as NSString).lastPathComponent)
+            job = try LatticeFileJob.build(settings, modelName: (path as NSString).lastPathComponent,
+                                           demand: needs ? LatticeFileJob.demandName : nil)
         } catch {
             state = .failed("The job could not be written"); return
         }
@@ -226,7 +345,8 @@ public final class LatticeFileExport: ObservableObject {
         state = .making(since: Date())
         Task.detached {
             let outcome: Result<(stl: Data, report: LatticeFileReport), Error> = Result {
-                try LatticeFileRun.drive(config: config, modelPath: path, jobJSON: job, projectName: name, isCancelled: { f.get() },
+                try LatticeFileRun.drive(config: config, modelPath: path, jobJSON: job, projectName: name, demand: demand,
+                                         isCancelled: { f.get() },
                                          onState: { st, pos in
                                              Task { @MainActor [weak self] in
                                                  guard let self, self.token == t else { return }
@@ -261,6 +381,7 @@ public final class LatticeFileExport: ObservableObject {
     public func settingsChanged() {
         if case .making = state { return }
         state = .idle
+        needsStressCheck = false
     }
 }
 
@@ -270,6 +391,8 @@ public final class LatticeFileExport: ObservableObject {
 struct LatticeFileExportBar: View {
     @ObservedObject var export: LatticeFileExport
     let make: () -> Void
+    /// ★ Install 2: the one tap that starts the stage's stress check (By stress with no result yet)
+    var runStressCheck: (() -> Void)? = nil
     @State private var sharing = false
 
     private func chip(_ title: String, key: String, primary: Bool = false, _ action: @escaping () -> Void) -> some View {
@@ -318,7 +441,11 @@ struct LatticeFileExportBar: View {
                 chip("Again", key: "new-engine-export", make)
             case let .failed(line):
                 said(line, warning: true, key: "new-engine-export-failed")
-                chip("Try again", key: "new-engine-export", make)
+                if export.needsStressCheck, let runStressCheck {
+                    chip("Run the stress check", key: "new-engine-export-stress", primary: true, runStressCheck)
+                } else {
+                    chip("Try again", key: "new-engine-export", make)
+                }
             }
         }
         .padding(.horizontal, DS.Space.s)

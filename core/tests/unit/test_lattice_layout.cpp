@@ -6,6 +6,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <functional>
 #include <map>
 #include <stdexcept>
 #include <thread>
@@ -2935,6 +2936,254 @@ static void test_cover() {
   }
 }
 
+// S13: a Lattice region's own Finish (rim, cover, skin). What it does not state it takes from the part's. A 20 x 20 x
+// 12 block as a model (faces 0 bottom, 1 top, 2 front y = 0, 3 x = 20, 4 back, 5 x = 0); region A under its top,
+// region B under its bottom, each 6 mm deep, so they meet at z = 6.
+static StepModel finish_block() {
+  StepModel m;
+  const double x = 20, y = 20, z = 12;
+  const Vec3 p[8] = {{0, 0, 0}, {x, 0, 0}, {x, y, 0}, {0, y, 0}, {0, 0, z}, {x, 0, z}, {x, y, z}, {0, y, z}};
+  const int q[6][4] = {{0, 3, 2, 1}, {4, 5, 6, 7}, {0, 1, 5, 4}, {1, 2, 6, 5}, {2, 3, 7, 6}, {3, 0, 4, 7}};
+  const Vec3 out[6] = {{0, 0, -1}, {0, 0, 1}, {0, -1, 0}, {1, 0, 0}, {0, 1, 0}, {-1, 0, 0}};
+  for (int f = 0; f < 6; ++f) {
+    StepFaceInfo info;
+    info.kind = StepSurfaceKind::Plane;
+    info.plane_normal = out[f];
+    info.plane_origin = p[q[f][0]];
+    m.faces.push_back(info);
+    for (int t = 0; t < 2; ++t) {
+      const int n = static_cast<int>(m.mesh.vertices.size());
+      m.mesh.vertices.insert(m.mesh.vertices.end(), {p[q[f][0]], p[q[f][t ? 2 : 1]], p[q[f][t ? 3 : 2]]});
+      m.mesh.triangles.push_back({n, n + 1, n + 2});
+      m.triangle_face.push_back(f);
+    }
+  }
+  m.face_count = 6;
+  m.solid_count = 1;
+  return m;
+}
+static Settings finish_settings(double expand) {
+  Settings s;
+  s.min_strut_lines = kFewestStrutLines;
+  s.regions = {{1, Role::Lattice, {1}, 6.0, expand}, {2, Role::Lattice, {0}, 6.0, expand}};   // A top, B bottom
+  s.cells.cell_max_mm = 6;
+  return s;
+}
+static void test_area_finish() {
+  const StepModel model = finish_block();
+  auto same = [](const Outcome& x, const Outcome& y) {
+    return x.layout.cells == y.layout.cells && x.layout.solid == y.layout.solid && same_bars(x.bars, y.bars);
+  };
+  auto skin_bars = [](const Outcome& o) {
+    std::size_t n = 0;
+    for (const Bar& b : o.bars.bars) n += b.skin;
+    return n;
+  };
+  // 1. Nothing stated: each part Finish in turn (None, Rim, Skin, Covered) gives the layout and bars it gives with every
+  // region stating the part's own value; and the four are four different layouts.
+  {
+    std::vector<Outcome> laid;
+    for (int finish = 0; finish < 4; ++finish) {
+      Settings plain = finish_settings(finish == 1 ? -3.0 : 0.0);
+      if (finish == 1) plain.rim_mm = -1.0;
+      if (finish == 2) { plain.skin = true; plain.skin_spec.width_mm = 0.5; }
+      if (finish == 3) plain.cover_mm = -1.0;
+      Settings stated = plain;
+      for (Settings::RegionAsk& r : stated.regions) {
+        r.rim_mm = plain.rim_mm;
+        r.cover_mm = plain.cover_mm;
+        r.skin = plain.skin;
+        r.skin_width_mm = plain.skin_spec.width_mm;
+        r.skin_reach_cells = plain.skin_spec.reach_cells;
+      }
+      const Outcome a = Session(model).lay(plain), b = Session(model).lay(stated);
+      CHECK(!a.layout.cells.empty() && !a.bars.bars.empty());
+      CHECK(same(a, b));
+      laid.push_back(a);
+    }
+    CHECK(skin_bars(laid[0]) == 0 && skin_bars(laid[2]) > 20);
+    CHECK(!(laid[0].layout.cells == laid[3].layout.cells));   // the cover moved the cells
+    Session s(model);
+    const Outcome rimmed = s.lay([&] { Settings r = finish_settings(-3.0); r.rim_mm = -1.0; return r; }());
+    CHECK((s.domain()->probe().where({3.5, 10, 9}) == Where{Why::Rim, 1}));
+    CHECK((s.domain()->probe().where({3.5, 10, 3}) == Where{Why::Rim, 2}));
+  }
+  // 2. Part Rim (two lines, 0.9 mm), A states rim 0: rim along B's backed edges, lattice along A's.
+  {
+    Settings st = finish_settings(-3.0);   // pulled 3 mm in: solid backs every edge
+    st.rim_mm = -1.0;
+    st.regions[0].rim_mm = 0.0;
+    Session s(model);
+    s.lay(st);
+    const Domain::Probe pr = s.domain()->probe();
+    int a_rim = 0, b_lattice = 0, asked = 0;
+    for (double t = 4; t <= 16; t += 0.5)
+      for (const Vec3& p : {Vec3{3.5, t, 9}, Vec3{16.5, t, 9}, Vec3{t, 3.5, 9}, Vec3{t, 16.5, 10.5}}) {
+        ++asked;
+        a_rim += !(pr.where(p) == Where{Why::Lattice, 1});
+        b_lattice += !(pr.where(Vec3{p.x, p.y, 12 - p.z}) == Where{Why::Rim, 2});
+      }
+    CHECK(asked > 90 && a_rim == 0 && b_lattice == 0);
+    CHECK((pr.where({10, 10, 9}) == Where{Why::Lattice, 1}) && (pr.where({10, 10, 3}) == Where{Why::Lattice, 2}));
+  }
+  // 3. Part no rim, A states rim 1.5: rim within 1.5 mm of A's backed edges only, a hair inside 1.5 rim, a hair outside
+  // lattice; B has none.
+  {
+    Settings st = finish_settings(-3.0);
+    st.regions[0].rim_mm = 1.5;
+    Session s(model);
+    s.lay(st);
+    const Domain::Probe pr = s.domain()->probe();
+    int wrong = 0;
+    for (double t = 5; t <= 15; t += 0.25) {
+      for (double z : {6.5, 9.0, 11.5}) {
+        wrong += !(pr.where({3 + 1.5 - 0.01, t, z}) == Where{Why::Rim, 1});
+        wrong += !(pr.where({3 + 1.5 + 0.01, t, z}) == Where{Why::Lattice, 1});
+        wrong += !(pr.where({t, 17 - 1.5 + 0.01, z}) == Where{Why::Rim, 1});
+        wrong += !(pr.where({t, 17 - 1.5 - 0.01, z}) == Where{Why::Lattice, 1});
+        wrong += !(pr.where({3.2, t, 12 - z}) == Where{Why::Lattice, 2});   // B: no rim of its own, none of the part's
+      }
+    }
+    CHECK(wrong == 0);
+  }
+  // A's and B's cells: the shallowest any of them starts below its own face.
+  auto first_below_face = [](const Outcome& o, int region) {
+    double first = 1e9;
+    for (const Cell& c : o.layout.cells)
+      if (c.region == region) first = std::min(first, c.lo[2]);
+    return first;
+  };
+  // 4. Part no cover, A states cover 0.9: A's lattice within 0.9 mm of the part's surface is solid and its cells start
+  // behind it; B's lattice runs to the surface as today.
+  {
+    Settings st = finish_settings(-3.0);
+    st.regions[0].cover_mm = 0.9;
+    Session s(model);
+    const Outcome o = s.lay(st);
+    const Domain::Probe pr = s.domain()->probe();
+    CHECK((pr.where({10, 10, 12 - 0.45}) == Where{Why::Cover, 1}));
+    CHECK((pr.where({10, 10, 12 - 0.89}) == Where{Why::Cover, 1}));
+    CHECK((pr.where({10, 10, 12 - 0.91}) == Where{Why::Lattice, 1}));
+    CHECK((pr.where({10, 10, 0.2}) == Where{Why::Lattice, 2}));
+    NEAR(first_below_face(o, 1), 0.9, 1e-5);
+    NEAR(first_below_face(o, 2), 0.0, 1e-9);
+    // Its cells divide what is left of its 6 mm exactly (C15): one layer of 5.1 mm.
+    int a = 0, other = 0;
+    for (const Cell& c : o.layout.cells)
+      if (c.region == 1) { ++a; other += std::fabs(c.size - 5.1) > 1e-5; }
+    CHECK(a > 0 && other == 0);
+  }
+  // 5. Part cover on (0.9), A states cover 0: A is not covered, B is.
+  {
+    Settings st = finish_settings(-3.0);
+    st.cover_mm = 0.9;
+    st.regions[0].cover_mm = 0.0;
+    Session s(model);
+    const Outcome o = s.lay(st);
+    const Domain::Probe pr = s.domain()->probe();
+    CHECK((pr.where({10, 10, 12 - 0.2}) == Where{Why::Lattice, 1}));
+    CHECK((pr.where({10, 10, 0.45}) == Where{Why::Cover, 2}));
+    CHECK((pr.where({10, 10, 0.91}) == Where{Why::Lattice, 2}));
+    NEAR(first_below_face(o, 1), 0.0, 1e-9);
+    NEAR(first_below_face(o, 2), 0.9, 1e-5);
+  }
+  // The regions of the bars whose cut ends lie at a point (1 = A, 2 = B, 3 = both), from the bars as laid.
+  auto ends_of = [](const Outcome& o) {
+    std::map<std::array<double, 3>, int> at;
+    for (const Bar& b : o.bars.bars) {
+      if (b.skin) continue;
+      for (int e = 0; e < 2; ++e) {
+        const Bar::End k = e ? b.end_b : b.end_a;
+        if (k != Bar::End::Surface && k != Bar::End::Joined) continue;
+        const Vec3& p = e ? b.b : b.a;
+        at[{p.x, p.y, p.z}] |= b.region == 1 ? 1 : 2;
+      }
+    }
+    return at;
+  };
+  auto mask_at = [](const std::map<std::array<double, 3>, int>& m, const Vec3& p) {
+    const auto it = m.find({p.x, p.y, p.z});
+    return it == m.end() ? 0 : it->second;
+  };
+  // 6. Part Skin off, A states Skin on: skin bars exist; every one joins ends of A's bars, and no end of B's is joined.
+  {
+    Settings st = finish_settings(0.0);   // the whole faces: the block's sides cut both regions' cells
+    st.drop_loose = false;
+    st.regions[0].skin = true;
+    const Outcome o = Session(model).lay(st);
+    const auto ends = ends_of(o);
+    int not_a = 0, b_joined = 0, b_cut = 0;
+    for (const Bar& b : o.bars.bars)
+      if (b.skin) {
+        not_a += !(mask_at(ends, b.a) & 1) || !(mask_at(ends, b.b) & 1);
+      } else if (b.region == 2) {
+        for (int e = 0; e < 2; ++e) {
+          const Bar::End k = e ? b.end_b : b.end_a;
+          const int into = e ? b.into_b : b.into_a;
+          b_cut += k == Bar::End::Surface;
+          b_joined += k == Bar::End::Joined && into >= 0 && o.bars.bars[static_cast<std::size_t>(into)].skin;
+        }
+      }
+    CHECK(skin_bars(o) > 20);
+    CHECK(not_a == 0 && b_joined == 0 && b_cut > 20);
+  }
+  // 7. Both on, with different widths and reach (A 0.8 mm and 1.5 cells, B 0.6 mm and 0.6 cells): a bar between A's
+  // ends has A's width; a bar joining A to B has the smaller width and is no longer than the smaller reach allows.
+  {
+    Settings st = finish_settings(0.0);
+    st.drop_loose = false;
+    st.regions[0].skin = true; st.regions[0].skin_width_mm = 0.8; st.regions[0].skin_reach_cells = 1.5;
+    st.regions[1].skin = true; st.regions[1].skin_width_mm = 0.6; st.regions[1].skin_reach_cells = 0.6;
+    const Outcome o = Session(model).lay(st);
+    const auto ends = ends_of(o);
+    int in_a = 0, in_b = 0, a_to_b = 0, wrong_width = 0, too_long = 0, past_b_reach = 0;
+    for (const Bar& b : o.bars.bars) {
+      if (!b.skin) continue;
+      const int m = mask_at(ends, b.a), n = mask_at(ends, b.b);
+      const double len = bar_length(b);
+      if (m == 1 && n == 1) {
+        ++in_a;
+        wrong_width += std::fabs(b.width - 0.8) > 1e-12;
+        too_long += len > 1.5 * b.cell + 1e-9;
+        past_b_reach += len > 0.6 * b.cell + 1e-9;
+      } else if (m == 2 && n == 2) {
+        ++in_b;
+        wrong_width += std::fabs(b.width - 0.6) > 1e-12;
+        too_long += len > 0.6 * b.cell + 1e-9;
+      } else if ((m == 1 && n == 2) || (m == 2 && n == 1)) {
+        ++a_to_b;
+        wrong_width += std::fabs(b.width - 0.6) > 1e-12;
+        too_long += len > 0.6 * b.cell + 1e-9;
+      }
+    }
+    std::printf("area finish: skin bars %d in A, %d in B, %d A to B (%d of A's longer than B's reach)\n", in_a, in_b,
+                a_to_b, past_b_reach);
+    CHECK(in_a > 10 && in_b > 10 && a_to_b > 0 && past_b_reach > 0);
+    CHECK(wrong_width == 0 && too_long == 0);
+  }
+  // 8. A's own rim or cover change reads the part again; its skin change does not.
+  {
+    Session s(model);
+    Settings st = finish_settings(-3.0);
+    CHECK(s.lay(st).read_again);
+    st.regions[0].rim_mm = 1.5;
+    CHECK(s.lay(st).read_again);
+    CHECK(!s.lay(st).read_again);
+    st.regions[0].cover_mm = 0.9;
+    CHECK(s.lay(st).read_again);
+    st.regions[0].cover_mm = 1.2;
+    CHECK(s.lay(st).read_again);
+    st.regions[0].skin = true;
+    const Outcome skinned = s.lay(st);
+    CHECK(!skinned.read_again && same(skinned, Session(model).lay(st)));
+    st.regions[0].skin_width_mm = 0.7;
+    st.regions[0].skin_reach_cells = 1.0;
+    CHECK(!s.lay(st).read_again);
+    st.regions[0].rim_mm.reset();   // back to the part's
+    CHECK(s.lay(st).read_again);
+  }
+}
+
 // P2, stage E: the session the app holds for a part. A cell or strut setting re-lays
 // without reading the part again; a "where" setting reads it again; either way the
 // layout is the one a fresh session gives.
@@ -3856,9 +4105,9 @@ static void test_one_grid_smallest_cut() {
       cut += c.cut;
     }
     CHECK(!l.cells.empty() && l.solid.empty());                    // the smallest is cut, never refused
-    // C21: under the face, the slot cuts exactly half of the 12 mm cubes (2 of 4 columns): half is not more than half,
-    // so the main size is 6 mm (all its first-layer cubes whole), and the slot is lined with smaller cells.
-    CHECK(smallest < 6.0 && largest == 6.0 && cut > 0);
+    // C21 withdrawn: the slot cuts 2 of the 4 columns of 12 mm cubes under the face; the other two stand as 12 mm cells,
+    // and the slot is lined with smaller cells.
+    CHECK(smallest < 6.0 && largest == 12.0 && cut > 0);
     const C20 r = c20_count(d, l, smallest);
     CHECK(r.cut_large == 0);                                       // every cut cell is the smallest
     CHECK(r.large_not_whole == 0);                                 // every larger cell is whole (53 points)
@@ -3932,8 +4181,9 @@ static void test_one_grid_smallest_cut() {
               tally[0], tally[1], tally[2]);
 }
 
-// C21 with Let walls cut cells on: a region's face shows one main cell size, the largest size of its ladder at which more
-// than half of the cubes on its face stand whole. A few large cells in a field of small ones are not laid.
+// C21, WITHDRAWN by the owner 2026-11-14 ("if grading is on and a larger cell size can fit, it SHOULD fit"): with Let walls
+// cut cells on, a larger cell that lies whole in lattice IS laid, however few of them there are on the face. These were
+// C21's cases; their checks now assert the opposite where it mattered.
 static void test_one_grid_main_size() {
   auto lay_part = [](const std::vector<std::array<double, 2>>& section, Algorithm algo, double cell_max, int threads,
                      bool one_grid) {
@@ -3954,19 +4204,20 @@ static void test_one_grid_main_size() {
   };
   long tally[4] = {0, 0, 0, 0};
   // (1) His back plate: 6 mm behind the face under 8 mm cubes, with one boss 12 mm thick (x 32..40) where a column
-  // of 8 mm cubes would stand whole: 8 of 64, so the main size is 4 mm; no cell larger anywhere in the region.
+  // of 8 mm cubes stands whole: those 8 cubes are 8 mm cells; the rest of the plate is cut down to 4 mm (C20).
   const std::vector<std::array<double, 2>> plate = {{0, 0}, {64, 0}, {64, 6}, {40, 6}, {40, 12}, {32, 12}, {32, 6}, {0, 6}};
   for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
     const Layout l = lay_part(plate, algo, 8, 0, true);
-    int at_face = 0, other = 0;
+    int large = 0, other = 0;
     for (const Cell& c : l.cells) {
-      if (c.lo[2] == l.cells.front().lo[2]) ++at_face;
-      if (std::fabs(c.size - 4.0) > 1e-9) ++other;
+      if (c.size == 8.0) ++large;
+      else if (std::fabs(c.size - 4.0) > 1e-9) ++other;
     }
-    CHECK(!l.cells.empty() && l.solid.empty() && largest(l) == 4.0);      // no cell above the main size
-    // Halves (a ladder of two sizes here, 8 and 4): every cell, on the face and below it, is 4 mm. (Stepped packs each
-    // 8 mm cube from one unit of its own below the main size, C6c; its 6 mm plate takes 8/3 mm units.)
-    if (algo == Algorithm::DefaultGrade) CHECK(at_face == 16 * 16 && other == 0);
+    CHECK(!l.cells.empty() && l.solid.empty() && largest(l) == 8.0);      // the boss's whole 8 mm cubes are laid
+    // Halves (a ladder of two sizes here, 8 and 4): the boss's 8 cubes are 8 mm cells, every other cell 4 mm.
+    // (Stepped packs the plate's cubes from one unit of their own, C6c.)
+    CHECK(large == 8);
+    if (algo == Algorithm::DefaultGrade) CHECK(other == 0);
     CHECK(lay_part(plate, algo, 8, 1, true).cells == l.cells && lay_part(plate, algo, 8, 3, true).cells == l.cells);
     tally[0] += static_cast<long>(l.cells.size());
   }
@@ -4002,16 +4253,16 @@ static void test_one_grid_main_size() {
     CHECK(lay_cells(d, cs, 1).cells == l.cells && lay_cells(d, cs, 3).cells == l.cells);
     tally[1] = large, tally[2] = small;
   }
-  // (3) Exactly half is not more than half: 5 mm behind the face for x < 32, 24 mm for x > 32, so 4 of the 8 columns of
-  // 8 mm cubes are whole: the main size is 4 mm. With the step at x = 24 (5 of 8 whole) it is 8 mm.
+  // (3) 5 mm behind the face for x < 32, 24 mm for x > 32 (4 of the 8 columns of 8 mm cubes whole), and the same with the
+  // step at x = 24 (5 of 8 whole): both lay 8 mm cells where they are whole.
   for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
     const Layout half = lay_part({{0, 0}, {64, 0}, {64, 24}, {32, 24}, {32, 5}, {0, 5}}, algo, 8, 0, true);
     const Layout more = lay_part({{0, 0}, {64, 0}, {64, 24}, {24, 24}, {24, 5}, {0, 5}}, algo, 8, 0, true);
-    CHECK(largest(half) == 4.0 && largest(more) == 8.0);
+    CHECK(largest(half) == 8.0 && largest(more) == 8.0);
     tally[3] += static_cast<long>(half.cells.size());
   }
-  std::printf("main size: a 6 mm plate with a boss is %ld cells of 4 mm (halves and Stepped); a slotted block keeps %ld "
-              "cells of 8 mm and %ld smaller; exactly half whole: 4 mm cells (%ld)\n", tally[0], tally[1], tally[2], tally[3]);
+  std::printf("no main size: a 6 mm plate with a boss is %ld cells (halves and Stepped); a slotted block keeps %ld "
+              "cells of 8 mm and %ld smaller; half the columns whole: %ld cells\n", tally[0], tally[1], tally[2], tally[3]);
 }
 
 static void test_one_grid() {
@@ -4076,15 +4327,15 @@ static void test_one_grid() {
           if (std::fabs(c.size - 12.0) < 1e-9 && !c.cut) ++base_whole;
         }
         CHECK(not_mine == 0 && smallest < 12.0 - 1e-9);
-        // C21: only 2 of the 5 columns of 12 mm cubes under the face are whole (x < 24), under half, so the region's
-        // main size is 6 mm: no 12 mm cell, and every 6 mm cube under the face is one whole 6 mm cell.
+        // C21 withdrawn: the 2 of the 5 columns of 12 mm cubes under the face that are whole (x < 24) are 12 mm cells;
+        // beyond them every 6 mm cube under the face is one whole 6 mm cell.
         double largest = 0.0;
         int six_whole = 0;
         for (const Cell& c : l.cells) {
           largest = std::max(largest, c.size);
           if (std::fabs(c.size - 6.0) < 1e-9 && !c.cut && c.lo[2] == l.cells.front().lo[2]) ++six_whole;
         }
-        CHECK(base_whole == 0 && largest == 6.0 && six_whole == 10 * 10);
+        CHECK(base_whole == 2 * 5 && largest == 12.0 && six_whole == 6 * 10);
       }
       int n = 0;
       const int a1 = holder(d, l, thick, &n);
@@ -4207,9 +4458,9 @@ static void test_one_grid() {
       // the step or the thin wall's far side cuts the cube).
       double o[3] = {1e300, 1e300, 1e300};
       for (const Cell& c : l.cells) for (int k = 0; k < 3; ++k) o[k] = std::min(o[k], c.lo[k]);
-      // C21: 24 of the 64 12 mm cubes under the face are whole (x < 36), under half, so the region's main size is 6 mm
-      // (all its first-layer cubes whole): the checks below read the main size M where they read the base cell.
-      const double M = 6.0;
+      // C21 withdrawn (the owner, 2026-11-14): the 24 of the 64 12 mm cubes under the face that are whole (x < 36) are
+      // base cells, however few; M below is the base cell.
+      const double M = 12.0;
       auto parent_whole = [&](const Layout& lay, const Cell& c) {
         double p[3];
         for (int k = 0; k < 3; ++k) p[k] = o[k] + M * std::floor((c.lo[k] - o[k]) / M + 1e-9);
@@ -4262,7 +4513,7 @@ static void test_one_grid() {
       {
         const C20 r = c20(d, l, f);
         CHECK(r.cut_large == 0 && r.large_not_whole == 0);          // C20: only the smallest is cut
-      CHECK(all.size() >= 2 && all.rbegin()->first == 6000);   // it steps, and no cell is above the main size (C21)
+      CHECK(all.size() >= 2 && all.rbegin()->first == 12000);  // it steps, and the whole base cubes are base cells
       }
       // Away from the outline, every base cube that is whole is one base cell (of the 6 x 6 whose centres are a band
       // inside, those the step and the thin wall's far side do not cut).
@@ -4483,7 +4734,2624 @@ static void test_solid_why() {
   std::printf("solid why: %d fixes tried, each lays cells where the reason was\n", fixed);
 }
 
+// Install 2a, step 1: the stress result (R16, R17). Indexing as core's VoxelGrid; the highest value in a box reads
+// exactly the voxels that share volume with it; the part's own reference is the percentile over its lattice space.
+static void test_demand_field() {
+  {  // Indexing and emptiness.
+    DemandField f;
+    CHECK(f.empty());
+    f.nx = 5; f.ny = 4; f.nz = 3; f.spacing = 2.0;
+    CHECK(f.empty());                       // no values
+    f.mpa.assign(60, 0.0f);
+    CHECK(!f.empty());
+    f.spacing = 0.0;
+    CHECK(f.empty());
+    f.spacing = 2.0;
+    f.mpa.push_back(1.0f);
+    CHECK(f.empty());                       // one value too many
+    f.mpa.pop_back();
+    CHECK(f.index(0, 0, 0) == 0 && f.index(1, 0, 0) == 1 && f.index(0, 1, 0) == 5 && f.index(0, 0, 1) == 20);
+    CHECK(f.index(4, 3, 2) == 59);
+    CHECK(f.highest_in({-100, -100, -100}, {100, 100, 100}) == 0.0);   // all cold
+  }
+  {  // One hot voxel: exactly the boxes that share volume with it see it.
+    DemandField f;
+    f.origin = {1, 2, 3};
+    f.spacing = 2.0;
+    f.nx = 5; f.ny = 4; f.nz = 3;
+    f.mpa.assign(60, 0.0f);
+    f.mpa[f.index(2, 1, 1)] = 7.0f;
+    const double vlo[3] = {5, 4, 5}, vhi[3] = {7, 6, 7};   // that voxel's cube
+    int seen = 0, unseen = 0, wrong = 0;
+    for (double x0 = -1.0; x0 <= 12.0; x0 += 1.0)
+      for (double y0 = 0.0; y0 <= 11.0; y0 += 1.0)
+        for (double z0 = 1.0; z0 <= 10.0; z0 += 1.5)
+          for (double s : {0.5, 1.0, 2.0, 3.5}) {
+            const double lo[3] = {x0, y0, z0}, hi[3] = {x0 + s, y0 + s * 0.5, z0 + s};
+            bool overlap = true;
+            for (int a = 0; a < 3; ++a) overlap = overlap && std::min(hi[a], vhi[a]) > std::max(lo[a], vlo[a]);
+            const double got = f.highest_in({lo[0], lo[1], lo[2]}, {hi[0], hi[1], hi[2]});
+            if (got != (overlap ? 7.0 : 0.0)) ++wrong;
+            (overlap ? seen : unseen)++;
+          }
+    CHECK(wrong == 0);
+    CHECK(seen > 50 && unseen > 500);
+    // Touching the voxel on a face only is not overlapping it; a box with no width inside it is.
+    CHECK(f.highest_in({7, 4, 5}, {9, 6, 7}) == 0.0);
+    CHECK(f.highest_in({6.9, 4, 5}, {9, 6, 7}) == 7.0);
+    CHECK(f.highest_in({6, 5, 6}, {6, 5, 6}) == 7.0);
+    // A box outside the grid sees 0; one round the whole grid sees the hot voxel.
+    CHECK(f.highest_in({20, 20, 20}, {30, 30, 30}) == 0.0);
+    CHECK(f.highest_in({-9, -9, -9}, {1, 2, 3}) == 0.0);
+    CHECK(f.highest_in({-100, -100, -100}, {100, 100, 100}) == 7.0);
+  }
+  {  // The highest of many: against reading every voxel.
+    DemandField f;
+    f.origin = {-3, 0, 0};
+    f.spacing = 1.5;
+    f.nx = 7; f.ny = 6; f.nz = 5;
+    f.mpa.resize(210);
+    for (std::size_t n = 0; n < f.mpa.size(); ++n) f.mpa[n] = static_cast<float>((n * 37) % 101);
+    int wrong = 0;
+    for (double x0 = -4.0; x0 < 8.0; x0 += 0.7)
+      for (double y0 = -1.0; y0 < 9.0; y0 += 1.1) {
+        const Vec3 lo{x0, y0, 1.2}, hi{x0 + 2.3, y0 + 1.9, 4.6};
+        double want = 0.0;
+        for (int k = 0; k < f.nz; ++k)
+          for (int j = 0; j < f.ny; ++j)
+            for (int i = 0; i < f.nx; ++i) {
+              const double a0 = -3 + 1.5 * i, b0 = 1.5 * j, c0 = 1.5 * k;
+              if (std::min(hi.x, a0 + 1.5) > std::max(lo.x, a0) && std::min(hi.y, b0 + 1.5) > std::max(lo.y, b0) &&
+                  std::min(hi.z, c0 + 1.5) > std::max(lo.z, c0))
+                want = std::max(want, static_cast<double>(f.mpa[f.index(i, j, k)]));
+            }
+        if (f.highest_in(lo, hi) != want) ++wrong;
+      }
+    CHECK(wrong == 0);
+  }
+  {  // R17: the part's own reference, a block with a known ramp. 40 x 40 x 20 mm, voxels of 2 mm: 4,000 voxels in
+     // the part, 200 of each value 0 .. 19 (the value is the voxel's i). Sorted, 95% is index floor(0.95 x 3999) =
+     // 3799, value 18. A ring of voxels outside the part, all at 1000 MPa, never counts.
+    PartMeasure pm(weld_mesh(box(40, 40, 20)));
+    DomainSpec s;
+    s.start = Start::AllLattice;
+    Domain d(pm, s);
+    DemandField f;
+    f.origin = {-2, -2, -2};
+    f.spacing = 2.0;
+    f.nx = 22; f.ny = 22; f.nz = 12;
+    f.mpa.assign(static_cast<std::size_t>(22) * 22 * 12, 1000.0f);
+    for (int k = 1; k <= 10; ++k)
+      for (int j = 1; j <= 20; ++j)
+        for (int i = 1; i <= 20; ++i) f.mpa[f.index(i, j, k)] = static_cast<float>(i - 1);
+    NEAR(stress_reference(d, f, 0.95), 18.0, 0.0);
+    NEAR(stress_reference(d, f, 0.95, 1), 18.0, 0.0);   // the same for any number of threads
+    NEAR(stress_reference(d, f, 0.0), 0.0, 0.0);
+    NEAR(stress_reference(d, f, 1.0), 19.0, 0.0);
+    NEAR(stress_reference(d, f, 0.5), 9.0, 0.0);         // index 1999: value 9
+    // Nothing is lattice: 0. An empty field: 0.
+    Domain none(pm, {});
+    NEAR(stress_reference(none, f, 0.95), 0.0, 0.0);
+    NEAR(stress_reference(d, DemandField{}, 0.95), 0.0, 0.0);
+    // Only lattice space counts: a No lattice region over x < 20 leaves the values 10 .. 19 (2,000 voxels; zero-
+    // valued voxels count where they are lattice, and here there are none). 95%: index 1899, value 19.
+    DomainSpec half = s;
+    half.regions.push_back(face_region(2, Role::NoLattice, {0, 20, 10}, {1, 0, 0}, 20, 20, 20));
+    Domain dh(pm, half);
+    NEAR(stress_reference(dh, f, 0.95), 19.0, 0.0);
+    NEAR(stress_reference(dh, f, 0.0), 10.0, 0.0);
+  }
+}
+
+// The axis-aligned box round a cell's cube (R16).
+static void cell_box(const Layout& l, const Cell& c, Vec3* lo, Vec3* hi) {
+  const Frame& fr = l.frames[static_cast<std::size_t>(c.frame)];
+  for (int k = 0; k < 8; ++k) {
+    const Vec3 p = fr.at(c.lo[0] + ((k & 1) ? c.size : 0.0), c.lo[1] + ((k & 2) ? c.size : 0.0),
+                         c.lo[2] + ((k & 4) ? c.size : 0.0));
+    if (k == 0) { *lo = *hi = p; continue; }
+    *lo = {std::min(lo->x, p.x), std::min(lo->y, p.y), std::min(lo->z, p.z)};
+    *hi = {std::max(hi->x, p.x), std::max(hi->y, p.y), std::max(hi->z, p.z)};
+  }
+}
+// A field of 1 mm voxels over [0, nx] x [0, ny] x [0, nz], every voxel `value(i, j, k)`.
+template <class F>
+static std::shared_ptr<DemandField> field_of(int nx, int ny, int nz, F value, Vec3 origin = {0, 0, 0}) {
+  auto f = std::make_shared<DemandField>();
+  f->origin = origin;
+  f->spacing = 1.0;
+  f->nx = nx; f->ny = ny; f->nz = nz;
+  f->mpa.resize(static_cast<std::size_t>(nx) * ny * nz);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) f->mpa[f->index(i, j, k)] = static_cast<float>(value(i, j, k));
+  return f;
+}
+
+// Install 2a, steps 2 and 4: By stress in set_struts (R7, R8, R12, R16, R17, R18; 02-tests.md R7a to R18a).
+static void test_by_stress() {
+  // A slab 96 x 16 x 8 mm, all lattice, 4 mm cells. The stress ramps 0 -> 100 MPa along its length: 0 over the first
+  // 4 mm, 100 over the last 4 mm, even steps between (by each voxel's middle).
+  PartMeasure pm(weld_mesh(box(96, 16, 8)));
+  DomainSpec ds;
+  ds.start = Start::AllLattice;
+  Domain dom(pm, ds);
+  CellSpec cs;
+  cs.algorithm = Algorithm::Uniform;
+  cs.cell_mm = 4.0;
+  const Layout base = lay_cells(dom, cs);
+  CHECK(base.cells.size() == 24 * 4 * 2);
+  const auto ramp = field_of(96, 16, 8, [](int i, int, int) {
+    return std::clamp((i + 0.5 - 4.0) / 88.0 * 100.0, 0.0, 100.0);
+  });
+  // The dial's strut / cell, as the Uniform mode reads it on the largest cell (R10).
+  const auto ratio_of = [&](double dial) {
+    Layout l = base;
+    StrutSpec u;
+    u.dial = dial;
+    set_struts(l, u);
+    return l.cells[0].strut / l.cells[0].size;
+  };
+  const double r2 = ratio_of(0.2), r8 = ratio_of(0.8);
+  CHECK(r8 > r2 + 0.01);
+  StrutSpec sp;
+  sp.mode = Density::ByStress;
+  sp.dial_light = 0.2;
+  sp.dial_heavy = 0.8;
+  sp.demand = ramp;
+  sp.reference_mpa = 100.0;
+  const auto f_of = [&](const Layout& l, const Cell& c, double ref) {
+    Vec3 lo, hi;
+    cell_box(l, c, &lo, &hi);
+    return std::clamp(ramp->highest_in(lo, hi) / ref, 0.0, 1.0);
+  };
+  {  // 1. Along the ramp the strut / cell never falls; the 0 end is at dial 0.2, the 100 end at dial 0.8; every cell
+     // matches the formula for its own highest voxel.
+    Layout l = base;
+    const StrutReport r = set_struts(l, sp);
+    CHECK(!r.no_stress);
+    NEAR(r.reference_mpa, 100.0, 0.0);
+    NEAR(r.highest_mpa, 100.0, 1e-9);
+    std::vector<std::pair<double, double>> along;   // (cell's middle x, strut / cell)
+    int light = 0, heavy = 0, wrong = 0;
+    for (const Cell& c : l.cells) {
+      const double f = f_of(l, c, 100.0);
+      const double want = (r2 + f * (r8 - r2)) * c.size;
+      if (std::fabs(c.strut - want) > 1e-9) ++wrong;
+      if (f == 0.0) { ++light; NEAR(c.strut, r2 * c.size, 1e-9); }
+      if (f == 1.0) { ++heavy; NEAR(c.strut, r8 * c.size, 1e-9); }
+      Vec3 lo, hi;
+      cell_box(l, c, &lo, &hi);
+      along.push_back({0.5 * (lo.x + hi.x), c.strut / c.size});
+    }
+    CHECK(wrong == 0);
+    CHECK(light == 8 && heavy == 8);   // one column of 4 x 2 cells at each end
+    CHECK(r.at_light == 8 && r.at_heavy == 8);
+    std::sort(along.begin(), along.end());
+    int falls = 0;
+    for (std::size_t i = 1; i < along.size(); ++i)
+      if (along[i].second < along[i - 1].second - 1e-12) ++falls;
+    CHECK(falls == 0);
+    CHECK(along.back().second > along.front().second + 0.01);
+    // Ends given the wrong way round are swapped.
+    Layout sw = base;
+    StrutSpec s2 = sp;
+    std::swap(s2.dial_light, s2.dial_heavy);
+    set_struts(sw, s2);
+    CHECK(sw.cells == l.cells);
+  }
+  {  // 2. Response 2 makes every in-between cell thinner than response 1 and leaves both ends alone.
+    Layout one = base, two = base;
+    set_struts(one, sp);
+    StrutSpec s2 = sp;
+    s2.response = 2.0;
+    set_struts(two, s2);
+    int between = 0, thinner = 0, ends_same = 0, ends = 0;
+    for (std::size_t i = 0; i < one.cells.size(); ++i) {
+      const double f = f_of(one, one.cells[i], 100.0);
+      if (f > 0.0 && f < 1.0) { ++between; if (two.cells[i].strut < one.cells[i].strut - 1e-12) ++thinner; }
+      else { ++ends; if (two.cells[i].strut == one.cells[i].strut) ++ends_same; }
+    }
+    CHECK(between > 100 && thinner == between);
+    CHECK(ends == 16 && ends_same == ends);
+    // The response is held to 0.25 .. 4.
+    Layout big = base, four = base;
+    s2.response = 40.0;
+    set_struts(big, s2);
+    s2.response = 4.0;
+    set_struts(four, s2);
+    CHECK(big.cells == four.cells);
+  }
+  {  // 4. One hot voxel: exactly the cells whose cube's box shares volume with it change. Every other voxel is 10 MPa.
+     // The voxel [3.5, 4.5] x [3.5, 4.5] x [3.5, 4.5] straddles the corner of eight 4 mm cells.
+    const Vec3 at{-0.5, -0.5, -0.5};
+    const auto cold = field_of(98, 18, 10, [](int, int, int) { return 10.0; }, at);
+    const auto hot = field_of(98, 18, 10, [](int i, int j, int k) { return i == 4 && j == 4 && k == 4 ? 90.0 : 10.0; }, at);
+    StrutSpec s = sp;
+    Layout a = base, b = base;
+    s.demand = cold;
+    set_struts(a, s);
+    s.demand = hot;
+    set_struts(b, s);
+    int changed = 0, overlapping = 0, wrong = 0;
+    for (std::size_t i = 0; i < a.cells.size(); ++i) {
+      Vec3 lo, hi;
+      cell_box(a, a.cells[i], &lo, &hi);
+      const bool over = std::min(hi.x, 4.5) > std::max(lo.x, 3.5) && std::min(hi.y, 4.5) > std::max(lo.y, 3.5) &&
+                        std::min(hi.z, 4.5) > std::max(lo.z, 3.5);
+      const bool moved = a.cells[i].strut != b.cells[i].strut;
+      if (over != moved) ++wrong;
+      changed += moved;
+      overlapping += over;
+    }
+    CHECK(wrong == 0);
+    CHECK(overlapping == 8 && changed == 8);
+  }
+  {  // 5. No field (null or empty), or no reference: every cell at its light end, and the report says so (R18).
+    for (int how = 0; how < 3; ++how) {
+      StrutSpec s = sp;
+      if (how == 0) s.demand = nullptr;
+      if (how == 1) s.demand = std::make_shared<DemandField>();
+      if (how == 2) s.reference_mpa = 0.0;
+      Layout l = base;
+      const StrutReport r = set_struts(l, s);
+      CHECK(r.no_stress);
+      CHECK(r.at_light == l.cells.size() && r.at_heavy == 0);
+      for (const Cell& c : l.cells) NEAR(c.strut, r2 * c.size, 1e-9);
+    }
+    // Uniform and PerRegion read none of it: the same as with no stress settings at all, and the report is as before.
+    for (Density m : {Density::Uniform, Density::PerRegion}) {
+      StrutSpec plain;
+      plain.mode = m;
+      plain.dial = 0.6;
+      plain.region_dial = {{0, 0.3}};
+      StrutSpec withs = sp;
+      withs.mode = m;
+      withs.dial = 0.6;
+      withs.region_dial = {{0, 0.3}};
+      Layout x = base, y = base;
+      const StrutReport rx = set_struts(x, plain), ry = set_struts(y, withs);
+      CHECK(x.cells == y.cells);
+      CHECK(!ry.no_stress && ry.reference_mpa == 0.0 && ry.highest_mpa == 0.0 && ry.at_light == 0 && ry.at_heavy == 0);
+      CHECK(rx.at_bead == ry.at_bead && rx.at_ceiling == ry.at_ceiling);
+    }
+  }
+  {  // 6. The cells of a ByStress layout equal the Uniform layout's in everything but the strut.
+    Layout s = base, u = base;
+    set_struts(s, sp);
+    set_struts(u, StrutSpec{});
+    int differ = 0;
+    for (std::size_t i = 0; i < s.cells.size(); ++i) {
+      Cell x = s.cells[i], y = u.cells[i];
+      x.strut = y.strut = 0.0;
+      if (!(x == y)) ++differ;
+    }
+    CHECK(differ == 0 && s.solid == u.solid);
+  }
+  {  // 7. Widths in mm: every strut lies between the two widths, the same in every cell size; the ends exact where the
+     // cell can hold them, and the widest allowed where it cannot.
+    StrutSpec s = sp;
+    s.width_light_mm = 0.5;
+    s.width_heavy_mm = 0.7;
+    s.dial_light = 0.9;   // not read
+    Layout l = base;
+    set_struts(l, s);
+    int outside = 0, wrong = 0;
+    for (const Cell& c : l.cells) {
+      if (c.strut < 0.5 - 1e-12 || c.strut > 0.7 + 1e-12) ++outside;
+      const double f = f_of(l, c, 100.0);
+      if (std::fabs(c.strut - (0.5 + f * 0.2)) > 1e-9) ++wrong;
+    }
+    CHECK(outside == 0 && wrong == 0);
+    // Mixed cell sizes under one stress: one width in every cell that can hold it.
+    const double bead = 0.45, open = 0.7592 / 4.0;
+    Layout mixed = strut_layout(bead);
+    s.demand = field_of(60, 4, 16, [](int, int, int) { return 50.0; }, {-1, -1, -1});
+    s.width_light_mm = 1.6;   // the wrong way round: swapped
+    s.width_heavy_mm = 0.6;
+    const StrutReport r = set_struts(mixed, s);
+    int held = 0;
+    for (const Cell& c : mixed.cells) {
+      const double top = std::max(bead, open * c.size);
+      if (top >= 1.1) { NEAR(c.strut, 1.1, 1e-12); ++held; }
+      else NEAR(c.strut, top, 1e-9);
+    }
+    CHECK(held == 4 && r.at_ceiling == 2);   // 12, 6, 6 and 8 mm hold 1.1 mm; 2.4 and 4 mm do not
+    // The ends exact: all cold, all at the reference.
+    s.demand = field_of(60, 4, 16, [](int, int, int) { return 0.0; }, {-1, -1, -1});
+    set_struts(mixed, s);
+    for (const Cell& c : mixed.cells) NEAR(c.strut, std::min(0.6, std::max(bead, open * c.size)), 1e-12);
+    s.demand = field_of(60, 4, 16, [](int, int, int) { return 300.0; }, {-1, -1, -1});
+    set_struts(mixed, s);
+    for (const Cell& c : mixed.cells) NEAR(c.strut, std::min(1.6, std::max(bead, open * c.size)), 1e-9);
+  }
+  {  // 8. A band cell is never thinner than its by-stress width, and never past the open look without Allow quilt.
+    const double bead = 0.45, open = 0.7592 / 4.0;
+    Layout banded = strut_layout(bead);
+    for (std::size_t i = 0; i < banded.cells.size(); ++i) {
+      banded.cells[i].own = 12.0;
+      banded.cells[i].band = i % 2 ? 0.3 : 1.0;
+      banded.cells[i].finest = banded.cells[i].size < 3.0;
+    }
+    Layout flat = banded;
+    for (Cell& c : flat.cells) c.band = 1.0;
+    StrutSpec s = sp;
+    const auto grad = field_of(60, 4, 16, [](int i, int, int) { return i * 2.0; }, {-1, -1, -1});
+    s.demand = grad;
+    // The dials' strut / cell on this layout's largest cell (12 mm), as Uniform reads them.
+    const auto dial_ratio = [&](double dial) {
+      Layout u = flat;
+      StrutSpec us;
+      us.dial = dial;
+      set_struts(u, us);
+      return u.cells[0].strut / 12.0;
+    };
+    const double lr = dial_ratio(0.2), hr = dial_ratio(0.8);
+    for (bool mm : {false, true}) {
+      s.width_light_mm = mm ? 0.5 : 0.0;
+      s.width_heavy_mm = mm ? 1.0 : 0.0;
+      Layout a = banded, b = flat;
+      set_struts(a, s);
+      set_struts(b, s);
+      int thinner = 0, quilted = 0, raised = 0;
+      for (std::size_t i = 0; i < a.cells.size(); ++i) {
+        // The cell's by-stress width, from the formula.
+        Vec3 lo, hi;
+        cell_box(b, b.cells[i], &lo, &hi);
+        const double f = std::clamp(grad->highest_in(lo, hi) / 100.0, 0.0, 1.0);
+        const double top = std::max(bead, open * b.cells[i].size);
+        const double by = std::clamp(mm ? 0.5 + f * 0.5 : (lr + f * (hr - lr)) * b.cells[i].size, bead, top);
+        NEAR(b.cells[i].strut, by, 1e-9);
+        if (a.cells[i].band >= 1.0) { CHECK(a.cells[i].strut == b.cells[i].strut); continue; }
+        if (a.cells[i].strut < b.cells[i].strut - 1e-12) ++thinner;
+        if (a.cells[i].strut > std::max(bead, open * a.cells[i].size) + 1e-9) ++quilted;
+        if (a.cells[i].strut > b.cells[i].strut + 1e-12) ++raised;
+      }
+      CHECK(thinner == 0 && quilted == 0 && raised > 0);
+    }
+  }
+  {  // 9. A typed width (R11) changes nothing under By stress (R12).
+    Layout a = base, b = base;
+    StrutSpec s = sp;
+    set_struts(a, s);
+    s.width_mm = 1.2;
+    set_struts(b, s);
+    CHECK(a.cells == b.cells);
+  }
+  {  // 11. Speed: 2,000 cells of 4 mm in a 64 mm cube, a 64^3 field of 1 mm voxels.
+    Layout l;
+    l.bead_mm = 0.45;
+    l.frames.push_back(Frame{});
+    for (int n = 0; n < 2000; ++n) {
+      Cell c;
+      c.size = 4.0;
+      c.lo[0] = 4.0 * (n % 16);
+      c.lo[1] = 4.0 * ((n / 16) % 16);
+      c.lo[2] = 4.0 * (n / 256);
+      l.cells.push_back(c);
+    }
+    StrutSpec s = sp;
+    s.demand = field_of(64, 64, 64, [](int i, int j, int k) { return (i * 7 + j * 3 + k) % 120; }, {-0.5, -0.5, -0.5});
+    double best = 1e9;
+    for (int run = 0; run < 5; ++run) {
+      Layout x = l;
+      const auto t0 = std::chrono::steady_clock::now();
+      set_struts(x, s);
+      best = std::min(best, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+    }
+    std::printf("by stress: set_struts on 2,000 cells with a 64^3 field: %.3f ms (best of 5)\n", best);
+    CHECK(best < 5.0);
+  }
+}
+
+// Install 2a, step 2: the session resolves the reference (R17) and keeps it while nothing it is made from changes.
+static void test_by_stress_session() {
+  int L = 0, square = 0, sideA = 0, sideB = 0;
+  const StepModel model = plate_with_L_face(&L, &square, &sideA, &sideB);
+  Session session(model);
+  Settings st;
+  st.start = Start::AllLattice;
+  st.cells.algorithm = Algorithm::Uniform;
+  st.cells.cell_mm = 5.0;
+  st.bars = false;
+  st.struts.mode = Density::ByStress;
+  st.struts.dial_light = 0.2;
+  st.struts.dial_heavy = 0.8;
+  // A 60 x 60 x 10 plate; the stress rises with x and y: 0 .. 118 MPa.
+  auto field = field_of(60, 60, 10, [](int i, int j, int) { return static_cast<double>(i + j); });
+  st.stress.demand = field;
+  // 3. Reference 0: the session's reference is the part's own.
+  const Outcome own = session.lay(st);
+  const double want = stress_reference(*session.domain(), *field, 0.95);
+  CHECK(want > 50.0);
+  NEAR(own.struts.reference_mpa, want, 0.0);
+  CHECK(!own.struts.no_stress && own.struts.at_heavy > 0);
+  // A stated reference half as large puts more cells at the heavy end.
+  st.stress.reference_mpa = 0.5 * want;
+  const Outcome half = session.lay(st);
+  NEAR(half.struts.reference_mpa, 0.5 * want, 0.0);
+  CHECK(half.struts.at_heavy > own.struts.at_heavy);
+  // Kept: the same field (pointer) and percentile on the same domain are not read again. The field's values are
+  // changed behind the session's back here only to show it; the reference stays.
+  st.stress.reference_mpa = 0.0;
+  for (float& v : field->mpa) v *= 2.0f;
+  st.struts.dial_heavy = 0.9;   // a slider move
+  NEAR(session.lay(st).struts.reference_mpa, want, 0.0);
+  // A new field, a new percentile or a new domain: read again.
+  st.stress.demand = std::make_shared<DemandField>(*field);
+  NEAR(session.lay(st).struts.reference_mpa, 2.0 * want, 0.0);
+  st.stress.percentile = 0.5;
+  const double mid = stress_reference(*session.domain(), *field, 0.5);
+  NEAR(session.lay(st).struts.reference_mpa, mid, 0.0);
+  for (float& v : field->mpa) v *= 0.5f;   // the field the session now holds is a copy; this one is back to before
+  st.stress.demand = field;
+  st.min_wall_mm = 0.5;                    // a "where" setting: a new domain
+  const Outcome again = session.lay(st);
+  CHECK(again.read_again);
+  NEAR(again.struts.reference_mpa, stress_reference(*session.domain(), *field, 0.5), 0.0);
+  // The struts' own stress settings, set by a caller, are overwritten only when Settings::stress has a field.
+  Settings direct = st;
+  direct.stress = StressGrade{};
+  direct.struts.demand = field;
+  direct.struts.reference_mpa = 40.0;
+  const Outcome d = session.lay(direct);
+  NEAR(d.struts.reference_mpa, 40.0, 0.0);
+  // No field anywhere: every strut at its light end, and the layout says so (R18).
+  direct.struts.demand = nullptr;
+  const Outcome none = session.lay(direct);
+  CHECK(none.struts.no_stress && none.struts.at_light == none.layout.cells.size());
+}
+
+// ── C22: cell size by stress ──────────────────────────────────────────────────
+// A made-up stress field over a box of voxels, each voxel's value from its centre.
+template <class F>
+static std::shared_ptr<DemandField> stress_field(Vec3 origin, double spacing, int nx, int ny, int nz, F value) {
+  auto f = std::make_shared<DemandField>();
+  f->origin = origin;
+  f->spacing = spacing;
+  f->nx = nx; f->ny = ny; f->nz = nz;
+  f->mpa.resize(static_cast<std::size_t>(nx) * ny * nz);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i)
+        f->mpa[f->index(i, j, k)] = static_cast<float>(value(Vec3{origin.x + (i + 0.5) * spacing,
+                                                                  origin.y + (j + 0.5) * spacing,
+                                                                  origin.z + (k + 0.5) * spacing}));
+  return f;
+}
+// The highest stress in the axis-aligned box round a cube of the layout's frame (R16), read here on its own.
+static double cube_demand(const Layout& l, int frame, const double lo[3], double s, const DemandField& f) {
+  const Frame& fr = l.frames[static_cast<std::size_t>(frame)];
+  Vec3 mn{1e300, 1e300, 1e300}, mx{-1e300, -1e300, -1e300};
+  for (int k = 0; k < 8; ++k) {
+    const Vec3 v = fr.at(lo[0] + ((k & 1) ? s : 0.0), lo[1] + ((k & 2) ? s : 0.0), lo[2] + ((k & 4) ? s : 0.0));
+    mn = {std::min(mn.x, v.x), std::min(mn.y, v.y), std::min(mn.z, v.z)};
+    mx = {std::max(mx.x, v.x), std::max(mx.y, v.y), std::max(mx.z, v.z)};
+  }
+  return f.highest_in(mn, mx);
+}
+// The sizes a pass of base cell `base` can lay, largest first, each once, read here from core's own menus: Default
+// Grade its halves; Stepped the base and m x base / n for each admitted fraction n and m = 1 .. n - 1; Uniform the base.
+static std::vector<double> ladder_of(const Layout& l, const CellSpec& c, double base) {
+  const double tile_min = std::max(c.cell_min_mm, l.floor_cell_mm);
+  std::vector<double> out;
+  if (c.algorithm == Algorithm::DefaultGrade)
+    out = stepped_size_menu(l.topology, base, l.min_strut_mm, tile_min, !c.allow_quilt, SteppedMenu::Halves);
+  else
+    out = {base};
+  if (c.algorithm == Algorithm::Stepped)
+    for (int n : stepped_admitted_divisors(l.topology, base, l.min_strut_mm, tile_min, !c.allow_quilt,
+                                           SteppedMenu::AnyStep))
+      for (int m = 1; m < n; ++m) out.push_back(m * (base / n));
+  std::sort(out.begin(), out.end(), std::greater<double>());
+  out.erase(std::unique(out.begin(), out.end(), [](double a, double b) { return std::fabs(a - b) <= 1e-9 * std::max(a, b); }),
+            out.end());
+  return out;
+}
+// The stress's t at a cube (R16, the response).
+static double stress_t(const Layout& l, int frame, const double lo[3], double s, const DemandField& f, double ref,
+                       double response) {
+  return std::pow(std::clamp(cube_demand(l, frame, lo, s, f) / ref, 0.0, 1.0), response);
+}
+// C22 for one cube (LatticeReview's ruling 2026-11-15: the nearest size): S* = S_base - t (S_base - f); a cell of size s
+// may stand where S* >= (s + s_below) / 2, s_below the ladder's next size down; the finest, and a size with none below,
+// always may; a tie keeps the larger.
+static bool stress_rule_allows(const Layout& l, int frame, const double lo[3], double s, const std::vector<double>& ladder,
+                               const DemandField& f, double ref, double response) {
+  const double base = ladder.front(), finest = ladder.back();
+  if (s <= finest * (1 + 1e-9)) return true;
+  double below = 0.0;
+  for (double a : ladder)
+    if (a < s * (1 - 1e-9)) { below = a; break; }
+  if (below <= 0.0) return true;
+  const double asked = base - stress_t(l, frame, lo, s, f, ref, response) * (base - finest);
+  return asked >= 0.5 * (s + below) - 1e-9 * base;
+}
+// The rule as it was before 2026-11-15 (a cell stood only where S* >= s), for the check that the new one never
+// allows less.
+static bool old_stress_rule_allows(const Layout& l, int frame, const double lo[3], double s,
+                                   const std::vector<double>& ladder, const DemandField& f, double ref, double response) {
+  const double base = ladder.front(), finest = ladder.back();
+  if (s <= finest * (1 + 1e-9)) return true;
+  return stress_t(l, frame, lo, s, f, ref, response) <= (base - s) / (base - finest) + 1e-9;
+}
+// At every cell's place, every size of its ladder that the old rule allowed there the new one allows too (the new
+// threshold is always under s): nothing that was lattice becomes solid for the change. Returns the places it fails.
+static int tighter_than_old(const Layout& l, const CellSpec& spec, const DemandField& f, double ref, double response) {
+  int tighter = 0;
+  std::map<long long, std::vector<double>> ladders;
+  for (const Cell& c : l.cells) {
+    auto& lad = ladders[std::llround(c.own * 1e6)];
+    if (lad.empty()) lad = ladder_of(l, spec, c.own);
+    for (double s : lad)
+      if (old_stress_rule_allows(l, c.frame, c.lo, s, lad, f, ref, response) &&
+          !stress_rule_allows(l, c.frame, c.lo, s, lad, f, ref, response))
+        ++tighter;
+  }
+  return tighter;
+}
+static bool same_layout(const Layout& a, const Layout& b) { return a.cells == b.cells && a.solid == b.solid; }
+// The size of the cell whose cube holds p (0: none).
+static double size_holding(const Layout& l, const Vec3& p) {
+  for (const Cell& c : l.cells) {
+    const Vec3 m = cell_centre(l, c);
+    if (std::fabs(p.x - m.x) < 0.5 * c.size && std::fabs(p.y - m.y) < 0.5 * c.size && std::fabs(p.z - m.z) < 0.5 * c.size)
+      return c.size;
+  }
+  return 0.0;
+}
+
+static void test_cells_by_stress() {
+  // A slab 96 x 24 x 8 latticed from its top face, 8 mm deep: one layer of 8 mm cells, ladder 8, 4, 2 (halves, at a
+  // 0.2 mm line) or 8 and its fifths/sixths (Stepped). The made-up field is 0 for x < 16, rises evenly to the
+  // reference (100 MPa) at x = 80 and stays there.
+  PartMeasure pm(weld_mesh(box(96, 24, 8)));
+  DomainSpec s;
+  s.bead_mm = 0.2;
+  s.regions = {face_region(1, Role::Lattice, {48, 12, 8}, {0, 0, -1}, 12, 48, 8)};   // u along y
+  Domain d(pm, s);
+  const double ref = 100.0;
+  auto ramp_value = [](const Vec3& c) { return 100.0 * std::clamp((c.x - 16.0) / 64.0, 0.0, 1.0); };
+  const auto ramp = stress_field({-2, -2, -2}, 1.0, 100, 28, 12, ramp_value);
+  CellSpec off;
+  off.cell_max_mm = 8;
+  auto on_with = [&](Algorithm algo, std::shared_ptr<const DemandField> f, double r) {
+    CellSpec c = off;
+    c.algorithm = algo;
+    c.by_stress = true;
+    c.demand = std::move(f);
+    c.reference_mpa = r;
+    return c;
+  };
+  const double finest_of[2] = {2.0, 8.0 / 6.0};   // Default Grade, Stepped
+  int before = g_fail;
+  auto block = [&](const char* name) {
+    std::printf("C22 %s: %d failed\n", name, g_fail - before);
+    before = g_fail;
+  };
+
+  // 1, 2. The ramp, Default Grade and Stepped.
+  Layout ramp_dg;
+  for (int a = 0; a < 2; ++a) {
+    const Algorithm algo = a == 0 ? Algorithm::DefaultGrade : Algorithm::Stepped;
+    const CellSpec on = on_with(algo, ramp, ref);
+    CHECK(stress_sizes_cells(on));
+    const Layout l = lay_cells(d, on);
+    if (a == 0) ramp_dg = l;
+    const double finest = finest_of[a];
+    const std::vector<double> ladder = ladder_of(l, on, 8.0);
+    NEAR(ladder.back(), finest, 1e-12);
+    CHECK(tighter_than_old(l, on, *ramp, ref, 1.0) == 0);
+    int breaks = 0, cold = 0, cold_wrong = 0, hot = 0, hot_wrong = 0, wrong_own = 0;
+    for (const Cell& c : l.cells) {
+      if (std::fabs(c.own - 8.0) > 1e-9) ++wrong_own;
+      if (!stress_rule_allows(l, c.frame, c.lo, c.size, ladder, *ramp, ref, 1.0)) ++breaks;
+      const Vec3 m = cell_centre(l, c);
+      if (m.x < 16.0) { ++cold; if (std::fabs(c.size - 8.0) > 1e-9) ++cold_wrong; }
+      if (m.x > 80.0) { ++hot; if (std::fabs(c.size - finest) > 1e-9) ++hot_wrong; }
+    }
+    CHECK(wrong_own == 0);
+    CHECK(breaks == 0);
+    CHECK(cold == 6 && cold_wrong == 0);            // the cold end: the base cell (2 x 3 of them)
+    CHECK(hot > 0 && hot_wrong == 0);               // the hot end: the finest
+    CHECK(l.solid.empty());                         // nothing goes solid for the stress
+    CHECK(badly_covered(d, l, {0, 0, 0}, {96, 24, 8}, 1.3) == 0);
+    // Along the ramp the cell never grows.
+    int grew = 0, read = 0;
+    for (double y = 0.6; y < 24; y += 2.9)
+      for (double z = 0.3; z < 8; z += 1.9) {
+        double last = 1e300;
+        for (double x = 0.1; x < 96; x += 0.25) {
+          const double sz = size_holding(l, {x, y, z});
+          if (sz == 0.0) continue;
+          ++read;
+          if (sz > last + 1e-9) ++grew;
+          last = sz;
+        }
+      }
+    CHECK(read > 10000 && grew == 0);
+    if (a == 0) {
+      // As large as the rule lets them: no eight sibling cells stand where their parent would be allowed and fits.
+      std::map<std::array<long long, 4>, int> groups;
+      double o[3] = {1e300, 1e300, 1e300};
+      for (const Cell& c : l.cells)
+        for (int k = 0; k < 3; ++k) o[k] = std::min(o[k], c.lo[k]);
+      for (const Cell& c : l.cells) {
+        if (c.size >= 8.0 - 1e-9) continue;
+        const double P = 2 * c.size;
+        groups[{std::llround(std::floor((c.lo[0] - o[0]) / P + 1e-9) * P * 1e3),
+                std::llround(std::floor((c.lo[1] - o[1]) / P + 1e-9) * P * 1e3),
+                std::llround(std::floor((c.lo[2] - o[2]) / P + 1e-9) * P * 1e3), std::llround(c.size * 1e3)}]++;
+      }
+      int full = 0, mergeable = 0;
+      for (const auto& g : groups) {
+        if (g.second != 8) continue;
+        ++full;
+        const double P = 2e-3 * static_cast<double>(g.first[3]);
+        const double plo[3] = {o[0] + g.first[0] * 1e-3, o[1] + g.first[1] * 1e-3, o[2] + g.first[2] * 1e-3};
+        if (stress_rule_allows(l, 0, plo, P, ladder, *ramp, ref, 1.0)) ++mergeable;
+      }
+      CHECK(full > 10 && mergeable == 0);
+      std::printf("C22 ramp, Default Grade: %zu cells (%d sibling groups, none mergeable)\n", l.cells.size(), full);
+    } else {
+      std::printf("C22 ramp, Stepped: %zu cells\n", l.cells.size());
+    }
+  }
+  block("1-2 ramp");
+
+  {  // 3. Off, whatever the switch says: the layout is today's, byte for byte.
+    for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
+      CellSpec plain = off;
+      plain.algorithm = algo;
+      const Layout today = lay_cells(d, plain);
+      const auto zero = stress_field({-2, -2, -2}, 1.0, 100, 28, 12, [](const Vec3&) { return 0.0; });
+      CellSpec no_field = on_with(algo, nullptr, ref);
+      CellSpec empty_field = on_with(algo, std::make_shared<DemandField>(), ref);
+      CellSpec all_zero = on_with(algo, zero, ref);
+      CellSpec no_ref = on_with(algo, ramp, 0.0);
+      CHECK(!stress_sizes_cells(no_field) && !stress_sizes_cells(empty_field) && !stress_sizes_cells(no_ref));
+      CHECK(stress_sizes_cells(all_zero));   // applied, and a field of nothing asks for nothing
+      CHECK(same_layout(lay_cells(d, no_field), today));
+      CHECK(same_layout(lay_cells(d, empty_field), today));
+      CHECK(same_layout(lay_cells(d, all_zero), today));
+      CHECK(same_layout(lay_cells(d, no_ref), today));
+      CHECK(!same_layout(lay_cells(d, on_with(algo, ramp, ref)), today));   // and on, it is not today's
+      CellSpec typed = plain;                // a typed cell size: only Manual forces one size (C16)
+      typed.cell_mm = 8;
+      CellSpec typed_on = on_with(algo, ramp, ref);
+      typed_on.cell_mm = 8;
+      CHECK(!stress_sizes_cells(typed_on) && same_layout(lay_cells(d, typed_on), lay_cells(d, typed)));
+    }
+    CellSpec uni = off;                      // Uniform: one size
+    uni.algorithm = Algorithm::Uniform;
+    CellSpec uni_on = on_with(Algorithm::Uniform, ramp, ref);
+    CHECK(!stress_sizes_cells(uni_on) && same_layout(lay_cells(d, uni_on), lay_cells(d, uni)));
+  }
+  block("3 off");
+
+  {  // 4. Nothing goes solid: the part of test_cells_behind_a_pocket (a 4 mm wall, a 5 mm pocket, the wall behind,
+     // solid beside it), a ramp along x. Every point held by a cell with the option off is held by one with it on, and
+     // the layout's solid does not grow. KNOWN LIMIT (reported 2026-11-14, not changed here): under a flat face a
+     // cut cell that is halved can leave a strip of its lattice under a millimetre thin to a half none of whose sample
+     // points is lattice (here 0.5 mm along the part's bottom), and no cell holds it (D14: "strips under about a
+     // millimetre can be unlisted"). Grade to shape's halving loses the same kind of strip on this part; Stepped loses
+     // none. So on Default Grade a lost point must lie within a millimetre of the part's surface.
+    PartMeasure pp(weld_mesh(prism_any({{0, 0}, {60, 0}, {60, 20}, {0, 20}, {0, 9}, {50, 9}, {50, 4}, {0, 4}}, 0, 40)));
+    DomainSpec ps;
+    ps.regions = {face_region(1, Role::Lattice, {30, 0, 20}, {0, 1, 0}, 30, 30, 13)};
+    Domain dp(pp, ps);
+    const auto f = stress_field({-2, -2, -2}, 1.0, 64, 24, 44,
+                            [](const Vec3& c) { return 100.0 * std::clamp((c.x - 10.0) / 40.0, 0.0, 1.0); });
+    auto pr = dp.probe();
+    const PartMeasure::Probe surface = pp.probe();
+    for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
+      CellSpec plain;
+      plain.algorithm = algo;
+      CellSpec on = plain;
+      on.by_stress = true;
+      on.demand = f;
+      on.reference_mpa = 100;
+      CellSpec band = plain;   // the band's own halving, for the comparison
+      band.grade_to_shape = true;
+      band.band_mm = 8;
+      const Layout lo_ = lay_cells(dp, plain), hi_ = lay_cells(dp, on), bd = lay_cells(dp, band);
+      CHECK(tighter_than_old(hi_, on, *f, 100.0, 1.0) == 0);
+      auto held = [&](const Layout& l, const Vec3& p) {
+        for (const Cell& c : l.cells) if (cell_holds(l, pr, c, p)) return true;
+        return false;
+      };
+      int held_off = 0, lost = 0, lost_deep = 0, lost_band = 0;
+      for (double x = 0.31; x < 60; x += 1.1)
+        for (double y = 0.27; y < 20; y += 0.9)
+          for (double z = 0.33; z < 40; z += 1.3) {
+            const Vec3 p{x, y, z};
+            if (!pr.where(p).lattice() || !held(lo_, p)) continue;
+            ++held_off;
+            if (!held(bd, p)) ++lost_band;
+            if (held(hi_, p)) continue;
+            ++lost;
+            if (surface.depth(p) >= 1.0) ++lost_deep;
+          }
+      double v0 = 0, v1 = 0;
+      for (const Cell& c : lo_.solid) v0 += c.size * c.size * c.size;
+      for (const Cell& c : hi_.solid) v1 += c.size * c.size * c.size;
+      CHECK(held_off > 1000 && lost_deep == 0);
+      if (algo == Algorithm::Stepped) CHECK(lost == 0);
+      CHECK(v1 <= v0 + 1e-9 && hi_.solid.size() <= lo_.solid.size());
+      CHECK(hi_.cells.size() > lo_.cells.size());
+      std::printf("C22 pocket part, %s: %d points held with it off; with it on %d of them in no cell (%d a millimetre "
+                  "or more inside); Grade to shape (band 8) leaves %d; cells %zu -> %zu, solid %zu -> %zu\n",
+                  algo == Algorithm::Stepped ? "Stepped" : "Default Grade", held_off, lost, lost_deep, lost_band,
+                  lo_.cells.size(), hi_.cells.size(), lo_.solid.size(), hi_.solid.size());
+    }
+  }
+  block("4 nothing solid");
+
+  {  // 5. Grade to shape on as well (band 6 mm): every cell obeys both rules.
+    for (int a = 0; a < 2; ++a) {
+      const Algorithm algo = a == 0 ? Algorithm::DefaultGrade : Algorithm::Stepped;
+      CellSpec band = off;
+      band.algorithm = algo;
+      band.grade_to_shape = true;
+      band.band_mm = 6;
+      CellSpec both = on_with(algo, ramp, ref);
+      both.grade_to_shape = true;
+      both.band_mm = 6;
+      const Layout lb = lay_cells(d, band), l = lay_cells(d, both);
+      const double finest = finest_of[a];
+      const std::vector<double> ladder = ladder_of(l, both, 8.0);
+      NEAR(ladder.back(), finest, 1e-12);
+      CHECK(tighter_than_old(l, both, *ramp, ref, 1.0) == 0);
+      int breaks_band = 0, breaks_stress = 0;
+      for (const Cell& c : l.cells) {
+        const Vec3 m = cell_centre(l, c);
+        const double dist = std::max(0.0, std::min(std::min(m.x, 96 - m.x), std::min(m.y, 24 - m.y)));
+        if (c.size > finest * (1 + 1e-9) && dist < 6.0 * (c.size - finest) / (8.0 - finest) - 1e-6) ++breaks_band;
+        if (!stress_rule_allows(l, c.frame, c.lo, c.size, ladder, *ramp, ref, 1.0)) ++breaks_stress;
+      }
+      CHECK(breaks_band == 0 && breaks_stress == 0);
+      CHECK(!same_layout(l, lb) && l.cells.size() > lb.cells.size());
+      CHECK(l.solid.empty());
+    }
+  }
+  block("5 with Grade to shape");
+
+  {  // 6. One hot voxel (x 50..51, y 11..12, z 3..4): only the base cube whose box overlaps it differs from the cold
+     // layout, which is the plain one.
+    auto one = stress_field({-2, -2, -2}, 1.0, 100, 28, 12, [](const Vec3& c) {
+      return (c.x > 50 && c.x < 51 && c.y > 11 && c.y < 12 && c.z > 3 && c.z < 4) ? 100.0 : 0.0;
+    });
+    for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
+      const auto zero = stress_field({-2, -2, -2}, 1.0, 100, 28, 12, [](const Vec3&) { return 0.0; });
+      const Layout cold = lay_cells(d, on_with(algo, zero, ref));
+      const Layout hot = lay_cells(d, on_with(algo, one, ref));
+      CHECK(tighter_than_old(hot, on_with(algo, one, ref), *one, ref, 1.0) == 0);
+      int overlap = 0, changed = 0, wrong = 0;
+      for (const Cell& b : cold.cells) {
+        const Vec3 m = cell_centre(cold, b);
+        const bool over = std::fabs(m.x - 50.5) < 4.5 && std::fabs(m.y - 11.5) < 4.5 && std::fabs(m.z - 3.5) < 4.5;
+        std::vector<Cell> in;
+        for (const Cell& c : hot.cells) {
+          const Vec3 n = cell_centre(hot, c);
+          if (std::fabs(n.x - m.x) < 4 && std::fabs(n.y - m.y) < 4 && std::fabs(n.z - m.z) < 4) in.push_back(c);
+        }
+        const bool same = in.size() == 1 && in[0] == b;
+        if (over) { ++overlap; changed += !same; }
+        else if (!same) ++wrong;
+      }
+      CHECK(cold.cells.size() == 36);
+      CHECK(overlap == 1 && changed == 1 && wrong == 0);
+    }
+  }
+  block("6 one hot voxel");
+
+  {  // 7. Response 2 leaves fewer small cells than response 1 on the ramp; both ends are unchanged.
+    for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
+      CellSpec r2 = on_with(algo, ramp, ref);
+      r2.response = 2.0;
+      const Layout a1 = lay_cells(d, on_with(algo, ramp, ref)), a2 = lay_cells(d, r2);
+      CHECK(tighter_than_old(a2, r2, *ramp, ref, 2.0) == 0);
+      auto ends = [](const Layout& l, bool cold) {
+        std::vector<Cell> out;
+        for (const Cell& c : l.cells) {
+          const double x = cell_centre(l, c).x;
+          if (cold ? x < 16.0 : x > 80.0) out.push_back(c);
+        }
+        return out;
+      };
+      CHECK(a2.cells.size() < a1.cells.size());
+      CHECK(ends(a1, true) == ends(a2, true) && ends(a1, false) == ends(a2, false));
+      CHECK(!ends(a1, false).empty());
+      std::printf("C22 response 1: %zu cells, response 2: %zu (%s)\n", a1.cells.size(), a2.cells.size(),
+                  algo == Algorithm::Stepped ? "Stepped" : "Default Grade");
+    }
+  }
+  block("7 response");
+
+  {  // 8. One thread and eight: the same layout (D18).
+    for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
+      const CellSpec on = on_with(algo, ramp, ref);
+      const Layout one = lay_cells(d, on, 1), eight = lay_cells(d, on, 8);
+      CHECK(same_layout(one, eight));
+      CHECK(!same_layout(one, lay_cells(d, off, 1)));
+    }
+  }
+  block("8 threads");
+
+  {  // 9. Through a Session: the reference, kept; cells_by_stress and cells_no_stress.
+    int L = 0, square = 0, sideA = 0, sideB = 0;
+    const StepModel model = plate_with_L_face(&L, &square, &sideA, &sideB);
+    Session session(model);
+    Settings st;
+    st.min_strut_lines = kFewestStrutLines;
+    st.regions = {{1, Role::Lattice, {square}, 6.0, 0.0}};
+    st.bead_mm = 0.2;                                         // a ladder of 6, 3 and 1.5 mm
+    st.cells.cell_max_mm = 6;
+    st.bars = false;
+    auto f = stress_field({-2, -2, -2}, 1.0, 64, 64, 14,
+                      [](const Vec3& c) { return 100.0 * std::clamp((c.x - 25.0) / 40.0, 0.0, 1.0); });
+    const Outcome plain = session.lay(st);
+    CHECK(!plain.cells_by_stress && !plain.cells_no_stress && plain.stress_reference_mpa == 0.0);
+    {  // A field sent under Uniform struts with cells by stress off is never read for a reference: none is reported and
+       // the layout is the one with no field.
+      Settings sent = st;
+      sent.stress.demand = f;
+      const Outcome quiet = session.lay(sent);
+      CHECK(quiet.stress_reference_mpa == 0.0 && !quiet.cells_by_stress && !quiet.cells_no_stress);
+      CHECK(quiet.layout.cells == plain.layout.cells);
+      sent.cells.by_stress = true;   // asked for, but a typed size turns it off: still no reference read
+      sent.cells.cell_mm = 6;
+      CHECK(session.lay(sent).stress_reference_mpa == 0.0);
+    }
+    st.cells.by_stress = true;
+    const Outcome none = session.lay(st);                     // asked, no field
+    CHECK(!none.cells_by_stress && none.cells_no_stress && none.layout.cells == plain.layout.cells);
+    st.stress.demand = f;                                     // reference 0: the part's own
+    const Outcome own = session.lay(st);
+    const double want = stress_reference(*session.domain(), *f, st.stress.percentile);
+    CHECK(want > 0.0 && want < 100.0);
+    CHECK(own.cells_by_stress && !own.cells_no_stress && own.stress_reference_mpa == want);
+    auto laid_with = [&](double r) {
+      CellSpec c = st.cells;
+      c.demand = f;
+      c.reference_mpa = r;
+      Layout l = lay_cells(*session.domain(), c);
+      set_struts(l, st.struts);
+      return l;
+    };
+    CHECK(own.layout.cells == laid_with(want).cells);
+    CHECK(tighter_than_old(own.layout, st.cells, *f, want, 1.0) == 0);
+    CHECK(!(own.layout.cells == plain.layout.cells));
+    CHECK(!(laid_with(want).cells == laid_with(2.0 * want).cells));   // the reference decides
+    // Kept while the domain, the field and the percentile are the same: the field changed in place is not read again
+    // for its reference (a slider move never reads it), and a new field pointer is.
+    const std::vector<float> was = f->mpa;
+    for (float& v : f->mpa) v *= 2.0f;
+    const Outcome kept = session.lay(st);
+    CHECK(kept.layout.cells == laid_with(want).cells);
+    CHECK(!(kept.layout.cells == laid_with(2.0 * want).cells));
+    auto g = std::make_shared<DemandField>(*f);
+    st.stress.demand = g;
+    const Outcome fresh = session.lay(st);
+    CHECK(fresh.layout.cells == laid_with(2.0 * want).cells);
+    f->mpa = was;
+    st.stress.demand = f;
+    st.stress.percentile = 0.5;                               // a new percentile: read again
+    const double half = stress_reference(*session.domain(), *f, 0.5);
+    CHECK(session.lay(st).layout.cells == laid_with(half).cells);
+    st.stress.percentile = 0.95;
+    st.stress.reference_mpa = 40.0;                           // a stated reference is used as it is
+    const Outcome stated = session.lay(st);
+    CHECK(stated.cells_by_stress && stated.layout.cells == laid_with(40.0).cells);
+    st.stress.reference_mpa = 0.0;
+    st.stress.demand = stress_field({-2, -2, -2}, 1.0, 64, 64, 14, [](const Vec3&) { return 0.0; });
+    const Outcome zero = session.lay(st);                     // the part's own reference of a cold field is 0
+    CHECK(!zero.cells_by_stress && zero.cells_no_stress && zero.layout.cells == plain.layout.cells);
+    st.stress.demand = f;
+    st.cells.cell_mm = 6;                                     // a typed size: off, and not "no stress"
+    const Outcome typed = session.lay(st);
+    CHECK(!typed.cells_by_stress && !typed.cells_no_stress);
+    st.cells.cell_mm = 0;
+    st.one_grid = true;                                       // Let walls cut cells: applied as anywhere else
+    const Outcome grid = session.lay(st);
+    CHECK(grid.cells_by_stress && !grid.cells_no_stress && grid.stress_reference_mpa == want);
+    st.one_grid = false;
+    st.cells.by_stress = false;                               // a field, the switch off
+    const Outcome unasked = session.lay(st);
+    CHECK(!unasked.cells_by_stress && !unasked.cells_no_stress && unasked.layout.cells == plain.layout.cells);
+    // ONE reference for the cells and the struts: with both by stress, the struts read the one the cells were laid with.
+    st.cells.by_stress = true;
+    st.struts.mode = Density::ByStress;
+    const Outcome both = session.lay(st);
+    CHECK(both.cells_by_stress && both.struts.reference_mpa == want && both.stress_reference_mpa == want);
+    CHECK(both.layout.cells.size() == laid_with(want).cells.size());
+    st.cells.by_stress = false;   // the struts alone ask for it
+    CHECK(session.lay(st).stress_reference_mpa == want);
+  }
+  block("9 session");
+
+  {  // 12. Let walls cut cells (the owner, 2026-11-14: it means "ONLY that the cells can be cut by walls. NOTHING
+     // ELSE"): cell size by stress applies, with C20 (only the finest cell is cut). The back plate of
+     // test_one_grid_main_size (6 mm behind the face under 8 mm cubes, one 12 mm boss at x 32..40) at a 0.2 mm line
+     // (halves 8, 4, 2), a ramp along x: 0 for x < 16, the reference from x = 48.
+    PartMeasure pg(weld_mesh(prism({{0, 0}, {64, 0}, {64, 6}, {40, 6}, {40, 12}, {32, 12}, {32, 6}, {0, 6}}, 0, 64)));
+    DomainSpec gs;
+    gs.bead_mm = 0.2;
+    gs.regions = {face_region(1, Role::Lattice, {32, 0, 32}, {0, 1, 0}, 32, 32, 8)};
+    Domain dg(pg, gs);
+    const auto gramp = stress_field({-2, -2, -2}, 1.0, 68, 16, 68,
+                                    [](const Vec3& c) { return 100.0 * std::clamp((c.x - 16.0) / 32.0, 0.0, 1.0); });
+    for (int a = 0; a < 2; ++a) {
+      const Algorithm algo = a == 0 ? Algorithm::DefaultGrade : Algorithm::Stepped;
+      CellSpec grid = off;
+      grid.algorithm = algo;
+      grid.one_grid = true;
+      const Layout today = lay_cells(dg, grid);
+      CellSpec no_field = grid;          // (b) no field: today's one-grid layout, byte for byte
+      no_field.by_stress = true;
+      no_field.reference_mpa = ref;
+      CHECK(same_layout(lay_cells(dg, no_field), today));
+      CellSpec on = no_field;            // (a) the ramp
+      on.demand = gramp;
+      CHECK(stress_sizes_cells(on));
+      const Layout l = lay_cells(dg, on);
+      double finest = 1e300;
+      for (const Cell& c : l.cells) finest = std::min(finest, c.size);
+      const double want_finest = a == 0 ? 2.0 : 8.0 / 6.0;
+      const std::vector<double> ladder = ladder_of(l, on, 8.0);
+      NEAR(ladder.back(), want_finest, 1e-12);
+      CHECK(tighter_than_old(l, on, *gramp, ref, 1.0) == 0);
+      int breaks = 0, cut_large = 0, hot = 0, hot_wrong = 0;
+      for (const Cell& c : l.cells) {
+        if (!stress_rule_allows(l, c.frame, c.lo, c.size, ladder, *gramp, ref, 1.0)) ++breaks;
+        if (c.cut && c.size > want_finest * (1 + 1e-9)) ++cut_large;        // C20
+        if (cell_centre(l, c).x > 48.0) { ++hot; if (std::fabs(c.size - want_finest) > 1e-9) ++hot_wrong; }
+      }
+      // Where the stress is nothing (cells wholly at x < 16) the cells are today's.
+      auto cold_cells = [](const Layout& lay) {
+        std::vector<Cell> out;
+        for (const Cell& c : lay.cells) if (cell_centre(lay, c).x + 0.5 * c.size <= 16.0) out.push_back(c);
+        return out;
+      };
+      NEAR(finest, want_finest, 1e-9);
+      CHECK(breaks == 0 && cut_large == 0);
+      CHECK(hot > 0 && hot_wrong == 0);
+      CHECK(!cold_cells(today).empty() && cold_cells(l) == cold_cells(today));
+      CHECK(l.cells.size() > today.cells.size());
+      std::printf("C22 one grid, %s: %zu cells cold, %zu with the ramp\n", a == 0 ? "Default Grade" : "Stepped",
+                  today.cells.size(), l.cells.size());
+    }
+    {  // C20 acts only when the region grades its cells: with one size (Uniform) the base cell is cut wherever the
+       // wall falls, and none is split.
+      CellSpec uni = off;
+      uni.algorithm = Algorithm::Uniform;
+      uni.one_grid = true;
+      const Layout u = lay_cells(dg, uni);
+      int other = 0, cut = 0;
+      for (const Cell& c : u.cells) { other += std::fabs(c.size - 8.0) > 1e-9; cut += c.cut; }
+      CHECK(!u.cells.empty() && other == 0 && cut > 0 && u.solid.empty());
+    }
+  }
+  block("12 Let walls cut cells");
+
+  {  // 13. The nearest size (LatticeReview's ruling 2026-11-15). The slab with a smallest cell of 4: a ladder of exactly
+     // two sizes, 8 and 4, on both algorithms; the 8 stands where t <= 0.5.
+    for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
+      const char* name = algo == Algorithm::Stepped ? "Stepped" : "Default Grade";
+      auto two = [&](std::shared_ptr<const DemandField> f) {
+        CellSpec c = on_with(algo, std::move(f), ref);
+        c.cell_min_mm = 4;
+        return c;
+      };
+      auto flat = [](double mpa) {
+        return stress_field({-2, -2, -2}, 1.0, 100, 28, 12, [mpa](const Vec3&) { return mpa; });
+      };
+      auto sizes = [](const Layout& l) {
+        std::map<long long, int> n;
+        for (const Cell& c : l.cells) n[std::llround(c.size * 1e3)]++;
+        return n;
+      };
+      const auto quarter = flat(25.0), three = flat(75.0);
+      const Layout lq = lay_cells(d, two(quarter)), l3 = lay_cells(d, two(three)), lr = lay_cells(d, two(ramp));
+      const std::vector<double> ladder = ladder_of(lq, two(quarter), 8.0);
+      CHECK(ladder.size() == 2 && std::fabs(ladder[0] - 8) < 1e-12 && std::fabs(ladder[1] - 4) < 1e-12);
+      const auto nq = sizes(lq), n3 = sizes(l3);
+      CHECK(nq.size() == 1 && nq.count(8000) && nq.at(8000) == 36);   // t = 0.25: every cell the region's own
+      CHECK(n3.size() == 1 && n3.count(4000) && n3.at(4000) == 288);  // t = 0.75: every cell the smallest
+      // The ramp (t = 0.5 at x = 48): every cell wholly at x < 40 is 8, every one wholly at x > 56 is 4, and both
+      // sizes stand.
+      int left = 0, left_wrong = 0, right = 0, right_wrong = 0;
+      for (const Cell& c : lr.cells) {
+        const Vec3 m = cell_centre(lr, c);
+        if (m.x + 0.5 * c.size <= 40.0 + 1e-9) { ++left; left_wrong += std::fabs(c.size - 8) > 1e-9; }
+        if (m.x - 0.5 * c.size >= 56.0 - 1e-9) { ++right; right_wrong += std::fabs(c.size - 4) > 1e-9; }
+      }
+      CHECK(left > 0 && left_wrong == 0 && right > 0 && right_wrong == 0);
+      CHECK(lq.solid.empty() && l3.solid.empty() && lr.solid.empty());
+      CHECK(tighter_than_old(lr, two(ramp), *ramp, ref, 1.0) == 0);
+      std::printf("C22 nearest, two sizes, %s: t 0.25 %zu cells, t 0.75 %zu, ramp %zu (%d cells wholly under x 40, all 8; "
+                  "%d wholly over x 56, all 4)\n", name, lq.cells.size(), l3.cells.size(), lr.cells.size(), left, right);
+    }
+    // The lead's example: base 12, smallest cell 4, Stepped admits 2 and 3: the ladder 12, 8, 6, 4; 12 stands where
+    // S* >= 10, 8 where S* >= 7, 6 where S* >= 5, 4 always. S* = 12 - 8 t. A slab 96 x 24 x 12 under its top face.
+    PartMeasure p12(weld_mesh(box(96, 24, 12)));
+    DomainSpec s12;
+    s12.bead_mm = 0.2;
+    s12.regions = {face_region(1, Role::Lattice, {48, 12, 12}, {0, 0, -1}, 12, 48, 12)};
+    Domain d12(p12, s12);
+    auto at = [&](double t) {
+      CellSpec c = off;
+      c.algorithm = Algorithm::Stepped;
+      c.cell_max_mm = 12;
+      c.cell_min_mm = 4;
+      c.by_stress = true;
+      c.demand = stress_field({-2, -2, -2}, 1.0, 100, 28, 16, [t](const Vec3&) { return 100.0 * t; });
+      c.reference_mpa = ref;
+      return c;
+    };
+    const Layout tie = lay_cells(d12, at(0.25));   // S* = 10 exactly: a tie keeps the larger
+    const std::vector<double> lad = ladder_of(tie, at(0.25), 12.0);
+    CHECK(lad.size() == 4 && std::fabs(lad[0] - 12) < 1e-9 && std::fabs(lad[1] - 8) < 1e-9 &&
+          std::fabs(lad[2] - 6) < 1e-9 && std::fabs(lad[3] - 4) < 1e-9);
+    auto largest = [](const Layout& l) {
+      double m = 0;
+      for (const Cell& c : l.cells) m = std::max(m, c.size);
+      return m;
+    };
+    auto smallest = [](const Layout& l) {
+      double m = 1e300;
+      for (const Cell& c : l.cells) m = std::min(m, c.size);
+      return m;
+    };
+    int all12 = 0;
+    for (const Cell& c : tie.cells) all12 += std::fabs(c.size - 12) < 1e-9;
+    CHECK(!tie.cells.empty() && all12 == static_cast<int>(tie.cells.size()));
+    const Layout under10 = lay_cells(d12, at(0.30));   // S* = 9.6: no 12; a cell is never larger than 8
+    CHECK(largest(under10) <= 8 + 1e-9 && smallest(under10) >= 6 - 1e-9);
+    const Layout at7 = lay_cells(d12, at(0.625));      // S* = 7: 8 may stand
+    CHECK(largest(at7) <= 8 + 1e-9 && smallest(at7) >= 6 - 1e-9);
+    const Layout under7 = lay_cells(d12, at(0.70));    // S* = 6.4: 6 at most, nothing under it
+    CHECK(largest(under7) <= 6 + 1e-9 && smallest(under7) >= 6 - 1e-9);
+    const Layout under5 = lay_cells(d12, at(0.90));    // S* = 4.8: the smallest
+    CHECK(largest(under5) <= 4 + 1e-9 && !under5.cells.empty());
+    for (const Layout* l : {&tie, &under10, &at7, &under7, &under5}) CHECK(l->solid.empty());
+    std::printf("C22 nearest, base 12 (12, 8, 6, 4): S* 10 -> %zu cells, largest %.2f; 9.6 -> %.2f..%.2f; 7 -> "
+                "%.2f..%.2f; 6.4 -> %.2f..%.2f; 4.8 -> %.2f\n", tie.cells.size(), largest(tie), smallest(under10),
+                largest(under10), smallest(at7), largest(at7), smallest(under7), largest(under7), largest(under5));
+  }
+  block("13 nearest size");
+
+  {  // 11. Speed: lay_cells with the option on, about 2,000 cells and a 64^3 field, against it off.
+    PartMeasure pb(weld_mesh(box(128, 128, 64)));
+    DomainSpec bs;
+    bs.bead_mm = 0.2;
+    bs.start = Start::AllLattice;
+    Domain db(pb, bs);
+    const auto zero = stress_field({0, 0, 0}, 2.0, 64, 64, 64, [](const Vec3&) { return 0.0; });
+    const auto slope = stress_field({0, 0, 0}, 2.0, 64, 64, 64,
+                                [](const Vec3& c) { return 100.0 * std::clamp((c.x - 100.0) / 28.0, 0.0, 1.0); });
+    CellSpec plain = off;
+    plain.cell_min_mm = 2;   // the whole part's base cell 8 mm (its halves end at 2)
+    auto with_min = [](CellSpec c) { c.cell_min_mm = 2; return c; };
+    auto best_ms = [&](const CellSpec& c, std::size_t* cells) {
+      double best = 1e300;
+      for (int k = 0; k < 3; ++k) {
+        const auto t0 = std::chrono::steady_clock::now();
+        const Layout l = lay_cells(db, c);
+        best = std::min(best, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+        *cells = l.cells.size();
+      }
+      return best;
+    };
+    std::size_t n0 = 0, n1 = 0, n2 = 0;
+    (void)lay_cells(db, plain);   // the domain's first reading, not timed
+    {  // What the part's own reference costs, once, on a 64^3 field (the session keeps it: R17).
+      const auto t0 = std::chrono::steady_clock::now();
+      const double r = stress_reference(db, *slope, 0.95);
+      std::printf("C22 stress_reference on a 64^3 field: %.2f ms (%.3f MPa)\n",
+                  std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count(), r);
+    }
+    const double t_off = best_ms(plain, &n0);
+    const double t_on = best_ms(with_min(on_with(Algorithm::DefaultGrade, zero, ref)), &n1);
+    const double t_slope = best_ms(with_min(on_with(Algorithm::DefaultGrade, slope, ref)), &n2);
+    std::printf("C22 speed: off %.2f ms (%zu cells); on, a cold 64^3 field %.2f ms (%zu cells, %.2fx); on, a slope "
+                "over the last 28 mm %.2f ms (%zu cells)\n",
+                t_off, n0, t_on, n1, t_on / t_off, t_slope, n2);
+    CHECK(n0 > 1500 && n0 < 2600 && n1 == n0);
+    CHECK(t_on <= 1.5 * t_off);
+    CHECK(n2 > n0);
+  }
+  block("11 speed");
+}
+
+// ── C23, R19: an area's own cells and struts ──────────────────────────────────
+static std::vector<Cell> cells_of(const Layout& l, int region) {
+  std::vector<Cell> out;
+  for (const Cell& c : l.cells)
+    if (c.region == region) out.push_back(c);
+  return out;
+}
+static std::vector<double> sizes_of(const Layout& l, int region) {
+  std::vector<double> out;
+  for (const Cell& c : l.cells)
+    if (c.region == region && std::find(out.begin(), out.end(), c.size) == out.end()) out.push_back(c.size);
+  std::sort(out.begin(), out.end());
+  return out;
+}
+// R10, as set_struts reads a dial on a cell of `ref` mm.
+static double dial_ratio(const Layout& l, double dial, double ref) {
+  const double bead = std::max(l.bead_mm, l.min_strut_mm);
+  const double t = std::clamp((dial - 0.01) / 0.99, 0.0, 1.0);
+  return (bead + t * (std::max(bead, l.open_look * ref) - bead)) / ref;
+}
+static double held_strut(const Layout& l, double want, double size) {
+  const double bead = std::max(l.bead_mm, l.min_strut_mm);
+  return std::clamp(want, bead, std::max(bead, l.open_look * size));
+}
+static double largest_of(const Layout& l, int region) {
+  double m = 0.0;
+  for (const Cell& c : l.cells)
+    if (c.region == region) m = std::max(m, c.size);
+  return m;
+}
+
+static void test_area_own() {
+  // A block 46 x 46 x 16 at a 0.2 mm line (ladder 8, 4, 2): region A (1) under the top face and region B (2) under
+  // the bottom face, each 8 mm deep. 46 is not a whole number of 8 mm cells, so the outline cuts the outer ring.
+  PartMeasure pm(weld_mesh(box(46, 46, 16)));
+  DomainSpec ds;
+  ds.bead_mm = 0.2;
+  ds.regions = {face_region(1, Role::Lattice, {23, 23, 16}, {0, 0, -1}, 23, 23, 8),
+                face_region(2, Role::Lattice, {23, 23, 0}, {0, 0, 1}, 23, 23, 8)};
+  Domain d(pm, ds);
+  CellSpec P;
+  P.cell_max_mm = 8;
+  const Layout base = lay_cells(d, P);
+  CHECK(sizes_of(base, 1) == std::vector<double>{8.0} && sizes_of(base, 2) == std::vector<double>{8.0});
+  CellSpec P3 = P;   // with Grade to shape, band 8
+  P3.grade_to_shape = true;
+  P3.band_mm = 8;
+  const Layout base3 = lay_cells(d, P3);
+  // A stress ramp along x: 0 for x < 8, 100 MPa from x = 36 on.
+  const auto ramp = stress_field({-2, -2, -2}, 1.0, 48, 48, 20,
+                                 [](const Vec3& c) { return 100.0 * std::clamp((c.x - 8.0) / 28.0, 0.0, 1.0); });
+  const auto only = [](int id, AreaOwn o) { AreaOwnMap m; m[id] = o; return m; };
+
+  {  // 1. Nothing stated: today's layout. Each setting stated equal to the part's: today's layout.
+    AreaOwnMap none;
+    none[1] = AreaOwn{};
+    none[2] = AreaOwn{};
+    CellSpec ps = P3;
+    ps.by_stress = true;
+    ps.demand = ramp;
+    ps.reference_mpa = 100.0;
+    const Layout today = lay_cells(d, ps);
+    CHECK(same_layout(lay_cells(d, ps, 0, &none), today));
+    AreaOwn eq;
+    eq.algorithm = ps.algorithm; eq.cell_mm = ps.cell_mm; eq.cell_max_mm = ps.cell_max_mm;
+    eq.cell_min_mm = ps.cell_min_mm; eq.min_cells_across = ps.min_cells_across; eq.grade_to_shape = ps.grade_to_shape;
+    eq.band_mm = ps.band_mm; eq.band_cell_mm = ps.band_cell_mm; eq.cells_by_stress = ps.by_stress;
+    eq.response = ps.response; eq.reference_mpa = ps.reference_mpa;
+    StrutSpec ss;
+    ss.dial = 0.3;
+    ss.strength = 0.5;
+    ss.demand = ramp;
+    ss.reference_mpa = 100.0;
+    eq.by_stress = false; eq.dial = ss.dial; eq.width_mm = ss.width_mm; eq.strength = ss.strength;
+    eq.dial_light = ss.dial_light; eq.dial_heavy = ss.dial_heavy;
+    eq.width_light_mm = ss.width_light_mm; eq.width_heavy_mm = ss.width_heavy_mm;
+    AreaOwnMap all;
+    all[1] = eq;
+    all[2] = eq;
+    Layout x = lay_cells(d, ps, 0, &all), y = today;
+    CHECK(same_layout(x, today));
+    CHECK(largest_of(today, 1) == largest_of(today, 2) && !today.cells.empty());   // a stated dial reads the same cell
+    Layout z = today;
+    set_struts(x, ss, &all);
+    set_struts(y, ss);
+    set_struts(z, ss, &none);
+    CHECK(x.cells == y.cells && z.cells == y.cells);
+    ss.mode = Density::ByStress;   // and By stress, its ends and widths stated as the part's
+    ss.dial_light = 0.2; ss.dial_heavy = 0.7; ss.width_light_mm = 0.0; ss.response = 1.0;
+    for (auto* o : {&all[1], &all[2]}) {
+      o->by_stress = true; o->dial_light = 0.2; o->dial_heavy = 0.7;
+    }
+    x = today; y = today;
+    const StrutReport rx = set_struts(x, ss, &all), ry = set_struts(y, ss);
+    CHECK(x.cells == y.cells && !rx.no_stress && rx.at_heavy == ry.at_heavy && rx.at_light == ry.at_light);
+  }
+  {  // 2. A states cell_mm 4 while the part's is 8: A's cells are 4 (and its ladder's), B's are 8.
+    AreaOwn a;
+    a.cell_mm = 4.0;
+    const AreaOwnMap m = only(1, a);
+    const Layout l = lay_cells(d, P, 0, &m);
+    CellSpec four = P;
+    four.cell_mm = 4.0;
+    const Layout all4 = lay_cells(d, four);
+    CHECK(cells_of(l, 1) == cells_of(all4, 1) && largest_of(l, 1) == 4.0);
+    CHECK(cells_of(l, 2) == cells_of(base, 2) && largest_of(l, 2) == 8.0);
+    CHECK(l.regions.size() == 2 && l.regions[0].base_cell_mm == 4.0 && l.regions[1].base_cell_mm == 8.0);
+  }
+  {  // 3. A states Stepped while the part is Default Grade (Grade to shape on): A's sizes are Stepped fractions, B's
+     // halves only.
+    AreaOwn a;
+    a.algorithm = Algorithm::Stepped;
+    const AreaOwnMap m = only(1, a);
+    const Layout l = lay_cells(d, P3, 0, &m);
+    CellSpec st = P3;
+    st.algorithm = Algorithm::Stepped;
+    CHECK(cells_of(l, 1) == cells_of(lay_cells(d, st), 1));
+    CHECK(cells_of(l, 2) == cells_of(base3, 2));
+    const auto half = [](double s) { const double k = std::log2(8.0 / s); return std::fabs(k - std::round(k)) < 1e-9; };
+    int a_not_half = 0, b_not_half = 0;
+    for (double s : sizes_of(l, 1)) a_not_half += !half(s);
+    for (double s : sizes_of(l, 2)) b_not_half += !half(s);
+    CHECK(a_not_half > 0 && b_not_half == 0 && sizes_of(l, 2).size() > 1);
+  }
+  {  // 4. A states Uniform: A has one cell size and is cut where it ends; B grades.
+    AreaOwn a;
+    a.algorithm = Algorithm::Uniform;
+    const AreaOwnMap m = only(1, a);
+    const Layout l = lay_cells(d, P3, 0, &m);
+    int past = 0;   // cubes reaching past the face's outline: cut by it
+    for (const Cell& c : cells_of(l, 1)) {
+      Vec3 lo, hi;
+      cell_box(l, c, &lo, &hi);
+      past += lo.x < -1e-9 || lo.y < -1e-9 || hi.x > 46 + 1e-9 || hi.y > 46 + 1e-9;
+    }
+    CHECK(sizes_of(l, 1) == std::vector<double>{8.0} && past > 0);
+    CHECK(sizes_of(l, 2).size() > 1 && cells_of(l, 2) == cells_of(base3, 2));
+  }
+  {  // 5. A states Grade to shape with band 6 while the part has it off: only A's cells shrink toward its outline.
+    AreaOwn a;
+    a.grade_to_shape = true;
+    a.band_mm = 6.0;
+    const AreaOwnMap m = only(1, a);
+    const Layout l = lay_cells(d, P, 0, &m);
+    CellSpec g = P;
+    g.grade_to_shape = true;
+    g.band_mm = 6.0;
+    CHECK(cells_of(l, 1) == cells_of(lay_cells(d, g), 1) && sizes_of(l, 1).front() < 8.0);
+    CHECK(sizes_of(l, 2) == std::vector<double>{8.0} && cells_of(l, 2) == cells_of(base, 2));
+  }
+  {  // 6. A states min_cells_across 1 while the part's is 2, on a plate whose regions hold one cell across:
+     // lattice in A there, solid in B.
+    PartMeasure thin(weld_mesh(box(44, 44, 3)));
+    DomainSpec ts;
+    ts.bead_mm = 0.2;
+    ts.regions = {face_region(1, Role::Lattice, {22, 22, 3}, {0, 0, -1}, 22, 22, 1.5),
+                  face_region(2, Role::Lattice, {22, 22, 0}, {0, 0, 1}, 22, 22, 1.5)};
+    Domain td(thin, ts);
+    CellSpec two = P;
+    two.min_cells_across = 2;
+    const Layout today = lay_cells(td, two);
+    CHECK(today.cells.empty() && !today.solid.empty());
+    AreaOwn a;
+    a.min_cells_across = 1;
+    const AreaOwnMap m = only(1, a);
+    const Layout l = lay_cells(td, two, 0, &m);
+    std::size_t b_solid = 0;
+    for (const Cell& c : l.solid) b_solid += c.region == 2;
+    CHECK(!cells_of(l, 1).empty() && cells_of(l, 2).empty() && b_solid > 0);
+  }
+  {  // 7. A states cell_min_mm above the floor: no cell of A is smaller; B still goes to the floor.
+    AreaOwn a;
+    a.cell_min_mm = 3.0;
+    const AreaOwnMap m = only(1, a);
+    const Layout l = lay_cells(d, P3, 0, &m);
+    CHECK(sizes_of(l, 1).front() >= 3.0 && sizes_of(l, 1).size() > 1);
+    CHECK(sizes_of(l, 2).front() == 2.0 && cells_of(l, 2) == cells_of(base3, 2));
+  }
+  {  // 8. A states cell size by stress off while the part's is on (ramp field): A's cells ignore the stress, B's follow.
+    CellSpec ps = P;
+    ps.by_stress = true;
+    ps.demand = ramp;
+    ps.reference_mpa = 100.0;
+    const Layout stressed = lay_cells(d, ps);
+    CHECK(!(cells_of(stressed, 2) == cells_of(base, 2)));
+    AreaOwn a;
+    a.cells_by_stress = false;
+    const AreaOwnMap m = only(1, a);
+    const Layout l = lay_cells(d, ps, 0, &m);
+    CHECK(cells_of(l, 1) == cells_of(base, 1) && cells_of(l, 2) == cells_of(stressed, 2));
+  }
+  {  // 9. Struts: A states dial 0.9, the part Uniform 0.3: A's strut / cell is the 0.9 dial read on A's largest cell,
+     // B's the part's. With A's cells 4 mm, on A's 4 mm cell, not the part's 8.
+    StrutSpec u;
+    u.dial = 0.3;
+    for (bool small : {false, true}) {
+      AreaOwn a;
+      a.dial = 0.9;
+      if (small) a.cell_mm = 4.0;
+      const AreaOwnMap m = only(1, a);
+      Layout l = lay_cells(d, P, 0, &m);
+      set_struts(l, u, &m);
+      const double ra = dial_ratio(l, 0.9, small ? 4.0 : 8.0), rb = dial_ratio(l, 0.3, 8.0);
+      int wrong = 0;
+      for (const Cell& c : l.cells)
+        if (std::fabs(c.strut - held_strut(l, (c.region == 1 ? ra : rb) * c.size, c.size)) > 1e-12) ++wrong;
+      CHECK(wrong == 0 && largest_of(l, 1) == (small ? 4.0 : 8.0));
+    }
+    // A states width_mm: every cell of A that can hold it has it; B does not.
+    AreaOwn a;
+    a.width_mm = 0.75;
+    const AreaOwnMap m = only(1, a);
+    Layout l = base;
+    set_struts(l, u, &m);
+    int a_has = 0, a_could = 0, b_has = 0;
+    for (const Cell& c : l.cells) {
+      if (c.region == 1 && l.open_look * c.size >= 0.75) { ++a_could; a_has += c.strut == 0.75; }
+      if (c.region == 2) b_has += c.strut == 0.75;
+    }
+    CHECK(a_could > 0 && a_has == a_could && b_has == 0);
+  }
+  {  // 10. A states By stress with its own ends while the part is Uniform (ramp field): A's struts follow the ramp
+     // between A's ends, B's are uniform. And the reverse: the part By stress, A Uniform with its own dial.
+    StrutSpec u;
+    u.dial = 0.3;
+    u.demand = ramp;
+    u.reference_mpa = 100.0;
+    AreaOwn a;
+    a.by_stress = true;
+    a.dial_light = 0.2;
+    a.dial_heavy = 0.8;
+    AreaOwnMap m = only(1, a);
+    Layout l = base;
+    const StrutReport r = set_struts(l, u, &m);
+    const double rl = dial_ratio(l, 0.2, 8.0), rh = dial_ratio(l, 0.8, 8.0), r3 = dial_ratio(l, 0.3, 8.0);
+    int wrong = 0, a_light = 0, a_heavy = 0;
+    for (const Cell& c : l.cells) {
+      const double f = std::clamp(cube_demand(l, c.frame, c.lo, c.size, *ramp) / 100.0, 0.0, 1.0);
+      const double want = c.region == 1 ? (rl + f * (rh - rl)) * c.size : r3 * c.size;
+      if (std::fabs(c.strut - held_strut(l, want, c.size)) > 1e-12) ++wrong;
+      if (c.region == 1) { a_light += f == 0.0; a_heavy += f == 1.0; }
+    }
+    CHECK(wrong == 0 && a_light > 0 && a_heavy > 0 && !r.no_stress);
+    CHECK(r.at_light == static_cast<std::size_t>(a_light) && r.at_heavy == static_cast<std::size_t>(a_heavy));
+    // No field: A at its light end, and the layout says so (R18).
+    StrutSpec nofield = u;
+    nofield.demand = nullptr;
+    Layout n = base;
+    CHECK(set_struts(n, nofield, &m).no_stress);
+    // The reverse.
+    StrutSpec bs = u;
+    bs.mode = Density::ByStress;
+    bs.dial_light = 0.2;
+    bs.dial_heavy = 0.8;
+    AreaOwn b;
+    b.by_stress = false;
+    b.dial = 0.6;
+    m = only(1, b);
+    l = base;
+    set_struts(l, bs, &m);
+    const double r6 = dial_ratio(l, 0.6, 8.0);
+    wrong = 0;
+    for (const Cell& c : l.cells) {
+      const double f = std::clamp(cube_demand(l, c.frame, c.lo, c.size, *ramp) / 100.0, 0.0, 1.0);
+      const double want = c.region == 1 ? r6 * c.size : (rl + f * (rh - rl)) * c.size;
+      if (std::fabs(c.strut - held_strut(l, want, c.size)) > 1e-12) ++wrong;
+    }
+    CHECK(wrong == 0);
+    // Through the session: the part Uniform, a region By stress with no reference of its own reads the part's (R17).
+    int L = 0, square = 0, sideA = 0, sideB = 0;
+    Session session(plate_with_L_face(&L, &square, &sideA, &sideB));
+    Settings st;
+    st.min_strut_lines = kFewestStrutLines;
+    st.bars = false;
+    st.regions = {{1, Role::Lattice, {square}, 6.0, 0.0}, {2, Role::Lattice, {L}, 6.0, 0.0}};
+    st.regions[0].own.by_stress = true;
+    st.cells.cell_max_mm = 6;
+    st.stress.demand = field_of(60, 60, 10, [](int i, int j, int) { return static_cast<double>(i + j); });
+    const Outcome o = session.lay(st);
+    const double part_ref = stress_reference(*session.domain(), *st.stress.demand, 0.95);
+    CHECK(part_ref > 0.0 && o.stress_reference_mpa == part_ref && !o.struts.no_stress && o.struts.at_heavy > 0);
+    std::vector<double> ra, rb;
+    for (const Cell& c : o.layout.cells) {
+      auto& v = c.region == 1 ? ra : rb;
+      if (std::find(v.begin(), v.end(), c.strut / c.size) == v.end()) v.push_back(c.strut / c.size);
+    }
+    CHECK(ra.size() > 2 && rb.size() <= 2);   // B: one ratio, two at most where a cell is held at a limit
+  }
+  {  // 11. A's own response and reference change A's struts and cells and nothing of B's.
+    CellSpec ps = P;
+    ps.by_stress = true;
+    ps.demand = ramp;
+    ps.reference_mpa = 100.0;
+    StrutSpec bs;
+    bs.mode = Density::ByStress;
+    bs.dial_light = 0.2;
+    bs.dial_heavy = 0.8;
+    bs.demand = ramp;
+    bs.reference_mpa = 100.0;
+    Layout before = lay_cells(d, ps);
+    set_struts(before, bs);
+    AreaOwn a;
+    a.response = 2.0;
+    a.reference_mpa = 50.0;
+    const AreaOwnMap m = only(1, a);
+    Layout l = lay_cells(d, ps, 0, &m);
+    set_struts(l, bs, &m);
+    CHECK(cells_of(l, 2) == cells_of(before, 2));
+    CellSpec theirs = ps;
+    theirs.response = 2.0;
+    theirs.reference_mpa = 50.0;
+    std::vector<Cell> want_a = cells_of(lay_cells(d, theirs), 1), got_a = cells_of(l, 1), old_a = cells_of(before, 1);
+    for (Cell& c : got_a) c.strut = 0.0;
+    for (Cell& c : old_a) c.strut = 0.0;
+    CHECK(got_a == want_a && !(got_a == old_a));
+    // A's struts: f = stress / 50, to the power 2, between the part's ends read on the part's largest cell.
+    double part_big = 0.0;
+    for (const Cell& c : l.cells) part_big = std::max(part_big, c.size);
+    const double pl = dial_ratio(l, 0.2, part_big), ph = dial_ratio(l, 0.8, part_big);
+    int wrong = 0;
+    for (const Cell& c : l.cells) {
+      if (c.region != 1) continue;
+      const double f = std::clamp(cube_demand(l, c.frame, c.lo, c.size, *ramp) / 50.0, 0.0, 1.0);
+      if (std::fabs(c.strut - held_strut(l, (pl + f * f * (ph - pl)) * c.size, c.size)) > 1e-12) ++wrong;
+    }
+    CHECK(wrong == 0);
+  }
+  {  // 12. Per region with region_dial is today's; a stated dial wins over the region's region_dial entry.
+    StrutSpec pr;
+    pr.mode = Density::PerRegion;
+    pr.region_dial = {{1, 0.7}, {2, 0.2}};
+    AreaOwnMap none;
+    none[1] = AreaOwn{};
+    Layout x = base, y = base;
+    set_struts(x, pr);
+    set_struts(y, pr, &none);
+    CHECK(x.cells == y.cells);
+    AreaOwn a;
+    a.dial = 0.4;
+    const AreaOwnMap m = only(1, a);
+    Layout l = base;
+    set_struts(l, pr, &m);
+    int wrong = 0;
+    for (std::size_t i = 0; i < l.cells.size(); ++i) {
+      const Cell& c = l.cells[i];
+      const double want = c.region == 1 ? held_strut(l, dial_ratio(l, 0.4, 8.0) * c.size, c.size) : x.cells[i].strut;
+      if (std::fabs(c.strut - want) > 1e-12) ++wrong;
+    }
+    CHECK(wrong == 0 && l.cells[0].region == 1 && l.cells[0].strut != x.cells[0].strut);
+  }
+  {  // 13. One thread and eight give the same layout. Speed: every region stating everything (as the part's values)
+     // takes no more than 1.2 x the same layout stated at part level.
+    AreaOwn a, b;
+    a.algorithm = Algorithm::Stepped; a.cell_mm = 4.0; a.dial = 0.7;
+    b.grade_to_shape = false; b.cell_min_mm = 3.0; b.by_stress = true; b.reference_mpa = 60.0;
+    AreaOwnMap m;
+    m[1] = a;
+    m[2] = b;
+    StrutSpec u;
+    u.demand = ramp;
+    u.reference_mpa = 100.0;
+    Layout one = lay_cells(d, P3, 1, &m), eight = lay_cells(d, P3, 8, &m);
+    set_struts(one, u, &m);
+    set_struts(eight, u, &m);
+    CHECK(same_layout(one, eight) && one.cells == eight.cells);
+    AreaOwn eq;
+    eq.algorithm = P3.algorithm; eq.cell_mm = P3.cell_mm; eq.cell_max_mm = P3.cell_max_mm;
+    eq.cell_min_mm = P3.cell_min_mm; eq.min_cells_across = P3.min_cells_across; eq.grade_to_shape = P3.grade_to_shape;
+    eq.band_mm = P3.band_mm; eq.band_cell_mm = P3.band_cell_mm; eq.cells_by_stress = P3.by_stress;
+    eq.response = 1.0; eq.reference_mpa = 0.0;
+    eq.by_stress = false; eq.dial = u.dial; eq.width_mm = 0.0; eq.strength = 0.0; eq.dial_light = u.dial_light;
+    eq.dial_heavy = u.dial_heavy; eq.width_light_mm = 0.0; eq.width_heavy_mm = 0.0;
+    AreaOwnMap all;
+    all[1] = eq;
+    all[2] = eq;
+    const auto time = [&](const AreaOwnMap* own) {
+      double best = 1e9;
+      for (int run = 0; run < 9; ++run) {
+        const auto t0 = std::chrono::steady_clock::now();
+        Layout l = lay_cells(d, P3, 0, own);
+        set_struts(l, u, own);
+        best = std::min(best, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+      }
+      return best;
+    };
+    const double plain = time(nullptr), stated = time(&all);
+    std::printf("area own: a layout stated at part level %.2f ms, every region stating everything %.2f ms (best of 9)\n",
+                plain, stated);
+    CHECK(stated <= 1.2 * plain);
+  }
+}
+
+// D21: zones. A block as a model (faces 0 bottom, 1 top, 2 the front at y = 0, 3..5 the rest), for the Session.
+static StepModel zone_block(double x, double y, double z) {
+  StepModel m;
+  const Vec3 p[8] = {{0, 0, 0}, {x, 0, 0}, {x, y, 0}, {0, y, 0}, {0, 0, z}, {x, 0, z}, {x, y, z}, {0, y, z}};
+  const int q[6][4] = {{0, 3, 2, 1}, {4, 5, 6, 7}, {0, 1, 5, 4}, {1, 2, 6, 5}, {2, 3, 7, 6}, {3, 0, 4, 7}};
+  const Vec3 out[6] = {{0, 0, -1}, {0, 0, 1}, {0, -1, 0}, {1, 0, 0}, {0, 1, 0}, {-1, 0, 0}};
+  for (int f = 0; f < 6; ++f) {
+    StepFaceInfo info;
+    info.kind = StepSurfaceKind::Plane;
+    info.plane_normal = out[f];
+    info.plane_origin = p[q[f][0]];
+    m.faces.push_back(info);
+    for (int t = 0; t < 2; ++t) {
+      const int n = static_cast<int>(m.mesh.vertices.size());
+      m.mesh.vertices.insert(m.mesh.vertices.end(), {p[q[f][0]], p[q[f][t ? 2 : 1]], p[q[f][t ? 3 : 2]]});
+      m.mesh.triangles.push_back({n, n + 1, n + 2});
+      m.triangle_face.push_back(f);
+    }
+  }
+  m.face_count = 6;
+  m.solid_count = 1;
+  return m;
+}
+static Zone box_zone(Vec3 centre, Vec3 a0, Vec3 a1, Vec3 a2, double h0, double h1, double h2) {
+  Zone z;
+  z.kind = Zone::Kind::Box;
+  z.centre = centre;
+  z.axis[0] = a0; z.axis[1] = a1; z.axis[2] = a2;
+  z.half[0] = h0; z.half[1] = h1; z.half[2] = h2;
+  return z;
+}
+static Zone cylinder_zone(Vec3 centre, Vec3 axis, double radius, double half_length) {
+  Zone z;
+  z.kind = Zone::Kind::Cylinder;
+  z.centre = centre;
+  z.axis[2] = axis;
+  z.half[0] = radius;
+  z.half[2] = half_length;
+  return z;
+}
+// A point of a box zone, from its own coordinates.
+static Vec3 in_zone(const Zone& z, double q0, double q1, double q2) {
+  const Vec3* a = z.axis;
+  return {z.centre.x + a[0].x * q0 + a[1].x * q1 + a[2].x * q2, z.centre.y + a[0].y * q0 + a[1].y * q1 + a[2].y * q2,
+          z.centre.z + a[0].z * q0 + a[1].z * q1 + a[2].z * q2};
+}
+static double zone_coord(const Zone& z, const Vec3& p, int a) {
+  const Vec3 r{p.x - z.centre.x, p.y - z.centre.y, p.z - z.centre.z};
+  return r.x * z.axis[a].x + r.y * z.axis[a].y + r.z * z.axis[a].z;
+}
+
+static void test_zones() {
+  const double hair = 0.05;
+  PartMeasure pm(weld_mesh(box(40, 40, 20)));
+  const double c30 = std::cos(3.14159265358979323846 / 6), s30 = 0.5;
+  // 1, 2: a box zone inside a solid block, Start from Solid, square to the part and turned 30 degrees about a2.
+  for (const Zone& z : {box_zone({20, 20, 10}, {1, 0, 0}, {0, 1, 0}, {0, 0, 1}, 8, 6, 5),
+                        box_zone({20, 20, 10}, {c30, s30, 0}, {-s30, c30, 0}, {0, 0, 1}, 8, 6, 5)}) {
+    bool ok = false;
+    DomainSpec s;
+    s.regions = {region_from_zone(z, 3, Role::Lattice, 0.0, &ok)};
+    CHECK(ok);
+    Domain d(pm, s);
+    auto pr = d.probe();
+    int wrong = 0;
+    for (int a = 0; a < 3; ++a)
+      for (int side : {-1, 1})
+        for (double off : {-0.6, 0.0, 0.6}) {   // a few places along each of the six sides
+          double q[3] = {off * z.half[0], off * z.half[1], off * z.half[2]};
+          q[a] = side * (z.half[a] - hair);
+          wrong += !(pr.where(in_zone(z, q[0], q[1], q[2])) == Where{Why::Lattice, 3});
+          q[a] = side * (z.half[a] + hair);
+          wrong += !(pr.where(in_zone(z, q[0], q[1], q[2])) == Where{Why::NotAsked, 0});
+        }
+    CHECK(wrong == 0);
+    CellSpec cs;
+    cs.cell_max_mm = 4;
+    const Layout l = lay_cells(d, cs);
+    int astray = 0;
+    for (const Cell& c : l.cells) {   // each cell's cube meets the box; its centre is within the box's depth
+      const Vec3 m = cell_centre(l, c);
+      astray += c.region != 3 || std::fabs(zone_coord(z, m, 0)) >= z.half[0] + 0.5 * c.size - 1e-9 ||
+                std::fabs(zone_coord(z, m, 1)) >= z.half[1] + 0.5 * c.size - 1e-9 ||
+                std::fabs(zone_coord(z, m, 2)) > z.half[2] + 1e-9;
+    }
+    CHECK(!l.cells.empty() && astray == 0);
+    // The box's own axes are the cells' frame: the cells line up with its sides.
+    if (!l.cells.empty()) {
+      const Vec3& u = l.frames[l.cells.front().frame].ax[0];
+      NEAR(u.x * z.axis[0].x + u.y * z.axis[0].y + u.z * z.axis[0].z, 1.0, 1e-12);
+    }
+  }
+  // 3: a cylinder zone: lattice inside 0.98 r, not outside 1.02 r, at 24 angles and three heights.
+  {
+    const Vec3 axis{0.0, 0.6, 0.8};   // tilted, so the in-plane axes are the engine's own pick
+    const Zone z = cylinder_zone({20, 20, 10}, axis, 7, 5);
+    bool ok = false;
+    DomainSpec s;
+    s.regions = {region_from_zone(z, 4, Role::Lattice, 0.0, &ok)};
+    CHECK(ok);
+    Domain d(pm, s);
+    auto pr = d.probe();
+    const Vec3 e1{1, 0, 0}, e2{0, 0.8, -0.6};   // square to the axis
+    int wrong = 0;
+    for (int k = 0; k < 24; ++k)
+      for (double t : {-4.5, 0.0, 4.5}) {
+        const double ang = 2 * 3.14159265358979323846 * k / 24 + 0.01;
+        auto at = [&](double rr) {
+          return Vec3{20 + axis.x * t + (e1.x * std::cos(ang) + e2.x * std::sin(ang)) * rr,
+                      20 + axis.y * t + (e1.y * std::cos(ang) + e2.y * std::sin(ang)) * rr,
+                      10 + axis.z * t + (e1.z * std::cos(ang) + e2.z * std::sin(ang)) * rr};
+        };
+        wrong += !(pr.where(at(0.98 * 7)) == Where{Why::Lattice, 4});
+        wrong += !(pr.where(at(1.02 * 7)) == Where{Why::NotAsked, 0});
+      }
+    CHECK(wrong == 0);
+    // Its two ends, a hair either side.
+    CHECK((pr.where({20, 20 + 0.6 * 4.95, 10 + 0.8 * 4.95}) == Where{Why::Lattice, 4}));
+    CHECK((pr.where({20, 20 + 0.6 * 5.05, 10 + 0.8 * 5.05}) == Where{Why::NotAsked, 0}));
+    CHECK((pr.where({20, 20 - 0.6 * 4.95, 10 - 0.8 * 4.95}) == Where{Why::Lattice, 4}));
+    CHECK((pr.where({20, 20 - 0.6 * 5.05, 10 - 0.8 * 5.05}) == Where{Why::NotAsked, 0}));
+    // The loop's area is the circle's.
+    double area = 0.0;
+    const auto& loops = s.regions[0].prism.outline_uv;
+    CHECK(loops.size() == 1 && loops[0].size() == 96);
+    for (const auto& loop : loops)
+      for (std::size_t i = 0, j = loop.size() - 1; i < loop.size(); j = i++)
+        area += loop[j][0] * loop[i][1] - loop[i][0] * loop[j][1];
+    NEAR(0.5 * std::fabs(area), 3.14159265358979323846 * 49.0, 1e-9);
+    CellSpec cs;
+    cs.cell_max_mm = 4;
+    CHECK(!lay_cells(d, cs).cells.empty());
+  }
+  // 4: a zone half outside the part: lattice only where the part has material.
+  {
+    const Zone z = box_zone({40, 20, 10}, {1, 0, 0}, {0, 1, 0}, {0, 0, 1}, 8, 6, 5);
+    DomainSpec s;
+    s.regions = {region_from_zone(z, 1, Role::Lattice)};
+    Domain d(pm, s);
+    auto pr = d.probe();
+    CHECK((pr.where({36, 20, 10}) == Where{Why::Lattice, 1}));
+    CHECK((pr.where({39.9, 24, 6}) == Where{Why::Lattice, 1}));
+    CHECK((pr.where({40.1, 20, 10}) == Where{Why::Outside, 0}));
+    CHECK((pr.where({44, 24, 6}) == Where{Why::Outside, 0}));
+    CellSpec cs;
+    cs.cell_max_mm = 4;
+    const Layout l = lay_cells(d, cs);
+    int outside = 0;   // no cell stands wholly outside the part
+    for (const Cell& c : l.cells) outside += cell_centre(l, c).x - 0.5 * c.size >= 40.0;
+    CHECK(!l.cells.empty() && outside == 0);
+  }
+  // 5: Start from All lattice with a No lattice box zone: no lattice inside it, lattice round it.
+  {
+    const Zone z = box_zone({20, 20, 10}, {c30, s30, 0}, {-s30, c30, 0}, {0, 0, 1}, 8, 6, 5);
+    DomainSpec s;
+    s.start = Start::AllLattice;
+    s.regions = {region_from_zone(z, 2, Role::NoLattice)};
+    Domain d(pm, s);
+    auto pr = d.probe();
+    int wrong = 0;
+    for (int a = 0; a < 3; ++a)
+      for (int side : {-1, 1}) {
+        double q[3] = {0, 0, 0};
+        q[a] = side * (z.half[a] - hair);
+        wrong += !(pr.where(in_zone(z, q[0], q[1], q[2])) == Where{Why::NoLattice, 2});
+        q[a] = side * (z.half[a] + hair);
+        wrong += !(pr.where(in_zone(z, q[0], q[1], q[2])) == Where{Why::Lattice, 0});
+      }
+    CHECK(wrong == 0);
+  }
+  // 6: Expand +1 and -1 move the four in-plane sides by that, and leave the two ends alone (D11).
+  for (double e : {1.0, -1.0}) {
+    const Zone z = box_zone({20, 20, 10}, {c30, s30, 0}, {-s30, c30, 0}, {0, 0, 1}, 8, 6, 5);
+    DomainSpec s;
+    s.regions = {region_from_zone(z, 1, Role::Lattice, e)};
+    Domain d(pm, s);
+    auto pr = d.probe();
+    int wrong = 0;
+    for (int a = 0; a < 2; ++a)
+      for (int side : {-1, 1}) {
+        double q[3] = {0, 0, 0};
+        q[a] = side * (z.half[a] + e - hair);
+        wrong += !pr.where(in_zone(z, q[0], q[1], q[2])).lattice();
+        q[a] = side * (z.half[a] + e + hair);
+        wrong += pr.where(in_zone(z, q[0], q[1], q[2])).lattice();
+      }
+    for (int side : {-1, 1}) {
+      wrong += !pr.where(in_zone(z, 0, 0, side * (z.half[2] - hair))).lattice();
+      wrong += pr.where(in_zone(z, 0, 0, side * (z.half[2] + hair))).lattice();
+    }
+    CHECK(wrong == 0);
+  }
+  // 7: Grade to shape in a box zone: the band is measured from the box's outline, not the part's.
+  {
+    PartMeasure big(weld_mesh(box(60, 60, 20)));
+    const Zone z = box_zone({30, 30, 10}, {1, 0, 0}, {0, 1, 0}, {0, 0, 1}, 20, 20, 8);
+    DomainSpec s;
+    s.bead_mm = 0.2;
+    s.regions = {region_from_zone(z, 1, Role::Lattice)};
+    Domain d(big, s);
+    CellSpec cs;
+    cs.cell_max_mm = 8;
+    cs.grade_to_shape = true;
+    cs.band_mm = 8;
+    const Layout l = lay_cells(d, cs);
+    double finest = 1e9, largest = 0.0;
+    for (const Cell& c : l.cells) { finest = std::min(finest, c.size); largest = std::max(largest, c.size); }
+    int wrong_t = 0, at_edge = 0, at_edge_large = 0;
+    for (const Cell& c : l.cells) {
+      const Vec3 m = cell_centre(l, c);
+      const double dist = std::max(0.0, std::min(20 - std::fabs(m.x - 30), 20 - std::fabs(m.y - 30)));
+      if (std::fabs(c.band - std::min(1.0, dist / 8.0)) > 1e-9) ++wrong_t;
+      if (dist <= 0.5 * c.size + 1e-9) { ++at_edge; if (c.size > finest + 1e-9) ++at_edge_large; }
+    }
+    CHECK(!l.cells.empty() && largest == 8.0 && finest < 8.0 - 1e-9);
+    CHECK(wrong_t == 0 && at_edge > 0 && at_edge_large == 0);
+  }
+  // 8: a box zone over part of a face region. The existing order (D6): the nearer face owns the space; the zone's
+  // face is the side it starts on (centre - a2 half2). Face region 1 under the top (z 20, 10 deep, down); zone 2 from
+  // z 9 up to 15: at z the face is 20 - z away and the zone's side z - 9, so the zone owns below z 14.5, the face above.
+  {
+    DomainSpec s;
+    s.regions = {face_region(1, Role::Lattice, {20, 20, 20}, {0, 0, -1}, 20, 20, 10),
+                 region_from_zone(box_zone({20, 20, 12}, {1, 0, 0}, {0, 1, 0}, {0, 0, 1}, 6, 6, 3), 2, Role::Lattice)};
+    Domain d(pm, s);
+    auto pr = d.probe();
+    CHECK((pr.where({20, 20, 9.5}) == Where{Why::Lattice, 2}));    // the zone alone
+    CHECK((pr.where({20, 20, 12}) == Where{Why::Lattice, 2}));     // both: the zone's side is nearer
+    CHECK((pr.where({20, 20, 14.9}) == Where{Why::Lattice, 1}));   // both: the face is nearer
+    CHECK((pr.where({30, 20, 12}) == Where{Why::Lattice, 1}));     // the face alone
+    CHECK((pr.where({20, 20, 8.5}) == Where{Why::NotAsked, 0}));
+  }
+  // 9: bad zones are left out and listed; the rest still lay.
+  {
+    const StepModel model = zone_block(40, 40, 20);
+    Settings st;
+    st.min_strut_lines = kFewestStrutLines;
+    st.cells.cell_max_mm = 4;
+    const Zone good = box_zone({20, 20, 10}, {1, 0, 0}, {0, 1, 0}, {0, 0, 1}, 8, 6, 5);
+    Zone flat = good;  flat.half[1] = 0.0;                 // zero size
+    Zone skew = good;  skew.axis[1] = {0.1, 0.995, 0.0};   // not square (and not unit)
+    Zone tilt = good;  tilt.axis[1] = {std::sqrt(0.5), std::sqrt(0.5), 0.0};   // unit, not square
+    Zone nan = good;   nan.centre.x = std::nan("");
+    Zone cyl0 = cylinder_zone({20, 20, 10}, {0, 0, 1}, 0.0, 5);
+    Settings::RegionAsk both{6, Role::Lattice, {1}, 5.0, 0.0};
+    both.zone = good;
+    st.regions = {{1, Role::Lattice, {}, 0.0, 0.0}, {2, Role::Lattice, {}, 0.0, 0.0}, {3, Role::Lattice, {}, 0.0, 0.0},
+                  {4, Role::Lattice, {}, 0.0, 0.0}, {5, Role::Lattice, {}, 0.0, 0.0}, both,
+                  {7, Role::Lattice, {}, 0.0, 0.0}};
+    st.regions[0].zone = good;
+    st.regions[1].zone = flat;
+    st.regions[2].zone = skew;
+    st.regions[3].zone = tilt;
+    st.regions[4].zone = nan;
+    st.regions[6].zone = cyl0;
+    const Outcome out = Session(model).lay(st);
+    CHECK((out.empty_regions == std::vector<int>{2, 3, 4, 5, 6, 7}));
+    Settings only = st;
+    only.regions = {st.regions[0]};
+    const Outcome alone = Session(model).lay(only);
+    CHECK(!out.layout.cells.empty() && out.layout.cells == alone.layout.cells && alone.empty_regions.empty());
+    // 12: with no zone the layout is today's: a Session of face regions lays what the face regions laid directly do.
+    Settings faces = st;
+    faces.bars = false;   // the cells as lay_cells gives them
+    faces.regions = {{1, Role::Lattice, {1}, 6.0, -2.0}};
+    const Outcome by_faces = Session(model).lay(faces);
+    PartMeasure m(weld_mesh(model.mesh));
+    DomainSpec ds;
+    ds.min_strut_lines = kFewestStrutLines;
+    ds.regions = {region_from_faces(model, {1}, 1, Role::Lattice, 6.0, -2.0)};
+    Domain dd(m, ds);
+    CellSpec cs = faces.cells;
+    Layout direct = lay_cells(dd, cs);
+    set_struts(direct, faces.struts);
+    CHECK(!by_faces.layout.cells.empty() && by_faces.layout.cells == direct.cells);
+  }
+  // 10: through a Session, moving a zone reads the part again; a cell-size setting does not.
+  {
+    const StepModel model = zone_block(40, 40, 20);
+    Session session(model);
+    Settings st;
+    st.min_strut_lines = kFewestStrutLines;
+    st.cells.cell_max_mm = 4;
+    st.regions = {{1, Role::Lattice, {}, 0.0, 0.0}};
+    st.regions[0].zone = box_zone({20, 20, 10}, {1, 0, 0}, {0, 1, 0}, {0, 0, 1}, 8, 6, 5);
+    const Outcome first = session.lay(st);
+    CHECK(first.read_again && !first.layout.cells.empty() && first.empty_regions.empty());
+    st.cells.cell_max_mm = 3;
+    const Outcome smaller = session.lay(st);
+    CHECK(!smaller.read_again);
+    st.regions[0].zone.centre.x = 21;   // moved
+    const Outcome moved = session.lay(st);
+    CHECK(moved.read_again && moved.layout.cells == Session(model).lay(st).layout.cells);
+    if (!moved.layout.cells.empty() && !smaller.layout.cells.empty())   // the cells moved with it
+      NEAR(cell_centre(moved.layout, moved.layout.cells.front()).x -
+               cell_centre(smaller.layout, smaller.layout.cells.front()).x, 1.0, 1e-9);
+    st.regions[0].zone.axis[0] = {c30, s30, 0};   // turned
+    st.regions[0].zone.axis[1] = {-s30, c30, 0};
+    CHECK(session.lay(st).read_again);
+    st.regions[0].zone.half[2] = 4;               // shallower
+    CHECK(session.lay(st).read_again);
+    CHECK(!session.lay(st).read_again);           // and asked again: kept
+  }
+}
+
+// D22: a region, and a Protect skin, given as pieces of faces (the app's Edit faces). zone_block(40, 40, 20): face 1
+// is the top (z = 20), 0 the bottom, 2 the front (y = 0), 3 x = 40, 4 the back, 5 x = 0.
+static FacePiece face_piece(std::vector<int> faces, std::vector<FaceCut> cuts) {
+  FacePiece p;
+  p.faces = std::move(faces);
+  p.cuts = std::move(cuts);
+  return p;
+}
+// A block 40 (x) by 20 (y) whose top is a cylinder about y (radius 25, axis at x 20, z -5, so its top is z 20 at
+// x 20 and z 10 at either side), in 96 flat strips: faces 0 the bottom, 1 the right side, 2 the arch (Cylinder),
+// 3 the left side, 4 the front (y = 0), 5 the back (y = 20).
+static StepModel arch_block() {
+  const double R = 25, cx = 20, cz = -5;
+  std::vector<std::array<double, 2>> xz = {{0, 0}, {40, 0}, {40, 10}};
+  const double a0 = std::asin(20.0 / R);   // the arch runs from +a0 (x 40) to -a0 (x 0), angle from the top
+  for (int k = 1; k < 96; ++k) {
+    const double a = a0 - 2.0 * a0 * k / 96.0;
+    xz.push_back({cx + R * std::sin(a), cz + R * std::cos(a)});
+  }
+  xz.push_back({0, 10});
+  const int n = static_cast<int>(xz.size());
+  ModelBuilder b;
+  const int bottom = b.face(StepSurfaceKind::Plane, {0, 0, -1}, {0, 0, 0});
+  const int right = b.face(StepSurfaceKind::Plane, {1, 0, 0}, {40, 0, 0});
+  const int arch = b.face(StepSurfaceKind::Cylinder, {0, 0, 0}, {0, 0, 0});
+  const int left = b.face(StepSurfaceKind::Plane, {-1, 0, 0}, {0, 0, 0});
+  const int front = b.face(StepSurfaceKind::Plane, {0, -1, 0}, {0, 0, 0});
+  const int back = b.face(StepSurfaceKind::Plane, {0, 1, 0}, {0, 20, 0});
+  const Vec3 mid{20, 10, 8};
+  auto out_tri = [&](int f, Vec3 p, Vec3 q, Vec3 r) {   // wound to face away from the middle (the block is convex)
+    const Vec3 u{q.x - p.x, q.y - p.y, q.z - p.z}, v{r.x - p.x, r.y - p.y, r.z - p.z};
+    const Vec3 nn{u.y * v.z - u.z * v.y, u.z * v.x - u.x * v.z, u.x * v.y - u.y * v.x};
+    const Vec3 c{(p.x + q.x + r.x) / 3 - mid.x, (p.y + q.y + r.y) / 3 - mid.y, (p.z + q.z + r.z) / 3 - mid.z};
+    if (nn.x * c.x + nn.y * c.y + nn.z * c.z >= 0) b.tri(f, p, q, r); else b.tri(f, p, r, q);
+  };
+  for (int i = 0; i < n; ++i) {
+    const int j = (i + 1) % n;
+    const int f = i == 0 ? bottom : i == 1 ? right : i == n - 1 ? left : arch;
+    const Vec3 p0{xz[i][0], 0, xz[i][1]}, p1{xz[j][0], 0, xz[j][1]}, q0{xz[i][0], 20, xz[i][1]}, q1{xz[j][0], 20, xz[j][1]};
+    out_tri(f, p0, p1, q1);
+    out_tri(f, p0, q1, q0);
+  }
+  for (int i = 1; i + 1 < n; ++i) {
+    out_tri(front, {xz[0][0], 0, xz[0][1]}, {xz[i][0], 0, xz[i][1]}, {xz[i + 1][0], 0, xz[i + 1][1]});
+    out_tri(back, {xz[0][0], 20, xz[0][1]}, {xz[i][0], 20, xz[i][1]}, {xz[i + 1][0], 20, xz[i + 1][1]});
+  }
+  b.m.solid_count = 1;
+  return b.m;
+}
+
+static void test_face_pieces() {
+  const StepModel model = zone_block(40, 40, 20);
+  PartMeasure pm(weld_mesh(model.mesh));
+  const double hair = 0.01;
+  // A slanted cut across the top: kept (left) where (p - c) . n >= 0.
+  const Vec3 c{20, 20, 0};
+  const double nl = std::sqrt(1.0 + 0.09);
+  const Vec3 n{-1.0 / nl, -0.3 / nl, 0}, along{-0.3 / nl, 1.0 / nl, 0};
+  const FaceCut keep_left{c, {-1, -0.3, 0}, false}, keep_right{c, {1, 0.3, 0}, true};
+  auto off = [&](double s, double side, double z) {   // s along the cut, side across it (+ = the left piece)
+    return Vec3{c.x + along.x * s + n.x * side, c.y + along.y * s + n.y * side, z};
+  };
+  CellSpec cs;
+  cs.cell_max_mm = 4;
+
+  // 1: the left piece alone: lattice a hair left of the cut and not a hair right, along it and at three depths;
+  // cells only under the piece.
+  {
+    bool ok = false;
+    DomainSpec s;
+    s.regions = {region_from_pieces(model, {face_piece({1}, {keep_left})}, 1, Role::Lattice, 6.0, 0.0, &ok)};
+    CHECK(ok && !s.regions[0].is_shell());
+    Domain d(pm, s);
+    auto pr = d.probe();
+    int wrong = 0;
+    for (double t : {-15.0, -7.0, 0.0, 7.0, 15.0})
+      for (double z : {19.5, 17.0, 14.5}) {
+        wrong += !(pr.where(off(t, hair, z)) == Where{Why::Lattice, 1});
+        wrong += !(pr.where(off(t, -hair, z)) == Where{Why::NotAsked, 0});
+      }
+    CHECK(wrong == 0);
+    const Layout l = lay_cells(d, cs);
+    int astray = 0;
+    for (const Cell& cell : l.cells) {   // each cube reaches the kept side of the cut
+      const Vec3 m = cell_centre(l, cell);
+      const double side = (m.x - c.x) * n.x + (m.y - c.y) * n.y;
+      astray += cell.region != 1 || side < -0.5 * cell.size * (std::fabs(n.x) + std::fabs(n.y)) - 1e-9;
+    }
+    CHECK(!l.cells.empty() && astray == 0);
+  }
+
+  // 2: the left piece one region, the right piece another (its cut strict): every point under the face is held by
+  // exactly one, points exactly on a cut along x included. Which one takes those is the prism's own edge rule: printed.
+  {
+    const FacePiece L = face_piece({1}, {keep_left}), Rp = face_piece({1}, {keep_right});
+    DomainSpec a, b;
+    a.regions = {region_from_pieces(model, {L}, 1, Role::Lattice, 6.0)};
+    b.regions = {region_from_pieces(model, {Rp}, 2, Role::Lattice, 6.0)};
+    Domain da(pm, a), db(pm, b);
+    auto pa = da.probe(), pb = db.probe();
+    int twice = 0, never = 0, points = 0;
+    for (double x = 0.37; x < 40; x += 0.83)
+      for (double y = 0.41; y < 40; y += 0.79) {
+        const Vec3 p{x, y, 17.3};
+        const int held = (pa.where(p) == Where{Why::Lattice, 1}) + (pb.where(p) == Where{Why::Lattice, 2});
+        twice += held > 1;
+        never += held < 1;
+        ++points;
+      }
+    CHECK(points > 2000 && twice == 0 && never == 0);
+    // Exactly on an axis cut x = 20, both senses of strict.
+    for (bool left_strict : {false, true}) {
+      DomainSpec e, f;
+      e.regions = {region_from_pieces(model, {face_piece({1}, {{{20, 0, 0}, {-1, 0, 0}, left_strict}})}, 1, Role::Lattice, 6.0)};
+      f.regions = {region_from_pieces(model, {face_piece({1}, {{{20, 0, 0}, {1, 0, 0}, !left_strict}})}, 2, Role::Lattice, 6.0)};
+      Domain de(pm, e), df(pm, f);
+      auto pe = de.probe(), pf = df.probe();
+      int on_twice = 0, on_never = 0, to_left = 0, to_right = 0;
+      for (double y = 0.5; y < 40; y += 1.5) {
+        const Vec3 p{20, y, 17.0};
+        const bool l = pe.where(p) == Where{Why::Lattice, 1}, r = pf.where(p) == Where{Why::Lattice, 2};
+        on_twice += l && r;
+        on_never += !l && !r;
+        to_left += l && !r;
+        to_right += r && !l;
+      }
+      CHECK(on_twice == 0 && on_never == 0);
+      std::printf("face pieces, on the cut x = 20 (left %s, right %s): %d points to the left piece, %d to the right\n",
+                  left_strict ? "strict" : "not strict", left_strict ? "not strict" : "strict", to_left, to_right);
+    }
+  }
+
+  // 3: ONE region of both pieces is the region of the whole face: the same `where` at 2,000 points and the same cells.
+  {
+    bool ok = false;
+    DomainSpec a, b;
+    a.regions = {region_from_pieces(model, {face_piece({1}, {keep_left}), face_piece({1}, {keep_right})}, 1,
+                                    Role::Lattice, 6.0, 0.0, &ok)};
+    b.regions = {region_from_faces(model, {1}, 1, Role::Lattice, 6.0)};
+    CHECK(ok && a.regions[0].prism.outline_uv.size() == 1);
+    Domain da(pm, a), db(pm, b);
+    auto pa = da.probe(), pb = db.probe();
+    int differ = 0, points = 0;
+    for (int i = 0; i < 2000; ++i) {
+      const Vec3 p{-1 + 42 * std::fmod(i * 0.6180339887, 1.0), -1 + 42 * std::fmod(i * 0.7548776662, 1.0),
+                   10 + 11 * std::fmod(i * 0.5698402910, 1.0)};
+      differ += !(pa.where(p) == pb.where(p));
+      ++points;
+    }
+    CHECK(points == 2000 && differ == 0);
+    const Layout la = lay_cells(da, cs), lb = lay_cells(db, cs);
+    CHECK(!la.cells.empty() && la.cells == lb.cells && la.solid == lb.solid);
+  }
+
+  // 4: a T. The top cut at x 14, x 26 and y 28 into six pieces (each takes its lower side as it is, its upper side
+  // strict, as core's own splits do); the region is the bar (y >= 28) and the stem (14 <= x <= 26).
+  {
+    auto cell_piece = [&](int i, int j) {   // i: x band 0..2, j: y band 0..1
+      const double xs[4] = {0, 14, 26, 40}, ys[3] = {0, 28, 40};
+      std::vector<FaceCut> cuts;
+      if (i > 0) cuts.push_back({{xs[i], 0, 0}, {1, 0, 0}, false});
+      if (i < 2) cuts.push_back({{xs[i + 1], 0, 0}, {-1, 0, 0}, true});
+      if (j > 0) cuts.push_back({{0, ys[j], 0}, {0, 1, 0}, false});
+      if (j < 1) cuts.push_back({{0, ys[j + 1], 0}, {0, -1, 0}, true});
+      return face_piece({1}, cuts);
+    };
+    bool ok = false;
+    DomainSpec s;
+    s.rim_mm = 1.0;
+    s.regions = {region_from_pieces(model, {cell_piece(0, 1), cell_piece(1, 1), cell_piece(2, 1), cell_piece(1, 0)}, 1,
+                                    Role::Lattice, 6.0, 0.0, &ok)};
+    CHECK(ok && !s.regions[0].is_shell() && s.regions[0].prism.outline_uv.size() == 1);   // one outline
+    DomainSpec plain = s;
+    plain.rim_mm = 0.0;
+    Domain d(pm, plain), rim(pm, s);
+    auto pr = d.probe(), rr = rim.probe();
+    auto in_t = [](double x, double y) { return x > 0 && x < 40 && y > 0 && y < 40 && (y >= 28 || (x >= 14 && x <= 26)); };
+    // A hair inside and outside each of the T's eight edges, at three places along each.
+    struct Edge { double x0, y0, x1, y1; };
+    const Edge edges[8] = {{0, 28, 0, 40}, {0, 40, 40, 40}, {40, 40, 40, 28}, {40, 28, 26, 28},
+                           {26, 28, 26, 0}, {26, 0, 14, 0}, {14, 0, 14, 28}, {14, 28, 0, 28}};
+    int wrong = 0, tried = 0;
+    for (const Edge& e : edges)
+      for (double t : {0.2, 0.5, 0.8}) {
+        const double x = e.x0 + (e.x1 - e.x0) * t, y = e.y0 + (e.y1 - e.y0) * t;
+        const double len = std::hypot(e.x1 - e.x0, e.y1 - e.y0);
+        const double nx = (e.y1 - e.y0) / len, ny = -(e.x1 - e.x0) / len;   // one side of it
+        for (double side : {hair, -hair}) {
+          const double px = x + nx * side, py = y + ny * side;
+          const bool want = in_t(px, py);
+          wrong += pr.where({px, py, 17}).lattice() != want;
+          ++tried;
+        }
+      }
+    CHECK(tried == 48 && wrong == 0);
+    // Finish Rim follows the T: on its edges inside the part (the stem's sides, the bar's underside), not on the part's.
+    int rim_wrong = 0;
+    for (double y : {5.0, 15.0, 25.0}) {
+      rim_wrong += !(rr.where({14.5, y, 17}) == Where{Why::Rim, 1}) + !(rr.where({25.5, y, 17}) == Where{Why::Rim, 1});
+      rim_wrong += !(rr.where({16, y, 17}) == Where{Why::Lattice, 1});
+    }
+    for (double x : {5.0, 35.0}) {
+      rim_wrong += !(rr.where({x, 28.5, 17}) == Where{Why::Rim, 1});
+      rim_wrong += !(rr.where({x, 30, 17}) == Where{Why::Lattice, 1});
+    }
+    rim_wrong += !(rr.where({0.5, 34, 17}) == Where{Why::Lattice, 1});   // the part's own edge: no rim
+    CHECK(rim_wrong == 0);
+  }
+
+  // 5: Protect skin on the left piece (x <= 20) over a Lattice region of the whole top, 12 deep: the skin under that
+  // piece only, the lattice under the other running to the surface; the cells start below the skin only there.
+  {
+    DomainSpec s;
+    s.regions = {region_from_faces(model, {1}, 1, Role::Lattice, 12.0)};
+    s.protect = {{7, pieces_mesh(model, {face_piece({1}, {{{20, 0, 0}, {-1, 0, 0}, false}})}), 1.2}};
+    Domain d(pm, s);
+    auto pr = d.probe();
+    CHECK((pr.where({10, 20, 19.4}) == Where{Why::ProtectSkin, 7}));
+    CHECK((pr.where({10, 20, 18.7}) == Where{Why::Lattice, 1}));
+    CHECK((pr.where({30, 20, 19.99}) == Where{Why::Lattice, 1}));
+    CHECK((pr.where({21.5, 20, 19.4}) == Where{Why::Lattice, 1}));   // more than the skin's depth past the cut
+    CellSpec u;
+    u.algorithm = Algorithm::Uniform;
+    u.cell_max_mm = 8;
+    const Layout l = lay_cells(d, u);
+    int behind = 0, open = 0, odd = 0;
+    for (const Cell& cell : l.cells) {
+      const Vec3 at = cell_centre(l, cell);
+      if (at.x < 14.0) {
+        ++behind;
+        if (std::fabs(cell.size - 5.4) > 1e-5 || cell.lo[2] < 1.2 - 1e-5) ++odd;
+      } else if (at.x > 26.0) {
+        ++open;
+        if (std::fabs(cell.size - 6.0) > 1e-5 || (std::fabs(cell.lo[2]) > 1e-5 && std::fabs(cell.lo[2] - 6.0) > 1e-5)) ++odd;
+      }
+    }
+    CHECK(behind > 0 && open > 0 && odd == 0);
+  }
+
+  // 5b: the cuts stand up out of the face. A Protect skin on the left piece (x <= 20) does not reach past the cut:
+  // 0.05 mm, half its depth and 0.9 of its depth past it, at the surface and half its depth down, is the lattice
+  // under the right side; the same distances on the kept side are skin. Given through a Session as well. A Lattice
+  // region and a No lattice region on the same piece stop at the cut too.
+  {
+    const double depth = 1.2;
+    const FacePiece left = face_piece({1}, {{{20, 0, 0}, {-1, 0, 0}, false}});
+    DomainSpec s;
+    s.regions = {region_from_faces(model, {1}, 1, Role::Lattice, 12.0)};
+    s.protect = {{7, pieces_mesh(model, {left}), depth, {left}}};
+    Domain d(pm, s);
+    Settings st5;
+    st5.min_strut_lines = kFewestStrutLines;
+    st5.cells.cell_max_mm = 8;
+    st5.regions = {{1, Role::Lattice, {1}, 12.0, 0.0}};
+    st5.protect = {{7, {1}, depth, {left}}};
+    Session session(model);
+    session.lay(st5);
+    DomainSpec lat, nol;
+    lat.regions = {region_from_pieces(model, {left}, 2, Role::Lattice, 6.0)};
+    nol.start = Start::AllLattice;
+    nol.regions = {region_from_pieces(model, {left}, 3, Role::NoLattice, 6.0)};
+    Domain dl(pm, lat), dn(pm, nol);
+    auto pr = d.probe(), ps = session.domain()->probe(), pl = dl.probe(), pn = dn.probe();
+    int skin_past = 0, skin_kept = 0, region_past = 0;
+    for (double past : {0.05, 0.5 * depth, 0.9 * depth})
+      for (double down : {0.01, 0.5 * depth})
+        for (double y : {5.0, 20.0, 35.0}) {
+          const Vec3 out{20 + past, y, 20 - down}, in{20 - past, y, 20 - down};
+          skin_past += !(pr.where(out) == Where{Why::Lattice, 1}) + !(ps.where(out) == Where{Why::Lattice, 1});
+          skin_kept += !(pr.where(in) == Where{Why::ProtectSkin, 7}) + !(ps.where(in) == Where{Why::ProtectSkin, 7});
+          region_past += !(pl.where(out) == Where{Why::NotAsked, 0}) + !(pn.where(out) == Where{Why::Lattice, 0});
+          region_past += !(pl.where(in) == Where{Why::Lattice, 2}) + !(pn.where(in) == Where{Why::NoLattice, 3});
+        }
+    CHECK(skin_past == 0);
+    CHECK(skin_kept == 0);
+    CHECK(region_past == 0);
+    std::printf("face pieces, cut skin: %d points past the cut taken by the skin, %d on the kept side missed, "
+                "%d region answers wrong\n", skin_past, skin_kept, region_past);
+  }
+
+  // 6: No lattice on a piece inside Start from All lattice: solid under the piece only.
+  {
+    DomainSpec s;
+    s.start = Start::AllLattice;
+    s.regions = {region_from_pieces(model, {face_piece({1}, {keep_left})}, 2, Role::NoLattice, 6.0)};
+    Domain d(pm, s);
+    auto pr = d.probe();
+    int wrong = 0;
+    for (double t : {-12.0, 0.0, 12.0}) {
+      wrong += !(pr.where(off(t, hair, 17)) == Where{Why::NoLattice, 2});
+      wrong += !(pr.where(off(t, -hair, 17)) == Where{Why::Lattice, 0});
+      wrong += !(pr.where(off(t, 3, 13.9)) == Where{Why::Lattice, 0});   // below its depth
+    }
+    CHECK(wrong == 0);
+  }
+
+  // 7: a curved face cut by a plane (x >= 26): lattice under the kept side only; the cut is the region's edge.
+  {
+    const StepModel archm = arch_block();
+    PartMeasure am(weld_mesh(archm.mesh));
+    bool ok = false;
+    DomainSpec s;
+    s.regions = {region_from_pieces(archm, {face_piece({2}, {{{26, 0, 0}, {1, 0, 0}, false}})}, 3, Role::Lattice, 4.0,
+                                    0.0, &ok)};
+    CHECK(ok && s.regions[0].is_shell());
+    int west = 0;
+    for (const auto& e : s.regions[0].shell_edge) west += e[0].x < 26 - 1e-9 || e[1].x < 26 - 1e-9;
+    CHECK(west == 0 && !s.regions[0].shell_edge.empty());
+    Domain d(am, s);
+    auto pr = d.probe();
+    const double R = 25;
+    auto under = [&](double x_on_face, double y, double depth) {   // `depth` in along the radius from the face at x
+      const double a = std::asin((x_on_face - 20) / R);
+      return Vec3{20 + (R - depth) * std::sin(a), y, -5 + (R - depth) * std::cos(a)};
+    };
+    int wrong = 0;
+    for (double y : {5.0, 10.0, 15.0})
+      for (double depth : {0.5, 2.0, 3.5}) {
+        wrong += !(pr.where(under(26.1, y, depth)) == Where{Why::Lattice, 3});
+        wrong += !(pr.where(under(25.9, y, depth)) == Where{Why::NotAsked, 0});
+        wrong += !(pr.where(under(33, y, depth)) == Where{Why::Lattice, 3});
+        wrong += !(pr.where(under(14, y, depth)) == Where{Why::NotAsked, 0});
+      }
+    CHECK(wrong == 0);
+  }
+
+  // 8: Expand +1 and -1 on the left piece (cut x <= 20) move its whole outline, the cut edge included.
+  for (double e : {1.0, -1.0}) {
+    DomainSpec s;
+    s.regions = {region_from_pieces(model, {face_piece({1}, {{{20, 0, 0}, {-1, 0, 0}, false}})}, 1, Role::Lattice, 6.0, e)};
+    Domain d(pm, s);
+    auto pr = d.probe();
+    int wrong = 0;
+    for (double y : {10.0, 20.0, 30.0}) {
+      wrong += !pr.where({20 + e - 0.05, y, 17}).lattice();
+      wrong += pr.where({20 + e + 0.05, y, 17}).lattice();
+    }
+    if (e < 0) {   // the part's own edges move in too
+      wrong += !pr.where({10, 1.05, 17}).lattice() + pr.where({10, 0.95, 17}).lattice();
+      wrong += !pr.where({1.05, 20, 17}).lattice() + pr.where({0.95, 20, 17}).lattice();
+    }
+    CHECK(wrong == 0);
+  }
+
+  // 9, 10, 12: through a Session.
+  Settings st;
+  st.min_strut_lines = kFewestStrutLines;
+  st.cells.cell_max_mm = 4;
+  {  // 9: a cut that keeps nothing, a zero or not finite normal, a piece with no faces, a face with no triangles,
+     // pieces with a zone: left out and listed; the rest still lay. A piece that keeps nothing beside one that does
+     // is not refused.
+    const FacePiece good = face_piece({1}, {keep_left});
+    st.regions.assign(9, Settings::RegionAsk{});
+    for (int i = 0; i < 9; ++i) {
+      st.regions[i].id = i + 1;
+      st.regions[i].depth_mm = 6.0;
+    }
+    st.regions[0].pieces = {good};
+    st.regions[1].pieces = {face_piece({1}, {{{100, 0, 0}, {1, 0, 0}, false}})};   // keeps nothing
+    st.regions[2].pieces = {face_piece({1}, {{{20, 0, 0}, {0, 0, 0}, false}})};    // zero normal
+    st.regions[3].pieces = {face_piece({}, {})};                                  // no faces
+    st.regions[4].pieces = {face_piece({99}, {})};                                // a face the part does not have
+    st.regions[5].pieces = {face_piece({1}, {{{20, 0, 0}, {std::nan(""), 0, 0}, false}})};
+    st.regions[6].pieces = {good};
+    st.regions[6].zone.kind = Zone::Kind::Box;   // a zone with pieces
+    st.regions[6].zone.centre = {20, 20, 10};
+    st.regions[6].zone.axis[0] = {1, 0, 0}; st.regions[6].zone.axis[1] = {0, 1, 0}; st.regions[6].zone.axis[2] = {0, 0, 1};
+    st.regions[6].zone.half[0] = st.regions[6].zone.half[1] = st.regions[6].zone.half[2] = 4;
+    st.regions[7].pieces = {face_piece({1}, {{{100, 0, 0}, {1, 0, 0}, false}}), face_piece({0}, {})};   // half kept
+    st.regions[7].depth_mm = 3.0;
+    st.regions[8].pieces = {good, face_piece({0}, {{{20, 0, 0}, {0, 0, 0}, false}})};   // one bad piece of two
+    const Outcome out = Session(model).lay(st);
+    CHECK((out.empty_regions == std::vector<int>{2, 3, 4, 5, 6, 7, 9}));
+    Settings only = st;
+    only.regions = {st.regions[0], st.regions[7]};
+    const Outcome alone = Session(model).lay(only);
+    CHECK(!out.layout.cells.empty() && out.layout.cells == alone.layout.cells && alone.empty_regions.empty());
+    bool p8 = false;
+    for (const Cell& cell : alone.layout.cells) p8 = p8 || cell.region == 8;
+    CHECK(p8);
+    bool made = true;   // a Protect skin of a refused piece has no surface
+    pieces_mesh(model, {face_piece({1}, {{{20, 0, 0}, {0, 0, 0}, false}})}, &made);
+    CHECK(!made);
+  }
+  {  // 10: moving a cut reads the part again; so does turning it strict; a cell size does not.
+    Session session(model);
+    Settings s = st;
+    s.regions = {Settings::RegionAsk{}};
+    s.regions[0].id = 1;
+    s.regions[0].depth_mm = 6.0;
+    s.regions[0].pieces = {face_piece({1}, {{{20, 0, 0}, {-1, 0, 0}, false}})};
+    CHECK(session.lay(s).read_again);
+    s.cells.cell_max_mm = 3;
+    CHECK(!session.lay(s).read_again);
+    s.regions[0].pieces[0].cuts[0].point.x = 21;
+    const Outcome moved = session.lay(s);
+    CHECK(moved.read_again && moved.layout.cells == Session(model).lay(s).layout.cells);
+    s.regions[0].pieces[0].cuts[0].strict = true;
+    CHECK(session.lay(s).read_again);
+    s.protect = {{5, {}, 1.0, {face_piece({1}, {{{20, 0, 0}, {1, 0, 0}, false}})}}};
+    CHECK(session.lay(s).read_again);
+    s.protect[0].pieces[0].cuts[0].normal.y = 0.1;
+    CHECK(session.lay(s).read_again);
+    CHECK(!session.lay(s).read_again);
+  }
+  {  // 12: no pieces is today's: three parts, each region and skin also given as one piece of its faces with no cut,
+     // lay the same cells, solid and bars.
+    int L = 0, square = 0, sideA = 0, sideB = 0;
+    const StepModel plate = plate_with_L_face(&L, &square, &sideA, &sideB);
+    const StepModel finish = finish_block();
+    int differ = 0, laid = 0;
+    for (int part = 0; part < 3; ++part) {
+      Settings s;
+      s.min_strut_lines = kFewestStrutLines;
+      s.cells.cell_max_mm = 6;
+      s.rim_mm = -1.0;
+      if (part == 0) {
+        s.regions = {{1, Role::Lattice, {1}, 6.0, -2.0}, {2, Role::NoLattice, {2}, 4.0, 0.0}};
+        s.protect = {{5, {1}, 1.0}};
+      } else if (part == 1) {
+        s.regions = {{1, Role::Lattice, {L}, 6.0, -1.0}, {2, Role::Lattice, {sideA, sideB}, 4.0, 0.0}};
+        s.protect = {{5, {square}, 0.0}};
+      } else {
+        s.start = Start::AllLattice;
+        s.regions = {{1, Role::Lattice, {1}, 6.0, 0.0}, {2, Role::NoLattice, {0}, 3.0, 0.0}};
+      }
+      Settings p = s;
+      for (Settings::RegionAsk& r : p.regions) r.pieces = {face_piece(r.faces, {})};
+      for (Settings::ProtectAsk& k : p.protect) k.pieces = {face_piece(k.faces, {})};
+      const StepModel& m = part == 0 ? model : part == 1 ? plate : finish;
+      const Outcome a = Session(m).lay(s), b = Session(m).lay(p);
+      differ += !(a.layout.cells == b.layout.cells && a.layout.solid == b.layout.solid && same_bars(a.bars, b.bars) &&
+                  a.empty_regions.empty() && b.empty_regions.empty());
+      laid += !a.layout.cells.empty() && !a.bars.bars.empty();
+    }
+    CHECK(differ == 0 && laid == 3);
+  }
+}
+
+// ── C24: the largest size step between neighbouring cells ─────────────────────
+// Pairs of cells of one region and one frame that share any part of a face and differ in size by more than `limit`.
+static int step_breaks(const Layout& l, double limit, int region = -1) {
+  int n = 0;
+  const double tol = 1e-6;
+  for (std::size_t i = 0; i < l.cells.size(); ++i)
+    for (std::size_t j = i + 1; j < l.cells.size(); ++j) {
+      const Cell& A = l.cells[i];
+      const Cell& B = l.cells[j];
+      if (A.region != B.region || A.frame != B.frame || (region >= 0 && A.region != region)) continue;
+      if (std::max(A.size, B.size) <= limit * std::min(A.size, B.size) * (1 + 1e-9)) continue;
+      int touch = 0, over = 0;
+      for (int a = 0; a < 3; ++a) {
+        if (std::fabs(A.lo[a] + A.size - B.lo[a]) <= tol || std::fabs(B.lo[a] + B.size - A.lo[a]) <= tol) ++touch;
+        else if (std::min(A.lo[a] + A.size, B.lo[a] + B.size) - std::max(A.lo[a], B.lo[a]) > tol) ++over;
+      }
+      n += touch == 1 && over == 2;
+    }
+  return n;
+}
+// The largest step between face neighbours of the layout (1 when none differ).
+static double largest_step(const Layout& l) {
+  double m = 1.0;
+  for (double r = 1.0; r < 16.0; r *= 1.0625)
+    if (step_breaks(l, r) > 0) m = r * 1.0625;
+  return m;
+}
+
+static void test_size_step() {
+  int before = g_fail;
+  auto block = [&](const char* name) {
+    std::printf("C24 %s: %d failed\n", name, g_fail - before);
+    before = g_fail;
+  };
+  // The plate of test_cells_by_stress: 96 x 24 x 8 latticed from its top face, 8 mm deep, at a 0.2 mm line: one
+  // layer of 8 mm cells, ladder 8, 4, 2 (Default Grade) or 8 and its fractions (Stepped). One hot voxel (x 47..48,
+  // y 11..12, z 6..7, 1 to 2 mm under the face, at the reference) inside the base cube x 40..48: that cube goes down to 2 mm cells at its face
+  // x = 48, against the 8 mm cube beside it.
+  PartMeasure pm(weld_mesh(box(96, 24, 8)));
+  DomainSpec s;
+  s.bead_mm = 0.2;
+  s.regions = {face_region(1, Role::Lattice, {48, 12, 8}, {0, 0, -1}, 12, 48, 8)};
+  Domain d(pm, s);
+  const auto hot = stress_field({-2, -2, -2}, 1.0, 100, 28, 12, [](const Vec3& c) {
+    return (c.x > 47 && c.x < 48 && c.y > 11 && c.y < 12 && c.z > 6 && c.z < 7) ? 100.0 : 0.0;
+  });
+  CellSpec off;
+  off.cell_max_mm = 8;
+  off.by_stress = true;
+  off.demand = hot;
+  off.reference_mpa = 100.0;
+  auto with = [](CellSpec c, double step, Algorithm algo = Algorithm::DefaultGrade) {
+    c.algorithm = algo;
+    c.max_step = step;
+    return c;
+  };
+
+  {  // 1. max_step 0 is today's layout, byte for byte, on three parts (and a negative value is none as well).
+    CHECK(step_held(off) == 0.0 && step_held(with(off, -1)) == 0.0);
+    for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
+      CHECK(same_layout(lay_cells(d, with(off, 0, algo)), lay_cells(d, with(off, 0, algo))));
+      CellSpec today = off;
+      today.algorithm = algo;
+      CHECK(same_layout(lay_cells(d, with(off, 0, algo)), lay_cells(d, today)));
+      CHECK(same_layout(lay_cells(d, with(off, -1, algo)), lay_cells(d, today)));
+    }
+    // The pocket part (a 4 mm wall, a 5 mm pocket, the wall behind: walls of their own under one face).
+    PartMeasure pp(weld_mesh(prism_any({{0, 0}, {60, 0}, {60, 20}, {0, 20}, {0, 9}, {50, 9}, {50, 4}, {0, 4}}, 0, 40)));
+    DomainSpec ps;
+    ps.regions = {face_region(1, Role::Lattice, {30, 0, 20}, {0, 1, 0}, 30, 30, 13)};
+    Domain dp(pp, ps);
+    CellSpec band;
+    band.grade_to_shape = true;
+    band.band_mm = 8;
+    CHECK(same_layout(lay_cells(dp, with(band, 0)), lay_cells(dp, band)));
+    // The whole part, All lattice.
+    PartMeasure pw(weld_mesh(box(40, 30, 20)));
+    DomainSpec ws;
+    ws.start = Start::AllLattice;
+    Domain dw(pw, ws);
+    CellSpec whole;
+    whole.algorithm = Algorithm::Stepped;
+    CHECK(same_layout(lay_cells(dw, with(whole, 0, Algorithm::Stepped)), lay_cells(dw, whole)));
+  }
+  block("1 none is today's");
+
+  {  // 2. Default Grade: without the limit an 8 mm cell shares a face with a 2 mm cell; with max_step 2 no pair of face
+     // neighbours differs by more than 2 x, and cells farther than three base cells from any changed place are
+     // unchanged.
+    const Layout free_ = lay_cells(d, off), kept = lay_cells(d, with(off, 2));
+    CHECK(step_breaks(free_, 2.0) > 0 && step_breaks(free_, 3.9) > 0);   // 8 against 2
+    CHECK(step_breaks(kept, 2.0) == 0);
+    CHECK(kept.solid.empty() && kept.cells.size() > free_.cells.size());
+    std::vector<Vec3> changed;
+    for (const Cell& c : kept.cells)
+      if (std::find(free_.cells.begin(), free_.cells.end(), c) == free_.cells.end()) changed.push_back(cell_centre(kept, c));
+    for (const Cell& c : free_.cells)
+      if (std::find(kept.cells.begin(), kept.cells.end(), c) == kept.cells.end()) changed.push_back(cell_centre(free_, c));
+    int far = 0, far_changed = 0;
+    for (const Cell& c : free_.cells) {
+      const Vec3 m = cell_centre(free_, c);
+      double near = 1e300;
+      for (const Vec3& p : changed) near = std::min(near, std::max({std::fabs(p.x - m.x), std::fabs(p.y - m.y), std::fabs(p.z - m.z)}));
+      if (near <= 24.0) continue;
+      ++far;
+      far_changed += std::find(kept.cells.begin(), kept.cells.end(), c) == kept.cells.end();
+    }
+    CHECK(!changed.empty() && far > 10 && far_changed == 0);
+    std::printf("C24 hot spot, Default Grade: largest step %.2f without the limit (%zu cells), %.2f with 2 (%zu cells)\n",
+                largest_step(free_), free_.cells.size(), largest_step(kept), kept.cells.size());
+  }
+  block("2 Default Grade, stress");
+
+  {  // 3. The same with Grade to shape and a narrow band in place of the stress: a plate 89 long, so the end cubes
+     // overhang its outline by 3.5 mm; band 8: the inner half of an end cube is too near the outline for a 4 mm
+     // cell, so 2 mm cells stand against the 8 mm cube beside it.
+    PartMeasure pb(weld_mesh(box(89, 24, 8)));
+    DomainSpec bs;
+    bs.bead_mm = 0.2;
+    bs.regions = {face_region(1, Role::Lattice, {44.5, 12, 8}, {0, 0, -1}, 12, 44.5, 8)};
+    Domain db(pb, bs);
+    CellSpec band;
+    band.cell_max_mm = 8;
+    band.grade_to_shape = true;
+    band.band_mm = 8;
+    const Layout free_ = lay_cells(db, band), kept = lay_cells(db, with(band, 2));
+    CHECK(step_breaks(free_, 3.9) > 0);
+    CHECK(step_breaks(kept, 2.0) == 0);
+    CHECK(kept.solid.size() <= free_.solid.size() && kept.cells.size() > free_.cells.size());
+    std::printf("C24 band, Default Grade: largest step %.2f without the limit (%zu cells), %.2f with 2 (%zu cells)\n",
+                largest_step(free_), free_.cells.size(), largest_step(kept), kept.cells.size());
+  }
+  block("3 Default Grade, band");
+
+  {  // 4. Stepped with max_step 2 and with 3: the rule holds for every pair; with 3 at least one cell is larger.
+    const Layout free_ = lay_cells(d, with(off, 0, Algorithm::Stepped));
+    const Layout two = lay_cells(d, with(off, 2, Algorithm::Stepped)), three = lay_cells(d, with(off, 3, Algorithm::Stepped));
+    CHECK(step_breaks(free_, 3.0) > 0);
+    CHECK(step_breaks(two, 2.0) == 0 && step_breaks(three, 3.0) == 0);
+    int larger = 0, smaller = 0, grew = 0;   // grew: points in a larger cell with a limit than without
+    for (double x = 0.3; x < 96; x += 0.5)
+      for (double y = 0.3; y < 24; y += 0.5)
+        for (double z = 0.3; z < 8; z += 1.0) {
+          const double a = size_holding(two, {x, y, z}), b = size_holding(three, {x, y, z});
+          const double f0 = size_holding(free_, {x, y, z});
+          grew += a > f0 + 1e-9 || b > f0 + 1e-9;
+          larger += b > a + 1e-9;
+          smaller += b < a - 1e-9;
+        }
+    CHECK(larger > 0 && grew == 0);
+    std::printf("C24 Stepped: points in a larger cell with a limit than without: %d\n", grew);
+    CHECK(two.solid.size() <= free_.solid.size() && three.solid.size() <= free_.solid.size());
+    std::printf("C24 hot spot, Stepped: largest step %.2f free (%zu cells), %.2f with 2 (%zu), %.2f with 3 (%zu); "
+                "points in a larger cell with 3 than with 2: %d (in a smaller: %d)\n",
+                largest_step(free_), free_.cells.size(), largest_step(two), two.cells.size(), largest_step(three),
+                three.cells.size(), larger, smaller);
+  }
+  block("4 Stepped");
+
+  {  // 5. 1.5 on Default Grade is held at 2: the layout is the max_step 2 layout. (Stepped keeps 1.5; nothing under 1.)
+    CHECK(step_held(with(off, 1.5)) == 2.0 && step_held(with(off, 3)) == 3.0);
+    CHECK(step_held(with(off, 1.5, Algorithm::Stepped)) == 1.5 && step_held(with(off, 0.5, Algorithm::Stepped)) == 1.0);
+    CHECK(same_layout(lay_cells(d, with(off, 1.5)), lay_cells(d, with(off, 2))));
+    CHECK(!same_layout(lay_cells(d, with(off, 1.5)), lay_cells(d, off)));   // and it is a limit, not none
+    // Through a session: step_held_at is the value used, 0 when none was asked.
+    int L = 0, square = 0, sideA = 0, sideB = 0;
+    Session session(plate_with_L_face(&L, &square, &sideA, &sideB));
+    Settings st;
+    st.min_strut_lines = kFewestStrutLines;
+    st.regions = {{1, Role::Lattice, {square}, 6.0, 0.0}};
+    st.bead_mm = 0.2;
+    st.cells.cell_max_mm = 6;
+    st.bars = false;
+    CHECK(session.lay(st).step_held_at == 0.0);
+    st.cells.max_step = 1.5;
+    const Outcome a = session.lay(st);
+    st.cells.max_step = 2.0;
+    const Outcome b = session.lay(st);
+    CHECK(a.step_held_at == 2.0 && b.step_held_at == 2.0 && a.layout.cells == b.layout.cells);
+    st.cells.algorithm = Algorithm::Stepped;
+    st.cells.max_step = 2.5;
+    CHECK(session.lay(st).step_held_at == 2.5);
+  }
+  block("5 held at 2");
+
+  {  // 6. Nothing goes solid: the pocket part of test_cells_by_stress (4) at a 0.2 mm
+     // line, the stress a step at x = 56.7: the far end of the deep wall behind the pocket (cubes of 6.5 from x 50.125)
+     // goes down to its finest against a 6.5 mm cube. Every point held by a cell
+     // without the limit is held with it (on Default Grade within a millimetre of the surface: the D14 strip under a
+     // halved cube, as C22's test allows), and the layout's solid does not grow.
+    PartMeasure pp(weld_mesh(prism_any({{0, 0}, {60, 0}, {60, 20}, {0, 20}, {0, 9}, {50, 9}, {50, 4}, {0, 4}}, 0, 40)));
+    DomainSpec ps;
+    ps.regions = {face_region(1, Role::Lattice, {30, 0, 20}, {0, 1, 0}, 30, 30, 13)};
+    ps.bead_mm = 0.2;
+    Domain dp(pp, ps);
+    const auto f = stress_field({-2, -2, -2}, 1.0, 64, 24, 44, [](const Vec3& c) { return c.x > 56.7 ? 100.0 : 0.0; });
+    auto pr = dp.probe();
+    const PartMeasure::Probe surface = pp.probe();
+    for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
+      CellSpec plain;
+      plain.algorithm = algo;
+      plain.by_stress = true;
+      plain.demand = f;
+      plain.reference_mpa = 100;
+      const Layout lo_ = lay_cells(dp, plain), hi_ = lay_cells(dp, with(plain, 2, algo));
+      auto held = [&](const Layout& l, const Vec3& p) {
+        for (const Cell& c : l.cells) if (cell_holds(l, pr, c, p)) return true;
+        return false;
+      };
+      int held_off = 0, lost = 0, lost_deep = 0;
+      for (double x = 0.31; x < 60; x += 1.1)
+        for (double y = 0.27; y < 20; y += 0.9)
+          for (double z = 0.33; z < 40; z += 1.3) {
+            const Vec3 p{x, y, z};
+            if (!pr.where(p).lattice() || !held(lo_, p)) continue;
+            ++held_off;
+            if (held(hi_, p)) continue;
+            ++lost;
+            if (surface.depth(p) >= 1.0) ++lost_deep;
+          }
+      double v0 = 0, v1 = 0;
+      for (const Cell& c : lo_.solid) v0 += c.size * c.size * c.size;
+      for (const Cell& c : hi_.solid) v1 += c.size * c.size * c.size;
+      std::printf("C24 pocket part: largest step %.2f without the limit, %.2f with 2\n", largest_step(lo_), largest_step(hi_));
+      CHECK(step_breaks(lo_, 2.0) > 0 && step_breaks(hi_, 2.0) == 0);
+      CHECK(held_off > 1000 && lost_deep == 0);
+      if (algo == Algorithm::Stepped) CHECK(lost == 0);
+      CHECK(v1 <= v0 + 1e-9 && hi_.solid.size() <= lo_.solid.size());
+      std::printf("C24 pocket part, %s: %d points held without the limit; with 2, %d of them in no cell (%d a "
+                  "millimetre or more inside); cells %zu -> %zu, solid %zu -> %zu\n",
+                  algo == Algorithm::Stepped ? "Stepped" : "Default Grade", held_off, lost, lost_deep,
+                  lo_.cells.size(), hi_.cells.size(), lo_.solid.size(), hi_.solid.size());
+    }
+  }
+  block("6 nothing solid");
+
+  {  // 7. Let walls cut cells: the back plate of test_cells_by_stress (12) with a hot voxel by the boss: the rule
+     // holds and no cut cell is above the finest (C20).
+    PartMeasure pg(weld_mesh(prism({{0, 0}, {64, 0}, {64, 6}, {40, 6}, {40, 12}, {32, 12}, {32, 6}, {0, 6}}, 0, 64)));
+    DomainSpec gs;
+    gs.bead_mm = 0.2;
+    gs.regions = {face_region(1, Role::Lattice, {32, 0, 32}, {0, 1, 0}, 32, 32, 8)};
+    Domain dg(pg, gs);
+    const auto g = stress_field({-2, -2, -2}, 1.0, 68, 16, 68, [](const Vec3& c) {
+      return (c.x > 15 && c.x < 16 && c.z > 30 && c.z < 31) ? 100.0 : 0.0;
+    });
+    for (int a = 0; a < 2; ++a) {
+      const Algorithm algo = a == 0 ? Algorithm::DefaultGrade : Algorithm::Stepped;
+      CellSpec grid;
+      grid.algorithm = algo;
+      grid.one_grid = true;
+      grid.by_stress = true;
+      grid.demand = g;
+      grid.reference_mpa = 100;
+      const Layout free_ = lay_cells(dg, grid), kept = lay_cells(dg, with(grid, 2, algo));
+      const double finest = a == 0 ? 2.0 : 8.0 / 6.0;
+      int cut_large = 0;
+      for (const Cell& c : kept.cells) cut_large += c.cut && c.size > finest * (1 + 1e-9);
+      CHECK(step_breaks(free_, 2.0) > 0 && step_breaks(kept, 2.0) == 0 && cut_large == 0);
+      CHECK(kept.solid.size() <= free_.solid.size());
+      std::printf("C24 one grid, %s: %zu cells without the limit, %zu with 2\n", a == 0 ? "Default Grade" : "Stepped",
+                  free_.cells.size(), kept.cells.size());
+    }
+  }
+  block("7 Let walls cut cells");
+
+  {  // 8. A region's own max_step acts on that region only: the block of test_area_own, a hot voxel under each face.
+    PartMeasure pa(weld_mesh(box(46, 46, 16)));
+    DomainSpec as;
+    as.bead_mm = 0.2;
+    as.regions = {face_region(1, Role::Lattice, {23, 23, 16}, {0, 0, -1}, 23, 23, 8),
+                  face_region(2, Role::Lattice, {23, 23, 0}, {0, 0, 1}, 23, 23, 8)};
+    Domain da(pa, as);
+    const auto two_hot = stress_field({-2, -2, -2}, 1.0, 50, 50, 20, [](const Vec3& c) {
+      return (c.x > 22 && c.x < 23 && c.y > 22 && c.y < 23 && (std::fabs(c.z - 12.5) < 0.6 || std::fabs(c.z - 3.5) < 0.6))
+                 ? 100.0 : 0.0;
+    });
+    CellSpec P;
+    P.cell_max_mm = 8;
+    P.by_stress = true;
+    P.demand = two_hot;
+    P.reference_mpa = 100;
+    AreaOwn a;
+    a.max_step = 2.0;
+    AreaOwnMap m;
+    m[1] = a;
+    CHECK(a.any());
+    const Layout free_ = lay_cells(da, P), l = lay_cells(da, P, 0, &m);
+    CHECK(step_breaks(free_, 2.0, 1) > 0 && step_breaks(free_, 2.0, 2) > 0);
+    CHECK(step_breaks(l, 2.0, 1) == 0 && !(cells_of(l, 1) == cells_of(free_, 1)));
+    CHECK(cells_of(l, 2) == cells_of(free_, 2));
+    CHECK(region_cells(P, a).max_step == 2.0 && region_cells(P, AreaOwn{}).max_step == 0.0);
+    // And the reverse: the part asks 2, region 2 states 0 (none).
+    AreaOwn b;
+    b.max_step = 0.0;
+    AreaOwnMap mb;
+    mb[2] = b;
+    const Layout r = lay_cells(da, with(P, 2), 0, &mb);
+    CHECK(step_breaks(r, 2.0, 1) == 0 && cells_of(r, 2) == cells_of(free_, 2) && cells_of(r, 1) == cells_of(l, 1));
+  }
+  block("8 a region's own");
+
+  {  // 9. One thread and eight: the same layout (D18). Speed: about 2,000 cells, a hot spot, against no limit.
+    for (Algorithm algo : {Algorithm::DefaultGrade, Algorithm::Stepped}) {
+      const CellSpec on = with(off, 2, algo);
+      CHECK(same_layout(lay_cells(d, on, 1), lay_cells(d, on, 8)));
+    }
+    PartMeasure pb(weld_mesh(box(128, 128, 64)));
+    DomainSpec bs;
+    bs.bead_mm = 0.2;
+    bs.start = Start::AllLattice;
+    Domain db(pb, bs);
+    const auto spot = stress_field({0, 0, 0}, 2.0, 64, 64, 64, [](const Vec3& c) {
+      const double dx = c.x - 61, dy = c.y - 59, dz = c.z - 33;
+      return std::sqrt(dx * dx + dy * dy + dz * dz) < 10.0 ? 100.0 : 0.0;
+    });
+    CellSpec plain = off;
+    plain.cell_min_mm = 2;   // the whole part's base cell 8 mm (its halves end at 2)
+    plain.demand = spot;
+    const CellSpec limited = with(plain, 2);
+    auto best_ms = [&](const CellSpec& c, Layout* keep) {
+      double best = 1e300;
+      for (int k = 0; k < 3; ++k) {
+        const auto t0 = std::chrono::steady_clock::now();
+        Layout l = lay_cells(db, c);
+        best = std::min(best, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+        *keep = std::move(l);
+      }
+      return best;
+    };
+    (void)lay_cells(db, plain);   // the domain's first reading, not timed
+    Layout a, b;
+    const double t_free = best_ms(plain, &a), t_kept = best_ms(limited, &b);
+    std::printf("C24 speed: no limit %.2f ms (%zu cells, largest step %.0f); max_step 2 %.2f ms (%zu cells, %.2fx)\n",
+                t_free, a.cells.size(), largest_step(a), t_kept, b.cells.size(), t_kept / t_free);
+    CHECK(a.cells.size() > 1500 && a.cells.size() < 3000 && step_breaks(a, 2.0) > 0 && step_breaks(b, 2.0) == 0);
+    CHECK(same_layout(lay_cells(db, limited, 1), b));
+    CHECK(t_kept <= 2.0 * t_free);
+  }
+  block("9 threads and speed");
+}
+
 int main() {
+  test_size_step();
+  test_face_pieces();
+  test_area_own();
+  test_area_finish();
+  test_cells_by_stress();
+  test_zones();
+  test_by_stress();
+  test_by_stress_session();
+  test_demand_field();
   test_thin_cut_pieces();
   test_one_grid_main_size();
   test_one_grid_smallest_cut();

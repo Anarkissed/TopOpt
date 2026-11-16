@@ -69,6 +69,20 @@ enum NotificationLane {
         return Place(top: row, width: Swift.min(maxWidth, Swift.max(0, g.width - 2 * sideClearance)), cx: g.midX)
     }
 
+    /// ★ HIS PICK 11-15 for the new engine's stack ("at the very [bottom] in landscape and on top of the settings button in
+    /// portrait"): landscape — its foot on the screen's bottom edge, in the bottom row's widest gap (clear of the hint and the
+    /// corner's buttons); portrait, or a landscape row with no room — centred, stepped up past the controls in its way (just
+    /// above the corner's Settings). `bottom`: the screen's bottom edge, above the safe area.
+    @MainActor static func foot(bottom: CGFloat, height: CGFloat, viewport: CGSize, controls: [CGRect]) -> Place {
+        if controlOldPlace { return Place(top: bottom - LaneToast.bottomInset - height, width: maxWidth) }   // RED CONTROL
+        if viewport.width > viewport.height {
+            let g = widestGap(top: bottom - height, height: height, viewport: viewport, controls: controls)
+            let w = Swift.min(maxWidth, Swift.max(0, g.width - 2 * sideClearance))
+            if w >= minWidth { return Place(top: bottom - height, width: w, cx: g.midX) }
+        }
+        return place(edge: .bottom, preferred: bottom, height: height, viewport: viewport, controls: controls)
+    }
+
     /// The row's widest stretch with no control in it.
     static func widestGap(top: CGFloat, height: CGFloat, viewport: CGSize, controls: [CGRect]) -> CGRect {
         let spans = controls.filter { $0.maxY > top + 0.5 && $0.minY < top + height - 0.5 }
@@ -188,7 +202,50 @@ struct LaneToast: ViewModifier {
     }
 }
 
+/// ★ His pick 11-15: a stack held at the foot of the page — landscape at the very bottom, portrait just above the corner's
+/// Settings (`NotificationLane.foot`). Its frame is published as "lane-<key>", so its own buttons are not controls in its way.
+struct LaneFoot: ViewModifier {
+    let key: String
+    @Environment(\.laneControls) private var controls
+
+    func body(content: Content) -> some View {
+        if let controls {
+            LaneFootBody(controls: controls, key: key, content: content)
+        } else {
+            content.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)   // no lane above (a preview)
+        }
+    }
+}
+
+private struct LaneFootBody<Content: View>: View {
+    @ObservedObject var controls: LaneControls
+    let key: String
+    let content: Content
+    /// The stack's measured size: the row it shares is [foot − height, foot].
+    @State private var height: CGFloat = NotificationLane.twoLineHeight
+
+    var body: some View {
+        GeometryReader { g in
+            let space = g.frame(in: .global)
+            let local = controls.frames.map { $0.offsetBy(dx: -space.minX, dy: -space.minY) }
+            let p = NotificationLane.foot(bottom: g.size.height - g.safeAreaInsets.bottom, height: height, viewport: g.size,
+                                          controls: local)
+            content
+                .frame(maxWidth: p.width)
+                .fixedSize(horizontal: false, vertical: true)
+                .background(GeometryReader { s in
+                    Color.clear.onAppear { height = s.size.height }.onChange(of: s.size.height) { height = $0 }
+                })
+                .background(NumberPad.published("lane-\(key)"))
+                .position(x: p.cx ?? g.size.width / 2, y: p.top + height / 2)
+        }
+    }
+}
+
 extension View {
+    /// ★ His pick 11-15: hold this stack at the page's foot (`LaneFoot`).
+    func laneFoot(_ key: String) -> some View { modifier(LaneFoot(key: key)) }
+
     /// Show `message` as the app's toast in the notification lane; it clears the binding after the design's dwell.
     func laneToast(_ message: Binding<String?>) -> some View {
         modifier(LaneToast(message: message))

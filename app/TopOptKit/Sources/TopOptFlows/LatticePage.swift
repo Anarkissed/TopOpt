@@ -185,8 +185,9 @@ public struct LatticePage: View {
         return run.failure?.message ?? "The run failed."
     }
     private var simStale: Bool {
-        guard let ctx = model.makeLatticeSimContext() else { return false }
-        return sim.isStale(against: ctx.fingerprint)
+        let ctxs = model.makeLatticeSimContexts()   // ★ Install 2 (control 6): the stage's solves, the same as the workspace's
+        guard !ctxs.isEmpty else { return false }
+        return sim.isStale(against: ctxs)
     }
     /// The demand field: the variants entry's own field wins; else the sim's.
     private var demandField: LatticeDemandField? { variantField ?? sim.field }
@@ -464,8 +465,9 @@ public struct LatticePage: View {
 
     private var runSimButton: some View {
         Button {
-            guard !simGate.blocked, let ctx = model.makeLatticeSimContext() else { return }
-            sim.run(ctx)
+            let ctxs = model.makeLatticeSimContexts()
+            guard !simGate.blocked, !ctxs.isEmpty else { return }
+            sim.run(ctxs)
         } label: {
             HStack(spacing: DS.Space.s) {
                 Image(systemName: "play.fill").font(.system(size: 12, weight: .bold))
@@ -572,7 +574,7 @@ public struct LatticePage: View {
         switch b.kind {
         case .simRunning: sim.cancel()
         case .simStale:
-            if let ctx = model.makeLatticeSimContext() { sim.run(ctx) }
+            sim.run(model.makeLatticeSimContexts())
         case .optimizing: run.cancel()
         case .failed: page.go(nil)
         // ★ ruling 3: the one tap — the SAME path as "Optimize from scratch", replace-results

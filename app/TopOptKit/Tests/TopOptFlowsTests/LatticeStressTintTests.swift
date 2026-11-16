@@ -194,12 +194,12 @@ final class LatticeSimSolveTriggerTests: XCTestCase {
 
         XCTAssertTrue(body.contains("needsStressSolve"),
                       "★ nothing asking ⇒ no solve")
-        XCTAssertTrue(body.contains("makeLatticeSimContext()"),
+        XCTAssertTrue(body.contains("makeLatticeSimContexts()"),   // ★ Install 2: one per scenario switched on
                       "★ no describable solve ⇒ no solve")
-        XCTAssertTrue(body.contains("isStale(against: ctx.fingerprint)"),
+        XCTAssertTrue(body.contains("isStale(against: ctxs)"),
                       "★ a FRESH field for these exact inputs IS the answer — "
                       + "re-solving identical inputs produces an identical field")
-        XCTAssertTrue(body.contains("latticeSim.run(ctx)"),
+        XCTAssertTrue(body.contains("latticeSim.run(ctxs)"),
                       "★ …and otherwise it actually runs")
     }
 

@@ -253,11 +253,12 @@ public final class AppModel: ObservableObject {
     /// The lattice page's RUN SIM inputs: the SOLID part + page one's declared
     /// anchors and loads, at the COARSE (fast-tier) resolution. Nil when no part /
     /// material paths exist — the page's sim button is then disabled.
-    public func makeLatticeSimContext(resolution: Int = RunQuality.fast.resolution)
+    public func makeLatticeSimContext(resolution: Int = RunQuality.fast.resolution, scenario: UUID? = nil,
+                                      leavingOut: Set<UUID> = [])
         -> LatticeSimModel.Context? {
         guard let project, let file = project.importedFile,
               let materialsPath, let rulesPath else { return nil }
-        let lc = project.loadCase()
+        let lc = project.loadCase(leavingOut: leavingOut, scenario: scenario)
         return LatticeSimModel.Context(
             modelPath: file.path, material: project.material,
             materialsPath: materialsPath, rulesPath: rulesPath,
@@ -267,6 +268,22 @@ public final class AppModel: ObservableObject {
             // ★ the same region layer the run request sends (2026-09-05)
             faceRegions: project.faceRegions.regions.map(\.kitSpec),
             anchorRegionIDs: lc.anchorRegionIDs)
+    }
+
+    /// ★ INSTALL 2, MANUAL CONTROL 6 ("Which loads drive the grade", 00-proposal.md; LatticeReview's design: "Several loads:
+    /// the worst at each place, unweighted, over the loads switched on for the lattice"): the lattice's quick solves, one per
+    /// load scenario switched on in Lattice Setup, each without the Loads and Holds switched off there. One scenario with
+    /// nothing switched off: exactly `makeLatticeSimContext()`'s, so its field and fingerprint are as before.
+    public func makeLatticeSimContexts(resolution: Int = RunQuality.fast.resolution) -> [LatticeSimModel.Context] {
+        guard let project else { return [] }
+        let leftOut = project.latticeLeftOutGroups
+        guard project.force.hasScenarios else {
+            return makeLatticeSimContext(resolution: resolution, leavingOut: leftOut).map { [$0] } ?? []
+        }
+        let excluded = project.lattice.enabled ? project.lattice.topologyExcluded : []
+        return project.force.scenarioList.filter { !excluded.contains($0.id) }.compactMap {
+            makeLatticeSimContext(resolution: resolution, scenario: $0.id, leavingOut: leftOut)
+        }
     }
 
     /// The materials / rules files the certification engine needs (handoff
@@ -415,6 +432,13 @@ public final class AppModel: ObservableObject {
     /// name), which the results screen treats as "no limit" → relative-scale fallback.
     public func yieldStrengthMPa(for materialName: String) -> Double {
         materialsByName[materialName]?.yieldStrengthMPa ?? 0
+    }
+
+    /// ★ Install 2: the PRINTED yield (MPa): the material's yield across its layers (its z knockdown), the weakest way a
+    /// print holds — what the Safety margin's (i) says is already counted. 0 when the material is not loaded.
+    public func printedYieldMPa(for materialName: String) -> Double {
+        guard let m = materialsByName[materialName] else { return 0 }
+        return m.yieldStrengthMPa * (m.zKnockdown > 0 ? Swift.min(1, m.zKnockdown) : 1)
     }
 
     /// The density (g/cm³) of a material by name, for the results-screen STL export's

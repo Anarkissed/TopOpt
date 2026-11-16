@@ -4,8 +4,13 @@
 // the same values; a part goes in and a whole binary STL comes out with its numbers; and
 // every way the job can fail ends in one plain line, a refusal word, the right exit code
 // and NO file. Without the Manifold library the job says it cannot, and that is checked.
+#include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdio>
+#include <cstring>
+#include <memory>
+#include <vector>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -529,7 +534,634 @@ static void test_no_slit_under_solid() {
   CHECK(empty[1] == 0);
 }
 
+// Install 2a, step 3: By stress in the file job (R16 to R18; 04-layout-file-job.md). The demand file round-trips and
+// a bad one is refused with its reason; the keys land where Settings keeps them; By stress with no stress result is
+// refused; and a made file's struts are wider at the hot end than at the cold end by the layout's own widths.
+static void test_by_stress_file() {
+  const std::string dpath = kTmp + "/lattice_file_demand.bin";
+  DemandField f;
+  f.origin = {-1.5, 2.25, 0.0};
+  f.spacing = 0.75;
+  f.nx = 3; f.ny = 4; f.nz = 5;
+  for (int n = 0; n < 60; ++n) f.mpa.push_back(static_cast<float>(n * 1.25 - 7.0));
+  CHECK(write_demand_file(dpath, f));
+  CHECK(bytes(dpath) == 56 + 4 * 60);
+  {
+    DemandField g;
+    std::string why;
+    CHECK(read_demand_file(dpath, g, &why) && why.empty());
+    CHECK(g.nx == 3 && g.ny == 4 && g.nz == 5 && g.spacing == 0.75 && g.origin.x == -1.5 && g.origin.y == 2.25 &&
+          g.origin.z == 0.0 && g.mpa == f.mpa);
+  }
+  CHECK(!write_demand_file(dpath + ".x", DemandField{}));
+  {  // Each fault refused, with its reason; the field given is left as it was.
+    const std::string good = slurp(dpath);
+    const auto refused = [&](std::string bad, const char* words) {
+      const std::string p = kTmp + "/lattice_file_demand_bad.bin";
+      { std::ofstream o(p, std::ios::binary | std::ios::trunc); o << bad; }
+      DemandField g;
+      g.nx = 9;
+      std::string why;
+      const bool ok = read_demand_file(p, g, &why);
+      std::remove(p.c_str());
+      if (ok || !has(why, words)) std::printf("  (demand file: \"%s\", wanted \"%s\")\n", why.c_str(), words);
+      return !ok && has(why, words) && g.nx == 9;
+    };
+    std::string s = good;
+    s[0] = 'X';
+    CHECK(refused(s, "TODEMAND"));
+    s = good;
+    s[8] = 2;
+    CHECK(refused(s, "version 2"));
+    CHECK(refused(good.substr(0, good.size() - 4), "bytes"));
+    CHECK(refused(good + "x", "bytes"));
+    CHECK(refused(good.substr(0, 30), "cut short"));
+    s = good;
+    s[12] = 0;   // nx 0
+    CHECK(refused(s, "no voxels"));
+    s = good;
+    const float nan = std::nanf("");
+    std::memcpy(&s[56 + 4 * 7], &nan, 4);
+    CHECK(refused(s, "not a finite number"));
+    s = good;
+    const double inf = HUGE_VAL;
+    std::memcpy(&s[48], &inf, 8);
+    CHECK(refused(s, "voxel size"));
+    s = good;
+    std::memcpy(&s[32], &inf, 8);
+    CHECK(refused(s, "corner"));
+    DemandField g;
+    std::string why;
+    CHECK(!read_demand_file(kTmp + "/no_such_demand.bin", g, &why) && !why.empty());
+  }
+  // The keys.
+  {
+    const FileJob j = parse_file_job(R"({"mode": "lattice_file", "model": "a.step", "demand": "stress.bin",
+      "layout": {"by_stress": true, "dial_light": 0.1, "dial_heavy": 0.7, "width_light_mm": 0.6, "width_heavy_mm": 1.1,
+                 "reference_mpa": 80, "percentile": 0.9, "response": 2}})");
+    CHECK(j.demand == "stress.bin" && j.settings.struts.mode == Density::ByStress);
+    CHECK(j.settings.struts.dial_light == 0.1 && j.settings.struts.dial_heavy == 0.7 &&
+          j.settings.struts.width_light_mm == 0.6 && j.settings.struts.width_heavy_mm == 1.1);
+    CHECK(j.settings.stress.reference_mpa == 80.0 && j.settings.stress.percentile == 0.9 &&
+          j.settings.stress.response == 2.0 && !j.settings.stress.demand);
+    const FileJob d = parse_file_job(R"({"mode": "lattice_file", "model": "a.step"})");
+    CHECK(d.demand.empty() && d.settings.struts.mode == Density::Uniform);
+    const auto refused = [](const char* text, const char* names) {
+      try { (void)parse_file_job(text); } catch (const FileJobError& e) { return has(e.what(), names); }
+      return false;
+    };
+    CHECK(refused(R"({"mode": "lattice_file", "model": "a.step", "layout": {"by_stress": true, "per_region": true}})",
+                  "per_region"));
+    CHECK(refused(R"({"mode": "lattice_file", "model": "a.step", "demand": "../s.bin"})", "demand"));
+    CHECK(refused(R"({"mode": "lattice_file", "model": "a.step", "demand": ""})", "demand"));
+  }
+  // By stress with no stress result: refused, never made at the light end (R18).
+  const std::string path = kTmp + "/lattice_file_stress.stl";
+  std::remove(path.c_str());
+  std::string text = kBlockJob;
+  {
+    const std::string at = "\"min_cells_across\": 1";
+    text.replace(text.find(at), at.size(),
+                 "\"min_cells_across\": 1, \"cell_mm\": 8, \"by_stress\": true, \"width_light_mm\": 0.9, "
+                 "\"width_heavy_mm\": 1.3, \"reference_mpa\": 100");
+  }
+  FileJob job = parse_file_job(text);
+  {
+    const FileResult r = make_lattice_file(box_model(60, 30, 12), job, path);
+    check_refused(r, "no_stress_result", 3, path);
+    CHECK(has(r.why, "By stress needs a stress result"));
+    CHECK(has(file_result_json(r), "\"code\": \"no_stress_result\""));
+    FileJob zero = job;   // a field with no stress anywhere gives no reference either
+    zero.settings.stress.reference_mpa = 0.0;
+    auto none = std::make_shared<DemandField>(f);
+    for (float& v : none->mpa) v = 0.0f;
+    zero.settings.stress.demand = none;
+    if (mesh_available()) check_refused(make_lattice_file(box_model(60, 30, 12), zero, path), "no_stress_result", 3, path);
+  }
+  {  // From files: a job that names a stress result that is not one.
+    const std::string job_path = kTmp + "/lattice_file_stress_job.json";
+    const std::string bad = kTmp + "/lattice_file_bad_demand.bin";
+    { std::ofstream o(bad, std::ios::binary | std::ios::trunc); o << "not a stress result"; }
+    { std::ofstream o(job_path, std::ios::binary | std::ios::trunc);
+      o << R"({"mode": "lattice_file", "model": "no_such_part.stl", "demand": "lattice_file_bad_demand.bin",
+               "layout": {"by_stress": true}})"; }
+    const FileResult r = run_file_job(job_path, kTmp);
+    check_refused(r, "demand_unreadable", 1, kTmp + "/lattice.stl");
+    CHECK(has(r.detail, "TODEMAND") && has(slurp(kTmp + "/" + kFileResultName), "\"code\": \"demand_unreadable\""));
+    for (const std::string& p : {job_path, bad, kTmp + "/" + std::string(kFileResultName)}) std::remove(p.c_str());
+  }
+  std::remove(dpath.c_str());
+  if (!mesh_available()) return;
+  // Made: a 60 x 30 x 12 block, lattice under its top face, 8 mm cells; the stress 0 for x under 30, 200 MPa from 30 on
+  // (reference 100): the cold cells at 0.9 mm, the hot ones at 1.3 mm. Read back from the file it wrote: across each
+  // strut's flats at its middle (the narrowest chord square to its line), the hot struts are wider by 0.4 mm +- 0.01.
+  DemandField hot;
+  hot.spacing = 1.0;
+  hot.nx = 60; hot.ny = 30; hot.nz = 12;
+  for (int k = 0; k < 12; ++k)
+    for (int j = 0; j < 30; ++j)
+      for (int i = 0; i < 60; ++i) hot.mpa.push_back(i >= 30 ? 200.0f : 0.0f);
+  CHECK(write_demand_file(dpath, hot));
+  auto field = std::make_shared<DemandField>();
+  CHECK(read_demand_file(dpath, *field));
+  std::remove(dpath.c_str());
+  job.settings.stress.demand = field;
+  const FileResult r = make_lattice_file(box_model(60, 30, 12), job, path);
+  CHECK(r.ok && r.by_stress && r.reference_mpa == 100.0 && r.highest_mpa == 200.0 && r.at_light > 0 && r.at_heavy > 0 &&
+        r.at_light + r.at_heavy == r.cells);
+  if (!r.ok) { std::printf("  (%s: %s %s)\n", r.code.c_str(), r.why.c_str(), r.detail.c_str()); return; }
+  CHECK(has(file_result_json(r), "\"by_stress\": true, \"reference_mpa\": 100, \"highest_mpa\": 200, \"at_light\": " +
+                                     std::to_string(r.at_light) + ", \"at_heavy\": " + std::to_string(r.at_heavy) + "}"));
+  Session session(box_model(60, 30, 12));
+  const Outcome out = session.lay(job.settings);
+  CHECK(out.layout.cells.size() == r.cells && out.bars.bars.size() == r.bars);
+  const PartMeasure file(weld_mesh(read_stl_file(path).mesh));
+  const PartMeasure::Probe in = file.probe();
+  std::vector<double> got[2];
+  int off_width = 0;
+  for (const Bar& b : out.bars.bars) {
+    if (b.piece || b.skin || bar_is_bridge(b) || b.end_a != Bar::End::Node || b.end_b != Bar::End::Node) continue;
+    const int side = std::max(b.a.x, b.b.x) < 20.0 ? 0 : std::min(b.a.x, b.b.x) > 40.0 ? 1 : -1;
+    if (side < 0) continue;
+    if (std::fabs(b.width - (side ? 1.3 : 0.9)) > 1e-12) ++off_width;
+    const Vec3 m{0.5 * (b.a.x + b.b.x), 0.5 * (b.a.y + b.b.y), 0.5 * (b.a.z + b.b.z)};
+    Vec3 d{b.b.x - b.a.x, b.b.y - b.a.y, b.b.z - b.a.z};
+    const double len = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+    d = {d.x / len, d.y / len, d.z / len};
+    // Two directions square to the strut.
+    Vec3 e1 = std::fabs(d.x) < 0.9 ? Vec3{0, -d.z, d.y} : Vec3{-d.z, 0, d.x};
+    const double l1 = std::sqrt(e1.x * e1.x + e1.y * e1.y + e1.z * e1.z);
+    e1 = {e1.x / l1, e1.y / l1, e1.z / l1};
+    const Vec3 e2{d.y * e1.z - d.z * e1.y, d.z * e1.x - d.x * e1.z, d.x * e1.y - d.y * e1.x};
+    if (in.depth(m) <= 0.0) continue;
+    double narrowest = 1e9;
+    for (int a = 0; a < 360; ++a) {
+      const double t = 3.14159265358979323846 * a / 360.0;
+      const Vec3 dir{std::cos(t) * e1.x + std::sin(t) * e2.x, std::cos(t) * e1.y + std::sin(t) * e2.y,
+                     std::cos(t) * e1.z + std::sin(t) * e2.z};
+      narrowest = std::min(narrowest, in.wall_width(m, dir));
+    }
+    got[side].push_back(narrowest);
+  }
+  CHECK(off_width == 0 && got[0].size() >= 4 && got[1].size() >= 4);
+  if (got[0].empty() || got[1].empty()) return;
+  for (auto& g : got) std::sort(g.begin(), g.end());
+  const double cold = got[0][got[0].size() / 2], warm = got[1][got[1].size() / 2];
+  std::printf("by stress, the made file: %zu cold struts %.4f mm across the flats (%.4f .. %.4f), %zu hot struts %.4f mm "
+              "(%.4f .. %.4f): wider by %.4f, the layout's widths by 0.4\n", got[0].size(), cold, got[0].front(),
+              got[0].back(), got[1].size(), warm, got[1].front(), got[1].back(), warm - cold);
+  CHECK(std::fabs((warm - cold) - 0.4) <= 0.01);
+  std::remove(path.c_str());
+}
+
+// C22, cell size by stress: the layout key "cells_by_stress" reaches CellSpec::by_stress; a job with it on and no stress
+// result is refused (no_stress_result, exit 3) before anything is made; with one it makes a file whose layout says
+// cells_by_stress. The stress result is the job's own demand file (write_demand_file, read_demand_file).
+static void test_cells_by_stress_key() {
+  std::string text = kBlockJob;
+  const std::string at = "\"algorithm\": \"uniform\"";
+  text.replace(text.find(at), at.size(), "\"algorithm\": \"default_grade\", \"cells_by_stress\": true");
+  const std::string lines = "\"min_strut_lines\": 2";   // one line: a ladder of 8 and 4 mm
+  text.replace(text.find(lines), lines.size(), "\"min_strut_lines\": 1");
+  FileJob job;
+  bool parsed = true;
+  try { job = parse_file_job(text); } catch (const FileJobError& e) { parsed = false; std::printf("  (%s)\n", e.what()); }
+  CHECK(parsed && job.settings.cells.by_stress);
+  CHECK(!parse_file_job(kBlockJob).settings.cells.by_stress);   // off unless asked
+  if (!parsed) return;
+  const std::string path = kTmp + "/lattice_file_cells_by_stress.stl";
+  std::remove(path.c_str());
+  {  // No stress result: refused, in plain words, and nothing made.
+    const FileResult r = make_lattice_file(box_model(30, 30, 12), job, path);
+    check_refused(r, "no_stress_result", 3, path);
+    CHECK(has(r.why, "stress result"));
+    CHECK(has(file_result_json(r), "\"code\": \"no_stress_result\""));
+  }
+  // A ramp along x over the block, 1 mm voxels: 0 for x < 8, 100 MPa from x = 22.
+  const std::string demand_path = kTmp + "/cells_by_stress.demand";
+  {
+    DemandField f;
+    f.origin = {-2, -2, -2};
+    f.spacing = 1.0;
+    f.nx = 34; f.ny = 34; f.nz = 16;
+    for (int k = 0; k < f.nz; ++k)
+      for (int j = 0; j < f.ny; ++j)
+        for (int i = 0; i < f.nx; ++i)
+          f.mpa.push_back(static_cast<float>(100.0 * std::min(1.0, std::max(0.0, (i - 1.5 - 8.0) / 14.0))));
+    CHECK(write_demand_file(demand_path, f));
+  }
+  {
+    auto read = std::make_shared<DemandField>();
+    if (read_demand_file(demand_path, *read)) job.settings.stress.demand = read;
+  }
+  job.settings.stress.reference_mpa = 100.0;
+  std::remove(demand_path.c_str());
+  CHECK(job.settings.stress.demand && !job.settings.stress.demand->empty());
+  if (!job.settings.stress.demand) return;
+  const FileResult r = make_lattice_file(box_model(30, 30, 12), job, path);
+  if (!mesh_available()) {
+    check_refused(r, "mesh_unavailable", 3, path);
+    return;
+  }
+  CHECK(r.ok && r.code == "ok" && r.cells > 0 && r.cells_by_stress);
+  if (!r.ok) std::printf("  (%s: %s %s)\n", r.code.c_str(), r.why.c_str(), r.detail.c_str());
+  CHECK(has(file_result_json(r), "\"cells_by_stress\": true"));
+  FileJob plain = job;
+  plain.settings.cells.by_stress = false;
+  const FileResult p = make_lattice_file(box_model(30, 30, 12), plain, path);
+  CHECK(p.ok && !p.cells_by_stress && p.cells < r.cells);
+  CHECK(has(file_result_json(p), "\"cells_by_stress\": false"));
+  std::printf("block, cells by stress: %zu cells (%zu with it off); print clean %d\n", r.cells, p.cells,
+              static_cast<int>(r.made.print_clean));
+  std::remove(path.c_str());
+}
+
+// C23, R19: a region's own cells and struts, "region_own" (one entry per region: null, or the part's own key names).
+static void test_region_own_key() {
+  const std::string head = R"({"mode": "lattice_file", "model": "block.step", "layout": {
+    "min_strut_lines": 1,
+    "region_ids": [1, 2], "region_no_lattice": [0, 0], "region_depth_mm": [6, 6], "region_expand_mm": [0, 0],
+    "region_face_counts": [1, 1], "region_faces": [1, 0], "cell_max_mm": 6, "dial": 0.3)";
+  const std::string own = R"(, "region_own": [{"algorithm": "stepped", "cell_mm": 4, "cell_max_mm": 5, "cell_min_mm": 1.5,
+    "min_cells_across": 1, "grade_to_shape": true, "band_mm": 4, "band_cell_mm": 1.6, "cells_by_stress": false,
+    "by_stress": false, "dial": 0.8, "dial_light": 0.1, "dial_heavy": 0.9, "strut_width_mm": 0.7, "width_light_mm": 0.5,
+    "width_heavy_mm": 0.9, "strength": 0.5, "response": 2, "reference_mpa": 40}, null]}})";
+  FileJob job;
+  bool parsed = true;
+  try { job = parse_file_job(head + own); } catch (const FileJobError& e) { parsed = false; std::printf("  (%s)\n", e.what()); }
+  CHECK(parsed && job.settings.regions.size() == 2);
+  if (!parsed || job.settings.regions.size() != 2) return;
+  const AreaOwn& a = job.settings.regions[0].own;
+  CHECK(a.algorithm == Algorithm::Stepped && a.cell_mm == 4.0 && a.cell_max_mm == 5.0 && a.cell_min_mm == 1.5);
+  CHECK(a.min_cells_across == 1 && a.grade_to_shape == true && a.band_mm == 4.0 && a.band_cell_mm == 1.6);
+  CHECK(a.cells_by_stress == false && a.by_stress == false && a.dial == 0.8 && a.dial_light == 0.1 && a.dial_heavy == 0.9);
+  CHECK(a.width_mm == 0.7 && a.width_light_mm == 0.5 && a.width_heavy_mm == 0.9 && a.strength == 0.5);
+  CHECK(a.response == 2.0 && a.reference_mpa == 40.0);
+  CHECK(!job.settings.regions[1].own.any());
+  CHECK(!parse_file_job(head + "}}").settings.regions[0].own.any());   // nothing stated unless asked
+  // The same layout as the Settings made directly.
+  Settings direct = parse_file_job(head + "}}").settings;
+  direct.regions[0].own = a;
+  const Outcome x = Session(box_model(30, 30, 12)).lay(job.settings), y = Session(box_model(30, 30, 12)).lay(direct);
+  const Outcome plain = Session(box_model(30, 30, 12)).lay(parse_file_job(head + "}}").settings);
+  CHECK(!x.layout.cells.empty() && x.layout.cells == y.layout.cells && x.layout.solid == y.layout.solid);
+  CHECK(x.bars.bars.size() == y.bars.bars.size());
+  CHECK(!(x.layout.cells == plain.layout.cells));
+  // An unknown key, a list of the wrong length, or an entry that is not an object refuses the job.
+  const auto refused = [&](const std::string& tail, const char* names) {
+    try { (void)parse_file_job(head + tail); } catch (const FileJobError& e) { return has(e.what(), names); }
+    return false;
+  };
+  CHECK(refused(R"(, "region_own": [{"cell_mn": 4}, null]}})", "cell_mn"));
+  CHECK(refused(R"(, "region_own": [{"topology": "octet"}, null]}})", "topology"));   // part only
+  CHECK(refused(R"(, "region_own": [null]}})", "region_own"));
+  CHECK(refused(R"(, "region_own": [4, null]}})", "region_own"));
+  // A region By stress with no stress result: refused, as the part's is (R18).
+  const FileJob stress = parse_file_job(head + R"(, "region_own": [{"by_stress": true}, null]}})");
+  const std::string path = kTmp + "/lattice_file_region_own.stl";
+  std::remove(path.c_str());
+  check_refused(make_lattice_file(box_model(30, 30, 12), stress, path), "no_stress_result", 3, path);
+  std::printf("region own: %zu cells with region 1's own settings, %zu without\n", x.layout.cells.size(),
+              plain.layout.cells.size());
+}
+
+// D21: a region's zone in place of its faces (`region_zones`, one entry per region: null, or the zone). Both kinds
+// read into the same Settings as made directly, and lay the same layout; bad numbers refuse the job.
+static void test_zones_key() {
+  const char* job_text = R"({
+    "mode": "lattice_file", "model": "block.step",
+    "layout": {
+      "min_strut_lines": 2,
+      "region_ids": [1, 2, 3], "region_no_lattice": [0, 0, 1], "region_depth_mm": [8, 0, 0],
+      "region_expand_mm": [-2, 0.5, 0], "region_face_counts": [1, 0, 0], "region_faces": [1],
+      "region_zones": [null,
+        {"kind": "box", "centre": [15, 15, 6], "axes": [[0.8, 0.6, 0], [-0.6, 0.8, 0], [0, 0, 1]], "half_mm": [9, 9, 3]},
+        {"kind": "cylinder", "centre": [15, 15, 6], "axis": [0, 0, 1], "radius_mm": 2.5, "half_length_mm": 6}],
+      "algorithm": "uniform", "cell_max_mm": 8, "min_cells_across": 1
+    }
+  })";
+  FileJob job;
+  bool parsed = true;
+  try { job = parse_file_job(job_text); } catch (const FileJobError& e) { parsed = false; std::printf("  (%s)\n", e.what()); }
+  CHECK(parsed && job.settings.regions.size() == 3);
+  if (!parsed || job.settings.regions.size() != 3) return;
+  Settings direct;
+  direct.min_strut_lines = 2;
+  direct.cells.algorithm = Algorithm::Uniform;
+  direct.cells.cell_max_mm = 8;
+  direct.cells.min_cells_across = 1;
+  direct.regions.resize(3);
+  direct.regions[0].id = 1; direct.regions[0].faces = {1}; direct.regions[0].depth_mm = 8; direct.regions[0].expand_mm = -2;
+  direct.regions[1].id = 2; direct.regions[1].expand_mm = 0.5;
+  direct.regions[1].zone.kind = Zone::Kind::Box;
+  direct.regions[1].zone.centre = {15, 15, 6};
+  direct.regions[1].zone.axis[0] = {0.8, 0.6, 0};
+  direct.regions[1].zone.axis[1] = {-0.6, 0.8, 0};
+  direct.regions[1].zone.axis[2] = {0, 0, 1};
+  direct.regions[1].zone.half[0] = 9; direct.regions[1].zone.half[1] = 9; direct.regions[1].zone.half[2] = 3;
+  direct.regions[2].id = 3; direct.regions[2].role = Role::NoLattice;
+  direct.regions[2].zone.kind = Zone::Kind::Cylinder;
+  direct.regions[2].zone.centre = {15, 15, 6};
+  direct.regions[2].zone.axis[2] = {0, 0, 1};
+  direct.regions[2].zone.half[0] = 2.5; direct.regions[2].zone.half[2] = 6;
+  int differ = 0;
+  for (std::size_t r = 0; r < 3; ++r) {
+    const Zone &a = job.settings.regions[r].zone, &b = direct.regions[r].zone;
+    differ += a.kind != b.kind || a.centre.x != b.centre.x || a.centre.y != b.centre.y || a.centre.z != b.centre.z;
+    for (int k = 0; k < 3; ++k)
+      differ += a.axis[k].x != b.axis[k].x || a.axis[k].y != b.axis[k].y || a.axis[k].z != b.axis[k].z ||
+                a.half[k] != b.half[k];
+    differ += job.settings.regions[r].faces != direct.regions[r].faces;
+  }
+  CHECK(differ == 0);
+  const Outcome from_job = Session(box_model(30, 30, 12)).lay(job.settings);
+  const Outcome made = Session(box_model(30, 30, 12)).lay(direct);
+  CHECK(from_job.empty_regions.empty() && !from_job.layout.cells.empty());
+  CHECK(from_job.layout.cells == made.layout.cells && from_job.layout.solid == made.layout.solid);
+  bool zone2 = false;
+  for (const Cell& c : from_job.layout.cells) zone2 = zone2 || c.region == 2;
+  CHECK(zone2);
+
+  // Bad numbers, and a region with faces and a zone, refuse the job, naming the key.
+  const auto refused = [](const std::string& zone, const char* counts, const char* names) {
+    const std::string text = std::string(R"({"mode": "lattice_file", "model": "a.step", "layout": {"region_ids": [1],
+      "region_no_lattice": [0], "region_depth_mm": [0], "region_expand_mm": [0], "region_face_counts": [)") + counts +
+      R"(], "region_faces": [)" + (counts[0] == '1' ? "4" : "") + R"(], "region_zones": [)" + zone + "]}}";
+    try {
+      (void)parse_file_job(text);
+    } catch (const FileJobError& e) {
+      return has(e.what(), names);
+    }
+    return false;
+  };
+  const std::string box = R"({"kind": "box", "centre": [1, 2, 3], "axes": [[1, 0, 0], [0, 1, 0], [0, 0, 1]], "half_mm": [2, 2, 2]})";
+  CHECK(!refused(box, "0", "region_zones"));   // the good one parses
+  CHECK(refused(R"({"kind": "box", "centre": [1, 2, 3], "axes": [[1, 0, 0], [0, 1, 0], [0, 0, 1]], "half_mm": [2, 0, 2]})",
+                "0", "half sizes above 0"));
+  CHECK(refused(R"({"kind": "box", "centre": [1, 2, 3], "axes": [[1, 0, 0], [0.6, 0.8, 0], [0, 0, 1]], "half_mm": [2, 2, 2]})",
+                "0", "right angles"));
+  CHECK(refused(R"({"kind": "cylinder", "centre": [1, 2, 3], "axis": [0, 0, 2], "radius_mm": 1, "half_length_mm": 2})",
+                "0", "unit axis"));
+  CHECK(refused(R"({"kind": "cylinder", "centre": [1, 2, 3], "axis": [0, 0, 1], "radius_mm": -1, "half_length_mm": 2})",
+                "0", "above 0"));
+  CHECK(refused(R"({"kind": "sphere", "centre": [1, 2, 3]})", "0", "sphere"));
+  CHECK(refused(R"({"kind": "box", "centre": [1, 2], "axes": [[1, 0, 0], [0, 1, 0], [0, 0, 1]], "half_mm": [2, 2, 2]})",
+                "0", "centre"));
+  CHECK(refused(R"({"kind": "box", "centre": [1, 2, 3], "axes": [[1, 0, 0], [0, 1, 0], [0, 0, 1]], "half_mm": [2, 2, 2], "radius_mm": 1})",
+                "0", "radius_mm"));
+  CHECK(refused(box, "1", "faces and a zone"));
+  CHECK(refused(box + ", null", "0", "region_zones"));   // not one per region
+
+  // The file job does not take a zone's missing faces for faces the part does not have.
+  const std::string path = kTmp + "/lattice_file_zone.stl";
+  std::remove(path.c_str());
+  FileJob only = job;
+  only.settings.regions = {job.settings.regions[1]};
+  const FileResult r = make_lattice_file(box_model(30, 30, 12), only, path);
+  CHECK(r.code != "region_faces_missing" && r.empty_regions.empty());
+  if (mesh_available()) {
+    CHECK(r.ok && r.cells > 0 && r.bars > 0);
+    if (!r.ok) std::printf("  (%s: %s %s)\n", r.code.c_str(), r.why.c_str(), r.detail.c_str());
+  }
+  std::remove(path.c_str());
+}
+
+// S13 in the file job: a region may carry its own Finish in "region_finish" (null = the part's). The keys land in the
+// region's RegionAsk and lay exactly what the same Settings made directly lay; an unknown key, or a list of the wrong
+// length, refuses the job by name. A made file with region A (the top) covered and region B (the front) not is closed
+// over A's face and open over B's; with A's Finish left to the part's (none), A's face is open too.
+static void test_area_finish_file() {
+  const std::string text = R"({
+    "mode": "lattice_file", "model": "block.step",
+    "layout": {
+      "min_strut_lines": 2,
+      "region_ids": [1, 2], "region_no_lattice": [0, 0], "region_depth_mm": [8, 6], "region_expand_mm": [-2, -2],
+      "region_face_counts": [1, 1], "region_faces": [1, 2],
+      "region_finish": [{"rim_mm": 0, "cover_mm": 1.2, "skin": true, "skin_width_mm": 0.9, "skin_reach_cells": 1.0}, null],
+      "algorithm": "uniform", "cell_max_mm": 8, "min_cells_across": 1
+    }
+  })";
+  FileJob job;
+  bool parsed = true;
+  try { job = parse_file_job(text); } catch (const FileJobError& e) { parsed = false; std::printf("  (%s)\n", e.what()); }
+  CHECK(parsed);
+  if (!parsed) return;
+  const Settings::RegionAsk &a = job.settings.regions[0], &b = job.settings.regions[1];
+  CHECK(a.rim_mm && *a.rim_mm == 0.0 && a.cover_mm && *a.cover_mm == 1.2 && a.skin && *a.skin &&
+        a.skin_width_mm && *a.skin_width_mm == 0.9 && a.skin_reach_cells && *a.skin_reach_cells == 1.0);
+  CHECK(!b.rim_mm && !b.cover_mm && !b.skin && !b.skin_width_mm && !b.skin_reach_cells);
+  {  // The same Settings, made directly.
+    Settings direct;
+    direct.min_strut_lines = 2;
+    direct.regions = {{1, Role::Lattice, {1}, 8.0, -2.0}, {2, Role::Lattice, {2}, 6.0, -2.0}};
+    direct.regions[0].rim_mm = 0.0;
+    direct.regions[0].cover_mm = 1.2;
+    direct.regions[0].skin = true;
+    direct.regions[0].skin_width_mm = 0.9;
+    direct.regions[0].skin_reach_cells = 1.0;
+    direct.cells.algorithm = Algorithm::Uniform;
+    direct.cells.cell_max_mm = 8;
+    direct.cells.min_cells_across = 1;
+    const Outcome x = Session(box_model(30, 30, 12)).lay(job.settings), y = Session(box_model(30, 30, 12)).lay(direct);
+    bool same = x.layout.cells == y.layout.cells && x.layout.solid == y.layout.solid &&
+                x.bars.bars.size() == y.bars.bars.size() && !x.bars.bars.empty();
+    for (std::size_t i = 0; same && i < x.bars.bars.size(); ++i) {
+      const Bar &p = x.bars.bars[i], &q = y.bars.bars[i];
+      same = p.a.x == q.a.x && p.a.y == q.a.y && p.a.z == q.a.z && p.b.x == q.b.x && p.b.y == q.b.y &&
+             p.b.z == q.b.z && p.width == q.width && p.end_a == q.end_a && p.end_b == q.end_b && p.skin == q.skin;
+    }
+    CHECK(same);
+  }
+  for (const char* bad : {R"([{"cover": 1.2}, null])", R"([null])"}) {
+    std::string t = text;
+    const std::size_t from = t.find("[{\"rim_mm\""), to = t.find("null]") + 5;
+    t.replace(from, to - from, bad);
+    bool refused = false;
+    try { (void)parse_file_job(t); } catch (const FileJobError& e) { refused = has(e.what(), "region_finish"); }
+    CHECK(refused);
+  }
+  if (!mesh_available()) return;
+  // Points a quarter of a millimetre inside each face, over the middle of its region (A's away from where B's reaches).
+  auto empty_under = [](const std::string& path, int face) {
+    const PartMeasure file(weld_mesh(read_stl_file(path).mesh));
+    const PartMeasure::Probe in = file.probe();
+    int empty = 0;
+    for (double u = 4.1; u < 26; u += 0.25)
+      for (double v = (face == 1 ? 10.1 : 3.1); v < (face == 1 ? 26 : 9); v += 0.25)
+        empty += !in.inside(face == 1 ? Vec3{u, v, 12 - 0.25} : Vec3{u, 0.25, v});
+    return empty;
+  };
+  const std::string path = kTmp + "/lattice_file_area_finish.stl";
+  int covered[2] = {0, 0}, open[2] = {0, 0};
+  for (int own = 1; own >= 0; --own) {
+    FileJob j = job;
+    if (!own) j.settings.regions[0] = Settings::RegionAsk{1, Role::Lattice, {1}, 8.0, -2.0, {}, {}, {}, {}, {}};
+    std::remove(path.c_str());
+    const FileResult r = make_lattice_file(box_model(30, 30, 12), j, path);
+    CHECK(r.ok && r.cells > 0 && r.bars > 0);
+    if (!r.ok) { std::printf("  (%s: %s %s)\n", r.code.c_str(), r.why.c_str(), r.detail.c_str()); return; }
+    covered[own] = empty_under(path, 1);
+    open[own] = empty_under(path, 2);
+  }
+  std::printf("area finish file: A covered %d empty points under its face (%d with the part's Finish); B %d empty "
+              "points under its face (%d)\n", covered[1], covered[0], open[1], open[0]);
+  CHECK(covered[1] == 0 && covered[0] > 100);   // closed over A's face; open there without its own cover
+  CHECK(open[1] > 100 && open[0] > 100);        // open over B's face either way
+  std::remove(path.c_str());
+}
+
+// D22 in the file job: "region_pieces" and "protect_pieces", one entry per region / Protect skin: null, or its pieces
+// (with pieces its faces are not read: the bridge may send the parent faces as well). They read into the same Settings
+// as made directly and lay the same layout; bad numbers or a wrong length refuse the job naming the key; pieces that
+// leave no surface are refused as faces the part does not have. A made file with a Protect skin on the left half of
+// the top (x <= 15) over lattice under the whole top is closed over that half and open over the other.
+static void test_pieces_key() {
+  const std::string text = R"({
+    "mode": "lattice_file", "model": "block.step",
+    "layout": {
+      "min_strut_lines": 2,
+      "region_ids": [1, 2], "region_no_lattice": [0, 1], "region_depth_mm": [8, 3], "region_expand_mm": [0, 0],
+      "region_face_counts": [1, 1], "region_faces": [1, 2],
+      "region_pieces": [null, [{"faces": [2], "cuts": [{"point": [20, 0, 0], "normal": [1, 0, 0], "strict": true}]}]],
+      "protect_ids": [7], "protect_depth_mm": [1.2], "protect_face_counts": [1], "protect_faces": [1],
+      "protect_pieces": [[{"faces": [1], "cuts": [{"point": [15, 0, 0], "normal": [-1, 0, 0]}]}]],
+      "algorithm": "uniform", "cell_max_mm": 8, "min_cells_across": 1
+    }
+  })";
+  FileJob job;
+  bool parsed = true;
+  try { job = parse_file_job(text); } catch (const FileJobError& e) { parsed = false; std::printf("  (%s)\n", e.what()); }
+  CHECK(parsed && job.settings.regions.size() == 2 && job.settings.protect.size() == 1);
+  if (!parsed || job.settings.regions.size() != 2 || job.settings.protect.size() != 1) return;
+  Settings direct;
+  direct.min_strut_lines = 2;
+  direct.cells.algorithm = Algorithm::Uniform;
+  direct.cells.cell_max_mm = 8;
+  direct.cells.min_cells_across = 1;
+  direct.regions = {{1, Role::Lattice, {1}, 8.0, 0.0}, {2, Role::NoLattice, {2}, 3.0, 0.0}};
+  direct.regions[1].pieces = {FacePiece{{2}, {FaceCut{{20, 0, 0}, {1, 0, 0}, true}}}};
+  direct.protect = {{7, {1}, 1.2, {FacePiece{{1}, {FaceCut{{15, 0, 0}, {-1, 0, 0}, false}}}}}};
+  auto same_pieces = [](const std::vector<FacePiece>& a, const std::vector<FacePiece>& b) {
+    if (a.size() != b.size()) return false;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+      if (a[i].faces != b[i].faces || a[i].cuts.size() != b[i].cuts.size()) return false;
+      for (std::size_t k = 0; k < a[i].cuts.size(); ++k) {
+        const FaceCut &p = a[i].cuts[k], &q = b[i].cuts[k];
+        if (p.point.x != q.point.x || p.point.y != q.point.y || p.point.z != q.point.z || p.normal.x != q.normal.x ||
+            p.normal.y != q.normal.y || p.normal.z != q.normal.z || p.strict != q.strict)
+          return false;
+      }
+    }
+    return true;
+  };
+  CHECK(job.settings.regions[0].pieces.empty() && same_pieces(job.settings.regions[1].pieces, direct.regions[1].pieces));
+  CHECK(same_pieces(job.settings.protect[0].pieces, direct.protect[0].pieces));
+  const Outcome from_job = Session(box_model(30, 30, 12)).lay(job.settings);
+  const Outcome made = Session(box_model(30, 30, 12)).lay(direct);
+  CHECK(from_job.empty_regions.empty() && !from_job.layout.cells.empty());
+  CHECK(from_job.layout.cells == made.layout.cells && from_job.layout.solid == made.layout.solid);
+
+  // Bad numbers, a wrong length, pieces with a zone: refused, naming the key.
+  const auto refused = [&](const char* from, const char* to, const char* names) {
+    std::string t = text;
+    const std::size_t at = t.find(from);
+    if (at == std::string::npos) return false;
+    t.replace(at, std::strlen(from), to);
+    try {
+      (void)parse_file_job(t);
+    } catch (const FileJobError& e) {
+      return has(e.what(), names);
+    }
+    return false;
+  };
+  CHECK(refused(R"("normal": [1, 0, 0])", R"("normal": [0, 0, 0])", "region_pieces"));
+  CHECK(refused(R"("point": [20, 0, 0])", R"("point": [20, 0])", "region_pieces"));
+  CHECK(refused(R"("strict": true)", R"("strict": true, "plane": 1)", "plane"));
+  CHECK(refused(R"([null, [{"faces")", R"([[{"faces")", "region_pieces"));   // not one per region
+  CHECK(refused(R"([null, [{"faces")", R"([[], [{"faces")", "region_pieces"));   // an empty list
+  CHECK(refused(R"("normal": [-1, 0, 0])", R"("normal": [0, 0, 0])", "protect_pieces"));
+  CHECK(refused(R"("protect_pieces": [[)", R"("protect_pieces": [null, [)", "protect_pieces"));
+  CHECK(refused(R"("region_face_counts": [1, 1], "region_faces": [1, 2],)",
+                R"("region_face_counts": [1, 0], "region_faces": [1], "region_zones": [null, {"kind": "box",
+                   "centre": [15, 15, 6], "axes": [[1, 0, 0], [0, 1, 0], [0, 0, 1]], "half_mm": [3, 3, 3]}],)",
+                "pieces and a zone"));
+
+  const std::string path = kTmp + "/lattice_file_pieces.stl";
+  {  // Pieces that leave nothing: refused before anything is made, as faces the part does not have.
+    FileJob none = job;
+    none.settings.regions[1].pieces[0].cuts[0].point.x = 100;
+    std::remove(path.c_str());
+    const FileResult r = make_lattice_file(box_model(30, 30, 12), none, path);
+    CHECK(r.code == "region_faces_missing" && (r.empty_regions == std::vector<int>{2}) && !exists(path));
+    none = job;
+    none.settings.protect[0].pieces[0].faces = {42};
+    const FileResult s = make_lattice_file(box_model(30, 30, 12), none, path);
+    CHECK(s.code == "protect_faces_missing" && !exists(path));
+  }
+  if (!mesh_available()) return;
+  std::remove(path.c_str());
+  const FileResult r = make_lattice_file(box_model(30, 30, 12), job, path);
+  CHECK(r.ok && r.cells > 0 && r.bars > 0);
+  if (!r.ok) { std::printf("  (%s: %s %s)\n", r.code.c_str(), r.why.c_str(), r.detail.c_str()); return; }
+  // Points a quarter of a millimetre under the top, over each half (clear of the cut and of region 2).
+  const PartMeasure file(weld_mesh(read_stl_file(path).mesh));
+  const PartMeasure::Probe in = file.probe();
+  int skinned = 0, open = 0;
+  for (double v = 8.1; v < 26; v += 0.25)
+    for (double u = 1.1; u < 13; u += 0.25) {
+      skinned += !in.inside(Vec3{u, v, 12 - 0.25});
+      open += !in.inside(Vec3{u + 16, v, 12 - 0.25});
+    }
+  std::printf("pieces file: %d empty points under the skinned half of the top, %d under the other half\n", skinned, open);
+  CHECK(skinned == 0 && open > 100);
+  std::remove(path.c_str());
+}
+
+// C24, the largest size step between neighbouring cells: the layout key "max_step" reaches CellSpec::max_step, and a
+// region's own in "region_own"; the file's layout reports step_held_at (1.5 on Default Grade is held at 2; 0 when none
+// was asked).
+static void test_max_step_key() {
+  std::string text = kBlockJob;
+  const std::string at = "\"algorithm\": \"uniform\"";
+  text.replace(text.find(at), at.size(), "\"algorithm\": \"default_grade\", \"max_step\": 1.5");
+  FileJob job;
+  bool parsed = true;
+  try { job = parse_file_job(text); } catch (const FileJobError& e) { parsed = false; std::printf("  (%s)\n", e.what()); }
+  CHECK(parsed && job.settings.cells.max_step == 1.5);
+  CHECK(parse_file_job(kBlockJob).settings.cells.max_step == 0.0);   // none unless asked
+  std::string own = text;
+  const std::string tail = "\"min_cells_across\": 1";
+  own.replace(own.find(tail), tail.size(), "\"min_cells_across\": 1, \"region_own\": [{\"max_step\": 3}]");
+  bool own_parsed = true;
+  FileJob oj;
+  try { oj = parse_file_job(own); } catch (const FileJobError& e) { own_parsed = false; std::printf("  (%s)\n", e.what()); }
+  CHECK(own_parsed && oj.settings.regions.size() == 1 && oj.settings.regions[0].own.max_step == 3.0);
+  if (!parsed) return;
+  const std::string path = kTmp + "/lattice_file_max_step.stl";
+  std::remove(path.c_str());
+  const FileResult r = make_lattice_file(box_model(30, 30, 12), job, path);
+  if (!mesh_available()) {
+    check_refused(r, "mesh_unavailable", 3, path);
+    return;
+  }
+  CHECK(r.ok && r.cells > 0 && r.step_held_at == 2.0);
+  CHECK(has(file_result_json(r), "\"step_held_at\": 2,"));
+  FileJob plain = job;
+  plain.settings.cells.max_step = 0.0;
+  const FileResult p = make_lattice_file(box_model(30, 30, 12), plain, path);
+  CHECK(p.ok && p.step_held_at == 0.0 && has(file_result_json(p), "\"step_held_at\": 0,"));
+  std::printf("block, max_step 1.5: held at %g, %zu cells (%zu with none)\n", r.step_held_at, r.cells, p.cells);
+  std::remove(path.c_str());
+}
+
 int main() {
+  test_max_step_key();
+  test_pieces_key();
+  test_region_own_key();
+  test_area_finish_file();
+  test_cells_by_stress_key();
+  test_zones_key();
+  test_by_stress_file();
   test_no_slit_under_solid();
   test_strut_reach();
   test_thin_slot();
