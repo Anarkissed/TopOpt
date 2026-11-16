@@ -887,8 +887,12 @@ class Handler(BaseHTTPRequestHandler):
         # routing can never widen what actually executes.
         # "lattice_file" (lattice rebuild, docs/design/lattice-rebuild/04-layout-file-job.md):
         # the printable lattice file from the new layout engine (`topopt-cli lattice-file`).
+        # "lattice_part" (the Lattice button: lattice the imported part, no optimization) goes
+        # through the SAME entry point as lattice_variant (core/src/cli/main.cpp: two modes, one
+        # entry). It was missing here, so it fell to `run`, which refuses it: his 11-16 job
+        # 7f99b667 "unsupported mode: lattice_part".
         _MODE_SUBCMD = {"analyze": "analyze", "lattice_variant": "lattice-variant",
-                        "lattice_file": "lattice-file"}
+                        "lattice_part": "lattice-variant", "lattice_file": "lattice-file"}
         subcmd = _MODE_SUBCMD.get(job_doc.get("mode"), "run")
         cmd = [CFG.cli, subcmd, job_path, "--out", out_dir]
         if CFG.materials:
