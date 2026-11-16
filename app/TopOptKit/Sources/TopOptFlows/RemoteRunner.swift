@@ -867,8 +867,10 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         // as model-space geometry. The worker re-evaluates the filter against ITS
         // import and reports the difference against `filter_matched_at_author`,
         // so a CAD edit that renumbers faces is surfaced instead of absorbed.
-        if !request.faceRegions.isEmpty {
-            loads["face_regions"] = request.faceRegions.map { r -> [String: Any] in
+        // ★ his 11-16: only the pieces the job uses (FaceRegionSend.onWire)
+        let wireRegions = FaceRegionSend.onWire(request)
+        if !wireRegions.isEmpty {
+            loads["face_regions"] = wireRegions.map { r -> [String: Any] in
                 var e: [String: Any] = ["id": r.id]
                 if !r.name.isEmpty { e["name"] = r.name }
                 if r.parentID >= 0 { e["parent_id"] = r.parentID }
