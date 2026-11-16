@@ -71,9 +71,18 @@ public final class AppSettings: ObservableObject {
         didSet { defaults.set(newEngineTest, forKey: Self.newEngineKey) }
     }
 
+    /// ★ His ask 11-16 ("it kills my iPad when I have the lattice view on"): the Lattice button's ⌃ picks "Live preview" or
+    /// "Click to refresh preview". DEFAULT = Click to refresh (his pick): a changed setting marks the preview out of date and
+    /// the Lattice button reads "Refresh Lattice"; nothing rebuilds and no stress check runs until he presses it.
+    static let livePreviewKey = "topopt.settings.latticeLivePreview.v1"
+    @Published public var latticeLivePreview: Bool {
+        didSet { defaults.set(latticeLivePreview, forKey: Self.livePreviewKey) }
+    }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         self.newEngineTest = defaults.bool(forKey: Self.newEngineKey)   // absent ⇒ false: OFF by default
+        self.latticeLivePreview = defaults.bool(forKey: Self.livePreviewKey)   // absent ⇒ false: Click to refresh (his pick)
         let m = defaults.double(forKey: Self.marginKey)
         self.safetyMargin = m >= SafetyMargin.minimum - 1e-9 ? m : SafetyMargin.defaultValue
         self.units = Self.storedUnits(defaults)

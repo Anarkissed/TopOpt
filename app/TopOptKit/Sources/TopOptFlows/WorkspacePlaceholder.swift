@@ -178,6 +178,13 @@ public struct WorkspacePlaceholder: View {
     /// ★ The lattice settings the strut preview was last baked FROM, with the
     /// fields a bake writes stripped (`LatticeSettings.previewBakeInputs`).
     @State private var latticeInputsLastBaked: LatticeSettings? = nil
+    /// ★ his pick 11-16 (Click to refresh, the default): a change marks the preview out of date — the Lattice button reads
+    /// Refresh Lattice — and nothing rebuilds until he presses it (`LatticePreviewMode`).
+    @State private var latticePreviewStale = false
+    /// Refresh Lattice's own pass: the holds let it through.
+    @State private var latticeRefreshRequested = false
+    /// ★ his pick 11-16 (4): Live preview's half-second wait for the old preview's rebake (a newer change restarts it).
+    @State private var liveRebakeTask: Task<Void, Never>? = nil
     /// ★★★ WHAT THE LAST ORGANIC BAKE WAS BUILT FROM (his walk, 2026-09-07: "If no
     /// changes were made in the lattice settings, then do *not* rebake the lattice").
     /// Sixteen call sites reach `buildStrutScene()`, and most of them are events, not
@@ -1323,7 +1330,8 @@ public struct WorkspacePlaceholder: View {
                     if newEngineDrawn {
                         VStack(spacing: 6) {
                             if let why = newEngine.solidReason {   // ★ his ruling 11-14: solid where lattice was asked — why, and fixes
-                                LatticeSolidReasonBar(reason: why) { fix in SolidReason.apply(fix, to: &project.lattice) }
+                                LatticeSolidReasonBar(reason: why, apply: { fix in SolidReason.apply(fix, to: &project.lattice) },
+                                                      checkNozzle: newEngine.nozzleState == .notAsked ? { newEngine.checkNozzle() } : nil)   // ★ 11-16
                             }
                             LatticeFileExportBar(export: fileExport, make: exportPrintFile, runStressCheck: runNewEngineStressCheck)   // ★ his go 11-13: Export, on the Mac
                             LatticeLayoutPreviewLines(preview: newEngine)
@@ -1334,7 +1342,7 @@ public struct WorkspacePlaceholder: View {
                 }   // ★ the new engine (test): its lines
                 .onChange(of: newEngineOn) { on in newEngine.update(project: project, on: on, solid: !surfaceXrayOn, stress: newEngineStress) }
                 .onChange(of: surfaceXrayOn) { x in if newEngineOn { newEngine.update(project: project, on: true, solid: !x, stress: newEngineStress) } }
-                .onChange(of: project.lattice, perform: { _ in if newEngineOn { newEngine.update(project: project, on: true, solid: !surfaceXrayOn, stress: newEngineStress); fileExport.settingsChanged() } })   // (the rebake's lattice trigger stays the page's first: OrganicPreviewBakeInputsTests)
+                .onChange(of: project.lattice, perform: { _ in if newEngineOn { newEngineSettingsChanged(); fileExport.settingsChanged() } })   // ★ 11-16: Live waits, Click to refresh holds   // (the rebake's lattice trigger stays the page's first: OrganicPreviewBakeInputsTests)
                 .ignoresSafeArea()
                 // ★ §6(g) — THE PENCIL HOVER, ON THE MESH VIEW ITSELF.
                 //
@@ -1666,7 +1674,7 @@ public struct WorkspacePlaceholder: View {
                     // superseding whatever is running; an unchanged one starts nothing.
                     if project.lattice.previewBakeInputs != latticeInputsLastBaked {
                         latticeInputsLastBaked = project.lattice.previewBakeInputs
-                        buildStrutScene(forceRebuild: true)
+                        buildStrutScene(forceRebuild: appSettings.latticeLivePreview)   // ★ 11-16: Click to refresh holds it
                     }
                     // ★ "SAVE" SAVES (2026-09-02: a kill before the next navigation
                     // ran the next job from stale on-disk settings). Kept SHORT: the
@@ -3258,7 +3266,7 @@ public struct WorkspacePlaceholder: View {
                     let inputs = project.lattice.previewBakeInputs
                     if inputs != latticeInputsLastBaked {
                         latticeInputsLastBaked = inputs
-                        buildStrutScene()
+                        if appSettings.latticeLivePreview { scheduleLiveRebake() } else { buildStrutScene() }   // ★ 11-16
                     }
                 }
             }
@@ -3285,7 +3293,9 @@ public struct WorkspacePlaceholder: View {
             // ★ The same inputs feed the solve's fingerprint, so a change here can
             // make the field STALE as well as the bake. Idempotent when it is not.
             if showStrutPreview, project.lattice.enabled { startStressSolveIfNeeded() }
-            if showStrutPreview, project.lattice.enabled { buildStrutScene() }
+            if showStrutPreview, project.lattice.enabled {   // ★ 11-16: Live waits half a second; Click to refresh holds
+                if appSettings.latticeLivePreview { scheduleLiveRebake() } else { buildStrutScene() }
+            }
         }
         // ★★ AND THE BAKE HAPPENS ON RELEASE. Watching the flag rather than the key
         // means the deferred change is not lost — the drag ends, this fires once, and
@@ -3330,6 +3340,9 @@ public struct WorkspacePlaceholder: View {
         // `densityMode == .sim` preview actually grades by. Without it the preview
         // keeps a scene baked before the solve existed — uniform struts, every tap
         // reading the floor, and a stress overlay that can never arm.
+        .onChange(of: appSettings.latticeLivePreview) { live in   // ★ 11-16: back to Live preview — catch up at once
+            if live, latticePreviewStale { refreshLatticePreview(checkNozzle: false) }
+        }
         .onChange(of: latticeStressFieldKey) { _ in
             refreshLatticeStressPeak()
             if showStrutPreview, project.lattice.enabled { buildStrutScene() }
@@ -3971,6 +3984,11 @@ public struct WorkspacePlaceholder: View {
         // A field we already have, for these exact inputs, is the answer.
         if latticeSim.field != nil, !latticeSim.isStale(against: ctxs) {
             NSLog("DIAG solve: field already current")
+            return
+        }
+        // ★ 11-16 Click to refresh: an out-of-date field waits for Refresh Lattice (the first one still runs)
+        if !appSettings.latticeLivePreview, !latticeRefreshRequested, latticeSim.field != nil {
+            latticePreviewStale = true
             return
         }
         simBannerDismissed = false          // a NEW solve gets a fresh banner
@@ -4700,6 +4718,42 @@ public struct WorkspacePlaceholder: View {
                      referenceMPa: model.printedYieldMPa(for: project.material) / Swift.max(1, margin))
     }
 
+    /// ★ his picks 11-16: the new engine's answer to a settings change — Live preview lays half a second after the last
+    /// change; Click to refresh marks the preview out of date (the Lattice button reads Refresh Lattice).
+    private func newEngineSettingsChanged() {
+        if appSettings.latticeLivePreview {
+            newEngine.update(project: project, on: true, solid: !surfaceXrayOn, stress: newEngineStress, delay: LatticePreviewMode.liveWait)
+        } else if !newEngine.isCurrent(project: project, stress: newEngineStress) {
+            latticePreviewStale = true
+        }
+    }
+
+    /// ★ his pick 11-16 (4): Live preview's old-preview rebake, half a second after the last change.
+    private func scheduleLiveRebake() {
+        liveRebakeTask?.cancel()
+        liveRebakeTask = Task { @MainActor in
+            try? await Task.sleep(for: LatticePreviewMode.liveWait)
+            guard !Task.isCancelled else { return }
+            buildStrutScene()
+        }
+    }
+
+    /// ★ his pick 11-16 (2): Refresh Lattice — the stress check when out of date, both previews from the settings as they are
+    /// now and (5) the 0.2 mm nozzle check; the button goes back to Lattice.
+    func refreshLatticePreview(checkNozzle: Bool = true) {
+        latticePreviewStale = false
+        latticeRefreshRequested = true
+        defer { latticeRefreshRequested = false }
+        if showStrutPreview, project.lattice.enabled {
+            startStressSolveIfNeeded()
+            buildStrutScene()
+        }
+        if newEngineOn {
+            if LatticeLayoutPreview.needsStress(project.lattice) { runNewEngineStressCheck() }   // only what these settings read
+            newEngine.update(project: project, on: true, solid: !surfaceXrayOn, stress: newEngineStress, checkNozzle: checkNozzle)
+        }
+    }
+
     /// ★ Install 2: the stress check the new engine grades by — the stage's quick solve, whatever the old preview asks (its
     /// needsStressSolve covers By stress and Swept only; the new engine also sizes Auto cells by stress).
     private func runNewEngineStressCheck() {
@@ -5091,6 +5145,15 @@ public struct WorkspacePlaceholder: View {
                                      inputs: project.lattice.previewBakeInputs)
             if !forceRebuild, strutScene != nil, organicBakeFingerprint == now {
                 NSLog("DIAG lattice bake: skipped — no input changed since the last one")
+                return
+            }
+            // ★ his pick 11-16 (Click to refresh): a change marks the preview out of date; nothing rebuilds until Refresh
+            // Lattice. A stress result landing is not a change he made (a solve starts only on Refresh, or the first time),
+            // so its picture bakes.
+            let onlyStressMoved = organicBakeFingerprint.map { $0.region == now.region && $0.inputs == now.inputs } ?? false
+            if !forceRebuild, !latticeRefreshRequested, strutScene != nil, !appSettings.latticeLivePreview, !onlyStressMoved {
+                latticePreviewStale = true
+                NSLog("DIAG lattice bake: held (Click to refresh)")
                 return
             }
             // Recorded on EVERY bake, forced or not: a forced rebuild that did not
@@ -14264,12 +14327,19 @@ extension WorkspacePlaceholder {
                                          groups: Swift.max(0, tabs - zones), zones: zones)
             : summary
         let state: DSRunButton.State = runs ? .running(line) : ok ? .ready : notSet || marks || opensType ? .grey(line) : .disabled(line)
-        return DSRunButton(runs ? LatticeSetupCopy.running : "Lattice", subtitle: line, state: state, key: "latticeButton") {
+        // ★ his pick 11-16: under Click to refresh, an out-of-date preview turns the button into Refresh Lattice
+        let refresh = LatticePreviewMode.showsRefresh(live: appSettings.latticeLivePreview, previewUp: showStrutPreview,
+                                                      stale: latticePreviewStale, running: runs)
+        return DSRunButton(refresh ? LatticePreviewMode.refreshButton : runs ? LatticeSetupCopy.running : "Lattice",
+                           subtitle: refresh ? LatticePreviewMode.refreshLine : line, state: refresh ? .ready : state, key: "latticeButton") {
+            if refresh { refreshLatticePreview(); return }
             if runs { run.restore(); return }
             if ok { requestLatticeRun() } else if notSet { showLatticeWizard = true }
             else if marks { goToWallMarking() } else if opensType { goToLatticeType() }
         }
-        .accessibilityHint(marks ? WallMarkingSubline.hint : opensType || notSet ? Self.latticeTypeTapHint : line)
+        .accessibilityHint(refresh ? LatticePreviewMode.refreshLine
+                           : marks ? WallMarkingSubline.hint : opensType || notSet ? Self.latticeTypeTapHint : line)
+        .background(refresh ? CornerPairStyle.publish("latticeRefreshButton") : nil)   // the hosted tests' frame: Refresh Lattice
     }
 
     /// ★ B6 s1 (note 21): "Lattice an optimized result ›" — this run's results, each as the Library names it ("v7a"); a tap
@@ -15259,6 +15329,14 @@ extension WorkspacePlaceholder {
                 Button(LatticeSetupCopy.export) { viewOriginal = false }
                     .disabled(!hasResults)
                     .accessibilityIdentifier("lattice-split-export")
+                // ★ his ask 11-16: how the lattice view keeps up — a check mark on the one in force
+                Divider()
+                Picker(selection: $appSettings.latticeLivePreview) {
+                    Text(LatticePreviewMode.live).tag(true)
+                    Text(LatticePreviewMode.refresh).tag(false)
+                } label: { EmptyView() }
+                .pickerStyle(.inline)
+                .accessibilityIdentifier("lattice-split-preview-mode")
             }
         }
         .background(CornerPairStyle.publish("latticeSplit"))

@@ -73,8 +73,10 @@ final class LatticeCornerHostedTests: XCTestCase {
         // (the divider before Preview only reads as an untitled item: dropped)
         let offered = try h.pickFromMenu("latticeSplitMore", "no such item", what: "⌃")
             .filter { !$0.replacingOccurrences(of: " [off]", with: "").isEmpty }
-        let five = ["Lattice the original part", "Optimize, then lattice", "Lattice an optimized result", "Preview only", "Export\u{2026}"]
-        XCTAssertEqual(offered.count, five.count, "★ note 21's five: \(offered)")
+        // ★ note 21's five, then his 11-16 pair: how the lattice view keeps up (Live preview / Click to refresh preview)
+        let five = ["Lattice the original part", "Optimize, then lattice", "Lattice an optimized result", "Preview only", "Export\u{2026}",
+                    LatticePreviewMode.live, LatticePreviewMode.refresh]
+        XCTAssertEqual(offered.count, five.count, "★ note 21's five + his 11-16 pair: \(offered)")
         for (o, t) in zip(offered, five) { XCTAssertTrue(o.hasPrefix(t), "★ in the design's order: \(t) — \(offered)") }
         func item(_ t: String) -> String? { offered.first { $0.hasPrefix(t) } }
         XCTAssertFalse(item("Lattice the original part")?.hasSuffix("[off]") ?? true, "★ a lattice set: it runs (\(offered))")

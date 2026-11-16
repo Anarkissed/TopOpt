@@ -77,12 +77,18 @@ final class NewEngineStackPlacementHostedTests: XCTestCase {
             let export = try h.probe("new-engine-export", "★ \(name): Export, a 44 x 44 target")
             XCTAssertTrue(stack.insetBy(dx: -0.5, dy: -0.5).contains(export), "\(name): Export is in the stack")
             if name == "13L" {   // RED CONTROL: the old place
+                // the control is a static, not a state: a 1 pt nudge of the window makes the page place the stack again (it
+                // used to ride on the nozzle check's redraw after every layout, which runs only when asked since 11-16)
+                func replace() {
+                    h.view.setFrameSize(NSSize(width: size.width, height: size.height - 1)); h.pump(0.5)
+                    h.view.setFrameSize(NSSize(width: size.width, height: size.height)); h.pump(1)
+                }
                 NotificationLane.controlOldPlace = true
-                h.pump(1)
+                replace()
                 let old = try h.onScreen("lane-new-engine", "\(name): the stack, old place")
                 XCTAssertLessThan(old.maxY, size.height - 50, "RED CONTROL: the old place sits 96 pt off the bottom")
                 NotificationLane.controlOldPlace = false
-                h.pump(1)
+                replace()
             }
             settings.newEngineTest = false
             h.pump(1)
