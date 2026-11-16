@@ -3466,6 +3466,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// The clip-from-model and aspect the G-buffer above was drawn with (★ his pick 11-16 (B)).
     private var lastGBufferMVP = simd_float4x4()
     private var lastGBufferAspect: Float = 0
+    /// The long side of the G-buffer last encoded (★ his pick 11-16 (C)).
+    private(set) var lastGBufferLongSide = 0
     private var frameDrawCalls = 0
     private var frameVertices = 0
 
@@ -3525,6 +3527,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             mainSize = (ctex.width, ctex.height)
             gbufferScale = SIMD2<Float>(Float(g.w) / Float(Swift.max(ctex.width, 1)),
                                         Float(g.h) / Float(Swift.max(ctex.height, 1)))
+            lastGBufferLongSide = Swift.max(g.w, g.h)   // ★ his pick 11-16 (C): tests read it
             gbuffer = encodeDepthPrepass(width: g.w, height: g.h,
                                          uniforms: uniforms, aspect: aspect, into: cmd)
             sceneDepthTex = gbuffer?.depth
@@ -6418,7 +6421,7 @@ extension MetalMeshView {
         var renderer: MeshRenderer?
         /// The shared camera source of truth (STEP 1), when the host provides one. The
         /// renderer's own `camera` becomes a mirror kept in sync from this via `sink`.
-        private var cameraModel: OrbitCameraModel?
+        private(set) var cameraModel: OrbitCameraModel?
         private var cameraCancellable: AnyCancellable?
         private weak var boundView: MTKView?
         private var appliedSignature: ViewerMeshSignature?
