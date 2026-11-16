@@ -194,7 +194,8 @@ public enum EditedFaces {
                             fallback: RegionID? = nil) -> EditedFace.ID {
         let covering = regions.regions.contains { FaceRegionGeometry.members(of: $0, in: mesh).contains(face) }
         guard covering else { return .face(face) }
-        let hit = point.flatMap { SurfaceTint.regionAt(point: $0, face: face, mesh: mesh, regions: regions) } ?? fallback
+        // ★ his 11-16: with a point, the point decides (no piece there = the bare face); `fallback` only when it is unknown
+        let hit = point.map { SurfaceTint.regionAt(point: $0, face: face, mesh: mesh, regions: regions) } ?? fallback
         guard let piece = hit else { return .face(face) }
         return .region(regions.outermostUnion(containing: piece))
     }

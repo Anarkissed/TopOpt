@@ -17,7 +17,10 @@ public enum SurfaceRegionTool {
     /// Children a split made — a union's parts hang off it too, and they are not a split of it.
     public static func splitChildren(_ id: RegionID, regions: FaceRegionModel) -> [RegionID] {
         let parts = Set(regions.region(id)?.parts ?? [])
-        return regions.children(of: id).map(\.id).filter { !parts.contains($0) }
+        // ★ his 11-16: a piece of this split a union has taken is still one of its pieces (Undo split takes it back too)
+        return regions.regions.filter { r in
+            !parts.contains(r.id) && (r.parentID == id || (r.parentID != id && regions.origin(of: r.id) == id))
+        }.map(\.id)
     }
 
     /// Whether Undo split is offered: the aim was divided (cut, pattern, detached pieces).

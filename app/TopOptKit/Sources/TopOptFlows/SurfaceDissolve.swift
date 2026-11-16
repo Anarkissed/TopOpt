@@ -57,7 +57,7 @@ public enum SurfaceDissolve {
         let faces = r.isUnionOfParts ? [] : FaceRegionGeometry.members(of: r, in: mesh)
         let restored = r.partParents == nil ? [] : r.parts
         let before = Set(regions.regions.map(\.id))
-        _ = regions.dissolve(id, resolvedMembers: faces)
+        _ = regions.dissolve(id, resolvedMembers: faces, includingLent: true)   // ★ his 11-16: a piece a union took goes too
         let dropped = before.subtracting(regions.regions.map(\.id)).sorted()
         // faces first, so the group they return to is never swept as empty in between
         if let g = source, !faces.isEmpty { selection.addFaces(faces, to: g) }

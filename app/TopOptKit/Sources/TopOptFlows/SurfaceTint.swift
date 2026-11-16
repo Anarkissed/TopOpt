@@ -376,6 +376,12 @@ public enum SurfaceTint {
         for r in holding where r.isCut {
             if FaceRegionGeometry.inside(point, r.cuts) { return r.id }
         }
-        return holding.first(where: { !$0.isCut })?.id ?? holding.first?.id
+        // ★ his 11-16 (the "T"): never a cut piece the point is NOT in — a tap where no piece lies is on the bare face (nil).
+        // It returned the first holder, so a tap on a cut face's uncovered half picked the half across the cut, and so the
+        // union that half was in. RED CONTROL: the old fallback.
+        if controlCutPieceFallback { return holding.first(where: { !$0.isCut })?.id ?? holding.first?.id }
+        return holding.first(where: { !$0.isCut })?.id
     }
+    /// RED CONTROL (tests only): a tap outside every cut piece falls back to one of them, as before 11-16.
+    nonisolated(unsafe) public static var controlCutPieceFallback = false
 }

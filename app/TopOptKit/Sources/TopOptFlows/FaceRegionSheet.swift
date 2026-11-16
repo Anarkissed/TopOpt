@@ -304,7 +304,7 @@ public struct FaceRegionSheet: View {
                 HStack(spacing: DS.Space.l) {
                     if !model.children(of: region.id).isEmpty {
                         Button {
-                            model.revertSplit(region.id)
+                            model.revertSplit(region.id, includingLent: true)
                             refresh()
                             onChange()
                         } label: {
