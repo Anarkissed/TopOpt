@@ -1328,8 +1328,9 @@ public struct WorkspacePlaceholder: View {
                             LatticeFileExportBar(export: fileExport, make: exportPrintFile, runStressCheck: runNewEngineStressCheck)   // ★ his go 11-13: Export, on the Mac
                             LatticeLayoutPreviewLines(preview: newEngine)
                         }
+                        .laneFoot("new-engine")   // ★ his pick 11-15: very bottom in landscape, just above Settings in portrait
                     }
-                    else if newEngineAsked { LatticeLayoutPreviewOneLine(text: LatticeLayoutPreview.organicLine) }   // ★ Organic: said
+                    else if newEngineAsked { LatticeLayoutPreviewOneLine(text: LatticeLayoutPreview.organicLine).laneFoot("new-engine") }   // ★ Organic: said
                 }   // ★ the new engine (test): its lines
                 .onChange(of: newEngineOn) { on in newEngine.update(project: project, on: on, solid: !surfaceXrayOn, stress: newEngineStress) }
                 .onChange(of: surfaceXrayOn) { x in if newEngineOn { newEngine.update(project: project, on: true, solid: !x, stress: newEngineStress) } }

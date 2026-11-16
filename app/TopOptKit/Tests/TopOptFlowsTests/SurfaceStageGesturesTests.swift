@@ -336,8 +336,9 @@ final class SurfacePencilToggleExemptionTests: XCTestCase {
         // A runaway-slice guard, generously above the panel's real size (126 lines,
         // ~6.7 k chars — it is five tool buttons and three switches with their
         // styling). The next property is 27 k further on, so this only ever fires if
-        // the end marker stops matching.
-        XCTAssertLessThan(tray.count, 12_000,
+        // the end marker stops matching. (362, 11-16: his 11-14 asks grew the real panel to
+        // 215 lines, 12.6 k chars, still ending at `surfaceActionCluster`: the guard moved up.)
+        XCTAssertLessThan(tray.count, 16_000,
                           "★ the slice must be the PANEL, not half the file")
 
         XCTAssertTrue(tray.contains("surfacePencilOnly.toggle()"),

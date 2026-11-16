@@ -39,6 +39,57 @@ private func latticeSetup(_ size: CGSize, _ name: String, _ test: XCTestCase, th
     return (h, p)
 }
 
+// MARK: his pick 11-15 — the new engine's stack
+
+/// ★ "Put them at the very [bottom] in landscape and on top of the settings button in portrait": landscape, the stack's foot
+/// is the screen's bottom edge; portrait, it sits just above the corner's Settings; at every window it covers neither the hint
+/// nor Settings nor Lattice, and Export stays a 44 x 44 target in it. RED CONTROL: the old place, 96 pt off the bottom.
+final class NewEngineStackPlacementHostedTests: XCTestCase {
+    @MainActor
+    func testVeryBottomInLandscapeAboveSettingsInPortrait() throws {
+        let settings = AppSettings.shared
+        let was = settings.newEngineTest
+        addTeardownBlock { @MainActor in AppSettings.shared.newEngineTest = was; NotificationLane.controlOldPlace = false }
+        for (name, size) in zip(sweepNames, AppBuildHost.sweep) {
+            settings.newEngineTest = false
+            let (h, _) = try latticeSetup(size, name, self, thinWalls: false)
+            settings.newEngineTest = true
+            let end = Date().addingTimeInterval(120)
+            while h.frames.all["new-engine-timing"] == nil, Date() < end { h.pump(0.5) }
+            h.pump(1)
+            let stack = try h.onScreen("lane-new-engine", "★ \(name): the new engine's stack")
+            let lines = try h.onScreen("new-engine-lines", "\(name): its lines")
+            let hint = try h.onScreen("stageHint", "\(name): premise: the hint")
+            let set = try h.onScreen("setupChip", "\(name): premise: Settings")
+            let lat = try h.onScreen("latticeSplit", "\(name): premise: Lattice")
+            print("STACK \(name) \(Int(size.width))x\(Int(size.height)): stack \(stack), Settings \(set), Lattice \(lat), hint \(hint)")
+            XCTAssertTrue(stack.insetBy(dx: -0.5, dy: -0.5).contains(lines), "\(name): the lines are in the stack")
+            if size.width > size.height {
+                XCTAssertEqual(stack.maxY, size.height, accuracy: 1, "★ \(name): landscape, at the very bottom of the screen")
+            } else {
+                let corner = Swift.min(set.minY, lat.minY)
+                XCTAssertLessThanOrEqual(stack.maxY, set.minY + 0.5, "★ \(name): portrait, above Settings")
+                XCTAssertGreaterThanOrEqual(stack.maxY, corner - NotificationLane.stepGap - 1, "★ \(name): portrait, just above the corner")
+            }
+            for (f, what) in [(hint, "the hint"), (set, "Settings"), (lat, "Lattice")] {
+                XCTAssertFalse(stack.intersects(f), "★ \(name): the stack \(stack) is clear of \(what) \(f)")
+            }
+            let export = try h.probe("new-engine-export", "★ \(name): Export, a 44 x 44 target")
+            XCTAssertTrue(stack.insetBy(dx: -0.5, dy: -0.5).contains(export), "\(name): Export is in the stack")
+            if name == "13L" {   // RED CONTROL: the old place
+                NotificationLane.controlOldPlace = true
+                h.pump(1)
+                let old = try h.onScreen("lane-new-engine", "\(name): the stack, old place")
+                XCTAssertLessThan(old.maxY, size.height - 50, "RED CONTROL: the old place sits 96 pt off the bottom")
+                NotificationLane.controlOldPlace = false
+                h.pump(1)
+            }
+            settings.newEngineTest = false
+            h.pump(1)
+        }
+    }
+}
+
 // MARK: (a)
 
 final class AppAsksThinWallPopUpHostedTests: XCTestCase {

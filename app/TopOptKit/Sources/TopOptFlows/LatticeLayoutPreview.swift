@@ -542,7 +542,6 @@ struct LatticeLayoutPreviewOneLine: View {
             .padding(.horizontal, DS.Space.m).padding(.vertical, DS.Space.xs)
             .background(Capsule().fill(DS.Surface.bar.color))
             .background(CornerPairStyle.publish("new-engine-lines"))
-            .padding(.bottom, 96)
             .allowsHitTesting(false)
     }
 }
@@ -577,7 +576,6 @@ struct LatticeLayoutPreviewLines: View {
         .padding(.horizontal, DS.Space.m).padding(.vertical, DS.Space.xs)
         .background(Capsule().fill(DS.Surface.bar.color))
         .background(CornerPairStyle.publish("new-engine-lines"))   // the hosted tests' frame (LatticeLayoutSwitchHostedTests)
-        .padding(.bottom, 96)   // above the bottom bar and the stage row's own lines
         .allowsHitTesting(false)
         .accessibilityIdentifier("new-engine-lines")
     }
