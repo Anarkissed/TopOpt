@@ -1252,7 +1252,7 @@ public final class RunModel: ObservableObject {
                 // 2026-08-14-face-regions). The LAN job.json and this call now
                 // carry the same regions; JobJSONEquivalenceTests asserts they
                 // agree, the way it already does for the wall widths.
-                faceRegions: request.faceRegions.map(TopOptKit.FaceRegionSpec.init(region:)),
+                faceRegions: FaceRegionSend.onWire(request).map(TopOptKit.FaceRegionSpec.init(region:)),   // ★ his 11-16: only the pieces it uses
                 anchorRegionIDs: request.anchorRegionIDs,
                 faceProtectionRegionIDs: request.faceProtectionRegionIDs,
                 faceProtectionRegionDepthsMM: request.faceProtectionRegionDepthsMM,

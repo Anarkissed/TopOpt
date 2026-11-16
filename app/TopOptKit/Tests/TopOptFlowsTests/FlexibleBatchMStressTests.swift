@@ -79,7 +79,19 @@ final class FlexibleBatchMStressTests: XCTestCase {
     func testWhyHisSolidStressFailedAndTheGroupsSimDoesNot() throws {
         let r = try FlexibleHisProject.restore(FlexibleHisProject.round5Dir)
         defer { r.cleanup() }
+        // ★ his 11-16: the app now sends only the pieces the solve uses, never an empty union — his solve runs
+        let now = FlexibleStressContext.reached(try XCTUnwrap(r.app.makeLatticeSimContext()))
+        XCTAssertFalse(now.faceRegions.contains { $0.id == 105 }, "★ the empty union is not sent")
+        XCTAssertNoThrow(try TopOptKit.analyzeSolidLoadCase(modelPath: now.modelPath, material: now.material,
+                                                            materialsPath: now.materialsPath, rulesPath: now.rulesPath,
+                                                            resolution: now.resolution, anchorFaceIDs: now.anchorFaceIDs,
+                                                            loadGroups: now.loadGroups, buildDirection: now.buildDirection,
+                                                            faceRegions: now.faceRegions, anchorRegionIDs: now.anchorRegionIDs),
+                         "★ his solid stress solves")
+        // RED CONTROL: every region sent, as before 11-16 — the union reaches core empty
+        FaceRegionSend.controlSendEveryPiece = true
         let ctx = FlexibleStressContext.reached(try XCTUnwrap(r.app.makeLatticeSimContext()))
+        FaceRegionSend.controlSendEveryPiece = false
         var why = ""
         XCTAssertThrowsError(try TopOptKit.analyzeSolidLoadCase(modelPath: ctx.modelPath, material: ctx.material,
                                                                materialsPath: ctx.materialsPath, rulesPath: ctx.rulesPath,
