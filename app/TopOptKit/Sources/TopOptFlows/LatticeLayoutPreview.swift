@@ -31,6 +31,12 @@ public final class LatticeLayoutPreview: ObservableObject {
     @Published public private(set) var nozzleLine: String?
     /// ★ his ruling 11-14: where asked-for lattice came out solid, why (one line) and one to three fixes he can take.
     @Published public private(set) var solidReason: SolidReason?
+    /// ★ his pick 11-16 (5): the 0.2 mm nozzle check is a second full layout, so it runs only when asked — on Refresh, or his
+    /// tap on "Check a 0.2 mm nozzle". `.notAsked` for the layout on screen, `.checking`, or `.done` (its line, or none).
+    public enum NozzleState: Equatable { case notAsked, checking, done }
+    @Published public private(set) var nozzleState: NozzleState = .notAsked
+    /// How many nozzle checks ran (a test's count: none may run after a layout nobody asked to check).
+    public static private(set) var nozzleChecksRun = 0
 
     public struct Timing: Equatable, Sendable {
         public var openMS: Double
@@ -107,8 +113,18 @@ public final class LatticeLayoutPreview: ObservableObject {
 
     public init() {}
 
+    /// ★ his pick 11-16 (2): whether the layout on screen is the one these inputs ask for (Click to refresh marks the preview
+    /// out of date when not). True with nothing laid yet only when there is nothing to lay.
+    public func isCurrent(project p: ProjectModel, stress: Stress = Stress()) -> Bool {
+        guard let path = p.importedFile?.path else { return bars == nil }
+        return path == sessionPath && Self.settings(p, referenceMPa: stress.referenceMPa) == lastSettings && stress.key == self.stress.key
+    }
+
     /// The page's one call, on every change of the part or its lattice settings (cheap when nothing changed).
-    public func update(project p: ProjectModel, on: Bool, solid: Bool = false, stress: Stress = Stress()) {
+    /// ★ his picks 11-16: `delay` — Live preview lays half a second after the last change (a newer change cancels the wait);
+    /// `checkNozzle` — Refresh also runs the 0.2 mm nozzle check after the layout.
+    public func update(project p: ProjectModel, on: Bool, solid: Bool = false, stress: Stress = Stress(),
+                       delay: Duration = .zero, checkNozzle: Bool = false) {
         guard on else { clear(); return }
         guard let path = p.importedFile?.path else { problem = Self.noPartLine; bars = nil; return }
         if path != sessionPath || box == nil { box = Self.box(p.importedMesh?.vertices ?? []) }
@@ -120,25 +136,48 @@ public final class LatticeLayoutPreview: ObservableObject {
         self.stress = stress
         if path == sessionPath, s == lastSettings, !stressMoved, task != nil || bars != nil {
             if solidChanged, task == nil || bars != nil { solidToggled() }
+            if checkNozzle, nozzleState == .notAsked, bars != nil { self.checkNozzle() }   // Refresh with nothing changed
             return
         }
         lastSettings = s
         latticeAtLay = p.lattice
         task?.cancel()
         laying = true
-        task = Task { [weak self] in await self?.lay(path: path, s) }
+        nozzleWanted = checkNozzle
+        task = Task { [weak self] in
+            if delay > .zero {   // ★ Live preview: wait for him to stop changing it
+                try? await Task.sleep(for: delay)
+                if Task.isCancelled { return }
+            }
+            await self?.lay(path: path, s)
+        }
     }
+
+    /// ★ his pick 11-16 (5): the 0.2 mm nozzle check for the layout on screen, on his tap (or Refresh).
+    public func checkNozzle() {
+        guard let path = sessionPath, let s = lastSettings, bars != nil, !laying else { nozzleWanted = true; return }   // after the lay
+        nozzleTask?.cancel()
+        let lattice = latticeAtLay
+        nozzleTask = Task { [weak self] in await self?.nozzleCheck(path: path, s, lattice: lattice) }
+    }
+    private var nozzleWanted = false
+    private var nozzleTask: Task<Void, Never>?
 
     /// Off: the session closed, nothing drawn.
     public func clear() {
         task?.cancel(); task = nil
         mapTask?.cancel(); mapTask = nil
+        nozzleTask?.cancel(); nozzleTask = nil; nozzleWanted = false; nozzleState = .notAsked
         nozzleSession?.close(); nozzleSession = nil; nozzlePath = nil; nozzleLine = nil; solidReason = nil
         session?.close(); session = nil; sessionPath = nil; lastSettings = nil; sessionStressKey = nil; nozzleStressKey = nil
         bars = nil; problem = nil; timing = nil; laying = false
     }
 
+    /// Layouts started, app-wide (a hosted test's count: Click to refresh lays none on a change; Live one per pause).
+    public static private(set) var laysStarted = 0
+
     private func lay(path: String, _ s: LatticeLayoutSession.Settings) async {
+        Self.laysStarted += 1
         do {
             if session == nil || sessionPath != path {
                 session?.close()
@@ -157,7 +196,13 @@ public final class LatticeLayoutPreview: ObservableObject {
             problem = r.barCount == 0 ? "New engine: no lattice fits these settings" : nil
             laying = false
             if solidWanted { await addMap() }
-            await nozzleCheck(path: path, s, lattice: latticeAtLay)   // after the layout and its map: never while a setting moves
+            nozzleTask?.cancel(); nozzleLine = nil; nozzleState = .notAsked
+            await solidReasonCheck(lattice: latticeAtLay)   // ★ his ruling 11-14: why it is solid (one coarse map, cheap)
+            // ★ his pick 11-16 (5): the nozzle check is a second full layout — only when asked (Refresh, or his tap)
+            if LatticePreviewMode.nozzleAfterLay(asked: nozzleWanted), !Task.isCancelled {
+                nozzleWanted = false
+                await nozzleCheck(path: path, s, lattice: latticeAtLay)
+            }
         } catch is CancellationError {
             // a newer setting is laying
         } catch {
@@ -213,15 +258,24 @@ public final class LatticeLayoutPreview: ObservableObject {
         return Swift.max(0, (now - then) / now)
     }
 
-    private func nozzleCheck(path: String, _ s: LatticeLayoutSession.Settings, lattice: LatticeSettings) async {
-        nozzleLine = nil
+    /// ★ his ruling 11-14: why asked-for lattice is solid, and the fixes (after every layout: one coarse map).
+    private func solidReasonCheck(lattice: LatticeSettings) async {
         guard let session, let box, !Task.isCancelled else { return }
-        // ★ his ruling 11-14: why, and the fixes (before the second layout, so the line comes first)
         if let rep = try? await Self.unheldReport(session, box), !Task.isCancelled {
             solidReason = SolidReason.of(share: rep.share, nocell: rep.nocell, lattice: lattice)
         } else {
             solidReason = nil
         }
+    }
+
+    /// His 0.2 mm nozzle line: the same settings laid again with only the line width changed (a second full layout) —
+    /// ★ 11-16: only when asked.
+    private func nozzleCheck(path: String, _ s: LatticeLayoutSession.Settings, lattice: LatticeSettings) async {
+        nozzleLine = nil
+        guard let session, let box, !Task.isCancelled else { return }
+        nozzleState = .checking
+        Self.nozzleChecksRun += 1
+        defer { if !Task.isCancelled { nozzleState = .done } }
         do {
             if nozzleSession == nil || nozzlePath != path {
                 nozzleSession?.close()

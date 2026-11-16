@@ -70,14 +70,28 @@ public struct SolidReason: Equatable, Sendable {
 struct LatticeSolidReasonBar: View {
     let reason: SolidReason
     let apply: (SolidReason.Fix) -> Void
+    /// ★ his pick 11-16 (5): "Check a 0.2 mm nozzle" — the nozzle check runs only on his tap (or Refresh); nil hides it.
+    var checkNozzle: (() -> Void)? = nil
 
     var body: some View {
         VStack(spacing: 4) {
             Text(reason.line).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.warning.color)
                 .lineLimit(2).multilineTextAlignment(.center)
                 .background(CornerPairStyle.publish("new-engine-reason"))
-            if !reason.fixes.isEmpty {
+            if !reason.fixes.isEmpty || checkNozzle != nil {
                 HStack(spacing: DS.Space.s) {
+                    if let checkNozzle {
+                        Button(action: checkNozzle) {
+                            Text(LatticePreviewMode.nozzleCheck).font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(DS.Color.textPrimary.color)
+                                .padding(.horizontal, DS.Space.m).frame(height: 32)
+                                .background(Capsule().fill(DS.Surface.bar.color))
+                        }
+                        .buttonStyle(.plain)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
+                        .background(CornerPairStyle.publish("new-engine-nozzle-check"))
+                    }
                     ForEach(reason.fixes, id: \.self) { f in
                         Button { apply(f) } label: {
                             Text(f.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)

@@ -1824,6 +1824,30 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// ★ his 11-09: some vertex carries the thin-wall glow (tint flags.w > 0) — the view draws continuously so it can
     /// breathe, and returns to on-demand drawing when the glow is gone.
     var glowBreathe = false
+    /// ★ his ask 11-16 (the lattice view made his iPad lag): the glow breathes two breaths, then HOLDS at its brightest
+    /// (`glowHeld`) and the view goes back to drawing only on a change. `glowBreathEnds` is when (media clock).
+    var glowHeld = false
+    var glowBreathEnds: Double = 0
+    /// Some vertex glows (breathing or held).
+    var glowPresent: Bool { glowBreathe || glowHeld }
+    /// The glow came on: two breaths from now (`LatticePreviewMode.glowBreathEnd`), then held.
+    func startGlow(now: Double = CACurrentMediaTime()) {
+        glowBreathe = true
+        glowHeld = false
+        glowBreathEnds = LatticePreviewMode.glowBreathEnd(now: now)
+    }
+    /// The glow is gone.
+    func stopGlow() {
+        glowBreathe = false
+        glowHeld = false
+    }
+    /// The breaths are over by `now`: held from here (the caller's frame draws the held glow, then the view pauses).
+    func settleGlow(now: Double = CACurrentMediaTime()) {
+        if glowBreathe, now >= glowBreathEnds {
+            glowBreathe = false
+            glowHeld = true
+        }
+    }
     /// The breathe at time `t` (s): 0.7 … 1.0, one slow cycle every 2.6 s.
     static func glowBreathe(at t: Double) -> Float {
         Float(0.7 + 0.3 * (0.5 + 0.5 * sin(2 * Double.pi * t / 2.6)))
@@ -3399,6 +3423,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
 
     func draw(in view: MTKView) {
         let wasAnimating = isSettling || isPulsing || glowBreathe
+        settleGlow()   // ★ 11-16: two breaths, then held (this frame draws it held; the check below pauses the view)
         let flexLooping = stepFlexibleLoop(in: view)   // Flexible (PR #362): the main page's squish loop sets THIS frame's flexScale (MeshRenderer+FlexibleLattice.swift); false ⇒ #354's frame
         if isSettling { stepSettle() }
         if isPulsing { stepPulse() }   // advance the detent flash (item 2), re-uploading its tint
@@ -3912,6 +3937,9 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     private var latticeInFrame: Bool {
         !latticeHidden && latticeLayer?.isReady == true
     }
+    /// ★ his pick 11-16 (6): a lattice is drawn (the old preview's march, the Flexible pass or the new engine's bars) — the
+    /// view then draws at half resolution while he turns it (`LatticePreviewMode.drawScale`).
+    var latticeDrawnForScale: Bool { latticeInFrame || flexibleLatticeInFrame || layoutBarsInFrame }
 
 
     /// THE ONE ENTRY POINT for putting the lattice in this renderer's passes. The
@@ -4639,6 +4667,9 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // ★ his 11-09: the glow's slow breathe — 0.7 … 1.0 over 2.6 s, while any vertex glows
         if glowBreathe {
             sp.tint.z = Self.glowBreathe(at: CACurrentMediaTime())
+            sp.tint.w = 1
+        } else if glowHeld {   // ★ 11-16: after its two breaths the glow holds at its brightest, drawn only on a change
+            sp.tint.z = 1
             sp.tint.w = 1
         }
         return sp
@@ -6607,8 +6638,8 @@ extension MetalMeshView {
                     renderer.setVertexTints(inputs.vertexTints ?? [])
                     // ★ his 11-09: a glowing vertex (flags.w) keeps the view drawing so the glow breathes
                     let glows = LatticeThinWallGlow.anyGlow(inputs.vertexTints ?? [])
-                    if glows != renderer.glowBreathe {
-                        renderer.glowBreathe = glows
+                    if glows != renderer.glowPresent {
+                        if glows { renderer.startGlow() } else { renderer.stopGlow() }   // ★ 11-16: two breaths, then held
                         if glows {
                             view.isPaused = false
                             view.enableSetNeedsDisplay = false
@@ -7193,15 +7224,20 @@ extension MetalMeshView {
                 // An ARMED brush that will not take this contact says so ONCE, as
                 // the drag starts (bar D1b) — the drag still orbits.
                 if g.state == .began, gesture.refuses(.finger) { onBrushRefused?(.finger) }
+                noteTurning(g, in: view)   // ★ 11-16: half resolution while turning a lattice
                 driveCamera(g, in: view, pan: false)
             case .pan:
                 if g.state == .began, gesture.refuses(.finger) { onBrushRefused?(.finger) }
+                noteTurning(g, in: view)
                 driveCamera(g, in: view, pan: true)
             }
+            if g.state != .began, g.state != .changed { noteTurning(g, in: view) }   // whatever the route, an end restores
         }
 
         @objc func handlePinch(_ g: UIPinchGestureRecognizer) {
-            guard let view = g.view as? MTKView, g.scale > 0 else { return }
+            guard let view = g.view as? MTKView else { return }
+            noteTurning(g, in: view)   // ★ 11-16 (before the scale guard: an end always restores)
+            guard g.scale > 0 else { return }
             if let model = cameraModel {
                 model.zoom(Float(1 / g.scale))
             } else {
@@ -7209,6 +7245,20 @@ extension MetalMeshView {
                 redraw(view); publishProjection(from: view)
             }
             g.scale = 1
+        }
+
+        /// ★ his pick 11-16 (6) — "impossibly slow and laggy" with the lattice view on: while a camera gesture is down and a
+        /// lattice is drawn, the view draws at half the screen's resolution; the last gesture to end puts it back.
+        private var turning = Set<ObjectIdentifier>()
+        private func noteTurning(_ g: UIGestureRecognizer, in view: MTKView) {
+            if g.state == .began || g.state == .changed { turning.insert(ObjectIdentifier(g)) } else { turning.remove(ObjectIdentifier(g)) }
+            let native = view.traitCollection.displayScale > 0 ? view.traitCollection.displayScale : 2
+            let want = LatticePreviewMode.drawScale(native: native, turning: !turning.isEmpty,
+                                                    latticeShown: renderer?.latticeDrawnForScale ?? false)
+            if abs(view.contentScaleFactor - want) > 0.01 {
+                view.contentScaleFactor = want
+                redraw(view)
+            }
         }
 
         @objc func handleTap(_ g: UITapGestureRecognizer) {

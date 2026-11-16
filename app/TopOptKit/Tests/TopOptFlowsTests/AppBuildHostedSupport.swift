@@ -36,6 +36,9 @@ final class AppBuildHost {
     static let sweep: [CGSize] = [landscape13, portrait13, landscape11, portrait11, moreSpace, moreSpacePortrait]
 
     init<V: View>(_ v: V, size: CGSize, test: XCTestCase) {
+        // ★ 11-16: the page's hosted tests were written for a preview that keeps up by itself (Live preview). His default,
+        // Click to refresh, is LatticePreviewModeHostedTests' own: they switch to it after the host is made.
+        AppSettings.shared.latticeLivePreview = true
         let frames = Frames()
         let root = AnyView(v.onPreferenceChange(ChromeKeepOutKey.self) { frames.all = $0 }.environment(\.colorScheme, .dark))
         let hv = NSHostingView(rootView: root)
