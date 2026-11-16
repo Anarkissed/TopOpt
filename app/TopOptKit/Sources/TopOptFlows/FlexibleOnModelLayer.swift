@@ -63,7 +63,13 @@ public struct FlexibleOnModelLayer: View {
         self.cardsChanged = cardsChanged
     }
 
+    /// ★ his pick 11-16 (A): hidden while he turns the view with a lattice drawn
+    @Environment(\.latticeTurning) private var latticeTurning
     public var body: some View {
+        if !latticeTurning { shownBody }
+    }
+
+    @ViewBuilder private var shownBody: some View {
         GeometryReader { g in
             let origin = g.frame(in: .global).origin
             let v = g.size
