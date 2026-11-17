@@ -15537,6 +15537,58 @@ ll::StrengthDone run_lattice_file_strength(const ll::StrengthAsk& ask,
   s += "    \"accepted\": " + std::string(a.accepted ? "true" : "false") + ",\n";
   s += "    \"struts_pass\": " + std::string(struts_pass ? "true" : "false") + ",\n";
   s += "    \"verdict\": \"" + std::string(verdict) + "\",\n";
+  // V5: why a fail failed, so a fine solid margin beside "fail" is never left unexplained.
+  //   load_on_open_lattice  the load has no path AND some of it lands on lattice given no credit (empty in the check)
+  //   no_load_path          the load has no path, for any other reason
+  //   solid_margin          the path is there and the solid's margin is under the safety margin
+  // (A fail for none of these, e.g. anchors that only slide, carries no fail_reason.)
+  if (!a.accepted) {
+    const bool path_ok = oc.open_finish ? oc.open_load_path_ok : cx.load_path_ok;
+    // The load of the solve that governs: the job's one load case, or the governing scenario's.
+    const std::vector<NodalLoad>* lv = &cx.loads;
+    for (const ScenarioReport& r : oc.scenarios)
+      if (r.governs)
+        for (const SimpScenario& sc : cx.scenarios)
+          if (sc.name == r.name) lv = &sc.loads;
+    // Per loaded node, its force; it lands on open lattice when a voxel round it has no credit and none round it is
+    // printed in the check (solid, or credited lattice).
+    std::map<int, Vec3> force;
+    for (const NodalLoad& l : *lv) {
+      Vec3& f = force[l.node];
+      (l.component == 0 ? f.x : l.component == 1 ? f.y : f.z) += l.value;
+    }
+    double total = 0.0, on_open = 0.0;
+    if (!force.empty()) {
+      for (int c = 0; c <= cert_grid.nz; ++c)
+        for (int b = 0; b <= cert_grid.ny; ++b)
+          for (int a2 = 0; a2 <= cert_grid.nx; ++a2) {
+            const auto it = force.find(fea_node_index(cert_grid, a2, b, c));
+            if (it == force.end()) continue;
+            const Vec3& f = it->second;
+            const double mag = std::sqrt(f.x * f.x + f.y * f.y + f.z * f.z);
+            total += mag;
+            bool open = false, printed = false;
+            for (int dk = -1; dk <= 0; ++dk)
+              for (int dj = -1; dj <= 0; ++dj)
+                for (int di = -1; di <= 0; ++di) {
+                  const int i = a2 + di, j = b + dj, k = c + dk;
+                  if (i < 0 || j < 0 || k < 0 || i >= cert_grid.nx || j >= cert_grid.ny || k >= cert_grid.nz) continue;
+                  const std::size_t e = cert_grid.index(i, j, k);
+                  if (no_credit[e]) open = true;
+                  else if (density[e] > 0.5) printed = true;
+                }
+            if (open && !printed) on_open += mag;
+          }
+    }
+    const char* reason = !path_ok ? (on_open > 0.0 ? "load_on_open_lattice" : "no_load_path")
+                         : a.margin_effective < options.margin_stop ? "solid_margin"
+                                                                    : nullptr;
+    if (reason) {
+      s += "    \"fail_reason\": \"" + std::string(reason) + "\",\n";
+      if (std::string(reason) == "load_on_open_lattice")
+        s += "    \"load_on_no_credit_n\": " + json_num(on_open) + ",\n    \"load_total_n\": " + json_num(total) + ",\n";
+    }
+  }
   s += "    \"margin_worst_case\": " + json_num(a.margin.worst_case) + ",\n";
   s += "    \"margin_in_plane\": " + json_num(a.margin.in_plane) + ",\n";
   s += "    \"margin_interlayer\": " + json_num(a.margin.interlayer) + ",\n";

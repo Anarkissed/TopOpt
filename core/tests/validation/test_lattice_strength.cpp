@@ -7,6 +7,7 @@
 // §3 no strength_job: no block, no fields.bin, and the same file (byte for byte) as with the check.
 // §4 a cut cell and a cell that lost a bar the file left out get no credit (lattice_credit).
 // §5 a type with no strut law (Bccz): its strut margins are null, it is uncertified, and it cannot fully pass.
+// Each fail says why (V5): solid_margin (§2 heavy), load_on_open_lattice (§2, a load on cut cells), no_load_path (§5b).
 // §6 a strength job that cannot be read, is not lattice_part, or is of another part: refused, no file.
 #include <algorithm>
 #include <cmath>
@@ -197,7 +198,20 @@ int main() {
   CHECK(num_after(hb, "margin_worst_case") < 1.5);
   CHECK(has(hb, "\"diagnosis\": {"));
   CHECK(has(hb, "\"verdict\": \"fail\""));
+  CHECK(has(hb, "\"fail_reason\": \"solid_margin\"") && !has(hb, "load_on_no_credit_n"));
+  CHECK(!has(lb, "\"fail_reason\""));
   CHECK(exists(heavy.out + "/fields.bin"));
+  {
+    // A light load on the lattice's own face, where the region's outline cuts cells: the load lands on lattice given
+    // no credit and has no path, so it fails, and says why, with the share of the load that landed there.
+    const Run ol = run("open_load", file_job(f, ""), strength_job(f, 20.0, "lattice_part", "block.stl", f.top));
+    const std::string ob = block(ol.json);
+    CHECK(ol.r.ok && ol.r.strength_ran);
+    CHECK(has(ob, "\"verdict\": \"fail\"") && has(ob, "\"fail_reason\": \"load_on_open_lattice\""));
+    const double on = num_after(ob, "load_on_no_credit_n"), all = num_after(ob, "load_total_n");
+    std::printf("[open_load] %.4g N of %.4g N on lattice with no credit\n", on, all);
+    CHECK(on > 0.0 && all >= on && std::fabs(all - 20.0) < 1.0);
+  }
   {
     // The thinnest struts under the light load give both margins; linear in the load, so a load between them makes
     // the solid keep its margin and the struts not.
@@ -333,6 +347,42 @@ int main() {
     const std::size_t s = zb.find("\"strut\": {");
     CHECK(s != std::string::npos && has(zb.substr(s), "\"margin_in_plane\": null") &&
           has(zb.substr(s), "\"margin_worst_case\": null"));
+  }
+
+  // ── §5b no load path for another reason: a covered region across the whole block, every cell refused credit (the
+  // layout named Bccz, as above), the load on the cover: the cover is printed, the lattice under it is empty, and
+  // nothing joins the load to the supports. The cover is a 0.5 mm Protect
+  // skin on the top face (Finish Covered would shell the sides too); it leaves a 7.5 mm wall, which four 7.5 mm cells
+  // fill edge to edge, so no solid strip is left at the sides.
+  {
+    write(kDir + "/strength_job.json", strength_job(f, 20.0, "lattice_part", "block.stl", f.top));
+    StepModel m = import_part_file_resolved(kDir + "/block.stl");
+    Vec3 lo{1e300, 1e300, 1e300}, hi{-1e300, -1e300, -1e300};
+    for (const Vec3& v : m.mesh.vertices) {
+      lo = {std::min(lo.x, v.x), std::min(lo.y, v.y), std::min(lo.z, v.z)};
+      hi = {std::max(hi.x, v.x), std::max(hi.y, v.y), std::max(hi.z, v.z)};
+    }
+    Session session(std::move(m));
+    Outcome out = session.lay(parse_file_job(whole_cells(file_job(f, ", \"protect_ids\": [2], \"protect_depth_mm\": [0.5], \"protect_face_counts\": [1], "
+                                             "\"protect_faces\": [" + std::to_string(f.top) + "]", "octet", ""))).settings);
+    out.layout.topology = LatticeTopology::Bccz;
+    const FileReport made;
+    StrengthAsk ask;
+    ask.session = &session;
+    ask.outcome = &out;
+    ask.made = &made;
+    ask.job_path = kDir + "/strength_job.json";
+    ask.out_dir = kDir + "/no_path";
+    std::filesystem::create_directories(ask.out_dir);
+    ask.part_lo = lo;
+    ask.part_hi = hi;
+    const StrengthCheck check = lattice_file_strength_check(MATERIALS_JSON_PATH, SETTINGS_RULES_PATH);
+    const StrengthDone d = check.run(ask);
+    std::printf("[no_path] ok %d %s %s\n", d.ok, d.why.c_str(), d.detail.c_str());
+    CHECK(d.ok);
+    CHECK(has(d.json, "\"verdict\": \"fail\"") && has(d.json, "\"fail_reason\": \"no_load_path\"") &&
+          !has(d.json, "load_on_no_credit_n"));
+    if (!has(d.json, "\"fail_reason\": \"no_load_path\"")) std::printf("%s\n", d.json.substr(0, 600).c_str());
   }
 
   // ── §6 refusals: no file, no block.
