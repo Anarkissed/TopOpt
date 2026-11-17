@@ -194,6 +194,7 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         public var barEnds: [UInt8] = []       // 2 per bar: End
         public var barFlags: [UInt8] = []      // 1 per bar: 1 a piece of a cut strut, 2 a skin bar
         public var barRegion: [Int32] = []
+        public var barCell: [Float] = []       // ★ Install 3: 1 per bar: its cell's size, mm (core's Bar::cell)
         public var frames: [Float] = []        // 12 per frame: origin, then three unit axes
         public var solidCubes: [Float] = []    // 4 per solid piece: low corner (frame mm) and size
         public var cellInfo: [Float] = []      // 5 per laid cell: size, own, band, finest, cut (LatticeLayoutBridge.hpp)
@@ -436,6 +437,7 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         o.barEnds = Array(r.bar_ends)
         o.barFlags = Array(r.bar_flags)
         o.barRegion = Array(r.bar_region)
+        o.barCell = Array(r.bar_cell)   // ★ Install 3
         o.frames = Array(r.frames)
         o.solidCubes = Array(r.solid_cubes)
         o.cellInfo = Array(r.cell_info)

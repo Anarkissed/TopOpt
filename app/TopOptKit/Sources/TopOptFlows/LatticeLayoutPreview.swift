@@ -20,6 +20,8 @@ public final class LatticeLayoutPreview: ObservableObject {
 
     /// What the 3D view draws (nil: nothing yet).
     @Published public private(set) var bars: LatticeLayoutBarsInputs?
+    /// ★ Install 3: what the layout on screen laid (bars and cells), for the colour key, the tap-to-read card and the drawer.
+    @Published public private(set) var laid: LatticeLayoutColours.Laid?
     /// One plain line under the preview: what is wrong, or nil.
     @Published public private(set) var problem: String?
     /// Core's numbers for the debug overlay (stage E's iPad timing): open, read, cells, bars, ms.
@@ -170,7 +172,41 @@ public final class LatticeLayoutPreview: ObservableObject {
         nozzleTask?.cancel(); nozzleTask = nil; nozzleWanted = false; nozzleState = .notAsked
         nozzleSession?.close(); nozzleSession = nil; nozzlePath = nil; nozzleLine = nil; solidReason = nil
         session?.close(); session = nil; sessionPath = nil; lastSettings = nil; sessionStressKey = nil; nozzleStressKey = nil
-        bars = nil; problem = nil; timing = nil; laying = false
+        bars = nil; laid = nil; problem = nil; timing = nil; laying = false
+    }
+
+    // MARK: ★ Install 3 — the old preview's colour key on the new engine's bars
+
+    private var lookupCache: (token: Int, lookup: LatticeLayoutColours.CellLookup)?
+    private var drawnCache: (key: [Int], bars: LatticeLayoutBarsInputs)?
+
+    /// Which laid cell holds a point (the tap-to-read card, the drawer), for the layout on screen.
+    public func cellLookup() -> LatticeLayoutColours.CellLookup? {
+        guard let laid else { return nil }
+        if let c = lookupCache, c.token == laid.token { return c.lookup }
+        let l = LatticeLayoutColours.CellLookup(laid)
+        lookupCache = (laid.token, l)
+        return l
+    }
+
+    /// The bars to draw, wearing the old preview's key (LatticeLayoutColours): by what each bar is and how much material it
+    /// holds, or by the stress (`stress`, the stress view with the lattice; `stressKey` names it). Worked out once per layout
+    /// and colouring.
+    public func drawn(stressField field: LatticeDemandField?, stressKey: Int) -> LatticeLayoutBarsInputs? {
+        guard var b = bars else { return nil }
+        guard let laid, laid.token == b.token else { return b }
+        let grade = latticeAtLay.gradingMode.fitsShape
+        let key = [b.token, field == nil ? 0 : stressKey, grade ? 1 : 0, latticeAtLay.topologyID.hashValue,
+                   LatticeLayoutColours.controlOneColour ? 1 : 0, b.solid?.token ?? -1, b.hidden ? 1 : 0]
+        if let c = drawnCache, c.key == key { return c.bars }
+        b.colours = LatticeLayoutColours.colours(laid, type: latticeAtLay.lattice, grade: grade,
+                                                 stress: field.map(LatticeLayoutColours.Stress.init(field:)),
+                                                 lookup: grade ? cellLookup() : nil)
+        var h = Hasher()
+        key.forEach { h.combine($0) }
+        b.colourKey = h.finalize()
+        drawnCache = (key, b)
+        return b
     }
 
     /// Layouts started, app-wide (a hosted test's count: Click to refresh lays none on a change; Live one per pause).
@@ -192,6 +228,7 @@ public final class LatticeLayoutPreview: ObservableObject {
             token &+= 1
             // the last map stays until this layout's own lands (no flash of a closed part on every change)
             bars = LatticeLayoutBarsInputs(token: token, bars: r.bars, solid: solidWanted ? bars?.solid : nil, flags: r.barFlags)
+            laid = LatticeLayoutColours.Laid(r, token: token)   // ★ Install 3
             timing = Timing(openMS: openMS, readMS: r.msRead, cellsMS: r.msCells, barsMS: r.msBars, bars: r.barCount)
             problem = r.barCount == 0 ? "New engine: no lattice fits these settings" : nil
             laying = false

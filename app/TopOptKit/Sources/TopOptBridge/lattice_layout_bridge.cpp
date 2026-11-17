@@ -266,6 +266,7 @@ void fill(LatticeLayoutResult& o, const ll::Outcome& out) {
     o.bar_ends.push_back(static_cast<uint8_t>(b.end_b));
     o.bar_flags.push_back(static_cast<uint8_t>((b.piece ? 1 : 0) | (b.skin ? 2 : 0) | (ll::bar_is_bridge(b) ? 16 : 0)));
     o.bar_region.push_back(b.region);
+    o.bar_cell.push_back(static_cast<float>(b.cell));   // ★ Install 3: the colour key's density (width against its cell)
   }
   for (const ll::Frame& f : L.frames) {
     put(o.frames, f.origin);

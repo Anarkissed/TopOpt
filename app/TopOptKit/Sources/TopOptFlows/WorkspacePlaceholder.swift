@@ -1327,7 +1327,8 @@ public struct WorkspacePlaceholder: View {
                                                         || latticeSimIsRunning)
                               }
                               : nil,
-                          layoutBars: newEngineDrawn ? newEngine.bars : nil,   // ★ the new engine (test): its bars (LatticeLayoutPreview)
+                          layoutBars: newEngineDrawn ? newEngine.drawn(stressField: stressViewOn ? latticeStressField : nil,
+                                                                       stressKey: latticeStressFieldKey) : nil,   // ★ the new engine's bars, in the old preview's colour key (Install 3)
                           flexibleLattice: flexibleMain.layer(project, stage: stage, pageUp: fullScreenPageUp))   // Flexible (PR #362) H3: the main page's lattice + its squish loop (FlexibleMainStage.swift)
                 .onEmptyTap { emptyTapClears() }   // ★ his iPad 10-26 (5): a tap on empty space clears the selection
                 .onLatticeTurning { latticeTurningChanged($0) }   // ★ his pick 11-16 (A): chips and legends hide while he turns a lattice

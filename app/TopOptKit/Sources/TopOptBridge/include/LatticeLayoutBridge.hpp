@@ -130,6 +130,7 @@ struct LatticeLayoutResult {
                                              // as a square bar, as wide and as tall as its width, its underside level
                                              // (core's bar_is_bridge, the writer's own test); every other bar is round
   std::vector<int32_t> bar_region;           // 1 per bar: its region, 0 = the whole part
+  std::vector<float> bar_cell;               // ★ Install 3: 1 per bar: the size of the cell it is a strut of, mm (core's Bar::cell)
   // The solid pieces the layout lists (D14: a cube tried and not fitted), each with its reason. Cubes sit on frames.
   std::vector<float> frames;                 // 12 per frame: origin xyz, then its three axes (unit) xyz each
   std::vector<float> solid_cubes;            // 4 per piece: low corner a b c (frame mm), size mm
