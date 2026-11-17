@@ -315,6 +315,11 @@ public struct LatticeFileStrength: Equatable, Sendable {
 
     private static func x(_ m: Double) -> String { String(format: "%.1f×", m) }
 
+    /// The check's not-certified words, or a plain fallback when it gives none.
+    public static func notCertifiedLine(_ reason: String) -> String {
+        "The check could not certify it: " + (reason.isEmpty ? "it could not judge this part" : reason)
+    }
+
     /// One plain line: whether the latticed part is strong enough for his loads at his safety margin.
     public var line: String {
         if notCertified { return "Strength not checked: " + (notCertifiedReason.isEmpty ? "the check could not judge it" : notCertifiedReason) }
@@ -516,14 +521,21 @@ public enum LatticeFileButton {
         // ★ a fail with no load path (a load on open lattice): the not-strong-enough card says so INSTEAD of a margin sentence
         // (its load-path wording), with core's reason in plain words and the fix; a margin fail keeps core's own diagnosis
         var diagnosis = s?.diagnosis
-        if let s, !accepted, let why = s.noPathLine {
+        func said(_ binding: GateDiagnosis.Term, _ why: String, _ s: LatticeFileStrength) -> GateDiagnosis {
             let d = s.diagnosis
-            diagnosis = GateDiagnosis(binding: .loadPath, bindingValue: d?.bindingValue ?? 0, requiredValue: s.safetyMargin,
-                                      ratio: d?.ratio ?? 0, marginWorstCaseRaw: s.marginWorstCase, marginInPlaneRaw: s.marginInPlane,
-                                      marginInterlayerRaw: s.marginInterlayer, marginEffective: s.marginWorstCase,
-                                      knockdownFactor: d?.knockdownFactor ?? 1, infillPercent: d?.infillPercent ?? 100,
-                                      minFeatureViolations: 0, inheritsUnsourcedZKnockdown: false, provenance: d?.provenance ?? "",
-                                      noSettingFixesThis: true, noFixReason: why, headroomMinInfillPercent: nil, recommendations: [])
+            return GateDiagnosis(binding: binding, bindingValue: d?.bindingValue ?? 0, requiredValue: s.safetyMargin,
+                                 ratio: d?.ratio ?? 0, marginWorstCaseRaw: s.marginWorstCase, marginInPlaneRaw: s.marginInPlane,
+                                 marginInterlayerRaw: s.marginInterlayer, marginEffective: s.marginWorstCase,
+                                 knockdownFactor: d?.knockdownFactor ?? 1, infillPercent: d?.infillPercent ?? 100,
+                                 minFeatureViolations: 0, inheritsUnsourcedZKnockdown: false, provenance: d?.provenance ?? "",
+                                 noSettingFixesThis: true, noFixReason: why, headroomMinInfillPercent: nil, recommendations: [])
+        }
+        if let s, !accepted, let why = s.noPathLine {
+            diagnosis = said(.loadPath, why, s)
+        } else if let s, !accepted, s.failReason == nil, s.notCertified, s.diagnosis == nil {
+            // ★ LatticeReview 11-17 18:34Z: a fail none of the three reasons covers (anchors held only by sliding; no solid
+            // carries load) has no fail_reason — the check's own not-certified words, in one plain line
+            diagnosis = said(.none, LatticeFileStrength.notCertifiedLine(s.notCertifiedReason), s)
         }
         var v = OptimizeVariant(
             requestedVolumeFraction: fraction, achievedVolumeFraction: fraction,

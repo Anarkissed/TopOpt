@@ -141,6 +141,26 @@ final class LatticeFileButtonTests: XCTestCase {
         XCTAssertNil(LatticeFileStrength(block: b).noPathLine)
         let mo = try LatticeFileButton.outcome(try Self.made(b), densityGCm3: 1.24)
         XCTAssertNotEqual(mo.variants[0].diagnosis?.binding, .loadPath, "RED CONTROL: core's diagnosis stands")
+
+        // ★ LatticeReview 18:34Z: a fail none of the three reasons covers carries no fail_reason — the check's own
+        // not-certified words in one plain line (or a plain fallback), core's diagnosis first when it sends one
+        var nc = Self.strength("fail", accepted: false, margin: 0)
+        nc["not_certified"] = true
+        nc["not_certified_reason"] = "the anchors hold it only by sliding"
+        let ncs = LatticeFileStrength(block: nc)
+        XCTAssertNil(ncs.failReason)
+        XCTAssertEqual(ncs.line, "Strength not checked: the anchors hold it only by sliding")
+        let nco = try LatticeFileButton.outcome(try Self.made(nc), densityGCm3: 1.24)
+        XCTAssertEqual(nco.acceptedCount, 0)
+        let ncd = try XCTUnwrap(nco.variants[0].diagnosis)
+        let nccard = RunFailure.allRejectedOnMargin(worstMargin: 0, effectiveMargin: 0, minFeatureViolations: 0, diagnosis: ncd).message
+        XCTAssertTrue(nccard.contains("The check could not certify it: the anchors hold it only by sliding"), nccard)
+        nc["not_certified_reason"] = ""
+        XCTAssertEqual(try LatticeFileButton.outcome(try Self.made(nc), densityGCm3: 1.24).variants[0].diagnosis?.noFixReason,
+                       LatticeFileStrength.notCertifiedLine(""), "a plain fallback")
+        nc["diagnosis"] = ["binding_term": "interlayer", "no_fix_reason": "core's own"]
+        XCTAssertEqual(try LatticeFileButton.outcome(try Self.made(nc), densityGCm3: 1.24).variants[0].diagnosis?.binding, .interlayer,
+                       "core's diagnosis first when it sends one")
     }
 
     // MARK: which parts
