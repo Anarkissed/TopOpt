@@ -2264,6 +2264,7 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     target_compile_definitions(test_lattice_strength PRIVATE
       MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
       SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+      DOCS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../docs/strength-check"
       TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME lattice_strength COMMAND test_lattice_strength)
   endif()

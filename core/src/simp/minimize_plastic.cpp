@@ -437,7 +437,8 @@ std::string scenario_too_light_reason(
 }
 
 std::vector<SimpScenario> sized_scenarios(std::vector<SimpScenario> scenarios,
-                                          double youngs_modulus_mpa, double spacing) {
+                                          double youngs_modulus_mpa, double spacing,
+                                          double weak_spring_rel, double weak_spring_min_scale) {
   // The springs follow the scenario's load (his ask, 2026-10-28): (F_s / F_max)^2, F the
   // 2-norm of its nodal loads. A 1 % twist on fixed springs sat on them cheaply, so the
   // optimizer never joined the arms, and any connection sized for 1 % was softer than
@@ -451,11 +452,11 @@ std::vector<SimpScenario> sized_scenarios(std::vector<SimpScenario> scenarios,
   }
   for (std::size_t s = 0; s < scenarios.size(); ++s) {
     const double scale =
-        f2_max > 0.0 ? std::max(f2[s] / f2_max, kScenarioWeakSpringMinScale) : 1.0;
+        f2_max > 0.0 ? std::max(f2[s] / f2_max, weak_spring_min_scale) : 1.0;
     for (DirichletBC& b : scenarios[s].bcs)
       if (b.spring > 0.0 && !b.contact)
         b.spring = b.spring_tangent =
-            kScenarioWeakSpringRel * youngs_modulus_mpa * spacing * scale;
+            weak_spring_rel * youngs_modulus_mpa * spacing * scale;
   }
   return scenarios;
 }
@@ -464,7 +465,7 @@ ScenarioCertification certify_scenarios(
     const VoxelGrid& G, const std::vector<SimpScenario>& scenarios,
     const std::function<FixedDesignAnalysis(const std::vector<DirichletBC>&,
                                             const std::vector<NodalLoad>&)>& certify,
-    bool keep_fields) {
+    bool keep_fields, double unheld_share) {
   ScenarioCertification out;
   if (scenarios.empty()) return out;
   std::size_t worst = 0;
@@ -501,7 +502,7 @@ ScenarioCertification certify_scenarios(
       (l.component == 0 ? F.x : l.component == 1 ? F.y : F.z) += l.value;
     const double fm = std::sqrt(F.x * F.x + F.y * F.y + F.z * F.z);
     r.weak_share = fm > 0.0 ? std::sqrt(W.x * W.x + W.y * W.y + W.z * W.z) / fm : 0.0;
-    r.unheld = r.weak_share > kScenarioUnheldShare;
+    r.unheld = r.weak_share > unheld_share;
     if (r.unheld && out.unheld.empty()) out.unheld = sc.name;
     out.reports.push_back(r);
     if (keep_fields)

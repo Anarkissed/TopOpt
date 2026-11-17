@@ -1136,12 +1136,17 @@ ScenarioCertification certify_scenarios(
     const VoxelGrid& grid, const std::vector<SimpScenario>& scenarios,
     const std::function<FixedDesignAnalysis(const std::vector<DirichletBC>&,
                                             const std::vector<NodalLoad>&)>& certify,
-    bool keep_fields = false);
+    bool keep_fields = false,
+    // Install 3 (the strength check's settings): the share over which a scenario is unheld.
+    double unheld_share = kScenarioUnheldShare);
 // The weak springs (an anchor OFF in a scenario) sized for the material, grid and load:
 // kScenarioWeakSpringRel x E x h x max((F_s / F_max)^2, kScenarioWeakSpringMinScale)
 // per node, isotropic.
+// The two constants can be stated (Install 3, the strength check's settings); left out, they are the constants.
 std::vector<SimpScenario> sized_scenarios(std::vector<SimpScenario> scenarios,
-                                          double youngs_modulus_mpa, double spacing);
+                                          double youngs_modulus_mpa, double spacing,
+                                          double weak_spring_rel = kScenarioWeakSpringRel,
+                                          double weak_spring_min_scale = kScenarioWeakSpringMinScale);
 
 inline constexpr const char* kAnchorsSlidingReason =
     "anchors cannot hold the load in some direction (held by the sliding springs)";

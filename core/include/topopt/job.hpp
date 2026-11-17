@@ -1304,11 +1304,16 @@ struct JobDescription {
 // Parse and schema-validate a job document. Throws JobError on malformed JSON,
 // an unknown (non-underscore) key at any level, a missing required key, or a
 // type/value violation. The diagnostic names the offending key.
-JobDescription parse_job(const std::string& json_text);
+//
+// The top-level key "strength_settings" (Install 3) is the new engine's strength
+// check's own; this reader takes it and reads nothing in it. `safety_margin_floor`
+// is the lowest loads.safety_margin accepted: 1.5 (the owner's floor, every caller
+// but the strength check, which states its own when a job's settings say so).
+JobDescription parse_job(const std::string& json_text, double safety_margin_floor = 1.5);
 
 // Read the file at `path` and parse it via parse_job(). Throws JobError if the
 // file cannot be opened.
-JobDescription load_job_file(const std::string& path);
+JobDescription load_job_file(const std::string& path, double safety_margin_floor = 1.5);
 
 // Handoff 114 — per-run OBSERVABILITY configuration for run_job. Only consulted
 // when `emit_progress` is true (the topopt-cli path); in-process callers leave it

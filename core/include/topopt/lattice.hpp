@@ -361,17 +361,19 @@ double octet_strut_diameter_mm(double rho, double cell_size_mm);
 //
 // Octet's branch returns EXACTLY `octet_strut_diameter_mm(rho, cell_size_mm)`, bit for
 // bit, which is what keeps R9 (octet byte-identical) true through this change.
-// Every other topology throws LatticeDiameterLawNotMeasured until its own table is
-// measured and landed.
+// Every type with its own measured table (lattice.cpp's type_measured: sc, bcc, fcc,
+// diamond, kelvin, rhombic, gyroid, schwarz_d) returns its own law; a type with none
+// (bccz, fccz, reentrant) throws LatticeDiameterLawNotMeasured.
 double lattice_strut_diameter_mm(LatticeTopology topo, double rho,
                                  double cell_size_mm);
 
 // ── ★ THE SAME LAW, THE OTHER DIRECTION, PER TYPE ──────────────────────
 // (cell, strut radius) -> relative density, which is what a UNIFORM lattice job states
 // and what the stepped menu's "prints open" test asks about. Octet returns EXACTLY
-// `octet_relative_density`; every other type throws the SAME
-// LatticeDiameterLawNotMeasured the forward direction throws, because it is one
-// measurement with two directions and a type either has it or does not.
+// `octet_relative_density`; a type with its own measured table reads that table in the
+// other direction; a type with none throws the SAME LatticeDiameterLawNotMeasured the
+// forward direction throws, because it is one measurement with two directions and a
+// type either has it or does not.
 //
 // Note the two directions are NOT exact inverses even for octet -- the forward density
 // law and the diameter table disagree by the round trip (0.211733 vs 0.218871 at

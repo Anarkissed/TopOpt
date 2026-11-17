@@ -534,7 +534,7 @@ KeepRegion parse_oriented_keep_region(const JsonValue& kv, bool cylinder) {
 
 }  // namespace
 
-JobDescription parse_job(const std::string& json_text) {
+JobDescription parse_job(const std::string& json_text, double safety_margin_floor) {
   // ★ TWO KEYS, ONE TYPE (reviewer, 2026-09-30). `lattice.topology` and
   // `grading.topology` describe the same physical lattice, and the blocks are parsed
   // far apart, so statedness is recorded here and reconciled once below -- after both
@@ -554,7 +554,8 @@ JobDescription parse_job(const std::string& json_text) {
                        "keep_regions",
                        "build_direction", "build_orientation_report",
                        "bake_build_orientation", "variant", "semdot",
-                       "plsm", "flexible", "orientation_recheck"},
+                       "plsm", "flexible", "orientation_recheck",
+                       "strength_settings"},
                       "the job");
 
   JobDescription job;
@@ -1090,8 +1091,12 @@ JobDescription parse_job(const std::string& json_text) {
     // least. His words for a lower one, read verbatim.
     if (const JsonValue* sm = find_key(lv, "safety_margin")) {
       const double v = require_number(*sm, "loads.safety_margin");
-      if (!std::isfinite(v) || v < 1.5)
-        schema_fail("The safety margin can't be below 150% of the load");
+      if (!std::isfinite(v) || v < safety_margin_floor)
+        schema_fail(safety_margin_floor == 1.5
+                        ? std::string("The safety margin can't be below 150% of the load")
+                        : "The safety margin can't be below " +
+                              std::to_string(static_cast<int>(std::lround(safety_margin_floor * 100.0))) +
+                              "% of the load");
       job.loads.safety_margin = v;
     }
     // Width-aware knockdown slicer metadata (handoff 2026-07-26-width-aware-knockdown).
@@ -3234,12 +3239,12 @@ JobDescription parse_job(const std::string& json_text) {
   return job;
 }
 
-JobDescription load_job_file(const std::string& path) {
+JobDescription load_job_file(const std::string& path, double safety_margin_floor) {
   std::ifstream in(path, std::ios::binary);
   if (!in) throw JobError("cannot open job file: " + path);
   std::ostringstream ss;
   ss << in.rdbuf();
-  return parse_job(ss.str());
+  return parse_job(ss.str(), safety_margin_floor);
 }
 
 }  // namespace topopt

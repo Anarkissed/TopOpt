@@ -10,6 +10,7 @@
 // Each fail says why (V5): solid_margin (§2 heavy), load_on_open_lattice (§2, a load on cut cells), no_load_path (§5b).
 // §6 a strength job that cannot be read, is not lattice_part, or is of another part: refused, no file.
 #include <algorithm>
+#include <tuple>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -20,6 +21,7 @@
 #include <string>
 #include <vector>
 
+#include "../../src/flexible/json.hpp"   // reads the result and docs/strength-check/variables.json
 #include "topopt/face_overrides.hpp"
 #include "topopt/lattice_file_strength.hpp"
 #include "topopt/lattice_layout_file.hpp"
@@ -98,7 +100,8 @@ std::string file_job(const Faces& f, const std::string& extra, const std::string
          "\"algorithm\": \"uniform\", \"cell_max_mm\": 8, \"min_cells_across\": 1" + extra + "}}";
 }
 std::string strength_job(const Faces& f, double newtons, const std::string& mode = "lattice_part",
-                         const std::string& model = "block.stl", int load_face = -1) {
+                         const std::string& model = "block.stl", int load_face = -1,
+                         const std::string& settings = "") {
   return "{\"model\": \"" + model + "\", \"material\": \"PLA\", \"mode\": \"" + mode + "\", "
          "\"resolution\": 40, "
          "\"loads\": {\"minimize_plastic\": true, \"safety_margin\": 1.5, \"build_dir\": [0, 0, 1], "
@@ -107,7 +110,8 @@ std::string strength_job(const Faces& f, double newtons, const std::string& mode
          "\"lattice\": {\"topology\": \"octet\", \"require_lattice_void_reaches_exterior\": false}, "
          "\"grading\": {\"topology\": \"octet\", \"cell_mm\": 8, \"min_extrudable_width_mm\": 0.45, "
          "\"intent\": \"structural\"}, "
-         "\"output\": {\"report\": \"report.json\", \"mesh_format\": \"stl\", \"mesh_prefix\": \"variant\"}}";
+         "\"output\": {\"report\": \"report.json\", \"mesh_format\": \"stl\", \"mesh_prefix\": \"variant\"}" +
+         (settings.empty() ? std::string() : ", \"strength_settings\": " + settings) + "}";
 }
 
 // The same job with the region reaching the block's edges: its cells divide the face exactly and none is cut, so a
@@ -186,6 +190,9 @@ int main() {
   CHECK(has(lb, "\"law\": \"") && has(lb, "\"uncertified\": false"));   // octet has its law
   CHECK(has(lb, "\"struts_pass\": true") && has(lb, "\"verdict\": \"pass\""));
   CHECK(!has(lb, "\"diagnosis\""));
+  CHECK(has(lb, "\"resolve_reproduces\": true"));   // the re-solve proof, written
+  CHECK(num_after(lb, "resolve_margin_solid") > 0.0 && num_after(lb, "resolve_margin_again") > 0.0);
+  CHECK(has(lb, "\"settings\": {"));
   CHECK(!has(lb, "\"scenario_fields\""));        // one load case: no scenario fields, as today
   CHECK(exists(light.out + "/fields.bin") && !exists(light.out + "/scenario_fields.bin"));
 
@@ -383,6 +390,151 @@ int main() {
     CHECK(has(d.json, "\"verdict\": \"fail\"") && has(d.json, "\"fail_reason\": \"no_load_path\"") &&
           !has(d.json, "load_on_no_credit_n"));
     if (!has(d.json, "\"fail_reason\": \"no_load_path\"")) std::printf("%s\n", d.json.substr(0, 600).c_str());
+  }
+
+  // ── §7 the settings (strength_settings; docs/strength-check). The docs agree with the code: every {{key}} in the two
+  // texts is a key of variables.json, the two texts have the same sections and every entry's section is one of them,
+  // and the editable entries are exactly the check's settings, with its ranges.
+  {
+    namespace sj = topopt::flexible::json;
+    const std::string docs = DOCS_DIR;
+    const sj::Value vars = sj::parse(slurp(docs + "/variables.json"), "variables.json");
+    std::vector<std::string> keys, sections;
+    for (const sj::Value& e : vars.arr) {
+      keys.push_back(sj::as_string(*sj::find(e, "key"), "key"));
+      sections.push_back(sj::as_string(*sj::find(e, "section"), "section"));
+    }
+    CHECK(keys.size() == 60);
+    const auto headings = [](const std::string& t) {
+      std::vector<std::string> h;
+      std::istringstream in(t);
+      for (std::string line; std::getline(in, line);)
+        if (line.rfind("## ", 0) == 0) h.push_back(line.substr(3));
+      return h;
+    };
+    const std::string simple = slurp(docs + "/simple.md"), maths = slurp(docs + "/maths.md");
+    CHECK(!simple.empty() && !maths.empty());
+    CHECK(headings(simple) == headings(maths));
+    for (const std::string& sec : sections) {
+      const auto h = headings(simple);
+      if (std::find(h.begin(), h.end(), sec) == h.end()) std::printf("  section not in the texts: %s\n", sec.c_str());
+      CHECK(std::find(h.begin(), h.end(), sec) != h.end());
+    }
+    for (const std::string* t : {&simple, &maths})
+      for (std::size_t at = t->find("{{"); at != std::string::npos; at = t->find("{{", at + 2)) {
+        const std::size_t end = t->find("}}", at);
+        CHECK(end != std::string::npos);
+        if (end == std::string::npos) break;
+        const std::string k = t->substr(at + 2, end - at - 2);
+        if (std::find(keys.begin(), keys.end(), k) == keys.end()) std::printf("  {{%s}} is not a key\n", k.c_str());
+        CHECK(std::find(keys.begin(), keys.end(), k) != keys.end());
+      }
+    std::size_t editable = 0;
+    for (const sj::Value& e : vars.arr) {
+      const std::string k = sj::as_string(*sj::find(e, "key"), "key");
+      const bool ed = sj::find(e, "editable")->boolean;
+      const StrengthSettingSpec* sp = nullptr;
+      for (const StrengthSettingSpec& x : strength_setting_specs())
+        if (x.key == k) sp = &x;
+      if (ed != (sp != nullptr)) std::printf("  %s: editable %d in the docs, %s in the code\n", k.c_str(), ed, sp ? "a setting" : "not one");
+      CHECK(ed == (sp != nullptr));
+      if (!ed || !sp) continue;
+      ++editable;
+      const sj::Value* mn = sj::find(e, "min");
+      const sj::Value* mx = sj::find(e, "max");
+      if (sp->kind == StrengthSettingSpec::Kind::Number || sp->kind == StrengthSettingSpec::Kind::Integer ||
+          sp->kind == StrengthSettingSpec::Kind::PerMaterial) {
+        CHECK(mn && mn->is_number() && mn->num == sp->min);
+        CHECK(mx && mx->is_number() && mx->num == sp->max);
+      }
+      if (sp->kind == StrengthSettingSpec::Kind::Choice) {
+        const sj::Value* ch = sj::find(e, "choices");
+        CHECK(ch && ch->arr.size() == sp->choices.size());
+        for (std::size_t i = 0; ch && i < ch->arr.size() && i < sp->choices.size(); ++i)
+          CHECK(sj::find(ch->arr[i], "value")->num == sp->choices[i]);
+      }
+      if (sp->kind != StrengthSettingSpec::Kind::PerMaterial && sp->kind != StrengthSettingSpec::Kind::Bool) {
+        const sj::Value* d = sj::find(e, "default");
+        CHECK(d && d->is_number() && d->num == sp->def);
+      }
+    }
+    CHECK(editable == strength_setting_specs().size());
+
+    // Every editable key stated at its DEFAULT: the check is the one with none stated, number for number.
+    std::string defaults = "{\"z_knockdown\": {\"PLA\": 0.55}";
+    for (const StrengthSettingSpec& x : strength_setting_specs()) {
+      if (x.kind == StrengthSettingSpec::Kind::PerMaterial) continue;
+      defaults += ", \"" + x.key + "\": " +
+                  (x.kind == StrengthSettingSpec::Kind::Bool ? std::string(x.def != 0.0 ? "true" : "false")
+                                                             : [](double d) {
+                                                                 char b[40];
+                                                                 std::snprintf(b, sizeof b, "%.17g", d);
+                                                                 return std::string(b);
+                                                               }(x.def));
+    }
+    defaults += "}";
+    const Run same = run("defaults", file_job(f, ""), strength_job(f, 20.0, "lattice_part", "block.stl", -1, defaults));
+    CHECK(same.r.ok && same.r.strength_ran);
+    const std::string db = block(same.json);
+    for (const char* k : {"margin_worst_case", "margin_in_plane", "margin_interlayer", "mass_grams",
+                          "max_effective_von_mises_mpa", "max_interlayer_tension_mpa", "resolve_margin_again"}) {
+      const double x = num_after(db, k), y = num_after(lb, k);
+      if (!(std::fabs(x - y) <= 1e-9 * std::fabs(y))) std::printf("  %s: %.12g stated at defaults, %.12g with none\n", k, x, y);
+      CHECK(std::fabs(x - y) <= 1e-9 * std::fabs(y));
+    }
+
+    // Every editable key stated at another value it allows: accepted, and echoed as stated.
+    const std::string others =
+        "{\"z_knockdown\": {\"PLA\": 0.5}, \"safety_margin_floor\": 1.2, \"infill_exponent\": 2, \"infill_floor\": 0.01, "
+        "\"width_aware_knockdown\": true, \"thickness_cap_voxels\": 16, \"load_path_connectivity\": 18, "
+        "\"printed_threshold\": 0.4, \"void_floor\": 1e-8, \"cg_tolerance\": 1e-9, \"cg_max_iterations\": 100000, "
+        "\"contact_rounds\": 3, \"sliding_share_max\": 0.1, \"bearing_stiffness\": 100000, "
+        "\"bearing_tangent_fraction\": 0.001, \"scenario_weak_spring\": 1e-7, \"scenario_weak_spring_min_scale\": 0.1, "
+        "\"scenario_unheld_share\": 0.1, \"part_box_tol_mm\": 0.2, \"part_box_tol_fraction\": 0.01, "
+        "\"min_feature_warning_threshold\": 2}";
+    const Run set = run("settings", file_job(f, ""), strength_job(f, 20.0, "lattice_part", "block.stl", -1, others));
+    CHECK(set.r.ok && set.r.strength_ran);
+    const sj::Value stated = sj::parse(others, "stated");
+    const sj::Value result = sj::parse(set.json, "lattice_file.json");
+    const sj::Value* got = sj::find(*sj::find(result, "strength"), "settings");
+    CHECK(got != nullptr);
+    if (got) {
+      std::size_t echoed = 0;
+      for (const auto& [k, v] : stated.obj) {
+        const sj::Value* g = sj::find(*got, k);
+        CHECK(g != nullptr);
+        if (!g) continue;
+        if (k == "z_knockdown") {
+          CHECK(sj::find(*g, "PLA") && sj::find(*g, "PLA")->num == 0.5);
+        } else if (v.is_bool()) {
+          CHECK(g->is_bool() && g->boolean == v.boolean);
+        } else {
+          const bool eq = g->is_number() && std::fabs(g->num - v.num) <= 1e-12 * std::fabs(v.num);
+          if (!eq) std::printf("  %s: stated %g, used %g\n", k.c_str(), v.num, g->is_number() ? g->num : -1.0);
+          CHECK(eq);
+        }
+        ++echoed;
+      }
+      CHECK(echoed == strength_setting_specs().size());
+      CHECK(got->obj.size() == 60);   // every variable of the docs, editable or not
+      for (const std::string& k : keys) CHECK(sj::find(*got, k) != nullptr);
+    }
+    // The layer factor reaches the margin: 0.5 in place of PLA's 0.55 scales the layer margin by 0.5 / 0.55.
+    const double il = num_after(lb, "margin_interlayer"), il2 = num_after(block(set.json), "margin_interlayer");
+    std::printf("[settings] layer margin %.6g -> %.6g (ratio %.4f, expected %.4f)\n", il, il2, il2 / il, 0.5 / 0.55);
+    CHECK(std::fabs(il2 / il - 0.5 / 0.55) < 0.01);
+
+    // Refused, with one line and no file: a key it does not know, and a value out of its range.
+    for (const auto& [tag, bad, word] : std::vector<std::tuple<const char*, std::string, const char*>>{
+             {"unknown_setting", "{\"infill_exponant\": 2}", "infill_exponant"},
+             {"out_of_range", "{\"infill_exponent\": 7}", "infill_exponent"},
+             {"z_out_of_range", "{\"z_knockdown\": {\"PLA\": 0}}", "z_knockdown"},
+             {"bad_choice", "{\"load_path_connectivity\": 8}", "load_path_connectivity"}}) {
+      const Run x = run(tag, file_job(f, ""), strength_job(f, 20.0, "lattice_part", "block.stl", -1, bad));
+      CHECK(!x.r.ok && x.r.code == "strength_settings_refused" && x.r.exit_code == 1);
+      CHECK(has(x.r.why, word) && x.r.why.find('\n') == std::string::npos);
+      CHECK(!exists(x.out + "/block_lattice.stl"));
+    }
   }
 
   // ── §6 refusals: no file, no block.
