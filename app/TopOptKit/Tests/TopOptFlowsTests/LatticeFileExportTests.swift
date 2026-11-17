@@ -151,7 +151,8 @@ final class LatticeFileExportTests: XCTestCase {
               let port = Int(hp[hp.index(after: colon)...]) else { throw XCTSkip("opt-in: LATTICE_FILE_WORKER=host:port") }
         let (_, job, model) = try cubeJob()
         let config = RemoteRunnerConfig(host: String(hp[..<colon]), port: port, expectedFingerprint: CoreFingerprint.value)
-        let (stl, r) = try LatticeFileRun.drive(config: config, modelPath: model, jobJSON: job, projectName: "Export test cube")
+        let made = try LatticeFileRun.drive(config: config, modelPath: model, jobJSON: job, projectName: "Export test cube")
+        let (stl, r) = (made.stl, made.report)
         print("LATTICE-FILE cube via the worker: \(r.line), \(stl.count) bytes")
         XCTAssertTrue(r.ok)
         XCTAssertGreaterThan(stl.count, 84)

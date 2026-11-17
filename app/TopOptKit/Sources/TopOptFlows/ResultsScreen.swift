@@ -1286,7 +1286,8 @@ public struct ResultsScreen: View {
                                     thinJoints: thin, bridged: model.selected.map { model.isBridged($0) } ?? false,
                                     pieces: model.selected.flatMap { model.piecesFlag($0) },
                                     finish: selectedFinish,   // ★ B4: E1's finishing
-                                    weakest: model.hotSpot.map { SIMD3<Double>($0.position) })
+                                    weakest: model.hotSpot.map { SIMD3<Double>($0.position) },
+                                    struts: blocks?.latticeFile)   // ★ his ruling 11-17: a new-engine Lattice run's struts
     }
 
     /// Bottom left: the streaming pill, a latticed version's mesh state, then the Versions panel.

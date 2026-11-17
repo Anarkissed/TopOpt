@@ -189,6 +189,9 @@ public struct RunReportBlocks: Equatable, Sendable {
     public let rows: [Row]
     /// ★ report.json's top-level `safety_margin` (ruling 2026-10-26 13:12): "Built for N% of your load". nil = not sent.
     public var safetyMargin: Double? = nil
+    /// ★ Install 3: a Lattice run on the new engine — its report is `lattice_file.json`, whose `strength` block is the check
+    /// (the struts' verdict among it). nil on every other run.
+    public var latticeFile: LatticeFileStrength? = nil
 
     public static func decode(reportJSON: Data) -> RunReportBlocks? {
         guard let r = (try? JSONSerialization.jsonObject(with: reportJSON)) as? [String: Any] else { return nil }
@@ -208,11 +211,13 @@ public struct RunReportBlocks: Equatable, Sendable {
             }
         }
         var strengthen = StrengthenReport.decode(r["strengthen"] as? [String: Any])
+        let latticeFile = (r["strength"] as? [String: Any]).map(LatticeFileStrength.init(block:))
         let margin = (r["safety_margin"] as? NSNumber)?.doubleValue ?? strengthen?.safetyMargin
+            ?? latticeFile.flatMap { $0.safetyMargin > 0 ? $0.safetyMargin : nil }
         if strengthen?.safetyMargin == nil { strengthen?.safetyMargin = margin }
         return RunReportBlocks(strengthen: strengthen,
                                rows: rows("variants", accepted: true) + rows("rejected_variants", accepted: false),
-                               safetyMargin: margin)
+                               safetyMargin: margin, latticeFile: latticeFile)
     }
 }
 

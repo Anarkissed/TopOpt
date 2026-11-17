@@ -1954,8 +1954,7 @@ public struct WorkspacePlaceholder: View {
             pendingLatticeRerun = prompt
             return
         }
-        runCouldntFinish = false; lastRunWasLattice = true   // ★ B1 (O1)
-        run.start(request)
+        startLatticeRun(request)
     }
 
     /// The lattice request, started (the re-run card's "Re-run the lattice here").
@@ -1965,8 +1964,39 @@ public struct WorkspacePlaceholder: View {
             return
         }
         if stoppedForTinyPiece(request) { return }   // Install 3
+        startLatticeRun(request)
+    }
+
+    /// ★ HIS YES 11-17 (Install 3): a regular lattice on a STEP part goes to the new engine — the print file's job on the Mac,
+    /// with the strength check on Structural (`LatticeFileButton`); Organic, STL parts and Flexible keep the old run. A
+    /// remembered Mac not found yet is looked for first (as Optimize and Export do); with no Mac chosen, one line says so.
+    private func startLatticeRun(_ request: RunRequest) {
+        guard latticeButtonOnNewEngine else {
+            runCouldntFinish = false; lastRunWasLattice = true   // ★ B1 (O1)
+            run.start(request)
+            return
+        }
+        if compute.wantsRemote, compute.activeRemote == nil { findTheMac { startLatticeRun(request) }; return }
+        guard let config = compute.activeRemote else { model.toast = LatticeFileButton.noMacLine; return }
+        let strengthJob = LatticeFileJob.checksStrength(project.lattice, wired: LatticeFileButton.wired)
+            ? try? RemoteRun.buildJobJSON(request) : nil   // the Lattice run's own job, as Export sends it
+        let job: LatticeFileJob.ForPart
+        switch LatticeFileJob.forPart(project, stress: newEngineStress, strengthJob: strengthJob) {
+        case .success(let j): job = j
+        case .failure(let why): model.toast = why.line; return
+        }
         runCouldntFinish = false; lastRunWasLattice = true   // ★ B1 (O1)
-        run.start(request)
+        // the old run's runner stays the run's own: this one is set for this start only (`start` takes it as it begins)
+        let before = run.runner
+        run.runner = LatticeFileButton.runner(config: config, job: job, projectName: project.name, strengthJob: strengthJob,
+                                              densityGCm3: model.densityGCm3(for: project.material))
+        run.start(request, remote: true, workerName: compute.selectedWorkerName)
+        run.runner = before
+    }
+
+    /// Whether the Lattice button sends the new engine's job for this part (`LatticeFileButton.takes`), never on Flexible.
+    private var latticeButtonOnNewEngine: Bool {
+        LatticeFileButton.takes(project.lattice, modelPath: project.importedFile?.path) && !flexibleMain.owns(project, stage)
     }
 
     /// ★ his 11-16 (Install 3): a cut piece the run uses that core would refuse as too small (`TinyCutPiece`) stops the press
