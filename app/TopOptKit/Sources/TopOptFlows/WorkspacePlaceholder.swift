@@ -7949,7 +7949,13 @@ public struct WorkspacePlaceholder: View {
     private var bandChipsAvailable: Bool {
         latticeOnlyShowing && visible.latticeControls && viewerMesh != nil
             && !legendDrilledIn
-            && !(strutScene?.bandDecisions.isEmpty ?? true)
+            && !bandDecisionsShown.isEmpty
+    }
+
+    /// ★ The chips to ask: where the new engine draws, its places (D23, his 11-17 "add a chip to ask what it should be");
+    /// elsewhere (a variant's page, Organic) the old preview's band, as before.
+    private var bandDecisionsShown: [LatticeBandDecision] {
+        newEngineDrawn ? LatticeLayoutPreview.chipDecisions(newEngine.places) : strutScene?.bandDecisions ?? []
     }
 
     /// ★ THE TRANSFORM THE PART IS DRAWN WITH, for the chips: the camera the viewer
@@ -7967,13 +7973,14 @@ public struct WorkspacePlaceholder: View {
     /// The chips themselves. Re-laid out on every render — `projection` is republished on
     /// every orbit, so each chip rides its face; placement is `LatticeBandChipLayout`.
     @ViewBuilder private var latticeBandChipsOverlay: some View {
-        if latticeOnlyShowing, !bandChipsHidden, let scene = strutScene, !scene.bandDecisions.isEmpty {
+        let decisions = bandDecisionsShown
+        if latticeOnlyShowing, !bandChipsHidden, !decisions.isEmpty {
             GeometryReader { geo in
                 // the keep-out frames are `.global`; this layer ignores the safe area like
                 // the MTKView, so the difference is the layer's own origin (0 full-screen)
                 let origin = geo.frame(in: .global).origin
                 let chips = LatticeBandChipLayout.layout(
-                    scene: scene, treatments: project.lattice.bandTreatments,
+                    decisions: decisions, treatments: project.lattice.bandTreatments,
                     frame: latticeBandChipFrame, latticeOnly: latticeOnlyShowing,
                     keepOut: bandChipKeepOut.map { $0.offsetBy(dx: -origin.x, dy: -origin.y) })
                 ZStack(alignment: .topLeading) {

@@ -150,6 +150,10 @@ final class LatticeFileButtonTests: XCTestCase {
         let ncs = LatticeFileStrength(block: nc)
         XCTAssertNil(ncs.failReason)
         XCTAssertEqual(ncs.line, "Strength not checked: the anchors hold it only by sliding")
+        // core's own reason leads with "Not certified:" (seen on the cube, 11-17): said once
+        var lead = nc
+        lead["not_certified_reason"] = "Not certified: no solid part carries the load"
+        XCTAssertEqual(LatticeFileStrength(block: lead).line, "Strength not checked: no solid part carries the load")
         let nco = try LatticeFileButton.outcome(try Self.made(nc), densityGCm3: 1.24)
         XCTAssertEqual(nco.acceptedCount, 0)
         let ncd = try XCTUnwrap(nco.variants[0].diagnosis)
@@ -178,7 +182,7 @@ final class LatticeFileButtonTests: XCTestCase {
         XCTAssertFalse(LatticeFileButton.takes(l, modelPath: "/a/model.stl", wired: true), "RED CONTROL: an STL part keeps the old run")
         XCTAssertFalse(LatticeFileButton.takes(l, modelPath: nil, wired: true))
         XCTAssertFalse(LatticeFileButton.takes(l, modelPath: "/a/p.step", wired: false), "RED CONTROL: the switch off")
-        XCTAssertFalse(LatticeFileButton.takes(l, modelPath: "/a/p.step"), "★ production: off until the strength core is merged")
+        XCTAssertTrue(LatticeFileButton.takes(l, modelPath: "/a/p.step"), "★ production: on, LatticeReview's core is merged")
     }
 
     // MARK: the result
@@ -372,6 +376,66 @@ final class LatticeFileButtonTests: XCTestCase {
         XCTAssertEqual(ticks, 1, "one coarse tick, no fake progress")
         XCTAssertEqual(Set(try FileManager.default.contentsOfDirectory(atPath: dir.path)), before,
                        "★ nothing left beside the model")
+    }
+
+    /// ★ END TO END on this device (Install 3 gate): the print file AND its strength check made here by core's run_file_job with
+    /// LatticeReview's check, on core's 10 mm cube held on its bottom and pushed down 50 N on its top — the strength block read (a verdict
+    /// of the three), its views, the result a Results screen takes; and a setting he changed reaches the check (its echo).
+    func testTheStrengthCheckRunsOnThisDeviceForReal() throws {
+        let fm = FileManager.default
+        let core = FlexibleHisProject.repoRoot.appendingPathComponent("core")
+        let work = fm.temporaryDirectory.appendingPathComponent("strength-here-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: work, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: work) }
+        // core's 10 mm cube (its file prints at 5 mm cells): held on its bottom, pushed down on its top
+        let model = work.appendingPathComponent("cube.step")
+        try fm.copyItem(at: core.appendingPathComponent("tests/fixtures/step/cube.step"), to: model)
+        let materials = core.appendingPathComponent("src/materials/materials.json").path
+        let rules = core.appendingPathComponent("src/settings/rules.json").path
+        let mesh = try TopOptKit.importMesh(path: model.path)
+        let zs = stride(from: 2, to: mesh.vertices.count, by: 3).map { mesh.vertices[$0] }
+        let bottom = try XCTUnwrap(LatticePlaceChipsTests.face(mesh, axis: 2, sign: -1, at: zs.min() ?? 0), "the cube's bottom")
+        let top = try XCTUnwrap(LatticePlaceChipsTests.face(mesh, axis: 2, sign: 1, at: zs.max() ?? 0), "the cube's top")
+        // the Lattice run's job as the page makes it (makeLatticeRunRequest: a lattice block of his type), core's identity test's
+        var spec = LatticeSpec(topologyID: "octet", cellMM: 6, strutRadiusMM: 0.6, generateRelativeDensity: 0.3,
+                               minRelativeDensity: 0.1, maxRelativeDensity: 0.5, skin: "none", minExtrudableWidthMM: 0.45)
+        spec.algorithm = ""
+        let request = RunRequest(modelPath: model.path, material: "PLA", materialsPath: materials, rulesPath: rules,
+                                 resolution: 48, projectName: "strength here", anchorFaceIDs: [Int(bottom)],
+                                 loadGroups: [TopOptKit.LoadGroupSpec(faceIDs: [Int(top)], force: SIMD3(0, 0, -50))],
+                                 minimizePlastic: true, buildDirection: SIMD3(0, 0, 1), infillPercent: 40, wallLoops: 3,
+                                 wallLineWidthOuterMM: 0.45, wallLineWidthInnerMM: 0.45, lattice: spec, jobMode: "lattice_part")
+        // the strength job as the page builds it, with one value he changed (the check echoes it)
+        let s = StrengthSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let infill = try XCTUnwrap(StrengthCheckDocs.variable("infill_exponent"))
+        XCTAssertNil(s.set(.number(2), for: infill))
+        let strengthJob = s.addTo(strengthJob: try RemoteRun.buildJobJSON(request))
+        // the cube's file at 5 mm cells (the size core's own CLI test makes it at)
+        var tried: LatticeFileRun.Made?
+        var refusals: [String] = []
+        for cell in [5.0, 4.0] where tried == nil {
+            var lay = LatticeLayoutSession.Settings()
+            lay.allLattice = true
+            lay.cellMM = cell
+            let job = LatticeFileJob.ForPart(json: try LatticeFileJob.build(lay, modelName: "cube.step",
+                                                                           strengthJob: LatticeFileJob.strengthJobName),
+                                             modelPath: model.path, demand: nil)
+            do { tried = try LatticeFileButton.runHere(job: job, strengthJob: strengthJob, materialsPath: materials, rulesPath: rules) }
+            catch { refusals.append("\(cell) mm: \(error)") }
+        }
+        let made = try XCTUnwrap(tried, "a file at some cell size: \(refusals)")
+        let st = try XCTUnwrap(made.report.strength, "★ the strength block, made on this device")
+        print("LATTICE-STRENGTH-HERE: \(st.line) · verdict \(st.verdict.rawValue) · fields \(made.fields?.count ?? 0) bytes")
+        XCTAssertNotNil(st.verdictSent, "★ core's verdict (pass, solid only or fail)")
+        XCTAssertGreaterThan(st.safetyMargin, 0)
+        let block = try XCTUnwrap((try JSONSerialization.jsonObject(with: made.reportJSON) as? [String: Any])?["strength"] as? [String: Any])
+        let echo = try XCTUnwrap(block["settings"] as? [String: Any], "the check's echo of every value it used")
+        XCTAssertEqual((echo["infill_exponent"] as? NSNumber)?.doubleValue, 2, "★ the value he changed reached the check")
+        if st.verdict != .fail || st.fields != nil { XCTAssertNotNil(made.fields, "★ the check's views came back") }
+        let o = try LatticeFileButton.outcome(made, densityGCm3: 1.24)
+        XCTAssertEqual(o.variants.count, 1)
+        XCTAssertGreaterThan(o.variants[0].meshIndices.count, 0, "the file's mesh is the result")
+        XCTAssertEqual(o.acceptedCount, st.accepted ? 1 : 0, "the old gate's word decides the card")
     }
 
     // MARK: opt-in, the real worker

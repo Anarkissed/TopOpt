@@ -27,6 +27,9 @@ public final class LatticeLayoutPreview: ObservableObject {
     /// Core's numbers for the debug overlay (stage E's iPad timing): open, read, cells, bars, ms.
     @Published public private(set) var timing: Timing?
     @Published public private(set) var laying = false
+    /// ★ D23 (his 11-17): the chips' places of the last layout, and how long core took to find them.
+    @Published public private(set) var places: [LatticeLayoutSession.Place] = []
+    public private(set) var placesMS = 0.0
     /// One plain line: what these settings ask that the new engine does not do yet (nil: nothing).
     @Published public private(set) var notes: [String] = []
     /// ★ his rule 11-14: "recommend changing to a 0.2mm nozzle" when lattice cannot go where asked — one line, or nil.
@@ -173,7 +176,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         nozzleTask?.cancel(); nozzleTask = nil; nozzleWanted = false; nozzleState = .notAsked
         nozzleSession?.close(); nozzleSession = nil; nozzlePath = nil; nozzleLine = nil; solidReason = nil
         session?.close(); session = nil; sessionPath = nil; lastSettings = nil; sessionStressKey = nil; nozzleStressKey = nil
-        bars = nil; laid = nil; problem = nil; timing = nil; laying = false
+        bars = nil; laid = nil; problem = nil; timing = nil; laying = false; places = []
     }
 
     // MARK: ★ Install 3 — the old preview's colour key on the new engine's bars
@@ -306,6 +309,12 @@ public final class LatticeLayoutPreview: ObservableObject {
             if solidWanted { await addMap() }
             nozzleTask?.cancel(); nozzleLine = nil; nozzleState = .notAsked
             await solidReasonCheck(lattice: latticeAtLay)   // ★ his ruling 11-14: why it is solid (one coarse map, cheap)
+            // ★ his 11-17 "add a chip to ask what it should be": the faces this layout's regions run into that no rule decides
+            // (D23), asked with the SAME settings it was laid with — a second call, so a dragged slider never waits on it
+            if !Task.isCancelled, let found = try? await session.places(s), !Task.isCancelled {
+                places = found.places
+                placesMS = found.ms
+            }
             // ★ his pick 11-16 (5): the nozzle check is a second full layout — only when asked (Refresh, or his tap)
             if LatticePreviewMode.nozzleAfterLay(asked: nozzleWanted), !Task.isCancelled {
                 nozzleWanted = false
@@ -690,10 +699,37 @@ public final class LatticeLayoutPreview: ObservableObject {
         // ★ 11-13: Protect skins of one depth go as ONE skin (the same solid, rule D5). The engine's reading asks every skin in
         // turn: his v4 stand's 26 skins of 4 mm took 289 s to lay on the Mac, one group of them 0.7 s, the lattice identical.
         s.protect = Self.mergedByDepth(s.protect)
+        // ★ D23 (his 11-17 "add a chip to ask what it should be"): every face a chip was answered "Solid" on, as ONE chip skin at
+        // depth 0 (core's D5 two line widths, LatticeReview 11-17: a thin skin with the lattice kept behind it), never merged
+        // with his own skins, so its place stays listed and the chip can be answered again
+        if let chip = Self.chipSkin(l, id: id) { s.protect.append(chip) }
         // Whole part ("In a part"), or no face asked for lattice: the whole part is lattice, less No lattice and Protect skins
         s.allLattice = l.wholePart || !s.regions.contains { !$0.noLattice }
         return s
     }
+
+    /// ★ D23: the places as the chip overlay takes them — one chip per place, its faces its members ("face:<raw>", the old
+    /// chips' keys), Lattice by default (what the engine makes there), Solid when a chip's answer makes it so now.
+    public static func chipDecisions(_ places: [LatticeLayoutSession.Place]) -> [LatticeBandDecision] {
+        places.map { p in
+            let keys = p.faces.map { chipFaceKey + String($0) }
+            return LatticeBandDecision(key: keys.first ?? "place:\(p.region)", kind: .place,
+                                       label: LatticeBandChipText.placeTitle(faces: p.faces.count),
+                                       anchor: p.point, normal: p.normal, areaMM2: Float(p.areaMM2),
+                                       defaultSolid: false, solid: p.solidNow, memberKeys: keys)
+        }
+    }
+
+    /// The faces answered "Solid" on a chip (`bandTreatments` "face:<raw>" = true, the old chips' keys, so his answers carry
+    /// over), as one chip skin; nil when none.
+    static func chipSkin(_ l: LatticeSettings, id: Int32) -> LatticeLayoutSession.Protect? {
+        let faces = l.bandTreatments.compactMap { k, solid -> Int32? in
+            guard solid, k.hasPrefix(chipFaceKey) else { return nil }
+            return Int32(k.dropFirst(chipFaceKey.count))
+        }.sorted()
+        return faces.isEmpty ? nil : .init(id: id, faces: faces, depthMM: 0, chip: true)
+    }
+    static let chipFaceKey = "face:"
 }
 
 extension LatticeLayoutPreview {

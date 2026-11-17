@@ -120,8 +120,26 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         public var depthMM: Double      // 0 = two line widths
         /// ★ his ask 11-14 (D22): the cut pieces under this skin, in place of whole faces; empty = `faces` as they are.
         public var pieces: [Piece] = []
-        public init(id: Int32, faces: [Int32], depthMM: Double = 0, pieces: [Piece] = []) {
-            self.id = id; self.faces = faces; self.depthMM = depthMM; self.pieces = pieces
+        /// ★ D23 (his 11-17 "add a chip to ask what it should be"): this skin is a chip's answer "Solid" — its place stays
+        /// listed (now solid) so the chip can be answered again; false: his own Protect skin.
+        public var chip = false
+        public init(id: Int32, faces: [Int32], depthMM: Double = 0, pieces: [Piece] = [], chip: Bool = false) {
+            self.id = id; self.faces = faces; self.depthMM = depthMM; self.pieces = pieces; self.chip = chip
+        }
+    }
+
+    /// ★ D23: a face (or edge-joined faces) a region's prism runs into that no rule decides — where a chip asks what it should
+    /// be. `now`: what the engine makes there (lattice, or solid under a chip's answer).
+    public struct Place: Sendable, Equatable {
+        public var region: Int32
+        public var faces: [Int32]      // raw face ids, the seeds first
+        public var point: SIMD3<Float>
+        public var normal: SIMD3<Float>
+        public var areaMM2: Double
+        public var solidNow: Bool
+        public init(region: Int32, faces: [Int32], point: SIMD3<Float>, normal: SIMD3<Float>, areaMM2: Double, solidNow: Bool) {
+            self.region = region; self.faces = faces; self.point = point; self.normal = normal; self.areaMM2 = areaMM2
+            self.solidNow = solidNow
         }
     }
 
@@ -258,6 +276,8 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         public var code: String
         public var why: String
         public var msTotal: Double
+        /// Not ok: core's technical message behind `why` (for the log, never on screen).
+        public var detail: String = ""
     }
 
     /// ★ THE PRINT FILE ON THE iPAD (his 11-17): the same `lattice_file` job the Mac's worker runs, through core's own
@@ -271,7 +291,7 @@ public final class LatticeLayoutSession: @unchecked Sendable {
             let r = topoptbridge.lattice_file_job(std.string(jobPath), std.string(outDir), std.string(materialsPath),
                                                   std.string(rulesPath), &err)
             outcome = err.ok ? .success(FileJobOutcome(ok: r.ok, exitCode: Int(r.exit_code), code: String(r.code),
-                                                       why: String(r.why), msTotal: r.ms_total))
+                                                       why: String(r.why), msTotal: r.ms_total, detail: String(r.detail)))
                              : .failure(TopOptError(message: String(err.message)))
             done.signal()
         }
@@ -316,6 +336,31 @@ public final class LatticeLayoutSession: @unchecked Sendable {
             }
         } onCancel: { [weak self] in
             self?.cancel()
+        }
+    }
+
+    /// ★ D23: the chips' places of the last layout, asked with the SAME settings it was laid with (other settings: none). A
+    /// separate call (it costs about as much as a layout).
+    public func places(_ settings: Settings) async throws -> (places: [Place], ms: Double) {
+        let sid = id
+        let raw = convert(settings)
+        return try await worker.run {
+            var err = topoptbridge.BridgeError()
+            let r = topoptbridge.lattice_layout_places(sid, raw, &err)
+            if !err.ok { throw TopOptError(message: String(err.message)) }
+            let counts = Array(r.face_counts), faces = Array(r.faces), pt = Array(r.point), nm = Array(r.normal)
+            let area = Array(r.area_mm2), solid = Array(r.solid_now), region = Array(r.region)
+            var out: [Place] = []
+            var k = 0
+            for i in 0..<region.count {
+                let n = Int(counts[i])
+                out.append(Place(region: region[i], faces: Array(faces[k..<k + n]),
+                                 point: SIMD3(pt[3 * i], pt[3 * i + 1], pt[3 * i + 2]),
+                                 normal: SIMD3(nm[3 * i], nm[3 * i + 1], nm[3 * i + 2]),
+                                 areaMM2: area[i], solidNow: solid[i] != 0))
+                k += n
+            }
+            return (out, r.ms)
         }
     }
 
@@ -407,6 +452,7 @@ public final class LatticeLayoutSession: @unchecked Sendable {
             o.protect_face_counts.push_back(Int32(p.faces.count))
             for f in p.faces { o.protect_faces.push_back(f) }
         }
+        if s.protect.contains(where: \.chip) { for p in s.protect { o.protect_chip.push_back(p.chip ? 1 : 0) } }   // D23
         // D22: the cut pieces, the regions' first and then the skins' (the counts sent only when some piece exists)
         if s.regions.contains(where: { !$0.pieces.isEmpty }) || s.protect.contains(where: { !$0.pieces.isEmpty }) {
             for r in s.regions { o.region_piece_counts.push_back(Int32(r.pieces.count)) }

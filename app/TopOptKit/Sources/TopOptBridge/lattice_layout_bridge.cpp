@@ -21,6 +21,7 @@
 #include "topopt/lattice.hpp"         // lattice_topology_from_id
 #include "topopt/lattice_layout.hpp"
 #include "topopt/lattice_layout_file.hpp"   // run_file_job: the print file on the iPad
+#include "topopt/lattice_file_strength.hpp" // its strength check (Install 3)
 
 namespace topoptbridge {
 namespace {
@@ -124,8 +125,11 @@ ll::Settings settings_from(const LatticeLayoutSettings& in) {
     a.id = in.protect_ids[p];
     a.faces = pf[p];
     a.depth_mm = in.protect_depth_mm[p];
+    a.chip = p < in.protect_chip.size() && in.protect_chip[p] != 0;   // D23: a chip's answer "Solid"
     s.protect.push_back(std::move(a));
   }
+  if (!in.protect_chip.empty() && in.protect_chip.size() != np)
+    throw std::invalid_argument("lattice layout: protect_chip is not one per Protect skin");
   // D22: the pieces (each a list of faces and a list of cuts), handed out to the regions, then the skins, in order
   if (!in.region_piece_counts.empty() && in.region_piece_counts.size() != nr)
     throw std::invalid_argument("lattice layout: region_piece_counts is not one per region");
@@ -418,6 +422,32 @@ void lattice_layout_set_demand(int64_t session, const LatticeLayoutDemand& d, Br
   if (!why.empty()) failed(err, why);
 }
 
+LatticeLayoutPlaces lattice_layout_places(int64_t session, const LatticeLayoutSettings& settings, BridgeError& err) {
+  LatticeLayoutPlaces o;
+  const std::string why = bridge_guard_run("lattice_layout_places", [&] {
+    auto s = layout_at(session);
+    const ll::Settings ask = settings_from(settings);
+    std::lock_guard<std::mutex> lock(s->mu);
+    if (!s->last) return;   // before the first whole layout, or after a cancelled one: none
+    const auto t0 = std::chrono::steady_clock::now();
+    for (const ll::Place& p : s->session->places(ask)) {
+      o.region.push_back(static_cast<int32_t>(p.region));
+      o.face_counts.push_back(static_cast<int32_t>(p.faces.size()));
+      for (int f : p.faces) o.faces.push_back(static_cast<int32_t>(f));
+      o.point.insert(o.point.end(), {static_cast<float>(p.point.x), static_cast<float>(p.point.y), static_cast<float>(p.point.z)});
+      o.normal.insert(o.normal.end(), {static_cast<float>(p.normal.x), static_cast<float>(p.normal.y), static_cast<float>(p.normal.z)});
+      o.area_mm2.push_back(p.area_mm2);
+      o.solid_now.push_back(p.now == "solid" ? 1 : 0);
+    }
+    o.ms = ms_since(t0);
+  });
+  if (!why.empty()) {
+    o = LatticeLayoutPlaces{};
+    failed(err, why);
+  }
+  return o;
+}
+
 LatticeLayoutWhere lattice_layout_where(int64_t session, const LatticeLayoutPoints& points, BridgeError& err) {
   LatticeLayoutWhere o;
   const std::vector<float>& xyz = points.xyz;
@@ -555,14 +585,16 @@ void lattice_layout_close(int64_t session) {
 LatticeFileJobResult lattice_file_job(const std::string& job_path, const std::string& out_dir,
                                       const std::string& materials_path, const std::string& rules_path, BridgeError& err) {
   LatticeFileJobResult out;
-  (void)materials_path;   // the strength check's, once the linked core has one (Install 3, LatticeReview's core)
-  (void)rules_path;
   const std::string why = bridge_guard_run("lattice_file_job", [&] {
-    const ll::FileResult r = ll::run_file_job(job_path, out_dir);
+    // ★ Install 3: the strength check, as the CLI makes it (LatticeReview's lattice_file_strength_check), with the app's
+    // own materials and rules; a job with no strength_job never reads it
+    const ll::StrengthCheck check = topopt::lattice_file_strength_check(materials_path, rules_path);
+    const ll::FileResult r = ll::run_file_job(job_path, out_dir, 0, nullptr, &check);
     out.ok = r.ok;
     out.exit_code = static_cast<int32_t>(r.exit_code);
     out.code = r.code;
     out.why = r.why;
+    out.detail = r.detail;
     out.ms_total = r.ms_total;
   });
   if (!why.empty()) {

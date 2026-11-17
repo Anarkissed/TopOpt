@@ -37,9 +37,10 @@ public enum LatticeFileJob {
     /// (`lattice_part`: loads, supports, material, safety margin, build direction, voxel size), named by the job's
     /// `strength_job`. Absent = no check and no block (rule V2); Aesthetic never sends it (U9); Organic never reaches here.
     public static let strengthJobName = "strength_job.json"
-    /// ★ Whether the core the app and the Mac run reads `strength_job` (LatticeReview's install3-strength): OFF until that core
-    /// is merged into the release — a core that does not know the key refuses the whole job.
-    public static let strengthWired = false
+    /// ★ Whether the core the app and the Mac run reads `strength_job`: ON since LatticeReview's Install 3 core
+    /// (claude/install3-engine @ 61ac4291) is merged and vendored — the app and the Mac's worker go out together (a core that
+    /// does not know the key refuses the whole job, so the worker must be this core's: the fingerprint check stops any other).
+    public static let strengthWired = true
     /// Whether a part's print file carries the strength check: Structural only (U9), on a core that reads it.
     public static func checksStrength(_ l: LatticeSettings, wired: Bool = strengthWired) -> Bool {
         wired && (l.stageMode ?? .structural) == .structural && l.resolvedAlgorithm != "organic"   // (LatticeLayoutPreview.draws)
@@ -124,6 +125,8 @@ public enum LatticeFileJob {
         }
         if s.regions.contains(where: { !$0.pieces.isEmpty }) { layout["region_pieces"] = s.regions.map { pieces($0.pieces) } }
         if s.protect.contains(where: { !$0.pieces.isEmpty }) { layout["protect_pieces"] = s.protect.map { pieces($0.pieces) } }
+        // ★ D23: a chip's answer "Solid" (only when some skin is one, so a job with none is the bytes it was)
+        if s.protect.contains(where: \.chip) { layout["protect_chip"] = s.protect.map { $0.chip ? 1 : 0 } }
         // Install 2: the stress keys, cell size by stress and the size step (core's defaults are the job's bytes as before
         // only by value: the keys are always written, as every other layout key is)
         layout["by_stress"] = s.byStress
@@ -317,12 +320,21 @@ public struct LatticeFileStrength: Equatable, Sendable {
 
     /// The check's not-certified words, or a plain fallback when it gives none.
     public static func notCertifiedLine(_ reason: String) -> String {
-        "The check could not certify it: " + (reason.isEmpty ? "it could not judge this part" : reason)
+        "The check could not certify it: " + (reason.isEmpty ? "it could not judge this part" : Self.reason(reason))
+    }
+
+    /// Core's reason without its own "Not certified:" lead (the line already says so), first letter as written after.
+    static func reason(_ r: String) -> String {
+        guard !r.isEmpty else { return "the check could not judge it" }
+        let lead = "not certified:"
+        guard r.lowercased().hasPrefix(lead) else { return r }
+        let rest = r.dropFirst(lead.count).trimmingCharacters(in: .whitespaces)
+        return rest.prefix(1).lowercased() + rest.dropFirst()
     }
 
     /// One plain line: whether the latticed part is strong enough for his loads at his safety margin.
     public var line: String {
-        if notCertified { return "Strength not checked: " + (notCertifiedReason.isEmpty ? "the check could not judge it" : notCertifiedReason) }
+        if notCertified { return "Strength not checked: " + Self.reason(notCertifiedReason) }
         let mass = massGrams > 0 ? String(format: " · %.0f g", massGrams) : ""
         let margin = Self.x(marginWorstCase)
         switch verdict {
@@ -635,6 +647,7 @@ public enum LatticeFileButton {
             return d
         }
         let said = r.why.isEmpty ? "The file could not be made" : r.why
+        if !r.ok { NSLog("DIAG lattice file on this device: %@ (%@): %@", r.code, said, r.detail) }   // the why behind the line
         guard let rd = file(LatticeFileJob.reportName), let report = LatticeFileReport.parse(rd) else {
             throw LatticeFileRun.Failure(said)
         }

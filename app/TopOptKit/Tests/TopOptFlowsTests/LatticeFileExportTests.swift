@@ -68,7 +68,7 @@ final class LatticeFileExportTests: XCTestCase {
         var l = LatticeSettings()
         l.chooseLatticeType(.structural)
         XCTAssertTrue(LatticeFileJob.checksStrength(l, wired: true), "★ Structural: the check rides the file")
-        XCTAssertFalse(LatticeFileJob.checksStrength(l), "★ production: off until the core that reads it is merged")
+        XCTAssertTrue(LatticeFileJob.checksStrength(l), "★ production: on, the core that reads it is merged")
         var a = LatticeSettings()
         a.chooseLatticeType(.aesthetic)
         XCTAssertFalse(LatticeFileJob.checksStrength(a, wired: true), "★ Aesthetic never sends it (U9)")

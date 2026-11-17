@@ -45,8 +45,8 @@ struct LatticeBandChipView: View {
 
     private var glyph: String {
         switch (placement.decision.kind, placement.solid) {
-        case (.face, true):  return "square.fill"
-        case (.face, false): return "square.grid.3x3"
+        case (.face, true), (.place, true):  return "square.fill"
+        case (.face, false), (.place, false): return "square.grid.3x3"
         case (.cap, true):   return "square.bottomhalf.filled"
         case (.cap, false):  return "square.dashed"
         }
@@ -103,7 +103,8 @@ struct LatticeBandChipCard: View {
                 Text(d.label)
                     .dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
                     .foregroundStyle(DS.Color.textPrimary.color)
-                Text(d.kind == .face ? "Face the lattice reaches" : "Where the lattice's depth ends")
+                Text(d.kind == .cap ? "Where the lattice's depth ends"
+                     : d.kind == .place ? "The lattice runs into it: what should it be?" : "Face the lattice reaches")
                     .dsStyle(DS.TypeScale.caption2)
                     .foregroundStyle(DS.Color.textTertiary.color)
             }

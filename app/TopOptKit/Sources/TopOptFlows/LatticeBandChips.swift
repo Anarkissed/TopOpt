@@ -178,6 +178,7 @@ public enum LatticeBandChipText {
         switch kind {
         case .face: return ("Grade to solid", "Lattice through")
         case .cap:  return ("Rim", "Nothing")
+        case .place: return ("Solid", "Lattice")
         }
     }
 
@@ -187,8 +188,13 @@ public enum LatticeBandChipText {
         case (.face, false): return "Lattice through — the lattice reaches this face"
         case (.cap, true):   return "Rim facing the solid"
         case (.cap, false):  return "Nothing — the lattice is cut here"
+        case (.place, true):  return "A thin solid skin on this face, the lattice behind it"
+        case (.place, false): return "The lattice runs out to this face, its cells open there"
         }
     }
+
+    /// What a place's chip is called on its card (never a face number, his rule: the chip sits on the face).
+    public static func placeTitle(faces: Int) -> String { faces == 1 ? "This face" : "These \(faces) faces" }
 
     /// What the chip is, for VoiceOver.
     public static func accessibility(_ p: LatticeBandChipPlacement) -> String {

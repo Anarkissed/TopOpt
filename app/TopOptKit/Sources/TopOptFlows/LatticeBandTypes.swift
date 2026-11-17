@@ -135,7 +135,10 @@ public struct LatticeBandOptions: Sendable, Equatable {
 /// user set one). Stored keys, per member: "face:<rawFaceID>" and "cap:<selectable key>". The overrides live in
 /// `LatticeSettings.bandTreatments` ([key: solid]) and reach the scene as `bandOverrides`.
 public struct LatticeBandDecision: Sendable, Equatable, Identifiable {
-    public enum Kind: String, Sendable, Codable { case face, cap }
+    /// `face` / `cap`: the old preview's band. ★ `place` (D23, his 11-17 "add a chip to ask what it should be"): the new
+    /// engine's — a face a region runs into that no rule decides: Lattice (open cells, the default) or Solid (a thin skin,
+    /// the lattice behind it).
+    public enum Kind: String, Sendable, Codable { case face, cap, place }
     public var key: String
     public var kind: Kind
     /// A short name for the chip ("Face 20", "Face 23 depth end").

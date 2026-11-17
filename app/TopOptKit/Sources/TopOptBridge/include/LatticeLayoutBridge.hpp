@@ -55,6 +55,9 @@ struct LatticeLayoutSettings {
   std::vector<double> protect_depth_mm;
   std::vector<int32_t> protect_face_counts;
   std::vector<int32_t> protect_faces;
+  // D23 (his 11-17 "add a chip to ask what it should be"): per Protect skin, 1 when it is a chip's answer "Solid" (its place
+  // stays listed, now "solid"); 0 his own skin. Empty: none.
+  std::vector<uint8_t> protect_chip;
   // Face cuts (core's rule D22, his ask 11-14: every Edit faces cut respected): pieces of faces in place of whole faces,
   // flattened. Region r has region_piece_counts[r] pieces (0: its faces as listed), Protect skin p protect_piece_counts[p];
   // either list may be empty (no pieces there). The pieces, the regions' first and then the skins', in order: piece k has
@@ -221,6 +224,21 @@ struct LatticeLayoutDemand {
   int32_t nx = 0, ny = 0, nz = 0;
 };
 void lattice_layout_set_demand(int64_t session, const LatticeLayoutDemand& demand, BridgeError& err);
+// ★ THE CHIPS' PLACES (rule D23; his 11-17 "add a chip to ask what it should be"): the faces each region's prism runs into
+// that no rule decides, of the LAST layout — call it after `lattice_layout` with the SAME settings (other settings: none).
+// A separate call: it costs about as much as a layout. Place i: region[i], face_counts[i] raw faces of `faces` (seeds
+// first), point / normal (3 each, outward), area_mm2[i], solid_now[i] (1: a chip entry makes it solid now).
+struct LatticeLayoutPlaces {
+  std::vector<int32_t> region;
+  std::vector<int32_t> face_counts;
+  std::vector<int32_t> faces;
+  std::vector<float> point;
+  std::vector<float> normal;
+  std::vector<double> area_mm2;
+  std::vector<uint8_t> solid_now;
+  double ms = 0.0;
+};
+LatticeLayoutPlaces lattice_layout_places(int64_t session, const LatticeLayoutSettings& settings, BridgeError& err);
 // Every layout of `session` running now or waiting comes back cancelled. Safe from any thread.
 void lattice_layout_cancel(int64_t session);
 void lattice_layout_close(int64_t session);
@@ -236,6 +254,7 @@ struct LatticeFileJobResult {
   int32_t exit_code = 1;
   std::string code;   // "ok", or core's refusal word
   std::string why;    // not ok: one plain line
+  std::string detail; // not ok: the technical message behind it (for the log)
   double ms_total = 0.0;
 };
 LatticeFileJobResult lattice_file_job(const std::string& job_path, const std::string& out_dir,
