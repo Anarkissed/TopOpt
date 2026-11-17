@@ -177,6 +177,9 @@ StrutStrengthReport evaluate_strut_strength(
 // byte for byte; every other type names its own evidence folder and its own measured
 // bulk K_dev drift from vpc 32 to 48. Throws for a type with no table, like the above.
 std::string strut_law_source(LatticeTopology topo);
+// The density under which this type's law rests on a BULK-ONLY row (no boundary value measured there), so a strut
+// pass must not be given on it alone: 0.10 for octet (its 0.04959 row, 2026-11-17), 0 for every other type.
+double strut_law_bulk_only_below(LatticeTopology topo);
 std::string strut_law_resolution_note(LatticeTopology topo);
 
 }  // namespace topopt

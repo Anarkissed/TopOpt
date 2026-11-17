@@ -37,7 +37,7 @@ For the solid parts, the strength of the plastic is compared with the highest st
 
 ## The struts' margin
 
-A lattice cube only shows a smeared stress. Measured tables turn it into the peak stress in the struts, which is much higher. That gives the struts' margin.
+A lattice cube only shows a smeared stress. Measured tables turn it into the peak stress in the struts, which is much higher. That gives the struts' margin. For the octet, the table was measured on 17 November 2026 on the octet cell we actually print. Its lightest row was measured only inside the lattice, so octet cells lighter than 10 % of solid can't give the struts a pass; the result says so.
 
 ## Too few cells across
 

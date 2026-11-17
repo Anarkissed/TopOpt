@@ -173,6 +173,8 @@ $$M^s_{ip}=\frac{\sigma_y}{\max_e b_{vm}},\qquad M^s_{il}=\frac{k_z\,\sigma_y}{\
 
 Types with a law: octet, sc, bcc, fcc, diamond, kelvin, rhombic, gyroid, schwarz_d. bccz, fccz, reentrant: none (`strut.uncertified` true).
 
+The octet's table is the full octet's (legs and braces, the cell the engine lays), measured 2026-11-17 (`evidence/2026-11-17-octet-full-strut-law`); its span is the octet band, so no octet density is clamped. Its lowest row ($\rho$ = 0.04959) is bulk only: every boundary fixture there failed the aliasing guard, and the cut layer read about 1.6 times higher, so the row is a lower bound. Until it has a boundary value, a credited cell with $\rho_c<0.10$ (the next row, `strut_law_bulk_only_below`) gives no strut pass: `strut.out_of_regime` is true with a plain `regime_note`, and struts_pass is false.
+
 ### When no solid carries the load
 
 ({{strut_gate_only_without_solid}}.) The strut margin enters `accepted` only when the solid-only $M_{\text{eff}}=+\infty$ and lattice voxels exist: then if the type has a law and the member is in regime, $M_{\text{eff}}\leftarrow M^s$ and accepted $=\text{path\_ok}\wedge M^s\ge S$; otherwise not certified, accepted = false, with a sentence why.
@@ -187,7 +189,9 @@ $W_e$ is the local member width of the composite design (no-credit voxels empty)
 
 ## The verdict
 
-$$\text{struts\_pass}=\text{law}\wedge M^s\ge S$$
+$$\text{struts\_pass}=\text{law}\wedge M^s\ge S\wedge\min_{c\ \text{credited}}\rho_c\ge\rho^{\text{bulk}}_T$$
+
+($\rho^{\text{bulk}}_T$ = 0.10 for the octet, 0 for every other type; see the struts' margin)
 
 (rule switched {{struts_in_verdict}})
 

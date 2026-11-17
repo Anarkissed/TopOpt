@@ -1,0 +1,41 @@
+LATTICE DE-HOMOGENIZATION PROBE — octet band [0.04959, 0.90027] (read from core)
+
+===== BOUNDARY POPULATIONS — free surfaces and cut cells (J4) =====
+  sandwich rho 0.050 N3 vpc24: K_dev free=0.0 interior=0.0 dropped=12960 (1s, cg<=35)
+    rho_meas 0.0023 is -95.3% off rho_lib 0.0496 (aliased): re-measuring at N3 vpc32
+  cut rho 0.050 N3 vpc24: K_dev free=0.0 interior=0.0 dropped=15672 (1s, cg<=35)
+    rho_meas 0.0023 is -95.3% off rho_lib 0.0496 (aliased): re-measuring at N3 vpc32
+  sandwich rho 0.100 N3 vpc24: K_dev free=50.7 interior=41.0 dropped=0 (39s, cg<=1046)
+  cut rho 0.100 N3 vpc24: K_dev free=52.2 interior=42.3 dropped=0 (52s, cg<=1226)
+  sandwich rho 0.157 N3 vpc24: K_dev free=28.7 interior=23.4 dropped=0 (39s, cg<=1046)
+    rho_meas 0.1065 is -32.2% off rho_lib 0.1570 (aliased): re-measuring at N3 vpc32
+  cut rho 0.157 N3 vpc24: K_dev free=29.5 interior=24.0 dropped=0 (52s, cg<=1226)
+    rho_meas 0.1076 is -31.5% off rho_lib 0.1570 (aliased): re-measuring at N3 vpc32
+  sandwich rho 0.200 N4 vpc16: K_dev free=24.5 interior=21.1 dropped=0 (42s, cg<=770)
+  cut rho 0.200 N4 vpc16: K_dev free=25.1 interior=22.0 dropped=0 (54s, cg<=979)
+  sandwich rho 0.313 N4 vpc16: K_dev free=12.5 interior=10.8 dropped=0 (40s, cg<=770)
+    rho_meas 0.2188 is -30.1% off rho_lib 0.3130 (aliased): re-measuring at N3 vpc24
+  cut rho 0.313 N4 vpc16: K_dev free=12.8 interior=11.2 dropped=0 (54s, cg<=979)
+    rho_meas 0.2196 is -29.8% off rho_lib 0.3130 (aliased): re-measuring at N3 vpc24
+  sandwich rho 0.450 N4 vpc16: K_dev free=8.8 interior=7.6 dropped=0 (63s, cg<=578)
+  cut rho 0.450 N4 vpc16: K_dev free=8.9 interior=7.8 dropped=0 (90s, cg<=758)
+  sandwich rho 0.600 N4 vpc16: K_dev free=5.4 interior=4.7 dropped=0 (74s, cg<=493)
+  cut rho 0.600 N4 vpc16: K_dev free=5.5 interior=4.7 dropped=0 (106s, cg<=690)
+  sandwich rho 0.750 N4 vpc16: K_dev free=3.0 interior=2.5 dropped=0 (79s, cg<=441)
+  cut rho 0.750 N4 vpc16: K_dev free=3.0 interior=2.6 dropped=0 (113s, cg<=605)
+  sandwich rho 0.900 N4 vpc16: K_dev free=2.0 interior=1.7 dropped=0 (81s, cg<=414)
+  cut rho 0.900 N4 vpc16: K_dev free=2.0 interior=1.7 dropped=0 (121s, cg<=561)
+  sandwich rho 0.050 N3 vpc32: K_dev free=106.1 interior=85.3 dropped=0 (78s, cg<=1539)
+    rho_meas 0.0625 is +26.0% off rho_lib 0.0496 (aliased): re-measuring at N3 vpc40
+  cut rho 0.050 N3 vpc32: K_dev free=109.4 interior=88.0 dropped=0 (103s, cg<=1712)
+    rho_meas 0.0632 is +27.4% off rho_lib 0.0496 (aliased): re-measuring at N3 vpc40
+  sandwich rho 0.157 N3 vpc32: K_dev free=33.0 interior=26.2 dropped=0 (142s, cg<=1236)
+  cut rho 0.157 N3 vpc32: K_dev free=33.8 interior=27.1 dropped=0 (200s, cg<=1526)
+  sandwich rho 0.313 N3 vpc24: K_dev free=15.9 interior=14.0 dropped=0 (76s, cg<=784)
+  cut rho 0.313 N3 vpc24: K_dev free=16.2 interior=14.3 dropped=0 (103s, cg<=1004)
+  sandwich rho 0.050 N3 vpc40: K_dev free=101.3 interior=81.1 dropped=0 (139s, cg<=2064)
+    rho_meas 0.0410 is -17.3% off rho_lib 0.0496 (aliased) at the finest pitch tried: this rho has no sandwich population
+  cut rho 0.050 N3 vpc40: K_dev free=104.7 interior=83.9 dropped=0 (185s, cg<=2265)
+    rho_meas 0.0415 is -16.4% off rho_lib 0.0496 (aliased) at the finest pitch tried: this rho has no cut population
+
+DONE (rc=0).

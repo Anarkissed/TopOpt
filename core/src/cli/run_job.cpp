@@ -15710,7 +15710,25 @@ ll::StrengthDone run_lattice_file_strength(const ll::StrengthAsk& ask,
   // V5 (his ruling, 2026-11-17): in Structural the lattice passes only when the solid AND the struts keep the safety
   // margin. `accepted` stays the old gate exactly; a type with no strut law cannot reach a full pass. A result, never a
   // refusal: the file is made in all three cases.
-  const bool struts_pass = law && ss.margin_worst_case >= options.margin_stop;
+  // A credited cell lighter than where the type's law has a boundary value (octet: under 0.10, its lowest row is
+  // bulk only, a lower bound) is not given a strut pass on that row alone: its strut result is out of regime.
+  double lightest_credited = std::numeric_limits<double>::infinity();
+  for (std::size_t c = 0; c < credit.cell_credit.size(); ++c)
+    if (credit.cell_credit[c]) lightest_credited = std::min(lightest_credited, credit.cell_rho[c]);
+  const double bulk_only_below = law ? strut_law_bulk_only_below(topo) : 0.0;
+  const bool bulk_only = law && lightest_credited < bulk_only_below;
+  const bool out_of_regime = a.lattice_strut_out_of_regime || bulk_only;
+  std::string regime_note;
+  if (a.lattice_strut_out_of_regime)
+    regime_note = "the thinnest latticed member spans fewer cells than the measured homogenization floor, so the macro "
+                  "stress field these strut numbers amplify is itself out of the tensor's validated regime: treat them "
+                  "as indicative, not certified";
+  if (bulk_only)
+    regime_note += std::string(regime_note.empty() ? "" : "; ") + "some cells are lighter than " +
+                   json_num(bulk_only_below) + " of solid, where the strut rule was measured inside the lattice only " +
+                   "(not where it is cut or meets a surface, which reads about 1.6 times higher), so it cannot give "
+                   "the struts a pass";
+  const bool struts_pass = law && !bulk_only && ss.margin_worst_case >= options.margin_stop;
   const char* verdict = !a.accepted ? "fail" : struts_pass ? "pass" : "solid_only";
   std::string s = "{\n";
   s += "    \"accepted\": " + std::string(a.accepted ? "true" : "false") + ",\n";
@@ -15794,14 +15812,8 @@ ll::StrengthDone run_lattice_file_strength(const ll::StrengthAsk& ask,
        ", \"margin_in_plane\": " + json_num(law ? ss.margin_in_plane : nan) +
        ", \"margin_interlayer\": " + json_num(law ? ss.margin_interlayer : nan) +
        ", \"margin_worst_case\": " + json_num(law ? ss.margin_worst_case : nan) +
-       ", \"out_of_regime\": " + std::string(a.lattice_strut_out_of_regime ? "true" : "false") +
-       ", \"regime_note\": " +
-       json_str(a.lattice_strut_out_of_regime
-                    ? "the thinnest latticed member spans fewer cells than the measured homogenization floor, so "
-                      "the macro stress field these strut numbers amplify is itself out of the tensor's validated "
-                      "regime: treat them as indicative, not certified"
-                    : "") +
-       "},\n";
+       ", \"out_of_regime\": " + std::string(out_of_regime ? "true" : "false") +
+       ", \"regime_note\": " + json_str(regime_note) + "},\n";
   s += "    \"fields\": \"fields.bin\",\n";
   if (done.files.size() > 1) s += "    \"scenario_fields\": \"scenario_fields.bin\",\n";
   // The old report's diagnosis (diagnose_gate), on the composite analysis, when it is not accepted.

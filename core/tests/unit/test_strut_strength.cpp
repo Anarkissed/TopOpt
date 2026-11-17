@@ -2,12 +2,13 @@
 // 2026-07-31-lattice-strut-strength-report).
 //
 // What is pinned, and why:
-//   1. TRANSCRIPTION — the embedded law table reproduces PR 259's kfit `*_cert`
-//      envelope rows (evidence/2026-07-31-lattice-dehomogenization-probe/
-//      kfit.csv) EXACTLY at every anchor. A silent table edit breaks here.
+//   1. TRANSCRIPTION — the embedded law table reproduces the full octet's kfit
+//      `*_cert` envelope rows (evidence/2026-11-17-octet-full-strut-law/octet/
+//      kfit.csv; until 2026-11-17 PR 259's legs-only octet) EXACTLY at every
+//      anchor. A silent table edit breaks here.
 //   2. INTERPOLATION + CLAMP (bar L5) — piecewise-linear between rows; outside
 //      the span the K's are CLAMPED to the endpoint row and FLAGGED, never
-//      extrapolated (K_dev is 124 at the floor — extrapolating it is exactly how
+//      extrapolated (K_dev is 108 at the floor — extrapolating it is exactly how
 //      a wrong number would look plausible).
 //   3. TWO INVARIANTS, NOT ONE — a purely hydrostatic macro stress has ZERO von
 //      Mises yet produces a NONZERO strut bound (the measured fact that killed
@@ -60,21 +61,22 @@ static int g_checks = 0;
 namespace {
 
 // The kfit `*_cert` rows, VERBATIM from
-// evidence/2026-07-31-lattice-dehomogenization-probe/kfit.csv — the independent
-// transcription this test pins the embedded table against.
+// evidence/2026-11-17-octet-full-strut-law/octet/kfit.csv (the full octet, measured
+// 2026-11-17; the 0.04959 row is bulk only) — the independent transcription this
+// test pins the embedded table against.
 struct Row {
   double rho, Kd, Kv, Kild, Kilv;
 };
 constexpr Row kExpected[] = {
-    {0.04762, 124.0930, 60.6036, 90.9946, 66.0605},
-    {0.09505, 65.3739, 37.8932, 67.1207, 43.5009},
-    {0.15524, 38.7510, 20.5053, 30.6208, 20.8223},
-    {0.20414, 34.7623, 21.4607, 34.0004, 21.6227},
-    {0.31619, 20.6863, 13.3207, 17.5533, 11.8537},
-    {0.44394, 11.6092, 8.0827, 12.8386, 9.5626},
-    {0.60004, 9.3845, 6.4616, 6.9696, 6.3297},
-    {0.75210, 4.6847, 3.5686, 4.2797, 4.3419},
-    {0.89598, 3.6882, 2.8571, 3.2186, 2.8771},
+    {0.04959, 108.3685, 57.0626, 68.7590, 46.0341},
+    {0.10000, 78.7478, 42.7945, 59.6058, 35.0698},
+    {0.15700, 55.9002, 27.6657, 35.1808, 24.1727},
+    {0.20000, 38.7718, 22.8618, 24.4197, 15.9557},
+    {0.31300, 23.5379, 15.4270, 13.6524, 10.2743},
+    {0.45000, 14.7720, 10.6152, 9.9659, 6.8229},
+    {0.60000, 9.9508, 8.1374, 7.0267, 5.1523},
+    {0.75000, 8.4235, 5.8863, 4.1941, 3.4319},
+    {0.90027, 6.3898, 3.7379, 2.3695, 2.1135},
 };
 constexpr int kRows = static_cast<int>(sizeof(kExpected) / sizeof(kExpected[0]));
 
@@ -82,7 +84,7 @@ constexpr int kRows = static_cast<int>(sizeof(kExpected) / sizeof(kExpected[0]))
 struct OneVoxel {
   std::vector<double> stress;  // 6
   std::vector<char> mask{1};
-  std::vector<double> rho{0.31619};
+  std::vector<double> rho{0.31300};
 };
 OneVoxel voxel_with(double xx, double yy, double zz, double xy, double yz,
                     double zx, double rho) {
@@ -158,7 +160,7 @@ int main() {
   // The measured fact that makes the scalar K·vm law unbounded (PR 259 J5): a
   // hydrostatic macro state loads the struts while carrying zero macro von Mises.
   {
-    OneVoxel v = voxel_with(-10.0, -10.0, -10.0, 0.0, 0.0, 0.0, 0.31619);
+    OneVoxel v = voxel_with(-10.0, -10.0, -10.0, 0.0, 0.0, 0.0, 0.31300);
     const StrutStrengthReport r = evaluate_strut_strength(
         v.stress, v.mask, v.rho, Vec3{0, 0, 1}, kYield, kZk);
     CHECK(r.evaluated && r.max_macro_vm_mpa == 0.0,
@@ -173,7 +175,7 @@ int main() {
 
   // ── 4. build direction (bar L8): explicit, resolved, in-plane untouched ─────
   {
-    OneVoxel v = voxel_with(12.0, -3.0, 5.0, 4.0, -2.0, 1.0, 0.31619);
+    OneVoxel v = voxel_with(12.0, -3.0, 5.0, 4.0, -2.0, 1.0, 0.31300);
     const StrutStrengthReport rz = evaluate_strut_strength(
         v.stress, v.mask, v.rho, Vec3{0, 0, 1}, kYield, kZk);
     const StrutStrengthReport rx = evaluate_strut_strength(
@@ -217,7 +219,7 @@ int main() {
     std::vector<double> stress = {2.0, 0.0, 0.0, 0.0, 0.0, 0.0,    // vm = 2
                                   30.0, 0.0, 0.0, 0.0, 0.0, 0.0};  // vm = 30
     std::vector<char> mask = {1, 1};
-    std::vector<double> rho = {0.31619, 0.95};
+    std::vector<double> rho = {0.31300, 0.95};
     const StrutStrengthReport r = evaluate_strut_strength(
         stress, mask, rho, Vec3{0, 0, 1}, kYield, kZk);
     CHECK(r.lattice_voxels == 2 && r.rho_clamped_voxels == 1,
@@ -319,7 +321,7 @@ int main() {
         for (int i = 1; i < g.nx; ++i) {
           const std::size_t e = g.index(i, j, k);
           post.mask[e] = 1;
-          post.relative_density[e] = 0.31619;
+          post.relative_density[e] = 0.31300;
         }
 
     // The verdict the design receives TODAY (margin_stop 0.5): solid-region
@@ -410,7 +412,7 @@ int main() {
       for (int j = 0; j < g.ny; ++j) {
         const std::size_t e = g.index(0, j, k);
         kel.mask[e] = 1;
-        kel.relative_density[e] = 0.31619;
+        kel.relative_density[e] = 0.31300;
       }
     const FixedDesignAnalysis ak = analyze_fixed_design(
         g, params, density, bcs, loads, material, Vec3{0, 0, 1}, 1e-8, 0,

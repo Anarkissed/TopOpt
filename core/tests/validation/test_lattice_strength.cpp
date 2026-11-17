@@ -25,7 +25,9 @@
 #include "topopt/face_overrides.hpp"
 #include "topopt/lattice_file_strength.hpp"
 #include "topopt/lattice_layout_file.hpp"
+#include "topopt/lattice.hpp"
 #include "topopt/stl.hpp"
+#include "topopt/strut_strength.hpp"
 
 using namespace topopt;
 using namespace topopt::lattice_layout;
@@ -535,6 +537,62 @@ int main() {
       CHECK(has(x.r.why, word) && x.r.why.find('\n') == std::string::npos);
       CHECK(!exists(x.out + "/block_lattice.stl"));
     }
+  }
+
+  // ── §8 the octet's strut law is the full octet's (2026-11-17): its span is the octet band, so no density in the band
+  // is clamped; its lowest row is bulk only, so a credited cell under 0.10 gets no strut pass, with a plain note.
+  {
+    const LatticeTopology oct = LatticeTopology::Octet;
+    CHECK(strut_law_rho_min(oct) == lattice_rho_min(oct) && strut_law_rho_max(oct) == lattice_rho_max(oct));
+    CHECK(std::fabs(strut_law_rho_min(oct) - 0.04959) < 1e-12 && std::fabs(strut_law_rho_max(oct) - 0.90027) < 1e-12);
+    bool c_lo = true, c_hi = true, c_mid = true;
+    (void)strut_law_at(oct, lattice_rho_min(oct), &c_lo);
+    (void)strut_law_at(oct, lattice_rho_max(oct), &c_hi);
+    (void)strut_law_at(oct, 0.5 * (lattice_rho_min(oct) + lattice_rho_max(oct)), &c_mid);
+    CHECK(!c_lo && !c_hi && !c_mid);
+    CHECK(strut_law_bulk_only_below(oct) == 0.10);
+    CHECK(strut_law_bulk_only_below(LatticeTopology::Fcc) == 0.0);
+    // The lightest credited cell of a job's layout.
+    const auto lightest = [&](const std::string& fj) {
+      StepModel m = import_part_file_resolved(kDir + "/block.stl");
+      Session session(std::move(m));
+      const Outcome o = session.lay(parse_file_job(fj).settings);
+      CreditGrid g;
+      g.spacing = 1.0;
+      g.nx = g.ny = g.nz = 1;
+      const LatticeCredit c = lattice_credit(o.layout, *session.domain(), o.bars, {}, g);
+      double lo = 1e300;
+      for (std::size_t i = 0; i < c.cell_credit.size(); ++i)
+        if (c.cell_credit[i]) lo = std::min(lo, c.cell_rho[i]);
+      return lo;
+    };
+    const double rho_light = lightest(file_job(f, "", "octet", ""));
+    // One-line struts 0.65 mm wide on the 8 mm cells: lighter than 0.10, inside the octet band.
+    const auto one_line = [](std::string job) {
+      const std::string a = "\"min_strut_lines\": 2";
+      const std::size_t at = job.find(a);
+      if (at != std::string::npos) job.replace(at, a.size(), "\"min_strut_lines\": 1");
+      return job;
+    };
+    const std::string thin_extra = ", \"strut_width_mm\": 0.65";
+    const double rho_thin = lightest(one_line(file_job(f, thin_extra, "octet", "")));
+    std::printf("[octet law] lightest credited cell: default struts %.4f, one-line 0.65 mm struts %.4f\n", rho_light,
+                rho_thin);
+    // The pass example's cells are at or above 0.10, so its pass stands on measured boundary rows.
+    CHECK(rho_light >= 0.10);
+    CHECK(!has(lb, "lighter than"));
+    // A layout with a cell under 0.10: its struts are out of regime, said plainly, and never pass.
+    const std::string light_cells = one_line(file_job(f, thin_extra, "octet"));
+    CHECK(rho_thin < 0.10 && rho_thin >= lattice_rho_min(oct));
+    const Run low = run("low_density", light_cells, strength_job(f, 20.0));
+    const std::string wb = block(low.json);
+    const std::size_t st = wb.find("\"strut\": {");
+    CHECK(low.r.ok && low.r.strength_ran && st != std::string::npos);
+    if (st != std::string::npos) {
+      CHECK(has(wb.substr(st), "\"out_of_regime\": true"));
+      CHECK(has(wb.substr(st), "lighter than 0.1 of solid"));
+    }
+    CHECK(has(wb, "\"accepted\": true") && has(wb, "\"struts_pass\": false") && has(wb, "\"verdict\": \"solid_only\""));
   }
 
   // ── §6 refusals: no file, no block.
