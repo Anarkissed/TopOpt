@@ -848,6 +848,25 @@ class Handler(BaseHTTPRequestHandler):
             with open(os.path.join(tmpdir, "demand.bin"), "wb") as f:
                 f.write(fields["demand"]["data"])
             job_doc["demand"] = "demand.bin"
+        # The STRENGTH CHECK for a print file (Install 3, LatticeReview's shape of 2026-11-17): the run job a Lattice run
+        # writes (loads, supports, material, safety margin, build direction, voxel size), uploaded as the multipart field
+        # "strength_job", saved beside the model as strength_job.json with its own `model` pointed at the same saved model
+        # (the job.json's rule above), and named by the lattice-file job's `strength_job`. No field, no key: no check.
+        if "strength_job" in fields:
+            try:
+                strength_doc = json.loads(fields["strength_job"]["data"].decode("utf-8"))
+            except (ValueError, UnicodeDecodeError) as e:
+                shutil.rmtree(tmpdir, ignore_errors=True)
+                return self._json(400, {"error": f"strength_job is not valid JSON: {e}"})
+            if not isinstance(strength_doc, dict):
+                shutil.rmtree(tmpdir, ignore_errors=True)
+                return self._json(400, {"error": "strength_job must be a JSON object"})
+            strength_doc["model"] = step_name
+            strength_doc.pop("project", None)
+            strength_doc.pop("project_name", None)
+            with open(os.path.join(tmpdir, "strength_job.json"), "w") as f:
+                json.dump(strength_doc, f)
+            job_doc["strength_job"] = "strength_job.json"
         job_path = os.path.join(tmpdir, "job.json")
         with open(job_path, "w") as f:
             json.dump(job_doc, f)

@@ -14176,10 +14176,19 @@ public struct WorkspacePlaceholder: View {
     /// found yet is looked for first, as Optimize does).
     private func exportPrintFile() {
         if compute.wantsRemote, compute.activeRemote == nil {
-            findTheMac { fileExport.make(project: project, config: compute.activeRemote, stress: newEngineStress) }
+            findTheMac { fileExport.make(project: project, config: compute.activeRemote, stress: newEngineStress,
+                                         strengthJob: printFileStrengthJob()) }
             return
         }
-        fileExport.make(project: project, config: compute.activeRemote, stress: newEngineStress)
+        fileExport.make(project: project, config: compute.activeRemote, stress: newEngineStress, strengthJob: printFileStrengthJob())
+    }
+
+    /// ★ Install 3, the strength check (LatticeReview's shape, 11-17): for a Structural lattice, the print file's job carries the
+    /// run job a Lattice run writes today (`lattice_part`), so the Mac checks the new layout against his loads, supports,
+    /// material and safety margin. nil: Aesthetic (U9), Organic, a core that does not read it yet, or no runnable request.
+    private func printFileStrengthJob() -> Data? {
+        guard LatticeFileJob.checksStrength(project.lattice), let request = model.makeLatticeRunRequest() else { return nil }
+        return try? RemoteRun.buildJobJSON(request)
     }
 
     private func findTheMac(then go: @escaping () -> Void) {
