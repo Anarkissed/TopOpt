@@ -2,6 +2,7 @@
 // docs/design/lattice-rebuild/04-layout-file-job.md.
 #include "topopt/lattice_layout_file.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -418,6 +419,8 @@ constexpr Refusal kNoStress{"no_stress_result", 3};
 // The stress result sent with the job could not be read (missing, or not a demand file).
 constexpr Refusal kDemandUnreadable{"demand_unreadable", 1};
 constexpr Refusal kCannotWrite{"cannot_write", 1};
+// V4: a strength check was asked for and this build has none to make.
+constexpr Refusal kStrengthUnavailable{"strength_unavailable", 1};
 constexpr Refusal kCancelled{"cancelled", 1};
 constexpr Refusal kError{"error", 1};
 
@@ -626,8 +629,8 @@ FileJob parse_file_job(const std::string& json_text) {
     const json::Value doc = json::parse(json_text, "job.json");
     const std::string w = "job.json";
     json::as_object(doc, w);
-    json::reject_unknown(doc, {"mode", "model", "output", "linear_deflection", "threads", "layout", "mesh", "demand"},
-                         w);
+    json::reject_unknown(
+        doc, {"mode", "model", "output", "linear_deflection", "threads", "layout", "mesh", "demand", "strength_job"}, w);
     const std::string mode = json::as_string(json::require(doc, "mode", w), w + ".mode");
     if (mode != "lattice_file") json::fail(w + ".mode", "must be \"lattice_file\", not \"" + mode + "\"");
     FileJob job;
@@ -647,6 +650,15 @@ FileJob parse_file_job(const std::string& json_text) {
           job.demand.find_first_of("/\\") != std::string::npos)
         json::fail(w + ".demand", "must be a file name with no folder in it");
     }
+    // The strength check's job (V4): a file beside the job, by its bare name.
+    if (json::find(doc, "strength_job")) {
+      job.strength_job = text(doc, "strength_job", "", w);
+      if (job.strength_job.empty() || job.strength_job == "." || job.strength_job == ".." ||
+          job.strength_job.find_first_of("/\\") != std::string::npos)
+        json::fail(w + ".strength_job", "must be a file name with no folder in it");
+      if (job.strength_job == job.output || job.strength_job == kFileResultName)
+        json::fail(w + ".strength_job", "is the name of a file the job writes");
+    }
     if (const json::Value* v = json::find(doc, "layout"))
       job.settings = settings_from(json::as_object(*v, w + ".layout"), w + ".layout");
     if (const json::Value* v = json::find(doc, "mesh"))
@@ -662,7 +674,8 @@ FileJob parse_file_job(const std::string& json_text) {
 }
 
 FileResult make_lattice_file(StepModel model, const FileJob& job, const std::string& stl_path,
-                             const std::atomic<bool>* stop, void (*said)(const char*)) {
+                             const std::atomic<bool>* stop, void (*said)(const char*),
+                             const StrengthCheck* strength) {
   FileResult r;
   const auto t_all = std::chrono::steady_clock::now();
   const auto done = [&]() -> FileResult& {
@@ -729,6 +742,23 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
              "part's stress result with it, or turn Cell size by stress off.");
       return done();
     }
+    // V4: the strength job is read before the long work, and refused now if it cannot be checked.
+    if (!job.strength_job.empty()) {
+      if (!strength || !strength->before || !strength->run) {
+        refuse(r, kStrengthUnavailable,
+               "This worker cannot check a lattice's strength, so no file was made. Update the worker.");
+        return done();
+      }
+      const StrengthDone ok = strength->before(job.strength_job);
+      if (!ok.ok) {
+        r.ok = false;
+        r.code = ok.code;
+        r.exit_code = ok.exit_code;
+        r.why = ok.why;
+        r.detail = ok.detail;
+        return done();
+      }
+    }
     if (!mesh_available()) {
       refuse(r, kMeshUnavailable,
              "The worker on the Mac was built without the part that makes lattice files, so it "
@@ -738,6 +768,11 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
 
     say(said, "measuring the part");
     auto t0 = std::chrono::steady_clock::now();
+    Vec3 part_lo{1e300, 1e300, 1e300}, part_hi{-1e300, -1e300, -1e300};
+    for (const Vec3& v : model.mesh.vertices) {
+      part_lo = {std::min(part_lo.x, v.x), std::min(part_lo.y, v.y), std::min(part_lo.z, v.z)};
+      part_hi = {std::max(part_hi.x, v.x), std::max(part_hi.y, v.y), std::max(part_hi.z, v.z)};
+    }
     Session session(std::move(model));
     r.ms_measure = ms_since(t0);
     r.open_edges = session.open_edges();
@@ -849,6 +884,44 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
              write_detail);
       return done();
     }
+    // V4: the check of the lattice that is in the file, after every cut and repair. A check asked for that cannot
+    // run fails the job: the file is taken away again, so nothing looks checked that was not.
+    if (!job.strength_job.empty()) {
+      say(said, "checking its strength");
+      t0 = std::chrono::steady_clock::now();
+      StrengthAsk ask;
+      ask.session = &session;
+      ask.outcome = &out;
+      ask.made = &r.made;
+      ask.job_path = job.strength_job;
+      ask.out_dir = folder_of(stl_path);
+      ask.part_lo = part_lo;
+      ask.part_hi = part_hi;
+      ask.threads = job.options.threads;
+      StrengthDone sd;
+      try {
+        sd = strength->run(ask);
+      } catch (const std::exception& e) {
+        sd = StrengthDone{};
+        sd.code = "strength_failed";
+        sd.why = "The lattice's strength could not be checked, so no file was made.";
+        sd.detail = e.what();
+      }
+      r.ms_strength = ms_since(t0);
+      if (!sd.ok) {
+        std::remove(stl_path.c_str());
+        for (const std::string& f : sd.files) std::remove((ask.out_dir + "/" + f).c_str());
+        r.ok = false;
+        r.code = sd.code.empty() ? "strength_failed" : sd.code;
+        r.exit_code = sd.exit_code;
+        r.why = sd.why;
+        r.detail = sd.detail;
+        return done();
+      }
+      r.strength_ran = true;
+      r.strength_accepted = sd.accepted;
+      r.strength_json = sd.json;
+    }
     r.file = stl_path;
     r.file_bytes = want;
     r.ok = true;
@@ -865,7 +938,7 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
 }
 
 FileResult run_file_job(const std::string& job_path, const std::string& out_dir, int threads,
-                        void (*said)(const char*)) {
+                        void (*said)(const char*), const StrengthCheck* strength) {
   FileResult r;
   const auto t_all = std::chrono::steady_clock::now();
   const auto run = [&] {
@@ -888,6 +961,7 @@ FileResult run_file_job(const std::string& job_path, const std::string& out_dir,
       }
     }
     if (threads > 0) job.options.threads = threads;
+    if (!job.strength_job.empty()) job.strength_job = folder_of(job_path) + "/" + job.strength_job;
     if (!job.demand.empty()) {
       auto field = std::make_shared<DemandField>();
       std::string why;
@@ -917,7 +991,7 @@ FileResult run_file_job(const std::string& job_path, const std::string& out_dir,
       return;
     }
     const double ms_import = ms_since(t0);
-    r = make_lattice_file(std::move(model), job, out_dir + "/" + job.output, nullptr, said);
+    r = make_lattice_file(std::move(model), job, out_dir + "/" + job.output, nullptr, said, strength);
     r.ms_import = ms_import;
   };
   run();
@@ -1031,6 +1105,8 @@ std::string file_result_json(const FileResult& r) {
     }
     o += "]},\n";
   }
+  // V4: written only when the check ran (V2); the block is the check's own.
+  if (r.strength_ran) o += "  \"strength\": " + r.strength_json + ",\n";
   std::snprintf(b, sizeof b,
                 "  \"ms\": {\"import\": %.1f, \"measure\": %.1f, \"read\": %.1f, \"cells\": %.1f, "
                 "\"bars\": %.1f, \"open_space\": %.1f, \"carve\": %.1f, \"struts\": %.1f, \"solid\": %.1f, "

@@ -475,9 +475,11 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
     // the plate, it put the peak there and grew it with resolution). A STICK spring
     // (friction with no slip limit) makes the stuck / released boundary a new singular
     // edge (the plate, 2026-10-25); Coulomb stick-slip is a later batch.
-    constexpr double kBearingSteelMpa = 200000.0;
+    // Steel E 200000 MPa through 1 mm and a 1e-4 tangential share, unless the strength check's settings state
+    // others (ProductionLoadCase; defaults = these constants).
+    const double kBearingSteelMpa = lc.bearing_stiffness_mpa_per_mm;
     constexpr double kBearingLengthMm = 1.0;
-    constexpr double kBearingTangentFraction = 1e-4;
+    const double kBearingTangentFraction = lc.bearing_tangent_fraction;
     const double h = grid.spacing;
     const auto& V = model.mesh.vertices;
     auto closest = [](const Vec3& p, const Vec3& a, const Vec3& b, const Vec3& c) {

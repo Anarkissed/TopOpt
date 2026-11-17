@@ -566,8 +566,11 @@ std::vector<double> lattice_member_width_mm(const VoxelGrid& grid,
 // Deterministic (a reachable-set membership test — no traversal order affects the
 // answer) and READ-ONLY on `density`. O(voxel_count) — free next to a stress solve.
 // Throws std::invalid_argument if density.size() != grid.voxel_count().
+// `connectivity` (Install 3, the strength check's settings): which neighbours count as joined: 26 (faces, edges and
+// corners: the default, every caller before it), 18 (faces and edges) or 6 (faces only).
 bool load_path_connected(const VoxelGrid& grid,
-                         const std::vector<double>& density, double iso = 0.5);
+                         const std::vector<double>& density, double iso = 0.5,
+                         int connectivity = 26);
 
 // The BELT'S OWN WALK, reported rather than reduced to a bool (task
 // 2026-08-03-preflight-feasibility-and-divergence). `load_path_connected` above is
@@ -616,6 +619,7 @@ struct LoadPathWalk {
 // independent of traversal order, so the walk stays deterministic.
 // O(voxel_count). Throws std::invalid_argument on a size mismatch.
 LoadPathWalk walk_load_path(const VoxelGrid& grid,
-                            const std::vector<double>& density, double iso = 0.5);
+                            const std::vector<double>& density, double iso = 0.5,
+                            int connectivity = 26);
 
 }  // namespace topopt

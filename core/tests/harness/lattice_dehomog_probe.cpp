@@ -150,13 +150,20 @@ double octet_dist2_unit(double u, double v, double w,
 // R7 gradient-normalised wall (tpms.hpp). The radius (for a sheet, half the true wall) is
 // calibrated through lattice_density_from_strut, the law that type's jobs key on.
 LatticeTopology g_topo = LatticeTopology::Octet;
+// THE OCTET CELL (re-measure of 2026-11-17, evidence/2026-11-17-octet-full-strut-law). By
+// default octet goes through its PRODUCTION strut cell (lattice_strut_cell(Octet): the full
+// octet, legs and braces, the cell the generator lays) and the 11-09 recipe, exactly like
+// every other type: that is how strut_strength.cpp's kOctetStrutLaw was measured.
+// TOPOPT_DEHOMOG_OCTET_LEGACY=1 brings back PR 259's legs-only (FCC) octet cell and its
+// recipe, to reproduce evidence/2026-07-31-lattice-dehomogenization-probe.
+const bool kLegacyOctetCell = std::getenv("TOPOPT_DEHOMOG_OCTET_LEGACY") != nullptr;
 std::vector<std::array<std::array<double, 3>, 2>> g_type_segs;  // unit-cell strut images
 
 bool g_is_sheet() { return lattice_topology_is_sheet(g_topo); }
 
 void init_type_geometry() {
   g_type_segs.clear();
-  if (g_topo == LatticeTopology::Octet || g_is_sheet()) return;
+  if ((g_topo == LatticeTopology::Octet && kLegacyOctetCell) || g_is_sheet()) return;
   const StrutCell& c = lattice_strut_cell(g_topo);
   const double S = c.S;
   for (const StrutCellStrut& st : c.struts)
@@ -176,7 +183,7 @@ void init_type_geometry() {
 
 // The production rho map of the type at unit-cell radius r.
 double type_density(double r_unit) {
-  if (g_topo == LatticeTopology::Octet) return octet_relative_density(1.0, r_unit);
+  if ((g_topo == LatticeTopology::Octet && kLegacyOctetCell)) return octet_relative_density(1.0, r_unit);
   return lattice_density_from_strut(g_topo, 1.0, r_unit);
 }
 
@@ -188,7 +195,7 @@ double sheet_param(double r_unit) {
 // Is the point (unit-cell coordinates, any cell) solid?
 bool type_inside(double u, double v, double w, double r_unit, double sheet_t,
                  const std::vector<std::array<std::array<double, 3>, 2>>& octet_segs) {
-  if (g_topo == LatticeTopology::Octet)
+  if ((g_topo == LatticeTopology::Octet && kLegacyOctetCell))
     return octet_dist2_unit(u, v, w, octet_segs) < r_unit * r_unit;
   // A radius past the whole cell is S4's SOLID cell, for every type: a sheet's wall test
   // reads a field critical point as "far from the sheet", which would leave holes in it.
@@ -880,7 +887,7 @@ FILE* open_csv(const std::string& dir, const char* name, const char* header) {
 std::vector<double> rho_sweep() {
   const double lo = lattice_rho_min(g_topo);
   const double hi = lattice_rho_max(g_topo);
-  if (g_topo == LatticeTopology::Octet) return {lo, 0.10, 0.157, 0.20, 0.313, 0.45, 0.60, 0.75, hi};
+  if ((g_topo == LatticeTopology::Octet && kLegacyOctetCell)) return {lo, 0.10, 0.157, 0.20, 0.313, 0.45, 0.60, 0.75, hi};
   // the same interior targets, inside this type's own band, and its two ends
   std::vector<double> r{lo};
   for (double t : {0.10, 0.157, 0.20, 0.313, 0.45, 0.60, 0.75})
@@ -1159,7 +1166,7 @@ void phase_bulk(const std::string& ev, bool fast) {
   for (double rt : rhos) {
     const RhoCal c = calibrate(rt);
     std::vector<int> vpcs = {vpc_main};
-    if (!fast && g_topo == LatticeTopology::Octet) {
+    if (!fast && (g_topo == LatticeTopology::Octet && kLegacyOctetCell)) {
       if (rt == rhos[3] || rt == rhos[5]) vpcs = {16, 24, 32, 40};  // vpc study
       if (rt <= 0.11 || rt == rhos[3] || rt == rhos[8]) vpcs.push_back(48);
     } else if (!fast) {
@@ -1255,7 +1262,7 @@ void phase_boundary(const std::string& ev, bool fast) {
   std::vector<Case> cases;
   if (fast) {
     cases = {{0.313, 3, 8, 0.0}, {0.313, 3, 8, 0.6}};
-  } else if (g_topo != LatticeTopology::Octet) {
+  } else if (!(g_topo == LatticeTopology::Octet && kLegacyOctetCell)) {
     // Every other type: BOTH boundary populations at EVERY rho of its band (PR 259 cut
     // three; cut cells run 43-79 % hotter, so each row's envelope sees its own). Thin rows
     // (under 0.19) at N=3 vpc24, as PR 259 re-measured its low band.
@@ -1289,7 +1296,7 @@ void phase_boundary(const std::string& ev, bool fast) {
   // aliased low band at a finer pitch; this does the same, case by case: N4 vpc16 -> N3
   // vpc24 -> N3 vpc32 -> N3 vpc40, stopping at the first fixture the guard keeps. Every
   // attempt is written, so the evidence shows the aliased row and its re-measure.
-  const bool escalate = !fast && g_topo != LatticeTopology::Octet;
+  const bool escalate = !fast && !(g_topo == LatticeTopology::Octet && kLegacyOctetCell);
   auto finer = [](const Case& cs, Case& out) {
     static const int ladder[][2] = {{4, 16}, {3, 24}, {3, 32}, {3, 40}};
     for (int i = 0; i + 1 < 4; ++i)
