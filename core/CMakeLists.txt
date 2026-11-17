@@ -178,6 +178,8 @@ add_library(topopt
   src/lattice_layout/file_job.cpp
   # Install 3: the lattice the strength check sees (rule V4); the check itself is run_job.cpp's.
   src/lattice_layout/strength.cpp
+  # Install 3, rule D23: the faces a region runs into that no rule decides (places).
+  src/lattice_layout/places.cpp
   src/orient/orient.cpp
   src/orient/build_orientation.cpp
   src/orient/build_frame.cpp

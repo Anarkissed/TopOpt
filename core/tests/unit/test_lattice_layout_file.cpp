@@ -180,6 +180,18 @@ static void test_parse() {
       "region_no_lattice": [0], "region_depth_mm": [4], "region_expand_mm": [0],
       "region_face_counts": [2], "region_faces": [7]}})", "region_faces"));
   CHECK(refused(R"({"mode": "lattice_file", "model": "a.step", "layout": {"protect_ids": [1]}})", "one length"));
+  // D23: protect_chip marks which Protect entries are chips' answers; absent, none is.
+  {
+    const FileJob c = parse_file_job(R"({"mode": "lattice_file", "model": "a.step", "layout": {
+        "protect_ids": [1, 2], "protect_depth_mm": [1, 0], "protect_face_counts": [1, 1], "protect_faces": [3, 4],
+        "protect_chip": [0, 1]}})");
+    CHECK(c.settings.protect.size() == 2 && !c.settings.protect[0].chip && c.settings.protect[1].chip);
+    const FileJob d = parse_file_job(R"({"mode": "lattice_file", "model": "a.step", "layout": {
+        "protect_ids": [1], "protect_depth_mm": [1], "protect_face_counts": [1], "protect_faces": [3]}})");
+    CHECK(d.settings.protect.size() == 1 && !d.settings.protect[0].chip);
+  }
+  CHECK(refused(R"({"mode": "lattice_file", "model": "a.step", "layout": {"protect_ids": [1], "protect_depth_mm": [1],
+      "protect_face_counts": [1], "protect_faces": [3], "protect_chip": [1, 0]}})", "protect_chip"));
   CHECK(refused(R"({"mode": "lattice_file", "model": "a.step", "layout": {"dial_region": [1]}})", "dial_region"));
   CHECK(refused(R"({"mode": "lattice_file", "model": "a.step", "layout": {"algorithm": "fancy"}})", "algorithm"));
   CHECK(refused(R"({"mode": "lattice_file", "model": "a.step", "layout": {"topology": "nope"}})", "topology"));

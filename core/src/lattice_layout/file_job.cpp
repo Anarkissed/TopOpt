@@ -190,7 +190,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
       {"all_lattice", "bead_mm", "min_strut_lines", "min_wall_mm", "rim_mm", "cover_mm",
        "region_ids", "region_no_lattice", "region_depth_mm", "region_expand_mm",
        "region_face_counts", "region_faces", "region_zones", "region_finish", "region_pieces", "protect_ids", "protect_depth_mm",
-       "protect_face_counts", "protect_faces", "protect_pieces", "topology", "algorithm", "cell_mm", "cell_max_mm",
+       "protect_face_counts", "protect_faces", "protect_pieces", "protect_chip", "topology", "algorithm", "cell_mm", "cell_max_mm",
        "cell_min_mm", "min_cells_across", "grade_to_shape", "band_mm", "band_cell_mm",
        "per_region", "dial", "dial_region", "dial_value", "strut_width_mm", "allow_quilt",
        "strength", "small_cells_in_thin_walls", "one_grid", "cells_by_stress", "bars", "join_loose", "skin",
@@ -303,6 +303,13 @@ Settings settings_from(const json::Value& in, const std::string& w) {
                   "are not all one length");
   const auto pf = unflatten(pcounts, wholes(in, "protect_faces", w), w + ".protect_faces");
   for (std::size_t p = 0; p < np; ++p) s.protect.push_back({pids[p], pf[p], pdepth[p], {}});
+  // D23: per Protect skin, 1 when it is a place's answer "Solid" (a chip's), 0 when it is the owner's own skin.
+  // Absent: all 0. It acts in the layout exactly as any Protect skin; the place it answers stays listed.
+  if (json::find(in, "protect_chip")) {
+    const std::vector<bool> chip = flags(in, "protect_chip", w);
+    if (chip.size() != np) json::fail(w, "protect_chip is not as long as protect_ids");
+    for (std::size_t p = 0; p < np; ++p) s.protect[p].chip = chip[p];
+  }
   // D22: per Protect skin, null (its faces) or its pieces; with pieces its faces are not read.
   if (const json::Value* pieces = json::find(in, "protect_pieces")) {
     const std::string at = w + ".protect_pieces";
