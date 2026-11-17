@@ -1,0 +1,58 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="katex.min.css">
+<style>
+  :root { color-scheme: light dark; --fg: #1d1d1f; --muted: #6e6e73; --rule: #d2d2d7; --link: #0a66d1; --code: #f2f2f7; }
+  @media (prefers-color-scheme: dark) { :root { --fg: #f5f5f7; --muted: #a1a1a6; --rule: #3a3a3c; --link: #4ea1ff; --code: #2c2c2e; } }
+  html, body { margin: 0; background: transparent; color: var(--fg); }
+  body { font: 16px/1.55 -apple-system, system-ui, sans-serif; padding: 4px 20px 40px; -webkit-text-size-adjust: 100%; }
+  h2 { font-size: 20px; margin: 28px 0 8px; font-weight: 600; }
+  h3 { font-size: 17px; margin: 20px 0 6px; font-weight: 600; }
+  p, li { max-width: 70ch; }
+  a { color: var(--link); text-decoration: none; border-bottom: 1px dotted var(--link); }
+  code { background: var(--code); border-radius: 4px; padding: 1px 4px; font-size: 14px; }
+  table { border-collapse: collapse; margin: 10px 0; display: block; overflow-x: auto; }
+  th, td { border: 1px solid var(--rule); padding: 6px 10px; text-align: left; font-size: 14px; }
+  .katex-display { overflow-x: auto; overflow-y: hidden; padding: 4px 0; }
+  .flash { animation: flash 2s ease-out; }
+  @keyframes flash { from { color: var(--link); } to { color: var(--fg); } }
+</style>
+<script src="katex.min.js"></script>
+<script src="marked.min.js"></script>
+</head>
+<body>
+<div id="doc"></div>
+<script>
+  // The strength check's explainer (Install 3): the repo's own Markdown, drawn here. Maths in $...$ and $$...$$ is taken
+  // out before the Markdown is read (so underscores and backslashes in it are never read as Markdown) and put back drawn by
+  // KaTeX. Headings get ids from their own text, so a control's "How it's worked out" lands on its section.
+  function slug(t) { return t.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); }
+  function render(md) {
+    const math = [];
+    const keep = (t, d) => { math.push({ t: t, d: d }); return '@@M' + (math.length - 1) + '@@'; };
+    md = md.replace(/\$\$([\s\S]+?)\$\$/g, (_, t) => keep(t, true));
+    md = md.replace(/(^|[^\\$])\$([^$\n]+?)\$/g, (_, pre, t) => pre + keep(t, false));
+    let html = marked.parse(md, { gfm: true });
+    html = html.replace(/@@M(\d+)@@/g, (_, i) => {
+      const m = math[+i];
+      try { return katex.renderToString(m.t, { displayMode: m.d, throwOnError: false }); }
+      catch (e) { return m.t; }
+    });
+    const doc = document.getElementById('doc');
+    doc.innerHTML = html;
+    doc.querySelectorAll('h2, h3').forEach(h => { h.id = 'sec-' + slug(h.textContent); });
+    return doc.querySelectorAll('.katex').length;
+  }
+  function go(section) {
+    const el = document.getElementById('sec-' + slug(section));
+    if (!el) return false;
+    el.scrollIntoView({ block: 'start' });
+    el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+    return true;
+  }
+</script>
+</body>
+</html>

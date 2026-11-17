@@ -135,8 +135,18 @@ struct AppSettingsView: View {
     @ObservedObject var compute: ComputeLocationModel
     let storage: () -> Void
     let done: () -> Void
+    @ObservedObject var strength: StrengthSettings = .shared
+    @State private var strengthOpen = false
 
     var body: some View {
+        content
+            .sheet(isPresented: $strengthOpen) {
+                StrengthCheckPage(settings: strength) { strengthOpen = false }
+                    .frame(minWidth: 700, minHeight: 640)
+            }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(AppSettingsCopy.title).dsStyle(DS.TypeScale.title)
             Text(AppSettingsCopy.subtitle).dsStyle(DS.TypeScale.subhead).foregroundStyle(DS.Color.textTertiary.color)
@@ -163,6 +173,21 @@ struct AppSettingsView: View {
                 }
                 row("Accent") { accentDots }
                 // ★ Install 3: "New engine (test)" retired — the new engine is the preview (no row)
+                // ★ Install 3 (his 11-17): the strength check, all of it, Simple and Full maths, and the values we chose
+                row("Strength check") {
+                    Button { strengthOpen = true } label: {
+                        HStack(spacing: 4) {
+                            Text(strength.changed.isEmpty ? "How it works" : "How it works \u{00B7} \(strength.changed.count) changed")
+                                .dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
+                            Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold))
+                        }
+                        .foregroundStyle(DS.Color.accent.color)
+                        .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("app-settings-strength")
+                    .background(publish("appSettingsStrength"))
+                }
                 row("Storage") {
                     Button(action: storage) {
                         HStack(spacing: 4) {

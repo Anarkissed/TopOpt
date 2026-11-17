@@ -108,7 +108,8 @@ final class LatticeFileExportTests: XCTestCase {
         let src = try String(contentsOf: FlexibleHisProject.repoRoot
             .appendingPathComponent("app/TopOptKit/Sources/TopOptFlows/WorkspacePlaceholder.swift"), encoding: .utf8)
         XCTAssertTrue(src.contains("guard LatticeFileJob.checksStrength(project.lattice), let request = model.makeLatticeRunRequest() else { return nil }"))
-        XCTAssertTrue(src.contains("return try? RemoteRun.buildJobJSON(request)"), "★ the job a Lattice run writes today")
+        XCTAssertTrue(src.contains("(try? RemoteRun.buildJobJSON(request)).map { StrengthSettings.shared.addTo(strengthJob: $0) }"),
+                      "★ the job a Lattice run writes today, with the values he changed in Settings")
         XCTAssertEqual(src.components(separatedBy: "strengthJob: printFileStrengthJob()").count - 1, 2, "★ both Export paths send it")
     }
 

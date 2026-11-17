@@ -1983,7 +1983,7 @@ public struct WorkspacePlaceholder: View {
         // a chosen Mac not found yet is looked for first; if it never answers, the button says so as Optimize's does
         if compute.wantsRemote, compute.activeRemote == nil { findTheMac { startLatticeRun(request) }; return }
         let strengthJob = LatticeFileJob.checksStrength(project.lattice, wired: LatticeFileButton.wired)
-            ? try? RemoteRun.buildJobJSON(request) : nil   // the Lattice run's own job, as Export sends it
+            ? strengthJobJSON(request) : nil   // the Lattice run's own job, as Export sends it
         let job: LatticeFileJob.ForPart
         switch LatticeFileJob.forPart(project, stress: newEngineStress, strengthJob: strengthJob) {
         case .success(let j): job = j
@@ -14251,7 +14251,13 @@ public struct WorkspacePlaceholder: View {
     /// material and safety margin. nil: Aesthetic (U9), Organic, a core that does not read it yet, or no runnable request.
     private func printFileStrengthJob() -> Data? {
         guard LatticeFileJob.checksStrength(project.lattice), let request = model.makeLatticeRunRequest() else { return nil }
-        return try? RemoteRun.buildJobJSON(request)
+        return strengthJobJSON(request)
+    }
+
+    /// The strength check's job: the Lattice run's own (`RemoteRun.buildJobJSON`), with ★ the values he changed in Settings
+    /// (`strength_settings`, his 11-17; none changed: the same bytes).
+    private func strengthJobJSON(_ request: RunRequest) -> Data? {
+        (try? RemoteRun.buildJobJSON(request)).map { StrengthSettings.shared.addTo(strengthJob: $0) }
     }
 
     private func findTheMac(then go: @escaping () -> Void) {
