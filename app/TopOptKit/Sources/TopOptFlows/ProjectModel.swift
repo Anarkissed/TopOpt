@@ -2279,6 +2279,33 @@ public final class ProjectModel: ObservableObject {
         return dropped
     }
 
+    /// ★ his 11-16 (Install 3): a used cut piece too small for core (`TinyCutPiece`), made whole as one undo step — the split
+    /// that made it is taken back (Undo split's rule: every piece of it goes, even one a union took) and the group that used
+    /// the piece holds the whole face in its place, so its role stays on that face; a group is never left holding nothing by
+    /// it. Returns the pieces that went ([] when nothing could be undone).
+    @discardableResult
+    public func surfaceMakeWhole(_ piece: RegionID) -> [RegionID] {
+        beginFaceEdit(); defer { endFaceEdit(.undoSplit) }
+        guard let whole = TinyCutPiece.whole(of: piece, in: faceRegions),
+              SurfaceRegionTool.canUndoSplit(whole, regions: faceRegions) else { return [] }
+        let user = selection.group(forRegion: piece)?.id
+        let before = Set(faceRegions.regions.map(\.id))
+        faceRegions.revertSplit(whole, includingLent: true)
+        let dropped = before.subtracting(faceRegions.regions.map(\.id)).sorted()
+        if let g = user {
+            // the whole face, held by one group: its bare faces leave the others, as a piece's move does
+            if let mesh = viewerMesh, let w = faceRegions.region(whole) {
+                let faces = FaceRegionGeometry.members(of: w, in: mesh)
+                for other in selection.groups where other.id != g { selection.removeFaces(faces, from: other.id) }
+            }
+            selection.addRegions([whole], to: g)
+        }
+        selection.removeRegions(dropped)
+        syncForceGroups()   // ★ B6: both lists
+        objectWillChange.send()
+        return dropped
+    }
+
     /// ★★ DISSOLVE ON THE SURFACE STAGE (2026-10-08) — `SurfaceDissolve`, as one undo step: the
     /// faces back to the group they came from, a union's parts back, nothing dangling. nil when the
     /// region cannot be dissolved (`SurfaceDissolve.refusal` says why).

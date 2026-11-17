@@ -609,6 +609,7 @@ public struct WorkspacePlaceholder: View {
     @State private var nextVersionAsk = false   // Library (B3): Optimize on a version with results asks "Optimize as vN"
     @State private var macFinding = false        // ★ B1 (note 4): Optimize is looking for the remembered Mac
     @State private var macNotAnswering = false   // ★ B1 (note 4): it looked, and the Mac never answered
+    @State private var tinyPiece: TinyCutPiece.Hit?   // ★ his 11-16 (Install 3): the press stopped on a cut piece too small for core
     @State private var macRetryLattice = false   // ★ T5: the run the fix line's Try again starts again
     @State private var runCouldntFinish = false  // ★ B1 (O1): the last run failed with the engine's own text
     @State private var lastRunWasLattice = false // ★ B1 (O1): which button started it (Optimize, or Lattice)
@@ -1928,6 +1929,7 @@ public struct WorkspacePlaceholder: View {
             model.toast = "Import a part and set a lattice region first."
             return
         }
+        if stoppedForTinyPiece(request) { return }   // ★ his 11-16 (Install 3)
         // ★ B4 (APP LIST 6): the LATTICE run's own re-run card — its first button starts this request
         // (startLatticeRequest), never Topology's Optimize run
         if let prompt = ResultsReplacementPrompt.forNewRun(existing: run.outcome) {
@@ -1944,8 +1946,32 @@ public struct WorkspacePlaceholder: View {
             model.toast = "Import a part and set a lattice region first."
             return
         }
+        if stoppedForTinyPiece(request) { return }   // Install 3
         runCouldntFinish = false; lastRunWasLattice = true   // ★ B1 (O1)
         run.start(request)
+    }
+
+    /// ★ his 11-16 (Install 3): a cut piece the run uses that core would refuse as too small (`TinyCutPiece`) stops the press
+    /// here, before anything is sent; the corner's fix line says so with one tap that undoes its cuts.
+    private func stoppedForTinyPiece(_ request: RunRequest) -> Bool {
+        guard let mesh = project.viewerMesh,
+              let hit = TinyCutPiece.first(in: request, regions: project.faceRegions, mesh: mesh) else {
+            tinyPiece = nil
+            return false
+        }
+        tinyPiece = hit
+        return true
+    }
+
+    /// The stopped press's piece while it is still there (undoing its cuts in Edit faces clears the line too).
+    private var tinyPieceShown: TinyCutPiece.Hit? {
+        tinyPiece.flatMap { project.faceRegions.region($0.piece) != nil ? $0 : nil }
+    }
+
+    /// The line's one tap: the piece's cuts undone, the whole face in its group (`ProjectModel.surfaceMakeWhole`).
+    private func fixTinyPiece(_ hit: TinyCutPiece.Hit) {
+        tinyPiece = nil
+        if project.surfaceMakeWhole(hit.piece).isEmpty { model.toast = TinyCutPiece.toast }
     }
 
     private var latticeRerunBinding: Binding<Bool> {
@@ -1982,6 +2008,7 @@ public struct WorkspacePlaceholder: View {
         }
         if let no = StrengthenRoute.refusal(for: request, workerSelected: compute.wantsRemote) { model.toast = no; return }   // Flexible (PR #362) H56m: redesign to strengthen (overnight plan 2026-10-25) — no design box: one line, nothing sent
         if let no = LoadScenarioRule.refusal(for: request, workerSelected: compute.wantsRemote) { model.toast = no; return }   // ★ load scenarios: core's own words, before the send
+        if stoppedForTinyPiece(request) { return }   // ★ his 11-16 (Install 3): the fix line says it, with its one tap
         lastRunRequest = request   // Optimize greys out until the inputs change
         startedRunWithLattice = lattice   // ★ B3: a failed run's Try again keeps this run's flavour
         runCouldntFinish = false; lastRunWasLattice = false   // ★ B1 (O1)
@@ -3841,6 +3868,7 @@ public struct WorkspacePlaceholder: View {
                 finishLines: LatticeReport.finishLines(receipt: result.receiptJSON)))   // ★ B7 slice 2 (ruling 3)
         }
         guard let request = model.makeRunRequest() else { return }
+        if stoppedForTinyPiece(request) { model.toast = TinyCutPiece.toast; return }   // ★ his 11-16 (Install 3): no fix line here
         closeLatticePage()
         run.start(request, remote: true, workerName: compute.selectedWorkerName)
     }
@@ -14499,6 +14527,8 @@ extension WorkspacePlaceholder {
         let line: (words: String, fix: String, info: String?, act: () -> Void)
         if let b = topologyBlock {
             line = (b.words, b.fix, b.info, { fixTopologyBlock(b) })
+        } else if let hit = tinyPieceShown {   // ★ his 11-16 (Install 3)
+            line = (TinyCutPiece.words, TinyCutPiece.fix, TinyCutPiece.info, { fixTinyPiece(hit) })
         } else if macNotAnswering {
             line = (Self.macNotAnsweringWords, "Try again", nil, {
                 macNotAnswering = false; runCouldntFinish = false; requestRun(lattice: macRetryLattice)
