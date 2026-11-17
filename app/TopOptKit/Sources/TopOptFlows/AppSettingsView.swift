@@ -64,12 +64,12 @@ public final class AppSettings: ObservableObject {
     /// The accent the app wears now (`DS.Color.accent`). The Library redraws whole when it changes.
     @Published public private(set) var appliedAccent: AccentChoice
 
-    /// ★ "New engine (test)" (the lattice rebuild; his blitz 2026-11-12, the reviewer's go): Lattice Setup's preview from the
-    /// new engine (LatticeLayoutPreview). DEFAULT OFF — off, the page, the run and the LAN worker are exactly today's.
+    /// ★ "New engine (test)" RETIRED (Install 3, his 11-17 "Implement it as soon as possible"): the new engine draws every
+    /// regular lattice that has its model file; the App settings row is gone and the stored choice is no longer read (an Off
+    /// left on his iPad must not keep the old preview with no way back). What is left is a TESTS-ONLY hook, never stored:
+    /// false draws the old engine's preview on Lattice Setup, as before Install 3 (old hosted tests and red controls).
     static let newEngineKey = "topopt.settings.newEngineTest.v1"
-    @Published public var newEngineTest: Bool {
-        didSet { defaults.set(newEngineTest, forKey: Self.newEngineKey) }
-    }
+    @Published public var newEngineTest: Bool = true
 
     /// ★ His ask 11-16 ("it kills my iPad when I have the lattice view on"): the Lattice button's ⌃ picks "Live preview" or
     /// "Click to refresh preview". DEFAULT = Click to refresh (his pick): a changed setting marks the preview out of date and
@@ -81,7 +81,6 @@ public final class AppSettings: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        self.newEngineTest = defaults.bool(forKey: Self.newEngineKey)   // absent ⇒ false: OFF by default
         self.latticeLivePreview = defaults.bool(forKey: Self.livePreviewKey)   // absent ⇒ false: Click to refresh (his pick)
         let m = defaults.double(forKey: Self.marginKey)
         self.safetyMargin = m >= SafetyMargin.minimum - 1e-9 ? m : SafetyMargin.defaultValue
@@ -163,12 +162,7 @@ struct AppSettingsView: View {
                         .frame(width: 280)
                 }
                 row("Accent") { accentDots }
-                // ★ the lattice rebuild's test switch (his blitz 11-12): Lattice Setup's preview from the new engine; OFF by default
-                row("New engine (test)") {
-                    SegmentedGlass([.init(false, "Off"), .init(true, "On")], selection: $settings.newEngineTest, small: true)
-                        .background(publish("appSettingsNewEngine"))
-                        .accessibilityIdentifier("app-settings-new-engine")
-                }
+                // ★ Install 3: "New engine (test)" retired — the new engine is the preview (no row)
                 row("Storage") {
                     Button(action: storage) {
                         HStack(spacing: 4) {

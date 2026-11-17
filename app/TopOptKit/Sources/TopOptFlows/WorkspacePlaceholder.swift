@@ -4969,8 +4969,8 @@ public struct WorkspacePlaceholder: View {
         return s.partInteriorVoxelCount == 0 || s.interiorVoxelCount == 0
     }
 
-    /// ★ THE NEW ENGINE (test) is asked for: App settings' "New engine (test)" (OFF by default) on Lattice Setup with the
-    /// lattice view up. Off, nothing of the new engine runs and the page is today's.
+    /// ★ THE NEW ENGINE is asked for: Lattice Setup with the lattice view up. ★ Install 3: "New engine (test)" retired — always,
+    /// except under the tests-only hook (`AppSettings.newEngineTest = false`: the old preview, as before Install 3).
     private var newEngineAsked: Bool { appSettings.newEngineTest && latticeSetupUp && showStrutPreview && latticeViewsUp }
     private var newEngineOn: Bool { newEngineAsked && LatticeLayoutPreview.draws(project.lattice) }   // ★ Organic: the old preview
     /// …and draws in the old engine's place (its bars, the body ghosted, its lines under the view).

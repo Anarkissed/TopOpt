@@ -197,6 +197,12 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         public var frames: [Float] = []        // 12 per frame: origin, then three unit axes
         public var solidCubes: [Float] = []    // 4 per solid piece: low corner (frame mm) and size
         public var cellInfo: [Float] = []      // 5 per laid cell: size, own, band, finest, cut (LatticeLayoutBridge.hpp)
+        // ★ Install 3: per laid cell, aligned with cellInfo — its region (0 = the whole part), its wall (-1 = none), its frame
+        // and its cube's low corner (3 per cell, frame mm)
+        public var cellRegion: [Int32] = []
+        public var cellWall: [Int32] = []
+        public var cellFrame: [Int32] = []
+        public var cellLo: [Float] = []
         public var solidFrame: [Int32] = []
         public var solidRegion: [Int32] = []
         public var solidWhy: [UInt8] = []      // a Why per solid piece
@@ -433,6 +439,8 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         o.frames = Array(r.frames)
         o.solidCubes = Array(r.solid_cubes)
         o.cellInfo = Array(r.cell_info)
+        o.cellRegion = Array(r.cell_region); o.cellWall = Array(r.cell_wall)   // ★ Install 3
+        o.cellFrame = Array(r.cell_frame); o.cellLo = Array(r.cell_lo)
         o.solidFrame = Array(r.solid_frame)
         o.solidRegion = Array(r.solid_region)
         o.solidWhy = Array(r.solid_why)

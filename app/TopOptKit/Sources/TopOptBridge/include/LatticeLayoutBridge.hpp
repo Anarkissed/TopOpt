@@ -136,6 +136,13 @@ struct LatticeLayoutResult {
   // Per laid cell, 5 each (LatticeReview's test 2, 11-13: what set this cell's size): size mm, own mm (the wall's or
   // region's own cell here), band (0 at the outline, 1 at the band's inner edge and beyond), finest (1/0), cut (1/0).
   std::vector<float> cell_info;
+  // ★ Install 3 (LatticeReview's answer 11-17, core's Cell): per laid cell, aligned with cell_info — its region (0 = the
+  // whole part), its wall (index into its frame's WallMap walls, -1 = the space no wall holds), its frame and its cube's low
+  // corner (a b c, frame mm; its size is cell_info's first). What the old engine's bake gave the drawer and the probe.
+  std::vector<int32_t> cell_region;
+  std::vector<int32_t> cell_wall;
+  std::vector<int32_t> cell_frame;
+  std::vector<float> cell_lo;                // 3 per cell
   std::vector<int32_t> solid_frame;          // 1 per piece
   std::vector<int32_t> solid_region;         // 1 per piece
   std::vector<uint8_t> solid_why;            // 1 per piece: a LatticeLayoutWhy

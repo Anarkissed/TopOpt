@@ -286,12 +286,18 @@ void fill(LatticeLayoutResult& o, const ll::Outcome& out) {
   o.empty_regions.assign(out.empty_regions.begin(), out.empty_regions.end());
   o.cells = static_cast<int32_t>(L.cells.size());
   o.cell_info.reserve(5 * L.cells.size());
+  o.cell_region.reserve(L.cells.size()); o.cell_wall.reserve(L.cells.size()); o.cell_frame.reserve(L.cells.size());
+  o.cell_lo.reserve(3 * L.cells.size());
   for (const ll::Cell& c : L.cells) {
     o.cell_info.push_back(static_cast<float>(c.size));
     o.cell_info.push_back(static_cast<float>(c.own));
     o.cell_info.push_back(static_cast<float>(c.band));
     o.cell_info.push_back(c.finest ? 1.0f : 0.0f);
     o.cell_info.push_back(c.cut ? 1.0f : 0.0f);
+    o.cell_region.push_back(c.region);   // ★ Install 3
+    o.cell_wall.push_back(c.wall);
+    o.cell_frame.push_back(c.frame);
+    for (double v : c.lo) o.cell_lo.push_back(static_cast<float>(v));
   }
   o.solid_pieces = static_cast<int32_t>(L.solid.size());
   o.at_one_line = static_cast<int32_t>(out.struts.at_bead);
