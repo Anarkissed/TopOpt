@@ -5490,7 +5490,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// copied back. Returns the MODEL-space point of the strut surface, or nil when
     /// the pixel is not lattice — the caller then falls through to ordinary picking.
     func latticeProbe(atNormalizedPoint p: CGPoint, width: Int, height: Int) -> LatticeProbeHit? {
-        guard vertexDrawCount > 0, latticeInFrame || flexibleLatticeInFrame, width > 0, height > 0 else { return nil }   // Flexible (PR #362) M4: a tap on a Flexible wall is found too
+        guard vertexDrawCount > 0, latticeInFrame || flexibleLatticeInFrame || layoutBarsInFrame, width > 0, height > 0 else { return nil }   // Flexible (PR #362) M4: a tap on a Flexible wall is found too; ★ Install 3: and the new engine's bars
         // ★ his pick 11-16 (B): the frame on screen already holds the lattice's layer for THIS camera and shape — read the
         // tap from it, never draw a second whole frame for one tap. Another camera, shape or size falls back to drawing one.
         if !LatticePreviewMode.controlTapDrawsWholeFrames, lastFrameHadLatticeGBuffer,

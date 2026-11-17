@@ -177,6 +177,11 @@ public final class LatticeLayoutPreview: ObservableObject {
 
     // MARK: ★ Install 3 — the old preview's colour key on the new engine's bars
 
+    /// RED CONTROL (tests): the old engine's bake still runs under the new engine (before Install 3).
+    nonisolated(unsafe) public static var controlOldBakeUnderNewEngine = false
+    /// The old engine's bakes the page started (a test's count: none where the new engine draws).
+    nonisolated(unsafe) public static var oldEngineBakes = 0
+
     private var lookupCache: (token: Int, lookup: LatticeLayoutColours.CellLookup)?
     private var drawnCache: (key: [Int], bars: LatticeLayoutBarsInputs)?
 
@@ -187,6 +192,64 @@ public final class LatticeLayoutPreview: ObservableObject {
         let l = LatticeLayoutColours.CellLookup(laid)
         lookupCache = (laid.token, l)
         return l
+    }
+
+    /// The span of relative density the bars are drawn over (the key's scale), and the median cell (its millimetres).
+    public func keyScale() -> (lo: Double, hi: Double, cellMM: Double)? {
+        guard let laid, laid.barCount > 0 else { return nil }
+        if let c = scaleCache, c.token == laid.token { return c.scale }
+        let rho = LatticeLayoutColours.densities(laid, type: latticeAtLay.lattice)
+        let cells = laid.barCell.sorted()
+        let scale = (lo: rho.min() ?? 0, hi: rho.max() ?? 0, cellMM: Double(cells.isEmpty ? 0 : cells[cells.count / 2]))
+        scaleCache = (laid.token, scale)
+        return scale
+    }
+    private var scaleCache: (token: Int, scale: (lo: Double, hi: Double, cellMM: Double))?
+
+    /// Whether any bar on screen is boundary work (the key's rim row).
+    public var hasSkinBars: Bool { laid?.barFlags.contains { LatticeLayoutColours.isSkin($0) } ?? false }
+
+    /// ★ The tap-to-read card's reading on the new engine: the bar nearest `p` (model mm) — its cell, width and density, what
+    /// it is (boundary work, the grade band, or fill) — from what the layout laid, the same numbers its colour was made from.
+    public struct Reading: Equatable {
+        public var cellMM: Double
+        public var widthMM: Double
+        public var density: Double
+        public var klass: LatticeStructureClass
+    }
+    public func read(at p: SIMD3<Float>) -> Reading? {
+        guard let laid else { return nil }
+        return Self.read(laid, at: p, lattice: latticeAtLay, lookup: latticeAtLay.gradingMode.fitsShape ? cellLookup() : nil)
+    }
+    /// The same, for a given layout and settings (tests read it directly).
+    static func read(_ laid: LatticeLayoutColours.Laid, at p: SIMD3<Float>, lattice latticeAtLay: LatticeSettings,
+                     lookup: LatticeLayoutColours.CellLookup?) -> Reading? {
+        guard laid.barCount > 0 else { return nil }
+        var best = -1
+        var bestD = Float.infinity
+        for i in 0..<laid.barCount {
+            let k = 7 * i
+            let a = SIMD3(laid.bars[k], laid.bars[k + 1], laid.bars[k + 2]), b = SIMD3(laid.bars[k + 3], laid.bars[k + 4], laid.bars[k + 5])
+            let ab = b - a, l2 = simd_length_squared(ab)
+            let t = l2 > 0 ? Swift.min(Swift.max(simd_dot(p - a, ab) / l2, 0), 1) : 0
+            let d = simd_length(a + ab * t - p) - laid.bars[k + 6] / 2
+            if d < bestD { bestD = d; best = i }
+        }
+        guard best >= 0 else { return nil }
+        let width = Double(laid.bars[7 * best + 6])
+        let cell = best < laid.barCell.count ? Double(laid.barCell[best]) : 0
+        var one = LatticeLayoutColours.Laid()
+        one.bars = Array(laid.bars[(7 * best)..<(7 * best + 7)]); one.barCell = [Float(cell)]
+        let rho = LatticeLayoutColours.densities(one, type: latticeAtLay.lattice).first ?? 0
+        var klass: LatticeStructureClass = .interior
+        if best < laid.barFlags.count, LatticeLayoutColours.isSkin(laid.barFlags[best]) {
+            klass = .rim
+        } else if latticeAtLay.gradingMode.fitsShape, let look = lookup {
+            let k = 7 * best
+            let mid = (SIMD3(laid.bars[k], laid.bars[k + 1], laid.bars[k + 2]) + SIMD3(laid.bars[k + 3], laid.bars[k + 4], laid.bars[k + 5])) / 2
+            if let c = look.cell(at: mid), laid.cellInfo[5 * c + 2] < 1 { klass = .grade }
+        }
+        return Reading(cellMM: cell, widthMM: width, density: rho, klass: klass)
     }
 
     /// The bars to draw, wearing the old preview's key (LatticeLayoutColours): by what each bar is and how much material it

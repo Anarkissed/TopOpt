@@ -190,6 +190,54 @@ final class LatticeLayoutColoursTests: XCTestCase {
         for i in past { XCTAssertEqual(gc[i], off[i], "★ a bar past the band is untouched") }
     }
 
+    // MARK: (6) the tap-to-read card
+
+    /// ★ R2b: a tap on a bar reads that bar — its own cell, width and density, and what it is (the class its colour came
+    /// from): a skin bar reads as the rim, a band bar as the grade, a bar past the band as fill.
+    func testATapReadsTheBarItHits() async throws {
+        let top = try topFace()
+        let session = try await LatticeLayoutSession.open(path: Self.cube)
+        defer { session.close() }
+        let type = LatticeType.named("octet")
+        var g = LatticeLayoutSession.Settings()
+        g.algorithm = "stepped"
+        g.cellMaxMM = 4; g.cellMinMM = 0
+        g.beadMM = 0.2; g.minStrutLines = 1
+        g.gradeToShape = true; g.bandMM = 3
+        g.regions = [.init(id: 1, faces: [top], depthMM: 5, expandMM: 0)]
+        var k = LatticeLayoutSession.Settings()   // the skin (Finish Skin on the whole part)
+        k.allLattice = true
+        k.beadMM = 0.2; k.minStrutLines = 1
+        k.skin = true
+        var settings = LatticeSettings()
+        settings.topologyID = "octet"
+        settings.gradingMode = .fitShape
+        var seen: Set<LatticeStructureClass> = []
+        var checked = 0
+        for (token, s) in [(3, g), (4, k)] {
+        let laid = LatticeLayoutColours.Laid(try await session.lay(s), token: token)
+        let look = LatticeLayoutColours.CellLookup(laid)
+        let rho = LatticeLayoutColours.densities(laid, type: type)
+        let grading = token == 3
+        settings.gradingMode = grading ? .fitShape : .stressOnly
+        for i in stride(from: 0, to: laid.barCount, by: Swift.max(1, laid.barCount / 400)) {
+            let r = try XCTUnwrap(LatticeLayoutPreview.read(laid, at: Self.mid(laid, i), lattice: settings, lookup: look))
+            guard abs(r.widthMM - Double(laid.bars[7 * i + 6])) < 1e-6 else { continue }   // two bars meet here: either may answer
+            checked += 1
+            XCTAssertEqual(r.cellMM, Double(laid.barCell[i]), accuracy: 1e-6, "★ the bar's own cell")
+            XCTAssertEqual(r.density, rho[i], accuracy: 1e-9, "★ its density, the one its colour was made from")
+            let skin = LatticeLayoutColours.isSkin(laid.barFlags[i])
+            let band = look.cell(at: Self.mid(laid, i)).map { laid.cellInfo[5 * $0 + 2] } ?? 1
+            let want: LatticeStructureClass = skin ? .rim : (grading && band < 1 ? .grade : .interior)
+            XCTAssertEqual(r.klass, want, "★ what it is: \(want)")
+            seen.insert(r.klass)
+        }
+        }
+        print("COLOURS tap: \(checked) bars read, classes \(seen.map(\.rawValue).sorted())")
+        XCTAssertGreaterThan(checked, 100, "premise: bars read")
+        XCTAssertEqual(seen, [.rim, .grade, .interior], "premise: every class read")
+    }
+
     // MARK: (5) the frame
 
     func testTheColoursReachTheFrame() throws {

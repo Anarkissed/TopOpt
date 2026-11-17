@@ -50,4 +50,43 @@ final class LatticeLayoutSwitchHostedTests: XCTestCase {
         }
     }
 }
+
+/// ★ Install 3 (R2b): on Lattice Setup the new engine is the only lattice — the old engine's bake never starts there, and the
+/// colour key is up with the new engine's bars (its scale from them). RED CONTROL `controlOldBakeUnderNewEngine`: the old
+/// bake runs underneath, as before Install 3.
+final class LatticeOldBakeRetiredHostedTests: XCTestCase {
+
+    @MainActor
+    func testNoOldBakeUnderTheNewEngineAndTheKeyIsUp() throws {
+        for control in [false, true] {
+            LatticeLayoutPreview.controlOldBakeUnderNewEngine = control
+            defer { LatticeLayoutPreview.controlOldBakeUnderNewEngine = false }
+            let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
+            let p = r.project
+            p.lattice.flexible = nil
+            p.lattice.clearLatticeType()
+            p.lattice.chooseLatticeType(.structural)
+            p.lattice.enabled = true
+            let h = AppBuildHost(WorkspacePlaceholder(model: r.app, project: p), size: AppBuildHost.sweep[0], test: self)
+            h.pump(3)
+            let before = LatticeLayoutPreview.oldEngineBakes
+            try h.pickFromMenu("capsuleMenu", "Structural", what: "the stage menu")
+            h.pump(1.5)
+            if h.frames.all["view-Lattice preview-on"] == nil { try h.tap("view-Lattice preview", "the lattice preview", settle: 1.5) }
+            if h.frames.all["latticeSettingsPanel"] != nil { try h.tap("capsuleSetup", "the page's Save", settle: 1.5) }
+            let end = Date().addingTimeInterval(120)
+            while h.frames.all["new-engine-timing"] == nil, Date() < end { h.pump(0.5) }
+            h.pump(2)
+            _ = try h.onScreen("new-engine-lines", "premise: the new engine laid the lattice")
+            let bakes = LatticeLayoutPreview.oldEngineBakes - before
+            print("OLD-BAKE control \(control): \(bakes) old bakes; key \(h.frames.all["latticeDensityLegend"].map { "\($0)" } ?? "none")")
+            if control {
+                XCTAssertGreaterThan(bakes, 0, "RED CONTROL: before Install 3 the old engine baked underneath")
+            } else {
+                XCTAssertEqual(bakes, 0, "★ no old bake where the new engine draws")
+                _ = try h.onScreen("latticeDensityLegend", "★ the colour key is up, on the new engine's bars")
+            }
+        }
+    }
+}
 #endif
