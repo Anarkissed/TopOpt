@@ -26,6 +26,7 @@
 #include "topopt/fea.hpp"  // SolverStopped (the solver's safety net)
 #include "topopt/job.hpp"
 #include "topopt/lattice_layout_file.hpp"  // `lattice-file` subcommand
+#include "topopt/lattice_file_strength.hpp"  // its strength check (Install 3, V4)
 #include "topopt/lattice_sample.hpp"  // `lattice-sample` subcommand
 #include "topopt/stl.hpp"
 #include "topopt/flexible/run.hpp"  // `flexible` subcommand
@@ -538,12 +539,14 @@ static int run_lattice_sample(int argc, char** argv) {
 // `lattice-file` (lattice rebuild; docs/design/lattice-rebuild/04-layout-file-job.md):
 // the printable lattice file made from the new layout engine. Everything is core's
 // (lattice_layout_file.hpp); this parses the flags, makes --out, and says what happened.
-// --materials / --rules are taken and not read, because the worker passes them to every
-// job. Exit 0 = made, 3 = refused, 1 = error, 2 = usage.
-static int run_lattice_file(int argc, char** argv) {
+// --materials / --rules (the worker passes them to every job) are read only by the strength
+// check, when the job asks for one ("strength_job", V4). Exit 0 = made, 3 = refused, 1 = error, 2 = usage.
+static int run_lattice_file(int argc, char** argv, const std::string& materials_default,
+                            const std::string& rules_default) {
   if (argc < 3) return usage(argv[0]);
   const std::string job_path = argv[2];
   std::string out_dir = ".";
+  std::string materials_path = materials_default, rules_path = rules_default;
   int threads = 0;
   for (int i = 3; i < argc; ++i) {
     const std::string arg = argv[i];
@@ -553,23 +556,31 @@ static int run_lattice_file(int argc, char** argv) {
     } else if (arg == "--threads") {
       threads = std::atoi(argv[++i]);
       if (threads < 1) return usage(argv[0]);
-    } else if (arg == "--materials" || arg == "--rules") {
-      ++i;
+    } else if (arg == "--materials") {
+      materials_path = argv[++i];
+    } else if (arg == "--rules") {
+      rules_path = argv[++i];
     } else {
       return usage(argv[0]);
     }
   }
   std::error_code ec;
   std::filesystem::create_directories(out_dir, ec);
+  const topopt::lattice_layout::StrengthCheck strength =
+      topopt::lattice_file_strength_check(materials_path, rules_path);
   const topopt::lattice_layout::FileResult r = topopt::lattice_layout::run_file_job(
-      job_path, out_dir, threads, [](const char* step) {
+      job_path, out_dir, threads,
+      [](const char* step) {
         std::printf("lattice-file: %s\n", step);
         std::fflush(stdout);
-      });
+      },
+      &strength);
   if (r.ok) {
     std::printf("lattice-file: made %s (%zu cells, %zu struts, %zu triangles, %.1f s)\n",
                 r.file.c_str(), r.cells, r.bars, r.made.mesh.triangles, r.ms_total / 1000.0);
     std::printf("mesh: %s\n", r.file.c_str());
+    if (r.strength_ran)
+      std::printf("lattice-file: strength checked: %s\n", r.strength_accepted ? "ACCEPTED" : "NOT ACCEPTED");
   } else {
     std::printf("lattice-file: %s (%s): %s\n", r.exit_code == 3 ? "REFUSED" : "FAILED",
                 r.code.c_str(), r.why.c_str());
@@ -669,7 +680,7 @@ int main(int argc, char** argv) {
   if (argc >= 2 && std::string(argv[1]) == "flexible") return run_flexible(argc, argv);
   if (argc >= 2 && std::string(argv[1]) == "lattice-sample")
     return run_lattice_sample(argc, argv);
-  if (argc >= 2 && std::string(argv[1]) == "lattice-file") return run_lattice_file(argc, argv);
+  if (argc >= 2 && std::string(argv[1]) == "lattice-file") return run_lattice_file(argc, argv, TOPOPT_CLI_DEFAULT_MATERIALS, TOPOPT_CLI_DEFAULT_RULES);
   if (argc < 3 || std::string(argv[1]) != "run") return usage(argv[0]);
   const std::string job_path = argv[2];
   std::string out_dir = ".";

@@ -1,4 +1,7 @@
 #include "topopt/job.hpp"
+#include "topopt/lattice_file_strength.hpp"  // Install 3 (V4)
+#include "topopt/gate_diagnosis_eval.hpp"     // diagnose_gate, for the check's diagnosis
+#include "topopt/strut_strength.hpp"
 #include "topopt/flexible/job_block.hpp"  // refuse_flexible_job
 #include "topopt/lattice_dc.hpp"
 #include "topopt/lattice_union_volume.hpp"
@@ -4271,7 +4274,10 @@ PostureCertification certify_posture(const MinimizePlasticVariant& variant,
                                      const Material& material,
                                      const std::vector<DirichletBC>& bcs,
                                      const LatticeCertContext& cx,
-                                     const LatticePosture* post) {
+                                     const LatticePosture* post,
+                                     // Install 3: each scenario's own fields, when given (none without
+                                     // scenarios). Null, every caller before it: nothing kept, as before.
+                                     std::vector<ScenarioFields>* fields_out = nullptr) {
   PostureCertification pc;
   if (cx.scenarios.empty()) {
     pc.governing = analyze_variant_with_posture(variant, sg, options, material, bcs, cx, post);
@@ -4291,7 +4297,8 @@ PostureCertification certify_posture(const MinimizePlasticVariant& variant,
                           a.lattice_not_certified_reason;
         return a;
       },
-      /*keep_fields=*/false);
+      /*keep_fields=*/fields_out != nullptr);
+  if (fields_out) *fields_out = std::move(sc.fields);
   pc.governing = std::move(sc.governing);
   pc.reports = std::move(sc.reports);
   for (const char a : pc.accepted)
@@ -4386,7 +4393,10 @@ LatticeCertOutcome certify_latticed_variant(const MinimizePlasticVariant& varian
                                             const LatticeCertContext& cx,
                                             const LatticePosture& post,
                                             double rho_uniform,
-                                            const std::vector<char>* open_cut = nullptr) {
+                                            const std::vector<char>* open_cut = nullptr,
+                                            // Install 3: the latticed solve's per-scenario fields, when
+                                            // given (scenario_fields.bin). Null: none kept, as before.
+                                            std::vector<ScenarioFields>* lattice_fields = nullptr) {
   LatticeCertOutcome oc;
   oc.rho = rho_uniform;
 
@@ -4485,7 +4495,7 @@ LatticeCertOutcome certify_latticed_variant(const MinimizePlasticVariant& varian
     }
   }
   PostureCertification lat =
-      certify_posture(*lat_variant, sg, options, material, bcs, *lat_cx, lat_post);
+      certify_posture(*lat_variant, sg, options, material, bcs, *lat_cx, lat_post, lattice_fields);
   oc.lattice = std::move(lat.governing);
   oc.scenarios = std::move(lat.reports);
   oc.scenario_accepted = std::move(lat.accepted);
@@ -15218,6 +15228,427 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
   write_text_file(result.provenance_path, prov);
 
   return result;
+}
+
+// ══ INSTALL 3: THE STRENGTH CHECK OF THE NEW ENGINE'S LATTICE FILE (rule V4) ══════
+// lattice_file_strength.hpp. The OLD check, unchanged (certify_latticed_variant: the
+// null-posture solve, the composite solve, the gate), fed from the new layout: the
+// part is set up exactly as the old Lattice run sets it up ("lattice_part": the part
+// is the design, every voxel it occupies solid), and the lattice's density per voxel
+// is the new layout's own (lattice_layout::lattice_credit). The cells it gives no
+// credit go in as the old open finish's cut cells: void in the composite solve.
+namespace {
+
+namespace ll = lattice_layout;
+
+ll::StrengthDone strength_no(const char* code, int exit_code, const std::string& why,
+                             const std::string& detail = {}) {
+  ll::StrengthDone d;
+  d.ok = false;
+  d.code = code;
+  d.exit_code = exit_code;
+  d.why = why;
+  d.detail = detail;
+  return d;
+}
+
+constexpr const char* kStrengthJobUnreadableWhy =
+    "The strength check's job sent with the lattice job could not be read, so no file was made.";
+
+// What `before` reads: the job, and the refusals that need no solve.
+std::string strength_job_problem(const JobDescription& job, const MaterialLibrary& materials) {
+  if (job.mode != "lattice_part")
+    return "the strength job's mode must be \"lattice_part\", not \"" + job.mode + "\"";
+  if (materials.find(job.material) == materials.end())
+    return "material \"" + job.material + "\" is not in the material library";
+  return {};
+}
+
+ll::StrengthDone run_lattice_file_strength(const ll::StrengthAsk& ask,
+                                           const std::string& materials_path,
+                                           const std::string& rules_path) {
+  const auto t_start = std::chrono::steady_clock::now();
+  if (!ask.session || !ask.outcome || !ask.made || !ask.session->domain())
+    return strength_no("strength_failed", 1,
+                       "The lattice's strength could not be checked, so no file was made.",
+                       "the strength check was asked with no laid lattice");
+  JobDescription job;
+  MaterialLibrary materials;
+  SettingsRules rules;
+  try {
+    job = load_job_file(ask.job_path);
+    materials = load_materials_file(materials_path);
+    rules = load_settings_rules_file(rules_path);
+  } catch (const std::exception& e) {
+    return strength_no("strength_job_unreadable", 1, kStrengthJobUnreadableWhy, e.what());
+  }
+  if (const std::string p = strength_job_problem(job, materials); !p.empty())
+    return strength_no("strength_job_unreadable", 1, kStrengthJobUnreadableWhy, p);
+  const Material& material = materials.at(job.material);
+  const std::string job_dir = [&] {
+    const std::string d = std::filesystem::path(ask.job_path).parent_path().string();
+    return d.empty() ? std::string(".") : d;
+  }();
+
+  // ── the part, opened as the old Lattice run opens it.
+  StepModel model;
+  try {
+    model = import_part_file_resolved(join_path(job_dir, job.model));
+  } catch (const std::exception& e) {
+    return strength_no("strength_failed", 1,
+                       "The part could not be opened for the strength check, so no file was made.",
+                       e.what());
+  }
+  if (!check_watertight(model.mesh).watertight)
+    return strength_no("strength_failed", 1,
+                       "The part's surface has gaps in it, so its strength could not be checked. No file was made.",
+                       "the strength job's model tessellation is not watertight: " + job.model);
+  // The strength job must be of the part the file was made from: the two boxes agree.
+  {
+    Vec3 lo{1e300, 1e300, 1e300}, hi{-1e300, -1e300, -1e300};
+    for (const Vec3& v : model.mesh.vertices) {
+      lo = {std::min(lo.x, v.x), std::min(lo.y, v.y), std::min(lo.z, v.z)};
+      hi = {std::max(hi.x, v.x), std::max(hi.y, v.y), std::max(hi.z, v.z)};
+    }
+    const double dx = ask.part_hi.x - ask.part_lo.x, dy = ask.part_hi.y - ask.part_lo.y,
+                 dz = ask.part_hi.z - ask.part_lo.z;
+    const double tol = std::max(0.1, 0.005 * std::sqrt(dx * dx + dy * dy + dz * dz));
+    const double worst = std::max({std::fabs(lo.x - ask.part_lo.x), std::fabs(lo.y - ask.part_lo.y),
+                                   std::fabs(lo.z - ask.part_lo.z), std::fabs(hi.x - ask.part_hi.x),
+                                   std::fabs(hi.y - ask.part_hi.y), std::fabs(hi.z - ask.part_hi.z)});
+    if (!(worst <= tol))
+      return strength_no("strength_job_unreadable", 1, kStrengthJobUnreadableWhy,
+                         "the strength job's part is not the lattice file's part (their boxes differ by " +
+                             json_num(worst) + " mm)");
+  }
+
+  // ── the load case: the SAME mapping the old Lattice run makes (lattice_variant_job).
+  const bool model_is_mesh = part_format_for_path(job.model) != PartFormat::Step;
+  VoxelGrid model_grid;
+  std::vector<DirichletBC> bcs;
+  MinimizePlasticOptions options;
+  if (job.loads.present) {
+    const ProductionLoadCase lc = production_loadcase_from_job(job, model);
+    ProductionRunSetup setup = build_production_loadcase(model, job.resolution, lc);
+    if (setup.options.require_external_loads && setup.options.external_loads.empty())
+      return strength_no("strength_failed", 1,
+                         "The strength job's load reaches no part of the part, so its strength could not be "
+                         "checked. No file was made.",
+                         no_external_load_message(setup, job.resolution));
+    model_grid = setup.grid;
+    bcs = setup.bcs;
+    options = setup.options;
+  } else {
+    model_grid = voxelize(model.mesh, job.resolution);
+    const std::vector<int> fixture = resolve_selectors(model, job.fixture_faces, "fixture_faces");
+    std::size_t tagged = 0;
+    for (const int f : fixture)
+      tagged += model_is_mesh ? tag_mesh_face(model_grid, model, f, VoxelTag::Fixture)
+                              : tag_step_face(model_grid, model, f, VoxelTag::Fixture);
+    if (tagged == 0)
+      return strength_no("strength_failed", 1,
+                         "The strength job's supports hold no part of the part, so its strength could not be "
+                         "checked. No file was made.",
+                         "fixture faces tagged no voxels");
+    for (const int n : fea_tagged_nodes(model_grid, VoxelTag::Fixture))
+      for (int c = 0; c < 3; ++c) bcs.push_back({n, c, 0.0});
+    configure_production_options(options);
+    options.margin_stop = job.margin_stop;
+    options.gravity = job.gravity.magnitude_mm_s2 * kGramPerCm3ToTonnePerMm3;
+    options.gravity_direction = job.gravity.direction;
+  }
+  apply_build_direction_options(options, job);
+  // As the old Lattice run: the part is solved on its own grid, never a design box's.
+  options.design_box.reset();
+  options.keep_out_boxes.clear();
+  const SolvedDesignDomain domain = resolve_design_domain(model_grid, bcs, options);
+  const VoxelGrid& cert_grid = domain.grid;
+
+  // ── the design: the part itself, every voxel it occupies solid (lattice_part).
+  std::vector<double> density(cert_grid.voxel_count(), 0.0);
+  std::vector<char> in_part(cert_grid.voxel_count(), 0);
+  std::size_t solid_count = 0;
+  for (int k = 0; k < cert_grid.nz; ++k)
+    for (int j = 0; j < cert_grid.ny; ++j)
+      for (int i = 0; i < cert_grid.nx; ++i)
+        if (cert_grid.solid(i, j, k)) {
+          density[cert_grid.index(i, j, k)] = 1.0;
+          in_part[cert_grid.index(i, j, k)] = 1;
+          ++solid_count;
+        }
+  if (solid_count == 0)
+    return strength_no("strength_failed", 1,
+                       "The part fills no voxel of the strength job's grid, so its strength could not be checked. "
+                       "No file was made.",
+                       "the part occupies no voxels at this resolution");
+
+  SimpParams params;
+  params.youngs_modulus = material.youngs_modulus_mpa;
+  params.poisson = material.poisson;
+  params.penalty = 3.0;
+  // The direction the composite solve is certified in (lattice_cert_context's); the solid solve uses the same, so
+  // the null-posture solve inside certify_latticed_variant reproduces it.
+  const Vec3 build_dir = resolve_build_direction(options);
+  const std::vector<NodalLoad> loads = design_domain_loads(domain, options, material.density_g_cm3);
+  const bool load_path_ok = load_path_connected(cert_grid, density, 0.5);
+  const KnockdownSpec knockdown = knockdown_spec_for(options);
+  const double part_solid = static_cast<double>(model_grid.solid_count());
+  auto certify_solid = [&](const std::vector<DirichletBC>& b, const std::vector<NodalLoad>& l) {
+    return analyze_fixed_design(cert_grid, params, density, b, l, material, build_dir,
+                                options.simp.cg_tolerance, options.simp.cg_max_iterations,
+                                options.simp.solver, options.margin_stop, knockdown, load_path_ok,
+                                part_solid, /*lattice=*/nullptr, options.build_orientation_report,
+                                resolve_build_direction_is_inferred(options),
+                                /*auto_apply_build_orientation=*/false);
+  };
+  FixedDesignAnalysis solid;
+  std::vector<ScenarioReport> solid_scenarios;
+  std::string solid_unheld;
+  if (domain.scenarios.empty()) {
+    solid = certify_solid(domain.bcs, loads);
+  } else {
+    ScenarioCertification sc = certify_scenarios(
+        cert_grid, sized_scenarios(domain.scenarios, material.youngs_modulus_mpa, cert_grid.spacing),
+        certify_solid, /*keep_fields=*/false);
+    solid = std::move(sc.governing);
+    solid_unheld = std::move(sc.unheld);
+    solid_scenarios = std::move(sc.reports);
+  }
+  if (solid.non_convergent)
+    return strength_no("strength_failed", 1,
+                       "The strength check's solve did not settle, so the lattice's strength is not known. No file "
+                       "was made.",
+                       "the solid certification solve did not converge (iteration " +
+                           std::to_string(solid.non_convergent_iteration) + ")");
+
+  // The variant the old pipeline consumes, as lattice_variant_job builds it for the part.
+  MinimizePlasticVariant v;
+  v.requested_volume_fraction = static_cast<double>(solid_count) / static_cast<double>(cert_grid.voxel_count());
+  v.optimization.physical_density = density;
+  v.optimization.volume_fraction = v.requested_volume_fraction;
+  v.v3 = solid.v3;
+  v.accepted = solid.accepted;
+  v.von_mises_field = solid.von_mises_field;
+  v.stress_tensor_field = solid.stress_tensor_field;
+  v.displacement_field = solid.displacement_field;
+  v.mass_grams = solid.mass_grams;
+  v.support_volume_voxels = solid.support_volume_voxels;
+  v.applied_build_dir = build_dir;
+  {
+    VariantReport vr;
+    vr.volume_fraction = solid.printed_fraction;
+    vr.printed_fraction = solid.printed_fraction;
+    vr.max_stress_mpa = solid.max_von_mises;
+    vr.max_interlayer_tension_mpa = solid.max_interlayer_tension;
+    vr.margin = solid.margin;
+    vr.accepted = solid.accepted;
+    vr.margin_required = options.margin_stop;
+    vr.margin_effective = solid.margin_effective;
+    vr.scenarios = solid_scenarios;
+    v.report = vr;
+  }
+
+  // ── the lattice the file holds, on this grid (V4).
+  const ll::Outcome& out = *ask.outcome;
+  ll::CreditGrid g;
+  g.origin = cert_grid.origin;
+  g.spacing = cert_grid.spacing;
+  g.nx = cert_grid.nx;
+  g.ny = cert_grid.ny;
+  g.nz = cert_grid.nz;
+  const ll::LatticeCredit credit = ll::lattice_credit(out.layout, *ask.session->domain(), out.bars,
+                                                      ask.made->left_out_at, g, &in_part, ask.threads);
+  const LatticeTopology topo = out.layout.topology;
+  LatticePosture post;
+  post.topology = topo;
+  const std::size_t nv = cert_grid.voxel_count();
+  post.mask.assign(nv, 0);
+  post.relative_density.assign(nv, 0.0);
+  post.cell_size_field.assign(nv, 0.0);
+  std::vector<char> no_credit(nv, 0);
+  const double rho_floor = lattice_rho_min(topo);
+  for (std::size_t e = 0; e < nv; ++e) {
+    const std::int32_t c = credit.cell[e];
+    if (c < 0) continue;
+    const ll::Cell& cell = out.layout.cells[static_cast<std::size_t>(c)];
+    post.mask[e] = 1;
+    post.cell_size_field[e] = cell.size;
+    post.cell_size_mm = std::max(post.cell_size_mm, cell.size);
+    if (credit.credited[e]) {
+      post.relative_density[e] = credit.cell_rho[static_cast<std::size_t>(c)];
+    } else {
+      // Void in the composite solve (certify_latticed_variant's open_cut): its density is never read.
+      post.relative_density[e] = rho_floor;
+      no_credit[e] = 1;
+    }
+  }
+
+  // ── THE OLD CHECK, unchanged: the null-posture solve, the composite solve, the gate.
+  const LatticeCertContext cx = lattice_cert_context(v, model_grid, domain, options, material, job);
+  std::vector<ScenarioFields> lattice_fields;
+  LatticeCertOutcome oc;
+  {
+    const ScopedLadderSolverIsolation solver_isolation;
+    oc = certify_latticed_variant(v, cert_grid, options, material, domain.bcs, cx, post,
+                                  std::numeric_limits<double>::quiet_NaN(), &no_credit,
+                                  cx.scenarios.empty() ? nullptr : &lattice_fields);
+  }
+  const FixedDesignAnalysis& a = oc.lattice;
+  if (a.non_convergent)
+    return strength_no("strength_failed", 1,
+                       "The strength check's solve did not settle, so the lattice's strength is not known. No file "
+                       "was made.",
+                       "the composite certification solve did not converge (iteration " +
+                           std::to_string(a.non_convergent_iteration) + ")");
+
+  ll::StrengthDone done;
+  // ── fields.bin (and scenario_fields.bin), the composite solve's, as the old Lattice run writes them.
+  {
+    MinimizePlasticResult fr;
+    fr.report.material = job.material;
+    MinimizePlasticVariant fv;
+    fv.requested_volume_fraction = v.requested_volume_fraction;
+    fv.accepted = a.accepted;
+    fv.von_mises_field = a.von_mises_field;
+    fv.stress_tensor_field = a.stress_tensor_field;
+    fv.displacement_field = a.displacement_field;
+    fv.mass_grams = a.mass_grams;
+    fv.support_volume_voxels = a.support_volume_voxels;
+    fv.report.scenarios = oc.scenarios;
+    fv.scenario_fields = std::move(lattice_fields);
+    fr.evaluated.push_back(std::move(fv));
+    write_fields_file(join_path(ask.out_dir, "fields.bin"), fr, cert_grid, /*accepted_only=*/false);
+    done.files.push_back("fields.bin");
+    if (write_scenario_fields_file(join_path(ask.out_dir, "scenario_fields.bin"), fr, cert_grid) > 0)
+      done.files.push_back("scenario_fields.bin");
+  }
+
+  // ── the block (the old receipt's names, renamed: lattice_accepted -> accepted, ...).
+  const bool law = a.lattice_strut_report;
+  const StrutStrengthReport& ss = a.lattice_strut;
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_start).count();
+  // V5 (his ruling, 2026-11-17): in Structural the lattice passes only when the solid AND the struts keep the safety
+  // margin. `accepted` stays the old gate exactly; a type with no strut law cannot reach a full pass. A result, never a
+  // refusal: the file is made in all three cases.
+  const bool struts_pass = law && ss.margin_worst_case >= options.margin_stop;
+  const char* verdict = !a.accepted ? "fail" : struts_pass ? "pass" : "solid_only";
+  std::string s = "{\n";
+  s += "    \"accepted\": " + std::string(a.accepted ? "true" : "false") + ",\n";
+  s += "    \"struts_pass\": " + std::string(struts_pass ? "true" : "false") + ",\n";
+  s += "    \"verdict\": \"" + std::string(verdict) + "\",\n";
+  s += "    \"margin_worst_case\": " + json_num(a.margin.worst_case) + ",\n";
+  s += "    \"margin_in_plane\": " + json_num(a.margin.in_plane) + ",\n";
+  s += "    \"margin_interlayer\": " + json_num(a.margin.interlayer) + ",\n";
+  s += "    \"safety_margin\": " + json_num(options.margin_stop) + ",\n";
+  s += "    \"not_certified\": " + std::string(a.lattice_not_certified ? "true" : "false") + ",\n";
+  s += "    \"not_certified_reason\": " + json_str(a.lattice_not_certified_reason) + ",\n";
+  s += "    \"mass_grams\": " + json_num(a.mass_grams) + ",\n";
+  s += "    \"max_effective_von_mises_mpa\": " + json_num(a.lattice_max_effective_vm) + ",\n";
+  s += "    \"max_interlayer_tension_mpa\": " + json_num(a.max_interlayer_tension) + ",\n";
+  s += "    \"cells_credited\": " + std::to_string(credit.cells_credited) + ",\n";
+  s += "    \"cells_no_credit\": " + std::to_string(credit.cells_no_credit) + ",\n";
+  s += "    \"voxel_mm\": " + json_num(cert_grid.spacing) + ",\n";
+  s += "    \"build_direction\": {\"x\": " + json_num(cx.build_dir.x) + ", \"y\": " + json_num(cx.build_dir.y) +
+       ", \"z\": " + json_num(cx.build_dir.z) + "},\n";
+  s += "    \"strut\": {\"law\": " + (law ? json_str(strut_law_source(topo)) : std::string("null")) +
+       // The type has no strut law to certify its struts by (brief: Bccz, Fccz, Reentrant).
+       ", \"uncertified\": " + std::string(!law ? "true" : "false") +
+       ", \"gated\": " + std::string(a.strut_gated ? "true" : "false") +
+       ", \"margin_in_plane\": " + json_num(law ? ss.margin_in_plane : nan) +
+       ", \"margin_interlayer\": " + json_num(law ? ss.margin_interlayer : nan) +
+       ", \"margin_worst_case\": " + json_num(law ? ss.margin_worst_case : nan) +
+       ", \"out_of_regime\": " + std::string(a.lattice_strut_out_of_regime ? "true" : "false") +
+       ", \"regime_note\": " +
+       json_str(a.lattice_strut_out_of_regime
+                    ? "the thinnest latticed member spans fewer cells than the measured homogenization floor, so "
+                      "the macro stress field these strut numbers amplify is itself out of the tensor's validated "
+                      "regime: treat them as indicative, not certified"
+                    : "") +
+       "},\n";
+  s += "    \"fields\": \"fields.bin\",\n";
+  if (done.files.size() > 1) s += "    \"scenario_fields\": \"scenario_fields.bin\",\n";
+  // The old report's diagnosis (diagnose_gate), on the composite analysis, when it is not accepted.
+  if (!a.accepted) {
+    GateDiagnosisInputs gd;
+    gd.accepted = a.accepted;
+    gd.load_path_ok = oc.open_finish ? oc.open_load_path_ok : cx.load_path_ok;
+    gd.margin_stop = options.margin_stop;
+    gd.margin_effective = a.margin_effective;
+    gd.margin = a.margin;
+    gd.material = material;
+    gd.material_name = job.material;
+    gd.knockdown = cx.knockdown;
+    gd.max_von_mises = a.max_von_mises;
+    gd.max_von_mises_effective = a.max_von_mises;
+    gd.max_interlayer = a.max_interlayer_tension;
+    gd.infill_percent = options.infill_percent;
+    gd.wall_loops = options.wall_loops;
+    gd.wall_line_width_mm = options.wall_line_width_mm;
+    gd.wall_line_width_outer_mm = options.wall_line_width_outer_mm;
+    gd.min_feature_violations = a.v3.min_feature_violations;
+    gd.min_feature_warning_threshold =
+        rules.min_feature_warning.message_template.empty() ? 0 : rules.min_feature_warning.threshold;
+    gd.voxel_spacing_mm = cert_grid.spacing;
+    gd.materials = &materials;
+    gd.poisson_locked = true;
+    for (const DirichletBC& bc : domain.bcs)
+      if (bc.value != 0.0) { gd.poisson_locked = false; break; }
+    gd.this_volume_fraction = a.printed_fraction;
+    gd.printed_von_mises = a.gate_printed_von_mises;
+    gd.printed_member_width_mm = a.gate_printed_member_width_mm;
+    const GateDiagnosis d = diagnose_gate(gd);
+    if (d.evaluated) {
+      s += "    \"diagnosis\": ";
+      emit_gate_diagnosis(s, d, "    ");
+      s += ",\n";
+    }
+  }
+  // run_info, as the old run writes it (the core's build and the job's echo), nested.
+  {
+    std::string ri = run_info_json(build_run_info(job, options, build_identity()));
+    while (!ri.empty() && (ri.back() == '\n' || ri.back() == ' ')) ri.pop_back();
+    std::string nested;
+    for (const char ch : ri) {
+      nested += ch;
+      if (ch == '\n') nested += "    ";
+    }
+    s += "    \"run_info\": " + nested + ",\n";
+  }
+  s += "    \"ms\": " + json_num(std::round(ms * 10.0) / 10.0) + "\n  }";
+  done.ok = true;
+  done.json = std::move(s);
+  done.accepted = a.accepted;
+  return done;
+}
+
+}  // namespace
+
+lattice_layout::StrengthCheck lattice_file_strength_check(const std::string& materials_path,
+                                                          const std::string& rules_path) {
+  lattice_layout::StrengthCheck check;
+  check.before = [materials_path](const std::string& path) {
+    try {
+      const JobDescription job = load_job_file(path);
+      const MaterialLibrary materials = load_materials_file(materials_path);
+      if (const std::string p = strength_job_problem(job, materials); !p.empty())
+        return strength_no("strength_job_unreadable", 1, kStrengthJobUnreadableWhy, p);
+    } catch (const std::exception& e) {
+      return strength_no("strength_job_unreadable", 1, kStrengthJobUnreadableWhy, e.what());
+    }
+    lattice_layout::StrengthDone ok;
+    ok.ok = true;
+    return ok;
+  };
+  check.run = [materials_path, rules_path](const lattice_layout::StrengthAsk& ask) {
+    try {
+      return run_lattice_file_strength(ask, materials_path, rules_path);
+    } catch (const std::exception& e) {
+      return strength_no("strength_failed", 1,
+                         "The lattice's strength could not be checked, so no file was made.", e.what());
+    }
+  };
+  return check;
 }
 
 namespace {

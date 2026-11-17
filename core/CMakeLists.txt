@@ -176,6 +176,8 @@ add_library(topopt
   # The lattice file job (docs/design/lattice-rebuild/04-layout-file-job.md): job.json ->
   # layout -> mesh -> STL. `topopt-cli lattice-file` is its only caller in core.
   src/lattice_layout/file_job.cpp
+  # Install 3: the lattice the strength check sees (rule V4); the check itself is run_job.cpp's.
+  src/lattice_layout/strength.cpp
   src/orient/orient.cpp
   src/orient/build_orientation.cpp
   src/orient/build_frame.cpp
@@ -2254,6 +2256,16 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
       --out "${CMAKE_CURRENT_BINARY_DIR}/cli_lattice_file_refused")
     set_tests_properties(cli_lattice_file_refused PROPERTIES PASS_REGULAR_EXPRESSION
       "lattice-file: REFUSED \\(region_faces_missing\\): Region 2 points at faces this part does not have")
+    # Install 3 (rule V4): the strength check of the new engine's lattice file, the old check fed from the layout:
+    # checked and accepted, not accepted (thinnest struts, heavy load), no check = no block and the same file, cut
+    # cells and a left-out bar get no credit, a type with no strut law, and the strength job's refusals.
+    add_executable(test_lattice_strength tests/validation/test_lattice_strength.cpp)
+    target_link_libraries(test_lattice_strength PRIVATE topopt)
+    target_compile_definitions(test_lattice_strength PRIVATE
+      MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+      SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+      TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME lattice_strength COMMAND test_lattice_strength)
   endif()
 
   # M6.2 integration test: the maintainer-authored demo job in

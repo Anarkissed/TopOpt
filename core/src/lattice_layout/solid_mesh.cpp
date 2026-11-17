@@ -574,17 +574,11 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
   {
     std::vector<char> used(spec.drop_at.size(), 0);
     for (const Bar& x : all_bars.bars) {
-      const double r = 0.5 * x.width;
       const Vec3 d{x.b.x - x.a.x, x.b.y - x.a.y, x.b.z - x.a.z};
       const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
       bool drop = false;
-      for (std::size_t k = 0; k < spec.drop_at.size(); ++k) {
-        const Vec3& s = spec.drop_at[k];
-        if (std::fabs(std::min(x.a.z, x.b.z) - r - s.z) > 0.45) continue;
-        const double t = l2 > 0 ? std::clamp(((s.x - x.a.x) * d.x + (s.y - x.a.y) * d.y + (s.z - x.a.z) * d.z) / l2, 0.0, 1.0) : 0.0;
-        const double ex = x.a.x + t * d.x - s.x, ey = x.a.y + t * d.y - s.y, ez = x.a.z + t * d.z - s.z;
-        if (std::sqrt(ex * ex + ey * ey + ez * ez) < r + 0.35) { drop = true; used[k] = 1; }
-      }
+      for (std::size_t k = 0; k < spec.drop_at.size(); ++k)
+        if (bar_left_out_at(x, spec.drop_at[k])) { drop = true; used[k] = 1; }
       if (drop) { ++rep.bars_left_out; rep.bars_left_out_mm += std::sqrt(l2); continue; }
       bars.push_back(x);
     }
