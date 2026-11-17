@@ -251,6 +251,38 @@ public final class LatticeLayoutSession: @unchecked Sendable {
     deinit { close() }
 
     /// Opens the imported model at `path` (STEP, STL or 3MF) on a new worker thread.
+    /// What core's `run_file_job` said: made, or refused with its word and plain line.
+    public struct FileJobOutcome: Sendable, Equatable {
+        public var ok: Bool
+        public var exitCode: Int
+        public var code: String
+        public var why: String
+        public var msTotal: Double
+    }
+
+    /// ★ THE PRINT FILE ON THE iPAD (his 11-17): the same `lattice_file` job the Mac's worker runs, through core's own
+    /// `run_file_job`, on a thread with the layout's stack (laying needs it; a GCD thread's 512 KB does not hold it).
+    /// Blocking: call it off the main thread. `outDir` must exist; it receives the STL and lattice_file.json.
+    public static func runFileJob(jobPath: String, outDir: String, materialsPath: String, rulesPath: String) throws -> FileJobOutcome {
+        var outcome: Swift.Result<FileJobOutcome, Error> = .failure(CancellationError())
+        let done = DispatchSemaphore(value: 0)
+        let t = Thread {
+            var err = topoptbridge.BridgeError()
+            let r = topoptbridge.lattice_file_job(std.string(jobPath), std.string(outDir), std.string(materialsPath),
+                                                  std.string(rulesPath), &err)
+            outcome = err.ok ? .success(FileJobOutcome(ok: r.ok, exitCode: Int(r.exit_code), code: String(r.code),
+                                                       why: String(r.why), msTotal: r.ms_total))
+                             : .failure(TopOptError(message: String(err.message)))
+            done.signal()
+        }
+        t.stackSize = workerStackSize
+        t.name = "TopOpt lattice file"
+        t.qualityOfService = QualityOfService.userInitiated
+        t.start()
+        done.wait()
+        return try outcome.get()
+    }
+
     public static func open(path: String, linearDeflection: Double = 0) async throws -> LatticeLayoutSession {
         let worker = LatticeLayoutWorker(stackSize: workerStackSize)
         let raw: topoptbridge.LatticeLayoutOpenInfo = try await worker.run {

@@ -225,4 +225,20 @@ void lattice_layout_set_demand(int64_t session, const LatticeLayoutDemand& deman
 void lattice_layout_cancel(int64_t session);
 void lattice_layout_close(int64_t session);
 
+// ★ THE PRINT FILE ON THE iPAD (his 11-17: "Not everyone will have a mac, definitely include an iPad only option"): the
+// SAME lattice_file job the Mac's worker runs (`topopt-cli lattice-file`), through core's own `run_file_job` — one job
+// document, two executors, as the old Lattice run's `run_lattice_job`. `job_path` is the job.json, beside the model (its
+// `model`, `demand` and `strength_job` are bare names resolved there); `out_dir` (must exist) receives the STL and
+// lattice_file.json whatever happened. Blocking: call it off the main thread. `materials_path` / `rules_path` feed the
+// strength check once the linked core has one. A refusal is not an error: `ok` false with its code and plain line.
+struct LatticeFileJobResult {
+  bool ok = false;
+  int32_t exit_code = 1;
+  std::string code;   // "ok", or core's refusal word
+  std::string why;    // not ok: one plain line
+  double ms_total = 0.0;
+};
+LatticeFileJobResult lattice_file_job(const std::string& job_path, const std::string& out_dir,
+                                      const std::string& materials_path, const std::string& rules_path, BridgeError& err);
+
 }  // namespace topoptbridge

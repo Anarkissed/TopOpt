@@ -610,6 +610,9 @@ public struct WorkspacePlaceholder: View {
     @State private var macFinding = false        // ★ B1 (note 4): Optimize is looking for the remembered Mac
     @State private var macNotAnswering = false   // ★ B1 (note 4): it looked, and the Mac never answered
     @State private var tinyPiece: TinyCutPiece.Hit?   // ★ his 11-16 (Install 3): the press stopped on a cut piece too small for core
+    /// ★ Install 3: a Lattice press waiting for the stress check it started (grading by stress needs it); it goes on when
+    /// the field lands, and stops with the check's words if the check fails.
+    @State private var latticeAfterStress: RunRequest?
     @State private var macRetryLattice = false   // ★ T5: the run the fix line's Try again starts again
     @State private var runCouldntFinish = false  // ★ B1 (O1): the last run failed with the engine's own text
     @State private var lastRunWasLattice = false // ★ B1 (O1): which button started it (Optimize, or Lattice)
@@ -1967,30 +1970,47 @@ public struct WorkspacePlaceholder: View {
         startLatticeRun(request)
     }
 
-    /// ★ HIS YES 11-17 (Install 3): a regular lattice on a STEP part goes to the new engine — the print file's job on the Mac,
-    /// with the strength check on Structural (`LatticeFileButton`); Organic, STL parts and Flexible keep the old run. A
-    /// remembered Mac not found yet is looked for first (as Optimize and Export do); with no Mac chosen, one line says so.
+    /// ★ HIS YES 11-17 (Install 3): a regular lattice on a STEP part goes to the new engine — the print file's job, with the
+    /// strength check on Structural (`LatticeFileButton`); Organic, STL parts and Flexible keep the old run. Where it runs is
+    /// Runs on's choice, as for Optimize: a chosen Mac (a remembered one not found yet is looked for first), else ★ this iPad
+    /// (his 11-17: "Not everyone will have a mac, definitely include an iPad only option"). The run's mode says which engine.
     private func startLatticeRun(_ request: RunRequest) {
         guard latticeButtonOnNewEngine else {
             runCouldntFinish = false; lastRunWasLattice = true   // ★ B1 (O1)
             run.start(request)
             return
         }
+        // a chosen Mac not found yet is looked for first; if it never answers, the button says so as Optimize's does
         if compute.wantsRemote, compute.activeRemote == nil { findTheMac { startLatticeRun(request) }; return }
-        guard let config = compute.activeRemote else { model.toast = LatticeFileButton.noMacLine; return }
         let strengthJob = LatticeFileJob.checksStrength(project.lattice, wired: LatticeFileButton.wired)
             ? try? RemoteRun.buildJobJSON(request) : nil   // the Lattice run's own job, as Export sends it
         let job: LatticeFileJob.ForPart
         switch LatticeFileJob.forPart(project, stress: newEngineStress, strengthJob: strengthJob) {
         case .success(let j): job = j
-        case .failure(let why): model.toast = why.line; return
+        case .failure(let why):
+            // grading by stress with no stress result yet: one press runs the check first, then lattices
+            if why.line == LatticeFileExport.noStressLine, !model.makeLatticeSimContexts().isEmpty, latticeAfterStress == nil {
+                latticeAfterStress = request
+                runNewEngineStressCheck()
+                model.toast = LatticeFileButton.stressFirstLine
+                return
+            }
+            model.toast = why.line; return
         }
         runCouldntFinish = false; lastRunWasLattice = true   // ★ B1 (O1)
+        let density = model.densityGCm3(for: project.material)
         // the old run's runner stays the run's own: this one is set for this start only (`start` takes it as it begins)
         let before = run.runner
-        run.runner = LatticeFileButton.runner(config: config, job: job, projectName: project.name, strengthJob: strengthJob,
-                                              densityGCm3: model.densityGCm3(for: project.material))
-        run.start(request, remote: true, workerName: compute.selectedWorkerName)
+        let fileRequest = request.withJobMode(LatticeFileButton.jobMode)
+        if let config = compute.activeRemote {
+            run.runner = LatticeFileButton.runner(config: config, job: job, projectName: project.name, strengthJob: strengthJob,
+                                                  densityGCm3: density)
+            run.start(fileRequest, remote: true, workerName: compute.selectedWorkerName)
+        } else {
+            run.runner = LatticeFileButton.deviceRunner(job: job, strengthJob: strengthJob, materialsPath: request.materialsPath,
+                                                        rulesPath: request.rulesPath, densityGCm3: density)
+            run.start(fileRequest)
+        }
         run.runner = before
     }
 
@@ -3429,6 +3449,19 @@ public struct WorkspacePlaceholder: View {
             refreshLatticeStressPeak()
             if showStrutPreview, project.lattice.enabled { buildStrutScene() }
             if newEngineOn { newEngine.update(project: project, on: true, solid: !surfaceXrayOn, stress: newEngineStress) }   // ★ Install 2: the field landed
+        }
+        .onChange(of: latticeSim.phase) { phase in   // ★ Install 3: a Lattice press that started the stress check goes on
+            guard let waiting = latticeAfterStress else { return }
+            switch phase {
+            case .complete:
+                latticeAfterStress = nil
+                if latticeStressField != nil { startLatticeRun(waiting) }
+            case .failed(let why):
+                latticeAfterStress = nil
+                model.toast = FlexibleRowCopy.fit(why, 70)
+            case .idle, .running:
+                break
+            }
         }
         .onAppear {
             syncLatticeProxy()

@@ -494,8 +494,10 @@ public enum LatticeFileButton {
     public static var wired: Bool { testWired ?? LatticeFileJob.strengthWired }
     /// Tests only: the switch as a test sets it. The app never sets it.
     nonisolated(unsafe) public static var testWired: Bool?
-    /// The new engine's file is made on the Mac: with none chosen, the button says so.
-    public static let noMacLine = "Choose a Mac to lattice this part"
+    /// Grading by stress with no stress result yet: the press runs the stress check first, then lattices.
+    public static let stressFirstLine = "Checking the stresses first, then latticing"
+    /// The run's mode on the new engine (the request the run carries says which engine made it).
+    public static let jobMode = "lattice_file"
 
     /// Whether this part's Lattice goes to the new engine: a regular lattice (not Organic) on a STEP part, the switch on.
     public static func takes(_ l: LatticeSettings, modelPath: String?, wired: Bool = wired) -> Bool {
@@ -576,6 +578,70 @@ public enum LatticeFileButton {
                                                 isCancelled: { !keepGoing.call(0, 1, 0) })
             return try outcome(made, densityGCm3: densityGCm3)
         }
+    }
+
+    /// ★ THE iPAD ONLY OPTION (his 11-17: "Not everyone will have a mac, definitely include an iPad only option"): with Runs on
+    /// set to this iPad, the same job runs here, through core's own `run_file_job` (`LatticeLayoutSession.runFileJob`), then
+    /// `outcome`. One coarse tick, as the old on-device Lattice: no fake progress.
+    public static func deviceRunner(job: LatticeFileJob.ForPart, strengthJob: Data?, materialsPath: String, rulesPath: String,
+                                    densityGCm3: Double) -> RunModel.Runner {
+        { _, progress, _ in
+            _ = progress(0, 1, 0)
+            let made = try runHere(job: job, strengthJob: strengthJob, materialsPath: materialsPath, rulesPath: rulesPath)
+            return try outcome(made, densityGCm3: densityGCm3)
+        }
+    }
+
+    /// The job made on this device. Its files go beside the model (its `model`, `demand` and `strength_job` are names resolved
+    /// there) under names of their own, so nothing of the project's is ever overwritten, and all of them are removed after; the
+    /// file and its report land in a temporary folder. Timing is the run's own (RunModel stamps a local run).
+    static func runHere(job: LatticeFileJob.ForPart, strengthJob: Data?, materialsPath: String, rulesPath: String) throws
+        -> LatticeFileRun.Made {
+        let fm = FileManager.default
+        let dir = URL(fileURLWithPath: job.modelPath).deletingLastPathComponent()
+        let tag = UUID().uuidString
+        let outDir = fm.temporaryDirectory.appendingPathComponent("lattice-file-\(tag)", isDirectory: true)
+        try fm.createDirectory(at: outDir, withIntermediateDirectories: true)
+        var written: [URL] = []
+        defer {
+            for u in written { try? fm.removeItem(at: u) }
+            try? fm.removeItem(at: outDir)
+        }
+        guard var doc = (try? JSONSerialization.jsonObject(with: job.json)) as? [String: Any] else {
+            throw LatticeFileRun.Failure("The job could not be written")
+        }
+        func beside(_ name: String, _ data: Data) throws {
+            let u = dir.appendingPathComponent(name)
+            try data.write(to: u, options: .withoutOverwriting)
+            written.append(u)
+        }
+        if let d = job.demand {
+            let name = "lattice_file_demand-\(tag).bin"
+            try beside(name, d)
+            doc["demand"] = name
+        }
+        if let s = strengthJob {
+            let name = "lattice_file_strength_job-\(tag).json"
+            try beside(name, s)
+            doc["strength_job"] = name
+        }
+        let jobName = "lattice_file_job-\(tag).json"
+        try beside(jobName, try JSONSerialization.data(withJSONObject: doc, options: [.sortedKeys]))
+        let r = try LatticeLayoutSession.runFileJob(jobPath: dir.appendingPathComponent(jobName).path, outDir: outDir.path,
+                                                    materialsPath: materialsPath, rulesPath: rulesPath)
+        func file(_ name: String) -> Data? {
+            guard !name.contains("/"), !name.contains(".."), let d = try? Data(contentsOf: outDir.appendingPathComponent(name)),
+                  !d.isEmpty else { return nil }
+            return d
+        }
+        let said = r.why.isEmpty ? "The file could not be made" : r.why
+        guard let rd = file(LatticeFileJob.reportName), let report = LatticeFileReport.parse(rd) else {
+            throw LatticeFileRun.Failure(said)
+        }
+        guard report.ok else { throw LatticeFileRun.Failure(report.why.isEmpty ? said : report.why) }
+        guard let stl = file(LatticeFileJob.outputName) else { throw LatticeFileRun.Failure("The file was made but could not be read") }
+        return LatticeFileRun.Made(stl: stl, report: report, reportJSON: rd, fields: report.strength?.fields.flatMap(file),
+                                   scenarioFields: report.strength?.scenarioFields.flatMap(file), timing: nil)
     }
 }
 

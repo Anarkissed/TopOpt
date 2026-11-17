@@ -300,26 +300,78 @@ final class LatticeFileButtonTests: XCTestCase {
         return (h, p, app)
     }
 
-    func testOnTheBracketTheLatticeButtonNeverStartsTheOldRunWithTheSwitchOn() throws {
+    /// ★ his 11-17 "definitely include an iPad only option": Runs on This iPad, the switch on — the Lattice button starts the
+    /// new engine's run (mode lattice_file) here, never the old one; RED CONTROL the switch off: the old lattice_part run.
+    /// The bracket on Lattice Setup with Runs on This iPad, every run recorded (none run).
+    func pressReady() throws -> (AppBuildHost, AppModel, TopologyEntriesSendNoLatticeHostedTests.Sent) {
+        let key = RememberedMacHostedTests.key
+        let saved = UserDefaults.standard.data(forKey: key)
+        UserDefaults.standard.set(try JSONEncoder().encode(ComputeChoice.local), forKey: key)   // Runs on: This iPad
+        addTeardownBlock { @MainActor in
+            if let saved { UserDefaults.standard.set(saved, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) }
+        }
         let (h, _, app) = try bracketOnLatticeSetup()
+        app.toast = nil
         let sent = TopologyEntriesSendNoLatticeHostedTests.Sent()
         RunModel.hostedTestRunner = { req, _, _ in sent.add(req); return AppBuildFixtures.outcome(1) }
         XCTAssertNil(h.frames.all["latticeRefreshButton"], "premise: the Lattice button, not Refresh Lattice")
+        return (h, app, sent)
+    }
 
-        LatticeFileButton.testWired = true
-        app.toast = nil
-        try h.tap("latticeButton", "★ the Lattice button, the switch on", settle: 1)
-        let end = Date().addingTimeInterval(8)
-        while app.toast == nil, Date() < end { h.pump(0.25) }
-        XCTAssertTrue(sent.requests.isEmpty, "★ the old run never starts for a regular lattice on a STEP part")
-        XCTAssertEqual(app.toast, LatticeFileButton.noMacLine, "★ no Mac chosen: one line says so")
-
-        LatticeFileButton.testWired = false   // RED CONTROL: the switch off — the old run
-        app.toast = nil
+    /// RED CONTROL for the test below: the switch off — the press starts the old lattice_part run.
+    func testOnTheBracketTheSwitchOffStartsTheOldRun() throws {
+        let (h, _, sent) = try pressReady()
+        LatticeFileButton.testWired = false
         try h.tap("latticeButton", "RED CONTROL: the Lattice button, the switch off", settle: 1)
-        let end2 = Date().addingTimeInterval(8)
-        while sent.requests.isEmpty, Date() < end2 { h.pump(0.25) }
+        let end = Date().addingTimeInterval(8)
+        while sent.requests.isEmpty, Date() < end { h.pump(0.25) }
         XCTAssertEqual(sent.requests.map(\.jobMode), ["lattice_part"], "RED CONTROL: the old Lattice run starts")
+    }
+
+    func testOnTheBracketTheLatticeButtonRunsTheNewEngineOnThisIPad() throws {
+        let (h, app, sent) = try pressReady()
+        LatticeFileButton.testWired = true
+        try h.tap("latticeButton", "★ the Lattice button, the switch on", settle: 1)
+        // Structural grades by stress: with no stress result yet, the one press runs the stress check first, then lattices
+        XCTAssertEqual(app.toast, LatticeFileButton.stressFirstLine, "★ the press says it checks the stresses first")
+        let end = Date().addingTimeInterval(180)
+        while sent.requests.isEmpty, Date() < end { h.pump(0.5) }
+        XCTAssertEqual(sent.requests.map(\.jobMode), [LatticeFileButton.jobMode],
+                       "★ the new engine's run starts on this iPad, never the old one (toast: \(app.toast ?? "none"))")
+    }
+
+    /// ★ The iPad route for real: the app's own job for core's cube, run on this device by core's `run_file_job` through the
+    /// bridge, comes back as the one result; every file it put beside the model is gone after (the project is never written).
+    func testTheIPadRouteMakesTheFileHereAndLeavesNothingBeside() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("lattice-here-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        let model = dir.appendingPathComponent("cube.step").path
+        try FileManager.default.copyItem(atPath: root.appendingPathComponent("core/tests/fixtures/step/cube.step").path, toPath: model)
+        let before = Set(try FileManager.default.contentsOfDirectory(atPath: dir.path))
+        var s = LatticeLayoutSession.Settings()
+        s.allLattice = true
+        s.cellMM = 5
+        let job = LatticeFileJob.ForPart(json: try LatticeFileJob.build(s, modelName: "cube.step"), modelPath: model, demand: nil)
+        let core = FlexibleHisProject.repoRoot.appendingPathComponent("core")
+        let run = LatticeFileButton.deviceRunner(job: job, strengthJob: nil,
+                                                 materialsPath: core.appendingPathComponent("src/materials/materials.json").path,
+                                                 rulesPath: core.appendingPathComponent("src/settings/rules.json").path,
+                                                 densityGCm3: 1.24)
+        let req = RunRequest(modelPath: model, material: "PLA", materialsPath: "", rulesPath: "", resolution: 64,
+                             projectName: "Lattice here cube")
+        var ticks = 0
+        let o = try run(req, { _, _, _ in ticks += 1; return true }, { _ in })
+        print("LATTICE-HERE cube on this device: \(o.variants.first.map { $0.meshIndices.count / 3 } ?? 0) triangles, "
+              + String(format: "%.2f g", o.variants.first?.massGrams ?? 0))
+        XCTAssertEqual(o.variants.count, 1, "★ one result")
+        XCTAssertGreaterThan(o.variants[0].meshIndices.count, 0, "★ the file's own mesh, made here")
+        XCTAssertGreaterThan(o.variants[0].massGrams, 0)
+        XCTAssertEqual(ticks, 1, "one coarse tick, no fake progress")
+        XCTAssertEqual(Set(try FileManager.default.contentsOfDirectory(atPath: dir.path)), before,
+                       "★ nothing left beside the model")
     }
 
     // MARK: opt-in, the real worker

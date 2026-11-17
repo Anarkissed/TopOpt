@@ -20,6 +20,7 @@
 #include "topopt/face_overrides.hpp"  // import_part_file_resolved
 #include "topopt/lattice.hpp"         // lattice_topology_from_id
 #include "topopt/lattice_layout.hpp"
+#include "topopt/lattice_layout_file.hpp"   // run_file_job: the print file on the iPad
 
 namespace topoptbridge {
 namespace {
@@ -549,6 +550,26 @@ void lattice_layout_close(int64_t session) {
   }
   s->stop = true;
   s->cancel_gen.fetch_add(1);   // anything still waiting on it comes back cancelled; it is freed when the last call returns
+}
+
+LatticeFileJobResult lattice_file_job(const std::string& job_path, const std::string& out_dir,
+                                      const std::string& materials_path, const std::string& rules_path, BridgeError& err) {
+  LatticeFileJobResult out;
+  (void)materials_path;   // the strength check's, once the linked core has one (Install 3, LatticeReview's core)
+  (void)rules_path;
+  const std::string why = bridge_guard_run("lattice_file_job", [&] {
+    const ll::FileResult r = ll::run_file_job(job_path, out_dir);
+    out.ok = r.ok;
+    out.exit_code = static_cast<int32_t>(r.exit_code);
+    out.code = r.code;
+    out.why = r.why;
+    out.ms_total = r.ms_total;
+  });
+  if (!why.empty()) {
+    out = LatticeFileJobResult{};
+    failed(err, why);
+  }
+  return out;
 }
 
 }  // namespace topoptbridge
