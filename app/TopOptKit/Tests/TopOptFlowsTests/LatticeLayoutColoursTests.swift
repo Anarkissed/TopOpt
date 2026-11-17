@@ -238,6 +238,56 @@ final class LatticeLayoutColoursTests: XCTestCase {
         XCTAssertEqual(seen, [.rim, .grade, .interior], "premise: every class read")
     }
 
+    // MARK: (7) the cells drawer
+
+    /// ★ R2c: the drawer's rows are the regions the job sends (the same ids), and each Lattice row's measured wall and cell
+    /// come from the new engine's own laid cells (its walls' widths, the cell laid there).
+    func testTheDrawerReadsTheNewEnginesWallsAndCells() async throws {
+        let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
+        let p = r.project
+        _ = try FlexibleR7M1Fixtures.hisLiveLattice(p)
+        let s = LatticeLayoutPreview.settings(p)
+        let keys = LatticeLayoutPreview.regionKeys(p)
+        let lattice = Set(s.regions.filter { !$0.noLattice }.map(\.id))
+        XCTAssertFalse(lattice.isEmpty, "premise: Lattice rows")
+        XCTAssertEqual(Set(keys.keys), lattice, "★ one drawer key per Lattice region the job sends, by the same id")
+        for reg in s.regions where !reg.noLattice {
+            let key = try XCTUnwrap(keys[reg.id])
+            if key.hasPrefix("f:"), let f = Int32(key.split(separator: ":").last ?? "") {
+                XCTAssertEqual(reg.faces, [f], "★ the row's face is the region's")
+            }
+        }
+
+        // the walls and cells, on core's cube: a Stepped region under the top face
+        let top = try topFace()
+        let session = try await LatticeLayoutSession.open(path: Self.cube)
+        defer { session.close() }
+        var g = LatticeLayoutSession.Settings()
+        g.algorithm = "stepped"
+        g.cellMaxMM = 4; g.cellMinMM = 0
+        g.beadMM = 0.2; g.minStrutLines = 1
+        g.regions = [.init(id: 1, faces: [top], depthMM: 5, expandMM: 0)]
+        let laid = LatticeLayoutColours.Laid(try await session.lay(g), token: 5)
+        XCTAssertEqual(laid.cellWallMM.count, laid.cellCount, "★ one wall width per cell")
+        let walled = (0..<laid.cellCount).filter { laid.cellWall[$0] >= 0 }
+        XCTAssertFalse(walled.isEmpty, "premise: cells laid for a wall")
+        for c in walled { XCTAssertGreaterThan(laid.cellWallMM[c], 0, "★ a cell's wall has its width") }
+        let cells = LatticeLayoutPreview.selectableCells(laid, keys: [1: "f:test:\(top)"], algorithm: "stepped")
+        let card = try XCTUnwrap(cells["f:test:\(top)"], "★ the row's card")
+        print("COLOURS drawer: wall \(card.measuredWidthMM) mm, cell \(card.cellMM) mm, range \(card.cellRangeMM)")
+        XCTAssertGreaterThan(card.measuredWidthMM, 0)
+        XCTAssertLessThanOrEqual(card.measuredWidthMM, 10.001, "the cube is 10 mm")
+        XCTAssertGreaterThan(card.cellMM, 0)
+        XCTAssertTrue(laid.cellInfo.enumerated().contains { $0.offset % 5 == 1 && abs(Double($0.element) - card.cellMM) < 1e-6 },
+                      "★ the card's cell is a cell the engine laid for that wall")
+        XCTAssertTrue(LatticeLayoutPreview.selectableCells(laid, keys: [1: "k"], algorithm: "default_grade").isEmpty,
+                      "Stepped and Doubled only, as the old drawer")
+        // the wiring
+        let src = try String(contentsOf: FlexibleHisProject.repoRoot
+            .appendingPathComponent("app/TopOptKit/Sources/TopOptFlows/WorkspacePlaceholder.swift"), encoding: .utf8)
+        XCTAssertTrue(src.contains("let baked = newEngineDrawn ? newEngine.selectableCells()"), "★ the drawer reads the new engine")
+    }
+
     // MARK: (5) the frame
 
     func testTheColoursReachTheFrame() throws {

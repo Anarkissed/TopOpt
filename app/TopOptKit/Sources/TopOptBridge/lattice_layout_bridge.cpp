@@ -298,6 +298,14 @@ void fill(LatticeLayoutResult& o, const ll::Outcome& out) {
     o.cell_region.push_back(c.region);   // ★ Install 3
     o.cell_wall.push_back(c.wall);
     o.cell_frame.push_back(c.frame);
+    {   // its wall's width (the drawer's measured wall), 0 = the space no wall holds
+      double w = 0;
+      if (c.wall >= 0 && c.frame >= 0 && c.frame < static_cast<int>(L.walls.size())) {
+        const auto& ws = L.walls[static_cast<size_t>(c.frame)].walls;
+        if (c.wall < static_cast<int>(ws.size())) w = ws[static_cast<size_t>(c.wall)].width;
+      }
+      o.cell_wall_mm.push_back(static_cast<float>(w));
+    }
     for (double v : c.lo) o.cell_lo.push_back(static_cast<float>(v));
   }
   o.solid_pieces = static_cast<int32_t>(L.solid.size());

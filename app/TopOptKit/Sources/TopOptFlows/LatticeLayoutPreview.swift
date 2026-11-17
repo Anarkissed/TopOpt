@@ -143,6 +143,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         }
         lastSettings = s
         latticeAtLay = p.lattice
+        keysAtLay = Self.regionKeys(p)   // ★ Install 3: the drawer's rows, as this layout's regions
         task?.cancel()
         laying = true
         nozzleWanted = checkNozzle
@@ -181,6 +182,13 @@ public final class LatticeLayoutPreview: ObservableObject {
     nonisolated(unsafe) public static var controlOldBakeUnderNewEngine = false
     /// The old engine's bakes the page started (a test's count: none where the new engine draws).
     nonisolated(unsafe) public static var oldEngineBakes = 0
+
+    private var keysAtLay: [Int32: String] = [:]
+    /// ★ Install 3: the cells drawer's numbers per face row, from the layout on screen.
+    public func selectableCells() -> [String: LatticeRegionCells.SelectableCell] {
+        guard let laid else { return [:] }
+        return Self.selectableCells(laid, keys: keysAtLay, algorithm: latticeAtLay.algorithm)
+    }
 
     private var lookupCache: (token: Int, lookup: LatticeLayoutColours.CellLookup)?
     private var drawnCache: (key: [Int], bars: LatticeLayoutBarsInputs)?
@@ -685,6 +693,70 @@ public final class LatticeLayoutPreview: ObservableObject {
         // Whole part ("In a part"), or no face asked for lattice: the whole part is lattice, less No lattice and Protect skins
         s.allLattice = l.wholePart || !s.regions.contains { !$0.noLattice }
         return s
+    }
+}
+
+extension LatticeLayoutPreview {
+    /// ★ Install 3 (the cells drawer on the new engine): which face row each region `settings(_:)` sends is — region id →
+    /// the drawer's key (`LatticeSelectableRef.key`). Walks the rows exactly as `settings` does (the ids it gives); the test
+    /// holds the two to the same ids.
+    public static func regionKeys(_ p: ProjectModel) -> [Int32: String] {
+        let l = p.lattice
+        var out: [Int32: String] = [:]
+        var id: Int32 = 1
+        for g in p.latticeGroups {
+            let skinGroup = l.skinGroups.contains(g.id)
+            for ref in p.latticeSelectableRefs(g) {
+                let role = p.latticeSelectableRole(ref, in: g.id)
+                guard skinGroup || role != nil else { continue }
+                let hasFaces: Bool
+                switch ref {
+                case .face: hasFaces = true
+                case let .region(_, rid): hasFaces = !p.surfaceResolvedFaces(rid).isEmpty
+                case let .primitive(pid):
+                    guard !skinGroup, l.zoneGroups.contains(g.id), Self.zone(p, group: g.id, primitive: pid) != nil else { continue }
+                    if role != .exclude { out[id] = ref.key }
+                    id += 1
+                    continue
+                }
+                guard hasFaces else { continue }
+                if !skinGroup, role != .exclude { out[id] = ref.key }
+                id += 1
+            }
+        }
+        return out
+    }
+
+    /// ★ Install 3: the drawer's measured wall and cell per face row, from what the new engine laid there — the wall that
+    /// holds most of the row's cells (its width) and the cell it lays there (the wall's own), the row's cells' size range;
+    /// rows sharing a key keep the finer cell, as the old bake's drawer did. Stepped and Doubled only, as before.
+    static func selectableCells(_ laid: LatticeLayoutColours.Laid, keys: [Int32: String], algorithm: String)
+        -> [String: LatticeRegionCells.SelectableCell] {
+        guard ["stepped", "doubled"].contains(algorithm) else { return [:] }
+        var byRegion: [Int32: [Int]] = [:]
+        for c in 0..<Swift.min(laid.cellCount, laid.cellRegion.count) { byRegion[laid.cellRegion[c], default: []].append(c) }
+        var out: [String: LatticeRegionCells.SelectableCell] = [:]
+        for (rid, key) in keys.sorted(by: { $0.key < $1.key }) {
+            guard let cells = byRegion[rid], !cells.isEmpty else { continue }
+            var count: [SIMD2<Int32>: Int] = [:]
+            for c in cells where c < laid.cellWall.count && laid.cellWall[c] >= 0 {
+                count[SIMD2(laid.cellFrame[c], laid.cellWall[c]), default: 0] += 1
+            }
+            guard let wall = count.max(by: { $0.value < $1.value || ($0.value == $1.value && ($0.key.x, $0.key.y) > ($1.key.x, $1.key.y)) })?.key
+            else { continue }
+            let inWall = cells.filter { laid.cellFrame[$0] == wall.x && laid.cellWall[$0] == wall.y }
+            let width = Double(laid.cellWallMM[inWall[0]])
+            let owns = inWall.map { Double(laid.cellInfo[5 * $0 + 1]) }.sorted()
+            let cell = owns[owns.count / 2]
+            let sizes = cells.map { Double(laid.cellInfo[5 * $0]) }
+            let mine = LatticeRegionCells.SelectableCell(measuredWidthMM: width, cellMM: cell,
+                                                         cellRangeMM: (sizes.min() ?? cell)...(sizes.max() ?? cell))
+            guard let had = out[key] else { out[key] = mine; continue }
+            let span = Swift.min(had.cellRangeMM.lowerBound, mine.cellRangeMM.lowerBound)...Swift.max(had.cellRangeMM.upperBound, mine.cellRangeMM.upperBound)
+            let gov = mine.cellMM < had.cellMM ? mine : had
+            out[key] = LatticeRegionCells.SelectableCell(measuredWidthMM: gov.measuredWidthMM, cellMM: gov.cellMM, cellRangeMM: span)
+        }
+        return out
     }
 }
 

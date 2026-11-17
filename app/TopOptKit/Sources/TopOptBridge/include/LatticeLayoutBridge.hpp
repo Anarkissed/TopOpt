@@ -144,6 +144,7 @@ struct LatticeLayoutResult {
   std::vector<int32_t> cell_wall;
   std::vector<int32_t> cell_frame;
   std::vector<float> cell_lo;                // 3 per cell
+  std::vector<float> cell_wall_mm;           // 1 per cell: its wall's width, mm (core's WallMap::Wall::width); 0 = no wall
   std::vector<int32_t> solid_frame;          // 1 per piece
   std::vector<int32_t> solid_region;         // 1 per piece
   std::vector<uint8_t> solid_why;            // 1 per piece: a LatticeLayoutWhy

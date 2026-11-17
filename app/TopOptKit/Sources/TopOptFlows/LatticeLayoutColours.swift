@@ -32,12 +32,13 @@ public enum LatticeLayoutColours {
         public var cellWall: [Int32] = []
         public var cellFrame: [Int32] = []
         public var cellLo: [Float] = []        // 3 per cell, frame mm
+        public var cellWallMM: [Float] = []    // 1 per cell: its wall's width, mm (0 = no wall)
         public var token = 0
         public init() {}
         public init(_ r: LatticeLayoutSession.Result, token: Int) {
             bars = r.bars; barFlags = r.barFlags; barCell = r.barCell; barRegion = r.barRegion
             frames = r.frames; cellInfo = r.cellInfo; cellRegion = r.cellRegion; cellWall = r.cellWall
-            cellFrame = r.cellFrame; cellLo = r.cellLo
+            cellFrame = r.cellFrame; cellLo = r.cellLo; cellWallMM = r.cellWallMM
             self.token = token
         }
         public var barCount: Int { bars.count / 7 }

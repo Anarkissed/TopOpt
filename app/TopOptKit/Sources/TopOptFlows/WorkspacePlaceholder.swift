@@ -1362,6 +1362,10 @@ public struct WorkspacePlaceholder: View {
                         strutScene = nil; latticeThinWalls = nil; latticeThinWallTints = []; latticeThinWallsPromptUp = false
                     } else if !owns, showStrutPreview, latticeViewsUp, strutScene == nil { buildStrutScene() }
                 }
+                .onChange(of: newEngine.laid) { _ in
+                    // ★ Install 3: the drawer's walls and cells are the new engine's — re-derive the cards when its layout lands
+                    if newEngineDrawn, Self.perRegionCellAlgorithms.contains(project.lattice.algorithm) { refreshLatticeFaceCards() }
+                }
                 .onChange(of: surfaceXrayOn) { x in if newEngineOn { newEngine.update(project: project, on: true, solid: !x, stress: newEngineStress) } }
                 .onChange(of: project.lattice, perform: { _ in if newEngineOn { newEngineSettingsChanged(); fileExport.settingsChanged() } })   // ★ 11-16: Live waits, Click to refresh holds   // (the rebake's lattice trigger stays the page's first: OrganicPreviewBakeInputsTests)
                 .ignoresSafeArea()
@@ -12639,7 +12643,8 @@ public struct WorkspacePlaceholder: View {
         // ★★ ONE NUMBER, ONE SOURCE (maintainer, 2026-10-03, item 5): the wall the bake measured
         // and the cell it lays there, per drawer — nil (declared depth, core's derivation) with no
         // bake yet or under an algorithm whose bake does not derive region cells.
-        let baked = LatticeRegionCells.selectableCells(project: project, scene: strutScene)
+        let baked = newEngineDrawn ? newEngine.selectableCells()   // ★ Install 3: the new engine's own walls and cells
+            : LatticeRegionCells.selectableCells(project: project, scene: strutScene)
         let bakedCopy = keys.map { baked[$0] }
         // ★ batch E (#362, ported 2026-10-08): a cut piece holds only its SHARE of its face — the
         // card's held voxels (and so its grams) are the face's, scaled by that share; nil = whole
