@@ -1333,6 +1333,7 @@ public struct WorkspacePlaceholder: View {
                 .onLatticeTurning { latticeTurningChanged($0) }   // ★ his pick 11-16 (A): chips and legends hide while he turns a lattice
                 .onTapRay(primitiveTapRay)   // ★ his iPad 10-28: a tap on a keep-clear volume picks it
                 .cutSibling(SurfaceTint.siblingShows(tool: surfaceTool))   // ★ his 11-14: the other half is tinted under Union only
+                .pieceOutline(outlineDrawing)   // ★ his 11-16/17 (Install 3): Outlines draw the faces as the app sends them
                 .overlay(alignment: .bottom) {
                     if newEngineDrawn {
                         VStack(spacing: 6) {
@@ -7071,6 +7072,15 @@ public struct WorkspacePlaceholder: View {
         guard visible.wireframe, surfaceWireframeOn, let mesh = viewerMesh
         else { return [] }
         return SurfaceCutLines.committed(regions: project.faceRegions, in: mesh)
+    }
+
+    /// ★ his 11-16 ("Shouldn't the Outline view INCLUDE cuts and unions and patterns and such?") and 11-17 ("Start on the
+    /// Outline view showing cuts and patterns"), Install 3: with any face edits, the Outlines view draws the faces the way
+    /// the app sends them — every cut and pattern line, no line inside a union (`PieceOutline`, the tap's own rule). nil = no
+    /// edits: the part's own edges, as before.
+    private var outlineDrawing: PieceOutline.Drawing? {
+        guard visible.wireframe, surfaceWireframeOn, let mesh = viewerMesh, !project.faceRegions.isEmpty else { return nil }
+        return PieceOutline.drawing(regions: project.faceRegions, in: mesh)
     }
 
     /// ★ THE GRID A PATTERN *WOULD* MAKE — the only thing on screen that has not
