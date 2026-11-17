@@ -104,6 +104,45 @@ final class LatticeFileButtonTests: XCTestCase {
         XCTAssertNil(LatticeFileStrength(block: Self.strength(nil)).strutsLine, "no strut block: nothing said about them")
     }
 
+    /// ★ LatticeReview 11-17: a load on OPEN lattice has no load path whatever the solid's margin ("fail", with `fail_reason`).
+    /// The lines say so instead of a margin; the not-strong-enough card says it with the fix; never "Strong enough".
+    func testALoadOnOpenLatticeFailsWithItsReasonNeverAMargin() throws {
+        var b = Self.strength("fail", accepted: false, margin: 3.2, strut: ["uncertified": true])
+        b["fail_reason"] = "load_on_open_lattice"
+        b["load_on_no_credit_n"] = 30.0
+        b["load_total_n"] = 50.0
+        b["diagnosis"] = ["binding_term": "in_plane"]
+        let s = LatticeFileStrength(block: b)
+        XCTAssertEqual(s.failReason, .loadOnOpenLattice)
+        XCTAssertEqual(s.line, "Not strong enough · the load lands on open lattice")
+        XCTAssertEqual(s.noPathLine, "The load lands on open lattice (60% of it), so nothing carries it to the anchors. "
+                       + LatticeFileStrength.protectLoadedFace + ".")
+        XCTAssertNil(s.strutMargin, "a no-rule type's strut margins are null")
+
+        let o = try LatticeFileButton.outcome(try Self.made(b), densityGCm3: 1.24)
+        XCTAssertEqual(o.acceptedCount, 0)
+        let d = try XCTUnwrap(o.variants[0].diagnosis)
+        XCTAssertEqual(d.binding, .loadPath, "★ the card's no-path wording, not a margin sentence")
+        let card = RunFailure.allRejectedOnMargin(worstMargin: 3.2, effectiveMargin: 3.2, minFeatureViolations: 0, diagnosis: d).message
+        XCTAssertTrue(card.contains("no connected path"), card)
+        XCTAssertTrue(card.contains(LatticeFileStrength.protectLoadedFace), "★ with the fix: \(card)")
+        XCTAssertFalse(card.contains("3.20×"), "never the solid's margin as the reason")
+
+        // a fail is the card, never a result on the Results screen (so never its "Strong enough" check)
+        XCTAssertNil(ResultsModel(projectName: "B", outcome: o).selected, "★ no result to call strong enough")
+
+        // no load path at all
+        b["fail_reason"] = "no_load_path"
+        XCTAssertEqual(LatticeFileStrength(block: b).line, "Not strong enough · nothing carries the load")
+        // RED CONTROL: a margin fail keeps the margin line and core's own diagnosis
+        b["fail_reason"] = "solid_margin"
+        b["margin_worst_case"] = 0.7
+        XCTAssertEqual(LatticeFileStrength(block: b).line, "Not strong enough · margin 0.7×, needs 1.5×")
+        XCTAssertNil(LatticeFileStrength(block: b).noPathLine)
+        let mo = try LatticeFileButton.outcome(try Self.made(b), densityGCm3: 1.24)
+        XCTAssertNotEqual(mo.variants[0].diagnosis?.binding, .loadPath, "RED CONTROL: core's diagnosis stands")
+    }
+
     // MARK: which parts
 
     func testTheButtonTakesARegularLatticeOnAStepPartOnly() {

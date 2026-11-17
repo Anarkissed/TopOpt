@@ -256,8 +256,17 @@ public struct LatticeFileStrength: Equatable, Sendable {
     public var strutsPass: Bool
     /// The struts' own worst-case margin (`strut.margin_worst_case`), or nil.
     public var strutMargin: Double?
-    /// This lattice type has no strut rule (`strut.uncertified`).
+    /// This lattice type has no strut rule (`strut.uncertified`; its `strut.margin_*` are null).
     public var strutNoRule: Bool
+
+    /// ★ Why a "fail" failed (LatticeReview 11-17): a load on OPEN lattice (cut cells, cells that lost a left-out bar) has no
+    /// load path whatever the solid's margin — the old open-finish rule.
+    public enum FailReason: String, Sendable { case loadOnOpenLattice = "load_on_open_lattice", noLoadPath = "no_load_path",
+                                                    solidMargin = "solid_margin" }
+    public var failReason: FailReason?
+    /// The load landing on cells that get no credit, and the whole load (N), where countable.
+    public var loadOnNoCreditN: Double?
+    public var loadTotalN: Double?
 
     public init(block b: [String: Any]) {
         func num(_ v: Any?) -> Double { (v as? NSNumber)?.doubleValue ?? 0 }
@@ -282,6 +291,26 @@ public struct LatticeFileStrength: Equatable, Sendable {
         strutNoRule = strut["uncertified"] as? Bool ?? false
         strutsPass = b["struts_pass"] as? Bool ?? false
         verdictSent = (b["verdict"] as? String).flatMap(Verdict.init(rawValue:))
+        failReason = (b["fail_reason"] as? String).flatMap(FailReason.init(rawValue:))
+        loadOnNoCreditN = (b["load_on_no_credit_n"] as? NSNumber)?.doubleValue
+        loadTotalN = (b["load_total_n"] as? NSNumber)?.doubleValue
+    }
+
+    /// The one-tap fix for a load on open lattice (his words to come; the tap keeps the loaded face solid).
+    public static let protectLoadedFace = "Protect the loaded face to keep it solid, then Lattice again"
+
+    /// Why the solid fails, in plain words, when it is not the margin itself; nil for "solid_margin" or a core without it.
+    public var noPathLine: String? {
+        switch failReason {
+        case .loadOnOpenLattice?:
+            var share = ""
+            if let on = loadOnNoCreditN, let all = loadTotalN, all > 0, on > 0 {
+                share = String(format: " (%.0f%% of it)", Swift.min(100, 100 * on / all))
+            }
+            return "The load lands on open lattice\(share), so nothing carries it to the anchors. " + Self.protectLoadedFace + "."
+        case .noLoadPath?: return "Nothing carries the load to the anchors."
+        case .solidMargin?, nil: return nil
+        }
     }
 
     private static func x(_ m: Double) -> String { String(format: "%.1f×", m) }
@@ -294,7 +323,12 @@ public struct LatticeFileStrength: Equatable, Sendable {
         switch verdict {
         case .pass: return "Strong enough · margin \(margin)\(mass)"
         case .solidOnly: return "Solid strong enough · margin \(margin) · struts: " + (strutsLine ?? Self.strutsNot).lowercased()
-        case .fail: return "Not strong enough · margin \(margin), needs \(Self.x(safetyMargin))"
+        case .fail:
+            switch failReason {
+            case .loadOnOpenLattice?: return "Not strong enough · the load lands on open lattice"
+            case .noLoadPath?: return "Not strong enough · nothing carries the load"
+            case .solidMargin?, nil: return "Not strong enough · margin \(margin), needs \(Self.x(safetyMargin))"
+            }
         }
     }
 
@@ -479,6 +513,18 @@ public enum LatticeFileButton {
         let fraction = m.report.partMM3 > 0 ? m.report.plasticMM3 / m.report.partMM3 : 0
         let accepted = s?.accepted ?? true
         let grams = s.flatMap { $0.massGrams > 0 ? $0.massGrams : nil } ?? m.report.plasticMM3 / 1000 * densityGCm3
+        // ★ a fail with no load path (a load on open lattice): the not-strong-enough card says so INSTEAD of a margin sentence
+        // (its load-path wording), with core's reason in plain words and the fix; a margin fail keeps core's own diagnosis
+        var diagnosis = s?.diagnosis
+        if let s, !accepted, let why = s.noPathLine {
+            let d = s.diagnosis
+            diagnosis = GateDiagnosis(binding: .loadPath, bindingValue: d?.bindingValue ?? 0, requiredValue: s.safetyMargin,
+                                      ratio: d?.ratio ?? 0, marginWorstCaseRaw: s.marginWorstCase, marginInPlaneRaw: s.marginInPlane,
+                                      marginInterlayerRaw: s.marginInterlayer, marginEffective: s.marginWorstCase,
+                                      knockdownFactor: d?.knockdownFactor ?? 1, infillPercent: d?.infillPercent ?? 100,
+                                      minFeatureViolations: 0, inheritsUnsourcedZKnockdown: false, provenance: d?.provenance ?? "",
+                                      noSettingFixesThis: true, noFixReason: why, headroomMinInfillPercent: nil, recommendations: [])
+        }
         var v = OptimizeVariant(
             requestedVolumeFraction: fraction, achievedVolumeFraction: fraction,
             massGrams: grams, supportVolumeVoxels: block?.supportVolumeVoxels ?? 0,
@@ -489,7 +535,7 @@ public enum LatticeFileButton {
             inPlaneMargin: s?.marginInPlane ?? 0, interlayerMargin: s?.marginInterlayer ?? 0,
             meshVertices: mesh.vertices, meshIndices: mesh.indices,
             vonMisesField: block?.vonMises ?? [], displacementField: block?.displacement ?? [],
-            stressTensorField: block?.stressTensor ?? [], diagnosis: s?.diagnosis)
+            stressTensorField: block?.stressTensor ?? [], diagnosis: diagnosis)
         if let sf = m.scenarioFields.flatMap(RemoteScenarioFields.parse),
            sf.gridNx == fields?.gridNx, sf.gridNy == fields?.gridNy, sf.gridNz == fields?.gridNz {
             v.scenarioFields = sf.blocks.first?.sets ?? []
