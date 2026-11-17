@@ -53,6 +53,7 @@ std::string where_text(const Settings& s) {
   out += "P";
   for (const Settings::ProtectAsk& p : s.protect) {
     whole(p.id); num(p.depth_mm);
+    if (p.chip) out += "k";   // D23: which entries are chips decides the domain read without them
     for (int f : p.faces) whole(f);
     pieces(p.pieces);
     out += ";";
@@ -96,6 +97,18 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
     for (const Settings::ProtectAsk& p : settings.protect)
       spec.protect.push_back({p.id, p.pieces.empty() ? faces_mesh(model_, p.faces) : pieces_mesh(model_, p.pieces),
                               p.depth_mm, p.pieces});
+    // D23: with protect_chip entries, the same domain without them too (a place under a chip's answer stays listed).
+    chip_ids_.clear();
+    domain_no_chips_.reset();
+    for (const Settings::ProtectAsk& p : settings.protect)
+      if (p.chip) chip_ids_.push_back(p.id);
+    if (!chip_ids_.empty()) {
+      DomainSpec bare = spec;
+      bare.protect.clear();
+      for (std::size_t i = 0; i < settings.protect.size(); ++i)
+        if (!settings.protect[i].chip) bare.protect.push_back(spec.protect[i]);
+      domain_no_chips_ = std::make_unique<Domain>(*measure_, std::move(bare));
+    }
     domain_ = std::make_unique<Domain>(*measure_, std::move(spec));
     where_ = where;
     unread_ = true;
@@ -170,6 +183,7 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
     out.struts = set_struts(out.layout, struts, own_or_none);
     const double laid = ms_since(t0);
     (out.read_again ? out.ms_read : out.ms_cells) = laid;
+    last_cells_.regions = out.layout.regions;   // D23: what Session::places reads of this layout
     if (settings.bars) {
       t0 = std::chrono::steady_clock::now();
       domain_->check_stop();
@@ -203,6 +217,13 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
     return given_up();
   }
   return out;
+}
+
+std::vector<Place> Session::places(const Settings& settings) const {
+  if (!domain_ || where_text(settings) != where_) return {};
+  const CellSpec& c = settings.cells;
+  return find_places(model_, *domain_, domain_no_chips_.get(), chip_ids_, settings.regions, last_cells_,
+                     c.cell_max_mm > 0.0 ? c.cell_max_mm : c.cell_mm);
 }
 
 }  // namespace topopt::lattice_layout
