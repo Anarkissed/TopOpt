@@ -7839,7 +7839,8 @@ static void test_weave_bars() {
   CHECK(loose == 8);   // the short ring's two, the short line's two, R1's and R2's ends in the air, J's two
   // (3) Crossings.
   Bars cut = wb;
-  const std::size_t joints = split_at_crossings(cut);
+  CrossingCutStats cst;
+  const std::size_t joints = split_at_crossings(cut, 0.0, 0.2, &cst);
   Bars again = wb;
   split_at_crossings(again);
   CHECK(bars_hash(again) == bars_hash(cut));
@@ -7860,9 +7861,20 @@ static void test_weave_bars() {
   for (const Bar& b : cut.bars) { ++ends_at[{b.a.x, b.a.y, b.a.z}]; ++ends_at[{b.b.x, b.b.y, b.b.z}]; }
   int fours = 0, threes = 0;
   for (const auto& kv : ends_at) { fours += kv.second == 4; threes += kv.second == 3 || kv.second > 4; }
-  CHECK(fours == 22 && threes == 0);
-  CHECK(joints == 20);
-  CHECK(unshared == 0 && close_pairs > 0);
+  // Re-pinned 2026-11-18 (brief L1) to rule S (brief G28, the lead's ruling), which replaced O2's cut for weave bars:
+  // each bar is cut at ITS OWN closest point (never moved off its line, never lengthened) and, where the two points
+  // differ, ONE link bar joins them (one per pair of strands, then one per 10 light widths along them). So a crossing
+  // is no longer one point where four bars end, and a close pair need not share an end. Was: fours 22, threes 0,
+  // joints 20, unshared 0.
+  std::size_t links = 0;
+  for (const Bar& b : cut.bars) links += b.link;
+  std::printf("weave crossings (rule S): %d four-way points, %d other; contacts %zu, strand pairs %zu, kept %zu; links %zu "
+              "(%.3f mm, longest %.3f); off the line %zu (largest %.2e mm), backwards %zu\n", fours, threes, cst.contacts,
+              cst.strand_pairs, cst.kept, cst.links, cst.links_mm, cst.link_max_mm, cst.off_line, cst.off_line_max_mm,
+              cst.backwards);
+  CHECK(cst.off_line == 0 && cst.backwards == 0);
+  CHECK(links == cst.links && links > 0 && close_pairs > 0);
+  CHECK(joints == 38);
   auto is_r1 = [](const Bar& b) {
     return std::fabs(b.a.z - 10) < 1e-9 && std::fabs(b.b.z - 10) < 1e-9 &&
            std::fabs(std::atan2(14 - b.a.y, b.a.x - 20) - 3.14159265358979323846 / 3) < 1e-6;
@@ -7949,7 +7961,8 @@ static void test_weave_crossing_at_a_vertex() {
     strands.push_back(weave_strand(p));
   }
   Bars bars = weave_bars(d, strands);
-  const std::size_t joints = split_at_crossings(bars);
+  CrossingCutStats vst;
+  const std::size_t joints = split_at_crossings(bars, 0.0, 0.2, &vst);
   auto on_a = [&](const Vec3& p) { return std::fabs(p.x - vertex.x) < 1e-6 && std::fabs(p.y - vertex.y) < 1e-6; };
   std::vector<const Bar*> a;
   for (const Bar& b : bars.bars)
@@ -7969,9 +7982,16 @@ static void test_weave_crossing_at_a_vertex() {
       if (same_point(p, vertex)) { ++at_vertex; b_at_vertex += !(on_a(b.a) && on_a(b.b)); }
   std::printf("weave crossing at a vertex: %zu joint(s), line A in %zu bars, %zu piece(s); %d bars end at A's vertex (%d of ring B)\n",
               joints, a.size(), pieces, at_vertex, b_at_vertex);
-  CHECK(joints == 1);
-  CHECK(pieces == 1 && a.size() == 3);
-  CHECK(at_vertex == 4 && b_at_vertex == 2);
+  // Re-pinned 2026-11-18 (brief L1) to rule S (brief G28): a crossing is moved onto a strand's own vertex only within
+  // 0.1 x the light width (0.09 mm); A's vertex is 0.3 mm from ring B, so A is cut at its own closest point (A stays
+  // one piece on its own line, now in 4 bars), B at its own, and one link joins the two. Was: joints 1, A in 3 bars,
+  // 4 bars ending at A's vertex (2 of ring B).
+  std::printf("weave crossing at a vertex (rule S): links %zu (%.3f mm), off the line %zu\n", vst.links, vst.links_mm,
+              vst.off_line);
+  CHECK(joints == 2);
+  CHECK(pieces == 1 && a.size() == 4);
+  CHECK(at_vertex == 2 && b_at_vertex == 0);
+  CHECK(vst.links == 1 && vst.off_line == 0);
 }
 
 // O1, O2 through the session: the cube region laid as lay() lays it, the weave's bars after its bars, the spacing

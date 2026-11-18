@@ -153,7 +153,7 @@ static void test_d_stress_goal() {
   std::size_t sides_on = on.face_hits[0] + on.face_hits[1] + on.face_hits[2] + on.face_hits[3];
   std::printf("OL-D stress goal: D2 branches offered %zu (grown %zu, refused %zu, short %zu), side-face exits %zu; off: "
               "offered %zu\n", on.d2_offered, on.d2_grown, on.d2_refused, on.d2_short, sides_on, off.d2_offered);
-  CHECK(on.d2_offered > 0 && on.d2_offered == on.d2_grown + on.d2_refused);
+  CHECK(on.d2_offered > 0 && on.d2_grown > 0 && on.d2_grown + on.d2_refused <= on.d2_offered);
   CHECK(off.d2_offered == 0 && off.d2_grown == 0);
 }
 
@@ -236,32 +236,47 @@ static void test_g_h_runs() {
   (void)b.grow(root);
   std::printf("OL-G roots: feet %zu, made %zu (dipped %zu)\n", root.root_feet, root.root_run_mm.size(), root.root_runs_dip);
   CHECK(root.root_feet > 0 && !root.root_run_mm.empty());
-  // H: under a straight-up stress a run has no level stress to follow; with the magnet on it steps on the magnet.
+  // H: in stripes 4 mm wide the stress is straight up (no level part to follow) and, between them, leans 45 degrees
+  // (a level part to follow). A run in an upright stripe has no direction of its own; with the magnet on it finds the
+  // leaning stress beside it and steps on the magnet; off, never.
+  Part st(24, 24, 24, 3, [](const Vec3& p) {
+    return static_cast<int>(std::floor(p.x / 4.0)) % 2 ? along({1, 0, 1}, 1.0) : along({0, 0, 1}, 1.0);
+  });
+  st.ask.reference_mpa = 2.0;
+  st.ask.top_run = 4.0;
+  st.ask.run_max = 2;
+  (void)st.grow(top);
+  st.ask.run_pull = 1.0;
+  (void)st.grow(pull);
   b.ask.root_run = 0.0;
-  b.ask.top_run = 4.0;
-  b.ask.run_pull = 1.0;
-  (void)b.grow(pull);
   std::printf("OL-H magnet: top steps on the magnet %zu (runs %zu), with no target %zu; off: %zu on the magnet\n",
               pull.top_steps_magnet, pull.top_runs_magnet, pull.top_steps_none, top.top_steps_magnet);
   CHECK(pull.top_steps_magnet > 0 && pull.top_runs_magnet > 0);
   CHECK(top.top_steps_magnet == 0 && top.top_runs_magnet == 0);
-  CHECK(throws([&] { OrganicAsk a = b.ask; a.run_follow = 0.0; (void)grow_strands(b.d, 1, b.field, a); }));
+  CHECK(throws([&] { OrganicAsk a = st.ask; a.run_follow = 0.0; (void)grow_strands(b.d, 1, b.field, a); }));
 }
 
 // ── OL-I: Auto by stress, and strut width by stress ─────────────────────────────
 static void test_i_auto() {
-  // No stress at all for x < 12: there u is 0, so Auto gives those top ends no run.
-  Part b(24, 24, 24, 3, [](const Vec3& p) { return along({0, 0, 1}, p.x < 12.0 ? 0.0 : 2.0); });
+  // A uniform stress of 1 MPa: u = 1 / the reference everywhere. Reference 1: u = 1, Auto gives every top end
+  // run_max (3) runs; reference 10: u = 0.1, round(0.3) = 0 runs. The random draw gives 1 to 3, never 0.
+  Part b(24, 24, 24, 3, [](const Vec3&) { return along({0, 0, 1}, 1.0); });
   b.ask.top_run = 4.0;
   b.ask.run_max = 3;
-  GrowReport drawn, autod;
+  GrowReport drawn, all3, none;
+  b.ask.reference_mpa = 1.0;
   (void)b.grow(drawn);
   b.ask.auto_by_stress = true;
-  (void)b.grow(autod);
-  std::printf("OL-I top ends with 0 runs: Auto %zu of %zu; drawn %zu of %zu\n", autod.top_n.empty() ? 0 : autod.top_n[0],
-              autod.top_vines, drawn.top_n.empty() ? 0 : drawn.top_n[0], drawn.top_vines);
-  CHECK(!autod.top_n.empty() && autod.top_n[0] > 0);
-  CHECK(!drawn.top_n.empty() && drawn.top_n[0] == 0 && drawn.top_vines > 0);
+  (void)b.grow(all3);
+  b.ask.reference_mpa = 10.0;
+  (void)b.grow(none);
+  auto at = [](const GrowReport& g, std::size_t n) { return n < g.top_n.size() ? g.top_n[n] : std::size_t(0); };
+  std::printf("OL-I Auto, top ends by runs (0, 1, 2, 3): u = 1: %zu %zu %zu %zu of %zu; u = 0.1: %zu of %zu with 0; "
+              "drawn: %zu %zu %zu %zu\n", at(all3, 0), at(all3, 1), at(all3, 2), at(all3, 3), all3.top_vines, at(none, 0),
+              none.top_vines, at(drawn, 0), at(drawn, 1), at(drawn, 2), at(drawn, 3));
+  CHECK(all3.top_vines > 0 && at(all3, 3) == all3.top_vines);
+  CHECK(none.top_vines > 0 && at(none, 0) == none.top_vines && none.top_run_mm.empty());
+  CHECK(drawn.top_vines > 0 && at(drawn, 0) == 0 && at(drawn, 3) < drawn.top_vines);
   // Width by stress: every point from the light width to the heavy, the heavy half wider than the light half.
   Part c(24, 24, 24, 3, ramp_up(24));
   c.ask.width_heavy_mm = 1.8;
@@ -312,8 +327,11 @@ static void test_j_prune_and_cap() {
   for (const Bar& x : bars.bars) loose_left = loose_left || x.end_a == Bar::End::Loose || x.end_b == Bar::End::Loose;
   CHECK(!loose_left);
   // J1: on a slender block (12 mm wide) the member cap (12 / 5 = 2.4 mm, under the 8 mm widest spacing) tightens the
-  // spacing; with member_cap off, only the outline cap does, so fewer candidates are tightened and the widest is wider.
+  // spacing (held at the tightest, 3 mm); with member_cap off only the outline cap does: fewer tightened, wider.
   Part b(12, 40, 20, 3, ramp_up(12));
+  // The member width is read on the field's grid: it must reach past the part (one voxel of air all round).
+  b.field = make_field(14, 42, 22, [](const Vec3& p) { return along({0, 0, 1}, 0.1 + 2.0 * (p.x - 1.0) / 12.0); });
+  b.field.origin = {-1, -1, -1};
   b.ask.spacing_max_mm = 8.0;
   b.ask.shape_fit = true;
   const OrganicSpacing capped = organic_spacing(b.d, 1, b.field, b.ask);
@@ -325,7 +343,7 @@ static void test_j_prune_and_cap() {
   std::printf("OL-J1 member cap: tightened %zu (widest %.2f mm); off: %zu (widest %.2f mm)\n", capped.shape_fit_tightened,
               wide_c, uncapped.shape_fit_tightened, wide_u);
   CHECK(capped.shape_fit_tightened > uncapped.shape_fit_tightened);
-  CHECK(wide_c <= 12.0 / 5.0 + 1e-9 && wide_u > wide_c);
+  CHECK(wide_c <= 3.0 + 1e-9 && wide_u > wide_c);   // 12 / 5 = 2.4 is under the tightest spacing (3): held at 3
 }
 
 // ── OL-K: a flat floor on the bed (weave regions only) ─────────────────────────────
@@ -524,7 +542,8 @@ static void test_q_traced_full() {
   const Outcome floor2 = floored.lay_organic(s, f, a);
   std::printf("OL-Q1 traced floor 2 mm: lowest weave bar point %.3f mm (%zu bars); no floor %.3f mm\n", lowest(floor2),
               floor2.bars.bars.size(), lowest(no_floor));
-  CHECK(!floor2.bars.bars.empty() && lowest(floor2) >= 2.0 - 1e-6 && lowest(no_floor) < 1.0);
+  // A bar that ends in the floor runs on into it by its own width (S11, a Solid end): 0.9 mm here.
+  CHECK(!floor2.bars.bars.empty() && lowest(floor2) >= 2.0 - 0.9 - 1e-6 && lowest(no_floor) < 2.0 - 0.9 - 0.1);
   // Q3: the solid above the 14 mm region hangs over it: supports are laid under it in Traced.
   s.bed_floor_mm = 0.0;
   a.hold_parts = true;

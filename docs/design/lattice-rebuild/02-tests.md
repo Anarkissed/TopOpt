@@ -308,3 +308,12 @@ made-up blocks and fields; each fails without its rule (its switch on gives what
 | T | L | OL-T: Traced with `unbraced_max` 6 lays braces and leaves fewer struts over 6 widths; off, none |
 | (fault 1) | L | OL-F1: a stated `reference_mpa` at the value the engine resolves (organic_spacing's own) lays the same bars as none stated, Traced and Grown, with the widths, level ties and braces on (every reader of the reference) |
 | (fault 2) | L | OL-F2: `link_width` 0.5, 1 and 2 through `lay_organic` (links held between the light width and the thicker strut) and `organic_link_width` 0.5 and 2.0 through the file job (made); 2.5 refused |
+
+Re-pinned 2026-11-18 (brief L1) to rule S (brief G28, which replaced O2's cut for weave bars): `test_weave_bars` (3),
+crossings: was fours 22, threes 0, joints 20, unshared 0; now joints 38, no piece off its line or backwards, the links
+counted (18 on the made-up weave). `test_weave_crossing_at_a_vertex`: was joints 1, A in 3 bars, 4 bars at A's vertex
+(2 of ring B); now joints 2, A in 4 bars (one piece), 2 at A's vertex (0 of B), one link 0.264 mm.
+In `test_organic_rules`, the first run's own faults were in the tests and are fixed: OL-D (offered = grown + refused
+does not hold: a branch can end otherwise), OL-H (a straight-up stress gives the magnet nothing to find: stripes now),
+OL-I (Auto on a uniform stress at reference 1 and 10), OL-J1 (the member width needs air round the part on the field's
+grid; the cap is held at the tightest spacing, 3), OL-Q1 (a bar ending in the floor runs on into it by its width).
