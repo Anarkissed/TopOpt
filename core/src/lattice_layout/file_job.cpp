@@ -1017,10 +1017,8 @@ FileJob parse_file_job(const std::string& json_text) {
     const json::Value doc = json::parse(json_text, "job.json");
     const std::string w = "job.json";
     json::as_object(doc, w);
-    json::reject_unknown(
-        doc, {"mode", "model", "output", "linear_deflection", "threads", "layout", "mesh", "demand", "strength_job"}, w);
     json::reject_unknown(doc, {"mode", "model", "output", "linear_deflection", "threads", "layout", "mesh", "demand",
-                               "tensor"},
+                               "strength_job", "tensor"},
                          w);
     const std::string mode = json::as_string(json::require(doc, "mode", w), w + ".mode");
     if (mode != "lattice_file") json::fail(w + ".mode", "must be \"lattice_file\", not \"" + mode + "\"");
@@ -1050,7 +1048,6 @@ FileJob parse_file_job(const std::string& json_text) {
       if (job.strength_job == job.output || job.strength_job == kFileResultName)
         json::fail(w + ".strength_job", "is the name of a file the job writes");
     }
-    if (const json::Value* v = json::find(doc, "layout"))
     // The stress tensor (Organic, Traced): a file beside the job, by its bare name.
     if (json::find(doc, "tensor")) {
       job.tensor = text(doc, "tensor", "", w);
