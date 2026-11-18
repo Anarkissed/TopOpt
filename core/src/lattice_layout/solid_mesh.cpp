@@ -8,6 +8,8 @@
 #include <cstdint>
 #include <cstring>
 #include <map>
+#include <memory>
+#include <optional>
 #include <thread>
 #include <unordered_map>
 
@@ -34,9 +36,12 @@ std::uint64_t place_key(const Vec3& p) {
   return (a * 0x9E3779B97F4A7C15ULL) ^ (b * 0xC2B2AE3D27D4EB4FULL) ^ (c * 0x165667B19E3779F9ULL);
 }
 
-// One cell's open space, as boxes in its frame.
-void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c, double pitch, bool merge, bool keep_edge,
-                   std::vector<OpenSpace::Box>& mine) {
+// One cube's open space, as boxes in its frame. `holds(p)` is whether the cube's own lattice is at `p` (a point of the
+// cube); `holds_near(a, b, c)` the same at a point of its frame just past the cube, asked only when `near_too` is set
+// (for a cell: what cell_holds asks, less the cube). A cell's cube, or a cube of a weave region's open space (O1).
+template <class Holds, class HoldsNear>
+void open_boxes_with(const Layout& lay, const Domain::Probe& probe, const Cell& c, double pitch, bool merge, bool keep_edge,
+                     std::vector<OpenSpace::Box>& mine, Holds holds, HoldsNear holds_near, bool near_too) {
   const Frame& f = lay.frames[static_cast<std::size_t>(c.frame)];
   const WallMap& walls = lay.walls[static_cast<std::size_t>(c.frame)];
   const int k = std::max(1, static_cast<int>(std::ceil(c.size / pitch - 1e-9)));
@@ -111,7 +116,7 @@ void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c,
   // A column read point by point: every point the cell holds is open.
   auto by_points = [&](int i, int j) {
     for (int z = 0; z < k; ++z)
-      if (cell_holds(lay, probe, c, place(i, j, z))) pt(i, j, z) = kSpace | kBox;
+      if (holds(place(i, j, z))) pt(i, j, z) = kSpace | kBox;
   };
   // NO CRUST (his major flaw, 2026-11-12). The points stop at their own grid, the part's
   // surface does not: a point whose middle is in the AIR while its cube pokes into the
@@ -130,10 +135,7 @@ void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c,
   // or lattice no cell holds, which is solid (D14). A cube face lying in the part's
   // surface is passed by the boxes' own overlap alone, as it always was.
   auto open_air = [&] {
-    // Which cell of the layout this is (read_open_space passes the layout's own cells).
-    const Cell* first = lay.cells.data();
-    if (&c < first || &c >= first + lay.cells.size()) return;
-    const std::size_t self = static_cast<std::size_t>(&c - first);
+    if (!near_too) return;
     // Nothing of the part's surface near the cube: no air to open, nothing to ask.
     const double reach = 1.001 * std::sqrt(3.0) * (0.5 * c.size + s);
     const double h = 0.5 * c.size;
@@ -152,7 +154,7 @@ void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c,
                 if (!(o & kAsked)) {
                   o |= kAsked;
                   // What cell_holds asks, less the cube.
-                  if (cell_holds_at(lay, probe, self, c.lo[0] + (u + 0.5) * s, c.lo[1] + (v + 0.5) * s, c.lo[2] + (w + 0.5) * s))
+                  if (holds_near(c.lo[0] + (u + 0.5) * s, c.lo[1] + (v + 0.5) * s, c.lo[2] + (w + 0.5) * s))
                     o |= kSpace;
                 }
                 touches = o & kSpace;
@@ -252,7 +254,7 @@ void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c,
       for (int z = 0; z < k && whole; ++z) {
         const double cz = c.lo[2] + (z + 0.5) * s;
         if (cz <= o.c0 || cz >= o.c1) continue;
-        whole = cell_holds(lay, probe, c, f.at(a, b, cz));
+        whole = holds(f.at(a, b, cz));
       }
       if (!whole) { o.kind = 3; continue; }
       o.kind = 1;
@@ -271,7 +273,7 @@ void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c,
       Col& o = col[at(i, j)];
       if (o.kind != 0 && o.kind != 2) continue;
       for (int z = 0; z < k; ++z)
-        if (cell_holds(lay, probe, c, place(i, j, z))) { o.kind = 3; break; }
+        if (holds(place(i, j, z))) { o.kind = 3; break; }
     }
   // A column of air beside an open one opens with it, so no film is left along the
   // part's side where the grid stops short of the surface.
@@ -382,6 +384,70 @@ void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c,
   point_boxes();
 }
 
+// One cell's open space, as boxes in its frame.
+void open_boxes_of(const Layout& lay, const Domain::Probe& probe, const Cell& c, double pitch, bool merge, bool keep_edge,
+                   std::vector<OpenSpace::Box>& mine) {
+  // Which cell of the layout this is (read_open_space passes the layout's own cells): the air past its cube is read
+  // only for one of them.
+  const Cell* first = lay.cells.data();
+  const bool own = &c >= first && &c < first + lay.cells.size();
+  const std::size_t self = own ? static_cast<std::size_t>(&c - first) : 0;
+  open_boxes_with(
+      lay, probe, c, pitch, merge, keep_edge, mine, [&](const Vec3& p) { return cell_holds(lay, probe, c, p); },
+      [&](double a, double b, double z) { return cell_holds_at(lay, probe, self, a, b, z); }, own);
+}
+
+// O1: the cubes a weave region's open space is read in: cubes of `size` on its frame (the part's own axes) over the
+// box round the region, cut to the part's own box. In order: the same for any number of threads.
+std::vector<Cell> weave_cubes(const Domain& domain, const Layout& lay, const Layout::Weave& wv, double size) {
+  std::vector<Cell> out;
+  const Region* r = nullptr;
+  for (const Region& x : domain.spec().regions)
+    if (x.id == wv.region) r = &x;
+  if (!r) return out;
+  double lo[3] = {1e300, 1e300, 1e300}, hi[3] = {-1e300, -1e300, -1e300};
+  auto take = [&](const Vec3& p, double grow) {
+    const double v[3] = {p.x, p.y, p.z};
+    for (int a = 0; a < 3; ++a) { lo[a] = std::min(lo[a], v[a] - grow); hi[a] = std::max(hi[a], v[a] + grow); }
+  };
+  if (r->is_shell()) {
+    for (const Vec3& v : r->shell.vertices) take(v, r->shell_depth_mm);
+  } else {
+    const ClearanceGeometry& g = r->prism;
+    if (!g.valid) return out;
+    const double e = std::max(0.0, r->expand_mm);
+    for (int k = 0; k < 8; ++k) {
+      const double u = (k & 1) ? g.u_hi + e : g.u_lo - e, w = (k & 2) ? g.w_hi + e : g.w_lo - e, d = (k & 4) ? g.depth : 0.0;
+      take(Vec3{g.origin.x + g.u.x * u + g.w.x * w + g.normal.x * d, g.origin.y + g.u.y * u + g.w.y * w + g.normal.y * d,
+                g.origin.z + g.u.z * u + g.w.z * w + g.normal.z * d},
+           0.0);
+    }
+  }
+  const PartMeasure& part = domain.measure();
+  const double plo[3] = {part.lo().x, part.lo().y, part.lo().z}, phi[3] = {part.hi().x, part.hi().y, part.hi().z};
+  const Frame& f = lay.frames[static_cast<std::size_t>(wv.frame)];
+  const double o[3] = {f.origin.x, f.origin.y, f.origin.z};
+  long n0[3], n1[3];
+  for (int a = 0; a < 3; ++a) {
+    const double l = std::max(lo[a], plo[a]) - o[a], h = std::min(hi[a], phi[a]) - o[a];
+    if (!(h > l)) return out;
+    n0[a] = static_cast<long>(std::floor(l / size));
+    n1[a] = static_cast<long>(std::ceil(h / size));
+  }
+  for (long z = n0[2]; z < n1[2]; ++z)
+    for (long y = n0[1]; y < n1[1]; ++y)
+      for (long x = n0[0]; x < n1[0]; ++x) {
+        Cell c;
+        c.region = wv.region;
+        c.frame = wv.frame;
+        c.lo[0] = x * size; c.lo[1] = y * size; c.lo[2] = z * size;
+        c.size = size;
+        c.cut = true;
+        out.push_back(c);
+      }
+  return out;
+}
+
 }  // namespace
 
 OpenSpace read_open_space(const Domain& domain, const Layout& layout, double pitch_mm, int threads,
@@ -407,7 +473,405 @@ OpenSpace read_open_space(const Domain& domain, const Layout& layout, double pit
   }
   check(stop);
   for (const auto& v : of_cell) out.boxes.insert(out.boxes.end(), v.begin(), v.end());
+  // O1: a weave region's open space, read from the domain itself at the same pitch, point by point as a curved
+  // region's cells are (with the same rule at an edge against solid, S11b, and the same air opened beside it), in
+  // cubes of sixteen points; after the cells' boxes.
+  for (const Layout::Weave& wv : layout.weave) {
+    const std::vector<Cell> cubes = weave_cubes(domain, layout, wv, 16.0 * out.pitch_mm);
+    std::vector<std::vector<OpenSpace::Box>> of_cube(cubes.size());
+    std::atomic<std::size_t> next_cube{0};
+    auto work_weave = [&] {
+      const Domain::Probe probe = domain.probe();
+      for (std::size_t k = next_cube.fetch_add(1); k < cubes.size() && !asked(stop); k = next_cube.fetch_add(1)) {
+        const Cell& c = cubes[k];
+        const Frame& f = layout.frames[static_cast<std::size_t>(c.frame)];
+        auto here = [&](const Vec3& p) {
+          const Where w = probe.where(p);
+          return w.lattice() && w.id == c.region;
+        };
+        open_boxes_with(layout, probe, c, out.pitch_mm, merge, keep_edge, of_cube[k], here,
+                        [&](double a, double b, double z) { return here(f.at(a, b, z)); }, true);
+      }
+    };
+    const int nt = static_cast<int>(std::min<std::size_t>(static_cast<std::size_t>(thread_count(threads)),
+                                                           std::max<std::size_t>(1, cubes.size())));
+    std::vector<std::thread> pool;
+    for (int t = 1; t < nt; ++t) pool.emplace_back(work_weave);
+    work_weave();
+    for (std::thread& t : pool) t.join();
+    check(stop);
+    for (const auto& v : of_cube) out.boxes.insert(out.boxes.end(), v.begin(), v.end());
+  }
   out.ms = ms_since(t0);
+  return out;
+}
+
+// ── the owner's bridge rules for a weave (O6 to O9) ──────────────────────────
+namespace {
+using PointKey = std::array<double, 3>;
+PointKey key_of(const Vec3& p) { return {p.x, p.y, p.z}; }
+double bar_length(const Bar& b) {
+  return std::sqrt((b.b.x - b.a.x) * (b.b.x - b.a.x) + (b.b.y - b.a.y) * (b.b.y - b.a.y) + (b.b.z - b.a.z) * (b.b.z - b.a.z));
+}
+double to_bar(const Vec3& p, const Bar& x, double* along = nullptr) {
+  const Vec3 d{x.b.x - x.a.x, x.b.y - x.a.y, x.b.z - x.a.z};
+  const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
+  const double t = l2 > 0 ? std::clamp(((p.x - x.a.x) * d.x + (p.y - x.a.y) * d.y + (p.z - x.a.z) * d.z) / l2, 0.0, 1.0) : 0.0;
+  if (along) *along = t;
+  const double ex = x.a.x + t * d.x - p.x, ey = x.a.y + t * d.y - p.y, ez = x.a.z + t * d.z - p.z;
+  return std::sqrt(ex * ex + ey * ey + ez * ez);
+}
+bool in_regions(const std::vector<int>& regions, int r) { return std::find(regions.begin(), regions.end(), r) != regions.end(); }
+}  // namespace
+
+std::vector<std::size_t> end_joints(const Bars& bars) {
+  // Ends within a hundredth of a micron of a point already seen are that point (as drop_loose_bars reads a joint).
+  constexpr double kSame = 1e-5;
+  using Cell = std::array<long long, 3>;
+  std::map<Cell, std::vector<std::pair<Vec3, std::size_t>>> seen;
+  std::size_t points = 0;
+  auto joint_of = [&](const Vec3& p) {
+    const Cell k{std::llround(p.x / kSame), std::llround(p.y / kSame), std::llround(p.z / kSame)};
+    for (long long dx = -1; dx <= 1; ++dx)
+      for (long long dy = -1; dy <= 1; ++dy)
+        for (long long dz = -1; dz <= 1; ++dz) {
+          const auto it = seen.find({k[0] + dx, k[1] + dy, k[2] + dz});
+          if (it == seen.end()) continue;
+          for (const auto& [q, id] : it->second)
+            if ((q.x - p.x) * (q.x - p.x) + (q.y - p.y) * (q.y - p.y) + (q.z - p.z) * (q.z - p.z) <= kSame * kSame) return id;
+        }
+    seen[k].push_back({p, points});
+    return points++;
+  };
+  std::vector<std::size_t> out(2 * bars.bars.size());
+  for (std::size_t i = 0; i < bars.bars.size(); ++i) {
+    out[2 * i] = joint_of(bars.bars[i].a);
+    out[2 * i + 1] = joint_of(bars.bars[i].b);
+  }
+  return out;
+}
+
+namespace {
+// Where each bar has an end, by joint (end_joints): the bars ending there.
+std::vector<std::vector<std::size_t>> bars_at_joints(const std::vector<std::size_t>& joints, std::size_t n) {
+  std::size_t most = 0;
+  for (std::size_t j : joints) most = std::max(most, j + 1);
+  std::vector<std::vector<std::size_t>> at(most);
+  for (std::size_t i = 0; i < n; ++i) {
+    at[joints[2 * i]].push_back(i);
+    if (joints[2 * i + 1] != joints[2 * i]) at[joints[2 * i + 1]].push_back(i);
+  }
+  return at;
+}
+// O10 (a finding at a held end): is end e of weave bar i held, by the bars still `present`? In the solid, or on a
+// present bar that reaches that point from below or level: a Node end where another present bar ends whose other end
+// is less than one layer above it, a Joined end in a present bar whose lowest end is less than one layer above it.
+bool held_from_below(const Bars& all, const std::vector<std::size_t>& joints, const std::vector<std::vector<std::size_t>>& at,
+                     const std::vector<char>& present, std::size_t i, int e, double layer) {
+  const Bar& x = all.bars[i];
+  const Bar::End end = e == 0 ? x.end_a : x.end_b;
+  const Vec3& p = e == 0 ? x.a : x.b;
+  if (end == Bar::End::Solid) return true;
+  const std::size_t n = all.bars.size();
+  if (end == Bar::End::Joined) {
+    const int into = e == 0 ? x.into_a : x.into_b;
+    if (into < 0 || static_cast<std::size_t>(into) >= n || static_cast<std::size_t>(into) == i ||
+        !present[static_cast<std::size_t>(into)])
+      return false;
+    const Bar& y = all.bars[static_cast<std::size_t>(into)];
+    return std::min(y.a.z, y.b.z) < p.z + layer;
+  }
+  if (end != Bar::End::Node) return false;
+  const std::size_t joint = joints[2 * i + static_cast<std::size_t>(e)];
+  for (std::size_t j : at[joint]) {
+    if (j == i || !present[j]) continue;
+    const Bar& y = all.bars[j];
+    if (joints[2 * j] == joints[2 * j + 1]) continue;
+    const Vec3& other = joints[2 * j] == joint ? y.b : y.a;
+    if (other.z < p.z + layer) return true;
+  }
+  return false;
+}
+// The lowest end of a bar (a at a tie).
+int low_end(const Bar& x) { return x.b.z < x.a.z ? 1 : 0; }
+// As build_mesh has always read a place against a bar: the bar's lowest point within 0.45 mm of it in height, and
+// the place within half its width + 0.35 mm of its line.
+bool place_reaches(const Vec3& s, const Bar& x) {
+  const double r = 0.5 * x.width;
+  if (std::fabs(std::min(x.a.z, x.b.z) - r - s.z) > 0.45) return false;
+  return to_bar(s, x) < r + 0.35;
+}
+}  // namespace
+
+std::vector<char> bars_present(const Bars& bars, const std::vector<Vec3>& drop_at) { return bars_present(bars, drop_at, {}); }
+
+std::vector<char> bars_present(const Bars& bars, const std::vector<Vec3>& drop_at, const std::vector<int>& weave_regions,
+                               double layer_mm, std::vector<char>* used) {
+  // As build_mesh leaves a strut out: its lowest point at one of the places.
+  const std::size_t n = bars.bars.size();
+  std::vector<char> out(n, 1);
+  if (used) used->assign(drop_at.size(), 0);
+  std::vector<std::vector<std::size_t>> reached(weave_regions.empty() ? 0 : n);   // a weave bar: the places reaching it
+  for (std::size_t i = 0; i < n; ++i) {
+    const Bar& x = bars.bars[i];
+    const bool weave = in_regions(weave_regions, x.region);
+    for (std::size_t k = 0; k < drop_at.size(); ++k) {
+      if (!place_reaches(drop_at[k], x)) continue;
+      if (weave) { reached[i].push_back(k); continue; }
+      out[i] = 0;
+      if (!used) break;
+      (*used)[k] = 1;
+    }
+  }
+  if (weave_regions.empty()) return out;
+  // O10 (a finding at a held end, a level end): a place leaves a weave bar out only when the bar's own lowest end is
+  // not held from below or level; an end less than one layer below a held other end of the same bar is at that end's
+  // level. What is left out can leave another bar unheld: judged again until nothing changes.
+  const double layer = layer_mm > 0.0 ? layer_mm : 0.2;
+  const std::vector<std::size_t> joints = end_joints(bars);
+  const std::vector<std::vector<std::size_t>> at = bars_at_joints(joints, n);
+  for (bool changed = true; changed;) {
+    changed = false;
+    for (std::size_t i = 0; i < n; ++i) {
+      if (reached[i].empty() || !out[i]) continue;
+      const Bar& x = bars.bars[i];
+      const int lo = low_end(x);
+      if (held_from_below(bars, joints, at, out, i, lo, layer)) continue;
+      const double rise = std::fabs(x.b.z - x.a.z);
+      if (rise < layer && held_from_below(bars, joints, at, out, i, 1 - lo, layer)) continue;
+      out[i] = 0;
+      changed = true;
+    }
+  }
+  if (used)
+    for (std::size_t i = 0; i < n; ++i)
+      if (!out[i])
+        for (std::size_t k : reached[i]) (*used)[k] = 1;
+  return out;
+}
+
+std::vector<WeaveFinding> weave_findings(const Bars& bars, const std::vector<int>& weave_regions, const std::vector<char>& present,
+                                         const std::vector<Vec3>& places, double layer_mm) {
+  std::vector<WeaveFinding> out(places.size());
+  if (places.empty()) return out;
+  const double layer = layer_mm > 0.0 ? layer_mm : 0.2;
+  const std::size_t n = bars.bars.size();
+  const std::vector<char> here(present.empty() ? std::vector<char>(n, 1) : present);
+  const std::vector<std::size_t> joints = end_joints(bars);
+  const std::vector<std::vector<std::size_t>> at = bars_at_joints(joints, n);
+  for (std::size_t k = 0; k < places.size(); ++k) {
+    WeaveFinding& f = out[k];
+    const Vec3& place = places[k];
+    for (std::size_t i = 0; i < n; ++i) {
+      if (!here[i]) continue;
+      const Bar& x = bars.bars[i];
+      const bool weave = in_regions(weave_regions, x.region);
+      if (weave && to_bar(place, x) < 0.5 * x.width + 0.35) f.on_weave = true;
+      if (!place_reaches(place, x)) continue;
+      ++f.reached;
+      if (!weave) { ++f.cube; continue; }
+      const int lo = low_end(x);
+      if (held_from_below(bars, joints, at, here, i, lo, layer)) { ++f.held; continue; }
+      if (std::fabs(x.b.z - x.a.z) < layer && held_from_below(bars, joints, at, here, i, 1 - lo, layer)) ++f.level;
+    }
+  }
+  return out;
+}
+
+WeaveHolds weave_holds(const Bars& all, const std::vector<int>& regions, const std::vector<char>& present, double rise) {
+  WeaveHolds h;
+  const std::size_t n = all.bars.size();
+  h.kept.assign(n, 1);
+  h.shallow.assign(n, 0);
+  std::vector<char> weave(n, 0);
+  for (std::size_t i = 0; i < n; ++i) {
+    if (!present.empty() && !present[i]) h.kept[i] = 0;
+    weave[i] = in_regions(regions, all.bars[i].region);
+    h.shallow[i] = weave[i] && bar_is_bridge(all.bars[i], rise);
+  }
+  // Every bar's ends by joint: ends within a hundredth of a micron are one point, as drop_loose_bars reads them (O6).
+  const std::vector<std::size_t> joints = end_joints(all);
+  const std::vector<std::vector<std::size_t>> at = bars_at_joints(joints, n);
+  auto held = [&](std::size_t i, int e) {
+    const Bar& x = all.bars[i];
+    const Bar::End end = e == 0 ? x.end_a : x.end_b;
+    if (end == Bar::End::Solid) return true;
+    if (end == Bar::End::Joined) {
+      const int into = e == 0 ? x.into_a : x.into_b;
+      return into >= 0 && static_cast<std::size_t>(into) < n && static_cast<std::size_t>(into) != i &&
+             h.kept[static_cast<std::size_t>(into)] != 0;
+    }
+    if (end != Bar::End::Node) return false;
+    for (std::size_t j : at[joints[2 * i + static_cast<std::size_t>(e)]])
+      if (j != i && h.kept[j]) return true;
+    return false;
+  };
+  // Left out one by one until nothing changes: what a left-out bar held is judged again. A shallow weave bar needs
+  // both ends held (O9); every other weave bar its lowest end (O9, every weave bar).
+  for (bool changed = true; changed;) {
+    changed = false;
+    for (std::size_t i = 0; i < n; ++i) {
+      if (!weave[i] || !h.kept[i]) continue;
+      if (h.shallow[i] ? held(i, 0) && held(i, 1) : held(i, low_end(all.bars[i]))) continue;
+      h.kept[i] = 0;
+      changed = true;
+    }
+  }
+  for (std::size_t i = 0; i < n; ++i) {
+    if (!weave[i] || (!present.empty() && !present[i])) continue;
+    if (h.kept[i]) h.kept_any_length += h.shallow[i];
+    else ++h.left_unheld;
+  }
+  return h;
+}
+
+std::vector<WeaveStand> weave_stands_wanted(const Bars& all, const std::vector<int>& regions, const std::vector<char>& kept,
+                                            double every_mm, double rise) {
+  std::vector<WeaveStand> out;
+  if (!(every_mm > 0.0)) return out;
+  const std::size_t n = all.bars.size();
+  auto is_kept = [&](std::size_t i) { return i < kept.size() ? kept[i] != 0 : true; };
+  std::vector<std::size_t> sb;   // the kept shallow weave bars
+  std::vector<int> slot(n, -1);
+  for (std::size_t i = 0; i < n; ++i)
+    if (is_kept(i) && in_regions(regions, all.bars[i].region) && bar_is_bridge(all.bars[i], rise)) {
+      slot[i] = static_cast<int>(sb.size());
+      sb.push_back(i);
+    }
+  if (sb.empty()) return out;
+  // Every kept bar's ends by exact point, and the shallow ones among them.
+  std::map<PointKey, std::vector<std::size_t>> ends, shallow_ends;
+  for (std::size_t i = 0; i < n; ++i) {
+    if (!is_kept(i)) continue;
+    ends[key_of(all.bars[i].a)].push_back(i);
+    ends[key_of(all.bars[i].b)].push_back(i);
+  }
+  for (std::size_t i : sb) {
+    shallow_ends[key_of(all.bars[i].a)].push_back(i);
+    shallow_ends[key_of(all.bars[i].b)].push_back(i);
+  }
+  // Chained as stage 1c's table chains them: exactly two shallow bars end at the point, in line within 15 degrees.
+  const double in_line = std::cos(15.0 * 3.14159265358979323846 / 180.0);
+  auto chained = [&](const PointKey& k) {
+    const auto it = shallow_ends.find(k);
+    if (it == shallow_ends.end() || it->second.size() != 2 || it->second[0] == it->second[1]) return false;
+    const Bar &x = all.bars[it->second[0]], &y = all.bars[it->second[1]];
+    const Vec3 p{k[0], k[1], k[2]};
+    const Vec3& px = key_of(x.a) == k ? x.b : x.a;
+    const Vec3& py = key_of(y.a) == k ? y.b : y.a;
+    const Vec3 u{p.x - px.x, p.y - px.y, p.z - px.z}, v{py.x - p.x, py.y - p.y, py.z - p.z};
+    const double lu = std::sqrt(u.x * u.x + u.y * u.y + u.z * u.z), lv = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+    return lu > 0.0 && lv > 0.0 && (u.x * v.x + u.y * v.y + u.z * v.z) / (lu * lv) >= in_line;
+  };
+  // Where other kept bars' Joined ends land in a shallow bar.
+  std::map<std::size_t, std::vector<Vec3>> landed;
+  for (std::size_t i = 0; i < n; ++i) {
+    if (!is_kept(i)) continue;
+    const Bar& x = all.bars[i];
+    for (int e = 0; e < 2; ++e) {
+      if ((e == 0 ? x.end_a : x.end_b) != Bar::End::Joined) continue;
+      const int into = e == 0 ? x.into_a : x.into_b;
+      if (into < 0 || static_cast<std::size_t>(into) >= n || slot[static_cast<std::size_t>(into)] < 0) continue;
+      landed[static_cast<std::size_t>(into)].push_back(e == 0 ? x.a : x.b);
+    }
+  }
+  std::vector<char> done(sb.size(), 0);
+  for (std::size_t s0 = 0; s0 < sb.size(); ++s0) {
+    if (done[s0]) continue;
+    // Walk back from this bar to an end of its run (round a closed ring, back to it), then along the run.
+    std::size_t start = sb[s0];
+    bool from_a = true;   // the run enters `start` at its a end
+    {
+      std::size_t cur = sb[s0];
+      PointKey back = key_of(all.bars[cur].a);
+      for (std::size_t steps = 0; steps <= sb.size(); ++steps) {
+        start = cur;
+        from_a = key_of(all.bars[cur].a) == back;
+        if (!chained(back)) break;
+        const auto& two = shallow_ends.at(back);
+        const std::size_t nxt = two[0] == cur ? two[1] : two[0];
+        if (nxt == sb[s0]) break;
+        back = key_of(all.bars[nxt].a) == back ? key_of(all.bars[nxt].b) : key_of(all.bars[nxt].a);
+        cur = nxt;
+      }
+    }
+    struct Step { std::size_t bar; Vec3 p0, p1; double s0, len; };
+    std::vector<Step> path;
+    bool closed = false;
+    double s = 0.0;
+    {
+      std::size_t cur = start;
+      bool enter_a = from_a;
+      for (std::size_t steps = 0; steps <= sb.size(); ++steps) {
+        done[static_cast<std::size_t>(slot[cur])] = 1;
+        const Bar& x = all.bars[cur];
+        const Vec3 p0 = enter_a ? x.a : x.b, p1 = enter_a ? x.b : x.a;
+        const double len = bar_length(x);
+        path.push_back({cur, p0, p1, s, len});
+        s += len;
+        const PointKey k1 = key_of(p1);
+        if (!chained(k1)) break;
+        const auto& two = shallow_ends.at(k1);
+        const std::size_t nxt = two[0] == cur ? two[1] : two[0];
+        if (nxt == start) { closed = true; break; }
+        if (done[static_cast<std::size_t>(slot[nxt])]) break;
+        enter_a = key_of(all.bars[nxt].a) == k1;
+        cur = nxt;
+      }
+    }
+    const double total = s;
+    auto in_run = [&](std::size_t j) {
+      for (const Step& st : path) if (st.bar == j) return true;
+      return false;
+    };
+    // A joint of the run is a stand when an end of the run there is Solid or Joined, or another kept bar ends there.
+    auto joint_stands = [&](const PointKey& k) {
+      for (std::size_t j : ends[k]) {
+        if (!in_run(j)) return true;
+        const Bar& x = all.bars[j];
+        const Bar::End e = key_of(x.a) == k ? x.end_a : x.end_b;
+        if (e == Bar::End::Solid || e == Bar::End::Joined) return true;
+      }
+      return false;
+    };
+    std::vector<double> stand;   // positions along the run
+    for (std::size_t q = 0; q < path.size(); ++q) {
+      const Step& st = path[q];
+      if (q == 0 && joint_stands(key_of(st.p0))) stand.push_back(st.s0);
+      if (joint_stands(key_of(st.p1))) stand.push_back(st.s0 + st.len);
+      const auto it = landed.find(st.bar);
+      if (it == landed.end()) continue;
+      const bool forward = key_of(all.bars[st.bar].a) == key_of(st.p0);
+      for (const Vec3& p : it->second) {
+        double t = 0.0;
+        (void)to_bar(p, all.bars[st.bar], &t);
+        stand.push_back(st.s0 + (forward ? t : 1.0 - t) * st.len);
+      }
+    }
+    if (stand.empty()) continue;
+    std::sort(stand.begin(), stand.end());
+    std::vector<std::pair<double, double>> gaps;
+    for (std::size_t q = 0; q + 1 < stand.size(); ++q) gaps.push_back({stand[q], stand[q + 1]});
+    if (closed) gaps.push_back({stand.back(), stand.front() + total});
+    for (const auto& g : gaps) {
+      if (!(g.second - g.first > every_mm)) continue;
+      double m = 0.5 * (g.first + g.second);
+      if (closed && m >= total) m -= total;
+      const Step* st = &path.back();
+      for (const Step& c : path)
+        if (m <= c.s0 + c.len) { st = &c; break; }
+      const double t = st->len > 0.0 ? std::clamp((m - st->s0) / st->len, 0.0, 1.0) : 0.0;
+      const Bar& x = all.bars[st->bar];
+      WeaveStand w;
+      w.at = {st->p0.x + t * (st->p1.x - st->p0.x), st->p0.y + t * (st->p1.y - st->p0.y), st->p0.z + t * (st->p1.z - st->p0.z)};
+      w.width = x.width;
+      // The bridge's underside straight under its centre line, less the fall over 0.45 mm along it and a hair.
+      const double horiz = std::hypot(x.b.x - x.a.x, x.b.y - x.a.y);
+      const double cosv = st->len > 0.0 ? horiz / st->len : 1.0, tanv = horiz > 0.0 ? std::fabs(x.b.z - x.a.z) / horiz : 0.0;
+      w.below_z = w.at.z - 0.5 * x.width / std::max(cosv, 1e-6) - 0.45 * tanv - 0.1;
+      out.push_back(w);
+    }
+  }
   return out;
 }
 
@@ -569,25 +1033,66 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
   // ── the struts ────────────────────────────────────────────────────────────
   // Left out first: every strut whose LOWEST point is at a place the layer check found
   // something starting in mid-air (a strut hanging from above with nothing under its tip).
+  // A weave's bar only when its lowest end is not held (O10: bars_present with the weave regions).
+  std::vector<int> weave_regions;
+  for (const Layout::Weave& w : lay.weave) weave_regions.push_back(w.region);
   std::vector<Bar> bars;
   bars.reserve(all_bars.bars.size());
-  {
-    std::vector<char> used(spec.drop_at.size(), 0);
-    for (const Bar& x : all_bars.bars) {
-      const Vec3 d{x.b.x - x.a.x, x.b.y - x.a.y, x.b.z - x.a.z};
-      const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
-      bool drop = false;
-      for (std::size_t k = 0; k < spec.drop_at.size(); ++k)
-        if (bar_left_out_at(x, spec.drop_at[k])) { drop = true; used[k] = 1; }
-      if (drop) { ++rep.bars_left_out; rep.bars_left_out_mm += std::sqrt(l2); continue; }
-      bars.push_back(x);
+  std::vector<char> used;
+  const std::vector<char> present = bars_present(all_bars, spec.drop_at, weave_regions, spec.layer_mm, &used);
+  for (std::size_t i = 0; i < all_bars.bars.size(); ++i) {
+    const Bar& x = all_bars.bars[i];
+    if (!present[i]) {
+      ++rep.bars_left_out;
+      rep.bars_left_out_mm += std::sqrt((x.b.x - x.a.x) * (x.b.x - x.a.x) + (x.b.y - x.a.y) * (x.b.y - x.a.y) + (x.b.z - x.a.z) * (x.b.z - x.a.z));
+      continue;
     }
-    for (char u : used) rep.drop_unanswered += !u;
+    bars.push_back(x);
+  }
+  for (char u : used) rep.drop_unanswered += !u;
+  // The owner's bridge rules for a weave (O6, O7, O9): of what is left, a weave bar held by nothing kept is left out
+  // too (weave_holds), never posted instead. No weave region: nothing here.
+  if (!weave_regions.empty()) {
+    const WeaveHolds holds = weave_holds(all_bars, weave_regions, present, spec.bridge_rise);
+    rep.kept_any_length = holds.kept_any_length;
+    rep.weave_left_unheld = holds.left_unheld;
+    if (holds.left_unheld) {
+      bars.clear();
+      for (std::size_t i = 0; i < all_bars.bars.size(); ++i)
+        if (holds.kept[i]) bars.push_back(all_bars.bars[i]);
+    }
   }
 
   // Every strut is written a little longer than its bar (MeshSpec::strut_reach_mm): each end is carried on along the
   // bar's own line, so a strut that ends on solid is fused into it across the open space's last column.
   const double reach = spec.strut_reach_mm < 0.0 ? 0.5 * kept.pitch_mm + kept.grow_mm + 0.05 : spec.strut_reach_mm;
+  // O11: the blended foot, only where a weave bar runs into the solid. With f = 0 or no weave region: nothing here.
+  std::vector<int> foot_regions;
+  if (spec.weave_foot_mm != 0.0)
+    for (const Layout::Weave& w : lay.weave) foot_regions.push_back(w.region);
+  std::unique_ptr<const SolidAt> wall_at = foot_regions.empty() ? nullptr : std::make_unique<const SolidAt>(lay);
+  // O14: a weave's shallow struts are written with a round top (a D section) when asked; cube-lattice bridges never.
+  std::vector<int> round_top_regions;
+  if (spec.weave_round_top)
+    for (const Layout::Weave& w : lay.weave) round_top_regions.push_back(w.region);
+  const int HALF = std::max(2, SEG / 2);   // the half round's flat facets: half a round strut's sides
+  // The D section in a bridge's frame, at `at`: its underside at up = -r from the bar's line, `half` either side, its
+  // sides straight up to the line, its top a half round of radius `half` about the line (corners on the round).
+  auto d_section = [&](std::vector<manifold::vec3>& pts, const Vec3& at, const Vec3& side, const Vec3& up, double r, double half) {
+    auto put = [&](double s, double v) {
+      pts.push_back(mv(Vec3{at.x + side.x * s + up.x * v, at.y + side.y * s + up.y * v, at.z + side.z * s + up.z * v}));
+    };
+    put(-half, -r);
+    put(half, -r);
+    for (int k = 0; k <= HALF; ++k) {
+      const double t = kPi * k / HALF;
+      put(half * std::cos(t), half * std::sin(t));
+    }
+  };
+  // The D section's area: the straight lower half and the faceted half round.
+  auto d_area = [&](double r, double half) { return 2.0 * half * r + 0.5 * HALF * half * half * std::sin(kPi / HALF); };
+  std::optional<Domain::Probe> wall_probe;
+  if (wall_at) wall_probe.emplace(domain.probe());
   Manifold struts;
   {
     std::vector<Manifold> solids;
@@ -606,7 +1111,22 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
       const double pa = x.end_a == Bar::End::Surface ? std::max(2.0 * r + 0.3, reach) : reach;
       const double pb = x.end_b == Bar::End::Surface ? std::max(2.0 * r + 0.3, reach) : reach;
       const Vec3 a{x.a.x - d.x * pa, x.a.y - d.y * pa, x.a.z - d.z * pa};
-      if (bar_is_bridge(x, spec.bridge_rise)) {
+      const bool round_top = bar_is_bridge(x, spec.bridge_rise) && in_regions(round_top_regions, x.region);
+      if (round_top) {
+        // O14: a weave's shallow strut, its underside the square bar's exactly (the same frame, the same plane, the
+        // same width), its top a half round: a D section from end to end.
+        Vec3 side{-d.y, d.x, 0.0};
+        const double ls = std::sqrt(side.x * side.x + side.y * side.y);
+        side = {side.x / ls, side.y / ls, 0.0};
+        Vec3 up{d.y * side.z - d.z * side.y, d.z * side.x - d.x * side.z, d.x * side.y - d.y * side.x};
+        if (up.z < 0) { up = {-up.x, -up.y, -up.z}; side = {-side.x, -side.y, 0.0}; }
+        const Vec3 b{x.b.x + d.x * pb, x.b.y + d.y * pb, x.b.z + d.z * pb};
+        std::vector<manifold::vec3> pts;
+        d_section(pts, a, side, up, r, r);
+        d_section(pts, b, side, up, r, r);
+        solids.push_back(Manifold::Hull(pts));
+        ++rep.bridges;
+      } else if (bar_is_bridge(x, spec.bridge_rise)) {
         // A strut that lies flat (under 30 degrees) is printed as a BRIDGE: a square bar as
         // wide and as tall as the strut, its underside level and flat, so the first layer
         // across the gap is one straight full-width line and not the belly of a round bar.
@@ -630,6 +1150,110 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
       }
       ++rep.bars;
       centres.push_back({0.5 * (x.a.x + x.b.x), 0.5 * (x.a.y + x.b.y), 0.5 * (x.a.z + x.b.z)});
+      // O11: a foot at each end of a weave bar that runs into the solid.
+      if (wall_at && in_regions(foot_regions, x.region))
+        for (int e = 0; e < 2; ++e) {
+          if ((e == 0 ? x.end_a : x.end_b) != Bar::End::Solid) continue;
+          const Vec3 E = e == 0 ? x.a : x.b;
+          const double sg = e == 0 ? 1.0 : -1.0;   // along d, from the end into the bar
+          const Vec3 u{d.x * sg, d.y * sg, d.z * sg};
+          double f = spec.weave_foot_mm < 0.0 ? r : spec.weave_foot_mm;
+          if (f > r) { f = r; ++rep.feet_held; }
+          // Where it meets the wall: the first point back from the end, along the bar, that is not solid (as the end
+          // was tagged: SolidAt, or outside the part). Not found within twice its width and a half millimetre: one
+          // width back (S11's run-in).
+          auto solid_here = [&](double t) {
+            const Vec3 p{E.x + u.x * t, E.y + u.y * t, E.z + u.z * t};
+            const Where w = wall_probe->where(p);
+            return w.why != Why::Outside && (*wall_at)(*wall_probe, p, w);
+          };
+          double tw = std::min(x.width, len);
+          {
+            const double most = std::min(len, 2.0 * x.width + 0.5);
+            double in = 0.0;
+            bool found = false;
+            for (double t = 0.0; t <= most + 1e-12; t += 0.05) {
+              if (!solid_here(t)) { found = true; tw = t; break; }
+              in = t;
+            }
+            if (found && tw > 0.0) {
+              double out = tw;
+              for (int k = 0; k < 14; ++k) {
+                const double m = 0.5 * (in + out);
+                if (solid_here(m)) in = m; else out = m;
+              }
+              tw = out;
+            }
+          }
+          // The taper: 3 f, never past the bar's other end.
+          const double L = std::min(3.0 * f, len - tw);
+          if (!(L > 1e-6)) continue;
+          const double g = 1.0 - L / (3.0 * f);   // the share of f left where the taper stops (0 unless cut short)
+          const Vec3 W{E.x + u.x * tw, E.y + u.y * tw, E.z + u.z * tw};
+          const double run = tw + (e == 0 ? pa : pb);   // from the wall on into the solid, as far as the strut runs
+          const Vec3 deep{W.x - u.x * run, W.y - u.y * run, W.z - u.z * run};
+          // Added between the wall and the taper's end, less the strut there (Simpson: the area is quadratic in s).
+          auto added = [&](double area0, double areaM, double areaL, double strut) {
+            return L / 6.0 * (area0 + 4.0 * areaM + areaL) - strut * L;
+          };
+          if (round_top) {
+            // O14 with O11: the D section widened by f each side and f upward (its round's radius r + f), the
+            // underside (up = -r) kept exactly, in the same straight tapers as the square bar's foot.
+            Vec3 side{-d.y, d.x, 0.0};
+            const double ls = std::sqrt(side.x * side.x + side.y * side.y);
+            side = {side.x / ls, side.y / ls, 0.0};
+            Vec3 up{d.y * side.z - d.z * side.y, d.z * side.x - d.x * side.z, d.x * side.y - d.y * side.x};
+            if (up.z < 0) up = {-up.x, -up.y, -up.z};
+            std::vector<manifold::vec3> pts;
+            d_section(pts, deep, side, up, r, r + f);
+            d_section(pts, W, side, up, r, r + f);
+            d_section(pts, Vec3{W.x + u.x * L, W.y + u.y * L, W.z + u.z * L}, side, up, r, r + f * g);
+            solids.push_back(Manifold::Hull(pts));
+            rep.feet_mm3 += added(d_area(r, r + f), d_area(r, r + f * (1.0 + g) * 0.5), d_area(r, r + f * g), d_area(r, r));
+          } else if (bar_is_bridge(x, spec.bridge_rise)) {
+            // The bridge's own frame, as above; its underside (up = -r) is kept exactly.
+            Vec3 side{-d.y, d.x, 0.0};
+            const double ls = std::sqrt(side.x * side.x + side.y * side.y);
+            side = {side.x / ls, side.y / ls, 0.0};
+            Vec3 up{d.y * side.z - d.z * side.y, d.z * side.x - d.x * side.z, d.x * side.y - d.y * side.x};
+            if (up.z < 0) up = {-up.x, -up.y, -up.z};
+            std::vector<manifold::vec3> pts;
+            auto section = [&](const Vec3& at, double grow) {
+              for (int q = 0; q < 4; ++q) {
+                const double s = (q & 1) ? r + grow : -(r + grow), v = (q & 2) ? r + grow : -r;
+                pts.push_back(mv(Vec3{at.x + side.x * s + up.x * v, at.y + side.y * s + up.y * v, at.z + side.z * s + up.z * v}));
+              }
+            };
+            section(deep, f);
+            section(W, f);
+            section(Vec3{W.x + u.x * L, W.y + u.y * L, W.z + u.z * L}, f * g);
+            solids.push_back(Manifold::Hull(pts));
+            auto area = [&](double grow) { return (2.0 * r + 2.0 * grow) * (2.0 * r + grow); };
+            rep.feet_mm3 += added(area(f), area(f * (1.0 + g) * 0.5), area(f * g), 4.0 * r * r);
+          } else {
+            // The strut's own frame, as above, so the cone's sides meet the strut's.
+            const Vec3 ref = std::fabs(d.x) < 0.9 ? Vec3{1, 0, 0} : Vec3{0, 1, 0};
+            Vec3 e1{d.y * ref.z - d.z * ref.y, d.z * ref.x - d.x * ref.z, d.x * ref.y - d.y * ref.x};
+            const double l1 = std::sqrt(e1.x * e1.x + e1.y * e1.y + e1.z * e1.z);
+            e1 = {e1.x / l1, e1.y / l1, e1.z / l1};
+            const Vec3 e2{d.y * e1.z - d.z * e1.y, d.z * e1.x - d.x * e1.z, d.x * e1.y - d.y * e1.x};
+            const double rw = (r + f) * kRound, rt = (r + f * g) * kRound;
+            Manifold cone, in;
+            if (e == 0) {
+              cone = Manifold::Cylinder(L, rw, rt, SEG).Transform(manifold::mat3x4(mv(e1), mv(e2), mv(d), mv(W)));
+              in = Manifold::Cylinder(run, rw, rw, SEG).Transform(manifold::mat3x4(mv(e1), mv(e2), mv(d), mv(deep)));
+            } else {
+              const Vec3 top{W.x + u.x * L, W.y + u.y * L, W.z + u.z * L};
+              cone = Manifold::Cylinder(L, rt, rw, SEG).Transform(manifold::mat3x4(mv(e1), mv(e2), mv(d), mv(top)));
+              in = Manifold::Cylinder(run, rw, rw, SEG).Transform(manifold::mat3x4(mv(e1), mv(e2), mv(d), mv(W)));
+            }
+            solids.push_back(Manifold::Hull(std::vector<Manifold>{cone, in}));
+            auto area = [&](double grow) { return kPi * (r + grow) * (r + grow); };
+            rep.feet_mm3 += added(area(f), area(f * (1.0 + g) * 0.5), area(f * g), kPi * r * r);
+          }
+          centres.push_back(W);
+          ++rep.feet;
+        }
       for (int e = 0; e < 2; ++e) {
         if ((e == 0 ? x.end_a : x.end_b) == Bar::End::Surface) continue;
         const Vec3& p = e == 0 ? x.a : x.b;
@@ -823,6 +1447,9 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
     if (fill_under < 0.0) {
       double smallest = 0.0;
       for (const Cell& c : lay.cells) smallest = smallest > 0.0 ? std::min(smallest, c.size) : c.size;
+      // O2: a weave's smallest spacing stands where a cell's size stands.
+      for (const Layout::Weave& w : lay.weave)
+        if (w.spacing_mm > 0.0) smallest = smallest > 0.0 ? std::min(smallest, w.spacing_mm) : w.spacing_mm;
       fill_under = std::max(1.0, smallest * smallest * smallest);
     }
     rep.filled_under_mm3 = fill_under;

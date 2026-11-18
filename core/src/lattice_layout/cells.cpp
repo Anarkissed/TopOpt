@@ -103,7 +103,8 @@ bool in_cube(const Layout& layout, const Cell& cell, const Vec3& p, double q[3])
   }
   return true;
 }
-// Is the point lattice of the cell's own region and wall? `other`: it is lattice of ANOTHER region.
+// Is the point lattice of the cell's own region and wall? `other`: it is lattice of ANOTHER region, and not a weave's
+// (O1: a weave's lattice is open space, never a cube cell's to take in).
 // (Lattice of the cell's own region under another wall, or under none, is neither: a wall too thin for its cell
 // is solid by D8 and stays solid, whoever's cube reaches over it.)
 bool own(const Layout& layout, const Domain::Probe& probe, const Cell& cell, const double q[3], bool* other) {
@@ -112,11 +113,11 @@ bool own(const Layout& layout, const Domain::Probe& probe, const Cell& cell, con
   if (!walls.flat) {
     // No wall to name: only "lattice, and whose" is asked, so no width is measured (the costly part of a reading).
     const Where w = probe.where(f.at(q[0], q[1], q[2]));
-    if (other) *other = w.lattice() && w.id != cell.region;
+    if (other) *other = w.lattice() && w.id != cell.region && !layout.is_weave(w.id);
     return w.lattice() && w.id == cell.region;
   }
   const Reading r = read_at(probe, f, walls, q[0], q[1], q[2]);
-  if (other) *other = r.where.lattice() && r.where.id != cell.region;
+  if (other) *other = r.where.lattice() && r.where.id != cell.region && !layout.is_weave(r.where.id);
   return r.where.lattice() && r.where.id == cell.region && r.wall == cell.wall;
 }
 // D14b: lattice of another region at `p`, inside `cell`'s cube. The cell takes it in when no cell holds it as its
@@ -1371,6 +1372,14 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads, const 
     const CellSpec& spec = spec_of(r.id);   // C23: this region's own
     const double target = target_of(spec), smallest = smallest_of(spec);
     const int k_min = k_min_of(spec);
+    if (r.weave) {
+      // O1: a weave region is filled by its strands, not by cells. No cell, no solid cube, no tally; only the frame
+      // its open space is read in (the part's own axes).
+      out.weave.push_back({r.id, static_cast<int>(out.frames.size()), 0.0});
+      out.frames.push_back(world);
+      out.walls.emplace_back();
+      continue;
+    }
     if (r.is_shell()) {
       run(r.id, world, r.shell_depth_mm, world_base(spec), wlo, whi, false);
       continue;

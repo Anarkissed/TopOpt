@@ -171,8 +171,14 @@ add_library(topopt
   src/lattice_layout/thin_cuts.cpp
   src/lattice_layout/stress.cpp
   src/lattice_layout/session.cpp
+  src/lattice_layout/organic.cpp
+  src/lattice_layout/organic_finish.cpp
+  src/lattice_layout/organic_grow.cpp
   src/lattice_layout/solid_mesh.cpp
   src/lattice_layout/print_check.cpp
+  src/lattice_layout/weave_sags.cpp
+  # Brief L2: the Organic preview (runs, the draft lay, the Auto Sweep limits).
+  src/lattice_layout/organic_preview.cpp
   # The lattice file job (docs/design/lattice-rebuild/04-layout-file-job.md): job.json ->
   # layout -> mesh -> STL. `topopt-cli lattice-file` is its only caller in core.
   src/lattice_layout/file_job.cpp
@@ -531,6 +537,22 @@ add_test(NAME lattice_layout COMMAND test_lattice_layout)
 add_executable(test_lattice_layout_mesh tests/unit/test_lattice_layout_mesh.cpp)
 target_link_libraries(test_lattice_layout_mesh PRIVATE topopt)
 add_test(NAME lattice_layout_mesh COMMAND test_lattice_layout_mesh)
+# Organic stage 1b (O3, O4): the owner's Traced placement through the new engine, on made-up parts and fields.
+add_executable(test_organic_traced tests/unit/test_organic_traced.cpp)
+target_link_libraries(test_organic_traced PRIVATE topopt)
+add_test(NAME organic_traced COMMAND test_organic_traced)
+# Organic, Grown (G1 to G12): the owner's Grown placement written new in the new engine, on made-up parts and fields.
+add_executable(test_organic_grown tests/unit/test_organic_grown.cpp)
+target_link_libraries(test_organic_grown PRIVATE topopt)
+target_compile_definitions(test_organic_grown PRIVATE
+  ORGANIC_GROWN_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME organic_grown COMMAND test_organic_grown)
+# Organic rules D to T (brief L1): one pin per rule, and the stated-reference and link-width checks, on made-up parts.
+add_executable(test_organic_rules tests/unit/test_organic_rules.cpp)
+target_link_libraries(test_organic_rules PRIVATE topopt)
+target_compile_definitions(test_organic_rules PRIVATE
+  ORGANIC_RULES_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME organic_rules COMMAND test_organic_rules)
 # The lattice file job: its JSON becomes the settings the bridge would make, a part goes in
 # and a whole binary STL comes out, and every refusal is one plain line, its word, its exit
 # code and no file. Without the Manifold library the job says it cannot, and that is checked.
