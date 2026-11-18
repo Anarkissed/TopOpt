@@ -2218,7 +2218,150 @@ static void test_cells_and_weave_job() {
   std::remove(path.c_str());
 }
 
+// Brief E2, items 9 and 11: the width floors and the job key "strengthened". The file job's own lay (as its strength
+// check is handed it) and lay_organic_preview Exact are the same lattice, bar for bar: with floors (the strut width on a
+// Sweep: bars in the floor's ball widened, never above the upper width; a single width: not applied), and with a
+// strengthened.json (a boosted stress input, the stated reference, floors) read by the file job from its job key and by
+// the preview through apply_strengthened. The reference reads back as the same double.
+static bool same_bars(const Bars& x, const Bars& y) {
+  if (x.bars.size() != y.bars.size()) return false;
+  for (std::size_t i = 0; i < x.bars.size(); ++i) {
+    const Bar& a = x.bars[i];
+    const Bar& b = y.bars[i];
+    if (a.a.x != b.a.x || a.a.y != b.a.y || a.a.z != b.a.z || a.b.x != b.b.x || a.b.y != b.b.y || a.b.z != b.b.z ||
+        a.width != b.width || a.link != b.link)
+      return false;
+  }
+  return true;
+}
+static void test_floors_and_strengthened() {
+  if (!mesh_available()) return;
+  const std::string dir = kTmp + "/e2_floors";
+  std::system(("mkdir -p " + dir + "/s").c_str());
+  write_stl_file(dir + "/block.stl", box_model(30, 30, 24).mesh);
+  int top = -1;
+  {
+    const StepModel m = import_part_file_resolved(dir + "/block.stl");
+    for (int f = 0; f < m.face_count; ++f)
+      if (m.faces[static_cast<std::size_t>(f)].kind == StepSurfaceKind::Plane && m.faces[static_cast<std::size_t>(f)].plane_normal.z > 0.99) top = f;
+  }
+  CHECK(top >= 0);
+  TensorField f;
+  f.spacing = 1.0;
+  f.nx = 30; f.ny = 30; f.nz = 24;
+  f.voigt.assign(6 * 30 * 30 * 24, 0.0);
+  for (int k = 0; k < 24; ++k)
+    for (int j = 0; j < 30; ++j)
+      for (int i = 0; i < 30; ++i) {
+        const std::size_t e = f.index(i, j, k);
+        f.voigt[6 * e + 2] = 0.5 + 3.0 * i / 29.0;
+        f.voigt[6 * e + 0] = 1.0;
+      }
+  CHECK(write_tensor_file(dir + "/stress.tensor", f));
+  const auto job_text = [&](const std::string& extra, double heavy) {
+    char h[32];
+    std::snprintf(h, sizeof h, "%g", heavy);
+    return std::string(R"({"mode": "lattice_file", "model": "block.stl", "tensor": "stress.tensor", "strength_job": "none.json")") + extra +
+           R"(, "layout": {"min_strut_lines": 2, "bead_mm": 0.45, "region_ids": [1], "region_no_lattice": [0],
+             "region_depth_mm": [10], "region_expand_mm": [-2], "region_face_counts": [1], "region_faces": [)" +
+           std::to_string(top) + R"(], "region_weave": [true], "organic_spacing_min_mm": 3, "organic_spacing_max_mm": 6,
+             "organic_width_mm": 0.9, "organic_width_heavy_mm": )" + h + "}}";
+  };
+  // The file job's own lay, as handed to its (Organic) strength check.
+  const auto file_lay = [&](const std::string& path, const std::vector<WidthFloor>& floors, Bars& got) {
+    FileJob job;
+    StepModel model;
+    FileResult r;
+    if (!load_file_job(path, 0, job, model, r)) {
+      std::printf("  (%s: %s %s)\n", r.code.c_str(), r.why.c_str(), r.detail.c_str());
+      return job;
+    }
+    job.organic.floors.insert(job.organic.floors.end(), floors.begin(), floors.end());
+    StrengthCheck cap;
+    cap.before = [](const std::string&) { StrengthDone d; d.ok = true; return d; };
+    cap.run = [](const StrengthAsk&) { StrengthDone d; d.ok = true; d.json = "{}"; return d; };
+    cap.run_organic = [&](const StrengthAsk& ask) {
+      got = ask.outcome->bars;
+      StrengthDone d;
+      d.ok = true;
+      d.json = "{}";
+      return d;
+    };
+    const FileResult made = make_lattice_file(std::move(model), job, dir + "/out.stl", nullptr, nullptr, &cap);
+    if (!made.ok) std::printf("  (%s: %s %s)\n", made.code.c_str(), made.why.c_str(), made.detail.c_str());
+    CHECK(made.ok && made.strength_ran);
+    std::remove(made.file.c_str());
+    return job;
+  };
+  const WidthFloor floor{{15.0, 15.0, 19.0}, 6.0, 1.6};
+  // Item 9: with the width on a Sweep.
+  {
+    std::ofstream(dir + "/job.json") << job_text("", 1.8);
+    Bars got;
+    const FileJob job = file_lay(dir + "/job.json", {floor}, got);
+    Session s(import_part_file_resolved(dir + "/block.stl"));
+    OrganicPreviewAsk pa;
+    pa.quality = PreviewQuality::Exact;
+    const OrganicPreview pv = lay_organic_preview(s, job.settings, *job.tensor_field, job.organic, pa);
+    std::size_t at_floor = 0;
+    for (const Bar& b : pv.outcome.bars.bars) at_floor += !b.link && b.width == 1.6;
+    std::printf("floors (Sweep): file %zu bars, preview %zu; widened %zu (links %zu), at the floor %zu\n", got.bars.size(),
+                pv.outcome.bars.bars.size(), pv.outcome.floors_widened, pv.outcome.floor_links_widened, at_floor);
+    CHECK(!got.bars.empty() && same_bars(got, pv.outcome.bars));
+    CHECK(pv.outcome.floors_widened > 0 && at_floor > 0);
+    for (const Bar& b : pv.outcome.bars.bars) CHECK(b.width <= 1.8 + 1e-12);
+    // The same job with no floors: the bars the floor's ball holds are thinner.
+    Session s2(import_part_file_resolved(dir + "/block.stl"));
+    FileJob plain = job;
+    plain.organic.floors.clear();
+    const OrganicPreview p0 = lay_organic_preview(s2, plain.settings, *plain.tensor_field, plain.organic, pa);
+    CHECK(p0.outcome.floors_widened == 0 && p0.outcome.bars.bars.size() == pv.outcome.bars.bars.size());
+    // Item 11: a strengthened.json (a boosted stress input, the reference the plain lay resolved, the floor).
+    double ref = 0.0;
+    for (const auto& r : p0.outcome.organic_references) ref = std::max(ref, r.second);
+    CHECK(ref > 0.0);
+    TensorField boosted = f;
+    for (std::size_t e = 0; e < boosted.voigt.size() / 6; ++e)
+      if (e % 3 == 0)
+        for (int q = 0; q < 6; ++q) boosted.voigt[6 * e + q] *= 3.0;
+    CHECK(write_tensor_file(dir + "/s/stress.tensor", boosted));
+    CHECK(write_floors_file(dir + "/s/floors.bin", {floor}));
+    Strengthened st;
+    st.stress_input = "stress.tensor";
+    st.floors = "floors.bin";
+    st.reference_mpa = ref * (1.0 + 1e-13) / 3.0;   // any double: it must read back the same
+    CHECK(write_strengthened_file(dir + "/s/strengthened.json", st, "  \"round\": 1"));
+    std::ofstream(dir + "/job_s.json") << job_text(R"(, "strengthened": "s/strengthened.json")", 1.8);
+    Bars got_s;
+    const FileJob js = file_lay(dir + "/job_s.json", {}, got_s);
+    CHECK(js.organic.reference_mpa == st.reference_mpa && js.organic.floors.size() == 1);
+    TensorField pf;
+    OrganicAsk pask = plain.organic;
+    std::string why;
+    CHECK(apply_strengthened(dir + "/s/strengthened.json", pf, pask, &why));
+    CHECK(pask.reference_mpa == st.reference_mpa);
+    Session s3(import_part_file_resolved(dir + "/block.stl"));
+    const OrganicPreview ps = lay_organic_preview(s3, plain.settings, pf, pask, pa);
+    std::printf("strengthened: file %zu bars, preview %zu; widened %zu\n", got_s.bars.size(), ps.outcome.bars.bars.size(),
+                ps.outcome.floors_widened);
+    CHECK(!got_s.bars.empty() && same_bars(got_s, ps.outcome.bars));
+    CHECK(!same_bars(got_s, pv.outcome.bars));   // the boosted input and the stated reference changed the lattice
+  }
+  // Item 9: a single width (no Sweep): the floors are not applied.
+  {
+    std::ofstream(dir + "/job1.json") << job_text("", 0.0);
+    Bars got;
+    const FileJob job = file_lay(dir + "/job1.json", {floor}, got);
+    Session s(import_part_file_resolved(dir + "/block.stl"));
+    OrganicPreviewAsk pa;
+    const OrganicPreview pv = lay_organic_preview(s, job.settings, *job.tensor_field, job.organic, pa);
+    CHECK(same_bars(got, pv.outcome.bars) && pv.outcome.floors_widened == 0);
+    for (const Bar& b : pv.outcome.bars.bars) CHECK(b.link || b.width == 0.9);
+  }
+}
+
 int main() {
+  test_floors_and_strengthened();
   test_cells_and_weave_job();
   test_max_step_key();
   test_pieces_key();

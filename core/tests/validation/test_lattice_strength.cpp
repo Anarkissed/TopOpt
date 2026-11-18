@@ -578,6 +578,47 @@ int main() {
     std::printf("[organic] strut_margins.bin: %zu bars, %zu judged; file bars %zu\n", mb.size() / 4, judged_bars, org.r.bars);
     CHECK(mb.size() % 4 == 0 && mb.size() / 4 >= org.r.bars && judged_bars > 0);
     CHECK(exists(org.out + "/fields.bin"));
+
+    // ── §10 (brief E2, item 12) the strengthen rounds as one job: a heavy load (struts under the safety margin), the
+    // width on a Sweep and the spacing a range; one round allowed. Then a job with nothing that follows the stress.
+    const auto strengthen = [&](const std::string& tag, const std::string& extra, double newtons, const std::string& settings) {
+      std::string j = file_job(f, extra);
+      j.replace(j.find("\"layout\""), 8, "\"tensor\": \"stress.tensor\", \"layout\"");
+      write(kDir + "/" + tag + "_job.json", j);
+      write(kDir + "/strength_job.json", strength_job(f, newtons, "lattice_part", "block.stl", -1, settings));
+      const std::string out = kDir + "/" + tag;
+      std::filesystem::remove_all(out);
+      std::filesystem::create_directories(out);
+      const OrganicStrengthenResult r =
+          run_organic_strengthen(kDir + "/" + tag + "_job.json", out, 0, MATERIALS_JSON_PATH, SETTINGS_RULES_PATH);
+      std::printf("[%s] ok %d code %s rounds %d passing %d %s %s\n", tag.c_str(), r.ok, r.code.c_str(), r.rounds_fixed,
+                  r.passing, r.why.c_str(), r.detail.c_str());
+      return r;
+    };
+    const OrganicStrengthenResult sr =
+        strengthen("strengthen", ", \"region_weave\": [true], \"organic_spacing_min_mm\": 3, \"organic_spacing_max_mm\": 6, "
+                                 "\"organic_width_mm\": 0.9, \"organic_width_heavy_mm\": 1.8",
+                   6000.0, "{\"strengthen_rounds\": 1}");
+    const std::string sjson = slurp(kDir + "/strengthen/strengthen.json");
+    std::printf("%s\n", sjson.substr(0, 1400).c_str());
+    CHECK(sr.ok && (sr.code == "done" || sr.code == "limit"));
+    CHECK(sr.rounds_fixed == 1 && sr.last_strengthened == "r1/strengthened.json");
+    for (const char* x : {"/r0/strength.json", "/r0/strut_margins.bin", "/r0/fields.bin", "/r1/strengthened.json",
+                          "/r1/stress.tensor", "/r1/floors.bin", "/r1/strength.json"})
+      CHECK(exists(kDir + "/strengthen" + x));
+    CHECK(has(sjson, "\"round\": 0") && has(sjson, "\"round\": 1") && has(sjson, "\"wrote\": {\"strengthened\": \"r1/strengthened.json\""));
+    CHECK(num_after(sjson, "under_safety") > 0);   // round 0 had struts under the safety margin
+    // The reference stated is the one the first lay resolved, and reads back as the same double.
+    {
+      TensorField back;
+      OrganicAsk a;
+      std::string why;
+      CHECK(apply_strengthened(kDir + "/strengthen/r1/strengthened.json", back, a, &why));
+      CHECK(a.reference_mpa > 0.0 && a.reference_mpa == num_after(sjson, "reference_mpa") && !a.floors.empty());
+    }
+    const OrganicStrengthenResult nv =
+        strengthen("nothing", ", \"region_weave\": [true], \"organic_spacing_mm\": 4, \"organic_width_mm\": 0.9", 2500.0, "");
+    CHECK(nv.ok && nv.code == "nothing_to_vary" && nv.rounds_fixed == 0);
   }
 
   // ── §8 the octet's strut law is the full octet's (2026-11-17): its span is the octet band, so no density in the band

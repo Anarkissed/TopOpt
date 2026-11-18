@@ -182,6 +182,10 @@ struct FileJob {
   // field there itself. A job with a weave region and no field is refused (no_stress_result, OR14).
   std::string tensor;
   std::shared_ptr<const TensorField> tensor_field;
+  // Brief E2, item 11 (key "strengthened"): a strengthen round's strengthened.json, by a path from the job's folder
+  // (or a whole path). run_file_job reads it (apply_strengthened): its stress input replaces the tensor, its reference is
+  // stated, its floors are added. Empty: none.
+  std::string strengthened;
   // OF5 (key "file_format"): "3mf" or "stl". Empty: 3MF when the file takes the tubes route (OF4), STL otherwise. A
   // 3MF is written where the STL would be, its ".stl" name ending ".3mf".
   std::string file_format;
@@ -324,6 +328,12 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
 // `threads` > 0 overrides the job's own. Never throws.
 FileResult run_file_job(const std::string& job_path, const std::string& out_dir, int threads = 0,
                         void (*said)(const char*) = nullptr, const StrengthCheck* strength = nullptr);
+
+// Brief E2: what run_file_job reads before it makes anything: the job at `job_path` (`threads` > 0 overrides its own),
+// its demand and tensor files, its "strengthened" (apply_strengthened), and the part beside it. False: `r` holds the
+// refusal (as run_file_job would write it). Never throws.
+bool load_file_job(const std::string& job_path, int threads, FileJob& job, StepModel& model, FileResult& r,
+                   void (*said)(const char*) = nullptr);
 
 // The result file's name, and its text.
 inline constexpr const char* kFileResultName = "lattice_file.json";

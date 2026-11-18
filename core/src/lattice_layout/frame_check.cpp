@@ -750,4 +750,53 @@ FrameCheck check_frame(const FrameModel& f, const FrameVoxelSolve& vs, const Fra
   return out;
 }
 
+// ── ONE STRENGTHEN ROUND ───────────────────────────────────────────────────────────────────────────────────────────
+StrengthenRound strengthen_round(const FrameModel& f, const FrameCheck& c, const Bars& bars, TensorField& field,
+                                 const StrengthenSettings& s) {
+  StrengthenRound out;
+  const std::size_t nv = static_cast<std::size_t>(field.nx) * field.ny * field.nz;
+  std::vector<float> boost(nv, 1.0f);
+  const double h = field.spacing;
+  for (const FrameStrut& st : c.struts) {
+    if (!st.judged || !(st.margin < s.watch_margin)) continue;
+    ++out.struts_watched;
+    const double b = std::min(s.boost_max, std::pow(s.watch_margin / st.margin, s.boost_power));
+    const double least = st.width_max * s.target_margin / st.margin;
+    for (int pi : st.pieces) {
+      const FramePiece& p = f.pieces[static_cast<std::size_t>(pi)];
+      const double r = bars.bars[static_cast<std::size_t>(p.bar)].cell;
+      if (!(r > 0.0)) continue;
+      const Vec3& A = f.nodes[static_cast<std::size_t>(p.a)];
+      const Vec3& B = f.nodes[static_cast<std::size_t>(p.b)];
+      for (const Vec3& q : {A, B, Vec3{0.5 * (A.x + B.x), 0.5 * (A.y + B.y), 0.5 * (A.z + B.z)}}) {
+        out.floors.push_back({q, r, least});
+        if (!(h > 0.0) || nv == 0) continue;
+        const int i0 = std::max(0, static_cast<int>(std::floor((q.x - r - field.origin.x) / h)));
+        const int i1 = std::min(field.nx - 1, static_cast<int>(std::floor((q.x + r - field.origin.x) / h)));
+        const int j0 = std::max(0, static_cast<int>(std::floor((q.y - r - field.origin.y) / h)));
+        const int j1 = std::min(field.ny - 1, static_cast<int>(std::floor((q.y + r - field.origin.y) / h)));
+        const int k0 = std::max(0, static_cast<int>(std::floor((q.z - r - field.origin.z) / h)));
+        const int k1 = std::min(field.nz - 1, static_cast<int>(std::floor((q.z + r - field.origin.z) / h)));
+        for (int k = k0; k <= k1; ++k)
+          for (int j = j0; j <= j1; ++j)
+            for (int i = i0; i <= i1; ++i) {
+              const double dx = field.origin.x + (i + 0.5) * h - q.x, dy = field.origin.y + (j + 0.5) * h - q.y,
+                           dz = field.origin.z + (k + 0.5) * h - q.z;
+              if (dx * dx + dy * dy + dz * dz > r * r) continue;
+              float& v = boost[field.index(i, j, k)];
+              v = std::max(v, static_cast<float>(b));
+            }
+      }
+    }
+  }
+  for (std::size_t e = 0; e < nv; ++e) {
+    if (!(boost[e] > 1.0f)) continue;
+    ++out.voxels_boosted;
+    out.boost_largest = std::max(out.boost_largest, static_cast<double>(boost[e]));
+    for (int q = 0; q < 6; ++q) field.voigt[6 * e + static_cast<std::size_t>(q)] *= static_cast<double>(boost[e]);
+  }
+  out.boosted_mm3 = static_cast<double>(out.voxels_boosted) * h * h * h;
+  return out;
+}
+
 }  // namespace topopt::lattice_layout

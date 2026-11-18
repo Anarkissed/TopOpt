@@ -15437,10 +15437,6 @@ struct StrengthSetup {
 
 ll::StrengthDone strength_setup(const ll::StrengthAsk& ask, const std::string& materials_path,
                                 const std::string& rules_path, StrengthSetup& S) {
-  if (!ask.session || !ask.outcome || !ask.made || !ask.session->domain())
-    return strength_no("strength_failed", 1,
-                       "The lattice's strength could not be checked, so no file was made.",
-                       "the strength check was asked with no laid lattice");
   JobDescription& job = S.job;
   MaterialLibrary& materials = S.materials;
   SettingsRules& rules = S.rules;
@@ -15561,6 +15557,10 @@ ll::StrengthDone run_lattice_file_strength(const ll::StrengthAsk& ask,
                                            const std::string& materials_path,
                                            const std::string& rules_path) {
   const auto t_start = std::chrono::steady_clock::now();
+  if (!ask.session || !ask.outcome || !ask.made || !ask.session->domain())
+    return strength_no("strength_failed", 1,
+                       "The lattice's strength could not be checked, so no file was made.",
+                       "the strength check was asked with no laid lattice");
   StrengthSetup S;
   if (ll::StrengthDone bad = strength_setup(ask, materials_path, rules_path, S); !bad.ok) return bad;
   JobDescription& job = S.job;
@@ -16366,6 +16366,196 @@ lattice_layout::StrengthCheck lattice_file_strength_check(const std::string& mat
     }
   };
   return check;
+}
+
+// ══ BRIEF E2, ITEM 12: THE STRENGTHEN ROUNDS AS ONE JOB (`topopt-cli organic-strengthen`) ══════════════════════════
+// The lattice-file job (read as the file job reads it) and its strength job; no file is meshed. Check; stop when no
+// judged strut is under the safety margin, or after strengthen_rounds rounds (0: 2 Traced, 3 Grown); else a round
+// (strengthen_round: the boosted copy of the stress input, the floors, strengthened.json, in r<N+1>/), lay again, check
+// again. Nothing in the job follows the stress: nothing_to_vary after the first check.
+OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, const std::string& out_dir, int threads,
+                                               const std::string& materials_path, const std::string& rules_path,
+                                               void (*said)(const char*), const std::atomic<bool>* stop) {
+  OrganicStrengthenResult res;
+  const auto t_all = std::chrono::steady_clock::now();
+  const auto say = [&](const std::string& line) {
+    if (said) said(line.c_str());
+  };
+  const auto secs = [](std::chrono::steady_clock::time_point t0) {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+  };
+  std::string rounds_json;
+  double reference = 0.0;
+  int limit = 0;
+  const auto finish = [&](bool ok, const std::string& code, int exit_code, const std::string& why,
+                          const std::string& detail = {}) {
+    res.ok = ok;
+    res.code = code;
+    res.exit_code = exit_code;
+    res.why = why;
+    res.detail = detail;
+    std::string o = "{\n  \"ok\": " + std::string(ok ? "true" : "false") + ",\n  \"code\": " + json_str(code) +
+                    ",\n  \"why\": " + json_str(why) + ",\n  \"detail\": " + json_str(detail) +
+                    ",\n  \"passing\": " + std::string(res.passing ? "true" : "false") +
+                    ",\n  \"rounds_fixed\": " + std::to_string(res.rounds_fixed) + ",\n  \"rounds_limit\": " +
+                    std::to_string(limit) + ",\n  \"reference_mpa\": " + [&] {
+                      char b[64];
+                      std::snprintf(b, sizeof b, "%.17g", reference);   // as strengthened.json states it
+                      return std::string(b);
+                    }() +
+                    ",\n  \"strengthened\": " + (res.last_strengthened.empty() ? std::string("null") : json_str(res.last_strengthened)) +
+                    ",\n  \"rounds\": [" + rounds_json + (rounds_json.empty() ? "" : "\n  ") + "],\n  \"seconds\": " +
+                    json_num(std::round(secs(t_all) * 10.0) / 10.0) + "\n}\n";
+    std::ofstream(join_path(out_dir, "strengthen.json")) << o;
+    return res;
+  };
+  // ── the job, as the file job reads it.
+  ll::FileJob job;
+  StepModel model;
+  {
+    ll::FileResult fr;
+    if (!ll::load_file_job(job_path, threads, job, model, fr, said)) return finish(false, fr.code, fr.exit_code, fr.why, fr.detail);
+  }
+  if (job.strength_job.empty())
+    return finish(false, "strength_job_missing", 3,
+                  "Strengthening needs the part's strength job (its loads and supports), and this job names none.");
+  bool any_weave = false, any_cells = job.settings.regions.empty();
+  for (const ll::Settings::RegionAsk& a : job.settings.regions) {
+    any_weave = any_weave || a.weave;
+    any_cells = any_cells || (a.role == ll::Role::Lattice && !a.weave);
+  }
+  if (!any_weave || any_cells || !job.tensor_field)
+    return finish(false, "not_organic", 3,
+                  "Strengthening is for an Organic lattice in every region, and this job is not one, so nothing was done.");
+  Vec3 lo{1e300, 1e300, 1e300}, hi{-1e300, -1e300, -1e300};
+  for (const Vec3& v : model.mesh.vertices) {
+    lo = {std::min(lo.x, v.x), std::min(lo.y, v.y), std::min(lo.z, v.z)};
+    hi = {std::max(hi.x, v.x), std::max(hi.y, v.y), std::max(hi.z, v.z)};
+  }
+  ll::Session session(std::move(model));
+  if (session.open_edges() != 0)
+    return finish(false, "part_not_closed", 3, "The part's surface has gaps in it, so its inside cannot be told from its outside.");
+  // ── the strength job, set up once (its grid and load case do not change between rounds).
+  StrengthSetup S;
+  {
+    ll::StrengthAsk ask;
+    ask.job_path = job.strength_job;
+    ask.part_lo = lo;
+    ask.part_hi = hi;
+    ask.threads = job.options.threads;
+    ll::StrengthDone bad = strength_setup(ask, materials_path, rules_path, S);
+    if (!bad.ok) return finish(false, bad.code, bad.exit_code, bad.why, bad.detail);
+  }
+  ll::OrganicAsk ask = job.organic;
+  const bool grown = ask.mode == ll::OrganicMode::Grown;
+  limit = static_cast<int>(S.st.get("strengthen_rounds"));
+  if (limit == 0) limit = grown ? 3 : 2;
+  ll::StrengthenSettings ss;
+  ss.watch_margin = S.st.get("strengthen_watch_margin");
+  ss.boost_max = S.st.get("strengthen_boost_max");
+  ss.boost_power = S.st.get("strengthen_boost_power");
+  ss.target_margin = S.st.get("strengthen_target_margin");
+  // What follows the stress: a strut width on a Sweep, a spacing range, Grown's runs by stress.
+  const bool varies = ask.width_heavy_mm > 0.0 || (!(ask.spacing_mm > 0.0) && ask.spacing_max_mm > ask.spacing_min_mm) ||
+                      (grown && ask.auto_by_stress);
+  ll::TensorField field = *job.tensor_field;
+  const std::vector<ll::WidthFloor> base_floors = ask.floors;
+  std::string laid_with = job.strengthened.empty() ? std::string("job") : job.strengthened;
+  for (int n = 0;; ++n) {
+    if (stop && stop->load()) return finish(false, "cancelled", 1, "Stopped before the strengthening was finished.");
+    const std::string rdir = join_path(out_dir, "r" + std::to_string(n));
+    std::error_code ec;
+    std::filesystem::create_directories(rdir, ec);
+    say("round " + std::to_string(n) + ": laying the lattice");
+    auto t0 = std::chrono::steady_clock::now();
+    const ll::Outcome out = session.lay_organic(job.settings, field, ask, job.options.threads, stop);
+    const double s_lay = secs(t0);
+    const double mb_lay = process_memory().rss_mb;
+    if (out.cancelled) return finish(false, "cancelled", 1, "Stopped before the strengthening was finished.");
+    if (n == 0)
+      for (const auto& [region, ref] : out.organic_references) reference = std::max(reference, ref);
+    if (stop && stop->load()) return finish(false, "cancelled", 1, "Stopped before the strengthening was finished.");
+    say("round " + std::to_string(n) + ": checking its strength");
+    const ll::Domain& domain = *session.domain();
+    const double light = ask.width_mm > 0.0 ? ask.width_mm : domain.spec().bead_mm * domain.spec().min_strut_lines;
+    OrganicCheckRun cr = organic_frame_check(S, domain, out.bars, nullptr, light, rdir, job.options.threads);
+    if (!cr.done.ok) return finish(false, cr.done.code, cr.done.exit_code, cr.done.why, cr.done.detail);
+    std::ofstream(join_path(rdir, "strength.json")) << cr.done.json << "\n";
+    const ll::FrameCheck& c = cr.check;
+    std::string r = std::string(rounds_json.empty() ? "\n    " : ",\n    ") + "{\"round\": " + std::to_string(n) +
+                    ", \"laid_with\": " + json_str(laid_with) + ", \"verdict\": " + json_str(cr.verdict) +
+                    ", \"fail_reason\": " + json_str(cr.fail_reason) + ", \"bars\": " + std::to_string(out.bars.bars.size()) +
+                    ", \"floors_widened\": " + std::to_string(out.floors_widened) +
+                    ", \"floor_links_widened\": " + std::to_string(out.floor_links_widened) +
+                    ",\n     \"struts\": {\"judged\": " + std::to_string(c.judged) + ", \"under_safety\": " +
+                    std::to_string(c.under_safety) + ", \"under_one\": " + std::to_string(c.under_one) +
+                    ", \"smallest_margin\": " + json_num(c.judged ? c.smallest_margin : std::numeric_limits<double>::quiet_NaN()) +
+                    ", \"buckling_failures\": " + std::to_string(c.buckling_failures) + ", \"stubs\": " + std::to_string(c.stubs) +
+                    ", \"unjudged_mm\": " + json_num(c.unjudged_mm) + ", \"load_unheld_n\": " + json_num(c.load_unheld_n) + "}" +
+                    ",\n     \"lattice_mm3\": " + json_num(cr.lattice_mm3) +
+                    ", \"seconds\": {\"lay\": " + json_num(std::round(s_lay * 10) / 10) + ", \"material\": " +
+                    json_num(std::round(cr.ms_material / 100) / 10) + ", \"voxel_solve\": " +
+                    json_num(std::round(cr.ms_voxel / 100) / 10) + ", \"frame\": " + json_num(std::round(cr.ms_frame / 100) / 10) +
+                    "}, \"memory_mb\": {\"after_lay\": " + json_num(std::round(mb_lay)) + ", \"after_voxel_solve\": " +
+                    json_num(std::round(cr.mb_voxel)) + ", \"after_frame\": " + json_num(std::round(cr.mb_frame)) +
+                    ", \"peak\": " + json_num(std::round(process_memory().peak_rss_mb)) + "}, \"check\": " +
+                    json_str("r" + std::to_string(n) + "/strength.json");
+    const bool clean = c.solved && c.under_safety == 0;
+    if (clean || !varies || n >= limit || !c.solved) {
+      rounds_json += r + "}";
+      res.passing = cr.verdict == "pass";
+      if (clean) return finish(true, "done", 0, "");
+      if (!c.solved) return finish(true, "frame_not_solved", 0, "The frame could not be solved, so there is nothing to strengthen from.");
+      if (!varies)
+        return finish(true, "nothing_to_vary", 0,
+                      "Nothing in this job follows the stress (one spacing and one strut width), so strengthening cannot "
+                      "change the lattice.");
+      return finish(true, "limit", 0, "The rounds of strengthening allowed were all done.");
+    }
+    // ── one round: the boosted copy of the stress input, the floors, strengthened.json.
+    if (stop && stop->load()) return finish(false, "cancelled", 1, "Stopped before the strengthening was finished.");
+    say("round " + std::to_string(n) + ": strengthening the weak struts");
+    const std::string ndir = join_path(out_dir, "r" + std::to_string(n + 1));
+    std::filesystem::create_directories(ndir, ec);
+    ll::TensorField boosted = field;
+    const ll::StrengthenRound sr = ll::strengthen_round(cr.frame, cr.check, [&] {
+      ll::Bars b;
+      for (int i : cr.bar_of) b.bars.push_back(out.bars.bars[static_cast<std::size_t>(i)]);
+      return b;
+    }(), boosted, ss);
+    std::vector<ll::WidthFloor> floors = base_floors;
+    floors.insert(floors.end(), sr.floors.begin(), sr.floors.end());
+    ll::Strengthened st;
+    st.stress_input = "stress.tensor";
+    st.floors = "floors.bin";
+    st.reference_mpa = reference;
+    const std::string sj = join_path(ndir, "strengthened.json");
+    const std::string more = "  \"round\": " + std::to_string(n + 1) + ",\n  \"struts_watched\": " + std::to_string(sr.struts_watched) +
+                             ",\n  \"voxels_boosted\": " + std::to_string(sr.voxels_boosted) + ",\n  \"boost_largest\": " +
+                             json_num(sr.boost_largest) + ",\n  \"boosted_mm3\": " + json_num(sr.boosted_mm3) +
+                             ",\n  \"floors_count\": " + std::to_string(floors.size());
+    if (!ll::write_tensor_file(join_path(ndir, st.stress_input), boosted) || !ll::write_floors_file(join_path(ndir, st.floors), floors) ||
+        !ll::write_strengthened_file(sj, st, more))
+      return finish(false, "cannot_write", 1, "The strengthened files could not be saved on the Mac.", ndir);
+    // Lay again from what was written (read back: the file job given this strengthened.json lays the same).
+    {
+      std::string why;
+      ll::OrganicAsk again = job.organic;
+      again.floors.clear();
+      ll::TensorField read_back;
+      if (!ll::apply_strengthened(sj, read_back, again, &why))
+        return finish(false, "cannot_write", 1, "The strengthened files could not be read back.", why);
+      field = std::move(read_back);
+      ask = again;
+    }
+    res.last_strengthened = "r" + std::to_string(n + 1) + "/strengthened.json";
+    ++res.rounds_fixed;
+    laid_with = res.last_strengthened;
+    rounds_json += r + ",\n     \"wrote\": {\"strengthened\": " + json_str(res.last_strengthened) +
+                   ", \"struts_watched\": " + std::to_string(sr.struts_watched) + ", \"voxels_boosted\": " +
+                   std::to_string(sr.voxels_boosted) + ", \"boost_largest\": " + json_num(sr.boost_largest) +
+                   ", \"floors\": " + std::to_string(floors.size()) + "}}";
+  }
 }
 
 namespace {

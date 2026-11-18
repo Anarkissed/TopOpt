@@ -5,6 +5,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "topopt/lattice_layout.hpp"
@@ -40,6 +41,16 @@ struct TensorField {
 // G1: Organic's two placements, the owner's OR25 and OR26. Traced (trace_strands) is stage 1b's; Grown (grow_strands)
 // is the rewrite of 2026-11-15 in this engine (organic_grow.cpp).
 enum class OrganicMode : std::uint8_t { Traced, Grown };
+// Brief E2, item 9: a least strut width over a ball (from a strengthen round, organic_strengthen). After the lay, every
+// non-link bar whose middle lies within `radius_mm` of `centre` is at least `width_mm` wide, never above the job's own
+// upper strut width (OrganicAsk::width_heavy_mm); links then follow S8 where that rose. Applied only when the strut
+// width is on a Sweep (width_heavy_mm above 0): a single width is the owner's own number.
+struct WidthFloor {
+  Vec3 centre{};
+  double radius_mm = 0.0;
+  double width_mm = 0.0;
+};
+
 struct OrganicAsk {
   double spacing_mm = 0.0;        // > 0: one spacing everywhere (both ends of the range); 0: the range below
   double width_mm = 0.0;          // the strut diameter; 0 = the generator's own: the minimum extrudable width
@@ -185,7 +196,35 @@ struct OrganicAsk {
   bool tie_level = false;
   double tie_gap = 1.0;
   double tie_gap_heavy = 0.0;
+  // Brief E2, item 9: the width floors (WidthFloor). Empty: none (as before). The file job, the preview and the
+  // strengthen job take them from a strengthened.json (apply_strengthened).
+  std::vector<WidthFloor> floors;
 };
+
+// Brief E2, item 9: the floors on laid bars (Session::lay_organic calls it last). Every non-link bar whose middle lies
+// in a floor's ball: w = max(w, min(floor, upper_mm)); then every link: S8's width from the struts at its two ends
+// (link_width x the thinner, between light_mm and the thicker), where that is wider than it is. Returns the bars
+// widened; `links`, when given, the links widened.
+std::size_t apply_width_floors(Bars& bars, const std::vector<WidthFloor>& floors, double upper_mm, double light_mm,
+                               double link_width, std::size_t* links = nullptr);
+
+// Brief E2, items 10 and 11: the files a strengthen round writes.
+// The floors file, little-endian: 8 bytes "TOFLOORS", int32 version (1), int32 count, then per floor five float64:
+// centre x, y, z, radius mm, width mm.
+bool write_floors_file(const std::string& path, const std::vector<WidthFloor>& floors);
+bool read_floors_file(const std::string& path, std::vector<WidthFloor>& floors, std::string* why = nullptr);
+// strengthened.json: {"version": 1, "stress_input": NAME, "floors": NAME, "reference_mpa": X, ...}; the two names are
+// files beside it. `reference_mpa` is the reference the engine resolved for the ORIGINAL stress input, written with 17
+// digits so that it reads back as the same double.
+struct Strengthened {
+  std::string stress_input, floors;   // file names, beside the strengthened.json
+  double reference_mpa = 0.0;
+};
+bool write_strengthened_file(const std::string& path, const Strengthened& s, const std::string& more_json = {});
+// The job key "strengthened" (file job and preview alike): reads it, replaces `field` with its stress input, states
+// its reference in `ask` and adds its floors to `ask`. False (with `why`) when anything cannot be read.
+bool apply_strengthened(const std::string& path, TensorField& field, OrganicAsk& ask, std::string* why = nullptr);
+
 
 // J2 (brief G12), the pruning of a Grown area's weave bars, for each (region, median asked spacing) of `areas`:
 //   J2a, no end in the air: a weave bar (not a net strut) of the area with an end that is not Solid, not Surface, and not

@@ -667,6 +667,11 @@ Outcome Session::lay_organic_with(const Settings& settings, const TensorField& f
   const double ms_trace = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
   Outcome out = lay_with(settings, &strands, threads, stop, &finish);
   if (!out.cancelled) {
+    out.organic_references = references;   // brief E2
+    // Brief E2, item 9: the width floors, last, only with the strut width on a Sweep.
+    if (!ask.floors.empty() && ask.width_heavy_mm > 0.0)
+      out.floors_widened = apply_width_floors(out.bars, ask.floors, ask.width_heavy_mm, finish.light_mm, ask.link_width,
+                                              &out.floor_links_widened);
     out.strands = strands.size();
     out.ms_trace = ms_trace;
     out.spacing_smallest_mm = smallest;

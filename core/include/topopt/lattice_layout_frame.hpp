@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "topopt/lattice_layout.hpp"
+#include "topopt/lattice_layout_organic.hpp"
 #include "topopt/voxel.hpp"
 
 namespace topopt::lattice_layout {
@@ -118,5 +119,25 @@ struct FrameCheck {
 };
 FrameCheck check_frame(const FrameModel& frame, const FrameVoxelSolve& voxels, const FrameStrength& strength,
                        const FrameSettings& settings = {});
+
+// ── ONE STRENGTHEN ROUND (brief E2, item 10; prototype R6, R8 with the lead's changes) ──────────────────────────────
+// From a check: every judged strut with margin m under `watch_margin`, at its pieces' ends and middles, each point with
+// the local spacing r of its piece's bar (Bar::cell, the engine's spacing there):
+//   (B) every voxel of `field` whose centre lies within r of a point gets b = min(boost_max, (watch / m)^boost_power),
+//       the largest where several reach; all six components times b (`field` is changed: the caller's copy);
+//   (A) a floor at the point, radius r, least width = the strut's widest piece x target_margin / m.
+struct StrengthenSettings {
+  double watch_margin = 2.0;     // strengthen_watch_margin
+  double boost_max = 4.0;        // strengthen_boost_max
+  double boost_power = 2.0;      // strengthen_boost_power
+  double target_margin = 1.75;   // strengthen_target_margin
+};
+struct StrengthenRound {
+  std::size_t struts_watched = 0, voxels_boosted = 0;
+  double boost_largest = 1.0, boosted_mm3 = 0.0;
+  std::vector<WidthFloor> floors;
+};
+StrengthenRound strengthen_round(const FrameModel& frame, const FrameCheck& check, const Bars& bars,
+                                 TensorField& field, const StrengthenSettings& settings = {});
 
 }  // namespace topopt::lattice_layout

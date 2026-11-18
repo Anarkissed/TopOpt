@@ -7,6 +7,7 @@
 // Eigen); elsewhere a lattice file job that asks for a check is refused (strength_unavailable).
 #pragma once
 
+#include <atomic>
 #include <string>
 #include <vector>
 
@@ -31,5 +32,23 @@ const std::vector<StrengthSettingSpec>& strength_setting_specs();
 // The check, reading the material library and the settings rules from these files when a job asks for it.
 lattice_layout::StrengthCheck lattice_file_strength_check(const std::string& materials_path,
                                                           const std::string& rules_path);
+
+// Brief E2, item 12: the strengthen rounds as one job (topopt-cli organic-strengthen). `job_path` is a lattice-file job
+// (every lattice region a weave) naming its strength job; nothing is meshed. Each round's check is written to
+// out_dir/r<N>/ (strength.json, fields.bin, strut_margins.bin), each round's fix to out_dir/r<N+1>/ (stress.tensor,
+// floors.bin, strengthened.json); the job's own files are never changed. out_dir/strengthen.json is written whatever
+// happened. `said` gets a line as each step starts; `stop` is read between steps (and inside the lay).
+struct OrganicStrengthenResult {
+  bool ok = false;
+  std::string code, why, detail;   // ok: "done", "limit", "nothing_to_vary" or "frame_not_solved"
+  int exit_code = 1;
+  bool passing = false;            // the last check's verdict is "pass"
+  int rounds_fixed = 0;
+  std::string last_strengthened;   // out_dir-relative; empty when no round was made
+};
+OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, const std::string& out_dir, int threads,
+                                               const std::string& materials_path, const std::string& rules_path,
+                                               void (*said)(const char*) = nullptr,
+                                               const std::atomic<bool>* stop = nullptr);
 
 }  // namespace topopt

@@ -658,6 +658,8 @@ constexpr Refusal kStrengthUnavailable{"strength_unavailable", 1};
 // Brief E2: a strength job on a job whose lattice regions are both weave and cells: the two checks judge differently
 // and are not made into one verdict.
 constexpr Refusal kStrengthMixed{"strength_mixed", 1};
+// Brief E2, item 11: the job's "strengthened" file (or what it names) could not be read.
+constexpr Refusal kStrengthenedUnreadable{"strengthened_unreadable", 1};
 constexpr Refusal kCancelled{"cancelled", 1};
 constexpr Refusal kError{"error", 1};
 
@@ -1038,7 +1040,7 @@ FileJob parse_file_job(const std::string& json_text) {
     const std::string w = "job.json";
     json::as_object(doc, w);
     json::reject_unknown(doc, {"mode", "model", "output", "linear_deflection", "threads", "layout", "mesh", "demand",
-                               "strength_job", "tensor", "file_format"},
+                               "strength_job", "tensor", "file_format", "strengthened"},
                          w);
     const std::string mode = json::as_string(json::require(doc, "mode", w), w + ".mode");
     if (mode != "lattice_file") json::fail(w + ".mode", "must be \"lattice_file\", not \"" + mode + "\"");
@@ -1075,6 +1077,10 @@ FileJob parse_file_job(const std::string& json_text) {
         json::fail(w + ".file_format", "must be \"3mf\" or \"stl\", not \"" + job.file_format + "\"");
     }
     // The stress tensor (Organic, Traced): a file beside the job, by its bare name.
+    if (json::find(doc, "strengthened")) {
+      job.strengthened = text(doc, "strengthened", "", w);
+      if (job.strengthened.empty()) throw FileJobError("\"strengthened\" must name a strengthened.json");
+    }
     if (json::find(doc, "tensor")) {
       job.tensor = text(doc, "tensor", "", w);
       if (job.tensor.empty() || job.tensor == "." || job.tensor == ".." ||
@@ -1445,18 +1451,17 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
   return done();
 }
 
-FileResult run_file_job(const std::string& job_path, const std::string& out_dir, int threads,
-                        void (*said)(const char*), const StrengthCheck* strength) {
-  FileResult r;
-  const auto t_all = std::chrono::steady_clock::now();
-  const auto run = [&] {
-    FileJob job;
+// Brief E2: what run_file_job reads before it makes anything (the job, its stress files, its "strengthened", the
+// part), so the strengthen job reads a job exactly as the file job does. Not ok: `r` holds the refusal.
+bool load_file_job(const std::string& job_path, int threads, FileJob& job, StepModel& model, FileResult& r,
+                   void (*said)(const char*)) {
+  const auto run = [&]() -> bool {
     {
       std::ifstream f(job_path, std::ios::binary);
       if (!f) {
         refuse(r, kJobUnreadable, "The lattice job could not be opened on the Mac, so nothing was made.",
                "cannot open " + job_path);
-        return;
+        return false;
       }
       std::ostringstream all;
       all << f.rdbuf();
@@ -1465,7 +1470,7 @@ FileResult run_file_job(const std::string& job_path, const std::string& out_dir,
       } catch (const std::exception& e) {
         refuse(r, kJobUnreadable,
                "The lattice job sent to the Mac could not be read, so nothing was made.", e.what());
-        return;
+        return false;
       }
     }
     if (threads > 0) job.options.threads = threads;
@@ -1476,7 +1481,7 @@ FileResult run_file_job(const std::string& job_path, const std::string& out_dir,
       if (!read_demand_file(folder_of(job_path) + "/" + job.demand, *field, &why)) {
         refuse(r, kDemandUnreadable, "The stress result sent with the lattice job could not be read, so nothing was made.",
                why);
-        return;
+        return false;
       }
       job.settings.stress.demand = std::move(field);
     }
@@ -1486,7 +1491,19 @@ FileResult run_file_job(const std::string& job_path, const std::string& out_dir,
       if (!read_tensor_file(folder_of(job_path) + "/" + job.tensor, *field, &why)) {
         refuse(r, kTensorUnreadable,
                "The stress tensor sent with the lattice job could not be read, so nothing was made.", why);
-        return;
+        return false;
+      }
+      job.tensor_field = std::move(field);
+    }
+    // Brief E2, item 11: a strengthen round's stress input, reference and floors in place of the job's own.
+    if (!job.strengthened.empty()) {
+      const std::string sp = job.strengthened[0] == '/' ? job.strengthened : folder_of(job_path) + "/" + job.strengthened;
+      auto field = std::make_shared<TensorField>();
+      std::string why;
+      if (!apply_strengthened(sp, *field, job.organic, &why)) {
+        refuse(r, kStrengthenedUnreadable,
+               "The strengthened stress sent with the lattice job could not be read, so nothing was made.", why);
+        return false;
       }
       job.tensor_field = std::move(field);
     }
@@ -1494,7 +1511,6 @@ FileResult run_file_job(const std::string& job_path, const std::string& out_dir,
         !job.model.empty() && job.model[0] == '/' ? job.model : folder_of(job_path) + "/" + job.model;
     say(said, "opening the part");
     const auto t0 = std::chrono::steady_clock::now();
-    StepModel model;
     try {
       StepTessellation tess;
       if (job.linear_deflection > 0.0) tess.linear_deflection = job.linear_deflection;
@@ -1502,13 +1518,27 @@ FileResult run_file_job(const std::string& job_path, const std::string& out_dir,
     } catch (const std::exception& e) {
       refuse(r, kModelUnreadable,
              "The part's file could not be opened on the Mac, so no lattice file was made.", e.what());
-      return;
+      return false;
     } catch (...) {
       refuse(r, kModelUnreadable,
              "The part's file could not be opened on the Mac, so no lattice file was made.");
-      return;
+      return false;
     }
-    const double ms_import = ms_since(t0);
+    r.ms_import = ms_since(t0);
+    return true;
+  };
+  return run();
+}
+
+FileResult run_file_job(const std::string& job_path, const std::string& out_dir, int threads,
+                        void (*said)(const char*), const StrengthCheck* strength) {
+  FileResult r;
+  const auto t_all = std::chrono::steady_clock::now();
+  const auto run = [&] {
+    FileJob job;
+    StepModel model;
+    if (!load_file_job(job_path, threads, job, model, r, said)) return;
+    const double ms_import = r.ms_import;
     r = make_lattice_file(std::move(model), job, out_dir + "/" + job.output, nullptr, said, strength);
     r.ms_import = ms_import;
   };

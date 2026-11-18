@@ -1405,6 +1405,10 @@ struct Outcome {
   // The one stress reference resolved for this lay (the stated one or the part's own), read by the cells and the
   // struts alike; 0 when neither asked for one (no field, or neither by stress) or the part's own is 0.
   double stress_reference_mpa = 0.0;
+  // Brief E2 (lay_organic only): each weave region's O12 reference as resolved (region, MPa), and what the width
+  // floors did (OrganicAsk::floors): the bars and the links widened.
+  std::vector<std::pair<int, double>> organic_references;
+  std::size_t floors_widened = 0, floor_links_widened = 0;
   // C24: the part's size-step limit this layout kept (step_held of the part's cells: a value under the ladder's
   // smallest step is held there, 2 on Default Grade); 0 when none was asked. A region's own limit is not reported here.
   double step_held_at = 0.0;
