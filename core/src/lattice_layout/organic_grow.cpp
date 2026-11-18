@@ -41,6 +41,11 @@ void GrowReport::add(const GrowReport& o) {
   wall_lines_joined.insert(wall_lines_joined.end(), o.wall_lines_joined.begin(), o.wall_lines_joined.end());
   wall_roots += o.wall_roots; wall_roots_kept += o.wall_roots_kept; wall_roots_cut_at_joint += o.wall_roots_cut_at_joint;
   wall_vines_removed += o.wall_vines_removed;
+  cross_seeded += o.cross_seeded; cross_grown += o.cross_grown; cross_ended_side += o.cross_ended_side;
+  cross_ended_top += o.cross_ended_top; cross_ended_noface += o.cross_ended_noface;
+  cross_ended_unsupported += o.cross_ended_unsupported; cross_ended_guard += o.cross_ended_guard;
+  cross_joins.insert(cross_joins.end(), o.cross_joins.begin(), o.cross_joins.end());
+  cross_reach_mm.insert(cross_reach_mm.end(), o.cross_reach_mm.begin(), o.cross_reach_mm.end());
   d2_offered += o.d2_offered; d2_grown += o.d2_grown; d2_refused += o.d2_refused; d2_short += o.d2_short;
   for (int f = 0; f < 6; ++f) face_hits[f] += o.face_hits[f];
   stubs.insert(stubs.end(), o.stubs.begin(), o.stubs.end());
@@ -68,6 +73,8 @@ constexpr double kTestRatio = 0.5;                           // G5: crowded with
 constexpr double kRecordRadii = 6.0;                         // G5: a vertex recorded every 6 r of travel
 constexpr double kJoinRunMm = 3.0;                           // G5, G6: a join or a link runs 3 mm or less
 constexpr int kMaxJoins = 6;                                 // G5: a tip ends on its seventh join
+constexpr double kCrossMaxSin = 0.7071067811865476;          // F: a crossing vine climbs at 45 degrees from level at most
+constexpr double kCrossGap = 2.5;                            // F: crossing vines start 2.5 x the local spacing apart
 constexpr double kBranchEveryRatio = 0.5;                    // G6: branches offered every 0.5 x spacing of climb
 constexpr double kVoidRatio = 1.5;                           // G11: a bare place is 1.5 x the spacing from any vine
 constexpr double kTieMinorRatio = 0.10;                      // G9: |sigma2| / |sigma1| at least this
@@ -223,6 +230,8 @@ struct Tip {
   int line = -1;   // a re-seeded tip grows on from the top of its stub (that line)
   int seed_no = -1;   // a floor seed: its order
   int d2 = 0;         // D2: 2 the branch made at a face, 1 a tip descended from one
+  Vec3 inward{};      // F: a wall seed's unit level direction straight away from its wall
+  bool cross = false; // F: this wall seed is a crossing vine (the others stay ordinary wall vines)
 };
 
 // A fixed, stated randomness (G2): splitmix64 of the ask's seed and the place, never the clock, never the order.
@@ -684,6 +693,7 @@ void Grower::seeds(std::vector<Tip>& tips) {
           break;
         }
       }
+  std::vector<Vec3> cross_kept;   // F: the wall points of the crossing vines made so far
   for (const auto& kv : cells) {
     const long long ck = std::get<0>(kv.first), ca = std::get<1>(kv.first), cb = std::get<2>(kv.first);
     const Vec3 pick = add(mul(up_, (ck + rnd(ask_.seed, 3, ca, cb, static_cast<int>(ck) * 3)) * stride),
@@ -711,12 +721,21 @@ void Grower::seeds(std::vector<Tip>& tips) {
       corner = e >= 0.0 && solid(add(w.c, mul(dir, e + 0.06)));
     }
     if (corner) continue;
+    // F (third form): the crossing vines are chosen BEFORE anything grows (a tie holds a crossing vine up, so no
+    // competition after the growth can remove one): a wall seed with no crossing vine within kCrossGap x its local
+    // spacing is one. Every other wall seed stays an ordinary wall vine, with every ordinary rule (they are what
+    // draws the faces).
+    bool cross = ask_.wall_cross != 0;
+    for (const Vec3& k : cross_kept) cross = cross && !(dist(k, on) < kCrossGap * sep(on));
+    if (cross) cross_kept.push_back(on);
     Tip t;
     t.kind = Tip::Wall;
     t.root = end_at_edge(w.c, w.w, at);
     t.dir = add(mul(w.w, -cone_cos_), mul(up_, cone_sin_));   // inward, at the cone
     t.from = on;
     t.seed_no = static_cast<int>(rep_.seeds_wall);
+    t.inward = unit(level(t.dir));   // F: the level part of its first heading
+    t.cross = cross;
     tips.push_back(t);
     ++rep_.seeds_wall;
   }
@@ -825,7 +844,7 @@ void Grower::grow_tip(const Tip& t, std::vector<Tip>& tips) {
       L.floor_pt = t.from;
     }
     if (t.kind == Tip::Wall) {
-      L.wall_seed = true;
+      L.wall_seed = !t.cross;   // F: a crossing vine is not in the wall roots' competition
       L.seed_no = t.seed_no;
       L.root0 = t.root;
       L.wall_pt = t.from;
@@ -844,6 +863,10 @@ void Grower::grow_tip(const Tip& t, std::vector<Tip>& tips) {
   // E, wall_connect: a wall seed's tip aims at the nearest live strand sample within 4 x the local spacing, not on its
   // own line nor on a line it has joined, in a direction rising at the cone or steeper (none: false).
   const bool connect = ask_.wall_connect && t.kind == Tip::Wall;
+  // F, wall_cross: a wall seed's own strand is a crossing vine.
+  const bool crossing = ask_.wall_cross != 0 && t.kind == Tip::Wall && t.cross;
+  std::size_t cross_joins = 0;
+  double since_tie = 0.0;
   std::vector<int> joined;
   auto target = [&](const Vec3& at, Vec3& x) {
     const double R = 4.0 * sep(at);
@@ -875,7 +898,21 @@ void Grower::grow_tip(const Tip& t, std::vector<Tip>& tips) {
       // D1 (stress_goal): t = (widest - S(p)) / (widest - tightest) of the spacing field (0 when they are equal);
       // where t >= 0.1 and there is a stress direction the stress is the goal: no pull.
       const double tg = ask_.stress_goal && sp_wide_ > sp_tight_ ? (sp_wide_ - sep(p)) / (sp_wide_ - sp_tight_) : 0.0;
-      if (aim) {
+      if (crossing) {
+        // F: its heading, the stress (where there is one) and straight away from its wall; no pull to a face. Its
+        // climb is held between the cone and 45 degrees from level: the stress bends it, and it still crosses.
+        Vec3 fc;
+        want = mul(dir, kBlendHeading);
+        if (stress_dir(p, fc)) want = add(want, mul(fc, kBlendField));
+        want = add(want, mul(t.inward, kUpwardBias));
+        if (len(want) > 1e-12) {
+          want = unit(want);
+          const Vec3 lv = level(want);
+          const Vec3 side = len(lv) > 1e-6 ? unit(lv) : t.inward;
+          const double s = std::min(std::max(dot(want, up_), cone_sin_), kCrossMaxSin);
+          want = add(mul(side, std::sqrt(1.0 - s * s)), mul(up_, s));
+        }
+      } else if (aim) {
         want = add(mul(dir, kBlendHeading), mul(unit(sub(x, p)), kBlendField));   // E: toward the next strand
       } else if (ask_.stress_goal && has_f && tg >= 0.1) {
         want = add(mul(dir, kBlendHeading), mul(f, kBlendField));
@@ -908,7 +945,7 @@ void Grower::grow_tip(const Tip& t, std::vector<Tip>& tips) {
       how = Unsupported;
       break;
     }
-    if (foot <= 0.0) {
+    if (foot <= 0.0 && !crossing) {   // F: a crossing vine is never moved or turned by what it passes
       const Near n = too_close(q, li, parent, &spared);
       if (n.found) {
         if (len(level(sub(n.hit, p))) > kJoinRunMm) {
@@ -964,6 +1001,25 @@ void Grower::grow_tip(const Tip& t, std::vector<Tip>& tips) {
     dir = want;
     if (foot > 0.0) { foot -= layer_; continue; }
     since_branch += layer_;
+    if (crossing) {
+      // F (second form, 2026-11-16): it runs its own line through the plant. Where it passes within the crowding
+      // distance of a strand it has not tied to yet, a branch stride after its last tie, the level run is 3 mm or less
+      // and the segment stays on the candidates, it throws ONE tie from its own point to that strand (as a refused
+      // branch's link is made) and goes on unmoved.
+      since_tie += layer_;
+      if (since_tie >= std::max(layer_, kBranchEveryRatio * sep(p))) {
+        const Near n = too_close(p, li, parent);
+        if (n.found && std::find(joined.begin(), joined.end(), n.line) == joined.end() && dist(n.hit, p) > 1e-9 &&
+            len(level(sub(n.hit, p))) <= kJoinRunMm && on_candidates(p, n.hit)) {
+          const int l = new_line(p, li, (lines_[static_cast<std::size_t>(li)].family + 1) % 3);
+          lay(l, n.hit);
+          ++rep_.links;
+          ++cross_joins;
+          joined.push_back(n.line);
+          since_tie = 0.0;
+        }
+      }
+    }
     if (!connect && since_branch >= std::max(layer_, kBranchEveryRatio * sep(p))) {
       since_branch = 0.0;
       offer_branches(li, p, dir, tips);
@@ -986,6 +1042,18 @@ void Grower::grow_tip(const Tip& t, std::vector<Tip>& tips) {
     const Vec3 o = face < 5 ? Vec3{nbv[face][0], nbv[face][1], nbv[face][2]} : up_;
     if (ask_.stress_goal && !connect && !lines_[static_cast<std::size_t>(li)].d2 && dot(o, up_) <= 0.5)
       d2_branch(li, p, o, tips);
+    if (crossing) ++(face < 4 ? rep_.cross_ended_side : face == 4 ? rep_.cross_ended_top : rep_.cross_ended_noface);
+  }
+  if (crossing) {
+    ++rep_.cross_seeded;
+    if (how == Unsupported) ++rep_.cross_ended_unsupported;
+    else if (how == Guard) ++rep_.cross_ended_guard;
+    const Line& L = lines_[static_cast<std::size_t>(li)];
+    if (L.pts.size() >= 2) {
+      ++rep_.cross_grown;
+      rep_.cross_joins.push_back(cross_joins);
+      rep_.cross_reach_mm.push_back(len(level(sub(L.pts.back(), start))));
+    }
   }
   if (connect) {
     rep_.wall_lines_joined.push_back(joined.size());
@@ -2058,6 +2126,12 @@ bool Grower::setup() {
   if (!std::isfinite(ask_.foot_gap)) throw std::invalid_argument("grow_strands: foot_gap must be a number");
   if (!(ask_.void_ratio > 0.0) || !std::isfinite(ask_.void_ratio))
     throw std::invalid_argument("grow_strands: void_ratio must be above 0");   // E
+  if (ask_.wall_cross < 0 || ask_.wall_cross > 2)
+    throw std::invalid_argument("grow_strands: wall_cross must be 0, 1 or 2");   // F
+  if (ask_.wall_cross != 0 && !ask_.walls_out)
+    throw std::invalid_argument("grow_strands: wall_cross needs walls_out");   // F
+  if (ask_.wall_cross != 0 && ask_.wall_connect)
+    throw std::invalid_argument("grow_strands: wall_cross and wall_connect cannot both be on");   // F
   const double thinnest = domain_.spec().bead_mm * domain_.spec().min_strut_lines;
   if (ask_.width_mm != 0.0 && !(ask_.width_mm >= thinnest - 1e-12))
     throw std::invalid_argument("grow_strands: the strut width is under the thinnest strut (G8)");
@@ -2110,7 +2184,15 @@ std::vector<Strand> Grower::run() {
   std::vector<Tip> tips;
   seeds(tips);
   tips_ = tips.size();
-  if (ask_.wall_connect) {
+  if (ask_.wall_cross != 0) {
+    // F: the crossing vines (and all theirs) grown after everything else (1) or before it (2); everything else in
+    // its usual order.
+    std::vector<Tip> rest, cross;
+    for (const Tip& t : tips) (t.cross ? cross : rest).push_back(t);
+    if (ask_.wall_cross == 2) grow(std::move(cross));
+    grow(std::move(rest));
+    if (ask_.wall_cross == 1) grow(std::move(cross));
+  } else if (ask_.wall_connect) {
     // E: the wall seeds' tips grow after every floor seed's tip and all its descendants (today they come after the
     // floor seeds but before the branches those push).
     std::vector<Tip> floor, wall;

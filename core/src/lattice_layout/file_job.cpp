@@ -201,7 +201,8 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "organic_width_mm", "organic_spacing_min_mm", "organic_spacing_max_mm", "organic_spacing_exponent",
        "organic_shape_fit", "organic_mode", "organic_walls_out", "organic_ties", "organic_tie_swirl",
        "organic_foot_gap", "organic_stress_goal",
-       "organic_void_ratio", "organic_reseed_rounds", "organic_wall_connect", "organic_wall_gap"},
+       "organic_void_ratio", "organic_reseed_rounds", "organic_wall_connect", "organic_wall_gap",
+       "organic_wall_cross"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -449,6 +450,10 @@ OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::str
   a.wall_connect = flag(in, "organic_wall_connect", a.wall_connect, w);   // E (off when not given)
   a.wall_gap = num(in, "organic_wall_gap", a.wall_gap, w);   // E: 0 or less (and when not given): off
   if (!std::isfinite(a.wall_gap)) json::fail(w + ".organic_wall_gap", "must be a number (0 or less: off)");
+  // F (brief G7, a try key): crossing vines (0 when not given: off).
+  const double cross = num(in, "organic_wall_cross", a.wall_cross, w);
+  if (!(cross == 0.0 || cross == 1.0 || cross == 2.0)) json::fail(w + ".organic_wall_cross", "must be 0, 1 or 2");
+  a.wall_cross = static_cast<int>(cross);
   // G13: 0 or less: the feet do not compete.
   if (!std::isfinite(a.foot_gap)) json::fail(w + ".organic_foot_gap", "must be a number (0 or less: feet do not compete)");
   const double thinnest = s.bead_mm * s.min_strut_lines;

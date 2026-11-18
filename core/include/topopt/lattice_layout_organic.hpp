@@ -84,6 +84,11 @@ struct OrganicAsk {
   // E: wall roots compete as feet do (G13), separately from them: a wall seed's root is kept only where no kept wall
   // root stands within wall_gap x the local spacing of its wall point (straight-line distance). 0 or less: off.
   double wall_gap = 0.0;
+  // F (brief G7, a try key): crossing vines. A wall seed's own strand heads on its heading, the stress and straight
+  // away from its wall (no pull to a face), joins as today and goes on from the hit with its heading, with no limit
+  // on its joins. 1: the wall tips grown after every floor tip and its descendants; 2: before any floor tip. 0: off.
+  // Needs walls_out; refused with wall_connect.
+  int wall_cross = 0;   // 0, 1 or 2
 };
 
 // O16, the net skin: Finish Skin (Settings::skin) on a weave region (the old finish step "Skin", organic_lattice.cpp,
@@ -203,6 +208,12 @@ struct GrowReport {
   // E, wall_gap: wall roots that competed (a wall seed's strand still holding its root), kept, removed with a joint,
   // whole vines removed.
   std::size_t wall_roots = 0, wall_roots_kept = 0, wall_roots_cut_at_joint = 0, wall_vines_removed = 0;
+  // F, wall_cross: crossing vines seeded, grown; how they ended (edge at a side face, the top, no face; unsupported;
+  // the loop's guard); per grown vine its joins and the level distance from its wall point to its end (mm).
+  std::size_t cross_seeded = 0, cross_grown = 0, cross_ended_side = 0, cross_ended_top = 0, cross_ended_noface = 0,
+              cross_ended_unsupported = 0, cross_ended_guard = 0;
+  std::vector<std::size_t> cross_joins;
+  std::vector<double> cross_reach_mm;
   // D2 (stress_goal): branches offered one spacing back from a side face, grown, refused, strands too short for one;
   // and every tip that ended by leaving the region, by its last voxel's wall site: +x, -x, +y, -y, +z, none.
   std::size_t d2_offered = 0, d2_grown = 0, d2_refused = 0, d2_short = 0;
