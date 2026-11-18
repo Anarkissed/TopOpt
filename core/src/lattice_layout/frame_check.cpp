@@ -508,6 +508,7 @@ FrameCheck check_frame(const FrameModel& f, const FrameVoxelSolve& vs, const Fra
     for (char x : loaded) count += x;
     out.frame_nodes_loaded = count;
     for (char x : lost) out.loaded_nodes_undriven += x;
+    out.node_loaded = loaded;
     const double on = share * out.load_total_n;
     if (on > 0.0 && count == 0) {
       out.load_unheld_n = on;
@@ -631,6 +632,7 @@ FrameCheck check_frame(const FrameModel& f, const FrameVoxelSolve& vs, const Fra
   // ── The verdict (steps 9, 10): per piece, then per strut.
   t0 = std::chrono::steady_clock::now();
   std::vector<double> pm_stress(np, inf), pN(np, 0.0), pM(np, 0.0), pT(np, inf), pC(np, inf), plen(np, 0.0);
+  std::vector<char> pbend(np, 0);   // brief E3a: bending the larger part of the piece's stress
   for (std::size_t pi = 0; pi < np; ++pi) {
     const FramePiece& p = f.pieces[pi];
     plen[pi] = len3(sub3(f.nodes[static_cast<std::size_t>(p.b)], f.nodes[static_cast<std::size_t>(p.a)]));
@@ -662,6 +664,7 @@ FrameCheck check_frame(const FrameModel& f, const FrameVoxelSolve& vs, const Fra
     pm_stress[pi] = std::min(pT[pi], pC[pi]);
     pN[pi] = N;
     pM[pi] = M;
+    pbend[pi] = sb > std::fabs(N) / sc.A;
   }
   // Struts: non-link pieces joined through nodes that are not joints (a joint: three or more non-link pieces, driven,
   // or an end of one piece only).
@@ -720,13 +723,18 @@ FrameCheck check_frame(const FrameModel& f, const FrameVoxelSolve& vs, const Fra
       if (plen[static_cast<std::size_t>(pi)] >= s.min_piece * p.width && pm_stress[static_cast<std::size_t>(pi)] < sn.stress_margin) {
         sn.stress_margin = pm_stress[static_cast<std::size_t>(pi)];
         worst_by = pT[static_cast<std::size_t>(pi)] <= pC[static_cast<std::size_t>(pi)] ? "tension" : "compression";
+        sn.bending_led = pbend[static_cast<std::size_t>(pi)] != 0;
       }
+      if (out.node_loaded.size() == nn &&
+          (out.node_loaded[static_cast<std::size_t>(p.a)] || out.node_loaded[static_cast<std::size_t>(p.b)]))
+        sn.loaded = true;
       const double demand = pm_stress[static_cast<std::size_t>(pi)] > 0.0 ? 1.0 / pm_stress[static_cast<std::size_t>(pi)] : inf;
       if (demand > worst) {
         worst = demand;
         worst_piece = pi;
       }
     }
+    sn.n_min = Nmin;
     if (Nmin < 0.0) sn.buckling_margin = (M_PI * M_PI * E * section(sn.width_min).I / (sn.length_mm * sn.length_mm)) / -Nmin;
     sn.margin = std::min(sn.stress_margin, sn.buckling_margin);
     sn.by = sn.buckling_margin < sn.stress_margin ? "buckling" : worst_by;

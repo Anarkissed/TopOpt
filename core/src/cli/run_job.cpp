@@ -16082,6 +16082,53 @@ struct OrganicCheckRun {
   int passes_at_infill_percent = -1;      // the lowest whole infill percent at which the solid passes; -1: none
 };
 
+// Brief E3a, item 1: every judged strut under `watch`, what strengthening by adding reads of it: its bars in the
+// layout's order (in piece order, each once), the limit that failed, its margins, the compression its buckling used,
+// whether bending led its stress, its widths and length, whether it is at `cap` (its widest bar at least cap; 0: not
+// told), whether it carries the load, and its two ends. The weakest first.
+std::string struts_under_json(const OrganicCheckRun& cr, double watch, double cap) {
+  const ll::FrameCheck& c = cr.check;
+  std::vector<int> order;
+  for (std::size_t i = 0; i < c.struts.size(); ++i)
+    if (c.struts[i].judged && c.struts[i].margin < watch) order.push_back(static_cast<int>(i));
+  std::sort(order.begin(), order.end(), [&](int a, int b) {
+    const double ma = c.struts[static_cast<std::size_t>(a)].margin, mb = c.struts[static_cast<std::size_t>(b)].margin;
+    return ma != mb ? ma < mb : a < b;
+  });
+  const auto v3 = [](const Vec3& p) { return "[" + json_num(p.x) + ", " + json_num(p.y) + ", " + json_num(p.z) + "]"; };
+  std::string s = "{\n  \"watch_margin\": " + json_num(watch) + ",\n  \"cap_mm\": " + json_num(cap) + ",\n  \"struts\": [";
+  for (std::size_t q = 0; q < order.size(); ++q) {
+    const ll::FrameStrut& sn = c.struts[static_cast<std::size_t>(order[q])];
+    std::vector<int> bars;
+    for (int pi : sn.pieces) {
+      const int fb = cr.frame.pieces[static_cast<std::size_t>(pi)].bar;
+      const int lb = fb >= 0 && static_cast<std::size_t>(fb) < cr.bar_of.size() ? cr.bar_of[static_cast<std::size_t>(fb)] : -1;
+      if (std::find(bars.begin(), bars.end(), lb) == bars.end()) bars.push_back(lb);
+    }
+    std::string bl;
+    for (std::size_t k = 0; k < bars.size(); ++k) bl += (k ? ", " : "") + std::to_string(bars[k]);
+    std::string ends;
+    for (int e = 0; e < 2; ++e) {
+      if (sn.end_node[e] < 0) continue;
+      const char k = sn.end_kind[e];
+      ends += std::string(ends.empty() ? "" : ", ") + "{\"at\": " + v3(cr.frame.nodes[static_cast<std::size_t>(sn.end_node[e])]) +
+              ", \"kind\": " + json_str(k == 'd' ? "driven" : k == 'j' ? "joint" : k == 'f' ? "free" : "other") +
+              ", \"floor\": " + (sn.end_floor[e] ? "true" : "false") + "}";
+    }
+    s += std::string(q ? "," : "") + "\n    {\"strut\": " + std::to_string(order[q]) + ", \"margin\": " + json_num(sn.margin) +
+         ", \"stress_margin\": " + json_num(std::isfinite(sn.stress_margin) ? sn.stress_margin : -1.0) +
+         ", \"buckling_margin\": " + json_num(std::isfinite(sn.buckling_margin) ? sn.buckling_margin : -1.0) +
+         ", \"by\": " + json_str(sn.by) + ", \"bending_led\": " + (sn.bending_led ? "true" : "false") +
+         ", \"n_min\": " + json_num(sn.n_min) + ", \"width_min_mm\": " + json_num(sn.width_min) +
+         ", \"width_max_mm\": " + json_num(sn.width_max) + ", \"length_mm\": " + json_num(sn.length_mm) +
+         ", \"at_cap\": " + (cap > 0.0 && sn.width_max >= cap - 1e-9 ? "true" : "false") +
+         ", \"loaded\": " + (sn.loaded ? "true" : "false") + ", \"at\": " + v3(sn.at) + ",\n     \"ends\": [" + ends +
+         "], \"bars\": [" + bl + "]}";
+  }
+  s += std::string(order.empty() ? "" : "\n  ") + "]\n}\n";
+  return s;
+}
+
 OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain, const ll::Bars& layout_bars,
                                     const std::vector<char>* kept, double light_width_mm,
                                     const std::string& out_dir, int threads) {
@@ -16567,6 +16614,8 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
     OrganicCheckRun cr = organic_frame_check(S, domain, out.bars, nullptr, light, rdir, job.options.threads);
     if (!cr.done.ok) return finish(false, cr.done.code, cr.done.exit_code, cr.done.why, cr.done.detail);
     std::ofstream(join_path(rdir, "strength.json")) << cr.done.json << "\n";
+    // Brief E3a, item 1: the struts under the watch margin, as strengthening by adding reads them.
+    std::ofstream(join_path(rdir, "struts_under.json")) << struts_under_json(cr, ss.watch_margin, ask.width_heavy_mm > 0.0 ? ask.width_heavy_mm : light);
     const ll::FrameCheck& c = cr.check;
     // Whether the geometry stays put: a hash of every non-link bar's two end points (rounded to 1e-4 mm, each bar's
     // ends in order, the bars sorted); and the judged struts at the upper strut width.

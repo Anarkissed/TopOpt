@@ -109,6 +109,8 @@ void test_pulled_strut() {
   CHECK(std::fabs(stress - F / area()) <= 0.02 * F / area(), "a pulled strut's stress is F / A within 2 %");
   CHECK(c.struts[0].by == "tension", "it is limited in tension");
   CHECK(std::isinf(c.struts[0].buckling_margin), "no buckling in tension");
+  CHECK(c.struts[0].n_min == 0.0 && !c.struts[0].bending_led && !c.struts[0].loaded,
+        "E3a: a pulled strut has no compression, is axial-led and carries no load");
 }
 
 void test_cantilever() {
@@ -135,6 +137,8 @@ void test_cantilever() {
   const double stress = kLevel / c.struts[0].stress_margin;
   std::printf("§2 cantilever: root stress %.5f MPa, beam theory %.5f MPa\n", stress, expect);
   CHECK(std::fabs(stress - expect) <= 0.05 * expect, "a cantilever's root stress is P L r / I within 5 %");
+  CHECK(c.struts[0].bending_led && c.struts[0].loaded, "E3a: the cantilever is bending-led and carries the load");
+  CHECK(c.node_loaded.size() == 2 && c.node_loaded[0] + c.node_loaded[1] == 1, "E3a: one node carries the load");
 }
 
 void test_buckling() {
@@ -151,6 +155,7 @@ void test_buckling() {
   std::printf("§3 buckling: margin %.5f, pinned Euler %.5f (%s)\n", c.struts[0].buckling_margin, expect, c.struts[0].by.c_str());
   CHECK(std::fabs(c.struts[0].buckling_margin - expect) <= 0.02 * expect, "the buckling margin is the pinned Euler load's within 2 %");
   CHECK(c.struts[0].by == "buckling", "a slender strut in compression is limited by buckling");
+  CHECK(std::fabs(-c.struts[0].n_min - N) <= 0.02 * N, "E3a: n_min is the strut's compressive force within 2 %");
 }
 
 void test_t_join() {

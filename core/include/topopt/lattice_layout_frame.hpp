@@ -105,6 +105,12 @@ struct FrameStrut {
   bool end_floor[2] = {false, false};
   Vec3 end_u[2]{}, end_read[2]{};
   double axial_n = 0.0, moment_nmm = 0.0;
+  // Brief E3a, item 1 (what strengthening by adding reads): the most compressive axial force of its pieces (N, negative:
+  // compression; 0: none), the force its buckling margin used; whether bending is the larger part of the stress at the
+  // piece that set its stress margin (M r / I over |N| / A); whether any of its nodes carries a share of the load.
+  double n_min = 0.0;
+  bool bending_led = false;
+  bool loaded = false;
 };
 struct FrameCheck {
   bool solved = false;
@@ -128,6 +134,7 @@ struct FrameCheck {
   std::vector<int> weakest;       // into `struts`, the weakest first
   std::vector<float> bar_margin;  // per bar of the Bars the frame was built from: its strut's margin; NaN not judged
   std::vector<Vec3> node_u;       // per node: its displacement as solved (0 for nodes not in the solve)
+  std::vector<char> node_loaded;  // per node: it carries a share of the load (step 5); brief E3a, item 1
   double ms_drive = 0.0, ms_assemble = 0.0, ms_solve = 0.0, ms_verdict = 0.0;
 };
 FrameCheck check_frame(const FrameModel& frame, const FrameVoxelSolve& voxels, const FrameStrength& strength,
