@@ -136,6 +136,21 @@ LatticeSampleReceipt write_lattice_sample(const LatticeSampleSpec& spec, Triangl
   return r;
 }
 
+// ★ The bare sample body (brief C2, E8): the sample's outer solid with no lattice, closed, welded, outward.
+TriangleMesh lattice_sample_body(const LatticeSampleSpec& spec) {
+  if (spec.shape == "coupon") return lattice_coupon_solid();
+  if (spec.shape != "cube")
+    throw std::invalid_argument("lattice-sample: --shape is \"cube\" or \"coupon\" (got \"" + spec.shape + "\")");
+  if (!(spec.size_mm > 0.0) || !std::isfinite(spec.size_mm) || !(spec.plate_mm >= 0.0) || !std::isfinite(spec.plate_mm))
+    throw std::invalid_argument("lattice-sample: size must be > 0 and plate >= 0");
+  const double e = spec.size_mm, top = spec.plate_mm + spec.size_mm;
+  TriangleMesh m;
+  m.vertices = {{0, 0, 0}, {e, 0, 0}, {e, e, 0}, {0, e, 0}, {0, 0, top}, {e, 0, top}, {e, e, top}, {0, e, top}};
+  m.triangles = {{0, 2, 1}, {0, 3, 2}, {4, 5, 6}, {4, 6, 7}, {0, 1, 5}, {0, 5, 4},
+                 {2, 3, 7}, {2, 7, 6}, {1, 2, 6}, {1, 6, 5}, {3, 0, 4}, {3, 4, 7}};
+  return m;
+}
+
 TriangleMesh lattice_sample_mesh(const LatticeSampleSpec& spec, LatticeSampleReceipt* receipt) {
   struct Soup : TriangleSink {
     TriangleMesh m;

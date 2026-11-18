@@ -183,6 +183,7 @@ add_library(topopt
   src/lattice_layout/organic_preview.cpp
   # Organic cut 2 (brief E1): the weave as closed shells beside the solid, never joined (OF2, OF3).
   src/lattice_layout/weave_tubes.cpp
+  src/lattice_layout/organic_synthetic.cpp
   # The lattice file job (docs/design/lattice-rebuild/04-layout-file-job.md): job.json ->
   # layout -> mesh -> STL. `topopt-cli lattice-file` is its only caller in core.
   src/lattice_layout/file_job.cpp

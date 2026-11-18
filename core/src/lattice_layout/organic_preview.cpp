@@ -118,6 +118,21 @@ OrganicPreview lay_organic_preview(Session& session, const Settings& settings, c
   return out;
 }
 
+OrganicPreview lay_organic_preview(Session& session, const Settings& settings, const TensorField& field,
+                                   const std::vector<OrganicGroup>& groups, const OrganicPreviewAsk& preview,
+                                   int threads, const std::atomic<bool>* stop) {
+  OrganicPreview out;
+  out.quality = preview.quality;
+  out.outcome = preview.quality == PreviewQuality::Draft
+                    ? session.lay_organic_draft(settings, field, groups, threads, stop)
+                    : session.lay_organic(settings, field, groups, threads, stop);
+  if (out.outcome.cancelled) return out;
+  std::vector<int> regions;
+  for (const Layout::Weave& w : out.outcome.layout.weave) regions.push_back(w.region);
+  out.runs = weave_runs(out.outcome.bars, regions, preview.tolerance_mm);
+  return out;
+}
+
 std::vector<std::uint8_t> pack_weave_runs(const std::vector<WeaveRun>& runs) {
   std::size_t bytes = 0;
   for (const WeaveRun& r : runs) bytes += 12 + 20 * r.points.size();
@@ -174,16 +189,26 @@ double narrowest_width(std::vector<std::array<double, 2>> p) {
 }
 }  // namespace
 
+// The limits' two roundings, shared by organic_sweep_limits and Session::sweep_limits_for (OP10): whole lines, at least
+// one; the nearest 0.5 mm, never under the smallest printable cell of the thinnest strut (2 lines).
+struct SweepRounding {
+  double line = 0.0, thinnest = 0.0, floor_cell = 0.0;
+  SweepRounding(const Domain& domain, double line_mm)
+      : line(line_mm > 0.0 ? line_mm : domain.spec().bead_mm), thinnest(2.0 * line),
+        // The engine's smallest printable Organic spacing: the tracer's own print floor, t x sqrt(3 pi) / 2 with t the
+        // thinnest strut (organic_lattice.cpp, spacing_print_floor_mm). (The octet's open-look floor, C14, is a cube
+        // cell's, 4.74 mm at a 0.45 mm line: it would refuse the brief's own D = 18 example.)
+        floor_cell(0.5 * thinnest * std::sqrt(3.0 * 3.14159265358979323846)) {}
+  double lines(double x) const { return std::max(1.0, std::round(x / line)) * line; }
+  double half(double x) const { return std::max(std::round(x * 2.0) / 2.0, std::ceil(floor_cell * 2.0) / 2.0); }
+};
+
 std::vector<SweepLimits> organic_sweep_limits(const Domain& domain, double line_mm) {
   std::vector<SweepLimits> out;
-  const double line = line_mm > 0.0 ? line_mm : domain.spec().bead_mm;
-  const double thinnest = 2.0 * line;
-  // The engine's smallest printable Organic spacing: the tracer's own print floor, t x sqrt(3 pi) / 2 with t the
-  // thinnest strut (organic_lattice.cpp, spacing_print_floor_mm). (The octet's open-look floor, C14, is a cube cell's,
-  // 4.74 mm at a 0.45 mm line: it would refuse the brief's own D = 18 example.)
-  const double floor_cell = 0.5 * thinnest * std::sqrt(3.0 * 3.14159265358979323846);
-  auto lines = [&](double x) { return std::max(1.0, std::round(x / line)) * line; };
-  auto half = [&](double x) { return std::max(std::round(x * 2.0) / 2.0, std::ceil(floor_cell * 2.0) / 2.0); };
+  const SweepRounding rd(domain, line_mm);
+  const double thinnest = rd.thinnest;
+  auto lines = [&](double x) { return rd.lines(x); };
+  auto half = [&](double x) { return rd.half(x); };
   for (const Region& r : domain.spec().regions) {
     if (r.role != Role::Lattice || !r.weave) continue;
     SweepLimits s;
@@ -216,6 +241,39 @@ std::vector<SweepLimits> organic_sweep_limits(const Domain& domain, double line_
 std::vector<SweepLimits> Session::sweep_limits(const Settings& settings, double line_mm) {
   ready_domain(settings);
   return organic_sweep_limits(*domain_, line_mm);
+}
+
+// OP10 (brief C2, E4; E7: per group): the union of the measured regions' limits among `regions`.
+SweepLimitsUnion Session::sweep_limits_for(const Settings& settings, const std::vector<int>& regions, double line_mm) {
+  const std::vector<SweepLimits> all = sweep_limits(settings, line_mm);
+  const SweepRounding rd(*domain_, line_mm);
+  SweepLimitsUnion u;
+  for (const int id : regions) {
+    const SweepLimits* s = nullptr;
+    for (const SweepLimits& x : all)
+      if (x.region == id) s = &x;
+    if (!s || !s->measured) {
+      u.unmeasured.push_back(id);
+      continue;
+    }
+    if (!u.measured) {
+      u.strut_lower_mm = s->strut_lower_mm;
+      u.strut_upper_mm = s->strut_upper_mm;
+      u.cell_lower_mm = s->cell_lower_mm;
+      u.cell_upper_mm = s->cell_upper_mm;
+    }
+    u.measured = true;
+    u.strut_lower_mm = std::min(u.strut_lower_mm, s->strut_lower_mm);
+    u.strut_upper_mm = std::max(u.strut_upper_mm, s->strut_upper_mm);
+    u.cell_lower_mm = std::min(u.cell_lower_mm, s->cell_lower_mm);
+    u.cell_upper_mm = std::max(u.cell_upper_mm, s->cell_upper_mm);
+    u.measured_regions.push_back(id);
+  }
+  if (u.measured) {
+    u.strut_auto_mm = rd.lines(0.5 * (u.strut_lower_mm + u.strut_upper_mm));
+    u.cell_auto_mm = rd.half(0.5 * (u.cell_lower_mm + u.cell_upper_mm));
+  }
+  return u;
 }
 
 }  // namespace topopt::lattice_layout

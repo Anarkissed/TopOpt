@@ -1303,6 +1303,7 @@ Pieces drop_adrift_bars(Bars& bars, const Domain& domain, const Layout* layout =
 // region, depth, Expand, Protect skin, rim or line-width change reads it again, once.
 struct TensorField;   // Organic, Traced (lattice_layout_organic.hpp)
 struct OrganicAsk;
+struct OrganicGroup;   // OP11 (lattice_layout_organic.hpp)
 struct GrowReport;   // Organic, Grown (lattice_layout_organic.hpp)
 struct Settings {
   struct RegionAsk {
@@ -1402,6 +1403,24 @@ std::vector<Place> find_places(const StepModel& model, const Domain& domain, con
                                const std::vector<int>& chip_ids, const std::vector<Settings::RegionAsk>& asks,
                                const Layout& layout, double fallback_cell_mm);
 
+// OP7 (brief C2, E1): one refusal of an Organic ask (validate_organic, lattice_layout_organic.hpp). `setting` is a
+// stable name the app maps to its control: the OrganicAsk field's own name (spacing_min_mm, width_heavy_mm, ...), or
+// bead_mm, layer_mm, build_dir, seed_stride, stress (no stress input), groups (E7), foci or region (the synthetic
+// stress call, E5).
+// `code` is a stable word for the rule; `text` one plain sentence for the owner (no key names). `given` is the value
+// refused; allowed_min / allowed_max the nearest allowed numbers where a number applies (has_min / has_max).
+// OP11 (E7): `group`, the index (in the list given) of the group whose ask is refused; -1 for a refusal of the list
+// itself or of no one group (a region in no group or in two, the stress input).
+struct OrganicRefusal {
+  int group = -1;
+  std::string setting;
+  std::string code;
+  std::string text;
+  double given = 0.0;
+  bool has_min = false, has_max = false;
+  double allowed_min = 0.0, allowed_max = 0.0;
+};
+
 struct Outcome {
   Layout layout;
   StrutReport struts;
@@ -1445,9 +1464,19 @@ struct Outcome {
   // G1 (Organic, Grown; lay_organic with OrganicAsk::mode Grown): what the growth did, every weave region together;
   // null otherwise.
   std::shared_ptr<const GrowReport> grown;
+  // OP7 (brief C2, E1; lay_organic and lay_organic_draft only): the ask refused, every refusal validate_organic gave.
+  // When not empty nothing was laid, nothing else here is filled, and the session's kept domain was not touched.
+  std::vector<OrganicRefusal> refused;
+  // OP8 (brief C2, E2; lay_organic and lay_organic_draft only): plain sentences for the owner about the lay that are
+  // not refusals: the cell size's two ends equal while a heavy end is set (that heavy end then does nothing).
+  std::vector<std::string> notes;
+  // OP11 (brief C2, E7; a lay of two groups or more): weave bar pairs of different groups closer than the sum of their
+  // half widths (the cut at crossings does not join them in this version). 0 for one group.
+  std::size_t cross_group_touches = 0;
 };
 
 struct SweepLimits;   // lattice_layout_organic.hpp
+struct SweepLimitsUnion;
 
 class Session {
  public:
@@ -1475,10 +1504,26 @@ class Session {
   // dropped; braces on the uncut bars, supports and net skin as they come. lay_organic_preview (organic header) calls it.
   Outcome lay_organic_draft(const Settings& settings, const TensorField& field, const OrganicAsk& ask, int threads = 0,
                             const std::atomic<bool>* stop = nullptr);
+  // OP11 (brief C2, E7; the owner: Organic settings are whole part only when the whole part is latticed, otherwise per
+  // GROUP): the same two lays with a list of groups, each {its weave region ids, its own OrganicAsk}. Every weave region
+  // of the settings must be in exactly one group, and every group's regions be weave regions (else refused, Outcome::
+  // refused, by validate_organic_groups). Each group is traced or grown on its own regions with its own ask (mode,
+  // sizes, gaps, everything) and its own stress reference (stated, else the percentile over its own regions: organic_
+  // spacing's `pool`); its weave bars are cut at their crossings and braced on their own (bars of different groups are
+  // never joined by the cut; Outcome::cross_group_touches counts the pairs that touch). The groups' bars are one layout,
+  // in group order, each bar carrying its region. The rest of the path (joining, the net skin, supports, dropping) runs
+  // once over all of it, as before. One group holding every weave region is exactly the one-ask call.
+  Outcome lay_organic(const Settings& settings, const TensorField& field, const std::vector<OrganicGroup>& groups,
+                      int threads = 0, const std::atomic<bool>* stop = nullptr);
+  Outcome lay_organic_draft(const Settings& settings, const TensorField& field, const std::vector<OrganicGroup>& groups,
+                            int threads = 0, const std::atomic<bool>* stop = nullptr);
   // OP5 (brief C1): the Auto Sweep limits before any lay. The domain for these settings' "where" is made exactly as
   // lay() and lay_organic() make it (and kept for the next lay, as theirs is), nothing is laid, and the answer is
   // organic_sweep_limits(that domain, line_mm) (lattice_layout_organic.hpp; include it to read the result).
   std::vector<SweepLimits> sweep_limits(const Settings& settings, double line_mm);
+  // OP10 (brief C2, E4, E7): the limits of a group of weave regions, the union over the measured ones among `regions`
+  // (SweepLimitsUnion, lattice_layout_organic.hpp). Makes the domain as sweep_limits does; lays nothing.
+  SweepLimitsUnion sweep_limits_for(const Settings& settings, const std::vector<int>& regions, double line_mm);
   std::size_t open_edges() const { return open_edges_; }
   const PartMeasure& measure() const { return *measure_; }
   // The part as it was opened (its unwelded triangles and their raw face ids): D23 reads its faces. Not a copy.
@@ -1498,14 +1543,21 @@ class Session {
     std::vector<int> arrived;   // G11 (Grown only): weave regions whose vines that reach the surface have arrived
     std::vector<std::pair<int, double>> prune;   // J2 (brief G12): (Grown region, median asked spacing); empty: off
     std::vector<WeaveHold> hold;   // L2 (brief G14): Grown areas with floating parts' undersides; empty: off
-    // S (brief G28): the light strut width and the layer, for split_at_crossings (0: the thinnest weave bar).
-    double light_mm = 0.0, layer_mm = 0.2;
-    double link_width = 1.0;   // S8: OrganicAsk::link_width
-    WeaveBraceAsk brace;       // T (brief G30): off unless brace.unbraced_max > 0
+    // OP11 (brief C2, E7): per group of weave regions (in order), its strands (strands[first, first + count)) and what
+    // the cut at crossings and the braces read of its ask; each group's weave bars are cut and braced on their own, so
+    // bars of different groups are never joined by the cut. Empty: one group, every strand, the defaults below.
+    struct Group {
+      std::size_t first = 0, count = 0;
+      // S (brief G28): the light strut width and the layer, for split_at_crossings (0: the thinnest weave bar).
+      double light_mm = 0.0, layer_mm = 0.2;
+      double link_width = 1.0;   // S8: OrganicAsk::link_width
+      WeaveBraceAsk brace;       // T (brief G30): off unless brace.unbraced_max > 0
+    };
+    std::vector<Group> groups;
     bool draft = false;        // brief L2, item 3: lay_organic_draft
   };
-  Outcome lay_organic_with(const Settings& settings, const TensorField& field, const OrganicAsk& ask, int threads,
-                           const std::atomic<bool>* stop, bool draft);
+  Outcome lay_organic_with(const Settings& settings, const TensorField& field, const std::vector<OrganicGroup>& groups,
+                           int threads, const std::atomic<bool>* stop, bool draft);
   Outcome lay_with(const Settings& settings, const std::vector<Strand>* strands, int threads, const std::atomic<bool>* stop,
                    const WeaveFinish* finish = nullptr);
   // The domain for these settings' "where": kept when it is the same, made again when it is not.
