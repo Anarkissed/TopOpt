@@ -544,6 +544,10 @@ Outcome Session::lay_organic(const Settings& settings, const TensorField& field,
   // traced and laid in (their solid cuts the strands as any solid does); Skin lays the net skin (O16).
   ready_domain(settings);
   WeaveFinish finish;
+  // S (brief G28): the cut at crossings judges by the light width (the growth's and the tracer's), never by I1 / Q2's.
+  finish.light_mm = ask.width_mm > 0.0 ? ask.width_mm : domain_->spec().bead_mm * domain_->spec().min_strut_lines;
+  finish.layer_mm = ask.layer_mm;
+  finish.link_width = ask.link_width;   // S8
   const auto t0 = std::chrono::steady_clock::now();
   std::vector<Strand> strands;
   double smallest = 0.0, largest = 0.0, sum = 0.0;

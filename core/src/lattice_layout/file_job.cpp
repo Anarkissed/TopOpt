@@ -208,7 +208,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "organic_shape_reach", "organic_hold_parts", "organic_part_reach_mm",
        "organic_part_support_mm", "organic_part_to_floor", "organic_wall_gap_heavy", "organic_cross_gap",
        "organic_cross_gap_heavy", "organic_cross_climb_max_deg", "organic_tie_level", "organic_tie_gap",
-       "organic_tie_gap_heavy"},
+       "organic_tie_gap_heavy", "organic_link_width"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -511,6 +511,10 @@ OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::str
   if (a.tie_gap_heavy > 0.0 && (a.spacing_mm > 0.0 || !(a.spacing_max_mm > a.spacing_min_mm)))
     json::fail(w + ".organic_tie_gap_heavy", "needs the spacing as a range (organic_spacing_min_mm below "
                                              "organic_spacing_max_mm): it follows that range's stress measure");
+  // S8 (brief G28): a link's width, in the thinner joined strut's widths (1 when not given).
+  a.link_width = num(in, "organic_link_width", a.link_width, w);
+  if (!(std::isfinite(a.link_width) && a.link_width >= 0.5 && a.link_width <= 2.0))
+    json::fail(w + ".organic_link_width", "must be from 0.5 to 2");
   // G (brief G8, try keys): top runs, roots (0 when not given: off), runs per end (1 when not given).
   a.top_run = num(in, "organic_top_run", a.top_run, w);
   if (!(std::isfinite(a.top_run) && a.top_run >= 0.0)) json::fail(w + ".organic_top_run", "must be 0 or above");

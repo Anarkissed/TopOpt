@@ -5,9 +5,11 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <memory>
 #include <thread>
+#include <tuple>
 
 #include "topopt/strut_cell.hpp"
 #include "bar_ends.hpp"
@@ -854,6 +856,7 @@ Bars weave_bars(const Domain& domain, const std::vector<Strand>& strands, int th
         bar.cell = st.spacing_mm;
         bar.region = st.region;
         bar.strand = static_cast<int>(si);
+        bar.level_tie = st.level_tie;   // S (brief G28)
         const int n = std::max(2, static_cast<int>(std::ceil(line.length / kStep)));
         std::vector<char> in(static_cast<std::size_t>(n) + 1);
         for (int i = 0; i <= n; ++i) in[static_cast<std::size_t>(i)] = held(static_cast<double>(i) / n);
@@ -925,21 +928,27 @@ double closest(const Vec3& p0, const Vec3& p1, const Vec3& q0, const Vec3& q1, d
 }
 }  // namespace
 
-std::size_t split_at_crossings(Bars& bars) {
+std::size_t split_at_crossings(Bars& bars, double light_mm, double layer_mm, CrossingCutStats* stats, double link_width) {
+  if (stats) *stats = CrossingCutStats{};
   const std::vector<Bar> before = bars.bars;
   const std::size_t n = before.size();
   if (n < 2) return 0;
+  // S1 (brief G28): ONE light width for every distance (0 or less: the thinnest bar here).
+  double light = light_mm;
+  if (!(light > 0.0)) {
+    light = std::numeric_limits<double>::infinity();
+    for (const Bar& b : before) light = std::min(light, b.width);
+    if (!std::isfinite(light)) light = 0.0;
+  }
   // The bars sorted into a grid, to find the pairs that may come close.
-  double widest = 0.0;
-  for (const Bar& b : before) widest = std::max(widest, b.width);
   const double pitch = 2.0;
   auto slot = [&](double x) { return static_cast<long long>(std::floor(x / pitch)); };
   std::map<std::array<long long, 3>, std::vector<std::size_t>> grid;
   for (std::size_t i = 0; i < n; ++i) {
     const Bar& b = before[i];
-    for (long long x = slot(std::min(b.a.x, b.b.x) - widest); x <= slot(std::max(b.a.x, b.b.x) + widest); ++x)
-      for (long long y = slot(std::min(b.a.y, b.b.y) - widest); y <= slot(std::max(b.a.y, b.b.y) + widest); ++y)
-        for (long long z = slot(std::min(b.a.z, b.b.z) - widest); z <= slot(std::max(b.a.z, b.b.z) + widest); ++z)
+    for (long long x = slot(std::min(b.a.x, b.b.x) - light); x <= slot(std::max(b.a.x, b.b.x) + light); ++x)
+      for (long long y = slot(std::min(b.a.y, b.b.y) - light); y <= slot(std::max(b.a.y, b.b.y) + light); ++y)
+        for (long long z = slot(std::min(b.a.z, b.b.z) - light); z <= slot(std::max(b.a.z, b.b.z) + light); ++z)
           grid[{x, y, z}].push_back(i);
   }
   std::vector<std::pair<std::size_t, std::size_t>> pairs;
@@ -963,54 +972,125 @@ std::size_t split_at_crossings(Bars& bars) {
     joints.emplace(k, p);
     return p;
   };
+  auto d3 = [](const Vec3& a, const Vec3& b) {
+    return std::sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z));
+  };
+  // Where p projects onto bar b's own line (0 at a, 1 at b; not held to 0 .. 1), and its distance from the bar.
+  auto along = [](const Bar& b, const Vec3& p) {
+    const Vec3 d{b.b.x - b.a.x, b.b.y - b.a.y, b.b.z - b.a.z};
+    const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
+    return l2 > 0.0 ? ((p.x - b.a.x) * d.x + (p.y - b.a.y) * d.y + (p.z - b.a.z) * d.z) / l2 : 0.0;
+  };
+  auto off_bar = [&](const Bar& b, const Vec3& p) {
+    const double u = std::clamp(along(b, p), 0.0, 1.0);
+    return d3(p, Vec3{b.a.x + (b.b.x - b.a.x) * u, b.a.y + (b.b.y - b.a.y) * u, b.a.z + (b.b.z - b.a.z) * u});
+  };
+  auto tie_h = [](const Bar& b) { return 0.5 * (b.a.z + b.b.z); };   // a level tie's height (build direction +z)
   struct Cut { double s; Vec3 at; };
   std::vector<std::vector<Cut>> cuts(n);
   std::map<PointKey, int> ends_at;   // how many bars end at each point, as found
   for (const Bar& b : before) { ++ends_at[key_of(b.a)]; ++ends_at[key_of(b.b)]; }
+  // S7 (brief G28, the lead's ruling): ONE connection per pair of strands. The contacts (S1; links never; two bars of
+  // one strand never) are grouped by the unordered pair of their strands; within a group, smallest closest approach
+  // first (ties: lower bar numbers first), a contact is kept only more than 10 x the light width (straight line, from
+  // the middle of its two closest points) from every contact already kept for that pair.
+  struct Contact { std::size_t i, j; double s, t, d; Vec3 at; };
+  std::map<std::pair<int, int>, std::vector<Contact>> by_strands;
+  std::size_t found = 0;
   for (const auto& [i, j] : pairs) {
     const Bar &x = before[i], &y = before[j];
+    if (x.link || y.link) continue;   // S6: a link is never cut here and takes no part in the pair test
+    if (x.strand >= 0 && x.strand == y.strand) continue;   // S7: a strand touching itself is left alone
     const PointKey xa = key_of(x.a), xb = key_of(x.b), ya = key_of(y.a), yb = key_of(y.b);
     if (xa == ya || xa == yb || xb == ya || xb == yb) continue;   // they share an end already
     double s = 0.0, t = 0.0;
-    if (closest(x.a, x.b, y.a, y.b, &s, &t) > 0.5 * (x.width + y.width)) continue;
+    const double d = closest(x.a, x.b, y.a, y.b, &s, &t);
+    if (d > light) continue;   // S1
+    if (x.level_tie && y.level_tie && std::fabs(tie_h(x) - tie_h(y)) > 0.25 * layer_mm) continue;   // S2
     const Vec3 px{x.a.x + (x.b.x - x.a.x) * s, x.a.y + (x.b.y - x.a.y) * s, x.a.z + (x.b.z - x.a.z) * s};
     const Vec3 py{y.a.x + (y.b.x - y.a.x) * t, y.a.y + (y.b.y - y.a.y) * t, y.a.z + (y.b.z - y.a.z) * t};
-    Vec3 mid{0.5 * (px.x + py.x), 0.5 * (px.y + py.y), 0.5 * (px.z + py.z)};
-    // A crossing within the two half widths of an existing vertex of either bar (an end where two or more bars of
-    // the list meet: a strand's own vertex) is made AT that vertex (the nearest; the first of x.a, x.b, y.a, y.b at
-    // a tie): no new joint a hair beside it. Each of the strand's two bars there crosses the same bar: both now share
-    // the one joint, and the strand stays whole (S1b). A free end is not such a vertex: a bar whose closest point is
-    // its own free end lands on the joint as before.
-    {
-      const Vec3* end[4] = {&x.a, &x.b, &y.a, &y.b};
-      const PointKey key[4] = {xa, xb, ya, yb};
-      const double reach = 0.5 * (x.width + y.width);
-      int which = -1;
-      double best = 0.0;
-      for (int e = 0; e < 4; ++e) {
-        const auto met = ends_at.find(key[e]);
-        if (met == ends_at.end() || met->second < 2) continue;
-        const Vec3& v = *end[e];
-        const double d = std::sqrt((v.x - mid.x) * (v.x - mid.x) + (v.y - mid.y) * (v.y - mid.y) + (v.z - mid.z) * (v.z - mid.z));
-        if (d <= reach && (which < 0 || d < best)) { which = e; best = d; }
-      }
-      if (which >= 0) {
-        mid = *end[which];
-        if (which == 0) s = 0.0; else if (which == 1) s = 1.0; else if (which == 2) t = 0.0; else t = 1.0;
+    by_strands[{std::min(x.strand, y.strand), std::max(x.strand, y.strand)}].push_back(
+        {i, j, s, t, d, Vec3{0.5 * (px.x + py.x), 0.5 * (px.y + py.y), 0.5 * (px.z + py.z)}});
+    ++found;
+  }
+  std::vector<Contact> kept;
+  for (auto& kv : by_strands) {
+    std::vector<Contact>& g = kv.second;
+    std::sort(g.begin(), g.end(), [](const Contact& p, const Contact& q) {
+      return std::tie(p.d, p.i, p.j) < std::tie(q.d, q.i, q.j);
+    });
+    const std::size_t first = kept.size();
+    for (const Contact& c : g) {
+      bool far = true;
+      for (std::size_t k = first; k < kept.size() && far; ++k) far = d3(c.at, kept[k].at) > 10.0 * light;
+      if (far) kept.push_back(c);
+    }
+  }
+  std::sort(kept.begin(), kept.end(), [](const Contact& p, const Contact& q) { return std::tie(p.i, p.j) < std::tie(q.i, q.j); });
+  if (stats) { stats->contacts = found; stats->strand_pairs = by_strands.size(); stats->kept = kept.size(); }
+  int next_strand = -1;   // S7: each link its own strand number, above every strand number here
+  for (const Bar& b : before) next_strand = std::max(next_strand, b.strand);
+  ++next_strand;
+  std::vector<Bar> links;   // S6
+  for (const Contact& c : kept) {
+    const std::size_t i = c.i, j = c.j;
+    const Bar &x = before[i], &y = before[j];
+    const PointKey xa = key_of(x.a), xb = key_of(x.b), ya = key_of(y.a), yb = key_of(y.b);
+    // S6: each bar is cut at its OWN closest point; S3 per bar: onto one of its own ends that is a strand vertex (two or
+    // more bars end there) when within 0.1 x the light width, along that bar only.
+    auto own_cut = [&](const Bar& b, const PointKey& ka, const PointKey& kb, double& u) {
+      Vec3 p{b.a.x + (b.b.x - b.a.x) * u, b.a.y + (b.b.y - b.a.y) * u, b.a.z + (b.b.z - b.a.z) * u};
+      if (u <= 0.0) { u = 0.0; return b.a; }
+      if (u >= 1.0) { u = 1.0; return b.b; }
+      const double reach = 0.1 * light;
+      const double da = d3(p, b.a), db = d3(p, b.b);
+      const auto ma = ends_at.find(ka), mb = ends_at.find(kb);
+      const bool va = ma != ends_at.end() && ma->second >= 2 && da <= reach;
+      const bool vb = mb != ends_at.end() && mb->second >= 2 && db <= reach;
+      if (va && (!vb || da <= db)) { u = 0.0; return b.a; }
+      if (vb) { u = 1.0; return b.b; }
+      return p;
+    };
+    double sx = c.s, sy = c.t;
+    const Vec3 cx = own_cut(x, xa, xb, sx), cy = own_cut(y, ya, yb, sy);
+    const Vec3 jx = joint_at(cx), jy = joint_at(cy);   // within 1e-5 mm of each other: one joint
+    cuts[i].push_back({sx, jx});
+    cuts[j].push_back({sy, jy});
+    if (!(key_of(jx) == key_of(jy)) && d3(jx, jy) > kSame) {   // S6: one straight link between the two cut points
+      Bar l = x;
+      l.a = jx; l.b = jy;
+      // S8: link_width x the thinner of the two (their widths after width by stress), between light and the thicker.
+      l.width = std::max(light, std::min(link_width * std::min(x.width, y.width), std::max(x.width, y.width)));
+      l.end_a = l.end_b = Bar::End::Node;
+      l.into_a = l.into_b = -1;
+      l.piece = false; l.skin = false; l.net = false; l.support = false; l.level_tie = false;
+      l.link = true;
+      l.strand = next_strand++;   // S7: its own strand (the region is the lower-numbered bar's)
+      links.push_back(l);
+      if (stats) {
+        const double len = d3(jx, jy);
+        ++stats->links;
+        stats->links_mm += len;
+        stats->link_max_mm = std::max(stats->link_max_mm, len);
+        if (l.width <= light + 1e-9) ++stats->links_light; else ++stats->links_wider;
+        stats->link_width_max_mm = std::max(stats->link_width_max_mm, l.width);
       }
     }
-    const Vec3 at = joint_at(mid);
-    cuts[i].push_back({s, at});
-    cuts[j].push_back({t, at});
   }
   if (joints.empty()) return 0;
   std::vector<Bar> out;
   out.reserve(n + 2 * joints.size());
+  auto backwards = [&](const Bar& piece, const Bar& own) {
+    const double d = (piece.b.x - piece.a.x) * (own.b.x - own.a.x) + (piece.b.y - piece.a.y) * (own.b.y - own.a.y) +
+                     (piece.b.z - piece.a.z) * (own.b.z - own.a.z);
+    // beyond rounding: a piece square to its bar (two joints at one place along it) is not backwards
+    return d < -1e-9 * std::sqrt(d3(piece.a, piece.b) * d3(piece.a, piece.b) * d3(own.a, own.b) * d3(own.a, own.b));
+  };
   for (std::size_t i = 0; i < n; ++i) {
     Bar bar = before[i];
     std::vector<Cut>& c = cuts[i];
     std::stable_sort(c.begin(), c.end(), [](const Cut& p, const Cut& q) { return p.s < q.s; });
-    // A joint at the bar's own end moves that end onto it: it lands there.
+    // A joint at (or past) the bar's own end moves that end onto it: it lands there.
     std::vector<Vec3> inner;
     for (const Cut& k : c) {
       if (k.s <= 0.0) { bar.a = k.at; bar.end_a = Bar::End::Node; bar.into_a = -1; continue; }
@@ -1018,6 +1098,7 @@ std::size_t split_at_crossings(Bars& bars) {
       if (!inner.empty() && key_of(inner.back()) == key_of(k.at)) continue;
       inner.push_back(k.at);
     }
+    const std::size_t first = out.size();
     std::size_t made = 0;
     Vec3 from = bar.a;
     Bar::End from_end = bar.end_a;
@@ -1035,11 +1116,19 @@ std::size_t split_at_crossings(Bars& bars) {
     }
     if (key_of(from) == key_of(bar.b) && made > 0) {   // the last joint fell on the far end
       out.back().b = bar.b; out.back().end_b = bar.end_b; out.back().into_b = bar.into_b;
-      continue;
+    } else {
+      bar.a = from; bar.end_a = from_end; bar.into_a = from_into;
+      out.push_back(bar);
     }
-    bar.a = from; bar.end_a = from_end; bar.into_a = from_into;
-    out.push_back(bar);
+    if (stats)   // S5: a piece that runs backwards along its own bar; a piece's end off its own bar's line
+      for (std::size_t q = first; q < out.size(); ++q) {
+        stats->backwards += backwards(out[q], before[i]) ? 1 : 0;
+        const double off = std::max(off_bar(before[i], out[q].a), off_bar(before[i], out[q].b));
+        stats->off_line_max_mm = std::max(stats->off_line_max_mm, off);
+        stats->off_line += off > 1e-6 ? 1 : 0;
+      }
   }
+  out.insert(out.end(), links.begin(), links.end());   // S6: the links, after every cut bar
   bars.bars.swap(out);
   return joints.size();
 }

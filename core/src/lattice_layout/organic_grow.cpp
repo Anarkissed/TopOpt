@@ -1466,6 +1466,7 @@ std::vector<Strand> Grower::strands() const {
     }
     s.width_mm.assign(s.points.size(), width_);
     s.tie = L.tie;
+    s.level_tie = L.level_tie;   // S (brief G28)
     double sm = 0.0;
     for (const Vec3& p : s.points) {
       const double v = sep(p);
@@ -1511,7 +1512,7 @@ Grower::Fate Grower::pass() {
   };
   Bars bars = weave_bars(domain_, ss, 1);
   mark(bars, 2, 1);   // reached the bars: not cut at the model's edge
-  split_at_crossings(bars);
+  split_at_crossings(bars, width_, layer_);   // S (brief G28): the light width, as the path judges it
   join_loose_bars(bars, domain_, 1, nullptr);
   const std::vector<int> arrived{region_};   // G11: a vine that reached the part's surface has arrived
   drop_loose_bars(bars, &arrived);
@@ -3129,6 +3130,7 @@ void lay_traced_level_ties(const Domain& domain, int region, const TensorField& 
           Strand s;
           s.region = region;
           s.tie = true;
+          s.level_tie = true;   // S (brief G28)
           s.spacing_mm = strands[ci].spacing_mm;
           for (const Vec3& v : lt.path)
             if (s.points.empty() || dist(s.points.back(), v) > 1e-9) s.points.push_back(v);

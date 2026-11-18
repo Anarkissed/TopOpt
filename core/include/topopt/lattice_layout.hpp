@@ -996,6 +996,12 @@ struct Bar {
   // L2 d (brief G14): a support laid by hold_up_weave under a floating part's underside. J2b never removes a piece that
   // holds one (J2a still applies).
   bool support = false;
+  // S (brief G28): a bar of a level tie's strand (Strand::level_tie): split_at_crossings joins onto its own line only.
+  bool level_tie = false;
+  // S6, S7 (brief G28, the lead's ruling): a LINK made by split_at_crossings between two bars' own closest points (light
+  // width, its own new strand number, the lower-numbered bar's region). Never cut by that step; every later step treats
+  // it as any bar.
+  bool link = false;
 };
 
 // Preview is the spec (reviewer, 2026-11-12): a bar lying flatter than 30 degrees is written to the file as a BRIDGE,
@@ -1044,6 +1050,8 @@ struct Strand {
   int region = 0;
   double spacing_mm = 0.0;
   bool tie = false;   // G9: a Grown transfer tie (read by its tests; the path lays it as any strand)
+  // S (brief G28): a level tie (P, R): every point at one height. split_at_crossings never moves it (Bar::level_tie).
+  bool level_tie = false;
 };
 // L2 (brief G14): what the supports of one Grown area need (hold_up_weave): the kept patches' bottoms and the area's
 // own numbers.
@@ -1071,7 +1079,34 @@ Bars weave_bars(const Domain& domain, const std::vector<Strand>& strands, int th
 // two bars there share the one joint and it stays whole (S1b). Two bars that already share an end are left alone; joints
 // within a hundredth of a micron of each other are one. The same result whatever order the bars were found in.
 // Returns the number of joints made.
-std::size_t split_at_crossings(Bars& bars);
+// S (brief G28; the lead's ruling, weave bars) with S6: every distance is judged by ONE light width `light_mm` for both
+// bars (0 or less: the thinnest bar in the list), never the bars' own (stress-thickened) widths. Two bars (no link)
+// cross when they share no end and their closest approach is at most light_mm; two level ties (Bar::level_tie) whose
+// heights differ by more than a quarter of `layer_mm` do not. Each of the two is cut at ITS OWN closest point, moved
+// onto one of its own ends that is a strand vertex (two or more bars end there) when within 0.1 x light_mm of it, so no
+// bar leaves its line and the cut adds no length. Two cut points within 1e-5 mm are one joint; otherwise ONE straight
+// LINK bar (Bar::link, light width, ends Node, the lower-numbered bar's region, its own new strand number) joins them.
+// S7: only ONE such connection per pair of strands, then one per more than 10 x light_mm along them (CrossingCutStats);
+// two bars of one strand are never joined here. Links are never
+// cut here and take no part in the pair test. `stats`, when given (S5): the largest distance of a piece's end from its
+// own bar's line and how many are over 1e-6 mm; the links made, their summed and longest length; pieces that run
+// backwards along their bar (beyond rounding).
+// S7: contacts found, pairs of strands in contact, contacts kept (one per pair of strands, then one per more than 10 x
+// the light width along them); each link made gets its own strand number above every strand number in the list.
+struct CrossingCutStats {
+  std::size_t contacts = 0, strand_pairs = 0, kept = 0;
+  double off_line_max_mm = 0.0;
+  std::size_t off_line = 0;
+  std::size_t links = 0;
+  double links_mm = 0.0, link_max_mm = 0.0;
+  std::size_t links_light = 0, links_wider = 0;   // S8
+  double link_width_max_mm = 0.0;
+  std::size_t backwards = 0;
+};
+// S8: a link is link_width x the thinner of the two bars' widths, held between light_mm and the thicker bar's width;
+// counted: links at the light width, wider, and the widest.
+std::size_t split_at_crossings(Bars& bars, double light_mm = 0.0, double layer_mm = 0.2,
+                               CrossingCutStats* stats = nullptr, double link_width = 1.0);
 // Rule O2 (one bar per two points): of the bars of `regions` (a weave's), two with the same two ends (each within a
 // hundredth of a micron, either order) are ONE bar, of the wider width. The first in list order is kept, at the widest
 // width of its repeats; each of its ends takes the best-landed tag any of them has there (Solid, then Joined into a bar
@@ -1396,6 +1431,9 @@ class Session {
     std::vector<int> arrived;   // G11 (Grown only): weave regions whose vines that reach the surface have arrived
     std::vector<std::pair<int, double>> prune;   // J2 (brief G12): (Grown region, median asked spacing); empty: off
     std::vector<WeaveHold> hold;   // L2 (brief G14): Grown areas with floating parts' undersides; empty: off
+    // S (brief G28): the light strut width and the layer, for split_at_crossings (0: the thinnest weave bar).
+    double light_mm = 0.0, layer_mm = 0.2;
+    double link_width = 1.0;   // S8: OrganicAsk::link_width
   };
   Outcome lay_with(const Settings& settings, const std::vector<Strand>* strands, int threads, const std::atomic<bool>* stop,
                    const WeaveFinish* finish = nullptr);

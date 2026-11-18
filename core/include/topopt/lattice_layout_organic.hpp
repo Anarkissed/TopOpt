@@ -164,6 +164,10 @@ struct OrganicAsk {
   // O (brief G22): the steepest a crossing vine climbs, in degrees from level (45: F's limit, as before). From 30 (the
   // cone) to 45; only with wall_cross on when not 45. Nothing else about a crossing vine changes.
   double cross_climb_max_deg = 45.0;
+  // S8 (brief G28; the owner, 2026-11-17: "Fix the thin links ... the links need a variable in manual"): a link made by
+  // the cut at crossings is link_width x the thinner of the two bars it joins, held between the light width and the
+  // thicker of the two. 0.5 to 2.0; 1: as thick as the thinner strut. Both Organic modes.
+  double link_width = 1.0;
   // P (brief G23): level ties. tie_level: every transfer tie walks the level part of its direction (not started where
   // that is under 0.2 of the whole), every point at its start's height, welds at that height (a recorded vertex within
   // a quarter layer of it as it is, else the point where the other strand crosses it), ends on its last weld (or in
