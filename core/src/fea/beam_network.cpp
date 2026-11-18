@@ -1,5 +1,6 @@
 #include "topopt/beam_network.hpp"
 #include "topopt/observability.hpp"   // process_memory(): what the certificate cost
+#include "topopt/sparse_ldlt.hpp"     // brief E2, item 1: the direct factorisation
 
 #include <algorithm>
 #include <cassert>
@@ -2396,19 +2397,19 @@ CoupledLatticeSolve solve_coupled_lattice(
 #if defined(TOPOPT_HAVE_ACCELERATE)
   if (pc_sel == "direct" || pc_sel == "cholesky") {
     // lower triangle in coordinate form; Accelerate sums duplicates itself
-    std::vector<int> ri, ci;
-    std::vector<double> va;
-    ri.reserve(static_cast<std::size_t>(A.nnz() / 2 + NF));
-    ci.reserve(ri.capacity());
-    va.reserve(ri.capacity());
+    SymmetricLower lower;
+    lower.n = NF;
+    lower.row.reserve(static_cast<std::size_t>(A.nnz() / 2 + NF));
+    lower.col.reserve(lower.row.capacity());
+    lower.val.reserve(lower.row.capacity());
     for (int i = 0; i < NF; ++i)
       for (int k = A.ptr[static_cast<std::size_t>(i)];
            k < A.ptr[static_cast<std::size_t>(i) + 1]; ++k) {
         const int j = A.idx[static_cast<std::size_t>(k)];
         if (j > i) continue;                       // keep the lower triangle only
-        ri.push_back(i);
-        ci.push_back(j);
-        va.push_back(A.val[static_cast<std::size_t>(k)]);
+        lower.row.push_back(i);
+        lower.col.push_back(j);
+        lower.val.push_back(A.val[static_cast<std::size_t>(k)]);
       }
     // ★ WHAT DOES THE DIAGONAL LOOK LIKE? A Cholesky that aborts with
     // SparseFactorizationFailed hit a non-positive pivot; the diagonal is the first
@@ -2431,19 +2432,6 @@ CoupledLatticeSolve solve_coupled_lattice(
       mark("diagonal max", dmax);
       mark("non-positive diagonals", static_cast<double>(nonpos));
     }
-    SparseAttributes_t attr{};
-    attr.kind = SparseSymmetric;
-    attr.triangle = SparseLowerTriangle;
-    SparseMatrix_Double Amat = SparseConvertFromCoordinate(
-        NF, NF, static_cast<long>(va.size()), 1, attr, ri.data(), ci.data(), va.data());
-    SparseSymbolicFactorOptions sopt{};
-    sopt.control = SparseDefaultControl;
-    sopt.orderMethod = SparseOrderAMD;   // fill-reducing; the RCM order above is for CG
-    sopt.order = nullptr;
-    sopt.ignoreRowsAndColumns = nullptr;
-    sopt.malloc = malloc;
-    sopt.free = free;
-    sopt.reportError = nullptr;
     // ★ LDLT BY DEFAULT, AND THAT IS A MEASUREMENT. Cholesky is the cheaper
     // factorisation and the obvious first choice for a stiffness matrix, but it
     // needs STRICT positive definiteness and it refused on every real model
@@ -2453,81 +2441,49 @@ CoupledLatticeSolve solve_coupled_lattice(
     // marginally definite, not indefinite: rounding at a pivot, not a mechanism.
     // Trying it first therefore buys nothing and costs the whole failed elimination
     // -- 0.45 s at 303k dof, 42.32 s at 1.05M. LDLT needs only symmetry, is exact,
-    // and the residual gate below is what actually decides the answer is kept.
+    // and the residual gate is what actually decides the answer is kept.
     // TOPOPT_BEAM_PRECON=cholesky to try the other one and re-measure.
-    const bool try_cholesky = (pc_env && std::string(pc_env) == "cholesky");
-    SparseFactorization_t ftype =
-        try_cholesky ? SparseFactorizationCholesky : SparseFactorizationLDLT;
-    SparseOpaqueSymbolicFactorization sym = SparseFactor(ftype, Amat.structure, sopt);
-    if (sym.status != SparseStatusOK)
-      mark("symbolic factorization FAILED", static_cast<double>(sym.status));
-    if (sym.status == SparseStatusOK) {
-      direct_factor_gb = static_cast<double>(sym.factorSize_Double) / (1024.0 * 1024.0 * 1024.0);
-      mark("symbolic factorization", direct_factor_gb);
-      constexpr double kMaxFactorGb = 24.0;
-      if (direct_factor_gb > kMaxFactorGb)
-        mark("factor too large, falling back to CG", direct_factor_gb);
-      if (direct_factor_gb <= kMaxFactorGb) {
-        SparseNumericFactorOptions nopt{};
-        nopt.control = SparseDefaultControl;
-        nopt.scalingMethod = SparseScalingDefault;
-        nopt.scaling = nullptr;
-        nopt.pivotTolerance = 0.0;
-        nopt.zeroTolerance = 0.0;
-        SparseOpaqueFactorization_Double fac = SparseFactor(sym, Amat, nopt);
-        const char* which = try_cholesky ? "Cholesky" : "LDLT";
-        // ★ LDLT WHEN CHOLESKY REFUSES. Cholesky needs strict positive
-        // definiteness; LDLT only needs symmetry, and it is just as exact and
-        // essentially as fast. On the real part Cholesky aborts with a non-positive
-        // pivot (SparseFactorizationFailed, 0.45 s in) while conjugate gradients
-        // still descends, so the matrix is at worst marginally definite -- a
-        // rounding-level pivot, not a mechanism. LDLT pivots through that instead of
-        // giving up, and the residual measured below is what decides whether the
-        // answer is kept, so nothing rests on which factorisation ran.
-        if (fac.status != SparseStatusOK && try_cholesky) {
-          mark("numeric Cholesky refused, trying LDLT", static_cast<double>(fac.status));
-          SparseCleanup(fac);
-          SparseCleanup(sym);
-          sym = SparseFactor(SparseFactorizationLDLT, Amat.structure, sopt);
-          fac = SparseFactor(sym, Amat, nopt);
-          which = "LDLT";
-          if (fac.status != SparseStatusOK)
-            mark("numeric LDLT FAILED", static_cast<double>(fac.status));
-        }
-        if (fac.status == SparseStatusOK) {
-          mark("numeric factorization", direct_factor_gb);
-          u_direct = Fp;
-          DenseVector_Double xb{NF, u_direct.data()};
-          SparseSolve(fac, xb);
-          // ★ MEASURE THE ANSWER, DO NOT TRUST IT. A direct solve reports no
-          // residual of its own, so compute ||b - Ax|| / ||b|| here; a factorisation
-          // that silently lost accuracy must not pass as an exact answer.
-          double bn = 0.0, rr = 0.0;
-          for (int i = 0; i < NF; ++i) {
-            double ax = 0.0;
-            for (int k = A.ptr[static_cast<std::size_t>(i)];
-                 k < A.ptr[static_cast<std::size_t>(i) + 1]; ++k)
-              ax += A.val[static_cast<std::size_t>(k)] *
-                    u_direct[static_cast<std::size_t>(A.idx[static_cast<std::size_t>(k)])];
-            const double b = Fp[static_cast<std::size_t>(i)];
-            bn += b * b;
-            rr += (b - ax) * (b - ax);
-          }
-          direct_rn = bn > 0.0 ? std::sqrt(rr) / std::sqrt(bn) : 0.0;
-          // ★ A DIRECT SOLVE REPORTS NO RESIDUAL OF ITS OWN, SO GATE ON THE MEASURED
-          // ONE. Accepting the answer because the factorisation returned OK is how a
-          // wrong displacement field passes as exact. If it is not small, fall
-          // through to CG rather than ship it.
-          direct_ok = direct_rn < kDirectAcceptResidual;
-          direct_which = which;
-          mark(direct_ok ? "direct solve accepted" : "direct solve REJECTED (residual)",
-               direct_rn);
-        }
-        SparseCleanup(fac);
+    // Brief E2, item 1: the factorisation itself is sparse_ldlt_solve (sparse_ldlt.hpp), the same calls it was here.
+    SparseLdltOptions lo;
+    lo.backend = SparseLdltBackend::Accelerate;
+    lo.memory_limit_gb = 24.0;   // the part whose fill-in would not fit falls back to CG
+    lo.try_cholesky = (pc_env && std::string(pc_env) == "cholesky");
+    lo.accept_residual = kDirectAcceptResidual;
+    // ★ MEASURE THE ANSWER, DO NOT TRUST IT: ||b - Ax|| / ||b|| on the full matrix, as before.
+    lo.residual = [&](const std::vector<double>& x) {
+      double bn = 0.0, rr = 0.0;
+      for (int i = 0; i < NF; ++i) {
+        double ax = 0.0;
+        for (int k = A.ptr[static_cast<std::size_t>(i)];
+             k < A.ptr[static_cast<std::size_t>(i) + 1]; ++k)
+          ax += A.val[static_cast<std::size_t>(k)] *
+                x[static_cast<std::size_t>(A.idx[static_cast<std::size_t>(k)])];
+        const double b = Fp[static_cast<std::size_t>(i)];
+        bn += b * b;
+        rr += (b - ax) * (b - ax);
       }
-      SparseCleanup(sym);
+      return bn > 0.0 ? std::sqrt(rr) / std::sqrt(bn) : 0.0;
+    };
+    SparseLdltResult sr = sparse_ldlt_solve(lower, Fp, lo);
+    if (!sr.symbolic_ok) mark("symbolic factorization FAILED", static_cast<double>(sr.status));
+    if (sr.symbolic_ok) {
+      direct_factor_gb = sr.factor_gb;
+      mark("symbolic factorization", direct_factor_gb);
+      if (sr.too_large) mark("factor too large, falling back to CG", direct_factor_gb);
+      if (sr.cholesky_refused) mark("numeric Cholesky refused, trying LDLT", static_cast<double>(sr.status));
+      if (!sr.too_large && !sr.numeric_ok && sr.cholesky_refused)
+        mark("numeric LDLT FAILED", static_cast<double>(sr.status));
+      if (sr.numeric_ok) {
+        mark("numeric factorization", direct_factor_gb);
+        u_direct = std::move(sr.x);
+        direct_rn = sr.residual;
+        // ★ A DIRECT SOLVE REPORTS NO RESIDUAL OF ITS OWN, SO GATE ON THE MEASURED
+        // ONE. If it is not small, fall through to CG rather than ship it.
+        direct_ok = sr.ok;
+        direct_which = sr.method == "Cholesky" ? "Cholesky" : "LDLT";
+        mark(direct_ok ? "direct solve accepted" : "direct solve REJECTED (residual)", direct_rn);
+      }
     }
-    SparseCleanup(Amat);
     if (direct_ok) {
       out.preconditioner = std::string("direct sparse ") + direct_which +
                            " (Accelerate, AMD, factor " +

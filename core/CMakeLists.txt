@@ -155,6 +155,8 @@ add_library(topopt
   src/simp/observability.cpp
   src/fea/hex_element.cpp
   src/fea/beam_network.cpp
+  # Brief E2, item 1: the sparse symmetric solve as one call (Accelerate LDLT, Eigen SimplicialLDLT elsewhere).
+  src/fea/sparse_ldlt.cpp
   src/fea/lattice.cpp
   src/fea/strut_cell.cpp
   src/fea/lattice_types.cpp
@@ -354,6 +356,8 @@ if(Eigen3_FOUND)
   # driver. CI has Eigen (DEPS=ON), so it always builds in CI.
   target_sources(topopt PRIVATE src/simp/production.cpp)
   target_link_libraries(topopt PRIVATE Eigen3::Eigen)
+  # Brief E2, item 1: sparse_ldlt.cpp's Eigen SimplicialLDLT (the solve where Accelerate is absent, or asked).
+  target_compile_definitions(topopt PRIVATE TOPOPT_HAVE_EIGEN)
 endif()
 
 # 3MF export/import (M6.1) requires lib3mf. Compile it into the library and link
@@ -713,6 +717,11 @@ add_test(NAME frame_element COMMAND test_frame_element)
 add_executable(test_beam_network tests/unit/test_beam_network.cpp)
 target_link_libraries(test_beam_network PRIVATE topopt)
 add_test(NAME beam_network COMMAND test_beam_network)
+
+# Brief E2, item 1: the sparse symmetric solve as one call; Accelerate and Eigen agree on a 20,000-beam frame.
+add_executable(test_sparse_ldlt tests/unit/test_sparse_ldlt.cpp)
+target_link_libraries(test_sparse_ldlt PRIVATE topopt)
+add_test(NAME sparse_ldlt COMMAND test_sparse_ldlt)
 
 # The DKT plate-bending triangle. Pure C++/std: rigid-body modes, the
 # constant-curvature patch test, and the paper's own plate benchmarks.
