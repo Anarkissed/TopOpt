@@ -61,6 +61,7 @@ void GrowReport::add(const GrowReport& o) {
   cut_outside_mm += o.cut_outside_mm; cut_unsupported_mm += o.cut_unsupported_mm; cut_nothing_mm += o.cut_nothing_mm;
   cut_repeat_mm += o.cut_repeat_mm;
   strands += o.strands; ms += o.ms;
+  wall_thirds.insert(wall_thirds.end(), o.wall_thirds.begin(), o.wall_thirds.end());   // M
 }
 
 namespace {
@@ -326,6 +327,23 @@ class Grower {
           if (sp_.candidate[f]) return sp_.spacing_mm[f];
         }
     return sep_hi_;
+  }
+  // M (brief G19): O12's stress measure f (0 .. 1) at p, read exactly as sep reads the spacing: the voxel's own; off the
+  // candidates, the first candidate neighbour's (in axis order); else 0 (sep's widest, the light end).
+  double stress_f(const Vec3& p) const {
+    int i, j, k;
+    if (!voxel(p, i, j, k)) return 0.0;
+    const std::size_t e = field_.index(i, j, k);
+    if (sp_.candidate[e]) return sp_.stress_f[e];
+    for (int dk = -1; dk <= 1; ++dk)
+      for (int dj = -1; dj <= 1; ++dj)
+        for (int di = -1; di <= 1; ++di) {
+          const int a = i + di, b = j + dj, c = k + dk;
+          if (a < 0 || b < 0 || c < 0 || a >= field_.nx || b >= field_.ny || c >= field_.nz) continue;
+          const std::size_t f = field_.index(a, b, c);
+          if (sp_.candidate[f]) return sp_.stress_f[f];
+        }
+    return 0.0;
   }
   bool frame(const Vec3& p, double ev[3], Vec3 vec[3]) const {
     int i, j, k;
@@ -1529,9 +1547,37 @@ void Grower::feet(const std::vector<int>& parent, const std::vector<char>& branc
   std::vector<std::size_t> removed;
   std::vector<Vec3> kept;   // the kept feet's floor points (wall: the kept wall roots' wall points)
   if (wall) rep_.wall_roots += all.size();
+  // M: the wall gap by stress (on when wall_gap_heavy is above 0), and the counts by third, rule M off against on.
+  const bool by_stress = wall && ask_.wall_gap_heavy > 0.0;
+  auto third = [](double f) { return f < 1.0 / 3.0 ? 0 : (f < 2.0 / 3.0 ? 1 : 2); };
+  auto exempt = [&](const Vec3& fp) {   // L2 c's zone, as below
+    const double R2 = sp_.hold_reach_mm * sp_.hold_reach_mm;
+    for (const Vec3& c : sp_.hold_centres) {
+      const Vec3 d = sub(c, fp);
+      if (dot(d, d) <= R2) return true;
+    }
+    return false;
+  };
+  GrowReport::WallThirds thirds;
+  thirds.region = region_;
+  if (wall) {   // rule M off: the same pass with wall_gap everywhere, counted only
+    std::vector<Vec3> kept_off;
+    for (const Foot& f : all) {
+      const Vec3 fp = lines_[f.line].wall_pt;
+      const int t = third(stress_f(fp));
+      ++thirds.roots[t];
+      const double lim = ask_.wall_gap * sep(fp);
+      bool near = false;
+      for (const Vec3& k : kept_off) near = near || dist(k, fp) < lim;
+      if (near && !sp_.hold_centres.empty() && exempt(fp)) near = false;
+      if (!near) { kept_off.push_back(fp); ++thirds.kept_off[t]; }
+    }
+  }
   for (const Foot& f : all) {
     const Vec3 fp = wall ? lines_[f.line].wall_pt : lines_[f.line].floor_pt;
-    const double lim = (wall ? ask_.wall_gap : ask_.foot_gap) * sep(fp);
+    const double gap = by_stress ? ask_.wall_gap + (ask_.wall_gap_heavy - ask_.wall_gap) * stress_f(fp)
+                                 : (wall ? ask_.wall_gap : ask_.foot_gap);   // M
+    const double lim = gap * sep(fp);
     bool near = false;
     for (const Vec3& k : kept) near = near || (wall ? dist(k, fp) : len(level(sub(k, fp)))) < lim;
     if (near && !sp_.hold_centres.empty()) {   // L2 c: never thinned within the reach of a floating part's underside
@@ -1548,8 +1594,10 @@ void Grower::feet(const std::vector<int>& parent, const std::vector<char>& branc
     } else {
       kept.push_back(fp);
       ++(wall ? rep_.wall_roots_kept : rep_.feet_kept);
+      if (wall) ++thirds.kept_on[third(stress_f(fp))];   // M
     }
   }
+  if (wall) rep_.wall_thirds.push_back(thirds);   // M
   if (removed.empty()) return;
   std::sort(removed.begin(), removed.end());
   std::map<std::size_t, std::size_t> slot;   // a removed foot's line -> its place in `removed`
@@ -2441,6 +2489,14 @@ bool Grower::setup() {
   if (!(ask_.seed_stride > 0.0) || !std::isfinite(ask_.seed_stride))
     throw std::invalid_argument("grow_strands: seed_stride must be above 0");
   if (!std::isfinite(ask_.foot_gap)) throw std::invalid_argument("grow_strands: foot_gap must be a number");
+  if (!std::isfinite(ask_.wall_gap_heavy))
+    throw std::invalid_argument("grow_strands: wall_gap_heavy must be a number (0 or less: off)");   // M
+  if (ask_.wall_gap_heavy > 0.0 && !(ask_.wall_gap > 0.0))
+    throw std::invalid_argument("grow_strands: wall_gap_heavy needs wall_gap");   // M
+  if (ask_.wall_gap_heavy > ask_.wall_gap && ask_.wall_gap > 0.0)
+    throw std::invalid_argument("grow_strands: wall_gap_heavy must be at most wall_gap");   // M
+  if (ask_.wall_gap_heavy > 0.0 && (ask_.spacing_mm > 0.0 || !(ask_.spacing_max_mm > ask_.spacing_min_mm)))
+    throw std::invalid_argument("grow_strands: wall_gap_heavy needs the spacing as a range (O12's measure)");   // M
   if (!(ask_.void_ratio > 0.0) || !std::isfinite(ask_.void_ratio))
     throw std::invalid_argument("grow_strands: void_ratio must be above 0");   // E
   if (ask_.wall_cross < 0 || ask_.wall_cross > 2)

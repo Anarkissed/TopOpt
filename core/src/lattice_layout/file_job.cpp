@@ -206,7 +206,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "organic_run_follow", "organic_run_pull", "organic_run_seek", "organic_run_min", "organic_root_gap",
        "organic_auto", "organic_width_heavy_mm", "organic_member_cap", "organic_prune", "organic_bed_floor_mm",
        "organic_shape_reach", "organic_hold_parts", "organic_part_reach_mm",
-       "organic_part_support_mm", "organic_part_to_floor"},
+       "organic_part_support_mm", "organic_part_to_floor", "organic_wall_gap_heavy"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -454,6 +454,16 @@ OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::str
   a.wall_connect = flag(in, "organic_wall_connect", a.wall_connect, w);   // E (off when not given)
   a.wall_gap = num(in, "organic_wall_gap", a.wall_gap, w);   // E: 0 or less (and when not given): off
   if (!std::isfinite(a.wall_gap)) json::fail(w + ".organic_wall_gap", "must be a number (0 or less: off)");
+  a.wall_gap_heavy = num(in, "organic_wall_gap_heavy", a.wall_gap_heavy, w);   // M: 0 or less (and when not given): off
+  if (!std::isfinite(a.wall_gap_heavy))
+    json::fail(w + ".organic_wall_gap_heavy", "must be a number (0 or less: off)");
+  if (a.wall_gap_heavy > 0.0 && !(a.wall_gap > 0.0))
+    json::fail(w + ".organic_wall_gap_heavy", "needs organic_wall_gap on (above 0)");
+  if (a.wall_gap_heavy > 0.0 && a.wall_gap_heavy > a.wall_gap)
+    json::fail(w + ".organic_wall_gap_heavy", "must be at most organic_wall_gap");
+  if (a.wall_gap_heavy > 0.0 && (a.spacing_mm > 0.0 || !(a.spacing_max_mm > a.spacing_min_mm)))
+    json::fail(w + ".organic_wall_gap_heavy", "needs the spacing as a range (organic_spacing_min_mm below "
+                                              "organic_spacing_max_mm): it follows that range's stress measure");
   // F (brief G7, a try key): crossing vines (0 when not given: off).
   const double cross = num(in, "organic_wall_cross", a.wall_cross, w);
   if (!(cross == 0.0 || cross == 1.0 || cross == 2.0)) json::fail(w + ".organic_wall_cross", "must be 0, 1 or 2");
@@ -1538,6 +1548,22 @@ std::string file_result_json(const FileResult& r) {
   if (r.grown) {
     // G12: written only for Grown, so a Traced file's result is as it was.
     const GrowReport& g = *r.grown;
+    std::string wt;   // M: per area, the wall roots by third of the stress, kept with rule M off and as run
+    if (!g.wall_thirds.empty()) {
+      wt = "\"wall_thirds\": [";
+      for (std::size_t i = 0; i < g.wall_thirds.size(); ++i) {
+        const GrowReport::WallThirds& x = g.wall_thirds[i];
+        char tb[320];
+        std::snprintf(tb, sizeof tb,
+                      "%s{\"area\": %d, \"roots\": [%llu, %llu, %llu], \"kept_off\": [%llu, %llu, %llu], "
+                      "\"kept_on\": [%llu, %llu, %llu]}",
+                      i ? ", " : "", x.region, count(x.roots[0]), count(x.roots[1]), count(x.roots[2]),
+                      count(x.kept_off[0]), count(x.kept_off[1]), count(x.kept_off[2]), count(x.kept_on[0]),
+                      count(x.kept_on[1]), count(x.kept_on[2]));
+        wt += tb;
+      }
+      wt += "],\n    ";
+    }
     char gb[4096];
     std::snprintf(gb, sizeof gb,
                   "  \"grown\": {\"strands\": %llu, \"grown_mm\": %.9g, \"kept_mm\": %.9g, \"cut_mm\": {\"outside\": %.9g, "
@@ -1551,7 +1577,7 @@ std::string file_result_json(const FileResult& r) {
                   "    \"bare_before\": %.9g, \"bare_after\": %.9g, \"reseed_voids\": %llu, \"reseed_landed\": %llu, "
                   "\"reseed_failed\": %llu, \"reseed_mm\": %.9g,\n"
                   "    \"ties_seeded\": %llu, \"ties_laid\": %llu, \"ties_refused_minor\": %llu, \"ties_refused_reach\": %llu, "
-                  "\"ms\": %.1f},\n",
+                  "%s\"ms\": %.1f},\n",
                   count(g.strands), g.grown_mm, g.kept_mm, g.cut_outside_mm, g.cut_unsupported_mm, g.cut_nothing_mm,
                   g.cut_repeat_mm, count(g.seeds_floor), count(g.seeds_wall), count(g.seeds_refused_support),
                   count(g.strands_grown), count(g.steps), count(g.clamped), count(g.tips), count(g.tip_budget_hit),
@@ -1560,7 +1586,7 @@ std::string file_result_json(const FileResult& r) {
                   count(g.branches_grown), count(g.links), count(g.refused_region), count(g.refused_support),
                   count(g.refused_crowded), g.bare_before, g.bare_after, count(g.reseed_voids), count(g.reseed_landed),
                   count(g.reseed_failed), g.reseed_mm, count(g.ties_seeded), count(g.ties_laid),
-                  count(g.ties_refused_minor), count(g.ties_refused_reach), g.ms);
+                  count(g.ties_refused_minor), count(g.ties_refused_reach), wt.c_str(), g.ms);
     o += gb;
   }
   std::snprintf(b, sizeof b,

@@ -143,6 +143,12 @@ struct OrganicAsk {
   // running more than twice the area's depth ends it at its last joint, or refuses it with none (false: as before).
   double part_support_mm = 0.0;
   bool part_to_floor = false;
+  // M (brief G19; the owner, 2026-11-16: "Could wall seeding be stress based?"): wall_gap_heavy above 0: a wall root's
+  // gap is wall_gap + (wall_gap_heavy - wall_gap) x f, f (0 .. 1) O12's own stress measure at its wall point
+  // (OrganicSpacing::stress_f, read as sep reads the spacing); so wall_gap where the stress is light, wall_gap_heavy
+  // where it is heaviest. 0 or less: off (wall_gap everywhere, as before). Needs wall_gap on, at most wall_gap, and
+  // the spacing as a range (O12's measure exists only then). Feet (foot_gap) and L2 c are not changed.
+  double wall_gap_heavy = 0.0;
 };
 
 // J2 (brief G12), the pruning of a Grown area's weave bars, for each (region, median asked spacing) of `areas`:
@@ -249,6 +255,9 @@ struct OrganicSpacing {
   std::size_t candidates = 0;
   double reference_mpa = 0.0;           // the reference used (stated, or the weave's percentile)
   std::size_t shape_fit_tightened = 0;  // O13: candidates the shape fit tightened
+  // M (brief G19): per voxel, O12's 0 .. 1 stress measure f for a candidate (the f the spacing hi - (hi - lo) x f was
+  // made from, before O13 and L2 change the spacing); 0 elsewhere, and 0 everywhere with one spacing.
+  std::vector<double> stress_f;
   // L2 a, b (OrganicAsk::hold_parts; all empty or 0 when off; brief G15). The FLOATING PIECES of the part, found layer
   // by layer from the bed on the field's grid (see organic_spacing): solid voxels not grounded, 26-connected, 20 mm3 or
   // more (smaller ones counted in hold_small_patches). Per kept piece: every voxel's centre, its volume and box; its
@@ -390,6 +399,14 @@ struct GrowReport {
   double cut_outside_mm = 0.0, cut_unsupported_mm = 0.0, cut_nothing_mm = 0.0, cut_repeat_mm = 0.0;
   std::size_t strands = 0;      // returned
   double ms = 0.0;
+  // M (brief G19): per area, its wall roots that competed by third of O12's measure f at the wall point (light: f
+  // under 1/3, middle, heavy: 2/3 and up), and of them those kept with rule M off (wall_gap everywhere) and as run
+  // (on when wall_gap_heavy is above 0; then equal to kept_off when off). Only with wall_gap on.
+  struct WallThirds {
+    int region = 0;
+    std::size_t roots[3] = {0, 0, 0}, kept_off[3] = {0, 0, 0}, kept_on[3] = {0, 0, 0};
+  };
+  std::vector<WallThirds> wall_thirds;
   void add(const GrowReport& o);
 };
 

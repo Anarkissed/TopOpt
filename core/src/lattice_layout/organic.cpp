@@ -139,6 +139,7 @@ OrganicSpacing spacing_core(const Domain& domain, int region, const TensorField&
   const std::size_t n = static_cast<std::size_t>(field.nx) * field.ny * field.nz;
   out.candidate.assign(n, 0);
   out.spacing_mm.assign(n, 0.0);
+  out.stress_f.assign(n, 0.0);   // M
   if (solid) solid->assign(n, 0);
   std::vector<char> weave_ids;   // by region id: is it a weave region
   for (const Region& r : domain.spec().regions)
@@ -204,6 +205,7 @@ OrganicSpacing spacing_core(const Domain& domain, int region, const TensorField&
     double f = span > 0.0 ? (g[e] - g_lo) / span : 0.0;
     f = std::pow(std::min(1.0, std::max(0.0, f)), kAestheticOpenExponent);   // run_organic_step's f_exponent, on
     out.spacing_mm[e] = hi - (hi - lo) * f;
+    out.stress_f[e] = f;   // M: O12's measure, kept
   }
   if (!ask.shape_fit) return out;
   // O13: the steps to the weave's outline (two passes over the faces' neighbours; a voxel on the grid's face is one
