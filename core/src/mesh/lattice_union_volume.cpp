@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <unordered_map>
 #include <vector>
 
@@ -177,8 +178,15 @@ LatticeUnionVolume lattice_union_volume(const std::vector<OrganicSpan>& spans,
 // ── ★ THE UNION, PER VOXEL (see the header for why it is not sampled) ─────────
 std::vector<double> lattice_union_voxel_volume(const std::vector<OrganicSpan>& spans,
                                                const VoxelGrid& grid, int subdiv) {
+  return lattice_union_voxel_volume(spans, grid, subdiv, {}, nullptr);
+}
+
+std::vector<double> lattice_union_voxel_volume(const std::vector<OrganicSpan>& spans, const VoxelGrid& grid,
+                                               int subdiv, const std::function<bool(std::size_t, int)>& skip,
+                                               std::vector<double>* skipped) {
   const std::size_t n = grid.voxel_count();
   std::vector<double> out(n, 0.0);
+  if (skipped) skipped->assign(n, 0.0);
   const int k = subdiv < 1 ? 1 : (subdiv > 32 ? 32 : subdiv);
   const double h = grid.spacing;
   if (!(h > 0.0) || spans.empty()) return out;
@@ -262,15 +270,20 @@ std::vector<double> lattice_union_voxel_volume(const std::vector<OrganicSpan>& s
         if (!touched[e]) continue;
         const Vec3 lo{grid.origin.x + ii * h, grid.origin.y + jj * h,
                       grid.origin.z + kk * h};
-        int hit = 0;
+        int hit = 0, hit_skipped = 0;
         for (int a = 0; a < k; ++a)
           for (int b = 0; b < k; ++b)
             for (int c = 0; c < k; ++c) {
               const Vec3 p{lo.x + (a + 0.5) * h / k, lo.y + (b + 0.5) * h / k,
                            lo.z + (c + 0.5) * h / k};
+              if (skip && skip(e, (a * k + b) * k + c)) {
+                if (skipped && inside(p)) ++hit_skipped;
+                continue;
+              }
               if (inside(p)) ++hit;
             }
         out[e] = hit * sub_vol;
+        if (skipped) (*skipped)[e] = hit_skipped * sub_vol;
       }
   return out;
 }
