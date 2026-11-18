@@ -227,7 +227,7 @@ $$\mathbf u(\mathbf X)=\frac{1}{|V|}\sum_{e\in V}\bar{\mathbf u}_e,\qquad V=\{e:
 
 ($\rho_{\text{drive}}$ = {{frame_drive_share}}; $\mathbf U$ trilinear at $\mathbf X$ when $V$ is empty). Its translations are fixed to it. A node with an end on the bed floor (the domain says BedFloor there) reads at $\mathbf X+$ {{frame_floor_shift_voxels}} $h\,\mathbf n$ instead; with {{frame_floor_free}} it is not a solid node.
 
-**The Organic verdict.** The solid: $M=\min\!\big(\sigma_y/\max\sigma_{vm},\ k_z\sigma_y/\max t\big)$ over the voxels with solid share $\ge$ {{printed_threshold}}, $M_{\text{eff}}=M\,f_{\text{infill}}$; fail `solid_margin` when $M_{\text{eff}}<S$. Install 3's voxel load-path test is not applied (written as `voxel_load_path`). The load path: fail `no_load_path` when any undriven node within the load reach of a loaded grid node is on a part of the frame with no solid node (`loaded_nodes_undriven`).
+**The Organic verdict.** The solid: $M=\min\!\big(\sigma_y/\max\sigma_{vm},\ k_z\sigma_y/\max t\big)$ over the voxels with solid share $\ge$ {{printed_threshold}}, $M_{\text{eff}}$ by Install 3's gate (the infill curve; with {{width_aware_knockdown}} the per-voxel wall rescue on the member width of the solid share); fail `solid_margin` when $M_{\text{eff}}<S$. `passes_at_infill_percent`: the least whole infill $p\le100$ with $M_{\text{eff}}(p)\ge S$, the other print settings unchanged (null: none). Install 3's voxel load-path test is not applied (written as `voxel_load_path`). The load path: fail `no_load_path` when any undriven node within the load reach of a loaded grid node is on a part of the frame with no solid node (`loaded_nodes_undriven`).
 
 ### The load on the frame
 

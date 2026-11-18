@@ -582,11 +582,29 @@ int main() {
     // judged on the frame (Install 3's voxel load-path test not applied); each weakest strut says what drives its ends.
     CHECK(has(b, "\"solid_margin\": {\"worst_case\": ") && has(b, "\"loaded_nodes_undriven\": 0") && has(b, "\"ends\": [{\"at\": "));
     CHECK(!has(b, "\"fail_reason\": \"no_load_path\""));
+    // passes_at_infill_percent: the lowest whole infill at which the solid's effective margin reaches the safety margin.
+    CHECK(has(b, "\"passes_at_infill_percent\": ") && !has(b, "\"passes_at_infill_percent\": null"));
+    {   // width_aware_knockdown is honoured as Install 3 honours it: at 20 % infill with two 0.45 mm walls the setting
+        // changes the solid's effective margin (the walls rescue thin members).
+      const auto sparse = [&](const std::string& settings) {
+        std::string j = strength_job(f, 20.0, "lattice_part", "block.stl", -1, settings);
+        j.replace(j.find("\"minimize_plastic\": true,"), 25,
+                  "\"minimize_plastic\": true, \"infill_percent\": 20, \"wall_loops\": 2, \"wall_line_width_mm\": 0.45,");
+        return j;
+      };
+      const std::string sb = block(run("organic_scalar", fj, sparse("")).json);
+      const std::string wb2 = block(run("organic_wa", fj, sparse("{\"width_aware_knockdown\": true}")).json);
+      std::printf("[organic width-aware] effective %.6g (scalar %.6g), passes at %.0f %% (scalar %.0f %%)\n",
+                  num_after(wb2, "effective"), num_after(sb, "effective"), num_after(wb2, "passes_at_infill_percent"),
+                  num_after(sb, "passes_at_infill_percent"));
+      CHECK(has(wb2, "\"width_aware_knockdown\": 1") && num_after(wb2, "effective") > num_after(sb, "effective"));
+    }
     {
       const Run heavy = run("organic_heavy", fj, strength_job(f, 2.0e6));
       const std::string hb2 = block(heavy.json);
       std::printf("[organic heavy] %s\n", hb2.substr(hb2.find("\"verdict\""), 120).c_str());
       CHECK(heavy.r.ok && has(hb2, "\"verdict\": \"fail\"") && has(hb2, "\"fail_reason\": \"solid_margin\""));
+      CHECK(has(hb2, "\"passes_at_infill_percent\": null"));   // not even solid infill holds 2e6 N
     }
 
     // ── §10 (brief E2, item 12) the strengthen rounds as one job: a heavy load (struts under the safety margin), the
@@ -618,6 +636,7 @@ int main() {
       CHECK(exists(kDir + "/strengthen" + x));
     CHECK(has(sjson, "\"round\": 0") && has(sjson, "\"round\": 1") && has(sjson, "\"wrote\": {\"strengthened\": \"r1/strengthened.json\""));
     CHECK(num_after(sjson, "under_safety") > 0);   // round 0 had struts under the safety margin
+    CHECK(has(sjson, "\"bars_geometry\": \"") && has(sjson, "\"struts_at_upper_width\": "));
     // The reference stated is the one the first lay resolved, and reads back as the same double.
     {
       TensorField back;

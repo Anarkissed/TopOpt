@@ -14,6 +14,7 @@
 #include "topopt/stepped_plan.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <deque>
 #include <array>
 #include <cassert>
@@ -16078,6 +16079,7 @@ struct OrganicCheckRun {
   StressMargin solid_margin;              // over the voxels at least printed_threshold solid
   double solid_margin_effective = 0.0, solid_vm = 0.0, solid_tension = 0.0;
   std::size_t solid_voxels = 0;
+  int passes_at_infill_percent = -1;      // the lowest whole infill percent at which the solid passes; -1: none
 };
 
 OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain, const ll::Bars& layout_bars,
@@ -16181,23 +16183,52 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
   // is at least printed_threshold (the lattice's voxels are the frame's to judge), against the safety margin. Install 3's
   // load-path test of the voxel solve is not applied: it reads sparse lattice voxels as no material. The load path is
   // judged on the frame: a frame node within the load's reach on a piece with no driven node.
+  // The knockdown is Install 3's (knockdown_spec_for: the infill curve, and with width_aware_knockdown the per-voxel
+  // wall rescue on the member width, measured as analyze_fixed_design measures it, here on the solid share).
   double solid_vm = 0.0;
   std::size_t solid_voxels = 0;
+  std::vector<double> s_vm, s_width;   // per solid voxel: von Mises, member width (width-aware only)
   {
     const std::size_t nv = cert_grid.voxel_count();
     std::vector<std::array<double, 6>> sig(nv, std::array<double, 6>{0.0, 0.0, 0.0, 0.0, 0.0, 0.0});
+    std::vector<double> width;
+    if (knockdown.width_aware) {
+      std::vector<double> solid_share(nv, 0.0);
+      for (std::size_t e = 0; e < nv; ++e) solid_share[e] = in_part[e] ? static_cast<double>(fm.solid[e]) : 0.0;
+      width = local_member_thickness_mm(cert_grid, solid_share, printed_iso, knobs.thickness_cap_voxels);
+    }
     for (std::size_t e = 0; e < nv; ++e) {
       if (!in_part[e] || !(static_cast<double>(fm.solid[e]) >= printed_iso)) continue;
       ++solid_voxels;
-      if (e < a.von_mises_field.size()) solid_vm = std::max(solid_vm, a.von_mises_field[e]);
+      const double vm = e < a.von_mises_field.size() ? a.von_mises_field[e] : 0.0;
+      solid_vm = std::max(solid_vm, vm);
+      if (knockdown.width_aware) {
+        s_vm.push_back(vm);
+        s_width.push_back(width[e]);
+      }
       if (6 * e + 5 < a.stress_tensor_field.size())
         for (int q = 0; q < 6; ++q) sig[e][static_cast<std::size_t>(q)] = a.stress_tensor_field[6 * e + static_cast<std::size_t>(q)];
     }
     R.solid_tension = solid_voxels ? max_interlayer_tension(cert_grid, sig, build_dir) : 0.0;
   }
   R.solid_margin = compute_stress_margin(material.yield_strength_mpa, material.z_knockdown, solid_vm, R.solid_tension);
-  R.solid_margin_effective = gate_margin_effective(material.yield_strength_mpa, material.z_knockdown, solid_vm, solid_vm,
-                                                   R.solid_tension, KnockdownSpec{knockdown.infill_knockdown});
+  // The effective margin at an infill percent: Install 3's gate (gate_margin_effective), the job's other print settings.
+  const auto effective_at = [&](double infill) {
+    KnockdownSpec k = knockdown;
+    k.infill_percent = infill;
+    k.infill_knockdown = infill_margin_knockdown(infill, k.infill_exponent, k.infill_floor);
+    double vm_eff = solid_vm;
+    if (k.width_aware) {
+      vm_eff = 0.0;
+      for (std::size_t i = 0; i < s_vm.size(); ++i)
+        vm_eff = std::max(vm_eff, s_vm[i] / width_aware_knockdown(infill, s_width[i], k.wall_thickness_mm,
+                                                                   k.infill_exponent, k.infill_floor));
+    }
+    return gate_margin_effective(material.yield_strength_mpa, material.z_knockdown, solid_vm, vm_eff, R.solid_tension, k);
+  };
+  R.solid_margin_effective = effective_at(knockdown.infill_percent);
+  for (int pc = 1; pc <= 100 && R.passes_at_infill_percent < 0; ++pc)
+    if (effective_at(pc) >= options.margin_stop) R.passes_at_infill_percent = pc;
   R.solid_vm = solid_vm;
   R.solid_voxels = solid_voxels;
   // ── the verdict (V5's three states).
@@ -16270,7 +16301,9 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
   s += "    \"solid_margin\": {\"worst_case\": " + num(R.solid_margin.worst_case) + ", \"in_plane\": " + num(R.solid_margin.in_plane) +
        ", \"interlayer\": " + num(R.solid_margin.interlayer) + ", \"effective\": " + num(R.solid_margin_effective) +
        ", \"von_mises_mpa\": " + num(R.solid_vm) + ", \"interlayer_tension_mpa\": " + num(R.solid_tension) +
-       ", \"voxels\": " + std::to_string(R.solid_voxels) + ", \"voxel_load_path\": " + std::string(load_path_ok ? "true" : "false") + "},\n";
+       ", \"voxels\": " + std::to_string(R.solid_voxels) + ", \"passes_at_infill_percent\": " +
+       (R.passes_at_infill_percent < 0 ? std::string("null") : std::to_string(R.passes_at_infill_percent)) +
+       ", \"voxel_load_path\": " + std::string(load_path_ok ? "true" : "false") + "},\n";
   s += "    \"margin_worst_case\": " + num(a.margin.worst_case) + ",\n";
   s += "    \"margin_in_plane\": " + num(a.margin.in_plane) + ",\n";
   s += "    \"margin_interlayer\": " + num(a.margin.interlayer) + ",\n";
@@ -16535,7 +16568,33 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
     if (!cr.done.ok) return finish(false, cr.done.code, cr.done.exit_code, cr.done.why, cr.done.detail);
     std::ofstream(join_path(rdir, "strength.json")) << cr.done.json << "\n";
     const ll::FrameCheck& c = cr.check;
+    // Whether the geometry stays put: a hash of every non-link bar's two end points (rounded to 1e-4 mm, each bar's
+    // ends in order, the bars sorted); and the judged struts at the upper strut width.
+    std::uint64_t geometry = 1469598103934665603ull;
+    {
+      std::vector<std::array<long long, 6>> keys;
+      for (const ll::Bar& b : out.bars.bars) {
+        if (b.link) continue;
+        std::array<long long, 3> p{std::llround(b.a.x * 1e4), std::llround(b.a.y * 1e4), std::llround(b.a.z * 1e4)},
+            q{std::llround(b.b.x * 1e4), std::llround(b.b.y * 1e4), std::llround(b.b.z * 1e4)};
+        if (q < p) std::swap(p, q);
+        keys.push_back({p[0], p[1], p[2], q[0], q[1], q[2]});
+      }
+      std::sort(keys.begin(), keys.end());
+      for (const auto& k : keys)
+        for (long long v : k)
+          for (int byte = 0; byte < 8; ++byte) {
+            geometry ^= static_cast<std::uint64_t>(v) >> (8 * byte) & 0xffu;
+            geometry *= 1099511628211ull;
+          }
+    }
+    std::size_t at_upper = 0;
+    if (ask.width_heavy_mm > 0.0)
+      for (const ll::FrameStrut& st : c.struts) at_upper += st.judged && st.width_max >= ask.width_heavy_mm - 1e-9;
+    char geometry_hex[17];
+    std::snprintf(geometry_hex, sizeof geometry_hex, "%016llx", static_cast<unsigned long long>(geometry));
     std::string r = std::string(rounds_json.empty() ? "\n    " : ",\n    ") + "{\"round\": " + std::to_string(n) +
+                    ", \"bars_geometry\": \"" + geometry_hex + "\", \"struts_at_upper_width\": " + std::to_string(at_upper) +
                     ", \"laid_with\": " + json_str(laid_with) + ", \"verdict\": " + json_str(cr.verdict) +
                     ", \"fail_reason\": " + json_str(cr.fail_reason) + ", \"bars\": " + std::to_string(out.bars.bars.size()) +
                     ", \"floors_widened\": " + std::to_string(out.floors_widened) +
