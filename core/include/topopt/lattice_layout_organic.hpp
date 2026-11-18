@@ -51,6 +51,30 @@ struct WidthFloor {
   double width_mm = 0.0;
 };
 
+// ── Brief E3a: STRENGTHENING BY ADDING (rules OS10 to OS14) ──────────────────────────────────────────────────────────
+// A strengthen round in the additive mode never lays the lattice again: it adds to the lattice as laid, and nothing that
+// exists is moved or removed (a bar may be cut into pieces on its own line, never thinner). What a round added is kept
+// as a list of operations (AddOp), applied in order after the lay of the job's own inputs; after each round the bars'
+// hash (bars_hash) is stated, and a lay that does not reach it is refused (never a silent difference).
+//   kind 1, a brace point: v = the host bar's a (x, y, z), b (x, y, z), u along it from a, the braces' width. All brace
+//     points of a round are laid in one call of lay_braces (rule T's brace maker), before the round's widenings.
+//   kind 2, a widening: v = the bar's a (x, y, z), b (x, y, z), its new width (never thinner). Links ending where a
+//     widened bar ends then follow S8 (only wider).
+// A later engine may add kinds; the file carries each operation's kind and length, and an engine meeting a kind it
+// does not know refuses the list.
+struct AddOp {
+  int kind = 0;
+  std::vector<double> v;
+};
+struct AddRound {
+  std::vector<AddOp> ops;
+  std::uint64_t hash = 0;   // bars_hash after this round
+};
+struct Additions {
+  std::vector<AddRound> rounds;
+  bool empty() const { return rounds.empty(); }
+};
+
 struct OrganicAsk {
   double spacing_mm = 0.0;        // > 0: one spacing everywhere (both ends of the range); 0: the range below
   double width_mm = 0.0;          // the strut diameter; 0 = the generator's own: the minimum extrudable width
@@ -199,6 +223,9 @@ struct OrganicAsk {
   // Brief E2, item 9: the width floors (WidthFloor). Empty: none (as before). The file job, the preview and the
   // strengthen job take them from a strengthened.json (apply_strengthened).
   std::vector<WidthFloor> floors;
+  // Brief E3a: what strengthening by adding added (a strengthened.json of version 2), applied after the lay and the
+  // floors, each round's hash checked (apply_additions). Empty: none.
+  Additions additions;
   // OP6 (brief C1; the owner, 2026-11-18: "It should be a choice between stress and shape gradient or shape gradient
   // alone."). true (the default): as before. false, "shape only": O12's stress shares are 0 everywhere for every SIZE
   // rule: f (organic_spacing gives every candidate the widest spacing, spacing_max_mm, before O13's shape fit and L2;
@@ -226,11 +253,46 @@ bool read_floors_file(const std::string& path, std::vector<WidthFloor>& floors, 
 struct Strengthened {
   std::string stress_input, floors;   // file names, beside the strengthened.json
   double reference_mpa = 0.0;
+  // Brief E3a: version 2, the additive mode: {"version": 2, "mode": "additive", "additions": NAME, ...}; the job's own
+  // stress input and floors are kept, and the additions file (beside it) is applied after the lay.
+  int version = 1;
+  std::string additions;
 };
 bool write_strengthened_file(const std::string& path, const Strengthened& s, const std::string& more_json = {});
 // The job key "strengthened" (file job and preview alike): reads it, replaces `field` with its stress input, states
 // its reference in `ask` and adds its floors to `ask`. False (with `why`) when anything cannot be read.
+// Version 2 (brief E3a): `field` is left as it is; `ask.additions` takes the additions file's list.
 bool apply_strengthened(const std::string& path, TensorField& field, OrganicAsk& ask, std::string* why = nullptr);
+
+// Brief E3a. The bars' hash: FNV-1a (64 bits) over every bar in order: its ends and width (their IEEE bits), its end
+// kinds, strand, region and flags (link, brace, net, skin, support, level_tie). Two lays are the same lattice, bar for
+// bar, exactly when their hashes agree (to a 64-bit hash's chance).
+std::uint64_t bars_hash(const Bars& bars);
+// The numbers additions are applied with: the job's light width (S), layer and link width (S8).
+struct AddContext {
+  double light_mm = 0.0, layer_mm = 0.2, link_width = 1.0;
+};
+struct AddReport {
+  std::size_t brace_points = 0, braces = 0, widened = 0, links_widened = 0;
+  std::vector<int> braces_at;   // per brace point of the round, in op order: braces laid there
+};
+// One round's operations on `bars` (no hash check). False (with `why`) when an operation names a bar the lattice does
+// not hold, or is of a kind this engine does not know.
+bool apply_add_round(Bars& bars, const Domain& domain, const AddRound& round, const AddContext& c, AddReport* report = nullptr,
+                     std::string* why = nullptr);
+// Every round in order, each round's hash checked. False (with `why`) at the first that fails.
+bool apply_additions(Bars& bars, const Domain& domain, const Additions& adds, const AddContext& c, std::string* why = nullptr);
+// The additions file, little-endian: 8 bytes "TOADDS\0\0", int32 version (1), int32 rounds; per round: uint64 hash,
+// int32 operations; per operation: int32 kind, int32 count, count float64.
+bool write_additions_file(const std::string& path, const Additions& adds);
+bool read_additions_file(const std::string& path, Additions& adds, std::string* why = nullptr);
+// The old-bar invariant (OS12): every bar of `before` is in `after` whole, or as pieces lying on its line (each end
+// within tol_mm of it) that cover it end to end, of its strand and never thinner; links may only widen. "" when it
+// holds, else what broke first; `split`, when given: the old bars found cut into pieces.
+// The bars of `after` lying on each bar of `olds` (both ends within tol_mm of it, of its strand and link kind, longer
+// than tol_mm), in list order: where an old bar went when bars were cut.
+std::vector<std::vector<std::size_t>> pieces_on(const Bars& after, const std::vector<Bar>& olds, double tol_mm = 1e-5);
+std::string old_bars_kept(const Bars& before, const Bars& after, double tol_mm = 1e-5, std::size_t* split = nullptr);
 
 
 // J2 (brief G12), the pruning of a Grown area's weave bars, for each (region, median asked spacing) of `areas`:

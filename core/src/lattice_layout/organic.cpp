@@ -677,6 +677,20 @@ Outcome Session::lay_organic_with(const Settings& settings, const TensorField& f
     if (!ask.floors.empty() && ask.width_heavy_mm > 0.0)
       out.floors_widened = apply_width_floors(out.bars, ask.floors, ask.width_heavy_mm, finish.light_mm, ask.link_width,
                                               &out.floor_links_widened);
+    // Brief E3a: what strengthening by adding added, in order, each round's hash checked; a mismatch is refused.
+    if (!ask.additions.empty()) {
+      AddContext c;
+      c.light_mm = finish.light_mm;
+      c.layer_mm = ask.layer_mm;
+      c.link_width = ask.link_width;
+      std::string why;
+      if (apply_additions(out.bars, *domain_, ask.additions, c, &why)) {
+        out.additions_rounds = ask.additions.rounds.size();
+      } else {
+        out.additions_refused = why;
+        out.bars.bars.clear();
+      }
+    }
     out.strands = strands.size();
     out.ms_trace = ms_trace;
     out.spacing_smallest_mm = smallest;

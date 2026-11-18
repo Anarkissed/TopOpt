@@ -1110,8 +1110,11 @@ struct CrossingCutStats {
 // counted: links at the light width, wider, and the widest.
 // T4 (brief G30): `first_new` above 0: only pairs with at least one bar at or after that index are tried (the cut run
 // again over new bars only, against everything).
+// Brief E3a: `first_piece`, when given and a joint was made: n + 1 entries, the place of bar i's first piece in the new
+// list (its pieces are consecutive, up to entry i + 1; entry n: where the links begin). Left empty when nothing was cut.
 std::size_t split_at_crossings(Bars& bars, double light_mm = 0.0, double layer_mm = 0.2,
-                               CrossingCutStats* stats = nullptr, double link_width = 1.0, std::size_t first_new = 0);
+                               CrossingCutStats* stats = nullptr, double link_width = 1.0, std::size_t first_new = 0,
+                               std::vector<std::size_t>* first_piece = nullptr);
 // T (brief G30), no strut runs too far without a joint. A STRUT is the run of one strand's non-link bars between two
 // real joints (a point where three or more non-link bars meet, or an end tagged Solid) or the strand's own ends.
 struct WeaveStrut {
@@ -1138,6 +1141,19 @@ struct WeaveBraceStats {
 // Each brace: width_at's mean of its two ends, `brace`, its own new strand number. Then split_at_crossings runs once
 // more over the new bars only. Returns the braces laid.
 std::size_t brace_weave(Bars& weave, const Domain& domain, const WeaveBraceAsk& ask, WeaveBraceStats* stats = nullptr);
+// Brief E3a (strengthening by adding; rule T's brace maker split): braces at named points. Each point: bar `bar` at `u`
+// along it from its a (strictly inside: the bar is cut there, exactly on its line; at an end: that end), the braces'
+// strand excluded from landing being the bar's own; `width` above 0: the braces' width (else width_at's mean, else
+// light_mm). Then split_at_crossings over the new bars only. A Joined end (into_a / into_b) that pointed at a bar cut
+// here or by that split points at the piece of it nearest the end. `laid`, when given: per point, the braces laid there.
+// Returns the braces laid. brace_weave picks its points and calls this.
+struct BracePoint {
+  std::size_t bar = 0;
+  double u = 0.5;
+  double width = 0.0;
+};
+std::size_t lay_braces(Bars& bars, const Domain& domain, const std::vector<BracePoint>& points, const WeaveBraceAsk& ask,
+                       WeaveBraceStats* stats = nullptr, std::vector<int>* laid = nullptr);
 // Rule O2 (one bar per two points): of the bars of `regions` (a weave's), two with the same two ends (each within a
 // hundredth of a micron, either order) are ONE bar, of the wider width. The first in list order is kept, at the widest
 // width of its repeats; each of its ends takes the best-landed tag any of them has there (Solid, then Joined into a bar
@@ -1409,6 +1425,11 @@ struct Outcome {
   // floors did (OrganicAsk::floors): the bars and the links widened.
   std::vector<std::pair<int, double>> organic_references;
   std::size_t floors_widened = 0, floor_links_widened = 0;
+  // Brief E3a (lay_organic only, OrganicAsk::additions): the rounds of additions applied, and why they could not be (a
+  // round names a bar the lay does not hold, or the lay does not reach a round's hash). Not empty: refused, and `bars`
+  // is emptied; nothing is drawn or written from it.
+  std::size_t additions_rounds = 0;
+  std::string additions_refused;
   // C24: the part's size-step limit this layout kept (step_held of the part's cells: a value under the ladder's
   // smallest step is held there, 2 on Default Grade); 0 when none was asked. A region's own limit is not reported here.
   double step_held_at = 0.0;

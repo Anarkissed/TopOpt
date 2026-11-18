@@ -192,6 +192,8 @@ add_library(topopt
   src/lattice_layout/frame_check.cpp
   # Brief E2, Part B: the width floors, their file and strengthened.json (the job key "strengthened").
   src/lattice_layout/organic_floors.cpp
+  # Brief E3a: strengthening by adding (the additions, their file and replay, the old-bar invariant).
+  src/lattice_layout/organic_additions.cpp
   # Install 3, rule D23: the faces a region runs into that no rule decides (places).
   src/lattice_layout/places.cpp
   src/orient/orient.cpp

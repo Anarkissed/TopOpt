@@ -138,8 +138,10 @@ bool read_floors_file(const std::string& path, std::vector<WidthFloor>& floors, 
 bool write_strengthened_file(const std::string& path, const Strengthened& s, const std::string& more_json) {
   char ref[64];
   std::snprintf(ref, sizeof ref, "%.17g", s.reference_mpa);
-  std::string t = "{\n  \"version\": 1,\n  \"stress_input\": \"" + s.stress_input + "\",\n  \"floors\": \"" + s.floors +
-                  "\",\n  \"reference_mpa\": " + ref;
+  std::string t = s.version == 2
+                      ? "{\n  \"version\": 2,\n  \"mode\": \"additive\",\n  \"additions\": \"" + s.additions + "\""
+                      : "{\n  \"version\": 1,\n  \"stress_input\": \"" + s.stress_input + "\",\n  \"floors\": \"" + s.floors +
+                            "\",\n  \"reference_mpa\": " + ref;
   if (!more_json.empty()) t += ",\n" + more_json;
   t += "\n}\n";
   std::ofstream f(path);
@@ -159,8 +161,18 @@ bool apply_strengthened(const std::string& path, TensorField& field, OrganicAsk&
   Strengthened s;
   try {
     const json::Value doc = json::parse(all.str(), "strengthened.json");
-    if (json::as_int(json::require(doc, "version", "strengthened.json"), "version") != 1)
-      return no("the strengthened file's version is not 1");
+    const long long version = json::as_int(json::require(doc, "version", "strengthened.json"), "version");
+    if (version == 2) {   // brief E3a: the additive mode; the job's own stress and floors stay
+      s.additions = json::as_string(json::require(doc, "additions", "strengthened.json"), "additions");
+      if (s.additions.empty() || s.additions == "." || s.additions == ".." || s.additions.find_first_of("/\\") != std::string::npos)
+        return no("the strengthened file must name its files by bare name, beside it");
+      Additions adds;
+      std::string w;
+      if (!read_additions_file(folder_of(path) + "/" + s.additions, adds, &w)) return no(w);
+      ask.additions = std::move(adds);
+      return true;
+    }
+    if (version != 1) return no("the strengthened file's version is not 1 or 2");
     s.stress_input = json::as_string(json::require(doc, "stress_input", "strengthened.json"), "stress_input");
     s.floors = json::as_string(json::require(doc, "floors", "strengthened.json"), "floors");
     s.reference_mpa = json::as_number(json::require(doc, "reference_mpa", "strengthened.json"), "reference_mpa");

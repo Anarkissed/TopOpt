@@ -661,6 +661,8 @@ constexpr Refusal kStrengthUnavailable{"strength_unavailable", 1};
 constexpr Refusal kStrengthMixed{"strength_mixed", 1};
 // Brief E2, item 11: the job's "strengthened" file (or what it names) could not be read.
 constexpr Refusal kStrengthenedUnreadable{"strengthened_unreadable", 1};
+// Brief E3a: the lay does not give the lattice its additions were made on (a round's hash, or a bar they name).
+constexpr Refusal kStrengthenedMismatch{"strengthened_mismatch", 1};
 constexpr Refusal kCancelled{"cancelled", 1};
 constexpr Refusal kError{"error", 1};
 
@@ -1248,6 +1250,13 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
       refuse(r, kCancelled, "Stopped before the lattice file was finished. Nothing was made.");
       return done();
     }
+    if (!out.additions_refused.empty()) {
+      refuse(r, kStrengthenedMismatch,
+             "The strengthening sent with the lattice job was made on a different lattice than this lay gives, so "
+             "nothing was made.",
+             out.additions_refused);
+      return done();
+    }
     r.cells = out.layout.cells.size();
     r.solid_pieces = out.layout.solid.size();
     r.bars = out.bars.bars.size();
@@ -1499,7 +1508,8 @@ bool load_file_job(const std::string& job_path, int threads, FileJob& job, StepM
     // Brief E2, item 11: a strengthen round's stress input, reference and floors in place of the job's own.
     if (!job.strengthened.empty()) {
       const std::string sp = job.strengthened[0] == '/' ? job.strengthened : folder_of(job_path) + "/" + job.strengthened;
-      auto field = std::make_shared<TensorField>();
+      // (version 2, brief E3a: the job's own stress stays; version 1 replaces it)
+      auto field = job.tensor_field ? std::make_shared<TensorField>(*job.tensor_field) : std::make_shared<TensorField>();
       std::string why;
       if (!apply_strengthened(sp, *field, job.organic, &why)) {
         refuse(r, kStrengthenedUnreadable,

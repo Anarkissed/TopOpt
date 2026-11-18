@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <stdexcept>
@@ -1076,6 +1077,132 @@ static void test_follow_stress() {
   CHECK(!job.organic.follow_stress);
 }
 
+// ── OL-ADD (brief E3a, OS10 to OS13): strengthening by adding. A round of brace points and widenings on a laid lattice
+// keeps every old bar (whole, or cut on its own line, never thinner); the additions replayed after a new lay give the
+// same lattice bar for bar (its hash); written and read back they are the same list; a wrong hash, a bar the lay does
+// not hold, or a kind this engine does not know is refused; the lay is the same with 1 and with 4 threads.
+static void test_additions() {
+  const StepModel model = box_model(30, 30, 20);
+  const TensorField f = traced_field();
+  OrganicAsk a = traced_ask();
+  a.width_heavy_mm = 1.6;
+  Session s0(model);
+  const Outcome base = s0.lay_organic(traced_settings(), f, a, 1);
+  Session s4(model);
+  const Outcome base4 = s4.lay_organic(traced_settings(), f, a, 4);
+  CHECK(!base.bars.bars.empty() && bars_hash(base.bars) == bars_hash(base4.bars));
+  CHECK(old_bars_kept(base.bars, base.bars).empty());
+  // The round: the five longest non-link weave bars braced at their middles (as wide as they are) and widened by half.
+  std::vector<std::size_t> idx;
+  for (std::size_t i = 0; i < base.bars.bars.size(); ++i)
+    if (!base.bars.bars[i].link && base.bars.bars[i].strand >= 0 && !base.bars.bars[i].net) idx.push_back(i);
+  auto blen = [&](std::size_t i) { return dist(base.bars.bars[i].a, base.bars.bars[i].b); };
+  std::sort(idx.begin(), idx.end(), [&](std::size_t x, std::size_t y) { return blen(x) != blen(y) ? blen(x) > blen(y) : x < y; });
+  idx.resize(std::min<std::size_t>(5, idx.size()));
+  AddRound braces;
+  for (std::size_t i : idx) {
+    const Bar& b = base.bars.bars[i];
+    braces.ops.push_back({1, {b.a.x, b.a.y, b.a.z, b.b.x, b.b.y, b.b.z, 0.5, b.width}});
+  }
+  Bars after = base.bars;
+  const Domain& dom = *s0.domain();
+  AddContext c;
+  c.light_mm = 0.9;
+  c.layer_mm = a.layer_mm;
+  c.link_width = a.link_width;
+  AddReport rep;
+  std::string why;
+  CHECK(apply_add_round(after, dom, braces, c, &rep, &why));
+  // Then the widenings, on the bars as they now are (each braced bar's pieces).
+  std::vector<Bar> olds;
+  for (std::size_t i : idx) olds.push_back(base.bars.bars[i]);
+  const std::vector<std::vector<std::size_t>> on = pieces_on(after, olds);
+  AddRound round = braces;
+  for (const auto& ps : on)
+    for (std::size_t j : ps) {
+      const Bar& b = after.bars[j];
+      round.ops.push_back({2, {b.a.x, b.a.y, b.a.z, b.b.x, b.b.y, b.b.z, 1.5 * b.width}});
+    }
+  AddRound widen;
+  for (const AddOp& op : round.ops)
+    if (op.kind == 2) widen.ops.push_back(op);
+  AddReport rep2;
+  CHECK(apply_add_round(after, dom, widen, c, &rep2, &why));
+  std::size_t split = 0;
+  const std::string kept = old_bars_kept(base.bars, after, 1e-5, &split);
+  std::printf("OL-ADD round: %zu brace points, %zu braces, %zu bars widened, %zu links widened; old bars split %zu; "
+              "invariant: %s\n", rep.brace_points, rep.braces, rep2.widened, rep2.links_widened, split,
+              kept.empty() ? "held" : kept.c_str());
+  CHECK(rep.braces > 0 && rep2.widened >= idx.size() && kept.empty() && split >= idx.size());
+  CHECK(after.bars.size() > base.bars.bars.size());
+  round.hash = bars_hash(after);
+  // The invariant catches a thinner bar and a moved end.
+  {
+    Bars thin = after;
+    for (Bar& b : thin.bars)
+      if (!b.link && b.strand == base.bars.bars[idx[0]].strand) { b.width *= 0.5; break; }
+    CHECK(!old_bars_kept(base.bars, thin).empty());
+    Bars moved = after;
+    moved.bars[0].a.x += 0.01;
+    CHECK(!old_bars_kept(base.bars, moved).empty());
+  }
+  // A second round on top: a widening of one more bar.
+  AddRound second;
+  {
+    std::size_t k = 0;
+    while (k < after.bars.size() && (after.bars[k].link || after.bars[k].strand < 0)) ++k;
+    const Bar& b = after.bars[k];
+    second.ops.push_back({2, {b.b.x, b.b.y, b.b.z, b.a.x, b.a.y, b.a.z, b.width + 0.2}});   // named b to a
+  }
+  Bars after2 = after;
+  CHECK(apply_add_round(after2, dom, second, c, nullptr, &why));
+  second.hash = bars_hash(after2);
+  CHECK(old_bars_kept(base.bars, after2).empty() && old_bars_kept(after, after2).empty());
+  Additions adds;
+  adds.rounds = {round, second};
+  // Replayed after a new lay (through the ask, as the file job and the preview lay it): the same lattice.
+  OrganicAsk b2 = a;
+  b2.additions = adds;
+  Session s1(model);
+  const Outcome replay = s1.lay_organic(traced_settings(), f, b2, 3);
+  std::printf("OL-ADD replay: %zu rounds, %s, hash %s\n", replay.additions_rounds,
+              replay.additions_refused.empty() ? "applied" : replay.additions_refused.c_str(),
+              bars_hash(replay.bars) == second.hash ? "the same" : "DIFFERENT");
+  CHECK(replay.additions_refused.empty() && replay.additions_rounds == 2 && bars_hash(replay.bars) == second.hash &&
+        replay.bars.bars.size() == after2.bars.size());
+  // The file, and strengthened.json version 2.
+  const std::string dir = std::string(ORGANIC_RULES_TMP_DIR) + "/ol_add";
+  std::filesystem::create_directories(dir);
+  CHECK(write_additions_file(dir + "/additions.bin", adds));
+  Strengthened st;
+  st.version = 2;
+  st.additions = "additions.bin";
+  CHECK(write_strengthened_file(dir + "/strengthened.json", st, "  \"rounds\": 2"));
+  {
+    TensorField keep = f;
+    OrganicAsk r = a;
+    CHECK(apply_strengthened(dir + "/strengthened.json", keep, r, &why));
+    CHECK(keep.voigt == f.voigt && r.additions.rounds.size() == 2 && r.additions.rounds[1].hash == second.hash &&
+          r.additions.rounds[0].ops.size() == round.ops.size() && r.additions.rounds[0].ops[0].v == round.ops[0].v);
+  }
+  // Refused: a wrong hash; a bar not in the lattice; a kind not known.
+  {
+    OrganicAsk bad = b2;
+    bad.additions.rounds[1].hash ^= 1;
+    Session sx(model);
+    const Outcome o = sx.lay_organic(traced_settings(), f, bad);
+    CHECK(!o.additions_refused.empty() && o.bars.bars.empty());
+    std::printf("OL-ADD wrong hash: %s\n", o.additions_refused.c_str());
+    AddRound none;
+    none.ops.push_back({2, {-99, -99, -99, -98, -98, -98, 1.0}});
+    Bars x = base.bars;
+    CHECK(!apply_add_round(x, dom, none, c, nullptr, &why) && why.find("not in the lattice") != std::string::npos);
+    AddRound unknown;
+    unknown.ops.push_back({3, {0.0}});
+    CHECK(!apply_add_round(x, dom, unknown, c, nullptr, &why) && why.find("kind 3") != std::string::npos);
+  }
+}
+
 int main() {
   test_s_cut_fix();
   test_k_floor();
@@ -1098,6 +1225,7 @@ int main() {
   test_sweep_limits();
   test_session_sweep_limits();
   test_follow_stress();
+  test_additions();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }
