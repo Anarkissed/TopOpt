@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <functional>
 #include <limits>
+#include <map>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -17,6 +18,7 @@
 #include "topopt/lattice_layout_file.hpp"
 #include "topopt/lattice_layout_mesh.hpp"
 #include "topopt/lattice_layout_organic.hpp"
+#include "topopt/lattice_sample.hpp"
 
 using namespace topopt;
 using namespace topopt::lattice_layout;
@@ -1576,6 +1578,104 @@ static void test_synthetic() {
   CHECK(kSyntheticFociDefault == 3);
 }
 
+// ── OL-BODY (brief C2, E8): the bare sample bodies, and a WHOLE body laid as weave (one box-zone region) ──────────────
+static bool closed_outward(const TriangleMesh& m, double* volume) {
+  std::map<std::pair<int, int>, int> edges;   // directed edge -> count
+  double v = 0.0;
+  for (const auto& t : m.triangles) {
+    for (int k = 0; k < 3; ++k) ++edges[{t[static_cast<std::size_t>(k)], t[static_cast<std::size_t>((k + 1) % 3)]}];
+    const Vec3 &a = m.vertices[static_cast<std::size_t>(t[0])], &b = m.vertices[static_cast<std::size_t>(t[1])],
+               &c = m.vertices[static_cast<std::size_t>(t[2])];
+    v += (a.x * (b.y * c.z - b.z * c.y) - a.y * (b.x * c.z - b.z * c.x) + a.z * (b.x * c.y - b.y * c.x)) / 6.0;
+  }
+  bool ok = !edges.empty();
+  for (const auto& e : edges) ok = ok && e.second == 1 && edges.count({e.first.second, e.first.first}) == 1;
+  if (volume) *volume = v;
+  return ok;
+}
+static void box_of(const TriangleMesh& m, Vec3& lo, Vec3& hi) {
+  lo = {1e300, 1e300, 1e300};
+  hi = {-1e300, -1e300, -1e300};
+  for (const Vec3& p : m.vertices) {
+    lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
+    hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+  }
+}
+// The whole body as ONE weave region: a box zone round the body's box, 1 mm margin (no face ids needed).
+static Settings whole_body_weave(const TriangleMesh& body) {
+  Vec3 lo, hi;
+  box_of(body, lo, hi);
+  Settings s;
+  Settings::RegionAsk r;
+  r.id = 1;
+  r.role = Role::Lattice;
+  r.weave = true;
+  r.zone.kind = Zone::Kind::Box;
+  r.zone.centre = {0.5 * (lo.x + hi.x), 0.5 * (lo.y + hi.y), 0.5 * (lo.z + hi.z)};
+  r.zone.axis[0] = {1, 0, 0};
+  r.zone.axis[1] = {0, 1, 0};
+  r.zone.axis[2] = {0, 0, 1};
+  r.zone.half[0] = 0.5 * (hi.x - lo.x) + 1.0;
+  r.zone.half[1] = 0.5 * (hi.y - lo.y) + 1.0;
+  r.zone.half[2] = 0.5 * (hi.z - lo.z) + 1.0;
+  s.regions = {r};
+  return s;
+}
+static StepModel one_face_model(const TriangleMesh& mesh) {   // the body as a model with one face (no face is read)
+  StepModel m;
+  m.mesh = mesh;
+  m.triangle_face.assign(mesh.triangles.size(), 0);
+  m.faces.resize(1);
+  m.face_count = 1;
+  m.solid_count = 1;
+  return m;
+}
+static void test_sample_bodies() {
+  for (const char* kind : {"cube", "coupon"}) {
+    LatticeSampleSpec spec;
+    spec.shape = kind;
+    spec.topology = "octet";
+    const TriangleMesh body = lattice_sample_body(spec);
+    double vol = 0.0;
+    const bool closed = closed_outward(body, &vol);
+    Vec3 lo, hi, slo, shi;
+    box_of(body, lo, hi);
+    LatticeSampleReceipt rec;
+    const TriangleMesh sample = lattice_sample_mesh(spec, &rec);
+    box_of(sample, slo, shi);
+    if (std::string(kind) == "cube") {   // its struts' round ends stand proud of the cube: the box as stated
+      slo = {0.0, 0.0, 0.0};
+      shi = {rec.size_mm, rec.size_mm, rec.plate_mm + rec.size_mm};
+    }
+    const double off = std::max({std::fabs(lo.x - slo.x), std::fabs(lo.y - slo.y), std::fabs(lo.z - slo.z),
+                                 std::fabs(hi.x - shi.x), std::fabs(hi.y - shi.y), std::fabs(hi.z - shi.z)});
+    std::printf("OL-BODY %s: %zu triangles, closed and outward %d, volume %.1f mm3, box %.2f x %.2f x %.2f (the "
+                "sample's %.2f x %.2f x %.2f, apart %.4f mm)\n", kind, body.triangles.size(), closed ? 1 : 0, vol,
+                hi.x - lo.x, hi.y - lo.y, hi.z - lo.z, shi.x - slo.x, shi.y - slo.y, shi.z - slo.z, off);
+    CHECK(closed && vol > 0.0 && off < 0.05);
+    // The whole body laid as weave from no stress input, one focus: Traced curves, Grown vines and ties.
+    const Settings st = whole_body_weave(body);
+    for (int g = 0; g < 2; ++g) {
+      OrganicAsk a = traced_ask();
+      if (g) { a.mode = OrganicMode::Grown; a.layer_mm = 0.2; }
+      const std::vector<OrganicGroup> gs = {{{1}, a}};
+      Session s(one_face_model(body));
+      const SyntheticStress made = organic_synthetic_stress(s, st, TensorField{}, {{1, 1}}, gs);
+      const Outcome o = made.refused.empty() ? s.lay_organic(st, made.field, gs) : Outcome{};
+      const std::size_t ties = o.grown ? o.grown->ties_laid : 0;
+      std::printf("OL-BODY %s whole-body weave, %s: filled %zu voxels, %zu strands, %zu bars, ties %zu, spacing %.2f to "
+                  "%.2f, empty regions %zu\n", kind, g ? "Grown" : "Traced", made.regions.empty() ? 0 : made.regions[0].filled,
+                  o.strands, o.bars.bars.size(), ties, o.spacing_smallest_mm, o.spacing_largest_mm, o.empty_regions.size());
+      CHECK(made.refused.empty() && !made.regions.empty() && made.regions[0].filled > 0);
+      CHECK(o.refused.empty() && o.empty_regions.empty() && o.strands > 0 && !o.bars.bars.empty());
+      if (g) CHECK(ties > 0);
+    }
+  }
+  bool threw = false;
+  try { LatticeSampleSpec bad; bad.shape = "sphere"; (void)lattice_sample_body(bad); } catch (const std::invalid_argument&) { threw = true; }
+  CHECK(threw);
+}
+
 int main() {
   test_s_cut_fix();
   test_k_floor();
@@ -1604,6 +1704,7 @@ int main() {
   test_sweep_limits_for();
   test_groups();
   test_synthetic();
+  test_sample_bodies();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }

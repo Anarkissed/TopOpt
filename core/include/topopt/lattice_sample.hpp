@@ -85,6 +85,13 @@ TriangleMesh lattice_coupon_solid();
 // write_lattice_sample does; `receipt` (optional) gets the receipt.
 TriangleMesh lattice_sample_mesh(const LatticeSampleSpec& spec, LatticeSampleReceipt* receipt);
 
+// ★ THE BARE SAMPLE BODY (brief C2, E8): the sample's outer solid with NO lattice, closed, welded and wound outward,
+// to open a lattice-layout session on (the app's Organic samples). `spec.shape` "cube": the box x, y in [0, size_mm],
+// z in [0, plate_mm + size_mm] (the cube sample's outer box, its plate included; only size_mm and plate_mm are read);
+// "coupon": lattice_coupon_solid() (45 x 40 x 35, the coupon sample's outline, the plate inside it). Throws
+// std::invalid_argument for another shape, a size not above 0 or a plate below 0.
+TriangleMesh lattice_sample_body(const LatticeSampleSpec& spec);
+
 // The receipt as a small JSON object (one line per field).
 std::string lattice_sample_receipt_json(const LatticeSampleReceipt& r);
 
