@@ -35,6 +35,12 @@ void GrowReport::add(const GrowReport& o) {
   reseed_voids += o.reseed_voids; reseed_landed += o.reseed_landed; reseed_failed += o.reseed_failed;
   reseed_mm += o.reseed_mm;
   reseed_from_vertex += o.reseed_from_vertex;
+  reseed_voids_round.insert(reseed_voids_round.end(), o.reseed_voids_round.begin(), o.reseed_voids_round.end());
+  wall_grown += o.wall_grown; wall_joins += o.wall_joins; wall_ended_edge += o.wall_ended_edge;
+  wall_ended_unsupported += o.wall_ended_unsupported; wall_ended_joins += o.wall_ended_joins;
+  wall_lines_joined.insert(wall_lines_joined.end(), o.wall_lines_joined.begin(), o.wall_lines_joined.end());
+  wall_roots += o.wall_roots; wall_roots_kept += o.wall_roots_kept; wall_roots_cut_at_joint += o.wall_roots_cut_at_joint;
+  wall_vines_removed += o.wall_vines_removed;
   d2_offered += o.d2_offered; d2_grown += o.d2_grown; d2_refused += o.d2_refused; d2_short += o.d2_short;
   for (int f = 0; f < 6; ++f) face_hits[f] += o.face_hits[f];
   stubs.insert(stubs.end(), o.stubs.begin(), o.stubs.end());
@@ -197,6 +203,8 @@ struct Line {
   bool floor_seed = false;
   int seed_no = -1;
   Vec3 root0{}, floor_pt{};
+  bool wall_seed = false;   // E, wall_gap: a wall seed's strand (`seed_no`, `root0` as a foot's; `wall_pt` its wall point)
+  Vec3 wall_pt{};
 };
 
 struct Near {
@@ -513,7 +521,8 @@ class Grower {
   void offer_branches(int li, const Vec3& p, const Vec3& dir, std::vector<Tip>& tips);
   void d2_branch(int li, const Vec3& p, const Vec3& o, std::vector<Tip>& tips);
   void repeats();
-  void feet(const std::vector<int>& parent, const std::vector<char>& branch, const std::vector<char>& seeded);
+  void feet(const std::vector<int>& parent, const std::vector<char>& branch, const std::vector<char>& seeded,
+            bool wall = false);
   void settle();
   struct Fate {
     std::vector<std::vector<char>> seg;   // per line, per segment: 0 kept, 1 outside, 2 nothing, 3 unsupported
@@ -707,6 +716,7 @@ void Grower::seeds(std::vector<Tip>& tips) {
     t.root = end_at_edge(w.c, w.w, at);
     t.dir = add(mul(w.w, -cone_cos_), mul(up_, cone_sin_));   // inward, at the cone
     t.from = on;
+    t.seed_no = static_cast<int>(rep_.seeds_wall);
     tips.push_back(t);
     ++rep_.seeds_wall;
   }
@@ -814,6 +824,12 @@ void Grower::grow_tip(const Tip& t, std::vector<Tip>& tips) {
       L.root0 = t.root;
       L.floor_pt = t.from;
     }
+    if (t.kind == Tip::Wall) {
+      L.wall_seed = true;
+      L.seed_no = t.seed_no;
+      L.root0 = t.root;
+      L.wall_pt = t.from;
+    }
   }
   const int parent = t.parent;
   const Vec3 start = t.from;
@@ -825,6 +841,26 @@ void Grower::grow_tip(const Tip& t, std::vector<Tip>& tips) {
   int joins_used = 0;
   std::vector<std::pair<int, Vec3>> spared;
   bool after_join = false, first = true;
+  // E, wall_connect: a wall seed's tip aims at the nearest live strand sample within 4 x the local spacing, not on its
+  // own line nor on a line it has joined, in a direction rising at the cone or steeper (none: false).
+  const bool connect = ask_.wall_connect && t.kind == Tip::Wall;
+  std::vector<int> joined;
+  auto target = [&](const Vec3& at, Vec3& x) {
+    const double R = 4.0 * sep(at);
+    bool found = false;
+    double bd = std::numeric_limits<double>::infinity();
+    int bl = -1, bs = -1;
+    boxes_.near(at, R, [&](const Sample& s) {
+      if (s.line == li || !live(s)) return;
+      if (std::find(joined.begin(), joined.end(), s.line) != joined.end()) return;
+      const double d = dist(s.p, at);
+      if (!(d <= R) || d <= 1e-9 || dot(sub(s.p, at), up_) < cone_sin_ * d) return;
+      if (d < bd || (d == bd && (s.line < bl || (s.line == bl && s.seg < bs)))) {
+        found = true; bd = d; bl = s.line; bs = s.seg; x = s.p;
+      }
+    });
+    return found;
+  };
   const int layers = static_cast<int>(std::ceil((domain_.measure().diagonal_mm() + 1.0) / layer_)) + 4;
   const long long guard = 16LL * layers;
   enum End { Edge, Unsupported, Joins, Guard } how = Guard;
@@ -833,12 +869,15 @@ void Grower::grow_tip(const Tip& t, std::vector<Tip>& tips) {
     if (foot > 0.0) {
       want = dir;
     } else {
-      Vec3 f;
-      const bool has_f = stress_dir(p, f);
+      Vec3 f, x;
+      const bool aim = connect && target(p, x);
+      const bool has_f = !aim && stress_dir(p, f);
       // D1 (stress_goal): t = (widest - S(p)) / (widest - tightest) of the spacing field (0 when they are equal);
       // where t >= 0.1 and there is a stress direction the stress is the goal: no pull.
       const double tg = ask_.stress_goal && sp_wide_ > sp_tight_ ? (sp_wide_ - sep(p)) / (sp_wide_ - sp_tight_) : 0.0;
-      if (ask_.stress_goal && has_f && tg >= 0.1) {
+      if (aim) {
+        want = add(mul(dir, kBlendHeading), mul(unit(sub(x, p)), kBlendField));   // E: toward the next strand
+      } else if (ask_.stress_goal && has_f && tg >= 0.1) {
         want = add(mul(dir, kBlendHeading), mul(f, kBlendField));
       } else {
         want = has_f ? add(mul(dir, kBlendHeading), mul(f, kBlendField)) : dir;
@@ -880,7 +919,21 @@ void Grower::grow_tip(const Tip& t, std::vector<Tip>& tips) {
           // JOIN the neighbour, move onto it, and DEFLECT: re-aimed away from where it came from, at the cone.
           if (dist(n.hit, p) > 1e-9) lay(li, n.hit);
           ++rep_.joins;
+          if (connect) {
+            ++rep_.wall_joins;
+            if (std::find(joined.begin(), joined.end(), n.line) == joined.end()) joined.push_back(n.line);
+          }
           if (++joins_used > kMaxJoins) { how = Joins; break; }
+          Vec3 nx;
+          if (connect && target(n.hit, nx)) {
+            // E: no deflection: it stays on the joint and re-aims at the next strand.
+            dir = unit(sub(nx, n.hit));
+            p = n.hit;
+            spared.push_back({n.line, n.hit});
+            since_record = kRecordRadii * r_;
+            after_join = true;
+            continue;
+          }
           Vec3 away = level(sub(p, n.hit));
           if (len(away) < 1e-9) away = level(cross(up_, dir));
           if (len(away) < 1e-9) away = u_;
@@ -911,7 +964,7 @@ void Grower::grow_tip(const Tip& t, std::vector<Tip>& tips) {
     dir = want;
     if (foot > 0.0) { foot -= layer_; continue; }
     since_branch += layer_;
-    if (since_branch >= std::max(layer_, kBranchEveryRatio * sep(p))) {
+    if (!connect && since_branch >= std::max(layer_, kBranchEveryRatio * sep(p))) {
       since_branch = 0.0;
       offer_branches(li, p, dir, tips);
     }
@@ -931,7 +984,15 @@ void Grower::grow_tip(const Tip& t, std::vector<Tip>& tips) {
     ++rep_.face_hits[face];
     static const double nbv[5][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}};
     const Vec3 o = face < 5 ? Vec3{nbv[face][0], nbv[face][1], nbv[face][2]} : up_;
-    if (ask_.stress_goal && !lines_[static_cast<std::size_t>(li)].d2 && dot(o, up_) <= 0.5) d2_branch(li, p, o, tips);
+    if (ask_.stress_goal && !connect && !lines_[static_cast<std::size_t>(li)].d2 && dot(o, up_) <= 0.5)
+      d2_branch(li, p, o, tips);
+  }
+  if (connect) {
+    rep_.wall_lines_joined.push_back(joined.size());
+    if (how == Edge) ++rep_.wall_ended_edge;
+    else if (how == Unsupported) ++rep_.wall_ended_unsupported;
+    else if (how == Joins) ++rep_.wall_ended_joins;
+    if (lines_[static_cast<std::size_t>(li)].pts.size() >= 2) ++rep_.wall_grown;
   }
   if (how == Edge) ++rep_.ended_edge;
   else if (how == Unsupported) ++rep_.ended_unsupported;
@@ -1121,6 +1182,12 @@ void Grower::repeats() {
         run.seed_no = L.seed_no;
         run.root0 = L.root0;
         run.floor_pt = L.floor_pt;
+      }
+      if (s0 == 0 && L.wall_seed) {   // E: likewise a wall seed's root
+        run.wall_seed = true;
+        run.seed_no = L.seed_no;
+        run.root0 = L.root0;
+        run.wall_pt = L.wall_pt;
       }
       run.pts.push_back(L.pts[s]);
       run.rec.push_back(L.rec[s]);
@@ -1322,7 +1389,11 @@ Grower::Fate Grower::pass() {
 // its first joint with a strand of another plant that is not removed (a strand that is itself a removed foot counts
 // only above its own cut), or, with none, taken whole. What hung on a removed foot is left to the mid-air pass that
 // follows. `parent`, `branch`, `seeded`: per line as grown (before the repeats split them).
-void Grower::feet(const std::vector<int>& parent, const std::vector<char>& branch, const std::vector<char>& seeded) {
+// E, wall_gap (`wall`): the same for wall seeds' roots, by their own plants (`seeded` then marks wall seeds), their wall
+// points, wall_gap, straight-line distance, joints from the wall on; their own counts. Feet and wall roots never
+// remove each other.
+void Grower::feet(const std::vector<int>& parent, const std::vector<char>& branch, const std::vector<char>& seeded,
+                  bool wall) {
   const std::size_t no = parent.size();
   std::vector<std::vector<int>> kids(no);
   for (std::size_t o = 0; o < no; ++o)
@@ -1355,24 +1426,25 @@ void Grower::feet(const std::vector<int>& parent, const std::vector<char>& branc
   std::vector<Foot> all;
   for (std::size_t l = 0; l < lines_.size(); ++l) {
     const Line& L = lines_[l];
-    if (!L.floor_seed || L.pts.size() < 2 || dist(L.pts.front(), L.root0) > 1e-9) continue;
+    if (!(wall ? L.wall_seed : L.floor_seed) || L.pts.size() < 2 || dist(L.pts.front(), L.root0) > 1e-9) continue;
     all.push_back({l, L.seed_no, worth[static_cast<std::size_t>(L.origin)]});
   }
   std::sort(all.begin(), all.end(), [](const Foot& a, const Foot& b) {
     return a.worth != b.worth ? a.worth > b.worth : a.seed_no < b.seed_no;
   });
   std::vector<std::size_t> removed;
-  std::vector<Vec3> kept;   // the kept feet's floor points
+  std::vector<Vec3> kept;   // the kept feet's floor points (wall: the kept wall roots' wall points)
+  if (wall) rep_.wall_roots += all.size();
   for (const Foot& f : all) {
-    const Vec3 fp = lines_[f.line].floor_pt;
-    const double lim = ask_.foot_gap * sep(fp);
+    const Vec3 fp = wall ? lines_[f.line].wall_pt : lines_[f.line].floor_pt;
+    const double lim = (wall ? ask_.wall_gap : ask_.foot_gap) * sep(fp);
     bool near = false;
-    for (const Vec3& k : kept) near = near || len(level(sub(k, fp))) < lim;
+    for (const Vec3& k : kept) near = near || (wall ? dist(k, fp) : len(level(sub(k, fp)))) < lim;
     if (near) {
       removed.push_back(f.line);
     } else {
       kept.push_back(fp);
-      ++rep_.feet_kept;
+      ++(wall ? rep_.wall_roots_kept : rep_.feet_kept);
     }
   }
   if (removed.empty()) return;
@@ -1439,7 +1511,8 @@ void Grower::feet(const std::vector<int>& parent, const std::vector<char>& branc
   };
   std::vector<std::vector<Joint>> joints(removed.size());
   for (std::size_t r = 0; r < removed.size(); ++r)
-    joints[r] = joints_of(removed[r], h(lines_[removed[r]].floor_pt) + 1e-6);
+    joints[r] = joints_of(removed[r], wall ? -std::numeric_limits<double>::infinity()
+                                           : h(lines_[removed[r]].floor_pt) + 1e-6);
   // The cuts, to a fixed point. Each removed foot starts cut at its first joint; a joint HOLDS while the strand there
   // stays: it is not gone, and, when it is a removed foot, the joint lies above that foot's cut. A foot whose joint
   // does not hold is cut at its next one that does; with none it goes whole, and so does each strand of its plant
@@ -1519,7 +1592,7 @@ void Grower::feet(const std::vector<int>& parent, const std::vector<char>& branc
   auto count_high = [&](const Line& L, std::size_t upto) {
     double mm = 0.0;
     for (std::size_t k = 0; k < upto && k + 1 < L.pts.size(); ++k) mm += high(L.pts[k], L.pts[k + 1]);
-    if (mm > 0.0) {
+    if (mm > 0.0 && !wall) {
       rep_.feet_cut_high_mm += mm;
       ++rep_.feet_cut_high_strands;
     }
@@ -1534,19 +1607,19 @@ void Grower::feet(const std::vector<int>& parent, const std::vector<char>& branc
     L.rec.resize(1);
     L.stamp.clear();
     L.dead.clear();
-    rep_.feet_cut_mm += mm;
+    if (!wall) rep_.feet_cut_mm += mm;
     rep_.cut_nothing_mm += mm;
   }
   for (std::size_t r = 0; r < removed.size(); ++r) {
     Line& L = lines_[removed[r]];
-    L.floor_seed = false;
+    (wall ? L.wall_seed : L.floor_seed) = false;
     double mm = 0.0;
     if (at_joint[r] < 0) {
       for (std::size_t k = 0; k + 1 < L.pts.size(); ++k) mm += dist(L.pts[k], L.pts[k + 1]);
       count_high(L, L.pts.size());
       L.pts.resize(1);
       L.rec.resize(1);
-      ++rep_.vines_removed;
+      ++(wall ? rep_.wall_vines_removed : rep_.vines_removed);
     } else {
       const Joint& x = joints[r][static_cast<std::size_t>(at_joint[r])];
       const std::size_t k = static_cast<std::size_t>(std::floor(x.pos + 1e-12));
@@ -1562,11 +1635,11 @@ void Grower::feet(const std::vector<int>& parent, const std::vector<char>& branc
         L.pts.insert(L.pts.begin(), x.x);
         L.rec.insert(L.rec.begin(), 0);
       }
-      ++rep_.feet_cut_at_joint;
+      ++(wall ? rep_.wall_roots_cut_at_joint : rep_.feet_cut_at_joint);
     }
     L.stamp.clear();
     L.dead.assign(L.pts.size() > 0 ? L.pts.size() - 1 : 0, 0);
-    rep_.feet_cut_mm += mm;
+    if (!wall) rep_.feet_cut_mm += mm;
     rep_.cut_nothing_mm += mm;   // counted under "leads to nothing" (G12)
   }
   rebuild_boxes();
@@ -1577,15 +1650,17 @@ void Grower::feet(const std::vector<int>& parent, const std::vector<char>& branc
 // drops): what it leaves out is no longer material.
 void Grower::prune() {
   std::vector<int> parent(lines_.size());
-  std::vector<char> branch(lines_.size()), seeded(lines_.size());
+  std::vector<char> branch(lines_.size()), seeded(lines_.size()), walled(lines_.size());
   for (std::size_t l = 0; l < lines_.size(); ++l) {
     parent[l] = lines_[l].parent;
     branch[l] = lines_[l].branch;
     seeded[l] = lines_[l].floor_seed;
+    walled[l] = lines_[l].wall_seed;
   }
   repeats();
   settle();
   if (ask_.foot_gap > 0.0) feet(parent, branch, seeded);   // G13 (0 or less: the feet do not compete)
+  if (ask_.wall_gap > 0.0) feet(parent, branch, walled, true);   // E: the wall roots, the same way, by themselves
   settle();
   const Fate f = pass();
   for (std::size_t l = 0; l < lines_.size(); ++l)
@@ -1693,7 +1768,7 @@ void Grower::reseed(std::vector<Tip>& tips) {
         const std::size_t e = field_.index(i, j, k);
         if (!sp_.candidate[e]) continue;
         const Vec3 q = centre(i, j, k);
-        const double lim = kVoidRatio * sp_.spacing_mm[e];
+        const double lim = ask_.void_ratio * sp_.spacing_mm[e];   // E: G11's kVoidRatio unless asked
         if (live_within(q, lim)) continue;
         bool near = false;
         for (const Vec3& o : at) near = near || dist(o, q) < lim;
@@ -1981,6 +2056,8 @@ bool Grower::setup() {
   if (!(ask_.seed_stride > 0.0) || !std::isfinite(ask_.seed_stride))
     throw std::invalid_argument("grow_strands: seed_stride must be above 0");
   if (!std::isfinite(ask_.foot_gap)) throw std::invalid_argument("grow_strands: foot_gap must be a number");
+  if (!(ask_.void_ratio > 0.0) || !std::isfinite(ask_.void_ratio))
+    throw std::invalid_argument("grow_strands: void_ratio must be above 0");   // E
   const double thinnest = domain_.spec().bead_mm * domain_.spec().min_strut_lines;
   if (ask_.width_mm != 0.0 && !(ask_.width_mm >= thinnest - 1e-12))
     throw std::invalid_argument("grow_strands: the strut width is under the thinnest strut (G8)");
@@ -2033,18 +2110,44 @@ std::vector<Strand> Grower::run() {
   std::vector<Tip> tips;
   seeds(tips);
   tips_ = tips.size();
-  grow(std::move(tips));
+  if (ask_.wall_connect) {
+    // E: the wall seeds' tips grow after every floor seed's tip and all its descendants (today they come after the
+    // floor seeds but before the branches those push).
+    std::vector<Tip> floor, wall;
+    for (const Tip& t : tips) (t.kind == Tip::Wall ? wall : floor).push_back(t);
+    grow(std::move(floor));
+    grow(std::move(wall));
+  } else {
+    grow(std::move(tips));
+  }
   if (ask_.ties) ties(0);
   prune();
   rep_.bare_before = bare();
-  const std::size_t first_new = lines_.size();
-  std::vector<Tip> more;
-  reseed(more);
-  grow(std::move(more));
-  if (ask_.ties) ties(first_new);
-  repeats();
-  settle();
-  const Fate f = pass();
+  // E: the re-seed step reseed_rounds times (G11: once); between rounds what the last pass cut is no longer material,
+  // as after the first pruning.
+  Fate f;
+  for (int round = 0; round < std::max(0, ask_.reseed_rounds); ++round) {
+    if (round > 0) {
+      for (std::size_t l = 0; l < lines_.size(); ++l)
+        for (std::size_t k = 0; k < f.seg[l].size(); ++k) lines_[l].dead[k] = f.seg[l][k] != 0;
+      rebuild_rec();
+    }
+    const std::size_t first_new = lines_.size();
+    const std::size_t voids0 = rep_.reseed_voids;
+    std::vector<Tip> more;
+    reseed(more);
+    rep_.reseed_voids_round.push_back(rep_.reseed_voids - voids0);
+    grow(std::move(more));
+    if (ask_.ties) ties(first_new);
+    repeats();
+    settle();
+    f = pass();
+  }
+  if (ask_.reseed_rounds <= 0) {
+    repeats();
+    settle();
+    f = pass();
+  }
   account(f);
   for (std::size_t l = 0; l < lines_.size(); ++l)
     for (std::size_t k = 0; k < f.seg[l].size(); ++k) lines_[l].dead[k] = f.seg[l][k] != 0;

@@ -72,6 +72,18 @@ struct OrganicAsk {
   // spacing is at least a tenth of the way from the widest to the tightest the heading follows the stress with no
   // pull; D2, a tip that leaves through a side face offers ONE branch one spacing back, away from that face.
   bool stress_goal = false;
+  // E (brief G6, try keys): a place is bare for the re-seeding when no kept strand lies within void_ratio x its
+  // spacing (G11's 1.5; the "bare" share reported keeps 1.5); and the whole re-seed step (bare places found after the
+  // pruning, stubs, the new tips grown, pruned again) is done reseed_rounds times (G11: once; 0: none).
+  double void_ratio = 1.5;   // > 0
+  int reseed_rounds = 1;     // >= 0
+  // E (the owner on walls-out seeds: "I'd say their goal is to connect as many vines as possible"): a wall seed's tip
+  // is grown after every floor seed's tip and its descendants, aims at the nearest kept strand it has not joined that
+  // rises at the cone or steeper from it (within 4 spacings), stays on each joint it makes, and offers no branches.
+  bool wall_connect = false;
+  // E: wall roots compete as feet do (G13), separately from them: a wall seed's root is kept only where no kept wall
+  // root stands within wall_gap x the local spacing of its wall point (straight-line distance). 0 or less: off.
+  double wall_gap = 0.0;
 };
 
 // O16, the net skin: Finish Skin (Settings::skin) on a weave region (the old finish step "Skin", organic_lattice.cpp,
@@ -184,6 +196,13 @@ struct GrowReport {
   // (its root, its top: the bare place; its points, root first; its length; the local spacing and the landing radius
   // at the bare place).
   std::size_t reseed_from_vertex = 0;
+  std::vector<std::size_t> reseed_voids_round;   // E: the bare places found, per re-seed round
+  // E, wall_connect: wall tips grown, the joins they made, the distinct lines each joined; how they ended.
+  std::size_t wall_grown = 0, wall_joins = 0, wall_ended_edge = 0, wall_ended_unsupported = 0, wall_ended_joins = 0;
+  std::vector<std::size_t> wall_lines_joined;
+  // E, wall_gap: wall roots that competed (a wall seed's strand still holding its root), kept, removed with a joint,
+  // whole vines removed.
+  std::size_t wall_roots = 0, wall_roots_kept = 0, wall_roots_cut_at_joint = 0, wall_vines_removed = 0;
   // D2 (stress_goal): branches offered one spacing back from a side face, grown, refused, strands too short for one;
   // and every tip that ended by leaving the region, by its last voxel's wall site: +x, -x, +y, -y, +z, none.
   std::size_t d2_offered = 0, d2_grown = 0, d2_refused = 0, d2_short = 0;

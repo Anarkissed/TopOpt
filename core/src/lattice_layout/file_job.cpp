@@ -200,7 +200,8 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "width_heavy_mm", "reference_mpa", "percentile", "response", "region_own", "max_step", "region_weave", "organic_spacing_mm",
        "organic_width_mm", "organic_spacing_min_mm", "organic_spacing_max_mm", "organic_spacing_exponent",
        "organic_shape_fit", "organic_mode", "organic_walls_out", "organic_ties", "organic_tie_swirl",
-       "organic_foot_gap", "organic_stress_goal"},
+       "organic_foot_gap", "organic_stress_goal",
+       "organic_void_ratio", "organic_reseed_rounds", "organic_wall_connect", "organic_wall_gap"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -438,6 +439,16 @@ OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::str
   a.foot_gap = num(in, "organic_foot_gap", a.foot_gap, w);
   // D (brief G6, an experiment): the stress lines are the goal (off when not given).
   a.stress_goal = flag(in, "organic_stress_goal", a.stress_goal, w);
+  // E (brief G6, try keys): the re-seeding's bare distance (1.5 when not given) and its rounds (1 when not given).
+  a.void_ratio = num(in, "organic_void_ratio", a.void_ratio, w);
+  if (!(std::isfinite(a.void_ratio) && a.void_ratio > 0.0)) json::fail(w + ".organic_void_ratio", "must be above 0");
+  const double rounds = num(in, "organic_reseed_rounds", a.reseed_rounds, w);
+  if (!(rounds >= 0.0 && rounds <= 100.0 && rounds == std::floor(rounds)))
+    json::fail(w + ".organic_reseed_rounds", "must be a whole number, 0 to 100");
+  a.reseed_rounds = static_cast<int>(rounds);
+  a.wall_connect = flag(in, "organic_wall_connect", a.wall_connect, w);   // E (off when not given)
+  a.wall_gap = num(in, "organic_wall_gap", a.wall_gap, w);   // E: 0 or less (and when not given): off
+  if (!std::isfinite(a.wall_gap)) json::fail(w + ".organic_wall_gap", "must be a number (0 or less: off)");
   // G13: 0 or less: the feet do not compete.
   if (!std::isfinite(a.foot_gap)) json::fail(w + ".organic_foot_gap", "must be a number (0 or less: feet do not compete)");
   const double thinnest = s.bead_mm * s.min_strut_lines;
