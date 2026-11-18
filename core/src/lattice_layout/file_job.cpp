@@ -645,6 +645,9 @@ constexpr Refusal kTensorUnreadable{"tensor_unreadable", 1};
 constexpr Refusal kCannotWrite{"cannot_write", 1};
 // V4: a strength check was asked for and this build has none to make.
 constexpr Refusal kStrengthUnavailable{"strength_unavailable", 1};
+// V4 (Install 3, owed): the strength check reads cells, and an Organic (weave) region has none: a strength job on a job
+// with a weave region is refused.
+constexpr Refusal kStrengthOrganic{"strength_organic", 1};
 constexpr Refusal kCancelled{"cancelled", 1};
 constexpr Refusal kError{"error", 1};
 
@@ -1159,6 +1162,12 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     }
     // V4: the strength job is read before the long work, and refused now if it cannot be checked.
     if (!job.strength_job.empty()) {
+      if (any_weave) {
+        refuse(r, kStrengthOrganic,
+               "The strength check cannot check an Organic lattice yet, so no file was made. Turn the strength check "
+               "off for this part, or use a cell lattice in every region.");
+        return done();
+      }
       if (!strength || !strength->before || !strength->run) {
         refuse(r, kStrengthUnavailable,
                "This worker cannot check a lattice's strength, so no file was made. Update the worker.");
@@ -1482,9 +1491,12 @@ std::string file_result_json(const FileResult& r) {
                 count(r.adrift), count(r.stepped_edges), count(r.thin_solid),
                 r.cells_by_stress ? "true" : "false", r.step_held_at);
   o += b;
-  std::snprintf(b, sizeof b, "    \"weave_regions\": %llu, \"strands\": %llu, \"weave_bars\": %llu,\n",
-                count(r.weave_regions), count(r.strands), count(r.weave_bars));
-  o += b;
+  if (r.weave_regions > 0) {   // Organic: written only for a job with a weave region (a cube-lattice result is the
+                               // released engine's, byte for byte)
+    std::snprintf(b, sizeof b, "    \"weave_regions\": %llu, \"strands\": %llu, \"weave_bars\": %llu,\n",
+                  count(r.weave_regions), count(r.strands), count(r.weave_bars));
+    o += b;
+  }
   std::snprintf(b, sizeof b,
                 "    \"floor_cell_mm\": %.9g, \"min_strut_mm\": %.9g, \"open_look\": %.9g, "
                 "\"touch\": %.9g, \"empty_regions\": [",
@@ -1555,8 +1567,8 @@ std::string file_result_json(const FileResult& r) {
   }
   // V4: written only when the check ran (V2); the block is the check's own.
   if (r.strength_ran) o += "  \"strength\": " + r.strength_json + ",\n";
-  {
-    // Organic, Traced: the trace's time and the shallow-bar table (ShallowTable).
+  if (r.weave_regions > 0) {
+    // Organic, Traced: the trace's time and the shallow-bar table (ShallowTable). Only for a job with a weave region.
     const ShallowTable& t = r.shallow;
     std::snprintf(b, sizeof b,
                   "  \"organic\": {\"ms_trace\": %.1f, \"spacing_used_mm\": {\"smallest\": %.9g, \"largest\": %.9g, "
@@ -1580,7 +1592,7 @@ std::string file_result_json(const FileResult& r) {
       o += b;
     }
     o += "]";
-    if (r.weave_regions > 0) {   // O10: only a job with a weave says them (a cube-lattice file is as before)
+    {   // O10
       std::snprintf(b, sizeof b, ",\n    \"weave_specks_ignored\": %llu, \"weave_held_ignored\": %llu",
                     count(r.made.weave_specks_ignored), count(r.made.weave_held_ignored));
       o += b;

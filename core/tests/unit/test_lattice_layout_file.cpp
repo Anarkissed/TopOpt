@@ -1536,6 +1536,13 @@ static void test_no_weave_same_file() {
   const FileResult y = make_lattice_file(box_model(30, 30, 12), with, b);
   CHECK(x.ok && y.ok && !slurp(a).empty() && slurp(a) == slurp(b));
   CHECK(y.weave_regions == 0 && y.strands == 0 && y.weave_bars == 0 && y.shallow.bars == 0 && y.ms_trace == 0.0);
+  // The lead's ruling (2026-11-17, brief L1): a job with no Organic region writes the released engine's result, no
+  // Organic field in it (the app reads that file).
+  for (const FileResult* r : {&x, &y}) {
+    const std::string j = file_result_json(*r);
+    CHECK(!has(j, "weave_regions") && !has(j, "\"organic\"") && !has(j, "\"grown\"") && !has(j, "strands") &&
+          !has(j, "shallow_bars"));
+  }
   std::printf("no weave region: the file %zu bytes, the same with the organic keys %d\n", x.file_bytes, slurp(a) == slurp(b) ? 1 : 0);
   std::remove(a.c_str());
   std::remove(b.c_str());
@@ -2036,7 +2043,74 @@ static void test_sag_keys() {
     std::remove(p.c_str());
 }
 
+// L1 (brief L1, item 6): one job with a cell region AND an Organic (weave) region is laid and made: the top face's region
+// is the weave, the bottom face's region cells. And a strength job on a job with an Organic region is refused
+// (strength_organic) before any work, with one plain line, no file; the same job with no weave region is not refused
+// for it (it goes on to the check's own reading of its job).
+static void test_cells_and_weave_job() {
+  std::string text = R"({"mode": "lattice_file", "model": "block.step", "layout": {
+    "min_strut_lines": 2, "bead_mm": 0.45,
+    "region_ids": [1, 2], "region_no_lattice": [0, 0], "region_depth_mm": [10, 10], "region_expand_mm": [-2, -2],
+    "region_face_counts": [1, 1], "region_faces": [1, 0], "region_weave": [true, false],
+    "organic_spacing_mm": 4, "organic_width_mm": 0.9,
+    "algorithm": "uniform", "cell_max_mm": 6, "min_cells_across": 1}})";
+  TensorField f;
+  f.spacing = 1.0;
+  f.nx = 30; f.ny = 30; f.nz = 24;
+  f.voigt.assign(6 * 30 * 30 * 24, 0.0);
+  for (std::size_t e = 0; e < 30 * 30 * 24; ++e) { f.voigt[6 * e + 2] = 3.0; f.voigt[6 * e + 0] = 1.0; }
+  const auto field = std::make_shared<TensorField>(f);
+  FileJob job = parse_file_job(text);
+  CHECK(job.settings.regions.size() == 2 && job.settings.regions[0].weave && !job.settings.regions[1].weave);
+  job.tensor_field = field;
+  const std::string path = kTmp + "/lattice_file_cells_and_weave.stl";
+  std::remove(path.c_str());
+  if (mesh_available()) {
+    const FileResult r = make_lattice_file(box_model(30, 30, 24), job, path);
+    if (!r.ok) std::printf("  (%s: %s %s)\n", r.code.c_str(), r.why.c_str(), r.detail.c_str());
+    std::size_t cell_bars = 0;
+    std::printf("cells and weave in one job: ok %d, cells %zu, weave regions %zu, strands %zu, bars %zu (weave %zu)\n",
+                r.ok ? 1 : 0, r.cells, r.weave_regions, r.strands, r.bars, r.weave_bars);
+    cell_bars = r.bars - r.weave_bars;
+    CHECK(r.ok && r.cells > 0 && r.weave_regions == 1 && r.strands > 0 && r.weave_bars > 0 && cell_bars > 0);
+    CHECK(r.ok && exists(path) && r.file_bytes > 0);
+    CHECK(has(file_result_json(r), "\"weave_regions\": 1"));
+    std::remove(path.c_str());
+  }
+  // The strength check refused on it, before anything (the check is never asked).
+  bool asked = false;
+  StrengthCheck check;
+  check.before = [&](const std::string&) { asked = true; StrengthDone d; d.ok = true; return d; };
+  check.run = [&](const StrengthAsk&) { asked = true; StrengthDone d; d.ok = true; d.json = "{}"; return d; };
+  std::string with_strength = text;
+  with_strength.replace(with_strength.find("\"layout\""), 8, "\"strength_job\": \"strength.json\", \"layout\"");
+  FileJob sj = parse_file_job(with_strength);
+  CHECK(sj.strength_job == "strength.json");
+  sj.tensor_field = field;
+  const FileResult s = make_lattice_file(box_model(30, 30, 24), sj, path, nullptr, nullptr, &check);
+  std::printf("strength job with an Organic region: %s: %s\n", s.code.c_str(), s.why.c_str());
+  check_refused(s, "strength_organic", 1, path);
+  CHECK(!asked && has(file_result_json(s), "\"code\": \"strength_organic\""));
+  // No weave region: not refused for it (the check's own `before` is asked).
+  std::string cells_only = with_strength;
+  cells_only.replace(cells_only.find("[true, false]"), 13, "[false, false]");
+  FileJob cj = parse_file_job(cells_only);
+  cj.tensor_field = field;
+  StrengthCheck refuse_it = check;
+  refuse_it.before = [&](const std::string&) {
+    asked = true;
+    StrengthDone d;
+    d.code = "strength_job_unreadable";
+    d.why = "made up";
+    return d;
+  };
+  const FileResult c = make_lattice_file(box_model(30, 30, 24), cj, path, nullptr, nullptr, &refuse_it);
+  CHECK(asked && c.code == "strength_job_unreadable");
+  std::remove(path.c_str());
+}
+
 int main() {
+  test_cells_and_weave_job();
   test_max_step_key();
   test_pieces_key();
   test_region_own_key();

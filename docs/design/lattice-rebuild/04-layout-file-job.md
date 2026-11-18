@@ -146,7 +146,7 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
              "stubs": 0, "joined": 0, "dropped": 60, "pieces": 1, "adrift": 0, "stepped_edges": 1, "thin_solid": 0, "cells_by_stress": false, "step_held_at": 0,
              "floor_cell_mm": 2.37, "min_strut_mm": 0.45, "open_look": 0.19, "touch": 0.354,
              "empty_regions": [],
-             "weave_regions": 0, "strands": 0, "weave_bars": 0,
+             "weave_regions": 1, "strands": 120, "weave_bars": 900,   (only with a weave region)
              "by_stress": false, "reference_mpa": 0, "highest_mpa": 0, "at_light": 0, "at_heavy": 0},
   "mesh": {"triangles": 1640, "mm3": 452.9, "part_mm3": 1000, "struts_mm3": 59.5, "solid_mm3": 398,
            "bars": 36, "bridges": 12, "balls": 14, "bars_left_out": 0, "bars_left_out_mm": 0,
@@ -167,7 +167,7 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
       {"band": "to 5 mm", "runs": 0, "kept": 0, "left_out": 0, "post": 0},
       {"band": "5 to 10 mm", "runs": 0, "kept": 0, "left_out": 0, "post": 0},
       {"band": "10 to 20 mm", "runs": 0, "kept": 0, "left_out": 0, "post": 0},
-      {"band": "over 20 mm", "runs": 0, "kept": 0, "left_out": 0, "post": 0}]},
+      {"band": "over 20 mm", "runs": 0, "kept": 0, "left_out": 0, "post": 0}]},   (only with a weave region)
   "grown": {"strands": 0, "grown_mm": 0, "kept_mm": 0, "cut_mm": {"outside": 0, "unsupported": 0,
     "leads_to_nothing": 0, "crowded": 0, "repeat": 0}, "seeds_floor": 0, ...},   (Grown only)
   "ms": {"import": 27, "measure": 0, "read": 9, "cells": 0, "bars": 1, "open_space": 6,
@@ -185,7 +185,7 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
   `thin_solid`: cut cells print rule P8 (f) made solid (a cut piece thinner than its own strut, lying against solid); they are counted in `solid_pieces` too.
   `cells_by_stress`: cell size by stress (C22) was applied to the layout (false when it was not asked for, or one of its OFF cases holds).
   `step_held_at`: the part's size-step limit the layout kept (C24, `max_step` held at the ladder's smallest step: 1.5 on Default Grade is kept as 2); 0 when none was asked. A region's own `max_step` is not reported here.
-  `weave_regions`, `strands`, `weave_bars` (Organic, Traced): the weave regions laid, the strands the trace gave for them, and the bars of those regions (in `bars` too). All 0 with no weave region.
+  `weave_regions`, `strands`, `weave_bars` (Organic, Traced): the weave regions laid, the strands the trace gave for them, and the bars of those regions (in `bars` too). Written only when the job has a weave region (the lead's ruling, 2026-11-17: a job with no Organic region writes the released engine's result byte for byte).
   `by_stress`: the struts were graded by stress; then `reference_mpa` is the reference used (the stated one or the part's own), `highest_mpa` the highest stress any cell read in its own cube, `at_light` and `at_heavy` the cells at the light end (no stress) and at the heavy end (at or over the reference). All 0 otherwise.
 - `mesh` is core's `MeshReport`. `mm3` is the plastic in the file; `part_mm3` the solid part's.
 - `print_check` is his print rules measured on the mesh the file holds, layer by layer (0.2 mm layers), the part standing on its lowest face:
@@ -195,7 +195,7 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
   - `left_out_at` ([x, y, z] each): the PLACES the make-check-make loop left struts out at, as it ended (core's `PrintableReport::drop_at`), gathered over all its passes: each mid-air start or one-ended overhang the layer check found, half a layer below it. Every strut whose lowest point is at one of these places is left out, and so is a small separate piece of the solid body that starts there. It is a list of places, not a count and not a list of struts: one place may leave out several struts, or none (`mesh.drop_unanswered` counts those). `posts` ([x, y, z_bottom, z_top] each): short posts added to hold up what leaving out could not fix. The preview can show both after a run.
   - `longest_bridge_reach_mm`: the farthest any bridge reaches past its supports (half its span).
   - `thin_islands`: a count only. Slices of the file about one line thick (a strut lying in an open face, cut in half by it).
-- `organic` (Organic, Traced; all 0 with no weave region): `ms_trace` is the trace's time, ms (every weave region; it is in none of `ms`'s steps, only in its `total`). `net_struts` and `net_mm` the net skin's struts as laid (O16, Finish Skin; after loose bars are dropped) and their length, mm. The rest is THE SHALLOW-BAR TABLE the owner's bridge rules (OR8 to OR10) need, from the weave's bars as laid (`shallow_bar_table` in `lattice_layout_file.hpp`):
+- `organic` (Organic; written only when the job has a weave region): `ms_trace` is the trace's time, ms (every weave region; it is in none of `ms`'s steps, only in its `total`). `net_struts` and `net_mm` the net skin's struts as laid (O16, Finish Skin; after loose bars are dropped) and their length, mm. The rest is THE SHALLOW-BAR TABLE the owner's bridge rules (OR8 to OR10) need, from the weave's bars as laid (`shallow_bar_table` in `lattice_layout_file.hpp`):
   - `shallow_bars`: the weave's bars lying under 30 degrees (`bar_is_bridge`). `held_both`, `held_one`, `held_none`: how many of their two ends are held (an end is held when it is a node, in the solid, or joined to another bar; an end on the part's surface or loose in the lattice is not).
   - `runs`: WHOLE runs: shallow bars chained through joints where exactly two shallow bars end at one point and go on in line within 15 degrees (a crossing of two level strands is four, and ends both runs there). A shallow bar that chains to nothing is a run of one. `longest_run_mm`: the longest run, the sum of its bars' lengths.
   - `kept_any_length`, `weave_left_unheld`, `stands_added`: the owner's bridge rules (01-rules.md, O6 to O9): the shallow bars kept because both ends are held (in the solid, or on a bar that is itself kept), at any length; those left out because an end leads to nothing (never posted instead); the posts put under long shallow runs as stands (O8; they are in `print_check.posts` too).
@@ -230,6 +230,7 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
 | `mesh_failed` | 1 | the mesh maker's own plain line, or: The lattice file could not be put together. Nothing was made. |
 | `cannot_write` | 1 | The lattice file could not be saved on the Mac (the folder is missing or the disk is full). |
 | `cancelled` | 1 | Stopped before the lattice file was finished. Nothing was made. (Only from code that passes a stop flag. On the worker a cancel stops the whole process and the worker reports it itself.) |
+| `strength_organic` | 1 | The strength check cannot check an Organic lattice yet, so no file was made. Turn the strength check off for this part, or use a cell lattice in every region. (A `strength_job` on a job with a weave region: refused before any work; brief L1.) |
 | `error` | 1 | Something went wrong while making the lattice file, and nothing was made. |
 
 The checks run in this order: the stress result (when the job names one) reads; the stress tensor (when the job names one) reads; the model opens; it has a surface; every region and Protect skin has at least one face that is the part's; By stress has a stress result; a weave has a stress tensor; the type is a strut type; cell size by stress has a stress result; the worker can make meshes; the part is closed; the layout has cells; By stress has a reference; the layout has struts.
