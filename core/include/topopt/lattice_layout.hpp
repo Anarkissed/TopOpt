@@ -993,6 +993,9 @@ struct Bar {
   // O17: the strand of a weave it was laid from (its place in the list weave_bars was given), -1 for every other bar.
   // Read only to walk along a strand (lift_weave_sags).
   int strand = -1;
+  // L2 d (brief G14): a support laid by hold_up_weave under a floating part's underside. J2b never removes a piece that
+  // holds one (J2a still applies).
+  bool support = false;
 };
 
 // Preview is the spec (reviewer, 2026-11-12): a bar lying flatter than 30 degrees is written to the file as a BRIDGE,
@@ -1041,6 +1044,16 @@ struct Strand {
   int region = 0;
   double spacing_mm = 0.0;
   bool tie = false;   // G9: a Grown transfer tie (read by its tests; the path lays it as any strand)
+};
+// L2 (brief G14): what the supports of one Grown area need (hold_up_weave): the kept patches' bottoms and the area's
+// own numbers.
+struct WeaveHold {
+  int region = 0;
+  double spacing_min_mm = 0.0, width_mm = 0.0, layer_mm = 0.2, depth_mm = 0.0, grid_mm = 0.0;
+  double support_mm = 0.0;   // OrganicAsk::part_support_mm (0: spacing_min_mm)
+  bool to_floor = false;     // OrganicAsk::part_to_floor
+  struct Patch { std::vector<Vec3> bottoms; double plan_mm2 = 0.0; Vec3 lo{}, hi{}; };
+  std::vector<Patch> patches;
 };
 // Each segment of each strand is one Bar (width the mean of its two ends' widths, `cell` the strand's spacing,
 // `region` its region), its ends finished as lay_bars finishes a cut strut's (finish_bar_ends in bars.cpp): where a
@@ -1382,6 +1395,7 @@ class Session {
     std::vector<std::pair<int, double>> net_reach;   // (region, reach mm); empty: no net skin
     std::vector<int> arrived;   // G11 (Grown only): weave regions whose vines that reach the surface have arrived
     std::vector<std::pair<int, double>> prune;   // J2 (brief G12): (Grown region, median asked spacing); empty: off
+    std::vector<WeaveHold> hold;   // L2 (brief G14): Grown areas with floating parts' undersides; empty: off
   };
   Outcome lay_with(const Settings& settings, const std::vector<Strand>* strands, int threads, const std::atomic<bool>* stop,
                    const WeaveFinish* finish = nullptr);

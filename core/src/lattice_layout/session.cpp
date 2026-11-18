@@ -246,6 +246,8 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
       domain_->check_stop();
       if (settings.skin && finish && !finish->net_reach.empty() && !finish->prune.empty())
         prune_weave(out.bars, finish->prune);   // J2: the weave pruned before the net skin is laid on it
+      if (settings.skin && finish && !finish->hold.empty())   // L2 d: after the growth and J2, before the net skin
+        hold_up_weave(out.bars, *domain_, finish->hold);
       if (settings.skin && finish && !finish->net_reach.empty())   // O16: Finish Skin on a weave region
         lay_net_skin(out.bars, *domain_, finish->net_reach, settings.skin_spec.width_mm);
       domain_->check_stop();
@@ -257,6 +259,8 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
       } else {
         out.pieces = count_pieces(out.bars, *domain_, nullptr, nullptr, &out.layout);
       }
+      if (!settings.skin && finish && !finish->hold.empty())   // L2 d: Skin off, after the growth and J2
+        hold_up_weave(out.bars, *domain_, finish->hold);
       for (const Bar& b : out.bars.bars)
         if (b.net) {
           ++out.net_struts;

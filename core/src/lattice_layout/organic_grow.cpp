@@ -53,6 +53,7 @@ void GrowReport::add(const GrowReport& o) {
   ties_seeded += o.ties_seeded; ties_laid += o.ties_laid; ties_refused_minor += o.ties_refused_minor;
   ties_refused_reach += o.ties_refused_reach;
   feet_kept += o.feet_kept; feet_cut_at_joint += o.feet_cut_at_joint; vines_removed += o.vines_removed;
+  hold_feet_kept += o.hold_feet_kept; hold_wall_roots_kept += o.hold_wall_roots_kept;   // L2 c
   feet_cut_mm += o.feet_cut_mm; feet_cut_high_mm += o.feet_cut_high_mm;
   feet_cut_high_strands += o.feet_cut_high_strands;
   joins_refused_outside += o.joins_refused_outside; links_refused_outside += o.links_refused_outside;
@@ -1533,6 +1534,15 @@ void Grower::feet(const std::vector<int>& parent, const std::vector<char>& branc
     const double lim = (wall ? ask_.wall_gap : ask_.foot_gap) * sep(fp);
     bool near = false;
     for (const Vec3& k : kept) near = near || (wall ? dist(k, fp) : len(level(sub(k, fp)))) < lim;
+    if (near && !sp_.hold_centres.empty()) {   // L2 c: never thinned within the reach of a floating part's underside
+      const double R2 = sp_.hold_reach_mm * sp_.hold_reach_mm;
+      bool in_zone = false;
+      for (const Vec3& c : sp_.hold_centres) {
+        const Vec3 d = sub(c, fp);
+        if (dot(d, d) <= R2) { in_zone = true; break; }
+      }
+      if (in_zone) { near = false; ++(wall ? rep_.hold_wall_roots_kept : rep_.hold_feet_kept); }
+    }
     if (near) {
       removed.push_back(f.line);
     } else {

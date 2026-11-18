@@ -204,7 +204,9 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "organic_void_ratio", "organic_reseed_rounds", "organic_wall_connect", "organic_wall_gap",
        "organic_wall_cross", "organic_top_run", "organic_run_max", "organic_root_run", "organic_run_gap",
        "organic_run_follow", "organic_run_pull", "organic_run_seek", "organic_run_min", "organic_root_gap",
-       "organic_auto", "organic_width_heavy_mm", "organic_member_cap", "organic_prune", "organic_bed_floor_mm"},
+       "organic_auto", "organic_width_heavy_mm", "organic_member_cap", "organic_prune", "organic_bed_floor_mm",
+       "organic_shape_reach", "organic_hold_parts", "organic_part_reach_mm",
+       "organic_part_support_mm", "organic_part_to_floor"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -495,6 +497,17 @@ OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::str
   a.bed_floor_mm = num(in, "organic_bed_floor_mm", a.bed_floor_mm, w);   // K1
   if (!(std::isfinite(a.bed_floor_mm) && a.bed_floor_mm >= 0.0))
     json::fail(w + ".organic_bed_floor_mm", "must be 0 (no floor) or above");
+  a.shape_reach = num(in, "organic_shape_reach", a.shape_reach, w);   // L1
+  if (!(std::isfinite(a.shape_reach) && a.shape_reach >= 0.0))
+    json::fail(w + ".organic_shape_reach", "must be 0 (no outline cap) or above");
+  a.hold_parts = flag(in, "organic_hold_parts", a.hold_parts, w);   // L2
+  a.part_reach_mm = num(in, "organic_part_reach_mm", a.part_reach_mm, w);
+  if (!(std::isfinite(a.part_reach_mm) && a.part_reach_mm >= 0.0))
+    json::fail(w + ".organic_part_reach_mm", "must be 0 or above");
+  a.part_support_mm = num(in, "organic_part_support_mm", a.part_support_mm, w);
+  if (!(std::isfinite(a.part_support_mm) && a.part_support_mm >= 0.0))
+    json::fail(w + ".organic_part_support_mm", "must be 0 (the tightest spacing) or above");
+  a.part_to_floor = flag(in, "organic_part_to_floor", a.part_to_floor, w);
   a.width_heavy_mm = num(in, "organic_width_heavy_mm", a.width_heavy_mm, w);   // I
   {
     const double light = a.width_mm > 0.0 ? a.width_mm : thinnest;

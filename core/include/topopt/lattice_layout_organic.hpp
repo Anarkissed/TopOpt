@@ -126,6 +126,23 @@ struct OrganicAsk {
   // lattice. Carried to the domain as Settings::bed_floor_mm (DomainSpec::bed_floor_mm) by the file job, for Grown only.
   // 0 = no floor (as before); 0 or above.
   double bed_floor_mm = 0.0;
+  // L1 (brief G14), Grade to shape as a variable: O13's outline cap is (2 / shape_reach) x steps x the grid step (the
+  // owner, 2026-11-16: "Should this be considered a 'Grade to shape' and make it a variable?"). 1 = as before; 2 = the
+  // small cells reach twice as far in from every face; 0 = no outline cap at all. 0 or above.
+  double shape_reach = 1.0;
+  // L2 (brief G14), Detect floating parts (the owner: "detect parts of the MODEL ... which, without anything holding them
+  // up, would be floating in mid-air"): per Grown area, the undersides of solid that hangs over its lattice are found
+  // (OrganicSpacing::hold_patches), every candidate within part_reach_mm of them takes the tightest spacing, the feet
+  // and wall roots there are never thinned (Grower), and supports are grown down from them (hold_up_weave). Off: as
+  // before. part_reach_mm 0 or above.
+  bool hold_parts = false;
+  double part_reach_mm = 8.0;
+  // (brief G15, heavier; the owner: "ok. Go for that.") part_support_mm: above 0, the least distance between support
+  // points on a piece's underside (0: spacing_min_mm, as before). part_to_floor: a support passes THROUGH the vine
+  // vertices it reaches (a joint each) and ends only on the part's solid or the area's floor; leaving the area or
+  // running more than twice the area's depth ends it at its last joint, or refuses it with none (false: as before).
+  double part_support_mm = 0.0;
+  bool part_to_floor = false;
 };
 
 // J2 (brief G12), the pruning of a Grown area's weave bars, for each (region, median asked spacing) of `areas`:
@@ -146,8 +163,43 @@ struct PruneCount {
   double removed_mm = 0.0;
   std::size_t pieces_apart = 0;    // J2b: pieces kept apart from the largest (20 x the median or more)
   double apart_mm = 0.0;
+  std::size_t supports_cut = 0;          // L2: support bars J2a removed (an end not Solid, not Surface, not at a joint)
+  std::size_t pieces_held_by_support = 0;   // L2: pieces J2b would have removed but kept, as they hold a support bar
+  double held_by_support_mm = 0.0;
 };
 std::vector<PruneCount> prune_weave(Bars& bars, const std::vector<std::pair<int, double>>& areas);
+
+// L2 d, e (brief G14): supports from the undersides of floating parts, on the weave bars after the growth and J2 (the
+// Grower's strands are bars by then: a "kept strand" is a kept weave bar of the area that is not a net strut, its
+// "vertices" the bars' ends, "a strand that ends in the solid" a bar end tagged Solid). Per patch of `area`:
+// support points = the patch's bottoms, lowest first then by x, y, kept when at least spacing_min_mm from every point
+// kept before (at least one). A point is already held when a kept bar's Solid end lies within 0.5 x spacing_min_mm of
+// it. Otherwise a support walks DOWN from it one layer (layer_mm) at a time, leaning each step at most one layer
+// sideways toward the nearest kept bar end below it inside the 45 degree cone (straight down with none). It ends on the
+// first of: a kept bar end within that bar's width (the support ends exactly there: a joint, end Node), the part's solid
+// (BedFloor: on the floor; any other solid: on solid). Refused when a step leaves the part (air) or enters another
+// region's lattice ("left the area"), or the walk is longer than the region's depth (Region prism depth, or the shell
+// depth). A kept support is one strand (points from its lower end up, the top one width into the solid above the
+// point, the light width, not a tie) laid by weave_bars, its bars given a new strand number. Its ends: Solid where it
+// enters solid, Node on a bar end.
+struct HoldPatchCount {
+  int region = 0;
+  Vec3 lo{}, hi{};
+  double plan_mm2 = 0.0;
+  std::size_t points = 0, held = 0, on_vine = 0, on_solid = 0, on_floor = 0, refused_air = 0, refused_long = 0;
+  double mm = 0.0;
+  std::size_t ends_before = 0, ends_after = 0;   // kept weave bar ends tagged Solid under the patch (in its voxel
+                                                 // columns, within one grid step of its bottoms' height)
+  // The top end of a support: where its top piece (from its last vertex below the solid to the solid) was shorter than
+  // its width, weave_bars drops that piece as a stub (S4) and the strand's last vertex is left as a Node with nothing
+  // above it. It is then tagged Solid when the solid begins within the support's width + half a grid step above it
+  // (`top_retagged`: the mesh runs a Solid end on into the solid by its width), else left (`top_open`).
+  std::size_t top_retagged = 0, top_open = 0;
+  std::size_t joints = 0;   // part_to_floor: vine vertices kept supports passed through (a fallback's last joint is its end)
+  std::size_t bars_laid = 0;
+  int strand_lo = -1, strand_hi = -1;   // the strand numbers of this patch's supports: [lo, hi)
+};
+std::vector<HoldPatchCount> hold_up_weave(Bars& bars, const Domain& domain, const std::vector<WeaveHold>& areas);
 
 // O16, the net skin: Finish Skin (Settings::skin) on a weave region (the old finish step "Skin", organic_lattice.cpp,
 // read for its rules and numbers only). For each
@@ -197,6 +249,24 @@ struct OrganicSpacing {
   std::size_t candidates = 0;
   double reference_mpa = 0.0;           // the reference used (stated, or the weave's percentile)
   std::size_t shape_fit_tightened = 0;  // O13: candidates the shape fit tightened
+  // L2 a, b (OrganicAsk::hold_parts; all empty or 0 when off; brief G15). The FLOATING PIECES of the part, found layer
+  // by layer from the bed on the field's grid (see organic_spacing): solid voxels not grounded, 26-connected, 20 mm3 or
+  // more (smaller ones counted in hold_small_patches). Per kept piece: every voxel's centre, its volume and box; its
+  // UNDERSIDE against this region (bottom-face centres of its voxels with a candidate of this region straight below,
+  // and their area, plan_mm2) and its SIDES (centres of its voxels with a candidate of this region beside them in the
+  // same layer, and their area); the candidates its reach took into the zone, and of them those tightened.
+  struct HoldPatch {
+    std::vector<Vec3> bottoms, centres, sides;
+    double plan_mm2 = 0.0, volume_mm3 = 0.0, side_mm2 = 0.0;
+    Vec3 lo{}, hi{};
+    std::size_t zone = 0, tightened = 0;
+  };
+  std::vector<HoldPatch> hold_patches;
+  std::size_t hold_small_patches = 0;   // floating pieces under 20 mm3, ignored
+  std::vector<Vec3> hold_centres;       // the centres of every voxel of the kept pieces
+  double hold_reach_mm = 0.0;           // OrganicAsk::part_reach_mm
+  std::size_t hold_zone = 0;            // candidates within the reach of a hanging voxel's centre
+  std::size_t hold_tightened = 0;       // of those, the ones whose spacing was above the tightest and was set to it
 };
 OrganicSpacing organic_spacing(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask);
 
@@ -306,6 +376,9 @@ struct GrowReport {
   // joint that holds with another plant's strand; removed whole (no such joint); the length those cuts took, with what
   // hung only on a vine removed whole (counted, in the lengths below, under "leads to nothing").
   std::size_t feet_kept = 0, feet_cut_at_joint = 0, vines_removed = 0;
+  // L2 c (brief G14): feet and wall roots within OrganicSpacing::hold_reach_mm of a hanging voxel's centre, kept though
+  // another kept one stood within the gap (they would have been removed).
+  std::size_t hold_feet_kept = 0, hold_wall_roots_kept = 0;
   double feet_cut_mm = 0.0;
   // ... of which above half the region's height: the length, and the strands it was taken from.
   double feet_cut_high_mm = 0.0;

@@ -10,6 +10,7 @@
 #include <limits>
 #include <memory>
 #include <stdexcept>
+#include <tuple>
 
 #include "topopt/grading.hpp"
 #include "topopt/lattice.hpp"
@@ -118,7 +119,11 @@ std::vector<std::size_t> straighten_points(const std::vector<Vec3>& points, doub
 // Structural (not built here): rho = rho_max * (s / s_max)^g (s_max the region's highest von Mises, not a percentile)
 // held to octet's band [rho_min, rho_max], so every voxel under (rho_min / rho_max)^(1/g) of the peak sits at rho_min,
 // the widest end; then the same stretch and exponent e.
-OrganicSpacing organic_spacing(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask) {
+namespace {
+// O12, O13 as before (with L1); `solid`, when given, receives per voxel: 1 inside the part and lattice of no region,
+// 2 inside and lattice of a region, 0 outside.
+OrganicSpacing spacing_core(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask,
+                            std::vector<char>* solid) {
   OrganicSpacing out;
   if (field.empty()) return out;
   if (ask.spacing_mm != 0.0 && !(ask.spacing_mm > 0.0 && std::isfinite(ask.spacing_mm)))
@@ -134,6 +139,7 @@ OrganicSpacing organic_spacing(const Domain& domain, int region, const TensorFie
   const std::size_t n = static_cast<std::size_t>(field.nx) * field.ny * field.nz;
   out.candidate.assign(n, 0);
   out.spacing_mm.assign(n, 0.0);
+  if (solid) solid->assign(n, 0);
   std::vector<char> weave_ids;   // by region id: is it a weave region
   for (const Region& r : domain.spec().regions)
     if (r.role == Role::Lattice && r.weave && r.id >= 0) {
@@ -152,6 +158,7 @@ OrganicSpacing organic_spacing(const Domain& domain, int region, const TensorFie
         const Where w = probe.where(c);
         const std::size_t e = field.index(i, j, k);
         in_part[e] = w.why != Why::Outside;
+        if (solid) (*solid)[e] = in_part[e] ? (w.lattice() ? 2 : 1) : 0;   // L2: 1 solid, 2 lattice of a region, 0 outside
         const bool of_weave = w.lattice() && (w.id == region || (w.id >= 0 && static_cast<std::size_t>(w.id) <
                                                                                      weave_ids.size() &&
                                                                  weave_ids[static_cast<std::size_t>(w.id)]));
@@ -242,13 +249,156 @@ OrganicSpacing organic_spacing(const Domain& domain, int region, const TensorFie
     if (!out.candidate[e]) continue;
     const double w = width[e];
     const double cap_member = (w > 0.0 && std::isfinite(w)) ? w / n_star : std::numeric_limits<double>::infinity();
-    const double cap_outline = 2.0 * static_cast<double>(steps[e]) * field.spacing;
+    // L1: Grade to shape as a variable (shape_reach 1: as before; 0: no outline cap).
+    const double cap_outline = ask.shape_reach > 0.0 ? (2.0 / ask.shape_reach) * static_cast<double>(steps[e]) * field.spacing
+                                                     : std::numeric_limits<double>::infinity();
     double cap = ask.member_cap ? std::min(cap_member, cap_outline) : cap_outline;   // J1
     if (cap < lo) cap = lo;
     if (!(cap > 0.0) || !(cap < out.spacing_mm[e])) continue;
     out.spacing_mm[e] = cap;
     ++out.shape_fit_tightened;
   }
+  return out;
+}
+}  // namespace
+
+OrganicSpacing organic_spacing(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask) {
+  if (!ask.hold_parts) return spacing_core(domain, region, field, ask, nullptr);
+  std::vector<char> solid;
+  OrganicSpacing out = spacing_core(domain, region, field, ask, &solid);
+  if (out.candidates == 0) return out;
+  // L2 a (brief G15): the FLOATING PIECES, layer by layer from the bed, for the whole part (+z is up: the file job's
+  // build direction). Solid = inside the part and lattice of no region. In the lowest layer holding any voxel of the
+  // part every solid voxel is grounded; in each layer above, the solid voxels fall into groups (touching by a side or
+  // a corner within the layer), and a group is grounded when any of its voxels has a grounded solid voxel among the 9
+  // of the layer below. Floating = solid and not grounded; floating voxels touching in any way (26) are one piece; a
+  // piece under 20 mm3 is ignored (counted). Per kept piece, against THIS region's candidates: its underside (voxels
+  // with a candidate straight below) and its sides (voxels with a candidate beside them in the same layer, 4 sides).
+  const int nx = field.nx, ny = field.ny, nz = field.nz;
+  const double h = field.spacing;
+  const std::size_t n = solid.size();
+  std::vector<char> in_part(n, 0);
+  for (std::size_t e = 0; e < n; ++e) { in_part[e] = solid[e] != 0; solid[e] = solid[e] == 1; }
+  std::vector<char> grounded(n, 0);
+  {
+    int k0 = -1;
+    for (int k = 0; k < nz && k0 < 0; ++k)
+      for (int j = 0; j < ny && k0 < 0; ++j)
+        for (int i = 0; i < nx && k0 < 0; ++i)
+          if (in_part[field.index(i, j, k)]) k0 = k;
+    if (k0 >= 0) {
+      for (int j = 0; j < ny; ++j)
+        for (int i = 0; i < nx; ++i) grounded[field.index(i, j, k0)] = solid[field.index(i, j, k0)];
+      std::vector<int> group(static_cast<std::size_t>(nx) * ny, -1);
+      std::vector<std::array<int, 2>> stack;
+      for (int k = k0 + 1; k < nz; ++k) {
+        std::fill(group.begin(), group.end(), -1);
+        int groups = 0;
+        for (int j = 0; j < ny; ++j)
+          for (int i = 0; i < nx; ++i) {
+            if (!solid[field.index(i, j, k)] || group[static_cast<std::size_t>(j) * nx + i] >= 0) continue;
+            std::vector<std::array<int, 2>> members;
+            bool held = false;
+            stack.assign(1, {i, j});
+            group[static_cast<std::size_t>(j) * nx + i] = groups;
+            while (!stack.empty()) {
+              const std::array<int, 2> c = stack.back();
+              stack.pop_back();
+              members.push_back(c);
+              for (int dj = -1; dj <= 1; ++dj)
+                for (int di = -1; di <= 1; ++di) {
+                  const int a = c[0] + di, bb = c[1] + dj;
+                  if (a < 0 || bb < 0 || a >= nx || bb >= ny) continue;
+                  if (!held && grounded[field.index(a, bb, k - 1)]) held = true;
+                  if (!solid[field.index(a, bb, k)] || group[static_cast<std::size_t>(bb) * nx + a] >= 0) continue;
+                  group[static_cast<std::size_t>(bb) * nx + a] = groups;
+                  stack.push_back({a, bb});
+                }
+            }
+            if (held)
+              for (const auto& c : members) grounded[field.index(c[0], c[1], k)] = 1;
+            ++groups;
+          }
+      }
+    }
+  }
+  std::vector<char> seen(n, 0);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const std::size_t e0 = field.index(i, j, k);
+        if (!solid[e0] || grounded[e0] || seen[e0]) continue;
+        std::vector<std::array<int, 3>> stack{{i, j, k}}, all;
+        seen[e0] = 1;
+        while (!stack.empty()) {
+          const std::array<int, 3> c = stack.back();
+          stack.pop_back();
+          all.push_back(c);
+          for (int dk = -1; dk <= 1; ++dk)
+            for (int dj = -1; dj <= 1; ++dj)
+              for (int di = -1; di <= 1; ++di) {
+                const int a = c[0] + di, bb = c[1] + dj, cc = c[2] + dk;
+                if (a < 0 || bb < 0 || cc < 0 || a >= nx || bb >= ny || cc >= nz) continue;
+                const std::size_t f = field.index(a, bb, cc);
+                if (!solid[f] || grounded[f] || seen[f]) continue;
+                seen[f] = 1;
+                stack.push_back({a, bb, cc});
+              }
+        }
+        const double volume = static_cast<double>(all.size()) * h * h * h;
+        if (volume < 20.0) { ++out.hold_small_patches; continue; }
+        std::sort(all.begin(), all.end(), [](const std::array<int, 3>& p, const std::array<int, 3>& q) {
+          return std::make_tuple(p[2], p[0], p[1]) < std::make_tuple(q[2], q[0], q[1]);
+        });
+        OrganicSpacing::HoldPatch P;
+        P.volume_mm3 = volume;
+        P.lo = {1e300, 1e300, 1e300};
+        P.hi = {-1e300, -1e300, -1e300};
+        for (const auto& c : all) {
+          const Vec3 lo{field.origin.x + c[0] * h, field.origin.y + c[1] * h, field.origin.z + c[2] * h};
+          P.centres.push_back({lo.x + 0.5 * h, lo.y + 0.5 * h, lo.z + 0.5 * h});
+          out.hold_centres.push_back(P.centres.back());
+          P.lo = {std::min(P.lo.x, lo.x), std::min(P.lo.y, lo.y), std::min(P.lo.z, lo.z)};
+          P.hi = {std::max(P.hi.x, lo.x + h), std::max(P.hi.y, lo.y + h), std::max(P.hi.z, lo.z + h)};
+          if (c[2] > 0 && out.candidate[field.index(c[0], c[1], c[2] - 1)]) {
+            P.bottoms.push_back({lo.x + 0.5 * h, lo.y + 0.5 * h, lo.z});
+            P.plan_mm2 += h * h;
+          }
+          bool side = false;
+          for (const auto& d : {std::array<int, 2>{1, 0}, std::array<int, 2>{-1, 0}, std::array<int, 2>{0, 1}, std::array<int, 2>{0, -1}}) {
+            const int a = c[0] + d[0], bb = c[1] + d[1];
+            if (a >= 0 && bb >= 0 && a < nx && bb < ny && out.candidate[field.index(a, bb, c[2])]) side = true;
+          }
+          if (side) { P.sides.push_back(P.centres.back()); P.side_mm2 += h * h; }
+        }
+        out.hold_patches.push_back(std::move(P));
+      }
+  // L2 b: every candidate within part_reach_mm of the centre of ANY voxel of a kept piece takes the tightest spacing
+  // (a candidate is counted for the first piece that reaches it).
+  out.hold_reach_mm = ask.part_reach_mm;
+  const bool one = ask.spacing_mm > 0.0;
+  const double tight = one ? ask.spacing_mm : ask.spacing_min_mm;
+  const double R = ask.part_reach_mm, R2 = R * R;
+  const int r = static_cast<int>(std::ceil(R / h));
+  std::vector<char> zone(n, 0);
+  for (OrganicSpacing::HoldPatch& P : out.hold_patches)
+    for (const Vec3& c : P.centres) {
+      const int ci = static_cast<int>(std::floor((c.x - field.origin.x) / h)), cj = static_cast<int>(std::floor((c.y - field.origin.y) / h)),
+                ck = static_cast<int>(std::floor((c.z - field.origin.z) / h));
+      for (int k = std::max(0, ck - r); k <= std::min(nz - 1, ck + r); ++k)
+        for (int j = std::max(0, cj - r); j <= std::min(ny - 1, cj + r); ++j)
+          for (int i = std::max(0, ci - r); i <= std::min(nx - 1, ci + r); ++i) {
+            const std::size_t e = field.index(i, j, k);
+            if (!out.candidate[e] || zone[e]) continue;
+            const double dx = field.origin.x + (i + 0.5) * h - c.x, dy = field.origin.y + (j + 0.5) * h - c.y,
+                         dz = field.origin.z + (k + 0.5) * h - c.z;
+            if (dx * dx + dy * dy + dz * dz > R2) continue;
+            zone[e] = 1;
+            ++out.hold_zone;
+            ++P.zone;
+            if (out.spacing_mm[e] > tight) { out.spacing_mm[e] = tight; ++out.hold_tightened; ++P.tightened; }
+          }
+    }
   return out;
 }
 
@@ -399,6 +549,19 @@ Outcome Session::lay_organic(const Settings& settings, const TensorField& field,
     if (settings.skin && reach > 0.0) finish.net_reach.push_back({r.id, reach});   // O16
     if (ask.mode == OrganicMode::Grown) finish.arrived.push_back(r.id);   // G11: a vine that reached the surface
     if (ask.mode == OrganicMode::Grown && ask.prune) finish.prune.push_back({r.id, median});   // J2
+    if (ask.mode == OrganicMode::Grown && ask.hold_parts && !sp.hold_patches.empty()) {   // L2 d
+      WeaveHold hold;
+      hold.region = r.id;
+      hold.spacing_min_mm = ask.spacing_mm > 0.0 ? ask.spacing_mm : ask.spacing_min_mm;
+      hold.width_mm = ask.width_mm > 0.0 ? ask.width_mm : domain_->spec().bead_mm * domain_->spec().min_strut_lines;
+      hold.layer_mm = ask.layer_mm;
+      hold.depth_mm = r.is_shell() ? r.shell_depth_mm : r.prism.depth;
+      hold.grid_mm = field.spacing;
+      hold.support_mm = ask.part_support_mm;
+      hold.to_floor = ask.part_to_floor;
+      for (const OrganicSpacing::HoldPatch& P : sp.hold_patches) hold.patches.push_back({P.bottoms, P.plan_mm2, P.lo, P.hi});
+      finish.hold.push_back(std::move(hold));
+    }
     if (st.candidates > 0) {
       smallest = candidates ? std::min(smallest, st.spacing_smallest_mm) : st.spacing_smallest_mm;
       largest = candidates ? std::max(largest, st.spacing_largest_mm) : st.spacing_largest_mm;
@@ -481,6 +644,7 @@ std::vector<PruneCount> prune_weave(Bars& bars, const std::vector<std::pair<int,
     for (std::size_t i : cut) {
       keep[i] = 0;
       PruneCount& c = out[static_cast<std::size_t>(area_of(bars.bars[i].region))];
+      c.supports_cut += bars.bars[i].support;   // L2
       ++c.bars_cut;
       c.cut_mm += jlen(bars.bars[i]);
       if (first) ++c.ends_cut;
@@ -545,7 +709,11 @@ std::vector<PruneCount> prune_weave(Bars& bars, const std::vector<std::pair<int,
       }
     }
     std::map<std::size_t, double> mm;
-    for (std::size_t m = 0; m < mine.size(); ++m) mm[find(m)] += jlen(bars.bars[mine[m]]);
+    std::map<std::size_t, char> holds_support;   // L2: a piece holding a support bar is never removed
+    for (std::size_t m = 0; m < mine.size(); ++m) {
+      mm[find(m)] += jlen(bars.bars[mine[m]]);
+      if (bars.bars[mine[m]].support) holds_support[find(m)] = 1;
+    }
     std::size_t largest = 0;
     double big = -1.0;
     for (const auto& g : mm) if (g.second > big) { big = g.second; largest = g.first; }
@@ -553,13 +721,230 @@ std::vector<PruneCount> prune_weave(Bars& bars, const std::vector<std::pair<int,
     PruneCount& c = out[k];
     for (const auto& g : mm) {
       if (g.first == largest) continue;
-      if (g.second < floor_mm) {
+      if (g.second < floor_mm && holds_support.count(g.first)) {
+        ++c.pieces_held_by_support; c.held_by_support_mm += g.second;
+      } else if (g.second < floor_mm) {
         ++c.pieces_removed; c.removed_mm += g.second;
         for (std::size_t m = 0; m < mine.size(); ++m) if (find(m) == g.first) keep[mine[m]] = 0;
       } else { ++c.pieces_apart; c.apart_mm += g.second; }
     }
   }
   jkeep(bars, keep);
+  return out;
+}
+
+// ── L2 d, e (brief G14): supports from the undersides of floating parts ────────────────
+std::vector<HoldPatchCount> hold_up_weave(Bars& bars, const Domain& domain, const std::vector<WeaveHold>& areas) {
+  std::vector<HoldPatchCount> out;
+  const Domain::Probe probe = domain.probe();
+  auto d3 = [](const Vec3& a, const Vec3& b) { return std::sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z)); };
+  int strand_base = 0;
+  for (const Bar& b : bars.bars) strand_base = std::max(strand_base, b.strand + 1);
+  for (const WeaveHold& A : areas) {
+    // The area's kept vine bars: their ends (with the bar's width) and the ends tagged Solid.
+    std::vector<Vec3> verts, solid_ends;
+    std::vector<double> vw;
+    auto read_ends = [&]() {
+      verts.clear(); vw.clear(); solid_ends.clear();
+      for (const Bar& b : bars.bars) {
+        if (b.region != A.region || b.net) continue;
+        verts.push_back(b.a); vw.push_back(b.width);
+        verts.push_back(b.b); vw.push_back(b.width);
+        if (b.end_a == Bar::End::Solid) solid_ends.push_back(b.a);
+        if (b.end_b == Bar::End::Solid) solid_ends.push_back(b.b);
+      }
+    };
+    read_ends();
+    const double g = A.grid_mm > 0.0 ? A.grid_mm : 1.0;
+    auto ends_under = [&](const WeaveHold::Patch& P) {
+      std::size_t n = 0;
+      for (const Vec3& e : solid_ends)
+        for (const Vec3& q : P.bottoms)
+          if (std::fabs(e.x - q.x) <= 0.5 * g && std::fabs(e.y - q.y) <= 0.5 * g && std::fabs(e.z - q.z) <= g) { ++n; break; }
+      return n;
+    };
+    const double smin = A.spacing_min_mm, Lh = A.layer_mm > 0.0 ? A.layer_mm : 0.2;
+    std::vector<Strand> supports;
+    std::vector<std::size_t> of_patch;
+    std::vector<char> on_vertex;
+    const std::size_t first = out.size();
+    for (const WeaveHold::Patch& P : A.patches) {
+      HoldPatchCount c;
+      c.region = A.region; c.lo = P.lo; c.hi = P.hi; c.plan_mm2 = P.plan_mm2;
+      c.ends_before = ends_under(P);
+      std::vector<Vec3> pts = P.bottoms;
+      std::sort(pts.begin(), pts.end(), [](const Vec3& a, const Vec3& b) { return std::make_tuple(a.z, a.x, a.y) < std::make_tuple(b.z, b.x, b.y); });
+      std::vector<Vec3> kept;
+      const double apart = A.support_mm > 0.0 ? A.support_mm : smin;   // organic_part_support_mm (0: spacing_min_mm)
+      for (const Vec3& q : pts) {
+        bool far = true;
+        for (const Vec3& k : kept) far = far && d3(k, q) >= apart;
+        if (far || kept.empty()) kept.push_back(q);
+      }
+      for (const Vec3& p : kept) {
+        ++c.points;
+        bool held = false;
+        for (const Vec3& e : solid_ends) held = held || d3(e, p) <= 0.5 * smin;
+        if (held) { ++c.held; continue; }
+        // The bar ends that can matter: inside the 45 degree cone under p (and a little round it, for the joint test).
+        std::vector<std::size_t> near;
+        for (std::size_t i = 0; i < verts.size(); ++i) {
+          const double dz = p.z - verts[i].z, hd = std::hypot(verts[i].x - p.x, verts[i].y - p.y);
+          const double reach = A.to_floor ? 2.0 * A.depth_mm : A.depth_mm, slack = A.to_floor ? 4.0 : 2.0;
+          if (dz > -2.0 && dz <= reach + 2.0 && hd <= std::max(0.0, dz) + slack) near.push_back(i);
+        }
+        std::vector<Vec3> path{p};
+        Vec3 cur = p;
+        double run = 0.0;
+        bool entered = false;
+        int ending = 0;   // 1 on a vine, 2 on solid, 3 on the floor, -1 left the area, -2 too long
+        // (brief G15 heavier) to_floor: a vine vertex reached is a joint the support passes through; it ends only on
+        // solid or the floor; leaving the area or running past twice the depth ends it at its last joint (or refuses it).
+        std::vector<Vec3> joints;
+        std::size_t last_joint = 0;   // path's size just after the last joint
+        auto joined_at = [&](const Vec3& v) {
+          for (const Vec3& q : joints) if (d3(q, v) < 1e-9) return true;
+          return false;
+        };
+        const double most = A.to_floor ? 2.0 * A.depth_mm : A.depth_mm;
+        for (;;) {
+          std::size_t best = verts.size();
+          double bd = std::numeric_limits<double>::infinity();
+          for (std::size_t i : near) {
+            const double dz = cur.z - verts[i].z;
+            if (!(dz > 0.0)) continue;
+            const double hd = std::hypot(verts[i].x - cur.x, verts[i].y - cur.y);
+            if (hd > dz) continue;
+            const double dd = std::hypot(hd, dz);
+            if (dd < bd) { bd = dd; best = i; }
+          }
+          Vec3 next{cur.x, cur.y, cur.z - Lh};
+          if (best < verts.size()) {
+            const double hx = verts[best].x - cur.x, hy = verts[best].y - cur.y, hd = std::hypot(hx, hy);
+            if (hd > 1e-9) {
+              const double lean = std::min(Lh, hd);
+              next.x += hx / hd * lean;
+              next.y += hy / hd * lean;
+            }
+          }
+          run += d3(cur, next);
+          if (entered) {
+            std::size_t hit = verts.size();
+            double hb = std::numeric_limits<double>::infinity();
+            for (std::size_t i : near) {
+              if (A.to_floor && joined_at(verts[i])) continue;
+              const double dd = d3(next, verts[i]);
+              if (dd <= vw[i] && dd < hb) { hb = dd; hit = i; }
+            }
+            if (hit < verts.size()) {
+              path.push_back(verts[hit]);
+              if (!A.to_floor) { ending = 1; break; }
+              joints.push_back(verts[hit]);
+              last_joint = path.size();
+              cur = verts[hit];
+              if (run > most) { ending = -2; break; }
+              continue;
+            }
+          }
+          const Where w = probe.where(next);
+          if (w.why == Why::Outside) { ending = -1; break; }
+          if (w.lattice()) {
+            if (w.id != A.region) { ending = -1; break; }
+            entered = true;
+          } else if (entered) {
+            path.push_back(next);
+            ending = w.why == Why::BedFloor ? 3 : 2;
+            break;
+          }
+          if (run > most) { ending = -2; break; }
+          path.push_back(next);
+          cur = next;
+        }
+        if (A.to_floor && ending < 0 && !joints.empty()) {   // ends at its last joint, as a support ending on a vine
+          path.resize(last_joint);
+          ending = 1;
+        }
+        c.joints += A.to_floor ? (ending == 1 ? joints.size() - 1 : joints.size()) : 0;
+        if (ending == -1) { ++c.refused_air; continue; }
+        if (ending == -2) { ++c.refused_long; continue; }
+        // One strand from its lower end up, its top at the hanging voxel's centre (in the solid), straight runs merged.
+        std::vector<Vec3> up(path.rbegin(), path.rend());
+        up.push_back({p.x, p.y, p.z + 0.5 * g});
+        Strand st;
+        st.region = A.region;
+        st.spacing_mm = smin;
+        for (std::size_t i = 0; i < up.size(); ++i) {
+          if (!st.points.empty() && i + 1 < up.size() && !joined_at(up[i])) {   // a joint is never merged away
+            const Vec3& a = st.points.back();
+            const Vec3 d1{up[i].x - a.x, up[i].y - a.y, up[i].z - a.z}, d2{up[i + 1].x - up[i].x, up[i + 1].y - up[i].y, up[i + 1].z - up[i].z};
+            const double l1 = d3(up[i], a), l2 = d3(up[i + 1], up[i]);
+            if (l1 > 0.0 && l2 > 0.0 && std::fabs((d1.x * d2.x + d1.y * d2.y + d1.z * d2.z) / (l1 * l2) - 1.0) < 1e-9) continue;
+          }
+          st.points.push_back(up[i]);
+        }
+        st.width_mm.assign(st.points.size(), A.width_mm);
+        supports.push_back(std::move(st));
+        of_patch.push_back(out.size());
+        on_vertex.push_back(ending == 1);
+        (ending == 1 ? c.on_vine : ending == 3 ? c.on_floor : c.on_solid)++;
+      }
+      out.push_back(c);
+    }
+    if (!supports.empty()) {
+      Bars sup = weave_bars(domain, supports, 1);
+      const std::size_t base = bars.bars.size();
+      // Each support's top end: tagged Solid when its top piece was dropped as a stub and the solid begins within its
+      // width + half a grid step above it.
+      std::vector<int> top_bar(supports.size(), -1);
+      std::vector<char> top_is_b(supports.size(), 0);
+      for (std::size_t q = 0; q < sup.bars.size(); ++q) {
+        const Bar& b = sup.bars[q];
+        const std::size_t si = static_cast<std::size_t>(b.strand);
+        if (si >= supports.size()) continue;
+        for (int e = 0; e < 2; ++e) {
+          const Vec3& x = e ? b.b : b.a;
+          const int t = top_bar[si];
+          const double tz = t < 0 ? -1e300 : (top_is_b[si] ? sup.bars[static_cast<std::size_t>(t)].b.z : sup.bars[static_cast<std::size_t>(t)].a.z);
+          if (x.z > tz) { top_bar[si] = static_cast<int>(q); top_is_b[si] = static_cast<char>(e); }
+        }
+      }
+      for (std::size_t si = 0; si < supports.size(); ++si) {
+        if (top_bar[si] < 0) continue;   // (with to_floor the top is still the support's highest end)
+        Bar& b = sup.bars[static_cast<std::size_t>(top_bar[si])];
+        Bar::End& kind = top_is_b[si] ? b.end_b : b.end_a;
+        if (kind == Bar::End::Solid || kind == Bar::End::Surface) continue;
+        const Vec3 x = top_is_b[si] ? b.b : b.a;
+        bool solid_above = false;
+        for (double t = 0.05; t <= A.width_mm + 0.5 * g + 1e-9 && !solid_above; t += 0.05) {
+          const Where w = probe.where(Vec3{x.x, x.y, x.z + t});
+          solid_above = w.why != Why::Outside && !w.lattice();
+        }
+        if (solid_above) { kind = Bar::End::Solid; ++out[of_patch[si]].top_retagged; }
+        else ++out[of_patch[si]].top_open;
+      }
+      for (Bar& b : sup.bars) {
+        const std::size_t si = static_cast<std::size_t>(b.strand);
+        if (si < supports.size()) {
+          if (on_vertex[si] && d3(b.a, supports[si].points.front()) < 1e-9) b.end_a = Bar::End::Node;
+          HoldPatchCount& c = out[of_patch[si]];
+          c.mm += d3(b.a, b.b);
+          ++c.bars_laid;
+          const int sn = static_cast<int>(si) + strand_base;
+          c.strand_lo = c.strand_lo < 0 ? sn : std::min(c.strand_lo, sn);
+          c.strand_hi = std::max(c.strand_hi, sn + 1);
+        }
+        b.support = true;
+        b.strand += strand_base;
+        if (b.into_a >= 0) b.into_a += static_cast<int>(base);
+        if (b.into_b >= 0) b.into_b += static_cast<int>(base);
+        bars.bars.push_back(b);
+      }
+      bars.stubs += sup.stubs;
+      strand_base += static_cast<int>(supports.size());
+    }
+    read_ends();
+    for (std::size_t q = first; q < out.size(); ++q) out[q].ends_after = ends_under(A.patches[q - first]);
+  }
   return out;
 }
 
