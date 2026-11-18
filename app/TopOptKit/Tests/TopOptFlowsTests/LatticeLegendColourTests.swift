@@ -273,6 +273,8 @@ final class LatticeLegendColourTests: XCTestCase {
         XCTAssertTrue(ws.contains("!(showStrutPreview && strutScene != nil) {\n                    stressLegend"),
                       "★ the standalone stress legend must stand down while the "
                       + "lattice key is up and carrying the scale itself")
+        // ★ Install 3: and while the new engine's key is up
+        XCTAssertTrue(ws.contains("if !(newEngineDrawn && newEngine.laid != nil) {   // ★ Install 3: the new engine's key carries the stress"))
     }
 
     /// ★ AND WHEN STRESS OWNS THE STRUTS, THE KEY MUST NOT STILL CLAIM THEY MEAN

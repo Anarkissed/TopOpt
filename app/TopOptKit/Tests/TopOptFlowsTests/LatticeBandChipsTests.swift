@@ -202,7 +202,8 @@ final class LatticeBandChipsTests: XCTestCase {
                       "the overlay ignores the hide switch")
         XCTAssertTrue(src.contains("case .bandChips: return bandChipsAvailable"), "the toggle is not gated on chips to hide")
         let avail = body(after: "private var bandChipsAvailable", 400)
-        XCTAssertTrue(avail.contains("latticeOnlyShowing") && avail.contains("bandDecisions.isEmpty"))
+        // ★ Install 3: the chips shown are either engine's (`bandDecisionsShown`: the new engine's places, else the old band's)
+        XCTAssertTrue(avail.contains("latticeOnlyShowing") && avail.contains("bandDecisionsShown.isEmpty"))
         let chip = body(after: "private var bandChipsToggleChip", 1600)
         XCTAssertTrue(chip.contains("\"Hide chips\"") && chip.contains("\"Show chips\"") && chip.contains("bandChipsHidden.toggle()"))
         XCTAssertTrue(src.contains("case .bandChips: bandChipsToggleChip.background(chipWidthReader(id))"),

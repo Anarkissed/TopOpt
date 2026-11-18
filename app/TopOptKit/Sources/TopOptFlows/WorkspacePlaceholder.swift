@@ -997,7 +997,6 @@ public struct WorkspacePlaceholder: View {
                           onLatticeProbe: legendDrilledIn && flexibleMain.wantsWallProbe(latticeLegendMode)   // Flexible (PR #362) H8: the wall probe only for the lattice legend (a dent / stress tap must reach the surface)
                               ? { model, world, cellMM, density in
                                   if flexibleMain.readLattice(project, mode: latticeLegendMode, model: model) { return }   // Flexible (PR #362) H8: a Flexible wall, read at its rest point
-                                  if newEngineDrawn { setNewEngineProbe(at: model, world: world); return }   // ★ Install 3: the new engine's bars
                                   setLatticeProbe(at: model, world: world,
                                                   bakedCellMM: cellMM,
                                                   bakedDensity: density)
@@ -1365,6 +1364,18 @@ public struct WorkspacePlaceholder: View {
                         strutScene = nil; latticeThinWalls = nil; latticeThinWallTints = []; latticeThinWallsPromptUp = false
                     } else if !owns, showStrutPreview, latticeViewsUp, strutScene == nil { buildStrutScene() }
                 }
+                .onChange(of: newEngine.solidReason) { reason in
+                    // ★ Install 3: his 11-09 thin-wall pop-up on the new engine — once per project, by itself, on Structural,
+                    // when the engine leaves lattice solid because the walls are too thin (its own reason, not the old bake's)
+                    guard newEngineDrawn else { return }
+                    latticeThinWalls = Self.thinWalls(reason, project: project)
+                    if let thin = latticeThinWalls, LatticeThinWallPrompt.opensByItself(
+                        finding: thin, structural: project.lattice.stageMode == .structural,
+                        setupUp: latticeSetupUp, seen: project.lattice.thinWallsNoticeSeen) {
+                        latticeThinWallsPromptUp = true
+                    }
+                    if latticeThinWalls == nil { latticeThinWallsPromptUp = false }
+                }
                 .onChange(of: newEngine.laid) { _ in
                     // ★ Install 3: the drawer's walls and cells are the new engine's — re-derive the cards when its layout lands
                     if newEngineDrawn, Self.perRegionCellAlgorithms.contains(project.lattice.algorithm) { refreshLatticeFaceCards() }
@@ -1555,9 +1566,11 @@ public struct WorkspacePlaceholder: View {
                 // legend as well"). With the strut preview up the LATTICE key carries
                 // the stress scale itself, so the standalone plot legend stands down
                 // rather than putting a second colour bar on the same edge.
+                if !(newEngineDrawn && newEngine.laid != nil) {   // ★ Install 3: the new engine's key carries the stress
                 if stressViewOn, latticeStressField != nil, latticeViewsUp,
-                   !latticeLegendMounted {   // ★ Install 3: the lattice key (either engine's) carries the stress
+                   !(showStrutPreview && strutScene != nil) {
                     stressLegend
+                }
                 }
                 if latticeLegendMounted {
                     latticeDensityLegend
@@ -1606,7 +1619,7 @@ public struct WorkspacePlaceholder: View {
             // over the SAME live stage — the workspace chrome above is hidden while
             // it is open, so exactly one set of controls exists at a time.
             if showLatticePage { latticePageOverlay }
-            if latticeThinWallGlowUp { latticeThinWallsPromptCard }   // ★ his 11-09: the glow's pop-up
+            if latticeThinWallGlowUp || latticeThinWallPopUpOnNewEngine { latticeThinWallsPromptCard }   // ★ his 11-09: the glow's pop-up
             // ★★★ THE MODE IS ASKED BEFORE THE STAGE IS USABLE (2026-08-21). It covers
             // everything and blurs it, it has no cancel, and answering it is the only
             // way out — because the two modes make DIFFERENT CLAIMS about the same
@@ -1957,7 +1970,9 @@ public struct WorkspacePlaceholder: View {
             pendingLatticeRerun = prompt
             return
         }
-        startLatticeRun(request)
+        if latticeButtonOnNewEngine { startLatticeRun(request); return }   // ★ his yes 11-17
+        runCouldntFinish = false; lastRunWasLattice = true   // ★ B1 (O1)
+        run.start(request)
     }
 
     /// The lattice request, started (the re-run card's "Re-run the lattice here").
@@ -1967,7 +1982,8 @@ public struct WorkspacePlaceholder: View {
             return
         }
         if stoppedForTinyPiece(request) { return }   // Install 3
-        startLatticeRun(request)
+        if !latticeButtonOnNewEngine { runCouldntFinish = false; lastRunWasLattice = true; run.start(request); return }
+        startLatticeRun(request)   // ★ his yes 11-17: the new engine's file job
     }
 
     /// ★ HIS YES 11-17 (Install 3): a regular lattice on a STEP part goes to the new engine — the print file's job, with the
@@ -2012,6 +2028,19 @@ public struct WorkspacePlaceholder: View {
             run.start(fileRequest)
         }
         run.runner = before
+    }
+
+    /// ★ Install 3: the thin-wall finding from the new engine's own reason — Structural, walls too thin for a whole cell or
+    /// too narrow for the cells across Structural needs, or (the whole part latticed) the part itself too shallow for them
+    /// (on his first A1 pad the engine says "the region is too shallow", 93 %); the thinnest wall it lattices is that many of
+    /// the smallest cell. A face prism too shallow is his depth, not a thin wall: its own line says so, no pop-up.
+    static func thinWalls(_ r: SolidReason?, project p: ProjectModel) -> LatticeStructuralThinWalls.Finding? {
+        guard let r, (p.lattice.stageMode ?? .structural) == .structural,
+              r.cause == .wallNarrow || r.cause == .tooFewAcross || (r.cause == .regionShallow && p.latticeStartsWhole)
+        else { return nil }
+        let s = LatticeLayoutPreview.settings(p, referenceMPa: 0)
+        let smallest = s.cellMinMM > 0 ? s.cellMinMM : s.cellMM
+        return .init(minWallMM: Double(Swift.max(1, s.minCellsAcross)) * smallest, share: r.share)
     }
 
     /// Whether the Lattice button sends the new engine's job for this part (`LatticeFileButton.takes`), never on Flexible.
@@ -4494,6 +4523,7 @@ public struct WorkspacePlaceholder: View {
                                  // below for why this must come from the RENDERER's
                                  // field and not a re-bake.
                                  bakedDensity: Float = -1) {
+        if newEngineDrawn { setNewEngineProbe(at: point, world: world); return }   // ★ Install 3: the new engine's bars
         guard let scene = strutScene else { return }
         // ★★★ THE CELL THE BAKE LAID DOWN HERE, NOT THE ONE IN THE SETTINGS
         // (maintainer, 2026-08-22: "The legend is still saying it's 2.2mm cells - which
@@ -5109,6 +5139,11 @@ public struct WorkspacePlaceholder: View {
     /// ★ his 11-09: the glow is up — the pop-up is open on Lattice Setup and the last bake found walls.
     private var latticeThinWallGlowUp: Bool {
         latticeThinWallsPromptUp && latticeSetupUp && !latticeThinWallTints.isEmpty
+    }
+
+    /// ★ Install 3: the pop-up on the new engine, from its own reason (no glow yet: the old bake's mask is not made there).
+    private var latticeThinWallPopUpOnNewEngine: Bool {
+        newEngineDrawn && latticeThinWallsPromptUp && latticeSetupUp && latticeThinWalls != nil
     }
 
     /// ★ WHERE THE LATTICE'S VIEWS MAY SHOW AT ALL (his 11-05: "When in the face cutting screen, sometimes the legend stays
@@ -7918,11 +7953,15 @@ public struct WorkspacePlaceholder: View {
     /// lattice came back. The part now stays until the lattice is drawn — the body alpha and the
     /// band chips read this one value.
     private var latticeOnlyShowing: Bool {
-        LatticePreviewBodyAlpha.latticeOnlyShowing(viewOn: latticeOnlyViewOn,
-                                                   layerDrawn: latticeLayerIsDrawn || newEngineDrawn,   // ★ Install 3
+        if newEngineDrawn {   // ★ Install 3: the new engine's lattice is the layer, its bars what there is to draw
+            return LatticePreviewBodyAlpha.latticeOnlyShowing(viewOn: latticeOnlyViewOn, layerDrawn: true,
+                                                              simRunning: latticeSimIsRunning,
+                                                              nothingToDraw: (newEngine.laid?.barCount ?? 0) == 0)
+        }
+        return LatticePreviewBodyAlpha.latticeOnlyShowing(viewOn: latticeOnlyViewOn,
+                                                   layerDrawn: latticeLayerIsDrawn,
                                                    simRunning: latticeSimIsRunning,
-                                                   nothingToDraw: newEngineDrawn ? (newEngine.laid?.barCount ?? 0) == 0
-                                                       : latticePreviewHasNothingToDraw)
+                                                   nothingToDraw: latticePreviewHasNothingToDraw)
     }
 
     /// ★★ THE KEY'S DRILL-IN ONLY COUNTS WHILE THE KEY IS ON SCREEN (his 2026-10-01: "in
@@ -10668,7 +10707,7 @@ public struct WorkspacePlaceholder: View {
                 .accessibilityIdentifier("lattice-preview-notice")
             }
             // ★ his iPad notes 11-09: "there should be some kind of notice" — the walls Structural leaves solid
-            if latticePreviewBanner != nil, showStrutPreview, project.lattice.stageMode == .structural,
+            if latticePreviewBanner != nil || newEngineDrawn, showStrutPreview, project.lattice.stageMode == .structural,   // ★ Install 3: and on the new engine
                let thin = latticeThinWalls {
                 HStack(alignment: .firstTextBaseline, spacing: DS.Space.xs) {
                     // ★ his 11-09: a tap on the note re-opens the glow and the pop-up
