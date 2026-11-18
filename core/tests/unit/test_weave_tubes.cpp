@@ -436,7 +436,7 @@ static void test_trimmed_to_part() {
   CHECK(worst_raw > 0.1);                      // there was something to trim
   CHECK(w.trimmed_vertices > 0 && worst <= 0.05);
   CHECK(std::fabs(w.outside_largest_mm - worst) < 1e-3);
-  CHECK(z_low >= -0.05);                       // the bed is the part's lowest z, 0
+  CHECK(z_low >= 0.0);                         // the bed is the part's lowest z, 0: nothing under it at all
   CHECK(good == w.shells() && least > 0.0);
   CHECK(w.shells() + w.left_out == raw.shells());
 }

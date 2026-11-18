@@ -256,6 +256,10 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
   std::vector<char> keep(shells.size(), 1);
   if (trim && !shells.empty()) {
     const double over = 0.02;
+    // Nothing below the bed (the part's lowest z): a vertex left within `over` of the part but under the bed would
+    // become the file's lowest point and lift the bed off the solid's flat underside; it is raised onto the bed.
+    double bed = 1e300;
+    for (const Vec3& v : part.mesh().vertices) bed = std::min(bed, v.z);
     std::vector<double> moved_most(shells.size(), 0.0), outside_most(shells.size(), 0.0);
     std::vector<std::size_t> moved(shells.size(), 0);
     std::vector<char> rebuilt(shells.size(), 0);
@@ -266,6 +270,7 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
       std::size_t n = 0;
       double most = 0.0, outside = 0.0;
       for (Vec3& v : m.vertices) {
+        if (v.z < bed) { v.z = bed; ++n; }
         if (pr.inside(v)) continue;
         double d = pr.depth(v);
         if (d >= -over) { outside = std::max(outside, -d); continue; }
@@ -274,6 +279,7 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
           v = add(v, mul(pr.through(v), -d));
           d = pr.depth(v);
         }
+        if (v.z < bed) v.z = bed;
         ++n;
         most = std::max(most, len(sub(v, was)));
         outside = std::max(outside, std::max(0.0, -d));
