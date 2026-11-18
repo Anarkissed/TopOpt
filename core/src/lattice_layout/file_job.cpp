@@ -204,7 +204,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "organic_void_ratio", "organic_reseed_rounds", "organic_wall_connect", "organic_wall_gap",
        "organic_wall_cross", "organic_top_run", "organic_run_max", "organic_root_run", "organic_run_gap",
        "organic_run_follow", "organic_run_pull", "organic_run_seek", "organic_run_min", "organic_root_gap",
-       "organic_auto", "organic_width_heavy_mm", "organic_member_cap", "organic_prune"},
+       "organic_auto", "organic_width_heavy_mm", "organic_member_cap", "organic_prune", "organic_bed_floor_mm"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -492,6 +492,9 @@ OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::str
   a.auto_by_stress = flag(in, "organic_auto", a.auto_by_stress, w);   // I
   a.member_cap = flag(in, "organic_member_cap", a.member_cap, w);   // J1
   a.prune = flag(in, "organic_prune", a.prune, w);   // J2
+  a.bed_floor_mm = num(in, "organic_bed_floor_mm", a.bed_floor_mm, w);   // K1
+  if (!(std::isfinite(a.bed_floor_mm) && a.bed_floor_mm >= 0.0))
+    json::fail(w + ".organic_bed_floor_mm", "must be 0 (no floor) or above");
   a.width_heavy_mm = num(in, "organic_width_heavy_mm", a.width_heavy_mm, w);   // I
   {
     const double light = a.width_mm > 0.0 ? a.width_mm : thinnest;
@@ -984,6 +987,12 @@ FileJob parse_file_job(const std::string& json_text) {
     if (const json::Value* v = json::find(doc, "layout")) {
       job.settings = settings_from(json::as_object(*v, w + ".layout"), w + ".layout");
       job.organic = organic_from(*v, job.settings, w + ".layout");
+      // K1: the floor lives in the domain (where), so the growth, the path, the net skin, the print check and the
+      // file all see it; a Grown job's weave regions only (with organic_mode traced the key is read and does nothing).
+      if (job.organic.mode == OrganicMode::Grown && job.organic.bed_floor_mm > 0.0) {
+        job.settings.bed_floor_mm = job.organic.bed_floor_mm;
+        job.settings.bed_up = job.organic.build_dir;
+      }
     }
     if (const json::Value* v = json::find(doc, "mesh"))
       job.options = options_from(json::as_object(*v, w + ".mesh"), w + ".mesh");

@@ -322,6 +322,12 @@ struct DomainSpec {
   // instead, on every face; the cells start behind it as they do behind a Protect skin.
   // 0 = no cover. < 0 = the default thickness, two line widths.
   double cover_mm = 0.0;
+  // K1 (brief G13), a flat floor on the bed (the owner, 2026-11-16: "Yes, add the floor"): every point of a WEAVE
+  // region (Region::weave) that lies less than this height above the bed is solid, not lattice (Why::BedFloor). The bed
+  // is the plane through the part's lowest point along `bed_up`. The session sets it only for a Grown job's weave
+  // regions (Settings::bed_floor_mm, from OrganicAsk::bed_floor_mm). 0 = no floor: every answer as before.
+  double bed_floor_mm = 0.0;
+  Vec3 bed_up{0.0, 0.0, 1.0};
 };
 
 enum class Why : std::uint8_t {
@@ -335,6 +341,7 @@ enum class Why : std::uint8_t {
   Rim,          // solid: the rim round a flat Lattice region's outline (S1, S2, S10);
                 // `id` is that region
   Cover,        // solid: Finish Covered's shell over the lattice (S9); `id` as Lattice
+  BedFloor,     // solid: K1, the floor on the bed under a weave region (DomainSpec::bed_floor_mm); `id` that region
 };
 
 struct Where {
@@ -462,6 +469,7 @@ class Domain {
  private:
   const PartMeasure* measure_;
   DomainSpec spec_;
+  double bed_level_ = 0.0;   // K1: the part's lowest point along spec_.bed_up (made unit length)
   const std::atomic<bool>* stop_ = nullptr;
   std::vector<Near> near_skin_;    // one per Protect skin, within its depth
   // Every Protect skin of one depth as ONE surface (the distance to several surfaces is the least of their
@@ -1242,6 +1250,8 @@ struct Settings {
   double min_wall_mm = 0.0;
   double rim_mm = 0.0;           // Finish Rim: 0 none, < 0 two line widths
   double cover_mm = 0.0;         // Finish Covered: 0 none, < 0 two line widths
+  double bed_floor_mm = 0.0;     // K1: DomainSpec::bed_floor_mm (the file job sets it from OrganicAsk for Grown only)
+  Vec3 bed_up{0.0, 0.0, 1.0};    // K1: DomainSpec::bed_up
   std::vector<RegionAsk> regions;
   std::vector<ProtectAsk> protect;
   // The cells, the struts, and what happens to cut ends.

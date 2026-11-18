@@ -121,6 +121,11 @@ struct OrganicAsk {
   // area in the path (prune_weave). Defaults: as before.
   bool member_cap = true;
   bool prune = false;
+  // K1 (brief G13), a flat floor on the bed (the owner, 2026-11-16: "Yes, add the floor"): in a Grown area every point
+  // less than this height above the bed (the plane through the part's lowest point along build_dir) is solid, not
+  // lattice. Carried to the domain as Settings::bed_floor_mm (DomainSpec::bed_floor_mm) by the file job, for Grown only.
+  // 0 = no floor (as before); 0 or above.
+  double bed_floor_mm = 0.0;
 };
 
 // J2 (brief G12), the pruning of a Grown area's weave bars, for each (region, median asked spacing) of `areas`:

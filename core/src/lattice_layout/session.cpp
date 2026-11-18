@@ -37,6 +37,10 @@ std::string where_text(const Settings& s) {
   };
   whole(static_cast<long>(s.start));
   num(s.bead_mm); num(s.min_strut_lines); num(s.min_wall_mm); num(s.rim_mm); num(s.cover_mm);
+  if (s.bed_floor_mm > 0.0) {   // K1 (written only when on: with no floor the text is as it was)
+    out += "F";
+    num(s.bed_floor_mm); num(s.bed_up.x); num(s.bed_up.y); num(s.bed_up.z);
+  }
   out += "R";
   for (const Settings::RegionAsk& r : s.regions) {
     whole(r.id); whole(static_cast<long>(r.role)); num(r.depth_mm); num(r.expand_mm);
@@ -89,6 +93,8 @@ void Session::ready_domain(const Settings& settings) {
     spec.min_wall_mm = settings.min_wall_mm;
     spec.rim_mm = settings.rim_mm;
     spec.cover_mm = settings.cover_mm;
+    spec.bed_floor_mm = settings.bed_floor_mm;   // K1
+    spec.bed_up = settings.bed_up;
     empty_regions_.clear();
     for (const Settings::RegionAsk& r : settings.regions) {
       bool ok = false;
