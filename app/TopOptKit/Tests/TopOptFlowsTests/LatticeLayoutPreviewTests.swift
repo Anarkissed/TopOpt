@@ -188,7 +188,7 @@ final class LatticeLayoutPreviewTests: XCTestCase {
         p.lattice.smallCellsInThinWalls = true
         XCTAssertTrue(LatticeLayoutPreview.settings(p).smallCellsInThinWalls, "★ reaches core")
         l.algorithm = "organic"
-        XCTAssertFalse(LatticeLayoutPreview.draws(l), "★ Organic: the new engine does not draw it")
+        XCTAssertTrue(LatticeLayoutPreview.draws(l), "★ Organic cut 1 (his 11-18 \"Preview PLUS settings\"): the new engine draws it")
         l.algorithm = "stepped"
         XCTAssertTrue(LatticeLayoutPreview.draws(l))
         l.setSimulateStresses(true)
