@@ -127,7 +127,8 @@ struct OrganicAsk {
   // K1 (brief G13), a flat floor on the bed (the owner, 2026-11-16: "Yes, add the floor"): in a Grown area every point
   // less than this height above the bed (the plane through the part's lowest point along build_dir) is solid, not
   // lattice. Carried to the domain as Settings::bed_floor_mm (DomainSpec::bed_floor_mm) by the file job, for Grown and
-  // (Q1, brief G24) Traced alike. 0 = no floor (as before); 0 or above.
+  // (Q1, brief G24) Traced alike. 0 = no floor (as before); 0 or above. OP9 (brief C2, E3): Session::lay_organic (and
+  // so lay_organic_draft, lay_organic_preview) copies it the same way, so the ask's value alone lays the floor.
   double bed_floor_mm = 0.0;
   // L1 (brief G14), Grade to shape as a variable: O13's outline cap is (2 / shape_reach) x steps x the grid step (the
   // owner, 2026-11-16: "Should this be considered a 'Grade to shape' and make it a variable?"). 1 = as before; 2 = the

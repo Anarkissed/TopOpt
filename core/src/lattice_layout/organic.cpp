@@ -583,8 +583,15 @@ Outcome Session::lay_organic_draft(const Settings& settings, const TensorField& 
   return lay_organic_with(settings, field, ask, threads, stop, true);
 }
 
-Outcome Session::lay_organic_with(const Settings& settings, const TensorField& field, const OrganicAsk& ask,
+Outcome Session::lay_organic_with(const Settings& asked, const TensorField& field, const OrganicAsk& ask,
                                   int threads, const std::atomic<bool>* stop, bool draft) {
+  // OP9 (brief C2, E3): K1's flat floor from the ask, exactly as the file job copies it into the settings (Q1): the
+  // floor lives in the domain ("where"), so the growth, the trace, the path and the net skin all see it.
+  Settings settings = asked;
+  if (ask.bed_floor_mm > 0.0) {
+    settings.bed_floor_mm = ask.bed_floor_mm;
+    settings.bed_up = ask.build_dir;
+  }
   if (stop && stop->load(std::memory_order_relaxed)) {
     Outcome none;
     none.cancelled = true;

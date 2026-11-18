@@ -1311,6 +1311,38 @@ static void test_equal_ends() {
   }
 }
 
+// ── OL-FLOOR-ASK (OP9, brief C2, E3): the session lays the flat floor from the ask, as the file job does ──────────────
+static void test_floor_from_ask() {
+  const StepModel model = box_model(30, 30, 20);
+  const TensorField f = traced_field();
+  const std::string job = R"({"mode": "lattice_file", "model": "block.step", "layout": {
+      "min_strut_lines": 2, "bead_mm": 0.45, "region_ids": [1], "region_no_lattice": [0], "region_depth_mm": [14],
+      "region_expand_mm": [0], "region_face_counts": [1], "region_faces": [0], "region_weave": [true],
+      "organic_spacing_min_mm": 3, "organic_spacing_max_mm": 6, "organic_shape_fit": false, "organic_width_mm": 0.9,
+      "organic_bed_floor_mm": 2, "organic_mode": ")";
+  for (int g = 0; g < 2; ++g) {
+    const FileJob fj = parse_file_job(job + (g ? "grown" : "traced") + "\"}}");
+    Settings plain = fj.settings;
+    plain.bed_floor_mm = 0.0;   // what the app's bridge sends: no floor in the settings, the floor in the ask
+    Session by_job(model), by_ask(model), none(model);
+    const Outcome a = by_job.lay_organic(fj.settings, f, fj.organic);
+    const Outcome b = by_ask.lay_organic(plain, f, fj.organic);
+    OrganicAsk off = fj.organic;
+    off.bed_floor_mm = 0.0;
+    const Outcome c = none.lay_organic(plain, f, off);
+    double low = 1e300, low_none = 1e300;
+    for (const Bar& x : b.bars.bars) low = std::min({low, x.a.z, x.b.z});
+    for (const Bar& x : c.bars.bars) low_none = std::min({low_none, x.a.z, x.b.z});
+    std::printf("OL-FLOOR-ASK %s, floor 2 mm in the ask only: %zu bars, hash %016llx; the file job's settings: %zu bars, "
+                "hash %016llx; lowest bar point %.3f mm (no floor %.3f mm)\n", g ? "Grown" : "Traced",
+                b.bars.bars.size(), static_cast<unsigned long long>(bars_fnv(b)), a.bars.bars.size(),
+                static_cast<unsigned long long>(bars_fnv(a)), low, low_none);
+    // A bar that ends in the floor runs on into it by its own width (S11, a Solid end): 0.9 mm here (as OL-Q1).
+    CHECK(fj.settings.bed_floor_mm == 2.0 && !b.bars.bars.empty() && bars_fnv(a) == bars_fnv(b));
+    CHECK(low >= 2.0 - 0.9 - 1e-6 && low_none < 2.0 - 0.9 - 0.1);
+  }
+}
+
 int main() {
   test_s_cut_fix();
   test_k_floor();
@@ -1335,6 +1367,7 @@ int main() {
   test_follow_stress();
   test_validate();
   test_equal_ends();
+  test_floor_from_ask();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }
