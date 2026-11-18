@@ -73,6 +73,9 @@ In each round, every strut with a margin under {{strengthen_watch_margin}} raise
 
 If nothing in the job follows the stress (one spacing, one strut width), there is nothing to vary, and the job says so after the first check.
 
+
+In the Add mode ({{strengthen_mode}} 0, the default) the lattice is laid once and never laid again: nothing that is there is moved or removed. Each round widens every strut under {{strengthen_watch_margin}} where it stands, by how short it falls of {{strengthen_target_margin}}: a strut mostly pulled or pushed by (aim / margin) to the power 1 / {{strengthen_power_axial}}, a strut mostly bent by the power 1 / {{strengthen_power_bending}}, never thinner and never past {{strengthen_width_cap}} times your widest strut width. A strut that buckles gets braces from rule T's brace maker, enough of them that its free length can carry the aim at its width; only where a brace cannot be placed is it widened instead (power 1 / {{strengthen_power_buckling}}). What a round added is saved as a list, with a check number of the whole lattice after each round; the file job and the preview lay your lattice again and add the list, and refuse if the lattice they reach is not exactly the one the rounds were made on. In the Lay again mode ({{strengthen_mode}} 1) each round works as described above.
+
 ## What it does not cover
 
 - Struts that buckle, wear out from repeated loads, or creep.

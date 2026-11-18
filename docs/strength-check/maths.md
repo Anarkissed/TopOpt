@@ -267,6 +267,13 @@ $$b_v=\max_{s:\ \min_{\mathbf p\in P_s}|\mathbf c_v-\mathbf p|\le r_s}\ \min\!\B
 
 with $b_{\max}$ = {{strengthen_boost_max}}, $q$ = {{strengthen_boost_power}}; every component of the stress input's voxel $v$ times $b_v$. A floor per such strut: centre each $\mathbf p\in P_s$, radius $r_s$, least width $w_{\max,s}\,m_t/m_s$, $m_t$ = {{strengthen_target_margin}}. After the lay, every non-link bar whose middle lies in a floor's ball gets $w\leftarrow\min\big(\max(w,w_{\text{floor}}),w_{\text{upper}}\big)$ ($w_{\text{upper}}$: the job's own upper strut width; not applied when the width is one number); links then take the thinner of the struts at their two ends (S8) where that rose. The reference stress is stated at the value resolved for the original input, so the boost does not move it.
 
+
+**Additive mode** ({{strengthen_mode}} $=0$, the default). The lay is done once; round $n$ checks, then adds. For a watched strut ($m<m_w$) failing by buckling, with $N_{\min}<0$ its most compressive axial force and $w_{\min}$ its thinnest width, $I=\pi w_{\min}^4/64$:
+$$L_{\text{allow}}=\pi\sqrt{\frac{E\,I}{|N_{\min}|\,m_t}},\qquad n_b=\Big\lceil \frac{L}{L_{\text{allow}}}\Big\rceil-1$$
+brace points evenly along it (rule T's brace maker at named points, each brace as wide as the bar it starts on). A strut failing by stress, or by buckling with a point where no brace could be laid, has each of its own bars (as they are after the round's braces) widened
+$$w\leftarrow\min\Big(w_{\text{cap}},\ \max\big(w,\ w\,(m_t/m)^{1/p}\big)\Big),\qquad w_{\text{cap}}=c\,w_{\text{upper}}$$
+with $m$ its stress margin and $p$ = {{strengthen_power_axial}} when $|N|/A\ge Mr/I$ at the piece that set it, else {{strengthen_power_bending}}; for buckling $m$ its buckling margin and $p$ = {{strengthen_power_buckling}}; $c$ = {{strengthen_width_cap}}, $w_{\text{upper}}$ the job's upper strut width (its one width without a range). Links at a widened bar's ends take S8 again (only wider). Every bar of round 0 must remain whole or as pieces on its own line (ends within $10^{-5}$ mm), never thinner. The round's operations are saved in order (`additions.bin`) with the 64-bit FNV-1a hash of the bars after it; a lay with them that does not reach each hash is refused (`strengthened_mismatch`). With {{strengthen_mode}} $=1$ the rounds are as above.
+
 ## What it does not cover
 
 - Buckling of struts or thin walls (linear statics only), fatigue, creep, temperature, moisture, UV.

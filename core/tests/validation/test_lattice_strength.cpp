@@ -407,7 +407,7 @@ int main() {
       keys.push_back(sj::as_string(*sj::find(e, "key"), "key"));
       sections.push_back(sj::as_string(*sj::find(e, "section"), "section"));
     }
-    CHECK(keys.size() == 84);   // 60 of Install 3, 24 of the Organic check (brief E2)
+    CHECK(keys.size() == 89);   // 60 of Install 3, 24 of the Organic check (brief E2), 5 of strengthening by adding (E3a)
     const auto headings = [](const std::string& t) {
       std::vector<std::string> h;
       std::istringstream in(t);
@@ -626,7 +626,7 @@ int main() {
     const OrganicStrengthenResult sr =
         strengthen("strengthen", ", \"region_weave\": [true], \"organic_spacing_min_mm\": 3, \"organic_spacing_max_mm\": 6, "
                                  "\"organic_width_mm\": 0.9, \"organic_width_heavy_mm\": 1.8",
-                   6000.0, "{\"strengthen_rounds\": 1}");
+                   6000.0, "{\"strengthen_rounds\": 1, \"strengthen_mode\": \"rebuild\"}");
     const std::string sjson = slurp(kDir + "/strengthen/strengthen.json");
     std::printf("%s\n", sjson.substr(0, 1400).c_str());
     CHECK(sr.ok && (sr.code == "done" || sr.code == "limit"));
@@ -646,8 +646,55 @@ int main() {
       CHECK(a.reference_mpa > 0.0 && a.reference_mpa == num_after(sjson, "reference_mpa") && !a.floors.empty());
     }
     const OrganicStrengthenResult nv =
-        strengthen("nothing", ", \"region_weave\": [true], \"organic_spacing_mm\": 4, \"organic_width_mm\": 0.9", 2500.0, "");
+        strengthen("nothing", ", \"region_weave\": [true], \"organic_spacing_mm\": 4, \"organic_width_mm\": 0.9", 2500.0,
+                   "{\"strengthen_mode\": 1}");
     CHECK(nv.ok && nv.code == "nothing_to_vary" && nv.rounds_fixed == 0);
+
+    // ── §11 (brief E3a) the additive mode, the default: the lattice is laid ONCE; each round adds (widening in place,
+    // braces) and checks again; every bar of round 0 is kept (OS12); r<n>/strengthened.json (version 2) and its
+    // additions.bin, given to the file job, lay the same lattice (its hash checked: a mismatch is refused); a job with
+    // one strut width is widened too.
+    const std::string sweep = ", \"region_weave\": [true], \"organic_spacing_min_mm\": 3, \"organic_spacing_max_mm\": 6, "
+                              "\"organic_width_mm\": 0.9, \"organic_width_heavy_mm\": 1.8";
+    const OrganicStrengthenResult ad = strengthen("additive", sweep, 6000.0, "{\"strengthen_rounds\": 2}");
+    const std::string ajson = slurp(kDir + "/additive/strengthen.json");
+    std::printf("%s\n", ajson.substr(0, 2400).c_str());
+    CHECK(ad.ok && (ad.code == "done" || ad.code == "limit") && ad.rounds_fixed >= 1 && ad.old_bars_kept);
+    CHECK(has(ajson, "\"mode\": \"additive\"") && has(ajson, "\"old_bars_kept\": true") && !has(ajson, "\"old_bars_kept\": false"));
+    CHECK(has(ajson, "\"added\": {\"strengthened\": \"r1/strengthened.json\"") && num_after(ajson, "bars_widened") > 0);
+    for (const char* x : {"/r0/strength.json", "/r0/struts_under.json", "/r1/strengthened.json", "/r1/additions.bin", "/r1/strength.json"})
+      CHECK(exists(kDir + "/additive" + x));
+    CHECK(!exists(kDir + "/additive/r1/stress.tensor") && !exists(kDir + "/additive/r1/floors.bin"));
+    CHECK(has(slurp(kDir + "/additive/r0/struts_under.json"), "\"bars\": ["));
+    {
+      // Round 1's lattice in the check had this many bars; the file job given r1/strengthened.json lays the same.
+      const std::size_t r1 = ajson.find("\"round\": 1");
+      const double bars1 = num_after(ajson, "bars", r1);
+      std::string j = file_job(f, sweep, "octet", "");
+      j.replace(j.find("\"layout\""), 8, "\"tensor\": \"stress.tensor\", \"strengthened\": \"additive/r1/strengthened.json\", \"layout\"");
+      write(kDir + "/replay_job.json", j);
+      std::filesystem::remove_all(kDir + "/replay");
+      std::filesystem::create_directories(kDir + "/replay");
+      const FileResult rr = run_file_job(kDir + "/replay_job.json", kDir + "/replay");
+      std::printf("[replay] ok %d code %s bars %zu (round 1: %.0f) %s\n", rr.ok, rr.code.c_str(), rr.bars, bars1, rr.detail.c_str());
+      CHECK(rr.ok && static_cast<double>(rr.bars) == bars1);
+      // The same additions on another lattice (a narrower spacing range): refused, nothing made.
+      std::string k = file_job(f, ", \"region_weave\": [true], \"organic_spacing_min_mm\": 3, \"organic_spacing_max_mm\": 5, "
+                                  "\"organic_width_mm\": 0.9, \"organic_width_heavy_mm\": 1.8", "octet", "");
+      k.replace(k.find("\"layout\""), 8, "\"tensor\": \"stress.tensor\", \"strengthened\": \"additive/r1/strengthened.json\", \"layout\"");
+      write(kDir + "/mismatch_job.json", k);
+      std::filesystem::remove_all(kDir + "/mismatch");
+      std::filesystem::create_directories(kDir + "/mismatch");
+      const FileResult mm = run_file_job(kDir + "/mismatch_job.json", kDir + "/mismatch");
+      std::printf("[mismatch] ok %d code %s %s\n", mm.ok, mm.code.c_str(), mm.detail.c_str());
+      CHECK(!mm.ok && mm.code == "strengthened_mismatch" && !exists(kDir + "/mismatch/block_lattice.stl"));
+    }
+    const OrganicStrengthenResult one =
+        strengthen("additive_one", ", \"region_weave\": [true], \"organic_spacing_mm\": 4, \"organic_width_mm\": 0.9", 6000.0,
+                   "{\"strengthen_rounds\": 1}");
+    const std::string ojson = slurp(kDir + "/additive_one/strengthen.json");
+    CHECK(one.ok && one.code != "nothing_to_vary" && one.old_bars_kept);
+    CHECK(one.rounds_fixed == 0 || num_after(ojson, "bars_widened") > 0);
   }
 
   // ── §8 the octet's strut law is the full octet's (2026-11-17): its span is the octet band, so no density in the band

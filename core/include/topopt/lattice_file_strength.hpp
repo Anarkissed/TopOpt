@@ -45,6 +45,7 @@ struct OrganicStrengthenResult {
   bool passing = false;            // the last check's verdict is "pass"
   int rounds_fixed = 0;
   std::string last_strengthened;   // out_dir-relative; empty when no round was made
+  bool old_bars_kept = true;       // brief E3a, the additive mode: every round kept round 0's bars (OS12)
 };
 OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, const std::string& out_dir, int threads,
                                                const std::string& materials_path, const std::string& rules_path,

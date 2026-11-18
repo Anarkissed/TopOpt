@@ -15303,6 +15303,12 @@ const std::vector<StrengthSettingSpec>& strength_setting_specs() {
       {"strengthen_target_margin", K::Number, 1.75, 1.0, 10.0, false, {}},
       {"strengthen_rounds", K::Integer, 0.0, 0.0, 20.0, false, {}},
       {"strengthen_reach", K::Number, 1.0, 0.1, 10.0, false, {}},
+      // Brief E3a: strengthening by adding (the owner, 2026-11-18: both loops stay, as a choice; additive the default).
+      {"strengthen_mode", K::Choice, 0.0, 0.0, 1.0, false, {0.0, 1.0}},   // 0 "additive", 1 "rebuild" (strings read too)
+      {"strengthen_width_cap", K::Number, 2.0, 1.0, 10.0, false, {}},
+      {"strengthen_power_axial", K::Number, 2.0, 1.0, 6.0, false, {}},
+      {"strengthen_power_bending", K::Number, 3.0, 1.0, 6.0, false, {}},
+      {"strengthen_power_buckling", K::Number, 4.0, 1.0, 6.0, false, {}},
   };
   return specs;
 }
@@ -15395,6 +15401,10 @@ std::string read_strength_settings(const std::string& job_path, const MaterialLi
       if (!v.is_bool())
         return "The strength setting \"" + key + "\" must be true or false, so no file was made.";
       x = v.boolean ? 1.0 : 0.0;
+    } else if (key == "strengthen_mode" && v.is_string()) {   // brief E3a: its two choices by name
+      if (v.str != "additive" && v.str != "rebuild")
+        return "The strength setting \"strengthen_mode\" is \"" + v.str + "\"; it must be \"additive\" or \"rebuild\", so no file was made.";
+      x = v.str == "rebuild" ? 1.0 : 0.0;
     } else {
       if (!v.is_number() || !std::isfinite(v.num))
         return "The strength setting \"" + key + "\" must be a number, so no file was made.";
@@ -16520,6 +16530,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
   std::string rounds_json;
   double reference = 0.0;
   int limit = 0;
+  std::string mode_name = "rebuild";
   const auto finish = [&](bool ok, const std::string& code, int exit_code, const std::string& why,
                           const std::string& detail = {}) {
     res.ok = ok;
@@ -16529,6 +16540,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
     res.detail = detail;
     std::string o = "{\n  \"ok\": " + std::string(ok ? "true" : "false") + ",\n  \"code\": " + json_str(code) +
                     ",\n  \"why\": " + json_str(why) + ",\n  \"detail\": " + json_str(detail) +
+                    ",\n  \"mode\": " + json_str(mode_name) + (mode_name == "additive" ? std::string(",\n  \"old_bars_kept\": ") + (res.old_bars_kept ? "true" : "false") : std::string()) +
                     ",\n  \"passing\": " + std::string(res.passing ? "true" : "false") +
                     ",\n  \"rounds_fixed\": " + std::to_string(res.rounds_fixed) + ",\n  \"rounds_limit\": " +
                     std::to_string(limit) + ",\n  \"reference_mpa\": " + [&] {
@@ -16588,6 +16600,241 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
   ss.boost_max = S.st.get("strengthen_boost_max");
   ss.boost_power = S.st.get("strengthen_boost_power");
   ss.target_margin = S.st.get("strengthen_target_margin");
+  // ── Brief E3a: the additive mode (the default; strengthen_mode 0): lay ONCE, then per round check, add (braces at
+  // struts failing by buckling, widening in place), check again. Nothing that exists is moved or removed.
+  if (S.st.get("strengthen_mode") == 0.0) {
+    mode_name = "additive";
+    const double cap_x = S.st.get("strengthen_width_cap");
+    const double p_axial = S.st.get("strengthen_power_axial"), p_bend = S.st.get("strengthen_power_bending"),
+                 p_buckle = S.st.get("strengthen_power_buckling");
+    const double E = S.material.youngs_modulus_mpa;
+    const auto hash_hex = [](std::uint64_t h) {
+      char b[24];
+      std::snprintf(b, sizeof b, "%016llx", static_cast<unsigned long long>(h));
+      return std::string(b);
+    };
+    say("laying the lattice (once)");
+    auto t0 = std::chrono::steady_clock::now();
+    const ll::Outcome out = session.lay_organic(job.settings, *job.tensor_field, ask, job.options.threads, stop);
+    const double s_lay0 = secs(t0);
+    if (out.cancelled) return finish(false, "cancelled", 1, "Stopped before the strengthening was finished.");
+    if (!out.additions_refused.empty())
+      return finish(false, "strengthened_mismatch", 1,
+                    "The strengthening sent with the lattice job was made on a different lattice than this lay gives.",
+                    out.additions_refused);
+    for (const auto& [region, ref] : out.organic_references) reference = std::max(reference, ref);
+    const ll::Domain& domain = *session.domain();
+    const double light = ask.width_mm > 0.0 ? ask.width_mm : domain.spec().bead_mm * domain.spec().min_strut_lines;
+    const double upper = ask.width_heavy_mm > 0.0 ? ask.width_heavy_mm : light;
+    const double cap = cap_x * upper;
+    ll::AddContext ctx;
+    ctx.light_mm = light;
+    ctx.layer_mm = ask.layer_mm;
+    ctx.link_width = ask.link_width;
+    ll::Bars bars = out.bars;
+    const ll::Bars bars0 = out.bars;          // round 0's lattice: every round must keep it (OS12)
+    ll::Additions adds = ask.additions;       // a job laid with additions goes on from them
+    res.old_bars_kept = true;
+    for (int n = 0;; ++n) {
+      if (stop && stop->load()) return finish(false, "cancelled", 1, "Stopped before the strengthening was finished.");
+      const std::string rdir = join_path(out_dir, "r" + std::to_string(n));
+      std::error_code ec;
+      std::filesystem::create_directories(rdir, ec);
+      say("round " + std::to_string(n) + ": checking its strength");
+      OrganicCheckRun cr = organic_frame_check(S, domain, bars, nullptr, light, rdir, job.options.threads);
+      if (!cr.done.ok) return finish(false, cr.done.code, cr.done.exit_code, cr.done.why, cr.done.detail);
+      std::ofstream(join_path(rdir, "strength.json")) << cr.done.json << "\n";
+      std::ofstream(join_path(rdir, "struts_under.json")) << struts_under_json(cr, ss.watch_margin, cap);
+      const ll::FrameCheck& c = cr.check;
+      std::size_t at_cap_left = 0;
+      for (const ll::FrameStrut& sn : c.struts) at_cap_left += sn.judged && sn.margin < S.options.margin_stop && sn.width_max >= cap - 1e-9;
+      std::string r = std::string(rounds_json.empty() ? "\n    " : ",\n    ") + "{\"round\": " + std::to_string(n) +
+                      ", \"verdict\": " + json_str(cr.verdict) + ", \"fail_reason\": " + json_str(cr.fail_reason) +
+                      ", \"bars\": " + std::to_string(bars.bars.size()) + ", \"hash\": " + json_str(hash_hex(ll::bars_hash(bars))) +
+                      ", \"old_bars_kept\": " + (res.old_bars_kept ? "true" : "false") +
+                      ",\n     \"struts\": {\"judged\": " + std::to_string(c.judged) + ", \"under_safety\": " +
+                      std::to_string(c.under_safety) + ", \"under_one\": " + std::to_string(c.under_one) +
+                      ", \"smallest_margin\": " + json_num(c.judged ? c.smallest_margin : std::numeric_limits<double>::quiet_NaN()) +
+                      ", \"buckling_failures\": " + std::to_string(c.buckling_failures) + ", \"stubs\": " + std::to_string(c.stubs) +
+                      ", \"under_safety_at_cap\": " + std::to_string(at_cap_left) +
+                      ", \"unjudged_mm\": " + json_num(c.unjudged_mm) + ", \"load_unheld_n\": " + json_num(c.load_unheld_n) + "}" +
+                      ",\n     \"lattice_mm3\": " + json_num(cr.lattice_mm3) +
+                      ", \"seconds\": {\"lay\": " + json_num(n == 0 ? std::round(s_lay0 * 10) / 10 : 0.0) + ", \"material\": " +
+                      json_num(std::round(cr.ms_material / 100) / 10) + ", \"voxel_solve\": " +
+                      json_num(std::round(cr.ms_voxel / 100) / 10) + ", \"frame\": " + json_num(std::round(cr.ms_frame / 100) / 10) +
+                      "}, \"memory_mb\": {\"after_voxel_solve\": " + json_num(std::round(cr.mb_voxel)) + ", \"after_frame\": " +
+                      json_num(std::round(cr.mb_frame)) + ", \"peak\": " + json_num(std::round(process_memory().peak_rss_mb)) +
+                      "}, \"check\": " + json_str("r" + std::to_string(n) + "/strength.json");
+      const bool clean = c.solved && c.under_safety == 0;
+      if (clean || n >= limit || !c.solved) {
+        rounds_json += r + "}";
+        res.passing = cr.verdict == "pass";
+        if (clean) return finish(true, "done", 0, "");
+        if (!c.solved) return finish(true, "frame_not_solved", 0, "The frame could not be solved, so there is nothing to strengthen from.");
+        return finish(true, "limit", 0, "The rounds of strengthening allowed were all done.");
+      }
+      // ── one round of additions.
+      say("round " + std::to_string(n) + ": adding to the weak struts");
+      const auto t1 = std::chrono::steady_clock::now();
+      // The watched struts, each with its bars in the layout's order and its pieces chained end to end.
+      struct Watched { const ll::FrameStrut* sn; std::vector<int> chain; };
+      std::vector<Watched> watched;
+      for (const ll::FrameStrut& sn : c.struts)
+        if (sn.judged && sn.margin < ss.watch_margin) watched.push_back({&sn, {}});
+      const auto layout_bar = [&](int pi) { return cr.bar_of[static_cast<std::size_t>(cr.frame.pieces[static_cast<std::size_t>(pi)].bar)]; };
+      // (1) braces at struts failing by buckling: n = ceil(L / L_allow) - 1 points evenly along it, L_allow the free
+      // length whose pinned Euler load is target x its compression at its thinnest width.
+      ll::AddRound round;
+      std::vector<std::pair<std::size_t, std::size_t>> brace_ops_of;   // per watched strut: its brace ops [from, to)
+      brace_ops_of.assign(watched.size(), {0, 0});
+      std::size_t struts_braced_asked = 0;
+      for (std::size_t wi = 0; wi < watched.size(); ++wi) {
+        const ll::FrameStrut& sn = *watched[wi].sn;
+        brace_ops_of[wi] = {round.ops.size(), round.ops.size()};
+        if (sn.by != "buckling" || !(sn.n_min < 0.0)) continue;
+        const double I = M_PI * std::pow(0.5 * sn.width_min, 4) / 4.0;
+        const double L_allow = M_PI * std::sqrt(E * I / (-sn.n_min * ss.target_margin));
+        if (!(L_allow > 0.0)) continue;
+        const int nb = static_cast<int>(std::ceil(sn.length_mm / L_allow)) - 1;
+        if (nb < 1) continue;
+        // The pieces in order from one end.
+        std::vector<int> chain;
+        {
+          std::map<int, std::vector<int>> at;
+          for (int pi : sn.pieces) {
+            at[cr.frame.pieces[static_cast<std::size_t>(pi)].a].push_back(pi);
+            at[cr.frame.pieces[static_cast<std::size_t>(pi)].b].push_back(pi);
+          }
+          int node = sn.end_node[0] >= 0 ? sn.end_node[0] : cr.frame.pieces[static_cast<std::size_t>(sn.pieces.front())].a;
+          std::set<int> used;
+          for (;;) {
+            int next = -1;
+            for (int pi : at[node]) if (!used.count(pi)) { next = pi; break; }
+            if (next < 0) break;
+            used.insert(next);
+            chain.push_back(next);
+            const ll::FramePiece& fp = cr.frame.pieces[static_cast<std::size_t>(next)];
+            node = fp.a == node ? fp.b : fp.a;
+          }
+          if (chain.size() != sn.pieces.size()) continue;   // not one run end to end: left to widening
+        }
+        ++struts_braced_asked;
+        double walked = 0.0;
+        std::size_t k = 0;
+        int node = sn.end_node[0] >= 0 ? sn.end_node[0] : cr.frame.pieces[static_cast<std::size_t>(chain.front())].a;
+        for (int q = 1; q <= nb; ++q) {
+          const double want = sn.length_mm * q / (nb + 1);
+          while (k < chain.size()) {
+            const ll::FramePiece& fp = cr.frame.pieces[static_cast<std::size_t>(chain[k])];
+            const Vec3 A = cr.frame.nodes[static_cast<std::size_t>(fp.a == node ? fp.a : fp.b)];
+            const Vec3 B = cr.frame.nodes[static_cast<std::size_t>(fp.a == node ? fp.b : fp.a)];
+            const double l = std::sqrt((B.x - A.x) * (B.x - A.x) + (B.y - A.y) * (B.y - A.y) + (B.z - A.z) * (B.z - A.z));
+            if (walked + l >= want || k + 1 == chain.size()) {
+              const double t = l > 0.0 ? std::clamp((want - walked) / l, 0.0, 1.0) : 0.0;
+              const Vec3 X{A.x + (B.x - A.x) * t, A.y + (B.y - A.y) * t, A.z + (B.z - A.z) * t};
+              const ll::Bar& hb = bars.bars[static_cast<std::size_t>(layout_bar(chain[k]))];
+              const Vec3 d{hb.b.x - hb.a.x, hb.b.y - hb.a.y, hb.b.z - hb.a.z};
+              const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
+              const double u = l2 > 0.0 ? ((X.x - hb.a.x) * d.x + (X.y - hb.a.y) * d.y + (X.z - hb.a.z) * d.z) / l2 : 0.5;
+              round.ops.push_back({1, {hb.a.x, hb.a.y, hb.a.z, hb.b.x, hb.b.y, hb.b.z, std::clamp(u, 0.0, 1.0), hb.width}});
+              break;
+            }
+            walked += l;
+            node = fp.a == node ? fp.b : fp.a;
+            ++k;
+          }
+        }
+        brace_ops_of[wi].second = round.ops.size();
+      }
+      const ll::Bars before_round = bars;   // the bars the check numbered
+      ll::AddReport brep;
+      std::string why;
+      if (!round.ops.empty() && !ll::apply_add_round(bars, domain, round, ctx, &brep, &why))
+        return finish(false, "strengthen_failed", 1, "A round of strengthening could not be added.", why);
+      // (2) widening in place: each watched strut's own bars (as they now are, braces cut) by
+      // (target / m)^(1 / p): p axial, bending (bending the larger part) or buckling (a buckling strut no brace could
+      // be laid at); never thinner, never above the cap.
+      std::vector<ll::Bar> olds;
+      std::vector<double> factor;
+      std::size_t struts_widened = 0, struts_braced = 0, struts_at_cap = 0;
+      for (std::size_t wi = 0; wi < watched.size(); ++wi) {
+        const ll::FrameStrut& sn = *watched[wi].sn;
+        double f = 1.0;
+        if (sn.by == "buckling") {
+          bool all = brace_ops_of[wi].second > brace_ops_of[wi].first;
+          for (std::size_t q = brace_ops_of[wi].first; q < brace_ops_of[wi].second; ++q) all = all && brep.braces_at[q] > 0;
+          if (all) { ++struts_braced; continue; }
+          f = std::pow(ss.target_margin / sn.buckling_margin, 1.0 / p_buckle);
+        } else {
+          f = std::pow(ss.target_margin / sn.stress_margin, 1.0 / (sn.bending_led ? p_bend : p_axial));
+        }
+        if (!(f > 1.0)) continue;
+        bool any = false, capped = false;
+        std::vector<int> seen;
+        for (int pi : sn.pieces) {
+          const int lb = layout_bar(pi);
+          if (std::find(seen.begin(), seen.end(), lb) != seen.end()) continue;
+          seen.push_back(lb);
+          olds.push_back(before_round.bars[static_cast<std::size_t>(lb)]);
+          factor.push_back(f);
+          capped = capped || olds.back().width * f > cap + 1e-12;
+          any = true;
+        }
+        struts_widened += any;
+        struts_at_cap += capped;
+      }
+      ll::AddRound widen;
+      {
+        const std::vector<std::vector<std::size_t>> on = ll::pieces_on(bars, olds);
+        std::set<std::size_t> done;
+        for (std::size_t k = 0; k < olds.size(); ++k)
+          for (std::size_t j : on[k]) {
+            if (done.count(j)) continue;
+            const ll::Bar& b = bars.bars[j];
+            const double w = std::min(cap, std::max(b.width, b.width * factor[k]));
+            if (!(w > b.width)) continue;
+            done.insert(j);
+            widen.ops.push_back({2, {b.a.x, b.a.y, b.a.z, b.b.x, b.b.y, b.b.z, w}});
+          }
+      }
+      ll::AddReport wrep;
+      if (!widen.ops.empty() && !ll::apply_add_round(bars, domain, widen, ctx, &wrep, &why))
+        return finish(false, "strengthen_failed", 1, "A round of strengthening could not be added.", why);
+      round.ops.insert(round.ops.end(), widen.ops.begin(), widen.ops.end());
+      round.hash = ll::bars_hash(bars);
+      adds.rounds.push_back(round);
+      std::size_t split = 0;
+      const std::string kept = ll::old_bars_kept(bars0, bars, 1e-5, &split);
+      if (!kept.empty()) res.old_bars_kept = false;
+      const double s_add = secs(t1);
+      // The files: the additions so far and strengthened.json (version 2), in r<n+1>/.
+      const std::string ndir = join_path(out_dir, "r" + std::to_string(n + 1));
+      std::filesystem::create_directories(ndir, ec);
+      ll::Strengthened st;
+      st.version = 2;
+      st.additions = "additions.bin";
+      const std::string sj = join_path(ndir, "strengthened.json");
+      const std::string more = "  \"round\": " + std::to_string(n + 1) + ",\n  \"rounds\": " + std::to_string(adds.rounds.size()) +
+                               ",\n  \"bars_hash\": " + json_str(hash_hex(round.hash)) + ",\n  \"struts_watched\": " +
+                               std::to_string(watched.size()) + ",\n  \"struts_widened\": " + std::to_string(struts_widened) +
+                               ",\n  \"struts_braced\": " + std::to_string(struts_braced) + ",\n  \"braces\": " +
+                               std::to_string(brep.braces) + ",\n  \"struts_at_cap\": " + std::to_string(struts_at_cap);
+      if (!ll::write_additions_file(join_path(ndir, st.additions), adds) || !ll::write_strengthened_file(sj, st, more))
+        return finish(false, "cannot_write", 1, "The strengthened files could not be saved on the Mac.", ndir);
+      res.last_strengthened = "r" + std::to_string(n + 1) + "/strengthened.json";
+      ++res.rounds_fixed;
+      rounds_json += r + ",\n     \"added\": {\"strengthened\": " + json_str(res.last_strengthened) +
+                     ", \"struts_watched\": " + std::to_string(watched.size()) + ", \"struts_widened\": " +
+                     std::to_string(struts_widened) + ", \"bars_widened\": " + std::to_string(wrep.widened) +
+                     ", \"links_widened\": " + std::to_string(wrep.links_widened) + ", \"struts_braced\": " +
+                     std::to_string(struts_braced) + ", \"buckling_struts_asked\": " + std::to_string(struts_braced_asked) +
+                     ", \"brace_points\": " + std::to_string(brep.brace_points) + ", \"braces\": " + std::to_string(brep.braces) +
+                     ", \"struts_at_cap\": " + std::to_string(struts_at_cap) + ", \"cap_mm\": " + json_num(cap) +
+                     ", \"old_bars_split\": " + std::to_string(split) + ", \"old_bars_kept\": " + (kept.empty() ? "true" : "false") +
+                     (kept.empty() ? std::string() : ", \"old_bars_broken\": " + json_str(kept)) +
+                     ", \"hash\": " + json_str(hash_hex(round.hash)) + ", \"seconds\": " + json_num(std::round(s_add * 10) / 10) + "}}";
+    }
+  }
   // What follows the stress: a strut width on a Sweep, a spacing range, Grown's runs by stress.
   const bool varies = ask.width_heavy_mm > 0.0 || (!(ask.spacing_mm > 0.0) && ask.spacing_max_mm > ask.spacing_min_mm) ||
                       (grown && ask.auto_by_stress);
