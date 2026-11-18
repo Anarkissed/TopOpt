@@ -276,6 +276,7 @@ class Grower {
   Vec3 up_{}, u_{}, v_{};
   double layer_ = 0.2, width_ = 0.9, r_ = 0.45, sep_hi_ = 8.0, median_ = 5.0, bed_ = 0.0, ds_ = 0.2;
   double cone_sin_ = 0.5, cone_cos_ = 0.0;
+  double cross_max_sin_ = kCrossMaxSin;   // O: a crossing vine's steepest climb (kCrossMaxSin at 45, bit for bit)
   double laid_mm_ = 0.0;
   std::uint64_t next_stamp_ = 1;
   Boxes boxes_;   // samples along every laid segment (support, pruning)
@@ -954,7 +955,8 @@ void Grower::grow_tip(const Tip& t, std::vector<Tip>& tips) {
       const double tg = ask_.stress_goal && sp_wide_ > sp_tight_ ? (sp_wide_ - sep(p)) / (sp_wide_ - sp_tight_) : 0.0;
       if (crossing) {
         // F: its heading, the stress (where there is one) and straight away from its wall; no pull to a face. Its
-        // climb is held between the cone and 45 degrees from level: the stress bends it, and it still crosses.
+        // climb is held between the cone and 45 degrees from level (O: cross_climb_max_deg): the stress bends it,
+        // and it still crosses.
         Vec3 fc;
         want = mul(dir, kBlendHeading);
         if (stress_dir(p, fc)) want = add(want, mul(fc, kBlendField));
@@ -963,7 +965,7 @@ void Grower::grow_tip(const Tip& t, std::vector<Tip>& tips) {
           want = unit(want);
           const Vec3 lv = level(want);
           const Vec3 side = len(lv) > 1e-6 ? unit(lv) : t.inward;
-          const double s = std::min(std::max(dot(want, up_), cone_sin_), kCrossMaxSin);
+          const double s = std::min(std::max(dot(want, up_), cone_sin_), cross_max_sin_);
           want = add(mul(side, std::sqrt(1.0 - s * s)), mul(up_, s));
         }
       } else if (aim) {
@@ -2530,6 +2532,10 @@ bool Grower::setup() {
     throw std::invalid_argument("grow_strands: cross_gap_heavy must be at most cross_gap");   // N
   if (ask_.cross_gap_heavy > 0.0 && (ask_.spacing_mm > 0.0 || !(ask_.spacing_max_mm > ask_.spacing_min_mm)))
     throw std::invalid_argument("grow_strands: cross_gap_heavy needs the spacing as a range (O12's measure)");   // N
+  if (!(ask_.cross_climb_max_deg >= kConeDeg && ask_.cross_climb_max_deg <= 45.0))
+    throw std::invalid_argument("grow_strands: cross_climb_max_deg must be from 30 to 45");   // O
+  if (ask_.cross_climb_max_deg != 45.0 && ask_.wall_cross == 0)
+    throw std::invalid_argument("grow_strands: cross_climb_max_deg needs wall_cross");   // O
   if (!(ask_.top_run >= 0.0) || !std::isfinite(ask_.top_run))
     throw std::invalid_argument("grow_strands: top_run must be 0 or above");   // G
   if (!(ask_.root_run >= 0.0) || !std::isfinite(ask_.root_run))
@@ -2573,6 +2579,8 @@ bool Grower::setup() {
   }
   cone_sin_ = std::sin(kConeDeg * kPi / 180.0);
   cone_cos_ = std::cos(kConeDeg * kPi / 180.0);
+  cross_max_sin_ = ask_.cross_climb_max_deg == 45.0 ? kCrossMaxSin
+                                                    : std::sin(ask_.cross_climb_max_deg * kPi / 180.0);   // O
   bed_ = std::numeric_limits<double>::infinity();
   for (const Vec3& p : domain_.measure().mesh().vertices) bed_ = std::min(bed_, h(p));
   {

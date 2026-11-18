@@ -157,6 +157,9 @@ struct OrganicAsk {
   // most cross_gap, and the spacing as a range. A crossing vine's heading, climb, ties and width are not changed.
   double cross_gap = 2.5;
   double cross_gap_heavy = 0.0;
+  // O (brief G22): the steepest a crossing vine climbs, in degrees from level (45: F's limit, as before). From 30 (the
+  // cone) to 45; only with wall_cross on when not 45. Nothing else about a crossing vine changes.
+  double cross_climb_max_deg = 45.0;
 };
 
 // J2 (brief G12), the pruning of a Grown area's weave bars, for each (region, median asked spacing) of `areas`:
