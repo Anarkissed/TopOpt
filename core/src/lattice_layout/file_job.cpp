@@ -208,7 +208,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "organic_shape_reach", "organic_hold_parts", "organic_part_reach_mm",
        "organic_part_support_mm", "organic_part_to_floor", "organic_wall_gap_heavy", "organic_cross_gap",
        "organic_cross_gap_heavy", "organic_cross_climb_max_deg", "organic_tie_level", "organic_tie_gap",
-       "organic_tie_gap_heavy", "organic_link_width", "organic_unbraced_max"},
+       "organic_tie_gap_heavy", "organic_link_width", "organic_unbraced_max", "organic_follow_stress"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -553,6 +553,7 @@ OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::str
     json::fail(w + ".organic_width_mm", b);
   }
   a.auto_by_stress = flag(in, "organic_auto", a.auto_by_stress, w);   // I
+  a.follow_stress = flag(in, "organic_follow_stress", a.follow_stress, w);   // OP6: false = shape only
   a.member_cap = flag(in, "organic_member_cap", a.member_cap, w);   // J1
   a.prune = flag(in, "organic_prune", a.prune, w);   // J2
   a.bed_floor_mm = num(in, "organic_bed_floor_mm", a.bed_floor_mm, w);   // K1
