@@ -98,6 +98,20 @@ std::vector<WeaveRun> weave_runs(const Bars& bars, const std::vector<int>& weave
   return runs;
 }
 
+OrganicPreview lay_organic_preview(Session& session, const Settings& settings, const TensorField& field,
+                                   const OrganicAsk& ask, const OrganicPreviewAsk& preview, int threads,
+                                   const std::atomic<bool>* stop) {
+  OrganicPreview out;
+  out.quality = preview.quality;
+  out.outcome = preview.quality == PreviewQuality::Draft ? session.lay_organic_draft(settings, field, ask, threads, stop)
+                                                         : session.lay_organic(settings, field, ask, threads, stop);
+  if (out.outcome.cancelled) return out;
+  std::vector<int> regions;
+  for (const Layout::Weave& w : out.outcome.layout.weave) regions.push_back(w.region);
+  out.runs = weave_runs(out.outcome.bars, regions, preview.tolerance_mm);
+  return out;
+}
+
 std::vector<std::uint8_t> pack_weave_runs(const std::vector<WeaveRun>& runs) {
   std::size_t bytes = 0;
   for (const WeaveRun& r : runs) bytes += 12 + 20 * r.points.size();

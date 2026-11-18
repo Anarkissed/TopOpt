@@ -835,6 +835,46 @@ static void test_runs() {
   for (const WeaveRun& r : thin) CHECK(r.points.size() >= 2 && r.width_mm.size() == r.points.size() && r.spacing_mm.size() == r.points.size());
 }
 
+// ── OL-DRAFT (brief L2, item 3): exact against draft on a made part ─────────────────────────────────────────────────
+static void test_draft() {
+  const StepModel model = box_model(30, 30, 20);
+  const TensorField f = traced_field();
+  OrganicAsk a = traced_ask();
+  a.hold_parts = true;   // the solid above the 14 mm region hangs over it: supports
+  Settings st = traced_settings(0, 14.0);
+  st.skin = true;        // the net skin on the open faces
+  Session plain(model);
+  const Outcome full = plain.lay_organic(st, f, a);
+  Session se(model), sd(model);
+  OrganicPreviewAsk pe, pd;
+  pd.quality = PreviewQuality::Draft;
+  const OrganicPreview exact = lay_organic_preview(se, st, f, a, pe);
+  const OrganicPreview draft = lay_organic_preview(sd, st, f, a, pd);
+  auto tally = [](const Outcome& o, double& mm, std::size_t& links, std::size_t& sup, std::size_t& net) {
+    mm = 0.0; links = sup = net = 0;
+    for (const Bar& b : o.bars.bars) {
+      if (b.link) { ++links; continue; }
+      mm += dist(b.a, b.b); sup += b.support; net += b.net;
+    }
+  };
+  double em, dm, fm;
+  std::size_t el, es, en, dl, ds, dn, fl, fs, fn;
+  tally(exact.outcome, em, el, es, en);
+  tally(draft.outcome, dm, dl, ds, dn);
+  tally(full, fm, fl, fs, fn);
+  std::printf("OL-DRAFT exact: %zu bars, %.1f mm (links %zu, supports %zu, net %zu), runs %zu; draft: %zu bars, %.1f mm "
+              "(links %zu, supports %zu, net %zu), runs %zu: length %+.1f %%\n", exact.outcome.bars.bars.size(), em, el, es,
+              en, exact.runs.size(), draft.outcome.bars.bars.size(), dm, dl, ds, dn, draft.runs.size(),
+              em > 0.0 ? 100.0 * (dm - em) / em : 0.0);
+  CHECK(exact.quality == PreviewQuality::Exact && draft.quality == PreviewQuality::Draft);
+  CHECK(same_bars(exact.outcome.bars, full.bars));   // exact IS the full lay
+  CHECK(el > 0 && dl == 0);                          // no cut at crossings in the draft: no links (braces off here)
+  // What it differs by, shown (not pinned to a sign: nothing is dropped, but nothing is joined either, and the net skin
+  // and the supports are laid on other bars): on this part -13.3 % length, supports 10 -> 18, net 1,544 -> 1,070.
+  CHECK(es > 0 && ds > 0 && en > 0 && dn > 0 && std::fabs(dm - em) > 0.01 * em && (es != ds || en != dn));
+  CHECK(!same_bars(exact.outcome.bars, draft.outcome.bars) && !draft.runs.empty());
+}
+
 
 int main() {
   test_s_cut_fix();
@@ -854,6 +894,7 @@ int main() {
   test_reference_stated_at_resolved();
   test_link_width_run();
   test_runs();
+  test_draft();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }

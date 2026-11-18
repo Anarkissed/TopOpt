@@ -568,6 +568,16 @@ WeaveBraceAsk organic_brace_ask(const Domain& domain, const TensorField& field, 
 
 Outcome Session::lay_organic(const Settings& settings, const TensorField& field, const OrganicAsk& ask, int threads,
                              const std::atomic<bool>* stop) {
+  return lay_organic_with(settings, field, ask, threads, stop, false);
+}
+
+Outcome Session::lay_organic_draft(const Settings& settings, const TensorField& field, const OrganicAsk& ask,
+                                   int threads, const std::atomic<bool>* stop) {
+  return lay_organic_with(settings, field, ask, threads, stop, true);
+}
+
+Outcome Session::lay_organic_with(const Settings& settings, const TensorField& field, const OrganicAsk& ask,
+                                  int threads, const std::atomic<bool>* stop, bool draft) {
   if (stop && stop->load(std::memory_order_relaxed)) {
     Outcome none;
     none.cancelled = true;
@@ -581,6 +591,7 @@ Outcome Session::lay_organic(const Settings& settings, const TensorField& field,
   finish.light_mm = ask.width_mm > 0.0 ? ask.width_mm : domain_->spec().bead_mm * domain_->spec().min_strut_lines;
   finish.layer_mm = ask.layer_mm;
   finish.link_width = ask.link_width;   // S8
+  finish.draft = draft;                 // brief L2, item 3
   const auto t0 = std::chrono::steady_clock::now();
   std::vector<Strand> strands;
   double smallest = 0.0, largest = 0.0, sum = 0.0;

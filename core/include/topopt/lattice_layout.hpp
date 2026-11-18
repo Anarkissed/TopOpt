@@ -1443,6 +1443,11 @@ class Session {
   // everything after it.
   Outcome lay_organic(const Settings& settings, const TensorField& field, const OrganicAsk& ask, int threads = 0,
                       const std::atomic<bool>* stop = nullptr);
+  // Brief L2, item 3: the DRAFT of lay_organic, for the preview while a slider is dragged (NOT what will be made): the
+  // same trace or growth, then no cut at crossings (no links), no joining of loose ends, no merging of repeats, nothing
+  // dropped; braces on the uncut bars, supports and net skin as they come. lay_organic_preview (organic header) calls it.
+  Outcome lay_organic_draft(const Settings& settings, const TensorField& field, const OrganicAsk& ask, int threads = 0,
+                            const std::atomic<bool>* stop = nullptr);
   std::size_t open_edges() const { return open_edges_; }
   const PartMeasure& measure() const { return *measure_; }
   // The part as it was opened (its unwelded triangles and their raw face ids): D23 reads its faces. Not a copy.
@@ -1466,7 +1471,10 @@ class Session {
     double light_mm = 0.0, layer_mm = 0.2;
     double link_width = 1.0;   // S8: OrganicAsk::link_width
     WeaveBraceAsk brace;       // T (brief G30): off unless brace.unbraced_max > 0
+    bool draft = false;        // brief L2, item 3: lay_organic_draft
   };
+  Outcome lay_organic_with(const Settings& settings, const TensorField& field, const OrganicAsk& ask, int threads,
+                           const std::atomic<bool>* stop, bool draft);
   Outcome lay_with(const Settings& settings, const std::vector<Strand>* strands, int threads, const std::atomic<bool>* stop,
                    const WeaveFinish* finish = nullptr);
   // The domain for these settings' "where": kept when it is the same, made again when it is not.

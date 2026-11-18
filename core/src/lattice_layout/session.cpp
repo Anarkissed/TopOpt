@@ -221,14 +221,16 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
       out.bars = lay_bars(out.layout, *domain_, threads);
       if (strands) {   // O2: the weave's bars, cut at their crossings, after the cells'
         Bars weave = weave_bars(*domain_, *strands, threads);
-        split_at_crossings(weave, finish ? finish->light_mm : 0.0, finish ? finish->layer_mm : 0.2, nullptr,
-                           finish ? finish->link_width : 1.0);   // S, S8
+        if (!(finish && finish->draft))   // brief L2, item 3: the draft has no cut at crossings (no links)
+          split_at_crossings(weave, finish ? finish->light_mm : 0.0, finish ? finish->layer_mm : 0.2, nullptr,
+                             finish ? finish->link_width : 1.0);   // S, S8
         if (finish && finish->brace.unbraced_max > 0.0) brace_weave(weave, *domain_, finish->brace);   // T
         out.bars.stubs += weave.stubs;
         out.bars.bars.insert(out.bars.bars.end(), weave.bars.begin(), weave.bars.end());
       }
-      if (settings.join_loose) join_loose_bars(out.bars, *domain_, threads, &out.layout);
-      if (strands) {   // O2 (one bar per two points): a weave's bars laid more than once on the same two ends are one
+      const bool draft = finish && finish->draft;   // brief L2, item 3: no joining, merging or dropping
+      if (settings.join_loose && !draft) join_loose_bars(out.bars, *domain_, threads, &out.layout);
+      if (strands && !draft) {   // O2 (one bar per two points): a weave's bars laid more than once on the same two ends are one
         std::vector<int> weave_regions;
         for (const Layout::Weave& w : out.layout.weave) weave_regions.push_back(w.region);
         merge_repeated_bars(out.bars, weave_regions);
@@ -246,14 +248,14 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
       }
       if (any_skin) lay_skin(out.bars, *domain_, skin);
       domain_->check_stop();
-      if (settings.skin && finish && !finish->net_reach.empty() && !finish->prune.empty())
+      if (settings.skin && finish && !draft && !finish->net_reach.empty() && !finish->prune.empty())
         prune_weave(out.bars, finish->prune);   // J2: the weave pruned before the net skin is laid on it
       if (settings.skin && finish && !finish->hold.empty())   // L2 d: after the growth and J2, before the net skin
         hold_up_weave(out.bars, *domain_, finish->hold);
       if (settings.skin && finish && !finish->net_reach.empty())   // O16: Finish Skin on a weave region
         lay_net_skin(out.bars, *domain_, finish->net_reach, settings.skin_spec.width_mm);
       domain_->check_stop();
-      if (settings.drop_loose) {
+      if (settings.drop_loose && !draft) {
         drop_loose_bars(out.bars, finish && !finish->arrived.empty() ? &finish->arrived : nullptr);   // G11
         out.stepped_edges = stepped_edges(out.bars);
         out.pieces = drop_adrift_bars(out.bars, *domain_, &out.layout);

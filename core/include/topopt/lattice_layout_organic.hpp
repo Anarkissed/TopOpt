@@ -553,4 +553,23 @@ std::vector<WeaveRun> weave_runs(const Bars& bars, const std::vector<int>& weave
 // end_b u8 (Bar::End), one pad byte), then 20 bytes per point (x, y, z, width, spacing as float32).
 std::vector<std::uint8_t> pack_weave_runs(const std::vector<WeaveRun>& runs);
 
+// Item 3, two qualities of an Organic lay for the preview. Exact: Session::lay_organic as it is (the picture is what
+// will be made), then the runs. Draft (for dragging a slider; NOT what will be made): the same trace or growth, then
+// the weave's bars with no cut at crossings (so no links), no joining of loose ends, no merging of repeats, nothing
+// dropped (loose bars, pieces adrift, the J2 pruning); the braces laid on the uncut bars, the supports and the net skin
+// as they come. A job with cell regions too: their bars are laid, not joined and not dropped either.
+enum class PreviewQuality : std::uint8_t { Exact, Draft };
+struct OrganicPreviewAsk {
+  PreviewQuality quality = PreviewQuality::Exact;
+  double tolerance_mm = 0.1;   // the runs' thinning (item 2)
+};
+struct OrganicPreview {
+  PreviewQuality quality = PreviewQuality::Exact;   // what was laid: say it on screen when Draft
+  Outcome outcome;                                   // the lay itself (its bars, counts, Grown's report)
+  std::vector<WeaveRun> runs;                        // the weave regions' runs (item 2)
+};
+OrganicPreview lay_organic_preview(Session& session, const Settings& settings, const TensorField& field,
+                                   const OrganicAsk& ask, const OrganicPreviewAsk& preview, int threads = 0,
+                                   const std::atomic<bool>* stop = nullptr);
+
 }  // namespace topopt::lattice_layout
