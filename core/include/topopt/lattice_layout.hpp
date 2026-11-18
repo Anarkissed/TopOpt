@@ -182,6 +182,9 @@ struct Region {
   std::vector<std::array<Vec3, 2>> shell_edge;
   double shell_depth_mm = 0.0;
   bool expand_ignored = false;
+  // Rule O1 (Organic, a weave): a Lattice region filled by a strut list handed in (weave_bars), not by cells.
+  // lay_cells lays nothing in it, and all of its lattice is OPEN space: for the bars and for the file.
+  bool weave = false;
   bool is_shell() const { return !shell.triangles.empty(); }
   // S13: a Lattice region's own Finish. What it does not state it takes from the part's
   // (DomainSpec::rim_mm, cover_mm), with the same meaning: 0 none for this region (even when
@@ -799,6 +802,17 @@ struct Layout {
   // one of these cubes is never taken in by another region's cell (D14b): what the rule made solid stays solid.
   std::vector<std::uint32_t> thin_solid;
   std::vector<RegionCells> regions;
+  // O1: the weave regions (Region::weave), in region order. Each has no cell; its lattice is open space, read by
+  // read_open_space in `frame` (the part's own axes, as a curved region's). `spacing_mm` is the smallest spacing of
+  // the strands laid in it (0 until a weave is laid: Session::lay_weave fills it); the file fills a sealed space
+  // smaller than its cube, as it does one smaller than the smallest cell.
+  struct Weave { int region = 0; int frame = 0; double spacing_mm = 0.0; };
+  std::vector<Weave> weave;
+  bool is_weave(int region) const {
+    for (const Weave& w : weave)
+      if (w.region == region) return true;
+    return false;
+  }
 };
 
 // `threads`: 0 = all of this machine's; the layout is the same for any number (D18).
@@ -960,6 +974,7 @@ struct Bar {
   End end_a = End::Node, end_b = End::Node;
   bool piece = false;    // part of a strut of a cut cell, not a whole strut
   bool skin = false;     // a skin bar (S3): it lies on the part's surface, between cut ends
+  bool net = false;      // O16: a strut of the Organic net skin over a weave region's open face
   // The plane of its cell's own grid that the strut lies in, as that plane's unit normal
   // (an octet strut lies in exactly one: a cell face, or the plane half way between two).
   // Zero for a strut that lies in none, or in two. The skin follows these planes.
@@ -967,6 +982,9 @@ struct Bar {
   // For a Joined end: the bar it ends in (its place in Bars::bars), -1 otherwise. If that
   // bar is removed, this end lands on nothing again (drop_loose_bars follows it).
   int into_a = -1, into_b = -1;
+  // O17: the strand of a weave it was laid from (its place in the list weave_bars was given), -1 for every other bar.
+  // Read only to walk along a strand (lift_weave_sags).
+  int strand = -1;
 };
 
 // Preview is the spec (reviewer, 2026-11-12): a bar lying flatter than 30 degrees is written to the file as a BRIDGE,
@@ -984,6 +1002,7 @@ struct Bars {
   std::size_t stubs = 0;      // pieces shorter than their own width: not kept (S4)
   std::size_t dropped = 0;    // by drop_loose_bars
   std::size_t joined = 0;     // ends, by join_loose_bars
+  std::size_t repeats = 0;    // weave bars that repeated another on the same two ends, merged into it (merge_repeated_bars)
   // Where drop_loose_bars removed a strut that the part's surface had cut and nothing
   // held: the places a stepped edge is left (S4).
   struct CutEnd { Vec3 at{}; int region = 0; double cell = 0.0; };
@@ -1002,6 +1021,43 @@ struct SteppedEdge {
 std::vector<SteppedEdge> stepped_edges(const Bars& bars);
 
 Bars lay_bars(const Layout& layout, const Domain& domain, int threads = 0);
+
+// ── ORGANIC: A WEAVE (O1, O2) ─────────────────────────────────────────────────
+// Rule O2: a strut list that belongs to no cell. One strand is a polyline in the part's own coordinates, one width per
+// point, in one weave region. `spacing_mm` is the local distance between neighbouring strands; it stands where a
+// cell's size stands for cube lattices: how far a loose end is run on to be joined (join_loose_bars), and the
+// smallest sealed space the file keeps.
+struct Strand {
+  std::vector<Vec3> points;
+  std::vector<double> width_mm;   // one per point
+  int region = 0;
+  double spacing_mm = 0.0;
+  bool tie = false;   // G9: a Grown transfer tie (read by its tests; the path lays it as any strand)
+};
+// Each segment of each strand is one Bar (width the mean of its two ends' widths, `cell` the strand's spacing,
+// `region` its region), its ends finished as lay_bars finishes a cut strut's (finish_bar_ends in bars.cpp): where a
+// segment leaves its region's lattice it is cut there, and the new end, and each of the strand's two free ends, is
+// tagged Solid (the part's solid begins: the bar runs on into it by its own width, S11), Surface (cut by the part's
+// own surface, moved onto it) or Loose (in open lattice). Where two segments of a strand meet the ends are Node. A
+// cut piece shorter than its own width is a stub (S4) and is not kept. In strand order; the same for any number of
+// threads. A strand with fewer than two points, or a width list of another length, lays nothing.
+Bars weave_bars(const Domain& domain, const std::vector<Strand>& strands, int threads = 0);
+// Rule O2, crossings: wherever two bars pass within the sum of their half widths of each other, both are cut there and
+// share ONE exact joint, the middle of their closest approach (its ends Node), so that drop_loose_bars stops there
+// and a loose tail never eats a whole strand. A bar whose closest point is its own end has that end moved onto the
+// joint instead of being cut, and it lands there (Node). A crossing within the two half widths of an existing vertex
+// of either bar (an end where two or more bars meet: a strand's own vertex) is made AT that vertex, so the strand's
+// two bars there share the one joint and it stays whole (S1b). Two bars that already share an end are left alone; joints
+// within a hundredth of a micron of each other are one. The same result whatever order the bars were found in.
+// Returns the number of joints made.
+std::size_t split_at_crossings(Bars& bars);
+// Rule O2 (one bar per two points): of the bars of `regions` (a weave's), two with the same two ends (each within a
+// hundredth of a micron, either order) are ONE bar, of the wider width. The first in list order is kept, at the widest
+// width of its repeats; each of its ends takes the best-landed tag any of them has there (Solid, then Joined into a bar
+// that is not one of the repeats, then Node, Surface, Loose; the first at a tie), and a Joined end of any other bar
+// that landed in a repeat lands in the bar kept. Bars of other regions are never read or changed. Returns (and adds
+// to `repeats`) how many bars were merged away. With no bar of `regions` the list is untouched.
+std::size_t merge_repeated_bars(Bars& bars, const std::vector<int>& regions);
 
 // Print rule P8 (f) (reviewer, 2026-11-14): a cut piece of lattice thinner than its own strut, lying against solid,
 // is solid. Nothing can stand in it (every strut through it is shorter than its own width and is dropped as a stub),
@@ -1078,8 +1134,9 @@ class SolidAt {
 // notch, nor through the part). Ends of struts that lie in no single plane are joined to
 // each other by the same three tests.
 // A cut end that gets a skin bar has landed (End::Joined). Returns the number of skin bars.
+// The bars of a weave region (Organic) are not read: a weave's skin is its net skin (O16, lay_net_skin).
 struct SkinSpec {
-  double width_mm = 0.0;      // 0 = as wide as the thinner of the two struts it joins
+  double width_mm = 0.0;      // 0 = as wide as the thinner of the two struts it joins (O16: a weave's net struts too)
   double reach_cells = 1.2;
   // Round a CURVED wall a straight bar between two points of the surface leaves the surface by the bow of the curve:
   // into the air on a hollow wall (a pocket), into the part on a bulging one. A bar may bow by this share of its own
@@ -1108,7 +1165,10 @@ std::size_t lay_skin(Bars& bars, const Domain& domain, const SkinSpec& spec = Sk
 // S4, Finish None: a bar is kept only if each of its ends lands on another bar or on
 // solid. Removes the rest (a cut end in the air or loose in the lattice, and then any
 // bar left holding a node alone), and counts them in `dropped`.
-void drop_loose_bars(Bars& bars);
+// G11 (Grown, the brief G2 change 3): in the regions of `arrived` (the Grown weave regions; null or empty: none), the
+// Surface end of a steep bar (not a bridge, bar_is_bridge) that is its UPPER end (the higher z) has landed: a vine that
+// climbed to the part's surface has arrived, and the Finish decides what joins it. Its lower end is judged as before.
+void drop_loose_bars(Bars& bars, const std::vector<int>* arrived = nullptr);
 
 // S4, S5, S6: is the lattice one piece, and is it joined to the part? Bars are one piece
 // when they share an end, when an end of one lies inside the other, or when their middle
@@ -1138,6 +1198,9 @@ Pieces drop_adrift_bars(Bars& bars, const Domain& domain, const Layout* layout =
 // once, and between two layouts keeps everything the changed settings do not touch (P2):
 // a cell-size, band or strut slider re-lays the cells without reading the part again; a
 // region, depth, Expand, Protect skin, rim or line-width change reads it again, once.
+struct TensorField;   // Organic, Traced (lattice_layout_organic.hpp)
+struct OrganicAsk;
+struct GrowReport;   // Organic, Grown (lattice_layout_organic.hpp)
 struct Settings {
   struct RegionAsk {
     int id = 0;
@@ -1145,6 +1208,8 @@ struct Settings {
     std::vector<int> faces;      // the model's own face numbers
     double depth_mm = 0.0;
     double expand_mm = 0.0;
+    bool weave = false;          // O1: filled by a strand list (Session::lay_weave), not by cells.
+                                 // Here, after expand_mm, so a test's {id, role, faces, depth, expand, weave} reads it
     AreaOwn own{};               // C23, R19: a Lattice region's own cells and struts (not read for No lattice)
     // D21: a zone in place of faces (region_from_zone). `depth_mm` is then not read: the
     // depth is the zone's own. An ask with both faces and a zone is left out and listed.
@@ -1254,6 +1319,18 @@ struct Outcome {
   // C24: the part's size-step limit this layout kept (step_held of the part's cells: a value under the ladder's
   // smallest step is held there, 2 on Default Grade); 0 when none was asked. A region's own limit is not reported here.
   double step_held_at = 0.0;
+  // Organic, Traced (lay_organic only; 0 from lay() and lay_weave()): the strands traced for the weave regions, and the
+  // time the trace took, ms (trace_strands, every weave region).
+  std::size_t strands = 0;
+  double ms_trace = 0.0;
+  // O12: the spacing the trace used over every weave region's candidates (smallest, largest, mean); 0 with no trace.
+  double spacing_smallest_mm = 0.0, spacing_largest_mm = 0.0, spacing_mean_mm = 0.0;
+  // O16 (lay_organic only): the net skin's struts in `bars` and their length, mm.
+  std::size_t net_struts = 0;
+  double net_mm = 0.0;
+  // G1 (Organic, Grown; lay_organic with OrganicAsk::mode Grown): what the growth did, every weave region together;
+  // null otherwise.
+  std::shared_ptr<const GrowReport> grown;
 };
 
 class Session {
@@ -1265,6 +1342,18 @@ class Session {
   // whole step). What the session keeps for the next lay() is not harmed: the same settings asked again give the
   // layout a fresh session gives. The flag must outlive the call; the session never writes it.
   Outcome lay(const Settings& settings, int threads = 0, const std::atomic<bool>* stop = nullptr);
+  // O1, O2: the same lay, with a weave. The cube regions are laid as lay() lays them; the weave regions' bars are made
+  // from `strands` (weave_bars), cut at their crossings (split_at_crossings) and added after the cells' bars; then all
+  // of them are joined, skinned if asked, loose bars dropped and pieces counted as lay() does. The layout's weave
+  // regions carry the smallest spacing of their strands. With no strands it is lay().
+  Outcome lay_weave(const Settings& settings, const std::vector<Strand>& strands, int threads = 0,
+                    const std::atomic<bool>* stop = nullptr);
+  // O3, O4 (Organic, Traced; lattice_layout_organic.hpp): the owner's Traced placement for each weave region of the
+  // settings (trace_strands on `field` with `ask`, in region order), then exactly lay_weave with those strands. With
+  // no weave region it is lay(). The trace itself is not cancelled part way; the stop flag is read before it and in
+  // everything after it.
+  Outcome lay_organic(const Settings& settings, const TensorField& field, const OrganicAsk& ask, int threads = 0,
+                      const std::atomic<bool>* stop = nullptr);
   std::size_t open_edges() const { return open_edges_; }
   const PartMeasure& measure() const { return *measure_; }
   // The part as it was opened (its unwelded triangles and their raw face ids): D23 reads its faces. Not a copy.
@@ -1278,6 +1367,15 @@ class Session {
   const Domain* domain() const { return domain_.get(); }
 
  private:
+  // O16: what lay_organic adds with Finish Skin on: per weave region, the net skin's reach.
+  struct WeaveFinish {
+    std::vector<std::pair<int, double>> net_reach;   // (region, reach mm); empty: no net skin
+    std::vector<int> arrived;   // G11 (Grown only): weave regions whose vines that reach the surface have arrived
+  };
+  Outcome lay_with(const Settings& settings, const std::vector<Strand>* strands, int threads, const std::atomic<bool>* stop,
+                   const WeaveFinish* finish = nullptr);
+  // The domain for these settings' "where": kept when it is the same, made again when it is not.
+  void ready_domain(const Settings& settings);
   StepModel model_;
   std::size_t open_edges_ = 0;
   std::unique_ptr<PartMeasure> measure_;

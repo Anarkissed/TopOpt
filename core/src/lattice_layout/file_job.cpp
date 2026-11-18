@@ -3,6 +3,7 @@
 #include "topopt/lattice_layout_file.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -11,6 +12,7 @@
 #include <memory>
 #include <exception>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <utility>
 
@@ -195,7 +197,10 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "per_region", "dial", "dial_region", "dial_value", "strut_width_mm", "allow_quilt",
        "strength", "small_cells_in_thin_walls", "one_grid", "cells_by_stress", "bars", "join_loose", "skin",
        "skin_width_mm", "skin_reach_cells", "drop_loose", "by_stress", "dial_light", "dial_heavy", "width_light_mm",
-       "width_heavy_mm", "reference_mpa", "percentile", "response", "region_own", "max_step"},
+       "width_heavy_mm", "reference_mpa", "percentile", "response", "region_own", "max_step", "region_weave", "organic_spacing_mm",
+       "organic_width_mm", "organic_spacing_min_mm", "organic_spacing_max_mm", "organic_spacing_exponent",
+       "organic_shape_fit", "organic_mode", "organic_walls_out", "organic_ties", "organic_tie_swirl",
+       "organic_foot_gap"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -214,6 +219,10 @@ Settings settings_from(const json::Value& in, const std::string& w) {
   if (no_lattice.size() != nr || depth.size() != nr || expand.size() != nr || counts.size() != nr)
     json::fail(w, "the region lists (region_ids, region_no_lattice, region_depth_mm, "
                   "region_expand_mm, region_face_counts) are not all one length");
+  // Organic, Traced: which regions are filled by the weave. Absent: none.
+  const std::vector<bool> weave = flags(in, "region_weave", w);
+  if (json::find(in, "region_weave") && weave.size() != nr)
+    json::fail(w + ".region_weave", "is not as long as region_ids (one true or false for each region)");
   const auto rf = unflatten(counts, wholes(in, "region_faces", w), w + ".region_faces");
   // D21: per region, null (its faces) or its zone (and then no faces).
   const json::Value* zones = json::find(in, "region_zones");
@@ -231,6 +240,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
       a.zone = zone_from(zones->arr[r], zat);
       if (!a.faces.empty()) json::fail(zat, "region " + std::to_string(a.id) + " has faces and a zone: one or the other");
     }
+    a.weave = !weave.empty() && weave[r];
     s.regions.push_back(std::move(a));
   }
   // D22: per region, null (its faces, or its zone) or its pieces; with pieces its faces are not read.
@@ -371,11 +381,81 @@ Settings settings_from(const json::Value& in, const std::string& w) {
   return s;
 }
 
+// Organic, Traced: the trace's ask, from the layout object (its keys are let through by settings_from). The spacing is
+// needed when any region is a weave: one spacing ("organic_spacing_mm", both ends), or the range (O12:
+// "organic_spacing_min_mm" and "organic_spacing_max_mm" together, "organic_spacing_exponent" 1 when not given), never
+// both. The reference is the layout's own ("reference_mpa", "percentile"). O13, "organic_shape_fit": true when not
+// given, as the old run reads a job that does not say. The width is 0 (the thinnest strut) or at least the thinnest
+// strut.
+OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::string& w) {
+  OrganicAsk a;
+  bool any_weave = false;
+  for (const Settings::RegionAsk& r : s.regions) any_weave = any_weave || r.weave;
+  const bool has_spacing = json::find(in, "organic_spacing_mm") != nullptr;
+  const bool has_min = json::find(in, "organic_spacing_min_mm") != nullptr;
+  const bool has_max = json::find(in, "organic_spacing_max_mm") != nullptr;
+  const bool has_exp = json::find(in, "organic_spacing_exponent") != nullptr;
+  a.spacing_mm = num(in, "organic_spacing_mm", 0.0, w);
+  a.width_mm = num(in, "organic_width_mm", 0.0, w);
+  if (has_spacing && !(std::isfinite(a.spacing_mm) && a.spacing_mm > 0.0))
+    json::fail(w + ".organic_spacing_mm", "must be above 0");
+  if (has_spacing && (has_min || has_max || has_exp))
+    json::fail(w + ".organic_spacing_mm", "is one spacing for both ends; give it, or the range "
+                                          "(organic_spacing_min_mm, organic_spacing_max_mm), not both");
+  if (has_min != has_max)
+    json::fail(w + (has_min ? ".organic_spacing_max_mm" : ".organic_spacing_min_mm"),
+               "is needed with the other end of the range");
+  if (has_exp && !has_min)
+    json::fail(w + ".organic_spacing_exponent", "is read only with the range (organic_spacing_min_mm, "
+                                                "organic_spacing_max_mm)");
+  if (has_min) {
+    a.spacing_min_mm = num(in, "organic_spacing_min_mm", a.spacing_min_mm, w);
+    a.spacing_max_mm = num(in, "organic_spacing_max_mm", a.spacing_max_mm, w);
+    a.spacing_exponent = num(in, "organic_spacing_exponent", a.spacing_exponent, w);
+    if (!(std::isfinite(a.spacing_min_mm) && a.spacing_min_mm > 0.0))
+      json::fail(w + ".organic_spacing_min_mm", "must be above 0");
+    if (!(std::isfinite(a.spacing_max_mm) && a.spacing_max_mm >= a.spacing_min_mm))
+      json::fail(w + ".organic_spacing_max_mm", "must be at least organic_spacing_min_mm");
+    if (!(std::isfinite(a.spacing_exponent) && a.spacing_exponent > 0.0))
+      json::fail(w + ".organic_spacing_exponent", "must be above 0");
+  }
+  if (any_weave && !has_spacing && !has_min)
+    json::fail(w + ".organic_spacing_mm", "is needed when a region is filled by the weave (region_weave): the distance "
+                                          "between neighbouring strands, mm (or the range: organic_spacing_min_mm and "
+                                          "organic_spacing_max_mm)");
+  a.reference_mpa = s.stress.reference_mpa;
+  a.percentile = s.stress.percentile;
+  a.shape_fit = flag(in, "organic_shape_fit", a.shape_fit, w);
+  // G1: Traced (the default) or Grown; the keys read by Grown only (its layer is the mesh's "layer_mm").
+  const std::string mode = text(in, "organic_mode", "traced", w);
+  if (mode != "traced" && mode != "grown")
+    json::fail(w + ".organic_mode", "must be \"traced\" or \"grown\", not \"" + mode + "\"");
+  a.mode = mode == "grown" ? OrganicMode::Grown : OrganicMode::Traced;
+  a.walls_out = flag(in, "organic_walls_out", a.walls_out, w);
+  a.ties = flag(in, "organic_ties", a.ties, w);
+  a.tie_swirl = num(in, "organic_tie_swirl", a.tie_swirl, w);
+  if (!(a.tie_swirl >= 0.0 && a.tie_swirl <= 1.0)) json::fail(w + ".organic_tie_swirl", "must be 0 to 1");
+  a.foot_gap = num(in, "organic_foot_gap", a.foot_gap, w);
+  // G13: 0 or less: the feet do not compete.
+  if (!std::isfinite(a.foot_gap)) json::fail(w + ".organic_foot_gap", "must be a number (0 or less: feet do not compete)");
+  const double thinnest = s.bead_mm * s.min_strut_lines;
+  if (!(std::isfinite(a.width_mm) && a.width_mm >= 0.0))
+    json::fail(w + ".organic_width_mm", "must be 0 (the thinnest strut) or more");
+  if (a.width_mm > 0.0 && a.width_mm < thinnest) {
+    char b[160];
+    std::snprintf(b, sizeof b, "is under the thinnest strut (%.9g mm: bead_mm x min_strut_lines); 0 gives the thinnest",
+                  thinnest);
+    json::fail(w + ".organic_width_mm", b);
+  }
+  return a;
+}
+
 FileOptions options_from(const json::Value& in, const std::string& w) {
   json::reject_unknown(in,
                        {"pitch_mm", "bar_sides", "block_mm", "grow_mm", "clean_mm", "part_mm",
                         "fill_under_mm3", "bridge_rise", "post_mm", "layer_mm", "pixel_mm", "most_passes",
-                        "leave_out", "keep_if_not_clean"},
+                        "leave_out", "keep_if_not_clean", "weave_stand_every_mm", "weave_foot_mm", "weave_round_top",
+                        "weave_sag_lift_mm", "weave_sag_legs"},
                        w);
   FileOptions o;
   o.pitch_mm = num(in, "pitch_mm", o.pitch_mm, w);
@@ -387,6 +467,13 @@ FileOptions options_from(const json::Value& in, const std::string& w) {
   o.mesh.fill_under_mm3 = num(in, "fill_under_mm3", o.mesh.fill_under_mm3, w);
   o.mesh.bridge_rise = num(in, "bridge_rise", o.mesh.bridge_rise, w);
   o.mesh.post_mm = num(in, "post_mm", o.mesh.post_mm, w);
+  o.mesh.weave_stand_every_mm = num(in, "weave_stand_every_mm", o.mesh.weave_stand_every_mm, w);
+  if (!(o.mesh.weave_stand_every_mm >= 0.0)) json::fail(w + ".weave_stand_every_mm", "must be 0 (never) or more");
+  o.mesh.weave_foot_mm = num(in, "weave_foot_mm", o.mesh.weave_foot_mm, w);   // O11: 0 = no foot, below 0 = half the bar's width
+  o.mesh.weave_round_top = flag(in, "weave_round_top", o.mesh.weave_round_top, w);   // O14: false = the square bar
+  o.mesh.weave_sag_lift_mm = num(in, "weave_sag_lift_mm", o.mesh.weave_sag_lift_mm, w);   // O17: 0 = never lift
+  if (!(o.mesh.weave_sag_lift_mm >= 0.0)) json::fail(w + ".weave_sag_lift_mm", "must be 0 (never) or more");
+  o.mesh.weave_sag_legs = flag(in, "weave_sag_legs", o.mesh.weave_sag_legs, w);   // O18: false = no leg
   o.layers.layer_mm = num(in, "layer_mm", o.layers.layer_mm, w);
   o.layers.pixel_mm = num(in, "pixel_mm", o.layers.pixel_mm, w);
   o.most_passes = whole(in, "most_passes", o.most_passes, w);
@@ -425,6 +512,8 @@ constexpr Refusal kWouldNotPrint{"would_not_print", 3};
 constexpr Refusal kNoStress{"no_stress_result", 3};
 // The stress result sent with the job could not be read (missing, or not a demand file).
 constexpr Refusal kDemandUnreadable{"demand_unreadable", 1};
+// The tensor file sent with the job (Organic, Traced) could not be read.
+constexpr Refusal kTensorUnreadable{"tensor_unreadable", 1};
 constexpr Refusal kCannotWrite{"cannot_write", 1};
 // V4: a strength check was asked for and this build has none to make.
 constexpr Refusal kStrengthUnavailable{"strength_unavailable", 1};
@@ -527,6 +616,11 @@ TriangleMesh make_file_mesh(const Session& session, const Outcome& outcome, cons
   report.found_per_pass = made.found_per_pass;
   report.left_out_at = made.drop_at;
   report.posts = made.posts;
+  report.stands_added = made.stands_added;
+  report.weave_specks_ignored = made.weave_specks_ignored;
+  report.weave_held_ignored = made.weave_held_ignored;
+  report.sags = made.sags;
+  report.sagged = made.sagged;
   if (made.mesh.ok) {
     report.bed_contact_mm2 = made.layers.bed_mm2;
     report.midair_starts = static_cast<int>(made.layers.mid_air.size());
@@ -631,6 +725,165 @@ bool write_demand_file(const std::string& path, const DemandField& field) {
   return static_cast<bool>(f);
 }
 
+// ── THE TENSOR FILE ───────────────────────────────────────────────────────────
+namespace {
+constexpr char kTensorMagic[8] = {'T', 'O', 'T', 'E', 'N', 'S', 'O', 'R'};
+constexpr std::size_t kTensorHead = kDemandHead;   // the same 56 bytes before the values
+}  // namespace
+
+bool read_tensor_file(const std::string& path, TensorField& out, std::string* why) {
+  const auto no = [&](const std::string& reason) {
+    if (why) *why = reason;
+    return false;
+  };
+  std::ifstream f(path, std::ios::binary);
+  if (!f) return no("cannot open " + path);
+  std::ostringstream all;
+  all << f.rdbuf();
+  const std::string bytes = all.str();
+  const auto* p = reinterpret_cast<const unsigned char*>(bytes.data());
+  if (bytes.size() < 8 || std::memcmp(p, kTensorMagic, 8) != 0)
+    return no("not a stress tensor file (it does not start with TOTENSOR)");
+  if (bytes.size() < kTensorHead) return no("the stress tensor file is cut short");
+  const std::int32_t version = i32_at(p + 8);
+  if (version != kTensorVersion)
+    return no("the stress tensor file is version " + std::to_string(version) + ", and only version 1 can be read");
+  const std::int32_t nx = i32_at(p + 12), ny = i32_at(p + 16), nz = i32_at(p + 20);
+  if (nx <= 0 || ny <= 0 || nz <= 0) return no("the stress tensor's grid has no voxels");
+  const std::uint64_t n = static_cast<std::uint64_t>(nx) * static_cast<std::uint64_t>(ny) * static_cast<std::uint64_t>(nz);
+  if (bytes.size() != kTensorHead + 24 * n)
+    return no("the stress tensor file is " + std::to_string(bytes.size()) + " bytes, and its grid needs " +
+              std::to_string(kTensorHead + 24 * n));
+  TensorField t;
+  t.nx = nx; t.ny = ny; t.nz = nz;
+  t.origin = {f64_at(p + 24), f64_at(p + 32), f64_at(p + 40)};
+  t.spacing = f64_at(p + 48);
+  if (!std::isfinite(t.origin.x) || !std::isfinite(t.origin.y) || !std::isfinite(t.origin.z))
+    return no("the stress tensor's grid corner is not a finite number");
+  if (!std::isfinite(t.spacing) || !(t.spacing > 0.0)) return no("the stress tensor's voxel size is not a number above 0");
+  t.voigt.resize(static_cast<std::size_t>(6 * n));
+  for (std::size_t i = 0; i < t.voigt.size(); ++i) {
+    const float v = f32_at(p + kTensorHead + 4 * i);
+    if (!std::isfinite(v))
+      return no("the stress tensor holds a value that is not a finite number (voxel " + std::to_string(i / 6) + ")");
+    t.voigt[i] = v;
+  }
+  out = std::move(t);
+  return true;
+}
+
+bool write_tensor_file(const std::string& path, const TensorField& field) {
+  if (field.empty()) return false;
+  std::string o(kTensorMagic, 8);
+  put_u32(o, static_cast<std::uint32_t>(kTensorVersion));
+  for (int n : {field.nx, field.ny, field.nz}) put_u32(o, static_cast<std::uint32_t>(n));
+  for (double v : {field.origin.x, field.origin.y, field.origin.z, field.spacing}) {
+    std::uint64_t u;
+    std::memcpy(&u, &v, 8);
+    put_u64(o, u);
+  }
+  for (double d : field.voigt) {
+    const float v = static_cast<float>(d);
+    std::uint32_t u;
+    std::memcpy(&u, &v, 4);
+    put_u32(o, u);
+  }
+  std::ofstream f(path, std::ios::binary | std::ios::trunc);
+  f.write(o.data(), static_cast<std::streamsize>(o.size()));
+  f.close();
+  return static_cast<bool>(f);
+}
+
+// ── THE SHALLOW-BAR TABLE ─────────────────────────────────────────────────────
+ShallowTable shallow_bar_table(const Bars& all, const std::vector<int>& regions, const std::vector<Vec3>& drop_at,
+                               const std::vector<MeshSpec::Post>& posts, double layer_mm) {
+  ShallowTable t;
+  const auto length = [](const Bar& b) {
+    return std::sqrt((b.b.x - b.a.x) * (b.b.x - b.a.x) + (b.b.y - b.a.y) * (b.b.y - b.a.y) + (b.b.z - b.a.z) * (b.b.z - b.a.z));
+  };
+  const auto to_segment = [](const Vec3& p, const Vec3& a, const Vec3& b) {
+    const Vec3 d{b.x - a.x, b.y - a.y, b.z - a.z};
+    const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
+    const double s = l2 > 0.0 ? std::clamp(((p.x - a.x) * d.x + (p.y - a.y) * d.y + (p.z - a.z) * d.z) / l2, 0.0, 1.0) : 0.0;
+    const double ex = a.x + s * d.x - p.x, ey = a.y + s * d.y - p.y, ez = a.z + s * d.z - p.z;
+    return std::sqrt(ex * ex + ey * ey + ez * ez);
+  };
+  const auto holds = [](Bar::End e) { return e == Bar::End::Node || e == Bar::End::Solid || e == Bar::End::Joined; };
+  // The shallow bars of the weave, in bar order.
+  std::vector<const Bar*> sb;
+  for (const Bar& b : all.bars)
+    if (std::find(regions.begin(), regions.end(), b.region) != regions.end() && bar_is_bridge(b)) sb.push_back(&b);
+  t.bars = sb.size();
+  for (const Bar* b : sb) {
+    const int h = holds(b->end_a) + holds(b->end_b);
+    (h == 2 ? t.held_both : h == 1 ? t.held_one : t.held_none) += 1;
+  }
+  // The joints: the shallow bars' ends, ends within a hundredth of a micron being one point (O6, end_joints).
+  const std::vector<std::size_t> joint = end_joints(all);
+  std::map<std::size_t, std::vector<std::pair<std::size_t, int>>> at;   // (shallow bar, which end: 0 a, 1 b)
+  for (std::size_t i = 0; i < sb.size(); ++i) {
+    const std::size_t k = static_cast<std::size_t>(sb[i] - all.bars.data());
+    at[joint[2 * k]].push_back({i, 0});
+    at[joint[2 * k + 1]].push_back({i, 1});
+  }
+  // Chained through a joint of exactly two shallow bars, in line within 15 degrees.
+  std::vector<std::size_t> up(sb.size());
+  for (std::size_t i = 0; i < up.size(); ++i) up[i] = i;
+  const auto find = [&](std::size_t v) {
+    while (up[v] != v) v = up[v] = up[up[v]];
+    return v;
+  };
+  const double in_line = std::cos(15.0 * 3.14159265358979323846 / 180.0);
+  for (const auto& kv : at) {
+    if (kv.second.size() != 2) continue;
+    const auto [i, ei] = kv.second[0];
+    const auto [j, ej] = kv.second[1];
+    if (i == j) continue;
+    // Into the joint along bar i, and out of it along bar j.
+    const Vec3& p = ei ? sb[i]->b : sb[i]->a;
+    const Vec3& pi = ei ? sb[i]->a : sb[i]->b;
+    const Vec3& pj = ej ? sb[j]->a : sb[j]->b;
+    const Vec3 u{p.x - pi.x, p.y - pi.y, p.z - pi.z}, v{pj.x - p.x, pj.y - p.y, pj.z - p.z};
+    const double lu = std::sqrt(u.x * u.x + u.y * u.y + u.z * u.z), lv = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+    if (!(lu > 0.0) || !(lv > 0.0)) continue;
+    if ((u.x * v.x + u.y * v.y + u.z * v.z) / (lu * lv) >= in_line) up[find(i)] = find(j);
+  }
+  // Each run: its length and what the layer check did with it.
+  // As the file writer leaves a bar out (solid_mesh.cpp: bars_present with the weave regions, O10).
+  const std::vector<char> present = bars_present(all, drop_at, regions, layer_mm);
+  const auto left_out = [&](const Bar& x) { return !present[static_cast<std::size_t>(&x - all.bars.data())]; };
+  const auto under_post = [&](const Bar& x) {
+    for (const MeshSpec::Post& q : posts)
+      if (to_segment(Vec3{q.x, q.y, q.z_top}, x.a, x.b) < 0.5 * x.width + 0.5) return true;
+    return false;
+  };
+  // The owner's bridge rules on what the places leave (weave_holds): a bar they leave out is left out.
+  const WeaveHolds rules = weave_holds(all, regions, present);
+  t.kept_any_length = rules.kept_any_length;
+  t.weave_left_unheld = rules.left_unheld;
+  const auto unheld = [&](const Bar* x) {
+    const std::size_t i = static_cast<std::size_t>(x - all.bars.data());
+    return rules.shallow[i] && !rules.kept[i];
+  };
+  struct Run { double mm = 0.0; bool out = false, post = false; };
+  std::map<std::size_t, Run> runs;
+  for (std::size_t i = 0; i < sb.size(); ++i) {
+    Run& r = runs[find(i)];
+    r.mm += length(*sb[i]);
+    r.out = r.out || left_out(*sb[i]) || unheld(sb[i]);
+    r.post = r.post || under_post(*sb[i]);
+  }
+  t.runs = runs.size();
+  for (const auto& kv : runs) {
+    const Run& r = kv.second;
+    t.longest_run_mm = std::max(t.longest_run_mm, r.mm);
+    ShallowTable::Band& b = t.bands[r.mm <= 5.0 ? 0 : r.mm <= 10.0 ? 1 : r.mm <= 20.0 ? 2 : 3];
+    ++b.runs;
+    (r.out ? b.left_out : r.post ? b.post : b.kept) += 1;
+  }
+  return t;
+}
+
 FileJob parse_file_job(const std::string& json_text) {
   try {
     const json::Value doc = json::parse(json_text, "job.json");
@@ -638,6 +891,9 @@ FileJob parse_file_job(const std::string& json_text) {
     json::as_object(doc, w);
     json::reject_unknown(
         doc, {"mode", "model", "output", "linear_deflection", "threads", "layout", "mesh", "demand", "strength_job"}, w);
+    json::reject_unknown(doc, {"mode", "model", "output", "linear_deflection", "threads", "layout", "mesh", "demand",
+                               "tensor"},
+                         w);
     const std::string mode = json::as_string(json::require(doc, "mode", w), w + ".mode");
     if (mode != "lattice_file") json::fail(w + ".mode", "must be \"lattice_file\", not \"" + mode + "\"");
     FileJob job;
@@ -667,9 +923,20 @@ FileJob parse_file_job(const std::string& json_text) {
         json::fail(w + ".strength_job", "is the name of a file the job writes");
     }
     if (const json::Value* v = json::find(doc, "layout"))
+    // The stress tensor (Organic, Traced): a file beside the job, by its bare name.
+    if (json::find(doc, "tensor")) {
+      job.tensor = text(doc, "tensor", "", w);
+      if (job.tensor.empty() || job.tensor == "." || job.tensor == ".." ||
+          job.tensor.find_first_of("/\\") != std::string::npos)
+        json::fail(w + ".tensor", "must be a file name with no folder in it");
+    }
+    if (const json::Value* v = json::find(doc, "layout")) {
       job.settings = settings_from(json::as_object(*v, w + ".layout"), w + ".layout");
+      job.organic = organic_from(*v, job.settings, w + ".layout");
+    }
     if (const json::Value* v = json::find(doc, "mesh"))
       job.options = options_from(json::as_object(*v, w + ".mesh"), w + ".mesh");
+    job.organic.layer_mm = job.options.layers.layer_mm;   // G1: Grown grows one printed layer per step
     job.options.threads = whole(doc, "threads", 0, w);
     if (job.options.threads < 0) json::fail(w + ".threads", "must be 0 (every core) or more");
     return job;
@@ -737,6 +1004,15 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     if (by_stress && (!job.settings.stress.demand || job.settings.stress.demand->empty()) &&
         (!job.settings.struts.demand || job.settings.struts.demand->empty()))
       return no_stress();
+    // OR14: the weave is traced from the part's own stress, never from a made-up one here.
+    bool any_weave = false;
+    for (const Settings::RegionAsk& a : job.settings.regions) any_weave = any_weave || a.weave;
+    if (any_weave && (!job.tensor_field || job.tensor_field->empty())) {
+      refuse(r, kNoStress,
+             "Organic follows the part's stress, and no stress result came with this job, so no file was made. Run the "
+             "stress check first.");
+      return done();
+    }
     if (lattice_topology_is_sheet(job.settings.cells.topology)) {
       refuse(r, kTypeNotSupported,
              "This lattice type is made of sheets, and a lattice file can only be made from the "
@@ -792,7 +1068,9 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     }
 
     say(said, "laying the lattice");
-    const Outcome out = session.lay(job.settings, job.options.threads, stop);
+    const Outcome out = any_weave ? session.lay_organic(job.settings, *job.tensor_field, job.organic,
+                                                        job.options.threads, stop)
+                                  : session.lay(job.settings, job.options.threads, stop);
     if (out.cancelled) {
       refuse(r, kCancelled, "Stopped before the lattice file was finished. Nothing was made.");
       return done();
@@ -824,11 +1102,24 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     r.highest_mpa = out.struts.highest_mpa;
     r.at_light = out.struts.at_light;
     r.at_heavy = out.struts.at_heavy;
+    std::vector<int> weave_regions;
+    for (const Layout::Weave& w : out.layout.weave) weave_regions.push_back(w.region);
+    r.weave_regions = weave_regions.size();
+    r.strands = out.strands;
+    r.ms_trace = out.ms_trace;
+    r.spacing_smallest_mm = out.spacing_smallest_mm;
+    r.spacing_largest_mm = out.spacing_largest_mm;
+    r.spacing_mean_mm = out.spacing_mean_mm;
+    r.net_struts = out.net_struts;
+    r.net_mm = out.net_mm;
+    r.grown = out.grown;
+    for (const Bar& b : out.bars.bars)
+      r.weave_bars += std::find(weave_regions.begin(), weave_regions.end(), b.region) != weave_regions.end();
     if (!out.empty_regions.empty()) {
       refuse(r, kRegionFacesMissing, faces_missing("Region", "Regions", out.empty_regions));
       return done();
     }
-    if (out.layout.cells.empty()) {
+    if (out.layout.cells.empty() && out.layout.weave.empty()) {   // O1: a weave has no cells and is not refused for it
       refuse(r, kNoCells,
              "No lattice cell fits anywhere in this part with these settings, so there is no lattice "
              "to make. Try a smaller cell, a deeper region, or more of the part.");
@@ -850,6 +1141,11 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
              r.made.mesh.why.empty() ? "The lattice file could not be put together. Nothing was made."
                                      : r.made.mesh.why);
       return done();
+    }
+    if (!weave_regions.empty()) {
+      r.shallow = shallow_bar_table(r.made.sagged ? *r.made.sagged : out.bars, weave_regions, r.made.left_out_at, r.made.posts,
+                                    job.options.layers.layer_mm);
+      r.shallow.stands_added = r.made.stands_added;
     }
     if (!r.made.print_clean && !job.options.keep_if_not_clean) {
       const std::size_t mid = r.made.layers.mid_air.size(), one = r.made.layers.one_ended.size(),
@@ -979,6 +1275,16 @@ FileResult run_file_job(const std::string& job_path, const std::string& out_dir,
       }
       job.settings.stress.demand = std::move(field);
     }
+    if (!job.tensor.empty()) {
+      auto field = std::make_shared<TensorField>();
+      std::string why;
+      if (!read_tensor_file(folder_of(job_path) + "/" + job.tensor, *field, &why)) {
+        refuse(r, kTensorUnreadable,
+               "The stress tensor sent with the lattice job could not be read, so nothing was made.", why);
+        return;
+      }
+      job.tensor_field = std::move(field);
+    }
     const std::string model_path =
         !job.model.empty() && job.model[0] == '/' ? job.model : folder_of(job_path) + "/" + job.model;
     say(said, "opening the part");
@@ -1021,7 +1327,7 @@ FileResult run_file_job(const std::string& job_path, const std::string& out_dir,
 
 std::string file_result_json(const FileResult& r) {
   std::string o;
-  char b[512];
+  char b[1024];
   const auto count = [](std::size_t n) { return static_cast<unsigned long long>(n); };
   o += "{\n";
   o += std::string("  \"ok\": ") + (r.ok ? "true" : "false") + ",\n";
@@ -1043,6 +1349,9 @@ std::string file_result_json(const FileResult& r) {
                 count(r.at_widest), count(r.stubs), count(r.joined), count(r.dropped), count(r.pieces),
                 count(r.adrift), count(r.stepped_edges), count(r.thin_solid),
                 r.cells_by_stress ? "true" : "false", r.step_held_at);
+  o += b;
+  std::snprintf(b, sizeof b, "    \"weave_regions\": %llu, \"strands\": %llu, \"weave_bars\": %llu,\n",
+                count(r.weave_regions), count(r.strands), count(r.weave_bars));
   o += b;
   std::snprintf(b, sizeof b,
                 "    \"floor_cell_mm\": %.9g, \"min_strut_mm\": %.9g, \"open_look\": %.9g, "
@@ -1114,6 +1423,73 @@ std::string file_result_json(const FileResult& r) {
   }
   // V4: written only when the check ran (V2); the block is the check's own.
   if (r.strength_ran) o += "  \"strength\": " + r.strength_json + ",\n";
+  {
+    // Organic, Traced: the trace's time and the shallow-bar table (ShallowTable).
+    const ShallowTable& t = r.shallow;
+    std::snprintf(b, sizeof b,
+                  "  \"organic\": {\"ms_trace\": %.1f, \"spacing_used_mm\": {\"smallest\": %.9g, \"largest\": %.9g, "
+                  "\"mean\": %.9g},\n    \"net_struts\": %llu, \"net_mm\": %.9g,"
+                  "\n    \"shallow_bars\": %llu, \"held_both\": %llu, \"held_one\": %llu, "
+                  "\"held_none\": %llu,\n    \"kept_any_length\": %llu, \"weave_left_unheld\": %llu, \"stands_added\": %llu,"
+                  "\n    \"feet\": %llu, \"feet_held\": %llu, \"feet_mm3\": %.9g,"
+                  "\n    \"runs\": %llu, \"longest_run_mm\": %.9g, \"run_bands\": [",
+                  r.ms_trace, r.spacing_smallest_mm, r.spacing_largest_mm, r.spacing_mean_mm,
+                  count(r.net_struts), r.net_mm, count(t.bars),
+                  count(t.held_both), count(t.held_one), count(t.held_none),
+                  count(t.kept_any_length), count(t.weave_left_unheld), count(t.stands_added),
+                  count(r.made.mesh.feet), count(r.made.mesh.feet_held), r.made.mesh.feet_mm3, count(t.runs),
+                  t.longest_run_mm);
+    o += b;
+    const char* names[4] = {"to 5 mm", "5 to 10 mm", "10 to 20 mm", "over 20 mm"};
+    for (int k = 0; k < 4; ++k) {
+      const ShallowTable::Band& d = t.bands[k];
+      std::snprintf(b, sizeof b, "%s\n      {\"band\": \"%s\", \"runs\": %llu, \"kept\": %llu, \"left_out\": %llu, \"post\": %llu}",
+                    k ? "," : "", names[k], count(d.runs), count(d.kept), count(d.left_out), count(d.post));
+      o += b;
+    }
+    o += "]";
+    if (r.weave_regions > 0) {   // O10: only a job with a weave says them (a cube-lattice file is as before)
+      std::snprintf(b, sizeof b, ",\n    \"weave_specks_ignored\": %llu, \"weave_held_ignored\": %llu",
+                    count(r.made.weave_specks_ignored), count(r.made.weave_held_ignored));
+      o += b;
+      // O17, O18: what was done with the weave's sags.
+      std::snprintf(b, sizeof b,
+                    ",\n    \"sags_lifted\": %llu, \"sag_lift_largest_mm\": %.9g, \"sag_legs\": %llu, \"sag_legs_mm\": %.9g, "
+                    "\"sags_unsupported\": %llu",
+                    count(r.made.sags.lifted), r.made.sags.lift_largest_mm, count(r.made.sags.legs), r.made.sags.legs_mm,
+                    count(r.made.sags.unsupported));
+      o += b;
+    }
+    o += "},\n";
+  }
+  if (r.grown) {
+    // G12: written only for Grown, so a Traced file's result is as it was.
+    const GrowReport& g = *r.grown;
+    char gb[4096];
+    std::snprintf(gb, sizeof gb,
+                  "  \"grown\": {\"strands\": %llu, \"grown_mm\": %.9g, \"kept_mm\": %.9g, \"cut_mm\": {\"outside\": %.9g, "
+                  "\"unsupported\": %.9g, \"leads_to_nothing\": %.9g, \"repeat\": %.9g},\n"
+                  "    \"seeds_floor\": %llu, \"seeds_wall\": %llu, \"seeds_refused_support\": %llu, "
+                  "\"strands_grown\": %llu, \"steps\": %llu, \"clamped\": %llu, \"tips\": %llu, \"tip_budget_hit\": %llu,\n"
+                  "    \"ended_edge\": %llu, \"ended_unsupported\": %llu, \"ended_joins\": %llu, \"joins\": %llu, "
+                  "\"grew_on_after_join\": %llu, \"joins_refused_span\": %llu,\n"
+                  "    \"branches_offered\": %llu, \"branches_grown\": %llu, \"links\": %llu, \"refused_region\": %llu, "
+                  "\"refused_support\": %llu, \"refused_crowded\": %llu,\n"
+                  "    \"bare_before\": %.9g, \"bare_after\": %.9g, \"reseed_voids\": %llu, \"reseed_landed\": %llu, "
+                  "\"reseed_failed\": %llu, \"reseed_mm\": %.9g,\n"
+                  "    \"ties_seeded\": %llu, \"ties_laid\": %llu, \"ties_refused_minor\": %llu, \"ties_refused_reach\": %llu, "
+                  "\"ms\": %.1f},\n",
+                  count(g.strands), g.grown_mm, g.kept_mm, g.cut_outside_mm, g.cut_unsupported_mm, g.cut_nothing_mm,
+                  g.cut_repeat_mm, count(g.seeds_floor), count(g.seeds_wall), count(g.seeds_refused_support),
+                  count(g.strands_grown), count(g.steps), count(g.clamped), count(g.tips), count(g.tip_budget_hit),
+                  count(g.ended_edge), count(g.ended_unsupported), count(g.ended_joins), count(g.joins),
+                  count(g.grew_on_after_join), count(g.joins_refused_span), count(g.branches_offered),
+                  count(g.branches_grown), count(g.links), count(g.refused_region), count(g.refused_support),
+                  count(g.refused_crowded), g.bare_before, g.bare_after, count(g.reseed_voids), count(g.reseed_landed),
+                  count(g.reseed_failed), g.reseed_mm, count(g.ties_seeded), count(g.ties_laid),
+                  count(g.ties_refused_minor), count(g.ties_refused_reach), g.ms);
+    o += gb;
+  }
   std::snprintf(b, sizeof b,
                 "  \"ms\": {\"import\": %.1f, \"measure\": %.1f, \"read\": %.1f, \"cells\": %.1f, "
                 "\"bars\": %.1f, \"open_space\": %.1f, \"carve\": %.1f, \"struts\": %.1f, \"solid\": %.1f, "

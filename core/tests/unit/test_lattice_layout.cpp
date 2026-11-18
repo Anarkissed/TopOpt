@@ -7541,12 +7541,548 @@ static void test_places() {
   }
 }
 
+// ── ORGANIC (WEAVE), rules O1, O2 ─────────────────────────────────────────────
+// A 40 x 14 x 20 block with a half-round pocket (radius 6) in its top edge, running the block's whole length (z):
+// 8 mm of wall under the pocket. Faces: 0 the flat underside (y = 0), 1 the pocket's curved wall, 2 the rest.
+static StepModel weave_block() {
+  const double H = 14.0, cx = 20.0, R = 6.0;
+  std::vector<std::array<double, 2>> xy = {{0, 0}, {40, 0}, {40, H}, {cx + R, H}};
+  const int N = 48;
+  for (int i = 1; i < N; ++i) {
+    const double t = 3.14159265358979323846 * i / N;
+    xy.push_back({cx + R * std::cos(t), H - R * std::sin(t)});
+  }
+  xy.push_back({cx - R, H});
+  xy.push_back({0, H});
+  const TriangleMesh solid_mesh = prism_any(xy, 0, 20);
+  StepModel model;
+  model.mesh = solid_mesh;
+  StepFaceInfo under, wall, rest;
+  under.kind = StepSurfaceKind::Plane;
+  under.plane_normal = {0, -1, 0};
+  under.plane_origin = {20, 0, 10};
+  wall.kind = StepSurfaceKind::Other;
+  rest.kind = StepSurfaceKind::Other;
+  model.faces = {under, wall, rest};
+  model.face_count = 3;
+  for (const auto& t : solid_mesh.triangles) {
+    const Vec3 &a = solid_mesh.vertices[static_cast<std::size_t>(t[0])], &b = solid_mesh.vertices[static_cast<std::size_t>(t[1])],
+               &c = solid_mesh.vertices[static_cast<std::size_t>(t[2])];
+    auto on_arc = [&](const Vec3& v) { return std::fabs(std::hypot(v.x - cx, v.y - H) - R) < 1e-6 && v.y < H + 1e-9; };
+    int f = 2;
+    if (a.y < 1e-9 && b.y < 1e-9 && c.y < 1e-9) f = 0;
+    else if (on_arc(a) && on_arc(b) && on_arc(c) && !(a.z == b.z && b.z == c.z)) f = 1;
+    model.triangle_face.push_back(f);
+  }
+  model.solid_count = 1;
+  return model;
+}
+
+// Every field of every bar, and the stubs, as one number: two bar lists with the same number are the same bars.
+static unsigned long long bars_hash(const Bars& bars) {
+  unsigned long long h = 1469598103934665603ULL;
+  auto eat = [&](const void* p, std::size_t n) {
+    const unsigned char* c = static_cast<const unsigned char*>(p);
+    for (std::size_t i = 0; i < n; ++i) { h ^= c[i]; h *= 1099511628211ULL; }
+  };
+  for (const Bar& b : bars.bars) {
+    const double v[13] = {b.a.x, b.a.y, b.a.z, b.b.x, b.b.y, b.b.z, b.width, b.cell, b.flat.x, b.flat.y, b.flat.z,
+                          static_cast<double>(b.into_a), static_cast<double>(b.into_b)};
+    eat(v, sizeof v);
+    const int w[6] = {b.region, static_cast<int>(b.end_a), static_cast<int>(b.end_b), b.piece ? 1 : 0, b.skin ? 1 : 0, 0};
+    eat(w, sizeof w);
+  }
+  const unsigned long long s = bars.stubs;
+  eat(&s, sizeof s);
+  return h;
+}
+
+// The bars of three parts, laid as the cube lattices lay them, held to what lay_bars returned before the end code was
+// lifted out of it (O2: lay_bars lays exactly the bars it laid; numbers taken on f63ff6ae).
+static void test_lay_bars_unchanged() {
+  auto bars_of = [](const Domain& d, const CellSpec& cs) {
+    Layout l = lay_cells(d, cs);
+    set_struts(l, StrutSpec{});
+    solidify_thin_cuts(l, d);
+    return lay_bars(l, d);
+  };
+  unsigned long long got[3] = {0, 0, 0};
+  std::size_t count[3] = {0, 0, 0};
+  {  // the curved pocket: a shell under its wall and a slab under the flat underside, both cube regions
+    const StepModel model = weave_block();
+    PartMeasure pm(weld_mesh(model.mesh));
+    DomainSpec s;
+    s.min_strut_lines = 2.0;
+    s.regions = {region_from_faces(model, {1}, 1, Role::Lattice, 4.0), region_from_faces(model, {0}, 2, Role::Lattice, 3.0)};
+    Domain d(pm, s);
+    CellSpec cs;
+    cs.cell_max_mm = 4;
+    cs.min_cells_across = 1;
+    cs.allow_quilt = true;
+    const Bars b = bars_of(d, cs);
+    got[0] = bars_hash(b);
+    count[0] = b.bars.size();
+  }
+  {  // the plate with the L face: a flat region and a curved one
+    int L = 0, square = 0, sideA = 0, sideB = 0;
+    const StepModel model = plate_with_L_face(&L, &square, &sideA, &sideB);
+    PartMeasure pm(weld_mesh(model.mesh));
+    DomainSpec s;
+    s.min_strut_lines = 2.0;
+    s.regions = {region_from_faces(model, {L}, 1, Role::Lattice, 6.0), region_from_faces(model, {sideA, sideB}, 2, Role::Lattice, 5.0)};
+    Domain d(pm, s);
+    CellSpec cs;
+    cs.cell_max_mm = 6;
+    const Bars b = bars_of(d, cs);
+    got[1] = bars_hash(b);
+    count[1] = b.bars.size();
+  }
+  {  // the slot block of the thin-piece rule: its front cut 2.6 mm in, thin cut pieces against the solid made solid
+    PartMeasure pm(weld_mesh(slot_block()));
+    DomainSpec s;
+    s.regions = {slot_front(-2.6)};
+    Domain d(pm, s);
+    Layout l = lay_cells(d, slot_cells());
+    set_struts(l, slot_struts(kSlotStrut));
+    solidify_thin_cuts(l, d);
+    const Bars b = lay_bars(l, d);
+    got[2] = bars_hash(b);
+    count[2] = b.bars.size();
+  }
+  const unsigned long long want[3] = {0x935840c703eb5f33ULL, 0xff5cc5b3af9fe0d9ULL, 0x17631120b9e61b43ULL};
+  const std::size_t want_count[3] = {5392, 2267, 1328};
+  std::printf("lay_bars as before: %zu, %zu, %zu bars; %016llx %016llx %016llx\n", count[0], count[1], count[2], got[0], got[1],
+              got[2]);
+  for (int i = 0; i < 3; ++i) CHECK(got[i] == want[i] && count[i] == want_count[i]);
+}
+
+// The made-up weave in the block's pocket (O2): strands at radius 7.75 round the pocket's axis (the middle of the
+// 4 mm of lattice under its wall), 0.9 mm wide, 4 mm apart. Two families crossing: rings round the pocket (vertices
+// every 30 degrees), three running out through the block's top face at both ends and one ending in the air; and lines
+// along the pocket, five running out through the block's two ends and one ending in the air whose crossings fall on
+// the rings' own vertices. And across them: R1 from the air through a line and out through the wall into solid; R2
+// from the air through a line and out through the pocket's wall; J, a short piece in the air pointing at a ring.
+// No strand has a vertex within half the widths of a bar it crosses near it: split_at_crossings joins pair by pair, and
+// there a crossing next to a vertex gives two joints a hair apart (reported, not ruled: S1a report).
+static Vec3 round_pocket(double r, double deg, double z) {
+  const double t = deg * 3.14159265358979323846 / 180.0;
+  return {20.0 + r * std::cos(t), 14.0 - r * std::sin(t), z};
+}
+static Strand weave_strand(std::vector<Vec3> pts) {
+  Strand s;
+  s.width_mm.assign(pts.size(), 0.9);
+  s.points = std::move(pts);
+  s.region = 1;
+  s.spacing_mm = 4.0;
+  return s;
+}
+static std::vector<Strand> made_up_weave() {
+  std::vector<Strand> w;
+  const double r = 7.75;
+  for (double z : {4.0, 8.0, 12.0}) {   // rings out through the top face
+    std::vector<Vec3> p;
+    for (double t = -15; t <= 195 + 1e-9; t += 30) p.push_back(round_pocket(r, t, z));
+    w.push_back(weave_strand(p));
+  }
+  {  // a ring ending in the air at both ends
+    std::vector<Vec3> p;
+    for (double t = 45; t <= 135 + 1e-9; t += 30) p.push_back(round_pocket(r, t, 16.0));
+    w.push_back(weave_strand(p));
+  }
+  for (double t : {30.0, 60.0, 90.0, 120.0, 150.0}) {   // lines out through the two ends
+    std::vector<Vec3> p;
+    for (double z = -1; z <= 21 + 1e-9; z += 2) p.push_back(round_pocket(r, t, z));
+    w.push_back(weave_strand(p));
+  }
+  {  // a line ending in the air, crossing two rings at their vertices
+    std::vector<Vec3> p;
+    for (double z = 6; z <= 14 + 1e-9; z += 2) p.push_back(round_pocket(r, 165.0, z));
+    w.push_back(weave_strand(p));
+  }
+  w.push_back(weave_strand({round_pocket(7.0, 60, 10), round_pocket(9.0, 60, 10), round_pocket(11.5, 60, 10)}));   // R1
+  w.push_back(weave_strand({round_pocket(9.0, 90, 6), round_pocket(4.5, 90, 6)}));      // R2
+  w.push_back(weave_strand({round_pocket(9.6, 45, 16), round_pocket(8.9, 45, 16)}));                              // J
+  return w;
+}
+static DomainSpec weave_domain(const StepModel& model, bool weave_region, bool slab) {
+  DomainSpec s;
+  s.min_strut_lines = 2.0;
+  if (weave_region) {
+    s.regions.push_back(region_from_faces(model, {1}, 1, Role::Lattice, 4.0));
+    s.regions.back().weave = true;
+  }
+  if (slab) s.regions.push_back(region_from_faces(model, {0}, 2, Role::Lattice, 3.0));
+  return s;
+}
+static CellSpec weave_cells() {
+  CellSpec cs;
+  cs.cell_max_mm = 4;
+  cs.min_cells_across = 1;
+  cs.allow_quilt = true;
+  return cs;
+}
+// The nearest approach of point p to segment a..b.
+static double to_segment(const Vec3& p, const Vec3& a, const Vec3& b) {
+  const Vec3 d{b.x - a.x, b.y - a.y, b.z - a.z};
+  const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
+  const double t = l2 > 0 ? std::clamp(((p.x - a.x) * d.x + (p.y - a.y) * d.y + (p.z - a.z) * d.z) / l2, 0.0, 1.0) : 0.0;
+  return std::hypot(p.x - a.x - d.x * t, std::hypot(p.y - a.y - d.y * t, p.z - a.z - d.z * t));
+}
+static bool same_point(const Vec3& a, const Vec3& b) { return a.x == b.x && a.y == b.y && a.z == b.z; }
+static bool share_end(const Bar& x, const Bar& y) {
+  return same_point(x.a, y.a) || same_point(x.a, y.b) || same_point(x.b, y.a) || same_point(x.b, y.b);
+}
+// The closest approach of two segments, by sampling one finely against the other (the test's own, not the engine's).
+static double segments_apart(const Bar& x, const Bar& y) {
+  double best = 1e300;
+  for (int i = 0; i <= 400; ++i) {
+    const double t = i / 400.0;
+    best = std::min(best, to_segment(Vec3{x.a.x + (x.b.x - x.a.x) * t, x.a.y + (x.b.y - x.a.y) * t, x.a.z + (x.b.z - x.a.z) * t}, y.a, y.b));
+  }
+  return best;
+}
+
+// O1: no cell, no solid cube, in a weave region; its lattice is open; the cube region beside it lays as it lays alone.
+static void test_weave_cells() {
+  const StepModel model = weave_block();
+  PartMeasure pm(weld_mesh(model.mesh));
+  Domain dw(pm, weave_domain(model, true, true)), d2(pm, weave_domain(model, false, true));
+  auto pr = dw.probe();
+  const Layout lw = lay_cells(dw, weave_cells()), l2 = lay_cells(d2, weave_cells());
+  CHECK(lw.weave.size() == 1 && lw.weave[0].region == 1 && lw.weave[0].spacing_mm == 0.0);
+  CHECK(lw.is_weave(1) && !lw.is_weave(2) && l2.weave.empty());
+  std::size_t in_weave = 0, solid_weave = 0;
+  for (const Cell& c : lw.cells) in_weave += c.region == 1;
+  for (const Cell& c : lw.solid) solid_weave += c.region == 1;
+  CHECK(in_weave == 0 && solid_weave == 0);
+  for (const RegionCells& r : lw.regions) CHECK(r.region != 1);
+  // The slab's cells and solid cubes are the cells it lays alone (on the same frame; the weave's frame comes first).
+  auto same_but_frame = [&](const std::vector<Cell>& x, const std::vector<Cell>& y) {
+    if (x.size() != y.size()) return false;
+    for (std::size_t i = 0; i < x.size(); ++i) {
+      Cell p = x[i], q = y[i];
+      const Frame &fp = lw.frames[static_cast<std::size_t>(p.frame)], &fq = l2.frames[static_cast<std::size_t>(q.frame)];
+      if (!same_point(fp.origin, fq.origin) || !same_point(fp.ax[0], fq.ax[0]) || !same_point(fp.ax[2], fq.ax[2])) return false;
+      p.frame = q.frame = 0;
+      if (!(p == q)) return false;
+    }
+    return true;
+  };
+  CHECK(!l2.cells.empty() && same_but_frame(lw.cells, l2.cells) && same_but_frame(lw.solid, l2.solid));
+  // Every point of the weave region is open: no cell holds it, and it is not solid (D14 does not reach it).
+  const SolidAt solid(lw);
+  long weave_pts = 0, held = 0, called_solid = 0;
+  for (double z = 1.1; z < 20; z += 2.3)
+    for (double y = 2.05; y < 14; y += 0.4)
+      for (double x = 8.05; x < 32; x += 0.4) {
+        const Vec3 p{x, y, z};
+        const Where w = pr.where(p);
+        if (!w.lattice() || w.id != 1) continue;
+        ++weave_pts;
+        for (const Cell& c : lw.cells) held += cell_holds(lw, pr, c, p);
+        called_solid += solid(pr, p);
+      }
+  std::printf("weave cells: %zu cells (the slab alone %zu), %zu solid cubes; %ld points of the weave region: held by a cell %ld, solid %ld\n",
+              lw.cells.size(), l2.cells.size(), lw.solid.size(), weave_pts, held, called_solid);
+  CHECK(weave_pts > 1000 && held == 0 && called_solid == 0);
+  CHECK(solid(pr, {20, 3.5, 10}));   // the solid between the weave and the slab is solid still
+}
+
+// O2: every end tagged right, the bars cut at their crossings, a loose tail eaten back to its first crossing only,
+// loose ends joined, pieces counted; the same for any number of threads.
+static void test_weave_bars() {
+  const StepModel model = weave_block();
+  PartMeasure pm(weld_mesh(model.mesh));
+  Domain d(pm, weave_domain(model, true, true));
+  auto pr = d.probe();
+  Layout layout = lay_cells(d, weave_cells());
+  set_struts(layout, StrutSpec{});
+  const std::vector<Strand> weave = made_up_weave();
+  const Bars wb = weave_bars(d, weave);
+  CHECK(bars_hash(wb) == bars_hash(weave_bars(d, weave, 1)) && bars_hash(wb) == bars_hash(weave_bars(d, weave, 8)));
+  // (2) Ends.
+  int surface = 0, solid = 0, loose = 0, bad = 0, wall = 0, ends_of_block = 0, top = 0;
+  bool r1_solid = false, r2_wall = false;
+  for (const Bar& b : wb.bars) {
+    CHECK(b.region == 1 && b.cell == 4.0 && b.width == 0.9 && !b.skin);
+    for (int e = 0; e < 2; ++e) {
+      const Bar::End tag = e ? b.end_b : b.end_a;
+      const Vec3 p = e ? b.b : b.a, q = e ? b.a : b.b;
+      const double len = bar_length(b);
+      const Vec3 out{(p.x - q.x) / len, (p.y - q.y) / len, (p.z - q.z) / len};
+      auto along = [&](double s) { return Vec3{p.x + out.x * s, p.y + out.y * s, p.z + out.z * s}; };
+      if (tag == Bar::End::Surface) {
+        ++surface;
+        if (std::fabs(pr.part().depth(p)) > 2e-3) ++bad;
+        if (std::fabs(std::hypot(p.x - 20, p.y - 14) - 6.0) < 0.05) { ++wall; r2_wall = r2_wall || std::fabs(p.z - 6) < 1e-9; }
+        if (std::fabs(p.z) < 1e-3 || std::fabs(p.z - 20) < 1e-3) ++ends_of_block;
+        if (std::fabs(p.y - 14) < 1e-3) ++top;
+      } else if (tag == Bar::End::Solid) {
+        ++solid;
+        // It ran into solid and on by its own width: a width back is the edge, lattice before it, solid after.
+        const Where before = pr.where(along(-b.width - 0.05)), after = pr.where(along(-b.width + 0.05));
+        if (!(before.lattice() && before.id == 1) || after.lattice() || after.why == Why::Outside) ++bad;
+        if (!(pr.where(p).why == Why::NotAsked)) ++bad;
+        r1_solid = r1_solid || (std::fabs(p.z - 10) < 1e-9 && std::fabs(std::hypot(p.x - 20, p.y - 14) - 10.9) < 0.02);
+      } else if (tag == Bar::End::Loose) {
+        ++loose;
+        const Where w = pr.where(p);
+        if (!(w.lattice() && w.id == 1)) ++bad;
+      }
+    }
+  }
+  std::printf("weave bars: %zu from %zu strands (%zu stubs); ends: %d surface (%d on the pocket's wall, %d on the block's ends, %d on its top), %d solid, %d loose, %d wrong\n",
+              wb.bars.size(), weave.size(), wb.stubs, surface, wall, ends_of_block, top, solid, loose, bad);
+  CHECK(bad == 0);
+  CHECK(surface == 17 && wall == 1 && ends_of_block == 10 && top == 6);
+  CHECK(solid == 1 && r1_solid && r2_wall);
+  CHECK(loose == 8);   // the short ring's two, the short line's two, R1's and R2's ends in the air, J's two
+  // (3) Crossings.
+  Bars cut = wb;
+  const std::size_t joints = split_at_crossings(cut);
+  Bars again = wb;
+  split_at_crossings(again);
+  CHECK(bars_hash(again) == bars_hash(cut));
+  long close_pairs = 0, unshared = 0;
+  for (std::size_t i = 0; i < cut.bars.size(); ++i)
+    for (std::size_t j = i + 1; j < cut.bars.size(); ++j) {
+      const Bar &x = cut.bars[i], &y = cut.bars[j];
+      if (segments_apart(x, y) > 0.5 * (x.width + y.width) - 1e-3) continue;
+      ++close_pairs;
+      if (!share_end(x, y)) ++unshared;
+    }
+  // Rings x lines: 3 x 5 + the short ring x 3 + the short line x 2; R1 and R2 each through a line: 22 crossings.
+  std::printf("weave crossings: %zu joints, %zu bars -> %zu; %ld pairs within their half widths, %ld not sharing an end\n", joints,
+              wb.bars.size(), cut.bars.size(), close_pairs, unshared);
+  // Every crossing is one point where four bars end. The short line meets two rings at points both strands already
+  // have (the same vertex): those two need no joint.
+  std::map<std::array<double, 3>, int> ends_at;
+  for (const Bar& b : cut.bars) { ++ends_at[{b.a.x, b.a.y, b.a.z}]; ++ends_at[{b.b.x, b.b.y, b.b.z}]; }
+  int fours = 0, threes = 0;
+  for (const auto& kv : ends_at) { fours += kv.second == 4; threes += kv.second == 3 || kv.second > 4; }
+  CHECK(fours == 22 && threes == 0);
+  CHECK(joints == 20);
+  CHECK(unshared == 0 && close_pairs > 0);
+  auto is_r1 = [](const Bar& b) {
+    return std::fabs(b.a.z - 10) < 1e-9 && std::fabs(b.b.z - 10) < 1e-9 &&
+           std::fabs(std::atan2(14 - b.a.y, b.a.x - 20) - 3.14159265358979323846 / 3) < 1e-6;
+  };
+  int r1_before = 0;
+  for (const Bar& b : cut.bars) r1_before += is_r1(b);
+  Bars dropped = cut;
+  drop_loose_bars(dropped);
+  int r1_after = 0;
+  bool r1_tail = false;
+  for (const Bar& b : dropped.bars)
+    if (is_r1(b)) {
+      ++r1_after;
+      r1_tail = r1_tail || std::hypot(b.a.x - 20, b.a.y - 14) < 7.5 || std::hypot(b.b.x - 20, b.b.y - 14) < 7.5;
+    }
+  std::printf("weave, R1 (a loose tail, through a line, into solid): %d bars after the cut, %d after loose bars go; %zu of %zu bars kept in all\n",
+              r1_before, r1_after, dropped.bars.size(), cut.bars.size());
+  CHECK(r1_before == 3 && r1_after == 2 && !r1_tail);   // only its tail, back to the crossing
+  // Without the cut the same strand goes whole: nothing holds it at the line it crosses.
+  Bars uncut = wb;
+  drop_loose_bars(uncut);
+  int r1_uncut = 0;
+  for (const Bar& b : uncut.bars) r1_uncut += is_r1(b);
+  CHECK(r1_uncut == 0);
+  // (4) Joining: every loose end that has another bar within one spacing straight ahead, through open lattice, lands.
+  const SolidAt solid_at(layout);
+  Bars joined = cut;
+  std::vector<std::pair<std::size_t, int>> loose_ends;
+  long expect = 0, landed_as_expected = 0;
+  std::vector<char> should(2 * joined.bars.size(), 0);
+  for (std::size_t i = 0; i < cut.bars.size(); ++i)
+    for (int e = 0; e < 2; ++e) {
+      const Bar& b = cut.bars[i];
+      if ((e ? b.end_b : b.end_a) != Bar::End::Loose) continue;
+      const Vec3 p = e ? b.b : b.a, q = e ? b.a : b.b;
+      const double len = bar_length(b);
+      const Vec3 dir{(p.x - q.x) / len, (p.y - q.y) / len, (p.z - q.z) / len};
+      bool hit = false;
+      for (double s = 0.0; s <= b.cell && !hit; s += 0.02) {
+        const Vec3 at{p.x + dir.x * s, p.y + dir.y * s, p.z + dir.z * s};
+        const Where w = pr.where(at);
+        if (!w.lattice() || solid_at(pr, at, w)) break;   // it meets solid or air first
+        for (std::size_t k = 0; k < cut.bars.size() && !hit; ++k)
+          hit = k != i && to_segment(at, cut.bars[k].a, cut.bars[k].b) < 0.5 * cut.bars[k].width - 0.01;
+      }
+      should[2 * i + e] = hit;
+      expect += hit;
+    }
+  join_loose_bars(joined, d, 0, &layout);
+  bool j_in = false, j_out = false;
+  for (std::size_t i = 0; i < joined.bars.size(); ++i)
+    for (int e = 0; e < 2; ++e) {
+      const Bar& b = joined.bars[i];
+      if (should[2 * i + e] && (e ? b.end_b : b.end_a) == Bar::End::Joined) ++landed_as_expected;
+      const Vec3 p = e ? b.b : b.a;
+      if (std::fabs(p.z - 16) < 1e-9 && std::fabs(std::atan2(14 - p.y, p.x - 20) - 3.14159265358979323846 / 4) < 1e-6) {
+        const double r = std::hypot(p.x - 20, p.y - 14);
+        if ((e ? b.end_b : b.end_a) == Bar::End::Joined && r < 8.9) j_in = true;
+        if ((e ? b.end_b : b.end_a) == Bar::End::Solid && r > 10.0) j_out = true;
+      }
+    }
+  const Pieces pieces = count_pieces(joined, d, nullptr, nullptr, &layout);
+  std::printf("weave joining: %zu ends joined; %ld loose ends had a bar within one spacing ahead, %ld of them landed in it; %zu pieces, %zu adrift\n",
+              joined.joined, expect, landed_as_expected, pieces.pieces, pieces.adrift);
+  CHECK(expect >= 1 && landed_as_expected == expect);
+  CHECK(j_in && j_out);   // J: on into the ring ahead, and out into the solid behind
+  CHECK(pieces.pieces >= 1 && pieces.adrift == 0);
+}
+
+// O2, S1b: a strand with a vertex next to a crossing stays in one piece. Line A along the pocket (out through both
+// ends of the block) has a vertex 0.3 mm above the ring B it crosses (within their half widths, 0.9 mm): both of A's
+// bars there cross B. The crossing is made AT A's vertex: A's bars share their ends end to end (one piece), and the
+// one point where A and B meet is A's own vertex, exactly, where four bars end.
+static void test_weave_crossing_at_a_vertex() {
+  const StepModel model = weave_block();
+  PartMeasure pm(weld_mesh(model.mesh));
+  Domain d(pm, weave_domain(model, true, false));
+  const Vec3 vertex = round_pocket(7.75, 90, 10.3);
+  std::vector<Strand> strands;
+  strands.push_back(weave_strand({round_pocket(7.75, 90, -1), round_pocket(7.75, 90, 8), vertex, round_pocket(7.75, 90, 21)}));
+  {
+    std::vector<Vec3> p;
+    for (double t = -15; t <= 195 + 1e-9; t += 30) p.push_back(round_pocket(7.75, t, 10.0));
+    strands.push_back(weave_strand(p));
+  }
+  Bars bars = weave_bars(d, strands);
+  const std::size_t joints = split_at_crossings(bars);
+  auto on_a = [&](const Vec3& p) { return std::fabs(p.x - vertex.x) < 1e-6 && std::fabs(p.y - vertex.y) < 1e-6; };
+  std::vector<const Bar*> a;
+  for (const Bar& b : bars.bars)
+    if (on_a(b.a) && on_a(b.b)) a.push_back(&b);
+  // A's pieces, joined end to end where they share an exact end.
+  std::vector<int> up(a.size());
+  for (std::size_t i = 0; i < a.size(); ++i) up[i] = static_cast<int>(i);
+  auto find = [&](int v) { while (up[static_cast<std::size_t>(v)] != v) v = up[static_cast<std::size_t>(v)]; return v; };
+  for (std::size_t i = 0; i < a.size(); ++i)
+    for (std::size_t j = i + 1; j < a.size(); ++j)
+      if (share_end(*a[i], *a[j])) up[static_cast<std::size_t>(find(static_cast<int>(j)))] = find(static_cast<int>(i));
+  std::size_t pieces = 0;
+  for (std::size_t i = 0; i < a.size(); ++i) pieces += find(static_cast<int>(i)) == static_cast<int>(i);
+  int at_vertex = 0, b_at_vertex = 0;
+  for (const Bar& b : bars.bars)
+    for (const Vec3& p : {b.a, b.b})
+      if (same_point(p, vertex)) { ++at_vertex; b_at_vertex += !(on_a(b.a) && on_a(b.b)); }
+  std::printf("weave crossing at a vertex: %zu joint(s), line A in %zu bars, %zu piece(s); %d bars end at A's vertex (%d of ring B)\n",
+              joints, a.size(), pieces, at_vertex, b_at_vertex);
+  CHECK(joints == 1);
+  CHECK(pieces == 1 && a.size() == 3);
+  CHECK(at_vertex == 4 && b_at_vertex == 2);
+}
+
+// O1, O2 through the session: the cube region laid as lay() lays it, the weave's bars after its bars, the spacing
+// carried by the layout; the same on one thread and on eight.
+static void test_weave_session() {
+  const StepModel model = weave_block();
+  Session session(model);
+  Settings s;
+  s.regions = {{1, Role::Lattice, {1}, 4.0, 0.0, true}, {2, Role::Lattice, {0}, 3.0, 0.0, false}};
+  s.cells = weave_cells();
+  s.struts.allow_quilt = true;
+  const std::vector<Strand> weave = made_up_weave();
+  const Outcome a = session.lay_weave(s, weave, 1), b = session.lay_weave(s, weave, 8);
+  CHECK(!a.cancelled && a.layout.weave.size() == 1 && a.layout.weave[0].spacing_mm == 4.0);
+  CHECK(a.layout.cells == b.layout.cells && bars_hash(a.bars) == bars_hash(b.bars));
+  std::size_t weave_bars_kept = 0, slab_bars = 0;
+  for (const Bar& x : a.bars.bars) (x.region == 1 ? weave_bars_kept : slab_bars) += 1;
+  const Outcome plain = session.lay(s, 1);   // no strands: the weave region has nothing
+  std::size_t plain_weave = 0;
+  for (const Bar& x : plain.bars.bars) plain_weave += x.region == 1;
+  std::printf("weave session: %zu cells, %zu bars (%zu of the weave, %zu of the slab), %zu pieces, %zu adrift; without strands %zu bars\n",
+              a.layout.cells.size(), a.bars.bars.size(), weave_bars_kept, slab_bars, a.pieces.pieces, a.pieces.adrift,
+              plain.bars.bars.size());
+  CHECK(weave_bars_kept > 50 && slab_bars > 0 && plain_weave == 0);
+  CHECK(plain.layout.cells == a.layout.cells && plain.bars.bars.size() == slab_bars);
+}
+
+// O2 (one bar per two points, test 16): of a weave's bars, those on the same two points (within a hundredth of a
+// micron, either way round) are one, of the widest width; its ends take the best-landed tag of the repeats; a Joined
+// end in a repeat lands in the bar kept; a cube region's bar on the same points, and a bar 2e-5 mm off, are not touched.
+static Bar repeat_bar(Vec3 a, Vec3 b, double w, int region, Bar::End ea, Bar::End eb, int into_b = -1) {
+  Bar x;
+  x.a = a; x.b = b; x.width = w; x.cell = 4.0; x.region = region; x.end_a = ea; x.end_b = eb; x.into_b = into_b;
+  return x;
+}
+static void test_weave_repeats() {
+  const Vec3 A{10, 10, 10}, B{14, 10, 11};
+  const Bar::End N = Bar::End::Node, J = Bar::End::Joined, S = Bar::End::Solid;
+  Bars b;
+  b.bars.push_back(repeat_bar(A, B, 0.9, 1, N, N));                                     // 0
+  b.bars.push_back(repeat_bar(B, {A.x + 5e-6, A.y, A.z}, 1.2, 1, N, N));                // 1 the other way round, 5e-6 off
+  b.bars.push_back(repeat_bar(A, B, 0.8, 1, N, J, 5));                                  // 2 its b end Joined in bar 5
+  b.bars.push_back(repeat_bar(A, B, 0.9, 2, N, N));                                     // 3 a cube region's
+  b.bars.push_back(repeat_bar({12, 14, 10}, {12, 10.2, 10.5}, 0.9, 1, S, J, 2));        // 4 Joined in repeat 2
+  b.bars.push_back(repeat_bar({14, 10, 9}, {14, 12, 13}, 0.9, 1, S, S));                // 5
+  b.bars.push_back(repeat_bar({A.x + 2e-5, A.y, A.z}, B, 0.9, 1, N, N));                // 6 2e-5 off: not a repeat
+  Bars untouched = b;
+  CHECK(merge_repeated_bars(untouched, {}) == 0 && bars_hash(untouched) == bars_hash(b) && untouched.repeats == 0);
+  const std::size_t merged = merge_repeated_bars(b, {1});
+  std::printf("weave repeats by hand: %zu merged, %zu bars left; kept width %.2f, ends %d %d (into %d); bar 4 into %d\n",
+              merged, b.bars.size(), b.bars.empty() ? 0.0 : b.bars[0].width, b.bars.empty() ? -1 : static_cast<int>(b.bars[0].end_a),
+              b.bars.empty() ? -1 : static_cast<int>(b.bars[0].end_b), b.bars.empty() ? -9 : b.bars[0].into_b,
+              b.bars.size() > 2 ? b.bars[2].into_b : -9);
+  CHECK(merged == 2 && b.repeats == 2 && b.bars.size() == 5 && b.dropped == 0);
+  if (b.bars.size() == 5) {
+    CHECK(b.bars[0].width == 1.2 && b.bars[0].a.x == A.x && b.bars[0].b.x == B.x);
+    CHECK(b.bars[0].end_a == N && b.bars[0].end_b == J && b.bars[0].into_b == 3);   // bar 5 is now 3
+    CHECK(b.bars[1].region == 2 && b.bars[1].width == 0.9);
+    CHECK(b.bars[2].end_b == J && b.bars[2].into_b == 0);
+    CHECK(b.bars[4].a.x == A.x + 2e-5);
+  }
+  // Through the session: the made-up weave with one of its rings laid twice (the second 1.1 mm wide) lays exactly the
+  // bars of the weave laid once, that ring's at 1.1 mm; no two weave bars on the same two points.
+  const StepModel model = weave_block();
+  Session session(model);
+  Settings s;
+  s.regions = {{1, Role::Lattice, {1}, 4.0, 0.0, true}, {2, Role::Lattice, {0}, 3.0, 0.0, false}};
+  s.cells = weave_cells();
+  s.struts.allow_quilt = true;
+  const std::vector<Strand> once = made_up_weave();
+  std::vector<Strand> twice = once;
+  Strand again = once[0];
+  again.width_mm.assign(again.points.size(), 1.1);
+  twice.push_back(again);
+  const Outcome a = session.lay_weave(s, once, 1);
+  const Outcome t = session.lay_weave(s, twice, 1);
+  auto weave_count = [](const Bars& x) {
+    std::size_t n = 0;
+    for (const Bar& y : x.bars) n += y.region == 1;
+    return n;
+  };
+  auto repeats_left = [](const Bars& x) {
+    std::size_t n = 0;
+    for (std::size_t i = 0; i < x.bars.size(); ++i)
+      for (std::size_t j = i + 1; j < x.bars.size(); ++j) {
+        const Bar &p = x.bars[i], &q = x.bars[j];
+        if (p.region != 1 || q.region != 1) continue;
+        n += (same_point(p.a, q.a) && same_point(p.b, q.b)) || (same_point(p.a, q.b) && same_point(p.b, q.a));
+      }
+    return n;
+  };
+  std::size_t wide = 0;
+  for (const Bar& y : t.bars.bars) wide += y.region == 1 && y.width == 1.1;
+  std::printf("weave repeats in the session: once %zu weave bars, ring twice %zu (merged %zu, %zu at 1.1 mm), repeats left %zu\n",
+              weave_count(a.bars), weave_count(t.bars), t.bars.repeats, wide, repeats_left(t.bars));
+  CHECK(weave_count(t.bars) == weave_count(a.bars) && t.bars.repeats > 0 && wide > 0 && repeats_left(t.bars) == 0);
+  CHECK(repeats_left(a.bars) == 0);
+}
+
 int main() {
   test_places();
   test_size_step();
   test_face_pieces();
   test_area_own();
   test_area_finish();
+  test_lay_bars_unchanged();
+  test_weave_cells();
+  test_weave_bars();
+  test_weave_crossing_at_a_vertex();
+  test_weave_session();
+  test_weave_repeats();
   test_cells_by_stress();
   test_zones();
   test_by_stress();

@@ -17,7 +17,8 @@
 //
 // His print rules that live here (2026-11-12): a strut that lies flatter than 30 degrees
 // is a BRIDGE: a square bar, its underside level, so its first layer across the gap is one
-// straight full-width line. The part is printed standing on its lowest z.
+// straight full-width line (a weave's may have a round top over that underside: O14, `weave_round_top`). The part is
+// printed standing on its lowest z.
 // The other two (flat bed face, nothing starting in mid-air) are judged on the finished
 // mesh layer by layer; what they find comes back in as `drop_at` and `posts`.
 //
@@ -89,13 +90,52 @@ struct MeshSpec {
   int threads = 0;            // 0 = every core
   // From the layer check. A strut whose LOWEST point is at one of these places is left out
   // (it hangs from above with nothing under its tip), and so is a small separate piece of
-  // the solid body that starts there.
+  // the solid body that starts there. A weave's bar is left out only when its lowest end is not held (O10:
+  // bars_present with the weave regions, at `layer_mm`).
   std::vector<Vec3> drop_at;
+  // The layer check's layer height, read for a weave's bars only (O10, a level end); build_printable_mesh sets it.
+  double layer_mm = 0.2;
   // A vertical post, two lines across, from the first material below (`z_bottom`) up to
   // something that would otherwise start in mid-air or reach out held at one end (`z_top`).
   struct Post { double x = 0.0, y = 0.0, z_top = 0.0, z_bottom = 0.0; };
   std::vector<Post> posts;
   double post_mm = 0.9;
+  // O8, stands along the way (the owner's OR10: "a preference for stands along the way to keep it up"). A whole
+  // shallow run of a weave (stage 1c's run, of the bars the bridge rules keep) that goes farther than this between two
+  // stands gets one post at the middle of that stretch, when there is material straight below it (the post starts on
+  // that material); with none below it stands as it is. A stand is a joint where another kept bar meets the run, or
+  // where the run enters the solid. 0 = never. The number is the lead's (LatticeReview, 2026-11-14), not the owner's.
+  // Read by build_printable_mesh only.
+  double weave_stand_every_mm = 20.0;
+  // O11, the blended foot (the owner's OR17: "blended when a strut meets a wall"). ONLY a bar of a weave region, and
+  // ONLY at an end tagged Solid (it runs into the part's solid wall), is given a foot of this size f where it meets
+  // the wall (the first point back from that end, along the bar, that is not solid: SolidAt, as the end was tagged).
+  // A round strut flares in a straight cone from its own radius r, 3 f along the strut from the wall, to r + f at the
+  // wall, and runs on into the solid at that radius. A shallow strut (a bridge, O5) keeps its flat underside exactly:
+  // its foot widens by f each side and by f upward over the same 3 f, in straight tapers, and runs on into the solid
+  // at that section. The taper never runs past the bar's other end. f is held at r (a foot is never more than twice
+  // its strut). 0 = no foot: the mesh as before (the writer's own default, so every caller that does not ask is
+  // unchanged). Below 0 = half the bar's own width (the file job's default: FileOptions). Joints between struts, ends
+  // cut by the open surface and every cube-lattice bar are unchanged.
+  double weave_foot_mm = 0.0;
+  // O14, a round top on a weave's shallow struts (the owner approved "give shallow struts a flat bottom with a rounded
+  // top instead of a square bar", 2026-11-14). ONLY a bar of a weave region that is a bridge (bar_is_bridge) is written
+  // with a D-shaped section: its underside the same flat plane as the square bar's (same plane, same width), its two
+  // sides rising straight for half the strut's width, its top a half round of the strut's width made of half
+  // `bar_sides` flat facets (its corners on the round); as wide and as tall as the square bar. Its run-on, its foot
+  // (O11: the D widened by f each side and f upward, its round's radius r + f, the underside kept) and the balls at its
+  // joints are as for the square bar. Every cube-lattice bridge stays square. false = the square bar, the mesh as
+  // before: the writer's own default, so every caller that does not ask is unchanged; the file job's default is true
+  // (file_mesh_defaults).
+  bool weave_round_top = false;
+  // O17, O18: what happens to a weave strand that SAGS (the owner's OR29: "A traced curve that sags is never cut for
+  // it"). Read by build_printable_mesh only, once, on the layout's bars before the writer (lift_weave_sags).
+  // O17: a sag no deeper than this below the lower of its two held nodes is lifted onto the straight line between
+  // them. 0 = never lift. The 0.9 mm is the owner's starting number (2026-11-15: "let's start at 0.9mm").
+  double weave_sag_lift_mm = 0.9;
+  // O18: a deeper sag with material straight below its low point gets a zig-zag leg, the old engine's shape, from that
+  // material up to the low point. false = no leg (the sag is left to the layer check, as before).
+  bool weave_sag_legs = true;
   // Set, the work is given up between its steps and LayCancelled is thrown.
   const std::atomic<bool>* stop = nullptr;
 };
@@ -123,6 +163,13 @@ struct MeshReport {
   std::size_t drop_unanswered = 0; // `drop_at` places no strut answered for
   std::size_t posts = 0;
   double posts_mm = 0.0;
+  // The owner's bridge rules for a weave (O6, O7, O9; weave_holds): its shallow bars kept with both ends held, at any
+  // length, and those left out because an end is held by nothing kept. Both 0 with no weave region.
+  std::size_t kept_any_length = 0, weave_left_unheld = 0;
+  // O11: the weave ends given a foot, of them those whose f was held at r, and the material the feet add (each foot
+  // as written between the wall and 3 f out, less the strut it wraps there; what runs on into the solid adds none).
+  std::size_t feet = 0, feet_held = 0;
+  double feet_mm3 = 0.0;
   double struts_mm3 = 0.0;         // joined and cut to the part
   double solid_mm3 = 0.0;          // the part less the open space
   std::size_t solid_pieces = 0;
@@ -142,6 +189,114 @@ struct MeshReport {
 };
 
 bool mesh_available();
+
+// ── THE OWNER'S BRIDGE RULES FOR A WEAVE (O6, O7, O9) ───────────────────────────
+// They apply ONLY to the bars of a weave region (region one of `weave_regions`); every other bar is kept here, and
+// judged as before.
+//   O6, held: an end of such a bar is held when it is in the part's solid (Solid), or shares a joint with another bar
+//     that is itself kept: a Node end at the joint (ends within 1e-5 mm are one, end_joints) where a kept bar has an
+//     end, a Joined end in a bar (`into_a`, `into_b`) that is kept. A Surface or Loose end is held by nothing.
+//   O7, any length: a shallow weave bar (bar_is_bridge at `rise`) with both ends held is kept, whatever its length.
+//   O9, leads to nothing: a shallow one with an end not held, or any other weave bar with its LOWEST end not held (the a
+//     end at a tie), is left out; then whatever it held is judged again, until nothing changes (a bar whose end lands
+//     on a bar that is left out is left out too). It is never given a post instead. `left_unheld` counts both kinds.
+// `present`: the bars still in the file (the layer check's `drop_at` leaves some out first); empty = all of them.
+// The writer (build_mesh) leaves out what this leaves out; the layer check's loop reads the same answer.
+struct WeaveHolds {
+  std::vector<char> kept;         // per bar of `bars`: 1 kept (absent bars are 0)
+  std::vector<char> shallow;      // per bar: a shallow bar of a weave region
+  std::size_t kept_any_length = 0, left_unheld = 0;   // shallow kept; weave bars (shallow or not) left out here
+};
+WeaveHolds weave_holds(const Bars& bars, const std::vector<int>& weave_regions, const std::vector<char>& present = {},
+                       double rise = kBridgeRise);
+// The bars a list of `drop_at` places leaves in the file, as build_mesh reads it (per bar: 1 present). A place reaches a
+// bar when the bar's lowest point is within 0.45 mm of it in height and the place within half the bar's width + 0.35 mm
+// of its line; a bar a place reaches is left out. This form reads every bar so (a cube lattice's rule).
+std::vector<char> bars_present(const Bars& bars, const std::vector<Vec3>& drop_at);
+// The same, with the bars of `weave_regions` judged by O10 (a finding at a held end, a level end): a place leaves such
+// a bar out only when the bar's own LOWEST end (a at a tie) is not held from below or level by what is still present:
+// in the solid (Solid), or a Node end where another present bar ends whose other end is less than one layer
+// (`layer_mm`, the layer check's height) above it, or a Joined end in a present bar whose lowest end is less than one
+// layer above it. An end less than one layer below the bar's other end, when that end is so held, is at its level: the
+// bar starts where it is held, and is not left out. Judged again until nothing changes. Every other bar as above; with
+// no weave region exactly the form above. `used`, when given: per place, 1 when it left out a bar.
+std::vector<char> bars_present(const Bars& bars, const std::vector<Vec3>& drop_at, const std::vector<int>& weave_regions,
+                               double layer_mm = 0.2, std::vector<char>* used = nullptr);
+// O6 (joints a hair apart): each bar end's joint, ends within a hundredth of a micron (1e-5 mm) of a point already seen
+// being that point, as drop_loose_bars reads a joint. Per bar two numbers (a, b): `[2 i]`, `[2 i + 1]`.
+std::vector<std::size_t> end_joints(const Bars& bars);
+// O10, for the make-check-make loop: what a place of the layer check reaches (as `bars_present` reads it) of the bars
+// still `present` (empty = all): how many bars, how many of them cube-lattice bars, how many weave bars held at their
+// lowest end from below or level, how many held only at their level (an end less than a layer below a held end), and
+// whether the place lies on a weave bar (within its half width + 0.35 mm of its line).
+struct WeaveFinding { std::size_t reached = 0, cube = 0, held = 0, level = 0; bool on_weave = false; };
+std::vector<WeaveFinding> weave_findings(const Bars& bars, const std::vector<int>& weave_regions,
+                                         const std::vector<char>& present, const std::vector<Vec3>& places,
+                                         double layer_mm = 0.2);
+// ── WHAT HAPPENS TO A SAG (O17, O18; the owner's OR29) ─────────────────────────
+// Only the bars of a weave region are read and moved; every other bar is never moved.
+// HELD FROM BELOW (a node, a joint of end_joints): in the solid (a Solid end), or an end of a bar that is not a weave's,
+// or reached by a bar from a node held from below whose far end is not a layer (`layer_mm`) or more below it, or the
+// Joined end of a bar landing in a STANDING bar (its lowest node held from below, and, when it lies under 30 degrees,
+// both) whose lowest end is less than a layer above it. Read walking upward from the solid, so the two arms of a V
+// never hold each other.
+// A LOW NODE: a node not held from below where only weave bars end, two or more of them (its ARMS: two of one strand,
+// a curve's end and a tie, or more), lower than every node they join it to (a node at exactly its height is passed
+// over). An arm runs from it along its bar and on (along the same strand where that strand goes on, else into the one
+// other weave bar there) to the nearest node held from below (its held node), or to an end with none (an OPEN arm).
+// Lowest low nodes first, each judged on the bars as the sags before it left them:
+//   O17, lifted: every arm reaching a held node, and two arms to lift along (the only two, or of more the two of the
+//     one strand passing through it; the others, its ties, ride with it), and `lift_mm` > 0: every node strictly
+//     between those two held nodes would be moved straight up or down onto the straight line between them, the line read along the arms'
+//     length in plan (each node at its share of the way, x and y kept). It is lifted only if no node would move more
+//     than `lift_mm`, up or down; else it gets a leg (O18, counted `too_far`). Every weave bar end at a moved node moves
+//     with it (the strand's own, its crossings', its ties'); a Joined end landing inside a moved bar moves with the bar
+//     at its place along it. An open arm (`open_arm`), more than two arms with no strand through it, or a sag with no
+//     length in plan (`not_covered`) has no line to lift it onto: it gets a leg.
+//   O18, a leg: `legs` on, and material straight below the low point (the solid, or any bar but its own arms within
+//     its half width of the plumb line) before the line leaves the part: a leg in the shape the old engine grew its
+//     branched supports (organic_lattice.cpp, "BRANCHED SUPPORT"): from the low point it steps down ONE LAYER at a time;
+//     each step leans toward the nearest material of a standing bar in the layer below, looked for on a grid of half
+//     the leg's width out to 8 such steps (the old raster's 8 cells of the thinnest radius), by at most tan(40 degrees)
+//     of a layer sideways (never flatter than 50 degrees from level), straight down when nothing is in reach; a step
+//     that would come within half the leg's width of the part's surface goes straight down instead, and if that would
+//     too, the leg is not made. It ends at the first material a step reaches: the solid (cut where the solid begins
+//     and run on into it by its own width, end Solid, S11), or any bar but its own arms, standing or not (end Joined
+//     into it): it never passes through a bar. Its width is the thinnest weave bar of its region, never under
+//     Layout::min_strut_mm; the steps going on in one direction are one bar. Its bars are laid from the foot up (`a`
+//     the lower end), each lower end on the one below, the top end on the low node (Node). Legs laid before are
+//     material for the next. No material below, or no leg could be made: `unsupported`, the sag left as before.
+// The bars of a sag are never cut for it. The hold rules (weave_holds) and the layer check then judge the result
+// (build_printable_mesh: a leg they leave out, with the bar it landed on, is taken off `legs` and counted unsupported).
+// Nothing changes with `lift_mm` 0 and `legs` false, with no weave region, or with no low node.
+struct SagReport {
+  std::size_t low_nodes = 0;       // low nodes found on the bars as laid
+  std::size_t lifted = 0;          // O17: sags lifted
+  double lift_largest_mm = 0.0;    // the most any node of a lifted sag moved, up or down
+  std::size_t too_far = 0;         // O17: not lifted, a node would have moved more than lift_mm
+  std::size_t open_arm = 0;        // an arm reached an end with no held node
+  std::size_t not_covered = 0;     // more than two arms and no strand through it, or no length in plan
+  std::size_t legs = 0;            // O18: legs laid (and, after build_printable_mesh, kept)
+  std::size_t leg_bars = 0;        // their bars
+  double legs_mm = 0.0;            // their length, run-in included
+  std::size_t legs_left_out = 0;   // build_printable_mesh: legs the hold rules or the layer check left out
+  std::size_t unsupported = 0;     // O18: no material straight below, no leg could be made, or its leg left out
+  // Per leg laid: its first bar in the bars after the pass, and how many.
+  std::vector<std::pair<std::size_t, std::size_t>> leg_at;
+  bool changed() const { return lifted + leg_at.size() > 0; }
+};
+SagReport lift_weave_sags(const Domain& domain, const Layout& layout, Bars& bars, double lift_mm, bool legs,
+                          double layer_mm = 0.2);
+
+// O8: where a weave's whole shallow runs (of the bars `kept` keeps) go farther than `every_mm` between stands, the
+// middle of each such stretch, on the run's centre line (`width`: the bar's there; `below_z`: the lowest point of the
+// bar within 0.45 mm round it, where material under it is looked for). Runs as stage 1c's table chains them: joints
+// where exactly two kept shallow weave bars end at one point and go on in line within 15 degrees. A stand is a joint of
+// the run where an end of it is Solid or Joined, or another kept bar has an end, or where another kept bar's Joined end
+// lands in one of its bars. A run with no stand (a closed ring tied to nothing) has no stretch. In bar order.
+struct WeaveStand { Vec3 at{}; double width = 0.0, below_z = 0.0; };
+std::vector<WeaveStand> weave_stands_wanted(const Bars& bars, const std::vector<int>& weave_regions,
+                                            const std::vector<char>& kept, double every_mm, double rise = kBridgeRise);
 
 // The part with every cell's open space taken out of it: the slow half of the mesh, and
 // the half that does not depend on the struts. Whoever makes the mesh more than once (the
@@ -195,6 +350,9 @@ struct LayerSpec {
   // them and printed clean, so nothing is changed for them; every file reports how many.
   double thin_under_mm = 0.6;
   double thin_min_mm2 = 0.15;
+  // Places (x, y, and the height under which to look) to ask what material lies straight below: the same reading as
+  // a post's foot (the highest layer under it with anything within 0.45 mm). Answered in LayerReport::below.
+  std::vector<Vec3> below_of;
   int threads = 0;
   const std::atomic<bool>* stop = nullptr;
 };
@@ -212,6 +370,9 @@ struct LayerReport {
   double longest_reach_mm = 0.0;
   std::size_t thin_islands = 0;      // rule (d): islands under `thin_under_mm` thick, all layers together
   int thin_layers = 0;               // layers that have at least one
+  // One per LayerSpec::below_of: anything below, and the middle of the highest layer that has it.
+  struct Below { bool anything = false; double z = 0.0; };
+  std::vector<Below> below;
   // The bed face is flat (no sloped or curved underside in the first layer worth the name,
   // and the first layer rests on the bed), nothing starts in mid-air, nothing is one-ended.
   bool bed_flat() const { return sloped_mm2 <= 0.5 && bed_mm2 >= 0.98 * first_layer_mm2; }
@@ -223,6 +384,11 @@ LayerReport check_layers(const TriangleMesh& mesh, const LayerSpec& spec = Layer
 // in mid-air and nothing is one-ended. What the check finds is first answered by leaving
 // out the struts (and specks of solid) that start there; when that stops helping, by a
 // post from the first material below. This is the loop his v2 stand file came out of.
+// With a weave region, the owner's bridge rules (O5 to O10): the writer leaves out the shallow weave bars that lead
+// to nothing (weave_holds); a one-ended overhang or a bridge reaching past `reach_limit_mm` found ON a kept shallow
+// weave bar (within its half width + 0.35 mm, as `drop_at` is read) is not a finding: it is kept at any length (O7);
+// a stretch of a shallow run longer than MeshSpec::weave_stand_every_mm between stands gets one post at its middle
+// where material lies straight below (O8). Everything else, mid-air starts first of all, is judged as before (O10).
 struct PrintableSpec {
   MeshSpec mesh;       // its drop_at and posts are where the loop starts from (normally empty)
   LayerSpec layers;
@@ -238,6 +404,15 @@ struct PrintableReport {
   std::vector<int> found_per_pass;   // mid-air starts + one-ended overhangs, pass by pass
   std::vector<Vec3> drop_at;         // what the loop ended with: the same call with these gives the mesh in one pass
   std::vector<MeshSpec::Post> posts;
+  std::size_t stands_added = 0;      // O8: of `posts`, those put under a weave's long shallow runs
+  // O10, mid-air findings that are not findings for a weave, all passes together: a speck (an island smaller than
+  // half a line width both ways, on a weave bar, reaching no cube-lattice bar), and a held start (a place that would
+  // leave out no bar: every bar it reaches is a weave bar that starts where it is held, WeaveFinding held + level).
+  std::size_t weave_specks_ignored = 0, weave_held_ignored = 0;
+  // O17, O18: what the sag pass did (once, before the first pass), and, when it changed a bar, the bars every pass
+  // was made of (the layout's own otherwise: null). `drop_at` and `posts` are read against those.
+  SagReport sags;
+  std::shared_ptr<const Bars> sagged;
   double ms_carve = 0.0;             // the part carved, once for all the passes
   double ms = 0.0;
 };

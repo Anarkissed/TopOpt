@@ -1,7 +1,10 @@
 // Lattice rebuild, stage E: what the app holds for one part (rule P2). See lattice_layout.hpp.
 #include "topopt/lattice_layout.hpp"
+#include "topopt/lattice_layout_organic.hpp"
 
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 
 namespace topopt::lattice_layout {
@@ -37,6 +40,7 @@ std::string where_text(const Settings& s) {
   out += "R";
   for (const Settings::RegionAsk& r : s.regions) {
     whole(r.id); whole(static_cast<long>(r.role)); num(r.depth_mm); num(r.expand_mm);
+    if (r.weave) out += "w,";   // O1 (written only when on: with no weave the text is as it was)
     for (int f : r.faces) whole(f);
     pieces(r.pieces);
     // D21: every number of the zone, so a moved zone reads the part again.
@@ -67,10 +71,15 @@ Session::Session(StepModel model) : model_(std::move(model)) {
 }
 
 Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bool>* stop) {
-  Outcome out;
-  const auto given_up = [] { Outcome none; none.cancelled = true; return none; };
-  if (stop && stop->load(std::memory_order_relaxed)) return given_up();
-  auto t0 = std::chrono::steady_clock::now();
+  return lay_with(settings, nullptr, threads, stop);
+}
+
+Outcome Session::lay_weave(const Settings& settings, const std::vector<Strand>& strands, int threads,
+                           const std::atomic<bool>* stop) {
+  return lay_with(settings, &strands, threads, stop);
+}
+
+void Session::ready_domain(const Settings& settings) {
   const std::string where = where_text(settings);
   if (!domain_ || where != where_) {
     DomainSpec spec;
@@ -92,6 +101,7 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
       if (!ok) { empty_regions_.push_back(r.id); continue; }
       region.rim_mm = r.rim_mm;       // S13: its own, else the part's
       region.cover_mm = r.cover_mm;
+      region.weave = r.weave;
       spec.regions.push_back(std::move(region));
     }
     for (const Settings::ProtectAsk& p : settings.protect)
@@ -115,6 +125,15 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
     ref_kept_ = false;   // the reference is the new domain's to read again
     ref_field_.reset();
   }
+}
+
+Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* strands, int threads,
+                          const std::atomic<bool>* stop, const WeaveFinish* finish) {
+  Outcome out;
+  const auto given_up = [] { Outcome none; none.cancelled = true; return none; };
+  if (stop && stop->load(std::memory_order_relaxed)) return given_up();
+  auto t0 = std::chrono::steady_clock::now();
+  ready_domain(settings);
   out.read_again = unread_;   // a new domain, or one whose first reading was given up part way
   out.empty_regions = empty_regions_;
   // The domain watches the flag for this lay only (the flag need not outlive the call).
@@ -173,6 +192,11 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
     out.step_held_at = step_held(cells);   // C24
     out.layout = lay_cells(*domain_, cells, threads, own_or_none);
     unread_ = false;
+    if (strands)   // O2: each weave region carries the smallest spacing of its strands
+      for (Layout::Weave& w : out.layout.weave)
+        for (const Strand& s : *strands)
+          if (s.region == w.region && s.spacing_mm > 0.0)
+            w.spacing_mm = w.spacing_mm > 0.0 ? std::min(w.spacing_mm, s.spacing_mm) : s.spacing_mm;
     StrutSpec struts = settings.struts;
     if (stress.demand) {
       // By stress reads the field, the RESOLVED reference (the one the cells were laid with) and the response.
@@ -189,7 +213,18 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
       domain_->check_stop();
       out.thin_solid = solidify_thin_cuts(out.layout, *domain_, threads);   // P8 (f): before any bar is laid
       out.bars = lay_bars(out.layout, *domain_, threads);
+      if (strands) {   // O2: the weave's bars, cut at their crossings, after the cells'
+        Bars weave = weave_bars(*domain_, *strands, threads);
+        split_at_crossings(weave);
+        out.bars.stubs += weave.stubs;
+        out.bars.bars.insert(out.bars.bars.end(), weave.bars.begin(), weave.bars.end());
+      }
       if (settings.join_loose) join_loose_bars(out.bars, *domain_, threads, &out.layout);
+      if (strands) {   // O2 (one bar per two points): a weave's bars laid more than once on the same two ends are one
+        std::vector<int> weave_regions;
+        for (const Layout::Weave& w : out.layout.weave) weave_regions.push_back(w.region);
+        merge_repeated_bars(out.bars, weave_regions);
+      }
       domain_->check_stop();
       // S13: the part's Skin, and each region's own where it states one.
       SkinSpec skin = settings.skin_spec;
@@ -203,13 +238,22 @@ Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bo
       }
       if (any_skin) lay_skin(out.bars, *domain_, skin);
       domain_->check_stop();
+      if (settings.skin && finish && !finish->net_reach.empty())   // O16: Finish Skin on a weave region
+        lay_net_skin(out.bars, *domain_, finish->net_reach, settings.skin_spec.width_mm);
+      domain_->check_stop();
       if (settings.drop_loose) {
-        drop_loose_bars(out.bars);
+        drop_loose_bars(out.bars, finish && !finish->arrived.empty() ? &finish->arrived : nullptr);   // G11
         out.stepped_edges = stepped_edges(out.bars);
         out.pieces = drop_adrift_bars(out.bars, *domain_, &out.layout);
       } else {
         out.pieces = count_pieces(out.bars, *domain_, nullptr, nullptr, &out.layout);
       }
+      for (const Bar& b : out.bars.bars)
+        if (b.net) {
+          ++out.net_struts;
+          out.net_mm += std::sqrt((b.b.x - b.a.x) * (b.b.x - b.a.x) + (b.b.y - b.a.y) * (b.b.y - b.a.y) +
+                                  (b.b.z - b.a.z) * (b.b.z - b.a.z));
+        }
       out.ms_bars = ms_since(t0);
     }
     domain_->check_stop();   // set during the last step: the answer is "cancelled", never a layout nobody waits for
