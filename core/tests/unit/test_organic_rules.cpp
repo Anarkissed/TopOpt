@@ -623,6 +623,18 @@ static void test_s_cut_fix() {
       CHECK(bars.bars.size() == 5);
     }
   }
+  // Brief L2, item 1: the pairs are tried cell by cell with no pair list; a pair whose boxes share many cells (two
+  // bars 40 mm long crossing at a shallow angle, 2 mm cells) is still tried ONCE: one contact, one link.
+  {
+    Bars two;
+    two.bars.push_back(jbar({0, 0, 5}, {40, 0, 5}, Bar::End::Solid, Bar::End::Solid, 0));
+    two.bars.push_back(jbar({0, -1, 5.5}, {40, 1, 5.5}, Bar::End::Solid, Bar::End::Solid, 1));
+    CrossingCutStats st2;
+    split_at_crossings(two, 0.9, 0.2, &st2, 1.0);
+    std::printf("OL-S once: two long bars over many cells: contacts %zu, links %zu, bars %zu\n", st2.contacts, st2.links,
+                two.bars.size());
+    CHECK(st2.contacts == 1 && st2.kept == 1 && st2.links == 1 && two.bars.size() == 5);
+  }
   // A level tie is never moved: two level ties 0.1 mm apart in height (more than a quarter of a 0.2 mm layer) do
   // not cross.
   Bars ties;

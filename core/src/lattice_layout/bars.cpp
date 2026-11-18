@@ -944,22 +944,31 @@ std::size_t split_at_crossings(Bars& bars, double light_mm, double layer_mm, Cro
   // The bars sorted into a grid, to find the pairs that may come close.
   const double pitch = 2.0;
   auto slot = [&](double x) { return static_cast<long long>(std::floor(x / pitch)); };
+  // Each bar's box of grid cells (its lowest cell kept: a pair is tried in ONE cell, the lowest both boxes share, so
+  // the pairs are never gathered into one list; brief L2, item 1: the same pairs, tried once each, no pair list).
   std::map<std::array<long long, 3>, std::vector<std::size_t>> grid;
+  std::vector<std::array<long long, 3>> low(n);
   for (std::size_t i = 0; i < n; ++i) {
     const Bar& b = before[i];
-    for (long long x = slot(std::min(b.a.x, b.b.x) - light); x <= slot(std::max(b.a.x, b.b.x) + light); ++x)
-      for (long long y = slot(std::min(b.a.y, b.b.y) - light); y <= slot(std::max(b.a.y, b.b.y) + light); ++y)
-        for (long long z = slot(std::min(b.a.z, b.b.z) - light); z <= slot(std::max(b.a.z, b.b.z) + light); ++z)
+    low[i] = {slot(std::min(b.a.x, b.b.x) - light), slot(std::min(b.a.y, b.b.y) - light), slot(std::min(b.a.z, b.b.z) - light)};
+    for (long long x = low[i][0]; x <= slot(std::max(b.a.x, b.b.x) + light); ++x)
+      for (long long y = low[i][1]; y <= slot(std::max(b.a.y, b.b.y) + light); ++y)
+        for (long long z = low[i][2]; z <= slot(std::max(b.a.z, b.b.z) + light); ++z)
           grid[{x, y, z}].push_back(i);
   }
-  std::vector<std::pair<std::size_t, std::size_t>> pairs;
-  for (const auto& cell : grid)
-    for (std::size_t a = 0; a < cell.second.size(); ++a)
-      for (std::size_t b = a + 1; b < cell.second.size(); ++b)
-        if (first_new == 0 || cell.second[b] >= first_new)   // T4: a pair of two old bars is never tried (not kept)
-          pairs.push_back({cell.second[a], cell.second[b]});
-  std::sort(pairs.begin(), pairs.end());
-  pairs.erase(std::unique(pairs.begin(), pairs.end()), pairs.end());
+  // Calls f(i, j), i < j, once for every pair of bars whose boxes share a cell, in no particular order.
+  auto each_pair = [&](auto&& f) {
+    for (const auto& cell : grid)
+      for (std::size_t a = 0; a < cell.second.size(); ++a)
+        for (std::size_t b = a + 1; b < cell.second.size(); ++b) {
+          const std::size_t i = cell.second[a], j = cell.second[b];
+          if (first_new != 0 && j < first_new) continue;   // T4: a pair of two old bars is never tried (not kept)
+          const std::array<long long, 3> shared{std::max(low[i][0], low[j][0]), std::max(low[i][1], low[j][1]),
+                                                std::max(low[i][2], low[j][2])};
+          if (shared != cell.first) continue;   // tried in the lowest cell the two share, only
+          f(i, j);
+        }
+  };
   // The joints, each once: two found within a hundredth of a micron of each other are one.
   std::map<PointKey, Vec3> joints;
   auto joint_at = [&](const Vec3& p) {
@@ -1000,23 +1009,23 @@ std::size_t split_at_crossings(Bars& bars, double light_mm, double layer_mm, Cro
   struct Contact { std::size_t i, j; double s, t, d; Vec3 at; };
   std::map<std::pair<int, int>, std::vector<Contact>> by_strands;
   std::size_t found = 0;
-  for (const auto& [i, j] : pairs) {
+  each_pair([&](std::size_t i, std::size_t j) {
     const Bar &x = before[i], &y = before[j];
-    if (x.link || y.link) continue;   // S6: a link is never cut here and takes no part in the pair test
-    if (first_new > 0 && i < first_new && j < first_new) continue;   // T4: only pairs with a new bar
-    if (x.strand >= 0 && x.strand == y.strand) continue;   // S7: a strand touching itself is left alone
+    if (x.link || y.link) return;   // S6: a link is never cut here and takes no part in the pair test
+    if (first_new > 0 && i < first_new && j < first_new) return;   // T4: only pairs with a new bar
+    if (x.strand >= 0 && x.strand == y.strand) return;   // S7: a strand touching itself is left alone
     const PointKey xa = key_of(x.a), xb = key_of(x.b), ya = key_of(y.a), yb = key_of(y.b);
-    if (xa == ya || xa == yb || xb == ya || xb == yb) continue;   // they share an end already
+    if (xa == ya || xa == yb || xb == ya || xb == yb) return;   // they share an end already
     double s = 0.0, t = 0.0;
     const double d = closest(x.a, x.b, y.a, y.b, &s, &t);
-    if (d > light) continue;   // S1
-    if (x.level_tie && y.level_tie && std::fabs(tie_h(x) - tie_h(y)) > 0.25 * layer_mm) continue;   // S2
+    if (d > light) return;   // S1
+    if (x.level_tie && y.level_tie && std::fabs(tie_h(x) - tie_h(y)) > 0.25 * layer_mm) return;   // S2
     const Vec3 px{x.a.x + (x.b.x - x.a.x) * s, x.a.y + (x.b.y - x.a.y) * s, x.a.z + (x.b.z - x.a.z) * s};
     const Vec3 py{y.a.x + (y.b.x - y.a.x) * t, y.a.y + (y.b.y - y.a.y) * t, y.a.z + (y.b.z - y.a.z) * t};
     by_strands[{std::min(x.strand, y.strand), std::max(x.strand, y.strand)}].push_back(
         {i, j, s, t, d, Vec3{0.5 * (px.x + py.x), 0.5 * (px.y + py.y), 0.5 * (px.z + py.z)}});
     ++found;
-  }
+  });
   std::vector<Contact> kept;
   for (auto& kv : by_strands) {
     std::vector<Contact>& g = kv.second;

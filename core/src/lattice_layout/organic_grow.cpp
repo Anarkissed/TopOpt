@@ -200,6 +200,15 @@ struct Boxes {
   void clear() {
     for (auto& b : box) b.clear();
   }
+  // The same grid, empty (brief L2, item 1: in place of a whole copy then clear(), which copied every sample first).
+  Boxes empty_like() const {
+    Boxes b;
+    b.lo = lo;
+    b.cell = cell;
+    b.n[0] = n[0]; b.n[1] = n[1]; b.n[2] = n[2];
+    b.box.resize(box.size());
+    return b;
+  }
 };
 
 // One strand while it grows: its points, a stamp per segment (a segment cut back loses its stamp, so its samples in
@@ -1269,8 +1278,7 @@ void Grower::settle() {
 void Grower::repeats() {
   const double near_mm = kRepeatMm + 0.5 * r_;
   std::vector<Line> out;
-  Boxes kept = boxes_;
-  kept.clear();
+  Boxes kept = boxes_.empty_like();
   std::vector<Line> keep_lines;
   std::vector<std::array<char, 2>> split;   // per kept piece: its front, its back left by a dropped repeat
   auto dist_to = [&](const Vec3& q, std::size_t line) {
@@ -1535,8 +1543,7 @@ Grower::Fate Grower::pass() {
   // A segment is still there when its middle lies on a bar (within the straightening's tolerance).
   const double tol = 0.25 * r_ + 1e-6;
   auto mark = [&](const Bars& bars, char value, char only) {
-    Boxes bb = boxes_;
-    bb.clear();
+    Boxes bb = boxes_.empty_like();
     for (std::size_t i = 0; i < bars.bars.size(); ++i) {
       const Vec3 a = bars.bars[i].a, b = bars.bars[i].b;
       const int n = std::max(1, static_cast<int>(std::ceil(dist(a, b) / ds_)));
@@ -2281,8 +2288,7 @@ LevelTie walk_level_tie(const W& w, const Vec3& p, const Vec3& dir0, int self, d
 
 void Grower::ties(std::size_t from) {
   std::vector<Vec3> tie_pts;
-  Boxes tie_box = rec_;
-  tie_box.clear();
+  Boxes tie_box = rec_.empty_like();
   for (const Line& L : lines_)
     if (L.tie)
       for (const Vec3& p : L.pts) tie_box.put(Sample{0, 0, 0, p});
@@ -2656,8 +2662,7 @@ void Grower::runs() {
   };
   auto turn = [&](const Vec3& v, double a) { return add(mul(v, std::cos(a)), mul(cross(up_, v), std::sin(a))); };
   if (ask_.top_run > 0.0) {
-    Boxes mine = rec_;
-    mine.clear();
+    Boxes mine = rec_.empty_like();
     rep_.top_n.assign(static_cast<std::size_t>(nmax) + 1, 0);
     for (std::size_t e = 0; e < top_ends_.size(); ++e) {
       const int li = top_ends_[e].first;
@@ -2703,8 +2708,7 @@ void Grower::runs() {
     }
   }
   if (ask_.root_run > 0.0) {
-    Boxes mine = rec_;
-    mine.clear();
+    Boxes mine = rec_.empty_like();
     rep_.root_n.assign(static_cast<std::size_t>(nmax) + 1, 0);
     const std::size_t count = lines_.size();
     for (std::size_t li = 0; li < count; ++li) {
