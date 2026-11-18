@@ -358,6 +358,8 @@ against 2,303; Grown 1,882 against 1,838) when `reference_mpa` moves in its nint
 | OP2 | L | OL-RUN: on a made Traced block (widths by stress, level ties, braces) the runs' length equals the non-link weave bars' to 1e-6 mm; thinned at 0.1 mm no original point is farther than 0.1 mm, ends and marks kept; packed bytes = 12 per run + 20 per point |
 | OP3 | L | OL-DRAFT: exact equals lay_organic bar for bar; the draft has no links and differs in length (-13.3 %), supports (10 -> 18) and net (1,544 -> 1,070) |
 | OP4 | L | OL-SWEEP: D = 18 gives strut 0.9 to 1.8 (Auto 1.35), cell 2.0 to 8.0 (Auto 5.0); a square of side 10 turned 45 degrees gives D = 10, not its box |
+| OP5 | L | OL-SWEEP-S: on a made Traced block, `sweep_limits` before any lay equals `organic_sweep_limits` on the domain of a real lay with the same settings, field for field; the next lay still reads the part (nothing was laid) and its bars equal a fresh session's by hash |
+| OP6 | L | OL-FOLLOW: true (and the default) lays today's bars by hash on a made Traced and a made Grown block (pinned from 8340a99f); false on a block with a stress ramp: every candidate at the widest spacing with no shape fit, and with it only the shape-fit-tightened candidates under it; every point at the light width with a heavy width set; the heavy gaps M, N, P change no strand (true: each does); Auto gives no top end a run (true: every one run_max); the file job reads the key |
 
 ## 14. The Organic file as the solid plus unmerged tubes (brief E1), in `test_weave_tubes` and `test_lattice_layout_file`
 

@@ -199,6 +199,13 @@ struct OrganicAsk {
   // Brief E2, item 9: the width floors (WidthFloor). Empty: none (as before). The file job, the preview and the
   // strengthen job take them from a strengthened.json (apply_strengthened).
   std::vector<WidthFloor> floors;
+  // OP6 (brief C1; the owner, 2026-11-18: "It should be a choice between stress and shape gradient or shape gradient
+  // alone."). true (the default): as before. false, "shape only": O12's stress shares are 0 everywhere for every SIZE
+  // rule: f (organic_spacing gives every candidate the widest spacing, spacing_max_mm, before O13's shape fit and L2;
+  // stress_f 0) and u (its reference_mpa is 0, so the width's heavy end (I1, Q2, T's widths), the three gaps' heavy ends
+  // (M, N, P) and Auto's runs per end (I) all read 0). The DIRECTIONS still come from the stress field (Traced's
+  // curves, Grown's heading) and are not changed by it.
+  bool follow_stress = true;
 };
 
 // Brief E2, item 9: the floors on laid bars (Session::lay_organic calls it last). Every non-link bar whose middle lies

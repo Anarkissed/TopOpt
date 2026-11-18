@@ -1426,6 +1426,8 @@ struct Outcome {
   std::shared_ptr<const GrowReport> grown;
 };
 
+struct SweepLimits;   // lattice_layout_organic.hpp
+
 class Session {
  public:
   // Welds and measures the model once. `open_edges()` is 0 for a part that can be measured.
@@ -1452,6 +1454,10 @@ class Session {
   // dropped; braces on the uncut bars, supports and net skin as they come. lay_organic_preview (organic header) calls it.
   Outcome lay_organic_draft(const Settings& settings, const TensorField& field, const OrganicAsk& ask, int threads = 0,
                             const std::atomic<bool>* stop = nullptr);
+  // OP5 (brief C1): the Auto Sweep limits before any lay. The domain for these settings' "where" is made exactly as
+  // lay() and lay_organic() make it (and kept for the next lay, as theirs is), nothing is laid, and the answer is
+  // organic_sweep_limits(that domain, line_mm) (lattice_layout_organic.hpp; include it to read the result).
+  std::vector<SweepLimits> sweep_limits(const Settings& settings, double line_mm);
   std::size_t open_edges() const { return open_edges_; }
   const PartMeasure& measure() const { return *measure_; }
   // The part as it was opened (its unwelded triangles and their raw face ids): D23 reads its faces. Not a copy.

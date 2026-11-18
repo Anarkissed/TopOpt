@@ -212,4 +212,10 @@ std::vector<SweepLimits> organic_sweep_limits(const Domain& domain, double line_
   return out;
 }
 
+// OP5 (brief C1): the same limits before any lay, on the domain lay() would lay in.
+std::vector<SweepLimits> Session::sweep_limits(const Settings& settings, double line_mm) {
+  ready_domain(settings);
+  return organic_sweep_limits(*domain_, line_mm);
+}
+
 }  // namespace topopt::lattice_layout
