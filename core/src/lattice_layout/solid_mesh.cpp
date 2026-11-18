@@ -909,6 +909,7 @@ double strut_run_on_mm(const Carved&, const MeshSpec& spec) {
 void weave_bar_shells(const Domain&, const Layout&, const Bars&, const std::vector<char>&, const std::vector<char>&,
                       const Carved&, const MeshSpec&, TriangleMesh&, std::vector<std::size_t>&, MeshReport&) {}
 std::vector<char> solid_slivers_left_out(const Carved&, const std::vector<Vec3>&) { return {}; }
+bool cut_shell_at_bed(TriangleMesh&, double) { return false; }
 
 #else
 
@@ -957,6 +958,26 @@ bool sliver_dropped(const manifold::Box& b, double v, const std::vector<Vec3>& d
   return drop;
 }
 }  // namespace
+
+bool cut_shell_at_bed(TriangleMesh& shell, double bed) {
+  manifold::MeshGL64 g;
+  g.numProp = 3;
+  for (const Vec3& v : shell.vertices) { g.vertProperties.push_back(v.x); g.vertProperties.push_back(v.y); g.vertProperties.push_back(v.z); }
+  for (const auto& t : shell.triangles)
+    for (int k = 0; k < 3; ++k) g.triVerts.push_back(static_cast<std::uint64_t>(t[static_cast<std::size_t>(k)]));
+  const Manifold m(g);
+  if (m.Status() != Manifold::Error::NoError) return false;
+  const Manifold above = m.TrimByPlane({0.0, 0.0, 1.0}, bed);
+  if (above.Status() != Manifold::Error::NoError || above.IsEmpty()) return false;
+  const manifold::MeshGL64 h = above.GetMeshGL64();
+  TriangleMesh out;
+  for (std::size_t v = 0; v < h.NumVert(); ++v)
+    out.vertices.push_back({h.vertProperties[v * h.numProp], h.vertProperties[v * h.numProp + 1], std::max(bed, h.vertProperties[v * h.numProp + 2])});
+  for (std::size_t t = 0; t < h.NumTri(); ++t)
+    out.triangles.push_back({static_cast<int>(h.triVerts[3 * t]), static_cast<int>(h.triVerts[3 * t + 1]), static_cast<int>(h.triVerts[3 * t + 2])});
+  shell = std::move(out);
+  return true;
+}
 
 std::vector<char> solid_slivers_left_out(const Carved& carved, const std::vector<Vec3>& drop_at) {
   std::vector<char> out;

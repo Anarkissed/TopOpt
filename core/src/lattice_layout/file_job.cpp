@@ -768,6 +768,7 @@ TriangleMesh make_file_mesh(const Session& session, const Outcome& outcome, cons
   report.shell_first_tri = made.shell_first_tri;
   report.base_builds = made.base_builds;
   report.ms_shells = made.ms_shells;
+  report.pass_ms = made.pass_ms;
   if (made.mesh.ok) {
     report.bed_contact_mm2 = made.layers.bed_mm2;
     report.midair_starts = static_cast<int>(made.layers.mid_air.size());
@@ -1759,10 +1760,21 @@ std::string file_result_json(const FileResult& r) {
   std::snprintf(b, sizeof b,
                 "  \"ms\": {\"import\": %.1f, \"measure\": %.1f, \"read\": %.1f, \"cells\": %.1f, "
                 "\"bars\": %.1f, \"open_space\": %.1f, \"carve\": %.1f, \"struts\": %.1f, \"solid\": %.1f, "
-                "\"finish\": %.1f, \"write\": %.1f, \"total\": %.1f}\n",
+                "\"finish\": %.1f, \"write\": %.1f, \"total\": %.1f",
                 r.ms_import, r.ms_measure, r.ms_read, r.ms_cells, r.ms_bars, r.made.ms_open_space, r.made.ms_carve,
                 m.ms_struts, m.ms_solid, m.ms_finish, r.ms_write, r.ms_total);
   o += b;
+  if (r.made.tubes) {   // OF4: every pass of the tubes route (written only on that route: a cube job's result unchanged)
+    o += ", \"passes\": [";
+    for (std::size_t i = 0; i < r.made.pass_ms.size(); ++i) {
+      const PrintableReport::PassTime& p = r.made.pass_ms[i];
+      std::snprintf(b, sizeof b, "%s{\"shells\": %.1f, \"layers\": %.1f, \"solid\": %.1f}", i ? ", " : "", p.shells_ms,
+                    p.layers_ms, p.solid_ms);
+      o += b;
+    }
+    o += "]";
+  }
+  o += "}\n";
   o += "}\n";
   return o;
 }

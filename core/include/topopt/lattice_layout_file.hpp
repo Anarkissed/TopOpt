@@ -88,6 +88,7 @@ struct FileReport {
   std::vector<std::size_t> shell_first_tri;
   int base_builds = 0;
   double ms_shells = 0.0;
+  std::vector<PrintableReport::PassTime> pass_ms;   // OF4: per pass of the tubes route
 };
 
 // THE ONE PLACE THE MESH IS MADE for a file: the open space of the layout's cells, then

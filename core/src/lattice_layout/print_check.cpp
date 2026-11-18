@@ -434,6 +434,42 @@ LayerReport check_layers(const TriangleMesh& mesh, const LayerSpec& spec) {
     std::size_t n = 0;
     for (unsigned char c : first) n += c;
     rep.first_layer_mm2 = n * PX * PX;
+    if (spec.fill == LayerSpec::Fill::NonZero) {
+      // OF1 with the owner's flat bottom (the lead's ruling, 2026-11-18): overlapping shells are counted once, on the
+      // filled first layer. Bed contact: the pixels of the first layer under a triangle lying flat on the bed. Sloped:
+      // the footprint of the downward faces within the first layer that are not flat on it, less the pixels resting on
+      // the bed (a face over material on the bed is inside the material, not an underside).
+      std::vector<unsigned char> on_bed(first.size(), 0), down(first.size(), 0);
+      for (const auto& t : mesh.triangles) {
+        const Vec3 &a = mesh.vertices[static_cast<std::size_t>(t[0])], &b = mesh.vertices[static_cast<std::size_t>(t[1])],
+                   &c = mesh.vertices[static_cast<std::size_t>(t[2])];
+        const bool flat = std::fabs(a.z - zmin) < 1e-4 && std::fabs(b.z - zmin) < 1e-4 && std::fabs(c.z - zmin) < 1e-4;
+        const double nz = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+        if (!flat && !(std::min(a.z, std::min(b.z, c.z)) < zmin + L && nz < -1e-12)) continue;
+        std::vector<unsigned char>& into = flat ? on_bed : down;
+        const int c0 = std::max(0, static_cast<int>(std::floor((std::min(a.x, std::min(b.x, c.x)) - g.x0) / PX)));
+        const int c1 = std::min(g.W - 1, static_cast<int>(std::ceil((std::max(a.x, std::max(b.x, c.x)) - g.x0) / PX)));
+        const int r0 = std::max(0, static_cast<int>(std::floor((std::min(a.y, std::min(b.y, c.y)) - g.y0) / PX)));
+        const int r1 = std::min(g.H - 1, static_cast<int>(std::ceil((std::max(a.y, std::max(b.y, c.y)) - g.y0) / PX)));
+        if (std::fabs(nz) < 1e-18) continue;
+        for (int r = r0; r <= r1; ++r)
+          for (int col = c0; col <= c1; ++col) {
+            const double x = g.x0 + (col + 0.5) * PX, y = g.y0 + (r + 0.5) * PX;
+            const double w0 = ((b.x - x) * (c.y - y) - (b.y - y) * (c.x - x)) / nz;
+            const double w1 = ((c.x - x) * (a.y - y) - (c.y - y) * (a.x - x)) / nz;
+            const double w2 = 1.0 - w0 - w1;
+            if (w0 >= -1e-9 && w1 >= -1e-9 && w2 >= -1e-9) into[static_cast<std::size_t>(r) * g.W + col] = 1;
+          }
+      }
+      std::size_t nb = 0, ns = 0;
+      for (std::size_t i = 0; i < first.size(); ++i) {
+        const bool bed_here = on_bed[i] && first[i];
+        nb += bed_here;
+        ns += down[i] && !on_bed[i];
+      }
+      rep.bed_mm2 = nb * PX * PX;
+      rep.sloped_mm2 = ns * PX * PX;
+    }
   }
   if (spec.layer_areas) {
     rep.layer_mm2.assign(static_cast<std::size_t>(nl), 0.0);
@@ -540,7 +576,9 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
     if (rep.tubes) {
       // The solid again only when the cube bars left in, or the slivers left out, changed.
       const std::vector<char> cp = bars_present(cube_bars, ms.drop_at), sl = solid_slivers_left_out(carved, ms.drop_at);
+      rep.pass_ms.push_back({});
       if (rep.base_builds == 0 || cp != base_present || sl != base_slivers) {
+        const auto ts = std::chrono::steady_clock::now();
         MeshSpec bs = ms;
         bs.posts.clear();
         bs.keep_pieces = true;
@@ -548,12 +586,14 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
         base_present = cp;
         base_slivers = sl;
         ++rep.base_builds;
+        rep.pass_ms.back().solid_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - ts).count();
       }
       rep.mesh = base_rep;
       if (!rep.mesh.ok) { mesh = TriangleMesh{}; break; }
       // The weave's shells from the bars as they now stand (OF2, OF3), and the posts.
       rep.shells = weave_shells(part, domain, layout, bars, holds.kept, carved, ms, true);
       rep.ms_shells += rep.shells.ms;
+      rep.pass_ms.back().shells_ms = rep.shells.ms;
       mesh = base;
       rep.base_triangles = base.triangles.size();
       rep.shell_first_tri.clear();
@@ -594,7 +634,9 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
         layers.below_of.push_back({w.at.x, w.at.y, w.below_z});
       }
     }
+    const auto tl = std::chrono::steady_clock::now();
     rep.layers = check_layers(mesh, layers);
+    if (rep.tubes) rep.pass_ms.back().layers_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tl).count();
     const std::vector<LayerReport::Below> below = std::move(rep.layers.below);
     rep.layers.below.clear();
     if (!weave_regions.empty()) {

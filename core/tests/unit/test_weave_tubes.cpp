@@ -499,6 +499,15 @@ static void test_tubes_route() {
   CHECK(!rm.found_per_pass.empty() && rm.found_per_pass.front() > 0);   // it did start overhanging
   CHECK(rt.clean && rt.found_per_pass.back() == 0 && rt.passes <= rm.passes);
   CHECK(total > 0.0 && diff < 0.03 * total);
+  // The owner's flat bottom (the lead's ruling, 2026-11-18): the weave's tubes reach the bed here (its strands run
+  // from z -1); every shell reaching under it is cut flat on it, and under NonZero the bed is counted once.
+  std::printf("bed: merged %.2f of %.2f mm2, sloped %.3f, flat %d; tubes %.2f of %.2f mm2, sloped %.3f, flat %d; %zu shells cut at the bed\n",
+              rm.layers.bed_mm2, rm.layers.first_layer_mm2, rm.layers.sloped_mm2, rm.layers.bed_flat() ? 1 : 0, rt.layers.bed_mm2,
+              rt.layers.first_layer_mm2, rt.layers.sloped_mm2, rt.layers.bed_flat() ? 1 : 0, rt.shells.cut_at_bed);
+  // This block's bed reads sloped in the merged route too (its pocket's lattice opens onto the bed): not the tubes'.
+  CHECK(!rm.layers.bed_flat() && rt.layers.bed_mm2 <= rt.layers.first_layer_mm2);
+  CHECK(rt.pass_ms.size() == static_cast<std::size_t>(rt.passes) && rt.pass_ms.front().solid_ms > 0.0 &&
+        rt.pass_ms.front().shells_ms > 0.0 && rt.pass_ms.front().layers_ms > 0.0);
   // The keys: mesh "weave_mesh" ("tubes" or "merged"; anything else refused, by name) and "tube_sides" (3 or more).
   {
     auto job = [](const std::string& mesh) { return R"({"mode": "lattice_file", "model": "a.step", "mesh": {)" + mesh + "}}"; };
@@ -535,6 +544,58 @@ static void test_tubes_route() {
   }
 }
 
+// The owner's flat bottom (the lead's ruling, 2026-11-18): a 20 x 20 x 10 block, a weave 9.6 mm deep under its top over
+// a 0.4 mm floor, its steep strands running down into the floor (their run-on and feet reach under the bed). The tubes
+// route cuts every shell reaching under the bed flat on it, and reads the bed flat and its contact at most the layer.
+static void test_flat_bottom() {
+  const TriangleMesh mesh = prism_poly({{0, 0}, {20, 0}, {20, 20}, {0, 20}}, 0, 10);
+  StepModel model;
+  model.mesh = mesh;
+  StepFaceInfo top, rest;
+  top.kind = StepSurfaceKind::Plane;
+  top.plane_normal = {0, 0, 1};
+  top.plane_origin = {10, 10, 10};
+  rest.kind = StepSurfaceKind::Other;
+  model.faces = {top, rest};
+  model.face_count = 2;
+  for (const auto& t : mesh.triangles) {
+    bool up = true;
+    for (int k = 0; k < 3; ++k) up = up && mesh.vertices[static_cast<std::size_t>(t[static_cast<std::size_t>(k)])].z > 10 - 1e-9;
+    model.triangle_face.push_back(up ? 0 : 1);
+  }
+  model.solid_count = 1;
+  Session session(model);
+  Settings s;
+  s.regions = {{1, Role::Lattice, {0}, 9.6, 0.0, true}};
+  s.cells.cell_max_mm = 4;
+  s.cells.min_cells_across = 1;
+  std::vector<Strand> strands;
+  for (double x = 3.0; x < 18.0; x += 3.5)
+    for (double y = 3.0; y < 18.0; y += 3.5) strands.push_back(weave_strand({{x, y, 11.0}, {x + 0.5, y, 5.0}, {x, y + 0.3, 0.1}}));
+  for (double z : {3.0, 6.0, 9.0}) strands.push_back(weave_strand({{-1.0, 10.0, z}, {21.0, 10.0, z}}));
+  const Outcome out = session.lay_weave(s, strands);
+  CHECK(!out.cancelled && !out.bars.bars.empty());
+  const Domain& d = *session.domain();
+  const OpenSpace open = read_open_space(d, out.layout, 0.25);
+  PrintableSpec merged_spec;
+  merged_spec.mesh = file_mesh_defaults();
+  PrintableSpec tubes_spec = merged_spec;
+  tubes_spec.mesh.weave_mesh = MeshSpec::WeaveMesh::Tubes;
+  PrintableReport rm, rt;
+  build_printable_mesh(session.measure(), d, out.layout, out.bars, open, merged_spec, &rm);
+  const TriangleMesh mt = build_printable_mesh(session.measure(), d, out.layout, out.bars, open, tubes_spec, &rt);
+  double z_low = 1e9;
+  for (const Vec3& v : mt.vertices) z_low = std::min(z_low, v.z);
+  std::printf("flat bottom: merged bed %.2f of %.2f mm2, sloped %.3f, flat %d; tubes bed %.2f of %.2f mm2, sloped %.3f, flat %d; "
+              "%zu shells (%zu feet), %zu cut at the bed; lowest z %.6f\n", rm.layers.bed_mm2, rm.layers.first_layer_mm2,
+              rm.layers.sloped_mm2, rm.layers.bed_flat() ? 1 : 0, rt.layers.bed_mm2, rt.layers.first_layer_mm2, rt.layers.sloped_mm2,
+              rt.layers.bed_flat() ? 1 : 0, rt.shells.shells(), rt.shells.feet, rt.shells.cut_at_bed, z_low);
+  CHECK(rt.mesh.ok && rt.shells.feet > 0 && rt.shells.cut_at_bed > 0);
+  CHECK(z_low >= 0.0);
+  CHECK(rm.layers.bed_flat());
+  CHECK(rt.layers.bed_flat() && rt.layers.bed_mm2 <= rt.layers.first_layer_mm2);
+}
+
 int main() {
   if (!mesh_available()) {
     std::printf("no mesh library in this build (%d checks, %d failed)\n", g_checks, g_fail);
@@ -544,6 +605,7 @@ int main() {
   test_tubes_from_bars();
   test_trimmed_to_part();
   test_tubes_route();
+  test_flat_bottom();
   std::printf("weave tubes: %d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }

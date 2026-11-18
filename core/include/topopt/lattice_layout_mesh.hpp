@@ -354,8 +354,10 @@ TriangleMesh build_mesh(const PartMeasure& part, const Domain& domain, const Lay
 struct WeaveShells {
   TriangleMesh mesh;                     // the shells one after another, each on its own vertices
   std::vector<std::size_t> first_tri;    // per shell, its first triangle; one more at the end (= triangles)
+  // tubes: round runs; bridges: shallow runs swept with their own section (D or square; the lead's ruling 2026-11-18).
   std::size_t tubes = 0, sharp_splits = 0, bridges = 0, feet = 0, posts = 0;
   std::size_t trimmed_vertices = 0, rebuilt = 0, left_out = 0;
+  std::size_t cut_at_bed = 0;            // shells cut flat at the bed plane
   double trimmed_largest_mm = 0.0;       // the farthest a vertex was moved onto the surface
   double outside_largest_mm = 0.0;       // after trimming: the farthest any vertex lies outside the part (trim on)
   double mm3 = 0.0;                      // the shells' own volumes, summed (overlaps counted twice)
@@ -374,6 +376,9 @@ void weave_bar_shells(const Domain& domain, const Layout& layout, const Bars& ba
 double strut_run_on_mm(const Carved& carved, const MeshSpec& spec);
 // Per piece of the carved solid: 1 when build_mesh leaves it out for `drop_at` (a small piece starting at one of them).
 std::vector<char> solid_slivers_left_out(const Carved& carved, const std::vector<Vec3>& drop_at);
+// OF3 (the lead's ruling, 2026-11-18: the owner's rule is a flat bottom): a closed shell reaching under `bed` cut there,
+// with a flat face on the bed plane (Manifold). False (the shell untouched) when it cannot be.
+bool cut_shell_at_bed(TriangleMesh& shell, double bed);
 
 // ── HIS PRINT RULES, JUDGED LAYER BY LAYER (P8) ─────────────────────────────────
 // The mesh as a printer lays it, standing on its lowest z: one cross-section per layer,
@@ -485,6 +490,9 @@ struct PrintableReport {
   std::vector<std::size_t> shell_first_tri;
   int base_builds = 0;
   double ms_shells = 0.0;            // all passes together
+  // OF4 times, the tubes route: per pass, the shells, the layer check, and the solid when it was made again (else 0).
+  struct PassTime { double shells_ms = 0.0, layers_ms = 0.0, solid_ms = 0.0; };
+  std::vector<PassTime> pass_ms;
   double ms_carve = 0.0;             // the part carved, once for all the passes
   double ms = 0.0;
 };
