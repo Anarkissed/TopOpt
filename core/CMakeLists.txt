@@ -188,6 +188,8 @@ add_library(topopt
   src/lattice_layout/file_job.cpp
   # Install 3: the lattice the strength check sees (rule V4); the check itself is run_job.cpp's.
   src/lattice_layout/strength.cpp
+  # Brief E2, Part A: the Organic strength check, a frame of beams (lattice_layout_frame.hpp).
+  src/lattice_layout/frame_check.cpp
   # Install 3, rule D23: the faces a region runs into that no rule decides (places).
   src/lattice_layout/places.cpp
   src/orient/orient.cpp
@@ -722,6 +724,12 @@ add_test(NAME beam_network COMMAND test_beam_network)
 add_executable(test_sparse_ldlt tests/unit/test_sparse_ldlt.cpp)
 target_link_libraries(test_sparse_ldlt PRIVATE topopt)
 add_test(NAME sparse_ldlt COMMAND test_sparse_ldlt)
+
+# Brief E2, item 8: the Organic strength check's frame of beams on made frames (pulled, cantilever, buckling, T-join,
+# link, load on open lattice).
+add_executable(test_organic_frame tests/unit/test_organic_frame.cpp)
+target_link_libraries(test_organic_frame PRIVATE topopt)
+add_test(NAME organic_frame COMMAND test_organic_frame)
 
 # The DKT plate-bending triangle. Pure C++/std: rigid-body modes, the
 # constant-curvature patch test, and the paper's own plate benchmarks.

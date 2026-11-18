@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -406,7 +407,7 @@ int main() {
       keys.push_back(sj::as_string(*sj::find(e, "key"), "key"));
       sections.push_back(sj::as_string(*sj::find(e, "section"), "section"));
     }
-    CHECK(keys.size() == 60);
+    CHECK(keys.size() == 81);   // 60 of Install 3, 21 of the Organic check (brief E2)
     const auto headings = [](const std::string& t) {
       std::vector<std::string> h;
       std::istringstream in(t);
@@ -517,9 +518,13 @@ int main() {
         }
         ++echoed;
       }
-      CHECK(echoed == strength_setting_specs().size());
-      CHECK(got->obj.size() == 60);   // every variable of the docs, editable or not
-      for (const std::string& k : keys) CHECK(sj::find(*got, k) != nullptr);
+      // Install 3's settings are its own; the Organic check's (sections "Organic: ...") are not read by it.
+      std::size_t organic = 0;
+      for (std::size_t i = 0; i < keys.size(); ++i) organic += sections[i].rfind("Organic", 0) == 0;
+      CHECK(echoed + organic == strength_setting_specs().size());
+      CHECK(got->obj.size() == 60);   // every variable of Install 3's docs, editable or not
+      for (std::size_t i = 0; i < keys.size(); ++i)
+        if (sections[i].rfind("Organic", 0) != 0) CHECK(sj::find(*got, keys[i]) != nullptr);
     }
     // The layer factor reaches the margin: 0.5 in place of PLA's 0.55 scales the layer margin by 0.5 / 0.55.
     const double il = num_after(lb, "margin_interlayer"), il2 = num_after(block(set.json), "margin_interlayer");
@@ -537,6 +542,42 @@ int main() {
       CHECK(has(x.r.why, word) && x.r.why.find('\n') == std::string::npos);
       CHECK(!exists(x.out + "/block_lattice.stl"));
     }
+  }
+
+  // ── §9 (brief E2, item 7) Organic: every lattice region a weave, checked as a frame of beams on the bars the file
+  // holds; Install 3's block keys, the struts' numbers, the weakest struts, and strut_margins.bin (a float32 per bar).
+  {
+    TensorField tf;
+    tf.spacing = 1.0;
+    tf.nx = 30; tf.ny = 30; tf.nz = 12;
+    tf.voigt.assign(6 * 30 * 30 * 12, 0.0);
+    for (std::size_t e = 0; e < 30 * 30 * 12; ++e) { tf.voigt[6 * e + 2] = 3.0; tf.voigt[6 * e] = 1.0; }
+    CHECK(write_tensor_file(kDir + "/stress.tensor", tf));
+    std::string fj = file_job(f, ", \"region_weave\": [true], \"organic_spacing_mm\": 4, \"organic_width_mm\": 0.9");
+    fj.replace(fj.find("\"layout\""), 8, "\"tensor\": \"stress.tensor\", \"layout\"");
+    const Run org = run("organic", fj, strength_job(f, 20.0));
+    CHECK(org.r.ok && org.r.strength_ran);
+    const std::string b = block(org.json);
+    check_block_names(b);
+    for (const char* k : {"\"struts\": {\"judged\": ", "\"under_safety\": ", "\"under_one\": ", "\"smallest_margin\": ",
+                          "\"buckling_failures\": ", "\"stubs\": ", "\"unjudged_mm\": ", "\"load_unheld_n\": ",
+                          "\"weakest\": [", "\"strut_margins\": \"strut_margins.bin\"", "\"frame_link_stiffness\": "})
+      CHECK(has(b, k));
+    const std::string verdict = b.substr(b.find("\"verdict\": \"") + 12, 12);
+    std::printf("[organic] verdict %s judged %.0f under_safety %.0f smallest %.4g\n", verdict.substr(0, verdict.find('"')).c_str(),
+                num_after(b, "judged"), num_after(b, "under_safety"), num_after(b, "smallest_margin"));
+    CHECK(has(verdict, "pass\"") || has(verdict, "fail\"") || has(verdict, "solid_only\""));
+    CHECK(num_after(b, "judged") > 0);
+    const std::string mb = slurp(org.out + "/strut_margins.bin");
+    std::size_t judged_bars = 0;
+    for (std::size_t i = 0; i + 4 <= mb.size(); i += 4) {
+      float v;
+      std::memcpy(&v, mb.data() + i, 4);
+      judged_bars += !std::isnan(v);
+    }
+    std::printf("[organic] strut_margins.bin: %zu bars, %zu judged; file bars %zu\n", mb.size() / 4, judged_bars, org.r.bars);
+    CHECK(mb.size() % 4 == 0 && mb.size() / 4 >= org.r.bars && judged_bars > 0);
+    CHECK(exists(org.out + "/fields.bin"));
   }
 
   // ── §8 the octet's strut law is the full octet's (2026-11-17): its span is the octet band, so no density in the band

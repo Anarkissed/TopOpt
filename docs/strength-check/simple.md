@@ -51,6 +51,28 @@ The lattice model holds only when a member is at least {{cells_per_member_min}} 
 
 The file is made in every case. If the check can't run, no file is made and it says why.
 
+## Organic: the frame of beams
+
+An Organic lattice has no cells, so it is checked another way: as a frame of round beams, one for each strut, exactly as the file holds them.
+
+First the whole part is cut into small cubes and each cube is read at {{frame_material_subdiv}} points along each edge: how much of it is your solid, and how much is strut. The computer works out how every cube moves under your load. A cube with nothing in it keeps {{frame_void_floor}} of the plastic's stiffness.
+
+Then the struts are joined where their ends meet (ends closer than {{frame_node_weld_mm}} mm are one joint), and a strut that stops on the middle of another is joined there ({{frame_tjoin_off_line_mm}} mm). A joint inside the solid moves as the solid around it moves: the average of the material cubes within {{frame_drive_ball_voxels}} cubes of it that are at least {{frame_drive_share}} full. Where your load lands on lattice, the struts' share of it is put on the strut joints near it. If more than {{load_unheld_share}} of the load lands on lattice with no strut joint near, the part fails: the load is on open lattice.
+
+The short joiners where two strands cross (links) are made {{frame_link_stiffness}} times stiffer than a strut of their size, so the two strands move as one. A link is never judged.
+
+Each strut, from one real joint to the next, is judged at both ends of every piece: pulling, pushing and bending together. Pulling across the layers is judged against the weaker across-layer strength, by its slope; level struts get the full strength. A strut being pushed is also judged for buckling, as if pinned at its ends. Its margin is the smallest of these. A piece shorter than {{frame_min_piece}} times its width does not count for the stress, and a strut shorter than it is wide gets no margin.
+
+The verdict: **pass** when the solid passes and no strut is under the safety margin; **fail** when the solid fails, the load is on open lattice, or a strut is under the safety margin; **solid only** when the solid passes but the frame could not be solved (in {{frame_solve_memory_gb}} GB) or more than {{frame_unjudged_share}} of the strut length is in pieces that touch no solid. The {{frame_weakest}} weakest struts are listed, and every strut's margin is written beside the file.
+
+## Organic: strengthen
+
+The strengthen job checks the lattice, then lays it again where it was weak, and checks again, up to {{strengthen_rounds}} times (0 means 2 for Traced and 3 for Grown). It stops as soon as nothing is under the safety margin.
+
+In each round, every strut with a margin under {{strengthen_watch_margin}} raises the stress the lattice is laid from, around it, by up to {{strengthen_boost_max}} times (more for a weaker strut, by the power {{strengthen_boost_power}}), so the next lay puts more, wider struts there. It also sets a least width there, aimed at a margin of {{strengthen_target_margin}}, never wider than your own widest strut. Your own files are never changed: each round writes its own copy.
+
+If nothing in the job follows the stress (one spacing, one strut width), there is nothing to vary, and the job says so after the first check.
+
 ## What it does not cover
 
 - Struts that buckle, wear out from repeated loads, or creep.

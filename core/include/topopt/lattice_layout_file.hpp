@@ -137,6 +137,12 @@ struct StrengthAsk {
   std::string out_dir;                // where the file was written; the check's own files go beside it
   Vec3 part_lo{}, part_hi{};          // the part's box as the file job opened it
   int threads = 0;
+  // Brief E2 (Organic: every lattice region a weave): the bars the file was made of, in the layout's order (the sag
+  // lift's when it changed any), and per bar whether the file holds it (the writer's own rules: what the layer check
+  // left out and the bridge rules); the job's light strut width. Null for a cell lattice.
+  const Bars* bars = nullptr;
+  const std::vector<char>* kept = nullptr;
+  double light_width_mm = 0.0;
 };
 struct StrengthDone {
   bool ok = false;
@@ -150,9 +156,13 @@ struct StrengthDone {
 // The check is the CLI's (run_job.cpp: lattice_file_strength_check): core's lattice layout is always built, and the
 // old check needs the solver and the importer. `before` reads the strength job (cheap; no solve) and may refuse it;
 // `run` makes the check on the laid lattice.
+// `run_organic` (brief E2, Part A) is the Organic check, a frame of beams (lattice_layout_frame.hpp), asked when every
+// lattice region of the job is a weave; a job with weave AND cell regions and a strength job is refused
+// (strength_mixed).
 struct StrengthCheck {
   std::function<StrengthDone(const std::string& job_path)> before;
   std::function<StrengthDone(const StrengthAsk& ask)> run;
+  std::function<StrengthDone(const StrengthAsk& ask)> run_organic;
 };
 
 // One job, as read from job.json.

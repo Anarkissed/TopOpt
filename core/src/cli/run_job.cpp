@@ -1,5 +1,6 @@
 #include "topopt/job.hpp"
 #include "topopt/lattice_file_strength.hpp"  // Install 3 (V4)
+#include "topopt/lattice_layout_frame.hpp"   // brief E2: the Organic check, a frame of beams
 #include "topopt/gate_diagnosis_eval.hpp"     // diagnose_gate, for the check's diagnosis
 #include "topopt/strut_strength.hpp"
 #include "../flexible/json.hpp"   // the strength settings (Install 3), read by the always-built reader
@@ -15274,6 +15275,29 @@ const std::vector<StrengthSettingSpec>& strength_setting_specs() {
       {"part_box_tol_mm", K::Number, 0.1, 0.001, 10.0, false, {}},
       {"part_box_tol_fraction", K::Number, 0.005, 5e-5, 0.5, false, {}},
       {"min_feature_warning_threshold", K::Integer, 1.0, 1.0, 1000.0, false, {}},
+      // Brief E2, Part A: the Organic check, a frame of beams (lattice_layout_frame.hpp, FrameSettings).
+      {"frame_node_weld_mm", K::Number, 1e-5, 1e-7, 0.01, false, {}},
+      {"frame_tjoin_reach_mm", K::Number, 0.3, 0.01, 2.0, false, {}},
+      {"frame_tjoin_off_line_mm", K::Number, 1e-4, 1e-7, 0.05, false, {}},
+      {"frame_zero_piece_mm", K::Number, 1e-6, 1e-9, 0.01, false, {}},
+      {"frame_link_stiffness", K::Number, 1e4, 1.0, 1e8, false, {}},
+      {"frame_drive_ball_voxels", K::Number, 2.0, 0.5, 6.0, false, {}},
+      {"frame_drive_share", K::Number, 0.5, 0.01, 0.99, false, {}},
+      {"frame_collinear_tol_mm", K::Number, 1e-6, 1e-9, 0.01, false, {}},
+      {"frame_collinear_max_driven", K::Integer, 50.0, 2.0, 10000.0, false, {}},
+      {"load_unheld_share", K::Number, 0.01, 0.0, 0.5, false, {}},
+      {"frame_unjudged_share", K::Number, 0.01, 0.0, 0.5, false, {}},
+      {"frame_min_piece", K::Number, 0.1, 0.0, 2.0, false, {}},
+      {"frame_material_subdiv", K::Integer, 3.0, 1.0, 4.0, false, {}},
+      {"frame_void_floor", K::Number, 1e-3, 1e-9, 0.1, false, {}},
+      {"frame_solve_memory_gb", K::Number, 4.0, 0.1, 64.0, false, {}},
+      {"frame_weakest", K::Integer, 20.0, 0.0, 1000.0, false, {}},
+      // Brief E2, Part B: the strengthen rounds.
+      {"strengthen_watch_margin", K::Number, 2.0, 1.0, 10.0, false, {}},
+      {"strengthen_boost_max", K::Number, 4.0, 1.0, 100.0, false, {}},
+      {"strengthen_boost_power", K::Number, 2.0, 0.1, 10.0, false, {}},
+      {"strengthen_target_margin", K::Number, 1.75, 1.0, 10.0, false, {}},
+      {"strengthen_rounds", K::Integer, 0.0, 0.0, 20.0, false, {}},
   };
   return specs;
 }
@@ -15394,18 +15418,33 @@ std::string read_strength_settings(const std::string& job_path, const MaterialLi
   return {};
 }
 
-ll::StrengthDone run_lattice_file_strength(const ll::StrengthAsk& ask,
-                                           const std::string& materials_path,
-                                           const std::string& rules_path) {
-  const auto t_start = std::chrono::steady_clock::now();
-  if (!ask.session || !ask.outcome || !ask.made || !ask.session->domain())
-    return strength_no("strength_failed", 1,
-                       "The lattice's strength could not be checked, so no file was made.",
-                       "the strength check was asked with no laid lattice");
+// Brief E2, item 3: what both strength checks set up the same way (Install 3's, moved here unchanged): the strength
+// job, its materials, rules and settings, the part (its box the file's), the load case on the job's own grid, and the
+// domain it is solved on. Not ok: the refusal, as the check returns it.
+struct StrengthSetup {
   JobDescription job;
   MaterialLibrary materials;
   SettingsRules rules;
   StrengthSettingsAsked st;
+  Material material;   // with the layer factor as the settings state it (a copy: the library is not changed)
+  std::string job_dir;
+  StepModel model;
+  VoxelGrid model_grid;
+  std::vector<DirichletBC> bcs;
+  MinimizePlasticOptions options;
+  SolvedDesignDomain domain;
+};
+
+ll::StrengthDone strength_setup(const ll::StrengthAsk& ask, const std::string& materials_path,
+                                const std::string& rules_path, StrengthSetup& S) {
+  if (!ask.session || !ask.outcome || !ask.made || !ask.session->domain())
+    return strength_no("strength_failed", 1,
+                       "The lattice's strength could not be checked, so no file was made.",
+                       "the strength check was asked with no laid lattice");
+  JobDescription& job = S.job;
+  MaterialLibrary& materials = S.materials;
+  SettingsRules& rules = S.rules;
+  StrengthSettingsAsked& st = S.st;
   try {
     materials = load_materials_file(materials_path);
     rules = load_settings_rules_file(rules_path);
@@ -15422,18 +15461,20 @@ ll::StrengthDone run_lattice_file_strength(const ll::StrengthAsk& ask,
   if (const std::string p = strength_job_problem(job, materials); !p.empty())
     return strength_no("strength_job_unreadable", 1, kStrengthJobUnreadableWhy, p);
   // The material, with its layer factor as the settings state it (a copy: the library is not changed).
-  Material material = materials.at(job.material);
+  S.material = materials.at(job.material);
+  Material& material = S.material;
   if (const auto it = st.z_knockdown.find(job.material); it != st.z_knockdown.end())
     material.z_knockdown = it->second;
   if (st.has("min_feature_warning_threshold"))
     rules.min_feature_warning.threshold = static_cast<int>(st.get("min_feature_warning_threshold"));
-  const std::string job_dir = [&] {
+  S.job_dir = [&] {
     const std::string d = std::filesystem::path(ask.job_path).parent_path().string();
     return d.empty() ? std::string(".") : d;
   }();
+  const std::string& job_dir = S.job_dir;
 
   // ── the part, opened as the old Lattice run opens it.
-  StepModel model;
+  StepModel& model = S.model;
   try {
     model = import_part_file_resolved(join_path(job_dir, job.model));
   } catch (const std::exception& e) {
@@ -15467,9 +15508,9 @@ ll::StrengthDone run_lattice_file_strength(const ll::StrengthAsk& ask,
 
   // ── the load case: the SAME mapping the old Lattice run makes (lattice_variant_job).
   const bool model_is_mesh = part_format_for_path(job.model) != PartFormat::Step;
-  VoxelGrid model_grid;
-  std::vector<DirichletBC> bcs;
-  MinimizePlasticOptions options;
+  VoxelGrid& model_grid = S.model_grid;
+  std::vector<DirichletBC>& bcs = S.bcs;
+  MinimizePlasticOptions& options = S.options;
   if (job.loads.present) {
     ProductionLoadCase lc = production_loadcase_from_job(job, model);
     lc.bearing_stiffness_mpa_per_mm = st.get("bearing_stiffness");
@@ -15510,7 +15551,26 @@ ll::StrengthDone run_lattice_file_strength(const ll::StrengthAsk& ask,
   if (st.has("cg_tolerance")) options.simp.cg_tolerance = st.get("cg_tolerance");
   if (st.has("cg_max_iterations")) options.simp.cg_max_iterations = static_cast<int>(st.get("cg_max_iterations"));
   if (st.has("width_aware_knockdown")) options.width_aware_knockdown = st.get("width_aware_knockdown") != 0.0;
-  const SolvedDesignDomain domain = resolve_design_domain(model_grid, bcs, options);
+  S.domain = resolve_design_domain(model_grid, bcs, options);
+  ll::StrengthDone ok;
+  ok.ok = true;
+  return ok;
+}
+
+ll::StrengthDone run_lattice_file_strength(const ll::StrengthAsk& ask,
+                                           const std::string& materials_path,
+                                           const std::string& rules_path) {
+  const auto t_start = std::chrono::steady_clock::now();
+  StrengthSetup S;
+  if (ll::StrengthDone bad = strength_setup(ask, materials_path, rules_path, S); !bad.ok) return bad;
+  JobDescription& job = S.job;
+  MaterialLibrary& materials = S.materials;
+  SettingsRules& rules = S.rules;
+  StrengthSettingsAsked& st = S.st;
+  Material& material = S.material;
+  VoxelGrid& model_grid = S.model_grid;
+  MinimizePlasticOptions& options = S.options;
+  const SolvedDesignDomain& domain = S.domain;
   const VoxelGrid& cert_grid = domain.grid;
 
   // ── the design: the part itself, every voxel it occupies solid (lattice_part).
@@ -15976,6 +16036,298 @@ ll::StrengthDone run_lattice_file_strength(const ll::StrengthAsk& ask,
   return done;
 }
 
+// ══ BRIEF E2, PART A: THE ORGANIC CHECK, A FRAME OF BEAMS (lattice_layout_frame.hpp) ═════════════════════════════
+// On the strength job's own grid and load case (strength_setup, as Install 3's): the material per voxel is the part's
+// solid share plus the lattice's (frame_material, every bar the file holds), solved once at penalty 1; the frame of
+// the bars is driven by that solve and judged strut by strut (check_frame).
+ll::FrameSettings frame_settings_of(const StrengthSettingsAsked& st) {
+  ll::FrameSettings f;
+  f.node_weld_mm = st.get("frame_node_weld_mm");
+  f.tjoin_reach_mm = st.get("frame_tjoin_reach_mm");
+  f.tjoin_off_line_mm = st.get("frame_tjoin_off_line_mm");
+  f.zero_piece_mm = st.get("frame_zero_piece_mm");
+  f.link_stiffness = st.get("frame_link_stiffness");
+  f.drive_ball_voxels = st.get("frame_drive_ball_voxels");
+  f.drive_share = st.get("frame_drive_share");
+  f.collinear_tol_mm = st.get("frame_collinear_tol_mm");
+  f.collinear_max_driven = static_cast<int>(st.get("frame_collinear_max_driven"));
+  f.load_unheld_share = st.get("load_unheld_share");
+  f.unjudged_share = st.get("frame_unjudged_share");
+  f.min_piece = st.get("frame_min_piece");
+  f.material_subdiv = static_cast<int>(st.get("frame_material_subdiv"));
+  f.solve_memory_gb = st.get("frame_solve_memory_gb");
+  f.weakest = static_cast<int>(st.get("frame_weakest"));
+  return f;
+}
+
+struct OrganicCheckRun {
+  ll::StrengthDone done;          // ok: the block (json) and the files written
+  ll::FrameModel frame;
+  ll::FrameCheck check;
+  std::vector<int> bar_of;        // per bar the frame was built from: its place in the layout's order
+  double lattice_mm3 = 0.0, lattice_open_mm3 = 0.0;
+  double ms_material = 0.0, ms_voxel = 0.0, ms_frame = 0.0;
+  double mb_voxel = 0.0, mb_frame = 0.0;   // the process's footprint after each (process_memory().rss_mb)
+  std::string verdict, fail_reason;
+};
+
+OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain, const ll::Bars& layout_bars,
+                                    const std::vector<char>* kept, double light_width_mm,
+                                    const std::string& out_dir, int threads) {
+  const auto t_start = std::chrono::steady_clock::now();
+  OrganicCheckRun R;
+  JobDescription& job = S.job;
+  StrengthSettingsAsked& st = S.st;
+  Material& material = S.material;
+  MinimizePlasticOptions& options = S.options;
+  const SolvedDesignDomain& domain = S.domain;
+  const VoxelGrid& cert_grid = domain.grid;
+  if (!domain.scenarios.empty()) {
+    R.done = strength_no("strength_failed", 1,
+                         "The Organic strength check takes the strength job's one load case, and this job has load "
+                         "scenarios, so no file was made.",
+                         "the frame check does not take load scenarios");
+    return R;
+  }
+  const ll::FrameSettings fs = frame_settings_of(st);
+  // The bars the file holds.
+  ll::Bars bars;
+  for (std::size_t i = 0; i < layout_bars.bars.size(); ++i) {
+    if (kept && (i >= kept->size() || !(*kept)[i])) continue;
+    bars.bars.push_back(layout_bars.bars[i]);
+    R.bar_of.push_back(static_cast<int>(i));
+  }
+  // ── the material per voxel, and the voxel solve (penalty 1).
+  auto t0 = std::chrono::steady_clock::now();
+  const ll::FrameMaterial fm = ll::frame_material(bars, ldomain, cert_grid, fs, threads);
+  R.lattice_mm3 = fm.lattice_mm3;
+  R.lattice_open_mm3 = fm.lattice_open_mm3;
+  R.ms_material = fm.ms;
+  std::vector<double> density(cert_grid.voxel_count(), 0.0);
+  std::vector<char> in_part(cert_grid.voxel_count(), 0);
+  for (int k = 0; k < cert_grid.nz; ++k)
+    for (int j = 0; j < cert_grid.ny; ++j)
+      for (int i = 0; i < cert_grid.nx; ++i)
+        if (cert_grid.solid(i, j, k)) {
+          const std::size_t e = cert_grid.index(i, j, k);
+          density[e] = std::min(1.0, static_cast<double>(fm.solid[e]) + static_cast<double>(fm.lattice[e]));
+          in_part[e] = 1;
+        }
+  SimpParams params;
+  params.youngs_modulus = material.youngs_modulus_mpa;
+  params.poisson = material.poisson;
+  params.penalty = 1.0;
+  params.density_min = st.get("frame_void_floor");   // at penalty 1 an empty voxel keeps this share of the stiffness
+  const double printed_iso = st.get("printed_threshold");
+  const int connectivity = static_cast<int>(st.get("load_path_connectivity"));
+  AnalysisKnobs knobs;
+  knobs.contact_rounds = static_cast<int>(st.get("contact_rounds"));
+  knobs.sliding_share_max = st.get("sliding_share_max");
+  knobs.thickness_cap_voxels = static_cast<int>(st.get("thickness_cap_voxels"));
+  const Vec3 build_dir = resolve_build_direction(options);
+  const std::vector<NodalLoad> loads = design_domain_loads(domain, options, material.density_g_cm3);
+  const bool load_path_ok = load_path_connected(cert_grid, density, printed_iso, connectivity);
+  KnockdownSpec knockdown = knockdown_spec_for(options);
+  knockdown.infill_exponent = st.get("infill_exponent");
+  knockdown.infill_floor = st.get("infill_floor");
+  knockdown.infill_knockdown =
+      infill_margin_knockdown(options.infill_percent, knockdown.infill_exponent, knockdown.infill_floor);
+  const FixedDesignAnalysis a = analyze_fixed_design(
+      cert_grid, params, density, domain.bcs, loads, material, build_dir, options.simp.cg_tolerance,
+      options.simp.cg_max_iterations, options.simp.solver, options.margin_stop, knockdown, load_path_ok,
+      static_cast<double>(S.model_grid.solid_count()), /*lattice=*/nullptr, /*score=*/false,
+      resolve_build_direction_is_inferred(options), /*auto_apply=*/false, printed_iso,
+      /*gate_on_strut_strength=*/false, &knobs);
+  R.ms_voxel = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+  R.mb_voxel = process_memory().rss_mb;
+  if (a.non_convergent) {
+    R.done = strength_no("strength_failed", 1,
+                         "The strength check's solve did not settle, so the lattice's strength is not known. No file "
+                         "was made.",
+                         "the Organic voxel solve did not converge (iteration " +
+                             std::to_string(a.non_convergent_iteration) + ")");
+    return R;
+  }
+  // ── the frame.
+  t0 = std::chrono::steady_clock::now();
+  R.frame = ll::build_frame(bars, &ldomain, fs);
+  ll::FrameVoxelSolve vs;
+  vs.grid = &cert_grid;
+  vs.displacement = &a.displacement_field;
+  vs.material = &fm;
+  for (const NodalLoad& l : loads) vs.loads.push_back({l.node, l.component, l.value});
+  ll::FrameStrength fst;
+  fst.youngs_mpa = material.youngs_modulus_mpa;
+  fst.poisson = material.poisson;
+  fst.level_mpa = material.yield_strength_mpa;
+  fst.across_mpa = material.yield_strength_mpa * material.z_knockdown;
+  fst.up = build_dir;
+  fst.safety = options.margin_stop;
+  fst.light_width_mm = light_width_mm;
+  R.check = ll::check_frame(R.frame, vs, fst, fs);
+  R.ms_frame = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+  R.mb_frame = process_memory().rss_mb;
+  const ll::FrameCheck& c = R.check;
+  // ── the verdict (V5's three states).
+  if (c.load_on_open_lattice) {
+    R.verdict = "fail";
+    R.fail_reason = "load_on_open_lattice";
+  } else if (!a.accepted) {
+    R.verdict = "fail";
+    R.fail_reason = !load_path_ok ? "no_load_path" : a.margin_effective < options.margin_stop ? "solid_margin" : "";
+  } else if (!c.solved) {
+    R.verdict = "solid_only";
+    R.fail_reason = "frame_not_solved";
+  } else if (c.under_safety > 0) {
+    R.verdict = "fail";
+    R.fail_reason = "strut_margin";
+  } else if (c.too_unjudged) {
+    R.verdict = "solid_only";
+    R.fail_reason = "frame_unjudged";
+  } else {
+    R.verdict = "pass";
+  }
+  ll::StrengthDone& done = R.done;
+  // ── the files: fields.bin (the voxel solve's), strut_margins.bin (one float32 per bar, the layout's order).
+  {
+    MinimizePlasticResult fr;
+    fr.report.material = job.material;
+    MinimizePlasticVariant fv;
+    fv.requested_volume_fraction = 1.0;
+    fv.accepted = a.accepted;
+    fv.von_mises_field = a.von_mises_field;
+    fv.stress_tensor_field = a.stress_tensor_field;
+    fv.displacement_field = a.displacement_field;
+    fv.mass_grams = a.mass_grams;
+    fv.support_volume_voxels = a.support_volume_voxels;
+    fr.evaluated.push_back(std::move(fv));
+    write_fields_file(join_path(out_dir, "fields.bin"), fr, cert_grid, /*accepted_only=*/false);
+    done.files.push_back("fields.bin");
+    std::vector<float> m(layout_bars.bars.size(), std::numeric_limits<float>::quiet_NaN());
+    for (std::size_t i = 0; i < R.bar_of.size() && i < c.bar_margin.size(); ++i)
+      m[static_cast<std::size_t>(R.bar_of[i])] = c.bar_margin[i];
+    std::ofstream f(join_path(out_dir, "strut_margins.bin"), std::ios::binary);
+    f.write(reinterpret_cast<const char*>(m.data()), static_cast<std::streamsize>(m.size() * sizeof(float)));
+    if (!f) {
+      R.done = strength_no("strength_failed", 1, "The lattice's strength could not be checked, so no file was made.",
+                           "cannot write strut_margins.bin");
+      return R;
+    }
+    done.files.push_back("strut_margins.bin");
+  }
+  // ── the block: Install 3's keys, and the frame's.
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const bool struts_pass = c.solved && c.under_safety == 0 && !c.too_unjudged && !c.load_on_open_lattice;
+  const auto num = [](double x) { return json_num(x); };
+  const auto smallest = c.judged ? c.smallest_margin : nan;
+  std::string s = "{\n";
+  s += "    \"accepted\": " + std::string(R.verdict != "fail" ? "true" : "false") + ",\n";
+  s += "    \"struts_pass\": " + std::string(struts_pass ? "true" : "false") + ",\n";
+  s += "    \"verdict\": \"" + R.verdict + "\",\n";
+  if (!R.fail_reason.empty()) {
+    s += "    \"fail_reason\": \"" + R.fail_reason + "\",\n";
+    if (R.fail_reason == "load_on_open_lattice")
+      s += "    \"load_on_no_credit_n\": " + num(c.load_unheld_n) + ",\n    \"load_total_n\": " + num(c.load_total_n) + ",\n";
+    if (R.fail_reason == "frame_not_solved") s += "    \"fail_detail\": " + json_str(c.why_not) + ",\n";
+  }
+  s += "    \"margin_worst_case\": " + num(a.margin.worst_case) + ",\n";
+  s += "    \"margin_in_plane\": " + num(a.margin.in_plane) + ",\n";
+  s += "    \"margin_interlayer\": " + num(a.margin.interlayer) + ",\n";
+  s += "    \"safety_margin\": " + num(options.margin_stop) + ",\n";
+  s += "    \"not_certified\": false,\n    \"not_certified_reason\": \"\",\n";
+  s += "    \"mass_grams\": " + num(a.mass_grams) + ",\n";
+  s += "    \"max_effective_von_mises_mpa\": " + num(a.max_von_mises) + ",\n";
+  s += "    \"max_interlayer_tension_mpa\": " + num(a.max_interlayer_tension) + ",\n";
+  s += "    \"cells_credited\": 0,\n    \"cells_no_credit\": 0,\n";
+  s += "    \"voxel_mm\": " + num(cert_grid.spacing) + ",\n";
+  s += "    \"build_direction\": {\"x\": " + num(build_dir.x) + ", \"y\": " + num(build_dir.y) + ", \"z\": " + num(build_dir.z) + "},\n";
+  s += "    \"resolve_reproduces\": null, \"resolve_margin_solid\": null, \"resolve_margin_again\": null,\n";
+  s += "    \"strut\": {\"law\": \"frame of beams\", \"uncertified\": false, \"gated\": true, \"margin_in_plane\": null, "
+       "\"margin_interlayer\": null, \"margin_worst_case\": " + num(smallest) + ", \"out_of_regime\": false, \"regime_note\": \"\"},\n";
+  s += "    \"fields\": \"fields.bin\",\n";
+  s += "    \"strut_margins\": \"strut_margins.bin\",\n";
+  s += "    \"struts\": {\"judged\": " + std::to_string(c.judged) + ", \"under_safety\": " + std::to_string(c.under_safety) +
+       ", \"under_one\": " + std::to_string(c.under_one) + ", \"smallest_margin\": " + num(smallest) +
+       ", \"buckling_failures\": " + std::to_string(c.buckling_failures) + ", \"stubs\": " + std::to_string(c.stubs) +
+       ", \"unjudged_mm\": " + num(c.unjudged_mm) + ", \"load_unheld_n\": " + num(c.load_unheld_n) + "},\n";
+  s += "    \"weakest\": [";
+  for (std::size_t w = 0; w < c.weakest.size(); ++w) {
+    const ll::FrameStrut& x = c.struts[static_cast<std::size_t>(c.weakest[w])];
+    s += std::string(w ? ",\n      " : "\n      ") + "{\"at\": [" + num(x.at.x) + ", " + num(x.at.y) + ", " + num(x.at.z) +
+         "], \"width_mm\": " + num(x.width_max) + ", \"length_mm\": " + num(x.length_mm) + ", \"margin\": " + num(x.margin) +
+         ", \"by\": \"" + x.by + "\"}";
+  }
+  s += c.weakest.empty() ? "],\n" : "\n    ],\n";
+  s += "    \"frame\": {\"bars\": " + std::to_string(R.frame.bars) + ", \"nodes\": " + std::to_string(c.nodes_used) +
+       ", \"pieces\": " + std::to_string(R.frame.pieces.size()) + ", \"links\": " + std::to_string(R.frame.links) +
+       ", \"t_joins\": " + std::to_string(R.frame.t_joins) + ", \"zero_pieces\": " + std::to_string(R.frame.zero_pieces) +
+       ", \"driven\": " + std::to_string(c.driven) + ", \"frame_parts\": " + std::to_string(c.pieces_of_frame) +
+       ", \"undriven_parts\": " + std::to_string(c.undriven_pieces) + ", \"rotations_held\": " + std::to_string(c.rotations_held) +
+       ", \"drive_voxels_median\": " + num(c.drive_voxels_median) + ", \"drive_fallback\": " + std::to_string(c.drive_fallback) +
+       ", \"load_total_n\": " + num(c.load_total_n) + ", \"load_on_frame_n\": " + num(c.load_on_frame_n) +
+       ", \"frame_nodes_loaded\": " + std::to_string(c.frame_nodes_loaded) + ", \"strut_mm\": " + num(c.strut_mm) +
+       ", \"solved\": " + std::string(c.solved ? "true" : "false") + ", \"dofs\": " + std::to_string(c.dofs) +
+       ", \"solver\": " + json_str(c.solver) + ", \"factor_gb\": " + num(c.factor_gb) + ", \"residual\": " + num(c.residual) + "},\n";
+  s += "    \"material\": {\"lattice_mm3\": " + num(fm.lattice_mm3) + ", \"lattice_outside_solid_mm3\": " + num(fm.lattice_open_mm3) +
+       ", \"solid_mm3\": " + num(fm.solid_mm3) + "},\n";
+  s += "    \"times_ms\": {\"material\": " + num(std::round(R.ms_material)) + ", \"voxel_solve\": " + num(std::round(R.ms_voxel)) +
+       ", \"frame\": " + num(std::round(R.ms_frame)) + ", \"frame_assemble\": " + num(std::round(c.ms_assemble)) +
+       ", \"frame_solve\": " + num(std::round(c.ms_solve)) + "},\n";
+  s += "    \"memory_mb\": {\"after_voxel_solve\": " + num(std::round(R.mb_voxel)) + ", \"after_frame\": " + num(std::round(R.mb_frame)) +
+       ", \"peak\": " + num(std::round(process_memory().peak_rss_mb)) + "},\n";
+  {
+    std::string t = "{";
+    bool first = true;
+    const auto add = [&](const char* key, const std::string& value) {
+      t += std::string(first ? "\n      \"" : ",\n      \"") + key + "\": " + value;
+      first = false;
+    };
+    add("safety_margin", num(options.margin_stop));
+    add("material", json_str(job.material));
+    add("resolution", std::to_string(job.resolution));
+    add("build_direction", "[" + num(build_dir.x) + ", " + num(build_dir.y) + ", " + num(build_dir.z) + "]");
+    add("anchor_model", json_str(has_contact_springs(domain.bcs) ? "bearing" : "glued"));
+    add("gravity_mm_s2", job.loads.present ? std::string("null") : num(job.gravity.magnitude_mm_s2));
+    add("yield_strength_mpa", num(material.yield_strength_mpa));
+    add("youngs_modulus_mpa", num(material.youngs_modulus_mpa));
+    add("poisson", num(material.poisson));
+    add("z_knockdown", num(material.z_knockdown));
+    for (const StrengthSettingSpec& sp : strength_setting_specs())
+      if (sp.kind != StrengthSettingSpec::Kind::PerMaterial) add(sp.key.c_str(), num(st.get(sp.key)));
+    add("voxel_mm", num(cert_grid.spacing));
+    add("penalty", num(params.penalty));
+    s += "    \"settings\": " + t + "\n    },\n";
+  }
+  {
+    std::string ri = run_info_json(build_run_info(job, options, build_identity()));
+    while (!ri.empty() && (ri.back() == '\n' || ri.back() == ' ')) ri.pop_back();
+    std::string nested;
+    for (const char ch : ri) {
+      nested += ch;
+      if (ch == '\n') nested += "    ";
+    }
+    s += "    \"run_info\": " + nested + ",\n";
+  }
+  const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_start).count();
+  s += "    \"ms\": " + num(std::round(ms * 10.0) / 10.0) + "\n  }";
+  done.ok = true;
+  done.json = std::move(s);
+  done.accepted = R.verdict != "fail";
+  (void)in_part;
+  return R;
+}
+
+ll::StrengthDone run_lattice_file_strength_organic(const ll::StrengthAsk& ask, const std::string& materials_path,
+                                                   const std::string& rules_path) {
+  if (!ask.bars || !ask.session || !ask.session->domain())
+    return strength_no("strength_failed", 1, "The lattice's strength could not be checked, so no file was made.",
+                       "the Organic check was asked with no bars");
+  StrengthSetup S;
+  if (ll::StrengthDone bad = strength_setup(ask, materials_path, rules_path, S); !bad.ok) return bad;
+  return organic_frame_check(S, *ask.session->domain(), *ask.bars, ask.kept, ask.light_width_mm, ask.out_dir,
+                             ask.threads).done;
+}
+
 }  // namespace
 
 lattice_layout::StrengthCheck lattice_file_strength_check(const std::string& materials_path,
@@ -16000,6 +16352,14 @@ lattice_layout::StrengthCheck lattice_file_strength_check(const std::string& mat
   check.run = [materials_path, rules_path](const lattice_layout::StrengthAsk& ask) {
     try {
       return run_lattice_file_strength(ask, materials_path, rules_path);
+    } catch (const std::exception& e) {
+      return strength_no("strength_failed", 1,
+                         "The lattice's strength could not be checked, so no file was made.", e.what());
+    }
+  };
+  check.run_organic = [materials_path, rules_path](const lattice_layout::StrengthAsk& ask) {
+    try {
+      return run_lattice_file_strength_organic(ask, materials_path, rules_path);
     } catch (const std::exception& e) {
       return strength_no("strength_failed", 1,
                          "The lattice's strength could not be checked, so no file was made.", e.what());

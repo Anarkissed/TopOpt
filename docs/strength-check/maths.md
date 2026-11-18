@@ -203,6 +203,68 @@ The file is made in all three cases. A fail carries `fail_reason`: `load_on_open
 
 Model frame, v1: grid header; one block of float32 von Mises per voxel (MPa: true in solid voxels, smeared in lattice voxels, 0 where empty), no tensor, float32 displacement per node (mm), mass, support count. Written even on fail. `scenario_fields.bin`: the same per scenario.
 
+## Organic: the frame of beams
+
+A job whose every lattice region is a weave (Organic) is checked by `check_frame` (`core/include/topopt/lattice_layout_frame.hpp`) on the bars the file holds (the sag lift's, less what the writer left out), on the strength job's own grid and load case (as above; scenarios are refused).
+
+### The material per voxel
+
+With $k$ = {{frame_material_subdiv}} and the $k^3$ sub-points $\mathbf x_{e,s}$ of voxel $e$ (centres of a $k^3$ sub-grid), $D(\mathbf x)$ the domain's answer and $C_b$ the capsule of bar $b$ (radius $w_b/2$; links and stubs in):
+
+$$\phi^{\text{sol}}_e=\frac{1}{k^3}\#\{s:\ D(\mathbf x_{e,s})\notin\{\text{Lattice},\text{Outside}\}\},\qquad \phi^{\text{lat}}_e=\frac{1}{k^3}\#\{s:\ D(\mathbf x_{e,s})\in\{\text{Lattice},\text{Outside}\}\wedge \mathbf x_{e,s}\in\textstyle\bigcup_b C_b\}$$
+
+on the part's voxels; $\rho_e=\phi^{\text{sol}}_e+\phi^{\text{lat}}_e\le1$. One solve, $E_e=E\max(\rho_e,\rho_{\min})$ with penalty 1 and $\rho_{\min}$ = {{frame_void_floor}}, gives the nodal displacements $\mathbf U$; $\bar{\mathbf u}_e$ is the mean of voxel $e$'s eight corners.
+
+### The frame
+
+Nodes: bar ends within {{frame_node_weld_mm}} mm, joined transitively. A node is solid when an end there is of kind Solid or $D$ at an end is neither Lattice nor Outside. T-join: a node with one bar that lies inside another bar $ab$ ($t=\frac{(\mathbf x-\mathbf a)\cdot(\mathbf b-\mathbf a)}{|\mathbf b-\mathbf a|^2}\in(10^{-6},1-10^{-6})$, distance to the line under {{frame_tjoin_off_line_mm}} mm, looked for within {{frame_tjoin_reach_mm}} mm) splits it. Pieces shorter than {{frame_zero_piece_mm}} mm are left out. A connected part of the frame with no solid node is left out of the solve and the verdict; one with one solid node, or with fewer than {{frame_collinear_max_driven}} whose nodes have a second singular value of their centred positions under {{frame_collinear_tol_mm}} mm, has its solid nodes' rotations held.
+
+### The drive
+
+A solid node at $\mathbf X$, $R=$ {{frame_drive_ball_voxels}} $h$:
+
+$$\mathbf u(\mathbf X)=\frac{1}{|V|}\sum_{e\in V}\bar{\mathbf u}_e,\qquad V=\{e:\ |\mathbf c_e-\mathbf X|\le R,\ \rho_e>\rho_{\text{drive}}\}$$
+
+($\rho_{\text{drive}}$ = {{frame_drive_share}}; $\mathbf U$ trilinear at $\mathbf X$ when $V$ is empty). Its translations are fixed to it.
+
+### The load on the frame
+
+For each loaded grid node $g$ (force $\mathbf f_g$, the voxel solve's, gravity in), over the voxels $e\ni g$:
+
+$$s_g=\frac{\sum_e\phi^{\text{lat}}_e}{\sum_e\rho_e},\qquad N_g=\{n\ \text{not solid, in the solve}:\ |\mathbf X_n-\mathbf x_g|\le\max(w_{\text{light}},h)\}$$
+
+$s_g\mathbf f_g/|N_g|$ goes on each $n\in N_g$; when $N_g=\varnothing$, $L_{\text{unheld}}\mathrel{+}=s_g|\mathbf f_g|$. Fail (`load_on_open_lattice`) when $L_{\text{unheld}}>$ {{load_unheld_share}} $\sum_g|\mathbf f_g|$.
+
+### Assembly and solve
+
+Each piece: a 2-node Timoshenko beam (`frame2_stiffness`) of a round section, $d=w$: $A=\pi d^2/4$, $I=\pi d^4/64$, $J=2I$, $G=E/2(1+\nu)$, $\kappa=6(1+\nu)/(7+6\nu)$; a link's matrix times {{frame_link_stiffness}}. Local axes: $\mathbf e_x$ along the piece, $\mathbf e_y=\mathbf r\times\mathbf e_x$ normalised ($\mathbf r=\mathbf z$ unless $|e_{x,z}|\ge0.9$, then $\mathbf x$), $\mathbf e_z=\mathbf e_x\times\mathbf e_y$. $K_{ff}\mathbf u_f=\mathbf F_f-K_{fc}\mathbf u_c$ is solved by `sparse_ldlt_solve` (LDLT, AMD order; refused when the predicted factor passes {{frame_solve_memory_gb}} GB; kept when $\|\mathbf b-K\mathbf u\|/\|\mathbf b\|<10^{-6}$).
+
+### The struts' stress
+
+Per piece, end forces $\mathbf f=k\,T\mathbf u_e$ (the link factor not in $k$): $N=f_7$ (tension +), $M=\max\big(\sqrt{f_5^2+f_6^2},\sqrt{f_{11}^2+f_{12}^2}\big)$,
+
+$$\sigma_t=\frac NA+\frac{M d}{2I},\qquad \sigma_c=-\frac NA+\frac{M d}{2I},\qquad \sin\theta=\frac{|(\mathbf b-\mathbf a)\cdot\mathbf n|}{L}$$
+
+$$m_t=\frac{\sigma_y\cos^2\theta+k_z\sigma_y\sin^2\theta}{\sigma_t},\qquad m_c=\frac{\sigma_y}{\sigma_c}$$
+
+($+\infty$ when the stress is not positive). A strut: non-link pieces joined through nodes with exactly two non-link pieces that are not solid. Its stress margin $m_s=\min(m_t,m_c)$ over its pieces with $L\ge$ {{frame_min_piece}} $w$; buckling (pinned) $m_b=\pi^2E\,I(w_{\min})/(L_s^2\,|N_{\min}|)$ when its most compressive piece has $N_{\min}<0$; margin $m=\min(m_s,m_b)$. A strut with $L_s<w_{\max}$ (a stub) has no margin. Judged: in the solve and not a stub.
+
+### The verdict
+
+$$\text{verdict}=\begin{cases}\text{fail} & L_{\text{unheld}}\text{ too large},\ \neg\text{accepted (solid)},\ \text{or solved}\wedge\exists\ \text{judged}\ m<S\\ \text{solid\_only} & \neg\text{solved, or}\ \textstyle\sum_{\text{undriven}}L_s>u\sum L_s\\ \text{pass} & \text{otherwise}\end{cases}$$
+
+($u$ = {{frame_unjudged_share}}.)
+
+`accepted` is the voxel solve's own gate (the solid's margin as above, on the material $\rho$). Written: Install 3's keys, `struts` {judged, under_safety, under_one, smallest_margin, buckling_failures, stubs, unjudged_mm, load_unheld_n}, the {{frame_weakest}} weakest (middle of the worst piece, width, length, margin, which limit), and `strut_margins.bin`: one float32 per bar in the layout's order, the least margin of the struts its pieces belong to, NaN where not judged.
+
+## Organic: strengthen
+
+`topopt-cli organic-strengthen`: check; stop when no judged strut has $m<S$, or after $N$ = {{strengthen_rounds}} rounds (0: 2 Traced, 3 Grown); else one round, lay again, check again. For every judged strut with $m<m_w$ = {{strengthen_watch_margin}}, $P_s$ its piece ends and middles, $r_s$ the local spacing there (its bars' `cell`):
+
+$$b_v=\max_{s:\ \min_{\mathbf p\in P_s}|\mathbf c_v-\mathbf p|\le r_s}\ \min\!\Big(b_{\max},\Big(\frac{m_w}{m_s}\Big)^{q}\Big)\qquad(1\ \text{elsewhere})$$
+
+with $b_{\max}$ = {{strengthen_boost_max}}, $q$ = {{strengthen_boost_power}}; every component of the stress input's voxel $v$ times $b_v$. A floor per such strut: centre each $\mathbf p\in P_s$, radius $r_s$, least width $w_{\max,s}\,m_t/m_s$, $m_t$ = {{strengthen_target_margin}}. After the lay, every non-link bar whose middle lies in a floor's ball gets $w\leftarrow\min\big(\max(w,w_{\text{floor}}),w_{\text{upper}}\big)$ ($w_{\text{upper}}$: the job's own upper strut width; not applied when the width is one number); links then take the thinner of the struts at their two ends (S8) where that rose. The reference stress is stated at the value resolved for the original input, so the boost does not move it.
+
 ## What it does not cover
 
 - Buckling of struts or thin walls (linear statics only), fatigue, creep, temperature, moisture, UV.

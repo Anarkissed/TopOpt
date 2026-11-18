@@ -655,9 +655,9 @@ constexpr Refusal kTensorUnreadable{"tensor_unreadable", 1};
 constexpr Refusal kCannotWrite{"cannot_write", 1};
 // V4: a strength check was asked for and this build has none to make.
 constexpr Refusal kStrengthUnavailable{"strength_unavailable", 1};
-// V4 (Install 3, owed): the strength check reads cells, and an Organic (weave) region has none: a strength job on a job
-// with a weave region is refused.
-constexpr Refusal kStrengthOrganic{"strength_organic", 1};
+// Brief E2: a strength job on a job whose lattice regions are both weave and cells: the two checks judge differently
+// and are not made into one verdict.
+constexpr Refusal kStrengthMixed{"strength_mixed", 1};
 constexpr Refusal kCancelled{"cancelled", 1};
 constexpr Refusal kError{"error", 1};
 
@@ -1185,13 +1185,15 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     }
     // V4: the strength job is read before the long work, and refused now if it cannot be checked.
     if (!job.strength_job.empty()) {
-      if (any_weave) {
-        refuse(r, kStrengthOrganic,
-               "The strength check cannot check an Organic lattice yet, so no file was made. Turn the strength check "
-               "off for this part, or use a cell lattice in every region.");
+      bool any_cells = job.settings.regions.empty();
+      for (const Settings::RegionAsk& a : job.settings.regions) any_cells = any_cells || (a.role == Role::Lattice && !a.weave);
+      if (any_weave && any_cells) {
+        refuse(r, kStrengthMixed,
+               "The strength check judges an Organic lattice and a cell lattice in different ways and cannot check a "
+               "part that has both, so no file was made. Use one kind in every region, or turn the strength check off.");
         return done();
       }
-      if (!strength || !strength->before || !strength->run) {
+      if (!strength || !strength->before || !(any_weave ? strength->run_organic : strength->run)) {
         refuse(r, kStrengthUnavailable,
                "This worker cannot check a lattice's strength, so no file was made. Update the worker.");
         return done();
@@ -1391,9 +1393,22 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
       ask.part_lo = part_lo;
       ask.part_hi = part_hi;
       ask.threads = job.options.threads;
+      // Brief E2, item 7: Organic is checked on the FINAL bars, as the file holds them.
+      std::vector<char> kept;
+      if (any_weave) {
+        const Bars& made = r.made.sagged ? *r.made.sagged : out.bars;
+        const double layer = job.options.layers.layer_mm > 0.0 ? job.options.layers.layer_mm : 0.2;
+        const std::vector<char> present = bars_present(made, r.made.left_out_at, weave_regions, layer);
+        kept = weave_holds(made, weave_regions, present, options.mesh.bridge_rise).kept;
+        ask.bars = &made;
+        ask.kept = &kept;
+        ask.light_width_mm = job.organic.width_mm > 0.0
+                                 ? job.organic.width_mm
+                                 : session.domain()->spec().bead_mm * session.domain()->spec().min_strut_lines;
+      }
       StrengthDone sd;
       try {
-        sd = strength->run(ask);
+        sd = any_weave ? strength->run_organic(ask) : strength->run(ask);
       } catch (const std::exception& e) {
         sd = StrengthDone{};
         sd.code = "strength_failed";
