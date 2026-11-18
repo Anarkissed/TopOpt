@@ -127,7 +127,8 @@ struct OrganicAsk {
   // K1 (brief G13), a flat floor on the bed (the owner, 2026-11-16: "Yes, add the floor"): in a Grown area every point
   // less than this height above the bed (the plane through the part's lowest point along build_dir) is solid, not
   // lattice. Carried to the domain as Settings::bed_floor_mm (DomainSpec::bed_floor_mm) by the file job, for Grown and
-  // (Q1, brief G24) Traced alike. 0 = no floor (as before); 0 or above.
+  // (Q1, brief G24) Traced alike. 0 = no floor (as before); 0 or above. OP9 (brief C2, E3): Session::lay_organic (and
+  // so lay_organic_draft, lay_organic_preview) copies it the same way, so the ask's value alone lays the floor.
   double bed_floor_mm = 0.0;
   // L1 (brief G14), Grade to shape as a variable: O13's outline cap is (2 / shape_reach) x steps x the grid step (the
   // owner, 2026-11-16: "Should this be considered a 'Grade to shape' and make it a variable?"). 1 = as before; 2 = the
@@ -193,6 +194,48 @@ struct OrganicAsk {
   // curves, Grown's heading) and are not changed by it.
   bool follow_stress = true;
 };
+
+// OP7 (brief C2, E1): every range and rule an Organic ask must keep, in one call, so the file job's parser and the
+// session path (Session::lay_organic, lay_organic_draft, lay_organic_preview) refuse exactly the same asks. Returns
+// every refusal (empty: the ask is valid), in a fixed order. The rules (the sheet's sections A to D):
+//   the cell size: spacing_mm 0 (the range) or above 0; with the range, spacing_min_mm above 0, spacing_max_mm at least
+//     it (equal is allowed: one spacing), spacing_exponent above 0; the small end (or the one size) at least the
+//     smallest printable cell, kSmallestCellFactor x the light width (OP7, both modes);
+//   the struts: the thinnest strut (bead_mm x min_strut_lines) above 0; width_mm 0 or at least it; width_heavy_mm 0 or
+//     at least the light width; link_width 0.5 to 2; unbraced_max 0 or 4 to 40;
+//   shape_reach, bed_floor_mm, part_reach_mm, part_support_mm 0 or above; tie_swirl 0 to 1; foot_gap, wall_gap,
+//     root_gap numbers; void_ratio above 0; reseed_rounds 0 to 100; wall_cross 0, 1 or 2; cross_gap above 0 (not 2.5
+//     only with wall_cross); cross_climb_max_deg 30 to 45 (not 45 only with wall_cross); tie_gap above 0; top_run,
+//     root_run, run_gap, run_pull, run_seek, run_min 0 or above; run_max 1 to 1,000,000; run_follow above 0;
+//     build_dir not zero; layer_mm and seed_stride above 0;
+//   the three heavy gaps: 0 or less is off; above 0 at most their light gap, and needs the cell size as a range
+//     (spacing_mm 0; OP8: its two ends may be equal, the heavy ends then do not act); wall_gap_heavy needs wall_gap above 0; cross_gap_heavy needs wall_cross;
+//   Grown only (as the Grower reads them): wall_cross needs walls_out and not wall_connect; tie_level, tie_gap not 1 and
+//     tie_gap_heavy above 0 need ties;
+//   `field` given (the session path): a weave region in `settings` and an empty field is refused (setting "stress").
+//     Null (the file job, whose own refusal for it is no_stress_result): not checked.
+// Every text is one plain sentence for the owner, naming the control and the number allowed, no key names.
+// OP11 (brief C2, E7): a group of weave regions and its own ask (Session::lay_organic's group list). The app names
+// the groups; the whole part latticed is one group holding every weave region (the one-ask calls mean exactly that).
+struct OrganicGroup {
+  std::vector<int> regions;   // weave region ids
+  OrganicAsk ask;
+};
+// OP11: validate_organic for a group list: every refusal of each group's ask (validate_organic, field not checked there,
+// OrganicRefusal::group its index), then the list's own (group -1 unless said): a weave region of the settings in no
+// group (setting "groups", code region_without_group) or in two (region_in_two_groups), a group's region that is not
+// a weave region (not_a_weave_region, its group), a group with no region (empty_group, its group); the flat floor,
+// one number for the part, differing between groups (bed_floor_mm, floors_differ, the group that differs from the
+// first); then, `field` given, the stress input (as validate_organic). Empty: valid.
+std::vector<OrganicRefusal> validate_organic_groups(const Settings& settings, const std::vector<OrganicGroup>& groups,
+                                                    const TensorField* field = nullptr);
+// OP8 (brief C2, E2): the note Outcome::notes carries when the cell size's two ends are equal and a heavy end is set.
+inline constexpr const char* kNoteEqualEnds =
+    "The cell size has one value, so the thick end of the strut thickness and the heavy ends of the gaps do nothing.";
+inline constexpr double kSmallestCellFactor = 1.5349900619197328;   // 0.5 x sqrt(3 pi): the tracer's print floor
+double organic_smallest_cell_mm(const Settings& settings, const OrganicAsk& ask);   // kSmallestCellFactor x light
+std::vector<OrganicRefusal> validate_organic(const Settings& settings, const OrganicAsk& ask,
+                                             const TensorField* field = nullptr);
 
 // J2 (brief G12), the pruning of a Grown area's weave bars, for each (region, median asked spacing) of `areas`:
 //   J2a, no end in the air: a weave bar (not a net strut) of the area with an end that is not Solid, not Surface, and not
@@ -320,7 +363,10 @@ struct OrganicSpacing {
   std::size_t hold_zone = 0;            // candidates within the reach of a hanging voxel's centre
   std::size_t hold_tightened = 0;       // of those, the ones whose spacing was above the tightest and was set to it
 };
-OrganicSpacing organic_spacing(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask);
+// OP11 (brief C2, E7): `pool`, when given, is the weave for this call in place of every weave region: a GROUP's regions
+// (the reference, the g stretch and O13's outline are read over them alone, as if they were the part's only weave).
+OrganicSpacing organic_spacing(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask,
+                               const std::vector<int>* pool = nullptr);
 
 // The spacing the tracer actually used, over the candidates of one trace (its spacing_used_mm, which raises the asked
 // spacing to its print and resolution floors where they bind); all 0 when nothing was traced.
@@ -366,8 +412,9 @@ struct OrganicTraceStats {
 // spacing that is not > 0 (or a range organic_spacing refuses), a width under the minimum extrudable width, a
 // degenerate build direction.
 // `stats`, when given, receives the spacing used (OrganicTraceStats).
+// OP11 (brief C2, E7): `pool` as organic_spacing's (null: every weave region).
 std::vector<Strand> trace_strands(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask,
-                                  OrganicTraceStats* stats = nullptr);
+                                  OrganicTraceStats* stats = nullptr, const std::vector<int>* pool = nullptr);
 // T (brief G30): what brace_weave needs for this job's weave regions: unbraced_max, the light width, the layer, the
 // link width, and the braces' width rule (the strands' own: by stress with width_heavy_mm, the share over each
 // region's O12 reference, else the light width). Off (unbraced_max 0) when the ask has it off.
@@ -578,6 +625,11 @@ struct OrganicPreview {
 OrganicPreview lay_organic_preview(Session& session, const Settings& settings, const TensorField& field,
                                    const OrganicAsk& ask, const OrganicPreviewAsk& preview, int threads = 0,
                                    const std::atomic<bool>* stop = nullptr);
+// OP11 (brief C2, E7): the same with a group list (Session::lay_organic's groups). weave_runs needs no change: every
+// bar carries its region, and a run never crosses regions.
+OrganicPreview lay_organic_preview(Session& session, const Settings& settings, const TensorField& field,
+                                   const std::vector<OrganicGroup>& groups, const OrganicPreviewAsk& preview,
+                                   int threads = 0, const std::atomic<bool>* stop = nullptr);
 
 // Item 4, the Auto Sweep limits (the app's fields), per weave region of the domain. D = the smaller of the region's
 // depth and the narrowest width of its mouth outline in its own plane (the least width over all directions: the convex
@@ -598,5 +650,82 @@ struct SweepLimits {
   double cell_lower_mm = 0.0, cell_upper_mm = 0.0, cell_auto_mm = 0.0;
 };
 std::vector<SweepLimits> organic_sweep_limits(const Domain& domain, double line_mm);
+// OP10 (brief C2, E4, made per group by E7): Session::sweep_limits_for(settings, region ids, line_mm), the Auto Sweep
+// limits of a GROUP of weave regions (the whole part: every weave region's id): the union over the MEASURED regions
+// among those given (organic_sweep_limits' entries): cell lower = the smallest lower, upper = the largest upper; strut
+// the same; Auto = the middle of each, by the same rounding (whole lines; the nearest 0.5 mm, never under the smallest
+// printable cell). `measured_regions` / `unmeasured` list the ids given that were / were not measured (a curved shell,
+// no outline, or not a weave region the domain built). `measured` false (every number 0) when none was.
+struct SweepLimitsUnion {
+  bool measured = false;
+  std::vector<int> measured_regions, unmeasured;
+  double strut_lower_mm = 0.0, strut_upper_mm = 0.0, strut_auto_mm = 0.0;
+  double cell_lower_mm = 0.0, cell_upper_mm = 0.0, cell_auto_mm = 0.0;
+};
+
+// ── OP12 (brief C2, E5; organic_synthetic.cpp): synthetic stress for the new engine ─────────────────────────────────
+// The owner: "Simulate stresses on unstressed walls" (Organic and Aesthetic only, a Number of foci per wall, 1 to 5)
+// and the samples that show ONE stress focus on a body with no solve. One call that takes the stress input and returns
+// it filled, with a report; the caller sets the filled field as the lay's tensor.
+//   `in` EMPTY (no solve): the field is made on a grid over the part's box, its voxel half the smallest spacing asked
+//     (over the groups' asks: spacing_mm, else spacing_min_mm), never over voxel_max_mm (1 mm); every weave region is
+//     without stress and filled, with its wall's count or kSyntheticFociDefault.
+//   Otherwise: only the regions listed in `walls` are considered. A voxel belongs to a weave region when its centre is
+//     lattice of it (as the spacing reads it). peak = the largest von Mises over every weave voxel; a listed region is
+//     WITHOUT STRESS when the 99th percentile of its von Mises (sorted, index round(0.99 (n - 1))) is at or under
+//     max(dead_fraction x peak, dead_floor_mpa) (the old rule, his ruling of 2026-09-07). A region with stress is left
+//     untouched (reported so).
+//   Foci (as the old engine places them): the region's box over its voxel centres, its two largest extents (axes a1,
+//     a2, half sizes h1, h2); focus q of n at angle 2 pi q / n + angle0_rad on the ellipse of `ellipse` (80 %) of h1, h2
+//     round the box centre (the third axis at the centre); weights alternate +1 (pull), -1 (push); soft = soft_fraction
+//     (a quarter) of the largest extent.
+//   The field (the lead's ruling: three distinct principal stresses, the minor at least 0.10 of the major for ties): at
+//     each voxel, for each focus, r the unit vector from it, t1 = unit(build direction x r) (any unit vector across r
+//     where that is zero), t2 = r x t1, g = w / (L^2 + soft^2): T += g (radial r r^T + across_build t1 t1^T +
+//     across_other t2 t2^T), the factors 1, -0.30, 0.12. The build direction is the region's group's ask's.
+//   Magnitude (the lead's ruling, confirmed by the owner: "Absolutely right. Full range"; it differs from the old engine
+//     on purpose): one factor per region so that its largest synthetic von Mises equals the reference its GROUP's lay
+//     will use for the real field: the group's stated reference_mpa, else its `percentile` of the real von Mises over
+//     the group's regions that HAVE stress; when none has (or `in` is empty), 1 MPa. The region's real values are
+//     replaced whole (a voxel whose T is zero keeps its value).
+//   Refused (E1's list, nothing made): a count not a whole number 1 to 5 (setting "foci"), a region that is not a weave
+//     region (setting "region").
+inline constexpr int kSyntheticFociDefault = 3;   // the owner, 2026-11-18: "Change the default to 3" (the OLD run keeps 4)
+inline constexpr int kSyntheticFociMin = 1, kSyntheticFociMax = 5;
+struct SyntheticStressAsk {
+  double dead_fraction = 0.02, dead_floor_mpa = 0.005;           // K2, the old run's numbers
+  double radial = 1.0, across_build = -0.30, across_other = 0.12;  // the field's three factors
+  double ellipse = 0.80, angle0_rad = 0.35, soft_fraction = 0.25;  // the old placing of the foci
+  double voxel_max_mm = 1.0;                                       // the made grid's largest voxel (no input)
+};
+struct SyntheticWall {
+  int region = 0;
+  int foci = kSyntheticFociDefault;   // 1 to 5; a wall that gives no count keeps the default
+};
+struct SyntheticRegionReport {
+  int region = 0, group = -1;      // its group's index in the list given (-1: in none)
+  bool flagged = false;            // listed in `walls` (every weave region with no input)
+  bool without_stress = false;
+  double p99_mpa = 0.0, threshold_mpa = 0.0;
+  int foci = 0;                    // used (0 when not flagged)
+  double soft_mm = 0.0;
+  std::size_t voxels = 0, filled = 0;
+  double reference_mpa = 0.0, factor = 0.0, peak_after_mpa = 0.0;   // filled only: the target, the factor, the peak
+};
+struct SyntheticStress {
+  TensorField field;               // the input, filled (or the made field)
+  std::vector<SyntheticRegionReport> regions;   // every weave region, in the domain's order
+  double peak_mpa = 0.0, threshold_mpa = 0.0;   // over the real weave voxels
+  bool from_empty = false;
+  std::vector<OrganicRefusal> refused;           // not empty: nothing made
+};
+SyntheticStress organic_synthetic_stress(const Domain& domain, const TensorField& in,
+                                         const std::vector<SyntheticWall>& walls,
+                                         const std::vector<OrganicGroup>& groups, const SyntheticStressAsk& how = {});
+// Bound to the session: the domain the lay will lay in (the settings' "where", with the first group's flat floor as
+// Session::lay_organic sets it), made and kept as Session::sweep_limits makes it.
+SyntheticStress organic_synthetic_stress(Session& session, const Settings& settings, const TensorField& in,
+                                         const std::vector<SyntheticWall>& walls,
+                                         const std::vector<OrganicGroup>& groups, const SyntheticStressAsk& how = {});
 
 }  // namespace topopt::lattice_layout

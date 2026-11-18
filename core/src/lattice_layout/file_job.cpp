@@ -420,12 +420,6 @@ OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::str
     a.spacing_min_mm = num(in, "organic_spacing_min_mm", a.spacing_min_mm, w);
     a.spacing_max_mm = num(in, "organic_spacing_max_mm", a.spacing_max_mm, w);
     a.spacing_exponent = num(in, "organic_spacing_exponent", a.spacing_exponent, w);
-    if (!(std::isfinite(a.spacing_min_mm) && a.spacing_min_mm > 0.0))
-      json::fail(w + ".organic_spacing_min_mm", "must be above 0");
-    if (!(std::isfinite(a.spacing_max_mm) && a.spacing_max_mm >= a.spacing_min_mm))
-      json::fail(w + ".organic_spacing_max_mm", "must be at least organic_spacing_min_mm");
-    if (!(std::isfinite(a.spacing_exponent) && a.spacing_exponent > 0.0))
-      json::fail(w + ".organic_spacing_exponent", "must be above 0");
   }
   if (any_weave && !has_spacing && !has_min)
     json::fail(w + ".organic_spacing_mm", "is needed when a region is filled by the weave (region_weave): the distance "
@@ -439,143 +433,65 @@ OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::str
   if (mode != "traced" && mode != "grown")
     json::fail(w + ".organic_mode", "must be \"traced\" or \"grown\", not \"" + mode + "\"");
   a.mode = mode == "grown" ? OrganicMode::Grown : OrganicMode::Traced;
+  // OP7 (brief C2, E1): only what a key IS is checked here (a number, a whole number, given with what); every range
+  // and rule on the values is validate_organic's, called by parse_file_job once the ask is whole (its layer is the
+  // mesh's), exactly as the session path calls it.
+  // A whole number held to [lo_cap, hi_cap] before the cast (the range itself is validate_organic's).
+  const auto whole_of = [&](const char* key, double v, const char* text_if_not) {
+    if (!(std::isfinite(v) && v == std::floor(v) && std::fabs(v) <= 2e9)) json::fail(w + "." + key, text_if_not);
+    return static_cast<int>(v);
+  };
   a.walls_out = flag(in, "organic_walls_out", a.walls_out, w);
   a.ties = flag(in, "organic_ties", a.ties, w);
   a.tie_swirl = num(in, "organic_tie_swirl", a.tie_swirl, w);
-  if (!(a.tie_swirl >= 0.0 && a.tie_swirl <= 1.0)) json::fail(w + ".organic_tie_swirl", "must be 0 to 1");
   a.foot_gap = num(in, "organic_foot_gap", a.foot_gap, w);
   // D (brief G6, an experiment): the stress lines are the goal (off when not given).
   a.stress_goal = flag(in, "organic_stress_goal", a.stress_goal, w);
   // E (brief G6, try keys): the re-seeding's bare distance (1.5 when not given) and its rounds (1 when not given).
   a.void_ratio = num(in, "organic_void_ratio", a.void_ratio, w);
-  if (!(std::isfinite(a.void_ratio) && a.void_ratio > 0.0)) json::fail(w + ".organic_void_ratio", "must be above 0");
-  const double rounds = num(in, "organic_reseed_rounds", a.reseed_rounds, w);
-  if (!(rounds >= 0.0 && rounds <= 100.0 && rounds == std::floor(rounds)))
-    json::fail(w + ".organic_reseed_rounds", "must be a whole number, 0 to 100");
-  a.reseed_rounds = static_cast<int>(rounds);
+  a.reseed_rounds = whole_of("organic_reseed_rounds", num(in, "organic_reseed_rounds", a.reseed_rounds, w),
+                             "must be a whole number, 0 to 100");
   a.wall_connect = flag(in, "organic_wall_connect", a.wall_connect, w);   // E (off when not given)
   a.wall_gap = num(in, "organic_wall_gap", a.wall_gap, w);   // E: 0 or less (and when not given): off
-  if (!std::isfinite(a.wall_gap)) json::fail(w + ".organic_wall_gap", "must be a number (0 or less: off)");
   a.wall_gap_heavy = num(in, "organic_wall_gap_heavy", a.wall_gap_heavy, w);   // M: 0 or less (and when not given): off
-  if (!std::isfinite(a.wall_gap_heavy))
-    json::fail(w + ".organic_wall_gap_heavy", "must be a number (0 or less: off)");
-  if (a.wall_gap_heavy > 0.0 && !(a.wall_gap > 0.0))
-    json::fail(w + ".organic_wall_gap_heavy", "needs organic_wall_gap on (above 0)");
-  if (a.wall_gap_heavy > 0.0 && a.wall_gap_heavy > a.wall_gap)
-    json::fail(w + ".organic_wall_gap_heavy", "must be at most organic_wall_gap");
-  if (a.wall_gap_heavy > 0.0 && (a.spacing_mm > 0.0 || !(a.spacing_max_mm > a.spacing_min_mm)))
-    json::fail(w + ".organic_wall_gap_heavy", "needs the spacing as a range (organic_spacing_min_mm below "
-                                              "organic_spacing_max_mm): it follows that range's stress measure");
   // F (brief G7, a try key): crossing vines (0 when not given: off).
-  const double cross = num(in, "organic_wall_cross", a.wall_cross, w);
-  if (!(cross == 0.0 || cross == 1.0 || cross == 2.0)) json::fail(w + ".organic_wall_cross", "must be 0, 1 or 2");
-  a.wall_cross = static_cast<int>(cross);
+  a.wall_cross = whole_of("organic_wall_cross", num(in, "organic_wall_cross", a.wall_cross, w), "must be 0, 1 or 2");
   // N (brief G21): the crossing gap in spacings (2.5 when not given), and by stress (0 or less, and not given: off).
-  if (json::find(in, "organic_cross_gap")) {
-    a.cross_gap = num(in, "organic_cross_gap", a.cross_gap, w);
-    if (!(std::isfinite(a.cross_gap) && a.cross_gap > 0.0)) json::fail(w + ".organic_cross_gap", "must be above 0");
-    if (a.wall_cross == 0) json::fail(w + ".organic_cross_gap", "needs organic_wall_cross on (1 or 2)");
-  }
+  a.cross_gap = num(in, "organic_cross_gap", a.cross_gap, w);
   a.cross_gap_heavy = num(in, "organic_cross_gap_heavy", a.cross_gap_heavy, w);
-  if (!std::isfinite(a.cross_gap_heavy))
-    json::fail(w + ".organic_cross_gap_heavy", "must be a number (0 or less: off)");
-  if (a.cross_gap_heavy > 0.0 && a.wall_cross == 0)
-    json::fail(w + ".organic_cross_gap_heavy", "needs organic_wall_cross on (1 or 2)");
-  if (a.cross_gap_heavy > 0.0 && a.cross_gap_heavy > a.cross_gap)
-    json::fail(w + ".organic_cross_gap_heavy", "must be at most organic_cross_gap");
-  if (a.cross_gap_heavy > 0.0 && (a.spacing_mm > 0.0 || !(a.spacing_max_mm > a.spacing_min_mm)))
-    json::fail(w + ".organic_cross_gap_heavy", "needs the spacing as a range (organic_spacing_min_mm below "
-                                               "organic_spacing_max_mm): it follows that range's stress measure");
   // O (brief G22): the steepest a crossing vine climbs, degrees from level (45 when not given, as before).
-  if (json::find(in, "organic_cross_climb_max_deg")) {
-    a.cross_climb_max_deg = num(in, "organic_cross_climb_max_deg", a.cross_climb_max_deg, w);
-    if (!(std::isfinite(a.cross_climb_max_deg) && a.cross_climb_max_deg >= 30.0 && a.cross_climb_max_deg <= 45.0))
-      json::fail(w + ".organic_cross_climb_max_deg", "must be from 30 (the print cone) to 45");
-    if (a.wall_cross == 0) json::fail(w + ".organic_cross_climb_max_deg", "needs organic_wall_cross on (1 or 2)");
-  }
+  a.cross_climb_max_deg = num(in, "organic_cross_climb_max_deg", a.cross_climb_max_deg, w);
   // P (brief G23): level ties (off when not given), the tie gap in spacings (1 when not given), and by stress (0 or
   // less, and not given: off). R (brief G26): a Traced job lays them too, with no need of organic_ties (Grown's switch).
-  const bool grown_ties = a.mode == OrganicMode::Grown && !a.ties;   // R: only Grown needs organic_ties on
   a.tie_level = flag(in, "organic_tie_level", a.tie_level, w);
-  if (a.tie_level && grown_ties) json::fail(w + ".organic_tie_level", "needs organic_ties on");
-  if (json::find(in, "organic_tie_gap")) {
-    a.tie_gap = num(in, "organic_tie_gap", a.tie_gap, w);
-    if (!(std::isfinite(a.tie_gap) && a.tie_gap > 0.0)) json::fail(w + ".organic_tie_gap", "must be above 0");
-    if (grown_ties) json::fail(w + ".organic_tie_gap", "needs organic_ties on");
-  }
+  a.tie_gap = num(in, "organic_tie_gap", a.tie_gap, w);
   a.tie_gap_heavy = num(in, "organic_tie_gap_heavy", a.tie_gap_heavy, w);
-  if (!std::isfinite(a.tie_gap_heavy)) json::fail(w + ".organic_tie_gap_heavy", "must be a number (0 or less: off)");
-  if (a.tie_gap_heavy > 0.0 && grown_ties) json::fail(w + ".organic_tie_gap_heavy", "needs organic_ties on");
-  if (a.tie_gap_heavy > 0.0 && a.tie_gap_heavy > a.tie_gap)
-    json::fail(w + ".organic_tie_gap_heavy", "must be at most organic_tie_gap");
-  if (a.tie_gap_heavy > 0.0 && (a.spacing_mm > 0.0 || !(a.spacing_max_mm > a.spacing_min_mm)))
-    json::fail(w + ".organic_tie_gap_heavy", "needs the spacing as a range (organic_spacing_min_mm below "
-                                             "organic_spacing_max_mm): it follows that range's stress measure");
   // S8 (brief G28): a link's width, in the thinner joined strut's widths (1 when not given).
   a.link_width = num(in, "organic_link_width", a.link_width, w);
-  if (!(std::isfinite(a.link_width) && a.link_width >= 0.5 && a.link_width <= 2.0))
-    json::fail(w + ".organic_link_width", "must be from 0.5 to 2");
   // T (brief G30): the longest a strut runs without a joint, in its widths (0 when not given: off).
   a.unbraced_max = num(in, "organic_unbraced_max", a.unbraced_max, w);
-  if (!(std::isfinite(a.unbraced_max) && (a.unbraced_max == 0.0 || (a.unbraced_max >= 4.0 && a.unbraced_max <= 40.0))))
-    json::fail(w + ".organic_unbraced_max", "must be 0 (off) or from 4 to 40 strut widths");
   // G (brief G8, try keys): top runs, roots (0 when not given: off), runs per end (1 when not given).
   a.top_run = num(in, "organic_top_run", a.top_run, w);
-  if (!(std::isfinite(a.top_run) && a.top_run >= 0.0)) json::fail(w + ".organic_top_run", "must be 0 or above");
   a.root_run = num(in, "organic_root_run", a.root_run, w);
-  if (!(std::isfinite(a.root_run) && a.root_run >= 0.0)) json::fail(w + ".organic_root_run", "must be 0 or above");
   a.run_gap = num(in, "organic_run_gap", a.run_gap, w);
-  if (!(std::isfinite(a.run_gap) && a.run_gap >= 0.0)) json::fail(w + ".organic_run_gap", "must be 0 or above");
-  const double rmax = num(in, "organic_run_max", a.run_max, w);
-  if (!(std::isfinite(rmax) && rmax >= 1.0 && rmax <= 1e6 && rmax == std::floor(rmax)))
-    json::fail(w + ".organic_run_max", "must be a whole number, 1 or more");
-  a.run_max = static_cast<int>(rmax);
+  a.run_max = whole_of("organic_run_max", num(in, "organic_run_max", a.run_max, w), "must be a whole number, 1 or more");
   // H (brief G9, try keys): how a run is steered and when it may end.
   a.run_follow = num(in, "organic_run_follow", a.run_follow, w);
-  if (!(std::isfinite(a.run_follow) && a.run_follow > 0.0)) json::fail(w + ".organic_run_follow", "must be above 0");
   a.run_pull = num(in, "organic_run_pull", a.run_pull, w);
-  if (!(std::isfinite(a.run_pull) && a.run_pull >= 0.0)) json::fail(w + ".organic_run_pull", "must be 0 or above");
   a.run_seek = num(in, "organic_run_seek", a.run_seek, w);
-  if (!(std::isfinite(a.run_seek) && a.run_seek >= 0.0)) json::fail(w + ".organic_run_seek", "must be 0 or above");
   a.run_min = num(in, "organic_run_min", a.run_min, w);
-  if (!(std::isfinite(a.run_min) && a.run_min >= 0.0)) json::fail(w + ".organic_run_min", "must be 0 or above");
   a.root_gap = num(in, "organic_root_gap", a.root_gap, w);
-  if (!std::isfinite(a.root_gap)) json::fail(w + ".organic_root_gap", "must be a number (below 0: the run gap)");
-  // G13: 0 or less: the feet do not compete.
-  if (!std::isfinite(a.foot_gap)) json::fail(w + ".organic_foot_gap", "must be a number (0 or less: feet do not compete)");
-  const double thinnest = s.bead_mm * s.min_strut_lines;
-  if (!(std::isfinite(a.width_mm) && a.width_mm >= 0.0))
-    json::fail(w + ".organic_width_mm", "must be 0 (the thinnest strut) or more");
-  if (a.width_mm > 0.0 && a.width_mm < thinnest) {
-    char b[160];
-    std::snprintf(b, sizeof b, "is under the thinnest strut (%.9g mm: bead_mm x min_strut_lines); 0 gives the thinnest",
-                  thinnest);
-    json::fail(w + ".organic_width_mm", b);
-  }
   a.auto_by_stress = flag(in, "organic_auto", a.auto_by_stress, w);   // I
   a.follow_stress = flag(in, "organic_follow_stress", a.follow_stress, w);   // OP6: false = shape only
   a.member_cap = flag(in, "organic_member_cap", a.member_cap, w);   // J1
   a.prune = flag(in, "organic_prune", a.prune, w);   // J2
   a.bed_floor_mm = num(in, "organic_bed_floor_mm", a.bed_floor_mm, w);   // K1
-  if (!(std::isfinite(a.bed_floor_mm) && a.bed_floor_mm >= 0.0))
-    json::fail(w + ".organic_bed_floor_mm", "must be 0 (no floor) or above");
   a.shape_reach = num(in, "organic_shape_reach", a.shape_reach, w);   // L1
-  if (!(std::isfinite(a.shape_reach) && a.shape_reach >= 0.0))
-    json::fail(w + ".organic_shape_reach", "must be 0 (no outline cap) or above");
   a.hold_parts = flag(in, "organic_hold_parts", a.hold_parts, w);   // L2
   a.part_reach_mm = num(in, "organic_part_reach_mm", a.part_reach_mm, w);
-  if (!(std::isfinite(a.part_reach_mm) && a.part_reach_mm >= 0.0))
-    json::fail(w + ".organic_part_reach_mm", "must be 0 or above");
   a.part_support_mm = num(in, "organic_part_support_mm", a.part_support_mm, w);
-  if (!(std::isfinite(a.part_support_mm) && a.part_support_mm >= 0.0))
-    json::fail(w + ".organic_part_support_mm", "must be 0 (the tightest spacing) or above");
   a.part_to_floor = flag(in, "organic_part_to_floor", a.part_to_floor, w);
   a.width_heavy_mm = num(in, "organic_width_heavy_mm", a.width_heavy_mm, w);   // I
-  {
-    const double light = a.width_mm > 0.0 ? a.width_mm : thinnest;
-    if (!(std::isfinite(a.width_heavy_mm) && (a.width_heavy_mm == 0.0 || a.width_heavy_mm >= light)))
-      json::fail(w + ".organic_width_heavy_mm", "must be 0 (off) or at least the strand width");
-  }
   return a;
 }
 
@@ -1073,6 +989,28 @@ FileJob parse_file_job(const std::string& json_text) {
     if (const json::Value* v = json::find(doc, "mesh"))
       job.options = options_from(json::as_object(*v, w + ".mesh"), w + ".mesh");
     job.organic.layer_mm = job.options.layers.layer_mm;   // G1: Grown grows one printed layer per step
+    // OP7 (brief C2, E1): the ask's ranges and rules, as the session path checks them (validate_organic); the first
+    // refusal is the job's (job_unreadable, as before), its key named in the detail, its plain sentence after it. The
+    // stress input is the job's own refusal (no_stress_result), so it is not asked here. With no weave region the
+    // organic keys are still held to their ranges (as the parser always did); the thinnest strut is then not Organic's
+    // to refuse.
+    {
+      bool weave = false;
+      for (const Settings::RegionAsk& r : job.settings.regions) weave = weave || (r.weave && r.role == Role::Lattice);
+      std::vector<OrganicRefusal> refused = validate_organic(job.settings, job.organic, nullptr);
+      if (!weave)
+        refused.erase(std::remove_if(refused.begin(), refused.end(),
+                                     [](const OrganicRefusal& x) { return x.setting == "bead_mm"; }),
+                      refused.end());
+      if (!refused.empty()) {
+        const std::string& k = refused.front().setting;
+        const std::string at = k == "layer_mm"                                      ? w + ".mesh.layer_mm"
+                               : k == "bead_mm"                                     ? w + ".layout.bead_mm"
+                               : (k == "build_dir" || k == "seed_stride") ? w + ".layout"
+                                                                                    : w + ".layout.organic_" + k;
+        json::fail(at, refused.front().text);
+      }
+    }
     job.options.threads = whole(doc, "threads", 0, w);
     if (job.options.threads < 0) json::fail(w + ".threads", "must be 0 (every core) or more");
     return job;
