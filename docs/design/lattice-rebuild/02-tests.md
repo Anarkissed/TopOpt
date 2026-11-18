@@ -340,6 +340,8 @@ one printed line per fault. No other check is loosened.
 | G-7 repeats | 0 | 2 / 4 and 4 / 8 | segments sharing both ends / lying along another strand within 0.02 mm (converging; ties) |
 | G-13 loose ends | 0 | 1 | strand ends held by nothing after the feet compete |
 
+Owed (brief E2, rule OS3): an Organic strength job with more than one load scenario is refused (`strength_failed`); the frame check takes the job's one load case only.
+
 Superseded, not a fault: G-11's "kept at least 90 % of the grown length" (brief G4 cuts repeats again, the owner's
 ruling); now a floor at 0.11 (11.3 % on 2026-11-18). SUPERSEDED by G4; a lay that keeps a ninth of what it grows is a
 speed lead, owed after cut 1.

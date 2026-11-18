@@ -700,11 +700,18 @@ static std::string without_times(std::string t) {
     if (k == std::string::npos) { out += t.substr(i); break; }
     out += t.substr(i, k - i);
     std::size_t e = t.find_first_of(",}", k);
-    if (t.compare(k, 6, "\"ms\": ") == 0 && t[k + 6] == '{') e = t.find('}', k);
+    if (t.compare(k, 6, "\"ms\": ") == 0 && t[k + 6] == '{') {   // the whole object (OF4's "passes" are in it)
+      int depth = 0;
+      for (e = k + 6; e < t.size(); ++e) {
+        if (t[e] == '{') ++depth;
+        if (t[e] == '}' && --depth == 0) break;
+      }
+    }
     i = e;
   }
   return out;
 }
+static std::string base_name_of(const std::string& p) { const std::size_t k = p.find_last_of('/'); return k == std::string::npos ? p : p.substr(k + 1); }
 static void test_file_job() {
   const std::string dir = ORGANIC_GROWN_TMP_DIR;
   const auto job_text = [](const std::string& mode) {
@@ -739,28 +746,29 @@ static void test_file_job() {
   if (!g.ok) std::printf("  (%s: %s %s)\n", g.code.c_str(), g.why.c_str(), g.detail.c_str());
   CHECK(g.ok && g.grown && g.strands > 0 && g.strands == g.grown->strands);
   if (!g.ok || !g.grown) return;
-  const TriangleMesh mesh = read_stl_file(gstl).mesh;
+  // OF5: the file the job's result names (a 3MF of the solid and its tubes, unmerged, by default).
   const std::string text = file_result_json(g);
-  std::printf("G-9 file job, grown: %zu strands, %zu weave bars; %zu triangles, %zu bodies; print clean %d, mid-air %zu, "
-              "one-ended %zu; builds %d; grow %.0f ms, total %.0f ms\n", g.strands, g.weave_bars, mesh.triangles.size(),
-              shells(mesh), g.made.print_clean ? 1 : 0, g.made.layers.mid_air.size(), g.made.layers.one_ended.size(),
+  std::printf("G-9 file job, grown: %zu strands, %zu weave bars; %s, %zu bytes, %zu triangles; print clean %d, mid-air %zu, "
+              "one-ended %zu; builds %d; grow %.0f ms, total %.0f ms\n", g.strands, g.weave_bars, g.file.c_str(), g.file_bytes,
+              g.made.mesh.triangles, g.made.print_clean ? 1 : 0, g.made.layers.mid_air.size(), g.made.layers.one_ended.size(),
               g.made.builds, g.grown ? g.grown->ms : 0.0, g.ms_total);
   if (g.grown) print_report("G-9 pocket", *g.grown);
-  CHECK(shells(mesh) == 1 && g.made.print_clean);
+  CHECK(!slurp(g.file).empty() && g.file_bytes > 0 && g.made.print_clean);
   CHECK(has(text, "\"grown\": {\"strands\": " + std::to_string(g.strands) + ", \"grown_mm\": "));
   // Traced: the same file and result whether the mode is left out or said.
   FileResult t1, t2;
   const std::string a = run("", "organic_traced_a.stl", t1);
   const std::string b = run(R"(, "organic_mode": "traced")", "organic_traced_b.stl", t2);
   CHECK(t1.ok && t2.ok && !t1.grown && !t2.grown);
-  CHECK(slurp(a) == slurp(b) && !slurp(a).empty());
+  CHECK(slurp(t1.file) == slurp(t2.file) && !slurp(t1.file).empty());
   std::string j1 = without_times(file_result_json(t1)), j2 = without_times(file_result_json(t2));
   const auto name = [](std::string s, const std::string& from, const std::string& to) {
     const std::size_t k = s.find(from);
     if (k != std::string::npos) s.replace(k, from.size(), to);
     return s;
   };
-  j2 = name(j2, "organic_traced_b.stl", "organic_traced_a.stl");
+  j2 = name(j2, base_name_of(t2.file), base_name_of(t1.file));
+  if (j1 != j2) std::printf("  j1: %s\n  j2: %s\n", j1.c_str(), j2.c_str());
   CHECK(j1 == j2 && !has(j1, "\"grown\""));
   // A mode that is neither is refused, with the key named.
   bool refused = false;
@@ -770,7 +778,7 @@ static void test_file_job() {
     refused = has(e.what(), "organic_mode");
   }
   CHECK(refused);
-  for (const std::string& p : {gstl, a, b}) std::remove(p.c_str());
+  for (const std::string& p : {gstl, a, b, g.file, t1.file, t2.file}) std::remove(p.c_str());
 }
 
 // ── G3 (brief G4; the owner's OR35): vines reach for every face ───────────────
