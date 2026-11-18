@@ -125,7 +125,7 @@ namespace {
 // O12, O13 as before (with L1); `solid`, when given, receives per voxel: 1 inside the part and lattice of no region,
 // 2 inside and lattice of a region, 0 outside.
 OrganicSpacing spacing_core(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask,
-                            std::vector<char>* solid) {
+                            std::vector<char>* solid, const std::vector<int>* pool) {
   OrganicSpacing out;
   if (field.empty()) return out;
   if (ask.spacing_mm != 0.0 && !(ask.spacing_mm > 0.0 && std::isfinite(ask.spacing_mm)))
@@ -145,7 +145,8 @@ OrganicSpacing spacing_core(const Domain& domain, int region, const TensorField&
   if (solid) solid->assign(n, 0);
   std::vector<char> weave_ids;   // by region id: is it a weave region
   for (const Region& r : domain.spec().regions)
-    if (r.role == Role::Lattice && r.weave && r.id >= 0) {
+    if (r.role == Role::Lattice && r.weave && r.id >= 0 &&
+        (!pool || std::find(pool->begin(), pool->end(), r.id) != pool->end())) {   // OP11: a group's own weave
       if (static_cast<std::size_t>(r.id) >= weave_ids.size()) weave_ids.resize(static_cast<std::size_t>(r.id) + 1, 0);
       weave_ids[static_cast<std::size_t>(r.id)] = 1;
     }
@@ -271,10 +272,11 @@ OrganicSpacing spacing_core(const Domain& domain, int region, const TensorField&
 }
 }  // namespace
 
-OrganicSpacing organic_spacing(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask) {
-  if (!ask.hold_parts) return spacing_core(domain, region, field, ask, nullptr);
+OrganicSpacing organic_spacing(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask,
+                               const std::vector<int>* pool) {
+  if (!ask.hold_parts) return spacing_core(domain, region, field, ask, nullptr, pool);
   std::vector<char> solid;
-  OrganicSpacing out = spacing_core(domain, region, field, ask, &solid);
+  OrganicSpacing out = spacing_core(domain, region, field, ask, &solid, pool);
   if (out.candidates == 0) return out;
   // L2 a (brief G15): the FLOATING PIECES, layer by layer from the bed, for the whole part (+z is up: the file job's
   // build direction). Solid = inside the part and lattice of no region. In the lowest layer holding any voxel of the
@@ -412,7 +414,7 @@ OrganicSpacing organic_spacing(const Domain& domain, int region, const TensorFie
 }
 
 std::vector<Strand> trace_strands(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask,
-                                  OrganicTraceStats* stats) {
+                                  OrganicTraceStats* stats, const std::vector<int>* pool) {
   std::vector<Strand> out;
   if (stats) *stats = OrganicTraceStats{};
   if (field.empty()) return out;
@@ -434,7 +436,7 @@ std::vector<Strand> trace_strands(const Domain& domain, int region, const Tensor
   grid.tags.assign(n, VoxelTag::Interior);
   // The candidates (voxels whose centre is lattice of the weave region) and the spacing asked of each (O12).
   const Domain::Probe probe = domain.probe();
-  const OrganicSpacing asked = organic_spacing(domain, region, field, ask);
+  const OrganicSpacing asked = organic_spacing(domain, region, field, ask, pool);
   if (asked.candidates == 0) return out;
   const std::vector<char>& candidate = asked.candidate;
   const std::vector<double>& spacing = asked.spacing_mm;
@@ -573,124 +575,212 @@ WeaveBraceAsk organic_brace_ask(const Domain& domain, const TensorField& field, 
   return b;
 }
 
+namespace {
+// OP11 (brief C2, E7): the one-ask lay is one group holding every weave region of the settings (in their order).
+std::vector<OrganicGroup> one_group(const Settings& settings, const OrganicAsk& ask) {
+  OrganicGroup g;
+  g.ask = ask;
+  for (const Settings::RegionAsk& r : settings.regions)
+    if (r.weave && r.role == Role::Lattice) g.regions.push_back(r.id);
+  return {g};
+}
+// The least distance between two segments.
+double segments_apart(const Vec3& p1, const Vec3& q1, const Vec3& p2, const Vec3& q2) {
+  const Vec3 d1{q1.x - p1.x, q1.y - p1.y, q1.z - p1.z}, d2{q2.x - p2.x, q2.y - p2.y, q2.z - p2.z};
+  const Vec3 r{p1.x - p2.x, p1.y - p2.y, p1.z - p2.z};
+  auto dot = [](const Vec3& u, const Vec3& v) { return u.x * v.x + u.y * v.y + u.z * v.z; };
+  const double a = dot(d1, d1), e = dot(d2, d2), f = dot(d2, r);
+  double s = 0.0, t = 0.0;
+  if (a <= 1e-18 && e <= 1e-18) return dist(p1, p2);
+  if (a <= 1e-18) {
+    t = std::clamp(f / e, 0.0, 1.0);
+  } else {
+    const double c = dot(d1, r);
+    if (e <= 1e-18) {
+      s = std::clamp(-c / a, 0.0, 1.0);
+    } else {
+      const double bb = dot(d1, d2), den = a * e - bb * bb;
+      s = den > 1e-18 ? std::clamp((bb * f - c * e) / den, 0.0, 1.0) : 0.0;
+      t = (bb * s + f) / e;
+      if (t < 0.0) { t = 0.0; s = std::clamp(-c / a, 0.0, 1.0); }
+      else if (t > 1.0) { t = 1.0; s = std::clamp((bb - c) / a, 0.0, 1.0); }
+    }
+  }
+  return dist(Vec3{p1.x + d1.x * s, p1.y + d1.y * s, p1.z + d1.z * s}, Vec3{p2.x + d2.x * t, p2.y + d2.y * t, p2.z + d2.z * t});
+}
+// OP11: bar pairs of different groups closer than the sum of their half widths (sweep over x).
+std::size_t cross_group_touches(const Bars& bars, const std::vector<OrganicGroup>& groups) {
+  struct Item { double lo, hi; std::size_t bar; int group; };
+  std::vector<Item> items;
+  for (std::size_t i = 0; i < bars.bars.size(); ++i) {
+    const Bar& x = bars.bars[i];
+    int g = -1;
+    for (std::size_t k = 0; k < groups.size() && g < 0; ++k)
+      if (std::find(groups[k].regions.begin(), groups[k].regions.end(), x.region) != groups[k].regions.end())
+        g = static_cast<int>(k);
+    if (g < 0) continue;
+    items.push_back({std::min(x.a.x, x.b.x) - 0.5 * x.width, std::max(x.a.x, x.b.x) + 0.5 * x.width, i, g});
+  }
+  std::sort(items.begin(), items.end(), [](const Item& p, const Item& q) { return p.lo < q.lo || (p.lo == q.lo && p.bar < q.bar); });
+  std::size_t n = 0;
+  for (std::size_t i = 0; i < items.size(); ++i)
+    for (std::size_t j = i + 1; j < items.size() && items[j].lo <= items[i].hi; ++j) {
+      if (items[j].group == items[i].group) continue;
+      const Bar& x = bars.bars[items[i].bar];
+      const Bar& y = bars.bars[items[j].bar];
+      if (segments_apart(x.a, x.b, y.a, y.b) < 0.5 * (x.width + y.width)) ++n;
+    }
+  return n;
+}
+}  // namespace
+
 Outcome Session::lay_organic(const Settings& settings, const TensorField& field, const OrganicAsk& ask, int threads,
                              const std::atomic<bool>* stop) {
-  return lay_organic_with(settings, field, ask, threads, stop, false);
+  return lay_organic_with(settings, field, one_group(settings, ask), threads, stop, false);
 }
 
 Outcome Session::lay_organic_draft(const Settings& settings, const TensorField& field, const OrganicAsk& ask,
                                    int threads, const std::atomic<bool>* stop) {
-  return lay_organic_with(settings, field, ask, threads, stop, true);
+  return lay_organic_with(settings, field, one_group(settings, ask), threads, stop, true);
 }
 
-Outcome Session::lay_organic_with(const Settings& asked, const TensorField& field, const OrganicAsk& ask,
+Outcome Session::lay_organic(const Settings& settings, const TensorField& field, const std::vector<OrganicGroup>& groups,
+                             int threads, const std::atomic<bool>* stop) {
+  return lay_organic_with(settings, field, groups, threads, stop, false);
+}
+
+Outcome Session::lay_organic_draft(const Settings& settings, const TensorField& field,
+                                   const std::vector<OrganicGroup>& groups, int threads, const std::atomic<bool>* stop) {
+  return lay_organic_with(settings, field, groups, threads, stop, true);
+}
+
+Outcome Session::lay_organic_with(const Settings& asked, const TensorField& field, const std::vector<OrganicGroup>& groups,
                                   int threads, const std::atomic<bool>* stop, bool draft) {
-  // OP9 (brief C2, E3): K1's flat floor from the ask, exactly as the file job copies it into the settings (Q1): the
-  // floor lives in the domain ("where"), so the growth, the trace, the path and the net skin all see it.
-  Settings settings = asked;
-  if (ask.bed_floor_mm > 0.0) {
-    settings.bed_floor_mm = ask.bed_floor_mm;
-    settings.bed_up = ask.build_dir;
-  }
   if (stop && stop->load(std::memory_order_relaxed)) {
     Outcome none;
     none.cancelled = true;
     return none;
   }
-  // OP7 (brief C2, E1): an ask validate_organic refuses comes back refused, every refusal listed, before the domain is
-  // made (the kept domain, and what the caller holds of the last lay, stay as they were). With no weave region the ask
-  // is not read (it is lay()).
-  for (const Settings::RegionAsk& r : settings.regions)
-    if (r.weave && r.role == Role::Lattice) {
-      std::vector<OrganicRefusal> refused = validate_organic(settings, ask, &field);
-      if (!refused.empty()) {
-        Outcome no;
-        no.refused = std::move(refused);
-        return no;
-      }
-      break;
+  // OP7 (brief C2, E1; OP11, E7: per group): an ask validate_organic refuses comes back refused, every refusal listed,
+  // before the domain is made (the kept domain, and what the caller holds of the last lay, stay as they were). With no
+  // weave region the asks are not read (it is lay()).
+  bool any_weave = false;
+  for (const Settings::RegionAsk& r : asked.regions) any_weave = any_weave || (r.weave && r.role == Role::Lattice);
+  if (any_weave) {
+    std::vector<OrganicRefusal> refused = validate_organic_groups(asked, groups, &field);
+    if (!refused.empty()) {
+      Outcome no;
+      no.refused = std::move(refused);
+      return no;
     }
+  }
+  // OP9 (brief C2, E3): K1's flat floor from the ask, exactly as the file job copies it into the settings (Q1): the
+  // floor lives in the domain ("where"), so the growth, the trace, the path and the net skin all see it. One floor for
+  // the part: the first group's (validate_organic_groups refuses groups that differ).
+  Settings settings = asked;
+  if (!groups.empty() && groups.front().ask.bed_floor_mm > 0.0) {
+    settings.bed_floor_mm = groups.front().ask.bed_floor_mm;
+    settings.bed_up = groups.front().ask.build_dir;
+  }
   // OR30: the Finish is the regular lattices' own. Rim and Covered are "where" settings of the domain the weave is
   // traced and laid in (their solid cuts the strands as any solid does); Skin lays the net skin (O16).
   ready_domain(settings);
   WeaveFinish finish;
-  // S (brief G28): the cut at crossings judges by the light width (the growth's and the tracer's), never by I1 / Q2's.
-  finish.light_mm = ask.width_mm > 0.0 ? ask.width_mm : domain_->spec().bead_mm * domain_->spec().min_strut_lines;
-  finish.layer_mm = ask.layer_mm;
-  finish.link_width = ask.link_width;   // S8
   finish.draft = draft;                 // brief L2, item 3
   const auto t0 = std::chrono::steady_clock::now();
   std::vector<Strand> strands;
   double smallest = 0.0, largest = 0.0, sum = 0.0;
   std::size_t candidates = 0;
   std::shared_ptr<GrowReport> grown;
-  std::vector<std::pair<int, double>> references;   // T fix: each weave region's O12 reference, as computed once   // G1: Grown in place of Traced; the spacing stats are then O12's, as asked
-  for (const Region& r : domain_->spec().regions) {
-    if (r.role != Role::Lattice || !r.weave) continue;
-    OrganicTraceStats st;
-    std::vector<Strand> traced;
-    // O16, the net skin's reach: Traced, the trace's own median spacing (as the old run); Grown, which has no trace, the
-    // median of the spacing field over the region's candidates (the field it is laid with). LatticeReview's ruling 2
-    // (2026-11-15) asked the field's median for both; on the made-up cube it changed Traced's net from 5,145 struts
-    // (12,626 mm) to 5,932 (24,424 mm), so Traced keeps its own until that is ruled on.
-    const OrganicSpacing sp =
-        ask.mode == OrganicMode::Grown ? organic_spacing(*domain_, r.id, field, ask) : OrganicSpacing{};
-    double median = 0.0;
-    {
-      std::vector<double> all;
-      for (std::size_t e = 0; e < sp.candidate.size(); ++e)
-        if (sp.candidate[e]) all.push_back(sp.spacing_mm[e]);
-      if (!all.empty()) {
-        std::sort(all.begin(), all.end());
-        median = all[all.size() / 2];
+  std::vector<std::string> notes;
+  // OP11 (brief C2, E7): each group in turn, on its own regions (in the domain's order) with its own ask; its spacing's
+  // weave (the reference, the stretch, the outline) is its own regions only. One group: exactly the one-ask lay.
+  for (const OrganicGroup& group : groups) {
+    const OrganicAsk& ask = group.ask;
+    const std::vector<int>* pool = &group.regions;
+    WeaveFinish::Group gf;
+    gf.first = strands.size();
+    // S (brief G28): the cut at crossings judges by the light width (the growth's and the tracer's), never by I1 / Q2's.
+    gf.light_mm = ask.width_mm > 0.0 ? ask.width_mm : domain_->spec().bead_mm * domain_->spec().min_strut_lines;
+    gf.layer_mm = ask.layer_mm;
+    gf.link_width = ask.link_width;   // S8
+    std::vector<std::pair<int, double>> references;   // T fix: each weave region's O12 reference, as computed once
+    for (const Region& r : domain_->spec().regions) {
+      if (r.role != Role::Lattice || !r.weave) continue;
+      if (std::find(group.regions.begin(), group.regions.end(), r.id) == group.regions.end()) continue;
+      OrganicTraceStats st;
+      std::vector<Strand> traced;
+      // O16, the net skin's reach: Traced, the trace's own median spacing (as the old run); Grown, which has no trace,
+      // the median of the spacing field over the region's candidates (the field it is laid with). LatticeReview's
+      // ruling 2 (2026-11-15) asked the field's median for both; on the made-up cube it changed Traced's net from 5,145
+      // struts (12,626 mm) to 5,932 (24,424 mm), so Traced keeps its own until that is ruled on.
+      const OrganicSpacing sp =
+          ask.mode == OrganicMode::Grown ? organic_spacing(*domain_, r.id, field, ask, pool) : OrganicSpacing{};
+      double median = 0.0;
+      {
+        std::vector<double> all;
+        for (std::size_t e = 0; e < sp.candidate.size(); ++e)
+          if (sp.candidate[e]) all.push_back(sp.spacing_mm[e]);
+        if (!all.empty()) {
+          std::sort(all.begin(), all.end());
+          median = all[all.size() / 2];
+        }
       }
-    }
-    if (ask.mode == OrganicMode::Grown) {
-      GrowReport one;
-      traced = grow_strands(*domain_, r.id, field, ask, &one, &sp);   // T fix: the spacing computed once, above
-      if (!grown) grown = std::make_shared<GrowReport>();
-      grown->add(one);
-      for (std::size_t e = 0; e < sp.candidate.size(); ++e) {
-        if (!sp.candidate[e]) continue;
-        const double v = sp.spacing_mm[e];
-        st.spacing_smallest_mm = st.candidates ? std::min(st.spacing_smallest_mm, v) : v;
-        st.spacing_largest_mm = st.candidates ? std::max(st.spacing_largest_mm, v) : v;
-        st.spacing_mean_mm += v;
-        ++st.candidates;
+      if (ask.mode == OrganicMode::Grown) {
+        GrowReport one;
+        traced = grow_strands(*domain_, r.id, field, ask, &one, &sp);   // T fix: the spacing computed once, above
+        if (!grown) grown = std::make_shared<GrowReport>();
+        grown->add(one);
+        for (std::size_t e = 0; e < sp.candidate.size(); ++e) {
+          if (!sp.candidate[e]) continue;
+          const double v = sp.spacing_mm[e];
+          st.spacing_smallest_mm = st.candidates ? std::min(st.spacing_smallest_mm, v) : v;
+          st.spacing_largest_mm = st.candidates ? std::max(st.spacing_largest_mm, v) : v;
+          st.spacing_mean_mm += v;
+          ++st.candidates;
+        }
+        if (st.candidates) st.spacing_mean_mm /= static_cast<double>(st.candidates);
+      } else {
+        traced = trace_strands(*domain_, r.id, field, ask, &st, pool);
       }
-      if (st.candidates) st.spacing_mean_mm /= static_cast<double>(st.candidates);
-    } else {
-      traced = trace_strands(*domain_, r.id, field, ask, &st);
+      const double reach = ask.mode == OrganicMode::Grown ? median : st.spacing_median_mm;
+      if (settings.skin && reach > 0.0) finish.net_reach.push_back({r.id, reach});   // O16
+      if (ask.mode == OrganicMode::Grown) finish.arrived.push_back(r.id);   // G11: a vine that reached the surface
+      if (ask.mode == OrganicMode::Grown && ask.prune) finish.prune.push_back({r.id, median});   // J2
+      // L2 d; Q3 (brief G24): Traced lays the same supports, from the floating pieces its own trace's spacing found.
+      const std::vector<OrganicSpacing::HoldPatch>& patches =
+          ask.mode == OrganicMode::Grown ? sp.hold_patches : st.hold_patches;
+      if (ask.hold_parts && !patches.empty()) {
+        WeaveHold hold;
+        hold.region = r.id;
+        hold.spacing_min_mm = ask.spacing_mm > 0.0 ? ask.spacing_mm : ask.spacing_min_mm;
+        hold.width_mm = ask.width_mm > 0.0 ? ask.width_mm : domain_->spec().bead_mm * domain_->spec().min_strut_lines;
+        hold.layer_mm = ask.layer_mm;
+        hold.depth_mm = r.is_shell() ? r.shell_depth_mm : r.prism.depth;
+        hold.grid_mm = field.spacing;
+        hold.support_mm = ask.part_support_mm;
+        hold.to_floor = ask.part_to_floor;
+        for (const OrganicSpacing::HoldPatch& P : patches) hold.patches.push_back({P.bottoms, P.plan_mm2, P.lo, P.hi});
+        finish.hold.push_back(std::move(hold));
+      }
+      if (st.candidates > 0) {
+        smallest = candidates ? std::min(smallest, st.spacing_smallest_mm) : st.spacing_smallest_mm;
+        largest = candidates ? std::max(largest, st.spacing_largest_mm) : st.spacing_largest_mm;
+        sum += st.spacing_mean_mm * static_cast<double>(st.candidates);
+        candidates += st.candidates;
+      }
+      references.push_back({r.id, ask.mode == OrganicMode::Grown ? sp.reference_mpa : st.reference_mpa});   // T fix
+      strands.insert(strands.end(), std::make_move_iterator(traced.begin()), std::make_move_iterator(traced.end()));
     }
-    const double reach = ask.mode == OrganicMode::Grown ? median : st.spacing_median_mm;
-    if (settings.skin && reach > 0.0) finish.net_reach.push_back({r.id, reach});   // O16
-    if (ask.mode == OrganicMode::Grown) finish.arrived.push_back(r.id);   // G11: a vine that reached the surface
-    if (ask.mode == OrganicMode::Grown && ask.prune) finish.prune.push_back({r.id, median});   // J2
-    // L2 d; Q3 (brief G24): Traced lays the same supports, from the floating pieces its own trace's spacing found.
-    const std::vector<OrganicSpacing::HoldPatch>& patches = ask.mode == OrganicMode::Grown ? sp.hold_patches : st.hold_patches;
-    if (ask.hold_parts && !patches.empty()) {
-      WeaveHold hold;
-      hold.region = r.id;
-      hold.spacing_min_mm = ask.spacing_mm > 0.0 ? ask.spacing_mm : ask.spacing_min_mm;
-      hold.width_mm = ask.width_mm > 0.0 ? ask.width_mm : domain_->spec().bead_mm * domain_->spec().min_strut_lines;
-      hold.layer_mm = ask.layer_mm;
-      hold.depth_mm = r.is_shell() ? r.shell_depth_mm : r.prism.depth;
-      hold.grid_mm = field.spacing;
-      hold.support_mm = ask.part_support_mm;
-      hold.to_floor = ask.part_to_floor;
-      for (const OrganicSpacing::HoldPatch& P : patches) hold.patches.push_back({P.bottoms, P.plan_mm2, P.lo, P.hi});
-      finish.hold.push_back(std::move(hold));
-    }
-    if (st.candidates > 0) {
-      smallest = candidates ? std::min(smallest, st.spacing_smallest_mm) : st.spacing_smallest_mm;
-      largest = candidates ? std::max(largest, st.spacing_largest_mm) : st.spacing_largest_mm;
-      sum += st.spacing_mean_mm * static_cast<double>(st.candidates);
-      candidates += st.candidates;
-    }
-    references.push_back({r.id, ask.mode == OrganicMode::Grown ? sp.reference_mpa : st.reference_mpa});   // T fix
-    strands.insert(strands.end(), std::make_move_iterator(traced.begin()), std::make_move_iterator(traced.end()));
+    gf.brace = organic_brace_ask(*domain_, field, ask, references);   // T (off unless unbraced_max)
+    gf.count = strands.size() - gf.first;
+    finish.groups.push_back(std::move(gf));
+    // OP8 (brief C2, E2): equal cell ends with a heavy end set: laid, and said (once).
+    if (ask.spacing_mm == 0.0 && ask.spacing_max_mm == ask.spacing_min_mm &&
+        (ask.width_heavy_mm > 0.0 || ask.wall_gap_heavy > 0.0 || ask.cross_gap_heavy > 0.0 || ask.tie_gap_heavy > 0.0) &&
+        std::find(notes.begin(), notes.end(), std::string(kNoteEqualEnds)) == notes.end())
+      notes.push_back(kNoteEqualEnds);
   }
-  finish.brace = organic_brace_ask(*domain_, field, ask, references);   // T (off unless unbraced_max)
   const double ms_trace = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
   Outcome out = lay_with(settings, &strands, threads, stop, &finish);
   if (!out.cancelled) {
@@ -700,10 +790,8 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
     out.spacing_largest_mm = largest;
     out.spacing_mean_mm = candidates ? sum / static_cast<double>(candidates) : 0.0;
     out.grown = grown;
-    // OP8 (brief C2, E2): equal cell ends with a heavy end set: laid, and said.
-    if (ask.spacing_mm == 0.0 && ask.spacing_max_mm == ask.spacing_min_mm &&
-        (ask.width_heavy_mm > 0.0 || ask.wall_gap_heavy > 0.0 || ask.cross_gap_heavy > 0.0 || ask.tie_gap_heavy > 0.0))
-      out.notes.push_back(kNoteEqualEnds);
+    out.notes = std::move(notes);
+    if (groups.size() > 1) out.cross_group_touches = cross_group_touches(out.bars, groups);   // OP11
   }
   return out;
 }
@@ -1309,6 +1397,59 @@ std::vector<OrganicRefusal> validate_organic(const Settings& settings, const Org
   if (field && field->empty() && any_weave(settings))
     refuse("stress", "no_stress_result",
            "Organic follows the part's stress, and there is no stress result yet. Run the stress check first.", 0.0);
+  return out;
+}
+
+std::vector<OrganicRefusal> validate_organic_groups(const Settings& settings, const std::vector<OrganicGroup>& groups,
+                                                    const TensorField* field) {
+  std::vector<OrganicRefusal> out;
+  for (std::size_t g = 0; g < groups.size(); ++g)
+    for (OrganicRefusal r : validate_organic(settings, groups[g].ask, nullptr)) {
+      r.group = static_cast<int>(g);
+      out.push_back(std::move(r));
+    }
+  auto refuse = [&](int group, const char* code, const std::string& text, double given, const char* setting = "groups") {
+    OrganicRefusal r;
+    r.group = group;
+    r.setting = setting;
+    r.code = code;
+    r.text = text;
+    r.given = given;
+    out.push_back(std::move(r));
+  };
+  auto is_weave = [&](int id) {
+    for (const Settings::RegionAsk& r : settings.regions)
+      if (r.id == id && r.weave && r.role == Role::Lattice) return true;
+    return false;
+  };
+  for (const Settings::RegionAsk& r : settings.regions) {
+    if (!(r.weave && r.role == Role::Lattice)) continue;
+    std::size_t in = 0;
+    for (const OrganicGroup& g : groups) in += static_cast<std::size_t>(std::count(g.regions.begin(), g.regions.end(), r.id));
+    if (in == 0)
+      refuse(-1, "region_without_group", "Organic area " + std::to_string(r.id) + " is in no group of Organic settings.",
+             r.id);
+    else if (in > 1)
+      refuse(-1, "region_in_two_groups",
+             "Organic area " + std::to_string(r.id) + " is in more than one group of Organic settings.", r.id);
+  }
+  for (std::size_t g = 0; g < groups.size(); ++g) {
+    if (groups[g].regions.empty())
+      refuse(static_cast<int>(g), "empty_group", "A group of Organic settings has no area in it.", 0.0);
+    for (const int id : groups[g].regions)
+      if (!is_weave(id))
+        refuse(static_cast<int>(g), "not_a_weave_region",
+               "Area " + std::to_string(id) + " is in a group of Organic settings but is not an Organic area.", id);
+    if (g > 0 && groups[g].ask.bed_floor_mm != groups.front().ask.bed_floor_mm)
+      refuse(static_cast<int>(g), "floors_differ",
+             "Flat floor: it is one height for the whole part, and this group's differs from the first group's (" +
+                 plain_number(groups.front().ask.bed_floor_mm) + " mm).",
+             groups[g].ask.bed_floor_mm, "bed_floor_mm");
+  }
+  if (field && field->empty() && any_weave(settings))
+    refuse(-1, "no_stress_result",
+           "Organic follows the part's stress, and there is no stress result yet. Run the stress check first.", 0.0,
+           "stress");
   return out;
 }
 

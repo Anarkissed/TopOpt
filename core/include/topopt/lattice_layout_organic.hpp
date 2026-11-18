@@ -215,6 +215,20 @@ struct OrganicAsk {
 //   `field` given (the session path): a weave region in `settings` and an empty field is refused (setting "stress").
 //     Null (the file job, whose own refusal for it is no_stress_result): not checked.
 // Every text is one plain sentence for the owner, naming the control and the number allowed, no key names.
+// OP11 (brief C2, E7): a group of weave regions and its own ask (Session::lay_organic's group list). The app names
+// the groups; the whole part latticed is one group holding every weave region (the one-ask calls mean exactly that).
+struct OrganicGroup {
+  std::vector<int> regions;   // weave region ids
+  OrganicAsk ask;
+};
+// OP11: validate_organic for a group list: every refusal of each group's ask (validate_organic, field not checked there,
+// OrganicRefusal::group its index), then the list's own (group -1 unless said): a weave region of the settings in no
+// group (setting "groups", code region_without_group) or in two (region_in_two_groups), a group's region that is not
+// a weave region (not_a_weave_region, its group), a group with no region (empty_group, its group); the flat floor,
+// one number for the part, differing between groups (bed_floor_mm, floors_differ, the group that differs from the
+// first); then, `field` given, the stress input (as validate_organic). Empty: valid.
+std::vector<OrganicRefusal> validate_organic_groups(const Settings& settings, const std::vector<OrganicGroup>& groups,
+                                                    const TensorField* field = nullptr);
 // OP8 (brief C2, E2): the note Outcome::notes carries when the cell size's two ends are equal and a heavy end is set.
 inline constexpr const char* kNoteEqualEnds =
     "The cell size has one value, so the thick end of the strut thickness and the heavy ends of the gaps do nothing.";
@@ -349,7 +363,10 @@ struct OrganicSpacing {
   std::size_t hold_zone = 0;            // candidates within the reach of a hanging voxel's centre
   std::size_t hold_tightened = 0;       // of those, the ones whose spacing was above the tightest and was set to it
 };
-OrganicSpacing organic_spacing(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask);
+// OP11 (brief C2, E7): `pool`, when given, is the weave for this call in place of every weave region: a GROUP's regions
+// (the reference, the g stretch and O13's outline are read over them alone, as if they were the part's only weave).
+OrganicSpacing organic_spacing(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask,
+                               const std::vector<int>* pool = nullptr);
 
 // The spacing the tracer actually used, over the candidates of one trace (its spacing_used_mm, which raises the asked
 // spacing to its print and resolution floors where they bind); all 0 when nothing was traced.
@@ -395,8 +412,9 @@ struct OrganicTraceStats {
 // spacing that is not > 0 (or a range organic_spacing refuses), a width under the minimum extrudable width, a
 // degenerate build direction.
 // `stats`, when given, receives the spacing used (OrganicTraceStats).
+// OP11 (brief C2, E7): `pool` as organic_spacing's (null: every weave region).
 std::vector<Strand> trace_strands(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask,
-                                  OrganicTraceStats* stats = nullptr);
+                                  OrganicTraceStats* stats = nullptr, const std::vector<int>* pool = nullptr);
 // T (brief G30): what brace_weave needs for this job's weave regions: unbraced_max, the light width, the layer, the
 // link width, and the braces' width rule (the strands' own: by stress with width_heavy_mm, the share over each
 // region's O12 reference, else the light width). Off (unbraced_max 0) when the ask has it off.
@@ -607,6 +625,11 @@ struct OrganicPreview {
 OrganicPreview lay_organic_preview(Session& session, const Settings& settings, const TensorField& field,
                                    const OrganicAsk& ask, const OrganicPreviewAsk& preview, int threads = 0,
                                    const std::atomic<bool>* stop = nullptr);
+// OP11 (brief C2, E7): the same with a group list (Session::lay_organic's groups). weave_runs needs no change: every
+// bar carries its region, and a run never crosses regions.
+OrganicPreview lay_organic_preview(Session& session, const Settings& settings, const TensorField& field,
+                                   const std::vector<OrganicGroup>& groups, const OrganicPreviewAsk& preview,
+                                   int threads = 0, const std::atomic<bool>* stop = nullptr);
 
 // Item 4, the Auto Sweep limits (the app's fields), per weave region of the domain. D = the smaller of the region's
 // depth and the narrowest width of its mouth outline in its own plane (the least width over all directions: the convex

@@ -1370,6 +1370,108 @@ static void test_sweep_limits_for() {
   CHECK(!none.measured && none.unmeasured.size() == 1 && none.cell_upper_mm == 0.0 && none.strut_auto_mm == 0.0);
 }
 
+// ── OL-GROUPS (OP11, brief C2, E7): Organic settings per group of weave regions ───────────────────────────────────────
+static std::uint64_t region_fnv(const Outcome& o, int region) {
+  std::uint64_t h = 1469598103934665603ULL;
+  for (const Bar& b : o.bars.bars) {
+    if (b.region != region) continue;
+    const double v[7] = {b.a.x, b.a.y, b.a.z, b.b.x, b.b.y, b.b.z, b.width};
+    const unsigned char* c = reinterpret_cast<const unsigned char*>(v);
+    for (std::size_t i = 0; i < sizeof v; ++i) { h ^= c[i]; h *= 1099511628211ULL; }
+  }
+  return h;
+}
+static void test_groups() {
+  // One group holding every weave region: today's one-ask lay, bar for bar (OL-FOLLOW's hashes).
+  {
+    const StepModel model = box_model(30, 30, 20);
+    const TensorField f = traced_field();
+    const std::uint64_t today[2] = {0x9a119fd417d400d7ULL, 0x235c732cf4f2f269ULL};
+    for (int g = 0; g < 2; ++g) {
+      Session s(model);
+      const Outcome o = s.lay_organic(traced_settings(), f, std::vector<OrganicGroup>{{{1}, follow_ask(g == 1)}});
+      std::printf("OL-GROUPS one group, %s: hash %016llx (today's %016llx), touches %zu\n", g ? "Grown" : "Traced",
+                  static_cast<unsigned long long>(bars_fnv(o)), static_cast<unsigned long long>(today[g]),
+                  o.cross_group_touches);
+      CHECK(bars_fnv(o) == today[g] && o.cross_group_touches == 0 && o.refused.empty());
+    }
+  }
+  // Two groups on a 30 x 30 x 40 box: region 1 under the top face, region 2 under the bottom face, 12 mm deep each (16
+  // mm of solid between). Group 0 = {1} Traced, group 1 = {2} Grown, in one lay. Each region's bars are those of a lay
+  // of that region alone with its group's ask.
+  const StepModel model = box_model(30, 30, 40);
+  const TensorField f = traced_field(30, 30, 40);
+  Settings both;
+  both.regions = {{1, Role::Lattice, {1}, 12.0, 0.0, true}, {2, Role::Lattice, {0}, 12.0, 0.0, true}};
+  Settings only1 = both, only2 = both;
+  only1.regions = {both.regions[0]};
+  only2.regions = {both.regions[1]};
+  const OrganicAsk traced = traced_ask(), grown = follow_ask(true);
+  const std::vector<OrganicGroup> groups = {{{1}, traced}, {{2}, grown}};
+  Session s(model), s1(model), s2(model);
+  const Outcome o = s.lay_organic(both, f, groups);
+  const Outcome a1 = s1.lay_organic(only1, f, traced);
+  const Outcome a2 = s2.lay_organic(only2, f, grown);
+  std::size_t n1 = 0, n2 = 0;
+  for (const Bar& b : o.bars.bars) { n1 += b.region == 1; n2 += b.region == 2; }
+  std::printf("OL-GROUPS two groups (Traced {1}, Grown {2}): %zu bars in 1, %zu in 2 (alone: %zu, %zu); region 1 the "
+              "same %d, region 2 the same %d; grown report %d; touches %zu; refusals %zu\n", n1, n2, a1.bars.bars.size(),
+              a2.bars.bars.size(), region_fnv(o, 1) == region_fnv(a1, 1) ? 1 : 0,
+              region_fnv(o, 2) == region_fnv(a2, 2) ? 1 : 0, o.grown ? 1 : 0, o.cross_group_touches, o.refused.size());
+  CHECK(o.refused.empty() && n1 > 0 && n2 > 0 && o.grown != nullptr);
+  CHECK(region_fnv(o, 1) == region_fnv(a1, 1) && region_fnv(o, 2) == region_fnv(a2, 2));
+  CHECK(o.cross_group_touches == 0);
+  // The preview takes the groups: its runs carry both regions.
+  {
+    Session p(model);
+    const OrganicPreview pv = lay_organic_preview(p, both, f, groups, OrganicPreviewAsk{});
+    bool r1 = false, r2 = false;
+    for (const WeaveRun& r : pv.runs) { r1 = r1 || r.region == 1; r2 = r2 || r.region == 2; }
+    CHECK(r1 && r2 && bars_fnv(pv.outcome) == bars_fnv(o));
+  }
+  // Two touching regions (each 20 mm deep, meeting half way): the pairs of different groups that touch, reported.
+  {
+    Settings touch = both;
+    touch.regions[0].depth_mm = touch.regions[1].depth_mm = 20.0;
+    Session t(model);
+    const Outcome ot = t.lay_organic(touch, f, groups);
+    std::printf("OL-GROUPS two touching regions: %zu bars, cross-group touches %zu\n", ot.bars.bars.size(),
+                ot.cross_group_touches);
+    CHECK(ot.refused.empty() && !ot.bars.bars.empty());
+  }
+  // The list's own refusals, and a group's ask refused with its group named.
+  {
+    auto refusals = [&](const std::vector<OrganicGroup>& gs) { return validate_organic_groups(both, gs, &f); };
+    auto has_group = [](const std::vector<OrganicRefusal>& r, const char* code, int group) {
+      for (const OrganicRefusal& x : r)
+        if (x.code == code && x.group == group) return true;
+      return false;
+    };
+    OrganicAsk bad = grown;
+    bad.link_width = 3.0;
+    OrganicAsk floor2 = grown;
+    floor2.bed_floor_mm = 2.0;
+    const auto r1 = refusals({{{1}, traced}});
+    const auto r2 = refusals({{{1, 2}, traced}, {{2}, grown}});
+    const auto r3 = refusals({{{1, 7}, traced}, {{2}, grown}});
+    const auto r4 = refusals({{{1}, traced}, {{2}, bad}});
+    const auto r5 = refusals({{{1}, traced}, {{2}, floor2}});
+    const auto r6 = refusals({{{1}, traced}, {{2}, grown}, {{}, grown}});
+    for (const auto* r : {&r1, &r2, &r3, &r4, &r5, &r6})
+      for (const OrganicRefusal& x : *r)
+        std::printf("OL-GROUPS refused: group %d, %s %s \"%s\"\n", x.group, x.setting.c_str(), x.code.c_str(), x.text.c_str());
+    CHECK(r1.size() == 1 && has_group(r1, "region_without_group", -1));
+    CHECK(r2.size() == 1 && has_group(r2, "region_in_two_groups", -1));
+    CHECK(r3.size() == 1 && has_group(r3, "not_a_weave_region", 0));
+    CHECK(r4.size() == 1 && has_group(r4, "out_of_range", 1) && r4[0].setting == "link_width");
+    CHECK(r5.size() == 1 && has_group(r5, "floors_differ", 1));
+    CHECK(r6.size() == 1 && has_group(r6, "empty_group", 2));
+    Session z(model);
+    const Outcome no = z.lay_organic(both, f, std::vector<OrganicGroup>{{{1}, traced}});
+    CHECK(no.refused.size() == 1 && no.bars.bars.empty() && z.domain() == nullptr);
+  }
+}
+
 int main() {
   test_s_cut_fix();
   test_k_floor();
@@ -1396,6 +1498,7 @@ int main() {
   test_equal_ends();
   test_floor_from_ask();
   test_sweep_limits_for();
+  test_groups();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }
