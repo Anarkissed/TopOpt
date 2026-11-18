@@ -114,6 +114,8 @@ struct OrganicAsk {
   // auto_by_stress: a top end makes round(run_max x u(end)) runs and a foot round(run_max x u(floor point)) roots
   // (0 to run_max) in place of the random draw. width_heavy_mm above 0: every point handed back is
   // w + (width_heavy_mm - w) x u(point) wide, w the light width (the growth itself uses w); 0: off.
+  // Q2 (brief G24): Traced too: every point of a traced strand (curves and connectors) is w + (width_heavy_mm - w) x
+  // u(point), w its own (light) width; the tracer, O3 and O4 use w.
   bool auto_by_stress = false;
   double width_heavy_mm = 0.0;
   // J (brief G12): member_cap false: O13's shape fit applies the outline cap (2 k h) alone, not the member cap (W / 5)
@@ -123,8 +125,8 @@ struct OrganicAsk {
   bool prune = false;
   // K1 (brief G13), a flat floor on the bed (the owner, 2026-11-16: "Yes, add the floor"): in a Grown area every point
   // less than this height above the bed (the plane through the part's lowest point along build_dir) is solid, not
-  // lattice. Carried to the domain as Settings::bed_floor_mm (DomainSpec::bed_floor_mm) by the file job, for Grown only.
-  // 0 = no floor (as before); 0 or above.
+  // lattice. Carried to the domain as Settings::bed_floor_mm (DomainSpec::bed_floor_mm) by the file job, for Grown and
+  // (Q1, brief G24) Traced alike. 0 = no floor (as before); 0 or above.
   double bed_floor_mm = 0.0;
   // L1 (brief G14), Grade to shape as a variable: O13's outline cap is (2 / shape_reach) x steps x the grid step (the
   // owner, 2026-11-16: "Should this be considered a 'Grade to shape' and make it a variable?"). 1 = as before; 2 = the
@@ -134,7 +136,9 @@ struct OrganicAsk {
   // up, would be floating in mid-air"): per Grown area, the undersides of solid that hangs over its lattice are found
   // (OrganicSpacing::hold_patches), every candidate within part_reach_mm of them takes the tightest spacing, the feet
   // and wall roots there are never thinned (Grower), and supports are grown down from them (hold_up_weave). Off: as
-  // before. part_reach_mm 0 or above.
+  // before. part_reach_mm 0 or above. Q3 (brief G24): Traced too: the zone (organic_spacing is the spacing the tracer
+  // is given, so part_reach_mm tightens it there on purpose) and the same supports (hold_up_weave over the traced
+  // strands' bars); the feet and wall roots rule is the Grower's own and has no Traced twin.
   bool hold_parts = false;
   double part_reach_mm = 8.0;
   // (brief G15, heavier; the owner: "ok. Go for that.") part_support_mm: above 0, the least distance between support
@@ -310,6 +314,10 @@ struct OrganicTraceStats {
   // O16: the trace's own median spacing (its report's achieved_spacing_median_mm): the net skin's reach for Traced, as
   // the old run sets it (Grown reads the spacing field's median instead).
   double spacing_median_mm = 0.0;
+  // Q3 (brief G24): with OrganicAsk::hold_parts, the floating pieces O12's spacing found for this region (L2 a; its
+  // tight-cell zone, L2 b, is already in the spacing the tracer was given), handed to Session::lay_organic so that
+  // hold_up_weave lays Grown's own supports under them over the traced strands. Empty when off.
+  std::vector<OrganicSpacing::HoldPatch> hold_patches;
 };
 
 // The Traced placement of one weave region, as strands. The candidate voxels are those whose CENTRE the domain says is

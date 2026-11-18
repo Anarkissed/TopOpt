@@ -409,6 +409,12 @@ std::vector<Strand> trace_strands(const Domain& domain, int region, const Tensor
   std::vector<Strand> out;
   if (stats) *stats = OrganicTraceStats{};
   if (field.empty()) return out;
+  {   // Q2 (brief G24): refused as grow_strands refuses it (I)
+    const double thinnest = domain.spec().bead_mm * domain.spec().min_strut_lines;
+    const double light = ask.width_mm > 0.0 ? ask.width_mm : thinnest;
+    if (!(std::isfinite(ask.width_heavy_mm) && (ask.width_heavy_mm == 0.0 || ask.width_heavy_mm >= light - 1e-12)))
+      throw std::invalid_argument("trace_strands: width_heavy_mm must be 0 or at least the strand width");
+  }
   const std::size_t n = static_cast<std::size_t>(field.nx) * field.ny * field.nz;
   // The tracer reads only nx, ny, nz, spacing and origin of the grid; its tags must be sized to the grid (its voxel
   // count is the tags' size) though what is in them is never read.
@@ -491,6 +497,26 @@ std::vector<Strand> trace_strands(const Domain& domain, int region, const Tensor
     out.push_back(std::move(s));
   }
   for (const OrganicConnector& cn : lat.connectors) out.push_back(strand_of({cn.a, cn.b}, cn.radius_mm));
+  // Q2 (brief G24): strut thickness by stress, I1's rule on every point handed back (the tracer, O3 and O4 used the
+  // light width): w + (width_heavy_mm - w) x u(p), w the point's own width, u(p) O12's stress share at p's voxel over
+  // the reference the spacing used (the Grower's share()); 0 off the field or with a reference of 0.
+  if (ask.width_heavy_mm > 0.0) {
+    auto share = [&](const Vec3& p) {
+      const int i = static_cast<int>(std::floor((p.x - field.origin.x) / field.spacing));
+      const int j = static_cast<int>(std::floor((p.y - field.origin.y) / field.spacing));
+      const int k = static_cast<int>(std::floor((p.z - field.origin.z) / field.spacing));
+      if (i < 0 || j < 0 || k < 0 || i >= field.nx || j >= field.ny || k >= field.nz) return 0.0;
+      const double* t = &field.voigt[6 * field.index(i, j, k)];
+      const double a = t[0] - t[1], b = t[1] - t[2], d = t[2] - t[0];
+      const double vm =
+          std::sqrt(std::max(0.0, 0.5 * (a * a + b * b + d * d) + 3.0 * (t[3] * t[3] + t[4] * t[4] + t[5] * t[5])));
+      return grading_demand_fraction(GradingIntent::Aesthetic, vm, asked.reference_mpa, 1.0);
+    };
+    for (Strand& s : out)
+      for (std::size_t q = 0; q < s.points.size(); ++q)
+        s.width_mm[q] = s.width_mm[q] + (ask.width_heavy_mm - s.width_mm[q]) * share(s.points[q]);
+  }
+  if (stats && ask.hold_parts) stats->hold_patches = asked.hold_patches;   // Q3: for hold_up_weave (L2 d)
   return out;
 }
 
@@ -551,7 +577,9 @@ Outcome Session::lay_organic(const Settings& settings, const TensorField& field,
     if (settings.skin && reach > 0.0) finish.net_reach.push_back({r.id, reach});   // O16
     if (ask.mode == OrganicMode::Grown) finish.arrived.push_back(r.id);   // G11: a vine that reached the surface
     if (ask.mode == OrganicMode::Grown && ask.prune) finish.prune.push_back({r.id, median});   // J2
-    if (ask.mode == OrganicMode::Grown && ask.hold_parts && !sp.hold_patches.empty()) {   // L2 d
+    // L2 d; Q3 (brief G24): Traced lays the same supports, from the floating pieces its own trace's spacing found.
+    const std::vector<OrganicSpacing::HoldPatch>& patches = ask.mode == OrganicMode::Grown ? sp.hold_patches : st.hold_patches;
+    if (ask.hold_parts && !patches.empty()) {
       WeaveHold hold;
       hold.region = r.id;
       hold.spacing_min_mm = ask.spacing_mm > 0.0 ? ask.spacing_mm : ask.spacing_min_mm;
@@ -561,7 +589,7 @@ Outcome Session::lay_organic(const Settings& settings, const TensorField& field,
       hold.grid_mm = field.spacing;
       hold.support_mm = ask.part_support_mm;
       hold.to_floor = ask.part_to_floor;
-      for (const OrganicSpacing::HoldPatch& P : sp.hold_patches) hold.patches.push_back({P.bottoms, P.plan_mm2, P.lo, P.hi});
+      for (const OrganicSpacing::HoldPatch& P : patches) hold.patches.push_back({P.bottoms, P.plan_mm2, P.lo, P.hi});
       finish.hold.push_back(std::move(hold));
     }
     if (st.candidates > 0) {

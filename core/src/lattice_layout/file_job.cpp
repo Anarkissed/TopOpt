@@ -1053,8 +1053,9 @@ FileJob parse_file_job(const std::string& json_text) {
       job.settings = settings_from(json::as_object(*v, w + ".layout"), w + ".layout");
       job.organic = organic_from(*v, job.settings, w + ".layout");
       // K1: the floor lives in the domain (where), so the growth, the path, the net skin, the print check and the
-      // file all see it; a Grown job's weave regions only (with organic_mode traced the key is read and does nothing).
-      if (job.organic.mode == OrganicMode::Grown && job.organic.bed_floor_mm > 0.0) {
+      // file all see it. Q1 (brief G24): a Traced job's weave regions as a Grown job's (the owner, 2026-11-17: "generate
+      // a version with the flat floor"); a traced strand that meets it ends in it as in any solid (O4, finish_bar_ends).
+      if (job.organic.bed_floor_mm > 0.0) {
         job.settings.bed_floor_mm = job.organic.bed_floor_mm;
         job.settings.bed_up = job.organic.build_dir;
       }
