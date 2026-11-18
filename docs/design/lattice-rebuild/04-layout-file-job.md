@@ -230,7 +230,8 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
 | `mesh_failed` | 1 | the mesh maker's own plain line, or: The lattice file could not be put together. Nothing was made. |
 | `cannot_write` | 1 | The lattice file could not be saved on the Mac (the folder is missing or the disk is full). |
 | `cancelled` | 1 | Stopped before the lattice file was finished. Nothing was made. (Only from code that passes a stop flag. On the worker a cancel stops the whole process and the worker reports it itself.) |
-| `strength_organic` | 1 | The strength check cannot check an Organic lattice yet, so no file was made. Turn the strength check off for this part, or use a cell lattice in every region. (A `strength_job` on a job with a weave region: refused before any work; brief L1.) |
+| `strength_mixed` | 1 | The strength check judges an Organic lattice and a cell lattice in different ways and cannot check a part that has both, so no file was made. Use one kind in every region, or turn the strength check off. (A `strength_job` on a job with weave AND cell regions: refused before any work; brief E2. Every region a weave: checked as a frame of beams, rules OS2 to OS6.) |
+| `strengthened_unreadable` | 1 | The strengthened stress sent with the lattice job could not be read, so nothing was made. (Job key `strengthened`, brief E2.) |
 | `error` | 1 | Something went wrong while making the lattice file, and nothing was made. |
 
 The checks run in this order: the stress result (when the job names one) reads; the stress tensor (when the job names one) reads; the model opens; it has a surface; every region and Protect skin has at least one face that is the part's; By stress has a stress result; a weave has a stress tensor; the type is a strut type; cell size by stress has a stress result; the worker can make meshes; the part is closed; the layout has cells; By stress has a reference; the layout has struts.

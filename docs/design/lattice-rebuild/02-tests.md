@@ -366,3 +366,15 @@ against 2,303; Grown 1,882 against 1,838) when `reference_mpa` moves in its nint
 | OF3 | L | A part with a slanted face and a slot: 1.10 mm outside before trimming, 0.013 mm after (no vertex past 0.05 mm), nothing below the bed, every shell closed and outward, none left out uncounted |
 | OF4 | L | Weave block with a hanging V: both routes clean in 2 passes (found 2, 0), every layer's area within 0.003 %; a cube part reads Tubes as Merged, the same mesh; the keys read and refuse by name. Driver (not in the suite): a cube job's STL and result, timings aside, and the merged weave mesh are byte for byte those of `8340a99f` |
 | OF5 | L | The pocket job with no mesh key writes `pocket_lattice.3mf`: unzipped and inflated in the test, one object, its triangles the mesh's, vertices shared, every edge once each way; deflated with zlib; the result's new fields; asked for `stl`, the tubes route writes an STL of the same triangles |
+
+## 15. The Organic strength check and the strengthen rounds (brief E2), in `test_sparse_ldlt`, `test_organic_frame`, `test_lattice_strength` and `test_lattice_layout_file`
+
+| Rule | Kind | Test |
+|---|---|---|
+| OS1 | L | A made frame of 22,860 beams: Accelerate's LDLT and Eigen's SimplicialLDLT agree to 6e-13 (asked 1e-6), both pass the residual gate; a factor over the memory limit is refused before the numeric work; `test_beam_network` unchanged |
+| OS2 | L | Made frames: one strut pulled between two solid blocks reads F / A (within 2 %); a slender strut in compression has the pinned Euler margin (within 2 %); a T-join splits the bar (three struts, all judged); two struts joined by a link move as one along it |
+| OS3 | V | Install 3's results byte for byte the same with the set-up moved (every `test_lattice_strength` run's result and fields.bin compared, timings aside) |
+| OS4, OS5 | L | A cantilever strut loaded at its tip through the load rule reads P L r / I at the root (within 5 %); a load on open lattice with no strut near is unheld and gives `load_on_open_lattice` |
+| OS6 | V | A made Organic block with a strength job: Install 3's keys, the three states, `struts`, the weakest struts, `strut_margins.bin` (a float32 per bar); weave and cells: `strength_mixed`; every region a weave and no Organic check in the build: `strength_unavailable` |
+| OS7 | L | Floors with the width on a Sweep: the file job's own lay and `lay_organic_preview` Exact the same bar for bar, bars widened, none over the upper width; a single width: not applied; a `strengthened.json`: the same lay in the file job (its key) and the preview, the reference read back as the same double |
+| OS8 | V | `organic-strengthen` on the made block (heavy load, one round): rounds 0 and 1 checked, r1's files written, the reference stated; a job with one spacing and one width: `nothing_to_vary` |
