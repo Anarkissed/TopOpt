@@ -955,6 +955,127 @@ static void test_session_sweep_limits() {
   CHECK(after_ask.read_again && !after_ask.bars.bars.empty() && bars_fnv(after_ask) == bars_fnv(laid));
 }
 
+// ── OL-FOLLOW (OP6, brief C1): stress and shape, or shape only ───────────────────────────────────────────────────────
+static OrganicAsk follow_ask(bool grown) {
+  OrganicAsk a = traced_ask();
+  a.width_heavy_mm = 1.6;
+  if (grown) {
+    a.mode = OrganicMode::Grown;
+    a.layer_mm = 0.2;
+    a.auto_by_stress = true;
+    a.top_run = 4.0;
+    a.run_max = 3;
+    a.walls_out = true;
+    a.wall_gap = 2.5;
+    a.wall_gap_heavy = 1.0;
+  }
+  return a;
+}
+static bool same_strands(const std::vector<Strand>& a, const std::vector<Strand>& b) {
+  if (a.size() != b.size()) return false;
+  for (std::size_t i = 0; i < a.size(); ++i) {
+    if (a[i].points.size() != b[i].points.size() || a[i].width_mm != b[i].width_mm) return false;
+    for (std::size_t k = 0; k < a[i].points.size(); ++k)
+      if (a[i].points[k].x != b[i].points[k].x || a[i].points[k].y != b[i].points[k].y || a[i].points[k].z != b[i].points[k].z)
+        return false;
+  }
+  return true;
+}
+static void test_follow_stress() {
+  // True (the default): the bars of two made lays are today's, by hash (8340a99f, before OP6), Traced and Grown.
+  {
+    const StepModel model = box_model(30, 30, 20);
+    const TensorField f = traced_field();
+    const std::uint64_t today[2] = {0x9a119fd417d400d7ULL, 0x235c732cf4f2f269ULL};
+    for (int g = 0; g < 2; ++g) {
+      OrganicAsk a = follow_ask(g == 1);
+      Session s1(model), s2(model);
+      const Outcome dflt = s1.lay_organic(traced_settings(), f, a);
+      a.follow_stress = true;
+      const Outcome on = s2.lay_organic(traced_settings(), f, a);
+      std::printf("OL-FOLLOW true, %s: %zu bars, hash %016llx (today's %016llx)\n", g ? "Grown" : "Traced",
+                  on.bars.bars.size(), static_cast<unsigned long long>(bars_fnv(on)), static_cast<unsigned long long>(today[g]));
+      CHECK(bars_fnv(dflt) == today[g] && bars_fnv(on) == today[g]);
+    }
+  }
+  // False, the spacing: the widest everywhere, then only where the shape fit tightens it.
+  Part b(30, 30, 20, 3, ramp_up(30));
+  const OrganicSpacing stress = organic_spacing(b.d, 1, b.field, b.ask);
+  b.ask.follow_stress = false;
+  const OrganicSpacing plain = organic_spacing(b.d, 1, b.field, b.ask);
+  b.ask.shape_fit = true;
+  const OrganicSpacing fit = organic_spacing(b.d, 1, b.field, b.ask);
+  std::size_t not_widest = 0, f_set = 0, below = 0;
+  double s_lo = 1e300, s_hi = 0.0;
+  for (std::size_t e = 0; e < plain.candidate.size(); ++e) {
+    if (plain.candidate[e]) { not_widest += plain.spacing_mm[e] != 5.5; f_set += plain.stress_f[e] != 0.0; }
+    if (fit.candidate[e]) below += fit.spacing_mm[e] < 5.5;
+    if (stress.candidate[e]) { s_lo = std::min(s_lo, stress.spacing_mm[e]); s_hi = std::max(s_hi, stress.spacing_mm[e]); }
+  }
+  std::printf("OL-FOLLOW false, spacing: %zu candidates, not the widest %zu, stress measure set %zu, reference %.3f; with "
+              "the shape fit: under the widest %zu, the fit tightened %zu; true: %.2f to %.2f mm\n", plain.candidates,
+              not_widest, f_set, plain.reference_mpa, below, fit.shape_fit_tightened, s_lo, s_hi);
+  CHECK(plain.candidates > 0 && not_widest == 0 && f_set == 0 && plain.reference_mpa == 0.0);
+  CHECK(below > 0 && below == fit.shape_fit_tightened && fit.reference_mpa == 0.0);
+  CHECK(s_hi - s_lo > 1.0);
+  // False, the width: the light width everywhere, the heavy end set.
+  Part c(24, 24, 24, 3, ramp_up(24));
+  c.ask.width_heavy_mm = 1.8;
+  c.ask.follow_stress = false;
+  GrowReport wr;
+  std::size_t n = 0, off_light = 0;
+  for (const Strand& s : c.grow(wr))
+    for (double w : s.width_mm) { ++n; off_light += std::fabs(w - 0.9) > 1e-12; }
+  std::printf("OL-FOLLOW false, width: %zu points, not the light width %zu\n", n, off_light);
+  CHECK(n > 0 && off_light == 0);
+  // False, the heavy gaps do not act (M, N, P): the strands with them set are the strands without them. True: they act.
+  auto pair = [](Part& p, double OrganicAsk::*key, double heavy, bool follow) {
+    p.ask.follow_stress = follow;
+    GrowReport r0, r1;
+    const std::vector<Strand> off = p.grow(r0);
+    p.ask.*key = heavy;
+    const std::vector<Strand> on = p.grow(r1);
+    p.ask.*key = 0.0;
+    return same_strands(off, on);
+  };
+  Part g(24, 24, 24, 3, ramp_up(24), 3.0);
+  g.ask.walls_out = true;
+  g.ask.wall_gap = 2.5;
+  const bool m_f = pair(g, &OrganicAsk::wall_gap_heavy, 1.0, false), m_t = pair(g, &OrganicAsk::wall_gap_heavy, 1.0, true);
+  Part t(24, 24, 24, 3, [](const Vec3& q) {   // OL-P's field: a minor stress a half of the major, so ties are laid
+    return std::array<double, 6>{0.5 * (0.2 + q.x / 24.0), 0.0, 0.2 + q.x / 24.0, 0, 0, 0};
+  });
+  const bool p_f = pair(t, &OrganicAsk::tie_gap_heavy, 0.5, false), p_t = pair(t, &OrganicAsk::tie_gap_heavy, 0.5, true);
+  g.ask.wall_gap = 0.0;
+  g.ask.wall_cross = 1;
+  const bool n_f = pair(g, &OrganicAsk::cross_gap_heavy, 1.0, false), n_t = pair(g, &OrganicAsk::cross_gap_heavy, 1.0, true);
+  std::printf("OL-FOLLOW heavy gaps change nothing: false M %d N %d P %d; true M %d N %d P %d\n", m_f, n_f, p_f, m_t, n_t, p_t);
+  CHECK(m_f && n_f && p_f);
+  CHECK(!m_t && !n_t && !p_t);
+  // False, Auto's runs per end: u = 0, no top end makes a run (true, u = 1: every one makes run_max).
+  Part u(24, 24, 24, 3, [](const Vec3&) { return along({0, 0, 1}, 1.0); });
+  u.ask.top_run = 4.0;
+  u.ask.run_max = 3;
+  u.ask.reference_mpa = 1.0;
+  u.ask.auto_by_stress = true;
+  GrowReport all3, none;
+  (void)u.grow(all3);
+  u.ask.follow_stress = false;
+  (void)u.grow(none);
+  auto at = [](const GrowReport& r, std::size_t k) { return k < r.top_n.size() ? r.top_n[k] : std::size_t(0); };
+  std::printf("OL-FOLLOW Auto runs per top end: true %zu of %zu with 3; false %zu of %zu with 0\n", at(all3, 3),
+              all3.top_vines, at(none, 0), none.top_vines);
+  CHECK(all3.top_vines > 0 && at(all3, 3) == all3.top_vines);
+  CHECK(none.top_vines > 0 && at(none, 0) == none.top_vines && none.top_run_mm.empty());
+  // The file job reads the key.
+  const std::string text = R"({"mode": "lattice_file", "model": "block.step", "layout": {
+      "min_strut_lines": 2, "bead_mm": 0.45, "region_ids": [1], "region_no_lattice": [0], "region_depth_mm": [16],
+      "region_expand_mm": [0], "region_face_counts": [1], "region_faces": [1], "region_weave": [true],
+      "organic_spacing_min_mm": 3, "organic_spacing_max_mm": 6, "organic_follow_stress": false}})";
+  const FileJob job = parse_file_job(text);
+  CHECK(!job.organic.follow_stress);
+}
+
 int main() {
   test_s_cut_fix();
   test_k_floor();
@@ -976,6 +1097,7 @@ int main() {
   test_draft();
   test_sweep_limits();
   test_session_sweep_limits();
+  test_follow_stress();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }

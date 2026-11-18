@@ -179,6 +179,10 @@ OrganicSpacing spacing_core(const Domain& domain, int region, const TensorField&
       if (out.candidate[e]) out.spacing_mm[e] = lo;
     return out;
   }
+  if (!ask.follow_stress) {   // OP6, shape only: f = 0 and no reference (u = 0); O13 and L2 below as ever
+    for (std::size_t e = 0; e < n; ++e)
+      if (out.candidate[e]) out.spacing_mm[e] = hi;
+  } else {
   // O12: the reference, then g per weave voxel and its least and greatest over the weave.
   double ref = ask.reference_mpa;
   if (!(ref > 0.0)) {
@@ -207,6 +211,7 @@ OrganicSpacing spacing_core(const Domain& domain, int region, const TensorField&
     out.spacing_mm[e] = hi - (hi - lo) * f;
     out.stress_f[e] = f;   // M: O12's measure, kept
   }
+  }   // OP6
   if (!ask.shape_fit) return out;
   // O13: the steps to the weave's outline (two passes over the faces' neighbours; a voxel on the grid's face is one
   // step from it), and the part's member width.

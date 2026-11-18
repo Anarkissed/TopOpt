@@ -185,6 +185,13 @@ struct OrganicAsk {
   bool tie_level = false;
   double tie_gap = 1.0;
   double tie_gap_heavy = 0.0;
+  // OP6 (brief C1; the owner, 2026-11-18: "It should be a choice between stress and shape gradient or shape gradient
+  // alone."). true (the default): as before. false, "shape only": O12's stress shares are 0 everywhere for every SIZE
+  // rule: f (organic_spacing gives every candidate the widest spacing, spacing_max_mm, before O13's shape fit and L2;
+  // stress_f 0) and u (its reference_mpa is 0, so the width's heavy end (I1, Q2, T's widths), the three gaps' heavy ends
+  // (M, N, P) and Auto's runs per end (I) all read 0). The DIRECTIONS still come from the stress field (Traced's
+  // curves, Grown's heading) and are not changed by it.
+  bool follow_stress = true;
 };
 
 // J2 (brief G12), the pruning of a Grown area's weave bars, for each (region, median asked spacing) of `areas`:
