@@ -908,6 +908,7 @@ double strut_run_on_mm(const Carved&, const MeshSpec& spec) {
 }
 void weave_bar_shells(const Domain&, const Layout&, const Bars&, const std::vector<char>&, const std::vector<char>&,
                       const Carved&, const MeshSpec&, TriangleMesh&, std::vector<std::size_t>&, MeshReport&) {}
+std::vector<char> solid_slivers_left_out(const Carved&, const std::vector<Vec3>&) { return {}; }
 
 #else
 
@@ -945,7 +946,25 @@ struct CarvedSolids {
   double pitch_mm = 0.25;   // the open space's own pitch and the overlap it was carved with: MeshSpec::strut_reach_mm
   double grow_mm = 0.02;    // reads them, so a carving gives the same mesh whatever the build's own grow_mm
 };
+// A small separate piece of the solid body whose lowest point is one of the mid-air places (`drop_at`) is left out.
+bool sliver_dropped(const manifold::Box& b, double v, const std::vector<Vec3>& drop_at) {
+  bool drop = false;
+  if (v < 20.0)
+    for (const Vec3& sp : drop_at)
+      if (std::fabs(b.min.z - sp.z) < 0.45 && sp.x > b.min.x - 0.4 && sp.x < b.max.x + 0.4 && sp.y > b.min.y - 0.4 &&
+          sp.y < b.max.y + 0.4)
+        drop = true;
+  return drop;
+}
 }  // namespace
+
+std::vector<char> solid_slivers_left_out(const Carved& carved, const std::vector<Vec3>& drop_at) {
+  std::vector<char> out;
+  if (!carved.kept) return out;
+  for (const Manifold& piece : static_cast<const CarvedSolids*>(carved.kept.get())->pieces)
+    out.push_back(drop_at.empty() ? 0 : sliver_dropped(piece.BoundingBox(), piece.Volume(), drop_at) ? 1 : 0);
+  return out;
+}
 
 Carved carve_part(const PartMeasure& pm, const Layout& lay, const OpenSpace& open_space, double grow,
                   const std::atomic<bool>* stop) {
@@ -1409,13 +1428,7 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
       for (const Manifold& piece : pieces) {
         const manifold::Box b = piece.BoundingBox();
         const double v = piece.Volume();
-        bool drop = false;
-        if (v < 20.0)
-          for (const Vec3& sp : spec.drop_at)
-            if (std::fabs(b.min.z - sp.z) < 0.45 && sp.x > b.min.x - 0.4 && sp.x < b.max.x + 0.4 && sp.y > b.min.y - 0.4 &&
-                sp.y < b.max.y + 0.4)
-              drop = true;
-        if (!drop) continue;
+        if (!sliver_dropped(b, v, spec.drop_at)) continue;
         ++rep.slivers_left_out;
         rep.slivers_mm3 += v;
         // Cut it away with its own hull, a hair larger (so no skin of it is left).

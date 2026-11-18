@@ -372,6 +372,8 @@ void weave_bar_shells(const Domain& domain, const Layout& layout, const Bars& ba
                       std::vector<std::size_t>& first_tri, MeshReport& rep);
 // build_mesh's run-on past a strut's end (MeshSpec::strut_reach_mm, its default read from the carving).
 double strut_run_on_mm(const Carved& carved, const MeshSpec& spec);
+// Per piece of the carved solid: 1 when build_mesh leaves it out for `drop_at` (a small piece starting at one of them).
+std::vector<char> solid_slivers_left_out(const Carved& carved, const std::vector<Vec3>& drop_at);
 
 // ── HIS PRINT RULES, JUDGED LAYER BY LAYER (P8) ─────────────────────────────────
 // The mesh as a printer lays it, standing on its lowest z: one cross-section per layer,
@@ -472,6 +474,17 @@ struct PrintableReport {
   // was made of (the layout's own otherwise: null). `drop_at` and `posts` are read against those.
   SagReport sags;
   std::shared_ptr<const Bars> sagged;
+  // OF4, the tubes route (MeshSpec::weave_mesh Tubes with a weave region): the mesh returned is the solid (with any
+  // cube lattice joined to it) and then every shell of the weave, unmerged. `shells` holds the last pass's counts (its
+  // mesh is not kept: it is the mesh returned from `base_triangles` on), `shell_first_tri` each shell's first triangle in
+  // the mesh returned (and one more at the end). The solid is made again only when the cube bars left in, or the slivers
+  // of solid the layer check leaves out, change (`base_builds`).
+  bool tubes = false;
+  WeaveShells shells;
+  std::size_t base_triangles = 0;
+  std::vector<std::size_t> shell_first_tri;
+  int base_builds = 0;
+  double ms_shells = 0.0;            // all passes together
   double ms_carve = 0.0;             // the part carved, once for all the passes
   double ms = 0.0;
 };

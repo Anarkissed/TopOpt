@@ -1436,8 +1436,8 @@ static void test_organic_job() {
     check_refused(r, "job_unreadable", 1, stl);
     CHECK(has(r.detail, "organic_spacing_mm"));
   }
-  // 2: made.
-  write_job(R"("tensor": "lattice_file_pocket.tensor", )", weave);
+  // 2: made (the merged route: one body; OF4's tubes route is test_weave_tubes').
+  write_job(R"("tensor": "lattice_file_pocket.tensor", "mesh": {"weave_mesh": "merged"}, )", weave);
   const FileResult r = run_file_job(job_path, kTmp);
   if (!mesh_available()) {
     check_refused(r, "mesh_unavailable", 3, stl);
@@ -1618,8 +1618,9 @@ static void test_organic_foot() {
     m.mesh = read_stl_file(stl).mesh;
     return m;
   };
-  const Made off = make(R"("mesh": {"weave_foot_mm": 0}, )");
-  const Made on = make("");
+  // The merged route (one body; OF4 keeps it): the feet are judged joined to the solid.
+  const Made off = make(R"("mesh": {"weave_foot_mm": 0, "weave_mesh": "merged"}, )");
+  const Made on = make(R"("mesh": {"weave_mesh": "merged"}, )");
   CHECK(off.r.ok && on.r.ok);
   if (!off.r.ok || !on.r.ok) return;
   // The bars the job laid (lay_organic directly, as test_organic_job reads them).
@@ -1749,8 +1750,9 @@ static void test_organic_round_top() {
     m.mesh = read_stl_file(stl).mesh;
     return m;
   };
-  const Made off = make(R"("mesh": {"weave_round_top": false}, )");
-  const Made on = make("");
+  // The merged route (one body; OF4 keeps it).
+  const Made off = make(R"("mesh": {"weave_round_top": false, "weave_mesh": "merged"}, )");
+  const Made on = make(R"("mesh": {"weave_mesh": "merged"}, )");
   CHECK(off.r.ok && on.r.ok);
   if (!off.r.ok || !on.r.ok) return;
   const auto& a = off.r.made;

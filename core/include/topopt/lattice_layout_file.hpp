@@ -52,6 +52,9 @@ struct FileOptions {
   int most_passes = 10;
   bool leave_out = true;
   bool keep_if_not_clean = false;
+  // OF4: mesh key "weave_mesh" ("tubes" or "merged"). Not given: Tubes for a job with a weave region (make_lattice_file
+  // sets mesh.weave_mesh), the writer's own Merged otherwise (a job with no weave region is never changed by it).
+  bool weave_mesh_asked = false;
 };
 
 // What making the mesh found.
@@ -77,6 +80,14 @@ struct FileReport {
   // the layout's own). `left_out_at` and `posts` are read against those.
   SagReport sags;
   std::shared_ptr<const Bars> sagged;
+  // OF4: PrintableReport's: the tubes route was taken, its shells' counts, where the solid's triangles end and each
+  // shell's first triangle in the mesh returned, how often the solid was made.
+  bool tubes = false;
+  WeaveShells shells;
+  std::size_t base_triangles = 0;
+  std::vector<std::size_t> shell_first_tri;
+  int base_builds = 0;
+  double ms_shells = 0.0;
 };
 
 // THE ONE PLACE THE MESH IS MADE for a file: the open space of the layout's cells, then

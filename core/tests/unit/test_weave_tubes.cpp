@@ -2,12 +2,14 @@
 //   OF1  the layer check's NonZero fill: overlapping closed shells read as their union.
 //   OF2  tubes from the final bars: every shell closed and outward, their union the merged lattice's volume.
 //   OF3  trimmed to the part: nothing more than 0.05 mm outside a slanted face or into a slot, nothing below the bed.
+//   OF4  the file route: tubes end clean in no more passes than merged, the layers' areas within 3 %.
 // Needs the Manifold library (the test makes its reference unions with it).
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
 #include <map>
+#include <string>
 #include <vector>
 
 #include <manifold/manifold.h>
@@ -439,6 +441,100 @@ static void test_trimmed_to_part() {
   CHECK(w.shells() + w.left_out == raw.shells());
 }
 
+// OF4: the file route on the weave block, with a V of one strand hanging in the open lattice (an overhanging start): the tubes route ends with 0 findings in no more passes than the merged route, and per layer the filled area of
+// the two routes differs by under 3 % summed over the part.
+static void test_tubes_route() {
+  const StepModel model = weave_block();
+  Session session(model);
+  Settings s;
+  s.regions = {{1, Role::Lattice, {1}, 4.0, 0.0, true}, {2, Role::Lattice, {0}, 3.0, 0.0, false}};
+  s.cells.cell_max_mm = 4;
+  s.cells.min_cells_across = 1;
+  s.struts.allow_quilt = true;
+  std::vector<Strand> strands = made_up_weave();
+  strands.erase(strands.begin());   // the ring at z 4: a level ring over open lattice the check never clears, either route
+  // A V hanging in the open lattice (its two arms hold each other at the bottom): a start in mid-air, no sag lift or leg.
+  strands.push_back(weave_strand({round_pocket(11.0, 100, 15.0), round_pocket(8.6, 105, 11.0), round_pocket(11.0, 110, 15.0)}));
+  const Outcome out = session.lay_weave(s, strands);
+  const Domain& d = *session.domain();
+  const OpenSpace open = read_open_space(d, out.layout, 0.25);
+  PrintableSpec merged_spec;
+  merged_spec.mesh = file_mesh_defaults();
+  merged_spec.mesh.weave_sag_lift_mm = 0.0;
+  merged_spec.mesh.weave_sag_legs = false;
+  PrintableSpec tubes_spec = merged_spec;
+  tubes_spec.mesh.weave_mesh = MeshSpec::WeaveMesh::Tubes;
+  PrintableReport rm, rt;
+  const TriangleMesh mm = build_printable_mesh(session.measure(), d, out.layout, out.bars, open, merged_spec, &rm);
+  const TriangleMesh mt = build_printable_mesh(session.measure(), d, out.layout, out.bars, open, tubes_spec, &rt);
+  CHECK(rm.mesh.ok && rt.mesh.ok && !rm.tubes && rt.tubes);
+  CHECK(rt.shell_first_tri.size() == rt.shells.shells() + 1 && rt.shell_first_tri.back() == mt.triangles.size());
+  CHECK(rt.base_triangles == rt.shell_first_tri.front() && rt.base_builds >= 1 && rt.base_builds <= rt.passes);
+  LayerSpec eo, nz;
+  eo.layer_areas = nz.layer_areas = true;
+  nz.fill = LayerSpec::Fill::NonZero;
+  const LayerReport lm = check_layers(mm, eo), lt = check_layers(mt, nz);
+  double diff = 0.0, total = 0.0;
+  for (std::size_t k = 0; k < std::max(lm.layer_mm2.size(), lt.layer_mm2.size()); ++k) {
+    const double a = k < lm.layer_mm2.size() ? lm.layer_mm2[k] : 0.0, b = k < lt.layer_mm2.size() ? lt.layer_mm2[k] : 0.0;
+    diff += std::fabs(a - b);
+    total += a;
+  }
+  auto passes = [](const PrintableReport& r) {
+    std::string o;
+    for (int f : r.found_per_pass) o += std::to_string(f) + " ";
+    return o;
+  };
+  std::printf("route: merged %d passes (found %s), clean %d, %zu triangles; tubes %d passes (found %s), clean %d, %zu triangles, "
+              "%zu shells (%zu tubes, %zu shallow, %zu feet, %zu posts), %zu left out, solid made %d times; layers differ by "
+              "%.3f %% of %.1f mm2\n",
+              rm.passes, passes(rm).c_str(), rm.clean ? 1 : 0, mm.triangles.size(), rt.passes, passes(rt).c_str(),
+              rt.clean ? 1 : 0, mt.triangles.size(), rt.shells.shells(), rt.shells.tubes, rt.shells.bridges, rt.shells.feet,
+              rt.shells.posts, rt.shells.left_out, rt.base_builds, 100.0 * diff / total, total);
+  for (const PrintableReport* r : {&rm, &rt}) {
+    for (const auto& m : r->layers.mid_air) std::printf("  mid-air at %.2f %.2f %.2f (%.3f mm2)\n", m.x, m.y, m.z, m.mm2);
+    for (const auto& o : r->layers.one_ended) std::printf("  one-ended at %.2f %.2f %.2f reach %.2f\n", o.x, o.y, o.z, o.reach_mm);
+    for (const auto& o : r->layers.long_bridges) std::printf("  long bridge at %.2f %.2f %.2f reach %.2f\n", o.x, o.y, o.z, o.reach_mm);
+  }
+  CHECK(!rm.found_per_pass.empty() && rm.found_per_pass.front() > 0);   // it did start overhanging
+  CHECK(rt.clean && rt.found_per_pass.back() == 0 && rt.passes <= rm.passes);
+  CHECK(total > 0.0 && diff < 0.03 * total);
+  // The keys: mesh "weave_mesh" ("tubes" or "merged"; anything else refused, by name) and "tube_sides" (3 or more).
+  {
+    auto job = [](const std::string& mesh) { return R"({"mode": "lattice_file", "model": "a.step", "mesh": {)" + mesh + "}}"; };
+    const FileJob plain = parse_file_job(job(""));
+    CHECK(!plain.options.weave_mesh_asked && plain.options.mesh.weave_mesh == MeshSpec::WeaveMesh::Merged &&
+          plain.options.mesh.tube_sides == 8);
+    const FileJob t = parse_file_job(job(R"("weave_mesh": "tubes", "tube_sides": 12)"));
+    CHECK(t.options.weave_mesh_asked && t.options.mesh.weave_mesh == MeshSpec::WeaveMesh::Tubes && t.options.mesh.tube_sides == 12);
+    const FileJob m = parse_file_job(job(R"("weave_mesh": "merged")"));
+    CHECK(m.options.weave_mesh_asked && m.options.mesh.weave_mesh == MeshSpec::WeaveMesh::Merged);
+    for (const char* bad : {R"("weave_mesh": "solid")", R"("tube_sides": 2)"}) {
+      bool refused = false;
+      try { (void)parse_file_job(job(bad)); } catch (const FileJobError& e) {
+        refused = std::string(e.what()).find(std::string(bad).substr(1, 9)) != std::string::npos;
+      }
+      CHECK(refused);
+    }
+  }
+  // The route is the writer's choice only with a weave region: a cube-lattice part reads it as Merged, the same mesh.
+  {
+    PrintableReport a, b;
+    Layout no_weave = out.layout;
+    no_weave.weave.clear();
+    Bars cube;
+    for (const Bar& x : out.bars.bars)
+      if (x.region == 2) cube.bars.push_back(x);
+    const OpenSpace o2 = read_open_space(d, no_weave, 0.25);
+    const TriangleMesh x = build_printable_mesh(session.measure(), d, no_weave, cube, o2, merged_spec, &a);
+    const TriangleMesh y = build_printable_mesh(session.measure(), d, no_weave, cube, o2, tubes_spec, &b);
+    bool same = x.vertices.size() == y.vertices.size() && x.triangles == y.triangles && !b.tubes;
+    for (std::size_t i = 0; same && i < x.vertices.size(); ++i)
+      same = x.vertices[i].x == y.vertices[i].x && x.vertices[i].y == y.vertices[i].y && x.vertices[i].z == y.vertices[i].z;
+    CHECK(same && !x.triangles.empty());
+  }
+}
+
 int main() {
   if (!mesh_available()) {
     std::printf("no mesh library in this build (%d checks, %d failed)\n", g_checks, g_fail);
@@ -447,6 +543,7 @@ int main() {
   test_nonzero_fill();
   test_tubes_from_bars();
   test_trimmed_to_part();
+  test_tubes_route();
   std::printf("weave tubes: %d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }

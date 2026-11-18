@@ -517,18 +517,75 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
   std::vector<int> weave_regions;
   for (const Layout::Weave& w : layout.weave) weave_regions.push_back(w.region);
   std::vector<Vec3> stands_asked;   // O8: the middles of long stretches already asked about (posted or not)
+  // OF4, the tubes route: the solid, with any cube lattice joined to it, is made apart from the weave's shells.
+  rep.tubes = spec.mesh.weave_mesh == MeshSpec::WeaveMesh::Tubes && !weave_regions.empty();
+  Bars cube_bars;
+  TriangleMesh base;
+  MeshReport base_rep;
+  std::vector<char> base_present, base_slivers;
+  if (rep.tubes)
+    for (const Bar& x : bars.bars)
+      if (std::find(weave_regions.begin(), weave_regions.end(), x.region) == weave_regions.end()) cube_bars.bars.push_back(x);
   for (int pass = 1; pass <= most; ++pass) {
     rep.passes = pass;
-    mesh = build_mesh(part, domain, layout, bars, carved, ms, &rep.mesh);
-    if (!rep.mesh.ok) { mesh = TriangleMesh{}; break; }
     LayerSpec layers = spec.layers;
     WeaveHolds holds;
     std::vector<char> present;
     std::vector<WeaveStand> stands;
     if (!weave_regions.empty()) {
-      // The bars the writer kept on this pass (weave_holds after `drop_at`), and their runs' long stretches.
+      // The bars the writer keeps on this pass (weave_holds after `drop_at`).
       present = bars_present(bars, ms.drop_at, weave_regions, ms.layer_mm);
       holds = weave_holds(bars, weave_regions, present, ms.bridge_rise);
+    }
+    if (rep.tubes) {
+      // The solid again only when the cube bars left in, or the slivers left out, changed.
+      const std::vector<char> cp = bars_present(cube_bars, ms.drop_at), sl = solid_slivers_left_out(carved, ms.drop_at);
+      if (rep.base_builds == 0 || cp != base_present || sl != base_slivers) {
+        MeshSpec bs = ms;
+        bs.posts.clear();
+        bs.keep_pieces = true;
+        base = build_mesh(part, domain, layout, cube_bars, carved, bs, &base_rep);
+        base_present = cp;
+        base_slivers = sl;
+        ++rep.base_builds;
+      }
+      rep.mesh = base_rep;
+      if (!rep.mesh.ok) { mesh = TriangleMesh{}; break; }
+      // The weave's shells from the bars as they now stand (OF2, OF3), and the posts.
+      rep.shells = weave_shells(part, domain, layout, bars, holds.kept, carved, ms, true);
+      rep.ms_shells += rep.shells.ms;
+      mesh = base;
+      rep.base_triangles = base.triangles.size();
+      rep.shell_first_tri.clear();
+      const int vb = static_cast<int>(mesh.vertices.size());
+      mesh.vertices.insert(mesh.vertices.end(), rep.shells.mesh.vertices.begin(), rep.shells.mesh.vertices.end());
+      for (const auto& t : rep.shells.mesh.triangles) mesh.triangles.push_back({t[0] + vb, t[1] + vb, t[2] + vb});
+      for (std::size_t f : rep.shells.first_tri) rep.shell_first_tri.push_back(rep.base_triangles + f);
+      rep.shells.mesh = TriangleMesh{};
+      // The writer's counts for the whole file: the weave bars left out, the shells' shapes, the triangles.
+      for (std::size_t i = 0; i < bars.bars.size(); ++i) {
+        const Bar& x = bars.bars[i];
+        if (std::find(weave_regions.begin(), weave_regions.end(), x.region) == weave_regions.end() || present[i]) continue;
+        ++rep.mesh.bars_left_out;
+        rep.mesh.bars_left_out_mm += std::sqrt((x.b.x - x.a.x) * (x.b.x - x.a.x) + (x.b.y - x.a.y) * (x.b.y - x.a.y) + (x.b.z - x.a.z) * (x.b.z - x.a.z));
+      }
+      rep.mesh.kept_any_length = holds.kept_any_length;
+      rep.mesh.weave_left_unheld = holds.left_unheld;
+      rep.mesh.bridges += rep.shells.bridges;
+      rep.mesh.feet = rep.shells.feet;
+      rep.mesh.posts = rep.shells.posts;
+      rep.mesh.posts_mm = 0.0;
+      for (const MeshSpec::Post& p : ms.posts)
+        if (p.z_top > p.z_bottom) rep.mesh.posts_mm += p.z_top - p.z_bottom;
+      rep.mesh.triangles = mesh.triangles.size();
+      rep.mesh.mm3 += rep.shells.mm3;
+      layers.fill = LayerSpec::Fill::NonZero;
+    } else {
+      mesh = build_mesh(part, domain, layout, bars, carved, ms, &rep.mesh);
+      if (!rep.mesh.ok) { mesh = TriangleMesh{}; break; }
+    }
+    if (!weave_regions.empty()) {
+      // Their runs' long stretches.
       for (const WeaveStand& w : weave_stands_wanted(bars, weave_regions, holds.kept, ms.weave_stand_every_mm, ms.bridge_rise)) {
         bool before = false;
         for (const Vec3& p : stands_asked) before = before || (p.x == w.at.x && p.y == w.at.y && p.z == w.at.z);

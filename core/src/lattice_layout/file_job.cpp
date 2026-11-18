@@ -583,7 +583,7 @@ FileOptions options_from(const json::Value& in, const std::string& w) {
                        {"pitch_mm", "bar_sides", "block_mm", "grow_mm", "clean_mm", "part_mm",
                         "fill_under_mm3", "bridge_rise", "post_mm", "layer_mm", "pixel_mm", "most_passes",
                         "leave_out", "keep_if_not_clean", "weave_stand_every_mm", "weave_foot_mm", "weave_round_top",
-                        "weave_sag_lift_mm", "weave_sag_legs"},
+                        "weave_sag_lift_mm", "weave_sag_legs", "weave_mesh", "tube_sides"},
                        w);
   FileOptions o;
   o.pitch_mm = num(in, "pitch_mm", o.pitch_mm, w);
@@ -602,6 +602,15 @@ FileOptions options_from(const json::Value& in, const std::string& w) {
   o.mesh.weave_sag_lift_mm = num(in, "weave_sag_lift_mm", o.mesh.weave_sag_lift_mm, w);   // O17: 0 = never lift
   if (!(o.mesh.weave_sag_lift_mm >= 0.0)) json::fail(w + ".weave_sag_lift_mm", "must be 0 (never) or more");
   o.mesh.weave_sag_legs = flag(in, "weave_sag_legs", o.mesh.weave_sag_legs, w);   // O18: false = no leg
+  if (json::find(in, "weave_mesh")) {   // OF4
+    const std::string m = text(in, "weave_mesh", "", w);
+    if (m == "tubes") o.mesh.weave_mesh = MeshSpec::WeaveMesh::Tubes;
+    else if (m == "merged") o.mesh.weave_mesh = MeshSpec::WeaveMesh::Merged;
+    else json::fail(w + ".weave_mesh", "must be \"tubes\" or \"merged\", not \"" + m + "\"");
+    o.weave_mesh_asked = true;
+  }
+  o.mesh.tube_sides = whole(in, "tube_sides", o.mesh.tube_sides, w);   // OF2
+  if (o.mesh.tube_sides < 3) json::fail(w + ".tube_sides", "must be 3 or more");
   o.layers.layer_mm = num(in, "layer_mm", o.layers.layer_mm, w);
   o.layers.pixel_mm = num(in, "pixel_mm", o.layers.pixel_mm, w);
   o.most_passes = whole(in, "most_passes", o.most_passes, w);
@@ -752,6 +761,12 @@ TriangleMesh make_file_mesh(const Session& session, const Outcome& outcome, cons
   report.weave_held_ignored = made.weave_held_ignored;
   report.sags = made.sags;
   report.sagged = made.sagged;
+  report.tubes = made.tubes;
+  report.shells = made.shells;
+  report.base_triangles = made.base_triangles;
+  report.shell_first_tri = made.shell_first_tri;
+  report.base_builds = made.base_builds;
+  report.ms_shells = made.ms_shells;
   if (made.mesh.ok) {
     report.bed_contact_mm2 = made.layers.bed_mm2;
     report.midair_starts = static_cast<int>(made.layers.mid_air.size());
@@ -1276,7 +1291,10 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     }
 
     say(said, "making the file");
-    const TriangleMesh mesh = make_file_mesh(session, out, job.options, r.made, stop);
+    FileOptions options = job.options;
+    // OF4: a job with a weave region takes the tubes route unless it asked for one.
+    if (!weave_regions.empty() && !options.weave_mesh_asked) options.mesh.weave_mesh = MeshSpec::WeaveMesh::Tubes;
+    const TriangleMesh mesh = make_file_mesh(session, out, options, r.made, stop);
     if (!r.made.mesh.ok || mesh.empty()) {
       refuse(r, kMeshFailed,
              r.made.mesh.why.empty() ? "The lattice file could not be put together. Nothing was made."
