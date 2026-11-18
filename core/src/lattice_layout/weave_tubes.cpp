@@ -216,23 +216,185 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
       start = k;
     }
   }
+  // Every shell on its own, to be trimmed (OF3) on any number of threads; joined into one list at the end.
+  std::vector<TriangleMesh> shells;
   std::vector<int> made_from;   // per shell: its piece, or -1 (a shape of build_mesh's)
-  for (std::size_t i = 0; i < pieces.size(); ++i)
-    if (sweep(pieces[i], sides, out.mesh, out.first_tri)) { ++out.tubes; made_from.push_back(static_cast<int>(i)); }
+  auto split_off = [&](TriangleMesh& all, std::vector<std::size_t>& firsts, int piece) {
+    firsts.push_back(all.triangles.size());
+    for (std::size_t s = 0; s + 1 < firsts.size(); ++s) {
+      TriangleMesh one;
+      int lo = 1 << 30, hi = -1;
+      for (std::size_t t = firsts[s]; t < firsts[s + 1]; ++t)
+        for (int k = 0; k < 3; ++k) { lo = std::min(lo, all.triangles[t][static_cast<std::size_t>(k)]); hi = std::max(hi, all.triangles[t][static_cast<std::size_t>(k)]); }
+      if (hi < 0) continue;
+      one.vertices.assign(all.vertices.begin() + lo, all.vertices.begin() + hi + 1);
+      for (std::size_t t = firsts[s]; t < firsts[s + 1]; ++t)
+        one.triangles.push_back({all.triangles[t][0] - lo, all.triangles[t][1] - lo, all.triangles[t][2] - lo});
+      shells.push_back(std::move(one));
+      made_from.push_back(piece);
+    }
+  };
+  for (std::size_t i = 0; i < pieces.size(); ++i) {
+    TriangleMesh one;
+    std::vector<std::size_t> firsts;
+    if (!sweep(pieces[i], sides, one, firsts)) continue;
+    ++out.tubes;
+    split_off(one, firsts, static_cast<int>(i));
+  }
   // build_mesh's own shapes: the shallow struts, the feet, the posts.
   {
     MeshReport counts;
-    const std::size_t before = out.first_tri.size();
-    weave_bar_shells(domain, layout, bars, strut, feet, carved, spec, out.mesh, out.first_tri, counts);
+    TriangleMesh all;
+    std::vector<std::size_t> firsts;
+    weave_bar_shells(domain, layout, bars, strut, feet, carved, spec, all, firsts, counts);
     out.bridges = counts.bridges;
     out.feet = counts.feet;
     out.posts = counts.posts;
-    made_from.resize(made_from.size() + (out.first_tri.size() - before), -1);
+    split_off(all, firsts, -1);
+  }
+  // OF3: trimmed to the part.
+  std::vector<char> keep(shells.size(), 1);
+  if (trim && !shells.empty()) {
+    const double over = 0.02;
+    std::vector<double> moved_most(shells.size(), 0.0), outside_most(shells.size(), 0.0);
+    std::vector<std::size_t> moved(shells.size(), 0);
+    std::vector<char> rebuilt(shells.size(), 0);
+    // Trims one shell in place; true when it is still closed (by index, untouched) with a positive volume of at
+    // least 5 % of what it was.
+    auto trim_one = [&](const PartMeasure::Probe& pr, TriangleMesh& m, std::size_t s) {
+      const double before = volume_of(m, 0, m.triangles.size());
+      std::size_t n = 0;
+      double most = 0.0, outside = 0.0;
+      for (Vec3& v : m.vertices) {
+        if (pr.inside(v)) continue;
+        double d = pr.depth(v);
+        if (d >= -over) { outside = std::max(outside, -d); continue; }
+        const Vec3 was = v;
+        for (int it = 0; it < 4 && d < -1e-4; ++it) {
+          v = add(v, mul(pr.through(v), -d));
+          d = pr.depth(v);
+        }
+        ++n;
+        most = std::max(most, len(sub(v, was)));
+        outside = std::max(outside, std::max(0.0, -d));
+      }
+      const double after = volume_of(m, 0, m.triangles.size());
+      moved[s] = n;
+      moved_most[s] = most;
+      outside_most[s] = outside;
+      return after > 0.0 && after >= 0.05 * before;
+    };
+    // A tube made again from its run cut back where its line leaves the part: the longest stretch of its centre line
+    // inside the part, ends found to a micron, flat there; an end that was inside keeps its own cap.
+    auto cut_back = [&](const PartMeasure::Probe& pr, const Piece& pc, Piece& cut) {
+      const std::size_t n = pc.p.size();
+      std::vector<char> in(n);
+      for (std::size_t j = 0; j < n; ++j) in[j] = pr.inside(pc.p[j]);
+      // Each segment sampled at 0.1 mm for where the line is inside: the longest inside stretch, as (segment, t).
+      struct At { std::size_t seg; double t; };
+      std::vector<std::pair<At, At>> stretches;
+      bool open = false;
+      At from{0, 0.0};
+      auto edge = [&](std::size_t k, double ta, double tb) {   // the place between ta (in) and tb (out) or back
+        const bool a_in = pr.inside(add(pc.p[k], mul(sub(pc.p[k + 1], pc.p[k]), ta)));
+        for (int it = 0; it < 30; ++it) {
+          const double tm = 0.5 * (ta + tb);
+          (pr.inside(add(pc.p[k], mul(sub(pc.p[k + 1], pc.p[k]), tm))) == a_in ? ta : tb) = tm;
+        }
+        return a_in ? ta : tb;
+      };
+      for (std::size_t k = 0; k + 1 < n; ++k) {
+        const double L = len(sub(pc.p[k + 1], pc.p[k]));
+        const int steps = std::max(1, static_cast<int>(std::ceil(L / 0.1)));
+        double tp = 0.0;
+        bool ip = pr.inside(pc.p[k]);
+        if (k == 0 && ip) { open = true; from = {0, 0.0}; }
+        for (int q = 1; q <= steps; ++q) {
+          const double t = static_cast<double>(q) / steps;
+          const bool i2 = pr.inside(add(pc.p[k], mul(sub(pc.p[k + 1], pc.p[k]), t)));
+          if (i2 != ip) {
+            const double te = edge(k, tp, t);
+            if (i2) { open = true; from = {k, te}; }
+            else if (open) { stretches.push_back({from, {k, te}}); open = false; }
+          }
+          ip = i2;
+          tp = t;
+        }
+      }
+      if (open) stretches.push_back({from, {n - 2, 1.0}});
+      double best = 0.0;
+      const std::pair<At, At>* pick = nullptr;
+      auto along = [&](const At& a) {
+        double l = 0.0;
+        for (std::size_t k = 0; k < a.seg; ++k) l += len(sub(pc.p[k + 1], pc.p[k]));
+        return l + a.t * len(sub(pc.p[a.seg + 1], pc.p[a.seg]));
+      };
+      for (const auto& st : stretches) {
+        const double l = along(st.second) - along(st.first);
+        if (l > best) { best = l; pick = &st; }
+      }
+      if (!pick || best < 1e-3) return false;
+      auto point = [&](const At& a) { return add(pc.p[a.seg], mul(sub(pc.p[a.seg + 1], pc.p[a.seg]), a.t)); };
+      auto radius = [&](const At& a) { return pc.r[a.seg] + (pc.r[a.seg + 1] - pc.r[a.seg]) * a.t; };
+      cut = Piece{};
+      cut.p.push_back(point(pick->first));
+      cut.r.push_back(radius(pick->first));
+      for (std::size_t j = pick->first.seg + 1; j <= pick->second.seg; ++j) {
+        if (len(sub(pc.p[j], cut.p.back())) < 1e-6) continue;
+        cut.p.push_back(pc.p[j]);
+        cut.r.push_back(pc.r[j]);
+      }
+      const Vec3 e = point(pick->second);
+      if (len(sub(e, cut.p.back())) > 1e-6) { cut.p.push_back(e); cut.r.push_back(radius(pick->second)); }
+      if (cut.p.size() < 2) return false;
+      const bool a_whole = pick->first.seg == 0 && pick->first.t == 0.0 && in[0];
+      const bool b_whole = pick->second.seg == n - 2 && pick->second.t == 1.0 && in[n - 1];
+      cut.cap_a = a_whole ? pc.cap_a : Cap::Flat;
+      cut.cap_b = b_whole ? pc.cap_b : Cap::Flat;
+      return true;
+    };
+    std::atomic<std::size_t> next{0};
+    auto work = [&] {
+      const PartMeasure::Probe pr = part.probe();
+      for (std::size_t s = next.fetch_add(1); s < shells.size() && !(spec.stop && spec.stop->load()); s = next.fetch_add(1)) {
+        if (trim_one(pr, shells[s], s)) continue;
+        keep[s] = 0;
+        if (made_from[s] < 0) continue;
+        Piece cut;
+        if (!cut_back(pr, pieces[static_cast<std::size_t>(made_from[s])], cut)) continue;
+        TriangleMesh again;
+        std::vector<std::size_t> firsts;
+        if (!sweep(cut, sides, again, firsts)) continue;
+        if (!trim_one(pr, again, s)) continue;
+        shells[s] = std::move(again);
+        keep[s] = 1;
+        rebuilt[s] = 1;
+      }
+    };
+    const int nt = std::max(1, std::min<int>(spec.threads > 0 ? spec.threads : static_cast<int>(std::thread::hardware_concurrency()),
+                                            static_cast<int>(shells.size())));
+    std::vector<std::thread> pool;
+    for (int t = 1; t < nt; ++t) pool.emplace_back(work);
+    work();
+    for (std::thread& t : pool) t.join();
+    if (spec.stop && spec.stop->load()) throw LayCancelled{};
+    for (std::size_t s = 0; s < shells.size(); ++s) {
+      out.rebuilt += rebuilt[s];
+      if (!keep[s]) { ++out.left_out; continue; }
+      out.trimmed_vertices += moved[s];
+      out.trimmed_largest_mm = std::max(out.trimmed_largest_mm, moved_most[s]);
+      out.outside_largest_mm = std::max(out.outside_largest_mm, outside_most[s]);
+    }
+  }
+  for (std::size_t s = 0; s < shells.size(); ++s) {
+    if (!keep[s]) continue;
+    const int base = static_cast<int>(out.mesh.vertices.size());
+    out.first_tri.push_back(out.mesh.triangles.size());
+    out.mesh.vertices.insert(out.mesh.vertices.end(), shells[s].vertices.begin(), shells[s].vertices.end());
+    for (const auto& t : shells[s].triangles) out.mesh.triangles.push_back({t[0] + base, t[1] + base, t[2] + base});
+    out.mm3 += volume_of(shells[s], 0, shells[s].triangles.size());
   }
   out.first_tri.push_back(out.mesh.triangles.size());
-  (void)part;
-  (void)trim;
-  for (std::size_t s = 0; s + 1 < out.first_tri.size(); ++s) out.mm3 += volume_of(out.mesh, out.first_tri[s], out.first_tri[s + 1]);
   out.ms = ms_since(t0);
   return out;
 }

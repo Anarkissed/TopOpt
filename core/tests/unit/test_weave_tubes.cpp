@@ -1,6 +1,7 @@
 // Organic cut 2 (brief E1): the print file as the carved solid plus unmerged closed tubes.
 //   OF1  the layer check's NonZero fill: overlapping closed shells read as their union.
 //   OF2  tubes from the final bars: every shell closed and outward, their union the merged lattice's volume.
+//   OF3  trimmed to the part: nothing more than 0.05 mm outside a slanted face or into a slot, nothing below the bed.
 // Needs the Manifold library (the test makes its reference unions with it).
 #include <algorithm>
 #include <array>
@@ -360,6 +361,84 @@ static void test_tubes_from_bars() {
   CHECK(bar_of.empty());
 }
 
+// A part with a slanted face and a slot (a 2 mm notch down into it, under the slanted face's low end): 30 wide, 20 deep
+// (z), the slanted face from (14, 13) to (0, 18); face 0 the slanted face, 1 the rest. A weave region 6 mm under the
+// slanted face.
+static StepModel slanted_slot_part() {
+  const std::vector<std::array<double, 2>> xy = {{0, 0}, {30, 0}, {30, 10}, {16, 10}, {16, 5}, {14, 5}, {14, 13}, {0, 18}};
+  const TriangleMesh mesh = prism_poly(xy, 0, 20);
+  StepModel model;
+  model.mesh = mesh;
+  StepFaceInfo slant, rest;
+  slant.kind = StepSurfaceKind::Plane;
+  const double nx = 5.0, ny = 14.0, nl = std::hypot(nx, ny);   // outward normal of the slanted face
+  slant.plane_normal = {nx / nl, ny / nl, 0};
+  slant.plane_origin = {7, 15.5, 10};
+  rest.kind = StepSurfaceKind::Other;
+  model.faces = {slant, rest};
+  model.face_count = 2;
+  for (const auto& t : mesh.triangles) {
+    bool on = true;
+    for (int k = 0; k < 3; ++k) {
+      const Vec3& v = mesh.vertices[static_cast<std::size_t>(t[static_cast<std::size_t>(k)])];
+      on = on && std::fabs((v.x - 7.0) * nx + (v.y - 15.5) * ny) < 1e-6;
+    }
+    model.triangle_face.push_back(on ? 0 : 1);
+  }
+  model.solid_count = 1;
+  return model;
+}
+
+// OF3: trimmed to the part, on a made part with a slanted face and a slot: no vertex of any shell more than 0.05 mm
+// outside the part, nothing below the bed; every shell still closed and outward; what was left out is counted.
+static void test_trimmed_to_part() {
+  const StepModel model = slanted_slot_part();
+  Session session(model);
+  Settings s;
+  s.regions = {{1, Role::Lattice, {0}, 6.0, 0.0, true}};
+  s.cells.cell_max_mm = 4;
+  s.cells.min_cells_across = 1;
+  // Strands through the region: steep ones from beyond the slanted face down into the part (they meet the face on a
+  // slant), steep ones down past the slot, and level ones across it.
+  std::vector<Strand> strands;
+  for (double x = 1.0; x < 14.0; x += 2.5)
+    for (double z = 2.0; z < 18.0; z += 4.0) {
+      const double yf = 18.0 - 5.0 * x / 14.0;   // the face's height here
+      strands.push_back(weave_strand({{x, yf + 1.0, z}, {x + 0.7, yf - 2.0, z + 2.0}, {x + 1.4, yf - 5.0, z + 4.5},
+                                      {x + 2.0, yf - 9.0, z + 7.0}}));
+    }
+  for (double z = 3.0; z < 18.0; z += 3.0) strands.push_back(weave_strand({{4.0, 9.0, z}, {15.0, 7.0, z + 0.3}, {19.0, 9.0, z}}));
+  for (double x : {13.2, 14.6, 15.4, 16.8}) strands.push_back(weave_strand({{x, 9.5, -1.0}, {x + 0.3, 6.0, 9.0}, {x, 9.5, 21.0}}));
+  for (double z = 1.0; z < 20.0; z += 2.0) strands.push_back(weave_strand({{-1.0, 16.7, z}, {15.0, 12.1, z}}));
+  const Outcome out = session.lay_weave(s, strands);
+  std::printf("slanted part: cancelled %d, weave regions %zu, bars %zu, empty regions %zu\n", out.cancelled ? 1 : 0,
+              out.layout.weave.size(), out.bars.bars.size(), out.empty_regions.size());
+  CHECK(!out.cancelled && out.layout.weave.size() == 1 && !out.bars.bars.empty());
+  const Domain& d = *session.domain();
+  const PartMeasure& pm = session.measure();
+  const OpenSpace open = read_open_space(d, out.layout, 0.25);
+  const Carved carved = carve_part(pm, out.layout, open);
+  const MeshSpec spec = file_mesh_defaults();
+  const WeaveShells raw = weave_shells(pm, d, out.layout, out.bars, {}, carved, spec, false);
+  const WeaveShells w = weave_shells(pm, d, out.layout, out.bars, {}, carved, spec, true);
+  auto pr = pm.probe();
+  double worst_raw = 0.0, worst = 0.0, z_low = 1e9;
+  for (const Vec3& v : raw.mesh.vertices) worst_raw = std::max(worst_raw, -pr.depth(v));
+  for (const Vec3& v : w.mesh.vertices) { worst = std::max(worst, -pr.depth(v)); z_low = std::min(z_low, v.z); }
+  double least = 0.0;
+  const std::size_t good = shells_closed_outward(w, &least);
+  std::printf("trimmed: %zu shells (%zu tubes, %zu shallow struts, %zu feet) from %zu; before trimming %.3f mm outside at most, "
+              "after %.4f mm (reported %.4f); %zu vertices moved, %.3f mm at most; %zu made again, %zu left out; lowest z %.4f\n",
+              w.shells(), w.tubes, w.bridges, w.feet, raw.shells(), worst_raw, worst, w.outside_largest_mm, w.trimmed_vertices,
+              w.trimmed_largest_mm, w.rebuilt, w.left_out, z_low);
+  CHECK(worst_raw > 0.1);                      // there was something to trim
+  CHECK(w.trimmed_vertices > 0 && worst <= 0.05);
+  CHECK(std::fabs(w.outside_largest_mm - worst) < 1e-3);
+  CHECK(z_low >= -0.05);                       // the bed is the part's lowest z, 0
+  CHECK(good == w.shells() && least > 0.0);
+  CHECK(w.shells() + w.left_out == raw.shells());
+}
+
 int main() {
   if (!mesh_available()) {
     std::printf("no mesh library in this build (%d checks, %d failed)\n", g_checks, g_fail);
@@ -367,6 +446,7 @@ int main() {
   }
   test_nonzero_fill();
   test_tubes_from_bars();
+  test_trimmed_to_part();
   std::printf("weave tubes: %d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }
