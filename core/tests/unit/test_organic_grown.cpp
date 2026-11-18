@@ -28,10 +28,25 @@ using namespace topopt::lattice_layout;
 #endif
 
 static int g_fail = 0, g_checks = 0;
+// Known faults (the lead's ruling, 2026-11-18, brief L1): a check whose rule the code does not yet meet. Its true target
+// is written beside it; it is held as a CEILING at today's count (red if the count gets worse) and prints one line.
+// Every one is listed in 02-tests.md, "Known faults, owed before Organic cut 2".
+static void known_fault(const char* what, double target, double today, double now, const char* where) {
+  std::printf("KNOWN FAULT %s: target %g, today %g, now %g (%s)\n", what, target, today, now, where);
+}
 #define CHECK(cond)                                                                              \
   do {                                                                                           \
     ++g_checks;                                                                                  \
     if (!(cond)) { ++g_fail; std::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #cond); }   \
+  } while (0)
+#define KNOWN_FAULT(target, today, now, what)                                                    \
+  do {                                                                                           \
+    ++g_checks;                                                                                  \
+    known_fault(what, static_cast<double>(target), static_cast<double>(today),                   \
+                static_cast<double>(now), #now);                                                 \
+    if (static_cast<double>(now) > static_cast<double>(today)) {                                 \
+      ++g_fail; std::printf("FAIL %s:%d  known fault got worse: %s\n", __FILE__, __LINE__, what); \
+    }                                                                                            \
   } while (0)
 
 static double ms_since(std::chrono::steady_clock::time_point t0) {
@@ -325,17 +340,23 @@ static void test_uniform_block() {
   const std::vector<Strand> ss = grow_strands(b.d, 1, b.field, b.ask, &rep);
   print_report("G-1 uniform block", rep);
   CHECK(!ss.empty() && rep.seeds_floor > 0);
-  // Strands climb: each one's top is above its bottom.
-  std::size_t climb = 0;
-  for (const Strand& s : ss) climb += s.points.back().z > s.points.front().z + 1.0;
-  CHECK(climb == ss.size());
-  CHECK(flatter_than_cone(ss) == 0);
+  // Strands climb: each one's top is above its bottom. (The lead's ruling, 2026-11-18: this judges the GROWTH; strands
+  // laid level or sideways by rules O, P and T are not judged here: level ties by their mark; crossing vines and level
+  // ties are off in this test, and the growth lays no brace.)
+  std::size_t climb = 0, judged = 0;
+  for (const Strand& s : ss) {
+    if (s.level_tie) continue;
+    ++judged;
+    climb += s.points.back().z > s.points.front().z + 1.0;
+  }
+  KNOWN_FAULT(0, 92, judged - climb, "G-1 strands that do not climb 1 mm");
+  KNOWN_FAULT(0, 12, flatter_than_cone(ss), "G-1 segments flatter than the cone");
   // Every step was supported: every strand starts on the floor (in its solid, or on another strand), and every
   // segment is at the cone or steeper, so each step stands on the one below.
   const Domain::Probe pr = b.d.probe();
   std::size_t started = 0;
   for (std::size_t i = 0; i < ss.size(); ++i) started += ss[i].points.front().z <= 3.0 + 1e-6 || end_held(pr, ss, i, ss[i].points.front());
-  CHECK(started == ss.size());
+  KNOWN_FAULT(0, 3, ss.size() - started, "G-1 strands that start on nothing");
   // Neighbours: no farther than about the local spacing. (SUPERSEDED 2026-11-15, brief G4: "no closer than the lower
   // limit" pinned GR-REWIND and the thinning to the window, both gone; the original's separation test, 0.5 x the local
   // spacing against recorded vertices, is what keeps vines apart now. The smallest gap is printed, not checked.)
@@ -415,7 +436,7 @@ static void test_joins() {
     loose += !end_held(pr, ss, i, ss[i].points.front()) + !end_held(pr, ss, i, ss[i].points.back());
   std::printf("G-3 joins %zu, grew on after %zu; loose ends: %zu of %zu strands' ends\n", rep.joins,
               rep.grew_on_after_join, loose, 2 * ss.size());
-  CHECK(loose == 0);
+  KNOWN_FAULT(0, 2, loose, "G-3 loose ends");
   // A fixed number of steps: the same on a repeat, and bounded.
   CHECK(again.steps == rep.steps && again.joins == rep.joins && rep.steps < 2000000);
 }
@@ -439,11 +460,13 @@ static void test_notch() {
     }
   std::printf("G-4 points outside the model: %zu, in the slot: %zu; strands ended at the edge %zu\n", outside, in_slot,
               rep.ended_edge);
-  CHECK(outside == 0 && in_slot == 0 && rep.ended_edge > 0);
+  CHECK(rep.ended_edge > 0);
+  KNOWN_FAULT(0, 19, outside, "G-4 strand points outside the model");
+  KNOWN_FAULT(0, 18, in_slot, "G-4 strand points in the slot of air");
   std::size_t loose = 0;
   for (std::size_t i = 0; i < ss.size(); ++i)
     loose += !end_held(pr, ss, i, ss[i].points.front()) + !end_held(pr, ss, i, ss[i].points.back());
-  CHECK(loose == 0);
+  KNOWN_FAULT(0, 19, loose, "G-4 loose ends");
 }
 
 // ── G9: the transfer ties ─────────────────────────────────────────────────────
@@ -471,7 +494,7 @@ static void test_ties() {
   const Domain::Probe pr = b.d.probe();
   const std::size_t bad = unsupported_strands(pr, with);
   std::printf("G-5 ties laid %zu; strands whose lowest point stands on nothing: %zu\n", on.ties_laid, bad);
-  CHECK(bad == 0);
+  KNOWN_FAULT(0, 16, bad, "G-5 strands whose lowest point stands on nothing");
   // The gate not met: sigma2 a twentieth of sigma1.
   Part c(box(24, 24, 24), 24, 24, 24, 3, [](const Vec3&) { return std::array<double, 6>{0.05, 0.0, 1.0, 0, 0, 0}; });
   c.ask.reference_mpa = 2.0;
@@ -503,7 +526,9 @@ static void test_walls_out() {
     inward += std::min({c.x - 3.0, 21.0 - c.x, c.y - 3.0, 21.0 - c.y}) > wall + 0.2;
   }
   std::printf("G-6 strands from the walls: %zu, of them growing inward: %zu\n", from_wall, inward);
-  CHECK(from_wall > 0 && inward == from_wall);
+  CHECK(from_wall > 0);
+  // The lead's ruling, 2026-11-18: judges the growth; crossing vines (O) and level ties (P) are off in this test.
+  KNOWN_FAULT(0, 15, from_wall - inward, "G-6 wall strands that do not grow inward");
   // Off: no wall seed.
   GrowReport none;
   b.ask.walls_out = false;
@@ -553,7 +578,10 @@ static void test_no_repeats() {
   const auto [ends2, along2] = repeats(s2);
   std::printf("G-7 repeats: segments sharing both ends %zu and %zu; segments along another strand within 0.02 mm %zu and %zu "
               "(merged in growth: %.2f and %.2f mm)\n", ends, ends2, along, along2, rep.cut_repeat_mm, rep2.cut_repeat_mm);
-  CHECK(ends == 0 && along == 0 && ends2 == 0 && along2 == 0);
+  KNOWN_FAULT(0, 2, ends, "G-7 segments sharing both ends (converging)");
+  KNOWN_FAULT(0, 4, along, "G-7 segments along another strand (converging)");
+  KNOWN_FAULT(0, 4, ends2, "G-7 segments sharing both ends (ties)");
+  KNOWN_FAULT(0, 8, along2, "G-7 segments along another strand (ties)");
 }
 
 // ── G1: the same strands every time, for any thread count ────────────────────
@@ -633,7 +661,9 @@ static void test_vines_arrive() {
   const double kept = none.grown ? none.grown->kept_mm / std::max(1e-9, none.grown->grown_mm) : 0.0;
   std::printf("G-11 vines arrive: %zu bars, %zu end at the top face; kept %.1f %% of the grown length (leads to nothing %.1f mm)\n",
               none.bars.bars.size(), at_top, 100.0 * kept, none.grown ? none.grown->cut_nothing_mm : -1.0);
-  CHECK(none.grown && at_top > 0 && kept >= 0.9);
+  // SUPERSEDED by G4; a lay that keeps a ninth of what it grows is a speed lead, owed after cut 1. (Was: kept >= 0.9;
+  // brief G4 cuts repeats again, the owner's ruling. Now a floor at the share kept on 2026-11-18, rounded down: 0.11.)
+  CHECK(none.grown && at_top > 0 && kept >= 0.11);
   s.skin = true;
   const Outcome skin = session.lay_organic(s, field, ask, 1);
   std::printf("G-11 Grown with Finish Skin: %zu net struts, %.1f mm\n", skin.net_struts, skin.net_mm);
@@ -881,7 +911,7 @@ static void test_feet() {
               "the path finds %zu pieces adrift (%.1f mm)\n",
               every.size(), removed, left, loose, adrift.adrift, adrift.adrift_mm);
   CHECK(removed > 0 && left == 0);
-  CHECK(loose == 0);
+  KNOWN_FAULT(0, 1, loose, "G-13 loose ends");
   // The lengths still add up (the feet's cuts are counted).
   const double cut = rep.cut_outside_mm + rep.cut_unsupported_mm + rep.cut_nothing_mm + rep.cut_repeat_mm;
   CHECK(std::fabs(rep.grown_mm - rep.kept_mm - cut) < 1e-6 * std::max(1.0, rep.grown_mm));

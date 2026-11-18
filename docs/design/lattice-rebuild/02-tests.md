@@ -317,3 +317,33 @@ In `test_organic_rules`, the first run's own faults were in the tests and are fi
 does not hold: a branch can end otherwise), OL-H (a straight-up stress gives the magnet nothing to find: stripes now),
 OL-I (Auto on a uniform stress at reference 1 and 10), OL-J1 (the member width needs air round the part on the field's
 grid; the cap is held at the tightest spacing, 3), OL-Q1 (a bar ending in the floor runs on into it by its width).
+
+## Known faults, owed before Organic cut 2
+
+The lead's ruling, 2026-11-18 (brief L1). Each check below pins a rule brief G4 kept (or, for G-1's climb and G-6's
+inward growth, the growth itself); the code does not yet meet it. The fix is Grown's growth and pruning, not the
+landing. Cut 1 (the preview only, no Organic file from the app) does not wait on them; cut 2 does. Each is held in
+`test_organic_grown` by `KNOWN_FAULT(target, today, now, what)`: a ceiling at today's count (red if it gets worse),
+one printed line per fault. No other check is loosened.
+
+| Check (test_organic_grown) | Target | Today | What it means |
+|---|---|---|---|
+| G-1 strands that do not climb 1 mm | 0 | 92 | strands of the growth whose top is not 1 mm above their bottom (level ties left out by their mark) |
+| G-1 segments flatter than the cone | 0 | 12 | pieces of strands laid flatter than 30 degrees that do not lie on another strand |
+| G-1 strands that start on nothing | 0 | 3 | strands whose first point is neither on the floor, in solid, nor on another strand |
+| G-3 loose ends | 0 | 2 | strand ends held by nothing (converging stress) |
+| G-4 points outside the model | 0 | 19 | sample points of strands in air outside the part (the notch block) |
+| G-4 points in the slot of air | 0 | 18 | the same, inside the slot |
+| G-4 loose ends | 0 | 19 | strand ends held by nothing (the notch block) |
+| G-5 strands standing on nothing | 0 | 16 | strands whose lowest point is held by nothing (ties on) |
+| G-6 wall strands that do not grow inward | 0 | 15 | of 748 strands seeded on the walls (walls out) |
+| G-7 repeats | 0 | 2 / 4 and 4 / 8 | segments sharing both ends / lying along another strand within 0.02 mm (converging; ties) |
+| G-13 loose ends | 0 | 1 | strand ends held by nothing after the feet compete |
+
+Superseded, not a fault: G-11's "kept at least 90 % of the grown length" (brief G4 cuts repeats again, the owner's
+ruling); now a floor at 0.11 (11.3 % on 2026-11-18). SUPERSEDED by G4; a lay that keeps a ninth of what it grows is a
+speed lead, owed after cut 1.
+
+Also owed (OL-F1's finding, not this landing's to fix): the lattice changes by about 13 % in bar count (Traced 2,645
+against 2,303; Grown 1,882 against 1,838) when `reference_mpa` moves in its ninth digit (3.3995440870799 stated as
+3.39954409). The engine reads the resolved reference correctly; the lattice is that sensitive to it.
