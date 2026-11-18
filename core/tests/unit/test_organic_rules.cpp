@@ -913,6 +913,48 @@ static void test_sweep_limits() {
         kSweepCellUpper == 4.0 / 9.0);
 }
 
+// ── OL-SWEEP-S (OP5, brief C1): the Auto Sweep limits before any lay ─────────────────────────────────────────────────
+static std::uint64_t bars_fnv(const Outcome& o) {   // FNV-1a over every bar's ends, width and region, in order
+  std::uint64_t h = 1469598103934665603ULL;
+  auto eat = [&](const void* p, std::size_t n) {
+    const unsigned char* c = static_cast<const unsigned char*>(p);
+    for (std::size_t i = 0; i < n; ++i) { h ^= c[i]; h *= 1099511628211ULL; }
+  };
+  for (const Bar& b : o.bars.bars) {
+    const double v[7] = {b.a.x, b.a.y, b.a.z, b.b.x, b.b.y, b.b.z, b.width};
+    eat(v, sizeof v);
+    eat(&b.region, sizeof b.region);
+  }
+  return h;
+}
+static void test_session_sweep_limits() {
+  const StepModel model = box_model(30, 30, 20);
+  const TensorField f = traced_field();
+  const Settings st = traced_settings();
+  Session before(model);
+  const std::vector<SweepLimits> early = before.sweep_limits(st, 0.45);
+  const Outcome after_ask = before.lay_organic(st, f, traced_ask());   // nothing was laid by the ask: read here
+  Session plain(model);
+  const Outcome laid = plain.lay_organic(st, f, traced_ask());
+  const std::vector<SweepLimits> late = plain.domain() ? organic_sweep_limits(*plain.domain(), 0.45) : std::vector<SweepLimits>{};
+  bool same = early.size() == late.size() && !early.empty();
+  for (std::size_t i = 0; same && i < early.size(); ++i) {
+    const SweepLimits& a = early[i];
+    const SweepLimits& b = late[i];
+    same = a.region == b.region && a.measured == b.measured && a.d_mm == b.d_mm && a.depth_mm == b.depth_mm &&
+           a.mouth_width_mm == b.mouth_width_mm && a.strut_lower_mm == b.strut_lower_mm &&
+           a.strut_upper_mm == b.strut_upper_mm && a.strut_auto_mm == b.strut_auto_mm &&
+           a.cell_lower_mm == b.cell_lower_mm && a.cell_upper_mm == b.cell_upper_mm && a.cell_auto_mm == b.cell_auto_mm;
+  }
+  std::printf("OL-SWEEP-S before any lay: %zu regions, D %.3f, strut Auto %.2f, cell Auto %.2f; the same as after a lay %d; "
+              "the next lay read the part %d, its bars as a fresh session's %d\n", early.size(),
+              early.empty() ? 0.0 : early[0].d_mm, early.empty() ? 0.0 : early[0].strut_auto_mm,
+              early.empty() ? 0.0 : early[0].cell_auto_mm, same ? 1 : 0, after_ask.read_again ? 1 : 0,
+              bars_fnv(after_ask) == bars_fnv(laid) ? 1 : 0);
+  CHECK(same && early[0].measured);
+  CHECK(after_ask.read_again && !after_ask.bars.bars.empty() && bars_fnv(after_ask) == bars_fnv(laid));
+}
+
 int main() {
   test_s_cut_fix();
   test_k_floor();
@@ -933,6 +975,7 @@ int main() {
   test_runs();
   test_draft();
   test_sweep_limits();
+  test_session_sweep_limits();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }
