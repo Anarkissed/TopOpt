@@ -290,6 +290,37 @@ final class LatticeLayoutColoursTests: XCTestCase {
 
     // MARK: (5) the frame
 
+    /// ★ Organic cut 1, the light pass (his 11-18 "it will lag"): bars from `lightFrom` on are drawn as plain tubes.
+    /// RED CONTROL: with none light the frame is the ray-cast one, byte for byte; all light covers nearly the same pixels.
+    func testTheLightPassDrawsTheBarsAsTubes() throws {
+        guard let device = MTLCreateSystemDefaultDevice(),
+              let r = MeshRenderer(device: device, sampleCount: 1) else { throw XCTSkip("no renderer: \(MeshRenderer.lastInitError ?? "?")") }
+        r.setMesh(LatticeLayoutPreviewTests.cubeMesh(20))
+        r.camera.setOrientation(azimuth: 0.6, elevation: 0.5)
+        r.setBodyAlpha(0.2)
+        let clear = MTLClearColor(red: 0.1, green: 0.1, blue: 0.12, alpha: 1)
+        func frame() throws -> [UInt8] { try XCTUnwrap(r.renderOffscreen(width: 320, height: 240, clear: clear, stage: false)) }
+        let bars = LatticeLayoutPreviewTests.grid(400, pitch: 2, from: -8)
+        let bare = try frame()
+        XCTAssertTrue(r.applyLayoutBars(.init(token: 1, bars: bars), device: device))
+        let cast = try frame()
+        var none = LatticeLayoutBarsInputs(token: 2, bars: bars)
+        none.lightFrom = .max
+        XCTAssertTrue(r.applyLayoutBars(none, device: device))
+        XCTAssertEqual(try frame(), cast, "RED CONTROL: no light bars: the ray-cast frame, byte for byte")
+        var all = LatticeLayoutBarsInputs(token: 3, bars: bars)
+        all.lightFrom = 0
+        XCTAssertTrue(r.applyLayoutBars(all, device: device))
+        let tubes = try frame()
+        func covered(_ f: [UInt8]) -> Int { stride(from: 0, to: f.count, by: 4).filter { f[$0..<$0 + 4] != bare[$0..<$0 + 4] }.count }
+        let c = covered(cast), t = covered(tubes)
+        print("LIGHT PASS frame: ray-cast covers \(c) pixels, tubes \(t)")
+        XCTAssertGreaterThan(c, 2_000, "premise: the bars are on screen")
+        XCTAssertGreaterThan(Double(t), 0.8 * Double(c), "★ the tubes draw the bars")
+        XCTAssertLessThan(Double(t), 1.25 * Double(c), "★ no bigger than the bars")
+        XCTAssertNotEqual(tubes, cast, "the light pass drew them (not the ray-cast pass)")
+    }
+
     func testTheColoursReachTheFrame() throws {
         guard let device = MTLCreateSystemDefaultDevice(),
               let r = MeshRenderer(device: device, sampleCount: 1) else { throw XCTSkip("no renderer: \(MeshRenderer.lastInitError ?? "?")") }

@@ -14,6 +14,9 @@ import SwiftUI
 import simd
 import TopOptKit
 import TopOptDesign
+#if os(iOS)
+import os
+#endif
 
 @MainActor
 public final class LatticeLayoutPreview: ObservableObject {
@@ -50,8 +53,10 @@ public final class LatticeLayoutPreview: ObservableObject {
         public var barsMS: Double
         public var bars: Int
         public var mapMS: Double = 0   // the solid view's map (0: X-ray, or not yet)
+        public var organicLine: String?   // ★ Organic cut 1: its own line (mode, Draft or Exact, the lay time, struts)
         public var line: String {
-            String(format: "New engine · open %.0f · read %.0f · cells %.0f · bars %.0f ms · %d bars", openMS, readMS, cellsMS, barsMS, bars)
+            if let o = organicLine { return o }
+            return String(format: "New engine · open %.0f · read %.0f · cells %.0f · bars %.0f ms · %d bars", openMS, readMS, cellsMS, barsMS, bars)
                 + (mapMS > 0 ? String(format: " · solid %.0f ms", mapMS) : "")
         }
     }
@@ -64,7 +69,12 @@ public final class LatticeLayoutPreview: ObservableObject {
     public static let perAreaLine = "New engine: one cell range, grade style and band for the whole part, not per area yet"
 
     /// The new engine draws the strut types' Uniform, Default Grade and Stepped; Organic keeps the old preview (LatticeReview 11-13).
-    public static func draws(_ l: LatticeSettings) -> Bool { l.resolvedAlgorithm != "organic" }
+    /// ★ Organic cut 1 (his 11-18 "VIEW things on the ipad ASAP"): Organic is drawn by the new engine too, on a part with
+    /// its model file (variants keep the old engine). `organic` says whether these settings are Organic.
+    public static func draws(_ l: LatticeSettings) -> Bool { true }
+    public static func organic(_ l: LatticeSettings) -> Bool { l.resolvedAlgorithm == "organic" }
+    /// The strut type whose law turns a width into a density; Organic has none (width / cell size).
+    static func lawType(_ l: LatticeSettings) -> LatticeType? { organic(l) ? nil : l.lattice }
     /// One plain line each for what the new engine leaves out for these settings.
     public static func notes(_ l: LatticeSettings, hasStress: Bool = false) -> [String] {
         var out: [String] = []
@@ -88,6 +98,7 @@ public final class LatticeLayoutPreview: ObservableObject {
 
     /// Whether these settings grade by stress at all (By stress struts, or cell size by stress).
     public static func needsStress(_ l: LatticeSettings) -> Bool {
+        if organic(l) { return true }   // ★ Organic cut 1: the weave follows the stress (its tensor)
         let s = settings(l)
         return s.byStress || s.cellsByStress
     }
@@ -114,6 +125,21 @@ public final class LatticeLayoutPreview: ObservableObject {
     private var nozzlePath: String?
     private var stress = Stress()
     private var sessionStressKey: Int?   // the field the session holds (setDemand), by its key
+    // ★ Organic cut 1: the tensor the session holds (by the stress key), the layer height at this lay, the Auto Sweep limits
+    // core measured for these regions and line (before the lay), what the last Organic lay was, and its numbers
+    private var sessionTensorKey: Int?
+    private var layerAtLay = 0.2
+    private var organicLimits: (key: LatticeLayoutSession.Settings, line: Double, limits: LatticeOrganicLook.Limits?)?
+    @Published public private(set) var organicQuality: LatticeLayoutSession.Organic.Quality?
+    @Published public private(set) var organicNumbers: OrganicNumbers?
+    /// The Auto numbers the last Organic lay used (core's once measured), for the controls' fields.
+    @Published public private(set) var organicAutoLimits: LatticeOrganicLook.Limits?
+    public struct OrganicNumbers: Equatable { public var strands: Int, segments: Int, ms: Double, draft: Bool
+        public var limitsMeasured: Bool }
+    /// Organic's draft line (a dragged slider's quick lay is NOT what will be made).
+    public static let draftLine = "Draft while you change it \u{00B7} the exact lattice follows"
+    /// Organic needs the stress check (its weave follows the stress's directions).
+    public static let organicNeedsStressLine = "Organic follows the stress: the stress check runs first"
     private var nozzleStressKey: Int?
 
     public init() {}
@@ -146,6 +172,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         }
         lastSettings = s
         latticeAtLay = p.lattice
+        layerAtLay = p.printParams.layerHeightMM > 0 ? p.printParams.layerHeightMM : 0.2
         keysAtLay = Self.regionKeys(p)   // ★ Install 3: the drawer's rows, as this layout's regions
         task?.cancel()
         laying = true
@@ -155,7 +182,7 @@ public final class LatticeLayoutPreview: ObservableObject {
                 try? await Task.sleep(for: delay)
                 if Task.isCancelled { return }
             }
-            await self?.lay(path: path, s)
+            await self?.lay(path: path, s, draft: delay > .zero && Self.organic(p.lattice))
         }
     }
 
@@ -176,6 +203,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         nozzleTask?.cancel(); nozzleTask = nil; nozzleWanted = false; nozzleState = .notAsked
         nozzleSession?.close(); nozzleSession = nil; nozzlePath = nil; nozzleLine = nil; solidReason = nil
         session?.close(); session = nil; sessionPath = nil; lastSettings = nil; sessionStressKey = nil; nozzleStressKey = nil
+        sessionTensorKey = nil; organicLimits = nil; organicQuality = nil; organicNumbers = nil   // ★ Organic cut 1
         bars = nil; laid = nil; problem = nil; timing = nil; laying = false; places = []
     }
 
@@ -209,7 +237,7 @@ public final class LatticeLayoutPreview: ObservableObject {
     public func keyScale() -> (lo: Double, hi: Double, cellMM: Double)? {
         guard let laid, laid.barCount > 0 else { return nil }
         if let c = scaleCache, c.token == laid.token { return c.scale }
-        let rho = LatticeLayoutColours.densities(laid, type: latticeAtLay.lattice)
+        let rho = LatticeLayoutColours.densities(laid, type: Self.lawType(latticeAtLay))
         let cells = laid.barCell.sorted()
         let scale = (lo: rho.min() ?? 0, hi: rho.max() ?? 0, cellMM: Double(cells.isEmpty ? 0 : cells[cells.count / 2]))
         scaleCache = (laid.token, scale)
@@ -251,7 +279,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         let cell = best < laid.barCell.count ? Double(laid.barCell[best]) : 0
         var one = LatticeLayoutColours.Laid()
         one.bars = Array(laid.bars[(7 * best)..<(7 * best + 7)]); one.barCell = [Float(cell)]
-        let rho = LatticeLayoutColours.densities(one, type: latticeAtLay.lattice).first ?? 0
+        let rho = LatticeLayoutColours.densities(one, type: Self.lawType(latticeAtLay)).first ?? 0
         var klass: LatticeStructureClass = .interior
         if best < laid.barFlags.count, LatticeLayoutColours.isSkin(laid.barFlags[best]) {
             klass = .rim
@@ -273,7 +301,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         let key = [b.token, field == nil ? 0 : stressKey, grade ? 1 : 0, latticeAtLay.topologyID.hashValue,
                    LatticeLayoutColours.controlOneColour ? 1 : 0, b.solid?.token ?? -1, b.hidden ? 1 : 0]
         if let c = drawnCache, c.key == key { return c.bars }
-        b.colours = LatticeLayoutColours.colours(laid, type: latticeAtLay.lattice, grade: grade,
+        b.colours = LatticeLayoutColours.colours(laid, type: Self.lawType(latticeAtLay), grade: grade,
                                                  stress: field.map(LatticeLayoutColours.Stress.init(field:)),
                                                  lookup: grade ? cellLookup() : nil)
         var h = Hasher()
@@ -286,17 +314,22 @@ public final class LatticeLayoutPreview: ObservableObject {
     /// Layouts started, app-wide (a hosted test's count: Click to refresh lays none on a change; Live one per pause).
     public static private(set) var laysStarted = 0
 
-    private func lay(path: String, _ s: LatticeLayoutSession.Settings) async {
+    private func lay(path: String, _ s: LatticeLayoutSession.Settings, draft: Bool = false) async {
         Self.laysStarted += 1
         do {
             if session == nil || sessionPath != path {
                 session?.close()
                 let opened = try await LatticeLayoutSession.open(path: path)
                 guard !Task.isCancelled else { return }
-                session = opened; sessionPath = path; openMS = opened.info.msOpen; sessionStressKey = nil
+                session = opened; sessionPath = path; openMS = opened.info.msOpen; sessionStressKey = nil; sessionTensorKey = nil; organicLimits = nil
             }
             guard let session else { return }
             sessionStressKey = try await Self.give(stress, to: session, holding: sessionStressKey)
+            if Self.organic(latticeAtLay) {   // ★ Organic cut 1: the weave's own lay
+                try await layOrganic(session, path: path, s, draft: draft)
+                return
+            }
+            organicQuality = nil; organicNumbers = nil
             let r = try await session.lay(s)
             guard !Task.isCancelled else { return }
             token &+= 1
@@ -327,6 +360,115 @@ public final class LatticeLayoutPreview: ObservableObject {
             bars = nil
             laying = false
         }
+    }
+
+    /// ★ Organic cut 1: the weave's lay. The tensor in (once per stress), Auto's numbers (core's, measured before the lay,
+    /// once per regions and line), the lay (Draft while a slider moves, then Exact), its runs as
+    /// the bars pass's segments. No stress yet: one line (the page runs the stress check first).
+    private func layOrganic(_ session: LatticeLayoutSession, path: String, _ s: LatticeLayoutSession.Settings, draft: Bool) async throws {
+        guard let f = stress.field, !f.stressTensor.isEmpty else {
+            problem = Self.organicNeedsStressLine; bars = nil; laying = false; return
+        }
+        if sessionTensorKey != stress.key {
+            try await session.setTensor(voigt: f.stressTensor, nx: f.nx, ny: f.ny, nz: f.nz, origin: f.origin, spacingMM: f.spacingMM)
+            sessionTensorKey = stress.key
+        }
+        let look = latticeAtLay.organicLook ?? LatticeOrganicLook()
+        let line = s.beadMM > 0 ? s.beadMM : 0.45   // the print line (the settings' bead)
+        if organicLimits == nil || !Self.sameWhere(organicLimits!.key, s) || organicLimits!.line != line {
+            let all = try await session.sweepLimits(s, lineMM: line)
+            guard !Task.isCancelled else { return }
+            organicLimits = (s, line, (all.first(where: \.measured) ?? all.first).map(LatticeOrganicLook.Limits.init))
+        }
+        let limits = organicLimits?.limits   // not measured (a curved shell): the controls say so; Auto takes core's defaults
+        var ask = look.ask(limits: limits?.measured == true ? limits : nil, layerMM: layerAtLay)
+        organicAutoLimits = limits
+        ask.quality = draft ? .draft : .exact
+        if let short = Self.organicMemoryShort(mode: look.modeValue, availableMB: Self.availableMB()) {
+            problem = short; bars = nil; laid = nil; laying = false; return   // ★ refused, never a crash
+        }
+        let r = try await session.layOrganic(s, ask)
+        guard !Task.isCancelled else { return }
+        token &+= 1
+        let seg = Self.segments(r.runs)
+        var drawn = LatticeLayoutBarsInputs(token: token, bars: seg.bars, solid: nil, flags: seg.flags)
+        drawn.lightFrom = Self.organicLightFrom(grown: look.modeValue == .grown, netFrom: seg.lightFrom, count: seg.count)
+        bars = drawn
+        var l = LatticeLayoutColours.Laid()   // no cells: the key and card read each strut's width and its cell size
+        l.bars = seg.bars; l.barFlags = seg.skin; l.barCell = seg.cell; l.barRegion = seg.region; l.token = token
+        laid = l
+        timing = Timing(openMS: openMS, readMS: r.layout.msRead, cellsMS: r.msTrace, barsMS: r.layout.msBars, bars: seg.count)
+        timing?.organicLine = Self.organicTimeLine(mode: look.modeValue, draft: r.quality == .draft, ms: r.ms, struts: seg.count)
+        organicQuality = r.quality
+        organicNumbers = OrganicNumbers(strands: r.strands, segments: seg.count, ms: r.ms, draft: r.quality == .draft,
+                                        limitsMeasured: limits?.measured == true)
+        problem = seg.count == 0 ? "New engine: no Organic lattice fits these settings" : nil
+        notes = Self.notes(latticeAtLay, hasStress: true) + (r.quality == .draft ? [Self.draftLine] : [])
+        laying = false
+        // a draft is followed by the exact lattice when nothing newer came
+        if r.quality == .draft, !Task.isCancelled { try await layOrganic(session, path: path, s, draft: false) }
+    }
+
+    /// The Organic lay's line: "Organic Grown · Exact · laid in 3.8 s · 63,670 struts".
+    static func organicTimeLine(mode: LatticeOrganicLook.Mode, draft: Bool, ms: Double, struts: Int) -> String {
+        let n = NumberFormatter.localizedString(from: NSNumber(value: struts), number: .decimal)
+        return String(format: "Organic %@ \u{00B7} %@ \u{00B7} laid in %.1f s \u{00B7} %@ struts", mode.title,
+                      draft ? "Draft" : "Exact", ms / 1000, n)
+    }
+
+    /// ★ Organic cut 1, the memory gate: an Exact lay of his stand peaked at 498 MB (Grown) and 186 MB (Traced) (LatticeReview's
+    /// item 2, after the fix); with a quarter more, a lay that would not fit in what this device has free is refused in one
+    /// line. nil: room enough, or the device cannot say (a Mac).
+    static func organicMemoryShort(mode: LatticeOrganicLook.Mode, availableMB: Double?) -> String? {
+        let need = mode == .grown ? 625.0 : 235.0
+        guard let a = availableMB, a < need else { return nil }
+        return String(format: "Not enough free memory for %@ (%.0f of %.0f MB): close other apps", mode.title, a, need)
+    }
+    /// What this app may still use (iOS: os_proc_available_memory), MB; nil where the system does not say.
+    static func availableMB() -> Double? {
+        #if os(iOS)
+        let b = os_proc_available_memory()
+        return b > 0 ? Double(b) / 1_048_576 : nil
+        #else
+        return nil
+        #endif
+    }
+
+    /// ★ His 11-18 ("There is no question, it will lag"): the light pass draws ALL of Grown (43,646 struts on his stand at
+    /// Auto, past the ~37,000 the iPad lags at; at Auto Grown has no net skin), and only a net skin otherwise (Traced:
+    /// 32,433 on his stand, drawn round).
+    static func organicLightFrom(grown: Bool, netFrom: Int, count: Int) -> Int {
+        grown ? 0 : (netFrom < count ? netFrom : .max)
+    }
+
+    /// The same regions and depths (the "where" Auto's numbers are measured on).
+    static func sameWhere(_ a: LatticeLayoutSession.Settings, _ b: LatticeLayoutSession.Settings) -> Bool {
+        a.regions == b.regions && a.protect == b.protect && a.allLattice == b.allLattice
+    }
+
+    /// The runs as the bars pass draws them: one capsule per pair of neighbouring points, its width the two points' mean.
+    static func segments(_ runs: [LatticeLayoutSession.Run])
+        -> (bars: [Float], flags: [UInt8], count: Int, cell: [Float], region: [Int32], skin: [UInt8], lightFrom: Int) {
+        var b: [Float] = [], f: [UInt8] = [], cell: [Float] = [], region: [Int32] = [], skin: [UInt8] = []
+        let n = runs.reduce(0) { $0 + Swift.max(0, $1.points.count - 1) }
+        b.reserveCapacity(7 * n); f.reserveCapacity(n); cell.reserveCapacity(n); region.reserveCapacity(n); skin.reserveCapacity(n)
+        var lightFrom = 0
+        // ★ his 11-18 ("it will lag"): the net skin last, so the light pass draws it from `lightFrom` on
+        for netPass in [false, true] {
+          if netPass { lightFrom = cell.count }
+          for r in runs where r.points.count >= 2 && r.marks.contains(.net) == netPass {
+            let net: UInt8 = netPass ? 2 : 0
+            for i in 1..<r.points.count {
+                let a = r.points[i - 1], c = r.points[i]
+                b.append(contentsOf: [a.x, a.y, a.z, c.x, c.y, c.z, 0.5 * (r.widthMM[i - 1] + r.widthMM[i])])
+                f.append(0)
+                cell.append(0.5 * (r.spacingMM[i - 1] + r.spacingMM[i]))
+                region.append(r.region)
+                skin.append(net)
+            }
+          }
+        }
+        return (b, f, n, cell, region, skin, lightFrom)
     }
 
     /// The stress result into a session once per field (core keeps the part's own reference by its pointer).
@@ -699,6 +841,8 @@ public final class LatticeLayoutPreview: ObservableObject {
         // ★ 11-13: Protect skins of one depth go as ONE skin (the same solid, rule D5). The engine's reading asks every skin in
         // turn: his v4 stand's 26 skins of 4 mm took 289 s to lay on the Mac, one group of them 0.7 s, the lattice identical.
         s.protect = Self.mergedByDepth(s.protect)
+        // ★ Organic cut 1: every lattice region is woven, not filled with cells
+        if Self.organic(l) { for i in s.regions.indices where !s.regions[i].noLattice { s.regions[i].weave = true } }
         // ★ D23 (his 11-17 "add a chip to ask what it should be"): every face a chip was answered "Solid" on, as ONE chip skin at
         // depth 0 (core's D5 two line widths, LatticeReview 11-17: a thin skin with the lattice kept behind it), never merged
         // with his own skins, so its place stays listed and the chip can be answered again

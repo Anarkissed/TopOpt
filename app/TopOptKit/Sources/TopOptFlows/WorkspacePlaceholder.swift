@@ -1364,6 +1364,9 @@ public struct WorkspacePlaceholder: View {
                         strutScene = nil; latticeThinWalls = nil; latticeThinWallTints = []; latticeThinWallsPromptUp = false
                     } else if !owns, showStrutPreview, latticeViewsUp, strutScene == nil { buildStrutScene() }
                 }
+                .onChange(of: newEngine.problem) { p in   // ★ Organic cut 1: the weave needs the stress; the check runs itself
+                    if p == LatticeLayoutPreview.organicNeedsStressLine { runNewEngineStressCheck() }
+                }
                 .onChange(of: newEngine.solidReason) { reason in
                     // ★ Install 3: his 11-09 thin-wall pop-up on the new engine — once per project, by itself, on Structural,
                     // when the engine leaves lattice solid because the walls are too thin (its own reason, not the old bake's)
@@ -1729,6 +1732,7 @@ public struct WorkspacePlaceholder: View {
                     // 2026-09-21 rule). The plain rebake that stood here started a second
                     // octet bake behind the forced one on every Save & Exit.
                 }
+                .organicLimits(newEngine.organicAutoLimits)   // ★ Organic cut 1
                 .organicProbeDriver(makeOrganicProbeDriver())
                 // ★ ruling 4 (item 6): its "nothing set to lattice" lines leave by its own exit
                 .wallMarking { goToWallMarking() }
@@ -2041,6 +2045,19 @@ public struct WorkspacePlaceholder: View {
         let s = LatticeLayoutPreview.settings(p, referenceMPa: 0)
         let smallest = s.cellMinMM > 0 ? s.cellMinMM : s.cellMM
         return .init(minWallMM: Double(Swift.max(1, s.minCellsAcross)) * smallest, share: r.share)
+    }
+
+    /// ★ Organic cut 1: Live preview, except Grown on the new engine, always Click to refresh (a Grown lay takes minutes).
+    private var latticeLiveHere: Bool {
+        appSettings.latticeLivePreview
+            && !(newEngineOwnsPreview && LatticeLayoutPreview.organic(project.lattice)
+                 && (project.lattice.organicLook?.modeValue ?? .grown) == .grown)
+    }
+    /// ★ Organic cut 1 (his 11-18 "Off until cut 2"): the Lattice button is off for Organic on the new engine.
+    static let organicMakesNextInstall = "Making an Organic part comes with the next install"
+    private var organicButtonRefusal: String? {
+        project.importedFile != nil && LatticeLayoutPreview.organic(project.lattice) && project.lattice.flexible == nil
+            ? Self.organicMakesNextInstall : nil
     }
 
     /// Whether the Lattice button sends the new engine's job for this part (`LatticeFileButton.takes`), never on Flexible.
@@ -4907,7 +4924,7 @@ public struct WorkspacePlaceholder: View {
     /// ★ his picks 11-16: the new engine's answer to a settings change — Live preview lays half a second after the last
     /// change; Click to refresh marks the preview out of date (the Lattice button reads Refresh Lattice).
     private func newEngineSettingsChanged() {
-        if appSettings.latticeLivePreview {
+        if latticeLiveHere {
             newEngine.update(project: project, on: true, solid: !surfaceXrayOn, stress: newEngineStress, delay: LatticePreviewMode.liveWait)
         } else if !newEngine.isCurrent(project: project, stress: newEngineStress) {
             latticePreviewStale = true
@@ -14217,6 +14234,7 @@ public struct WorkspacePlaceholder: View {
                                       regions: project.latticeJobRegions().regions, wholePart: project.latticeStartsWhole)
             ?? latticeSettingsRefusal
             ?? emptyRegionRefusal   // ★ B1 (note 38): the lattice run sends the same regions
+            ?? organicButtonRefusal   // ★ Organic cut 1: off until the export install
     }
 
     var canLatticeThis: Bool {
@@ -14591,7 +14609,7 @@ extension WorkspacePlaceholder {
             : summary
         let state: DSRunButton.State = runs ? .running(line) : ok ? .ready : notSet || marks || opensType ? .grey(line) : .disabled(line)
         // ★ his pick 11-16: under Click to refresh, an out-of-date preview turns the button into Refresh Lattice
-        let refresh = LatticePreviewMode.showsRefresh(live: appSettings.latticeLivePreview, previewUp: showStrutPreview,
+        let refresh = LatticePreviewMode.showsRefresh(live: latticeLiveHere, previewUp: showStrutPreview,
                                                       stale: latticePreviewStale, running: runs)
         return DSRunButton(refresh ? LatticePreviewMode.refreshButton : runs ? LatticeSetupCopy.running : "Lattice",
                            subtitle: refresh ? LatticePreviewMode.refreshLine : line, state: refresh ? .ready : state, key: "latticeButton") {

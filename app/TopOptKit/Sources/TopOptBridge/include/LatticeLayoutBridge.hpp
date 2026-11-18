@@ -50,6 +50,8 @@ struct LatticeLayoutSettings {
   std::vector<double> region_expand_mm;
   std::vector<int32_t> region_face_counts;
   std::vector<int32_t> region_faces;
+  // ★ Organic cut 1: per region, 1 when the Organic weave fills it (core's RegionAsk::weave), not cells. Empty: none.
+  std::vector<uint8_t> region_weave;
   // Protect skins, flattened the same way. Depth 0 = two line widths (D5).
   std::vector<int32_t> protect_ids;
   std::vector<double> protect_depth_mm;
@@ -239,6 +241,71 @@ struct LatticeLayoutPlaces {
   double ms = 0.0;
 };
 LatticeLayoutPlaces lattice_layout_places(int64_t session, const LatticeLayoutSettings& settings, BridgeError& err);
+// ★ ORGANIC, CUT 1 (his 11-18: "I'd like to get going to be able to VIEW things on the ipad ASAP"; "Preview PLUS settings
+// simultaneously"): the weave's preview on the iPad, from LatticeReview's engine (lattice_layout_organic.hpp, brief L2).
+// Every field of core's OrganicAsk, under its own name and default, so any of his controls can reach it.
+struct LatticeLayoutOrganic {
+  int32_t mode = 0;               // 0 Traced, 1 Grown
+  int32_t quality = 0;            // 0 Exact (what will be made), 1 Draft (for a dragged slider; NOT what will be made)
+  double tolerance_mm = 0.1;      // the runs' thinning
+  double spacing_mm = 0.0, spacing_min_mm = 3.0, spacing_max_mm = 8.0, spacing_exponent = 1.0;
+  double width_mm = 0.0, width_heavy_mm = 0.0;
+  double reference_mpa = 0.0, percentile = 0.95;
+  bool shape_fit = true, member_cap = true;
+  double shape_reach = 1.0;
+  double build_x = 0.0, build_y = 0.0, build_z = 1.0;
+  bool walls_out = false, ties = true;
+  double tie_swirl = 1.0, foot_gap = 2.5;
+  bool stress_goal = false;
+  double void_ratio = 1.5;
+  int32_t reseed_rounds = 1;
+  bool wall_connect = false;
+  double wall_gap = 0.0, wall_gap_heavy = 0.0;
+  int32_t wall_cross = 0;
+  double cross_gap = 2.5, cross_gap_heavy = 0.0, cross_climb_max_deg = 45.0;
+  double top_run = 0.0, root_run = 0.0;
+  int32_t run_max = 1;
+  double run_gap = 0.5, run_follow = 1.0, run_pull = 0.0, run_seek = 0.0, run_min = 0.5, root_gap = -1.0;
+  bool auto_by_stress = false, prune = false;
+  double bed_floor_mm = 0.0;
+  bool hold_parts = false;
+  double part_reach_mm = 8.0, part_support_mm = 0.0;
+  bool part_to_floor = false;
+  double link_width = 1.0, unbraced_max = 0.0;
+  bool tie_level = false;
+  double tie_gap = 1.0, tie_gap_heavy = 0.0;
+  bool follow_stress = true;   // OP6 (his 11-18): true stress and shape, false shape only
+  uint64_t seed = 1;
+};
+// The weave's preview: the lay's counts (its bars are the weave's — draw `runs`), the runs packed as core packs them
+// (pack_weave_runs: per run 12 bytes, then 20 per point, float32, little-endian), what was laid, and the weave's numbers.
+struct LatticeLayoutOrganicResult {
+  LatticeLayoutResult layout;
+  std::vector<uint8_t> runs;
+  int32_t quality = 0;
+  int64_t strands = 0, net_struts = 0;
+  double spacing_smallest_mm = 0.0, spacing_largest_mm = 0.0, spacing_mean_mm = 0.0, ms_trace = 0.0, ms = 0.0;
+  bool cancelled = false;
+};
+LatticeLayoutOrganicResult lattice_layout_organic(int64_t session, const LatticeLayoutSettings& settings,
+                                                  const LatticeLayoutOrganic& organic, BridgeError& err);
+// The stress TENSOR a weave follows (Voigt, 6 per voxel, x fastest; low corner `origin`, voxel edge `spacing`), kept by the
+// session until set again; an empty `voigt` clears it (a weave then lays nothing: core's no_stress_result).
+struct LatticeLayoutTensor {
+  std::vector<float> voigt;
+  double origin_x = 0.0, origin_y = 0.0, origin_z = 0.0, spacing = 0.0;
+  int32_t nx = 0, ny = 0, nz = 0;
+};
+void lattice_layout_set_tensor(int64_t session, const LatticeLayoutTensor& tensor, BridgeError& err);
+// The Auto Sweep limits per weave region of the domain `settings` lay in, before any lay (Session::sweep_limits, OP5; the
+// domain is kept for the next lay; LatticeReview's rule, its four fractions core's named constants). `measured` 0: a region core cannot measure (a curved shell): no Auto there.
+struct LatticeLayoutSweep {
+  std::vector<int32_t> region;
+  std::vector<uint8_t> measured;
+  std::vector<double> d_mm, strut_lower_mm, strut_upper_mm, strut_auto_mm, cell_lower_mm, cell_upper_mm, cell_auto_mm;
+};
+LatticeLayoutSweep lattice_layout_sweep_limits(int64_t session, const LatticeLayoutSettings& settings, double line_mm,
+                                               BridgeError& err);
 // Every layout of `session` running now or waiting comes back cancelled. Safe from any thread.
 void lattice_layout_cancel(int64_t session);
 void lattice_layout_close(int64_t session);

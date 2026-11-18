@@ -230,6 +230,8 @@ private struct LaneFootBody<Content: View>: View {
             let local = controls.frames.map { $0.offsetBy(dx: -space.minX, dy: -space.minY) }
             let p = NotificationLane.foot(bottom: g.size.height - g.safeAreaInsets.bottom, height: height, viewport: g.size,
                                           controls: local)
+            // ★ Organic cut 1 gate (11L: the stack 2 pt past the window's foot): the stack sits ON its row's foot, whatever its
+            // height this frame — the measured height (a frame behind when the stack changes) only picks the row
             content
                 .frame(maxWidth: p.width)
                 .fixedSize(horizontal: false, vertical: true)
@@ -237,7 +239,9 @@ private struct LaneFootBody<Content: View>: View {
                     Color.clear.onAppear { height = s.size.height }.onChange(of: s.size.height) { height = $0 }
                 })
                 .background(NumberPad.published("lane-\(key)"))
-                .position(x: p.cx ?? g.size.width / 2, y: p.top + height / 2)
+                .frame(width: g.size.width, height: Swift.max(0, p.top + height), alignment: .bottom)
+                .offset(x: (p.cx ?? g.size.width / 2) - g.size.width / 2)
+                .frame(width: g.size.width, height: g.size.height, alignment: .top)
         }
     }
 }
