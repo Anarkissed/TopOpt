@@ -545,6 +545,12 @@ target_link_libraries(test_organic_grown PRIVATE topopt)
 target_compile_definitions(test_organic_grown PRIVATE
   ORGANIC_GROWN_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 add_test(NAME organic_grown COMMAND test_organic_grown)
+# Organic rules D to T (brief L1): one pin per rule, and the stated-reference and link-width checks, on made-up parts.
+add_executable(test_organic_rules tests/unit/test_organic_rules.cpp)
+target_link_libraries(test_organic_rules PRIVATE topopt)
+target_compile_definitions(test_organic_rules PRIVATE
+  ORGANIC_RULES_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME organic_rules COMMAND test_organic_rules)
 # The lattice file job: its JSON becomes the settings the bridge would make, a part goes in
 # and a whole binary STL comes out, and every refusal is one plain line, its word, its exit
 # code and no file. Without the Manifold library the job says it cannot, and that is checked.
