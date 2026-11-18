@@ -1437,6 +1437,9 @@ struct Outcome {
   // OP7 (brief C2, E1; lay_organic and lay_organic_draft only): the ask refused, every refusal validate_organic gave.
   // When not empty nothing was laid, nothing else here is filled, and the session's kept domain was not touched.
   std::vector<OrganicRefusal> refused;
+  // OP8 (brief C2, E2; lay_organic and lay_organic_draft only): plain sentences for the owner about the lay that are
+  // not refusals: the cell size's two ends equal while a heavy end is set (that heavy end then does nothing).
+  std::vector<std::string> notes;
 };
 
 struct SweepLimits;   // lattice_layout_organic.hpp

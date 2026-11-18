@@ -1274,6 +1274,43 @@ static void test_validate() {
   }
 }
 
+// ── OL-EQUAL (OP8, brief C2, E2): equal cell ends are accepted; the heavy ends then do not act, and a note says so ────
+static void test_equal_ends() {
+  const StepModel model = box_model(30, 30, 20);
+  const TensorField f = traced_field();
+  const Settings st = traced_settings();
+  for (int g = 0; g < 2; ++g) {
+    OrganicAsk heavy = judged_ask(g == 1);
+    heavy.spacing_min_mm = heavy.spacing_max_mm = 4.0;
+    OrganicAsk light = heavy;
+    light.width_heavy_mm = light.wall_gap_heavy = light.cross_gap_heavy = light.tie_gap_heavy = 0.0;
+    const std::vector<OrganicRefusal> r = validate_organic(st, heavy, &f);
+    Session s1(model), s2(model);
+    const Outcome a = s1.lay_organic(st, f, heavy);
+    const Outcome b = s2.lay_organic(st, f, light);
+    std::printf("OL-EQUAL %s, cell 4 to 4 with every heavy end set: %zu refusals, %zu bars (hash %016llx), without the "
+                "heavy ends %zu bars (hash %016llx); notes %zu / %zu: \"%s\"\n", g ? "Grown" : "Traced", r.size(),
+                a.bars.bars.size(), static_cast<unsigned long long>(bars_fnv(a)), b.bars.bars.size(),
+                static_cast<unsigned long long>(bars_fnv(b)), a.notes.size(), b.notes.size(),
+                a.notes.empty() ? "" : a.notes[0].c_str());
+    CHECK(r.empty() && a.refused.empty() && !a.bars.bars.empty() && bars_fnv(a) == bars_fnv(b));
+    CHECK(a.notes.size() == 1 && a.notes[0] == kNoteEqualEnds && b.notes.empty());
+    // A grower or a level-tie walk given the same ask directly does not throw either.
+    bool threw = false;
+    try { (void)grow_strands(*s1.domain(), 1, f, heavy); } catch (const std::exception&) { threw = true; }
+    CHECK(!threw);
+  }
+  // Ends that differ: nothing changes (the bars of OL-FOLLOW's two made lays, today's hashes from before OP6), no note.
+  const std::uint64_t today[2] = {0x9a119fd417d400d7ULL, 0x235c732cf4f2f269ULL};
+  for (int g = 0; g < 2; ++g) {
+    Session s(model);
+    const Outcome o = s.lay_organic(st, f, follow_ask(g == 1));
+    std::printf("OL-EQUAL ends differ, %s: hash %016llx (today's %016llx), notes %zu\n", g ? "Grown" : "Traced",
+                static_cast<unsigned long long>(bars_fnv(o)), static_cast<unsigned long long>(today[g]), o.notes.size());
+    CHECK(bars_fnv(o) == today[g] && o.notes.empty());
+  }
+}
+
 int main() {
   test_s_cut_fix();
   test_k_floor();
@@ -1297,6 +1334,7 @@ int main() {
   test_session_sweep_limits();
   test_follow_stress();
   test_validate();
+  test_equal_ends();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }

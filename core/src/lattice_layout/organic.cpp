@@ -693,6 +693,10 @@ Outcome Session::lay_organic_with(const Settings& settings, const TensorField& f
     out.spacing_largest_mm = largest;
     out.spacing_mean_mm = candidates ? sum / static_cast<double>(candidates) : 0.0;
     out.grown = grown;
+    // OP8 (brief C2, E2): equal cell ends with a heavy end set: laid, and said.
+    if (ask.spacing_mm == 0.0 && ask.spacing_max_mm == ask.spacing_min_mm &&
+        (ask.width_heavy_mm > 0.0 || ask.wall_gap_heavy > 0.0 || ask.cross_gap_heavy > 0.0 || ask.tie_gap_heavy > 0.0))
+      out.notes.push_back(kNoteEqualEnds);
   }
   return out;
 }
@@ -1129,7 +1133,9 @@ std::vector<OrganicRefusal> validate_organic(const Settings& settings, const Org
       at_least(refuse("spacing_exponent", "not_above_zero", "Cell size: the grading strength must be above 0.",
                       a.spacing_exponent),
                0.0);
-    range = lo_ok && fin(a.spacing_max_mm) && a.spacing_max_mm > a.spacing_min_mm;
+    // OP8 (brief C2, E2): a range whose two ends are equal is a range; the heavy ends then do not act (O12's measure
+    // is 0 everywhere with one spacing) and are not refused.
+    range = true;
   }
   // The struts.
   if (!(fin(a.width_mm) && a.width_mm >= 0.0))
@@ -1202,7 +1208,7 @@ std::vector<OrganicRefusal> validate_organic(const Settings& settings, const Org
   }
   // The wall seeds' gap (M).
   a_number(a.wall_gap, "wall_gap", "Wall seed gap: the light end must be a number.");
-  const std::string ranged = "needs the cell size as a range with two different ends.";
+  const std::string ranged = "needs the cell size as a range (a small and a large end).";
   if (!fin(a.wall_gap_heavy)) {
     refuse("wall_gap_heavy", "not_a_number", "Wall seed gap: the heavy end must be a number.", a.wall_gap_heavy);
   } else if (a.wall_gap_heavy > 0.0) {

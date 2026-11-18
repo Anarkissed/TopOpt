@@ -208,12 +208,15 @@ struct OrganicAsk {
 //     root_run, run_gap, run_pull, run_seek, run_min 0 or above; run_max 1 to 1,000,000; run_follow above 0;
 //     build_dir not zero; layer_mm and seed_stride above 0;
 //   the three heavy gaps: 0 or less is off; above 0 at most their light gap, and needs the cell size as a range
-//     (spacing_mm 0, spacing_max_mm above spacing_min_mm); wall_gap_heavy needs wall_gap above 0; cross_gap_heavy needs wall_cross;
+//     (spacing_mm 0; OP8: its two ends may be equal, the heavy ends then do not act); wall_gap_heavy needs wall_gap above 0; cross_gap_heavy needs wall_cross;
 //   Grown only (as the Grower reads them): wall_cross needs walls_out and not wall_connect; tie_level, tie_gap not 1 and
 //     tie_gap_heavy above 0 need ties;
 //   `field` given (the session path): a weave region in `settings` and an empty field is refused (setting "stress").
 //     Null (the file job, whose own refusal for it is no_stress_result): not checked.
 // Every text is one plain sentence for the owner, naming the control and the number allowed, no key names.
+// OP8 (brief C2, E2): the note Outcome::notes carries when the cell size's two ends are equal and a heavy end is set.
+inline constexpr const char* kNoteEqualEnds =
+    "The cell size has one value, so the thick end of the strut thickness and the heavy ends of the gaps do nothing.";
 inline constexpr double kSmallestCellFactor = 1.5349900619197328;   // 0.5 x sqrt(3 pi): the tracer's print floor
 double organic_smallest_cell_mm(const Settings& settings, const OrganicAsk& ask);   // kSmallestCellFactor x light
 std::vector<OrganicRefusal> validate_organic(const Settings& settings, const OrganicAsk& ask,
