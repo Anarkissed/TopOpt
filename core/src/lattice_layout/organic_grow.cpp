@@ -52,6 +52,12 @@ void GrowReport::add(const GrowReport& o) {
   stubs.insert(stubs.end(), o.stubs.begin(), o.stubs.end());
   ties_seeded += o.ties_seeded; ties_laid += o.ties_laid; ties_refused_minor += o.ties_refused_minor;
   ties_refused_reach += o.ties_refused_reach;
+  tie_level = tie_level || o.tie_level;   // P
+  ties_level_refused_steep += o.ties_level_refused_steep; ties_level_cut_span += o.ties_level_cut_span;
+  tie_level_joints.insert(tie_level_joints.end(), o.tie_level_joints.begin(), o.tie_level_joints.end());
+  tie_level_span_mm.insert(tie_level_span_mm.end(), o.tie_level_span_mm.begin(), o.tie_level_span_mm.end());
+  tie_level_dz_max_mm = std::max(tie_level_dz_max_mm, o.tie_level_dz_max_mm);
+  tie_level_dz_max_unsnapped_mm = std::max(tie_level_dz_max_unsnapped_mm, o.tie_level_dz_max_unsnapped_mm);
   feet_kept += o.feet_kept; feet_cut_at_joint += o.feet_cut_at_joint; vines_removed += o.vines_removed;
   hold_feet_kept += o.hold_feet_kept; hold_wall_roots_kept += o.hold_wall_roots_kept;   // L2 c
   feet_cut_mm += o.feet_cut_mm; feet_cut_high_mm += o.feet_cut_high_mm;
@@ -84,6 +90,7 @@ constexpr double kVoidRatio = 1.5;                           // G11: a bare plac
 constexpr double kTieMinorRatio = 0.10;                      // G9: |sigma2| / |sigma1| at least this
 constexpr double kTieReachRatio = 8.0;                       // G9: a tie reaches 8 spacings at most
 constexpr double kTieSwirlDeg = 28.0, kTieSwirlWavelengthRatio = 3.5;   // G9: the swirl
+constexpr double kLevelSpanMax = 10.0;                       // P: a level tie's flat span between joints, mm at most
 // The limits the record shows were hit, raised (brief G4): tips, and the re-seeded stubs.
 constexpr std::size_t kMaxTips = 200000;
 constexpr std::size_t kReseedMax = 5000;
@@ -216,6 +223,11 @@ struct Line {
   Vec3 root0{}, floor_pt{};
   bool wall_seed = false;   // E, wall_gap: a wall seed's strand (`seed_no`, `root0` as a foot's; `wall_pt` its wall point)
   Vec3 wall_pt{};
+  // P (brief G23): a level tie, its height, and the points it welded to as they were (a recorded vertex or another
+  // tie's point within a quarter layer of that height).
+  bool level_tie = false;
+  double level_h = 0.0;
+  std::vector<Vec3> snapped;
 };
 
 struct Near {
@@ -1302,6 +1314,9 @@ void Grower::repeats() {
       run.parent = -1;
       run.family = L.family;
       run.tie = L.tie;
+      run.level_tie = L.level_tie;   // P: a piece of a level tie is one
+      run.level_h = L.level_h;
+      run.snapped = L.snapped;
       run.origin = L.origin;
       run.branch = L.branch;
       if (s0 == 0 && L.floor_seed) {   // the piece that keeps the seed's root is still its foot
@@ -2085,6 +2100,15 @@ void Grower::reseed(std::vector<Tip>& tips) {
 // after a spacing, within half a spacing of another tie's point, it welds there and stops. With no weld it is no tie.
 // Its free points are thinned to 8 r apart (welds kept). A tie is a strut like any other: the path's support and
 // bridge rules judge it.
+// P (brief G23): with tie_level every tie is level. It walks the level part of the direction above (not started where
+// that is under 0.2 of the whole: ties_level_refused_steep; on the way, where it is, the walk goes on as it was), the
+// swirl turns it about the build direction only, and every point lies at its start's height. It welds there: onto a
+// recorded vertex within a quarter layer of that height, used as it is; else onto the point where a material segment of
+// another strand (not a tie) crosses that height, which strands() makes a vertex of both (a joint in the bars, as every
+// weld is); onto another tie's point only within a quarter layer of the height. It ends on its last weld, or where it
+// runs into the solid (as a run ends there). Its free points are dropped (joint to joint straight), and it is cut at
+// the joint before the first span over kLevelSpanMax (ties_level_cut_span). tie_gap (and tie_gap_heavy, by stress as
+// rule N) scales how often a vine starts one and the "not within half a spacing of another tie" test.
 void Grower::ties(std::size_t from) {
   std::vector<Vec3> tie_pts;
   Boxes tie_box = rec_;
@@ -2092,10 +2116,11 @@ void Grower::ties(std::size_t from) {
   for (const Line& L : lines_)
     if (L.tie)
       for (const Vec3& p : L.pts) tie_box.put(Sample{0, 0, 0, p});
-  auto near_tie = [&](const Vec3& q, double lim, Vec3* hit) {
+  auto near_tie = [&](const Vec3& q, double lim, Vec3* hit, const double* at_h = nullptr) {
     bool found = false;
     double best = lim;
     tie_box.near(q, lim, [&](const Sample& s) {
+      if (at_h && std::fabs(h(s.p) - *at_h) > 0.25 * layer_) return;   // P: only at the tie's height
       const double d = dist(q, s.p);
       if (d < best) { best = d; found = true; if (hit) *hit = s.p; }
     });
@@ -2110,6 +2135,11 @@ void Grower::ties(std::size_t from) {
     ratio = std::fabs(ev[1]) / std::fabs(ev[0]);
     return len(e2) > 1e-9;
   };
+  const bool lv = ask_.tie_level;   // P
+  const bool gap_by_stress = ask_.tie_gap_heavy > 0.0;
+  auto gap = [&](const Vec3& x) {
+    return gap_by_stress ? ask_.tie_gap + (ask_.tie_gap_heavy - ask_.tie_gap) * stress_f(x) : ask_.tie_gap;
+  };
   const std::size_t pillars = lines_.size();
   for (std::size_t ci = from; ci < pillars; ++ci) {
     if (lines_[ci].family != 0 || lines_[ci].tie || lines_[ci].pts.size() < 2) continue;
@@ -2119,9 +2149,10 @@ void Grower::ties(std::size_t from) {
       since += dist(pc[pi], pc[pi - 1]);
       const Vec3 p = pc[pi];
       if (lines_[ci].dead[pi - 1]) continue;   // not on what the path drops
-      if (since < sep(p)) continue;
+      const double tg = gap(p);   // P: 1 when not given (as before)
+      if (since < tg * sep(p)) continue;
       since = 0.0;
-      if (near_tie(p, kTestRatio * sep(p), nullptr)) continue;
+      if (near_tie(p, kTestRatio * (tg * sep(p)), nullptr)) continue;
       Vec3 e2, e1;
       double ratio = 0.0;
       if (!minor(p, e2, ratio, e1)) continue;
@@ -2130,11 +2161,19 @@ void Grower::ties(std::size_t from) {
         ++rep_.ties_seeded;
         const double max_reach = kTieReachRatio * sep(p);
         Vec3 dir = mul(e2, sgn);
+        const double h0 = h(p);   // P: a level tie's height
+        if (lv) {
+          const Vec3 ld = level(dir);
+          if (len(ld) < 0.2 * len(dir)) { ++rep_.ties_level_refused_steep; continue; }
+          dir = unit(ld);
+        }
         Vec3 q = p;
         double travelled = 0.0;
         std::vector<Vec3> path{p};
         std::vector<char> must{1};
+        std::vector<Vec3> snapped;   // P: welds onto a point used as it was
         int joins = 0, last_line = static_cast<int>(ci);
+        bool solid_end = false;   // P
         Vec3 last_join = p;
         while (travelled < max_reach) {
           Vec3 ea, em, xa, xm;
@@ -2144,52 +2183,109 @@ void Grower::ties(std::size_t from) {
           const Vec3 mid = add(q, mul(ea, 0.5 * layer_));
           if (!minor(mid, em, rm, xm)) break;
           if (dot(em, dir) < 0.0) em = mul(em, -1.0);
-          dir = unit(em);
+          if (lv) {
+            const Vec3 le = level(em);
+            if (len(le) >= 0.2 * len(em)) dir = unit(le);
+          } else {
+            dir = unit(em);
+          }
           if (ask_.tie_swirl > 0.0) {
             const double lam = kTieSwirlWavelengthRatio * sep(q);
             const double k1 = 2.0 * kPi / lam, k2 = k1 * 0.618, k3 = k1 * 1.414;
             const double phase = std::sin(k1 * q.x + 0.7) * std::cos(k2 * q.z + 1.9) +
                                  0.5 * std::sin(k3 * (q.x + q.z) + 0.3) * std::cos(k1 * q.y + 2.4);
             const double ang = ask_.tie_swirl * kTieSwirlDeg * kPi / 180.0 * std::clamp(phase, -1.0, 1.0);
-            const Vec3 axis = unit(cross(dir, xa));
-            if (len(axis) > 1e-9) {
+            if (lv) {   // P: about the build direction only
               const double c = std::cos(ang), sn = std::sin(ang);
-              dir = unit(add(add(mul(dir, c), mul(cross(axis, dir), sn)), mul(axis, dot(axis, dir) * (1.0 - c))));
+              dir = unit(level(add(mul(dir, c), mul(cross(up_, dir), sn))));
+            } else {
+              const Vec3 axis = unit(cross(dir, xa));
+              if (len(axis) > 1e-9) {
+                const double c = std::cos(ang), sn = std::sin(ang);
+                dir = unit(add(add(mul(dir, c), mul(cross(axis, dir), sn)), mul(axis, dot(axis, dir) * (1.0 - c))));
+              }
             }
           }
-          const Vec3 nq = add(q, mul(dir, layer_));
-          if (!inreg(nq)) break;
+          Vec3 nq = add(q, mul(dir, layer_));
+          if (lv) nq = sub(nq, mul(up_, h(nq) - h0));
+          if (!inreg(nq)) {
+            if (lv) {   // P: into the solid, it ends there (as a run does); into air, it ends on its last weld
+              const double at = edge(q, dir, layer_ + 0.05);
+              const double a = at >= 0.0 ? at : 0.0;
+              if (solid(add(q, mul(dir, a + 3.0 * 0.02)))) {
+                const Vec3 e = end_at_edge(q, dir, a);
+                path.push_back(sub(e, mul(up_, h(e) - h0)));
+                must.push_back(1);
+                solid_end = true;
+              }
+            }
+            break;
+          }
           q = nq;
           travelled += layer_;
           path.push_back(q);
           must.push_back(0);
           if (dist(q, last_join) > 2.0 * r_) {
             Near w;
+            bool w_vertex = false;
             const double wr = std::max(2.0 * r_, 0.75 * layer_);
             rec_.near(q, wr, [&](const Sample& s) {
               if (s.line == static_cast<int>(ci) || !rec_current(s)) return;
+              if (lv && std::fabs(h(s.p) - h0) > 0.25 * layer_) return;   // P: a vertex at the tie's height only
               const double d = dist(q, s.p);
-              if (d < wr && (d < w.d || (d == w.d && s.line < w.line))) { w.found = true; w.d = d; w.hit = s.p; w.line = s.line; }
+              if (d < wr && (d < w.d || (d == w.d && s.line < w.line))) {
+                w.found = true; w.d = d; w.hit = s.p; w.line = s.line; w_vertex = true;
+              }
             });
+            if (lv)   // P: the point where a material segment of another strand (not a tie) crosses the height
+              boxes_.near(q, wr + ds_, [&](const Sample& s) {
+                if (s.line == static_cast<int>(ci) || !live(s)) return;
+                const Line& B = lines_[static_cast<std::size_t>(s.line)];
+                if (B.tie) return;
+                const Vec3 a = B.pts[static_cast<std::size_t>(s.seg)], b = B.pts[static_cast<std::size_t>(s.seg) + 1];
+                const double ha = h(a) - h0, hb = h(b) - h0;
+                if (ha == hb || (ha > 0.0 && hb > 0.0) || (ha < 0.0 && hb < 0.0)) return;
+                Vec3 x = add(a, mul(sub(b, a), ha / (ha - hb)));
+                x = sub(x, mul(up_, h(x) - h0));
+                const double d = dist(q, x);
+                if (d < wr && (d < w.d || (d == w.d && s.line < w.line))) {
+                  w.found = true; w.d = d; w.hit = x; w.line = s.line; w_vertex = false;
+                }
+              });
             if (w.found && w.line != last_line) {
               path.back() = w.hit;
               must.back() = 1;
-              q = w.hit;
+              if (lv && w_vertex) snapped.push_back(w.hit);
+              q = lv ? sub(w.hit, mul(up_, h(w.hit) - h0)) : w.hit;
               ++joins;
               last_line = w.line;
               last_join = w.hit;
             }
           }
           Vec3 tv;
-          if (travelled > sep(p) && near_tie(q, kTestRatio * sep(q), &tv)) {
+          if (travelled > sep(p) && near_tie(q, kTestRatio * sep(q), &tv, lv ? &h0 : nullptr)) {
             path.push_back(tv);
             must.push_back(1);
+            if (lv) snapped.push_back(tv);
             ++joins;
             break;
           }
         }
-        if (joins < 1) { ++rep_.ties_refused_reach; continue; }
-        {
+        if (joins < 1 && !solid_end) { ++rep_.ties_refused_reach; continue; }
+        if (lv) {
+          // P 3: it ends on a joint (its last weld, or the solid end); 5: joint to joint straight; 4: cut at the joint
+          // before the first span over kLevelSpanMax.
+          std::vector<Vec3> jp;
+          for (std::size_t k = 0; k < path.size(); ++k)
+            if (must[k] && (jp.empty() || dist(jp.back(), path[k]) > 1e-9)) jp.push_back(path[k]);
+          for (std::size_t k = 1; k < jp.size(); ++k)
+            if (dist(jp[k], jp[k - 1]) > kLevelSpanMax) {
+              jp.resize(k);
+              ++rep_.ties_level_cut_span;
+              break;
+            }
+          path.swap(jp);
+        } else {
           const double keep_d = 8.0 * r_;
           std::vector<Vec3> thin;
           std::size_t next_must = 0;
@@ -2204,6 +2300,14 @@ void Grower::ties(std::size_t from) {
         }
         if (path.size() < 2) { ++rep_.ties_refused_reach; continue; }
         const int l = new_line(path[0], static_cast<int>(ci), 1, true);
+        if (lv) {
+          Line& T = lines_[static_cast<std::size_t>(l)];
+          T.level_tie = true;
+          T.level_h = h0;
+          T.snapped = snapped;
+          rep_.tie_level_joints.push_back(path.size());
+          for (std::size_t k = 1; k < path.size(); ++k) rep_.tie_level_span_mm.push_back(dist(path[k], path[k - 1]));
+        }
         for (std::size_t k = 1; k < path.size(); ++k)
           if (dist(path[k], lines_[static_cast<std::size_t>(l)].pts.back()) > 1e-9) lay(l, path[k]);
         for (const Vec3& v : path) tie_box.put(Sample{0, 0, 0, v});
@@ -2536,6 +2640,18 @@ bool Grower::setup() {
     throw std::invalid_argument("grow_strands: cross_climb_max_deg must be from 30 to 45");   // O
   if (ask_.cross_climb_max_deg != 45.0 && ask_.wall_cross == 0)
     throw std::invalid_argument("grow_strands: cross_climb_max_deg needs wall_cross");   // O
+  if (ask_.tie_level && !ask_.ties) throw std::invalid_argument("grow_strands: tie_level needs ties");   // P
+  if (!(ask_.tie_gap > 0.0) || !std::isfinite(ask_.tie_gap))
+    throw std::invalid_argument("grow_strands: tie_gap must be above 0");   // P
+  if (ask_.tie_gap != 1.0 && !ask_.ties) throw std::invalid_argument("grow_strands: tie_gap needs ties");   // P
+  if (!std::isfinite(ask_.tie_gap_heavy))
+    throw std::invalid_argument("grow_strands: tie_gap_heavy must be a number (0 or less: off)");   // P
+  if (ask_.tie_gap_heavy > 0.0 && !ask_.ties)
+    throw std::invalid_argument("grow_strands: tie_gap_heavy needs ties");   // P
+  if (ask_.tie_gap_heavy > ask_.tie_gap)
+    throw std::invalid_argument("grow_strands: tie_gap_heavy must be at most tie_gap");   // P
+  if (ask_.tie_gap_heavy > 0.0 && (ask_.spacing_mm > 0.0 || !(ask_.spacing_max_mm > ask_.spacing_min_mm)))
+    throw std::invalid_argument("grow_strands: tie_gap_heavy needs the spacing as a range (O12's measure)");   // P
   if (!(ask_.top_run >= 0.0) || !std::isfinite(ask_.top_run))
     throw std::invalid_argument("grow_strands: top_run must be 0 or above");   // G
   if (!(ask_.root_run >= 0.0) || !std::isfinite(ask_.root_run))
@@ -2673,6 +2789,22 @@ std::vector<Strand> Grower::run() {
       for (std::size_t k = 0; k < s.points.size(); ++k)
         s.width_mm[k] = width_ + (ask_.width_heavy_mm - width_) * share(s.points[k]);
   rep_.strands = out.size();
+  if (ask_.tie_level) {   // P: the largest height difference within one level tie, as the growth ends
+    rep_.tie_level = true;
+    for (const Line& L : lines_) {
+      if (!L.level_tie || L.pts.empty()) continue;
+      double lo = h(L.pts[0]), hi = lo, lo2 = L.level_h, hi2 = L.level_h;
+      for (const Vec3& p : L.pts) {
+        lo = std::min(lo, h(p));
+        hi = std::max(hi, h(p));
+        bool sn = false;
+        for (const Vec3& x : L.snapped) sn = sn || (x.x == p.x && x.y == p.y && x.z == p.z);
+        if (!sn) { lo2 = std::min(lo2, h(p)); hi2 = std::max(hi2, h(p)); }
+      }
+      rep_.tie_level_dz_max_mm = std::max(rep_.tie_level_dz_max_mm, hi - lo);
+      rep_.tie_level_dz_max_unsnapped_mm = std::max(rep_.tie_level_dz_max_unsnapped_mm, hi2 - lo2);
+    }
+  }
   return out;
 }
 

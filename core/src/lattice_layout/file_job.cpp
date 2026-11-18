@@ -207,7 +207,8 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "organic_auto", "organic_width_heavy_mm", "organic_member_cap", "organic_prune", "organic_bed_floor_mm",
        "organic_shape_reach", "organic_hold_parts", "organic_part_reach_mm",
        "organic_part_support_mm", "organic_part_to_floor", "organic_wall_gap_heavy", "organic_cross_gap",
-       "organic_cross_gap_heavy", "organic_cross_climb_max_deg"},
+       "organic_cross_gap_heavy", "organic_cross_climb_max_deg", "organic_tie_level", "organic_tie_gap",
+       "organic_tie_gap_heavy"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -492,6 +493,23 @@ OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::str
       json::fail(w + ".organic_cross_climb_max_deg", "must be from 30 (the print cone) to 45");
     if (a.wall_cross == 0) json::fail(w + ".organic_cross_climb_max_deg", "needs organic_wall_cross on (1 or 2)");
   }
+  // P (brief G23): level ties (off when not given), the tie gap in spacings (1 when not given), and by stress (0 or
+  // less, and not given: off).
+  a.tie_level = flag(in, "organic_tie_level", a.tie_level, w);
+  if (a.tie_level && !a.ties) json::fail(w + ".organic_tie_level", "needs organic_ties on");
+  if (json::find(in, "organic_tie_gap")) {
+    a.tie_gap = num(in, "organic_tie_gap", a.tie_gap, w);
+    if (!(std::isfinite(a.tie_gap) && a.tie_gap > 0.0)) json::fail(w + ".organic_tie_gap", "must be above 0");
+    if (!a.ties) json::fail(w + ".organic_tie_gap", "needs organic_ties on");
+  }
+  a.tie_gap_heavy = num(in, "organic_tie_gap_heavy", a.tie_gap_heavy, w);
+  if (!std::isfinite(a.tie_gap_heavy)) json::fail(w + ".organic_tie_gap_heavy", "must be a number (0 or less: off)");
+  if (a.tie_gap_heavy > 0.0 && !a.ties) json::fail(w + ".organic_tie_gap_heavy", "needs organic_ties on");
+  if (a.tie_gap_heavy > 0.0 && a.tie_gap_heavy > a.tie_gap)
+    json::fail(w + ".organic_tie_gap_heavy", "must be at most organic_tie_gap");
+  if (a.tie_gap_heavy > 0.0 && (a.spacing_mm > 0.0 || !(a.spacing_max_mm > a.spacing_min_mm)))
+    json::fail(w + ".organic_tie_gap_heavy", "needs the spacing as a range (organic_spacing_min_mm below "
+                                             "organic_spacing_max_mm): it follows that range's stress measure");
   // G (brief G8, try keys): top runs, roots (0 when not given: off), runs per end (1 when not given).
   a.top_run = num(in, "organic_top_run", a.top_run, w);
   if (!(std::isfinite(a.top_run) && a.top_run >= 0.0)) json::fail(w + ".organic_top_run", "must be 0 or above");
@@ -1616,6 +1634,26 @@ std::string file_result_json(const FileResult& r) {
                     med, big, count(g.cross_ended_side), count(g.cross_ended_top), count(g.cross_ended_noface),
                     count(g.cross_ended_unsupported), count(g.cross_ended_guard));
       wt += rb;
+    }
+    if (g.tie_level) {   // P: the level ties
+      std::vector<std::size_t> jn = g.tie_level_joints;
+      std::sort(jn.begin(), jn.end());
+      std::vector<double> sp = g.tie_level_span_mm;
+      std::sort(sp.begin(), sp.end());
+      const std::size_t nj = jn.size(), ns = sp.size();
+      const double jmed = nj == 0 ? 0.0 : nj % 2 ? static_cast<double>(jn[nj / 2])
+                                                 : 0.5 * static_cast<double>(jn[nj / 2 - 1] + jn[nj / 2]);
+      const double smed = ns == 0 ? 0.0 : ns % 2 ? sp[ns / 2] : 0.5 * (sp[ns / 2 - 1] + sp[ns / 2]);
+      const double sbig = ns == 0 ? 0.0 : sp.back();
+      char lb[600];
+      std::snprintf(lb, sizeof lb,
+                    "\"ties_level_refused_steep\": %llu, \"ties_level_cut_span\": %llu, \"tie_level_laid\": %llu, "
+                    "\"tie_level_joints_median\": %.9g, \"tie_level_span_median_mm\": %.9g, "
+                    "\"tie_level_span_max_mm\": %.9g, \"tie_level_dz_max_mm\": %.9g, "
+                    "\"tie_level_dz_max_unsnapped_mm\": %.9g,\n    ",
+                    count(g.ties_level_refused_steep), count(g.ties_level_cut_span), count(nj), jmed, smed, sbig,
+                    g.tie_level_dz_max_mm, g.tie_level_dz_max_unsnapped_mm);
+      wt += lb;
     }
     std::vector<char> gbuf(4096 + wt.size());   // O: room for the per-area counts, however many areas
     char* gb = gbuf.data();

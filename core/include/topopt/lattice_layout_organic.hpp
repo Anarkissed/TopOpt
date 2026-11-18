@@ -160,6 +160,17 @@ struct OrganicAsk {
   // O (brief G22): the steepest a crossing vine climbs, in degrees from level (45: F's limit, as before). From 30 (the
   // cone) to 45; only with wall_cross on when not 45. Nothing else about a crossing vine changes.
   double cross_climb_max_deg = 45.0;
+  // P (brief G23): level ties. tie_level: every transfer tie walks the level part of its direction (not started where
+  // that is under 0.2 of the whole), every point at its start's height, welds at that height (a recorded vertex within
+  // a quarter layer of it as it is, else the point where the other strand crosses it), ends on its last weld (or in
+  // the solid), cut at the joint before the first span over kLevelSpanMax (10 mm), joint to joint straight. Needs
+  // ties. tie_gap: a tie starts every tie_gap x the local spacing of a vine's length (1: as before; above 0; only with
+  // ties when not 1); tie_gap_heavy above 0: tie_gap + (tie_gap_heavy - tie_gap) x f, f O12's stress measure there
+  // (as rule N). 0 or less: off. Needs ties, at most tie_gap, the spacing as a range. The "not within half a spacing
+  // of another tie" test scales by the same factor.
+  bool tie_level = false;
+  double tie_gap = 1.0;
+  double tie_gap_heavy = 0.0;
 };
 
 // J2 (brief G12), the pruning of a Grown area's weave bars, for each (region, median asked spacing) of `areas`:
@@ -392,6 +403,15 @@ struct GrowReport {
   std::vector<Stub> stubs;
   // Transfer ties (G9).
   std::size_t ties_seeded = 0, ties_laid = 0, ties_refused_minor = 0, ties_refused_reach = 0;
+  // P (brief G23), with tie_level only: ties not started (the level part under 0.2), ties cut at a span over 10 mm;
+  // per laid level tie its joints (start, welds, solid end); every flat span between two joints (mm); the largest
+  // height difference between two points of one level tie as the growth ends (mm), over all its points and over its
+  // points that are not a recorded vertex used as it is (those may lie up to a quarter layer off).
+  bool tie_level = false;
+  std::size_t ties_level_refused_steep = 0, ties_level_cut_span = 0;
+  std::vector<std::size_t> tie_level_joints;
+  std::vector<double> tie_level_span_mm;
+  double tie_level_dz_max_mm = 0.0, tie_level_dz_max_unsnapped_mm = 0.0;
   // G13, the feet (floor seeds' strands) after the first pruning: kept; removed, cut from the floor up to their first
   // joint that holds with another plant's strand; removed whole (no such joint); the length those cuts took, with what
   // hung only on a vine removed whole (counted, in the lengths below, under "leads to nothing").
