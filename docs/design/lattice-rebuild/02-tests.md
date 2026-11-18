@@ -356,3 +356,13 @@ against 2,303; Grown 1,882 against 1,838) when `reference_mpa` moves in its nint
 | OP2 | L | OL-RUN: on a made Traced block (widths by stress, level ties, braces) the runs' length equals the non-link weave bars' to 1e-6 mm; thinned at 0.1 mm no original point is farther than 0.1 mm, ends and marks kept; packed bytes = 12 per run + 20 per point |
 | OP3 | L | OL-DRAFT: exact equals lay_organic bar for bar; the draft has no links and differs in length (-13.3 %), supports (10 -> 18) and net (1,544 -> 1,070) |
 | OP4 | L | OL-SWEEP: D = 18 gives strut 0.9 to 1.8 (Auto 1.35), cell 2.0 to 8.0 (Auto 5.0); a square of side 10 turned 45 degrees gives D = 10, not its box |
+
+## 14. The Organic file as the solid plus unmerged tubes (brief E1), in `test_weave_tubes` and `test_lattice_layout_file`
+
+| Rule | Kind | Test |
+|---|---|---|
+| OF1 | L | Two overlapping closed boxes as two shells under NonZero give every layer's area and every finding of their Manifold union as one mesh; under EvenOdd they do not (the overlap cancels); an inside-out shell under NonZero takes away |
+| OF2 | L | Weave block: every shell closed (each edge once each way) and outward; the shells' Manifold union in the part is within 2 % of the merged route's struts for the same bars (-0.26 %); a 45 degree turn is one mitred tube, a 150 degree turn two; 12 sides make more triangles, the same shells |
+| OF3 | L | A part with a slanted face and a slot: 1.10 mm outside before trimming, 0.013 mm after (no vertex past 0.05 mm), nothing below the bed, every shell closed and outward, none left out uncounted |
+| OF4 | L | Weave block with a hanging V: both routes clean in 2 passes (found 2, 0), every layer's area within 0.003 %; a cube part reads Tubes as Merged, the same mesh; the keys read and refuse by name. Driver (not in the suite): a cube job's STL and result, timings aside, and the merged weave mesh are byte for byte those of `8340a99f` |
+| OF5 | L | The pocket job with no mesh key writes `pocket_lattice.3mf`: unzipped and inflated in the test, one object, its triangles the mesh's, vertices shared, every edge once each way; deflated with zlib; the result's new fields; asked for `stl`, the tubes route writes an STL of the same triangles |
