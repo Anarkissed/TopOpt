@@ -7,6 +7,7 @@
 // §4 a T-join: a strut ending on another's middle splits it; three struts, all judged.
 // §5 two struts joined by a link move as one where the link joins them.
 // §6 a load on open lattice with no strut near: it is unheld, and the check says load_on_open_lattice.
+// §7 a loaded face with a strut end near only part of it: the lattice's share of the whole load is held there.
 #include "topopt/lattice_layout_frame.hpp"
 
 #include <cmath>
@@ -215,6 +216,27 @@ void test_load_on_open_lattice() {
   CHECK(c.load_on_open_lattice, "and the check says load_on_open_lattice");
 }
 
+void test_face_partly_near() {
+  // §7: a face of 11 loaded grid nodes along y at x = 6 (lattice voxels), the cantilever's tip near only one of them.
+  ll::Bars bars;
+  bars.bars.push_back(bar({0, 0, 0}, {6, 0, 0}, ll::Bar::End::Solid, ll::Bar::End::Loose));
+  Field f({-3.0, -3.0, -3.0}, 24, 24, 12);
+  for (int k = 0; k < f.grid.nz; ++k)
+    for (int j = 0; j < f.grid.ny; ++j)
+      for (int i = 0; i < f.grid.nx; ++i)
+        if (f.grid.origin.x + (i + 0.5) * f.grid.spacing > 1.0) {
+          f.mat.solid[f.grid.index(i, j, k)] = 0.0f;
+          f.mat.lattice[f.grid.index(i, j, k)] = 0.2f;
+        }
+  std::vector<ll::FrameVoxelSolve::Load> loads;
+  for (int b = 6; b <= 16; ++b) loads.push_back({f.node(18, b, 6), 2, -0.05});   // y from 0 to 5 mm
+  const ll::FrameCheck c = run(bars, f, loads);
+  std::printf("§7 face partly near: on the frame %.3f N of %.3f N, unheld %.3f, nodes loaded %zu\n", c.load_on_frame_n,
+              c.load_total_n, c.load_unheld_n, c.frame_nodes_loaded);
+  CHECK(c.solved && std::fabs(c.load_on_frame_n - 0.55) < 1e-9 && c.load_unheld_n == 0.0, "the whole lattice share is held");
+  CHECK(!c.load_on_open_lattice && c.frame_nodes_loaded == 1, "held at the one strut end near the face, not failed");
+}
+
 }  // namespace
 
 int main() {
@@ -224,6 +246,7 @@ int main() {
   test_t_join();
   test_link_moves_as_one();
   test_load_on_open_lattice();
+  test_face_partly_near();
   std::printf("organic_frame: %d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;
 }

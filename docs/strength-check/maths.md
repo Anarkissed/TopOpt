@@ -229,11 +229,11 @@ $$\mathbf u(\mathbf X)=\frac{1}{|V|}\sum_{e\in V}\bar{\mathbf u}_e,\qquad V=\{e:
 
 ### The load on the frame
 
-For each loaded grid node $g$ (force $\mathbf f_g$, the voxel solve's, gravity in), over the voxels $e\ni g$:
+Over the loaded grid nodes $G$ (forces $\mathbf f_g$, the voxel solve's) and the voxels $E_G$ touching any of them (each once):
 
-$$s_g=\frac{\sum_e\phi^{\text{lat}}_e}{\sum_e\rho_e},\qquad N_g=\{n\ \text{not solid, in the solve}:\ |\mathbf X_n-\mathbf x_g|\le\max(w_{\text{light}},h)\}$$
+$$s=\frac{\sum_{e\in E_G}\phi^{\text{lat}}_e}{\sum_{e\in E_G}\rho_e},\qquad \mathbf F=\sum_g\mathbf f_g,\qquad N=\{n\ \text{not solid, in the solve}:\ \min_g|\mathbf X_n-\mathbf x_g|\le\max(w_{\text{light}},h)\}$$
 
-$s_g\mathbf f_g/|N_g|$ goes on each $n\in N_g$; when $N_g=\varnothing$, $L_{\text{unheld}}\mathrel{+}=s_g|\mathbf f_g|$. Fail (`load_on_open_lattice`) when $L_{\text{unheld}}>$ {{load_unheld_share}} $\sum_g|\mathbf f_g|$.
+$s\,\mathbf F/|N|$ goes on each $n\in N$. When $N=\varnothing$, $L_{\text{unheld}}=s|\mathbf F|$ (else 0); fail (`load_on_open_lattice`) when $L_{\text{unheld}}>0$ and $s>$ {{load_unheld_share}}.
 
 ### Assembly and solve
 
@@ -259,7 +259,7 @@ $$\text{verdict}=\begin{cases}\text{fail} & L_{\text{unheld}}\text{ too large},\
 
 ## Organic: strengthen
 
-`topopt-cli organic-strengthen`: check; stop when no judged strut has $m<S$, or after $N$ = {{strengthen_rounds}} rounds (0: 2 Traced, 3 Grown); else one round, lay again, check again. For every judged strut with $m<m_w$ = {{strengthen_watch_margin}}, $P_s$ its piece ends and middles, $r_s$ the local spacing there (its bars' `cell`):
+`topopt-cli organic-strengthen`: check; stop when no judged strut has $m<S$, or after $N$ = {{strengthen_rounds}} rounds (0: 2 Traced, 3 Grown); else one round, lay again, check again. For every judged strut with $m<m_w$ = {{strengthen_watch_margin}}, $P_s$ its piece ends and middles, $r_s=r$ = {{strengthen_reach}} $\times$ the mean spacing in use in the weave (`spacing_used_mm.mean`):
 
 $$b_v=\max_{s:\ \min_{\mathbf p\in P_s}|\mathbf c_v-\mathbf p|\le r_s}\ \min\!\Big(b_{\max},\Big(\frac{m_w}{m_s}\Big)^{q}\Big)\qquad(1\ \text{elsewhere})$$
 

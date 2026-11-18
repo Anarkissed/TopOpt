@@ -33,7 +33,7 @@ struct FrameSettings {
   double drive_share = 0.5;            // frame_drive_share: a voxel drives when its material share is above this
   double collinear_tol_mm = 1e-6;      // frame_collinear_tol_mm: a piece of the frame lying on one line (rotations held)
   int collinear_max_driven = 50;       // frame_collinear_max_driven: ... looked for when it has fewer driven nodes
-  double load_unheld_share = 0.01;     // load_unheld_share: the lattice's load with no frame node near it, of the whole
+  double load_unheld_share = 0.01;     // load_unheld_share: the lattice's share of the load above which, with no frame node near, it fails
   double unjudged_share = 0.01;        // frame_unjudged_share: strut length in pieces with no driven node, of the whole
   double min_piece = 0.1;              // frame_min_piece: a piece counts for its strut's stress when this x its width long
   int material_subdiv = 3;             // frame_material_subdiv: sub-points per voxel edge for the material
@@ -104,7 +104,7 @@ struct FrameCheck {
   std::string solver;
   double drive_voxels_median = 0.0;
   std::size_t drive_fallback = 0;
-  double load_total_n = 0.0, load_on_frame_n = 0.0, load_unheld_n = 0.0;
+  double load_total_n = 0.0, load_on_frame_n = 0.0, load_unheld_n = 0.0, load_share = 0.0;
   std::size_t frame_nodes_loaded = 0;
   bool load_on_open_lattice = false;
   double strut_mm = 0.0, unjudged_mm = 0.0;
@@ -122,7 +122,8 @@ FrameCheck check_frame(const FrameModel& frame, const FrameVoxelSolve& voxels, c
 
 // ── ONE STRENGTHEN ROUND (brief E2, item 10; prototype R6, R8 with the lead's changes) ──────────────────────────────
 // From a check: every judged strut with margin m under `watch_margin`, at its pieces' ends and middles, each point with
-// the local spacing r of its piece's bar (Bar::cell, the engine's spacing there):
+// the reach r = `reach_mm` (the caller's strengthen_reach x the mean spacing in use in the weave, the lead's ruling of
+// 2026-11-18):
 //   (B) every voxel of `field` whose centre lies within r of a point gets b = min(boost_max, (watch / m)^boost_power),
 //       the largest where several reach; all six components times b (`field` is changed: the caller's copy);
 //   (A) a floor at the point, radius r, least width = the strut's widest piece x target_margin / m.
@@ -131,6 +132,7 @@ struct StrengthenSettings {
   double boost_max = 4.0;        // strengthen_boost_max
   double boost_power = 2.0;      // strengthen_boost_power
   double target_margin = 1.75;   // strengthen_target_margin
+  double reach_mm = 0.0;         // strengthen_reach x the weave's mean spacing (Outcome::spacing_mean_mm); 0: no round
 };
 struct StrengthenRound {
   std::size_t struts_watched = 0, voxels_boosted = 0;

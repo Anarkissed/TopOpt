@@ -407,7 +407,7 @@ int main() {
       keys.push_back(sj::as_string(*sj::find(e, "key"), "key"));
       sections.push_back(sj::as_string(*sj::find(e, "section"), "section"));
     }
-    CHECK(keys.size() == 81);   // 60 of Install 3, 21 of the Organic check (brief E2)
+    CHECK(keys.size() == 82);   // 60 of Install 3, 22 of the Organic check (brief E2)
     const auto headings = [](const std::string& t) {
       std::vector<std::string> h;
       std::istringstream in(t);

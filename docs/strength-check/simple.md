@@ -57,7 +57,7 @@ An Organic lattice has no cells, so it is checked another way: as a frame of rou
 
 First the whole part is cut into small cubes and each cube is read at {{frame_material_subdiv}} points along each edge: how much of it is your solid, and how much is strut. The computer works out how every cube moves under your load. A cube with nothing in it keeps {{frame_void_floor}} of the plastic's stiffness.
 
-Then the struts are joined where their ends meet (ends closer than {{frame_node_weld_mm}} mm are one joint), and a strut that stops on the middle of another is joined there ({{frame_tjoin_off_line_mm}} mm). A joint inside the solid moves as the solid around it moves: the average of the material cubes within {{frame_drive_ball_voxels}} cubes of it that are at least {{frame_drive_share}} full. Where your load lands on lattice, the struts' share of it is put on the strut joints near it. If more than {{load_unheld_share}} of the load lands on lattice with no strut joint near, the part fails: the load is on open lattice.
+Then the struts are joined where their ends meet (ends closer than {{frame_node_weld_mm}} mm are one joint), and a strut that stops on the middle of another is joined there ({{frame_tjoin_off_line_mm}} mm). A joint inside the solid moves as the solid around it moves: the average of the material cubes within {{frame_drive_ball_voxels}} cubes of it that are at least {{frame_drive_share}} full. Where your load lands, the share carried by lattice (rather than solid) is worked out over the whole loaded area; that share of the whole load is shared equally among the strut joints near any loaded point. If that share is more than {{load_unheld_share}} and no strut joint is near the loaded area at all, the part fails: the load is on open lattice.
 
 The short joiners where two strands cross (links) are made {{frame_link_stiffness}} times stiffer than a strut of their size, so the two strands move as one. A link is never judged.
 
@@ -69,7 +69,7 @@ The verdict: **pass** when the solid passes and no strut is under the safety mar
 
 The strengthen job checks the lattice, then lays it again where it was weak, and checks again, up to {{strengthen_rounds}} times (0 means 2 for Traced and 3 for Grown). It stops as soon as nothing is under the safety margin.
 
-In each round, every strut with a margin under {{strengthen_watch_margin}} raises the stress the lattice is laid from, around it, by up to {{strengthen_boost_max}} times (more for a weaker strut, by the power {{strengthen_boost_power}}), so the next lay puts more, wider struts there. It also sets a least width there, aimed at a margin of {{strengthen_target_margin}}, never wider than your own widest strut. Your own files are never changed: each round writes its own copy.
+In each round, every strut with a margin under {{strengthen_watch_margin}} raises the stress the lattice is laid from, within {{strengthen_reach}} times the weave's mean spacing of it, by up to {{strengthen_boost_max}} times (more for a weaker strut, by the power {{strengthen_boost_power}}), so the next lay puts more, wider struts there. It also sets a least width there (over the same reach), aimed at a margin of {{strengthen_target_margin}}, never wider than your own widest strut. Your own files are never changed: each round writes its own copy.
 
 If nothing in the job follows the stress (one spacing, one strut width), there is nothing to vary, and the job says so after the first check.
 

@@ -15298,6 +15298,7 @@ const std::vector<StrengthSettingSpec>& strength_setting_specs() {
       {"strengthen_boost_power", K::Number, 2.0, 0.1, 10.0, false, {}},
       {"strengthen_target_margin", K::Number, 1.75, 1.0, 10.0, false, {}},
       {"strengthen_rounds", K::Integer, 0.0, 0.0, 20.0, false, {}},
+      {"strengthen_reach", K::Number, 1.0, 0.1, 10.0, false, {}},
   };
   return specs;
 }
@@ -16264,7 +16265,7 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
        ", \"driven\": " + std::to_string(c.driven) + ", \"frame_parts\": " + std::to_string(c.pieces_of_frame) +
        ", \"undriven_parts\": " + std::to_string(c.undriven_pieces) + ", \"rotations_held\": " + std::to_string(c.rotations_held) +
        ", \"drive_voxels_median\": " + num(c.drive_voxels_median) + ", \"drive_fallback\": " + std::to_string(c.drive_fallback) +
-       ", \"load_total_n\": " + num(c.load_total_n) + ", \"load_on_frame_n\": " + num(c.load_on_frame_n) +
+       ", \"load_total_n\": " + num(c.load_total_n) + ", \"load_share\": " + num(c.load_share) + ", \"load_on_frame_n\": " + num(c.load_on_frame_n) +
        ", \"frame_nodes_loaded\": " + std::to_string(c.frame_nodes_loaded) + ", \"strut_mm\": " + num(c.strut_mm) +
        ", \"solved\": " + std::string(c.solved ? "true" : "false") + ", \"dofs\": " + std::to_string(c.dofs) +
        ", \"solver\": " + json_str(c.solver) + ", \"factor_gb\": " + num(c.factor_gb) + ", \"residual\": " + num(c.residual) + "},\n";
@@ -16518,6 +16519,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
     const std::string ndir = join_path(out_dir, "r" + std::to_string(n + 1));
     std::filesystem::create_directories(ndir, ec);
     ll::TensorField boosted = field;
+    ss.reach_mm = S.st.get("strengthen_reach") * out.spacing_mean_mm;   // the result's spacing_used_mm.mean
     const ll::StrengthenRound sr = ll::strengthen_round(cr.frame, cr.check, [&] {
       ll::Bars b;
       for (int i : cr.bar_of) b.bars.push_back(out.bars.bars[static_cast<std::size_t>(i)]);

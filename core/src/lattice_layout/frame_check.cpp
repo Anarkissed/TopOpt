@@ -445,7 +445,10 @@ FrameCheck check_frame(const FrameModel& f, const FrameVoxelSolve& vs, const Fra
     }
   }
 
-  // ── 5. The load on the frame: per loaded grid node, the lattice's share of its force, on the frame nodes near it.
+  // ── 5. The load on the frame (the lead's ruling of 2026-11-18, the prototype's rule for any part): the lattice's share
+  // of the WHOLE load = the lattice material share of the voxels touching the loaded grid nodes over their whole material
+  // share; that share x the whole load vector, equally on every undriven frame node (in the solve) within
+  // R = max(light width, voxel) of ANY loaded grid node. No such node: the whole of it is unheld.
   std::vector<std::array<double, 3>> F(nn, {0.0, 0.0, 0.0});
   {
     std::unordered_map<int, std::array<double, 3>> force;
@@ -455,27 +458,26 @@ FrameCheck check_frame(const FrameModel& f, const FrameVoxelSolve& vs, const Fra
     for (std::size_t n = 0; n < nn; ++n)
       if (used[n] && !driven[n] && comp_in[static_cast<std::size_t>(comp[n])])
         near[cell_of(f.nodes[n], R)].push_back(static_cast<int>(n));
-    std::vector<char> loaded(nn, 0);
-    std::vector<int> found;
+    std::array<double, 3> total{0.0, 0.0, 0.0};
+    double lat = 0.0, all = 0.0;
+    std::vector<char> seen_voxel(g.voxel_count(), 0), loaded(nn, 0);
     for (const auto& [node, fv] : force) {
       const double mag = std::sqrt(fv[0] * fv[0] + fv[1] * fv[1] + fv[2] * fv[2]);
-      out.load_total_n += mag;
       if (!(mag > 0.0)) continue;
+      for (int q = 0; q < 3; ++q) total[static_cast<std::size_t>(q)] += fv[static_cast<std::size_t>(q)];
       const int a = node % NX, b = (node / NX) % NY, c = node / (NX * NY);
-      double lat = 0.0, all = 0.0;
       for (int dk = -1; dk <= 0; ++dk)
         for (int dj = -1; dj <= 0; ++dj)
           for (int di = -1; di <= 0; ++di) {
             const int i = a + di, j = b + dj, k = c + dk;
             if (i < 0 || j < 0 || k < 0 || i >= g.nx || j >= g.ny || k >= g.nz) continue;
             const std::size_t e = g.index(i, j, k);
+            if (seen_voxel[e]) continue;   // each voxel once
+            seen_voxel[e] = 1;
             lat += mat.lattice[e];
             all += mat.solid[e] + mat.lattice[e];
           }
-      const double share = all > 0.0 ? lat / all : 0.0;
-      if (!(share * mag > 0.0)) continue;
       const Vec3 P{g.origin.x + a * h, g.origin.y + b * h, g.origin.z + c * h};
-      found.clear();
       const CellKey ck = cell_of(P, R);
       for (long long dx = -1; dx <= 1; ++dx)
         for (long long dy = -1; dy <= 1; ++dy)
@@ -483,21 +485,25 @@ FrameCheck check_frame(const FrameModel& f, const FrameVoxelSolve& vs, const Fra
             const auto it = near.find({ck[0] + dx, ck[1] + dy, ck[2] + dz});
             if (it == near.end()) continue;
             for (int n : it->second)
-              if (len3(sub3(f.nodes[static_cast<std::size_t>(n)], P)) <= R) found.push_back(n);
+              if (len3(sub3(f.nodes[static_cast<std::size_t>(n)], P)) <= R) loaded[static_cast<std::size_t>(n)] = 1;
           }
-      if (found.empty()) {
-        out.load_unheld_n += share * mag;
-        continue;
-      }
-      const double each = share / static_cast<double>(found.size());
-      for (int n : found) {
-        for (int q = 0; q < 3; ++q) F[static_cast<std::size_t>(n)][static_cast<std::size_t>(q)] += each * fv[static_cast<std::size_t>(q)];
-        loaded[static_cast<std::size_t>(n)] = 1;
-      }
-      out.load_on_frame_n += share * mag;
     }
-    for (char x : loaded) out.frame_nodes_loaded += x;
-    out.load_on_open_lattice = out.load_unheld_n > s.load_unheld_share * out.load_total_n;
+    out.load_total_n = std::sqrt(total[0] * total[0] + total[1] * total[1] + total[2] * total[2]);
+    const double share = all > 0.0 ? lat / all : 0.0;
+    out.load_share = share;
+    std::size_t count = 0;
+    for (char x : loaded) count += x;
+    out.frame_nodes_loaded = count;
+    const double on = share * out.load_total_n;
+    if (on > 0.0 && count == 0) {
+      out.load_unheld_n = on;
+    } else if (on > 0.0) {
+      for (std::size_t n = 0; n < nn; ++n)
+        if (loaded[n])
+          for (int q = 0; q < 3; ++q) F[n][static_cast<std::size_t>(q)] = share * total[static_cast<std::size_t>(q)] / count;
+      out.load_on_frame_n = on;
+    }
+    out.load_on_open_lattice = out.load_unheld_n > 0.0 && share > s.load_unheld_share;
   }
   out.ms_drive = ms_since(t0);
 
@@ -764,7 +770,7 @@ StrengthenRound strengthen_round(const FrameModel& f, const FrameCheck& c, const
     const double least = st.width_max * s.target_margin / st.margin;
     for (int pi : st.pieces) {
       const FramePiece& p = f.pieces[static_cast<std::size_t>(pi)];
-      const double r = bars.bars[static_cast<std::size_t>(p.bar)].cell;
+      const double r = s.reach_mm;   // the lead's ruling (2026-11-18): strengthen_reach x the region's mean spacing
       if (!(r > 0.0)) continue;
       const Vec3& A = f.nodes[static_cast<std::size_t>(p.a)];
       const Vec3& B = f.nodes[static_cast<std::size_t>(p.b)];
