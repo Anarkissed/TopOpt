@@ -561,6 +561,15 @@ target_link_libraries(test_lattice_layout_file PRIVATE topopt)
 target_compile_definitions(test_lattice_layout_file PRIVATE
   LATTICE_FILE_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 add_test(NAME lattice_layout_file COMMAND test_lattice_layout_file)
+# Organic cut 2 (brief E1, rules OF1..): the file as the solid plus unmerged closed tubes. The test makes its reference
+# unions with Manifold, so it is registered only where the writer has it.
+if(manifold_FOUND)
+  add_executable(test_weave_tubes tests/unit/test_weave_tubes.cpp)
+  target_link_libraries(test_weave_tubes PRIVATE topopt manifold::manifold)
+  target_compile_definitions(test_weave_tubes PRIVATE
+    WEAVE_TUBES_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME weave_tubes COMMAND test_weave_tubes)
+endif()
 
 # Harness-side lattice material model C(rho) (multiscale-lattice-feasibility
 # probe, 2026-07-31). The model itself lives in tests/harness/

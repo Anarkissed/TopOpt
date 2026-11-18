@@ -353,6 +353,15 @@ struct LayerSpec {
   // Places (x, y, and the height under which to look) to ask what material lies straight below: the same reading as
   // a post's foot (the highest layer under it with anything within 0.45 mm). Answered in LayerReport::below.
   std::vector<Vec3> below_of;
+  // OF1: how a pixel row is filled from the crossings of the mesh's triangles. EvenOdd (the default, every result as
+  // before): inside where an odd number of crossings lie at or before it, so two closed shells that overlap cancel.
+  // NonZero (the slicer's rule, for a file of the solid plus unmerged closed tubes): each crossing counts +1 or -1 by
+  // the side the triangle's normal faces along the row (+1 where it faces back, entering), inside where the sum is
+  // above 0, so overlapping closed outward shells read as their union.
+  enum class Fill { EvenOdd, NonZero };
+  Fill fill = Fill::EvenOdd;
+  // Set: LayerReport::layer_mm2 holds every layer's filled area (for comparing two files layer by layer).
+  bool layer_areas = false;
   int threads = 0;
   const std::atomic<bool>* stop = nullptr;
 };
@@ -373,6 +382,8 @@ struct LayerReport {
   // One per LayerSpec::below_of: anything below, and the middle of the highest layer that has it.
   struct Below { bool anything = false; double z = 0.0; };
   std::vector<Below> below;
+  // LayerSpec::layer_areas: per layer, its filled area, mm2 (empty otherwise).
+  std::vector<double> layer_mm2;
   // The bed face is flat (no sloped or curved underside in the first layer worth the name,
   // and the first layer rests on the bed), nothing starts in mid-air, nothing is one-ended.
   bool bed_flat() const { return sloped_mm2 <= 0.5 && bed_mm2 >= 0.98 * first_layer_mm2; }

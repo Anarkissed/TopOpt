@@ -53,8 +53,10 @@ bool any_in(const Section& s, const Grid& g, int r0, int r1, int c0, int c1) {
 }
 
 // The cross-section of `mesh` at height z, from the triangles listed.
+// NonZero (OF1): each crossing is kept as 2 * column + (1 when it enters, the triangle's normal facing back along the
+// row), and the flips are where the running sum of +1 / -1 rises above 0 or falls back to it.
 Section cut(const TriangleMesh& mesh, const std::vector<std::uint32_t>& tris, double z, const Grid& g,
-            std::vector<std::vector<int>>& rows) {
+            std::vector<std::vector<int>>& rows, bool nonzero = false) {
   for (auto& r : rows) r.clear();
   for (std::uint32_t ti : tris) {
     const auto& t = mesh.triangles[ti];
@@ -74,6 +76,11 @@ Section cut(const TriangleMesh& mesh, const std::vector<std::uint32_t>& tris, do
       py[e] = a.y + s * (b.y - a.y);
     }
     if (count != 2) continue;
+    int enter = 0;
+    if (nonzero) {
+      const double nx = (v[1]->y - v[0]->y) * (v[2]->z - v[0]->z) - (v[1]->z - v[0]->z) * (v[2]->y - v[0]->y);
+      enter = nx < 0.0 ? 1 : 0;
+    }
     const int ia = cross[0] ? 0 : 1, ib = cross[2] ? 2 : 1;
     const double ya = (py[ia] - g.y0) / g.px - 0.5, yb = (py[ib] - g.y0) / g.px - 0.5;
     const int r0 = static_cast<int>(std::ceil(std::min(ya, yb))), r1 = static_cast<int>(std::ceil(std::max(ya, yb))) - 1;
@@ -81,7 +88,22 @@ Section cut(const TriangleMesh& mesh, const std::vector<std::uint32_t>& tris, do
       const double s = (r - ya) / (yb - ya);
       const double x = px[ia] + s * (px[ib] - px[ia]);
       const int c = std::max(0, static_cast<int>(std::ceil((x - g.x0) / g.px - 0.5)));
-      if (c < g.W) rows[static_cast<std::size_t>(r)].push_back(c);
+      if (c < g.W) rows[static_cast<std::size_t>(r)].push_back(nonzero ? 2 * c + enter : c);
+    }
+  }
+  if (nonzero) {
+    // The crossings as flips of "the sum is above 0": the rest reads them as before.
+    for (auto& row : rows) {
+      std::sort(row.begin(), row.end());
+      std::vector<int> flips;
+      int sum = 0;
+      for (std::size_t i = 0; i < row.size();) {
+        const int c = row[i] >> 1;
+        const bool was = sum > 0;
+        for (; i < row.size() && (row[i] >> 1) == c; ++i) sum += (row[i] & 1) ? 1 : -1;
+        if ((sum > 0) != was) flips.push_back(c);
+      }
+      row.swap(flips);
     }
   }
   Section out;
@@ -395,7 +417,8 @@ LayerReport check_layers(const TriangleMesh& mesh, const LayerSpec& spec) {
     auto work = [&] {
       std::vector<std::vector<int>> rows(static_cast<std::size_t>(g.H));
       for (int k = next.fetch_add(1); k < nl && !asked(spec.stop); k = next.fetch_add(1))
-        sections[static_cast<std::size_t>(k)] = cut(mesh, through[static_cast<std::size_t>(k)], z_of(k), g, rows);
+        sections[static_cast<std::size_t>(k)] = cut(mesh, through[static_cast<std::size_t>(k)], z_of(k), g, rows,
+                                                    spec.fill == LayerSpec::Fill::NonZero);
     };
     std::vector<std::thread> pool;
     for (int t = 1; t < nt; ++t) pool.emplace_back(work);
@@ -411,6 +434,19 @@ LayerReport check_layers(const TriangleMesh& mesh, const LayerSpec& spec) {
     std::size_t n = 0;
     for (unsigned char c : first) n += c;
     rep.first_layer_mm2 = n * PX * PX;
+  }
+  if (spec.layer_areas) {
+    rep.layer_mm2.assign(static_cast<std::size_t>(nl), 0.0);
+    for (int k = 0; k < nl; ++k) {
+      const Section& s = sections[static_cast<std::size_t>(k)];
+      long n = 0;
+      if (!s.start.empty())
+        for (int r = 0; r < g.H; ++r)
+          for (int i = s.start[static_cast<std::size_t>(r)]; i < s.start[static_cast<std::size_t>(r) + 1]; i += 2)
+            n += (i + 1 < s.start[static_cast<std::size_t>(r) + 1] ? s.cols[static_cast<std::size_t>(i) + 1] : g.W) -
+                 s.cols[static_cast<std::size_t>(i)];
+      rep.layer_mm2[static_cast<std::size_t>(k)] = n * PX * PX;
+    }
   }
   const int grow_px = std::max(1, static_cast<int>(std::lround(L / PX)));
   std::vector<LayerFound> found(static_cast<std::size_t>(nl));
