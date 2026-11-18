@@ -223,6 +223,7 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
         Bars weave = weave_bars(*domain_, *strands, threads);
         split_at_crossings(weave, finish ? finish->light_mm : 0.0, finish ? finish->layer_mm : 0.2, nullptr,
                            finish ? finish->link_width : 1.0);   // S, S8
+        if (finish && finish->brace.unbraced_max > 0.0) brace_weave(weave, *domain_, finish->brace);   // T
         out.bars.stubs += weave.stubs;
         out.bars.bars.insert(out.bars.bars.end(), weave.bars.begin(), weave.bars.end());
       }

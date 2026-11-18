@@ -168,6 +168,9 @@ struct OrganicAsk {
   // the cut at crossings is link_width x the thinner of the two bars it joins, held between the light width and the
   // thicker of the two. 0.5 to 2.0; 1: as thick as the thinner strut. Both Organic modes.
   double link_width = 1.0;
+  // T (brief G30; the owner: "Yes, add it"): no strut runs longer than unbraced_max x its thinnest width without a
+  // joint (brace_weave). 0: off (as before); 4 to 40. A Manual variable; Auto will use 10.
+  double unbraced_max = 0.0;
   // P (brief G23): level ties. tie_level: every transfer tie walks the level part of its direction (not started where
   // that is under 0.2 of the whole), every point at its start's height, welds at that height (a recorded vertex within
   // a quarter layer of it as it is, else the point where the other strand crosses it), ends on its last weld (or in
@@ -357,6 +360,13 @@ struct OrganicTraceStats {
 // `stats`, when given, receives the spacing used (OrganicTraceStats).
 std::vector<Strand> trace_strands(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask,
                                   OrganicTraceStats* stats = nullptr);
+// T (brief G30): what brace_weave needs for this job's weave regions: unbraced_max, the light width, the layer, the
+// link width, and the braces' width rule (the strands' own: by stress with width_heavy_mm, the share over each
+// region's O12 reference, else the light width). Off (unbraced_max 0) when the ask has it off.
+// `references`: each weave region's O12 reference (region, MPa), as the region's own spacing computed it ONCE (the
+// trace's OrganicTraceStats::reference_mpa, Grown's organic_spacing): nothing is computed again here.
+WeaveBraceAsk organic_brace_ask(const Domain& domain, const TensorField& field, const OrganicAsk& ask,
+                                const std::vector<std::pair<int, double>>& references);
 // R (brief G26), the level ties for Traced (OrganicAsk::tie_level), P's rule by P's own walk (organic_grow.cpp):
 // along each of the first `curves` strands of `strands` (the traced curves; the connectors follow them), a start point
 // every tie_gap x sep(p) of its length (read every layer; tie_gap_heavy by stress as P), not where the curve there
@@ -503,8 +513,10 @@ struct GrowReport {
 // field, or no candidate voxel, gives none. Throws std::invalid_argument for a range organic_spacing refuses, a width
 // under the thinnest strut, a layer or a seed stride not above 0, a foot gap not a number, or a degenerate build
 // direction.
+// T fix (brief G30): `spacing`, when given, is organic_spacing(domain, region, field, ask) computed once by the
+// caller (Session::lay_organic); the growth then reads it instead of computing it again. The result is the same.
 std::vector<Strand> grow_strands(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask,
-                                 GrowReport* report = nullptr);
+                                 GrowReport* report = nullptr, const OrganicSpacing* spacing = nullptr);
 
 // G3 and G16a alone, exposed for tests: the unit direction of the pull ("the light") at `p`, as grow_strands sets it up
 // for `region` (the build direction where there is no pull); the build direction for an empty field or no candidate.

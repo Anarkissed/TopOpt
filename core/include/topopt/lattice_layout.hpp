@@ -22,6 +22,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -1002,6 +1003,8 @@ struct Bar {
   // width, its own new strand number, the lower-numbered bar's region). Never cut by that step; every later step treats
   // it as any bar.
   bool link = false;
+  // T (brief G30): a BRACE laid by brace_weave from a brace point of a too-long strut (its own strand number).
+  bool brace = false;
 };
 
 // Preview is the spec (reviewer, 2026-11-12): a bar lying flatter than 30 degrees is written to the file as a BRIDGE,
@@ -1105,8 +1108,36 @@ struct CrossingCutStats {
 };
 // S8: a link is link_width x the thinner of the two bars' widths, held between light_mm and the thicker bar's width;
 // counted: links at the light width, wider, and the widest.
+// T4 (brief G30): `first_new` above 0: only pairs with at least one bar at or after that index are tried (the cut run
+// again over new bars only, against everything).
 std::size_t split_at_crossings(Bars& bars, double light_mm = 0.0, double layer_mm = 0.2,
-                               CrossingCutStats* stats = nullptr, double link_width = 1.0);
+                               CrossingCutStats* stats = nullptr, double link_width = 1.0, std::size_t first_new = 0);
+// T (brief G30), no strut runs too far without a joint. A STRUT is the run of one strand's non-link bars between two
+// real joints (a point where three or more non-link bars meet, or an end tagged Solid) or the strand's own ends.
+struct WeaveStrut {
+  int strand = -1, region = 0;
+  double length_mm = 0.0, thinnest_mm = 0.0;
+  std::vector<std::size_t> bars;   // in order along it
+  std::vector<char> flipped;       // per bar: walked from b to a
+};
+std::vector<WeaveStrut> weave_struts(const Bars& bars);
+struct WeaveBraceAsk {
+  double unbraced_max = 0.0;   // in strut widths; 0: off
+  double light_mm = 0.0, layer_mm = 0.2, link_width = 1.0;
+  std::function<double(int region, const Vec3& p)> width_at;   // a brace end's width (empty: light_mm)
+};
+struct WeaveBraceStats {
+  std::size_t over_before = 0, points = 0, level = 0, sloping = 0, not_laid = 0;
+  double braces_mm = 0.0;
+};
+// T1-T4: every strut longer than unbraced_max x its thinnest width gets n = ceil(L / (max x w)) - 1 brace points,
+// evenly spaced along it (each made a vertex of its bar); at each, two braces along b1 (level, square to the strut)
+// and b2 = d x b1: one under 30 degrees from level made level (both ways tried, the nearer landing wins), one at 30
+// or more laid as it is, downward. A brace ends where it first comes within light_mm of a non-link bar of another
+// strand (read every 0.05 mm) or enters solid (its end at the edge, tagged Solid), 10 mm at most; none: not laid.
+// Each brace: width_at's mean of its two ends, `brace`, its own new strand number. Then split_at_crossings runs once
+// more over the new bars only. Returns the braces laid.
+std::size_t brace_weave(Bars& weave, const Domain& domain, const WeaveBraceAsk& ask, WeaveBraceStats* stats = nullptr);
 // Rule O2 (one bar per two points): of the bars of `regions` (a weave's), two with the same two ends (each within a
 // hundredth of a micron, either order) are ONE bar, of the wider width. The first in list order is kept, at the widest
 // width of its repeats; each of its ends takes the best-landed tag any of them has there (Solid, then Joined into a bar
@@ -1434,6 +1465,7 @@ class Session {
     // S (brief G28): the light strut width and the layer, for split_at_crossings (0: the thinnest weave bar).
     double light_mm = 0.0, layer_mm = 0.2;
     double link_width = 1.0;   // S8: OrganicAsk::link_width
+    WeaveBraceAsk brace;       // T (brief G30): off unless brace.unbraced_max > 0
   };
   Outcome lay_with(const Settings& settings, const std::vector<Strand>* strands, int threads, const std::atomic<bool>* stop,
                    const WeaveFinish* finish = nullptr);

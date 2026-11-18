@@ -308,8 +308,9 @@ double stress_f_of(const OrganicSpacing& sp, const TensorField& field, const Vec
 
 class Grower {
  public:
-  Grower(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask, GrowReport& rep)
-      : domain_(domain), region_(region), field_(field), ask_(ask), rep_(rep), probe_(domain.probe()) {}
+  Grower(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask, GrowReport& rep,
+         const OrganicSpacing* given = nullptr)
+      : domain_(domain), region_(region), field_(field), ask_(ask), rep_(rep), probe_(domain.probe()), given_sp_(given) {}
 
   std::vector<Strand> run();
   // G16a, for the tests (grown_light): set up as run() does, up to the lighting; false when nothing would grow.
@@ -324,7 +325,10 @@ class Grower {
   const OrganicAsk& ask_;
   GrowReport& rep_;
   Domain::Probe probe_;
-  OrganicSpacing sp_;
+  OrganicSpacing own_sp_;                    // T fix (brief G30): computed here only when not handed in
+  const OrganicSpacing* given_sp_ = nullptr;   // T fix: organic_spacing's answer for this region, computed once by the caller
+  const OrganicSpacing* spp_ = &own_sp_;
+  const OrganicSpacing& spacing() const { return *spp_; }
   Vec3 up_{}, u_{}, v_{};
   double layer_ = 0.2, width_ = 0.9, r_ = 0.45, sep_hi_ = 8.0, median_ = 5.0, bed_ = 0.0, ds_ = 0.2;
   double cone_sin_ = 0.5, cone_cos_ = 0.0;
@@ -362,10 +366,10 @@ class Grower {
   }
   // The local spacing (O12's, per voxel): the voxel's own; off the candidates, the first candidate neighbour's (in
   // axis order); else the widest.
-  double sep(const Vec3& p) const { return sep_of(sp_, field_, sep_hi_, p); }   // R: shared with Traced
+  double sep(const Vec3& p) const { return sep_of(spacing(), field_, sep_hi_, p); }   // R: shared with Traced
   // M (brief G19): O12's stress measure f (0 .. 1) at p, read exactly as sep reads the spacing: the voxel's own; off the
   // candidates, the first candidate neighbour's (in axis order); else 0 (sep's widest, the light end).
-  double stress_f(const Vec3& p) const { return stress_f_of(sp_, field_, p); }   // R: shared with Traced
+  double stress_f(const Vec3& p) const { return stress_f_of(spacing(), field_, p); }   // R: shared with Traced
   bool frame(const Vec3& p, double ev[3], Vec3 vec[3]) const {
     int i, j, k;
     if (!voxel(p, i, j, k)) return false;
@@ -374,7 +378,7 @@ class Grower {
   }
   // G3: the major principal direction, turned to point up; false where there is no stress.
   // I (brief G10): the stress share u(p), 0 .. 1, exactly O12's (organic_spacing): the von Mises of the tensor at p's
-  // voxel over sp_'s reference; 0 off the field or with a reference of 0.
+  // voxel over spacing()'s reference; 0 off the field or with a reference of 0.
   double share(const Vec3& p) const {
     int i, j, k;
     if (!voxel(p, i, j, k)) return 0.0;
@@ -382,7 +386,7 @@ class Grower {
     const double a = t[0] - t[1], b = t[1] - t[2], d = t[2] - t[0];
     const double vm =
         std::sqrt(std::max(0.0, 0.5 * (a * a + b * b + d * d) + 3.0 * (t[3] * t[3] + t[4] * t[4] + t[5] * t[5])));
-    return grading_demand_fraction(GradingIntent::Aesthetic, vm, sp_.reference_mpa, 1.0);
+    return grading_demand_fraction(GradingIntent::Aesthetic, vm, spacing().reference_mpa, 1.0);
   }
   bool stress_dir(const Vec3& p, Vec3& f) const {
     double ev[3];
@@ -406,7 +410,7 @@ class Grower {
     const int n = std::max(1, static_cast<int>(std::ceil(dist(a, b) / ds_)));
     for (int t = 1; t < n; ++t) {
       int i, j, k;
-      if (!voxel(add(a, mul(sub(b, a), static_cast<double>(t) / n)), i, j, k) || !sp_.candidate[field_.index(i, j, k)])
+      if (!voxel(add(a, mul(sub(b, a), static_cast<double>(t) / n)), i, j, k) || !spacing().candidate[field_.index(i, j, k)])
         return false;
     }
     return true;
@@ -629,12 +633,12 @@ void Grower::lighting() {
     for (int j = 0; j < field_.ny; ++j)
       for (int i = 0; i < field_.nx; ++i) {
         const std::size_t e = field_.index(i, j, k);
-        if (!sp_.candidate[e]) continue;
+        if (!spacing().candidate[e]) continue;
         const Vec3 c = centre(i, j, k);
         for (int f = 0; f < 6; ++f) {
           const int a = i + nb[f][0], b = j + nb[f][1], cc = k + nb[f][2];
           if (a >= 0 && b >= 0 && cc >= 0 && a < field_.nx && b < field_.ny && cc < field_.nz &&
-              sp_.candidate[field_.index(a, b, cc)])
+              spacing().candidate[field_.index(a, b, cc)])
             continue;
           const Vec3 o{static_cast<double>(nb[f][0]), static_cast<double>(nb[f][1]), static_cast<double>(nb[f][2])};
           if (dot(o, up_) < -0.5) continue;   // the floor
@@ -643,7 +647,7 @@ void Grower::lighting() {
           if (d < best[e]) {
             best[e] = d;
             light_[e] = site;
-            aim_[e] = add(site, mul(o, sp_.spacing_mm[e]));
+            aim_[e] = add(site, mul(o, spacing().spacing_mm[e]));
             face_[e] = static_cast<signed char>(f);
           }
         }
@@ -663,7 +667,7 @@ void Grower::lighting() {
           const int a = i + di, b = j + dj, c = k + dk;
           if ((!di && !dj && !dk) || a < 0 || b < 0 || c < 0 || a >= field_.nx || b >= field_.ny || c >= field_.nz) continue;
           const std::size_t f = field_.index(a, b, c);
-          if (!sp_.candidate[f]) continue;
+          if (!spacing().candidate[f]) continue;
           const double d = dist(light_[e], centre(a, b, c));
           if (d < best[f] - 1e-12) {
             best[f] = d;
@@ -684,7 +688,7 @@ void Grower::seeds(std::vector<Tip>& tips) {
   for (int k = 0; k < field_.nz; ++k)
     for (int j = 0; j < field_.ny; ++j)
       for (int i = 0; i < field_.nx; ++i) {
-        if (!sp_.candidate[field_.index(i, j, k)]) continue;
+        if (!spacing().candidate[field_.index(i, j, k)]) continue;
         const Vec3 c = centre(i, j, k);
         const std::pair<long long, long long> key{static_cast<long long>(std::floor(dot(c, u_) / hv)),
                                                   static_cast<long long>(std::floor(dot(c, v_) / hv))};
@@ -737,14 +741,14 @@ void Grower::seeds(std::vector<Tip>& tips) {
   for (int k = 0; k < field_.nz; ++k)
     for (int j = 0; j < field_.ny; ++j)
       for (int i = 0; i < field_.nx; ++i) {
-        if (!sp_.candidate[field_.index(i, j, k)]) continue;
+        if (!spacing().candidate[field_.index(i, j, k)]) continue;
         const Vec3 c = centre(i, j, k);
         for (int n = 0; n < 6; ++n) {
           const Vec3 off{static_cast<double>(nb6[n][0]), static_cast<double>(nb6[n][1]), static_cast<double>(nb6[n][2])};
           if (std::fabs(dot(off, up_)) >= 0.5) continue;
           const int a = i + nb6[n][0], b = j + nb6[n][1], cc = k + nb6[n][2];
           if (a >= 0 && b >= 0 && cc >= 0 && a < field_.nx && b < field_.ny && cc < field_.nz &&
-              sp_.candidate[field_.index(a, b, cc)])
+              spacing().candidate[field_.index(a, b, cc)])
             continue;
           if (!solid(add(c, mul(off, hv)))) continue;
           const auto key = std::make_tuple(static_cast<long long>(std::floor(h(c) / stride)),
@@ -1589,8 +1593,8 @@ void Grower::feet(const std::vector<int>& parent, const std::vector<char>& branc
   const bool by_stress = wall && ask_.wall_gap_heavy > 0.0;
   auto third = [](double f) { return f < 1.0 / 3.0 ? 0 : (f < 2.0 / 3.0 ? 1 : 2); };
   auto exempt = [&](const Vec3& fp) {   // L2 c's zone, as below
-    const double R2 = sp_.hold_reach_mm * sp_.hold_reach_mm;
-    for (const Vec3& c : sp_.hold_centres) {
+    const double R2 = spacing().hold_reach_mm * spacing().hold_reach_mm;
+    for (const Vec3& c : spacing().hold_centres) {
       const Vec3 d = sub(c, fp);
       if (dot(d, d) <= R2) return true;
     }
@@ -1607,7 +1611,7 @@ void Grower::feet(const std::vector<int>& parent, const std::vector<char>& branc
       const double lim = ask_.wall_gap * sep(fp);
       bool near = false;
       for (const Vec3& k : kept_off) near = near || dist(k, fp) < lim;
-      if (near && !sp_.hold_centres.empty() && exempt(fp)) near = false;
+      if (near && !spacing().hold_centres.empty() && exempt(fp)) near = false;
       if (!near) { kept_off.push_back(fp); ++thirds.kept_off[t]; }
     }
   }
@@ -1618,10 +1622,10 @@ void Grower::feet(const std::vector<int>& parent, const std::vector<char>& branc
     const double lim = gap * sep(fp);
     bool near = false;
     for (const Vec3& k : kept) near = near || (wall ? dist(k, fp) : len(level(sub(k, fp)))) < lim;
-    if (near && !sp_.hold_centres.empty()) {   // L2 c: never thinned within the reach of a floating part's underside
-      const double R2 = sp_.hold_reach_mm * sp_.hold_reach_mm;
+    if (near && !spacing().hold_centres.empty()) {   // L2 c: never thinned within the reach of a floating part's underside
+      const double R2 = spacing().hold_reach_mm * spacing().hold_reach_mm;
       bool in_zone = false;
-      for (const Vec3& c : sp_.hold_centres) {
+      for (const Vec3& c : spacing().hold_centres) {
         const Vec3 d = sub(c, fp);
         if (dot(d, d) <= R2) { in_zone = true; break; }
       }
@@ -1767,7 +1771,7 @@ void Grower::feet(const std::vector<int>& parent, const std::vector<char>& branc
   for (int k = 0; k < field_.nz; ++k)
     for (int j = 0; j < field_.ny; ++j)
       for (int i = 0; i < field_.nx; ++i)
-        if (sp_.candidate[field_.index(i, j, k)]) {
+        if (spacing().candidate[field_.index(i, j, k)]) {
           hlo = std::min(hlo, h(centre(i, j, k)));
           hhi = std::max(hhi, h(centre(i, j, k)));
         }
@@ -1905,9 +1909,9 @@ double Grower::bare() const {
   }
   std::size_t cand = 0, bare_n = 0;
   for (std::size_t e = 0; e < n; ++e) {
-    if (!sp_.candidate[e]) continue;
+    if (!spacing().candidate[e]) continue;
     ++cand;
-    bare_n += best[e] > kVoidRatio * sp_.spacing_mm[e];
+    bare_n += best[e] > kVoidRatio * spacing().spacing_mm[e];
   }
   return cand ? static_cast<double>(bare_n) / static_cast<double>(cand) : 0.0;
 }
@@ -1955,9 +1959,9 @@ void Grower::reseed(std::vector<Tip>& tips) {
     for (int j = 0; j < field_.ny; j += stride)
       for (int i = 0; i < field_.nx; i += stride) {
         const std::size_t e = field_.index(i, j, k);
-        if (!sp_.candidate[e]) continue;
+        if (!spacing().candidate[e]) continue;
         const Vec3 q = centre(i, j, k);
-        const double lim = ask_.void_ratio * sp_.spacing_mm[e];   // E: G11's kVoidRatio unless asked
+        const double lim = ask_.void_ratio * spacing().spacing_mm[e];   // E: G11's kVoidRatio unless asked
         if (live_within(q, lim)) continue;
         bool near = false;
         for (const Vec3& o : at) near = near || dist(o, q) < lim;
@@ -2035,7 +2039,7 @@ void Grower::reseed(std::vector<Tip>& tips) {
             const int i2 = ci + di, j2 = cj + dj, k2 = ck + dk;
             if (i2 < 0 || j2 < 0 || k2 < 0 || i2 >= field_.nx || j2 >= field_.ny || k2 >= field_.nz) continue;
             const std::size_t e2 = field_.index(i2, j2, k2);
-            if (!sp_.candidate[e2] || visited.count(e2)) continue;
+            if (!spacing().candidate[e2] || visited.count(e2)) continue;
             const Vec3 o{static_cast<double>(di), static_cast<double>(dj), static_cast<double>(dk)};
             const double score = dot(o, up_) * 10.0 - dot(o, f) + 0.1 * (std::abs(di) + std::abs(dj) + std::abs(dk));
             if (score < best) { best = score; bi = i2; bj = j2; bk = k2; }
@@ -2792,8 +2796,8 @@ bool Grower::setup() {
     if (!(std::isfinite(ask_.width_heavy_mm) && (ask_.width_heavy_mm == 0.0 || ask_.width_heavy_mm >= light - 1e-12)))
       throw std::invalid_argument("grow_strands: width_heavy_mm must be 0 or at least the strand width");   // I
   }
-  sp_ = organic_spacing(domain_, region_, field_, ask_);
-  if (sp_.candidates == 0) return false;
+  if (given_sp_) spp_ = given_sp_; else { own_sp_ = organic_spacing(domain_, region_, field_, ask_); spp_ = &own_sp_; }   // T fix
+  if (spacing().candidates == 0) return false;
   up_ = unit(ask_.build_dir);
   u_ = unit(cross(up_, std::fabs(up_.x) < 0.9 ? Vec3{1, 0, 0} : Vec3{0, 1, 0}));
   v_ = cross(up_, u_);
@@ -2804,8 +2808,8 @@ bool Grower::setup() {
   sep_hi_ = ask_.spacing_mm > 0.0 ? ask_.spacing_mm : ask_.spacing_max_mm;
   {
     std::vector<double> all;
-    for (std::size_t e = 0; e < sp_.candidate.size(); ++e)
-      if (sp_.candidate[e]) all.push_back(sp_.spacing_mm[e]);
+    for (std::size_t e = 0; e < spacing().candidate.size(); ++e)
+      if (spacing().candidate[e]) all.push_back(spacing().spacing_mm[e]);
     std::sort(all.begin(), all.end());
     median_ = all[all.size() / 2];
   }
@@ -2826,10 +2830,10 @@ bool Grower::setup() {
   // D1: the spacing field's own tightest and widest values, over the candidates.
   sp_tight_ = std::numeric_limits<double>::infinity();
   sp_wide_ = 0.0;
-  for (std::size_t e = 0; e < sp_.candidate.size(); ++e)
-    if (sp_.candidate[e]) {
-      sp_tight_ = std::min(sp_tight_, sp_.spacing_mm[e]);
-      sp_wide_ = std::max(sp_wide_, sp_.spacing_mm[e]);
+  for (std::size_t e = 0; e < spacing().candidate.size(); ++e)
+    if (spacing().candidate[e]) {
+      sp_tight_ = std::min(sp_tight_, spacing().spacing_mm[e]);
+      sp_wide_ = std::max(sp_wide_, spacing().spacing_mm[e]);
     }
   return true;
 }
@@ -2927,10 +2931,10 @@ std::vector<Strand> Grower::run() {
 }  // namespace
 
 std::vector<Strand> grow_strands(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask,
-                                 GrowReport* report) {
+                                 GrowReport* report, const OrganicSpacing* spacing) {
   const auto t0 = std::chrono::steady_clock::now();
   GrowReport rep;
-  Grower g(domain, region, field, ask, rep);
+  Grower g(domain, region, field, ask, rep, spacing);
   std::vector<Strand> out = g.run();
   rep.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
   if (report) *report = rep;

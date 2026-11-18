@@ -533,6 +533,39 @@ std::vector<Strand> trace_strands(const Domain& domain, int region, const Tensor
   return out;
 }
 
+WeaveBraceAsk organic_brace_ask(const Domain& domain, const TensorField& field, const OrganicAsk& ask,
+                                const std::vector<std::pair<int, double>>& references) {
+  WeaveBraceAsk b;
+  if (!(ask.unbraced_max > 0.0)) return b;
+  b.unbraced_max = ask.unbraced_max;
+  b.light_mm = ask.width_mm > 0.0 ? ask.width_mm : domain.spec().bead_mm * domain.spec().min_strut_lines;
+  b.layer_mm = ask.layer_mm;
+  b.link_width = ask.link_width;
+  if (ask.width_heavy_mm > 0.0) {   // I1 / Q2's rule: light + (heavy - light) x u(p), u over the region's reference
+    const std::vector<std::pair<int, double>> refs = references;   // T fix: computed once, by the region's own spacing
+    const double light = b.light_mm, heavy = ask.width_heavy_mm;
+    const TensorField* f = &field;
+    b.width_at = [refs, light, heavy, f](int region, const Vec3& p) {
+      double ref = 0.0;
+      for (const auto& rr : refs) if (rr.first == region) ref = rr.second;
+      const TensorField& field = *f;
+      const int i = static_cast<int>(std::floor((p.x - field.origin.x) / field.spacing));
+      const int j = static_cast<int>(std::floor((p.y - field.origin.y) / field.spacing));
+      const int k = static_cast<int>(std::floor((p.z - field.origin.z) / field.spacing));
+      double u = 0.0;
+      if (!(i < 0 || j < 0 || k < 0 || i >= field.nx || j >= field.ny || k >= field.nz)) {
+        const double* t = &field.voigt[6 * field.index(i, j, k)];
+        const double a = t[0] - t[1], bb = t[1] - t[2], d = t[2] - t[0];
+        const double vm =
+            std::sqrt(std::max(0.0, 0.5 * (a * a + bb * bb + d * d) + 3.0 * (t[3] * t[3] + t[4] * t[4] + t[5] * t[5])));
+        u = grading_demand_fraction(GradingIntent::Aesthetic, vm, ref, 1.0);
+      }
+      return light + (heavy - light) * u;
+    };
+  }
+  return b;
+}
+
 Outcome Session::lay_organic(const Settings& settings, const TensorField& field, const OrganicAsk& ask, int threads,
                              const std::atomic<bool>* stop) {
   if (stop && stop->load(std::memory_order_relaxed)) {
@@ -552,7 +585,8 @@ Outcome Session::lay_organic(const Settings& settings, const TensorField& field,
   std::vector<Strand> strands;
   double smallest = 0.0, largest = 0.0, sum = 0.0;
   std::size_t candidates = 0;
-  std::shared_ptr<GrowReport> grown;   // G1: Grown in place of Traced; the spacing stats are then O12's, as asked
+  std::shared_ptr<GrowReport> grown;
+  std::vector<std::pair<int, double>> references;   // T fix: each weave region's O12 reference, as computed once   // G1: Grown in place of Traced; the spacing stats are then O12's, as asked
   for (const Region& r : domain_->spec().regions) {
     if (r.role != Role::Lattice || !r.weave) continue;
     OrganicTraceStats st;
@@ -575,7 +609,7 @@ Outcome Session::lay_organic(const Settings& settings, const TensorField& field,
     }
     if (ask.mode == OrganicMode::Grown) {
       GrowReport one;
-      traced = grow_strands(*domain_, r.id, field, ask, &one);
+      traced = grow_strands(*domain_, r.id, field, ask, &one, &sp);   // T fix: the spacing computed once, above
       if (!grown) grown = std::make_shared<GrowReport>();
       grown->add(one);
       for (std::size_t e = 0; e < sp.candidate.size(); ++e) {
@@ -615,8 +649,10 @@ Outcome Session::lay_organic(const Settings& settings, const TensorField& field,
       sum += st.spacing_mean_mm * static_cast<double>(st.candidates);
       candidates += st.candidates;
     }
+    references.push_back({r.id, ask.mode == OrganicMode::Grown ? sp.reference_mpa : st.reference_mpa});   // T fix
     strands.insert(strands.end(), std::make_move_iterator(traced.begin()), std::make_move_iterator(traced.end()));
   }
+  finish.brace = organic_brace_ask(*domain_, field, ask, references);   // T (off unless unbraced_max)
   const double ms_trace = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
   Outcome out = lay_with(settings, &strands, threads, stop, &finish);
   if (!out.cancelled) {

@@ -208,7 +208,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "organic_shape_reach", "organic_hold_parts", "organic_part_reach_mm",
        "organic_part_support_mm", "organic_part_to_floor", "organic_wall_gap_heavy", "organic_cross_gap",
        "organic_cross_gap_heavy", "organic_cross_climb_max_deg", "organic_tie_level", "organic_tie_gap",
-       "organic_tie_gap_heavy", "organic_link_width"},
+       "organic_tie_gap_heavy", "organic_link_width", "organic_unbraced_max"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -515,6 +515,10 @@ OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::str
   a.link_width = num(in, "organic_link_width", a.link_width, w);
   if (!(std::isfinite(a.link_width) && a.link_width >= 0.5 && a.link_width <= 2.0))
     json::fail(w + ".organic_link_width", "must be from 0.5 to 2");
+  // T (brief G30): the longest a strut runs without a joint, in its widths (0 when not given: off).
+  a.unbraced_max = num(in, "organic_unbraced_max", a.unbraced_max, w);
+  if (!(std::isfinite(a.unbraced_max) && (a.unbraced_max == 0.0 || (a.unbraced_max >= 4.0 && a.unbraced_max <= 40.0))))
+    json::fail(w + ".organic_unbraced_max", "must be 0 (off) or from 4 to 40 strut widths");
   // G (brief G8, try keys): top runs, roots (0 when not given: off), runs per end (1 when not given).
   a.top_run = num(in, "organic_top_run", a.top_run, w);
   if (!(std::isfinite(a.top_run) && a.top_run >= 0.0)) json::fail(w + ".organic_top_run", "must be 0 or above");

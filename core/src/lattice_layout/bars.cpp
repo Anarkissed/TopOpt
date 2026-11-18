@@ -928,7 +928,8 @@ double closest(const Vec3& p0, const Vec3& p1, const Vec3& q0, const Vec3& q1, d
 }
 }  // namespace
 
-std::size_t split_at_crossings(Bars& bars, double light_mm, double layer_mm, CrossingCutStats* stats, double link_width) {
+std::size_t split_at_crossings(Bars& bars, double light_mm, double layer_mm, CrossingCutStats* stats, double link_width,
+                               std::size_t first_new) {
   if (stats) *stats = CrossingCutStats{};
   const std::vector<Bar> before = bars.bars;
   const std::size_t n = before.size();
@@ -954,7 +955,9 @@ std::size_t split_at_crossings(Bars& bars, double light_mm, double layer_mm, Cro
   std::vector<std::pair<std::size_t, std::size_t>> pairs;
   for (const auto& cell : grid)
     for (std::size_t a = 0; a < cell.second.size(); ++a)
-      for (std::size_t b = a + 1; b < cell.second.size(); ++b) pairs.push_back({cell.second[a], cell.second[b]});
+      for (std::size_t b = a + 1; b < cell.second.size(); ++b)
+        if (first_new == 0 || cell.second[b] >= first_new)   // T4: a pair of two old bars is never tried (not kept)
+          pairs.push_back({cell.second[a], cell.second[b]});
   std::sort(pairs.begin(), pairs.end());
   pairs.erase(std::unique(pairs.begin(), pairs.end()), pairs.end());
   // The joints, each once: two found within a hundredth of a micron of each other are one.
@@ -1000,6 +1003,7 @@ std::size_t split_at_crossings(Bars& bars, double light_mm, double layer_mm, Cro
   for (const auto& [i, j] : pairs) {
     const Bar &x = before[i], &y = before[j];
     if (x.link || y.link) continue;   // S6: a link is never cut here and takes no part in the pair test
+    if (first_new > 0 && i < first_new && j < first_new) continue;   // T4: only pairs with a new bar
     if (x.strand >= 0 && x.strand == y.strand) continue;   // S7: a strand touching itself is left alone
     const PointKey xa = key_of(x.a), xb = key_of(x.b), ya = key_of(y.a), yb = key_of(y.b);
     if (xa == ya || xa == yb || xb == ya || xb == yb) continue;   // they share an end already
@@ -1223,6 +1227,244 @@ std::size_t merge_repeated_bars(Bars& bars, const std::vector<int>& regions) {
   bars.dropped = dropped;   // not drop_loose_bars' count
   bars.repeats += merged;
   return merged;
+}
+
+
+// ── T (brief G30): no strut runs too far without a joint ─────────────────────────────
+std::vector<WeaveStrut> weave_struts(const Bars& bars) {
+  const std::size_t n = bars.bars.size();
+  std::map<PointKey, std::vector<std::pair<std::size_t, int>>> at;   // non-link bars' ends: (bar, 0 a / 1 b)
+  for (std::size_t i = 0; i < n; ++i) {
+    const Bar& b = bars.bars[i];
+    if (b.link || b.strand < 0) continue;
+    at[key_of(b.a)].push_back({i, 0});
+    at[key_of(b.b)].push_back({i, 1});
+  }
+  auto end_of = [&](std::size_t i, int e) { return e ? bars.bars[i].b : bars.bars[i].a; };
+  auto tag_of = [&](std::size_t i, int e) { return e ? bars.bars[i].end_b : bars.bars[i].end_a; };
+  // The next bar of the same strand at end e of bar i, when that end is no real joint; none: npos.
+  auto next = [&](std::size_t i, int e, const std::vector<char>& seen) -> std::pair<std::size_t, int> {
+    const std::size_t none = static_cast<std::size_t>(-1);
+    if (tag_of(i, e) == Bar::End::Solid) return {none, 0};
+    const auto it = at.find(key_of(end_of(i, e)));
+    if (it == at.end() || it->second.size() >= 3) return {none, 0};   // a real joint: three or more non-link bars
+    for (const auto& [j, f] : it->second)
+      if (j != i && !seen[j] && bars.bars[j].strand == bars.bars[i].strand) return {j, f};
+    return {none, 0};
+  };
+  std::vector<char> seen(n, 0);
+  std::vector<WeaveStrut> out;
+  for (std::size_t i0 = 0; i0 < n; ++i0) {
+    const Bar& b0 = bars.bars[i0];
+    if (seen[i0] || b0.link || b0.strand < 0) continue;
+    seen[i0] = 1;
+    // Walk back from a (prepend), then forward from b.
+    std::vector<std::pair<std::size_t, char>> back, fwd;   // (bar, flipped)
+    for (std::pair<std::size_t, int> c = next(i0, 0, seen); c.first != static_cast<std::size_t>(-1);) {
+      seen[c.first] = 1;
+      const bool flipped = c.second == 0;   // met at its a: walking backwards it runs b -> a? (it ends where we are)
+      back.push_back({c.first, static_cast<char>(flipped)});
+      c = next(c.first, flipped ? 1 : 0, seen);
+    }
+    for (std::pair<std::size_t, int> c = next(i0, 1, seen); c.first != static_cast<std::size_t>(-1);) {
+      seen[c.first] = 1;
+      const bool flipped = c.second == 1;   // met at its b: walking forward it runs b -> a
+      fwd.push_back({c.first, static_cast<char>(flipped)});
+      c = next(c.first, flipped ? 0 : 1, seen);
+    }
+    WeaveStrut s;
+    s.strand = b0.strand;
+    s.region = b0.region;
+    for (std::size_t k = back.size(); k-- > 0;) { s.bars.push_back(back[k].first); s.flipped.push_back(back[k].second); }
+    s.bars.push_back(i0);
+    s.flipped.push_back(0);
+    for (const auto& x : fwd) { s.bars.push_back(x.first); s.flipped.push_back(x.second); }
+    s.thinnest_mm = std::numeric_limits<double>::infinity();
+    for (std::size_t k : s.bars) {
+      const Bar& b = bars.bars[k];
+      s.length_mm += std::sqrt((b.b.x - b.a.x) * (b.b.x - b.a.x) + (b.b.y - b.a.y) * (b.b.y - b.a.y) + (b.b.z - b.a.z) * (b.b.z - b.a.z));
+      s.thinnest_mm = std::min(s.thinnest_mm, b.width);
+    }
+    out.push_back(std::move(s));
+  }
+  return out;
+}
+
+std::size_t brace_weave(Bars& weave, const Domain& domain, const WeaveBraceAsk& ask, WeaveBraceStats* stats) {
+  if (stats) *stats = WeaveBraceStats{};
+  if (!(ask.unbraced_max > 0.0) || weave.bars.empty()) return 0;
+  auto sub = [](const Vec3& a, const Vec3& b) { return Vec3{a.x - b.x, a.y - b.y, a.z - b.z}; };
+  auto add = [](const Vec3& a, const Vec3& b) { return Vec3{a.x + b.x, a.y + b.y, a.z + b.z}; };
+  auto mul = [](const Vec3& a, double k) { return Vec3{a.x * k, a.y * k, a.z * k}; };
+  auto dot = [](const Vec3& a, const Vec3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; };
+  auto len = [&](const Vec3& a) { return std::sqrt(dot(a, a)); };
+  auto unit = [&](const Vec3& a) { const double l = len(a); return l > 1e-300 ? mul(a, 1.0 / l) : Vec3{0, 0, 0}; };
+  auto cross = [](const Vec3& a, const Vec3& b) { return Vec3{a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x}; };
+  const Vec3 up{0.0, 0.0, 1.0};   // the build direction (fixed +z, as the domain's bed)
+  const double light = ask.light_mm > 0.0 ? ask.light_mm : 0.9;
+  // T1: the struts over the limit and their brace points (a vertex put in their bar: the bar is cut there).
+  const std::vector<WeaveStrut> struts = weave_struts(weave);
+  struct Point { std::size_t strut; Vec3 p, d; double cell; };
+  std::vector<Point> points;
+  std::vector<std::vector<double>> cut(weave.bars.size());
+  for (std::size_t si = 0; si < struts.size(); ++si) {
+    const WeaveStrut& S = struts[si];
+    const double limit = ask.unbraced_max * S.thinnest_mm;
+    if (!(S.length_mm > limit) || !(limit > 0.0)) continue;
+    if (stats) ++stats->over_before;
+    const int nb = static_cast<int>(std::ceil(S.length_mm / limit)) - 1;
+    double walked = 0.0;
+    std::size_t k = 0;
+    for (int q = 1; q <= nb; ++q) {
+      const double want = S.length_mm * q / (nb + 1);
+      while (k < S.bars.size()) {
+        const Bar& b = weave.bars[S.bars[k]];
+        const double l = len(sub(b.b, b.a));
+        if (walked + l >= want || k + 1 == S.bars.size()) {
+          double u = l > 0.0 ? (want - walked) / l : 0.0;
+          u = std::clamp(u, 0.0, 1.0);
+          if (S.flipped[k]) u = 1.0 - u;   // along the bar from a
+          if (u > 1e-9 && u < 1.0 - 1e-9) {
+            cut[S.bars[k]].push_back(u);
+            points.push_back({si, add(b.a, mul(sub(b.b, b.a), u)), unit(sub(b.b, b.a)), b.cell});
+          } else {
+            points.push_back({si, u <= 1e-9 ? b.a : b.b, unit(sub(b.b, b.a)), b.cell});
+          }
+          break;
+        }
+        walked += l;
+        ++k;
+      }
+    }
+  }
+  if (stats) stats->points = points.size();
+  if (points.empty()) return 0;
+  // The brace points become vertices: each bar cut there (exactly on its line).
+  {
+    std::vector<Bar> out;
+    out.reserve(weave.bars.size() + points.size());
+    for (std::size_t i = 0; i < weave.bars.size(); ++i) {
+      std::vector<double>& c = cut[i];
+      if (c.empty()) { out.push_back(weave.bars[i]); continue; }
+      std::sort(c.begin(), c.end());
+      const Bar b = weave.bars[i];
+      Vec3 from = b.a;
+      Bar::End from_end = b.end_a;
+      int from_into = b.into_a;
+      for (double u : c) {
+        const Vec3 p = add(b.a, mul(sub(b.b, b.a), u));
+        if (key_of(p) == key_of(from)) continue;
+        Bar piece = b;
+        piece.a = from; piece.end_a = from_end; piece.into_a = from_into;
+        piece.b = p; piece.end_b = Bar::End::Node; piece.into_b = -1;
+        piece.piece = true;
+        out.push_back(piece);
+        from = p; from_end = Bar::End::Node; from_into = -1;
+      }
+      Bar last = b;
+      last.a = from; last.end_a = from_end; last.into_a = from_into;
+      last.piece = last.piece || from_end == Bar::End::Node;
+      out.push_back(last);
+    }
+    weave.bars.swap(out);   // (into_* of other bars are not renumbered: the weave has no Joined ends yet)
+  }
+  // The bars a brace may land on: non-link, in a grid.
+  const double pitch = 2.0;
+  auto slot = [&](double x) { return static_cast<long long>(std::floor(x / pitch)); };
+  std::map<std::array<long long, 3>, std::vector<std::size_t>> grid;
+  for (std::size_t i = 0; i < weave.bars.size(); ++i) {
+    const Bar& b = weave.bars[i];
+    if (b.link) continue;
+    for (long long x = slot(std::min(b.a.x, b.b.x) - light); x <= slot(std::max(b.a.x, b.b.x) + light); ++x)
+      for (long long y = slot(std::min(b.a.y, b.b.y) - light); y <= slot(std::max(b.a.y, b.b.y) + light); ++y)
+        for (long long z = slot(std::min(b.a.z, b.b.z) - light); z <= slot(std::max(b.a.z, b.b.z) + light); ++z)
+          grid[{x, y, z}].push_back(i);
+  }
+  auto near_other = [&](const Vec3& q, int strand) {
+    const auto it = grid.find({slot(q.x), slot(q.y), slot(q.z)});
+    if (it == grid.end()) return false;
+    for (std::size_t i : it->second) {
+      const Bar& b = weave.bars[i];
+      if (b.strand == strand) continue;
+      const Vec3 d = sub(b.b, b.a);
+      const double l2 = dot(d, d);
+      const double t = l2 > 0.0 ? std::clamp(dot(sub(q, b.a), d) / l2, 0.0, 1.0) : 0.0;
+      if (len(sub(q, add(b.a, mul(d, t)))) <= light) return true;
+    }
+    return false;
+  };
+  const Domain::Probe probe = domain.probe();
+  constexpr double kRead = 0.05, kMost = 10.0;   // kLevelSpanMax
+  // From p along dir: the landing (distance, end, tagged Solid) or none.
+  struct Landing { bool found = false, solid = false; double t = 0.0; Vec3 end{}; };
+  auto march = [&](const Vec3& p, const Vec3& dir, int strand, int region) {
+    Landing L;
+    for (int k = 1; k * kRead <= kMost + 1e-9; ++k) {
+      const double t = k * kRead;
+      const Vec3 q = add(p, mul(dir, t));
+      const Where w = probe.where(q);
+      if (!w.lattice()) {
+        if (w.why == Why::Outside) return L;   // into the air: no landing this way
+        double a = t - kRead, b = t;   // into the solid: its edge
+        while (b - a > 1e-6) {
+          const double m = 0.5 * (a + b);
+          const Where wm = probe.where(add(p, mul(dir, m)));
+          if (wm.lattice()) a = m; else b = m;
+        }
+        L.found = L.solid = true; L.t = a; L.end = add(p, mul(dir, a));
+        return L;
+      }
+      if (w.id != region) return L;   // another region's lattice
+      if (near_other(q, strand)) { L.found = true; L.t = t; L.end = q; return L; }
+    }
+    return L;
+  };
+  int next_strand = -1;
+  for (const Bar& b : weave.bars) next_strand = std::max(next_strand, b.strand);
+  ++next_strand;
+  const std::size_t first_new = weave.bars.size();
+  const double cone = 0.5;   // sin 30 degrees
+  for (const Point& P : points) {
+    const WeaveStrut& S = struts[P.strut];
+    Vec3 b1 = unit(cross(P.d, up));   // T2: level, square to the strut
+    if (len(cross(P.d, up)) < 1e-9) b1 = Vec3{1.0, 0.0, 0.0};
+    const Vec3 b2 = unit(cross(P.d, b1));
+    for (const Vec3& bd : {b1, b2}) {
+      const bool level = std::fabs(dot(bd, up)) < cone;
+      Landing best;
+      if (level) {
+        const Vec3 dl = unit(Vec3{bd.x, bd.y, 0.0});
+        for (int sg = -1; sg <= 1; sg += 2) {
+          const Landing L = march(P.p, mul(dl, sg), S.strand, S.region);
+          if (L.found && (!best.found || L.t < best.t)) best = L;
+        }
+      } else {
+        best = march(P.p, bd.z > 0.0 ? mul(bd, -1.0) : bd, S.strand, S.region);   // downward
+      }
+      if (!best.found || !(best.t > 0.0)) { if (stats) ++stats->not_laid; continue; }
+      Bar br;
+      br.a = P.p;
+      br.b = best.end;
+      if (level) br.b.z = P.p.z;   // exactly level
+      const double wa = ask.width_at ? ask.width_at(S.region, br.a) : light;
+      const double wb = ask.width_at ? ask.width_at(S.region, br.b) : light;
+      br.width = 0.5 * (wa + wb);
+      br.cell = P.cell;
+      br.region = S.region;
+      br.end_a = Bar::End::Node;
+      br.end_b = best.solid ? Bar::End::Solid : Bar::End::Node;
+      br.brace = true;
+      br.strand = next_strand++;
+      weave.bars.push_back(br);
+      if (stats) {
+        ++(level ? stats->level : stats->sloping);
+        stats->braces_mm += best.t;
+      }
+    }
+  }
+  const std::size_t laid = weave.bars.size() - first_new;
+  if (laid > 0) split_at_crossings(weave, ask.light_mm, ask.layer_mm, nullptr, ask.link_width, first_new);   // T4
+  return laid;
 }
 
 }  // namespace topopt::lattice_layout
