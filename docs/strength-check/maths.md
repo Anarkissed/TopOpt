@@ -225,7 +225,9 @@ A solid node at $\mathbf X$, $R=$ {{frame_drive_ball_voxels}} $h$:
 
 $$\mathbf u(\mathbf X)=\frac{1}{|V|}\sum_{e\in V}\bar{\mathbf u}_e,\qquad V=\{e:\ |\mathbf c_e-\mathbf X|\le R,\ \rho_e>\rho_{\text{drive}}\}$$
 
-($\rho_{\text{drive}}$ = {{frame_drive_share}}; $\mathbf U$ trilinear at $\mathbf X$ when $V$ is empty). Its translations are fixed to it.
+($\rho_{\text{drive}}$ = {{frame_drive_share}}; $\mathbf U$ trilinear at $\mathbf X$ when $V$ is empty). Its translations are fixed to it. A node with an end on the bed floor (the domain says BedFloor there) reads at $\mathbf X+$ {{frame_floor_shift_voxels}} $h\,\mathbf n$ instead; with {{frame_floor_free}} it is not a solid node.
+
+**The Organic verdict.** The solid: $M=\min\!\big(\sigma_y/\max\sigma_{vm},\ k_z\sigma_y/\max t\big)$ over the voxels with solid share $\ge$ {{printed_threshold}}, $M_{\text{eff}}=M\,f_{\text{infill}}$; fail `solid_margin` when $M_{\text{eff}}<S$. Install 3's voxel load-path test is not applied (written as `voxel_load_path`). The load path: fail `no_load_path` when any undriven node within the load reach of a loaded grid node is on a part of the frame with no solid node (`loaded_nodes_undriven`).
 
 ### The load on the frame
 

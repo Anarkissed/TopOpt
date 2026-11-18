@@ -407,7 +407,7 @@ int main() {
       keys.push_back(sj::as_string(*sj::find(e, "key"), "key"));
       sections.push_back(sj::as_string(*sj::find(e, "section"), "section"));
     }
-    CHECK(keys.size() == 82);   // 60 of Install 3, 22 of the Organic check (brief E2)
+    CHECK(keys.size() == 84);   // 60 of Install 3, 24 of the Organic check (brief E2)
     const auto headings = [](const std::string& t) {
       std::vector<std::string> h;
       std::istringstream in(t);
@@ -578,6 +578,16 @@ int main() {
     std::printf("[organic] strut_margins.bin: %zu bars, %zu judged; file bars %zu\n", mb.size() / 4, judged_bars, org.r.bars);
     CHECK(mb.size() % 4 == 0 && mb.size() / 4 >= org.r.bars && judged_bars > 0);
     CHECK(exists(org.out + "/fields.bin"));
+    // The Organic verdict (the lead's ruling of 2026-11-18): the solid's stress margin over its solid voxels; the load path
+    // judged on the frame (Install 3's voxel load-path test not applied); each weakest strut says what drives its ends.
+    CHECK(has(b, "\"solid_margin\": {\"worst_case\": ") && has(b, "\"loaded_nodes_undriven\": 0") && has(b, "\"ends\": [{\"at\": "));
+    CHECK(!has(b, "\"fail_reason\": \"no_load_path\""));
+    {
+      const Run heavy = run("organic_heavy", fj, strength_job(f, 2.0e6));
+      const std::string hb2 = block(heavy.json);
+      std::printf("[organic heavy] %s\n", hb2.substr(hb2.find("\"verdict\""), 120).c_str());
+      CHECK(heavy.r.ok && has(hb2, "\"verdict\": \"fail\"") && has(hb2, "\"fail_reason\": \"solid_margin\""));
+    }
 
     // ── §10 (brief E2, item 12) the strengthen rounds as one job: a heavy load (struts under the safety margin), the
     // width on a Sweep and the spacing a range; one round allowed. Then a job with nothing that follows the stress.

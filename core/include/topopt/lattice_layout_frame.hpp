@@ -33,6 +33,8 @@ struct FrameSettings {
   double drive_share = 0.5;            // frame_drive_share: a voxel drives when its material share is above this
   double collinear_tol_mm = 1e-6;      // frame_collinear_tol_mm: a piece of the frame lying on one line (rotations held)
   int collinear_max_driven = 50;       // frame_collinear_max_driven: ... looked for when it has fewer driven nodes
+  double floor_shift_voxels = 0.0;     // frame_floor_shift_voxels: a bed-floor node reads its drive this many voxels up
+  bool floor_free = false;             // frame_floor_free: bed-floor nodes are not driven (they join as any node)
   double load_unheld_share = 0.01;     // load_unheld_share: the lattice's share of the load above which, with no frame node near, it fails
   double unjudged_share = 0.01;        // frame_unjudged_share: strut length in pieces with no driven node, of the whole
   double min_piece = 0.1;              // frame_min_piece: a piece counts for its strut's stress when this x its width long
@@ -51,6 +53,7 @@ struct FramePiece {
 struct FrameModel {
   std::vector<Vec3> nodes;
   std::vector<char> solid;     // per node: an end of kind Solid, or an end the domain says is solid
+  std::vector<char> floor;     // per node: an end the domain says is on the bed floor (Why::BedFloor)
   std::vector<FramePiece> pieces;
   std::size_t bars = 0, t_joins = 0, zero_pieces = 0, links = 0;
 };
@@ -94,6 +97,14 @@ struct FrameStrut {
   bool judged = false;        // driven, not a stub
   bool stub = false;
   std::vector<int> pieces;    // in FrameModel::pieces
+  // What drives it (reported for the weakest): its two end nodes (-1: none, a closed loop), each end's kind
+  // ('d' driven, 'j' joint of three or more, 'f' free, 'p' other), on the bed floor, its displacement as solved and,
+  // for a driven end, the point its drive was read at; the worst piece's axial force (tension +) and larger end moment.
+  int end_node[2] = {-1, -1};
+  char end_kind[2] = {'p', 'p'};
+  bool end_floor[2] = {false, false};
+  Vec3 end_u[2]{}, end_read[2]{};
+  double axial_n = 0.0, moment_nmm = 0.0;
 };
 struct FrameCheck {
   bool solved = false;
@@ -106,6 +117,8 @@ struct FrameCheck {
   std::size_t drive_fallback = 0;
   double load_total_n = 0.0, load_on_frame_n = 0.0, load_unheld_n = 0.0, load_share = 0.0;
   std::size_t frame_nodes_loaded = 0;
+  std::size_t loaded_nodes_undriven = 0;   // nodes within the load's reach on a piece of the frame with no driven node
+                                           // (Organic: the load has no path, the lead's ruling of 2026-11-18)
   bool load_on_open_lattice = false;
   double strut_mm = 0.0, unjudged_mm = 0.0;
   bool too_unjudged = false;

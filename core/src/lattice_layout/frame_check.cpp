@@ -168,6 +168,7 @@ FrameModel build_frame(const Bars& bars, const Domain* domain, const FrameSettin
   const std::size_t nn = f.nodes.size();
   // Solid nodes: an end of kind Solid, or an end where the domain says solid (prototype: why >= NotAsked).
   f.solid.assign(nn, 0);
+  f.floor.assign(nn, 0);
   {
     std::unique_ptr<Domain::Probe> probe;
     if (domain) probe = std::make_unique<Domain::Probe>(domain->probe());
@@ -175,14 +176,16 @@ FrameModel build_frame(const Bars& bars, const Domain* domain, const FrameSettin
       const Bar& b = bars.bars[e < nb ? e : e - nb];
       const Bar::End kind = e < nb ? b.end_a : b.end_b;
       char& sol = f.solid[static_cast<std::size_t>(node_of[e])];
-      if (sol) continue;
-      if (kind == Bar::End::Solid) {
+      char& flr = f.floor[static_cast<std::size_t>(node_of[e])];
+      if (sol && flr) continue;
+      if (kind == Bar::End::Solid && !probe) {
         sol = 1;
         continue;
       }
       if (!probe) continue;
-      const Why w = probe->where(end_at(e)).why;
-      if (w != Why::Lattice && w != Why::Outside) sol = 1;
+      const Why w = probe->where(end_at(e)).why;   // the prototype: the end's why (BedFloor marks the bed floor)
+      if (w == Why::BedFloor) flr = 1;
+      if (kind == Bar::End::Solid || (w != Why::Lattice && w != Why::Outside)) sol = 1;
     }
   }
   // T-joins: a node with one bar that lies on another bar (inside it, within tjoin_off_line_mm of its line) splits it.
@@ -353,7 +356,8 @@ FrameCheck check_frame(const FrameModel& f, const FrameVoxelSolve& vs, const Fra
     if (!used[i]) continue;
     ++out.nodes_used;
     comp[i] = uf.find(static_cast<int>(i));
-    if (f.solid[i]) {
+    const bool floor_node = i < f.floor.size() && f.floor[i];
+    if (f.solid[i] && !(s.floor_free && floor_node)) {   // frame_floor_free: the prototype's --floor-free
       driven[i] = 1;
       ++out.driven;
       ++comp_driven[static_cast<std::size_t>(comp[i])];
@@ -390,6 +394,7 @@ FrameCheck check_frame(const FrameModel& f, const FrameVoxelSolve& vs, const Fra
 
   // ── 4. The drive: each driven node, the mean displacement of the material voxels whose centres lie within the ball.
   std::vector<std::array<double, 3>> ud(nn, {0.0, 0.0, 0.0});
+  std::vector<Vec3> read_at(nn, Vec3{0.0, 0.0, 0.0});
   {
     auto corner_u = [&](int a, int b, int c, int comp_) { return U[3 * node_index(a, b, c) + static_cast<std::size_t>(comp_)]; };
     auto voxel_u = [&](int i, int j, int k, std::array<double, 3>& u) {
@@ -404,7 +409,13 @@ FrameCheck check_frame(const FrameModel& f, const FrameVoxelSolve& vs, const Fra
     std::vector<double> counts;
     for (std::size_t n = 0; n < nn; ++n) {
       if (!driven[n] || !comp_in[static_cast<std::size_t>(comp[n])]) continue;
-      const Vec3& X = f.nodes[n];
+      // frame_floor_shift_voxels (the prototype's --floor-shift): a bed-floor node reads its drive that far up.
+      Vec3 X = f.nodes[n];
+      if (n < f.floor.size() && f.floor[n] && s.floor_shift_voxels != 0.0) {
+        const double d = s.floor_shift_voxels * h;
+        X = {X.x + d * up.x, X.y + d * up.y, X.z + d * up.z};
+      }
+      read_at[n] = X;
       const int bi = static_cast<int>(std::floor((X.x - g.origin.x) / h)), bj = static_cast<int>(std::floor((X.y - g.origin.y) / h)),
                 bk = static_cast<int>(std::floor((X.z - g.origin.z) / h));
       std::array<double, 3> acc{0.0, 0.0, 0.0}, u{};
@@ -456,8 +467,9 @@ FrameCheck check_frame(const FrameModel& f, const FrameVoxelSolve& vs, const Fra
     const double R = std::max(st.light_width_mm, h);
     std::unordered_map<CellKey, std::vector<int>, CellHash> near;
     for (std::size_t n = 0; n < nn; ++n)
-      if (used[n] && !driven[n] && comp_in[static_cast<std::size_t>(comp[n])])
+      if (used[n] && !driven[n])   // nodes of pieces with no driven node too: they are counted, never loaded
         near[cell_of(f.nodes[n], R)].push_back(static_cast<int>(n));
+    std::vector<char> lost(nn, 0);
     std::array<double, 3> total{0.0, 0.0, 0.0};
     double lat = 0.0, all = 0.0;
     std::vector<char> seen_voxel(g.voxel_count(), 0), loaded(nn, 0);
@@ -485,7 +497,8 @@ FrameCheck check_frame(const FrameModel& f, const FrameVoxelSolve& vs, const Fra
             const auto it = near.find({ck[0] + dx, ck[1] + dy, ck[2] + dz});
             if (it == near.end()) continue;
             for (int n : it->second)
-              if (len3(sub3(f.nodes[static_cast<std::size_t>(n)], P)) <= R) loaded[static_cast<std::size_t>(n)] = 1;
+              if (len3(sub3(f.nodes[static_cast<std::size_t>(n)], P)) <= R)
+                (comp_in[static_cast<std::size_t>(comp[static_cast<std::size_t>(n)])] ? loaded : lost)[static_cast<std::size_t>(n)] = 1;
           }
     }
     out.load_total_n = std::sqrt(total[0] * total[0] + total[1] * total[1] + total[2] * total[2]);
@@ -494,6 +507,7 @@ FrameCheck check_frame(const FrameModel& f, const FrameVoxelSolve& vs, const Fra
     std::size_t count = 0;
     for (char x : loaded) count += x;
     out.frame_nodes_loaded = count;
+    for (char x : lost) out.loaded_nodes_undriven += x;
     const double on = share * out.load_total_n;
     if (on > 0.0 && count == 0) {
       out.load_unheld_n = on;
@@ -616,7 +630,7 @@ FrameCheck check_frame(const FrameModel& f, const FrameVoxelSolve& vs, const Fra
 
   // ── The verdict (steps 9, 10): per piece, then per strut.
   t0 = std::chrono::steady_clock::now();
-  std::vector<double> pm_stress(np, inf), pN(np, 0.0), pT(np, inf), pC(np, inf), plen(np, 0.0);
+  std::vector<double> pm_stress(np, inf), pN(np, 0.0), pM(np, 0.0), pT(np, inf), pC(np, inf), plen(np, 0.0);
   for (std::size_t pi = 0; pi < np; ++pi) {
     const FramePiece& p = f.pieces[pi];
     plen[pi] = len3(sub3(f.nodes[static_cast<std::size_t>(p.b)], f.nodes[static_cast<std::size_t>(p.a)]));
@@ -647,6 +661,7 @@ FrameCheck check_frame(const FrameModel& f, const FrameVoxelSolve& vs, const Fra
     pC[pi] = s_c > 0.0 ? st.level_mpa / s_c : inf;
     pm_stress[pi] = std::min(pT[pi], pC[pi]);
     pN[pi] = N;
+    pM[pi] = M;
   }
   // Struts: non-link pieces joined through nodes that are not joints (a joint: three or more non-link pieces, driven,
   // or an end of one piece only).
@@ -719,6 +734,28 @@ FrameCheck check_frame(const FrameModel& f, const FrameVoxelSolve& vs, const Fra
     const Vec3& A = f.nodes[static_cast<std::size_t>(wp.a)];
     const Vec3& B = f.nodes[static_cast<std::size_t>(wp.b)];
     sn.at = {0.5 * (A.x + B.x), 0.5 * (A.y + B.y), 0.5 * (A.z + B.z)};
+    sn.axial_n = pN[static_cast<std::size_t>(worst_piece)];
+    sn.moment_nmm = pM[static_cast<std::size_t>(worst_piece)];
+    {   // its two ends: the nodes met once by its pieces
+      std::unordered_map<int, int> met;
+      for (int pi : sn.pieces) {
+        ++met[f.pieces[static_cast<std::size_t>(pi)].a];
+        ++met[f.pieces[static_cast<std::size_t>(pi)].b];
+      }
+      int e = 0;
+      for (int pi : sn.pieces)   // in piece order, so the ends come out the same every run
+        for (const int n : {f.pieces[static_cast<std::size_t>(pi)].a, f.pieces[static_cast<std::size_t>(pi)].b})
+          if (e < 2 && met[n] == 1) {
+            met[n] = 0;
+            const std::size_t nu = static_cast<std::size_t>(n);
+            sn.end_node[e] = n;
+            sn.end_kind[e] = driven[nu] ? 'd' : nldeg[nu] >= 3 ? 'j' : nldeg[nu] == 1 ? 'f' : 'p';
+            sn.end_floor[e] = nu < f.floor.size() && f.floor[nu];
+            sn.end_u[e] = {u[6 * nu], u[6 * nu + 1], u[6 * nu + 2]};
+            sn.end_read[e] = read_at[nu];
+            ++e;
+          }
+    }
     sn.stub = sn.length_mm < sn.width_max;
     sn.judged = !out_of_solve && !sn.stub;
     strut_len_all += sn.length_mm;

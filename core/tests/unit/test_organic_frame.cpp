@@ -8,6 +8,9 @@
 // §5 two struts joined by a link move as one where the link joins them.
 // §6 a load on open lattice with no strut near: it is unheld, and the check says load_on_open_lattice.
 // §7 a loaded face with a strut end near only part of it: the lattice's share of the whole load is held there.
+// §8 a load near a piece of the frame with no driven node: counted (loaded_nodes_undriven), the load path fails there.
+// §9 the bed floor (prototype --floor-shift, --floor-free): a bed-floor node reads its drive frame_floor_shift_voxels up;
+//    with frame_floor_free it is not driven. The weakest's ends say what drives them.
 #include "topopt/lattice_layout_frame.hpp"
 
 #include <cmath>
@@ -237,6 +240,67 @@ void test_face_partly_near() {
   CHECK(!c.load_on_open_lattice && c.frame_nodes_loaded == 1, "held at the one strut end near the face, not failed");
 }
 
+void test_load_on_undriven_piece() {
+  // §8: the strut of §1, and a loose strut (no end in the solid) 8 mm away with a load at its end.
+  ll::Bars bars;
+  bars.bars.push_back(bar({0, 0, 0}, {10, 0, 0}, ll::Bar::End::Solid, ll::Bar::End::Solid));
+  bars.bars.push_back(bar({2, 8, 0}, {8, 8, 0}, ll::Bar::End::Loose, ll::Bar::End::Loose));
+  Field f({-3.0, -3.0, -3.0}, 32, 32, 12);
+  for (std::size_t e = 0; e < f.mat.solid.size(); ++e) {
+    f.mat.solid[e] = 0.0f;
+    f.mat.lattice[e] = 0.2f;
+  }
+  const ll::FrameCheck c = run(bars, f, {{f.node(16, 22, 6), 2, -1.0}});   // (5, 8, 0): its middle, 3 mm from its nodes
+  const ll::FrameCheck d = run(bars, f, {{f.node(22, 22, 6), 2, -1.0}});   // (8, 8, 0): the loose strut's end
+  std::printf("§8 undriven piece: loaded nodes undriven %zu (load at its end), %zu (load 3 mm from any node)\n",
+              d.loaded_nodes_undriven, c.loaded_nodes_undriven);
+  CHECK(d.loaded_nodes_undriven == 1 && d.undriven_pieces == 1, "a load at a node of a piece with no driven node is counted");
+  CHECK(c.loaded_nodes_undriven == 0, "a load near no node of it is not");
+}
+
+void test_bed_floor() {
+  // §9: a 10 mm strut along x, both ends solid, A on the bed floor; the field moves x by 1e-3 z (zero at z = 0).
+  ll::Bars bars;
+  bars.bars.push_back(bar({0, 0, 0}, {10, 0, 0}, ll::Bar::End::Solid, ll::Bar::End::Solid));
+  Field f({-3.0, -3.0, -3.0}, 32, 12, 12);
+  for (int c = 0; c <= f.grid.nz; ++c)
+    for (int b = 0; b <= f.grid.ny; ++b)
+      for (int a = 0; a <= f.grid.nx; ++a) f.u[3 * static_cast<std::size_t>(f.node(a, b, c))] = 1e-3 * (f.grid.origin.z + c * f.grid.spacing);
+  ll::FrameModel m = ll::build_frame(bars, nullptr);
+  m.floor.assign(m.nodes.size(), 0);
+  int A = -1;
+  for (std::size_t n = 0; n < m.nodes.size(); ++n)
+    if (std::fabs(m.nodes[n].x) < 1e-9) A = static_cast<int>(n);
+  if (A < 0) {
+    CHECK(false, "the bed-floor node is found");
+    return;
+  }
+  m.floor[static_cast<std::size_t>(A)] = 1;
+  ll::FrameVoxelSolve vs;
+  vs.grid = &f.grid;
+  vs.displacement = &f.u;
+  vs.material = &f.mat;
+  ll::FrameSettings s0, s1, s2;
+  s1.floor_shift_voxels = 4.0;   // 2 mm up
+  s2.floor_free = true;
+  const ll::FrameCheck c0 = ll::check_frame(m, vs, strength(), s0), c1 = ll::check_frame(m, vs, strength(), s1),
+                       c2 = ll::check_frame(m, vs, strength(), s2);
+  const double uA0 = c0.node_u[static_cast<std::size_t>(A)].x, uA1 = c1.node_u[static_cast<std::size_t>(A)].x;
+  std::printf("§9 bed floor: A moves %.3g mm (read at the node), %.3g mm (read 2 mm up); floor free: %zu driven\n", uA0, uA1,
+              c2.driven);
+  CHECK(std::fabs(uA0) < 1e-9 && std::fabs(uA1 - 2e-3) < 1e-6, "a bed-floor node reads its drive frame_floor_shift_voxels up");
+  CHECK(c0.driven == 2 && c2.driven == 1, "with frame_floor_free the bed-floor node is not driven");
+  CHECK(c1.solved && c1.judged == 1, "the shifted strut is judged");
+  if (c1.judged == 1) {
+    const ll::FrameStrut& st = c1.struts[0];
+    const int e = st.end_node[0] == A ? 0 : 1;
+    CHECK(st.end_kind[0] == 'd' && st.end_kind[1] == 'd' && st.end_floor[e] && !st.end_floor[1 - e],
+          "its ends: both driven, the floor one marked");
+    CHECK(std::fabs(st.end_read[e].z - 2.0) < 1e-9 && std::fabs(st.end_read[1 - e].z) < 1e-9, "where each end read its drive");
+    CHECK(st.axial_n < 0.0, "pushed by the floor node's drive: in compression");
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -247,6 +311,8 @@ int main() {
   test_link_moves_as_one();
   test_load_on_open_lattice();
   test_face_partly_near();
+  test_load_on_undriven_piece();
+  test_bed_floor();
   std::printf("organic_frame: %d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;
 }

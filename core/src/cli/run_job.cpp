@@ -67,6 +67,7 @@
 #include "topopt/part.hpp"
 #include "topopt/production.hpp"
 #include "topopt/report.hpp"
+#include "topopt/orient.hpp"
 #include "topopt/settings.hpp"
 #include "topopt/smooth.hpp"
 #include "topopt/step.hpp"
@@ -15285,6 +15286,8 @@ const std::vector<StrengthSettingSpec>& strength_setting_specs() {
       {"frame_drive_share", K::Number, 0.5, 0.01, 0.99, false, {}},
       {"frame_collinear_tol_mm", K::Number, 1e-6, 1e-9, 0.01, false, {}},
       {"frame_collinear_max_driven", K::Integer, 50.0, 2.0, 10000.0, false, {}},
+      {"frame_floor_shift_voxels", K::Number, 0.0, 0.0, 10.0, false, {}},
+      {"frame_floor_free", K::Bool, 0.0, 0.0, 1.0, false, {}},
       {"load_unheld_share", K::Number, 0.01, 0.0, 0.5, false, {}},
       {"frame_unjudged_share", K::Number, 0.01, 0.0, 0.5, false, {}},
       {"frame_min_piece", K::Number, 0.1, 0.0, 2.0, false, {}},
@@ -16052,6 +16055,8 @@ ll::FrameSettings frame_settings_of(const StrengthSettingsAsked& st) {
   f.drive_share = st.get("frame_drive_share");
   f.collinear_tol_mm = st.get("frame_collinear_tol_mm");
   f.collinear_max_driven = static_cast<int>(st.get("frame_collinear_max_driven"));
+  f.floor_shift_voxels = st.get("frame_floor_shift_voxels");
+  f.floor_free = st.get("frame_floor_free") != 0.0;
   f.load_unheld_share = st.get("load_unheld_share");
   f.unjudged_share = st.get("frame_unjudged_share");
   f.min_piece = st.get("frame_min_piece");
@@ -16070,6 +16075,9 @@ struct OrganicCheckRun {
   double ms_material = 0.0, ms_voxel = 0.0, ms_frame = 0.0;
   double mb_voxel = 0.0, mb_frame = 0.0;   // the process's footprint after each (process_memory().rss_mb)
   std::string verdict, fail_reason;
+  StressMargin solid_margin;              // over the voxels at least printed_threshold solid
+  double solid_margin_effective = 0.0, solid_vm = 0.0, solid_tension = 0.0;
+  std::size_t solid_voxels = 0;
 };
 
 OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain, const ll::Bars& layout_bars,
@@ -16169,13 +16177,41 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
   R.ms_frame = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
   R.mb_frame = process_memory().rss_mb;
   const ll::FrameCheck& c = R.check;
+  // ── the solid's verdict (the lead's ruling of 2026-11-18): its STRESS margin only, over the voxels whose SOLID share
+  // is at least printed_threshold (the lattice's voxels are the frame's to judge), against the safety margin. Install 3's
+  // load-path test of the voxel solve is not applied: it reads sparse lattice voxels as no material. The load path is
+  // judged on the frame: a frame node within the load's reach on a piece with no driven node.
+  double solid_vm = 0.0;
+  std::size_t solid_voxels = 0;
+  {
+    const std::size_t nv = cert_grid.voxel_count();
+    std::vector<std::array<double, 6>> sig(nv, std::array<double, 6>{0.0, 0.0, 0.0, 0.0, 0.0, 0.0});
+    for (std::size_t e = 0; e < nv; ++e) {
+      if (!in_part[e] || !(static_cast<double>(fm.solid[e]) >= printed_iso)) continue;
+      ++solid_voxels;
+      if (e < a.von_mises_field.size()) solid_vm = std::max(solid_vm, a.von_mises_field[e]);
+      if (6 * e + 5 < a.stress_tensor_field.size())
+        for (int q = 0; q < 6; ++q) sig[e][static_cast<std::size_t>(q)] = a.stress_tensor_field[6 * e + static_cast<std::size_t>(q)];
+    }
+    R.solid_tension = solid_voxels ? max_interlayer_tension(cert_grid, sig, build_dir) : 0.0;
+  }
+  R.solid_margin = compute_stress_margin(material.yield_strength_mpa, material.z_knockdown, solid_vm, R.solid_tension);
+  R.solid_margin_effective = gate_margin_effective(material.yield_strength_mpa, material.z_knockdown, solid_vm, solid_vm,
+                                                   R.solid_tension, KnockdownSpec{knockdown.infill_knockdown});
+  R.solid_vm = solid_vm;
+  R.solid_voxels = solid_voxels;
   // ── the verdict (V5's three states).
   if (c.load_on_open_lattice) {
     R.verdict = "fail";
     R.fail_reason = "load_on_open_lattice";
-  } else if (!a.accepted) {
+  } else if (c.loaded_nodes_undriven > 0) {
     R.verdict = "fail";
-    R.fail_reason = !load_path_ok ? "no_load_path" : a.margin_effective < options.margin_stop ? "solid_margin" : "";
+    R.fail_reason = "no_load_path";
+  } else if (R.solid_margin_effective < options.margin_stop) {
+    R.verdict = "fail";
+    R.fail_reason = "solid_margin";
+  } else if (a.contact_held_by_sliding) {
+    R.verdict = "fail";
   } else if (!c.solved) {
     R.verdict = "solid_only";
     R.fail_reason = "frame_not_solved";
@@ -16231,6 +16267,10 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
       s += "    \"load_on_no_credit_n\": " + num(c.load_unheld_n) + ",\n    \"load_total_n\": " + num(c.load_total_n) + ",\n";
     if (R.fail_reason == "frame_not_solved") s += "    \"fail_detail\": " + json_str(c.why_not) + ",\n";
   }
+  s += "    \"solid_margin\": {\"worst_case\": " + num(R.solid_margin.worst_case) + ", \"in_plane\": " + num(R.solid_margin.in_plane) +
+       ", \"interlayer\": " + num(R.solid_margin.interlayer) + ", \"effective\": " + num(R.solid_margin_effective) +
+       ", \"von_mises_mpa\": " + num(R.solid_vm) + ", \"interlayer_tension_mpa\": " + num(R.solid_tension) +
+       ", \"voxels\": " + std::to_string(R.solid_voxels) + ", \"voxel_load_path\": " + std::string(load_path_ok ? "true" : "false") + "},\n";
   s += "    \"margin_worst_case\": " + num(a.margin.worst_case) + ",\n";
   s += "    \"margin_in_plane\": " + num(a.margin.in_plane) + ",\n";
   s += "    \"margin_interlayer\": " + num(a.margin.interlayer) + ",\n";
@@ -16256,7 +16296,18 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
     const ll::FrameStrut& x = c.struts[static_cast<std::size_t>(c.weakest[w])];
     s += std::string(w ? ",\n      " : "\n      ") + "{\"at\": [" + num(x.at.x) + ", " + num(x.at.y) + ", " + num(x.at.z) +
          "], \"width_mm\": " + num(x.width_max) + ", \"length_mm\": " + num(x.length_mm) + ", \"margin\": " + num(x.margin) +
-         ", \"by\": \"" + x.by + "\"}";
+         ", \"by\": \"" + x.by + "\", \"axial_n\": " + num(x.axial_n) + ", \"moment_nmm\": " + num(x.moment_nmm) + ", \"ends\": [";
+    for (int e = 0; e < 2; ++e) {
+      if (x.end_node[e] < 0) continue;
+      const Vec3& P = R.frame.nodes[static_cast<std::size_t>(x.end_node[e])];
+      s += std::string(e ? ", " : "") + "{\"at\": [" + num(P.x) + ", " + num(P.y) + ", " + num(P.z) + "], \"kind\": \"" +
+           (x.end_kind[e] == 'd' ? "driven" : x.end_kind[e] == 'j' ? "joint" : x.end_kind[e] == 'f' ? "free" : "pass") +
+           "\", \"floor\": " + (x.end_floor[e] ? "true" : "false") + ", \"u\": [" + num(x.end_u[e].x) + ", " +
+           num(x.end_u[e].y) + ", " + num(x.end_u[e].z) + "]" +
+           (x.end_kind[e] == 'd' ? ", \"read_at\": [" + num(x.end_read[e].x) + ", " + num(x.end_read[e].y) + ", " + num(x.end_read[e].z) + "]"
+                                 : std::string()) + "}";
+    }
+    s += "]}";
   }
   s += c.weakest.empty() ? "],\n" : "\n    ],\n";
   s += "    \"frame\": {\"bars\": " + std::to_string(R.frame.bars) + ", \"nodes\": " + std::to_string(c.nodes_used) +
@@ -16266,7 +16317,8 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
        ", \"undriven_parts\": " + std::to_string(c.undriven_pieces) + ", \"rotations_held\": " + std::to_string(c.rotations_held) +
        ", \"drive_voxels_median\": " + num(c.drive_voxels_median) + ", \"drive_fallback\": " + std::to_string(c.drive_fallback) +
        ", \"load_total_n\": " + num(c.load_total_n) + ", \"load_share\": " + num(c.load_share) + ", \"load_on_frame_n\": " + num(c.load_on_frame_n) +
-       ", \"frame_nodes_loaded\": " + std::to_string(c.frame_nodes_loaded) + ", \"strut_mm\": " + num(c.strut_mm) +
+       ", \"frame_nodes_loaded\": " + std::to_string(c.frame_nodes_loaded) +
+       ", \"loaded_nodes_undriven\": " + std::to_string(c.loaded_nodes_undriven) + ", \"strut_mm\": " + num(c.strut_mm) +
        ", \"solved\": " + std::string(c.solved ? "true" : "false") + ", \"dofs\": " + std::to_string(c.dofs) +
        ", \"solver\": " + json_str(c.solver) + ", \"factor_gb\": " + num(c.factor_gb) + ", \"residual\": " + num(c.residual) + "},\n";
   s += "    \"material\": {\"lattice_mm3\": " + num(fm.lattice_mm3) + ", \"lattice_outside_solid_mm3\": " + num(fm.lattice_open_mm3) +
