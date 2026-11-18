@@ -35,6 +35,8 @@ void GrowReport::add(const GrowReport& o) {
   reseed_voids += o.reseed_voids; reseed_landed += o.reseed_landed; reseed_failed += o.reseed_failed;
   reseed_mm += o.reseed_mm;
   reseed_from_vertex += o.reseed_from_vertex;
+  d2_offered += o.d2_offered; d2_grown += o.d2_grown; d2_refused += o.d2_refused; d2_short += o.d2_short;
+  for (int f = 0; f < 6; ++f) face_hits[f] += o.face_hits[f];
   stubs.insert(stubs.end(), o.stubs.begin(), o.stubs.end());
   ties_seeded += o.ties_seeded; ties_laid += o.ties_laid; ties_refused_minor += o.ties_refused_minor;
   ties_refused_reach += o.ties_refused_reach;
@@ -187,6 +189,7 @@ struct Line {
   int parent = -1;
   int family = 0;
   bool tie = false;
+  bool d2 = false;   // D2: a branch made at a face, or a strand grown from one (they make no D2 branch)
   // G13: the line it was grown as (its index then: repeats split a line, its pieces keep it); a branch (G6) of
   // `parent`; a floor seed's strand (`seed_no` its seed's order, `root0` its root, `floor_pt` where it leaves the floor).
   int origin = -1;
@@ -211,6 +214,7 @@ struct Tip {
   int parent = -1, family = 0;
   int line = -1;   // a re-seeded tip grows on from the top of its stub (that line)
   int seed_no = -1;   // a floor seed: its order
+  int d2 = 0;         // D2: 2 the branch made at a face, 1 a tip descended from one
 };
 
 // A fixed, stated randomness (G2): splitmix64 of the ask's seed and the place, never the clock, never the order.
@@ -259,6 +263,8 @@ class Grower {
   std::vector<Vec3> light_;   // G3: per voxel, the nearest point of the region's boundary that is not its floor
   std::vector<Vec3> aim_;     // G16a: per voxel, where the pull aims: that point moved out of the part (lighting())
   std::vector<char> lit_;
+  std::vector<signed char> face_;   // D2: per voxel, the face (nb order: +x -x +y -y +z) its wall site was found across
+  double sp_tight_ = 0.0, sp_wide_ = 0.0;   // D1: the spacing field's tightest and widest over the candidates
   std::size_t tips_ = 0;
 
   double h(const Vec3& p) const { return dot(p, up_); }
@@ -505,6 +511,7 @@ class Grower {
   void grow(std::vector<Tip> tips);
   void grow_tip(const Tip& t, std::vector<Tip>& tips);
   void offer_branches(int li, const Vec3& p, const Vec3& dir, std::vector<Tip>& tips);
+  void d2_branch(int li, const Vec3& p, const Vec3& o, std::vector<Tip>& tips);
   void repeats();
   void feet(const std::vector<int>& parent, const std::vector<char>& branch, const std::vector<char>& seeded);
   void settle();
@@ -532,6 +539,7 @@ void Grower::lighting() {
   const std::size_t n = static_cast<std::size_t>(field_.nx) * field_.ny * field_.nz;
   light_.assign(n, Vec3{});
   aim_.assign(n, Vec3{});
+  face_.assign(n, -1);
   lit_.assign(n, 0);
   std::vector<double> best(n, std::numeric_limits<double>::infinity());
   std::vector<std::size_t> queue;
@@ -552,7 +560,12 @@ void Grower::lighting() {
           if (dot(o, up_) < -0.5) continue;   // the floor
           const Vec3 site = add(c, mul(o, 0.5 * hv));
           const double d = dist(site, c);
-          if (d < best[e]) { best[e] = d; light_[e] = site; aim_[e] = add(site, mul(o, sp_.spacing_mm[e])); }
+          if (d < best[e]) {
+            best[e] = d;
+            light_[e] = site;
+            aim_[e] = add(site, mul(o, sp_.spacing_mm[e]));
+            face_[e] = static_cast<signed char>(f);
+          }
         }
         if (best[e] < std::numeric_limits<double>::infinity()) {
           lit_[e] = 1;
@@ -576,6 +589,7 @@ void Grower::lighting() {
             best[f] = d;
             light_[f] = light_[e];
             aim_[f] = aim_[e];
+            face_[f] = face_[e];
             lit_[f] = 1;
             queue.push_back(f);
           }
@@ -742,9 +756,49 @@ void Grower::offer_branches(int li, const Vec3& p, const Vec3& dir, std::vector<
     t.dir = bdir;
     t.parent = li;
     t.family = family;
+    t.d2 = me.d2 ? 1 : 0;
     tips.push_back(t);
     ++tips_;
   }
+}
+
+// D2 (stress_goal, brief G6 step 3): a tip that left the region through a side face (`o` its wall site's outward
+// direction): its strand stays, ending on the face; one local spacing (at its last point inside, `p`) back along it
+// from its end, ONE branch is offered, leaving at the cone, its level direction straight away from the face, through
+// the usual branch tests (in the region, supported, not crowded); refused: no branch, no link. A strand shorter than
+// one spacing: no branch. Counted.
+void Grower::d2_branch(int li, const Vec3& p, const Vec3& o, std::vector<Tip>& tips) {
+  const Line& me = lines_[static_cast<std::size_t>(li)];
+  const double S = sep(p);
+  double left = S;
+  Vec3 at{};
+  bool found = false;
+  for (std::size_t k = me.pts.size(); k-- > 1 && !found;) {
+    const double l = dist(me.pts[k], me.pts[k - 1]);
+    if (l >= left) {
+      at = add(me.pts[k], mul(sub(me.pts[k - 1], me.pts[k]), l > 0.0 ? left / l : 0.0));
+      found = true;
+    } else {
+      left -= l;
+    }
+  }
+  if (!found) { ++rep_.d2_short; return; }
+  ++rep_.d2_offered;
+  const Vec3 side = unit(level(mul(o, -1.0)));
+  if (len(side) < 0.5) { ++rep_.d2_refused; return; }
+  const Vec3 bdir = add(mul(side, cone_cos_), mul(up_, cone_sin_));
+  const Vec3 bq = add(at, mul(bdir, layer_));
+  if (!inreg(bq) || !supported(bq) || too_close(bq, li, -1).found) { ++rep_.d2_refused; return; }
+  if (tips_ >= kMaxTips) { rep_.tip_budget_hit = 1; return; }
+  Tip t;
+  t.kind = Tip::Branch;
+  t.root = t.from = at;
+  t.dir = bdir;
+  t.parent = li;
+  t.family = (me.family + 1) % 3;
+  t.d2 = 2;
+  tips.push_back(t);
+  ++tips_;
 }
 
 // G3 to G5, the original's tip loop, step by step.
@@ -753,6 +807,7 @@ void Grower::grow_tip(const Tip& t, std::vector<Tip>& tips) {
   if (t.line < 0) {
     Line& L = lines_[static_cast<std::size_t>(li)];
     L.branch = t.kind == Tip::Branch;
+    L.d2 = t.d2 != 0;
     if (t.kind == Tip::Floor) {
       L.floor_seed = true;
       L.seed_no = t.seed_no;
@@ -779,8 +834,16 @@ void Grower::grow_tip(const Tip& t, std::vector<Tip>& tips) {
       want = dir;
     } else {
       Vec3 f;
-      want = stress_dir(p, f) ? add(mul(dir, kBlendHeading), mul(f, kBlendField)) : dir;
-      want = add(want, mul(light(p), kUpwardBias));   // the pull, toward the nearest face (OR35)
+      const bool has_f = stress_dir(p, f);
+      // D1 (stress_goal): t = (widest - S(p)) / (widest - tightest) of the spacing field (0 when they are equal);
+      // where t >= 0.1 and there is a stress direction the stress is the goal: no pull.
+      const double tg = ask_.stress_goal && sp_wide_ > sp_tight_ ? (sp_wide_ - sep(p)) / (sp_wide_ - sp_tight_) : 0.0;
+      if (ask_.stress_goal && has_f && tg >= 0.1) {
+        want = add(mul(dir, kBlendHeading), mul(f, kBlendField));
+      } else {
+        want = has_f ? add(mul(dir, kBlendHeading), mul(f, kBlendField)) : dir;
+        want = add(want, mul(light(p), kUpwardBias));   // the pull, toward the nearest face (OR35)
+      }
       if (!(len(want) > 1e-12)) { how = Unsupported; break; }
       want = unit(want);
       if (dot(want, up_) < cone_sin_) {
@@ -860,6 +923,16 @@ void Grower::grow_tip(const Tip& t, std::vector<Tip>& tips) {
     for (std::size_t k = 0; k + 1 < L.pts.size(); ++k) mm += dist(L.pts[k], L.pts[k + 1]);
     if (t.line < 0 && L.pts.size() >= 2 && mm < width_) laid_mm_ -= take_back(li, 0);
   }
+  if (how == Edge) {
+    // D2: the face it left through (its last voxel's wall site); none off the lit candidates.
+    int face = 5;
+    int fi, fj, fk;
+    if (voxel(p, fi, fj, fk) && lit_[field_.index(fi, fj, fk)]) face = face_[field_.index(fi, fj, fk)];
+    ++rep_.face_hits[face];
+    static const double nbv[5][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}};
+    const Vec3 o = face < 5 ? Vec3{nbv[face][0], nbv[face][1], nbv[face][2]} : up_;
+    if (ask_.stress_goal && !lines_[static_cast<std::size_t>(li)].d2 && dot(o, up_) <= 0.5) d2_branch(li, p, o, tips);
+  }
   if (how == Edge) ++rep_.ended_edge;
   else if (how == Unsupported) ++rep_.ended_unsupported;
   else if (how == Joins) ++rep_.ended_joins;
@@ -872,6 +945,7 @@ void Grower::grow_tip(const Tip& t, std::vector<Tip>& tips) {
   if (lines_[static_cast<std::size_t>(li)].pts.size() >= 2) {
     ++rep_.strands_grown;
     if (t.kind == Tip::Branch) ++rep_.branches_grown;
+    if (t.d2 == 2) ++rep_.d2_grown;
   }
 }
 
@@ -1939,6 +2013,14 @@ bool Grower::setup() {
     rec_.init(lo, hi, std::max(1e-3, kTestRatio * median_ * 2.0));
   }
   lighting();
+  // D1: the spacing field's own tightest and widest values, over the candidates.
+  sp_tight_ = std::numeric_limits<double>::infinity();
+  sp_wide_ = 0.0;
+  for (std::size_t e = 0; e < sp_.candidate.size(); ++e)
+    if (sp_.candidate[e]) {
+      sp_tight_ = std::min(sp_tight_, sp_.spacing_mm[e]);
+      sp_wide_ = std::max(sp_wide_, sp_.spacing_mm[e]);
+    }
   return true;
 }
 

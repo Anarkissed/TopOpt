@@ -67,6 +67,11 @@ struct OrganicAsk {
   // The lead's ruling (brief G5): 2.5, the smallest of 1, 1.5, 2, 2.5 that leaves the made-up cube's floor at most
   // 80 % covered by true feet. 0 or less: the feet do not compete (every foot is kept).
   double foot_gap = 2.5;
+  // D (brief G6, step 3, an EXPERIMENT for a picture; the owner: "Why not work backwards? Instead of the goal being go
+  // reach a face, the stress lines are the goal, but there are benefits and rules to [hitting] a face?"): D1, where the
+  // spacing is at least a tenth of the way from the widest to the tightest the heading follows the stress with no
+  // pull; D2, a tip that leaves through a side face offers ONE branch one spacing back, away from that face.
+  bool stress_goal = false;
 };
 
 // O16, the net skin: Finish Skin (Settings::skin) on a weave region (the old finish step "Skin", organic_lattice.cpp,
@@ -179,6 +184,10 @@ struct GrowReport {
   // (its root, its top: the bare place; its points, root first; its length; the local spacing and the landing radius
   // at the bare place).
   std::size_t reseed_from_vertex = 0;
+  // D2 (stress_goal): branches offered one spacing back from a side face, grown, refused, strands too short for one;
+  // and every tip that ended by leaving the region, by its last voxel's wall site: +x, -x, +y, -y, +z, none.
+  std::size_t d2_offered = 0, d2_grown = 0, d2_refused = 0, d2_short = 0;
+  std::size_t face_hits[6] = {0, 0, 0, 0, 0, 0};
   struct Stub {
     Vec3 root{}, top{};
     std::vector<Vec3> pts;

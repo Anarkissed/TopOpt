@@ -200,7 +200,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "width_heavy_mm", "reference_mpa", "percentile", "response", "region_own", "max_step", "region_weave", "organic_spacing_mm",
        "organic_width_mm", "organic_spacing_min_mm", "organic_spacing_max_mm", "organic_spacing_exponent",
        "organic_shape_fit", "organic_mode", "organic_walls_out", "organic_ties", "organic_tie_swirl",
-       "organic_foot_gap"},
+       "organic_foot_gap", "organic_stress_goal"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -436,6 +436,8 @@ OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::str
   a.tie_swirl = num(in, "organic_tie_swirl", a.tie_swirl, w);
   if (!(a.tie_swirl >= 0.0 && a.tie_swirl <= 1.0)) json::fail(w + ".organic_tie_swirl", "must be 0 to 1");
   a.foot_gap = num(in, "organic_foot_gap", a.foot_gap, w);
+  // D (brief G6, an experiment): the stress lines are the goal (off when not given).
+  a.stress_goal = flag(in, "organic_stress_goal", a.stress_goal, w);
   // G13: 0 or less: the feet do not compete.
   if (!std::isfinite(a.foot_gap)) json::fail(w + ".organic_foot_gap", "must be a number (0 or less: feet do not compete)");
   const double thinnest = s.bead_mm * s.min_strut_lines;
