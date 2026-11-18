@@ -3,6 +3,8 @@
 #include "topopt/lattice_layout_organic.hpp"
 
 #include <algorithm>
+#include <array>
+#include <map>
 #include <chrono>
 #include <cmath>
 #include <limits>
@@ -241,7 +243,7 @@ OrganicSpacing organic_spacing(const Domain& domain, int region, const TensorFie
     const double w = width[e];
     const double cap_member = (w > 0.0 && std::isfinite(w)) ? w / n_star : std::numeric_limits<double>::infinity();
     const double cap_outline = 2.0 * static_cast<double>(steps[e]) * field.spacing;
-    double cap = std::min(cap_member, cap_outline);
+    double cap = ask.member_cap ? std::min(cap_member, cap_outline) : cap_outline;   // J1
     if (cap < lo) cap = lo;
     if (!(cap > 0.0) || !(cap < out.spacing_mm[e])) continue;
     out.spacing_mm[e] = cap;
@@ -396,6 +398,7 @@ Outcome Session::lay_organic(const Settings& settings, const TensorField& field,
     const double reach = ask.mode == OrganicMode::Grown ? median : st.spacing_median_mm;
     if (settings.skin && reach > 0.0) finish.net_reach.push_back({r.id, reach});   // O16
     if (ask.mode == OrganicMode::Grown) finish.arrived.push_back(r.id);   // G11: a vine that reached the surface
+    if (ask.mode == OrganicMode::Grown && ask.prune) finish.prune.push_back({r.id, median});   // J2
     if (st.candidates > 0) {
       smallest = candidates ? std::min(smallest, st.spacing_smallest_mm) : st.spacing_smallest_mm;
       largest = candidates ? std::max(largest, st.spacing_largest_mm) : st.spacing_largest_mm;
@@ -414,6 +417,149 @@ Outcome Session::lay_organic(const Settings& settings, const TensorField& field,
     out.spacing_mean_mm = candidates ? sum / static_cast<double>(candidates) : 0.0;
     out.grown = grown;
   }
+  return out;
+}
+
+
+// ── J2 (brief G12): the pruning of a Grown area's weave bars ──────────────────────
+namespace {
+using JKey = std::array<long long, 3>;
+JKey jkey(const Vec3& p) {   // as bars.cpp's key_of (kSame 1e-5 mm)
+  return {std::llround(p.x / 1e-5), std::llround(p.y / 1e-5), std::llround(p.z / 1e-5)};
+}
+double jlen(const Bar& b) { return std::sqrt((b.b.x - b.a.x) * (b.b.x - b.a.x) + (b.b.y - b.a.y) * (b.b.y - b.a.y) + (b.b.z - b.a.z) * (b.b.z - b.a.z)); }
+double jto(const Vec3& p, const Vec3& a, const Vec3& b) {
+  const Vec3 d{b.x - a.x, b.y - a.y, b.z - a.z};
+  const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
+  const double t = l2 > 0.0 ? std::max(0.0, std::min(1.0, ((p.x - a.x) * d.x + (p.y - a.y) * d.y + (p.z - a.z) * d.z) / l2)) : 0.0;
+  const double x = p.x - a.x - d.x * t, y = p.y - a.y - d.y * t, z = p.z - a.z - d.z * t;
+  return std::sqrt(x * x + y * y + z * z);
+}
+void jkeep(Bars& bars, const std::vector<char>& keep) {   // as bars.cpp's keep_only
+  std::vector<int> now(bars.bars.size(), -1);
+  std::vector<Bar> left;
+  for (std::size_t i = 0; i < bars.bars.size(); ++i) {
+    if (!keep[i]) { ++bars.dropped; continue; }
+    now[i] = static_cast<int>(left.size());
+    left.push_back(bars.bars[i]);
+  }
+  for (Bar& b : left) {
+    if (b.into_a >= 0) b.into_a = b.into_a < static_cast<int>(now.size()) ? now[static_cast<std::size_t>(b.into_a)] : -1;
+    if (b.into_b >= 0) b.into_b = b.into_b < static_cast<int>(now.size()) ? now[static_cast<std::size_t>(b.into_b)] : -1;
+  }
+  bars.bars.swap(left);
+}
+}  // namespace
+
+std::vector<PruneCount> prune_weave(Bars& bars, const std::vector<std::pair<int, double>>& areas) {
+  std::vector<PruneCount> out;
+  for (const auto& a : areas) { PruneCount c; c.region = a.first; out.push_back(c); }
+  auto area_of = [&](int region) {
+    for (std::size_t k = 0; k < areas.size(); ++k) if (areas[k].first == region) return static_cast<int>(k);
+    return -1;
+  };
+  const std::size_t n = bars.bars.size();
+  std::vector<char> keep(n, 1);
+  // J2a
+  for (bool again = true, first = true; again; first = false) {
+    again = false;
+    std::map<JKey, int> at;
+    for (std::size_t i = 0; i < n; ++i)
+      if (keep[i]) { ++at[jkey(bars.bars[i].a)]; ++at[jkey(bars.bars[i].b)]; }
+    std::vector<std::size_t> cut;
+    for (std::size_t i = 0; i < n; ++i) {
+      if (!keep[i]) continue;
+      const Bar& b = bars.bars[i];
+      if (b.net || area_of(b.region) < 0) continue;
+      auto in_air = [&](Bar::End e, const Vec3& p, int into) {
+        if (e == Bar::End::Solid || e == Bar::End::Surface) return false;
+        if (e == Bar::End::Joined) return !(into >= 0 && into < static_cast<int>(n) && keep[static_cast<std::size_t>(into)]);
+        return at[jkey(p)] < 2;
+      };
+      if (in_air(b.end_a, b.a, b.into_a) || in_air(b.end_b, b.b, b.into_b)) cut.push_back(i);
+    }
+    for (std::size_t i : cut) {
+      keep[i] = 0;
+      PruneCount& c = out[static_cast<std::size_t>(area_of(bars.bars[i].region))];
+      ++c.bars_cut;
+      c.cut_mm += jlen(bars.bars[i]);
+      if (first) ++c.ends_cut;
+      again = true;
+    }
+  }
+  // J2b, per area
+  for (std::size_t k = 0; k < areas.size(); ++k) {
+    std::vector<std::size_t> mine;
+    for (std::size_t i = 0; i < n; ++i) if (keep[i] && bars.bars[i].region == areas[k].first) mine.push_back(i);
+    if (mine.empty()) continue;
+    std::map<std::size_t, std::size_t> local;   // bar -> its place in mine
+    for (std::size_t m = 0; m < mine.size(); ++m) local[mine[m]] = m;
+    std::vector<std::size_t> parent(mine.size());
+    for (std::size_t m = 0; m < mine.size(); ++m) parent[m] = m;
+    auto find = [&](std::size_t i) { while (parent[i] != i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+    auto join = [&](std::size_t i, std::size_t j) { i = find(i); j = find(j); if (i != j) parent[std::max(i, j)] = std::min(i, j); };
+    {   // shared end points, not when both bars end Solid there
+      std::map<JKey, std::vector<std::pair<std::size_t, bool>>> ends;   // (place, Solid end)
+      for (std::size_t m = 0; m < mine.size(); ++m) {
+        const Bar& b = bars.bars[mine[m]];
+        ends[jkey(b.a)].push_back({m, b.end_a == Bar::End::Solid});
+        ends[jkey(b.b)].push_back({m, b.end_b == Bar::End::Solid});
+      }
+      for (const auto& e : ends)
+        for (std::size_t x = 0; x < e.second.size(); ++x)
+          for (std::size_t y = x + 1; y < e.second.size(); ++y)
+            if (!(e.second[x].second && e.second[y].second)) join(e.second[x].first, e.second[y].first);
+    }
+    for (std::size_t m = 0; m < mine.size(); ++m) {   // a Joined end and the bar it ends in
+      const Bar& b = bars.bars[mine[m]];
+      for (int into : {b.end_a == Bar::End::Joined ? b.into_a : -1, b.end_b == Bar::End::Joined ? b.into_b : -1}) {
+        if (into < 0) continue;
+        const auto it = local.find(static_cast<std::size_t>(into));
+        if (it != local.end()) join(m, it->second);
+      }
+    }
+    {   // an end lying within half the other bar's width of it
+      const double pitch = 2.0;
+      auto slot = [&](double x) { return static_cast<long long>(std::floor(x / pitch)); };
+      std::map<JKey, std::vector<std::size_t>> grid;
+      double widest = 0.0;
+      for (std::size_t m = 0; m < mine.size(); ++m) widest = std::max(widest, bars.bars[mine[m]].width);
+      for (std::size_t m = 0; m < mine.size(); ++m) {
+        const Bar& b = bars.bars[mine[m]];
+        for (long long x = slot(std::min(b.a.x, b.b.x) - widest); x <= slot(std::max(b.a.x, b.b.x) + widest); ++x)
+          for (long long y = slot(std::min(b.a.y, b.b.y) - widest); y <= slot(std::max(b.a.y, b.b.y) + widest); ++y)
+            for (long long z = slot(std::min(b.a.z, b.b.z) - widest); z <= slot(std::max(b.a.z, b.b.z) + widest); ++z)
+              grid[{x, y, z}].push_back(m);
+      }
+      for (std::size_t m = 0; m < mine.size(); ++m) {
+        const Bar& b = bars.bars[mine[m]];
+        for (const Vec3& p : {b.a, b.b}) {
+          const auto it = grid.find({slot(p.x), slot(p.y), slot(p.z)});
+          if (it == grid.end()) continue;
+          for (std::size_t o : it->second) {
+            if (o == m || find(o) == find(m)) continue;
+            const Bar& c = bars.bars[mine[o]];
+            if (jto(p, c.a, c.b) <= 0.5 * c.width) join(m, o);
+          }
+        }
+      }
+    }
+    std::map<std::size_t, double> mm;
+    for (std::size_t m = 0; m < mine.size(); ++m) mm[find(m)] += jlen(bars.bars[mine[m]]);
+    std::size_t largest = 0;
+    double big = -1.0;
+    for (const auto& g : mm) if (g.second > big) { big = g.second; largest = g.first; }
+    const double floor_mm = 20.0 * areas[k].second;
+    PruneCount& c = out[k];
+    for (const auto& g : mm) {
+      if (g.first == largest) continue;
+      if (g.second < floor_mm) {
+        ++c.pieces_removed; c.removed_mm += g.second;
+        for (std::size_t m = 0; m < mine.size(); ++m) if (find(m) == g.first) keep[mine[m]] = 0;
+      } else { ++c.pieces_apart; c.apart_mm += g.second; }
+    }
+  }
+  jkeep(bars, keep);
   return out;
 }
 

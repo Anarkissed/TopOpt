@@ -238,6 +238,8 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
       }
       if (any_skin) lay_skin(out.bars, *domain_, skin);
       domain_->check_stop();
+      if (settings.skin && finish && !finish->net_reach.empty() && !finish->prune.empty())
+        prune_weave(out.bars, finish->prune);   // J2: the weave pruned before the net skin is laid on it
       if (settings.skin && finish && !finish->net_reach.empty())   // O16: Finish Skin on a weave region
         lay_net_skin(out.bars, *domain_, finish->net_reach, settings.skin_spec.width_mm);
       domain_->check_stop();
@@ -245,6 +247,7 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
         drop_loose_bars(out.bars, finish && !finish->arrived.empty() ? &finish->arrived : nullptr);   // G11
         out.stepped_edges = stepped_edges(out.bars);
         out.pieces = drop_adrift_bars(out.bars, *domain_, &out.layout);
+        if (finish && !finish->prune.empty()) prune_weave(out.bars, finish->prune);   // J2, where the dropping ends
       } else {
         out.pieces = count_pieces(out.bars, *domain_, nullptr, nullptr, &out.layout);
       }

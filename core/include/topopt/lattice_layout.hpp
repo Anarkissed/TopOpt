@@ -1371,6 +1371,7 @@ class Session {
   struct WeaveFinish {
     std::vector<std::pair<int, double>> net_reach;   // (region, reach mm); empty: no net skin
     std::vector<int> arrived;   // G11 (Grown only): weave regions whose vines that reach the surface have arrived
+    std::vector<std::pair<int, double>> prune;   // J2 (brief G12): (Grown region, median asked spacing); empty: off
   };
   Outcome lay_with(const Settings& settings, const std::vector<Strand>* strands, int threads, const std::atomic<bool>* stop,
                    const WeaveFinish* finish = nullptr);

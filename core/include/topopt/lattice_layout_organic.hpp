@@ -116,7 +116,33 @@ struct OrganicAsk {
   // w + (width_heavy_mm - w) x u(point) wide, w the light width (the growth itself uses w); 0: off.
   bool auto_by_stress = false;
   double width_heavy_mm = 0.0;
+  // J (brief G12): member_cap false: O13's shape fit applies the outline cap (2 k h) alone, not the member cap (W / 5)
+  // (the owner, 2026-11-16: "the 5 cell rule is not useful for organic"). prune: rule J2 on the weave bars of each Grown
+  // area in the path (prune_weave). Defaults: as before.
+  bool member_cap = true;
+  bool prune = false;
 };
+
+// J2 (brief G12), the pruning of a Grown area's weave bars, for each (region, median asked spacing) of `areas`:
+//   J2a, no end in the air: a weave bar (not a net strut) of the area with an end that is not Solid, not Surface, and not
+//     at a joint (a Node or Loose end: another kept bar ends at the same point, as drop_loose_bars reads a node; a
+//     Joined end: the bar it ends in is kept) is removed; repeated until there is none, so a strand is cut back to its
+//     last joint and a bar with no joint at either end goes whole.
+//   J2b, no small separate piece: the area's kept bars (net struts too) fall into pieces: bars sharing an end point
+//     (not when both bars end Solid there), a Joined end and the bar it ends in, an end lying within half the other
+//     bar's width of it. Every piece but the largest is removed when its bars' length is under 20 x the area's median.
+// Returns the counts per area (in the order of `areas`).
+struct PruneCount {
+  int region = 0;
+  std::size_t ends_cut = 0;        // J2a: bars removed in the first round (each an end in the air)
+  std::size_t bars_cut = 0;        // J2a: bars removed in all
+  double cut_mm = 0.0;
+  std::size_t pieces_removed = 0;  // J2b
+  double removed_mm = 0.0;
+  std::size_t pieces_apart = 0;    // J2b: pieces kept apart from the largest (20 x the median or more)
+  double apart_mm = 0.0;
+};
+std::vector<PruneCount> prune_weave(Bars& bars, const std::vector<std::pair<int, double>>& areas);
 
 // O16, the net skin: Finish Skin (Settings::skin) on a weave region (the old finish step "Skin", organic_lattice.cpp,
 // read for its rules and numbers only). For each

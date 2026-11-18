@@ -204,7 +204,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "organic_void_ratio", "organic_reseed_rounds", "organic_wall_connect", "organic_wall_gap",
        "organic_wall_cross", "organic_top_run", "organic_run_max", "organic_root_run", "organic_run_gap",
        "organic_run_follow", "organic_run_pull", "organic_run_seek", "organic_run_min", "organic_root_gap",
-       "organic_auto", "organic_width_heavy_mm"},
+       "organic_auto", "organic_width_heavy_mm", "organic_member_cap", "organic_prune"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -490,6 +490,8 @@ OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::str
     json::fail(w + ".organic_width_mm", b);
   }
   a.auto_by_stress = flag(in, "organic_auto", a.auto_by_stress, w);   // I
+  a.member_cap = flag(in, "organic_member_cap", a.member_cap, w);   // J1
+  a.prune = flag(in, "organic_prune", a.prune, w);   // J2
   a.width_heavy_mm = num(in, "organic_width_heavy_mm", a.width_heavy_mm, w);   // I
   {
     const double light = a.width_mm > 0.0 ? a.width_mm : thinnest;
