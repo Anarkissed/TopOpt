@@ -202,7 +202,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "organic_shape_fit", "organic_mode", "organic_walls_out", "organic_ties", "organic_tie_swirl",
        "organic_foot_gap", "organic_stress_goal",
        "organic_void_ratio", "organic_reseed_rounds", "organic_wall_connect", "organic_wall_gap",
-       "organic_wall_cross"},
+       "organic_wall_cross", "organic_top_run", "organic_run_max", "organic_root_run", "organic_run_gap"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -454,6 +454,17 @@ OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::str
   const double cross = num(in, "organic_wall_cross", a.wall_cross, w);
   if (!(cross == 0.0 || cross == 1.0 || cross == 2.0)) json::fail(w + ".organic_wall_cross", "must be 0, 1 or 2");
   a.wall_cross = static_cast<int>(cross);
+  // G (brief G8, try keys): top runs, roots (0 when not given: off), runs per end (1 when not given).
+  a.top_run = num(in, "organic_top_run", a.top_run, w);
+  if (!(std::isfinite(a.top_run) && a.top_run >= 0.0)) json::fail(w + ".organic_top_run", "must be 0 or above");
+  a.root_run = num(in, "organic_root_run", a.root_run, w);
+  if (!(std::isfinite(a.root_run) && a.root_run >= 0.0)) json::fail(w + ".organic_root_run", "must be 0 or above");
+  a.run_gap = num(in, "organic_run_gap", a.run_gap, w);
+  if (!(std::isfinite(a.run_gap) && a.run_gap >= 0.0)) json::fail(w + ".organic_run_gap", "must be 0 or above");
+  const double rmax = num(in, "organic_run_max", a.run_max, w);
+  if (!(std::isfinite(rmax) && rmax >= 1.0 && rmax <= 1e6 && rmax == std::floor(rmax)))
+    json::fail(w + ".organic_run_max", "must be a whole number, 1 or more");
+  a.run_max = static_cast<int>(rmax);
   // G13: 0 or less: the feet do not compete.
   if (!std::isfinite(a.foot_gap)) json::fail(w + ".organic_foot_gap", "must be a number (0 or less: feet do not compete)");
   const double thinnest = s.bead_mm * s.min_strut_lines;

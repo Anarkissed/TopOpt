@@ -283,6 +283,10 @@ class Grower {
   std::vector<signed char> face_;   // D2: per voxel, the face (nb order: +x -x +y -y +z) its wall site was found across
   double sp_tight_ = 0.0, sp_wide_ = 0.0;   // D1: the spacing field's tightest and widest over the candidates
   std::size_t tips_ = 0;
+  // G (brief G8): the strands that ended by leaving through the top face (line, end point), in the order they ended,
+  // while the first growth runs (top_open_).
+  std::vector<std::pair<int, Vec3>> top_ends_;
+  bool top_open_ = false;
 
   double h(const Vec3& p) const { return dot(p, up_); }
   Vec3 level(const Vec3& d) const { return sub(d, mul(up_, dot(d, up_))); }
@@ -543,6 +547,12 @@ class Grower {
   void account(const Fate& f);
   void reseed(std::vector<Tip>& tips);
   void ties(std::size_t from);
+  // G (brief G8): top runs and roots, once, after ties(0) and before the pruning.
+  void runs();
+  std::size_t split_at(int li, std::size_t seg, const Vec3& x);
+  enum RunEnd { RVine, RRun, RSolid, RDip, RAir, RReach, RNoFloor };
+  RunEnd make_run(int vine, const Vec3& start, Vec3 dir, double max_len, bool root, Boxes& mine, int end_id,
+                  double& mm);
   std::vector<Strand> strands() const;
 };
 
@@ -1043,6 +1053,9 @@ void Grower::grow_tip(const Tip& t, std::vector<Tip>& tips) {
     if (ask_.stress_goal && !connect && !lines_[static_cast<std::size_t>(li)].d2 && dot(o, up_) <= 0.5)
       d2_branch(li, p, o, tips);
     if (crossing) ++(face < 4 ? rep_.cross_ended_side : face == 4 ? rep_.cross_ended_top : rep_.cross_ended_noface);
+    // G: a strand that left through the top face: its line and end point, for its top runs.
+    if (top_open_ && face == 4 && lines_[static_cast<std::size_t>(li)].pts.size() >= 2)
+      top_ends_.push_back({li, lines_[static_cast<std::size_t>(li)].pts.back()});
   }
   if (crossing) {
     ++rep_.cross_seeded;
@@ -2115,6 +2128,235 @@ void Grower::ties(std::size_t from) {
   }
 }
 
+// G (brief G8): put x, a point of segment `seg` of line li, in as a vertex of the line (nothing moves); its index.
+std::size_t Grower::split_at(int li, std::size_t seg, const Vec3& x) {
+  Line& L0 = lines_[static_cast<std::size_t>(li)];
+  if (dist(x, L0.pts[seg]) <= 1e-9) return seg;
+  if (dist(x, L0.pts[seg + 1]) <= 1e-9) return seg + 1;
+  const std::vector<Vec3> pts = L0.pts;
+  const std::vector<char> rec = L0.rec;
+  laid_mm_ -= take_back(li, seg);
+  lay(li, x, false);
+  for (std::size_t k = seg + 1; k < pts.size(); ++k) lay(li, pts[k], rec[k] != 0);
+  return seg + 1;
+}
+
+// G: one run (a top run, or a root) from `start`, a vertex of line `vine`, level at the start's height, leaving on
+// `dir` (level, unit) and turned gradually onto the stress line (addendum B). Its endings (rule item 5, addendum D);
+// made, it is a tie in every other respect (thinned as a tie, the tie flag); its points go into `mine` as end_id's.
+Grower::RunEnd Grower::make_run(int vine, const Vec3& start, Vec3 dir, double max_len, bool root, Boxes& mine,
+                                int end_id, double& mm) {
+  const double s0 = sep(start), w = layer_ / s0, wr = std::max(2.0 * r_, 0.75 * layer_);
+  Vec3 q = start;
+  double travelled = 0.0;
+  std::vector<Vec3> path{start};
+  std::vector<char> must{1};
+  RunEnd how = RReach;
+  while (true) {
+    if (travelled >= max_len) {
+      if (!root) return RReach;
+      // D: it dips into the floor: one last segment along its direction and down at 45 degrees, ended in the floor's
+      // solid as a tip that leaves the region into solid ends.
+      const Vec3 d = unit(sub(dir, up_));
+      const double at = edge(q, d, 2.0 * s0);
+      if (at < 0.0 || !solid(add(q, mul(d, at + 3.0 * 0.02)))) return RNoFloor;
+      path.push_back(end_at_edge(q, d, at));
+      must.push_back(1);
+      how = RDip;
+      break;
+    }
+    Vec3 f;
+    if (stress_dir(q, f)) {
+      Vec3 lf = level(f);
+      if (len(lf) >= 0.2) {
+        lf = unit(lf);
+        if (dot(lf, dir) < 0.0) lf = mul(lf, -1.0);
+        dir = unit(add(mul(dir, 1.0 - w), mul(lf, w)));
+      }
+    }
+    const Vec3 nq = add(q, mul(dir, layer_));
+    if (!inreg(nq)) {
+      const double at = edge(q, dir, layer_ + 0.05);
+      const double a = at >= 0.0 ? at : 0.0;
+      if (!solid(add(q, mul(dir, a + 3.0 * 0.02)))) return RAir;
+      path.push_back(end_at_edge(q, dir, a));
+      must.push_back(1);
+      how = RSolid;
+      break;
+    }
+    q = nq;
+    travelled += layer_;
+    path.push_back(q);
+    must.push_back(0);
+    if (travelled >= 0.5 * s0) {
+      Near n;
+      rec_.near(q, wr, [&](const Sample& s) {
+        if (s.line == vine || !rec_current(s)) return;
+        const double d = dist(q, s.p);
+        if (d < wr && (d < n.d || (d == n.d && s.line < n.line))) { n.found = true; n.d = d; n.hit = s.p; n.line = s.line; }
+      });
+      if (n.found) {
+        path.back() = n.hit;
+        must.back() = 1;
+        how = RVine;
+        break;
+      }
+    }
+    if (travelled >= s0) {
+      const double lim = kTestRatio * sep(q);
+      bool found = false;
+      double best = lim;
+      Vec3 hit{};
+      mine.near(q, lim, [&](const Sample& s) {
+        const double d = dist(q, s.p);
+        if (d < best) { best = d; found = true; hit = s.p; }
+      });
+      if (found) {
+        path.push_back(hit);
+        must.push_back(1);
+        how = RRun;
+        break;
+      }
+    }
+  }
+  {
+    const double keep_d = 8.0 * r_;   // thinned as a tie's free points are
+    std::vector<Vec3> thin;
+    std::size_t next_must = 0;
+    for (std::size_t k = 0; k < path.size(); ++k) {
+      if (must[k]) { thin.push_back(path[k]); continue; }
+      next_must = std::max(next_must, k);
+      while (next_must < path.size() && !must[next_must]) ++next_must;
+      const double to_next = next_must < path.size() ? dist(path[next_must], path[k]) : 1e9;
+      if (dist(path[k], thin.back()) >= keep_d && to_next >= keep_d) thin.push_back(path[k]);
+    }
+    path.swap(thin);
+  }
+  const int l = new_line(path[0], vine, 1, true);
+  mm = 0.0;
+  for (std::size_t k = 1; k < path.size(); ++k)
+    if (dist(path[k], lines_[static_cast<std::size_t>(l)].pts.back()) > 1e-9) {
+      mm += dist(path[k], lines_[static_cast<std::size_t>(l)].pts.back());
+      lay(l, path[k]);
+    }
+  for (const Vec3& v : path) mine.put(Sample{end_id, 0, 0, v});
+  return how;
+}
+
+// G (brief G8 and its addendum): every top end's runs, in the order the ends were recorded; then every floor seed's
+// strand's roots, in line order.
+void Grower::runs() {
+  constexpr std::uint64_t kWhatN = 0x6701, kWhatA = 0x6702;
+  const int nmax = std::max(1, ask_.run_max);
+  auto draw_n = [&](int li, int kind) {
+    if (nmax <= 1) return 1;
+    const int n = 1 + static_cast<int>(std::floor(rnd(ask_.seed, kWhatN, li, kind, 0) * nmax));
+    return std::min(nmax, std::max(1, n));
+  };
+  auto turn = [&](const Vec3& v, double a) { return add(mul(v, std::cos(a)), mul(cross(up_, v), std::sin(a))); };
+  if (ask_.top_run > 0.0) {
+    Boxes mine = rec_;
+    mine.clear();
+    rep_.top_n.assign(static_cast<std::size_t>(nmax) + 1, 0);
+    for (std::size_t e = 0; e < top_ends_.size(); ++e) {
+      const int li = top_ends_[e].first;
+      if (lines_[static_cast<std::size_t>(li)].pts.size() < 2 ||
+          dist(lines_[static_cast<std::size_t>(li)].pts.back(), top_ends_[e].second) > 1e-9)
+        continue;
+      ++rep_.top_vines;
+      const std::size_t np = lines_[static_cast<std::size_t>(li)].pts.size();
+      const Vec3 a = lines_[static_cast<std::size_t>(li)].pts[np - 2], b = lines_[static_cast<std::size_t>(li)].pts[np - 1];
+      Vec3 head = level(unit(sub(b, a)));
+      const bool has_head = len(head) >= 0.2;
+      if (!has_head && nmax <= 1) { ++rep_.top_refused_level; continue; }
+      head = has_head ? unit(head) : u_;
+      const double rise = h(b) - h(a);
+      const Vec3 x = rise < r_ ? a : sub(b, mul(sub(b, a), r_ / rise));
+      const int n = draw_n(li, 0);
+      ++rep_.top_n[static_cast<std::size_t>(n)];
+      if (nmax > 1) head = turn(head, 2.0 * kPi * rnd(ask_.seed, kWhatA, li, 0, 0));
+      bool split = false;
+      Vec3 start = x;
+      for (int k = 0; k < n; ++k) {
+        bool ontop = false;
+        if (ask_.run_gap > 0.0)
+          mine.near(x, ask_.run_gap * sep(x), [&](const Sample& s) {
+            if (s.line != static_cast<int>(e) && dist(x, s.p) < ask_.run_gap * sep(x)) ontop = true;
+          });
+        if (ontop) { ++rep_.top_refused_ontop; continue; }
+        if (!split) {
+          const std::size_t at = split_at(li, np - 2, x);
+          start = lines_[static_cast<std::size_t>(li)].pts[at];
+          split = true;
+        }
+        double mm = 0.0;
+        const RunEnd r = make_run(li, start, unit(turn(head, 2.0 * kPi * k / n)), ask_.top_run * sep(start), false, mine,
+                                  static_cast<int>(e), mm);
+        if (r == RVine) ++rep_.top_runs_vine;
+        else if (r == RRun) ++rep_.top_runs_run;
+        else if (r == RSolid) ++rep_.top_runs_solid;
+        else if (r == RAir) ++rep_.top_refused_air;
+        else ++rep_.top_refused_reach;
+        if (r == RVine || r == RRun || r == RSolid) rep_.top_run_mm.push_back(mm);
+      }
+    }
+  }
+  if (ask_.root_run > 0.0) {
+    Boxes mine = rec_;
+    mine.clear();
+    rep_.root_n.assign(static_cast<std::size_t>(nmax) + 1, 0);
+    const std::size_t count = lines_.size();
+    for (std::size_t li = 0; li < count; ++li) {
+      if (!lines_[li].floor_seed || lines_[li].tie || lines_[li].pts.size() < 2) continue;
+      ++rep_.root_feet;
+      const double H = h(lines_[li].floor_pt) + r_;
+      std::size_t seg = 0;
+      bool got = false;
+      Vec3 x{};
+      for (std::size_t k = 0; k + 1 < lines_[li].pts.size(); ++k) {
+        const Vec3 a = lines_[li].pts[k], b = lines_[li].pts[k + 1];
+        if (h(a) <= H && h(b) >= H && h(b) > h(a)) {
+          x = add(a, mul(sub(b, a), (H - h(a)) / (h(b) - h(a))));
+          seg = k;
+          got = true;
+          break;
+        }
+      }
+      if (!got) { ++rep_.root_refused_nostart; continue; }
+      const Vec3 a = lines_[li].pts[seg], b = lines_[li].pts[seg + 1];
+      Vec3 head = level(unit(sub(b, a)));
+      head = len(head) >= 0.2 ? unit(head) : u_;
+      const int n = draw_n(static_cast<int>(li), 1);
+      ++rep_.root_n[static_cast<std::size_t>(n)];
+      if (nmax > 1) head = turn(head, 2.0 * kPi * rnd(ask_.seed, kWhatA, static_cast<long long>(li), 1, 0));
+      bool split = false;
+      Vec3 start = x;
+      for (int k = 0; k < n; ++k) {
+        bool ontop = false;
+        if (ask_.run_gap > 0.0)
+          mine.near(x, ask_.run_gap * sep(x), [&](const Sample& s) {
+            if (s.line != static_cast<int>(li) && dist(x, s.p) < ask_.run_gap * sep(x)) ontop = true;
+          });
+        if (ontop) { ++rep_.root_refused_ontop; continue; }
+        if (!split) {
+          start = lines_[li].pts[split_at(static_cast<int>(li), seg, x)];
+          split = true;
+        }
+        double mm = 0.0;
+        const RunEnd r = make_run(static_cast<int>(li), start, unit(turn(head, 2.0 * kPi * k / n)),
+                                  ask_.root_run * sep(start), true, mine, static_cast<int>(li), mm);
+        if (r == RVine) ++rep_.root_runs_vine;
+        else if (r == RRun) ++rep_.root_runs_run;
+        else if (r == RSolid) ++rep_.root_runs_solid;
+        else if (r == RDip) ++rep_.root_runs_dip;
+        else if (r == RAir) ++rep_.root_refused_air;
+        else ++rep_.root_refused_nofloor;
+        if (r == RVine || r == RRun || r == RSolid || r == RDip) rep_.root_run_mm.push_back(mm);
+      }
+    }
+  }
+}
+
 bool Grower::setup() {
   if (field_.empty()) return false;
   if (!(len(ask_.build_dir) > 1e-9) || !std::isfinite(len(ask_.build_dir)))
@@ -2132,6 +2374,13 @@ bool Grower::setup() {
     throw std::invalid_argument("grow_strands: wall_cross needs walls_out");   // F
   if (ask_.wall_cross != 0 && ask_.wall_connect)
     throw std::invalid_argument("grow_strands: wall_cross and wall_connect cannot both be on");   // F
+  if (!(ask_.top_run >= 0.0) || !std::isfinite(ask_.top_run))
+    throw std::invalid_argument("grow_strands: top_run must be 0 or above");   // G
+  if (!(ask_.root_run >= 0.0) || !std::isfinite(ask_.root_run))
+    throw std::invalid_argument("grow_strands: root_run must be 0 or above");   // G
+  if (!(ask_.run_gap >= 0.0) || !std::isfinite(ask_.run_gap))
+    throw std::invalid_argument("grow_strands: run_gap must be 0 or above");   // G
+  if (ask_.run_max < 1) throw std::invalid_argument("grow_strands: run_max must be 1 or more");   // G
   const double thinnest = domain_.spec().bead_mm * domain_.spec().min_strut_lines;
   if (ask_.width_mm != 0.0 && !(ask_.width_mm >= thinnest - 1e-12))
     throw std::invalid_argument("grow_strands: the strut width is under the thinnest strut (G8)");
@@ -2184,6 +2433,7 @@ std::vector<Strand> Grower::run() {
   std::vector<Tip> tips;
   seeds(tips);
   tips_ = tips.size();
+  top_open_ = ask_.top_run > 0.0;   // G: the top ends are recorded during this first growth only
   if (ask_.wall_cross != 0) {
     // F: the crossing vines (and all theirs) grown after everything else (1) or before it (2); everything else in
     // its usual order.
@@ -2202,7 +2452,9 @@ std::vector<Strand> Grower::run() {
   } else {
     grow(std::move(tips));
   }
+  top_open_ = false;
   if (ask_.ties) ties(0);
+  if (ask_.top_run > 0.0 || ask_.root_run > 0.0) runs();   // G
   prune();
   rep_.bare_before = bare();
   // E: the re-seed step reseed_rounds times (G11: once); between rounds what the last pass cut is no longer material,

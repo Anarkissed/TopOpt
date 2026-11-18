@@ -89,6 +89,18 @@ struct OrganicAsk {
   // on its joins. 1: the wall tips grown after every floor tip and its descendants; 2: before any floor tip. 0: off.
   // Needs walls_out; refused with wall_connect.
   int wall_cross = 0;   // 0, 1 or 2
+  // G (brief G8, a try key): top runs. A strand that ended by leaving the region through the top face runs along it,
+  // level, one radius below its end, on the stress: the longest a run may be, in local spacings. 0: off.
+  double top_run = 0.0;
+  // G (addendum): each top end (and each foot, for roots) makes 1 to run_max runs, fanned evenly round the build
+  // direction; 1 or more.
+  int run_max = 1;
+  // G (addendum): roots: a foot's runs along the floor, one radius above its floor point; their longest length in local
+  // spacings, then they dip into the floor. 0: off.
+  double root_run = 0.0;
+  // G (follow-up): a run (root) is not started where a point of a run (root) made from another end lies within
+  // run_gap x the local spacing of its start; 0: the test is off.
+  double run_gap = 0.5;
 };
 
 // O16, the net skin: Finish Skin (Settings::skin) on a weave region (the old finish step "Skin", organic_lattice.cpp,
@@ -214,6 +226,19 @@ struct GrowReport {
               cross_ended_unsupported = 0, cross_ended_guard = 0;
   std::vector<std::size_t> cross_joins;
   std::vector<double> cross_reach_mm;
+  // G, top_run: strands that ended at the top; runs made, by how they ended (welded to a strand, welded to another
+  // run, into the solid); refused (no level heading, left into air, out of reach); each run's length (mm).
+  std::size_t top_vines = 0, top_runs_vine = 0, top_runs_run = 0, top_runs_solid = 0, top_refused_level = 0,
+              top_refused_air = 0, top_refused_reach = 0;
+  std::vector<double> top_run_mm;
+  std::size_t top_refused_ontop = 0;   // addendum C: a run not started on top of another end's run
+  // G (addendum D), roots: made by ending (welded to a strand, to another root, into the solid sideways, dipped into
+  // the floor); refused (on top of another end's root, left into air, no solid under its dip, no start on the foot).
+  std::size_t root_feet = 0, root_runs_vine = 0, root_runs_run = 0, root_runs_solid = 0, root_runs_dip = 0,
+              root_refused_ontop = 0, root_refused_air = 0, root_refused_nofloor = 0, root_refused_nostart = 0;
+  std::vector<double> root_run_mm;
+  // the spread of n: how many ends drew 1, 2, ... runs (index n)
+  std::vector<std::size_t> top_n, root_n;
   // D2 (stress_goal): branches offered one spacing back from a side face, grown, refused, strands too short for one;
   // and every tip that ended by leaving the region, by its last voxel's wall site: +x, -x, +y, -y, +z, none.
   std::size_t d2_offered = 0, d2_grown = 0, d2_refused = 0, d2_short = 0;
