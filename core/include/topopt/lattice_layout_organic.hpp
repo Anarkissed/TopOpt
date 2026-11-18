@@ -161,6 +161,8 @@ struct GrowReport {
   std::size_t strands_grown = 0, steps = 0, clamped = 0;   // tips grown, steps laid, headings held up to the cone
   // How tips ended (G3 to G5): at the region's edge, on a step with nothing under it, on their seventh join.
   std::size_t ended_edge = 0, ended_unsupported = 0, ended_joins = 0;
+  // ... of them the floor seeds' tips that took at least one step (G16a, brief G6): how many, and how each ended.
+  std::size_t floor_stepped = 0, floor_ended_edge = 0, floor_ended_unsupported = 0, floor_ended_joins = 0;
   // G5: crowded tips. Joined into the neighbour (the run 3 mm or less), then deflected; of those joins, the ones the
   // tip grew on from; crowded with a longer run: climbed on.
   std::size_t joins = 0, grew_on_after_join = 0, joins_refused_span = 0;
@@ -173,6 +175,17 @@ struct GrowReport {
   double bare_before = 0.0, bare_after = 0.0;
   std::size_t reseed_voids = 0, reseed_landed = 0, reseed_failed = 0;
   double reseed_mm = 0.0;
+  // G16c (brief G6): of the stubs landed, those rooted on a kept vine's vertex (the rest walked); and every stub made
+  // (its root, its top: the bare place; its points, root first; its length; the local spacing and the landing radius
+  // at the bare place).
+  std::size_t reseed_from_vertex = 0;
+  struct Stub {
+    Vec3 root{}, top{};
+    std::vector<Vec3> pts;
+    double mm = 0.0, spacing_mm = 0.0, land_mm = 0.0;
+    bool from_vertex = false;
+  };
+  std::vector<Stub> stubs;
   // Transfer ties (G9).
   std::size_t ties_seeded = 0, ties_laid = 0, ties_refused_minor = 0, ties_refused_reach = 0;
   // G13, the feet (floor seeds' strands) after the first pruning: kept; removed, cut from the floor up to their first
@@ -208,6 +221,10 @@ struct GrowReport {
 // direction.
 std::vector<Strand> grow_strands(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask,
                                  GrowReport* report = nullptr);
+
+// G3 and G16a alone, exposed for tests: the unit direction of the pull ("the light") at `p`, as grow_strands sets it up
+// for `region` (the build direction where there is no pull); the build direction for an empty field or no candidate.
+Vec3 grown_light(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask, const Vec3& p);
 
 // O3 alone, exposed for tests: the fewest of the strand's points that keep each of its points within `tolerance_mm`
 // of the line through the kept ones, both ends kept (the first of several equally short answers, by index).

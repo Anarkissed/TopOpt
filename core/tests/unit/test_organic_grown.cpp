@@ -926,6 +926,107 @@ static void test_joins_inside() {
   CHECK(across == 0);
 }
 
+// ── G16a (brief G6; the owner: "the vines need to go to a face"): the light is outside the part ───────────────
+// On the G-1 block (24 x 24 x 30, 3 mm floor, voxels of 1 mm), in every boundary voxel of a side face (x = 24) and of
+// the top, away from their edges: at the voxel's centre and a quarter voxel off it each way along the wall, the pull
+// points through the wall (light . o at least 0.9, o the wall's outward normal). On the unchanged source it aims at the
+// middle of the voxel's own face, so a quarter voxel along the wall it is 0.894 off the normal.
+static void test_light_outside() {
+  Part b(box(24, 24, 30), 24, 24, 30, 3, [](const Vec3&) { return along({0, 0, 1}, 1.0); });
+  b.ask.reference_mpa = 2.0;
+  at_5_5(b.ask);
+  std::size_t side = 0, side_bad = 0, top = 0, top_bad = 0;
+  double side_worst = 1.0, top_worst = 1.0;
+  const double q = 0.25;
+  for (int k = 4; k <= 28; ++k)   // the side x = 24: its voxels i = 23, away from the floor, the top and the corners
+    for (int j = 1; j <= 22; ++j) {
+      const Vec3 c{23.5, j + 0.5, k + 0.5};
+      const Vec3 pts[5] = {c, {c.x, c.y, c.z + q}, {c.x, c.y, c.z - q}, {c.x, c.y + q, c.z}, {c.x, c.y - q, c.z}};
+      for (const Vec3& p : pts) {
+        const double d = grown_light(b.d, 1, b.field, b.ask, p).x;
+        ++side;
+        side_bad += d < 0.9;
+        side_worst = std::min(side_worst, d);
+      }
+    }
+  for (int j = 1; j <= 22; ++j)   // the top: its voxels k = 29, away from the sides
+    for (int i = 1; i <= 22; ++i) {
+      const Vec3 c{i + 0.5, j + 0.5, 29.5};
+      const Vec3 pts[5] = {c, {c.x + q, c.y, c.z}, {c.x - q, c.y, c.z}, {c.x, c.y + q, c.z}, {c.x, c.y - q, c.z}};
+      for (const Vec3& p : pts) {
+        const double d = grown_light(b.d, 1, b.field, b.ask, p).z;
+        ++top;
+        top_bad += d < 0.9;
+        top_worst = std::min(top_worst, d);
+      }
+    }
+  std::printf("G-16a light through the wall: side %zu points, under 0.9 %zu (least %.3f); top %zu points, under 0.9 %zu "
+              "(least %.3f)\n", side, side_bad, side_worst, top, top_bad, top_worst);
+  CHECK(side > 0 && side_bad == 0);
+  CHECK(top > 0 && top_bad == 0);
+}
+
+// G16a: on the G-1 block every floor seed's tip that takes a step ends by an existing end (edge, unsupported, seventh
+// join; never the step guard), and more of them end at the edge than on the unchanged source.
+static constexpr std::size_t kBaseFloorEndedEdge = 123;   // the unchanged source's count (ab2759a2, brief G6)
+static void test_floor_tips_leave() {
+  Part b(box(24, 24, 30), 24, 24, 30, 3, [](const Vec3&) { return along({0, 0, 1}, 1.0); });
+  b.ask.reference_mpa = 2.0;
+  at_5_5(b.ask);
+  b.ask.foot_gap = 0.0;
+  GrowReport rep;
+  (void)grow_strands(b.d, 1, b.field, b.ask, &rep);
+  std::printf("G-16a floor tips that stepped %zu: ended edge %zu (unchanged source %zu), unsupported %zu, 7th join %zu\n",
+              rep.floor_stepped, rep.floor_ended_edge, kBaseFloorEndedEdge, rep.floor_ended_unsupported,
+              rep.floor_ended_joins);
+  CHECK(rep.floor_stepped > 0 &&
+        rep.floor_stepped == rep.floor_ended_edge + rep.floor_ended_unsupported + rep.floor_ended_joins);
+  CHECK(rep.floor_ended_edge > kBaseFloorEndedEdge);
+}
+
+// ── G16c (brief G6): a bare place is filled from the nearest vine ───────────────────────────────────────────
+// The G-10 cube (40 mm, the made-up bending-and-twist field): no re-seeded stub is longer INSIDE the region (from its
+// landing on the floor's surface, or its root vertex, to the bare place; its run on into the floor's solid not counted,
+// the lead's ruling) than 4 x the local spacing at its bare place + the landing radius there, and every stub rooted on a
+// vine's vertex rises at the cone or steeper.
+// On A alone the walk goes as far as the region's height + 2 spacings (poles down the corner columns).
+static void test_reseed_from_vine() {
+  Part b(box(40, 40, 40), 40, 40, 40, 4, [](const Vec3& p) {
+    return std::array<double, 6>{0.0, 0.0, 0.2 + 0.08 * (p.x - 20.0), 0.0, 0.3 * (p.x - 20.0) / 20.0,
+                                 -0.3 * (p.y - 20.0) / 20.0};
+  });
+  GrowReport rep;
+  (void)grow_strands(b.d, 1, b.field, b.ask, &rep);
+  const Domain::Probe pr = b.d.probe();
+  std::size_t over = 0, flat = 0, from_vertex = 0;
+  double worst = 0.0;
+  for (const GrowReport::Stub& st : rep.stubs) {
+    const double lim = 4.0 * st.spacing_mm + st.land_mm;
+    double inside = 0.0;   // its length inside the region, read every 0.01 mm at the middle of each piece
+    for (std::size_t k = 0; k + 1 < st.pts.size(); ++k) {
+      const Vec3 a = st.pts[k], e = st.pts[k + 1];
+      const double l = dist(a, e);
+      const int n = std::max(1, static_cast<int>(std::ceil(l / 0.01)));
+      for (int m = 0; m < n; ++m) {
+        const double f = (m + 0.5) / n;
+        const Where w = pr.where({a.x + (e.x - a.x) * f, a.y + (e.y - a.y) * f, a.z + (e.z - a.z) * f});
+        if (w.lattice() && w.id == 1) inside += l / n;
+      }
+    }
+    over += inside > lim + 1e-9;
+    worst = std::max(worst, inside / lim);
+    if (!st.from_vertex) continue;
+    ++from_vertex;
+    const double l = dist(st.root, st.top);
+    flat += l > 0.0 && (st.top.z - st.root.z) < 0.5 * l - 1e-9;
+  }
+  std::printf("G-16c re-seeded stubs %zu (from a vertex %zu, walked %zu, failed %zu): longer than 4 spacings + the "
+              "landing radius %zu (longest %.2f of it); from a vertex flatter than the cone %zu\n",
+              rep.stubs.size(), from_vertex, rep.stubs.size() - from_vertex, rep.reseed_failed, over, worst, flat);
+  CHECK(!rep.stubs.empty() && over == 0);
+  CHECK(flat == 0);
+}
+
 int main() {
   test_uniform_block();
   test_ramp();
@@ -941,6 +1042,9 @@ int main() {
   test_cube_time();
   test_feet();
   test_joins_inside();
+  test_light_outside();
+  test_floor_tips_leave();
+  test_reseed_from_vine();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail == 0 ? 0 : 1;
 }

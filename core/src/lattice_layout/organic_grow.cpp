@@ -25,6 +25,8 @@ void GrowReport::add(const GrowReport& o) {
   seeds_floor += o.seeds_floor; seeds_wall += o.seeds_wall; seeds_refused_support += o.seeds_refused_support;
   strands_grown += o.strands_grown; steps += o.steps; clamped += o.clamped;
   ended_edge += o.ended_edge; ended_unsupported += o.ended_unsupported; ended_joins += o.ended_joins;
+  floor_stepped += o.floor_stepped; floor_ended_edge += o.floor_ended_edge;
+  floor_ended_unsupported += o.floor_ended_unsupported; floor_ended_joins += o.floor_ended_joins;
   joins += o.joins; grew_on_after_join += o.grew_on_after_join; joins_refused_span += o.joins_refused_span;
   branches_offered += o.branches_offered; branches_grown += o.branches_grown; links += o.links;
   refused_region += o.refused_region; refused_support += o.refused_support; refused_crowded += o.refused_crowded;
@@ -32,6 +34,8 @@ void GrowReport::add(const GrowReport& o) {
   bare_before = std::max(bare_before, o.bare_before); bare_after = std::max(bare_after, o.bare_after);
   reseed_voids += o.reseed_voids; reseed_landed += o.reseed_landed; reseed_failed += o.reseed_failed;
   reseed_mm += o.reseed_mm;
+  reseed_from_vertex += o.reseed_from_vertex;
+  stubs.insert(stubs.end(), o.stubs.begin(), o.stubs.end());
   ties_seeded += o.ties_seeded; ties_laid += o.ties_laid; ties_refused_minor += o.ties_refused_minor;
   ties_refused_reach += o.ties_refused_reach;
   feet_kept += o.feet_kept; feet_cut_at_joint += o.feet_cut_at_joint; vines_removed += o.vines_removed;
@@ -231,8 +235,12 @@ class Grower {
       : domain_(domain), region_(region), field_(field), ask_(ask), rep_(rep), probe_(domain.probe()) {}
 
   std::vector<Strand> run();
+  // G16a, for the tests (grown_light): set up as run() does, up to the lighting; false when nothing would grow.
+  bool lit_up();
+  Vec3 light_at(const Vec3& p) const { return light(p); }
 
  private:
+  bool setup();
   const Domain& domain_;
   int region_;
   const TensorField& field_;
@@ -249,6 +257,7 @@ class Grower {
   Boxes rec_;     // the recorded vertices (the separation test, G5)
   std::vector<Line> lines_;
   std::vector<Vec3> light_;   // G3: per voxel, the nearest point of the region's boundary that is not its floor
+  std::vector<Vec3> aim_;     // G16a: per voxel, where the pull aims: that point moved out of the part (lighting())
   std::vector<char> lit_;
   std::size_t tips_ = 0;
 
@@ -303,14 +312,14 @@ class Grower {
     f = dot(vec[0], up_) < 0.0 ? mul(vec[0], -1.0) : vec[0];
     return true;
   }
-  // G3, the pull (the owner's OR35): toward the nearest point of the region's boundary that is not its floor; up
-  // where there is none (off the candidates, or on that point).
+  // G3, the pull (the owner's OR35): toward the nearest point of the region's boundary that is not its floor, moved
+  // out of the part by the local spacing (G16a: aim_); up where there is none (off the candidates, or on that point).
   Vec3 light(const Vec3& p) const {
     int i, j, k;
     if (!voxel(p, i, j, k)) return up_;
     const std::size_t e = field_.index(i, j, k);
     if (!lit_[e]) return up_;
-    const Vec3 d = sub(light_[e], p);
+    const Vec3 d = sub(aim_[e], p);
     return len(d) > 1e-9 ? unit(d) : up_;
   }
   // 3 (brief G5): the line from a to b stays on the region's candidates (read every ds between its ends).
@@ -516,9 +525,13 @@ class Grower {
 // (the middle of a candidate's face whose neighbour across it is not a candidate, unless that face looks down along
 // the build direction). Spread from those faces to their neighbours (26) in index order, each voxel keeping the
 // nearest point any neighbour offers: the same answer every time.
+// G16a (brief G6; the owner, 2026-11-15: "the vines need to go to a face"): the light is outside the part. Which point
+// is a voxel's nearest is found exactly as above; the pull AIMS at that point moved out across its face by the local
+// spacing of the voxel it was found on (aim_), so at the wall the pull is through the wall, not along it.
 void Grower::lighting() {
   const std::size_t n = static_cast<std::size_t>(field_.nx) * field_.ny * field_.nz;
   light_.assign(n, Vec3{});
+  aim_.assign(n, Vec3{});
   lit_.assign(n, 0);
   std::vector<double> best(n, std::numeric_limits<double>::infinity());
   std::vector<std::size_t> queue;
@@ -539,7 +552,7 @@ void Grower::lighting() {
           if (dot(o, up_) < -0.5) continue;   // the floor
           const Vec3 site = add(c, mul(o, 0.5 * hv));
           const double d = dist(site, c);
-          if (d < best[e]) { best[e] = d; light_[e] = site; }
+          if (d < best[e]) { best[e] = d; light_[e] = site; aim_[e] = add(site, mul(o, sp_.spacing_mm[e])); }
         }
         if (best[e] < std::numeric_limits<double>::infinity()) {
           lit_[e] = 1;
@@ -562,6 +575,7 @@ void Grower::lighting() {
           if (d < best[f] - 1e-12) {
             best[f] = d;
             light_[f] = light_[e];
+            aim_[f] = aim_[e];
             lit_[f] = 1;
             queue.push_back(f);
           }
@@ -766,7 +780,7 @@ void Grower::grow_tip(const Tip& t, std::vector<Tip>& tips) {
     } else {
       Vec3 f;
       want = stress_dir(p, f) ? add(mul(dir, kBlendHeading), mul(f, kBlendField)) : dir;
-      want = add(want, mul(light(p), kUpwardBias));   // the pull, toward the nearest face (OR35)   // the pull, toward the nearest face (OR35)
+      want = add(want, mul(light(p), kUpwardBias));   // the pull, toward the nearest face (OR35)
       if (!(len(want) > 1e-12)) { how = Unsupported; break; }
       want = unit(want);
       if (dot(want, up_) < cone_sin_) {
@@ -849,6 +863,12 @@ void Grower::grow_tip(const Tip& t, std::vector<Tip>& tips) {
   if (how == Edge) ++rep_.ended_edge;
   else if (how == Unsupported) ++rep_.ended_unsupported;
   else if (how == Joins) ++rep_.ended_joins;
+  if (t.kind == Tip::Floor && !first) {
+    ++rep_.floor_stepped;
+    if (how == Edge) ++rep_.floor_ended_edge;
+    else if (how == Unsupported) ++rep_.floor_ended_unsupported;
+    else if (how == Joins) ++rep_.floor_ended_joins;
+  }
   if (lines_[static_cast<std::size_t>(li)].pts.size() >= 2) {
     ++rep_.strands_grown;
     if (t.kind == Tip::Branch) ++rep_.branches_grown;
@@ -1591,14 +1611,6 @@ void Grower::account(const Fate& f) {
 void Grower::reseed(std::vector<Tip>& tips) {
   const double hv = field_.spacing;
   const int stride = std::max(1, static_cast<int>(0.5 * median_ / hv));
-  double hlo = std::numeric_limits<double>::infinity(), hhi = -hlo;
-  for (int k = 0; k < field_.nz; ++k)
-    for (int j = 0; j < field_.ny; ++j)
-      for (int i = 0; i < field_.nx; ++i)
-        if (sp_.candidate[field_.index(i, j, k)]) {
-          hlo = std::min(hlo, h(centre(i, j, k)));
-          hhi = std::max(hhi, h(centre(i, j, k)));
-        }
   std::vector<std::array<int, 3>> voids;
   std::vector<Vec3> at;
   for (int k = 0; k < field_.nz; k += stride)
@@ -1621,8 +1633,52 @@ void Grower::reseed(std::vector<Tip>& tips) {
     if (rep_.reseed_landed + rep_.reseed_failed >= kReseedMax) break;
     int ci = voids[vi][0], cj = voids[vi][1], ck = voids[vi][2];
     const Vec3 sp = centre(ci, cj, ck);
-    const double reach = (hhi - hlo) + 2.0 * sep(sp);
+    // G16c (brief G6): a bare place is filled from the nearest vine, not from the floor. First the vertices of what
+    // the path keeps (a vertex: a joint both keep, as the landing below reads them) within 4 x the local spacing: one
+    // may root the stub when the straight line from it up to the bare place rises at the cone or steeper and stays on
+    // the region's candidates; the nearest (ties: lower line, then lower vertex). The stub is that straight line.
+    const double reach = 4.0 * sep(sp);   // G16c: and the walk below travels this far at most
     const double land_r = std::max(2.0 * r_, kTestRatio * sep(sp));
+    {
+      bool found = false;
+      double bd = std::numeric_limits<double>::infinity();
+      int bl = -1;
+      std::size_t bk = 0;
+      Vec3 bx{};
+      boxes_.near(sp, reach + ds_, [&](const Sample& s) {
+        if (!live(s)) return;
+        const Line& L = lines_[static_cast<std::size_t>(s.line)];
+        for (std::size_t end = 0; end < 2; ++end) {
+          const std::size_t k = static_cast<std::size_t>(s.seg) + end;
+          const Vec3 x = L.pts[k];
+          const double d = dist(x, sp);
+          if (!(d <= reach) || d <= 1e-9) continue;
+          if (!(d < bd || (d == bd && (s.line < bl || (s.line == bl && k < bk))))) continue;
+          if (dot(sub(sp, x), up_) < cone_sin_ * d || !on_candidates(x, sp)) continue;
+          found = true;
+          bd = d;
+          bl = s.line;
+          bk = k;
+          bx = x;
+        }
+      });
+      if (found) {
+        const int li = new_line(bx, -1, 0);
+        rep_.reseed_mm += dist(bx, sp);
+        lay(li, sp, true);
+        ++rep_.reseed_landed;
+        ++rep_.reseed_from_vertex;
+        rep_.stubs.push_back({bx, sp, {bx, sp}, dist(bx, sp), sep(sp), land_r, true});
+        Tip t;
+        t.kind = Tip::Reseed;
+        t.line = li;
+        t.root = t.from = sp;
+        t.dir = cap(4, static_cast<long long>(vi), 0);
+        tips.push_back(t);
+        ++tips_;
+        continue;
+      }
+    }
     std::vector<Vec3> path{sp};
     std::set<std::size_t> visited{field_.index(ci, cj, ck)};
     Vec3 q = sp;
@@ -1651,6 +1707,7 @@ void Grower::reseed(std::vector<Tip>& tips) {
       visited.insert(field_.index(ci, cj, ck));
       const Vec3 nq = centre(ci, cj, ck);
       travelled += dist(nq, q);
+      if (travelled > reach) break;   // out of reach (G16c: 4 x the local spacing at most, before it may land)
       q = nq;
       if (dist(q, path.back()) >= kRecordRadii * r_) path.push_back(q);
       const Vec3 below = sub(q, mul(up_, r_ + hv));
@@ -1683,15 +1740,17 @@ void Grower::reseed(std::vector<Tip>& tips) {
           break;
         }
       }
-      if (travelled > reach) break;   // out of reach
     }
     if (!landed || path.size() < 2) { ++rep_.reseed_failed; continue; }
     const int li = new_line(path.back(), -1, 0);
+    double stub_mm = 0.0;
     for (std::size_t k = path.size() - 1; k-- > 0;) {
       rep_.reseed_mm += dist(path[k + 1], path[k]);
+      stub_mm += dist(path[k + 1], path[k]);
       lay(li, path[k], true);
     }
     ++rep_.reseed_landed;
+    rep_.stubs.push_back({path.back(), sp, std::vector<Vec3>(path.rbegin(), path.rend()), stub_mm, sep(sp), land_r, false});
     Tip t;
     t.kind = Tip::Reseed;
     t.line = li;
@@ -1839,8 +1898,8 @@ void Grower::ties(std::size_t from) {
   }
 }
 
-std::vector<Strand> Grower::run() {
-  if (field_.empty()) return {};
+bool Grower::setup() {
+  if (field_.empty()) return false;
   if (!(len(ask_.build_dir) > 1e-9) || !std::isfinite(len(ask_.build_dir)))
     throw std::invalid_argument("grow_strands: the build direction must not be zero");
   if (!(ask_.layer_mm > 0.0) || !std::isfinite(ask_.layer_mm))
@@ -1852,7 +1911,7 @@ std::vector<Strand> Grower::run() {
   if (ask_.width_mm != 0.0 && !(ask_.width_mm >= thinnest - 1e-12))
     throw std::invalid_argument("grow_strands: the strut width is under the thinnest strut (G8)");
   sp_ = organic_spacing(domain_, region_, field_, ask_);
-  if (sp_.candidates == 0) return {};
+  if (sp_.candidates == 0) return false;
   up_ = unit(ask_.build_dir);
   u_ = unit(cross(up_, std::fabs(up_.x) < 0.9 ? Vec3{1, 0, 0} : Vec3{0, 1, 0}));
   v_ = cross(up_, u_);
@@ -1880,6 +1939,13 @@ std::vector<Strand> Grower::run() {
     rec_.init(lo, hi, std::max(1e-3, kTestRatio * median_ * 2.0));
   }
   lighting();
+  return true;
+}
+
+bool Grower::lit_up() { return setup(); }
+
+std::vector<Strand> Grower::run() {
+  if (!setup()) return {};
   // The owner's order (2026-11-15): grow, prune, then one round of re-seeding in the bare areas, grown and pruned
   // the same way.
   std::vector<Tip> tips;
@@ -1919,6 +1985,16 @@ std::vector<Strand> grow_strands(const Domain& domain, int region, const TensorF
   rep.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
   if (report) *report = rep;
   return out;
+}
+
+Vec3 grown_light(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask, const Vec3& p) {
+  GrowReport rep;
+  Grower g(domain, region, field, ask, rep);
+  if (!g.lit_up()) {
+    const double l = len(ask.build_dir);
+    return l > 1e-9 ? mul(ask.build_dir, 1.0 / l) : Vec3{0.0, 0.0, 1.0};
+  }
+  return g.light_at(p);
 }
 
 }  // namespace topopt::lattice_layout
